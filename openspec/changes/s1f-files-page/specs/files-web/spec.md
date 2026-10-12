@@ -210,7 +210,7 @@
 
 #### Scenario: 两处同一份实现
 - **WHEN** 静态扫描 `web/src/features`
-- **THEN** `web/src/features/files` 下没有文件导入 `web/src/features/chat`；`web/src/features/chat` 只经 `features/files/index` 导入文件页的东西；目录树的行组件与预览面板在仓库里各只有一个定义
+- **THEN** `web/src/features/files` 下没有文件导入 `web/src/features/chat`；`web/src/features/chat` 只经 `features/files/index` 导入文件页的东西（例外：`features/files/file-meta` 可被 `features/chat` 直接导入，随 #1105 去掉；owner 2026-10-11 认可）；目录树的行组件与预览面板在仓库里各只有一个定义
 
 #### Scenario: 受控路径与定位
 - **WHEN** 以 `path="out/a.md"` 渲染 `WorkspaceBrowser`；随后调用 `reveal("src/deep/app.ts")`；再调用 `refresh(["out/b.md"])`

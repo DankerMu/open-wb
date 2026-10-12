@@ -290,7 +290,7 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
 - [x] 10.2 `archive.ts` 的 zip 部分：`yauzl`（新依赖，MIT，登记 `ATTRIBUTION.md`）只读中央目录；成员名超过 4096 字节的成员不计入结果，停读并置 `truncated`（名字随中央目录项读入后判定——`zip` 的名长字段只有 2 字节，读入量有界；不要求在 `yauzl` 交出该项之前拦截）。
   实施注记见 `implementation-notes-1.md`「10.2（#1064）」。
 - [x] 10.3 `GET /api/workspaces/:id/archive` 路由（新文件或并入 `rest-entries.ts`），`PREVIEW_ARCHIVE_MAX_ENTRIES` 经 `limits` 传入。
-  实施注记见 `implementation-notes.md`「10.3、10.4、10.5（#1065）」。
+  实施注记见 `implementation-notes-2.md`「10.3、10.4、10.5（#1065）」。
 - [x] 10.4 测试（新文件 `server/test/workspaces-archive.test.ts`）：workspaces「压缩包列表」五个场景（含「声明超大的长文件名记录」：1 KiB 文件声明 4 GiB 的 `L` 记录、两个成员之后声明 1 GiB 的 pax 头、5000 字节的 zip 成员名与 `L` 名字、注入时钟的未压缩 tar 超时）。
   测试用的压缩包在测试里用 `node:zlib` 与手写的 tar / zip 字节现场生成（不入库二进制夹具）；断言请求前后工作空间与临时目录无新增文件。
 - [x] 10.5 变异证据：到上限后继续读 → 1500 项用例的条数断言判红；对成员名做路径解析 → 「恶意成员名只是数据」里出现空间外访问而判红；不认 GNU 长文件名 → 长路径用例判红；
@@ -310,7 +310,7 @@ Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用
   `server/test/http-parser-owners.test.ts` 的归属身份表（`:29-42`，与 `:144-146` 的条数断言、常量名里的条数）加入 `POST /api/workspaces/:id/preview-token`，做法同 9.2 对 `move` 的处理；先合的那一个把条数加一，后合的再加一。
 - [x] 11.4 跨路由边界测试（扩展 `server/test/workspaces-http.test.ts` 既有的「完整真实装配与隔离」用例，写成一份表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「新增路由沿用同一边界」——对 `archive`、`download`、`DELETE entries`、`move`、`preview-token` 五条路由逐条断言：
   他人与不存在的 id 带越界路径（或越界的 `from`/`to`）→ 相同的 404、没有 `sandbox.reject` 审计行、没有文件系统变化；未认证 → 401；`archive`、`download`、`DELETE entries` 的重复 `path` → 400；全部响应带 `Cache-Control: no-store`。Depends on 8.2、9.1、9.3、10.3、11.2（被测的五条路由；因 8.2、9.1 而间接等 1.2。组 11 里只有本任务与 11.5 的最后一条变异有这个依赖）。
-  实施注记见 `implementation-notes.md`「11.4、11.5 的最后一条变异（#1075）」。落点订正：用例在新文件 `server/test/workspaces-http-boundary.test.ts`，写成一份表驱动；`workspaces-http.test.ts` 不加行（736 行，加表会破 800）。
+  实施注记见 `implementation-notes-2.md`「11.4、11.5 的最后一条变异（#1075）」。落点订正：用例在新文件 `server/test/workspaces-http-boundary.test.ts`，写成一份表驱动；`workspaces-http.test.ts` 不加行（736 行，加表会破 800）。
 - [x] 11.5 变异证据：`lookup` 顺手续期 → 「查找不续期」判红；他人的工作空间也签发 → 归属用例判红；`base` 用 `Host` 头里的端口 → 端口断言判红；任一新路由把路径检查放到归属检查之前 → 11.4 的表里该路由出现 403 与审计行而判红。
   订正（#1075，实测）：本条末句「路径检查放到归属检查之前 → 任一新路由出现 403 与审计行」过强。沙箱的 `resolve` 自己先查归属，所以该变异下他人与不存在的 id 的越界行仍是 404、无审计行（它们的畸形行因解析随之前移而得 400，也判红）；403 加一条 `sandbox.reject` 只出现在「属自己但根目录不在」的 id。`preview-token` 没有路径参数，该变异对它不可观察，替代变异是把归属检查挪到 body 判断之后。
 
@@ -320,7 +320,7 @@ Minimal mergeable slice: 11.1 的登记表与测试先合（只依赖 0.1）；�
 ## 12. preview-origin — 预览监听器与响应头
 
 - [x] 12.1 新文件 `server/src/preview/app.ts`：`createPreviewApp({store, sandbox, tokens, converter, limits})`，只有 `/w/<token>/*`（`/o/` 在组 15 加）；校验次序、不读 cookie、404 / 403 的固定纯文本、复用组 7 的区间发送函数；有界关停沿用 `app.ts` 的 `registerListenerShutdown`（必要时把它提到两个实例都能导入的模块）。
-  实施注记见 `implementation-notes.md`「12.1、12.3、12.4（#1069）」。
+  实施注记见 `implementation-notes-2.md`「12.1、12.3、12.4（#1069）」。
 - [x] 12.2 响应头与类型表（preview-origin「预览响应头与内容类型」）：做成一个纯函数 `previewHeaders(name, embedOrigin)`，成功与失败响应都经它或其子集。
   实施注记见 `implementation-notes-1.md`「12.2（#1068）」。
 - [x] 12.3 测试（新文件 `server/test/preview-app.test.ts` 与 `preview-headers.test.ts`）：「令牌放行，cookie 不放行」「相对资源与子目录」「拒绝项」「作用域只有一个工作空间」「空间消失后令牌失效」「范围请求」，以及响应头的五个场景。
@@ -336,7 +336,7 @@ Minimal mergeable slice: 12.2 的头函数与其测试先合；监听器实例�
   启动回收目录清理（8.1 的 `sweep` 半边）的定时器（`unref`）；`OwnedResources` 增加预览实例与该定时器；关停次序（回收目录清理的定时器 → 预览监听器 → 主监听器 → DB；转换器与转换缓存清理在组 15 接入这个序列）；`listener_force_close` 至多一行。`appAssemblyOf` 带上 `preview`。
   清空 `work`：本任务只做本进程自己的递归删除（此时入口还没有转换器，`work` 下不会有属 omp 用户的东西）；同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时先执行的那条 `sudo … find`（owner D-24）由 14.3 提供、在 15.1 连同真实转换器一起接进入口。
   #1286：启动与周期清理的接线不等它（owner D-23，design D22「已知残余」）。`server/src/workspaces/trash.ts:12` 的头注释写着「settle it before anything schedules this sweep」，同一个代码 PR 把这半句改成已裁决的现状（登记为已知残余、issue 保持打开）；注释的其余陈述不动。
-  实施注记见 `implementation-notes.md`「13.1、13.2、13.3（#1070）」。
+  实施注记见 `implementation-notes-2.md`「13.1、13.2、13.3（#1070）」。
 - [x] 13.2 测试（`server/test/server-startup-order.test.ts`、`listener-shutdown.test.ts` 或新文件，用既有 `server-startup-helpers` 起编译入口）：「两个监听器的启动与干净关停」「预览端口被占用」「关停期间的在途请求与转换」中在途请求的部分（转换的部分在 15.2）；
   「预览与文件键的缺省与覆盖」里关于实际绑定端口与四键启动记录的部分；信号落在两次 `listen` 之间时两个端口都可立即复用。
 - [x] 13.3 变异证据：先起主监听器 → 「主监听器受理时预览已可用」的断言判红（在 success record 之前对预览端口的探测）；关停时先关 DB → 在途预览请求的用例出现 5xx 而判红；启动记录多一个键 → 精确四键断言判红。
@@ -349,7 +349,7 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
 - [x] 14.1 新文件 `server/src/preview/office.ts`：`createOfficeConverter`——作业目录、argv 与环境、sudo 前缀（复用 `core/process-path` 的 `setpriv` 检查）、成功判定；终止在途转换（超时、`signal` 中止、`close()`）按 office-preview「转换器调用契约」的两种模式：同 uid 模式以新进程组启动并对进程组发 `SIGKILL`，`OMP_USER` 模式只杀自己启动的 `sudo`（不执行 `kill`/`pkill`/第二次 `sudo`，不新增 sudoers 规则）。
   实施注记见 `implementation-notes-1.md`「14.1、14.4（#1071）」。
 - [x] 14.2 同文件或 `office-queue.ts`：并发上限、排队上限 8、按缓存键去重、排队中中止出队（office-preview「并发上限与排队」）。
-  实施注记见 `implementation-notes.md`「14.2，含分摊的 14.5 / 14.6 条款（#1073）」。
+  实施注记见 `implementation-notes-2.md`「14.2，含分摊的 14.5 / 14.6 条款（#1073）」。
 - [x] 14.3 缓存与周期清理（office-preview「转换缓存」）：键的计算、命中更新修改时间、输出**复制**后改名进 `pdf/`、失败不入缓存、7 天清理函数、启动时清空 `work/`（周期定时器在 15.1 接进 `server.ts`）。
   启动时清空 `work/` 按 office-preview「转换缓存」分两种情况（owner D-24，design D18「作业目录的清理」；**审批 / 提权策略的改动，落在 Critical Path「omp 子进程治理」，PR 标注白盒审查**）：
   - `ompUser` 与 `officeBin` 没有同时提供（同 uid 模式；或有 `ompUser` 而没有 `officeBin`）：只由本进程递归删除，不启动 `sudo`。
@@ -389,11 +389,11 @@ Minimal mergeable slice: atomic - 一条路由、它的映射表与转换器在�
 
 - [x] 16.1 新文件 `web/src/lib/api-files.ts`：两个地址函数 `fileUrl`、`downloadUrl` 与 `listArchive`；传输由 `api.ts` 注入、对 `api.ts` 只有类型导入；响应严格解析。`api.ts` 只加接线与类型再导出（不超过 800 行；必要时把既有工作空间方法一并挪进 `api-files.ts`）。
   实施注记见 `implementation-notes-1.md`「16.1 的地址函数部分，含分摊的 16.4 / 16.5 条款（#1079）」。
-  实施注记见 `implementation-notes.md`「16.1 的 listArchive 部分、16.4、16.5（#1080）」。
+  实施注记见 `implementation-notes-2.md`「16.1 的 listArchive 部分、16.4、16.5（#1080）」。
 - [x] 16.2 `api-files.ts`：`moveEntry`、`deleteEntry`、`issuePreviewToken`（同样的注入与严格解析）。
-  实施注记见 `implementation-notes.md`「16.2 的 issuePreviewToken 部分，含分摊的 16.4 / 16.5 条款（#1082）」。
-  实施注记见 `implementation-notes.md`「16.2 的 moveEntry 部分，含分摊的 16.4 条款（#1083）」。
-  实施注记见 `implementation-notes.md`「16.2（deleteEntry）、16.4、16.5（#1084）」。
+  实施注记见 `implementation-notes-2.md`「16.2 的 issuePreviewToken 部分，含分摊的 16.4 / 16.5 条款（#1082）」。
+  实施注记见 `implementation-notes-2.md`「16.2 的 moveEntry 部分，含分摊的 16.4 条款（#1083）」。
+  实施注记见 `implementation-notes-2.md`「16.2（deleteEntry）、16.4、16.5（#1084）」。
 - [x] 16.3 `fetchPreview` 的图片类型集合扩到六种，`audio/*`、`video/*`、`image/svg+xml`、`text/html` 仍按失败处理。
   实施注记见 `implementation-notes-1.md`「16.3（#1081）」。
 - [x] 16.4 测试（`web/test/api-files.test.ts` 扩充）：files-web「API 客户端扩展」五个场景，随 16.1–16.3 各自的方法分批加入，对应如下——
@@ -452,7 +452,7 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - `web/test/chat-messages.test.tsx:185-187` 断言 `preview.tsx` 含 `MarkdownView`、不含 `function renderBlock`——读的文件改为 Markdown 预览器模块（「文件页的 Markdown 仍经 `lib/markdown-view`、不自带渲染器」的意思不变）。
   - 不搬的：`csv.ts`（`web/test/csv.test.ts:2` 导入 `parseCsv`；表格模块导入它）、`file-meta.ts` 的 `fileIcon` / `formatSize` / `formatMtime` / `logicalPath`（`file-meta.test.ts:2`、`files-page.test.tsx:3`、`preview.test.tsx:3`、`files-logical-path.test.tsx:3` 导入；`kind.ts` 的图标映射调用或扩充 `fileIcon`，不另立导出）、
     预览头（`files-page.test.tsx:537-541` 断言 `preview.tsx` 含 `fileIcon(`、`formatSize(`）。`files-empty-layout.test.tsx:190-194` 读的 `preview.tsx`、`types.ts` 仍在原处。
-  实施注记见 `implementation-notes.md`「17.1、17.3（#1085）」。
+  实施注记见 `implementation-notes-2.md`「17.1、17.3（#1085）」。
 - [x] 17.2 `preview.tsx`：按 `previewKind` 选预览器（加载中的 `正在加载预览…` 与加载失败的 `预览组件加载失败` + `重试` 已在 17.1 落地，这里只是让新类别也走同一段逻辑）；预览头的 `下载 <文件名>` 链接（`downloadUrl` + `download` 属性）对所有文件渲染；不支持 / 超限 / 截断 / 其它错误的文案表（file-previewers「预览头、下载与不可预览的呈现」）。
   `tree.tsx` / `page.tsx` 去掉扩展名白名单的预判：非按扩展名分流的文件一律发一次 `file` 请求（files-web「目录树与预览」；网页的渲染视图这一例外在组 19 引入，此前 html 仍是源码视图、发一次 `file` 请求）。
   过渡规则：预览器模块尚未合入的类别（pdf、办公文档、音视频、Notebook、压缩包——组 19、20 才有）在此之前按「未知」处理——发一次 `file` 请求，由服务端裁决并沿用既有呈现：pdf、办公文档、压缩包得到 415（workspaces「文件预览」）→ `该类型不支持预览`；Notebook 得到 `text/plain` → 源码视图；音视频得到 `audio/*` / `video/*` → `fetchPreview` 按「失败不变成预览」走 request_failed 的安全文案。每种情况预览头都有下载链接。各自的预览器合入时在那一刀改成该类别的呈现，并改掉受影响的既有断言。
@@ -461,12 +461,12 @@ Minimal mergeable slice: 16.1 按方法分两刀——地址函数 `fileUrl`、`
   - `web/test/files-empty-layout.test.tsx:51-75`（E2）：`归档.zip` 的副行同上；`:74` 的「零次 `file` 请求」改为「恰一次 `file` 请求、415 后显示不支持」，夹具补该路由的 415 信封，用例标题里的 `without a file request` 同改。
   - `web/test/files-page.test.tsx:162-169`：`archive.zip` 的 `file` 请求数由 0 改为 1（夹具补 415），`该类型不支持预览` 的断言不变。
   写作时既有测试里受白名单影响的只有 zip 这一种扩展名（`grep -rnE '\.zip|\.bin|不支持预览' web/test web/e2e`）；走查不选不支持的文件，不受影响。
-  实施注记见 `implementation-notes.md`「17.2、17.5、17.6、17.7 分摊部分（#1087）」。
+  实施注记见 `implementation-notes-2.md`「17.2、17.5、17.6、17.7 分摊部分（#1087）」。
 - [x] 17.3 守卫（新文件 `web/test/previewers-code-split.test.ts`）：ui-foundation「预览器按需加载是唯一的代码分割」两个场景的静态部分（动态 `import()` 只在 `previewers/index.ts`、`previewers/` 之外不静态导入其内部模块、`vite.config.ts` 无 `manualChunks`、注入样本自证）；
   「构建产物确有按需块」的唯一落点是 `make ui-walk`：在 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）里，`/files` 步骤选中 `readme.md` 之前记录已成功加载的 `.js`，选中时断言新增了至少一个来自同源 `assets/` 的 200 `.js` 响应。
   走查本来就对 `npm run build --workspace web` 的产物运行（CI 的 ui-walk job 先 build 再起服务），所以不新增构建步骤、不改 `.github/workflows/ci.yml` 的步骤序列，也不动 `scripts/test-ci-harness.sh` 的期望；`make check` 与 `make test-guardrails` 不执行构建，不放这条断言。
 - [x] 17.4 契约测试（`web/test/preview-kind-contract.test.ts`）：读取服务端 `preview.ts` 导出的四个扩展名集合与 `kind.ts` 的对应集合，断言两两相等（file-previewers「与服务端的扩展名表一致」）。
-  实施注记见 `implementation-notes.md`「17.4（#1086）」。
+  实施注记见 `implementation-notes-2.md`「17.4（#1086）」。
 - [x] 17.5 测试（`web/test/preview.test.tsx` 扩充、`web/test/previewers-loading.test.tsx` 扩充——该文件与它的三条 `PreviewPane` 级用例已随 17.1 建立，这里补页面级场景，其中「加载失败可重试」的 `下载 main.py` 断言依赖 17.2 的预览头；凡取预览正文的断言一律 `await screen.findBy…` / `waitFor`，不在 `render` 或点击之后同步取）：「判定表」「未知文件由服务端裁决」「第一次才加载」「加载失败可重试」「每个文件都能下载」「截断提示」「请求归属与资源释放」。
 - [x] 17.6 FL 行：每个文件都有下载按钮、未知类型文件的两种结果（看得了 / 不支持加下载）；结论 `待签`。
 - [ ] 17.7 变异证据：在 `page.tsx` 里静态导入 `previewers/code` → 守卫判红；把 `previewers/index.ts` 的动态 `import()` 全改成静态导入 → 走查的「选中时新增 `.js` 响应」断言判红；不支持态去掉下载链接 → 「每个文件都能下载」判红；恢复扩展名白名单 → `schema.proto` 用例判红；去掉加载期间的 `正在加载预览…` 占位，或让 `重试` 不重新发起加载 → `previewers-loading.test.tsx` 对应用例判红（这两条随 17.1 的 PR）。
@@ -483,14 +483,14 @@ Minimal mergeable slice: 17.1 + 17.3（搬家、加载占位与失败重试、�
   - 改写一处——`describe("PreviewPane Markdown")` › `renders deep reconstructed Markdown with every literal text pair and link`（`:228-261`）：它把 `console.error` 换成 spy 并在 `:257` 断言输出为空串；`:241` 切到源码视图后 `deep.md` 按 `md` 着色，高亮模块的加载在 `act` 之外落定时 React 报「not wrapped in act」，`:257` 即红。
     在 `:241` 的点击之后与 `:242` 的 `rerender` 之后各加一行 `await act(async () => { await loadHighlighter(); })`——`loadHighlighter` 指 `previewers/index.ts` 导出的那个带缓存的高亮加载函数（高亮库的动态 `import()` 只能写在该文件，`code.tsx` 与测试都从它取；名字以实现为准）（等的是同一个带缓存的 promise，着色的提交因此落在 `act` 之内；高亮模块已被同文件前面的用例加载过时这两行是空操作），`:257` 原样保留。
     这里等加载函数而不用 `findBy`，是因为该用例要证明的是「没有 `act` 之外的更新」而不是某段内容出现，且这段输入着色后有没有可供等待的着色元素取决于语法定义。同文件另两处 `console.error` 的 spy（`:104`、`:144`）只匹配 `same key`，不受影响。
-  实施注记见 `implementation-notes.md`「18.1、18.5–18.7 的源码高亮部分（#1091）」。
+  实施注记见 `implementation-notes-2.md`「18.1、18.5–18.7 的源码高亮部分（#1091）」。
 - [x] 18.2 `previewers/table.tsx` 支持 `tsv`（制表符分列）。
-  实施注记见 `implementation-notes.md`「18.2，含分摊的 18.5 / 18.6 条款（#1088）」。
+  实施注记见 `implementation-notes-2.md`「18.2，含分摊的 18.5 / 18.6 条款（#1088）」。
 - [x] 18.3 `previewers/svg.tsx`：`data:` 地址的 `img`、图片 / 源码切换、截断时只显示源码、`img` 的 `error` → `无法显示该图片`（仍可看源码）。
-  实施注记见 `implementation-notes.md`「18.3，含分摊的 18.5 / 18.6 / 18.7 条款（#1089）」。
+  实施注记见 `implementation-notes-2.md`「18.3，含分摊的 18.5 / 18.6 / 18.7 条款（#1089）」。
 - [x] 18.4 图片预览接受六种类型；`img` 的 `error` → `无法显示该图片`、移除破图、释放 Blob 地址、保留下载链接。
   18.2–18.4 不改动任何既有用例：写作时 `grep -nE '\.(tsv|svg|gif|webp|bmp|ico)' web/test/files-*.tsx web/test/preview.test.tsx web/e2e/*.ts` 零命中（`svg` 今天不在白名单里，没有用例选它）；既有图片用例（`preview.test.tsx:441`、`files-page.test.tsx:441`、`files-concurrency.test.tsx:155`）不触发 `error` 事件，17.1 之后已是 `findBy`。
-  实施注记见 `implementation-notes.md`「18.4，含分摊的 18.5 / 18.6 / 18.7 条款（#1090）」。
+  实施注记见 `implementation-notes-2.md`「18.4，含分摊的 18.5 / 18.6 / 18.7 条款（#1090）」。
 - [x] 18.5 测试（新文件 `web/test/previewers-code.test.tsx`、`previewers-table-svg.test.tsx`；两个文件静态导入各自的预览器模块直接渲染，行号、文本、`img` 的 `src` 这类模块同步渲染的内容同步断言，着色元素一律 `await waitFor(…)` 取，「先内容后颜色」以 `vi.mock` 把 `previewers/index.ts` 的高亮加载函数换成可手动放行的 promise；经 `PreviewPane` 走的用例按文首纪律 `findBy`）：file-previewers「源码视图与语法高亮」三个场景、「Markdown、表格、图片与 SVG」四个场景（含「损坏的图片」）；静态断言 `previewers/` 下没有 `dangerouslySetInnerHTML`。
 - [x] 18.6 FL 行：代码文件按语言着色且带行号（亮暗各看一次）、tsv 表格、gif / webp / svg 图片与 svg 的源码切换、损坏的图片文件的提示与下载；结论 `待签`。
 - [x] 18.7 变异证据：把 SVG 文本插进 DOM → 「没有内联 `svg` / `script`」判红；高亮完成前不渲染内容 → 「先内容后颜色」判红；着色后行数变化 → 行数断言判红；图片 `error` 时不处理 → 「损坏的图片」判红。
@@ -501,7 +501,7 @@ Minimal mergeable slice: 18.2（tsv）、18.3（svg）、18.4（图片）三刀�
 ## 19. file-previewers — 隔离来源：网页渲染、PDF 与办公文档
 
 - [x] 19.1 `web/src/features/files/use-preview-token.ts`：按工作空间共用一次签发、有需要它的预览挂载时每 5 分钟续期、无挂载时不续期、卸载与换空间时中止；令牌不进地址栏与存储。
-  实施注记见 `implementation-notes.md`「19.1（#1092）」。
+  实施注记见 `implementation-notes-2.md`「19.1（#1092）」。
 - [ ] 19.2 `previewers/frame.tsx`：网页渲染视图（`sandbox="allow-scripts allow-forms allow-modals"`、`referrerpolicy="no-referrer"`、无 `srcdoc`、渲染 / 源码切换；选中 html 时不发 `file` 请求，切到源码才发）、PDF 与办公文档（无 `sandbox`、`正在转换文档…` 遮层、三种不建 iframe 的情况）；路径按段编码。
   PDF 与办公文档的部分 Depends on 1.1：其结论与设计相符才开工（不符时这一部分停下，网页渲染视图照常交付）。
   实施注记见 `implementation-notes.md`「19.2 网页渲染视图、19.5，含分摊的 19.3 / 19.4 条款（#1093）」。

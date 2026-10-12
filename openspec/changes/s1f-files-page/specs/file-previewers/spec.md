@@ -64,10 +64,10 @@
 
 #### Scenario: 请求归属与资源释放
 - **WHEN** 选中一张图片后在响应返回前切到另一个文件；或图片显示后切换工作空间；或页面卸载（含 StrictMode 的二次挂载）
-- **THEN** 迟到的图片不显示，其 Blob 地址被释放；每个分配过的 Blob 地址在失去归属时都被释放一次
+- **THEN** 迟到的图片不显示，其 Blob 地址被释放；每个分配过的 Blob 地址在失去归属时都被释放（出错的图片其地址可被释放两次，见「图片」一条）
 
 ### Requirement: 源码视图与语法高亮
-源码预览器 SHALL 以带行号的表格显示文本：每行一个行号单元格与一个内容单元格，保留空白，末尾空行计入，内容在容器内部横向滚动而不撑宽页面；`json` 先尝试格式化，失败保留原文。它 SHALL 按 `highlightLanguage(name)`（扩展名或文件名到语言的固定映射，至少覆盖 `js` `mjs` `cjs` `jsx` `ts` `tsx` `json` `css` `scss` `html` `htm` `xml` `svg` `py` `go` `rs` `java` `c` `h` `cpp` `sh` `sql` `yaml` `yml` `toml` `ini` `md`、`Dockerfile`、`Makefile`）给内容着色；没有映射的文件名不着色、仍带行号。着色 SHALL 经 `lowlight` 产出语法树并映射为 React 元素，SHALL NOT 使用 `dangerouslySetInnerHTML` 或任何把文件内容当作 HTML 解析的途径；颜色取自主题变量，亮暗两种主题下都可读。着色完成之前 SHALL 先显示未着色的带行号源码（文件内容不因高亮库加载或着色而延后出现）；着色抛错时保留未着色的源码、不显示错误。本条只适用于文件预览；会话消息里的代码块不受影响。
+源码预览器 SHALL 以带行号的表格显示文本：每行一个行号单元格与一个内容单元格，保留空白，末尾空行计入，内容在容器内部横向滚动而不撑宽页面；`json` 先尝试格式化，失败保留原文。它 SHALL 按 `highlightLanguage(name)`（扩展名或文件名到语言的固定映射，至少覆盖 `js` `mjs` `cjs` `jsx` `ts` `tsx` `json` `css` `scss` `html` `htm` `xml` `svg` `py` `go` `rs` `java` `c` `h` `cpp` `sh` `sql` `yaml` `yml` `toml` `ini` `md`、`Dockerfile`、`Makefile`）给内容着色；没有映射的文件名不着色、仍带行号；文本长度超过 100 000 个字符时同样不着色、仍带行号（经验值，owner 2026-10-11 认可）。着色 SHALL 经 `lowlight` 产出语法树并映射为 React 元素，SHALL NOT 使用 `dangerouslySetInnerHTML` 或任何把文件内容当作 HTML 解析的途径；颜色取自主题变量，亮暗两种主题下都可读。着色完成之前 SHALL 先显示未着色的带行号源码（文件内容不因高亮库加载或着色而延后出现）；着色抛错时保留未着色的源码、不显示错误。本条只适用于文件预览；会话消息里的代码块不受影响。
 
 #### Scenario: 行号与字面值
 - **WHEN** 源码预览器显示含两行与一个末尾空行的文本，其中一行是 `<script>alert(1)</script>`
@@ -84,7 +84,7 @@
 ### Requirement: Markdown、表格、图片与 SVG
 - Markdown（`md`）SHALL 沿用既有 `mdRender` 的安全子集（见 files-web「文件预览纯组件」），默认渲染，可在 `查看源码` 与 `渲染视图` 之间切换，切换文件时重置为渲染。
 - 表格（`csv`、`tsv`）SHALL 以首行为表头显示，`csv` 以逗号、`tsv` 以制表符分列，并显示 `共 N 行 · 大文件仅预览前若干行`（N 为数据行数）。
-- 图片 SHALL 用 `fetchPreview` 给出的 Blob 地址渲染 `img`（`alt` 为文件名），在预览区内等比缩放、不撑宽页面；`img` 触发 `error`（文件损坏或内容不是它的扩展名所称的格式）时预览区 SHALL 改为显示 `无法显示该图片`、移除该 `img` 并保留预览头的下载链接，SVG 的图片视图同样处理（此时仍可切到 `查看源码`）。
+- 图片 SHALL 用 `fetchPreview` 给出的 Blob 地址渲染 `img`（`alt` 为文件名），在预览区内等比缩放、不撑宽页面；`img` 触发 `error`（文件损坏或内容不是它的扩展名所称的格式）时预览区 SHALL 改为显示 `无法显示该图片`、移除该 `img` 并保留预览头的下载链接，SVG 的图片视图同样处理（此时仍可切到 `查看源码`）。出错时图片预览器 MAY 自行释放该 Blob 地址，持有者此后在替换或卸载时对同一地址再释放一次是允许的（对已释放的地址再次释放是空操作；owner 2026-10-11 认可）。
 - SVG SHALL 默认以图片显示：把取回的文本做成 `data:image/svg+xml;charset=utf-8,<百分号编码>` 地址交给 `img`，并可在 `查看源码` 与 `图片视图` 之间切换；响应被截断时只显示源码并带截断提示。SVG 的文本 SHALL NOT 被插入页面 DOM、SHALL NOT 做成 Blob 地址。
 
 #### Scenario: tsv 与 csv
@@ -104,7 +104,7 @@
 - **THEN** 只显示源码与截断提示，没有 `img`，没有视图切换按钮
 
 ### Requirement: 隔离来源的嵌入与令牌
-需要隔离预览来源的预览器（网页的渲染视图、PDF、办公文档）SHALL 经 `issuePreviewToken(workspaceId)` 取得 `{base, officeBase, expiresAt, documentMaxBytes, officeAvailable}`，并把文件路径按段 `encodeURIComponent` 后接在 `base`（或 `officeBase`）之后作为 iframe 的 `src`；页面 SHALL NOT 自己拼接预览来源的主机或端口。同一工作空间在一个页面里 SHALL 共用一次签发的结果；只要有这样的预览处于挂载状态，页面 SHALL 每 5 分钟再调用一次 `issuePreviewToken` 续期（返回同一个 `base` 时 iframe 不重载；返回了不同的 `base` 时以新地址重载），没有这样的预览时不续期。签发失败（非 401）时预览区显示信封 message 或安全文案，网页仍可切到源码视图。令牌与 `base` SHALL NOT 被写入地址栏、`localStorage`、日志或任何持久存储，SHALL NOT 出现在界面可见文本里。
+需要隔离预览来源的预览器（网页的渲染视图、PDF、办公文档）SHALL 经 `issuePreviewToken(workspaceId)` 取得 `{base, officeBase, expiresAt, documentMaxBytes, officeAvailable}`，并把文件路径按段 `encodeURIComponent` 后接在 `base`（或 `officeBase`）之后作为 iframe 的 `src`；页面 SHALL NOT 自己拼接预览来源的主机或端口。同一工作空间在一个页面里 SHALL 共用一次签发的结果；只要有这样的预览处于挂载状态，页面 SHALL 每 5 分钟再调用一次 `issuePreviewToken` 续期（返回同一个 `base` 时 iframe 不重载；返回了不同的 `base` 时以新地址重载），没有这样的预览时不续期；此后再次出现这样的预览时，距上一次签发不足 5 分钟 SHALL 复用上一次的结果、不重新签发，否则重新签发（owner 2026-10-11 认可）。签发失败（非 401）时预览区显示信封 message 或安全文案，网页仍可切到源码视图。令牌与 `base` SHALL NOT 被写入地址栏、`localStorage`、日志或任何持久存储，SHALL NOT 出现在界面可见文本里。
 
 网页渲染视图的 iframe SHALL 带 `sandbox="allow-scripts allow-forms allow-modals"`（恰这三个令牌，没有 `allow-same-origin`）、`referrerpolicy="no-referrer"` 与 `title="<文件名>"`，SHALL NOT 使用 `srcdoc`。网页默认显示渲染视图，可在 `查看源码` 与 `渲染视图` 之间切换，切换文件时重置为渲染；源码视图经 `fetchPreview` 取文本（1 MiB 截断与截断提示照常），渲染视图不受该上限约束。
 
