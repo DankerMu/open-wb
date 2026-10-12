@@ -425,6 +425,7 @@ describe("拉取中、卸载与换账号", () => {
     expect(writeText.mock.calls).toEqual([[CODE_TEXT]]);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
+    expect(blobs.createObjectURL).not.toHaveBeenCalled();
   });
 
   it("A11 switching sessions aborts a pending preview and revokes the late Blob URL of an image the code card was sent", async () => {
@@ -468,6 +469,7 @@ describe("拉取中、卸载与换账号", () => {
 
     expect(writeText).not.toHaveBeenCalled();
     expect(toasts()).toEqual([]);
+    expect(blobs.createObjectURL).not.toHaveBeenCalled();
   });
 
   it("A11 a preview fetch rejected by the abort stays silent", async () => {

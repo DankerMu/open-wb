@@ -204,23 +204,47 @@ describe("打开网页预览", () => {
     expect(paths(fetchMock)).toStrictEqual(before);
   });
 
+  type Opener = keyof ReturnType<typeof openers>;
+  const pressEscape = () => fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
   const closings: Array<[string, (layer: HTMLElement) => void]> = [
-    ["Escape", () => fireEvent.keyDown(document.activeElement as Element, { key: "Escape" })],
+    ["Escape", pressEscape],
     ["关闭", (layer) => fireEvent.click(within(layer).getByRole("button", { name: CLOSE }))],
   ];
+  // 被点的按钮 × 关闭方式：卡头是图标按钮，卡脚是文字按钮。
+  const clickable: Array<[string, Opener]> = [
+    ["卡头", "head"],
+    ["卡脚", "foot"],
+  ];
+  const returns = clickable.flatMap(([label, clicked]) =>
+    closings.map(([name, close]): [string, string, Opener, (layer: HTMLElement) => void] => [
+      label,
+      name,
+      clicked,
+      close,
+    ]),
+  );
 
-  it.each(closings)(
-    "R17 窄屏点卡脚的 打开网页预览：焦点进层内的 关闭，预览是渲染框；用 %s 关掉后焦点只带 preventScroll 回到卡脚按钮，卡头按钮与顶栏按钮没有被聚焦",
-    async (_name, close) => {
-      installNarrowViewport();
-      const { fetchMock } = await openPage();
-      const { foot, head } = openers();
-      const top = vi.spyOn(sidebarButton(), "focus");
-      foot.focus();
-      const onHead = vi.spyOn(head, "focus");
-      const onFoot = vi.spyOn(foot, "focus");
+  /**
+   * 窄屏下打开 `out/index.html` 那一回合，焦点先放到 `clicked` 上（真实点击会这样），之后才装 `focus`
+   * 的探针——所以探针记到的只有关闭时归还焦点的那一次。
+   */
+  async function narrowPage(clicked: Opener) {
+    installNarrowViewport();
+    const { fetchMock } = await openPage();
+    const buttons = openers();
+    const top = vi.spyOn(sidebarButton(), "focus");
+    buttons[clicked].focus();
+    const on = { foot: vi.spyOn(buttons.foot, "focus"), head: vi.spyOn(buttons.head, "focus") };
+    return { buttons, fetchMock, on, top };
+  }
 
-      fireEvent.click(foot);
+  it.each(returns)(
+    "R17 窄屏点%s的 打开网页预览：焦点进层内的 关闭，预览是渲染框；用 %s 关掉后焦点只带 preventScroll 回到被点的那个按钮，另一个按钮与顶栏按钮没有被聚焦",
+    async (_label, _name, clicked, close) => {
+      const { buttons, fetchMock, on, top } = await narrowPage(clicked);
+      const other = clicked === "head" ? "foot" : "head";
+
+      fireEvent.click(buttons[clicked]);
 
       const layer = await screen.findByRole("dialog", { name: NAME });
       expect(layer.getAttribute("aria-modal")).toBe("true");
@@ -234,13 +258,33 @@ describe("打开网页预览", () => {
       close(layer);
 
       await waitFor(() => expect(screen.queryByRole("dialog", { name: NAME })).toBeNull());
-      await focusOn(foot);
-      expect(onFoot.mock.calls).toStrictEqual([[{ preventScroll: true }]]);
-      expect(onHead).not.toHaveBeenCalled();
+      await focusOn(buttons[clicked]);
+      expect(on[clicked].mock.calls).toStrictEqual([[{ preventScroll: true }]]);
+      expect(on[other]).not.toHaveBeenCalled();
       expect(top).not.toHaveBeenCalled();
       expect(document.querySelector("iframe")).toBeNull();
     },
   );
+
+  // 真实的点击落在卡头按钮里的图标上：记下的是挂着处理函数的按钮，不是事件的目标。
+  it("R17 窄屏点卡头按钮里的图标：Escape 关掉后焦点只带 preventScroll 回到卡头按钮，卡脚按钮与顶栏按钮没有被聚焦", async () => {
+    const { buttons, on, top } = await narrowPage("head");
+    const glyph = buttons.head.querySelector("svg");
+    if (!glyph) throw new Error("卡头按钮里应有图标");
+
+    fireEvent.click(glyph);
+
+    await rendered(await screen.findByRole("dialog", { name: NAME }));
+    await yieldMacrotask();
+
+    pressEscape();
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: NAME })).toBeNull());
+    await focusOn(buttons.head);
+    expect(on.head.mock.calls).toStrictEqual([[{ preventScroll: true }]]);
+    expect(on.foot).not.toHaveBeenCalled();
+    expect(top).not.toHaveBeenCalled();
+  });
 
   it("R18 out 的列表里没有 index.html：侧边栏打开并展开到 out，预览区是 文件不存在，没有框，不签发令牌，也不请求 file", async () => {
     const { fetchMock } = await openPage({
