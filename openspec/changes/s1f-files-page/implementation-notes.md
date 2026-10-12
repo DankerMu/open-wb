@@ -548,7 +548,7 @@
 - 变异：`failureOf` 不看 `target.asked` → 组件段「onlyPaths 下 path 指向没加载过的层…」判红。
 - 变异：`endWithoutFile` 去掉 `target.notify` 判断 → 组件段「reveal() 定位到不存在的文件或失败的一级…」判红。
 - 变异：搬移时漏掉任意一个 `it` → vitest 汇总 39 变 38，对照表缺行。
-- 合入后更正（以 #1362 的 PR 文本为准）：实测根因是 `waitFor` 回调里按角色查询的成本（单次 21–44ms，占首例等待的 78%），不是渲染；除 `selectedRow` 外还改了 `rowNames`（拆分后它成了 failures 文件冷启动首例的第一个等待）；`expect(` 合计 112（原 111 加修复的一行）；`TREE` 未从 support 导出（与 `ROOT` 同值，knip 报重复导出）；两句变异报文预测与实测不同（M2 报 `expected undefined to be 'app.ts'`，M3 红 10 例）。1000ms 预算这一类没有闭合：`findRow` 与 `previewRegion().findBy*` 仍在轮询里跑角色查询。
+- 合入后更正（以 #1362 的 PR 文本为准）：实测根因是 `waitFor` 回调里按角色查询的成本（单次 21–43ms，占首例等待的 78%），不是渲染；除 `selectedRow` 外还改了 `rowNames`（拆分后它成了 failures 文件冷启动首例的第一个等待）；`expect(` 合计 112（原 111 加修复的一行）；`TREE` 未从 support 导出（与 `ROOT` 同值，knip 报重复导出）；两句变异报文预测与实测不同（M2 报 `expected undefined to be 'app.ts'`，M3 红 10 例）。1000ms 预算这一类没有闭合：`findRow` 与 `previewRegion().findBy*` 仍在轮询里跑角色查询。
 
 ## 21.7、21.8（#1361）
 
