@@ -4,7 +4,7 @@
 import { type ReactNode, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
-import { formatSize } from "../files/file-meta.js";
+import { formatSize } from "../files/index.js";
 import { NO_WORKSPACE, type useAttachmentsState } from "./attachments-state.js";
 
 type Attachments = ReturnType<typeof useAttachmentsState>;

@@ -1,7 +1,6 @@
 import type { ComponentProps } from "react";
 import { useSidebarNavigate, useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
-import { useArtifactsPanel } from "./artifacts-panel.js";
 import { useAttachmentArea } from "./attachment-chips.js";
 import { useConversationSearch } from "./conversation-search.js";
 import { ConversationView } from "./conversation-view.js";
@@ -15,6 +14,8 @@ import { chatTopbar } from "./topbar-actions.js";
 import { UndoConflictDialog } from "./undo-conflict-dialog.js";
 import { useChatSession } from "./use-chat-session.js";
 import { useSessionListView } from "./use-session-list-view.js";
+import { useWorkspaceSidebar } from "./use-workspace-sidebar.js";
+import { WorkspaceSplit } from "./workspace-sidebar.js";
 
 type SessionListProps = Omit<ComponentProps<typeof SessionSidebar>, "onCreateSession"> & {
   onShowWelcome(focusComposer: boolean): void;
@@ -34,11 +35,11 @@ export function ChatPage() {
   const session = useChatSession();
   const { client, draft, historyView, requestedSessionId, selected, sessionActions, workspace } =
     session;
-  const artifacts = useArtifactsPanel(client, historyView, session.space, selected?.id);
+  const sidebar = useWorkspaceSidebar(selected?.workspaceId);
   const search = useConversationSearch(selected?.id, historyView);
   const config = useProjectConfig(client, selected);
   useTopbar(
-    chatTopbar(selected, sessionActions.openRename, search.slot, artifacts.open, config.slot),
+    chatTopbar(selected, sessionActions.openRename, search.slot, sidebar.slot, config.slot),
   );
   const listView = useSessionListView();
   // 只读判定（chat-web「会话页」）：`archivedAt` 可以是 0，所以与 null 比较；会话还没解析出来时按未归档。
@@ -85,47 +86,55 @@ export function ChatPage() {
 
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <ConversationView
-        approvalMode={selected?.approvalMode}
-        archived={archived}
-        client={client}
-        composerDisabled={session.composerDisabled}
-        composerOptions={session.composerOptions}
-        composerRef={session.composerRef}
-        draft={draft}
-        files={files}
-        generating={session.generating}
-        historyError={session.historyError}
-        historyView={historyView}
-        modelId={selected?.modelId}
-        onAnswerApproval={session.answerApproval}
-        onChangeDraft={session.setDraft}
-        onFork={session.forkTurn}
-        onPatchComposer={sessionActions.patchComposer}
-        onRegenerate={session.regenerateTurn}
-        onSend={session.sendPrompt}
-        onStop={session.stopTurn}
-        onSubmit={session.submitComposer}
-        onUndo={session.undoTurn}
-        promptError={session.promptError}
-        reasoningEffort={selected?.reasoningEffort}
-        requestedSessionId={requestedSessionId}
-        search={search}
-        sendDisabled={session.sendDisabled}
-        slash={slash}
-        space={session.space}
-        streamError={session.streamError}
-        temporaryWorkspace={selected?.temporaryWorkspace ?? false}
-        undoNotice={session.undoNotice}
-        welcome={session.welcome}
-        workspace={workspace}
-        workspaceId={session.slashWorkspaceId}
-      />
+      <WorkspaceSplit
+        sidebar={sidebar}
+        target={
+          sidebar.open && selected?.workspaceId
+            ? { client, sessionId: selected.id, workspace, workspaceId: selected.workspaceId }
+            : null
+        }
+      >
+        <ConversationView
+          approvalMode={selected?.approvalMode}
+          archived={archived}
+          client={client}
+          composerDisabled={session.composerDisabled}
+          composerOptions={session.composerOptions}
+          composerRef={session.composerRef}
+          draft={draft}
+          files={files}
+          generating={session.generating}
+          historyError={session.historyError}
+          historyView={historyView}
+          modelId={selected?.modelId}
+          onAnswerApproval={session.answerApproval}
+          onChangeDraft={session.setDraft}
+          onFork={session.forkTurn}
+          onPatchComposer={sessionActions.patchComposer}
+          onRegenerate={session.regenerateTurn}
+          onSend={session.sendPrompt}
+          onStop={session.stopTurn}
+          onSubmit={session.submitComposer}
+          onUndo={session.undoTurn}
+          promptError={session.promptError}
+          reasoningEffort={selected?.reasoningEffort}
+          requestedSessionId={requestedSessionId}
+          search={search}
+          sendDisabled={session.sendDisabled}
+          slash={slash}
+          space={session.space}
+          streamError={session.streamError}
+          temporaryWorkspace={selected?.temporaryWorkspace ?? false}
+          undoNotice={session.undoNotice}
+          welcome={session.welcome}
+          workspace={workspace}
+          workspaceId={session.slashWorkspaceId}
+        />
+      </WorkspaceSplit>
       <RenameDialog rename={sessionActions.rename} />
       <PromoteDialog promote={sessionActions.promote} />
       <DeleteDialog remove={sessionActions.remove} />
       <UndoConflictDialog conflict={session.undoConflict} />
-      {artifacts.panel}
       {config.dialog}
     </section>
   );

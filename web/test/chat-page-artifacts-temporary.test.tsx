@@ -1,6 +1,7 @@
 /**
- * Issue #968 临时空间会话的产物卡 (tasks 17.5): the turn-artifacts scenarios 「临时空间会话的文件变更卡」,
- * 「临时空间会话照常渲染产物卡」 (with its promoted half) and 「临时空间会话的面板行」.
+ * Issue #968 临时空间会话的产物卡 (tasks 17.5): the turn-artifacts scenarios 「临时空间会话的文件变更卡」
+ * and 「临时空间会话照常渲染产物卡」 (with its promoted half); 「临时空间会话的面板行」 was removed with
+ * the panel it described (#1105).
  * Seams: the jsdom chat page over a stubbed `fetch`, the list-event connection, the two Blob URL
  * statics, `<a>.click()` and `navigator.clipboard`. Expected values are literals from the spec
  * deltas. The session uses a temporary workspace: `temporaryWorkspace` is true and its
@@ -24,12 +25,6 @@ import {
   stubClipboard,
 } from "./chat-page-artifact-card-support.js";
 import {
-  artifactsPanelFixture,
-  openPanel,
-  panelAction,
-  rowButtons,
-} from "./chat-page-artifacts-panel-support.js";
-import {
   type Change,
   cardNamed,
   detailButtons,
@@ -48,12 +43,13 @@ import {
   write,
 } from "./chat-page-file-changes-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
+import { chatShellFixture } from "./chat-page-shell-support.js";
 import type { FetchRoutes } from "./chat-page-support.js";
 import { latestListSource, settle } from "./chat-stream-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
 import { calls, currentLocation, jsonResponse, textPreviewResponse } from "./support.js";
 
-const blobs = artifactsPanelFixture();
+const blobs = chatShellFixture();
 
 /** The temporary workspace of the session: `listed` holds the ids of 5s and 6s only. */
 const TEMP = "7c".repeat(16);
@@ -225,40 +221,5 @@ describe("临时空间会话照常渲染产物卡", () => {
     await screen.findByRole("navigation", { name: "工作空间目录树" });
     await quiesce();
     expect(calls(page.fetchMock, tree)).not.toHaveLength(0);
-  });
-});
-
-describe("临时空间会话的面板行", () => {
-  it("恰两行，只有空间内相对路径、没有 查看详情；index.html 一行以会话的 workspaceId 打开预览，main.py 一行没有操作按钮", async () => {
-    const page = await openSession(
-      temporaryTurn([write(INDEX), edit("main.py", 2, 0)]),
-      listed,
-      previews(),
-    );
-
-    const { panel } = await openPanel();
-
-    expect(rowCells(panel)).toEqual([
-      [
-        ["file-change-kind", "写入"],
-        ["file-change-path", INDEX],
-      ],
-      [
-        ["file-change-add", "+2"],
-        ["file-change-path", "main.py"],
-      ],
-    ]);
-    expect(rowButtons(panel)).toEqual([[OPEN_INDEX], []]);
-    expect(previewCalls(page.fetchMock)).toEqual([]);
-    expectNoWorkspacePath();
-
-    fireEvent.click(panelAction(panel, OPEN_INDEX));
-    const dialog = await previewDialog();
-
-    expect(frameOf(dialog).getAttribute("sandbox")).toBe("allow-scripts");
-    expect(frameOf(dialog).getAttribute("srcdoc")).toBe(HTML_TEXT);
-    expect(previewCalls(page.fetchMock).map(([path, options]) => [path, options?.method])).toEqual([
-      [`/api/workspaces/${TEMP}/file?path=out%2Findex.html`, "GET"],
-    ]);
   });
 });

@@ -54,9 +54,8 @@ type ArtifactActionProps = {
 };
 
 /**
- * The action of one artifact, without markup: shared by its card and by a 产物面板 row
- * (`ArtifactRowAction`). It owns at most one preview request at a time (`controller`): the request
- * starts on a click, sets `busy`
+ * The action of one artifact, without markup. It owns at most one preview request at a time
+ * (`controller`): the request starts on a click, sets `busy`
  * while in flight and is aborted on unmount, after which its late result has no effect except that
  * a Blob URL it brought is revoked. `report` is called with `null` when an action starts and with
  * the outcome when it copied or failed; a download and an opened preview report nothing, an aborted
@@ -183,8 +182,7 @@ function ArtifactPreview({ name, preview }: { name: string; preview: HtmlPreview
 }
 
 /**
- * The html preview of a card or a 产物面板 row, in the copied-layer dialog. Opened from a row it
- * is a second Radix layer above the panel's sheet: Escape reaches it first and the sheet stays.
+ * The html preview of a card, in the copied-layer dialog.
  *
  * That dialog has no trigger element, so
  * closing it would leave focus on `body`: focus goes back to `opener` here, without scrolling the
@@ -275,36 +273,6 @@ function ActionButton({ action, copied }: { action: Action; copied: boolean }) {
           已复制
         </span>
       ) : null}
-    </>
-  );
-}
-
-/**
- * The action of one artifact as the children of a 产物面板 row: the card's icon button, outcome
- * and html preview. A failure is a line of its own under the row's controls (the row wraps), so a
- * long message does not squeeze the path.
- */
-export function ArtifactRowAction(props: ArtifactActionProps) {
-  const [outcome, setOutcome] = useOutcome();
-  const action = useArtifactAction(props, setOutcome);
-  return (
-    <>
-      <ActionButton action={action} copied={outcome?.kind === "copied"} />
-      {outcome?.kind === "failed" ? (
-        <p
-          className="m-0 min-w-0 basis-full text-right text-xs text-(--wb-status-error-text)"
-          data-slot="artifact-error"
-          role="alert"
-        >
-          {outcome.message}
-        </p>
-      ) : null}
-      <PreviewDialog
-        name={props.artifact.name}
-        onClose={action.closePreview}
-        opener={action.opener}
-        preview={action.preview}
-      />
     </>
   );
 }

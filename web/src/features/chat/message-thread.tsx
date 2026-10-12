@@ -12,7 +12,7 @@ import {
 import { memo, type Ref, useCallback } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import { BrandMark, Icon } from "../../ui/index.js";
-import { formatSize } from "../files/file-meta.js";
+import { formatSize } from "../files/index.js";
 import { ApprovalRecords } from "./approval-card.js";
 import { ArtifactCards } from "./artifact-card.js";
 import { FileChangesCard } from "./file-changes-card.js";

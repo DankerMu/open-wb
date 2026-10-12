@@ -31,8 +31,8 @@ export const SEARCH_INPUT = "搜索对话内容";
 export const SESSION_PATH = `/?session=${SESSION_ID}`;
 /** The only argument the page may hand to `scrollIntoView`. */
 export const CENTER = { block: "center" };
-/** Banner buttons of a selected session, in DOM order. */
-export const TOPBAR_BUTTONS = ["重命名", SEARCH, "产物面板"];
+/** Banner buttons of a selected session bound to no workspace, in DOM order. */
+export const TOPBAR_BUTTONS = ["重命名", SEARCH];
 
 export const asked = (id: number, content: string): Message => ({
   ...historyUser,

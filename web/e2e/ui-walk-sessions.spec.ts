@@ -42,13 +42,9 @@ import {
   walkTemporarySpace,
   welcomeHeading,
 } from "./ui-walk-session-list.js";
-import {
-  expandToolGroup,
-  toolGroup,
-  walkArtifactPreview,
-  walkArtifactsPanel,
-} from "./ui-walk-steps.js";
+import { expandToolGroup, toolGroup, walkArtifactPreview } from "./ui-walk-steps.js";
 import { walkTodoPanel } from "./ui-walk-todo.js";
+import { walkWorkspaceSidebar } from "./ui-walk-workspace-sidebar.js";
 
 const DEV_PASSWORD = "demo";
 const WORKSPACE_NAME = "ui-walk-sessions";
@@ -150,7 +146,7 @@ async function walkSessionMeta(
     mark("step 4");
     await step5FileChanges(page);
     await walkArtifactPreview(page, REPORT_FILE);
-    await walkArtifactsPanel(page, REPORT_FILE, LOGICAL_PATH);
+    await walkWorkspaceSidebar(page, REPORT_FILE, project);
     await step5ViewDetails(page, workspaceId, sessionId);
     mark("step 5");
     await step6Sidebar(page, project, WORKSPACE_NAME, INITIAL_TITLE);

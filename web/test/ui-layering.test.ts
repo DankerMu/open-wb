@@ -20,7 +20,6 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/archived-notice.tsx",
   "web/src/features/chat/archived-view.tsx",
   "web/src/features/chat/artifact-card.tsx",
-  "web/src/features/chat/artifacts-panel.tsx",
   "web/src/features/chat/attachment-chips.tsx",
   "web/src/features/chat/attachments-state.ts",
   "web/src/features/chat/capability-bar.tsx",
@@ -82,10 +81,12 @@ const MIGRATED_AREAS: string[] = [
   "web/src/features/chat/use-session-list-events.ts",
   "web/src/features/chat/use-session-list-view.ts",
   "web/src/features/chat/use-thread-runtime.ts",
+  "web/src/features/chat/use-workspace-sidebar.ts",
   "web/src/features/chat/welcome-content.ts",
   "web/src/features/chat/welcome-options.ts",
   "web/src/features/chat/welcome.tsx",
   "web/src/features/chat/workspace-list.ts",
+  "web/src/features/chat/workspace-sidebar.tsx",
   "web/src/features/files",
 ];
 const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
@@ -363,7 +364,6 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/archived-notice.tsx",
       "web/src/features/chat/archived-view.tsx",
       "web/src/features/chat/artifact-card.tsx",
-      "web/src/features/chat/artifacts-panel.tsx",
       "web/src/features/chat/attachment-chips.tsx",
       "web/src/features/chat/attachments-state.ts",
       "web/src/features/chat/capability-bar.tsx",
@@ -425,10 +425,12 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       "web/src/features/chat/use-session-list-events.ts",
       "web/src/features/chat/use-session-list-view.ts",
       "web/src/features/chat/use-thread-runtime.ts",
+      "web/src/features/chat/use-workspace-sidebar.ts",
       "web/src/features/chat/welcome-content.ts",
       "web/src/features/chat/welcome-options.ts",
       "web/src/features/chat/welcome.tsx",
       "web/src/features/chat/workspace-list.ts",
+      "web/src/features/chat/workspace-sidebar.tsx",
       "web/src/features/files",
     ]);
     expect(MIGRATED_AREAS).not.toContain("web/src/features/chat");

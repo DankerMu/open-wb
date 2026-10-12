@@ -1,10 +1,10 @@
-/* File-change card adapted from resource/workbuddy-live-demo.html:2468-2476 (fileChangesHTML) and :519-526 (its frame): the head has no icon, each row shows the logical path `<account>/<dir>/<path>` (never the workspace root) and 查看详情 opens that workspace in /files. Built from the copied-layer Button and Tailwind classes; the row carries its own classes, so the 产物面板 list reuses it as is; it wraps, so a row of that list can put the failure of its action on a line under its controls. */
-import { type ReactNode, useId } from "react";
+/* File-change card adapted from resource/workbuddy-live-demo.html:2468-2476 (fileChangesHTML) and :519-526 (its frame): the head has no icon, each row shows the logical path `<account>/<dir>/<path>` (never the workspace root) and 查看详情 opens that workspace in /files. Built from the copied-layer Button and Tailwind classes; each row carries its own classes. */
+import { useId } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
-import { logicalPath } from "../files/file-meta.js";
+import { logicalPath } from "../files/index.js";
 import { summarizeChanges } from "./stream-artifacts.js";
 import type { ChatStepView } from "./stream-steps.js";
 import type { SessionSpace } from "./workspace-list.js";
@@ -20,7 +20,7 @@ const COUNT = "font-mono text-[11px]";
  * `space` is, while its workspace is in no list (a temporary one: resolved, yet not linkable; see
  * `FileChangesCard`) or no account is signed in.
  */
-export function useChangeSpace(space: SessionSpace | null): ChangeSpace | null {
+function useChangeSpace(space: SessionSpace | null): ChangeSpace | null {
   const account = useAuth().principal?.account;
   const workspace = space?.workspace ?? null;
   return workspace !== null && account !== undefined
@@ -29,18 +29,10 @@ export function useChangeSpace(space: SessionSpace | null): ChangeSpace | null {
 }
 
 /**
- * One change: its counts or 写入, its path and, when `space` is resolved, 查看详情 followed by
- * `children`. Without `space` the path is workspace-relative and there is no 查看详情.
+ * One change: its counts or 写入, its path and, when `space` is resolved, 查看详情. Without
+ * `space` the path is workspace-relative and there is no 查看详情.
  */
-export function FileChangeRow({
-  change,
-  space,
-  children,
-}: {
-  change: FileChange;
-  space: ChangeSpace | null;
-  children?: ReactNode;
-}) {
+function FileChangeRow({ change, space }: { change: FileChange; space: ChangeSpace | null }) {
   const navigate = useNavigate();
   const path = `${space?.prefix ?? ""}${change.path}`;
   return (
@@ -79,7 +71,6 @@ export function FileChangeRow({
           <Icon name="chevron-right" size={12} />
         </Button>
       )}
-      {children}
     </div>
   );
 }

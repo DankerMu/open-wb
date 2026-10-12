@@ -9,9 +9,9 @@ import { screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { createApiClient } from "../src/lib/api.js";
 import type { ComposerOptions } from "../src/lib/composer-contract.js";
-import { artifactsPanelFixture, openProbedSession } from "./chat-page-artifacts-panel-support.js";
 import { turn } from "./chat-page-file-changes-support.js";
 import { renderChatPageWithAuthProbe } from "./chat-page-lifecycle-support.js";
+import { chatShellFixture, openProbedSession } from "./chat-page-shell-support.js";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { DEFAULT_COMPOSER_OPTIONS } from "./session-meta-fixtures.js";
 import {
@@ -33,7 +33,7 @@ const CAPPED_OPTIONS: ComposerOptions = {
 const NO_SESSIONS = { "/api/sessions": () => jsonResponse({ sessions: [] }) };
 
 // Unmounts the page and the probed shell after each case (`cleanupChatLifecycle` included).
-artifactsPanelFixture();
+chatShellFixture();
 
 /** What a client created after the mount reads from the options endpoint. */
 function options() {

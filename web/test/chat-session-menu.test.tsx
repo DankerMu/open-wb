@@ -189,15 +189,17 @@ describe("会话条目菜单与重命名（session-sidebar）", () => {
   });
 
   it("顶栏重命名入口", async () => {
-    const { fetchMock, router } = mountSessions(SESSION_A, SESSIONS);
-    await findList(OLD);
+    // A 未绑定工作空间，B 绑定了一个：前者只有两个按钮，后者其后另有 `工作空间侧边栏`。
+    const bound = view(B, OTHER, { workspaceId: "1".repeat(32) });
+    const { fetchMock, router } = mountSessions(SESSION_A, [view(A, OLD), bound, view(C, THIRD)]);
+    const nav = await findList(OLD);
     await crumb(OLD);
 
     const banner = screen.getByRole("banner");
     const heading = within(banner).getByRole("heading", { level: 1, name: `我的工作 / ${OLD}` });
     const rename = within(banner).getByRole("button", { name: "重命名" });
     expect(heading.compareDocumentPosition(rename) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-    expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]);
+    expect(bannerButtons()).toEqual(["重命名", "对话内搜索"]);
     expect(within(banner).queryByRole("button", { name: "更多" })).toBeNull();
 
     const controls = await openTopbarRename();
@@ -210,10 +212,15 @@ describe("会话条目菜单与重命名（session-sidebar）", () => {
     await focusOn(rename);
     expect(calls(fetchMock, patchPath(A))).toEqual([]);
 
+    fireEvent.click(within(nav).getByRole("button", { name: OTHER }));
+    await crumb(OTHER);
+    expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "工作空间侧边栏"]);
+    expect(within(banner).queryByRole("button", { name: "更多" })).toBeNull();
+
     await act(() => router.navigate("/"));
     await expectWelcome();
     expect(screen.queryByRole("banner")).toBeNull();
-    for (const name of ["重命名", "对话内搜索", "产物面板"]) {
+    for (const name of ["重命名", "对话内搜索", "工作空间侧边栏"]) {
       expect(screen.queryByRole("button", { name })).toBeNull();
     }
     expectNoListToast();

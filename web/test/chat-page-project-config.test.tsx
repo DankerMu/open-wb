@@ -56,7 +56,8 @@ const SESSIONS = [BOUND, UNBOUND, OTHER];
 
 const TITLE = "助手会读取的项目配置文件";
 const NOTE = "以下位置存在配置文件；同一层有多个说明文件时只有一个生效";
-const THREE_BUTTONS = ["重命名", "对话内搜索", "产物面板"];
+const TWO_BUTTONS = ["重命名", "对话内搜索"];
+const THREE_BUTTONS = [...TWO_BUTTONS, "工作空间侧边栏"];
 
 const file = (path: string, depth: number, kind: ProjectConfigFile["kind"] = "instructions") => ({
   path,
@@ -296,12 +297,12 @@ describe("项目配置入口 (G1–G7)", () => {
     await crumb("未绑定会话");
     await quiesce();
 
-    // No workspace: no query string at all. Until it answers, A's button is not shown.
+    // No workspace: no query string at all, and no 工作空间侧边栏. Until it answers, A's button is not shown.
     expect(configPaths(fetchMock)).toEqual([configOf(A), "/api/project-config"]);
-    expect(bannerButtons()).toEqual(THREE_BUTTONS);
+    expect(bannerButtons()).toEqual(TWO_BUTTONS);
 
     await settleDeferredResponse(unbound, jsonResponse({ files: [file("AGENTS.md", 0)] }));
-    expect(bannerButtons()).toEqual(["项目配置 1", ...THREE_BUTTONS]);
+    expect(bannerButtons()).toEqual(["项目配置 1", ...TWO_BUTTONS]);
 
     await selectSession(OTHER);
     await crumb("客服会话");
@@ -331,7 +332,7 @@ describe("项目配置入口 (G1–G7)", () => {
     await crumb("未绑定会话");
     await settleDeferredResponse(late, jsonResponse({ files: THREE }));
     await quiesce();
-    expect(bannerButtons()).toEqual(THREE_BUTTONS);
+    expect(bannerButtons()).toEqual(TWO_BUTTONS);
 
     await selectSession(BOUND);
     await crumb("绑定会话");
@@ -344,7 +345,7 @@ describe("项目配置入口 (G1–G7)", () => {
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${UNBOUND.id}`));
     await waitFor(() => expect(configDialog()).toBeNull());
     await quiesce();
-    expect(bannerButtons()).toEqual(THREE_BUTTONS);
+    expect(bannerButtons()).toEqual(TWO_BUTTONS);
 
     // Back on its session the list is closed: it opens on a press only.
     await selectSession(BOUND);
@@ -491,14 +492,15 @@ describe("groupByDepth 与 chatTopbar (G9)", () => {
   it("G9 chatTopbar puts the filled config slot first under its own label; without it the three slots only", () => {
     const onSelect = vi.fn();
     const search = { expanded: false, onSelect: vi.fn() };
+    const workspace = { expanded: false, onSelect: vi.fn() };
     const describeActions = (config?: Parameters<typeof chatTopbar>[4]) =>
-      chatTopbar(BOUND, vi.fn(), search, vi.fn(), config).actions?.map(
+      chatTopbar(BOUND, vi.fn(), search, workspace, config).actions?.map(
         ({ expanded, icon, key, label }) => ({ expanded, icon, key, label }),
       );
     const three = [
       { expanded: undefined, icon: "pencil", key: "rename", label: "重命名" },
       { expanded: false, icon: "search", key: "search", label: "对话内搜索" },
-      { expanded: undefined, icon: "package", key: "artifacts", label: "产物面板" },
+      { expanded: false, icon: "folder", key: "workspace", label: "工作空间侧边栏" },
     ];
 
     expect(describeActions()).toEqual(three);
@@ -507,11 +509,11 @@ describe("groupByDepth 与 chatTopbar (G9)", () => {
       ...three,
     ]);
     expect(
-      chatTopbar(undefined, vi.fn(), search, vi.fn(), { expanded: false, onSelect }),
+      chatTopbar(undefined, vi.fn(), search, workspace, { expanded: false, onSelect }),
     ).toStrictEqual({});
 
     const trigger = document.createElement("button");
-    chatTopbar(BOUND, vi.fn(), search, vi.fn(), {
+    chatTopbar(BOUND, vi.fn(), search, workspace, {
       expanded: false,
       onSelect,
     }).actions?.[0]?.onSelect(trigger);

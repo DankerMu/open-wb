@@ -32,14 +32,14 @@ import {
   toasts,
   truncatedPreview,
 } from "./chat-page-artifact-card-support.js";
-import { artifactsPanelFixture } from "./chat-page-artifacts-panel-support.js";
 import { cardNamed, edit, quiesce, reply, write } from "./chat-page-file-changes-support.js";
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
+import { chatShellFixture } from "./chat-page-shell-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
 import { deferredResponse, textPreviewResponse } from "./support.js";
 
-const blobs = artifactsPanelFixture();
+const blobs = chatShellFixture();
 afterEach(() => {
   vi.useRealTimers();
 });

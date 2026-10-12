@@ -9,7 +9,7 @@ import { expect, type Page } from "@playwright/test";
 
 const TITLE = "助手会读取的项目配置文件";
 const NOTE = "以下位置存在配置文件；同一层有多个说明文件时只有一个生效";
-const HEADER_ACTIONS = ["重命名", "对话内搜索", "产物面板"];
+const HEADER_ACTIONS = ["重命名", "对话内搜索", "工作空间侧边栏"];
 // 夹具 smoke/fixtures/sandbox/u1/ui-walk-skills/AGENTS.md。
 const FIXTURE_FILES = [{ path: "AGENTS.md", kind: "instructions", depth: 0 }];
 
