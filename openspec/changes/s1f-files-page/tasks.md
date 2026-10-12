@@ -296,10 +296,10 @@ Minimal mergeable slice: 9.1–9.2（移动）与 9.3–9.4（下载）互不依
   测试用的压缩包在测试里用 `node:zlib` 与手写的 tar / zip 字节现场生成（不入库二进制夹具）；断言请求前后工作空间与临时目录无新增文件。
 - [x] 10.5 变异证据：到上限后继续读 → 1500 项用例的条数断言判红；对成员名做路径解析 → 「恶意成员名只是数据」里出现空间外访问而判红；不认 GNU 长文件名 → 长路径用例判红；
   去掉扩展记录的长度上限（按声明长度分配或读取）→ tar 用例的「单次读取不超过 65536 字节」判红；时限只套在 tar.gz 上 → 未压缩 `slow.tar` 的超时用例判红。
-- [ ] 10.7 压缩包列表的三个上界（#1353，owner 2026-10-11 裁决；Critical Path）。(a) `PREVIEW_ARCHIVE_MAX_ENTRIES` 的可配范围收到 `1..10000`：`resolvePositiveInteger` 加可选第四参数 `max`，越界消息为 `PREVIEW_ARCHIVE_MAX_ENTRIES must be within 1..10000`。(b) zip 并入 tar 的同一个 5 秒时限（`DEADLINE_MS`，不加配置键）：时钟在读每个中央目录项之前读一次，到时返回已读到的项并置 `truncated`。(c) zip 成员的未压缩大小不是安全整数时按损坏处理。同刀改写 `archive.ts` 文首与 `rest-archive.ts` 文首关于「zip 没有时限」的注释。Depends on：10.2、10.3、5.1。
+- [x] 10.7 压缩包列表的三个上界（#1353，owner 2026-10-11 裁决；Critical Path）。(a) `PREVIEW_ARCHIVE_MAX_ENTRIES` 的可配范围收到 `1..10000`：`resolvePositiveInteger` 加可选第四参数 `max`，越界消息为 `PREVIEW_ARCHIVE_MAX_ENTRIES must be within 1..10000`。(b) zip 并入 tar 的同一个 5 秒时限（`DEADLINE_MS`，不加配置键）：时钟在读每个中央目录项之前读一次，到时返回已读到的项并置 `truncated`。(c) zip 成员的未压缩大小不是安全整数时按损坏处理。同刀改写 `archive.ts` 文首与 `rest-archive.ts` 文首关于「zip 没有时限」的注释。Depends on：10.2、10.3、5.1。
   实施注记见 `implementation-notes.md`「10.7、10.8、10.9（#1353）」。
-- [ ] 10.8 并发上限的评估与一次粗测（#1353）：结论「不加」及理由写进 design D7；粗测（一次性脚本不入库）记三组数——上限 10000 的最坏包单请求（状态码、响应字节数、耗时、RSS 峰值、事件循环最大停顿）；同一个包在装配上限 100000 时的结果；缺省 1000 与 10000 各 8 个并发时的 RSS 峰值与 `GET /api/healthz` 的最大延迟。任何一组与 D7 的推算不符（10000 时不是 200；缺省 8 并发 RSS 增量超过 1 GiB，或 healthz 延迟超过 1 秒）即停下报 owner，不在本刀设计限流。
-- [ ] 10.9 测试与变异证据（#1353）：workspaces 场景「zip 的读取时限」「zip64 声明的大小」、http-service-skeleton 场景「预览与文件键的非法值」新增的 `10001`；改写的既有断言逐条进偏离记录；变异表见实施注记。
+- [x] 10.8 并发上限的评估与一次粗测（#1353）：结论「不加」及理由写进 design D7；粗测（一次性脚本不入库）记三组数——上限 10000 的最坏包单请求（状态码、响应字节数、耗时、RSS 峰值、事件循环最大停顿）；同一个包在装配上限 100000 时的结果；缺省 1000 与 10000 各 8 个并发时的 RSS 峰值与 `GET /api/healthz` 的最大延迟。任何一组与 D7 的推算不符（10000 时不是 200；缺省 8 并发 RSS 增量超过 1 GiB，或 healthz 延迟超过 1 秒）即停下报 owner，不在本刀设计限流。
+- [x] 10.9 测试与变异证据（#1353）：workspaces 场景「zip 的读取时限」「zip64 声明的大小」、http-service-skeleton 场景「预览与文件键的非法值」新增的 `10001`；改写的既有断言逐条进偏离记录；变异表见实施注记。
 
 Suggested fixture level: expanded - 解析不可信的二进制格式并对外新增端点；条目上限、长度上限与「不解压、不落盘」是硬约束
 Minimal mergeable slice: 10.1（tar / gz 的遍历器）与它在 10.4 里的用例先合；10.6（遍历器的两处修正，带自己的用例）单独一刀，先于 10.3；10.2（zip，带新依赖）与 10.3 的路由随后，各带自己的用例（10.3 Depends on 5.1 与 6.2 的 `limits` 依赖对象；10.1、10.2 只依赖 0.1）
