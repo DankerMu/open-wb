@@ -3,7 +3,9 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  canMoveInto,
   type DirectoryCache,
+  moveDestination,
   movedCache,
   movedKeys,
   movedPath,
@@ -101,6 +103,48 @@ describe("parentPath / renameTarget", () => {
     ["out/a.md", "", "out/"],
   ])("renameTarget(%j, %j) 是 %j", (path, name, expected) => {
     expect(renameTarget(path, name)).toBe(expected);
+  });
+});
+
+// files-web「文件操作界面」：`移动到…` 与拖放共用的两样——能不能移进去、发出的 `to`。期望值手写。
+describe("canMoveInto / moveDestination", () => {
+  it.each([
+    // 自身
+    ["out", "out", false],
+    ["a.md", "a.md", false],
+    // 自身的后代
+    ["out", "out/sub", false],
+    ["out", "out/sub/deep", false],
+    // 当前父目录
+    ["a.md", "", false],
+    ["out", "", false],
+    ["out/b.md", "out", false],
+    ["out/sub", "out", false],
+    // 根（不是当前父目录时）与别的目录
+    ["out/b.md", "", true],
+    ["out/sub", "", true],
+    ["a.md", "out", true],
+    ["out/b.md", "out/sub", true],
+    ["out/sub", "docs", true],
+    // 名字以它开头的同级不是它的后代，反过来也一样
+    ["out", "output", true],
+    ["output", "out", true],
+    ["out", "output/out", true],
+  ])("canMoveInto(%j, %j) 是 %j", (path, directory, expected) => {
+    expect(canMoveInto(path, directory)).toBe(expected);
+  });
+
+  // 目标目录与名字都原样：不去空格、不折叠点段、不编码也不解码；目标是根时没有前导的分隔符。
+  it.each([
+    ["a.md", "out", "out/a.md"],
+    ["out/b.md", "", "b.md"],
+    ["out/sub", "output", "output/sub"],
+    ["out/sub/x.md", "out", "out/x.md"],
+    [" a%20b#c?.md ", " o%20ut ", " o%20ut / a%20b#c?.md "],
+    ["out/..", "", ".."],
+    ["a.md", "out/../..", "out/../../a.md"],
+  ])("moveDestination(%j, %j) 是 %j", (from, directory, expected) => {
+    expect(moveDestination(from, directory)).toBe(expected);
   });
 });
 

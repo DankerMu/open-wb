@@ -31,8 +31,8 @@
  * - Entry operations: the row menu, its dialog and the request are `useEntryOperations`
  *   (`entry-ops.tsx`); after a rename or a move `useFollowEntry` (`follow-entry.ts`) moves the
  *   listings, the expanded set and the selection to the new path without walking again, and after a
- *   delete drops them (a deleted current file or ancestor: `onPathChange(null)`). No row menu while
- *   `onlyPaths` is set.
+ *   delete drops them (a deleted current file or ancestor: `onPathChange(null)`). A row dropped on a
+ *   directory row moves the same way (`tree.tsx`). No row menu and no drag while `onlyPaths` is set.
  */
 import {
   type ReactNode,
@@ -146,6 +146,8 @@ export function WorkspaceBrowser({
   const expandedPathsRef = useRef<ReadonlySet<string>>(new Set([""]));
   // 最近一次请求失败的目录与文案：定位从这里读（它的 effect 不随 `directoryErrors` 重跑）。
   const failedDirectoriesRef = useRef(new Map<string, string>());
+  // 行操作成功后该拿到焦点的行（`MenuFocus`）；它所在的那一层重列失败就作废，不留给以后才出现的行。
+  const focusMenuPath = useRef<string | null>(null);
   const mountedRef = useRef(false);
   const ownedImageUrlRef = useRef<string | null>(null);
   const previewRequestRef = useRef(0);
@@ -222,6 +224,9 @@ export function WorkspaceBrowser({
 
           const message = errorMessage(error);
           failedDirectoriesRef.current.set(path, message);
+          if (focusMenuPath.current !== null && parentPath(focusMenuPath.current) === path) {
+            focusMenuPath.current = null;
+          }
           // 树上没有行的层（`path` 属性里上一级没有列出的那些）不进错误行：`刷新` 不会再请求它。
           if (onTree) {
             setDirectoryErrors((current) => ({ ...current, [path]: message }));
@@ -606,6 +611,7 @@ export function WorkspaceBrowser({
   const operations = useEntryOperations(client, workspaceId, followEntry, {
     cacheRef,
     expandedPathsRef,
+    focusMenuPath,
     name,
   });
 
@@ -643,7 +649,7 @@ export function WorkspaceBrowser({
               cache={subtree ? subtree.tree : directories}
               errors={subtree ? NO_ERRORS : directoryErrors}
               expandedPaths={subtree ? subtree.expandedPaths : expandedPaths}
-              focusMenuPath={operations.focusMenuPath}
+              focusMenuPath={focusMenuPath}
               loadingPaths={subtree ? NO_PATHS : loadingPaths}
               marks={marks}
               onSelectFile={chooseFile}
@@ -655,7 +661,7 @@ export function WorkspaceBrowser({
             />
           )
         }
-        folderNotice={folder.notice}
+        folderNotice={folder.notice ?? operations.notice}
         layout={layout}
         onNewDirectory={folder.open}
         onNewWorkspace={onNewWorkspace}

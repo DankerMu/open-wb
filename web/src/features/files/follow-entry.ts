@@ -56,7 +56,7 @@ function abandonRequests(requests: Map<string, AbortController>, from: string, t
  * `from` 已被改名或移动为 `to`，或已被删除（`to` 为 `null`），界面跟过去而不重新逐级展开。次序：放弃
  * `from` 之下、以及 `to` 之下（那里早先留下的目录已被顶掉）在途的目录请求；列表缓存、展开集合、目录的
  * 失败文案与进行中的定位换到新路径（`movedKeys`：先丢 `to` 之下早先留下的，再换；删除时 `from` 之下的
- * 都丢掉、定位放弃）；当前文件在 `from` 之下时在新路径重新选中一次（按新名的类别重取：`file`、
+ * 都丢掉、定位放弃），`to` 的父目录进展开集合；当前文件在 `from` 之下时在新路径重新选中一次（按新名的类别重取：`file`、
  * `archive` 或预览来源的地址）并上报，删除时清掉选中并上报 `null`——选中在前、上报在后，上报回来的
  * `path` 不另起定位；重新列出受影响的层，先 `from` 的父目录、后 `to` 的父目录，同一层只列一次（改名
  * 与删除因此只有一次）；已展开而没有列表的新路径补一次请求。
@@ -86,7 +86,9 @@ export function useFollowEntry<Reveal extends { path: string }>({
       cacheRef.current = movedCache(cacheRef.current, from, to);
       setDirectories(cacheRef.current);
       const expanded = movedKeys(expandedPathsRef.current.entries(), from, to);
-      expandedPathsRef.current = new Set(expanded.map(([path]) => path));
+      // 移到的那一层展开：拖放可以落在折叠着的目录上，新行要挂得上；改名与 `移动到…` 的那一层本来就展开。
+      const landing = to === null ? [] : [parentPath(to)];
+      expandedPathsRef.current = new Set([...expanded.map(([path]) => path), ...landing]);
       setExpandedPaths(expandedPathsRef.current);
       setDirectoryErrors((current) =>
         Object.fromEntries(movedKeys(Object.entries(current), from, to)),
