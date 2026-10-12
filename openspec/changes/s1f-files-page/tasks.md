@@ -627,8 +627,9 @@ Minimal mergeable slice: 23.1（拷入组件与依赖登记；knip 的拷入层�
 - [x] 24.2 `只看本会话改动` 开关（`aria-pressed`）→ `onlyPaths`；空集合文案 `本会话暂无文件改动`；切换会话重置；关闭开关后恢复原展开与选中。树区的 `折叠文件树` / `展开文件树`。
 - [x] 24.3 刷新（workspace-sidebar「随助手改动刷新」）：新的已结束步骤 `changes` → 300 毫秒合并后 `refresh(这些路径)` 并在命中当前文件时重取预览；生成中 → 不在生成中 → `refresh()`；关闭期间不请求、重开时只有挂载的那一次根请求（关闭即卸载，见规格）；刷新失败保留旧树。
   实施注记见 `implementation-notes.md`「24.3，含分摊的 24.4 / 24.5 / 24.6 条款（#1107）」。
-- [ ] 24.4 测试（新文件 `web/test/chat-workspace-sidebar-changes.test.tsx`、`chat-workspace-sidebar-refresh.test.tsx`）：两条需求的全部场景（假定时器驱动合并；用既有的事件注入支持文件推 `files.changed` / `step.end` / 回合结束）；workspace-sidebar「内容与文件操作」三个场景。
-- [ ] 24.5 CH 行：树上的改动标记与「只看本会话改动」、助手写文件后树自己更新（写文件工具与命令各一例）、回合进行中在侧边栏里删除 / 重命名文件的表现；结论 `待签`。
+- [x] 24.4 测试（新文件 `web/test/chat-workspace-sidebar-changes.test.tsx`、`chat-workspace-sidebar-refresh.test.tsx`）：两条需求的全部场景（假定时器驱动合并；用既有的事件注入支持文件推 `files.changed` / `step.end` / 回合结束）；workspace-sidebar「内容与文件操作」三个场景。
+  实施注记见 `implementation-notes.md`「24.4、24.5（#1108）」。
+- [x] 24.5 CH 行：树上的改动标记与「只看本会话改动」、助手写文件后树自己更新（写文件工具与命令各一例）、回合进行中在侧边栏里删除 / 重命名文件的表现；结论 `待签`。
 - [x] 24.6 变异证据：running 步骤的 `changes` 也计入 → 标记用例判红；过滤时仍去列目录 → 「没有发出 `tree` 请求」判红；去掉回合结束的兜底 → `bash` 用例判红；合并定时器在卸载后仍去刷新，或重开时把已有历史当新改动再刷一轮 → 「关闭期间不请求」判红（原写「关闭期间照常刷新」：关闭即卸载，按字面不可观察，#1107 fixture 评审订正）；去掉合并 → 「恰一轮刷新」判红。
 
 Suggested fixture level: compact - 由既有会话视图派生的展示与请求节流；不新增服务端契约
@@ -679,9 +680,10 @@ Minimal mergeable slice: 26.1 的夹具与 README 可先合（既有 hurl 只断
 
 ## 27. files-harness — `/files` 走查的新步骤
 
-- [ ] 27.1 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）：files-harness「走查 /files 步骤」新增的 (a)–(f)——高亮的源码与地址里的 `path`、隔离来源的 html 预览及其相对样式表（标题颜色 `rgb(0, 128, 0)`）、源码切换、音频播放器、下载链接、重载后仍选中、
+- [x] 27.1 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）：files-harness「走查 /files 步骤」新增的 (a)–(f)——高亮的源码与地址里的 `path`、隔离来源的 html 预览及其相对样式表（标题颜色 `rgb(0, 128, 0)`）、源码切换、音频播放器、下载链接、重载后仍选中、
   把 `walk-out-<project>` 重命名为 `walk-renamed-<project>` 后经确认框删除并以 `tree` 接口复核。两个 project 都跑。
   实施注记见 `implementation-notes.md`「27.1 的 (a)(c)(d)(e)（#1114）」。
+  实施注记见 `implementation-notes.md`「27.1 的 (f)（#1116）」。
 - [x] 27.2 验证「相对资源没加载不可假绿」：在隔离的调用方夹具里删掉 `site/style.css` 跑一次，确认在标题颜色断言处失败；恢复后全绿。结果写进 PR。
   实施注记见 `implementation-notes.md`「27.1 的 (b)、27.2（#1115）」。
 - [ ] 27.3 FL 行核对：把组 3、17–22 各自加的 FL 行通读一遍，补上遗漏的窄屏与深色情形，去重；确认全部为 `待签`、守卫通过。

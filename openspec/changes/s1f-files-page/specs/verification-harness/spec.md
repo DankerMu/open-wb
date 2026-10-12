@@ -23,7 +23,7 @@
 - **THEN** 完整正文逐字等于`你好，这是 WorkBuddy 的第一条流式回复。`，bash 步骤徽章（`role=status` 名 `bash 已完成`）与会话列表当前项 status 文本均为 `已完成`，恰一user/assistant pair；完成后reload同样完整且done；exact两次auth401及零新增console/pageerror合同不变，finally清理gate
 - **AND** 不以浏览器伪造响应、fake EventSource、已完成回合的延迟展示或任意sleep冒充真正回合中刷新；其他canonical CI/HTTP requirements保持不变
 
-After the four-route traversal and before the existing held dialogue, the journey SHALL perform files-harness「走查 /files 步骤」through the real UI. Its caller-owned sandbox SHALL contain the tracked fixture and no directory named `walk-out-<project>` for the running project (a sibling project's directory may exist). Existing auth/error, dialogue recovery, theme, logout and lifecycle scenarios remain unchanged.
+After the four-route traversal and before the existing held dialogue, the journey SHALL perform files-harness「走查 /files 步骤」through the real UI. Its caller-owned sandbox SHALL contain the tracked fixture and no directory named `walk-out-<project>` or `walk-renamed-<project>` for the running project (a sibling project's directories may exist). Existing auth/error, dialogue recovery, theme, logout and lifecycle scenarios remain unchanged.
 
 #### Scenario: 文件面预览、创建与同空间恢复
 - **WHEN** the authenticated browser selects or creates smoke-fixture, opens the three-file tree, switches Markdown rendered/source views, inspects CSV, opens `logo.png` (asserting `naturalWidth === 256`) and creates the root `walk-out-<project>` directory (≥48 chars)
