@@ -501,6 +501,12 @@ describe("usePreviewToken", () => {
     expect(client.issuePreviewToken.mock.calls).toStrictEqual([CALL, CALL, CALL]);
     expect(frames.length).toBeGreaterThan(from);
     expect(frames.slice(from)).toStrictEqual(frames.slice(from).map(() => LOADING));
+    // 重新签发还在途时宿主以同样的参数再渲染一次：仍是 loading，保留的旧 ready 不回来。
+    const again = frames.length;
+    rerender({ client, workspaceId: "ws-1", needed: true, attempt: 1 });
+    expect(frames.length).toBeGreaterThan(again);
+    expect(frames.slice(again)).toStrictEqual(frames.slice(again).map(() => LOADING));
+    expect(client.issuePreviewToken.mock.calls).toStrictEqual([CALL, CALL, CALL]);
     await advance(0);
     expect(result.current).toStrictEqual({ ...READY, base: moved });
   });
