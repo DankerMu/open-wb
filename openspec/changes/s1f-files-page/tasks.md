@@ -553,6 +553,7 @@ Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20
 - [x] 21.3 测试（新文件 `web/test/files-deep-link.test.tsx`、`workspace-browser.test.tsx`）：「地址定位到文件」前三个场景与「工作空间浏览器组件」三个场景；静态断言 `features/files` 不从 `features/chat` 导入。
 - [x] 21.4 FL 行：带文件的地址可直接打开并定位、刷新后仍在同一文件、指向不存在文件的地址的表现；结论 `待签`。
 - [x] 21.5 变异证据：选中时用 `push` → 「没有新增历史记录」判红；`ws` 被纠正时保留 `path` → 非法 `ws` 用例判红；`onlyPaths` 下仍请求 `tree` → 「没有新的 `tree` 请求」判红。
+- [ ] 21.6 测试稳定性与拆分（#1362，只动 `web/test`）：定位 `files-deep-link.test.tsx` 首例「直接访问带 path 的地址…」在 CI 偶发红（`expected null to be 'true'`）的根因并按根因修，不调大超时；把该文件按 describe 拆成多个文件加一个 support 文件（每个低于 600 行），断言零改动，逐例对照表进 PR。根因若在产品代码则停下报告。
 
 Suggested fixture level: compact - 前端结构抽取加一个查询参数；路径只作为数据交给服务端裁决
 Minimal mergeable slice: 21.1（抽组件，行为不变，既有文件页测试保绿）先合；21.2 的地址参数随后。会话页卡片的 `查看详情` 在组 25 之前保持现有的 `?ws=` 导航，本组不动它
