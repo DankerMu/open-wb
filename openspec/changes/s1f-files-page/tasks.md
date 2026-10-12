@@ -621,7 +621,7 @@ Minimal mergeable slice: 23.1（拷入组件与依赖登记；knip 的拷入层�
 - [x] 24.1 改动集合：复用 `stream-artifacts.ts` 的 `summarizeChanges` 对全视图聚合（原面板的 `sessionChanges` 逻辑搬到侧边栏的 hook 里）；传给 `WorkspaceBrowser` 的 `markedPaths`（标记文本 `本会话已改动`，父目录同标）。
   实施注记见 `implementation-notes.md`「24.1、24.2，含分摊的 24.4 / 24.5 / 24.6 条款（#1106）」。
 - [x] 24.2 `只看本会话改动` 开关（`aria-pressed`）→ `onlyPaths`；空集合文案 `本会话暂无文件改动`；切换会话重置；关闭开关后恢复原展开与选中。树区的 `折叠文件树` / `展开文件树`。
-- [ ] 24.3 刷新（workspace-sidebar「随助手改动刷新」）：新的已结束步骤 `changes` → 300 毫秒合并后 `refresh(这些路径)` 并在命中当前文件时重取预览；生成中 → 不在生成中 → `refresh()`；关闭期间不请求、重开时刷新一次；刷新失败保留旧树。
+- [ ] 24.3 刷新（workspace-sidebar「随助手改动刷新」）：新的已结束步骤 `changes` → 300 毫秒合并后 `refresh(这些路径)` 并在命中当前文件时重取预览；生成中 → 不在生成中 → `refresh()`；关闭期间不请求、重开时只有挂载的那一次根请求（关闭即卸载，见规格）；刷新失败保留旧树。
   实施注记见 `implementation-notes.md`「24.3，含分摊的 24.4 / 24.5 / 24.6 条款（#1107）」。
 - [ ] 24.4 测试（新文件 `web/test/chat-workspace-sidebar-changes.test.tsx`、`chat-workspace-sidebar-refresh.test.tsx`）：两条需求的全部场景（假定时器驱动合并；用既有的事件注入支持文件推 `files.changed` / `step.end` / 回合结束）；workspace-sidebar「内容与文件操作」三个场景。
 - [ ] 24.5 CH 行：树上的改动标记与「只看本会话改动」、助手写文件后树自己更新（写文件工具与命令各一例）、回合进行中在侧边栏里删除 / 重命名文件的表现；结论 `待签`。
