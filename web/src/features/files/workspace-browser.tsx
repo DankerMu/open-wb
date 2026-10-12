@@ -473,6 +473,22 @@ export function WorkspaceBrowser({
   );
 
   /**
+   * 定位落在目录 `path` 上：展开并请求它。它的父目录不在 `rows`（树上有行的各级）里时——别名路径，如
+   * `./out`——它自己也没有行：不展开、不请求。
+   */
+  const openDirectory = useCallback(
+    (path: string, rows: readonly string[]) => {
+      if (!rows.includes(path.slice(0, Math.max(0, path.lastIndexOf("/"))))) {
+        return;
+      }
+
+      expandDirectories([path]);
+      loadDirectory(path);
+    },
+    [expandDirectories, loadDirectory],
+  );
+
+  /**
    * 把进行中的定位推进到不能再推为止：已加载的层直接走过，树上有行的并展开；遇到未加载的层请求一次
    * 后返回，等列表或失败落地（下面的 effect）再进来，等不到就停在这一级，文案是这一次请求的失败。
    * 走到末级：文件则选中（`reveal` 发起的另上报一次），目录只展开，列表里没有就是 `文件不存在`。
@@ -500,13 +516,12 @@ export function WorkspaceBrowser({
         onPathChange(target.path);
       }
     } else if (entry) {
-      expandDirectories([target.path]);
-      loadDirectory(target.path);
+      openDirectory(target.path, expand);
       endWithoutFile(target, null);
     } else {
       endWithoutFile(target, MISSING_FILE);
     }
-  }, [awaitDirectory, endWithoutFile, expandDirectories, loadDirectory, onPathChange, selectFile]);
+  }, [awaitDirectory, endWithoutFile, expandDirectories, onPathChange, openDirectory, selectFile]);
 
   // `path` 属性只在变化时生效一次，每次都顶掉进行中的定位：与当前选中相同就只是放弃它，`null` 另清掉
   // 选中，其余换成对 `path` 的定位。其后每当目录列表或进行中的目录请求有变化，推进定位。

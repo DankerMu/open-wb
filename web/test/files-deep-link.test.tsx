@@ -453,6 +453,14 @@ describe("指向目录、不存在与越界", () => {
       extra: { [`${TREE}constructor`]: notFound },
     },
     {
+      title: "path=__proto__/x（与原型访问器同名的一级）：照样请求它，显示服务端的 404 文案",
+      path: "__proto__/x",
+      trees: [ROOT, `${TREE}__proto__`],
+      notice: NOT_FOUND,
+      rows: ROOT_ROWS,
+      extra: { [`${TREE}__proto__`]: notFound },
+    },
+    {
       title: "path=..（单独两个点）：根的列表里没有它，显示 文件不存在，不为它发请求",
       path: "..",
       trees: [ROOT],
@@ -566,6 +574,31 @@ describe("指向目录、不存在与越界", () => {
     },
   );
 
+  it("path=./bad（别名指向目录，bad 的列表读取失败）：没有行的 ./bad 不展开、不请求；点 刷新 只重取根，没有错误行", async () => {
+    const listing = () =>
+      jsonResponse({ path: "", entries: [dirEntry("bad"), fileEntry("readme.md", 8)] });
+    const { treeRequests } = open(
+      address("./bad"),
+      routes({ [ROOT]: listing, [`${TREE}.`]: listing, [`${TREE}.%2Fbad`]: notFound }),
+    );
+    await findRow("展开 bad");
+    await waitFor(() => {
+      expect(treeRequests()).toHaveLength(2);
+    });
+    await settle();
+    expect(treeRequests()).toStrictEqual([ROOT, `${TREE}.`]);
+    expectEmptyPreview();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => {
+      expect(treeRequests()).toHaveLength(3);
+    });
+    await settle();
+    expect(treeRequests()).toStrictEqual([ROOT, `${TREE}.`, ROOT]);
+    expect(rowNames()).toStrictEqual(["设计文档", "bad", "readme.md"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("失败的那一级后来真的出现在根的列表里：它是一个折叠着的普通目录，没有被当作展开过", async () => {
     let rootReads = 0;
     const { treeRequests } = open(
@@ -611,6 +644,28 @@ describe("指向目录、不存在与越界", () => {
     expect(treeRequests()).toStrictEqual([ROOT, OUT]);
     expect(fileRequests()).toStrictEqual([FILE_README]);
   });
+
+  it.each([
+    ["out/gone.md", MISSING, [ROOT, OUT], {}],
+    ["nodir/x.md", NOT_FOUND, [ROOT, `${TREE}nodir`], { [`${TREE}nodir`]: notFound }],
+  ] satisfies [string, string, string[], FetchRoutes][])(
+    "已选中 readme.md 时地址改到 %s：选中被清掉，预览区显示失败文案，不请求新的 file",
+    async (path, notice, trees, extra) => {
+      const { fileRequests, router, treeRequests } = open(address("readme.md"), routes(extra));
+      await selectedRow("readme.md");
+      expect(await previewRegion().findByText("自述正文", { exact: true })).toBeTruthy();
+
+      await act(async () => {
+        await router.navigate(address(path));
+      });
+      expect((await previewRegion().findByRole("alert")).textContent).toBe(notice);
+      await settle();
+      expect(tree().querySelector('[aria-current="true"]')).toBeNull();
+      expect(previewRegion().queryByText("自述正文", { exact: true })).toBeNull();
+      expect(treeRequests()).toStrictEqual(trees);
+      expect(fileRequests()).toStrictEqual([FILE_README]);
+    },
+  );
 
   it("失败文案在 path 再变时清掉：改到目录、改到没有 path 都回到 未选择文件", async () => {
     const { router } = open(address("out/gone.md"));
