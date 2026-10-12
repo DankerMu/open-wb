@@ -148,7 +148,7 @@ PDF SHALL 以不带 `sandbox` 属性的 `iframe`（`title` 为文件名）从 `b
 - **THEN** 依次显示 `文件过大，无法预览`、`服务器未启用文档转换，请下载后查看`、`此浏览器不支持内嵌 PDF 预览，请下载后查看`；三者都没有 `iframe`，都有下载链接
 
 ### Requirement: 音视频
-音频 SHALL 以 `<audio controls>`、视频 SHALL 以 `<video controls>` 播放，`src` 为主站 `/api/workspaces/<id>/file?path=<编码后的路径>`（同源、随 cookie，由浏览器发起范围请求），`preload="metadata"`，不自动播放；视频在预览区内等比缩放。页面 SHALL NOT 经 `fetch` 把媒体读进内存。媒体元素触发 `error` 时预览区显示 `无法播放该文件` 并保留下载链接。切换文件或卸载时媒体元素被移除（播放随之停止）。`刷新` 或再点已选中的同一行 SHALL 换一个新的媒体元素：已显示的 `无法播放该文件` 随之清除并重新尝试，播放中的媒体回到开头且不自动播放。媒体请求得到 401 时 SHALL NOT 通知认证守卫：媒体元素的 `error` 不带状态码，页面不为此另发请求，与其它失败一样显示 `无法播放该文件`。
+音频 SHALL 以 `<audio controls>`、视频 SHALL 以 `<video controls>` 播放，`src` 为主站 `/api/workspaces/<id>/file?path=<编码后的路径>`（同源、随 cookie，由浏览器发起范围请求），`preload="metadata"`，不自动播放；视频在预览区内等比缩放。页面 SHALL NOT 经 `fetch` 把媒体读进内存。媒体元素触发 `error` 时预览区显示 `无法播放该文件` 并保留下载链接。切换文件或卸载时媒体元素被移除（播放随之停止）。`刷新` 或再点已选中的同一行 SHALL 换一个新的媒体元素：已显示的 `无法播放该文件` 随之清除并重新尝试（新元素是否再次向服务端请求由浏览器决定，见 #1356），播放中的媒体回到开头且不自动播放。媒体请求得到 401 时 SHALL NOT 通知认证守卫：媒体元素的 `error` 不带状态码，页面不为此另发请求，与其它失败一样显示 `无法播放该文件`。
 
 #### Scenario: 播放器与地址
 - **WHEN** 选中 `clip.mp4` 与 `voice.mp3`
