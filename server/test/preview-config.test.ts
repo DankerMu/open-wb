@@ -27,6 +27,9 @@ const NUMERIC = [
   ["TRASH_RETENTION_DAYS", "trashRetentionDays", 30, 3],
 ] as const;
 const NUMERIC_KEYS = NUMERIC.map(([key]) => key);
+/** 上界是 10000 而不是 2147483647 的那一个数值键（#1353）。 */
+const ARCHIVE_KEY = "PREVIEW_ARCHIVE_MAX_ENTRIES";
+const NUMERIC_TO_TIMER_LIMIT = NUMERIC.filter(([key]) => key !== ARCHIVE_KEY);
 
 /** 十二个键各自的非缺省取值与它在 `ServerConfig` 上的字段、解析结果。 */
 const OVERRIDES: readonly (readonly [string, string, string, string | number])[] = [
@@ -61,12 +64,15 @@ const DEFAULT_FIELDS = {
 
 const CANONICAL = "must be a canonical ASCII decimal";
 const POSITIVE_RANGE = "must be within 1..2147483647";
+const ARCHIVE_RANGE = "must be within 1..10000";
+/** 数值键越界时的句尾：压缩包条目上限报它自己的范围，其余七键报计时器上限。 */
+const rangeOf = (key: string) => (key === ARCHIVE_KEY ? ARCHIVE_RANGE : POSITIVE_RANGE);
 const PORT_RANGE = "must be within 0..65535";
 const ORIGIN_RULE = "must be a scheme and authority only";
 const NOT_EMPTY = "must not be empty";
 const ABSOLUTE = "must be an absolute path";
 
-/** 规格场景「预览与文件键的非法值」逐键逐值：6 + 5 + 1 + 2 + 8×7 = 70 例，每例带完整的期望句尾。 */
+/** 规格场景「预览与文件键的非法值」逐键逐值：6 + 5 + 1 + 2 + 8×7 + 1 = 71 例，每例带完整的期望句尾。 */
 const SPEC_INVALID: readonly (readonly [string, string, string])[] = [
   ["PREVIEW_PORT", "", CANONICAL],
   ["PREVIEW_PORT", "abc", CANONICAL],
@@ -86,15 +92,16 @@ const SPEC_INVALID: readonly (readonly [string, string, string])[] = [
     (
       [
         ["", CANONICAL],
-        ["0", POSITIVE_RANGE],
+        ["0", rangeOf(key)],
         ["abc", CANONICAL],
         ["-1", CANONICAL],
         ["1.5", CANONICAL],
         ["016", CANONICAL],
-        ["2147483648", POSITIVE_RANGE],
+        ["2147483648", rangeOf(key)],
       ] as const
     ).map(([raw, rule]) => [key, raw, rule] as const),
   ),
+  [ARCHIVE_KEY, "10001", ARCHIVE_RANGE],
 ];
 
 /** 规格之外补的取值：空白、符号、指数、大小写、查询串、片段、换行与相对路径的另两种写法。 */
@@ -132,12 +139,16 @@ function thrownMessage(key: string, raw: string): string {
   throw new Error(`resolver accepted ${key}=${JSON.stringify(raw)}`);
 }
 
-/** 整句相等（与输入无关）、命名该键、不含输入值（空串无从断言）。 */
+/**
+ * 整句相等（与输入无关）、命名该键、不含输入值（空串无从断言）。
+ * 句尾自己就含有该取值的那几个字符时（`1..10000` 与输入 `0`）子串断言无从成立，不做；
+ * 这样的行恰有一条，由下面「句尾自身含输入取值的只有一例」钉住。
+ */
 function expectKeyOnlyMessage(key: string, raw: string, rule: string): void {
   const message = thrownMessage(key, raw);
   expect(message).toBe(`${key} ${rule}`);
   expect(message).toContain(key);
-  if (raw.length > 0) {
+  if (raw.length > 0 && !rule.includes(raw)) {
     expect(message).not.toContain(raw);
   }
 }
@@ -196,9 +207,20 @@ describe("resolveServerConfig — 预览与文件键的覆盖", () => {
     expect(configOf({ PREVIEW_PORT: raw }).previewPort).toBe(expected);
   });
 
-  it.each(NUMERIC)("%s 接受下界 1 与上界 2147483647", (key, field) => {
+  it.each(NUMERIC_TO_TIMER_LIMIT)("%s 接受下界 1 与上界 2147483647", (key, field) => {
     expect(configOf({ [key]: "1" })[field]).toBe(1);
     expect(configOf({ [key]: "2147483647" })[field]).toBe(2_147_483_647);
+  });
+
+  it("上界是 2147483647 的数值键恰七个", () => {
+    expect(NUMERIC_TO_TIMER_LIMIT).toHaveLength(7);
+  });
+
+  it("PREVIEW_ARCHIVE_MAX_ENTRIES 接受下界 1 与上界 10000", () => {
+    expect(configOf({ PREVIEW_ARCHIVE_MAX_ENTRIES: "1" }).previewArchiveMaxEntries).toBe(1);
+    expect(configOf({ PREVIEW_ARCHIVE_MAX_ENTRIES: "10000" }).previewArchiveMaxEntries).toBe(
+      10_000,
+    );
   });
 
   it.each(["http://127.0.0.1:8080", "https://[::1]:9443"])("PREVIEW_ORIGIN 接受 %s", (raw) => {
@@ -212,8 +234,15 @@ describe("resolveServerConfig — 预览与文件键的覆盖", () => {
 });
 
 describe("resolveServerConfig — 预览与文件键的非法值", () => {
-  it("规格列出的非法取值共七十例", () => {
-    expect(SPEC_INVALID).toHaveLength(70);
+  it("规格列出的非法取值共七十一例", () => {
+    expect(SPEC_INVALID).toHaveLength(71);
+  });
+
+  it("句尾自身含输入取值的只有一例：PREVIEW_ARCHIVE_MAX_ENTRIES=0", () => {
+    const exempt = [...SPEC_INVALID, ...EXTRA_INVALID].filter(
+      ([, raw, rule]) => raw.length > 0 && rule.includes(raw),
+    );
+    expect(exempt).toEqual([["PREVIEW_ARCHIVE_MAX_ENTRIES", "0", "must be within 1..10000"]]);
   });
 
   it.each(SPEC_INVALID)("拒绝 %s=%j，消息只命名键且不含输入值", (key, raw, rule) => {

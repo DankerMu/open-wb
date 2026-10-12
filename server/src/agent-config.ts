@@ -154,11 +154,15 @@ export function resolveOwnedPath(
   return isAbsolute(raw) ? raw : join(repoRoot, raw);
 }
 
-/** canonical ASCII decimal 正整数 1..2147483647；错误只命名键，不回显输入值。 */
+/**
+ * canonical ASCII decimal 正整数 1..`max`（缺省 2147483647）；错误只命名键，不回显输入值。
+ * 判定与消息用同一个 `max`：上界更小的键不在调用处另包一层判断。
+ */
 export function resolvePositiveInteger(
   raw: string | undefined,
   fallback: number,
   key: string,
+  max: number = MAX_POSITIVE_SETTING,
 ): number {
   if (raw === undefined) {
     return fallback;
@@ -167,8 +171,8 @@ export function resolvePositiveInteger(
     throw new Error(`${key} must be a canonical ASCII decimal`);
   }
   const value = Number(raw);
-  if (!Number.isSafeInteger(value) || value < 1 || value > MAX_POSITIVE_SETTING) {
-    throw new Error(`${key} must be within 1..${MAX_POSITIVE_SETTING}`);
+  if (!Number.isSafeInteger(value) || value < 1 || value > max) {
+    throw new Error(`${key} must be within 1..${max}`);
   }
   return value;
 }

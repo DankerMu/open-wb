@@ -100,11 +100,11 @@ registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical precon
 ### Requirement: 压缩包列表
 `GET /api/workspaces/:id/archive?path=<rel>` SHALL 经 `resolve(op=read)` 后只读取压缩包的目录结构并返回 200 `{format, entries:[{path, type:'file'|'dir', size}], truncated}`，`no-store`；它 SHALL NOT 解压任何成员的内容、SHALL NOT 向文件系统写入任何东西。目标不存在或不是普通文件 → 404。按文件名（小写）判定格式：以 `.zip` 结尾 → `zip`；以 `.tar` 结尾 → `tar`；以 `.tar.gz` 或 `.tgz` 结尾 → `tar.gz`；其它以 `.gz` 结尾 → `gz`；都不是 → 415 `preview_unsupported`。
 
-- `zip`：只读中央目录；`size` 为成员的未压缩大小；名字以 `/` 结尾的成员为 `dir`。
+- `zip`：只读中央目录；`size` 为成员的未压缩大小；名字以 `/` 结尾的成员为 `dir`。未压缩大小（含 zip64 扩展字段给出的）大于 2^53−1（不是安全整数）的成员 SHALL NOT 计入结果，并按「读出若干项之后才损坏」处理——立即停止读取，返回已读到的项并置 `truncated:true`，此前一项都没读出时为 415 `preview_unsupported`；响应里的 `size` 因此只会是 `null` 或 0 到 2^53−1 之间的整数。
 - `tar` 与 `tar.gz`（后者经流式 gunzip）：按 512 字节的头逐块读取，SHALL 认 ustar 的 `name` 与 `prefix`、GNU 长文件名记录（类型 `L`）与 pax 扩展头里的 `path` 记录；成员的正文一律跳过不读（未压缩的 `tar` 以定位跳过，`tar.gz` 以丢弃解压出的字节跳过）；类型为目录的成员为 `dir`，其它（含符号链接、设备等）为 `file`；`size` 取头里的大小。类型标志为 `1`–`6` 的成员（硬链接、符号链接、字符设备、块设备、目录、FIFO）没有正文：SHALL NOT 按其头里的大小跳过任何字节，下一个头紧随其后，条目的 `size` 仍取头里的值。`tar.gz` 的 gzip 容器由服务端自己解析：每个 gzip 流的头 SHALL 在一次至多 65536 字节的读取之内结束，否则按损坏处理。一个完整的 gzip 流结束之后：紧随其后的字节构成一个合法的 gzip 头时 SHALL 接着读下一个流，其解压输出接在前一个流之后（多成员 gzip，与解压工具一致）；否则这些字节 SHALL 被忽略——列表与去掉它们后的列表相同，`truncated` 不因此为 `true`。`gz`（恰一项）不读流的内容，流之后的字节与它无关。gzip 流自身损坏或未结束时的行为不变；条目上限、读取时限与各项读入上限对全部流合计适用。
 - `gz`：恰一项，`path` 为去掉结尾 `.gz` 的文件名，`type:'file'`，`size:null`。
 
-`entries` 按包内出现的次序，至多 `PREVIEW_ARCHIVE_MAX_ENTRIES`（缺省 1000）项：读到上限即停止读取并置 `truncated:true`；`tar` 与 `tar.gz` 都另有 5 秒的读取时限（时钟可注入），到时返回已读到的项并置 `truncated:true`。为取得成员名而读入内存的内容 SHALL 有硬上限（凡长度由头部字段**声明**的，按声明的长度在读取之前判定，见下）：单个扩展记录（GNU 类型 `L` 的长文件名记录、pax 扩展头）的声明长度至多 65536 字节，单个成员名（`zip` 中央目录里的成员名、ustar `prefix` 与 `name` 的拼接、`L` 记录或 pax `path` 给出的名字）至多 4096 字节；任一超出时，该记录或该成员 SHALL NOT 计入结果，并按「读出若干项之后才损坏」处理——立即停止读取，返回已读到的项并置 `truncated:true`，此前一项都没读出时为 415 `preview_unsupported`。凡长度由头部字段声明的（`L` 记录与 pax 扩展头的 `size` 字段），SHALL 在读入其内容之前按声明长度判定，超出即不读；成员名随所在记录一起读入的（`zip` 中央目录的成员名——中央目录项的各变长字段长度都是 2 字节，读入量以此为界；未超 65536 字节的 pax 记录里的 `path`；ustar `prefix` 与 `name` 的拼接）可在读入后判定，4096 字节的上限同样适用。`tar` 与 `tar.gz` 里为成员名与扩展记录做的单次读取因此都不超过 65536 字节；处理一个压缩包占用的内存有固定上界，与包内 4 字节或更宽的长度字段声明的任何长度无关。成员名 SHALL 原样作为 JSON 字符串返回（不合法的 UTF-8 序列替换为 U+FFFD），不做路径规范化、不与文件系统交互——含 `..` 或以 `/` 开头的成员名只是数据。包损坏到一项都读不出时 → 415 `preview_unsupported`；读出若干项之后才损坏时返回已读到的项并置 `truncated:true`。属他人或不存在的 `:id` → 404；越界路径 → 403 `sandbox_denied` + 审计。
+`entries` 按包内出现的次序，至多 `PREVIEW_ARCHIVE_MAX_ENTRIES`（缺省 1000，可配范围 `1..10000`，见 http-service-skeleton「服务启动与装配」）项：读到上限即停止读取并置 `truncated:true`；`zip`、`tar` 与 `tar.gz` 都另有同一个 5 秒的读取时限（时钟可注入），自开始读该压缩包起算（`zip` 含查找结束记录的读取），到时返回已读到的项并置 `truncated:true`——一项都没读到时是 200 与空的 `entries`，不是 415。时钟在读每个 tar 头之前、读每个 zip 中央目录项之前各读一次（`tar.gz` 另在每一步解压之前）；时限不打断一次已经发出的读取，一次请求的读取时长以「5 秒加一步」为界。`zip` 在结束记录或目录项上的损坏与时钟无关：一项都没读出时仍是 415。为取得成员名而读入内存的内容 SHALL 有硬上限（凡长度由头部字段**声明**的，按声明的长度在读取之前判定，见下）：单个扩展记录（GNU 类型 `L` 的长文件名记录、pax 扩展头）的声明长度至多 65536 字节，单个成员名（`zip` 中央目录里的成员名、ustar `prefix` 与 `name` 的拼接、`L` 记录或 pax `path` 给出的名字）至多 4096 字节；任一超出时，该记录或该成员 SHALL NOT 计入结果，并按「读出若干项之后才损坏」处理——立即停止读取，返回已读到的项并置 `truncated:true`，此前一项都没读出时为 415 `preview_unsupported`。凡长度由头部字段声明的（`L` 记录与 pax 扩展头的 `size` 字段），SHALL 在读入其内容之前按声明长度判定，超出即不读；成员名随所在记录一起读入的（`zip` 中央目录的成员名——中央目录项的各变长字段长度都是 2 字节，读入量以此为界；未超 65536 字节的 pax 记录里的 `path`；ustar `prefix` 与 `name` 的拼接）可在读入后判定，4096 字节的上限同样适用。`tar` 与 `tar.gz` 里为成员名与扩展记录做的单次读取因此都不超过 65536 字节；处理一个压缩包占用的内存有固定上界，与包内 4 字节或更宽的长度字段声明的任何长度无关。成员名 SHALL 原样作为 JSON 字符串返回（不合法的 UTF-8 序列替换为 U+FFFD），不做路径规范化、不与文件系统交互——含 `..` 或以 `/` 开头的成员名只是数据。包损坏到一项都读不出时 → 415 `preview_unsupported`；读出若干项之后才损坏时返回已读到的项并置 `truncated:true`。属他人或不存在的 `:id` → 404；越界路径 → 403 `sandbox_denied` + 审计。
 
 #### Scenario: 三种格式的列表
 - **WHEN** 请求一个含 `a.txt`（5 字节）、`dir/`、`dir/b.md`（7 字节）的 `x.zip`，同样内容的 `x.tar`、`x.tar.gz`、`x.tgz`，以及 `notes.txt.gz`
@@ -117,6 +117,14 @@ registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical precon
 #### Scenario: 声明超大的长文件名记录
 - **WHEN** 请求 `evil.tar`（整个文件 1 KiB，第一个头是类型 `L` 的记录、其 `size` 字段声明 4 GiB）；`evil2.tar`（两个正常成员之后是一个声明 1 GiB 的 pax 扩展头）；`long.zip`（两个正常成员之后是一个成员名 5000 字节的成员）；`long2.tar`（一个正常成员之后是一个 `L` 记录给出 5000 字节名字的成员）；另以注入的时钟请求一个未压缩的 `slow.tar`，时钟在读出第 3 项之后越过 5 秒
 - **THEN** 依次为 415 `preview_unsupported`、200 恰两项 + `truncated:true`、200 恰两项 + `truncated:true`、200 恰一项 + `truncated:true`、200 恰三项 + `truncated:true`；五例都在有界时间内返回；四个 tar 用例里为成员名与扩展记录做的单次读取都不超过 65536 字节（以注入的读取函数记录的最大读取长度为证），`entries` 里没有超过 4096 字节的 `path`
+
+#### Scenario: zip 的读取时限
+- **WHEN** 以注入的时钟请求含 5 个成员的 `slow.zip`，时钟在读第 3 个中央目录项的那次读取时越过 5 秒；同一文件，时钟在查找结束记录的那次读取时就越过 5 秒；同一文件，时钟停在 4999 毫秒
+- **THEN** 依次为：恰三项 + `truncated:true`，第 4 个目录项所在的位置没有被读取；200、`entries` 为空 + `truncated:true`，没有读任何目录项；五项 + `truncated:false`
+
+#### Scenario: zip64 声明的大小
+- **WHEN** 请求 `safe.zip`（两个成员经 zip64 扩展字段给出大小 5368709120 与 9007199254740991）；`over.zip`（一个正常成员，其后是 zip64 大小为 9007199254740992 的成员，再后还有一个正常成员）；`over-first.zip`（第一个成员的 zip64 大小为 18446744073709551615）
+- **THEN** 依次为：两项，`size` 恰为这两个数，`truncated:false`；恰一项 + `truncated:true`；415 `preview_unsupported`
 
 #### Scenario: gzip 流之后的字节与没有正文的成员
 - **WHEN** 请求 `tail.tgz`（三个成员与结束块压成的完整 gzip 流，后面跟 10 个非零字节）、同一内容后跟 300000 个非零字节的 `tail2.tgz`、含 3000 个成员后跟非零字节的 `bigtail.tgz`（上限放宽到不截断）；一个 `links.tar`，其成员依次为头里大小 1024 的目录（类型 `5`）、头里大小 2048 的硬链接（类型 `1`）、普通文件 `after.txt`，三个头彼此紧邻
