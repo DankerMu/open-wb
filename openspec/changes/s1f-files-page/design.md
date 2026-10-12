@@ -94,7 +94,7 @@
 
 **D6 Notebook 不引库，自己渲染 nbformat v4 的 JSON。**
 Markdown 单元用既有 `md-render`（源 HTML 已按文本转义）；代码单元用 D5 的高亮；输出按类型：`stream` 与 `text/plain` → 等宽文本；
-`image/png`、`image/jpeg` → `data:` 图片；`image/svg+xml` → `data:` 图片（同 D4）；`text/html` → `sandbox=""`（不允许脚本）的 `srcdoc` iframe；
+`image/png`、`image/jpeg` → `data:` 图片；`image/svg+xml` → `data:` 图片（同 D4）；`text/html` → `sandbox=""`（不允许脚本）的 `srcdoc` iframe，`srcdoc` 为固定的 CSP `meta` 前缀加原文（框内不向外取资源，#1351）；
 `error` → 等宽的 traceback（去掉 ANSI 转义）；其它类型显示「不支持的输出类型 <类型>」。JSON 解析失败或不是 v4 结构时退回源码视图。
 理由：nbformat 是公开的简单 JSON；现成的浏览器渲染库（notebookjs 等）把输出里的 HTML 直接注入页面，还得再加一层净化。
 否决：服务端用 `jupyter nbconvert`（多一个 Python 依赖与又一条不可信输入的解析路径）。

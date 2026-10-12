@@ -30,7 +30,7 @@
 >   - 18.1 ← 17.1；18.2、18.3 ← 17.1、6.1；18.4 ← 17.1、16.3。
 >   - 19.1 ← 16.2 的 `issuePreviewToken`；19.2 的网页渲染视图 ← 17.2、19.1、13.1（入口已启动预览监听器）；19.2 的 PDF 与办公文档部分另 ← 1.1、15.1、19.6。
 >   - 20.1 ← 17.1、16.1 的地址函数、7.3；20.2 ← 17.1、18.1、6.1；20.3 ← 17.1、16.1 的 `listArchive`。
->   - 19.6 ← 19.1、19.2 的网页渲染视图、21.1；20.7 ← 20.1、20.3、21.1（#1352）。
+>   - 19.6 ← 19.1、19.2 的网页渲染视图、21.1；20.7 ← 20.1、20.3、21.1（#1352）；20.11 ← 20.2（#1351）。
 >   - 21.1 ← 17.2；21.2 ← 21.1。
 >   - 22.1、22.2、22.3 ← 21.1、16.2 的 `moveEntry`；22.4 ← 21.1、16.2 的 `deleteEntry`；22.5 ← 21.2，随 22.1 合入。
 >   - 23.1 只 ← 0.1；23.2–23.6 ← 23.1、21.1。
@@ -538,6 +538,9 @@ Minimal mergeable slice: 19.1 的 hook 与测试先合；`frame.tsx` 的网页�
 - [x] 20.6 变异证据：Notebook 的 `text/html` 输出直接插入页面 → 「主文档没有新增 `script` / `table`」判红；压缩包成员名当 HTML 渲染 → 「恶意成员名只是文字」判红；媒体改用 `fetchPreview` → 「没有经 `fetchPreview` 的请求」判红。
 - [x] 20.7 `刷新` 与再点同一行总是重取：音视频换新元素（`types.ts` 的 media 加 `reload`，`preview-area.tsx` 递增，`preview.tsx` 以它为 key）；`archive.tsx` 重新列出期间保留上一次结果并追加 `正在读取文件`。取代 20.1 注记里「刷新不重试失败的媒体」与 20.3「回到读取态」的做法。（#1352）
 - [x] 20.8 测试、FL 行与变异证据（改写 `files-preview-states.test.tsx` 的媒体刷新用例、`previewers-archive.test.tsx` 的两条换 `load` 用例；files-web 场景「刷新总是重取」）。
+- [ ] 20.11 Notebook 的 `text/html` 输出：`srcdoc` 为固定 CSP `meta` 前缀加原文（#1351；file-previewers「Notebook」）。产品代码只动 `previewers/notebook.tsx`（一个模块私有常量、`srcDoc` 那一行与文件头注释）；`previewers/index.ts`、服务端与主站响应头不动。取代 20.2 注记里「`srcdoc` 恰为原文、不拼接任何前后缀」及其变异一条。
+  实施注记见 `implementation-notes.md`「20.11 / 20.12（#1351）」。
+- [ ] 20.12 测试、实测与变异证据（#1351）：`previewers-notebook.test.tsx` 四处 `srcdoc` 断言改为「测试里另写一遍的前缀字面量加原文」的 `toBe`，新增场景「HTML 输出的 srcdoc 是固定前缀加原文」；`previewers-table-svg.test.tsx` 不改（`srcDoc` 在 `notebook.tsx` 仍恰一次）；一次性真实浏览器实测（至少 Chromium，页面不入库，结果写进实施注记）：外链 `img`、`link rel=stylesheet`、内联样式里的 `@import` 与 `url()`、`link rel=preconnect` 各自是否到达本地监听器，`data:` 图片与内联样式是否生效，脚本是否运行，点框内链接后的行为；FL-18 改写，结论 `待签`。
 
 Suggested fixture level: compact - 三个互不相干的预览器模块；不可信输出的处理各有反例断言
 Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20.3 各带自己的测试；20.3 另带它点名的两处 zip 既有断言的改写）
