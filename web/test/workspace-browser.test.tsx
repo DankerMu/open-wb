@@ -78,7 +78,7 @@ function mount(initialPath: string | null, extra: Extra = {}, table = routes(), 
   vi.stubGlobal("fetch", fetchMock);
   const client = createApiClient();
   const handle = createRef<WorkspaceBrowserHandle>();
-  const onPathChange = vi.fn<(path: string) => void>();
+  const onPathChange = vi.fn<(path: string | null) => void>();
   let setPath: (path: string | null) => void = () => {};
 
   function Host(props: Extra) {

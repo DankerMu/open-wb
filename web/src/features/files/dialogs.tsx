@@ -7,6 +7,15 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -52,6 +61,18 @@ type RenameDialogProps = {
   onRename(name: string): void;
 };
 
+type DeleteEntryDialogProps = {
+  /** 条目的名字与类别：标题与说明用。 */
+  name: string;
+  type: "dir" | "file";
+  error: string | null;
+  pending: boolean;
+  /** 取消类关闭后是该行的 `更多操作 <名>`；删除成功后调用方把它换成父目录的行按钮。 */
+  returnFocus: ReturnFocus;
+  onCancel(): void;
+  onConfirm(): void;
+};
+
 type CreationDialogProps = PropsWithChildren<{
   title: string;
   /** 提交按钮的字样，缺省 `创建`。 */
@@ -67,7 +88,16 @@ type CreationDialogProps = PropsWithChildren<{
   onSubmit(event: FormEvent<HTMLFormElement>): void;
 }>;
 
+/** 删除确认框的说明，逐字照规格（files-web「文件操作界面」）。 */
+const DELETE_NOTES = {
+  dir: "文件夹及其全部内容将从工作空间移除。管理员可在保留期内从服务器恢复，界面不提供回收站。",
+  file: "文件将从工作空间移除。管理员可在保留期内从服务器恢复，界面不提供回收站。",
+};
+
 const FIELD = "flex flex-col gap-1.5";
+/** 对话框内的失败文案。 */
+const ERROR_NOTE =
+  "m-0 rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-(--wb-status-error-text) [overflow-wrap:anywhere]";
 /** `位置` 是原生 `<select>`（拷入层没有 select）；外观对齐拷入层 `Input`。 */
 const SELECT =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
@@ -139,10 +169,7 @@ function CreationDialog({
             </p>
           ) : null}
           {error ? (
-            <p
-              className="m-0 rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-(--wb-status-error-text) [overflow-wrap:anywhere]"
-              role="alert"
-            >
+            <p className={ERROR_NOTE} role="alert">
               {error}
             </p>
           ) : null}
@@ -354,5 +381,77 @@ export function RenameDialog({
         />
       </div>
     </CreationDialog>
+  );
+}
+
+/**
+ * `删除` 确认框（拷入层 `alert-dialog`：没有右上 `关闭`，点遮罩不关闭）。初始焦点在 `取消`，是拷入层
+ * 的缺省，这里不写 `onOpenAutoFocus`。`删除` 是普通按钮而不是 `AlertDialogAction`：点了不关框，关不关
+ * 由请求的结局定——失败时文案显示在框内、框留着。`取消` 与 Escape 都是 `onCancel`（挂起期即中止等待）；
+ * 关闭后焦点给 `returnFocus`。
+ */
+export function DeleteEntryDialog({
+  error,
+  name,
+  onCancel,
+  onConfirm,
+  pending,
+  returnFocus,
+  type,
+}: DeleteEntryDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const onOpenChange = (open: boolean) => {
+    if (!open) onCancel();
+  };
+  const fallback = useEscapeFallback({ canClose: true, onOpenChange });
+
+  // `删除` 在请求发出的那次提交里被禁用：焦点若在它上面（jsdom 不移焦点）或已被浏览器移到 body，
+  // 移到 `取消`，不让焦点留在禁用的控件上或逃出确认框。
+  useLayoutEffect(() => {
+    const active = document.activeElement;
+    if (pending && (active === document.body || (active as HTMLButtonElement | null)?.disabled)) {
+      cancelRef.current?.focus();
+    }
+  }, [pending]);
+
+  return (
+    <AlertDialog onOpenChange={onOpenChange} open>
+      <AlertDialogContent
+        aria-modal="true"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          returnFocus.current?.focus({ preventScroll: true });
+        }}
+        onEscapeKeyDown={fallback.onEscapeKeyDown}
+        onKeyDown={fallback.onKeyDown}
+        ref={fallback.ref}
+      >
+        <AlertDialogHeader>
+          <AlertDialogTitle className="[overflow-wrap:anywhere]">{`删除「${name}」？`}</AlertDialogTitle>
+          <AlertDialogDescription>{DELETE_NOTES[type]}</AlertDialogDescription>
+        </AlertDialogHeader>
+        {pending ? (
+          <p className="m-0 text-xs text-muted-foreground" role="status">
+            正在删除。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。
+          </p>
+        ) : null}
+        {error ? (
+          <p className={ERROR_NOTE} role="alert">
+            {error}
+          </p>
+        ) : null}
+        <AlertDialogFooter>
+          <AlertDialogCancel ref={cancelRef}>取消</AlertDialogCancel>
+          <Button
+            aria-busy={pending || undefined}
+            disabled={pending}
+            onClick={onConfirm}
+            variant="destructive"
+          >
+            删除
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
