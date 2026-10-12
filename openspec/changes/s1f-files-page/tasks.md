@@ -30,6 +30,7 @@
 >   - 18.1 ← 17.1；18.2、18.3 ← 17.1、6.1；18.4 ← 17.1、16.3。
 >   - 19.1 ← 16.2 的 `issuePreviewToken`；19.2 的网页渲染视图 ← 17.2、19.1、13.1（入口已启动预览监听器）；19.2 的 PDF 与办公文档部分另 ← 1.1、15.1。
 >   - 20.1 ← 17.1、16.1 的地址函数、7.3；20.2 ← 17.1、18.1、6.1；20.3 ← 17.1、16.1 的 `listArchive`。
+>   - 19.6 ← 19.1、19.2 的网页渲染视图、21.1；20.7 ← 20.1、20.3、21.1（#1352）。
 >   - 21.1 ← 17.2；21.2 ← 21.1。
 >   - 22.1、22.2、22.3 ← 21.1、16.2 的 `moveEntry`；22.4 ← 21.1、16.2 的 `deleteEntry`；22.5 ← 21.2，随 22.1 合入。
 >   - 23.1 只 ← 0.1；23.2–23.6 ← 23.1、21.1。
@@ -512,6 +513,8 @@ Minimal mergeable slice: 18.2（tsv）、18.3（svg）、18.4（图片）三刀�
   对既有用例：写作时 `grep -nE '\.(html?|pdf|docx|xlsx|pptx)"' web/test/files-*.tsx web/test/preview.test.tsx` 零命中——文件页的既有测试不选这些类型，19.2 不改动任何既有用例（产物卡与走查里的 html 归组 25）。
 - [ ] 19.4 FL 行：html 的渲染 / 源码切换且同目录的样式表与图片在预览里生效、pdf 可翻页、docx / xlsx / pptx 转换后可看、服务器没装转换组件时的说明、超过上限的文档只给下载；结论 `待签`。
 - [ ] 19.5 变异证据：给网页 iframe 加 `allow-same-origin` → 属性断言判红；每次预览都重新签发 → 「合计恰一次签发」判红；整条路径一次 `encodeURIComponent`（把 `/` 也编码）→ 路径编码用例判红。
+- [ ] 19.6 `use-preview-token.ts` 加第四参数 `attempt: number`（宿主给网页预览的 `reload`，其余给 0）：`attempt` 变化时，令牌为签发失败态或距上次成功签发已满 5 分钟的立即重新签发，其余不发请求、续期时刻不变；需要令牌的预览重新出现而上次成功签发已满 5 分钟时，那一次渲染起就是 loading，不交出旧 `base`。`workspace-browser.tsx` 的唯一调用点传入。凭据的前端生命周期：owner 白盒。（#1352，owner 2026-10-11 裁决「刷新统一为总是重取」；19.2 的 PDF 与办公文档部分 ← 19.6）
+- [ ] 19.7 测试与变异证据（`use-preview-token.test.tsx` 改写 T2 末段并加用例；新文件 `web/test/previewers-frame-refetch.test.tsx` 页面级两条：file-previewers「隔离来源的嵌入与令牌」的场景「签发失败后刷新」「过期的 base 不建首帧」）。
 
 Suggested fixture level: expanded - 不可信内容的嵌入方式与凭据的前端生命周期；属性错一个就是来源隔离被削弱
 Minimal mergeable slice: 19.1 的 hook 与测试先合；`frame.tsx` 的网页渲染视图随后；PDF 与办公文档（等 1.1）再随后
@@ -531,6 +534,8 @@ Minimal mergeable slice: 19.1 的 hook 与测试先合；`frame.tsx` 的网页�
   合入记录：三刀（#1095 / #1096 / #1097）都已合入；「20.1、20.2 不改动任何既有用例」一句不成立——#1095 拆写了 `files-preview-states.test.tsx` 的 mp4 用例，#1096 收窄了 `previewers-table-svg.test.tsx` 的静态扫描，均记在各自 PR 的偏离记录里。FL 行为 FL-16 / FL-18 / FL-17，结论均「待签」。
 - [x] 20.5 FL 行：mp3 / mp4 可播放并可拖动进度、ipynb 的单元格与输出、zip / tar.gz 的文件列表与上限说明；结论 `待签`。
 - [x] 20.6 变异证据：Notebook 的 `text/html` 输出直接插入页面 → 「主文档没有新增 `script` / `table`」判红；压缩包成员名当 HTML 渲染 → 「恶意成员名只是文字」判红；媒体改用 `fetchPreview` → 「没有经 `fetchPreview` 的请求」判红。
+- [ ] 20.7 `刷新` 与再点同一行总是重取：音视频换新元素（`types.ts` 的 media 加 `reload`，`preview-area.tsx` 递增，`preview.tsx` 以它为 key）；`archive.tsx` 重新列出期间保留上一次结果并追加 `正在读取文件`。取代 20.1 注记里「刷新不重试失败的媒体」与 20.3「回到读取态」的做法。（#1352）
+- [ ] 20.8 测试、FL 行与变异证据（改写 `files-preview-states.test.tsx` 的媒体刷新用例、`previewers-archive.test.tsx` 的两条换 `load` 用例；files-web 场景「刷新总是重取」）。
 
 Suggested fixture level: compact - 三个互不相干的预览器模块；不可信输出的处理各有反例断言
 Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20.3 各带自己的测试；20.3 另带它点名的两处 zip 既有断言的改写）
