@@ -359,6 +359,26 @@ describe("指向目录、不存在与越界", () => {
     },
   );
 
+  it("已选中 readme.md 时地址改到 path=.：去完一段不剩等同于没有 path，选中被清掉，预览为 未选择文件，不发新的请求", async () => {
+    const { fileRequests, router, treeRequests } = open(address("readme.md"));
+    await selectedRow("readme.md");
+    expect(await previewRegion().findByText("自述正文", { exact: true })).toBeTruthy();
+
+    await act(async () => {
+      await router.navigate(address("."));
+    });
+    await waitFor(() => {
+      expect(tree().querySelector('[aria-current="true"]')).toBeNull();
+    });
+    await settle();
+    expect(tree().querySelector('[aria-current="true"]')).toBeNull();
+    expectEmptyPreview();
+    expect(previewRegion().queryByText("自述正文", { exact: true })).toBeNull();
+    expect(rowNames()).toStrictEqual(ROOT_ROWS);
+    expect(treeRequests()).toStrictEqual([ROOT]);
+    expect(fileRequests()).toStrictEqual([FILE_README]);
+  });
+
   it("失败文案在 path 再变时清掉：改到目录、改到没有 path 都回到 未选择文件", async () => {
     const { router } = open(address("out/gone.md"));
     await findRow("readme.md");
@@ -373,6 +393,17 @@ describe("指向目录、不存在与越界", () => {
 
     await act(async () => {
       await router.navigate(address("out/gone.md"));
+    });
+    expect((await previewRegion().findByRole("alert")).textContent).toBe(MISSING);
+    await act(async () => {
+      await router.navigate("/files?ws=workspace-1");
+    });
+    await settle();
+    expectEmptyPreview();
+
+    // 被拦下的写法（去完是 `null`）之后改到没有 `path`（也是 `null`）：比的是地址里的原串，照样生效。
+    await act(async () => {
+      await router.navigate(address("../x"));
     });
     expect((await previewRegion().findByRole("alert")).textContent).toBe(MISSING);
     await act(async () => {
