@@ -47,7 +47,7 @@ export const treeOf = (workspaceId: string, path = "") =>
 export const fileOf = (workspaceId: string, path: string) =>
   `/api/workspaces/${workspaceId}/file?path=${encodeURIComponent(path)}`;
 
-const dir = (name: string) => ({ name, type: "dir", size: 0, mtime: 100 });
+export const dir = (name: string) => ({ name, type: "dir", size: 0, mtime: 100 });
 export const file = (name: string) => ({ name, type: "file", size: 4, mtime: 200 });
 export const listing = (path: string, entries: readonly unknown[]) => () =>
   jsonResponse({ path, entries });

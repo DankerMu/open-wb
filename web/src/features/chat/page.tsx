@@ -90,7 +90,13 @@ export function ChatPage() {
         sidebar={sidebar}
         target={
           sidebar.open && selected?.workspaceId
-            ? { client, sessionId: selected.id, workspace, workspaceId: selected.workspaceId }
+            ? {
+                client,
+                sessionId: selected.id,
+                view: historyView,
+                workspace,
+                workspaceId: selected.workspaceId,
+              }
             : null
         }
       >

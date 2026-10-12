@@ -742,3 +742,36 @@
 - 变异：`page.tsx:170` `requestedPath` 恒为 `null` → 重载后 `expectClipSelected` 的 `aria-current` 与 `audio` 判红，而 `path` 地址断言仍绿。
 - 变异：`tree.tsx:85` 去掉 `aria-current` → 重载前的 `expectClipSelected` 即判红。
 - 变异：不可观测：`SYNTAX_COLORS` 的取值与各类别配色（只断元素存在）；`HIGHLIGHT_LIMIT`；刷新或再点同一行的 `v`（本刀不走）；下载的实际字节与 `Content-Disposition`（不点击，由 `smoke/files.hurl` 覆盖）；实际播放。
+
+## 24.1、24.2，含分摊的 24.4 / 24.5 / 24.6 条款（#1106）
+
+- 不触 Critical Path：纯 web 派生展示，路径只作数据交给既有 `WorkspaceBrowser`，无新 `op`、不碰 `sandbox.resolve`、服务端零改动，单评审席；前置 #1049、#1098、#1105 已在 origin/master，不等 1.1 / 1.2 / 1.3。
+- **边界加宽（进偏离记录）**：`columns.tsx`（145 行）加可选属性 `treeCollapsed`，`workspace-browser.tsx`（649 行，组 22 的对话框还要进，本刀净增控制在 15 行内）透传它并加 `onlyPathsEmpty?: string`（`onlyPaths.size === 0` 时树的位置渲染这段文案而不是 `DirectoryTree`）；`page.tsx:93` 的 `target` 加 `view: historyView`（`page.tsx:36` 已解构，`use-chat-session.ts:693`，未就绪或不属于当前会话时为 `null` 即空集）。
+- 来历与聚合：`sessionChanges` 随 #1105（`3633faaa`）删除，原文是 `summarizeChanges(view.messages.flatMap((message) => message.steps))`；`summarizeChanges(steps: readonly ChatStepView[])`（`stream-artifacts.ts:39-46`）跳过 `status === "running"`、同路径取靠后的一条、返回 `{path, added, removed, kind}[]`，本刀不改它。
+- 落点：`use-workspace-sidebar.ts`（84 行）导出纯函数 `sessionChangedPaths(view: ChatState | null): ReadonlySet<string>`（只取 `path`），不新拆文件，所以 `ui-layering.test.ts` 无须登记；`ChatState` 从 `./stream.js` 作类型导入，侧边栏两个文件不得导入 `use-chat-session.ts`（`chat-module-layout.test.ts:150-152`）。
+- `changes` 的 `kind` 只有 `edit` / `write`（`session-contract.ts:41-43`），没有删除类：「已删除的文件」指集合里的路径后来不在磁盘上，集合不会因删除而减少。
+- `markedPaths: {label: string; paths: ReadonlySet<string>}`、`onlyPaths: ReadonlySet<string>`（`workspace-browser.tsx:89-90`）：父目录由浏览器的 `markedRows` 补（`browser-paths.ts:110-120`，根行不标），侧边栏只给文件路径、`label` 为 `本会话已改动`；身份不承重（只有 `:590-597` 两个 `useMemo` 依赖它，`loadDirectory` 依赖的是布尔 `subtreeOnly`，每次渲染新 Set 不会重跑 effect），在 `SidebarContent` 里按 `view` 做一个 `useMemo` 即可。
+- 「关闭开关后恢复原展开与选中」已是浏览器行为（`onlyPaths` 不写缓存与展开集合，`workspace-browser.test.tsx:580` 钉住）：侧边栏只切属性；过滤期间选中的文件关掉后仍选中。
+- 开关与折叠都是 `SidebarContent`（`workspace-sidebar.tsx:33-93`）里的 `useState(false)`：它按 `会话 id:空间 id` 设 `key`（`:124`），切会话自动重置；未写明的分支取最简并记偏离——关闭再打开侧边栏、宽窄屏互换（`aside` 与 `Sheet` 是两棵树）同样重置，与当前文件今天的表现一致。
+- 头部控件：`只看本会话改动` 用 `Icon filter` 图标按钮（`aria-label` 与 `title` 同名、`aria-pressed`），折叠用同一个按钮节点在 `折叠文件树` / `展开文件树` 间换名（`chevron-up` / `chevron-down`；两个条件渲染的按钮会丢焦点）；侧边栏最小宽度 240，头部已有空间名、`在文件页打开`、关闭，文字按钮放不下。
+- 折叠实现：给 `aside` 加 `hidden` 属性而不卸载（展开状态、选中、预览都在浏览器 state 里，不受影响）；`hidden` 属性能否压过 `aside` 上的 `flex` 类未验证，开工先在真实浏览器里看一眼，不行就把 `flex` 换成 `hidden` 类；宽屏与窄屏模态层同一份 `SidebarContent`，#1363 的宽度请求只在顶栏点击那一下，折叠与它无关。
+- 测试夹具漂移：`chat-workspace-sidebar-support.tsx` 没有事件注入，注入在 `chat-page-file-changes-support.tsx`（`openSession` / `goLive` / `turn` / `toolStep` / `write` / `edit`，空间 `PROJ`），组合先例是 `chat-workspace-sidebar-layout.test.tsx:326-360`；`turn()` 只有一条助手消息，「标记」场景要自拼两条助手消息的快照；sidebar support 的 `dir` 未导出，需导出或内联。
+- 新文件 `web/test/chat-workspace-sidebar-changes.test.tsx` 用例：C1 标记（`src`、`out`、`src/app.ts`、`out/index.html` 四行有 `本会话已改动`，`draft.md` 与其它行没有，`getByRole("button",{name:"app.ts"})` 精确命中，`step.end` 后 `draft.md` 出现标记）；C2 只看改动（集合另含从未展开的 `deep/x.md`；先记 `tree` 计数，打开后树恰为三支且全展开、`aria-pressed="true"`、计数不变，过滤下点 `刷新` 计数仍不变，选中 `out/index.html` 预览出现，关掉后完整的树回来且它仍 `aria-current`、`deep` 仍折叠）；C3 空集合显示 `本会话暂无文件改动` 且没有「该工作空间暂无目录」；C4 `gone.md`（根列表含它、`file` 返回 404 信封，选中后显示该文案；`deep/x.md` 行 `disabled`）；C5 切到 `SAME_SPACE` 再切回开关为 `false`；C6 折叠（`queryByRole("navigation",{name:"工作空间目录树"})` 为 null、预览仍在、焦点仍在该按钮，展开后是同一个 DOM 节点且展开与选中不变）；C7 没有空间级入口（四个名字在，`新建工作空间`、`选择工作空间`、含「上传」的控件不在；不断言按钮全集，`＋` 菜单的 `新建文件夹` 合法存在）；C8 在文件页打开（过滤下选中后链接带 `path`；`TEMPORARY` 会话有开关但没有链接——L7 / L2 已钉基础形态，不照抄，防 jscpd）。预览正文一律 `findBy` / `waitFor`。
+- 既有测试：`workspace-browser.test.tsx` 753 行，两个新属性的用例放新文件不放它；L3「恰一个 `刷新`」（`layout.test.tsx:205`）与 N1 的 `/关闭/` 过滤（`narrow.test.tsx:75`）不受新按钮影响，不得改写；走查 `ui-walk-workspace-sidebar.ts`（276 行）全用 `exact: true` 的名字，不加步骤（折叠的布局效果 jsdom 不可观察，由清单行覆盖）。
+- 清单 CH-101（master 末行是 CH-100，`functional-checklist.md:166`）：「宽度 1440 下新建一个绑定了工作空间的会话，先发一句「你好」，回答结束后点顶栏「工作空间侧边栏」，点侧边栏头部的「只看本会话改动」，再点一次关掉；让助手用写文件工具新建 out/notes.md（内容随便写一行），回答结束后点树上方的「刷新」，点「out」把它展开；点「只看本会话改动」；点 notes.md；再点一次「只看本会话改动」；点「折叠文件树」，再点「展开文件树」；在侧栏点另一个会话再点回来，重新打开开关前先看它的状态 \| 第一次打开开关时树的位置显示「本会话暂无文件改动」；展开 out 后 out 与 notes.md 两行各带一个小圆点，别的行没有；打开开关后树里只剩 out 和它下面的 notes.md；点 notes.md 后预览显示那一行内容；关掉开关后回到完整的树，out 仍展开、notes.md 仍被选中；折叠后树与「刷新」收起、预览占满，展开后树原样回来；点回来后开关是关着的 \| 待签」。两个坑：#1107 合入前树不自动刷新，必须有「刷新」一步；必须先展开 out 再开开关，否则 notes.md 一行点不了。
+- 变异：running 步骤的 `changes` 也计入（临时去掉 `stream-artifacts.ts:42` 的 `continue`，或 hook 绕过 `summarizeChanges`）→ C1「`draft.md` 没有标记」红。
+- 变异：只聚合最后一条助手消息（去掉 `flatMap`）→ C1 第一条消息的 `src/app.ts` 标记红。
+- 变异：过滤改用逐个 `reveal` / 展开而不是 `onlyPaths` → C2「计数不变」红（`deep` 被请求）。
+- 变异：去掉 `workspace-browser.tsx:168` 的 `subtreeOnly` 门 → C2「过滤下点 `刷新` 计数不变」红；只断「打开开关没有请求」对这条不可观察（已加载层被缓存分支先挡住）。
+- 变异：`markedPaths` 传了但 `label` 写错 → C1 红；不传 `markedPaths` → C1 红。
+- 变异：`onlyPaths` 传成含父目录的集合 → C2「树恰为三支」不红（`subtreeOf` 自己补父级），预期不可观察，如实写。
+- 变异：开关状态提到 `useWorkspaceSidebar`（不随 `key` 重置）→ C5 红。
+- 变异：空集时不传 `onlyPathsEmpty`，或浏览器忽略它 → C3 红。
+- 变异：关掉开关时重挂浏览器（改 `key`）→ C2「仍 `aria-current`、`deep` 仍折叠」红。
+- 变异：让无 `size` 的行可点并伪造 `mtime` → C4「`x.md` 行 `disabled`」红。
+- 变异：折叠改为卸载 `WorkspaceBrowser` → C6「展开后展开与选中不变」红；折叠按钮写成两个条件渲染的节点 → C6 焦点断言红。
+- 变异：头部再放一个 `刷新` → 既有 L3 红；加 `新建工作空间` 入口 → C7 红。
+- 变异：临时空间也渲染 `在文件页打开` → C8 与既有 L2 红。
+- 变异：折叠后预览是否真的占满、`hidden` 是否真的隐藏 → jsdom 不可观察，由 CH-101 覆盖，写「未做自动化」。
+- 实现后更正（2026-10-12，据实现者报告）：① `hidden` 属性对带 `flex` 类的树栏有效（实测，Chromium 151 + 构建产物样式表：`display: none`；Tailwind preflight 的 `[hidden]` 带 `!important`），用属性、没换类。② 「只聚合最后一条助手消息 → C1 红」不成立：规格场景里第二条消息同样改了 `src/app.ts`，集合相同；改由 C2 钉住（`deep/x.md` 只放第一条消息）。③ 「过滤改逐个 `reveal` → C2 计数红」实际红在更早的「树恰为三支」，`deep` 是否被请求没有单独验证。④ 空集文案放在组件外的小函数 `emptyNote`（行内三元使 `WorkspaceBrowser` 认知复杂度到 19）；`onlyPathsEmpty` 为空串按没给处理（规格未写）。⑤ 两个新属性的用例在新文件 `workspace-browser-sidebar-props.test.tsx`；`chat-workspace-sidebar-support.tsx` 的 `dir` 改为导出。⑥ jsdom 里侧边栏内的 Radix 菜单用不带坐标的 `pressPointer` 打不开（分栏库对命中分隔线的 `pointerdown` 调 `preventDefault`——读源码得出），C7 给了离开原点的坐标；后续在侧边栏里开菜单的测试同此。⑦ CH-101 在假上游下不能照字面走（假上游只写根下一个固定文件）；真实浏览器走法拆成两个会话，带 `out` 目录的部分只有 jsdom 用例覆盖。⑧ 最小宽度 240 时头部不溢出但空间名一栏只剩约 19 宽（实测），未处理，交 owner。
+- 评审第一轮之后（通过，两条 P2 一并处理）：① 过滤打开时 `新建文件夹` 成功后树不更新、关掉开关也不出现（`folder-dialog.ts` 成功后的重列被 `subtreeOnly` 的门挡住）——本刀使之可达；取最简：`onlyPaths` 生效期间 `新建` 禁用，规格补一句（编排方写，待 owner 认可）。② 补三处用例：集合随视图减少（去掉一条助手消息后标记消失）；过滤打开期间集合随 `step.end` 更新；C6 的「预览还在」改为在可访问树里按 `文件预览` 区域取。

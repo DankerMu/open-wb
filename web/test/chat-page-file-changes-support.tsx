@@ -25,7 +25,7 @@ export type Message = Snapshot["messages"][number];
 type Step = Message["steps"][number];
 export type Change = NonNullable<Step["changes"]>[number];
 
-const MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
+export const MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
 export const WORKSPACES = "/api/workspaces";
 /** No page text or attribute may hold this prefix: both workspace roots start with it. */
 export const ROOT_PREFIX = "/srv/wb-private-root";

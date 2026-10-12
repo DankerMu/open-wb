@@ -25,9 +25,9 @@
  * - `onlyPaths`: the tree is built from those paths (`subtreeOf`) and neither the listing cache
  *   nor the expanded set is written, so both are back when it is dropped. `loadDirectory` returns
  *   without a request while it is set: tests pin that for `refresh`, for a walk (it ends at the
- *   first unloaded level) and for mounting; the re-listing after creating a folder goes through the
- *   same gate (read from the code, no test). Dropping it requests the root if that was never loaded
- *   and replays nothing else.
+ *   first unloaded level) and for mounting. `新建` is disabled while it is set: the re-listing after
+ *   creating a folder would go through the same gate. Dropping it requests the root if that was
+ *   never loaded and replays nothing else.
  */
 import {
   type ReactNode,
@@ -49,7 +49,7 @@ import {
   revealStep,
   subtreeOf,
 } from "./browser-paths.js";
-import { type BrowserLayout, WorkspaceColumns } from "./columns.js";
+import { type BrowserLayout, STATUS_TEXT, WorkspaceColumns } from "./columns.js";
 import { DirectoryDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
@@ -88,6 +88,9 @@ type WorkspaceBrowserProps = {
   layout?: BrowserLayout | undefined;
   markedPaths?: { label: string; paths: ReadonlySet<string> } | undefined;
   onlyPaths?: ReadonlySet<string> | undefined;
+  /** 侧边栏用：`onlyPaths` 是空集时树的位置上的文案；树栏收起（见 `WorkspaceColumns`）。 */
+  onlyPathsEmpty?: string | undefined;
+  treeCollapsed?: boolean | undefined;
   ref?: Ref<WorkspaceBrowserHandle> | undefined;
   /** 文件页专用：切换器与 `新建工作空间`。 */
   switcher?: ReactNode;
@@ -99,6 +102,13 @@ const MISSING_FILE = "文件不存在";
 /** 这一次定位请求过 `directory` 才读它的失败文案：`onlyPaths` 下没有请求，早先留下的文案不算数。 */
 function failureOf(target: Reveal, failed: ReadonlyMap<string, string>, directory: string) {
   return target.asked.has(directory) ? failed.get(directory) : undefined;
+}
+
+/** `onlyPaths` 是空集且给了文案时树的位置上的那段文案，否则 `null`（照常是树）。 */
+function emptyNote(onlyPaths: ReadonlySet<string> | undefined, text: string | undefined) {
+  return onlyPaths?.size === 0 && text ? (
+    <p className={`${STATUS_TEXT} px-2 py-1`}>{text}</p>
+  ) : null;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
@@ -114,9 +124,11 @@ export function WorkspaceBrowser({
   onNewWorkspace,
   onPathChange,
   onlyPaths,
+  onlyPathsEmpty,
   path,
   ref,
   switcher,
+  treeCollapsed,
   workspaceId,
 }: WorkspaceBrowserProps) {
   const [directories, setDirectories] = useState<DirectoryCache>({});
@@ -599,20 +611,23 @@ export function WorkspaceBrowser({
   return (
     <>
       <WorkspaceColumns
+        creationDisabled={subtreeOnly}
         directory={
-          <DirectoryTree
-            cache={subtree ? subtree.tree : directories}
-            errors={subtree ? NO_ERRORS : directoryErrors}
-            expandedPaths={subtree ? subtree.expandedPaths : expandedPaths}
-            loadingPaths={subtree ? NO_PATHS : loadingPaths}
-            marks={marks}
-            onSelectFile={chooseFile}
-            // `onlyPaths` 下各级目录恒为展开：不改真实的展开集合，也不列目录。
-            onToggleDirectory={subtree ? ignoreToggle : toggleDirectory}
-            rootPath={dir === undefined ? undefined : logicalPath(account, dir)}
-            selectedPath={selectedFile?.path ?? null}
-            workspaceName={name}
-          />
+          emptyNote(onlyPaths, onlyPathsEmpty) ?? (
+            <DirectoryTree
+              cache={subtree ? subtree.tree : directories}
+              errors={subtree ? NO_ERRORS : directoryErrors}
+              expandedPaths={subtree ? subtree.expandedPaths : expandedPaths}
+              loadingPaths={subtree ? NO_PATHS : loadingPaths}
+              marks={marks}
+              onSelectFile={chooseFile}
+              // `onlyPaths` 下各级目录恒为展开：不改真实的展开集合，也不列目录。
+              onToggleDirectory={subtree ? ignoreToggle : toggleDirectory}
+              rootPath={dir === undefined ? undefined : logicalPath(account, dir)}
+              selectedPath={selectedFile?.path ?? null}
+              workspaceName={name}
+            />
+          )
         }
         folderNotice={folder.notice}
         layout={layout}
@@ -630,6 +645,7 @@ export function WorkspaceBrowser({
           />
         }
         switcher={switcher}
+        treeCollapsed={treeCollapsed}
       />
       {folder.dialog ? (
         <DirectoryDialog
