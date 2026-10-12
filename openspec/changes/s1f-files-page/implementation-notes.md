@@ -923,3 +923,67 @@
 - 变异：逃逸向量不适用：没有带路径参数的新请求代码，服务端未改。
 - 实现后更正（2026-10-12，据实现者报告）：① 行号漂移（本节写于 #1100 合入前）：`WorkspaceBrowserHandle` 在 `workspace-browser.tsx:78-83`、`refresh` `:579-594`、`onlyPaths` 下 `loadDirectory` 直接返回 `:187`、失败文案在发请求时清掉 `:204-212`、`refreshLayers` 在 `browser-paths.ts:191-201`、树的 `role="alert"` 在 `tree.tsx:268-275`。② 扫描写成模块内函数 `unseenChangedPaths`（写在 effect 里认知复杂度 21）。③ R4 的搭法与本节不同：第一次打开要在真定时器下等根目录落地，所以是打开、关闭、换假定时器后重开再推进 300。④ 改动前 R3、R3b、R4 本来就绿（「不得请求」的反向断言），咬合由「首个视图不播种」「闭包持有句柄且卸载不清定时器」两条变异证明；「只去掉卸载时的 `clearTimeout`」为绿、不可观察（卸载后句柄为 `null`）。⑤ 规格的「回合结束、停止或失败」三种走同一个比较，用例只推了 `turn.end` 的 done，停止与失败无用例（读代码推出）。⑥ CH-102 在假上游下不能照字面走：真实浏览器里走了两段（写文件工具一例实测；命令一例由脚本在审批停顿时往沙箱写文件——钩子辅助复现），同一会话两个回合、选中保持、相隔超过 300 毫秒的局部刷新都没走到。⑦ `design.md` D29 第三条已随本刀改为与规格一致（编排方写）。
 - 评审第一轮之后（2026-10-12，据修订报告；不通过的原因是覆盖缺口，源码未改）：① 第二轮及以后的局部刷新原先没有用例——R1 末尾接了一段（`text.delta` 后过 300 毫秒无请求；第三个步骤结束后第 299 毫秒无请求、第 300 毫秒恰多一轮），「定时器回调里不清 `timer.current`」「到点后不清待刷集合」两条变异由绿转红；「不记已见步骤」一条在第一轮就被 R1c 判红（评审读代码推为存活，实跑不符）。② 新增 R2c（`turn.end` 的 stopped / failed 同样触发兜底；`error` 事件单独到达时会话仍是 running，不算结束）、R3c（回合中途重开，下一个事件就是 `turn.end`）、R6（视图 running → `null` → 已结束：`null` 不算跃迁；用 `renderHook` 直接测钩子，整页里没找到同一次挂载中的这种走法）。③ 回合结束的兜底连带重取当前预览（`refresh()` 不带路径即重选当前文件），规格场景没写：R2b 钉住文本文件一例；音视频、PDF、办公文档、网页渲染视图、压缩包在每个回合结束时被重建（播放回到开头）是读代码推出，无用例、未在浏览器里走——交 owner。
+
+## 25.1、25.3，含分摊的 25.4 / 25.5 / 25.6 / 25.7 条款（#1109）
+
+- 不触 Critical Path，单评审席：纯 web，`server/**` 零改动、无新 `op`、不碰 `sandbox.resolve`；`changes[].path` 只作数据经 `path` 属性交给既有 `WorkspaceBrowser`（先过 `normalizedPath`，含 `..` 段的不发请求），越界由服务端裁决。前置 #1049 / #1093 / #1105 / #1106 / #968 / #973 的代码均在 origin/master，不等 1.1 / 1.2 / 1.3；#1100 先合入后 `workspace-browser.tsx` 为 718 行（master 665），本刀不改 `web/src/features/files/**`。
+- 现状：`file-changes-card.tsx`（111 行）`:66` 是 `navigate(\`/files?ws=${space.id}\`)`，按钮只在 `useChangeSpace(space) !== null` 时渲染（`:61`）。`resolveSessionSpace`（`workspace-list.ts:21-29`）对「非临时且不在列表 / 列表读取中或失败」返回 `null`、对临时空间返回 `workspace: null`，所以渲染条件不能从 `space` 推出。`WorkspaceBrowserHandle.reveal`（`workspace-browser.tsx:593-596`）在 `web/src` 仍无调用方，且 `notify:true` 时 `endWithoutFile` 直接返回、不显示任何失败文案。
+- 接缝走 `path` 属性，不走 `ref.reveal`：关着的时候 `SidebarContent` 没挂载（`page.tsx:91-100` 给 `target: null`），点击时无 ref 可调；`path` 一变就顶掉进行中的定位（`:551-565`），「最后一次为准」与失败文案都已有，`reveal()` 的失败呈现仍写「未做」。代价（进偏离记录）：同一路径连点两次、且期间选中未变时第二次是空操作。
+- `use-workspace-sidebar.ts`（96 行）：签名改为 `useWorkspaceSidebar(workspaceId: string | null | undefined, sessionId?: string)`，新增返回 `located: { sessionId: string; path: string; seq: number } | null` 与 `reveal: ((path: string, trigger: HTMLElement) => void) | undefined`（未绑定时 `undefined`，同 `slot`）。`reveal` 记下 `trigger` 与 `located`（`seq` 自增），`!wanted` 时先 `requestMainWidth(BESIDE_WIDTH)` 再 `setWanted(true)`，已开时不请求、不放进 updater；引用须稳定（`useCallback` 加 `wanted` 的 ref 镜像），因为它要进 `message-thread.tsx:320` 的 `renderMessage` 依赖。`slot.onSelect` 与 `close()` 清掉 `located`，`onSelect` 另清 `trigger`。
+- 焦点：`restoreFocus()` 改为可选入参 `restoreFocus(toOpener = false)`，仅 `Sheet` 的 `onCloseAutoFocus`（`workspace-sidebar.tsx:247-250`）传 `true`——记下的 `trigger` 仍 `isConnected` 时 `focus({ preventScroll: true })` 它，否则回顶栏按钮；宽屏头部 `关闭`（`:186-189`）仍无参、回顶栏按钮（规格「布局与开合」原句）。宽屏定位后不移焦点（侧边栏挂载不抢焦，`ConversationView` 不重挂）；窄屏打开沿用 `onOpenAutoFocus` 进 `关闭`。意图恢复（甲 → 未绑定 → 甲）后 `trigger` 已不在文档，走回退。
+- `workspace-sidebar.tsx`（268 行）：`WorkspaceSplit` 只在 `sidebar.located?.sessionId === target.sessionId` 时把 `located` 传给 `SidebarContent`。后者 `useState(located?.path ?? null)` 作初值，`seq` 变化时在渲染期 `setPath(located.path)`（不用 effect），`onlyChanges` 不动。按会话打标是为了换会话：`key` 变化重挂，不带标记的待定路径会被定位进乙会话的树。宽窄屏互换重挂时会重新套用最近一次 `located`（未规定，取最简，进偏离记录）。
+- 下发：`page.tsx`（147 行）`:38` 改为 `useWorkspaceSidebar(selected?.workspaceId, selected?.id)`（不用 `:137` 的 `slashWorkspaceId`），`onReveal={sidebar.reveal}` 经 `conversation-view.tsx`（344 行，`:263-278`）→ `message-thread.tsx`（337 行；`Thread`、`renderMessage` 及其依赖数组 `:320`、`AssistantMessage` `:219`）到 `FileChangesCard`。卡片渲染条件为 `onReveal !== undefined`，点击 `onReveal(change.path, event.currentTarget)`（传空间内相对路径，不是带前缀的显示路径）；名字与 tooltip 用 `space?.workspace` 可解析时的逻辑路径，否则相对路径；去掉 `useNavigate`，改文件头 `:1` 与 `:18-21,31-33,78-82` 及 `workspace-list.ts:19` 的注释。不新增文件，`ui-layering.test.ts` 不用登记；卡片不导入页面状态，`chat-module-layout.test.ts` 的方向不变。
+- 过滤开着时（只可能是侧边栏已开——关了再开 `SidebarContent` 重挂、开关回到关）：不切开关；父目录已加载且列表里有它 → 选中，`aria-pressed` 仍为 `true`、零 `tree` 请求；父目录未加载 → `awaitDirectory` 返回 false、`failureOf` 为 `undefined`，不请求、不选中、无文案，原选中保留（`workspace-browser.tsx:462-476,482-492`）。#1372 未裁决，本刀不绕。
+- 其余竞态（读代码推出，未实测）：回合进行中点较早消息的卡片不打断回合（L5 同理）；已开着另一文件时定位到不存在的文件会清掉原选中并显示 `文件不存在`；连点两张卡在侧边栏挂载前即以最后一次的 `located` 为准；`a` 的迟到列表只进缓存、`a` 行保持展开，不改选中；#1107 若先合入，步骤结束的刷新会中止并重发在途的 `tree`，定位等新的那次。
+- 必须改写的既有断言（逐条进偏离记录；任务 25.4 的 grep 重跑后未被点名的标 ★）：
+- `chat-page-file-changes.test.tsx`（757 行，上限 800）C9/G5（`:468-527`，标题同改）：补 `tree?path=src` 与 `file?path=src%2Fapp.ts` 路由，否则定位停在空根。点击后断言地址仍是会话地址、`complementary` `工作空间侧边栏` 出现、`app.ts` 行 `aria-current="true"`。
+- 同文件 `expectRelativeRows`（`:575-582`）拆成「有 `查看详情 src/app.ts`」与「没有」两种，`:589-598` 的 `it.each` 两行各取一种，`:600-606` 取前者。
+- ★ 同文件 `:608-626`「列表读取中」：读取中即有 `查看详情 src/app.ts`，读到后变为逻辑路径名。净增控制在 30 行内，放不下的搬进新文件，不压缩既有断言。
+- ★ `chat-page-artifacts-temporary.test.tsx`（225 行）`:100,116-117`：标题同改，卡内恰两个按钮 `查看详情 out/index.html`、`查看详情 notes.md`；点后者对 `TEMP` 请求 `tree` 并选中、URL 不变。
+- ★ 同文件 `:164`、`:192`：`detailButtons()` 改为三个相对路径名。
+- ★ 同文件 `:169,218-223`：转正后点击不再去 `/files?ws=`，改为 URL 不变、侧边栏头部是空间名并有 `在文件页打开`；标题同改。
+- 原样不动：`chat-page-file-changes-support.tsx:47` 的 `DETAILS`；`chat-page-artifact-card-feedback.test.tsx:403-416` 的 F6（只断类名）。
+- 行号漂移：tasks 写的 `ui-walk-sessions.spec.ts:386-393`、776 / 681 行，实为 `:376-408`、677 行。
+- 新文件 `web/test/chat-workspace-sidebar-reveal.test.tsx`（导入 `./radix-platform.js`；夹具照 `chat-workspace-sidebar-changes.test.tsx:70-115` 用 `openSession` + `treeOf` / `fileOf` / `listing`，窄屏用 `installNarrowViewport`；预览正文一律 `findBy` / `waitFor`）：
+- R1 查看详情定位：`tree` 请求依次为根、`src`、`src/deep` 各一次；`app.ts` `aria-current` 且带 `本会话已改动`；预览有源码；`currentLocation()` 仍是 `/?session=<id>`；`activeElement` 是被点的那个节点；`只看本会话改动` 仍为 `false`。
+- R2 已加载的不重复请求：先手动展开 `src` 再点，`src` 的 `tree` 计数不变。
+- R3 最后一次为准：`tree?path=a` 用 `deferred` 挂住，点 `b/y.md` 后选中 `y.md`；放行 `a` 后仍是 `y.md`，`file` 请求只有 `b/y.md`。
+- R4 窄屏的焦点往返：对被点按钮 `vi.spyOn(focus)`；打开时 `activeElement` 是层内 `关闭工作空间侧边栏`；期间 `goLive` 推增量；Escape 后 `focus.mock.calls` 严格等于 `[[{ preventScroll: true }]]`，没有 `回到最新`，顶栏按钮的 `focus` 未被调用。
+- R5 文件已不存在：两例按替换后的 THEN，用 `observeUnhandledRejections`，无 Toast。
+- R6 过滤开着：父目录已加载 → 选中、`aria-pressed="true"`、`tree` 计数不变；未加载 → 计数不变、选中不变。
+- R7 换会话：在甲点击且 `tree` 挂住时切到乙，乙的树只请求根、无选中、没有对乙空间该路径的请求。
+- R8 关闭后用顶栏重开：没有选中文件。
+- R9 `chat-workspace-sidebar-fit.test.tsx`（243 行）加两例：主区放不下时 `查看详情` 打开同样折叠外壳侧栏；侧边栏已开时点它不折叠、不写偏好。
+- 场景「打开网页预览」归 #1110，本文件不写。
+- 走查：新增 `walkViewDetails`，放 `ui-walk-workspace-sidebar.ts`（276 行）；`ui-walk-sessions.spec.ts` 删掉 `step5ViewDetails`（`:376-408`）与其注释，`:150` 换调用、`:47` 导入加名，净减行。
+- 步骤：点 `查看详情 ${LOGICAL_PATH}` → 地址的 `pathname` 与 `session` 参数不变、`framenavigated` 主帧零次；`desktop-light` 是 `complementary`，`mobile-dark` 是同名 `dialog` 且 `关闭` `toBeFocused`、活动元素不是 `IFRAME`；树里该文件 `aria-current="true"` 且带 `本会话已改动`。
+- iframe：`src` 以该页 `POST …/preview-token` 响应的 `base` 开头（`page.waitForResponse` 与点击并成一个 `Promise.all`），`sandbox` 恰为 `allow-scripts allow-forms allow-modals`，框内标题 `WorkBuddy` 可见。
+- 收尾：打开 `只看本会话改动` 后树里恰一个文件行，再关掉；`mobile-dark` 按 Escape 后 `查看详情` `toBeFocused` 且线程 `scrollTop` 不变，`desktop-light` 用头部 `关闭`；结束时侧边栏是关的（`step6Sidebar` 要会话列表）。
+- `ui-walk-session-list.ts:327`（486 行）改为 `getByRole("button", { name: \`查看详情 ${file}\`, exact: true })` `toHaveCount(1)`，`:299` 注释同改，不点击（临时空间旅程不加载 iframe）；`:148`、`:328` 的 `walkArtifactPreview` 对话框留给 #1110。
+- 未实测、开工先看：`walkBeside` 把宽度留在 240，那个宽度下框内标题是否 `toBeVisible`；CI 的走查环境里预览监听器是否可达（`PREVIEW_PORT` 缺省 0 即启动，`base` 取自 `previewOriginOf`）。
+- 耗时：PR 贴两个 project 改动前后 `mark("step 5")` 的增量与 list reporter 总时长；不加固定等待，不加 `test.slow()` / `setTimeout`，超时就停下报告。正则只写字面量。
+- oracle（`ui-walk-oracle.ts`，264 行）：本刀是第一个让走查加载隔离来源 iframe 的 PR（origin/master 的 `web/e2e` 无 `preview-token`，#1115 排在其后），例外在这里加。`watchAssets` 只在 `desktop-light`。不能在 `classifyRequestOrigin` 当场放行——`response.json()` 晚于 iframe 发请求。做法：外来请求照旧全记；`page.on("response")` 对「`productionOrigin` 上、`POST`、路径匹配字面量正则 `/^\/api\/workspaces\/[0-9a-f]{32}\/preview-token$/`、200」的响应把 `new URL(base).origin` 收进允许集（解析的 promise 留在 oracle 上）；`runWithBrowserErrorOracle` 在 `collectOracleFailures` 之前 `await` 它们，再剔除来源在允许集里的记录。只认 `base` 的来源，不认 `officeBase`、不认端口范围或主机通配；失败信息只打印来源（`base` 含令牌）。
+- 清单（结论一律 `待签`）：任务 25.6 只点名 CH-27，但 CH-53 与 CH-59 随本刀变假，必须同 PR 改写。
+- CH-27 末句改为：「行尾按钮的悬停提示是「查看详情」加这一行的路径；宽度 1440 下点击后对话区右侧出现工作空间侧边栏，树里 notes.md 被选中并带一个小圆点，预览显示它的内容，地址栏不变、没有跳到文件页。用户消息任何时候都没有这张卡」。操作列末尾补「（宽度 1440；侧边栏若已开着同样适用）」，不写「侧边栏原先是关的」——开合意图在同一页面加载内跨会话保留。
+- CH-53 中句改为：「…每行只显示文件在空间内的相对路径，行尾仍有「查看详情」，消息里没有带文件名的卡，页面没有报错」。不要求点击——开发者工具按 `/api/workspaces` 屏蔽会连 `tree` 一起挡掉。
+- CH-59 改为：另存之前每行行尾有「查看详情」，点它打开标题为「工作空间」、没有「在文件页打开」的侧边栏并选中该文件；另存之后路径变为「账号/目录/文件」，点「查看详情」仍是打开侧边栏（头部是空间名并有「在文件页打开」），不去文件页。
+- 新增一行（CH 节下一个空号：master 末行 CH-101，#1100 只加 FL-28 / FL-29；#1107 若先合入并占用 CH 号则顺延）：「宽度 390 下在绑定了工作空间的会话里发一句会输出很长回答的请求，回答输出期间点较早一条助手消息里「文件变更」卡行尾的「查看详情」，等十几秒后按 Esc \| 侧边栏盖满整个窗口，键盘焦点在它的关闭按钮上，树里该文件被选中；按 Esc 后侧边栏消失，对话区仍停在最新输出处并继续跟随，没有被拉回那张卡，也没有出现「回到最新」 \| 待签」。
+- CH-28 / CH-29 / CH-33 归 #1110。
+- 变异（PR 描述逐条给判红用例；前三条是 25.7 分摊的）：
+- 变异：`查看详情` 仍然 `navigate` → C9/G5「地址不变」、R1、走查第 5 步红。
+- 变异：临时空间或未列出的空间不渲染 `查看详情`（条件退回 `space?.workspace`）→ `chat-page-artifacts-temporary` 第一个 `it.each`、C11 两例、走查临时空间第 1 步红。
+- 变异：窄屏关闭后 `focus()` 不带 `preventScroll`，或改用 `scrollIntoView` → R4 的 `focus` 入参断言红；真实滚动只在 `mobile-dark` 的 `scrollTop` 断言可见。
+- 变异：窄屏关闭后焦点回顶栏按钮 → R4 红。
+- 变异：`workspaceId` 为 null 也渲染按钮 → C11 的 null 例红。
+- 变异：把带前缀的逻辑路径传给 `onReveal` → R1 的 `tree` 请求序列红（请求 `zhangsan`）。
+- 变异：`located` 不按会话打标 → R7 红。
+- 变异：`close()` 不清 `located` → R8 红。
+- 变异：`reveal` 不调 `requestMainWidth`，或已开时也调 → R9 两例各红其一。
+- 变异：定位时关掉过滤 → R6 的 `aria-pressed` 红；过滤下为定位去请求 `tree` → R6 计数红。
+- 变异：改走 `ref.reveal`（`notify:true`）→ R5 两例红（无文案）。
+- 变异：对不在列表里的文件照发 `file` → R5「没有 `file` 请求」红。
+- 变异：`path` 变化不顶掉进行中的定位（去掉 `workspace-browser.tsx:554` 的置空）→ R3 红。
+- 变异：`reveal` 引用不稳定致消息重渲染 → 预期不可观察（按钮节点不重挂），如实写。
+- 变异：oracle 允许任意外来来源 → 绿跑不可观察；PR 里用一次性手工变异证明（走查中向另一来源发一个请求须红），并贴例外的 diff 供白盒看。
+- 变异：iframe 的 `sandbox` 加 `allow-same-origin`，或 `src` 改同源 → 只有走查红（jsdom 不可观察）。
+- 开工时的状态（编排方补，2026-10-12）：上面的规格替换（「从卡片定位到文件」两句与场景「文件已不存在」的 THEN）和 design D30 一句已随 fixture 提交逐字写入。本注记写于 #1100 / #1101 / #1107 / #1115 合入之前；这四刀现已在主干：`workspace-browser.tsx` 的行号与行数以主干为准（#1102 正在另一分支把它减到 692 行，本刀不改 `web/src/features/files/**`，不会冲突）；`use-workspace-sidebar.ts` / `workspace-sidebar.tsx` 已有 #1107 的 `useAssistantRefresh` 与句柄 ref；全站走查 oracle 的隔离来源例外已随 #1115 在主干（`web/e2e/ui-walk-oracle.ts`），25.5 分摊给本刀的 oracle 条款以「已存在、核对没有写宽」处置，不再新加；走查主旅程已有 `test.setTimeout(60_000)`。出入记偏离。
