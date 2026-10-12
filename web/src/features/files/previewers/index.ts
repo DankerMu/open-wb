@@ -20,12 +20,14 @@ export type PreviewerId =
   | "media"
   | "archive"
   | "notebook"
-  | "web";
+  | "web"
+  | "document";
 
 /**
  * `content` is the text for text previewers, the caller-owned Blob URL for the image one and the
  * file's own address for the media one; the archive one gets none and lists the members itself
- * through `load`; the web one gets none either and takes everything it shows from `web`.
+ * through `load`; the web one gets none either and takes everything it shows from `web`, and the
+ * document one (PDF, office documents) likewise from `doc`.
  * `truncated` says the text is only the head of the file; previewers that show it as is ignore it.
  */
 export type Previewer = (props: {
@@ -34,6 +36,7 @@ export type Previewer = (props: {
   truncated: boolean;
   load?: Extract<PreviewState, { status: "archive" }>["load"] | undefined;
   web?: WebFrame | undefined;
+  doc?: DocumentFrame | undefined;
 }) => ReactElement;
 
 /**
@@ -51,6 +54,21 @@ type WebFrame = {
   source: ReactNode;
 };
 
+/**
+ * What the document previewer is handed. `token` as in `WebFrame` (when ready, `base` and
+ * `officeBase` are credentials: one of them goes into the frame's address and nowhere else).
+ * `size` is the tree entry's size, compared with the token's `documentMaxBytes` before any frame
+ * is built; `office` says the file is an office document (converted by the server, loaded from
+ * `officeBase`) and not a PDF (loaded from `base`).
+ */
+type DocumentFrame = {
+  path: string;
+  token: ReturnType<typeof usePreviewToken>;
+  reload: number;
+  size: number;
+  office: boolean;
+};
+
 const LOADERS: Record<PreviewerId, () => Promise<Previewer>> = {
   markdown: () => import("./markdown.js").then((module) => module.MarkdownPreviewer),
   table: () => import("./table.js").then((module) => module.TablePreviewer),
@@ -61,6 +79,7 @@ const LOADERS: Record<PreviewerId, () => Promise<Previewer>> = {
   archive: () => import("./archive.js").then((module) => module.ArchivePreviewer),
   notebook: () => import("./notebook.js").then((module) => module.NotebookPreviewer),
   web: () => import("./frame.js").then((module) => module.WebPreviewer),
+  document: () => import("./frame.js").then((module) => module.DocumentPreviewer),
 };
 
 export function loadPreviewer(id: PreviewerId): Promise<Previewer> {

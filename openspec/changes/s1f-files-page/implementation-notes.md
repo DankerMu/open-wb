@@ -380,3 +380,95 @@
 - 变异：新结果到达后状态行不撤 → `files-preview-states.test.tsx:247` 的「没有 正在读取文件」判红。
 - 变异：媒体 `error` 时另发探测请求或调用认证守卫 → `files-preview-states.test.tsx:512` 加「error 之后 fetch 调用数不变」断言后判红；不加则写「未做」。
 - 变异：遍历、符号链接、跨空间 id、他人空间 404、`sandbox.reject` → 不适用：本刀没有带路径参数的新代码与服务端改动，证据在 11.4 / #1075。
+
+## 19.2 PDF 与办公文档，含分摊的 19.3 / 19.4 条款（#1094）
+
+- 边界：按代码推得不是 `AGENTS.md` 的 Critical Path（纯前端，无路由、无 `sandbox.resolve`、无新 `op`）；但嵌入的是不带 `sandbox` 的不可信文档，且改了凭据 hook 的调用点，PR 照 issue 标 owner 白盒，建议两个评审席。D-23 / #1286：本刀没有路由，只是 `GET /w/<token>/<path>`（pdf）与 `GET /o/<token>/<path>`（办公文档）两个读窗口的第一个产品内入口，不闭合、不加宽；`/o/` 的 resolve→open 间隔被排队拉长到约 `ceil(8/concurrency) × timeoutMs`（按 #1074 注记推得，未测）。
+- 前提（查代码）：1.1 已勾，结论「与设计相符」（`design.md:203`）；15.1 的 `/o/` 在 `server/src/preview/app.ts:268`，`officeAvailable` 经 `server.ts:410` 接通；19.1、19.2 网页部分、21.1 已合。19.6（#1352）与 #1099 未合，本刀叠在其上，四参签名与 `files-site-fixture.tsx` 落地前不能开工。不在 1.2 / 1.3 挡住的集合里。
+- 与 issue / tasks 的差异（origin/master 为准，进偏离记录）：
+- `kind.ts:18-21` 早已有 pdf / office，本刀不改它；issue 说的「过渡呈现」实际是 `immediatePreview` 返回 `null` → `fetchPreview` → 服务端 415（`server/src/workspaces/preview.ts:47`）→ `failedPreview`。
+- PR Boundary 漏列 `types.ts`、`preview.tsx`、`preview-area.tsx`、`workspace-browser.tsx`、新测试文件与 `openspec/`。
+- 依赖漏列 #1352、#1099。
+- issue 与 `tasks.md:510` 把用例放进 `previewers-frame.test.tsx`（729 行；#1352 搬走夹具后约 640），放不下，改新文件。
+- issue 把 `pdfViewerEnabled` 排在三项判定之首，规格次序是大小 → `officeAvailable` → `pdfViewerEnabled`（`specs/file-previewers/spec.md:136`「依次判定」）。
+- 编排简报说的「三种」含签发失败，规格的三种不含；签发失败是第四种，出自 `:107`「签发失败（非 401）时预览区显示…」。
+- D16 写「加下载按钮」，规格是「保留预览头的下载链接」，按规格不另加按钮。
+- `tasks.md:513` 的 grep 在 origin/master 仍零命中，既有用例无一须改。（合入后更正：#1352 的夹具里有两行 html 条目命中该 grep，仍无既有用例须改。）
+- 状态与宿主（不发 `file` 的依据是 `specs/files-web/spec.md:90`，不是设计选择）：
+- `types.ts` 的 `PreviewState` 加 `{ status: "document"; reload: number }`。
+- `immediatePreview`（`preview-area.tsx:62-88`）对 `kind === "pdf" || "office"` 返回它；`previous` 同为 `document` 时 `reload + 1`，否则 0，与网页同形。
+- `workspace-browser.tsx` 唯一调用点改为：`needed` = 状态是 `web` 或 `document`，`attempt` = 该状态的 `reload`，其余 0。`previewers-frame.test.tsx:217` 的调用点扫描仍为 1。
+- #1099 之后该文件约 623 行，本刀加不到 10 行，不需要先拆。同步改 `:120` 与 `preview.tsx:42` 的注释。
+- `preview.tsx`（283 行）：在 `web` 分支旁加 `document` 分支，渲染 `<LoadedPreview id="document" key={path} doc={{ path, token: previewToken, reload, size, office: previewKind(name) === "office" }} />`；`PreviewBody` 的类型同时排除 `document`。`previewers/index.ts`：`PreviewerId` 加 `"document"`，加载器 `import("./frame.js").then((m) => m.DocumentPreviewer)`，`Previewer` props 加可选 `doc`。`previewers-code-split.test.ts` 允许两个加载器指向同一模块；`PreviewPane` 不加必填 prop，既有 15 处 `<PreviewPane` 不动。
+- `frame.tsx`（84 行，增到约 170）的 `DocumentPreviewer`：
+- 先过令牌门，与 `RenderedView:35-44` 抽成同一个小函数，否则 jscpd 报重复：`error` → `role="alert"` 的 message；非 `ready`（含 401）→ `正在加载预览…`。
+- 再依次判定：`size > token.documentMaxBytes` → `文件过大，无法预览`（严格大于，与 `app.ts:231` 一致）；`office && !token.officeAvailable` → `服务器未启用文档转换，请下载后查看`；`navigator.pdfViewerEnabled === false` → `此浏览器不支持内嵌 PDF 预览，请下载后查看`。
+- 第三项没有「办公文档且」的限定，所以对办公文档同样生效（`:136` 的句式决定，不是未规定）；必须是 `=== false`，jsdom 里它是 `undefined`，要建 iframe。
+- 三种说明用 `EmptyState`（标题为文案，描述沿用 `<name> · <大小>`）。
+- iframe 为 `<iframe className src title={name} onLoad>`，`src` = pdf 用 `token.base`、办公文档用 `token.officeBase`，后接按段 `encodeURIComponent` 的路径。按 D15 字面不带 `sandbox`、`referrerpolicy`、`allow`，属性集合封死为 `["class","src","title"]`。
+- 文件头注释「calls no hook and keeps no state」要改；注释里不得出现驼峰 srcdoc 与点号加 innerHTML（`previewers-table-svg.test.tsx` 的静态扫描）。
+- 转换遮层（只办公文档）：
+- iframe 与「是否已 load」的状态放进一个以 `` `${reload} ${src}` `` 为 key 的子组件；`load` 之前在 iframe 之上盖 `role="status"` 的 `正在转换文档…`，iframe 此时已在 DOM 里，`onLoad` 后撤掉。
+- PDF 没有遮层：`:136` 只对办公文档要求。
+- key 含 `src` 是偏离网页框「只按 reload」的做法（进偏离记录）：续期换了 `officeBase` 时换新节点，遮层才会回来；规格只要求「以新地址重载」，新节点满足。
+- 「`load` 对成功页与失败页都触发」是 D19 的设计句，仓库里没有任何实测（1.1 没测 `load`）。浏览器对内置 PDF 查看器的响应若不触发 `load`，遮层会一直盖住文档。合入前请在 Chromium 与 Firefox 各手工看一次（不入库）；不触发就停下回 owner，不自行加超时。
+- 无 `sandbox` 的 PDF 框靠什么隔离（逐句标证据，PR 与 `frame.tsx` 头注释照此写，不写「不能」「拿不到」）：
+- ① `src` 只来自令牌响应的 `base` / `officeBase`（`rest-preview-token.ts:85-86`），页面不拼主机端口——测试钉属性。
+- ② 缺省部署是同主机不同端口：不同来源、同站；配置了预览来源时是否不同于主站由部署决定——未验证。
+- ③ PDF 响应头为 `application/pdf`、`nosniff`、`no-store`、`no-referrer`、ACAO `*`、CORP、CSP 仅 `frame-ancestors <签发请求的 Origin>`，不带 CSP `sandbox`（`headers.ts:89-101`，服务端测试钉值）；`/o/` 成功恒用 `a.pdf` 的头（`app.ts:96,295`）。
+- ④ 属性与响应都没有 sandbox，所以框内文档是预览来源的真实来源，不是不透明来源——按代码推得。
+- ⑤ 该来源下不出现可执行的 HTML 文档：监听器的非 PDF 成功响应一律带不含 `allow-same-origin` 的 CSP `sandbox`，失败响应是 `text/plain` 加 `nosniff`、无 CSP（`headers.ts:104-106`）——按代码推得；「该头使文档不透明」只有 1.1 的对照实测（Chromium 151 / Chrome 154 / Firefox 153 的 Playwright 构建，macOS）。
+- ⑥ 内容是 HTML 而名字是 pdf 的文件靠「类型只看扩展名 + nosniff」不被当成 HTML——未测。
+- ⑦ Chromium 在 iframe 带 `sandbox` 属性时拦掉查看器、响应头带 CSP `sandbox` 时不拦——1.1 实测。
+- ⑧ 没有属性就没有属性层对弹窗、顶层导航、下载、表单的限制；内置查看器对文档内脚本与链接怎么处理、点链接时 `Referer` 带不带含令牌的地址——全部未测。
+- ⑨ 框的导航请求在同主机不同端口下带主站会话 cookie——网页框实测，仅 Chromium；PDF 框按同理推得，未测。监听器不读 cookie（`preview-app.test.ts:82`）。
+- 刷新与重签：`document` 的 `reload` 传作 `attempt`，所以签发失败态下点 `刷新` 或再点同一行会立即重签；不满 5 分钟不发请求、只换 iframe 节点（办公文档因此重新请求 `/o/`，遮层重现）。依据是 `specs/workspace-sidebar/spec.md:75`「PDF 与办公文档换一个新的 iframe，令牌必要时先重新签发」加 19.6 的裁决。在网页（`reload` N）与 pdf（0）之间切换算 `attempt` 变化，新鲜时不发请求（#1352 注记的分支 ①）。
+- openspec 计划内改动（PR 文本逐个列出，编排者改文字时同步更新 PR 文本）：
+- `tasks.md:516`「宿主给网页预览的 `reload`，其余给 0」→「宿主给网页渲染视图、PDF 与办公文档预览的 `reload`，其余给 0」。
+- `specs/file-previewers/spec.md:107`「渲染视图下 `刷新` 或再点已选中的同一行时」→「网页的渲染视图、PDF 与办公文档下 `刷新` 或再点已选中的同一行时」。
+- `tasks.md` 勾 19.2、19.3、19.4、19.5 四项，本刀是各项最后一份分摊；19.5 的「合计恰一次签发」靠本刀页面级的「两个 html 加一个 pdf」补齐。19.6 / 19.7 归 #1352。
+- `implementation-notes.md` 加本节与指针，须低于 1000 行。若手工看了 `load`，结果写进 `design.md` D19 增补。
+- 测试放新文件 `web/test/previewers-document.test.tsx`。
+- 组件级（静态导入 `DocumentPreviewer`，自建令牌夹具；`previewers-frame.test.tsx:36` 的 `ready()` 上限只有 1000，不能借用）：
+- 规格三个场景。
+- 封死属性集合；`hasAttribute("sandbox") === false`。
+- 路径编码一例，加「路径是数据」向量（首尾空格、`..` 段、开头 `/`、合成与分解字符）。
+- 恰等于上限仍建 iframe。
+- 次序三例：超限且查看器禁用 → 过大；超限且未启用转换 → 过大；未启用转换且查看器禁用 → 未启用。
+- pdf 在 `officeAvailable:false` 下仍建 iframe；`pdfViewerEnabled` 为 `undefined` 与 `true` 都建 iframe。
+- 办公文档：先 `yieldMacrotask` 后断言遮层在（jsdom 不为 iframe 导航，按 `previewers-frame.test.tsx:4` 的说明推得；若它自发 `load`，这条会红），`fireEvent.load` 后遮层不在；`reload + 1` 与换 `officeBase` 各自换新节点且遮层重现。pdf 始终没有 `正在转换文档…`。
+- `error` / `loading` 时无 iframe。
+- `navigator.pdfViewerEnabled` 用 `Object.defineProperty(…, { configurable: true })` 打桩，`afterEach` 里 `delete`，并断言起点为 `undefined`（`vi.restoreAllMocks` 不还原它）。
+- 页面级（导入 #1352 的 `files-site-fixture.tsx`，覆盖 `TREE` 加 `doc.pdf` / `plan.docx`，`ISSUE` 改 `officeAvailable:true`）：
+- 选中 pdf / docx 后 `file` 请求为 `[]`，下载链接的 `href` 与 `download` 在。
+- 「共用与续期」：两个 html 加一个 pdf、假时钟 11 分钟，恰一次签发加两次续期，iframe 节点 `toBe` 原节点、`src` 不变；切到 md 再 6 分钟，签发数不变。
+- 签发 500 后点 `刷新`：恰两次签发，iframe 出现。
+- 令牌串不在 `document.body.textContent`、`location.href` 不变、console 无输出、「通知」区无 `listitem` 与 `.ui-toast`。
+- 浏览器行为一律标「按代码推得，未走查」；本刀不加 ui-walk 步骤。
+- 门槛：无新依赖、无新 `ApiClient` 方法（`api-files-archive.test.ts` 的键集不动）、`ui-layering` 不用登记；`frame.tsx` 新增的导出只经 `index.ts` 的动态导入进产品代码，静态导入者是测试（knip 的 web 入口含 `test/**/*.test.tsx`）；不建大 DOM；计数断言用 `toStrictEqual` 且先断言起点。
+- FL 行（下面是开工前的草稿，交付的 FL-24 至 FL-27 措辞以清单为准，差异在 PR 偏离记录；四行，结论 `待签`；编号接 #1099 与 #1352 的行之后；FL-19 之后挂 2 个附件，#1352 的行不上传，#1099 的行我看不到——它若上传要重新计数；本刀第一行加 1 个、第二行加 3 个，共 6 个）：
+- 行一｜操作：`接上一行（文件页停在 FL-05 的空间，uploads 已展开）；在本机备一个不少于 3 页、大于 1 KB 的 fl-doc.pdf；在 FL-10 用的那个会话标签页里（文件页所在的标签页不动）经「+」菜单「上传文件」传入它，等标签传完；回到文件页点「刷新」，在 uploads 里点 fl-doc.pdf，在预览里向下翻到最后一页`｜期望：`预览区是浏览器自带的 PDF 查看器，能翻到最后一页；预览头有下载图标；页面不弹提示`。
+- 行二｜操作：`本行要求服务启动时 OFFICE_BIN 指向已安装的 LibreOffice，不是的话由启动服务的人照此重启，然后刷新浏览器页面并展开 uploads；在本机备 fl-plan.docx、fl-sheet.xlsx、fl-slides.pptx（各有几行可辨认的内容，都大于 1 KB）；在 FL-10 用的那个会话标签页里（文件页所在的标签页不动）经「+」菜单「上传文件」传入，等标签传完；回到文件页点「刷新」，在 uploads 里依次点这三个文件`｜期望：`每个文件先显示「正在转换文档…」，随后该提示消失，显示转换出的文档，内容可辨认；预览头都有下载图标`。
+- 行三｜操作：`由启动服务的人去掉 OFFICE_BIN 后重启服务；刷新浏览器页面，展开 uploads，点 fl-plan.docx，再点 fl-doc.pdf`｜期望：`fl-plan.docx 的预览区显示「服务器未启用文档转换，请下载后查看」，没有文档内容，点预览头的下载图标能存下原文件；fl-doc.pdf 照常显示`。
+- 行四｜操作：`由启动服务的人把 PREVIEW_DOCUMENT_MAX_BYTES 设为 1024（OFFICE_BIN 仍不设）后重启；刷新浏览器页面，展开 uploads，点 fl-doc.pdf，再点 fl-plan.docx；看完后由启动服务的人恢复原来的配置重启，再刷新浏览器页面并展开 uploads`｜期望：`两个文件都显示「文件过大，无法预览」，没有查看器；预览头的下载图标仍可用`。
+- 坑：重启后登记表清空，必须刷新浏览器页面；1024 是否过得了 `server/src/preview-config.ts:92` 的下限校验，开工时核一下；#1099 之后刷新会按 `path` 还原选中，措辞可能要跟着改；`pdfViewerEnabled` 为 false 的情况 19.4 没要求行，签核人要改浏览器设置才做得出，不写行。
+- 变异：给 pdf / 办公文档的 iframe 加 `sandbox`（任意值）→ 封死属性集合与 `hasAttribute("sandbox")` 两条断言判红。
+- 变异：加 `referrerpolicy` / `allow` / `name` → 封死属性集合判红；去掉 `title` → 同条判红。
+- 变异：pdf 用 `officeBase` → 「PDF 的嵌入」的 `src` 恰等判红；办公文档用 `base` → 「办公文档的嵌入」的 `src` 恰等判红。
+- 变异：整条路径一次 `encodeURIComponent`，或先 `trim` / 规范化 → 路径编码与「路径是数据」判红。
+- 变异：`>` 写成 `>=` → 「恰等于上限仍建 iframe」判红；去掉大小判定 → `huge.pdf` 一例判红。
+- 变异：大小判定只对 pdf 生效 → 「超限且未启用转换的办公文档 → 过大」判红；只对办公文档生效 → `huge.pdf` 判红。
+- 变异：`officeAvailable` 判定挪到大小之前 → 次序第二例判红；对 pdf 也判 `officeAvailable` → 「pdf 在 `officeAvailable:false` 下仍建 iframe」判红。
+- 变异：`=== false` 写成 `!navigator.pdfViewerEnabled` → `undefined` 一例判红；`pdfViewerEnabled` 判定只对 pdf 生效 → 须补一条「查看器禁用时 docx 显示此浏览器不支持…」，补后判红，不补则写「未做」。
+- 变异：`pdfViewerEnabled` 判定挪到最前 → 次序第一、第三例判红。
+- 变异：令牌未就绪或失败时仍建 iframe → `error` / `loading` 无 iframe 的断言判红；只处理 `error` 不处理 `loading`（或反之）→ 各自判红。
+- 变异：办公文档不盖遮层 → 「`load` 之前可见」判红；`load` 后不撤 → 「之后不可见」判红；pdf 也盖遮层 → pdf 的「没有 正在转换文档…」判红。
+- 变异：遮层状态不随 `reload` 重置 → 「`reload + 1` 后遮层重现」判红；key 不含 `src` → 「换 `officeBase` 后遮层重现」判红。
+- 变异：选中 pdf / docx 仍发 `file` → 页面级起点 `[]` 判红。
+- 变异：`needed` 不含 `document` → 页面级取 iframe 超时（停在 `正在加载预览…`）。
+- 变异：宿主只给网页传 `reload` → 页面级「签发 500 后刷新」判红。
+- 变异：`reload` 不递增 → 同一例与组件级换节点断言判红。
+- 变异：每次预览都重新签发 → 「两个 html 加一个 pdf 恰一次签发」判红；续期时以令牌对象为 key → 「节点 `toBe` 原节点」判红。
+- 变异：把 `base` 渲染成可见文字或写进地址 → 页面级令牌不可见的断言判红。
+- 变异：不可观察（jsdom 不为 iframe 导航）：查看器是否出现、`load` 是否对 PDF 响应触发、失败页是否触发 `load`、刷新后是否真的重新请求、框内来源与 cookie；归 FL 行与 #1123，实测时只写所走的引擎。（合入后更正：`load` 一项已在 Chromium 151 与 Firefox 153 实走，记录在 design D19 之下。）
+- 变异：遍历、符号链接、跨空间 id、他人空间相同的 404、`sandbox.reject` → 不适用：本刀无服务端代码与新的带路径请求，证据在 `server/test/preview-app*.test.ts`、`preview-office-route.test.ts` 与 #1075。
