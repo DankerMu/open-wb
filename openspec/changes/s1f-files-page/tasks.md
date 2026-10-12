@@ -507,6 +507,7 @@ Minimal mergeable slice: 18.2（tsv）、18.3（svg）、18.4（图片）三刀�
 - [ ] 19.2 `previewers/frame.tsx`：网页渲染视图（`sandbox="allow-scripts allow-forms allow-modals"`、`referrerpolicy="no-referrer"`、无 `srcdoc`、渲染 / 源码切换；选中 html 时不发 `file` 请求，切到源码才发）、PDF 与办公文档（无 `sandbox`、`正在转换文档…` 遮层、三种不建 iframe 的情况）；路径按段编码。
   PDF 与办公文档的部分 Depends on 1.1：其结论与设计相符才开工（不符时这一部分停下，网页渲染视图照常交付）。
   实施注记见 `implementation-notes.md`「19.2 网页渲染视图、19.5，含分摊的 19.3 / 19.4 条款（#1093）」。
+  实施注记见 `implementation-notes.md`「19.2 PDF 与办公文档，含分摊的 19.3 / 19.4 条款（#1094）」。
 - [ ] 19.3 测试（新文件 `web/test/previewers-frame.test.tsx`、`use-preview-token.test.tsx`）：file-previewers「隔离来源的嵌入与令牌」四个场景与「PDF 与办公文档」三个场景（假定时器驱动续期；`navigator.pdfViewerEnabled` 打桩）。
   写法：两个文件静态导入 `previewers/frame` 与 hook 直接渲染（不经加载函数）；`iframe` 在令牌签发的 promise 落定之后才出现，真实定时器下一律 `await screen.findBy…` / `waitFor` 取它再断言属性，「此时没有发出 `file` 请求」这类计数断言排在取到 `iframe` 之后；
   「共用与续期」在 `render` 之前装假定时器，签发与续期都用 `await act(() => vi.advanceTimersByTimeAsync(n))` 推进后同步断言，不混用 `findBy`。
