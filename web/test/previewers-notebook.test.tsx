@@ -345,6 +345,16 @@ describe("Notebook 预览器：输出按类型", () => {
       "<!DOCTYPE html><html><head><title>t</title></head><body><p>x</p></body></html>",
       "<!DOCTYPE html><html><head><title>t</title></head><body><p>x</p></body></html>",
     ],
+    [
+      "原文以 html 开标签开头、没有 DOCTYPE 时前缀仍在最前",
+      "<html><head><title>t</title></head><body><p>x</p></body></html>",
+      "<html><head><title>t</title></head><body><p>x</p></body></html>",
+    ],
+    [
+      "原文开头的字节序标记与其中的回车换行原样保留",
+      "\uFEFF<p>一</p>\r\n<p>二</p>\r\n",
+      "\uFEFF<p>一</p>\r\n<p>二</p>\r\n",
+    ],
   ])("HTML 输出的 srcdoc 是固定前缀加原文：%s", (_label, html, original) => {
     const container = withOutputs(display({ "text/html": html }));
 

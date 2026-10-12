@@ -98,10 +98,12 @@ function svgAddress(text: string): string | null {
  * `data:` 图片与内联样式照常生效，原文自带的第二个策略 `meta` 没有把它放宽；Chromium 与 WebKit 里
  * 框内指向外部的图片、样式表、字体、音视频、子框架与插件内容都没有发出 HTTP 请求。
  * 同一次实测里它没有挡住的：
- *   - Firefox：输出里同时有音视频元素时，只带 srcset 的 `img` 在部分运行里仍被取回，其余同上；
+ *   - Firefox：只带 srcset 的 `img` 与某些其它元素同现时，在部分运行里仍被取回（实测到的同现元素是
+ *     `video`；`audio` 只与 `svg image` 合成一组测过；原因未查，不能断定只限这些元素），其余同上；
  *   - Chromium：对框内指向外部的子框架仍向对方建立一条 TCP 连接（不发请求）；
  *   - WebKit：对 `link rel=preconnect` 仍建立连接；
- *   - 三个浏览器：用户点框内链接时该框自身被导航到链接地址。
+ *   - 三个浏览器：用户点框内链接时该框自身被导航到链接地址；这次导航在 Firefox 与 WebKit 里
+ *     带主站来源作 Referer，Chromium 里不带。
  * 公网地址、https 与域名解析未测。
  */
 const HTML_OUTPUT_POLICY =
