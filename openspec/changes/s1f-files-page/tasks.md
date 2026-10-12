@@ -675,6 +675,7 @@ Minimal mergeable slice: 26.1 的夹具与 README 可先合（既有 hurl 只断
   把 `walk-out-<project>` 重命名为 `walk-renamed-<project>` 后经确认框删除并以 `tree` 接口复核。两个 project 都跑。
   实施注记见 `implementation-notes.md`「27.1 的 (a)(c)(d)(e)（#1114）」。
 - [ ] 27.2 验证「相对资源没加载不可假绿」：在隔离的调用方夹具里删掉 `site/style.css` 跑一次，确认在标题颜色断言处失败；恢复后全绿。结果写进 PR。
+  实施注记见 `implementation-notes.md`「27.1 的 (b)、27.2（#1115）」。
 - [ ] 27.3 FL 行核对：把组 3、17–22 各自加的 FL 行通读一遍，补上遗漏的窄屏与深色情形，去重；确认全部为 `待签`、守卫通过。
 
 Suggested fixture level: compact - 真实浏览器走查的扩充；隔离来源 iframe 的行为只有这一层能证明
