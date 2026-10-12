@@ -1,12 +1,22 @@
 // 工作空间侧边栏（#1105）整页测试的夹具与页面查询：五个会话（两个各绑一个正式空间、一个与第一个同
 // 空间、一个未绑定、一个用临时空间）、两个空间的目录与一份文本预览的路由、顶栏按钮与侧边栏的读取。
-// 页面搭法来自 chat-page-session-meta-support.tsx（不改它）。
+// 页面搭法来自 chat-page-session-meta-support.tsx（不改它）。末尾是 PROJ 空间上的一组（#1106、#1107 的
+// 整页测试共用）：目录路由、带快照打开会话页与侧边栏、`tree` 请求与树行的读取。
 import "./radix-platform.js";
 import { fireEvent, screen, within } from "@testing-library/react";
-import { ROOT_PREFIX } from "./chat-page-file-changes-support.js";
+import {
+  listed,
+  openSession,
+  PROJ,
+  quiesce,
+  ROOT_PREFIX,
+  type Snapshot,
+} from "./chat-page-file-changes-support.js";
 import { A, B, C, crumb, mountSessions, view } from "./chat-page-session-meta-support.js";
 import type { FetchRoutes } from "./chat-page-support.js";
-import { calls, type FetchMock, jsonResponse, textPreviewResponse } from "./support.js";
+import { issued } from "./files-site-fixture.js";
+import { calls, type FetchMock, jsonResponse, paths, textPreviewResponse } from "./support.js";
+import { yieldMacrotask } from "./ui-support.js";
 
 export const NAME = "工作空间侧边栏";
 export const CLOSE = "关闭工作空间侧边栏";
@@ -133,4 +143,50 @@ export function sidebarHead(scope: HTMLElement) {
 /** 对 `workspaceId` 的 `path` 目录发出的 `tree` 请求，按调用顺序。 */
 export function treeCalls(fetchMock: FetchMock, workspaceId: string, path = "") {
   return calls(fetchMock, treeOf(workspaceId, path));
+}
+
+/**
+ * PROJ 的目录：根下 `deep`、`out`、`src` 三个目录与 `draft.md`、`readme.md`；`out` 里是 `b.md` 与
+ * `index.html`，`src` 里是 `app.ts` 与 `util.ts`，`deep` 里是 `x.md`（用例都不展开它）。
+ */
+function project(extra: FetchRoutes = {}): FetchRoutes {
+  return {
+    [treeOf(PROJ.id)]: listing("", [
+      dir("deep"),
+      dir("out"),
+      dir("src"),
+      file("draft.md"),
+      file("readme.md"),
+    ]),
+    [treeOf(PROJ.id, "deep")]: listing("deep", [file("x.md")]),
+    [treeOf(PROJ.id, "out")]: listing("out", [file("b.md"), file("index.html")]),
+    [treeOf(PROJ.id, "src")]: listing("src", [file("app.ts"), file("util.ts")]),
+    [fileOf(PROJ.id, "readme.md")]: () => textPreviewResponse("自述正文"),
+    [`/api/workspaces/${PROJ.id}/preview-token`]: () => issued(),
+    ...extra,
+  };
+}
+
+/** 在 PROJ 上打开 `snapshot` 的会话页与侧边栏，等到根目录里的 `readme.md` 出现。 */
+export async function openChanges(snapshot: Snapshot, extra: FetchRoutes = {}) {
+  const page = await openSession(snapshot, listed, project(extra));
+  await crumb("saved title");
+  const { region } = await openSidebar("readme.md");
+  return { ...page, region };
+}
+
+/** 对 PROJ 发出的全部 `tree` 请求，按调用顺序。 */
+export function treeRequests(fetchMock: FetchMock) {
+  return paths(fetchMock).filter((path) => path.startsWith(`/api/workspaces/${PROJ.id}/tree?`));
+}
+
+/** 树上各行的名字，自上而下；树栏收起时照样读（直接在 DOM 里找）。 */
+export function rowNames(scope: HTMLElement) {
+  return [...scope.querySelectorAll('[data-slot="tree-name"]')].map((node) => node.textContent);
+}
+
+/** 让已发出的请求与随后的渲染落地，之后再断「没有新的请求」。 */
+export async function settled() {
+  await quiesce();
+  await yieldMacrotask();
 }

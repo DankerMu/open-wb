@@ -8,11 +8,12 @@ import type { ApiClient } from "../../lib/api.js";
 import { SHELL_NARROW_QUERY, useMediaQuery } from "../../lib/viewport.js";
 import { Icon, useEscapeFallback } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
-import { logicalPath, WorkspaceBrowser } from "../files/index.js";
+import { logicalPath, WorkspaceBrowser, type WorkspaceBrowserHandle } from "../files/index.js";
 import type { ChatState } from "./stream.js";
 import {
   MIN_WIDTH,
   sessionChangedPaths,
+  useAssistantRefresh,
   type useWorkspaceSidebar,
 } from "./use-workspace-sidebar.js";
 import type { Workspace } from "./workspace-list.js";
@@ -46,6 +47,9 @@ type SidebarTarget = {
  *   （读代码推出，没有测试；规格没有写这两种情况）。
  * - 折叠只给浏览器的树栏加 `hidden`，不卸载：展开状态、选中与预览都在浏览器的状态里。折叠按钮是同
  *   一个节点换名字与图标，焦点留在它上面。
+ * - 随助手的改动刷新（workspace-sidebar「随助手改动刷新」）：`useAssistantRefresh` 拿 `view` 与浏览器
+ *   的句柄去调它的 `refresh`。树区折叠、`只看本会话改动` 打开时照常调：前者预览仍可见；后者浏览器
+ *   自己不发 `tree`、只重取预览，关掉开关后期间没重列的层不补（读代码推出，没有测试）。
  */
 function SidebarContent({
   client,
@@ -63,6 +67,8 @@ function SidebarContent({
     () => ({ label: "本会话已改动", paths: sessionChangedPaths(view) }),
     [view],
   );
+  const browser = useRef<WorkspaceBrowserHandle | null>(null);
+  useAssistantRefresh(view, browser);
   const treeToggle = treeCollapsed ? "展开文件树" : "折叠文件树";
   const listed = workspace !== undefined && account !== undefined;
   return (
@@ -137,6 +143,7 @@ function SidebarContent({
         onlyPathsEmpty="本会话暂无文件改动"
         onPathChange={setPath}
         path={path}
+        ref={browser}
         treeCollapsed={treeCollapsed}
         workspaceId={workspaceId}
       />

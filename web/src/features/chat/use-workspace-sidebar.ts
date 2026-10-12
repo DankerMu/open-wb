@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { type RefObject, useEffect, useRef, useState } from "react";
 import { useRequestMainWidth } from "../../lib/shell-nav.js";
+import type { WorkspaceBrowserHandle } from "../files/index.js";
 import type { ChatState } from "./stream.js";
 import { summarizeChanges } from "./stream-artifacts.js";
 import { WORKSPACE_ACTION_LABEL } from "./topbar-actions.js";
@@ -39,6 +40,76 @@ function storedShare(): number {
 export function sessionChangedPaths(view: ChatState | null): ReadonlySet<string> {
   const steps = view?.messages.flatMap((message) => message.steps) ?? [];
   return new Set(summarizeChanges(steps).map((change) => change.path));
+}
+
+/**
+ * `view` 里「已结束且 `changes` 非空」而 `seen` 里还没有的步骤所改的路径；这些步骤同时记进 `seen`
+ * （键是 `消息 id:步骤 id`）。
+ */
+function unseenChangedPaths(view: ChatState, seen: Set<string>): string[] {
+  return view.messages.flatMap((message) =>
+    message.steps.flatMap((step) => {
+      const key = `${message.id}:${step.id}`;
+      if (step.status === "running" || !step.changes?.length || seen.has(key)) return [];
+      seen.add(key);
+      return step.changes.map((change) => change.path);
+    }),
+  );
+}
+
+/** 步骤结束的局部刷新的合并窗口（毫秒）：从窗口里第一批改动起算，后到的批次不顺延。 */
+const MERGE_MS = 300;
+
+/**
+ * 侧边栏随助手的改动刷新（workspace-sidebar「随助手改动刷新」）。由 `SidebarContent` 调用，随它挂载
+ * 与卸载：侧边栏关闭、换会话、宽窄屏互换都是卸载，卸载时清掉待发的定时器。不轮询。
+ *
+ * - 局部刷新：`view` 里出现没见过的「已结束且 `changes` 非空」的步骤时，把它的路径排进待刷集合，
+ *   `MERGE_MS` 后对集合调一次 `refresh(paths)`（浏览器只重列这些路径已加载的各级父目录，当前文件在
+ *   其中才重取预览）。按步骤（`消息 id:步骤 id`）判新而不按路径：同一路径被后一个步骤再改时也要刷。
+ *   `changes` 为空的已结束步骤不记，`files.changed` 晚于 `step.end` 到达时仍算新。
+ * - 第一个非 `null` 的 `view` 只记下已有的步骤、不刷新：首屏历史与重开侧边栏时已有的改动不是新的
+ *   （挂载时浏览器自己请求一次根）。
+ * - 兜底：`view.status` 由 `running` 变为别的值时丢掉待刷集合与定时器，立即 `refresh()`（全部已加载
+ *   的目录与当前文件）——`bash` 等途径改的文件没有 `changes`，靠这一次。`null` 的 `view` 不参与比较。
+ * - 定时器到点时才读 `browser.current`（`refresh` 的身份会变）。处理 `view` 的 effect 没有清理函数：
+ *   每个 `text.delta` 都换 `view`，在那里清定时器会把窗口一直推后。
+ */
+export function useAssistantRefresh(
+  view: ChatState | null,
+  browser: RefObject<WorkspaceBrowserHandle | null>,
+) {
+  const seen = useRef<Set<string> | null>(null);
+  const running = useRef(false);
+  const pending = useRef(new Set<string>());
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    if (view === null) return;
+    const seeding = seen.current === null;
+    seen.current ??= new Set();
+    const fresh = unseenChangedPaths(view, seen.current);
+    const ended = running.current && view.status !== "running";
+    running.current = view.status === "running";
+    if (seeding) return;
+    if (ended) {
+      clearTimeout(timer.current);
+      timer.current = undefined;
+      pending.current.clear();
+      browser.current?.refresh();
+      return;
+    }
+    if (fresh.length === 0) return;
+    for (const path of fresh) pending.current.add(path);
+    timer.current ??= setTimeout(() => {
+      timer.current = undefined;
+      const paths = [...pending.current];
+      pending.current.clear();
+      browser.current?.refresh(paths);
+    }, MERGE_MS);
+  }, [view, browser]);
+
+  useEffect(() => () => clearTimeout(timer.current), []);
 }
 
 /**
