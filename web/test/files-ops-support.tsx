@@ -103,6 +103,12 @@ export async function openRename(name: string) {
   return screen.findByRole("dialog", { name: "重命名" });
 }
 
+/** 经行菜单打开 `name` 这一行的 `移动到` 对话框。 */
+export async function openMove(name: string) {
+  fireEvent.click(within(await openRowMenu(name)).getByRole("menuitem", { name: "移动到…" }));
+  return screen.findByRole("dialog", { name: "移动到" });
+}
+
 /** 经行菜单打开 `name` 这一行的删除确认框（`alertdialog`，按标题找）。 */
 export async function openDelete(name: string) {
   fireEvent.click(within(await openRowMenu(name)).getByRole("menuitem", { name: "删除" }));
@@ -137,6 +143,37 @@ export function submitButton(dialog: HTMLElement) {
 export function renameTo(dialog: HTMLElement, name: string) {
   fireEvent.change(nameInput(dialog), { target: { value: name } });
   fireEvent.click(submitButton(dialog));
+}
+
+/** `移动到` 对话框里的下拉 `目标位置`；没有可选目标时没有它，这里会抛错。 */
+export function targetSelect(dialog: HTMLElement) {
+  return within(dialog).getByLabelText<HTMLSelectElement>("目标位置");
+}
+
+export function moveButton(dialog: HTMLElement) {
+  return within(dialog).getByRole<HTMLButtonElement>("button", { name: "移动" });
+}
+
+/** 在 `目标位置` 选 `target` 并点 `移动`。 */
+export function moveInto(dialog: HTMLElement, target: string) {
+  fireEvent.change(targetSelect(dialog), { target: { value: target } });
+  fireEvent.click(moveButton(dialog));
+}
+
+/** 拷入层 `dialog` 的遮罩。 */
+export function overlay() {
+  const element = document.querySelector('[data-slot="dialog-overlay"]');
+  if (!element) throw new Error("expected the dialog overlay");
+  return element;
+}
+
+/** `折叠 <目录>` 那一行之下的各行名字。对话框开着（树被标成 aria-hidden）的时候也能用。 */
+export function rowsUnder(directory: string) {
+  const names = screen
+    .getByRole("button", { name: `折叠 ${directory}`, hidden: true })
+    .closest("li")
+    ?.querySelectorAll(':scope > ul [data-slot="tree-name"]');
+  return [...(names ?? [])].map((node) => node.textContent);
 }
 
 export function dialogGone(name = "重命名") {
