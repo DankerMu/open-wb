@@ -393,7 +393,7 @@
 - issue 把 `pdfViewerEnabled` 排在三项判定之首，规格次序是大小 → `officeAvailable` → `pdfViewerEnabled`（`specs/file-previewers/spec.md:136`「依次判定」）。
 - 编排简报说的「三种」含签发失败，规格的三种不含；签发失败是第四种，出自 `:107`「签发失败（非 401）时预览区显示…」。
 - D16 写「加下载按钮」，规格是「保留预览头的下载链接」，按规格不另加按钮。
-- `tasks.md:513` 的 grep 在 origin/master 仍零命中，既有用例无一须改。
+- `tasks.md:513` 的 grep 在 origin/master 仍零命中，既有用例无一须改。（合入后更正：#1352 的夹具里有两行 html 条目命中该 grep，仍无既有用例须改。）
 - 状态与宿主（不发 `file` 的依据是 `specs/files-web/spec.md:90`，不是设计选择）：
 - `types.ts` 的 `PreviewState` 加 `{ status: "document"; reload: number }`。
 - `immediatePreview`（`preview-area.tsx:62-88`）对 `kind === "pdf" || "office"` 返回它；`previous` 同为 `document` 时 `reload + 1`，否则 0，与网页同形。
@@ -446,7 +446,7 @@
 - 令牌串不在 `document.body.textContent`、`location.href` 不变、console 无输出、「通知」区无 `listitem` 与 `.ui-toast`。
 - 浏览器行为一律标「按代码推得，未走查」；本刀不加 ui-walk 步骤。
 - 门槛：无新依赖、无新 `ApiClient` 方法（`api-files-archive.test.ts` 的键集不动）、`ui-layering` 不用登记；`frame.tsx` 新增的导出只经 `index.ts` 的动态导入进产品代码，静态导入者是测试（knip 的 web 入口含 `test/**/*.test.tsx`）；不建大 DOM；计数断言用 `toStrictEqual` 且先断言起点。
-- FL 行（四行，结论 `待签`；编号接 #1099 与 #1352 的行之后；FL-19 之后挂 2 个附件，#1352 的行不上传，#1099 的行我看不到——它若上传要重新计数；本刀第一行加 1 个、第二行加 3 个，共 6 个）：
+- FL 行（下面是开工前的草稿，交付的 FL-24 至 FL-27 措辞以清单为准，差异在 PR 偏离记录；四行，结论 `待签`；编号接 #1099 与 #1352 的行之后；FL-19 之后挂 2 个附件，#1352 的行不上传，#1099 的行我看不到——它若上传要重新计数；本刀第一行加 1 个、第二行加 3 个，共 6 个）：
 - 行一｜操作：`接上一行（文件页停在 FL-05 的空间，uploads 已展开）；在本机备一个不少于 3 页、大于 1 KB 的 fl-doc.pdf；在 FL-10 用的那个会话标签页里（文件页所在的标签页不动）经「+」菜单「上传文件」传入它，等标签传完；回到文件页点「刷新」，在 uploads 里点 fl-doc.pdf，在预览里向下翻到最后一页`｜期望：`预览区是浏览器自带的 PDF 查看器，能翻到最后一页；预览头有下载图标；页面不弹提示`。
 - 行二｜操作：`本行要求服务启动时 OFFICE_BIN 指向已安装的 LibreOffice，不是的话由启动服务的人照此重启，然后刷新浏览器页面并展开 uploads；在本机备 fl-plan.docx、fl-sheet.xlsx、fl-slides.pptx（各有几行可辨认的内容，都大于 1 KB）；在 FL-10 用的那个会话标签页里（文件页所在的标签页不动）经「+」菜单「上传文件」传入，等标签传完；回到文件页点「刷新」，在 uploads 里依次点这三个文件`｜期望：`每个文件先显示「正在转换文档…」，随后该提示消失，显示转换出的文档，内容可辨认；预览头都有下载图标`。
 - 行三｜操作：`由启动服务的人去掉 OFFICE_BIN 后重启服务；刷新浏览器页面，展开 uploads，点 fl-plan.docx，再点 fl-doc.pdf`｜期望：`fl-plan.docx 的预览区显示「服务器未启用文档转换，请下载后查看」，没有文档内容，点预览头的下载图标能存下原文件；fl-doc.pdf 照常显示`。
@@ -470,5 +470,5 @@
 - 变异：`reload` 不递增 → 同一例与组件级换节点断言判红。
 - 变异：每次预览都重新签发 → 「两个 html 加一个 pdf 恰一次签发」判红；续期时以令牌对象为 key → 「节点 `toBe` 原节点」判红。
 - 变异：把 `base` 渲染成可见文字或写进地址 → 页面级令牌不可见的断言判红。
-- 变异：不可观察（jsdom 不为 iframe 导航）：查看器是否出现、`load` 是否对 PDF 响应触发、失败页是否触发 `load`、刷新后是否真的重新请求、框内来源与 cookie；归 FL 行与 #1123，实测时只写所走的引擎。
+- 变异：不可观察（jsdom 不为 iframe 导航）：查看器是否出现、`load` 是否对 PDF 响应触发、失败页是否触发 `load`、刷新后是否真的重新请求、框内来源与 cookie；归 FL 行与 #1123，实测时只写所走的引擎。（合入后更正：`load` 一项已在 Chromium 151 与 Firefox 153 实走，记录在 design D19 之下。）
 - 变异：遍历、符号链接、跨空间 id、他人空间相同的 404、`sandbox.reject` → 不适用：本刀无服务端代码与新的带路径请求，证据在 `server/test/preview-app*.test.ts`、`preview-office-route.test.ts` 与 #1075。
