@@ -520,3 +520,32 @@
 - 变异：方向键不改宽度，或刷新后宽度不沿用 → 走查 `desktop-light` 红；jsdom 下是否可观察未验证，不可则写「未做」而不是「不可观察」。
 - 变异：Tab 逸出窄屏层 → 未做（无 user-event；走查若不加 Tab 步骤就如实写未做）。
 - 合入后更正（以 #1105 的 PR 文本为准）：最小宽度按像素（对话区 320、侧边栏 240），不按 (c) 的占比范围；M05 只在 hook 直测判红（整页被 `chatTopbar` 的未选中分支挡住）；M19（去掉 `onOpenAutoFocus`）与 W29（`modal={false}`）不可观察；M15 未做（本刀代码够不到事件连接）；`NULL_SESSION_META` 的导入方在 `web` 下是 20 个，不是 29；`file-meta` 例外的括注原在 `specs/files-web/spec.md:217`。头部不设 `刷新`（编排方裁定，规格句已同步改）；`只看本会话改动` 与 `折叠文件树` 归 24.2，本刀未做。
+
+## 21.6（#1362）
+
+- 边界：只动 `web/test`，不触任何 Critical Path；前提 21.2 / 21.3 已合入（`9818b84b`、`67fe3ce3`），不被 1.1 / 1.2 / 1.3 挡；no checklist rows；无配置项。门禁是 `make check`（lint、typecheck、test、anti-drift）。
+- 现状核对：`files-deep-link.test.tsx` 794 行、39 例（6 + 7 + 23 + 3）、`expect(` 共 111 处（辅助段 4，四个 describe 依次 21 / 23 / 43 / 20）；`workspace-browser.tsx` 641 行。漂移：issue 写「守卫上限 1000」，实际 `scripts/size-guard.sh:6` 与 `constraints.yaml:60` 都是 800，原文件只剩 6 行余量；`tasks.md` 21.6 没抄这个数，不必改文。
+- 失败形状（job 日志）：栈在 `files-deep-link.test.tsx:118`（`selectedRow` 的 `waitFor`），最后一次检查由 50ms 定时器触发。报的是 `AssertionError` 而不是找不到元素，说明超时那一刻 `app.ts` 行已在树上（`src/deep` 的列表已提交）、只差选中。首例 1333ms（挂载约 330ms 加整 1000ms 等待），同流程第二例 1026ms 通过，第三例（两次挂载）1576ms；该文件在全套开跑后 23 秒内跑完，全套 import 158s、environment 159s。日志里的 DOM 快照被截到 7000 字符，只有外壳导航，不能当树状态的证据。
+- 根因假设：`asyncUtilTimeout` 默认 1000ms（`node_modules/@testing-library/dom/dist/config.js:15`），`web/vitest.config.ts`、`vitest.shared.mjs` 与 `web/test` 都没改它，也没有 `retry` / `testTimeout`。这一个 1000ms 要覆盖 `auth/me`、`workspaces`、根、`src`、`src/deep` 五次应答各自的渲染，再加「列表提交 → effect（`workspace-browser.tsx:532-545`）→ `selectFile` → 再提交」。CI 是 `vitest run --coverage`，开头所有 worker 同时冷启动，同一流程热态也要约 0.8–1s，余量本来就是零。
+- 放大器（待实测）：`selectedRow` 每次 DOM 变更和每 50ms 都跑 `screen.getByRole("navigation", …)`（扫整个应用外壳）加 `within(tree).getByRole("button", { name })`。jsdom 里这两个查询要算可访问名并逐级查祖先样式，轮询本身在和 React 的调度任务抢同一个线程。
+- 已排除：按需加载的块不是这次红的原因。`web/src` 只有 `previewers/index.ts:73-82,103` 有 `import()`，块在 `file` 应答成功后才取（`preview.tsx` 的 `LoadedPreview`），而选中在发 `file` 之前就发布（`workspace-browser.tsx:395-396`），`selectedRow` 也排在 `codePreview` 之前。
+- 产品代码：读码未见缺陷，不需要改。「行已出现、尚未选中」是一次 effect 的固有间隙；`revealRef` 只在点击、卸载、`path` 变化时清，本例都不发生。停下报告的判据：超时后再 `await settle()` 两轮，`aria-current` 仍为空（定位停住）；或换成廉价轮询后热态「挂载到选中」仍超过约 800ms（外壳渲染成本，报数字给 owner，不调超时）。
+- 第一步实测（临时插桩，不提交）：在 `selectedRow` 回调外包 `performance.now()` 与计数，记单次检查耗时、检查次数、挂载到选中的总时长。在 `web/` 下单跑首例 `npx vitest run --coverage test/files-deep-link.test.tsx -t "直接访问带 path 的地址"`（单文件覆盖率阈值会红，加 `--coverage.thresholds.lines=0` 等四项或只看用例结果），循环 N 次。争用条件任选：另一个 shell 同时跑整套 web 测试、容器限 CPU 小数核、macOS 用 `taskpolicy -b` 包住命令。条件与 N 写进 PR。
+- 确定性复现与前后对比：本文件临时 `configure({ asyncUtilTimeout: T })`（`@testing-library/react`），T 向下扫到首例稳定红；记下首例（冷）与第二例（热）各自的临界 T。修后在同一 T 下首例连续 N 次绿。`configure` 不入库。
+- 修法（实测确认轮询成本占主导时）：轮询只用廉价谓词，原断言逐字保留、在其后不轮询地执行一次。即 `selectedRow` 先 `waitFor` 断 `document.querySelector('nav[aria-label="工作空间目录树"] [aria-current="true"] [data-slot="tree-name"]')?.textContent` 等于 `name`（`tree.tsx:240` 是 `aria-label`，属性选择器可用），再跑原来那句 `expect(row(name).getAttribute("aria-current")).toBe("true")`。只改这一个辅助函数体，全部 `expect(` 行原文不变。若实测是渲染而非轮询占主导，改用 `act` 下按轮数推进（先例 `chat-approval-support.tsx:85` 的 `flush(rounds)`），仍不碰超时。禁用：`{ timeout }`、`asyncUtilTimeout`、`retry`、`testTimeout`。
+- 提交顺序：提交一在原文件修 `selectedRow`（加 3–4 行，不超 800）；提交二纯搬移。提交二用 `git show --color-moved=dimmed-zebra` 应全是「移动」；搬移后 `expect(` 合计仍 111，`npx vitest list` 的 39 个标题集合前后相等；PR 附「标题 → 新文件:行」对照表。
+- 拆分（每个文件低于 600 行）：`web/test/files-deep-link-support.ts`（原 28–146 行的常量、`routes` / `address` / `open`、树与预览辅助、`settle`、`expectEmptyPreview`，约 140 行，无 JSX）。`files-deep-link.test.tsx` 留「深链打开」加「选中写入地址」（13 例，约 270 行，保留文件名，21.3 与旧注记的引用不失效）。`files-deep-link-failures.test.ts`：「指向目录、不存在与越界」（23 例，约 340 行；#1361 接着要改这里的 `..` 用例，留足余量）。`files-deep-link-component.test.tsx`：「不显示失败文案的定位失败（组件）」（3 例，约 130 行，唯一有 JSX 的）。嫌多可把后两个并成一个约 440 行的文件。
+- 守卫：knip 的 web 入口只有 `test/**/*.test.ts(x)`，support 的每个导出必须被某个测试文件导入。`SECOND_ROOT`、`FILE`、`ROOT_ROWS` 之外只有单个文件用的东西（`expectAppOpened`、`COMPOSED`、`OUT_ROWS`、组件段的 `mount` / `table`）留在各自测试文件；`codePreview` 只有「深链打开」用，跟过去。四行的 `afterEach` 每个测试文件各留一份，不为它造函数（jscpd 记号数不够成块）。新文件名不含 naming-guard 的禁用后缀。
+- 残余（登记不修）：`codePreview` 同样吃 1000ms，还要等 `previewers/code.js` 首次转换，把它的耗时一并量进同一张表，数字不坏就不动。收尾勾 `tasks.md` 21.6，PR 列出动过的 `openspec/` 文件。
+- 变异：把 `selectedRow` 的廉价谓词换回原来的角色查询，在记录的临界 T 下跑 → `files-deep-link.test.tsx`「直接访问带 path 的地址…」判红。只有它需要降预算才可观察，常规预算下预期不可观察。
+- 变异：`workspace-browser.tsx` 的 `continueReveal` 对 `notify:false` 跳过 `selectFile` → 同一例判红，报文仍是 `expected null to be 'true'`，且在预算内红而不是挂住；证明新等待仍在断言。
+- 变异：`browser-paths.ts` 的 `revealStep` 不再 `expand.push(parent)` → 「深链打开」前三例判红（`折叠 deep` 找不到）。
+- 变异：`page.tsx:216` 去掉 `replace: true` → 「依次选中 readme.md 与 out/a.md…没有新增历史记录」判红。
+- 变异：`page.tsx:36` 删掉 `parameters.delete("path")` → 「ws 属于别人或不存在…」「没有 ws…」两例判红。
+- 变异：`continueReveal` 末支把 `MISSING_FILE` 换成 `null` → failures 文件的 `out/gone.md`、`..`、`/x`、`out/`、尾随空格、合成形式各行判红。
+- 变异：`openDirectory` 去掉 `rows.includes(…)` 守卫 → failures 文件「path=./bad…」判红（多出一次 `tree?path=.%2Fbad`）。
+- 变异：`loadDirectory` 的 catch 去掉 `isUnauthorized(error)` → 组件段「某一级父目录应答 401…」判红。
+- 变异：`failureOf` 不看 `target.asked` → 组件段「onlyPaths 下 path 指向没加载过的层…」判红。
+- 变异：`endWithoutFile` 去掉 `target.notify` 判断 → 组件段「reveal() 定位到不存在的文件或失败的一级…」判红。
+- 变异：搬移时漏掉任意一个 `it` → vitest 汇总 39 变 38，对照表缺行。
+- 合入后更正（以 #1362 的 PR 文本为准）：实测根因是 `waitFor` 回调里按角色查询的成本（单次 21–43ms，占首例等待的 78%），不是渲染；除 `selectedRow` 外还改了 `rowNames`（拆分后它成了 failures 文件冷启动首例的第一个等待）；`expect(` 合计 112（原 111 加修复的一行）；`TREE` 未从 support 导出（与 `ROOT` 同值，knip 报重复导出）；两句变异报文预测与实测不同（M2 报 `expected undefined to be 'app.ts'`，M3 红 10 例）。1000ms 预算这一类没有闭合：`findRow` 与 `previewRegion().findBy*` 仍在轮询里跑角色查询。
