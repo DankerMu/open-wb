@@ -296,7 +296,7 @@ async function sendFromWelcome(walk: TempWalk, events: Watched): Promise<TempSes
   return { sessionId: body.id, workspaceId: body.workspaceId };
 }
 
-// 第 1 步后半：能力栏的只读标签、侧栏分组、文件变更卡（空间内相对路径、没有 `查看详情`）、产物卡预览，
+// 第 1 步后半：能力栏的只读标签、侧栏分组、文件变更卡（空间内相对路径、`查看详情` 以它为名）、产物卡预览，
 // 以及服务端的两处：空间列表不含它，它的 tree 恰有那一个文件。
 async function expectTemporarySpace(walk: TempWalk, workspaceId: string): Promise<void> {
   const { page, project, file } = walk;
@@ -324,7 +324,7 @@ async function expectTemporarySpace(walk: TempWalk, workspaceId: string): Promis
   await expect(row).toHaveCount(1);
   await expect(row.locator('[data-slot="file-change-path"]')).toHaveText(file);
   await expect(row.locator('[data-slot="file-change-kind"]')).toHaveText("写入");
-  await expect(card.getByRole("button", { name: /查看详情/u })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: `查看详情 ${file}`, exact: true })).toHaveCount(1);
   await walkArtifactPreview(page, file);
 }
 

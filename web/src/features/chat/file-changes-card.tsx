@@ -1,6 +1,5 @@
-/* File-change card adapted from resource/workbuddy-live-demo.html:2468-2476 (fileChangesHTML) and :519-526 (its frame): the head has no icon, each row shows the logical path `<account>/<dir>/<path>` (never the workspace root) and 查看详情 opens that workspace in /files. Built from the copied-layer Button and Tailwind classes; each row carries its own classes. */
+/* File-change card adapted from resource/workbuddy-live-demo.html:2468-2476 (fileChangesHTML) and :519-526 (its frame): the head has no icon, each row shows the logical path `<account>/<dir>/<path>` (never the workspace root) and 查看详情 opens the workspace sidebar of the session page on that file, without navigating. Built from the copied-layer Button and Tailwind classes; each row carries its own classes. */
 import { useId } from "react";
-import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
@@ -10,31 +9,44 @@ import type { ChatStepView } from "./stream-steps.js";
 import type { SessionSpace } from "./workspace-list.js";
 
 type FileChange = ReturnType<typeof summarizeChanges>[number];
-type ChangeSpace = { id: string; prefix: string };
-type ChangeSource = { space: SessionSpace | null; steps: readonly ChatStepView[] };
+/** 查看详情 of one row: `path` is workspace-relative, `trigger` the button that was clicked. */
+type Reveal = (path: string, trigger: HTMLElement) => void;
+type ChangeSource = {
+  /** Absent while the session has no workspace (`workspaceId` null or not known yet): no 查看详情. */
+  onReveal: Reveal | undefined;
+  space: SessionSpace | null;
+  steps: readonly ChatStepView[];
+};
 
 const COUNT = "font-mono text-[11px]";
 
 /**
- * The workspace a row links to and the logical prefix `<account>/<dir>/` of its paths; `null` while
- * `space` is, while its workspace is in no list (a temporary one: resolved, yet not linkable; see
- * `FileChangesCard`) or no account is signed in.
+ * The logical prefix `<account>/<dir>/` of a row's path; empty while `space` is `null`, while its
+ * workspace is in no list (a temporary one, an unlisted one, or the list is loading or failed) or
+ * no account is signed in: the row then shows the workspace-relative path.
  */
-function useChangeSpace(space: SessionSpace | null): ChangeSpace | null {
+function useChangePrefix(space: SessionSpace | null): string {
   const account = useAuth().principal?.account;
   const workspace = space?.workspace ?? null;
   return workspace !== null && account !== undefined
-    ? { id: workspace.id, prefix: `${logicalPath(account, workspace.dir)}/` }
-    : null;
+    ? `${logicalPath(account, workspace.dir)}/`
+    : "";
 }
 
 /**
- * One change: its counts or 写入, its path and, when `space` is resolved, 查看详情. Without
- * `space` the path is workspace-relative and there is no 查看详情.
+ * One change: its counts or 写入, its shown path (`prefix` + the relative one) and, with `onReveal`,
+ * 查看详情 named after the shown path. `onReveal` gets the workspace-relative path, not the shown one.
  */
-function FileChangeRow({ change, space }: { change: FileChange; space: ChangeSpace | null }) {
-  const navigate = useNavigate();
-  const path = `${space?.prefix ?? ""}${change.path}`;
+function FileChangeRow({
+  change,
+  onReveal,
+  prefix,
+}: {
+  change: FileChange;
+  onReveal: Reveal | undefined;
+  prefix: string;
+}) {
+  const path = `${prefix}${change.path}`;
   return (
     <div
       className="flex flex-wrap items-center gap-2 border-b border-(--wb-border-default) px-3 py-[7px] text-[12.5px] last:border-b-0"
@@ -58,11 +70,11 @@ function FileChangeRow({ change, space }: { change: FileChange; space: ChangeSpa
       <span className="min-w-0 flex-1 truncate font-mono" data-slot="file-change-path" title={path}>
         {path}
       </span>
-      {space === null ? null : (
+      {onReveal === undefined ? null : (
         <Button
           aria-label={`查看详情 ${path}`}
           className="size-[26px] rounded-md text-(--wb-icon-muted) hover:bg-accent hover:text-(--wb-text-secondary) dark:hover:bg-accent"
-          onClick={() => void navigate(`/files?ws=${space.id}`)}
+          onClick={(event) => onReveal(change.path, event.currentTarget)}
           size="icon-xs"
           title={`查看详情 ${path}`}
           type="button"
@@ -77,12 +89,14 @@ function FileChangeRow({ change, space }: { change: FileChange; space: ChangeSpa
 
 /**
  * One card per assistant message: the changes of its ended steps, one row per path. `space` is
- * the session's resolved workspace (`resolveSessionSpace`). While it is `null`, or its workspace is
- * in no list (a session using a temporary workspace), rows show the workspace-relative path and no
- * 查看详情. Renders nothing while no ended step carries changes.
+ * the session's resolved workspace (`resolveSessionSpace`): it only decides the shown path (logical
+ * when its workspace is listed, workspace-relative otherwise). 查看详情 depends on `onReveal` alone,
+ * which the page hands down whenever the session's `workspaceId` is not null — a temporary
+ * workspace, an unlisted one and a failed list read included. Renders nothing while no ended step
+ * carries changes.
  */
-export function FileChangesCard({ space: resolved, steps }: ChangeSource) {
-  const space = useChangeSpace(resolved);
+export function FileChangesCard({ onReveal, space, steps }: ChangeSource) {
+  const prefix = useChangePrefix(space);
   const headId = useId();
   const changes = summarizeChanges(steps);
   if (changes.length === 0) {
@@ -104,7 +118,7 @@ export function FileChangesCard({ space: resolved, steps }: ChangeSource) {
         {`文件变更（${changes.length} 个）`}
       </div>
       {changes.map((change) => (
-        <FileChangeRow change={change} key={change.path} space={space} />
+        <FileChangeRow change={change} key={change.path} onReveal={onReveal} prefix={prefix} />
       ))}
     </div>
   );

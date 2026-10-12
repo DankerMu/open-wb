@@ -35,7 +35,7 @@ export function ChatPage() {
   const session = useChatSession();
   const { client, draft, historyView, requestedSessionId, selected, sessionActions, workspace } =
     session;
-  const sidebar = useWorkspaceSidebar(selected?.workspaceId);
+  const sidebar = useWorkspaceSidebar(selected?.workspaceId, selected?.id);
   const search = useConversationSearch(selected?.id, historyView);
   const config = useProjectConfig(client, selected);
   useTopbar(
@@ -118,6 +118,7 @@ export function ChatPage() {
           onFork={session.forkTurn}
           onPatchComposer={sessionActions.patchComposer}
           onRegenerate={session.regenerateTurn}
+          onReveal={sidebar.reveal}
           onSend={session.sendPrompt}
           onStop={session.stopTurn}
           onSubmit={session.submitComposer}

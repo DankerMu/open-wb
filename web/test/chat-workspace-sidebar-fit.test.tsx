@@ -8,10 +8,16 @@
  * jsdom 证不了的：折叠的过渡结束后两栏各自的宽度、分隔线能否移动、开着侧边栏缩窄窗口，只在
  * `make ui-walk` 里证明。
  */
-import { act, fireEvent, screen, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SHELL_NARROW_QUERY } from "../src/lib/viewport.js";
-import { cleanupSessionMeta, installNarrowViewport } from "./chat-page-session-meta-support.js";
+import { edit, toolStep } from "./chat-page-file-changes-support.js";
+import {
+  cleanupSessionMeta,
+  installNarrowViewport,
+  messagesPath,
+} from "./chat-page-session-meta-support.js";
+import { chatSnapshot } from "./chat-stream-support.js";
 import {
   BOUND,
   CLOSE,
@@ -26,6 +32,7 @@ import {
   UNBOUND,
 } from "./chat-workspace-sidebar-support.js";
 import { createMediaQuery, installMatchMedia } from "./media-query-support.js";
+import { jsonResponse } from "./support.js";
 
 const SHELL_KEY = "workbuddy-sidebar";
 
@@ -146,6 +153,57 @@ describe("放不下时折叠外壳侧栏", () => {
 
     expect(shellCollapsed()).toBe("false");
     expect(writes()).toStrictEqual([]);
+  });
+});
+
+describe("从卡片定位到文件的打开", () => {
+  /** 甲会话的历史里有一张改了 `readme.md` 的文件变更卡。 */
+  const withCard = {
+    [messagesPath(BOUND.id)]: () =>
+      jsonResponse({
+        ...chatSnapshot({
+          assistantStatus: "done",
+          content: "回答",
+          steps: [toolStep(11, 0, "edit", [edit("readme.md", 1, 0)])],
+        }),
+        session: BOUND,
+      }),
+  };
+
+  async function clickDetail() {
+    fireEvent.click(
+      await screen.findByRole("button", { name: "查看详情 zhangsan/proj-a/readme.md" }),
+    );
+    const region = await screen.findByRole("complementary", { name: NAME });
+    const row = await within(region).findByRole("button", { name: "readme.md" });
+    await waitFor(() => expect(row.getAttribute("aria-current")).toBe("true"));
+  }
+
+  it("F11 主区放不下、外壳侧栏展开：查看详情 的打开同样把外壳侧栏折叠并写入折叠偏好", async () => {
+    await mountSidebarPage(BOUND, withCard);
+    const writes = shellWrites();
+    setMainWidth(512);
+    expect(shellCollapsed()).toBe("false");
+
+    await clickDetail();
+
+    expect(shellCollapsed()).toBe("true");
+    expect(writes()).toStrictEqual(["collapsed"]);
+    expect(window.localStorage.getItem(SHELL_KEY)).toBe("collapsed");
+  });
+
+  it("F12 侧边栏已经开着（用户随后自己展开了外壳侧栏）：再点 查看详情 不是打开动作，不折叠、不写折叠偏好", async () => {
+    await mountSidebarPage(BOUND, withCard);
+    const writes = shellWrites();
+    setMainWidth(512);
+    await open();
+    expandShell();
+    expect(writes()).toStrictEqual(["collapsed", "expanded"]);
+
+    await clickDetail();
+
+    expect(shellCollapsed()).toBe("false");
+    expect(writes()).toStrictEqual(["collapsed", "expanded"]);
   });
 });
 

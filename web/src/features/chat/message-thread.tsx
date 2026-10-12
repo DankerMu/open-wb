@@ -37,6 +37,11 @@ type ThreadProps = {
   locked: boolean;
   onFork(messageId: number): Promise<void>;
   onRegenerate(): Promise<void>;
+  /**
+   * 文件变更卡的 `查看详情`：打开工作空间侧边栏并定位到 `path`（空间内相对路径），`trigger` 是被点的
+   * 按钮。会话没有工作空间（`workspaceId` 为 null 或会话还没解析出来）时为 undefined，卡上没有该按钮。
+   */
+  onReveal: ((path: string, trigger: HTMLElement) => void) | undefined;
   onSend(prompt: string): void;
   onStop(): Promise<unknown>;
   /** `撤回`：`trigger` 是被点的按钮，冲突对话框关闭后焦点还给它。 */
@@ -178,6 +183,7 @@ const AssistantMessage = memo(function AssistantMessage({
   custom,
   locked,
   onRegenerate,
+  onReveal,
   regenerable,
   space,
   text,
@@ -188,6 +194,7 @@ const AssistantMessage = memo(function AssistantMessage({
   custom: ChatMessageCustom;
   locked: boolean;
   onRegenerate: ThreadProps["onRegenerate"];
+  onReveal: ThreadProps["onReveal"];
   /** 仅转录末条助手消息、且会话状态允许时为真。 */
   regenerable: boolean;
   space: SessionSpace | null;
@@ -216,7 +223,7 @@ const AssistantMessage = memo(function AssistantMessage({
           <ToolCallGroup steps={steps} />
           <ApprovalRecords approvals={approvals} />
           <MessageError error={error} />
-          <FileChangesCard space={space} steps={steps} />
+          <FileChangesCard onReveal={onReveal} space={space} steps={steps} />
           <ArtifactCards client={client} space={space} steps={steps} />
           {status === "stopped" ? (
             <p
@@ -268,6 +275,7 @@ export function Thread({
   locked,
   onFork,
   onRegenerate,
+  onReveal,
   onSend,
   onStop,
   onUndo,
@@ -299,6 +307,7 @@ export function Thread({
           custom={custom}
           locked={locked}
           onRegenerate={onRegenerate}
+          onReveal={onReveal}
           regenerable={message.id === regenerableId}
           space={space}
           text={text}
@@ -317,7 +326,18 @@ export function Thread({
         />
       );
     },
-    [archived, client, currentId, locked, onFork, onRegenerate, onUndo, regenerableId, space],
+    [
+      archived,
+      client,
+      currentId,
+      locked,
+      onFork,
+      onRegenerate,
+      onReveal,
+      onUndo,
+      regenerableId,
+      space,
+    ],
   );
   return (
     <AssistantRuntimeProvider runtime={runtime}>

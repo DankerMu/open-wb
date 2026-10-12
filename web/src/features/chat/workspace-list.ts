@@ -16,7 +16,8 @@ export type SessionSpace = { id: string; workspace: Workspace | null };
  * 「空间可解析」判定（文件变更卡与产物卡共用）：会话的 `workspaceId` 非 null，且它在已读取
  * 的列表里或会话用的是临时空间；否则为 null（不可解析）。`workspaces` 为 null 表示列表未读到（读取中
  * 或读取失败）——临时空间那一半只看会话，不依赖它。`id` 决定产物卡的按钮及预览请求；
- * `workspace` 非 null 才有逻辑路径前缀与 `查看详情`。
+ * `workspace` 非 null 才有逻辑路径前缀；文件变更卡的 `查看详情` 不看这里，只看会话的 `workspaceId`
+ * 非 null（`useWorkspaceSidebar` 的 `reveal`）。
  */
 export function resolveSessionSpace(
   workspaceId: string | null | undefined,
