@@ -1,6 +1,7 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { Outlet } from "react-router";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { ShellNavProvider } from "@/lib/shell-nav";
 import { SidebarSlotProvider } from "@/lib/sidebar-slot";
 import { TopbarProvider } from "@/lib/topbar";
 import { cn } from "@/lib/utils";
@@ -81,10 +82,25 @@ function NavOverlay({
  *
  * 主区布局契约（会话页、文件页依赖）：`main` 是纵向 flex 容器、`min-height: 0`，直接子元素撑满；
  * 宽屏 `overflow: hidden`（页面各自滚动），窄屏外壳与 `main` 放开为 `overflow: visible`、由 body 滚动。
+ *
+ * 页面经 ShellNavProvider 请求「主区至少要这么宽」（workspace-sidebar「布局与开合」）：宽屏下量 `main`
+ * 的当前宽度，不够就折叠侧栏（与用户点 `折叠侧栏` 同一条路径，写折叠偏好）；已折叠时 `collapse` 不做
+ * 任何事。窄屏不处理（覆盖层不碰折叠偏好）。量得 0 也不处理：没有布局的环境（jsdom）里宽度恒为 0，
+ * 不能据此判断放不下。只量主区、不另设视口断点；只在页面请求的那一下量，不监听尺寸变化。
  */
 export function AppShell() {
-  const [collapsed, toggle] = useSidebarCollapsed();
+  const [collapsed, toggle, collapse] = useSidebarCollapsed();
   const narrow = useMediaQuery(SHELL_NARROW_QUERY);
+  const main = useRef<HTMLElement>(null);
+  const requestMainWidth = useCallback(
+    (needed: number) => {
+      if (narrow) return;
+      const width = main.current?.clientWidth ?? 0;
+      if (width === 0 || width >= needed) return;
+      collapse();
+    },
+    [narrow, collapse],
+  );
   const [navOpen, setNavOpen] = useState(false);
   // 切回宽屏时复位，避免再次进入窄屏时覆盖层"复活"。
   useEffect(() => {
@@ -112,8 +128,11 @@ export function AppShell() {
                 "flex min-h-0 min-w-0 flex-auto flex-col *:min-h-0 *:min-w-0 *:flex-auto",
                 narrow ? "overflow-visible" : "overflow-hidden",
               )}
+              ref={main}
             >
-              <Outlet />
+              <ShellNavProvider requestMainWidth={requestMainWidth}>
+                <Outlet />
+              </ShellNavProvider>
             </main>
           </div>
         </div>

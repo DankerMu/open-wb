@@ -9,15 +9,13 @@ import { SHELL_NARROW_QUERY, useMediaQuery } from "../../lib/viewport.js";
 import { Icon, useEscapeFallback } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
 import { logicalPath, WorkspaceBrowser } from "../files/index.js";
-import type { useWorkspaceSidebar } from "./use-workspace-sidebar.js";
+import { MIN_WIDTH, type useWorkspaceSidebar } from "./use-workspace-sidebar.js";
 import type { Workspace } from "./workspace-list.js";
 
 const NAME = "工作空间侧边栏";
 const CONVERSATION = "conversation";
 const SIDEBAR = "workspace";
 const COLUMN = "flex min-h-0 min-w-0 flex-col";
-/** 两栏各自的最小宽度（像素）：拖动与存储里的占比都收不到它以下。 */
-const MIN_WIDTH = { conversation: 320, sidebar: 240 } as const;
 
 type SidebarTarget = {
   client: ApiClient;
@@ -106,8 +104,12 @@ type WorkspaceSplitProps = {
  * 会话页主区的两栏：对话区，以及 `target` 非空时的侧边栏。
  *
  * - 宽屏：`complementary` 地标与分隔线并排在对话区右侧，不是模态；拖动或方向键结束后把侧边栏的占比
- *   交给 `sidebar.resize`。两栏各有像素最小宽度，拖不到它以下；主区窄到两者之和都放不下时分隔线
- *   拖不动。头部 `关闭` 之后焦点回到打开它的按钮。
+ *   交给 `sidebar.resize`。两栏各有像素最小宽度（`MIN_WIDTH`），拖不到它以下。主区放不下两者之和时，
+ *   用户打开的那一下由 `useWorkspaceSidebar` 请外壳折叠外壳侧栏；分栏在主区还窄的那一帧就挂上第二
+ *   栏，随外壳侧栏的宽度过渡长宽后两栏各自回到最小宽度以上（实测，Chromium：`make ui-walk` 的 800
+ *   一档）。不判断的那些时刻（开着缩窄窗口、用户自己展开外壳侧栏等）两栏会低于最小宽度、分隔线
+ *   拖不动（实测，Chromium：1200 打开后缩到 800 为 292 / 219，方向键不动）。头部 `关闭` 之后焦点回到
+ *   打开它的按钮。
  * - 窄屏：全屏模态层，没有分隔线；打开时焦点进 `关闭`，Escape 与 `关闭` 关闭后焦点同样归还。屏上有
  *   Toast 时 Radix 收不到 Escape，由 `useEscapeFallback` 兜底。
  * - 拷入层的分栏在挂载时无条件 `new ResizeObserver`；没有它的运行环境退回普通的横向 flex，没有分隔线。
