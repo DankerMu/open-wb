@@ -542,6 +542,7 @@ Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20
   树条目的渲染留在 `tree.tsx` 则都原样通过；若把它一并搬进新文件，这些断言读的路径同刀改指新文件（断言内容不变，记入偏离记录）。`data-slot` 与 3.1 列的 DOM 结构随组件原样带走。
   实施注记见 `implementation-notes.md`「21.1，含分摊的 21.3 / 21.5 条款（#1098）」。
 - [ ] 21.2 `page.tsx`：`path` 查询参数（files-web「地址定位到文件」）——深链逐级展开、选中以 `replace` 写入、切换空间与 `ws` 被纠正时移除、指向目录 / 不存在 / 越界的三种呈现。
+  实施注记见 `implementation-notes.md`「21.2、21.4，含分摊的 21.3 / 21.5 条款（#1099）」。
 - [ ] 21.3 测试（新文件 `web/test/files-deep-link.test.tsx`、`workspace-browser.test.tsx`）：「地址定位到文件」前三个场景与「工作空间浏览器组件」三个场景；静态断言 `features/files` 不从 `features/chat` 导入。
 - [ ] 21.4 FL 行：带文件的地址可直接打开并定位、刷新后仍在同一文件、指向不存在文件的地址的表现；结论 `待签`。
 - [ ] 21.5 变异证据：选中时用 `push` → 「没有新增历史记录」判红；`ws` 被纠正时保留 `path` → 非法 `ws` 用例判红；`onlyPaths` 下仍请求 `tree` → 「没有新的 `tree` 请求」判红。

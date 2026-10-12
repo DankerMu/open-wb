@@ -278,3 +278,37 @@
 - 变异：源码请求失败时切换按钮消失 → 未做（上列用例未覆盖，实施时补一条「`file` 500 后 `渲染视图` 按钮仍在」，补后可判红）。
 - 变异：不可观察（jsdom 无 iframe 导航）：文档确为不透明来源、子请求与框内脚本对主站的请求不带主站 cookie（文档自身的导航请求在同主机不同端口下带，监听器不读——实现后走查实测，仅 Chromium；fixture 评审时写的「不带主站 cookie」不全对，已更正）、同 `base` 续期不重载、`reload` 后确实重新请求、同目录样式与图片生效；归 FL 行（仅人工）与 #1109 / #1115（仅 Chromium）。
 - 变异：不可观察（本刀无服务端代码）：遍历、符号链接、跨空间 id、他人空间的相同 404、`sandbox.reject` 审计；归 `server/test/preview-app*.test.ts` 与 #1075 已有证据。
+
+## 21.2、21.4，含分摊的 21.3 / 21.5 条款（#1099）
+
+- 定性与前提：服务端零改动，不新增 `op`、不碰 `sandbox.resolve`，不改 Critical Path 代码（同 #1098 口径）。但本刀让地址栏里的任意字符串能直达 `listTree` / `fetchPreview`，逃逸向量仍须进变异清单。21.2 ← 21.1（#1098）已在 origin/master；不等 1.1 / 1.2 / 1.3；#1352、#1094 未合入且不是本刀前提。#1286 的窗口本刀不新增也不加宽：只调既有的 `GET …/tree`、`GET …/file`（据代码推出，未实测）。
+- **最大漂移：只动 `page.tsx` 做不出规格。** `browser-paths.ts:71-90` 的 `revealStep` 在中间级不在父目录列表里时 `break`，所以 `nodir/x.md` 与 `../x` 今天一个请求都不发。场景第三、四例要「服务端的 404 文案」「服务端的 403 文案（服务端写了 `sandbox.reject`）」，要求句是「逐级请求并展开它的各级父目录」「某一级父目录请求失败（404、403 等）时停在上一级，预览区显示该错误的信封 message」——此分支由规格句裁定，不是未规定。必须改 `browser-paths.ts`（154 行）、`workspace-browser.tsx`（567 行）、`preview-area.tsx`（126 行）；`page.tsx` 357 行。记入偏离记录。
+- 走法：各级父目录未加载就请求一次，不看它在不在上级列表里；只有末级查父目录列表。结局三种：是文件 → 选中；是目录 → 展开且清掉已有选中（规格「不选中任何文件」，地址从文件改到目录时成立）；不在列表里 → `文件不存在`；某级失败 → 该级的 `errorMessage(error)`。后两种清掉选中。401 不发布任何文案（`isUnauthorized` 已交给登录层）。
+- 呈现：`WorkspaceBrowser` 加一个失败文案状态，经 `PreviewArea` 的新可选属性在没有选中文件时替换 `EmptyPreview`，用 `role="alert"` + `ALERT_BOX`（同 `preview.tsx:182`）。清除时机：`path` 再变、任一文件被选中、`path` 为 `null`。只对 `path` 属性发起的定位（`notify:false`）生效；`reveal()` 失败的呈现写「未做」（归组 25）。`刷新` 不重走失败的定位，写「未做」。
+- 两个实现陷阱：其一，`continueReveal` 的 effect 依赖是 `directories` / `loadingPaths`，不含 `directoryErrors`，失败文案须从 ref 读或扩依赖，否则失败级显示成 `未选择文件`。其二，无参 `refresh()` 重取 `Object.keys(directoryErrors)`（`workspace-browser.tsx` 的 `refresh`），树上没有行的失败级（`..`、`nodir`）若留在里面，每点一次 `刷新` 就再发一次 `tree?path=..`、服务端再写一条 `sandbox.reject`——这类级别的错误不得留在 `directoryErrors` / `expandedPaths`，用例钉住。
+- 地址归属全在 `page.tsx`：删掉 `PageBrowser`（`:93-98` 的本地状态），`path` 取 `new URLSearchParams(location.search).get("path")`，空串当作没有且不改写地址（「使 `path` 有值时」）；重复的 `path=` 取第一个，写回用 `set` 收成一个。`onPathChange` → `navigate(…, {replace: true})`，只改 `path`，其余参数与 `#hash` 保留（`files-page.test.tsx:65/208/221` 钉着）。`workspaceNavigation` 的三个调用方（`ws` 纠正 effect、`selectWorkspace`、`createWorkspace` 成功）一律删 `path`；切空间仍是 `push`（`files-page.test.tsx:430` 不动）。`ws` 不合法时 `urlMatchesWorkspace` 为假、浏览器不挂载，据代码推出此时不会带着 `path` 发 `tree`。
+- 往返与残余：深链定位是 `notify:false`，不写地址；只有点击写。后退到上一个空间的历史项时 `path` 随地址恢复并重新定位。#1098 的残余（宿主异步写回 `path` 会顶掉写回落地前发起的 `reveal()`）本刀不可达——`page.tsx` 不持 `ref`、不调 `reveal`（据代码推出）；原样留给 #1105 / #1106，本刀不得让页面调 `reveal`。路由是 react-router `^8.3.1`，导航异步落地：补一条「不等地址落地连点两个文件 → 最终选中与地址都是后者」，`file` 请求次数照实测值写，不预设为最少。
+- 不可信输入逐形（均据代码推出；用例里请求串逐字断言）：`out/gone.md` → 请求根、`out`，显示 `文件不存在`。`nodir/x.md` → `tree?path=nodir` 得 404 文案。`readme.md/x` → `tree?path=readme.md` 得 404（`rest.ts` 的 `isOrdinaryDirectory`）。`../x` → `tree?path=..` 得 403。`..` 单独 → 不在根列表，`文件不存在`，不发请求、无审计。`/etc/x` → `parentDirectories` 给 `["", "", "/etc"]`，请求 `tree?path=%2Fetc` 得 403。`/x` → `文件不存在`，无额外请求。`out/` → `文件不存在`。首尾空格、组合与分解字符 → 原样比对列表名、原样发出，不 `trim`、不 `.normalize()`。他人或不存在的 `ws` → 先被纠正、`path` 一并移除，不为它发 `tree`。合法 `ws` 配别的空间的路径 → 就是本空间里不存在的路径。
+- 需登记的残余（据代码推出，未实测）：服务端 `resolve.ts:40-42` 跳过空段与 `.`，所以 `./readme.md`、`out//a.md` 会经别名层被选中，预览正常但树上没有高亮行。`././…/x` 每一级都 200，一条链接能让打开者的会话顺序发出与 `/` 个数相同的 `tree` 请求（一次一个，卸载或点别的文件即止）。含 `..` 的链接会在打开者名下写 `sandbox.reject`。PR 不得写「越界被挡住」之类的全称句，只列这几条并标注证据级别。
+- 必须改写的既有断言：`web/test/workspace-browser.test.tsx:347-368` 两处 `未选择文件` 改为 `文件不存在` 与 `目录读取失败`（树里的错误行断言保留），记入偏离记录。该文件 758 行，只许原地改，新用例一律进 `web/test/files-deep-link.test.tsx`。`:711` 的静态扫描继续约束 `workspace-browser.tsx`：不得出现 `location` / `history` 整词与 `react-router`，新标识符避开这两个词。`:722` 与 `files-page.test.tsx:363` 应原样保绿。`routes/manifest.ts:27` 的描述不含 `?ws=`，不必改。
+- `files-deep-link.test.tsx`（`renderFiles` 整页渲染）：「深链打开」断 `tree` 请求序列 `toStrictEqual` 为根、`src`、`src/deep` 各一次，加一次 `file`。「刷新后状态相同」在 jsdom 只能卸载后按同一地址重挂，标题写「重新挂载」；真实重载归 FL-21 与 #1114。「没有新增历史记录」：先落在一个不发文件请求的路由再 `router.navigate` 到文件页，先断 `window.history.length` 的起点（jsdom 的历史跨用例累积），两次选中后长度不变，`router.navigate(-1)` 后 pathname 不是 `/files`。四例失败呈现各带 `vi.spyOn(console, "error")` 零调用，并各点一次别的文件证明树可用。
+- 非法 `ws` 用例：第一个空间里必须真有同名文件，断地址无 `path`、无 `file` 请求、`aria-current` 为空（先断正向形状，再断不等）。另加：经切换器切空间与新建空间后地址无 `path`；失败深链后点 `刷新` 不再请求 `..`。服务端的 `sandbox.reject` 在 web 测试不可观察，指向 `server/test/workspaces-http.test.ts:389/611` 与 `workspaces-http-boundary.test.ts:288`。
+- FL 行（FL-20 至 FL-22，结论 `待签`；全程不上传，待发附件仍是 FL-19 留下的 2 个；文件页原标签页不动）。FL-20：接 FL-19，复制文件页地址栏的地址，在同一浏览器新开标签页粘贴回车 → 地址含 ws 与 path 两段、path 一段含 uploads 与 fl-page.html；新标签页直接是 FL-05 的空间，uploads 已展开，fl-page.html 被选中并显示为渲染后的网页。FL-21：在新标签页重新加载，再点 uploads 里的 fl-page.css，再按后退 → 重新加载后空间、展开与选中都不变；点 fl-page.css 后 path 一段换成它；后退不会回到 fl-page.html。FL-22：在该标签页粘贴 FL-20 的地址，把末尾的 fl-page.html 改成 nope.html 回车，再点 logo.png，最后关掉这个标签页 → uploads 已展开、没有文件被选中、预览区显示「文件不存在」；logo.png 可正常预览。FL-21 的后退表现各浏览器不同（新标签起始页是否算历史项），实现者须实走并注明仅 Chromium。
+- 收尾：`tasks.md` 勾 21.2、21.4；21.3、21.5 的分摊至此全部合入，一并勾。PR 列出动过的 `openspec/` 文件（`tasks.md`、`implementation-notes.md`，后者现 280 行）；规格句本刀无需修订。批内共碰文件：`workspace-browser.tsx`、`preview-area.tsx`（#1352、#1094 都会碰，按既定栈序 #1099 在先）。issue 与 origin/master 的差异：PR 边界（上述三个源文件加一个既有测试）、`PageBrowser` 须删。
+- 变异：选中时用 `push` → 「没有新增历史记录」判红（长度加 2，后退落在 `readme.md`）。
+- 变异：`ws` 被纠正时保留 `path` → 非法 `ws` 用例判红（地址仍含 `path`，同名文件被选中）。
+- 变异：`selectWorkspace` 保留 `path` → 「经切换器切空间后地址无 `path`」判红；`createWorkspace` 成功后保留 `path` → 「新建空间后地址无 `path`」判红。
+- 变异：深链定位也调 `onPathChange` 或写地址 → 「深链打开」里历史长度与地址不变的断言判红。
+- 变异：恢复 `revealStep` 的 `break`（不请求未列出的父级）→ 第三例（404 文案）与第四例（403 文案）同红。
+- 变异：浏览器端把 `..` 规范化掉 → 第四例请求串断言判红；写回前 `.normalize()` → 分解字符用例的请求串判红。
+- 变异：只 `trim` 前导空格 → 尾随空格用例判红；只 `trim` 尾随 → 前导用例判红（两条分开）。
+- 变异：末级不在列表里时仍发 `file` 请求 → 第二例「无 `file` 请求」判红；不发布 `文件不存在` → 第二例与 `workspace-browser.test.tsx:347` 同红。
+- 变异：失败文案不从错误源读（effect 依赖陷阱）→ 第三例显示 `未选择文件`，判红。
+- 变异：只处理第一种失败（不存在）不处理第二种（某级失败），或反之 → 第二例、第三例各自判红。
+- 变异：指向目录时不清已有选中 → 「地址从文件改到目录后无 `aria-current`、预览为 `未选择文件`」判红。
+- 变异：失败级留在 `directoryErrors` → 「失败深链后点 `刷新` 不再请求 `..`」判红。
+- 变异：写 `path` 时丢掉其它参数或 `#hash` → 新用例「带 `keep=1#x` 选中后仍在」判红。
+- 变异：空串 `path=` 当作路径去定位 → 「`path=` 时预览为 `未选择文件`、无 alert」判红。
+- 变异：跳过中间层或重复请求根 → 「深链打开」的 `toStrictEqual` 序列判红。
+- 变异：不可观察：服务端是否写了 `sandbox.reject`（web 测试看不到，由上述服务端测试承担）；真实浏览器重载（jsdom 无，归 #1114 与 FL-21）。
+- 变异：未做：`reveal()` 失败的呈现；`刷新` 重走失败的定位；别名路径（`./x`、`a//b`）的行高亮。
