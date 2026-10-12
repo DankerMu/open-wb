@@ -547,11 +547,11 @@ Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20
   既有测试里按文件路径读源码的断言随抽取核对：`web/test/files-page.test.tsx:536-544`（`tree.tsx` 含 `fileIcon(`、`formatSize(`、`size={14}`，不含手写图标路径）、`files-empty-layout.test.tsx:183-189`（`tree.tsx`、`page.tsx` 不含 `此文件夹为空` 等三个字面量）、`topbar.test.tsx:263`（`page.tsx` 不含 `<h1`）——
   树条目的渲染留在 `tree.tsx` 则都原样通过；若把它一并搬进新文件，这些断言读的路径同刀改指新文件（断言内容不变，记入偏离记录）。`data-slot` 与 3.1 列的 DOM 结构随组件原样带走。
   实施注记见 `implementation-notes.md`「21.1，含分摊的 21.3 / 21.5 条款（#1098）」。
-- [ ] 21.2 `page.tsx`：`path` 查询参数（files-web「地址定位到文件」）——深链逐级展开、选中以 `replace` 写入、切换空间与 `ws` 被纠正时移除、指向目录 / 不存在 / 越界的三种呈现。
+- [x] 21.2 `page.tsx`：`path` 查询参数（files-web「地址定位到文件」）——深链逐级展开、选中以 `replace` 写入、切换空间与 `ws` 被纠正时移除、指向目录 / 不存在 / 越界的三种呈现。
   实施注记见 `implementation-notes.md`「21.2、21.4，含分摊的 21.3 / 21.5 条款（#1099）」。
-- [ ] 21.3 测试（新文件 `web/test/files-deep-link.test.tsx`、`workspace-browser.test.tsx`）：「地址定位到文件」前三个场景与「工作空间浏览器组件」三个场景；静态断言 `features/files` 不从 `features/chat` 导入。
-- [ ] 21.4 FL 行：带文件的地址可直接打开并定位、刷新后仍在同一文件、指向不存在文件的地址的表现；结论 `待签`。
-- [ ] 21.5 变异证据：选中时用 `push` → 「没有新增历史记录」判红；`ws` 被纠正时保留 `path` → 非法 `ws` 用例判红；`onlyPaths` 下仍请求 `tree` → 「没有新的 `tree` 请求」判红。
+- [x] 21.3 测试（新文件 `web/test/files-deep-link.test.tsx`、`workspace-browser.test.tsx`）：「地址定位到文件」前三个场景与「工作空间浏览器组件」三个场景；静态断言 `features/files` 不从 `features/chat` 导入。
+- [x] 21.4 FL 行：带文件的地址可直接打开并定位、刷新后仍在同一文件、指向不存在文件的地址的表现；结论 `待签`。
+- [x] 21.5 变异证据：选中时用 `push` → 「没有新增历史记录」判红；`ws` 被纠正时保留 `path` → 非法 `ws` 用例判红；`onlyPaths` 下仍请求 `tree` → 「没有新的 `tree` 请求」判红。
 
 Suggested fixture level: compact - 前端结构抽取加一个查询参数；路径只作为数据交给服务端裁决
 Minimal mergeable slice: 21.1（抽组件，行为不变，既有文件页测试保绿）先合；21.2 的地址参数随后。会话页卡片的 `查看详情` 在组 25 之前保持现有的 `?ws=` 导航，本组不动它
@@ -639,10 +639,11 @@ Minimal mergeable slice: 25.1（文件变更卡）与 25.2（产物卡）可各�
 
 - [x] 26.1 夹具：`smoke/fixtures/sandbox/u1/smoke-fixture/` 新增 `site/index.html`、`site/style.css`、`sample.py`、`clip.wav`（按 files-harness「沙箱夹具与 files.hurl」的内容约定；`clip.wav` 由一段不入库的脚本生成，生成方式记入 `smoke/fixtures/README.md`）。
   实施注记见 `implementation-notes-1.md`「26.1（#1111）」。
-- [ ] 26.2 `smoke/files.hurl`：追加范围请求、下载、`hurl-a` → `hurl-b` 的重命名与删除（宽容状态码保证可重复）、同名移动 409、越界删除 403、`preview-token` 与隔离来源的 html / css / 伪造令牌 404、主站对同一 html 的 `text/plain`、他账号的三个 404。
+- [x] 26.2 `smoke/files.hurl`：追加范围请求、下载、`hurl-a` → `hurl-b` 的重命名与删除（宽容状态码保证可重复）、同名移动 409、越界删除 403、`preview-token` 与隔离来源的 html / css / 伪造令牌 404、主站对同一 html 的 `text/plain`、他账号的三个 404。
   实施注记见 `implementation-notes.md`「26.2 只读步骤，含分摊的 26.3 / 26.4 条款（#1112）」。
-- [ ] 26.3 验证：对同一服务连续两次 `make smoke` 全绿；在 `POST move` 之后人为中断一次再跑仍全绿；跑完后空间里没有 `hurl-a` / `hurl-b`、夹具文件未变（`git status` 干净）。
-- [ ] 26.4 变异证据（对临时改坏的服务各跑一次，结果写进 PR）：预览监听器对 html 返回 `text/plain` → hurl 判红；主站对 html 返回 `text/html` → hurl 判红；删除后条目仍在 → 第二次删除的 404 断言判红。
+  实施注记见 `implementation-notes.md`「26.2 文件操作步骤、26.3、26.4（#1113）」。
+- [x] 26.3 验证：对同一服务连续两次 `make smoke` 全绿；在 `POST move` 之后人为中断一次再跑仍全绿；跑完后空间里没有 `hurl-a` / `hurl-b`、夹具文件未变（`git status` 干净）。
+- [x] 26.4 变异证据（对临时改坏的服务各跑一次，结果写进 PR）：预览监听器对 html 返回 `text/plain` → hurl 判红；主站对 html 返回 `text/html` → hurl 判红；删除后条目仍在 → 第二次删除的 404 断言判红。
 
 Suggested fixture level: compact - 冒烟用例与被跟踪夹具的扩充，不改产品代码
 Minimal mergeable slice: 26.1 的夹具与 README 可先合（既有 hurl 只断言「包含」三个文件，不受新增文件影响）；26.2 按步骤分两刀——范围请求、下载、`preview-token` 与隔离来源、主站 `text/plain`、他账号 404 的步骤先合（Depends on 7.3、9.3、13.1）；重命名 / 删除 / 同名移动 409 / 越界删除 403 的步骤随后（Depends on 8.2、9.1，间接等 1.2），26.3、26.4 里针对它们的验证随这一刀
