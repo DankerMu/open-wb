@@ -1,5 +1,6 @@
 // /files probes for the UI walk that need a real browser's computed styles, and the walk's
-// steps over the new previews (highlighted source, audio, download link, deep link).
+// steps over the new previews (highlighted source, the isolated-origin html preview with its
+// relative stylesheet and source view, audio, download link, deep link).
 
 import { expect, type Page, type Response } from "@playwright/test";
 
@@ -68,7 +69,7 @@ export async function expectOnDemandChunk(page: Page, select: () => Promise<void
   }
 }
 
-// files-harness「走查 /files 步骤」(a)，再选中 `clip.wav` 做 (c)(d)。调用时页面已选中工作空间、树已加载。
+// files-harness「走查 /files 步骤」(a)(b)，再选中 `clip.wav` 做 (c)(d)。调用时页面已选中工作空间、树已加载。
 export async function expectNewPreviews(page: Page, workspaceId: string): Promise<void> {
   const files = page.locator("main");
   const tree = files.getByRole("navigation", { name: "工作空间目录树" });
@@ -86,8 +87,72 @@ export async function expectNewPreviews(page: Page, workspaceId: string): Promis
     .poll(() => new URL(page.url()).searchParams.get("path"), "path after selecting sample.py")
     .toBe("sample.py");
 
+  await expectSitePreview(page, workspaceId);
+
   await tree.getByRole("button", { name: "clip.wav", exact: true }).click();
   await expectClipSelected(page, workspaceId);
+}
+
+// (b)：`site/index.html` 在隔离来源的 iframe 里渲染，标题颜色来自它用相对地址引的 `style.css`；再切到源码视图。
+// `base` 取自这一次点击引出的 `preview-token` 响应（预览端口由系统分配，写不死）；监听先于点击挂上。
+async function expectSitePreview(page: Page, workspaceId: string): Promise<void> {
+  const files = page.locator("main");
+  const tree = files.getByRole("navigation", { name: "工作空间目录树" });
+  const preview = files.getByRole("region", { name: "文件预览" });
+  const tokenPath = `/api/workspaces/${workspaceId}/preview-token`;
+
+  await tree.getByRole("button", { name: "展开 site", exact: true }).click();
+  const [issued] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && new URL(response.url()).pathname === tokenPath,
+    ),
+    tree.getByRole("button", { name: "index.html", exact: true }).click(),
+  ]);
+  expect(issued.status(), "preview-token status").toBe(200);
+  const base = previewBase(await issued.json());
+  // 规格条文之外：预览若与页面同源，下面的 `src` 恰等照样通过，要到标题可见性才红（实测）；这一句让它红在原因上。
+  expect(new URL(base).origin, "preview origin is not the page origin").not.toBe(
+    new URL(page.url()).origin,
+  );
+
+  const frame = preview.locator("iframe");
+  await expect(frame, "site/index.html frame").toHaveCount(1);
+  await expect(frame, "site/index.html frame src").toHaveAttribute("src", `${base}site/index.html`);
+  await expect(frame, "site/index.html frame sandbox").toHaveAttribute(
+    "sandbox",
+    "allow-scripts allow-forms allow-modals",
+  );
+  // 帧是跨源且带 sandbox 的；标题的计算颜色在帧内取（Chromium 下取得到，实测）。
+  const heading = frame
+    .contentFrame()
+    .getByRole("heading", { level: 1, name: "smoke-site", exact: true });
+  await expect(heading, "smoke-site heading inside the frame").toBeVisible();
+  await expect(heading, "smoke-site heading colour from the relative stylesheet").toHaveCSS(
+    "color",
+    "rgb(0, 128, 0)",
+  );
+
+  await preview.getByRole("button", { name: "查看源码" }).click();
+  await expect(preview.locator("iframe"), "source view has no frame").toHaveCount(0);
+  const code = preview.locator('[data-slot="preview-code"]');
+  await expect(
+    code.getByRole("row").first().getByRole("cell").nth(0),
+    "index.html source line number",
+  ).toHaveText("1");
+  const headingRow = code.getByRole("row").filter({ hasText: "<h1>smoke-site</h1>" });
+  await expect(headingRow, "index.html source row with the heading").toHaveCount(1);
+  await expect(headingRow.getByRole("cell").nth(0), "heading source line number").toHaveText("9");
+}
+
+function previewBase(body: unknown): string {
+  if (body === null || typeof body !== "object" || !("base" in body)) {
+    throw new Error("preview-token 200 body has no base");
+  }
+  if (typeof body.base !== "string") {
+    throw new Error("preview-token base is not a string");
+  }
+  return body.base;
 }
 
 // (c)(d) 与选中态；重载之后再调一次即 (e)。地址里的 `path` 重载后原样还在，证明不了恢复——
@@ -105,6 +170,7 @@ export async function expectClipSelected(page: Page, workspaceId: string): Promi
     tree.getByRole("button", { name: "clip.wav", exact: true }),
     "clip.wav row is the current one",
   ).toHaveAttribute("aria-current", "true");
+  await expect(tree.locator('[aria-current="true"]'), "exactly one current row").toHaveCount(1);
 
   // (c)：`src` 读属性值（解析后的绝对地址）；首次选中与由地址恢复的选中都不带 `v`（实测）。
   const audio = preview.locator("audio");

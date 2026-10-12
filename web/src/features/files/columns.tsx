@@ -63,6 +63,13 @@ type WorkspaceColumnsProps = CreationMenuProps & {
   treeCollapsed?: boolean | undefined;
 };
 
+/** `onlyPaths` 是空集且给了文案时树的位置上的那段文案，否则 `null`（照常是树）。 */
+export function emptyNote(onlyPaths: ReadonlySet<string> | undefined, text: string | undefined) {
+  return onlyPaths?.size === 0 && text ? (
+    <p className={`${STATUS_TEXT} px-2 py-1`}>{text}</p>
+  ) : null;
+}
+
 export function EmptyPreview() {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center">

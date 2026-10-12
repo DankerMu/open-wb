@@ -30,7 +30,8 @@
  *   never loaded and replays nothing else.
  * - Entry operations: the row menu, its dialog and the request are `useEntryOperations`
  *   (`entry-ops.tsx`); after a rename `followEntry` moves the listings, the expanded set and the
- *   selection to the new path without walking again. No row menu while `onlyPaths` is set.
+ *   selection to the new path without walking again, and after a delete drops them (a deleted
+ *   current file or ancestor: `onPathChange(null)`). No row menu while `onlyPaths` is set.
  */
 import {
   type ReactNode,
@@ -48,14 +49,16 @@ import {
   loadedDirectoryPaths,
   markedRows,
   movedCache,
+  movedKeys,
   movedPath,
+  movedTarget,
   normalizedPath,
   parentPath,
   refreshLayers,
   revealStep,
   subtreeOf,
 } from "./browser-paths.js";
-import { type BrowserLayout, STATUS_TEXT, WorkspaceColumns } from "./columns.js";
+import { type BrowserLayout, emptyNote, WorkspaceColumns } from "./columns.js";
 import { DirectoryDialog } from "./dialogs.js";
 import { abandonRequests, useEntryOperations } from "./entry-ops.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
@@ -91,7 +94,7 @@ type WorkspaceBrowserProps = {
   /** 给了才渲染根行的逻辑路径 `<account>/<dir>`。 */
   dir?: string | undefined;
   path: string | null;
-  onPathChange(path: string): void;
+  onPathChange(path: string | null): void;
   layout?: BrowserLayout | undefined;
   markedPaths?: { label: string; paths: ReadonlySet<string> } | undefined;
   onlyPaths?: ReadonlySet<string> | undefined;
@@ -109,13 +112,6 @@ const MISSING_FILE = "文件不存在";
 /** 这一次定位请求过 `directory` 才读它的失败文案：`onlyPaths` 下没有请求，早先留下的文案不算数。 */
 function failureOf(target: Reveal, failed: ReadonlyMap<string, string>, directory: string) {
   return target.asked.has(directory) ? failed.get(directory) : undefined;
-}
-
-/** `onlyPaths` 是空集且给了文案时树的位置上的那段文案，否则 `null`（照常是树）。 */
-function emptyNote(onlyPaths: ReadonlySet<string> | undefined, text: string | undefined) {
-  return onlyPaths?.size === 0 && text ? (
-    <p className={`${STATUS_TEXT} px-2 py-1`}>{text}</p>
-  ) : null;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
@@ -594,44 +590,46 @@ export function WorkspaceBrowser({
   );
 
   /**
-   * `from` 已被改名为 `to`，界面跟过去而不重新逐级展开。次序：放弃 `from` 之下在途的目录请求；列表
-   * 缓存、展开集合、目录的失败文案与进行中的定位换到新路径；当前文件在 `from` 之下时在新路径重新选中
-   * 一次（按新名的类别重取：`file`、`archive` 或预览来源的地址）并上报：上报回来的 `path` 与选中相同，不另起
-   * 定位（选中在前、上报在后，不依赖宿主何时把 `path` 送回来）；重新列出 `to` 的父目录；已展开而
-   * 没有列表的新路径补一次请求。
+   * `from` 已被改名为 `to`，或已被删除（`to` 为 `null`），界面跟过去而不重新逐级展开。次序：放弃 `from`
+   * 之下在途的目录请求；列表缓存、展开集合、目录的失败文案与进行中的定位换到新路径（`movedKeys`；删除时
+   * `from` 之下的都丢掉、定位放弃）；当前文件在 `from` 之下时在新路径重新选中一次（按新名的类别重取：
+   * `file`、`archive` 或预览来源的地址）并上报，删除时清掉选中并上报 `null`——选中在前、上报在后，上报
+   * 回来的 `path` 不另起定位；重新列出 `to`（删除：`from`）的父目录；已展开而没有列表的新路径补一次请求。
    */
   const followEntry = useCallback(
-    (from: string, to: string) => {
-      const moved = (path: string) => movedPath(path, from, to);
+    (from: string, to: string | null) => {
       abandonRequests(directoryRequestsRef.current, from);
-      setLoadingPaths((current) => new Set([...current].filter((path) => moved(path) === path)));
+      setLoadingPaths(
+        (current) => new Set([...current].filter((path) => movedPath(path, from, to) === path)),
+      );
       cacheRef.current = movedCache(cacheRef.current, from, to);
       setDirectories(cacheRef.current);
-      expandedPathsRef.current = new Set([...expandedPathsRef.current].map(moved));
+      const expanded = movedKeys(expandedPathsRef.current.entries(), from, to);
+      expandedPathsRef.current = new Set(expanded.map(([path]) => path));
       setExpandedPaths(expandedPathsRef.current);
       setDirectoryErrors((current) =>
-        Object.fromEntries(Object.entries(current).map(([path, text]) => [moved(path), text])),
+        Object.fromEntries(movedKeys(Object.entries(current), from, to)),
       );
-      failedDirectoriesRef.current = new Map(
-        [...failedDirectoriesRef.current].map(([path, text]) => [moved(path), text]),
-      );
-      if (revealRef.current) {
-        revealRef.current.path = moved(revealRef.current.path);
-      }
+      failedDirectoriesRef.current = new Map(movedKeys(failedDirectoriesRef.current, from, to));
+      revealRef.current = movedTarget(revealRef.current, from, to);
       const selected = selectedFileRef.current;
-      const next = selected ? moved(selected.path) : null;
-      if (selected && next !== null && next !== selected.path) {
-        selectFile({ ...selected.entry, name: next.slice(next.lastIndexOf("/") + 1) }, next);
-        onPathChange(next);
+      const next = movedTarget(selected, from, to);
+      if (selected && !next) {
+        clearSelection();
+        onPathChange(null);
+      } else if (next && next.path !== selected?.path) {
+        const name = next.path.slice(next.path.lastIndexOf("/") + 1);
+        selectFile({ ...next.entry, name }, next.path);
+        onPathChange(next.path);
       }
-      loadDirectory(parentPath(to), true);
-      for (const path of expandedPathsRef.current) {
-        if (movedPath(path, to, null) === null) {
+      loadDirectory(parentPath(to ?? from), true);
+      for (const [path] of expanded) {
+        if (to !== null && movedPath(path, to, null) === null) {
           loadDirectory(path);
         }
       }
     },
-    [loadDirectory, onPathChange, selectFile],
+    [clearSelection, loadDirectory, onPathChange, selectFile],
   );
   const operations = useEntryOperations(client, workspaceId, followEntry);
 
