@@ -160,6 +160,28 @@ export function moveInto(dialog: HTMLElement, target: string) {
   fireEvent.click(moveButton(dialog));
 }
 
+/** 树里 Tab 会停的控件各自的名字，按文档顺序；有正的 `tabindex`（Tab 次序就不是文档顺序了）即抛错。 */
+export function tabStops() {
+  const controls = tree().querySelectorAll<HTMLElement>("button, a[href], input, [tabindex]");
+  if ([...controls].some((control) => control.tabIndex > 0)) throw new Error("positive tabindex");
+  return [...controls]
+    .filter((control) => control.tabIndex >= 0 && !(control as HTMLButtonElement).disabled)
+    .map((control) => control.getAttribute("aria-label") ?? control.getAttribute("title"));
+}
+
+/**
+ * 在聚焦着的原生 `button` 上按一次 `key`（`Enter` 或空格）。jsdom 不做「键盘激活按钮」这一步——那是
+ * 浏览器的缺省动作，不是 DOM 事件自带的——这里照浏览器补上：Enter 在 `keydown` 之后点击，空格在
+ * `keyup` 之后点击；处理器拦了缺省动作就不点。发的是键盘事件，点击只由它们引出。
+ */
+export function pressKey(button: HTMLElement, key: "Enter" | " ") {
+  if (document.activeElement !== button) throw new Error("expected the button to have focus");
+  const down = fireEvent.keyDown(button, { key });
+  if (key === "Enter" && down) fireEvent.click(button);
+  const up = fireEvent.keyUp(button, { key });
+  if (key === " " && down && up) fireEvent.click(button);
+}
+
 /** 树的拖放写进 `dataTransfer` 的自定义类型（手写，不从实现导入）。 */
 export const ENTRY_DRAG = "application/x-workbuddy-entry";
 

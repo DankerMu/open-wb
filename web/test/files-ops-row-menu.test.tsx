@@ -1,17 +1,27 @@
 // files-web「文件操作界面」与「树的键盘操作」：行菜单 `更多操作 <名>` 本身——哪些行有、里面有什么、
-// 只用键盘走通重命名；以及「没有范围外的入口」。重命名对话框在 files-ops-rename.test.tsx，改名之后的
-// 跟随在 files-ops-follow.test.tsx。
+// 只用键盘走通重命名；行按钮的 Tab 次序与 Enter / 空格；以及「没有范围外的入口」。重命名对话框在
+// files-ops-rename.test.tsx，改名之后的跟随在 files-ops-follow.test.tsx。
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceBrowser } from "../src/features/files/index.js";
 import { createApiClient } from "../src/lib/api.js";
-import { findRow, previewRegion, row, rowNames, settle, tree } from "./files-deep-link-support.js";
+import {
+  expectEmptyPreview,
+  findRow,
+  previewRegion,
+  row,
+  rowNames,
+  selectedRow,
+  settle,
+  tree,
+} from "./files-deep-link-support.js";
 import { cleanupFilesFixture } from "./files-fixture.js";
 import {
   cancelButton,
   confirmGone,
   dialogGone,
+  dirEntry,
   dragTransfer,
   expand,
   fileEntry,
@@ -28,6 +38,8 @@ import {
   openMove,
   openRename,
   openRowMenu,
+  pressKey,
+  tabStops,
   treeUrl,
 } from "./files-ops-support.js";
 import { createFetchMock, jsonResponse, textPreviewResponse } from "./support.js";
@@ -207,6 +219,61 @@ describe("行菜单", () => {
 
     view.rerender(browser());
     expect(menuButton("notes.md")).toBeTruthy();
+  });
+});
+
+describe("树的键盘操作", () => {
+  it("R22 Tab 次序是行按钮、它的更多操作、下一行；目录 out 的按钮上按 Enter 展开且 aria-expanded 为 true；文件 readme.md 的按钮上按空格选中并显示预览；每个非根行旁的更多操作可聚焦", async () => {
+    const { mark } = openFiles(
+      { "": [dirEntry("out"), fileEntry("readme.md", 8)], out: [fileEntry("a.md")] },
+      { [fileUrl("readme.md")]: () => textPreviewResponse("说明正文") },
+    );
+    const out = await findRow("展开 out");
+    expect(tabStops()).toStrictEqual([
+      "折叠 设计文档",
+      "展开 out",
+      "更多操作 out",
+      "readme.md",
+      "更多操作 readme.md",
+    ]);
+    expect(out.getAttribute("aria-expanded")).toBe("false");
+    const since = mark();
+
+    // jsdom 不移动焦点：Tab 次序由上面的列表钉住，这里直接把焦点放到按钮上再按键。
+    out.focus();
+    pressKey(out, "Enter");
+    expect(await findRow("折叠 out")).toBe(out);
+    expect(out.getAttribute("aria-expanded")).toBe("true");
+    await findRow("a.md");
+    expect(document.activeElement).toBe(out);
+    expect(since()).toStrictEqual([treeUrl("out")]);
+
+    const readme = row("readme.md");
+    expect(readme.hasAttribute("aria-current")).toBe(false);
+    expectEmptyPreview();
+    readme.focus();
+    pressKey(readme, " ");
+    await selectedRow("readme.md");
+    expect(await previewRegion().findByText("说明正文", { exact: true })).toBeTruthy();
+    expect(document.activeElement).toBe(readme);
+    expect(since()).toStrictEqual([treeUrl("out"), fileUrl("readme.md")]);
+
+    expect(tabStops()).toStrictEqual([
+      "折叠 设计文档",
+      "折叠 out",
+      "更多操作 out",
+      "a.md",
+      "更多操作 a.md",
+      "readme.md",
+      "更多操作 readme.md",
+    ]);
+    for (const name of ["out", "a.md", "readme.md"]) {
+      const menu = menuButton(name);
+      expect(menu.tabIndex).toBe(0);
+      expect(menu.disabled).toBe(false);
+      menu.focus();
+      expect(document.activeElement).toBe(menu);
+    }
   });
 });
 
