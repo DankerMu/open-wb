@@ -21,6 +21,8 @@ export const ALERT_BOX =
 export const STATUS_TEXT = "shrink-0 text-[13px] text-muted-foreground";
 
 type CreationMenuProps = {
+  /** 真值时 `新建` 渲染为禁用（浏览器在 `onlyPaths` 下给：过滤视图不列目录，新建的条目无从显示）。 */
+  creationDisabled?: boolean | undefined;
   /** 回调带上菜单触发器，供对话框在取消类关闭后把焦点还给它。 */
   onNewDirectory(trigger: HTMLElement | null): void;
   /** 缺省时菜单没有 `新建工作空间` 一项。 */
@@ -70,11 +72,11 @@ export function EmptyPreview() {
 }
 
 /** `modal={false}`：菜单不锁 body 的指针事件，随后打开的对话框自己管模态。 */
-function CreationMenu({ onNewDirectory, onNewWorkspace }: CreationMenuProps) {
+function CreationMenu({ creationDisabled, onNewDirectory, onNewWorkspace }: CreationMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
+      <DropdownMenuTrigger asChild disabled={creationDisabled}>
         <Button aria-label="新建" ref={triggerRef} size="sm" type="button" variant="secondary">
           ＋
         </Button>
@@ -94,6 +96,7 @@ function CreationMenu({ onNewDirectory, onNewWorkspace }: CreationMenuProps) {
 }
 
 export function WorkspaceColumns({
+  creationDisabled,
   directory,
   folderNotice,
   layout = "columns",
@@ -130,7 +133,11 @@ export function WorkspaceColumns({
           >
             <Icon name="refresh-cw" size={14} />
           </Button>
-          <CreationMenu onNewDirectory={onNewDirectory} onNewWorkspace={onNewWorkspace} />
+          <CreationMenu
+            creationDisabled={creationDisabled}
+            onNewDirectory={onNewDirectory}
+            onNewWorkspace={onNewWorkspace}
+          />
         </div>
         {folderNotice ? (
           <p className={`${ALERT_BOX} shrink-0 text-[12px]`} role="alert">

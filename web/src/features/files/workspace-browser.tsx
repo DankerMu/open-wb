@@ -25,9 +25,9 @@
  * - `onlyPaths`: the tree is built from those paths (`subtreeOf`) and neither the listing cache
  *   nor the expanded set is written, so both are back when it is dropped. `loadDirectory` returns
  *   without a request while it is set: tests pin that for `refresh`, for a walk (it ends at the
- *   first unloaded level) and for mounting; the re-listing after creating a folder goes through the
- *   same gate (read from the code, no test). Dropping it requests the root if that was never loaded
- *   and replays nothing else.
+ *   first unloaded level) and for mounting. `新建` is disabled while it is set: the re-listing after
+ *   creating a folder would go through the same gate. Dropping it requests the root if that was
+ *   never loaded and replays nothing else.
  */
 import {
   type ReactNode,
@@ -611,6 +611,7 @@ export function WorkspaceBrowser({
   return (
     <>
       <WorkspaceColumns
+        creationDisabled={subtreeOnly}
         directory={
           emptyNote(onlyPaths, onlyPathsEmpty) ?? (
             <DirectoryTree

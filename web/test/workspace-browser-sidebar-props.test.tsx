@@ -104,9 +104,9 @@ describe("WorkspaceBrowser onlyPathsEmpty", () => {
     expect(within(column()).getByText(EMPTY_TEXT, { exact: true })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: TREE })).toBeNull();
     expect(screen.queryByText(EMPTY_WORKSPACE)).toBeNull();
-    // 树栏自己的 `刷新` 与 `新建` 还在。
+    // 树栏自己的 `刷新` 与 `新建` 还在；`新建` 在 `onlyPaths` 下禁用。
     expect(screen.getByRole("button", { name: "刷新" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "新建" })).toBeTruthy();
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "新建" }).disabled).toBe(true);
   });
 
   it("onlyPaths 不是空集、或没有 onlyPaths 时不显示这段文案：照常是树", async () => {
@@ -127,5 +127,28 @@ describe("WorkspaceBrowser onlyPathsEmpty", () => {
     expect(screen.getByRole("navigation", { name: TREE })).toBeTruthy();
     await settle();
     expect(requests()).toStrictEqual([]);
+  });
+});
+
+describe("WorkspaceBrowser 新建 under onlyPaths", () => {
+  it("没有 onlyPaths 时 新建 可用；传入后禁用、按下不出菜单，刷新 不受影响；撤掉后又可用", async () => {
+    const { update } = mount();
+    await screen.findByRole("button", { name: "readme.md" });
+    const creation = () => screen.getByRole<HTMLButtonElement>("button", { name: "新建" });
+    expect(creation().disabled).toBe(false);
+
+    update({ onlyPaths: new Set(["out/a.md"]) });
+
+    expect(creation().disabled).toBe(true);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "刷新" }).disabled).toBe(false);
+    fireEvent.pointerDown(creation(), { button: 0 });
+    await settle();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+
+    update({});
+
+    expect(creation().disabled).toBe(false);
+    fireEvent.pointerDown(creation(), { button: 0 });
+    expect(await screen.findByRole("menuitem", { name: "新建文件夹" })).toBeTruthy();
   });
 });

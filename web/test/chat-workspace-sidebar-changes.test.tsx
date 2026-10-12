@@ -8,13 +8,14 @@
  * （按角色查不到）而节点还在。
  */
 import "./radix-platform.js";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assistantMessage,
   edit,
   goLive,
   listed,
+  MESSAGES,
   openSession,
   PROJ,
   quiesce,
@@ -26,7 +27,7 @@ import {
 import { envelope } from "./chat-page-ownership-support.js";
 import { cleanupSessionMeta, crumb } from "./chat-page-session-meta-support.js";
 import type { FetchRoutes } from "./chat-page-support.js";
-import { historyUser, observeUnhandledRejections } from "./chat-stream-support.js";
+import { historyUser, latestSource, observeUnhandledRejections } from "./chat-stream-support.js";
 import {
   BOUND,
   CLOSE,
@@ -44,7 +45,7 @@ import {
   treeOf,
 } from "./chat-workspace-sidebar-support.js";
 import { issued, shownFrame } from "./files-site-fixture.js";
-import { type FetchMock, paths, textPreviewResponse } from "./support.js";
+import { type FetchMock, jsonResponse, paths, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const MARK = "本会话已改动";
@@ -53,6 +54,7 @@ const COLLAPSE = "折叠文件树";
 const EXPAND = "展开文件树";
 const NO_CHANGES = "本会话暂无文件改动";
 const TREE = "工作空间目录树";
+const PREVIEW = "文件预览";
 /** 服务端 `not_found` 信封的文案。 */
 const NOT_FOUND = "请求的资源不存在";
 const ROOT = treeOf(PROJ.id);
@@ -123,6 +125,10 @@ async function expandOutAndSrc(region: HTMLElement) {
 const button = (scope: HTMLElement, name: string) =>
   within(scope).getByRole<HTMLButtonElement>("button", { name });
 
+/** 侧边栏里的预览区，按角色查：它或它的任何一层祖先被隐藏时查不到。 */
+const preview = (scope: HTMLElement) =>
+  within(within(scope).getByRole("region", { name: PREVIEW }));
+
 /** 对 PROJ 发出的全部 `tree` 请求，按调用顺序。 */
 function treeRequests(fetchMock: FetchMock) {
   return paths(fetchMock).filter((path) => path.startsWith(`/api/workspaces/${PROJ.id}/tree?`));
@@ -155,7 +161,10 @@ async function settled() {
 
 describe("本会话改动标记与过滤", () => {
   it("C1 标记：两条助手消息的已结束步骤改过的文件与其各级父目录带 本会话已改动，running 步骤的不带；该步骤结束后带上", async () => {
-    const { region } = await openChanges(twoTurns("running"));
+    const history = { current: twoTurns("running") };
+    const { region } = await openChanges(history.current, {
+      [MESSAGES]: () => jsonResponse(history.current),
+    });
     const send = await goLive();
     await expandOutAndSrc(region);
 
@@ -179,6 +188,23 @@ describe("本会话改动标记与过滤", () => {
 
     await waitFor(() => expect(markedRows(region)).toStrictEqual([...FOUR, ["draft.md", MARK]]));
     expect(description(button(region, "draft.md"))).toBe(MARK);
+
+    // 集合随视图减少：重新读到的历史里没有第二条助手消息（重新生成删掉了它），只剩第一条改的 `src/app.ts`。
+    history.current = {
+      ...turn("done", { steps: [toolStep(1, 0, "edit", [edit("src/app.ts", 1, 0)])] }),
+      streamCursor: { epoch: 1, seq: 5 },
+    };
+    act(() => latestSource().emitGap());
+
+    await waitFor(() =>
+      expect(markedRows(region)).toStrictEqual([
+        ["src", MARK],
+        ["app.ts", MARK],
+      ]),
+    );
+    for (const name of ["index.html", "折叠 out", "draft.md"]) {
+      expect(description(button(region, name))).toBeNull();
+    }
   });
 
   it("C2 只看改动：树恰为改动路径的三支且各级展开，打开开关与其后的 刷新 都不请求 tree；关掉后完整的树、原展开与过滤期间的选中都在", async () => {
@@ -251,12 +277,14 @@ describe("本会话改动标记与过滤", () => {
     expect(within(region).queryByRole("navigation", { name: TREE })).toBeNull();
     expect(within(region).queryByText("该工作空间暂无目录")).toBeNull();
     expect(within(region).queryByRole("button", { name: "readme.md" })).toBeNull();
+    expect(button(region, "新建").disabled).toBe(true);
     await settled();
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
 
     fireEvent.click(button(region, ONLY));
 
     expect(within(region).queryByText(NO_CHANGES)).toBeNull();
+    expect(button(region, "新建").disabled).toBe(false);
     expect(button(region, "readme.md")).toBeTruthy();
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
   });
@@ -314,6 +342,33 @@ describe("本会话改动标记与过滤", () => {
       expect(await within(next).findByRole("button", { name: "readme.md" })).toBeTruthy();
     }
   });
+
+  it("C9 过滤期间集合随视图更新：开关打开着时 running 步骤结束，树多出 draft.md，不请求 tree；开关打开期间 新建 禁用，关掉后可用", async () => {
+    const { fetchMock, region } = await openChanges(twoTurns("running", write("deep/x.md")));
+    const send = await goLive();
+    await expandOutAndSrc(region);
+    const LOADED = [ROOT, OUT, SRC];
+    const THREE = ["项目", "deep", "x.md", "out", "index.html", "src", "app.ts"];
+    expect(button(region, "新建").disabled).toBe(false);
+
+    fireEvent.click(button(region, ONLY));
+
+    expect(rowNames(region)).toStrictEqual(THREE);
+    expect(button(region, "新建").disabled).toBe(true);
+
+    send("step.end", { messageId: 2, stepId: 3, status: "done", output: "ok" });
+
+    await waitFor(() => expect(rowNames(region)).toStrictEqual([...THREE, "draft.md"]));
+    expect(description(button(region, "draft.md"))).toBe(MARK);
+    expect(button(region, ONLY).getAttribute("aria-pressed")).toBe("true");
+    expect(button(region, "新建").disabled).toBe(true);
+    await settled();
+    expect(treeRequests(fetchMock)).toStrictEqual(LOADED);
+
+    fireEvent.click(button(region, ONLY));
+
+    expect(button(region, "新建").disabled).toBe(false);
+  });
 });
 
 describe("内容与文件操作", () => {
@@ -321,7 +376,7 @@ describe("内容与文件操作", () => {
     const { fetchMock, region } = await openChanges(twoTurns("done"));
     await expandOutAndSrc(region);
     fireEvent.click(button(region, "readme.md"));
-    expect(await within(region).findByText("自述正文")).toBeTruthy();
+    expect(await preview(region).findByText("自述正文")).toBeTruthy();
     const tree = within(region).getByRole("navigation", { name: TREE });
     const rows = rowNames(region);
     const requests = paths(fetchMock);
@@ -337,7 +392,7 @@ describe("内容与文件操作", () => {
     expect(button(region, EXPAND)).toBe(toggle);
     expect(document.activeElement).toBe(toggle);
     expect(tree.isConnected).toBe(true);
-    expect(within(region).getByText("自述正文")).toBeTruthy();
+    expect(preview(region).getByText("自述正文")).toBeTruthy();
     expect(button(region, ONLY)).toBeTruthy();
     expect(button(region, CLOSE)).toBeTruthy();
 
@@ -350,7 +405,7 @@ describe("内容与文件操作", () => {
     expect(button(region, "折叠 out").getAttribute("aria-expanded")).toBe("true");
     expect(button(region, "折叠 src").getAttribute("aria-expanded")).toBe("true");
     expect(button(region, "readme.md").getAttribute("aria-current")).toBe("true");
-    expect(within(region).getByText("自述正文")).toBeTruthy();
+    expect(preview(region).getByText("自述正文")).toBeTruthy();
     expect(button(region, "刷新")).toBeTruthy();
     await settled();
     expect(paths(fetchMock)).toStrictEqual(requests);
