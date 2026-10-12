@@ -678,7 +678,7 @@ Minimal mergeable slice: 26.1 的夹具与 README 可先合（既有 hurl 只断
 
 ## 27. files-harness — `/files` 走查的新步骤
 
-- [ ] 27.1 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）：files-harness「走查 /files 步骤」新增的 (a)–(f)——高亮的源码与地址里的 `path`、隔离来源的 html 预览及其相对样式表（标题颜色 `rgb(0, 128, 0)`）、源码切换、音频播放器、下载链接、重载后仍选中、
+- [x] 27.1 `web/e2e/ui-walk-files.ts`（组 3 建的 helper）：files-harness「走查 /files 步骤」新增的 (a)–(f)——高亮的源码与地址里的 `path`、隔离来源的 html 预览及其相对样式表（标题颜色 `rgb(0, 128, 0)`）、源码切换、音频播放器、下载链接、重载后仍选中、
   把 `walk-out-<project>` 重命名为 `walk-renamed-<project>` 后经确认框删除并以 `tree` 接口复核。两个 project 都跑。
   实施注记见 `implementation-notes.md`「27.1 的 (a)(c)(d)(e)（#1114）」。
   实施注记见 `implementation-notes.md`「27.1 的 (f)（#1116）」。
