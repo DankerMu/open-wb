@@ -61,29 +61,37 @@ export function loadedDirectoryPaths(cache: DirectoryCache) {
 }
 
 /**
- * 定位到 `path` 的下一步，只看已加载的列表：`expand` 是走得到的各级父目录；`unloaded` 是第一个还
- * 没加载的层（没有则为 `null`）；`entry` 是末级在它父目录列表里的条目——中途缺了一级、某一级不是
- * 目录或末级不在列表里时为 `null`。
+ * 定位到 `path` 的下一步，只看已加载的列表。各级父目录没加载就是下一个要请求的 `unloaded`——不看
+ * 它在不在上一级的列表里：有没有、能不能列由服务端答复。`expand` 是其中在树上有行的那些（根，以及
+ * 被一个有行的上级列为目录的）：只有它们会被展开；`unloaded` 不在 `expand` 里即它在树上没有行。
+ * 各级都已加载（`unloaded` 为 `null`）时，`entry` 是末级在它父目录列表里的条目，没有则为 `null`。
+ * 路径原样按 `/` 切开、原样比对：不去空格，不做 Unicode 规范化，不处理 `.` / `..` / 空段。
  */
 export function revealStep(path: string, cache: DirectoryCache) {
   const parents = parentDirectories(path);
   const expand: string[] = [];
+  let listed = true;
   for (const [index, parent] of parents.entries()) {
-    expand.push(parent);
+    const above = parents[index - 1];
+    listed &&=
+      above === undefined ||
+      cache[above]?.entries.some(
+        (item) => item.type === "dir" && workspacePath(above, item.name) === parent,
+      ) === true;
+    if (listed) {
+      expand.push(parent);
+    }
     if (!Object.hasOwn(cache, parent)) {
       return { entry: null, expand, unloaded: parent };
     }
-
-    const child = parents[index + 1] ?? path;
-    const entry = cache[parent]?.entries.find((item) => workspacePath(parent, item.name) === child);
-    if (child === path) {
-      return { entry: entry ?? null, expand, unloaded: null };
-    }
-    if (entry?.type !== "dir") {
-      break;
-    }
   }
-  return { entry: null, expand, unloaded: null };
+
+  const last = parents.at(-1);
+  const entry =
+    last === undefined
+      ? undefined
+      : cache[last]?.entries.find((item) => workspacePath(last, item.name) === path);
+  return { entry: entry ?? null, expand, unloaded: null };
 }
 
 /** 带标记的行：这些路径本身与它们的各级父目录；根行不带。 */

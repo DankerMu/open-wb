@@ -3,10 +3,16 @@
  * files page wraps it; nothing in here knows about the address or the router.
  *
  * - Current path: `path` is applied when it changes — the unloaded parent directories are listed
- *   one level at a time and expanded, then a file is selected (one `file` request) and a directory
- *   only expanded. A level that fails or lacks the next name ends the walk there. A selection made
- *   this way is not reported; a click and `reveal` report through `onPathChange` once the file is
- *   found.
+ *   one level at a time, each requested once whether or not the level above lists it, then a file
+ *   is selected (one `file` request) and a directory only expanded. A selection made this way is
+ *   not reported; a click and `reveal` report through `onPathChange` once the file is found.
+ * - A walk started by `path` that does not end on a file leaves nothing selected. Ending on a
+ *   directory shows the empty preview; a last name missing from its parent's listing shows
+ *   `文件不存在`; a level whose request failed shows that failure's message (none for a 401, which
+ *   belongs to the login layer). `path` is forwarded as given: whether a level may be listed is the
+ *   server's answer, nothing here inspects or rewrites the segments. A failed level without a row
+ *   on the tree is kept out of the error rows and the expanded set, so `刷新` does not ask for it
+ *   again. `reveal` reports no failure, and `刷新` does not repeat a failed walk.
  * - A web page (html / htm) is the exception to that one request: it opens in the rendered view,
  *   loaded by a frame from the preview origin, and `file` is requested only for its source view
  *   (`immediatePreview`). The preview token is issued here, by the one `usePreviewToken` call, and
@@ -82,6 +88,13 @@ type WorkspaceBrowserProps = {
   onNewWorkspace?: ((trigger: HTMLElement | null) => void) | undefined;
 };
 
+const MISSING_FILE = "文件不存在";
+
+/** 这一次定位请求过 `directory` 才读它的失败文案：`onlyPaths` 下没有请求，早先留下的文案不算数。 */
+function failureOf(target: Reveal, failed: ReadonlyMap<string, string>, directory: string) {
+  return target.asked.has(directory) ? failed.get(directory) : undefined;
+}
+
 const NO_PATHS: ReadonlySet<string> = new Set();
 const NO_ERRORS: Record<string, string> = {};
 
@@ -104,12 +117,16 @@ export function WorkspaceBrowser({
   const [directoryErrors, setDirectoryErrors] = useState<Record<string, string>>({});
   const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(new Set([""]));
   const [loadingPaths, setLoadingPaths] = useState<ReadonlySet<string>>(new Set());
+  // `path` 属性的定位没有落在文件上时预览区显示的失败文案。
+  const [pathNotice, setPathNotice] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
   const appliedPathRef = useRef<string | null | undefined>(undefined);
   const cacheRef = useRef<DirectoryCache>({});
   const directoryRequestsRef = useRef(new Map<string, AbortController>());
   const expandedPathsRef = useRef<ReadonlySet<string>>(new Set([""]));
+  // 最近一次请求失败的目录与文案：定位从这里读（它的 effect 不随 `directoryErrors` 重跑）。
+  const failedDirectoriesRef = useRef(new Map<string, string>());
   const mountedRef = useRef(false);
   const ownedImageUrlRef = useRef<string | null>(null);
   const previewRequestRef = useRef(0);
@@ -140,8 +157,8 @@ export function WorkspaceBrowser({
   }, []);
 
   const loadDirectory = useCallback(
-    (path: string, refresh = false) => {
-      if (subtreeOnly || (!refresh && cacheRef.current[path])) {
+    (path: string, refresh = false, onTree = true) => {
+      if (subtreeOnly || (!refresh && Object.hasOwn(cacheRef.current, path))) {
         return;
       }
 
@@ -156,6 +173,7 @@ export function WorkspaceBrowser({
 
       const controller = new AbortController();
       directoryRequestsRef.current.set(path, controller);
+      failedDirectoriesRef.current.delete(path);
       setLoadingPaths((current) => new Set(current).add(path));
       setDirectoryErrors((current) => {
         if (!current[path]) {
@@ -182,7 +200,12 @@ export function WorkspaceBrowser({
             return;
           }
 
-          setDirectoryErrors((current) => ({ ...current, [path]: errorMessage(error) }));
+          const message = errorMessage(error);
+          failedDirectoriesRef.current.set(path, message);
+          // 树上没有行的层（`path` 属性里上一级没有列出的那些）不进错误行：`刷新` 不会再请求它。
+          if (onTree) {
+            setDirectoryErrors((current) => ({ ...current, [path]: message }));
+          }
         })
         .finally(() => {
           if (directoryRequestsRef.current.get(path) !== controller) {
@@ -258,6 +281,17 @@ export function WorkspaceBrowser({
     previewControllerRef.current = null;
   }, []);
 
+  const clearSelection = useCallback(() => {
+    if (!selectedFileRef.current) {
+      return;
+    }
+
+    cancelPreviewRequest();
+    releaseOwnedImage();
+    publishSelectedFile(null);
+    setPreviewLoading(false);
+  }, [cancelPreviewRequest, publishSelectedFile, releaseOwnedImage]);
+
   /**
    * 为已发布的选中项 `path` 发一次 `file` 请求；调用方先 `cancelPreviewRequest`。结局经
    * `withFetched` 放进那时的预览：网页收进它的 `source`，其余类别就是预览本身。
@@ -330,6 +364,7 @@ export function WorkspaceBrowser({
   const selectFile = useCallback(
     (entry: TreeEntry, path: string) => {
       cancelPreviewRequest();
+      setPathNotice(null);
       const previous = selectedFileRef.current;
       const sameFile = previous?.path === path;
       const next: SelectedFile =
@@ -401,9 +436,12 @@ export function WorkspaceBrowser({
     [onPathChange, selectFile],
   );
 
-  /** 定位遇到未加载的层：请求进行中就等；这一次还没请求过就请求并等；否则（失败过，或 `onlyPaths` 下）不等。 */
+  /**
+   * 定位遇到未加载的层：请求进行中就等；这一次还没请求过就请求并等；否则（失败过，或 `onlyPaths` 下）
+   * 不等。`onTree` 为假即这一层在树上没有行。
+   */
   const awaitDirectory = useCallback(
-    (target: Reveal, directory: string) => {
+    (target: Reveal, directory: string, onTree: boolean) => {
       if (directoryRequestsRef.current.has(directory)) {
         return true;
       }
@@ -412,16 +450,48 @@ export function WorkspaceBrowser({
       }
 
       target.asked.add(directory);
-      loadDirectory(directory);
+      loadDirectory(directory, false, onTree);
       return true;
     },
     [loadDirectory, subtreeOnly],
   );
 
   /**
-   * 把进行中的定位推进到不能再推为止：已加载的层直接走过并展开；遇到未加载的层请求一次后返回，
-   * 等列表或失败落地（下面的 effect）再进来，等不到就停在这一级。
-   * 走到末级：文件则选中（`reveal` 发起的另上报一次），目录只展开，列表里没有就什么都不做。
+   * 定位结束而没有落在文件上。`path` 属性发起的：清掉选中，预览区显示 `notice`（`null` 即空态）；
+   * 没有文案可给（`undefined`：401，或 `onlyPaths` 下没有请求）时什么都不动。`reveal` 发起的不报。
+   */
+  const endWithoutFile = useCallback(
+    (target: Reveal, notice: string | null | undefined) => {
+      if (target.notify || notice === undefined) {
+        return;
+      }
+
+      clearSelection();
+      setPathNotice(notice);
+    },
+    [clearSelection],
+  );
+
+  /**
+   * 定位落在目录 `path` 上：展开并请求它。它的父目录不在 `rows`（树上有行的各级）里时——别名路径，如
+   * `./out`——它自己也没有行：不展开、不请求。
+   */
+  const openDirectory = useCallback(
+    (path: string, rows: readonly string[]) => {
+      if (!rows.includes(path.slice(0, Math.max(0, path.lastIndexOf("/"))))) {
+        return;
+      }
+
+      expandDirectories([path]);
+      loadDirectory(path);
+    },
+    [expandDirectories, loadDirectory],
+  );
+
+  /**
+   * 把进行中的定位推进到不能再推为止：已加载的层直接走过，树上有行的并展开；遇到未加载的层请求一次
+   * 后返回，等列表或失败落地（下面的 effect）再进来，等不到就停在这一级，文案是这一次请求的失败。
+   * 走到末级：文件则选中（`reveal` 发起的另上报一次），目录只展开，列表里没有就是 `文件不存在`。
    */
   const continueReveal = useCallback(() => {
     const target = revealRef.current;
@@ -432,20 +502,26 @@ export function WorkspaceBrowser({
     const { entry, expand, unloaded } = revealStep(target.path, cacheRef.current);
     expandDirectories(expand);
     if (unloaded !== null) {
-      if (awaitDirectory(target, unloaded)) {
-        return;
+      if (!awaitDirectory(target, unloaded, expand.includes(unloaded))) {
+        revealRef.current = null;
+        endWithoutFile(target, failureOf(target, failedDirectoriesRef.current, unloaded));
       }
-    } else if (entry?.type === "file") {
+      return;
+    }
+
+    revealRef.current = null;
+    if (entry?.type === "file") {
       selectFile(entry, target.path);
       if (target.notify) {
         onPathChange(target.path);
       }
     } else if (entry) {
-      expandDirectories([target.path]);
-      loadDirectory(target.path);
+      openDirectory(target.path, expand);
+      endWithoutFile(target, null);
+    } else {
+      endWithoutFile(target, MISSING_FILE);
     }
-    revealRef.current = null;
-  }, [awaitDirectory, expandDirectories, loadDirectory, onPathChange, selectFile]);
+  }, [awaitDirectory, endWithoutFile, expandDirectories, onPathChange, openDirectory, selectFile]);
 
   // `path` 属性只在变化时生效一次，每次都顶掉进行中的定位：与当前选中相同就只是放弃它，`null` 另清掉
   // 选中，其余换成对 `path` 的定位。其后每当目录列表或进行中的目录请求有变化，推进定位。
@@ -453,23 +529,17 @@ export function WorkspaceBrowser({
   useEffect(() => {
     if (appliedPathRef.current !== path) {
       appliedPathRef.current = path;
+      setPathNotice(null);
       if (path === null) {
         revealRef.current = null;
-        if (selectedFileRef.current) {
-          previewRequestRef.current += 1;
-          previewControllerRef.current?.abort();
-          previewControllerRef.current = null;
-          releaseOwnedImage();
-          publishSelectedFile(null);
-          setPreviewLoading(false);
-        }
+        clearSelection();
       } else {
         revealRef.current =
           selectedFileRef.current?.path === path ? null : { asked: new Set(), notify: false, path };
       }
     }
     continueReveal();
-  }, [continueReveal, directories, loadingPaths, path, publishSelectedFile, releaseOwnedImage]);
+  }, [clearSelection, continueReveal, directories, loadingPaths, path]);
 
   const folder = useFolderDialog(client, workspaceId, cacheRef, loadDirectory);
 
@@ -541,6 +611,7 @@ export function WorkspaceBrowser({
         preview={
           <PreviewArea
             loading={previewLoading}
+            notice={pathNotice}
             onWebViewChange={showWebView}
             previewToken={previewToken}
             selectedFile={selectedFile}

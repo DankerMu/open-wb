@@ -1,12 +1,4 @@
-import {
-  type ComponentProps,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import { useAuth } from "../auth/index.js";
@@ -30,6 +22,10 @@ type WorkspaceDialogState = {
   pending: boolean;
 };
 
+/**
+ * 换工作空间的地址：只改 `ws`，并去掉 `path`——当前文件属于原来的空间；`ws` 被纠正、经切换器切换、
+ * 新建成功三处都走这里。
+ */
 function workspaceNavigation(
   pathname: string,
   search: string,
@@ -37,6 +33,7 @@ function workspaceNavigation(
   workspaceId: string | null,
 ) {
   const parameters = new URLSearchParams(search);
+  parameters.delete("path");
   if (workspaceId) {
     parameters.set("ws", workspaceId);
   } else {
@@ -85,17 +82,6 @@ function EmptyWorkspace({
       switcher={switcher}
     />
   );
-}
-
-/**
- * 文件页的浏览器：当前路径是这里的本地状态。调用方按工作空间 id 设 `key`，换空间即重挂，上一个
- * 空间的路径不带过来。
- */
-function PageBrowser(
-  props: Omit<ComponentProps<typeof WorkspaceBrowser>, "onPathChange" | "path">,
-) {
-  const [path, setPath] = useState<string | null>(null);
-  return <WorkspaceBrowser {...props} onPathChange={setPath} path={path} />;
 }
 
 export function FilesPage() {
@@ -178,7 +164,10 @@ export function FilesPage() {
 
   const listForClient =
     listState.status === "success" && listState.client === client ? listState : null;
-  const requestedWorkspaceId = new URLSearchParams(location.search).get("ws");
+  const query = new URLSearchParams(location.search);
+  const requestedWorkspaceId = query.get("ws");
+  // 当前文件：地址里的 `path`（写了多个取第一个），空串当作没有。值原样交给浏览器组件，这里不改它。
+  const requestedPath = query.get("path") || null;
   const currentWorkspace = currentWorkspaceFromList(listForClient, requestedWorkspaceId);
   const urlMatchesWorkspace = currentWorkspace
     ? requestedWorkspaceId === currentWorkspace.id
@@ -215,6 +204,19 @@ export function FilesPage() {
       navigate(workspaceNavigation(location.pathname, location.search, location.hash, workspaceId));
     },
     [closeWorkspaceDialog, location.hash, location.pathname, location.search, navigate],
+  );
+
+  // 在树里选中文件：以 replace 把它写进 `path`，其余参数与页内锚点不动。由地址定位到的选中不经过这里。
+  const writePath = useCallback(
+    (path: string) => {
+      const parameters = new URLSearchParams(location.search);
+      parameters.set("path", path);
+      navigate(
+        { hash: location.hash, pathname: location.pathname, search: `?${parameters}` },
+        { replace: true },
+      );
+    },
+    [location.hash, location.pathname, location.search, navigate],
   );
 
   const openWorkspaceDialog = useCallback(
@@ -324,13 +326,15 @@ export function FilesPage() {
         </p>
       )}
       {listForClient && currentWorkspace && urlMatchesWorkspace ? (
-        <PageBrowser
+        <WorkspaceBrowser
           account={principal.account}
           client={client}
           dir={currentWorkspace.dir}
           key={currentWorkspace.id}
           name={currentWorkspace.name}
           onNewWorkspace={openWorkspaceDialog}
+          onPathChange={writePath}
+          path={requestedPath}
           switcher={switcher}
           workspaceId={currentWorkspace.id}
         />
