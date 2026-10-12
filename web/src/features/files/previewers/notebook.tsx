@@ -2,8 +2,8 @@
  * Notebook previewer: a read-only rendering of nbformat 4 JSON, cell by cell, with no notebook
  * library (file-previewers「Notebook」). The file is untrusted, cell outputs included:
  *   - an HTML output is the document of an `iframe` whose `sandbox` attribute is empty, handed
- *     over as the original text with nothing added around it; nothing of it is parsed as markup
- *     of this document;
+ *     over as a fixed policy prefix followed by the original text, with nothing after it; nothing
+ *     of it is parsed as markup of this document;
  *   - images are the `src` of an `img`: a fixed `data:` prefix followed by the content;
  *   - everything else reaches the page as React text nodes.
  * Parsing never throws and neither does rendering what it returns: every value read from the
@@ -91,6 +91,22 @@ function svgAddress(text: string): string | null {
   }
 }
 
+/**
+ * HTML 输出的 srcdoc 开头固定加这一段：逐字如此、不随内容变化，输出为空串时也加
+ * （file-previewers「Notebook」）。它排在原文的任何记号之前。
+ * 实测（issue 1351；Chromium 151、Firefox 153、WebKit 26.5，本机回环监听器按到达的请求与连接判定）：
+ * `data:` 图片与内联样式照常生效，原文自带的第二个策略 `meta` 没有把它放宽；Chromium 与 WebKit 里
+ * 框内指向外部的图片、样式表、字体、音视频、子框架与插件内容都没有发出 HTTP 请求。
+ * 同一次实测里它没有挡住的：
+ *   - Firefox：输出里同时有音视频元素时，只带 srcset 的 `img` 在部分运行里仍被取回，其余同上；
+ *   - Chromium：对框内指向外部的子框架仍向对方建立一条 TCP 连接（不发请求）；
+ *   - WebKit：对 `link rel=preconnect` 仍建立连接；
+ *   - 三个浏览器：用户点框内链接时该框自身被导航到链接地址。
+ * 公网地址、https 与域名解析未测。
+ */
+const HTML_OUTPUT_POLICY =
+  "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\">";
+
 const MONO =
   "m-0 overflow-x-auto font-(family-name:--wb-mono) text-[0.75rem] leading-[1.55] whitespace-pre text-(--wb-text-primary)";
 
@@ -123,7 +139,7 @@ function RichOutput({ data }: { data: Json }) {
       <iframe
         className="block h-[20rem] w-full rounded-[8px] border border-(--wb-border-default) bg-white"
         sandbox=""
-        srcDoc={joined(data["text/html"])}
+        srcDoc={HTML_OUTPUT_POLICY + joined(data["text/html"])}
         title="HTML 输出"
       />
     );
