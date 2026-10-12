@@ -9,7 +9,6 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { chatTopbar } from "../src/features/chat/topbar-actions.js";
-import { artifactsPanelFixture, openProbedSession } from "./chat-page-artifacts-panel-support.js";
 import { quiesce } from "./chat-page-file-changes-support.js";
 import { renewAccount, settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { composer, envelope, SESSION_PROMPT } from "./chat-page-ownership-support.js";
@@ -48,6 +47,7 @@ import {
   openTopbarRename,
   renameDialog,
 } from "./chat-page-session-meta-support.js";
+import { chatShellFixture, openProbedSession } from "./chat-page-shell-support.js";
 import { FakeEventSource } from "./chat-stream-support.js";
 import { hasLucideGlyph } from "./files-fixture.js";
 import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
@@ -333,7 +333,9 @@ describe("会话切换与欢迎态 (S12, S13)", () => {
 
     expect(searchBox()).toBeNull();
     expect(screen.queryByRole("banner")).toBeNull();
-    expect(screen.queryAllByRole("button", { name: /^(重命名|对话内搜索|产物面板)$/ })).toEqual([]);
+    expect(
+      screen.queryAllByRole("button", { name: /^(重命名|对话内搜索|工作空间侧边栏)$/ }),
+    ).toEqual([]);
 
     await act(() => page.router.navigate(SESSION_PATH));
     await waitFor(() => expect(messageIds()).toEqual(WEEKLY_IDS));
@@ -346,15 +348,19 @@ describe("会话切换与欢迎态 (S12, S13)", () => {
 });
 
 describe("顶栏全序 (S14, S16)", () => {
-  it("S14 a selected session shows 重命名, 对话内搜索, 产物面板 after the heading; the welcome state shows none", async () => {
-    const page = await openConversation(weeklyConversation());
+  it("S14 a selected session bound to a workspace shows 重命名, 对话内搜索, 工作空间侧边栏 after the heading; the welcome state shows none", async () => {
+    const weekly = weeklyConversation();
+    const page = await openConversation({
+      ...weekly,
+      session: { ...weekly.session, workspaceId: "5".repeat(32) },
+    });
 
     const heading = within(banner()).getByRole("heading", {
       level: 1,
       name: "我的工作 / saved title",
     });
     const buttons = within(banner()).getAllByRole("button");
-    expect(bannerButtons()).toEqual(TOPBAR_BUTTONS);
+    expect(bannerButtons()).toEqual([...TOPBAR_BUTTONS, "工作空间侧边栏"]);
     for (const button of buttons) {
       expect(heading.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(
         0,
@@ -366,16 +372,18 @@ describe("顶栏全序 (S14, S16)", () => {
     expect(buttons.map((button) => button.getAttribute("aria-expanded"))).toEqual([
       null,
       "false",
-      null,
+      "false",
     ]);
 
     await act(() => page.router.navigate("/"));
     await screen.findByRole("heading", { level: 1, name: WELCOME });
     expect(screen.queryByRole("banner")).toBeNull();
-    expect(screen.queryAllByRole("button", { name: /^(重命名|对话内搜索|产物面板)$/ })).toEqual([]);
+    expect(
+      screen.queryAllByRole("button", { name: /^(重命名|对话内搜索|工作空间侧边栏)$/ }),
+    ).toEqual([]);
   });
 
-  it("S14 at 760px and below 打开导航 comes first, and is all that is left in the welcome state", async () => {
+  it("S14 at 760px and below 打开导航 comes first (the session is bound to no workspace: two buttons follow), and is all that is left in the welcome state", async () => {
     installNarrowViewport();
     const page = await openConversation(weeklyConversation());
     await crumb("saved title");
@@ -387,35 +395,39 @@ describe("顶栏全序 (S14, S16)", () => {
     expect(bannerButtons()).toEqual(["打开导航"]);
   });
 
-  it("S16 chatTopbar fills rename, search and artifacts in that order; only search carries expanded and receives its trigger", () => {
+  it("S16 chatTopbar fills rename, search and workspace in that order; search and workspace carry expanded and receive their trigger; without a workspace slot only the first two", () => {
     const session = weeklyConversation().session;
-    const [openRename, openArtifacts] = [vi.fn(), vi.fn()];
+    const openRename = vi.fn();
     const closed = { expanded: false, onSelect: vi.fn() };
     const opened = { expanded: true, onSelect: vi.fn() };
+    const workspace = { expanded: true, onSelect: vi.fn() };
 
-    expect(chatTopbar(undefined, openRename, opened, openArtifacts)).toStrictEqual({});
+    expect(chatTopbar(undefined, openRename, opened, workspace)).toStrictEqual({});
 
-    const report = chatTopbar(session, openRename, closed, openArtifacts);
+    const report = chatTopbar(session, openRename, closed, workspace);
     expect(report.breadcrumb).toBe("saved title");
-    expect(report.actions?.map((action) => action.key)).toEqual(["rename", "search", "artifacts"]);
+    expect(report.actions?.map((action) => action.key)).toEqual(["rename", "search", "workspace"]);
     expect(report.actions?.map((action) => Object.keys(action).includes("expanded"))).toEqual([
       false,
       true,
-      false,
+      true,
     ]);
     expect(report.actions?.[1]?.expanded).toBe(false);
-    expect(chatTopbar(session, openRename, opened, openArtifacts).actions?.[1]?.expanded).toBe(
-      true,
-    );
+    expect(report.actions?.[2]?.expanded).toBe(true);
+    expect(chatTopbar(session, openRename, opened, workspace).actions?.[1]?.expanded).toBe(true);
+    expect(chatTopbar(session, openRename, closed).actions?.map((action) => action.key)).toEqual([
+      "rename",
+      "search",
+    ]);
 
     const trigger = document.createElement("button");
     report.actions?.[1]?.onSelect(trigger);
     expect(closed.onSelect.mock.calls).toEqual([[trigger]]);
     expect(opened.onSelect).not.toHaveBeenCalled();
     expect(openRename).not.toHaveBeenCalled();
-    expect(openArtifacts).not.toHaveBeenCalled();
+    expect(workspace.onSelect).not.toHaveBeenCalled();
     report.actions?.[2]?.onSelect(trigger);
-    expect(openArtifacts.mock.calls).toEqual([[trigger]]);
+    expect(workspace.onSelect.mock.calls).toEqual([[trigger]]);
   });
 });
 
@@ -471,8 +483,8 @@ describe("历史未读到 (S15)", () => {
 });
 
 describe("标题未知与模态层 (S19, S20)", () => {
-  // The probed shell of the 产物面板 cases: its hooks dispose that shell's router.
-  artifactsPanelFixture();
+  // The probed shell (chat-page-shell-support): its hooks dispose that shell's router.
+  chatShellFixture();
 
   it("S19 the search closes when the top bar loses the session title under the same URL, and stays closed once the title is back", async () => {
     const getProbe = await openProbedSession(weeklyConversation());

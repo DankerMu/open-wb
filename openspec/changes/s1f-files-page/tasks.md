@@ -575,23 +575,24 @@ Minimal mergeable slice: 22.1（重命名）、22.4（删除）、22.2（移动�
 
 - [x] 23.1 拷入 shadcn `resizable` 到 `web/src/components/ui/resizable.tsx`（`react-resizable-panels` 加入依赖并登记 `ATTRIBUTION.md`；只做六类修改；确认没有引入新的 `@radix-ui/*` 包）。
   实施注记见 `implementation-notes-1.md`「23.1（#1104）」。
-- [ ] 23.2 新文件 `web/src/features/chat/workspace-sidebar.tsx` 与 `use-workspace-sidebar.ts`（登记 `MIGRATED_AREAS`）：开合意图、宽屏的 `complementary` + 分隔线、宽度读写 `localStorage` 键 `workbuddy-workspace-sidebar`（读失败与非法值回缺省）、窄屏的全屏 `sheet`（焦点进 `关闭`、Escape、焦点归还且 `preventScroll`）、
-  切换会话保持、未绑定会话与欢迎态不渲染但保留意图。主体先挂 `WorkspaceBrowser`（`stacked` 布局，无标记、无过滤）与头部的 `刷新`、`关闭`、`在文件页打开`。
-- [ ] 23.3 `topbar-actions.ts`：第四项改为 `{key:"workspace", label:"工作空间侧边栏", icon:"folder"}`，带 `expanded`，只在 `workspaceId` 非 null 时填入；`page.tsx` 的主区改为对话区 + 侧边栏两栏。
+- [x] 23.2 新文件 `web/src/features/chat/workspace-sidebar.tsx` 与 `use-workspace-sidebar.ts`（登记 `MIGRATED_AREAS`）：开合意图、宽屏的 `complementary` + 分隔线、宽度读写 `localStorage` 键 `workbuddy-workspace-sidebar`（读失败与非法值回缺省）、窄屏的全屏 `sheet`（焦点进 `关闭`、Escape、焦点归还且 `preventScroll`）、
+  切换会话保持、未绑定会话与欢迎态不渲染但保留意图。主体先挂 `WorkspaceBrowser`（`stacked` 布局，无标记、无过滤）与头部的 `关闭`、`在文件页打开`。
+  实施注记见 `implementation-notes.md`「23.2–23.7（#1105）」。
+- [x] 23.3 `topbar-actions.ts`：第四项改为 `{key:"workspace", label:"工作空间侧边栏", icon:"folder"}`，带 `expanded`，只在 `workspaceId` 非 null 时填入；`page.tsx` 的主区改为对话区 + 侧边栏两栏。
   删除 `artifacts-panel.tsx` 及其四个测试文件（`chat-page-artifacts-panel*.test.tsx` 与 support），从 `MIGRATED_AREAS` 与清单断言两处（`web/test/ui-layering.test.ts:21`、`:333`）去掉它的条目；`page.tsx:4`、`:33` 对 `useArtifactsPanel` 的使用随之去掉；
   `artifact-card.tsx` 里只被面板用的 `ArtifactRowAction`（写作时唯一调用方是 `artifacts-panel.tsx:61`）一并删除。
   **support 文件不能直接删**：`web/test/chat-page-artifacts-panel-support.tsx` 还被两个不删的测试文件导入——`chat-page-search.test.tsx:12`（`artifactsPanelFixture`、`openProbedSession`）与 `chat-page-artifact-card-feedback.test.tsx:36-40`（`artifactsPanelFixture`、`renameBehindDialog`、`renameRoute`）。
   先把这四个导出（连同它们依赖的夹具常量）搬进一个不带 panel 字样的新 support 文件 `web/test/chat-page-shell-support.tsx`（`artifactsPanelFixture` 顺手改名为不提面板的名字），两个导入方改导入路径，再删原 support 文件；面板专用的其余导出（`openPanel`、`panelRows`、`drawer` 等）随文件删除。
-- [ ] 23.4 测试（新文件 `web/test/chat-workspace-sidebar-layout.test.tsx`、`chat-workspace-sidebar-narrow.test.tsx`）：workspace-sidebar「顶栏入口与可用性」两个场景、「布局与开合」五个场景（其中「宽屏并排与拖动」的后半断言刷新后侧边栏初始为关闭、再次打开时宽度等于刷新前，owner D-20）；`web/test/topbar-actions.test.tsx` 与 chat-web「顶栏入口」、session-sidebar 的按钮次序断言随条文改写。
+- [x] 23.4 测试（新文件 `web/test/chat-workspace-sidebar-layout.test.tsx`、`chat-workspace-sidebar-narrow.test.tsx`）：workspace-sidebar「顶栏入口与可用性」两个场景、「布局与开合」五个场景（其中「宽屏并排与拖动」的后半断言刷新后侧边栏初始为关闭、再次打开时宽度等于刷新前，owner D-20）；`web/test/topbar-actions.test.tsx` 与 chat-web「顶栏入口」、session-sidebar 的按钮次序断言随条文改写。
   断言了 `产物面板` 的既有文件逐个处理（写作时 `grep -rln 产物面板 web/test web/e2e` 的结果；开工时重跑一次，C 与 S1g 新增或改名的文件一并处理，结果记入 PR 的偏离记录）：
   删除——`web/test/chat-page-artifacts-panel.test.tsx`、`chat-page-artifacts-panel-focus.test.tsx`、`chat-page-artifacts-panel-sheet.test.tsx`、`chat-page-artifacts-panel-support.tsx`（23.3）；
   改按钮名与次序断言——`web/test/chat-page-session-pin.test.tsx`、`chat-page-session-rename-pin.test.tsx`、`chat-page-project-config.test.tsx`、`chat-page-search.test.tsx`、`chat-page-search-support.tsx`；
   只改导入路径（不含 `产物面板` 字样，上面的 grep 找不到它们，另用 `grep -rn 'artifacts-panel' web/test web/e2e web/src` 找）——`chat-page-artifact-card-feedback.test.tsx`、`chat-page-search.test.tsx`（23.3 的 support 搬家）；
   走查——`web/e2e/ui-walk-steps.ts`（`:136-178` 的 `walkArtifactsPanel` 删除，其调用在 `ui-walk-sessions.spec.ts:35`、`:131`）、`web/e2e/ui-walk-project-config.ts`（23.5）。
-- [ ] 23.5 走查（`web/e2e/` 新 helper `ui-walk-workspace-sidebar.ts`，在 `ui-walk-sessions.spec.ts` 里只换调用、不增行）：顶栏按钮断言改为 `工作空间侧边栏`；原「`产物面板` 打开面板并列出该文件」换成「打开侧边栏，树里有 `workbuddy-report.html`」；
+- [x] 23.5 走查（`web/e2e/` 新 helper `ui-walk-workspace-sidebar.ts`，在 `ui-walk-sessions.spec.ts` 里只换调用、不增行）：顶栏按钮断言改为 `工作空间侧边栏`；原「`产物面板` 打开面板并列出该文件」换成「打开侧边栏，树里有 `workbuddy-report.html`」；
   `desktop-light` 断并排且无横向溢出，`mobile-dark` 断对话框形态与 Escape 后的焦点。原 `打开网页预览` 对话框的断言此时仍保留（组 25 才改）。
-- [ ] 23.6 清单：SH-05、CH-37 里的「产物面板」改为「工作空间侧边栏」；CH-34、CH-35、CH-36 与 CH-54 的前半改写为侧边栏的对应行（打开 / 关闭的四种方式按新形态重写、空态、窄屏覆盖、切换会话保持打开）；新增行：分隔线拖动与宽度记忆、未绑定工作空间的会话没有该按钮。结论一律 `待签`（被改写的已有行同样回到 `待签`）。
-- [ ] 23.7 变异证据：切换会话时关闭侧边栏 → 「切换会话保持打开」判红；未绑定会话也上报按钮 → 可用性用例判红；窄屏关闭后不还焦点 → 窄屏用例判红；`localStorage` 抛错未兜住 → 「存储值不合法」判红。
+- [x] 23.6 清单：SH-05、CH-37 里的「产物面板」改为「工作空间侧边栏」；CH-34、CH-35、CH-36 与 CH-54 的前半改写为侧边栏的对应行（打开 / 关闭的四种方式按新形态重写、空态、窄屏覆盖、切换会话保持打开）；新增行：分隔线拖动与宽度记忆、未绑定工作空间的会话没有该按钮。结论一律 `待签`（被改写的已有行同样回到 `待签`）。
+- [x] 23.7 变异证据：切换会话时关闭侧边栏 → 「切换会话保持打开」判红；未绑定会话也上报按钮 → 可用性用例判红；窄屏关闭后不还焦点 → 窄屏用例判红；`localStorage` 抛错未兜住 → 「存储值不合法」判红。
 
 Suggested fixture level: expanded - 改共享入口（会话页 `page.tsx` 的主区布局与 `CHAT_TOPBAR_ACTIONS` 的顶栏槽位）、新增持久化的 `localStorage` 键、删除一个既有面板及其测试（BREAKING）；评审要看顶栏槽位的其它消费方与回合、连接、草稿不受影响（「不打断回合」用例）
 Minimal mergeable slice: 23.1（拷入组件与依赖登记；knip 的拷入层豁免只压住该文件自身的未使用文件与未使用导出，压不住 web/package.json 上的「未使用依赖」，故同刀新增 web/test/components-ui-resizable.test.tsx 作为唯一导入方，不改 knip.json）先合；23.2–23.6 同刀——顶栏槽位只有一个，面板的移除与侧边栏的引入、走查与清单必须一起换；同刀之内先搬 support 的四个导出、改两个导入方，再删面板的四个测试文件

@@ -683,19 +683,14 @@ describe("两处同一份实现（静态）", () => {
     expect(imports.filter(([, module]) => under(module, CHAT))).toStrictEqual([]);
   });
 
-  it("features/chat 导入文件页的东西只经 features/files/index——file-meta 的四处直接导入是登记在案的例外", () => {
-    const direct = importsUnder(CHAT).filter(
+  it("features/chat 导入文件页的东西只经 features/files/index，没有例外", () => {
+    const imports = importsUnder(CHAT);
+    const direct = imports.filter(
       ([, module]) => under(module, FILES) && module !== FILES && module !== `${FILES}/index`,
     );
-    // 规格「两处同一份实现」的第二句今天不成立：下面四个文件直接导入 `../files/file-meta.js`
-    //（`formatSize` / `logicalPath`）。本刀不改 features/chat（#1098 的边界），这里把例外钉死在
-    // 这一个模块、这四个文件上——第五处或别的模块即判红。去掉例外随任务 23.2（#1105）。
-    expect(direct).toStrictEqual([
-      [`${CHAT}/attachment-chips.tsx`, `${FILES}/file-meta`],
-      [`${CHAT}/capability-bar.tsx`, `${FILES}/file-meta`],
-      [`${CHAT}/file-changes-card.tsx`, `${FILES}/file-meta`],
-      [`${CHAT}/message-thread.tsx`, `${FILES}/file-meta`],
-    ]);
+    // 扫描没有放空：`formatSize` / `logicalPath` 经 index 的那几处导入被扫到了。
+    expect(imports).toContainEqual([`${CHAT}/message-thread.tsx`, `${FILES}/index`]);
+    expect(direct).toStrictEqual([]);
   });
 
   it("目录树的行组件与预览面板在 web/src 里各只有一个定义", () => {

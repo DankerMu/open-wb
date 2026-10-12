@@ -440,28 +440,28 @@ describe("CHAT_TOPBAR_ACTIONS (M15)", () => {
       { icon: "file-text", key: "config", label: "项目配置" },
       { icon: "pencil", key: "rename", label: "重命名" },
       { icon: "search", key: "search", label: "对话内搜索" },
-      { icon: "package", key: "artifacts", label: "产物面板" },
+      { icon: "folder", key: "workspace", label: "工作空间侧边栏" },
     ]);
 
     const rename = vi.fn();
-    const artifacts = vi.fn();
+    const workspace = vi.fn();
     // 入参键序与常量次序相反：产出次序必须跟常量走。
     const built = chatTopbarActions({
-      artifacts: { expanded: true, onSelect: artifacts },
+      workspace: { expanded: true, onSelect: workspace },
       rename: { onSelect: rename },
     });
     expect(built.map(({ expanded, icon, key, label }) => ({ expanded, icon, key, label }))).toEqual(
       [
         { expanded: undefined, icon: "pencil", key: "rename", label: "重命名" },
-        { expanded: true, icon: "package", key: "artifacts", label: "产物面板" },
+        { expanded: true, icon: "folder", key: "workspace", label: "工作空间侧边栏" },
       ],
     );
     const trigger = document.createElement("button");
     built[0]?.onSelect(trigger);
     expect(rename.mock.calls).toEqual([[trigger]]);
-    expect(artifacts).not.toHaveBeenCalled();
+    expect(workspace).not.toHaveBeenCalled();
     built[1]?.onSelect(trigger);
-    expect(artifacts.mock.calls).toEqual([[trigger]]);
+    expect(workspace.mock.calls).toEqual([[trigger]]);
 
     expect(chatTopbarActions({})).toEqual([]);
     const search = chatTopbarActions({ search: { expanded: false, onSelect: vi.fn() } });

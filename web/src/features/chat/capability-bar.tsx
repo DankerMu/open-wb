@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Icon } from "../../ui/index.js";
 import { useAuth } from "../auth/index.js";
-import { logicalPath } from "../files/file-meta.js";
+import { logicalPath } from "../files/index.js";
 import { PermissionTier } from "./permission-tier.js";
 import { sourceTag, type useSlashMenu } from "./slash-menu.js";
 import type { WelcomeOptions } from "./welcome-options.js";

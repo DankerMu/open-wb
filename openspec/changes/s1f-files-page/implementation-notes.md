@@ -472,3 +472,51 @@
 - 变异：把 `base` 渲染成可见文字或写进地址 → 页面级令牌不可见的断言判红。
 - 变异：不可观察（jsdom 不为 iframe 导航）：查看器是否出现、`load` 是否对 PDF 响应触发、失败页是否触发 `load`、刷新后是否真的重新请求、框内来源与 cookie；归 FL 行与 #1123，实测时只写所走的引擎。（合入后更正：`load` 一项已在 Chromium 151 与 Firefox 153 实走，记录在 design D19 之下。）
 - 变异：遍历、符号链接、跨空间 id、他人空间相同的 404、`sandbox.reject` → 不适用：本刀无服务端代码与新的带路径请求，证据在 `server/test/preview-app*.test.ts`、`preview-office-route.test.ts` 与 #1075。
+
+## 23.2–23.7（#1105）
+
+- 不触 Critical Path：纯 web，不加路由、不加 `op`、不碰 `sandbox.resolve`，单评审席即可。D-23：本刀不新增窗口，只是让既有 `tree` / `file` / `archive` / `preview-token` 多一个界面入口（由代码推断：`server/**` 零改动）。前置 23.1（`web/src/components/ui/resizable.tsx`，41 行）与 21.1（`workspace-browser.tsx`，567 行）已在 origin/master；不等 1.1 / 1.2 / 1.3。栈内前序 #1099 / #1352 / #1094 均不在 origin/master，未能对照。
+- **边界必须加宽（进偏离记录）**：去掉 `file-meta` 例外要改 `web/src/features/files/index.ts`（加一行再导出 `formatSize`、`logicalPath`），以及 `attachment-chips.tsx:7`、`capability-bar.tsx:16`、`file-changes-card.tsx:7`、`message-thread.tsx:15` 四行导入。`web/test/workspace-browser.test.tsx:686-699` 改为 `expect(direct).toStrictEqual([])` 并改标题，该文件 758 行，净减。`file-changes-card.tsx` 的 `useChangeSpace`、`FileChangeRow` 删面板后只剩文件内使用，须去掉 `export`（knip）；`children` 属性一并删。`artifact-card.tsx` 除删 `ArtifactRowAction`（`:287`）外，`:57`、`:186`、`:283` 的注释也含「产物面板」，要改写才能过 grep 验收；`PreviewDialog` 与 `srcdoc` + `allow-scripts` 框原样保留（组 25 才删）。
+- **需编排者裁定（`刷新` 重名）**：`columns.tsx` 的 `WorkspaceColumns` 自带 `aria-label="刷新"` 按钮和 `新建` 菜单（只剩 `新建文件夹`），本刀不许改 `features/files/**`（上一条的 `index.ts` 除外）。侧边栏头部再放一个 `刷新` 就有两个同名按钮。取最简：头部不另放，树栏那个就是规格的 `刷新`（`workspace-browser.tsx` 的 `refresh()` 无参即「全部已加载目录 + 当前文件」，由代码推断）。用例断言侧边栏内恰一个名为 `刷新` 的按钮且点击后重发根 `tree`。因此本刀不需要 `WorkspaceBrowserHandle` 的 ref。树折叠后 `刷新` 去哪留给 #1106。
+- **与 issue / tasks 的差异（origin/master 为准）**：`page.tsx:37`（非 `:33`）；`ui-layering.test.ts:23`、`:366`（非 `:21`、`:333`）；`walkArtifactsPanel` 调用只有 `ui-walk-sessions.spec.ts:153` 一处加 `:49` 的导入（非 `:35`、`:131`）；`renameBehindDialog`、`renameRoute` 在 `web/test` 已不存在，support 只有 `artifactsPanelFixture`、`openProbedSession` 两个导出有存活的导入方；`WorkspaceBrowser` 的属性是 `layout="stacked"`，没有 `stacked` 布尔属性；`topbar-actions.test.tsx` 不含「产物面板」（`:450` 的 `package` 是冻结区图标表，不动）；origin/master 的 `files-web/spec.md:213` 还没有 `file-meta` 例外括注，也没有 `implementation-notes-2.md`（两者在未合入的 `91ba721c`）。
+- **grep 命中而任务未点名的**：`chat-page-artifacts-temporary.test.tsx:27-31`（删 `:231-264` 的 `describe("临时空间会话的面板行")`，即 REMOVED 场景，其余保留并改导入）；`chat-page-composer-support.test.tsx:12`（改导入路径）；`chat-session-menu.test.tsx:200`、`:216`；`previewers-code-split.test.ts:191`（样本路径换成 `workspace-sidebar.tsx`）；清单 CH-58、CH-59；`topbar-actions.ts:30` 与 `workspace-list.ts:16` 的注释。`ui-walk-steps.ts:101-124` 的 `paintedWithin` 删面板后无调用方，删掉或搬进新 helper。
+- **最大的隐性返工**：`web/test/session-meta-fixtures.ts:7` 的 `NULL_SESSION_META.workspaceId` 是 `null`，有 29 个导入方。这些会话按新规格只有两个按钮，不是「把第三个改名」。逐处查夹具的 `workspaceId`：为 `null` 的把期望改成 `["重命名","对话内搜索"]`，不为绑定而改夹具；非 null 的改成第三个为 `工作空间侧边栏`。涉及 `chat-session-menu.test.tsx:200,216`、`chat-page-session-rename-pin.test.tsx:485,502,542,554`、`chat-page-search-support.tsx:35` 及 `chat-page-search.test.tsx:336,357,375,383`、`chat-page-project-config.test.tsx:59` 的 `THREE_BUTTONS` 各处。chat-web「顶栏入口」与 session-sidebar「顶栏重命名入口」各须保留至少一个绑定会话断三个、一个未绑定会话断两个。逐条进偏离记录。
+- **`chatTopbar` 签名**：第四参由 `openArtifacts: (trigger) => void` 改为 `workspace?: {expanded: boolean; onSelect(trigger: HTMLElement): void}`，`undefined` 即不产出；槽位常量第四项为 `{key:"workspace", label:"工作空间侧边栏", icon:"folder"}`（`icon.tsx:54` 已有 `folder`）。直接调用点 `chat-page-search.test.tsx:396,398,407`、`chat-page-project-config.test.tsx:495,510,514`、`chat-page-session-pin.test.tsx:443,456` 同步改，描述符用 `toStrictEqual` 比（`expanded: false` 是真键，不是 `undefined`）。
+- **新文件**：`use-workspace-sidebar.ts` 导出 `useWorkspaceSidebar(workspaceId: string | null | undefined)`，持有开合意图（内存，初值关）、打开它的触发元素、宽度读写；`workspaceId` 为空时 `slot` 为 `undefined` 但意图不清。`workspace-sidebar.tsx` 渲染宽屏 `<aside aria-label="工作空间侧边栏">` 或窄屏 `Sheet`。窄屏判定用既有 `useMediaQuery(SHELL_NARROW_QUERY)`（`web/src/lib/viewport.ts`）。两文件登记进 `MIGRATED_AREAS` 与清单断言（`use-thread-runtime.ts` 之后、`workspace-list.ts` 之后各一条），不得导入 `use-chat-session.ts`。`use-chat-session.ts` 790 行不许加行：空间名与 `dir` 在 `page.tsx`（132 行）里由 `session.workspaces?.find(...)` 取。
+- **布局与 `ResizeObserver`**：库在 Group 挂载时无条件 `new ResizeObserver`，而 chat 测试只有导入了 `web/test/radix-platform.ts` 的那 44 个文件有它。`page.tsx` 照 `thread-viewport.tsx:175` 的先例：有 `ResizeObserver` 时 Group 常挂、第二个 `ResizablePanel` 与 `ResizableHandle` 仅在「打开且宽屏」时渲染；没有时退回普通横向 flex。两条路径都不因开合重挂 `ConversationView`。第一步只改布局就先跑一遍全量 web 测试。v4 能否条件增删面板、`Group` / `Panel` 的属性名（`defaultLayout`、`onLayoutChanged`、`defaultSize`、`minSize`）开工先对安装的 4.14.3 类型核对。不成立就停下报告，不 mock 整个库、不改拷入文件。
+- **窄屏层**：`SheetContent` 设 `showCloseButton={false}`（自带的那个名叫 `关闭`），自渲染 `关闭工作空间侧边栏`；放一个视觉隐藏的 `SheetTitle` `工作空间侧边栏`（Radix 缺标题会 `console.error`）并设 `aria-describedby={undefined}`、`aria-modal="true"`；宽度类覆盖为全宽。`onOpenAutoFocus` 聚焦关闭按钮；`onCloseAutoFocus` 里 `preventDefault` 后 `opener.focus({preventScroll: true})`（仍在文档里时）；Escape 复用 `useEscapeFallback`（Toast 会吃掉 Escape，原面板同因）。宽屏关闭后同样把焦点还给触发按钮。
+- **由规格句决定的分支**：(a)「内容换成新会话的空间（目录树、当前文件与预览重置）」→ `WorkspaceBrowser` 的 `key` 取 `会话 id + workspaceId`，同空间的两个会话互切也重置。(b) 意图恢复（A→C→A）后触发元素已不在文档 → 关闭时不还焦点，规格只要求「按钮仍在时」。(c) 宽度存分栏占比的十进制字符串；`getItem` 抛错、非有限数、越出最小 / 最大占比都回缺省；`setItem` 抛错吞掉，不 `console.error`。(d) 头部标题为空间名或 `工作空间`，可解析时另一行 `logicalPath(account, dir)`；`name`、`dir` 同样传给 `WorkspaceBrowser`，根行会重复显示，断言须 `within(头部)`。(e) `在文件页打开` 用 `Link`，地址由 `URLSearchParams({ws, path})` 生成，仅空间在列表里时渲染；「文件页选中该文件」那一半要等 #1099。
+- **令牌**：本刀不新增 `usePreviewToken` 调用点，`previewers-frame.test.tsx:218` 的扫描保持绿。同一应用里 `/` 与 `/files` 是两条路由，同一时刻至多一个 `WorkspaceBrowser`（由路由结构推断）；不同标签页各自签发；`server/src/preview/tokens.ts` 未见按空间的数量上限（grep 推断，未实测）。`key` 变化会重挂并丢掉 5 分钟复用的本地时钟，换会话后再选网页会重新签发一次（由代码推断）。
+- **测试落点**：`chat-workspace-sidebar-layout.test.tsx`（导入 `./radix-platform.js`）放 L1「按钮只在有工作空间的会话上」、L2「不在列表里的空间」（临时 id 与列表 500 两例，断整个侧边栏内没有逻辑路径和 `在文件页打开`）、L3「宽屏并排与拖动」的 jsdom 半边、L4「切换会话保持打开」、L5「不打断回合」、L6「存储值不合法」表驱动、L7「在文件页打开」。`chat-workspace-sidebar-narrow.test.tsx` 放 N1「窄屏覆盖」（`focus` 入参 `toStrictEqual([{preventScroll: true}])`）、N2 关闭按钮、N3 屏上有 Toast 时 Escape 仍关。L5 先断 `FakeEventSource` 起始实例数再断不变，并断输入框是同一个 DOM 节点。L7 的路径夹具含首尾空格、`..` 段、前导 `/`、合成与分解字符，用 `new URL(href).searchParams.get("path")` 严格比。web 没有 `@testing-library/user-event`：「Tab 不离开该层」、并排、无横向溢出、盖满视口、方向键改宽度只在 `make ui-walk` 证明，用例标题不得许诺。两个 `chatTopbar` 用例从被删的 `chat-page-artifacts-panel.test.tsx:126,134` 搬进 L 文件。
+- **走查与清单**：`ui-walk-sessions.spec.ts`（681 行）在 `:49` 换导入名、`:153` 换调用，净增零行；`ui-walk-project-config.ts:12` 改第三项。新 helper `ui-walk-workspace-sidebar.ts`：打开后树里有 `workbuddy-report.html`；`desktop-light` 断侧边栏左缘不小于对话区右缘且无横向溢出；`mobile-dark` 断同名 `dialog`、焦点在 `关闭工作空间侧边栏`、Escape 后焦点回顶栏按钮；不选文件（不触发令牌，零非 `baseURL` 请求的 oracle 不变）。清单改 SH-05、CH-34–37、CH-54 前半、CH-58、CH-59（CH-36 整行是「面板之上的预览」，改写成窄屏覆盖行；CH-58 / 59 去掉面板字样，卡片的 `打开网页预览` 对话框仍在），全部回 `待签`。新增 CH-98「宽度 1440 下打开一个绑定了工作空间的会话，点顶栏「工作空间侧边栏」；拖对话区与侧边栏之间的分隔线；按 Tab 把焦点移到分隔线上按几次左右方向键；把分隔线分别往两边拖到头；刷新页面；再点一次该按钮 \| 侧边栏在对话区右侧并排出现，对话区变窄但没被盖住、仍可滚动和输入，页面没有横向滚动条；拖动与方向键都改变两边宽度；拖到头时两边都还留有可用的宽度；刷新后侧边栏是关着的，再打开时宽度与刷新前相同 \| 待签」。新增 CH-99「打开一个没有绑定空间的存量会话（升级前留下的；现在的界面建不出这种会话，没有就跳过这一行），看顶栏右侧；先在一个绑定了工作空间的会话里打开侧边栏，点这个存量会话，再点回去 \| 存量会话顶栏只有「重命名」「对话内搜索」，没有「工作空间侧边栏」，右侧也没有侧边栏；点回后侧边栏自己恢复打开 \| 待签」。坑：现在不选空间发送得到的是临时空间会话（`server/src/sessions/store-metadata.ts:454`），不是未绑定，CH-35 的「不选工作空间直接发一句话」措辞要改；浏览器行为只对实际走查的引擎标实测。
+- **PR 文本须列的 `openspec/` 改动**：`tasks.md` 勾 23.2–23.7 并更正上面的行号与导出名；`implementation-notes.md` 加本节；若 `91ba721c` 届时已合入，删 `specs/files-web/spec.md:213` 的 `file-meta` 例外括注（origin/master 上该句已是目标文本）。与同批共改的文件：`docs/acceptance/functional-checklist.md`（#1099 / #1094 加 FL 行，本刀改 SH / CH）、`implementation-notes.md`、可能的 `web/test/workspace-browser.test.tsx`（#1099）；按栈序串行，后者 rebase。
+- 变异：切换会话时关闭侧边栏 → L4 红。
+- 变异：`key` 只用 `workspaceId` → L4 的「同空间两会话互切后没有选中文件」红。
+- 变异：切到未绑定会话时清掉意图 → L4 的「切回 A 恢复打开」红。
+- 变异：未绑定会话也上报按钮 → L1 红，另有 `chat-session-menu.test.tsx`「顶栏重命名入口」的两按钮断言红。
+- 变异：欢迎态上报按钮 → L1 末段红。
+- 变异：不传 `expanded` → L1 的 `aria-expanded="false"` 与 `chatTopbar` 描述符 `toStrictEqual` 红。
+- 变异：页面加载即打开（把意图持久化）→ L3「重挂后初始为关闭」红。
+- 变异：读存储不兜抛错 → L6 的 `getItem` 抛错行红。
+- 变异：只兜读不兜写（`setItem` 抛错）→ L6 写入行红。
+- 变异：只验可解析、不验范围 → L6 的负数与超大值行红。
+- 变异：列表读取失败时仍渲染 `在文件页打开` 或逻辑路径 → L2 红。
+- 变异：空间不在列表时不请求 `tree` → L2 红。
+- 变异：`在文件页打开` 不带 `path`，或手拼不编码 → L7 红。
+- 变异：开合时重挂 `ConversationView` → L5 的节点同一性红。
+- 变异：开合时重开事件连接 → L5 的实例计数红。
+- 变异：窄屏关闭后不还焦点 → N1 红。
+- 变异：还焦点但不带 `preventScroll` → N1 的 `focus` 入参断言红。
+- 变异：窄屏保留拷入层自带的 `关闭` → N1「层内恰一个关闭按钮且名为 `关闭工作空间侧边栏`」红。
+- 变异：窄屏初始焦点落在第一个可聚焦元素 → N1 红。
+- 变异：去掉 `useEscapeFallback` → N3 红。
+- 变异：窄屏仍渲染分隔线 → N1 的「没有 `separator`」红。
+- 变异：头部再加一个 `刷新` → L3「恰一个 `刷新`」红。
+- 变异：chat 又直接导入 `../files/file-meta.js` → `workspace-browser.test.tsx` 静态用例红。
+- 变异：新文件漏登记 `MIGRATED_AREAS`，或只改一处 → `ui-layering.test.ts` 红。
+- 变异：侧边栏里再调一次 `usePreviewToken` → `previewers-frame.test.tsx:218` 红。
+- 变异：宽屏做成覆盖而非并排 → 走查 `desktop-light` 红（jsdom 不可观察）。
+- 变异：窄屏层不满视口 → 走查 `mobile-dark` 红（jsdom 不可观察）。
+- 变异：方向键不改宽度，或刷新后宽度不沿用 → 走查 `desktop-light` 红；jsdom 下是否可观察未验证，不可则写「未做」而不是「不可观察」。
+- 变异：Tab 逸出窄屏层 → 未做（无 user-event；走查若不加 Tab 步骤就如实写未做）。
+- 合入后更正（以 #1105 的 PR 文本为准）：最小宽度按像素（对话区 320、侧边栏 240），不按 (c) 的占比范围；M05 只在 hook 直测判红（整页被 `chatTopbar` 的未选中分支挡住）；M19（去掉 `onOpenAutoFocus`）与 W29（`modal={false}`）不可观察；M15 未做（本刀代码够不到事件连接）；`NULL_SESSION_META` 的导入方在 `web` 下是 20 个，不是 29；`file-meta` 例外的括注原在 `specs/files-web/spec.md:217`。头部不设 `刷新`（编排方裁定，规格句已同步改）；`只看本会话改动` 与 `折叠文件树` 归 24.2，本刀未做。

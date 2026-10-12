@@ -188,7 +188,7 @@ describe("预览器按需加载是唯一的代码分割", () => {
   it("自证：previewers/ 之外静态导入 previewers/code 或 previewers/kind 判失败，相对路径、别名与再导出都算", () => {
     const page = `${SRC}/features/files/page.tsx`;
     const preview = `${SRC}/features/files/preview.tsx`;
-    const chat = `${SRC}/features/chat/artifacts-panel.tsx`;
+    const chat = `${SRC}/features/chat/workspace-sidebar.tsx`;
     expect(
       codeSplitViolations([
         COMPLIANT_INDEX,

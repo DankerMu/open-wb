@@ -482,7 +482,7 @@ describe("顶栏重命名入口 (M6, M7)", () => {
     const rename = within(banner).getByRole("button", { name: "重命名" });
     expect(heading.compareDocumentPosition(rename) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(heading.contains(rename)).toBe(false);
-    expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]);
+    expect(bannerButtons()).toEqual(["重命名", "对话内搜索"]);
     expect(within(banner).queryByRole("button", { name: "更多" })).toBeNull();
     expect(rename.querySelector("svg")?.getAttribute("class")).toContain("lucide-pencil");
 
@@ -499,7 +499,7 @@ describe("顶栏重命名入口 (M6, M7)", () => {
     );
     await expectRenamed(nav);
     await focusOn(within(banner).getByRole("button", { name: "重命名" }));
-    expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]);
+    expect(bannerButtons()).toEqual(["重命名", "对话内搜索"]);
   });
 
   it("M6 切换会话后顶栏 重命名 作用于当前会话：输入初值为 B 的标题，PATCH 发往 B", async () => {
@@ -539,7 +539,7 @@ describe("顶栏重命名入口 (M6, M7)", () => {
   it("M6 欢迎态不上报 actions：≥761px 离开会话后无 banner 与 重命名", async () => {
     const { router } = mountSelected();
     await selectedList();
-    expect(bannerButtons()).toEqual(["重命名", "对话内搜索", "产物面板"]);
+    expect(bannerButtons()).toEqual(["重命名", "对话内搜索"]);
 
     await act(() => router.navigate("/"));
     await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" });
@@ -551,7 +551,7 @@ describe("顶栏重命名入口 (M6, M7)", () => {
     installNarrowViewport();
     const { router } = mountSelected();
     await crumb(OLD);
-    expect(bannerButtons()).toEqual(["打开导航", "重命名", "对话内搜索", "产物面板"]);
+    expect(bannerButtons()).toEqual(["打开导航", "重命名", "对话内搜索"]);
 
     await act(() => router.navigate("/"));
     await screen.findByRole("heading", { level: 1, name: "WorkBuddy，我帮你" });
