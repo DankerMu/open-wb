@@ -584,6 +584,77 @@
 - 变异：不可观察：服务端没有写 `sandbox.reject`（web 测试看不到，只能断零请求）；真实浏览器重载（归 FL-21 / FL-22）。
 - 合入后更正（以 #1361 的 PR 文本为准）：`path` effect 在规范化之前多一条短路——`path` 与当前选中逐字相同时不规范化（否则 `chat-workspace-sidebar-layout.test.tsx` L7 的夹具名 `/../é é&ws=x#h.md` 点击后被当成含 `..` 拦下）；编排方裁定保留，规格句已补。`..\x` 用例改为断言同名文件被选中（整页上「请求根后不存在」与「被拦下」分不出来）；M15 的判红用例是「已选中时地址改到它的别名」；M09a（逐段 trim）只红纯函数表。实现者另定的四个分支（定位进行中改到含 `..` 的写法顶掉进行中的定位；根列表失败时 `..` 仍显示 `文件不存在`；`..` 后刷新只重取根；`path=/`、`//` 同 `path=.`）待 owner 复核。
 
+## 20.9、20.10（#1356）
+
+- 非 Critical Path：服务端零改动，到达 `sandbox.resolve` 的 `path` 值不变。`server/src/workspaces/rest.ts:104-118` 的 `parsePathQuery` 只读 `path`，`file` 路由（`:347-380`）无 schema，`server/src/http/path-classifier.ts:22,26` 原样透传查询串，`server/src/app.ts:178` `logger: false`，无 CSRF 模块（GET、同源 cookie）。`v` 不会得 400——按代码推得，无服务端用例覆盖多余查询键，由走查证实。
+- 前提：20.7 / 20.8（#1352）已在 origin/master；本分支叠在未合入的 #1361 上，交点只有 `workspace-browser.tsx`（649 行），本刀不改它；不在 1.1 / 1.2 / 1.3 挡住的集合里。
+- 缓存与范围请求：`rest.ts:62` 对每个工作空间应答写 `Cache-Control: no-store`，无 ETag / Last-Modified，改地址不损失任何正当缓存；`range-send.ts` 只读 `Range` 头，206 / 416 不受影响。参数名 `v` 不撞名（服务端读的查询键只有 `path` 与上传的 `name`）。
+- 落点：只改 `preview-area.tsx:94-100`（150 行）媒体分支，这是 `kind: "media"` 的唯一构造点。模块级 `let mediaVersion = Date.now()`；`reload === 0` 时 `url` 原样，否则 `` `${url}&v=${++mediaVersion}` ``。`reload` 字段与 `preview.tsx:224` 的 `key` 不动。
+- 计数器放模块级的理由：放 `WorkspaceBrowser` 的 ref 会在文件页与会话侧边栏之间路由切换时归零，又撞值。以 `Date.now()` 作种是为了整页重载后也不撞（该情形未实测）；若只从 1 起，须在走查里实测重载情形。
+- 不动的文件：`previewers/media.tsx` 代码、`fileUrl`（`web/src/lib/api-files.ts:143`）、`api-files.ts:482` 的 `fetchPreview`、`downloadUrl`（`preview.tsx:126` 由 `path` 另拼）、`page.tsx` 的地址写入。20.10 点名的「媒体预览器的相应用例」结论是零改动：`web/test/previewers-media.test.tsx`（131 行）的「src 与传入的地址逐字相等」须保持原样且仍绿。
+- 同步改写失真的注释：`types.ts:38-39`「地址不变」、`preview-area.tsx:63-64`「地址不变」、`media.tsx:10-17`（「same address」「is the browser's call」及 40 秒 / 70 秒一段，改为现状加「改地址前的实测」）。`implementation-notes.md` #1352 一节的媒体条目标「地址不变已由 20.9 取代」。
+- 必须改写的既有断言（`web/test/files-preview-states.test.tsx`，671 行，逐条进偏离记录，不得放松成「包含 `v=`」）：`:532` 标题与 `:556`、`:570`、`:583` 的 `src`；`:586` 标题与 `:610` 的 `src`。每处写成 `` `${FILE}clip.mp4&v=${n}` ``，`n` 用字面量正则 `/&v=([1-9]\d*)$/` 取出并断言严格大于上一次。不能写死 `&v=1`：模块级计数在同一测试文件内跨用例累加。
+- 保持原样且须仍绿：首次选中的 `:392-394`、`:405-407`、`:440`（`src` 恰为 `fileUrl`，无 `v`）；各处 `fileRequests(fetchMock)` 仍为 `[]`（媒体不经 `fetchMock`）。
+- 新增断言（同文件，不新建文件）：① 刷新后选 `readme.md` 再选回 `clip.mp4`，`src` 恰为 `${FILE}clip.mp4`；再 `刷新`，`n` 大于此前全部值。② 媒体刷新后 `expectDownloadLink("clip.mp4")` 的 `href` 仍恰为 download 地址。③ `readme.md` 点 `刷新` 后 `fileRequests` 恰为两条相同的 `${FILE}readme.md`。④ 页面地址在媒体刷新前后逐字相同。`web/e2e` 无任何媒体步骤（grep 无命中），不加 ui-walk。
+- 与既有规则的交互（按代码推得）：`刷新` 经 `workspace-browser.tsx:571` 重入 `selectFile`，组 24.3 的重取走同一路径——每次都是一次完整的新请求，播放中的媒体被打断回到开头，助手连续改同一文件时每 300 毫秒合并窗口一次，PR 写明。媒体 401 规则不变（`error` 不带状态码，不通知守卫）。会话侧边栏用同一个 `WorkspaceBrowser`（`chat/workspace-sidebar.tsx:83`），自动继承。
+- 规格未写的分支（取最简，进偏离记录）：改选再选回不带 `v`，约一分钟内可能仍是旧内容（issue 已实测、裁决未覆盖），点 `刷新` 即新；网页 / PDF / 办公文档 / 压缩包的地址一律不加 `v`。
+- 门槛：触及文件均不超过 311 行（测试 671 行，预计加约 30 行）；无新导出、无新依赖，knip / `ui-layering` 无须登记；断言用正则字面量，不用 `new RegExp`（semgrep）。
+- FL-23 改写（行数仍 27，结论 `待签`，单元格里不写井号编号）｜操作：`接 FL-22（回到原来的文件页标签页：停在 FL-05 的空间，uploads 已展开，选中的是 fl-page.html；这一行不上传，会话标签页里待发的附件仍是 2 个）；在本机另备一段不短于半分钟、画面与 clip.mp4 明显不同的视频；点 clip.mp4，点播放，等几秒后点「工作空间目录」旁的「刷新」，再点播放；然后由能登录服务器的人到该工作空间的 uploads 目录里用那段新视频覆盖 clip.mp4（文件名不变；不要经「上传文件」再传，同名上传会得到带编号的新文件），回到文件页立即点「刷新」，看地址栏，再点播放；点 broken.mp4，点「刷新」；点 demo.zip，点「刷新」`｜预期：`clip.mp4 第一次点「刷新」后播放停止、进度回到开头，不会自己开始播放，再点播放可以重新播放；覆盖后立即点「刷新」再点播放，画面已是新视频，不用等待；地址栏里的地址与刷新前相同；broken.mp4 点「刷新」后仍显示「无法播放该文件」，页面不弹提示；demo.zip 点「刷新」后成员表格仍在、内容不变`。坑：签核人看得到的是新画面而不是网络请求；同名上传不覆盖（`server/src/workspaces/upload.ts:14`，CH-82 已钉），覆盖只能在服务器上做（先例 CH-31）。
+- 真实浏览器走查（PR 证据，至少 Chromium，真实服务，开网络面板）：① 选中 → 一条 `file?path=…` 206。② `刷新` → 新增一条带 `&v=` 的 206。③ 覆盖磁盘同名文件后立即 `刷新` → 再新增一条、`v` 更大、取到新内容。④ 点别的文件再点回来再 `刷新`（一分钟内）→ 仍有新请求（即上面的撞值序列）。⑤ 下载图标 `href` 与地址栏无 `v`。⑥ 整页重载后立即 `刷新` 是否新请求——只记录结果。Firefox / Safari 未走则写「未走」。
+- 变异：重取时不追加 `v` → `files-preview-states.test.tsx:556/570/583/610` 改写后的 `src` 断言判红。
+- 变异：首次选中也带 `v` → `:392-394`、`:405-407`、`:440` 判红。
+- 变异：`n` 按选中归零（改回 `&v=${reload}`）→ 新增断言 ① 的「再 `刷新` 的 n 大于此前全部值」判红。
+- 变异：改选再选回仍带 `v` → 新增断言 ① 的「`src` 恰为 `${FILE}clip.mp4`」判红。
+- 变异：`n` 不递增（常数）→ 「严格大于上一次」判红。
+- 变异：把 `v` 拼进 `fileUrl` → `web/test/api-files-url.test.ts:37/52` 与 `previewers-media.test.tsx` 的字面期望判红。
+- 变异：把 `v` 拼进下载链接 → 新增断言 ② 判红。
+- 变异：文本类重取也带 `v` → 新增断言 ③ 判红。
+- 变异：`v` 写进页面地址 → 新增断言 ④ 判红。
+- 变异：去掉 `key={`media:${reload}`}` → `:549-551`、`:569`、`:581` 的 `not.toBe` 判红。
+- 变异：媒体改经 `fetchPreview` → 既有「`fileRequests` 为 `[]`」与桩 `new Error("clip.mp4 must not be fetched")` 判红。
+- 变异：不可观察：服务端拒绝 `v`（400）——web 测试里媒体不经 `fetchMock`，只有走查 ②③ 看得到（表现为「无法播放该文件」）。
+- 变异：不可观察：浏览器是否真的重新请求、整页重载后是否撞值——jsdom 不发媒体请求，归走查 ③④⑥。
+- 变异：逃逸向量不适用：`path` 值与服务端未改，由既有 `server/test/workspaces-http*.test.ts` 承担。
+- 合入后更正（以 #1356 的 PR 文本为准）：落点是同文件不导出的 `mediaPreview`（`immediatePreview` 加一行后认知复杂度超限，故抽出）；已有服务端用例钉住 `file` 路由忽略多余查询键（`server/test/workspaces-file-range.test.ts`，媒体发的是范围请求，故不放在 failures 文件）；`Date.now()` 种子有实测依据——种子为 0 的构建上，覆盖文件、整页重载后点 `刷新` 地址又成了用过的 `&v=1`，Firefox 153 没有请求到达、仍是旧视频（Chromium 151 重新请求了）；交付构建两种引擎都取到新内容。测试加了约 69 行（预计 30）。#1352 一节「地址不变…是否改地址待 owner 定」已由 20.9 取代。首次选中（含改选再选回、整页重载后自动选回）不带 `v`，两种引擎都实测到旧内容窗口，是否也绕开待 owner 定。
+
+## 23.8–23.9（#1363）
+
+- 不触 Critical Path：纯 web，`server/**` 零改动，单评审席。前置 23.2–23.7（#1105）已在 origin/master（`workspace-sidebar.tsx` 214 行、`use-workspace-sidebar.ts` 71 行、`page.tsx` 141 行）；不等 1.1 / 1.2 / 1.3。栈内前序 #1362 / #1361 / #1356 未对照其 diff，按标题推断不碰这些文件。
+- **现状**：外壳没有给页面的折叠入口。`useSidebarCollapsed(): readonly [boolean, () => void]`（`sidebar.tsx:34`）唯一调用方是 `app-shell.tsx:86`；折叠态不渲染列表区（`sidebar.tsx:179`）。`features/**` 与 `lib/**` 没有任何对 `routes/**` 的导入，页面与外壳的既有接缝都在 `web/src/lib`（`topbar.tsx`、`sidebar-slot.tsx`）。
+- **接缝**：新文件 `web/src/lib/shell-nav.tsx` 导出 `ShellNavProvider({ children, requestMainWidth })` 与 `useRequestMainWidth(): (needed: number) => void`，Provider 外返回 no-op。不进 `MIGRATED_AREAS`（不在 chat 目录），`ui-layering.test.ts` 与 `chat-module-layout.test.ts` 都不触发；两个导出各有 src 调用方，knip 过。
+- **外壳侧**：`useSidebarCollapsed` 返回 `[collapsed, toggle, collapse]`；`collapse` 读 `collapsedRef`，已折叠直接返回，否则走 `toggle` 的同一路径（`setCollapsed` + `writeCollapsed`）。不得在页面请求里直接调 `toggle`，已折叠时它会展开。`AppShell` 给 `<main>` 挂 ref，`requestMainWidth(needed)` 为：`narrow` 时返回；取 `main.clientWidth`，为 0 或 `>= needed` 时返回；否则 `collapse()`。
+- **宽度为 0 不折叠（进偏离记录）**：jsdom 没有布局，`clientWidth` 恒为 0。不设这条，既有每个打开侧边栏的用例都会折叠外壳侧栏，`chat-workspace-sidebar-support.tsx:91-99` 的 `selectSession` 找不到 `会话列表`，L4 等全红；不许靠改那些用例过关。真实浏览器里 `main` 不会是 0 宽。
+- **页面侧**：`MIN_WIDTH` 从 `workspace-sidebar.tsx:20` 搬到 `use-workspace-sidebar.ts` 并导出（前者改为导入，避免值导入成环）。`slot.onSelect` 改为读闭包里的 `wanted`：为假时先 `requestMainWidth(MIN_WIDTH.conversation + MIN_WIDTH.sidebar + 1)`，再 `setWanted(!wanted)`；请求不放进 updater（StrictMode 双调）。`+1` 是分隔线的 `w-px`（`resizable.tsx:30`）。组 25 的 `reveal` 须走同一个内部打开函数。
+- **为什么不用「并排侧边栏出现」的 effect**：意图恢复时用户点的是外壳侧栏里的会话条目，折叠会卸载列表区，焦点落到 body。只在用户的打开动作上判断，焦点必在顶栏按钮（或将来的卡片按钮）上，因此不需要任何焦点处理；用例断言折叠后 `document.activeElement` 仍是顶栏按钮。
+- **由规格句决定的分支（进偏离记录供 owner 复核）**：(a) 自动折叠写持久化，之后拉宽窗口或刷新仍是折叠，要用户自己展开；只改当次状态要再加一层「生效值」，不取。(b) 关闭不恢复。(c) 开着缩窄、手动展开、切会话、意图恢复、窄屏拉宽都不判断。(d) 折叠后会话列表不可见，800 宽下换会话要先展开，此时两栏被挤窄，是裁决的固有后果。(e) 不动存储的侧边栏占比：`defaultSize` 仍是百分比，折叠后不足 240 的由分栏的像素下限夹住（由代码推断）。
+- **阈值**：折叠条件是主区 < 561，即视口 < 849（由 `w-72` / `w-12` 推出，未实测；issue 与 D26 的「约 870」不准）。实现只量主区，不写 288、848 之类常数；走查与清单只用 800 与 1200，不取边界值。
+- **开工先实测，不成立就停下报告**：点击那一下折叠与打开同批渲染，分栏在主区 512 时挂上第二栏，随 `transition-[width] duration-250`（`sidebar.tsx:148`）长到 752。`react-resizable-panels` 4.14.3 在 Group 变宽后是否重新满足像素 `minSize` 未验证。不满足时不重挂 `ConversationView`、不改拷入文件、不 mock 库。
+- **新测试文件** `web/test/chat-workspace-sidebar-fit.test.tsx`（导入 `chat-workspace-sidebar-support.js`；挂载后用 `Object.defineProperty(screen.getByRole("main"), "clientWidth", { configurable: true, value })` 给宽度，`vi.spyOn(Storage.prototype, "setItem")` 按键 `workbuddy-sidebar` 过滤；标题不得许诺宽度或可拖）。
+- **用例 F1–F4**：F1 宽 512、展开时点击，断言 `data-collapsed="true"`、存储 `collapsed`、地标出现、焦点在顶栏按钮，用 `关闭工作空间侧边栏` 关掉后仍折叠。F2 宽 912，不折叠且零写入。F3 预置存储 `collapsed`、宽 512，仍折叠且零写入。F4 边界表：560 折叠，561 不折叠。
+- **用例 F5–F8**：F5 `installNarrowViewport` 加宽 390，出现 dialog 且零写入。F6 接 F1 点 `展开侧栏`，再 `selectSession(SAME_SPACE)`、`selectSession(OTHER)`，始终展开。F7 接 F6 切 `UNBOUND` 再切回 `BOUND`，侧边栏恢复且仍展开；随后关闭再点顶栏按钮，再次折叠。F8 不桩宽度（0），不折叠。
+- **既有文件的改动**：既有测试零改动；`sidebar.test.tsx`、`app-shell-responsive.test.tsx` 不导入 `useSidebarCollapsed`，元组加第三项不影响。`workspace-sidebar.tsx:109-110` 与 `use-workspace-sidebar.ts:12-13` 的注释随改。Provider 外的 no-op 由既有的 hook 直测覆盖，没有就在 fit 文件加一例。
+- **走查**：只改 `web/e2e/ui-walk-workspace-sidebar.ts` 的 `walkBeside`，`withViewport` 从 `ui-walk-layout.js` 导入；`ui-walk-layout.ts`（775 行）与 `ui-walk-sessions.spec.ts`（677 行，`:149` 已调用）不加行。1440 打开后加断 `aside` 的 `data-collapsed="false"`。
+- **走查的 1200 与 800 两段**：`withViewport` 1200 打开并断展开，缩到 800 仍展开，关闭。`withViewport` 800 打开后断折叠与存储 `collapsed`，`expect.poll` 等对话区栏 ≥320、侧边栏 ≥240（容差 1），`ArrowLeft` 后宽度变化，无横向溢出；关闭后仍折叠。
+- **走查必须还原**：返回前点 `展开侧栏` 并断 `workbuddy-sidebar` 为 `expanded`，否则后续步骤找不到会话列表。semgrep：只用正则字面量。
+- **清单**：新增一行，取 rebase 后的下一个空号（origin/master 最后是 CH-99）。期望列里不写带单位的数字。坑：自动折叠是持久的，本行不以「展开」收尾会让之后走 SH-02、SH-04 的签署人看到与预期不符的初态；CH-98 留下的侧边栏宽度不影响本行。
+- **清单行文本**：`| CH-100 | 宽度 800 下打开一个绑定了工作空间的会话，先确认左边的侧栏是展开的（是折叠的就点「展开侧栏」）；点顶栏「工作空间侧边栏」；按 Tab 把焦点移到对话区与侧边栏之间的分隔线上按几次左右方向键；用侧边栏右上角的关闭图标关掉它；刷新页面；点「展开侧栏」，把窗口拉宽到 1200，再点顶栏「工作空间侧边栏」；开着它把窗口缩回 800；最后关掉侧边栏 \| 第一次打开时左边的侧栏自己折叠成只剩图标，侧边栏与对话区并排、两边都留有可用的宽度，方向键能改变两边宽度；关掉侧边栏后左边的侧栏仍是折叠的，刷新后也仍是折叠的；宽度 1200 下打开时左边的侧栏保持展开；开着侧边栏缩回 800 时左边的侧栏不会自己折叠（这时两栏被挤窄、分隔线可能动不了，属已知表现） \| 待签 |`
+- 变异：打开时不发请求（不折叠）→ F1 红，走查 800 段红。
+- 变异：去掉宽度比较（宽屏也折叠）→ F2 红，走查 1440 / 1200 的 `data-collapsed="false"` 红。
+- 变异：关闭侧边栏时展开外壳侧栏 → F1 后半红，走查 800 段「关闭后仍折叠」红。
+- 变异：只 `setCollapsed` 不 `writeCollapsed` → F1 的存储断言红。
+- 变异：用 `toggle` 代替幂等的 `collapse` → F3 红（已折叠被展开，且有写入）。
+- 变异：去掉 `narrow` 判断 → F5 红。
+- 变异：阈值只算 320 + 240 或把 `<` 写成 `<=` → F4 红。
+- 变异：去掉「宽度为 0 不折叠」→ F8 红，另有 `chat-workspace-sidebar-layout.test.tsx` 的 L4 等经 `会话列表` 换会话的用例红。
+- 变异：改成「并排侧边栏出现即判断」的 effect → F7 的「切回后仍展开」红。
+- 变异：切换会话时重新判断 → F6 红。
+- 变异：手动展开后「本次不再折叠」做成永久标记 → F7 末段「再次打开重新判断」红。
+- 变异：窗口缩窄时重新判断（`ResizeObserver` 或 `resize` 监听）→ 走查 1200 缩到 800 段红；jsdom 不可观察（`radix-platform.ts` 的 `ResizeObserver` 桩不回调）。
+- 变异：折叠后两栏仍低于最小宽度或分隔线不动 → 走查 800 段红；jsdom 不可观察（无布局）。
+- 变异：把 `requestMainWidth` 放进 `setWanted` 的 updater → 预计不可观察（幂等，StrictMode 双调无差别），如实写「不可观察」。
+- 变异：走查结束不展开外壳侧栏 → 后续走查步骤红（顺序依赖，不计入变异表）。
+- 合入后更正（以 #1363 的 PR 文本为准）：开工实测通过（Chromium，视口 800：折叠与第二栏挂载同批发生，分栏库在 Group 变宽过程中重新满足像素最小宽度，稳定在 511 / 240，方向键能移动分隔线；其它引擎未走）。走查的 1200 / 800 两段放进同文件的新函数 `walkFit`（注记写只改 `walkBeside`）；800 段多断一步「关闭后刷新仍折叠」。「先请求、再置意图」只在 `onSelect` 里，没有抽内部打开函数——组 25 的 `reveal` 必须走这段，不能直接置意图。「视口从不超过 760 拉宽不折叠」无用例无走查（读代码推出：实现里没有任何尺寸监听）；阈值对应视口约 849 以下是读代码推出，边界未实测。
+
 ## 20.11 / 20.12（#1351）
 
 - Critical Path：沙箱与文件边界（不可信用户文件内容的预览；issue 自己要求 owner 白盒）→ 两个评审席位并标记 PR。本刀不碰 `sandbox.resolve`、路径、`op`、服务端，遍历 / 符号链接 / 跨空间 id 类逃逸向量不适用，变异清单只列框内向量。

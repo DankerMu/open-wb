@@ -11,13 +11,20 @@ import {
   stubBlobUrls,
   workspace,
 } from "./files-fixture.js";
-import { deferredResponse, jsonResponse, paths, textPreviewResponse } from "./support.js";
+import {
+  currentLocation,
+  deferredResponse,
+  jsonResponse,
+  paths,
+  textPreviewResponse,
+} from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 /*
  * file-previewers「预览头、下载与不可预览的呈现」与「未知文件由服务端裁决」的页面级场景：
  * 浏览器不按扩展名预筛，每个文件发一次 `file` 请求，由应答决定呈现；预览头的下载链接哪一态都在。
- * 音视频除外（file-previewers「音视频」）：选中即把文件自己的地址交给媒体元素，页面不为它发 `file` 请求。
+ * 音视频除外（file-previewers「音视频」）：选中即把文件自己的地址交给媒体元素，页面不为它发 `file` 请求；
+ * 刷新与再点同一行之后那个地址追加 `&v=<n>`，n 在整个测试文件里只增（计数在模块级，跨用例累加）。
  * 压缩包也除外（file-previewers「压缩包列表」）：选中发一次 `archive` 请求列出成员，不发 `file` 请求。
  */
 
@@ -121,6 +128,17 @@ function mediaAttributes(element: Element) {
     autoplay: element.hasAttribute("autoplay"),
     src: element.getAttribute("src"),
   };
+}
+
+/**
+ * 重取之后的媒体地址：恰为 `${url}&v=<n>`，n 是不带前导零的正整数；返回 n 供调用方比大小。
+ * 取不出 n 时下面的断言以 `&v=NaN` 判红。
+ */
+function refetchVersion(element: Element, url: string) {
+  const src = element.getAttribute("src");
+  const n = Number(/&v=([1-9]\d*)$/.exec(src ?? "")?.[1]);
+  expect(src).toBe(`${url}&v=${n}`);
+  return n;
 }
 
 function fileRequests(fetchMock: ReturnType<typeof renderFiles>["fetchMock"]) {
@@ -532,7 +550,7 @@ describe("文件页的预览状态", () => {
     expect(previewRegion().queryByRole("alert")).toBeNull();
   });
 
-  it("刷新与再点同一行都换一个新的媒体元素：src 不变、没有 file 请求；已显示的「无法播放该文件」在刷新与再点同一行之后各自清除，播放器回来", async () => {
+  it("刷新与再点同一行都换一个新的媒体元素：src 由 file 地址变为其后追加 &v=<n>、n 一次比一次大，没有 file 请求；已显示的「无法播放该文件」在刷新与再点同一行之后各自清除，播放器回来", async () => {
     const { fetchMock } = renderWorkspaceWith({
       "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
     });
@@ -540,6 +558,7 @@ describe("文件页的预览状态", () => {
 
     await select("clip.mp4");
     const video = await waitFor(() => mediaElement("video"));
+    expect(video.getAttribute("src")).toBe(`${FILE}clip.mp4`);
     expect(treeRequests()).toHaveLength(1);
 
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
@@ -549,11 +568,12 @@ describe("文件页的预览状态", () => {
     expect(video).toBeInstanceOf(HTMLVideoElement);
     expect(refreshed).toBeInstanceOf(HTMLVideoElement);
     expect(refreshed).not.toBe(video);
+    const first = refetchVersion(refreshed, `${FILE}clip.mp4`);
     expect(mediaAttributes(refreshed)).toStrictEqual({
       controls: true,
       preload: "metadata",
       autoplay: false,
-      src: `${FILE}clip.mp4`,
+      src: `${FILE}clip.mp4&v=${first}`,
     });
     expect(mediaElements()).toStrictEqual(["VIDEO"]);
     expect(previewRegion().queryByText("正在读取文件")).toBeNull();
@@ -567,7 +587,8 @@ describe("文件页的预览状态", () => {
     expect(previewRegion().queryByText("无法播放该文件")).toBeNull();
     const retried = mediaElement("video");
     expect(retried).not.toBe(refreshed);
-    expect(retried.getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    const second = refetchVersion(retried, `${FILE}clip.mp4`);
+    expect(second).toBeGreaterThan(first);
 
     // 再点一次同一行也一样：失败态清掉，换一个新元素；没在失败态时同样换。
     fireEvent.error(retried);
@@ -577,16 +598,18 @@ describe("文件页的预览状态", () => {
     expect(previewRegion().queryByText("无法播放该文件")).toBeNull();
     const clicked = mediaElement("video");
     expect(clicked).not.toBe(retried);
+    const third = refetchVersion(clicked, `${FILE}clip.mp4`);
+    expect(third).toBeGreaterThan(second);
     await select("clip.mp4");
     await yieldMacrotask();
     expect(mediaElement("video")).not.toBe(clicked);
-    expect(mediaElement("video").getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    expect(refetchVersion(mediaElement("video"), `${FILE}clip.mp4`)).toBeGreaterThan(third);
     expect(mediaElements()).toStrictEqual(["VIDEO"]);
     expect(previewRegion().queryByText("正在读取文件")).toBeNull();
     expect(fileRequests(fetchMock)).toStrictEqual([]);
   });
 
-  it("刷新总是重取：clip.mp4 触发 error 后点「刷新」换成新的 video、文案消失、没有 file 请求；归档.zip 的第二次 archive 应答挂起时旧列表仍在且其后是「正在读取文件」，应答到达后换成新列表、状态行消失", async () => {
+  it("刷新总是重取：clip.mp4 触发 error 后点「刷新」换成新的 video、文案消失、src 由 file 地址变为其后追加 &v=<n>、再点一次 n 更大、没有 file 请求；归档.zip 的第二次 archive 应答挂起时旧列表仍在且其后是「正在读取文件」，应答到达后换成新列表、状态行消失", async () => {
     const second = deferredResponse();
     const listings = [archiveListing("旧.txt")(), second.promise];
     const { fetchMock } = renderWorkspaceWith(
@@ -602,12 +625,17 @@ describe("文件页的预览状态", () => {
 
     await select("clip.mp4");
     const video = await waitFor(() => mediaElement("video"));
+    expect(video.getAttribute("src")).toBe(`${FILE}clip.mp4`);
     fireEvent.error(video);
     expect(previewRegion().getByText("无法播放该文件", { exact: true })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(mediaElement("video")).not.toBe(video));
     expect(previewRegion().queryByText("无法播放该文件")).toBeNull();
-    expect(mediaElement("video").getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    const refreshed = mediaElement("video");
+    const first = refetchVersion(refreshed, `${FILE}clip.mp4`);
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(mediaElement("video")).not.toBe(refreshed));
+    expect(refetchVersion(mediaElement("video"), `${FILE}clip.mp4`)).toBeGreaterThan(first);
     expect(fileRequests(fetchMock)).toStrictEqual([]);
 
     await select("归档.zip");
@@ -634,6 +662,77 @@ describe("文件页的预览状态", () => {
     expect(previewRegion().getByText("共 2 项", { exact: true })).toBeTruthy();
     expect(previewRegion().queryByRole("status")).toBeNull();
     expect(archiveRequests(fetchMock)).toHaveLength(2);
+    expect(fileRequests(fetchMock)).toStrictEqual([]);
+  });
+
+  it("v 只在重取后的媒体 src 上：改选 readme.md 再选回 clip.mp4 不带 v，此后刷新的 n 仍大于此前各次；下载链接、页面地址与 readme.md 重取的 file 请求都不带 v", async () => {
+    const { fetchMock } = renderWorkspaceWith({
+      "readme.md": { size: 4, route: textPreviewResponse("# 说明") },
+      "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
+    });
+    const refresh = async (previous: Element) => {
+      fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+      await waitFor(() => expect(mediaElement("video")).not.toBe(previous));
+      return mediaElement("video");
+    };
+
+    await select("clip.mp4");
+    const video = await waitFor(() => mediaElement("video"));
+    expect(video.getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    const address = currentLocation();
+    expect(address).toBe("/files?ws=workspace-1&path=clip.mp4");
+
+    const refreshed = await refresh(video);
+    const first = refetchVersion(refreshed, `${FILE}clip.mp4`);
+    const again = await refresh(refreshed);
+    const second = refetchVersion(again, `${FILE}clip.mp4`);
+    expect(second).toBeGreaterThan(first);
+    expectDownloadLink("clip.mp4");
+    await yieldMacrotask();
+    expect(currentLocation()).toBe(address);
+
+    await select("readme.md");
+    expect(await screen.findByRole("heading", { level: 1, name: "说明" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(fileRequests(fetchMock)).toHaveLength(2));
+    await yieldMacrotask();
+    expect(fileRequests(fetchMock)).toStrictEqual([`${FILE}readme.md`, `${FILE}readme.md`]);
+
+    await select("clip.mp4");
+    const back = await waitFor(() => mediaElement("video"));
+    expect(back.getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    expect(refetchVersion(await refresh(back), `${FILE}clip.mp4`)).toBeGreaterThan(second);
+    expectDownloadLink("clip.mp4");
+    expect(fileRequests(fetchMock)).toStrictEqual([`${FILE}readme.md`, `${FILE}readme.md`]);
+  });
+
+  it("n 不随工作空间切换归零：clip.mp4 刷新两次后切到数据分析再切回设计文档，重新选中 clip.mp4 不带 v，此后刷新的 n 大于切换前各次", async () => {
+    const { fetchMock } = renderWorkspaceWith({
+      "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
+    });
+    const refresh = async (previous: Element) => {
+      fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+      await waitFor(() => expect(mediaElement("video")).not.toBe(previous));
+      return mediaElement("video");
+    };
+
+    await select("clip.mp4");
+    const video = await waitFor(() => mediaElement("video"));
+    expect(video.getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    const refreshed = await refresh(video);
+    const first = refetchVersion(refreshed, `${FILE}clip.mp4`);
+    const second = refetchVersion(await refresh(refreshed), `${FILE}clip.mp4`);
+    expect(second).toBeGreaterThan(first);
+
+    await selectWorkspaceByName(/数据分析/);
+    await screen.findByText("未选择文件", { exact: true });
+    expect(mediaElements()).toStrictEqual([]);
+    await selectWorkspaceByName(/设计文档/);
+
+    await select("clip.mp4");
+    const back = await waitFor(() => mediaElement("video"));
+    expect(back.getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    expect(refetchVersion(await refresh(back), `${FILE}clip.mp4`)).toBeGreaterThan(second);
     expect(fileRequests(fetchMock)).toStrictEqual([]);
   });
 
