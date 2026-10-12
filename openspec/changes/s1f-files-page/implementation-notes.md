@@ -552,7 +552,7 @@
 
 ## 21.7、21.8（#1361）
 
-- 定性：服务端、`sandbox.resolve`、`op` 集合零改动，按 #1099 口径不改 Critical Path 代码；但本刀改了浏览器发往沙箱边界的输入，且让一类越界链接不再写 `sandbox.reject`，建议按 Critical Path 待遇（两席评审加 owner 白盒标注）。不变量：规范化只删段或整条拦下，不产生服务端对原串不会解析到的路径（`server/src/core/sandbox/resolve.ts:37-42` 同样跳过空段与 `.`、拒 `..`）。
+- 定性：服务端、`sandbox.resolve`、`op` 集合零改动，按 #1099 口径不改 Critical Path 代码；但本刀改了浏览器发往沙箱边界的输入，且让一类越界链接不再写 `sandbox.reject`，建议按 Critical Path 待遇（两席评审加 owner 白盒标注）。不变量：规范化只删段或整条拦下，不产生服务端对原串不会解析到的路径——唯一例外是以 `/` 开头的写法，见漂移二（`server/src/core/sandbox/resolve.ts:37-42` 同样跳过空段与 `.`、拒 `..`）。
 - 前提：21.2（#1099）已在 origin/master；本分支叠在未合入的 #1362 上，测试文件名来自它；不等 1.1 / 1.2 / 1.3。
 - 漂移一：21.8 说 FL-22 有「`..` 期望」，但 `docs/acceptance/functional-checklist.md:216` 只有 nope.html 一步。漂移二：`server/src/core/sandbox/resolve.ts:26` 对 `/` 开头直接拒（403 加审计），所以 `/readme.md` 改前是 403，改后去掉前导空段选中它，属 owner 裁决的预期变化，写进 PR。
 - 落点：`browser-paths.ts`（162 行）加 `export function normalizedPath(path: string): string | null`，`split("/")` 后滤掉 `""` 与 `"."`，任一段 `=== ".."` 返回 `null`，否则 `join("/")`；不写正则、不 `trim`、不 `.normalize()`、不处理 `\`。调用方是 `workspace-browser.tsx:532-545` 的 `path` effect（641 行，约加 6 行），knip 有消费方。
