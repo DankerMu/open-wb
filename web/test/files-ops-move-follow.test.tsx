@@ -32,12 +32,13 @@ import {
   openMove,
   openRename,
   renameTo,
+  rowIn,
   rowsUnder,
   targetSelect,
   treeUrl,
 } from "./files-ops-support.js";
 import { createFetchMock, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
-import { yieldMacrotask } from "./ui-support.js";
+import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -346,6 +347,75 @@ describe("移动之后目标位置上早先留下的状态", () => {
       treeUrl(""),
       treeUrl("out"),
       treeUrl("out/a"),
+    ]);
+  });
+
+  it("M13c 旧的 out/a 之下再深一层的 out/a/deep 与名字以 a 开头的同级 out/ab 的列表都在途时把根下的 a 移进 out：只有 out/a/deep 的被中止；out/ab 的照常落地；迟到的旧列表不落进新目录，展开新的 deep 是一次新的请求", async () => {
+    const heldDeep = deferredResponse();
+    const heldSibling = deferredResponse();
+    const listings: Listings = {
+      "": [dirEntry("a"), dirEntry("out")],
+      out: [dirEntry("a"), dirEntry("ab")],
+      "out/a": [dirEntry("deep")],
+    };
+    let moved = false;
+    const { fetchMock, mark } = openFiles(listings, {
+      [treeUrl("out/a/deep")]: () =>
+        moved
+          ? jsonResponse({ path: "out/a/deep", entries: [fileEntry("new.md")] })
+          : heldDeep.promise,
+      [treeUrl("out/ab")]: () => heldSibling.promise,
+      [MOVE]: () => {
+        moved = true;
+        listings[""] = [dirEntry("out")];
+        return jsonResponse({ path: "out/a" });
+      },
+    });
+    await expand("out");
+    // 根下的 `a` 一直折叠着；`out` 里的那个展开，再点开它的 `deep` 与同级的 `ab`，两个列表都挂着。
+    fireEvent.click(rowIn("out", "a"));
+    fireEvent.click(await findRow("展开 deep"));
+    fireEvent.click(rowIn("out", "ab"));
+    await waitFor(() => expect(within(tree()).getAllByText("正在读取目录")).toHaveLength(2));
+    const signal = (path: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => url === treeUrl(path))
+        .map(([, options]) => options?.signal?.aborted);
+    expect([signal("out/a/deep"), signal("out/ab")]).toStrictEqual([[false], [false]]);
+
+    await yieldMacrotask();
+    pressPointer(rowIn("设计文档", "a").nextElementSibling as Element);
+    fireEvent.click(
+      within(await screen.findByRole("menu")).getByRole("menuitem", { name: "移动到…" }),
+    );
+    const dialog = await screen.findByRole("dialog", { name: "移动到" });
+    expect(targets(dialog)).toStrictEqual(["out", "out/a"]);
+    const since = mark();
+    moveInto(dialog, "out");
+    await dialogGone("移动到");
+    await waitFor(() => expect(rowNames()).toStrictEqual(["设计文档", "out", "a", "ab"]));
+    await settle();
+    expect([signal("out/a/deep"), signal("out/ab")]).toStrictEqual([[true], [false]]);
+
+    await act(async () => {
+      heldDeep.resolve(jsonResponse({ path: "out/a/deep", entries: [fileEntry("old.md")] }));
+      heldSibling.resolve(jsonResponse({ path: "out/ab", entries: [fileEntry("kept.md")] }));
+    });
+    await findRow("kept.md");
+    await settle();
+    expect(rowNames()).toStrictEqual(["设计文档", "out", "a", "ab", "kept.md"]);
+
+    fireEvent.click(rowIn("out", "a"));
+    fireEvent.click(await findRow("展开 deep"));
+    await findRow("new.md");
+    await settle();
+    expect(rowNames()).toStrictEqual(["设计文档", "out", "a", "deep", "new.md", "ab", "kept.md"]);
+    expect(since()).toStrictEqual([
+      `POST ${MOVE} {"from":"a","to":"out/a"}`,
+      treeUrl(""),
+      treeUrl("out"),
+      treeUrl("out/a"),
+      treeUrl("out/a/deep"),
     ]);
   });
 });

@@ -9,17 +9,24 @@ import { createApiClient } from "../src/lib/api.js";
 import { findRow, previewRegion, row, rowNames, settle, tree } from "./files-deep-link-support.js";
 import { cleanupFilesFixture } from "./files-fixture.js";
 import {
+  cancelButton,
+  confirmGone,
   dialogGone,
+  dragTransfer,
   expand,
   fileEntry,
   fileUrl,
   flat,
   focusedOn,
+  hoverOver,
   MOVE,
   menuButton,
   nameInput,
   nested,
+  openDelete,
   openFiles,
+  openMove,
+  openRename,
   openRowMenu,
   treeUrl,
 } from "./files-ops-support.js";
@@ -204,8 +211,10 @@ describe("行菜单", () => {
 });
 
 describe("没有范围外的入口", () => {
-  it("R21 整页的控件、新建菜单、切换器弹层与行菜单里都没有上传、删除工作空间、重命名工作空间", async () => {
-    openFiles(nested(), { [fileUrl("top.md")]: () => textPreviewResponse("正文") });
+  it("R21 整页的控件、新建菜单、切换器弹层、行菜单与它打开的对话框里都没有上传、删除工作空间、重命名工作空间；拖进来的操作系统文件哪一行都不接受", async () => {
+    const { mark } = openFiles(nested(), {
+      [fileUrl("top.md")]: () => textPreviewResponse("正文"),
+    });
     await expand("out");
     fireEvent.click(row("top.md"));
     expect(await previewRegion().findByText("正文", { exact: true })).toBeTruthy();
@@ -227,17 +236,53 @@ describe("没有范围外的入口", () => {
     fireEvent.keyDown(creation, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 
-    for (const [name, item] of [
-      ["a.md", "下载"],
-      ["out", "重命名"],
+    // 行菜单的全部项：文件行四项，目录行三项。
+    for (const [name, items] of [
+      ["a.md", ["重命名", "移动到…", "删除", "下载"]],
+      ["out", ["重命名", "移动到…", "删除"]],
     ] as const) {
       const menu = await openRowMenu(name);
-      expect(missing(controlNames(menu), [item])).toStrictEqual([]);
+      expect(
+        within(menu)
+          .getAllByRole("menuitem")
+          .map((item) => item.textContent),
+      ).toStrictEqual(items);
       seen.push(...controlNames(menu));
       pickerCount += pickers();
       fireEvent.keyDown(menu, { key: "Escape" });
       await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
     }
+
+    // 行菜单打开的三个对话框各看一次。
+    const rename = await openRename("a.md");
+    expect(missing(controlNames(rename), ["取消", "重命名"])).toStrictEqual([]);
+    seen.push(...controlNames(rename));
+    pickerCount += pickers();
+    fireEvent.click(cancelButton(rename));
+    await dialogGone();
+    const move = await openMove("a.md");
+    expect(missing(controlNames(move), ["取消", "移动", "根目录"])).toStrictEqual([]);
+    seen.push(...controlNames(move));
+    pickerCount += pickers();
+    fireEvent.click(cancelButton(move));
+    await dialogGone("移动到");
+    const confirm = await openDelete("a.md");
+    expect(missing(controlNames(confirm), ["取消", "删除"])).toStrictEqual([]);
+    seen.push(...controlNames(confirm));
+    pickerCount += pickers();
+    fireEvent.click(cancelButton(confirm));
+    await confirmGone();
+
+    // 拖放不是上传入口：带 `Files` 的拖动在根行、目录行、文件行上都不被接受，硬发 drop 也没有请求。
+    const since = mark();
+    for (const target of [row("折叠 设计文档"), row("折叠 out"), row("top.md")]) {
+      const files = dragTransfer(["Files"]);
+      expect(hoverOver(target, files)).toBe(false);
+      expect(target.hasAttribute("data-drop-target")).toBe(false);
+      fireEvent.drop(target, { dataTransfer: files });
+    }
+    await settle();
+    expect(since()).toStrictEqual([]);
 
     await yieldMacrotask();
     fireEvent.click(screen.getByRole("button", { name: "选择工作空间" }));
@@ -247,7 +292,7 @@ describe("没有范围外的入口", () => {
     // 切换器里的条目都是工作空间：这里连单独的「删除」「重命名」也不该有。
     expect(inSwitcher.filter((name) => /上传|删除|重命名/.test(name))).toStrictEqual([]);
     seen.push(...inSwitcher);
-    // 行菜单有「删除」「移动到…」（针对条目）：只断言没有针对工作空间的与上传。
+    // 行菜单与它的对话框有「重命名」「移动到…」「删除」（针对条目）：只断言没有针对工作空间的与上传。
     expect(seen.filter((name) => /上传|删除工作空间|重命名工作空间/.test(name))).toStrictEqual([]);
     expect(pickerCount + pickers()).toBe(0);
   });

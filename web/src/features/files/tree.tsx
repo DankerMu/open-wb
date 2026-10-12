@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from "react";
+import { type DragEvent, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -37,7 +37,30 @@ type DirectoryTreeProps = DirectoryTreeState & {
   workspaceName: string;
 };
 
+/** 可拖的行的行按钮上的属性。 */
+type DragSource = {
+  draggable: true;
+  onDragEnd(): void;
+  onDragStart(event: DragEvent<HTMLElement>): void;
+};
+
+/** 能放下的行（目录行与根行）的行按钮上的属性；`data-drop-target` 是经过时的高亮。 */
+type DropTarget = {
+  "data-drop-target": "true" | undefined;
+  onDragEnter(event: DragEvent<HTMLElement>): void;
+  onDragLeave(): void;
+  onDragOver(event: DragEvent<HTMLElement>): void;
+  onDrop(event: DragEvent<HTMLElement>): void;
+};
+
+/** 拖放给行按钮的属性：文件行只能被拖走；目录行可拖走也可放下；根行（`""`）只能放下。 */
+type RowDrag = {
+  directory(path: string): DropTarget & Partial<DragSource>;
+  file(path: string): DragSource;
+};
+
 type DirectoryNodeProps = DirectoryTreeState & {
+  drag: RowDrag | undefined;
   icon: IconName;
   label: string;
   path: string;
@@ -54,14 +77,24 @@ type FileRowProps = Pick<
   DirectoryTreeState,
   "actions" | "focusMenuPath" | "marks" | "onSelectFile"
 > & {
+  drag: RowDrag | undefined;
   entry: TreeRow;
   path: string;
   selected: boolean;
 };
 
-/** 树行（目录与文件同一写法）；选中的文件行由 `aria-current` 着色。 */
+/**
+ * 树行（目录与文件同一写法）；选中的文件行由 `aria-current` 着色，拖动经过的可放下的目录行由
+ * `data-drop-target` 着色加框。
+ */
 const ROW =
-  "group/row peer/row flex w-full min-w-0 cursor-pointer items-center gap-[0.4rem] rounded-[6px] px-2 py-[0.32rem] text-left text-[0.8rem] leading-[1.35] text-(--wb-text-primary) hover:bg-(--wb-brand-primary-subtle) aria-[current=true]:bg-(--wb-brand-primary-subtle) aria-[current=true]:text-(--wb-brand-primary-deep)";
+  "group/row peer/row flex w-full min-w-0 cursor-pointer items-center gap-[0.4rem] rounded-[6px] px-2 py-[0.32rem] text-left text-[0.8rem] leading-[1.35] text-(--wb-text-primary) hover:bg-(--wb-brand-primary-subtle) aria-[current=true]:bg-(--wb-brand-primary-subtle) aria-[current=true]:text-(--wb-brand-primary-deep) data-[drop-target=true]:bg-(--wb-brand-primary-subtle) data-[drop-target=true]:ring-1 data-[drop-target=true]:ring-(--wb-brand-primary) data-[drop-target=true]:ring-inset";
+/**
+ * 拖动一行时写进 `dataTransfer` 的类型，值是该行的路径。只当记号用：经过时看 `types` 里有没有它，放下
+ * 时把它的值与本树记下的路径比一次是否相等——发给服务端的路径不从这里取。不用 `text/plain`：文字类型
+ * 的拖动放进输入框会把路径插进去。
+ */
+const ENTRY_DRAG = "application/x-workbuddy-entry";
 const GLYPH =
   "inline-flex size-[14px] shrink-0 text-(--wb-text-secondary) group-aria-[current=true]/row:text-(--wb-brand-primary-deep)";
 const ROW_NAME = "min-w-0 flex-1 truncate";
@@ -97,6 +130,96 @@ function useRowMark(marks: TreeMarks | undefined, path: string) {
       </span>
     ),
   };
+}
+
+/**
+ * 树的拖放（原生拖放）。被拖的行的路径记在 `dragged` 里：`dragstart` 写入，`drop` 与 `dragend` 清掉，
+ * 下一次 `dragstart` 覆写；`from` 只从它取。经过一行时可放下的条件是三条同时成立：`dragged` 非空（拖动
+ * 是从本树起的）、`types` 里有 `ENTRY_DRAG`、`actions.accepts`（不是自身、后代、当前父目录，且没有在途
+ * 的放下）——成立才拦缺省动作，浏览器因此才会在这一行上发 `drop`。操作系统的文件、别的页面拖来的东西
+ * 没有经过本树的 `dragstart`，或不带这个类型，不被接受。放下时另要求 `getData(ENTRY_DRAG)` 与 `dragged`
+ * 逐字相同：源行在拖动途中被重列卸掉时它的 `dragend` 到不了这里，`dragged` 会留着旧值（读代码推出），
+ * 这时别处拖来的同类型数据对不上就不发请求。能不能移由 `actions.moveInto` 再判一次。
+ * 高亮用进入计数：指针移到行内的子元素上也会触发 `dragleave`。`dragstart` 里不写状态：只写引用。
+ * 没给 `actions`（`onlyPaths` 下）就没有拖放。
+ */
+function useRowDrag(actions: EntryActions | undefined): RowDrag | undefined {
+  const dragged = useRef<string | null>(null);
+  const [over, setOver] = useState<{ depth: number; path: string } | null>(null);
+  const handlers = useMemo(() => {
+    if (!actions) {
+      return undefined;
+    }
+
+    const end = () => {
+      dragged.current = null;
+      setOver(null);
+    };
+    const accepted = (event: DragEvent<HTMLElement>, directory: string) => {
+      const from = dragged.current;
+      return (
+        from !== null &&
+        event.dataTransfer.types.includes(ENTRY_DRAG) &&
+        actions.accepts(from, directory)
+      );
+    };
+    const source = (path: string): DragSource => ({
+      draggable: true,
+      onDragEnd: end,
+      onDragStart(event) {
+        event.dataTransfer.setData(ENTRY_DRAG, path);
+        event.dataTransfer.effectAllowed = "move";
+        dragged.current = path;
+      },
+    });
+    const target = (directory: string): Omit<DropTarget, "data-drop-target"> => ({
+      onDragEnter(event) {
+        if (accepted(event, directory)) {
+          event.preventDefault();
+          setOver((current) => ({
+            depth: current?.path === directory ? current.depth + 1 : 1,
+            path: directory,
+          }));
+        }
+      },
+      onDragLeave() {
+        setOver((current) => {
+          if (current?.path !== directory) {
+            return current;
+          }
+          return current.depth > 1 ? { depth: current.depth - 1, path: directory } : null;
+        });
+      },
+      onDragOver(event) {
+        if (accepted(event, directory)) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+        }
+      },
+      onDrop(event) {
+        const from = dragged.current;
+        end();
+        if (from !== null && event.dataTransfer.getData(ENTRY_DRAG) === from) {
+          event.preventDefault();
+          actions.moveInto(from, directory);
+        }
+      },
+    });
+    return { source, target };
+  }, [actions]);
+  const overPath = over?.path ?? null;
+  return useMemo(
+    () =>
+      handlers && {
+        directory: (path: string) => ({
+          ...(path === "" ? undefined : handlers.source(path)),
+          ...handlers.target(path),
+          "data-drop-target": overPath === path ? ("true" as const) : undefined,
+        }),
+        file: handlers.source,
+      },
+    [handlers, overPath],
+  );
 }
 
 /**
@@ -166,6 +289,7 @@ function RowMenu({ actions, focusMenuPath, name, path, type }: RowMenuProps) {
 
 function FileRow({
   actions,
+  drag,
   entry,
   focusMenuPath,
   marks,
@@ -188,6 +312,7 @@ function FileRow({
         onClick={stat ? () => onSelectFile(stat, path) : undefined}
         title={entry.name}
         type="button"
+        {...drag?.file(path)}
       >
         <span className={GLYPH}>
           <Icon name={fileIcon(entry.name)} size={14} />
@@ -220,6 +345,7 @@ function FileRow({
 function DirectoryNode({
   actions,
   cache,
+  drag,
   errors,
   expandedPaths,
   focusMenuPath,
@@ -252,6 +378,7 @@ function DirectoryNode({
         onClick={() => onToggleDirectory(path)}
         title={label}
         type="button"
+        {...drag?.directory(path)}
       >
         <svg
           aria-hidden="true"
@@ -315,6 +442,7 @@ function DirectoryNode({
                   <DirectoryNode
                     actions={actions}
                     cache={cache}
+                    drag={drag}
                     errors={errors}
                     expandedPaths={expandedPaths}
                     focusMenuPath={focusMenuPath}
@@ -334,6 +462,7 @@ function DirectoryNode({
               return (
                 <FileRow
                   actions={actions}
+                  drag={drag}
                   entry={entry}
                   focusMenuPath={focusMenuPath}
                   key={entryPath}
@@ -352,10 +481,18 @@ function DirectoryNode({
 }
 
 export function DirectoryTree({ rootPath, workspaceName, ...state }: DirectoryTreeProps) {
+  const drag = useRowDrag(state.actions);
   return (
     <nav aria-label="工作空间目录树">
       <ul>
-        <DirectoryNode {...state} icon="shield" label={workspaceName} path="" subline={rootPath} />
+        <DirectoryNode
+          {...state}
+          drag={drag}
+          icon="shield"
+          label={workspaceName}
+          path=""
+          subline={rootPath}
+        />
       </ul>
     </nav>
   );

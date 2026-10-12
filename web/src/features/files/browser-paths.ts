@@ -37,6 +37,24 @@ export function renameTarget(path: string, name: string): string {
 }
 
 /**
+ * 移动（`移动到…` 与拖放）发给 `move` 的 `to`：目标目录 `directory` 接上 `from` 的末段（它在列表里的
+ * 名字），原样拼接——不去空格、不折叠 `.` / `..`、不编码；目标是根（`""`）时就是名字本身。两段都来自
+ * 已加载的列表；能不能移由服务端裁决。
+ */
+export function moveDestination(from: string, directory: string): string {
+  return workspacePath(directory, from.slice(from.lastIndexOf("/") + 1));
+}
+
+/**
+ * 条目 `path` 能不能移进目录 `directory`（`""` 是根）：不能移进自身与自身的后代（`movedPath` 的判法：
+ * 同级的 `output` 不在 `out` 之下），也不移进它当前的父目录（那是原地不动）。`移动到…` 的下拉与拖放的
+ * 放下共用这一个判定；它只管界面给不给这个入口，服务端另有自己的裁决。
+ */
+export function canMoveInto(path: string, directory: string): boolean {
+  return parentPath(path) !== directory && movedPath(directory, path, null) !== null;
+}
+
+/**
  * `from` 被移到 `to`（`null`：被删除）之后 `path` 的写法。只有 `path` 恰为 `from` 或以 `from + "/"`
  * 开头才算命中（同级的 `output` 不在 `out` 之下）：换掉这段前缀，`to` 为 `null` 时是 `null`；没命中
  * 的原样返回。
@@ -176,9 +194,8 @@ export function loadedDirectoryPaths(cache: DirectoryCache) {
  * `移动到…` 可选的目标目录，`from` 是要移动的条目。只收树上此刻可见且列表已加载的目录：根（列表已
  * 加载即算），以及自身与各级上级都在 `expanded` 里、自身列表已加载的目录——自根沿各级列表里列为目录
  * 的条目下行，不看 `cache` 里还有哪些键：地址定位会把上级没列出的目录的列表留在缓存里，那样的目录在
- * 树上没有行。再去掉 `from` 自身与它的后代（`movedPath` 的判法：同级的 `output` 不在 `out` 之下）和它
- * 当前的父目录。次序同树上自上而下，根是 `""`。加载过但折叠着的目录不在其中，这一点与
- * `loadedDirectoryPaths` 不同。
+ * 树上没有行。再去掉 `from` 自身、它的后代和它当前的父目录（`canMoveInto`）。次序同树上自上而下，根是
+ * `""`。加载过但折叠着的目录不在其中，这一点与 `loadedDirectoryPaths` 不同。
  */
 export function moveTargets(
   cache: DirectoryCache,
@@ -202,8 +219,7 @@ export function moveTargets(
     }
   };
   visit("");
-  const parent = parentPath(from);
-  return visible.filter((path) => path !== parent && movedPath(path, from, null) !== null);
+  return visible.filter((path) => canMoveInto(from, path));
 }
 
 /**
