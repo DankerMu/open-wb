@@ -1,6 +1,7 @@
 // files-web「地址定位到文件」：场景「指向目录、不存在与越界」。整页渲染（路由在内）。
-// 地址里的 `path` 只是数据：用例逐字断言发给服务端的请求串，是否越界由服务端裁决——这里的 403 / 404
-// 是 fetch 桩给的应答，服务端是否写了 `sandbox.reject` 在 web 测试里看不到
+// 地址里的 `path` 先去掉空段与 `.` 段，有一段恰为 `..` 时不发请求（场景「别名路径」与拦截的各种写法在
+// files-deep-link-alias.test.ts）；其余的段原样发出，用例逐字断言请求串，能不能列由服务端裁决——这里
+// 的 403 / 404 是 fetch 桩给的应答，服务端是否写了 `sandbox.reject` 在 web 测试里看不到
 // （由 server/test/workspaces-http.test.ts 与 workspaces-http-boundary.test.ts 承担）。
 
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -84,12 +85,19 @@ describe("指向目录、不存在与越界", () => {
       extra: { [`${TREE}nodir`]: notFound },
     },
     {
-      title: "path=../x：两个点原样发出，停在根，显示服务端的 403 文案",
+      title: "path=../x：除对根的一次 tree 之外不发任何请求，显示 文件不存在",
       path: "../x",
-      trees: [ROOT, `${TREE}..`],
+      trees: [ROOT],
+      notice: MISSING,
+      rows: ROOT_ROWS,
+    },
+    {
+      title: "path=link/x（服务端拒绝的一级）：照样请求 link，停在根，显示服务端的 403 文案",
+      path: "link/x",
+      trees: [ROOT, `${TREE}link`],
       notice: DENIED,
       rows: ROOT_ROWS,
-      extra: { [`${TREE}..`]: denied },
+      extra: { [`${TREE}link`]: denied },
     },
     {
       title: "path=readme.md/x（中间一级是文件）：照样请求它，显示服务端的 404 文案",
@@ -100,12 +108,12 @@ describe("指向目录、不存在与越界", () => {
       extra: { [`${TREE}readme.md`]: notFound },
     },
     {
-      title: "path=/etc/x（斜杠开头）：请求串是编码后的 /etc，显示服务端的 403 文案",
+      title: "path=/etc/x（斜杠开头）：开头的空段被去掉，请求的是 etc，显示服务端的 404 文案",
       path: "/etc/x",
-      trees: [ROOT, `${TREE}%2Fetc`],
-      notice: DENIED,
+      trees: [ROOT, `${TREE}etc`],
+      notice: NOT_FOUND,
       rows: ROOT_ROWS,
-      extra: { [`${TREE}%2Fetc`]: denied },
+      extra: { [`${TREE}etc`]: notFound },
     },
     {
       title: "path=constructor/x（与对象内置成员同名的一级）：照样请求它，显示服务端的 404 文案",
@@ -124,24 +132,24 @@ describe("指向目录、不存在与越界", () => {
       extra: { [`${TREE}__proto__`]: notFound },
     },
     {
-      title: "path=..（单独两个点）：根的列表里没有它，显示 文件不存在，不为它发请求",
+      title: "path=..（单独两个点）：有一段恰为两个点，显示 文件不存在，不为它发请求",
       path: "..",
       trees: [ROOT],
       notice: MISSING,
       rows: ROOT_ROWS,
     },
     {
-      title: "path=/x：根的列表里没有它，显示 文件不存在，没有额外请求",
+      title: "path=/x：去掉开头的空段是 x，根的列表里没有它，显示 文件不存在，没有额外请求",
       path: "/x",
       trees: [ROOT],
       notice: MISSING,
       rows: ROOT_ROWS,
     },
     {
-      title: "path=out/（斜杠结尾）：展开到 out，显示 文件不存在",
+      title: "path=out/（斜杠结尾）：末尾的空段被去掉，展开到 out，预览区为 未选择文件",
       path: "out/",
       trees: [ROOT, OUT],
-      notice: MISSING,
+      notice: null,
       rows: OUT_ROWS,
     },
     {
@@ -216,7 +224,7 @@ describe("指向目录、不存在与越界", () => {
   );
 
   it.each([
-    ["../x", `${TREE}..`, denied, DENIED],
+    ["link/x", `${TREE}link`, denied, DENIED],
     ["nodir/x.md", `${TREE}nodir`, notFound, NOT_FOUND],
   ])(
     "%s 定位失败后点 刷新：只重取根，不再请求失败的那一级",
@@ -237,19 +245,39 @@ describe("指向目录、不存在与越界", () => {
     },
   );
 
-  it("path=./bad（别名指向目录，bad 的列表读取失败）：没有行的 ./bad 不展开、不请求；点 刷新 只重取根，没有错误行", async () => {
-    const listing = () =>
-      jsonResponse({ path: "", entries: [dirEntry("bad"), fileEntry("readme.md", 8)] });
-    const { treeRequests } = open(
-      address("./bad"),
-      routes({ [ROOT]: listing, [`${TREE}.`]: listing, [`${TREE}.%2Fbad`]: notFound }),
-    );
-    await findRow("展开 bad");
+  it("../x 被拦下后点 刷新：只重取根，仍不为它发请求，文件不存在 留着", async () => {
+    const { fileRequests, treeRequests } = open(address("../x"));
+    await findRow("readme.md");
+    expect((await previewRegion().findByRole("alert")).textContent).toBe(MISSING);
+    await settle();
+    expect(treeRequests()).toStrictEqual([ROOT]);
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => {
       expect(treeRequests()).toHaveLength(2);
     });
     await settle();
-    expect(treeRequests()).toStrictEqual([ROOT, `${TREE}.`]);
+    expect(treeRequests()).toStrictEqual([ROOT, ROOT]);
+    expect(fileRequests()).toStrictEqual([]);
+    expect(rowNames()).toStrictEqual(ROOT_ROWS);
+    expect(previewRegion().getByRole("alert").textContent).toBe(MISSING);
+  });
+
+  it("path=ghost/bad（上级列表没列出 ghost，但它能列；bad 的列表读取失败）：没有行的 ghost/bad 不展开、不请求；点 刷新 只重取根，没有错误行", async () => {
+    const ghost = `${TREE}ghost`;
+    const { treeRequests } = open(
+      address("ghost/bad"),
+      routes({
+        [ghost]: () => jsonResponse({ path: "ghost", entries: [dirEntry("bad")] }),
+        [`${TREE}ghost%2Fbad`]: notFound,
+      }),
+    );
+    await findRow("readme.md");
+    await waitFor(() => {
+      expect(treeRequests()).toHaveLength(2);
+    });
+    await settle();
+    expect(treeRequests()).toStrictEqual([ROOT, ghost]);
     expectEmptyPreview();
 
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
@@ -257,8 +285,8 @@ describe("指向目录、不存在与越界", () => {
       expect(treeRequests()).toHaveLength(3);
     });
     await settle();
-    expect(treeRequests()).toStrictEqual([ROOT, `${TREE}.`, ROOT]);
-    expect(rowNames()).toStrictEqual(["设计文档", "bad", "readme.md"]);
+    expect(treeRequests()).toStrictEqual([ROOT, ghost, ROOT]);
+    expect(rowNames()).toStrictEqual(ROOT_ROWS);
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -311,6 +339,7 @@ describe("指向目录、不存在与越界", () => {
   it.each([
     ["out/gone.md", MISSING, [ROOT, OUT], {}],
     ["nodir/x.md", NOT_FOUND, [ROOT, `${TREE}nodir`], { [`${TREE}nodir`]: notFound }],
+    ["../x", MISSING, [ROOT], {}],
   ] satisfies [string, string, string[], FetchRoutes][])(
     "已选中 readme.md 时地址改到 %s：选中被清掉，预览区显示失败文案，不请求新的 file",
     async (path, notice, trees, extra) => {

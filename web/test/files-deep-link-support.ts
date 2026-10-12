@@ -1,5 +1,6 @@
-// files-web「地址定位到文件」三个测试文件共用的夹具：files-deep-link.test.tsx（深链打开、选中写入地址）、
-// files-deep-link-failures.test.ts（指向目录、不存在与越界）、files-deep-link-component.test.tsx（组件）。
+// files-web「地址定位到文件」四个测试文件共用的夹具：files-deep-link.test.tsx（深链打开、选中写入地址）、
+// files-deep-link-failures.test.ts（指向目录、不存在与越界）、files-deep-link-alias.test.ts（别名路径与
+// 含两个点的路径）、files-deep-link-component.test.tsx（组件）。
 // 路由值是函数：每次请求给一份新应答，多发的请求留在记录里，由对整份记录的相等断言判红。
 
 import { act, screen, waitFor, within } from "@testing-library/react";
