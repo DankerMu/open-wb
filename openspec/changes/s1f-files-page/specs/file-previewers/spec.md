@@ -104,7 +104,7 @@
 - **THEN** 只显示源码与截断提示，没有 `img`，没有视图切换按钮
 
 ### Requirement: 隔离来源的嵌入与令牌
-需要隔离预览来源的预览器（网页的渲染视图、PDF、办公文档）SHALL 经 `issuePreviewToken(workspaceId)` 取得 `{base, officeBase, expiresAt, documentMaxBytes, officeAvailable}`，并把文件路径按段 `encodeURIComponent` 后接在 `base`（或 `officeBase`）之后作为 iframe 的 `src`；页面 SHALL NOT 自己拼接预览来源的主机或端口。同一工作空间在一个页面里 SHALL 共用一次签发的结果；只要有这样的预览处于挂载状态，页面 SHALL 每 5 分钟再调用一次 `issuePreviewToken` 续期（返回同一个 `base` 时 iframe 不重载；返回了不同的 `base` 时以新地址重载），没有这样的预览时不续期；此后再次出现这样的预览时，距上一次签发不足 5 分钟 SHALL 复用上一次的结果、不重新签发，否则重新签发（owner 2026-10-11 认可）。签发失败（非 401）时预览区显示信封 message 或安全文案，网页仍可切到源码视图。令牌与 `base` SHALL NOT 被写入地址栏、`localStorage`、日志或任何持久存储，SHALL NOT 出现在界面可见文本里。
+需要隔离预览来源的预览器（网页的渲染视图、PDF、办公文档）SHALL 经 `issuePreviewToken(workspaceId)` 取得 `{base, officeBase, expiresAt, documentMaxBytes, officeAvailable}`，并把文件路径按段 `encodeURIComponent` 后接在 `base`（或 `officeBase`）之后作为 iframe 的 `src`；页面 SHALL NOT 自己拼接预览来源的主机或端口。同一工作空间在一个页面里 SHALL 共用一次签发的结果；只要有这样的预览处于挂载状态，页面 SHALL 每 5 分钟再调用一次 `issuePreviewToken` 续期（返回同一个 `base` 时 iframe 不重载；返回了不同的 `base` 时以新地址重载），没有这样的预览时不续期；此后再次出现这样的预览时，距上一次签发不足 5 分钟 SHALL 复用上一次的结果、不重新签发，否则重新签发（owner 2026-10-11 认可）。渲染视图下 `刷新` 或再点已选中的同一行时，距上一次成功签发不足 5 分钟的不发签发请求、续期时刻不变；其余情况——签发失败态、还没有成功签发过（在途的那一次被中止）、或距上一次成功签发已满 5 分钟——SHALL 立即重新签发一次，新结果到达之前不建 iframe。需要令牌的预览重新出现时距上一次成功签发已满 5 分钟的，SHALL 先重新签发：自重新出现的那一次渲染起到新结果到达为止显示 `正在加载预览…`，不以旧 `base` 建 iframe。签发失败（非 401）时预览区显示信封 message 或安全文案，网页仍可切到源码视图。令牌与 `base` SHALL NOT 被写入地址栏、`localStorage`、日志或任何持久存储，SHALL NOT 出现在界面可见文本里。
 
 网页渲染视图的 iframe SHALL 带 `sandbox="allow-scripts allow-forms allow-modals"`（恰这三个令牌，没有 `allow-same-origin`）、`referrerpolicy="no-referrer"` 与 `title="<文件名>"`，SHALL NOT 使用 `srcdoc`。网页默认显示渲染视图，可在 `查看源码` 与 `渲染视图` 之间切换，切换文件时重置为渲染；源码视图经 `fetchPreview` 取文本（1 MiB 截断与截断提示照常），渲染视图不受该上限约束。
 
@@ -115,6 +115,14 @@
 #### Scenario: 路径编码
 - **WHEN** 选中 `报告 2026/a b#1.html`
 - **THEN** iframe 的 `src` 为 `<base>` 后接 `%E6%8A%A5%E5%91%8A%202026/a%20b%231.html`（各段分别编码，`/` 保留）
+
+#### Scenario: 签发失败后刷新
+- **WHEN** 第一次签发返回 500、第二次成功，选中 `index.html` 后点 `刷新`
+- **THEN** 先是失败文案、没有 iframe；`刷新` 后签发请求恰两次，iframe 出现且 `src` 为新 `base` 加路径，全程零 `file` 请求
+
+#### Scenario: 过期的 base 不建首帧
+- **WHEN** 选中 `index.html`（`base` 为 A），改选 `readme.md`，6 分钟后再选 `index.html`（签发返回 B）
+- **THEN** 第二次签发落定之前文档里没有建过 iframe；落定后 `src` 以 B 开头；签发请求合计两次
 
 #### Scenario: 共用与续期
 - **WHEN** 在同一工作空间里先后预览两个 html 与一个 pdf，停留 11 分钟（使用假定时器），随后切到一个 `md` 文件再停留 6 分钟
@@ -140,7 +148,7 @@ PDF SHALL 以不带 `sandbox` 属性的 `iframe`（`title` 为文件名）从 `b
 - **THEN** 依次显示 `文件过大，无法预览`、`服务器未启用文档转换，请下载后查看`、`此浏览器不支持内嵌 PDF 预览，请下载后查看`；三者都没有 `iframe`，都有下载链接
 
 ### Requirement: 音视频
-音频 SHALL 以 `<audio controls>`、视频 SHALL 以 `<video controls>` 播放，`src` 为主站 `/api/workspaces/<id>/file?path=<编码后的路径>`（同源、随 cookie，由浏览器发起范围请求），`preload="metadata"`，不自动播放；视频在预览区内等比缩放。页面 SHALL NOT 经 `fetch` 把媒体读进内存。媒体元素触发 `error` 时预览区显示 `无法播放该文件` 并保留下载链接。切换文件或卸载时媒体元素被移除（播放随之停止）。
+音频 SHALL 以 `<audio controls>`、视频 SHALL 以 `<video controls>` 播放，`src` 为主站 `/api/workspaces/<id>/file?path=<编码后的路径>`（同源、随 cookie，由浏览器发起范围请求），`preload="metadata"`，不自动播放；视频在预览区内等比缩放。页面 SHALL NOT 经 `fetch` 把媒体读进内存。媒体元素触发 `error` 时预览区显示 `无法播放该文件` 并保留下载链接。切换文件或卸载时媒体元素被移除（播放随之停止）。`刷新` 或再点已选中的同一行 SHALL 换一个新的媒体元素：已显示的 `无法播放该文件` 随之清除并重新尝试（新元素是否再次向服务端请求由浏览器决定，见 #1356），播放中的媒体回到开头且不自动播放。媒体请求得到 401 时 SHALL NOT 通知认证守卫：媒体元素的 `error` 不带状态码，页面不为此另发请求，与其它失败一样显示 `无法播放该文件`。
 
 #### Scenario: 播放器与地址
 - **WHEN** 选中 `clip.mp4` 与 `voice.mp3`
@@ -166,7 +174,7 @@ Notebook 预览器 SHALL 把 `fetchPreview` 取回的文本解析为 nbformat 4 
 - **THEN** 显示 `文件过大，无法预览` 与下载链接，没有单元格
 
 ### Requirement: 压缩包列表
-压缩包预览器 SHALL 调用 `listArchive(workspaceId, path)` 并以表格显示条目：每行一个路径（目录条目带目录图标）与大小（`formatSize`；`size` 为 `null` 时显示 `—`；目录不显示大小），路径作为纯文本显示、过长时截断并以 `title` 给出全文。表格上方显示 `共 N 项`；`truncated` 为 `true` 时显示 `仅显示前 N 项`。条目为空时显示 `压缩包内没有文件`。条目 SHALL NOT 可点击、SHALL NOT 触发任何解压或下载请求（下载整个压缩包用预览头的下载链接）。服务端 415（损坏或不是压缩包）显示 `无法读取该压缩包`。
+压缩包预览器 SHALL 调用 `listArchive(workspaceId, path)` 并以表格显示条目：每行一个路径（目录条目带目录图标）与大小（`formatSize`；`size` 为 `null` 时显示 `—`；目录不显示大小），路径作为纯文本显示、过长时截断并以 `title` 给出全文。表格上方显示 `共 N 项`；`truncated` 为 `true` 时显示 `仅显示前 N 项`。条目为空时显示 `压缩包内没有文件`。条目 SHALL NOT 可点击、SHALL NOT 触发任何解压或下载请求（下载整个压缩包用预览头的下载链接）。服务端 415（损坏或不是压缩包）显示 `无法读取该压缩包`。重新列出（`刷新`、再点已选中的同一行）期间 SHALL 保留上一次的结果——列表、`压缩包内没有文件` 或失败文案——并在其后显示 `正在读取文件`（`role="status"`）；新结果（含失败）到达后替换它，被取代的那一次请求迟到的结果 SHALL 丢弃。第一次列出期间只有 `正在读取文件`。
 
 #### Scenario: 列表与截断
 - **WHEN** `listArchive` 返回三项（`a.txt` 5 字节、`dir/` 目录、`dir/b.md` 7 字节）、`truncated:false`；另一例返回 1000 项、`truncated:true`

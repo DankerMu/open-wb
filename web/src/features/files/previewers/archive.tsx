@@ -2,15 +2,18 @@
  * Archive previewer: the member list of a zip / tar / gz, as text. The caller hands over `load`,
  * one listing request for the selected file; this module calls it once per `load` it is given, with
  * a signal of its own that is aborted when the previewer goes away or a new `load` arrives (刷新,
- * a second click on the same row). What is shown always belongs to the current `load`: until that
- * one settles the reading line is up, and a result that arrives after its signal was aborted is
- * dropped.
+ * a second click on the same row). What is shown is the last result that settled, whichever `load`
+ * it came from: the list, the empty-archive line or a failure text. While the current `load` has
+ * not settled the reading line follows it (on the first listing the reading line is all there is);
+ * the next result, a failure included, replaces it, and a result that arrives after its signal was
+ * aborted is dropped.
  * Member names are data: rendered as text and as the `title`, never trimmed, normalised or turned
  * into an address. Nothing in the table can be clicked and this module has no way to ask for a
  * member or for the archive itself; downloading the whole archive is the header link's job.
  * Failures: the envelope code `preview_unsupported` reads 无法读取该压缩包 (by code, not by
- * status); a 401 is left to the authentication guard and the reading line stays; anything else
- * shows the envelope message or the safe request-failed text.
+ * status); a 401 is left to the authentication guard and settles nothing, so the previous result
+ * (if any) and the reading line stay; anything else shows the envelope message or the safe
+ * request-failed text.
  * Not claimed: that a listing describes a file inside the workspace. The route behind `load` has
  * the known read window recorded in design D22「已知残余」, which this module neither closes nor
  * widens (read from the code, not measured).
@@ -28,7 +31,7 @@ type ArchiveLoad = Extract<PreviewState, { status: "archive" }>["load"];
 type Listing = Awaited<ReturnType<ArchiveLoad>>;
 type Entry = Listing["entries"][number];
 
-/** 某一个 `load` 的结果；`load` 换了它就不再算数。 */
+/** 最后一次落定的结果与它所属的 `load`；`load` 换了之后它仍显示，直到新的一次落定。 */
 type Settled = { load: ArchiveLoad } & ({ listing: Listing } | { message: string });
 
 function failureText(error: unknown): string {
@@ -55,7 +58,7 @@ export function ArchivePreviewer({ load }: { load?: ArchiveLoad | undefined }) {
         if (!signal.aborted) setSettled({ load, listing });
       },
       (error: unknown) => {
-        // 中止后的拒绝不是失败；401 交给认证守卫，这里停在读取态。
+        // 中止后的拒绝不是失败；401 交给认证守卫，这里不落定：上一次的结果与读取行都留着。
         if (signal.aborted || isUnauthorized(error)) return;
         setSettled({ load, message: failureText(error) });
       },
@@ -66,19 +69,24 @@ export function ArchivePreviewer({ load }: { load?: ArchiveLoad | undefined }) {
   if (!load) {
     return <Failure message={REQUEST_FAILED_MESSAGE} />;
   }
-  const current = settled?.load === load ? settled : null;
-  if (!current) {
-    return (
-      <p className={`${STATUS_TEXT} px-4 pt-3`} role="status">
-        正在读取文件
-      </p>
-    );
-  }
-  if ("message" in current) {
-    return <Failure message={current.message} />;
+  return (
+    <>
+      {settled ? <Result settled={settled} /> : null}
+      {settled?.load === load ? null : (
+        <p className={`${STATUS_TEXT} px-4 pt-3`} role="status">
+          正在读取文件
+        </p>
+      )}
+    </>
+  );
+}
+
+function Result({ settled }: { settled: Settled }) {
+  if ("message" in settled) {
+    return <Failure message={settled.message} />;
   }
 
-  const { entries, truncated } = current.listing;
+  const { entries, truncated } = settled.listing;
   if (entries.length === 0) {
     return <p className="px-4 pt-3 text-[13px] text-muted-foreground">压缩包内没有文件</p>;
   }

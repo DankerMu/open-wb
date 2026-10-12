@@ -509,25 +509,30 @@ describe("文件页的预览状态", () => {
     expect(document.querySelectorAll("audio, video")).toHaveLength(0);
   });
 
-  it("播放失败：video 触发 error 后显示「无法播放该文件」，下载链接仍在，页面不弹 Toast", async () => {
-    renderWorkspaceWith({
+  it("播放失败：video 触发 error 后显示「无法播放该文件」，下载链接仍在，页面不弹 Toast，不另发请求", async () => {
+    const { fetchMock } = renderWorkspaceWith({
       "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
     });
     const toasts = screen.getByRole("region", { name: "通知" });
 
     await select("clip.mp4");
-    fireEvent.error(await waitFor(() => mediaElement("video")));
+    const video = await waitFor(() => mediaElement("video"));
+    const requested = paths(fetchMock);
+    fireEvent.error(video);
 
     expect(previewRegion().getByText("无法播放该文件", { exact: true })).toBeTruthy();
     expect(mediaElements()).toStrictEqual([]);
     expectDownloadLink("clip.mp4");
+    // error 之后页面不为它另发任何请求（不探测状态码，也不问认证守卫）。
+    await yieldMacrotask();
+    expect(paths(fetchMock)).toStrictEqual(requested);
     // Toast 是通知区列表里的一项（类名 ui-toast，自身不带 role）。
     expect(within(toasts).queryByRole("listitem")).toBeNull();
     expect(document.querySelector(".ui-toast")).toBeNull();
     expect(previewRegion().queryByRole("alert")).toBeNull();
   });
 
-  it("刷新不重取也不重挂媒体：点「刷新」后还是同一个 video 元素，没有 file 请求；失败态在刷新与再点同一行之后都保留", async () => {
+  it("刷新与再点同一行都换一个新的媒体元素：src 不变、没有 file 请求；已显示的「无法播放该文件」在刷新与再点同一行之后各自清除，播放器回来", async () => {
     const { fetchMock } = renderWorkspaceWith({
       "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
     });
@@ -540,21 +545,95 @@ describe("文件页的预览状态", () => {
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(treeRequests()).toHaveLength(2));
     await yieldMacrotask();
-    expect(mediaElement("video")).toBe(video);
+    const refreshed = mediaElement("video");
+    expect(video).toBeInstanceOf(HTMLVideoElement);
+    expect(refreshed).toBeInstanceOf(HTMLVideoElement);
+    expect(refreshed).not.toBe(video);
+    expect(mediaAttributes(refreshed)).toStrictEqual({
+      controls: true,
+      preload: "metadata",
+      autoplay: false,
+      src: `${FILE}clip.mp4`,
+    });
+    expect(mediaElements()).toStrictEqual(["VIDEO"]);
     expect(previewRegion().queryByText("正在读取文件")).toBeNull();
 
-    fireEvent.error(video);
+    fireEvent.error(refreshed);
+    expect(previewRegion().getByText("无法播放该文件", { exact: true })).toBeTruthy();
+    expect(mediaElements()).toStrictEqual([]);
     fireEvent.click(screen.getByRole("button", { name: "刷新" }));
     await waitFor(() => expect(treeRequests()).toHaveLength(3));
     await yieldMacrotask();
-    expect(previewRegion().getByText("无法播放该文件", { exact: true })).toBeTruthy();
-    expect(mediaElements()).toStrictEqual([]);
+    expect(previewRegion().queryByText("无法播放该文件")).toBeNull();
+    const retried = mediaElement("video");
+    expect(retried).not.toBe(refreshed);
+    expect(retried.getAttribute("src")).toBe(`${FILE}clip.mp4`);
 
-    // 再点一次同一行也一样：地址没变，预览体不重挂。
+    // 再点一次同一行也一样：失败态清掉，换一个新元素；没在失败态时同样换。
+    fireEvent.error(retried);
+    expect(previewRegion().getByText("无法播放该文件", { exact: true })).toBeTruthy();
     await select("clip.mp4");
     await yieldMacrotask();
+    expect(previewRegion().queryByText("无法播放该文件")).toBeNull();
+    const clicked = mediaElement("video");
+    expect(clicked).not.toBe(retried);
+    await select("clip.mp4");
+    await yieldMacrotask();
+    expect(mediaElement("video")).not.toBe(clicked);
+    expect(mediaElement("video").getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    expect(mediaElements()).toStrictEqual(["VIDEO"]);
+    expect(previewRegion().queryByText("正在读取文件")).toBeNull();
+    expect(fileRequests(fetchMock)).toStrictEqual([]);
+  });
+
+  it("刷新总是重取：clip.mp4 触发 error 后点「刷新」换成新的 video、文案消失、没有 file 请求；归档.zip 的第二次 archive 应答挂起时旧列表仍在且其后是「正在读取文件」，应答到达后换成新列表、状态行消失", async () => {
+    const second = deferredResponse();
+    const listings = [archiveListing("旧.txt")(), second.promise];
+    const { fetchMock } = renderWorkspaceWith(
+      {
+        "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
+        "归档.zip": { size: 2048, route: new Error("归档.zip must not be fetched") },
+      },
+      false,
+      {
+        [`${ARCHIVE}%E5%BD%92%E6%A1%A3.zip`]: () => listings.shift() ?? new Error("第三次 archive"),
+      },
+    );
+
+    await select("clip.mp4");
+    const video = await waitFor(() => mediaElement("video"));
+    fireEvent.error(video);
     expect(previewRegion().getByText("无法播放该文件", { exact: true })).toBeTruthy();
-    expect(mediaElements()).toStrictEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(mediaElement("video")).not.toBe(video));
+    expect(previewRegion().queryByText("无法播放该文件")).toBeNull();
+    expect(mediaElement("video").getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    expect(fileRequests(fetchMock)).toStrictEqual([]);
+
+    await select("归档.zip");
+    expect(await previewRegion().findByRole("cell", { name: "旧.txt" })).toBeTruthy();
+    expect(archiveRequests(fetchMock)).toStrictEqual([`${ARCHIVE}%E5%BD%92%E6%A1%A3.zip`]);
+    expect(previewRegion().queryByRole("status")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(archiveRequests(fetchMock)).toHaveLength(2));
+    await yieldMacrotask();
+    expect(archiveRequests(fetchMock)).toStrictEqual([
+      `${ARCHIVE}%E5%BD%92%E6%A1%A3.zip`,
+      `${ARCHIVE}%E5%BD%92%E6%A1%A3.zip`,
+    ]);
+    const table = previewRegion().getByRole("table", { name: "压缩包成员" });
+    expect(within(table).getByRole("cell", { name: "旧.txt" })).toBeTruthy();
+    const status = previewRegion().getByRole("status");
+    expect(status.textContent).toBe("正在读取文件");
+    expect(table.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    second.resolve(archiveListing("新-1.txt", "新-2.txt")());
+    expect(await previewRegion().findByRole("cell", { name: "新-1.txt" })).toBeTruthy();
+    expect(previewRegion().queryByRole("cell", { name: "旧.txt" })).toBeNull();
+    expect(previewRegion().getByText("共 2 项", { exact: true })).toBeTruthy();
+    expect(previewRegion().queryByRole("status")).toBeNull();
+    expect(archiveRequests(fetchMock)).toHaveLength(2);
     expect(fileRequests(fetchMock)).toStrictEqual([]);
   });
 

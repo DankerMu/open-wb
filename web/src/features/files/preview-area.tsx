@@ -53,13 +53,14 @@ export function withFetched(current: PreviewState | null, fetched: FetchedPrevie
 }
 
 /**
- * 选中即有、不发 `file` 请求的预览；`null` 表示这个文件照常请求。音视频：把文件自己的地址 `url`
- * 交给媒体元素，由浏览器去取。压缩包：把 `listArchive`（对这个文件的一次成员列表请求）交给压缩包
- * 预览器，由它在挂上之后调用。
- * 网页：默认是渲染视图，由预览器把隔离预览来源的地址交给框，页面不为它发 `file` 请求。`previous`
- * 是同一路径上一次的预览（换了文件为 `null`，视图因此回到渲染）：再次选中或刷新时，渲染视图
- * `reload` 加一并丢掉取过的源码（下次看源码重新取）；源码视图返回 `null`，照常请求一次，结局由
- * `withFetched` 收进 `source`。
+ * 选中即有、不发 `file` 请求的预览；`null` 表示这个文件照常请求。`previous` 是同一路径上一次的
+ * 预览（换了文件为 `null`）。
+ * 音视频：把文件自己的地址 `url` 交给媒体元素，由浏览器去取；再次选中或刷新时 `reload` 加一，
+ * 预览面板据此换一个新的媒体元素（地址不变）。压缩包：把 `listArchive`（对这个文件的一次成员列表
+ * 请求）交给压缩包预览器，由它在挂上之后调用。
+ * 网页：默认是渲染视图，由预览器把隔离预览来源的地址交给框，页面不为它发 `file` 请求。换了文件
+ * 视图回到渲染；再次选中或刷新时，渲染视图 `reload` 加一并丢掉取过的源码（下次看源码重新取）；
+ * 源码视图返回 `null`，照常请求一次，结局由 `withFetched` 收进 `source`。
  */
 export function immediatePreview(
   entry: TreeEntry,
@@ -80,9 +81,13 @@ export function immediatePreview(
     return { status: "archive", load: listArchive };
   }
   if (kind === "audio" || kind === "video") {
+    const reload =
+      previous?.status === "success" && previous.data.kind === "media"
+        ? previous.data.reload + 1
+        : 0;
     return {
       status: "success",
-      data: { kind: "media", url, size: entry.size, truncated: false },
+      data: { kind: "media", url, reload, size: entry.size, truncated: false },
     };
   }
 
