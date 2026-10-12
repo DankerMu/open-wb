@@ -50,17 +50,39 @@ type SidebarTarget = {
  * - 随助手的改动刷新（workspace-sidebar「随助手改动刷新」）：`useAssistantRefresh` 拿 `view` 与浏览器
  *   的句柄去调它的 `refresh`。树区折叠、`只看本会话改动` 打开时照常调：前者预览仍可见；后者浏览器
  *   自己不发 `tree`、只重取预览，关掉开关后期间没重列的层不补（读代码推出，没有测试）。
+ * - 从卡片定位（workspace-sidebar「从卡片定位到文件」）：`located` 是 `useWorkspaceSidebar().reveal` 记下
+ *   的那一次。挂载时有它，当前文件的初值就是它的路径；挂着时来了新的一次（`seq` 变了）在渲染期把当前
+ *   文件换成它的路径。走的是浏览器的 `path` 属性而不是句柄的 `reveal`：点击时侧边栏可能还没挂载
+ *   （没有句柄可调），而 `path` 一变浏览器就顶掉进行中的定位（最后一次为准），没落在文件上时也由它
+ *   显示文案。`只看本会话改动` 不动。两处代价：
+ *   - 同一路径再点一次、期间当前文件没被别的操作换掉时，`path` 没变，浏览器什么都不做。上一次没落
+ *     在文件上（文件不存在；过滤开着而父目录未加载）之后再点同一行即是如此（实测，Chromium，改写
+ *     历史快照造出嵌套路径：过滤开着点一次、关掉过滤再点一次，选中不变、没有请求；没有自动化测试）。
+ *   - 没落在文件上时这里的 `path` 仍是被定位的那个路径，`在文件页打开` 的地址带着它，尽管树里选中
+ *     的不是它或没有选中（实测，Chromium：文件已删除之后，以及上面过滤开着的那一次；没有自动化测试）。
+ *   宽窄屏互换时这个组件重挂，会重新套用最近一次还没被丢弃的 `located`（读代码推出，没有测试；规格
+ *   没有写这种情况）。
  */
 function SidebarContent({
   client,
   closeRef,
+  located,
   onClose,
   view,
   workspace,
   workspaceId,
-}: SidebarTarget & { closeRef?: Ref<HTMLButtonElement>; onClose(): void }) {
+}: SidebarTarget & {
+  closeRef?: Ref<HTMLButtonElement>;
+  located: { path: string; seq: number } | null;
+  onClose(): void;
+}) {
   const account = useAuth().principal?.account;
-  const [path, setPath] = useState<string | null>(null);
+  const [path, setPath] = useState<string | null>(located?.path ?? null);
+  const [appliedSeq, setAppliedSeq] = useState(located?.seq);
+  if (located !== null && located.seq !== appliedSeq) {
+    setAppliedSeq(located.seq);
+    setPath(located.path);
+  }
   const [onlyChanges, setOnlyChanges] = useState(false);
   const [treeCollapsed, setTreeCollapsed] = useState(false);
   const changes = useMemo(
@@ -168,9 +190,11 @@ type WorkspaceSplitProps = {
  *   栏，随外壳侧栏的宽度过渡长宽后两栏各自回到最小宽度以上（实测，Chromium：`make ui-walk` 的 800
  *   一档）。不判断的那些时刻（开着缩窄窗口、用户自己展开外壳侧栏等）两栏会低于最小宽度、分隔线
  *   拖不动（实测，Chromium：1200 打开后缩到 800 为 292 / 219，方向键不动）。头部 `关闭` 之后焦点回到
- *   打开它的按钮。
- * - 窄屏：全屏模态层，没有分隔线；打开时焦点进 `关闭`，Escape 与 `关闭` 关闭后焦点同样归还。屏上有
- *   Toast 时 Radix 收不到 Escape，由 `useEscapeFallback` 兜底。
+ *   顶栏的那个按钮——由卡片的 `查看详情` 打开的也是（规格「宽屏下关闭后焦点回到顶栏的
+ *   `工作空间侧边栏` 按钮」）；定位本身不动焦点，它留在被点的按钮上。
+ * - 窄屏：全屏模态层，没有分隔线；打开时焦点进 `关闭`，Escape 与 `关闭` 关闭后焦点还给打开它的那个
+ *   控件：顶栏按钮，或被点的 `查看详情`（`restoreFocus(true)`）。屏上有 Toast 时 Radix 收不到
+ *   Escape，由 `useEscapeFallback` 兜底。
  * - 拷入层的分栏在挂载时无条件 `new ResizeObserver`；没有它的运行环境退回普通的横向 flex，没有分隔线。
  */
 export function WorkspaceSplit({ children, sidebar, target }: WorkspaceSplitProps) {
@@ -190,6 +214,7 @@ export function WorkspaceSplit({ children, sidebar, target }: WorkspaceSplitProp
         <SidebarContent
           {...target}
           key={key}
+          located={sidebar.located}
           onClose={() => {
             sidebar.close();
             sidebar.restoreFocus();
@@ -253,7 +278,7 @@ export function WorkspaceSplit({ children, sidebar, target }: WorkspaceSplitProp
           className="gap-0 data-[side=right]:w-full data-[side=right]:max-w-none data-[side=right]:border-l-0 data-[side=right]:sm:max-w-none"
           onCloseAutoFocus={(event) => {
             event.preventDefault();
-            sidebar.restoreFocus();
+            sidebar.restoreFocus(true);
           }}
           onEscapeKeyDown={fallback.onEscapeKeyDown}
           onKeyDown={fallback.onKeyDown}
@@ -266,7 +291,13 @@ export function WorkspaceSplit({ children, sidebar, target }: WorkspaceSplitProp
         >
           <SheetTitle className="sr-only">{NAME}</SheetTitle>
           {target !== null && narrow ? (
-            <SidebarContent {...target} closeRef={closeRef} key={key} onClose={sidebar.close} />
+            <SidebarContent
+              {...target}
+              closeRef={closeRef}
+              key={key}
+              located={sidebar.located}
+              onClose={sidebar.close}
+            />
           ) : null}
         </SheetContent>
       </Sheet>

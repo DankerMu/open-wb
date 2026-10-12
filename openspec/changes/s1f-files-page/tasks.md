@@ -636,9 +636,10 @@ Minimal mergeable slice: 24.1–24.2（标记与过滤，纯派生）先合；24
 
 ## 25. turn-artifacts — 卡片动作定位到侧边栏；移除网页预览对话框
 
-- [ ] 25.1 `file-changes-card.tsx`：`查看详情` 改为调用侧边栏的 `reveal(path)`（经 `page.tsx` 下发的回调，不从卡片里导入页面状态）；渲染条件改为会话 `workspaceId` 非 null——空间不在列表里、列表读取失败与临时空间会话都照常渲染，名字用相对路径（turn-artifacts「文件变更卡」的场景「空间不可解析」「临时空间会话的文件变更卡」）；去掉原来到 `/files?ws=` 的导航。
+- [x] 25.1 `file-changes-card.tsx`：`查看详情` 改为调用侧边栏的 `reveal(path)`（经 `page.tsx` 下发的回调，不从卡片里导入页面状态）；渲染条件改为会话 `workspaceId` 非 null——空间不在列表里、列表读取失败与临时空间会话都照常渲染，名字用相对路径（turn-artifacts「文件变更卡」的场景「空间不可解析」「临时空间会话的文件变更卡」）；去掉原来到 `/files?ws=` 的导航。
+  实施注记见 `implementation-notes.md`「25.1、25.3，含分摊的 25.4 / 25.5 / 25.6 / 25.7 条款（#1109）」。
 - [ ] 25.2 `artifact-card.tsx`：html 的 `打开网页预览` 改为 `reveal(path, {view:"rendered"})`；删除 `PreviewDialog` 与它的 `fetchPreview` 调用、截断提示分支；图片 `下载` 改为 `<a href={downloadUrl(workspaceId, path)} download>`（与预览头同一实现，owner D-19），删除图片的 `fetchPreview` 调用、Blob 地址的创建与撤销及其就地失败分支；代码 `复制代码` 不动。产物卡是否渲染沿用 C 的「空间可解析」判定，不改。
-- [ ] 25.3 定位的竞态与焦点（workspace-sidebar「从卡片定位到文件」）：最后一次为准；宽屏焦点留在按钮；窄屏进 `关闭`、关闭后回到按钮且线程不滚动。
+- [x] 25.3 定位的竞态与焦点（workspace-sidebar「从卡片定位到文件」）：最后一次为准；宽屏焦点留在按钮；窄屏进 `关闭`、关闭后回到按钮且线程不滚动。
 - [ ] 25.4 测试：`web/test/chat-page-file-changes.test.tsx`、`chat-page-artifact-card.test.tsx`、`chat-page-artifact-card-feedback.test.tsx`、`chat-page-artifact-card-state.test.tsx` 与两个 support（`chat-page-artifact-card-support.tsx`、`chat-page-file-changes-support.tsx`）随条文改写（turn-artifacts「产物卡」的「html 预览隔离」「图片下载与代码复制」「拉取中与卸载」「临时空间会话照常渲染产物卡」的新形态；删除对话框、`srcdoc` 与图片 Blob 下载的用例，图片 413 的就地文案用例随之删除并记入偏离记录）；新文件 `web/test/chat-workspace-sidebar-reveal.test.tsx` 覆盖「从卡片定位到文件」五个场景。
   写作时 `grep -rnE 'PreviewDialog|打开网页预览|srcdoc|网页预览|查看详情|files\?ws=' web/test web/e2e` 的命中按刀归位（面板的四个文件已在 23.3 删除；开工时重跑，结果记入偏离记录）：
   - 随 25.1（文件变更卡）：`chat-page-file-changes.test.tsx:468-525`（C9/G5 断言 `查看详情` 导航到 `/files?ws=<id>`）改为「URL 不变、侧边栏打开并选中该文件」；`:590-624`（C11/G4 与 C11 断言空间不可解析、列表读取失败时**没有** `查看详情`）按改写后的 turn-artifacts「文件变更卡」场景「空间不可解析」改为：`workspaceId` 非 null 的情形每行仍有 `查看详情 <相对路径>`，只有 `workspaceId` 为 null 的情形没有（用例标题里的 `without 查看详情` 同改）；

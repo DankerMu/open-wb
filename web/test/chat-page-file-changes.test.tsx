@@ -49,8 +49,8 @@ import {
   write,
 } from "./chat-page-file-changes-support.js";
 import { cleanupChatPage, expandToolGroups } from "./chat-page-support.js";
-import { assistantSteps, deferred, historyUser } from "./chat-stream-support.js";
-import { calls, currentLocation, jsonResponse } from "./support.js";
+import { assistantSteps, deferred, historyUser, SESSION_ID } from "./chat-stream-support.js";
+import { calls, currentLocation, jsonResponse, textPreviewResponse } from "./support.js";
 
 type StepView = ChatState["messages"][number]["steps"][number];
 
@@ -465,14 +465,17 @@ describe("文件变更 card on the chat page", () => {
     expect(rowTexts(cardNamed("文件变更（1 个）"))).toEqual(["写入zhangsan/proj/out/index.html"]);
   });
 
-  it("C9/G5 lists logical paths in the card only, never the absolute root, and 查看详情 opens the workspace in /files", async () => {
+  it("C9/G5 lists logical paths in the card only, never the absolute root, and 查看详情 opens the workspace sidebar on that file without leaving the session", async () => {
     const steps = [
       toolStep(11, 0, "edit", [edit("src/app.ts", 2, 1)]),
       toolStep(12, 1, "write", [write("out/index.html")]),
     ];
     const tree = `${WORKSPACES}/${PROJ.id}/tree?path=`;
+    const entry = (name: string, type: string) => ({ name, type, size: 4, mtime: 100 });
     const page = await openSession(turn("done", { content: "改好了", steps }), listed, {
-      [tree]: () => jsonResponse({ path: "", entries: [] }),
+      [tree]: () => jsonResponse({ path: "", entries: [entry("src", "dir")] }),
+      [`${tree}src`]: () => jsonResponse({ path: "src", entries: [entry("app.ts", "file")] }),
+      [`${WORKSPACES}/${PROJ.id}/file?path=src%2Fapp.ts`]: () => textPreviewResponse("app"),
     });
 
     const card = cardNamed("文件变更（2 个）");
@@ -517,13 +520,15 @@ describe("文件变更 card on the chat page", () => {
 
     fireEvent.click(open);
 
-    await waitFor(() => expect(currentLocation()).toBe(`/files?ws=${PROJ.id}`));
-    await screen.findByRole("navigation", { name: "工作空间目录树" });
+    const sidebar = await screen.findByRole("complementary", { name: "工作空间侧边栏" });
+    const row = await within(sidebar).findByRole("button", { name: "app.ts" });
+    await waitFor(() => expect(row.getAttribute("aria-current")).toBe("true"));
     await quiesce();
     const { pathname, search } = page.router.state.location;
-    expect(`${pathname}${search}`).toBe(`/files?ws=${PROJ.id}`);
-    expect(currentLocation()).toBe(`/files?ws=${PROJ.id}`);
-    expect(calls(page.fetchMock, tree)).not.toHaveLength(0);
+    expect(`${pathname}${search}`).toBe(`/?session=${SESSION_ID}`);
+    expect(currentLocation()).toBe(`/?session=${SESSION_ID}`);
+    expect(calls(page.fetchMock, tree)).toHaveLength(1);
+    expect(calls(page.fetchMock, `${tree}src`)).toHaveLength(1);
   });
 
   it("C10 collapses one path changed by two steps into the later step's counts", async () => {
@@ -572,46 +577,49 @@ describe("文件变更 card on the chat page", () => {
       workspaceId,
     );
 
-  function expectRelativeRows() {
+  /** The single row shows the workspace-relative path; `details` is the name of each 查看详情. */
+  function expectRelativeRows(details: string[]) {
     expect(rowTexts(cardNamed("文件变更（1 个）"))).toEqual(["+2-1src/app.ts"]);
     expect(document.querySelector('[data-slot="file-change-path"]')?.textContent).toBe(
       "src/app.ts",
     );
-    expect(detailButtons()).toEqual([]);
+    expect(detailButtons().map((button) => button.getAttribute("aria-label"))).toEqual(details);
+    expect(detailButtons().map((button) => button.getAttribute("title"))).toEqual(details);
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
   }
 
-  const unresolved: Array<[string, string | null]> = [
-    ["the bound workspace is not listed", UNLISTED_ID],
-    ["the session has no workspace", null],
+  const RELATIVE = ["查看详情 src/app.ts"];
+  const unresolved: Array<[string, string, string | null, string[]]> = [
+    ["with 查看详情", "the bound workspace is not listed", UNLISTED_ID, RELATIVE],
+    ["without 查看详情", "the session has no workspace", null, []],
   ];
 
   it.each(unresolved)(
-    "C11/G4 shows the relative path without 查看详情 when %s, with the list installed",
-    async (_name, workspaceId) => {
+    "C11/G4 shows the relative path %s when %s, with the list installed",
+    async (_expected, _name, workspaceId, details) => {
       const snapshot = changed(workspaceId);
       await openSession(snapshot, listed, withNeighbour(snapshot));
 
       expect(listedGroup()?.textContent).toContain("邻居会话");
-      expectRelativeRows();
+      expectRelativeRows(details);
     },
   );
 
-  it("C11 shows the relative path without 查看详情 when the workspace list fails", async () => {
+  it("C11 shows the relative path with 查看详情 when the workspace list fails", async () => {
     await openSession(changed(PROJ.id), () =>
       jsonResponse({ error: { code: "internal", message: "工作空间不可用" } }, 500),
     );
 
-    expectRelativeRows();
+    expectRelativeRows(RELATIVE);
   });
 
-  it("C11/G4 shows the relative path while the workspace list loads, then the logical path and still no root", async () => {
+  it("C11/G4 shows the relative path with 查看详情 while the workspace list loads, then the logical path and still no root", async () => {
     const gate = deferred<void>();
     const snapshot = changed(PROJ.id);
     await openSession(snapshot, () => gate.promise.then(listed), withNeighbour(snapshot));
 
     expect(listedGroup()).toBeNull();
-    expectRelativeRows();
+    expectRelativeRows(RELATIVE);
 
     gate.resolve();
     await quiesce();
