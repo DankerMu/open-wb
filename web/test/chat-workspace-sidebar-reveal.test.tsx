@@ -1,13 +1,14 @@
 /**
  * Issue #1109 文件变更卡的 `查看详情`（tasks 25.1、25.3，分摊的 25.4）：workspace-sidebar「从卡片定位到
  * 文件」的场景「查看详情定位」「最后一次为准」「窄屏的焦点往返」「文件已不存在」，以及同一条需求里
- * 「开关开着时」的两个分支、换会话与关闭后重开。场景「打开网页预览」属产物卡（#1110），不在这里。
+ * 「开关开着时」的三个分支、换会话与关闭后重开。场景「打开网页预览」属产物卡（#1110），不在这里。
  * 接缝：真实外壳里的整页（桩掉的 `fetch` 与事件连接）；请求取自 `fetch` 桩的调用记录。期望值是规格里
  * 的字面量。
  *
  * jsdom 没有布局，`focus()` 也不滚动：「消息线程不滚动」在这里证到归还焦点时只带 `preventScroll`、
- * 没有对该按钮调 `scrollIntoView`、线程的 `scrollTop` 仍在底部且继续跟随；真实的滚动只在
- * `make ui-walk` 的 `mobile-dark` 里看得到。
+ * 没有对该按钮调 `scrollIntoView`、线程的 `scrollTop` 仍在底部且继续跟随。`make ui-walk` 的
+ * `mobile-dark` 里卡片在视口内，去掉 `preventScroll` 不使走查变红（#1109 实测，见
+ * `web/e2e/ui-walk-workspace-sidebar.ts` 的注释）；真实的滚动由一次钩子辅助复现证明过。
  */
 import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -49,6 +50,7 @@ import {
   fileOf,
   listing,
   NAME,
+  OPEN_IN_FILES,
   openSidebar,
   rowNames,
   selectSession,
@@ -207,6 +209,32 @@ describe("查看详情定位", () => {
     await settled();
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT, SRC, DEEP]);
     expect(sidebarRegion()).toBe(region);
+  });
+
+  it("R13 定位落地之后点树里的 readme.md：选中的只有它、预览是它的正文，在文件页打开 的地址带的是它，全部落定之后仍是如此（定位只套用一次）", async () => {
+    const { fetchMock } = await openPage(changedTurn(edit(APP, 2, 1)), project());
+    const { region } = await reveal(APP);
+    await selected(region, "app.ts");
+    await previewShows(region, APP_SOURCE);
+
+    fireEvent.click(button(region, "readme.md"));
+
+    await selected(region, "readme.md");
+    await previewShows(region, README_TEXT);
+    expect(selectedRows(region)).toStrictEqual(["readme.md"]);
+    await settled();
+    expect(selectedRows(region)).toStrictEqual(["readme.md"]);
+    expect(preview(region).textContent).toContain(README_TEXT);
+    expect(preview(region).textContent).not.toContain(APP_SOURCE);
+    // 树的选中在浏览器自己的状态里；侧边栏这一侧的「当前文件」只从这个地址看得出来。
+    const link = within(region).getByRole<HTMLAnchorElement>("link", { name: OPEN_IN_FILES });
+    expect(`${new URL(link.href).pathname}${new URL(link.href).search}`).toBe(
+      `/files?ws=${PROJ.id}&path=readme.md`,
+    );
+    expect(fileRequests(fetchMock)).toStrictEqual([
+      fileOf(PROJ.id, APP),
+      fileOf(PROJ.id, "readme.md"),
+    ]);
   });
 });
 
@@ -567,6 +595,42 @@ describe("只看本会话改动 开着时定位", () => {
     // 关掉开关：原来选中的 readme.md 仍是选中的，定位没有留下别的选中。
     fireEvent.click(button(region, ONLY));
     expect(selectedRows(region)).toStrictEqual(["readme.md"]);
+  });
+
+  it("R6 父目录已加载而列表里没有它：与开关关着时相同，原选中被清掉，预览区是 文件不存在，开关仍是开的，不请求 tree 也不请求它的 file", async () => {
+    const { fetchMock } = await openPage(
+      changedTurn(write("out/gone.md")),
+      project({
+        [ROOT]: listing("", [dir("out"), file("readme.md")]),
+        [OUT]: listing("out", [file("b.md")]),
+      }),
+    );
+    const { region } = await openSidebar("readme.md");
+    fireEvent.click(button(region, "展开 out"));
+    await within(region).findByRole("button", { name: "b.md" });
+    fireEvent.click(button(region, "readme.md"));
+    await previewShows(region, README_TEXT);
+    fireEvent.click(button(region, ONLY));
+    expect(button(region, ONLY).getAttribute("aria-pressed")).toBe("true");
+    await settled();
+    expect(selectedRows(region)).toStrictEqual([]);
+    expect(preview(region).textContent).toContain(README_TEXT);
+    expect(treeRequests(fetchMock)).toStrictEqual([ROOT, OUT]);
+
+    clickDetail("out/gone.md");
+
+    expect(await within(preview(region)).findByText(MISSING, { exact: true })).toBeTruthy();
+    await settled();
+    expect(preview(region).textContent).not.toContain(README_TEXT);
+    expect(selectedRows(region)).toStrictEqual([]);
+    expect(button(region, ONLY).getAttribute("aria-pressed")).toBe("true");
+    expect(treeRequests(fetchMock)).toStrictEqual([ROOT, OUT]);
+    expect(fileRequests(fetchMock)).toStrictEqual([fileOf(PROJ.id, "readme.md")]);
+
+    // 关掉开关：先前选中的 readme.md 不再是选中的。
+    fireEvent.click(button(region, ONLY));
+    expect(button(region, ONLY).getAttribute("aria-pressed")).toBe("false");
+    expect(selectedRows(region)).toStrictEqual([]);
   });
 });
 
