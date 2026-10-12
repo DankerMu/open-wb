@@ -746,3 +746,4 @@
 - 变异：头部再放一个 `刷新` → 既有 L3 红；加 `新建工作空间` 入口 → C7 红。
 - 变异：临时空间也渲染 `在文件页打开` → C8 与既有 L2 红。
 - 变异：折叠后预览是否真的占满、`hidden` 是否真的隐藏 → jsdom 不可观察，由 CH-101 覆盖，写「未做自动化」。
+- 实现后更正（2026-10-12，据实现者报告）：① `hidden` 属性对带 `flex` 类的树栏有效（实测，Chromium 151 + 构建产物样式表：`display: none`；Tailwind preflight 的 `[hidden]` 带 `!important`），用属性、没换类。② 「只聚合最后一条助手消息 → C1 红」不成立：规格场景里第二条消息同样改了 `src/app.ts`，集合相同；改由 C2 钉住（`deep/x.md` 只放第一条消息）。③ 「过滤改逐个 `reveal` → C2 计数红」实际红在更早的「树恰为三支」，`deep` 是否被请求没有单独验证。④ 空集文案放在组件外的小函数 `emptyNote`（行内三元使 `WorkspaceBrowser` 认知复杂度到 19）；`onlyPathsEmpty` 为空串按没给处理（规格未写）。⑤ 两个新属性的用例在新文件 `workspace-browser-sidebar-props.test.tsx`；`chat-workspace-sidebar-support.tsx` 的 `dir` 改为导出。⑥ jsdom 里侧边栏内的 Radix 菜单用不带坐标的 `pressPointer` 打不开（分栏库对命中分隔线的 `pointerdown` 调 `preventDefault`——读源码得出），C7 给了离开原点的坐标；后续在侧边栏里开菜单的测试同此。⑦ CH-101 在假上游下不能照字面走（假上游只写根下一个固定文件）；真实浏览器走法拆成两个会话，带 `out` 目录的部分只有 jsdom 用例覆盖。⑧ 最小宽度 240 时头部不溢出但空间名一栏只剩约 19 宽（实测），未处理，交 owner。
