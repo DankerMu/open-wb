@@ -128,9 +128,7 @@ describe("workspace page route integration", () => {
     await screen.findByRole("button", { name: "展开 out" });
     const tree = screen.getByRole("navigation", { name: "工作空间目录树" });
     expect(
-      within(tree)
-        .getAllByRole("button")
-        .map((button) => button.querySelector('[data-slot="tree-name"]')?.textContent),
+      [...tree.querySelectorAll('[data-slot="tree-name"]')].map((name) => name.textContent),
     ).toEqual(["设计文档", "out", "in", "readme.md", "notes.csv", "logo.png", "archive.zip"]);
     fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
     await collapseAndExpand("out");

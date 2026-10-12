@@ -28,6 +28,9 @@
  *   first unloaded level) and for mounting. `新建` is disabled while it is set: the re-listing after
  *   creating a folder would go through the same gate. Dropping it requests the root if that was
  *   never loaded and replays nothing else.
+ * - Entry operations: the row menu, its dialog and the request are `useEntryOperations`
+ *   (`entry-ops.tsx`); after a rename `followEntry` moves the listings, the expanded set and the
+ *   selection to the new path without walking again. No row menu while `onlyPaths` is set.
  */
 import {
   type ReactNode,
@@ -44,13 +47,17 @@ import {
   type DirectoryCache,
   loadedDirectoryPaths,
   markedRows,
+  movedCache,
+  movedPath,
   normalizedPath,
+  parentPath,
   refreshLayers,
   revealStep,
   subtreeOf,
 } from "./browser-paths.js";
 import { type BrowserLayout, STATUS_TEXT, WorkspaceColumns } from "./columns.js";
 import { DirectoryDialog } from "./dialogs.js";
+import { abandonRequests, useEntryOperations } from "./entry-ops.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
@@ -497,7 +504,7 @@ export function WorkspaceBrowser({
    */
   const openDirectory = useCallback(
     (path: string, rows: readonly string[]) => {
-      if (!rows.includes(path.slice(0, Math.max(0, path.lastIndexOf("/"))))) {
+      if (!rows.includes(parentPath(path))) {
         return;
       }
 
@@ -586,6 +593,48 @@ export function WorkspaceBrowser({
     [directoryErrors, loadDirectory, selectFile],
   );
 
+  /**
+   * `from` 已被改名为 `to`，界面跟过去而不重新逐级展开。次序：放弃 `from` 之下在途的目录请求；列表
+   * 缓存、展开集合、目录的失败文案与进行中的定位换到新路径；当前文件在 `from` 之下时在新路径重新选中
+   * 一次（一次 `file` 请求——改名可以换掉预览的类别）并上报：上报回来的 `path` 与选中相同，不另起
+   * 定位（选中在前、上报在后，不依赖宿主何时把 `path` 送回来）；重新列出 `to` 的父目录；已展开而
+   * 没有列表的新路径补一次请求。
+   */
+  const followEntry = useCallback(
+    (from: string, to: string) => {
+      const moved = (path: string) => movedPath(path, from, to);
+      abandonRequests(directoryRequestsRef.current, from);
+      setLoadingPaths((current) => new Set([...current].filter((path) => moved(path) === path)));
+      cacheRef.current = movedCache(cacheRef.current, from, to);
+      setDirectories(cacheRef.current);
+      expandedPathsRef.current = new Set([...expandedPathsRef.current].map(moved));
+      setExpandedPaths(expandedPathsRef.current);
+      setDirectoryErrors((current) =>
+        Object.fromEntries(Object.entries(current).map(([path, text]) => [moved(path), text])),
+      );
+      failedDirectoriesRef.current = new Map(
+        [...failedDirectoriesRef.current].map(([path, text]) => [moved(path), text]),
+      );
+      if (revealRef.current) {
+        revealRef.current.path = moved(revealRef.current.path);
+      }
+      const selected = selectedFileRef.current;
+      const next = selected ? moved(selected.path) : null;
+      if (selected && next !== null && next !== selected.path) {
+        selectFile({ ...selected.entry, name: next.slice(next.lastIndexOf("/") + 1) }, next);
+        onPathChange(next);
+      }
+      loadDirectory(parentPath(to), true);
+      for (const path of expandedPathsRef.current) {
+        if (movedPath(path, to, null) === null) {
+          loadDirectory(path);
+        }
+      }
+    },
+    [loadDirectory, onPathChange, selectFile],
+  );
+  const operations = useEntryOperations(client, workspaceId, followEntry);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -615,9 +664,12 @@ export function WorkspaceBrowser({
         directory={
           emptyNote(onlyPaths, onlyPathsEmpty) ?? (
             <DirectoryTree
+              // `onlyPaths` 下没有行菜单：不列目录，改名之后既不能重列也跟不过去。
+              actions={subtree ? undefined : operations.actions}
               cache={subtree ? subtree.tree : directories}
               errors={subtree ? NO_ERRORS : directoryErrors}
               expandedPaths={subtree ? subtree.expandedPaths : expandedPaths}
+              focusMenuPath={operations.focusMenuPath}
               loadingPaths={subtree ? NO_PATHS : loadingPaths}
               marks={marks}
               onSelectFile={chooseFile}
@@ -658,6 +710,7 @@ export function WorkspaceBrowser({
           workspaceName={name}
         />
       ) : null}
+      {operations.dialog}
     </>
   );
 }
