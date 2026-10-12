@@ -173,8 +173,13 @@ export function tabStops() {
  * 在聚焦着的原生 `button` 上按一次 `key`（`Enter` 或空格）。jsdom 不做「键盘激活按钮」这一步——那是
  * 浏览器的缺省动作，不是 DOM 事件自带的——这里照浏览器补上：Enter 在 `keydown` 之后点击，空格在
  * `keyup` 之后点击；处理器拦了缺省动作就不点。发的是键盘事件，点击只由它们引出。
+ * 只有原生的 `<button type="button">` 才有这个缺省动作：换成 `<div role="button">` 浏览器就不点了，
+ * 所以不是它即抛错。
  */
 export function pressKey(button: HTMLElement, key: "Enter" | " ") {
+  if (!(button instanceof HTMLButtonElement) || button.type !== "button") {
+    throw new Error('expected a native <button type="button">');
+  }
   if (document.activeElement !== button) throw new Error("expected the button to have focus");
   const down = fireEvent.keyDown(button, { key });
   if (key === "Enter" && down) fireEvent.click(button);

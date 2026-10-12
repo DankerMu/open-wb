@@ -448,6 +448,11 @@ describe("拖拽：不是从本树拖起的拖动", () => {
     expect(hoverOver(target, files)).toBe(false);
     expect(highlighted()).toStrictEqual([]);
     fireEvent.drop(target, { dataTransfer: files });
+    // 被拒绝的放下也结束了这次拖动：没有 dragend、没有新的 dragstart，带着原路径的同类型数据不再被接受。
+    const stale = dragTransfer();
+    stale.setData(ENTRY_DRAG, "a.md");
+    expect(hoverOver(target, stale)).toBe(false);
+    expect(highlighted()).toStrictEqual([]);
 
     fireEvent.dragStart(source, { dataTransfer: dragTransfer() });
     const other = dragTransfer();
