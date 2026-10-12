@@ -1,15 +1,18 @@
 /**
  * Issue #1107 侧边栏随助手的改动刷新（tasks 24.3，分摊的 24.4）：workspace-sidebar「随助手改动刷新」的
- * 四个场景。接缝：真实外壳里的整页（桩掉的 `fetch` 与事件连接），事件经假的事件连接推入；请求取自
- * `fetch` 桩的调用记录。期望值是规格里的字面量（哪几层各请求一次、300 毫秒）。
+ * 四个场景与它们的邻近分支。接缝：真实外壳里的整页（桩掉的 `fetch` 与事件连接），事件经假的事件连接
+ * 推入；请求取自 `fetch` 桩的调用记录。期望值是规格里的字面量（哪几层各请求一次、300 毫秒）。R6 例外，
+ * 直接渲染 `useAssistantRefresh`：整页里同一次挂载期间视图不会回到 `null`。
  *
  * 定时器：打开侧边栏、展开目录、选文件与 `goLive()` 都在真定时器下做完（它们的等待走 `setTimeout`），
  * 之后才换成假的 `setTimeout` / `clearTimeout`；其后只用同步的 `send(...)` 与 `advance(n)`，断言同步。
  * R2、R5 不看时间边界，用真定时器加 `waitFor`。
  */
 import "./radix-platform.js";
-import { act, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, renderHook, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { type ChatState, chatStateFromSnapshot } from "../src/features/chat/stream.js";
+import { useAssistantRefresh } from "../src/features/chat/use-workspace-sidebar.js";
 import { goLive, PROJ, toolStep, turn, write } from "./chat-page-file-changes-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
 import { cleanupSessionMeta } from "./chat-page-session-meta-support.js";
@@ -115,7 +118,7 @@ async function reopen() {
 }
 
 describe("随助手改动刷新", () => {
-  it("R1 步骤结束触发局部刷新：running 步骤的 changes 不触发；两个步骤先后结束，第 299 毫秒前没有请求，第 300 毫秒恰一轮——根与 out 各一次、src 与 docs 没有、out/a.md 的预览重取一次且仍是源码，b.md 出现并带标记", async () => {
+  it("R1 步骤结束触发局部刷新：running 步骤的 changes 不触发；两个步骤先后结束，第 299 毫秒前没有请求，第 300 毫秒恰一轮——根与 out 各一次、src 与 docs 没有、out/a.md 的预览重取一次且仍是源码，b.md 出现并带标记；其后的 text.delta 不再触发，下一个步骤结束后的第 300 毫秒恰再一轮、只有它自己的路径", async () => {
     const current = { body: "# 第一份", out: [file("a.md")] };
     const { fetchMock, region } = await openChanges(turn("running"), {
       [ROOT]: listing("", [dir("docs"), dir("out"), dir("src"), file("readme.md")]),
@@ -179,6 +182,23 @@ describe("随助手改动刷新", () => {
     // 恰一轮：再过一个窗口也没有第二轮。
     await advance(WINDOW);
     expect(since()).toStrictEqual(ROUND);
+
+    // 已经刷过的步骤不再算新：视图再变（正文增量）也不触发。
+    send("text.delta", { delta: "，再看一处" });
+    await advance(WINDOW);
+    expect(since()).toStrictEqual(ROUND);
+
+    // 后一轮：窗口重新从这一批起算，只带这一批的路径（`out` 与 `out/a.md` 不再请求）。
+    endedStep(send, 3, "write", write("docs/c.md"));
+    await advance(WINDOW - 1);
+    expect(since()).toStrictEqual(ROUND);
+
+    await advance(1);
+    const TWO_ROUNDS = { files: [A_MD], trees: [ROOT, OUT, ROOT, DOCS].sort() };
+    expect(since()).toStrictEqual(TWO_ROUNDS);
+
+    await advance(WINDOW);
+    expect(since()).toStrictEqual(TWO_ROUNDS);
   });
 
   it("R1b 当前预览的文件不在这批改动里：根与 out 各重列一次，file 请求数不变", async () => {
@@ -250,12 +270,15 @@ describe("随助手改动刷新", () => {
     expect(since()).toStrictEqual({ files: [], trees: [DATA, ROOT].sort() });
   });
 
-  it("R2b 步骤结束后 300 毫秒内回合结束：每个已加载的目录恰重列一次，再过 300 毫秒没有新的请求", async () => {
+  it("R2b 步骤结束后 300 毫秒内回合结束：每个已加载的目录恰重列一次，选中的 readme.md 不在改动里也重取一次预览，再过 300 毫秒没有新的请求", async () => {
     const { fetchMock, region } = await openChanges(turn("running"));
     const send = await goLive();
     fireEvent.click(button(region, "展开 out"));
     await within(region).findByRole("button", { name: "index.html" });
+    fireEvent.click(button(region, "readme.md"));
+    await waitFor(() => expect(previewText(region)).toContain("自述正文"));
     await settled();
+    expect(fileRequests(fetchMock)).toStrictEqual([README]);
     const since = requestsSince(fetchMock);
     freezeTimers();
 
@@ -264,12 +287,35 @@ describe("随助手改动刷新", () => {
     expect(since()).toStrictEqual(NONE);
 
     send("turn.end", { status: "done" });
-    const ONCE = { files: [], trees: [ROOT, OUT].sort() };
+    // 兜底不带路径：当前文件不在这批改动里（`out/b.md`）也重取，对照 R1b 的局部刷新。
+    const ONCE = { files: [README], trees: [ROOT, OUT].sort() };
     expect(since()).toStrictEqual(ONCE);
 
     await advance(WINDOW);
     expect(since()).toStrictEqual(ONCE);
   });
+
+  it.each(["stopped", "failed"])(
+    "R2c 回合以 %s 结束也兜底：没有 changes 的 bash 步骤结束后无请求，turn.end 后根恰重列一次",
+    async (status) => {
+      const { fetchMock } = await openChanges(turn("running"));
+      const send = await goLive();
+      await settled();
+      const since = requestsSince(fetchMock);
+      freezeTimers();
+
+      endedStep(send, 1, "bash");
+      await advance(WINDOW);
+      expect(since()).toStrictEqual(NONE);
+
+      send("turn.end", { status });
+      const ONCE = { files: [], trees: [ROOT] };
+      expect(since()).toStrictEqual(ONCE);
+
+      await advance(WINDOW);
+      expect(since()).toStrictEqual(ONCE);
+    },
+  );
 
   it("R3 关闭期间不请求：关闭后三个带 changes 的步骤结束，没有 tree 或 file 请求；重新打开恰请求一次根、没有 file，再过 300 毫秒也没有", async () => {
     const { fetchMock, region } = await openChanges(turn("running"));
@@ -325,6 +371,27 @@ describe("随助手改动刷新", () => {
     expect(since()).toStrictEqual(NONE);
   });
 
+  it("R3c 回合进行中重新打开侧边栏，下一个事件就是 turn.end：挂载的一次根请求之外，兜底再请求一次根", async () => {
+    const { fetchMock, region } = await openChanges(turn("running"));
+    const send = await goLive();
+    await settled();
+    fireEvent.click(button(region, CLOSE));
+    expect(sidebarRegion()).toBeNull();
+    await settled();
+    const since = requestsSince(fetchMock);
+    freezeTimers();
+
+    await reopen();
+    expect(since()).toStrictEqual({ files: [], trees: [ROOT] });
+
+    send("turn.end", { status: "done" });
+    const BOTH = { files: [], trees: [ROOT, ROOT] };
+    expect(since()).toStrictEqual(BOTH);
+
+    await advance(WINDOW);
+    expect(since()).toStrictEqual(BOTH);
+  });
+
   it("R4 首屏历史里已有带 changes 的步骤：打开侧边栏只有挂载时那一次根请求，过 300 毫秒也没有刷新", async () => {
     const { fetchMock, region } = await openChanges(
       turn("done", { steps: [toolStep(1, 0, "write", [write("readme.md"), write("out/b.md")])] }),
@@ -372,5 +439,20 @@ describe("随助手改动刷新", () => {
     expect(rowNames(region)).toStrictEqual(["项目", "out", "new.md", "readme.md"]);
     await settled();
     expect(since()).toStrictEqual({ files: [], trees: [ROOT, ROOT] });
+  });
+
+  it("R6 null 的视图不参与比较：running 的视图变成 null 不刷新，其后来的是已结束的视图时兜底恰一次、不带路径", () => {
+    const refresh = vi.fn();
+    const browser = { current: { refresh, reveal: vi.fn() } };
+    const { rerender } = renderHook<void, { view: ChatState | null }>(
+      ({ view }) => useAssistantRefresh(view, browser),
+      { initialProps: { view: chatStateFromSnapshot(turn("running")) } },
+    );
+
+    rerender({ view: null });
+    expect(refresh.mock.calls).toStrictEqual([]);
+
+    rerender({ view: chatStateFromSnapshot(turn("done")) });
+    expect(refresh.mock.calls).toStrictEqual([[]]);
   });
 });
