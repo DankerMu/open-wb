@@ -12,7 +12,12 @@ import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-wal
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
-import { expectFilesUnpainted, expectOnDemandChunk } from "./ui-walk-files.js";
+import {
+  expectClipSelected,
+  expectFilesUnpainted,
+  expectNewPreviews,
+  expectOnDemandChunk,
+} from "./ui-walk-files.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
   clickRoute,
@@ -305,6 +310,12 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   await expect(
     restored.getByRole("button", { name: `展开 ${walkOut}`, exact: true }),
   ).toBeVisible();
+
+  // (a)(c)(d)，再重载做 (e)：重载后同一组断言重跑一遍。
+  await expectNewPreviews(page, workspaceId);
+  await page.reload();
+  await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");
+  await expectClipSelected(page, workspaceId);
 }
 
 // 键盘提交 walk-out，并在 POST …/dirs 挂起期间证明：`创建` 被原生禁用引发 focus fixup 后，
