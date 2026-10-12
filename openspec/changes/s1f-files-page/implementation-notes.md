@@ -654,3 +654,31 @@
 - 变异：把 `requestMainWidth` 放进 `setWanted` 的 updater → 预计不可观察（幂等，StrictMode 双调无差别），如实写「不可观察」。
 - 变异：走查结束不展开外壳侧栏 → 后续走查步骤红（顺序依赖，不计入变异表）。
 - 合入后更正（以 #1363 的 PR 文本为准）：开工实测通过（Chromium，视口 800：折叠与第二栏挂载同批发生，分栏库在 Group 变宽过程中重新满足像素最小宽度，稳定在 511 / 240，方向键能移动分隔线；其它引擎未走）。走查的 1200 / 800 两段放进同文件的新函数 `walkFit`（注记写只改 `walkBeside`）；800 段多断一步「关闭后刷新仍折叠」。「先请求、再置意图」只在 `onSelect` 里，没有抽内部打开函数——组 25 的 `reveal` 必须走这段，不能直接置意图。「视口从不超过 760 拉宽不折叠」无用例无走查（读代码推出：实现里没有任何尺寸监听）；阈值对应视口约 849 以下是读代码推出，边界未实测。
+
+## 20.11 / 20.12（#1351）
+
+- Critical Path：沙箱与文件边界（不可信用户文件内容的预览；issue 自己要求 owner 白盒）→ 两个评审席位并标记 PR。本刀不碰 `sandbox.resolve`、路径、`op`、服务端，遍历 / 符号链接 / 跨空间 id 类逃逸向量不适用，变异清单只列框内向量。
+- issue 所称规格句不存在：`specs/file-previewers/spec.md:162`、`:166` 只写「带 `srcdoc` 的 `iframe`」。「恰为原文、不拼接任何前后缀」实际在 `implementation-notes.md:222`（变异在 `:231`）、`notebook.tsx:4-6` 文件头注释、测试标题 `previewers-notebook.test.tsx:309`。钉住它的断言四处：`:156`、`:312`、`:470-471`（空输出 `[""]`）、`:567`。
+- 实现：`notebook.tsx`（224 行）加模块私有常量（不导出），值逐字为规格前缀；`:126` 改为 `srcDoc={HTML_OUTPUT_POLICY + joined(data["text/html"])}`；空串也加前缀，不加分支；引号转义交给 biome format。
+- 静态扫描 `previewers-table-svg.test.tsx:160,317` 按区分大小写的子串数 `srcDoc`，要求恰一次：常量名与注释都不得含驼峰写法（全大写、小写 `srcdoc`、中文都可）。文件头 `:4-6` 改为「a fixed policy prefix followed by the original text」之类。
+- 测试四处改写（进偏离记录，不得削弱）：`:156`、`:567` → `toBe(PREFIX + HTML)`；`:309` 标题改「…拼接后接在固定前缀之后，其后不加任何内容」，`:312` → `toBe(PREFIX + "<p>一</p>\n<p>二</p>")`；`:470` → `toStrictEqual([PREFIX])`，`:463` 注释里的「一个空文档的 iframe」同改。`PREFIX` 是测试文件里另写一遍的完整字面量，不从模块导入（导入则指令内容的变异不可观察）。新增一例对 R3 的四个输出；文件 601 行，加约 30 行。
+- `meta` 生效范围（按规范推出，待 20.12 实测确认）：前缀是文档第一个记号，解析器隐式建 `html` / `head`，`meta` 落在 `head` 内（规范要求 CSP `meta` 是 `head` 的子元素），插入即生效，其后解析的内容全部受约束。srcdoc 文档另继承嵌入页策略；主站无 CSP（`web/index.html` 无 `http-equiv`，`server/src` 只有预览监听器设该头）。
+- 不可信内容绕不过前缀：它之前没有任何记号；原文自带的 CSP `meta` 只会叠加成交集；嵌套的 `iframe srcdoc` 继承策略与沙箱标志。`meta` 里的 `sandbox`、`frame-ancestors`、`report-uri` 被忽略，本前缀不含。
+- 三条指令的覆盖面（按规范推出）：`img`、`srcset`、`picture`、`input type=image`、`video poster`、`svg image href`、CSS `url()` 归 `img-src`（仅 `data:`）；`link rel=stylesheet` 与内联样式里的 `@import` 归 `style-src`（无主机源）；`@font-face`、`audio` / `video` / `track`、子 `iframe`、`object` / `embed`、`a ping`、`link rel=prefetch` 回落 `default-src 'none'`。
+- 不加指令（偏离记录）：`form-action`（空 `sandbox` 已禁表单）、`base-uri`（`base` 只影响已登记的链接残余）、`navigate-to`（已从 CSP3 移除，无引擎实现）。空 `sandbox` 已挡 `meta refresh`（`implementation-notes.md:222` 有 Chromium 实测）、`target=_blank` 弹窗、`_top` 导航与下载。
+- 待实测的残余候选：`link rel=preconnect` / `dns-prefetch` 是否受 CSP 约束，规范与各引擎实现不一，我无法从这里确定。`preconnect` 进 20.12 实测（看本地监听器有无连接）；`dns-prefetch` 本地不可观察，写「未测」。若有连接，在注记与规格残余句里并列登记，不为它加代码。
+- 点链接残余的后果要如实写：导航后的页面仍在空沙箱里（不跑脚本、不透明来源），但会取自己的子资源，第三方此时可知有人在看；该 iframe 没有 `referrerpolicy`，这次导航会带主站来源作 Referer（未实测）。
+- 规格未写的分支（取最简，偏离记录）：原文带 DOCTYPE 时它排在 `meta` 之后，被解析器忽略；srcdoc 文档缺 DOCTYPE 不进怪异模式，所以只有原文本会触发怪异模式的旧 DOCTYPE 渲染有别，Jupyter 输出是片段，不处理。原文的 `<html>` / `<head>` 开标签按解析规则并入，不处理。
+- 一次性实测做法（不入库，结果连同浏览器版本写进本节）：本地回环监听器记录每个到达的请求与连接，按服务端记录判定，不只看开发者工具（预加载扫描器的抢先取回在面板里不一定可见）。去掉前缀时须能看到 `img` 与 `link` 各一个 GET（与 #1096 的实测对照），证明测法有效。Firefox / Safari 未测就写未测。
+- 门槛：无新导出（knip 无关）；单个字面量不触 jscpd；size-guard 只管 ts / tsx / py（`notebook.tsx` 224、测试 601）；`ui-layering`、`previewers-code-split` 不动；`make ui-walk` 不打开 ipynb，无新步骤、无 smoke 夹具改动。与 #1356 / #1363 等共用 `tasks.md`、`implementation-notes.md`、`functional-checklist.md`、`spec.md`，栈在其后；代码文件与批内其它刀不重叠。
+- FL-18 改写（`docs/acceptance/functional-checklist.md:212`，只改 HTML 单元一句与期望一句，其余逐字保留，结论 `待签`）。操作里「一个用 IPython 的 HTML 显示一段含表格与调用 alert 的 script 元素的代码单元并运行」换成：`一个用 IPython 的 HTML 显示下列内容的代码单元并运行：一张表格、一个调用 alert 的 script 元素、一段用 style 属性设成红色的文字、一张 src 以 data: 开头的内嵌小图片（把任意一张小 png 转成 base64）、一个 src 为任选公网图片地址的 img 元素（先在新标签页确认该地址能打开）`。期望里「表格显示在一个独立的框里，全程不弹出任何提示框」换成：`表格显示在一个独立的框里，框里那段文字是红色、内嵌小图片显示出来、公网图片的位置不显示图片，全程不弹出任何提示框`。坑：行里不写具体主机名（公开仓库）、不写十六进制颜色与点号开头的扩展名（格式守卫）；不让签字人点框内链接（点了该框停在外部页面，`刷新` 不会复原）；FL-19 起接续状态不变（仍是两个上传文件）。
+- 变异：去掉前缀（`srcDoc={html}`）→ `:156`、`:312`、`:470`、`:567` 与新场景四例全红。
+- 变异：前缀放到原文之后或前后各放一份 → 同上 `toBe` 判红。
+- 变异：改任一指令（`default-src 'none'` 换 `'self'` 或 `*`、删 `img-src data:`、删 `style-src 'unsafe-inline'`、加 `script-src`、`http-equiv` 拼错）→ 与测试自带字面量的 `toBe` 判红；若测试导入模块常量则不可观察，所以禁止导入。
+- 变异：原文为空时不加前缀 → `:470` 的 `[PREFIX]` 与新场景第四例判红。
+- 变异：对原文 `trim`、HTML 转义或去掉自带的 `meta` → 新场景第一例（`&`）、第三例（首部换行）、第二例分别判红。
+- 变异：原文之后追加收尾标签或其它内容 → 全部 `toBe` 判红。
+- 变异：`sandbox` 去掉或改 `allow-scripts` → 既有 `:154-155` 与静态断言 `previewers-table-svg.test.tsx:319` 判红（既有，不重写）。
+- 变异：常量名或注释含驼峰 srcdoc，或改用 `ref` 加 `setAttribute` → `previewers-table-svg.test.tsx:318` 的 `[0, 0, 1, 0]` 判红。
+- 变异：不可观察（jsdom 不加载 iframe，归一次性实测与 FL-18）：外链请求是否真被挡、`data:` 图片与内联样式是否生效、原文第二个 `meta` 能否放宽、点链接导航、`preconnect`。
+- 合入后更正（以 #1351 的 PR 文本为准；实测：Playwright 1.62.1 自带的无头 Chromium 151.0.7922.34、Firefox 153.0、WebKit 26.5，最小 harness 挂真实的 `NotebookPreviewer`，本地回环监听器按到达记录判定；去掉前缀的对照里 `img` 与 `link` 的 GET 都在）：`meta` CSP 对 srcdoc 文档在三个浏览器里都生效，但上面「其后解析的内容全部受约束」与「`srcset` 归只许 `data:` 的 `img-src`」有反例——Firefox 里只带 `srcset` 的 `img` 与某些其它元素同现时有时仍被取回（整套向量 12 次里 9 次；与 `video poster` 两行 6 次里 4 次、与 `video src` 6 次里 2 次；`audio` 加 `svg image` 合成一组 6 次里 1 次，各自单独未测；`srcset` 单独 12 次里 0 次；原因未查）。Chromium 对框内指向外部的子 `iframe` 仍建立一条不发 HTTP 请求的 TCP 连接（显式加 `frame-src 'none'; child-src 'none'` 结果相同）。WebKit 的 `link rel=preconnect` 仍建立连接（有无前缀都一样；Chromium 与 Firefox 里这条测不出）。点不带 `target` 的链接：框被导航、顶层地址不变；`Referer` 一项——Chromium 不带，Firefox 与 WebKit 带主站来源（无路径与查询串）。`_blank`、`_top`、表单提交都被挡（WebKit 点 `_blank` 时对方仍收到一条无请求的 TCP 连接，有无前缀都一样）。未测：`dns-prefetch`、公网地址、https、正式发行版的 Firefox 与 Safari。规格句已按实测收窄并列出三条残余（编排方改，待 owner 复核）；FL-18 的期望句改为「公网图片没有显示出来（它的位置上可能有一个破图标记）」。测试把场景的四个输出做成 `it.each`、每例一个输出，评审后又加了整页写法、`<html>` 开头与含回车换行的原文各一例。
