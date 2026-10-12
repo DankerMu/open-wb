@@ -1,8 +1,16 @@
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Icon, type IconName } from "../../ui/index.js";
 import { type TreeRow, type TreeRows, workspacePath } from "./browser-paths.js";
 import { ALERT_BOX } from "./columns.js";
 import { EmptyState } from "./empty-state.js";
+import type { EntryActions, MenuFocus } from "./entry-ops.js";
 import { fileIcon, formatSize } from "./file-meta.js";
 import type { TreeEntry } from "./types.js";
 
@@ -16,6 +24,9 @@ type DirectoryTreeState = {
   loadingPaths: ReadonlySet<string>;
   marks: TreeMarks | undefined;
   selectedPath: string | null;
+  /** 给了才有行菜单（根行始终没有）；`onlyPaths` 下浏览器不给。 */
+  actions?: EntryActions | undefined;
+  focusMenuPath?: MenuFocus | undefined;
   onSelectFile(entry: TreeEntry, path: string): void;
   onToggleDirectory(path: string): void;
 };
@@ -33,7 +44,16 @@ type DirectoryNodeProps = DirectoryTreeState & {
   subline?: string | undefined;
 };
 
-type FileRowProps = Pick<DirectoryTreeState, "marks" | "onSelectFile"> & {
+type RowMenuProps = Pick<DirectoryTreeState, "actions" | "focusMenuPath"> & {
+  name: string;
+  path: string;
+  type: "dir" | "file";
+};
+
+type FileRowProps = Pick<
+  DirectoryTreeState,
+  "actions" | "focusMenuPath" | "marks" | "onSelectFile"
+> & {
   entry: TreeRow;
   path: string;
   selected: boolean;
@@ -41,13 +61,18 @@ type FileRowProps = Pick<DirectoryTreeState, "marks" | "onSelectFile"> & {
 
 /** 树行（目录与文件同一写法）；选中的文件行由 `aria-current` 着色。 */
 const ROW =
-  "group/row flex w-full min-w-0 cursor-pointer items-center gap-[0.4rem] rounded-[6px] px-2 py-[0.32rem] text-left text-[0.8rem] leading-[1.35] text-(--wb-text-primary) hover:bg-(--wb-brand-primary-subtle) aria-[current=true]:bg-(--wb-brand-primary-subtle) aria-[current=true]:text-(--wb-brand-primary-deep)";
+  "group/row peer/row flex w-full min-w-0 cursor-pointer items-center gap-[0.4rem] rounded-[6px] px-2 py-[0.32rem] text-left text-[0.8rem] leading-[1.35] text-(--wb-text-primary) hover:bg-(--wb-brand-primary-subtle) aria-[current=true]:bg-(--wb-brand-primary-subtle) aria-[current=true]:text-(--wb-brand-primary-deep)";
 const GLYPH =
   "inline-flex size-[14px] shrink-0 text-(--wb-text-secondary) group-aria-[current=true]/row:text-(--wb-brand-primary-deep)";
 const ROW_NAME = "min-w-0 flex-1 truncate";
 /** 行下方的附注（错误、读取中、空目录、根的逻辑路径）与行内文字左对齐。 */
 const ROW_NOTE = "mr-2 ml-7";
 const UNMARKED = { describedBy: undefined, item: "min-w-0", mark: null };
+
+/** `<li>` 与行按钮的类。带行菜单的行：`<li>` 给菜单按钮定位，行按钮在右端给它让出位置。 */
+function rowFrame(menu: EntryActions | undefined, item: string) {
+  return menu ? { item: "relative min-w-0", row: `${ROW} pr-8` } : { item, row: ROW };
+}
 
 /**
  * 行的标记：行按钮的兄弟元素，经 `aria-describedby` 关联——放进按钮会改掉行的可访问名（恰为文件名）。
@@ -74,17 +99,79 @@ function useRowMark(marks: TreeMarks | undefined, path: string) {
   };
 }
 
-function FileRow({ entry, marks, onSelectFile, path, selected }: FileRowProps) {
+/**
+ * 行菜单 `更多操作 <名>`：行按钮的兄弟元素，画在行的右端——放进行按钮会改掉行的可访问名，按钮里也
+ * 不能再套按钮。始终在 DOM 里且可聚焦；只在可悬停的宽屏上以透明度弱化，行悬停、行或它自己有焦点、
+ * 菜单打开时显现。`modal={false}`：不锁 body 的指针事件，随后打开的对话框自己管模态。
+ * `下载` 是链接：浏览器直接导航，文件名由服务端的 Content-Disposition 给。没给 `actions` 就不渲染。
+ */
+function RowMenu({ actions, focusMenuPath, name, path, type }: RowMenuProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // 这一行是刚被重命名出来的：把焦点接过来（旧行连同它的按钮已卸载）。
+  useEffect(() => {
+    if (focusMenuPath && focusMenuPath.current === path) {
+      focusMenuPath.current = null;
+      triggerRef.current?.focus();
+    }
+  }, [focusMenuPath, path]);
+
+  if (!actions) {
+    return null;
+  }
+
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          aria-label={`更多操作 ${name}`}
+          className="absolute top-[0.1rem] right-1 text-muted-foreground peer-hover/row:opacity-100 peer-focus-visible/row:opacity-100 hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:hover)_and_(min-width:761px)]:opacity-0"
+          ref={triggerRef}
+          size="icon-xs"
+          type="button"
+          variant="ghost"
+        >
+          <Icon name="more-horizontal" size={14} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-32" collisionPadding={8} loop>
+        <DropdownMenuItem onSelect={() => actions.rename({ name, path }, triggerRef.current)}>
+          <Icon name="pencil" size={14} />
+          重命名
+        </DropdownMenuItem>
+        {type === "file" ? (
+          <DropdownMenuItem asChild>
+            <a download href={actions.downloadHref(path)}>
+              <Icon name="download" size={14} />
+              下载
+            </a>
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function FileRow({
+  actions,
+  entry,
+  focusMenuPath,
+  marks,
+  onSelectFile,
+  path,
+  selected,
+}: FileRowProps) {
   const mark = useRowMark(marks, path);
   // 没有 `size` / `mtime` 的行（`onlyPaths` 下父目录没加载过）选不了：预览头要这两项。
   const stat = entry.size === undefined ? null : entry;
+  const frame = rowFrame(actions, mark.item);
 
   return (
-    <li className={mark.item}>
+    <li className={frame.item}>
       <button
         aria-current={selected ? "true" : undefined}
         aria-describedby={mark.describedBy}
-        className={ROW}
+        className={frame.row}
         disabled={stat === null}
         onClick={stat ? () => onSelectFile(stat, path) : undefined}
         title={entry.name}
@@ -106,15 +193,24 @@ function FileRow({ entry, marks, onSelectFile, path, selected }: FileRowProps) {
           </span>
         ) : null}
       </button>
+      <RowMenu
+        actions={actions}
+        focusMenuPath={focusMenuPath}
+        name={entry.name}
+        path={path}
+        type="file"
+      />
       {mark.mark}
     </li>
   );
 }
 
 function DirectoryNode({
+  actions,
   cache,
   errors,
   expandedPaths,
+  focusMenuPath,
   icon,
   label,
   loadingPaths,
@@ -130,14 +226,17 @@ function DirectoryNode({
   const loading = loadingPaths.has(path);
   const error = errors[path];
   const mark = useRowMark(marks, path);
+  // 根行没有菜单。
+  const menu = path === "" ? undefined : actions;
+  const frame = rowFrame(menu, mark.item);
 
   return (
-    <li className={mark.item}>
+    <li className={frame.item}>
       <button
         aria-describedby={mark.describedBy}
         aria-expanded={expanded}
         aria-label={`${expanded ? "折叠" : "展开"} ${label}`}
-        className={ROW}
+        className={frame.row}
         onClick={() => onToggleDirectory(path)}
         title={label}
         type="button"
@@ -156,6 +255,7 @@ function DirectoryNode({
           {label}
         </span>
       </button>
+      <RowMenu actions={menu} focusMenuPath={focusMenuPath} name={label} path={path} type="dir" />
       {mark.mark}
       {subline ? (
         <p
@@ -201,9 +301,11 @@ function DirectoryNode({
               if (entry.type === "dir") {
                 return (
                   <DirectoryNode
+                    actions={actions}
                     cache={cache}
                     errors={errors}
                     expandedPaths={expandedPaths}
+                    focusMenuPath={focusMenuPath}
                     icon="folder"
                     key={entryPath}
                     label={entry.name}
@@ -219,7 +321,9 @@ function DirectoryNode({
 
               return (
                 <FileRow
+                  actions={actions}
                   entry={entry}
+                  focusMenuPath={focusMenuPath}
                   key={entryPath}
                   marks={marks}
                   onSelectFile={onSelectFile}

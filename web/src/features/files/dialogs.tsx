@@ -40,11 +40,27 @@ type DirectoryDialogProps = {
   onCreate(parent: string, name: string): void;
 };
 
-type CreationDialogProps = PropsWithChildren<{
-  title: string;
+type RenameDialogProps = {
+  /** 条目现在的名字：输入框的初值。 */
+  name: string;
   error: string | null;
   pending: boolean;
-  /** 打开时聚焦的控件（`工作空间名称` / `位置`）。 */
+  /** 该行的 `更多操作 <名>`。 */
+  returnFocus: ReturnFocus;
+  onCancel(): void;
+  /** `name` 已去掉首尾空白，非空、不含 `/` 与 `\`、不等于原名；除此之外原样（`.`、`..` 也是）。 */
+  onRename(name: string): void;
+};
+
+type CreationDialogProps = PropsWithChildren<{
+  title: string;
+  /** 提交按钮的字样，缺省 `创建`。 */
+  submitLabel?: string;
+  /** 请求挂起期间的说明，缺省是创建的那一句。 */
+  pendingNote?: string;
+  error: string | null;
+  pending: boolean;
+  /** 打开时聚焦的控件（`工作空间名称` / `位置` / `名称`）；是输入框时连同全选它的内容。 */
   initialFocus: RefObject<HTMLElement | null>;
   returnFocus: ReturnFocus;
   onCancel(): void;
@@ -57,7 +73,7 @@ const SELECT =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
 
 /**
- * 两个创建对话框共用的外框：标题、表单、挂起说明、错误与 `取消` / `创建`。Escape、右上 `关闭`、
+ * 创建与重命名对话框共用的外框：标题、表单、挂起说明、错误与 `取消` / 提交按钮（`创建`、`重命名`）。Escape、右上 `关闭`、
  * 遮罩点击都等同 `取消`（挂起期即取消等待，不锁关闭）；取消类关闭后焦点还给 `returnFocus`。
  * Enter 走表单的原生提交，本文件不写键盘处理。
  */
@@ -68,7 +84,9 @@ function CreationDialog({
   onCancel,
   onSubmit,
   pending,
+  pendingNote = "正在创建。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。",
   returnFocus,
+  submitLabel = "创建",
   title,
 }: CreationDialogProps) {
   const onOpenChange = (open: boolean) => {
@@ -77,7 +95,7 @@ function CreationDialog({
   const fallback = useEscapeFallback({ canClose: true, onOpenChange });
   const content = fallback.ref;
 
-  // `创建` 在请求发出的那次提交里被禁用：焦点若已丢失——活动元素是 body（Chromium 在禁用的当下就把
+  // 提交按钮在请求发出的那次提交里被禁用：焦点若已丢失——活动元素是 body（Chromium 在禁用的当下就把
   // 焦点移走），或是对话框内已禁用的控件（jsdom 不移焦点）——移到右上的 `关闭`；焦点在对话框内仍可用
   // 的控件上时不动。不取「首个可用控件」：拷入层把 `关闭` 放在内容最后，首个可用控件是表单字段。
   useLayoutEffect(() => {
@@ -104,7 +122,9 @@ function CreationDialog({
         onKeyDown={fallback.onKeyDown}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          initialFocus.current?.focus();
+          const first = initialFocus.current;
+          first?.focus();
+          if (first instanceof HTMLInputElement) first.select();
         }}
         ref={content}
       >
@@ -115,7 +135,7 @@ function CreationDialog({
           {children}
           {pending ? (
             <p className="m-0 text-xs text-muted-foreground" role="status">
-              正在创建。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。
+              {pendingNote}
             </p>
           ) : null}
           {error ? (
@@ -131,7 +151,7 @@ function CreationDialog({
               取消
             </Button>
             <Button disabled={pending} type="submit">
-              创建
+              {submitLabel}
             </Button>
           </div>
         </form>
@@ -271,6 +291,66 @@ export function DirectoryDialog({
           onChange={(event) => setName(event.target.value)}
           placeholder="例如 out"
           value={name}
+        />
+      </div>
+    </CreationDialog>
+  );
+}
+
+/**
+ * `重命名` 对话框。提交时依次：输入与原名逐字相同 → 关闭；去掉首尾空白后为空 → `请输入名称`；含 `/`
+ * 或 `\` → `名称不能包含路径分隔符`；去掉首尾空白后等于原名 → 关闭；否则 `onRename`。前四种都不发
+ * 请求。名字只检查这些：`.`、`..` 照样交出去，由服务端答复（它的文案显示在框内）。
+ */
+export function RenameDialog({
+  error,
+  name,
+  onCancel,
+  onRename,
+  pending,
+  returnFocus,
+}: RenameDialogProps) {
+  const nameRef = useRef<HTMLInputElement>(null);
+  const nameId = useId();
+  const [text, setText] = useState(name);
+  const [validationError, setValidationError] = useState<string | null>(null);
+
+  function submitName(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const next = text.trim();
+    if (text === name) {
+      onCancel();
+    } else if (next.length === 0) {
+      setValidationError("请输入名称");
+    } else if (/[\\/]/.test(next)) {
+      setValidationError("名称不能包含路径分隔符");
+    } else if (next === name) {
+      onCancel();
+    } else {
+      setValidationError(null);
+      onRename(next);
+    }
+  }
+
+  return (
+    <CreationDialog
+      error={validationError ?? error}
+      initialFocus={nameRef}
+      onCancel={onCancel}
+      onSubmit={submitName}
+      pending={pending}
+      pendingNote="正在重命名。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。"
+      returnFocus={returnFocus}
+      submitLabel="重命名"
+      title="重命名"
+    >
+      <div className={FIELD}>
+        <Label htmlFor={nameId}>名称</Label>
+        <Input
+          id={nameId}
+          onChange={(event) => setText(event.target.value)}
+          ref={nameRef}
+          value={text}
         />
       </div>
     </CreationDialog>

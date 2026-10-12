@@ -22,6 +22,74 @@ export function workspacePath(parent: string, name: string) {
   return `${parent}/${name}`;
 }
 
+/** 父目录的路径：`out/sub/a.md` → `out/sub`，根下的条目 → `""`。只按最后一个 `/` 切，别的不看。 */
+export function parentPath(path: string): string {
+  return path.slice(0, Math.max(0, path.lastIndexOf("/")));
+}
+
+/**
+ * 重命名发给 `move` 的 `to`：`path` 的父目录接上 `name`，原样拼接——不去空格、不折叠 `.` / `..`、
+ * 不看 `name` 里有没有分隔符。带 `/` 的 `name` 会让结果离开父目录：拒绝它是调用方（`RenameDialog`）
+ * 的事，是否越界由服务端 `sandbox.resolve` 裁决。
+ */
+export function renameTarget(path: string, name: string): string {
+  return workspacePath(parentPath(path), name);
+}
+
+/**
+ * `from` 被移到 `to`（`null`：被删除）之后 `path` 的写法。只有 `path` 恰为 `from` 或以 `from + "/"`
+ * 开头才算命中（同级的 `output` 不在 `out` 之下）：换掉这段前缀，`to` 为 `null` 时是 `null`；没命中
+ * 的原样返回。
+ */
+export function movedPath(path: string, from: string, to: string): string;
+export function movedPath(path: string, from: string, to: string | null): string | null;
+export function movedPath(path: string, from: string, to: string | null): string | null {
+  if (path !== from && !path.startsWith(`${from}/`)) {
+    return path;
+  }
+
+  return to === null ? null : `${to}${path.slice(from.length)}`;
+}
+
+/**
+ * `from` 被移到 `to`（`null`：被删除）之后的列表缓存，不请求：先丢掉 `to` 及其下早先留下的键，再把
+ * `from` 及其下的键与各自的 `listing.path` 换到 `to` 之下；`from` 在它已加载的父目录列表里的那一条
+ * 拿掉，`to` 的父目录已加载时以新名字放进去（顶掉同名的旧条目；父目录没变就留在原来的位置）。
+ * 父目录随后由调用方重新列出，这里改列表只为那之前的几帧。
+ */
+export function movedCache(cache: DirectoryCache, from: string, to: string | null): DirectoryCache {
+  const kept = Object.entries(cache).flatMap(([key, listing]): [string, DirectoryListing][] => {
+    const stale = to !== null && movedPath(key, to, null) === null;
+    const moved = stale ? null : movedPath(key, from, to);
+    return moved === null ? [] : [[moved, moved === key ? listing : { ...listing, path: moved }]];
+  });
+  // `Object.fromEntries` 定义自有属性：名为 `__proto__` 的目录不会改到原型。
+  const next: DirectoryCache = Object.fromEntries(kept);
+  const lastName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
+  const source = parentPath(from);
+  const listed = next[source];
+  const entry = listed?.entries.find((item) => item.name === lastName(from));
+  if (!listed || !entry) {
+    return next;
+  }
+
+  if (to === null || parentPath(to) !== source) {
+    next[source] = { ...listed, entries: listed.entries.filter((item) => item !== entry) };
+  }
+  const landing = to === null ? undefined : next[parentPath(to)];
+  if (to !== null && landing) {
+    const moved = { ...entry, name: lastName(to) };
+    const rest = landing.entries.filter((item) => item === entry || item.name !== moved.name);
+    next[parentPath(to)] = {
+      ...landing,
+      entries: rest.includes(entry)
+        ? rest.map((item) => (item === entry ? moved : item))
+        : [...rest, moved],
+    };
+  }
+  return next;
+}
+
 /**
  * 地址里的 `path` 在定位之前的写法：按 `/` 切开，去掉空段与 `.` 段后接回去（`./a//b/` → `a/b`，
  * `/`、`.` → `""`）；有一段恰为 `..` 时是 `null`——调用方不为它发请求。只认这三种段：不去空格、
