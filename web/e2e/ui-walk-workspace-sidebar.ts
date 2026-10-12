@@ -3,8 +3,13 @@
 // overflow, the separator resizes both by keyboard and by dragging and stops before either side is
 // gone, and the width survives a reload while the open state does not. `mobile-dark`: the sidebar is
 // a modal dialog over the whole viewport, Tab stays inside it and Escape hands the focus back
-// without scrolling the thread. No file is selected: no preview token is issued and no request
+// without scrolling the thread. No file is selected there: no preview token is issued and no request
 // leaves the base origin.
+//
+// `walkViewDetails` is the 查看详情 of the file-changes card (workspace-sidebar「从卡片定位到文件」): it
+// opens the sidebar on the written file without navigating, and the preview is an iframe on the
+// preview origin this page was issued — the one request target outside the base origin the walk
+// oracle admits (ui-walk-oracle.ts).
 //
 // `desktop-light` also walks the open action that collapses the shell sidebar (#1363): at 1200 the
 // two minimum widths fit and nothing collapses, not even when the window is then narrowed to 800 with
@@ -13,11 +18,12 @@
 // expand it again. The walk expands the shell sidebar before returning: later steps need the session
 // list.
 
-import { expect, type Locator, type Page } from "@playwright/test";
+import { expect, type Frame, type Locator, type Page } from "@playwright/test";
 import { type WalkProject, withViewport } from "./ui-walk-layout.js";
 
 const NAME = "工作空间侧边栏";
 const CLOSE = "关闭工作空间侧边栏";
+const ONLY_CHANGES = "只看本会话改动";
 const STORAGE_KEY = "workbuddy-workspace-sidebar";
 /** The shell's own sidebar (spa-shell) and the key its collapse preference is stored under. */
 const SHELL_SIDEBAR = "侧栏";
@@ -273,4 +279,119 @@ export async function walkWorkspaceSidebar(
   if (project === "mobile-dark") return walkOverlay(page, file);
   await walkBeside(page, file);
   await walkFit(page, file);
+}
+
+type Written = {
+  /** The file the turn wrote, at the workspace root. */
+  file: string;
+  /** Its logical path `<account>/<dir>/<file>`: what the card row shows and names its button after. */
+  logicalPath: string;
+  workspaceId: string;
+};
+
+function previewBase(body: unknown): string {
+  if (body === null || typeof body !== "object" || !("base" in body)) {
+    throw new Error("preview-token 200 body has no base");
+  }
+  if (typeof body.base !== "string") throw new Error("preview-token base is not a string");
+  return body.base;
+}
+
+/**
+ * 查看详情 of the card row of `written` (chat-harness「UI 走查会话元数据」step 5): the sidebar opens with
+ * the file selected and marked, the URL stays and the main frame does not navigate; the preview is
+ * an iframe on the issued preview origin with the three-token `sandbox`, and the written page's
+ * heading shows inside it; 只看本会话改动 leaves exactly that file. `desktop-light`: the focus stays
+ * on the clicked button. `mobile-dark`: it goes to 关闭 and Escape hands it back to the clicked
+ * button without scrolling the thread. Leaves the sidebar closed.
+ */
+export async function walkViewDetails(
+  page: Page,
+  project: WalkProject,
+  { file, logicalPath, workspaceId }: Written,
+): Promise<void> {
+  const wide = project === "desktop-light";
+  const opener = page
+    .getByRole("article", { name: "助手" })
+    .getByRole("button", { name: `查看详情 ${logicalPath}`, exact: true });
+  const sidebar = wide
+    ? page.getByRole("complementary", { name: NAME, exact: true })
+    : page.getByRole("dialog", { name: NAME, exact: true });
+  const close = sidebar.getByRole("button", { name: CLOSE, exact: true });
+  const tree = sidebar.getByRole("navigation", { name: "工作空间目录树" });
+  const row = tree.getByRole("button", { name: file, exact: true });
+  const thread = page.locator('[data-slot="thread-viewport"]');
+  const tokenPath = `/api/workspaces/${workspaceId}/preview-token`;
+  const address = page.url();
+  let navigations = 0;
+  const onNavigated = (frame: Frame) => {
+    if (frame === page.mainFrame()) navigations += 1;
+  };
+  page.on("framenavigated", onNavigated);
+
+  // `base` comes from the token response this click causes (the preview port is assigned by the system).
+  const [issued] = await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" && new URL(response.url()).pathname === tokenPath,
+    ),
+    opener.click(),
+  ]);
+  await expect(row, "查看详情: the file is selected").toHaveAttribute("aria-current", "true");
+  await expect(row, "查看详情: the file is marked").toHaveAccessibleDescription("本会话已改动");
+  if (wide) {
+    await expect(page.getByRole("dialog", { name: NAME, exact: true })).toHaveCount(0);
+    await expect(opener, "查看详情: focus stays on the clicked button").toBeFocused();
+  } else {
+    await expect(sidebar).toHaveAttribute("aria-modal", "true");
+    await expect(close, "查看详情: focus enters the layer at 关闭").toBeFocused();
+  }
+
+  expect(issued.status(), "preview-token status").toBe(200);
+  const base = previewBase(await issued.json());
+  expect(new URL(base).origin, "preview origin is not the page origin").not.toBe(
+    new URL(address).origin,
+  );
+  const frame = sidebar.getByRole("region", { name: "文件预览" }).locator("iframe");
+  await expect(frame, "查看详情: one preview frame").toHaveCount(1);
+  await expect(frame, "preview frame src").toHaveAttribute("src", `${base}${file}`);
+  await expect(frame, "preview frame sandbox").toHaveAttribute(
+    "sandbox",
+    "allow-scripts allow-forms allow-modals",
+  );
+  await expect(
+    frame.contentFrame().getByRole("heading", { name: "WorkBuddy", exact: true }),
+    "the written page renders inside the frame",
+  ).toBeVisible();
+  // The loaded frame did not take the focus.
+  await expect(wide ? opener : close, "focus after the frame loaded").toBeFocused();
+
+  // 只看本会话改动: the workspace row and that one file, still selected; then back off.
+  const only = sidebar.getByRole("button", { name: ONLY_CHANGES, exact: true });
+  await only.click();
+  await expect(only).toHaveAttribute("aria-pressed", "true");
+  await expect(tree.locator('[data-slot="tree-name"]')).toHaveCount(2);
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await only.click();
+  await expect(only).toHaveAttribute("aria-pressed", "false");
+
+  if (wide) {
+    await close.click();
+    await expect(sidebar).toHaveCount(0);
+    await expect(trigger(page)).toBeFocused();
+  } else {
+    // Read with the layer open: the click itself may have scrolled the card into view. The card is
+    // in view here, so this does not catch a focus handed back without `preventScroll` (measured:
+    // that mutation leaves the walk green); chat-workspace-sidebar-reveal.test.tsx pins the argument.
+    const scrolled = await thread.evaluate((el) => el.scrollTop);
+    await page.keyboard.press("Escape");
+    await expect(sidebar).toHaveCount(0);
+    await expect(opener, "查看详情: focus returns to the clicked button").toBeFocused();
+    expect(await thread.evaluate((el) => el.scrollTop), "thread scrollTop after closing").toBe(
+      scrolled,
+    );
+  }
+  page.off("framenavigated", onNavigated);
+  expect(navigations, "查看详情: main-frame navigations").toBe(0);
+  expect(page.url(), "查看详情: the address").toBe(address);
 }
