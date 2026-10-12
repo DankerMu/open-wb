@@ -344,12 +344,12 @@ describe("WorkspaceBrowser 受控路径与定位", () => {
     expect(onPathChange.mock.calls).toStrictEqual([]);
   });
 
-  it("末级不在列表里：停在父目录，不选中；某一级读取失败：停在该级并显示它的错误行，不重复请求", async () => {
+  it("末级不在列表里：停在父目录，预览区显示 文件不存在；某一级读取失败：停在该级，错误行与预览区都显示它的文案，不重复请求", async () => {
     const missing = mount("out/missing.md");
     expect(await within(tree()).findByRole("button", { name: "a.md" })).toBeTruthy();
     await settle();
     expect(missing.requests()).toStrictEqual([ROOT, OUT]);
-    expect(previewRegion().getByText("未选择文件", { exact: true })).toBeTruthy();
+    expect(previewRegion().getByRole("alert").textContent).toBe("文件不存在");
     expect(missing.onPathChange.mock.calls).toStrictEqual([]);
     cleanupFilesFixture();
 
@@ -364,7 +364,7 @@ describe("WorkspaceBrowser 受控路径与定位", () => {
     expect(within(tree()).getByRole("button", { name: "折叠 bad" })).toBeTruthy();
     await settle();
     expect(failed.requests()).toStrictEqual([ROOT, BAD]);
-    expect(previewRegion().getByText("未选择文件", { exact: true })).toBeTruthy();
+    expect(previewRegion().getByRole("alert").textContent).toBe("目录读取失败");
   });
 
   it("path 改成 null 清掉选中；改成另一个文件则定位过去，两种都不回调", async () => {
@@ -442,10 +442,10 @@ describe("WorkspaceBrowser 受控路径与定位", () => {
     );
     await selectedRow("a.md");
     await previewRegion().findByText("甲的正文", { exact: true });
-    // 先让 `path` 离开当前选中：指向已加载的目录，选中不动、没有请求。
-    setPath("out");
+    // 先让 `path` 离开当前选中：指向还没加载的层，定位在等 `src` 的列表，选中不动。
+    setPath("src/deep/app.ts");
     await settle();
-    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A]);
+    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A, SRC]);
     expect(fileRow("a.md").getAttribute("aria-current")).toBe("true");
 
     act(() => browser().reveal("src/deep/app.ts"));
