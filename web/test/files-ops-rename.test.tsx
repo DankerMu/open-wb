@@ -20,6 +20,7 @@ import {
   nested,
   openFiles,
   openRename,
+  overlay,
   renameTo,
   submitButton,
   treeUrl,
@@ -38,12 +39,6 @@ afterEach(async () => {
 });
 
 const moved = (path: string) => () => jsonResponse({ path });
-
-function overlay() {
-  const element = document.querySelector('[data-slot="dialog-overlay"]');
-  if (!element) throw new Error("expected the dialog overlay");
-  return element;
-}
 
 describe("重命名", () => {
   it("R1 合法新名：恰一次 POST move {from, to}，对话框关闭，根层被重新请求，树里是新名字", async () => {

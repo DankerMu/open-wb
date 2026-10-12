@@ -18,7 +18,13 @@ import {
   settle,
   tree,
 } from "./files-deep-link-support.js";
-import { cleanupFilesFixture, expectLocation, openDirectoryDialog } from "./files-fixture.js";
+import {
+  cleanupFilesFixture,
+  expectLocation,
+  imagePreviewResponse,
+  openDirectoryDialog,
+  stubBlobUrls,
+} from "./files-fixture.js";
 import {
   confirmButton,
   confirmGone,
@@ -457,5 +463,66 @@ describe("删除之后的状态清理", () => {
     expect((await within(dialog).findByRole("alert")).textContent).toBe("请求的资源不存在");
     await settle();
     expect(since()).toStrictEqual([`DELETE ${url}`]);
+  });
+});
+
+// 删除当前文件时预览的清理（#1101 评审留下的覆盖缺口）。直接渲染组件、`path` 属性不变：整页上宿主会把
+// `path=null` 送回来，`path` 的 effect 自己也会清一次选中，看不出跟随这一步清了没有。
+describe("删除当前文件时的预览清理", () => {
+  function mount(entry: ReturnType<typeof fileEntry>, preview: () => Promise<Response> | Response) {
+    const fetchMock = createFetchMock({
+      [treeUrl("")]: () => jsonResponse({ path: "", entries: [entry] }),
+      [fileUrl(entry.name)]: preview,
+      [entriesUrl(entry.name)]: deleted,
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <WorkspaceBrowser
+        account="zhangsan"
+        client={createApiClient()}
+        onPathChange={() => {}}
+        path={entry.name}
+        workspaceId="workspace-1"
+      />,
+    );
+    return fetchMock;
+  }
+
+  it("D22 当前文件的 file 请求还在途时删它：该请求被中止，迟到的正文不显示，预览区是空态", async () => {
+    const held = deferredResponse();
+    const fetchMock = mount(fileEntry("a.md"), () => held.promise);
+    const previews = () => fetchMock.mock.calls.filter(([path]) => path === fileUrl("a.md"));
+    await waitFor(() => expect(previews()).toHaveLength(1));
+    expect(previews()[0]?.[1]?.signal?.aborted).toBe(false);
+
+    fireEvent.click(confirmButton(await openDelete("a.md")));
+    await confirmGone();
+    await settle();
+    expect(previews().map(([, options]) => options?.signal?.aborted)).toStrictEqual([true]);
+    expectEmptyPreview();
+    expect(selectedCount()).toBe(0);
+
+    await act(async () => {
+      held.resolve(textPreviewResponse("迟到的正文"));
+    });
+    await settle();
+    expect(previewRegion().queryByText("迟到的正文", { exact: true })).toBeNull();
+    expectEmptyPreview();
+    expect(previews()).toHaveLength(1);
+  });
+
+  it("D23 当前文件是已显示的图片：删除后它的 blob 地址恰被释放一次，预览区是空态", async () => {
+    const blobUrls = stubBlobUrls(["blob:pic"]);
+    mount(fileEntry("pic.png", 8), () => imagePreviewResponse());
+    expect(await screen.findByRole("img", { name: "pic.png" })).toBeTruthy();
+    expect(blobUrls.revokeObjectURL).not.toHaveBeenCalled();
+
+    fireEvent.click(confirmButton(await openDelete("pic.png")));
+    await confirmGone();
+    await settle();
+    expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:pic"]]);
+    expect(blobUrls.createObjectURL).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("img", { name: "pic.png" })).toBeNull();
+    expectEmptyPreview();
   });
 });

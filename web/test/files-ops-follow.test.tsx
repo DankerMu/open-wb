@@ -28,6 +28,7 @@ import {
   openFiles,
   openRename,
   renameTo,
+  rowsUnder,
   treeUrl,
 } from "./files-ops-support.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
@@ -38,14 +39,6 @@ afterEach(async () => {
   cleanupFilesFixture();
   await yieldMacrotask();
 });
-
-/** `折叠 <目录>` 那一行之下的各行名字。 */
-function rowsUnder(directory: string) {
-  const names = row(`折叠 ${directory}`)
-    .closest("li")
-    ?.querySelectorAll(':scope > ul [data-slot="tree-name"]');
-  return [...(names ?? [])].map((node) => node.textContent);
-}
 
 describe("当前文件随操作变化", () => {
   it("R9 预览 out/a.md 时把 out 改名为 dist：选中项与地址跟到 dist/a.md，dist 仍展开；其后的请求恰为 POST、新路径的 file、根的 tree", async () => {

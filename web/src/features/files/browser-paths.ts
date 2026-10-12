@@ -173,6 +173,40 @@ export function loadedDirectoryPaths(cache: DirectoryCache) {
 }
 
 /**
+ * `移动到…` 可选的目标目录，`from` 是要移动的条目。只收树上此刻可见且列表已加载的目录：根（列表已
+ * 加载即算），以及自身与各级上级都在 `expanded` 里、自身列表已加载的目录——自根沿各级列表里列为目录
+ * 的条目下行，不看 `cache` 里还有哪些键：地址定位会把上级没列出的目录的列表留在缓存里，那样的目录在
+ * 树上没有行。再去掉 `from` 自身与它的后代（`movedPath` 的判法：同级的 `output` 不在 `out` 之下）和它
+ * 当前的父目录。次序同树上自上而下，根是 `""`。加载过但折叠着的目录不在其中，这一点与
+ * `loadedDirectoryPaths` 不同。
+ */
+export function moveTargets(
+  cache: DirectoryCache,
+  expanded: ReadonlySet<string>,
+  from: string,
+): string[] {
+  const visible: string[] = [];
+  const visit = (path: string) => {
+    // `Object.hasOwn`：没加载过的 `__proto__` 目录读出来的是对象原型，不是列表。
+    const listing = Object.hasOwn(cache, path) ? cache[path] : undefined;
+    if (!listing) {
+      return;
+    }
+
+    visible.push(path);
+    for (const entry of expanded.has(path) ? listing.entries : []) {
+      const child = workspacePath(path, entry.name);
+      if (entry.type === "dir" && expanded.has(child)) {
+        visit(child);
+      }
+    }
+  };
+  visit("");
+  const parent = parentPath(from);
+  return visible.filter((path) => path !== parent && movedPath(path, from, null) !== null);
+}
+
+/**
  * 定位到 `path` 的下一步，只看已加载的列表。各级父目录没加载就是下一个要请求的 `unloaded`——不看
  * 它在不在上一级的列表里：有没有、能不能列由服务端答复。`expand` 是其中在树上有行的那些（根，以及
  * 被一个有行的上级列为目录的）：只有它们会被展开；`unloaded` 不在 `expand` 里即它在树上没有行。

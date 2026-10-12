@@ -1,6 +1,7 @@
 import {
   type FormEvent,
   type PropsWithChildren,
+  type Ref,
   type RefObject,
   useId,
   useLayoutEffect,
@@ -73,15 +74,43 @@ type DeleteEntryDialogProps = {
   onConfirm(): void;
 };
 
+type MoveDialogProps = {
+  /** 可选的目标目录（`moveTargets`），对话框打开时取定；空数组即没有可选目标。 */
+  targets: readonly string[];
+  workspaceName: string;
+  error: string | null;
+  pending: boolean;
+  /** 该行的 `更多操作 <名>`。 */
+  returnFocus: ReturnFocus;
+  onCancel(): void;
+  /** `target` 是 `targets` 里的一项，原样。 */
+  onMove(target: string): void;
+};
+
+type DirectoryFieldProps = {
+  label: string;
+  directories: readonly string[];
+  /** 根项显示 `根目录　<空间名>`，不显示字面 root 或绝对路径。 */
+  workspaceName: string;
+  value: string;
+  onChange(path: string): void;
+  ref: Ref<HTMLSelectElement>;
+};
+
 type CreationDialogProps = PropsWithChildren<{
   title: string;
   /** 提交按钮的字样，缺省 `创建`。 */
   submitLabel?: string;
+  /** 为真时提交按钮禁用（没有可提交的内容）；请求挂起期间它本来就禁用。 */
+  submitDisabled?: boolean;
   /** 请求挂起期间的说明，缺省是创建的那一句。 */
   pendingNote?: string;
   error: string | null;
   pending: boolean;
-  /** 打开时聚焦的控件（`工作空间名称` / `位置` / `名称`）；是输入框时连同全选它的内容。 */
+  /**
+   * 打开时聚焦的控件（`工作空间名称` / `位置` / `名称` / `目标位置`）；是输入框时连同全选它的内容。
+   * 没有挂上（`移动到` 没有可选目标时不渲染下拉）就聚焦 `取消`。
+   */
   initialFocus: RefObject<HTMLElement | null>;
   returnFocus: ReturnFocus;
   onCancel(): void;
@@ -98,14 +127,14 @@ const FIELD = "flex flex-col gap-1.5";
 /** 对话框内的失败文案。 */
 const ERROR_NOTE =
   "m-0 rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-(--wb-status-error-text) [overflow-wrap:anywhere]";
-/** `位置` 是原生 `<select>`（拷入层没有 select）；外观对齐拷入层 `Input`。 */
+/** `位置`、`目标位置` 是原生 `<select>`（拷入层没有 select）；外观对齐拷入层 `Input`。 */
 const SELECT =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
 
 /**
- * 创建与重命名对话框共用的外框：标题、表单、挂起说明、错误与 `取消` / 提交按钮（`创建`、`重命名`）。Escape、右上 `关闭`、
- * 遮罩点击都等同 `取消`（挂起期即取消等待，不锁关闭）；取消类关闭后焦点还给 `returnFocus`。
- * Enter 走表单的原生提交，本文件不写键盘处理。
+ * 创建、重命名与移动对话框共用的外框：标题、表单、挂起说明、错误与 `取消` / 提交按钮（`创建`、`重命名`、`移动`）。
+ * Escape、右上 `关闭`、遮罩点击都等同 `取消`（挂起期即取消等待，不锁关闭）；取消类关闭后焦点还给
+ * `returnFocus`。Enter 走表单的原生提交，本文件不写键盘处理。
  */
 function CreationDialog({
   children,
@@ -116,9 +145,11 @@ function CreationDialog({
   pending,
   pendingNote = "正在创建。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。",
   returnFocus,
+  submitDisabled = false,
   submitLabel = "创建",
   title,
 }: CreationDialogProps) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
   const onOpenChange = (open: boolean) => {
     if (!open) onCancel();
   };
@@ -152,7 +183,7 @@ function CreationDialog({
         onKeyDown={fallback.onKeyDown}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
-          const first = initialFocus.current;
+          const first = initialFocus.current ?? cancelRef.current;
           first?.focus();
           if (first instanceof HTMLInputElement) first.select();
         }}
@@ -174,16 +205,47 @@ function CreationDialog({
             </p>
           ) : null}
           <div className="flex justify-end gap-2">
-            <Button onClick={onCancel} type="button" variant="ghost">
+            <Button onClick={onCancel} ref={cancelRef} type="button" variant="ghost">
               取消
             </Button>
-            <Button disabled={pending} type="submit">
+            <Button disabled={pending || submitDisabled} type="submit">
               {submitLabel}
             </Button>
           </div>
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** 一行标签加目录下拉：`新建文件夹` 的 `位置` 与 `移动到` 的 `目标位置`。选项的值是目录路径，根是 `""`。 */
+function DirectoryField({
+  directories,
+  label,
+  onChange,
+  ref,
+  value,
+  workspaceName,
+}: DirectoryFieldProps) {
+  const id = useId();
+
+  return (
+    <div className={FIELD}>
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        className={SELECT}
+        id={id}
+        onChange={(event) => onChange(event.target.value)}
+        ref={ref}
+        value={value}
+      >
+        {directories.map((path) => (
+          <option key={path} value={path}>
+            {path.length === 0 ? `根目录　${workspaceName}` : path}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -262,7 +324,6 @@ export function DirectoryDialog({
   onCreate,
 }: DirectoryDialogProps) {
   const parentRef = useRef<HTMLSelectElement>(null);
-  const parentId = useId();
   const nameId = useId();
   const [name, setName] = useState("");
   const [parent, setParent] = useState(directories[0] ?? "");
@@ -295,22 +356,14 @@ export function DirectoryDialog({
       returnFocus={returnFocus}
       title="新建文件夹"
     >
-      <div className={FIELD}>
-        <Label htmlFor={parentId}>位置</Label>
-        <select
-          className={SELECT}
-          id={parentId}
-          onChange={(event) => setParent(event.target.value)}
-          ref={parentRef}
-          value={parent}
-        >
-          {directories.map((path) => (
-            <option key={path} value={path}>
-              {path.length === 0 ? `根目录　${workspaceName}` : path}
-            </option>
-          ))}
-        </select>
-      </div>
+      <DirectoryField
+        directories={directories}
+        label="位置"
+        onChange={setParent}
+        ref={parentRef}
+        value={parent}
+        workspaceName={workspaceName}
+      />
       <div className={FIELD}>
         <Label htmlFor={nameId}>文件夹名称</Label>
         <Input
@@ -380,6 +433,57 @@ export function RenameDialog({
           value={text}
         />
       </div>
+    </CreationDialog>
+  );
+}
+
+/**
+ * `移动到` 对话框。`目标位置` 的选项就是 `targets`，缺省选第一项；提交把选中的那一项交给 `onMove`，
+ * 这里不拼路径。没有可选目标：不渲染下拉，显示说明文案，`移动` 禁用，提交表单也不调 `onMove`，初始
+ * 焦点落在 `取消`（外框的回落）。
+ */
+export function MoveDialog({
+  error,
+  onCancel,
+  onMove,
+  pending,
+  returnFocus,
+  targets,
+  workspaceName,
+}: MoveDialogProps) {
+  const targetRef = useRef<HTMLSelectElement>(null);
+  const [target, setTarget] = useState(targets[0]);
+
+  function submitTarget(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (target !== undefined) onMove(target);
+  }
+
+  return (
+    <CreationDialog
+      error={error}
+      initialFocus={targetRef}
+      onCancel={onCancel}
+      onSubmit={submitTarget}
+      pending={pending}
+      pendingNote="正在移动。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。"
+      returnFocus={returnFocus}
+      submitDisabled={target === undefined}
+      submitLabel="移动"
+      title="移动到"
+    >
+      {target === undefined ? (
+        <p className="m-0 text-muted-foreground">没有可用的目标目录，请先展开目标目录</p>
+      ) : (
+        <DirectoryField
+          directories={targets}
+          label="目标位置"
+          onChange={setTarget}
+          ref={targetRef}
+          value={target}
+          workspaceName={workspaceName}
+        />
+      )}
     </CreationDialog>
   );
 }

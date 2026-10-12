@@ -8,6 +8,7 @@ import {
   movedKeys,
   movedPath,
   movedTarget,
+  moveTargets,
   normalizedPath,
   parentPath,
   renameTarget,
@@ -277,5 +278,89 @@ describe("movedCache", () => {
     const before = cache();
     movedCache(before, "out", "dist");
     expect(before).toStrictEqual(cache());
+  });
+});
+
+// 「移动到…」的目标：期望值按规格「文件操作界面」那一条手写——树上此刻可见且列表已加载的目录（根，
+// 以及自身与各级上级都展开着、列表已加载的目录），去掉条目自身、它的后代与它当前的父目录。
+describe("moveTargets", () => {
+  const dir = (name: string) => ({ name, type: "dir" as const, size: 0, mtime: 100 });
+  const file = (name: string) => ({ name, type: "file" as const, size: 4, mtime: 200 });
+  const cache = (): DirectoryCache => ({
+    "": { path: "", entries: [dir("docs"), dir("out"), dir("output"), file("top.md")] },
+    docs: { path: "docs", entries: [] },
+    out: { path: "out", entries: [dir("sub"), file("a.md")] },
+    "out/sub": { path: "out/sub", entries: [file("x.md")] },
+    output: { path: "output", entries: [file("o.md")] },
+  });
+  const all = new Set(["", "docs", "out", "out/sub", "output"]);
+
+  it("根下的文件：当前父目录（根）不在，其余展开且已加载的目录按树上自上而下的次序", () => {
+    expect(moveTargets(cache(), all, "top.md")).toStrictEqual(["docs", "out", "out/sub", "output"]);
+  });
+
+  it("目录里的文件：根在首位，它的父目录不在", () => {
+    expect(moveTargets(cache(), all, "out/a.md")).toStrictEqual(["", "docs", "out/sub", "output"]);
+    expect(moveTargets(cache(), all, "out/sub/x.md")).toStrictEqual(["", "docs", "out", "output"]);
+  });
+
+  it("目录：自身、后代与当前父目录都不在；名字以它开头的同级 output 在", () => {
+    expect(moveTargets(cache(), all, "out")).toStrictEqual(["docs", "output"]);
+    expect(moveTargets(cache(), all, "out/sub")).toStrictEqual(["", "docs", "output"]);
+  });
+
+  it("加载过但折叠着的目录不在", () => {
+    const expanded = new Set(["", "out", "out/sub", "output"]);
+    expect(moveTargets(cache(), expanded, "top.md")).toStrictEqual(["out", "out/sub", "output"]);
+  });
+
+  it("上级折叠着的目录不在，即使它自己还在展开集合里", () => {
+    const expanded = new Set(["", "docs", "out/sub", "output"]);
+    expect(moveTargets(cache(), expanded, "top.md")).toStrictEqual(["docs", "output"]);
+  });
+
+  it("展开了而列表还没加载的目录不在", () => {
+    const { output: _unloaded, ...loaded } = cache();
+    expect(moveTargets(loaded, all, "top.md")).toStrictEqual(["docs", "out", "out/sub"]);
+  });
+
+  it("缓存里有列表、展开集合里也有，但上级的列表没列出它的目录不在（地址定位留下的）", () => {
+    const withGhost: DirectoryCache = {
+      ...cache(),
+      ghost: { path: "ghost", entries: [dir("deep")] },
+      "ghost/deep": { path: "ghost/deep", entries: [] },
+      "out/gone": { path: "out/gone", entries: [] },
+    };
+    const expanded = new Set([...all, "ghost", "ghost/deep", "out/gone"]);
+    expect(moveTargets(withGhost, expanded, "top.md")).toStrictEqual([
+      "docs",
+      "out",
+      "out/sub",
+      "output",
+    ]);
+  });
+
+  it("上级列表里与目录同名的文件不算：只沿列为目录的条目下行", () => {
+    const shadowed: DirectoryCache = {
+      "": { path: "", entries: [file("docs"), dir("out")] },
+      docs: { path: "docs", entries: [] },
+      out: { path: "out", entries: [] },
+    };
+    expect(moveTargets(shadowed, new Set(["", "docs", "out"]), "out/a.md")).toStrictEqual([""]);
+  });
+
+  it("根的列表没加载：没有目标；根折叠着：只有根", () => {
+    const { "": _root, ...rootless } = cache();
+    expect(moveTargets(rootless, all, "out/a.md")).toStrictEqual([]);
+    expect(moveTargets(cache(), new Set(["out", "output"]), "out/a.md")).toStrictEqual([""]);
+  });
+
+  it("名为 __proto__ 的目录没加载过时不被当成已加载", () => {
+    const odd: DirectoryCache = { "": { path: "", entries: [dir("__proto__"), dir("out")] } };
+    expect(moveTargets(odd, new Set(["", "__proto__", "out"]), "out/a.md")).toStrictEqual([""]);
+  });
+
+  it("没有可选目标时是空数组", () => {
+    expect(moveTargets(cache(), new Set(["", "out", "out/sub"]), "out")).toStrictEqual([]);
   });
 });

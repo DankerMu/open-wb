@@ -245,6 +245,9 @@ describe("删除确认框的焦点与模态清理", () => {
     const rename = within(menu).getByRole("menuitem", { name: "重命名" });
     await waitFor(() => expect(document.activeElement).toBe(rename));
     fireEvent.keyDown(rename, { key: "ArrowDown" });
+    const move = within(menu).getByRole("menuitem", { name: "移动到…" });
+    await waitFor(() => expect(document.activeElement).toBe(move));
+    fireEvent.keyDown(move, { key: "ArrowDown" });
     const remove = within(menu).getByRole("menuitem", { name: "删除" });
     await waitFor(() => expect(document.activeElement).toBe(remove));
     fireEvent.keyDown(remove, { key: "Enter" });

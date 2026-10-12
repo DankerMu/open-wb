@@ -103,13 +103,13 @@ function useRowMark(marks: TreeMarks | undefined, path: string) {
  * 行菜单 `更多操作 <名>`：行按钮的兄弟元素，画在行的右端——放进行按钮会改掉行的可访问名，按钮里也
  * 不能再套按钮。始终在 DOM 里且可聚焦；只在可悬停的宽屏上以透明度弱化，行悬停、行或它自己有焦点、
  * 菜单打开时显现。`modal={false}`：不锁 body 的指针事件，随后打开的对话框自己管模态。
- * 各项送出的都是这一行自己的 `path`（父目录接上列表里的名字，`workspacePath`），不是选中项的。
+ * 各项送出的都是这一行自己的 `path`（父目录接上列表里的名字，`workspacePath`）与 `name`，不是选中项的。
  * `下载` 是链接：浏览器直接导航，文件名由服务端的 Content-Disposition 给。没给 `actions` 就不渲染。
  */
 function RowMenu({ actions, focusMenuPath, name, path, type }: RowMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
 
-  // 这一行是刚被重命名出来的：把焦点接过来（旧行连同它的按钮已卸载）。删除不经这里：被删的行没有新行。
+  // 这一行是刚被重命名或移动出来的：把焦点接过来（旧行连同它的按钮已卸载）。删除不经这里：被删的行没有新行。
   useEffect(() => {
     if (focusMenuPath && focusMenuPath.current === path) {
       focusMenuPath.current = null;
@@ -139,6 +139,10 @@ function RowMenu({ actions, focusMenuPath, name, path, type }: RowMenuProps) {
         <DropdownMenuItem onSelect={() => actions.rename({ name, path, type }, triggerRef.current)}>
           <Icon name="pencil" size={14} />
           重命名
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => actions.moveTo({ name, path, type }, triggerRef.current)}>
+          <Icon name="folder" size={14} />
+          移动到…
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => actions.remove({ name, path, type }, triggerRef.current)}
