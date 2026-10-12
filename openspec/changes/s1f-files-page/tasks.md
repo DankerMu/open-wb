@@ -541,11 +541,11 @@ Minimal mergeable slice: 三个预览器各自可单独合入（20.1、20.2、20
   既有测试里按文件路径读源码的断言随抽取核对：`web/test/files-page.test.tsx:536-544`（`tree.tsx` 含 `fileIcon(`、`formatSize(`、`size={14}`，不含手写图标路径）、`files-empty-layout.test.tsx:183-189`（`tree.tsx`、`page.tsx` 不含 `此文件夹为空` 等三个字面量）、`topbar.test.tsx:263`（`page.tsx` 不含 `<h1`）——
   树条目的渲染留在 `tree.tsx` 则都原样通过；若把它一并搬进新文件，这些断言读的路径同刀改指新文件（断言内容不变，记入偏离记录）。`data-slot` 与 3.1 列的 DOM 结构随组件原样带走。
   实施注记见 `implementation-notes.md`「21.1，含分摊的 21.3 / 21.5 条款（#1098）」。
-- [ ] 21.2 `page.tsx`：`path` 查询参数（files-web「地址定位到文件」）——深链逐级展开、选中以 `replace` 写入、切换空间与 `ws` 被纠正时移除、指向目录 / 不存在 / 越界的三种呈现。
+- [x] 21.2 `page.tsx`：`path` 查询参数（files-web「地址定位到文件」）——深链逐级展开、选中以 `replace` 写入、切换空间与 `ws` 被纠正时移除、指向目录 / 不存在 / 越界的三种呈现。
   实施注记见 `implementation-notes.md`「21.2、21.4，含分摊的 21.3 / 21.5 条款（#1099）」。
-- [ ] 21.3 测试（新文件 `web/test/files-deep-link.test.tsx`、`workspace-browser.test.tsx`）：「地址定位到文件」前三个场景与「工作空间浏览器组件」三个场景；静态断言 `features/files` 不从 `features/chat` 导入。
-- [ ] 21.4 FL 行：带文件的地址可直接打开并定位、刷新后仍在同一文件、指向不存在文件的地址的表现；结论 `待签`。
-- [ ] 21.5 变异证据：选中时用 `push` → 「没有新增历史记录」判红；`ws` 被纠正时保留 `path` → 非法 `ws` 用例判红；`onlyPaths` 下仍请求 `tree` → 「没有新的 `tree` 请求」判红。
+- [x] 21.3 测试（新文件 `web/test/files-deep-link.test.tsx`、`workspace-browser.test.tsx`）：「地址定位到文件」前三个场景与「工作空间浏览器组件」三个场景；静态断言 `features/files` 不从 `features/chat` 导入。
+- [x] 21.4 FL 行：带文件的地址可直接打开并定位、刷新后仍在同一文件、指向不存在文件的地址的表现；结论 `待签`。
+- [x] 21.5 变异证据：选中时用 `push` → 「没有新增历史记录」判红；`ws` 被纠正时保留 `path` → 非法 `ws` 用例判红；`onlyPaths` 下仍请求 `tree` → 「没有新的 `tree` 请求」判红。
 
 Suggested fixture level: compact - 前端结构抽取加一个查询参数；路径只作为数据交给服务端裁决
 Minimal mergeable slice: 21.1（抽组件，行为不变，既有文件页测试保绿）先合；21.2 的地址参数随后。会话页卡片的 `查看详情` 在组 25 之前保持现有的 `?ws=` 导航，本组不动它
