@@ -889,3 +889,68 @@
 - 变异：不可观察：`submit` 缺省第三参时的 409 文案（删除路由不答 409）；残留 `focusMenuPath` 的清除（见上）；`emptyNote` 搬家（行为等价，既有 `chat-workspace-sidebar*` 保绿为证）。
 - 变异：不适用（服务端未改）：穿越、符号链接、跨工作空间 id、他人空间先于路径检查的相同 404、越界写 `sandbox.reject`，由 `server/test/workspaces-delete.test.ts`（`:244` 拒绝项、`:459` 回收目录被预先占位、`:541` 回收目录不可见）与 `workspaces-http-boundary.test.ts`（`:135`、`:298`、`:326`、`:378`）承担；整段编码与无 body 由 `web/test/api-files-delete.test.ts` 承担。
 - 实现后更正（2026-10-12，据实现者报告）：① `workspace-browser.tsx` 收尾 716 行；除本节点名的 `movedKeys` 与 `emptyNote` 外，另抽了纯函数 `movedTarget`（`followEntry` 原地加宽后认知复杂度 19）。② 测试拆成 `files-ops-delete.test.tsx`（14 例）与 `files-ops-delete-follow.test.tsx`（12 例）。③ 边界外动了一处类型：`workspace-browser.test.tsx:81` 的 `vi.fn<(path: string) => void>` 改为 `string | null`，断言未动。④ 变异出入：「不清选中 → D11 红」不成立——整页上宿主把 `path=null` 送回来，`path` 的 effect 自己清掉选中，补了组件级的 D20b 才红；「跟随改走 `refresh()` → D4、D12 红」不成立（删根下条目时 `refresh()` 也只重取根），红在 D4b、D13、D13b、D20；「409 文案不可观察」用假应答补了 D5b 后可观察；`failedDirectoriesRef` 不丢、不清 `focusMenuPath` 两条为绿、不可观察。⑤ D7 去掉「按压遮罩后焦点仍在 `取消`」一句：只在 jsdom 成立，真实 Chromium 里焦点落到 `body`（实测；Tab 仍困在框内，确认框仍开）。⑥ 未测：窄屏、深色主题、会话侧边栏里的同一个菜单；「无选中文件而地址 `path` 指向被删目录时地址不改」没有用例。
+
+## 22.2，含分摊的 22.6 / 22.7 条款（#1102）
+
+- 定性与前提：触及 Critical Path「沙箱与文件边界」的相邻面，服务端、`sandbox.resolve`、`op` 集合零改动，但客户端拼出发往 `move` 的 `to`，同 #1100 口径：两席评审加 owner 白盒标注。白盒入口是新纯函数 `moveTargets`（`browser-paths.ts`）与 `entry-ops.tsx` 里 `to = workspacePath(target, name)` 一行，对照未改的 move 路由（D23 检查次序）。前置 #1049、#1083（`web/src/lib/api-files.ts:505` 的 `moveEntry`）已在；#1100 未进主干（终轮评审中），#1101 尚无代码；实测 1.2 据 #1100 注记已勾，本次未复核；`tasks.md:45`「22.1–22.8 等 1.2」是过时措辞。22.8 没有点名本刀的变异，issue 也没分摊 22.8 条款，变异表照下列自拟。
+- 目标列表（纯函数，放 `browser-paths.ts`，现 242 行，加约 20）：`moveTargets(cache: DirectoryCache, expanded: ReadonlySet<string>, from: string): string[]`。做法：自根沿已加载列表逐层下行（写法同 `loadedDirectoryPaths:128-150`，不得用 `Object.keys(cache)`），只收「自身与各级上级都在 `expanded` 里且 `cache` 有列表」的目录，再去掉 `movedPath(p, from, null) === null`（自身与后代，前缀安全）与 `p === parentPath(from)`；次序同树上自上而下，根是 `""`。不能直接复用 `loadedDirectoryPaths`：它含「加载过但已折叠」的目录（`位置` 下拉有意如此），落进折叠目录后新行不挂载，「焦点落在新行」做不到。单只判 `expanded.has(p)` 也不够：`toggleDirectory:287-301` 折叠父目录不清子目录的展开项。
+- 对话框（`dialogs.tsx`，现 358 行，加约 70）：新 `MoveDialog`，标题 `移动到`，`<Label>` 为 `目标位置`，原生 `<select>`（同 `DirectoryDialog:273-285`，不拷入新 primitive）；根项显示 `根目录　<空间名>`，其余显示路径；按钮 `取消` / `移动`；`pendingNote` 取 `正在移动。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。`（规格没写，记偏离）。两处 select 收成文件内的 `DirectorySelect` 共用以免 jscpd，`files-overlays.test.tsx` 不改一字须仍绿。`CreationDialog:80-161` 加 `submitDisabled?: boolean`（`disabled={pending || submitDisabled}`）。
+- 没有可选目标：不渲染 select，原位显示 `没有可用的目标目录，请先展开目标目录`，`移动` 禁用，表单提交零请求。现状缺口：`onOpenAutoFocus:123-128` 已 `preventDefault`，`initialFocus.current` 为空时焦点留在模态之外。修法是 `CreationDialog` 给自己的 `取消` 挂引用，`initialFocus.current ?? 取消`（约 3 行，不加 prop）。
+- 接线（`entry-ops.tsx`，现 86 行，加约 35）：`EntryActions` 加 `moveTo(target: EntryTarget, trigger: HTMLElement | null): void`；沿用 #1101 留下的 `useRequestDialog` 用法（单实例加判别字段 `kind`，或它另起的实例，照它的）。目标列表在打开时取定并存进 subject（`targets: string[]`），挂起期间父层重列不改下拉（记偏离）。提交为 `client.moveEntry(workspaceId, {from: path, to: workspacePath(target, name)}, {signal})`，`conflictText` 为 `目标位置已存在同名条目`，成功回调同重命名（`focusMenuPath.current = to; onMoved(from, to)`）。`useEntryOperations` 因此多收缓存、展开集合（建议传 `cacheRef` / `expandedPathsRef`）与空间名 `name`；`actions` 的引用稳定性不得退化。`tree.tsx`（350 行，加约 5）：`RowMenu:108-153` 在 `重命名` 之后加 `移动到…`（U+2026；图标用冻结区已有的 `folder`，`web/src/ui/icon.tsx` 没有 move 类图标，不得新增）。规格次序是 `重命名`、`移动到…`、`删除`、`下载`。
+- 跟随（复用 `movedPath` / `movedCache`，不新增纯函数语义），相对 #1100 的 `followEntry:603-635` 改三处：
+- `:627` 只重列 `parentPath(to)`，改为 `for (const layer of new Set([parentPath(from), parentPath(to)])) loadDirectory(layer, true)`。去重是必须的：否则重命名对同一层中止再发，R1 / R9 / R12 的请求串变红。次序固定为先源父层后目标层。
+- 映射之前先丢掉 `to` 之下的旧键（判据同 `movedCache` 的 `stale`：`movedPath(p, to, null) === null`），对象是 `expandedPaths`、`directoryErrors`、`failedDirectoriesRef`，并 `abandonRequests(directoryRequestsRef.current, to)`。`revealRef` 不清：指向 `to` 之下的定位不是旧状态。
+- 选中项、地址、已展开子层与子层缓存照旧经 `movedPath` / `movedCache` 跟随。当前文件在 `from` 之下时在新路径重选一次（同 #1100 的「保持预览」偏离），请求次序为 POST、`file`、源父层 `tree`、目标层 `tree`。
+- 焦点与残留的 `focusMenuPath`：成功后落在新行的 `更多操作 <名>`，可实现——目标恒为可见且已加载的目录，`movedCache` 在同一次提交里把条目放进目标层，新行挂上即取走；旧行已卸载，`onCloseAutoFocus` 对它 `focus()` 是空操作。取消类关闭回到原行触发器。`focusMenuPath` 残留对移动不可达，#1100 记录的残余（源父层在挂起期被重列并丢了该条目时新行晚挂、迟一拍抢焦点）原样保留，不在本刀修。
+- 行预算：`workspace-browser.tsx` 718 / 720。本刀在该文件的必要净增约 7 行（调用处传参 +4、两层重列 +2、清旧键 +1 以上），放不下。开工先 `wc -l` 并看 #1101 把什么搬走了。`followEntry` 若仍在该文件，本刀第一个提交把它原样搬进新文件 `web/src/features/files/follow-entry.ts`（约 45 行，搬后该文件约 675 行，#1103 也要这块余量）。形状是 `useFollowEntry({cacheRef, directoryRequestsRef, expandedPathsRef, failedDirectoriesRef, revealRef, selectedFileRef, setDirectories, setDirectoryErrors, setExpandedPaths, setLoadingPaths, loadDirectory, onPathChange, selectFile})`，先做行为等价的搬移（R1–R21 不改须全绿），再做上一条的三处改动。不得靠删注释、压行换绿；#1340 口径：不新增以路径为键的普通对象，`moveTargets` 返回数组。
+- 必改的既有断言（等价改写，不得放松为子集）：`web/test/files-ops-row-menu.test.tsx` 的 R17（`:144-174`，两处 `toStrictEqual`，现为 `["重命名","下载"]` / `["重命名"]`）在 #1101 留下的数组下标 1 处插入 `移动到…`，终态 `["重命名","移动到…","删除","下载"]` / `["重命名","移动到…","删除"]`，用例名同步。R21（`:207-253`）只断禁止项，`:251` 的正则不动，`:230-233` 的种子可加一行 `["out","移动到…"]`。核对不红：R12（首项仍是 `重命名`）、R13、R16、`files-page.test.tsx:130-132`、`chat-workspace-sidebar-changes.test.tsx` C7（不枚举菜单项）、`web/e2e/**`（没有枚举文件行菜单项的断言）、FL-28 / FL-29 的文字。开工仍须在 #1101 之后的底上重跑 `git grep -n '"重命名"\|menuitem' -- web/test web/e2e`。
+- 新测试 `web/test/files-ops-move.test.tsx`（本刀建，#1103 续加，控制在 450 行内；整页 `openFiles`，请求串 `toStrictEqual`；`openMove(name)` / `targetSelect(dialog)` / `moveButton(dialog)` 加进 `files-ops-support.tsx`，四种取消写成参数化，不抄 R5–R8 的函数体；正则一律字面量）：
+- 「移动到」第一例 M1：根有 `a.md`、已展开的 `out`、未展开的 `docs`；下拉的 `option` 值恰为 `["out"]`；提交后 `mark()` 恰为 `[POST move {"from":"a.md","to":"out/a.md"}, tree(""), tree("out")]`，框关，`a.md` 在 `out` 之下、不在根下。
+- 「移动到」第二例 M2：`out` 与 `out/sub` 都展开，对 `out` 打开——没有 `目标位置` 控件，有那句文案，`移动` 禁用，提交表单零 POST，等一个宏任务后焦点在 `取消`。
+- 409 M3：框内 `role="alert"` 的 `目标位置已存在同名条目`，框仍开、`移动` 可用、可再提交，树不变且没有 `tree` 请求。M3b：404 显示信封文案；401 不显示。
+- 过滤细目 M4：同级 `output`（展开）在移动 `out` 时仍在；展开后又折叠的 `docs` 不在；父目录折叠而自身仍在展开集合里的 `out/sub` 不在；移动 `out/a.md` 时首项值为 `""`、文字 `根目录　设计文档`。
+- 「当前文件随操作变化」第二子句 M5：照场景串——先把 `out` 改名 `dist`，再把 `dist/a.md` 移到根；选中行与地址 `path=a.md`，其后请求恰为 `[POST {"from":"dist/a.md","to":"a.md"}, file(a.md), tree("dist"), tree("")]`。`to` 是 `a.md` 不是 `/a.md`。
+- 「随操作更新」的移动面 M6：已展开且已加载的 `out/sub` 移到已展开的 `output`，`折叠 sub` 在 `output` 之下，没有 `tree?path=output/sub`，请求恰为 POST、`tree("out")`、`tree("output")`。
+- 「请求中的对话框」M7：挂起时 `移动` 禁用，再提交表单仍恰 1 次 POST，`取消` 后 `signal.aborted`、框关，迟到应答不重开、不报错、树不变。「挂起期点遮罩」M8：中止，焦点回 `更多操作 a.md`，恰 1 次 POST。
+- 「初始焦点经受延迟回焦」M9：让出一个宏任务后焦点在 `目标位置`，`aria-modal="true"`。「取消类关闭无模态残留」M10：四种取消后焦点回触发器，`body.style.pointerEvents` 为空，容器无 `aria-hidden`，零 POST。
+- 成功后焦点 M11：在 `out` 那个 `<li>` 之内的 `更多操作 a.md` 上（新旧可访问名相同，须断言所在位置）。无 Toast M12（写法同 R15）。
+- `to` 之下的旧状态 M13：展开 `out/a`（目录）后改列表使 `out` 不再列它，点 `刷新`（`out/a` 读取失败、展开项留着）；再把根下折叠的目录 `a` 移进 `out`——新行是 `展开 a`，树内没有它的 `role="alert"`，请求恰为 POST、`tree("")`、`tree("out")`。
+- `web/test/browser-paths.test.ts`（197 行）加 `moveTargets` 用例：自身 / 后代 / `out` 对 `output` / 当前父目录 / 折叠而有缓存 / 展开而未加载 / 缓存里有键但上级列表没列出的目录（地址定位留下的，写法参照 `files-deep-link-failures.test.ts:266`）都不在结果里。
+- 客户端一侧的逃逸向量（进变异表）：① 根目标拼成 `/a.md` 或 `""`；② 目标取自 `Object.keys(cache)`，把地址栏送进缓存、树上没有行的目录列为目标；③ 对 `from` / `to` 做规范化或去空白（名字须原样；`to` 的每一段都来自服务端列表，没有用户键入，面比重命名窄）；④ 自身 / 后代过滤用裸 `startsWith`。服务端一侧由未改的测试承担，本刀不适用：`server/test/workspaces-move.test.ts`「其它拒绝」表（`d1 → d1/sub/d1` 400，`to: ""` / `../a.md` / `x/` 403 各一行 `sandbox.reject`，`nodir/a.md` 404）、`:282`（他人 / 未知 / 无根 id 先于路径检查的相同 404）、`:329`（子树判断先于存在性）、`:374`（符号链接）、`:177`（409 不覆盖不合并）、`workspaces-http-boundary.test.ts:137-145`、`sandbox-resolve.test.ts`。
+- FL 行（一行；FL-28 / FL-29 已占，#1101 若恰加一行为 FL-30，本刀即 FL-31，开工时按它实际占用的行数顺延；结论 `待签`）：
+- 操作：`接 FL-30（先核对上一行留下的树：文件页停在 FL-05 的空间，uploads 已展开且里面有 readme.md 与 notes.csv，docs 是空的；这一行做完之前不要到会话标签页操作）；docs 没展开就点它展开，其它文件夹保持折叠；点 uploads 里的 readme.md，点这一行行尾的「更多操作」按钮，选「移动到…」，先看「目标位置」下拉里有哪几项，再选 docs 点「移动」；把 uploads 里的 notes.csv 重命名为 readme.md；对 docs 里的 readme.md 选「移动到…」，目标选 uploads，点「移动」，看到提示后点「取消」；点 docs 把它折叠，对 uploads 这一行选「移动到…」，看完后按 Escape；最后把 uploads 里的 readme.md 改回 notes.csv，展开 docs，把 docs 里的 readme.md 用「移动到…」移回 uploads`
+- 期望：`对话框标题是「移动到」，打开时光标在「目标位置」下拉上；第一次下拉里恰有两项：以「根目录」开头并带空间名的一项与 docs，没有 uploads；点「移动」后对话框关闭，readme.md 出现在 docs 里、uploads 里不再有它，这一行仍是选中的样子，预览区仍是它的内容，地址栏 path 一段以 docs 开头，键盘焦点在它新位置那一行的「更多操作」按钮上；第二次移动显示「目标位置已存在同名条目」，对话框不关，树不变，点「取消」后焦点回到 docs 里 readme.md 这一行的「更多操作」按钮；对 uploads 打开的对话框里没有下拉，显示「没有可用的目标目录，请先展开目标目录」，「移动」是灰的、点不动，按 Escape 后焦点回到 uploads 这一行的「更多操作」按钮；全程没有弹出提示条；移回后树与开始时一样，readme.md 仍是选中的`
+- 坑：docs 的展开不随页面刷新还原（FL-27 刷新过），所以行内写「没展开就展开」；FL-07 的长名文件夹必须折叠，否则「恰有两项」不成立；FL-30 若删掉了 readme.md 或 notes.csv，换成 uploads 里仍在的两个文件；真实浏览器里按行序走一遍再提交。走查不加步骤。
+- 规格替换一（`openspec/changes/s1f-files-page/specs/files-web/spec.md`「文件操作界面」的「移动到…」一条，开工前改）：把「下拉 `目标位置` 只列已加载的目录——根 + 已展开目录，去掉条目自身、其后代与其当前父目录；按钮 `取消` / `移动`）。没有可选目标时显示 `没有可用的目标目录，请先展开目标目录` 且 `移动` 禁用。」换成「下拉 `目标位置` 只列树上此刻可见且列表已加载的目录——根，以及自身与各级上级目录都处于展开状态、列表已加载的目录（加载过但折叠着的不列，这一点与 `新建文件夹` 的 `位置` 不同；次序同树上自上而下，根项显示 `根目录　<空间名>`），去掉条目自身、其后代与其当前父目录；列表在对话框打开时取定；按钮 `取消` / `移动`）。没有可选目标时不渲染下拉，显示 `没有可用的目标目录，请先展开目标目录`，`移动` 禁用，初始焦点在 `取消`。」
+- 规格替换二（同文件「创建浮层的焦点时序与模态清理」，开工前改）：正文与场景「初始焦点经受延迟回焦」THEN 里的两处 `目标位置` 都改成「`目标位置`（没有可选目标时为 `取消`）」。场景「挂起期点遮罩中止请求」的「`重命名` 提交后 `POST …/move` 挂起时同样操作」改成「`重命名`、`移动到` 提交后 `POST …/move` 挂起时同样操作」。同 PR 可顺手同步、不挡开工：「当前文件随操作变化」THEN 的 `a.md` 后补「（移动之后的 `tree` 请求恰为对 `dist` 与根各一次）」；`design.md` D23 末句「目标从已加载的目录里选」改「目标从树上展开着的已加载目录里选」。
+- 变异：`moveTargets` 不去掉当前父目录 → M1（下拉多出根）、单测判红。
+- 变异：不去掉自身或后代 → M2（出现下拉、`移动` 可用）、单测判红。
+- 变异：自身 / 后代过滤用裸 `startsWith(from)` → M4 的 `output` 例与单测判红。
+- 变异：直接用 `loadedDirectoryPaths`（含折叠而有缓存的目录）→ M4 的 `docs` 例与单测判红。
+- 变异：只判 `expanded.has(p)`、不看上级 → M4「父目录折叠的 `out/sub`」例与单测判红。
+- 变异：目标取自 `Object.keys(cache)` → 单测「上级没列出的目录」例判红（逃逸向量）。
+- 变异：`to` 写成 `${target}/${name}` → M5 判红（`to` 变 `/a.md`）（逃逸向量）。
+- 变异：`to` 只发目标目录、不带原名 → M1 判红。
+- 变异：对 `from` / `to` 做 `normalizedPath` 或 `trim` → 在 M1 同文件加一例「名字含首尾空格与 `%`」判红（逃逸向量）。
+- 变异：没有可选目标时 `移动` 不禁用 → M2 判红。
+- 变异：没有可选目标时初始焦点不回落到 `取消` → M2 的焦点断言判红。
+- 变异：409 显示信封 message，或沿用重命名的 `该目录下已存在同名条目` → M3 判红。
+- 变异：409 后关框 → M3 判红。
+- 变异：只重列目标层（#1100 现状）→ M1、M5、M6 的请求串判红。
+- 变异：只重列源父层 → 同上判红。
+- 变异：两层不去重 → 既有 R1 / R9 / R12 的请求串判红。
+- 变异：移动后不更新 `path`（不调 `onPathChange`）→ M5 地址断言判红（22.8「重命名后不更新 `path`」的移动面）。
+- 变异：选中项不跟随 → M5 选中行断言判红。
+- 变异：失败改用 Toast → M12 判红，且 `web/test/ui-layering.test.ts` 拒 `useToast`（22.8 点名的通用项）。
+- 变异：不迁移展开集合或子层缓存 → M6 判红（`展开 sub`，或多出 `tree?path=output/sub`）。
+- 变异：不先清 `to` 之下的旧展开项 / 失败文案 → M13 判红（行成了 `折叠 a`、多出 `tree?path=out/a`、残留 alert）。
+- 变异：挂起时 `移动` 不禁用，或 `submit` 不查在途 → M7「恰 1 次 POST」判红。
+- 变异：`取消` 不中止 → M7 的 `signal.aborted` 判红。
+- 变异：遮罩不等同取消 → M8 判红。
+- 变异：`onOpenAutoFocus` 不聚焦 `目标位置` → M9 判红。
+- 变异：取消后不还焦点 → M10 判红。
+- 变异：成功后不置 `focusMenuPath` → M11 判红。
+- 变异：目录行没有 `移动到…`，或菜单项次序不对 → 改写后的 R17 判红。
+- 变异：预计不可观察：目标列表「打开时取定」对「随渲染重算」（模态期间用户改不了树，只有在途列表落地能区分，没有用例）；`abandonRequests(…, to)`（只在 M13 的状态下另有在途请求时可见，读代码推出）；`followEntry` 搬文件本身（行为等价，由 R1–R21 不改而绿证明）；`DirectorySelect` 抽取（由 `files-overlays.test.tsx` 不改而绿证明）。
+- 变异：不适用（服务端未改，见注记所列服务端用例）：穿越、符号链接、跨工作空间 id、他人空间先于路径检查的相同 404、越界写 `sandbox.reject`、移入自身后代的 400。
+- 开工时的状态（编排方补，2026-10-12）：上面两条规格替换与「同 PR 可顺手同步」的两处（场景「当前文件随操作变化」的 THEN、design D23 末句）已随 fixture 提交逐字写入。本注记写于 #1101 合入之前、审的是 #1100 分支；#1101 现已合入（见上一节「22.4（#1101）」及其「实现后更正」），行号、`workspace-browser.tsx` 的行数（现 716，预算 720）与 `browser-paths.ts` 的导出（新增 `movedKeys` / `movedTarget`）以主干为准，出入记偏离。#1101 评审留下的一条覆盖缺口并入本刀：删除（或移动）当前选中项时的预览清理——在途 `file` 请求被中止、图片的 blob 地址被释放——没有用例；本刀补用例（删除一例即可，放 `files-ops-delete-follow.test.tsx` 或本刀的测试文件），补不出可判定的断言就如实写进 PR。
