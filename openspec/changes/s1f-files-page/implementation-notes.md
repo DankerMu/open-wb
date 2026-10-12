@@ -583,3 +583,35 @@
 - 变异：逃逸向量（服务端未改，由既有测试承担）：遍历、符号链接、跨空间 id、他人空间 404 先于路径检查，见 `server/test/workspaces-http.test.ts`、`workspaces-http-boundary.test.ts`。
 - 变异：不可观察：服务端没有写 `sandbox.reject`（web 测试看不到，只能断零请求）；真实浏览器重载（归 FL-21 / FL-22）。
 - 合入后更正（以 #1361 的 PR 文本为准）：`path` effect 在规范化之前多一条短路——`path` 与当前选中逐字相同时不规范化（否则 `chat-workspace-sidebar-layout.test.tsx` L7 的夹具名 `/../é é&ws=x#h.md` 点击后被当成含 `..` 拦下）；编排方裁定保留，规格句已补。`..\x` 用例改为断言同名文件被选中（整页上「请求根后不存在」与「被拦下」分不出来）；M15 的判红用例是「已选中时地址改到它的别名」；M09a（逐段 trim）只红纯函数表。实现者另定的四个分支（定位进行中改到含 `..` 的写法顶掉进行中的定位；根列表失败时 `..` 仍显示 `文件不存在`；`..` 后刷新只重取根；`path=/`、`//` 同 `path=.`）待 owner 复核。
+
+## 20.9、20.10（#1356）
+
+- 非 Critical Path：服务端零改动，到达 `sandbox.resolve` 的 `path` 值不变。`server/src/workspaces/rest.ts:104-118` 的 `parsePathQuery` 只读 `path`，`file` 路由（`:347-380`）无 schema，`server/src/http/path-classifier.ts:22,26` 原样透传查询串，`server/src/app.ts:178` `logger: false`，无 CSRF 模块（GET、同源 cookie）。`v` 不会得 400——按代码推得，无服务端用例覆盖多余查询键，由走查证实。
+- 前提：20.7 / 20.8（#1352）已在 origin/master；本分支叠在未合入的 #1361 上，交点只有 `workspace-browser.tsx`（649 行），本刀不改它；不在 1.1 / 1.2 / 1.3 挡住的集合里。
+- 缓存与范围请求：`rest.ts:62` 对每个工作空间应答写 `Cache-Control: no-store`，无 ETag / Last-Modified，改地址不损失任何正当缓存；`range-send.ts` 只读 `Range` 头，206 / 416 不受影响。参数名 `v` 不撞名（服务端读的查询键只有 `path` 与上传的 `name`）。
+- 落点：只改 `preview-area.tsx:94-100`（150 行）媒体分支，这是 `kind: "media"` 的唯一构造点。模块级 `let mediaVersion = Date.now()`；`reload === 0` 时 `url` 原样，否则 `` `${url}&v=${++mediaVersion}` ``。`reload` 字段与 `preview.tsx:224` 的 `key` 不动。
+- 计数器放模块级的理由：放 `WorkspaceBrowser` 的 ref 会在文件页与会话侧边栏之间路由切换时归零，又撞值。以 `Date.now()` 作种是为了整页重载后也不撞（该情形未实测）；若只从 1 起，须在走查里实测重载情形。
+- 不动的文件：`previewers/media.tsx` 代码、`fileUrl`（`web/src/lib/api-files.ts:143`）、`api-files.ts:482` 的 `fetchPreview`、`downloadUrl`（`preview.tsx:126` 由 `path` 另拼）、`page.tsx` 的地址写入。20.10 点名的「媒体预览器的相应用例」结论是零改动：`web/test/previewers-media.test.tsx`（131 行）的「src 与传入的地址逐字相等」须保持原样且仍绿。
+- 同步改写失真的注释：`types.ts:38-39`「地址不变」、`preview-area.tsx:63-64`「地址不变」、`media.tsx:10-17`（「same address」「is the browser's call」及 40 秒 / 70 秒一段，改为现状加「改地址前的实测」）。`implementation-notes.md` #1352 一节的媒体条目标「地址不变已由 20.9 取代」。
+- 必须改写的既有断言（`web/test/files-preview-states.test.tsx`，671 行，逐条进偏离记录，不得放松成「包含 `v=`」）：`:532` 标题与 `:556`、`:570`、`:583` 的 `src`；`:586` 标题与 `:610` 的 `src`。每处写成 `` `${FILE}clip.mp4&v=${n}` ``，`n` 用字面量正则 `/&v=([1-9]\d*)$/` 取出并断言严格大于上一次。不能写死 `&v=1`：模块级计数在同一测试文件内跨用例累加。
+- 保持原样且须仍绿：首次选中的 `:392-394`、`:405-407`、`:440`（`src` 恰为 `fileUrl`，无 `v`）；各处 `fileRequests(fetchMock)` 仍为 `[]`（媒体不经 `fetchMock`）。
+- 新增断言（同文件，不新建文件）：① 刷新后选 `readme.md` 再选回 `clip.mp4`，`src` 恰为 `${FILE}clip.mp4`；再 `刷新`，`n` 大于此前全部值。② 媒体刷新后 `expectDownloadLink("clip.mp4")` 的 `href` 仍恰为 download 地址。③ `readme.md` 点 `刷新` 后 `fileRequests` 恰为两条相同的 `${FILE}readme.md`。④ 页面地址在媒体刷新前后逐字相同。`web/e2e` 无任何媒体步骤（grep 无命中），不加 ui-walk。
+- 与既有规则的交互（按代码推得）：`刷新` 经 `workspace-browser.tsx:571` 重入 `selectFile`，组 24.3 的重取走同一路径——每次都是一次完整的新请求，播放中的媒体被打断回到开头，助手连续改同一文件时每 300 毫秒合并窗口一次，PR 写明。媒体 401 规则不变（`error` 不带状态码，不通知守卫）。会话侧边栏用同一个 `WorkspaceBrowser`（`chat/workspace-sidebar.tsx:83`），自动继承。
+- 规格未写的分支（取最简，进偏离记录）：改选再选回不带 `v`，约一分钟内可能仍是旧内容（issue 已实测、裁决未覆盖），点 `刷新` 即新；网页 / PDF / 办公文档 / 压缩包的地址一律不加 `v`。
+- 门槛：触及文件均不超过 311 行（测试 671 行，预计加约 30 行）；无新导出、无新依赖，knip / `ui-layering` 无须登记；断言用正则字面量，不用 `new RegExp`（semgrep）。
+- FL-23 改写（行数仍 27，结论 `待签`，单元格里不写井号编号）｜操作：`接 FL-22（回到原来的文件页标签页：停在 FL-05 的空间，uploads 已展开，选中的是 fl-page.html；这一行不上传，会话标签页里待发的附件仍是 2 个）；在本机另备一段不短于半分钟、画面与 clip.mp4 明显不同的视频；点 clip.mp4，点播放，等几秒后点「工作空间目录」旁的「刷新」，再点播放；然后由能登录服务器的人到该工作空间的 uploads 目录里用那段新视频覆盖 clip.mp4（文件名不变；不要经「上传文件」再传，同名上传会得到带编号的新文件），回到文件页立即点「刷新」，看地址栏，再点播放；点 broken.mp4，点「刷新」；点 demo.zip，点「刷新」`｜预期：`clip.mp4 第一次点「刷新」后播放停止、进度回到开头，不会自己开始播放，再点播放可以重新播放；覆盖后立即点「刷新」再点播放，画面已是新视频，不用等待；地址栏里的地址与刷新前相同；broken.mp4 点「刷新」后仍显示「无法播放该文件」，页面不弹提示；demo.zip 点「刷新」后成员表格仍在、内容不变`。坑：签核人看得到的是新画面而不是网络请求；同名上传不覆盖（`server/src/workspaces/upload.ts:14`，CH-82 已钉），覆盖只能在服务器上做（先例 CH-31）。
+- 真实浏览器走查（PR 证据，至少 Chromium，真实服务，开网络面板）：① 选中 → 一条 `file?path=…` 206。② `刷新` → 新增一条带 `&v=` 的 206。③ 覆盖磁盘同名文件后立即 `刷新` → 再新增一条、`v` 更大、取到新内容。④ 点别的文件再点回来再 `刷新`（一分钟内）→ 仍有新请求（即上面的撞值序列）。⑤ 下载图标 `href` 与地址栏无 `v`。⑥ 整页重载后立即 `刷新` 是否新请求——只记录结果。Firefox / Safari 未走则写「未走」。
+- 变异：重取时不追加 `v` → `files-preview-states.test.tsx:556/570/583/610` 改写后的 `src` 断言判红。
+- 变异：首次选中也带 `v` → `:392-394`、`:405-407`、`:440` 判红。
+- 变异：`n` 按选中归零（改回 `&v=${reload}`）→ 新增断言 ① 的「再 `刷新` 的 n 大于此前全部值」判红。
+- 变异：改选再选回仍带 `v` → 新增断言 ① 的「`src` 恰为 `${FILE}clip.mp4`」判红。
+- 变异：`n` 不递增（常数）→ 「严格大于上一次」判红。
+- 变异：把 `v` 拼进 `fileUrl` → `web/test/api-files-url.test.ts:37/52` 与 `previewers-media.test.tsx` 的字面期望判红。
+- 变异：把 `v` 拼进下载链接 → 新增断言 ② 判红。
+- 变异：文本类重取也带 `v` → 新增断言 ③ 判红。
+- 变异：`v` 写进页面地址 → 新增断言 ④ 判红。
+- 变异：去掉 `key={`media:${reload}`}` → `:549-551`、`:569`、`:581` 的 `not.toBe` 判红。
+- 变异：媒体改经 `fetchPreview` → 既有「`fileRequests` 为 `[]`」与桩 `new Error("clip.mp4 must not be fetched")` 判红。
+- 变异：不可观察：服务端拒绝 `v`（400）——web 测试里媒体不经 `fetchMock`，只有走查 ②③ 看得到（表现为「无法播放该文件」）。
+- 变异：不可观察：浏览器是否真的重新请求、整页重载后是否撞值——jsdom 不发媒体请求，归走查 ③④⑥。
+- 变异：逃逸向量不适用：`path` 值与服务端未改，由既有 `server/test/workspaces-http*.test.ts` 承担。

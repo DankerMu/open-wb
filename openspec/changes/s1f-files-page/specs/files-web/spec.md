@@ -92,7 +92,7 @@
 
 #### Scenario: 刷新总是重取
 - **WHEN** `clip.mp4` 已触发 `error`、点 `刷新`；`归档.zip` 已显示列表、下一次 `archive` 应答挂起时点 `刷新`
-- **THEN** `clip.mp4` 处 `无法播放该文件` 消失、出现一个新的 `video` 元素、`src` 由 `…/file?path=clip.mp4` 变为 `…/file?path=clip.mp4&v=1`（再点一次为 `&v=2`）、页面没有经 `fetch` 发出 `file` 请求；`归档.zip` 的 `archive` 请求由一次变两次，挂起期间旧列表仍在且其后有 `正在读取文件`，应答到达后换成新列表、状态行消失
+- **THEN** `clip.mp4` 处 `无法播放该文件` 消失、出现一个新的 `video` 元素、`src` 由 `…/file?path=clip.mp4` 变为 `…/file?path=clip.mp4&v=<n>`（n 为正整数；再点一次 n 更大；改选 `readme.md` 再选回 `clip.mp4` 不带 `v`，此后再 `刷新` 的 n 仍大于此前各次）、页面没有经 `fetch` 发出 `file` 请求；`归档.zip` 的 `archive` 请求由一次变两次，挂起期间旧列表仍在且其后有 `正在读取文件`，应答到达后换成新列表、状态行消失
 
 #### Scenario: 一次浏览
 - WHEN 根包含 out/、readme.md、notes.csv、logo.png、归档.zip、blob.bin，展开 out 并依次点击五个文件，随后新建目录
