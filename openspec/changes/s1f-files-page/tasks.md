@@ -601,9 +601,9 @@ Minimal mergeable slice: 22.1（重命名）、22.4（删除）、22.2（移动�
   `desktop-light` 断并排且无横向溢出，`mobile-dark` 断对话框形态与 Escape 后的焦点。原 `打开网页预览` 对话框的断言此时仍保留（组 25 才改）。
 - [x] 23.6 清单：SH-05、CH-37 里的「产物面板」改为「工作空间侧边栏」；CH-34、CH-35、CH-36 与 CH-54 的前半改写为侧边栏的对应行（打开 / 关闭的四种方式按新形态重写、空态、窄屏覆盖、切换会话保持打开）；新增行：分隔线拖动与宽度记忆、未绑定工作空间的会话没有该按钮。结论一律 `待签`（被改写的已有行同样回到 `待签`）。
 - [x] 23.7 变异证据：切换会话时关闭侧边栏 → 「切换会话保持打开」判红；未绑定会话也上报按钮 → 可用性用例判红；窄屏关闭后不还焦点 → 窄屏用例判红；`localStorage` 抛错未兜住 → 「存储值不合法」判红。
-- [ ] 23.8 放不下两个最小宽度时，打开动作把外壳侧栏折叠（#1363）：新文件 `web/src/lib/shell-nav.tsx`（外壳提供、页面调用的「主区至少要这么宽」请求）；`routes/shell/sidebar.tsx` 的 `useSidebarCollapsed` 加幂等的 `collapse`；`app-shell.tsx` 量 `main` 并在宽屏、展开、量得到且不够宽时折叠；`use-workspace-sidebar.ts` 在意图从关到开的那一下发请求。规格 workspace-sidebar「布局与开合」补句与两个场景，design D26 同步。
+- [x] 23.8 放不下两个最小宽度时，打开动作把外壳侧栏折叠（#1363）：新文件 `web/src/lib/shell-nav.tsx`（外壳提供、页面调用的「主区至少要这么宽」请求）；`routes/shell/sidebar.tsx` 的 `useSidebarCollapsed` 加幂等的 `collapse`；`app-shell.tsx` 量 `main` 并在宽屏、展开、量得到且不够宽时折叠；`use-workspace-sidebar.ts` 在意图从关到开的那一下发请求。规格 workspace-sidebar「布局与开合」补句与两个场景，design D26 同步。
   实施注记见 `implementation-notes.md`「23.8–23.9（#1363）」。
-- [ ] 23.9 测试、走查、清单与变异证据（#1363）：新文件 `web/test/chat-workspace-sidebar-fit.test.tsx`（桩 `main` 的宽度；折叠 / 不折叠 / 已折叠 / 边界 / 窄屏 / 手动展开后不再折叠 / 意图恢复不折叠 / 关闭不展开 / 再次打开重新判断）；`web/e2e/ui-walk-workspace-sidebar.ts` 加 800 一档（真实布局下的两个最小宽度与分隔线可移动、1200 打开后缩到 800 不折叠，结束前把外壳侧栏展开回去）；清单新增一行，结论 `待签`；变异逐条判红，表进 PR 文本。
+- [x] 23.9 测试、走查、清单与变异证据（#1363）：新文件 `web/test/chat-workspace-sidebar-fit.test.tsx`（桩 `main` 的宽度；折叠 / 不折叠 / 已折叠 / 边界 / 窄屏 / 手动展开后不再折叠 / 意图恢复不折叠 / 关闭不展开 / 再次打开重新判断）；`web/e2e/ui-walk-workspace-sidebar.ts` 加 800 一档（真实布局下的两个最小宽度与分隔线可移动、1200 打开后缩到 800 不折叠，结束前把外壳侧栏展开回去）；清单新增一行，结论 `待签`；变异逐条判红，表进 PR 文本。
 
 Suggested fixture level: expanded - 改共享入口（会话页 `page.tsx` 的主区布局与 `CHAT_TOPBAR_ACTIONS` 的顶栏槽位）、新增持久化的 `localStorage` 键、删除一个既有面板及其测试（BREAKING）；评审要看顶栏槽位的其它消费方与回合、连接、草稿不受影响（「不打断回合」用例）
 Minimal mergeable slice: 23.1（拷入组件与依赖登记；knip 的拷入层豁免只压住该文件自身的未使用文件与未使用导出，压不住 web/package.json 上的「未使用依赖」，故同刀新增 web/test/components-ui-resizable.test.tsx 作为唯一导入方，不改 knip.json）先合；23.2–23.6 同刀——顶栏槽位只有一个，面板的移除与侧边栏的引入、走查与清单必须一起换；同刀之内先搬 support 的四个导出、改两个导入方，再删面板的四个测试文件
