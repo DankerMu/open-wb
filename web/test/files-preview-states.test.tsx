@@ -706,6 +706,36 @@ describe("文件页的预览状态", () => {
     expect(fileRequests(fetchMock)).toStrictEqual([`${FILE}readme.md`, `${FILE}readme.md`]);
   });
 
+  it("n 不随工作空间切换归零：clip.mp4 刷新两次后切到数据分析再切回设计文档，重新选中 clip.mp4 不带 v，此后刷新的 n 大于切换前各次", async () => {
+    const { fetchMock } = renderWorkspaceWith({
+      "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
+    });
+    const refresh = async (previous: Element) => {
+      fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+      await waitFor(() => expect(mediaElement("video")).not.toBe(previous));
+      return mediaElement("video");
+    };
+
+    await select("clip.mp4");
+    const video = await waitFor(() => mediaElement("video"));
+    expect(video.getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    const refreshed = await refresh(video);
+    const first = refetchVersion(refreshed, `${FILE}clip.mp4`);
+    const second = refetchVersion(await refresh(refreshed), `${FILE}clip.mp4`);
+    expect(second).toBeGreaterThan(first);
+
+    await selectWorkspaceByName(/数据分析/);
+    await screen.findByText("未选择文件", { exact: true });
+    expect(mediaElements()).toStrictEqual([]);
+    await selectWorkspaceByName(/设计文档/);
+
+    await select("clip.mp4");
+    const back = await waitFor(() => mediaElement("video"));
+    expect(back.getAttribute("src")).toBe(`${FILE}clip.mp4`);
+    expect(refetchVersion(await refresh(back), `${FILE}clip.mp4`)).toBeGreaterThan(second);
+    expect(fileRequests(fetchMock)).toStrictEqual([]);
+  });
+
   it("已显示的图片在刷新时重取失败：换成不支持态，它的 Blob 地址被释放", async () => {
     const blobUrls = stubBlobUrls(["blob:x"]);
     renderWorkspaceWith({
