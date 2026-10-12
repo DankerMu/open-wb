@@ -13,10 +13,13 @@ const NAME = "工作空间侧边栏";
 const CLOSE = "关闭工作空间侧边栏";
 const STORAGE_KEY = "workbuddy-workspace-sidebar";
 /**
- * Either side narrower than this could not be used. The floors are 240 for the sidebar and 320 for
- * the conversation panel (the measured column sits inside that panel's padding).
+ * The minimum widths in pixels (design D26): the conversation panel and the sidebar cannot be
+ * dragged below them. The conversation is measured on its panel, not on the chat column inside it,
+ * which is narrower by the panel's padding.
  */
-const USABLE = 200;
+const MIN_WIDTH = { conversation: 320, sidebar: 240 };
+/** Sub-pixel rounding of the split. */
+const TOLERANCE = 1;
 
 async function widthOf(target: Locator): Promise<number> {
   const box = await target.boundingBox();
@@ -50,7 +53,9 @@ async function walkBeside(page: Page, file: string): Promise<void> {
   const region = page.getByRole("complementary", { name: NAME, exact: true });
   const column = page.locator('[data-slot="chat-column"]');
   const group = page.locator('[data-slot="resizable-panel-group"]');
+  const conversation = group.locator('[data-slot="resizable-panel"]').first();
   const separator = page.getByRole("separator");
+  const stored = () => page.evaluate((key) => window.localStorage.getItem(key), STORAGE_KEY);
   await page.evaluate((key) => window.localStorage.removeItem(key), STORAGE_KEY);
   await expect(button).toHaveAttribute("aria-expanded", "false");
   const alone = await widthOf(column);
@@ -77,6 +82,9 @@ async function walkBeside(page: Page, file: string): Promise<void> {
   await expect(composer).toHaveValue("侧边栏开着也能输入");
   await composer.fill("");
 
+  // Opening lays the panels out but stores nothing: only a resize by the user is remembered.
+  expect(await stored()).toBeNull();
+
   // Keyboard: the separator is focusable and the arrow keys move it both ways.
   await separator.focus();
   await expect(separator).toBeFocused();
@@ -86,17 +94,16 @@ async function walkBeside(page: Page, file: string): Promise<void> {
   const widened = await widthOf(region);
   await page.keyboard.press("ArrowRight");
   await expect.poll(() => widthOf(region)).toBeLessThan(widened);
-  await expect
-    .poll(() => page.evaluate((key) => window.localStorage.getItem(key), STORAGE_KEY))
-    .toMatch(/^\d+(\.\d+)?$/);
+  await expect.poll(stored).toMatch(/^\d+(\.\d+)?$/);
 
-  // Dragging to either end leaves both sides usable.
+  // Dragging to either end stops at that side's minimum width.
   await dragSeparator(page, separator, 0);
   const widest = await widthOf(region);
-  expect(await widthOf(column)).toBeGreaterThan(USABLE);
+  const floor = await widthOf(conversation);
+  expect(Math.abs(floor - MIN_WIDTH.conversation)).toBeLessThanOrEqual(TOLERANCE);
   await dragSeparator(page, separator, page.viewportSize()?.width ?? 0);
   const narrowest = await widthOf(region);
-  expect(narrowest).toBeGreaterThan(USABLE);
+  expect(Math.abs(narrowest - MIN_WIDTH.sidebar)).toBeLessThanOrEqual(TOLERANCE);
   expect(widest).toBeGreaterThan(narrowest);
   // Neither end is the default width, so the reload below cannot pass by falling back to it.
   expect(Math.abs(narrowest - regionBox.width)).toBeGreaterThan(40);

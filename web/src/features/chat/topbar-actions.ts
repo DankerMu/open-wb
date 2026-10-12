@@ -2,6 +2,9 @@ import type { ChatSession } from "../../lib/session-contract.js";
 import type { TopbarAction, useTopbar } from "../../lib/topbar.js";
 import { sessionTitle } from "./session-path.js";
 
+/** `workspace` 槽位按钮的 accessible name；侧边栏关闭后按它在顶栏里找回按钮。 */
+export const WORKSPACE_ACTION_LABEL = "工作空间侧边栏";
+
 /**
  * 会话页顶栏按钮的全部槽位，数组次序即 DOM 次序（demo:1942-1953）。页面只从这里按序构造
  * `useTopbar` 的 `actions`；没有填入的槽位不产出按钮。
@@ -10,7 +13,7 @@ export const CHAT_TOPBAR_ACTIONS = [
   { key: "config", label: "项目配置", icon: "file-text" },
   { key: "rename", label: "重命名", icon: "pencil" },
   { key: "search", label: "对话内搜索", icon: "search" },
-  { key: "workspace", label: "工作空间侧边栏", icon: "folder" },
+  { key: "workspace", label: WORKSPACE_ACTION_LABEL, icon: "folder" },
 ] as const;
 
 /** 槽位可带 `label` 覆盖表中的名字（`项目配置` 的 accessible name 带文件数）。 */

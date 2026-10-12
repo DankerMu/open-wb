@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
+import { WORKSPACE_ACTION_LABEL } from "./topbar-actions.js";
 
 const STORAGE_KEY = "workbuddy-workspace-sidebar";
 
@@ -27,13 +28,14 @@ function storedShare(): number {
  *
  * - 开合意图是页面内存状态，初值关、不写存储；它不随 `workspaceId` 变化，所以换到另一个绑定会话时
  *   保持，换到未绑定会话或欢迎态时 `open` 为假、`slot` 为 `undefined`，回来后恢复。
- * - `slot` 填进顶栏的 `workspace` 槽位：点击在开合之间切换，并记下那个按钮供关闭后归还焦点。
+ * - `slot` 填进顶栏的 `workspace` 槽位：点击在开合之间切换。
+ * - `restoreFocus` 在调用时到顶栏里找那个按钮，不记节点：换到未绑定会话再回来后按钮是新节点（槽位
+ *   卸载又重建），记下的那个已不在文档里。按钮在外壳的顶栏里渲染，这里按 DOM 取而不传 ref。
  * - `share` 在挂载时读一次存储；`resize` 更新它并写回，写入抛错时只留在内存里。
  */
 export function useWorkspaceSidebar(workspaceId: string | null | undefined) {
   const [wanted, setWanted] = useState(false);
   const [share, setShare] = useState(storedShare);
-  const opener = useRef<HTMLElement | null>(null);
   const bound = workspaceId !== null && workspaceId !== undefined;
   return {
     open: wanted && bound,
@@ -41,8 +43,7 @@ export function useWorkspaceSidebar(workspaceId: string | null | undefined) {
     slot: bound
       ? {
           expanded: wanted,
-          onSelect(trigger: HTMLElement) {
-            opener.current = trigger;
+          onSelect() {
             setWanted((current) => !current);
           },
         }
@@ -50,9 +51,13 @@ export function useWorkspaceSidebar(workspaceId: string | null | undefined) {
     close() {
       setWanted(false);
     },
-    /** 把焦点还给打开它的按钮，不滚动消息线程；按钮已不在文档里（意图恢复出来的打开）时不动。 */
+    /** 把焦点还给顶栏里的那个按钮，不滚动消息线程；顶栏里没有它时不动。 */
     restoreFocus() {
-      if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+      document
+        .querySelector<HTMLElement>(
+          `[data-slot="topbar-actions"] button[aria-label="${WORKSPACE_ACTION_LABEL}"]`,
+        )
+        ?.focus({ preventScroll: true });
     },
     resize(next: number) {
       setShare(next);

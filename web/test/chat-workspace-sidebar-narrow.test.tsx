@@ -23,6 +23,7 @@ import {
   mountSidebarPage,
   NAME,
   sidebarButton,
+  UNBOUND,
 } from "./chat-workspace-sidebar-support.js";
 import { waitMs, yieldMacrotask } from "./ui-support.js";
 
@@ -77,6 +78,30 @@ describe("窄屏覆盖", () => {
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
 
     await expectClosed(opened);
+  });
+
+  // 模态层盖着会话列表，换会话走路由（真实路径是浏览器的后退 / 前进）。
+  it("N4 意图恢复出来的打开（甲 → 未绑定 → 甲）：顶栏按钮是新节点，Escape 关闭后焦点回到这个新按钮", async () => {
+    installNarrowViewport();
+    const { router } = await mountSidebarPage(BOUND);
+    const { trigger } = await openLayer();
+
+    await act(() => router.navigate(`/?session=${UNBOUND.id}`));
+    await crumb(UNBOUND.title);
+    expect(screen.queryByRole("dialog", { name: NAME })).toBeNull();
+    expect(trigger.isConnected).toBe(false);
+    await act(() => router.navigate(`/?session=${BOUND.id}`));
+    await crumb(BOUND.title);
+    const layer = await screen.findByRole("dialog", { name: NAME });
+    await within(layer).findByRole("button", { name: "readme.md" });
+    await yieldMacrotask();
+    const button = sidebarButton();
+    expect(button).not.toBe(trigger);
+    const focus = vi.spyOn(button, "focus");
+
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+
+    await expectClosed({ focus, layer, trigger: button });
   });
 
   it("N2 层内的 关闭工作空间侧边栏 关闭它，焦点同样归还", async () => {

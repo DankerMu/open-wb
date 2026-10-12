@@ -12,16 +12,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatTopbar } from "../src/features/chat/topbar-actions.js";
 import { useWorkspaceSidebar } from "../src/features/chat/use-workspace-sidebar.js";
 import {
+  assistantMessage,
   goLive,
   listed,
   openSession,
   PROJ,
+  quiesce,
   ROOT_PREFIX,
   turn,
 } from "./chat-page-file-changes-support.js";
-import { composer } from "./chat-page-ownership-support.js";
+import { composer, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { cleanupSessionMeta, crumb, focusOn } from "./chat-page-session-meta-support.js";
-import { FakeEventSource, latestSource } from "./chat-stream-support.js";
+import { FakeEventSource, historyUser, latestSource } from "./chat-stream-support.js";
 import {
   BOUND,
   bannerButtons,
@@ -49,7 +51,13 @@ import {
   W2,
 } from "./chat-workspace-sidebar-support.js";
 import { hasLucideGlyph } from "./files-fixture.js";
-import { currentLocation, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import {
+  calls,
+  currentLocation,
+  deferredResponse,
+  jsonResponse,
+  textPreviewResponse,
+} from "./support.js";
 
 const WELCOME = "WorkBuddy，我帮你";
 const TWO_BUTTONS = ["重命名", "对话内搜索"];
@@ -141,7 +149,7 @@ describe("顶栏入口与可用性", () => {
     );
     expect([result.current.open, result.current.slot?.expanded]).toEqual([false, false]);
 
-    act(() => result.current.slot?.onSelect(document.createElement("button")));
+    act(() => result.current.slot?.onSelect());
     expect([result.current.open, result.current.slot?.expanded]).toEqual([true, true]);
 
     for (const workspaceId of [null, undefined]) {
@@ -229,6 +237,26 @@ describe("布局与开合", () => {
 
     expect(sidebarRegion()).toBeNull();
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // 甲 → 未绑定 → 甲：顶栏按钮随槽位卸载又重建，是另一个节点；关闭时按钮仍在，焦点归还给现在的这个。
+  it("L3 意图恢复出来的打开：顶栏按钮是新节点，头部关闭后焦点回到这个新按钮，不滚动", async () => {
+    await mountSidebarPage(BOUND);
+    const { trigger } = await openSidebar("readme.md");
+    await selectSession(UNBOUND);
+    expect(trigger.isConnected).toBe(false);
+    await selectSession(BOUND);
+    const region = await screen.findByRole("complementary", { name: NAME });
+    const button = sidebarButton();
+    expect(button).not.toBe(trigger);
+    const focus = vi.spyOn(button, "focus");
+
+    fireEvent.click(within(region).getByRole("button", { name: CLOSE }));
+
+    expect(sidebarRegion()).toBeNull();
+    await focusOn(button);
+    expect(focus.mock.calls).toStrictEqual([[{ preventScroll: true }]]);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("L3 没有 ResizeObserver 的运行环境：侧边栏照常出现在对话区之后，没有分隔线，输入框不重挂", async () => {
@@ -329,6 +357,69 @@ describe("布局与开合", () => {
     expect(FakeEventSource.instances).toHaveLength(connections);
     expect(latestSource()).toBe(source);
     expect(source.closeCount).toBe(0);
+  });
+
+  // s1f-chat-followups 5.7：视图末条助手已终态时到达未知回合的事件，连接重装一次完整快照。
+  it("L8 重连与重同步不改变开合：各重读一次快照，侧边栏还是那个区域，选中的文件与预览都在，目录与文件不重取", async () => {
+    const before = turn("done", { content: "第一轮的回答" });
+    // 别处开始并结束的下一回合（助手消息 id 2）；游标盖过 `1:4`。
+    const after = {
+      ...before,
+      messages: [
+        ...before.messages,
+        { ...historyUser, id: 1, content: "再问一次", createdAt: 1 },
+        assistantMessage("done", { id: 2, content: "第二轮的回答", createdAt: 2 }),
+      ],
+      streamCursor: { epoch: 1, seq: 4 },
+    };
+    let current = before;
+    const readme = fileOf(PROJ.id, "readme.md");
+    const { fetchMock } = await openSession(before, listed, {
+      [SESSION_MESSAGES]: () => jsonResponse(current),
+      [treeOf(PROJ.id)]: listing("", [file("readme.md")]),
+      [readme]: () => textPreviewResponse("自述正文"),
+    });
+    await crumb("saved title");
+    const reads = () => calls(fetchMock, SESSION_MESSAGES).length;
+    const { region, trigger } = await openSidebar("readme.md");
+    fireEvent.click(within(region).getByRole("button", { name: "readme.md" }));
+    expect(await within(region).findByText("自述正文")).toBeTruthy();
+    // 预览栏自带一个 `header`，测试库把它也算作 banner：这里不经 banner 重查按钮，直接看原节点。
+    const unchanged = () => ({
+      expanded: trigger.getAttribute("aria-expanded"),
+      files: calls(fetchMock, readme).length,
+      preview: within(region).queryAllByText("自述正文").length,
+      region: sidebarRegion() === region,
+      selected: selectedRows(region),
+      trees: treeCalls(fetchMock, PROJ.id).length,
+      trigger: trigger.isConnected,
+    });
+    const open = {
+      expanded: "true",
+      files: 1,
+      preview: 1,
+      region: true,
+      selected: ["readme.md"],
+      trees: 1,
+      trigger: true,
+    };
+    expect(unchanged()).toStrictEqual(open);
+    const mounted = reads();
+
+    // 重连：事件连接重新打开，页面重读一次快照。
+    const send = await goLive();
+
+    expect(reads()).toBe(mounted + 1);
+    expect(unchanged()).toStrictEqual(open);
+
+    // 重同步：未知回合的事件，页面再重读一次，新快照装进视图。
+    current = after;
+    send("turn.start", { messageId: 2 });
+    await quiesce();
+
+    expect(reads()).toBe(mounted + 2);
+    expect(await screen.findByText("第二轮的回答")).toBeTruthy();
+    expect(unchanged()).toStrictEqual(open);
   });
 
   describe("L6 存储值不合法", () => {
