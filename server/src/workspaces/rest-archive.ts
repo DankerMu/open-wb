@@ -9,11 +9,18 @@
  * audited. A member name goes from the archive into the JSON answer and nowhere else: this file
  * hands `listArchive` a positional read over one descriptor and passes no name to any fs call.
  *
- * What is not here, on purpose: no time limit for a zip (the specification gives one to tar and
- * tar.gz only; a zip is bounded by the entry limit alone, so a very large configured limit is in
- * effect no limit — derived from `archive.ts`, not measured through this route), no limit on
- * concurrent listings, and no cancellation when the client goes away: a walk runs to the entry
- * limit, the deadline or the end of the archive (derived from the code, not tested).
+ * The bounds of one request: the entry limit (the configuration allows 1..10000; an assembled
+ * `limits` object is only required to hold a positive safe integer, see below) and the 5000 ms
+ * deadline of `archive.ts`, which a zip, a tar and a tar.gz share. The answer is one
+ * `JSON.stringify` of the whole listing, not a stream: a listing too long for one string is a
+ * 500 (seen once, 2026-10-12, with a one-off harness assembled with a limit of 100000 and an
+ * error hook: `RangeError: Invalid string length`; no test holds this).
+ *
+ * What is not here, on purpose: no limit on concurrent listings, and no cancellation when the
+ * client goes away: a walk runs to the entry limit, the deadline or the end of the archive, at
+ * most 5000 ms plus one step — the deadline is looked at between reads and does not interrupt
+ * one (derived from the code, not tested). What the listings in flight hold together therefore
+ * has no bound of its own.
  *
  * Known residual (design D22 / D-23, #1286 stays open; nothing here closes it): this is one more
  * route that resolves, lstats and then opens by path.
