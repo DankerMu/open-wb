@@ -1,8 +1,9 @@
 // /files probes for the UI walk that need a real browser's computed styles, and the walk's
 // steps over the new previews (highlighted source, the isolated-origin html preview with its
-// relative stylesheet and source view, audio, download link, deep link).
+// relative stylesheet and source view, audio, download link, deep link) and over the row menu
+// (rename the walk directory, then delete it through the confirmation dialog).
 
-import { expect, type Page, type Response } from "@playwright/test";
+import { expect, type Locator, type Page, type Response } from "@playwright/test";
 
 const TRANSPARENT = "rgba(0, 0, 0, 0)";
 const BUILT_SCRIPT = /^\/assets\/[^/]+\.js$/;
@@ -198,4 +199,97 @@ export async function expectClipSelected(page: Page, workspaceId: string): Promi
     `${origin}/api/workspaces/${workspaceId}/download?path=clip.wav`,
   );
   await expect(download, "clip.wav download attribute").toHaveAttribute("download", "");
+}
+
+// (f)：经行菜单把目录 `from` 改名为 `to`，再经行菜单与确认框删除 `to`；两次变更之后各用 `tree` 接口复核。
+// 调用时页面刚重载：`from` 行是折叠的，选中的是根下的 `clip.wav`。`root` 是根行的名字（空间名）。
+export async function walkRenameThenDelete(
+  page: Page,
+  workspaceId: string,
+  names: { from: string; to: string; root: string },
+): Promise<void> {
+  const { from, to, root } = names;
+  const tree = page.locator("main").getByRole("navigation", { name: "工作空间目录树" });
+
+  await openRowMenu(page, tree, from, "重命名");
+  const rename = page.getByRole("dialog", { name: "重命名", exact: true });
+  const field = rename.getByLabel("名称", { exact: true });
+  // 初值是这一行的名字：开的是这一行的框。
+  await expect(field, "rename dialog starts from the walk directory name").toHaveValue(from);
+  await field.fill(to);
+  await rename.getByRole("button", { name: "重命名", exact: true }).click();
+  await expect(rename, "rename dialog closes").toHaveCount(0);
+  // 新行在前、旧行在后：旧行的四个计数才不是对着一棵还没更新的树空转。
+  await expect(
+    tree.getByRole("button", { name: `展开 ${to}`, exact: true }),
+    "renamed directory row",
+  ).toBeVisible();
+  await expectNoRow(tree, from);
+  // 规格条文之外（files-web「文件操作界面」的回焦句）：改名成功后焦点在新行的菜单按钮上。
+  await expect(
+    tree.getByRole("button", { name: `更多操作 ${to}`, exact: true }),
+    "focus after rename is on the renamed row's menu button",
+  ).toBeFocused();
+  // `readme.md` 是正向对照：没有它，「不含」对空列表或别的空间恒真。
+  const renamed = await rootNames(page, workspaceId);
+  expect(renamed, "tree after rename lists the new name").toContain(to);
+  expect(renamed, "tree after rename still lists readme.md").toContain("readme.md");
+  expect(renamed, "tree after rename no longer lists the old name").not.toContain(from);
+
+  await openRowMenu(page, tree, to, "删除");
+  const confirm = page.getByRole("alertdialog", { name: `删除「${to}」？`, exact: true });
+  await expect(confirm, "delete confirmation").toBeVisible();
+  await expect(
+    confirm.getByText(DELETE_DIRECTORY_NOTE, { exact: true }),
+    "delete confirmation note for a directory",
+  ).toBeVisible();
+  // 未确认不删。确认框开着时按角色取不到框外的树与行（实测：计数为 0），所以两层都带 `includeHidden`。
+  await expect(
+    page
+      .locator("main")
+      .getByRole("navigation", { name: "工作空间目录树", includeHidden: true })
+      .getByRole("button", { name: `展开 ${to}`, exact: true, includeHidden: true }),
+    "renamed directory row while the confirmation is open",
+  ).toHaveCount(1);
+  await confirm.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(confirm, "delete confirmation closes").toHaveCount(0);
+  await expectNoRow(tree, to);
+  // 规格条文之外（同一句回焦）：删除成功后焦点在父目录的行上，这里是根行。
+  await expect(
+    tree.getByRole("button", { name: `折叠 ${root}`, exact: true }),
+    "focus after delete is on the root row",
+  ).toBeFocused();
+  const removed = await rootNames(page, workspaceId);
+  expect(removed, "tree after delete still lists readme.md").toContain("readme.md");
+  expect(removed, "tree after delete no longer lists the renamed directory").not.toContain(to);
+  expect(removed, "tree after delete does not list the old name either").not.toContain(from);
+
+  // 规格条文之外：`clip.wav` 不在被操作的目录之下，两次操作之后选中、地址、播放器与下载链接都还在。
+  await expectClipSelected(page, workspaceId);
+}
+
+// files-web「文件操作界面」目录的确认说明，逐字。
+const DELETE_DIRECTORY_NOTE =
+  "文件夹及其全部内容将从工作空间移除。管理员可在保留期内从服务器恢复，界面不提供回收站。";
+
+// 点开 `name` 那一行的 `更多操作 <名>`，再点菜单里的 `item`。菜单经 portal 渲染，在 page 作用域取。
+async function openRowMenu(page: Page, tree: Locator, name: string, item: string): Promise<void> {
+  await tree.getByRole("button", { name: `更多操作 ${name}`, exact: true }).click();
+  await page.getByRole("menuitem", { name: item, exact: true }).click();
+}
+
+// 目录行的名字（折叠、展开两种）、同名文件行与它的菜单按钮都不在树里。
+async function expectNoRow(tree: Locator, name: string): Promise<void> {
+  for (const label of [name, `展开 ${name}`, `折叠 ${name}`, `更多操作 ${name}`]) {
+    await expect(tree.getByRole("button", { name: label, exact: true }), label).toHaveCount(0);
+  }
+}
+
+// 工作空间根目录的条目名。`page.request` 带着页面的登录 cookie；它的 404 没有进 oracle 的记账（实测）。
+async function rootNames(page: Page, workspaceId: string): Promise<string[]> {
+  const response = await page.request.get(`/api/workspaces/${workspaceId}/tree`);
+  expect(response.status(), "GET tree status").toBe(200);
+  return ((await response.json()) as { entries: { name: string }[] }).entries.map(
+    (entry) => entry.name,
+  );
 }
