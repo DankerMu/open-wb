@@ -278,3 +278,30 @@
 - 变异：源码请求失败时切换按钮消失 → 未做（上列用例未覆盖，实施时补一条「`file` 500 后 `渲染视图` 按钮仍在」，补后可判红）。
 - 变异：不可观察（jsdom 无 iframe 导航）：文档确为不透明来源、子请求与框内脚本对主站的请求不带主站 cookie（文档自身的导航请求在同主机不同端口下带，监听器不读——实现后走查实测，仅 Chromium；fixture 评审时写的「不带主站 cookie」不全对，已更正）、同 `base` 续期不重载、`reload` 后确实重新请求、同目录样式与图片生效；归 FL 行（仅人工）与 #1109 / #1115（仅 Chromium）。
 - 变异：不可观察（本刀无服务端代码）：遍历、符号链接、跨空间 id、他人空间的相同 404、`sandbox.reject` 审计；归 `server/test/preview-app*.test.ts` 与 #1075 已有证据。
+
+## 26.2 文件操作步骤、26.3、26.4（#1113）
+
+- 不触及 Critical Path 代码：只改 `smoke/files.hurl`（281 行、33 个请求）、`smoke/fixtures/README.md` 与 `openspec/`；不动 `sandbox.resolve`、`op`、路由、回收目录实现。但本刀是 `DELETE entries` 与 `POST move` 第一次在真栈 CI（含 `uid-isolation` 的 `2770` setgid `SANDBOX_ROOT`）上经编译后的路由执行；`.trash` 四级目录在该布局下建得出来只对 `moveToTrash` 实测过（design D22「实测」#1318，驱动的不是路由）。CI 若在首个 `DELETE` 红，不得放宽断言，停下报告。
+- 前置全部在 `origin/master`（核对的是代码）：8.2 `server/src/workspaces/rest-entries.ts:158`；9.1 `:182`；4.1 `server/src/core/sandbox/resolve.ts:14`；#1112 的 33 个请求在树上；入口注入 `createTrash`（`server/src/server.ts:145`）。实测 1.2 已勾（`tasks.md:88`），结论两行均成功（`design.md:345` 起），不挡本刀。
+- D-23 / 1.2 的措辞界限：本刀的路由带 `rest-entries.ts:8-40`（移动）与 `trash.ts:39-65`（删除，含不需要竞态的账号根收编）两段 resolve→rename 窗口。冒烟是单线程顺序请求、没有 omp 侧并发动作，对这些窗口不构成证据，不收窄也不放宽（读代码推出）。`hurl-a` 由应用用户经 `POST dirs` 建出，全部 `rename` 同 uid：`uid-isolation` 跑本文件**不**复测 1.2 的跨 uid 情形，PR 不得写成「CI 覆盖跨 uid 改名」。
+- 插入位置：七步作为一整块放在下载步骤（`files.hurl:187-192`）之后、`# 签发预览令牌`（`:194`）之前，即规格的次序。七步各写一条审计（`dir.create` / `file.move` / `file.delete` / `sandbox.reject`），落点在两段「快照 → 断言」（`:68-89`、`:144-167`）之外；`session-meta.hurl` 的审计断言相对自己的动作取（读代码推出）。
+- 七步（请求 22–28）：(22) `POST dirs {"path":"hurl-a"}`，`HTTP *` + `status toString matches /^(201|409)$/`；(23) `POST move {"from":"hurl-a","to":"hurl-b"}`，`/^(200|409)$/`；(24) `DELETE …/entries?path=hurl-b`，`HTTP 204`、`body == ""`；(25) 同一请求，`HTTP 404` + 与 `:257` 相同的 `not_found` 信封；(26) `DELETE …/entries?path=hurl-a`，`/^(204|404)$/`；(27) `POST move {"from":"readme.md","to":"notes.csv"}`，`HTTP 409` + `{"error":{"code":"conflict","message":"同名资源已存在"}}`；(28) `DELETE …/entries?path=../x`，`HTTP 403` + `:77` 的 `sandbox_denied` 信封。两个 `move` 带 `Content-Type: application/json`，body 恰两键（`parseMoveBody`，`rest-entries.ts:106-116`，多一键即 400）；`DELETE` 不带 body、不带 `Content-Type`。
+- 收敛性（读代码推出，26.3 的实跑才是实测）：`move` 先查源（`:207`，不存在即 404）再查目标（`:213`，409），所以 (23) 的 `{200,409}` 靠 (22) 保证 `hurl-a` 必在。四种起点：都没有 → 201/200/204/404/404；只剩 `hurl-b`（在 `move` 后中断）→ 201/409/204/404/204；只剩 `hurl-a` → 409/200/204/404/404；两个都在 → 409/409/204/404/204。四种都以两者皆无结束，(24)(25)(27)(28) 的精确断言每次真实执行。
+- 「重命名成功」的证据是 (24) 的精确 204（`hurl-b` 只能来自这次或上次的改名），不是 (23) 的状态码。(23) 宽容，所以不断言 `{"path":"hurl-b"}`，写进偏离记录。不要为拿到精确 200 而在 (22) 前加一步预清理：规格句「`POST move … status ∈ {200,409}`（上一次中断的运行可能留下 `hurl-b`）」已定次序。
+- 比规格严的一步（记入偏离记录）：(28) 之后加 `GET …/tree`，断言 `$.entries[?(@.name=='hurl-a')]` 与 `hurl-b` 两条 `not exists`，`readme.md`、`notes.csv` 两条 `exists`。它把「跑完后空间里没有 `hurl-a` / `hurl-b`」变成每次都执行的断言；`tree` 不写审计。合计 33 → 41 个请求，文件约 345 行，离 800 行上限远。
+- (28) 不加第三段审计窗口（规格只写 403）。拒绝行的形状 `detail:{relPath:"../x",op:"delete",reason}` 来自 `server/src/core/sandbox/index.ts:40-46`，证据在 `server/test/workspaces-delete.test.ts:287-294`。`?path=../x` 位于 query，不被点段归一，与 `:75` 的 `tree?path=../..` 同理（后者已由现有冒烟证明能原样到达）。
+- 26.3 的做法：(a) 同一服务连续两次 `make smoke`。(b) 中断用 hurl 自带选项，不改文件：`hurl --test --jobs 1 --retry 0 --to-entry 23 --variable "base_url=<同一地址>" smoke/files.hurl`（本机 `hurl --help` 确认 8.0.1 有该选项，与 CI 同版本；未执行），随后整跑 `make smoke`。中断的那次不登出，会留一条登录会话；规格的「不留下会话行」只对完整运行成立，PR 里照实写。(c) 「夹具文件未变」分两句写：仓库侧 `git status` 干净；沙箱副本侧 `git status` 看不见，用 `cmp` 把 `<SANDBOX_ROOT>/u1/smoke-fixture/` 的七个文件与 `smoke/fixtures/sandbox/u1/smoke-fixture/` 逐个比对。
+- 每次运行留下的东西（读代码推出）：`<SANDBOX_ROOT>/.trash/u1/<空间 id>/` 下一到两个批次（各含一个空目录；批次名带时刻加 16 位随机数，不撞名，按保留期清理），外加 5–7 条审计。与既有的 `uploads/` 累积同性质，不清理；issue 已把回收目录内容断言列为范围外。`uid-isolation` 的三项后置检查只看 `OMP_STATE_DIR`（`ci-uid-isolation.sh:300-304`），不受 `.trash` 影响。
+- 必须同 PR 改的既有文字：`files.hurl:1-17` 头注释中 `:13`「范围请求起的各步只读：不建不删条目」变假，`:7-9` 的步骤摘要要补四类新步骤，并写明 `hurl-a` / `hurl-b` 自清理、回收批次不清理。`smoke/fixtures/README.md:26-29`「消费方」补一条（建删 `hurl-a` / `hurl-b`；409 步骤要求根下 `readme.md` 与 `notes.csv` 同时存在且都不被改动）；`:46`「替换夹具时要同步检查」补这两个文件名不可改。既有断言没有一条需要放宽。
+- 与 issue 的差异（`origin/master` 为准）：(a) PR Boundary 只列 `smoke/files.hurl`，实际还要改 README（同 #1112 的做法）与 `openspec/`。(b) 验收的「`git status` 干净」证明不了沙箱副本未变，见上条 (c)。(c) 本刀是 26.2 的最后一刀：勾 `tasks.md:634/636/637` 三个复选框，在 `:635` 后加本节指针。注记进 `implementation-notes.md`（现 280 行，加本节不超 1000，不必开新文件）。PR 文本列出动过的 `openspec/` 文件：`tasks.md`、`implementation-notes.md`。
+- 守卫与排序：biome / knip / jscpd / semgrep 不扫 `smoke/`；`scripts/test-ci-harness.sh` 用假 hurl，只钉 Makefile 命令行与三个旧夹具的 `cmp`，不用改；`Makefile`、`.github/**` 不改。无清单行（no checklist rows）。本批其它刀（#1099、#1352、#1094、#1105）都是 web，不碰 `smoke/`，本刀可排任意位置。
+- 变异（26.4 必做）：`rest-entries.ts:170` 不调 `moveToTrash`（或把它改成不 `rename` 只返回批次名）→ (24) 仍 204，(25) 得 204，`HTTP 404` 判红；新增的 `tree` 步骤是第二个红点。
+- 变异：`rest-entries.ts:217` 去掉 `renameSync`（`move` 答 200 但不动）→ 干净起点下 (24) 得 404，判红。
+- 变异：`rest-entries.ts:213-215` 去掉目标存在检查 → (27) 得 200，判红。**有破坏性**：沙箱副本里 `notes.csv` 被 `readme.md` 覆盖；跑完必须重新 `cp -R` 夹具再做后续运行，PR 里写明。
+- 变异：只做一侧的变体：`move` 只在目标是目录时判 409（文件目标放行）→ (27) 判红，(23) 的 409 分支不红；反过来只在目标是文件时判 409 → 仅「只剩 `hurl-b`」与「两个都在」两种起点下 (23) 得 200 后 (24) 多半 500，干净起点不可观察。前者必做，后者写「未做」。
+- 变异：`resolve.ts:37-39` 去掉 `..` 分量的拒绝 → (28) 判红，同时 `:75` 的既有步骤也红。只对 `op=delete` 放行 `..` 的变体 → 只有 (28) 红，状态码是 404 还是别的未核对。
+- 变异：`rest-entries.ts:167` 把 `op` 从 `"delete"` 写成 `"read"` → 冒烟不可观察（(28) 仍 403，审计的 `op` 未断言）；写「未做」，证据在 `workspaces-delete.test.ts:294`。
+- 变异：`rest-entries.ts:207` 的 `entryTypeOf(fromAbs)` 挪到目标检查之后 → 不可观察（(22) 保证源必在）。`entryTypeOf` 对缺失条目不抛 404 → (25) 判红，状态码未核对。
+- 变异：`server.ts:145` 的回收服务指向不可写的根，或 `.trash` 被预先占成普通文件 → (24) 得 500，判红。
+- 变异：`rest-entries.ts:164` / `:190` 去掉归属检查 → 未做：冒烟里没有他账号的 `DELETE` / `move` 步骤（规格只列三个他账号 404），证据在 `server/test/workspaces-http-boundary.test.ts`。
+- 变异：不可观察：回收批次的位置、权限位与 `trashId`；`file.move` / `file.delete` 审计行的内容；保留期与清理；跨 uid 改名；任何替换窗口。

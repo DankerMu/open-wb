@@ -632,10 +632,11 @@ Minimal mergeable slice: 25.1（文件变更卡）与 25.2（产物卡）可各�
 
 - [x] 26.1 夹具：`smoke/fixtures/sandbox/u1/smoke-fixture/` 新增 `site/index.html`、`site/style.css`、`sample.py`、`clip.wav`（按 files-harness「沙箱夹具与 files.hurl」的内容约定；`clip.wav` 由一段不入库的脚本生成，生成方式记入 `smoke/fixtures/README.md`）。
   实施注记见 `implementation-notes-1.md`「26.1（#1111）」。
-- [ ] 26.2 `smoke/files.hurl`：追加范围请求、下载、`hurl-a` → `hurl-b` 的重命名与删除（宽容状态码保证可重复）、同名移动 409、越界删除 403、`preview-token` 与隔离来源的 html / css / 伪造令牌 404、主站对同一 html 的 `text/plain`、他账号的三个 404。
+- [x] 26.2 `smoke/files.hurl`：追加范围请求、下载、`hurl-a` → `hurl-b` 的重命名与删除（宽容状态码保证可重复）、同名移动 409、越界删除 403、`preview-token` 与隔离来源的 html / css / 伪造令牌 404、主站对同一 html 的 `text/plain`、他账号的三个 404。
   实施注记见 `implementation-notes.md`「26.2 只读步骤，含分摊的 26.3 / 26.4 条款（#1112）」。
-- [ ] 26.3 验证：对同一服务连续两次 `make smoke` 全绿；在 `POST move` 之后人为中断一次再跑仍全绿；跑完后空间里没有 `hurl-a` / `hurl-b`、夹具文件未变（`git status` 干净）。
-- [ ] 26.4 变异证据（对临时改坏的服务各跑一次，结果写进 PR）：预览监听器对 html 返回 `text/plain` → hurl 判红；主站对 html 返回 `text/html` → hurl 判红；删除后条目仍在 → 第二次删除的 404 断言判红。
+  实施注记见 `implementation-notes.md`「26.2 文件操作步骤、26.3、26.4（#1113）」。
+- [x] 26.3 验证：对同一服务连续两次 `make smoke` 全绿；在 `POST move` 之后人为中断一次再跑仍全绿；跑完后空间里没有 `hurl-a` / `hurl-b`、夹具文件未变（`git status` 干净）。
+- [x] 26.4 变异证据（对临时改坏的服务各跑一次，结果写进 PR）：预览监听器对 html 返回 `text/plain` → hurl 判红；主站对 html 返回 `text/html` → hurl 判红；删除后条目仍在 → 第二次删除的 404 断言判红。
 
 Suggested fixture level: compact - 冒烟用例与被跟踪夹具的扩充，不改产品代码
 Minimal mergeable slice: 26.1 的夹具与 README 可先合（既有 hurl 只断言「包含」三个文件，不受新增文件影响）；26.2 按步骤分两刀——范围请求、下载、`preview-token` 与隔离来源、主站 `text/plain`、他账号 404 的步骤先合（Depends on 7.3、9.3、13.1）；重命名 / 删除 / 同名移动 409 / 越界删除 403 的步骤随后（Depends on 8.2、9.1，间接等 1.2），26.3、26.4 里针对它们的验证随这一刀
