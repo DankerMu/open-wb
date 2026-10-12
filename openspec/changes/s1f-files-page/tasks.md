@@ -576,7 +576,7 @@ Minimal mergeable slice: 22.1（重命名）、22.4（删除）、22.2（移动�
 - [x] 23.1 拷入 shadcn `resizable` 到 `web/src/components/ui/resizable.tsx`（`react-resizable-panels` 加入依赖并登记 `ATTRIBUTION.md`；只做六类修改；确认没有引入新的 `@radix-ui/*` 包）。
   实施注记见 `implementation-notes-1.md`「23.1（#1104）」。
 - [ ] 23.2 新文件 `web/src/features/chat/workspace-sidebar.tsx` 与 `use-workspace-sidebar.ts`（登记 `MIGRATED_AREAS`）：开合意图、宽屏的 `complementary` + 分隔线、宽度读写 `localStorage` 键 `workbuddy-workspace-sidebar`（读失败与非法值回缺省）、窄屏的全屏 `sheet`（焦点进 `关闭`、Escape、焦点归还且 `preventScroll`）、
-  切换会话保持、未绑定会话与欢迎态不渲染但保留意图。主体先挂 `WorkspaceBrowser`（`stacked` 布局，无标记、无过滤）与头部的 `刷新`、`关闭`、`在文件页打开`。
+  切换会话保持、未绑定会话与欢迎态不渲染但保留意图。主体先挂 `WorkspaceBrowser`（`stacked` 布局，无标记、无过滤）与头部的 `关闭`、`在文件页打开`。
   实施注记见 `implementation-notes.md`「23.2–23.7（#1105）」。
 - [ ] 23.3 `topbar-actions.ts`：第四项改为 `{key:"workspace", label:"工作空间侧边栏", icon:"folder"}`，带 `expanded`，只在 `workspaceId` 非 null 时填入；`page.tsx` 的主区改为对话区 + 侧边栏两栏。
   删除 `artifacts-panel.tsx` 及其四个测试文件（`chat-page-artifacts-panel*.test.tsx` 与 support），从 `MIGRATED_AREAS` 与清单断言两处（`web/test/ui-layering.test.ts:21`、`:333`）去掉它的条目；`page.tsx:4`、`:33` 对 `useArtifactsPanel` 的使用随之去掉；
