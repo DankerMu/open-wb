@@ -141,6 +141,8 @@ type ConversationViewProps = {
     >,
   ): Promise<void>;
   onRegenerate(): Promise<void>;
+  /** 文件变更卡的 `查看详情`（工作空间侧边栏的 `reveal`）；会话没有工作空间时为 undefined。 */
+  onReveal: ComponentProps<typeof Thread>["onReveal"];
   /** 现有发送路径的文本入口：运行时适配器的 `onNew` 委托给它。 */
   onSend(prompt: string): void;
   onStop: StopTurn;
@@ -188,6 +190,7 @@ export function ConversationView({
   onFork,
   onPatchComposer,
   onRegenerate,
+  onReveal,
   onSend,
   onStop,
   onSubmit,
@@ -268,6 +271,7 @@ export function ConversationView({
             locked={composerDisabled}
             onFork={onFork}
             onRegenerate={onRegenerate}
+            onReveal={onReveal}
             onSend={onSend}
             onStop={onStop}
             onUndo={onUndo}

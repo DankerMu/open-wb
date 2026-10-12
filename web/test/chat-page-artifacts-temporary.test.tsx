@@ -7,7 +7,7 @@
  * deltas. The session uses a temporary workspace: `temporaryWorkspace` is true and its
  * `workspaceId` is in no workspace list, so every preview route is keyed by that id.
  */
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   action,
@@ -45,7 +45,7 @@ import {
 import { envelope } from "./chat-page-ownership-support.js";
 import { chatShellFixture } from "./chat-page-shell-support.js";
 import type { FetchRoutes } from "./chat-page-support.js";
-import { latestListSource, settle } from "./chat-stream-support.js";
+import { latestListSource, SESSION_ID, settle } from "./chat-stream-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
 import { calls, currentLocation, jsonResponse, textPreviewResponse } from "./support.js";
 
@@ -57,6 +57,8 @@ const INDEX = "out/index.html";
 const CHART = "assets/chart.png";
 const NOTES = "notes.md";
 const NOTES_TEXT = "# 笔记\n";
+/** `notes.md` as the root listing of the temporary workspace holds it. */
+const NOTES_ENTRY = { name: NOTES, type: "file", size: 4, mtime: 1 };
 const OPEN_INDEX = "打开网页预览 index.html";
 
 const previewPath = (path: string) => `${WORKSPACES}/${TEMP}/file?path=${encodeURIComponent(path)}`;
@@ -95,11 +97,23 @@ function expectNoWorkspacePath() {
 
 const labels = () => artifactCards().map((card) => slot(card, "label")?.textContent);
 
+/** The title in the head of the workspace sidebar (the tree column has a heading of its own). */
+const sidebarTitle = (sidebar: HTMLElement) =>
+  sidebar.querySelector('[data-slot="workspace-sidebar-head"] h2')?.textContent;
+
+const detailNames = () => detailButtons().map((button) => button.getAttribute("aria-label"));
+/** 查看详情 of the three paths while the workspace is in no list: named by the relative path. */
+const RELATIVE_DETAILS = [`查看详情 ${INDEX}`, `查看详情 ${CHART}`, `查看详情 ${NOTES}`];
+
 describe("临时空间会话的文件变更卡", () => {
   it.each(lists)(
-    "%s：两行只有空间内相对路径，卡里没有 查看详情，index.html 与 notes.md 的产物卡照常渲染",
+    "%s：两行只有空间内相对路径，各带以相对路径为名的 查看详情（点它在原地打开侧边栏并选中），index.html 与 notes.md 的产物卡照常渲染",
     async (_name, workspaces) => {
-      const page = await openSession(temporaryTurn([write(INDEX), edit(NOTES, 3, 0)]), workspaces);
+      const tree = `${WORKSPACES}/${TEMP}/tree?path=`;
+      const page = await openSession(temporaryTurn([write(INDEX), edit(NOTES, 3, 0)]), workspaces, {
+        [tree]: () => jsonResponse({ path: "", entries: [NOTES_ENTRY] }),
+        [previewPath(NOTES)]: () => textPreviewResponse(NOTES_TEXT),
+      });
 
       const card = cardNamed("文件变更（2 个）");
       expect(rowTexts(card)).toEqual(["写入out/index.html", "+3notes.md"]);
@@ -113,10 +127,23 @@ describe("临时空间会话的文件变更卡", () => {
           ["file-change-path", NOTES],
         ],
       ]);
-      expect(card.querySelectorAll("button")).toHaveLength(0);
-      expect(detailButtons()).toEqual([]);
+      expect(
+        [...card.querySelectorAll("button")].map((button) => button.getAttribute("aria-label")),
+      ).toEqual(RELATIVE_DETAILS.filter((name) => !name.endsWith(CHART)));
+      expect(detailButtons()).toEqual([...card.querySelectorAll("button")]);
       expect(cardTitles()).toEqual(["index.html", "notes.md"]);
       expect(previewCalls(page.fetchMock)).toEqual([]);
+      expectNoWorkspacePath();
+
+      fireEvent.click(detailButtons()[1] as HTMLElement);
+
+      const sidebar = await screen.findByRole("complementary", { name: "工作空间侧边栏" });
+      const row = await within(sidebar).findByRole("button", { name: NOTES });
+      await waitFor(() => expect(row.getAttribute("aria-current")).toBe("true"));
+      expect(sidebarTitle(sidebar)).toBe("工作空间");
+      expect(within(sidebar).queryByRole("link", { name: "在文件页打开" })).toBeNull();
+      expect(calls(page.fetchMock, tree)).toHaveLength(1);
+      expect(currentLocation()).toBe(`/?session=${SESSION_ID}`);
       expectNoWorkspacePath();
     },
   );
@@ -161,12 +188,12 @@ describe("临时空间会话照常渲染产物卡", () => {
         [`/api/workspaces/${TEMP}/file?path=assets%2Fchart.png`, "GET"],
         [`/api/workspaces/${TEMP}/file?path=notes.md`, "GET"],
       ]);
-      expect(detailButtons()).toEqual([]);
+      expect(detailNames()).toEqual(RELATIVE_DETAILS);
       expectNoWorkspacePath();
     },
   );
 
-  it("转正后：产物卡仍在，文件变更卡的行改为逻辑路径并带 查看详情，指向该空间的文件页", async () => {
+  it("转正后：产物卡仍在，文件变更卡的行与 查看详情 的名字改为逻辑路径，点它仍是在原地打开侧边栏（头部是空间名并有 在文件页打开），不去文件页", async () => {
     const snapshot = temporaryTurn(changes());
     const promotedWorkspace = {
       ...PROJ,
@@ -185,11 +212,12 @@ describe("临时空间会话照常渲染产物卡", () => {
           jsonResponse({
             sessions: [{ ...snapshot.session, temporaryWorkspace: !promoted }],
           }),
-        [tree]: () => jsonResponse({ path: "", entries: [] }),
+        [tree]: () => jsonResponse({ path: "", entries: [NOTES_ENTRY] }),
+        [previewPath(NOTES)]: () => textPreviewResponse(NOTES_TEXT),
       },
     );
     expect(cardTitles()).toEqual(["index.html", "chart.png", "notes.md"]);
-    expect(detailButtons()).toEqual([]);
+    expect(detailNames()).toEqual(RELATIVE_DETAILS);
 
     // 服务端原地转正后发 `sessions.changed`：会话列表与工作空间列表各重取一次。
     promoted = true;
@@ -206,7 +234,7 @@ describe("临时空间会话照常渲染产物卡", () => {
         `+3${prefix}/notes.md`,
       ]),
     );
-    expect(detailButtons().map((button) => button.getAttribute("aria-label"))).toEqual([
+    expect(detailNames()).toEqual([
       `查看详情 ${prefix}/out/index.html`,
       `查看详情 ${prefix}/assets/chart.png`,
       `查看详情 ${prefix}/notes.md`,
@@ -215,11 +243,15 @@ describe("临时空间会话照常渲染产物卡", () => {
     expect(labels()).toEqual(["HTML", "PNG", "MD"]);
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
 
-    fireEvent.click(detailButtons()[0] as HTMLElement);
+    fireEvent.click(detailButtons()[2] as HTMLElement);
 
-    await waitFor(() => expect(currentLocation()).toBe(`/files?ws=${TEMP}`));
-    await screen.findByRole("navigation", { name: "工作空间目录树" });
+    const sidebar = await screen.findByRole("complementary", { name: "工作空间侧边栏" });
+    const row = await within(sidebar).findByRole("button", { name: NOTES });
+    await waitFor(() => expect(row.getAttribute("aria-current")).toBe("true"));
     await quiesce();
-    expect(calls(page.fetchMock, tree)).not.toHaveLength(0);
+    expect(sidebarTitle(sidebar)).toBe("转正空间");
+    expect(within(sidebar).getByRole("link", { name: "在文件页打开" })).toBeTruthy();
+    expect(calls(page.fetchMock, tree)).toHaveLength(1);
+    expect(currentLocation()).toBe(`/?session=${SESSION_ID}`);
   });
 });

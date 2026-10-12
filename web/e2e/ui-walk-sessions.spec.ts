@@ -44,7 +44,7 @@ import {
 } from "./ui-walk-session-list.js";
 import { expandToolGroup, toolGroup, walkArtifactPreview } from "./ui-walk-steps.js";
 import { walkTodoPanel } from "./ui-walk-todo.js";
-import { walkWorkspaceSidebar } from "./ui-walk-workspace-sidebar.js";
+import { walkViewDetails, walkWorkspaceSidebar } from "./ui-walk-workspace-sidebar.js";
 
 const DEV_PASSWORD = "demo";
 const WORKSPACE_NAME = "ui-walk-sessions";
@@ -147,7 +147,11 @@ async function walkSessionMeta(
     await step5FileChanges(page);
     await walkArtifactPreview(page, REPORT_FILE);
     await walkWorkspaceSidebar(page, REPORT_FILE, project);
-    await step5ViewDetails(page, workspaceId, sessionId);
+    await walkViewDetails(page, project, {
+      file: REPORT_FILE,
+      logicalPath: LOGICAL_PATH,
+      workspaceId,
+    });
     mark("step 5");
     await step6Sidebar(page, project, WORKSPACE_NAME, INITIAL_TITLE);
     mark("step 6");
@@ -371,40 +375,6 @@ async function step5FileChanges(page: Page): Promise<void> {
   await expect(row.locator('[data-slot="file-change-kind"]')).toHaveText("写入");
   await expect(row.locator('[data-slot="file-change-add"]')).toHaveCount(0);
   await expect(row.locator('[data-slot="file-change-del"]')).toHaveCount(0);
-}
-
-// 文件页只认 `ws`（没有 path 参数），落到空间；随后以真实导航回到会话。`ws` 缺失或未知时文件页自己
-// 把 URL 改写成第一个空间（全新状态下正是本空间），落定后的 URL 证明不了按钮的目标：断言点击后的
-// 第一次导航，URL 在事件回调里同步读（之后再读可能已是改写后的地址）。等导航与 click 并成一个
-// `Promise.all`：click 自己失败时，先 reject 的 `waitForEvent` 也有 handler，`finally` 照常清理。
-async function step5ViewDetails(page: Page, workspaceId: string, sessionId: string): Promise<void> {
-  let target = "";
-  const navigated = page.waitForEvent("framenavigated", (frame) => {
-    if (frame !== page.mainFrame()) return false;
-    target = frame.url();
-    return true;
-  });
-  await Promise.all([
-    navigated,
-    fileChangesCard(page)
-      .getByRole("button", { name: `查看详情 ${LOGICAL_PATH}`, exact: true })
-      .click(),
-  ]);
-  const first = new URL(target);
-  expect(
-    `${first.pathname}${first.search}${first.hash}`,
-    "查看详情: first navigation after the click",
-  ).toBe(`/files?ws=${workspaceId}`);
-  await expect.poll(() => new URL(page.url()).pathname).toBe("/files");
-  await expect.poll(() => new URL(page.url()).searchParams.get("ws")).toBe(workspaceId);
-  await expect(
-    page
-      .locator("main")
-      .getByRole("button", { name: "选择工作空间" })
-      .getByText(WORKSPACE_NAME, { exact: true }),
-  ).toBeVisible();
-  await page.goto(`/?session=${sessionId}`);
-  await expectTranscriptReady(page);
 }
 
 // 置顶不是乐观更新：PATCH 成功后条目换到 `置顶任务` 分组（DOM 节点重挂）。菜单在覆盖层的 DOM

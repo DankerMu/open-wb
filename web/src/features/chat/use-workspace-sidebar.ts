@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { useRequestMainWidth } from "../../lib/shell-nav.js";
 import type { WorkspaceBrowserHandle } from "../files/index.js";
 import type { ChatState } from "./stream.js";
@@ -112,9 +112,13 @@ export function useAssistantRefresh(
   useEffect(() => () => clearTimeout(timer.current), []);
 }
 
+/** 一次待套用的定位：`seq` 每次 `reveal` 加一，同一路径再点一次也是新的一次。 */
+type Located = { path: string; seq: number; sessionId: string };
+
 /**
- * 会话页的工作空间侧边栏状态（workspace-sidebar「布局与开合」）。`workspaceId` 是选中会话的空间，
- * 未绑定的会话为 `null`、欢迎态为 `undefined`。
+ * 会话页的工作空间侧边栏状态（workspace-sidebar「布局与开合」「从卡片定位到文件」）。`workspaceId` 是
+ * 选中会话的空间，未绑定的会话为 `null`、欢迎态为 `undefined`；`sessionId` 是选中会话的 id，会话还没
+ * 解析出来时为 `undefined`。
  *
  * - 开合意图是页面内存状态，初值关、不写存储；它不随 `workspaceId` 变化，所以换到另一个绑定会话时
  *   保持，换到未绑定会话或欢迎态时 `open` 为假、`slot` 为 `undefined`，回来后恢复。
@@ -125,35 +129,78 @@ export function useAssistantRefresh(
  *   列表；也不放进 state updater（StrictMode 下双调）。
  * - `restoreFocus` 在调用时到顶栏里找那个按钮，不记节点：换到未绑定会话再回来后按钮是新节点（槽位
  *   卸载又重建），记下的那个已不在文档里。按钮在外壳的顶栏里渲染，这里按 DOM 取而不传 ref。
+ *   `restoreFocus(true)`（只有窄屏模态层关闭时这样调）先试 `reveal` 记下的那个卡片按钮：它还在文档里
+ *   就还给它，否则回顶栏按钮。两条路都带 `preventScroll`。
+ * - `reveal(path, trigger)` 是文件变更卡 `查看详情` 的落点，会话没有工作空间时为 `undefined`（同
+ *   `slot`）。它记下 `trigger` 与一次定位（`located`），侧边栏没开就打开——这也是一次打开动作，同样先
+ *   向外壳请求主区宽度；已经开着时不请求。引用稳定（只随 `sessionId` 变）：它一路传进消息的渲染函数，
+ *   换引用会让每条助手消息重渲染；所以「开着没有」读的是 `wantedRef` 而不是闭包里的 `wanted`。
+ * - `located` 交给侧边栏内容去套用（`SidebarContent`）。它带着发起时的会话：换会话（含换到未绑定的
+ *   会话）即丢弃，不会被定位进另一个会话的树，切回来也不重新套用（规格「切换到另一个绑定了工作空间
+ *   的会话时…目录树、当前文件与预览重置」）。点顶栏按钮同样丢弃，并把记下的 `trigger` 清掉：关着的
+ *   侧边栏只有它和 `reveal` 能打开，所以关闭之后用它再打开没有选中的文件，那次打开的焦点也归它；
+ *   `close` 自己不用清。
  * - `share` 在挂载时读一次存储；`resize` 更新它并写回，写入抛错时只留在内存里。
  */
-export function useWorkspaceSidebar(workspaceId: string | null | undefined) {
+export function useWorkspaceSidebar(workspaceId: string | null | undefined, sessionId?: string) {
   const [wanted, setWanted] = useState(false);
   const [share, setShare] = useState(storedShare);
+  const [pending, setPending] = useState<Located | null>(null);
+  const wantedRef = useRef(false);
+  const trigger = useRef<HTMLElement | null>(null);
+  const seq = useRef(0);
   const requestMainWidth = useRequestMainWidth();
   const bound = workspaceId !== null && workspaceId !== undefined;
+  const located = pending?.sessionId === sessionId ? pending : null;
+  if (pending !== null && located === null) setPending(null);
+  const want = (next: boolean) => {
+    wantedRef.current = next;
+    setWanted(next);
+  };
+  const reveal = useCallback(
+    (path: string, opener: HTMLElement) => {
+      if (sessionId === undefined) return;
+      trigger.current = opener;
+      seq.current += 1;
+      setPending({ path, seq: seq.current, sessionId });
+      if (wantedRef.current) return;
+      requestMainWidth(BESIDE_WIDTH);
+      wantedRef.current = true;
+      setWanted(true);
+    },
+    [requestMainWidth, sessionId],
+  );
   return {
     open: wanted && bound,
     share,
+    located,
+    reveal: bound && sessionId !== undefined ? reveal : undefined,
     slot: bound
       ? {
           expanded: wanted,
           onSelect() {
             if (!wanted) requestMainWidth(BESIDE_WIDTH);
-            setWanted(!wanted);
+            trigger.current = null;
+            setPending(null);
+            want(!wanted);
           },
         }
       : undefined,
     close() {
-      setWanted(false);
+      want(false);
     },
-    /** 把焦点还给顶栏里的那个按钮，不滚动消息线程；顶栏里没有它时不动。 */
-    restoreFocus() {
-      document
-        .querySelector<HTMLElement>(
+    /**
+     * 把焦点还给打开它的控件，不滚动消息线程：`toOpener` 且 `reveal` 记下的按钮还在文档里时是那个
+     * 按钮，否则是顶栏里的那个按钮；顶栏里也没有它时不动。
+     */
+    restoreFocus(toOpener = false) {
+      const opener = toOpener && trigger.current?.isConnected ? trigger.current : null;
+      const target =
+        opener ??
+        document.querySelector<HTMLElement>(
           `[data-slot="topbar-actions"] button[aria-label="${WORKSPACE_ACTION_LABEL}"]`,
-        )
-        ?.focus({ preventScroll: true });
+        );
+      target?.focus({ preventScroll: true });
     },
     resize(next: number) {
       setShare(next);
