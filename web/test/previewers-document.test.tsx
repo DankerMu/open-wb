@@ -128,13 +128,18 @@ describe("文档预览器（组件级）：iframe 的属性", () => {
   it.each([
     ["pdf 用 base", pdf, "w"],
     ["办公文档用 officeBase", office, "o"],
-  ] as const)("路径编码：%s，后接各段分别编码的路径，斜杠保留", (_label, make, prefix) => {
-    render(<DocumentPreviewer doc={make({ path: "报告 2026/a b#1.pdf" })} name="x" />);
+  ] as const)(
+    "路径编码：%s，后接各段分别编码的路径，斜杠保留；title 是文件名，不是路径",
+    (_label, make, prefix) => {
+      render(<DocumentPreviewer doc={make({ path: "报告 2026/a b#1.pdf" })} name="x" />);
 
-    expect(frame().getAttribute("src")).toBe(
-      `https://${PREVIEW_HOST}/${prefix}/${TOKEN}/%E6%8A%A5%E5%91%8A%202026/a%20b%231.pdf`,
-    );
-  });
+      expect(frame().getAttribute("src")).toBe(
+        `https://${PREVIEW_HOST}/${prefix}/${TOKEN}/%E6%8A%A5%E5%91%8A%202026/a%20b%231.pdf`,
+      );
+      // 规格「title 为文件名」：子目录里的文件，路径与文件名才分得开。
+      expect(frame().getAttribute("title")).toBe("x");
+    },
+  );
 
   // 期望值是手写的字面量。这里只说属性里写了什么；浏览器解析这个地址时怎样处理点段与连续的斜杠、
   // 监听器怎样裁决，不在这个文件里。
@@ -594,7 +599,7 @@ describe("文件页的文档预览（页面级）：签发失败", () => {
 });
 
 describe("文件页的文档预览（页面级）：令牌不外露", () => {
-  it("先后选中 doc.pdf 与 plan.docx：令牌与预览来源不在界面文字里、不在地址里、不在两个存储、cookie 与控制台输出里，页面标记里恰出现一次（iframe 的 src）；通知区没有条目", async () => {
+  it("先后选中 doc.pdf 与 plan.docx：令牌与预览来源不在界面文字里、不在地址里、不在两个存储、cookie、history.state、document.title、window.name 与控制台输出里，页面标记里恰出现一次（iframe 的 src）；通知区没有条目", async () => {
     // 先于渲染装上：首次挂载时的输出也算。
     const consoles = [
       vi.spyOn(console, "log"),
@@ -633,6 +638,10 @@ describe("文件页的文档预览（页面级）：令牌不外露", () => {
     expect(leaked(JSON.stringify(window.localStorage))).toBe(false);
     expect(leaked(JSON.stringify(window.sessionStorage))).toBe(false);
     expect(document.cookie.includes(TOKEN)).toBe(false);
+    // 另外三处跨导航或跨页面留得住的地方。`history.state` 为 null 时序列化成 "null"。
+    expect(leaked(JSON.stringify(window.history.state))).toBe(false);
+    expect(leaked(document.title)).toBe(false);
+    expect(leaked(window.name)).toBe(false);
     await yieldMacrotask();
     expect(within(toasts).queryByRole("listitem")).toBeNull();
     expect(document.querySelector(".ui-toast")).toBeNull();
