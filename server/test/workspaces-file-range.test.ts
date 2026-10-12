@@ -193,6 +193,45 @@ describe("file route: range requests for audio and video", () => {
     });
   });
 
+  it("ignores a query key other than path: clip.mp4 with &v=1 answers the 200, 206 and 416 it answers without it", async () => {
+    await withRangeWorkspace(async ({ app, cookie }) => {
+      // What the web's media element asks for after a refetch: the file address plus `&v=<n>`.
+      const versioned = (range?: string) =>
+        app.inject({
+          method: "GET",
+          url: `${fileUrl("clip.mp4")}&v=1`,
+          headers: { cookie, ...(range === undefined ? {} : { range }) },
+        });
+      const comparable = ({ statusCode, headers, rawPayload }: LightMyRequestResponse) => ({
+        statusCode,
+        headers: { ...headers, date: undefined },
+        body: rawPayload.toString("hex"),
+      });
+
+      const whole = await versioned();
+      expectWhole(whole, "&v=1, no Range", "video/mp4", CLIP);
+      const partial = await versioned("bytes=0-99");
+      expectPartial(partial, "&v=1, bytes=0-99", "video/mp4", CLIP, {
+        contentRange: "bytes 0-99/1000",
+        length: "100",
+        start: 0,
+        end: 99,
+      });
+      const beyond = await versioned("bytes=1000-");
+      expectUnsatisfiable(beyond, "&v=1, bytes=1000-", "bytes */1000");
+
+      expect(comparable(whole)).toStrictEqual(
+        comparable(await requestFile(app, cookie, "clip.mp4")),
+      );
+      expect(comparable(partial)).toStrictEqual(
+        comparable(await requestFile(app, cookie, "clip.mp4", { range: "bytes=0-99" })),
+      );
+      expect(comparable(beyond)).toStrictEqual(
+        comparable(await requestFile(app, cookie, "clip.mp4", { range: "bytes=1000-" })),
+      );
+    });
+  });
+
   it("answers an unsatisfiable range with an empty 416 and opens nothing", async () => {
     await withRangeWorkspace(async ({ app, cookie }) => {
       spyBodyIo();

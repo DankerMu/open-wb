@@ -8,13 +8,20 @@
  * walked: a 401 / 404 / 416 answer and a format the browser rejects end the same way; a format it
  * plays badly without reporting an error shows no message.
  * The failure lasts as long as this mount. The caller remounts it for another file and, on the
- * same file, for 刷新 and a second click on the same row: each gets a new element with the same
- * address and no message.
- * Walked in Chromium only: after 刷新 a clip that was playing is a new element, back at its start
- * and not playing. Whether a new element asks the server again is the browser's call. In that
- * walk one remounted within about 40 seconds of the previous fetch of the same address sent no
- * request and ended as the previous one had, a file replaced on disk in between included; one
- * remounted about 70 seconds after fetched again. The mechanism was not looked into.
+ * same file, for 刷新 and a second click on the same row: each gets a new element and no
+ * message. For those two it also hands in another address, the file's own followed by `&v=<n>`
+ * with an n it has not used since the page loaded (`immediatePreview`); nothing here builds or
+ * reads that parameter.
+ * Walked in Chromium and Firefox against a real server (`file` answered 206 with `no-store`):
+ * after 刷新 a clip that was playing is a new element, back at its start and not playing; a
+ * request for the new address reaches the server, and a file replaced on disk just before the
+ * click is what the element gets.
+ * An address fetched before is another matter, and the reason for `v`. In the same walk a new
+ * element given one, some seconds after that fetch, sent no request and held what the fetch had
+ * got, the file having been replaced in between. A first selection carries no `v`, so selecting
+ * another file and coming back is that case. Walked before the address changed, Chromium only:
+ * still no request about 40 seconds after the fetch, a new one about 70 seconds after. The
+ * mechanism was not looked into.
  * A 401 answer is one more `error` among the others: the event carries no status, so nothing here
  * can tell the authentication guard, and nothing asks.
  */
