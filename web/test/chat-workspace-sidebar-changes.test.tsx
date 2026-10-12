@@ -3,6 +3,7 @@
  * 过滤」的三个场景，以及「内容与文件操作」的「没有空间级入口」「在文件页打开」与树区的折叠。接缝：
  * 真实外壳里的整页（桩掉的 `fetch` 与事件连接）；请求数取自 `fetch` 桩的调用记录。期望值是规格里的
  * 字面量；过滤后各行的次序按 files-web「工作空间浏览器组件」的规定写出（同级目录在前，再按名字）。
+ * Issue #1108（24.4 的最后一个分摊部分）在「内容与文件操作」里补场景「同一套组件与操作」（C10）。
  *
  * jsdom 没有布局：折叠后预览区是否占满只在功能验收清单 CH-101 里看；这里证到树栏带 `hidden` 属性
  * （按角色查不到）而节点还在。
@@ -23,7 +24,12 @@ import {
 } from "./chat-page-file-changes-support.js";
 import { envelope } from "./chat-page-ownership-support.js";
 import { cleanupSessionMeta } from "./chat-page-session-meta-support.js";
-import { historyUser, latestSource, observeUnhandledRejections } from "./chat-stream-support.js";
+import {
+  historyUser,
+  latestSource,
+  observeUnhandledRejections,
+  SESSION_ID,
+} from "./chat-stream-support.js";
 import {
   BOUND,
   CLOSE,
@@ -44,9 +50,22 @@ import {
   treeOf,
   treeRequests,
 } from "./chat-workspace-sidebar-support.js";
+import {
+  cancelButton,
+  confirmButton,
+  confirmGone,
+  deleted,
+  dialogGone,
+  dragOnto,
+  dropOn,
+  menuButton,
+  nameInput,
+  renameTo,
+  submitButton,
+} from "./files-ops-support.js";
 import { shownFrame } from "./files-site-fixture.js";
-import { jsonResponse, paths } from "./support.js";
-import { yieldMacrotask } from "./ui-support.js";
+import { currentLocation, jsonResponse, paths, textPreviewResponse } from "./support.js";
+import { waitMs, yieldMacrotask } from "./ui-support.js";
 
 const MARK = "本会话已改动";
 const ONLY = "只看本会话改动";
@@ -117,6 +136,17 @@ function markedRows(scope: HTMLElement) {
 function description(row: HTMLElement) {
   const id = row.getAttribute("aria-describedby");
   return id === null ? null : (document.getElementById(id)?.textContent ?? "");
+}
+
+/**
+ * 用指针打开 `name` 这一行的 `更多操作` 菜单。`files-ops-support` 的 `openRowMenu` 在侧边栏里打不开它：
+ * 不带坐标的按下在 jsdom 里被分栏库当成落在分隔线上（见 C7 的注释），所以这里给一个离开原点的坐标。
+ * 先让出一个宏任务：上一个覆盖层卸载时的焦点归还在 setTimeout(0) 里跑。
+ */
+async function rowMenu(name: string) {
+  await yieldMacrotask();
+  fireEvent.pointerDown(menuButton(name), { button: 0, clientX: 500, clientY: 500 });
+  return screen.findByRole("menu");
 }
 
 describe("本会话改动标记与过滤", () => {
@@ -415,5 +445,139 @@ describe("内容与文件操作", () => {
     expect(button(region, ONLY).getAttribute("aria-pressed")).toBe("false");
     expect(button(region, COLLAPSE)).toBeTruthy();
     expect(within(region).queryByRole("link")).toBeNull();
+  });
+
+  it("C10 同一套组件与操作：回合进行中展开 out、选中 readme.md、行菜单把 notes.md 重命名为 todo.md（先填 a/b）、拖进 out、行菜单删除——预览是渲染后的 Markdown 与下载链接，恰发出规格所列的三个请求与各自的重列，对话框与文件页的相同，地址始终只有 ?session=", async () => {
+    const API = `/api/workspaces/${PROJ.id}`;
+    const HERE = `/?session=${SESSION_ID}`;
+    const SEPARATOR = "名称不能包含路径分隔符";
+    const REMOVAL = "文件将从工作空间移除。管理员可在保留期内从服务器恢复，界面不提供回收站。";
+    // 两层目录此刻的内容；`move` 与 `entries` 的应答按请求改它，之后的 `tree` 读到改后的样子。
+    const listings = {
+      "": [dir("out"), file("notes.md"), file("readme.md")],
+      out: [file("a.md")],
+    };
+    const AFTER: Record<string, typeof listings> = {
+      '{"from":"notes.md","to":"todo.md"}': {
+        "": [dir("out"), file("readme.md"), file("todo.md")],
+        out: [file("a.md")],
+      },
+      '{"from":"todo.md","to":"out/todo.md"}': {
+        "": [dir("out"), file("readme.md")],
+        out: [file("a.md"), file("todo.md")],
+      },
+    };
+    // 视图一直是 running：不接通事件连接、不推事件，回合不会结束，也就没有随助手改动的刷新。
+    const { fetchMock, region } = await openChanges(turn("running", { content: "写到一半" }), {
+      [ROOT]: () => jsonResponse({ path: "", entries: listings[""] }),
+      [OUT]: () => jsonResponse({ path: "out", entries: listings.out }),
+      [fileOf(PROJ.id, "readme.md")]: () => textPreviewResponse("# 自述\n\n- 第一项"),
+      [`${API}/move`]: (_path, options) => {
+        const next = AFTER[String(options?.body)];
+        if (!next) throw new Error(`unexpected move ${String(options?.body)}`);
+        Object.assign(listings, next);
+        return jsonResponse({ path: JSON.parse(String(options?.body)).to });
+      },
+      [`${API}/entries?path=out%2Ftodo.md`]: () => {
+        listings.out = [file("a.md")];
+        return deleted();
+      },
+    });
+    /** 对这个空间发出的请求，按顺序：`GET` 只写地址，其余写成 `<方法> <地址>[ <请求体>]`。 */
+    const requests = () =>
+      fetchMock.mock.calls
+        .filter(([path]) => path.startsWith(`${API}/`))
+        .map(([path, options]) => {
+          const method = options?.method ?? "GET";
+          const body = options?.body == null ? [] : [String(options.body)];
+          return method === "GET" ? path : [method, path, ...body].join(" ");
+        });
+    const stop = () => screen.getByRole("button", { name: "停止" });
+    expect(stop()).toBeTruthy();
+
+    fireEvent.click(button(region, "展开 out"));
+    await within(region).findByRole("button", { name: "a.md" });
+    fireEvent.click(button(region, "readme.md"));
+
+    // 预览：渲染后的 Markdown（标题与列表项，不是源码的字面），头部有下载链接。
+    expect(await preview(region).findByRole("heading", { level: 1, name: "自述" })).toBeTruthy();
+    expect(preview(region).getByRole("listitem").textContent).toBe("第一项");
+    expect(preview(region).getByRole("button", { name: "查看源码" })).toBeTruthy();
+    expect(preview(region).queryByText("# 自述", { exact: false })).toBeNull();
+    const download = within(region).getByRole<HTMLAnchorElement>("link", {
+      name: "下载 readme.md",
+    });
+    expect(`${new URL(download.href).pathname}${new URL(download.href).search}`).toBe(
+      `${API}/download?path=readme.md`,
+    );
+    expect(rowNames(region)).toStrictEqual(["项目", "out", "a.md", "notes.md", "readme.md"]);
+    expect(currentLocation()).toBe(HERE);
+    await settled();
+    const before = requests().length;
+    const since = () => requests().slice(before);
+
+    // 重命名：先填含分隔符的名字，框内报校验文案、不发请求；再填合法的名字。
+    fireEvent.click(within(await rowMenu("notes.md")).getByRole("menuitem", { name: "重命名" }));
+    const rename = await screen.findByRole("dialog", { name: "重命名" });
+    expect(nameInput(rename).value).toBe("notes.md");
+    expect(cancelButton(rename)).toBeTruthy();
+    expect(submitButton(rename)).toBeTruthy();
+    renameTo(rename, "a/b");
+    expect(within(rename).getByRole("alert").textContent).toBe(SEPARATOR);
+    await settled();
+    expect(since()).toStrictEqual([]);
+    renameTo(rename, "todo.md");
+    await dialogGone();
+    await waitFor(() =>
+      expect(rowNames(region)).toStrictEqual(["项目", "out", "a.md", "readme.md", "todo.md"]),
+    );
+    expect(currentLocation()).toBe(HERE);
+
+    // 拖放：`todo.md` 拖到展开着的 `out` 上，经过时 `out` 行高亮，放下后高亮消失。
+    const source = button(region, "todo.md");
+    const target = button(region, "折叠 out");
+    const { accepted, transfer } = dragOnto(source, target);
+    expect(accepted).toBe(true);
+    expect(target.getAttribute("data-drop-target")).toBe("true");
+    dropOn(source, target, transfer);
+    await waitFor(() =>
+      expect(rowNames(region)).toStrictEqual(["项目", "out", "a.md", "todo.md", "readme.md"]),
+    );
+    expect(region.querySelector("[data-drop-target]")).toBeNull();
+    // 没有失败文案（拖放的失败文案在树区上方，是 `alert`）。
+    expect(within(region).queryAllByRole("alert")).toStrictEqual([]);
+    expect(currentLocation()).toBe(HERE);
+
+    // 删除：只有文件页的那一个确认框，没有因为回合进行中另加的一层。
+    fireEvent.click(within(await rowMenu("todo.md")).getByRole("menuitem", { name: "删除" }));
+    const confirm = await screen.findByRole("alertdialog", { name: "删除「todo.md」？" });
+    expect(within(confirm).getByText(REMOVAL, { exact: true })).toBeTruthy();
+    expect(cancelButton(confirm)).toBeTruthy();
+    fireEvent.click(confirmButton(confirm));
+    await confirmGone();
+    await waitFor(() =>
+      expect(rowNames(region)).toStrictEqual(["项目", "out", "a.md", "readme.md"]),
+    );
+
+    // 等过随助手改动刷新的合并窗口（300 毫秒）再读请求记录：把用户自己的操作当成助手的改动、迟一拍
+    // 再刷一轮的实现，多出来的 `tree` 这时已经发出。
+    await waitMs(350);
+    expect(since()).toStrictEqual([
+      `POST ${API}/move {"from":"notes.md","to":"todo.md"}`,
+      ROOT,
+      `POST ${API}/move {"from":"todo.md","to":"out/todo.md"}`,
+      ROOT,
+      OUT,
+      `DELETE ${API}/entries?path=out%2Ftodo.md`,
+      OUT,
+    ]);
+    expect(currentLocation()).toBe(HERE);
+    expect(button(region, "readme.md").getAttribute("aria-current")).toBe("true");
+    expect(preview(region).getByRole("heading", { level: 1, name: "自述" })).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(within(region).queryAllByRole("alert")).toStrictEqual([]);
+    // 回合还在进行：操作期间没有等它结束。
+    expect(stop()).toBeTruthy();
+    await yieldMacrotask();
   });
 });
