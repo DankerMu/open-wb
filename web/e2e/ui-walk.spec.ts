@@ -17,6 +17,7 @@ import {
   expectFilesUnpainted,
   expectNewPreviews,
   expectOnDemandChunk,
+  walkRenameThenDelete,
 } from "./ui-walk-files.js";
 import { armGate, controlOrigin, deleteGate, gatePhase, releaseGate } from "./ui-walk-gate.js";
 import {
@@ -109,6 +110,11 @@ test("cold load writes the stored theme before the stylesheet and #root", async 
 
 function walkOutName(project: WalkProject): string {
   return `walk-out-${project}-`.padEnd(WALK_OUT_LENGTH, "x");
+}
+
+// (f) 把 walk-out 改成的名字，补位规则相同。
+function walkRenamedName(project: WalkProject): string {
+  return `walk-renamed-${project}-`.padEnd(WALK_OUT_LENGTH, "x");
 }
 
 async function walkProductionOrigin(
@@ -232,6 +238,7 @@ async function expectSessionCookieAbsent(page: Page) {
 
 async function walkFiles(page: Page, project: WalkProject): Promise<void> {
   const walkOut = walkOutName(project);
+  const walkRenamed = walkRenamedName(project);
   const files = page.locator("main");
   await files.getByRole("button", { name: "选择工作空间" }).click();
   const switcher = page.getByRole("dialog", { name: "工作空间切换器" });
@@ -251,8 +258,11 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
 
   const tree = files.getByRole("navigation", { name: "工作空间目录树" });
   await expectRootFileButtons(tree);
-  for (const name of [walkOut, `展开 ${walkOut}`, `折叠 ${walkOut}`]) {
-    await expect(tree.getByRole("button", { name, exact: true })).toHaveCount(0);
+  // 沙箱前提：两个目录都不在。上一次走查若半途失败会留下其中一个，重跑在这里红（读代码推出）。
+  for (const dir of [walkOut, walkRenamed]) {
+    for (const name of [dir, `展开 ${dir}`, `折叠 ${dir}`]) {
+      await expect(tree.getByRole("button", { name, exact: true })).toHaveCount(0);
+    }
   }
 
   const preview = files.getByRole("region", { name: "文件预览" });
@@ -314,11 +324,17 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
     restored.getByRole("button", { name: `展开 ${walkOut}`, exact: true }),
   ).toBeVisible();
 
-  // (a)(b)(c)(d)，再重载做 (e)：重载后 (c)(d) 与选中态那组断言重跑一遍。
+  // (a)(b)(c)(d)，再重载做 (e)：重载后 (c)(d) 与选中态那组断言重跑一遍。最后是 (f)。
   await expectNewPreviews(page, workspaceId);
   await page.reload();
   await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");
   await expectClipSelected(page, workspaceId);
+  // walk-out 之后没有步骤再用到（读代码推出；它是空目录）：改名、删除放在 /files 步骤的最后。
+  await walkRenameThenDelete(page, workspaceId, {
+    from: walkOut,
+    to: walkRenamed,
+    root: SMOKE_FIXTURE,
+  });
 }
 
 // 键盘提交 walk-out，并在 POST …/dirs 挂起期间证明：`创建` 被原生禁用引发 focus fixup 后，
