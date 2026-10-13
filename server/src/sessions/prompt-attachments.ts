@@ -144,8 +144,10 @@ export function admitAttachments({
  * path), or names a path where `lstat` finds no directory (nothing there; a link is not followed).
  * The same answer the workspaces routes give (`ensureOwnedRoot`), and like there nothing is
  * resolved and nothing audited. Any other failure of the lookup is thrown as it is and stays the
- * generic failure it was (design D14-1): a root that is a symbolic link (tested), an unsafe owner
- * segment (read from the code, not exercised).
+ * generic failure it was (design D14-1): a root that is a symbolic link (tested), an owner
+ * directory that is itself occupied by a file — the store's own `lstat` then throws `ENOTDIR`,
+ * which is not the dedicated class (tested) — and an unsafe owner segment (read from the code, not
+ * exercised).
  * A check, not a hold: a root removed between this `lstat` and the facade's own look at it would
  * still be refused there, as the 403 with its event that every such request was before (read from
  * the code, not exercised).

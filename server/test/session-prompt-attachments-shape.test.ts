@@ -9,9 +9,17 @@
  * reached the supervisor. `admitAttachments` is also called directly for what no request can
  * show: that nothing is resolved, and what a root lookup the real store never gives leads to.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type AttachmentAdmission, admitAttachments } from "../src/sessions/prompt-attachments.js";
 import { WorkspaceRootOccupiedError } from "../src/workspaces/store.js";
@@ -121,6 +129,41 @@ describe("attachment shape: refused code points and the last segment (#1257)", (
     await expectAdmitted(world, session, { message: "看看", attachments: [path] });
 
     expect(JSON.parse(String(rowsOf(world, session)[0]?.attachments))).toEqual([{ path, size: 4 }]);
+  });
+
+  // The last segment is refused only when it is exactly `.`: `..` goes on to the sandbox, and a
+  // name that merely ends in a dot is a file like any other.
+  it("leaves a last segment `..` to the sandbox: 403 with exactly one sandbox.reject", async () => {
+    const world = await openWorld();
+
+    const audit = await expectRefused(
+      world,
+      await world.proj.session(),
+      { message: "看看", attachments: ["uploads/.."] },
+      403,
+      SANDBOX_DENIED_ENVELOPE,
+    );
+
+    expect(audit).toEqual([
+      {
+        kind: "sandbox.reject",
+        actorId: "u1",
+        workspaceId: world.proj.id,
+        detail: { relPath: "uploads/..", op: "read", reason: expect.any(String) },
+      },
+    ]);
+  });
+
+  it("still admits an existing file whose name ends in a dot, stored as given", async () => {
+    const world = await openWorld();
+    const session = await world.proj.session();
+    put(world.proj.root, "uploads/a.", "four");
+
+    await expectAdmitted(world, session, { message: "看看", attachments: ["uploads/a."] });
+
+    expect(JSON.parse(String(rowsOf(world, session)[0]?.attachments))).toEqual([
+      { path: "uploads/a.", size: 4 },
+    ]);
   });
 });
 
@@ -249,6 +292,20 @@ describe("a prompt with attachments on a workspace whose root is not there (#125
 
     expect(audit).toEqual([]);
   });
+
+  // The store's own `lstat` of the root throws ENOTDIR here, which is not its occupied-root class.
+  it("keeps the sanitized 500 when the owner directory itself is occupied by a file", async () => {
+    const world = await openWorld();
+    const [session = ""] = await sessionsOf(world, 1);
+    const ownerDir = dirname(world.proj.root);
+    rmSync(ownerDir, { recursive: true });
+    writeFileSync(ownerDir, "occupant");
+
+    const audit = await expectRefused(world, session, body, 500, INTERNAL_ERROR_ENVELOPE);
+
+    expect(audit).toEqual([]);
+    expect(readFileSync(ownerDir, "utf8")).toBe("occupant");
+  });
 });
 
 describe("admitAttachments and the root of the workspace (#1257)", () => {
@@ -324,8 +381,8 @@ describe("admitAttachments and the root of the workspace (#1257)", () => {
         },
       ],
       ["missing", () => join(dir, "missing")],
+      // The store never answers these three (it throws for each); `lstat` does not follow the link.
       ["below a regular file", () => join(dir, "file", "below")],
-      // The store never answers these two (it throws for both); `lstat` does not follow the link.
       ["a regular file", () => join(dir, "file")],
       ["a link to a directory", () => join(dir, "link")],
     ];
@@ -354,6 +411,27 @@ describe("admitAttachments and the root of the workspace (#1257)", () => {
     ).toThrow(failure);
     expect(log).toEqual([`root u9 ${"w".repeat(32)}`]);
   });
+
+  // Only a missing root is "no directory": any other failure of the `lstat` is not a 404. Root
+  // reads through a directory of mode 000, so the case cannot be made as root.
+  it.skipIf(process.getuid?.() === 0)(
+    "rethrows an lstat failure of the root that is not a missing entry, and resolves nothing",
+    () => {
+      const locked = join(scratchDir(), "locked");
+      mkdirSync(locked);
+      chmodSync(locked, 0o000);
+      const log: string[] = [];
+
+      try {
+        expect(() =>
+          admitAttachments(admission(["a"], () => join(locked, "root"), log)),
+        ).toThrowError(expect.objectContaining({ code: "EACCES", syscall: "lstat" }));
+      } finally {
+        chmodSync(locked, 0o700);
+      }
+      expect(log).toEqual([`root u9 ${"w".repeat(32)}`]);
+    },
+  );
 
   it("does not look the root up without a workspace, for a builtin or for no path", () => {
     const log: string[] = [];
