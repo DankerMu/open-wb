@@ -203,10 +203,10 @@ Minimal mergeable slice: atomic - 上报没有消费方是死属性，侧边栏�
 
 ## 12. omp-test-harness — 受控上游按回合判定工具轮（G12，#1140）
 
-- [ ] 12.1 测试先行（`server/test/fake-upstream-markers.test.ts`，现 445 行，或同组新文件）：omp-test-harness 场景「按回合判定工具轮」——`toolRoundScope:"turn"` 下历史为 `user → assistant(tool_calls) → tool → assistant → user(WORKBUDDY_TODO)` 的请求得到 `todo` 调用，追加 `tool` 消息后得到文本轮，`WORKBUDDY_WRITE` 与无标记同理；不传选项与传 `"history"` 时同一请求得到固定回复；`"turn"` 下错误标记、应答轮的 `WORKBUDDY_THINK`（有无闸门）、单条 user 消息的两轮与缺省逐字节相同（除生成的 id 与时间戳）；`start({toolRoundScope:"session"})` 被拒且没有端口被绑定。验证：在现有实现上判红（选项被忽略）。
-- [ ] 12.2 实现：`server/test/support/fake-upstream.mjs` 的 `start(options)` 校验并保存 `toolRoundScope`，`serveChat` 的工具轮判定按它二选一；缺省分支的代码路径不动。验证：12.1 转绿；`fake-upstream.test.ts`、`fake-upstream-gates.test.ts` 与 `fake-upstream-markers.test.ts` 的既有用例一条不改、全部通过；`fake-upstream.mjs` 仍 ≤800 行。
-- [ ] 12.3 删除转发器：`server/test/support/omp-official.ts` 的 `openOfficialWorld` 把选项透传给 `start()`，删掉 `freshToolRounds` 与 `startTurnForwarder`；`server/test/omp-official-approval-modes.test.ts` 的用例 (d) 改用新选项，其「夹具先行」断言的文案相应改写；`omp-official-model-commands.test.ts` 头注释里提到转发器的一句同步改。验证：`git grep -n "freshToolRounds\|startTurnForwarder" -- server` 无命中；用例 (d) 在 CI `uid-isolation` job 上通过（把该 job 的链接贴进 PR）。
-- [ ] 12.4 变异证据：把 `"turn"` 的判定写回整段历史 → 12.1 第一组判红。`make smoke` 与 `make ui-walk` 各跑一次，证明缺省路径没有任何改动需要（两者的夹具与断言文件 `git diff` 为空）。
+- [x] 12.1 测试先行（`server/test/fake-upstream-markers.test.ts`，现 445 行，或同组新文件）：omp-test-harness 场景「按回合判定工具轮」——`toolRoundScope:"turn"` 下历史为 `user → assistant(tool_calls) → tool → assistant → user(WORKBUDDY_TODO)` 的请求得到 `todo` 调用，追加 `tool` 消息后得到文本轮，`WORKBUDDY_WRITE` 与无标记同理；不传选项与传 `"history"` 时同一请求得到固定回复；`"turn"` 下错误标记、应答轮的 `WORKBUDDY_THINK`（有无闸门）、单条 user 消息的两轮与缺省逐字节相同（除生成的 id 与时间戳）；`start({toolRoundScope:"session"})` 被拒且没有端口被绑定。验证：在现有实现上判红（选项被忽略）。
+- [x] 12.2 实现：`server/test/support/fake-upstream.mjs` 的 `start(options)` 校验并保存 `toolRoundScope`，`serveChat` 的工具轮判定按它二选一；缺省分支的代码路径不动。验证：12.1 转绿；`fake-upstream.test.ts`、`fake-upstream-gates.test.ts` 与 `fake-upstream-markers.test.ts` 的既有用例一条不改、全部通过；`fake-upstream.mjs` 仍 ≤800 行。
+- [x] 12.3 删除转发器：`server/test/support/omp-official.ts` 的 `openOfficialWorld` 把选项透传给 `start()`，删掉 `freshToolRounds` 与 `startTurnForwarder`；`server/test/omp-official-approval-modes.test.ts` 的用例 (d) 改用新选项，其「夹具先行」断言的文案相应改写；`omp-official-model-commands.test.ts` 头注释里提到转发器的一句同步改。验证：`git grep -n "freshToolRounds\|startTurnForwarder" -- server` 无命中；用例 (d) 在 CI `uid-isolation` job 上通过（把该 job 的链接贴进 PR）。
+- [x] 12.4 变异证据：把 `"turn"` 的判定写回整段历史 → 12.1 第一组判红。`make smoke` 与 `make ui-walk` 各跑一次，证明缺省路径没有任何改动需要（两者的夹具与断言文件 `git diff` 为空）。
 
 Suggested fixture level: compact - 测试夹具的一个可选开关，缺省行为逐字节不变，不涉及产品代码
 Minimal mergeable slice: 12.1–12.2（开关与夹具单测，转发器仍在，独立保绿）；其后 12.3 删除转发器（净减行，依赖前一刀）

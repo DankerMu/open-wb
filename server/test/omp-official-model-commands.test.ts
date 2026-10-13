@@ -9,8 +9,9 @@
  *
  * One case, because the steps build on each other: the first turn of the fresh session is the tool
  * round (the fake upstream opens with a tool call only while the request holds no tool result), the
- * post-switch turn must carry that history (so no `freshToolRounds` here: its forwarder trims the
- * history), and `/compact` needs both behind it. The expectation tables were filled from the first
+ * post-switch turn must carry that history and was recorded as a plain-text answer (so the default
+ * `toolRoundScope` stays here: by the fixture's rule `"turn"` would open that turn with a tool call
+ * again), and `/compact` needs both behind it. The expectation tables were filled from the first
  * run and frozen; every observed value is also printed as a `[model-commands] ` line, which is what
  * s1g task 1.6 transcribes from the CI log.
  *

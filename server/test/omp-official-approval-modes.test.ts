@@ -9,8 +9,9 @@
  *
  * The fake upstream opens a turn with one tool call (`write` for `WORKBUDDY_WRITE`, else bash) only
  * while the request holds no tool result, so every tool round runs in a fresh session; case (d),
- * whose second tool round follows a resume, opens its world with `freshToolRounds` (the upstream is
- * then shown the running turn only — see `startTurnForwarder` in support/omp-official.ts).
+ * whose second tool round follows a resume, opens its world with `toolRoundScope: "turn"` (the
+ * upstream then asks only whether a tool result follows the last user message; omp's requests reach
+ * it whole — omp-test-harness「按回合判定工具轮」, #1140).
  *
  * Issue #1128 (s1g task 1.8): the last group checks design D12 item (g) on the same binary — does
  * omp store a prompt text that starts with newlines (the wire text of an attachment-only message)
@@ -158,7 +159,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: approval tiers`, ()
     async () => {
       const first = await openOfficialWorld(() => {}, {
         spawnArgs: { approvalMode: "write" },
-        freshToolRounds: true,
+        toolRoundScope: "turn",
       });
       const opening = await collectPrompt(first.runtime.prompt("第一回合"));
       expect(opening.at(-1)?.type).toBe("agent_end");
@@ -179,7 +180,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: approval tiers`, ()
       // Fixture check first, so a red run names its cause: the resumed turn must carry a tool call.
       expect(
         executions(frames).map(([name]) => name),
-        "the fake upstream issued no tool call in the resumed turn (the freshToolRounds forwarder did not hide the first turn's tool result), so omp had nothing to ask about",
+        "the fake upstream issued no tool call in the resumed turn (its toolRoundScope turn rule did not open a tool round after the first turn's tool result), so omp had nothing to ask about",
       ).toEqual(["write"]);
       expect(asked(resumed).slice(before)).toEqual([["write", "Allow tool: write"]]);
       expectExecuted(resumed, frames, "write");
