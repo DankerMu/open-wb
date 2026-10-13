@@ -12,7 +12,7 @@
 
 1. **独立的预览监听器。** 同一进程里的第二个 Fastify 实例（`server/src/preview/app.ts`），监听 `PREVIEW_PORT`，与主监听器绑定同一个 `HOST`。
    它只有两条 `GET`（及派生的 `HEAD`）路由：`/w/<token>/<path>` 原样发文件、`/o/<token>/<path>` 发办公文档转换出的 PDF；
-   不注册认证插件、不解析 cookie、自己不拿数据库句柄（经与主实例共用的 store 与 sandbox 读写同一个库：查空间归属、写 `sandbox.reject` 审计）、不托管静态文件、没有 `/api`。入口先于主监听器 `listen`、先于主监听器关停（`server/src/server.ts`）。
+   不注册认证插件、不解析 cookie、自己不拿数据库句柄（经与主实例共用的 store 与 sandbox 读写同一个库：查空间归属、写 `sandbox.reject` 审计）、不托管静态文件、没有 `/api`。入口在主监听器 `listen` 成功之后才让它 `listen`（#1337），关停时先于主监听器关停（`server/src/server.ts`）。
 2. **路径令牌。** `POST /api/workspaces/:id/preview-token`（主站、cookie 鉴权、无请求体）签发；令牌是 32 字节随机数的十六进制，
    登记在进程内存里，绑定一个账号、一个工作空间与签发请求的 `Origin` 头（`server/src/preview/tokens.ts`）。
    同一账号同一空间在未过期时重复签发得到同一个令牌并把到期时间设为「现在 + 900 秒」；页面每 300 秒续一次（`web/src/features/files/use-preview-token.ts`）。
@@ -58,7 +58,7 @@
 - 不透明来源下 `localStorage`、`sessionStorage`、cookie、IndexedDB 不可用，依赖它们的页面会报错。
 - 回收目录与工作空间同在 `SANDBOX_ROOT` 下，是为了 `rename` 不跨文件系统；代价是 omp 用户对它的父目录可写，见下表 #1286。
 
-已知残余（均未闭合；#1286、#1350、#1337 截至 2026-10-12 都是打开的 issue）：
+已知残余（#1286、#1350 截至 2026-10-12 都是打开的 issue，均未闭合；#1337 闭合于 change s1-followups-batch，该行留作记录）：
 
 | 残余 | 证据 |
 |---|---|
@@ -74,7 +74,7 @@
 | `OMP_USER` 模式下被终止的转换留下 `soffice.bin`；`work/` 在一次运行期间增长 | 实测（#1052，2026-10-06，design D18）；数字见「运维」与 ADR-0010 的 #1119 补充 |
 | 转换缓存没有总量上限 | 读代码推出（只有按 7 天的清理） |
 | 移动的「先看再改名」：检查之后、改名之前别的进程在目标位置建出的文件会被覆盖 | 读代码推出，未测（design Risks） |
-| **#1337** 缺省 `PREVIEW_PORT=0` 先于主端口绑定，系统分配的端口可能恰是 `PORT` | 读代码推出，未复现 |
+| **#1337**（已闭合，change s1-followups-batch）缺省 `PREVIEW_PORT=0` 曾先于主端口绑定，系统分配的端口可能恰是 `PORT`。入口改为先绑定主监听器，分配到的端口不可能是 `PORT`。对调留下一段窗口：主监听器已受理请求而预览监听器尚未绑定，其间 `preview-token` 答 typed 404。托管布局建在两次绑定之间（owner 2026-10-13 裁决）：主监听器绑定成功之后到 `ensureOmpStateLayout` 返回是同步代码，窗口里到达的 prompt 建得出快照目录，不留 `session_fault`；布局失败时已绑定的主监听器随失败清理关闭。`models.yml` 与宿主 overlay 仍在两次绑定之后写，它们写出之前到达的请求是对调之前就有的残余（写入本来就是异步的），窗口多了一次预览绑定的时长 | 原问题：读代码推出，未复现。对调后的次序、窗口里的 `preview-token` 404 与 prompt 不留 `session_fault`：实测（编译入口的 order trace；窗口由预加载钩子推迟预览监听器的原生 `listen` 拉宽，`server/test/server-startup-order.test.ts`、`server-startup-preview.test.ts`）。主绑定与布局之间没有让出：读代码推出（`server/src/server.ts` 的 `start`）。`models.yml` 未写时的请求：读代码推出，未测。不加钩子时窗口有多长、请求能否落进去：未测 |
 | 真实 LibreOffice 经 `/o/` 的端到端（docx / xlsx / pptx）、从另一台机器经固定端口打开 html 预览 | 已测一次（#1123，2026-10-12；浏览器一步是脚本驱动加截图）：三种格式可翻页，html 的相对样式表生效，见文末「真实转换的验证记录」；那里列着没有做的 |
 
 ## Considered Options
@@ -92,7 +92,7 @@
 
 - 不做任何配置也能启动：`PREVIEW_PORT` 缺省 `0`，由系统分配端口，只适合本机使用。要让别的机器访问预览，固定 `PREVIEW_PORT` 并在防火墙放行它；
   预览监听器与主监听器绑定同一个 `HOST`（缺省 `127.0.0.1`），所以 `HOST` 也得是外部可达的地址，或者前面有反向代理。
-- 固定 `PREVIEW_PORT` 还避开 #1337：`PORT` 落在系统临时端口段内而 `PREVIEW_PORT` 未设时，系统可能把 `PORT` 分给预览监听器，主监听器随即绑定失败（`{"event":"server_start_failed","reason":"listen"}`）。两者显式设成相同的值同样是这个失败（都是**读代码推出**，未复现）。
+- `PORT` 落在系统临时端口段内而 `PREVIEW_PORT` 未设也可以：入口先绑定主监听器，系统随后为预览监听器分配的端口不可能是 `PORT`（#1337，已闭合；**实测**次序，见上表）。两者显式设成相同的值仍是启动失败，阶段为预览监听器那一步（`{"event":"server_start_failed","reason":"preview_listen"}`，**实测**）。
 - 浏览器不自己拼预览地址，用的是令牌响应里的 `base` / `officeBase`。未设 `PREVIEW_ORIGIN` 时前缀取「本次请求的协议 + `Host` 头的主机名 + 预览监听器实际绑定的端口」（`server/src/workspaces/rest-preview-token.ts`）；
   服务端没有开启代理头信任，经 TLS 终结或端口映射时这样拼出的地址不对（**读代码推出**）。所以有反向代理、TLS 终结或端口映射时必须设 `PREVIEW_ORIGIN`。
 - `PREVIEW_ORIGIN` 只能是协议加 authority，例如 `https://preview.example.com` 或 `https://app.example.com:8443`：没有路径、没有结尾斜杠，写法不符即启动失败。

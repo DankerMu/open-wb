@@ -3,7 +3,11 @@
  * 只放跨文件共用的；单文件自用的辅助留在各自文件里。
  */
 
+import { readdirSync } from "node:fs";
 import { connect as connectTcp, createServer, type Server } from "node:net";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { expect } from "vitest";
 
 export const MODEL_ID = "issue-102-tracer-model";
 export const CONTINUE_LINE = "HTTP/1.1 100 Continue\r\n\r\n";
@@ -76,12 +80,32 @@ export function holdPort(port: number): Promise<Server> {
   });
 }
 
+/** 后继进程能重新打开同一个库并读到迁移过的表：原进程已关闭它的句柄。 */
+export function expectDbReopens(path: string): void {
+  const db = new DatabaseSync(path);
+  try {
+    expect(db.prepare("SELECT id FROM accounts WHERE id = 'u1'").get()).toEqual({ id: "u1" });
+  } finally {
+    db.close();
+  }
+}
+
 /**
- * 预加载：扣住进程里第 `nth` 次 `net.Server#listen`（1 = 预览监听器，2 = 主监听器）。进入时先装
- * SIGTERM 监听（由它写 LISTEN_RELEASE）、再落 LISTEN_ENTERED 标记，轮询到放行后才调原生 listen。
+ * 主监听器绑定成功之后、两个托管文件写出之前的状态目录（#1337）：托管布局的五个顶层目录都在，
+ * `models.yml` 与 `host-overlay.yml` 还没有。
+ */
+export function expectLayoutWithoutManagedFiles(state: string): void {
+  expect(readdirSync(state).toSorted()).toEqual(["home", "sessions", "snapshots", "trash", "xdg"]);
+  expect(readdirSync(join(state, "home", ".omp", "agent"))).toEqual([]);
+}
+
+/**
+ * 预加载：扣住进程里第 `nth` 次 `net.Server#listen`（1 = 主监听器，2 = 预览监听器）。进入时先装
+ * SIGTERM 监听（由它写 LISTEN_RELEASE）、再落 LISTEN_ENTERED 标记，轮询到放行后才调原生 listen；
+ * 测试自己写 LISTEN_RELEASE 同样放行（那时 signal 没有中止，绑定照常完成）。
  * 入口自己的 SIGTERM 处理与本监听在同一次 emit 内同步执行，原生 listen 只在其后的定时器宏任务里
- * 才被调用：它拿到的 signal 必然已经中止。这是把「信号落在 listen 调用与实际绑定之间」拉宽成可
- * 确定复现的窗口，不是生产里会出现的调用次序。
+ * 才被调用：它拿到的 signal 若被入口中止，此刻必然已经中止。这是把「信号落在 listen 调用与实际
+ * 绑定之间」拉宽成可确定复现的窗口，不是生产里会出现的调用次序。
  */
 export function heldListenHook(nth: 1 | 2): string {
   return [

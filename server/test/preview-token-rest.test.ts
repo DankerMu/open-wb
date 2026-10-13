@@ -275,7 +275,7 @@ describe("preview-token: 签发与复用", () => {
 });
 
 describe("preview-token: 对外来源与转换可用", () => {
-  it("uses the configured origin verbatim without asking for the port, and reports the injected limit and converter", async () => {
+  it("uses the configured origin verbatim without the bound port in it, and reports the injected limit and converter", async () => {
     await withPreviewWorld(
       async ({ app, zhangsan }) => {
         const issued = issuedOf(
@@ -291,10 +291,8 @@ describe("preview-token: 对外来源与转换可用", () => {
         });
       },
       {
+        // The bound port (PREVIEW_PORT) is read only to tell that the listener is bound (#1337).
         origin: "https://preview.example.test",
-        port: () => {
-          throw new Error("the port must not be read when an origin is configured");
-        },
         documentMaxBytes: 12_345,
         officeAvailable: true,
       },
@@ -592,4 +590,47 @@ describe("preview-token: 未装配预览的可注入 app", () => {
       expect(tree.statusCode).toBe(200);
     });
   });
+});
+
+describe("preview-token: 预览监听器尚未绑定（#1337）", () => {
+  it.each([
+    ["without a configured origin", {}],
+    ["with a configured origin", { origin: "https://preview.example.test" }],
+  ])(
+    "answers the typed 404 of an app without preview and issues nothing while the port is 0, %s",
+    async (_name, configured) => {
+      // The entry reports 0 between the main listener's bind and the preview listener's.
+      let port = 0;
+      await withPreviewWorld(
+        async ({ app, issueCalls, zhangsan }) => {
+          // Unassembled, a body never turns the 404 into a 400: neither does it here.
+          for (const body of [
+            undefined,
+            { name: "{} JSON", payload: "{}", contentType: "application/json" },
+          ]) {
+            const response = await issueToken(
+              app,
+              WORKSPACE,
+              zhangsan,
+              { origin: MAIN_ORIGIN },
+              body,
+            );
+            expectEnvelope(response, 404, NOT_FOUND_ENVELOPE);
+            expect(response.payload).not.toContain(":0/");
+          }
+          expect(issueCalls).toEqual([]);
+
+          port = PREVIEW_PORT;
+          const issued = issuedOf(
+            await issueToken(app, WORKSPACE, zhangsan, { origin: MAIN_ORIGIN }),
+          );
+          expect(issued.base).toBe(
+            `${"origin" in configured ? configured.origin : `http://127.0.0.1:${PREVIEW_PORT}`}/w/${issued.token}/`,
+          );
+          expect(issueCalls).toHaveLength(1);
+        },
+        { port: () => port, ...configured },
+      );
+    },
+  );
 });

@@ -150,22 +150,22 @@ Minimal mergeable slice: atomic - 失效入口没有调用方就是死代码（k
 
 ## 10. http-service-skeleton — 主监听器先于预览监听器绑定（G10，#1337；omp 子进程治理邻接面（启动窗口内的关停次序），请求白盒审查）
 
-- [ ] 10.1 测试先行（`server/test/server-startup-order.test.ts`，编译入口加 order trace）：场景「缺省预览端口不会占掉主端口」第一组——不设 `PREVIEW_PORT` 时 trace 里主监听器的 `listening:` 行先于预览监听器的，预览端口非 0 且不等于 `PORT`。把该文件里断言旧次序的期望改成新次序，逐条列入 PR 的偏离记录。验证：在现有实现上判红。
-- [ ] 10.2 测试先行（`server-startup-preview.test.ts`、`server-startup-failure-reason.test.ts`）：「预览端口被占用」——失败记录整行等于 `{"event":"server_start_failed","reason":"preview_listen"}`，进程退出后 `PORT` 可立即绑定（`expectBindable`），DB 可重新打开；显式 `PREVIEW_PORT === PORT` 一例的 `reason` 由 `listen` 改为 `preview_listen`。验证：第二例在现有实现上判红。
-- [ ] 10.3 测试先行：同场景第二、三组——（a）经 `requireHook` 把预览监听器的 `listen` 挂起，其间对自己的工作空间 `POST preview-token` → typed 404、没有令牌被登记；放行后同一请求 200 且 `base` 的端口是实际绑定的端口。（b）SIGTERM 落在主监听器已绑定、预览绑定仍在途：没有 success / failure record，没有后到的预览绑定，trace 里主监听器经 runtime → listener → DB 关闭，退出码 0，两个端口与 DB 可立即复用。验证：两例在现有实现上判红（现在没有这段窗口）。（a）的应答按 D14-4。
-- [ ] 10.4 实现（`server/src/server.ts`）：
+- [x] 10.1 测试先行（`server/test/server-startup-order.test.ts`，编译入口加 order trace）：场景「缺省预览端口不会占掉主端口」第一组——不设 `PREVIEW_PORT` 时 trace 里主监听器的 `listening:` 行先于预览监听器的，预览端口非 0 且不等于 `PORT`。把该文件里断言旧次序的期望改成新次序，逐条列入 PR 的偏离记录。验证：在现有实现上判红。
+- [x] 10.2 测试先行（`server-startup-preview.test.ts`、`server-startup-failure-reason.test.ts`）：「预览端口被占用」——失败记录整行等于 `{"event":"server_start_failed","reason":"preview_listen"}`，进程退出后 `PORT` 可立即绑定（`expectBindable`），DB 可重新打开；显式 `PREVIEW_PORT === PORT` 一例的 `reason` 由 `listen` 改为 `preview_listen`。验证：第二例在现有实现上判红。
+- [x] 10.3 测试先行：同场景第二、三组——（a）经 `requireHook` 把预览监听器的 `listen` 挂起，其间对自己的工作空间 `POST preview-token` → typed 404、没有令牌被登记；放行后同一请求 200 且 `base` 的端口是实际绑定的端口。（b）SIGTERM 落在主监听器已绑定、预览绑定仍在途：没有 success / failure record，没有后到的预览绑定，trace 里主监听器经 runtime → listener → DB 关闭，退出码 0，两个端口与 DB 可立即复用。验证：两例在现有实现上判红（现在没有这段窗口）。（a）的应答按 D14-4。
+- [x] 10.4 实现（`server/src/server.ts`）：
   - 对调两次 `listen`；主监听器绑定后立即换新的 `AbortController`，预览监听器的在途绑定用新的那一个（design D10 第 1 点）。
   - `requestShutdown`（现 `:566-571`）的 abort 条件由「主监听器未绑定」改为「当前有在途绑定」：预览监听器尚未 bound 时也 abort **当前** controller（此时它只管预览那一次绑定）；已绑定的主监听器仍只经 `releaseOwned` 关闭，不被任何 signal 的原生 close 触及。不这样改，对调之后信号落在预览绑定在途时不会 abort，`releaseOwned` 直接对 `listen` 仍在途的预览实例调 `close()`。
   - 预览绑定失败时的清理把已绑定的主监听器一并关掉；阶段标记顺序改为先 `listen` 后 `preview_listen`。
   - `server/src/workspaces/rest-preview-token.ts`：预览监听器尚未绑定时按未装配处理（typed 404，不登记）。
   - `server.ts` 不越 800 行。
   验证：10.1–10.3 转绿；`server-startup-*`、`listener-shutdown`、`server-assembly` 全部通过。
-- [ ] 10.5 文档与注释：
+- [x] 10.5 文档与注释：
   - `server/src/server.ts` 里描述旧次序的三处注释——文件头 `:2-3` 的次序串与 `:12`「一个 per-entry AbortController 随两次 listen 传递（预览监听器在先，同一个 signal）」、`:326`「先于主实例 listen」、`:400`「主监听器在它之后才 listen」——改成新次序与「各用一个 controller」。
   - `docs/adr/0014-isolated-preview-origin.md`：`:15`「入口先于主监听器 `listen`」改为后于；`:61`「#1286、#1350、#1337 截至 2026-10-12 都是打开的 issue」去掉 #1337 并注明它闭合于本 change；残余表 `:77` 的 #1337 一行标为已闭合；`:95`「固定 `PREVIEW_PORT` 还避开 #1337」一条改写（显式两端口相同仍是启动失败，阶段为 `preview_listen`）。
   - 已归档的 `implementation-notes.md:220` 不改，偏离的过时记在本 change 的 design D10。
   验证：`git grep -n "先于主监听器\|先于主实例 listen\|预览监听器在先\|同一个 signal" -- docs server/src` 不再有描述旧次序的句子（「先于主监听器关停」是关停次序，保留）。
-- [ ] 10.6 变异证据：把两次 `listen` 调回去 → 10.1 判红；预览绑定沿用主监听器的 signal、并让 `requestShutdown` abort 它 → 10.3 (b) 判红（主监听器被原生 close，trace 次序不对）；`requestShutdown` 仍只看主监听器是否 bound → 10.3 (b) 判红（出现后到的预览绑定，或端口不可立即复用）；去掉 `preview-token` 的未绑定判定 → 10.3 (a) 判红（签出端口 0 的地址）；失败清理不关主监听器 → 10.2 的 `expectBindable` 判红。`make smoke` 与 `make ui-walk` 各跑一次。PR 标注「omp 子进程治理邻接面（启动窗口内的关停次序），请求白盒审查」。
+- [x] 10.6 变异证据：把两次 `listen` 调回去 → 10.1 判红；预览绑定沿用主监听器的 signal、并让 `requestShutdown` abort 它 → 10.3 (b) 判红（主监听器被原生 close，trace 次序不对）；`requestShutdown` 仍只看主监听器是否 bound → 10.3 (b) 判红（出现后到的预览绑定，或端口不可立即复用）；去掉 `preview-token` 的未绑定判定 → 10.3 (a) 判红（签出端口 0 的地址）；失败清理不关主监听器 → 10.2 的 `expectBindable` 判红。`make smoke` 与 `make ui-walk` 各跑一次。PR 标注「omp 子进程治理邻接面（启动窗口内的关停次序），请求白盒审查」。
 
 Suggested fixture level: expanded - 生产入口的启动次序、失败清理与信号处理，改变一个失败阶段的取值
 Minimal mergeable slice: atomic - 绑定次序、signal 的更换与 abort 条件、失败清理、窗口期的 `preview-token` 是同一次对调的后果，分开合入会留下「信号绕过 runtime 关主监听器」「信号不中止在途的预览绑定」或「签出端口 0」的中间态
