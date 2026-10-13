@@ -12,10 +12,9 @@
  * boundaries, and a sandbox port that answers something the real facade never would.
  */
 import { Buffer } from "node:buffer";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
 import {
@@ -26,6 +25,20 @@ import {
 } from "../src/sessions/prompt-attachments.js";
 import { BAD_REQUEST_ENVELOPE } from "./session-db-helpers.js";
 import {
+  A_PDF,
+  closeAfterTest,
+  closeWorlds,
+  expectAdmitted,
+  expectEnvelope,
+  expectRefused,
+  openBound,
+  openWorld,
+  put,
+  rowsOf,
+  send,
+  type World,
+} from "./session-prompt-attachments-helpers.js";
+import {
   AGENT_UNAVAILABLE_ENVELOPE,
   cookieFor,
   getSessionMessages,
@@ -34,16 +47,11 @@ import {
   SESSION_BUSY_ENVELOPE,
 } from "./session-rest-helpers.js";
 import { sessionRow } from "./session-store-helpers.js";
-import {
-  createControlledRuntime,
-  openBareSession,
-  type SupervisorApp,
-} from "./session-supervisor-helpers.js";
+import { createControlledRuntime, openBareSession } from "./session-supervisor-helpers.js";
 import { seedUnboundSession, workspaceOf } from "./support/temporary-workspace.js";
 import { SANDBOX_DENIED_ENVELOPE } from "./workspace-upload-helpers.js";
 
 const NOTE = "用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：";
-const A_PDF = "uploads/a.pdf";
 const A_PDF_SUFFIX = `\n\n${NOTE}\n- ${A_PDF}`;
 const MESSAGE_KEYS = [
   "id",
@@ -58,154 +66,14 @@ const MESSAGE_KEYS = [
   "steps",
 ];
 
-const fixtures: SupervisorApp[] = [];
 const scratch: string[] = [];
 
 afterEach(async () => {
-  vi.restoreAllMocks();
-  for (const fixture of fixtures.splice(0)) {
-    await fixture.close();
-  }
+  await closeWorlds();
   for (const dir of scratch.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-/**
- * A logged-in owner (zhangsan, `u1`) and one workspace `proj` holding `uploads/a.pdf` (3 bytes);
- * `wire` records every call that reaches the supervisor, `notified` every list notification.
- */
-async function openWorld(uploadMaxFiles?: number) {
-  const rt = createControlledRuntime(() => {});
-  const opened = await openBareSession(
-    rt.runtime,
-    uploadMaxFiles === undefined ? {} : { assembly: { uploadMaxFiles } },
-  );
-  fixtures.push(opened.fixture);
-  const { app, db, supervisor } = opened.fixture;
-  // The workspace store realpaths the sandbox root, so it has to exist first.
-  mkdirSync(rt.runtime.sandboxRoot, { recursive: true });
-  const world = {
-    app,
-    db,
-    supervisor,
-    cookie: opened.cookie,
-    wire: vi.spyOn(supervisor, "prompt").mockResolvedValue(undefined),
-    notified: vi.spyOn(app.sessions.listEvents, "notify"),
-  };
-  const proj = await openBound(app, world.cookie, "proj");
-  put(proj.root, A_PDF, "pdf");
-  return { ...world, proj };
-}
-
-type World = Awaited<ReturnType<typeof openWorld>>;
-
-/** A workspace of the cookie's account; `session()` creates a fresh idle session bound to it. */
-async function openBound(app: FastifyInstance, cookie: string, dir: string) {
-  const headers = { cookie, "content-type": "application/json" };
-  const made = await app.inject({
-    method: "POST",
-    url: "/api/workspaces",
-    headers,
-    payload: JSON.stringify({ name: dir, dir }),
-  });
-  expect(made.statusCode).toBe(201);
-  const workspace = made.json<{ id: string; root: string }>();
-  const session = async (): Promise<string> => {
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/sessions",
-      headers,
-      payload: JSON.stringify({ workspaceId: workspace.id }),
-    });
-    expect(created.statusCode).toBe(201);
-    return created.json<{ id: string }>().id;
-  };
-  return { id: workspace.id, root: workspace.root, session };
-}
-
-function put(root: string, path: string, content: string): void {
-  mkdirSync(join(root, path, ".."), { recursive: true });
-  writeFileSync(join(root, path), content);
-}
-
-function rowsOf(world: World, session: string) {
-  return world.db
-    .prepare(
-      "SELECT role, content, typeof(content) AS kind, attachments FROM chat_messages WHERE session_id = ? ORDER BY id",
-    )
-    .all(session);
-}
-
-function auditRows(world: World) {
-  return world.db
-    .prepare("SELECT kind, actor_id, workspace_id, detail FROM audit_events ORDER BY id")
-    .all()
-    .map((row) => ({
-      kind: row.kind,
-      actorId: row.actor_id,
-      workspaceId: row.workspace_id,
-      detail: JSON.parse(String(row.detail)) as Record<string, unknown>,
-    }));
-}
-
-/**
- * Sends one prompt body and returns the response with what the request left behind: the audit rows
- * it added, the supervisor calls it made and the list notifications it sent.
- */
-async function send(world: World, session: string, body: unknown, cookie = world.cookie) {
-  const audited = auditRows(world).length;
-  const dispatched = world.wire.mock.calls.length;
-  const notified = world.notified.mock.calls.length;
-  const response = await postPrompt(world.app, session, cookie, JSON.stringify(body));
-  return {
-    response,
-    audit: auditRows(world).slice(audited),
-    calls: world.wire.mock.calls.slice(dispatched),
-    notified: world.notified.mock.calls.slice(notified).length,
-  };
-}
-
-function expectEnvelope(response: LightMyRequestResponse, status: number, envelope: unknown): void {
-  expect(response.statusCode).toBe(status);
-  expect(response.json()).toEqual(envelope);
-  expect(response.headers["cache-control"]).toBe("no-store");
-}
-
-/** A refusal: the envelope, and no message row, title, dispatch or list notification from it. */
-async function expectRefused(
-  world: World,
-  session: string,
-  body: unknown,
-  status: number,
-  envelope: unknown,
-  cookie = world.cookie,
-) {
-  const before = rowsOf(world, session);
-  const sent = await send(world, session, body, cookie);
-  expectEnvelope(sent.response, status, envelope);
-  expect(rowsOf(world, session)).toEqual(before);
-  expect(sessionRow(world.db, session).title).toBeNull();
-  expect(sent.calls).toEqual([]);
-  expect(sent.notified).toBe(0);
-  return sent.audit;
-}
-
-async function expectAdmitted(world: World, session: string, body: unknown) {
-  const sent = await send(world, session, body);
-  expect(sent.response.statusCode).toBe(202);
-  expect(Object.keys(sent.response.json() as object)).toEqual([
-    "userMessageId",
-    "assistantMessageId",
-    "undo",
-  ]);
-  expect(sent.audit).toEqual([]);
-  expect(sent.calls).toHaveLength(1);
-  const [target, text, step] = sent.calls[0] ?? [];
-  expect(target).toBe(session);
-  expect(step).toBeTypeOf("function");
-  return { text, body: sent.response.json<{ userMessageId: number; undo: string }>() };
-}
 
 describe("prompt with attachments (#1019)", () => {
   it("admits a prompt with an attachment: stored beside the text, suffixed only on the wire", async () => {
@@ -659,6 +527,8 @@ describe("prompt-attachments.ts on its own (#1019)", () => {
   function admission(paths: string[], resolve: SessionSandboxPort["resolve"]): AttachmentAdmission {
     return {
       sandbox: { resolve },
+      // #1257: the root is looked up first and has to be a directory.
+      workspaceRootOf: () => scratchDir(),
       principal: { id: "u1" },
       workspaceId: "w",
       builtin: false,
@@ -747,7 +617,7 @@ describe("a session created without a workspace (#1019)", () => {
   it("attaches a file of its temporary workspace like any other", async () => {
     const rt = createControlledRuntime(() => {});
     const opened = await openBareSession(rt.runtime);
-    fixtures.push(opened.fixture);
+    closeAfterTest(opened.fixture);
     const wire = vi.spyOn(opened.fixture.supervisor, "prompt").mockResolvedValue(undefined);
     const workspace = workspaceOf(opened.fixture.db, opened.session);
     const upload = await opened.fixture.app.inject({

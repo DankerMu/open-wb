@@ -13,6 +13,7 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import { hasRefusedCharacter } from "../core/refused-characters.js";
 import type { createSandbox } from "../core/sandbox/index.js";
 import {
   classifyPreview,
@@ -150,22 +151,14 @@ function parseUploadName(query: unknown): string {
   return name;
 }
 
-function hasControlCharacter(text: string): boolean {
-  for (let index = 0; index < text.length; index += 1) {
-    const unit = text.charCodeAt(index);
-    if (unit <= 0x1f || unit === 0x7f) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /**
  * The name rules that come after the sandbox. A `/` the sandbox let through (`sub/a.txt`,
- * `./a.txt`) would put the file somewhere other than directly under `uploads`.
+ * `./a.txt`) would put the file somewhere other than directly under `uploads`. The refused code
+ * points are those of a prompt's attachment paths (#1257), and only a name uploaded here is held
+ * to them: no route that reads, lists, moves or deletes a path calls this.
  */
 function assertUploadName(name: string): void {
-  if (name.includes("/") || hasControlCharacter(name) || name.startsWith(UPLOAD_TEMP_PREFIX)) {
+  if (name.includes("/") || hasRefusedCharacter(name) || name.startsWith(UPLOAD_TEMP_PREFIX)) {
     throw new HttpError("bad_request");
   }
 }

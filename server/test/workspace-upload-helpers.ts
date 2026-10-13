@@ -30,6 +30,18 @@ export const SANDBOX_DENIED_ENVELOPE = {
   error: { code: "sandbox_denied", message: "目标路径不在你的沙箱内，操作已拒绝" },
 };
 export const CONFLICT_ENVELOPE = { error: { code: "conflict", message: "同名资源已存在" } };
+/**
+ * The code points an uploaded name and a prompt's attachment path may not hold beyond
+ * U+0000–U+001F and U+007F (#1257), copied from the specification: three line breaks and the
+ * twelve bidirectional controls.
+ */
+export const REFUSED_CODE_POINTS = [
+  0x0085, 0x2028, 0x2029, 0x061c, 0x200e, 0x200f, 0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066,
+  0x2067, 0x2068, 0x2069,
+].map((codePoint) => ({
+  label: `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`,
+  char: String.fromCodePoint(codePoint),
+}));
 /** How long the client waits for the server to close the connection before giving up. */
 const CLOSE_BOUND_MS = 3_000;
 /** How long a poll waits for a server-side effect (a temporary file, a closed connection). */
