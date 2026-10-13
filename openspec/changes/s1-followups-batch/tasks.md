@@ -140,10 +140,10 @@ Minimal mergeable slice: 8.1、8.4 加 8.5 里的字符与末段校验（纯入�
 
 ## 9. chat-web — 保存设置后重取输入框选项（G9，#1269）
 
-- [ ] 9.1 测试先行（`web/test/chat-composer-options.test.tsx`，现 209 行；整页渲染加假 API）：chat-web「输入框与能力栏」的场景「保存设置后重取缺省值」七组 WHEN/THEN 逐条——带键的 `patchSession` 成功后恰多一次 `getComposerOptions`、挂起期间三个控件仍在、返回后欢迎态显示新缺省；带键的 `createSession` 成功后恰多一次；只带 `title` 的 patch 与失败的 patch 不触发；只选过强度、重取换了缺省模型 → 强度被丢弃、创建请求不带 `reasoningEffort` 也不带 `modelId`；页面上选过档位、模型与强度、重取三项缺省都变 → 三项选择都保留并随创建请求发出；只选过档位与强度、重取只换了缺省档位 → 两项都保留；重取失败时沿用上一份、下一次选中会话再取。验证：第一、二、四组在现有实现上判红。
-- [ ] 9.2 实现：`web/src/features/chat/composer-options.ts` 的 `useComposerOptions` 多返回一个失效入口（重取期间保留上一份数据；迟到结果仍靠记录比对丢弃；失败状态沿用既有的重取规则）；带三键之一的 `patchSession` 成功处（`session-actions.ts`）与 input 带三键之一的 `createSession` 成功处各调一次。重取之后欢迎态的页面内选择保留（owner 2026-10-13）：档位与模型的选择不动；只有「缺省模型变了、且页面上没有选过模型」时清掉已选的强度，别的情况不清任何选择。`use-chat-session.ts` 不净增到越线。验证：9.1 转绿；既有的「能力行的次序」（恰一次）与「选项读取失败后重取」（恰两次）两条用例不改、仍通过。
-- [ ] 9.3 验收清单：`docs/acceptance/functional-checklist.md` 的 CH-68、CH-69 去掉「先刷新页面」的步骤与括注，改成不刷新即可看到新缺省；结论置 `待签`。验证：`web/test/functional-checklist.test.ts` 通过。
-- [ ] 9.4 变异证据：去掉 patch 成功后的失效调用 → 9.1 第一组判红；去掉 create 成功后的 → 第二组判红；缺省模型变了也不清强度 → 第四组判红；`defaults` 一变就清掉全部页面内选择 → 第五、六组判红；重取在途时把数据置空 → 「挂起期间三个控件仍在」判红。`make ui-walk` 跑一次。PR 写明残余（另一个标签页或设备改了最近选择时仍会过期，D14-7）。
+- [x] 9.1 测试先行（`web/test/chat-composer-options.test.tsx`，现 209 行；整页渲染加假 API）：chat-web「输入框与能力栏」的场景「保存设置后重取缺省值」七组 WHEN/THEN 逐条——带键的 `patchSession` 成功后恰多一次 `getComposerOptions`、挂起期间三个控件仍在、返回后欢迎态显示新缺省；带键的 `createSession` 成功后恰多一次；只带 `title` 的 patch 与失败的 patch 不触发；只选过强度、重取换了缺省模型 → 强度被丢弃、创建请求不带 `reasoningEffort` 也不带 `modelId`；页面上选过档位、模型与强度、重取三项缺省都变 → 三项选择都保留并随创建请求发出；只选过档位与强度、重取只换了缺省档位 → 两项都保留；重取失败时沿用上一份、下一次选中会话再取。验证：第一、二、四组在现有实现上判红。
+- [x] 9.2 实现：`web/src/features/chat/composer-options.ts` 的 `useComposerOptions` 多返回一个失效入口（重取期间保留上一份数据；迟到结果仍靠记录比对丢弃；失败状态沿用既有的重取规则）；带三键之一的 `patchSession` 成功处（`session-actions.ts`）与 input 带三键之一的 `createSession` 成功处各调一次。重取之后欢迎态的页面内选择保留（owner 2026-10-13）：档位与模型的选择不动；只有「缺省模型变了、且页面上没有选过模型」时清掉已选的强度，别的情况不清任何选择。`use-chat-session.ts` 不净增到越线。验证：9.1 转绿；既有的「能力行的次序」（恰一次）与「选项读取失败后重取」（恰两次）两条用例不改、仍通过。
+- [x] 9.3 验收清单：`docs/acceptance/functional-checklist.md` 的 CH-68、CH-69 去掉「先刷新页面」的步骤与括注，改成不刷新即可看到新缺省；结论置 `待签`。验证：`web/test/functional-checklist.test.ts` 通过。
+- [x] 9.4 变异证据：去掉 patch 成功后的失效调用 → 9.1 第一组判红；去掉 create 成功后的 → 第二组判红；缺省模型变了也不清强度 → 第四组判红；`defaults` 一变就清掉全部页面内选择 → 第五、六组判红；重取在途时把数据置空 → 「挂起期间三个控件仍在」判红。`make ui-walk` 跑一次。PR 写明残余（另一个标签页或设备改了最近选择时仍会过期，D14-7）。
 
 Suggested fixture level: compact - 前端一个只读缓存的失效时机，不涉及服务端、存储格式或权限判定
 Minimal mergeable slice: atomic - 失效入口没有调用方就是死代码（knip 判红），只接 patch 不接 create 则欢迎态带键创建之后仍过期

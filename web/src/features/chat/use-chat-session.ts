@@ -75,7 +75,7 @@ export function useChatSession() {
     workspaces,
   } = useWorkspaceList(client);
   const welcome = useWelcomeOptions(workspaces, workspacesError);
-  const composerOptions = useComposerOptions(client, requestedSessionId);
+  const composer = useComposerOptions(client, requestedSessionId, welcome.defaultModelChanged);
   const mountedRef = useRef(false);
   const clientRef = useRef(client);
   const requestedSessionRef = useRef(requestedSessionId);
@@ -226,6 +226,7 @@ export function useChatSession() {
     refreshList,
     requestedSessionRef,
     setPromptError,
+    settingsSaved: composer.invalidate,
   });
 
   useEffect(() => {
@@ -406,7 +407,7 @@ export function useChatSession() {
     client,
     scopeKey: requestedSessionId,
     workspaceId: slashWorkspaceId,
-    upload: composerOptions?.upload,
+    upload: composer.options?.upload,
   });
   const tags = attachments.items;
   const turn = useTurnActions({
@@ -532,11 +533,7 @@ export function useChatSession() {
       };
       setSubmitting(true);
       setCreating(true);
-      setMutationOwner({
-        client,
-        originSessionId,
-        sessionId: null,
-      });
+      setMutationOwner({ client, originSessionId, sessionId: null });
       setPromptError(null);
       void client
         .createSession(welcome.createBody(), { signal: controller.signal })
@@ -550,6 +547,7 @@ export function useChatSession() {
             return;
           }
           createControllerRef.current = null;
+          if (Object.keys(welcome.picked).length > 0) composer.invalidate(); // 创建带了设置键
           if (pendingCreateSendRef.current?.generation === generation) {
             pendingCreateSendRef.current = {
               accepted: false,
@@ -606,6 +604,7 @@ export function useChatSession() {
     [
       attachments.adopt,
       client,
+      composer.invalidate,
       location.hash,
       location.pathname,
       location.search,
@@ -614,6 +613,7 @@ export function useChatSession() {
       requestedSessionId,
       restoreOwnedDraft,
       welcome.createBody,
+      welcome.picked,
     ],
   );
   // 发送路径的文本入口：表单提交与运行时适配器的 `onNew` 都走这里。
@@ -754,7 +754,7 @@ export function useChatSession() {
     attachments,
     client,
     composerDisabled,
-    composerOptions,
+    composerOptions: composer.options,
     composerRef,
     draft,
     forkTurn,
