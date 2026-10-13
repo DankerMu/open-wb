@@ -27,14 +27,14 @@
    (i) `ToastProvider` 包装 8 个文件（另 4 个随整文件删除、`chat-workspace-sidebar-narrow.test.tsx` 的随 N3 整组删除；共 13）；
    (ii) 按类名查 Toast——三个支撑文件各导出一个 `toasts()`（`chat-page-artifact-card-support.tsx:195`、`chat-page-search-support.tsx:282`、`chat-page-session-meta-support.tsx:259`），被 13 个测试文件调用；另有 18 个文件直接写 `document.querySelector(".ui-toast")`，走查 2 处；
    (iii) 按角色查通知区——14 个测试文件与 `web/e2e/ui-walk-stop.ts:124` 用 `getByRole("region", { name: "通知" })`。
-   去重后约 40 个测试或支撑文件。第 (ii) 类在 Toast 删除后恒真（查不到任何东西），第 (iii) 类直接变红（`getByRole` 抛错，`chat-stop-button.test.tsx:229` 还正面断言通知区存在）。处置见 D3、D14，名单见 tasks 2.4。
+   去重后约 40 个测试或支撑文件。第 (ii) 类在 Toast 删除后恒真（查不到任何东西），第 (iii) 类在单测里直接变红（`getByRole` 抛错；走查 `ui-walk-stop.ts` 里的是惰性 locator，`count()` 得 0、断言恒真而不是变红，`chat-stop-button.test.tsx:229` 还正面断言通知区存在）。处置见 D3、D14，名单见 tasks 2.4。
 9. **Radix 自己不看输入法组合。** `@radix-ui/react-use-escape-keydown`（1.1.5，`dist/index.mjs`）只判 `event.key === "Escape"`，DismissableLayer 在 `onEscapeKeyDown` 没有 `preventDefault` 时就关闭本层。
    所以「输入法组合中的 Escape 不关闭」在没有 Toast 的真实覆盖层上不是可断言的整层行为（jsdom 里派发 `isComposing: true` 的 Escape，Radix 照样关），它只是兜底自身的性质；真实浏览器里组合中的按键 `key` 不是 `Escape`，Radix 本来就收不到。这决定了兜底的三条性质在哪一层测（D4「兜底自身的性质」）。
 
 **约束：**
 
 - 旧层里的规则今天位于 `legacy` 层：高于 preflight（`base`），低于 utilities。使用处依赖这个位置——`web/src/features/chat/tool-call-group.tsx:13` 靠 `-outline-offset-2` 压过全局 `:focus-visible`，拷入层按钮靠 `disabled:opacity-50` 压过 `opacity: 0.45`，`bg-primary` 压过 `button { background: none }`。搬到哪里都不能改变这个相对位置。
-- `web/test/ui-guardrails.test.ts:135` 已经把 `web/src/components/shell.tsx` 这种「直接放在 `components/` 下的文件」判为应用层；五处豁免配置（`web/vitest.config.ts`、`.jscpd.json`、`knip.json`、`biome.json`、`scripts/size-guard.sh`）都只写两个拷入目录，`isPrecise`（`ui-layering.test.ts:455`）拒绝任何多出来的条目。两个搬入的文件因此天然不在豁免内。
+- `web/test/ui-guardrails.test.ts:132` 已经把 `web/src/components/shell.tsx` 这种「直接放在 `components/` 下的文件」判为应用层；五处豁免配置（`web/vitest.config.ts`、`.jscpd.json`、`knip.json`、`biome.json`、`scripts/size-guard.sh`）都只写两个拷入目录，`isPrecise`（`ui-layering.test.ts:455`）拒绝任何多出来的条目。两个搬入的文件因此天然不在豁免内。
 - 两个 `openspec` CLI 里较新的那个（1.13.2）拒绝「MODIFIED 少了主规格现有的场景」。这决定了规格 delta 的写法（D12）。
 - 当前没有别的进行中的 change（`openspec/changes/` 下只有 `archive/`），不存在跨 change 的条文对底问题。
 
@@ -162,7 +162,7 @@ owner 最初定的是四个；2026-10-12 看过 tasks 审核之后改判为六�
 | 刀 | 做什么 | 这一刀里会变红、必须同刀改的既有断言 |
 |---|---|---|
 | A | 删 24 个无调用方的基元文件与 8 个单测（先把 `ui-escape-dispatch` 里测 hook 的几例搬走）；`ui/index.ts` 去掉十三个导出；`ui.css` 只留 `toast.css` 的导入；卸 6 个 Radix 单包 | `ui-layering.test.ts` 的 `FROZEN_FILES`（32 → 8）与「恰为 32」；`ui-reduced-motion.test.ts:148`（非空）；`app-shell-responsive.test.tsx:560`（读 `drawer.tsx`）；`ATTRIBUTION.md` 的 Radix 条目（只剩 `react-toast`） |
-| B1 | 删 Toast 与测试里全部查 Toast 元素的写法；卸 `@radix-ui/react-toast` | `ui-foundation-entry.test.ts:106`（`ui.css` 不再有 `@import`）；`ui-guardrails.test.ts:224`（单包数 > 0）；`ui-layering.test.ts` 的 `FROZEN_FILES`（8 → 6）；14 个测试文件与 `ui-walk-stop.ts` 的通知区查询（`getByRole` 抛错）；走查两处 `.ui-toast` |
+| B1 | 删 Toast 与测试里全部查 Toast 元素的写法；卸 `@radix-ui/react-toast` | `ui-foundation-entry.test.ts:106`（`ui.css` 不再有 `@import`）；`ui-guardrails.test.ts:224`（单包数 > 0）；`ui-layering.test.ts` 的 `FROZEN_FILES`（8 → 6）；14 个测试文件的通知区查询（`getByRole` 抛错）与 `ui-walk-stop.ts` 的同类查询（恒真）；走查两处 `.ui-toast` |
 | B2 | Escape 实测并落分支 | 删除分支：`ui-layering.test.ts` 的 `FROZEN_FILES`（6 → 5）与白名单（去掉 `useEscapeFallback`）。保留分支：没有既有断言变红，新增「定义恰一处」的过渡断言 |
 | C1 | `Icon` / `BrandMark`（及保留的 hook）搬到 `web/src/components/`，改 36 个导入方（保留 hook 时另加它的 9 个）；删 `ui/index.ts` | `ui-guardrails.test.ts:46-56`、`:88-93`（`web/src/ui` 下 `.tsx` 非空）；`ui-layering.test.ts` 的白名单（清空）与 `FROZEN_FILES`（→ `motion.css`、`ui.css`）；`chat-module-layout.test.ts:147` 的样本 |
 | C2 | 活规则搬进 `theme.css` 的 `base` 块 | `ui-foundation-entry.test.ts` 的 `borderBaselineViolations`、`:282-290`（`legacy.css` 的 `body`）、`:299`，以及 `themeViolations` 变异表里以 `body {` 为锚点的两条 |
