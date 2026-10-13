@@ -1,7 +1,7 @@
 # office-preview Specification
 
 ## Purpose
-定义办公文档（docx、xlsx、pptx）经 LibreOffice 转成 PDF 的服务端契约：转换器的调用方式与运行身份、超时与终止、并发上限与排队、按内容的转换缓存及其清理、预览监听器上的 `/o/` 路由，以及真实转换只做人工验证、自动化测试不依赖 LibreOffice。
+定义办公文档（docx、xlsx、pptx）经 LibreOffice 转成 PDF 的服务端契约：转换器的调用方式与运行身份、超时与终止、并发上限与排队、按输入路径、修改时间与大小取键的转换缓存及其清理、预览监听器上的 `/o/` 路由，以及真实转换只做人工验证、自动化测试不依赖 LibreOffice。
 
 ## Requirements
 
