@@ -75,7 +75,7 @@
 | 转换缓存没有总量上限 | 读代码推出（只有按 7 天的清理） |
 | 移动的「先看再改名」：检查之后、改名之前别的进程在目标位置建出的文件会被覆盖 | 读代码推出，未测（design Risks） |
 | **#1337** 缺省 `PREVIEW_PORT=0` 先于主端口绑定，系统分配的端口可能恰是 `PORT` | 读代码推出，未复现 |
-| 真实 LibreOffice 经 `/o/` 的端到端（docx / xlsx / pptx）、从另一台机器经固定端口打开 html 预览 | 未测，属任务 28.6（#1123），结果另行补进本 ADR |
+| 真实 LibreOffice 经 `/o/` 的端到端（docx / xlsx / pptx）、从另一台机器经固定端口打开 html 预览 | 已测一次（#1123，2026-10-12；浏览器一步是脚本驱动加截图）：三种格式可翻页，html 的相对样式表生效，见文末「真实转换的验证记录」；那里列着没有做的 |
 
 ## Considered Options
 
@@ -104,7 +104,7 @@
 ### LibreOffice 与 `OFFICE_BIN`
 
 - 在主机（或部署镜像）上安装 LibreOffice，把 `OFFICE_BIN` 设为其启动程序的绝对路径（相对路径即启动失败；服务端不查它是否存在，路径不对时每次转换以 502 失败——**读代码推出**）。
-  仓库里还没有镜像文件，实际安装属 S4b。实测用的是发行版的 LibreOffice 24.2.7.2、只装了 writer 组件、路径 `/usr/bin/soffice`（#1052）；别的版本与另两种格式**未测**。
+  仓库里还没有镜像文件，实际安装属 S4b。实测用的是发行版的 LibreOffice 24.2.7.2、只装了 writer 组件、路径 `/usr/bin/soffice`（#1052）；#1123 的验证用的是 7.4.7.2、装了 writer、calc、impress，三种格式各转了一份（见文末「真实转换的验证记录」）；别的版本**未测**。
 - 配置了 `OMP_USER` 的部署另需两行 sudoers（作用范围与转义规则见 ADR-0010 的 #1119 补充；第二行的路径要求见下文「磁盘」）：
   - `<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- <OFFICE_BIN> *`
   - `<app-user> ALL=(<OMP_USER>) NOPASSWD: /usr/bin/find <PREVIEW_CACHE_DIR 的绝对路径>/work -mindepth 1 -delete`
@@ -155,18 +155,18 @@
 - 归零靠启动时的一条 `sudo -n -u <OMP_USER> -- /usr/bin/find <work 的路径> -mindepth 1 -delete`，需要上文「LibreOffice 与 `OFFICE_BIN`」里的第二行 sudoers（同 ADR-0010 的 #1119 补充）。没配 `OFFICE_BIN` 的部署不执行它，也不需要这一行。
   规则里的路径必须与服务端算出的 `join(PREVIEW_CACHE_DIR, "work")` 逐字相同：相对值先按仓库根解析，结果经词法规范化（去掉结尾斜杠、折叠 `.` 与 `..`），不解析符号链接；含空格等特殊字符时按 sudoers 语法转义。
 - 规则漏配、路径差一个字符、`find` 不在 `/usr/bin/find`、10 秒内没跑完：启动日志（标准错误）恰有一行 `{"event":"preview_work_clear_failed"}`，不带路径；服务照常启动并提供转换，只是 `work/` 不归零。
-  看到这一行先用 `sudo -l -U <app-user>` 核对规则。这条规则在真实 `sudo` 下的执行**未测**（自动化测试用的是假 `sudo`）；超时杀掉 `sudo` 之后它之下的 `find` 是否随之结束同样**未测**。
+  看到这一行先用 `sudo -l -U <app-user>` 核对规则。这条规则在真实 `sudo` 下执行过两次、都清空了（#1123，见文末「真实转换的验证记录」；自动化测试用的是假 `sudo`）；超时杀掉 `sudo` 之后它之下的 `find` 是否随之结束仍**未测**。
 - 回收目录没有总量上限，只按天数清理。
 
 ### 被终止的转换留下的进程
 
 `OMP_USER` 模式下，转换超时、请求方断开或服务关停时，应用只能杀掉自己启动的 `sudo`。**实测**（#1052，2026-10-06，design D18；容器内，只测了 docx 与 `SIGKILL`）：
-5 次终止 5 次都留下一个属 omp 用户的 `soffice.bin`，它占着一个核把整份文档转完才自行退出——约 25 秒的文档在终止后约 20–23 秒，约 133 秒的文档在终止后 128 秒，长于 60 秒的缺省超时。
+5 次终止 5 次都留下一个属 omp 用户的 `soffice.bin`（经 `/o/` 的整条链路上同样出现，#1123 一次，见文末），它占着一个核把整份文档转完才自行退出——约 25 秒的文档在终止后约 20–23 秒，约 133 秒的文档在终止后 128 秒，长于 60 秒的缺省超时。
 残留进程不占转换名额（**读代码推出**：名额在 `sudo` 退出时释放），所以主机上同时运行的 `soffice.bin` 可以多于 `OFFICE_CONVERT_CONCURRENCY`。同 uid 模式杀的是整个进程组。
 
 - 查：转换的命令行带着作业目录（`-env:UserInstallation=file://<PREVIEW_CACHE_DIR>/work/<随机名>/profile` 与 `--outdir`），可以
   `ps -u <OMP_USER> -ww -o pid,etime,args | grep -F '<PREVIEW_CACHE_DIR 的绝对路径>/work/'`（服务端解析出的绝对路径，相对值原样代入匹配不上），再对照 `work/` 下还在的目录名。
-  命令行的形状是**读代码推出**（`office.ts` 的 argv）；实测记录没有逐字写下 `soffice.bin` 自己的命令行，筛不到时按进程名 `soffice.bin` 与属主找。
+  命令行的形状是**读代码推出**（`office.ts` 的 argv）；#1123 取样到的 `soffice.bin` 命令行里有这个筛选串（那条 `ps` 命令本身没有在残留期间执行过），筛不到时按进程名 `soffice.bin` 与属主找。
 - 杀：以 root 或 omp 用户的身份 `kill`。应用用户发信号得 `EPERM`，sudoers 里没有、也不加 `kill` / `pkill` 规则（owner D-21、D-25）。
   不处理它也会自己退出；它用着的作业目录留到下次启动。
 
@@ -181,3 +181,43 @@
 - 临时空间随最后一个会话删除时，它在 `.trash/<账号 id>/<空间 id>/` 下的批次不随之删除，与正式空间的批次一样留到期满（清理不查数据库）。用户在临时空间里删过的文件因此在会话删除后至多再留 `TRASH_RETENTION_DAYS` 天，只有管理员在主机上看得到。
 - 上传中的文件写在目标目录下的 `.upload-<32 位十六进制>.part` 里，目录列举不按名字过滤，所以上传中的与进程被杀后残留的 `.part` 在目录树里可见（`docs/architecture/system.md` 9.3「上传残留」）。
 - 回滚到没有这些功能的版本后，`<SANDBOX_ROOT>/.trash` 与 `PREVIEW_CACHE_DIR` 留在磁盘上，可手工删除。
+
+## 真实转换的验证记录（#1123，任务 28.6）
+
+2026-10-12 在测试 VPS 上做了一次，记录现象，不改变任何做法。**浏览器一步是脚本驱动的桌面浏览器加截图，截图由执行验证的代理逐张看过，不是人眼在真实窗口里操作**；owner 如要亲眼看一次，按「运维」各节与下面的环境照做即可。
+
+**环境。** 测试 VPS 上的一次性容器（Debian 12，Node 24.13.1；用完即删），容器直接使用宿主的网络。构建的是 `master` 的 `35cf6c3a`（本 change 的运行时代码已全部合入；其后只有文档提交）：`npm ci`、`npm run build --workspace web`、`npm run build --workspace server`，以 `node server/dist/server.js` 启动。
+uid 分离按 ADR-0010：应用用户与 omp 用户各一个，同属一个共享组；sudoers 是 `secure_path`、`Defaults><OMP_USER> umask=0007`、omp 的 spawn 行与上文「LibreOffice 与 `OFFICE_BIN`」的两行。应用以共享组为当前组、umask `007` 启动，设了 `HOST=0.0.0.0`、固定的 `PORT` 与 `PREVIEW_PORT`、`OMP_USER`、`OFFICE_BIN=/usr/bin/soffice`、绝对路径的 `PREVIEW_CACHE_DIR`（父目录 `2770`、属应用用户与共享组）；没有设 `PREVIEW_ORIGIN`。
+LibreOffice 是发行版的 **7.4.7.2**（`LibreOffice 7.4.7.2 40(Build:2)`；装了 writer、calc、impress 三个组件，不带推荐包，另装了 DejaVu 字体），与 #1052 用的 24.2.7.2 不是同一个版本。
+没有装 omp 二进制，也没有配模型端点：助手没有参与，样本文件由种子账号经上传接口放进工作空间的 `uploads/`。
+浏览器在另一台机器上（macOS 26.6.2，arm64），经 VPS 的公网地址直连两个端口，不经隧道与反向代理：Playwright 1.62.1 的 Chromium 151.0.7922.34，`channel: "chromium"` 的新无头模式，视口 1440×900。
+
+**三种格式经 `/o/`。** 样本是脚本生成的：docx 四页（每页一行大字）、xlsx 一张 200 行的表、pptx 四张幻灯片。在文件页的目录树里依次点开：
+
+| 文件 | `/o/` 的响应 | 查看器里的页数 | 翻页 |
+|---|---|---|---|
+| `sample.docx` | 200，`application/pdf` | 4 | 点进框内按 End：页码 1 → 4；回到首页后滚轮：页码到 3 |
+| `sample.xlsx` | 200，`application/pdf` | 5 | End：页码 1 → 5，末页是第 184–200 行 |
+| `sample.pptx` | 200，`application/pdf` | 4 | End：页码 1 → 4 |
+
+三个 `iframe` 的地址都是 `<预览来源>/o/<令牌>/uploads/<文件名>`，响应的 CSP 只有 `frame-ancestors <主站来源>`（没有 `sandbox`），内置查看器带缩略图栏与页码框出现在预览区里。从点击到 `/o/` 响应返回各约 1.1 秒（都是首次转换）。把同一地址再取一次得到的 PDF 用 PDF 库数页，是 4、5、4 页，与查看器显示的一致。
+
+**进程身份与缓存属主。** 进程取样只在下文超时终止的那一次 docx 转换里做了（容器里每 0.5 秒取一次进程表与 `/proc/<pid>/status`）；三个小文档各约 1 秒转完，没有取样，它们的转换身份只有作业目录里的文件属 omp 用户这一间接证据：`sudo` 的 `Uid:` 是「应用用户 / root / root / root」；它之下的 `oosplash`、`soffice.bin` 的 `Uid:` 四个值都是 omp 用户。`soffice`（包装脚本）在进程表里只取到一拍，属 omp 用户，随即在同一个 pid 里 exec 成 `oosplash`，没有取到它自己的 `/proc/<pid>/status`。
+`<PREVIEW_CACHE_DIR>/pdf/` 里的缓存文件是 `0600`、属应用用户（属组是共享组）。作业目录 `work/<job>` 属应用用户（`2770`），其下的 `profile/`（`0700`）、`.cache/` 与 `.config/`（`2700`）、`out/`（`2770`）及 `out/<名>.pdf`（`0660`）都属 omp 用户。
+转换成功之后作业目录整个留在 `work/` 里，连 `out/<名>.pdf` 也在（三个小文档共 2.0 MB）。三个缓存目录由服务端建出，mode 是 `2750`、`2770`、`0700`，属组随父目录的 setgid 成了共享组——ADR-0010 的 #1119 补充里「属组须是共享组」的前提在满足时的样子；不满足时会怎样**没有测**。
+
+**启动时清空 `work`（第 2 行 sudoers）。** 带着上面三个作业目录重启服务：`work/` 变空，标准错误里没有 `preview_work_clear_failed`。之后带着一个被终止的作业目录（5.2 MB）又重启一次，结果相同。这是这条规则在真实 `sudo` 下第一次被执行；`sudo` 中途被杀时它之下的 `find` 是否随之结束仍**没有测**。
+
+**超时终止一次。** 把 `OFFICE_CONVERT_TIMEOUT_MS` 设成 3000 重启，请求一份 3000 页的 docx（188,779 字节；不被打断时经 `/o/` 要 84.5 秒，得到 4,682,817 字节的 PDF——那一次是事后把超时调到 200000 另跑的）：
+
+- 请求在 3.03 秒得到 504 与「文档转换超时，请下载后查看」。
+- `sudo` 随即消失，`oosplash` 同时被杀（`--pdeathsig` 生效）。
+- **残留出现了**：进程名 `soffice.bin`，属 omp 用户，被 1 号进程收养，又运行了约 75 秒把整份文档转完才自行退出，在已被放弃的 `work/<job>/out/` 里留下 4,682,817 字节的完整 PDF——与不被打断时字节数相同。这份 PDF 没有进 `pdf/` 缓存。
+- 它的命令行是 `/usr/lib/libreoffice/program/soffice.bin -env:UserInstallation=file://<PREVIEW_CACHE_DIR 的绝对路径>/work/<job>/profile --headless …`，上文「被终止的转换留下的进程」里那条 `ps … | grep -F` 的筛选串在其中（那条命令本身没有在残留期间执行过，这是对照取样到的命令行得出的）。
+- 只做了这一次。与 #1052 直接执行转换时的 5 次是同一个现象，这一次经的是 `/o/` 与产品代码的整条链路。
+- 容器的 1 号进程不回收孤儿：被杀的 `oosplash` 与退出后的 `soffice.bin` 都以僵尸状态留在进程表里直到容器删除。这是这种容器的现象，有正常 init 的主机上是否如此**没有测**。
+
+**从另一台机器打开 html 预览。** 同一个浏览器点开 `uploads/index.html`（它以 `./style.css` 引同目录的样式表，样式把标题设成绿色）：`iframe`（`sandbox="allow-scripts allow-forms allow-modals"`）的地址是 `<预览来源>/w/<令牌>/uploads/index.html`，其中主机来自请求的 `Host`、端口是固定的 `PREVIEW_PORT`；
+`index.html` 与 `style.css` 两个响应都是 200，CSP 为 `sandbox allow-scripts allow-forms allow-modals; frame-ancestors <主站来源>`；框内标题的计算颜色是 `rgb(0, 128, 0)`，截图里是绿色。相对资源可用。
+
+**没有做的。** 人眼在有界面的浏览器窗口里看；Firefox 与其它引擎；由助手生成的文档（没有装 omp）；经反向代理、`PREVIEW_ORIGIN` 或 https 的部署；容器之外的主机；LibreOffice 的其它版本；含中文字体、图片、公式的真实文档的版面；第二次及以后的超时终止；xlsx、pptx 转换进行中的进程取样；请求方断开与服务关停两种终止。

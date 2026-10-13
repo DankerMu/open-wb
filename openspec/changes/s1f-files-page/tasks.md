@@ -700,7 +700,7 @@ Minimal mergeable slice: (a)(c)(d)(e) 四步不依赖隔离来源，可先合；
 - [x] 28.3 `docs/adr/0013-assistant-ui-frontend-rebuild.md` 增补：预览器按需加载是唯一放开的代码分割；本 change 完成后 `web/dist` 入口 JS 与各按需块的字节数（原始与 gzip），仍不设上限；新拷入的 `resizable`。
 - [x] 28.4 `CONTEXT.md` 术语表：新增「工作空间侧边栏」「隔离预览来源」「回收目录」，去掉或改写「产物面板」的提法；`AGENTS.md` 的 Directory Map（`server/` 加预览监听器与文档转换）与命令面里提到的环境变量、`smoke/` 的夹具描述，连同 source-derived oracle 的文案同 PR 同步。
 - [x] 28.5 `IMPLEMENTATION_PLAN.md`：S1f 的 D 一节标注已交付的范围与本 change 留下的后续（旧样式层整体移除的清理 issue、包体上限）；在「S4b 单机部署包」一节加一行：部署镜像要安装 LibreOffice 并设 `OFFICE_BIN`、发布 `PREVIEW_PORT`（压测第 5 条；本 change 不配 `OFFICE_BIN` 即功能关闭）。
-- [ ] 28.6 真实转换的人工验证（office-preview「真实转换的人工验证」，测试 VPS，uid 分离部署、已装 LibreOffice）：docx、xlsx、pptx 各一份经 `/o/` 在浏览器内置查看器里可翻页；转换进程 `Uid` 为 omp 用户、缓存文件属应用用户；
+- [x] 28.6 真实转换的人工验证（office-preview「真实转换的人工验证」，测试 VPS，uid 分离部署、已装 LibreOffice）：docx、xlsx、pptx 各一份经 `/o/` 在浏览器内置查看器里可翻页；转换进程 `Uid` 为 omp 用户、缓存文件属应用用户；
   超时终止一次之后残留进程是否出现（进程名；只记录，不改变做法）；从另一台机器经固定的 `PREVIEW_PORT` 打开 html 预览且相对资源可用。结果与 LibreOffice 版本写进 ADR-0014（残留一项同时写进 ADR-0010 增补）。Depends on 1.1、1.3。
 - [ ] 28.7 收尾核对：0.2 的对底已做；两个 CLI 的 `openspec validate s1f-files-page --strict --no-interactive` 都通过；`docs/acceptance/functional-checklist.md` 里本 change 新增与改写的行全部为 `待签`；`ATTRIBUTION.md` 含 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`、`react-resizable-panels`、`yauzl`；
   为「旧样式层整体移除」开一个后续 issue（design「Not yet specified」）并在 Epic 里链接。
