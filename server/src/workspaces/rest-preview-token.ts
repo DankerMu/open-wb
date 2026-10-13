@@ -1,7 +1,8 @@
 /**
  * `POST /api/workspaces/:id/preview-token`（preview-origin「预览令牌签发端点」）：主站上受 cookie
  * 鉴权的无请求体端点，为调用者自己的一个工作空间签发预览来源的令牌。次序固定为
- * 401（根守卫）→ 归属 404（先于 body 解析）→ 带 body 即 400 → 算预览来源 → 签发。
+ * 401（根守卫）→ 归属 404 → 预览监听器尚未绑定 404（两者都先于 body 解析）→ 带 body 即 400 →
+ * 算预览来源 → 签发。
  * 不读写用户路径、不写审计、不写日志；令牌只出现在响应体里。
  */
 import type { FastifyInstance } from "fastify";
@@ -21,7 +22,10 @@ export interface WorkspacePreviewDependencies {
       now: number,
     ): { token: string; expiresAt: number };
   };
-  /** 预览监听器实际绑定的端口；监听器绑定之后才有值，所以每次请求现取。 */
+  /**
+   * 预览监听器实际绑定的端口，每次请求现取；尚未绑定时为 0（入口先绑定主监听器，#1337）：此时
+   * 与未装配预览同样答 typed 404、不登记令牌，配置了 `origin` 也一样。
+   */
   port: () => number;
   /** 对外的预览来源（PREVIEW_ORIGIN）；有它时原样使用，不看请求的主机名。 */
   origin?: string;
@@ -60,9 +64,13 @@ export function registerWorkspacePreviewToken(
     {
       bodyLimit: BODYLESS_BODY_LIMIT,
       onRequest: noStoreWorkspaceResponse,
-      // 他人的、不存在的 id 与根目录不在的空间是同一个 404，先于 body 解析。
+      // 他人的、不存在的 id 与根目录不在的空间是同一个 404，先于 body 解析。预览监听器尚未绑定
+      // 也是这个 404：未装配时这条路由不存在，带不带 body 都答 404，这里与它一致。
       preParsing: (request, _reply, payload, done) => {
         ensureOwnedRoot(dependencies, currentPrincipal(request), request.params.id);
+        if (preview.port() === 0) {
+          throw new HttpError("not_found");
+        }
         done(null, payload);
       },
     },

@@ -157,15 +157,46 @@ describe("production entry lifecycle", () => {
       const session = await createSession(port, cookie);
       await prompt(port, cookie, session, "stay-alive");
       exitCode = await server.stop();
-      // 预览监听器先绑定、先关闭；主监听器仍在 runtime 退出之后关，DB 最后。
+      // 主监听器先绑定；预览监听器先关闭，主监听器仍在 runtime 退出之后关，DB 最后。
       expect(readFileSync(tracePath, "utf8")).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nruntime-exit\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nruntime-exit\nlistener-close:${port}\ndb-close\n`,
       );
       expect(exitCode).toBe(0);
     } finally {
       await server.dispose();
     }
   }, 40_000);
+
+  it("binds the configured PORT before the system assigns the default preview port", async () => {
+    const compiled = await compileServerEntry();
+    const port = await reserveWildcardPort();
+    const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-bind-order-"));
+    scratch.push(scratchRoot);
+    const tracePath = join(scratchRoot, "order.log");
+    // 不设 PREVIEW_PORT：缺省 0，由系统分配。
+    const server = startCompiledServer(
+      compiled.entry,
+      compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
+      { orderTrace: tracePath },
+    );
+    try {
+      const started = await server.waitForStarted();
+      // success record 出现时两行都已在 trace 里：主监听器在 PORT 上的绑定在先。
+      const lines = readFileSync(tracePath, "utf8").split("\n");
+      expect(lines).toHaveLength(3);
+      expect(lines[0]).toBe(`listening:127.0.0.1:${port}`);
+      const assigned = /^listening:127\.0\.0\.1:(\d+)$/u.exec(lines[1] ?? "")?.[1];
+      expect(assigned).toBeDefined();
+      expect(Number(assigned)).toBeGreaterThan(0);
+      expect(Number(assigned)).not.toBe(port);
+      expect(lines[2]).toBe("");
+      expect(started).toMatchObject({ event: "server_started", port });
+      expect(await server.stop()).toBe(0);
+      expect(applicationStderr(server.stderr())).toBe("");
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
 
   it("relays a full call-proxy turn without leaking the upstream key or runtime bearer", async () => {
     const compiled = await compileServerEntry();
@@ -244,7 +275,7 @@ describe("production entry lifecycle", () => {
         providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } },
       });
       expect(readFileSync(tracePath, "utf8")).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
       await expectBindable("127.0.0.1", port);
       await expectBindable("127.0.0.1", previewPort);

@@ -2,7 +2,9 @@
  * Issue #1070：生产入口接上预览监听器、预览缓存目录与回收目录的清理（http-service-skeleton
  * 「预览监听器的装配与关停」）。每一例都跑真实的 compiled production 入口；次序由 orderTrace 预加载
  * 观察真实的 listener 绑定 / 关闭与 DB close 得出，不替换任何生产模块。
- * 信号窗口两例的证据等级：钩子辅助（预加载推迟原生 listen）、真实编译入口、真实 SIGTERM。
+ * 信号窗口各例与「两次绑定之间」两例的证据等级：钩子辅助（预加载推迟原生 listen）、真实编译入口、
+ * 真实 SIGTERM；「主实例 ready 期间」一例的 SIGTERM 处理由预加载同步触发，不是真实信号。
+ * 主监听器先绑定（#1337）。
  */
 
 import {
@@ -23,13 +25,19 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { expectFixedFailure, rawAnswer } from "./preview-app-helpers.js";
 import {
+  createSession,
   expectBindable,
   getJson,
+  login,
+  prompt,
   reserveWildcardPort,
   waitForFile,
+  writeFakeOmpLauncher,
 } from "./server-startup-helpers.js";
 import {
   applicationStderr,
+  expectDbReopens,
+  expectLayoutWithoutManagedFiles,
   heldListenHook,
   holdPort,
   openPartialRequest,
@@ -44,6 +52,7 @@ import {
   startEntry,
   ZHANGSAN,
 } from "./server-startup-preview-helpers.js";
+import { NOT_FOUND_ENVELOPE } from "./session-db-helpers.js";
 
 const STARTUP_MODULES = [
   "core/db",
@@ -134,7 +143,7 @@ function writeSparse(path: string, bytes: number): void {
 }
 
 describe("production entry with the preview listener", () => {
-  it("binds the preview listener first, prepares the cache directories and releases both ports on SIGTERM", async () => {
+  it("binds the main listener first, prepares the cache directories and releases both ports on SIGTERM", async () => {
     const entry = await startEntry({
       prepare: (root) => {
         // 上一次运行的遗留：work 下的作业目录要清掉，pdf 下的缓存留着；mode 故意不对。
@@ -152,7 +161,7 @@ describe("production entry with the preview listener", () => {
       );
       expect(Object.keys(started as object)).toEqual(["event", "host", "port", "modules"]);
       expect(entry.readTrace()).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\n`,
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\n`,
       );
 
       const health = await fetch(`http://127.0.0.1:${port}/api/healthz`);
@@ -172,7 +181,7 @@ describe("production entry with the preview listener", () => {
       expect(await server.stop()).toBe(0);
       expect(applicationStderr(server.stderr())).toBe("");
       expect(entry.readTrace()).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
       await expectBindable("127.0.0.1", port);
       await expectBindable("127.0.0.1", previewPort);
@@ -187,12 +196,12 @@ describe("production entry with the preview listener", () => {
     try {
       expect(await server.waitForStarted()).toMatchObject({ host: "0.0.0.0", port });
       expect(entry.readTrace()).toBe(
-        `listening:0.0.0.0:${previewPort}\nlistening:0.0.0.0:${port}\n`,
+        `listening:0.0.0.0:${port}\nlistening:0.0.0.0:${previewPort}\n`,
       );
       expect(await server.stop()).toBe(0);
       expect(applicationStderr(server.stderr())).toBe("");
       expect(entry.readTrace()).toBe(
-        `listening:0.0.0.0:${previewPort}\nlistening:0.0.0.0:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:0.0.0.0:${port}\nlistening:0.0.0.0:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
     } finally {
       await server.dispose();
@@ -314,7 +323,7 @@ describe("production entry preview bind failure", () => {
     }
   }
 
-  it("fails with preview_listen and never binds the main port when the preview port is taken", async () => {
+  it("fails with preview_listen and closes the already bound main listener when the preview port is taken", async () => {
     const port = await reserveWildcardPort();
     const previewPort = await reserveWildcardPort();
     let entry: Entry | undefined;
@@ -322,30 +331,55 @@ describe("production entry preview bind failure", () => {
       entry = await startEntry({ ports: { port, previewPort } });
       await expectStartFailure(entry, "preview_listen");
     });
-    // 整个进程里没有任何一个 listener 绑定成功过：主端口从未处于可连接状态。
-    expect(entry?.readTrace()).toBe("listener-close:-\ndb-close\n");
+    // 主监听器先绑定成功，预览监听器随后绑定失败（从未绑定，记 `-`）；失败清理把主监听器关掉，DB 最后。
+    expect(entry?.readTrace()).toBe(
+      `listening:127.0.0.1:${port}\nlistener-close:-\nlistener-close:${port}\ndb-close\n`,
+    );
     await expectBindable("127.0.0.1", port);
     await expectBindable("127.0.0.1", previewPort);
+    expectDbReopens(join(entry?.root ?? "", "db", "dev.db"));
+    expectLayoutWithoutManagedFiles(join(entry?.root ?? "", "state"));
   }, 60_000);
 
-  it("fails with preview_listen when both ports are taken", async () => {
+  it("fails with state_layout after the main bind, never binds the preview listener and closes the main listener", async () => {
+    const entry = await startEntry({
+      prepare: (root) => {
+        mkdirSync(join(root, "state", "home"), { recursive: true });
+        writeFileSync(join(root, "state", "home", ".omp"), "not-a-directory");
+      },
+    });
+    await expectStartFailure(entry, "state_layout");
+    // 只有主监听器绑定过；预览监听器的 listen 从未被调用，失败清理把主监听器关掉，DB 最后。
+    expect(entry.readTrace()).toBe(
+      `listening:127.0.0.1:${entry.port}\nlistener-close:${entry.port}\ndb-close\n`,
+    );
+    await expectBindable("127.0.0.1", entry.port);
+    await expectBindable("127.0.0.1", entry.previewPort);
+    expectDbReopens(join(entry.root, "db", "dev.db"));
+  }, 60_000);
+
+  it("fails with listen when both ports are taken: the main listener is the first to bind", async () => {
     const port = await reserveWildcardPort();
     const previewPort = await reserveWildcardPort();
     let entry: Entry | undefined;
     await withHeld([previewPort, port], async () => {
       entry = await startEntry({ ports: { port, previewPort } });
-      await expectStartFailure(entry, "preview_listen");
+      await expectStartFailure(entry, "listen");
     });
+    // 主监听器绑定失败，预览监听器的 listen 从未被调用：整个进程里没有任何一个 listener 绑定成功过。
     expect(entry?.readTrace()).toBe("listener-close:-\ndb-close\n");
+    expect(existsSync(join(entry?.root ?? "", "state"))).toBe(false);
   }, 60_000);
 
-  it("fails with listen when PREVIEW_PORT equals PORT: the preview listener took the port first", async () => {
+  it("fails with preview_listen when PREVIEW_PORT equals PORT: the main listener took the port first", async () => {
     const entry = await startEntry({ previewPort: "same-as-main" });
-    await expectStartFailure(entry, "listen");
+    await expectStartFailure(entry, "preview_listen");
     expect(entry.readTrace()).toBe(
-      `listening:127.0.0.1:${entry.port}\nlistener-close:${entry.port}\nlistener-close:-\ndb-close\n`,
+      `listening:127.0.0.1:${entry.port}\nlistener-close:-\nlistener-close:${entry.port}\ndb-close\n`,
     );
     await expectBindable("127.0.0.1", entry.port);
+    expectDbReopens(join(entry.root, "db", "dev.db"));
+    expectLayoutWithoutManagedFiles(join(entry.root, "state"));
   }, 60_000);
 });
 
@@ -367,7 +401,7 @@ describe("production entry shutdown with preview requests in flight", () => {
       expect(await stopping).toBe(0);
       expect(applicationStderr(server.stderr())).toBe("");
       expect(entry.readTrace()).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
     } finally {
       download?.destroy();
@@ -408,7 +442,7 @@ describe("production entry shutdown with preview requests in flight", () => {
       await partial.closed;
       expect(applicationStderr(server.stderr())).toBe(FORCE_CLOSE_RECORD);
       expect(entry.readTrace()).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
     } finally {
       download?.destroy();
@@ -418,44 +452,172 @@ describe("production entry shutdown with preview requests in flight", () => {
   }, 60_000);
 });
 
+/** 两个标记文件：钩子进入被扣住的 listen 时写前者，见到后者才调原生 listen。 */
+function listenGate(root: string): { LISTEN_ENTERED: string; LISTEN_RELEASE: string } {
+  return {
+    LISTEN_ENTERED: join(root, "listen-entered"),
+    LISTEN_RELEASE: join(root, "listen-released"),
+  };
+}
+
+/**
+ * 预加载：Fastify 的 `listen` 给它拿到的 signal 挂 `abort` 监听时（主实例的那一次，此时它的 `ready`
+ * 还没有落定、原生 listen 还没有被调用），同步触发一次进程的 SIGTERM 处理。真实信号由事件循环派发，
+ * 不会在 `listen` 调用的同步段里到达：这是把「信号落在主实例 ready 期间」做成确定的次序。
+ */
+function sigtermDuringReadyHook(): string {
+  return [
+    "'use strict';",
+    "const nativeAdd = EventTarget.prototype.addEventListener;",
+    "let fired = false;",
+    "EventTarget.prototype.addEventListener = function heldAdd(type, ...rest) {",
+    "  const result = nativeAdd.call(this, type, ...rest);",
+    "  const fromFastify = () => new Error().stack.includes('fastify');",
+    "  if (!fired && type === 'abort' && this instanceof AbortSignal && fromFastify()) {",
+    "    fired = true;",
+    "    process.emit('SIGTERM', 'SIGTERM');",
+    "  }",
+    "  return result;",
+    "};",
+    "",
+  ].join("\n");
+}
+
 describe("production entry SIGTERM between the two listens", () => {
+  it("builds no layout, binds nothing and exits 0 when SIGTERM lands while the main instance is still getting ready", async () => {
+    const entry = await startEntry({ hook: sigtermDuringReadyHook() });
+    const { server, port, previewPort, root } = entry;
+    try {
+      // 主实例的 `listen` 因 signal 已中止而不绑定就 resolve：入口在它之后核对到信号，直接返回。
+      expect(await server.waitForClose()).toEqual({ code: 0, signal: null });
+      expect(server.stdout()).toBe("");
+      expect(applicationStderr(server.stderr())).toBe("");
+      expect(entry.readTrace()).not.toContain("listening:");
+      expect(existsSync(join(root, "state"))).toBe(false);
+      await expectBindable("127.0.0.1", port);
+      await expectBindable("127.0.0.1", previewPort);
+      expectDbReopens(join(root, "db", "dev.db"));
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
   it.each([
-    { nth: 1, held: "the preview listener's" },
-    { nth: 2, held: "the main listener's" },
+    { nth: 1, held: "the main listener's" },
+    { nth: 2, held: "the preview listener's" },
   ] as const)(
     "publishes nothing and leaves both ports and the database reusable when SIGTERM lands in $held listen",
     async ({ nth }) => {
-      const entry = await startEntry({
-        hook: heldListenHook(nth),
-        env: (root) => ({
-          LISTEN_ENTERED: join(root, "listen-entered"),
-          LISTEN_RELEASE: join(root, "listen-released"),
-        }),
-      });
+      const entry = await startEntry({ hook: heldListenHook(nth), env: listenGate });
       const { server, port, previewPort, root } = entry;
       try {
         await waitForFile(join(root, "listen-entered"), 15_000);
         expect(existsSync(join(root, "listen-released"))).toBe(false);
         const before = entry.readTrace();
-        expect(before).toBe(nth === 1 ? "" : `listening:127.0.0.1:${previewPort}\n`);
+        expect(before).toBe(nth === 1 ? "" : `listening:127.0.0.1:${port}\n`);
         await server.stop();
         expect(await server.waitForClose()).toEqual({ code: 0, signal: null });
         expect(existsSync(join(root, "listen-released"))).toBe(true);
         expect(server.stdout()).toBe("");
         expect(applicationStderr(server.stderr())).toBe("");
-        // 被扣住的那个 listener 从未绑定；已绑定的预览监听器先关，DB 在其后。
+        // 被扣住的那个 listener 从未绑定（`-`）。主监听器被扣住时预览监听器的 listen 从未被调用；
+        // 预览监听器被扣住时，已绑定的主监听器在它之后关，DB 最后。
         expect(entry.readTrace()).toBe(
           nth === 1
             ? "listener-close:-\ndb-close\n"
-            : `listening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:-\ndb-close\n`,
+            : `listening:127.0.0.1:${port}\nlistener-close:-\nlistener-close:${port}\ndb-close\n`,
         );
         await expectBindable("127.0.0.1", port);
         await expectBindable("127.0.0.1", previewPort);
-        expect(existsSync(join(root, "state"))).toBe(false);
+        expectDbReopens(join(root, "db", "dev.db"));
+        // 主绑定在途时到达的信号不建托管布局；主绑定成功之后布局已在，两个托管文件没有写出。
+        if (nth === 1) {
+          expect(existsSync(join(root, "state"))).toBe(false);
+        } else {
+          expectLayoutWithoutManagedFiles(join(root, "state"));
+        }
       } finally {
         await server.dispose();
       }
     },
     60_000,
   );
+});
+
+describe("production entry between the main bind and the preview bind", () => {
+  it("closes the bound main listener after its runtime and before the database when SIGTERM lands in the preview listener's listen", async () => {
+    const entry = await startEntry({
+      hook: heldListenHook(2),
+      env: (root) => ({ ...listenGate(root), OMP_BIN: writeFakeOmpLauncher(root, "hang-eof") }),
+    });
+    const { server, port, previewPort, root } = entry;
+    try {
+      await waitForFile(join(root, "listen-entered"), 15_000);
+      expect(entry.readTrace()).toBe(`listening:127.0.0.1:${port}\n`);
+      // 窗口期里主监听器已受理请求：起一个真实的 runtime 子进程，关停时它得先退出。
+      const cookie = await login(port);
+      const session = await createSession(port, cookie);
+      await prompt(port, cookie, session, "stay-alive");
+      expect(await server.stop()).toBe(0);
+      // 没有 success record，也没有 failure record，也没有 `session_fault`：托管布局在主绑定成功之后、
+      // 预览绑定之前已经建好，窗口里的 prompt 建得出它的快照目录。
+      expect(server.stdout()).toBe("");
+      expect(applicationStderr(server.stderr())).toBe("");
+      expect(readdirSync(join(root, "state", "snapshots"))).toHaveLength(1);
+      // 没有后到的预览绑定（没有第二行 listening）；主监听器的关闭在 runtime 退出之后、DB 之前。
+      expect(entry.readTrace()).toBe(
+        `listening:127.0.0.1:${port}\nlistener-close:-\nruntime-exit\nlistener-close:${port}\ndb-close\n`,
+      );
+      await expectBindable("127.0.0.1", port);
+      await expectBindable("127.0.0.1", previewPort);
+      expectDbReopens(join(root, "db", "dev.db"));
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
+  it("answers preview-token with the typed 404 while the preview listener's listen is held, then issues an address on the port it bound", async () => {
+    const entry = await startEntry({
+      previewPort: "default",
+      hook: heldListenHook(2),
+      env: listenGate,
+      prepare: makeSandboxRoot,
+    });
+    const { server, port, root } = entry;
+    const post = async (path: string, cookie: string, body?: unknown) => {
+      const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+        method: "POST",
+        headers: { cookie, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(10_000),
+      });
+      return { status: response.status, body: (await response.json()) as unknown };
+    };
+    try {
+      await waitForFile(join(root, "listen-entered"), 15_000);
+      expect(entry.readTrace()).toBe(`listening:127.0.0.1:${port}\n`);
+      const cookie = await login(port);
+      const created = await post("/api/workspaces", cookie, { name: "window", dir: "window" });
+      expect(created.status).toBe(201);
+      const tokenPath = `/api/workspaces/${(created.body as { id: string }).id}/preview-token`;
+      expect(await post(tokenPath, cookie)).toEqual({ status: 404, body: NOT_FOUND_ENVELOPE });
+      expect(server.stdout()).toBe("");
+
+      writeFileSync(join(root, "listen-released"), "");
+      expect(await server.waitForStarted()).toMatchObject({ port });
+      const bound = /^listening:127\.0\.0\.1:(\d+)$/u.exec(
+        entry.readTrace().split("\n")[1] ?? "",
+      )?.[1];
+      expect(Number(bound)).toBeGreaterThan(0);
+      expect(Number(bound)).not.toBe(port);
+      const issued = await post(tokenPath, cookie);
+      expect(issued.status).toBe(200);
+      const { token, base } = issued.body as { token: string; base: string };
+      expect(base).toBe(`http://127.0.0.1:${bound}/w/${token}/`);
+      expect(await server.stop()).toBe(0);
+      expect(applicationStderr(server.stderr())).toBe("");
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
 });

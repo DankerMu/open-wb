@@ -1,7 +1,7 @@
 /**
  * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档转换器 → createApp →
- * 预览监听器 listen → listen → 托管布局与两个托管文件 → 预览缓存目录（含清空 `work/`）→ 转换器开始
- * 受理 → 成功记录 → 回收目录首扫（#1070、#1074）。
+ * listen → 托管布局 → 预览监听器 listen → 两个托管文件 → 预览缓存目录（含清空 `work/`）→ 转换器开始
+ * 受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局紧随其后，#1337）。
  *
  * ESM main guard：import 本模块只暴露纯配置 seam（resolveServerConfig），不产生任何
  * startup/signal/filesystem 副作用；只有直接执行本模块（import.meta.main）才进入主路径。
@@ -9,10 +9,21 @@
  * - 完整 env 配置在 SIGINT/SIGTERM 注册与任何文件系统/DB/listen 副作用之前同步校验；
  * - 配置失败只发一行 generic application stderr JSON，不安装 handler、不获取任何资源；
  * - 失败记录带 reason：失败所处的启动阶段（封闭枚举的源码字面量，#1203），不带 error 的任何内容；
- * - 一个 per-entry AbortController 随两次 listen 传递（预览监听器在先，同一个 signal）：
- *   ready/pre-bind 窗口内的 signal 也会中止绑定，不会留下一个逃过 releaseOwned 的后到 listener
- *   （Fastify 也因 aborted 跳过 server.listen/在 abort 时 close，Node 原生 listen signal 同样
- *   中止未完成绑定）；两次都成功之后才换新的 controller；
+ * - 两次 listen 各用一个 AbortController，主监听器在先（#1337：先占住 `PORT`，系统为缺省的
+ *   `PREVIEW_PORT=0` 分配的端口就不可能是它）。ready/pre-bind 窗口内的 signal 也会中止绑定，不会
+ *   留下一个逃过 releaseOwned 的后到 listener（Fastify 也因 aborted 跳过 server.listen/在 abort 时
+ *   close，Node 原生 listen signal 同样中止未完成绑定）。每次绑定成功后立即换新的 controller：
+ *   已绑定的监听器手里的 signal 此后不会再被 abort，主监听器只经 releaseOwned 关闭——预览绑定在途
+ *   时到达的信号只中止预览那一次绑定；
+ * - 两次绑定之间主监听器已受理请求而预览端口还没有：这段时间的 `preview-token` 答 typed 404
+ *   （`workspaces/rest-preview-token.ts`，端口为 0 即未绑定）。托管布局在这两次绑定之间建立
+ *   （owner 2026-10-13 裁决）：主 `listen` resolve 之后到 `ensureOmpStateLayout` 返回是同步代码，
+ *   没有 await，主监听器受理的第一个请求到达时布局已在（这段时间到达的 prompt 建得出快照目录：
+ *   钩子辅助复现，预加载推迟预览监听器的原生 listen，`test/server-startup-preview.test.ts`）。
+ *   布局失败时主监听器已绑定，随失败清理关闭。`models.yml` 与宿主 overlay 仍在两次绑定之后写：
+ *   overlay 写出之前 spawn 的 omp v18.0.10 以 `Config overlay not found` 退出码 1 退出、不到
+ *   `ready`（实测范围：macOS arm64、无 `OMP_USER`、手工按 `spawnOmp` 的 argv/env 运行官方二进制；
+ *   Linux、sudo/setpriv 形状与入口对这次退出的处置未测，见 ADR-0014 的 #1337 行）；
  * - 关停与失败清理同一条路：终止启动时那条 `sudo … find`（若仍在途）→ 转换器 `close()`（终止在途
  *   转换并等自己启动的进程退出）→ 两个周期清理的定时器 → 预览监听器 → 主实例（其 preClose 里
  *   runtime 退出，再关主监听器）→ DB。预览监听器先于 runtime 关：omp 只连主监听器上的模型代理，
@@ -277,9 +288,9 @@ type StartupStage =
   | "config"
   | "db"
   | "app"
-  | "preview_listen"
   | "listen"
   | "state_layout"
+  | "preview_listen"
   | "models_yml"
   | "host_overlay"
   | "preview_cache"
@@ -321,9 +332,12 @@ if (import.meta.main) {
 
 /** 入口拥有的一次性资源状态：转换器、定时器、两个实例与 DB 均只在此关闭，避免重复/二次关闭。 */
 interface OwnedResources {
+  /** 只管 `listening` 那个实例的那一次 listen；该次绑定成功后立即换新的。 */
   controller: AbortController;
+  /** 当前 `controller` 的 signal 交给了哪个实例的 listen：先主实例，它绑定成功后是预览实例。 */
+  listening: FastifyInstance | undefined;
   app: FastifyInstance | undefined;
-  /** 预览监听器的实例：先于主实例 listen，先于主实例关闭。 */
+  /** 预览监听器的实例：后于主实例 listen，先于主实例关闭。 */
   preview: FastifyInstance | undefined;
   /** 办公文档转换器：先于两个监听器关闭。 */
   converter: OfficeConverter | undefined;
@@ -360,6 +374,7 @@ function runEntrypoint(): void {
 
   const owned: OwnedResources = {
     controller: new AbortController(),
+    listening: undefined,
     app: undefined,
     preview: undefined,
     converter: undefined,
@@ -397,7 +412,8 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
         emitListenerForceClose();
       }
     };
-    // 预览监听器绑定之后才有值。主监听器在它之后才 listen，受理签发请求时这里已是绑定的端口。
+    // 预览监听器绑定之后才有值。主监听器先于它 listen：两次绑定之间到达的签发请求读到 0，
+    // 签发端点据此按未装配作答。
     let previewPort = 0;
     const tokens = createPreviewTokens();
     // 先登记到 owned 再做别的：此后任何一步失败或收到信号，releaseOwned 都会关掉转换器、终止清空。
@@ -426,21 +442,27 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       officeReady: () => owned.officeReady,
       onListenerForceClose,
     });
-    owned.stage = "preview_listen";
-    await owned.preview.listen({
+    owned.stage = "listen";
+    owned.listening = owned.app;
+    await owned.app.listen({
       host: config.host,
-      port: config.previewPort,
+      port: config.port,
       signal: owned.controller.signal,
     });
+    // 主监听器的 signal 到此作废：预览那一次绑定用新的，信号中止它时原生 close 碰不到主监听器。
+    owned.controller = new AbortController();
+    owned.listening = owned.preview;
     if (owned.signalReceived) {
       await releaseOwned(owned);
       return;
     }
-    previewPort = boundAddressOf(owned.preview, "preview").port;
-    owned.stage = "listen";
-    await owned.app.listen({
+    // 主 listen resolve 之后到这里返回没有 await：主监听器受理的第一个请求到达时托管布局已在。
+    owned.stage = "state_layout";
+    ensureOmpStateLayout(config.ompStateDir);
+    owned.stage = "preview_listen";
+    await owned.preview.listen({
       host: config.host,
-      port: config.port,
+      port: config.previewPort,
       signal: owned.controller.signal,
     });
     owned.controller = new AbortController();
@@ -448,6 +470,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       await releaseOwned(owned);
       return;
     }
+    previewPort = boundAddressOf(owned.preview, "preview").port;
     await publishStarted(owned, config, assembly.trash, office.cleanup);
   } catch {
     // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
@@ -460,9 +483,9 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
 }
 
 /**
- * 成功记录：listen 之后建托管布局、写托管 models 与宿主 overlay、建预览缓存目录并清空 `work/`，
- * 然后才让 `/o/` 受理转换、扫一轮转换缓存并起它的周期清理，再发主监听器实际的 bound
- * address/port；记录写出之后回收目录扫第一轮，入口不等它。
+ * 成功记录：两次 listen 之后（托管布局已在两次绑定之间建好）写托管 models 与宿主 overlay、建预览
+ * 缓存目录并清空 `work/`，然后才让 `/o/` 受理转换、扫一轮转换缓存并起它的周期清理，再发主监听器
+ * 实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。
  */
 async function publishStarted(
   owned: OwnedResources,
@@ -480,8 +503,6 @@ async function publishStarted(
   if (owned.signalReceived) {
     return;
   }
-  owned.stage = "state_layout";
-  ensureOmpStateLayout(config.ompStateDir);
   owned.stage = "models_yml";
   await writeManagedModelsYml(ompAgentDir(config.ompStateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(address),
@@ -564,8 +585,11 @@ function sameAddress(left: string | AddressInfo | null, right: AddressInfo): boo
 
 function requestShutdown(owned: OwnedResources): void {
   owned.signalReceived = true;
-  const app = owned.app;
-  const bound = app !== undefined && addressOf(app) !== undefined;
+  // 只中止在途的绑定：当前 controller 所管的那个实例还没有 bound（装配之前也算）。预览绑定在途时
+  // 这里中止的只是预览那一次；已绑定的监听器不经 signal 的原生 close，只由 releaseOwned 关
+  // （主实例：runtime → listener → DB）。
+  const listening = owned.listening;
+  const bound = listening !== undefined && addressOf(listening) !== undefined;
   if (!bound && !owned.controller.signal.aborted) {
     owned.controller.abort();
   }

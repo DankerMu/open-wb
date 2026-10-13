@@ -26,6 +26,10 @@ import {
   reserveWildcardPort,
   startCompiledServer,
 } from "./server-startup-helpers.js";
+import {
+  expectDbReopens,
+  expectLayoutWithoutManagedFiles,
+} from "./server-startup-order-helpers.js";
 
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
@@ -214,9 +218,12 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     }
     expectReason(failure.stderr, "preview_listen");
     expect(existsSync(join(root, "db", "dev.db"))).toBe(true);
-    expect(existsSync(join(root, "state"))).toBe(false);
+    // 托管布局在主绑定成功之后、预览绑定之前建立（#1337）：目录在，两个托管文件没有写出。
+    expectLayoutWithoutManagedFiles(join(root, "state"));
     expect(existsSync(join(root, "preview-cache"))).toBe(false);
+    // 主监听器先绑定成功（#1337），随预览绑定失败的清理关闭：PORT 与 DB 立即可由后继进程复用。
     await expectBindable("127.0.0.1", failure.port);
+    expectDbReopens(join(root, "db", "dev.db"));
   }, 60_000);
 
   it("state_layout: home/.omp is occupied by a file", async () => {
@@ -285,5 +292,6 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     expect(output).not.toContain(UPSTREAM_SENTINEL);
     expect(output).not.toContain(root);
     expectReason(failure.stderr, "state_layout");
+    await expectBindable("127.0.0.1", failure.port);
   }, 60_000);
 });

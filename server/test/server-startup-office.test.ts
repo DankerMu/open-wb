@@ -174,7 +174,7 @@ describe("production entry with the office converter", () => {
       // 三行 runtime-exit 是三个假 soffice 的退出：最后一个（关停时被终止的）先于两个监听器的
       // 关闭，DB 最后。
       expect(entry.readTrace()).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\nruntime-exit\n` +
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nruntime-exit\n` +
           "runtime-exit\nruntime-exit\n" +
           `listener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
@@ -390,7 +390,7 @@ describe("production entry clearing work/ as the omp user", () => {
       const trace = entry.readTrace().split("\n");
       expect(trace.filter((line) => line === "runtime-exit")).toHaveLength(1);
       expect(trace.filter((line) => line !== "runtime-exit").join("\n")).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\n` +
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\n` +
           `listener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
     } finally {
@@ -422,7 +422,7 @@ describe("production entry clearing work/ as the omp user", () => {
       expect(server.stdout()).toBe("");
       // 没有任何子进程被启动过（没有 runtime-exit 行）。
       expect(entry.readTrace()).toBe(
-        `listening:127.0.0.1:${previewPort}\nlistening:127.0.0.1:${port}\n` +
+        `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\n` +
           `listener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
     } finally {
