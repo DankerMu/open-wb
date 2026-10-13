@@ -113,7 +113,7 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
 - **预览器按需加载是唯一放开的代码分割**（design D9）：上文 2026-10-06 增补留下的「是否做代码分割」只在这一处有了答案。`web/src` 里动态 `import()` 只出现在
   `web/src/features/files/previewers/index.ts`——十类预览器九个模块（`web` 与 `document` 同在 `frame.tsx`），另有高亮器一个模块；`web/vite.config.ts` 不配 `manualChunks`；其余页面仍不做代码分割。
   规格是 ui-foundation「预览器按需加载是唯一的代码分割」，静态守卫是 `web/test/previewers-code-split.test.ts`（随 `make check` 跑）；
-  「构建产物里确有按需块」只在 `make ui-walk` 的 `/files` 步骤里断言，`make check` 不构建。
+  「构建产物确有按需块」只在 `make ui-walk` 的 `/files` 步骤里断言，`make check` 不构建。
 - **包体仍不设上限**：下面只是记录。上限定多少、要不要进一步分割，仍按 2026-10-06 增补「S1f 的全部 change 完成后再定」。
 - **测量**：提交 `08b236502f86c0202300618c34018008a17f3481`，`npm run build --workspace web`（CI 的构建步骤；Makefile 没有构建 web 的目标），Node 24.13.1、Vite 8.2.2，macOS arm64。
   连续构建两次，`web/dist/assets` 下 16 个文件的 SHA-256 逐个相同。原始字节为 `wc -c`，gzip 为逐文件 `gzip -9 -c <文件> | wc -c`（Apple gzip 479）。
