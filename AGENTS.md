@@ -42,12 +42,12 @@
 ## Directory Map
 
 ```
-server/     app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计/对话）
+server/     app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计/对话/预览监听器/文档转换）
 web/        浏览器 SPA（Playwright UI 走查在 web/e2e）
 kbservice/  知识库服务（P2 起吸收 RAGFlow，Apache-2.0，义务见 ATTRIBUTION.md §3）
 resource/   行为基准原型 + 后端选型研究 +（gitignore 的）上游参考克隆
 app-reference/  上游应用只读副本（gitignore；仅 analysis/ 可写）
-smoke/      Hurl HTTP 冒烟用例、对话链路、沙箱夹具与深链 exact-byte fixture
+smoke/      Hurl HTTP 冒烟用例、对话链路、沙箱夹具（含隔离预览来源的网页与范围请求的音频样本）与深链 exact-byte fixture
 scripts/    守卫脚本    .githooks/  git hooks    .github/    CI
 ```
 
