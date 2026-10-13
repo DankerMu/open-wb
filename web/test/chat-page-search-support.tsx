@@ -278,11 +278,6 @@ export function jumpButton() {
   return screen.queryByRole("button", { name: "回到最新" });
 }
 
-/** Text of every toast on the page. */
-export function toasts() {
-  return Array.from(document.querySelectorAll(".ui-toast-message"), (node) => node.textContent);
-}
-
 const settled = async () => true;
 
 /** A bare thread viewport over an empty runtime, holding the messages 1 and 2. */

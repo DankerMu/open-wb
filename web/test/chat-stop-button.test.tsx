@@ -8,7 +8,6 @@ import {
   renewAccount,
 } from "./chat-page-lifecycle-support.js";
 import { OTHER_SESSION_ID } from "./chat-page-ownership-support.js";
-import { toasts } from "./chat-page-search-support.js";
 import {
   expandToolGroups,
   expectChatLocation,
@@ -133,7 +132,6 @@ function toastText(message: string) {
 
 /** 停止不弹任何提示（turn-control「停止按钮与文案」）：页面上没有 Toast，也没有 `已停止生成` 文本。 */
 function expectNoToast() {
-  expect(toasts()).toEqual([]);
   expect(toastText(STOPPED_TOAST)).toBeNull();
 }
 
@@ -226,7 +224,6 @@ describe("stop button: layout and outcomes", () => {
 
     stop.resolve(accepted());
     await flush();
-    expect(screen.getByRole("region", { name: "通知" })).toBeTruthy();
     expectNoToast();
     expect(stopButton().disabled).toBe(false);
     expect(composerInput().disabled).toBe(true);

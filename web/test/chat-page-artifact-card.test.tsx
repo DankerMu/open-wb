@@ -11,6 +11,7 @@
  * chat-workspace-sidebar-reveal-html.test.tsx. Only the code card still fetches: A10 and A12 moved
  * to it.
  */
+
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { artifactKind } from "../src/features/chat/stream-artifacts.js";
@@ -42,7 +43,6 @@ import {
   slot,
   stubClipboard,
   switchSession,
-  toasts,
   truncatedPreview,
   withOtherSession,
   withoutUnhandledRejections,
@@ -82,6 +82,7 @@ import { envelope, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { deferred, historyUser, SESSION_ID } from "./chat-stream-support.js";
 import { hasLucideGlyph, imagePreviewResponse } from "./files-fixture.js";
 import { BASE } from "./files-site-fixture.js";
+import { pageNotices } from "./page-notices.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 
 const blobs = artifactCardFixture();
@@ -250,7 +251,7 @@ describe("html 产物卡", () => {
     expect(actions(OPEN_INDEX).map((button) => button.disabled)).toEqual([false, false]);
     expect(alerts()).toEqual([]);
     expect(blobs.createObjectURL).not.toHaveBeenCalled();
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成"]);
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
   });
 });
@@ -279,7 +280,7 @@ describe("图片与代码产物卡", () => {
     expect([...document.querySelectorAll("a[download]")]).toEqual([download]);
     expect(document.querySelectorAll("img")).toHaveLength(0);
     expect(alerts()).toEqual([]);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成"]);
     expect(download.hasAttribute("aria-disabled")).toBe(false);
   });
 
@@ -290,7 +291,7 @@ describe("图片与代码产物卡", () => {
     fireEvent.click(action(COPY_APP));
 
     await waitFor(() => expect(copiedStatus()?.getAttribute("role")).toBe("status"));
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:已复制"]);
     expect(alerts()).toEqual([]);
     expect(writeText.mock.calls).toEqual([[CODE_TEXT]]);
     expect(previewCalls(page.fetchMock).map(([path]) => path)).toEqual([
@@ -320,7 +321,7 @@ describe("图片与代码产物卡", () => {
       fireEvent.click(action(COPY_APP));
       await waitFor(() => expect(alerts()).toEqual(["复制失败"]));
     });
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["alert:复制失败", "status:已完成"]);
     if (spy !== null) expect(spy.mock.calls).toEqual([[CODE_TEXT]]);
     expect(action(COPY_APP).disabled).toBe(false);
   });
@@ -335,7 +336,7 @@ describe("图片与代码产物卡", () => {
     await quiesce();
     expect(writeText).not.toHaveBeenCalled();
     expect(alerts()).toEqual(["文件过大，无法复制"]);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["alert:文件过大，无法复制", "status:已完成"]);
   });
 });
 
@@ -355,7 +356,7 @@ describe("预览失败与类型不符", () => {
       fireEvent.click(action("复制代码 gone.md"));
       await waitFor(() => expect(alerts()).toEqual(["文件不存在或已被删除"]));
     });
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["alert:文件不存在或已被删除", "status:已完成"]);
     expect(writeText).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
@@ -449,7 +450,7 @@ describe("拉取中、卸载与换账号", () => {
     expect(blobs.createObjectURL).toHaveBeenCalledTimes(1);
     expect(blobs.revokeObjectURL.mock.calls).toEqual([[BLOB_URL]]);
     expect(writeText).not.toHaveBeenCalled();
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:未开始"]);
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
   });
 
@@ -468,7 +469,7 @@ describe("拉取中、卸载与换账号", () => {
     await quiesce();
 
     expect(writeText).not.toHaveBeenCalled();
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:未开始"]);
     expect(blobs.createObjectURL).not.toHaveBeenCalled();
   });
 
@@ -486,7 +487,7 @@ describe("拉取中、卸载与换账号", () => {
     });
 
     expect(previewSignal(page.fetchMock).aborted).toBe(true);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:未开始"]);
     expect(writeText).not.toHaveBeenCalled();
   });
 
@@ -518,7 +519,7 @@ describe("拉取中、卸载与换账号", () => {
     expect(writeText).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成"]);
     expect(previewCalls(fetchMock)).toHaveLength(1);
   });
 
@@ -534,7 +535,7 @@ describe("拉取中、卸载与换账号", () => {
       await quiesce();
     });
 
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual([]);
     expect(writeText).not.toHaveBeenCalled();
   });
 });
@@ -577,7 +578,7 @@ describe("产物卡 placement", () => {
 
     fireEvent.click(within(reply()).getByRole("button", { name: "复制" }));
     expect((await within(reply()).findByText("已复制")).getAttribute("role")).toBe("status");
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已停止", "status:已停止", "status:已复制"]);
     expect(writeText.mock.calls).toEqual([["部分回答"]]);
   });
 

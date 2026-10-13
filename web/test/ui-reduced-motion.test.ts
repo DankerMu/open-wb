@@ -144,6 +144,8 @@ describe("reduced-motion 过渡守卫（#423）", () => {
 
   it("web/src/**/*.css 每条非 none 过渡都有同文件、在后的 reduce 覆盖", () => {
     const paths = listRepoFiles("web/src", (path) => path.endsWith(".css"));
+    // 非空锚点：文件枚举坏掉（空表）时下面的「没有违例」不能悄悄通过。
+    expect(paths).toContain("web/src/styles.css");
     const report = checkReducedMotion(paths.map((path) => ({ path, css: readRepoFile(path) })));
     expect(report.violations).toEqual([]);
   });

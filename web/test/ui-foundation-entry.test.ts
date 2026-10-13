@@ -103,7 +103,8 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
     expect([...legacyTargets, ...importTargets(UI_BARREL)].sort()).toEqual(others);
 
     const importers = others.filter((path) => importStatements(readRepoFile(path)).length > 0);
-    expect(importers).toEqual([UI_BARREL]);
+    // Toast 删除（#1398）后 ui.css 不再汇总任何组件样式：既有样式文件里没有一个带 @import。
+    expect(importers).toEqual([]);
     expect(importStatements(readRepoFile(THEME))).toEqual([]);
   });
 

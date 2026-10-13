@@ -63,7 +63,6 @@ import {
   REQUEST_FAILED,
   renameDialog,
   SECOND_ACCOUNT_TASK,
-  toasts,
   UNPIN,
   view,
 } from "./chat-page-session-meta-support.js";
@@ -162,7 +161,7 @@ describe("确认框与取消 (R2)", () => {
       expect(calls(fetchMock, patchPath(A))).toEqual([]);
       expect(calls(fetchMock, patchPath(D))).toEqual([]);
       expect(entryTitles(nav)).toEqual([CURRENT, UNTITLED]);
-      expect(toasts()).toEqual([]);
+      expectNoListToast();
       expect(currentLocation()).toBe("/");
     },
   );
@@ -204,7 +203,7 @@ describe("删除当前会话回欢迎态 (R3, R5)", () => {
     expect(currentLocation()).toBe(path);
     expectStreamOpen(source);
     expect(watched.closedAt).toEqual([]);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     const sources = FakeEventSource.instances.length;
     const reads = [calls(fetchMock, messagesPath(A)).length, listReads(fetchMock)];
 
@@ -371,7 +370,7 @@ describe("删除失败 (R6, R7, R11)", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
     await yieldMacrotask();
     expect(patchRequests(fetchMock, A)).toEqual([DELETE_REQUEST]);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     expect(screen.queryByRole("button", { name: "关闭提示" })).toBeNull();
     expect(listReads(fetchMock)).toBe(reads);
   });
@@ -382,7 +381,7 @@ describe("删除请求中 (R8, R9, R12)", () => {
     const { fetchMock, nav, request } = await pendingDelete("/", { close: true });
     expect(calls(fetchMock, patchPath(A)).at(0)?.[1]?.signal?.aborted).toBe(false);
     expect(entryTitles(nav)).toEqual([CURRENT, OTHER, THIRD]);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
 
     const reopened = await openDelete(nav, CURRENT);
     expectConfirmBusy(reopened);
@@ -523,7 +522,7 @@ describe("fence：账号切换与卸载 (R10)", () => {
 
     await settleDeferredResponse(request, noContent());
     await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     expect(entryTitles(list)).toEqual([SECOND_ACCOUNT_TASK]);
     expect(currentLocation()).toBe(SESSION_A);
     expectStreamOpen(source);
@@ -538,7 +537,7 @@ describe("fence：账号切换与卸载 (R10)", () => {
 
     await settleDeferredResponse(request, sessionBusy());
     await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     expect(listAlert(list)).toBeNull();
     expect(listReads(fetchMock)).toBe(reads);
     expect(entryTitles(list)).toEqual([SECOND_ACCOUNT_TASK]);
@@ -587,7 +586,7 @@ describe("fence：账号切换与卸载 (R10)", () => {
 
       await settleDeferredResponse(request, response());
       await yieldMacrotask();
-      expect(toasts()).toEqual([]);
+      expectNoListToast();
       expect(screen.queryByRole("alert")).toBeNull();
       expect(currentLocation()).toBe("/center");
       expect(fetchMock.mock.calls).toHaveLength(requests);

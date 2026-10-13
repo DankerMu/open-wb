@@ -149,3 +149,15 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
 - **新拷入 `resizable`**（design D26，任务 23.1）：`web/src/components/ui/resizable.tsx`，来自 shadcn/ui registry 的 `radix-nova` 版式（`web/components.json`），按拷入层六类修改的规则拷入（这次没有与 registry 原文逐行比对）；
   新增依赖 `react-resizable-panels`（MIT，锁定 4.14.3），两者都登记在 `ATTRIBUTION.md`。用途是会话页工作空间侧边栏与对话区之间那条可拖动、键盘可达的分隔线，
   调用方只有 `web/src/features/chat/workspace-sidebar.tsx`；文件页自己的树 / 预览分栏不用它。
+
+## 增补（change `s1f-legacy-layer-removal`）
+
+逐刀追加：本节由该 change 的各个 PR 依次写入，每条写明是哪一刀。
+
+- **Toast 删除，不提供替代的通知机制**（任务组 2，#1398；owner 2026-10-12）：`web/src/ui/toast.tsx`、`toast.css` 与应用入口的 `ToastProvider` 包裹删除，直接依赖 `@radix-ui/react-toast` 卸载
+  （`web/package.json` 不再直接安装任何 `@radix-ui/*` 单包）。删除前产品代码里没有任何 `useToast` 调用方（`grep` 实测：`web/src` 里只有 `main.tsx` 导入 `ToastProvider`），所以没有哪一条用户可见的提示随之消失；
+  各功能规格里「不显示 Toast / 轻提示」的条文仍然为真，没有改。以后要通知机制另开 change。
+- **测试侧查 Toast 元素的断言整体删除**（同一刀）：三个 `toasts()` 助手及其调用、按类名 `.ui-toast` 的查询、对 `通知` 区域的查询。理由只有一个：被查的元素在 Toast 删除后不可能再存在，
+  这些断言要么恒真（按类名查不到任何东西）、要么抛错（按角色查通知区），留着是摆设。这是该 change 里「既有断言不删除、不削弱」的唯一例外。条件是每个受影响的用例里都有一条整页范围的断言继续证明「没有提示」：
+  旧提示文案在整页找不到，或整页的提示面清单（全部 `alert` 与 `status` 角色元素的文案，`web/test/page-notices.ts`）恰为该用例应有的那几条；逐文件的对照表在 #1398 的 PR 描述里。
+- **`useEscapeFallback` 本刀不动**：它与十处调用原样保留，六处「Toast 占住 Radix 层栈」的注释改为过渡说法；去留由 #1393 的 Escape 实测决定，结论由后一刀写在这里。

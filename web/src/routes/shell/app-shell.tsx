@@ -38,8 +38,9 @@ function useOpenerFocus(content: RefObject<HTMLElement | null>) {
 }
 
 /**
- * 窄屏导航覆盖层：左侧 Sheet（对话框名 `导航`），内含始终展开的侧栏。Toast 占住 Radix 层栈时
- * Escape 由 `useEscapeFallback` 兜底关闭；主体整体滚动，矮视口不裁掉用户区。
+ * 窄屏导航覆盖层：左侧 Sheet（对话框名 `导航`），内含始终展开的侧栏。Escape 另接了
+ * `useEscapeFallback` 兜底——Toast 已删除；这个兜底是否仍然需要由 issue 1393 的 Escape 实测决定。
+ * 主体整体滚动，矮视口不裁掉用户区。
  */
 function NavOverlay({
   open,

@@ -37,7 +37,6 @@ import {
   renameDialog,
   SECOND_ACCOUNT_TASK,
   saveTitle,
-  toasts,
   typeTitle,
   UNPIN,
   view,
@@ -298,7 +297,7 @@ describe("从条目菜单重命名 (M2, M3, M5)", () => {
     expect(controls.save.disabled).toBe(false);
     expect(entryTitles(nav)).toEqual([OLD, OTHER]);
     expect(await crumb(OLD)).toBeTruthy();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
 
     fireEvent.click(controls.save);
     expect(within(controls.dialog).queryByRole("alert")).toBeNull();
@@ -318,7 +317,7 @@ describe("从条目菜单重命名 (M2, M3, M5)", () => {
     saveTitle(controls, NEW);
     expect((await within(controls.dialog).findByRole("alert")).textContent).toBe(REQUEST_FAILED);
     expect(entryTitles(nav)).toEqual([OLD, OTHER]);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
   });
 
   it("M5 取消：Dialog 消失、不发请求、焦点回到打开它的「更多」按钮", async () => {
@@ -334,7 +333,7 @@ describe("从条目菜单重命名 (M2, M3, M5)", () => {
     expect(controls.trigger).toBe(moreButton(nav, OLD));
     expect(calls(fetchMock, patchPath(A))).toEqual([]);
     expect(entryTitles(nav)).toEqual([OLD, OTHER]);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
   });
 });
 
@@ -386,7 +385,7 @@ describe("重命名请求中 (M4)", () => {
   it("M4 请求中点 取消：Dialog 消失；迟到的 200 照常更新且无轻提示，Dialog 不重新出现", async () => {
     const { nav, patch } = await pendingRename(({ cancel }) => fireEvent.click(cancel));
     expect(entryTitles(nav)).toEqual([OLD, OTHER]);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
 
     await settleDeferredResponse(patch, jsonResponse(view(A, NEW)));
     await expectRenamed(nav);
@@ -529,7 +528,7 @@ describe("顶栏重命名入口 (M6, M7)", () => {
     expect((await within(controls.dialog).findByRole("alert")).textContent).toBe(BAD_REQUEST);
     expect(renameDialog()).toBe(controls.dialog);
     expect(await crumb(OLD)).toBeTruthy();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
 
     fireEvent.click(controls.cancel);
     await dialogGone();
@@ -641,7 +640,7 @@ describe("fence：账号切换与卸载 (M13)", () => {
 
       await settleDeferredResponse(patch, response());
       await yieldMacrotask();
-      expect(toasts()).toEqual([]);
+      expectNoListToast();
       expect(screen.queryByRole("alert")).toBeNull();
       expect(consoleError).not.toHaveBeenCalled();
     },

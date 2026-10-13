@@ -6,6 +6,7 @@
  * it), the pure `chatTopbar`, and the class tokens of the rendered box. Expected values are
  * literals from the spec deltas.
  */
+
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { chatTopbar } from "../src/features/chat/topbar-actions.js";
@@ -35,7 +36,6 @@ import {
   searchButton,
   searchInput,
   TOPBAR_BUTTONS,
-  toasts,
   toggleSearch,
   typeQuery,
   weeklyConversation,
@@ -50,6 +50,7 @@ import {
 import { chatShellFixture, openProbedSession } from "./chat-page-shell-support.js";
 import { FakeEventSource } from "./chat-stream-support.js";
 import { hasLucideGlyph } from "./files-fixture.js";
+import { pageNotices } from "./page-notices.js";
 import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
 
 const WEEKLY = "周报";
@@ -297,7 +298,7 @@ describe("消息标记与跳转调用 (S6, S7)", () => {
 
     expect(jumps).toHaveLength(5);
     await quiesce();
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:未开始"]);
   });
 });
 

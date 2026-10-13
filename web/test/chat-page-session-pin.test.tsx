@@ -41,7 +41,6 @@ import {
   type SessionView,
   saveTitle,
   submitRenameThenCancel,
-  toasts,
   UNPIN,
   view,
 } from "./chat-page-session-meta-support.js";
@@ -184,7 +183,7 @@ describe("只信响应 (M10)", () => {
     saveTitle(await openRename(nav, MIDDLE), "我键入的名字");
     expect(entryTitles(nav)).toEqual([FIRST, MIDDLE, LAST]);
     expect(await crumb(MIDDLE)).toBeTruthy();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
 
     await settleDeferredResponse(patch, jsonResponse(view(B, "服务端改写的名字")));
     await waitFor(() => expect(renameDialog()).toBeNull());
@@ -202,7 +201,7 @@ describe("只信响应 (M10)", () => {
     await chooseEntryAction(nav, MIDDLE, PIN);
     expect(patchRequests(fetchMock, B)).toEqual([patchOf('{"pinned":true}')]);
     expectUnpinned(nav);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
 
     await settleDeferredResponse(patch, jsonResponse(view(B, MIDDLE)));
     expectNoListToast();
@@ -369,7 +368,7 @@ describe("fence：置顶的失败响应 (M13)", () => {
     await leaveChatPage(router);
     await settleDeferredResponse(patch, envelope(409, CONFLICT));
     await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -382,7 +381,7 @@ describe("fence：置顶的失败响应 (M13)", () => {
     const list = await renew();
     await settleDeferredResponse(patch, envelope(409, CONFLICT));
     await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     expect(listAlert(list)).toBeNull();
     expect(entryTitles(list)).toEqual([SECOND_ACCOUNT_TASK]);
     expect(partition(list, PINNED_GROUP)).toBeNull();
@@ -396,7 +395,7 @@ describe("401 交给既有的登录失效处理 (D2)", () => {
   async function expectLoginWithoutToast() {
     expect(await screen.findByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeTruthy();
     await yieldMacrotask();
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     expect(screen.queryByRole("button", { name: "关闭提示" })).toBeNull();
   }
 

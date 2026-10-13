@@ -11,7 +11,6 @@ import { describe, expect, it, vi } from "vitest";
 import { quiesce } from "./chat-page-file-changes-support.js";
 import { renewAccount, settleDeferredResponse, typeDraft } from "./chat-page-lifecycle-support.js";
 import { composer, findMessageArea, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
-import { toasts } from "./chat-page-search-support.js";
 import {
   CATALOGUE,
   COMMANDS,
@@ -370,7 +369,6 @@ describe("候选目录的拉取时机 (J8, J9)", () => {
 
       expect(panel()).toBeNull();
       expect(commandCalls(fetchMock)).toHaveLength(1);
-      expect(toasts()).toEqual([]);
       expect(screen.queryAllByRole("alert")).toHaveLength(alerts);
       expect(press("ArrowDown")).toBe(true);
       expect(press("Tab")).toBe(true);
@@ -387,7 +385,6 @@ describe("候选目录的拉取时机 (J8, J9)", () => {
 
       expect(commandCalls(fetchMock)).toHaveLength(2);
       expect(labels()).toEqual(LABELS);
-      expect(toasts()).toEqual([]);
       expect(screen.queryAllByRole("alert")).toHaveLength(alerts);
       expect(errors).not.toHaveBeenCalled();
     },

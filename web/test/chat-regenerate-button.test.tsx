@@ -286,7 +286,6 @@ describe("regenerate button: request, lock and reconcile", () => {
     regen.resolve(accepted());
     await flush();
     expect(screen.queryByText(REGEN_TOAST)).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
     expect(source.closeCount).toBe(1);
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
     expectTranscript(["旧回答"]);

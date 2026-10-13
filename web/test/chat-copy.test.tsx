@@ -64,10 +64,8 @@ const iconOf = (button: HTMLElement) =>
 const copiedStatus = (article: HTMLElement) => within(article).queryByRole("status");
 const failedAlert = (article: HTMLElement) => within(article).queryByRole("alert");
 
-/** 页面任何位置都没有轻提示：通知区为空，旧的成功文案也不出现。 */
+/** 页面任何位置都没有轻提示：旧的成功文案不出现（应用里已没有 Toast 组件，#1398）。 */
 function expectNoToast() {
-  expect(within(screen.getByRole("region", { name: "通知" })).queryByRole("status")).toBeNull();
-  expect(document.querySelector(".ui-toast")).toBeNull();
   expect(screen.queryByText(OLD_TOAST)).toBeNull();
 }
 

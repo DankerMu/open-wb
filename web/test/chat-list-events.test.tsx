@@ -16,6 +16,7 @@ import {
   chooseEntryAction,
   cleanupSessionMeta,
   envelope,
+  expectNoListToast,
   findList,
   messagesPath,
   PIN,
@@ -24,7 +25,6 @@ import {
   partitionTitles,
   patchPath,
   type SessionView,
-  toasts,
   view,
 } from "./chat-page-session-meta-support.js";
 import {
@@ -263,7 +263,7 @@ describe("web 列表事件消费", () => {
 
     await chooseEntryAction(nav, SECOND, PIN);
     await waitFor(() => expect(partitionTitles(nav, PIN)).toEqual([SECOND]));
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
     expect(within(nav).getAllByRole("button", { name: FIRST })).toHaveLength(1);
     expect(alerts()).toEqual([]);
     expect(count(fetchMock, LIST)).toBe(1);

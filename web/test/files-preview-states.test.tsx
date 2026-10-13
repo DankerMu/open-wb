@@ -11,6 +11,7 @@ import {
   stubBlobUrls,
   workspace,
 } from "./files-fixture.js";
+import { pageNotices } from "./page-notices.js";
 import {
   currentLocation,
   deferredResponse,
@@ -334,16 +335,13 @@ describe("文件页的预览状态", () => {
       false,
       { [`${ARCHIVE}broken.zip`]: unsupported },
     );
-    const toasts = screen.getByRole("region", { name: "通知" });
-
     await select("broken.zip");
     expect((await previewRegion().findByRole("alert")).textContent).toBe("无法读取该压缩包");
     expect(screen.queryByText("该类型不支持预览")).toBeNull();
     expectDownloadLink("broken.zip");
-    // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+    // 让出一轮再数：整页的提示面只有预览区的这一条失败文案（应用里已没有 Toast 组件，#1398）。
     await yieldMacrotask();
-    expect(within(toasts).queryByRole("listitem")).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    expect(pageNotices()).toEqual(["alert:无法读取该压缩包"]);
     expect(archiveRequests(fetchMock)).toStrictEqual([`${ARCHIVE}broken.zip`]);
     expect(fileRequests(fetchMock)).toStrictEqual([]);
   });
@@ -531,8 +529,6 @@ describe("文件页的预览状态", () => {
     const { fetchMock } = renderWorkspaceWith({
       "clip.mp4": { size: 2048, route: new Error("clip.mp4 must not be fetched") },
     });
-    const toasts = screen.getByRole("region", { name: "通知" });
-
     await select("clip.mp4");
     const video = await waitFor(() => mediaElement("video"));
     const requested = paths(fetchMock);
@@ -544,9 +540,9 @@ describe("文件页的预览状态", () => {
     // error 之后页面不为它另发任何请求（不探测状态码，也不问认证守卫）。
     await yieldMacrotask();
     expect(paths(fetchMock)).toStrictEqual(requested);
-    // Toast 是通知区列表里的一项（类名 ui-toast，自身不带 role）。
-    expect(within(toasts).queryByRole("listitem")).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    // 整页范围：失败文案只此一处，提示面的清单里没有多出来的条目（应用里已没有 Toast 组件，#1398）。
+    expect(screen.getAllByText("无法播放该文件")).toHaveLength(1);
+    expect(pageNotices()).toEqual([]);
     expect(previewRegion().queryByRole("alert")).toBeNull();
   });
 

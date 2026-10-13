@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppRouter, routeManifest } from "../src/routes/index.js";
-import { ToastProvider } from "../src/ui/index.js";
 
 const expectedPages = [
   {
@@ -239,11 +238,7 @@ describe("SPA shell routes", () => {
     setBrowserPath("/");
     authenticateRouter();
     router = createAppRouter();
-    render(
-      <ToastProvider>
-        <RouterProvider router={router} />
-      </ToastProvider>,
-    );
+    render(<RouterProvider router={router} />);
 
     const sidebar = await screen.findByRole("complementary", { name: "侧栏" });
     const navigation = within(sidebar).getByRole("navigation", { name: "主导航" });
@@ -268,11 +263,7 @@ describe("SPA shell routes", () => {
     setBrowserPath(path);
     authenticateRouter();
     router = createAppRouter();
-    render(
-      <ToastProvider>
-        <RouterProvider router={router} />
-      </ToastProvider>,
-    );
+    render(<RouterProvider router={router} />);
 
     const { navigation, links } = await expectRouteShell({ title, currentLabel });
 
@@ -293,11 +284,7 @@ describe("SPA shell routes", () => {
       setBrowserPath(path);
       authenticateRouter();
       router = createAppRouter();
-      render(
-        <ToastProvider>
-          <RouterProvider router={router} />
-        </ToastProvider>,
-      );
+      render(<RouterProvider router={router} />);
 
       await waitFor(() => {
         expect(window.location.pathname).toBe(canonicalPath);

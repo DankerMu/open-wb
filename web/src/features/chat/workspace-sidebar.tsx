@@ -214,8 +214,8 @@ type WorkspaceSplitProps = {
  *   顶栏的那个按钮——由卡片的 `查看详情` 打开的也是（规格「宽屏下关闭后焦点回到顶栏的
  *   `工作空间侧边栏` 按钮」）；定位本身不动焦点，它留在被点的按钮上。
  * - 窄屏：全屏模态层，没有分隔线；打开时焦点进 `关闭`，Escape 与 `关闭` 关闭后焦点还给打开它的那个
- *   控件：顶栏按钮，或被点的 `查看详情`（`restoreFocus(true)`）。屏上有 Toast 时 Radix 收不到
- *   Escape，由 `useEscapeFallback` 兜底。
+ *   控件：顶栏按钮，或被点的 `查看详情`（`restoreFocus(true)`）。Escape 另接了 `useEscapeFallback`
+ *   兜底——Toast 已删除；这个兜底是否仍然需要由 issue 1393 的 Escape 实测决定。
  * - 拷入层的分栏在挂载时无条件 `new ResizeObserver`；没有它的运行环境退回普通的横向 flex，没有分隔线。
  */
 export function WorkspaceSplit({ children, sidebar, target }: WorkspaceSplitProps) {

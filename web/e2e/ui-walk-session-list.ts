@@ -37,8 +37,10 @@ export function menuItem(page: Page, name: string): Locator {
 }
 
 // mobile 上 `inspectSidebar` 回调结束后紧接着按 `Escape` 关覆盖层。菜单、对话框关闭后 Radix 在下一个
-// 宏任务才把焦点还回来：按键早于它时目标是 `body`，而 Toast 在场时覆盖层只靠目标在自身子树内的兜底
-// 关闭，于是关不掉。回调的最后一句等焦点回到覆盖层内（它自己或其后代）；desktop 没有覆盖层。
+// 宏任务才把焦点还回来：按键早于它时目标是 `body`，覆盖层的兜底（`useEscapeFallback`）只认目标在自身
+// 子树内的按键。这一步当初是为「Toast 在场时覆盖层只靠兜底关闭」加的；Toast 已删除，这个兜底是否仍然需要
+// 由 #1393 的 Escape 实测决定，在那之前等待原样保留。回调的最后一句等焦点回到覆盖层内（它自己或其后代）；
+// desktop 没有覆盖层。
 export async function expectFocusInNavOverlay(page: Page, project: WalkProject): Promise<void> {
   if (project === "desktop-light") return;
   const overlay = page.getByRole("dialog", NAV_OVERLAY);
@@ -84,8 +86,8 @@ export async function expectSelectedIn(
 }
 
 // 第 11 步确认删除之后：选中的条目与标题为 `title` 的条目都从列表消失，且删除没有轻提示——条目
-// 消失后页面任何位置都没有 `任务已删除`，也没有任何 Toast 元素。先断言列表本身还在（否则两条
-// 计数 0 是空断言）。
+// 消失后页面任何位置都没有 `任务已删除`（应用里已没有 Toast 组件，#1398）。先断言列表本身还在
+// （否则两条计数 0 是空断言）。
 export async function expectDeletedWithoutToast(
   page: Page,
   list: Locator,
@@ -95,7 +97,6 @@ export async function expectDeletedWithoutToast(
   await expect(list.locator(CURRENT_SESSION)).toHaveCount(0);
   await expect(list.getByRole("button", { name: title, exact: true })).toHaveCount(0);
   await expect(page.getByText("任务已删除")).toHaveCount(0);
-  await expect(page.locator(".ui-toast")).toHaveCount(0);
 }
 
 // 第 6 步：会话恰一次出现在 `workspaceName` 分组里，没有 `筛选任务`；随后在同一侧栏里（mobile 的覆盖层
@@ -353,7 +354,6 @@ async function undoFirstTurn(walk: TempWalk, { sessionId, workspaceId }: TempSes
   await expect(page.getByLabel("给助手发消息")).toHaveValue(prompt);
   expect(await treeNames(page, workspaceId), "tree after undo").not.toContain(file);
   await expect(page.getByText("已撤回，以下文件未还原")).toHaveCount(0);
-  await expect(page.locator(".ui-toast")).toHaveCount(0);
   await expect(page.getByRole("alertdialog")).toHaveCount(0);
 }
 

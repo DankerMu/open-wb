@@ -9,6 +9,7 @@
  * 浏览器里的那一步在功能验收清单 CH-101。定位没落在文件上（列表里本来就没有它）之后 `在文件页打开`
  * 的地址归 #1380，这里只断言经 404 清掉选中之后的地址。
  */
+import { pagePrompts } from "./page-notices.js";
 import "./radix-platform.js";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -119,8 +120,9 @@ function expectCleared(scope: HTMLElement) {
   expect(pane(scope).querySelector('[data-slot="preview-header"]')).toBeNull();
   expect(screen.queryByText(MISSING)).toBeNull();
   expect(screen.queryByText(NOT_FOUND)).toBeNull();
+  // 整页范围：除会话与回合的状态标记外，没有任何 alert 或 status。
+  expect(pagePrompts()).toEqual([]);
   expect(within(scope).queryByRole("alert")).toBeNull();
-  expect(document.querySelector(".ui-toast")).toBeNull();
 }
 
 /** 预览头有路径与下载链接，没有大小与修改时间。 */

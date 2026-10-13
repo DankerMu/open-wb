@@ -4,8 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPane } from "../src/features/files/preview.js";
 import { ArchivePreviewer } from "../src/features/files/previewers/archive.js";
 import { type ApiClient, ApiError } from "../src/lib/api.js";
-import { ToastProvider } from "../src/ui/index.js";
 import { hasLucideGlyph } from "./files-fixture.js";
+import { pageNotices } from "./page-notices.js";
 import { readRepoFile, stripTsComments } from "./ui-support.js";
 
 /*
@@ -238,25 +238,21 @@ describe("压缩包预览器：恶意成员名只是文字", () => {
 describe("压缩包预览器：损坏的压缩包与其它失败", () => {
   function archivePane(load: Load) {
     return (
-      <ToastProvider>
-        <PreviewPane
-          mtime={1_700_000_000_000}
-          name="x.zip"
-          path="uploads/x.zip"
-          preview={{ status: "archive", load }}
-          previewToken={{ status: "idle" }}
-          size={2048}
-          workspaceId="w1"
-        />
-      </ToastProvider>
+      <PreviewPane
+        mtime={1_700_000_000_000}
+        name="x.zip"
+        path="uploads/x.zip"
+        preview={{ status: "archive", load }}
+        previewToken={{ status: "idle" }}
+        size={2048}
+        workspaceId="w1"
+      />
     );
   }
 
   it("损坏的压缩包：load 以 415 preview_unsupported 拒绝时显示「无法读取该压缩包」，下载链接仍在，没有 Toast", async () => {
-    // 挂在 ToastProvider 之下：通知区在场，「没有 Toast」才不是空话。
     const load = failing(new ApiError(415, "preview_unsupported", "该类型不支持预览"));
     render(archivePane(load));
-    const toasts = screen.getByRole("region", { name: "通知" });
 
     expect((await screen.findByRole("alert")).textContent).toBe("无法读取该压缩包");
     const link = screen.getByRole("link", { name: "下载 x.zip" });
@@ -264,10 +260,9 @@ describe("压缩包预览器：损坏的压缩包与其它失败", () => {
     expect(link.hasAttribute("download")).toBe(true);
     expect(screen.queryByRole("table")).toBeNull();
     expect(screen.queryByText("该类型不支持预览")).toBeNull();
-    // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+    // 让出一轮再数：整页的提示面只有预览区的这一条失败文案（应用里已没有 Toast 组件，#1398）。
     await flush();
-    expect(within(toasts).queryByRole("listitem")).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    expect(pageNotices()).toEqual(["alert:无法读取该压缩包"]);
     expect(load).toHaveBeenCalledTimes(1);
   });
 

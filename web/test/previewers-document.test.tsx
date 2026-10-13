@@ -6,7 +6,7 @@
 // 用例自己派发。浏览器里查看器是否出现、`load` 是否对 PDF 响应与失败页触发、框内文档的来源与凭据，
 // 都不在这个文件里。
 import { inspect } from "node:util";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DocumentPreviewer } from "../src/features/files/previewers/frame.js";
@@ -25,6 +25,7 @@ import {
   shownFrame,
   TOKEN,
 } from "./files-site-fixture.js";
+import { pageNotices } from "./page-notices.js";
 import { jsonResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
@@ -576,17 +577,15 @@ describe("文件页的文档预览（页面级）：签发失败", () => {
           issuedDocs({ base: NEXT_BASE }),
         ],
       });
-      const toasts = screen.getByRole("region", { name: "通知" });
       await select("doc.pdf");
 
       expect((await previewRegion().findByRole("alert")).textContent).toBe("签发失败");
       expect(document.querySelector("iframe")).toBeNull();
       expectDownloadLink("doc.pdf");
       expect(issueRequests(fetchMock)).toStrictEqual([ISSUE]);
-      // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+      // 让出一轮再数：整页的提示面只有预览区的这一条失败文案（应用里已没有 Toast 组件，#1398）。
       await yieldMacrotask();
-      expect(within(toasts).queryByRole("listitem")).toBeNull();
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      expect(pageNotices()).toEqual(["alert:签发失败"]);
 
       again();
       const shown = await shownFrame("doc.pdf");
@@ -599,7 +598,7 @@ describe("文件页的文档预览（页面级）：签发失败", () => {
 });
 
 describe("文件页的文档预览（页面级）：令牌不外露", () => {
-  it("先后选中 doc.pdf 与 plan.docx：令牌与预览来源不在界面文字里、不在地址里、不在两个存储、cookie、history.state、document.title、window.name 与控制台输出里，页面标记里恰出现一次（iframe 的 src）；通知区没有条目", async () => {
+  it("先后选中 doc.pdf 与 plan.docx：令牌与预览来源不在界面文字里、不在地址里、不在两个存储、cookie、history.state、document.title、window.name 与控制台输出里，页面标记里恰出现一次（iframe 的 src）；整页没有任何提示", async () => {
     // 先于渲染装上：首次挂载时的输出也算。
     const consoles = [
       vi.spyOn(console, "log"),
@@ -609,7 +608,6 @@ describe("文件页的文档预览（页面级）：令牌不外露", () => {
       vi.spyOn(console, "error"),
     ];
     renderDocs();
-    const toasts = screen.getByRole("region", { name: "通知" });
     const leaked = (text: string) => text.includes(TOKEN) || text.includes(PREVIEW_HOST);
 
     await select("doc.pdf");
@@ -643,8 +641,7 @@ describe("文件页的文档预览（页面级）：令牌不外露", () => {
     expect(leaked(document.title)).toBe(false);
     expect(leaked(window.name)).toBe(false);
     await yieldMacrotask();
-    expect(within(toasts).queryByRole("listitem")).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    expect(pageNotices()).toEqual([]);
     // 按参数的内容查，不按次数：别的输出（如 React 的告警）不算泄漏。
     const printed = consoles
       .flatMap((spy) => spy.mock.calls.flat())

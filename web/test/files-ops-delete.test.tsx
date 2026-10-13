@@ -1,3 +1,4 @@
+import { pageNotices } from "./page-notices.js";
 // files-web「文件操作界面」的「删除」：行菜单 `删除` 打开的确认框——文案、焦点、发出的请求、请求中的
 // 状态与模态清理；「当前文件随操作变化」「随操作更新」里删除的一步。期望值按规格的场景手写：说明文案
 // 逐字抄自规格，`DELETE` 的地址按 `DELETE …/entries?path=` 的约定手写（`path` 整段编码一次），404 的
@@ -274,23 +275,21 @@ describe("删除确认框的焦点与模态清理", () => {
         return answer;
       },
     });
-    const toasts = await screen.findByRole("region", { name: "通知" });
-    const noToast = async () => {
-      // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+    /** 让出一轮再数：整页的提示面恰为 `notices`（应用里已没有 Toast 组件，#1398）。 */
+    const noToast = async (notices: string[]) => {
       await yieldMacrotask();
-      expect(within(toasts).queryByRole("listitem")).toBeNull();
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      expect(pageNotices()).toEqual(notices);
     };
     await findRow("展开 out");
     const dialog = await openDelete("out");
 
     fireEvent.click(confirmButton(dialog));
     expect((await within(dialog).findByRole("alert")).textContent).toBe("请求的资源不存在");
-    await noToast();
+    await noToast(["alert:请求的资源不存在"]);
     fireEvent.click(confirmButton(dialog));
     await confirmGone();
     await waitFor(() => expect(rowNames()).toStrictEqual(["设计文档", "output", "top.md"]));
-    await noToast();
+    await noToast([]);
   });
 });
 

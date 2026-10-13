@@ -10,6 +10,7 @@
  * `mobile-dark` 里卡片在视口内，去掉 `preventScroll` 不使走查变红（#1109 实测，见
  * `web/e2e/ui-walk-workspace-sidebar.ts` 的注释）；真实的滚动由一次钩子辅助复现证明过。
  */
+import { pageNotices } from "./page-notices.js";
 import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -462,7 +463,7 @@ describe("文件已不存在", () => {
       await run();
       await settled();
       expect(rejections.unhandled).toStrictEqual([]);
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      expect(pageNotices()).toEqual(["status:已完成"]);
     } finally {
       rejections.stop();
     }

@@ -5,6 +5,7 @@
  * `useProjectConfig` in a bare harness for the change of a workspace id and of the client, and the
  * pure `groupByDepth` / `chatTopbar`. Expected values are literals from the spec delta.
  */
+
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { groupByDepth, useProjectConfig } from "../src/features/chat/project-config.js";
@@ -20,7 +21,6 @@ import {
   focusOn,
   installNarrowViewport,
   messagesPath,
-  toasts,
   view,
 } from "./chat-page-session-meta-support.js";
 import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
@@ -32,6 +32,7 @@ import {
   SUPPORT,
   welcomeRoutes,
 } from "./chat-page-welcome-scene-support.js";
+import { pageNotices } from "./page-notices.js";
 import {
   createFetchMock,
   currentLocation,
@@ -263,7 +264,7 @@ describe("项目配置入口 (G1–G7)", () => {
     expect(bannerButtons()).toEqual(THREE_BUTTONS);
     expect(configPaths(fetchMock)).toEqual([configOf(A)]);
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:已完成", "status:已完成"]);
     expect(configDialog()).toBeNull();
   });
 
@@ -389,7 +390,7 @@ describe("项目配置入口 (G1–G7)", () => {
 
     expect(bannerButtons()).toEqual(THREE_BUTTONS);
     expect(configDialog()).toBeNull();
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:已完成", "status:已完成"]);
   });
 
   it("G6 the welcome state asks nothing, with or without a workspace chosen in the footer", async () => {

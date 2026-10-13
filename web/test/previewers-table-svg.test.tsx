@@ -4,7 +4,6 @@ import { PreviewPane } from "../src/features/files/preview.js";
 import { ImagePreviewer } from "../src/features/files/previewers/image.js";
 import { SvgPreviewer } from "../src/features/files/previewers/svg.js";
 import { TablePreviewer } from "../src/features/files/previewers/table.js";
-import { ToastProvider } from "../src/ui/index.js";
 import { observeUnhandledRejections, settle } from "./chat-stream-support.js";
 import {
   authenticatedFilesRoutes,
@@ -13,6 +12,7 @@ import {
   stubBlobUrls,
   workspace,
 } from "./files-fixture.js";
+import { pageNotices } from "./page-notices.js";
 import { jsonResponse } from "./support.js";
 import { listRepoFiles, readRepoFile } from "./ui-support.js";
 
@@ -280,17 +280,15 @@ describe("SvgPreviewer", () => {
   });
 
   it("经预览面板的损坏 svg：提示出现且没有 Toast、下载链接仍在、仍可看源码", async () => {
-    // 与 main.tsx 同样挂在 ToastProvider 之下：通知区在场，「没有 Toast」才不是空话。
-    render(<ToastProvider>{svgPane("bad.svg", "plain words", false)}</ToastProvider>);
-    const toasts = screen.getByRole("region", { name: "通知" });
+    render(svgPane("bad.svg", "plain words", false));
 
     fireEvent.error(await screen.findByRole("img", { name: "bad.svg" }));
     expect(screen.getByText("无法显示该图片")).toBeTruthy();
     expect(screen.queryByRole("img")).toBeNull();
-    // Toast 是通知区列表里的一项（Radix 的 li，类名 ui-toast，自身不带 role）；只在通知区里查，
-    // 不碰面板自己的 status。面板此时也不该有 alert。
-    expect(within(toasts).queryByRole("listitem")).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    // 整页范围：失败文案只此一处，提示面的清单里没有多出来的条目（应用里已没有 Toast 组件，#1398）。
+    // 面板此时也不该有 alert。
+    expect(screen.getAllByText("无法显示该图片")).toHaveLength(1);
+    expect(pageNotices()).toEqual([]);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("link", { name: "下载 bad.svg" }).getAttribute("href")).toBe(
       "/api/workspaces/w1/download?path=uploads%2Fbad.svg",
@@ -414,7 +412,6 @@ describe("ImagePreviewer", () => {
     const rejections = observeUnhandledRejections();
     try {
       renderImageFiles({ "broken.png": "image/png", "logo.png": "image/png" });
-      const toasts = screen.getByRole("region", { name: "通知" });
       const preview = within(await screen.findByRole("region", { name: "文件预览" }));
 
       fireEvent.click(await screen.findByRole("button", { name: "broken.png" }));
@@ -427,9 +424,9 @@ describe("ImagePreviewer", () => {
       expect(preview.getByText("无法显示该图片")).toBeTruthy();
       expect(preview.queryByRole("img")).toBeNull();
       expect(blobUrls.revokeObjectURL.mock.calls).toStrictEqual([["blob:broken"]]);
-      // Toast 是通知区列表里的一项（类名 ui-toast，自身不带 role）；预览区此时也不该有 alert。
-      expect(within(toasts).queryByRole("listitem")).toBeNull();
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      // 整页范围：失败文案只此一处，提示面的清单里没有多出来的条目；预览区此时也不该有 alert。
+      expect(screen.getAllByText("无法显示该图片")).toHaveLength(1);
+      expect(pageNotices()).toEqual([]);
       expect(preview.queryByRole("alert")).toBeNull();
       const link = preview.getByRole("link", { name: "下载 broken.png" });
       expect(link.getAttribute("href")).toBe(

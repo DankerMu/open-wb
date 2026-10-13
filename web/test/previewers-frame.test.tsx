@@ -25,6 +25,7 @@ import {
   shownFrame,
   TOKEN,
 } from "./files-site-fixture.js";
+import { pageNotices } from "./page-notices.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 import { listRepoFiles, readRepoFile, stripTsComments, yieldMacrotask } from "./ui-support.js";
 
@@ -440,7 +441,6 @@ describe("文件页的网页预览（页面级）：签发失败", () => {
     "%s：渲染视图处是失败文案，没有 iframe，下载链接在，「查看源码」能显示源码，不弹 Toast",
     async (_label, route, message) => {
       const { fetchMock } = renderSite({ [ISSUE]: route });
-      const toasts = screen.getByRole("region", { name: "通知" });
       await openSite();
       await select("index.html");
 
@@ -448,10 +448,9 @@ describe("文件页的网页预览（页面级）：签发失败", () => {
       expect(document.querySelector("iframe")).toBeNull();
       expectDownloadLink("site%2Findex.html", "index.html");
       expect(fileRequests(fetchMock)).toStrictEqual([]);
-      // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+      // 让出一轮再数：整页的提示面只有预览区的这一条失败文案（应用里已没有 Toast 组件，#1398）。
       await yieldMacrotask();
-      expect(within(toasts).queryByRole("listitem")).toBeNull();
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      expect(pageNotices()).toEqual([`alert:${message}`]);
 
       fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
       expect(await previewRegion().findByRole("cell", { name: "<h1>首页</h1>" })).toBeTruthy();

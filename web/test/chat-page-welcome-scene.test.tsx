@@ -21,7 +21,6 @@ import {
   mountSessions,
   partitionTitles,
   REQUEST_FAILED,
-  toasts,
   view,
 } from "./chat-page-session-meta-support.js";
 import {
@@ -101,17 +100,13 @@ function requestCount(fetchMock: FetchMock) {
   return fetchMock.mock.calls.length;
 }
 
-/** 页面上全部 `role="status"` / `role="alert"` 节点（含通知区的播报节点），按文档顺序。 */
+/** 页面上全部 `role="status"` / `role="alert"` 节点，按文档顺序。 */
 function announcements() {
   return [...screen.queryAllByRole("status"), ...screen.queryAllByRole("alert")];
 }
 
-/** 场景切换不提示：通知区为空、播报节点与切换前是同一批、`message` 不在页面任何位置。 */
+/** 场景切换不提示：播报节点与切换前是同一批、`message` 不在页面任何位置。 */
 function expectNoNotice(before: Element[], message: string) {
-  const region = screen.getByRole("region", { name: "通知" });
-  expect(within(region).queryAllByRole("listitem")).toEqual([]);
-  expect(region.textContent).toBe("");
-  expect(toasts()).toEqual([]);
   expect(announcements()).toEqual(before);
   expect(pageText()).not.toContain(message);
   expect(pageText()).not.toContain("已切换到");

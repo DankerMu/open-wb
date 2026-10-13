@@ -7,6 +7,7 @@
  * 定位落空之后预览区的空态（`未选择文件`、没有 `文件不存在`）由 #1372 做到，这里沿用并照样断言；本文件
  * 要证的是 `在文件页打开` 的地址取实际选中，以及同一行再点一次会重新定位。
  */
+import { pagePrompts } from "./page-notices.js";
 import "./radix-platform.js";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -115,7 +116,8 @@ function expectCleared(scope: HTMLElement) {
   expect(pane(scope).querySelector('[data-slot="preview-header"]')).toBeNull();
   expect(screen.queryByText(MISSING)).toBeNull();
   expect(screen.queryByText(NOT_FOUND)).toBeNull();
-  expect(document.querySelector(".ui-toast")).toBeNull();
+  // 整页范围：除会话与回合的状态标记外，没有任何 alert 或 status。
+  expect(pagePrompts()).toEqual([]);
 }
 
 /** 侧边栏开着、选中了 `readme.md`：`在文件页打开` 带着它。 */

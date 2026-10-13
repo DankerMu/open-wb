@@ -62,7 +62,6 @@ function sourcesFor(url: string) {
 /** 整页没有任何错误呈现：无 alert（提问卡内、输入框上方都没有）、无 Toast。 */
 function expectNoErrorShown() {
   expect(screen.queryAllByRole("alert")).toHaveLength(0);
-  expect(document.querySelector(".ui-toast")).toBeNull();
 }
 
 /** 恰一条 alert，且在 `card` 内：输入框上方没有内联错误，也没有 Toast。 */
@@ -70,7 +69,6 @@ function expectCardAlert(card: HTMLElement, message: string) {
   const alerts = screen.getAllByRole("alert");
   expect(alerts.map((alert) => alert.textContent)).toEqual([message]);
   expect(card.contains(alerts[0] as HTMLElement)).toBe(true);
-  expect(document.querySelector(".ui-toast")).toBeNull();
 }
 
 /** 卡的集合变化后 400ms 内的作答点击被忽略：推进注入时钟越过它。 */

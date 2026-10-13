@@ -144,7 +144,6 @@ describe("未还原文件说明", () => {
     expect(form.contains(container)).toBe(false);
     expect(textarea().value).toBe("第二个问题");
     expect(alerts()).toEqual([]);
-    expect(document.querySelector(".ui-toast")).toBeNull();
 
     const dismiss = within(container).getByRole<HTMLButtonElement>("button", { name: DISMISS });
     expect(dismiss.type).toBe("button");

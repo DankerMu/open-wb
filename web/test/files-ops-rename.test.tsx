@@ -1,3 +1,4 @@
+import { pageNotices } from "./page-notices.js";
 // files-web「文件操作界面」：`重命名` 对话框——名字的检查、发出的请求、请求中的状态、焦点与模态清理。
 // 期望值按规格的场景手写；`to` 的写法（父目录 + `/` + 新名）按 `POST …/move` 的请求体约定手写，不经
 // `renameTarget` 算。改名之后的跟随在 files-ops-follow.test.tsx。
@@ -382,25 +383,23 @@ describe("重命名对话框的焦点与模态清理", () => {
         return answers.shift() as Response;
       },
     });
-    const toasts = await screen.findByRole("region", { name: "通知" });
-    const noToast = async () => {
-      // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+    /** 让出一轮再数：整页的提示面恰为 `notices`（应用里已没有 Toast 组件，#1398）。 */
+    const noToast = async (notices: string[]) => {
       await yieldMacrotask();
-      expect(within(toasts).queryByRole("listitem")).toBeNull();
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      expect(pageNotices()).toEqual(notices);
     };
     await findRow("notes.md");
     const dialog = await openRename("notes.md");
 
     renameTo(dialog, "");
     expect((await within(dialog).findByRole("alert")).textContent).toBe("请输入名称");
-    await noToast();
+    await noToast(["alert:请输入名称"]);
     renameTo(dialog, "todo.md");
     expect((await within(dialog).findByRole("alert")).textContent).toBe("该目录下已存在同名条目");
-    await noToast();
+    await noToast(["alert:该目录下已存在同名条目"]);
     fireEvent.click(submitButton(dialog));
     await dialogGone();
     await findRow("todo.md");
-    await noToast();
+    await noToast([]);
   });
 });
