@@ -46,7 +46,7 @@
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;拷入的源码随打包产物分发时须附带该 MIT 声明。
 
 - **react-resizable-panels** —— `MIT License`,版权归 Brian Vaughn（https://github.com/bvaughn/react-resizable-panels）
-  - 用途：shadcn/ui `resizable` 的依赖（可拖拽、键盘可达的分栏与分隔线）,只供拷入层 `web/src/components/ui/resizable.tsx` 导入,会话页工作空间侧边栏的分隔线用;随 s1f-files-page 任务 23.1 加入,此刻尚无应用层调用方。
+  - 用途：shadcn/ui `resizable` 的依赖（可拖拽、键盘可达的分栏与分隔线）,只供拷入层 `web/src/components/ui/resizable.tsx` 导入,会话页工作空间侧边栏的分隔线用;随 s1f-files-page 任务 23.1 加入,应用层调用方只有 `web/src/features/chat/workspace-sidebar.tsx`。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `LICENSE.md`,随打包产物分发时须附带该 MIT 声明。
 
 - **Tailwind CSS** —— `MIT License`,版权归 Tailwind Labs, Inc.（https://github.com/tailwindlabs/tailwindcss）
