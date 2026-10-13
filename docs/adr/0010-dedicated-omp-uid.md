@@ -221,7 +221,7 @@ change `s1f-session-list-temp-space`（design D8、D9、D10）落地后的登记
 
 ## 补充（2026-10-12，#1119）：办公文档转换进程的身份、两行 sudoers 与终止后的已知残余
 
-change `s1f-files-page`（design D17、D18；owner D-21、D-24、D-25、D-26）落地后的登记。转换器的决定与运维步骤在 ADR-0014（#1118，待合入）；本节只登记与 uid 分离有关的部分。
+change `s1f-files-page`（design D17、D18；owner D-21、D-24、D-25、D-26）落地后的登记。转换器的决定与运维步骤在 ADR-0014；本节只登记与 uid 分离有关的部分。
 下文的「实测」除另注外都指 #1052（任务 1.3，2026-10-06，记录在该 change 的 `design.md` D18「实测」）。
 
 - **身份**：办公文档由 LibreOffice 解析，输入是不可信文档。配置了 `OMP_USER` 时转换进程以该用户运行，spawn 行与 omp 同形：
@@ -250,7 +250,7 @@ change `s1f-files-page`（design D17、D18；owner D-21、D-24、D-25、D-26）�
   | `<PREVIEW_CACHE_DIR>/work`、其下每个作业目录 `<job>` | `2770` | 可写（转换的 `HOME`、配置目录与输出都在 `<job>` 下） |
   | `<PREVIEW_CACHE_DIR>/pdf` | `0700` | 不能进入 |
 
-  `PREVIEW_CACHE_DIR` 缺省是 repo root 下的 `var/preview-cache`，不在 `OMP_STATE_DIR` 里。**部署前提（读代码推出，未测；待 28.6 核实）**：服务端不 `chown`，这三个目录的属组来自父目录的 setgid 或应用用户的主组，
+  `PREVIEW_CACHE_DIR` 缺省是 repo root 下的 `var/preview-cache`，不在 `OMP_STATE_DIR` 里。**部署前提（读代码推出；#1123 只看到了满足时的样子，不满足时未测）**：服务端不 `chown`，这三个目录的属组来自父目录的 setgid 或应用用户的主组，
   表中前两行的「omp uid」一列只在该属组是共享组时成立；`PREVIEW_CACHE_DIR` 的各级上级目录还须让 omp 用户可进入。缺省位置的父目录 `var/` 不存在时由服务端以普通 `mkdir` 建出，服务端不给它设 setgid。
   不满足时启动不失败，但 `OMP_USER` 模式下每次转换都失败。输出 PDF 是从作业目录**复制**成 app uid 自己的 `0600` 新文件再进 `pdf/`，不是改名：
   改名后的文件仍属 omp uid，留着它的文件描述符的进程可以改写所有账号共用的缓存。
@@ -272,7 +272,15 @@ change `s1f-files-page`（design D17、D18；owner D-21、D-24、D-25、D-26）�
     `oosplash` 与 `soffice.bin` 的 `Uid:` 四个值都是 omp uid（`sudo` 自身是实际 uid 应用用户、有效 uid root）。
     两个转换各用自己的 `UserInstallation` 同时进行（两个小文档，以及两个各约 25 秒的文档全程重叠），都以退出码 0 结束并各自产出 PDF。
     对 `sudo` 发 `SIGKILL` 共 5 次（约 25 秒的文档在第 3 秒 3 次、第 0.15 秒 1 次；约 133 秒的文档在第 5 秒 1 次）：`sudo` 立即消失，`oosplash` 随之被杀，`soffice.bin` 的表现如上「已知残余」，5 次一致。
-  - 没有观察的：对 `sudo` 发 `SIGKILL` 以外的信号；xlsx、pptx；经 `/o/` 路由与产品代码的端到端（属任务 28.6，#1123，尚未进行）；容器之外（1 号进程是容器的 init）；上面第 2 行规则。
+  - 没有观察的：对 `sudo` 发 `SIGKILL` 以外的信号；xlsx、pptx；经 `/o/` 路由与产品代码的端到端（后由任务 28.6 补做，见下一条）；容器之外（1 号进程是容器的 init）；上面第 2 行规则。
     每次转换的标准错误里有一行与结果无关的 `javaldx` 警告。
 - **验证**：CI `uid-isolation` job 不设 `OFFICE_BIN`，两行规则在那里都用不到，`.github/scripts/ci-uid-isolation.sh` 写出的 sudoers 不变；转换器的自动化测试用假的转换程序与假 `sudo`，不需要 LibreOffice。
-  `OMP_USER` 模式下真实转换的进程 uid、缓存文件属主与经 `/o/` 超时后的残留，待 28.6 的人工验证补记。
+  `OMP_USER` 模式下真实转换的进程 uid、缓存文件属主与经 `/o/` 超时后的残留已由 28.6 的验证补记，见下一条。
+- **28.6 的验证补记**（#1123，2026-10-12；测试 VPS 上的一次性容器，uid 分离部署，LibreOffice 7.4.7.2，经文件页与 `/o/` 的整条链路；环境、做法与没有做的见 ADR-0014「真实转换的验证记录」）：
+  - 转换进行中 `sudo` 的 `Uid:` 是「应用用户 / root / root / root」，它之下的 `soffice`（包装脚本）、`oosplash`、`soffice.bin` 四个值都是 omp 用户；docx、xlsx、pptx 各一份都转换成功。
+  - `pdf/` 里的缓存文件 `0600`、属应用用户；作业目录下的 `profile/`、`.cache/`、`.config/`、`out/` 与输出 PDF 属 omp 用户，转换成功后整个作业目录留在 `work/` 里。
+  - 三个缓存目录的属组随父目录的 setgid 成了共享组（上文「部署前提」满足时的样子）。
+  - 上面第 2 行规则在真实 `sudo` 下执行了两次（重启时），`work/` 都被清空，没有 `preview_work_clear_failed`。
+  - **超时终止一次之后残留出现了**：把超时设成 3 秒请求一份不被打断时要 84.5 秒的 docx，请求在 3.03 秒得到 504；`sudo` 消失，`oosplash` 随之被杀；
+    进程名 `soffice.bin`、属 omp 用户、被 1 号进程收养的残留又运行了约 75 秒把整份转完才自行退出，在被放弃的作业目录里留下与不被打断时字节数相同的 PDF（4,682,817 字节），该 PDF 没有进缓存。
+    只做了一次，与上面实测 1.3 的 5 次是同一个现象；终止的做法不因此改变（owner D-21、D-25）。
