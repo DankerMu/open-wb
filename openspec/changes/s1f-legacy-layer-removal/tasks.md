@@ -55,18 +55,18 @@ Minimal mergeable slice: atomic - 24 个文件经 `ui/index.ts`、`ui.css`、`FR
 
 ## 2. ui-primitives — 删除 Toast（子 issue B1）
 
-- [ ] 2.1 先搬后删（design D14；`useEscapeFallback` 与 10 处调用本组不动）：把三个 Toast 测试文件里**与 Toast 无关**的用例先搬到新家，去掉其中 Toast 的搭建：
+- [x] 2.1 先搬后删（design D14；`useEscapeFallback` 与 10 处调用本组不动）：把三个 Toast 测试文件里**与 Toast 无关**的用例先搬到新家，去掉其中 Toast 的搭建：
   `web/test/ui-toast-drawer-escape.test.tsx` 的 D5（`导航` 覆盖层内打开用户菜单，Escape 只关菜单，再按一次才关覆盖层）→ `web/test/app-shell-responsive.test.tsx`；
   `web/test/auth-footer-toast-escape.test.tsx` 的两例去掉 Toast 之后的形态（宽屏：Escape 关闭确认框、不发起退出、焦点回 `用户菜单`；窄屏：`导航` 覆盖层内打开的确认框，一次 Escape 只关确认框、覆盖层保持打开）→ `web/test/auth-footer-focus.test.tsx`。
   目标文件加上之后接近 800 行就另建一个文件（如 `web/test/overlay-escape.test.tsx`）。
   验证：搬来的用例在删除 Toast **之前**就通过（它们不依赖 Toast）；它们对应 ui-primitives「覆盖层的 Escape 关闭」的场景「嵌套层只关最内一层」。
-- [ ] 2.2 删除 Toast：`web/src/ui/toast.tsx`、`web/src/ui/toast.css`；`web/src/ui/index.ts` 去掉 `ToastProvider` / `useToast` 一行；`web/src/ui/ui.css` 去掉最后一条 `@import`；`web/src/main.tsx` 直接渲染 `<RouterProvider router={router} />`。
+- [x] 2.2 删除 Toast：`web/src/ui/toast.tsx`、`web/src/ui/toast.css`；`web/src/ui/index.ts` 去掉 `ToastProvider` / `useToast` 一行；`web/src/ui/ui.css` 去掉最后一条 `@import`；`web/src/main.tsx` 直接渲染 `<RouterProvider router={router} />`。
   从 `web/package.json` 移除 `@radix-ui/react-toast` 并更新根 `package-lock.json`。`ATTRIBUTION.md`：「Radix UI Primitives」条目的用途改写为「经合包 `radix-ui` 供拷入层使用，不再直接安装单包」（条目与 MIT 义务保留）；`radix-ui` 条目删去「与上条保留的各 `@radix-ui/*` 单包并存到旧基元层退役」一句。
   验证：`grep -rn 'useToast\|ToastProvider' web/src` 零命中；`grep -c '@radix-ui/' web/package.json` 为 0；`make typecheck` 通过；PR 描述标注依赖变更。
-- [ ] 2.3 Toast 的测试文件与包装：删除 `web/test/ui-toast.test.tsx`、`ui-toast-drawer-escape.test.tsx`、`auth-footer-toast-escape.test.tsx`（2.1 已搬走该留的用例）；`web/test/chat-workspace-sidebar-narrow.test.tsx` 删除「屏上有 Toast 时的 Escape」一组（N3）与随之无用的导入，N1、N2、N4 不动；
+- [x] 2.3 Toast 的测试文件与包装：删除 `web/test/ui-toast.test.tsx`、`ui-toast-drawer-escape.test.tsx`、`auth-footer-toast-escape.test.tsx`（2.1 已搬走该留的用例）；`web/test/chat-workspace-sidebar-narrow.test.tsx` 删除「屏上有 Toast 时的 Escape」一组（N3）与随之无用的导入，N1、N2、N4 不动；
   去掉其余 8 个文件里的 `ToastProvider` 包装：`chat-page-lifecycle-support.tsx`、`chat-page-shell-support.tsx`、`previewers-archive.test.tsx`、`previewers-media.test.tsx`、`previewers-table-svg.test.tsx`、`render-app-router.tsx`、`routes.test.tsx`、`settings-support.tsx`。
   验证：`grep -rn 'ToastProvider\|useToast' web/test web/e2e` 只剩 `ui-layering.test.ts` 里的注入样本。
-- [ ] 2.4 查 Toast 元素的断言整体删除（design D3、D14；通用纪律点名的唯一例外）。名单是在 `51ffffb3` 上 grep 的结果，开工时用本条末尾的命令在工作树上重新导出，以重导的为准：
+- [x] 2.4 查 Toast 元素的断言整体删除（design D3、D14；通用纪律点名的唯一例外）。名单是在 `51ffffb3` 上 grep 的结果，开工时用本条末尾的命令在工作树上重新导出，以重导的为准：
   (i) 三个 `toasts()` 助手连同定义删除：`chat-page-artifact-card-support.tsx:195`、`chat-page-search-support.tsx:282`、`chat-page-session-meta-support.tsx:259`；它们的调用在 13 个文件里：`chat-list-events.test.tsx`、`chat-page-artifact-card.test.tsx`、`chat-page-artifact-card-feedback.test.tsx`、`chat-page-artifact-card-state.test.tsx`、`chat-page-project-config.test.tsx`、`chat-page-search.test.tsx`、`chat-page-session-delete.test.tsx`、`chat-page-session-delete-concurrency.test.tsx`、`chat-page-session-pin.test.tsx`、`chat-page-session-rename-pin.test.tsx`、`chat-page-slash.test.tsx`、`chat-page-welcome-scene.test.tsx`、`chat-stop-button.test.tsx`。
   (ii) 直接按类名 `.ui-toast` 查询的 18 个文件：`chat-approval-bar.test.tsx`、`chat-copy.test.tsx`、`chat-page-session-delete-concurrency.test.tsx`、`chat-regenerate-button.test.tsx`、`chat-undo-notice.test.tsx`、`chat-undo-support.tsx`、`chat-workspace-sidebar-reveal.test.tsx`、`chat-workspace-sidebar-reveal-html.test.tsx`、`files-ops-delete.test.tsx`、`files-ops-drag.test.tsx`、`files-ops-move.test.tsx`、`files-ops-rename.test.tsx`、`files-preview-states.test.tsx`、`previewers-archive.test.tsx`、`previewers-document.test.tsx`、`previewers-frame.test.tsx`、`previewers-media.test.tsx`、`previewers-table-svg.test.tsx`；走查 `web/e2e/ui-walk-session-list.ts:98`、`:356`。
   (iii) 按角色查通知区（`getByRole` / `findByRole("region", { name: "通知" })` 及其内的断言；Toast 删除后直接抛错）的 14 个文件：`chat-copy.test.tsx:69`、`chat-markdown.test.tsx:156`、`chat-page-welcome-scene.test.tsx:111`、`chat-stop-button.test.tsx:229`（正面断言通知区存在，整条删除）、`files-ops-delete.test.tsx:277`、`files-ops-drag.test.tsx:182`、`files-ops-move.test.tsx:446`、`files-ops-rename.test.tsx:385`、`files-preview-states.test.tsx:337`、`:534`、`previewers-archive.test.tsx:259`、`previewers-document.test.tsx:579`、`:612`、`previewers-frame.test.tsx:443`、`previewers-media.test.tsx:105`、`previewers-table-svg.test.tsx:285`、`:417`；走查 `web/e2e/ui-walk-stop.ts:124`（连同 `:141`、`:158` 的计数）。
@@ -74,18 +74,18 @@ Minimal mergeable slice: atomic - 24 个文件经 `ui/index.ts`、`ui.css`、`FR
   注释同步：`previewers-archive.test.tsx:256`、`previewers-media.test.tsx:99`、`previewers-table-svg.test.tsx:283`、`:290`、`:430`、`files-preview-states.test.tsx:547` 等「挂在 `ToastProvider` 之下 / 通知区在场，没有 Toast 才不是空话」的说明改写为现状；`web/e2e/ui-walk-sessions.spec.ts:609-610`、`web/e2e/ui-walk-session-list.ts:87` 里提到 Toast 元素的注释同样处理。
   验证：`grep -rnE 'ui-toast|toasts\(|"通知"|/通知/' web/test web/e2e` 零命中（`ui-layering.test.ts` 的注入样本只含标识符 `useToast`，不在此列）；`npm test --workspace web` 通过；
   偏离记录是一张表，每个文件一行：删了哪几处查询、同用例里兜底的是哪条断言（既有 / 新补）。表里出现「无兜底」即不合入。
-- [ ] 2.5 这一步让它们变红的过渡守卫：`web/test/ui-foundation-entry.test.ts:106`（带 `@import` 的既有样式文件由恰为 `ui.css` 改为没有）；
+- [x] 2.5 这一步让它们变红的过渡守卫：`web/test/ui-foundation-entry.test.ts:106`（带 `@import` 的既有样式文件由恰为 `ui.css` 改为没有）；
   `web/test/ui-guardrails.test.ts:224` 去掉「已安装的 `@radix-ui/*` 单包数大于 0」，保留「每个已安装单包都在 `ATTRIBUTION.md` 登记」的循环与「标题含 `Radix` 的 MIT 条目存在」；
   `web/test/ui-layering.test.ts` 的 `FROZEN_FILES` 收缩为 6 个（`brand-mark.tsx`、`escape-fallback.ts`、`icon.tsx`、`index.ts`、`motion.css`、`ui.css`），长度断言同步；导入白名单不动（`useEscapeFallback` 仍在）。
   验证：三个守卫文件通过；`make anti-drift` 通过。
-- [ ] 2.6 注释与记录：提到「Toast 占住 Radix 层栈」的六处——`web/src/ui/escape-fallback.ts` 头注释、`web/src/features/auth/footer.tsx:72`、`web/src/routes/shell/app-shell.tsx:41`、`web/src/features/chat/workspace-sidebar.tsx:207`、`web/src/features/chat/project-config.tsx:117`、`web/e2e/ui-walk-session-list.ts:40`——改写为「Toast 已删除；这个兜底是否仍然需要由 #1393 的 Escape 实测决定」，不预写结论（组 3 写终稿）。
+- [x] 2.6 注释与记录：提到「Toast 占住 Radix 层栈」的六处——`web/src/ui/escape-fallback.ts` 头注释、`web/src/features/auth/footer.tsx:72`、`web/src/routes/shell/app-shell.tsx:41`、`web/src/features/chat/workspace-sidebar.tsx:207`、`web/src/features/chat/project-config.tsx:117`、`web/e2e/ui-walk-session-list.ts:40`——改写为「Toast 已删除；这个兜底是否仍然需要由 #1393 的 Escape 实测决定」，不预写结论（组 3 写终稿）。
   在 `docs/adr/0013-assistant-ui-frontend-rebuild.md` 末尾新增「增补（change `s1f-legacy-layer-removal`）」，本刀写一条：Toast 删除且不提供替代（owner 2026-10-12），以及测试侧查 Toast 元素的断言整体删除及其理由。
   验证：`grep -rniE 'toast' web/src --include='*.ts' --include='*.tsx' --include='*.css'` 的命中只剩上述改写后的句子与对「不弹提示」的行为说明（逐条在 PR 里列出）。
-- [ ] 2.7 变异证据（逐条做、逐条撤销，结果贴进 PR）：在 `web/src/features/chat/composer.tsx` 加一行 `useToast` 导入样本 → `ui-layering` 判红（既有自证用例覆盖，确认它仍在跑）；
+- [x] 2.7 变异证据（逐条做、逐条撤销，结果贴进 PR）：在 `web/src/features/chat/composer.tsx` 加一行 `useToast` 导入样本 → `ui-layering` 判红（既有自证用例覆盖，确认它仍在跑）；
   把 `@import "./toast.css";` 加回 `ui.css` → `ui-foundation-entry` 判红；`git checkout` 放回 `web/src/ui/toast.tsx` → 冻结清单断言判红；
   在 `web/src/routes/shell/app-shell.tsx` 的 `导航` 覆盖层上临时加一个「任何 Escape 都关闭覆盖层」的 document 监听 → 2.1 搬来的「覆盖层内菜单只关自己」用例判红（证明它确实断言了覆盖层仍在，不是空转）；
   从 2.4 的表里任取三个「新补」的兜底断言，临时让对应的旧提示文案出现在页面上（在被测组件里渲染该文案）→ 各判红（证明补的断言不是摆设）。
-- [ ] 2.8 整刀验证：`make check`、`make test-guardrails`、`make ui-walk`（两个 project）全绿；`npm run build --workspace web` 成功。
+- [x] 2.8 整刀验证：`make check`、`make test-guardrails`、`make ui-walk`（两个 project）全绿；`npm run build --workspace web` 成功。
 
 Suggested fixture level: expanded - 改应用入口（`main.tsx`），并在三十多个测试文件里成批删除断言（通用纪律的唯一例外），每一处删除都要有可审计的兜底
 Minimal mergeable slice: atomic - `ToastProvider` 从入口与测试包装里一删，14 个文件的通知区查询在同一次测试运行里抛错、`ui-foundation-entry:106` 与 `ui-guardrails:224` 同时变红；只删文件不卸 `@radix-ui/react-toast` 则 knip 判红。按测试文件分批删就得留着 `ToastProvider`，那是保留一个没有调用方的组件来迁就测试。`useEscapeFallback` 原样留着，对没有 Toast 的页面无害

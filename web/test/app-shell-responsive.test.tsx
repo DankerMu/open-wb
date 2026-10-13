@@ -17,7 +17,7 @@ import {
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import { pressPointer, readRepoFile, yieldMacrotask } from "./ui-support.js";
+import { pressPointer, readRepoFile, waitMs, yieldMacrotask } from "./ui-support.js";
 import "./radix-platform.js";
 
 const HERO = "WorkBuddy，我帮你";
@@ -541,6 +541,32 @@ describe("覆盖层内用户区 (R9/R9b/R9c/R9d)", () => {
     reenterNarrow(flow.narrow);
 
     await finishLogout(flow);
+  });
+});
+
+describe("覆盖层内嵌菜单：Escape 只关最内一层", () => {
+  // ui-primitives「覆盖层的 Escape 关闭」的场景「嵌套层只关最内一层」。
+  it("D5 导航 覆盖层内打开 用户菜单 → Escape 只关菜单；再 Escape 关覆盖层", async () => {
+    installViewport(true);
+    mountShell("/");
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    const { dialog } = await openNav();
+    await yieldMacrotask();
+    const trigger = screen.getByRole("button", { name: "用户菜单" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: "mouse" });
+    const item = await screen.findByRole("menuitem", { name: "退出登录" });
+    await yieldMacrotask();
+    expect(document.activeElement?.closest('[role="menu"]')).toBe(item.closest('[role="menu"]'));
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitMs(100);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(dialog.isConnected, "Escape 连带关闭了 dialog 导航").toBe(true);
+    expect(dialog.getAttribute("data-state")).toBe("open");
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitMs(100);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });
 

@@ -94,15 +94,13 @@ const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFal
 const CHAT_DIR = "web/src/features/chat";
 
 const FROZEN_DIR = "web/src/ui";
-/** 冻结区：`web/src/ui` 的文件名只能是这 8 个的子集（可以删，不能加）。 */
+/** 冻结区：`web/src/ui` 的文件名只能是这 6 个的子集（可以删，不能加）。 */
 const FROZEN_FILES = [
   "brand-mark.tsx",
   "escape-fallback.ts",
   "icon.tsx",
   "index.ts",
   "motion.css",
-  "toast.css",
-  "toast.tsx",
   "ui.css",
 ];
 
@@ -320,9 +318,9 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../ui/index.js";')).toEqual([]);
   });
 
-  it("冻结清单恰为 8 个互不相同的文件名", () => {
-    expect(new Set(FROZEN_FILES).size).toBe(8);
-    expect(FROZEN_FILES).toHaveLength(8);
+  it("冻结清单恰为 6 个互不相同的文件名", () => {
+    expect(new Set(FROZEN_FILES).size).toBe(6);
+    expect(FROZEN_FILES).toHaveLength(6);
   });
 
   it("web/src 现状：已迁移区域守约，web/src/ui 的每个文件都在冻结清单里", () => {

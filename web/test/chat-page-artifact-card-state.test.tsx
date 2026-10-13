@@ -8,6 +8,7 @@
  * the image fetch: H3, the open-preview H5 and H4's image row went with them, the pending H5 is now
  * about the code card.
  */
+
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -25,7 +26,6 @@ import {
   spyDownloads,
   stubClipboard,
   switchSession,
-  toasts,
   withOtherSession,
   withoutUnhandledRejections,
 } from "./chat-page-artifact-card-support.js";
@@ -45,6 +45,7 @@ import {
 } from "./chat-page-file-changes-support.js";
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { deferred, settle } from "./chat-stream-support.js";
+import { pageNotices } from "./page-notices.js";
 import { deferredResponse, textPreviewResponse } from "./support.js";
 
 const NOTES = "notes/a.md";
@@ -93,7 +94,7 @@ describe("产物卡 state", () => {
       expect(action(name)).toBe(button);
       expect(button.disabled).toBe(true);
       expect(previewCalls(page.fetchMock)).toHaveLength(1);
-      expect(toasts()).toEqual([]);
+      expect(pageNotices()).toEqual(["status:已完成"]);
       expect(copiedStatus()).toBeNull();
       expect(clicks).toEqual([]);
 
@@ -102,7 +103,7 @@ describe("产物卡 state", () => {
       await quiesce();
 
       expect(action(name)).toBe(button);
-      expect(toasts()).toEqual([]);
+      expect(pageNotices()).toEqual(["status:已完成", "status:已复制"]);
       expect(copiedStatus() !== null).toBe(copied);
       expect(clicks).toHaveLength(expectedDownloads);
       expect(previewCalls(page.fetchMock)).toHaveLength(1);
@@ -149,7 +150,7 @@ describe("产物卡 state", () => {
     expect(action(COPY_APP).disabled).toBe(false);
     expect(action("复制代码 a.md").disabled).toBe(false);
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:运行中", "status:已复制", "status:生成中"]);
   });
 
   it("H6 a clipboard write still pending at the session switch completes without a toast or a rejection", async () => {
@@ -165,12 +166,12 @@ describe("产物卡 state", () => {
       fireEvent.click(action(COPY_APP));
       await waitFor(() => expect(writeText.mock.calls).toEqual([[CODE_TEXT]]));
       await quiesce();
-      expect(toasts()).toEqual([]);
+      expect(pageNotices()).toEqual(["status:已完成", "status:未开始"]);
 
       await switchSession();
 
       expect(artifactCards()).toEqual([]);
-      expect(toasts()).toEqual([]);
+      expect(pageNotices()).toEqual(["status:已完成", "status:未开始"]);
 
       await act(async () => {
         written.resolve();
@@ -178,7 +179,7 @@ describe("产物卡 state", () => {
       });
 
       await quiesce();
-      expect(toasts()).toEqual([]);
+      expect(pageNotices()).toEqual(["status:已完成", "status:未开始"]);
       expect(screen.queryByText("已复制")).toBeNull();
     });
     expect(writeText).toHaveBeenCalledTimes(1);

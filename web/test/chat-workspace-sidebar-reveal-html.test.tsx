@@ -9,6 +9,7 @@
  * jsdom 不加载框：这里证到框的 `src` 与 `sandbox` 两个属性的值；「框确实从隔离来源加载、脚本够不到
  * 页面」只有 `make ui-walk` 能证（`web/e2e/ui-walk-workspace-sidebar.ts` 的 `walkOpenWebPreview`）。
  */
+import { pageNotices } from "./page-notices.js";
 import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -331,6 +332,6 @@ describe("打开网页预览", () => {
     expect(document.querySelector("iframe")).toBeNull();
     expect(document.body.style.pointerEvents).not.toBe("none");
     expect(composer().closest('[aria-hidden="true"]')).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    expect(pageNotices()).toEqual([]);
   });
 });

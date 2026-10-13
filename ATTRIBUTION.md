@@ -34,11 +34,11 @@
   - 义务：ISC 要求在副本中保留版权与许可声明;`lucide-react` 包自带 `LICENSE`,**若 `web/dist` 进入本项目发行物**,发行物须附带该 ISC 声明。
 
 - **Radix UI Primitives** —— `MIT License`,版权归 WorkOS（https://github.com/radix-ui/primitives）
-  - 用途：`web/src/ui/` 无样式交互基元。已安装的单包只剩 `@radix-ui/react-toast`（#279,`ToastProvider`/`useToast` 基元）;其余六个单包随没有调用方的旧基元一并移除（#1397）,这六个包仍作为下条合包 `radix-ui` 的传递依赖留在根 `package-lock.json` 里。
+  - 用途：经合包 `radix-ui` 供拷入层使用,不再直接安装单包。原先直接安装的七个 `@radix-ui/react-*` 单包已随旧基元（#1397）与 Toast（#1398）移除,它们仍作为下条合包 `radix-ui` 的传递依赖留在根 `package-lock.json` 里。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;安装后随打包产物分发时须附带该 MIT 声明。
 
 - **radix-ui** —— `MIT License`,版权归 WorkOS（https://github.com/radix-ui/primitives）
-  - 用途：Radix UI Primitives 的合包（单一入口再导出各基元）,只供拷入层 `web/src/components/ui/` 导入;与上条保留的各 `@radix-ui/*` 单包并存到旧基元层退役。
+  - 用途：Radix UI Primitives 的合包（单一入口再导出各基元）,只供拷入层 `web/src/components/ui/` 导入。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;随打包产物分发时须附带该 MIT 声明。
 
 - **shadcn/ui** —— `MIT License`,版权归 shadcn（https://github.com/shadcn-ui/ui）

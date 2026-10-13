@@ -5,11 +5,8 @@
  *
  * jsdom 没有布局也没有 Tab 的焦点移动：盖满视口与「Tab 不离开该层」只在 `make ui-walk` 里证明。
  */
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { RouterProvider } from "react-router";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createAppRouter } from "../src/routes/index.js";
-import { ToastProvider, useToast } from "../src/ui/index.js";
 import {
   cleanupSessionMeta,
   crumb,
@@ -25,13 +22,9 @@ import {
   sidebarButton,
   UNBOUND,
 } from "./chat-workspace-sidebar-support.js";
-import { waitMs, yieldMacrotask } from "./ui-support.js";
-
-let disposeRouter: (() => void) | undefined;
+import { yieldMacrotask } from "./ui-support.js";
 
 afterEach(async () => {
-  disposeRouter?.();
-  disposeRouter = undefined;
   await cleanupSessionMeta();
 });
 
@@ -112,46 +105,5 @@ describe("窄屏覆盖", () => {
     fireEvent.click(within(opened.layer).getByRole("button", { name: CLOSE }));
 
     await expectClosed(opened);
-  });
-});
-
-describe("屏上有 Toast 时的 Escape", () => {
-  let show: ReturnType<typeof useToast>["show"] | undefined;
-
-  function Probe() {
-    show = useToast().show;
-    return null;
-  }
-
-  /*
-   * Toast 的每条 Root 也是一层 DismissableLayer：它后入栈时占住 document 上唯一的 Escape 监听，
-   * 模态层的 Radix 收不到 Escape，由 SheetContent 上的 `useEscapeFallback` 关闭。会话页自己今天不出
-   * Toast，所以这里在应用旁边挂一个探针来出；顺序固定为「层先开、Toast 后出」（同
-   * auth-footer-toast-escape.test.tsx）。
-   */
-  it("N3 模态层打开后出现 Toast，层内按 Escape 仍关闭该层，Toast 还在", async () => {
-    installNarrowViewport();
-    const page = await mountSidebarPage(BOUND);
-    page.view.unmount();
-    const router = createAppRouter();
-    disposeRouter = () => router.dispose();
-    render(
-      <ToastProvider>
-        <Probe />
-        <RouterProvider router={router} />
-      </ToastProvider>,
-    );
-    await crumb(BOUND.title);
-    const opened = await openLayer();
-
-    act(() => show?.({ type: "info", message: "已停止生成" }));
-    await yieldMacrotask();
-    expect(document.querySelector(".ui-toast")).not.toBeNull();
-    expect(opened.layer.contains(document.activeElement)).toBe(true);
-    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
-    await waitMs(100);
-
-    await expectClosed(opened);
-    expect(document.querySelector(".ui-toast")).not.toBeNull();
   });
 });

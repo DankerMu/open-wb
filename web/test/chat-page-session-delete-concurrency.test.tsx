@@ -1,3 +1,4 @@
+import { pageNotices } from "./page-notices.js";
 import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
@@ -51,7 +52,6 @@ import {
   patchPath,
   patchRequests,
   renameDialog,
-  toasts,
   view,
 } from "./chat-page-session-meta-support.js";
 import { FakeEventSource, settle } from "./chat-stream-support.js";
@@ -116,7 +116,12 @@ describe("成功后的在途标记与提示的去处 (F1, F2)", () => {
     expect(within(alert).getByRole("button", { name: "关闭提示" })).toBeTruthy();
     // 列表区顶部：提示是 nav 的第一个子元素，在 `新建会话` 之前。
     expect(nav.firstElementChild).toBe(alert);
-    expect(document.querySelectorAll(".ui-toast")).toHaveLength(0);
+    expect(pageNotices()).toEqual([
+      "alert:会话正在生成，请稍候",
+      "status:已完成",
+      "status:已完成",
+      "status:已完成",
+    ]);
   });
 });
 
@@ -182,7 +187,7 @@ describe("槽位节点卸载 (F4)", () => {
     fireEvent.click(within(overlay).getByRole("button", { name: "关闭" }));
     await waitFor(() => expect(overlay.isConnected).toBe(false));
     expect(nav.isConnected).toBe(false);
-    expect(toasts()).toEqual([]);
+    expectNoListToast();
 
     await deleted(request);
     await expectReturnedToWelcome(watched);
@@ -216,7 +221,7 @@ describe("槽位节点卸载 (F4)", () => {
       await confirmGone();
       await yieldMacrotask();
       expect(calls(fetchMock, patchPath(A))).toEqual([]);
-      expect(toasts()).toEqual([]);
+      expectNoListToast();
       expect(currentLocation()).toBe(SESSION_A);
       expectStreamOpen(source);
       // 列表在另一个呈现面（窄屏须先打开覆盖层），条目不变。

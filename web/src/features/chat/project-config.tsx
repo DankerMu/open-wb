@@ -114,8 +114,8 @@ function ConfigList({ files }: { files: readonly ProjectConfigFile[] }) {
  *
  * That dialog has no trigger element, so closing it would leave focus on `body`: focus goes back
  * to `opener` (the header button) while it is still in the document, without scrolling. Escape is
- * also handled on the content itself, because a toast on screen (the session list's) takes the
- * Escape of every Radix layer below it.
+ * also handled on the content itself (`useEscapeFallback`). The Toast has been deleted; whether
+ * this fallback is still needed is decided by the Escape measurement of issue 1393.
  */
 function ConfigDialog({
   files,

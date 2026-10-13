@@ -606,9 +606,8 @@ async function step10Slash(page: Page, sessionId: string): Promise<void> {
   expect(escapedReply?.thinking).toBe(EXPECTED_THINKING);
 }
 
-// 确认框渲染在页面层。204 之后：条目移除、Toast、URL 去掉 `session`、回到欢迎态。Toast 按类名与
-// 文本定位：mobile 的覆盖层开着时通知区是 `aria-hidden`，按 role 找不到；覆盖层不随删除关闭，
-// 欢迎态在它关闭之后断言。
+// 确认框渲染在页面层。204 之后：条目移除、没有提示（整页找不到 `任务已删除`）、URL 去掉 `session`、
+// 回到欢迎态。覆盖层不随删除关闭，欢迎态在它关闭之后断言。
 async function step11Delete(
   page: Page,
   project: WalkProject,

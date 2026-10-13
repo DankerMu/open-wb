@@ -51,7 +51,7 @@ export async function walkStop(
   const stoppedBadge = second.getByRole("status", { name: "助手消息 已停止", exact: true });
   const stop = form.getByRole("button", { name: "停止", exact: true });
   const send = form.getByRole("button", { name: "发送", exact: true });
-  // 整页范围：既不在通知区，也不在别处出现这句文本（空正文的占位是带括号的另一句）。
+  // 整页范围：这句文本哪里都不出现（空正文的占位是带括号的另一句）。
   const toast = page.getByText(STOPPED_TOAST, { exact: true });
   const started = Date.now();
   const mark = (point: string) =>
@@ -119,9 +119,8 @@ export async function walkRegenerate(
   const second = assistants.nth(1);
   const stoppedBadge = second.getByRole("status", { name: "助手消息 已停止", exact: true });
   const regenerate = second.getByRole("button", { name: "重新生成", exact: true });
-  // 整页范围：重新生成不弹任何提示，这句文本哪里都不出现；通知区里也没有任何一条提示。
+  // 整页范围：重新生成不弹任何提示，这句文本哪里都不出现。
   const toast = page.getByText(REGENERATING_TOAST, { exact: true });
-  const anyToast = page.getByRole("region", { name: /通知/u }).getByRole("status");
   const started = Date.now();
   const mark = (point: string) =>
     console.log(`ui-walk regenerate ${project}: ${point} +${Date.now() - started}ms`);
@@ -138,7 +137,6 @@ export async function walkRegenerate(
   // 徽章消失在 202 回调的下游：回调里弹出的提示此刻已挂载且还没到自动消失的时间。即时计数、不重试——
   // 会重试的「数量为 0」会等到提示自己消失后通过。
   expect(await toast.count(), "no regenerating toast").toBe(0);
-  expect(await anyToast.count(), "no toast at all").toBe(0);
   mark("badge gone");
   await expect(second.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
   mark("original reply");
@@ -155,7 +153,6 @@ export async function walkRegenerate(
   await expect(regenerate).toBeEnabled();
   // 回合结束、输入框解锁之后再数一次（即时计数）：完成时才弹出的提示此刻也还挂着。
   expect(await toast.count(), "no regenerating toast after the round").toBe(0);
-  expect(await anyToast.count(), "no toast at all after the round").toBe(0);
 
   await inspectSidebar(page, project, async (sidebar) => {
     const current = sidebar

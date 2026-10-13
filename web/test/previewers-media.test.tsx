@@ -1,8 +1,8 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { MediaPreviewer } from "../src/features/files/previewers/media.js";
 import { fileUrl } from "../src/lib/api.js";
-import { ToastProvider } from "../src/ui/index.js";
+import { pageNotices } from "./page-notices.js";
 
 /*
  * file-previewers「音视频」的模块级部分：元素、属性、地址原样落到 `src`、`error` 之后的呈现。
@@ -96,13 +96,7 @@ describe("音视频预览器：播放失败", () => {
   ])(
     "%s 的 %s 触发 error 后只剩「无法播放该文件」，元素被移除，没有 Toast 也没有 alert",
     (name, tag) => {
-      // 挂在 ToastProvider 之下：通知区在场，「没有 Toast」才不是空话。
-      const { container } = render(
-        <ToastProvider>
-          <MediaPreviewer content={SRC} name={name} />
-        </ToastProvider>,
-      );
-      const toasts = screen.getByRole("region", { name: "通知" });
+      const { container } = render(<MediaPreviewer content={SRC} name={name} />);
       const element = container.querySelector(tag);
       expect(element).not.toBeNull();
       expect(screen.queryByText("无法播放该文件")).toBeNull();
@@ -111,8 +105,9 @@ describe("音视频预览器：播放失败", () => {
 
       expect(screen.getByText("无法播放该文件", { exact: true })).toBeTruthy();
       expect(container.querySelector("audio, video")).toBeNull();
-      expect(within(toasts).queryByRole("listitem")).toBeNull();
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      // 整页范围：失败文案只此一处，没有任何 alert 或 status（应用里已没有 Toast 组件，#1398）。
+      expect(screen.getAllByText("无法播放该文件")).toHaveLength(1);
+      expect(pageNotices()).toEqual([]);
       expect(screen.queryByRole("alert")).toBeNull();
     },
   );

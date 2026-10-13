@@ -2,4 +2,3 @@
 export { BrandMark } from "./brand-mark.js";
 export { useEscapeFallback } from "./escape-fallback.js";
 export { Icon, type IconName } from "./icon.js";
-export { ToastProvider, useToast } from "./toast.js";

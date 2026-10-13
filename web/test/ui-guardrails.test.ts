@@ -220,8 +220,8 @@ describe("ATTRIBUTION.md", () => {
     const { dependencies } = JSON.parse(readRepoFile("web/package.json")) as {
       dependencies: Record<string, string>;
     };
+    // #1398 之后 web 不再直接安装任何 @radix-ui/* 单包（集合为空）；循环留着，装回一个就得登记。
     const radix = Object.keys(dependencies).filter((name) => name.startsWith("@radix-ui/"));
-    expect(radix.length).toBeGreaterThan(0);
     const attribution = readRepoFile("ATTRIBUTION.md");
     for (const name of radix) expect(attribution).toContain(`\`${name}\``);
   });

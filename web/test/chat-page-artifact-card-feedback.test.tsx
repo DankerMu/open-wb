@@ -8,6 +8,7 @@
  * narrow sidebar is in chat-workspace-sidebar-reveal-html.test.tsx) and an image card fetches
  * nothing, so only the code card has an in-flight state: the focus hand-back cases use 复制代码.
  */
+
 import { act, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -22,13 +23,13 @@ import {
   openPreviewing,
   previewCalls,
   stubClipboard,
-  toasts,
   truncatedPreview,
 } from "./chat-page-artifact-card-support.js";
 import { type Change, cardNamed, edit, quiesce, reply } from "./chat-page-file-changes-support.js";
 import { settleDeferredResponse } from "./chat-page-lifecycle-support.js";
 import { composer } from "./chat-page-ownership-support.js";
 import { chatShellFixture } from "./chat-page-shell-support.js";
+import { pageNotices } from "./page-notices.js";
 import { deferredResponse, textPreviewResponse } from "./support.js";
 
 chatShellFixture();
@@ -70,7 +71,7 @@ describe("复制成功就地确认", () => {
     expect(glyphOf(copy)).toBe("copy");
     expect(copiedStatus()).toBeNull();
     expect(alerts()).toEqual([]);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成"]);
   });
 });
 
@@ -122,7 +123,7 @@ describe("失败就地显示", () => {
     expect(copiedStatus()?.textContent).toBe("已复制");
     expect(writeText.mock.calls).toEqual([[CODE_TEXT], [CODE_TEXT]]);
     expect(previewCalls(page.fetchMock)).toHaveLength(3);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:已复制"]);
   });
 });
 
@@ -169,7 +170,7 @@ describe("拉取结束后的焦点归还", () => {
     await waitFor(() => expect(writeText.mock.calls).toEqual([[CODE_TEXT]]));
     await focusOn(copy);
     expect(copy.disabled).toBe(false);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:已复制"]);
   });
 
   it("Q1 归还焦点时只带 preventScroll，不把消息线程滚到那个按钮", async () => {
@@ -204,7 +205,7 @@ describe("拉取结束后的焦点归还", () => {
     expect(copy.disabled).toBe(false);
     expect(document.activeElement).toBe(input);
     expect(onCopy.mock.calls).toEqual([]);
-    expect(toasts()).toEqual([]);
+    expect(pageNotices()).toEqual(["status:已完成", "status:已复制"]);
   });
 });
 

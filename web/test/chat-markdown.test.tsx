@@ -153,7 +153,6 @@ describe("代码块复制", () => {
     // 写入值是代码块原文去掉末尾恰一个换行（Markdown 转换追加的那个），不以换行结尾。
     expect(writeText.mock.calls).toEqual([['const a = "<b>";\nconsole.log(a);']]);
     expect(failed(article)).toBeNull();
-    expect(within(screen.getByRole("region", { name: "通知" })).queryByRole("status")).toBeNull();
     expect(screen.queryByText("已复制到剪贴板")).toBeNull();
 
     writeText.mockRejectedValueOnce(new Error("denied"));

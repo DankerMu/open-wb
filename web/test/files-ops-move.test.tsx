@@ -1,3 +1,4 @@
+import { pageNotices } from "./page-notices.js";
 // files-web「文件操作界面」：`移动到…` 对话框——目标列表、发出的请求、请求中的状态、焦点与模态清理。
 // 期望值按规格的场景手写；`to` 的写法（目标目录 + `/` + 原名，目标是根时只有原名）按 `POST …/move` 的
 // 请求体约定手写，不经 `workspacePath` / `moveTargets` 算。移动之后的跟随在 files-ops-move-follow.test.tsx。
@@ -443,20 +444,18 @@ describe("移动到对话框的焦点与模态清理", () => {
     const { dialog, listings } = await openSceneMove(() =>
       (answers.shift() ?? (() => landed(listings)))(),
     );
-    const toasts = screen.getByRole("region", { name: "通知", hidden: true });
-    const noToast = async () => {
-      // 让出一轮：Toast 若有，是在文案之后的一次状态更新里才进通知区的。
+    /** 让出一轮再数：整页的提示面恰为 `notices`（应用里已没有 Toast 组件，#1398）。 */
+    const noToast = async (notices: string[]) => {
       await yieldMacrotask();
-      expect(within(toasts).queryByRole("listitem", { hidden: true })).toBeNull();
-      expect(document.querySelector(".ui-toast")).toBeNull();
+      expect(pageNotices()).toEqual(notices);
     };
 
     fireEvent.click(moveButton(dialog));
     expect((await within(dialog).findByRole("alert")).textContent).toBe("目标位置已存在同名条目");
-    await noToast();
+    await noToast(["alert:目标位置已存在同名条目"]);
     moveInto(dialog, "out");
     await dialogGone("移动到");
     await waitFor(() => expect(rowsUnder("out")).toStrictEqual(["b.md", "a.md"]));
-    await noToast();
+    await noToast([]);
   });
 });

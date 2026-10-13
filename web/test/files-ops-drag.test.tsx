@@ -1,3 +1,4 @@
+import { pageNotices } from "./page-notices.js";
 // files-web「文件操作界面」的「拖拽移动」：哪些行可拖、哪些行接受放下、经过时的高亮、放下发出的请求、
 // 失败文案的位置与清除、放下之后的跟随。期望值按规格的场景手写；`to` 的写法（目标目录 + `/` + 原名，
 // 目标是根时只有原名）按 `POST …/move` 的请求体约定手写，不经 `canMoveInto` / `moveDestination` 算。
@@ -179,7 +180,6 @@ describe("拖拽", () => {
   it("D4 out/b.md 拖到根行上而根下已有 b.md：根行高亮，发出请求，409 后树区上方（目录树之外）出现固定的同名文案，树不变、不重列，没有对话框、没有 Toast", async () => {
     const { mark } = openFiles(scene(), { [MOVE]: CONFLICT });
     await expand("out");
-    const toasts = screen.getByRole("region", { name: "通知", hidden: true });
     const source = rowIn("out", "b.md");
     const root = row(`折叠 ${ROOT}`);
     const since = mark();
@@ -203,8 +203,8 @@ describe("拖拽", () => {
     expect(since()).toStrictEqual([B_TO_ROOT]);
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(within(toasts).queryByRole("listitem", { hidden: true })).toBeNull();
-    expect(document.querySelector(".ui-toast")).toBeNull();
+    // 整页的提示面只有树区上方的这一条（应用里已没有 Toast 组件，#1398）。
+    expect(pageNotices()).toEqual([`alert:${SAME_NAME}`]);
   });
 
   it.each([

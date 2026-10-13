@@ -69,7 +69,7 @@ export function AuthFooter() {
   const closeConfirm = (open: boolean) => {
     if (!open) setConfirming(false);
   };
-  // Toast 占住 Radix 层栈时确认框收不到 Escape，由兜底关闭（Escape 即取消）。
+  // Escape 兜底（Escape 即取消）。Toast 已删除；这个兜底是否仍然需要由 issue 1393 的 Escape 实测决定。
   const fallback = useEscapeFallback({ canClose: true, onOpenChange: closeConfirm });
   usePendingFocusRescue(fallback.ref, cancelRef, pending);
 

@@ -1,5 +1,6 @@
 // `撤回` 整页测试的夹具（chat-undo.test.tsx 与 chat-undo-notice.test.tsx 共用）：A 的两轮会话、undo 的 200、
 // 以 `?session=A&tab=x#frag` 挂载，以及线程、输入框与按钮的查询。
+
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
 import type {
@@ -17,6 +18,7 @@ import {
   SESSION_ID,
   settle,
 } from "./chat-stream-support.js";
+import { pagePrompts } from "./page-notices.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { calls, type FetchMock, jsonResponse } from "./support.js";
 
@@ -239,9 +241,9 @@ export function expectNoDialog() {
   expect(screen.queryByRole("dialog")).toBeNull();
 }
 
-/** 没有轻提示，也没有未还原文件说明。 */
+/** 没有轻提示，也没有未还原文件说明：整页除状态标记外没有任何 `status`（失败的 `alert` 由用例自己断言）。 */
 export function expectNoNotice() {
-  expect(document.querySelector(".ui-toast")).toBeNull();
+  expect(pagePrompts().filter((notice) => notice.startsWith("status:"))).toEqual([]);
   expect(screen.queryByText(UNRESTORED)).toBeNull();
 }
 

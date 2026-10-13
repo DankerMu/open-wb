@@ -255,14 +255,8 @@ export function patchOf(body: string) {
   return { body, contentType: "application/json", method: "PATCH" };
 }
 
-/** 当前显示的 Toast 文案，按出现顺序。 */
-export function toasts() {
-  return Array.from(document.querySelectorAll(".ui-toast-message"), (node) => node.textContent);
-}
-
-/** 列表动作不弹轻提示：没有任何 Toast，三条旧文案在页面任何位置都不出现。 */
+/** 列表动作不弹轻提示：三条旧文案在页面任何位置都不出现（应用里已没有 Toast 组件，#1398）。 */
 export function expectNoListToast() {
-  expect(toasts()).toEqual([]);
   const text = document.body.textContent ?? "";
   expect(RETIRED_TOASTS.filter((retired) => text.includes(retired))).toEqual([]);
 }

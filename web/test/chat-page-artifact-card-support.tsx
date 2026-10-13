@@ -1,5 +1,5 @@
 // 产物卡（issue 536）测试的夹具与页面查询：预览路由、迟到与 abort 的响应、jsdom 缺的下载/剪贴板接缝、
-// 卡片、就地提示与 Toast 的读取、切换会话。页面搭法来自 chat-page-file-changes-support.tsx（不改它）。
+// 卡片、就地提示的读取、切换会话。页面搭法来自 chat-page-file-changes-support.tsx（不改它）。
 // 供 chat-page-artifact-card.test.tsx 与 chat-page-artifact-card-state.test.tsx 使用。
 // #1110 起 html 卡的 `打开网页预览` 打开工作空间侧边栏、图片卡的 `下载` 是链接：`siteRoutes` 是侧边栏为
 // 那个网页要的三条路由，`link` 取那个链接；`spyDownloads` 只剩 chat-export.test.tsx 与 H4 在用。
@@ -189,14 +189,6 @@ export function glyphOf(button: Element) {
 /** The hidden `已复制` status of the assistant message, `null` while there is none. */
 export function copiedStatus() {
   return within(screen.getByRole("article", { name: "助手" })).queryByText("已复制");
-}
-
-/** `[type, message]` of every toast on screen, oldest first. */
-export function toasts() {
-  return [...document.querySelectorAll(".ui-toast")].map((toast) => [
-    toast.className.replace("ui-toast ui-toast--", ""),
-    toast.querySelector(".ui-toast-message")?.textContent,
-  ]);
 }
 
 /** Installs `navigator.clipboard` with `writeText`; the test file removes it after each case. */

@@ -6,7 +6,6 @@ import { afterEach, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { ChatPage } from "../src/features/chat/index.js";
 import { AppShell } from "../src/routes/shell/app-shell.js";
-import { ToastProvider } from "../src/ui/index.js";
 import { artifactCardFixture } from "./chat-page-artifact-card-support.js";
 import { listed, quiesce, type Snapshot, WORKSPACES } from "./chat-page-file-changes-support.js";
 import type { ChatAuthProbe } from "./chat-page-lifecycle-support.js";
@@ -81,11 +80,7 @@ export async function openProbedSession(snapshot: Snapshot) {
     { element: shell, children: [{ path: "/", element: <ChatPage /> }] },
   ]);
   disposeProbedShell = () => router.dispose();
-  render(
-    <ToastProvider>
-      <RouterProvider router={router} />
-    </ToastProvider>,
-  );
+  render(<RouterProvider router={router} />);
   await screen.findAllByRole("article", { name: "助手" });
   await quiesce();
   return () => {
