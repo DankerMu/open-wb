@@ -3,7 +3,8 @@
  * 「预览监听器的装配与关停」）。每一例都跑真实的 compiled production 入口；次序由 orderTrace 预加载
  * 观察真实的 listener 绑定 / 关闭与 DB close 得出，不替换任何生产模块。
  * 信号窗口各例与「两次绑定之间」两例的证据等级：钩子辅助（预加载推迟原生 listen）、真实编译入口、
- * 真实 SIGTERM。主监听器先绑定（#1337）。
+ * 真实 SIGTERM；「主实例 ready 期间」一例的 SIGTERM 处理由预加载同步触发，不是真实信号。
+ * 主监听器先绑定（#1337）。
  */
 
 import {
@@ -378,6 +379,7 @@ describe("production entry preview bind failure", () => {
     );
     await expectBindable("127.0.0.1", entry.port);
     expectDbReopens(join(entry.root, "db", "dev.db"));
+    expectLayoutWithoutManagedFiles(join(entry.root, "state"));
   }, 60_000);
 });
 
@@ -458,7 +460,48 @@ function listenGate(root: string): { LISTEN_ENTERED: string; LISTEN_RELEASE: str
   };
 }
 
+/**
+ * 预加载：Fastify 的 `listen` 给它拿到的 signal 挂 `abort` 监听时（主实例的那一次，此时它的 `ready`
+ * 还没有落定、原生 listen 还没有被调用），同步触发一次进程的 SIGTERM 处理。真实信号由事件循环派发，
+ * 不会在 `listen` 调用的同步段里到达：这是把「信号落在主实例 ready 期间」做成确定的次序。
+ */
+function sigtermDuringReadyHook(): string {
+  return [
+    "'use strict';",
+    "const nativeAdd = EventTarget.prototype.addEventListener;",
+    "let fired = false;",
+    "EventTarget.prototype.addEventListener = function heldAdd(type, ...rest) {",
+    "  const result = nativeAdd.call(this, type, ...rest);",
+    "  const fromFastify = () => new Error().stack.includes('fastify');",
+    "  if (!fired && type === 'abort' && this instanceof AbortSignal && fromFastify()) {",
+    "    fired = true;",
+    "    process.emit('SIGTERM', 'SIGTERM');",
+    "  }",
+    "  return result;",
+    "};",
+    "",
+  ].join("\n");
+}
+
 describe("production entry SIGTERM between the two listens", () => {
+  it("builds no layout, binds nothing and exits 0 when SIGTERM lands while the main instance is still getting ready", async () => {
+    const entry = await startEntry({ hook: sigtermDuringReadyHook() });
+    const { server, port, previewPort, root } = entry;
+    try {
+      // 主实例的 `listen` 因 signal 已中止而不绑定就 resolve：入口在它之后核对到信号，直接返回。
+      expect(await server.waitForClose()).toEqual({ code: 0, signal: null });
+      expect(server.stdout()).toBe("");
+      expect(applicationStderr(server.stderr())).toBe("");
+      expect(entry.readTrace()).not.toContain("listening:");
+      expect(existsSync(join(root, "state"))).toBe(false);
+      await expectBindable("127.0.0.1", port);
+      await expectBindable("127.0.0.1", previewPort);
+      expectDbReopens(join(root, "db", "dev.db"));
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
   it.each([
     { nth: 1, held: "the main listener's" },
     { nth: 2, held: "the preview listener's" },

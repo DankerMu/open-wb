@@ -19,8 +19,10 @@
  *   （`workspaces/rest-preview-token.ts`，端口为 0 即未绑定）。托管布局在这两次绑定之间建立
  *   （owner 2026-10-13 裁决）：主 `listen` resolve 之后到 `ensureOmpStateLayout` 返回是同步代码，
  *   没有 await，主监听器受理的第一个请求到达时布局已在（这段时间到达的 prompt 建得出快照目录：
- *   钩子辅助实测，预加载推迟预览监听器的原生 listen，`test/server-startup-preview.test.ts`）。
- *   布局失败时主监听器已绑定，随失败清理关闭。`models.yml` 与宿主 overlay 仍在两次绑定之后写；
+ *   钩子辅助复现，预加载推迟预览监听器的原生 listen，`test/server-startup-preview.test.ts`）。
+ *   布局失败时主监听器已绑定，随失败清理关闭。`models.yml` 与宿主 overlay 仍在两次绑定之后写：
+ *   overlay 写出之前 spawn 的 omp v18.0.10 以 `Config overlay not found` 退出码 1 退出、不到
+ *   `ready`（实测，手工按 `spawnOmp` 的 argv/env 运行官方二进制；没有不带钉住值运行的 omp）；
  * - 关停与失败清理同一条路：终止启动时那条 `sudo … find`（若仍在途）→ 转换器 `close()`（终止在途
  *   转换并等自己启动的进程退出）→ 两个周期清理的定时器 → 预览监听器 → 主实例（其 preClose 里
  *   runtime 退出，再关主监听器）→ DB。预览监听器先于 runtime 关：omp 只连主监听器上的模型代理，
