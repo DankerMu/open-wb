@@ -50,6 +50,7 @@ import {
 } from "./chat-page-slash-support.js";
 import { renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot } from "./chat-stream-support.js";
+import { pagePrompts } from "./page-notices.js";
 import { createFetchMock, deferredResponse, jsonResponse, paths } from "./support.js";
 
 const NEAREST = { block: "nearest" };
@@ -363,6 +364,8 @@ describe("候选目录的拉取时机 (J8, J9)", () => {
         return reads === 1 ? failure() : jsonResponse({ commands: CATALOGUE });
       });
       const alerts = screen.queryAllByRole("alert").length;
+      // `status` 角色的提示同样不多出一条（`alert` 之外的另一种提示面）。
+      const prompts = pagePrompts();
       const errors = vi.spyOn(console, "error");
 
       await type("/");
@@ -370,6 +373,7 @@ describe("候选目录的拉取时机 (J8, J9)", () => {
       expect(panel()).toBeNull();
       expect(commandCalls(fetchMock)).toHaveLength(1);
       expect(screen.queryAllByRole("alert")).toHaveLength(alerts);
+      expect(pagePrompts()).toEqual(prompts);
       expect(press("ArrowDown")).toBe(true);
       expect(press("Tab")).toBe(true);
       expect(composer().value).toBe("/");
@@ -386,6 +390,7 @@ describe("候选目录的拉取时机 (J8, J9)", () => {
       expect(commandCalls(fetchMock)).toHaveLength(2);
       expect(labels()).toEqual(LABELS);
       expect(screen.queryAllByRole("alert")).toHaveLength(alerts);
+      expect(pagePrompts()).toEqual(prompts);
       expect(errors).not.toHaveBeenCalled();
     },
   );

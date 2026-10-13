@@ -38,9 +38,9 @@ export function menuItem(page: Page, name: string): Locator {
 
 // mobile 上 `inspectSidebar` 回调结束后紧接着按 `Escape` 关覆盖层。菜单、对话框关闭后 Radix 在下一个
 // 宏任务才把焦点还回来：按键早于它时目标是 `body`，覆盖层的兜底（`useEscapeFallback`）只认目标在自身
-// 子树内的按键。这一步当初是为「Toast 在场时覆盖层只靠兜底关闭」加的；Toast 已删除，这个兜底是否仍然需要
-// 由 #1393 的 Escape 实测决定，在那之前等待原样保留。回调的最后一句等焦点回到覆盖层内（它自己或其后代）；
-// desktop 没有覆盖层。
+// 子树内的按键，这时关不关只取决于 Radix 把按键分派给了哪一层。回调的最后一句等焦点回到覆盖层内（它自己
+// 或其后代），让那次 Escape 同时落在兜底的范围里；去掉这一等走查是否仍然稳定没有测过（#1399 的实测保留了
+// 兜底，这一等原样保留）。desktop 没有覆盖层。
 export async function expectFocusInNavOverlay(page: Page, project: WalkProject): Promise<void> {
   if (project === "desktop-light") return;
   const overlay = page.getByRole("dialog", NAV_OVERLAY);

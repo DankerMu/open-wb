@@ -191,6 +191,29 @@ describe("files creation overlays focus loop", () => {
     await focusedOn(menuTrigger);
   });
 
+  // ui-primitives「覆盖层的 Escape 关闭」：创建类对话框与重命名 / 移动共用一个框架，这里钉创建的两种。
+  it.each([
+    ["新建文件夹", DIRS_PATH, openDirectoryDialog],
+    ["新建工作空间", "/api/workspaces", openWorkspaceDialogFromMenu],
+  ] as const)(
+    "O12 %s 对话框内按一次 Escape：对话框关闭，没有 POST，焦点回到 新建，模态标记清除",
+    async (name, path, open) => {
+      const { fetchMock, view } = renderWorkspace();
+      const menuTrigger = await screen.findByRole("button", { name: "新建" });
+
+      const dialog = await open();
+      await yieldMacrotask();
+      expectModalSet(view);
+      expect(dialog.contains(document.activeElement), "Escape 前焦点应在对话框内").toBe(true);
+      fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+
+      await dialogGone(name);
+      await focusedOn(menuTrigger);
+      expectModalCleared(view);
+      expect(posts(fetchMock, path)).toHaveLength(0);
+    },
+  );
+
   it("O9 aborts a held folder create on an overlay press and returns focus to 新建", async () => {
     const held = deferredResponse();
     const { fetchMock } = renderWorkspace({ [DIRS_PATH]: () => held.promise });

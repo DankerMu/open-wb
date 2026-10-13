@@ -1,9 +1,11 @@
 import { screen } from "@testing-library/react";
 
 /**
- * 整页范围内每个提示面的文案：全部 `alert` 与 `status` 角色的元素（含被模态层 `aria-hidden` 的），先
- * `alert` 后 `status`，各按文档顺序，写成 `角色:文案`。用来证明「没有另出提示」：页面上多出任何一条
- * 提示（不论文案、不论挂在哪个区域）这张清单都会变。
+ * 整页范围内 `alert` 与 `status` 两种角色的元素的文案（含被模态层 `aria-hidden` 的；显式 `role` 与
+ * 隐式角色都算，如 `<output>` 是 `status`），先 `alert` 后 `status`，各按文档顺序，写成 `角色:文案`。
+ * 用来证明「没有另出提示」，范围只到这两种角色：页面上多出一条 `alert` 或 `status`（不论文案、不论
+ * 挂在哪个区域）这张清单就变；不带这两种角色的提示它看不见——只有 `aria-live` 而没有角色的节点、
+ * `role="log"`、普通文字都不在清单里，那类提示要按文案另行断言。
  */
 export function pageNotices(): string[] {
   return (["alert", "status"] as const).flatMap((role) =>

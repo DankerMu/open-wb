@@ -69,7 +69,8 @@ export function AuthFooter() {
   const closeConfirm = (open: boolean) => {
     if (!open) setConfirming(false);
   };
-  // Escape 兜底（Escape 即取消）。Toast 已删除；这个兜底是否仍然需要由 issue 1393 的 Escape 实测决定。
+  // Escape 兜底（Escape 即取消）：Radix 没把按键分派给本层时由内容元素自己关闭，原因见 `useEscapeFallback`。
+  // 这个确认框在 issue 1399 的实测里去掉兜底也没有测出差别，与其余覆盖层一并保留。
   const fallback = useEscapeFallback({ canClose: true, onOpenChange: closeConfirm });
   usePendingFocusRescue(fallback.ref, cancelRef, pending);
 
