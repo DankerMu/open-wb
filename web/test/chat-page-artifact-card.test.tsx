@@ -1,9 +1,15 @@
 /**
  * Issue #536 产物卡 (parent tasks 7.5b): A1–A15 of openspec/changes/artifact-card/design.md.
  * Seams: the pure `artifactKind`, the jsdom chat page over a stubbed `fetch`, the two Blob URL
- * statics, `<a>.click()` and `navigator.clipboard`. Expected values are
+ * statics and `navigator.clipboard`. Expected values are
  * literals from the spec deltas; cases marked (guard) already hold before the change. H1 is from
  * review round 1; H2–H6 live in chat-page-artifact-card-state.test.tsx.
+ *
+ * Issue #1110 (s1f-files-page 25.2): the html card's 打开网页预览 opens the workspace sidebar instead
+ * of a dialog and the image card's 下载 is a link to the download endpoint; neither asks the preview
+ * API any more (A2, A3, A5). The sidebar's side of 打开网页预览 is in
+ * chat-workspace-sidebar-reveal-html.test.tsx. Only the code card still fetches: A10 and A12 moved
+ * to it.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -23,22 +29,19 @@ import {
   changedTurn,
   copiedStatus,
   DOWNLOAD_CHART,
-  frameOf,
-  HTML_TEXT,
   INDEX,
+  link,
   OPEN_INDEX,
   openPreviewing,
   previewCalls,
-  previewDialog,
   previewRoute,
   previewSignal,
   REQUEST_FAILED,
   rejectOnAbort,
+  siteRoutes,
   slot,
-  spyDownloads,
   stubClipboard,
   switchSession,
-  TRUNCATION_NOTE,
   toasts,
   truncatedPreview,
   withOtherSession,
@@ -78,6 +81,7 @@ import {
 import { envelope, SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { deferred, historyUser, SESSION_ID } from "./chat-stream-support.js";
 import { hasLucideGlyph, imagePreviewResponse } from "./files-fixture.js";
+import { BASE } from "./files-site-fixture.js";
 import { deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 
 const blobs = artifactCardFixture();
@@ -176,23 +180,25 @@ describe("产物卡 derivation on the chat page", () => {
     expect(
       derived.map((card, at) => hasLucideGlyph(slot(card, "icon") ?? card, glyphs[at] ?? "")),
     ).toEqual([true, true, true]);
+    // 下载 is a link, the other three are buttons: every control of the three cards, in order.
     expect(
-      within(reply())
-        .getAllByRole("button", { name: /^(复制代码|打开网页预览|下载) / })
-        .map((button) => [
-          button.getAttribute("aria-label"),
-          button.closest('[data-slot="artifact-card"]'),
+      derived
+        .flatMap((card) => [...card.querySelectorAll("button, a")])
+        .map((control) => [
+          control.tagName,
+          control.getAttribute("aria-label"),
+          control.closest('[data-slot="artifact-card"]'),
         ]),
     ).toEqual([
-      [COPY_APP, derived[0]],
-      [OPEN_INDEX, derived[1]],
-      [OPEN_INDEX, derived[1]],
-      [DOWNLOAD_CHART, derived[2]],
+      ["BUTTON", COPY_APP, derived[0]],
+      ["BUTTON", OPEN_INDEX, derived[1]],
+      ["BUTTON", OPEN_INDEX, derived[1]],
+      ["A", DOWNLOAD_CHART, derived[2]],
     ]);
     expect(action(COPY_APP).getAttribute("title")).toBe(COPY_APP);
     expect(hasLucideGlyph(action(COPY_APP), "copy")).toBe(true);
-    expect(action(DOWNLOAD_CHART).getAttribute("title")).toBe(DOWNLOAD_CHART);
-    expect(hasLucideGlyph(action(DOWNLOAD_CHART), "download")).toBe(true);
+    expect(link(DOWNLOAD_CHART).getAttribute("title")).toBe(DOWNLOAD_CHART);
+    expect(hasLucideGlyph(link(DOWNLOAD_CHART), "download")).toBe(true);
     expect(derived.map((card) => slot(card, "foot") !== null)).toEqual([false, true, false]);
 
     expect(previewCalls(page.fetchMock)).toEqual([]);
@@ -209,8 +215,8 @@ describe("产物卡 derivation on the chat page", () => {
 });
 
 describe("html 产物卡", () => {
-  it("A3 opens the fetched page in a dialog iframe sandboxed to exactly allow-scripts", async () => {
-    const page = await openPreviewing([write(INDEX)], () => textPreviewResponse(HTML_TEXT));
+  it("A3 打开网页预览 opens no dialog and asks the preview API nothing: the page shows in the workspace sidebar", async () => {
+    const page = await openSession(changedTurn([write(INDEX)]), listed, siteRoutes());
 
     const [head, foot] = actions(OPEN_INDEX);
     expect(actions(OPEN_INDEX)).toHaveLength(2);
@@ -221,86 +227,60 @@ describe("html 产物卡", () => {
     expect(previewCalls(page.fetchMock)).toEqual([]);
 
     fireEvent.click(head as HTMLButtonElement);
-    const dialog = await previewDialog();
+    const sidebar = await screen.findByRole("complementary", { name: "工作空间侧边栏" });
+    const row = await within(sidebar).findByRole("button", { name: "index.html" });
+    await waitFor(() => expect(row.getAttribute("aria-current")).toBe("true"));
+    const frame = await waitFor(() => {
+      const shown = sidebar.querySelector("iframe");
+      if (!shown) throw new Error("侧边栏的预览区里还没有 iframe");
+      return shown;
+    });
+    await quiesce();
 
-    expect(previewCalls(page.fetchMock).map(([path, options]) => [path, options?.method])).toEqual([
-      [`/api/workspaces/${PROJ.id}/file?path=out%2Findex.html`, "GET"],
-    ]);
-    const frame = frameOf(dialog);
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(frame.getAttribute("srcdoc")).toBe(HTML_TEXT);
+    expect(previewCalls(page.fetchMock)).toEqual([]);
+    expect(frame.getAttribute("src")).toBe(`${BASE}out/index.html`);
     expect(frame.getAttribute("title")).toBe("index.html");
-    expect(frame.hasAttribute("src")).toBe(false);
-    expect(dialog.querySelectorAll("iframe")).toHaveLength(1);
     expect(document.querySelectorAll("iframe")).toHaveLength(1);
+    expect(document.querySelector("iframe[srcdoc]")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "index.html", hidden: true })).toBeNull();
+    expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
     expect(artifactCards().map((card) => card.contains(frame))).toEqual([false]);
-    expect(within(dialog).queryByText(TRUNCATION_NOTE)).toBeNull();
-    expect(screen.queryByRole("heading", { name: "hi", hidden: true })).toBeNull();
+    // Nothing is in flight for the card, so neither button is ever disabled, and no failure line.
+    expect(actions(OPEN_INDEX)).toEqual([head, foot]);
+    expect(actions(OPEN_INDEX).map((button) => button.disabled)).toEqual([false, false]);
+    expect(alerts()).toEqual([]);
     expect(blobs.createObjectURL).not.toHaveBeenCalled();
     expect(toasts()).toEqual([]);
     expect(document.documentElement.innerHTML).not.toContain(ROOT_PREFIX);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(document.querySelector("iframe")).toBeNull();
-    expect(previewCalls(page.fetchMock)).toHaveLength(1);
-  });
-
-  it("A3 opens from the foot button without prior focus and hands focus back to that button", async () => {
-    const page = await openPreviewing([write(INDEX)], () => textPreviewResponse(HTML_TEXT));
-    const [head, foot] = actions(OPEN_INDEX);
-    expect(document.activeElement).toBe(document.body);
-
-    fireEvent.click(foot as HTMLButtonElement);
-    const dialog = await previewDialog();
-
-    expect(frameOf(dialog).getAttribute("srcdoc")).toBe(HTML_TEXT);
-    expect(previewCalls(page.fetchMock)).toHaveLength(1);
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
-
-    await waitFor(() => expect(document.activeElement).toBe(foot));
-    expect(actions(OPEN_INDEX)).toEqual([head, foot]);
-    expect(document.activeElement).not.toBe(head);
-    expect(document.activeElement).not.toBe(document.body);
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("A4 shows the truncation note above the iframe when the preview was cut at 1 MiB", async () => {
-    await openPreviewing([write(INDEX)], () => truncatedPreview(HTML_TEXT));
-
-    fireEvent.click(actions(OPEN_INDEX)[0] as HTMLButtonElement);
-    const dialog = await previewDialog();
-
-    const note = within(dialog).getByText(TRUNCATION_NOTE);
-    const frame = frameOf(dialog);
-    expect(frame.getAttribute("srcdoc")).toBe(HTML_TEXT);
-    expect(frame.getAttribute("sandbox")).toBe("allow-scripts");
-    expect(note.compareDocumentPosition(frame)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 });
 
 describe("图片与代码产物卡", () => {
-  it("A5 downloads the image through a temporary link and revokes its Blob URL one task later", async () => {
-    const page = await openPreviewing([write(CHART)], () => imagePreviewResponse());
-    const clicks = spyDownloads(blobs.revokeObjectURL);
+  it("A5 下载 of an image card is a link to the download endpoint: no preview request, no Blob URL", async () => {
+    const page = await openSession(changedTurn([write(CHART)]));
 
-    fireEvent.click(action(DOWNLOAD_CHART));
-    await waitFor(() => expect(clicks).toHaveLength(1));
+    const download = link(DOWNLOAD_CHART);
+    expect(download.tagName).toBe("A");
+    expect(download.getAttribute("href")).toBe(
+      `/api/workspaces/${PROJ.id}/download?path=assets%2Fchart.PNG`,
+    );
+    expect(download.hasAttribute("download")).toBe(true);
+    expect(download.closest('[data-slot="artifact-head"]')).not.toBeNull();
+    expect(within(reply()).queryByRole("button", { name: DOWNLOAD_CHART })).toBeNull();
+
+    // jsdom has no navigation: the default action is cancelled, the card's own handlers still run.
+    download.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(download);
     await quiesce();
 
-    expect(previewCalls(page.fetchMock).map(([path]) => path)).toEqual([
-      `/api/workspaces/${PROJ.id}/file?path=assets%2Fchart.PNG`,
-    ]);
-    expect(clicks).toEqual([
-      { href: BLOB_URL, download: "chart.PNG", revokedAtClick: 0, revokedNextTimer: 0 },
-    ]);
-    expect(blobs.revokeObjectURL.mock.calls).toEqual([[BLOB_URL]]);
-    expect(document.querySelector("a[download]")).toBeNull();
+    expect(previewCalls(page.fetchMock)).toEqual([]);
+    expect(blobs.createObjectURL).not.toHaveBeenCalled();
+    expect(blobs.revokeObjectURL).not.toHaveBeenCalled();
+    expect([...document.querySelectorAll("a[download]")]).toEqual([download]);
     expect(document.querySelectorAll("img")).toHaveLength(0);
+    expect(alerts()).toEqual([]);
     expect(toasts()).toEqual([]);
-    expect(action(DOWNLOAD_CHART).disabled).toBe(false);
+    expect(download.hasAttribute("aria-disabled")).toBe(false);
   });
 
   it("A6 copies exactly the fetched text and confirms with a hidden 已复制 status, not a toast", async () => {
@@ -389,34 +369,6 @@ describe("预览失败与类型不符", () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it("A8 an unsupported html preview shows the envelope message and opens no dialog", async () => {
-    await openPreviewing([write(INDEX)], () =>
-      envelope(415, "preview_unsupported", "该文件类型不支持预览"),
-    );
-
-    fireEvent.click(actions(OPEN_INDEX)[0] as HTMLButtonElement);
-
-    await waitFor(() => expect(alerts()).toEqual(["该文件类型不支持预览"]));
-    await quiesce();
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(document.querySelector("iframe")).toBeNull();
-    expect(actions(OPEN_INDEX).map((button) => button.disabled)).toEqual([false, false]);
-  });
-
-  it("A8 an oversized image shows the envelope message and downloads nothing", async () => {
-    await openPreviewing([write(CHART)], () =>
-      envelope(413, "preview_too_large", "图片超过预览上限"),
-    );
-    const clicks = spyDownloads(blobs.revokeObjectURL);
-
-    fireEvent.click(action(DOWNLOAD_CHART));
-
-    await waitFor(() => expect(alerts()).toEqual(["图片超过预览上限"]));
-    await quiesce();
-    expect(clicks).toEqual([]);
-    expect(blobs.createObjectURL).not.toHaveBeenCalled();
-  });
-
   it("A8 a network failure shows the request_failed text", async () => {
     const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     await openPreviewing([edit(APP, 2, 1)], () => new TypeError("Failed to fetch"));
@@ -429,10 +381,7 @@ describe("预览失败与类型不符", () => {
     expect(action(COPY_APP).disabled).toBe(false);
   });
 
-  const strayImages: Array<[string, Change, string]> = [
-    ["a code", edit(APP, 2, 1), COPY_APP],
-    ["an html", write(INDEX), OPEN_INDEX],
-  ];
+  const strayImages: Array<[string, Change, string]> = [["a code", edit(APP, 2, 1), COPY_APP]];
 
   it.each(strayImages)(
     "A9 %s card that receives an image revokes it and delivers nothing",
@@ -450,85 +399,41 @@ describe("预览失败与类型不符", () => {
       expect(document.querySelector("iframe")).toBeNull();
     },
   );
-
-  it("A9 an image card that receives text downloads nothing", async () => {
-    await openPreviewing([write(CHART)], () => textPreviewResponse("not an image"));
-    const clicks = spyDownloads(blobs.revokeObjectURL);
-
-    fireEvent.click(action(DOWNLOAD_CHART));
-
-    await waitFor(() => expect(alerts()).toEqual([REQUEST_FAILED]));
-    await quiesce();
-    expect(clicks).toEqual([]);
-    expect(blobs.revokeObjectURL).not.toHaveBeenCalled();
-  });
 });
 
 describe("拉取中、卸载与换账号", () => {
-  const clicked: Array<[string, number]> = [
-    ["head", 0],
-    ["foot", 1],
-  ];
-
-  it.each(clicked)(
-    "A10 disables both buttons of the html card while its preview is pending (%s button clicked)",
-    async (_name, at) => {
-      const pending = deferredResponse();
-      const page = await openPreviewing([write(INDEX), edit(APP, 2, 1)], () => pending.promise);
-      const buttons = actions(OPEN_INDEX);
-      expect(buttons.map((button) => button.disabled)).toEqual([false, false]);
-
-      fireEvent.click(buttons[at] as HTMLButtonElement);
-      await quiesce();
-
-      expect(actions(OPEN_INDEX)).toEqual(buttons);
-      expect(buttons.map((button) => button.disabled)).toEqual([true, true]);
-      expect(action(COPY_APP).disabled).toBe(false);
-      expect(previewCalls(page.fetchMock)).toHaveLength(1);
-
-      for (const button of buttons) fireEvent.click(button);
-      await quiesce();
-
-      expect(previewCalls(page.fetchMock)).toHaveLength(1);
-      expect(screen.queryByRole("dialog")).toBeNull();
-
-      await settleDeferredResponse(pending, textPreviewResponse(HTML_TEXT));
-      const dialog = await previewDialog();
-
-      expect(frameOf(dialog).getAttribute("srcdoc")).toBe(HTML_TEXT);
-      expect(actions(OPEN_INDEX).map((button) => button.disabled)).toEqual([false, false]);
-      expect(previewCalls(page.fetchMock)).toHaveLength(1);
-    },
-  );
-
-  // Beyond the design's A10: both clicks land in one React batch, before the buttons are disabled,
+  // Beyond the design's A10: both clicks land in one React batch, before the button is disabled,
   // so only the card's in-flight gate can keep the second click from fetching.
   it("A10 two clicks dispatched before the disabled state commits send one request", async () => {
+    const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const pending = deferredResponse();
-    const page = await openPreviewing([write(INDEX)], () => pending.promise);
-    const buttons = actions(OPEN_INDEX);
+    const page = await openPreviewing([edit(APP, 2, 1)], () => pending.promise);
+    const copy = action(COPY_APP);
 
     act(() => {
-      for (const button of buttons) fireEvent.click(button);
+      fireEvent.click(copy);
+      fireEvent.click(copy);
     });
     await quiesce();
 
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
-    expect(buttons.map((button) => button.disabled)).toEqual([true, true]);
+    expect(copy.disabled).toBe(true);
 
-    await settleDeferredResponse(pending, textPreviewResponse(HTML_TEXT));
+    await settleDeferredResponse(pending, textPreviewResponse(CODE_TEXT));
 
-    expect(frameOf(await previewDialog()).getAttribute("srcdoc")).toBe(HTML_TEXT);
-    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await waitFor(() => expect(copiedStatus()?.getAttribute("role")).toBe("status"));
+    expect(writeText.mock.calls).toEqual([[CODE_TEXT]]);
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
+    expect(blobs.createObjectURL).not.toHaveBeenCalled();
   });
 
-  it("A11 switching sessions aborts a pending image preview and revokes the late Blob URL", async () => {
+  it("A11 switching sessions aborts a pending preview and revokes the late Blob URL of an image the code card was sent", async () => {
+    const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const pending = deferredResponse();
-    const page = await openPreviewing([write(CHART)], () => pending.promise, withOtherSession);
-    const clicks = spyDownloads(blobs.revokeObjectURL);
+    const page = await openPreviewing([edit(APP, 2, 1)], () => pending.promise, withOtherSession);
 
-    fireEvent.click(action(DOWNLOAD_CHART));
+    fireEvent.click(action(COPY_APP));
     await quiesce();
     const signal = previewSignal(page.fetchMock);
     expect(signal.aborted).toBe(false);
@@ -543,7 +448,7 @@ describe("拉取中、卸载与换账号", () => {
 
     expect(blobs.createObjectURL).toHaveBeenCalledTimes(1);
     expect(blobs.revokeObjectURL.mock.calls).toEqual([[BLOB_URL]]);
-    expect(clicks).toEqual([]);
+    expect(writeText).not.toHaveBeenCalled();
     expect(toasts()).toEqual([]);
     expect(previewCalls(page.fetchMock)).toHaveLength(1);
   });
@@ -564,6 +469,7 @@ describe("拉取中、卸载与换账号", () => {
 
     expect(writeText).not.toHaveBeenCalled();
     expect(toasts()).toEqual([]);
+    expect(blobs.createObjectURL).not.toHaveBeenCalled();
   });
 
   it("A11 a preview fetch rejected by the abort stays silent", async () => {
@@ -584,18 +490,19 @@ describe("拉取中、卸载与换账号", () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it("A12 renewing the account aborts a pending preview without a toast or a dialog", async () => {
+  it("A12 renewing the account aborts a pending preview without a toast or a copy", async () => {
+    const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
     const pending = deferredResponse();
-    const snapshot = changedTurn([write(INDEX)]);
+    const snapshot = changedTurn([edit(APP, 2, 1)]);
     const { fetchMock, getProbe } = renderChatPageWithAuthProbe(`/?session=${SESSION_ID}`, {
       "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
       [WORKSPACES]: listed,
       [SESSION_MESSAGES]: () => jsonResponse(snapshot),
-      [previewRoute(INDEX)]: () => pending.promise,
+      [previewRoute(APP)]: () => pending.promise,
     });
     await waitFor(() => expect(artifactCards()).toHaveLength(1));
 
-    fireEvent.click(actions(OPEN_INDEX)[1] as HTMLButtonElement);
+    fireEvent.click(action(COPY_APP));
     await quiesce();
     const signal = previewSignal(fetchMock);
     expect(signal.aborted).toBe(false);
@@ -605,9 +512,10 @@ describe("拉取中、卸载与换账号", () => {
 
     expect(signal.aborted).toBe(true);
 
-    await settleDeferredResponse(pending, textPreviewResponse(HTML_TEXT));
+    await settleDeferredResponse(pending, textPreviewResponse(CODE_TEXT));
     await quiesce();
 
+    expect(writeText).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
     expect(toasts()).toEqual([]);

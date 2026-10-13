@@ -639,9 +639,10 @@ Minimal mergeable slice: 24.1–24.2（标记与过滤，纯派生）先合；24
 
 - [x] 25.1 `file-changes-card.tsx`：`查看详情` 改为调用侧边栏的 `reveal(path)`（经 `page.tsx` 下发的回调，不从卡片里导入页面状态）；渲染条件改为会话 `workspaceId` 非 null——空间不在列表里、列表读取失败与临时空间会话都照常渲染，名字用相对路径（turn-artifacts「文件变更卡」的场景「空间不可解析」「临时空间会话的文件变更卡」）；去掉原来到 `/files?ws=` 的导航。
   实施注记见 `implementation-notes.md`「25.1、25.3，含分摊的 25.4 / 25.5 / 25.6 / 25.7 条款（#1109）」。
-- [ ] 25.2 `artifact-card.tsx`：html 的 `打开网页预览` 改为 `reveal(path, {view:"rendered"})`；删除 `PreviewDialog` 与它的 `fetchPreview` 调用、截断提示分支；图片 `下载` 改为 `<a href={downloadUrl(workspaceId, path)} download>`（与预览头同一实现，owner D-19），删除图片的 `fetchPreview` 调用、Blob 地址的创建与撤销及其就地失败分支；代码 `复制代码` 不动。产物卡是否渲染沿用 C 的「空间可解析」判定，不改。
+- [x] 25.2 `artifact-card.tsx`：html 的 `打开网页预览` 改为 `reveal(path, 被点的按钮, {view:"rendered"})`（签名随 #1109 落地的 `reveal(path, opener)`）；删除 `PreviewDialog` 与它的 `fetchPreview` 调用、截断提示分支；图片 `下载` 改为 `<a href={downloadUrl(workspaceId, path)} download>`（与预览头同一实现，owner D-19），删除图片的 `fetchPreview` 调用、Blob 地址的创建与撤销（代码卡收到图片时撤销其 Blob 地址的 `discard` 保留）及其就地失败分支；代码 `复制代码` 不动。产物卡是否渲染沿用 C 的「空间可解析」判定，不改。
+  实施注记见 `implementation-notes.md`「25.2、25.4 / 25.5 / 25.6 / 25.7 的分摊部分（#1110）」。
 - [x] 25.3 定位的竞态与焦点（workspace-sidebar「从卡片定位到文件」）：最后一次为准；宽屏焦点留在按钮；窄屏进 `关闭`、关闭后回到按钮且线程不滚动。
-- [ ] 25.4 测试：`web/test/chat-page-file-changes.test.tsx`、`chat-page-artifact-card.test.tsx`、`chat-page-artifact-card-feedback.test.tsx`、`chat-page-artifact-card-state.test.tsx` 与两个 support（`chat-page-artifact-card-support.tsx`、`chat-page-file-changes-support.tsx`）随条文改写（turn-artifacts「产物卡」的「html 预览隔离」「图片下载与代码复制」「拉取中与卸载」「临时空间会话照常渲染产物卡」的新形态；删除对话框、`srcdoc` 与图片 Blob 下载的用例，图片 413 的就地文案用例随之删除并记入偏离记录）；新文件 `web/test/chat-workspace-sidebar-reveal.test.tsx` 覆盖「从卡片定位到文件」五个场景。
+- [x] 25.4 测试：`web/test/chat-page-file-changes.test.tsx`、`chat-page-artifact-card.test.tsx`、`chat-page-artifact-card-feedback.test.tsx`、`chat-page-artifact-card-state.test.tsx` 与两个 support（`chat-page-artifact-card-support.tsx`、`chat-page-file-changes-support.tsx`）随条文改写（turn-artifacts「产物卡」的「html 预览隔离」「图片下载与代码复制」「拉取中与卸载」「临时空间会话照常渲染产物卡」的新形态；删除对话框、`srcdoc` 与图片 Blob 下载的用例，图片 413 的就地文案用例随之删除并记入偏离记录）；新文件 `web/test/chat-workspace-sidebar-reveal.test.tsx` 覆盖「从卡片定位到文件」四个场景，「打开网页预览」一个场景在 `web/test/chat-workspace-sidebar-reveal-html.test.tsx`（#1110；原文件已 709 行）。
   写作时 `grep -rnE 'PreviewDialog|打开网页预览|srcdoc|网页预览|查看详情|files\?ws=' web/test web/e2e` 的命中按刀归位（面板的四个文件已在 23.3 删除；开工时重跑，结果记入偏离记录）：
   - 随 25.1（文件变更卡）：`chat-page-file-changes.test.tsx:468-525`（C9/G5 断言 `查看详情` 导航到 `/files?ws=<id>`）改为「URL 不变、侧边栏打开并选中该文件」；`:590-624`（C11/G4 与 C11 断言空间不可解析、列表读取失败时**没有** `查看详情`）按改写后的 turn-artifacts「文件变更卡」场景「空间不可解析」改为：`workspaceId` 非 null 的情形每行仍有 `查看详情 <相对路径>`，只有 `workspaceId` 为 null 的情形没有（用例标题里的 `without 查看详情` 同改）；
     `chat-page-file-changes-support.tsx:47` 的 `DETAILS` 匹配（`/^查看详情/`）按钮名不变，原样保留。
@@ -655,11 +656,11 @@ Minimal mergeable slice: 24.1–24.2（标记与过滤，纯派生）先合；24
     `F5 Escape closes the preview while a later toast holds the top of the layer stack`（`:237-259`）测的是预览对话框与 Toast 的叠层，对话框不存在后没有对应条文，随之删除。
     该文件留下不动的：`F1`（`:56`）、`F2`（`:91`，代码卡的复制失败与截断；其中 `previewCalls` 只数代码卡的请求）、`F6`（`:263`，`查看详情` 的按钮名不变）。删除之后该文件不再用到的导入（`CHART`、`DOWNLOAD_CHART`、`INDEX`、`OPEN_INDEX`、`HTML_TEXT`、`frameOf`、`previewDialog`、`spyDownloads`、`renameBehindDialog`、`renameRoute`、`changedTurn`、`envelope`、`imagePreviewResponse`、`jsonResponse` 中届时确已无引用的）同刀去掉；
     support 里因此零引用的导出按 knip 删除——`chat-page-artifact-card-support.tsx` 的 `previewDialog`（`:146`）、`frameOf`（`:150`）、`spyDownloads`（`:207`），以及 23.3 搬进 `chat-page-shell-support.tsx` 的 `renameBehindDialog` / `renameRoute`（写作时除面板测试外只有 F5 用它们）；以开工时 `grep -rnE 'previewDialog|frameOf|spyDownloads|renameBehindDialog|renameRoute' web/test` 为准。
-- [ ] 25.5 走查（落点：`web/e2e/ui-walk-sessions.spec.ts:386-393` 断言 `查看详情` 之后的首次导航是 `/files?ws=<id>`——随 25.1 改；`web/e2e/ui-walk-steps.ts:86-100` 的预览对话框帮手与其 `iframe[title=…]` 断言——随 25.2 改；`ui-walk-sessions.spec.ts` 776 行，只换调用、不增行）：chat-harness「UI 走查会话元数据」第 5 步按改写后的条文（`查看详情` 打开侧边栏并选中、URL 不变；隔离来源的 iframe 与其 `sandbox`、文档标题 `WorkBuddy`；`打开网页预览` 到达同一状态；`只看本会话改动` 恰一个文件）；
+- [x] 25.5 走查（落点：`web/e2e/ui-walk-sessions.spec.ts:386-393` 断言 `查看详情` 之后的首次导航是 `/files?ws=<id>`——随 25.1 改；`web/e2e/ui-walk-steps.ts:86-100` 的预览对话框帮手与其 `iframe[title=…]` 断言——随 25.2 改；`ui-walk-sessions.spec.ts` 776 行，只换调用、不增行）：chat-harness「UI 走查会话元数据」第 5 步按改写后的条文（`查看详情` 打开侧边栏并选中、URL 不变；隔离来源的 iframe 与其 `sandbox`、框内标题 `WorkBuddy` 可见；`打开网页预览` 到达同一状态；`只看本会话改动` 恰一个文件）；
   chat-harness「UI 走查临时空间、撤回与归档」第 1 步按本 change 的 MODIFIED 改写（C 的 helper `web/e2e/ui-walk-session-list.ts`：临时空间会话的文件变更卡有 `查看详情`；`打开网页预览` 打开头部为 `工作空间` 的侧边栏并以隔离来源的渲染视图选中该文件，随后关闭侧边栏再继续撤回步骤）；
   `web/e2e/ui-walk-oracle.ts` 的「零非 `baseURL` 源请求」加入预览来源的例外（以页面自己那次 `preview-token` 响应的 `base` 为准，verification-harness）。
-- [ ] 25.6 清单：CH-27（`查看详情` 的期望）、CH-28、CH-29（原预览对话框的两行改写为侧边栏里的渲染预览与关闭后的焦点 / 不滚动）、CH-53（超大网页一句改为侧边栏的渲染视图不受 1 MiB 截断）；CH-33（图片卡的下载）改写为：点下载由浏览器直接保存原文件、不受图片预览大小上限约束、审计里有一条 `file.download`；逐行核对 CH-30–CH-32（复制不变，只确认措辞里没有残留的对话框）。结论 `待签`。
-- [ ] 25.7 变异证据：`查看详情` 仍然导航 → 「URL 不变」判红；保留 `srcdoc` 对话框 → 「没有 `srcdoc` iframe」判红；卡片为 html 调 `fetchPreview` → 「`GET …/file` 次数不增加」判红；图片下载仍走 `fetchPreview` + Blob → 「没有 `GET …/file`、没有 Blob 地址」判红；临时空间会话不渲染 `查看详情` → 走查临时空间第 1 步与「临时空间会话的文件变更卡」判红；窄屏关闭后滚动线程 → 焦点往返用例判红。
+- [x] 25.6 清单：CH-27（`查看详情` 的期望）、CH-28、CH-29（原预览对话框的两行改写为侧边栏里的渲染预览与关闭后的焦点 / 不滚动）、CH-53（超大网页一句改为侧边栏的渲染视图不受 1 MiB 截断）；CH-33（图片卡的下载）改写为：点下载由浏览器直接保存原文件、不受图片预览大小上限约束、审计里有一条 `file.download`；逐行核对 CH-30–CH-32（复制不变，只确认措辞里没有残留的对话框）。结论 `待签`。
+- [x] 25.7 变异证据：`查看详情` 仍然导航 → 「URL 不变」判红；保留 `srcdoc` 对话框 → 「没有 `srcdoc` iframe」判红；卡片为 html 调 `fetchPreview` → 「`GET …/file` 次数不增加」判红；图片下载仍走 `fetchPreview` + Blob → 「没有 `GET …/file`、没有 Blob 地址」判红；临时空间会话不渲染 `查看详情` → 走查临时空间第 1 步与「临时空间会话的文件变更卡」判红；窄屏关闭后滚动线程 → 焦点往返用例判红。
 
 Suggested fixture level: expanded - 放宽全站走查 oracle（`ui-walk-oracle.ts` 的「零非 `baseURL` 源请求」加例外）、删除既有的预览对话框与图片 Blob 下载（legacy 行为移除）；评审要看 oracle 例外有没有写宽、两张卡的其它消费方
 Minimal mergeable slice: 25.1（文件变更卡）与 25.2（产物卡）可各自成 PR，各带自己的测试、走查与清单行；25.5 的 oracle 例外随第一个让走查加载隔离来源 iframe 的 PR
@@ -685,7 +686,8 @@ Minimal mergeable slice: 26.1 的夹具与 README 可先合（既有 hurl 只断
   实施注记见 `implementation-notes.md`「27.1 的 (f)（#1116）」。
 - [x] 27.2 验证「相对资源没加载不可假绿」：在隔离的调用方夹具里删掉 `site/style.css` 跑一次，确认在标题颜色断言处失败；恢复后全绿。结果写进 PR。
   实施注记见 `implementation-notes.md`「27.1 的 (b)、27.2（#1115）」。
-- [ ] 27.3 FL 行核对：把组 3、17–22 各自加的 FL 行通读一遍，补上遗漏的窄屏与深色情形，去重；确认全部为 `待签`、守卫通过。
+- [x] 27.3 FL 行核对：把组 3、17–22 各自加的 FL 行通读一遍，补上遗漏的窄屏与深色情形，去重；确认全部为 `待签`、守卫通过。
+  实施注记见 `implementation-notes.md`「27.3（#1117）」。
 
 Suggested fixture level: compact - 真实浏览器走查的扩充；隔离来源 iframe 的行为只有这一层能证明
 Minimal mergeable slice: (a)(c)(d)(e) 四步不依赖隔离来源，可先合；(b)（Depends on 19.2 的网页渲染视图）与 (f)（Depends on 22.1、22.4，间接等 1.2）各自随后

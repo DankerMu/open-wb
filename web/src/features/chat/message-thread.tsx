@@ -38,10 +38,14 @@ type ThreadProps = {
   onFork(messageId: number): Promise<void>;
   onRegenerate(): Promise<void>;
   /**
-   * 文件变更卡的 `查看详情`：打开工作空间侧边栏并定位到 `path`（空间内相对路径），`trigger` 是被点的
-   * 按钮。会话没有工作空间（`workspaceId` 为 null 或会话还没解析出来）时为 undefined，卡上没有该按钮。
+   * 文件变更卡的 `查看详情` 与 html 产物卡的 `打开网页预览`：打开工作空间侧边栏并定位到 `path`（空间内
+   * 相对路径），`trigger` 是被点的按钮；后者带 `{ view: "rendered" }`，网页停在源码视图时翻回渲染。
+   * 会话没有工作空间（`workspaceId` 为 null 或会话还没解析出来）时为 undefined，卡上没有 `查看详情`，
+   * 产物卡不渲染。
    */
-  onReveal: ((path: string, trigger: HTMLElement) => void) | undefined;
+  onReveal:
+    | ((path: string, trigger: HTMLElement, options?: { view: "rendered" }) => void)
+    | undefined;
   onSend(prompt: string): void;
   onStop(): Promise<unknown>;
   /** `撤回`：`trigger` 是被点的按钮，冲突对话框关闭后焦点还给它。 */
@@ -224,7 +228,7 @@ const AssistantMessage = memo(function AssistantMessage({
           <ApprovalRecords approvals={approvals} />
           <MessageError error={error} />
           <FileChangesCard onReveal={onReveal} space={space} steps={steps} />
-          <ArtifactCards client={client} space={space} steps={steps} />
+          <ArtifactCards client={client} onReveal={onReveal} space={space} steps={steps} />
           {status === "stopped" ? (
             <p
               aria-label="助手消息 已停止"

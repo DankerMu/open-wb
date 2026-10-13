@@ -2,7 +2,7 @@
 
 工作空间里的 HTML 由助手写出，是不可信内容；把它以 `text/html` 发在主站来源上，页面脚本就能以登录用户的身份调用 `/api`。
 此前的 `srcdoc` 预览加载不了相对资源。change `s1f-files-page` 同时要内嵌预览 PDF 与办公文档，并提供删除。
-本 ADR 登记其中三项长期决定（owner，2026-10-06 压测与 2026-10-09 / 10-10 的补充裁决 D-21、D-23 至 D-27）及其运维含义；
+本 ADR 登记其中三项长期决定（owner，2026-10-06 压测及当日的决定 D-21，2026-10-09 / 10-10 的补充裁决 D-23 至 D-27）及其运维含义；
 规格在 `preview-origin`、`office-preview`、`file-operations` 三个能力里，逐条理由在该 change 的 `design.md` D11–D22。
 
 下文每条后果标注证据等级：**实测**（跑过并观察到，注明日期与记录处）、**读代码推出**、**未测**。
@@ -12,7 +12,7 @@
 
 1. **独立的预览监听器。** 同一进程里的第二个 Fastify 实例（`server/src/preview/app.ts`），监听 `PREVIEW_PORT`，与主监听器绑定同一个 `HOST`。
    它只有两条 `GET`（及派生的 `HEAD`）路由：`/w/<token>/<path>` 原样发文件、`/o/<token>/<path>` 发办公文档转换出的 PDF；
-   不注册认证插件、不解析 cookie、不拿数据库句柄、不托管静态文件、没有 `/api`。入口先于主监听器 `listen`、先于主监听器关停（`server/src/server.ts`）。
+   不注册认证插件、不解析 cookie、自己不拿数据库句柄（经与主实例共用的 store 与 sandbox 读写同一个库：查空间归属、写 `sandbox.reject` 审计）、不托管静态文件、没有 `/api`。入口先于主监听器 `listen`、先于主监听器关停（`server/src/server.ts`）。
 2. **路径令牌。** `POST /api/workspaces/:id/preview-token`（主站、cookie 鉴权、无请求体）签发；令牌是 32 字节随机数的十六进制，
    登记在进程内存里，绑定一个账号、一个工作空间与签发请求的 `Origin` 头（`server/src/preview/tokens.ts`）。
    同一账号同一空间在未过期时重复签发得到同一个令牌并把到期时间设为「现在 + 900 秒」；页面每 300 秒续一次（`web/src/features/files/use-preview-token.ts`）。
@@ -31,6 +31,7 @@
 6. **办公文档经 LibreOffice 转换。** `docx`、`xlsx`、`pptx` 由服务端以 `<OFFICE_BIN> --headless … --convert-to pdf` 转成 PDF（`server/src/preview/office.ts`），浏览器按 PDF 预览。
    每次转换一个独立的作业目录 `<PREVIEW_CACHE_DIR>/work/<随机名>`（独立的 `UserInstallation`）；子进程环境只有 `PATH`、`LANG`、`HOME`；
    配置了 `OMP_USER` 时以该用户运行（身份、sudoers 与终止见 ADR-0010 的 #1119 补充）。
+   未配置时转换进程与应用同 uid，uid 分离的缓解不存在：解析不可信文档、读取文档所引用的本地资源的一方就是持有数据库与上游密钥的应用用户（**读代码推出**；见下表 #1350）。
    结果缓存在 `<PREVIEW_CACHE_DIR>/pdf/<键>.pdf`，键为 `sha256(输入绝对路径 NUL mtimeMs NUL size)`；输出是**复制**成应用用户自己的 `0600` 新文件后才进缓存，不是改名。
    输出超过 200 MiB 即失败；排队至多 8 组，再来的判繁忙；同一个键的并发请求共用一次转换。
    `OFFICE_BIN` 未配置即功能关闭：令牌响应的 `officeAvailable` 为 `false`，直接请求 `/o/` 得 503。
@@ -46,12 +47,14 @@
   **实测**（#1093 走查，design D15；仅 Chromium，主站与预览同主机不同端口）：框内来源为 `null`，读 `document.cookie`、`localStorage`、`parent.document`、`top.location` 都抛 `SecurityError`；
   框内带凭据对主站的 `fetch` 不带 cookie、得 401；框内文档自身的导航请求带了主站会话 cookie，监听器不读它。其它引擎、不同主机的部署、框内经表单提交或自我导航去主站：**未测**。
 - PDF 响应不带 `sandbox`，它在预览来源下不是不透明来源；依赖的是内置查看器不向页面脚本开放网络能力（design Risks，**未测**）。
-  这个例外的原始依据没有被实测支持——**实测**（#1050，2026-10-06，design D16；macOS 上的 Chromium 151、Chrome 154、Firefox 153 的 Playwright 构建）：
+  这个例外的原始依据没有被实测支持——**实测**（#1050，2026-10-06，design D16；macOS 上的 Chromium 151 与 Firefox 153（两者是 Playwright 自带构建）、Google Chrome 154）：
   PDF 响应带不带 CSP `sandbox` 查看器都正常；使查看器失效的是 `iframe` 的 `sandbox` 属性，且只在 Chromium 与 Chrome 上。例外作为规格决定保留，是否收回留给 owner。
-- 外部资源放行的后果（**读代码推出**）：预览页面的脚本可以把同一工作空间里任何文件的内容发往外网；它的地址里就有令牌，也可以把令牌发出去，持令牌者在到期前可直接读该空间。
+- 外部资源放行的后果（**读代码推出**）：预览页面的脚本可以把同一工作空间里任何文件的内容发往外网；它的地址里就有令牌，也可以把令牌发出去，持令牌者在令牌失效前（见下一条：该账号持续续期时不失效）可直接读该空间。
   没有出口的内网部署不受前一半影响。
-- 令牌在地址里：浏览器历史与代理访问日志会留下它。缓解是 `no-referrer`、`no-store`、900 秒闲置失效、作用域只有一个账号的一个空间、每次使用重核归属；
-  退出登录后旧地址至多再可读 900 秒（接受；要立即失效须等 S3a 的会话模型）。
+- 令牌在地址里：浏览器历史与代理访问日志会留下它。缓解是 `no-referrer`、`no-store`、作用域只有一个账号的一个空间、每次使用重核归属。
+  到期时间是「最近一次签发 + 900 秒」，对监听器的请求不续期；但同一账号对同一空间的每次签发（任何会话、任何设备）都返回**同一个**令牌并续期，令牌不轮换——
+  只要该账号还有页面开着这个空间的 HTML、PDF 或办公文档预览（页面每 300 秒签发一次），泄漏的地址就一直有效（**读代码推出**，`tokens.ts`、`use-preview-token.ts`）。
+  退出登录不吊销：此后该账号不再签发时旧地址至多再可读 900 秒（接受）。代码里没有吊销入口，要立即失效只有重启服务（登记表在内存里）；按会话吊销须等 S3a 的会话模型。
 - 不透明来源下 `localStorage`、`sessionStorage`、cookie、IndexedDB 不可用，依赖它们的页面会报错。
 - 回收目录与工作空间同在 `SANDBOX_ROOT` 下，是为了 `rename` 不跨文件系统；代价是 omp 用户对它的父目录可写，见下表 #1286。
 
@@ -59,7 +62,7 @@
 
 | 残余 | 证据 |
 |---|---|
-| **#1286** 检查之后按路径操作的替换窗口：删除、移动、回收目录清理、`file` / `download` / `archive`、`/w/`、`/o/`。owner D-23：本 change 不闭合，由部署模型兜底（单一专用 omp 用户、可信账号）；利用者须能以 omp 用户身份运行代码 | 起草时读代码推出；下面五行是 2026-10-10 的实测（#1318，design D22「实测」），那里没提到的仍是读代码推出、未测 |
+| **#1286** 检查之后按路径操作的替换窗口：删除、移动、回收目录清理、`file` / `download` / `archive`、`/w/`、`/o/`。owner D-23：本 change 不闭合，由部署模型兜底（单一专用 omp 用户、可信账号）；利用者须能以 omp 用户身份运行代码。后果：清理可被引到 `.trash` 之外、删掉一棵形状相符的应用用户 `0700` 目录树（快照目录是这个形状）；删除与移动的 `rename` 可穿过被换成符号链接的中间目录，把条目移出工作空间，或把空间之外、应用用户够得着的条目移进来；读路由可读到链接指向的文件，或被换入的命名管道占住线程池线程 | 起草时读代码推出；下面五行是 2026-10-10 的实测（#1318，design D22「实测」），那里没提到的仍是读代码推出、未测 |
 | ① 删除不需要竞态：`.trash` 不存在时 omp 用户把另一个账号的根改名成 `.trash`，下一次删除把它改成 `0700` 并在其中建批次，该账号根对 omp 用户锁死；被挪开的真 `.trash` 里的批次不再被清理 | 实测（ext4 与 overlayfs；驱动的是编译后的 `moveToTrash` 与 `sweep`，两半各自实测、未连成一次；经 `DELETE` 路由的 204 与审计行未测） |
 | ② 移动的目标一侧可替换工作空间之外、同一文件系统上应用用户可写处的同名文件或空目录；跨文件系统是 `EXDEV` | 纯系统调用实测；经真实处理器只在钩子辅助下复现；自然竞态 20000 轮未复现 |
 | ③ 同步的处理器挡不住同进程线程池里的文件系统调用落进检查与改名之间 | 时序未测 |
@@ -95,19 +98,23 @@
 - `PREVIEW_ORIGIN` 只能是协议加 authority，例如 `https://preview.example.com` 或 `https://app.example.com:8443`：没有路径、没有结尾斜杠，写法不符即启动失败。
   它必须是与主站**不同的来源**；监听器的路由固定在根下的 `/w/`、`/o/`，不能挂在主站来源的某个路径前缀下。
 - 代理把该来源的请求原样转给 `<HOST>:<PREVIEW_PORT>`，不改写路径、不加认证（凭据就是路径里的令牌）。令牌会出现在代理的访问日志里，按含凭据的日志对待。
+  经反向代理、TLS 终结或端口映射的部署没有演练过（**未测**）；上面三条（地址怎样拼、`PREVIEW_ORIGIN` 的写法与位置、代理怎样转发）是**读代码推出**。
 - 启动失败时标准错误只有一行 `{"event":"server_start_failed","reason":…}`：十二个键写法不符是 `config`，预览端口绑定失败是 `preview_listen`，缓存目录建不出或归属不符是 `preview_cache`。
 
 ### LibreOffice 与 `OFFICE_BIN`
 
 - 在主机（或部署镜像）上安装 LibreOffice，把 `OFFICE_BIN` 设为其启动程序的绝对路径（相对路径即启动失败；服务端不查它是否存在，路径不对时每次转换以 502 失败——**读代码推出**）。
   仓库里还没有镜像文件，实际安装属 S4b。实测用的是发行版的 LibreOffice 24.2.7.2、只装了 writer 组件、路径 `/usr/bin/soffice`（#1052）；别的版本与另两种格式**未测**。
-- 配置了 `OMP_USER` 的部署另需两行 sudoers，行文、作用范围与转义规则见 ADR-0010 的 #1119 补充。CI 与单元测试不需要 LibreOffice。
+- 配置了 `OMP_USER` 的部署另需两行 sudoers（作用范围与转义规则见 ADR-0010 的 #1119 补充；第二行的路径要求见下文「磁盘」）：
+  - `<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- <OFFICE_BIN> *`
+  - `<app-user> ALL=(<OMP_USER>) NOPASSWD: /usr/bin/find <PREVIEW_CACHE_DIR 的绝对路径>/work -mindepth 1 -delete`
+- CI 与单元测试不需要 LibreOffice。
 - 不配 `OFFICE_BIN`：界面对办公文档显示「服务器未启用文档转换，请下载后查看」与下载按钮，其余预览不受影响。
 
 ### 十二个环境变量
 
 十二个键都由 `server/src/preview-config.ts` 的 `resolvePreviewSettings` 解析（经 `server/src/server.ts` 的 `resolveServerConfig`），都有缺省值。
-数值键须是规范的十进制正整数；`OMP_USER`、`SANDBOX_ROOT`、`HOST`、`PORT` 是既有的键，不在这十二个里。
+数值键须是规范的十进制正整数（`PREVIEW_PORT` 另允许 `0`）；`OMP_USER`、`SANDBOX_ROOT`、`HOST`、`PORT` 是既有的键，不在这十二个里。
 
 | 变量 | 缺省 | 取值 | 含义 | 使用处 |
 |---|---|---|---|---|
@@ -126,7 +133,8 @@
 
 ### 从回收目录恢复
 
-1. 找到审计行：`kind` 为 `file.delete`（`GET /api/audit`，或数据库的 `audit_events` 表）。用到四个值：`actor_id`（账号 id）、`workspace_id`、`detail.path`（空间内的相对路径）、`detail.trashId`。
+1. 找到审计行：`kind` 为 `file.delete`（`GET /api/audit`，或数据库的 `audit_events` 表）。用到四个值：账号 id（表里是 `actor_id`，接口里是 `actorId`）、空间 id（`workspace_id` / `workspaceId`）、`detail.path`（空间内的相对路径）、`detail.trashId`。
+   接口对非管理员角色只返回本人的行，替别的账号恢复须用管理员账号或直接查库。
 2. 被删的条目是 `<SANDBOX_ROOT>/.trash/<actor_id>/<workspace_id>/<trashId>/<detail.path 的最后一段>`，一个批次里只有这一个条目。
 3. 空间的根目录是 `<SANDBOX_ROOT>/<账号 id>/<workspaces 表里该行的 dir>`（也是 `GET /api/workspaces` 返回的 `root`）。临时空间的行与目录随最后一个会话删除，这时没有原位可回，移到别处。
 4. 以**应用用户**的身份（回收目录各级 `0700`）把条目 `mv` 回 `detail.path` 所在的目录。先确认目标位置没有同名条目（`mv` 会覆盖）、父目录还在；
@@ -135,7 +143,8 @@
 
 依据：应用用户把 omp 用户建的文件与目录移进 `0700` 的批次目录再移回，四类条目都成功、inode 不变（**实测**，#1051，2026-10-06，design D22）；上面的步骤本身没有在部署上演练过（**未测**）。
 批次名里的时刻早于「现在 − `TRASH_RETENTION_DAYS` 天」的批次在下一轮清理时删除，清理在每次启动之后与此后每 6 小时各一轮；过期即不可恢复。
-`.trash` 或其下某一级是符号链接、普通文件或不属应用用户的目录时，删除什么都不移动（`moveToTrash` 抛出为**实测**，#1318；路由因此答 500 是**读代码推出**）；
+`.trash` 是 omp 用户放的符号链接、普通文件或属 omp 用户的目录，或账号一级是属 omp 用户的目录时，`moveToTrash` 抛出（**实测**，#1318，仅 ext4）；
+其余各级、其余两种与属主是别的用户的情形走同一个 `ensureOwnedDir`（**读代码推出**，未逐一测）；条目因此未被移动、路由答 500 是**读代码推出**（校验先于 `rename`，未观察）。
 属应用用户而 mode 不符的目录会被校正为 `0700` 后照常使用，所以恢复前先对照上表 #1286 的 ① 核对 `.trash` 确是回收目录。
 
 ### 磁盘
@@ -143,7 +152,7 @@
 - `PREVIEW_CACHE_DIR` **没有总量上限**。`pdf/` 只删修改时间早于 7 天的文件（命中会刷新修改时间），启动时一轮、此后每 24 小时一轮；磁盘吃紧的部署自己盯这个目录。停服务后可以清空 `pdf/` 与 `work/` 的内容（**读代码推出**：缓存只是可再生的副本；`work/` 里属 omp 用户的条目要以该用户或 root 删）。
 - `work/` 只在启动时清空。同 uid 模式下每次转换后应用自己删得掉作业目录。同时配置了 `OMP_USER` 与 `OFFICE_BIN` 时删不全：LibreOffice 在作业目录下建的 `profile/`、`.cache/` 属 omp 用户、只有它可进入，
   小文档每个作业留下约 650 KB，被终止的作业另加完整的输出 PDF（20–78 MB）（**实测**，#1052）。所以 `work/` 在一次运行期间只增不减，重启时归零。
-- 归零靠启动时的一条 `sudo -n -u <OMP_USER> -- /usr/bin/find <work 的路径> -mindepth 1 -delete`，需要 ADR-0010 的 #1119 补充里的第二行 sudoers。没配 `OFFICE_BIN` 的部署不执行它，也不需要这一行。
+- 归零靠启动时的一条 `sudo -n -u <OMP_USER> -- /usr/bin/find <work 的路径> -mindepth 1 -delete`，需要上文「LibreOffice 与 `OFFICE_BIN`」里的第二行 sudoers（同 ADR-0010 的 #1119 补充）。没配 `OFFICE_BIN` 的部署不执行它，也不需要这一行。
   规则里的路径必须与服务端算出的 `join(PREVIEW_CACHE_DIR, "work")` 逐字相同：相对值先按仓库根解析，结果经词法规范化（去掉结尾斜杠、折叠 `.` 与 `..`），不解析符号链接；含空格等特殊字符时按 sudoers 语法转义。
 - 规则漏配、路径差一个字符、`find` 不在 `/usr/bin/find`、10 秒内没跑完：启动日志（标准错误）恰有一行 `{"event":"preview_work_clear_failed"}`，不带路径；服务照常启动并提供转换，只是 `work/` 不归零。
   看到这一行先用 `sudo -l -U <app-user>` 核对规则。这条规则在真实 `sudo` 下的执行**未测**（自动化测试用的是假 `sudo`）；超时杀掉 `sudo` 之后它之下的 `find` 是否随之结束同样**未测**。
@@ -152,11 +161,11 @@
 ### 被终止的转换留下的进程
 
 `OMP_USER` 模式下，转换超时、请求方断开或服务关停时，应用只能杀掉自己启动的 `sudo`。**实测**（#1052，2026-10-06，design D18；容器内，只测了 docx 与 `SIGKILL`）：
-5 次终止 5 次都留下一个属 omp 用户的 `soffice.bin`，它占着一个核把整份文档转完才自行退出——小文档在终止后约 20–23 秒，大文档 128 秒，长于 60 秒的缺省超时。
+5 次终止 5 次都留下一个属 omp 用户的 `soffice.bin`，它占着一个核把整份文档转完才自行退出——约 25 秒的文档在终止后约 20–23 秒，约 133 秒的文档在终止后 128 秒，长于 60 秒的缺省超时。
 残留进程不占转换名额（**读代码推出**：名额在 `sudo` 退出时释放），所以主机上同时运行的 `soffice.bin` 可以多于 `OFFICE_CONVERT_CONCURRENCY`。同 uid 模式杀的是整个进程组。
 
 - 查：转换的命令行带着作业目录（`-env:UserInstallation=file://<PREVIEW_CACHE_DIR>/work/<随机名>/profile` 与 `--outdir`），可以
-  `ps -u <OMP_USER> -o pid,etime,args | grep -F '<PREVIEW_CACHE_DIR>/work/'`，再对照 `work/` 下还在的目录名。
+  `ps -u <OMP_USER> -ww -o pid,etime,args | grep -F '<PREVIEW_CACHE_DIR 的绝对路径>/work/'`（服务端解析出的绝对路径，相对值原样代入匹配不上），再对照 `work/` 下还在的目录名。
   命令行的形状是**读代码推出**（`office.ts` 的 argv）；实测记录没有逐字写下 `soffice.bin` 自己的命令行，筛不到时按进程名 `soffice.bin` 与属主找。
 - 杀：以 root 或 omp 用户的身份 `kill`。应用用户发信号得 `EPERM`，sudoers 里没有、也不加 `kill` / `pkill` 规则（owner D-21、D-25）。
   不处理它也会自己退出；它用着的作业目录留到下次启动。
