@@ -5,7 +5,7 @@
 > 依赖（边表。「A ← B」读作「A 的前提是 B」；没有列出的组之间不互相等待）：
 > - **G8 ← G3**：8.3 靠 3.3 的专用错误类辨认「根被文件占据」。
 > - **G11a ← G1**：两组同改 `web/src/features/files` 的 `browser-paths.ts`、`tree.tsx`、`workspace-browser.tsx`；G1 小，先合。
-> - **G11b ← G11a**：两组都改 `workspace-browser.tsx`（712 行）与 `workspace-sidebar.tsx`，顺序进行，#1372 在先。
+> - **G11b ← G11a**：两组都改 `workspace-browser.tsx`（712 行）与 `workspace-sidebar.tsx`，顺序进行，#1372 在先。侧边栏对已不存在的文件「一律清空」（含开关关着时）整个落在 G11a；G11b 只管 `在文件页打开` 的地址与再次点击。
 > - **G2b ← G10**：迁移时要按新的绑定次序归类调用点，且两组同改 `server-startup-failure-reason.test.ts`、`server-startup-preview.test.ts`、`listener-shutdown.test.ts`。G2a 没有前提。
 > - **G5 与 G9 顺序进行，先后不限**：都贴着 `web/src/features/chat/use-chat-session.ts` 的 800 行线（现 790 行），不并行。
 > - **G4 与 G10 可并行**：只共用 http-service-skeleton「服务启动与装配」的规格文本。G4 的入口用例放新文件（4.3），不碰 G10 与 G2b 要改的 `server-startup-failure-reason.test.ts`。
@@ -17,7 +17,7 @@
 > - **G3**：不改 `core/sandbox`，但改工作空间根的取得与状态映射，按邻接面同样请求白盒审查。
 > - **G10**：「omp 子进程治理」邻接面——启动窗口内（主监听器已受理请求、可 spawn omp）的关停次序，按邻接面同样请求白盒审查。
 >
-> 裁决与默认：owner 2026-10-12 与 2026-10-13 的裁决已写进 delta 与各组任务。design D14 的七项是「编排方按保守默认定，owner 可推翻」，任务按它们写、行内标 D14-n。仍待编排方确认的只有 design「待编排方确认」的 Q-1、Q-2（都在 G11a），各有默认，任务按默认写；答复不同时先改对应的规格句与任务再开工。
+> 裁决与默认：owner 2026-10-12 与 2026-10-13 的裁决已写进 delta 与各组任务。design D14 的九项是「编排方按保守默认定，owner 可推翻」，任务按它们写、行内标 D14-n。design「待编排方确认」是空的：前一稿的 Q-1 成了 D14-8，Q-2 已由 owner 2026-10-13 答复「侧边栏里一律清空」。
 >
 > 通用纪律：
 > - 每组先写会失败的测试，再实现；改变行为的组最后一项是变异证据（把实现改回去，指明哪条用例判红，输出贴进 PR）。
@@ -172,25 +172,28 @@ Minimal mergeable slice: atomic - 绑定次序、signal 的更换与 abort 条�
 
 ## 11a. workspace-sidebar — 过滤视图的行都可选中，已不存在的文件移出列表与预览区（G11a，#1372；← G1）
 
-- [ ] 11a.1 测试先行（新文件 `web/test/workspace-browser-only-paths.test.tsx`，`WorkspaceBrowser` 组件测试；`workspace-browser.test.tsx` 已 753 行，不追加）：`onlyPaths` 下——父目录未加载的行不带 `disabled`、键盘可选中；父目录已加载而列表里没有的路径不成行、没有对它的请求；选中后 `file` 答 404 的行从树里消失、`onPathChange(null)` 恰一次、预览区是未选状态；目录之下一个文件不剩时目录行也消失，全部不剩时显示 `onlyPathsEmpty` 的文案；`refresh()`（不带参数）不使已移出的行重新出现，`refresh([该路径])` 使它重新出现；不给 `onlyPaths` 时同一个 404 仍是既有的信封文案、行不消失。验证：在现有实现上判红（行被禁用；404 显示文案）。
+- [ ] 11a.1 测试先行（新文件 `web/test/workspace-browser-only-paths.test.tsx`，`WorkspaceBrowser` 组件测试；`workspace-browser.test.tsx` 已 753 行，不追加）：`onlyPaths` 下——父目录未加载的行不带 `disabled`、键盘可选中；父目录已加载而列表里没有的路径不成行、没有对它的请求；选中后 `file` 答 404 的行从树里消失、`onPathChange(null)` 恰一次、预览区是未选状态；目录之下一个文件不剩时目录行也消失，全部不剩时显示 `onlyPathsEmpty` 的文案；`refresh()`（不带参数）与 `refresh([该路径])` 都不使已移出的行重新出现，`reported([该路径])` 使它重新出现。陈旧列表一组（评审 R2-1）：根已加载、列表里没有 `new.md`，`onlyPaths` 含它——`reported(["new.md"])` 之前不成行，之后成行、不带 `disabled`、没有 `tree` 请求，选中后恰一次 `file`、预览头没有大小；随后撤掉 `onlyPaths`、`refresh()` 读到仍没有它的根列表、再给回 `onlyPaths` → 不成行。`clearMissing` 一组（不给 `onlyPaths`）：`path` 指向列表里没有的文件、指向 404 的父目录之下、含 `..` 段、指向以 500 失败的父目录之下——预览区都是空态、没有文案，此前的选中被清除；选中列表里仍有而 `file` 答 404 的行 → 选中被清除、`onPathChange(null)` 恰一次、该行仍在树里。对照：`clearMissing` 与 `onlyPaths` 都不给时，同一个 404 仍是既有的信封文案、行不消失，`path` 落空仍是 `文件不存在`。验证：在现有实现上判红（行被禁用；404 显示文案；没有 `reported`）。
 - [ ] 11a.2 测试先行（新文件 `web/test/preview-missing-meta.test.tsx`；`files-preview-states.test.tsx` 770 行、`preview.test.tsx` 708 行，都不追加）：file-previewers 场景「没有元数据的行」「大小未知的文档」——没有大小与修改时间时预览头只有图标、路径与下载链接，页面上没有 `NaN` / `undefined` / `1970`；415 的副行恰为文件名；没有大小的 PDF 行照常建 iframe。验证：在现有实现上判红（类型上必填，运行时拼出 `NaN`）。
-- [ ] 11a.3 测试先行（新文件 `web/test/chat-workspace-sidebar-filter-select.test.tsx`，会话页整页渲染）：workspace-sidebar 的四个场景——改写后的「空集合与已删除的文件」、新增的「父目录未加载的改动文件可选中」「过滤开着时的定位」、「随助手改动刷新」新增的「过滤开着时被删除的当前文件」。逐条断言：请求记录里没有 `tree`；哪些行在、哪些不在；选中行；预览区是 `未选择文件` 而页面上没有 `文件不存在`、没有服务端的不存在文案、没有 Toast；`在文件页打开` 的 `href`（只断言经 404 移出之后不带 `path` 的那几处——定位落在「列表里本来就没有」的路径上时的 `href` 归 11b）。覆盖裁决点名的三种情形：侧边栏打开之前就已删除（`old.md`、`only.md`）、选中期间被删除后的下一次刷新（`deep/x.md`）、卡片 `查看详情` 指向已删除的文件（`out/gone.md`、`old.md`）。「助手重写后重新列出」一组按 Q-1 的默认。验证：在现有实现上判红。
+- [ ] 11a.3 测试先行（新文件 `web/test/chat-workspace-sidebar-filter-select.test.tsx`，会话页整页渲染）：workspace-sidebar 的六个场景——改写后的「空集合与已删除的文件」、新增的「父目录未加载的改动文件可选中」「过滤开着时助手新写出的文件」（三例都写：步骤结束后列出并可选中；步骤结束与回合结束落在同一个 300 毫秒窗口内；关掉开关刷新后不再列出）「过滤开着时的定位」、「随助手改动刷新」新增的「过滤开着时被删除的当前文件」「过滤关着时被删除的当前文件」。逐条断言：请求记录里没有 `tree`；哪些行在、哪些不在；选中行；预览区是 `未选择文件` 而页面上没有 `文件不存在`、没有服务端的不存在文案、没有 Toast；`在文件页打开` 的 `href`（只断言经 404 移出之后不带 `path` 的那几处——定位落在「列表里本来就没有」的路径上时的 `href` 归 11b）。覆盖裁决点名的三种情形：侧边栏打开之前就已删除（`old.md`、`only.md`）、选中期间被删除后的下一次刷新（`deep/x.md`）、卡片 `查看详情` 指向已删除的文件（`out/gone.md`、`old.md`）。「助手重写后重新列出」一组按 D14-8。另：改写后的场景「文件已不存在」（开关关着，三例：列表里没有它、`out` 也不存在、列表里仍有它而 `file` 答 404 的卡片定位与点行）——既有用例在 `chat-workspace-sidebar-reveal.test.tsx`（709 行）的「文件已不存在」一组与 `chat-workspace-sidebar-reveal-html.test.tsx`，把其中开关关着时对 `文件不存在` / 404 文案的断言**原地改写**成 `未选择文件` 且页面上没有该文案（不追加行；`grep -n "文件不存在"` 逐条过，含 `..` 段的一例按 D14-9 同改），逐条记进 PR 的偏离记录；新增的「列表里仍有它」一例放本任务的新文件。验证：在现有实现上判红。
 - [ ] 11a.4 实现（`web/src/features/files/`）：
   - `tree.tsx` 去掉没有 `size` 的行的禁用。
   - `preview.tsx` 的 `size` / `mtime` 改为可缺，缺时头部那一段不渲染，副行与截断提示里带大小的片段省去；`preview-area.tsx` 的媒体预览与 `previewers/frame.tsx` 的文档大小前置判定容忍缺大小。
-  - `onlyPaths` 下的「已不存在」：`subtreeOf`（`browser-paths.ts`）不为「父目录已加载而列表里没有」的路径与记下 404 的路径生成行，目录之下不剩文件时不生成目录行；`workspace-browser.tsx` 在 `onlyPaths` 下收到 `file` / `archive` 的 404 时记下该路径、清除选中并 `onPathChange(null)`，不进入失败态；记下的路径在该路径父目录的 `tree` 应答到达、或 `refresh(paths)` 点名它时作废（Q-1 的默认），随组件卸载清空。不给 `onlyPaths` 时一行不变。
+  - 两种记录（组件内存，随卸载清空）：「被步骤报过」与「应答过 404」。句柄新增 `reported(paths)`：只记账、不发请求——清这些路径的 404 记录并记为被报过。某目录的 `tree` 应答到达时清掉直属于它的路径的两种记录。`refresh()` 与 `refresh(paths)` 都不动记录（D14-8）。
+  - `onlyPaths` 下的「已不存在」：`subtreeOf`（`browser-paths.ts`）不为记下 404 的路径生成行，也不为「父目录已加载、列表里没有、且没有被报过」的路径生成行（被报过的照常生成，无元数据），目录之下不剩文件时不生成目录行。`onlyPaths` 下收到 `file` / `archive` 的 404 时记下该路径、清除选中并 `onPathChange(null)`，不进入失败态。
+  - 新属性 `clearMissing`（design D11）：给了它时，`path` 定位没有落在文件上一律是空态、不放文案（D14-9），当前文件的 `file` / `archive` 答 404 时清除选中并 `onPathChange(null)`、不进入失败态；普通目录树的行不动。`clearMissing` 与 `onlyPaths` 都不给时（文件页）一行不变。
   - `onlyPaths` 下仍不请求任何 `tree`。`workspace-browser.tsx` 不越 800 行——记账逻辑放进 `browser-paths.ts` 或新的小文件。
-  验证：11a.1–11a.3 转绿；#1106 的用例「过滤时不请求 `tree`」不改、仍通过；workspace-sidebar「文件已不存在」与 files-web「地址定位到文件」的既有用例（开关关着、文件页）不改、仍显示 `文件不存在`。
-- [ ] 11a.5 验收清单：`docs/acceptance/functional-checklist.md` 的 CH-101（只看本会话改动）按新行为改写——不必先关开关展开目录即可选中；选中一个已被删除的改动文件后它从列表消失、预览区回到 `未选择文件`、没有错误文字；结论置 `待签`。验证：`web/test/functional-checklist.test.ts` 通过。
-- [ ] 11a.6 变异证据：恢复行的禁用 → 11a.3「父目录未加载的改动文件可选中」判红；过滤视图里偷偷列目录 → 「没有 `tree` 请求」判红（#1106 的既有变异仍被杀死）；预览头恢复无条件拼接 → 11a.2 判红；404 改回显示文案（`文件不存在` 或信封 message）→ 11a.3 的「没有错误文字」与「该行消失」判红；`subtreeOf` 不滤掉列表里没有的路径 → 「空集合与已删除的文件」的 `old.md` 与 `only.md` 判红；树栏 `刷新` 也使记下的 404 作废 → 「`y.md` 没有重新出现」判红。`make ui-walk` 跑一次。PR 写明 D14-5（不经 `file` 的类别沿用既有失败呈现）与 Q-1、Q-2 按默认。
+  - `web/src/features/chat/`：`workspace-sidebar.tsx` 给 `WorkspaceBrowser` 传 `clearMissing`；`use-workspace-sidebar.ts` 的 `useAssistantRefresh` 在发现新结束步骤的那个 effect 里（播种之后、`ended` 分支之前）立即 `browser.current?.reported(fresh)`，不进 300 毫秒窗口——回合在窗口内结束、待刷集合被清掉（现 `:98-99`）时路径已经交出。`refresh` 的两处调用不改：回合结束仍恰一次无参 `refresh()`。头注释同步。
+  验证：11a.1–11a.3 转绿；#1106 的用例「过滤时不请求 `tree`」与「回合结束兜底」「步骤结束触发局部刷新」的既有用例（请求次数）不改、仍通过；files-web「地址定位到文件」与文件页的全部既有用例不改、仍显示 `文件不存在`；侧边栏既有用例里被改写的断言只有 11a.3 点名的那些。
+- [ ] 11a.5 验收清单：`docs/acceptance/functional-checklist.md` 的 CH-101（只看本会话改动）按新行为改写——不必先关开关展开目录即可选中；选中一个已被删除的改动文件后它从列表消失、预览区回到 `未选择文件`、没有错误文字；开关开着时助手新写出的文件不必关开关就出现在列表里；结论置 `待签`。清单里写着 `文件不存在` 的另三条（CH-31、CH-62、FL-22）说的是复制失败、撤回与文件页，不动。验证：`web/test/functional-checklist.test.ts` 通过。
+- [ ] 11a.6 变异证据：恢复行的禁用 → 11a.3「父目录未加载的改动文件可选中」判红；过滤视图里偷偷列目录 → 「没有 `tree` 请求」判红（#1106 的既有变异仍被杀死）；预览头恢复无条件拼接 → 11a.2 判红；404 改回显示文案（`文件不存在` 或信封 message）→ 11a.3 的「没有错误文字」与「该行消失」判红；`subtreeOf` 不滤掉列表里没有的路径 → 「空集合与已删除的文件」的 `old.md` 与 `only.md` 判红；树栏 `刷新` 也使记下的 404 作废 → 「`y.md` 没有重新出现」判红；`subtreeOf` 不看「被报过」（列表里没有即不成行）→ 「过滤开着时助手新写出的文件」第一例判红；把 `reported` 的调用挪进 300 毫秒的定时器 → 同场景第二例（步骤结束与回合结束同窗）判红；`tree` 应答不清「被报过」→ 同场景第三例判红；侧边栏不传 `clearMissing` → 改写后的「文件已不存在」与「过滤关着时被删除的当前文件」判红；文件页也传 `clearMissing` → files-web「地址定位到文件」的既有用例判红。`make ui-walk` 跑一次。PR 写明 D14-5（不经 `file` 的类别沿用既有失败呈现）、D14-8（作废规则）、D14-9（侧边栏的预览区不放定位文案）是编排方的默认，以及开关关着时应答 404 的行留在树里直到重列。
 
-Suggested fixture level: expanded - 改的是文件页与会话页共用的 `WorkspaceBrowser` 在 `onlyPaths` 下的行为，跨 workspace-sidebar、file-previewers、files-web 三个 capability
-Minimal mergeable slice: 11a.2 加 11a.4 里预览头与前置判定的容忍（此时没有行会走到缺元数据的路径，纯放宽，独立保绿）；其后行可选中与已不存在的移出（11a.4 其余加 11a.1、11a.3）——这两件必须同刀，只放开选中而不移出会把裁决否掉的 `文件不存在` 文案发布出去
+Suggested fixture level: expanded - 改的是文件页与会话页共用的 `WorkspaceBrowser` 在 `onlyPaths` 下的行为，另加侧边栏专用的 `clearMissing` 与 `reported`，跨 workspace-sidebar、file-previewers、files-web 三个 capability
+Minimal mergeable slice: 11a.2 加 11a.4 里预览头与前置判定的容忍（此时没有行会走到缺元数据的路径，纯放宽，独立保绿）；其后行可选中与已不存在的移出（11a.4 其余加 11a.1、11a.3）——这两件连同 `reported` 与 `clearMissing` 必须同刀：只放开选中而不移出会把裁决否掉的 `文件不存在` 文案发布出去；移出而没有 `reported` 会把助手新写出的文件藏掉（评审 R2-1）；开关开与关分两刀会留下同一张卡片两种呈现的中间态
 
 ## 11b. workspace-sidebar — 侧边栏拿实际选中，再点同一张卡片重新定位（G11b，#1380；← G11a）
 
-- [ ] 11b.1 测试先行（新文件 `web/test/workspace-browser-actual-selection.test.tsx`，`WorkspaceBrowser` 组件测试）：files-web 场景「实际选中的上报与重复定位」——定位没落在文件上时宿主收到的实际选中为空；`refresh` 之后对同一路径再次发起定位会选中它并上报；两次都没有读写 `location`。验证：在现有实现上判红（同一路径再定位是空操作）。
-- [ ] 11b.2 测试先行（新文件 `web/test/chat-workspace-sidebar-relocate.test.tsx`，会话页整页渲染；`chat-workspace-sidebar-reveal.test.tsx` 已 709 行，不追加）：workspace-sidebar 场景「实际选中与再次点击」两组——开关关着：第一次点击之后 `在文件页打开` 的 `href` 不带 `path`、预览区是 `文件不存在`，文件重新生成且所在层刷新后再点同一行会选中它、`href` 带 `path`；开关开着、列表里本来就没有的 `old.md`：点击之后 `href` 不带被定位的路径。验证：在现有实现上判红。
+- [ ] 11b.1 测试先行（新文件 `web/test/workspace-browser-actual-selection.test.tsx`，`WorkspaceBrowser` 组件测试）：files-web 场景「实际选中的上报与重复定位」（不给 `clearMissing`，所以预览区是 `文件不存在`；给了它的一例预览区是空态，上报相同）——定位没落在文件上时宿主收到的实际选中为空；`refresh` 之后对同一路径再次发起定位会选中它并上报；两次都没有读写 `location`。验证：在现有实现上判红（同一路径再定位是空操作）。
+- [ ] 11b.2 测试先行（新文件 `web/test/chat-workspace-sidebar-relocate.test.tsx`，会话页整页渲染；`chat-workspace-sidebar-reveal.test.tsx` 已 709 行，不追加）：workspace-sidebar 场景「实际选中与再次点击」两组——开关关着：第一次点击之后 `在文件页打开` 的 `href` 不带 `path`、预览区是 `未选择文件`（空态由 G11a 做到，这里只是沿用，页面上没有 `文件不存在`），文件重新生成且所在层刷新后再点同一行会选中它、`href` 带 `path`；开关开着、列表里本来就没有的 `old.md`：点击之后 `href` 不带被定位的路径。验证：在现有实现上判红。
 - [ ] 11b.3 实现：`WorkspaceBrowser` 向宿主上报实际选中的文件，并接受「重新套用 `path`」的触发（design D11）；`web/src/features/chat/workspace-sidebar.tsx` 以上报的实际选中生成 `在文件页打开`，把每一次卡片定位的 `seq` 交给浏览器；头注释里「两处代价」一段随实现删除。文件页不消费这项上报、不据此改地址。`workspace-browser.tsx` 不越 800 行。验证：11b.1、11b.2 转绿；files-web「地址定位到文件」的既有用例（深链到不存在的文件时地址保持原样）与 11a 的全部用例不改、仍通过。
 - [ ] 11b.4 变异证据：侧边栏改回用被定位的路径 → 11b.2 两组的 `href` 断言判红；去掉重新套用的触发 → 11b.2 第一组的第二次点击与 11b.1 判红；文件页也消费上报并改写地址 → 「地址定位到文件」的既有用例判红。`make ui-walk` 跑一次。
 
