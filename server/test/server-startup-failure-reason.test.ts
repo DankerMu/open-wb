@@ -3,7 +3,6 @@
  * source literals, never anything read from the error. Every case runs the real compiled entry.
  * Expected lines are the spec's bytes (http-service-skeleton「启动失败记录带失败阶段」).
  */
-import { type ChildProcess, spawn } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -24,19 +23,20 @@ import {
   expectBindable,
   releaseStartupFixtures,
   reserveWildcardPort,
+  type StartedServer,
   startCompiledServer,
 } from "./server-startup-helpers.js";
 import {
   expectDbReopens,
   expectLayoutWithoutManagedFiles,
 } from "./server-startup-order-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
 const PATH_SENTINEL = "PATHSENTINEL1203zq";
 const UPSTREAM_SENTINEL = "upstream-api-key-sentinel-startup-failure";
 const scratch: string[] = [];
-const children = new Set<ChildProcess>();
 let compiled: CompiledServerEntry;
 
 beforeAll(async () => {
@@ -44,9 +44,6 @@ beforeAll(async () => {
 }, 90_000);
 
 afterAll(async () => {
-  for (const child of children) {
-    child.kill("SIGKILL");
-  }
   await releaseStartupFixtures();
   for (const root of scratch.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -66,18 +63,31 @@ function scratchRoot(): string {
   return root;
 }
 
-/** Runs the entry to its own exit and requires exit code 1 with nothing on stdout. */
+/**
+ * Starts the entry on a port of the helper's choosing — a listen-class failure there is a lost race
+ * for the port (#1273), so it is retried on another one — and runs it to its own exit. `extra` as a
+ * function is evaluated once per attempt: an explicit PREVIEW_PORT has to be taken anew each time.
+ * The root is reused across attempts because the callers seed the obstacle into it beforehand.
+ */
 async function failStartup(
   root: string,
-  extra: Record<string, string> = {},
+  extra: Record<string, string> | (() => Promise<Record<string, string>>) = {},
   requireHook?: string,
 ): Promise<Failure> {
-  const port = await reserveWildcardPort();
-  const server = startCompiledServer(
-    compiled.entry,
-    compiledFixtureEnv(root, port, join(root, "bin", "omp"), extra),
-    requireHook === undefined ? {} : { requireHook },
-  );
+  const { server, port } = await startCompiledServerWithRetry(compiled.entry, async (port) => ({
+    env: compiledFixtureEnv(
+      root,
+      port,
+      join(root, "bin", "omp"),
+      typeof extra === "function" ? await extra() : extra,
+    ),
+    ...(requireHook === undefined ? {} : { requireHook }),
+  }));
+  return failedExit(root, port, server);
+}
+
+/** Runs the entry to its own exit and requires exit code 1 with nothing on stdout. */
+async function failedExit(root: string, port: number, server: StartedServer): Promise<Failure> {
   try {
     expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
     expect(server.stdout()).toBe("");
@@ -102,34 +112,28 @@ function listenOn(port: number): Promise<Server> {
   });
 }
 
-/** The entry with a stdout it cannot write: a descriptor opened read-only (write fails EBADF). */
-async function failWithUnwritableStdout(root: string, port: number): Promise<string> {
+/**
+ * The entry with a stdout it cannot write: a descriptor opened read-only (write fails EBADF).
+ * Started through the retrying helper, so a port lost to another process before the entry's own
+ * listen is retried instead of surfacing as `listen` (#1273, the shape of the #1337 false red).
+ */
+async function failWithUnwritableStdout(root: string): Promise<{ stderr: string; port: number }> {
   const sink = join(root, "stdout-sink");
   writeFileSync(sink, "");
   const fd = openSync(sink, "r");
-  const child = spawn(process.execPath, [compiled.entry], {
-    stdio: ["ignore", fd, "pipe"],
-    env: {
-      PATH: process.env.PATH ?? "/usr/bin",
-      ...compiledFixtureEnv(root, port, join(root, "bin", "omp"), {}),
-    },
+  const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+    env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {}),
+    stdout: fd,
+  })).catch((error: unknown) => {
+    closeSync(fd);
+    throw error;
   });
-  children.add(child);
   try {
-    let stderr = "";
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    const closed = await new Promise((resolve, reject) => {
-      child.once("error", reject);
-      child.once("close", (code, signal) => resolve({ code, signal }));
-    });
+    const closed = await server.waitForClose();
     expect(closed).toEqual({ code: 1, signal: null });
-    return stderr;
+    return { stderr: server.stderr(), port };
   } finally {
-    children.delete(child);
-    child.kill("SIGKILL");
+    await server.dispose();
     closeSync(fd);
   }
 }
@@ -185,6 +189,7 @@ describe("startup failure record carries the failed stage (#1203)", () => {
 
   it("listen: the port is already taken", async () => {
     const root = scratchRoot();
+    // Not on the retrying helper: this case takes the port on purpose; `listen` is the expected result.
     const port = await reserveWildcardPort();
     const holder = await listenOn(port);
     try {
@@ -208,11 +213,20 @@ describe("startup failure record carries the failed stage (#1203)", () => {
 
   it("preview_listen: the preview port is already taken", async () => {
     const root = scratchRoot();
+    // Not on the retrying helper: this case takes the preview port on purpose; `preview_listen` is
+    // the expected result. Both ports are reserved the old way.
     const previewPort = await reserveWildcardPort();
     const holder = await listenOn(previewPort);
     let failure: Failure;
     try {
-      failure = await failStartup(root, { PREVIEW_PORT: String(previewPort) });
+      const port = await reserveWildcardPort();
+      const server = startCompiledServer(
+        compiled.entry,
+        compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
+          PREVIEW_PORT: String(previewPort),
+        }),
+      );
+      failure = await failedExit(root, port, server);
     } finally {
       await new Promise((resolve) => holder.close(resolve));
     }
@@ -255,9 +269,13 @@ describe("startup failure record carries the failed stage (#1203)", () => {
 
   it("preview_cache: the preview cache location is a file", async () => {
     const root = scratchRoot();
-    const previewPort = await reserveWildcardPort();
     writeFileSync(join(root, "preview-cache"), "not-a-directory");
-    const failure = await failStartup(root, { PREVIEW_PORT: String(previewPort) });
+    // The preview listener binds before the cache is prepared: its port is taken anew per attempt.
+    let previewPort = 0;
+    const failure = await failStartup(root, async () => {
+      previewPort = await reserveWildcardPort();
+      return { PREVIEW_PORT: String(previewPort) };
+    });
     expectReason(failure.stderr, "preview_cache");
     const agentDir = join(root, "state", "home", ".omp", "agent");
     expect(existsSync(join(agentDir, "host-overlay.yml"))).toBe(true);
@@ -267,8 +285,7 @@ describe("startup failure record carries the failed stage (#1203)", () => {
 
   it("publish: the stdout sink fails after listen", async () => {
     const root = scratchRoot();
-    const port = await reserveWildcardPort();
-    const stderr = await failWithUnwritableStdout(root, port);
+    const { stderr, port } = await failWithUnwritableStdout(root);
     expectReason(stderr, "publish");
     const agentDir = join(root, "state", "home", ".omp", "agent");
     expect(existsSync(join(agentDir, "models.yml"))).toBe(true);

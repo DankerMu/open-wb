@@ -35,9 +35,8 @@ import {
   getJson,
   login,
   releaseStartupFixtures,
-  reserveWildcardPort,
-  startCompiledServer,
 } from "./server-startup-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const MODEL_ID = "issue-706-layout-model";
 const NODE_SQLITE_WARNING =
@@ -88,11 +87,9 @@ async function expectGenericStartFailure(
   state: string,
   reason: "state_layout" | "host_overlay",
 ): Promise<void> {
-  const port = await reserveWildcardPort();
-  const server = startCompiledServer(
-    compiled.entry,
-    compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
-  );
+  const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+    env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
+  }));
   try {
     expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
     expect(server.stdout()).toBe("");
@@ -114,11 +111,9 @@ describe("production entry managed omp state layout", () => {
     // A state root left wide by the old layout is corrected; the legacy directory is not touched.
     chmodSync(state, 0o2770);
     const legacyBefore = lstatSync(join(legacy, "models.yml"));
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
-    );
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
+    }));
     try {
       await server.waitForStarted();
       expectLayout(state);
@@ -153,16 +148,14 @@ describe("production entry managed omp state layout", () => {
       { id: "m2" },
       { id: "m3", name: "深度", reasoning: true, vision: true, efforts: ["low", "high"] },
     ];
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
         MODEL_CATALOG: JSON.stringify(catalog),
         APPROVAL_MAX_MODE: "write",
         UPLOAD_MAX_BYTES: "1048576",
         UPLOAD_MAX_FILES: "3",
       }),
-    );
+    }));
     try {
       await server.waitForStarted();
       const agentDir = join(root, "state", "home", ".omp", "agent");
@@ -235,11 +228,12 @@ describe("production entry managed omp state layout", () => {
     mkdirSync(target);
     chmodSync(target, 0o755);
     symlinkSync(target, link);
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID, OMP_STATE_DIR: link }),
-    );
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
+        MODEL_ID,
+        OMP_STATE_DIR: link,
+      }),
+    }));
     try {
       await server.waitForStarted();
       expect(lstatSync(link).isSymbolicLink()).toBe(true);
@@ -267,11 +261,9 @@ describe("production entry managed omp state layout", () => {
     const state = join(root, "state");
     const agentDir = join(state, "home", ".omp", "agent");
     for (const _start of [1, 2]) {
-      const port = await reserveWildcardPort();
-      const server = startCompiledServer(
-        compiled.entry,
-        compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
-      );
+      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
+      }));
       try {
         await server.waitForStarted();
         expectHostOverlay(state);

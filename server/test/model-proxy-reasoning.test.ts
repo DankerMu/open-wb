@@ -17,9 +17,8 @@ import {
   compiledFixtureEnv,
   compileServerEntry,
   releaseStartupFixtures,
-  reserveWildcardPort,
-  startCompiledServer,
 } from "./server-startup-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const SOURCE_ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
@@ -193,9 +192,9 @@ describe("production entry — MODEL_REASONING", () => {
     "%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
     async (raw) => {
       const root = scratch("open-wb-reasoning-invalid-");
-      const port = await reserveWildcardPort();
-      const env = compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: raw });
-      const server = startCompiledServer(compiled.entry, env);
+      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: raw }),
+      }));
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -213,11 +212,9 @@ describe("production entry — MODEL_REASONING", () => {
 
   it("未设置时写出含 reasoning 声明的 models.yml", async () => {
     const root = scratch("open-wb-reasoning-default-");
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(root, port, join(root, "bin", "omp"), {}),
-    );
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {}),
+    }));
     try {
       await server.waitForStarted();
       const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
@@ -231,11 +228,9 @@ describe("production entry — MODEL_REASONING", () => {
 
   it("MODEL_REASONING=off 时写出与变更前逐字节相同的 models.yml", async () => {
     const root = scratch("open-wb-reasoning-off-");
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: "off" }),
-    );
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: "off" }),
+    }));
     try {
       await server.waitForStarted();
       const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");

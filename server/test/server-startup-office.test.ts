@@ -314,6 +314,8 @@ describe("production entry clearing work/ as the omp user", () => {
   function startOmpEntry(hook: string, sudoExit?: string): Promise<Entry> {
     return startEntry({
       hook,
+      // 两个调用方都要在 `server_started` 之前动作（假 sudo 挂住、models.yml 的写入被扣住）。
+      held: true,
       prepare: (root) => {
         makeSandboxRoot(root);
         mkdirSync(join(root, "fake-bin"));

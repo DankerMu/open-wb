@@ -14,9 +14,8 @@ import {
   compiledFixtureEnv,
   compileServerEntry,
   releaseStartupFixtures,
-  reserveWildcardPort,
-  startCompiledServer,
 } from "./server-startup-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
@@ -93,10 +92,9 @@ describe(`compiled entry with an invalid ${KEY}`, () => {
     for (const raw of REJECTED) {
       const root = mkdtempSync(join(tmpdir(), "open-wb-spawn-concurrency-"));
       roots.push(root);
-      const env = compiledFixtureEnv(root, await reserveWildcardPort(), join(root, "bin", "omp"), {
-        [KEY]: raw,
-      });
-      const server = startCompiledServer(compiled.entry, env);
+      const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: raw }),
+      }));
 
       expect(await server.waitForClose(), JSON.stringify(raw)).toEqual({ code: 1, signal: null });
       expect(server.stdout()).toBe("");

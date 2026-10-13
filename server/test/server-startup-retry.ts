@@ -21,18 +21,25 @@ interface Launch {
   env: Record<string, string>;
   orderTrace?: string;
   requireHook?: string;
+  stdout?: number;
 }
 
 /**
  * 每次尝试：取一个端口 → `launchFor(port)` → `startCompiledServer` → 等 `server_started`。
- * - 子进程在 `server_started` 之前留下 `reason` 为 `listen` 或 `preview_listen` 的失败记录时，
- *   回收它（整组强杀并等关闭）再换端口重来，至多 `ATTEMPTS` 次。
- * - 成功、其它阶段的失败、等待超时、以及最后一次的监听类失败，都不动子进程，连同这次用的端口
- *   原样交还：调用方照旧调 `waitForStarted()` / `waitForClose()`，结果与直接用
- *   `startCompiledServer` 相同（`waitForStarted` 每次调用都从头判定）。
- * `launchFor` 每次尝试调用一次：与某次尝试绑定的东西（临时根目录、orderTrace 文件、显式的
- * `PREVIEW_PORT`）要在它里面新取，否则前一次失败的尝试留下的 DB 与 trace 行会带进下一次，
- * 被占的预览端口也换不掉。
+ * - 这次等待没有等到 `server_started`（子进程先退出，或等待超时），而此刻 stderr 里已有一行
+ *   `reason` 为 `listen` 或 `preview_listen` 的失败记录时，回收子进程（整组强杀并等关闭）再换
+ *   端口重来，至多 `ATTEMPTS` 次。超时的那一种是：记录已写出、子进程却还没退出。
+ * - 其余一律不动子进程，连同这次用的端口原样交还：等到了 `server_started`；没等到（退出或超时）
+ *   而 stderr 里没有监听类失败记录；以及最后一次尝试，不论结果。调用方照旧调
+ *   `waitForStarted()` / `waitForClose()`，结果与直接用 `startCompiledServer` 相同
+ *   （`waitForStarted` 每次调用都从头判定）。
+ * 子进程要活着停在 `server_started` 之前、由用例自己推进的启动（预加载钩子扣住某一步）不能用它：
+ * 它会先等满 `waitForStarted` 的时限。
+ * `launchFor` 每次尝试调用一次。失败的那次尝试会留下东西（读既有用例的断言得出：主端口被占 →
+ * DB 文件已建、状态目录没有，orderTrace 里有 `listener-close:-` 与 `db-close` 两行；预览端口被占 →
+ * 另有托管布局的目录与主监听器的两行）。所以显式的 `PREVIEW_PORT` 要在 `launchFor` 里新取（否则
+ * 被占的预览端口换不掉），orderTrace 与钩子自己追加的记录文件要每次用新的或先删掉；根目录在
+ * 用例事先往里放了东西时沿用同一个，否则每次新建。
  */
 export async function startCompiledServerWithRetry(
   entry: string,

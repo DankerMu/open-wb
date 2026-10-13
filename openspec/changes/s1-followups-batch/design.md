@@ -266,7 +266,7 @@ issue 里「未核对：`computeSafeRoot` 是否先抛」的答案（读代码�
   - **`在文件页打开`**：选中被清除后地址不带 `path`。G11a 里这由既有的 `onPathChange(null)` 做到（当前文件被删除时浏览器本来就这样上报）；「定位没有落在文件上」时地址仍带被定位的路径，那是 #1380，归 G11b。
   - **三种情形**：侧边栏打开之前就删了（开关开着：根的列表里没有它 → 一开始就不成行；父目录没加载 → 成行，一选中就移出）；选中期间被删、下一次刷新（重取预览得到 404 → 清除选中，开关开着时另移出）；卡片 `查看详情` 指向已删除的文件（侧边栏照常打开，没有选中任何文件，预览区是未选状态；开关开着时不请求 `tree`）。
 - 状态归谁：`WorkspaceBrowser` 的（它有目录缓存，也是它收到 404 与 `tree` 应答），记在组件内存里，随卸载清空。宿主只多给一个属性、多调一个句柄方法，不需要新的回调，`features/files` 仍不从 `features/chat` 导入。
-- **开关关着的改动落在 G11a**，不在 G11b：它与开关开着时的 404 清除是同一个分支、同一条 `onPathChange(null)`，分到两组要先按 `onlyPaths` 写一遍再改成按 `clearMissing`。两组各自保绿：G11a 原地改写被本组行为打破的既有断言并逐条记进偏离记录——开关关着的 `文件不存在` 断言（`chat-workspace-sidebar-reveal.test.tsx`、`chat-workspace-sidebar-reveal-html.test.tsx`），以及开关开着的三处（`chat-workspace-sidebar-changes.test.tsx` 的 C4、`workspace-browser.test.tsx` 里行禁用与 `reveal` 未加载层的两处；清单见 tasks 11a.3），文件页的用例不动；G11b 的用例从一开始就按空态写，只管 `在文件页打开` 的地址与再次点击。
+- **开关关着的改动落在 G11a**，不在 G11b：它与开关开着时的 404 清除是同一个分支、同一条 `onPathChange(null)`，分到两组要先按 `onlyPaths` 写一遍再改成按 `clearMissing`。两组各自保绿：G11a 原地改写被本组行为打破的既有断言并逐条记进偏离记录——开关关着的 `文件不存在` 断言（`chat-workspace-sidebar-reveal.test.tsx`、`chat-workspace-sidebar-reveal-html.test.tsx`），以及开关开着的几处（`chat-workspace-sidebar-changes.test.tsx` 的 C4、`workspace-browser.test.tsx` 里行禁用与 `reveal` 未加载层的两处、`chat-workspace-sidebar-reveal.test.tsx` 的两条 R6；清单见 tasks 11a.3），文件页的用例不动；G11b 的用例从一开始就按空态写，只管 `在文件页打开` 的地址与再次点击。
 - 做不到的一处：不经 `file` 取数据的类别（网页的渲染视图、PDF、办公文档、音视频）在父目录未加载时页面拿不到 404，无从知道文件已删除，除非另发一次探测请求——不发，沿用各类别既有的失败呈现（D14-5）。开关关着时这几类被删除后同样如此：刷新重列之后行消失、选中保留、框内是预览来源的应答。
 
 **G11b（#1380）**

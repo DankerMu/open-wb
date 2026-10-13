@@ -27,6 +27,7 @@ import {
   openPartialRequest,
   type PartialRequest,
 } from "./server-startup-order-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 /** 与 issue 反例同一 deadline。 */
 const SETTLE_DEADLINE_MS = 2_000;
@@ -412,17 +413,18 @@ describe("listener shutdown with a failing module preClose", () => {
 describe("production entry listener force close", () => {
   it("writes exactly one listener_force_close stderr record and still exits 0", async () => {
     const compiled = await compileServerEntry();
-    const port = await reserveWildcardPort();
     const root = mkdtempSync(join(tmpdir(), "open-wb-listener-close-"));
-    const server = startCompiledServer(compiled.entry, {
-      HOST: "127.0.0.1",
-      PORT: String(port),
-      DB_PATH: join(root, "db", "dev.db"),
-      OMP_STATE_DIR: join(root, "state"),
-      SANDBOX_ROOT: join(root, "sandbox"),
-      OMP_BIN: join(root, "bin", "missing-omp"),
-      MODEL_ID: "issue-227-model",
-    });
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: {
+        HOST: "127.0.0.1",
+        PORT: String(port),
+        DB_PATH: join(root, "db", "dev.db"),
+        OMP_STATE_DIR: join(root, "state"),
+        SANDBOX_ROOT: join(root, "sandbox"),
+        OMP_BIN: join(root, "bin", "missing-omp"),
+        MODEL_ID: "issue-227-model",
+      },
+    }));
     let partial: PartialRequest | undefined;
     try {
       await server.waitForStarted();
@@ -447,6 +449,8 @@ describe("production entry listener force close", () => {
 
   it("keeps only the generic failure record when a post-listen startup failure forces close", async () => {
     const compiled = await compileServerEntry();
+    // 不迁到带重试的辅助函数：models.yml 的写入被钩子扣住，用例要在入口退出之前先放进一个在飞
+    // 请求，而辅助函数会先等满 server_started 的时限。端口照旧先取后放（#1273 的空隙仍在）。
     const port = await reserveWildcardPort();
     const root = mkdtempSync(join(tmpdir(), "open-wb-listener-close-failed-"));
     const entered = join(root, "models-entered");
@@ -518,18 +522,23 @@ function connectOutcome(host: string, port: number): Promise<string> {
 describe("production entry HOST=localhost", () => {
   it("binds only 127.0.0.1 so the bounded shutdown drains the single listener", async () => {
     const compiled = await compileServerEntry();
-    const port = await reserveWildcardPort();
-    const previewPort = await reserveWildcardPort();
     const root = mkdtempSync(join(tmpdir(), "open-wb-localhost-"));
-    const server = startCompiledServer(compiled.entry, {
-      HOST: "localhost",
-      PORT: String(port),
-      PREVIEW_PORT: String(previewPort),
-      DB_PATH: join(root, "db", "dev.db"),
-      OMP_STATE_DIR: join(root, "state"),
-      SANDBOX_ROOT: join(root, "sandbox"),
-      OMP_BIN: join(root, "bin", "missing-omp"),
-      MODEL_ID: "issue-340-model",
+    let previewPort = 0;
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, async (port) => {
+      // 预览端口每次尝试新取：被占的那一个换得掉。
+      previewPort = await reserveWildcardPort();
+      return {
+        env: {
+          HOST: "localhost",
+          PORT: String(port),
+          PREVIEW_PORT: String(previewPort),
+          DB_PATH: join(root, "db", "dev.db"),
+          OMP_STATE_DIR: join(root, "state"),
+          SANDBOX_ROOT: join(root, "sandbox"),
+          OMP_BIN: join(root, "bin", "missing-omp"),
+          MODEL_ID: "issue-340-model",
+        },
+      };
     });
     try {
       const started = await server.waitForStarted();

@@ -30,6 +30,7 @@ import {
   writeFakeOmpLauncher,
 } from "./server-startup-helpers.js";
 import { applicationStderr, MODEL_ID } from "./server-startup-order-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
 
 const STARTUP_MODULES = [
@@ -57,7 +58,6 @@ afterAll(async () => {
 describe("production entry lifecycle", () => {
   it("writes the actual-port model file before server_started and creates only the managed state layout", async () => {
     const compiled = await compileServerEntry();
-    const port = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-startup-case-"));
     scratch.push(scratchRoot);
     const state = join(scratchRoot, "state");
@@ -65,15 +65,17 @@ describe("production entry lifecycle", () => {
     const dbPath = join(scratchRoot, "db", "dev.db");
     const ompBin = join(scratchRoot, "bin", "missing-omp");
 
-    const server = startCompiledServer(compiled.entry, {
-      HOST: "0.0.0.0",
-      PORT: String(port),
-      DB_PATH: dbPath,
-      OMP_STATE_DIR: state,
-      SANDBOX_ROOT: sandbox,
-      OMP_BIN: ompBin,
-      MODEL_ID,
-    });
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: {
+        HOST: "0.0.0.0",
+        PORT: String(port),
+        DB_PATH: dbPath,
+        OMP_STATE_DIR: state,
+        SANDBOX_ROOT: sandbox,
+        OMP_BIN: ompBin,
+        MODEL_ID,
+      },
+    }));
 
     try {
       const started = await server.waitForStarted();
@@ -139,17 +141,23 @@ describe("production entry lifecycle", () => {
 
   it("records native exit before the main listener's close before database close", async () => {
     const compiled = await compileServerEntry();
-    const port = await reserveWildcardPort();
-    const previewPort = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-startup-order-"));
     scratch.push(scratchRoot);
     const tracePath = join(scratchRoot, "order.log");
     const bin = writeFakeOmpLauncher(scratchRoot, "hang-eof");
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(scratchRoot, port, bin, { MODEL_ID, PREVIEW_PORT: String(previewPort) }),
-      { orderTrace: tracePath },
-    );
+    let previewPort = 0;
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, async (port) => {
+      // 每次尝试：预览端口新取，上一次失败的尝试留下的 trace 行删掉。
+      previewPort = await reserveWildcardPort();
+      rmSync(tracePath, { force: true });
+      return {
+        env: compiledFixtureEnv(scratchRoot, port, bin, {
+          MODEL_ID,
+          PREVIEW_PORT: String(previewPort),
+        }),
+        orderTrace: tracePath,
+      };
+    });
     let exitCode: number | null = 1;
     try {
       await server.waitForStarted();
@@ -169,16 +177,18 @@ describe("production entry lifecycle", () => {
 
   it("binds the configured PORT before the system assigns the default preview port", async () => {
     const compiled = await compileServerEntry();
-    const port = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-bind-order-"));
     scratch.push(scratchRoot);
     const tracePath = join(scratchRoot, "order.log");
     // 不设 PREVIEW_PORT：缺省 0，由系统分配。
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
-      { orderTrace: tracePath },
-    );
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => {
+      // 上一次失败的尝试留下的 trace 行不带进这一次。
+      rmSync(tracePath, { force: true });
+      return {
+        env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
+        orderTrace: tracePath,
+      };
+    });
     try {
       const started = await server.waitForStarted();
       // success record 出现时两行都已在 trace 里：主监听器在 PORT 上的绑定在先。
@@ -200,21 +210,19 @@ describe("production entry lifecycle", () => {
 
   it("relays a full call-proxy turn without leaking the upstream key or runtime bearer", async () => {
     const compiled = await compileServerEntry();
-    const port = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-proxy-turn-"));
     scratch.push(scratchRoot);
     const upstreamKey = `upstream-sentinel-${randomBytes(23).toString("hex")}`;
     const upstream = await startTrackedFakeUpstream(upstreams, { apiKey: upstreamKey });
     const bearerPath = join(scratchRoot, "runtime-bearer.txt");
     const bin = writeFakeOmpLauncher(scratchRoot, "call-proxy", bearerPath);
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(scratchRoot, port, bin, {
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(scratchRoot, port, bin, {
         MODEL_ID,
         MODEL_UPSTREAM_BASE_URL: `http://127.0.0.1:${upstream.port}`,
         MODEL_UPSTREAM_API_KEY: upstreamKey,
       }),
-    );
+    }));
     try {
       await server.waitForStarted();
       const cookie = await login(port);
@@ -243,6 +251,8 @@ describe("production entry lifecycle", () => {
 
   it("publishes nothing when SIGTERM arrives while the models.yml write is held", async () => {
     const compiled = await compileServerEntry();
+    // 不迁到带重试的辅助函数：models.yml 的写入被钩子扣住，用例要在 server_started 之前动作，
+    // 而辅助函数会先等满 server_started 的时限。两个端口照旧先取后放（#1273 的空隙仍在）。
     const port = await reserveWildcardPort();
     const previewPort = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-held-write-"));
