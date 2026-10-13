@@ -76,7 +76,15 @@
   每条 MODIFIED 保留主规格该条文现有的全部场景标题。验证：`$HOME/.nvm/versions/node/v24.13.1/bin/openspec validate s1f-files-page --strict --no-interactive` 与 `$HOME/.local/bin/openspec validate s1f-files-page --strict --no-interactive` 都通过且 ERROR 为 0。
   实施注记见 `implementation-notes-1.md`「0.1（#1049）」。
   核对记录（#1049，2026-10-09，底本为 C 归档于 #980、S1g 归档于 #1047 / PR #1284 之后的主规格，合并提交 `7e0e6d3`）：D25 表十三条（十二条 MODIFIED 与被移除的「产物面板」）的表头全部命中主规格，本 change 另十四条 MODIFIED 的表头同样命中、35 条 ADDED 的表头在主规格里都不存在（预期归档输出 +35、~26、-1）；十三条与主规格的句子级差异只有 D25「本 change 的增量」列所列内容，外加一处表里漏列的本 change 自己的增量——「服务启动与装配」失败记录 `reason` 枚举的 `preview_cache` / `preview_listen` 一句（#1203 对齐时加入），已补进 D25 的表，delta 无需修改。与 S1g 同名的五条（chat-web「会话页」、http-service-skeleton 三条、sandbox-core「resolve 契约与逃逸向量」）带着 S1g 已交付的全部句子与场景；C 在实现期改过的各处（启动失败 `reason` 枚举与场景「启动失败记录带失败阶段」等）也都在。26 条 MODIFIED 的场景标题集合都是主规格同名条文的超集。计数：主规格为二十三项配置、十五条归属身份、十六码、`op ∈ {read, list, mkdir, write}`、迁移回执到 042；本 change 为三十五项（+12）、十七条（+2）、十六码（不变）、`op` 加 `delete` 与 `move`，不新增迁移；同一条文内正文与场景的计数、枚举一致。表外一处：主规格 session-sidebar「分组侧栏」仍写「既有的 `新建会话` 按钮（名称与行为不变）」，ui-foundation「组件分层」的场景「会话页迁移终态」仍把 `session-sidebar.tsx` 列在已迁移清单里，ui-primitives「按钮单一实现与旧类退役」自本 change 起草以来未被 C / S1g 改过。本 change 独自修改的十四条的主规格底本自起草以来逐字未变。两个 openspec CLI（1.3.1 与 1.13.2）的 `validate --strict` 都通过，0 个 ERROR。文首所列行数的现值（已同步进文首与 design）：`web/src/lib/api.ts` 778、`web/src/lib/md-render.ts` 797、`web/e2e/ui-walk-sessions.spec.ts` 681、`web/e2e/ui-walk-layout.ts` 793、`server/src/workspaces/rest.ts` 416。
-- [ ] 0.2 本 change 归档之前：用当时的主规格把 0.1 再做一遍（期间主规格若又被别的 change 改过，以当时的为准），diff 里仍只允许出现 D25 表里列的增量。
+- [x] 0.2 本 change 归档之前：用当时的主规格把 0.1 再做一遍（期间主规格若又被别的 change 改过，以当时的为准），diff 里仍只允许出现 D25 表里列的增量。
+  核对记录（#1124，2026-10-12，底本为 `ci-split-unit-tests` 归档（`5c355bcc`）之后的主规格，即 `master` 的 `5083399f`；做法与 0.1 相同，另以 0.1 的底本 `7e0e6d3` 为参照逐条比对两侧的条文文本）：
+  主规格自 0.1 以来只被 `ci-split-unit-tests` 的归档改过，改的是 omp-uid-isolation 一个场景与 verification-harness 的 CI job 各条（八个 direct job → 九个、新增「单元测试拆分」两个场景）；本 change 在 verification-harness 只有一条 MODIFIED「UI 走查（Playwright）」，该条主规格文本自 0.1 以来一字未动，在 omp-uid-isolation 没有 delta。
+  本 change 全部 26 条 MODIFIED 的主规格同名条文与 0.1 时逐字相同；26 条与 1 条 REMOVED 的表头全部命中主规格，35 条 ADDED 的表头在主规格里都不存在（预期归档输出 +35、~26、-1，与 0.1 相同）；26 条 MODIFIED 的场景标题集合都是主规格同名条文的超集。
+  D25 表十三条里，十二条（含被移除的「产物面板」）的 delta 文本自 0.1 以来一字未动，0.1 的结论照旧成立。改过的只有 http-service-skeleton「服务启动与装配」，三处：① 十二键一段给 `PREVIEW_ARCHIVE_MAX_ENTRIES` 加了上界 `10000`（#1353），② 场景「预览与文件键的非法值」随之加 `10001` 一例与「规则文本自带的数字不算回显输入」的括注（#1353）——这两处都在表里已列为本 change 新增的一段与新增的场景之内；
+  ③ 失败清理 / 关停一句把「再停止listener」写明为「再停止主listener」并加括注「预览监听器在这一串之前关闭，次序见『预览监听器的装配与关停』」（owner 2026-10-11 裁决以交付的次序为准之后加入）——这是对底本句子的改动而表里没有列，已补进 D25 的表，delta 无需修改。除此之外没有表外差异。
+  计数：主规格仍为二十三项配置、十五条归属身份、十六码、`op ∈ {read, list, mkdir, write}`、迁移回执到 042；本 change 为三十五项（+12）、十七条（+2）、十六码（不变）、`op` 加 `delete` 与 `move`，不新增迁移；同一条文内正文与场景的计数一致。
+  表外一处：主规格 session-sidebar「分组侧栏」、ui-foundation「组件分层」、ui-primitives「按钮单一实现与旧类退役」自 0.1 以来都未被改动。`openspec/changes/` 下没有其它在途 change。
+  两个 CLI（1.3.1 与 1.13.2）的 `openspec validate s1f-files-page --strict --no-interactive` 都通过，ERROR 为 0。
 
 Suggested fixture level: none - 只核对与修正规格文本，不改运行时代码
 Minimal mergeable slice: 0.1 一刀（有差异才产生 PR）；0.2 随归档
@@ -369,10 +377,13 @@ Minimal mergeable slice: atomic - 两个监听器与回收目录定时器在入�
   对输出按同一个 fd 的 `fstat` 所得 `size` 复制恰好这么多字节：`size` 大于 200 MiB → 不读，`failed`；读到的字节少于 `size` → `failed`（半截的副本不留在 `pdf/`）。上限是写死的常量，不加配置键。
   同一个 PR 更正 `server/src/preview/office.ts:9` 头注释里的「其后代可能残留」：按 design D18 与 owner D-25 写成实测事实（`OMP_USER` 模式下 `soffice.bin` 每次都留下并把转换跑完，实际并发可以超过上限）。
   各带用例与变异证据（去掉上限 → 超限输出被读入而判红；不比对读到的字节数 → 短读的输出进了 `pdf/` 而判红）。
-- [ ] 14.5 测试（新文件 `server/test/office-converter.test.ts`、`office-queue.test.ts`、`office-cache.test.ts`）：三条需求的全部场景，对着 14.4 的假可执行文件真实 spawn；「超时与中止」在同 uid 模式下断言假进程及其子进程都不存在；sudo 前缀与「OMP_USER 模式下终止的是 sudo」用记录型假 `sudo`（记录 pid 后睡眠：断言它被 `SIGKILL`、恰被启动一次、名额已释放）。office-preview「自动化测试不需要 LibreOffice」：转换器经注入的 spawn 函数启动进程，测试记录每次启动的可执行文件路径，断言其 basename 没有一个恰为 `soffice` 或 `libreoffice`（夹具名是 `fake-soffice.mjs`）。
+- [x] 14.5 测试（新文件 `server/test/office-converter.test.ts`、`office-queue.test.ts`、`office-cache.test.ts`）：三条需求的全部场景，对着 14.4 的假可执行文件真实 spawn；「超时与中止」在同 uid 模式下断言假进程及其子进程都不存在；sudo 前缀与「OMP_USER 模式下终止的是 sudo」用记录型假 `sudo`（记录 pid 后睡眠：断言它被 `SIGKILL`、恰被启动一次、名额已释放）。office-preview「自动化测试不需要 LibreOffice」：转换器经注入的 spawn 函数启动进程，测试记录每次启动的可执行文件路径，断言其 basename 没有一个恰为 `soffice` 或 `libreoffice`（夹具名是 `fake-soffice.mjs`）。
   「OMP_USER 模式下启动时清空 work」（`office-cache.test.ts`，记录型假 `sudo`）：假 `sudo` 恰被启动一次且 argv 逐项相等、环境的键只有 `PATH`（与 `LANG`）、它结束之后本进程才开始删除、结束时 `work` 为空；假 `sudo` 以退出码 1 结束 → stderr 恰多一行 `{"event":"preview_work_clear_failed"}`、不抛出、本进程可删的条目照常被删；`PATH` 含相对项 → 假 `sudo` 没有被启动、同一行日志；不提供 `ompUser` → 没有启动 `sudo`；提供 `ompUser` 而不提供 `officeBin` → 没有启动 `sudo`、stderr 没有新增行，`work` 照常被本进程清空。
-- [ ] 14.6 变异证据：把输出改名进缓存而不是复制 → inode / 属主断言判红；同 uid 模式超时只杀直接子进程 → 「子进程也不存在」判红；`OMP_USER` 模式改为再起一个 `sudo … pkill` → 「假 `sudo` 恰被启动一次」判红；去掉去重 → 「恰启动一次」判红；失败结果写缓存 → 「失败不入缓存」判红。
+- [x] 14.6 变异证据：把输出改名进缓存而不是复制 → inode / 属主断言判红；同 uid 模式超时只杀直接子进程 → 「子进程也不存在」判红；`OMP_USER` 模式改为再起一个 `sudo … pkill` → 「假 `sudo` 恰被启动一次」判红；去掉去重 → 「恰启动一次」判红；失败结果写缓存 → 「失败不入缓存」判红。
   启动时清空 `work`（14.3）：同 uid 模式也执行 `sudo` → 「没有启动 `sudo`」判红；判定里去掉 `officeBin`（只看 `ompUser`）→ 「有 `ompUser` 而没有 `officeBin` 时没有启动 `sudo`」判红；跳过 `sudo` 时连本进程自己的删除也跳过 → 该例的「`work` 为空」判红；argv 改成带通配或换成别的命令 → argv 逐项相等的断言判红；不等 `sudo` 结束就开始自己的删除 → 次序断言判红；该命令失败时抛出 → 「不抛出」判红；失败时不记日志或日志带路径 → stderr 整行相等的断言判红；去掉 `assertSafeSudoPath` → 「`PATH` 含相对项时不启动」判红。
+  勾选记录（#1124，2026-10-12 归档前核对；14.5、14.6 分摊在 #1071、#1072、#1073 与跟进 #1302 里交付，当时各 PR 只勾了自己的任务号）：14.5 的各条款在主干上都有测试——转换器调用契约九个场景在 `server/test/office-converter.test.ts`（输出字节上界在 `office-converter-output.test.ts`），并发与去重三个场景在 `office-queue.test.ts`，转换缓存的前三个场景在 `office-cache.test.ts`。
+  与任务文字不同的两处：转换缓存的后两个场景（启动清空 `work`、其超时与关停终止）在 `office-work-clear.test.ts` 而不在 `office-cache.test.ts`；「失败不入缓存」用的是内联的 node 替身进程而不是 `fake-soffice.mjs`（夹具在 `server/test/fixtures/`）。
+  14.6 点名的五条变异的实跑结果记在各 PR 的正文里（#1298：只杀直接子进程、再起 `sudo … pkill`；#1312：改名进缓存、失败写缓存，以及启动清空 `work` 的各条；#1324：去掉去重），`implementation-notes` 里的「变异」行是实施前的预期。
 
 Suggested fixture level: expanded - 启动外部进程处理不可信输入：身份、超时、并发与缓存完整性
 Minimal mergeable slice: 14.1 + 14.4 + 对应测试（单次转换的契约）先合；14.7（输出复制设界与头注释更正，带自己的用例）单独一刀；排队与缓存各自随后（整组以参数收值、对着假可执行文件测试，只依赖 0.1，不依赖组 13，可与组 4–13 并行）
@@ -702,8 +713,9 @@ Minimal mergeable slice: (a)(c)(d)(e) 四步不依赖隔离来源，可先合；
 - [x] 28.5 `IMPLEMENTATION_PLAN.md`：S1f 的 D 一节标注已交付的范围与本 change 留下的后续（旧样式层整体移除的清理 issue、包体上限）；在「S4b 单机部署包」一节加一行：部署镜像要安装 LibreOffice 并设 `OFFICE_BIN`、发布 `PREVIEW_PORT`（压测第 5 条；本 change 不配 `OFFICE_BIN` 即功能关闭）。
 - [x] 28.6 真实转换的人工验证（office-preview「真实转换的人工验证」，测试 VPS，uid 分离部署、已装 LibreOffice）：docx、xlsx、pptx 各一份经 `/o/` 在浏览器内置查看器里可翻页；转换进程 `Uid` 为 omp 用户、缓存文件属应用用户；
   超时终止一次之后残留进程是否出现（进程名；只记录，不改变做法）；从另一台机器经固定的 `PREVIEW_PORT` 打开 html 预览且相对资源可用。结果与 LibreOffice 版本写进 ADR-0014（残留一项同时写进 ADR-0010 增补）。Depends on 1.1、1.3。
-- [ ] 28.7 收尾核对：0.2 的对底已做；两个 CLI 的 `openspec validate s1f-files-page --strict --no-interactive` 都通过；`docs/acceptance/functional-checklist.md` 里本 change 新增与改写的行全部为 `待签`；`ATTRIBUTION.md` 含 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`、`react-resizable-panels`、`yauzl`；
+- [x] 28.7 收尾核对：0.2 的对底已做；两个 CLI 的 `openspec validate s1f-files-page --strict --no-interactive` 都通过；`docs/acceptance/functional-checklist.md` 里本 change 新增与改写的行全部为 `待签`；`ATTRIBUTION.md` 含 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`、`react-resizable-panels`、`yauzl`；
   为「旧样式层整体移除」开一个后续 issue（design「Not yet specified」）并在 Epic 里链接。
+  核对记录（#1124，2026-10-12）：0.2 的对底已做（见 0.2 下的记录）；两个 CLI（1.3.1、1.13.2）的 validate 都通过；`docs/acceptance/functional-checklist.md` 的 FL、CH、SH 三节共 151 行，签收栏全部为 `待签`；`ATTRIBUTION.md` 含五个依赖名；「旧样式层整体移除」的后续 issue 是 #1393，已在 Epic #1048 里链接。
 
 Suggested fixture level: none - 文档、术语与人工验证记录，不改运行时代码
 Minimal mergeable slice: 28.1–28.5 的文档可一个 PR 合入；28.6 的实测记录作为对 ADR-0014 的第二个小 PR
