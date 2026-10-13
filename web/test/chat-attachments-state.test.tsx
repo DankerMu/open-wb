@@ -54,6 +54,7 @@ function mount(overrides: Partial<Props> = {}) {
   let props = initialProps;
   const hook = renderHook((current: Props) => useAttachmentsState(current), { initialProps });
   const { result } = hook;
+  let flushing: ReturnType<typeof result.current.flush> = null;
   return {
     calls,
     hook,
@@ -76,15 +77,17 @@ function mount(overrides: Partial<Props> = {}) {
         value: undefined,
       };
       act(() => {
-        const flushing = result.current.flush(key);
+        flushing = result.current.flush(key);
         outcome.started = flushing !== null;
-        void flushing?.then((value) => {
+        void flushing?.done.then((value) => {
           outcome.settled = true;
           outcome.value = value;
         });
       });
       return outcome;
     },
+    /** 最近一次 `flush` 给出的 `cancel`。 */
+    cancelFlush: () => act(() => flushing?.cancel()),
     rerender(next: Partial<Props>) {
       props = { ...props, ...next };
       hook.rerender(props);
@@ -562,6 +565,33 @@ describe("欢迎态暂存的交接与上传", () => {
     await settle(page.calls[1], done("b.png"));
     expect(outcome).toEqual({ started: true, settled: true, value: undefined });
     expect(page.shown()).toEqual(["b.png uploaded 100"]);
+  });
+
+  it("cancel：在途的中止并回到待上传，其后的不再发出，已传完的不动，不算失败；再 flush 从被中止的那个接着传；落定后 cancel 无效", async () => {
+    const page = handedOver(W, "a.pdf", "b.png", "c.txt");
+    const outcome = page.flush("A");
+    await settle(page.calls[0], done("a.pdf"));
+    page.cancelFlush();
+    expect(page.calls[1]?.signal.aborted).toBe(true);
+    expect(page.shown()).toEqual(["a.pdf uploaded 100", "b.png pending 0", "c.txt pending 0"]);
+    await settle(page.calls[1], aborted());
+    expect(outcome).toEqual({ started: true, settled: true, value: undefined });
+    expect(page.shown()).toEqual(["a.pdf uploaded 100", "b.png pending 0", "c.txt pending 0"]);
+    expect(page.items()[1]?.message).toBeNull();
+    expect(page.sent()).toEqual(["a.pdf", "b.png"]);
+
+    const again = page.flush("A");
+    expect(page.sent()).toEqual(["a.pdf", "b.png", "b.png"]);
+    await settle(page.calls[2], done("b.png"));
+    await settle(page.calls[3], done("c.txt"));
+    expect(again).toEqual({ started: true, settled: true, value: undefined });
+    page.cancelFlush();
+    expect(page.calls[3]?.signal.aborted).toBe(false);
+    expect(page.shown()).toEqual([
+      "a.pdf uploaded 100",
+      "b.png uploaded 100",
+      "c.txt uploaded 100",
+    ]);
   });
 
   it.each([

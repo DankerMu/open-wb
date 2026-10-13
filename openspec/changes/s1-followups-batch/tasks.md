@@ -88,11 +88,11 @@ Minimal mergeable slice: atomic - 一个纯函数里的一处校验加它的测�
 
 ## 5. message-attachments — 首次发送带暂存文件的三处边角（G5，#1277）
 
-- [ ] 5.1 测试先行（整页渲染加假 API，`web/test/chat-attachments-first-send.test.tsx`，现 621 行；三项加起来会越线时把新用例放进新文件 `web/test/chat-attachments-first-send-cancel.test.tsx`）：场景「上传阶段按停止」——三个文件、第二个上传到 40% 时点 `停止`：在途请求的 `signal` 被中止、第三个没有请求、没有 prompt / `stopSession` / 删除请求、输入框解锁、草稿为原文、标签为已上传 / `待上传` / `待上传`、没有错误文字、URL 仍选中新会话；随后再次发送：没有第二次 `createSession`、不重传第一个、恰一次 prompt 带三个 `path`。另一例回合已在运行时点 `停止` 仍恰一次 `stopSession`。验证：第一例在现有实现上判红（现在发出 `stopSession` 且 prompt 照发）。
-- [ ] 5.2 测试先行：场景「移空标签后不发空 prompt」——建会话期间移除唯一标签、上传到 40% 时移除，两例都没有 prompt、输入框不停在 `生成中`、没有 400 文案；草稿非空的一例恰一次 `{"message":"看看"}`。验证：前两例在现有实现上判红（发出 `{"message":""}` 并显示 400）。
-- [ ] 5.3 测试先行：场景「上传落定时已离开该会话」——让上传在「渲染已把当前请求的会话指向别处、effect 尚未中止」之间落定：没有 prompt，另一个会话的草稿、标签、错误区不变。时序的造法写在用例注释里。验证：在现有实现上判红；若现有测试设施造不出这个时序，改为对抽出的归属判定函数做单元测试，并在 PR 里写明整页层没有覆盖的原因。
-- [ ] 5.4 实现（`web/src/features/chat/turn-actions.ts`、`attachments-state.ts`）：把 prompt 落定处的六项判定抽成一个函数，三处共用（design D5）；`send()` 在文本去空白后为空且没有取到标签时不发请求、按未受理收尾；`stopTurn` 在页面拥有一次尚未受理且处于上传阶段的首次发送时走取消——附件队列给出「中止在途并撤掉排队、被中止的回到 `待上传`」的入口，草稿与标签恢复，不写错误文案，不调 `stopSession`。`turn-actions.ts` 不越 800 行，`use-chat-session.ts` 不净增。验证：5.1–5.3 转绿，首次发送与带附件发送的既有用例全绿。
-- [ ] 5.5 变异证据：`stopTurn` 恢复为无条件 `stopSession` → 5.1 判红；去掉 `send()` 的空判断 → 5.2 判红；`staged.then` 改回只查 `aborted` → 5.3 判红。`make ui-walk` 跑一次。
+- [x] 5.1 测试先行（整页渲染加假 API，`web/test/chat-attachments-first-send.test.tsx`，现 621 行；三项加起来会越线时把新用例放进新文件 `web/test/chat-attachments-first-send-cancel.test.tsx`）：场景「上传阶段按停止」——三个文件、第二个上传到 40% 时点 `停止`：在途请求的 `signal` 被中止、第三个没有请求、没有 prompt / `stopSession` / 删除请求、输入框解锁、草稿为原文、标签为已上传 / `待上传` / `待上传`、没有错误文字、URL 仍选中新会话；随后再次发送：没有第二次 `createSession`、不重传第一个、恰一次 prompt 带三个 `path`。另一例回合已在运行时点 `停止` 仍恰一次 `stopSession`。验证：第一例在现有实现上判红（现在发出 `stopSession` 且 prompt 照发）。
+- [x] 5.2 测试先行：场景「移空标签后不发空 prompt」——建会话期间移除唯一标签、上传到 40% 时移除，两例都没有 prompt、输入框不停在 `生成中`、没有 400 文案；草稿非空的一例恰一次 `{"message":"看看"}`。验证：前两例在现有实现上判红（发出 `{"message":""}` 并显示 400）。
+- [x] 5.3 测试先行：场景「上传落定时已离开该会话」——让上传在「渲染已把当前请求的会话指向别处、effect 尚未中止」之间落定：没有 prompt，另一个会话的草稿、标签、错误区不变。时序的造法写在用例注释里。验证：在现有实现上判红；若现有测试设施造不出这个时序，改为对抽出的归属判定函数做单元测试，并在 PR 里写明整页层没有覆盖的原因。
+- [x] 5.4 实现（`web/src/features/chat/turn-actions.ts`、`attachments-state.ts`）：把 prompt 落定处的六项判定抽成一个函数，三处共用（design D5）；`send()` 在文本去空白后为空且没有取到标签时不发请求、按未受理收尾；`stopTurn` 在页面拥有一次尚未受理且处于上传阶段的首次发送时走取消——附件队列给出「中止在途并撤掉排队、被中止的回到 `待上传`」的入口，草稿与标签恢复，不写错误文案，不调 `stopSession`。`turn-actions.ts` 不越 800 行，`use-chat-session.ts` 不净增。验证：5.1–5.3 转绿，首次发送与带附件发送的既有用例全绿。
+- [x] 5.5 变异证据：`stopTurn` 恢复为无条件 `stopSession` → 5.1 判红；去掉 `send()` 的空判断 → 5.2 判红；`staged.then` 改回只查 `aborted` → 5.3 判红。`make ui-walk` 跑一次。
 
 Suggested fixture level: expanded - 改的是发送链路上的并发与次序（中止、排队、归属判定），不是孤立的显示逻辑
 Minimal mergeable slice: 5.3 加 5.4 里的归属判定抽取（纯重构加一处补判，独立保绿）；其后空 prompt（5.2）；最后停止（5.1）——三条共用一段代码，也可以一个 PR 做完

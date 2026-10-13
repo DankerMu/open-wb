@@ -1,9 +1,10 @@
 // 会话页回合操作：prompt 派发及其所有权 fence、审批作答、停止、重新生成、从此处分叉、撤回（由 useChatSession 调用并注入 fence 状态）。
-import { type Dispatch, type RefObject, type SetStateAction, useCallback } from "react";
+import { type Dispatch, type RefObject, type SetStateAction, useCallback, useRef } from "react";
 import { type ApiClient, ApiError } from "../../lib/api.js";
 import type { ChatMessageSnapshot } from "../../lib/session-contract.js";
 import type { useAttachmentsState } from "./attachments-state.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
+import { ownsCreateSend, ownsDispatch } from "./ownership.js";
 import type {
   ChatListState,
   ChatMutationOwner,
@@ -32,6 +33,15 @@ function isUndoConflict(error: unknown) {
   return error instanceof ApiError && error.status === 409 && error.code === "undo_conflict";
 }
 
+/** 输入框上的错误；`error` 为 null（未受理但没有可显示的错误）时是 null，即不显示。 */
+function alertOf(
+  client: ApiClient,
+  sessionId: string | null,
+  error: unknown,
+): ChatOwnedAlert | null {
+  return error === null ? null : { client, sessionId, message: errorMessage(error) };
+}
+
 type Attachments = ReturnType<typeof useAttachmentsState>;
 type ReplaceAttachments = Attachments["replace"];
 type UndoFiles = Parameters<ApiClient["undoMessage"]>[2];
@@ -48,7 +58,7 @@ type TurnActionDeps = {
   clientRef: RefObject<ApiClient>;
   closeSource: () => void;
   composerRef: RefObject<HTMLTextAreaElement | null>;
-  /** 发送前把某个会话里 `待上传` 的标签逐个传完：没有就同步返回 null，否则 resolve undefined 或让它停下的错误。 */
+  /** 发送前把某个会话里 `待上传` 的标签逐个传完：没有就同步返回 null，否则给出落定的 promise 与取消入口。 */
   flushAttachments: Attachments["flush"];
   /** 置真后的下一次提交里聚焦输入框（请求期间它是 disabled，`focus()` 无效），只此一次。 */
   focusOnUnlockRef: RefObject<boolean>;
@@ -129,6 +139,8 @@ export function useTurnActions({
   undoFlightRef,
   undoSkippedResyncRef,
 }: TurnActionDeps) {
+  // 上传阶段的那次派发（`flush` 给出句柄起、它落定止）：`停止` 据此取消这次发送，而不是请求停止回合。
+  const stagingRef = useRef<{ generation: number; withdraw: () => void } | null>(null);
   const restoreOwnedDraft = useCallback(
     (prompt: string, ownedClient: ApiClient, sessionId: string | null) => {
       if (
@@ -160,6 +172,7 @@ export function useTurnActions({
       controller: AbortController,
       mutationGeneration: number,
       ownedClient: ApiClient,
+      /** null：未受理但没有可显示的错误（上传阶段按了 `停止`、标签移空后的空 prompt），错误区清空。 */
       error: unknown,
       generation: number,
       accepted: boolean,
@@ -200,11 +213,7 @@ export function useTurnActions({
       ) {
         replaceAttachments(ownedSessionId, sent);
       }
-      setPromptError({
-        client: ownedClient,
-        sessionId: ownedSessionId,
-        message: errorMessage(error),
-      });
+      setPromptError(alertOf(ownedClient, ownedSessionId, error));
       finishCreateSend(generation);
       releaseMutationIfOwned(controller);
       // A welcome-state first send skipped the new session's history read to keep the handoff, and
@@ -247,40 +256,58 @@ export function useTurnActions({
         sessionId,
       });
       setPromptError(null);
+      // 这次派发仍归本页所有：prompt 落定、快照落定、上传落定三处共用，不成立即不发请求、不改界面。
+      const owner = {
+        client: ownedClient,
+        controller,
+        createSendGeneration: generation,
+        mutationGeneration,
+        sessionId,
+      };
+      const owned = () =>
+        ownsDispatch(owner, {
+          client: clientRef.current,
+          mounted: mountedRef.current,
+          mutationGeneration: mutationGenerationRef.current,
+          pending: pendingCreateSendRef.current,
+          requestedSessionId: requestedSessionRef.current,
+        });
+      const unaccepted = (error: unknown, sent: ReturnType<ReplaceAttachments> | null) =>
+        failOwnedPrompt(
+          controller,
+          mutationGeneration,
+          ownedClient,
+          error,
+          generation,
+          false,
+          sent,
+        );
       const send = () => {
         // 与清空草稿同一次事件里取走标签；`prompt` 原样发出，不裁剪、不补字。
         const sent = replaceAttachments(sessionId, []);
+        // 标签在建会话或上传期间被移空、文本又是空白：这个 prompt 只会得到 400，不发，按未受理收尾。
+        if (prompt.trim().length === 0 && sent.length === 0) {
+          unaccepted(null, null);
+          return;
+        }
         void ownedClient
           .prompt(sessionId, prompt, {
             attachments: sent.flatMap(({ path }) => path ?? []),
             signal: controller.signal,
           })
           .then(() => {
-            if (
-              !mountedRef.current ||
-              controller.signal.aborted ||
-              mutationGeneration !== mutationGenerationRef.current ||
-              pendingCreateSendRef.current?.generation !== generation ||
-              ownedClient !== clientRef.current ||
-              requestedSessionRef.current !== sessionId
-            ) {
+            const pending = pendingCreateSendRef.current;
+            if (!owned() || !pending) {
               return;
             }
-            pendingCreateSendRef.current = { ...pendingCreateSendRef.current, accepted: true };
+            pendingCreateSendRef.current = { ...pending, accepted: true };
             // Before the history read: once accepted the page may leave, and the sidebar entry
             // (title, status) must not wait for a read that leaving aborts.
             refreshList(ownedClient);
             closeSource();
             return ownedClient.getMessages(sessionId, { signal: controller.signal }).then(
               (snapshot) => {
-                if (
-                  !mountedRef.current ||
-                  controller.signal.aborted ||
-                  mutationGeneration !== mutationGenerationRef.current ||
-                  pendingCreateSendRef.current?.generation !== generation ||
-                  ownedClient !== clientRef.current ||
-                  requestedSessionRef.current !== sessionId
-                ) {
+                if (!owned()) {
                   return;
                 }
                 installSnapshot(snapshot, ownedClient);
@@ -301,42 +328,37 @@ export function useTurnActions({
               },
             );
           })
-          .catch((error: unknown) => {
-            failOwnedPrompt(
-              controller,
-              mutationGeneration,
-              ownedClient,
-              error,
-              generation,
-              false,
-              sent,
-            );
-          });
+          .catch((error: unknown) => unaccepted(error, sent));
       };
-      // 欢迎态暂存的文件先传完再发 prompt（首次发送失败后的续发也一样）；切走会话时上面的 controller 已
-      // 被中止，迟到的上传结果不改界面。
+      // 欢迎态暂存的文件先传完再发 prompt（首次发送失败后的续发也一样）。上传落定时这次派发可能已不归本页
+      // （切走会话的中止在 effect 里，晚于渲染改写 `requestedSessionRef`），所以落定处同样过六项判定。
       const staged = flushAttachments(sessionId);
       if (staged === null) {
         send();
         return;
       }
-      void staged.then((failure) => {
-        if (controller.signal.aborted) {
+      // `停止`：先撤掉在途与排队的上传，再按未受理收尾（不写错误），最后才中止——次序反了收尾会被提前返回。
+      const staging = {
+        generation,
+        withdraw: () => {
+          staged.cancel();
+          unaccepted(null, null);
+          controller.abort();
+        },
+      };
+      stagingRef.current = staging;
+      void staged.done.then((failure) => {
+        if (stagingRef.current === staging) {
+          stagingRef.current = null;
+        }
+        if (!owned()) {
           return;
         }
         if (failure === undefined) {
           send();
           return;
         }
-        failOwnedPrompt(
-          controller,
-          mutationGeneration,
-          ownedClient,
-          failure,
-          generation,
-          false,
-          null,
-        );
+        unaccepted(failure, null);
       });
     },
     [
@@ -422,6 +444,7 @@ export function useTurnActions({
   /**
    * Resolves `"stopping"` on 202 for the still-owned session, else `null`; never rejects. 204
    * (`"idle"`) writes nothing: the composer follows the next authoritative event or snapshot.
+   * 本页拥有一次尚未受理、仍在上传阶段的发送时没有回合可停：取消这次发送，不调 `stopSession`。
    */
   const stopTurn = useCallback((): Promise<"stopping" | null> => {
     const ownedClient = clientRef.current;
@@ -430,6 +453,18 @@ export function useTurnActions({
       return Promise.resolve(null);
     }
     setPromptError(null);
+    const pending = pendingCreateSendRef.current;
+    const staging = stagingRef.current;
+    if (
+      staging !== null &&
+      ownsCreateSend(pending, ownedClient, sessionId) &&
+      !pending.accepted &&
+      pending.generation === staging.generation
+    ) {
+      stagingRef.current = null;
+      staging.withdraw();
+      return Promise.resolve(null);
+    }
     return ownedClient.stopSession(sessionId).then(
       (result) =>
         result === "stopping" && ownsSessionWrite(ownedClient, sessionId) ? result : null,
@@ -440,7 +475,7 @@ export function useTurnActions({
         return null;
       },
     );
-  }, [clientRef, ownsSessionWrite, requestedSessionRef, setPromptError]);
+  }, [clientRef, ownsSessionWrite, pendingCreateSendRef, requestedSessionRef, setPromptError]);
 
   // Page-level lock (never the prompt fence) released by identity on every branch; never rejects.
   const regenerateTurn = useCallback((): Promise<void> => {

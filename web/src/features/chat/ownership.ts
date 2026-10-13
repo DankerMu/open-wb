@@ -36,6 +36,37 @@ export function blocksNewSession(
   );
 }
 
+/**
+ * 一次 prompt 派发此刻是否仍归本页所有（六项）：页面仍挂载、这次派发没有被中止、没有被另一次派发取代、
+ * 它的首次发送登记还在、账号没有变、当前请求的会话仍是它的会话。prompt 落定、其后的快照落定、暂存文件
+ * 上传落定三处共用；不成立时既不发请求也不改界面。`owner` 是派发时记下的，`page` 是此刻读到的。
+ */
+export function ownsDispatch(
+  owner: {
+    client: ApiClient;
+    controller: AbortController;
+    createSendGeneration: number;
+    mutationGeneration: number;
+    sessionId: string;
+  },
+  page: {
+    client: ApiClient;
+    mounted: boolean;
+    mutationGeneration: number;
+    pending: PendingCreateSend | null;
+    requestedSessionId: string | null;
+  },
+): boolean {
+  return (
+    page.mounted &&
+    !owner.controller.signal.aborted &&
+    owner.mutationGeneration === page.mutationGeneration &&
+    page.pending?.generation === owner.createSendGeneration &&
+    owner.client === page.client &&
+    page.requestedSessionId === owner.sessionId
+  );
+}
+
 export function ownsHistory(
   state: ChatHistoryState,
   client: ApiClient,
