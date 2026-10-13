@@ -99,6 +99,8 @@ type WorkspaceBrowserProps = {
   /** 侧边栏用：`onlyPaths` 是空集时树的位置上的文案；树栏收起（见 `WorkspaceColumns`）。 */
   onlyPathsEmpty?: string | undefined;
   treeCollapsed?: boolean | undefined;
+  /** 侧边栏用：换成新值（非 `undefined`）时，`path` 所指的网页已选中且停在源码视图就翻回渲染视图。 */
+  renderedSeq?: number | undefined;
   ref?: Ref<WorkspaceBrowserHandle> | undefined;
   /** 文件页专用：切换器与 `新建工作空间`。 */
   switcher?: ReactNode;
@@ -128,6 +130,7 @@ export function WorkspaceBrowser({
   onlyPathsEmpty,
   path,
   ref,
+  renderedSeq,
   switcher,
   treeCollapsed,
   workspaceId,
@@ -569,6 +572,17 @@ export function WorkspaceBrowser({
     }
     continueReveal();
   }, [clearSelection, continueReveal, directories, loadingPaths, path]);
+
+  // `renderedSeq` 换成新值才生效（挂载时的值不算），排在 `path` 的 effect 之后。选中的不是 `path`（定位
+  // 还在走，或没落在文件上）时不动。不经 `selectFile`：源码视图下它会再发一次 `file`。
+  const appliedRenderedRef = useRef(renderedSeq);
+  useEffect(() => {
+    if (appliedRenderedRef.current === renderedSeq) return;
+    appliedRenderedRef.current = renderedSeq;
+    if (renderedSeq !== undefined && selectedFileRef.current?.path === path) {
+      showWebView("rendered");
+    }
+  }, [path, renderedSeq, showWebView]);
 
   const folder = useFolderDialog(client, workspaceId, cacheRef, loadDirectory);
 

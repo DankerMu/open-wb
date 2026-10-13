@@ -34,6 +34,13 @@ type SidebarTarget = {
   workspaceId: string;
 };
 
+/** 侧边栏内容要套用的那一次定位（`useWorkspaceSidebar().located` 去掉会话）。 */
+type Applied = { path: string; seq: number; view?: "rendered" | undefined };
+
+/** `打开网页预览` 的那一次定位的 `seq`；别的定位与没有定位时为 `undefined`。 */
+const renderedSeqOf = (located: Applied | null) =>
+  located?.view === "rendered" ? located.seq : undefined;
+
 /**
  * 头部与浏览器。当前文件只在这里的内存里（不进会话页的地址），调用方按「会话 + 空间」给 `key`，
  * 所以换会话时它与目录树、预览一起重置。空间不在列表里时标题是 `工作空间`，没有逻辑路径，也没有
@@ -62,6 +69,9 @@ type SidebarTarget = {
  *     的不是它或没有选中（实测，Chromium：文件已删除之后，以及上面过滤开着的那一次；没有自动化测试）。
  *   宽窄屏互换时这个组件重挂，会重新套用最近一次还没被丢弃的 `located`（读代码推出，没有测试；规格
  *   没有写这种情况）。
+ * - `打开网页预览` 的那一次定位带 `view: "rendered"`：它的 `seq` 另作 `renderedSeq` 交给浏览器。新选中
+ *   的网页本来就是渲染视图，`renderedSeq` 只在「同一个网页已选中并停在源码视图」时有事可做——那时
+ *   `path` 没变，浏览器不会因为它做任何事。`查看详情` 的定位不带 `view`，不翻视图。
  */
 function SidebarContent({
   client,
@@ -73,7 +83,7 @@ function SidebarContent({
   workspaceId,
 }: SidebarTarget & {
   closeRef?: Ref<HTMLButtonElement>;
-  located: { path: string; seq: number } | null;
+  located: Applied | null;
   onClose(): void;
 }) {
   const account = useAuth().principal?.account;
@@ -166,6 +176,7 @@ function SidebarContent({
         onPathChange={setPath}
         path={path}
         ref={browser}
+        renderedSeq={renderedSeqOf(located)}
         treeCollapsed={treeCollapsed}
         workspaceId={workspaceId}
       />

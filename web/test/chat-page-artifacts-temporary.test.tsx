@@ -3,9 +3,11 @@
  * and 「临时空间会话照常渲染产物卡」 (with its promoted half); 「临时空间会话的面板行」 was removed with
  * the panel it described (#1105).
  * Seams: the jsdom chat page over a stubbed `fetch`, the list-event connection, the two Blob URL
- * statics, `<a>.click()` and `navigator.clipboard`. Expected values are literals from the spec
+ * statics and `navigator.clipboard`. Expected values are literals from the spec
  * deltas. The session uses a temporary workspace: `temporaryWorkspace` is true and its
- * `workspaceId` is in no workspace list, so every preview route is keyed by that id.
+ * `workspaceId` is in no workspace list, so every route is keyed by that id. Since #1110 only the
+ * code card asks the preview API: 打开网页预览 opens the sidebar on that id (its token is issued for
+ * it) and 下载 is a link to that id's download endpoint.
  */
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -13,15 +15,12 @@ import {
   action,
   actions,
   artifactCards,
-  BLOB_URL,
   cardTitles,
   copiedStatus,
-  frameOf,
-  HTML_TEXT,
+  link,
   previewCalls,
-  previewDialog,
+  siteRoutes,
   slot,
-  spyDownloads,
   stubClipboard,
 } from "./chat-page-artifact-card-support.js";
 import {
@@ -47,6 +46,7 @@ import { chatShellFixture } from "./chat-page-shell-support.js";
 import type { FetchRoutes } from "./chat-page-support.js";
 import { latestListSource, SESSION_ID, settle } from "./chat-stream-support.js";
 import { imagePreviewResponse } from "./files-fixture.js";
+import { BASE } from "./files-site-fixture.js";
 import { calls, currentLocation, jsonResponse, textPreviewResponse } from "./support.js";
 
 const blobs = chatShellFixture();
@@ -73,9 +73,16 @@ function temporaryTurn(changes: Change[]): Snapshot {
   return { ...snapshot, session: { ...snapshot.session, temporaryWorkspace: true } };
 }
 
-/** The previews of the three paths, each of its own kind. */
+const TOKEN_PATH = `${WORKSPACES}/${TEMP}/preview-token`;
+
+/**
+ * What the three actions may ask of TEMP: the sidebar's two listings and its preview token
+ * (`siteRoutes`), and the preview of `notes.md`. The previews of the page and of the image answer
+ * too, so a card that still asked for one would be caught by the request list, not by a thrown fetch.
+ */
 const previews = (): FetchRoutes => ({
-  [previewPath(INDEX)]: () => textPreviewResponse(HTML_TEXT),
+  ...siteRoutes(TEMP),
+  [previewPath(INDEX)]: () => textPreviewResponse("<h1>hi</h1>"),
   [previewPath(CHART)]: () => imagePreviewResponse(),
   [previewPath(NOTES)]: () => textPreviewResponse(NOTES_TEXT),
 });
@@ -153,29 +160,41 @@ describe("临时空间会话照常渲染产物卡", () => {
   const changes = () => [write(INDEX), write(CHART), edit(NOTES, 3, 0)];
 
   it.each(lists)(
-    "%s：三张产物卡都在，预览、下载、复制各恰以会话的 workspaceId 请求一次",
+    "%s：三张产物卡都在；打开网页预览 打开头部为 工作空间 的侧边栏并以会话的 workspaceId 签发一次令牌，下载 是指向该 id 下载端点的链接，只有 复制代码 请求预览（恰一次）",
     async (_name, workspaces) => {
       const writeText = stubClipboard(vi.fn((_text: string) => Promise.resolve()));
       const page = await openSession(temporaryTurn(changes()), workspaces, previews());
-      const clicks = spyDownloads(blobs.revokeObjectURL);
 
       expect(cardTitles()).toEqual(["index.html", "chart.png", "notes.md"]);
       expect(labels()).toEqual(["HTML", "PNG", "MD"]);
       expect(previewCalls(page.fetchMock)).toEqual([]);
 
       fireEvent.click(actions(OPEN_INDEX)[0] as HTMLButtonElement);
-      const dialog = await previewDialog();
-      expect(frameOf(dialog).getAttribute("sandbox")).toBe("allow-scripts");
-      expect(frameOf(dialog).getAttribute("srcdoc")).toBe(HTML_TEXT);
-      fireEvent.keyDown(dialog, { key: "Escape" });
-      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      const sidebar = await screen.findByRole("complementary", { name: "工作空间侧边栏" });
+      const row = await within(sidebar).findByRole("button", { name: "index.html" });
+      await waitFor(() => expect(row.getAttribute("aria-current")).toBe("true"));
+      await waitFor(() =>
+        expect(sidebar.querySelector("iframe")?.getAttribute("src")).toBe(`${BASE}${INDEX}`),
+      );
+      expect(sidebarTitle(sidebar)).toBe("工作空间");
+      expect(within(sidebar).queryByRole("link", { name: "在文件页打开" })).toBeNull();
+      expect(document.querySelector("iframe[srcdoc]")).toBeNull();
+      expect(screen.queryByRole("dialog", { hidden: true })).toBeNull();
+      expect(
+        calls(page.fetchMock, TOKEN_PATH).map(([path, options]) => [path, options?.method]),
+      ).toEqual([[TOKEN_PATH, "POST"]]);
+      expect(currentLocation()).toBe(`/?session=${SESSION_ID}`);
 
-      fireEvent.click(action("下载 chart.png"));
-      await waitFor(() => expect(clicks).toHaveLength(1));
+      // The sidebar's preview head has a 下载 link of its own (of index.html): `link` reads the card's.
+      const download = link("下载 chart.png");
+      expect(download.getAttribute("href")).toBe(
+        `/api/workspaces/${TEMP}/download?path=assets%2Fchart.png`,
+      );
+      expect(download.hasAttribute("download")).toBe(true);
+      download.addEventListener("click", (event) => event.preventDefault());
+      fireEvent.click(download);
       await quiesce();
-      expect(clicks.map(({ href, download }) => [href, download])).toEqual([
-        [BLOB_URL, "chart.png"],
-      ]);
+      expect(blobs.createObjectURL).not.toHaveBeenCalled();
 
       fireEvent.click(action("复制代码 notes.md"));
       await waitFor(() => expect(copiedStatus()?.getAttribute("role")).toBe("status"));
@@ -183,11 +202,8 @@ describe("临时空间会话照常渲染产物卡", () => {
 
       expect(
         previewCalls(page.fetchMock).map(([path, options]) => [path, options?.method]),
-      ).toEqual([
-        [`/api/workspaces/${TEMP}/file?path=out%2Findex.html`, "GET"],
-        [`/api/workspaces/${TEMP}/file?path=assets%2Fchart.png`, "GET"],
-        [`/api/workspaces/${TEMP}/file?path=notes.md`, "GET"],
-      ]);
+      ).toEqual([[`/api/workspaces/${TEMP}/file?path=notes.md`, "GET"]]);
+      expect(calls(page.fetchMock, TOKEN_PATH)).toHaveLength(1);
       expect(detailNames()).toEqual(RELATIVE_DETAILS);
       expectNoWorkspacePath();
     },
