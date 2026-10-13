@@ -25,7 +25,7 @@ Runtime config/DB/app/listen/预览监听器 listen/models.yml/预览缓存目�
 - **WHEN** DB parent为file/不可创建、DB file创建/chmod失败、DB open/migration失败、HOST由listen拒绝、port已占用、models.yml不可写或post-listen stdout sink失败
 - **THEN** 进程nonzero且stderr可写时只有generic failure record；stdout EPIPE不得输出raw stack；关闭所有已拥有的app/DB，不遗留可监听server、活跃omp原生子进程或active SQLite handle，parent/static/default路径无额外副作用；stderr同时不可写时允许无record但同样nonzero/cleanup
 - **WHEN** SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
-- **THEN** pending bind由同一AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
+- **THEN** pending bind由该次在途绑定所用的AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
 
 #### Scenario: 启动失败记录带失败阶段
 - **WHEN** 编译入口分别遇到：非法config；DB父目录位置是一个文件；监听端口已被占用；托管布局里 `home/.omp` 被一个文件占位；`host-overlay.yml` 的位置是一个目录；listen之后stdout sink写失败
