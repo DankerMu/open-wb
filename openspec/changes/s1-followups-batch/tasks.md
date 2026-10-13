@@ -111,12 +111,12 @@ Minimal mergeable slice: atomic - 创建与 fork 是同一条规则的两个写�
 
 ## 7. verification-harness — 固定 openspec CLI 并在 CI 校验（G7，#1126；改 CI 文件、新增依赖，PR 必须标注）
 
-- [ ] 7.1 依赖：根 `package.json` 的 `devDependencies` 加 `"@fission-ai/openspec": "1.13.2"`（不带 `^` / `~`），`npm install` 更新 `package-lock.json`。验证：干净检出后 `npm ci && npx openspec --version` 输出 `1.13.2`；`npx openspec validate --all --strict --no-interactive` 以 0 退出（输出贴进 PR）。`ATTRIBUTION.md` 按既有规则登记（MIT）。
-- [ ] 7.2 测试先行（`scripts/test-ci-harness.sh`）：`fast` 步骤元组在 `npm run typecheck --workspaces` 之后加 `run("npx openspec validate --all --strict --no-interactive")`，并加四条变异例——删除该步、去掉 `--strict`、`npx openspec` 换成 `openspec`、给该步加 `continue-on-error`。验证：此时 `make test-guardrails` 判红（workflow 还没有这一步）。
-- [ ] 7.3 实现：`.github/workflows/ci.yml` 的 `fast-checks` 末尾加同一条命令的 step。不加 action、不改 timeout、不动其它 job。验证：`make test-guardrails` 转绿（含 7.2 的四条变异例各自被拒）；PR 的 `fast-checks` 实际执行该步并成功，把 job 耗时与改动前的一次对比贴进 PR。
-- [ ] 7.4 `AGENTS.md`：写明「openspec 一律经 `npx openspec` 调用，不用全局安装的版本；固定 1.13.2」。位置选在 oracle 不钉的段落（Verification Matrix 与 Enforcement Index 两张表、`constraints.yaml` 的十个 surface 都不加行）。验证：`make test-guardrails` 仍全 PASS。
-- [ ] 7.5 `make anti-drift`：确认 knip 没有把该 devDependency 报为未使用；报了就在 `knip.json` 根 workspace 登记并在 PR 说明。验证：`make anti-drift` 退出码 0。
-- [ ] 7.6 变异证据（issue 的验收项）：在一份临时副本里把某个未归档 change 的一个 MODIFIED 块删掉一个既有 scenario 标题，`npx openspec validate --all --strict --no-interactive` 以非零退出；输出贴进 PR，副本不提交。PR 说明里另写：新依赖的理由（现有工具没有 OpenSpec 校验器，1.3.1 与 1.13.2 行为不同）；CI 文件改动清单；**CI 用 `validate --all` 是有意偏离 #1126 第 2 项的字面**（issue 写的是「对每个未归档 change 逐个校验」；`--all` 同时校验主规格与全部未归档 change，更严，理由见 design D7）；issue 第 4 项（`.claude/skills` 下的调用）不在本仓库、本 PR 不含（D14-6）。
+- [x] 7.1 依赖：根 `package.json` 的 `devDependencies` 加 `"@fission-ai/openspec": "1.13.2"`（不带 `^` / `~`），`npm install` 更新 `package-lock.json`。验证：干净检出后 `npm ci && npx openspec --version` 输出 `1.13.2`；`npx openspec validate --all --strict --no-interactive` 以 0 退出（输出贴进 PR）。`ATTRIBUTION.md` 按既有规则登记（MIT）。
+- [x] 7.2 测试先行（`scripts/test-ci-harness.sh`）：`fast` 步骤元组在 `npm run typecheck --workspaces` 之后加 `run("npx openspec validate --all --strict --no-interactive")`，并加四条变异例——删除该步、去掉 `--strict`、`npx openspec` 换成 `openspec`、给该步加 `continue-on-error`。验证：此时 `make test-guardrails` 判红（workflow 还没有这一步）。
+- [x] 7.3 实现：`.github/workflows/ci.yml` 的 `fast-checks` 末尾加同一条命令的 step。不加 action、不改 timeout、不动其它 job。验证：`make test-guardrails` 转绿（含 7.2 的四条变异例各自被拒）；PR 的 `fast-checks` 实际执行该步并成功，把 job 耗时与改动前的一次对比贴进 PR。
+- [x] 7.4 `AGENTS.md`：写明「openspec 一律经 `npx openspec` 调用，不用全局安装的版本；固定 1.13.2」。位置选在 oracle 不钉的段落（Verification Matrix 与 Enforcement Index 两张表、`constraints.yaml` 的十个 surface 都不加行）。验证：`make test-guardrails` 仍全 PASS。
+- [x] 7.5 `make anti-drift`：确认 knip 没有把该 devDependency 报为未使用；报了就在 `knip.json` 根 workspace 登记并在 PR 说明。验证：`make anti-drift` 退出码 0。
+- [x] 7.6 变异证据（issue 的验收项）：在一份临时副本里把某个未归档 change 的一个 MODIFIED 块删掉一个既有 scenario 标题，`npx openspec validate --all --strict --no-interactive` 以非零退出；输出贴进 PR，副本不提交。PR 说明里另写：新依赖的理由（现有工具没有 OpenSpec 校验器，1.3.1 与 1.13.2 行为不同）；CI 文件改动清单；**CI 用 `validate --all` 是有意偏离 #1126 第 2 项的字面**（issue 写的是「对每个未归档 change 逐个校验」；`--all` 同时校验主规格与全部未归档 change，更严，理由见 design D7）；issue 第 4 项（`.claude/skills` 下的调用）不在本仓库、本 PR 不含（D14-6）。
 
 Suggested fixture level: expanded - 改 CI 工作流与它的契约 oracle，并新增一个开发依赖（发布与依赖兼容面）
 Minimal mergeable slice: atomic - `ci.yml` 的新步骤与 oracle 的步骤元组必须同一提交改，否则 `make test-guardrails` 判红；依赖不先进 lockfile 则该步骤无从执行
