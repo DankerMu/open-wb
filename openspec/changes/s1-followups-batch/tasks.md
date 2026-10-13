@@ -193,10 +193,10 @@ Minimal mergeable slice: 11a.2 加 11a.4 里预览头与前置判定的容忍（
 
 ## 11b. workspace-sidebar — 侧边栏拿实际选中，再点同一张卡片重新定位（G11b，#1380；← G11a）
 
-- [ ] 11b.1 测试先行（新文件 `web/test/workspace-browser-actual-selection.test.tsx`，`WorkspaceBrowser` 组件测试）：files-web 场景「实际选中的上报与重复定位」（不给 `clearMissing`，所以预览区是 `文件不存在`；给了它的一例预览区是空态，上报相同）——定位没落在文件上时宿主收到的实际选中为空；`refresh` 之后对同一路径再次发起定位会选中它并上报；两次都没有读写 `location`。验证：在现有实现上判红（同一路径再定位是空操作）。
-- [ ] 11b.2 测试先行（新文件 `web/test/chat-workspace-sidebar-relocate.test.tsx`，会话页整页渲染；`chat-workspace-sidebar-reveal.test.tsx` 已 709 行，不追加）：workspace-sidebar 场景「实际选中与再次点击」两组——开关关着：第一次点击之后 `在文件页打开` 的 `href` 不带 `path`、预览区是 `未选择文件`（空态由 G11a 做到，这里只是沿用，页面上没有 `文件不存在`），文件重新生成且所在层刷新后再点同一行会选中它、`href` 带 `path`；开关开着、列表里本来就没有的 `old.md`：点击之后 `href` 不带被定位的路径。验证：在现有实现上判红。
-- [ ] 11b.3 实现：`WorkspaceBrowser` 向宿主上报实际选中的文件，并接受「重新套用 `path`」的触发（design D11）；`web/src/features/chat/workspace-sidebar.tsx` 以上报的实际选中生成 `在文件页打开`，把每一次卡片定位的 `seq` 交给浏览器；头注释里「两处代价」一段随实现删除。文件页不消费这项上报、不据此改地址。`workspace-browser.tsx` 不越 800 行。验证：11b.1、11b.2 转绿；files-web「地址定位到文件」的既有用例（深链到不存在的文件时地址保持原样）与 11a 的全部用例不改、仍通过。
-- [ ] 11b.4 变异证据：侧边栏改回用被定位的路径 → 11b.2 两组的 `href` 断言判红；去掉重新套用的触发 → 11b.2 第一组的第二次点击与 11b.1 判红；文件页也消费上报并改写地址 → 「地址定位到文件」的既有用例判红。`make ui-walk` 跑一次。
+- [x] 11b.1 测试先行（新文件 `web/test/workspace-browser-actual-selection.test.tsx`，`WorkspaceBrowser` 组件测试）：files-web 场景「实际选中的上报与重复定位」（不给 `clearMissing`，所以预览区是 `文件不存在`；给了它的一例预览区是空态，上报相同）——定位没落在文件上时宿主收到的实际选中为空；`refresh` 之后对同一路径再次发起定位会选中它并上报；两次都没有读写 `location`。验证：在现有实现上判红（同一路径再定位是空操作）。
+- [x] 11b.2 测试先行（新文件 `web/test/chat-workspace-sidebar-relocate.test.tsx`，会话页整页渲染；`chat-workspace-sidebar-reveal.test.tsx` 已 709 行，不追加）：workspace-sidebar 场景「实际选中与再次点击」两组——开关关着：第一次点击之后 `在文件页打开` 的 `href` 不带 `path`、预览区是 `未选择文件`（空态由 G11a 做到，这里只是沿用，页面上没有 `文件不存在`），文件重新生成且所在层刷新后再点同一行会选中它、`href` 带 `path`；开关开着、列表里本来就没有的 `old.md`：点击之后 `href` 不带被定位的路径。验证：在现有实现上判红。
+- [x] 11b.3 实现：`WorkspaceBrowser` 向宿主上报实际选中的文件，并接受「重新套用 `path`」的触发（design D11）；`web/src/features/chat/workspace-sidebar.tsx` 以上报的实际选中生成 `在文件页打开`，把每一次卡片定位的 `seq` 交给浏览器；头注释里「两处代价」一段随实现删除。文件页不消费这项上报、不据此改地址。`workspace-browser.tsx` 不越 800 行。验证：11b.1、11b.2 转绿；files-web「地址定位到文件」的既有用例（深链到不存在的文件时地址保持原样）与 11a 的全部用例不改、仍通过。
+- [x] 11b.4 变异证据：侧边栏改回用被定位的路径 → 11b.2 两组的 `href` 断言判红；去掉重新套用的触发 → 11b.2 第一组的第二次点击与 11b.1 判红；文件页也消费上报并改写地址 → 「地址定位到文件」的既有用例判红。`make ui-walk` 跑一次。
 
 Suggested fixture level: expanded - 改的是文件页与会话页共用的 `WorkspaceBrowser` 对宿主的契约（新增一条上报与一个触发）
 Minimal mergeable slice: atomic - 上报没有消费方是死属性，侧边栏只换 `href` 的来源而不接重新定位则同一张卡片仍点不动

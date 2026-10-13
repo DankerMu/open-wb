@@ -5,7 +5,12 @@
  * - Current path: `path` is applied when it changes — the unloaded parent directories are listed
  *   one level at a time, each requested once whether or not the level above lists it, then a file
  *   is selected (one `file` request) and a directory only expanded. A selection made this way is
- *   not reported; a click and `reveal` report through `onPathChange` once the file is found.
+ *   not reported through `onPathChange`; a click and `reveal` report there once the file is found.
+ * - `onSelectionChange` (issue 1380, `host-channel.ts`) is told the file actually selected, `null`
+ *   for none, once per change and however it changed — a walk that ended without a file included.
+ *   A new `pathSeq` applies `path` again although its value is the same: the walk is repeated,
+ *   unless that file is the selection already. The session sidebar gives both; the files page
+ *   gives neither, so a walk never rewrites its address.
  * - A walk started by `path` that does not end on a file leaves nothing selected. Ending on a
  *   directory shows the empty preview; a last name missing from its parent's listing shows
  *   `文件不存在`; a level whose request failed shows that failure's message (none for a 401, which
@@ -83,6 +88,7 @@ import { isNotFound, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
 import { useFollowEntry } from "./follow-entry.js";
+import { usePathReapply, useSelectionReport } from "./host-channel.js";
 import { filteredRow, listedPaths, usePathRecords } from "./path-records.js";
 import {
   failedPreview,
@@ -116,6 +122,9 @@ type WorkspaceBrowserProps = {
   dir?: string | undefined;
   path: string | null;
   onPathChange(path: string | null): void;
+  /** 侧边栏用：树里实际选中的文件每变化一次报一次（没有选中为 `null`）；`pathSeq` 换成新值即重新套用 `path`。 */
+  onSelectionChange?: ((path: string | null) => void) | undefined;
+  pathSeq?: number | undefined;
   layout?: BrowserLayout | undefined;
   markedPaths?: { label: string; paths: ReadonlySet<string> } | undefined;
   onlyPaths?: ReadonlySet<string> | undefined;
@@ -152,9 +161,11 @@ export function WorkspaceBrowser({
   name = "工作空间",
   onNewWorkspace,
   onPathChange,
+  onSelectionChange,
   onlyPaths,
   onlyPathsEmpty,
   path,
+  pathSeq,
   ref,
   renderedSeq,
   switcher,
@@ -204,10 +215,15 @@ export function WorkspaceBrowser({
     URL.revokeObjectURL(url);
   }, []);
 
-  const publishSelectedFile = useCallback((next: SelectedFile | null) => {
-    selectedFileRef.current = next;
-    setSelectedFile(next);
-  }, []);
+  const reportSelection = useSelectionReport(onSelectionChange);
+  const publishSelectedFile = useCallback(
+    (next: SelectedFile | null) => {
+      selectedFileRef.current = next;
+      setSelectedFile(next);
+      reportSelection(next);
+    },
+    [reportSelection],
+  );
 
   const loadDirectory = useDirectoryLoader({
     cacheRef,
@@ -398,14 +414,15 @@ export function WorkspaceBrowser({
 
       // 不发 `file` 请求的类别在这里交付：上一个请求已中止，换了文件时旧图片也已释放，没有新请求要管。
       // 压缩包的成员列表请求由它的预览器发起并中止；这里每次给一个新函数，刷新与再点同一行因此重新列出。
-      // 它不经 `requestPreview`：404 在这个闭包里交给 `dropMissing`，再照旧抛给预览器。
+      // 它不经 `requestPreview`：404 在这个闭包里交给 `dropMissing`（已被中止的那一次不算：再点同一行后
+      // 迟到的旧应答不代表新的一次），再照旧抛给预览器。
       // 网页也在这里：渲染视图不请求；同一路径停在源码视图时得到 `null`，走下面那一次请求。
       const immediate = immediatePreview(
         entry,
         fileUrl(workspaceId, path),
         (signal) =>
           client.listArchive(workspaceId, path, { signal }).catch((error: unknown) => {
-            dropMissing(path, error);
+            if (!signal.aborted) dropMissing(path, error);
             throw error;
           }),
         sameFile && previous ? previous.preview : null,
@@ -594,12 +611,14 @@ export function WorkspaceBrowser({
     openDirectory,
   ]);
 
-  // `path` 属性只在变化时生效一次，每次都顶掉进行中的定位。与当前选中逐字相同（点击后宿主送回来的
-  // 就是这样）只是放弃它，不看它的写法。其余先过 `normalizedPath`，比的、走的都是之后的写法：与当前
-  // 选中相同同样只是放弃；`null` 与去掉空段、点段后什么都不剩的清掉选中；含 `..` 段的同样清掉选中并
-  // 显示 `文件不存在`，不定位（因此不为它发请求）；其余换成对它的定位。其后每当目录列表或进行中的
-  // 目录请求有变化，推进定位。
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `directories` 与 `loadingPaths` 是推进定位的触发条件。
+  // `pathSeq` 换了新值时把已套用的 `path` 作废：须排在下面那个 effect 之前（`host-channel.ts`）。
+  usePathReapply(appliedPathRef, pathSeq);
+  // `path` 属性只在变化时生效一次（`pathSeq` 换了新值时算它变了），每次都顶掉进行中的定位。与当前选中
+  // 逐字相同（点击后宿主送回来的就是这样）只是放弃它，不看它的写法。其余先过 `normalizedPath`，比的、
+  // 走的都是之后的写法：与当前选中相同同样只是放弃；`null` 与去掉空段、点段后什么都不剩的清掉选中；含
+  // `..` 段的同样清掉选中并显示 `文件不存在`，不定位（因此不为它发请求）；其余换成对它的定位。其后每当
+  // 目录列表或进行中的目录请求有变化，推进定位。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `directories`、`loadingPaths` 与 `pathSeq` 是推进或重新套用定位的触发条件。
   useEffect(() => {
     if (appliedPathRef.current !== path) {
       appliedPathRef.current = path;
@@ -614,7 +633,7 @@ export function WorkspaceBrowser({
       }
     }
     continueReveal();
-  }, [clearSelection, continueReveal, directories, loadingPaths, path]);
+  }, [clearSelection, continueReveal, directories, loadingPaths, path, pathSeq]);
 
   // `renderedSeq` 换成新值才生效（挂载时的值不算），排在 `path` 的 effect 之后。选中的不是 `path`（定位
   // 还在走，或没落在文件上）时不动。不经 `selectFile`：源码视图下它会再发一次 `file`。

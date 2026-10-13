@@ -10,7 +10,7 @@ import { type ComponentProps, createRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceBrowser, type WorkspaceBrowserHandle } from "../src/features/files/index.js";
 import { createApiClient } from "../src/lib/api.js";
-import { observeUnhandledRejections } from "./chat-stream-support.js";
+import { deferred, observeUnhandledRejections } from "./chat-stream-support.js";
 import { cleanupFilesFixture, type FetchRoutes } from "./files-fixture.js";
 import { createFetchMock, jsonResponse, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
@@ -255,6 +255,90 @@ describe("onlyPaths 下的行", () => {
     }
   });
 
+  it("压缩包：再点同一行之后，被中止的那一次 archive 迟到的 404 不记账、不清选中；新的一次答 200 照常列出成员", async () => {
+    const rejections = observeUnhandledRejections();
+    try {
+      const late = deferred<Response>();
+      let asked = 0;
+      const members = () =>
+        jsonResponse({
+          entries: [{ path: "inner.txt", size: 3, type: "file" }],
+          format: "zip",
+          truncated: false,
+        });
+      const { onPathChange, requests } = mount(
+        {
+          [ARCHIVE]: () => {
+            asked += 1;
+            return asked === 1 ? late.promise : members();
+          },
+        },
+        { onlyPaths: new Set(["a.zip"]) },
+      );
+
+      fireEvent.click(row("a.zip"));
+      await waitFor(() => expect(requests()).toStrictEqual([ARCHIVE]));
+      fireEvent.click(row("a.zip"));
+      expect(await pane().findByText("inner.txt")).toBeTruthy();
+      await act(async () => {
+        late.resolve(notFound());
+        await yieldMacrotask();
+      });
+      await settle();
+
+      expect(rows()).toStrictEqual(["设计文档", "a.zip"]);
+      expect(selectedRows()).toStrictEqual(["a.zip"]);
+      expect(pane().getByText("inner.txt")).toBeTruthy();
+      expect(onPathChange.mock.calls).toStrictEqual([["a.zip"], ["a.zip"]]);
+      expect(requests()).toStrictEqual([ARCHIVE, ARCHIVE]);
+      expect(rejections.unhandled).toStrictEqual([]);
+    } finally {
+      rejections.stop();
+    }
+  });
+
+  it("压缩包：选中已换成别的文件、预览器还没来得及中止旧请求时到达的 404 不算数——不记账，不清新的选中，不上报 null", async () => {
+    const late = deferred<Response>();
+    const { browser, onPathChange, requests } = mount(
+      { [ARCHIVE]: () => late.promise, [fileOf("keep.md")]: text("留下的正文") },
+      { onlyPaths: new Set(["a.zip", "keep.md"]) },
+    );
+    fireEvent.click(row("a.zip"));
+    await waitFor(() => expect(requests()).toStrictEqual([ARCHIVE]));
+
+    // 同一个 `act` 里先换选中（句柄的定位：状态更新排着队，预览器的清理还没跑、旧请求的信号还没中止），
+    // 再让旧的 404 到达：拦它的只有「它已不是当前文件」。
+    await act(async () => {
+      browser().reveal("keep.md");
+      late.resolve(notFound());
+      for (let turn = 0; turn < 5; turn += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    });
+
+    expect(await pane().findByText("留下的正文", { exact: true })).toBeTruthy();
+    await settle();
+    expect(rows()).toStrictEqual(["设计文档", "a.zip", "keep.md"]);
+    expect(selectedRows()).toStrictEqual(["keep.md"]);
+    expect(onPathChange.mock.calls).toStrictEqual([["a.zip"], ["keep.md"]]);
+    expect(requests()).toStrictEqual([ARCHIVE, fileOf("keep.md")]);
+  });
+
+  it("句柄 reveal 定位到不成行的路径而当时没有选中：没有什么可清，不上报", async () => {
+    const { browser, onPathChange, requests, update } = mount({
+      [ROOT]: () => listing("", ["keep.md"]),
+    });
+    await within(column()).findByRole("button", { name: "keep.md" });
+    update({ onlyPaths: new Set(["keep.md", "old.md"]) });
+
+    act(() => browser().reveal("old.md"));
+    await settle();
+
+    expect(selectedRows()).toStrictEqual([]);
+    expect(onPathChange.mock.calls).toStrictEqual([]);
+    expect(requests()).toStrictEqual([ROOT]);
+  });
+
   it("非 404 的失败不移出：file 答 500，行仍在、选中仍在，预览区是既有的失败文案", async () => {
     const { onPathChange, requests } = mount(
       { [fileOf("keep.md")]: failed },
@@ -354,6 +438,33 @@ describe("陈旧列表与 reported", () => {
     expect(rows()).toStrictEqual([]);
     await settle();
     expect(requests()).toHaveLength(4);
+  });
+});
+
+describe("记录的作废只及于被列的那一层", () => {
+  it("deep/y.md 记下 404 之后撤掉 onlyPaths、refresh() 只重列根（deep 没加载过）：给回 onlyPaths，y.md 仍不成行", async () => {
+    const only = new Set(["deep/x.md", "deep/y.md"]);
+    const { browser, requests, update } = mount(
+      {
+        [ROOT]: () => listing("", ["keep.md"], ["deep"]),
+        [fileOf("deep/y.md")]: notFound,
+      },
+      { onlyPaths: only },
+    );
+    fireEvent.click(row("y.md"));
+    await waitFor(() => expect(rows()).toStrictEqual(["设计文档", "deep", "x.md"]));
+
+    // 撤掉 `onlyPaths`：根还没加载过，补一次；随后 `refresh()` 再列一次根，`deep` 从未加载、不在其中。
+    update({});
+    await within(column()).findByRole("button", { name: "keep.md" });
+    act(() => browser().refresh());
+    await waitFor(() => expect(requests()).toStrictEqual([fileOf("deep/y.md"), ROOT, ROOT]));
+    await settle();
+    update({ onlyPaths: only });
+
+    expect(rows()).toStrictEqual(["设计文档", "deep", "x.md"]);
+    await settle();
+    expect(requests()).toStrictEqual([fileOf("deep/y.md"), ROOT, ROOT]);
   });
 });
 

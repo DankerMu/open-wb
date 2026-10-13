@@ -455,4 +455,27 @@ describe("随助手改动刷新", () => {
     rerender({ view: chatStateFromSnapshot(turn("done")) });
     expect(refresh.mock.calls).toStrictEqual([[]]);
   });
+
+  it("R7 记账的次序：第一个视图（播种）里已结束的步骤不交给 reported；新结束的步骤与回合结束落在同一次渲染时，reported 恰一次、带那个步骤的路径，兜底的 refresh 恰一次、不带路径", () => {
+    const refresh = vi.fn();
+    const reported = vi.fn();
+    const browser = { current: { refresh, reported, reveal: vi.fn() } };
+    const viewOf = (status: "done" | "running", ...paths: string[]) =>
+      chatStateFromSnapshot(
+        turn(status, {
+          steps: paths.map((path, index) => toolStep(index + 1, 0, "write", [write(path)])),
+        }),
+      );
+    const { rerender } = renderHook<void, { view: ChatState | null }>(
+      ({ view }) => useAssistantRefresh(view, browser),
+      { initialProps: { view: viewOf("running", "a.md") } },
+    );
+    expect(reported.mock.calls).toStrictEqual([]);
+    expect(refresh.mock.calls).toStrictEqual([]);
+
+    rerender({ view: viewOf("done", "a.md", "b.md") });
+
+    expect(reported.mock.calls).toStrictEqual([[["b.md"]]]);
+    expect(refresh.mock.calls).toStrictEqual([[]]);
+  });
 });

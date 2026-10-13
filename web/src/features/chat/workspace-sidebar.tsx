@@ -43,7 +43,9 @@ const renderedSeqOf = (located: Applied | null) =>
 
 /**
  * 头部与浏览器。当前文件只在这里的内存里（不进会话页的地址），调用方按「会话 + 空间」给 `key`，
- * 所以换会话时它与目录树、预览一起重置。空间不在列表里时标题是 `工作空间`，没有逻辑路径，也没有
+ * 所以换会话时它与目录树、预览一起重置。这里有两个值：`path` 是交给浏览器的受控属性（最近一次被定位的
+ * 路径，或浏览器经 `onPathChange` 写回来的值），`selected` 是浏览器经 `onSelectionChange` 报回来的、树里
+ * 实际选中的文件——`在文件页打开` 的地址只取后者（issue 1380）。空间不在列表里时标题是 `工作空间`，没有逻辑路径，也没有
  * `在文件页打开`。`刷新` 是浏览器树栏自带的那一个，头部不另放。
  *
  * - 本会话改动（workspace-sidebar「本会话改动标记与过滤」）：`view` 的改动集合作为 `markedPaths` 交给
@@ -60,20 +62,17 @@ const renderedSeqOf = (located: Applied | null) =>
  *   （读代码推出，没有测试）。
  * - 已不存在的文件一律清空（owner 2026-10-13，issue 1372）：浏览器恒带 `clearMissing`，开关开着或关着都
  *   一样——卡片定位没有落在文件上时预览区是 `未选择文件`、不放文案；当前文件的 `file` / `archive` 答
- *   404 时选中被清掉，浏览器上报 `null`，这里的 `path` 随之为空、`在文件页打开` 不带 `path`。开关开着
- *   时浏览器另把这样的行移出过滤视图（规则在 `features/files/path-records.ts`）。文件页不给这个属性，
- *   仍显示 `文件不存在`。
+ *   404 时选中被清掉，浏览器上报 `null`，这里的 `path` 与 `selected` 随之为空、`在文件页打开` 不带
+ *   `path`。开关开着时浏览器另把这样的行移出过滤视图（规则在 `features/files/path-records.ts`）。文件页
+ *   不给这个属性，仍显示 `文件不存在`。
  * - 从卡片定位（workspace-sidebar「从卡片定位到文件」）：`located` 是 `useWorkspaceSidebar().reveal` 记下
  *   的那一次。挂载时有它，当前文件的初值就是它的路径；挂着时来了新的一次（`seq` 变了）在渲染期把当前
  *   文件换成它的路径。走的是浏览器的 `path` 属性而不是句柄的 `reveal`：点击时侧边栏可能还没挂载
  *   （没有句柄可调），而 `path` 一变浏览器就顶掉进行中的定位（最后一次为准），没落在文件上时由它
- *   清掉选中（`clearMissing`：不显示文案）。`只看本会话改动` 不动。两处代价：
- *   - 同一路径再点一次、期间当前文件没被别的操作换掉时，`path` 没变，浏览器什么都不做。上一次没落
- *     在文件上（它不在父目录的列表里）之后再点同一行即是如此（读代码推出；issue 1372 之前在 Chromium 里
- *     实测过同一条路：选中不变、没有请求；没有自动化测试）。
- *   - 定位没落在文件上、又没有经过 404 时（它不在父目录的列表里；某一级父目录失败；路径含 `..` 段）
- *     这里的 `path` 仍是被定位的那个路径，`在文件页打开` 的地址带着它，尽管树里没有选中（读代码推出，
- *     没有自动化测试；issue 1380）。经 404 清掉选中的那几种不在此列：浏览器上报了 `null`。
+ *   清掉选中（`clearMissing`：不显示文案）。`只看本会话改动` 不动。每一次定位的 `seq` 另作 `pathSeq` 交给
+ *   浏览器：同一行再点一次时 `path` 的值没变，浏览器凭 `seq` 变了重新走一遍定位——上一次没落在文件上、
+ *   而文件其后进了列表时这一次选中它；它已是选中的文件时浏览器什么都不做（不重取预览）。定位没落在
+ *   文件上时 `path` 仍是被定位的路径，`selected` 为空，`在文件页打开` 不带它。
  *   宽窄屏互换时这个组件重挂，会重新套用最近一次还没被丢弃的 `located`（读代码推出，没有测试；规格
  *   没有写这种情况）。
  * - `打开网页预览` 的那一次定位带 `view: "rendered"`：它的 `seq` 另作 `renderedSeq` 交给浏览器。新选中
@@ -95,6 +94,7 @@ function SidebarContent({
 }) {
   const account = useAuth().principal?.account;
   const [path, setPath] = useState<string | null>(located?.path ?? null);
+  const [selected, setSelected] = useState<string | null>(null);
   const [appliedSeq, setAppliedSeq] = useState(located?.seq);
   if (located !== null && located.seq !== appliedSeq) {
     setAppliedSeq(located.seq);
@@ -129,7 +129,7 @@ function SidebarContent({
         {workspace ? (
           <Button asChild className="shrink-0" size="sm" variant="ghost">
             <Link
-              to={`/files?${new URLSearchParams(path === null ? { ws: workspaceId } : { ws: workspaceId, path })}`}
+              to={`/files?${new URLSearchParams(selected === null ? { ws: workspaceId } : { ws: workspaceId, path: selected })}`}
             >
               在文件页打开
             </Link>
@@ -182,7 +182,9 @@ function SidebarContent({
         onlyPaths={onlyChanges ? changes.paths : undefined}
         onlyPathsEmpty="本会话暂无文件改动"
         onPathChange={setPath}
+        onSelectionChange={setSelected}
         path={path}
+        pathSeq={located?.seq}
         ref={browser}
         renderedSeq={renderedSeqOf(located)}
         treeCollapsed={treeCollapsed}
