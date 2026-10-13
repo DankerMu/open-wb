@@ -218,3 +218,55 @@ change `s1f-session-list-temp-space`（design D8、D9、D10）落地后的登记
   - 上述各项残余没有 CI 证明。
 - **升级**：无需手工步骤。升级后首次启动建出 `<state>/snapshots`（`0700`）；该位置若已有不属于 app uid 的条目、符号链接或文件，启动按 #706 的规则失败。
   升级前已有的消息没有快照登记，读作不可撤回。回滚到旧版本后残留的 `snapshots` 目录可由运维在停服务后删除。
+
+## 补充（2026-10-12，#1119）：办公文档转换进程的身份、两行 sudoers 与终止后的已知残余
+
+change `s1f-files-page`（design D17、D18；owner D-21、D-24、D-25、D-26）落地后的登记。转换器的决定与运维步骤在 ADR-0014；本节只登记与 uid 分离有关的部分。
+下文的「实测」除另注外都指 #1052（任务 1.3，2026-10-06，记录在该 change 的 `design.md` D18「实测」）。
+
+- **身份**：办公文档由 LibreOffice 解析，输入是不可信文档。配置了 `OMP_USER` 时转换进程以该用户运行，spawn 行与 omp 同形：
+  `sudo -n -u <OMP_USER> --preserve-env=PATH,LANG,HOME -- /usr/bin/setpriv --pdeathsig KILL -- <OFFICE_BIN> --headless … --convert-to pdf --outdir <job>/out <输入>`（`server/src/preview/office.ts`）。
+  环境只有 `PATH`、`LANG`（有则传）、`HOME=<job>`，不继承 app-server 的其它环境。`PATH` 与 `/usr/bin/setpriv` 的前置检查不过即转换失败，不回退为同 uid 启动。
+  未配置 `OMP_USER` 时直接启动 `<OFFICE_BIN>`，与 app-server 同 uid（与 omp 在该形态下的处境相同）。
+- **sudoers 新增两行**，都只在同时配置了 `OMP_USER` 与 `OFFICE_BIN` 的部署里用得到；没有第三行，不存在 `kill` / `pkill` 规则：
+  1. 转换的 spawn 前缀：`<app-user> ALL=(<OMP_USER>) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- <OFFICE_BIN> *`。`<OFFICE_BIN>` 处于参数位，转义规则同上文 #351 一节。
+  2. 启动时清空 `work`（owner D-24）：`<app-user> ALL=(<OMP_USER>) NOPASSWD: /usr/bin/find <PREVIEW_CACHE_DIR 的绝对路径>/work -mindepth 1 -delete`。参数逐项固定、没有通配、不带 `SETENV`。
+     - 这是**提权面的扩大**：应用用户多了一条能以 omp 用户身份执行的命令。作用范围是 `work` 之下的条目（`-mindepth 1` 不删 `work` 自身；`find` 缺省不跟随符号链接；命令以 omp 用户身份运行，删得掉的是它自己本来就删得掉的东西）。
+     - 服务端只在同时配置了两个键时、于启动时执行一次 `sudo -n -u <OMP_USER> -- /usr/bin/find <该路径> -mindepth 1 -delete`（`server/src/preview/office-cache.ts`；工作目录 `/`，环境只有 `PATH` 与 `LANG`，不经 `setpriv`），先于受理第一次转换。
+       有固定 10 秒的时限，到期或关停时对自己启动的 `sudo` 先发 `SIGTERM`、2 秒后仍在再发 `SIGKILL`（owner D-26）。
+     - 失败（规则漏配、路径不符、非 0 退出、超时、被终止）只记一行 `{"event":"preview_work_clear_failed"}`，**不阻止启动**；其后本进程自己的递归删除照常执行。
+     - 规则里的路径必须与服务端算出的 `join(PREVIEW_CACHE_DIR, "work")` 逐字相同（相对值按 repo root 解析；词法规范化，不解析符号链接；特殊字符按 sudoers 语法转义），sudo 按字面比对参数。
+     - 单次转换之后对作业目录的删除**不提权**，尽力而为。
+     - 证据：这条规则与命令在真实 `sudo` 下**未测**（自动化测试用假 `sudo`）；`sudo` 被终止后它之下的 `find` 是否随之结束**未测**（该命令不经 `--pdeathsig`）。
+- **目录的 mode**（app uid 持有，都以 `ensureOwnedDir` 建出并校正到精确值：前三个在监听成功后由入口建，`server/src/server.ts`；`<job>` 在每次转换开始时建，`server/src/preview/office.ts`）：
+
+  | 路径 | mode | omp uid |
+  | --- | --- | --- |
+  | `<PREVIEW_CACHE_DIR>` | `2750` | 只能进入 |
+  | `<PREVIEW_CACHE_DIR>/work`、其下每个作业目录 `<job>` | `2770` | 可写（转换的 `HOME`、配置目录与输出都在 `<job>` 下） |
+  | `<PREVIEW_CACHE_DIR>/pdf` | `0700` | 不能进入 |
+
+  `PREVIEW_CACHE_DIR` 缺省是 repo root 下的 `var/preview-cache`，不在 `OMP_STATE_DIR` 里。输出 PDF 是从作业目录**复制**成 app uid 自己的 `0600` 新文件再进 `pdf/`，不是改名：
+  改名后的文件仍属 omp uid，留着它的文件描述符的进程可以改写所有账号共用的缓存。
+- **终止在途转换**（超时、请求方断开、关停；owner D-21：不新增提权规则）：
+  - 同 uid 模式：转换进程以新的进程组启动，终止时对进程组发 `SIGKILL`。
+  - `OMP_USER` 模式：app uid 无权向 omp uid 的进程发信号（#351 实测 `EPERM`），只对自己启动的 `sudo` 发 `SIGKILL`；`sudo` 的直接子进程由 `--pdeathsig KILL` 随之被内核杀掉。不执行 `kill`、`pkill` 或第二次 `sudo`。
+- **已知残余**（owner D-25，按实测写）：`OMP_USER` 模式下直接子进程的后代不随之结束。LibreOffice 的启动程序是包装脚本，它启动 `oosplash`，再由后者派生 `soffice.bin`；
+  杀掉 `sudo` 之后 `soffice.bin` **每次都留下**（5 次终止 5 次如此），属 omp uid、被 1 号进程收养、占着 CPU **把整份转换跑完才自行退出**——
+  约 25 秒的文档在终止后约 20–23 秒，约 133 秒的文档在终止后 128 秒，长于 60 秒的缺省超时；被放弃的 `<job>/out` 里留下与未中断时字节数相同的完整 PDF。
+  它不占转换名额（名额在 `sudo` 退出、`convert` 落定时释放，**读代码推出**），所以主机上实际同时运行的 `soffice.bin` 可以多于 `OFFICE_CONVERT_CONCURRENCY`；
+  它用着的 `<job>` 删不掉，留到下次启动的清空（那时它若仍在写，可能删不净，再留到下一次）。与 #351「omp 派生的工具子进程仍可能存活」同类。
+  - 查：`ps -u <OMP_USER> -o pid,etime,args | grep -F '<PREVIEW_CACHE_DIR>/work/'`（转换的 argv 带着作业目录，**读代码推出**；实测记录没有逐字写下 `soffice.bin` 自己的命令行，筛不到时按进程名与属主找）。
+  - 杀：以 root 或 omp 用户的身份 `kill`；app uid 做不到，也不为此加规则。不处理它也会自己退出。
+- **`work` 在运行期间增长**：`OMP_USER` 模式下 app uid 删不掉 `<job>`，转换成功的作业也一样（实测：LibreOffice 把 `<job>/profile` 建成 `0700`、`<job>/.cache` 与 `.config` 建成 `2700`，都属 omp uid，不受 umask `007` 影响；
+  递归删除只删掉 `out/` 与空的 `.config/`，其余 `EACCES`）。小文档每个作业留下约 650 KB，被终止的作业另加 20–78 MB 的输出；只在重启时由上面第 2 行规则归零。
+- **实测 1.3 的记录**（测试主机容器内的 uid 分离部署，与 #1051 同一套；LibreOffice 24.2.7.2，只装 writer 组件，启动程序 `/usr/bin/soffice`；sudoers 当时只加了上面第 1 行；
+  应用用户 umask `007`、工作目录与 `HOME` 为 `2770` 的 `<job>`，手工执行上面的 spawn 行转换一份 docx）：
+  - 观察到：退出码 0，约 1.2 秒，`<job>/out/<名>.pdf` 生成（`0660`、属 omp uid 与共享组），应用用户能把它复制进 `pdf/`；`out/` 不必预建。
+    `oosplash` 与 `soffice.bin` 的 `Uid:` 四个值都是 omp uid（`sudo` 自身是实际 uid 应用用户、有效 uid root）。
+    两个转换各用自己的 `UserInstallation` 同时进行（两个小文档，以及两个各约 25 秒的文档全程重叠），都以退出码 0 结束并各自产出 PDF。
+    对 `sudo` 发 `SIGKILL` 共 5 次（约 25 秒的文档在第 3 秒 3 次、第 0.15 秒 1 次；约 133 秒的文档在第 5 秒 1 次）：`sudo` 立即消失，`oosplash` 随之被杀，`soffice.bin` 的表现如上「已知残余」，5 次一致。
+  - 没有观察的：对 `sudo` 发 `SIGKILL` 以外的信号；xlsx、pptx；经 `/o/` 路由与产品代码的端到端（属任务 28.6，#1123，尚未进行）；容器之外（1 号进程是容器的 init）；上面第 2 行规则。
+    每次转换的标准错误里有一行与结果无关的 `javaldx` 警告。
+- **验证**：CI `uid-isolation` job 不设 `OFFICE_BIN`，两行规则在那里都用不到，`.github/scripts/ci-uid-isolation.sh` 写出的 sudoers 不变；转换器的自动化测试用假的转换程序与假 `sudo`，不需要 LibreOffice。
+  `OMP_USER` 模式下真实转换的进程 uid、缓存文件属主与经 `/o/` 超时后的残留，待 28.6 的人工验证补记。
