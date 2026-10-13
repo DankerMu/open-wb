@@ -17,7 +17,7 @@ import {
   type FetchMock,
   jsonResponse,
 } from "./support.js";
-import { blockBody, pressPointer, readRepoFile, yieldMacrotask } from "./ui-support.js";
+import { pressPointer, readRepoFile, yieldMacrotask } from "./ui-support.js";
 import "./radix-platform.js";
 
 const HERO = "WorkBuddy，我帮你";
@@ -545,7 +545,7 @@ describe("覆盖层内用户区 (R9/R9b/R9c/R9d)", () => {
 });
 
 describe("静态契约 (R10)", () => {
-  it("窄屏判定走 useMediaQuery、旧基元 Drawer API 未扩", () => {
+  it("窄屏判定走 useMediaQuery", () => {
     const shell = readRepoFile("web/src/routes/shell/app-shell.tsx");
     expect(shell).toContain("useMediaQuery(SHELL_NARROW_QUERY)");
 
@@ -556,10 +556,5 @@ describe("静态契约 (R10)", () => {
     const viewport = readRepoFile("web/src/lib/viewport.ts");
     expect(viewport).toContain("useSyncExternalStore");
     expect(viewport).toContain('"(max-width: 760px)"');
-
-    const drawer = readRepoFile("web/src/ui/drawer.tsx");
-    const props = blockBody(drawer, /type DrawerProps = \{/);
-    const keys = [...props.matchAll(/^\s*(\w+)\??:/gm)].map((match) => match[1]);
-    expect(keys).toEqual(["open", "onOpenChange", "side", "width", "title", "footer", "children"]);
   });
 });

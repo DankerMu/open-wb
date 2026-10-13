@@ -156,6 +156,31 @@ describe("ToastProvider / useToast (jsdom, fake timers)", () => {
     expect(toasts()).toHaveLength(0);
     expect(probeMounts).toBe(1);
   });
+
+  it("D6 焦点在页面其它元素时 Escape 不关 Toast、2400ms 后到期；目标在 toast 内时 Escape 关闭", () => {
+    let show!: Show;
+    render(
+      <ToastProvider>
+        <Probe
+          onReady={(value) => {
+            show = value;
+          }}
+        />
+        <button type="button">页面</button>
+      </ToastProvider>,
+    );
+    act(() => show({ type: "info", message: "已停止生成" }));
+    const page = screen.getByRole("button", { name: "页面" });
+    page.focus();
+    fireEvent.keyDown(page, { key: "Escape" });
+    expect(toasts(), "焦点外的 Escape 关闭了 Toast").toHaveLength(1);
+    advance(2400);
+    expect(toasts()).toHaveLength(0);
+
+    act(() => show({ type: "info", message: "已复制" }));
+    fireEvent.keyDown(onlyToast(), { key: "Escape" });
+    expect(toasts()).toHaveLength(0);
+  });
 });
 
 describe("静态契约 (A8)", () => {
@@ -189,10 +214,9 @@ describe("静态契约 (A8)", () => {
     expect(reduced).toMatch(/\.ui-toast\s*\{[^}]*animation:\s*none/);
   });
 
-  it("ui.css 汇总 toast.css 与 empty-state.css；出口导出 ToastProvider/useToast（EmptyState 见 E1）", () => {
+  it("ui.css 汇总 toast.css；出口导出 ToastProvider/useToast", () => {
     const ui = readRepoFile("web/src/ui/ui.css");
     expect(ui).toContain('@import "./toast.css";');
-    expect(ui).toContain('@import "./empty-state.css";');
     expect(ToastProvider).toBeTypeOf("function");
     expect(useToast).toBeTypeOf("function");
   });

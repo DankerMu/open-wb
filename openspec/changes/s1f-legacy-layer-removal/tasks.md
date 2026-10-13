@@ -23,32 +23,32 @@
 
 ## 1. ui-primitives / ui-foundation — 删除没有调用方的旧基元（子 issue A）
 
-- [ ] 1.1 开工核对：在分支基线上重跑清点，确认 24 个待删文件在 `web/src`（不含 `web/src/ui/` 自身）里没有导入方，8 个待删测试文件只导入这些基元。
+- [x] 1.1 开工核对：在分支基线上重跑清点，确认 24 个待删文件在 `web/src`（不含 `web/src/ui/` 自身）里没有导入方，8 个待删测试文件只导入这些基元。
   命令：`grep -rnE 'from "[^"]*/ui/(index|[a-z-]+)(\.js)?"|from "@/ui(/[a-z-]+)?"' web/src web/test | grep -v '^web/src/ui/' | grep -v components/ui`，逐行核对具名导入里只剩 `Icon`、`IconName`、`BrandMark`、`useEscapeFallback`、`ToastProvider`、`useToast`（测试文件里另有待删的八个）。
   验证：核对结果（与 design「Context」的数字是否一致、有无新增导入方）写进 PR；有出入先改本 change 的 design 与本组任务再继续。
-- [ ] 1.2 先搬后删——兜底自身的用例（design D4「兜底自身的性质」）：`web/test/ui-escape-dispatch.test.tsx` 里测 `escape-fallback.ts` 的两例（`:85-95` D1 输入法、`:130-157` D4 恰一次）借旧 `Dialog` 与 `ToastProvider` 搭台，1.4 要删这个文件。先新建 `web/test/escape-fallback.test.tsx`（从 `../src/ui/index.js` 导入 `useEscapeFallback`，不用旧基元、不用 Toast），两种搭台：
+- [x] 1.2 先搬后删——兜底自身的用例（design D4「兜底自身的性质」）：`web/test/ui-escape-dispatch.test.tsx` 里测 `escape-fallback.ts` 的两例（`:85-95` D1 输入法、`:130-157` D4 恰一次）借旧 `Dialog` 与 `ToastProvider` 搭台，1.4 要删这个文件。先新建 `web/test/escape-fallback.test.tsx`（从 `../src/ui/index.js` 导入 `useEscapeFallback`，不用旧基元、不用 Toast），两种搭台：
   (1) hook 接在一个普通 `div` 上（`ref`、`onKeyDown`；没有 Radix）——子树内的普通 Escape → 关闭回调以 `false` 恰一次；`isComposing: true` 的 Escape → 0 次；目标在该 `div` 之外的 Escape → 0 次；先以某个原生事件调用 `onEscapeKeyDown`、再让同一个原生事件进 `onKeyDown` → 0 次；`canClose: false` → 0 次。
   (2) hook 按调用点的写法（`onEscapeKeyDown`、`onKeyDown`、`ref` 三个属性）接在拷入层 `@/components/ui/dialog` 的内容元素上（引入 `radix-platform.ts`）——焦点在内容内，按一次 Escape → 关闭回调恰被调用一次、入参 `false`。
   输入法与子树之外两例只放在 (1)：没有 Toast 时 Radix 自己会在 `isComposing` 的 Escape 上关闭本层（design Context 出入 9），整层断言不成立。
   验证：新文件在删除任何东西**之前**就通过；对 `web/src/ui/escape-fallback.ts` 逐条做变异并撤销——去掉 `:33` 的 `handled` 判断 → (2) 判红（回调两次）；去掉 `:32` 的 `isComposing` 判断 → (1) 的输入法例判红；去掉 `:35` 的 `contains` 判断 → (1) 的子树之外例判红。结果贴进 PR。
-- [ ] 1.3 删除 24 个文件：`web/src/ui/` 下的 `button.{tsx,css}`、`chip.{tsx,css}`、`confirm-dialog.tsx`、`dialog.{tsx,css}`、`drawer.tsx`、`empty-state.{tsx,css}`、`input.{tsx,css}`、`menu.{tsx,css}`、`popover.{tsx,css}`、`segmented-control.{tsx,css}`、`switch.{tsx,css}`、`tag.{tsx,css}`、`tooltip.{tsx,css}`。
+- [x] 1.3 删除 24 个文件：`web/src/ui/` 下的 `button.{tsx,css}`、`chip.{tsx,css}`、`confirm-dialog.tsx`、`dialog.{tsx,css}`、`drawer.tsx`、`empty-state.{tsx,css}`、`input.{tsx,css}`、`menu.{tsx,css}`、`popover.{tsx,css}`、`segmented-control.{tsx,css}`、`switch.{tsx,css}`、`tag.{tsx,css}`、`tooltip.{tsx,css}`。
   `web/src/ui/index.ts` 只留四行导出（`BrandMark`、`useEscapeFallback`、`Icon` 与 `IconName`、`ToastProvider` 与 `useToast`）；`web/src/ui/ui.css` 的 `@import` 只留 `./toast.css`，其下的规则不动。
   验证：`ls web/src/ui` 恰为 8 个文件（`brand-mark.tsx`、`escape-fallback.ts`、`icon.tsx`、`index.ts`、`motion.css`、`toast.css`、`toast.tsx`、`ui.css`）；`make typecheck` 通过。
-- [ ] 1.4 删除只测这些基元的 8 个测试文件：`web/test/ui-dialog.test.tsx`、`ui-dialog-busy.test.tsx`、`ui-empty-state.test.tsx`、`ui-escape-dispatch.test.tsx`（它导入旧 `Dialog` / `ConfirmDialog` / `Drawer`，所以在这一刀而不是组 2；测 hook 的两例 1.2 已搬走）、`ui-form.test.tsx`、`ui-menu.test.tsx`、`ui-popover-tooltip.test.tsx`、`ui-segmented-control.test.tsx`。
+- [x] 1.4 删除只测这些基元的 8 个测试文件：`web/test/ui-dialog.test.tsx`、`ui-dialog-busy.test.tsx`、`ui-empty-state.test.tsx`、`ui-escape-dispatch.test.tsx`（它导入旧 `Dialog` / `ConfirmDialog` / `Drawer`，所以在这一刀而不是组 2；测 hook 的两例 1.2 已搬走）、`ui-form.test.tsx`、`ui-menu.test.tsx`、`ui-popover-tooltip.test.tsx`、`ui-segmented-control.test.tsx`。
   `web/test/app-shell-responsive.test.tsx:560-563`（读 `web/src/ui/drawer.tsx` 的属性键）删除这四行，同一用例的其余断言不动。
   验证：`npm test --workspace web` 通过且覆盖率门槛仍满足；`grep -rn 'ui/drawer\|ui/dialog\|ui/button' web/test | grep -v components/ui` 的命中恰为守卫里的字符串样本——`ui-layering.test.ts:254`、`:256` 与 `ui-guardrails.test.ts:137`（这三行是预期命中，不要改）；
   偏离记录逐个文件写明「没有与已删基元无关的用例」或列出例外。`ui-escape-dispatch.test.tsx` 一项如实写：D1 输入法例与 D4 恰一次例测的是 `escape-fallback.ts`，已由 1.2 搬到 `web/test/escape-fallback.test.tsx`；其余各例以旧基元或 Toast 为前提，随文件删除。
-- [ ] 1.5 过渡守卫：`web/test/ui-layering.test.ts` 的 `FROZEN_FILES` 收缩为 1.3 留下的 8 个文件名，「冻结清单恰为 32」改为 8，注释同步；
+- [x] 1.5 过渡守卫：`web/test/ui-layering.test.ts` 的 `FROZEN_FILES` 收缩为 1.3 留下的 8 个文件名，「冻结清单恰为 32」改为 8，注释同步；
   `web/test/ui-reduced-motion.test.ts:148` 去掉「声明非 `none` 过渡的规则集合非空」（声明过渡的六个样式文件全部在 1.3 删除），保留对 `violations` 为空的断言与两条判定自证用例（它们用注入样本，证明守卫没有放空）。
   验证：两个测试文件通过；在 `web/src/ui/` 下临时放回一个 `button.tsx` → `ui-layering` 判红（做完撤销）。
-- [ ] 1.6 依赖：从 `web/package.json` 移除 `@radix-ui/react-dialog`、`react-dropdown-menu`、`react-popover`、`react-radio-group`、`react-switch`、`react-tooltip` 六个（保留 `@radix-ui/react-toast` 与合包 `radix-ui`），`npm install` 更新根 `package-lock.json`；
+- [x] 1.6 依赖：从 `web/package.json` 移除 `@radix-ui/react-dialog`、`react-dropdown-menu`、`react-popover`、`react-radio-group`、`react-switch`、`react-tooltip` 六个（保留 `@radix-ui/react-toast` 与合包 `radix-ui`），`npm install` 更新根 `package-lock.json`；
   `ATTRIBUTION.md` 的「Radix UI Primitives」条目把已安装单包的列举改为只剩 `@radix-ui/react-toast`。
   验证：`grep -c '@radix-ui/react-' web/package.json` 为 1；`web/test/ui-guardrails.test.ts` 的 `ATTRIBUTION.md` 一组通过；`make anti-drift`（knip）没有未使用或未登记的依赖；PR 描述标注依赖变更。
-- [ ] 1.7 变异证据（逐条做、逐条撤销，结果贴进 PR；1.2 的三条兜底变异另计）：`git checkout` 放回 `web/src/ui/chip.tsx` → `ui-layering` 的冻结清单断言判红；
+- [x] 1.7 变异证据（逐条做、逐条撤销，结果贴进 PR；1.2 的三条兜底变异另计）：`git checkout` 放回 `web/src/ui/chip.tsx` → `ui-layering` 的冻结清单断言判红；
   给 `web/src/ui/toast.css` 加一条 `transition: opacity 0.2s` 而不加 reduce 覆盖 → `ui-reduced-motion` 判红；
   在 `web/src/features/chat/composer.tsx` 加 `import { Root } from "@radix-ui/react-dialog"` → `ui-guardrails` 的依赖方向守卫判红；
   把 `@radix-ui/react-dialog` 加回 `web/package.json` 而不登记 → `ATTRIBUTION.md` 守卫判红。
-- [ ] 1.8 整刀验证：`make check`、`make test-guardrails`、`make ui-walk`（两个 project）全绿；`npm run build --workspace web` 成功。
+- [x] 1.8 整刀验证：`make check`、`make test-guardrails`、`make ui-walk`（两个 project）全绿；`npm run build --workspace web` 成功。
 
 Suggested fixture level: compact - 只删没有导入方的代码与只测它们的测试，另搬两例兜底用例；没有运行期行为变化，风险在过渡守卫与依赖登记，由变异证据与 knip 覆盖
 Minimal mergeable slice: atomic - 24 个文件经 `ui/index.ts`、`ui.css`、`FROZEN_FILES` 三处与 6 个依赖声明互相牵连：按基元分批删要把这三处各改多遍，每一批的验证路径都是同一条 `make check`，分批没有独立价值；依赖必须与最后一个导入方同刀移除，否则 knip 判红；1.2 的搬迁必须与删除 `ui-escape-dispatch.test.tsx` 同刀，否则兜底的三条性质有一段时间没有测试

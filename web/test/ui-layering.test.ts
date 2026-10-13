@@ -94,39 +94,15 @@ const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFal
 const CHAT_DIR = "web/src/features/chat";
 
 const FROZEN_DIR = "web/src/ui";
-/** 冻结区：`web/src/ui` 的文件名只能是这 32 个的子集（可以删，不能加）。 */
+/** 冻结区：`web/src/ui` 的文件名只能是这 8 个的子集（可以删，不能加）。 */
 const FROZEN_FILES = [
   "brand-mark.tsx",
-  "button.css",
-  "button.tsx",
-  "chip.css",
-  "chip.tsx",
-  "confirm-dialog.tsx",
-  "dialog.css",
-  "dialog.tsx",
-  "drawer.tsx",
-  "empty-state.css",
-  "empty-state.tsx",
   "escape-fallback.ts",
   "icon.tsx",
   "index.ts",
-  "input.css",
-  "input.tsx",
-  "menu.css",
-  "menu.tsx",
   "motion.css",
-  "popover.css",
-  "popover.tsx",
-  "segmented-control.css",
-  "segmented-control.tsx",
-  "switch.css",
-  "switch.tsx",
-  "tag.css",
-  "tag.tsx",
   "toast.css",
   "toast.tsx",
-  "tooltip.css",
-  "tooltip.tsx",
   "ui.css",
 ];
 
@@ -344,9 +320,9 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../ui/index.js";')).toEqual([]);
   });
 
-  it("冻结清单恰为 32 个互不相同的文件名", () => {
-    expect(new Set(FROZEN_FILES).size).toBe(32);
-    expect(FROZEN_FILES).toHaveLength(32);
+  it("冻结清单恰为 8 个互不相同的文件名", () => {
+    expect(new Set(FROZEN_FILES).size).toBe(8);
+    expect(FROZEN_FILES).toHaveLength(8);
   });
 
   it("web/src 现状：已迁移区域守约，web/src/ui 的每个文件都在冻结清单里", () => {
