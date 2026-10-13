@@ -318,6 +318,42 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
       差额随 S1g 归档补齐。
     - 尚未完成：功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增的 SL-01…SL-18 与 CH-58…CH-65 全部 `待签`。
   - **D `s1f-files-page`**：文件页重写。范围已扩大、含后端，见下方「2026-10-06 owner 决定」第 4 条。
+    - 状态（2026-10-12 留痕，#1122）：Epic #1048，子 issue #1049–#1117（69 个）全部关闭、实现已合入主干；
+      **change 未归档，真实转换的人工验证未做，功能验收未签**。写入本条时 `tasks.md` 未勾的是 0.2、14.5、14.6 与 28.1–28.7，
+      见本段末「尚未完成」。
+    - 已交付的范围（规格 PR #1125，与 C、S1g 的规格同一 PR）：
+      1. 文件页重写（任务组 2、3、16、21）：`/files` 改用拷入层组件 + Tailwind，`files.css` 删除，`web/src/features/files` 整目录登记为已迁移；
+         地址在 `?ws=<id>` 之外带 `&path=<空间内相对路径>`，可定位到具体文件。
+      2. 全格式预览（任务组 6、7、10、17–20）：HTML（渲染 / 源码切换）、按语言高亮的代码与文本、tsv、更多图片与 SVG、PDF、
+         办公文档（docx / xlsx / pptx）、音视频（范围请求）、Notebook、压缩包成员列表（`GET /api/workspaces/:id/archive`）；
+         未知扩展名由服务端嗅探是否为文本；上限按类别可配；预览器按需加载，代码分割只在 `web/src/features/files/previewers/index.ts`。
+      3. 隔离预览来源（任务组 11–13）：同一进程内的第二个监听器（`server/src/preview/`，端口 `PREVIEW_PORT`），只有 `/w/<令牌>/<路径>` 与
+         `/o/<令牌>/<路径>` 两条路由；令牌由 `POST /api/workspaces/:id/preview-token` 签发，只在内存、闲置 15 分钟失效；不认登录 cookie。
+         网页的渲染视图、PDF 与办公文档转出的 PDF 从这里加载。
+      4. 办公文档转 PDF（任务组 14、15）：经 `OFFICE_BIN` 指向的 LibreOffice 转换，有超时、并发上限、排队与缓存；
+         **不配 `OFFICE_BIN` 即功能关闭**。自动化测试只对着假可执行文件，不需要 LibreOffice。
+      5. 文件操作（任务组 4、8、9、22）：`DELETE /api/workspaces/:id/entries`（移进回收目录 `<SANDBOX_ROOT>/.trash`，保留
+         `TRASH_RETENTION_DAYS` 天，启动后清理一轮、此后每 6 小时一轮；界面不提供回收站）、`POST /api/workspaces/:id/move`
+         （重命名与同空间内移动，目标同名时 409）、`GET /api/workspaces/:id/download`（所有文件可下载）；
+         审计 `file.delete` / `file.move` / `file.download`；sandbox `op` 增 `delete`、`move`。
+      6. 工作空间侧边栏（任务组 23–25）：会话页右侧的文件树 + 预览，宽屏并排可拖宽、窄屏覆盖全屏，本会话改动标记与 `只看本会话改动`；
+         文件变更卡的 `查看详情` 与产物卡的 `打开网页预览` 改为打开它并定位到文件。产物面板与网页预览对话框已删除（后者 #1110）。
+      7. 契约增量：配置项 +12（`PREVIEW_PORT`、`PREVIEW_ORIGIN`、`PREVIEW_CACHE_DIR`、`OFFICE_BIN`、`OFFICE_CONVERT_TIMEOUT_MS`、
+         `OFFICE_CONVERT_CONCURRENCY`、`PREVIEW_TEXT_MAX_BYTES`、`PREVIEW_IMAGE_MAX_BYTES`、`PREVIEW_DOCUMENT_MAX_BYTES`、
+         `PREVIEW_NOTEBOOK_MAX_BYTES`、`PREVIEW_ARCHIVE_MAX_ENTRIES`、`TRASH_RETENTION_DAYS`）；无数据库迁移；
+         新增依赖 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`、`react-resizable-panels`、`yauzl`（已登记 `ATTRIBUTION.md`）。
+      8. harness（任务组 26、27）：`smoke/files.hurl` 增范围请求、下载、重命名 / 删除 / 同名移动 409 / 越界删除 403、预览令牌与隔离来源的步骤；
+         `make ui-walk` 的 `/files` 步骤按新页面改写，会话旅程增加侧边栏步骤；功能验收清单 FL-01…FL-37 与会话页侧边栏的 CH 行（CH-98…CH-104 等）。
+    - 尚未完成（写入本条时）：
+      1. 文档（任务 28.1–28.4）：ADR-0014（#1118）、ADR-0010 增补（#1119）、ADR-0013 增补（#1120）、`CONTEXT.md` 与 `AGENTS.md`（#1121），四个 issue 都开着。
+      2. 真实转换的人工验证（任务 28.6，#1123）：测试主机上 uid 分离部署、真实 LibreOffice 经 `/o/` 的转换与跨机器的 html 预览，未做。
+      3. 归档前对底与收尾核对（任务 0.2、28.7，#1124）：未做，change 未归档。`tasks.md` 的 14.5、14.6 未勾而对应的 issue
+         （#1071–#1073、#1302）已关闭，勾选状态留给这次核对。
+      4. 功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增与改写的行全部 `待签`。
+    - 本 change 留下的后续：
+      1. 旧样式层整体移除（冻结区 `web/src/ui` 与 `web/src/styles/legacy.css`；design「Not yet specified」）：清理 issue 待 #1124 开出。
+      2. 包体上限：仍不设。ADR-0013 已定「S1f 的全部 change 完成后再定」，本 change 只量并记录（数字随 #1120 写入 ADR-0013），尚无对应 issue。
+      3. 开着的跟进 issue：#1286（检查之后按路径操作的替换窗口，owner 裁决登记为已知残余）、#1337、#1340、#1350、#1372、#1380。
 - 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。
 - 必读增量：ADR-0013（含试验结论与未覆盖项）；assistant-ui 文档 ExternalStoreRuntime / Thread / ThreadList / Attachment。
 - Verify：`make check` + `make ui-walk`（视口矩阵无横向溢出、无 console error）+ 功能验收清单签收；真实端点走一轮含审批的回合；
@@ -424,6 +460,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 **S4b 单机部署包**
 - Outcome：部署产物（app-server+SPA+kbservice+减肥 omp+fuse3/rclone+onnx 与嵌入模型捆包）；冒烟脚本全绿。**P4 里程碑验收：无公网服务器全新部署跑通。**
+- 部署要求（S1f 的 D 留下，压测第 5 条，#1122）：部署镜像安装 LibreOffice 并设 `OFFICE_BIN`（绝对路径；不设即办公文档预览关闭），发布 `PREVIEW_PORT`（缺省 0 由系统分配，部署须设为固定端口；经反向代理时另设 `PREVIEW_ORIGIN`）。
 - 覆盖：F-OPS-4。
 - 必读增量：已定决策"模型分发=捆进部署包"（backend-research §3）。
 - Verify：干净 Linux 环境（测试 VPS 的全新 docker 容器）一键部署 + 全量 smoke + 双账号走查。
