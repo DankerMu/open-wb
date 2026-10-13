@@ -318,9 +318,10 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
       差额随 S1g 归档补齐。
     - 尚未完成：功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增的 SL-01…SL-18 与 CH-58…CH-65 全部 `待签`。
   - **D `s1f-files-page`**：文件页重写。范围已扩大、含后端，见下方「2026-10-06 owner 决定」第 4 条。
-    - 状态（2026-10-12 留痕，#1122）：Epic #1048，子 issue #1049–#1117（69 个）全部关闭、实现已合入主干；
-      **change 未归档，真实转换的人工验证未做，功能验收未签**。写入本条时 `tasks.md` 未勾的是 0.2、14.5、14.6 与 28.1–28.7，
-      见本段末「尚未完成」。
+    - 状态（2026-10-12 留痕，#1124）：Epic #1048，子 issue #1049–#1123 全部关闭、实现与文档已合入主干；
+      **change 已归档（2026-10-12，#1124），功能验收未签**。`tasks.md` 全部勾选。归档前对底的结果：本 change 26 条 MODIFIED 的主规格底本
+      自开工前的对底（#1049）以来没有变更，delta 无需修改，只在 design D25 的表里补列了一处；归档输出 +35、~26、-1。
+      归档后主规格写十六个错误码、三十五项配置、十七条归属身份。
     - 已交付的范围（规格 PR #1125，与 C、S1g 的规格同一 PR）：
       1. 文件页重写（任务组 2、3、16、21）：`/files` 改用拷入层组件 + Tailwind，`files.css` 删除，`web/src/features/files` 整目录登记为已迁移；
          地址在 `?ws=<id>` 之外带 `&path=<空间内相对路径>`，可定位到具体文件。
@@ -344,14 +345,13 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
          新增依赖 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`、`react-resizable-panels`、`yauzl`（已登记 `ATTRIBUTION.md`）。
       8. harness（任务组 26、27）：`smoke/files.hurl` 增范围请求、下载、重命名 / 删除 / 同名移动 409 / 越界删除 403、预览令牌与隔离来源的步骤；
          `make ui-walk` 的 `/files` 步骤按新页面改写，会话旅程增加侧边栏步骤；功能验收清单 FL-01…FL-37 与会话页侧边栏的 CH 行（CH-98…CH-104 等）。
-    - 尚未完成（写入本条时）：
-      1. 文档（任务 28.1–28.4）：ADR-0014（#1118）、ADR-0010 增补（#1119）、ADR-0013 增补（#1120）、`CONTEXT.md` 与 `AGENTS.md`（#1121），四个 issue 都开着。
-      2. 真实转换的人工验证（任务 28.6，#1123）：测试主机上 uid 分离部署、真实 LibreOffice 经 `/o/` 的转换与跨机器的 html 预览，未做。
-      3. 归档前对底与收尾核对（任务 0.2、28.7，#1124）：未做，change 未归档。`tasks.md` 的 14.5、14.6 未勾而对应的 issue
-         （#1071–#1073、#1302）已关闭，勾选状态留给这次核对。
-      4. 功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增与改写的行全部 `待签`。
+    - 尚未完成：
+      1. 功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增与改写的行全部 `待签`。
+      2. 真实转换的验证（任务 28.6，#1123）已做一次并记入 ADR-0014 与 ADR-0010 补充；其中浏览器一步是脚本驱动加截图，不是人眼操作，
+         是否另由人补看一次待 owner 定。
+      3. 并入本块的原始需求 #913 仍开着，是否关闭待 owner 定。
     - 本 change 留下的后续：
-      1. 旧样式层整体移除（冻结区 `web/src/ui` 与 `web/src/styles/legacy.css`；design「Not yet specified」）：清理 issue 待 #1124 开出。
+      1. 旧样式层整体移除（冻结区 `web/src/ui` 与 `web/src/styles/legacy.css`；design「Not yet specified」）：清理 issue 是 #1393。
       2. 包体上限：仍不设。ADR-0013 已定「S1f 的全部 change 完成后再定」，本 change 只量并记录（数字随 #1120 写入 ADR-0013），尚无对应 issue。
       3. 开着的跟进 issue：#1286（检查之后按路径操作的替换窗口，owner 裁决登记为已知残余）、#1337、#1340、#1350、#1372、#1380。
 - 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。

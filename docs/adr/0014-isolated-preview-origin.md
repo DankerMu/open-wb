@@ -6,7 +6,7 @@
 规格在 `preview-origin`、`office-preview`、`file-operations` 三个能力里，逐条理由在该 change 的 `design.md` D11–D22。
 
 下文每条后果标注证据等级：**实测**（跑过并观察到，注明日期与记录处）、**读代码推出**、**未测**。
-「测试主机」指 ADR-0010 所说的 Linux 测试部署；记录处的 `design` 指 `openspec/changes/s1f-files-page/design.md`。
+「测试主机」指 ADR-0010 所说的 Linux 测试部署；记录处的 `design` 指 `openspec/changes/archive/2026-10-12-s1f-files-page/design.md`（change 归档后的位置）。
 
 ## 决定
 
