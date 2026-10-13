@@ -31,11 +31,11 @@
 
 ## 1. files-web — 目录缓存按路径取值只认自有键（G1，#1340）
 
-- [ ] 1.1 测试先行（`web/test/browser-paths.test.ts`）：`loadedDirectoryPaths` 对根列表含 `constructor`、`__proto__`、`toString`、`hasOwnProperty`、`valueOf` 目录的缓存不抛出、返回 `[""]`；其中某一个已加载时只多出它；`revealStep("constructor/a.md", …)` 在 `constructor` 未加载时返回 `unloaded: "constructor"`。验证：新用例在现有实现上判红（`constructor` 一例抛 `TypeError`）。
-- [ ] 1.2 测试先行（`web/test/files-page.test.tsx`，整页渲染加假 fetch）：files-web「目录树与预览」的场景「与对象原型成员同名的目录」——页面不崩溃、位置下拉展开前只有根、展开 `constructor` 恰一次 `tree` 并列出内容、`__proto__` 列举失败时显示信封 message、其余目录没有错误行。验证：在现有实现上判红。
-- [ ] 1.3 实现：`web/src/features/files/browser-paths.ts` 导出一个取自有值的函数（design D1），目录缓存与目录错误表的每一处读都经它——`browser-paths.ts` 的 `loadedDirectoryPaths`（两处加入口的 `cache[""]`）与 `revealStep`（两处）、`tree.tsx` 的 `DirectoryNode`（`cache[path]`、`errors[path]`）、`workspace-browser.tsx` 清错误处的 `current[path]`、`folder-dialog.ts` 的 `cacheRef.current[""]`；既有四处 `Object.hasOwn` 改用同一个函数。不换 Map，不改写入点。验证：1.1、1.2 转绿，`npm test --workspace web` 全绿。
-- [ ] 1.4 守卫测试：一个源码断言——`web/src/features/files` 下的 `.ts` / `.tsx` 里，目录缓存与目录错误表不以方括号读取（按 1.3 改完后各取值点的变量名列出要拦的写法；展开加计算键的写入不算），读取只经 1.3 的函数。验证：临时加回一处 `cache[path]` 时该断言判红。
-- [ ] 1.5 变异证据：把 `loadedDirectoryPaths` 里的取值改回 `cache[path]` → 1.1 的 `constructor` 用例与 1.2 判红；把 `tree.tsx` 的 `errors[path]` 改回 → 1.2 的「没有错误行」判红。`make ui-walk` 跑一次（`/files` 走查不回归）。
+- [x] 1.1 测试先行（`web/test/browser-paths.test.ts`）：`loadedDirectoryPaths` 对根列表含 `constructor`、`__proto__`、`toString`、`hasOwnProperty`、`valueOf` 目录的缓存不抛出、返回 `[""]`；其中某一个已加载时只多出它；`revealStep("constructor/a.md", …)` 在 `constructor` 未加载时返回 `unloaded: "constructor"`。验证：新用例在现有实现上判红（`constructor` 一例抛 `TypeError`）。
+- [x] 1.2 测试先行（`web/test/files-page.test.tsx`，整页渲染加假 fetch）：files-web「目录树与预览」的场景「与对象原型成员同名的目录」——页面不崩溃、位置下拉展开前只有根、展开 `constructor` 恰一次 `tree` 并列出内容、`__proto__` 列举失败时显示信封 message、其余目录没有错误行。验证：在现有实现上判红。
+- [x] 1.3 实现：`web/src/features/files/browser-paths.ts` 导出一个取自有值的函数（design D1），目录缓存与目录错误表的每一处读都经它——`browser-paths.ts` 的 `loadedDirectoryPaths`（两处加入口的 `cache[""]`）与 `revealStep`（两处）、`tree.tsx` 的 `DirectoryNode`（`cache[path]`、`errors[path]`）、`workspace-browser.tsx` 清错误处的 `current[path]`、`folder-dialog.ts` 的 `cacheRef.current[""]`；既有四处 `Object.hasOwn` 改用同一个函数。不换 Map，不改写入点。验证：1.1、1.2 转绿，`npm test --workspace web` 全绿。
+- [x] 1.4 守卫测试：一个源码断言——`web/src/features/files` 下的 `.ts` / `.tsx` 里，目录缓存与目录错误表不以方括号读取（按 1.3 改完后各取值点的变量名列出要拦的写法；展开加计算键的写入不算），读取只经 1.3 的函数。验证：临时加回一处 `cache[path]` 时该断言判红。
+- [x] 1.5 变异证据：把 `loadedDirectoryPaths` 里的取值改回 `cache[path]` → 1.1 的 `constructor` 用例与 1.2 判红；把 `tree.tsx` 的 `errors[path]` 改回 → 1.2 的「没有错误行」判红。`make ui-walk` 跑一次（`/files` 走查不回归）。
 
 Suggested fixture level: compact - 单个前端特性目录内的取值方式修正，不涉及共享入口、格式或文件写删
 Minimal mergeable slice: atomic - 一个取值函数加它的全部调用点；只改一部分调用点就留下同一缺陷，守卫测试也无法成立

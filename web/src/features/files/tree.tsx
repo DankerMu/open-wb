@@ -7,7 +7,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Icon, type IconName } from "../../ui/index.js";
-import { type TreeRow, type TreeRows, workspacePath } from "./browser-paths.js";
+import { ownValue, type TreeRow, type TreeRows, workspacePath } from "./browser-paths.js";
 import { ALERT_BOX } from "./columns.js";
 import { EmptyState } from "./empty-state.js";
 import type { EntryActions, MenuFocus } from "./entry-ops.js";
@@ -359,10 +359,10 @@ function DirectoryNode({
   selectedPath,
   subline,
 }: DirectoryNodeProps) {
-  const entries = cache[path]?.entries;
+  const entries = ownValue(cache, path)?.entries;
   const expanded = expandedPaths.has(path);
   const loading = loadingPaths.has(path);
-  const error = errors[path];
+  const error = ownValue(errors, path);
   const mark = useRowMark(marks, path);
   // 根行没有菜单。
   const menu = path === "" ? undefined : actions;

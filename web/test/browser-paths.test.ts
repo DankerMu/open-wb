@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   canMoveInto,
   type DirectoryCache,
+  loadedDirectoryPaths,
   moveDestination,
   movedCache,
   movedKeys,
@@ -14,6 +15,7 @@ import {
   normalizedPath,
   parentPath,
   renameTarget,
+  revealStep,
 } from "../src/features/files/browser-paths.js";
 
 describe("normalizedPath", () => {
@@ -406,5 +408,55 @@ describe("moveTargets", () => {
 
   it("没有可选目标时是空数组", () => {
     expect(moveTargets(cache(), new Set(["", "out", "out/sub"]), "out")).toStrictEqual([]);
+  });
+});
+
+// files-web「目录树与预览」：目录名与对象原型成员同名时与其它目录名同样处理（#1340）。缓存是普通对象，
+// 这些名字按方括号读会读到继承来的值；期望值按规格那一句手写——没有登记过即未加载。
+describe("与对象原型成员同名的目录（#1340）", () => {
+  const NAMES = ["constructor", "__proto__", "toString", "hasOwnProperty", "valueOf"] as const;
+  const dir = (name: string) => ({ name, type: "dir" as const, size: 0, mtime: 100 });
+  const file = (name: string) => ({ name, type: "file" as const, size: 4, mtime: 200 });
+  // 经 `Object.fromEntries` 组装：对象字面量里的 `__proto__:` 是设原型，不是登记一个键。
+  const cacheOf = (...loaded: [string, DirectoryCache[string]["entries"]][]): DirectoryCache =>
+    Object.fromEntries([
+      ["", { path: "", entries: NAMES.map(dir) }],
+      ...loaded.map(([path, entries]) => [path, { path, entries }] as const),
+    ]);
+
+  it("loadedDirectoryPaths：根列表里有这五个目录、都没加载过时不抛出，只有根", () => {
+    expect(loadedDirectoryPaths(cacheOf())).toStrictEqual([""]);
+  });
+
+  it.each(NAMES)("loadedDirectoryPaths：只有 %s 加载过时只多出它", (name) => {
+    expect(loadedDirectoryPaths(cacheOf([name, [file("a.md")]]))).toStrictEqual(["", name]);
+  });
+
+  it("revealStep：constructor 没加载过时它就是下一个要请求的层", () => {
+    expect(revealStep("constructor/a.md", cacheOf())).toStrictEqual({
+      entry: null,
+      expand: ["", "constructor"],
+      unloaded: "constructor",
+    });
+  });
+
+  it("revealStep：__proto__ 加载过时取到的是它自己列表里的条目", () => {
+    expect(revealStep("__proto__/a.md", cacheOf(["__proto__", [file("a.md")]]))).toStrictEqual({
+      entry: file("a.md"),
+      expand: ["", "__proto__"],
+      unloaded: null,
+    });
+  });
+
+  it.each(NAMES)("movedCache：移进没加载过的 %s 时只从原父目录拿掉，不读继承来的值", (name) => {
+    const cache: DirectoryCache = { "": { path: "", entries: [dir(name), file("a.md")] } };
+    expect(movedCache(cache, "a.md", `${name}/a.md`)).toStrictEqual({
+      "": { path: "", entries: [dir(name)] },
+    });
+  });
+
+  it.each(NAMES)("movedCache：%s 没加载过时，其下条目的改名不动缓存", (name) => {
+    const cache: DirectoryCache = { "": { path: "", entries: [dir(name)] } };
+    expect(movedCache(cache, `${name}/a.md`, `${name}/b.md`)).toStrictEqual(cache);
   });
 });

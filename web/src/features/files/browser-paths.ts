@@ -14,6 +14,16 @@ export type TreeRow =
 
 export type TreeRows = Record<string, { entries: TreeRow[] }>;
 
+/**
+ * 以路径为键的普通对象（列表缓存、目录的失败文案、`TreeRows`）里 `key` 自己登记过的值，没登记过是
+ * `undefined`。这些表的每一处读都经这里，不用方括号：名为 `constructor`、`__proto__`、`toString` 的
+ * 目录按方括号读出来的是继承自对象原型的函数或原型本身，不是列表也不是文案（#1340）。写入端（展开加
+ * 计算键、`Object.fromEntries`）定义的本来就是自有属性。
+ */
+export function ownValue<T>(record: Readonly<Record<string, T>>, key: string): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 export function workspacePath(parent: string, name: string) {
   if (parent.length === 0) {
     return name;
@@ -117,7 +127,7 @@ export function movedCache(cache: DirectoryCache, from: string, to: string | nul
   const next: DirectoryCache = Object.fromEntries(kept);
   const lastName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
   const source = parentPath(from);
-  const listed = next[source];
+  const listed = ownValue(next, source);
   const entry = listed?.entries.find((item) => item.name === lastName(from));
   if (!listed || !entry) {
     return next;
@@ -126,7 +136,7 @@ export function movedCache(cache: DirectoryCache, from: string, to: string | nul
   if (to === null || parentPath(to) !== source) {
     next[source] = { ...listed, entries: listed.entries.filter((item) => item !== entry) };
   }
-  const landing = to === null ? undefined : next[parentPath(to)];
+  const landing = to === null ? undefined : ownValue(next, parentPath(to));
   if (to !== null && landing) {
     const moved = { ...entry, name: lastName(to) };
     const rest = landing.entries.filter((item) => item === entry || item.name !== moved.name);
@@ -166,19 +176,19 @@ function parentDirectories(path: string): string[] {
 }
 
 export function loadedDirectoryPaths(cache: DirectoryCache) {
-  if (!cache[""]) {
+  if (!ownValue(cache, "")) {
     return [];
   }
 
   const paths: string[] = [""];
   const visit = (parent: string) => {
-    for (const entry of cache[parent]?.entries ?? []) {
+    for (const entry of ownValue(cache, parent)?.entries ?? []) {
       if (entry.type !== "dir") {
         continue;
       }
 
       const path = workspacePath(parent, entry.name);
-      if (!cache[path]) {
+      if (!ownValue(cache, path)) {
         continue;
       }
 
@@ -204,8 +214,7 @@ export function moveTargets(
 ): string[] {
   const visible: string[] = [];
   const visit = (path: string) => {
-    // `Object.hasOwn`：没加载过的 `__proto__` 目录读出来的是对象原型，不是列表。
-    const listing = Object.hasOwn(cache, path) ? cache[path] : undefined;
+    const listing = ownValue(cache, path);
     if (!listing) {
       return;
     }
@@ -237,13 +246,13 @@ export function revealStep(path: string, cache: DirectoryCache) {
     const above = parents[index - 1];
     listed &&=
       above === undefined ||
-      cache[above]?.entries.some(
+      ownValue(cache, above)?.entries.some(
         (item) => item.type === "dir" && workspacePath(above, item.name) === parent,
       ) === true;
     if (listed) {
       expand.push(parent);
     }
-    if (!Object.hasOwn(cache, parent)) {
+    if (!ownValue(cache, parent)) {
       return { entry: null, expand, unloaded: parent };
     }
   }
@@ -252,7 +261,7 @@ export function revealStep(path: string, cache: DirectoryCache) {
   const entry =
     last === undefined
       ? undefined
-      : cache[last]?.entries.find((item) => workspacePath(last, item.name) === path);
+      : ownValue(cache, last)?.entries.find((item) => workspacePath(last, item.name) === path);
   return { entry: entry ?? null, expand, unloaded: null };
 }
 
@@ -274,7 +283,7 @@ export function refreshLayers(cache: DirectoryCache, paths: Iterable<string>): R
   const layers = new Set<string>();
   for (const path of paths) {
     for (const parent of parentDirectories(path)) {
-      if (Object.hasOwn(cache, parent)) {
+      if (ownValue(cache, parent)) {
         layers.add(parent);
       }
     }
@@ -305,7 +314,7 @@ export function subtreeOf(onlyPaths: Iterable<string>, cache: DirectoryCache) {
   }
 
   const rows = [...children].map(([parent, siblings]) => {
-    const loaded = Object.hasOwn(cache, parent) ? (cache[parent]?.entries ?? []) : [];
+    const loaded = ownValue(cache, parent)?.entries ?? [];
     const entries = [...siblings].map(
       ([name, type]): TreeRow =>
         loaded.find((entry) => entry.name === name && entry.type === type) ?? { name, type },

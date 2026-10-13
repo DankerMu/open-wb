@@ -4,7 +4,7 @@
  */
 import { type RefObject, useCallback, useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
-import { type DirectoryCache, workspacePath } from "./browser-paths.js";
+import { type DirectoryCache, ownValue, workspacePath } from "./browser-paths.js";
 import { useRequestDialog } from "./request-dialog.js";
 
 /** `cacheRef` 只用来看根是否已加载；`reloadDirectory` 在创建成功后重取父目录。 */
@@ -19,7 +19,7 @@ export function useFolderDialog(
 
   const open = useCallback(
     (trigger: HTMLElement | null) => {
-      if (!cacheRef.current[""]) {
+      if (!ownValue(cacheRef.current, "")) {
         setNotice("当前工作空间没有可写目录");
         return;
       }
