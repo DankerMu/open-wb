@@ -33,6 +33,16 @@ export function useWelcomeOptions(
         ) as Picked,
     );
   }, []);
+  /**
+   * 重取到的缺省模型变了（chat-web「输入框与能力栏」）：页面上没选过模型时，已选的强度相对的是原来的
+   * 缺省模型，丢弃；选过模型时强度相对的是所选的模型，不动。档位与模型的选择从不因重取而变。
+   */
+  const defaultModelChanged = useCallback(() => {
+    setPicked((current) => {
+      if (current.modelId !== undefined || current.reasoningEffort === undefined) return current;
+      return current.approvalMode === undefined ? {} : { approvalMode: current.approvalMode };
+    });
+  }, []);
   /** `POST /api/sessions` 的 body：没有生效空间时不带 `workspaceId` 键，`picked` 只带选过的键。 */
   const createBody = useCallback(
     () => ({
@@ -44,6 +54,7 @@ export function useWelcomeOptions(
   );
   return {
     createBody,
+    defaultModelChanged,
     pick,
     picked,
     scene,

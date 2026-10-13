@@ -84,7 +84,8 @@ type DeletingState = { client: ApiClient; ids: readonly string[] };
 /**
  * 页面交给删除用的句柄：中止历史读取、关闭事件流、重读列表、当前选中的会话 id（响应到达时读取），
  * 以及会话列表状态（打开删除确认框时判定临时空间是否共用）。`history` 是页面持有的历史（导出当前
- * 会话时读它的视图）。`setPromptError` 写输入框上的就地提示（输入框设置提交失败时用）。
+ * 会话时读它的视图）。`setPromptError` 写输入框上的就地提示（输入框设置提交失败时用）。`settingsSaved`
+ * 在一次输入框设置提交成功后调用（输入框选项随之失效并重取）。
  */
 type PageHandles = {
   abortHistory(): void;
@@ -94,6 +95,7 @@ type PageHandles = {
   refreshList(client: ApiClient): void;
   requestedSessionRef: RefObject<string | null>;
   setPromptError: Dispatch<SetStateAction<ChatOwnedAlert | null>>;
+  settingsSaved(): void;
 };
 
 /** 为 `client` 的 `sessionId` 会话打开的 Dialog 关闭（null）；为别的会话打开的原样返回。 */
@@ -260,6 +262,8 @@ export function useSessionActions(
     const request = track();
     return {
       ...request,
+      /** 只有 `track()` 的 fence：未卸载、未 abort、仍是当前 client，不看是不是最后发出的那次。 */
+      live: request.current,
       current: () => request.current() && sequence === sequencesRef.current.get(sequenceKey),
     };
   }
@@ -465,6 +469,9 @@ export function useSessionActions(
    * 把响应视图的三个设置键合并进列表与快照，不看此刻选中的是哪个会话；显示值只来自这次合并，不做乐观
    * 更新。失败：仅当通过 fence、此刻选中的仍是 `sessionId` 且不是 401 时，把信封文案写到输入框上——
    * 切走后迟到的失败不改界面。
+   *
+   * 200 之后另调一次 `page.settingsSaved()`（输入框选项失效并重取）：只看 `track()` 的 fence，不看是不是
+   * 最后发出的那次——被后发的提交挡掉合并的 200 同样已经改了账号的最近选择。
    */
   function patchComposer(sessionId: string, patch: ComposerPatch): Promise<void> {
     page.setPromptError(null);
@@ -474,6 +481,7 @@ export function useSessionActions(
       .finally(request.release)
       .then(
         (view) => {
+          if (request.live()) page.settingsSaved();
           if (request.current()) merge(client, view, "composer");
         },
         (error: unknown) => {
