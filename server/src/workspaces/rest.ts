@@ -23,7 +23,7 @@ import {
   sniffText,
 } from "./preview.js";
 import { sendFileRange } from "./range-send.js";
-import type { WorkspaceStore } from "./store.js";
+import { WorkspaceRootOccupiedError, type WorkspaceStore } from "./store.js";
 import type { createTrash } from "./trash.js";
 import { listOneLevel } from "./tree.js";
 import { storeUpload } from "./upload.js";
@@ -90,12 +90,34 @@ export function currentPrincipal(request: FastifyRequest): { id: string } {
   return principal;
 }
 
+/**
+ * The store's owner-scoped `rootOf` for the workspace HTTP boundary and the preview listener, the
+ * only places a root occupied by a non-directory is a 404 (#1244): that one error class becomes
+ * `not_found`, before the request's path or body is looked at. Null (not the caller's) and the
+ * path come back as the store gave them — what a missing root means is each caller's own rule —
+ * and any other failure (an unsafe owner segment, a symbolic link) propagates as it is.
+ */
+export function ownedRootOf(
+  store: Pick<WorkspaceStore, "rootOf">,
+  principal: { id: string },
+  workspaceId: string,
+): string | null {
+  try {
+    return store.rootOf(principal, workspaceId);
+  } catch (error) {
+    if (error instanceof WorkspaceRootOccupiedError) {
+      throw new HttpError("not_found");
+    }
+    throw error;
+  }
+}
+
 export function ensureOwnedRoot(
   dependencies: WorkspaceRestDependencies,
   principal: { id: string },
   workspaceId: string,
 ): void {
-  const root = dependencies.store.rootOf(principal, workspaceId);
+  const root = ownedRootOf(dependencies.store, principal, workspaceId);
   if (root === null || !isOrdinaryDirectory(root)) {
     throw new HttpError("not_found");
   }
@@ -246,9 +268,13 @@ export function registerWorkspaceRest(
     throw new Error("upload max bytes must be a positive safe integer");
   }
 
-  /** Runs before the body is parsed: another owner's id answers 404 whatever the body is. */
+  /**
+   * Runs before the body is parsed: another owner's id answers 404 whatever the body is, and so
+   * does an own workspace whose root path is occupied (`ownedRootOf`). A root that is only missing
+   * passes — it does not block `promote` — so this is not `ensureOwnedRoot`.
+   */
   const requireOwnedBeforeParse: OwnedPreParsing = (request, _reply, payload, done) => {
-    if (dependencies.store.rootOf(currentPrincipal(request), request.params.id) === null) {
+    if (ownedRootOf(dependencies.store, currentPrincipal(request), request.params.id) === null) {
       throw new HttpError("not_found");
     }
     done(null, payload);

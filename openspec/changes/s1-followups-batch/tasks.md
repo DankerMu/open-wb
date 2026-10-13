@@ -61,17 +61,17 @@ Minimal mergeable slice: 2b.1 的归类表加任意一个文件的迁移即可�
 
 ## 3. workspaces — 根路径被非目录占据（G3，#1244、#1316；Critical Path 邻接，请求白盒审查）
 
-- [ ] 3.1 测试先行（新文件 `server/test/workspace-store-root-occupied.test.ts`；`workspace-store.test.ts` 已 798 行，不追加）：自有空间的根路径是普通文件时 `rootOf` 抛出 store 导出的专用错误类；根路径是符号链接、owner 段不安全时抛的**不是**这个类（仍是通用错误）；根缺失时照旧返回路径、不抛。`list`：账号有两个空间、其中一个的根被普通文件占据 → 不抛，返回两项，被占据那一项的五个字段与它的根缺失时逐值相同（`root` 是同一个路径字符串）；根是符号链接的空间仍使 `list` 抛通用错误（D14-1）。`promote`：临时空间的根被占据 → 抛专用错误类，行仍 `temporary = 1`、没有 `workspace.promote` 审计行；根缺失时照常成功。验证：`rootOf` 第一例与 `list`、`promote` 两例在现有实现上判红（现在抛普通 `Error`）。
-- [ ] 3.2 测试先行（新文件 `server/test/workspaces-root-occupied.test.ts`，`createApp` + `inject`，表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「空间根被非目录占据」。
+- [x] 3.1 测试先行（新文件 `server/test/workspace-store-root-occupied.test.ts`；`workspace-store.test.ts` 已 798 行，不追加）：自有空间的根路径是普通文件时 `rootOf` 抛出 store 导出的专用错误类；根路径是符号链接、owner 段不安全时抛的**不是**这个类（仍是通用错误）；根缺失时照旧返回路径、不抛。`list`：账号有两个空间、其中一个的根被普通文件占据 → 不抛，返回两项，被占据那一项的五个字段与它的根缺失时逐值相同（`root` 是同一个路径字符串）；根是符号链接的空间仍使 `list` 抛通用错误（D14-1）。`promote`：临时空间的根被占据 → 抛专用错误类，行仍 `temporary = 1`、没有 `workspace.promote` 审计行；根缺失时照常成功。验证：`rootOf` 第一例与 `list`、`promote` 两例在现有实现上判红（现在抛普通 `Error`）。
+- [x] 3.2 测试先行（新文件 `server/test/workspaces-root-occupied.test.ts`，`createApp` + `inject`，表驱动）：workspaces「工作空间 HTTP 集成边界」的场景「空间根被非目录占据」。
   - 逐路由表：`/api/workspaces/:id/` 之下 `tree`、新建目录、`file`、`archive`、`download`、`DELETE entries`、`move`、`preview-token`、上传各一行，带路径的用 `../x`：应答与同一请求在根缺失时逐字相同（404、信封、`no-store`），审计行数不变，占位文件字节不变，没有目录被建出；上传一行另断言请求体没有被读取。
   - `promote` 一行（owner 2026-10-13）：临时空间的根被占据 → 404 `not_found`、`no-store`，没有 `workspace.promote` 审计，行仍 `temporary = 1`、名字未变，带非法 body（如 `[]`）时同样是 404 而不是 400；对照例根缺失 → 200。
   - 列表一例（owner 2026-10-13）：正式空间的根被占据时 `GET /api/workspaces` 为 200，应答体与该根缺失时逐字相同，其它空间照常列出。
   - 另一例根是指向目录的符号链接 → 各路由 sanitized 500（D14-1）。
   验证：在现有实现上逐路由表每一行、`promote` 一行与列表一例都是 500，判红。
-- [ ] 3.3 实现：`server/src/workspaces/store.ts` 的 `computeSafeRoot` 把「存在但不是目录」一支换成导出的专用错误类（带着已解析出的路径），另两支不动；`list` 遇到这个类时照常产出该行、`root` 取那条路径（`create` 与 `promote` 不捕获，照旧抛出）。`server/src/workspaces/rest.ts` 抽一个取根函数：捕获这一个类 → `not_found`。两处调用它但保留各自原有的判定——`ensureOwnedRoot` 仍是「null 或不是普通目录 → 404」，`requireOwnedBeforeParse`（`promote` 用）仍只在 null 时 404，**不得**因此让根缺失的 `promote` 变成 404。不改 `server/src/core/sandbox`，不改 `server/src/sessions`。验证：3.1、3.2 转绿。
-- [ ] 3.4 预览监听器：`server/src/preview/app.ts` 取根处用同一个取根函数；在 `server/test/preview-app.test.ts`（606 行）加一例——持有未过期令牌、根被普通文件占据 → 与「空间消失」相同的 404，不是 500。验证：该例先红后绿。
-- [ ] 3.5 回归（证明会话侧没变）：绑定空间的根被普通文件占据时，prompt 仍是 502 `agent_unavailable`、不 spawn（session-metadata「绑定不可改与工作目录」）；`GET /api/commands?workspaceId=` 仍 200 且没有项目级命令。两例若已有等价用例就指出文件与用例名，没有就补进新文件（不追加到上面清单里贴线的文件）。验证：用例通过，且 3.3 之前之后结果相同。
-- [ ] 3.6 变异证据：去掉取根函数里的捕获 → 3.2 逐路由表与 `promote` 一行判红；把专用错误类也用于符号链接一支 → 3.1 与 3.2 的符号链接例判红；`list` 不捕获 → 3.1 的 `list` 例与 3.2 的列表例判红；让 `requireOwnedBeforeParse` 也查「不是普通目录」→ 3.2 `promote` 的根缺失对照例判红。`make smoke` 跑一次。PR 标注「触碰工作空间根的取得（Critical Path 邻接面），请求白盒审查」，并写明符号链接的根按 D14-1 保持 500。
+- [x] 3.3 实现：`server/src/workspaces/store.ts` 的 `computeSafeRoot` 把「存在但不是目录」一支换成导出的专用错误类（带着已解析出的路径），另两支不动；`list` 遇到这个类时照常产出该行、`root` 取那条路径（`create` 与 `promote` 不捕获，照旧抛出）。`server/src/workspaces/rest.ts` 抽一个取根函数：捕获这一个类 → `not_found`。两处调用它但保留各自原有的判定——`ensureOwnedRoot` 仍是「null 或不是普通目录 → 404」，`requireOwnedBeforeParse`（`promote` 用）仍只在 null 时 404，**不得**因此让根缺失的 `promote` 变成 404。不改 `server/src/core/sandbox`，不改 `server/src/sessions`。验证：3.1、3.2 转绿。
+- [x] 3.4 预览监听器：`server/src/preview/app.ts` 取根处用同一个取根函数；在 `server/test/preview-app.test.ts`（606 行）加一例——持有未过期令牌、根被普通文件占据 → 与「空间消失」相同的 404，不是 500。验证：该例先红后绿。
+- [x] 3.5 回归（证明会话侧没变）：绑定空间的根被普通文件占据时，prompt 仍是 502 `agent_unavailable`、不 spawn（session-metadata「绑定不可改与工作目录」）；`GET /api/commands?workspaceId=` 仍 200 且没有项目级命令。两例若已有等价用例就指出文件与用例名，没有就补进新文件（不追加到上面清单里贴线的文件）。验证：用例通过，且 3.3 之前之后结果相同。
+- [x] 3.6 变异证据：去掉取根函数里的捕获 → 3.2 逐路由表与 `promote` 一行判红；把专用错误类也用于符号链接一支 → 3.1 与 3.2 的符号链接例判红；`list` 不捕获 → 3.1 的 `list` 例与 3.2 的列表例判红；让 `requireOwnedBeforeParse` 也查「不是普通目录」→ 3.2 `promote` 的根缺失对照例判红。`make smoke` 跑一次。PR 标注「触碰工作空间根的取得（Critical Path 邻接面），请求白盒审查」，并写明符号链接的根按 D14-1 保持 500。
 
 Suggested fixture level: expanded - 触及文件路径边界与跨路由共享的取根入口，且 `rootOf` 的抛出语义被会话模块依赖
 Minimal mergeable slice: atomic - 专用错误类没有捕获方时端点仍是 500，只在一部分取根点捕获则同一情形两种状态码；store、三个取根点、列表与表驱动测试必须同刀

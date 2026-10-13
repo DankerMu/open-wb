@@ -50,7 +50,35 @@ interface CreatedTemporaryWorkspace {
   removeCreatedDirs(): void;
 }
 
+/**
+ * The path of a root exists and its `lstat` is not a directory: a regular file in the tests, any
+ * other non-directory entry by the same check (as read from the code, not exercised). A root that
+ * is a symbolic link when the resolver looks is refused there and stays the plain `Error`
+ * (tested); one put in place between the resolver's `lstat` and this one would be reported as
+ * occupied (as read from the code, not exercised).
+ *
+ * Every caller of `computeSafeRoot` can get it: `rootOf` and `promote` let it through, `list`
+ * turns it into the path, `create` and `createTemporary` let it through for the owner root too.
+ * Only `ownedRootOf` (`rest.ts`) answers 404 for it — the routes below `/api/workspaces/:id/`
+ * and the preview listener; to every other caller it is the generic failure it was, under the
+ * same message.
+ */
+export class WorkspaceRootOccupiedError extends Error {
+  /** The resolved absolute path: what the same call returns while nothing is there. */
+  readonly root: string;
+
+  constructor(root: string) {
+    super(INVALID_ROOT_MESSAGE);
+    this.name = "WorkspaceRootOccupiedError";
+    this.root = root;
+  }
+}
+
 export interface WorkspaceStore {
+  /**
+   * A workspace whose root path is occupied by a non-directory is listed as one whose root is
+   * missing is — `root` is the same path. Any other unusable root fails the whole listing.
+   */
   list(ownerId: string): WorkspaceRecord[];
   create(principal: StorePrincipal, input: CreateWorkspaceInput): WorkspaceRecord;
   /**
@@ -69,6 +97,11 @@ export interface WorkspaceStore {
    * uses is a `conflict`.
    */
   promote(principal: StorePrincipal, workspaceId: string, name: string): WorkspaceRecord | null;
+  /**
+   * Null for an id that is not this owner's. The path, whether or not anything is there yet.
+   * Throws `WorkspaceRootOccupiedError` when a non-directory is there, a plain `Error` for an
+   * unsafe owner segment or a symbolic link on the way.
+   */
   rootOf(principal: StorePrincipal, workspaceId: string): string | null;
 }
 
@@ -97,6 +130,7 @@ const MAX_NAME_CODEPOINTS = 64;
 const ROLLBACK_FAILURE_MESSAGE = "workspace create rollback failed";
 const CLEANUP_FAILURE_MESSAGE = "workspace create compensation failed";
 const PROMOTE_ROLLBACK_FAILURE_MESSAGE = "workspace promote rollback failed";
+const INVALID_ROOT_MESSAGE = "invalid workspace root path";
 
 export function createWorkspaceStore(
   db: DatabaseSync,
@@ -113,7 +147,7 @@ export function createWorkspaceStore(
       const rows = db.prepare(LIST_SQL).all(ownerId) as WorkspaceRow[];
       const listed: WorkspaceRecord[] = [];
       for (const row of rows) {
-        listed.push(toWorkspace(sandboxRoot, ownerId, row));
+        listed.push(toWorkspace(row, listedRoot(sandboxRoot, ownerId, row.dir)));
       }
       return listed;
     },
@@ -191,7 +225,8 @@ export function createWorkspaceStore(
           db.exec("ROLLBACK");
           return null;
         }
-        const promoted = toWorkspace(sandboxRoot, principal.id, row);
+        // Not caught here: an occupied root rolls the promotion back and reaches the caller.
+        const promoted = toWorkspace(row, computeSafeRoot(sandboxRoot, principal.id, row.dir));
         emit(db, {
           kind: "workspace.promote",
           actorId: principal.id,
@@ -223,14 +258,20 @@ export function createWorkspaceStore(
   };
 }
 
-function toWorkspace(sandboxRoot: string, ownerId: string, row: WorkspaceRow): WorkspaceRecord {
-  return {
-    id: row.id,
-    name: row.name,
-    dir: row.dir,
-    root: computeSafeRoot(sandboxRoot, ownerId, row.dir),
-    createdAt: row.createdAt,
-  };
+function toWorkspace(row: WorkspaceRow, root: string): WorkspaceRecord {
+  return { id: row.id, name: row.name, dir: row.dir, root, createdAt: row.createdAt };
+}
+
+/** `list` only: the path an occupied root resolved to stands in for the root, as a missing one's does. */
+function listedRoot(sandboxRoot: string, ownerId: string, dir: string): string {
+  try {
+    return computeSafeRoot(sandboxRoot, ownerId, dir);
+  } catch (error) {
+    if (error instanceof WorkspaceRootOccupiedError) {
+      return error.root;
+    }
+    throw error;
+  }
 }
 
 function validateName(rawName: string): string {
@@ -307,11 +348,11 @@ function computeSafeRoot(sandboxRoot: string, ownerId: string, dir?: string): st
   const relPath = dir === undefined ? ownerId : `${ownerId}/${dir}`;
   const resolved = resolveSandboxPath(sandboxRoot, relPath, "read");
   if (!resolved.ok) {
-    throw new Error("invalid workspace root path");
+    throw new Error(INVALID_ROOT_MESSAGE);
   }
   const status = lstatSync(resolved.absPath, { throwIfNoEntry: false });
   if (status !== undefined && !status.isDirectory()) {
-    throw new Error("invalid workspace root path");
+    throw new WorkspaceRootOccupiedError(resolved.absPath);
   }
   return resolved.absPath;
 }

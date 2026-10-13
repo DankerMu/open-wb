@@ -10,8 +10,8 @@ import {
   closeSync,
   ftruncateSync,
   openSync,
+  readFileSync,
   renameSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -383,25 +383,37 @@ describe("preview listener: 空间消失后令牌失效", () => {
     });
   });
 
-  it("serves nothing and writes no audit row once the root is a file or a symlink: the store refuses such a root and the answer is the empty 500", async () => {
+  it("answers the same 404 without an audit row once a regular file occupies the root path (#1244)", async () => {
     await withPreviewWorld(async (world) => {
       const token = await tokenForA(world);
       renameSync(world.root, `${world.root}-moved`);
-      const replacements = [
-        () => writeFileSync(world.root, OUTSIDE_SECRET),
-        // A directory elsewhere that holds a readme.md of its own.
-        () => symlinkSync(`${world.root}-moved`, world.root),
-      ];
-      for (const replace of replacements) {
-        rmSync(world.root, { force: true });
-        replace();
-        const answer = await rawAnswer(world.origin, `/w/${token}/readme.md`);
+      const whenGone = await rawAnswer(world.origin, `/w/${token}/readme.md`);
+      expectFixedFailure(whenGone, 404);
+      writeFileSync(world.root, OUTSIDE_SECRET);
 
-        expect(answer.status).toBe(500);
-        expect(answer.body).toBe("");
-        expect(answer.headers).toMatchObject(FAILURE_HEADERS);
-        expectNoSuccessHeaders(answer);
+      for (const prefix of ["w", "o"]) {
+        const answer = await rawAnswer(world.origin, `/${prefix}/${token}/readme.md`);
+
+        expectFixedFailure(answer, 404);
+        expect(answer.body).toBe(whenGone.body);
       }
+      expect(readFileSync(world.root, "utf8")).toBe(OUTSIDE_SECRET);
+      expect(auditCount(world.db)).toEqual({ count: 0 });
+    });
+  });
+
+  it("serves nothing and writes no audit row once the root is a symlink: the store refuses such a root and the answer is the empty 500", async () => {
+    await withPreviewWorld(async (world) => {
+      const token = await tokenForA(world);
+      renameSync(world.root, `${world.root}-moved`);
+      // A directory elsewhere that holds a readme.md of its own.
+      symlinkSync(`${world.root}-moved`, world.root);
+      const answer = await rawAnswer(world.origin, `/w/${token}/readme.md`);
+
+      expect(answer.status).toBe(500);
+      expect(answer.body).toBe("");
+      expect(answer.headers).toMatchObject(FAILURE_HEADERS);
+      expectNoSuccessHeaders(answer);
       expect(auditCount(world.db)).toEqual({ count: 0 });
     });
   });

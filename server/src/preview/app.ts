@@ -64,7 +64,7 @@ import {
   validateListenerCloseBudget,
 } from "../http/listener-shutdown.js";
 import { sendFileRange } from "../workspaces/range-send.js";
-import { isOrdinaryDirectory, lstatExisting } from "../workspaces/rest.js";
+import { isOrdinaryDirectory, lstatExisting, ownedRootOf } from "../workspaces/rest.js";
 import type { WorkspaceStore } from "../workspaces/store.js";
 import { previewFailureHeaders, previewHeaders } from "./headers.js";
 import { OfficeConvertError, type OfficeConverter } from "./office.js";
@@ -189,7 +189,9 @@ export function createPreviewApp(options: PreviewAppOptions): FastifyInstance {
     }
     // 账号与空间只取自令牌的登记，请求里没有任何东西能换掉它们。
     const principal = { id: binding.ownerId };
-    const root = store.rootOf(principal, binding.workspaceId);
+    // 根路径被非目录占据时这里抛 `not_found`，由上面的错误处理器答与下一行相同的 404（#1244）；根是
+    // 符号链接等其余失败原样抛出，仍是无文案的 500。
+    const root = ownedRootOf(store, principal, binding.workspaceId);
     // 先于 resolve：根目录不在时 resolve 会当成越界，写一条审计并答 403。
     if (root === null || !isOrdinaryDirectory(root)) {
       fail(reply, 404, NOT_FOUND_TEXT);
