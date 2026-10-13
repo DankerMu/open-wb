@@ -365,4 +365,39 @@ describe("封顶时 fork 不带走超界档位 (session-metadata「fork 继承�
       expect(prefs(world)).toEqual(chosen);
     },
   );
+
+  it(
+    "上界 always-ask、源会话行 write：新行存 always-ask，源行与最近选择不动；放回后视图与 argv 仍是 always-ask，fork 没有审计",
+    REAL,
+    async () => {
+      const site = deploy();
+      let world = await restart(site);
+      const source = await create(world, "zhangsan", { approvalMode: "write" });
+      const forkPoint = seedHistory(world, source.id);
+      const chosen = prefs(world);
+      expect(chosen).toEqual([["u1", "write", null, null, source.createdAt]]);
+      // Choosing the default mode writes no creation audit.
+      expect(permissionAudits(world)).toEqual([]);
+
+      world = await restart(site, "always-ask");
+      const copy = await fork(world, source.id, forkPoint);
+
+      expect(copy.approvalMode).toBe("always-ask");
+      expect(site.rt.calls).toHaveLength(1);
+      expect(argvOf(site, 0)[0]).toBe("always-ask");
+      expect(rawOf(world, copy.id)).toEqual(["always-ask", null, null]);
+      expect(rawOf(world, source.id)).toEqual(["write", null, null]);
+      expect(prefs(world)).toEqual(chosen);
+      expect(permissionAudits(world)).toEqual([]);
+
+      world = await restart(site);
+
+      expect(await shownModes(world, [copy.id, source.id])).toEqual(["always-ask", "write"]);
+      await answered(world, copy.id);
+      expect(site.rt.calls).toHaveLength(2);
+      expect(argvOf(site, 1)[0]).toBe("always-ask");
+      expect(storedModes(world, [copy.id, source.id])).toEqual(["always-ask", "write"]);
+      expect(permissionAudits(world)).toEqual([]);
+    },
+  );
 });
