@@ -1,6 +1,8 @@
 // 产物卡（issue 536）测试的夹具与页面查询：预览路由、迟到与 abort 的响应、jsdom 缺的下载/剪贴板接缝、
 // 卡片、就地提示与 Toast 的读取、切换会话。页面搭法来自 chat-page-file-changes-support.tsx（不改它）。
 // 供 chat-page-artifact-card.test.tsx 与 chat-page-artifact-card-state.test.tsx 使用。
+// #1110 起 html 卡的 `打开网页预览` 打开工作空间侧边栏、图片卡的 `下载` 是链接：`siteRoutes` 是侧边栏为
+// 那个网页要的三条路由，`link` 取那个链接；`spyDownloads` 只剩 chat-export.test.tsx 与 H4 在用。
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, vi } from "vitest";
 import {
@@ -24,20 +26,19 @@ import {
 import { expectChatLocation, type FetchRoutes } from "./chat-page-support.js";
 import { observeUnhandledRejections, settle } from "./chat-stream-support.js";
 import { cleanupFilesFixture, stubBlobUrls } from "./files-fixture.js";
+import { issued } from "./files-site-fixture.js";
 import { type FetchMock, jsonResponse, textPreviewResponse } from "./support.js";
 
 /** Workspace-relative paths of the three kinds: html, image (upper-case extension) and code. */
 export const INDEX = "out/index.html";
 export const CHART = "assets/chart.PNG";
 export const APP = "src/app.ts";
-export const HTML_TEXT = "<h1>hi</h1><script>document.title='x'</script>";
 export const CODE_TEXT = "export const answer = 42;\n";
 export const BLOB_URL = "blob:artifact-first";
 export const REQUEST_FAILED = "请求失败，请稍后重试";
 export const OPEN_INDEX = "打开网页预览 index.html";
 export const COPY_APP = "复制代码 app.ts";
 export const DOWNLOAD_CHART = "下载 chart.PNG";
-export const TRUNCATION_NOTE = "文件超过 1 MiB，仅预览前 1 MiB";
 
 /**
  * Registers the hooks every artifact-card case runs under and returns the Blob URL stubs of the
@@ -85,6 +86,21 @@ export function openPreviewing(
   return openSession(snapshot, listed, { ...more(snapshot), ...Object.fromEntries(previews) });
 }
 
+/**
+ * What the workspace sidebar asks of `workspaceId` once 打开网页预览 of `out/index.html` opened it:
+ * the root (only `out`), `out` (only `index.html`) and the preview token (`files-site-fixture`'s
+ * `issued()`, so the frame's `src` starts with its `BASE`). No `file` route: a request for one throws.
+ */
+export function siteRoutes(workspaceId: string = PROJ.id): FetchRoutes {
+  const tree = `${WORKSPACES}/${workspaceId}/tree?path=`;
+  const entry = (name: string, type: "dir" | "file") => ({ name, type, size: 4, mtime: 200 });
+  return {
+    [tree]: () => jsonResponse({ path: "", entries: [entry("out", "dir")] }),
+    [`${tree}out`]: () => jsonResponse({ path: "out", entries: [entry("index.html", "file")] }),
+    [`${WORKSPACES}/${workspaceId}/preview-token`]: () => issued(),
+  };
+}
+
 /** Every preview (`…/file?path=`) request so far, in call order. */
 export function previewCalls(fetchMock: FetchMock) {
   return fetchMock.mock.calls.filter(([path]) => path.includes("/file?"));
@@ -128,8 +144,9 @@ export function cardTitles() {
 }
 
 /**
- * Buttons named `name` inside the assistant message, in document order. An open preview dialog
- * hides the rest of the page from the accessibility tree, so hidden elements are included.
+ * Buttons named `name` inside the assistant message, in document order. The narrow workspace
+ * sidebar is a modal layer that hides the rest of the page from the accessibility tree, so hidden
+ * elements are included.
  */
 export function actions(name: string) {
   const message = screen.getByRole("article", { name: "助手", hidden: true });
@@ -142,15 +159,15 @@ export function action(name: string) {
   return only;
 }
 
-/** The preview dialog of `index.html`, once it is open. */
-export function previewDialog() {
-  return screen.findByRole("dialog", { name: "index.html" });
-}
-
-export function frameOf(dialog: HTMLElement) {
-  const frame = dialog.querySelector("iframe");
-  if (!frame) throw new Error("预览对话框里没有 iframe");
-  return frame;
+/** The one link named `name` inside the assistant message: the 下载 of an image card. */
+export function link(name: string) {
+  const message = screen.getByRole("article", { name: "助手", hidden: true });
+  const [only, ...rest] = within(message).getAllByRole<HTMLAnchorElement>("link", {
+    name,
+    hidden: true,
+  });
+  if (!only || rest.length > 0) throw new Error(`期望恰有一个「${name}」链接`);
+  return only;
 }
 
 /** The text of every `role="alert"` line inside the assistant message, in document order. */

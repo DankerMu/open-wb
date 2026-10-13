@@ -42,7 +42,7 @@ import {
   walkTemporarySpace,
   welcomeHeading,
 } from "./ui-walk-session-list.js";
-import { expandToolGroup, toolGroup, walkArtifactPreview } from "./ui-walk-steps.js";
+import { expandToolGroup, toolGroup } from "./ui-walk-steps.js";
 import { walkTodoPanel } from "./ui-walk-todo.js";
 import { walkViewDetails, walkWorkspaceSidebar } from "./ui-walk-workspace-sidebar.js";
 
@@ -145,7 +145,6 @@ async function walkSessionMeta(
     await expectServerSnapshot(page, sessionId, workspaceId);
     mark("step 4");
     await step5FileChanges(page);
-    await walkArtifactPreview(page, REPORT_FILE);
     await walkWorkspaceSidebar(page, REPORT_FILE, project);
     await walkViewDetails(page, project, {
       file: REPORT_FILE,

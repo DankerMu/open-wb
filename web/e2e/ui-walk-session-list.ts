@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, type Request } from "@playwright/test";
 import { deleteCreatedSession, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { inspectSidebar, sessionList, type WalkProject } from "./ui-walk-layout.js";
-import { walkArtifactPreview } from "./ui-walk-steps.js";
+import { walkOpenWebPreview } from "./ui-walk-workspace-sidebar.js";
 
 export const CURRENT_SESSION = 'button[aria-current="true"]';
 const NAV_OVERLAY = { name: "导航", exact: true } as const;
@@ -325,7 +325,8 @@ async function expectTemporarySpace(walk: TempWalk, workspaceId: string): Promis
   await expect(row.locator('[data-slot="file-change-path"]')).toHaveText(file);
   await expect(row.locator('[data-slot="file-change-kind"]')).toHaveText("写入");
   await expect(card.getByRole("button", { name: `查看详情 ${file}`, exact: true })).toHaveCount(1);
-  await walkArtifactPreview(page, file);
+  // 打开网页预览：打开头部为「工作空间」的侧边栏并以隔离来源的渲染视图选中它；返回时侧边栏已关。
+  await walkOpenWebPreview(page, project, { file, temporary: true, workspaceId });
 }
 
 // 第 3 步：点 `撤回`，没有确认框；请求体严格等于 `{messageId, files:"restore"}`，200；线程回到零消息

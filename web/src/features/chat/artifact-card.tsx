@@ -1,9 +1,8 @@
-/* Artifact cards adapted from resource/workbuddy-live-demo.html:2419-2466 (artifactHTML) and :502-515 (their frame), issue 536: the card never embeds the file (no iframe, image or code body) and has no 在编辑器中打开; the content is fetched through the preview API only when its action is clicked. The html action uses chevron-right (the demo's externalLink is not registered). Built from the copied-layer Button and Dialog and Tailwind classes; outcomes are shown in the card, never as a toast (design D8). */
+/* Artifact cards adapted from resource/workbuddy-live-demo.html:2419-2466 (artifactHTML) and :502-515 (their frame), issue 536: the card never embeds the file (no iframe, image or code body) and has no 在编辑器中打开. Each kind has one action (s1f-files-page 25.2): html opens the workspace sidebar on the page in its rendered view, an image is a link to the download endpoint, code is fetched through the preview API when 复制代码 is clicked and copied. The html action uses chevron-right (the demo's externalLink is not registered). Built from the copied-layer Button and Tailwind classes; the outcome of a copy is shown in the card, never as a toast (design D8). */
 import { type MouseEvent, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import type { ApiClient } from "../../lib/api.js";
-import { Icon, type IconName, useEscapeFallback } from "../../ui/index.js";
+import { type ApiClient, downloadUrl } from "../../lib/api.js";
+import { Icon, type IconName } from "../../ui/index.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { artifactKind, summarizeChanges } from "./stream-artifacts.js";
 import type { ChatStepView } from "./stream-steps.js";
@@ -11,8 +10,12 @@ import type { SessionSpace } from "./workspace-list.js";
 
 type Artifact = NonNullable<ReturnType<typeof artifactKind>>;
 type FilePreview = Awaited<ReturnType<ApiClient["fetchPreview"]>>;
-type HtmlPreview = { text: string; truncated: boolean };
-/** How an action ended, when there is something to tell: the code was copied, or it failed. */
+/**
+ * 打开网页预览: `path` is workspace-relative, `opener` the button that was clicked; the sidebar
+ * selects the file and shows its rendered view (`useWorkspaceSidebar().reveal`).
+ */
+type Reveal = (path: string, opener: HTMLElement, options: { view: "rendered" }) => void;
+/** How a copy ended, when there is something to tell: the code was copied, or it failed. */
 type ArtifactOutcome = { kind: "copied" } | { kind: "failed"; message: string };
 
 const COPIED_MS = 2000;
@@ -41,35 +44,34 @@ const TRAITS: Record<
   },
 };
 
-/** Gives back the Blob URL of a preview that will not be used; a text preview holds none. */
+const ACTION_BUTTON =
+  "size-[26px] rounded-md text-(--wb-icon-muted) hover:bg-accent hover:text-(--wb-text-secondary) dark:hover:bg-accent";
+
+/**
+ * Gives back the Blob URL of a preview that will not be used; a text preview holds none. Only a
+ * code card fetches, so the image here is one the server answered for a path with a code extension.
+ */
 function discard(result: FilePreview) {
   if (result.kind === "image") URL.revokeObjectURL(result.url);
 }
 
-type ArtifactActionProps = {
-  artifact: Artifact;
-  client: ApiClient;
-  path: string;
-  workspaceId: string;
-};
+type CopySource = { client: ApiClient; path: string; workspaceId: string };
 
 /**
- * The action of one artifact, without markup. It owns at most one preview request at a time
+ * 复制代码 of a code card, without markup. It owns at most one preview request at a time
  * (`controller`): the request starts on a click, sets `busy`
  * while in flight and is aborted on unmount, after which its late result has no effect except that
- * a Blob URL it brought is revoked. `report` is called with `null` when an action starts and with
- * the outcome when it copied or failed; a download and an opened preview report nothing, an aborted
- * request and a 401 neither. `preview` is the fetched page while the html preview is open,
- * `opener` the button that was clicked last.
+ * a Blob URL it brought is revoked. `report` is called with `null` when the action starts and with
+ * the outcome when it copied or failed; an aborted request and a 401 report nothing. `opener` is the
+ * button that was clicked last.
  */
-function useArtifactAction(
-  { artifact, client, path, workspaceId }: ArtifactActionProps,
+function useCopyAction(
+  { client, path, workspaceId }: CopySource,
   report: (outcome: ArtifactOutcome | null) => void,
 ) {
   const opener = useRef<HTMLButtonElement | null>(null);
   const controller = useRef<AbortController | null>(null);
   const [busy, setBusy] = useState(false);
-  const [preview, setPreview] = useState<HtmlPreview | null>(null);
   useEffect(() => () => controller.current?.abort(), []);
   // A browser moves focus to `body` when the focused button is disabled by `busy`; once the request
   // ended, hand it back to the clicked button unless focus has gone elsewhere (issue 537).
@@ -79,17 +81,6 @@ function useArtifactAction(
     }
   }, [busy]);
   const failed = (message: string) => report({ kind: "failed", message });
-
-  /** Clicks a temporary link; the URL is revoked a task later so the browser can still read it. */
-  function download(url: string) {
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = artifact.name;
-    document.body.append(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 0);
-  }
 
   async function copy(text: string, truncated: boolean) {
     if (truncated) {
@@ -105,13 +96,9 @@ function useArtifactAction(
   }
 
   async function deliver(result: FilePreview) {
-    if ((result.kind === "image") !== (artifact.kind === "image")) {
+    if (result.kind === "image") {
       discard(result);
       failed(errorMessage(undefined));
-    } else if (result.kind === "image") {
-      download(result.url);
-    } else if (artifact.kind === "html") {
-      setPreview({ text: result.text, truncated: result.truncated });
     } else {
       await copy(result.text, result.truncated);
     }
@@ -142,98 +129,13 @@ function useArtifactAction(
     }
   }
 
-  const traits = TRAITS[artifact.kind];
   return {
     busy,
-    icon: traits.actionIcon,
-    label: `${traits.action} ${artifact.name}`,
     onAction(event: MouseEvent<HTMLButtonElement>) {
       opener.current = event.currentTarget;
       void run();
     },
-    opener,
-    preview,
-    closePreview: () => setPreview(null),
   };
-}
-
-/**
- * The body of the html preview dialog: the fetched page in an iframe that may run scripts and
- * nothing else, under a note when the server cut it. Fetched pages are written for a white canvas:
- * a transparent iframe would put their default dark text on the dark-theme dialog, hence `bg-white`.
- */
-function ArtifactPreview({ name, preview }: { name: string; preview: HtmlPreview | null }) {
-  if (preview === null) return null;
-  return (
-    <div className="min-w-0">
-      {preview.truncated ? (
-        <p className="m-0 mb-2 text-[12.5px] text-(--wb-text-secondary)">
-          文件超过 1 MiB，仅预览前 1 MiB
-        </p>
-      ) : null}
-      <iframe
-        className="block h-[60vh] w-full border-0 bg-white"
-        sandbox="allow-scripts"
-        srcDoc={preview.text}
-        title={name}
-      />
-    </div>
-  );
-}
-
-/**
- * The html preview of a card, in the copied-layer dialog.
- *
- * That dialog has no trigger element, so
- * closing it would leave focus on `body`: focus goes back to `opener` here, without scrolling the
- * thread to a card that has left the viewport meanwhile. Escape is also handled on the content
- * itself, because a toast on screen takes the Escape of every Radix layer below it.
- *
- * Opening focuses the dialog's 关闭 button rather than the first tabbable element (the iframe,
- * which the copied content puts before that button). That decides only where focus lands on open:
- * once the page's script focuses itself or the user Tabs into the iframe, Escape no longer reaches
- * this document; 关闭 and a click on the overlay still close the preview.
- */
-function PreviewDialog({
-  name,
-  onClose,
-  opener,
-  preview,
-}: {
-  name: string;
-  onClose(): void;
-  opener: { readonly current: HTMLButtonElement | null };
-  preview: HtmlPreview | null;
-}) {
-  const onOpenChange = (open: boolean) => {
-    if (!open) onClose();
-  };
-  const fallback = useEscapeFallback({ canClose: true, onOpenChange });
-  return (
-    <Dialog onOpenChange={onOpenChange} open={preview !== null}>
-      <DialogContent
-        aria-describedby={undefined}
-        aria-modal="true"
-        className="sm:max-w-[520px]"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          opener.current?.focus({ preventScroll: true });
-        }}
-        onEscapeKeyDown={fallback.onEscapeKeyDown}
-        onKeyDown={fallback.onKeyDown}
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          fallback.ref.current
-            ?.querySelector<HTMLElement>('[data-slot="dialog-close"]')
-            ?.focus({ preventScroll: true });
-        }}
-        ref={fallback.ref}
-      >
-        <DialogTitle className="truncate pr-8 font-mono leading-5">{name}</DialogTitle>
-        <ArtifactPreview name={name} preview={preview} />
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 /** The outcome shown in place: 已复制 lasts about two seconds, a failure until the next action. */
@@ -247,26 +149,35 @@ function useOutcome() {
   return [outcome, setOutcome] as const;
 }
 
-type Action = ReturnType<typeof useArtifactAction>;
-
 /**
- * The icon button of an action and, after a copy, the hidden 已复制 status beside it; the icon is a
- * check while that status lasts.
+ * 复制代码: the icon button and, after a copy, the hidden 已复制 status beside it; the icon is a check
+ * while that status lasts, and the button is disabled while the file is being fetched.
  */
-function ActionButton({ action, copied }: { action: Action; copied: boolean }) {
+function CopyAction({
+  copied,
+  label,
+  report,
+  source,
+}: {
+  copied: boolean;
+  label: string;
+  report: (outcome: ArtifactOutcome | null) => void;
+  source: CopySource;
+}) {
+  const { busy, onAction } = useCopyAction(source, report);
   return (
     <>
       <Button
-        aria-label={action.label}
-        className="size-[26px] rounded-md text-(--wb-icon-muted) hover:bg-accent hover:text-(--wb-text-secondary) dark:hover:bg-accent"
-        disabled={action.busy}
-        onClick={action.onAction}
+        aria-label={label}
+        className={ACTION_BUTTON}
+        disabled={busy}
+        onClick={onAction}
         size="icon-xs"
-        title={action.label}
+        title={label}
         type="button"
         variant="ghost"
       >
-        <Icon name={copied ? "check" : action.icon} size={12} />
+        <Icon name={copied ? "check" : "copy"} size={12} />
       </Button>
       {copied ? (
         <span className="sr-only" role="status">
@@ -277,84 +188,114 @@ function ActionButton({ action, copied }: { action: Action; copied: boolean }) {
   );
 }
 
+type ArtifactCardProps = CopySource & { artifact: Artifact; onReveal: Reveal };
+
 /**
  * One card: file icon, name, type label and the action; an html card repeats the action in its
- * foot. A copy swaps the action icon for a check and adds a hidden 已复制 status; a failure is one
- * line under the head, below the action button.
+ * foot. The action by kind:
+ * - html: both buttons call `onReveal` with the clicked button. Nothing is fetched here and the
+ *   buttons are never disabled; what the page looks like, and a file that is gone, show in the
+ *   sidebar.
+ * - image: a plain link to the download endpoint with `download` — the browser saves the file
+ *   itself (same as the preview head of the files page), so the card learns nothing of the outcome.
+ * - code: `CopyAction`. A copy swaps its icon for a check and adds a hidden 已复制 status; a
+ *   failure is one line under the head, below the action button.
  */
-function ArtifactCard(props: ArtifactActionProps) {
-  const { artifact } = props;
+function ArtifactCard({ artifact, onReveal, ...source }: ArtifactCardProps) {
   const headId = useId();
   const [outcome, setOutcome] = useOutcome();
-  const action = useArtifactAction(props, setOutcome);
-  const { busy, label, onAction } = action;
   const traits = TRAITS[artifact.kind];
+  const label = `${traits.action} ${artifact.name}`;
+  const openPreview = (event: MouseEvent<HTMLButtonElement>) =>
+    onReveal(source.path, event.currentTarget, { view: "rendered" });
+  const glyph = <Icon name={traits.actionIcon} size={12} />;
   return (
-    <>
-      {/* biome-ignore lint/a11y/useSemanticElements: fieldset 的禁用语义与默认边框都用不上，这里只要分组。 */}
-      <div
-        aria-labelledby={headId}
-        className="min-w-0 overflow-hidden rounded-xl border border-(--wb-border-default) bg-(--wb-bg-secondary)"
-        data-slot="artifact-card"
-        role="group"
-      >
-        <div className="flex items-center gap-2 px-3 py-[9px]" data-slot="artifact-head">
-          <span
-            className={`inline-flex size-[22px] flex-none items-center justify-center rounded-md ${traits.tint}`}
-            data-kind={artifact.kind}
-            data-slot="artifact-icon"
-          >
-            <Icon name={traits.icon} size={14} />
-          </span>
-          <span
-            className="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold"
-            data-slot="artifact-title"
-            id={headId}
-          >
-            {artifact.name}
-          </span>
-          <span
-            className="rounded border border-(--wb-border-default) px-1.5 py-px text-[10.5px] leading-[14px] text-(--wb-text-secondary)"
-            data-slot="artifact-label"
-          >
-            {artifact.label}
-          </span>
-          <ActionButton action={action} copied={outcome?.kind === "copied"} />
-        </div>
-        {outcome?.kind === "failed" ? (
-          <p
-            className="m-0 px-3 pb-2 text-right text-xs text-(--wb-status-error-text)"
-            data-slot="artifact-error"
-            role="alert"
-          >
-            {outcome.message}
-          </p>
-        ) : null}
-        {artifact.kind === "html" ? (
-          <div
-            className="flex items-center gap-2 border-t border-(--wb-border-default) px-3 py-2 text-xs text-(--wb-text-secondary)"
-            data-slot="artifact-foot"
-          >
-            <span>可交互预览</span>
-            <button
+    // biome-ignore lint/a11y/useSemanticElements: fieldset 的禁用语义与默认边框都用不上，这里只要分组。
+    <div
+      aria-labelledby={headId}
+      className="min-w-0 overflow-hidden rounded-xl border border-(--wb-border-default) bg-(--wb-bg-secondary)"
+      data-slot="artifact-card"
+      role="group"
+    >
+      <div className="flex items-center gap-2 px-3 py-[9px]" data-slot="artifact-head">
+        <span
+          className={`inline-flex size-[22px] flex-none items-center justify-center rounded-md ${traits.tint}`}
+          data-kind={artifact.kind}
+          data-slot="artifact-icon"
+        >
+          <Icon name={traits.icon} size={14} />
+        </span>
+        <span
+          className="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold"
+          data-slot="artifact-title"
+          id={headId}
+        >
+          {artifact.name}
+        </span>
+        <span
+          className="rounded border border-(--wb-border-default) px-1.5 py-px text-[10.5px] leading-[14px] text-(--wb-text-secondary)"
+          data-slot="artifact-label"
+        >
+          {artifact.label}
+        </span>
+        {artifact.kind === "code" ? (
+          <CopyAction
+            copied={outcome?.kind === "copied"}
+            label={label}
+            report={setOutcome}
+            source={source}
+          />
+        ) : artifact.kind === "image" ? (
+          <Button asChild className={ACTION_BUTTON} size="icon-xs" variant="ghost">
+            <a
               aria-label={label}
-              className="ml-auto cursor-pointer text-xs text-(--wb-brand-primary-deep) hover:underline disabled:cursor-default disabled:text-(--wb-text-tertiary) disabled:no-underline"
-              disabled={busy}
-              onClick={onAction}
-              type="button"
+              download
+              href={downloadUrl(source.workspaceId, source.path)}
+              title={label}
             >
-              打开网页预览
-            </button>
-          </div>
-        ) : null}
+              {glyph}
+            </a>
+          </Button>
+        ) : (
+          <Button
+            aria-label={label}
+            className={ACTION_BUTTON}
+            onClick={openPreview}
+            size="icon-xs"
+            title={label}
+            type="button"
+            variant="ghost"
+          >
+            {glyph}
+          </Button>
+        )}
       </div>
-      <PreviewDialog
-        name={artifact.name}
-        onClose={action.closePreview}
-        opener={action.opener}
-        preview={action.preview}
-      />
-    </>
+      {outcome?.kind === "failed" ? (
+        <p
+          className="m-0 px-3 pb-2 text-right text-xs text-(--wb-status-error-text)"
+          data-slot="artifact-error"
+          role="alert"
+        >
+          {outcome.message}
+        </p>
+      ) : null}
+      {artifact.kind === "html" ? (
+        <div
+          className="flex items-center gap-2 border-t border-(--wb-border-default) px-3 py-2 text-xs text-(--wb-text-secondary)"
+          data-slot="artifact-foot"
+        >
+          <span>可交互预览</span>
+          <button
+            aria-label={label}
+            className="ml-auto cursor-pointer text-xs text-(--wb-brand-primary-deep) hover:underline"
+            onClick={openPreview}
+            type="button"
+          >
+            打开网页预览
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -362,18 +303,23 @@ function ArtifactCard(props: ArtifactActionProps) {
  * The artifact cards of one assistant message: one per path of the file-change summary (same rows,
  * same order as the 文件变更 card) whose extension is previewable. `space` is the session's
  * resolved workspace (`resolveSessionSpace`; a temporary one counts); while it is `null` nothing is
- * rendered, because the preview request needs its id. Calls no hook: every hook lives in `ArtifactCard`.
+ * rendered, because every action needs its id. `onReveal` is absent only while the session has no
+ * workspace, which is when `space` is `null` too (both come from the selected session; 读代码推出,
+ * no test reaches a `space` without it): nothing is rendered then either. Calls no hook: every hook
+ * lives in `ArtifactCard`.
  */
 export function ArtifactCards({
   client,
+  onReveal,
   space,
   steps,
 }: {
   client: ApiClient;
+  onReveal: Reveal | undefined;
   space: SessionSpace | null;
   steps: readonly ChatStepView[];
 }) {
-  if (space === null) {
+  if (space === null || onReveal === undefined) {
     return null;
   }
   return summarizeChanges(steps).map((change) => {
@@ -383,6 +329,7 @@ export function ArtifactCards({
         artifact={artifact}
         client={client}
         key={change.path}
+        onReveal={onReveal}
         path={change.path}
         workspaceId={space.id}
       />

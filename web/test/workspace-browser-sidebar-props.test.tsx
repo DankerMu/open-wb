@@ -1,15 +1,19 @@
-// `WorkspaceBrowser` 为会话页侧边栏加的两个可选属性（issue #1106）：`treeCollapsed`（树栏收起而不卸载）
-// 与 `onlyPathsEmpty`（`onlyPaths` 为空集时树的位置的文案）。组件直接渲染、不挂路由；文件页两个都不传，
-// 用例同时钉住不传时与此前相同。请求数取自 fetch 桩的调用记录。
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+// `WorkspaceBrowser` 为会话页侧边栏加的可选属性：`treeCollapsed`（树栏收起而不卸载）与 `onlyPathsEmpty`
+// （`onlyPaths` 为空集时树的位置的文案），issue #1106；`renderedSeq`（把 `path` 所指、已选中的网页翻回渲染
+// 视图），issue #1110。组件直接渲染、不挂路由；文件页都不传，用例同时钉住不传时与此前相同。请求数取自
+// fetch 桩的调用记录。
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceBrowser } from "../src/features/files/index.js";
 import { createApiClient } from "../src/lib/api.js";
+import { BASE, ISSUE, issued } from "./files-site-fixture.js";
 import { createFetchMock, jsonResponse, paths, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const ROOT = "/api/workspaces/workspace-1/tree?path=";
 const README = "/api/workspaces/workspace-1/file?path=readme.md";
+const PAGE = "/api/workspaces/workspace-1/file?path=index.html";
+const PAGE_SOURCE = "<h1>首页</h1>";
 const TREE = "工作空间目录树";
 const EMPTY_TEXT = "这里没有要显示的文件";
 const EMPTY_WORKSPACE = "该工作空间暂无目录";
@@ -17,18 +21,25 @@ const EMPTY_WORKSPACE = "该工作空间暂无目录";
 type Extra = {
   onlyPaths?: ReadonlySet<string>;
   onlyPathsEmpty?: string;
+  path?: string | null;
+  renderedSeq?: number | undefined;
   treeCollapsed?: boolean;
 };
 
-/** 根下只有 `readme.md` 的空间；`update` 换属性而不重挂。 */
+/** 根下是 `index.html` 与 `readme.md` 的空间；`update` 换属性而不重挂。`path` 不给即 `null`。 */
 function mount(extra: Extra = {}) {
   const fetchMock = createFetchMock({
     [ROOT]: () =>
       jsonResponse({
         path: "",
-        entries: [{ name: "readme.md", type: "file", size: 4, mtime: 200 }],
+        entries: [
+          { name: "index.html", type: "file", size: 14, mtime: 201 },
+          { name: "readme.md", type: "file", size: 4, mtime: 200 },
+        ],
       }),
     [README]: () => textPreviewResponse("自述正文"),
+    [PAGE]: () => textPreviewResponse(PAGE_SOURCE),
+    [ISSUE]: () => issued(),
   });
   vi.stubGlobal("fetch", fetchMock);
   const client = createApiClient();
@@ -150,5 +161,69 @@ describe("WorkspaceBrowser 新建 under onlyPaths", () => {
     expect(creation().disabled).toBe(false);
     fireEvent.pointerDown(creation(), { button: 0 });
     expect(await screen.findByRole("menuitem", { name: "新建文件夹" })).toBeTruthy();
+  });
+});
+
+describe("WorkspaceBrowser renderedSeq", () => {
+  const files = (requests: () => string[]) => requests().filter((path) => path.includes("/file?"));
+  const frameSrc = () => document.querySelector("iframe")?.getAttribute("src");
+  const shown = () => waitFor(() => expect(frameSrc()).toBe(`${BASE}index.html`));
+
+  /** 等到 `index.html` 的渲染框出现，点 `查看源码`，等到源码出现（一次 `file`）。 */
+  async function toSource(requests: () => string[]) {
+    await shown();
+    fireEvent.click(screen.getByRole("button", { name: "查看源码" }));
+    expect(await preview().findByRole("cell", { name: PAGE_SOURCE })).toBeTruthy();
+    expect(files(requests)).toStrictEqual([PAGE]);
+  }
+
+  it("path 所指的网页已选中并停在源码视图：renderedSeq 换成新值即回到渲染框，file 请求数不变；值没变、或撤成不传都不动", async () => {
+    const { requests, update } = mount({ path: "index.html", renderedSeq: 1 });
+    await toSource(requests);
+
+    // 同一个值再渲染一次、撤成不传：都不是「新的一次」。
+    update({ path: "index.html", renderedSeq: 1 });
+    update({ path: "index.html" });
+    await settle();
+    expect(frameSrc()).toBeUndefined();
+    expect(preview().getByRole("cell", { name: PAGE_SOURCE })).toBeTruthy();
+
+    update({ path: "index.html", renderedSeq: 2 });
+
+    await shown();
+    expect(preview().queryByRole("cell", { name: PAGE_SOURCE })).toBeNull();
+    expect(screen.getByRole("button", { name: "index.html" }).getAttribute("aria-current")).toBe(
+      "true",
+    );
+    await settle();
+    expect(files(requests)).toStrictEqual([PAGE]);
+    expect(requests().filter((path) => path === ISSUE)).toHaveLength(1);
+  });
+
+  it("选中的网页不是 path 所指的那个（path 为 null，选中来自点击）：renderedSeq 变了也不动，源码还在", async () => {
+    const { requests, update } = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "index.html" }));
+    await toSource(requests);
+    const before = requests();
+
+    update({ renderedSeq: 1 });
+    await settle();
+
+    expect(frameSrc()).toBeUndefined();
+    expect(preview().getByRole("cell", { name: PAGE_SOURCE })).toBeTruthy();
+    expect(requests()).toStrictEqual(before);
+  });
+
+  it("不传 renderedSeq（文件页）：停在源码视图时重渲染不翻视图，与此前相同", async () => {
+    const { requests, update } = mount({ path: "index.html" });
+    await toSource(requests);
+    const before = requests();
+
+    update({ path: "index.html" });
+    await settle();
+
+    expect(frameSrc()).toBeUndefined();
+    expect(preview().getByRole("cell", { name: PAGE_SOURCE })).toBeTruthy();
+    expect(requests()).toStrictEqual(before);
   });
 });
