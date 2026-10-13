@@ -35,9 +35,13 @@ const MAX_ID_BYTES = 128;
 const MAX_NAME_CODE_POINTS = 64;
 
 export function resolveModelCatalog(env: Record<string, string | undefined>): ModelCatalog {
+  // MODEL_ID 给出时与白名单条目的 id 同一条规则，有没有 MODEL_CATALOG 都先过这一关；取值不 trim。
+  if (env.MODEL_ID !== undefined && !isModelId(env.MODEL_ID)) {
+    throw new Error("MODEL_ID must be a string of 1 to 128 UTF-8 bytes without control characters");
+  }
   const rawCatalog = env.MODEL_CATALOG;
   if (rawCatalog === undefined) {
-    // 本 change 之前的单模型配置：MODEL_ID 原样保留（不校验、不 trim），这一项不带 efforts。
+    // 单模型配置：MODEL_ID 逐字节成为这一项的 id 与 name（首尾空格属于模型名），这一项不带 efforts。
     const id = env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID;
     const reasoning = resolveOnOff(env.MODEL_REASONING, true, "MODEL_REASONING");
     return { models: [{ id, name: id, reasoning, vision: false }], defaultModelId: id };
@@ -155,7 +159,7 @@ function parseCatalogEntry(entry: unknown): CatalogModel {
     vision = false,
     efforts,
   } = entry as Record<string, unknown>;
-  if (typeof id !== "string" || !isLabel(id) || Buffer.byteLength(id, "utf8") > MAX_ID_BYTES) {
+  if (typeof id !== "string" || !isModelId(id)) {
     throw catalogError(
       "entry id must be a string of 1 to 128 UTF-8 bytes without control characters",
     );
@@ -192,6 +196,11 @@ function parseEfforts(raw: unknown): readonly Effort[] {
     );
   }
   return raw as readonly Effort[];
+}
+
+/** 模型 id（白名单条目的 `id` 与 `MODEL_ID` 共用）：`isLabel` 且不超过 128 个 UTF-8 字节。 */
+function isModelId(value: string): boolean {
+  return isLabel(value) && Buffer.byteLength(value, "utf8") <= MAX_ID_BYTES;
 }
 
 /** 非空且不含 U+0000–U+001F 与 U+007F。 */

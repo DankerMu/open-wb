@@ -78,13 +78,24 @@ describe("模型白名单配置 — 未配置白名单等于单模型", () => {
     ).toStrictEqual(resolveModelCatalog({}));
   });
 
-  it.each([" custom-model ", "", "a\u0000b", "x".repeat(200)])(
-    "旧式单模型的 MODEL_ID 原样保留，不受白名单的 id 规则约束（%j）",
+  it.each([" custom-model "])("旧式单模型的 MODEL_ID 原样保留，不去首尾空格（%j）", (raw) => {
+    expect(resolveModelCatalog({ MODEL_ID: raw })).toStrictEqual({
+      models: [{ id: raw, name: raw, reasoning: true, vision: false }],
+      defaultModelId: raw,
+    });
+  });
+
+  // #1261：下面三个取值此前原样通过，现在与白名单条目的 id 同一条规则。
+  it.each(["", "a\u0000b", "x".repeat(200)])(
+    "旧式单模型的 MODEL_ID 受白名单的 id 规则约束：%j 点名 MODEL_ID",
     (raw) => {
-      expect(resolveModelCatalog({ MODEL_ID: raw })).toStrictEqual({
-        models: [{ id: raw, name: raw, reasoning: true, vision: false }],
-        defaultModelId: raw,
-      });
+      const message = messageOf({ MODEL_ID: raw });
+      expect(message).toContain("MODEL_ID");
+      expect(message).not.toContain(KEY);
+      // 空串是任何字符串的子串，这一行的「不含取值」无从断言。
+      if (raw !== "") {
+        expect(message).not.toContain(raw);
+      }
     },
   );
 

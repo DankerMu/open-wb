@@ -78,10 +78,10 @@ Minimal mergeable slice: atomic - 专用错误类没有捕获方时端点仍是 
 
 ## 4. http-service-skeleton — `MODEL_ID` 的取值规则（G4，#1261）
 
-- [ ] 4.1 测试先行（新文件 `server/test/server-config-model-id.test.ts`，纯配置 seam；`server-config.test.ts` 已 771 行，不追加）：`resolveServerConfig` 对 `MODEL_ID` 为空串、`"a\nb"`、含 U+007F、129 个 UTF-8 字节的值各抛配置错误，message 含 `MODEL_ID` 且不含输入值；配置了合法 `MODEL_CATALOG` 时同样四例仍抛配置错误并点名 `MODEL_ID`；恰 128 字节的值与 `" custom-model "` 通过且逐字节保留。`server-config.test.ts` 里既有两条「字节原样」用例不改、不搬。验证：四个拒绝例在现有实现上判红。
-- [ ] 4.2 实现：`server/src/model-catalog.ts` 的 `resolveModelCatalog` 入口对给出的 `MODEL_ID` 用白名单条目 `id` 的同一对检查（`isLabel` 加 128 字节上限），不 trim；改掉 `:40` 的「不校验、不 trim」注释。验证：4.1 转绿。纯空白的取值不拒（D14-2）。
-- [ ] 4.3 入口一例（新文件 `server/test/server-startup-model-id.test.ts`；不放进 `server-startup-failure-reason.test.ts`，那个文件由 G10 与 G2b 改）：`MODEL_ID=""` 启动编译入口 → nonzero，stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`，无 success record，DB 文件未被创建。验证：用例通过。
-- [ ] 4.4 变异证据：去掉长度检查 → 129 字节例判红；加上 `trim()` → `" custom-model "` 的既有用例判红；去掉控制字符检查 → `"a\nb"` 例判红。文档：`docs/architecture/system.md` 的配置表里没有 `MODEL_ID` 独立一行，取值规则补在 `:278` 那句「未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项」之后（开工时按这句话重新定位）。
+- [x] 4.1 测试先行（新文件 `server/test/server-config-model-id.test.ts`，纯配置 seam；`server-config.test.ts` 已 771 行，不追加）：`resolveServerConfig` 对 `MODEL_ID` 为空串、`"a\nb"`、含 U+007F、129 个 UTF-8 字节的值各抛配置错误，message 含 `MODEL_ID` 且不含输入值；配置了合法 `MODEL_CATALOG` 时同样四例仍抛配置错误并点名 `MODEL_ID`；恰 128 字节的值与 `" custom-model "` 通过且逐字节保留。`server-config.test.ts` 里既有两条「字节原样」用例不改、不搬。验证：四个拒绝例在现有实现上判红。
+- [x] 4.2 实现：`server/src/model-catalog.ts` 的 `resolveModelCatalog` 入口对给出的 `MODEL_ID` 用白名单条目 `id` 的同一对检查（`isLabel` 加 128 字节上限），不 trim；改掉 `:40` 的「不校验、不 trim」注释。验证：4.1 转绿。纯空白的取值不拒（D14-2）。
+- [x] 4.3 入口一例（新文件 `server/test/server-startup-model-id.test.ts`；不放进 `server-startup-failure-reason.test.ts`，那个文件由 G10 与 G2b 改）：`MODEL_ID=""` 启动编译入口 → nonzero，stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`，无 success record，DB 文件未被创建。验证：用例通过。
+- [x] 4.4 变异证据：去掉长度检查 → 129 字节例判红；加上 `trim()` → `" custom-model "` 的既有用例判红；去掉控制字符检查 → `"a\nb"` 例判红。文档：`docs/architecture/system.md` 的配置表里没有 `MODEL_ID` 独立一行，取值规则补在 `:278` 那句「未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项」之后（开工时按这句话重新定位）。
 
 Suggested fixture level: expanded - 生产配置键的校验规则，非法值由「照常启动」变为「启动失败」
 Minimal mergeable slice: atomic - 一个纯函数里的一处校验加它的测试与文档行
