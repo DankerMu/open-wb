@@ -2,7 +2,9 @@
 
 ## Purpose
 `web/src/ui/` 基元层：设计 token 全集（demo 逐字移植）、以 Radix UI Primitives 为行为层的组件库、图标（lucide-react 单组件映射）与动效。feature/routes 只经 `ui/index.ts` 取基元、只引用语义 token；基元层是调色板到组件的唯一映射边界。
+
 ## Requirements
+
 ### Requirement: 设计 token 全集
 `web/src/styles/tokens.css` SHALL 是 `--wb-*` 设计 token 的唯一定义处：调色板层（`--wb-palette-*`）与语义层（`--wb-brand-*`、`--wb-bg-*`、`--wb-text-*`、`--wb-border-*`、`--wb-status-*`、`--wb-shadow-*`、`--wb-icon-*`、`--wb-font*`、`--wb-mono` 等），浅色在 `:root`、深色在 `[data-theme="dark"]`。token 的值由本仓拥有，不再要求与 `resource/workbuddy-live-demo.html` 逐值相等，名集合也不再受 demo 约束；文件头 SHALL 保留 token 来源说明（WorkBuddy 5.3.11 token 文件，经 demo；ATTRIBUTION.md §4）。字体 token 只列本地/系统字体栈，不得 `@import`/`<link>` 任何公网字体。`web/src/**/*.css` 引用的每个 `var(--wb-*)` SHALL 在 `tokens.css` 有定义（`web/test` 断言引用集合 ⊆ 定义集合）。feature 与 routes 的样式 SHALL 只引用语义层 token 或 ui-foundation 的主题变量，不得直接引用 `--wb-palette-*` 或硬编码颜色（`web/test` 以 grep 断言 `web/src/features/**`、`web/src/routes/**` 的 `.css`/`.tsx` 以及去掉块注释与 `//` 行注释后的 `.ts` 无 `#[0-9a-fA-F]{3,8}`、`rgba?(`、`--wb-palette-`；Tailwind 任意值类名里的颜色字面量同样命中）。调色板到组件的映射边界是 `web/src/ui/**/*.css` 与 ui-foundation 的 `web/src/styles/theme.css`。
 
@@ -93,15 +95,15 @@ Menu/Popover/Tooltip 的入场动画与 Menu 项过渡 SHALL 在 `prefers-reduce
 - THEN 全 journey 零静态资源 `requestfailed`、零跨源请求（图标离线可用）；reduce 下 `animationName` 为 `none`、恢复后非 `none`；`motion.css` 的 reduced-motion 块把每个 `ui-*` 动效类置为 `animation: none` 且 `transition: none`；`ATTRIBUTION.md` 含 `lucide`/ISC 与 `Radix`/MIT 条目
 
 ### Requirement: 按钮单一实现与旧类退役
-尚未迁移到 ui-foundation「组件分层」的区域（迁移完成前的 `web/src/features/chat/**`、`web/src/features/files/**`）中所有按钮 SHALL 经 `web/src/ui/index.ts` 导出的 `Button` 渲染样式（类名 `ui-btn ui-btn--<variant> ui-btn--<size>`，调用方附加类经 `className` 透传）；已迁移区域的按钮经 `@/components/ui/button`，不带 `ui-btn` 类；旧 `.ui-button`、`.ui-button-primary`、`.ui-button-danger` 类及其规则 SHALL 从 `web/src` 移除，`web/src` 下 `.ts`/`.tsx`/`.css` 不得再出现 `ui-button`（`ui-btn` 不受影响）。本条取代「基元组件库」中 `.ui-button*`「迁移切片前不动」的过渡约定；`.ui-alert`/`.ui-muted`/`.ui-empty` 不在本条范围。迁移 SHALL 保持各按钮的可访问名、`type`、禁用态、点击行为与作为 Menu 触发器时的 ref/回焦不变。`web/test/ui-guardrails.test.ts` SHALL 有扫描 `web/src` 的 grep 守卫，并以注入样本自证其匹配式命中 `ui-button` 且不命中 `ui-btn`。
+尚未迁移到 ui-foundation「组件分层」的区域中所有按钮 SHALL 经 `web/src/ui/index.ts` 导出的 `Button` 渲染样式（类名 `ui-btn ui-btn--<variant> ui-btn--<size>`，调用方附加类经 `className` 透传）；已迁移区域的按钮经 `@/components/ui/button`，不带 `ui-btn` 类；自 s1f-session-list-temp-space 与 s1f-files-page 起，`web/src/features/chat/**` 与 `web/src/features/files/**` 都是已迁移区域（ui-foundation「组件分层」的「会话页迁移终态」与「文件页整目录已迁移」），这两个目录下的按钮不再带 `ui-btn` 类；旧 `.ui-button`、`.ui-button-primary`、`.ui-button-danger` 类及其规则 SHALL 从 `web/src` 移除，`web/src` 下 `.ts`/`.tsx`/`.css` 不得再出现 `ui-button`（`ui-btn` 不受影响）。本条取代「基元组件库」中 `.ui-button*`「迁移切片前不动」的过渡约定；`.ui-alert`/`.ui-muted`/`.ui-empty` 不在本条范围。迁移 SHALL 保持各按钮的可访问名、`type`、禁用态、点击行为与作为 Menu 触发器时的 ref/回焦不变。`web/test/ui-guardrails.test.ts` SHALL 有扫描 `web/src` 的 grep 守卫，并以注入样本自证其匹配式命中 `ui-button` 且不命中 `ui-btn`。
 
 #### Scenario: 旧类清零且守卫自证
 - **WHEN** 扫描 `web/src` 下全部 `.ts`/`.tsx`/`.css`，并对注入样本 `<button className="ui-button">` 与 `<button className="ui-btn ui-btn--md">` 运行同一匹配式
 - **THEN** 仓库扫描零命中，注入样本恰命中 1 条（`ui-button` 行），`ui-btn` 行不命中
 
 #### Scenario: 迁移后行为不回归
-- **WHEN** 渲染 `新建会话`、`查看源码`/`渲染视图`、`＋ 新建工作空间`、`新建`（Menu 触发器）、对话框 `取消`/`创建`
-- **THEN** 它们的类名为 `ui-btn ui-btn--primary|secondary ui-btn--md`（`新建会话`另含 `chat-new-session`），可访问名不变，`创建`仍为 submit 且挂起期禁用，`新建`菜单开合与关闭回焦不变
+- **WHEN** s1f-files-page 的文件页首刀合入后渲染侧栏的 `新建会话`、文件预览的 `查看源码`/`渲染视图`、切换器里的 `＋ 新建工作空间`、`新建`（`＋` 菜单的触发器）、创建对话框的 `取消`/`创建`
+- **THEN** 它们的类名都不含 `ui-btn`（文件页的五个按钮随 ui-foundation「文件页整目录已迁移」改经 `@/components/ui/button`；`新建会话` 已随 s1f-session-list-temp-space 重建在拷入层上——session-sidebar「分组侧栏」规定其名称与行为不变，ui-foundation「会话页迁移终态」规定 `session-sidebar.tsx` 不再从 `web/src/ui` 导入 `Button`）；可访问名不变，`创建`仍为 submit 且挂起期禁用，`新建`菜单开合与关闭回焦不变
 
 ### Requirement: 全局 reduced-motion 规则
 `web/src/styles.css` 的全局 `@media (prefers-reduced-motion: reduce) { *, *::before, *::after { … } }` 块 SHALL 保持未分层（不放进 ui-foundation 的 `legacy` 层，从而压过 Tailwind utilities 设定的动画时长），且只声明 `animation-duration`、`animation-iteration-count` 与 `scroll-behavior`，SHALL NOT 声明任何 `transition` 或 `transition-*` 属性。原因：`transition-property` 初值为 `all`，只设时长会给所有元素隐式新建过渡；首帧（亮色）之后切换主题时，继承色文字会在若干帧内保持旧主题颜色（#423）。组件自己声明的过渡 SHALL 由各自 CSS 文件内的 reduce 块置为 `transition: none`：`web/src/**/*.css` 中每条在普通规则里声明非 `none` 的 `transition` 或 `transition-*` 的规则，其每个选择器都 SHALL 在同一文件中、源码顺序位于该规则之后的顶层 reduce 块内有同选择器（分组选择器按逗号拆分）的 `transition: none` 覆盖；只有覆盖、没有声明的 reduce 规则允许存在。以 Tailwind `transition*` 工具类声明的过渡（拷入层与已迁移区域）SHALL 由 `web/src/styles/theme.css` 中一条未分层的 reduce 规则统一置为 `transition: none`（选择器匹配类名含 `transition` 的元素），不逐组件改写拷入代码。`animation-*` 与各组件既有的 reduced-motion 行为保持不变。
@@ -136,4 +138,3 @@ Toast 与 `Dialog`/`ConfirmDialog`/`Drawer` 共用 Radix DismissableLayer 的模
 #### Scenario: 焦点不在通知区时 Escape 不关 Toast
 - **WHEN** 无覆盖层打开，Toast 可见，Escape 的事件目标为页面其它元素；另一次事件目标在 toast 内
 - **THEN** 前者 Toast 仍在，推进 2400ms 后消失；后者 Toast 关闭
-
