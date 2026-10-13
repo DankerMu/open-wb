@@ -42,10 +42,10 @@ Minimal mergeable slice: atomic - 一个取值函数加它的全部调用点；�
 
 ## 2a. server/test — SubscriberTable 不变量测试与带重试的启动辅助函数（G2a，#1150、#1273 的前一半）
 
-- [ ] 2a.1 新增 `server/test/supervisor-subscribers.test.ts`，用例 (a)：`read` 抛出某个错误实例 → `subscribe` 抛出**同一个**实例，`count(sessionId)` 等于调用前的值；另一例此前已有一个订阅者，失败后 `count` 仍为 1、原订阅者仍能收到 `fanout`。验证：用例通过；`server/src` 无改动（`git diff --stat -- server/src` 为空）。
-- [ ] 2a.2 同文件用例 (b)：`read` 内部调用 `table.fanout(sessionId, event)` 后返回 `{ mode: "fresh", events: [] }` → `deliver` 恰收到该事件一次。验证：用例通过。变异证据：删掉 `supervisor-subscribers.ts` 里 catch 分支的 `this.remove(...)` → (a) 判红；把 `this.add(...)` 挪到 `read()` 之后 → (b) 判红；两次输出贴进 PR，变异不提交。
-- [ ] 2a.3 新文件 `server/test/server-startup-retry.ts`：一个包住「取端口 → `startCompiledServer` → 等 `server_started`」的辅助函数（design D2）。子进程在 `server_started` 之前退出且失败记录的 `reason` 为 `listen` 或 `preview_listen` 时，回收它、换端口重来，至多三次；其它失败与成功都原样交还调用方（含实际用的端口）。两个取值今天都在失败阶段的枚举里，不依赖 G10 的次序对调。不改 `reserveWildcardPort` 与 `startCompiledServer` 的签名。验证：2a.4 的用例。
-- [ ] 2a.4 辅助函数自己的测试（新文件 `server/test/server-startup-retry.test.ts`）：第一次取到的端口在启动前被测试占住 → 第二次尝试成功，返回的端口不是被占的那个；三次都被占 → 把最后一次的监听失败原样交还；`config` 阶段失败不重试（恰启动一次）。断言只认「是监听类失败」，不钉 `listen` 与 `preview_listen` 哪一个（G10 前后都绿）。验证：用例通过。变异证据：去掉重试 → 第一例判红。此时辅助函数只有自测一个调用方，knip 不报（`make anti-drift` 退出码 0）。
+- [x] 2a.1 新增 `server/test/supervisor-subscribers.test.ts`，用例 (a)：`read` 抛出某个错误实例 → `subscribe` 抛出**同一个**实例，`count(sessionId)` 等于调用前的值；另一例此前已有一个订阅者，失败后 `count` 仍为 1、原订阅者仍能收到 `fanout`。验证：用例通过；`server/src` 无改动（`git diff --stat -- server/src` 为空）。
+- [x] 2a.2 同文件用例 (b)：`read` 内部调用 `table.fanout(sessionId, event)` 后返回 `{ mode: "fresh", events: [] }` → `deliver` 恰收到该事件一次。验证：用例通过。变异证据：删掉 `supervisor-subscribers.ts` 里 catch 分支的 `this.remove(...)` → (a) 判红；把 `this.add(...)` 挪到 `read()` 之后 → (b) 判红；两次输出贴进 PR，变异不提交。
+- [x] 2a.3 新文件 `server/test/server-startup-retry.ts`：一个包住「取端口 → `startCompiledServer` → 等 `server_started`」的辅助函数（design D2）。子进程在 `server_started` 之前退出且失败记录的 `reason` 为 `listen` 或 `preview_listen` 时，回收它、换端口重来，至多三次；其它失败与成功都原样交还调用方（含实际用的端口）。两个取值今天都在失败阶段的枚举里，不依赖 G10 的次序对调。不改 `reserveWildcardPort` 与 `startCompiledServer` 的签名。验证：2a.4 的用例。
+- [x] 2a.4 辅助函数自己的测试（新文件 `server/test/server-startup-retry.test.ts`）：第一次取到的端口在启动前被测试占住 → 第二次尝试成功，返回的端口不是被占的那个；三次都被占 → 把最后一次的监听失败原样交还；`config` 阶段失败不重试（恰启动一次）。断言只认「是监听类失败」，不钉 `listen` 与 `preview_listen` 哪一个（G10 前后都绿）。验证：用例通过。变异证据：去掉重试 → 第一例判红。此时辅助函数只有自测一个调用方，knip 不报（`make anti-drift` 退出码 0）。
 
 Suggested fixture level: compact - 只加测试与测试辅助函数，`server/src` 零改动，不涉及产品行为
 Minimal mergeable slice: 2a.1–2a.2（一个新测试文件，单独保绿）；其后 2a.3–2a.4（新辅助函数加自测）
