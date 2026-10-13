@@ -501,10 +501,10 @@ describe("WorkspaceBrowser 标记与子树", () => {
       expect(within(tree()).getByRole("button", { name: `折叠 ${name}` })).toBeTruthy();
     }
     expect(markedRows().map((row) => row.name)).toStrictEqual(["out", "a.md"]);
-    // 父目录加载过的行沿用它的大小；没加载过的（`x` 从未展开）没有大小，也选不了。
+    // 父目录加载过的行沿用它的大小；没加载过的（`x` 从未展开）没有大小，照样可选（#1372）。
     expect(fileRow("a.md").querySelector('[data-slot="tree-size"]')?.textContent).toBe("4 B");
     expect(fileRow("y.md").querySelector('[data-slot="tree-size"]')).toBeNull();
-    expect(fileRow("y.md").disabled).toBe(true);
+    expect(fileRow("y.md").disabled).toBe(false);
     expect(fileRow("a.md").disabled).toBe(false);
     await settle();
     expect(treeRequests()).toStrictEqual([ROOT, OUT]);
@@ -538,8 +538,10 @@ describe("WorkspaceBrowser 标记与子树", () => {
     ).toBeNull();
   });
 
-  it("onlyPaths 下点目录行、refresh() 与 reveal 未加载的层都不请求 tree；选中的文件仍可重取预览", async () => {
-    const { browser, onPathChange, requests, update } = mount("out/a.md");
+  it("onlyPaths 下点目录行、refresh() 与 reveal 未加载的层都不请求 tree；reveal 选中父目录未加载的 y.md 并上报，随后的 refresh() 重取它的预览", async () => {
+    const FILE_Y = `${FILE}x%2Fy.md`;
+    const table = routes({ [FILE_Y]: () => textPreviewResponse("乙的正文") });
+    const { browser, onPathChange, requests, update } = mount("out/a.md", {}, table);
     await selectedRow("a.md");
     await previewRegion().findByText("甲的正文", { exact: true });
     expect(requests()).toStrictEqual([ROOT, OUT, FILE_A]);
@@ -552,12 +554,13 @@ describe("WorkspaceBrowser 标记与子树", () => {
     act(() => browser().reveal("x/y.md"));
     act(() => browser().refresh());
     await waitFor(() => {
-      expect(requests()).toHaveLength(4);
+      expect(requests()).toHaveLength(5);
     });
     await settle();
-    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A, FILE_A]);
-    expect(fileRow("a.md").getAttribute("aria-current")).toBe("true");
-    expect(onPathChange.mock.calls).toStrictEqual([]);
+    expect(requests()).toStrictEqual([ROOT, OUT, FILE_A, FILE_Y, FILE_Y]);
+    expect(fileRow("y.md").getAttribute("aria-current")).toBe("true");
+    expect(fileRow("a.md").getAttribute("aria-current")).toBeNull();
+    expect(onPathChange.mock.calls).toStrictEqual([["x/y.md"]]);
   });
 
   it("挂载时就带着 onlyPaths：连根也不请求；撤掉之后才请求根", async () => {

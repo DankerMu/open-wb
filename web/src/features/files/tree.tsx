@@ -12,7 +12,6 @@ import { ALERT_BOX } from "./columns.js";
 import { EmptyState } from "./empty-state.js";
 import type { EntryActions, MenuFocus } from "./entry-ops.js";
 import { fileIcon, formatSize } from "./file-meta.js";
-import type { TreeEntry } from "./types.js";
 
 /** 带标记的行（路径与其各级父目录）与标记的可访问文本。 */
 type TreeMarks = { label: string; paths: ReadonlySet<string> };
@@ -27,7 +26,7 @@ type DirectoryTreeState = {
   /** 给了才有行菜单（根行始终没有）；`onlyPaths` 下浏览器不给。 */
   actions?: EntryActions | undefined;
   focusMenuPath?: MenuFocus | undefined;
-  onSelectFile(entry: TreeEntry, path: string): void;
+  onSelectFile(entry: TreeRow, path: string): void;
   onToggleDirectory(path: string): void;
 };
 
@@ -298,8 +297,7 @@ function FileRow({
   selected,
 }: FileRowProps) {
   const mark = useRowMark(marks, path);
-  // 没有 `size` / `mtime` 的行（`onlyPaths` 下父目录没加载过）选不了：预览头要这两项。
-  const stat = entry.size === undefined ? null : entry;
+  // 没有 `size` / `mtime` 的行（`onlyPaths` 下父目录没加载过）照样可选，只是行上不显示大小（issue 1372）。
   const frame = rowFrame(actions, mark.item);
 
   return (
@@ -308,8 +306,7 @@ function FileRow({
         aria-current={selected ? "true" : undefined}
         aria-describedby={mark.describedBy}
         className={frame.row}
-        disabled={stat === null}
-        onClick={stat ? () => onSelectFile(stat, path) : undefined}
+        onClick={() => onSelectFile(entry, path)}
         title={entry.name}
         type="button"
         {...drag?.file(path)}
@@ -320,15 +317,15 @@ function FileRow({
         <span className={ROW_NAME} data-slot="tree-name">
           {entry.name}
         </span>
-        {stat ? (
+        {entry.size === undefined ? null : (
           <span
             aria-hidden="true"
             className="ml-auto flex-none text-[10.5px] whitespace-nowrap text-(--wb-text-tertiary)"
             data-slot="tree-size"
           >
-            {formatSize(stat.size)}
+            {formatSize(entry.size)}
           </span>
-        ) : null}
+        )}
       </button>
       <RowMenu
         actions={actions}

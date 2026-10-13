@@ -3,15 +3,17 @@
  * and what the pane shows for each state. The request itself lives in the browser.
  */
 import { ApiError } from "../../lib/api.js";
+import type { TreeRow } from "./browser-paths.js";
 import { ALERT_BOX, EmptyPreview, STATUS_TEXT } from "./columns.js";
 import { errorMessage } from "./errors.js";
 import { PreviewPane } from "./preview.js";
 import { previewKind, textView } from "./previewers/index.js";
-import type { FetchedPreview, PreviewState, TreeEntry } from "./types.js";
+import type { FetchedPreview, PreviewState } from "./types.js";
 import type { usePreviewToken } from "./use-preview-token.js";
 
 export type SelectedFile = {
-  entry: TreeEntry;
+  /** 选中的那一行；过滤视图里没有元数据的行没有 `size` / `mtime`（issue 1372）。 */
+  entry: TreeRow;
   path: string;
   preview: PreviewState | null;
 };
@@ -71,7 +73,7 @@ let mediaVersion = Date.now();
  * 媒体预览：同一路径上一次也是媒体时 `reload` 加一、地址带一个新的 `v`；否则 `reload` 为 0，
  * 地址就是 `url`。
  */
-function mediaPreview(entry: TreeEntry, url: string, previous: PreviewState | null): PreviewState {
+function mediaPreview(entry: TreeRow, url: string, previous: PreviewState | null): PreviewState {
   const reload =
     previous?.status === "success" && previous.data.kind === "media" ? previous.data.reload + 1 : 0;
   const address = reload === 0 ? url : `${url}&v=${++mediaVersion}`;
@@ -95,7 +97,7 @@ function mediaPreview(entry: TreeEntry, url: string, previous: PreviewState | nu
  * 加一，预览器据此换一个新的框。
  */
 export function immediatePreview(
-  entry: TreeEntry,
+  entry: TreeRow,
   url: string,
   listArchive: ArchiveLoad,
   previous: PreviewState | null,

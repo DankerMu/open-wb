@@ -68,6 +68,10 @@ const MERGE_MS = 300;
  *   `MERGE_MS` 后对集合调一次 `refresh(paths)`（浏览器只重列这些路径已加载的各级父目录，当前文件在
  *   其中才重取预览）。按步骤（`消息 id:步骤 id`）判新而不按路径：同一路径被后一个步骤再改时也要刷。
  *   `changes` 为空的已结束步骤不记，`files.changed` 晚于 `step.end` 到达时仍算新。
+ * - 记账：同一批没见过的路径在发现它们的那一次 effect 里就交给浏览器的 `reported(paths)`（只记账、不发
+ *   请求），不进合并窗口——`只看本会话改动` 开着时浏览器不重列目录，助手新写出的文件靠这一笔才列得
+ *   出来（workspace-sidebar「本会话改动标记与过滤」，#1372）。回合在窗口内结束、待刷集合被下一条的
+ *   兜底清掉时，路径也已经交出去了。首屏播种的那一次不交。
  * - 第一个非 `null` 的 `view` 只记下已有的步骤、不刷新：首屏历史与重开侧边栏时已有的改动不是新的
  *   （挂载时浏览器自己请求一次根）。
  * - 兜底：`view.status` 由 `running` 变为别的值时丢掉待刷集合与定时器，立即 `refresh()`（全部已加载
@@ -92,6 +96,7 @@ export function useAssistantRefresh(
     const ended = running.current && view.status !== "running";
     running.current = view.status === "running";
     if (seeding) return;
+    if (fresh.length > 0) browser.current?.reported(fresh);
     if (ended) {
       clearTimeout(timer.current);
       timer.current = undefined;

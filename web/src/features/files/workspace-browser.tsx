@@ -22,12 +22,31 @@
  *   the preview origin too, and `file` is never requested for it. The preview token is issued
  *   here, by the one `usePreviewToken` call, and handed down as a prop; it is not part of the
  *   selection, the address or anything stored.
- * - `onlyPaths`: the tree is built from those paths (`subtreeOf`) and neither the listing cache
- *   nor the expanded set is written, so both are back when it is dropped. `loadDirectory` returns
- *   without a request while it is set: tests pin that for `refresh`, for a walk (it ends at the
- *   first unloaded level) and for mounting. `新建` is disabled while it is set: the re-listing after
- *   creating a folder would go through the same gate. Dropping it requests the root if that was
- *   never loaded and replays nothing else.
+ * - `onlyPaths`: the tree is built from those of the paths that still make a row (`listedPaths`,
+ *   then `subtreeOf`) and the listing cache is not written, so it is back when `onlyPaths` is
+ *   dropped. `loadDirectory` (`directory-loader.ts`) returns without a request while it is set:
+ *   tests pin that for `refresh`, for a walk and for mounting. `新建` is disabled while it is set:
+ *   the re-listing after creating a folder would go through the same gate. Dropping it requests
+ *   the root if that was never loaded and replays nothing else.
+ * - Rows under `onlyPaths` (issue 1372): every row can be selected, with or without a listing of its
+ *   parent — one without has no size and no time, and whether the file exists is what `file` /
+ *   `archive` answers. A path in `onlyPaths` makes no row once it is known to be gone
+ *   (`path-records.ts`: it answered 404, or its parent's listing is loaded without it and no step
+ *   reported it since — the host says so through `reported`). A `path` or `reveal` inside
+ *   `onlyPaths` follows the same test instead of walking: a row is selected, no row clears the
+ *   selection; a path outside `onlyPaths` walks as before and stops, untouched, at the first
+ *   unloaded level.
+ * - A 404 from `file` or `archive` for the current file, when `onlyPaths` or `clearMissing` is
+ *   given: the path is recorded, the selection is cleared and `onPathChange(null)` is called once;
+ *   the failed state is never shown. Any other failure stays the failed preview. With neither prop
+ *   (the files page) a 404 is the envelope's message as before.
+ * - `clearMissing` (the session sidebar gives it, always): a walk started by `path` that does not
+ *   end on a file shows the empty preview whatever the reason (missing name, `..`, a failed
+ *   level); the failed level keeps its error row on the tree. Rows of the ordinary tree are not
+ *   removed by it: they come from the listings alone.
+ * - Not claimed: a web page's rendered view, a PDF, an office document and audio / video are not
+ *   read through `file` or `archive`, so the page never sees a 404 for them; such a row stays and
+ *   shows what its previewer shows (read from the code, design D14-5).
  * - Entry operations: the row menu, its dialog and the request are `useEntryOperations`
  *   (`entry-ops.tsx`); after a rename or a move `useFollowEntry` (`follow-entry.ts`) moves the
  *   listings, the expanded set and the selection to the new path without walking again, and after a
@@ -50,19 +69,21 @@ import {
   loadedDirectoryPaths,
   markedRows,
   normalizedPath,
-  ownValue,
   parentPath,
   refreshLayers,
   revealStep,
   subtreeOf,
+  type TreeRow,
 } from "./browser-paths.js";
 import { type BrowserLayout, emptyNote, WorkspaceColumns } from "./columns.js";
 import { DirectoryDialog } from "./dialogs.js";
+import { useDirectoryLoader } from "./directory-loader.js";
 import { useEntryOperations } from "./entry-ops.js";
-import { errorMessage, isUnauthorized } from "./errors.js";
+import { isNotFound, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
 import { useFollowEntry } from "./follow-entry.js";
+import { filteredRow, listedPaths, usePathRecords } from "./path-records.js";
 import {
   failedPreview,
   immediatePreview,
@@ -71,7 +92,6 @@ import {
   withFetched,
 } from "./preview-area.js";
 import { DirectoryTree } from "./tree.js";
-import type { TreeEntry } from "./types.js";
 import { usePreviewToken } from "./use-preview-token.js";
 
 /** 进行中的定位：`asked` 是这一次已经请求过的目录，请求过仍没有列表即失败。 */
@@ -82,6 +102,8 @@ export type WorkspaceBrowserHandle = {
   reveal(path: string, options?: { view?: "rendered" }): void;
   /** 重取已加载的目录：给了 `paths` 只取它们的各级父目录，当前文件在其中才重取预览。 */
   refresh(paths?: string[]): void;
+  /** 这些路径刚被一个结束的步骤报过：只记账（`path-records.ts`），不发请求。 */
+  reported(paths: readonly string[]): void;
 };
 
 type WorkspaceBrowserProps = {
@@ -97,7 +119,9 @@ type WorkspaceBrowserProps = {
   layout?: BrowserLayout | undefined;
   markedPaths?: { label: string; paths: ReadonlySet<string> } | undefined;
   onlyPaths?: ReadonlySet<string> | undefined;
-  /** 侧边栏用：`onlyPaths` 是空集时树的位置上的文案；树栏收起（见 `WorkspaceColumns`）。 */
+  /** 侧边栏专用（恒为真）：已不存在的文件一律清空，不放文案；文件页不给。见头注释。 */
+  clearMissing?: boolean | undefined;
+  /** 侧边栏用：`onlyPaths` 里一行不剩时树的位置上的文案；树栏收起（见 `WorkspaceColumns`）。 */
   onlyPathsEmpty?: string | undefined;
   treeCollapsed?: boolean | undefined;
   /** 侧边栏用：换成新值（非 `undefined`）时，`path` 所指的网页已选中且停在源码视图就翻回渲染视图。 */
@@ -120,6 +144,7 @@ const NO_ERRORS: Record<string, string> = {};
 
 export function WorkspaceBrowser({
   account,
+  clearMissing = false,
   client,
   dir,
   layout,
@@ -159,6 +184,8 @@ export function WorkspaceBrowser({
   const revealRef = useRef<Reveal | null>(null);
   const selectedFileRef = useRef<SelectedFile | null>(null);
   const subtreeOnly = onlyPaths !== undefined;
+  const pathRecords = usePathRecords();
+  const { missing: recordMissing, records, ref: recordsRef } = pathRecords;
   // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）、PDF 或办公文档时才签发与续期。第四参是
   // 该预览的 `reload`：刷新或再点同一行使它变化（网页限渲染视图），令牌由此按需重新签发；其余情况给 0。
   const framed =
@@ -182,77 +209,20 @@ export function WorkspaceBrowser({
     setSelectedFile(next);
   }, []);
 
-  const loadDirectory = useCallback(
-    (path: string, refresh = false, onTree = true) => {
-      if (subtreeOnly || (!refresh && ownValue(cacheRef.current, path))) {
-        return;
-      }
-
-      const inFlight = directoryRequestsRef.current.get(path);
-      if (inFlight) {
-        if (!refresh) {
-          return;
-        }
-        inFlight.abort();
-        directoryRequestsRef.current.delete(path);
-      }
-
-      const controller = new AbortController();
-      directoryRequestsRef.current.set(path, controller);
-      failedDirectoriesRef.current.delete(path);
-      setLoadingPaths((current) => new Set(current).add(path));
-      setDirectoryErrors((current) => {
-        if (!ownValue(current, path)) {
-          return current;
-        }
-
-        const next = { ...current };
-        delete next[path];
-        return next;
-      });
-
-      void client
-        .listTree(workspaceId, path, { signal: controller.signal })
-        .then((listing) => {
-          if (!mountedRef.current || controller.signal.aborted) {
-            return;
-          }
-
-          cacheRef.current = { ...cacheRef.current, [path]: listing };
-          setDirectories(cacheRef.current);
-        })
-        .catch((error: unknown) => {
-          if (!mountedRef.current || controller.signal.aborted || isUnauthorized(error)) {
-            return;
-          }
-
-          const message = errorMessage(error);
-          failedDirectoriesRef.current.set(path, message);
-          if (focusMenuPath.current !== null && parentPath(focusMenuPath.current) === path) {
-            focusMenuPath.current = null;
-          }
-          // 树上没有行的层（`path` 属性里上一级没有列出的那些）不进错误行：`刷新` 不会再请求它。
-          if (onTree) {
-            setDirectoryErrors((current) => ({ ...current, [path]: message }));
-          }
-        })
-        .finally(() => {
-          if (directoryRequestsRef.current.get(path) !== controller) {
-            return;
-          }
-
-          directoryRequestsRef.current.delete(path);
-          if (mountedRef.current) {
-            setLoadingPaths((current) => {
-              const next = new Set(current);
-              next.delete(path);
-              return next;
-            });
-          }
-        });
-    },
-    [client, subtreeOnly, workspaceId],
-  );
+  const loadDirectory = useDirectoryLoader({
+    cacheRef,
+    client,
+    directoryRequestsRef,
+    failedDirectoriesRef,
+    focusMenuPath,
+    mountedRef,
+    onListed: pathRecords.listed,
+    setDirectories,
+    setDirectoryErrors,
+    setLoadingPaths,
+    subtreeOnly,
+    workspaceId,
+  });
 
   useEffect(() => {
     mountedRef.current = true;
@@ -322,6 +292,25 @@ export function WorkspaceBrowser({
   }, [cancelPreviewRequest, publishSelectedFile, releaseOwnedImage]);
 
   /**
+   * `file` / `archive` 对 `path` 的失败是不是「它已不存在」：给了 `onlyPaths` 或 `clearMissing`、应答是
+   * 404、它仍是当前文件——记下它，清掉选中并上报 `null`，返回真（调用方不再进失败态）。其余返回假。
+   */
+  const dropMissing = useCallback(
+    (path: string, error: unknown) => {
+      const tracked = subtreeOnly || clearMissing;
+      if (!tracked || !isNotFound(error) || selectedFileRef.current?.path !== path) {
+        return false;
+      }
+
+      recordMissing(path);
+      clearSelection();
+      onPathChange(null);
+      return true;
+    },
+    [clearMissing, clearSelection, onPathChange, recordMissing, subtreeOnly],
+  );
+
+  /**
    * 为已发布的选中项 `path` 发一次 `file` 请求；调用方先 `cancelPreviewRequest`。结局经
    * `withFetched` 放进那时的预览：网页收进它的 `source`，其余类别就是预览本身。
    */
@@ -372,6 +361,10 @@ export function WorkspaceBrowser({
             return;
           }
 
+          if (dropMissing(path, error)) {
+            return;
+          }
+
           releaseOwnedImage();
           publishSelectedFile({
             ...current,
@@ -387,11 +380,11 @@ export function WorkspaceBrowser({
           }
         });
     },
-    [client, publishSelectedFile, releaseOwnedImage, workspaceId],
+    [client, dropMissing, publishSelectedFile, releaseOwnedImage, workspaceId],
   );
 
   const selectFile = useCallback(
-    (entry: TreeEntry, path: string) => {
+    (entry: TreeRow, path: string) => {
       cancelPreviewRequest();
       setPathNotice(null);
       const previous = selectedFileRef.current;
@@ -405,11 +398,16 @@ export function WorkspaceBrowser({
 
       // 不发 `file` 请求的类别在这里交付：上一个请求已中止，换了文件时旧图片也已释放，没有新请求要管。
       // 压缩包的成员列表请求由它的预览器发起并中止；这里每次给一个新函数，刷新与再点同一行因此重新列出。
+      // 它不经 `requestPreview`：404 在这个闭包里交给 `dropMissing`，再照旧抛给预览器。
       // 网页也在这里：渲染视图不请求；同一路径停在源码视图时得到 `null`，走下面那一次请求。
       const immediate = immediatePreview(
         entry,
         fileUrl(workspaceId, path),
-        (signal) => client.listArchive(workspaceId, path, { signal }),
+        (signal) =>
+          client.listArchive(workspaceId, path, { signal }).catch((error: unknown) => {
+            dropMissing(path, error);
+            throw error;
+          }),
         sameFile && previous ? previous.preview : null,
       );
       if (immediate) {
@@ -424,6 +422,7 @@ export function WorkspaceBrowser({
     [
       cancelPreviewRequest,
       client,
+      dropMissing,
       publishSelectedFile,
       releaseOwnedImage,
       requestPreview,
@@ -457,7 +456,7 @@ export function WorkspaceBrowser({
 
   /** 点击文件行：放弃进行中的定位，选中并上报。点已选中的文件照样重取预览。 */
   const chooseFile = useCallback(
-    (entry: TreeEntry, path: string) => {
+    (entry: TreeRow, path: string) => {
       revealRef.current = null;
       selectFile(entry, path);
       onPathChange(path);
@@ -486,8 +485,9 @@ export function WorkspaceBrowser({
   );
 
   /**
-   * 定位结束而没有落在文件上。`path` 属性发起的：清掉选中，预览区显示 `notice`（`null` 即空态）；
-   * 没有文案可给（`undefined`：401，或 `onlyPaths` 下没有请求）时什么都不动。`reveal` 发起的不报。
+   * 定位结束而没有落在文件上。`path` 属性发起的：清掉选中，预览区显示 `notice`（`null` 即空态；
+   * `clearMissing` 下文案不交给预览区，一律空态）；没有文案可给（`undefined`：401，或 `onlyPaths` 下
+   * 没有请求）时什么都不动。`reveal` 发起的不报。
    */
   const endWithoutFile = useCallback(
     (target: Reveal, notice: string | null | undefined) => {
@@ -517,6 +517,36 @@ export function WorkspaceBrowser({
     [expandDirectories, loadDirectory],
   );
 
+  /** 定位落在文件上：选中，`reveal` 发起的另上报一次。 */
+  const land = useCallback(
+    (row: TreeRow, target: Reveal) => {
+      selectFile(row, target.path);
+      if (target.notify) {
+        onPathChange(target.path);
+      }
+    },
+    [onPathChange, selectFile],
+  );
+
+  /**
+   * `onlyPaths` 之内的路径不逐级走、不等目录：它在过滤视图里成行（`filteredRow`）就选中并取预览；不
+   * 成行即已不存在，清掉选中——`path` 属性发起的经 `endWithoutFile`，`reveal` 发起的上报 `null`。
+   */
+  const landFiltered = useCallback(
+    (target: Reveal) => {
+      const row = filteredRow(target.path, cacheRef.current, recordsRef.current);
+      if (row) {
+        land(row, target);
+      } else if (!target.notify) {
+        endWithoutFile(target, MISSING_FILE);
+      } else if (selectedFileRef.current) {
+        clearSelection();
+        onPathChange(null);
+      }
+    },
+    [clearSelection, endWithoutFile, land, onPathChange, recordsRef],
+  );
+
   /**
    * 把进行中的定位推进到不能再推为止：已加载的层直接走过，树上有行的并展开；遇到未加载的层请求一次
    * 后返回，等列表或失败落地（下面的 effect）再进来，等不到就停在这一级，文案是这一次请求的失败。
@@ -529,6 +559,13 @@ export function WorkspaceBrowser({
     }
 
     const { entry, expand, unloaded } = revealStep(target.path, cacheRef.current);
+    if (onlyPaths?.has(target.path)) {
+      revealRef.current = null;
+      // 只展开已加载的层：没加载的那一层不请求，展开了它，撤掉 `onlyPaths` 后是一个没有内容的展开行。
+      expandDirectories(expand.filter((path) => path !== unloaded));
+      landFiltered(target);
+      return;
+    }
     expandDirectories(expand);
     if (unloaded !== null) {
       if (!awaitDirectory(target, unloaded, expand.includes(unloaded))) {
@@ -540,17 +577,22 @@ export function WorkspaceBrowser({
 
     revealRef.current = null;
     if (entry?.type === "file") {
-      selectFile(entry, target.path);
-      if (target.notify) {
-        onPathChange(target.path);
-      }
+      land(entry, target);
     } else if (entry) {
       openDirectory(target.path, expand);
       endWithoutFile(target, null);
     } else {
       endWithoutFile(target, MISSING_FILE);
     }
-  }, [awaitDirectory, endWithoutFile, expandDirectories, onPathChange, openDirectory, selectFile]);
+  }, [
+    awaitDirectory,
+    endWithoutFile,
+    expandDirectories,
+    land,
+    landFiltered,
+    onlyPaths,
+    openDirectory,
+  ]);
 
   // `path` 属性只在变化时生效一次，每次都顶掉进行中的定位。与当前选中逐字相同（点击后宿主送回来的
   // 就是这样）只是放弃它，不看它的写法。其余先过 `normalizedPath`，比的、走的都是之后的写法：与当前
@@ -634,12 +676,13 @@ export function WorkspaceBrowser({
     ref,
     () => ({
       refresh,
+      reported: pathRecords.reported,
       reveal(path) {
         revealRef.current = { asked: new Set(), notify: true, path };
         continueReveal();
       },
     }),
-    [continueReveal, refresh],
+    [continueReveal, pathRecords.reported, refresh],
   );
 
   const directoriesForDialog = useMemo(() => loadedDirectoryPaths(directories), [directories]);
@@ -647,9 +690,14 @@ export function WorkspaceBrowser({
     () => markedPaths && { label: markedPaths.label, paths: markedRows(markedPaths.paths) },
     [markedPaths],
   );
+  // 过滤视图里还成行的路径：已不存在的（`path-records.ts`）不在其中，目录行只由剩下的拼出来。
+  const listed = useMemo(
+    () => listedPaths(onlyPaths, directories, records),
+    [directories, onlyPaths, records],
+  );
   const subtree = useMemo(
-    () => (onlyPaths ? subtreeOf(onlyPaths, directories) : null),
-    [directories, onlyPaths],
+    () => (listed ? subtreeOf(listed, directories) : null),
+    [directories, listed],
   );
 
   return (
@@ -657,7 +705,7 @@ export function WorkspaceBrowser({
       <WorkspaceColumns
         creationDisabled={subtreeOnly}
         directory={
-          emptyNote(onlyPaths, onlyPathsEmpty) ?? (
+          emptyNote(listed, onlyPathsEmpty) ?? (
             <DirectoryTree
               // `onlyPaths` 下没有行菜单：不列目录，改名、移动之后既不能重列也跟不过去。
               actions={subtree ? undefined : operations.actions}
@@ -684,7 +732,7 @@ export function WorkspaceBrowser({
         preview={
           <PreviewArea
             loading={previewLoading}
-            notice={pathNotice}
+            notice={clearMissing ? null : pathNotice}
             onWebViewChange={showWebView}
             previewToken={previewToken}
             selectedFile={selectedFile}

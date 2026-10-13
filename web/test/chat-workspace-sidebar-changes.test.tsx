@@ -279,7 +279,7 @@ describe("本会话改动标记与过滤", () => {
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
   });
 
-  it("C4 已删除的文件：列表里还有的 gone.md 可以选中，预览区是服务端的不存在文案，没有未处理的拒绝；从未展开的 deep 下的 x.md 列出但选不了", async () => {
+  it("C4 已删除的文件：从未展开的 deep 下的 x.md 列出并可选中；列表里还有的 gone.md 选中后从列表消失，没有选中的行，预览区是 未选择文件，没有服务端的不存在文案，没有未处理的拒绝", async () => {
     const rejections = observeUnhandledRejections();
     try {
       const changed = [write("gone.md"), write("deep/x.md")];
@@ -288,6 +288,7 @@ describe("本会话改动标记与过滤", () => {
         {
           [ROOT]: listing("", [dir("deep"), file("gone.md"), file("readme.md")]),
           [fileOf(PROJ.id, "gone.md")]: () => envelope(404, "not_found", NOT_FOUND),
+          [fileOf(PROJ.id, "deep/x.md")]: () => textPreviewResponse("深处的正文"),
         },
       );
 
@@ -295,18 +296,22 @@ describe("本会话改动标记与过滤", () => {
 
       expect(rowNames(region)).toStrictEqual(["项目", "deep", "x.md", "gone.md"]);
       expect(button(region, "折叠 deep").getAttribute("aria-expanded")).toBe("true");
-      expect(button(region, "x.md").disabled).toBe(true);
+      expect(button(region, "x.md").disabled).toBe(false);
       expect(button(region, "gone.md").disabled).toBe(false);
 
       fireEvent.click(button(region, "x.md"));
+      expect(await preview(region).findByText("深处的正文", { exact: true })).toBeTruthy();
+      expect(button(region, "x.md").getAttribute("aria-current")).toBe("true");
       fireEvent.click(button(region, "gone.md"));
 
-      expect(await within(region).findByText(NOT_FOUND, { exact: true })).toBeTruthy();
-      expect(button(region, "gone.md").getAttribute("aria-current")).toBe("true");
-      expect(button(region, "x.md").getAttribute("aria-current")).toBeNull();
+      await waitFor(() => expect(rowNames(region)).toStrictEqual(["项目", "deep", "x.md"]));
+      expect(preview(region).getByText("未选择文件", { exact: true })).toBeTruthy();
+      expect(screen.queryByText(NOT_FOUND)).toBeNull();
+      expect(region.querySelector('button[aria-current="true"]')).toBeNull();
       await settled();
       expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
       expect(paths(fetchMock).filter((path) => path.includes("/file?"))).toStrictEqual([
+        fileOf(PROJ.id, "deep/x.md"),
         fileOf(PROJ.id, "gone.md"),
       ]);
       expect(rejections.unhandled).toStrictEqual([]);

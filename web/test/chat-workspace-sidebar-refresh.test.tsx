@@ -443,7 +443,7 @@ describe("随助手改动刷新", () => {
 
   it("R6 null 的视图不参与比较：running 的视图变成 null 不刷新，其后来的是已结束的视图时兜底恰一次、不带路径", () => {
     const refresh = vi.fn();
-    const browser = { current: { refresh, reveal: vi.fn() } };
+    const browser = { current: { refresh, reported: vi.fn(), reveal: vi.fn() } };
     const { rerender } = renderHook<void, { view: ChatState | null }>(
       ({ view }) => useAssistantRefresh(view, browser),
       { initialProps: { view: chatStateFromSnapshot(turn("running")) } },

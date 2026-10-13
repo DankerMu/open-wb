@@ -9,6 +9,10 @@
  * through here on its way from the host's prop to that previewer.
  * A PDF or an office document has no fetched body either: its previewer gets the token, the path
  * and the entry's size, and decides there whether a frame is built.
+ * `size` and `mtime` are the tree entry's and may be missing together (a row of the session
+ * sidebar's filtered view whose parent directory was never listed, issue 1372): the header then has no
+ * size / time line and the unsupported and too-large lines are the file name alone. Nothing stands
+ * in for them. The size in the truncation line is the response's own and is always there.
  * Blob URLs are caller-owned; this module never allocates or revokes them.
  * Markdown mode is keyed by `path`; callers must remount across workspaces
  * if the same relative path can name different files.
@@ -20,7 +24,7 @@ import { downloadUrl } from "../../lib/api.js";
 import { Icon } from "../../ui/index.js";
 import { ALERT_BOX, STATUS_TEXT } from "./columns.js";
 import { EmptyState } from "./empty-state.js";
-import { fileIcon, formatMtime, formatSize } from "./file-meta.js";
+import { fileIcon, formatMtime, formatSize, withSize } from "./file-meta.js";
 import {
   loadPreviewer,
   type Previewer,
@@ -39,8 +43,8 @@ type PreviewPaneProps = {
   workspaceId: string;
   path: string;
   name: string;
-  size: number;
-  mtime: number;
+  size?: number | undefined;
+  mtime?: number | undefined;
   preview: PreviewState;
   /** The host's `usePreviewToken` result; a web page's rendered view, a PDF and an office document read it. */
   previewToken: ReturnType<typeof usePreviewToken>;
@@ -99,6 +103,10 @@ export function PreviewPane({
   const shown = preview.status === "web" && preview.view === "source" ? preview.source : preview;
   const truncatedSize =
     shown?.status === "success" && shown.data.truncated ? shown.data.size : null;
+  const meta =
+    size === undefined || mtime === undefined
+      ? null
+      : `${formatSize(size)} · ${formatMtime(mtime)}`;
   return (
     <article className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden">
       <header
@@ -114,14 +122,19 @@ export function PreviewPane({
         >
           {path}
         </p>
-        <p
-          className="ml-auto shrink text-[0.7rem] text-(--wb-text-tertiary) [overflow-wrap:anywhere] narrow:ml-0"
-          data-slot="preview-meta"
-        >{`${formatSize(size)} · ${formatMtime(mtime)}`}</p>
+        {meta === null ? null : (
+          <p
+            className="ml-auto shrink text-[0.7rem] text-(--wb-text-tertiary) [overflow-wrap:anywhere] narrow:ml-0"
+            data-slot="preview-meta"
+          >
+            {meta}
+          </p>
+        )}
         {/* 浏览器直接导航下载：文件名由服务端的 Content-Disposition 给，这里不经 fetch。 */}
         <a
           aria-label={`下载 ${name}`}
-          className="inline-flex shrink-0 rounded-[6px] p-1 text-(--wb-text-secondary) hover:bg-(--wb-brand-primary-subtle) hover:text-(--wb-text-primary)"
+          // 没有大小与时间那一段时由下载链接自己靠右。
+          className={`inline-flex shrink-0 rounded-[6px] p-1 text-(--wb-text-secondary) hover:bg-(--wb-brand-primary-subtle) hover:text-(--wb-text-primary) ${meta === null ? "ml-auto" : ""}`}
           download
           href={downloadUrl(workspaceId, path)}
           title={`下载 ${name}`}
@@ -181,13 +194,13 @@ function PreviewBody({
 }: {
   name: string;
   preview: Exclude<PreviewState, WebPreview | DocumentPreview>;
-  size: number;
+  size: number | undefined;
 }) {
   if (preview.status === "unsupported" || preview.status === "too-large") {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
         <EmptyState
-          description={`${name} · ${formatSize(size)}`}
+          description={withSize(name, size)}
           title={preview.status === "unsupported" ? "该类型不支持预览" : "文件过大，无法预览"}
         />
       </div>

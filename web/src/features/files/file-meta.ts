@@ -39,6 +39,11 @@ export function formatSize(bytes: number): string {
   return `${value.toFixed(1)} ${UNITS[unit]}`;
 }
 
+/** `<文件名> · <大小>`；大小未知（树条目没有它，#1372）时只有文件名，不放占位值。 */
+export function withSize(name: string, size: number | undefined): string {
+  return size === undefined ? name : `${name} · ${formatSize(size)}`;
+}
+
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
 /** 查看者本地时区 `YYYY-MM-DD HH:mm`（24 小时制、各段补零），取 `Date` 本地分量拼接；非有限值显示 `—`。 */

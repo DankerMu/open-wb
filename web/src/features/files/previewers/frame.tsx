@@ -48,7 +48,8 @@
  *   name ends in `pdf` is kept from running as HTML by the type-by-extension rule plus `nosniff`
  *   is not tested.
  * - Before any frame is built, in this order: the entry's size over the token's
- *   `documentMaxBytes`, an office document while `officeAvailable` is false, and
+ *   `documentMaxBytes` (skipped when the entry has no size, issue 1372: the frame then shows whatever
+ *   the preview origin answers), an office document while `officeAvailable` is false, and
  *   `navigator.pdfViewerEnabled === false` (for both kinds: an office document is shown as a PDF
  *   too). Each shows its line and builds no frame. `undefined` (a browser without the property)
  *   builds the frame.
@@ -69,7 +70,7 @@ import { Button } from "@/components/ui/button";
 import { REQUEST_FAILED_MESSAGE } from "../../../lib/api.js";
 import { ALERT_BOX, STATUS_TEXT } from "../columns.js";
 import { EmptyState } from "../empty-state.js";
-import { formatSize } from "../file-meta.js";
+import { withSize } from "../file-meta.js";
 import type { Previewer } from "./index.js";
 
 type Web = NonNullable<Parameters<Previewer>[0]["web"]>;
@@ -134,7 +135,7 @@ export function WebPreviewer({ name, web }: { name: string; web?: Web | undefine
 
 /** The line shown instead of a frame, or `null` when the frame may be built. Order is the spec's. */
 function refusal(doc: Doc, token: Extract<Token, { status: "ready" }>): string | null {
-  if (doc.size > token.documentMaxBytes) {
+  if (doc.size !== undefined && doc.size > token.documentMaxBytes) {
     return "文件过大，无法预览";
   }
   if (doc.office && !token.officeAvailable) {
@@ -159,7 +160,7 @@ export function DocumentPreviewer({ name, doc }: { name: string; doc?: Doc | und
   if (refused !== null) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center">
-        <EmptyState description={`${name} · ${formatSize(doc.size)}`} title={refused} />
+        <EmptyState description={withSize(name, doc.size)} title={refused} />
       </div>
     );
   }
