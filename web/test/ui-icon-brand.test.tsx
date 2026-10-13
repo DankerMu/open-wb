@@ -75,6 +75,16 @@ describe("Icon", () => {
     const { container } = render(<Icon name={name} />);
     expect(container.querySelectorAll("svg")).toHaveLength(1);
   });
+
+  it.each([
+    ["triangle-alert", "lucide-triangle-alert"],
+    ["info", "lucide-info"],
+  ] as const)("Icon %s 渲染 svg", (name, className) => {
+    const { container } = render(<Icon name={name} />);
+    const svg = container.querySelector("svg");
+    expect(svg?.classList.contains(className)).toBe(true);
+    expect(svg?.getAttribute("aria-hidden")).toBe("true");
+  });
 });
 
 describe("BrandMark", () => {

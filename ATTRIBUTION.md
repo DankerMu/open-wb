@@ -34,7 +34,7 @@
   - 义务：ISC 要求在副本中保留版权与许可声明;`lucide-react` 包自带 `LICENSE`,**若 `web/dist` 进入本项目发行物**,发行物须附带该 ISC 声明。
 
 - **Radix UI Primitives** —— `MIT License`,版权归 WorkOS（https://github.com/radix-ui/primitives）
-  - 用途：`web/src/ui/` 无样式交互基元。已安装 `@radix-ui/react-switch`（#276,`Switch` 基元）、`@radix-ui/react-dialog`（#277,`Dialog`/`ConfirmDialog`/`Drawer` 基元）、`@radix-ui/react-dropdown-menu`、`@radix-ui/react-popover`、`@radix-ui/react-tooltip`、`@radix-ui/react-radio-group`（#278,`Menu`/`Popover`/`Tooltip`/`SegmentedControl` 基元）、`@radix-ui/react-toast`（#279,`ToastProvider`/`useToast` 基元）。
+  - 用途：`web/src/ui/` 无样式交互基元。已安装的单包只剩 `@radix-ui/react-toast`（#279,`ToastProvider`/`useToast` 基元）;其余六个单包随没有调用方的旧基元一并移除（#1397）,这六个包仍作为下条合包 `radix-ui` 的传递依赖留在根 `package-lock.json` 里。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;安装后随打包产物分发时须附带该 MIT 声明。
 
 - **radix-ui** —— `MIT License`,版权归 WorkOS（https://github.com/radix-ui/primitives）

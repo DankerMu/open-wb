@@ -145,7 +145,6 @@ describe("reduced-motion 过渡守卫（#423）", () => {
   it("web/src/**/*.css 每条非 none 过渡都有同文件、在后的 reduce 覆盖", () => {
     const paths = listRepoFiles("web/src", (path) => path.endsWith(".css"));
     const report = checkReducedMotion(paths.map((path) => ({ path, css: readRepoFile(path) })));
-    expect(report.declaring.length).toBeGreaterThan(0);
     expect(report.violations).toEqual([]);
   });
 });

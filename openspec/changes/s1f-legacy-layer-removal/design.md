@@ -228,6 +228,8 @@ owner 最初定的是四个；2026-10-12 看过 tasks 审核之后改判为六�
 
 **D14 测试的处置规则。**
 
+> 实施记录（组 1，#1397，2026-10-13）：清点与本节原先的归类有四处出入，都在组 1 的 PR 里按「先搬后删」处置并列入偏离记录——(1) `ui-dialog.test.tsx` 里两条测 `web/test/radix-platform.ts` 的用例与已删基元无关，搬到新文件 `web/test/radix-platform.test.ts`；(2) 同文件的 `Icon %s 渲染 svg` 搬到 `ui-icon-brand.test.tsx`；(3) `ui-escape-dispatch.test.tsx` 的 D6 测的是 Toast 而不是旧基元，Toast 到组 2 才删，搬到 `ui-toast.test.tsx`；(4) `ui-toast.test.tsx` 里对 `ui.css` 的 `@import "./empty-state.css"` 的断言是组 1 就会变红的第五处守卫断言（D9 的 A 行原先漏列），随 `@import` 删除。任务 1.1「8 个待删测试文件只导入这些基元」按此更正：它们另含上述与基元无关的用例。
+
 - 只测已删代码的测试文件随代码删除，不改写、不搬家。`ui-escape-dispatch.test.tsx` 不全属此类：它的 D1 输入法例与 D4 恰一次例测的是 `escape-fallback.ts`，只是借旧 `Dialog` 搭台——A 先把它们搬到 `web/test/escape-fallback.test.tsx`（D4「兜底自身的性质」），再删原文件；其余各例（D2、D3、D6 与 D1 的 Toast 在场例）以旧基元或 Toast 为前提，随文件删除。
 - **查 Toast 元素的断言整体删除**（B1；「既有断言不删除、不削弱」的唯一例外）：三个 `toasts()` 助手及其全部调用、全部 `.ui-toast` / `.ui-toast-message` 查询、全部对 `通知` 区域的查询及其内的断言。理由只有一个——被查的元素不可能再存在，这些断言要么恒真要么抛错，留着是摆设。
   条件：逐用例确认同一用例里有整页范围的文本或角色断言仍证明「没有提示」，没有的补一条；PR 的偏离记录逐文件列出删了什么、兜底的是哪一条断言。「挂在 `ToastProvider` 之下，没有 Toast 才不是空话」一类的注释同步改写。
