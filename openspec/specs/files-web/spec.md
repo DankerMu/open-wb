@@ -94,6 +94,7 @@
 ### Requirement: 目录树与预览
 目录树 SHALL 进入空间请求根一层并默认展开根；目录首次展开请求该层，折叠重开复用成功缓存，保持服务端排序与 workspace-relative 路径。位置下拉 SHALL 仅包含根和成功加载过的目录，已折叠缓存可复用，不额外递归请求。点击文件 SHALL 交给 `PreviewPane`（「文件预览纯组件」与 file-previewers），不得另写渲染器。浏览器 SHALL NOT 以扩展名白名单预先判定「不支持」：除 file-previewers「类别判定与预览器选择」里按扩展名确定走其它数据来源的类别（PDF、办公文档、音视频、压缩包）与网页的渲染视图（`html`、`htm` 默认由隔离预览来源加载，切到源码视图时才发 `file` 请求，见 file-previewers「隔离来源的嵌入与令牌」）之外，选中文件恰发出一次 `file` 请求，是否可预览由响应决定。`刷新` 按钮 SHALL 对全部已加载过的目录重新请求 `tree` 并重新取当前文件的预览，保留展开状态、选中文件与 Markdown 等视图模式；刷新失败时保留旧列表并就地显示失败文案。「重新取」对每一类预览都成立，再点已选中的文件行与之相同（owner 2026-10-11 裁决）：经 `file` 取正文的类别重新请求一次 `file`；压缩包重新请求一次 `archive`；音视频换一个新的媒体元素，其地址追加 `&v=<n>` 使浏览器重新请求（file-previewers「音视频」，owner 2026-10-12 裁决，#1356）；网页的渲染视图换一个新的 iframe，预览令牌按 file-previewers「隔离来源的嵌入与令牌」必要时先重新签发。经 `file` 或 `archive` 重取期间 SHALL 保留上一次的结果（正文、列表或失败文案）并在其后显示 `正在读取文件`（`role="status"`），新结果到达后才替换。
 页面 SHALL 以 workspace identity 隔离树/当前文件/预览局部模式；同 workspace 同文件文本刷新保留视图模式。取消、切换和卸载 SHALL 阻止旧响应提交状态；图片 URL SHALL 在替换、卸载及迟到结果丢弃时释放，abort 本身不替代释放。
+目录列表缓存与目录错误的按路径取值 SHALL 只认该路径自己登记过的值（#1340）：目录名与 JavaScript 对象原型成员同名（`constructor`、`__proto__`、`toString`、`hasOwnProperty`、`valueOf` 等）时与其它目录名完全同样处理——没有展开过即未加载：不出现在位置下拉里，展开时照常请求该层并显示其内容；没有失败过即没有错误行，失败时显示的是那一次失败的文案。这类目录 SHALL NOT 使页面在渲染期抛出。
 
 #### Scenario: 刷新总是重取
 - **WHEN** `clip.mp4` 已触发 `error`、点 `刷新`；`归档.zip` 已显示列表、下一次 `archive` 应答挂起时点 `刷新`
@@ -120,6 +121,10 @@
 #### Scenario: 手动刷新
 - WHEN 根与 `out` 已展开、当前以源码模式预览 `readme.md`，磁盘上新增了 `out/new.md`，点 `刷新`
 - THEN 恰对根与 `out` 各发一次 `tree`、对 `readme.md` 发一次 `file`；`out/new.md` 出现；`out` 仍展开，`readme.md` 仍被选中且仍是源码模式
+
+#### Scenario: 与对象原型成员同名的目录
+- **WHEN** 根列表含目录 `constructor`、`__proto__`、`toString` 与 `hasOwnProperty`；页面渲染后打开 `新建文件夹` 查看位置下拉；随后展开 `constructor`（其下有 `a.md`）；再展开 `__proto__`，这一次 `tree` 以 500 信封失败
+- **THEN** 页面正常渲染，没有未捕获的异常，四个目录各有一行；展开之前位置下拉只有根，四个目录都没有错误行；展开 `constructor` 恰发出一次对该层的 `tree` 请求并列出 `a.md`，此后位置下拉多出 `constructor`；`__proto__` 一行之下显示该信封的 message，`toString` 与 `hasOwnProperty` 仍没有错误行、也没有被当成已加载
 
 ### Requirement: 文件界面与键盘可用性
 文件页 SHALL 使用与应用一致的浅色/深色主题变量。文件页 SHALL NOT 自涂页面级底色：树与预览的分栏容器（`data-slot="files-layout"`）与预览区容器（`data-slot="files-preview"`）不设背景，页面底色只来自 `body` 的 `--background`（ui-foundation「主题映射」；#420）。视口宽于外壳的窄屏断点（大于 760）时目录树与预览左右分栏（树在左、预览在右，预览区占剩余宽度）；不超过 760 时纵向排列（树在上、预览在下，各自内部滚动）。任何视口下页面 SHALL NOT 出现横向滚动：长路径与文件名单行省略（条目 `title` 为全名），源码、表格、图片、视频与 iframe 在预览容器内部滚动或缩放。目录树 SHALL 可由键盘操作：每个条目是可聚焦的按钮，目录按钮带 `aria-expanded`，Enter / 空格展开折叠或选中；每个非根条目另有 `更多操作 <名>` 菜单按钮（见「文件操作界面」）。创建对话框 SHALL 为阻止背景交互的模态，打开时聚焦首个表单控件，Tab/Shift+Tab 留在框内，Escape/取消关闭并恢复触发器焦点；请求进行中保持忙碌反馈且不得重复提交，但仍允许取消等待，通过既有 AbortController 与代际守卫防止迟到响应影响新界面。取消等待不承诺撤销服务端已完成操作，界面 SHALL 明示可刷新确认结果。创建对话框 SHALL 经拷入层 `dialog` 渲染：打开时的首个表单控件为 `新建工作空间` 的 `工作空间名称`、`新建文件夹` 的 `位置`；右上 `关闭`、Escape、遮罩点击与 `取消` 同义；取消类关闭后焦点 SHALL 回到发起该流程的触发器——经切换器 `＋ 新建工作空间` 打开时为 `选择工作空间`，经 `＋` 菜单打开时为 `新建`；提交按钮因请求进行中被禁用后焦点 SHALL 仍在对话框内。`＋` 菜单与切换器 SHALL 分别经拷入层 `dropdown-menu` 与 `popover`（切换器打开时聚焦搜索框，Escape 关闭后焦点回 `选择工作空间`）。既有账号/请求代际隔离与安全预览语义 SHALL 保持。
@@ -217,7 +222,7 @@
 - **THEN** 挂起期间提交按钮禁用、只发出一次请求；取消后请求的 signal 已中止、对话框关闭；之后到达的响应不重新打开对话框也不显示错误
 
 ### Requirement: 工作空间浏览器组件
-`web/src/features/files/` SHALL 经其 `index.ts` 导出 `WorkspaceBrowser`：给定 API 客户端、工作空间 id、账号与可选的空间名 / `dir`，它渲染目录树、预览区与全部文件操作，并以受控属性接收与上报「当前路径」（`path` / `onPathChange`）；它另接受可选的 `markedPaths`（带标记的路径集合及其可访问文本）、`onlyPaths`（只显示由这些路径构成的子树，此时不请求 `tree`）、`layout`（`columns`：树左预览右；`stacked`：树上预览下、树可收起）与一个命令式的 `reveal(path, {view?})`（逐级展开并选中，可指定网页文件的视图）与 `refresh(paths?)`（重新请求已加载目录中与这些路径相关的层；省略参数时全部已加载的层）。文件页以 `columns` 布局包一层并把当前路径接到地址的 `path`；会话页侧边栏以 `stacked` 布局包一层（workspace-sidebar）。目录树、预览与文件操作 SHALL 只有这一份实现；`WorkspaceBrowser` SHALL NOT 读写地址、SHALL NOT 依赖会话页的任何模块（`web/src/features/files` 不从 `web/src/features/chat` 导入）。
+`web/src/features/files/` SHALL 经其 `index.ts` 导出 `WorkspaceBrowser`：给定 API 客户端、工作空间 id、账号与可选的空间名 / `dir`，它渲染目录树、预览区与全部文件操作，并以受控属性接收与上报「当前路径」（`path` / `onPathChange`）；它另接受可选的 `markedPaths`（带标记的路径集合及其可访问文本）、`onlyPaths`（只显示由这些路径构成的子树，此时不请求 `tree`；其中已被判定为不存在的路径不列出，列出的每个文件行都可选中，不论它的父目录是否加载过；选中后 `file` / `archive` 应答 404 的行被移出、选中被清除并以 `onPathChange(null)` 上报——判定、移出与作废的规则见 workspace-sidebar「本会话改动标记与过滤」，移出只在给了 `onlyPaths` 时发生）、`clearMissing`（布尔，只有会话页侧边栏给：不论有没有 `onlyPaths`，由 `path` 发起的定位没有落在文件上时不显示 `文件不存在` 或失败文案，清除选中、预览区是空态；当前选中的文件的 `file` / `archive` 应答 404 时不进入失败态，清除选中并以 `onPathChange(null)` 上报；普通目录树的行不因此移除。owner 2026-10-13「侧边栏里一律清空」）、`layout`（`columns`：树左预览右；`stacked`：树上预览下、树可收起）与一个命令式的 `reveal(path, {view?})`（逐级展开并选中，可指定网页文件的视图）、`refresh(paths?)`（重新请求已加载目录中与这些路径相关的层；省略参数时全部已加载的层）与 `reported(paths)`（宿主告知这些路径刚被一个结束的步骤报过；只记账、不发请求，供 `onlyPaths` 下「列表读到之后被报过的路径按父目录未加载对待」与 404 记录的作废使用）。文件页以 `columns` 布局包一层并把当前路径接到地址的 `path`，SHALL NOT 给 `clearMissing`、SHALL NOT 调用 `reported`——它对不存在的文件的呈现不变（「地址定位到文件」）；会话页侧边栏以 `stacked` 布局包一层（workspace-sidebar）。`WorkspaceBrowser` SHALL 另向宿主上报树里实际选中的文件（没有选中文件时上报空值），实际选中每变化一次上报一次：由 `path` 发起的定位没有落在文件上（文件不存在、某一级父目录请求失败、`path` 指向目录）时，宿主得到的是定位之后的实际选中，而不是被定位的路径；宿主以同一个路径再次发起定位（会话页卡片的再次点击）时 SHALL 重新走一遍定位，不因 `path` 的值没变而不动（#1380）。文件页 SHALL NOT 据这项上报改写地址（「地址定位到文件」：定位不改写地址，只有用户选中才写）。目录树、预览与文件操作 SHALL 只有这一份实现；`WorkspaceBrowser` SHALL NOT 读写地址、SHALL NOT 依赖会话页的任何模块（`web/src/features/files` 不从 `web/src/features/chat` 导入）。
 
 #### Scenario: 两处同一份实现
 - **WHEN** 静态扫描 `web/src/features`
@@ -230,3 +235,7 @@
 #### Scenario: 标记与子树
 - **WHEN** 以 `markedPaths={"out/a.md"}`、标记文本 `本会话已改动` 渲染并展开 `out`；随后传入 `onlyPaths={"out/a.md","x/y.md"}`
 - **THEN** `out` 与 `out/a.md` 两行带该文本的标记；传入 `onlyPaths` 之后树恰为 `out → a.md` 与 `x → y.md`，没有新的 `tree` 请求
+
+#### Scenario: 实际选中的上报与重复定位
+- **WHEN** 已选中 `readme.md` 时以 `path="out/gone.md"` 发起定位，而 `out` 的列表里没有它；随后 `out/gone.md` 被建出并经 `refresh(["out/gone.md"])` 进入 `out` 的列表，宿主对同一路径再次发起定位
+- **THEN** 第一次定位结束后宿主收到的实际选中为空，预览区显示 `文件不存在`；第二次定位没有因为路径相同而被忽略：`out/gone.md` 被选中并显示预览，宿主收到的实际选中为 `out/gone.md`；两次都没有读写 `location`
