@@ -52,9 +52,9 @@ Minimal mergeable slice: 2a.1–2a.2（一个新测试文件，单独保绿）�
 
 ## 2b. server/test — 启动类测试迁到带重试的辅助函数（G2b，#1273 的后一半；← G10）
 
-- [ ] 2b.1 归类：G10 合入之后，把 `server/test` 下全部 `reserveWildcardPort()` 调用点（2026-10-12 为 12 个文件 44 处；以开工时 `git grep -n "reserveWildcardPort(" -- server/test` 的结果为准，含 G4 的 `server-startup-model-id.test.ts` 若它取端口）逐个归为三类——期望成功启动；期望非监听阶段失败；有意让端口被占。归类表贴进 PR。验证：表的行数等于 grep 的命中数。
-- [ ] 2b.2 迁移：前两类迁到 2a.3 的函数；第三类（`server-startup-failure-reason` 的端口占用例、`server-startup-preview` 的预览端口占用例、`listener-shutdown` 里自己占端口的例）保持原样并各加一行注释说明为什么不迁。不改任何断言。验证：`npm test --workspace server` 连跑三次全绿；`git diff` 里没有被改动的 `expect`。
-- [ ] 2b.3 变异证据：把一个已迁的「期望 `publish` 失败」用例在启动前占住它取到的端口（临时改动，不提交）→ 迁移前同样的占用得到 `listen` 而判红，迁移后重试换端口、用例仍绿；两次输出贴进 PR。
+- [x] 2b.1 归类：G10 合入之后，把 `server/test` 下全部 `reserveWildcardPort()` 调用点（2026-10-12 为 12 个文件 44 处；以开工时 `git grep -n "reserveWildcardPort(" -- server/test` 的结果为准，含 G4 的 `server-startup-model-id.test.ts` 若它取端口）逐个归为三类——期望成功启动；期望非监听阶段失败；有意让端口被占。归类表贴进 PR。验证：表的行数等于 grep 的命中数。
+- [x] 2b.2 迁移：前两类迁到 2a.3 的函数；第三类（`server-startup-failure-reason` 的端口占用例、`server-startup-preview` 的预览端口占用例、`listener-shutdown` 里自己占端口的例）保持原样并各加一行注释说明为什么不迁。不改任何断言。验证：`npm test --workspace server` 连跑三次全绿；`git diff` 里没有被改动的 `expect`。
+- [x] 2b.3 变异证据：把一个已迁的「期望 `publish` 失败」用例在启动前占住它取到的端口（临时改动，不提交）→ 迁移前同样的占用得到 `listen` 而判红，迁移后重试换端口、用例仍绿；两次输出贴进 PR。
 
 Suggested fixture level: compact - 只改测试对辅助函数的调用，`server/src` 零改动，断言不变
 Minimal mergeable slice: 2b.1 的归类表加任意一个文件的迁移即可独立保绿；其余文件可分批，但都在 G10 之后

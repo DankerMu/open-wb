@@ -3,8 +3,10 @@
  * 「端口被占」由测试在 `launchFor` 里（取到端口之后、子进程启动之前）真的监听上去造成。
  * 预览端口一例另钉住：与某次尝试绑定的显式 `PREVIEW_PORT` 在 `launchFor` 里新取才换得掉。
  * 监听类失败只认「`listen` 或 `preview_listen`」，不钉是哪一个（s1-followups-batch tasks 2a.4）。
+ * `orderTrace` / `requireHook` 的转发另有一例；`stdout` 的转发由
+ * `server-startup-failure-reason.test.ts` 的 publish 一例钉住（去掉转发它得到 success record 而判红）。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,7 +15,6 @@ import {
   type CompiledServerEntry,
   compiledFixtureEnv,
   compileServerEntry,
-  expectBindable,
   releaseStartupFixtures,
   reserveWildcardPort,
 } from "./server-startup-helpers.js";
@@ -160,7 +161,30 @@ describe("startCompiledServerWithRetry (#1273)", () => {
       expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
       expect(server.stdout()).toBe("");
       expect(failureReason(server.stderr())).toBe("config");
-      await expectBindable("127.0.0.1", port);
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
+  it("forwards orderTrace and requireHook to the entry it launches", async () => {
+    const root = mkdtempSync(join(tmpdir(), "open-wb-startup-retry-forward-"));
+    scratch.push(root);
+    const trace = join(root, "order.log");
+    const marker = join(root, "hook-ran");
+    const hook = join(root, "mark.cjs");
+    writeFileSync(hook, `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "");\n`);
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => {
+      // 被重试过的话，上一次尝试留下的 trace 行与标记不带进这一次。
+      rmSync(trace, { force: true });
+      rmSync(marker, { force: true });
+      return { env: envFor(port), orderTrace: trace, requireHook: hook };
+    });
+    try {
+      await server.waitForStarted();
+      // 预加载钩子在子进程里跑过；orderTrace 的预加载记下了主监听器在返回的端口上的绑定。
+      expect(existsSync(marker)).toBe(true);
+      expect(readFileSync(trace, "utf8").split("\n")[0]).toBe(`listening:127.0.0.1:${port}`);
+      expect(await server.stop()).toBe(0);
     } finally {
       await server.dispose();
     }

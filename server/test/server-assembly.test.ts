@@ -16,12 +16,8 @@ import type { SessionSupervisorRuntime } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import * as workspaces from "../src/workspaces/index.js";
 import { startRecordingUpstream } from "./model-proxy-helpers.js";
-import {
-  compileServerEntry,
-  releaseStartupFixtures,
-  reserveWildcardPort,
-  startCompiledServer,
-} from "./server-startup-helpers.js";
+import { compileServerEntry, releaseStartupFixtures } from "./server-startup-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 import {
   bearerCookie,
   loginSessionId,
@@ -440,17 +436,18 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
 
   it("call-through 注册顺序与 compiled STARTUP_MODULES 记录一致", async () => {
     const compiled = await compileServerEntry();
-    const port = await reserveWildcardPort();
     const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-assembly-startup-"));
     temps.push(scratchRoot);
-    const server = startCompiledServer(compiled.entry, {
-      HOST: "127.0.0.1",
-      PORT: String(port),
-      DB_PATH: join(scratchRoot, "db", "dev.db"),
-      OMP_STATE_DIR: join(scratchRoot, "state"),
-      SANDBOX_ROOT: join(scratchRoot, "sandbox"),
-      OMP_BIN: join(scratchRoot, "bin", "omp"),
-    });
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: {
+        HOST: "127.0.0.1",
+        PORT: String(port),
+        DB_PATH: join(scratchRoot, "db", "dev.db"),
+        OMP_STATE_DIR: join(scratchRoot, "state"),
+        SANDBOX_ROOT: join(scratchRoot, "sandbox"),
+        OMP_BIN: join(scratchRoot, "bin", "omp"),
+      },
+    }));
     try {
       const started = (await server.waitForStarted()) as { modules: string[] };
       const order = spyRegistrationOrder();

@@ -107,15 +107,17 @@ export function reserveWildcardPort(): Promise<number> {
  * 不继承调用方环境，避免把密钥带进子进程。
  * orderTrace 只观察真实 listener 的绑定与关闭、runtime 退出、DB close，不替换生产模块；
  * 每行一个事件：`listening:<address>:<port>`（实际绑定的地址）、`listener-close:<port>`（从未绑定为 `-`）、`runtime-exit`、`db-close`。
+ * stdout 给出时子进程的 stdout 接到这个文件描述符（由调用方打开与关闭），不再被收集：`stdout()` 恒为空串，
+ * `waitForStarted()` 也就看不到 success record，只会以子进程退出或时限到期 reject。
  */
 export function startCompiledServer(
   entry: string,
   env: Record<string, string>,
-  options: { orderTrace?: string; requireHook?: string } = {},
+  options: { orderTrace?: string; requireHook?: string; stdout?: number } = {},
 ): StartedServer {
   const child = spawn(process.execPath, [entry], {
     detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["ignore", options.stdout ?? "pipe", "pipe"],
     env: {
       PATH: process.env.PATH ?? "/usr/bin",
       ...(options.orderTrace === undefined && options.requireHook === undefined

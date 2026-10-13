@@ -15,10 +15,9 @@ import {
   expectPromptStatus,
   login,
   releaseStartupFixtures,
-  reserveWildcardPort,
-  startCompiledServer,
 } from "./server-startup-helpers.js";
 import { expectRefused, SQLITE_EXPERIMENTAL_WARNING } from "./server-startup-order-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 import { sudoPrefix } from "./session-supervisor-helpers.js";
 
 const scratch: string[] = [];
@@ -40,19 +39,17 @@ describe("production entry forwards OMP_USER to the captured spawn", () => {
       const tracePath = join(scratchRoot, "spawn.jsonl");
       const hookPath = join(scratchRoot, "capture-spawn.mjs");
       writeFileSync(hookPath, captureSpawnHook("present"));
-      const port = await reserveWildcardPort();
       const bin = join(scratchRoot, "bin", "omp");
       const forwardedTmpdir = "/tmp/workbuddy compiled:forward $;";
-      const server = startCompiledServer(
-        compiled.entry,
-        compiledFixtureEnv(scratchRoot, port, bin, {
+      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(scratchRoot, port, bin, {
           PATH: "/usr/bin:/bin",
           TMPDIR: forwardedTmpdir,
           ...(ompUser === undefined ? {} : { OMP_USER: ompUser }),
           PROBE_TRACE: tracePath,
         }),
-        { requireHook: hookPath },
-      );
+        requireHook: hookPath,
+      }));
       try {
         await server.waitForStarted();
         const cookie = await login(port);
@@ -101,10 +98,8 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
       const dbParent = join(scratchRoot, "db");
       const state = join(scratchRoot, "state");
       const sandbox = join(scratchRoot, "sandbox");
-      const port = await reserveWildcardPort();
-      const server = startCompiledServer(
-        compiled.entry,
-        {
+      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: {
           HOST: "127.0.0.1",
           PORT: String(port),
           DB_PATH: join(dbParent, "dev.db"),
@@ -114,8 +109,8 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
           OMP_USER: user,
           PATH: "/usr/bin:/bin",
         },
-        setpriv === undefined ? {} : { requireHook: hookPath },
-      );
+        ...(setpriv === undefined ? {} : { requireHook: hookPath }),
+      }));
       const closed = await server.waitForClose();
       expect(closed.code).toBe(1);
       expect(closed.signal).toBeNull();

@@ -26,11 +26,10 @@ import {
   denyChmodHook,
   observeOpenDbHook,
   releaseStartupFixtures,
-  reserveWildcardPort,
   type StartedServer,
-  startCompiledServer,
 } from "./server-startup-helpers.js";
 import { applicationStderr, expectRefused, MODEL_ID } from "./server-startup-order-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const PRIVATE_FILE_MODE = 0o600;
 /** 托管布局（#706）：托管配置目录与状态根都是 app 持有、组只读。 */
@@ -73,7 +72,6 @@ describe("production entry private state permissions", () => {
     const hookPath = join(scratchRoot, "observe-open.cjs");
     writeFileSync(hookPath, observeOpenDbHook());
 
-    const coldPort = await reserveWildcardPort();
     const restrictiveUmask = 0o077;
     const previousUmask = process.umask(restrictiveUmask);
     let restoredUmask = false;
@@ -83,16 +81,19 @@ describe("production entry private state permissions", () => {
         restoredUmask = true;
       }
     };
-    const cold = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(scratchRoot, coldPort, join(scratchRoot, "bin", "omp"), {
+    // 根沿用同一个：重试过的话 DB 已由上一次尝试建好，钩子记录的第一行仍是冷启动那一次的。
+    const { server: cold } = await startCompiledServerWithRetry(compiled.entry, (coldPort) => ({
+      env: compiledFixtureEnv(scratchRoot, coldPort, join(scratchRoot, "bin", "omp"), {
         MODEL_ID,
         OMP_STATE_DIR: state,
         SANDBOX_ROOT: sandbox,
         MODE_LOG: modeLog,
       }),
-      { requireHook: hookPath },
-    );
+      requireHook: hookPath,
+    })).catch((error: unknown) => {
+      restoreUmask();
+      throw error;
+    });
     try {
       await cold.waitForStarted();
       restoreUmask();
@@ -124,17 +125,18 @@ describe("production entry private state permissions", () => {
     chmodSync(`${dbPath}-shm`, 0o644);
     writeFileSync(modeLog, "");
 
-    const restartPort = await reserveWildcardPort();
-    const restart = startCompiledServer(
+    const { server: restart } = await startCompiledServerWithRetry(
       compiled.entry,
-      compiledFixtureEnv(scratchRoot, restartPort, join(scratchRoot, "bin", "omp"), {
-        MODEL_ID,
-        DB_PATH: dbPath,
-        OMP_STATE_DIR: existingState,
-        SANDBOX_ROOT: existingSandbox,
-        MODE_LOG: modeLog,
+      (restartPort) => ({
+        env: compiledFixtureEnv(scratchRoot, restartPort, join(scratchRoot, "bin", "omp"), {
+          MODEL_ID,
+          DB_PATH: dbPath,
+          OMP_STATE_DIR: existingState,
+          SANDBOX_ROOT: existingSandbox,
+          MODE_LOG: modeLog,
+        }),
+        requireHook: hookPath,
       }),
-      { requireHook: hookPath },
     );
     try {
       await restart.waitForStarted();
@@ -172,16 +174,18 @@ describe("production entry private state permissions", () => {
     const modeLog = join(scratchRoot, "modes.jsonl");
     const hookPath = join(scratchRoot, "observe-open.cjs");
     writeFileSync(hookPath, observeOpenDbHook());
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
-        MODEL_ID,
-        DB_PATH: ":memory:",
-        MODE_LOG: modeLog,
-      }),
-      { requireHook: hookPath },
-    );
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => {
+      // 钩子每次 open 追加一行：被重试过的话，上一次尝试的那一行不带进这一次。
+      rmSync(modeLog, { force: true });
+      return {
+        env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
+          MODEL_ID,
+          DB_PATH: ":memory:",
+          MODE_LOG: modeLog,
+        }),
+        requireHook: hookPath,
+      };
+    });
     try {
       await server.waitForStarted();
       const observations = readModeObservations(modeLog);
@@ -233,11 +237,9 @@ describe("production entry private state permissions", () => {
       mkdirSync(target, { recursive: true });
       writeFileSync(join(target, "keep.txt"), mainIsDirectory ? "main-keep" : "wal-keep");
       chmodSync(target, EXISTING_DIR_MODE);
-      const port = await reserveWildcardPort();
-      const server = startCompiledServer(
-        compiled.entry,
-        compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
-      );
+      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
+      }));
       await expectGenericStartupFailure(server, port);
       expect(existsSync(join(scratchRoot, "state"))).toBe(false);
       expect(existsSync(join(scratchRoot, "sandbox"))).toBe(false);
@@ -272,16 +274,14 @@ describe("production entry private state permissions", () => {
     chmodSync(umaskLog, 0o644);
     const hookPath = join(scratchRoot, "child-umask.cjs");
     writeFileSync(hookPath, childUmaskHook());
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
         MODEL_ID,
         MODE_LOG: modeLog,
         UMASK_LOG: umaskLog,
       }),
-      { requireHook: hookPath },
-    );
+      requireHook: hookPath,
+    }));
     try {
       await server.waitForStarted();
       const observations = readModeObservations(modeLog);
@@ -388,14 +388,12 @@ async function startDeniedPreparation(
 ): Promise<void> {
   const hookPath = join(seeded.scratchRoot, hookName);
   writeFileSync(hookPath, denyChmodHook(denied));
-  const port = await reserveWildcardPort();
-  const server = startCompiledServer(
-    compiled.entry,
-    compiledFixtureEnv(seeded.scratchRoot, port, join(seeded.scratchRoot, "bin", "omp"), {
+  const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+    env: compiledFixtureEnv(seeded.scratchRoot, port, join(seeded.scratchRoot, "bin", "omp"), {
       MODEL_ID,
     }),
-    { requireHook: hookPath },
-  );
+    requireHook: hookPath,
+  }));
   await expectGenericStartupFailure(server, port);
   expect(existsSync(join(seeded.scratchRoot, "state"))).toBe(false);
 }

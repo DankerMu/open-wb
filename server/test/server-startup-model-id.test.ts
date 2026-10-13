@@ -15,8 +15,6 @@ import {
   getJson,
   login,
   releaseStartupFixtures,
-  reserveWildcardPort,
-  startCompiledServer,
 } from "./server-startup-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
@@ -74,12 +72,10 @@ describe("MODEL_ID 的取值规则在编译入口上（#1261）", () => {
 
   it('MODEL_ID="" → 退出码 1，stderr 恰一行 config 失败记录，没有 success record，DB 未创建', async () => {
     const root = scratchRoot();
-    // 配置在 listen 之前就失败，端口只是一个合法的 PORT 取值，不会被绑定。
-    const port = await reserveWildcardPort();
-    const server = startCompiledServer(
-      compiled.entry,
-      compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID: "" }),
-    );
+    // 配置在 listen 之前就失败，端口只是一个合法的 PORT 取值，不会被绑定：辅助函数在这里不会重试。
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID: "" }),
+    }));
     try {
       expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
       // success record 只写 stdout：整个 stdout 为空即没有它。

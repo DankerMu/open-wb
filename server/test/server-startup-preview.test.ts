@@ -324,6 +324,7 @@ describe("production entry preview bind failure", () => {
   }
 
   it("fails with preview_listen and closes the already bound main listener when the preview port is taken", async () => {
+    // 不迁到带重试的辅助函数：预览端口是本例有意占住的，监听类失败正是要验证的结果。
     const port = await reserveWildcardPort();
     const previewPort = await reserveWildcardPort();
     let entry: Entry | undefined;
@@ -359,6 +360,7 @@ describe("production entry preview bind failure", () => {
   }, 60_000);
 
   it("fails with listen when both ports are taken: the main listener is the first to bind", async () => {
+    // 不迁到带重试的辅助函数：两个端口都是本例有意占住的，监听类失败正是要验证的结果。
     const port = await reserveWildcardPort();
     const previewPort = await reserveWildcardPort();
     let entry: Entry | undefined;
@@ -508,7 +510,7 @@ describe("production entry SIGTERM between the two listens", () => {
   ] as const)(
     "publishes nothing and leaves both ports and the database reusable when SIGTERM lands in $held listen",
     async ({ nth }) => {
-      const entry = await startEntry({ hook: heldListenHook(nth), env: listenGate });
+      const entry = await startEntry({ hook: heldListenHook(nth), env: listenGate, held: true });
       const { server, port, previewPort, root } = entry;
       try {
         await waitForFile(join(root, "listen-entered"), 15_000);
@@ -549,6 +551,7 @@ describe("production entry between the main bind and the preview bind", () => {
     const entry = await startEntry({
       hook: heldListenHook(2),
       env: (root) => ({ ...listenGate(root), OMP_BIN: writeFakeOmpLauncher(root, "hang-eof") }),
+      held: true,
     });
     const { server, port, previewPort, root } = entry;
     try {
@@ -582,6 +585,7 @@ describe("production entry between the main bind and the preview bind", () => {
       hook: heldListenHook(2),
       env: listenGate,
       prepare: makeSandboxRoot,
+      held: true,
     });
     const { server, port, root } = entry;
     const post = async (path: string, cookie: string, body?: unknown) => {
