@@ -589,7 +589,7 @@ describe("只看本会话改动 开着时定位", () => {
     expect(rowNames(region)).toStrictEqual(["项目", "src", "deep", "app.ts"]);
   });
 
-  it("R6 父目录未加载（#1372）：该行被选中并取预览，恰一次它的 file，预览头没有大小与修改时间，没有任何文案，不请求 tree；关掉开关后仍选中它", async () => {
+  it("R6 父目录未加载（#1372）：该行被选中并取预览，恰一次它的 file，预览头没有大小与修改时间，没有任何文案，不请求 tree；关掉开关后预览仍是它、在文件页打开 仍带着它", async () => {
     const { fetchMock, region } = await filtered(false);
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
 
@@ -612,6 +612,11 @@ describe("只看本会话改动 开着时定位", () => {
     fireEvent.click(button(region, ONLY));
     expect(button(region, "展开 src")).toBeTruthy();
     expect(preview(region).textContent).toContain(APP_SOURCE);
+    expect(preview(region).querySelector('[data-slot="preview-path"]')?.textContent).toBe(APP);
+    // 树上没有它的行可看，实际选中从 `在文件页打开` 的地址读（#1380）。
+    expect(within(region).getByRole("link", { name: OPEN_IN_FILES }).getAttribute("href")).toBe(
+      `/files?ws=${PROJ.id}&path=src%2Fdeep%2Fapp.ts`,
+    );
   });
 
   it("R6 父目录已加载而列表里没有它：与开关关着时相同，原选中被清掉，预览区是 未选择文件、页面上没有 文件不存在，开关仍是开的，不请求 tree 也不请求它的 file", async () => {

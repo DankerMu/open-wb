@@ -282,6 +282,11 @@ describe("过滤开着时助手新写出的文件", () => {
     await waitFor(() => expect(rowNames(region)).toStrictEqual(["项目", "new.md"]));
     expect(description(button(region, "new.md"))).toBe(MARK);
     expect(button(region, "new.md").disabled).toBe(false);
+    // 等过 300 毫秒的合并窗口再选中：那一轮局部刷新在开关开着时不发 `tree`；在窗口内选中的话，它会把
+    // 当前文件重取一次（「随助手改动刷新」），「恰一次 file」就看不出来了。
+    await waitMs(350);
+    await settled();
+    expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
     fireEvent.click(button(region, "new.md"));
     await previewShows(region, "新写的正文");
     expectBareHeader(region, "new.md");
