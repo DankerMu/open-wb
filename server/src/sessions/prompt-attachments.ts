@@ -6,19 +6,25 @@
  * is conditions 2 to 5 in that order; the prompt route (rest.ts) calls the two with its archive and
  * claim checks in between, and admits what the second returns.
  *
- * Every path goes through the sandbox facade the assembly injects — the one instance the
- * workspaces routes use, so a refusal is audited there and nowhere else — and the file it names is
- * only `lstat`ed: its content is never read, and the absolute path never leaves this file.
+ * Condition 4 is in two steps (#1257): the root of the session's workspace has to be a directory
+ * before any path is resolved, else 404 and no audit event — with no root the facade refuses every
+ * path as an escape, and that event would be false. Then every path goes through the sandbox
+ * facade the assembly injects — the one instance the workspaces routes use, so a refusal is
+ * audited there and nowhere else — and the file it names is only `lstat`ed: its content is never
+ * read, and the absolute path never leaves this file.
  */
 import { Buffer } from "node:buffer";
 import { lstatSync } from "node:fs";
 import { HttpError } from "../core/errors/index.js";
+import { hasRefusedCharacter } from "../core/refused-characters.js";
+import { WorkspaceRootOccupiedError } from "../workspaces/store.js";
+import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { StoredAttachment } from "./store-attachments.js";
 
 /**
  * The part of the sandbox facade (core/sandbox) the attachment check needs, declared here so that
- * sessions imports neither the facade nor the workspaces module: a refusal throws 403
- * `sandbox_denied` after the facade wrote its `sandbox.reject`, an invisible workspace throws 404.
+ * sessions does not import the facade: a refusal throws 403 `sandbox_denied` after the facade
+ * wrote its `sandbox.reject`, a workspace that is not this account's throws 404.
  */
 export interface SessionSandboxPort {
   resolve(principal: { id: string }, workspaceId: string, relPath: string, op: "read"): string;
@@ -59,9 +65,12 @@ export function parsePromptBody(
 
 /**
  * Condition 1: a list of at most `maxFiles` distinct strings (compared as given: `a` and `./a` are
- * two), each 1 to 1024 UTF-8 bytes, without U+0000–U+001F, U+007F or a lone surrogate (it has no
- * UTF-8 encoding), and not ending in `/` — the sandbox skips empty segments, so such a path would
- * pass every later condition and still name no file.
+ * two), each 1 to 1024 UTF-8 bytes, without a refused code point (`hasRefusedCharacter`: the
+ * controls, three line breaks and the bidirectional controls, the same list an upload's name is
+ * held to) or a lone surrogate (it has no UTF-8 encoding), and neither ending in `/` nor with `.`
+ * as its last segment — the sandbox skips empty and `.` segments, so such a path would pass every
+ * later condition and still name no file (`uploads/a.pdf/.`). A `.` segment before the last is not
+ * refused.
  */
 function parsePaths(value: unknown, maxFiles: number): string[] {
   if (!Array.isArray(value) || value.length > maxFiles) {
@@ -73,9 +82,11 @@ function parsePaths(value: unknown, maxFiles: number): string[] {
       typeof element !== "string" ||
       element.length === 0 ||
       Buffer.byteLength(element, "utf8") > PATH_LIMIT ||
-      hasControlCharacter(element) ||
+      hasRefusedCharacter(element) ||
       Buffer.from(element, "utf8").toString("utf8") !== element ||
       element.endsWith("/") ||
+      element === "." ||
+      element.endsWith("/.") ||
       paths.includes(element)
     ) {
       throw new HttpError("bad_request");
@@ -85,19 +96,11 @@ function parsePaths(value: unknown, maxFiles: number): string[] {
   return paths;
 }
 
-function hasControlCharacter(text: string): boolean {
-  for (let index = 0; index < text.length; index += 1) {
-    const unit = text.charCodeAt(index);
-    if (unit <= 0x1f || unit === 0x7f) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /** What `admitAttachments` judges the paths of one prompt against. */
 export interface AttachmentAdmission {
   sandbox: SessionSandboxPort;
+  /** The workspace store's owner-scoped `rootOf`, as the rest of the session module has it. */
+  workspaceRootOf: WorkspaceRootOf;
   /** The authenticated account. */
   principal: { id: string };
   /** The session's own binding; null for a session without a workspace. */
@@ -110,14 +113,15 @@ export interface AttachmentAdmission {
 /**
  * Conditions 2 to 5 for the paths of one prompt; no path, nothing to check. A session without a
  * workspace (2) and a builtin command (3) take no attachment: 400 before anything is resolved.
- * Then two passes: every path is resolved in request order as a `read` of this account in this
- * workspace (4) — the first refusal throws, so one request writes at most one audit event — and
- * only then is any file looked at: each target has to be an existing regular file (5; `lstat`, a
- * link is not followed), else 400. Returns what the admission stores: the path as given and the
- * size that `lstat` reported.
+ * Then the root (4, first half; `assertRootVisible`), once for the request, and two passes: every
+ * path is resolved in request order as a `read` of this account in this workspace (4) — the first
+ * refusal throws, so one request writes at most one audit event — and only then is any file looked
+ * at: each target has to be an existing regular file (5; `lstat`, a link is not followed), else
+ * 400. Returns what the admission stores: the path as given and the size that `lstat` reported.
  */
 export function admitAttachments({
   sandbox,
+  workspaceRootOf,
   principal,
   workspaceId,
   builtin,
@@ -129,8 +133,51 @@ export function admitAttachments({
   if (workspaceId === null || builtin) {
     throw new HttpError("bad_request");
   }
+  assertRootVisible(workspaceRootOf, principal.id, workspaceId);
   const targets = paths.map((path) => sandbox.resolve(principal, workspaceId, path, "read"));
   return paths.map((path, index) => ({ path, size: regularFileSize(targets[index] ?? "") }));
+}
+
+/**
+ * 404 unless the workspace's root is a directory right now: the lookup answers null (not this
+ * account's workspace), throws the store's `WorkspaceRootOccupiedError` (a non-directory is at the
+ * path), or names a path where `lstat` finds no directory (nothing there; a link is not followed).
+ * The same answer the workspaces routes give (`ensureOwnedRoot`), and like there nothing is
+ * resolved and nothing audited. Any other failure of the lookup is thrown as it is and stays the
+ * generic failure it was (design D14-1): a root that is a symbolic link (tested), an unsafe owner
+ * segment (read from the code, not exercised).
+ * A check, not a hold: a root removed between this `lstat` and the facade's own look at it would
+ * still be refused there, as the 403 with its event that every such request was before (read from
+ * the code, not exercised).
+ */
+function assertRootVisible(
+  workspaceRootOf: WorkspaceRootOf,
+  ownerId: string,
+  workspaceId: string,
+): void {
+  let root: string | null;
+  try {
+    root = workspaceRootOf(ownerId, workspaceId);
+  } catch (error) {
+    if (error instanceof WorkspaceRootOccupiedError) {
+      throw new HttpError("not_found");
+    }
+    throw error;
+  }
+  if (root === null || !isDirectory(root)) {
+    throw new HttpError("not_found");
+  }
+}
+
+function isDirectory(absPath: string): boolean {
+  try {
+    return lstatSync(absPath).isDirectory();
+  } catch (error) {
+    if (isMissing(error)) {
+      return false;
+    }
+    throw error;
+  }
 }
 
 function regularFileSize(absPath: string): number {

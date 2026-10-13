@@ -123,17 +123,17 @@ Minimal mergeable slice: atomic - `ci.yml` 的新步骤与 oracle 的步骤元�
 
 ## 8. message-attachments / workspaces — prompt 附件校验与上传文件名（G8，#1257；Critical Path「沙箱与文件边界」，owner 白盒审查；← G3）
 
-- [ ] 8.1 测试先行（新文件 `server/test/session-prompt-attachments-shape.test.ts`；`session-prompt-attachments.test.ts` 已 778 行，8.1–8.3 都不追加到它）：「附件形状与前提」里新增的取值——末段为 `.` 的 `uploads/a.pdf/.`（文件存在）、分别含 U+0085、U+2028、U+2029 以及十二个双向控制字符（U+061C、U+200E、U+200F、U+202A–U+202E、U+2066–U+2069）各一例的路径 → 400 `bad_request`，没有消息行、没有审计、supervisor 未被调用。对照例：中间含 `.` 段的 `uploads/./a.pdf` 与含普通非 ASCII 字符的路径仍 202。验证：新增的拒绝例在现有实现上判红（现在 202）。
-- [ ] 8.2 测试先行（同一个新文件）：场景「空间根丢失时带附件的 prompt」第一例（根目录被删除）→ 404、`no-store`、审计无新增、没有消息行、supervisor 未被调用。验证：在现有实现上判红（现在 403 加一条 `sandbox.reject`）。
-- [ ] 8.3（← 3.3）测试先行（同一个新文件）：同一场景第二例（根路径被普通文件占据）→ 同样的 404。验证：在现有实现上判红（现在 500）。
-- [ ] 8.4 测试先行（新文件 `server/test/workspace-upload-name-chars.test.ts`；`workspace-upload-rest.test.ts` 已 766 行，不追加）：workspaces「文件上传」场景「名字规则与媒体类型」的新增部分（owner 2026-10-13）——名字分别含 U+0085、U+2028、U+2029 与十二个双向控制字符各一例 → 400 `bad_request`、`no-store`，`uploads` 下没有该文件也没有 `.part` 文件，审计无新增（没有 `file.upload`、`upload.reject`、`sandbox.reject`）；`uploads` 尚不存在的一例被拒之后该目录仍不存在。对照：`报告 v2.pdf` 照常 201。已在磁盘上的文件：测试直接写一个名字含 U+202E 的文件 → `tree` 列出且名字逐码点原样，`file` 与 `download` 都是 200、字节相同。验证：拒绝例在现有实现上判红（现在 201）。
-- [ ] 8.5 实现：
+- [x] 8.1 测试先行（新文件 `server/test/session-prompt-attachments-shape.test.ts`；`session-prompt-attachments.test.ts` 已 778 行，8.1–8.3 都不追加到它）：「附件形状与前提」里新增的取值——末段为 `.` 的 `uploads/a.pdf/.`（文件存在）、分别含 U+0085、U+2028、U+2029 以及十二个双向控制字符（U+061C、U+200E、U+200F、U+202A–U+202E、U+2066–U+2069）各一例的路径 → 400 `bad_request`，没有消息行、没有审计、supervisor 未被调用。对照例：中间含 `.` 段的 `uploads/./a.pdf` 与含普通非 ASCII 字符的路径仍 202。验证：新增的拒绝例在现有实现上判红（现在 202）。
+- [x] 8.2 测试先行（同一个新文件）：场景「空间根丢失时带附件的 prompt」第一例（根目录被删除）→ 404、`no-store`、审计无新增、没有消息行、supervisor 未被调用。验证：在现有实现上判红（现在 403 加一条 `sandbox.reject`）。
+- [x] 8.3（← 3.3）测试先行（同一个新文件）：同一场景第二例（根路径被普通文件占据）→ 同样的 404。验证：在现有实现上判红（现在 500）。
+- [x] 8.4 测试先行（新文件 `server/test/workspace-upload-name-chars.test.ts`；`workspace-upload-rest.test.ts` 已 766 行，不追加）：workspaces「文件上传」场景「名字规则与媒体类型」的新增部分（owner 2026-10-13）——名字分别含 U+0085、U+2028、U+2029 与十二个双向控制字符各一例 → 400 `bad_request`、`no-store`，`uploads` 下没有该文件也没有 `.part` 文件，审计无新增（没有 `file.upload`、`upload.reject`、`sandbox.reject`）；`uploads` 尚不存在的一例被拒之后该目录仍不存在。对照：`报告 v2.pdf` 照常 201。已在磁盘上的文件：测试直接写一个名字含 U+202E 的文件 → `tree` 列出且名字逐码点原样，`file` 与 `download` 都是 200、字节相同。验证：拒绝例在现有实现上判红（现在 201）。
+- [x] 8.5 实现：
   - 一个判定「字符串是否含被拒码点」的函数（U+0000–U+001F、U+007F、U+0085、U+2028、U+2029 与十二个双向控制字符），放进一个两边都能导入的新小文件（位置由实现定，不放进 `server/src/core/sandbox`）；`server/src/sessions/prompt-attachments.ts:88` 与 `server/src/workspaces/rest.ts:131` 两个各自为政的 `hasControlCharacter` 都换成它（顺带消掉这段重复）。
   - `prompt-attachments.ts`：第 1 条加末段不得为 `.`；`admitAttachments` 在调用 `sandbox.resolve` 之前经会话模块已有的 `workspaceRootOf` 取根——null、G3 的专用错误类、或不是普通目录（`lstat`，不跟随链接）→ `not_found`，不解析、不写审计。
   - `workspaces/rest.ts`：上传第 5 步的名字规则用同一个函数，位置不动（仍在第 4 步沙箱解析之后、第 6 步建目录之前），所以被拒时什么都没写；`tree`、`file`、`download`、`archive`、`move`、`DELETE entries` 的路径处理一行不改。
   - 不改 `server/src/core/sandbox`，不改 `web/`（上传被拒时标签按既有规则显示 `失败：<信封文案>`）。
   验证：8.1–8.4 转绿；「越界附件被拒绝并入审计」「越界名字被拒绝并入审计」的既有用例不改、仍通过（根可见时越界仍是 403 加一条审计；`name=../../etc/passwd` 仍是 403 而不是 400）。
-- [ ] 8.6 变异证据：去掉取根判定 → 8.2、8.3 判红；字符集里去掉 U+2028 → 8.1 与 8.4 对应例判红；去掉末段判定 → `uploads/a.pdf/.` 例判红；上传改回只查 U+0000–U+001F 与 U+007F → 8.4 全部拒绝例判红；把名字规则挪到第 4 步之前 → 「越界名字被拒绝并入审计」的既有用例判红。`make smoke` 跑一次。PR 标注「Critical Path：沙箱与文件边界，请求白盒审查」。
+- [x] 8.6 变异证据：去掉取根判定 → 8.2、8.3 判红；字符集里去掉 U+2028 → 8.1 与 8.4 对应例判红；去掉末段判定 → `uploads/a.pdf/.` 例判红；上传改回只查 U+0000–U+001F 与 U+007F → 8.4 全部拒绝例判红；把名字规则挪到第 4 步之前 → 「越界名字被拒绝并入审计」的既有用例判红。`make smoke` 跑一次。PR 标注「Critical Path：沙箱与文件边界，请求白盒审查」。
 
 Suggested fixture level: expanded - 路径安全与审计：改变何时写越界审计、收紧可被接受的附件路径与上传文件名
 Minimal mergeable slice: 8.1、8.4 加 8.5 里的字符与末段校验（纯入参校验，不依赖 G3，独立保绿；附件与上传必须同刀，否则留下「能传不能发」）；其后取根判定（8.2–8.3，依赖 G3）

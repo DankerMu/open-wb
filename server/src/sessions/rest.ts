@@ -296,6 +296,7 @@ export function registerSessionRoutes(
       // prompt without attachments.
       const attachments = admitAttachments({
         sandbox: dependencies.sandbox,
+        workspaceRootOf: dependencies.workspaceRootOf,
         principal,
         workspaceId: bound,
         builtin: classifyPrompt(text, skills).kind === "builtin",
