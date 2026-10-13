@@ -76,6 +76,8 @@ make setup    # npm install + uv sync + 挂 git hooks
 | 反漂移（死代码/重复/命名/行数） | `make anti-drift` |
 | 守卫自证 | `make test-guardrails` |
 
+openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --strict --no-interactive`，CI `fast-checks` 跑的就是这一条），不用全局安装的版本；版本由根 `package.json` 的 `devDependencies` 固定在 `@fission-ai/openspec` 1.13.2。
+
 ## Verification Matrix
 
 | Surface | Verify with | Command | Evidence required |
