@@ -565,3 +565,100 @@ describe("workspace tree entry meta", () => {
     }
   });
 });
+
+// files-web「目录树与预览」的场景「与对象原型成员同名的目录」（#1340）。目录缓存与目录错误表是普通对象，
+// 这些名字按方括号读会读到继承来的函数或原型对象。
+describe("directories named after Object.prototype members", () => {
+  const NAMES = ["constructor", "__proto__", "toString", "hasOwnProperty"] as const;
+  const tree = (path: string) => `/api/workspaces/workspace-1/tree?path=${path}`;
+
+  async function locationOptions() {
+    const dialog = await openDirectoryDialog();
+    const options = within(dialog)
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    return options;
+  }
+
+  it("renders them as ordinary unloaded directories, lists one on expand, and shows only its own failure", async () => {
+    const { fetchMock } = renderFiles(
+      "/files?ws=workspace-1",
+      authenticatedFilesRoutes([workspace], {
+        [tree("")]: () =>
+          jsonResponse({
+            path: "",
+            entries: NAMES.map((name) => ({ name, type: "dir", size: 0, mtime: 101 })),
+          }),
+        [tree("constructor")]: () =>
+          jsonResponse({
+            path: "constructor",
+            entries: [{ name: "a.md", type: "file", size: 3, mtime: 102 }],
+          }),
+        [tree("__proto__")]: () =>
+          jsonResponse({ error: { code: "internal", message: "原型目录读取失败" } }, 500),
+        [tree("toString")]: () => jsonResponse({ path: "toString", entries: [] }),
+      }),
+    );
+
+    await screen.findByRole("button", { name: "展开 constructor" });
+    const nav = screen.getByRole("navigation", { name: "工作空间目录树" });
+    const rowNames = () =>
+      [...nav.querySelectorAll('[data-slot="tree-name"]')].map((name) => name.textContent);
+    expect(rowNames()).toEqual(["设计文档", ...NAMES]);
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+    expect(await locationOptions()).toEqual(["根目录　设计文档"]);
+    for (const name of NAMES) {
+      expect(fetchMock.mock.calls.filter(([path]) => path === tree(name))).toHaveLength(0);
+    }
+
+    fireEvent.click(screen.getByRole("button", { name: "展开 constructor" }));
+    expect(await screen.findByRole("button", { name: "a.md" })).toBeTruthy();
+    await expectTreeRequestCount(fetchMock, tree("constructor"), 1);
+    expect(rowNames()).toEqual(["设计文档", "constructor", "a.md", ...NAMES.slice(1)]);
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+    expect(await locationOptions()).toEqual(["根目录　设计文档", "constructor"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "展开 __proto__" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("原型目录读取失败");
+    expect(alert.parentElement).toBe(
+      screen.getByRole("button", { name: "折叠 __proto__" }).closest("li"),
+    );
+    await expectTreeRequestCount(fetchMock, tree("__proto__"), 1);
+    // 其余目录没有错误行，也没有被当成已加载：不在位置下拉里，展开时照常请求该层。
+    expect(screen.getAllByRole("alert")).toEqual([alert]);
+    expect(await locationOptions()).toEqual(["根目录　设计文档", "constructor"]);
+    expect(fetchMock.mock.calls.filter(([path]) => path === tree("toString"))).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "展开 toString" }));
+    await expectTreeRequestCount(fetchMock, tree("toString"), 1);
+    await waitFor(async () => {
+      expect(await locationOptions()).toEqual(["根目录　设计文档", "constructor", "toString"]);
+    });
+    expect(screen.getAllByRole("alert")).toEqual([alert]);
+    expect(fetchMock.mock.calls.filter(([path]) => path === tree("hasOwnProperty"))).toHaveLength(
+      0,
+    );
+  });
+
+  it("reads the directory cache and the directory error table only through ownValue", () => {
+    // 按改完后各取值点的变量名列出要拦的写法：名字后面直接跟方括号即取值。放行的只有三种——数组下标
+    // （`directories[0]`）、`delete next[path]`、给已取到自有值的键赋值（`next[source] = …`）；
+    // `{ ...cache, [path]: listing }` 这类计算键的写入本来就不是「名字加方括号」。
+    const read =
+      /(?<!delete )\b(?:cache|errors|current|next|directories|directoryErrors)\[(?!\d+\])[^\]]*\](?!\s*=(?!=))/;
+    const sources = listRepoFiles("web/src/features/files", (path) => /\.tsx?$/.test(path));
+    expect(sources).toContain("web/src/features/files/browser-paths.ts");
+    const offenders = sources.flatMap((path) =>
+      stripTsComments(readRepoFile(path))
+        .split("\n")
+        .flatMap((line, index) =>
+          read.test(line) ? [`${path}:${index + 1}: ${line.trim()}`] : [],
+        ),
+    );
+    expect(offenders).toEqual([]);
+    const paths = readRepoFile("web/src/features/files/browser-paths.ts");
+    expect(paths).toContain("export function ownValue<");
+  });
+});

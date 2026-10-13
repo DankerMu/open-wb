@@ -50,6 +50,7 @@ import {
   loadedDirectoryPaths,
   markedRows,
   normalizedPath,
+  ownValue,
   parentPath,
   refreshLayers,
   revealStep,
@@ -183,7 +184,7 @@ export function WorkspaceBrowser({
 
   const loadDirectory = useCallback(
     (path: string, refresh = false, onTree = true) => {
-      if (subtreeOnly || (!refresh && Object.hasOwn(cacheRef.current, path))) {
+      if (subtreeOnly || (!refresh && ownValue(cacheRef.current, path))) {
         return;
       }
 
@@ -201,7 +202,7 @@ export function WorkspaceBrowser({
       failedDirectoriesRef.current.delete(path);
       setLoadingPaths((current) => new Set(current).add(path));
       setDirectoryErrors((current) => {
-        if (!current[path]) {
+        if (!ownValue(current, path)) {
           return current;
         }
 
