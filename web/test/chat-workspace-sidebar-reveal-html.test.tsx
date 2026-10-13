@@ -286,7 +286,7 @@ describe("打开网页预览", () => {
     expect(top).not.toHaveBeenCalled();
   });
 
-  it("R18 out 的列表里没有 index.html：侧边栏打开并展开到 out，预览区是 文件不存在，没有框，不签发令牌，也不请求 file", async () => {
+  it("R18 out 的列表里没有 index.html：侧边栏打开并展开到 out，预览区是 未选择文件、页面上没有 文件不存在，没有框，不签发令牌，也不请求 file", async () => {
     const { fetchMock } = await openPage({
       [ROOT]: listing("", [dir("out")]),
       [OUT]: listing("out", []),
@@ -296,8 +296,10 @@ describe("打开网页预览", () => {
 
     const region = await screen.findByRole("complementary", { name: NAME });
     const preview = within(region).getByRole("region", { name: "文件预览" });
-    expect(await within(preview).findByText(MISSING, { exact: true })).toBeTruthy();
+    await waitFor(() => expect(treeRequests(fetchMock)).toStrictEqual([ROOT, OUT]));
     await settled();
+    expect(within(preview).getByText("未选择文件", { exact: true })).toBeTruthy();
+    expect(screen.queryByText(MISSING)).toBeNull();
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT, OUT]);
     expect(document.querySelector("iframe")).toBeNull();
     expect(calls(fetchMock, TOKEN_PATH)).toStrictEqual([]);

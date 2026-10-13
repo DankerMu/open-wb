@@ -12,9 +12,9 @@ import {
   movedPath,
   movedTarget,
   parentPath,
+  type TreeRow,
 } from "./browser-paths.js";
 import type { SelectedFile } from "./preview-area.js";
-import type { TreeEntry } from "./types.js";
 
 type Paths = ReadonlySet<string>;
 
@@ -33,7 +33,7 @@ type FollowState<Reveal extends { path: string }> = {
   clearSelection(): void;
   loadDirectory(path: string, refresh?: boolean): void;
   onPathChange(path: string | null): void;
-  selectFile(entry: TreeEntry, path: string): void;
+  selectFile(entry: TreeRow, path: string): void;
 };
 
 /**

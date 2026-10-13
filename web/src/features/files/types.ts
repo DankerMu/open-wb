@@ -41,7 +41,8 @@ type FilePreview =
       kind: "media";
       url: string;
       reload: number;
-      size: number;
+      /** 树条目的大小；条目没有它时缺（#1372）。 */
+      size?: number | undefined;
       truncated: false;
     };
 

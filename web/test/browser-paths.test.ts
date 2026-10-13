@@ -14,6 +14,7 @@ import {
   moveTargets,
   normalizedPath,
   parentPath,
+  refreshLayers,
   renameTarget,
   revealStep,
 } from "../src/features/files/browser-paths.js";
@@ -446,6 +447,15 @@ describe("与对象原型成员同名的目录（#1340）", () => {
       expand: ["", "__proto__"],
       unloaded: null,
     });
+  });
+
+  it("refreshLayers：constructor 没加载过时 constructor/a.md 要重取的层只有根", () => {
+    expect([...refreshLayers(cacheOf(), ["constructor/a.md"])]).toStrictEqual([""]);
+  });
+
+  it("refreshLayers：constructor 加载过时它也在要重取的层里", () => {
+    const layers = refreshLayers(cacheOf(["constructor", [file("a.md")]]), ["constructor/a.md"]);
+    expect([...layers]).toStrictEqual(["", "constructor"]);
   });
 
   it.each(NAMES)("movedCache：移进没加载过的 %s 时只从原父目录拿掉，不读继承来的值", (name) => {

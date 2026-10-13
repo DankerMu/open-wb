@@ -7,7 +7,10 @@ import type { DirectoryListing, TreeEntry } from "./types.js";
 
 export type DirectoryCache = Record<string, DirectoryListing>;
 
-/** 树上的一行。`onlyPaths` 合成的行在父目录没加载过时没有 `size` / `mtime`（不编造）。 */
+/**
+ * 树上的一行，选中的文件也是它。`onlyPaths` 合成的行在父目录没加载过、或列表里没有它而它被步骤报过
+ * 时没有 `size` / `mtime`（不编造）：预览头不显示那一段，文档大小的前置判定跳过（#1372）。
+ */
 export type TreeRow =
   | TreeEntry
   | { name: string; type: "dir" | "file"; size?: undefined; mtime?: undefined };

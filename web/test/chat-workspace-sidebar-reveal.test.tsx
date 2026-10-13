@@ -73,6 +73,7 @@ const MARK = "本会话已改动";
 const ONLY = "只看本会话改动";
 const PREVIEW = "文件预览";
 const MISSING = "文件不存在";
+const EMPTY = "未选择文件";
 /** 服务端 `not_found` 信封的文案。 */
 const NOT_FOUND = "请求的资源不存在";
 const SESSION = `/?session=${SESSION_ID}`;
@@ -467,7 +468,7 @@ describe("文件已不存在", () => {
     }
   }
 
-  it("R5 out/gone.md 不在 out 的列表里：侧边栏打开并展开到 out，预览区是 文件不存在，没有对它的 file 请求", () =>
+  it("R5 out/gone.md 不在 out 的列表里：侧边栏打开并展开到 out，预览区是 未选择文件，页面上没有 文件不存在，没有对它的 file 请求", () =>
     withoutNoise(async () => {
       const { fetchMock } = await openPage(
         changedTurn(write("out/gone.md")),
@@ -479,17 +480,19 @@ describe("文件已不存在", () => {
 
       const { region } = await reveal("out/gone.md");
 
-      expect(await within(preview(region)).findByText(MISSING, { exact: true })).toBeTruthy();
+      expect(await within(region).findByRole("button", { name: "b.md" })).toBeTruthy();
       expect(button(region, "折叠 out").getAttribute("aria-expanded")).toBe("true");
       expect(rowNames(region)).toStrictEqual(["项目", "out", "b.md", "readme.md"]);
       expect(selectedRows(region)).toStrictEqual([]);
       await settled();
+      expect(within(preview(region)).getByText(EMPTY, { exact: true })).toBeTruthy();
+      expect(screen.queryByText(MISSING)).toBeNull();
       expect(treeRequests(fetchMock)).toStrictEqual([ROOT, OUT]);
       expect(fileRequests(fetchMock)).toStrictEqual([]);
       expect(currentLocation()).toBe(SESSION);
     }));
 
-  it("R5 out 也已不存在：照样请求 out，停在根，预览区是服务端的 404 文案，没有 file 请求", () =>
+  it("R5 out 也已不存在：照样请求 out，停在根，预览区是 未选择文件，页面上没有服务端的 404 文案，没有 file 请求", () =>
     withoutNoise(async () => {
       const { fetchMock } = await openPage(
         changedTurn(write("out/gone.md")),
@@ -501,15 +504,18 @@ describe("文件已不存在", () => {
 
       const { region } = await reveal("out/gone.md");
 
-      expect(await within(preview(region)).findByText(NOT_FOUND, { exact: true })).toBeTruthy();
+      await waitFor(() => expect(treeRequests(fetchMock)).toStrictEqual([ROOT, OUT]));
+      await settled();
+      expect(within(preview(region)).getByText(EMPTY, { exact: true })).toBeTruthy();
+      expect(screen.queryByText(NOT_FOUND)).toBeNull();
+      expect(screen.queryByText(MISSING)).toBeNull();
       expect(rowNames(region)).toStrictEqual(["项目", "readme.md"]);
       expect(selectedRows(region)).toStrictEqual([]);
-      await settled();
       expect(treeRequests(fetchMock)).toStrictEqual([ROOT, OUT]);
       expect(fileRequests(fetchMock)).toStrictEqual([]);
     }));
 
-  it("R5 父目录的列表里仍有它而 file 返回 404：该行被选中，预览区是服务端的不存在文案", () =>
+  it("R5 父目录的列表里仍有它而 file 返回 404：恰一次 file，选中随即被清除，预览区是 未选择文件，页面上没有服务端的不存在文案，该行仍在树里", () =>
     withoutNoise(async () => {
       const { fetchMock } = await openPage(
         changedTurn(write("gone.md")),
@@ -521,20 +527,28 @@ describe("文件已不存在", () => {
 
       const { region } = await reveal("gone.md");
 
-      expect(await within(preview(region)).findByText(NOT_FOUND, { exact: true })).toBeTruthy();
-      expect(selectedRows(region)).toStrictEqual(["gone.md"]);
+      await waitFor(() =>
+        expect(fileRequests(fetchMock)).toStrictEqual([fileOf(PROJ.id, "gone.md")]),
+      );
+      await settled();
+      expect(within(preview(region)).getByText(EMPTY, { exact: true })).toBeTruthy();
+      expect(screen.queryByText(NOT_FOUND)).toBeNull();
+      expect(selectedRows(region)).toStrictEqual([]);
+      expect(rowNames(region)).toStrictEqual(["项目", "gone.md"]);
       expect(fileRequests(fetchMock)).toStrictEqual([fileOf(PROJ.id, "gone.md")]);
     }));
 });
 
 describe("路径只是交给浏览器的数据", () => {
-  it("R12 改动路径含 .. 段（../x）：既有的 normalizedPath 拦下它，除对根的一次 tree 之外不发任何请求，预览区是 文件不存在", async () => {
+  it("R12 改动路径含 .. 段（../x）：既有的 normalizedPath 拦下它，除对根的一次 tree 之外不发任何请求，预览区是 未选择文件，页面上没有 文件不存在", async () => {
     const { fetchMock } = await openPage(changedTurn(write("../x")), project());
 
     const { region } = await reveal("../x");
 
-    expect(await within(preview(region)).findByText(MISSING, { exact: true })).toBeTruthy();
+    expect(await within(region).findByRole("button", { name: "readme.md" })).toBeTruthy();
     await settled();
+    expect(within(preview(region)).getByText(EMPTY, { exact: true })).toBeTruthy();
+    expect(screen.queryByText(MISSING)).toBeNull();
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
     expect(fileRequests(fetchMock)).toStrictEqual([]);
     expect(selectedRows(region)).toStrictEqual([]);
@@ -575,29 +589,32 @@ describe("只看本会话改动 开着时定位", () => {
     expect(rowNames(region)).toStrictEqual(["项目", "src", "deep", "app.ts"]);
   });
 
-  it("R6 父目录未加载（已知表现，#1372）：该行可见但不被选中，原选中与预览保持，没有任何文案，不请求 tree 也不请求它的 file", async () => {
+  it("R6 父目录未加载（#1372）：该行被选中并取预览，恰一次它的 file，预览头没有大小与修改时间，没有任何文案，不请求 tree；关掉开关后仍选中它", async () => {
     const { fetchMock, region } = await filtered(false);
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
-    const before = preview(region).textContent;
 
     clickDetail(APP);
-    await settled();
 
-    expect(button(region, "app.ts").getAttribute("aria-current")).toBeNull();
-    expect(selectedRows(region)).toStrictEqual([]);
-    expect(preview(region).textContent).toBe(before);
-    expect(preview(region).textContent).toContain(README_TEXT);
+    await selected(region, "app.ts");
+    await previewShows(region, APP_SOURCE);
+    await settled();
+    expect(selectedRows(region)).toStrictEqual(["app.ts"]);
+    expect(preview(region).textContent).not.toContain(README_TEXT);
+    expect(preview(region).querySelector('[data-slot="preview-path"]')?.textContent).toBe(APP);
+    expect(preview(region).querySelector('[data-slot="preview-meta"]')).toBeNull();
     expect(within(region).queryByText(MISSING)).toBeNull();
     expect(button(region, ONLY).getAttribute("aria-pressed")).toBe("true");
     expect(treeRequests(fetchMock)).toStrictEqual([ROOT]);
-    expect(fileRequests(fetchMock)).toStrictEqual([fileOf(PROJ.id, "readme.md")]);
+    const files = [fileOf(PROJ.id, "readme.md"), fileOf(PROJ.id, APP)];
+    expect(fileRequests(fetchMock)).toStrictEqual(files);
 
-    // 关掉开关：原来选中的 readme.md 仍是选中的，定位没有留下别的选中。
+    // 关掉开关：选中的仍是 app.ts——它所在的层没加载过，树上没有它的行，src 仍是折叠的；预览还在。
     fireEvent.click(button(region, ONLY));
-    expect(selectedRows(region)).toStrictEqual(["readme.md"]);
+    expect(button(region, "展开 src")).toBeTruthy();
+    expect(preview(region).textContent).toContain(APP_SOURCE);
   });
 
-  it("R6 父目录已加载而列表里没有它：与开关关着时相同，原选中被清掉，预览区是 文件不存在，开关仍是开的，不请求 tree 也不请求它的 file", async () => {
+  it("R6 父目录已加载而列表里没有它：与开关关着时相同，原选中被清掉，预览区是 未选择文件、页面上没有 文件不存在，开关仍是开的，不请求 tree 也不请求它的 file", async () => {
     const { fetchMock } = await openPage(
       changedTurn(write("out/gone.md")),
       project({
@@ -619,8 +636,9 @@ describe("只看本会话改动 开着时定位", () => {
 
     clickDetail("out/gone.md");
 
-    expect(await within(preview(region)).findByText(MISSING, { exact: true })).toBeTruthy();
+    expect(await within(preview(region)).findByText(EMPTY, { exact: true })).toBeTruthy();
     await settled();
+    expect(screen.queryByText(MISSING)).toBeNull();
     expect(preview(region).textContent).not.toContain(README_TEXT);
     expect(selectedRows(region)).toStrictEqual([]);
     expect(button(region, ONLY).getAttribute("aria-pressed")).toBe("true");

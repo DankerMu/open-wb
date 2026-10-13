@@ -57,15 +57,15 @@ type WebFrame = {
 /**
  * What the document previewer is handed. `token` as in `WebFrame` (when ready, `base` and
  * `officeBase` are credentials: one of them goes into the frame's address and nowhere else).
- * `size` is the tree entry's size, compared with the token's `documentMaxBytes` before any frame
- * is built; `office` says the file is an office document (converted by the server, loaded from
+ * `size` is the tree entry's size (`undefined` when the entry has none), compared with the token's
+ * `documentMaxBytes` before any frame is built; `office` says the file is an office document (converted by the server, loaded from
  * `officeBase`) and not a PDF (loaded from `base`).
  */
 type DocumentFrame = {
   path: string;
   token: ReturnType<typeof usePreviewToken>;
   reload: number;
-  size: number;
+  size: number | undefined;
   office: boolean;
 };
 

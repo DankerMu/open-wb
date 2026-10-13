@@ -63,7 +63,10 @@ type WorkspaceColumnsProps = CreationMenuProps & {
   treeCollapsed?: boolean | undefined;
 };
 
-/** `onlyPaths` 是空集且给了文案时树的位置上的那段文案，否则 `null`（照常是树）。 */
+/**
+ * `onlyPaths` 是空集且给了文案时树的位置上的那段文案，否则 `null`（照常是树）。浏览器给的是其中还
+ * 成行的那些路径：集合本来就空，或其中的文件都已不存在（issue 1372），都是这段文案。
+ */
 export function emptyNote(onlyPaths: ReadonlySet<string> | undefined, text: string | undefined) {
   return onlyPaths?.size === 0 && text ? (
     <p className={`${STATUS_TEXT} px-2 py-1`}>{text}</p>
