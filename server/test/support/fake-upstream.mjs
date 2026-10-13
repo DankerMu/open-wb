@@ -27,8 +27,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const WALK_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/iu;
 const DEFAULT_TTL_MS = 30_000;
 const GATE_CAP = 32;
+/** `toolRoundScope` values: which messages decide whether a request is a tool round (#1140). */
+const TOOL_ROUND_SCOPES = new Set(["history", "turn"]);
 
 export async function start(options = {}) {
+  const scope = options.toolRoundScope === undefined ? "history" : options.toolRoundScope;
+  if (!TOOL_ROUND_SCOPES.has(scope)) {
+    throw new Error('fake-upstream toolRoundScope must be "history" or "turn"');
+  }
   const expectedKey = options.apiKey ?? DEFAULT_KEY;
   const requested = options.port ?? 0;
   const ttlMs =
@@ -41,7 +47,7 @@ export async function start(options = {}) {
   /** Accepted chat-completions requests in arrival order: `{model, messages}` only, latest 1000. */
   const requests = [];
   const server = createServer((request, response) => {
-    void handleRequest(request, response, expectedKey, gates, ttlMs, requests);
+    void handleRequest(request, response, expectedKey, gates, ttlMs, requests, scope);
   });
   await listen(server, requested);
   const address = server.address();
@@ -70,7 +76,7 @@ export async function start(options = {}) {
   };
 }
 
-async function handleRequest(request, response, expectedKey, gates, ttlMs, requests) {
+async function handleRequest(request, response, expectedKey, gates, ttlMs, requests, scope) {
   const path = request.url === undefined ? "" : request.url.split("?")[0];
   if (path === REQUESTS_PATH) {
     readRequests(request, response, expectedKey, requests);
@@ -92,7 +98,7 @@ async function handleRequest(request, response, expectedKey, gates, ttlMs, reque
   if (parsed === undefined) {
     return;
   }
-  serveChat(response, gates, parsed);
+  serveChat(response, gates, parsed, scope);
 }
 
 function readRequests(request, response, expectedKey, requests) {
@@ -144,7 +150,7 @@ async function readChatMessages(request, response, requests) {
   return { messages: body.messages, model: body.model };
 }
 
-function serveChat(response, gates, parsed) {
+function serveChat(response, gates, parsed, scope) {
   if (lastUserHasMarker(parsed.messages)) {
     writeJson(response, 500, { error: { message: "fake upstream error" } });
     return;
@@ -152,7 +158,9 @@ function serveChat(response, gates, parsed) {
   const id = `chatcmpl-${randomUUID()}`;
   const created = Math.floor(Date.now() / 1000);
   const model = typeof parsed.model === "string" ? parsed.model : "fake";
-  if (!hasToolRole(parsed.messages)) {
+  const answered =
+    scope === "turn" ? toolFollowsLastUser(parsed.messages) : hasToolRole(parsed.messages);
+  if (!answered) {
     const call = toolRoundCall(lastUserTextFrom(parsed.messages));
     writeSse(response, toolFrames(id, created, model, call));
     return;
@@ -415,6 +423,27 @@ function hasToolRole(messages) {
   return messages.some(
     (message) => message !== null && typeof message === "object" && message.role === "tool",
   );
+}
+
+/**
+ * `toolRoundScope: "turn"`：最后一条 user 消息之后有没有 tool 消息。历史里没有 user 消息时
+ * 看的就是整段历史，与缺省判定同一结果（规格条文没有点名这种历史；实测三种这样的历史两种
+ * 判定逐字节相同，见 fake-upstream-tool-rounds.test.ts 的「for a history with …」）。
+ */
+function toolFollowsLastUser(messages) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message === null || typeof message !== "object") {
+      continue;
+    }
+    if (message.role === "tool") {
+      return true;
+    }
+    if (message.role === "user") {
+      return false;
+    }
+  }
+  return false;
 }
 
 /** 工具轮只发一个调用：WRITE 优先于 TODO，都没有即缺省 bash。 */

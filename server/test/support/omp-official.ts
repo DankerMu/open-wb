@@ -1,15 +1,13 @@
 /**
  * The real-binary test tier (#813, #815, #984): a managed state layout, a sandbox with the
- * workspace `u1/proj`, the fake upstream as the model endpoint (`models.yml` points straight at it,
- * or with `freshToolRounds` at a forwarder in front of it, and the token book issues its key) and a `SessionRuntime` on the official omp binary whose cwd is
- * that workspace. Every approval request is recorded and answered, with deny unless the case says
- * otherwise. Opt-in through `WORKBUDDY_OMP_TEST=1`; opted in, `OMP_BIN` must be the pinned official
+ * workspace `u1/proj`, the fake upstream as the model endpoint (`models.yml` points straight at it
+ * and the token book issues its key; nothing sits between omp and the upstream) and a
+ * `SessionRuntime` on the official omp binary whose cwd is that workspace. Every approval request
+ * is recorded and answered, with deny unless the case says otherwise. Opt-in through `WORKBUDDY_OMP_TEST=1`; opted in, `OMP_BIN` must be the pinned official
  * binary (`make omp-fetch`) — a missing or different one fails, it is never skipped.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { createServer, request as httpRequest, type OutgoingHttpHeaders } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach } from "vitest";
@@ -19,7 +17,7 @@ import type { SpawnImpl } from "../../src/sessions/omp/process.js";
 import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
 import { ensureOmpStateLayout, ompAgentDir } from "../../src/sessions/omp/state-layout.js";
 import type { ApprovalDecision, ApprovalRequest } from "../../src/sessions/omp/ui-requests.js";
-import { type FakeUpstreamServer, start } from "./fake-upstream.mjs";
+import { type FakeUpstreamServer, type FakeUpstreamStartOptions, start } from "./fake-upstream.mjs";
 
 export const OMP_VERSION = "18.0.10";
 export const OMP_TEST_OFF = process.env.WORKBUDDY_OMP_TEST !== "1";
@@ -49,11 +47,10 @@ interface OfficialWorldOptions extends OfficialRuntimeOptions {
   /** The managed `models.yml` as text, given the model endpoint's base URL (its port is dynamic). */
   modelsYml?: (proxyBaseUrl: string) => string;
   /**
-   * Lets a session that already holds a tool result open another tool round: the model endpoint
-   * becomes a forwarder that shows the fake upstream only the running turn (see
-   * `startTurnForwarder`).
+   * Handed to the fake upstream's `start()` as it is. `"turn"` lets a session that already holds a
+   * tool result open another tool round; absent, only the first turn of a session has one.
    */
-  freshToolRounds?: boolean;
+  toolRoundScope?: FakeUpstreamStartOptions["toolRoundScope"];
 }
 
 export interface OfficialWorld extends OfficialDirs {
@@ -101,103 +98,6 @@ const rewritingSpawn: SpawnImpl = (command, args, options) => {
   return (spawn as SpawnImpl)(command, argv, { ...options, env });
 };
 
-/** Headers of one hop only, and the length the forwarder recomputes. */
-const HOP_HEADERS = new Set(["host", "connection", "content-length", "transfer-encoding"]);
-
-function forwardedHeaders(headers: NodeJS.Dict<string | string[]>): OutgoingHttpHeaders {
-  const kept: OutgoingHttpHeaders = {};
-  for (const [name, value] of Object.entries(headers)) {
-    if (value !== undefined && !HOP_HEADERS.has(name)) {
-      kept[name] = value;
-    }
-  }
-  return kept;
-}
-
-/**
- * A chat-completions body with `messages` cut down to the leading system messages plus everything
- * from the last user message onward; anything else is returned as it came.
- */
-function currentTurnOnly(raw: Buffer): Buffer {
-  let body: unknown;
-  try {
-    body = JSON.parse(raw.toString("utf8"));
-  } catch {
-    return raw;
-  }
-  const messages = (body as { messages?: unknown } | null)?.messages;
-  if (!Array.isArray(messages)) {
-    return raw;
-  }
-  const roles = messages.map((message: unknown) => (message as { role?: unknown } | null)?.role);
-  const lastUser = roles.lastIndexOf("user");
-  if (lastUser === -1) {
-    return raw;
-  }
-  const leading = roles.findIndex((role) => role !== "system" && role !== "developer");
-  const trimmed = [...messages.slice(0, leading), ...messages.slice(lastUser)];
-  return Buffer.from(JSON.stringify({ ...(body as object), messages: trimmed }));
-}
-
-/**
- * Test device for `freshToolRounds`: a loopback forwarder between omp and the fake upstream. The
- * controlled upstream opens a tool round only when the request history holds no tool result, so
- * the second turn of a resumed session would get plain text and nothing could be approved. The
- * forwarder trims each chat-completions request to the running turn and passes everything else
- * (method, path, authorization, status, the streamed response) through. Only what the fake model
- * is shown changes: omp's argv, its session file and its RPC frames are untouched.
- */
-async function startTurnForwarder(upstreamPort: number): Promise<number> {
-  const server = createServer((request, response) => {
-    const chunks: Buffer[] = [];
-    request.on("data", (chunk: Buffer) => chunks.push(chunk));
-    request.on("error", () => response.destroy());
-    request.on("end", () => {
-      const raw = Buffer.concat(chunks);
-      const path = (request.url ?? "").split("?")[0] ?? "";
-      const chat = request.method === "POST" && path.endsWith("/chat/completions");
-      const body = chat ? currentTurnOnly(raw) : raw;
-      const outgoing = httpRequest(
-        {
-          host: "127.0.0.1",
-          port: upstreamPort,
-          method: request.method,
-          path: request.url,
-          headers: { ...forwardedHeaders(request.headers), "content-length": body.length },
-          agent: false,
-        },
-        (incoming) => {
-          response.writeHead(incoming.statusCode ?? 502, forwardedHeaders(incoming.headers));
-          incoming.on("error", () => response.destroy());
-          incoming.pipe(response);
-        },
-      );
-      outgoing.on("error", () => {
-        if (response.headersSent) {
-          response.destroy();
-        } else {
-          response.writeHead(502).end();
-        }
-      });
-      // The client went away (omp aborted the turn): drop the upstream request with it.
-      response.on("close", () => outgoing.destroy());
-      outgoing.end(body);
-    });
-  });
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  });
-  cleanups.push(
-    () =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      }),
-  );
-  return (server.address() as AddressInfo).port;
-}
-
 /**
  * Opens the world. `plant` writes the project files before anything is spawned (the process
  * starts with the first command or prompt); everything is torn down after the running case.
@@ -219,11 +119,12 @@ export async function openOfficialWorld(
   mkdirSync(join(sandboxRoot, ".git"));
   const agentDir = ompAgentDir(stateDir);
   ensureOmpStateLayout(stateDir);
-  const upstream: FakeUpstreamServer = await start({ apiKey: UPSTREAM_KEY });
+  const upstream: FakeUpstreamServer = await start({
+    apiKey: UPSTREAM_KEY,
+    ...(options.toolRoundScope === undefined ? {} : { toolRoundScope: options.toolRoundScope }),
+  });
   cleanups.push(() => upstream.close());
-  const modelPort =
-    options.freshToolRounds === true ? await startTurnForwarder(upstream.port) : upstream.port;
-  const proxyBaseUrl = `http://127.0.0.1:${String(modelPort)}/v1`;
+  const proxyBaseUrl = `http://127.0.0.1:${String(upstream.port)}/v1`;
   if (options.modelsYml === undefined) {
     await writeManagedModelsYml(agentDir, {
       proxyBaseUrl,

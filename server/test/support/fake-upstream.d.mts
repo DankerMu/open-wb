@@ -2,6 +2,11 @@ export interface FakeUpstreamStartOptions {
   port?: number;
   apiKey?: string;
   gateTtlMs?: number;
+  /**
+   * Which messages decide whether a request is a tool round: `"history"` (default) — the whole
+   * history holds no `tool` message; `"turn"` — no `tool` message follows the last `user` message.
+   */
+  toolRoundScope?: "history" | "turn";
 }
 
 /** One accepted chat-completions request: its top-level `model` and the length of `messages`. */
