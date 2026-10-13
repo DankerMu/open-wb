@@ -277,7 +277,8 @@ change `s1f-files-page`（design D17、D18；owner D-21、D-24、D-25、D-26）�
 - **验证**：CI `uid-isolation` job 不设 `OFFICE_BIN`，两行规则在那里都用不到，`.github/scripts/ci-uid-isolation.sh` 写出的 sudoers 不变；转换器的自动化测试用假的转换程序与假 `sudo`，不需要 LibreOffice。
   `OMP_USER` 模式下真实转换的进程 uid、缓存文件属主与经 `/o/` 超时后的残留已由 28.6 的验证补记，见下一条。
 - **28.6 的验证补记**（#1123，2026-10-12；测试 VPS 上的一次性容器，uid 分离部署，LibreOffice 7.4.7.2，经文件页与 `/o/` 的整条链路；环境、做法与没有做的见 ADR-0014「真实转换的验证记录」）：
-  - 转换进行中 `sudo` 的 `Uid:` 是「应用用户 / root / root / root」，它之下的 `soffice`（包装脚本）、`oosplash`、`soffice.bin` 四个值都是 omp 用户；docx、xlsx、pptx 各一份都转换成功。
+  - （取样自被超时终止的那一次 docx 转换）转换进行中 `sudo` 的 `Uid:` 是「应用用户 / root / root / root」，它之下的 `oosplash`、`soffice.bin` 四个值都是 omp 用户（`soffice` 包装脚本在进程表里属 omp 用户，没有取到它的 `Uid:` 行）；
+    docx、xlsx、pptx 各一份都转换成功，后两种没有取样进程，只看到作业目录里的产物属 omp 用户。
   - `pdf/` 里的缓存文件 `0600`、属应用用户；作业目录下的 `profile/`、`.cache/`、`.config/`、`out/` 与输出 PDF 属 omp 用户，转换成功后整个作业目录留在 `work/` 里。
   - 三个缓存目录的属组随父目录的 setgid 成了共享组（上文「部署前提」满足时的样子）。
   - 上面第 2 行规则在真实 `sudo` 下执行了两次（重启时），`work/` 都被清空，没有 `preview_work_clear_failed`。

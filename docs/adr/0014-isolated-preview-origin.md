@@ -155,7 +155,7 @@
 - 归零靠启动时的一条 `sudo -n -u <OMP_USER> -- /usr/bin/find <work 的路径> -mindepth 1 -delete`，需要上文「LibreOffice 与 `OFFICE_BIN`」里的第二行 sudoers（同 ADR-0010 的 #1119 补充）。没配 `OFFICE_BIN` 的部署不执行它，也不需要这一行。
   规则里的路径必须与服务端算出的 `join(PREVIEW_CACHE_DIR, "work")` 逐字相同：相对值先按仓库根解析，结果经词法规范化（去掉结尾斜杠、折叠 `.` 与 `..`），不解析符号链接；含空格等特殊字符时按 sudoers 语法转义。
 - 规则漏配、路径差一个字符、`find` 不在 `/usr/bin/find`、10 秒内没跑完：启动日志（标准错误）恰有一行 `{"event":"preview_work_clear_failed"}`，不带路径；服务照常启动并提供转换，只是 `work/` 不归零。
-  看到这一行先用 `sudo -l -U <app-user>` 核对规则。这条规则在真实 `sudo` 下执行过两次、都清空了（#1123，见文末「真实转换的验证记录」；自动化测试用的是假 `sudo`）；超时杀掉 `sudo` 之后它之下的 `find` 是否随之结束同样**未测**。
+  看到这一行先用 `sudo -l -U <app-user>` 核对规则。这条规则在真实 `sudo` 下执行过两次、都清空了（#1123，见文末「真实转换的验证记录」；自动化测试用的是假 `sudo`）；超时杀掉 `sudo` 之后它之下的 `find` 是否随之结束仍**未测**。
 - 回收目录没有总量上限，只按天数清理。
 
 ### 被终止的转换留下的进程
@@ -187,7 +187,7 @@
 2026-10-12 在测试 VPS 上做了一次，记录现象，不改变任何做法。**浏览器一步是脚本驱动的桌面浏览器加截图，截图由执行验证的代理逐张看过，不是人眼在真实窗口里操作**；owner 如要亲眼看一次，按「运维」各节与下面的环境照做即可。
 
 **环境。** 测试 VPS 上的一次性容器（Debian 12，Node 24.13.1；用完即删），容器直接使用宿主的网络。构建的是 `master` 的 `35cf6c3a`（本 change 的运行时代码已全部合入；其后只有文档提交）：`npm ci`、`npm run build --workspace web`、`npm run build --workspace server`，以 `node server/dist/server.js` 启动。
-uid 分离按 ADR-0010：应用用户与 omp 用户各一个，同属一个共享组；sudoers 是 `secure_path`、`Defaults>omp umask=0007`、omp 的 spawn 行与上文「LibreOffice 与 `OFFICE_BIN`」的两行。应用以共享组为当前组、umask `007` 启动，设了 `HOST=0.0.0.0`、固定的 `PORT` 与 `PREVIEW_PORT`、`OMP_USER`、`OFFICE_BIN=/usr/bin/soffice`、绝对路径的 `PREVIEW_CACHE_DIR`（父目录 `2770`、属应用用户与共享组）；没有设 `PREVIEW_ORIGIN`。
+uid 分离按 ADR-0010：应用用户与 omp 用户各一个，同属一个共享组；sudoers 是 `secure_path`、`Defaults><OMP_USER> umask=0007`、omp 的 spawn 行与上文「LibreOffice 与 `OFFICE_BIN`」的两行。应用以共享组为当前组、umask `007` 启动，设了 `HOST=0.0.0.0`、固定的 `PORT` 与 `PREVIEW_PORT`、`OMP_USER`、`OFFICE_BIN=/usr/bin/soffice`、绝对路径的 `PREVIEW_CACHE_DIR`（父目录 `2770`、属应用用户与共享组）；没有设 `PREVIEW_ORIGIN`。
 LibreOffice 是发行版的 **7.4.7.2**（`LibreOffice 7.4.7.2 40(Build:2)`；装了 writer、calc、impress 三个组件，不带推荐包，另装了 DejaVu 字体），与 #1052 用的 24.2.7.2 不是同一个版本。
 没有装 omp 二进制，也没有配模型端点：助手没有参与，样本文件由种子账号经上传接口放进工作空间的 `uploads/`。
 浏览器在另一台机器上（macOS 26.6.2，arm64），经 VPS 的公网地址直连两个端口，不经隧道与反向代理：Playwright 1.62.1 的 Chromium 151.0.7922.34，`channel: "chromium"` 的新无头模式，视口 1440×900。
@@ -202,13 +202,13 @@ LibreOffice 是发行版的 **7.4.7.2**（`LibreOffice 7.4.7.2 40(Build:2)`；�
 
 三个 `iframe` 的地址都是 `<预览来源>/o/<令牌>/uploads/<文件名>`，响应的 CSP 只有 `frame-ancestors <主站来源>`（没有 `sandbox`），内置查看器带缩略图栏与页码框出现在预览区里。从点击到 `/o/` 响应返回各约 1.1 秒（都是首次转换）。把同一地址再取一次得到的 PDF 用 PDF 库数页，是 4、5、4 页，与查看器显示的一致。
 
-**进程身份与缓存属主。** 转换进行中在容器里每 0.5 秒取一次进程表与 `/proc/<pid>/status`：`sudo` 的 `Uid:` 是「应用用户 / root / root / root」；它之下的 `soffice`（包装脚本）、`oosplash`、`soffice.bin` 的 `Uid:` 四个值都是 omp 用户。
+**进程身份与缓存属主。** 进程取样只在下文超时终止的那一次 docx 转换里做了（容器里每 0.5 秒取一次进程表与 `/proc/<pid>/status`）；三个小文档各约 1 秒转完，没有取样，它们的转换身份只有作业目录里的文件属 omp 用户这一间接证据：`sudo` 的 `Uid:` 是「应用用户 / root / root / root」；它之下的 `oosplash`、`soffice.bin` 的 `Uid:` 四个值都是 omp 用户。`soffice`（包装脚本）在进程表里只取到一拍，属 omp 用户，随即在同一个 pid 里 exec 成 `oosplash`，没有取到它自己的 `/proc/<pid>/status`。
 `<PREVIEW_CACHE_DIR>/pdf/` 里的缓存文件是 `0600`、属应用用户（属组是共享组）。作业目录 `work/<job>` 属应用用户（`2770`），其下的 `profile/`（`0700`）、`.cache/` 与 `.config/`（`2700`）、`out/`（`2770`）及 `out/<名>.pdf`（`0660`）都属 omp 用户。
 转换成功之后作业目录整个留在 `work/` 里，连 `out/<名>.pdf` 也在（三个小文档共 2.0 MB）。三个缓存目录由服务端建出，mode 是 `2750`、`2770`、`0700`，属组随父目录的 setgid 成了共享组——ADR-0010 的 #1119 补充里「属组须是共享组」的前提在满足时的样子；不满足时会怎样**没有测**。
 
 **启动时清空 `work`（第 2 行 sudoers）。** 带着上面三个作业目录重启服务：`work/` 变空，标准错误里没有 `preview_work_clear_failed`。之后带着一个被终止的作业目录（5.2 MB）又重启一次，结果相同。这是这条规则在真实 `sudo` 下第一次被执行；`sudo` 中途被杀时它之下的 `find` 是否随之结束仍**没有测**。
 
-**超时终止一次。** 把 `OFFICE_CONVERT_TIMEOUT_MS` 设成 3000 重启，请求一份 3000 页的 docx（188,779 字节；不被打断时经 `/o/` 要 84.5 秒，得到 4,682,817 字节的 PDF）：
+**超时终止一次。** 把 `OFFICE_CONVERT_TIMEOUT_MS` 设成 3000 重启，请求一份 3000 页的 docx（188,779 字节；不被打断时经 `/o/` 要 84.5 秒，得到 4,682,817 字节的 PDF——那一次是事后把超时调到 200000 另跑的）：
 
 - 请求在 3.03 秒得到 504 与「文档转换超时，请下载后查看」。
 - `sudo` 随即消失，`oosplash` 同时被杀（`--pdeathsig` 生效）。
@@ -220,4 +220,4 @@ LibreOffice 是发行版的 **7.4.7.2**（`LibreOffice 7.4.7.2 40(Build:2)`；�
 **从另一台机器打开 html 预览。** 同一个浏览器点开 `uploads/index.html`（它以 `./style.css` 引同目录的样式表，样式把标题设成绿色）：`iframe`（`sandbox="allow-scripts allow-forms allow-modals"`）的地址是 `<预览来源>/w/<令牌>/uploads/index.html`，其中主机来自请求的 `Host`、端口是固定的 `PREVIEW_PORT`；
 `index.html` 与 `style.css` 两个响应都是 200，CSP 为 `sandbox allow-scripts allow-forms allow-modals; frame-ancestors <主站来源>`；框内标题的计算颜色是 `rgb(0, 128, 0)`，截图里是绿色。相对资源可用。
 
-**没有做的。** 人眼在有界面的浏览器窗口里看；Firefox 与其它引擎；由助手生成的文档（没有装 omp）；经反向代理、`PREVIEW_ORIGIN` 或 https 的部署；容器之外的主机；LibreOffice 的其它版本；含中文字体、图片、公式的真实文档的版面；第二次及以后的超时终止；请求方断开与服务关停两种终止。
+**没有做的。** 人眼在有界面的浏览器窗口里看；Firefox 与其它引擎；由助手生成的文档（没有装 omp）；经反向代理、`PREVIEW_ORIGIN` 或 https 的部署；容器之外的主机；LibreOffice 的其它版本；含中文字体、图片、公式的真实文档的版面；第二次及以后的超时终止；xlsx、pptx 转换进行中的进程取样；请求方断开与服务关停两种终止。
