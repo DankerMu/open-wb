@@ -5,6 +5,19 @@ import "./radix-platform.js";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CREATED,
+  EMPTY,
+  historyReads,
+  OPTIONS,
+  prompts,
+  sendFirst,
+  turn,
+  uploadOf,
+  W,
+  type Welcome,
+  welcome,
+} from "./chat-attachments-first-send-support.js";
+import {
   alerts,
   area,
   chips,
@@ -25,108 +38,36 @@ import {
   sessionPromptPath,
   typeDraft,
 } from "./chat-page-lifecycle-support.js";
-import { composer, envelope, promptAccepted, SESSION_BUSY } from "./chat-page-ownership-support.js";
-import {
-  A,
-  cleanupSessionMeta,
-  findList,
-  messagesPath,
-  type SessionView,
-  view,
-} from "./chat-page-session-meta-support.js";
-import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
+import { composer, envelope, SESSION_BUSY } from "./chat-page-ownership-support.js";
+import { A, cleanupSessionMeta, findList, view } from "./chat-page-session-meta-support.js";
+import type { FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import {
   CREATE_REJECTED,
-  CREATED_IDS,
   composerForm,
   createOf,
   createRejected,
   createRequests,
   HERO,
   leaveForWelcome,
-  PROJECT_A,
   PROJECT_A_OPTION,
   pickOption,
-  promptRequests,
   SUPPORT,
   SUPPORT_OPTION,
   TEMP_WORKSPACE_IDS,
   welcomeRoutes,
 } from "./chat-page-welcome-scene-support.js";
-import { historyUser } from "./chat-stream-support.js";
-import { DEFAULT_COMPOSER_OPTIONS } from "./session-meta-fixtures.js";
-import {
-  calls,
-  composerOptionsRoute,
-  currentLocation,
-  type FetchMock,
-  jsonResponse,
-} from "./support.js";
+import { composerOptionsRoute, currentLocation, jsonResponse } from "./support.js";
 import { FakeXhr, installFakeXhr } from "./upload-support.js";
 
-const W = PROJECT_A.id;
-const CREATED = `${CREATED_IDS[0]}`;
 const TEMP = `${TEMP_WORKSPACE_IDS[0]}`;
-const OPTIONS = { ...DEFAULT_COMPOSER_OPTIONS, upload: { maxBytes: 1000, maxFiles: 3 } };
 const DENIED = "路径不在工作空间内";
 const NO_WORKSPACE = "此会话没有工作空间，无法上传文件";
-const EMPTY = "还没有消息，发一条开始吧";
 const EXISTING = "既有会话";
 const UNTITLED = "新会话";
 
-type Welcome = NonNullable<Parameters<typeof welcomeRoutes>[0]>;
 type Mounted = ReturnType<typeof renderChatPage>;
 
 afterEach(cleanupSessionMeta);
-
-/** 欢迎态，上限为每条消息 3 个、每个 1000 字节；新会话的 prompt 缺省挂起。 */
-async function welcome(extra: FetchRoutes = {}, fixture: Welcome = {}) {
-  const page = renderChatPage("/", {
-    ...welcomeRoutes(fixture),
-    ...composerOptionsRoute(OPTIONS),
-    ...extra,
-  });
-  await screen.findByRole("heading", { level: 1, name: HERO });
-  await quiesce();
-  installFakeXhr();
-  return page;
-}
-
-/**
- * 新会话的 prompt 与历史：prompt 按 `outcomes` 依次应答，用完后受理；受理后的历史带回一条附件为 `paths`
- * 的用户消息与一条已完成的回答，此前是空历史。
- */
-function turn(
-  session: SessionView,
-  content: string,
-  paths: string[],
-  outcomes: (() => Response)[] = [],
-): FetchRoutes {
-  let accepted = false;
-  const messages = [
-    { ...historyUser, content, attachments: paths.map((path) => ({ path, size: 10 })) },
-    { ...historyUser, id: 0, role: "assistant", undo: null, content: "好的", createdAt: 0 },
-  ];
-  return {
-    [sessionPromptPath(session.id)]: () => {
-      const outcome = outcomes.shift();
-      if (outcome) return outcome();
-      accepted = true;
-      return jsonResponse(promptAccepted, 202);
-    },
-    [messagesPath(session.id)]: () =>
-      jsonResponse({
-        session,
-        messages: accepted ? messages : [],
-        streamCursor: { epoch: 1, seq: 0 },
-        todo: null,
-      }),
-  };
-}
-
-function uploadOf(workspaceId: string, name: string) {
-  return [["POST", `/api/workspaces/${workspaceId}/uploads?name=${encodeURIComponent(name)}`]];
-}
 
 async function deny(index: number) {
   act(() =>
@@ -135,25 +76,10 @@ async function deny(index: number) {
   await quiesce();
 }
 
-function prompts(fetchMock: FetchMock) {
-  return promptRequests(fetchMock, CREATED).map(([, body]) => body);
-}
-
-function historyReads(fetchMock: FetchMock) {
-  return calls(fetchMock, messagesPath(CREATED)).length;
-}
-
 /** 输入框锁定并显示 `生成中`：整个首次发送都算提交进行中。 */
 function expectSubmitting() {
   expect(composer().disabled).toBe(true);
   expect(screen.getByText("生成中", { exact: true })).toBeTruthy();
-}
-
-/** 发送并等到会话建出、URL 选中它。 */
-async function sendFirst() {
-  clickSend();
-  await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED}`));
-  await quiesce();
 }
 
 /** 用户气泡里的附件列表各项（文件名与大小）。 */

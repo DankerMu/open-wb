@@ -52,8 +52,9 @@ function owns(entry: Entry, client: UploadClient, scopeKey: string | null) {
  * 就全清」会抹掉刚恢复的。会话或账号变化时丢弃归属不符的记录，卸载时全部丢弃；被丢弃的在途请求中止，
  * 排队的不再发出。
  *
- * 同一时刻至多一个上传在途。中止的拒绝与网络失败是同一个错误，无法区分，所以结果与进度一律按 `id`
- * 写回存活的记录，找不到就丢弃；在途闩只由当前在途的那个请求释放。
+ * 同一时刻至多一个上传在途。结果与进度一律按 `id` 写回存活的记录，找不到就丢弃；被本页中止的请求
+ * （按它自己的 controller 认，不看错误——中止的拒绝与网络失败是同一个错误）不记失败；在途闩只由当前
+ * 在途的那个请求释放。
  */
 export function useAttachmentsState(scope: AttachmentsScope) {
   const { client, scopeKey } = scope;
@@ -90,7 +91,7 @@ export function useAttachmentsState(scope: AttachmentsScope) {
   );
 
   // 发出一个文件并占用在途闩。落定后（闩还是它的就先释放）调 `settled`：`failure` 是失败且记录还在时的
-  // 那个错误，成功、被移除或被丢弃都是 undefined。
+  // 那个错误，成功、被移除、被丢弃或被取消（`flush` 的 `cancel`）都是 undefined。
   const launch = useCallback(
     (entry: Entry, file: File, workspaceId: string, settled: (failure: unknown) => void) => {
       const { id } = entry.item;
@@ -107,7 +108,10 @@ export function useAttachmentsState(scope: AttachmentsScope) {
             return undefined;
           },
           (error: unknown) =>
-            patch(id, { status: "failed", message: errorMessage(error) }) ? error : undefined,
+            !controller.signal.aborted &&
+            patch(id, { status: "failed", message: errorMessage(error) })
+              ? error
+              : undefined,
         )
         .then((failure) => {
           if (flightRef.current?.controller === controller) {
@@ -261,11 +265,12 @@ export function useAttachmentsState(scope: AttachmentsScope) {
     [commit],
   );
 
-  // 发送前把 `key` 里待上传的标签按次序逐个传完，一次只有一个在传。没有待上传的同步返回 null；否则不会
-  // reject：传完（或剩下的被移除、丢弃）给出 undefined，停下时给出那个错误——某个文件失败（其后的仍是
-  // 待上传），或该会话没有工作空间（不发请求）。
+  // 发送前把 `key` 里待上传的标签按次序逐个传完，一次只有一个在传。没有待上传的同步返回 null；否则 `done`
+  // 不会 reject：传完（或剩下的被移除、丢弃、取消）给出 undefined，停下时给出那个错误——某个文件失败（其后
+  // 的仍是待上传），或该会话没有工作空间（不发请求）。`cancel` 中止这一轮在途的那个并撤掉排队：被中止的
+  // 回到待上传，其后的不再发出，已传完的不动；落定之后调用无效。
   const flush = useCallback(
-    (key: string): Promise<unknown> | null => {
+    (key: string): { done: Promise<unknown>; cancel: () => void } | null => {
       const owner = scopeRef.current.client;
       const staged = () =>
         entriesRef.current.find(
@@ -274,20 +279,35 @@ export function useAttachmentsState(scope: AttachmentsScope) {
       if (!staged()) {
         return null;
       }
-      return new Promise((resolve) => {
+      // 这一轮在传的那个记录；null 表示已取消或已落定。
+      let current: number | null = null;
+      let cancelled = false;
+      const done = new Promise<unknown>((resolve) => {
         const step = (failure: unknown) => {
-          const next = failure === undefined ? staged() : undefined;
+          const next = failure === undefined && !cancelled ? staged() : undefined;
+          current = null;
           if (!next?.file) {
             resolve(failure);
           } else if (next.workspaceId === null) {
             resolve(new ApiError(400, "no_workspace", NO_WORKSPACE));
           } else {
+            current = next.item.id;
             patch(next.item.id, { status: "uploading" });
             launch(next, next.file, next.workspaceId, step);
           }
         };
         step(undefined);
       });
+      const cancel = () => {
+        cancelled = true;
+        const flight = flightRef.current;
+        if (current !== null && flight?.id === current) {
+          flightRef.current = null;
+          flight.controller.abort();
+          patch(current, { status: "pending", percent: 0 });
+        }
+      };
+      return { done, cancel };
     },
     [launch, patch],
   );
