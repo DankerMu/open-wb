@@ -12,10 +12,10 @@
  * through realpath (macOS tmpdir is /var → /private/var).
  *
  * Issue #1007 (s1g-composer-capabilities task 8.4, design D5/D6): the fork copies the source's
- * three RAW composer columns. Those worlds open the same assembly with the three-model whitelist
- * and an approval cap; the source's columns come from `POST /api/sessions` with the three keys or,
- * for values REST refuses, from a direct `UPDATE`. Oracles: the 201 view and list entry, the three
- * columns with `typeof`, the account's last-choice row and the `session.permission` row count.
+ * three RAW composer columns (the mode no higher than the cap, #1282). Those worlds open the same
+ * assembly with the three-model whitelist and an approval cap; the source's columns come from
+ * `POST /api/sessions` with the three keys or, for values REST refuses, from a direct `UPDATE`.
+ * Oracles: the 201 view, list entry, three columns with `typeof`, last-choice row and audit count.
  * Issue #1009 (task 9.1): the temporary process is started with the source's EFFECTIVE mode and
  * model (turn-control「分叉继承三项输入框设置」, the argv part) — read from its recorded spawn argv.
  * Issue #1010 (task 9.2): the fork's own first dispatch starts its process under the inherited mode
@@ -645,7 +645,7 @@ describe("fork inherits the three composer settings (#1007)", () => {
   );
 
   it(
-    "raw values above the cap or off the whitelist are copied raw; the view clamps like the source's",
+    "a raw mode above the cap is stored as the cap, a model off the whitelist is copied raw; the view clamps like the source's",
     REAL,
     async () => {
       const raw = { approvalMode: "yolo", modelId: "gone", reasoningEffort: "xhigh" };
@@ -658,7 +658,8 @@ describe("fork inherits the three composer settings (#1007)", () => {
 
       const session = forkedSession(fork);
 
-      expect(composerColumns(db, session.id)).toEqual(storedAs(raw));
+      // #1282: the copy's mode is the cap, not the source's `yolo`; the other two columns are raw.
+      expect(composerColumns(db, session.id)).toEqual(storedAs({ ...raw, approvalMode: "write" }));
       expect(composerColumns(db, source.id)).toEqual(storedAs(raw));
       // The argv takes the clamped mode and the whitelisted model, never the raw columns.
       expect(tempArgv(world)).toEqual(["write", "workbuddy/m1"]);
