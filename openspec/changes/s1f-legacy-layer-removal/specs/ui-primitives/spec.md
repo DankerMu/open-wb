@@ -51,11 +51,11 @@
 ## ADDED Requirements
 
 ### Requirement: 覆盖层的 Escape 关闭
-应用里允许 Escape 关闭的覆盖层——外壳的 `导航` 覆盖层、退出确认框、会话的重命名与另存为工作空间对话框、会话删除确认框、撤回冲突确认框、权限档位 `全部自动` 的确认框、项目配置弹层、窄屏下的工作空间侧边栏模态层、文件的创建 / 重命名 / 移动对话框与文件删除确认框——SHALL 保证：焦点位于该覆盖层内容的 DOM 子树内时，一次 Escape 使该覆盖层关闭恰一次（它的关闭回调恰被调用一次，确认动作不被触发）；Escape 的事件目标位于 portal 在外的嵌套层（覆盖层内打开的菜单、弹层或另一个对话框）时 SHALL 只关闭最内的那一层，外层保持打开，再按一次才关闭外层。这是用户可见的行为保证，不规定实现方式。Toast 删除（s1f-legacy-layer-removal）之后 SHALL 逐个覆盖层实测 Radix 自身的 Escape 分派是否已满足上述保证：全部满足则 `useEscapeFallback` 及其全部调用删除；任一不满足则保留该 hook，放在 `web/src/components/escape-fallback.ts`（自写共享模块，见 ui-foundation「组件分层」），由应用层经组件 props 接到覆盖层的内容元素上，不改拷入代码。保留时该兜底 SHALL NOT 让同一次 Escape 把同一层关闭两次，SHALL NOT 在输入法组合中触发关闭，SHALL NOT 响应事件目标在本层内容子树之外的 Escape。两种结果都是合法终态；实测结论与（保留时）需要它的覆盖层 SHALL 记入 ADR-0013 的增补。
+应用里允许 Escape 关闭的覆盖层——外壳的 `导航` 覆盖层、退出确认框、会话的重命名与另存为工作空间对话框、会话删除确认框、撤回冲突确认框、权限档位 `全部自动` 的确认框、项目配置弹层、窄屏下的工作空间侧边栏模态层、文件的创建 / 重命名 / 移动对话框与文件删除确认框——SHALL 保证：焦点位于该覆盖层内容的 DOM 子树内时，一次 Escape 使该覆盖层关闭，确认动作不被触发；Escape 的事件目标位于 portal 在外的嵌套层（覆盖层内打开的菜单、弹层或另一个对话框）时 SHALL 只关闭最内的那一层，外层保持打开，再按一次才关闭外层。这是用户可见的行为保证，不规定实现方式。Toast 删除（s1f-legacy-layer-removal）之后 SHALL 逐个覆盖层实测 Radix 自身的 Escape 分派是否已满足上述保证：全部满足则 `useEscapeFallback` 及其全部调用删除；任一不满足则保留该 hook，放在 `web/src/components/escape-fallback.ts`（自写共享模块，见 ui-foundation「组件分层」），由应用层经组件 props 接到覆盖层的内容元素上，不改拷入代码。保留时该兜底 SHALL NOT 让同一次 Escape 把关闭回调调用两次（Radix 已分派到本层的那次事件，兜底不再处理），SHALL NOT 在输入法组合中触发关闭，SHALL NOT 响应事件目标在本层内容子树之外的 Escape；这三条是兜底自身的性质，以组件级测试断言（Radix 自己不判输入法组合，整层行为断言不了后两条）。保留时，实测中不通过的那个现象 SHALL 有常驻证据：jsdom 能复现的是一条单测，只在真实浏览器复现的是 `make ui-walk` 的一个步骤。两种结果都是合法终态；实测结论与（保留时）需要它的覆盖层 SHALL 记入 ADR-0013 的增补。
 
 #### Scenario: 一次 Escape 关闭所在覆盖层恰一次
 - **WHEN** 在 jsdom（引入 `radix-platform.ts`）中分别打开上列每个覆盖层，焦点在其内容内，按一次 Escape
-- **THEN** 该覆盖层关闭，它的关闭回调恰被调用一次；确认框的确认动作未被触发（退出确认发出 0 次 `POST /api/auth/logout`，会话与文件的删除确认发出 0 次删除请求，`全部自动` 确认框不提交档位）；焦点按各自规格归还
+- **THEN** 该覆盖层关闭（按角色与名称再也查不到它），它外层的页面与覆盖层仍在；确认框的确认动作未被触发（退出确认发出 0 次 `POST /api/auth/logout`，会话与文件的删除确认发出 0 次删除请求，`全部自动` 确认框不提交档位）；焦点按各自规格归还
 
 #### Scenario: 嵌套层只关最内一层
 - **WHEN** 窄屏已登录应用中打开 `导航` 覆盖层，在其中打开用户菜单，层栈交接完成后按 Escape；另一例在 `导航` 覆盖层内打开退出确认框后按 Escape
@@ -63,18 +63,22 @@
 
 #### Scenario: 真实浏览器里的 Escape
 - **WHEN** `make ui-walk` 的两个 project 运行其既有的 Escape 步骤（`mobile-dark` 的 `导航` 覆盖层、项目配置弹层、窄屏的工作空间侧边栏模态层）
-- **THEN** 每一步一次 Escape 之后对应的覆盖层关闭、焦点按各自规格归还，走查全绿
+- **THEN** 每一步一次 Escape 之后对应的覆盖层关闭、焦点按各自规格归还，走查全绿；`useEscapeFallback` 保留且实测中不通过的现象只在真实浏览器复现时，走查另含复现该现象的那一步（去掉该覆盖层的兜底则这一步失败）
+
+#### Scenario: 保留兜底时不重复、不抢输入法
+- **WHEN** `useEscapeFallback` 存在（见「兜底只有两种合法终态」），在 jsdom 中：(1) 把它接在一个不经 Radix 的普通元素上，分别派发子树内的一次 Escape、`isComposing: true` 的 Escape、目标在该元素之外的 Escape，以及一次已先经它的 `onEscapeKeyDown` 标记过的 Escape；(2) 把它按应用层的写法接在拷入层 `dialog` 的内容元素上（引入 `radix-platform.ts`），焦点在内容内按一次 Escape
+- **THEN** (1) 第一种情形关闭回调以 `false` 恰被调用一次，其余三种情形兜底都不调用关闭回调；(2) Radix 的分派与兜底都经过，关闭回调以 `false` 恰被调用一次；`useEscapeFallback` 不存在时本场景不适用
 
 #### Scenario: 兜底只有两种合法终态
 - **WHEN** 扫描 `web/src` 下全部 `.ts`/`.tsx`
-- **THEN** 要么 `useEscapeFallback` 不出现在任何文件里（定义与调用都没有），要么它只定义在 `web/src/components/escape-fallback.ts`；任何情况下 `web/src/ui/escape-fallback.ts` 都不存在
+- **THEN** 要么 `useEscapeFallback` 不出现在任何文件里（定义与调用都没有），要么它的定义恰一处、在 `web/src/components/escape-fallback.ts`；任何情况下 `web/src/ui/escape-fallback.ts` 都不存在；对注入样本（`web/src/features` 下一个文件定义同名函数、`web/src/ui/escape-fallback.ts` 重新出现）守卫各判失败
 
 ### Requirement: 品牌标记与取色边界
 `BrandMark` SHALL 位于 `web/src/components/brand-mark.tsx`（自写共享组件，见 ui-foundation「组件分层」；自 s1f-legacy-layer-removal 起从 `web/src/ui/brand-mark.tsx` 搬来，组件与名字不变），只含自有 mark SVG（沿用现有对勾图形）与可选字标 `WorkBuddy`，`size` 可配，不含任何上游品牌资产；无字标时 svg 为 `role="img"` 且可访问名为 `WorkBuddy`，有字标时 svg 为装饰、可访问名由字标文本提供。`BrandMark` 与 `Icon`（见「动效与图标」）用类名取样式（`ui-brand*`、`ui-icon*`，规则在 ui-foundation 规定的 `theme.css` `base` 块里），这两个文件 SHALL NOT 出现颜色字面量、`--wb-palette-` 引用与 `style={` 内联样式。搬家只改位置与导入路径，组件的属性、类名与渲染结果不变。旧基元层的出口 `web/src/ui/index.ts` SHALL 不存在，也不另建新的统一出口：使用方直接从这两个文件导入。调色板到组件的取色边界见「设计 token 全集」：`web/src/features/**`、`web/src/routes/**` 与直接放在 `web/src/components/` 下的自写文件只引用语义 token 或主题变量。
 
 #### Scenario: 出口与品牌
 - **WHEN** 在 jsdom 渲染从 `web/src/components/brand-mark.tsx` 导入的 `<BrandMark />` 与 `<BrandMark wordmark />`，并静态读取 `web/src/components/brand-mark.tsx`、`web/src/components/icon.tsx` 与 `web/src/ui`
-- **THEN** `BrandMark` 渲染 svg，仅 `wordmark` 时出现文本 `WorkBuddy`；无字标时 svg 为 `role="img"`、可访问名 `WorkBuddy`；两个文件都没有 `style={`；`web/src/ui/index.ts` 不存在，`Icon`、`IconName` 与 `BrandMark` 分别从这两个文件导入
+- **THEN** `BrandMark` 渲染 svg，仅 `wordmark` 时出现文本 `WorkBuddy`；无字标时 svg 为 `role="img"`、可访问名 `WorkBuddy`；两个文件都没有 `style={`；`web/src/ui/index.ts` 不存在，`web/src/components/index.ts` 与 `web/src/components/index.tsx` 也不存在（对注入样本「`web/src/components/index.ts` 出现」守卫判失败），`Icon`、`IconName` 与 `BrandMark` 分别从这两个文件导入
 
 #### Scenario: 取色边界
 - **WHEN** 静态扫描 `web/src/features/**/*.{css,tsx}`、`web/src/routes/**` 与 `web/src/components/` 下直接放置的 `.tsx`
@@ -104,8 +108,8 @@
 
 ### Requirement: Escape 分派不受 Toast 层栈影响
 **Reason**: 这条规定的是 Toast 与旧基元 `Dialog` / `ConfirmDialog` / `Drawer` 共用 Radix DismissableLayer 层栈时的 Escape 交接。owner 2026-10-12 裁定 Toast 直接删除、不提供替代；旧的三个覆盖层基元在产品代码里已没有调用方，随 s1f-legacy-layer-removal 一起删除。四个场景里三个以 Toast 在场为前提（「Toast 在场时打开导航覆盖层后立即 Escape」「覆盖层打开期间出现 Toast」「焦点不在通知区时 Escape 不关 Toast」），前提消失后无从成立；条文标题本身也以 Toast 为名。
-**Migration**: 仍然有效的用户可见保证——一次 Escape 恰好关闭所在覆盖层一次、嵌套菜单只关自己——改由新增的「覆盖层的 Escape 关闭」规定，覆盖对象换成现在实际存在的覆盖层（都由拷入层组件渲染）。原场景「无 Toast 时不重复关闭，嵌套菜单只关自己」的两个断言分别进入新条文的场景「一次 Escape 关闭所在覆盖层恰一次」与「嵌套层只关最内一层」。`useEscapeFallback` 的去留由新条文规定的实测决定（design D4）。通知区对 Escape 的响应不再有对应物：应用里没有 Toast。
+**Migration**: 仍然有效的用户可见保证——一次 Escape 恰好关闭所在覆盖层一次、嵌套菜单只关自己——改由新增的「覆盖层的 Escape 关闭」规定，覆盖对象换成现在实际存在的覆盖层（都由拷入层组件渲染）。原场景「无 Toast 时不重复关闭，嵌套菜单只关自己」的两个断言分别进入新条文的场景「一次 Escape 关闭所在覆盖层恰一次」与「嵌套层只关最内一层」；「不重复关闭」的计数断言与输入法组合的断言进入场景「保留兜底时不重复、不抢输入法」（只在兜底保留时适用）。`useEscapeFallback` 的去留由新条文规定的实测决定（design D4）。通知区对 Escape 的响应不再有对应物：应用里没有 Toast。
 
 ### Requirement: 基元组件库
 **Reason**: 这条是 `web/src/ui/` 基元层的规格：出口 `ui/index.ts` 的导出清单，以及 `Button`、`Input`、`Switch`、`Tag`、`Chip`、`Dialog`、`ConfirmDialog`、`Drawer`、`Menu`、`Popover`、`Tooltip`、`SegmentedControl`、`ToastProvider` / `useToast`、`EmptyState` 各自的属性、类名与样式映射。所有页面迁到拷入层之后，这十三个基元在产品代码里已没有导入方（#1393 清点一），Toast 由 owner 2026-10-12 裁定直接删除；s1f-legacy-layer-removal 把它们连同整个目录删除。十一个场景里五个只描述已删除的基元，无从改写：「表单级基元可访问且状态可断言」「模态基元可访问且关闭策略可断言」「弹出与分段基元可访问且键盘可断言」「通知与空态可断言」「忙碌期焦点留在模态内」。OpenSpec 的 MODIFIED 不能去掉既有场景，所以整条移除，仍然有效的内容另立新条。
-**Migration**: 仍然有效的内容原样迁入两条新条文——`BrandMark`、不设统一出口与取色边界进「品牌标记与取色边界」（场景「出口与品牌」「基元层取色边界」改写后保留，后者更名为「取色边界」）；退出确认与文件页对话框的迁移条款、`radix-platform.ts` 与 `ui-support.ts` 的约定、重命名对话框的焦点归还进「手写对话框迁移不回归」（场景「退出确认迁移不回归」「退出确认框忙碌期焦点」「既有对话框迁移不回归」「焦点归还不滚动」保留）。`Icon` 的条款本来就在「动效与图标」。「features 与 routes 不直接导入 Radix」由 ui-foundation「组件分层」的场景「应用层不直接引 Radix」规定；`ATTRIBUTION.md` 列出每个 `@radix-ui/*` 依赖由 ui-foundation「拷入层的门槛豁免」的场景「归属登记完整」规定，这里不再重复。界面上需要按钮、输入框、开关、对话框、确认框、抽屉、菜单、弹层、提示、分段选择与空态的地方，使用 ui-foundation 拷入层的 shadcn/ui 组件加 Tailwind 类；应用层各对话框自己的忙碌期焦点行为由它们各自的规格规定（退出确认见新条文，会话的重命名与删除见 session-sidebar，文件对话框见 files-web）。没有通知组件可迁：应用不再有 Toast。
+**Migration**: 仍然有效的内容原样迁入两条新条文——`BrandMark`、不设统一出口与取色边界进「品牌标记与取色边界」（场景「出口与品牌」「基元层取色边界」改写后保留，后者更名为「取色边界」）；退出确认与文件页对话框的迁移条款、`radix-platform.ts` 与 `ui-support.ts` 的约定、重命名对话框的焦点归还进「手写对话框迁移不回归」（场景「退出确认迁移不回归」「退出确认框忙碌期焦点」「既有对话框迁移不回归」「焦点归还不滚动」保留）。`Icon` 的条款本来就在「动效与图标」。「features 与 routes 不直接导入 Radix」由 ui-foundation「组件分层」的场景「应用层不直接引 Radix」规定；`ATTRIBUTION.md` 列出每个 `@radix-ui/*` 依赖由 ui-foundation「拷入层的门槛豁免」的场景「归属登记完整」规定，这里不再重复。界面上需要按钮、输入框、开关、对话框、确认框、抽屉、菜单、弹层、提示、分段选择与空态的地方，使用 ui-foundation 拷入层的 shadcn/ui 组件加 Tailwind 类；应用层各对话框自己的忙碌期焦点行为：退出确认见新条文「手写对话框迁移不回归」，文件对话框见 files-web「创建对话框」；会话的重命名与删除确认框已在应用层实现（`web/src/features/chat/rename-dialog.tsx`、`delete-dialog.tsx`），但 session-sidebar 尚无对应条文——这是 s1f-session-list-temp-space 留下的既有缺口，不由本 change 引入或修补。没有通知组件可迁：应用不再有 Toast。
