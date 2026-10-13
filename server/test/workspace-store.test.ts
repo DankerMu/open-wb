@@ -100,7 +100,7 @@ describe("workspaces store list and rootOf", () => {
       expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("secret");
     });
   });
-  it("rejects owned list and rootOf when the persisted workspace path is a symlink or file", () => {
+  it("rejects owned list when a persisted workspace path is a symlink, and rootOf when it is a symlink or a file", () => {
     const { sandboxRoot, ownerRoot, outside } = linkedOwnerLayout();
     writeFileSync(join(ownerRoot, "file-root"), "not-a-dir");
     withStore(sandboxRoot, (db, store) => {

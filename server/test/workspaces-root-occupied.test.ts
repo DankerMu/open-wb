@@ -190,6 +190,28 @@ function listWorkspaces({ app, zhangsan }: World) {
   return app.inject({ method: "GET", url: "/api/workspaces", headers: { cookie: zhangsan } });
 }
 
+/**
+ * A committed temporary workspace of zhangsan, from the store's own `createTemporary` over the
+ * same database, with its root directory removed again.
+ */
+function temporaryWithoutRoot({ db, sandboxRoot }: World) {
+  const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+  db.exec("BEGIN");
+  const { workspace } = store.createTemporary({ id: "u1" });
+  db.exec("COMMIT");
+  rmSync(workspace.root, { recursive: true });
+  return workspace;
+}
+
+function promote({ app, zhangsan }: World, id: string, payload: string) {
+  return app.inject({
+    method: "POST",
+    url: `/api/workspaces/${id}/promote`,
+    headers: { cookie: zhangsan, "content-type": "application/json" },
+    payload,
+  });
+}
+
 function workspaceRow(db: DatabaseSync, id: string): unknown {
   const row = db.prepare("SELECT name, temporary FROM workspaces WHERE id = ?").get(id);
   return row === undefined ? undefined : { ...row };
@@ -247,26 +269,12 @@ describe("workspace routes: 空间根被非目录占据", () => {
 
   it("promote answers 404 for an occupied root whatever the body, and 200 for a root that is only missing", async () => {
     await withWorld(async (world) => {
-      const { app, db, sandboxRoot, zhangsan } = world;
-      // Temporary workspaces come from the store's own `createTemporary`, over the same database.
-      const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
-      db.exec("BEGIN");
-      const occupied = store.createTemporary({ id: "u1" }).workspace;
-      const missing = store.createTemporary({ id: "u1" }).workspace;
-      db.exec("COMMIT");
-      rmSync(occupied.root, { recursive: true });
+      const { db } = world;
+      const [occupied, missing] = [temporaryWithoutRoot(world), temporaryWithoutRoot(world)];
       writeFileSync(occupied.root, OCCUPANT);
-      rmSync(missing.root, { recursive: true });
-      const promote = (id: string, payload: string) =>
-        app.inject({
-          method: "POST",
-          url: `/api/workspaces/${id}/promote`,
-          headers: { cookie: zhangsan, "content-type": "application/json" },
-          payload,
-        });
 
       for (const payload of [JSON.stringify({ name: "调研资料" }), "[]"]) {
-        const response = await promote(occupied.id, payload);
+        const response = await promote(world, occupied.id, payload);
         expectEnvelope(response, 404, NOT_FOUND_ENVELOPE, payload);
         expect(response.payload, payload).toBe(JSON.stringify(NOT_FOUND_ENVELOPE));
       }
@@ -279,7 +287,7 @@ describe("workspace routes: 空间根被非目录占据", () => {
       expect(listed.workspaces.map((workspace) => workspace.id)).toEqual([OCCUPIED, MISSING, FINE]);
 
       // The control: a missing root does not block promote (temporary-workspaces「转正」).
-      const control = await promote(missing.id, JSON.stringify({ name: "调研资料" }));
+      const control = await promote(world, missing.id, JSON.stringify({ name: "调研资料" }));
 
       expect(control.statusCode).toBe(200);
       expect(control.headers["cache-control"]).toBe("no-store");
@@ -296,7 +304,7 @@ describe("workspace routes: 空间根被非目录占据", () => {
       ]);
       expect(existsSync(missing.root)).toBe(false);
       // And an illegal body on a missing root is still judged as a body.
-      expect((await promote(missing.id, "[]")).statusCode).toBe(400);
+      expect((await promote(world, missing.id, "[]")).statusCode).toBe(400);
     });
   });
 
@@ -336,13 +344,15 @@ describe("workspace routes: 空间根被非目录占据", () => {
     });
   });
 
-  it("stays a sanitized 500 on every route and on the listing when the root is a symbolic link to a directory (D14-1)", async () => {
+  it("stays a sanitized 500 on every route, on promote and on the listing when the root is a symbolic link to a directory (D14-1)", async () => {
     await withWorld(async (world) => {
       const { db, sandboxRoot, root } = world;
       const target = join(sandboxRoot, "u1", "fine");
       writeFileSync(join(target, "keep.md"), LINKED_SECRET);
       rmSync(root);
       symlinkSync(target, root);
+      const temporary = temporaryWithoutRoot(world);
+      symlinkSync(target, temporary.root);
       const requests: Array<[name: string, request: RootRequest]> = [
         ...ROUTES,
         // Paths that would be legal below the link's target.
@@ -358,6 +368,11 @@ describe("workspace routes: 空间根被非目录占据", () => {
         expect(response.payload, name).not.toContain("keep.md");
       }
       expectEnvelope(await listWorkspaces(world), 500, INTERNAL_ERROR_ENVELOPE, "listing");
+      const promoted = await promote(world, temporary.id, JSON.stringify({ name: "调研资料" }));
+      expectEnvelope(promoted, 500, INTERNAL_ERROR_ENVELOPE, "promote");
+      expect(promoted.payload).not.toContain(LINKED_SECRET);
+      expect(workspaceRow(db, temporary.id)).toEqual({ name: temporary.name, temporary: 1 });
+      expect(auditRows(db, "workspace.promote")).toEqual([]);
 
       expect(auditCount(db)).toEqual({ count: 0 });
       expect(readFileSync(join(target, "keep.md"), "utf8")).toBe(LINKED_SECRET);

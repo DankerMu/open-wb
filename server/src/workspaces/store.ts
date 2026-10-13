@@ -51,9 +51,9 @@ interface CreatedTemporaryWorkspace {
 }
 
 /**
- * The path of a root exists and its `lstat` is not a directory: a regular file in the tests, any
- * other non-directory entry by the same check (as read from the code, not exercised). A root that
- * is a symbolic link when the resolver looks is refused there and stays the plain `Error`
+ * The path of a root exists and its `lstat` is not a directory: a regular file and a FIFO in the
+ * tests, any other non-directory entry by the same check (read from the code, not exercised). A
+ * root that is a symbolic link when the resolver looks is refused there and stays the plain `Error`
  * (tested); one put in place between the resolver's `lstat` and this one would be reported as
  * occupied (as read from the code, not exercised).
  *

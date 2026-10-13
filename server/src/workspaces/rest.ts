@@ -91,11 +91,11 @@ export function currentPrincipal(request: FastifyRequest): { id: string } {
 }
 
 /**
- * The store's owner-scoped `rootOf` for the workspace HTTP boundary and the preview listener, the
- * only places a root occupied by a non-directory is a 404 (#1244): that one error class becomes
- * `not_found`, before the request's path or body is looked at. Null (not the caller's) and the
- * path come back as the store gave them — what a missing root means is each caller's own rule —
- * and any other failure (an unsafe owner segment, a symbolic link) propagates as it is.
+ * The store's owner-scoped `rootOf` for the workspace routes and the preview listener, the only
+ * places an occupied root is a 404 (#1244): that one class becomes `not_found` before any path
+ * check on every route, and before the body only where the lookup runs in preParsing (`promote`,
+ * `move`, `preview-token`, upload) — `dirs` parses its JSON body first. Null and the path come back
+ * as the store gave them; any other failure (unsafe owner segment, symbolic link) propagates.
  */
 export function ownedRootOf(
   store: Pick<WorkspaceStore, "rootOf">,

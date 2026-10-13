@@ -4,9 +4,10 @@
  * `rootOf` and `promote` throw the store's own `WorkspaceRootOccupiedError`; `list` yields the row
  * as it does for a missing root. A root that is a symbolic link and an unsafe owner segment keep
  * failing with a plain `Error` (D14-1), so the HTTP boundary cannot take them for the 404 case.
- * Real SQLite, real directories; expected values are literals and the answers read while the
- * root was still missing.
+ * The occupant is a regular file, in one case a FIFO. Real SQLite, real directories; expected
+ * values are literals and the answers read while the root was still missing.
  */
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   lstatSync,
@@ -214,6 +215,31 @@ describe("workspace store: promote 对被非目录占据的根", () => {
       expect(rowOf(db, temporary.id)).toEqual(before);
       expect(auditKinds(db)).toEqual([]);
       expect(readFileSync(temporary.root, "utf8")).toBe(OCCUPANT);
+    });
+  });
+
+  it("throws WorkspaceRootOccupiedError from rootOf and from promote when a FIFO occupies the root", () => {
+    withWorld((world) => {
+      const { db, store } = world;
+      const temporary = createTemporary(world);
+      rmSync(temporary.root, { recursive: true });
+      execFileSync("mkfifo", [temporary.root]);
+      const before = rowOf(db, temporary.id);
+
+      for (const run of [
+        () => store.rootOf(U1, temporary.id),
+        () => store.promote(U1, temporary.id, "调研资料"),
+      ]) {
+        const error = thrownBy(run);
+        expect(error).toBeInstanceOf(WorkspaceRootOccupiedError);
+        expect((error as WorkspaceRootOccupiedError).root).toBe(temporary.root);
+      }
+
+      expect(before).toEqual({ name: temporary.name, dir: temporary.dir, temporary: 1 });
+      expect(db.isTransaction).toBe(false);
+      expect(rowOf(db, temporary.id)).toEqual(before);
+      expect(auditKinds(db)).toEqual([]);
+      expect(lstatSync(temporary.root).isFIFO()).toBe(true);
     });
   });
 
