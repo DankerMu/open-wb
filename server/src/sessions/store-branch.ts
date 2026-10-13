@@ -1,7 +1,9 @@
 import type { DatabaseSync } from "node:sqlite";
 import { HttpError } from "../core/errors/index.js";
+import type { ApprovalMode } from "../model-catalog.js";
 import type { MessageRole, MessageStatus, MessageView, StepStatus, StepView } from "./store.js";
 import { parseAttachments } from "./store-attachments.js";
+import { type ComposerConfig, storedModeUnderCap } from "./store-composer.js";
 
 export type MessageDbRow = {
   id: number;
@@ -184,13 +186,13 @@ export function replaceLastAssistant(
   });
 }
 
-const FORK_SOURCE = "SELECT status FROM chat_sessions WHERE id = ? AND owner_id = ?";
+const FORK_SOURCE = "SELECT status, approval_mode FROM chat_sessions WHERE id = ? AND owner_id = ?";
 const FORK_LAST_ASSISTANT =
   "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at DESC, id DESC LIMIT 1";
 const FORK_POINT =
   "SELECT created_at FROM chat_messages WHERE id = ? AND session_id = ? AND role = 'user'";
 const FORK_SESSION =
-  "INSERT INTO chat_sessions(id, owner_id, title, status, omp_session_file, parent_session_id, created_at, updated_at, workspace_id, scene, approval_mode, model_id, reasoning_effort) SELECT ?, owner_id, title, 'idle', ?, id, ?, ?, workspace_id, scene, approval_mode, model_id, reasoning_effort FROM chat_sessions WHERE id = ?";
+  "INSERT INTO chat_sessions(id, owner_id, title, status, omp_session_file, parent_session_id, created_at, updated_at, workspace_id, scene, approval_mode, model_id, reasoning_effort) SELECT ?, owner_id, title, 'idle', ?, id, ?, ?, workspace_id, scene, ?, model_id, reasoning_effort FROM chat_sessions WHERE id = ?";
 const FORK_HISTORY =
   "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
 const FORK_MESSAGE =
@@ -217,11 +219,21 @@ export interface ForkCommit {
  * than the prechecked one or lost the fork point (session_busy, no write), insert the new session
  * and copy, by explicit columns, every message before the fork point with its steps and approvals.
  * The new session takes the last copied assistant's status (a `running` one fails the whole copy).
+ * Its row copies the source's columns as they are, except `approval_mode`: the source's raw mode as
+ * read in this transaction, stored no higher than `composer.approvalMaxMode` (`storedModeUnderCap`,
+ * #1282). The source row is not rewritten.
  */
-export function copyForkHistory(db: DatabaseSync, input: ForkCommit, now: number): void {
+export function copyForkHistory(
+  db: DatabaseSync,
+  input: ForkCommit,
+  now: number,
+  composer: Pick<ComposerConfig, "approvalMaxMode">,
+): void {
   const { sourceId, sessionId, ownerId, messageId, expectedAssistantId, sessionFile } = input;
   runOwnedTransaction(db, "fork copy rollback failed", () => {
-    const source = db.prepare(FORK_SOURCE).get(sourceId, ownerId) as { status: string } | undefined;
+    const source = db.prepare(FORK_SOURCE).get(sourceId, ownerId) as
+      | { status: string; approval_mode: ApprovalMode | null }
+      | undefined;
     const last = db.prepare(FORK_LAST_ASSISTANT).get(sourceId) as { id: number } | undefined;
     const point = db.prepare(FORK_POINT).get(messageId, sourceId) as
       | { created_at: number }
@@ -234,7 +246,8 @@ export function copyForkHistory(db: DatabaseSync, input: ForkCommit, now: number
     ) {
       throw new HttpError("session_busy");
     }
-    const inserted = db.prepare(FORK_SESSION).run(sessionId, sessionFile, now, now, sourceId);
+    const mode = storedModeUnderCap(source.approval_mode, composer);
+    const inserted = db.prepare(FORK_SESSION).run(sessionId, sessionFile, now, now, mode, sourceId);
     requireChanges(inserted.changes, 1, "fork session insert");
     const at = Number(point.created_at);
     const history = db.prepare(FORK_HISTORY).all(sourceId, at, at, messageId) as Array<{

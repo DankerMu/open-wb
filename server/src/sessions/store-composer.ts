@@ -4,8 +4,9 @@
  * value, `effectiveComposer(rawComposer(row), config)`; the configuration is handed down by the
  * assembly and never read from the environment here.
  * The write side of creation (#1005, design D4/D6): which raw values a new session row gets — the
- * request's, else the account's last choice (`account_composer_prefs`, migration 041), else NULL —
- * the upsert of that last choice, and whether the creation writes a `session.permission` audit.
+ * request's, else the account's last choice (`account_composer_prefs`, migration 041; its mode no
+ * higher than the cap, #1282), else NULL — the upsert of that last choice, and whether the creation
+ * writes a `session.permission` audit.
  * The write side of a PATCH (#1006, design D5): the same value checks against the session's own
  * current model, the same upsert, and an audit only when the effective mode changes.
  * The read of the last choice alone (#1008) serves `GET /api/composer/options`.
@@ -16,6 +17,7 @@ import { HttpError } from "../core/errors/index.js";
 import {
   APPROVAL_MODES,
   type ApprovalMode,
+  capApprovalMode,
   type Effort,
   effectiveComposer,
 } from "../model-catalog.js";
@@ -139,7 +141,8 @@ export function readComposerPrefs(db: DatabaseSync, ownerId: string): ComposerDb
  * only, so it goes first in the creation transaction; an invalid value throws `bad_request` before
  * anything is written or any directory made.
  * Keys the request does not name copy the last choice's raw columns as they are, valid under
- * today's configuration or not (design D3: clamped on read).
+ * today's configuration or not (design D3: clamped on read) — except the mode, which is stored no
+ * higher than today's cap (`storedModeUnderCap`); the last-choice row itself is not rewritten.
  */
 export function resolveCreateComposer(
   db: DatabaseSync,
@@ -153,8 +156,25 @@ export function resolveCreateComposer(
     config,
     () => effectiveComposer(rawComposer({ ...NO_CHOICE, model_id: last.model_id }), config).modelId,
   );
-  const row = { ...last, ...given };
+  const inherited = { ...last, approval_mode: storedModeUnderCap(last.approval_mode, config) };
+  const row = { ...inherited, ...given };
   return { row, given, auditTo: creationAuditTo(row.approval_mode, config) };
+}
+
+/**
+ * The mode a creation inherits, or a fork copies, as the new session row stores it: the lower of
+ * the raw mode and the cap in force at this write; NULL (never chosen) stays NULL.
+ * session-permission-tier「管理员最高档」 (#1282, owner ruling A — s1g design D3's "never clamped in
+ * storage" no longer holds at these two writes): a row written while the cap is lowered must not
+ * read as a wider mode once the cap is raised again. Rows written earlier are not touched, and
+ * neither is the last-choice row; a mode the request itself names is refused above the cap
+ * (`checkComposerInput`), never clamped.
+ */
+export function storedModeUnderCap(
+  mode: ApprovalMode | null,
+  config: Pick<ComposerConfig, "approvalMaxMode">,
+): ApprovalMode | null {
+  return mode === null ? null : capApprovalMode(mode, config.approvalMaxMode);
 }
 
 /**

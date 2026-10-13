@@ -262,6 +262,7 @@ describe("创建时的审计 (session-permission-tier「档位变更审计」)",
   });
 
   // 上界 / 原始档位的来源 → 是否写、`to`、视图档位。前三行是规格「创建时的审计」的第二段。
+  // 末列只在入行的档位不同于最近选择里的原始值时给出：继承来的档位高于上界时存上界本身（#1282）。
   it.each<
     [
       string,
@@ -270,6 +271,7 @@ describe("创建时的审计 (session-permission-tier「档位变更审计」)",
       string | null,
       string | null,
       string,
+      string?,
     ]
   >([
     ["上界 always-ask、无选择", "always-ask", "none", null, null, "always-ask"],
@@ -279,6 +281,7 @@ describe("创建时的审计 (session-permission-tier「档位变更审计」)",
       "inherited",
       "yolo",
       null,
+      "always-ask",
       "always-ask",
     ],
     ["上界 yolo、显式 write（就是缺省档）", undefined, "explicit", "write", null, "write"],
@@ -291,7 +294,7 @@ describe("创建时的审计 (session-permission-tier「档位变更审计」)",
       "always-ask",
       "always-ask",
     ],
-    ["上界 write、继承 yolo（行存 yolo，视图 write）", "write", "inherited", "yolo", null, "write"],
+    ["上界 write、继承 yolo（行存 write）", "write", "inherited", "yolo", null, "write", "write"],
     ["上界 write、显式 always-ask", "write", "explicit", "always-ask", "always-ask", "always-ask"],
     [
       "上界 always-ask、显式 always-ask（就是缺省档）",
@@ -301,7 +304,7 @@ describe("创建时的审计 (session-permission-tier「档位变更审计」)",
       null,
       "always-ask",
     ],
-  ])("创建时的审计：%s", async (_name, cap, source, raw, to, shown) => {
+  ])("创建时的审计：%s", async (_name, cap, source, raw, to, shown, stored) => {
     const world = await openWorld(cap);
     if (source === "inherited") {
       plantPrefs(world, "zhaoliu", [raw, null, null]);
@@ -314,7 +317,7 @@ describe("创建时的审计 (session-permission-tier「档位变更审计」)",
     );
 
     expect(view.approvalMode).toBe(shown);
-    expect(rawOf(world, view.id)).toEqual([raw, null, null]);
+    expect(rawOf(world, view.id)).toEqual([stored ?? raw, null, null]);
     expect(permissionAudits(world)).toEqual(to === null ? [] : [createdAs("zhaoliu", view, to)]);
   });
 });

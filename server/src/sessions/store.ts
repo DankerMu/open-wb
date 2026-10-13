@@ -416,7 +416,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
 
     commitFork(input) {
       assertOpen(closed);
-      copyForkHistory(db, input, Date.now());
+      copyForkHistory(db, input, Date.now(), options.composer);
       return readSessionView(db, input.sessionId, options.composer, "forked session row missing");
     },
 

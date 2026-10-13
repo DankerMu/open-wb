@@ -83,6 +83,11 @@ export function defaultEffort(model: CatalogModel): Effort | null {
 export const APPROVAL_MODES = ["always-ask", "write", "yolo"] as const;
 export type ApprovalMode = (typeof APPROVAL_MODES)[number];
 
+/** 档位与最高档中较低的一个：读取时的夹取，以及新建与 fork 写入会话行时的夹取，都用它。 */
+export function capApprovalMode(mode: ApprovalMode, max: ApprovalMode): ApprovalMode {
+  return APPROVAL_MODES.indexOf(mode) > APPROVAL_MODES.indexOf(max) ? max : mode;
+}
+
 /**
  * 会话输入框设置的有效值（session-composer-settings「有效值解析」）：只读入参，不回写原始值。
  * 档位取原始值（null 即 write）与最高档中较低的一个；模型不在白名单取缺省模型；
@@ -97,11 +102,7 @@ export function effectiveComposer(
   config: { approvalMaxMode: ApprovalMode; modelCatalog: ModelCatalog },
 ): { approvalMode: ApprovalMode; modelId: string; reasoningEffort: Effort | null } {
   const { models, defaultModelId } = config.modelCatalog;
-  const wanted = raw.approvalMode ?? "write";
-  const capped =
-    APPROVAL_MODES.indexOf(wanted) > APPROVAL_MODES.indexOf(config.approvalMaxMode)
-      ? config.approvalMaxMode
-      : wanted;
+  const capped = capApprovalMode(raw.approvalMode ?? "write", config.approvalMaxMode);
   const model =
     models.find((entry) => entry.id === raw.modelId) ??
     models.find((entry) => entry.id === defaultModelId);
