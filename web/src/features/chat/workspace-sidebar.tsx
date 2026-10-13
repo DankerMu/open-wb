@@ -215,7 +215,9 @@ type WorkspaceSplitProps = {
  *   `工作空间侧边栏` 按钮」）；定位本身不动焦点，它留在被点的按钮上。
  * - 窄屏：全屏模态层，没有分隔线；打开时焦点进 `关闭`，Escape 与 `关闭` 关闭后焦点还给打开它的那个
  *   控件：顶栏按钮，或被点的 `查看详情`（`restoreFocus(true)`）。Escape 另接了 `useEscapeFallback`
- *   兜底——Toast 已删除；这个兜底是否仍然需要由 issue 1393 的 Escape 实测决定。
+ *   兜底：键盘聚焦顶栏按钮（它的 tooltip 出现）后按 Enter 打开，紧跟着的那次 Escape 被 Radix 分派给了
+ *   还在关闭中的 tooltip 那一层，去掉兜底时本层有时关不掉（实测，Chromium，自动化的按键速度；
+ *   issue 1399）。常驻证据：`chat-workspace-sidebar-narrow.test.tsx` 的 N5。
  * - 拷入层的分栏在挂载时无条件 `new ResizeObserver`；没有它的运行环境退回普通的横向 flex，没有分隔线。
  */
 export function WorkspaceSplit({ children, sidebar, target }: WorkspaceSplitProps) {

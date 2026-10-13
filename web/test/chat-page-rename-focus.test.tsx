@@ -5,7 +5,7 @@
  * scroll" is observed as the argument of the hand-back `focus` call.
  */
 import "./radix-platform.js";
-import { fireEvent, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   A,
@@ -15,10 +15,17 @@ import {
   focusOn,
   mountSessions,
   openTopbarRename,
+  patchPath,
   type RenameControls,
   renameDialog,
   view,
 } from "./chat-page-session-meta-support.js";
+import {
+  escapeOnFocusEntry,
+  keepTooltipExitAnimation,
+  tooltipStates,
+} from "./escape-race-support.js";
+import { calls } from "./support.js";
 
 const TITLE = "季度复盘";
 
@@ -47,4 +54,24 @@ describe("会话重命名对话框：焦点归还不滚动", () => {
       expect(focus.mock.calls).toEqual([[{ preventScroll: true }]]);
     },
   );
+
+  // The standing evidence for keeping `useEscapeFallback` (ADR-0013 addendum 「Escape 实测」): with the
+  // name dialog's fallback unwired the case goes red — the key is dispatched to the tooltip's layer only.
+  it("opened from the banner's 重命名 while its tooltip is still closing: an Escape landing the moment focus enters the dialog still closes it, sends nothing and hands the focus back", async () => {
+    keepTooltipExitAnimation();
+    const { fetchMock } = mountSessions(`/?session=${A}`, [view(A, TITLE)]);
+    await findList(TITLE);
+    await crumb(TITLE);
+    const trigger = within(screen.getByRole("banner")).getByRole("button", { name: "重命名" });
+    trigger.focus();
+    await waitFor(() => expect(tooltipStates()).toEqual(["instant-open"]));
+
+    const seen = escapeOnFocusEntry(() => fireEvent.click(trigger));
+
+    // Radix consumed the key on the closing tooltip's layer; the dialog's own layer never saw it.
+    expect(seen).toEqual({ fired: 1, prevented: true, tooltips: ["closed"] });
+    await waitFor(() => expect(renameDialog()).toBeNull());
+    await focusOn(trigger);
+    expect(calls(fetchMock, patchPath(A))).toEqual([]);
+  });
 });

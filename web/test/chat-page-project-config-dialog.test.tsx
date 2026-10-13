@@ -1,6 +1,6 @@
 /**
  * Issue 861 项目配置入口 on the copied-layer dialog
- * (openspec/changes/archive/2026-10-06-s1f-chat-surface, chat-web 「会话页」Project config entry): H1–H4. The behaviour cases G1–G9 stay in
+ * (openspec/changes/archive/2026-10-06-s1f-chat-surface, chat-web 「会话页」Project config entry): H1–H5. The behaviour cases G1–G9 stay in
  * chat-page-project-config.test.tsx; here is what the move itself has to hold: the dialog is the
  * copied one, focus opens on its 关闭 and goes back to the header button, and Escape still closes
  * it. Seam: the jsdom chat page inside the real shell over a stubbed `fetch`.
@@ -17,6 +17,11 @@ import {
 } from "./chat-page-session-meta-support.js";
 import { renderChatPage } from "./chat-page-support.js";
 import { PROJECT_A, welcomeRoutes } from "./chat-page-welcome-scene-support.js";
+import {
+  escapeOnFocusEntry,
+  keepTooltipExitAnimation,
+  tooltipStates,
+} from "./escape-race-support.js";
 import { jsonResponse } from "./support.js";
 
 const TITLE = "助手会读取的项目配置文件";
@@ -81,7 +86,7 @@ function stubScrollerHeights(content: number) {
 
 afterEach(cleanupSessionMeta);
 
-describe("项目配置入口：拷入层对话框 (H1–H4)", () => {
+describe("项目配置入口：拷入层对话框 (H1–H5)", () => {
   it("H1 the list is the copied dialog: modal, titled and described by its own slots, each row a text path and a kind badge, nothing of the old layer", async () => {
     await mount();
 
@@ -119,6 +124,24 @@ describe("项目配置入口：拷入层对话框 (H1–H4)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await focusOn(button);
     expect(onButton.mock.calls).toEqual([[{ preventScroll: true }]]);
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  // The standing evidence for keeping `useEscapeFallback` (ADR-0013 addendum 「Escape 实测」): with this
+  // dialog's fallback unwired the case goes red — the key is dispatched to the tooltip's layer only.
+  it("H5 opened from the header button while its tooltip is still closing: an Escape landing the moment focus enters the dialog still closes it, and focus goes back to the button", async () => {
+    keepTooltipExitAnimation();
+    await mount();
+    const button = configButton();
+    button.focus();
+    await waitFor(() => expect(tooltipStates()).toEqual(["instant-open"]));
+
+    const seen = escapeOnFocusEntry(() => fireEvent.click(button));
+
+    // Radix consumed the key on the closing tooltip's layer; the dialog's own layer never saw it.
+    expect(seen).toEqual({ fired: 1, prevented: true, tooltips: ["closed"] });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await focusOn(button);
     expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 

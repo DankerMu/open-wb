@@ -22,6 +22,11 @@ import {
   sidebarButton,
   UNBOUND,
 } from "./chat-workspace-sidebar-support.js";
+import {
+  escapeOnFocusEntry,
+  keepTooltipExitAnimation,
+  tooltipStates,
+} from "./escape-race-support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 afterEach(async () => {
@@ -95,6 +100,27 @@ describe("窄屏覆盖", () => {
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
 
     await expectClosed({ focus, layer, trigger: button });
+  });
+
+  // 保留 `useEscapeFallback` 的常驻证据（ADR-0013 增补「Escape 实测」）：去掉本层的兜底这一例判红——那次
+  // 按键只分派给了 tooltip 那一层。
+  it("N5 键盘聚焦顶栏按钮、它的 tooltip 还在关闭中时打开：焦点进层那一刻到达的 Escape 也关闭它，焦点回顶栏按钮", async () => {
+    keepTooltipExitAnimation();
+    installNarrowViewport();
+    await mountSidebarPage(BOUND);
+    const trigger = sidebarButton();
+    trigger.focus();
+    await waitFor(() => expect(tooltipStates()).toEqual(["instant-open"]));
+    const focus = vi.spyOn(trigger, "focus");
+
+    const seen = escapeOnFocusEntry(() => fireEvent.click(trigger));
+
+    // Radix 把这次按键交给了关闭中的 tooltip 那一层并吃掉了它；模态层自己那一层没有收到。
+    expect(seen).toEqual({ fired: 1, prevented: true, tooltips: ["closed"] });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: NAME })).toBeNull());
+    await focusOn(trigger);
+    expect(focus.mock.calls).toStrictEqual([[{ preventScroll: true }]]);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("N2 层内的 关闭工作空间侧边栏 关闭它，焦点同样归还", async () => {

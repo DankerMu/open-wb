@@ -9,6 +9,7 @@ import {
 import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
 import { chatSnapshot } from "./chat-stream-support.js";
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
+import { pagePrompts } from "./page-notices.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import { calls, type FetchMock, jsonResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
@@ -255,10 +256,15 @@ export function patchOf(body: string) {
   return { body, contentType: "application/json", method: "PATCH" };
 }
 
-/** 列表动作不弹轻提示：三条旧文案在页面任何位置都不出现（应用里已没有 Toast 组件，#1398）。 */
+/**
+ * 列表动作不弹轻提示：三条旧文案在页面任何位置都不出现（应用里已没有 Toast 组件，#1398），且整页没有
+ * `status` 角色的提示（`pagePrompts()`，状态标记不算）。`alert` 不在这里看：列表区顶部提示与对话框内的
+ * 报错由各用例自己按文案断言。
+ */
 export function expectNoListToast() {
   const text = document.body.textContent ?? "";
   expect(RETIRED_TOASTS.filter((retired) => text.includes(retired))).toEqual([]);
+  expect(pagePrompts().filter((notice) => notice.startsWith("status:"))).toEqual([]);
 }
 
 /** 列表区顶部提示（`关闭提示` 按钮所在的 `role="alert"`）的文案；没有为 null。 */

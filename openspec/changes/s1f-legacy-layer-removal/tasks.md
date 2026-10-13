@@ -92,7 +92,7 @@ Minimal mergeable slice: atomic - `ToastProvider` 从入口与测试包装里一
 
 ## 3. ui-primitives — Escape 实测与兜底的去留（子 issue B2）
 
-- [ ] 3.1 Escape 实测（design D4；基线是组 2 合入后的 `master`；实测用的改动不提交）：
+- [x] 3.1 Escape 实测（design D4；基线是组 2 合入后的 `master`；实测用的改动不提交）：
   (0) 开工先对照 design D4 的表逐个调用点检查既有用例：是否同时断言了「覆盖层消失」与「确认动作未触发 / 没有发出请求」。缺的先在未改动的代码上补齐并通过，再往下做；补了哪些写进 PR。
   (a) 把 9 个文件里 10 处 `useEscapeFallback` 调用接到内容元素上的 `onEscapeKeyDown` 与 `onKeyDown` 两个属性去掉，`ref` 保留；
   (b) 跑 `npm test --workspace web`，对照 D4 的表逐个调用点确认按 Escape 的用例（连同 2.1 搬来的三例与 (0) 补的）全部通过——不许改任何断言（`web/test/escape-fallback.test.tsx` 的 (2) 测的是接了 hook 的搭台，不受 (a) 影响）；
@@ -100,21 +100,22 @@ Minimal mergeable slice: atomic - `ToastProvider` 从入口与测试包装里一
   (d) 对走查没有 Escape 步骤的七处调用（退出确认框、重命名 / 另存为工作空间、会话删除确认框、撤回冲突确认框、`全部自动` 确认框、文件的创建 / 重命名 / 移动对话框、文件删除确认框），用一次性 Playwright 脚本在真实浏览器里各打开一次、焦点在其内时按一次 Escape，断言它关闭且确认动作未触发；其中能嵌套的（工作空间侧边栏模态层里的文件对话框、`导航` 覆盖层里的退出确认框）另断言只关最内一层。
   某一处触达不了（如撤回冲突确认框需要冲突态）时用 `page.route` 造出该状态；仍触达不了的，该调用点记「未证实」。
   验证：一张十行的结果表（调用点、单测、走查或补测、通过 / 不通过 / 未证实；不通过的写现象、复现步骤、jsdom 能否复现）。**任一处不通过、未证实，或结果不稳定（同一步骤重复三次出现不同结果）即判「不通过」，取 3.3。**
-- [ ] 3.2 分支一——十处全部通过：删除 `web/src/ui/escape-fallback.ts`、10 处调用与 `web/test/escape-fallback.test.tsx`；四处借用其 `ref` 的地方换成 `useRef<HTMLDivElement>(null)`、行为不变——`footer.tsx:74`（忙碌期焦点救回）、`app-shell.tsx:52`（打开者焦点归还）、`project-config.tsx:148`（`onOpenAutoFocus` 里把焦点定位到 `关闭`，不许删掉这段）、`dialogs.tsx:157`（内容元素引用）；`web/src/ui/index.ts` 去掉该导出；
+- [x] 3.2 分支一——十处全部通过：删除 `web/src/ui/escape-fallback.ts`、10 处调用与 `web/test/escape-fallback.test.tsx`；四处借用其 `ref` 的地方换成 `useRef<HTMLDivElement>(null)`、行为不变——`footer.tsx:74`（忙碌期焦点救回）、`app-shell.tsx:52`（打开者焦点归还）、`project-config.tsx:148`（`onOpenAutoFocus` 里把焦点定位到 `关闭`，不许删掉这段）、`dialogs.tsx:157`（内容元素引用）；`web/src/ui/index.ts` 去掉该导出；
   `web/test/ui-layering.test.ts` 的白名单去掉 `useEscapeFallback`、`FROZEN_FILES` 收缩为 5 个；2.6 改过的六处注释里随 hook 消失的删掉，其余改写为现状（`app-shell.tsx:42`、`workspace-sidebar.tsx:208`、`web/e2e/ui-walk-session-list.ts:39-41`）。
   验证：`grep -rn useEscapeFallback web/src web/test web/e2e` 只剩守卫里的注入样本；`npm test --workspace web` 与 `make ui-walk` 全绿（`ui-walk-project-config.ts` 的「打开时焦点在 `关闭`」步骤仍通过）。（未取此分支时：在本条后注明「未取，见 3.1 的结果表」并勾选。）
-- [ ] 3.3 分支二——任一处不通过：撤销 3.1(a) 的改动，10 处调用**全部**保留、原样不动（不做局部删除）；`web/src/ui/escape-fallback.ts` 的头注释与 2.6 改过的另五处注释改写为实测得到的真实原因与需要它的覆盖层（不再提 Toast）；文件留在原处，组 4 搬到 `web/src/components/escape-fallback.ts`。`web/test/escape-fallback.test.tsx` 保留（兜底三条性质的常驻证据）。
+  **未取，见 3.1 的结果表**（#1399 的 PR，2026-10-13）：十处里三处不通过——顶栏入口的重命名 / 另存为、项目配置弹层、窄屏工作空间侧边栏模态层；触发器的 tooltip 还在退出动画里时紧接着按下的 Escape 被 tooltip 层吃掉。取 3.3。
+- [x] 3.3 分支二——任一处不通过：撤销 3.1(a) 的改动，10 处调用**全部**保留、原样不动（不做局部删除）；`web/src/ui/escape-fallback.ts` 的头注释与 2.6 改过的另五处注释改写为实测得到的真实原因与需要它的覆盖层（不再提 Toast）；文件留在原处，组 4 搬到 `web/src/components/escape-fallback.ts`。`web/test/escape-fallback.test.tsx` 保留（兜底三条性质的常驻证据）。
   不通过的现象必须留下常驻证据，二者必居其一：jsdom 能复现的，补一条单测（先红后绿：去掉该调用点的 hook 时红，保留时绿），放在该覆盖层既有的测试文件里；只在真实浏览器复现的，把 3.1(d) 里对应的那一步固化为 `make ui-walk` 的常驻步骤（放进该覆盖层所在页面的走查文件，两个 project 里它适用的那个），同样先红后绿。
   验证：补的用例或走查步骤在去掉该调用点的 hook 时判红；`npm test --workspace web` 与 `make ui-walk` 全绿。（未取此分支时：在本条后注明「未取，见 3.1 的结果表」并勾选。）
-- [ ] 3.4 兜底去留的守卫（规格场景「兜底只有两种合法终态」；design D11 的 G1）：在 `web/test/ui-layering.test.ts` 加一个吃「文件列表 + 内容」的纯判定函数，接受且只接受两种状态——`useEscapeFallback` 在 `web/src` 的 `.ts`/`.tsx` 里完全不出现；或它的定义（`export function useEscapeFallback`）恰一处、在指定路径。
+- [x] 3.4 兜底去留的守卫（规格场景「兜底只有两种合法终态」；design D11 的 G1）：在 `web/test/ui-layering.test.ts` 加一个吃「文件列表 + 内容」的纯判定函数，接受且只接受两种状态——`useEscapeFallback` 在 `web/src` 的 `.ts`/`.tsx` 里完全不出现；或它的定义（`export function useEscapeFallback`）恰一处、在指定路径。
   取 3.2 时：对真实仓库断言前一种，且 `web/src/ui/escape-fallback.ts` 不存在——这就是终态，组 4、组 6 不再改它。取 3.3 时：对真实仓库断言后一种，指定路径暂为 `web/src/ui/escape-fallback.ts`（过渡），组 4 搬家时改为 `web/src/components/escape-fallback.ts`。
   验证：注入样本各判失败——`web/src/features/chat/x.ts` 里定义同名函数；定义出现在指定路径之外的第二处；（取 3.2 时）某个文件调用 `useEscapeFallback`。两种合法状态各有一个样本判通过。
-- [ ] 3.5 记录：3.1 的结果表与所取的分支写进 PR 描述；在 ADR-0013 的本 change 增补里补一条——Escape 实测的方法、十个调用点的结论与所取分支（保留时写明是哪个覆盖层、什么现象、常驻证据是哪条用例或走查步骤）。
+- [x] 3.5 记录：3.1 的结果表与所取的分支写进 PR 描述；在 ADR-0013 的本 change 增补里补一条——Escape 实测的方法、十个调用点的结论与所取分支（保留时写明是哪个覆盖层、什么现象、常驻证据是哪条用例或走查步骤）。
   验证：ADR 增补里能找到十个调用点的结论；ui-primitives「覆盖层的 Escape 关闭」的场景各有对应的测试或走查步骤，在 PR 里列出对应关系——「保留兜底时不重复、不抢输入法」对 `web/test/escape-fallback.test.tsx`（取 3.2 时写「不适用，hook 已删除」），「兜底只有两种合法终态」对 3.4。
-- [ ] 3.6 变异证据（逐条做、逐条撤销，结果贴进 PR）：
+- [x] 3.6 变异证据（逐条做、逐条撤销，结果贴进 PR）：
   取 3.2 时：恢复 `web/src/ui/escape-fallback.ts` → 冻结清单断言与 3.4 的守卫判红；在 `project-config.tsx` 去掉 `onOpenAutoFocus` 里定位 `关闭` 的那段 → `chat-page-project-config-dialog.test.tsx` 或 `ui-walk-project-config.ts` 的初始焦点断言判红（没有就补一条再做这条变异）。
   取 3.3 时：去掉 3.3 点名的那个调用点的 hook → 3.3 补的用例或走查步骤判红；去掉 `escape-fallback.ts` 的 `handled` 判断、`isComposing` 判断、`contains` 判断 → `web/test/escape-fallback.test.tsx` 各判红（与 1.2 相同的三条，在改过头注释的文件上重做一遍）；在 `web/src/features/chat/x.ts` 里另定义一个 `useEscapeFallback` → 3.4 的守卫判红。
-- [ ] 3.7 整刀验证：`make check`、`make test-guardrails`、`make ui-walk` 全绿；`npm run build --workspace web` 成功。
+- [x] 3.7 整刀验证：`make check`、`make test-guardrails`、`make ui-walk` 全绿；`npm run build --workspace web` 成功。
 
 Suggested fixture level: expanded - 触及十处覆盖层的键盘关闭行为；有两个由实测决定的分支，结论（十行结果表、所取分支、常驻证据）要可审计
 Minimal mergeable slice: atomic - 实测的改动与所取分支的终态落在同一批 10 处调用上：实测本身不产生可合入的代码（design D4 不许合入「hook 被掏空」的中间态），可合入的只有「全删」或「全留并写明原因」之一，连同它的守卫与 ADR 记录；再拆就只剩一个没有代码的 PR

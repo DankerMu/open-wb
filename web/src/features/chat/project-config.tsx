@@ -114,8 +114,11 @@ function ConfigList({ files }: { files: readonly ProjectConfigFile[] }) {
  *
  * That dialog has no trigger element, so closing it would leave focus on `body`: focus goes back
  * to `opener` (the header button) while it is still in the document, without scrolling. Escape is
- * also handled on the content itself (`useEscapeFallback`). The Toast has been deleted; whether
- * this fallback is still needed is decided by the Escape measurement of issue 1393.
+ * also handled on the content itself (`useEscapeFallback`): when the header button is focused from
+ * the keyboard its tooltip shows, and after Enter the closing tooltip is still on Radix's layer
+ * stack, so an Escape that follows at once is dispatched to that layer instead of this dialog.
+ * Without the fallback the dialog then sometimes stays open (measured in Chromium at automation key
+ * speed, issue 1399); standing evidence: H5 in `chat-page-project-config-dialog.test.tsx`.
  */
 function ConfigDialog({
   files,

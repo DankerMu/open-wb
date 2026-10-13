@@ -45,6 +45,7 @@ import {
   latestSource,
   SESSION_ID,
 } from "./chat-stream-support.js";
+import { pagePrompts } from "./page-notices.js";
 import { calls, deferredResponse, jsonResponse } from "./support.js";
 import { readRepoFile } from "./ui-support.js";
 
@@ -59,16 +60,18 @@ function sourcesFor(url: string) {
   return FakeEventSource.instances.filter((source) => source.url === url);
 }
 
-/** 整页没有任何错误呈现：无 alert（提问卡内、输入框上方都没有）、无 Toast。 */
+/** 整页没有任何错误呈现：无 alert（提问卡内、输入框上方都没有），也没有 `status` 角色的提示。 */
 function expectNoErrorShown() {
   expect(screen.queryAllByRole("alert")).toHaveLength(0);
+  expect(pagePrompts()).toEqual([]);
 }
 
-/** 恰一条 alert，且在 `card` 内：输入框上方没有内联错误，也没有 Toast。 */
+/** 恰一条 alert，且在 `card` 内：输入框上方没有内联错误，也没有 `status` 角色的提示。 */
 function expectCardAlert(card: HTMLElement, message: string) {
   const alerts = screen.getAllByRole("alert");
   expect(alerts.map((alert) => alert.textContent)).toEqual([message]);
   expect(card.contains(alerts[0] as HTMLElement)).toBe(true);
+  expect(pagePrompts()).toEqual([`alert:${message}`]);
 }
 
 /** 卡的集合变化后 400ms 内的作答点击被忽略：推进注入时钟越过它。 */

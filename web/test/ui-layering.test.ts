@@ -196,6 +196,39 @@ function areaEntryViolations(areas: string[], paths: string[]): string[] {
   });
 }
 
+const ESCAPE_FALLBACK = "useEscapeFallback";
+/** 兜底保留时定义所在的唯一路径。过渡值：`web/src/ui` 退役时（文件搬到 `web/src/components/`）改这里。 */
+const ESCAPE_FALLBACK_HOME = "web/src/ui/escape-fallback.ts";
+const ESCAPE_FALLBACK_DEFINITION = /\b(?:function|const|let|var|class)\s+useEscapeFallback\b/g;
+
+/**
+ * 兜底的两种合法终态（ui-primitives「覆盖层的 Escape 关闭」场景「兜底只有两种合法终态」）：`files` 的
+ * `.ts`/`.tsx` 里（注释不算）要么 `useEscapeFallback` 完全不出现，要么它的定义恰一处、写成
+ * `export function useEscapeFallback`、在 `home`。`definitions` 是找到的定义所在路径（一处一条）。
+ */
+function escapeFallbackState(files: SourceFile[], home: string) {
+  const sources = files
+    .filter((file) => /\.tsx?$/.test(file.path))
+    .map((file) => ({ path: file.path, text: stripTsComments(file.text) }))
+    .filter((file) => /\buseEscapeFallback\b/.test(file.text));
+  const definitions = sources.flatMap((file) =>
+    Array.from(file.text.matchAll(ESCAPE_FALLBACK_DEFINITION), () => file.path),
+  );
+  const violations = definitions
+    .filter((path) => path !== home)
+    .map((path) => `${path}: ${ESCAPE_FALLBACK} 的定义只能在 ${home}`);
+  const atHome = definitions.filter((path) => path === home).length;
+  if (atHome > 1) violations.push(`${home}: ${ESCAPE_FALLBACK} 的定义多于一处`);
+  if (sources.length > 0 && atHome === 0) {
+    violations.push(`${home}: ${ESCAPE_FALLBACK} 仍被提到，却没有在这里定义`);
+  }
+  const exported = sources.some(
+    (file) => file.path === home && file.text.includes(`export function ${ESCAPE_FALLBACK}(`),
+  );
+  if (atHome === 1 && !exported) violations.push(`${home}: 定义须写成 export function`);
+  return { definitions, violations };
+}
+
 describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻结区不增长」）", () => {
   const rules: LayeringRules = {
     migrated: ["web/src/routes", "web/src/features/auth"],
@@ -417,6 +450,61 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     expect(layeringViolations(files, { migrated: MIGRATED_AREAS, frozen: FROZEN_FILES })).toEqual(
       [],
     );
+  });
+});
+
+describe("兜底去留（ui-primitives「兜底只有两种合法终态」）", () => {
+  const HOME = ESCAPE_FALLBACK_HOME;
+  const definition = `export function ${ESCAPE_FALLBACK}() {\n  return {};\n}\n`;
+  const caller: SourceFile = {
+    path: "web/src/features/chat/delete-dialog.tsx",
+    text: `import { ${ESCAPE_FALLBACK} } from "../../ui/index.js";\nconst fallback = ${ESCAPE_FALLBACK}({});\n`,
+  };
+  const barrel: SourceFile = {
+    path: "web/src/ui/index.ts",
+    text: `export { ${ESCAPE_FALLBACK} } from "./escape-fallback.js";\n`,
+  };
+  const kept: SourceFile[] = [{ path: HOME, text: definition }, barrel, caller];
+  const check = (files: SourceFile[]) => escapeFallbackState(files, HOME).violations;
+
+  it("判定自证：两种合法状态各判通过——完全不出现（注释里提到不算），或定义恰一处在指定路径", () => {
+    const absent: SourceFile[] = [
+      { path: caller.path, text: `// 曾经接过 ${ESCAPE_FALLBACK}\nexport const a = 1;\n` },
+      { path: "web/src/features/chat/notes.md", text: ESCAPE_FALLBACK },
+    ];
+    expect(escapeFallbackState(absent, HOME)).toEqual({ definitions: [], violations: [] });
+    expect(escapeFallbackState(kept, HOME)).toEqual({ definitions: [HOME], violations: [] });
+  });
+
+  it("判定自证：别处定义同名函数、指定路径之外的第二处定义、没有定义却仍被调用、定义不是导出的函数各判失败", () => {
+    const stray = "web/src/features/chat/x.ts";
+    const elsewhere = `${stray}: ${ESCAPE_FALLBACK} 的定义只能在 ${HOME}`;
+    const missing = `${HOME}: ${ESCAPE_FALLBACK} 仍被提到，却没有在这里定义`;
+    // 指定路径上的定义还在，另一个文件又定义了一个同名函数（导出与否、function 还是 const 都算）。
+    for (const text of [
+      `function ${ESCAPE_FALLBACK}() {}\n`,
+      `export const ${ESCAPE_FALLBACK} = () => ({});\n`,
+    ]) {
+      expect(check([...kept, { path: stray, text }])).toEqual([elsewhere]);
+    }
+    // 定义只在指定路径之外；删除分支的回退（定义已删，某个文件又调用它）。
+    expect(check([{ path: stray, text: definition }, caller])).toEqual([elsewhere, missing]);
+    expect(check([caller])).toEqual([missing]);
+    expect(check([{ path: HOME, text: `${definition}${definition}` }])).toEqual([
+      `${HOME}: ${ESCAPE_FALLBACK} 的定义多于一处`,
+    ]);
+    expect(check([{ path: HOME, text: `const ${ESCAPE_FALLBACK} = () => ({});\n` }])).toEqual([
+      `${HOME}: 定义须写成 export function`,
+    ]);
+  });
+
+  // 取的是保留分支（Escape 实测，ADR-0013 增补）：对真实仓库断言后一种状态，不是「两种都行」。
+  it("web/src 现状：兜底保留，定义恰一处、在指定路径", () => {
+    const files = listRepoFiles("web/src", (path) => /\.tsx?$/.test(path)).map((path) => ({
+      path,
+      text: readRepoFile(path),
+    }));
+    expect(escapeFallbackState(files, HOME)).toEqual({ definitions: [HOME], violations: [] });
   });
 });
 
