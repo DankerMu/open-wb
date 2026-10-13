@@ -45,7 +45,7 @@
 - **THEN** 失败时预览区显示 `预览组件加载失败`、`重试` 与 `下载 main.py`，目录树仍可操作；重试后显示源码，没有未处理的拒绝
 
 ### Requirement: 预览头、下载与不可预览的呈现
-选中任何文件时，预览头 SHALL 显示文件图标、空间内路径、大小与修改时间（`formatMtime`，查看者本地时区 `YYYY-MM-DD HH:mm`），以及一个下载链接：accessible name `下载 <文件名>`，`href` 为 `/api/workspaces/<id>/download?path=<编码后的路径>`，带 `download` 属性——所有文件都有它，包括不支持预览、超限、预览失败与预览器加载失败的文件。下载由浏览器直接导航完成，页面 SHALL NOT 经 `fetch` 读取下载内容。
+选中任何文件时，预览头 SHALL 显示文件图标、空间内路径、大小与修改时间（`formatMtime`，查看者本地时区 `YYYY-MM-DD HH:mm`；这两项取自树条目，条目没有它们时——workspace-sidebar「本会话改动标记与过滤」里父目录未加载的行——这一段整个不显示，SHALL NOT 以 `0`、`—` 或其它占位值代替，#1372），以及一个下载链接：accessible name `下载 <文件名>`，`href` 为 `/api/workspaces/<id>/download?path=<编码后的路径>`，带 `download` 属性——所有文件都有它，包括不支持预览、超限、预览失败与预览器加载失败的文件。下载由浏览器直接导航完成，页面 SHALL NOT 经 `fetch` 读取下载内容。
 
 不可预览的各种情况 SHALL 在预览区就地显示，并都保留预览头：
 
@@ -56,6 +56,8 @@
 | 文本被截断 | 正文照常显示，其上一行 `文件超过预览上限，仅显示开头部分 · 共 <大小>` |
 | 其它非 401 的 `ApiError` | 信封 message |
 | 网络失败或非法响应 | 既有的 request_failed 安全文案 |
+
+大小未知时，上表副行与截断提示里带大小的那一段（` · <大小>`、` · 共 <大小>`）省去，其余不变。`file` 或 `archive` 应答 404 时，不论该行有没有树条目的元数据，预览面板都按上表显示信封 message；`WorkspaceBrowser` 在会话页侧边栏里（files-web「工作空间浏览器组件」的 `clearMissing`）不让这一态停留在页面上——它清除选中，预览区回到未选状态，`onlyPaths` 下另把该行移出列表（owner 2026-10-13，workspace-sidebar「本会话改动标记与过滤」）；文件页照上表显示。
 
 401 交由认证守卫，不显示页面内错误。错误与不支持态 SHALL NOT 使用 Toast。切换文件、切换工作空间、卸载时 SHALL 中止在途的预览请求，迟到的响应不提交状态；`fetchPreview` 分配的图片 Blob 地址在被替换、卸载与迟到结果被丢弃时释放。
 
@@ -70,6 +72,10 @@
 #### Scenario: 请求归属与资源释放
 - **WHEN** 选中一张图片后在响应返回前切到另一个文件；或图片显示后切换工作空间；或页面卸载（含 StrictMode 的二次挂载）
 - **THEN** 迟到的图片不显示，其 Blob 地址被释放；每个分配过的 Blob 地址在失去归属时都被释放（出错的图片其地址可被释放两次，见「图片」一条）
+
+#### Scenario: 没有元数据的行
+- **WHEN** 选中一个没有大小与修改时间的 `deep/x.md` 行，`file` 返回其文本；另一例同样的行 `deep/blob.bin`，`file` 返回 415
+- **THEN** 两例的预览头都有图标、路径与下载链接，都没有大小与修改时间那一段，页面上没有 `NaN`、`undefined` 或 `1970` 字样；第一例正文照常；第二例显示 `该类型不支持预览`，副行恰为 `blob.bin`
 
 ### Requirement: 源码视图与语法高亮
 源码预览器 SHALL 以带行号的表格显示文本：每行一个行号单元格与一个内容单元格，保留空白，末尾空行计入，内容在容器内部横向滚动而不撑宽页面；`json` 先尝试格式化，失败保留原文。它 SHALL 按 `highlightLanguage(name)`（扩展名或文件名到语言的固定映射，至少覆盖 `js` `mjs` `cjs` `jsx` `ts` `tsx` `json` `css` `scss` `html` `htm` `xml` `svg` `py` `go` `rs` `java` `c` `h` `cpp` `sh` `sql` `yaml` `yml` `toml` `ini` `md`、`Dockerfile`、`Makefile`）给内容着色；没有映射的文件名不着色、仍带行号；文本长度超过 100 000 个字符时同样不着色、仍带行号（经验值，owner 2026-10-11 认可）。着色 SHALL 经 `lowlight` 产出语法树并映射为 React 元素，SHALL NOT 使用 `dangerouslySetInnerHTML` 或任何把文件内容当作 HTML 解析的途径；颜色取自主题变量，亮暗两种主题下都可读。着色完成之前 SHALL 先显示未着色的带行号源码（文件内容不因高亮库加载或着色而延后出现）；着色抛错时保留未着色的源码、不显示错误。本条只适用于文件预览；会话消息里的代码块不受影响。
@@ -138,7 +144,7 @@
 - **THEN** 渲染视图处显示失败文案，没有 `iframe`；`查看源码` 可用并能显示源码；预览头的下载链接仍在
 
 ### Requirement: PDF 与办公文档
-PDF SHALL 以不带 `sandbox` 属性的 `iframe`（`title` 为文件名）从 `base` 加载，交给浏览器自带的查看器。办公文档（`docx`、`xlsx`、`pptx`）SHALL 以同样的 `iframe` 从 `officeBase` 加载（服务端转成 PDF）；在 iframe 的 `load` 事件之前预览区 SHALL 盖一层 `正在转换文档…`（`role="status"`），`load` 之后撤掉——转换失败时 iframe 里是服务端的失败说明页。建 iframe 之前 SHALL 依次判定：树条目的大小超过 `documentMaxBytes` → 显示 `文件过大，无法预览`，不建 iframe；办公文档且 `officeAvailable` 为 `false` → 显示 `服务器未启用文档转换，请下载后查看`，不建 iframe；`navigator.pdfViewerEnabled === false` → 显示 `此浏览器不支持内嵌 PDF 预览，请下载后查看`，不建 iframe。三种情况都保留预览头的下载链接。
+PDF SHALL 以不带 `sandbox` 属性的 `iframe`（`title` 为文件名）从 `base` 加载，交给浏览器自带的查看器。办公文档（`docx`、`xlsx`、`pptx`）SHALL 以同样的 `iframe` 从 `officeBase` 加载（服务端转成 PDF）；在 iframe 的 `load` 事件之前预览区 SHALL 盖一层 `正在转换文档…`（`role="status"`），`load` 之后撤掉——转换失败时 iframe 里是服务端的失败说明页。建 iframe 之前 SHALL 依次判定：树条目的大小超过 `documentMaxBytes` → 显示 `文件过大，无法预览`，不建 iframe（树条目没有大小时跳过这一项，框内显示预览来源自己的应答，#1372）；办公文档且 `officeAvailable` 为 `false` → 显示 `服务器未启用文档转换，请下载后查看`，不建 iframe；`navigator.pdfViewerEnabled === false` → 显示 `此浏览器不支持内嵌 PDF 预览，请下载后查看`，不建 iframe。三种情况都保留预览头的下载链接。
 
 #### Scenario: PDF 的嵌入
 - **WHEN** 选中 2 MB 的 `doc.pdf`
@@ -151,6 +157,10 @@ PDF SHALL 以不带 `sandbox` 属性的 `iframe`（`title` 为文件名）从 `b
 #### Scenario: 不建 iframe 的三种情况
 - **WHEN** 选中 150 MB 的 `huge.pdf`（`documentMaxBytes` 为 104857600）；`officeAvailable` 为 `false` 时选中 `a.xlsx`；`navigator.pdfViewerEnabled` 为 `false` 时选中 `doc.pdf`
 - **THEN** 依次显示 `文件过大，无法预览`、`服务器未启用文档转换，请下载后查看`、`此浏览器不支持内嵌 PDF 预览，请下载后查看`；三者都没有 `iframe`，都有下载链接
+
+#### Scenario: 大小未知的文档
+- **WHEN** 选中一个没有大小的 `deep/doc.pdf` 行（`navigator.pdfViewerEnabled` 不为 `false`）
+- **THEN** 预览区有一个 `iframe`，`src` 为 `<base>deep/doc.pdf`；没有显示 `文件过大，无法预览`；预览头有下载链接
 
 ### Requirement: 音视频
 音频 SHALL 以 `<audio controls>`、视频 SHALL 以 `<video controls>` 播放，`src` 为主站 `/api/workspaces/<id>/file?path=<编码后的路径>`（同源、随 cookie，由浏览器发起范围请求；首次选中时恰为该地址，重取之后其后追加 `&v=<n>`，见下），`preload="metadata"`，不自动播放；视频在预览区内等比缩放。页面 SHALL NOT 经 `fetch` 把媒体读进内存。媒体元素触发 `error` 时预览区显示 `无法播放该文件` 并保留下载链接。切换文件或卸载时媒体元素被移除（播放随之停止）。`刷新` 或再点已选中的同一行 SHALL 换一个新的媒体元素：已显示的 `无法播放该文件` 随之清除并重新尝试，播放中的媒体回到开头且不自动播放；新元素的 `src` SHALL 在原地址后追加 `&v=<n>`（n 为正整数，本次页面载入期间每次重取都取一个比此前用过的任何值更大的值，同一地址因此不会出现第二次；首次选中——含改选别的文件再选回来——不带 `v`），使浏览器向服务端重新请求（owner 2026-10-12 裁决，#1356：Chromium 实测同一地址的新元素约一分钟内不重新请求）。`v` 只出现在媒体元素的 `src` 上：预览头的下载链接、其它类别的请求与页面地址都不带；服务端的 `file` 路由不读该参数。媒体请求得到 401 时 SHALL NOT 通知认证守卫：媒体元素的 `error` 不带状态码，页面不为此另发请求，与其它失败一样显示 `无法播放该文件`。

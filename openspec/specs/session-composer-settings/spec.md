@@ -55,7 +55,7 @@
 - `modelId` SHALL 是白名单里某一项的 `id`（字符串精确相等）。
 - `reasoningEffort` SHALL 是字符串，且是七个强度名 `off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` 之一（`auto` 不合法），且「本次创建所得模型」支持推理；该模型取 body 的 `modelId`，body 未给时取该账号最近选择经「有效值解析」得到的模型。模型不支持推理时任何 `reasoningEffort` 都不合法；`null` 不是合法取值。校验 SHALL NOT 要求取值在该模型的可选强度内：不在其内的强度名照常受理并原样存储（omp 就近取低，model-selection「推理强度集合」）。
 
-合法请求 SHALL 在创建会话行的同一个 SQLite 事务内：把三列分别写为 body 给出的值，未给出的键取该账号 `account_composer_prefs` 行的同名原始列值（没有行或该列为 NULL 则写 NULL）；对 body 给出的每一个键，把该值写入 `account_composer_prefs` 的同名列并更新 `updated_at`（没有行则插入，未给出的列保持原值或 NULL）；按 session-permission-tier「档位变更审计」写创建时的审计。
+合法请求 SHALL 在创建会话行的同一个 SQLite 事务内：把三列分别写为 body 给出的值，未给出的键取该账号 `account_composer_prefs` 行的同名原始列值（没有行或该列为 NULL 则写 NULL）——唯一的例外是 `approval_mode`：继承来的档位高于当前 `APPROVAL_MAX_MODE` 时写入上界本身而不是原始值（session-permission-tier「管理员最高档」，owner 2026-10-12，#1282），`model_id` 与 `reasoning_effort` 仍原样继承；对 body 给出的每一个键，把该值写入 `account_composer_prefs` 的同名列并更新 `updated_at`（没有行则插入，未给出的列保持原值或 NULL）；按 session-permission-tier「档位变更审计」写创建时的审计。
 返回的会话视图 SHALL 带这三键的有效值。未携带这三键的创建 SHALL NOT 改动 `account_composer_prefs`。
 
 #### Scenario: 缺省与显式
@@ -71,6 +71,10 @@
 #### Scenario: 非法取值
 - **WHEN** `APPROVAL_MAX_MODE=write` 时以 `{approvalMode:"yolo"}` 创建；以及任意配置下以 `{approvalMode:"Write"}`、`{approvalMode:null}`、`{modelId:"nope"}`、`{modelId:1}`、`{modelId:"m2", reasoningEffort:"high"}`、`{modelId:"m1", reasoningEffort:"auto"}`、`{modelId:"m3", reasoningEffort:"ultra"}`、`{reasoningEffort:null}` 创建
 - **THEN** 均为 400 `bad_request` 与 no-store；没有新的会话行与审计行；`account_composer_prefs` 不变
+
+#### Scenario: 继承的档位不高于上界
+- **WHEN** `APPROVAL_MAX_MODE=write`，最近选择行为 `yolo`、`m3`、`low` 的账号以无 body 创建会话
+- **THEN** 201 的视图三键为 `write`、`m3`、`low`；会话行三列为 `write`、`m3`、`low`；该账号的最近选择行仍为 `yolo`、`m3`、`low`；没有 `session.permission` 审计行
 
 ### Requirement: 修改会话设置
 `PATCH /api/sessions/:id` 的 body SHALL 可携带 `approvalMode`、`modelId`、`reasoningEffort`（与 `title`、`scene`、`pinned`、`archived` 同属一个键集，鉴权、owner 预检、整体校验与 UPDATE 规则见 session-metadata「会话元数据修改」）。三键的取值规则与「创建会话时的设置与继承」相同，其中 `reasoningEffort` 所对的模型取 body 的 `modelId`，body 未给时取该会话当前的有效模型。

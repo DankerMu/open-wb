@@ -159,7 +159,7 @@
 - **THEN** `a.ipynb` 为 200 `text/plain; charset=utf-8` 精确字节、无截断头；`big.ipynb` 为 413 `preview_too_large`；`t.txt` 为 200 恰 16 字节 + `X-Workbuddy-Truncated: 1` + `X-Workbuddy-Size: 20`
 
 ### Requirement: 工作空间 HTTP 集成边界
-registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical preconstructed store, facade and same-db bound synchronous audit emitter. Since change s1f-files-page the dependency object additionally accepts preconstructed `limits` (the preview limits, defaulting to the spec defaults when omitted), `trash` (file-operations) and optional `preview` (preview-origin); the routes those capabilities and「压缩包列表」add under `/api/workspaces/:id/` SHALL obey every rule of this requirement: guard-bound principal, earliest route-local no-store for all matched outcomes, identical 404 for foreign/missing ids before their paths are inspected and without audit or filesystem changes, a required scalar `path` (or body field) with a repeated `path` → 400. It SHALL use guard-bound principal and earliest route-local no-store for all matched outcomes. It SHALL NOT read configuration, duplicate store/domain validation or wire production bootstrap. POST body shapes SHALL reject wrong types/extra fields, nonJSON and >16KiB as canonical400. Tree default path SHALL be empty; file path SHALL be a required scalar string; repeated path SHALL be400. Typed foreign/missing scoped IDs SHALL be404 before inspecting their paths, without audit or filesystem changes. Structurally absent owned roots/targets/parents SHALL be404, not fake sandbox denials. Directory creation SHALL check existing immediate parent/absent target before calling the canonical helper, then emit dir.create with detail.path and return201 only after emission. Failed creation/emission SHALL be generic500; filesystem rollback is not promised for dir creation failures.
+registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical preconstructed store, facade and same-db bound synchronous audit emitter. Since change s1f-files-page the dependency object additionally accepts preconstructed `limits` (the preview limits, defaulting to the spec defaults when omitted), `trash` (file-operations) and optional `preview` (preview-origin); the routes those capabilities and「压缩包列表」add under `/api/workspaces/:id/` SHALL obey every rule of this requirement: guard-bound principal, earliest route-local no-store for all matched outcomes, identical 404 for foreign/missing ids before their paths are inspected and without audit or filesystem changes, a required scalar `path` (or body field) with a repeated `path` → 400. It SHALL use guard-bound principal and earliest route-local no-store for all matched outcomes. It SHALL NOT read configuration, duplicate store/domain validation or wire production bootstrap. POST body shapes SHALL reject wrong types/extra fields, nonJSON and >16KiB as canonical400. Tree default path SHALL be empty; file path SHALL be a required scalar string; repeated path SHALL be400. Typed foreign/missing scoped IDs SHALL be404 before inspecting their paths, without audit or filesystem changes. Structurally absent owned roots/targets/parents SHALL be404, not fake sandbox denials. An owned root whose path exists but is not a directory (a regular file or any other non-directory entry that is not a symbolic link) SHALL be answered 404 `not_found` by every route under `/api/workspaces/:id/`, `promote` included (a missing root does not block `promote`; an occupied one does) — for the other routes this is the same response as for a missing root (owner 2026-10-12, #1244) — decided before the request's path or body is inspected, with no audit row and no filesystem change; the entry occupying the root path is left untouched. For `POST /api/workspaces/:id/promote` (temporary-workspaces「转正」) this means no `workspace.promote` audit row is written and the workspace row keeps `temporary = 1` and its name (owner 2026-10-13). `GET /api/workspaces` SHALL list a workspace whose root path is occupied by such an entry exactly as it lists one whose root is missing — the same five keys, `root` being the same absolute path string — and SHALL NOT fail the listing (owner 2026-10-13). The other invalid persisted states of「工作空间 store 与惰性目录事务」— an unsafe owner path segment, an owner or workspace directory that is a symbolic link — still fail generically. Directory creation SHALL check existing immediate parent/absent target before calling the canonical helper, then emit dir.create with detail.path and return201 only after emission. Failed creation/emission SHALL be generic500; filesystem rollback is not promised for dir creation failures.
 
 #### Scenario: 完整真实装配与隔离
 - WHEN two authenticated accounts use collection GET/POST and the three scoped routes on owned, foreign and missing IDs, including unsafe typed paths
@@ -189,6 +189,18 @@ registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical precon
 - **WHEN** 两个已认证账号对自己的、他人的与不存在的工作空间 id 请求 `archive`、`download`、`DELETE entries`、`move` 与 `preview-token`，其中对他人与不存在的 id 的请求带越界路径；另有未认证请求与重复的 `path` 查询参数
 - **THEN** 他人与不存在的 id 一律是相同的 404，没有审计行与文件系统变化（越界路径没有被检查）；未认证为 401；重复 `path` 为 400；所有这些响应都带 `Cache-Control: no-store`
 
+#### Scenario: 空间根被非目录占据
+- **WHEN** 自有工作空间 W 的根目录被移走、同一路径上建出一个普通文件；owner 对 W 之下的每一条路由各请求一次（`tree`、新建目录、`file`、`archive`、`download`、`DELETE entries`、`move`、`preview-token`、上传），带路径的请求用越界路径 `../x`
+- **THEN** 每一个应答都与 W 的根目录不存在时逐字相同：404 `not_found`、带 `Cache-Control: no-store`；审计没有新增行（越界路径没有被检查，没有 `sandbox.reject`）；占据根路径的那个文件原样未动，没有任何目录被创建，上传没有读取请求体
+- **WHEN** 临时空间 T 的根路径被同样占据，owner `POST /api/workspaces/<T>/promote {"name":"调研资料"}`；对照例临时空间 T2 的根目录只是不存在，同样 promote
+- **THEN** 前者 404 `not_found`、带 `Cache-Control: no-store`，审计没有新增 `workspace.promote`，T 的行仍是 `temporary = 1`、名字未变，`GET /api/workspaces` 不含它，占位文件原样未动；后者 200（根不存在不阻止转正，temporary-workspaces「转正」）
+- **WHEN** 正式空间 W 的根路径被占据时 owner `GET /api/workspaces`；对照例 W 的根目录只是不存在
+- **THEN** 两例都是 200，应答体逐字相同：列表含 W，其对象恰五键、`root` 为同一个绝对路径字符串；账号的其它空间照常列出
+- **WHEN** 持有 W 的未过期预览令牌的请求访问预览监听器的 `/w/<token>/a.md`
+- **THEN** 应答是预览监听器对「空间消失」的同一个 404（preview-origin「预览监听器」），不是 500
+- **WHEN** W 的根路径是一个指向目录的符号链接
+- **THEN** 同样的请求仍以 sanitized 500 结束（store 条文的通用失败），不返回链接目标之下的任何内容
+
 ### Requirement: 绝对 root 不属于对浏览器保密的信息
 按 ADR-0011，`GET /api/workspaces` 与 `POST /api/workspaces` 201 响应中工作空间对象的 `root`（`<SANDBOX_ROOT>/<ownerId>/<dir>` 绝对路径）以及 `workspace.create` 审计事件的 `detail.root` SHALL 保持原样返回给已认证的本人（审计对 admin 全量可见），不删除、不改写；它们不属于保密信息。界面呈现 SHALL 仍以逻辑路径 `<account>/<dir>` 为主，files 页、外壳、标题与 aria 属性不渲染 `root`（files-web）。凭证与他人账号的路径和内容不在本条放宽范围内。
 
@@ -206,7 +218,7 @@ registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical precon
 2. `name`：SHALL 是 query 里恰一个非空字符串（缺失、重复、空串 → 400 `bad_request`）；服务端按 URL 解码后的字符串使用，不做额外规范化。
 3. 声明的大小：请求带 `Content-Length` 且其值大于上限 → 413 `upload_too_large`，不读取请求体，并写一条 `upload.reject` 审计（见下）。
 4. 沙箱：经 facade `resolve(principal, id, "uploads/" + name, "write")`。被拒绝的（任一分量为 `..`、含 NUL、`uploads` 或目标本身是符号链接、最后一段含反斜杠或为空等，sandbox-core）→ 403 `sandbox_denied`，facade 先写一条 `sandbox.reject` 审计（`detail.op="write"`、`detail.relPath` 为 `uploads/` 加所给名字）。本步 SHALL 先于第 5 步，使越界的名字留下审计而不是被名字规则的 400 抢先；唯一的例外是长度：不含 `/` 且超过 255 个 UTF-8 字节的名字 SHALL 在本步之前即为 400 `bad_request`（不写审计、不触及文件系统）——`uploads` 已存在时对这样的名字 `lstat` 得到 `ENAMETOOLONG`，sandbox-core 对意外的元数据错误一律拒绝，否则一个只是太长的文件名会得到 403 与一条 `sandbox.reject`。
-5. 名字规则：解析出的目标 SHALL 直接位于 `uploads` 目录之下（名字含 `/` 而成为嵌套路径 → 400）；名字 SHALL 为 1 到 255 个 UTF-8 字节，不含 U+0000–U+001F 与 U+007F，不以 `.upload-` 开头。违反 → 400 `bad_request`，不写审计、不触及文件系统。
+5. 名字规则：解析出的目标 SHALL 直接位于 `uploads` 目录之下（名字含 `/` 而成为嵌套路径 → 400）；名字 SHALL 为 1 到 255 个 UTF-8 字节，不含 U+0000–U+001F 与 U+007F，也不含 U+0085、U+2028、U+2029 与双向控制字符 U+061C、U+200E、U+200F、U+202A–U+202E、U+2066–U+2069（owner 2026-10-13，#1257：与 message-attachments「prompt 携带附件」第 1 条拒绝的是同一组码点，否则这样的文件传得上去、却不能作为附件发出），不以 `.upload-` 开头。违反 → 400 `bad_request`，不写审计、不触及文件系统。这条只管经本端点新上传的名字：磁盘上已有的、名字含这些码点的文件（此前上传的、助手写出的）仍照常可列举、可预览、可下载，SHALL NOT 因此被改名、隐藏或拒绝。
 6. 目录：`uploads` 不存在时经 `ensureSharedDir` 创建（mode `0o2770`，不写 `dir.create` 审计）；存在但不是普通目录 → 409 `conflict`。
 7. 写入：在 `uploads` 内独占创建（目标路径已存在即失败、不跟随符号链接）一个名字以 `.upload-` 开头、以 `.part` 结尾、中间为随机十六进制串的临时文件，mode 精确为 `0660`（不受进程 umask 影响），把请求体流式写入并累计字节数。累计超过上限的那一刻 SHALL 停止读取请求体、删除临时文件，返回 413 `upload_too_large` 并写一条 `upload.reject` 审计（响应之后服务端可以关闭连接）。客户端中断、请求流出错或磁盘写入失败 SHALL 删除临时文件，不写审计；能响应时为 generic 500。
 8. 定名：依次以候选名对临时文件做「目标不存在才创建」的原子链接——先是所给名字，被占用则 `<主名> (1)<扩展名>`、`<主名> (2)<扩展名>` …直到 `(999)`；成功后删除临时文件。全部被占用 → 删除临时文件，409 `conflict`。扩展名是名字里最后一个 `.` 及其之后的部分；名字没有 `.`、或唯一的 `.` 在开头时视为没有扩展名（编号接在末尾）。SHALL NOT 覆盖、截断或替换任何已存在的文件；并发上传同名文件 SHALL 各得不同的最终名。
@@ -238,8 +250,10 @@ registerWorkspaces(app,{store,sandbox,audit}) SHALL consume one canonical precon
 - **THEN** 每一个都是 403 `sandbox_denied`，各恰新增一条 `sandbox.reject`（`detail.op="write"`），没有 `file.upload`；沙箱外没有新文件，符号链接的目标未被改动；`uploads` 下没有 `.part` 文件
 
 #### Scenario: 名字规则与媒体类型
-- **WHEN** 以缺失的 `name`、重复两次的 `name`、空串、256 字节的名字（`uploads` 不存在与已存在各一例）、含换行的名字、`name=sub/a.txt`、`name=.upload-x.part` 上传；另以 `Content-Type: application/json` 或 `multipart/form-data` 上传
+- **WHEN** 以缺失的 `name`、重复两次的 `name`、空串、256 字节的名字（`uploads` 不存在与已存在各一例）、含换行的名字、分别含 U+0085、U+2028、U+2029、U+061C、U+200E、U+202E、U+2066 的名字、`name=sub/a.txt`、`name=.upload-x.part` 上传；另以 `Content-Type: application/json` 或 `multipart/form-data` 上传
 - **THEN** 均为 400 `bad_request` 与 no-store；没有文件、没有审计新增
+- **WHEN** `uploads` 下已有一个名字含 U+202E 的文件（测试直接写盘），owner 请求 `tree?path=uploads`，并以该名字请求 `file` 与 `download`；另以一个含普通非 ASCII 字符的名字 `报告 v2.pdf` 上传
+- **THEN** `tree` 列出该文件、名字逐码点原样，`file` 与 `download` 都是 200 且字节与磁盘上相同；`报告 v2.pdf` 的上传照常 201
 
 #### Scenario: 他人与不存在的空间
 - **WHEN** 第二个账号向第一个账号的空间上传（含越界的名字与超限的 `Content-Length`）；任一账号向随机 32 位 hex 的 id 上传；匿名请求上传
