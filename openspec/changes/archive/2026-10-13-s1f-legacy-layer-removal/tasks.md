@@ -190,12 +190,12 @@ Minimal mergeable slice: atomic - 守卫（5.1）在规则搬完（5.2）之前�
   新建 `web/src/ui/card.tsx` → `ui-layering` 判红；
   新建 `web/src/features/chat/x.css` → `ui-foundation-entry` 的「样式文件恰为三个」与 `ui-layering` 的会话页终态都判红；
   在 `web/src/styles.css` 的层声明里加回 `legacy`，或加回 `@import "./styles/legacy.css" layer(legacy);` → `ui-foundation-entry` 各判红；
-  在 `web/src/features/files/tree.tsx` 加 `import * as Dialog from "@radix-ui/react-dialog"`（已卸载的单包）或 `import { Dialog } from "radix-ui"` → `ui-guardrails` 的依赖方向守卫各判红（前者另由 knip 判红；**实施更正**：原文写「另由类型检查判红」，实测不成立——该单包仍是 `radix-ui` 的传递依赖，`make typecheck` 退出码 0）；
+  在 `web/src/features/files/tree.tsx` 加 `import * as Dialog from "@radix-ui/react-dialog"`（已卸载的单包）或 `import { Dialog } from "radix-ui"` → `ui-guardrails` 的依赖方向守卫各判红（前者在应用层另由 knip 判红；**实施更正**：原文写「另由类型检查判红」，实测不成立——该单包仍是 `radix-ui` 的传递依赖，`make typecheck` 退出码 0；同一导入写在拷入层之内时没有任何东西拦，见 design D11 的更正）；
   在 `web/src/features/chat/composer.tsx` 加 `import { useToast } from "@/components/toast"` → `ui-layering` 判红；
   在 `web/src/features/chat/todo-panel.tsx` 去掉 `role="list"` → 显式列表语义守卫判红；
   把 `theme.css` 的 `@layer base` 改名为 `@layer components` → `ui-foundation-entry` 判红；
   新建 `web/src/ui/escape-fallback.ts`（内容为 `export function useEscapeFallback() {}`）→ 「`web/src/ui` 下没有文件」与兜底终态守卫都判红。
-- [ ] 6.9 归档时改 Purpose——**执行者是编排方，在归档提交里做（或紧随其后的一个文档提交）；不属于本组的 PR，实现本组的人不做、不勾**（design D21；先例 `6996028a`）：归档把 delta 并入主规格之后，改两份主规格的 `## Purpose`——`openspec/specs/ui-foundation/spec.md` 去掉「frozen-zone split with its migrated-area guard」，改述为拷入层 / 应用层两层与自写共享组件；
+- [x] 6.9 归档时改 Purpose——**执行者是编排方，在归档提交里做（或紧随其后的一个文档提交）；不属于本组的 PR，实现本组的人不做、不勾**（design D21；先例 `6996028a`）：归档把 delta 并入主规格之后，改两份主规格的 `## Purpose`——`openspec/specs/ui-foundation/spec.md` 去掉「frozen-zone split with its migrated-area guard」，改述为拷入层 / 应用层两层与自写共享组件；
   `openspec/specs/ui-primitives/spec.md` 去掉「`web/src/ui/` 基元层」「以 Radix UI Primitives 为行为层的组件库」，改述为设计 token、图标与品牌标记、动效约束与覆盖层的键盘关闭。
   验证：两个 CLI 的 `openspec validate --specs --strict` 通过；`grep -n 'web/src/ui\|frozen' openspec/specs/ui-foundation/spec.md openspec/specs/ui-primitives/spec.md` 的命中只剩条文里对「已不存在」的陈述。编排方做完后勾选本条；Epic #1393 的收尾清单里单列这一步。
 - [x] 6.10 收尾验证：逐条核对 #1393 的七条验收标准并在 PR 里给出各自的证据（命令输出或测试名）；`make check`、`make test-guardrails`、`make ui-walk` 全绿；
