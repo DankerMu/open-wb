@@ -94,7 +94,7 @@ Runtime config/DB/app/listen/预览监听器 listen/models.yml/预览缓存目�
 - **THEN** 每一例都在任何 filesystem/database/listen 副作用之前以 nonzero 退出，application stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`，无 success record；`resolveServerConfig` 抛出的错误 message 含 `MODEL_ID` 而不含输入值
 
 #### Scenario: 非法上游密钥拒绝启动
-- **WHEN** 编译入口分别以含 U+000A、含 U+0000、含非 Latin-1 字符（如 `密钥`）且各自带一个哨兵子串的 `MODEL_UPSTREAM_API_KEY` 启动；另以 `abc def`（中间有空格）启动
+- **WHEN** 编译入口分别以含 U+000A、含非 Latin-1 字符（如 `密钥`）且各自带一个哨兵子串的 `MODEL_UPSTREAM_API_KEY` 启动（含 U+0000 的取值经不了进程环境——`spawn` 拒绝含 NUL 的环境变量——只在 `resolveServerConfig` 层验证；含 U+007F 的取值同样被拒，制表符照常可用）；另以 `abc def`（中间有空格）启动
 - **THEN** 前三例都在任何 filesystem/database/listen 副作用之前以 nonzero 退出，application stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`，stdout 与 stderr 都不含哨兵；`resolveServerConfig` 对同样的输入抛出的错误 message 含 `MODEL_UPSTREAM_API_KEY` 而不含哨兵；最后一例正常启动
 
 #### Scenario: 上游失败记录

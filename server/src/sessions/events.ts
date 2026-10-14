@@ -4,11 +4,24 @@
  * #515 emits raw edit/write candidates as files.changed immediately before their step.end;
  * #554 maps command_output to turn.start (first time) + text.delta, so a command reply is the body;
  * #864 emits a `todo` result's raw `details.phases` as todo.updated immediately before its step.end.
+ * #909 maps omp's session-level retry (`auto_retry_start` → turn.retry; the next round's outcome
+ * replaces the remembered failure; `Retry cancelled` is an interruption) and classifies the
+ * failure an error event carries (upstream-classify.ts).
  */
 import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SessionTodo } from "./session-todo.js";
+import { classifyTurnFailure, type FailureReason, failureSentence } from "./upstream-classify.js";
+
+/** Mapper output: the classified failure, `detail` not yet sanitised (upstream-failure). */
+interface MappedFailure {
+  messageId: number;
+  message: string;
+  reason: FailureReason;
+  status: number | null;
+  detail: string;
+}
 
 export type ChatEvent<StepId extends string | number = number> =
   | { type: "turn.start"; data: { messageId: number } }
@@ -34,7 +47,13 @@ export type ChatEvent<StepId extends string | number = number> =
       };
     }
   | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" | "stopped" } }
-  | { type: "error"; data: { messageId: number; message: string } }
+  | { type: "turn.retry"; data: { messageId: number } }
+  // Published (numeric step ids) it is still the two keys of #909 PR 3: `message` is the line
+  // 「句子（HTTP s）」 the supervisor projects; the mapper's output carries the whole failure.
+  | {
+      type: "error";
+      data: StepId extends number ? { messageId: number; message: string } : MappedFailure;
+    }
   | {
       type: "approval.request";
       data: {
@@ -62,9 +81,13 @@ interface ToolEntry {
   readonly name: string;
 }
 
-/** 至多记住一个结局（首个胜出）：失败走 error + turn.end failed，中断走单独的 turn.end stopped。 */
+/**
+ * 至多记住一个结局（首个胜出；唯一例外是 omp 会话级重试之后的那一轮，它替换此前的结局）：失败走
+ * error + turn.end failed，中断走单独的 turn.end stopped。失败记下 omp 的 errorStatus 原值与文本，
+ * 终态时才分类。
+ */
 type Outcome =
-  | { readonly kind: "failure"; readonly message: string }
+  | { readonly kind: "failure"; readonly status: unknown; readonly message: string }
   | { readonly kind: "interrupted" };
 
 const INTERRUPTED: Outcome = Object.freeze({ kind: "interrupted" });
@@ -76,6 +99,8 @@ interface EventState {
   readonly ended: boolean;
   /** 本回合已归约过 command_output：其后的输出以 "\n" 起头。只记布尔，不存正文。 */
   readonly commandOutputSeen: boolean;
+  /** omp 发了 auto_retry_start、下一个 assistant message_end 尚未到达。 */
+  readonly retrying: boolean;
   readonly outcome: Outcome | undefined;
   readonly running: readonly ToolEntry[];
   readonly finished: readonly string[];
@@ -96,6 +121,7 @@ export function createEventState(input: {
     started: false,
     ended: false,
     commandOutputSeen: false,
+    retrying: false,
     outcome: undefined,
     running: NO_TOOLS,
     finished: NO_IDS,
@@ -123,6 +149,10 @@ export function applyFrame(state: EventState, frame: OmpFrame): ApplyResult {
       return applyCommandOutput(state, frame);
     case "response":
       return applyPromptFailure(state, frame);
+    case "auto_retry_start":
+      return applyRetryStart(state);
+    case "auto_retry_end":
+      return applyRetryEnd(state, frame);
     default:
       return { state, events: [] };
   }
@@ -132,7 +162,7 @@ export function applyFailure(state: EventState, message: string): ApplyResult {
   if (state.ended) {
     return { state, events: [] };
   }
-  return failTurn(state, message);
+  return failTurn(state, "runtime", undefined, message);
 }
 
 /** Supervisor 有界退回用：未终态即合成恰一个 turn.end stopped，不看 started 与已记住结局。 */
@@ -262,26 +292,56 @@ function todoCandidate(result: unknown): { phases: unknown } | undefined {
     : undefined;
 }
 
+/**
+ * assistant message_end：重试中时，它的结局替换已记住的结局（成功的一轮即清空）并结束重试中；否则
+ * 只在尚未记住结局时记下 error / aborted。
+ */
 function applyMessageEnd(state: EventState, frame: OmpFrame): ApplyResult {
   const message = asRecord(frame.message);
-  if (
-    message === undefined ||
-    message.role !== "assistant" ||
-    (message.stopReason !== "error" && message.stopReason !== "aborted")
-  ) {
+  if (message === undefined || message.role !== "assistant") {
     return { state, events: [] };
   }
-  if (state.outcome !== undefined) {
+  const outcome = outcomeOf(message);
+  if (state.retrying) {
+    return { state: evolve(state, { retrying: false, outcome }), events: [] };
+  }
+  if (outcome === undefined || state.outcome !== undefined) {
     return { state, events: [] };
   }
-  const outcome: Outcome =
-    message.stopReason === "aborted"
-      ? INTERRUPTED
-      : Object.freeze({
-          kind: "failure",
-          message: nonemptyString(message.errorMessage) ?? GENERIC_FAILURE,
-        });
   return { state: evolve(state, { outcome }), events: [] };
+}
+
+function outcomeOf(message: OmpFrame): Outcome | undefined {
+  if (message.stopReason === "aborted") {
+    return INTERRUPTED;
+  }
+  if (message.stopReason !== "error") {
+    return undefined;
+  }
+  return Object.freeze({
+    kind: "failure",
+    status: message.errorStatus,
+    message: nonemptyString(message.errorMessage) ?? GENERIC_FAILURE,
+  });
+}
+
+/** omp 开始一轮会话级重试：已 started 才发 turn.retry 并标为重试中；已记住的结局不清。 */
+function applyRetryStart(state: EventState): ApplyResult {
+  if (!state.started) {
+    return { state, events: [] };
+  }
+  return {
+    state: evolve(state, { retrying: true }),
+    events: [{ type: "turn.retry", data: { messageId: state.messageId } }],
+  };
+}
+
+/** 退避中被 abort 取消的重试（omp 的 `Retry cancelled`）记为已中断；其余 auto_retry_end 过滤。 */
+function applyRetryEnd(state: EventState, frame: OmpFrame): ApplyResult {
+  if (frame.success !== false || frame.finalError !== "Retry cancelled") {
+    return { state, events: [] };
+  }
+  return { state: evolve(state, { outcome: INTERRUPTED }), events: [] };
 }
 
 function applyAgentEnd(state: EventState, frame: OmpFrame): ApplyResult {
@@ -289,7 +349,7 @@ function applyAgentEnd(state: EventState, frame: OmpFrame): ApplyResult {
     return { state, events: [] };
   }
   if (state.outcome?.kind === "failure") {
-    return failTurn(state, state.outcome.message);
+    return failTurn(state, "message_end", state.outcome.status, state.outcome.message);
   }
   if (state.outcome?.kind === "interrupted") {
     return stopTurn(state);
@@ -322,21 +382,29 @@ function applyPromptFailure(state: EventState, frame: OmpFrame): ApplyResult {
   if (frame.command !== "prompt" || frame.success !== false || frame.id !== state.promptRequestId) {
     return { state, events: [] };
   }
-  return failTurn(state, frame.error);
+  return failTurn(state, "runtime", undefined, frame.error);
 }
 
-function failTurn(state: EventState, message: unknown): ApplyResult {
+function failTurn(
+  state: EventState,
+  source: "message_end" | "runtime",
+  errorStatus: unknown,
+  errorMessage: unknown,
+): ApplyResult {
+  const { reason, status, detail } = classifyTurnFailure({
+    source,
+    errorStatus,
+    errorMessage: nonemptyString(errorMessage) ?? GENERIC_FAILURE,
+  });
+  const { messageId } = state;
   return {
     state: evolve(state, { ended: true }),
     events: [
       {
         type: "error",
-        data: {
-          messageId: state.messageId,
-          message: nonemptyString(message) ?? GENERIC_FAILURE,
-        },
+        data: { messageId, message: failureSentence(reason), reason, status, detail },
       },
-      { type: "turn.end", data: { messageId: state.messageId, status: "failed" } },
+      { type: "turn.end", data: { messageId, status: "failed" } },
     ],
   };
 }
@@ -354,7 +422,9 @@ function evolve(
     started?: boolean;
     ended?: boolean;
     commandOutputSeen?: boolean;
-    outcome?: Outcome;
+    retrying?: boolean;
+    /** Own `outcome: undefined` clears the remembered outcome (a retry round that succeeded). */
+    outcome?: Outcome | undefined;
     running?: readonly ToolEntry[];
     finished?: readonly string[];
   },
@@ -365,7 +435,8 @@ function evolve(
     started: patch.started ?? state.started,
     ended: patch.ended ?? state.ended,
     commandOutputSeen: patch.commandOutputSeen ?? state.commandOutputSeen,
-    outcome: patch.outcome ?? state.outcome,
+    retrying: patch.retrying ?? state.retrying,
+    outcome: Object.hasOwn(patch, "outcome") ? patch.outcome : state.outcome,
     running: patch.running ?? state.running,
     finished: patch.finished ?? state.finished,
   });

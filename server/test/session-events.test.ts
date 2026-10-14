@@ -16,8 +16,18 @@ const OTHER_MESSAGE_ID = 42;
 const PROMPT_ID = "req_prompt_41";
 const OTHER_PROMPT_ID = "req_prompt_42";
 const GENERIC_FAILURE = "Agent execution failed";
+/**
+ * #909: a runtime failure's error event (chat-stream「纯协议事件归约」, upstream-failure
+ * 「回合失败分类」 row 1); `detail` is the runtime text.
+ */
+function runtimeError(detail: string, messageId = MESSAGE_ID): ChatEvent<string> {
+  return {
+    type: "error",
+    data: { messageId, message: "Agent 运行失败", reason: "agent_failed", status: null, detail },
+  };
+}
 const GENERIC_FAILURE_EVENTS: ChatEvent<string>[] = [
-  { type: "error", data: { messageId: MESSAGE_ID, message: GENERIC_FAILURE } },
+  runtimeError(GENERIC_FAILURE),
   { type: "turn.end", data: { messageId: MESSAGE_ID, status: "failed" } },
 ];
 const BASH_DETAIL = '{"command":"echo workbuddy-smoke"}';
@@ -221,7 +231,16 @@ describe("session event mapping — first failure through maintenance", () => {
 
     const terminal = applyFrame(state, { type: "agent_end", messages: [] });
     expect(terminal.events).toEqual([
-      { type: "error", data: { messageId: MESSAGE_ID, message: "upstream 500" } },
+      {
+        type: "error",
+        data: {
+          messageId: MESSAGE_ID,
+          message: "模型调用失败",
+          reason: "model_call_failed",
+          status: null,
+          detail: "upstream 500",
+        },
+      },
       { type: "turn.end", data: { messageId: MESSAGE_ID, status: "failed" } },
     ]);
     state = terminal.state;
@@ -295,10 +314,7 @@ describe("session event mapping — correlated runtime failure", () => {
       error: "async schedule failed",
     });
     expect(next.events).toEqual([
-      {
-        type: "error",
-        data: { messageId: MESSAGE_ID, message: "async schedule failed" },
-      },
+      runtimeError("async schedule failed"),
       { type: "turn.end", data: { messageId: MESSAGE_ID, status: "failed" } },
     ]);
   });
@@ -364,7 +380,7 @@ describe("session event mapping — correlated runtime failure", () => {
   it("closes with applyFailure before start and ignores later frames", () => {
     const failed = applyFailure(bind(), "child exited");
     expect(failed.events).toEqual([
-      { type: "error", data: { messageId: MESSAGE_ID, message: "child exited" } },
+      runtimeError("child exited"),
       { type: "turn.end", data: { messageId: MESSAGE_ID, status: "failed" } },
     ]);
     expect(applyFrame(failed.state, { type: "agent_start" }).events).toEqual([]);
@@ -579,10 +595,7 @@ describe("session event mapping — step identity and stale inputs", () => {
 
     const firstFailed = applyFailure(firstEnd.state, "first child died");
     expect(firstFailed.events).toEqual([
-      {
-        type: "error",
-        data: { messageId: MESSAGE_ID, message: "first child died" },
-      },
+      runtimeError("first child died"),
       { type: "turn.end", data: { messageId: MESSAGE_ID, status: "failed" } },
     ]);
     expect(applyFrame(secondEnd.state, { type: "agent_end", messages: [] }).events).toEqual([
@@ -666,10 +679,7 @@ describe("session event mapping — frozen inputs and output isolation", () => {
     expect(firstDelta.events).toEqual([
       { type: "text.delta", data: { messageId: MESSAGE_ID, delta: "Hel" } },
     ]);
-    firstDelta.events[0] = {
-      type: "error",
-      data: { messageId: MESSAGE_ID, message: "mutated" },
-    };
+    firstDelta.events[0] = runtimeError("mutated");
 
     const replay = applyFrame(started.state, deltaFrame);
     expect(replay.events).toEqual([

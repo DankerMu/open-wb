@@ -12,7 +12,7 @@ import { afterEach, beforeEach, expect } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import type { SpawnImpl } from "../src/sessions/omp/process.js";
-import type { HandshakeTimeoutRecord } from "../src/sessions/omp/spawn-gate.js";
+import type { SpawnLog } from "../src/sessions/omp/spawn-gate.js";
 import type { SessionStore } from "../src/sessions/store.js";
 import type { SessionSupervisor } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
@@ -59,7 +59,7 @@ export interface GateWorldOptions {
   tokens?: TokenRegistry;
   /** Every spawn execs this nonexistent path instead of fake-omp (ENOENT, no pid). */
   missingBinary?: string;
-  log?: (record: HandshakeTimeoutRecord) => unknown;
+  log?: (record: Parameters<SpawnLog>[0]) => unknown;
 }
 
 export interface GateWorld {

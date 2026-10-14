@@ -13,6 +13,7 @@ import { ownedChanges } from "./file-changes-ownership.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { Slot } from "./pool.js";
 import type { SessionStore, SettledApproval } from "./store.js";
+import { failureLine } from "./upstream-classify.js";
 
 const OMP_ABORT_GRACE_MS = 8000;
 
@@ -226,9 +227,16 @@ export function persistEvent(
   workspaceRoot: string | null,
 ): ChatEvent<number> | undefined {
   switch (event.type) {
+    // turn.retry (#909) takes a ring sequence like turn.start and is never stored.
     case "turn.start":
-    case "error":
+    case "turn.retry":
       return event;
+    // #909 PR 3: the published error keeps its two keys; `message` becomes 「句子（HTTP s）」.
+    case "error":
+      return {
+        type: "error",
+        data: { messageId: event.data.messageId, message: failureLine(event.data) },
+      };
     case "text.delta":
       store.appendDelta(assistantMessageId, event.data.delta);
       return event;

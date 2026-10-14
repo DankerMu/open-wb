@@ -94,41 +94,41 @@ Minimal mergeable slice: atomic - overlay 的六行与证明它生效的真实 o
 
 ## 4. chat-stream / turn-control / upstream-failure — 重试归约与 `turn.retry`（组 4）
 
-- [ ] 4.1 开工核对：`server/src/sessions/events.ts` 的帧分支（`:106-130`）、`message_end`（`:266-286`）、`agent_end`（`:288-302`）；`resource/oh-my-pi` 的 `Retry cancelled`（`packages/coding-agent/src/session/turn-recovery.ts:2264-2281`）。
+- [x] 4.1 开工核对：`server/src/sessions/events.ts` 的帧分支（`:106-130`）、`message_end`（`:266-286`）、`agent_end`（`:288-302`）；`resource/oh-my-pi` 的 `Retry cancelled`（`packages/coding-agent/src/session/turn-recovery.ts:2264-2281`）。
   验证：核对写进 PR。
-- [ ] 4.2 归约器（design D11）：`auto_retry_start` → `turn.retry{messageId}` 与「重试中」；其后第一个 assistant `message_end` 替换结局；`auto_retry_end` 的 `Retry cancelled` → 已中断；其余 `auto_retry_*` 过滤。
+- [x] 4.2 归约器（design D11）：`auto_retry_start` → `turn.retry{messageId}` 与「重试中」；其后第一个 assistant `message_end` 替换结局；`auto_retry_end` 的 `Retry cancelled` → 已中断；其余 `auto_retry_*` 过滤。
   验证：先在未改代码上写 chat-stream「Retry that succeeds ends done」并看到它红（今天判 failed），再实现到绿，并断言整段只有一个 `turn.start`（重试轮的 `agent_start` 不发第二个，靠 `events.ts:148` 既有的 `started` 守卫；守卫若已变，先补回）；一例断言 `turn.retry` 前已累积的 thinking 在重试成功后仍在（design D11 的已接受残余，不清）；「Cancelled retry ends stopped」「Retry frames outside a running turn」与全部既有 chat-stream、turn-control 场景通过。（「Retry that fails reports the last failure」与「Classified failure payload」依赖分类，属组 5。）
-- [ ] 4.3 supervisor 发布 `turn.retry`（不落库，占环形缓冲序号）。
+- [x] 4.3 supervisor 发布 `turn.retry`（不落库，占环形缓冲序号）。
   验证：upstream-failure「重试提示可回放不可快照」通过；另一例用现行 web 的连接器解析带 `turn.retry` 的事件流，证明它被忽略且不触发重新同步（chat-web 既有「未知类型忽略」规则）。
-- [ ] 4.4 官方 omp（同一文件）：
+- [x] 4.4 官方 omp（同一文件）：
   (a) `WORKBUDDY_FAKE_STATUS=503 WORKBUDDY_FAKE_FAIL_TIMES=12` → 恰一个 `turn.retry`、回合 `done`、正文为假上游的工具轮与回复（审批按既有夹具作答）；
   (b) 每次 503，在 `turn.retry` 之后调用 stop 路由 → turn-control「重试退避中停止（真实 omp）」：`OMP_ABORT_GRACE_MS` 内恰一个 `turn.end stopped`、无 `error`；**记录实测到的收尾路径**（omp 发 `agent_end`，还是有界退回）。
   验证：两例通过；(a) 在 4.2 之前的代码上判红，贴出对照。
-- [ ] 4.5 规格对照：chat-stream 与 turn-control 本组覆盖的场景各有对应测试名。
-- [ ] 4.6 文档：`docs/architecture/system.md` 的 SSE 一节加 `turn.retry`（发布不落库、可回放不进快照、第一轮失败前不出现）。
+- [x] 4.5 规格对照：chat-stream 与 turn-control 本组覆盖的场景各有对应测试名。
+- [x] 4.6 文档：`docs/architecture/system.md` 的 SSE 一节加 `turn.retry`（发布不落库、可回放不进快照、第一轮失败前不出现）。
   验证：PR 里贴出改动段落。
-- [ ] 4.7 变异证据：把替换改回「首个为准」→ 4.4(a) 与「Retry that succeeds ends done」判红；去掉 `Retry cancelled` 分支 → 「Cancelled retry ends stopped」判红（4.4(b) 若走有界退回则仍绿，如实记录）；`turn.retry` 改为落库 → 「重试提示可回放不可快照」判红。
-- [ ] 4.8 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿。
+- [x] 4.7 变异证据：把替换改回「首个为准」→ 4.4(a) 与「Retry that succeeds ends done」判红；去掉 `Retry cancelled` 分支 → 「Cancelled retry ends stopped」判红（4.4(b) 若走有界退回则仍绿，如实记录）；`turn.retry` 改为落库 → 「重试提示可回放不可快照」判红。
+- [x] 4.8 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿。
 
 Suggested fixture level: expanded - 改 omp 帧的归约语义（结局可被替换）与发布的事件集合，回合终态的判定在此
 Minimal mergeable slice: atomic - 替换规则、`Retry cancelled` 与 `turn.retry` 都由同一个「重试中」状态驱动；4.4(a) 只有三者齐备才可能为绿
 
 ## 5. upstream-failure / chat-stream — 失败分类、句子与日志（组 5）
 
-- [ ] 5.1 开工核对：1.7(b)–(e) 与 3.2 记录的 `errorMessage` 末尾形状与 upstream-failure「回合失败分类」的记号正则一致；`failTurn`（`events.ts:329-343`）与 `persistEvent`（`server/src/sessions/turn-control.ts:219-230`）行号核对。
+- [x] 5.1 开工核对：1.7(b)–(e) 与 3.2 记录的 `errorMessage` 末尾形状与 upstream-failure「回合失败分类」的记号正则一致；`failTurn`（`events.ts:329-343`）与 `persistEvent`（`server/src/sessions/turn-control.ts:219-230`）行号核对。
   验证：核对写进 PR；形状不一致时先改规格与 design D6。
-- [ ] 5.2 新建 `server/src/sessions/upstream-classify.ts`（纯函数）：末尾记号解码与 `classifyTurnFailure`，句子表只在此定义。
+- [x] 5.2 新建 `server/src/sessions/upstream-classify.ts`（纯函数）：末尾记号解码与 `classifyTurnFailure`，句子表只在此定义。
   验证：`upstream-classify.test.ts` 覆盖「逐条分类」「记号只认末尾」「状态不符的记号不被采信」「重试预算前缀不影响 detail」，每一行恰一例。
-- [ ] 5.3 归约器的失败负载：`error` 事件带 `reason`、`status`、`detail`（未净化）与句子 `message`；prompt 失败应答与 `applyFailure` 归为 `agent_failed`。supervisor **本组发布的 `error` 仍是两键** `{messageId, message}`，`message` 为「句子（HTTP s）」（status 为 null 时只有句子），现行前端照常解析。
+- [x] 5.3 归约器的失败负载：`error` 事件带 `reason`、`status`、`detail`（未净化）与句子 `message`；prompt 失败应答与 `applyFailure` 归为 `agent_failed`。supervisor **本组发布的 `error` 仍是两键** `{messageId, message}`，`message` 为「句子（HTTP s）」（status 为 null 时只有句子），现行前端照常解析。
   验证：chat-stream「Classified failure payload」「Retry that fails reports the last failure」通过（断言归约器输出）；一条 supervisor 用例断言线上负载恰两键、`message` 为 `鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）`。
-- [ ] 5.4 日志：sessions 的 `log` 端口类型加 `upstream_failed` 记录；supervisor 在发布 `reason ≠ agent_failed` 的 `error` 时交出一条；`server/src/server.ts` 的 `writeRecord` 联合类型同步。
+- [x] 5.4 日志：sessions 的 `log` 端口类型加 `upstream_failed` 记录；supervisor 在发布 `reason ≠ agent_failed` 的 `error` 时交出一条；`server/src/server.ts` 的 `writeRecord` 联合类型同步。
   验证：upstream-failure「每个失败回合一行」（桩运行时）与 http-service-skeleton「上游失败记录」（生产装配，stderr 恰多一行且不含密钥）通过。
-- [ ] 5.5 官方 omp（同一文件）：**不新增 503 运行**——在 3.2 第一例上追加断言：SSE 的 `error.message` 为 `上游出错：模型服务内部错误（HTTP 503）`，`log` 端口恰一条 `upstream_failed`、`status` 503；在 1.7(a) 的 401 例上追加 `鉴权失败：…（HTTP 401）`；在 1.7(d) 上追加 `上游不可达：无法连接模型服务`（无 `（HTTP`），在 1.7(e) 上追加 `上游超时：模型服务没有及时响应（HTTP 504）`。
+- [x] 5.5 官方 omp（同一文件）：**不新增 503 运行**——在 3.2 第一例上追加断言：SSE 的 `error.message` 为 `上游出错：模型服务内部错误（HTTP 503）`，`log` 端口恰一条 `upstream_failed`、`status` 503；在 1.7(a) 的 401 例上追加 `鉴权失败：…（HTTP 401）`；在 1.7(d) 上追加 `上游不可达：无法连接模型服务`（无 `（HTTP`），在 1.7(e) 上追加 `上游超时：模型服务没有及时响应（HTTP 504）`。
   验证：两例通过；官方测试文件的总时长写进 PR。
-- [ ] 5.6 文档：`CONTEXT.md` 领域术语表加一行「回合失败原因」（十个 `reason` 与句子，指向 upstream-failure 规格）；`docs/architecture/system.md` 写明 `upstream_failed` 记录。
+- [x] 5.6 文档：`CONTEXT.md` 领域术语表加一行「回合失败原因」（十个 `reason` 与句子，指向 upstream-failure 规格）；`docs/architecture/system.md` 写明 `upstream_failed` 记录。
   验证：`CONTEXT.md` 与 `openspec/glossary.md`（若存在）不双写同一术语。
-- [ ] 5.7 变异证据：去掉记号正则的 `$` 锚 → 「记号只认末尾」判红；去掉「`errorStatus` 须等于该种类的代理状态」的检查 → 「状态不符的记号不被采信」判红（401 伪造例归成 `upstream_error`）；不剥 `Retry budget exhausted` 前缀 → 「重试预算前缀不影响 detail」判红；把 #6 的 `model` 判定删掉 → 404 不含 model 的用例判红；日志记录加上 `detail` → 「每个失败回合一行」的键集断言判红；`agent_failed` 也记日志 → 同一场景判红。
-- [ ] 5.8 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿；手工打开一个 401 失败的会话，确认现行前端显示「鉴权失败：…（HTTP 401）」（贴 DOM 文本）。
+- [x] 5.7 变异证据：去掉记号正则的 `$` 锚 → 「记号只认末尾」判红；去掉「`errorStatus` 须等于该种类的代理状态」的检查 → 「状态不符的记号不被采信」判红（401 伪造例归成 `upstream_error`）；不剥 `Retry budget exhausted` 前缀 → 「重试预算前缀不影响 detail」判红；把 #6 的 `model` 判定删掉 → 404 不含 model 的用例判红；日志记录加上 `detail` → 「每个失败回合一行」的键集断言判红；`agent_failed` 也记日志 → 同一场景判红。
+- [x] 5.8 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿；手工打开一个 401 失败的会话，确认现行前端显示「鉴权失败：…（HTTP 401）」（贴 DOM 文本）。
 
 Suggested fixture level: expanded - 改变已发布事件的文本含义（`error.message`）并新增一种 application stderr 记录
 Minimal mergeable slice: atomic - 句子投影与日志读的是同一个分类结果；分类没有消费方时 knip 判未用导出

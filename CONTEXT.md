@@ -36,6 +36,7 @@
 | 附件 attachment | 随一条消息告知助手的工作空间文件路径 | 文件本身是工作空间里的普通文件：不随消息删除，也不随绑定正式工作空间的会话删除；临时空间随最后一个会话删除时、撤回连文件一起还原时，按工作空间的规则一并变化 |
 | host tool | omp RPC 的宿主工具机制；KB 检索经 app-server 转发实现 | 凭证只在 app-server，不进 omp 环境 |
 | 模型代理 model-proxy | app-server 内的 OpenAI 兼容端点，omp 访问模型的唯一通道 | omp 环境零网关凭证（ADR-0008）；kb-service 嵌入调用不经它 |
+| 回合失败原因 turn failure reason | 以 `error` 结束的回合被归入的十类之一，各配一句固定中文说明：`agent_failed` Agent 运行失败、`upstream_error` 上游出错：模型服务内部错误、`upstream_unreachable` 上游不可达：无法连接模型服务、`upstream_timeout` 上游超时：模型服务没有及时响应、`auth_failed` 鉴权失败：模型服务拒绝了配置的 API 密钥、`model_not_found` 模型不存在：模型服务找不到所请求的模型、`quota_exhausted` 额度不足：模型服务账户的额度已用完、`rate_limited` 请求过于频繁：模型服务暂时限流、`request_rejected` 请求被拒：模型服务拒绝了这次请求、`model_call_failed` 模型调用失败 | 规则与次序以 upstream-failure「回合失败分类」规格为准（句子在服务端只有一处定义）；`agent_failed` 是宿主侧原因（omp 进程异常退出、prompt 失败应答），其余九类都会写一行 `upstream_failed` 服务日志；被停止的回合（`stopped`）不是失败，没有原因 |
 
 ## 限界上下文
 

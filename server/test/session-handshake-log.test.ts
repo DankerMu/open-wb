@@ -5,7 +5,6 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { HandshakeTimeoutRecord } from "../src/sessions/omp/spawn-gate.js";
 import { AGENT_UNAVAILABLE_ENVELOPE } from "./session-rest-helpers.js";
 import { gateWorlds, send, waitSpawns } from "./session-spawn-gate-helpers.js";
 
@@ -77,7 +76,7 @@ describe("handshake timeout is logged once (L1)", () => {
   ])(
     "a log port that %s leaves the 502 unchanged, with no unhandled rejection",
     async (_name, sink) => {
-      const calls: HandshakeTimeoutRecord[] = [];
+      const calls: unknown[] = [];
       const world = await worlds.open({
         sessions: 1,
         argv: () => ["--scenario", "no-ready"],
