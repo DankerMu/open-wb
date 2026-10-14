@@ -77,6 +77,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               attachments: [],
               steps: [],
               thinking: null,
+              error: null,
             },
             {
               id: accepted.assistantMessageId,
@@ -111,6 +112,7 @@ describe("SessionStore owner-scoped persisted views", () => {
                 },
               ],
               thinking: null,
+              error: null,
             },
           ],
         });

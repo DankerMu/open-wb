@@ -90,6 +90,7 @@ const MESSAGE_KEYS = [
   "undo",
   "attachments",
   "steps",
+  "error",
 ];
 
 const worlds = forkWorlds();

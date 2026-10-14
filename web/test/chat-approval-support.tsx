@@ -68,6 +68,7 @@ export function assistantRow(
     createdAt: id,
     steps: [],
     thinking: null,
+    error: null,
   };
 }
 

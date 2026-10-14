@@ -16,6 +16,8 @@ const SECOND: ChatEvent<number> = {
   type: "text.delta",
   data: { messageId: 41, delta: "hello" },
 };
+/** The published `error` payload (#909: five keys); the ring stores whatever it is given. */
+const FAILURE = { reason: "agent_failed", status: null, detail: "" } as const;
 
 describe("RingBuffer", () => {
   it("replays the suffix after the first retained id with the original payload", () => {
@@ -116,12 +118,14 @@ describe("RingBuffer", () => {
       expect(ring.since(cursor, { turnRunning: true })).toEqual({ mode: "gap", events: [] });
     }
     expect(ring.since("9:1", { turnRunning: true })).toEqual({ mode: "gap", events: [] });
-    expect(next.push({ type: "error", data: { messageId: 3, message: "fresh" } })).toBe("5:1");
+    expect(next.push({ type: "error", data: { messageId: 3, message: "fresh", ...FAILURE } })).toBe(
+      "5:1",
+    );
   });
 
   it("accepts the largest safe integer cursor and gaps the next integer", () => {
     const ring = new RingBuffer(1);
-    ring.push({ type: "error", data: { messageId: 1, message: "bound" } });
+    ring.push({ type: "error", data: { messageId: 1, message: "bound", ...FAILURE } });
     const max = "9007199254740991";
 
     expect(ring.since(`1:${max}`, { turnRunning: true })).toEqual({ mode: "replay", events: [] });
@@ -130,7 +134,9 @@ describe("RingBuffer", () => {
       events: [],
     });
     expect(ring.since(`1:${max}0`, { turnRunning: true })).toEqual({ mode: "gap", events: [] });
-    expect(ring.push({ type: "error", data: { messageId: 1, message: "next" } })).toBe("1:2");
+    expect(ring.push({ type: "error", data: { messageId: 1, message: "next", ...FAILURE } })).toBe(
+      "1:2",
+    );
   });
 
   it("retains step start, step end, and error payloads in push order", () => {
@@ -143,7 +149,7 @@ describe("RingBuffer", () => {
       type: "step.end",
       data: { messageId: 4, stepId: 12, status: "failed", output: "missing" },
     });
-    ring.push({ type: "error", data: { messageId: 4, message: "stopped" } });
+    ring.push({ type: "error", data: { messageId: 4, message: "stopped", ...FAILURE } });
 
     expect(ring.since("11:0", { turnRunning: false })).toEqual({
       mode: "replay",
@@ -158,7 +164,7 @@ describe("RingBuffer", () => {
           type: "step.end",
           data: { messageId: 4, stepId: 12, status: "failed", output: "missing" },
         },
-        { id: "11:3", type: "error", data: { messageId: 4, message: "stopped" } },
+        { id: "11:3", type: "error", data: { messageId: 4, message: "stopped", ...FAILURE } },
       ],
     });
   });

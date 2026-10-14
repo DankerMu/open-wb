@@ -106,6 +106,8 @@ export interface SessionSupervisorOptions {
   onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
   /** Synchronous handshake-timeout record sink, never an onError fault; omitted → discarded. */
   log?: SpawnLog;
+  /** createApp's sanitiser bound to its secret list (#909): every `error` detail goes through it. */
+  redactUpstream: (text: string) => string;
   /** The skills of a session's cwd right now, for the branch-family command check (branching.ts). */
   skills: (ownerId: string, workspaceId: string | null) => readonly { name: string }[];
   /** What turns a session's raw composer columns into the mode and model of its spawns. */
@@ -143,6 +145,7 @@ export class SessionSupervisor {
   readonly #undos: Undos;
   readonly #cwdOf: ReturnType<typeof sessionCwdResolver>;
   readonly #composer: ComposerConfig;
+  readonly #redactUpstream: (text: string) => string;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -152,6 +155,7 @@ export class SessionSupervisor {
     this.#onError = options.onError;
     this.#onEvent = options.onEvent;
     this.#composer = options.composer;
+    this.#redactUpstream = options.redactUpstream;
     this.#cwdOf = sessionCwdResolver(options.runtime.sandboxRoot, options.workspaceRootOf);
     const clock = options.runtime.clock;
     this.#pool = new ProcessPool(
@@ -694,6 +698,7 @@ export class SessionSupervisor {
           nextOrdinal,
           settled,
           slot.workspaceRoot,
+          this.#redactUpstream,
         );
         if (settled.length > 0 && !(await this.#approvals.settled(settled))) {
           return false;

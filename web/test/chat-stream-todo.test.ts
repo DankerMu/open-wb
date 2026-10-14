@@ -135,7 +135,13 @@ describe("task list reduction", () => {
       "step.start",
       { type: "step.start", data: { messageId: M, stepId: 1, name: "bash", detail: "" } },
     ],
-    ["error", { type: "error", data: { messageId: M, message: "boom" } }],
+    [
+      "error",
+      {
+        type: "error",
+        data: { messageId: M, reason: "agent_failed", message: "boom", status: null, detail: "" },
+      },
+    ],
     ["turn.end failed", { type: "turn.end", data: { messageId: M, status: "failed" } }],
     ["turn.end stopped", { type: "turn.end", data: { messageId: M, status: "stopped" } }],
     ["turn.start of the same message", { type: "turn.start", data: { messageId: M } }],

@@ -48,6 +48,11 @@ import {
   type ComposerDbRow,
   rawComposer,
 } from "./store-composer.js";
+import {
+  createSessionErrorStore,
+  type MessageError,
+  type SessionErrorStore,
+} from "./store-error.js";
 import { appendThinking as appendThinkingText } from "./store-thinking.js";
 import {
   createSessionTodoStore,
@@ -92,6 +97,8 @@ export interface MessageView {
   createdAt: number;
   /** The list stored at admission (#1019); `[]` for none, for an assistant and for a bad column. */
   attachments: StoredAttachment[];
+  /** The three error columns (#909, store-error.ts); null for a user message and when unset. */
+  error: MessageError | null;
   steps: StepView[];
   /** Every approval row of this message in ascending id order; `[]` for user messages. */
   approvals: ApprovalEntry[];
@@ -173,7 +180,7 @@ interface StartStepInput {
   detail: string;
 }
 
-export interface SessionStore extends SessionTodoStore {
+export interface SessionStore extends SessionTodoStore, SessionErrorStore {
   create(ownerId: string): SessionView;
   list(ownerId: string): SessionView[];
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
@@ -273,6 +280,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
 
   return {
     ...createSessionTodoStore(db, options),
+    ...createSessionErrorStore(db),
     create(ownerId) {
       assertOpen(closed);
       const now = Date.now();

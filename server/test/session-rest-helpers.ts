@@ -41,6 +41,7 @@ export const UNBOUND_USER_VIEW = {
   attachments: [],
   steps: [],
   thinking: null,
+  error: null,
 } as const;
 
 const oversizedParserInput = PARSER_INPUTS.find((entry) => entry.name === "oversized body");

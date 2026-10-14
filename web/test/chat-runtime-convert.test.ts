@@ -15,6 +15,12 @@ const SETTLED = {
   decision: "allow" as const,
 };
 const CHANGES = [{ path: "out/index.html", added: null, removed: null, kind: "write" as const }];
+const FAILURE = {
+  reason: "request_rejected",
+  message: "请求被拒：模型服务拒绝了这次请求",
+  status: 400,
+  detail: "写入失败",
+};
 
 function stoppedView(): View {
   return {
@@ -44,7 +50,8 @@ function stoppedView(): View {
       },
     ],
     approvals: [SETTLED],
-    error: "写入失败",
+    error: FAILURE,
+    retrying: false,
   };
 }
 
@@ -60,6 +67,7 @@ function runningView(): View {
     steps: [],
     approvals: [],
     error: null,
+    retrying: false,
   };
 }
 
@@ -91,15 +99,20 @@ describe("convertMessage 映射", () => {
     expect(converted.status).toEqual({ type: "incomplete", reason: "cancelled" });
   });
 
-  it("审批、步骤 changes、error 与原始状态原值透传，应用层组件读得到", () => {
+  it("审批、步骤 changes、error、retrying 与原始状态原值透传，应用层组件读得到", () => {
     const view = stoppedView();
     const custom = messageCustom(convertMessage(view).metadata?.custom ?? {});
 
     expect(custom.status).toBe("stopped");
-    expect(custom.error).toBe("写入失败");
+    expect(custom.error).toBe(FAILURE);
     expect(custom.approvals).toBe(view.approvals);
     expect(custom.steps).toBe(view.steps);
     expect(custom.steps[1]?.changes).toBe(CHANGES);
+    expect(custom.retrying).toBe(false);
+    const retrying = messageCustom(
+      convertMessage({ ...runningView(), retrying: true }).metadata?.custom ?? {},
+    );
+    expect(retrying.retrying).toBe(true);
   });
 
   it("thinking 为 null、无步骤的 running 助手消息：只有一个 text part，状态为运行中", () => {
@@ -170,6 +183,7 @@ describe("附件透传：快照 → 视图消息 → 运行时消息的应用自
       approvals: [],
       undo: role === "user" ? "available" : null,
       attachments,
+      error: null,
     };
   }
 

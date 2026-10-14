@@ -140,6 +140,7 @@ describe("session REST snapshot capture", () => {
             attachments: [],
             steps: [],
             thinking: null,
+            error: null,
           },
           {
             id: accepted.assistantMessageId,
@@ -152,6 +153,7 @@ describe("session REST snapshot capture", () => {
             attachments: [],
             steps: [],
             thinking: null,
+            error: null,
           },
         ],
         streamCursor: { epoch: 1, seq: 1002 },

@@ -46,6 +46,7 @@ function assistant(id: number, steps: Step[], status: Message["status"] = "done"
     createdAt: id,
     steps,
     thinking: null,
+    error: null,
   };
 }
 

@@ -710,7 +710,7 @@ describe("文件变更 card on the chat page", () => {
     await openSession(turn("running", { content: "写到一半", steps }));
     const send = await goLive();
 
-    send("error", { message: "上游失败" });
+    send("error", { reason: "model_call_failed", message: "上游失败", status: null, detail: "" });
     send("turn.end", { status: "failed" });
 
     await waitFor(() => expect(cards()).toHaveLength(1));

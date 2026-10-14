@@ -14,8 +14,11 @@ import type { OmpFrame } from "./omp/frame.js";
 import type { SessionTodo } from "./session-todo.js";
 import { classifyTurnFailure, type FailureReason, failureSentence } from "./upstream-classify.js";
 
-/** Mapper output: the classified failure, `detail` not yet sanitised (upstream-failure). */
-interface MappedFailure {
+/**
+ * The classified failure an `error` event carries: in mapper output `detail` is the source text,
+ * in the persisted and published event the sanitised one (upstream-failure「上游原文净化」).
+ */
+interface ClassifiedFailure {
   messageId: number;
   message: string;
   reason: FailureReason;
@@ -48,12 +51,7 @@ export type ChatEvent<StepId extends string | number = number> =
     }
   | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" | "stopped" } }
   | { type: "turn.retry"; data: { messageId: number } }
-  // Published (numeric step ids) it is still the two keys of #909 PR 3: `message` is the line
-  // 「句子（HTTP s）」 the supervisor projects; the mapper's output carries the whole failure.
-  | {
-      type: "error";
-      data: StepId extends number ? { messageId: number; message: string } : MappedFailure;
-    }
+  | { type: "error"; data: ClassifiedFailure }
   | {
       type: "approval.request";
       data: {

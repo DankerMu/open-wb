@@ -50,6 +50,7 @@ function message(id: number, role: "user" | "assistant") {
     steps: [],
     approvals: [],
     undo: role === "user" ? "available" : null,
+    error: null,
   };
 }
 

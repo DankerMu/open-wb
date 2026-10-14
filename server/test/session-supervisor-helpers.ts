@@ -4,7 +4,7 @@ import { setImmediate as waitImmediate } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { expect, vi } from "vitest";
-import { createApp } from "../src/app.js";
+import { type AssemblyDependencies, createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
@@ -97,9 +97,14 @@ export interface OpenSessionOptions {
   /**
    * The app's model whitelist and approval cap (#1007); omitted → one model, cap `yolo`. And the
    * attachment count limit of a prompt (#1019); omitted → the default. And the sessions `log`
-   * port (#909 upstream_failed records); omitted → discarded.
+   * port (#909 upstream_failed records); omitted → discarded. And the upstream whose key and base
+   * URL the sessions-side sanitiser removes (#909); omitted → none configured.
    */
-  assembly?: Partial<ComposerConfig> & { uploadMaxFiles?: number; log?: SpawnLog };
+  assembly?: Partial<ComposerConfig> & {
+    uploadMaxFiles?: number;
+    log?: SpawnLog;
+    upstream?: AssemblyDependencies["upstream"];
+  };
 }
 
 export function createRealFakeRuntime(

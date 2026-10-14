@@ -12,7 +12,9 @@
  * Tasks 4.4 and 5.5 run the cases that assert what the browser sees (the published events, the
  * sessions `log` port, the stop route) in `openProxiedApp`, the production sessions assembly over
  * the same proxy; the omp frames there are a tee of the child's stdout. 5.5 adds no 503 run: its
- * assertions ride on 3.2's first case, (a), (d) and (e).
+ * assertions ride on 3.2's first case, (a), (d) and (e). Group 6 (6.5) adds none either: the three
+ * stored error columns ride on 3.2's first case and 4.4(b), plus one new 400 case of about 2 s.
+ * Since group 7 the published `error` carries five keys and the sentence without `（HTTP s）`.
  *
  * Run locally: `make omp-fetch`, then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
@@ -21,6 +23,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
@@ -169,18 +172,43 @@ function publishedTypes(turn: AppTurn): string[] {
   return turn.events.map((event) => event.type);
 }
 
+/** The published `error`'s classification (upstream-failure「失败的公开形状」). */
+interface PublishedFailure {
+  message: string;
+  reason: string;
+  status: number | null;
+  detail: string;
+}
+
 /**
- * The browser's side of a failed turn: exactly one `error` (the two keys of PR 3, chat-stream
- * 「纯协议事件归约」's sentence projection) right before `turn.end failed`; returns its message.
+ * The browser's side of a failed turn: exactly one `error` with the five keys right before
+ * `turn.end failed`; returns it without `messageId`.
  */
-function publishedError(turn: AppTurn): string {
+function publishedError(turn: AppTurn): PublishedFailure {
   const errors = turn.events.filter((event) => event.type === "error");
   expect(errors).toHaveLength(1);
-  expect(Object.keys(errors[0]?.data ?? {}).sort()).toEqual(["message", "messageId"]);
+  expect(Object.keys(errors[0]?.data ?? {})).toEqual([
+    "messageId",
+    "message",
+    "reason",
+    "status",
+    "detail",
+  ]);
   expect(turn.events.slice(-2).map((event) => event.type)).toEqual(["error", "turn.end"]);
   expect(turn.events.at(-1)).toMatchObject({ type: "turn.end", data: { status: "failed" } });
-  const [error] = errors;
-  return error === undefined ? "" : String((error.data as { message: unknown }).message);
+  const { messageId: _id, ...failure } = (errors[0]?.data ?? {}) as PublishedFailure & {
+    messageId: number;
+  };
+  return failure;
+}
+
+/** The three error columns of `session`'s assistant row (#909 group 6, migration 043). */
+function storedError(db: DatabaseSync, session: string) {
+  return db
+    .prepare(
+      "SELECT error_reason, error_status, error_detail FROM chat_messages WHERE session_id = ? AND role = 'assistant'",
+    )
+    .get(session) as { error_reason: unknown; error_status: unknown; error_detail: unknown };
 }
 
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model proxy`, () => {
@@ -201,8 +229,11 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     note("a-401", turn, world.upstream.requests().length);
     expect(end.errorStatus).toBe(401);
     expect(world.upstream.requests()).toHaveLength(1);
-    // 5.5: the published sentence.
-    expect(publishedError(turn)).toBe("鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）");
+    // 5.5 (sentence and status as separate keys since group 7).
+    expect(publishedError(turn)).toMatchObject({
+      message: "鉴权失败：模型服务拒绝了配置的 API 密钥",
+      status: 401,
+    });
   });
 
   it(
@@ -238,7 +269,17 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       expect(String(end.errorMessage)).toMatch(/\(type=wb_upstream param=status\.503\)$/u);
       // 4.3: one turn.retry published for the one omp retry; 5.5: the sentence and one log record.
       expect(publishedTypes(turn).filter((type) => type === "turn.retry")).toHaveLength(1);
-      expect(publishedError(turn)).toBe("上游出错：模型服务内部错误（HTTP 503）");
+      const failure = publishedError(turn);
+      expect(failure).toMatchObject({
+        message: "上游出错：模型服务内部错误",
+        reason: "upstream_error",
+        status: 503,
+      });
+      // 6.5: the three columns were stored, with the same sanitised detail as the event.
+      const stored = storedError(world.db, turn.session);
+      expect(stored).toMatchObject({ error_reason: "upstream_error", error_status: 503 });
+      expect(String(stored.error_detail)).toContain("模型服务返回 HTTP 503");
+      expect(stored.error_detail).toBe(failure.detail);
       expect(world.log).toEqual([
         {
           event: "upstream_failed",
@@ -280,7 +321,10 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       expect(end.errorStatus).toBe(424);
       expect(String(end.errorMessage)).toMatch(/\(type=wb_upstream param=no_connect\)$/u);
       // 5.5: the sentence, without a status.
-      expect(publishedError(turn)).toBe("上游不可达：无法连接模型服务");
+      expect(publishedError(turn)).toMatchObject({
+        message: "上游不可达：无法连接模型服务",
+        status: null,
+      });
     },
   );
 
@@ -302,7 +346,39 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       expect(String(end.errorMessage)).toMatch(/\(type=wb_upstream param=gateway_504\)$/u);
       expect(String(end.errorMessage)).not.toContain("Gateway");
       // 5.5: the sentence with the gateway's status.
-      expect(publishedError(turn)).toBe("上游超时：模型服务没有及时响应（HTTP 504）");
+      expect(publishedError(turn)).toMatchObject({
+        message: "上游超时：模型服务没有及时响应",
+        status: 504,
+      });
+    },
+  );
+
+  it(
+    "6.5 an upstream 400 with an empty body: request_rejected, 400, the dump path line not stored",
+    CASE,
+    async () => {
+      const world = await openProxiedApp();
+      const turn = await runAppTurn(
+        world,
+        "你好 WORKBUDDY_FAKE_STATUS=400 WORKBUDDY_FAKE_BODY=empty",
+      );
+      const end = expectFailedTurn(turn);
+      note("6.5-400-empty", turn, world.upstream.requests().length);
+      expect(world.upstream.requests()).toHaveLength(1);
+      expect(end.errorStatus).toBe(400);
+      // omp appends its request dump path (design Context, case 12 实测); the column must not keep it.
+      expect(String(end.errorMessage)).toContain("raw-http-request=");
+      const stored = storedError(world.db, turn.session);
+      console.log(
+        `[upstream-failure] ${JSON.stringify({ case: "6.5-400-empty-stored", errorMessage: end.errorMessage, stored })}`,
+      );
+      expect(stored).toMatchObject({ error_reason: "request_rejected", error_status: 400 });
+      expect(String(stored.error_detail)).not.toContain("raw-http-request=");
+      expect(publishedError(turn)).toMatchObject({
+        reason: "request_rejected",
+        status: 400,
+        detail: stored.error_detail,
+      });
     },
   );
 
@@ -415,6 +491,12 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       };
       expect(body.session.status).toBe("stopped");
       expect(body.messages[1]?.status).toBe("stopped");
+      // turn-control「重试退避中停止（真实 omp）」: a stopped turn stores no error columns.
+      expect(storedError(world.db, session)).toEqual({
+        error_reason: null,
+        error_status: null,
+        error_detail: null,
+      });
       expect(world.log).toEqual([]);
     },
   );

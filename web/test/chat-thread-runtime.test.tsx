@@ -36,7 +36,14 @@ afterEach(() => {
 
 function view(id: number, role: View["role"], status: View["status"], content = "x"): View {
   const undo = role === "user" ? "none" : null;
-  const empty = { thinking: null, attachments: [], steps: [], approvals: [], error: null };
+  const empty = {
+    thinking: null,
+    attachments: [],
+    steps: [],
+    approvals: [],
+    error: null,
+    retrying: false,
+  };
   return { id, role, content, status, undo, ...empty };
 }
 

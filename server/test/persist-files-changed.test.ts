@@ -111,6 +111,7 @@ function persist(event: ChatEvent<string>, workspaceRoot: string | null, double 
     ordinals,
     settled,
     workspaceRoot,
+    (text) => text,
   );
   const accessed = [...fsCalls];
   expect([...toolIds]).toEqual([[CALL_ID, STEP_ID]]);

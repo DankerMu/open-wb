@@ -72,6 +72,7 @@ function user(id: number, content: string) {
     approvals: [],
     undo: "none" as const,
     attachments: [],
+    error: null,
   };
 }
 
@@ -103,6 +104,7 @@ function assistant(
     approvals: [],
     undo: null,
     attachments: [],
+    error: null,
   };
 }
 
