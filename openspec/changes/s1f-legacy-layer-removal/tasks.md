@@ -165,32 +165,32 @@ Minimal mergeable slice: atomic - 守卫（5.1）在规则搬完（5.2）之前�
 
 ## 6. ui-foundation — 删除旧样式层，守卫改为终态，文档收尾（子 issue D）
 
-- [ ] 6.1 先把三个守卫改成终态断言（红），再删文件。`web/test/ui-foundation-entry.test.ts`（design D11 的 G2）：`LAYER_ORDER` 改为 `@layer theme, base, components, utilities;`；`ENTRY_IMPORTS` 去掉 `legacy.css` 一条（剩七条）；去掉 `LEGACY`、`UI_BARREL` 常量；
+- [x] 6.1 先把三个守卫改成终态断言（红），再删文件。`web/test/ui-foundation-entry.test.ts`（design D11 的 G2）：`LAYER_ORDER` 改为 `@layer theme, base, components, utilities;`；`ENTRY_IMPORTS` 去掉 `legacy.css` 一条（剩七条）；去掉 `LEGACY`、`UI_BARREL` 常量；
   「其余既有 `.css` 只被 `legacy.css` 导入」一条改为「`web/src` 下的 `.css` 恰为 `styles.css`、`styles/tokens.css`、`styles/theme.css`，后两个不含 `@import`」；「文件页样式已退出 legacy 层」一条改为「`web/src/features/files` 下没有 `.css`，`web/src/styles/legacy.css` 不存在」；
   入口结构的判定自证变异表改为：层声明里加回 `legacy`、加回 `@import "./styles/legacy.css" layer(legacy);`、`tokens.css` 入层、类名扫描范围放开、多一条 `@import`、reduce 块入层、`web/src/features` 下出现一个 `.css`（样本路径）。
   验证：此时该文件判红；变异表每条都判失败。
-- [ ] 6.2 `web/test/ui-layering.test.ts`（G1）：删除 `MIGRATED_AREAS`、`MIGRATED_ALLOWED_IMPORTS`、`FROZEN_FILES` 与 `areaEntryViolations`；「组件分层」一组改为终态——`web/src/ui` 下没有文件、没有模块从解析到 `web/src/ui` 的路径导入（保留现有的导入识别式与它的自证用例：别名、多行、`type`、`as`、命名空间、副作用、动态、再导出）、`web/src` 下不出现标识符 `useToast` 与 `ToastProvider`、自写共享组件的位置与「没有统一出口」（4.2 已加）、兜底的两种合法终态（3.4 / 4.2 已加；本条只确认它还在、指定路径是 `web/src/components/escape-fallback.ts` 或「不出现」）；
+- [x] 6.2 `web/test/ui-layering.test.ts`（G1）：删除 `MIGRATED_AREAS`、`MIGRATED_ALLOWED_IMPORTS`、`FROZEN_FILES` 与 `areaEntryViolations`；「组件分层」一组改为终态——`web/src/ui` 下没有文件、没有模块从解析到 `web/src/ui` 的路径导入（保留现有的导入识别式与它的自证用例：别名、多行、`type`、`as`、命名空间、副作用、动态、再导出）、`web/src` 下不出现标识符 `useToast` 与 `ToastProvider`、自写共享组件的位置与「没有统一出口」（4.2 已加）、兜底的两种合法终态（3.4 / 4.2 已加；本条只确认它还在、指定路径是 `web/src/components/escape-fallback.ts` 或「不出现」）；
   「会话页迁移终态」去掉「每个文件都已登记」与对 `legacy.css` 的读取，保留「没有 `.css`、没有 `session-filter.tsx`」与 `assistant-ui` 目录的文件清单；
   「显式列表语义」的扫描范围由「已迁移区域的 `.tsx`」改为「`web/src` 下除两个拷入目录之外的全部 `.tsx`」（design D10），「确有四个带 `list-none` 的文件」的非空断言保留。
   验证：此时「`web/src/ui` 下没有文件」判红（目录还在）；其余用例通过；注入样本 `web/src/ui/card.tsx`、`import { Button } from "../../ui/index.js"`、`useToast` 导入、`web/src/features/chat/chat.css`、`web/src/ui/escape-fallback.ts`、`web/src/components/index.ts` 各判失败。
-- [ ] 6.3 `web/test/ui-guardrails.test.ts`（G3）：`RADIX_ALLOWED_DIRS` 去掉 `web/src/ui/`；`:137` 的样本改为 `isApplicationLayer("web/src/ui/dialog.tsx")` 为 `true`；取色扫描去掉 `web/src/ui` 的 `.css` 一组（对象为 features、routes、直接放在 `web/src/components/` 下的 `.tsx`，三组都断言非空），相应的用例标题与注释改写；删除 `motion.css` 一组。
+- [x] 6.3 `web/test/ui-guardrails.test.ts`（G3）：`RADIX_ALLOWED_DIRS` 去掉 `web/src/ui/`；`:137` 的样本改为 `isApplicationLayer("web/src/ui/dialog.tsx")` 为 `true`；取色扫描去掉 `web/src/ui` 的 `.css` 一组（对象为 features、routes、直接放在 `web/src/components/` 下的 `.tsx`，三组都断言非空），相应的用例标题与注释改写；删除 `motion.css` 一组。
   验证：依赖方向与取色两组通过；注入样本（features 下的文件导入 `@radix-ui/react-dialog`、`web/src/ui/x.tsx` 导入 `radix-ui`）各判失败。
-- [ ] 6.4 删除旧样式层：`web/src/styles/legacy.css`、`web/src/ui/ui.css`、`web/src/ui/motion.css`（`web/src/ui/` 目录随之消失）；`web/src/styles.css` 的层声明改为 `@layer theme, base, components, utilities;`、去掉 `@import "./styles/legacy.css" layer(legacy);`、头注释改写（不再提 `legacy` 层与 `legacy.css`，写明全局基础规则在 `theme.css` 的 `base` 块）。
+- [x] 6.4 删除旧样式层：`web/src/styles/legacy.css`、`web/src/ui/ui.css`、`web/src/ui/motion.css`（`web/src/ui/` 目录随之消失）；`web/src/styles.css` 的层声明改为 `@layer theme, base, components, utilities;`、去掉 `@import "./styles/legacy.css" layer(legacy);`、头注释改写（不再提 `legacy` 层与 `legacy.css`，写明全局基础规则在 `theme.css` 的 `base` 块）。
   验证：`test ! -e web/src/ui && test ! -e web/src/styles/legacy.css`；`find web/src -name '*.css'` 恰为三个文件；6.1–6.3 的守卫全部转绿；`npm run build --workspace web` 成功。
-- [ ] 6.5 读 `legacy.css` 的五处断言改为读 `web/src/styles/theme.css`，断言内容不变（「不含某旧规则 / 某导入」，design D14）：`web/test/chat-steps.test.tsx:133`、`login-form.test.tsx:275`、`settings-footer.test.tsx:539`、`sidebar.test.tsx:398`、`topbar.test.tsx:276`（该处的路径清单里把 `legacy.css` 换成 `theme.css`）；用例标题里的 `legacy` 字样同步。
+- [x] 6.5 读 `legacy.css` 的五处断言改为读 `web/src/styles/theme.css`，断言内容不变（「不含某旧规则 / 某导入」，design D14）：`web/test/chat-steps.test.tsx:133`、`login-form.test.tsx:275`、`settings-footer.test.tsx:539`、`sidebar.test.tsx:398`、`topbar.test.tsx:276`（该处的路径清单里把 `legacy.css` 换成 `theme.css`）；用例标题里的 `legacy` 字样同步。
   验证：`grep -rn 'legacy\.css' web/test web/e2e` 只剩守卫里「该文件不存在」的断言与注入样本；`npm test --workspace web` 通过。
-- [ ] 6.6 走查：删除 `web/e2e/ui-walk-files.ts` 的 `expectLegacyOverPreflight`（连同它上方三行注释），以及 `web/e2e/ui-walk-layout.ts` 里对它的导入与调用（`:5`、`:198`，`:190` 的注释去掉「与层序探针」）。本组不新增走查步骤（整个 change 里唯一可能新增的一步在 3.3：取保留分支且现象只在真实浏览器复现时；它若存在，本组不动它）。
+- [x] 6.6 走查：删除 `web/e2e/ui-walk-files.ts` 的 `expectLegacyOverPreflight`（连同它上方三行注释），以及 `web/e2e/ui-walk-layout.ts` 里对它的导入与调用（`:5`、`:198`，`:190` 的注释去掉「与层序探针」）。本组不新增走查步骤（整个 change 里唯一可能新增的一步在 3.3：取保留分支且现象只在真实浏览器复现时；它若存在，本组不动它）。
   验证：`grep -rn 'LegacyOverPreflight\|legacy' web/e2e` 零命中；`make ui-walk` 两个 project 全绿。
-- [ ] 6.7 文档（design D18）：`AGENTS.md:164` 去掉「与冻结区 `web/src/ui/`」（改后仍是 Enforcement Index 说明段之后、`Known blind spots` 之前唯一一行同时点名两个拷入目录与 ADR-0013 的注记）；
+- [x] 6.7 文档（design D18）：`AGENTS.md:164` 去掉「与冻结区 `web/src/ui/`」（改后仍是 Enforcement Index 说明段之后、`Known blind spots` 之前唯一一行同时点名两个拷入目录与 ADR-0013 的注记）；
   `constraints.yaml:173` 与 `:178` 的 `exit_condition` 把「应用层与冻结区门槛不变」改为「应用层门槛不变」；
   `IMPLEMENTATION_PLAN.md`：`:149`（F-UI-7 的「`web/src/ui` 自有基元退役」标明已由本 change 完成）、`:163`（「不再新增 `web/src/ui` 基元」改为该目录已删除、自写共享组件放 `web/src/components/`）、`:354`（后续第 1 条标为已完成，指向 #1393）；
   ADR-0013 的本 change 增补补上终态：旧基元层与 `legacy` 层已删除、`web/src` 只剩三个样式文件、全局基础规则与 `ui-*` 类在 `theme.css` 的 `base` 块里及其理由（design D7）、分层守卫改为终态断言、七个 Radix 单包已卸载。
   验证：`grep -rnE '冻结区|web/src/ui|legacy\.css|layer\(legacy\)' AGENTS.md constraints.yaml ATTRIBUTION.md IMPLEMENTATION_PLAN.md web/src web/e2e` 的命中只剩对历史的记述（逐条在 PR 里说明）；`web/test/ui-layering.test.ts` 的 `AGENTS.md` 与 `constraints.yaml` 两条用例通过；`make test-guardrails` 通过（`scripts/test-ci-harness.sh` 没有镜像被改动的文本，design D18 已核对，开工时再 grep 一次）。
-- [ ] 6.8 变异证据（对真实文件逐条做、逐条撤销，结果贴进 PR）：
+- [x] 6.8 变异证据（对真实文件逐条做、逐条撤销，结果贴进 PR）：
   新建 `web/src/ui/card.tsx` → `ui-layering` 判红；
   新建 `web/src/features/chat/x.css` → `ui-foundation-entry` 的「样式文件恰为三个」与 `ui-layering` 的会话页终态都判红；
   在 `web/src/styles.css` 的层声明里加回 `legacy`，或加回 `@import "./styles/legacy.css" layer(legacy);` → `ui-foundation-entry` 各判红；
-  在 `web/src/features/files/tree.tsx` 加 `import * as Dialog from "@radix-ui/react-dialog"`（已卸载的单包）或 `import { Dialog } from "radix-ui"` → `ui-guardrails` 的依赖方向守卫各判红（前者另由类型检查判红）；
+  在 `web/src/features/files/tree.tsx` 加 `import * as Dialog from "@radix-ui/react-dialog"`（已卸载的单包）或 `import { Dialog } from "radix-ui"` → `ui-guardrails` 的依赖方向守卫各判红（前者另由 knip 判红；**实施更正**：原文写「另由类型检查判红」，实测不成立——该单包仍是 `radix-ui` 的传递依赖，`make typecheck` 退出码 0）；
   在 `web/src/features/chat/composer.tsx` 加 `import { useToast } from "@/components/toast"` → `ui-layering` 判红；
   在 `web/src/features/chat/todo-panel.tsx` 去掉 `role="list"` → 显式列表语义守卫判红；
   把 `theme.css` 的 `@layer base` 改名为 `@layer components` → `ui-foundation-entry` 判红；
@@ -198,7 +198,7 @@ Minimal mergeable slice: atomic - 守卫（5.1）在规则搬完（5.2）之前�
 - [ ] 6.9 归档时改 Purpose——**执行者是编排方，在归档提交里做（或紧随其后的一个文档提交）；不属于本组的 PR，实现本组的人不做、不勾**（design D21；先例 `6996028a`）：归档把 delta 并入主规格之后，改两份主规格的 `## Purpose`——`openspec/specs/ui-foundation/spec.md` 去掉「frozen-zone split with its migrated-area guard」，改述为拷入层 / 应用层两层与自写共享组件；
   `openspec/specs/ui-primitives/spec.md` 去掉「`web/src/ui/` 基元层」「以 Radix UI Primitives 为行为层的组件库」，改述为设计 token、图标与品牌标记、动效约束与覆盖层的键盘关闭。
   验证：两个 CLI 的 `openspec validate --specs --strict` 通过；`grep -n 'web/src/ui\|frozen' openspec/specs/ui-foundation/spec.md openspec/specs/ui-primitives/spec.md` 的命中只剩条文里对「已不存在」的陈述。编排方做完后勾选本条；Epic #1393 的收尾清单里单列这一步。
-- [ ] 6.10 收尾验证：逐条核对 #1393 的七条验收标准并在 PR 里给出各自的证据（命令输出或测试名）；`make check`、`make test-guardrails`、`make ui-walk` 全绿；
+- [x] 6.10 收尾验证：逐条核对 #1393 的七条验收标准并在 PR 里给出各自的证据（命令输出或测试名）；`make check`、`make test-guardrails`、`make ui-walk` 全绿；
   `$HOME/.nvm/versions/node/v24.13.1/bin/openspec validate s1f-legacy-layer-removal --strict --no-interactive` 与 `$HOME/.local/bin/openspec validate s1f-legacy-layer-removal --strict --no-interactive` 都通过；本文件的任务**除 6.9 外**全部勾选（3.2 / 3.3 中未取的一条带「未取」注记；6.9 留给归档）。
 
 Suggested fixture level: expanded - 改唯一的样式入口（层声明与导入）并重写三个守卫——它们是此后整个前端分层的判据；另含 `AGENTS.md`、`constraints.yaml` 的条文改动

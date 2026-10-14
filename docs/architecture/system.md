@@ -57,12 +57,17 @@ kb-service 只认 kb_id 集合，不认用户——租户过滤是 app-server `k
 `lib/sse`（Last-Event-ID 重连）、`lib/theme`（已有）、`lib/session-list-events`（列表事件连接 `GET /api/sessions/events` 的连接器，S1f change C）。每路由一个 feature 目录，不做全局状态库，
 按需 React context。
 
-`web/src/ui` 是基元层：按钮、输入、开关、标签、chip、Dialog、ConfirmDialog、Drawer、Menu、Popover、
-Toast、Tooltip、空态、分段控件、图标和品牌 mark。交互行为依赖 Radix Primitives
-（Dialog/DropdownMenu/Popover/RadioGroup/Switch/Toast/Tooltip），图标取自 lucide-react。
-token 定义在 `web/src/styles/tokens.css`（调色板 + 语义层，亮/暗两套），动效定义在
-`ui/motion.css`（受 `prefers-reduced-motion` 控制），二者都归这一层。feature 只经 `ui/index.ts`
-使用基元，不直接依赖 Radix；demo 中没有后端契约的控件不渲染。
+组件分两层（ADR-0013）。拷入层是 `web/src/components/ui/`（shadcn/ui registry 的组件，交互行为来自合包
+`radix-ui`）与 `web/src/components/assistant-ui/`（assistant-ui registry 的三个会话面组件及其依赖），原样拷入、
+只允许规格列出的几类修改。其余都是应用层：feature、路由，以及直接放在 `web/src/components/` 下的自写共享组件
+`icon.tsx`（图标，取自 lucide-react）、`brand-mark.tsx`（品牌 mark）与 `escape-fallback.ts`（覆盖层的 Escape
+兜底）；这一层没有统一出口文件，使用方直接从各文件导入，也不直接依赖 Radix。原先的 `web/src/ui` 基元层
+已删除（change `s1f-legacy-layer-removal`，#1393）。
+
+样式只有三个文件：入口 `web/src/styles.css`（层声明 `@layer theme, base, components, utilities;`、Tailwind
+三段与全局 reduced-motion 块）、`web/src/styles/tokens.css`（调色板 + 语义层，亮/暗两套）、
+`web/src/styles/theme.css`（shadcn 语义变量到 token 的映射，外加一个 `@layer base` 块承载全局基础规则与
+`ui-*` 类）。应用代码只写 Tailwind 类与主题变量，不新增 `.css`；demo 中没有后端契约的控件不渲染。
 
 ## 4. 依赖规则
 

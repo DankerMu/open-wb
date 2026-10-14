@@ -2,7 +2,6 @@
 // Project branches live here so the journey in ui-walk.spec.ts stays a single path.
 
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
-import { expectLegacyOverPreflight } from "./ui-walk-files.js";
 import { isExpectedUnauthorizedNetworkLog } from "./ui-walk-oracle.js";
 
 export const DEV_ACCOUNT = "zhangsan";
@@ -187,16 +186,13 @@ export async function withViewport(
   }
 }
 
-// desktop 逐路由临时缩到 1024×768 断无溢出；/files 另断树与预览并排（mobile 为纵向堆叠）与层序探针。
+// desktop 逐路由临时缩到 1024×768 断无溢出；/files 另断树与预览并排（mobile 为纵向堆叠）。
 export async function expectRouteViewports(
   page: Page,
   project: WalkProject,
   path: string,
 ): Promise<void> {
-  if (path === "/files") {
-    await expectFilesColumns(page, project);
-    await expectLegacyOverPreflight(page);
-  }
+  if (path === "/files") await expectFilesColumns(page, project);
   if (project !== "desktop-light") return;
   await withViewport(page, NARROW_DESKTOP, () => expectRouteLayout(page, project));
 }

@@ -536,7 +536,10 @@ describe("迁移静态契约", () => {
     for (const legacy of ["lib/dialog", "<dialog", "showModal", "trapDialogFocus"]) {
       expect(footer).not.toContain(legacy);
     }
-    expect(readRepoFile("web/src/styles/legacy.css")).not.toContain(".logout-dialog");
+    // 全局样式现在只在 theme.css：读到的确是那份文件（base 块里有 `.ui-alert`），其中没有旧的确认框规则。
+    const styles = readRepoFile("web/src/styles/theme.css");
+    expect(styles).toContain("  .ui-alert {");
+    expect(styles).not.toContain(".logout-dialog");
     for (const file of [
       "web/test/settings-footer.test.tsx",
       "web/test/settings-page.test.tsx",

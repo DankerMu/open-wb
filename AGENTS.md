@@ -163,7 +163,7 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 
 阈值与正则的机器可读权威是 `constraints.yaml`；变更先改那里，再同步守卫脚本内的镜像正则。没有执行点的规则是愿望不是规则——要么接上，要么删掉。
 
-拷入层豁免：`web/src/components/ui/` 与 `web/src/components/assistant-ui/`（registry 原样拷入的组件，ADR-0013）不计覆盖率、重复代码、文件行数、Biome linter 与 knip 未使用导出，格式化照常；条目登记在 `constraints.yaml` `exemptions.entries`，应用层与冻结区 `web/src/ui/` 门槛不变。
+拷入层豁免：`web/src/components/ui/` 与 `web/src/components/assistant-ui/`（registry 原样拷入的组件，ADR-0013）不计覆盖率、重复代码、文件行数、Biome linter 与 knip 未使用导出，格式化照常；条目登记在 `constraints.yaml` `exemptions.entries`，应用层门槛不变。
 
 界面功能验收：签收对象是 `docs/acceptance/functional-checklist.md`（格式由 `web/test/functional-checklist.test.ts` 守卫）；交付或改变用户可见功能的 PR 在同一 PR 里增改对应行并写 `待签`，只有仓库所有者本人可改为 `通过` 或 `不通过`，agent 不得代签（review-only，规则全文见该文件头）。
 

@@ -1,4 +1,3 @@
-import { posix } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   blockBody,
@@ -14,11 +13,12 @@ import {
 // 规则与 `ui-*` 类）。层叠结果本身由 ui-walk 在真实浏览器里证明。
 
 const ENTRY = "web/src/styles.css";
-const LEGACY = "web/src/styles/legacy.css";
+const TOKENS = "web/src/styles/tokens.css";
 const THEME = "web/src/styles/theme.css";
-const UI_BARREL = "web/src/ui/ui.css";
+/** `web/src` 下仅有的三个样式文件，按 `listRepoFiles` 的排序。 */
+const STYLE_FILES = [ENTRY, THEME, TOKENS];
 
-const LAYER_ORDER = "@layer theme, base, legacy, components, utilities;";
+const LAYER_ORDER = "@layer theme, base, components, utilities;";
 const ENTRY_IMPORTS = [
   '@import "tailwindcss/theme.css" layer(theme);',
   '@import "tailwindcss/preflight.css" layer(base);',
@@ -27,7 +27,6 @@ const ENTRY_IMPORTS = [
   '@import "tw-shimmer";',
   '@import "./styles/tokens.css";',
   '@import "./styles/theme.css";',
-  '@import "./styles/legacy.css" layer(legacy);',
 ];
 const REDUCE_PRELUDE = "@media (prefers-reduced-motion: reduce)";
 
@@ -61,25 +60,33 @@ function entryViolations(css: string): string[] {
   return violations;
 }
 
-/** `importer`（仓库相对路径）里每条 `@import` 的目标，解析成仓库相对路径。 */
-function importTargets(importer: string): string[] {
-  return importStatements(readRepoFile(importer)).map((statement) => {
-    const target = /^@import "(\.[^"]+)";$/.exec(statement)?.[1];
-    if (target === undefined) throw new Error(`${importer}: 非预期的 ${statement}`);
-    return posix.join(posix.dirname(importer), target);
-  });
+/** 样式文件集合（纯函数）：`web/src` 下的 `.css` 恰为三个样式文件，多一个、少一个都判失败。 */
+function styleFileViolations(paths: string[]): string[] {
+  const css = paths.filter((path) => path.endsWith(".css"));
+  return [
+    ...css
+      .filter((path) => !STYLE_FILES.includes(path))
+      .map((path) => `${path}: web/src 下的 .css 只能是三个样式文件`),
+    ...STYLE_FILES.filter((path) => !css.includes(path)).map((path) => `${path}: 样式文件缺失`),
+  ];
 }
 
 describe("入口结构（ui-foundation「入口结构不可缺失或重排」）", () => {
-  it("判定自证：层序重排、少 layer(legacy)、token 入层、多 @import、多规则块都判失败", () => {
+  it("判定自证：层声明加回 legacy、加回 legacy.css 的导入、token 入层、扫描范围放开、多 @import、reduce 块入层、多规则块都判失败", () => {
     const entry = readRepoFile(ENTRY);
+    const themeImport = '@import "./styles/theme.css";';
     const mutations: [string, string, string][] = [
-      ["层序重排", LAYER_ORDER, "@layer theme, base, components, legacy, utilities;"],
-      ["legacy 未入层", '"./styles/legacy.css" layer(legacy);', '"./styles/legacy.css";'],
-      ["tokens 入层", '"./styles/tokens.css";', '"./styles/tokens.css" layer(legacy);'],
+      ["层声明里加回 legacy", LAYER_ORDER, "@layer theme, base, legacy, components, utilities;"],
+      ["层序重排", LAYER_ORDER, "@layer theme, components, base, utilities;"],
+      [
+        "加回 legacy.css 的导入",
+        themeImport,
+        `${themeImport}\n@import "./styles/legacy.css" layer(legacy);`,
+      ],
+      ["tokens 入层", '"./styles/tokens.css";', '"./styles/tokens.css" layer(base);'],
       ["类名扫描范围放开", ' source("./");', ";"],
       ["多一条 @import", LAYER_ORDER, `${LAYER_ORDER}\n@import "./ui/ui.css";`],
-      ["reduce 块入层", REDUCE_PRELUDE, `@layer legacy { ${REDUCE_PRELUDE}`],
+      ["reduce 块入层", REDUCE_PRELUDE, `@layer base { ${REDUCE_PRELUDE}`],
     ];
     for (const [label, from, to] of mutations) {
       expect(entry, label).toContain(from);
@@ -88,30 +95,47 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
     expect(entryViolations(`body { margin: 0; }\n${entry}`)).not.toEqual([]);
   });
 
-  it("styles.css：层声明在首，八条导入各归其层，只剩一个未分层的全局 reduce 块", () => {
+  it("styles.css：层声明在首且不含 legacy，七条导入各归其层，只剩一个未分层的全局 reduce 块", () => {
+    expect(ENTRY_IMPORTS).toHaveLength(7);
     expect(entryViolations(readRepoFile(ENTRY))).toEqual([]);
   });
 
-  it("其余既有 .css 只被 legacy.css 直接导入或经 ui/ui.css 传递导入，且各恰一次", () => {
-    const wired = [ENTRY, "web/src/styles/tokens.css", THEME, LEGACY];
-    const others = listRepoFiles("web/src", (path) => path.endsWith(".css")).filter(
-      (path) => !wired.includes(path),
-    );
-    expect(others.length).toBeGreaterThan(0);
+  it("判定自证：web/src/features 下出现一个 .css、旧样式文件回来、少一个样式文件各判失败", () => {
+    expect(styleFileViolations([...STYLE_FILES, "web/src/main.tsx"])).toEqual([]);
+    for (const extra of [
+      "web/src/features/chat/x.css",
+      "web/src/features/files/files.css",
+      "web/src/styles/legacy.css",
+      "web/src/ui/ui.css",
+      "web/src/ui/motion.css",
+      "web/src/styles/base.css",
+    ]) {
+      expect(styleFileViolations([...STYLE_FILES, extra])).toEqual([
+        `${extra}: web/src 下的 .css 只能是三个样式文件`,
+      ]);
+    }
+    expect(styleFileViolations([ENTRY, THEME])).toEqual([`${TOKENS}: 样式文件缺失`]);
+    expect(styleFileViolations([])).toHaveLength(3);
+  });
 
-    const legacyTargets = importTargets(LEGACY);
-    expect(legacyTargets).toContain(UI_BARREL);
-    expect([...legacyTargets, ...importTargets(UI_BARREL)].sort()).toEqual(others);
-
-    const importers = others.filter((path) => importStatements(readRepoFile(path)).length > 0);
-    // Toast 删除（#1398）后 ui.css 不再汇总任何组件样式：既有样式文件里没有一个带 @import。
-    expect(importers).toEqual([]);
+  it("web/src 下的 .css 恰为 styles.css、styles/tokens.css、styles/theme.css，后两个不含 @import", () => {
+    const paths = listRepoFiles("web/src", () => true);
+    // 扫描没有放空：枚举到的不只是样式文件。
+    expect(paths).toContain("web/src/main.tsx");
+    expect(paths.filter((path) => path.endsWith(".css"))).toEqual(STYLE_FILES);
+    expect(styleFileViolations(paths)).toEqual([]);
+    expect(importStatements(readRepoFile(ENTRY))).toHaveLength(7);
+    expect(importStatements(readRepoFile(TOKENS))).toEqual([]);
     expect(importStatements(readRepoFile(THEME))).toEqual([]);
   });
 
-  it("文件页样式已退出 legacy 层：legacy.css 不导入 features/files，该目录下没有 .css", () => {
-    expect(readRepoFile(LEGACY)).not.toContain("features/files");
-    expect(listRepoFiles("web/src/features/files", (path) => path.endsWith(".css"))).toEqual([]);
+  it("文件页样式已退出 legacy 层：web/src/features/files 下没有 .css，web/src/styles/legacy.css 不存在", () => {
+    const files = listRepoFiles("web/src/features/files", () => true);
+    expect(files).toContain("web/src/features/files/tree.tsx");
+    expect(files.filter((path) => path.endsWith(".css"))).toEqual([]);
+    const styles = listRepoFiles("web/src/styles", () => true);
+    expect(styles).toContain(THEME);
+    expect(styles).not.toContain("web/src/styles/legacy.css");
   });
 });
 

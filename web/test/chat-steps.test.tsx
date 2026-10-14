@@ -129,8 +129,10 @@ describe("(S2) step cards render icon, Chinese badge, summary and collapsed raw 
     expect(screen.queryByRole("status", { name: /running|done|failed/ })).toBeNull();
   });
 
-  it("the legacy stylesheet imports nothing from the chat page; chat.css and messages.css are gone", () => {
-    const styles = readRepoFile("web/src/styles/legacy.css");
+  it("the global stylesheet (theme.css) carries nothing from the chat page; chat.css and messages.css are gone", () => {
+    const styles = readRepoFile("web/src/styles/theme.css");
+    // 读到的确是全局样式所在的那份文件（base 块里有 `.ui-alert`），下面的「不含」才不是空话。
+    expect(styles).toContain("  .ui-alert {");
     expect(styles).not.toContain("features/chat");
     expect(styles).not.toContain("messages.css");
     expect(styles).not.toContain(".chat-md");

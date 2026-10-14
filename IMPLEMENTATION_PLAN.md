@@ -36,7 +36,7 @@
   `workspaces`（CRUD/树/新建目录/预览）、`sessions`（omp `--mode rpc` 子进程、SSE + 序号回放 + 环形缓冲、
   SQLite 会话/消息/步骤含 args/output 双字段、`--resume`、空闲回收 `idleMs`）、`model-proxy`（omp 环境零凭证）、
   Linux 专用 omp uid（sudo + `setpriv --pdeathsig`，CI `uid-isolation` 证明）。**尚无**：中断/fork 端点、会话数上限、场景/分组字段、挂载。
-- web SPA（S0a/S0b/S1a/S1e）：React + Vite，四路由（`/`、`/files`、`/center` 占位、`/settings`）；`web/src/ui` 基元层
+- web SPA（S0a/S0b/S1a/S1e）：React + Vite，四路由（`/`、`/files`、`/center` 占位、`/settings`）；S1e 建的 `web/src/ui` 基元层已随 #1393 删除（ADR-0013），现为拷入层 `web/src/components/{ui,assistant-ui}/` 加直接放在 `web/src/components/` 下的自写共享组件（`icon.tsx`、`brand-mark.tsx`、`escape-fallback.ts`）
   （token 全集亮/暗、按钮/输入/开关/标签/chip/Dialog/ConfirmDialog/Drawer/Menu/Popover/Tooltip/Toast/空态/分段控件/图标/品牌 mark）；
   外壳（侧栏折叠 + 用户菜单、顶栏三态、900/760 两档响应式）；会话页（欢迎态、Markdown 消息 + 流式光标、步骤卡、回到最新、复制）；
   文件页（逻辑路径、条目元数据、空态、创建对话框）；登录页与设置页对齐 demo。demo 一致性清单 81/81 签收（`docs/acceptance/`）。
@@ -146,7 +146,7 @@
 | F-UI-3 | 会话页对齐（已交付范围）：欢迎页 hero + 最佳实践卡 + 免责声明、composer 卡片形态（未交付控件不渲染）、用户/助手消息形态、Markdown 正文 + 流式光标、步骤卡结构化摘要（不倒 JSON）、回到最新、消息操作条（复制） |
 | F-UI-4 | 文件页对齐：树图标/大小/修改时间、根行形态、切换器弹层形态、预览头与不支持态/空目录文案、逻辑路径展示（不暴露服务器绝对路径） |
 | F-UI-5 | 登录页与设置页对齐：登录卡结构（自有品牌位 + 副标题 + 自动聚焦）、外观分段控件 + 当前生效卡、关于卡图标 |
-| F-UI-7 | 前端重建（2026-10-04，ADR-0013）：全部页面改用 assistant-ui（会话面）+ shadcn/ui + Tailwind；现有 token 映射进 Tailwind 主题；`web/src/ui` 自有基元退役。取代 F-UI-1–F-UI-5 的呈现约定 |
+| F-UI-7 | 前端重建（2026-10-04，ADR-0013）：全部页面改用 assistant-ui（会话面）+ shadcn/ui + Tailwind；现有 token 映射进 Tailwind 主题；`web/src/ui` 自有基元退役（已完成：change `s1f-legacy-layer-removal`，#1393，目录已删除）。取代 F-UI-1–F-UI-5 的呈现约定 |
 | F-UI-8 | 功能验收 harness（2026-10-04，ADR-0013）：按功能的验收清单取代 demo 逐组件清单与 demo-vs-app 截图对；`make ui-walk` 视口矩阵与 error oracle 保留。取代 F-UI-6 |
 | F-UI-6 | demo 一致性验收 harness：Playwright 视口矩阵（1440/1024/390 × 亮/暗）、逐页 demo-vs-app 截图对产物（`make ui-shots`，人工验收输入）、肉眼可辨夹具（≥128px 图片 + 多段 md + 多行 csv）、逐页逐组件验收清单文档 |
 
@@ -160,7 +160,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - 凡触碰 `web/` 的阶段：Verify 必含该阶段页面的功能验收清单签收与 `make ui-walk`；
   Stage 5 对 web 任务的 `Suggested fixture level` 不得只以 jsdom/mock 收口，涉及呈现的任务至少 `expanded`（真实浏览器 + 视口矩阵）。
   S1f 关闭前已交付的阶段沿用原约定（demo-vs-app 截图对 + 逐组件清单），S1f 起不再产出截图对。
-- 新页面与新组件一律用 shadcn/ui + Tailwind（会话面用 assistant-ui），不再新增 `web/src/ui` 基元，也不再对照 demo 的布局与文案。
+- 新页面与新组件一律用 shadcn/ui + Tailwind（会话面用 assistant-ui），`web/src/ui` 目录已删除（#1393），自写共享组件放 `web/src/components/`（与两个拷入目录平级，不在其内），也不再对照 demo 的布局与文案。
 - 无后端契约支撑的控件在其后端落地前**不渲染**；不得以禁用态/占位按钮"先摆上"。需要某个控件时，把它的后端排到同一批。
 - 明确不做（2026-09-24 S1e grill 拍板，不列入任何阶段、不进验收清单）：麦克风语音输入、⌘K 命令面板、消息赞/踩、导出对话记录、通知铃铛；demo 快捷登录卡仅在 `dev-stub` 认证适配器下渲染（生产 OIDC 无此面）。
   2026-09-26 追加：追问建议 chip（无数据生成契约；omp `followUp` 是排队语义，不作来源，#404）；顶栏「更多」菜单（其 `切换主题`/`设置` 已由设置页与侧栏覆盖，`历史提问` 如需另立项，#403）；产物卡「在编辑器中打开」（本仓无内嵌编辑器，#403）。
@@ -205,7 +205,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 **S1e 前端基准对齐（已交付页面）**
 - Outcome：把 S0a/S0b/S1a 已交付的四页（登录、`/`、`/files`、`/settings`）按 demo 逐页逐组件对齐；建立基元组件库与 token 全集；接入视口矩阵与截图对产物；人工联合验收以截图对 + 清单签收。**不新增任何后端能力；demo 中无后端支撑的控件一律不渲染。**
-- Files/components：`web/src/ui/*`（基元）、`web/src/styles/tokens.css`、`web/src/routes`（外壳）、四个 feature 目录的呈现层、`web/e2e`、`web/playwright.config.ts`、`smoke/fixtures/sandbox`、`docs/acceptance/demo-parity-checklist.md`。
+- Files/components：`web/src/ui/*`（基元；S1e 交付时的位置，该目录已随 #1393 删除，`Icon` 与 `BrandMark` 现在 `web/src/components/`）、`web/src/styles/tokens.css`、`web/src/routes`（外壳）、四个 feature 目录的呈现层、`web/e2e`、`web/playwright.config.ts`、`smoke/fixtures/sandbox`、`docs/acceptance/demo-parity-checklist.md`。
 - 覆盖：F-UI-1、F-UI-2、F-UI-3、F-UI-4、F-UI-5、F-UI-6。
 - 必读增量：`docs/reviews/2026-09-24-demo-parity-audit.md` §4（逐页 demo 行号）；demo 全局组件节（demo:570-634, 934-1142）；ATTRIBUTION.md §4（token 可用、品牌图形不可用）。
 - Verify：`make check` + `make ui-walk`（矩阵内每格无横向溢出、无 console error）+ `make ui-shots` 产物经人工按清单逐项签收（清单每项写"demo:行号 → 页面元素 → 通过/不通过"）。
@@ -351,7 +351,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
          是否另由人补看一次待 owner 定。
       3. 并入本块的原始需求 #913 仍开着，是否关闭待 owner 定。
     - 本 change 留下的后续：
-      1. 旧样式层整体移除（冻结区 `web/src/ui` 与 `web/src/styles/legacy.css`；design「Not yet specified」）：清理 issue 是 #1393。
+      1. 旧样式层整体移除（当时的冻结区 `web/src/ui` 与 `web/src/styles/legacy.css`；design「Not yet specified」）：已完成，change `s1f-legacy-layer-removal`（Epic #1393，子 issue #1397–#1402）。
       2. 包体上限：仍不设。ADR-0013 已定「S1f 的全部 change 完成后再定」，本 change 只量并记录（数字随 #1120 写入 ADR-0013），尚无对应 issue。
       3. 开着的跟进 issue：#1286（检查之后按路径操作的替换窗口，owner 裁决登记为已知残余）、#1337、#1340、#1350、#1372、#1380。
 - 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。

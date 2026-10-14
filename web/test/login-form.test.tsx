@@ -271,8 +271,10 @@ describe("login card routing and scope", () => {
 });
 
 describe("login card static contract", () => {
-  it("legacy.css no longer carries any login rule or the auth stylesheet import", () => {
-    const styles = readRepoFile("web/src/styles/legacy.css");
+  it("the global stylesheet (theme.css) carries no login rule and no auth stylesheet import", () => {
+    const styles = readRepoFile("web/src/styles/theme.css");
+    // 读到的确是全局样式所在的那份文件（base 块里有 `.ui-alert`），下面的「不含」才不是空话。
+    expect(styles).toContain("  .ui-alert {");
     expect(styles).not.toContain("auth.css");
     expect(styles).not.toContain(".auth-loading");
     expect(styles).not.toContain(".brand-mark");
