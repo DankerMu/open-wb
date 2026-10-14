@@ -89,11 +89,17 @@ function redact(text: string, secrets: readonly string[]): string {
   const lines = normalize(text)
     .split("\n")
     .filter((line) => !DUMP_LINE.test(line));
-  let result = lines.join("\n");
-  for (const secret of orderedSecrets(secrets)) {
+  const result = replaceSecrets(lines.join("\n"), orderedSecrets(secrets));
+  return result.replace(BEARER, `Bearer ${REMOVED}`).replace(SK_KEY, REMOVED);
+}
+
+/** Step 3: every occurrence of each listed secret, in the given (longest first) order. */
+function replaceSecrets(text: string, ordered: readonly string[]): string {
+  let result = text;
+  for (const secret of ordered) {
     result = result.split(secret).join(REMOVED);
   }
-  return result.replace(BEARER, `Bearer ${REMOVED}`).replace(SK_KEY, REMOVED);
+  return result;
 }
 
 function orderedSecrets(secrets: readonly string[]): string[] {
@@ -104,16 +110,22 @@ function orderedSecrets(secrets: readonly string[]): string[] {
 }
 
 /**
- * After the replacement every whole secret is gone, so what a cut can leave is a tail that is a
- * proper prefix of a listed secret, or an `sk-` run too short for `SK_KEY`: the longest such tail
- * is dropped. A `Bearer` token cut short is still caught by `BEARER`.
+ * A cut can leave the head of a listed secret at the end of the text, and the replacement has
+ * already run over that head: a shorter listed secret wholly inside it reads `[已移除]` there (a
+ * base URL cut after its long path segment). So the text's end is compared with each proper prefix
+ * of each listed secret as the replacement leaves it — the raw prefix when nothing listed fits
+ * inside — and the longest match is dropped, as is an `sk-` run too short for `SK_KEY`. A `Bearer`
+ * token cut short is still caught by `BEARER`. A head the cut split inside a multi-byte character
+ * ends in U+FFFD and matches no prefix.
  */
 function dropSecretHead(text: string, secrets: readonly string[]): string {
+  const ordered = orderedSecrets(secrets);
   let end = text.length;
-  for (const secret of orderedSecrets(secrets)) {
-    for (let length = Math.min(secret.length - 1, text.length); length > 0; length -= 1) {
-      if (text.endsWith(secret.slice(0, length))) {
-        end = Math.min(end, text.length - length);
+  for (const secret of ordered) {
+    for (let length = secret.length - 1; length > 0; length -= 1) {
+      const head = replaceSecrets(secret.slice(0, length), ordered);
+      if (text.endsWith(head)) {
+        end = Math.min(end, text.length - head.length);
         break;
       }
     }

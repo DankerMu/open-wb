@@ -49,6 +49,12 @@ images:
   urls:
     enabled: false
     command: null
+retry:
+  enabled: true
+  maxRetries: 1
+  baseDelayMs: 500
+  maxDelayMs: 300000
+  modelFallback: false
 `;
 
 /** `<state>/home/.omp/agent/host-overlay.yml` is a 0640 regular file holding exactly the spec bytes. */

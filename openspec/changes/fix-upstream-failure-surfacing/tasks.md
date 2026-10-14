@@ -65,29 +65,29 @@ Minimal mergeable slice: atomic - 424 与三个记号名的选择只有经真实
 
 ## 2. http-service-skeleton — 非法密钥拒绝启动（组 2）
 
-- [ ] 2.1 `server/src/agent-config.ts` 在 `MODEL_UPSTREAM_API_KEY`（`:81`）解析之后调用 `http.validateHeaderValue("authorization", \`Bearer ${key}\`)`；抛错时改抛 `MODEL_UPSTREAM_API_KEY must be a valid HTTP header value`，不含取值、不透传 Node 的原始错误。
+- [x] 2.1 `server/src/agent-config.ts` 在 `MODEL_UPSTREAM_API_KEY`（`:81`）解析之后调用 `http.validateHeaderValue("authorization", \`Bearer ${key}\`)`；抛错时改抛 `MODEL_UPSTREAM_API_KEY must be a valid HTTP header value`，不含取值、不透传 Node 的原始错误。
   验证：`server-config.test.ts` 覆盖 `\n`、`\0`、`密钥`、`abc def` 四例（前三例抛错且 message 含键名不含哨兵，第四例通过）。
-- [ ] 2.2 编译入口：`server-startup-failure-reason.test.ts` 跑 http-service-skeleton「非法上游密钥拒绝启动」场景。
+- [x] 2.2 编译入口：`server-startup-failure-reason.test.ts` 跑 http-service-skeleton「非法上游密钥拒绝启动」场景。
   验证：stdout / stderr 不含哨兵、恰一行 `{"event":"server_start_failed","reason":"config"}`、无文件系统与监听副作用；`abc def` 正常启动。
-- [ ] 2.3 文档：`docs/architecture/system.md` 的配置说明写明密钥必须是合法 HTTP 头取值、否则拒绝启动；PR 描述提示升级前检查密钥。
+- [x] 2.3 文档：`docs/architecture/system.md` 的配置说明写明密钥必须是合法 HTTP 头取值、否则拒绝启动；PR 描述提示升级前检查密钥。
   验证：PR 里贴出改动段落。
-- [ ] 2.4 变异证据：去掉校验 → 2.2 判红（进程启动成功）；把 Node 原始错误的 message 透传 → 2.1 的键名 / 哨兵断言判红；改为手写字符集 `/^[\x20-\x7e]*$/` → `abc def` 之外再加一例 `é`（Latin-1，Node 接受）判红。
-- [ ] 2.5 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
+- [x] 2.4 变异证据：去掉校验 → 2.2 判红（进程启动成功）；把 Node 原始错误的 message 透传 → 2.1 的键名 / 哨兵断言判红；改为手写字符集 `/^[\x20-\x7e]*$/` → `abc def` 之外再加一例 `é`（Latin-1，Node 接受）判红。
+- [x] 2.5 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 
 Suggested fixture level: compact - 一处配置校验与它的测试；不过它改变的是生产启动条件（发布说明必须提示），审阅按 expanded 的 sibling surface 核对 `smoke-live` 与 CI 的密钥取值
 Minimal mergeable slice: atomic - 一个校验调用、它的单测与编译入口用例
 
 ## 3. omp-runtime — 会话级重试封顶一轮（组 3）
 
-- [ ] 3.1 `server/src/sessions/omp/host-overlay.ts` 的 `HOST_OVERLAY` 在 `images:` 段后追加 design D12 的 `retry:` 段（五个键，含 `modelFallback: false`）；头注释补一句理由。
+- [x] 3.1 `server/src/sessions/omp/host-overlay.ts` 的 `HOST_OVERLAY` 在 `images:` 段后追加 design D12 的 `retry:` 段（五个键，含 `modelFallback: false`）；头注释补一句理由。
   验证：overlay 字节测试按 omp-runtime「宿主 overlay」的新内容更新并通过（偏离记录列出旧字节与新字节）；「overlay 不随档位变化」照旧通过。
-- [ ] 3.2 官方 omp：`omp-official-upstream-failure.test.ts` 加「会话级重试封顶一轮（真实 omp）」两例（每次 503；项目层 `retry: {maxRetries: 10, baseDelayMs: 3600000, modelFallback: true, fallbackChains: {default: ["<provider>/<第二个模型>"]}}`，断言假上游收到的请求体 `model` 全是第一个模型），并把 1.7(c) 的末尾记号断言并进第一例（删去 1.7(c) 的单独运行）；第一例**逐字记录**最终 `message_end.errorMessage`（是否带 `Retry budget exhausted after 1 retry: ` 前缀，design D10），贴进 PR。连接失败不在官方层跑（记号形状与 `status.*` 同一拼装，由 1.4 的代理单测覆盖），只用一次性脚本实测一次时长贴进 PR。
+- [x] 3.2 官方 omp：`omp-official-upstream-failure.test.ts` 加「会话级重试封顶一轮（真实 omp）」两例（每次 503；项目层 `retry: {maxRetries: 10, baseDelayMs: 3600000, modelFallback: true, fallbackChains: {default: ["<provider>/<第二个模型>"]}}`，断言假上游收到的请求体 `model` 全是第一个模型），并把 1.7(c) 的末尾记号断言并进第一例（删去 1.7(c) 的单独运行）；第一例**逐字记录**最终 `message_end.errorMessage`（是否带 `Retry budget exhausted after 1 retry: ` 前缀，design D10），贴进 PR。连接失败不在官方层跑（记号形状与 `status.*` 同一拼装，由 1.4 的代理单测覆盖），只用一次性脚本实测一次时长贴进 PR。
   验证：两例通过；**实测**上游请求数与时长写进 PR（design 的 ≈ 64 s / 24 次是推算）。
-- [ ] 3.3 规格对照：omp-runtime「宿主 overlay」的新场景有对应测试名。
-- [ ] 3.4 文档：ADR-0012 增补（#909：overlay 新增 `retry:` 段，五个键的取值与理由，3.2 的实测数字；明写「关闭了 omp 的模型兜底」）。PR 描述同样写明 overlay 关闭了 omp 的模型兜底（`retry.modelFallback: false`）及其理由（多上游切换不在范围内）。
+- [x] 3.3 规格对照：omp-runtime「宿主 overlay」的新场景有对应测试名。
+- [x] 3.4 文档：ADR-0012 增补（#909：overlay 新增 `retry:` 段，五个键的取值与理由，3.2 的实测数字；明写「关闭了 omp 的模型兜底」）。PR 描述同样写明 overlay 关闭了 omp 的模型兜底（`retry.modelFallback: false`）及其理由（多上游切换不在范围内）。
   验证：文档数字与 3.2 的实测一致。
-- [ ] 3.5 变异证据：`maxRetries: 1` 改为 `2` → 3.2 判红（出现第二个 `auto_retry_start`）；去掉 `baseDelayMs` 行 → 项目层一例判红或超时（如实记录是哪一种）；去掉 `modelFallback: false` 行 → 项目层一例判红（出现请求第二个模型的请求体或第二个 `auto_retry_start`）。
-- [ ] 3.6 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿。
+- [x] 3.5 变异证据：`maxRetries: 1` 改为 `2` → 3.2 判红（出现第二个 `auto_retry_start`）；去掉 `baseDelayMs` 行 → 项目层一例判红或超时（如实记录是哪一种）；去掉 `modelFallback: false` 行 → 项目层一例判红（出现请求第二个模型的请求体或第二个 `auto_retry_start`）。
+- [x] 3.6 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿。
 
 Suggested fixture level: expanded - 改 omp 子进程的生产配置（Critical Path「omp 子进程治理」），行为以真实 omp 实测为准
 Minimal mergeable slice: atomic - overlay 的六行与证明它生效的真实 omp 用例

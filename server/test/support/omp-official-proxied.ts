@@ -27,7 +27,7 @@ import { officialBin, onTeardown } from "./omp-official.js";
 import { type StalledHandshake, startStalledHandshake } from "./stalled-handshake.js";
 
 /** The two whitelisted models; the runtime runs the first. */
-const PROXIED_MODELS = ["deepseek-v4.1-flash", "workbuddy-second"] as const;
+export const PROXIED_MODELS = ["deepseek-v4.1-flash", "workbuddy-second"] as const;
 const UPSTREAM_KEY = "fake";
 const OWNER_ID = "u1";
 

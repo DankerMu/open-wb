@@ -1,3 +1,4 @@
+import { validateHeaderValue } from "node:http";
 import { availableParallelism } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { assertSafeSudoPath, assertSetprivExecutable } from "./core/process-path.js";
@@ -79,6 +80,9 @@ export function resolveAgentSettings(
     "MODEL_UPSTREAM_BASE_URL",
   );
   const modelUpstreamApiKey = optionalSetting(env.MODEL_UPSTREAM_API_KEY, "MODEL_UPSTREAM_API_KEY");
+  if (modelUpstreamApiKey !== undefined) {
+    assertHeaderSafeKey(modelUpstreamApiKey);
+  }
   const modelCatalog = resolveModelCatalog(env);
   return {
     ompBin: resolveOwnedPath(env.OMP_BIN, DEFAULT_OMP_BIN_RELATIVE, repoRoot, "OMP_BIN"),
@@ -219,6 +223,19 @@ function optionalSetting(raw: string | undefined, key: string): string | undefin
     throw new Error(`${key} must not be empty`);
   }
   return raw;
+}
+
+/**
+ * #909: the proxy sends the key as `authorization: Bearer <key>`; a value Node refuses there (a line
+ * break, a NUL, a character above U+00FF) would fail every request, so it fails startup instead.
+ * Node's own check decides; its error is not passed on and the message never carries the value.
+ */
+function assertHeaderSafeKey(key: string): void {
+  try {
+    validateHeaderValue("authorization", `Bearer ${key}`);
+  } catch {
+    throw new Error("MODEL_UPSTREAM_API_KEY must be a valid HTTP header value");
+  }
 }
 
 function resolveOmpUser(raw: string, path: string | undefined): string {
