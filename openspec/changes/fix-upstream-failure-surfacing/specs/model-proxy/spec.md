@@ -67,7 +67,7 @@ Authenticated, configured requests SHALL accept JSON media/syntax with a4MiB raw
 Non5xx upstream status, content-type and opaque body bytes SHALL be streamed in order without waiting for the complete response; the proxy SHALL NOT follow redirects or transform response body bytes. **上游失败摘要（#909）。** 代理自己生成的上游失败应答 SHALL 是 `{"error":{"message":<一行人读中文>,"type":"wb_upstream","param":<种类>}}`（`application/json`，no-store，无 `code` 键），分两组五种。
 
 可重试的两种（状态 502，omp 照常重试）：
-- HTTP ≥500 且不是 504、524：代理 SHALL 读取上游错误正文的前至多 16 KiB，且自收到响应头起至多 5000ms（先到者为准；`content-encoding` 既非缺省也非 `identity` 时不读），随后释放上游响应；`param` 为 `status.<上游状态码>`，`message` 为 `模型服务返回 HTTP <上游状态码>：<节选>`（节选为空时为 `模型服务返回 HTTP <上游状态码>`）。节选 = 按 UTF-8 解码（非法序列替换为 U+FFFD）后经 upstream-failure「上游原文净化」（密钥集为该代理自己的 `upstream` 导出的 apiKey 与 base URL 各部分）、换行与制表符折成单个空格、截到至多 1000 码点（超出时保留前 994 个码点并接 `…（已截断）`）。
+- HTTP ≥500 且不是 504、524：代理 SHALL 读取上游错误正文的前至多 16 KiB，且自收到响应头起至多 5000ms（先到者为准；`content-encoding` 既非缺省也非 `identity` 时不读），随后释放上游响应；`param` 为 `status.<上游状态码>`，`message` 为 `模型服务返回 HTTP <上游状态码>：<节选>`（节选为空时为 `模型服务返回 HTTP <上游状态码>`）。节选 = 按 UTF-8 解码（非法序列替换为 U+FFFD）后经 upstream-failure「上游原文净化」（密钥集为该代理自己的 `upstream` 导出的 apiKey 与 base URL 各部分）、读取未到上游正文结尾即停止（字节上限、时间上限、出错或连接关闭）时，在整串密钥替换之后再丢掉末尾恰为某个密钥开头一段——按该开头经同一轮整串替换后的形状比较（较短的密钥嵌在较长密钥被截断的开头里时先被替换）——或不足 16 位的 `sk-…` 的部分（#1427 评审补入）、换行与制表符折成单个空格、截到至多 1000 码点（超出时保留前 994 个码点并接 `…（已截断）`）。
 - 传输建立前的连接失败（被拒、重置、DNS 失败等）或构造上游请求时同步抛错：`param` 为 `connect.<原因码>`，`message` 为 `无法连接模型服务（<原因码>）`；原因码取 Node 错误的 `code` 中 `[A-Z0-9_]` 字符（至多 64 个），取不到时为 `UNKNOWN`。
 
 不可重试的三种（状态 424，正文逐字节固定，不带上游正文的任何部分）：

@@ -10,6 +10,13 @@
  * one in effect and that line is only the fallback for a spawn without the flag (every spawn
  * passes it). All sessions and all approval modes share this one file and its bytes never vary
  * with the mode: a session changes mode by being re-spawned, never by rewriting the overlay.
+ *
+ * `retry:` (issue #909, ADR-0012) caps omp's session-level retry at one round: v18.0.10 already
+ * retries each failed request inside a round (6 transport attempts, the round replayed once by the
+ * provider layer), so its default ten rounds keep a 5xx turn running for minutes. `enabled`,
+ * `baseDelayMs` and `maxDelayMs` restate omp's defaults so the project layer cannot lengthen the
+ * wait; `modelFallback: false` turns omp's model fallback off — switching upstreams or models is out
+ * of scope, and a project `retry.fallbackChains` would otherwise replay even a non-retryable 424.
  */
 import { basename, dirname } from "node:path";
 import { replaceFile } from "../../core/replace-file.js";
@@ -39,6 +46,14 @@ const HOST_OVERLAY = [
   "  urls:",
   "    enabled: false",
   "    command: null",
+  // One session-level retry (issue #909); enabled and both delays restate omp's defaults.
+  "retry:",
+  "  enabled: true",
+  "  maxRetries: 1",
+  "  baseDelayMs: 500",
+  "  maxDelayMs: 300000",
+  // No model fallback: a project fallback chain would switch models and reset the retry budget.
+  "  modelFallback: false",
   "",
 ].join("\n");
 

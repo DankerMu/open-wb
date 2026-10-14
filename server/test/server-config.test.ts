@@ -424,6 +424,27 @@ describe("resolveServerConfig — 新路径与上游显式空值", () => {
     expectNamedInvalid("MODEL_UPSTREAM_BASE_URL", { MODEL_UPSTREAM_BASE_URL: "" });
     expectNamedInvalid("MODEL_UPSTREAM_API_KEY", { MODEL_UPSTREAM_API_KEY: "" });
   });
+
+  // #909: the key must be a valid `authorization` value (Node's own check); `é` is Latin-1 and passes.
+  it.each(["k\nSENTINEL909", "k\u0000SENTINEL909", "密钥SENTINEL909"])(
+    "上游密钥 %j 不是合法 HTTP 头取值：配置错误点名该键、不回显取值",
+    (raw) => {
+      let message = "";
+      try {
+        resolveServerConfig({ MODEL_UPSTREAM_API_KEY: raw }, SOURCE_ENTRY);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message).toBe("MODEL_UPSTREAM_API_KEY must be a valid HTTP header value");
+      expect(message).not.toContain("SENTINEL909");
+    },
+  );
+
+  it.each(["abc def", "é"])("上游密钥 %j 是合法 HTTP 头取值，原样保留", (raw) => {
+    expect(resolveServerConfig({ MODEL_UPSTREAM_API_KEY: raw }, SOURCE_ENTRY)).toMatchObject({
+      modelUpstreamApiKey: raw,
+    });
+  });
 });
 
 describe("resolveServerConfig — OMP_USER", () => {

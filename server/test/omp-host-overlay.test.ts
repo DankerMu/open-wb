@@ -71,6 +71,13 @@ describe("writeHostOverlay", () => {
       mcp: { enableProjectConfig: false },
       todo: { reminders: false },
       images: { urls: { enabled: false, command: null } },
+      retry: {
+        enabled: true,
+        maxRetries: 1,
+        baseDelayMs: 500,
+        maxDelayMs: 300_000,
+        modelFallback: false,
+      },
     });
   });
 

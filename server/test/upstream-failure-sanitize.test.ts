@@ -231,4 +231,19 @@ describe("failure envelopes", () => {
     // A body that ended on its own is not trimmed.
     expect(upstreamExcerpt(`busy ${key.slice(0, 20)}`, [key])).toBe(`busy ${key.slice(0, 20)}`);
   });
+
+  it("drops a cut head whose shorter listed secret was already replaced inside it (#1427 review)", () => {
+    // The 17-long segment is listed and replaced first; the two 7-long ones are not listed alone.
+    const baseUrl = "https://models.example/tenant-0123456789/abcdefg/hijklmn";
+    const secrets = upstreamSecretList({ apiKey: "wb-key-909", baseUrl, paths: [] });
+    const cutUrl = "https://models.example/tenant-0123456789/abcdefg/hij";
+    expect(upstreamExcerpt(`busy ${cutUrl}`, secrets, true)).toBe("busy");
+    expect(upstreamExcerpt("busy /tenant-0123456789/abcdefg/hij", secrets, true)).toBe("busy");
+    // Cut inside the listed segment itself: nothing was replaced, the raw head goes as before.
+    expect(upstreamExcerpt("busy https://models.example/tenant-01", secrets, true)).toBe("busy");
+    // Not cut: the replaced segment stays replaced and the short segments are kept.
+    expect(upstreamExcerpt(`busy ${cutUrl}`, secrets)).toBe(
+      "busy https://models.example/[已移除]/abcdefg/hij",
+    );
+  });
 });

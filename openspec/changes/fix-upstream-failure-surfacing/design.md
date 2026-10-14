@@ -160,7 +160,7 @@ retry:
   modelFallback: false
 ```
 
-`maxRetries: 1` 是 owner 定的；`enabled`、`baseDelayMs`、`maxDelayMs` 取 omp 默认值，写出来是为了让会话 cwd 下的项目层配置改不动它们（overlay 高于项目层）——否则一个项目文件把 `baseDelayMs` 改成一小时，5xx 回合就挂一小时。
+`maxRetries: 1` 是 owner 定的；`enabled`、`baseDelayMs`、`maxDelayMs` 取 omp 默认值，写出来是为了让会话 cwd 下的项目层配置改不动它们（overlay 高于项目层）。（**实施更正，#909 PR 2 实测**：原文写「否则一个项目文件把 `baseDelayMs` 改成一小时，5xx 回合就挂一小时」不成立——omp v18.0.10 的退避等待最长 8 s（`retry-fallback-chains.ts:69-77`）；去掉 overlay 的 `baseDelayMs`、项目层写 3600000 时实测只等了 7841 ms，回合 74 s 照常失败。钉住这几个键的理由仍成立：退避变长（最多到 8 s）与重试轮数都由 overlay 决定，项目层改不动。）
 
 只钉这三项还不够：`retry.modelFallback` 缺省为 `true`（`settings-schema.ts:1813`），项目层写一条 `retry.fallbackChains` 就能在重试预算用尽时换到链上的模型，并把重试预算重置（`turn-recovery.ts:2163` 的 `if (switchedModel) this.#retryAttempt = 1`），对不可重试的硬错误也会查链（`isHardErrorFallbackEligible`，`:1816`）——5xx 回合时长随链长翻倍，424 也被重放。`modelFallback: false` 让这三处都短路（`:1518`、`:1816`、`:2117`，读代码推出），与 owner「多上游切换不在范围内」一致：本 change **关闭了 omp 的模型兜底**，实现 PR 的描述必须写明这一点。放弃的方案：只写 `maxRetries`——更短，但重试时长又回到项目层手里。
 

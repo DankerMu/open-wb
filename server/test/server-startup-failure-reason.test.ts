@@ -312,3 +312,46 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     await expectBindable("127.0.0.1", failure.port);
   }, 60_000);
 });
+
+/**
+ * Issue #909 (http-service-skeleton「非法上游密钥拒绝启动」): an upstream key the proxy could not
+ * send as `authorization: Bearer <key>` stops startup at `config`. A key holding U+0000 cannot
+ * reach this entry at all: `spawn` refuses such an env value (ERR_INVALID_ARG_VALUE) and an
+ * assignment to `process.env` is cut at the NUL, so that input is covered by `server-config.test.ts`.
+ */
+describe("an upstream key that is not a valid HTTP header value (#909)", () => {
+  const KEY_SENTINEL = "KEYSENTINEL909";
+
+  it.each([
+    ["U+000A", `k\n${KEY_SENTINEL}`],
+    ["non-Latin-1", `密钥${KEY_SENTINEL}`],
+  ])(
+    "%s: config fails before any effect and no output carries the key",
+    async (_label, key) => {
+      const failure = await failStartup(scratchRoot(), { MODEL_UPSTREAM_API_KEY: key });
+      expect(failure.stdout + failure.stderr).not.toContain(KEY_SENTINEL);
+      expectReason(failure.stderr, "config");
+      for (const effect of ["db", "state", "sandbox", "preview-cache"]) {
+        expect(existsSync(join(failure.root, effect)), effect).toBe(false);
+      }
+      await expectBindable("127.0.0.1", failure.port);
+    },
+    60_000,
+  );
+
+  it("`abc def` (a space inside) starts normally", async () => {
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => {
+      const root = scratchRoot();
+      return {
+        env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
+          MODEL_UPSTREAM_API_KEY: "abc def",
+        }),
+      };
+    });
+    try {
+      await server.waitForStarted();
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+});

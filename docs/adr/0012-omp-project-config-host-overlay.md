@@ -92,3 +92,22 @@ omp 把会话 cwd（及其祖先）下的项目层内容当作配置加载：设
   宿主不因档位自动应答或丢弃 omp 的确认请求：`yolo` 下 omp 若仍因工具自带策略请求确认，照常出确认卡。
   「批准一次 `task` 后子代理以 yolo 运行」这条残余与会话档位无关，三档下都在。
 - **升级 omp 时**除了重新验证 overlay 的每个键，还要重跑上面四条对照用例：「argv 压过 overlay」与「项目层绕不过 `always-ask`」都依赖 v18.0.10 的层次次序。
+
+## 补充（2026-10-14，#909）：overlay 钉住会话级重试，关闭模型兜底
+
+overlay 在 `images:` 段之后新增 `retry:` 段（openspec 变更 `fix-upstream-failure-surfacing` design D2、D12）：
+
+```yaml
+retry:
+  enabled: true
+  maxRetries: 1
+  baseDelayMs: 500
+  maxDelayMs: 300000
+  modelFallback: false
+```
+
+- **`maxRetries: 1`（owner 2026-10-13）。** omp v18.0.10 在一轮之内已有硬编码的重试：传输层 6 次、provider 层整轮重放 1 次，一轮是 12 次上游请求。会话层缺省再试 10 轮，一次 5xx 回合要 402.7 s 才失败（design 实测）。封顶一轮后的**实测**（2026-10-14，官方 v18.0.10 经模型代理，本地假上游，`server/test/omp-official-upstream-failure.test.ts`）：上游每次答 503 → 恰一个 `auto_retry_start`（`attempt` 1、`maxAttempts` 1）、随后 `auto_retry_end{success:false}` 与终止 `agent_end`，上游恰收到 24 次请求，回合 65.8–67.9 s 以 failed 结束（三次运行）。上游端口无人监听（连接被拒，代理回 502 `connect.ECONNREFUSED`）→ 编译后的服务上回合 67.9 s 以 failed 结束（含约 4 s 的 omp 冷启动；一次性脚本，单次运行）。design 的「≈ 64 s / 24 次」是推算，以上面的数字为准。最终 `message_end.errorMessage` 不带 omp 的 `Retry budget exhausted after 1 retry: ` 前缀，逐字为 `502 模型服务返回 HTTP 503：<节选>\n模型服务返回 HTTP 503：<节选> (type=wb_upstream param=status.503)`（实测，上述各次运行都如此）。
+- **`enabled`、`baseDelayMs`、`maxDelayMs` 取 omp 的缺省值。** 写出来是为了让会话 cwd 下的项目层改不动它们（overlay 高于项目层）。v18.0.10 的退避等待是 `baseDelayMs` 乘以 2 的幂、封顶 8 s、再减至多 25% 的抖动（读源码 `retry-fallback-chains.ts:69-77`），所以项目层的 `baseDelayMs` 能把那一次等待从约 0.5 s 拉到至多 8 s，而不是任意长——**实测**：overlay 去掉 `baseDelayMs` 行、项目层写 3600000 时，`auto_retry_start.delayMs` 为 7841、回合 74 s 失败（design D12「改成一小时就挂一小时」对 v18.0.10 不成立）。`maxDelayMs` 约束的是从上游错误里解析出的等待，项目层写 0 即取消上限（读源码 `settings-schema.ts` 该键的说明）。
+- **`modelFallback: false`：本 overlay 关闭了 omp 的模型兜底**（缺省 `true`）。不关的话，项目层一条 `retry.fallbackChains` 就能在失败时换到链上的另一个模型、并把重试预算重置，对不可重试的硬错误（含模型代理的 424）也会换模型重放（读源码：`turn-recovery.ts` 的 `isHardErrorFallbackEligible` 与预算用尽分支）。多上游 / 多模型切换不在范围内（owner 2026-10-06），所以关掉。**实测**：项目层写 `retry: {maxRetries: 10, baseDelayMs: 3600000, modelFallback: true, fallbackChains: {default: ["workbuddy/<第二个白名单模型>"]}}` 时，结果与无项目配置相同——一个 `auto_retry_start`、24 次请求、全部请求第一个模型，65.9–67.3 s 失败（三次运行）；同一用例在旧 overlay（无 `retry:` 段）上出现 `model_changed` 与 `retry_fallback_applied` 帧和第二个 `auto_retry_start`。
+- **已接受残余**：普通限流 429（非额度）在封顶一轮下的时长未实测（读代码推出约同 5xx）；重试成功的回合目前仍被宿主判为失败（读代码推出），由 #909 后续组修。
+- 升级 omp 时与其余各键一样重新验证：这五个键的名字与取值、`auto_retry_*` 帧的形状和一轮内的硬编码次数都依赖 v18.0.10。

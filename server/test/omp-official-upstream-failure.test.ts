@@ -1,5 +1,5 @@
 /**
- * Issue #909 (tasks 1.6, 1.7): what the official omp v18.0.10 binary does with the model proxy's
+ * Issue #909 (tasks 1.6, 1.7, 3.2): what official omp v18.0.10 does with the model proxy's
  * failure answers, in the proxied world of support/omp-official-proxied.ts. The upstream request
  * count is the fake upstream's record (`requests()`) or the stalled listener's accept count; the
  * frames are omp's own. Design D7 rests on these cases: none of the three 424 answers
@@ -7,19 +7,45 @@
  * design is reopened, not worked around here.
  *
  * Every case prints one `[upstream-failure] ` line (elapsed time, request count, frame types, the
- * final `errorMessage`), which is what the PR quotes as 实测.
+ * final `errorMessage`; shown for passing cases with `--reporter=verbose`), quoted as 实测.
  *
  * Run locally: `make omp-fetch`, then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-upstream-failure.test.ts --coverage=false
  * Without `WORKBUDDY_OMP_TEST=1` the file is skipped (also under `make test`).
  */
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { OMP_TEST_OFF, OMP_VERSION } from "./support/omp-official.js";
-import { openProxiedWorld, type ProxiedWorld } from "./support/omp-official-proxied.js";
+import {
+  openProxiedWorld,
+  PROXIED_MODELS,
+  type ProxiedWorld,
+} from "./support/omp-official-proxied.js";
 
 const CASE = { timeout: 120_000 };
+/** Two rounds of omp's transport and provider retries (about a minute) and the turn's close. */
+const CAPPED = { timeout: 180_000 };
+/** omp-runtime「会话级重试封顶一轮（真实 omp）」: two rounds are 24 upstream requests under v18.0.10. */
+const UPSTREAM_REQUESTS = 24;
+/** The overlay's `retry.baseDelayMs` (omp-runtime「宿主 overlay」). */
+const OVERLAY_BASE_DELAY_MS = 500;
+/**
+ * omp-runtime「会话级重试封顶一轮（真实 omp）」: a session-cwd project layer that would lengthen
+ * the retries and switch to the second whitelisted model of the same provider.
+ */
+const PROJECT_RETRY = [
+  "retry:",
+  "  maxRetries: 10",
+  "  baseDelayMs: 3600000",
+  "  modelFallback: true",
+  "  fallbackChains:",
+  "    default:",
+  `      - workbuddy/${PROXIED_MODELS[1]}`,
+  "",
+].join("\n");
 /** omp's spelling of an assistant failure: the end of a turn's last assistant message. */
 interface AssistantEnd {
   stopReason?: unknown;
@@ -67,6 +93,34 @@ function retryStarts(frames: readonly OmpFrame[]): OmpFrame[] {
 
 /** Stops a turn at omp's first session-level retry: one retry is already the failure. */
 const AT_RETRY = (frame: OmpFrame): boolean => frame.type === "auto_retry_start";
+
+/**
+ * Stops a turn past the overlay's cap — a second session retry, or a retry delay no test sits
+ * through — so a widened cap fails on the assertions instead of on the case timeout.
+ */
+const BEYOND_CAP = (frame: OmpFrame): boolean =>
+  frame.type === "auto_retry_start" && (frame.attempt !== 1 || Number(frame.delayMs) >= 60_000);
+
+/**
+ * The capped shape: exactly one `auto_retry_start` (attempt 1 of 1) waiting at most the overlay's
+ * `baseDelayMs`, one `auto_retry_end` that failed, the terminal `agent_end` last; the upstream saw
+ * two rounds of the first model only. omp v18.0.10 waits `baseDelayMs` less up to 25 % jitter
+ * before the first retry and caps any base at 8 s (`retry-fallback-chains.ts:69-77`), so a project
+ * base of an hour shows as a delay above 500, not as an hour.
+ */
+function expectOneCappedRetry(turn: Turn, world: ProxiedWorld): void {
+  const starts = retryStarts(turn.frames).map(({ attempt, maxAttempts }) => ({
+    attempt,
+    maxAttempts,
+  }));
+  expect(starts).toEqual([{ attempt: 1, maxAttempts: 1 }]);
+  expect(Number(retryStarts(turn.frames)[0]?.delayMs)).toBeLessThanOrEqual(OVERLAY_BASE_DELAY_MS);
+  const ends = turn.frames.filter((frame) => frame.type === "auto_retry_end");
+  expect(ends.map((frame) => frame.success)).toEqual([false]);
+  expectFailedTurn(turn);
+  const models = world.upstream.requests().map((request) => request.model);
+  expect(models).toEqual(Array<string>(UPSTREAM_REQUESTS).fill(PROXIED_MODELS[0]));
+}
 
 /** The case's 实测 line: elapsed time, request count, frame types and the last `errorMessage`. */
 function note(label: string, turn: Turn, requests: number): void {
@@ -127,17 +181,34 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
   );
 
   it(
-    "(c) an upstream 503 reaches omp's first session retry as the status.503 summary",
-    CASE,
+    "3.2 an upstream 503 every time: one capped session retry, then failed, first model only",
+    CAPPED,
     async () => {
       const world = await openProxiedWorld();
-      const turn = await runTurn(world, "你好 WORKBUDDY_FAKE_STATUS=503", AT_RETRY);
+      const turn = await runTurn(world, "你好 WORKBUDDY_FAKE_STATUS=503", BEYOND_CAP);
+      note("cap-503", turn, world.upstream.requests().length);
+      expectOneCappedRetry(turn, world);
+      // The proxy's summary is what omp retried on and what it failed with (1.7(c) folded in here).
       const [retry] = retryStarts(turn.frames);
-      note("c-503", turn, world.upstream.requests().length);
-      expect(retry).toBeDefined();
       const message = String(retry?.errorMessage);
       expect(message.split("\n")[0]).toMatch(/^502 模型服务返回 HTTP 503：/u);
       expect(message).toMatch(/\(type=wb_upstream param=status\.503\)$/u);
+      const end = lastAssistantEnd(turn.frames);
+      expect(end.errorStatus).toBe(502);
+      expect(String(end.errorMessage)).toMatch(/\(type=wb_upstream param=status\.503\)$/u);
+    },
+  );
+
+  it(
+    "3.2 a project layer asking for ten slow retries and a fallback model changes nothing",
+    CAPPED,
+    async () => {
+      const world = await openProxiedWorld();
+      mkdirSync(join(world.workspaceRoot, ".omp"));
+      writeFileSync(join(world.workspaceRoot, ".omp", "config.yml"), PROJECT_RETRY);
+      const turn = await runTurn(world, "你好 WORKBUDDY_FAKE_STATUS=503", BEYOND_CAP);
+      note("cap-503-project-layer", turn, world.upstream.requests().length);
+      expectOneCappedRetry(turn, world);
     },
   );
 
