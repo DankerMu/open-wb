@@ -406,6 +406,75 @@ describe("upstream-failure「上游原文净化」: realpaths are taken when a f
         }
       },
     );
+
+    it(
+      `${key} configured with '//' and '/./' under a symlinked parent: its normalised, unresolved form is removed`,
+      REAL,
+      async () => {
+        const scripted = scriptedRuntime({ "spawn fails": [START] });
+        const real = realpathSync(mkdtempSync(join(tmpdir(), "wb-909-norm-real-")));
+        const links = mkdtempSync(join(tmpdir(), "wb-909-norm-link-"));
+        temps.push(real, links);
+        symlinkSync(real, join(links, "parent"));
+        // Concatenated, not joined: `join` would normalise the very form this case is about.
+        const configured = `${links}//parent/./dir`;
+        const normalised = `${links}/parent/dir`;
+        scripted.runtime[key] = configured;
+        if (key === "stateDir") {
+          ensureOmpStateLayout(configured);
+        } else {
+          mkdirSync(configured, { recursive: true });
+        }
+        throwOnPrompt(`cannot open ${normalised}/a.json; ${real}/dir/b; ${configured}/c`);
+        const world = await openRecordingSession(scripted.runtime);
+        try {
+          await prompt(world, world.session, "spawn fails");
+          await waitForTurn(world.fixture, world.session, "failed");
+          const assistant = assistantIdFor(world.fixture, world.session);
+          const expected = "cannot open [已移除]/a.json; [已移除]/b; [已移除]/c";
+          expect(errorColumns(world.fixture.db, assistant)).toMatchObject({
+            error_reason: "agent_failed",
+            error_detail: expected,
+          });
+          expect(ofType(sessionEvents(world), "error")[0]?.data.detail).toBe(expected);
+        } finally {
+          await world.fixture.close();
+        }
+      },
+    );
+
+    it(
+      `${key} configured with a trailing '/', missing when the failure is sanitised: the form without the slash is removed`,
+      REAL,
+      async () => {
+        const scripted = scriptedRuntime({ "spawn fails": [START] });
+        const base = realpathSync(mkdtempSync(join(tmpdir(), "wb-909-slash-")));
+        temps.push(base);
+        const configured = `${base}/missing/`;
+        scripted.runtime[key] = configured;
+        // Creating the session (sandbox root) or the spawn (state dir) makes the dir; the hook removes
+        // it again before the failure, so no realpath stands in for the slash-less form.
+        throwOnPrompt(`cannot open ${base}/missing; ${configured}a`, () => {
+          rmSync(configured, { recursive: true, force: true });
+        });
+        expect(existsSync(configured)).toBe(false);
+        const world = await openRecordingSession(scripted.runtime);
+        try {
+          await prompt(world, world.session, "spawn fails");
+          await waitForTurn(world.fixture, world.session, "failed");
+          const assistant = assistantIdFor(world.fixture, world.session);
+          expect(existsSync(configured)).toBe(false);
+          const expected = "cannot open [已移除]; [已移除]a";
+          expect(errorColumns(world.fixture.db, assistant)).toMatchObject({
+            error_reason: "agent_failed",
+            error_detail: expected,
+          });
+          expect(ofType(sessionEvents(world), "error")[0]?.data.detail).toBe(expected);
+        } finally {
+          await world.fixture.close();
+        }
+      },
+    );
   }
 });
 
@@ -494,27 +563,31 @@ describe("chat-sessions「会话 REST」: every message carries an error value",
  * 钩子辅助: the runtime's own failure texts are fixed strings, so every turn's frame stream is
  * wrapped to throw `text` (naming the server paths) after its agent_start.
  */
-function throwOnPrompt(text: string): void {
+function throwOnPrompt(text: string, beforeThrow: () => void = () => {}): void {
   const original = SessionRuntime.prototype.prompt;
   vi.spyOn(SessionRuntime.prototype, "prompt").mockImplementation(function (
     this: SessionRuntime,
     message: string,
   ) {
     const stream = original.call(this, message);
-    return Object.assign(throwAfterStart(stream, text), { dispatched: stream.dispatched });
+    return Object.assign(throwAfterStart(stream, text, beforeThrow), {
+      dispatched: stream.dispatched,
+    });
   });
 }
 
-/** Yields the stream's frames through its first `agent_start`, then throws `message`. */
+/** Yields the stream's frames through its first `agent_start`, runs `beforeThrow`, throws `message`. */
 function throwAfterStart(
   stream: AsyncIterable<OmpFrame>,
   message: string,
+  beforeThrow: () => void,
 ): AsyncIterable<OmpFrame> {
   return {
     async *[Symbol.asyncIterator]() {
       for await (const frame of stream) {
         yield frame;
         if (frame.type === "agent_start") {
+          beforeThrow();
           throw new Error(message);
         }
       }

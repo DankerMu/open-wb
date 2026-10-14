@@ -50,6 +50,7 @@ import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js"
 import { walkScrollFollow } from "./ui-walk-scroll.js";
 import { expandToolGroup } from "./ui-walk-steps.js";
 import { walkFork, walkRegenerate, walkStop } from "./ui-walk-stop.js";
+import { walkUpstreamFailure } from "./ui-walk-upstream-failure.js";
 
 const DEV_PASSWORD = "demo";
 const PRODUCTION_SERVICE_NAME = "workbuddy-app-server";
@@ -96,6 +97,18 @@ test("composer journey walks the capability row, confirms the permission tier, r
   const options = { watchAssets: project === "desktop-light" };
   await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
     walkComposer(page, oracle, project, EXPECTED_REPLY),
+  );
+});
+
+// 上游失败（chat-harness「上游失败的冒烟与走查」）：独立 test，自带登录、退出与 oracle 实例；步骤在 helper。
+test("upstream failure step shows the 401 sentence and the sanitised upstream text, then the next message completes", async ({
+  baseURL,
+  page,
+}, testInfo) => {
+  const project = walkProject(testInfo.project.name);
+  const options = { watchAssets: project === "desktop-light" };
+  await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
+    walkUpstreamFailure(page, oracle, project, EXPECTED_REPLY),
   );
 });
 

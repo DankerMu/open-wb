@@ -176,12 +176,12 @@ Minimal mergeable slice: atomic - **Width 例外**：快照消息与 `error` 事
 
 ## 8. chat-harness — 冒烟与走查（组 8）
 
-- [ ] 8.1 `smoke/chat.hurl`：按 chat-harness「上游失败的冒烟与走查」在既有用例之后追加 `401 + WORKBUDDY_FAKE_BODY=secret` 回合（上游正文逐字含配置的密钥，分类仍为 `auth_failed`）、断言、普通回合与删除，全部带 `skip: {{skip_turn_control}}`。`Makefile` 配方、Hurl 文件参数与 `AGENTS.md` 的冒烟证据行不变。
+- [x] 8.1 `smoke/chat.hurl`：按 chat-harness「上游失败的冒烟与走查」在既有用例之后追加 `401 + WORKBUDDY_FAKE_BODY=secret` 回合（上游正文逐字含配置的密钥，分类仍为 `auth_failed`）、断言、普通回合与删除，全部带 `skip: {{skip_turn_control}}`。`Makefile` 配方、Hurl 文件参数与 `AGENTS.md` 的冒烟证据行不变。
   验证：`make smoke` 连跑两遍通过，chat-harness「连跑两遍不积累临时空间」通过；`make test-guardrails`（Make 配方与 `AGENTS.md` 行的 oracle）通过；以 `skip_turn_control=true` 对假上游手工跑一次该文件，确认这些条目被跳过。
-- [ ] 8.2 `make ui-walk`：新增上游失败一步（新 `web/e2e/ui-walk-upstream-failure.ts`，由 `ui-walk.spec.ts` 调用），会话 id 取自被观察的 `POST /api/sessions` 201 响应，`finally` 里删除。
+- [x] 8.2 `make ui-walk`：新增上游失败一步（新 `web/e2e/ui-walk-upstream-failure.ts`，由 `ui-walk.spec.ts` 调用），会话 id 取自被观察的 `POST /api/sessions` 201 响应，`finally` 里删除。
   验证：两个 project 通过；步骤失败时会话也被删除（临时注入一个失败断言验证后撤销）。
-- [ ] 8.3 变异证据：服务端把 401 归成 `request_rejected` → 冒烟判红；`redactUpstream` 改为原样返回（跳过净化器）→ 冒烟的「`detail` 不含密钥」与走查的「原文不含密钥」判红；web 不渲染 `（HTTP 401）` → 走查判红；冒烟条目去掉 `skip` 门控 → 8.1 的 `skip_turn_control=true` 运行判红。
-- [ ] 8.4 收尾验证：`make check`、`make test-guardrails`、`make smoke`（两遍）、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿；`npx openspec validate fix-upstream-failure-surfacing --strict --no-interactive` 通过；本文件全部任务勾选；验收清单新增行仍为 `待签`，#909 在这些行签收前不关闭（functional-acceptance「功能验收清单与签收」）。
+- [x] 8.3 变异证据：服务端把 401 归成 `request_rejected` → 冒烟判红；`redactUpstream` 改为原样返回（跳过净化器）→ 冒烟的「`detail` 不含密钥」与走查的「原文不含密钥」判红；web 不渲染 `（HTTP 401）` → 走查判红；冒烟条目去掉 `skip` 门控 → 8.1 的 `skip_turn_control=true` 运行判红。
+- [x] 8.4 收尾验证：`make check`、`make test-guardrails`、`make smoke`（两遍）、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿；`npx openspec validate fix-upstream-failure-surfacing --strict --no-interactive` 通过；本文件全部任务勾选；验收清单新增行仍为 `待签`，#909 在这些行签收前不关闭（functional-acceptance「功能验收清单与签收」）。
 
 Suggested fixture level: compact - 只加测试步骤，不改产品代码；冒烟配方与证据行不变
 Minimal mergeable slice: atomic - 冒烟一例与走查一步同在五个 PR 中的最后一个（owner 2026-10-14 裁决）；两者只加测试、各几十行
