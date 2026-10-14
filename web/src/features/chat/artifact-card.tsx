@@ -1,8 +1,8 @@
 /* Artifact cards adapted from resource/workbuddy-live-demo.html:2419-2466 (artifactHTML) and :502-515 (their frame), issue 536: the card never embeds the file (no iframe, image or code body) and has no 在编辑器中打开. Each kind has one action (s1f-files-page 25.2): html opens the workspace sidebar on the page in its rendered view, an image is a link to the download endpoint, code is fetched through the preview API when 复制代码 is clicked and copied. The html action uses chevron-right (the demo's externalLink is not registered). Built from the copied-layer Button and Tailwind classes; the outcome of a copy is shown in the card, never as a toast (design D8). */
 import { type MouseEvent, useEffect, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Icon, type IconName } from "../../components/icon.js";
 import { type ApiClient, downloadUrl } from "../../lib/api.js";
-import { Icon, type IconName } from "../../ui/index.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 import { artifactKind, summarizeChanges } from "./stream-artifacts.js";
 import type { ChatStepView } from "./stream-steps.js";

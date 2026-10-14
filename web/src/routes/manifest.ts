@@ -1,4 +1,4 @@
-import type { IconName } from "../ui/index.js";
+import type { IconName } from "../components/icon.js";
 
 // 路由清单单独成文件：router.tsx 与 shell/sidebar.tsx 都读它，放在 router.tsx 会形成循环导入。
 export type RouteDefinition = {

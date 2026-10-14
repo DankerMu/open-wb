@@ -1,10 +1,11 @@
 import { type ReactNode, useEffect, useId, useState } from "react";
+import { BrandMark } from "@/components/brand-mark";
+import { Icon } from "@/components/icon";
 import { Card } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useAuth } from "@/features/auth/index";
 import { useTheme } from "@/features/theme/index";
 import { ApiError, REQUEST_FAILED_MESSAGE, type ServiceInfo } from "@/lib/api";
-import { BrandMark, Icon } from "@/ui/index";
 
 const THEME_OPTIONS = [
   { value: "light", label: "浅色" },

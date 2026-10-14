@@ -6,8 +6,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Icon } from "../../components/icon.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { Icon } from "../../ui/index.js";
 
 type SessionMenuProps = {
   session: ChatSession;

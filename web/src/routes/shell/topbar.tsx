@@ -1,8 +1,8 @@
 import { useLocation } from "react-router";
+import { Icon } from "@/components/icon";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { type TopbarAction, useTopbarActions, useTopbarBreadcrumb } from "@/lib/topbar";
-import { Icon } from "@/ui/index";
 import { routeManifest } from "../manifest";
 
 type TopbarProps = {

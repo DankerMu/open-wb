@@ -1,6 +1,6 @@
 /* Welcome state adapted from resource/workbuddy-live-demo.html:341-359 (.hero, .quick-row), 402-414 (.playbooks-*, .ai-disclaimer), 2537-2567 (markup); the chip expand toggle and 查看更多 are not rendered (undelivered /center). */
 import { useState } from "react";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import { ScenePills } from "./scene-pills.js";
 import { playbookWindow, WELCOME_SCENES, type WelcomeScene } from "./welcome-content.js";
 

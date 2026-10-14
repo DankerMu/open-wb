@@ -7,7 +7,7 @@
 // （可由键盘聚焦滚动，design D3）：它不是控件，没有角色之外的交互。
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import type { ChatState } from "./stream.js";
 import { useClipped } from "./use-clipped.js";
 

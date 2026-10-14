@@ -6,7 +6,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Icon, type IconName } from "../../ui/index.js";
+import { Icon, type IconName } from "../../components/icon.js";
 import { ownValue, type TreeRow, type TreeRows, workspacePath } from "./browser-paths.js";
 import { ALERT_BOX } from "./columns.js";
 import { EmptyState } from "./empty-state.js";

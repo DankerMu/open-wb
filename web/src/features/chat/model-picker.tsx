@@ -9,9 +9,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Icon } from "../../components/icon.js";
 import type { ComposerOptions } from "../../lib/composer-contract.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { Icon } from "../../ui/index.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 
 type Effort = NonNullable<ChatSession["reasoningEffort"]>;

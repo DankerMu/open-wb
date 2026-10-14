@@ -1,7 +1,7 @@
 import type { Ref } from "react";
 import { Button } from "@/components/ui/button";
+import { Icon } from "../../components/icon.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { Icon } from "../../ui/index.js";
 import { type EntryActions, SessionEntryList } from "./session-entry.js";
 import { searchSessions, splitArchived } from "./session-groups.js";
 

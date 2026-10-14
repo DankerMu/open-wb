@@ -10,8 +10,9 @@ import {
   ThreadPrimitive,
 } from "@assistant-ui/react";
 import { memo, type Ref, useCallback } from "react";
+import { BrandMark } from "../../components/brand-mark.js";
+import { Icon } from "../../components/icon.js";
 import type { ApiClient } from "../../lib/api.js";
-import { BrandMark, Icon } from "../../ui/index.js";
 import { formatSize } from "../files/index.js";
 import { ApprovalRecords } from "./approval-card.js";
 import { ArtifactCards } from "./artifact-card.js";

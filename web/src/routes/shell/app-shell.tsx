@@ -1,12 +1,12 @@
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
 import { Outlet } from "react-router";
+import { useEscapeFallback } from "@/components/escape-fallback";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ShellNavProvider } from "@/lib/shell-nav";
 import { SidebarSlotProvider } from "@/lib/sidebar-slot";
 import { TopbarProvider } from "@/lib/topbar";
 import { cn } from "@/lib/utils";
 import { SHELL_NARROW_QUERY, useMediaQuery } from "@/lib/viewport";
-import { useEscapeFallback } from "@/ui/index";
 import { Sidebar, useSidebarCollapsed } from "./sidebar";
 import { Topbar } from "./topbar";
 

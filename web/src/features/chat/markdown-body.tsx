@@ -3,7 +3,7 @@ import { TextMessagePartProvider } from "@assistant-ui/react";
 import type { CodeHeaderProps } from "@assistant-ui/react-markdown";
 import type { ComponentProps } from "react";
 import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import { useCopyFeedback } from "./copy-feedback.js";
 
 /** 链接保持惰性：任何目标都只留可见文字，不生成 `a` 元素。 */

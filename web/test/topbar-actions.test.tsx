@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { type ReactNode, StrictMode, useReducer } from "react";
 import { createMemoryRouter, MemoryRouter, Outlet, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Icon, type IconName } from "../src/components/icon.js";
 import {
   type TopbarAction,
   TopbarProvider,
@@ -10,7 +11,6 @@ import {
   useTopbarActions,
 } from "../src/lib/topbar.js";
 import { Topbar } from "../src/routes/shell/topbar.js";
-import { Icon, type IconName } from "../src/ui/index.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const LABEL = "示例操作";

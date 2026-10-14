@@ -18,8 +18,9 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useEscapeFallback } from "../../components/escape-fallback.js";
+import { Icon } from "../../components/icon.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { Icon, useEscapeFallback } from "../../ui/index.js";
 
 type Mode = ChatSession["approvalMode"];
 

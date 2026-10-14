@@ -16,7 +16,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 
 const PIN_TOLERANCE_PX = 4;
 

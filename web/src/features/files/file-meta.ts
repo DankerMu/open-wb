@@ -1,4 +1,4 @@
-import type { IconName } from "../../ui/index.js";
+import type { IconName } from "../../components/icon.js";
 
 const ICON_BY_EXTENSION = new Map<string, IconName>([
   ["png", "image"],

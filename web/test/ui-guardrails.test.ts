@@ -42,18 +42,35 @@ describe("颜色 grep 守卫", () => {
   const features = () => listRepoFiles("web/src/features", (path) => /\.(css|tsx)$/.test(path));
   const routes = () => listRepoFiles("web/src/routes", () => true);
   const uiCss = () => listRepoFiles("web/src/ui", (path) => path.endsWith(".css"));
-  const uiTsx = () => listRepoFiles("web/src/ui", (path) => path.endsWith(".tsx"));
+  /** 直接放在 `web/src/components/` 下的 `.tsx`（自写共享组件）；两个拷入目录里的文件不算。 */
+  const isSharedTsx = (path: string) => /^web\/src\/components\/[^/]+\.tsx$/.test(path);
+  const sharedTsx = () => listRepoFiles("web/src/components", isSharedTsx);
 
-  it("features/routes 与 web/src/ui 的 css/tsx 无 hex/rgba 字面颜色（含注释行）", () => {
-    const groups = [features(), routes(), uiCss(), uiTsx()];
+  it("扫描对象判定：只认直接放在 web/src/components 下的 .tsx，拷入目录、子目录与 .ts 不算", () => {
+    expect(isSharedTsx("web/src/components/icon.tsx")).toBe(true);
+    expect(isSharedTsx("web/src/components/brand-mark.tsx")).toBe(true);
+    expect(isSharedTsx("web/src/components/ui/button.tsx")).toBe(false);
+    expect(isSharedTsx("web/src/components/assistant-ui/elements/reasoning.tsx")).toBe(false);
+    expect(isSharedTsx("web/src/components/escape-fallback.ts")).toBe(false);
+    expect(isSharedTsx("web/src/ui/icon.tsx")).toBe(false);
+    // 不是允许清单：别的自写 .tsx 放进来同样被扫，这里只确认这两个在扫描对象里。
+    expect(sharedTsx()).toEqual(
+      expect.arrayContaining(["web/src/components/brand-mark.tsx", "web/src/components/icon.tsx"]),
+    );
+  });
+
+  it("features/routes、web/src/ui 的 css 与直接放在 web/src/components 下的 tsx 无 hex/rgba 字面颜色（含注释行）", () => {
+    const groups = [features(), routes(), uiCss(), sharedTsx()];
     for (const group of groups) expect(group.length).toBeGreaterThan(0);
     expect(hitsIn(groups.flat(), literalHits)).toEqual([]);
   });
 
-  it("features/routes 与 web/src/ui/**/*.tsx 无 --wb-palette-（仅 ui css 豁免）", () => {
+  it("features/routes 与直接放在 web/src/components 下的 tsx 无 --wb-palette-（仅 ui css 豁免）", () => {
     // web/src/ui/**/*.css 是调色板 → 组件的唯一映射边界（demo 组件规则直接引用调色板），
-    // 故只有它可引用 --wb-palette-*；feature/routes 只用语义 token，ui tsx 只写类名。
-    const paths = [...features(), ...routes(), ...uiTsx()];
+    // 故只有它可引用 --wb-palette-*；feature/routes 只用语义 token，自写共享组件的 tsx 只写类名。
+    const shared = sharedTsx();
+    expect(shared.length).toBeGreaterThan(0);
+    const paths = [...features(), ...routes(), ...shared];
     expect(hitsIn(paths, paletteHits)).toEqual([]);
   });
 
@@ -85,12 +102,13 @@ describe("颜色 grep 守卫", () => {
     expect(hitsIn(paths, find)).toEqual([]);
   });
 
-  it("web/src/ui/**/*.tsx 无内联 style={", () => {
-    const ui = listRepoFiles("web/src/ui", (path) => path.endsWith(".tsx"));
-    expect(ui.length).toBeGreaterThan(0);
+  it("直接放在 web/src/components 下的 tsx 无内联 style={", () => {
+    const shared = sharedTsx();
+    expect(shared.length).toBeGreaterThan(0);
     const inline = (text: string) =>
       text.split("\n").flatMap((line, index) => (line.includes("style={") ? [`${index + 1}`] : []));
-    expect(hitsIn(ui, inline)).toEqual([]);
+    expect(inline('<svg style={{ color: "red" }} />')).toEqual(["1"]);
+    expect(hitsIn(shared, inline)).toEqual([]);
   });
 });
 
@@ -131,6 +149,10 @@ describe("依赖方向 grep 守卫", () => {
     expect(isApplicationLayer("web/src/features/auth/footer.tsx")).toBe(true);
     expect(isApplicationLayer("web/src/components/shell.tsx")).toBe(true);
     expect(isApplicationLayer("web/src/components/ui-extra/a.tsx")).toBe(true);
+    // 自写共享组件直接放在 web/src/components 下，与两个拷入目录平级：是应用层。
+    expect(isApplicationLayer("web/src/components/icon.tsx")).toBe(true);
+    expect(isApplicationLayer("web/src/components/brand-mark.tsx")).toBe(true);
+    expect(isApplicationLayer("web/src/components/escape-fallback.ts")).toBe(true);
     expect(isApplicationLayer("web/src/uix/a.ts")).toBe(true);
     expect(isApplicationLayer("web/src/components/ui/button.tsx")).toBe(false);
     expect(isApplicationLayer("web/src/components/assistant-ui/thread.tsx")).toBe(false);
@@ -144,12 +166,35 @@ describe("依赖方向 grep 守卫", () => {
       expect(paths.some((path) => path.startsWith(dir))).toBe(true);
     }
     expect(paths).toContain("web/src/main.tsx");
+    // 自写共享组件在扫描范围内（它们不是拷入层）。
+    for (const name of ["icon.tsx", "brand-mark.tsx", "escape-fallback.ts"]) {
+      expect(paths).toContain(`web/src/components/${name}`);
+    }
     expect(paths.some((path) => RADIX_ALLOWED_DIRS.some((dir) => path.startsWith(dir)))).toBe(
       false,
     );
     expect(hitsIn(paths, radixHits)).toEqual([]);
     // 对照：同一正则在拷入层的真实文件上命中，上面的空结果不是正则失效。
     expect(radixHits(readRepoFile("web/src/components/ui/button.tsx"))).toHaveLength(1);
+  });
+
+  it("判定自证：自写共享组件导入 Radix 判失败，同样的导入放在拷入目录里不判", () => {
+    /** 与上一条同一个判定拆成按文件的形式：应用层的文件才扫，命中即违例。 */
+    const violations = (path: string, text: string) =>
+      isApplicationLayer(path) ? radixHits(text).map((hit) => `${path}:${hit}`) : [];
+    const slot = 'import { Slot } from "radix-ui";';
+    for (const name of ["icon.tsx", "brand-mark.tsx", "escape-fallback.ts"]) {
+      expect(violations(`web/src/components/${name}`, slot)).toEqual([
+        `web/src/components/${name}:1: ${slot}`,
+      ]);
+      expect(violations(`web/src/components/ui/${name}`, slot)).toEqual([]);
+    }
+    expect(
+      violations("web/src/components/icon.tsx", 'import { Root } from "@radix-ui/react-slot";'),
+    ).toHaveLength(1);
+    expect(
+      violations("web/src/components/icon.tsx", 'import { Check } from "lucide-react";'),
+    ).toEqual([]);
   });
 });
 

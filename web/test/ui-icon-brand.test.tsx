@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { BrandMark, Icon, type IconName } from "../src/ui/index.js";
+import { BrandMark } from "../src/components/brand-mark.js";
+import { Icon, type IconName } from "../src/components/icon.js";
 
 afterEach(cleanup);
 

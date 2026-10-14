@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Icon } from "../src/components/icon.js";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
-import { Icon } from "../src/ui/index.js";
 import {
   cleanupChatLifecycle,
   renderChatPageWithAuthProbe,
