@@ -1,7 +1,7 @@
 # ui-primitives Specification
 
 ## Purpose
-设计 token 全集（demo 逐字移植）、图标（`web/src/components/icon.tsx`，lucide-react 单组件映射）与品牌标记（`web/src/components/brand-mark.tsx`）、动效约束、覆盖层的键盘关闭（Escape 兜底）。feature/routes 只引用语义 token。
+设计 token 全集（源自 demo，值由本仓拥有）、图标（`web/src/components/icon.tsx`，lucide-react 单组件映射）与品牌标记（`web/src/components/brand-mark.tsx`）、动效约束、覆盖层的键盘关闭（Escape 兜底）。feature/routes 只引用语义层 token 或 ui-foundation 的主题变量。
 
 ## Requirements
 
