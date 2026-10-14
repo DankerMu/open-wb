@@ -1,15 +1,20 @@
 /**
  * Issue #909 upstream-failure「回合失败分类」: every turn that ends in an `error` event gets exactly
  * one `reason` (design D10's twelve rows, first match wins) and one fixed Chinese sentence. The
- * sentence table lives here and nowhere else in the server. Pure: no IO; `detail` is not yet
- * sanitised (the supervisor's caller does that before it stores or publishes it).
+ * sentence table lives here and nowhere else in the server. Pure: no IO; `detail` is not
+ * sanitised here. In #909 PR 3 nothing stores or publishes it: turn-control's `persistEvent`
+ * publishes the `error` event as `{messageId, message}` only and drops `detail`; group 6
+ * sanitises it before it is stored or published.
  *
  * The proxy's own failure envelopes reach omp's `errorMessage` ending in
  * `(type=wb_upstream param=<kind>)` (model-proxy「透传端点与 bearer 鉴权」, shape 实测 under omp
  * v18.0.10). Such a marker is credited only at the very end of the text and only when `errorStatus`
  * is the status the proxy sends for that kind (502 for `status.*` / `connect.*`, 424 for the other
  * three): a `< 500` upstream body is passed through and omp appends its own `type` / `param`, so a
- * 401 body can end in the same words.
+ * 401 body can end in the same words. Accepted residual (design Risks, 读代码推出): an upstream
+ * that itself answers 424 with `"type":"wb_upstream"` and a forged `param` cannot be told from the
+ * proxy's own 424 — `no_response` / `gateway_<s>` classify as `upstream_timeout`, `no_connect` as
+ * `upstream_unreachable`.
  */
 
 export type FailureReason =

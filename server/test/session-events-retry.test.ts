@@ -222,6 +222,24 @@ describe("chat-stream「Retry frames outside a running turn」", () => {
     expect(result.events).toEqual([]);
     expect(result.state).toBe(state);
   });
+
+  // design D11: only success:false with "Retry cancelled" is an interruption; every other
+  // auto_retry_end changes nothing, so the remembered 503 still decides the terminal.
+  it('auto_retry_end{success:true,finalError:"Retry cancelled"} changes nothing; the turn still fails', () => {
+    const { state } = feed(fresh(), [START, failedEnd(502, BUSY), RETRY_START]);
+    const result = applyFrame(state, {
+      type: "auto_retry_end",
+      success: true,
+      attempt: 1,
+      finalError: "Retry cancelled",
+    });
+    expect(result.events).toEqual([]);
+    expect(result.state).toBe(state);
+    expect(applyFrame(result.state, TERMINAL).events.map((event) => event.type)).toEqual([
+      "error",
+      "turn.end",
+    ]);
+  });
 });
 
 describe("chat-stream「Classified failure payload」", () => {

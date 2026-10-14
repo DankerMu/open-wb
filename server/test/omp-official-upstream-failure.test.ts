@@ -390,6 +390,11 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
           ),
         })}`,
       );
+      // The WHEN: the stop landed in the backoff, so omp cancelled the retry itself (a stop in
+      // the second round would also end stopped, through an aborted message_end).
+      expect(after).toContainEqual(
+        expect.objectContaining({ type: "auto_retry_end", finalError: "Retry cancelled" }),
+      );
       const events = publishedOf(world, session);
       expect(events.filter((event) => event.type === "turn.retry")).toHaveLength(1);
       expect(events.filter((event) => event.type === "error")).toEqual([]);
@@ -397,8 +402,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
         { type: "turn.end", data: { messageId: expect.any(Number), status: "stopped" } },
       ]);
       expect(closedMs).toBeLessThanOrEqual(ABORT_GRACE_MS);
-      // No full second round went out. Whether the stop landed in the backoff (12 requests, both
-      // local runs) is the 实测 line above, not an assertion: the backoff is under 0.5 s.
+      // No full second round went out (12 requests in every local run, the 实测 line above).
       expect(world.upstream.requests().length).toBeLessThan(2 * ROUND_REQUESTS);
       const snapshot = await world.app.inject({
         method: "GET",

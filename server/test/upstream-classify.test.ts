@@ -51,6 +51,11 @@ describe("upstream-failure「回合失败分类」逐条分类", () => {
       "quota_exhausted",
       429,
     ],
+    // Row 7's other keywords, and both case-insensitive matches (rows 6 and 7: 不分大小写).
+    ["429 余额", () => fromEnd(429, "429 账户余额不足"), "quota_exhausted", 429],
+    ["429 额度", () => fromEnd(429, "429 本月调用额度已用完"), "quota_exhausted", 429],
+    ["429 BILLING", () => fromEnd(429, "429 BILLING HARD LIMIT REACHED"), "quota_exhausted", 429],
+    ["404 MODEL", () => fromEnd(404, "404 MODEL_NOT_FOUND"), "model_not_found", 404],
     ["429 plain", () => fromEnd(429, "429 Too Many Requests"), "rate_limited", 429],
     ["408", () => fromEnd(408, "408 Request Timeout"), "upstream_timeout", 408],
     ["400 no body", () => fromEnd(400, "400 status code (no body)"), "request_rejected", 400],
@@ -145,6 +150,11 @@ describe("upstream-failure「回合失败分类」记号只认末尾", () => {
 describe("upstream-failure「回合失败分类」状态不符的记号不被采信", () => {
   it("a 401 body ending in a status.500 marker stays auth_failed", () => {
     const text = "401 x\nx (type=wb_upstream param=status.500)";
+    expect(fromEnd(401, text)).toMatchObject({ reason: "auth_failed", status: 401 });
+  });
+
+  it("a 401 body ending in a connect.ECONNREFUSED marker stays auth_failed", () => {
+    const text = "401 x\nx (type=wb_upstream param=connect.ECONNREFUSED)";
     expect(fromEnd(401, text)).toMatchObject({ reason: "auth_failed", status: 401 });
   });
 
