@@ -36,8 +36,8 @@
   `workspaces`（CRUD/树/新建目录/预览）、`sessions`（omp `--mode rpc` 子进程、SSE + 序号回放 + 环形缓冲、
   SQLite 会话/消息/步骤含 args/output 双字段、`--resume`、空闲回收 `idleMs`）、`model-proxy`（omp 环境零凭证）、
   Linux 专用 omp uid（sudo + `setpriv --pdeathsig`，CI `uid-isolation` 证明）。**尚无**：中断/fork 端点、会话数上限、场景/分组字段、挂载。
-- web SPA（S0a/S0b/S1a/S1e）：React + Vite，四路由（`/`、`/files`、`/center` 占位、`/settings`）；S1e 建的 `web/src/ui` 基元层已随 #1393 删除（ADR-0013），现为拷入层 `web/src/components/{ui,assistant-ui}/` 加直接放在 `web/src/components/` 下的自写共享组件（`icon.tsx`、`brand-mark.tsx`、`escape-fallback.ts`）
-  （token 全集亮/暗、按钮/输入/开关/标签/chip/Dialog/ConfirmDialog/Drawer/Menu/Popover/Tooltip/Toast/空态/分段控件/图标/品牌 mark）；
+- web SPA（S0a/S0b/S1a/S1e）：React + Vite，四路由（`/`、`/files`、`/center` 占位、`/settings`）；S1e 建的 `web/src/ui` 基元层
+  （当时含按钮/输入/开关/标签/chip/Dialog/ConfirmDialog/Drawer/Menu/Popover/Tooltip/Toast/空态/分段控件/图标/品牌 mark）已随 #1393 删除（ADR-0013），现为拷入层 `web/src/components/{ui,assistant-ui}/` 加直接放在 `web/src/components/` 下的自写共享组件（`icon.tsx`、`brand-mark.tsx`、`escape-fallback.ts`），token 全集（亮/暗）一直在 `web/src/styles/tokens.css`；
   外壳（侧栏折叠 + 用户菜单、顶栏三态、900/760 两档响应式）；会话页（欢迎态、Markdown 消息 + 流式光标、步骤卡、回到最新、复制）；
   文件页（逻辑路径、条目元数据、空态、创建对话框）；登录页与设置页对齐 demo。demo 一致性清单 81/81 签收（`docs/acceptance/`）。
 - kbservice：仍为包骨架（`dependencies = []`），S2a 起填。

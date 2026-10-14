@@ -29,6 +29,8 @@ const ENTRY_IMPORTS = [
   '@import "./styles/theme.css";',
 ];
 const REDUCE_PRELUDE = "@media (prefers-reduced-motion: reduce)";
+/** 入口文件的结尾（reduce 块的收尾），自证里往文件末尾追加语句的锚点。 */
+const ENTRY_TAIL = "scroll-behavior: auto;\n  }\n}";
 
 function importStatements(css: string): string[] {
   return [...stripComments(css).matchAll(/@import\s[^;]+;/g)].map(([statement]) =>
@@ -46,10 +48,18 @@ function blockPreludes(css: string): string[] {
   );
 }
 
+/** `@layer` 语句的 prelude（层声明与入层块都算），按源码次序；注释里的 `@layer` 不算。 */
+function layerPreludes(css: string): string[] {
+  return [...stripComments(css).matchAll(/@layer\b[^{;]*/g)].map(([prelude]) => prelude.trim());
+}
+
 function entryViolations(css: string): string[] {
   const violations: string[] = [];
   if (!stripComments(css).trimStart().startsWith(LAYER_ORDER)) {
     violations.push("第一条规则不是层声明");
+  }
+  if (layerPreludes(css).length !== 1) {
+    violations.push("入口的 @layer 语句不是恰好一条层声明");
   }
   if (importStatements(css).join("\n") !== ENTRY_IMPORTS.join("\n")) {
     violations.push("@import 集合或顺序不符");
@@ -72,7 +82,7 @@ function styleFileViolations(paths: string[]): string[] {
 }
 
 describe("入口结构（ui-foundation「入口结构不可缺失或重排」）", () => {
-  it("判定自证：层声明加回 legacy、加回 legacy.css 的导入、token 入层、扫描范围放开、多 @import、reduce 块入层、多规则块都判失败", () => {
+  it("判定自证：层声明加回 legacy、加回 legacy.css 的导入、token 入层、扫描范围放开、多 @import、reduce 块入层、末尾多一条层语句、多规则块都判失败", () => {
     const entry = readRepoFile(ENTRY);
     const themeImport = '@import "./styles/theme.css";';
     const mutations: [string, string, string][] = [
@@ -87,6 +97,8 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
       ["类名扫描范围放开", ' source("./");', ";"],
       ["多一条 @import", LAYER_ORDER, `${LAYER_ORDER}\n@import "./ui/ui.css";`],
       ["reduce 块入层", REDUCE_PRELUDE, `@layer base { ${REDUCE_PRELUDE}`],
+      // 无块的层语句不是规则块，也不动首条规则与 @import：只有 `@layer` 语句计数能判出来。
+      ["末尾追加第二条层语句", ENTRY_TAIL, `${ENTRY_TAIL}\n@layer legacy;`],
     ];
     for (const [label, from, to] of mutations) {
       expect(entry, label).toContain(from);
@@ -118,7 +130,18 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
     expect(styleFileViolations([])).toHaveLength(3);
   });
 
-  it("web/src 下的 .css 恰为 styles.css、styles/tokens.css、styles/theme.css，后两个不含 @import", () => {
+  it("判定自证：tokens 里加回一个 legacy 入层块、整份包进 @layer base 都被 @layer 扫描判出", () => {
+    const tokens = ":root {\n  --wb-text-primary: var(--wb-palette-black-90);\n}\n";
+    expect(layerPreludes(tokens)).toEqual([]);
+    expect(layerPreludes(`${tokens}@layer legacy { .x { color: red } }\n`)).toEqual([
+      "@layer legacy",
+    ]);
+    expect(layerPreludes(`@layer base {\n${tokens}}\n`)).toEqual(["@layer base"]);
+    // 注释里的 `@layer` 不算：入口文件的说明注释就提到了 `@layer base`。
+    expect(layerPreludes(`/* the @layer base block */\n${tokens}`)).toEqual([]);
+  });
+
+  it("web/src 下的 .css 恰为 styles.css、styles/tokens.css、styles/theme.css，后两个不含 @import，tokens.css 不含 @layer", () => {
     const paths = listRepoFiles("web/src", () => true);
     // 扫描没有放空：枚举到的不只是样式文件。
     expect(paths).toContain("web/src/main.tsx");
@@ -126,6 +149,7 @@ describe("入口结构（ui-foundation「入口结构不可缺失或重排」）
     expect(styleFileViolations(paths)).toEqual([]);
     expect(importStatements(readRepoFile(ENTRY))).toHaveLength(7);
     expect(importStatements(readRepoFile(TOKENS))).toEqual([]);
+    expect(layerPreludes(readRepoFile(TOKENS))).toEqual([]);
     expect(importStatements(readRepoFile(THEME))).toEqual([]);
   });
 
@@ -289,7 +313,7 @@ function baseBlocks(css: string): { prelude: string; body: string }[] {
  * 5. 其余规则的选择器按次序等于 `BASE_SELECTORS`。
  */
 function baseLayerViolations(css: string): string[] {
-  const layers = [...css.matchAll(/@layer\b[^{;]*/g)].map(([prelude]) => prelude.trim());
+  const layers = layerPreludes(css);
   if (layers.join("|") !== "@layer base") {
     return [`base 块：@layer 应恰为一个 base 块，实为 ${JSON.stringify(layers)}`];
   }
