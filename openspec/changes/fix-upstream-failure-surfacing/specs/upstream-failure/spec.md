@@ -5,7 +5,7 @@
 ## ADDED Requirements
 
 ### Requirement: 回合失败分类
-服务端 SHALL 把每个以 `error` 事件结束的回合归为下表恰一个 `reason`，按序取第一条命中的规则。输入是失败来源（`message_end`：omp 报告的 assistant 失败；`runtime`：prompt 失败应答或 supervisor 的 `applyFailure`）、`errorStatus`（可缺）与 `errorMessage`。「末尾记号」指 `errorMessage` 整段文本以 `(type=wb_upstream param=<种类>)` 结尾，`<种类>` 为 `status.<三位数>`、`connect.<1–64 个 [A-Z0-9_]>`、`gateway_504`、`gateway_524`、`no_connect` 或 `no_response` 之一（model-proxy「透传端点与 bearer 鉴权」的失败摘要经 omp 后的形状），**且** `errorStatus` 等于代理为该种类发出的状态：`status.*` 与 `connect.*` 为 502，`gateway_*`、`no_connect` 与 `no_response` 为 424。出现在其它位置的同样字样、以及 `errorStatus` 不符的末尾记号（例如原样透传的 `< 500` 上游正文自带的 `type` / `param`）SHALL NOT 被采信，此时按下表其余各行分类。
+服务端 SHALL 把每个以 `error` 事件结束的回合归为下表恰一个 `reason`，按序取第一条命中的规则。输入是失败来源（`message_end`：omp 报告的 assistant 失败；`runtime`：prompt 失败应答或 supervisor 的 `applyFailure`）、`errorStatus`（可缺；不是 100–599 之间的整数时按缺失处理——web 只接受该范围，见 chat-web「API 客户端扩展」，#909 PR 4 实施补入）与 `errorMessage`。「末尾记号」指 `errorMessage` 整段文本以 `(type=wb_upstream param=<种类>)` 结尾，`<种类>` 为 `status.<三位数>`、`connect.<1–64 个 [A-Z0-9_]>`、`gateway_504`、`gateway_524`、`no_connect` 或 `no_response` 之一（model-proxy「透传端点与 bearer 鉴权」的失败摘要经 omp 后的形状），**且** `errorStatus` 等于代理为该种类发出的状态：`status.*` 与 `connect.*` 为 502，`gateway_*`、`no_connect` 与 `no_response` 为 424。出现在其它位置的同样字样、以及 `errorStatus` 不符的末尾记号（例如原样透传的 `< 500` 上游正文自带的 `type` / `param`）SHALL NOT 被采信，此时按下表其余各行分类。
 
 | # | 条件 | `reason` | `status` | `message`（固定句子） |
 |---|---|---|---|---|

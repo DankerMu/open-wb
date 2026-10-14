@@ -315,7 +315,13 @@ describe("chat page isolation and errors", () => {
     const { messages, source } = await mountRunningSnapshot(snapshot);
     act(() => {
       source.emitOpen();
-      source.emitData("error", "1:4", { messageId: 0, message: BUSINESS_ERROR });
+      source.emitData("error", "1:4", {
+        messageId: 0,
+        reason: "model_call_failed",
+        message: BUSINESS_ERROR,
+        status: null,
+        detail: "",
+      });
     });
     expect(await within(messages).findByText(BUSINESS_ERROR, { exact: true })).toBeTruthy();
     expect(within(messages).getByText("Hello", exactText)).toBeTruthy();

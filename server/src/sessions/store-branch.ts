@@ -4,8 +4,10 @@ import type { ApprovalMode } from "../model-catalog.js";
 import type { MessageRole, MessageStatus, MessageView, StepStatus, StepView } from "./store.js";
 import { parseAttachments } from "./store-attachments.js";
 import { type ComposerConfig, storedModeUnderCap } from "./store-composer.js";
+import type { MessageError } from "./store-error.js";
+import { failureSentence, httpStatusOrNull, isFailureReason } from "./upstream-classify.js";
 
-export type MessageDbRow = {
+export type MessageDbRow = ErrorColumns & {
   id: number;
   session_id: string;
   role: MessageRole;
@@ -15,6 +17,13 @@ export type MessageDbRow = {
   thinking: Uint8Array | null;
   /** Bare column: whatever storage class it holds is judged by `parseAttachments`. */
   attachments: unknown;
+};
+
+/** The three error columns (migration 043) as SQLite returned them: any storage class a hand edit left. */
+type ErrorColumns = {
+  error_reason: unknown;
+  error_status: unknown;
+  error_detail: Uint8Array | null;
 };
 
 export type StepDbRow = {
@@ -31,7 +40,7 @@ export type StepDbRow = {
 };
 
 export const MESSAGE_COLUMNS =
-  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments";
+  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments, error_reason, error_status, CAST(error_detail AS BLOB) AS error_detail";
 export const STEP_COLUMNS =
   "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at, CAST(s.changes AS BLOB) AS changes";
 export const INSERT_MESSAGE =
@@ -67,6 +76,29 @@ export function toMessageView(
     status: row.status,
     createdAt: Number(row.created_at),
     attachments: parseAttachments(row.attachments),
+    error: messageError(row.role, row, decoder),
+  };
+}
+
+/**
+ * The snapshot's `error` (upstream-failure「失败的公开形状」): the sentence is looked up from `reason`
+ * (never stored); a user message, and a row whose `reason` is not in the classification table (only a
+ * hand-edited database has one), reads `null`; so does a stored status outside 100–599.
+ */
+function messageError(
+  role: MessageRole,
+  row: ErrorColumns,
+  decoder: TextDecoder,
+): MessageError | null {
+  const reason = row.error_reason;
+  if (role !== "assistant" || typeof reason !== "string" || !isFailureReason(reason)) {
+    return null;
+  }
+  return {
+    reason,
+    message: failureSentence(reason),
+    status: httpStatusOrNull(row.error_status),
+    detail: row.error_detail === null ? "" : decoder.decode(row.error_detail),
   };
 }
 
@@ -196,7 +228,7 @@ const FORK_SESSION =
 const FORK_HISTORY =
   "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
 const FORK_MESSAGE =
-  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments) SELECT ?, role, content, status, created_at, thinking, attachments FROM chat_messages WHERE id = ?";
+  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail) SELECT ?, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail FROM chat_messages WHERE id = ?";
 const FORK_STEPS =
   "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at, changes) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at, changes FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
 const FORK_APPROVALS =

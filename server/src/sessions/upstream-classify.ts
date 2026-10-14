@@ -2,9 +2,9 @@
  * Issue #909 upstream-failure「回合失败分类」: every turn that ends in an `error` event gets exactly
  * one `reason` (design D10's twelve rows, first match wins) and one fixed Chinese sentence. The
  * sentence table lives here and nowhere else in the server. Pure: no IO; `detail` is not
- * sanitised here. In #909 PR 3 nothing stores or publishes it: turn-control's `persistEvent`
- * publishes the `error` event as `{messageId, message}` only and drops `detail`; group 6
- * sanitises it before it is stored or published.
+ * sanitised here: turn-control's `persistEvent` sanitises it, stores the three error columns and
+ * only then returns the five-key `error` event for publication; the snapshot looks the sentence up
+ * again from the stored `reason` (store-error.ts).
  *
  * The proxy's own failure envelopes reach omp's `errorMessage` ending in
  * `(type=wb_upstream param=<kind>)` (model-proxy「透传端点与 bearer 鉴权」, shape 实测 under omp
@@ -59,10 +59,9 @@ export function failureSentence(reason: FailureReason): string {
   return SENTENCES[reason];
 }
 
-/** The sentence followed by `（HTTP <status>）`, or the sentence alone when `status` is null. */
-export function failureLine(failure: { reason: FailureReason; status: number | null }): string {
-  const sentence = failureSentence(failure.reason);
-  return failure.status === null ? sentence : `${sentence}（HTTP ${String(failure.status)}）`;
+/** True for one of the ten reasons (a stored column may hold anything a hand edit wrote). */
+export function isFailureReason(value: string): value is FailureReason {
+  return Object.hasOwn(SENTENCES, value);
 }
 
 export function classifyTurnFailure(input: {
@@ -74,11 +73,18 @@ export function classifyTurnFailure(input: {
   if (input.source === "runtime") {
     return { reason: "agent_failed", status: null, detail: text };
   }
-  const status =
-    typeof input.errorStatus === "number" && Number.isInteger(input.errorStatus)
-      ? input.errorStatus
-      : null;
+  const status = httpStatusOrNull(input.errorStatus);
   return markerFailure(status, text) ?? statusFailure(status, text);
+}
+
+/**
+ * An integer in 100–599, else `null`: outside that range counts as missing (the web accepts only
+ * that range), never stored, published or read back from a hand-edited row.
+ */
+export function httpStatusOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
+    ? value
+    : null;
 }
 
 /** Rows 2–4: a credited marker at the end of the text. */

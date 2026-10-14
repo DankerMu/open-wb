@@ -1,4 +1,5 @@
 import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-json.js";
+import { type ChatMessageError, parseMessageError } from "./message-error-contract.js";
 
 type ChatSessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 type ChatMessageRole = "user" | "assistant";
@@ -65,6 +66,8 @@ export type ChatMessage = {
   undo: ChatUndoState | null;
   /** 助手消息恒为空数组。 */
   attachments: ChatAttachment[];
+  /** 失败回合的分类说明与原文（issue 909）；用户消息与未失败的助手消息为 null。 */
+  error: ChatMessageError | null;
 };
 
 export type ChatStreamCursor = {
@@ -373,6 +376,7 @@ function parseMessage(value: unknown): ChatMessage | null {
       "approvals",
       "undo",
       "attachments",
+      "error",
     ])
   ) {
     return null;
@@ -394,12 +398,14 @@ function parseMessage(value: unknown): ChatMessage | null {
   const parsedSteps = parseJsonArray(steps, parseStep);
   const parsedApprovals = parseMessageApprovals(approvals, role);
   const attachments = parseAttachments(value.attachments);
+  const error = parseMessageError(value.error, role);
   // 附件只属于用户消息。
   if (
     !parsedSteps ||
     !parsedApprovals ||
     !attachments ||
-    (role === "assistant" && attachments.length > 0)
+    (role === "assistant" && attachments.length > 0) ||
+    error === undefined
   ) {
     return null;
   }
@@ -415,6 +421,7 @@ function parseMessage(value: unknown): ChatMessage | null {
     approvals: parsedApprovals,
     undo,
     attachments,
+    error,
   };
 }
 

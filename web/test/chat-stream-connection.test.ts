@@ -34,6 +34,7 @@ function completedSnapshot(): ChatMessageSnapshot {
         createdAt: 0,
         steps: [],
         thinking: null,
+        error: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 3 },
@@ -125,6 +126,7 @@ describe("Chat stream connector", () => {
           steps: [],
           thinking: null,
           error: null,
+          retrying: false,
         },
         {
           id: 4,
@@ -137,6 +139,7 @@ describe("Chat stream connector", () => {
           steps: [],
           thinking: null,
           error: null,
+          retrying: false,
         },
       ],
     });

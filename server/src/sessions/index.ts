@@ -85,6 +85,12 @@ export interface RegisterSessionsOptions {
   log?: SpawnLog;
   /** Optional synchronous warn sink for a dropped task-list candidate (#864); omitted → discarded. */
   warn?: TodoWarn;
+  /**
+   * The sanitiser createApp binds to its secret list (upstream-failure「上游原文净化」, #909): every
+   * turn failure's `detail` goes through it before it is stored or published. Sessions never holds
+   * the secrets themselves.
+   */
+  redactUpstream: (text: string) => string;
 }
 
 export function registerSessions(
@@ -108,6 +114,7 @@ export function registerSessions(
     runtime: options.runtime,
     composer: options.composer,
     workspaceRootOf: options.workspaceRootOf,
+    redactUpstream: options.redactUpstream,
     onError: options.onError,
     skills: sessionSkillsResolver(
       options.agentDir,

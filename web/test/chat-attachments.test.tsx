@@ -68,6 +68,7 @@ function answered(attachments: string[]) {
       createdAt: 0,
       steps: [],
       thinking: null,
+      error: null,
     },
   ]);
 }

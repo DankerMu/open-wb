@@ -15,6 +15,14 @@ import {
   resolveApproval,
 } from "./stream-approvals.js";
 import { type ChatFilesEvent, decodeFilesChanged, setStepChanges } from "./stream-artifacts.js";
+import {
+  type ChatFailureEvent,
+  clearRetrying,
+  decodeFailure,
+  decodeTurnRetry,
+  failureOf,
+  markRetrying,
+} from "./stream-failure.js";
 import { type ChatStepView, endStep, startStep } from "./stream-steps.js";
 import { appendThinking, type ChatThinkingEvent, decodeThinkingDelta } from "./stream-thinking.js";
 import { type ChatTodoEvent, decodeTodoUpdated, setTodo } from "./stream-todo.js";
@@ -29,7 +37,9 @@ type ChatMessageView = {
   attachments: ChatMessage["attachments"];
   steps: ChatStepView[];
   approvals: ChatApprovalView[];
-  error: string | null;
+  error: ChatMessage["error"];
+  /** omp 正在会话级重试（`turn.retry` 之后、该消息的下一个事件之前）；快照里恒为 false。 */
+  retrying: boolean;
 };
 
 export type ChatState = {
@@ -49,7 +59,7 @@ export type ChatEvent =
   | { type: "step.start"; data: ChatStepTarget & { name: string; detail: string } }
   | { type: "step.end"; data: ChatStepTarget & { status: ChatStepEndStatus; output: string } }
   | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTurnEndStatus } }
-  | { type: "error"; data: ChatMessageTarget & { message: string } }
+  | ChatFailureEvent
   | ChatApprovalEvent
   | ChatThinkingEvent
   | ChatFilesEvent
@@ -90,6 +100,7 @@ const DATA_EVENTS = [
   "thinking.delta",
   "files.changed",
   "todo.updated",
+  "turn.retry",
 ] as const satisfies readonly ChatEventType[];
 const QUEUE_CAP = 1000;
 const CANONICAL_CURSOR = /^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$/;
@@ -118,7 +129,8 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
         status: step.status,
       })),
       approvals: approvalViews(message.approvals),
-      error: null,
+      error: message.error,
+      retrying: false,
     })),
     todo: snapshot.todo,
   };
@@ -141,6 +153,7 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
           steps: [],
           approvals: [],
           error: null,
+          retrying: false,
         }),
         "running",
       );
@@ -148,9 +161,12 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       return replaceAssistant(state, event.data.messageId, (message) => ({
         ...message,
         content: message.content + event.data.delta,
+        retrying: false,
       }));
     case "step.start":
-      return replaceAssistant(state, event.data.messageId, (m) => startStep(m, event.data));
+      return replaceAssistant(state, event.data.messageId, (m) =>
+        startStep(clearRetrying(m), event.data),
+      );
     case "step.end":
       return replaceAssistant(state, event.data.messageId, (m) => endStep(m, event.data));
     case "error":
@@ -160,10 +176,14 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
         (message) => ({
           ...message,
           status: "failed",
-          error: event.data.message,
+          error: failureOf(event.data),
+          retrying: false,
         }),
         "running",
       );
+    // turn.retry only raises the message's retrying mark; the session status is left untouched.
+    case "turn.retry":
+      return replaceAssistant(state, event.data.messageId, markRetrying);
     case "turn.end":
       return endTurn(state, event.data.messageId, event.data.status);
     // approval.* only add/settle one entry by approvalId; the session status is left untouched.
@@ -174,7 +194,7 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
     // thinking.delta only appends to the message; the session status is left untouched.
     case "thinking.delta":
       return replaceAssistant(state, event.data.messageId, (m) =>
-        appendThinking(m, event.data.delta),
+        appendThinking(clearRetrying(m), event.data.delta),
       );
     // files.changed only replaces one step's changes; the session status is left untouched.
     case "files.changed":
@@ -195,6 +215,7 @@ function endTurn(state: ChatState, messageId: number, status: ChatTurnEndStatus)
       ...message,
       status,
       error: status === "failed" ? message.error : null,
+      retrying: false,
       steps: message.steps.some((step) => step.status === "running")
         ? message.steps.map((step) => (step.status === "running" ? { ...step, status } : step))
         : message.steps,
@@ -215,6 +236,7 @@ function emptyAssistant(messageId: number): ChatMessageView {
     steps: [],
     approvals: [],
     error: null,
+    retrying: false,
   };
 }
 
@@ -642,7 +664,9 @@ function decodeEvent(type: ChatEventType, value: unknown): ChatEvent | undefined
     case "turn.end":
       return decodeTurnEnd(value);
     case "error":
-      return decodeError(value);
+      return decodeFailure(value);
+    case "turn.retry":
+      return decodeTurnRetry(value);
     case "approval.request":
       return decodeApprovalRequest(value);
     case "approval.resolved":
@@ -711,14 +735,6 @@ function decodeTurnEnd(value: unknown): ChatEvent | undefined {
     isSafeInteger(value.messageId) &&
     isTurnEndStatus(value.status)
     ? { type: "turn.end", data: { messageId: value.messageId, status: value.status } }
-    : undefined;
-}
-
-function decodeError(value: unknown): ChatEvent | undefined {
-  return hasExactlyKeys(value, ["messageId", "message"]) &&
-    isSafeInteger(value.messageId) &&
-    typeof value.message === "string"
-    ? { type: "error", data: { messageId: value.messageId, message: value.message } }
     : undefined;
 }
 

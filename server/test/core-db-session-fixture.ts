@@ -76,6 +76,9 @@ const CHAT_TABLE_INFO = {
     ["created_at", "INTEGER", 1, null, 0],
     ["thinking", "TEXT", 0, null, 0],
     ["attachments", "TEXT", 0, null, 0],
+    ["error_reason", "TEXT", 0, null, 0],
+    ["error_status", "INTEGER", 0, null, 0],
+    ["error_detail", "TEXT", 0, null, 0],
   ],
   chat_steps: [
     ["id", "INTEGER", 0, null, 1],
@@ -96,7 +99,7 @@ const SESSION_FOREIGN_KEYS = [
   { from: "workspace_id", table: "workspaces", to: "id", on_delete: "SET NULL" },
 ];
 
-/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three; on messages 042 one more). */
+/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three; on messages 042 one more, 043 three). */
 function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
   return info.slice(0, info.length - newColumns).map(([name]) => name);
 }
@@ -106,7 +109,7 @@ export const PRIOR_COLUMNS = {
   accounts: ["id", "account", "role", "disabled", "password_hash"],
   workspaces: ["id", "owner_id", "name", "dir", "created_at"],
   chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 8),
-  chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 2),
+  chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 5),
   chat_steps: namesBefore035(CHAT_TABLE_INFO.chat_steps, 1),
   chat_approvals: [
     "id",

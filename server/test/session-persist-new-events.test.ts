@@ -52,7 +52,16 @@ function persistAlone(event: ChatEvent<string>) {
   const toolIds = new Map<string, number>([["call_prior", 7]]);
   const nextOrdinal = vi.fn(() => 1);
   const settled: SettledApproval[] = [];
-  const published = persistEvent(store, ASSISTANT_ID, event, toolIds, nextOrdinal, settled, null);
+  const published = persistEvent(
+    store,
+    ASSISTANT_ID,
+    event,
+    toolIds,
+    nextOrdinal,
+    settled,
+    null,
+    (text) => text,
+  );
   return { published, touched, toolIds: [...toolIds], nextOrdinal, settled };
 }
 

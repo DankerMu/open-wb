@@ -95,6 +95,7 @@ function snapshotWith(
         createdAt: -1,
         steps: [],
         approvals: [],
+        error: null,
         ...overrides.user,
       },
       {
@@ -108,6 +109,7 @@ function snapshotWith(
         createdAt: 0,
         steps: [step(0, null), { ...step(1, [editChange, writeChange]), ...overrides.step }],
         approvals: [],
+        error: null,
         ...overrides.assistant,
       },
       {
@@ -121,6 +123,7 @@ function snapshotWith(
         createdAt: 1,
         steps: [],
         approvals: [],
+        error: null,
       },
     ],
     streamCursor: { epoch: 1, seq: null },

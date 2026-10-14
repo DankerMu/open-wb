@@ -33,6 +33,7 @@ const MESSAGE_KEYS = [
   "undo",
   "attachments",
   "steps",
+  "error",
 ];
 const STEP_KEYS = ["id", "ordinal", "name", "detail", "output", "changes", "status"];
 const STORED_CHANGES = [

@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   classifyTurnFailure,
   type FailureReason,
-  failureLine,
   failureSentence,
+  isFailureReason,
 } from "../src/sessions/upstream-classify.js";
 
 /** The sentence table of upstream-failure「回合失败分类」, copied from the spec. */
@@ -133,6 +133,36 @@ describe("upstream-failure「回合失败分类」逐条分类", () => {
       classifyTurnFailure({ source: "message_end", errorStatus: "401", errorMessage: "x" }),
     ).toMatchObject({ reason: "model_call_failed", status: null });
   });
+
+  // Orchestrator ruling (PR 4): outside 100–599 counts as absent, so it is never stored or published.
+  it("an errorStatus outside 100–599 counts as absent: 600 and 99 fall to row 12 with status null", () => {
+    expect(fromEnd(600, "600 weird")).toEqual({
+      reason: "model_call_failed",
+      status: null,
+      detail: "600 weird",
+    });
+    expect(fromEnd(99, "99 weird")).toEqual({
+      reason: "model_call_failed",
+      status: null,
+      detail: "99 weird",
+    });
+    // A credited marker needs errorStatus 502; 600 is absent, so the marker is not credited either.
+    const text = marked(600, "模型服务返回 HTTP 503", "status.503");
+    expect(fromEnd(600, text)).toEqual({ reason: "model_call_failed", status: null, detail: text });
+  });
+
+  it("599 and 100 are kept: 599 is row 11 with its status; 100 reaches row 12, whose status is null", () => {
+    expect(fromEnd(599, "599 odd")).toEqual({
+      reason: "upstream_error",
+      status: 599,
+      detail: "599 odd",
+    });
+    expect(fromEnd(100, "100 odd")).toEqual({
+      reason: "model_call_failed",
+      status: null,
+      detail: "100 odd",
+    });
+  });
 });
 
 describe("upstream-failure「回合失败分类」记号只认末尾", () => {
@@ -191,13 +221,13 @@ describe("upstream-failure「回合失败分类」重试预算前缀不影响 de
   });
 });
 
-describe("failureLine (the two-key error message of PR 3)", () => {
-  it("appends （HTTP s） when there is a status and nothing when it is null", () => {
-    expect(failureLine({ reason: "auth_failed", status: 401 })).toBe(
-      "鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）",
-    );
-    expect(failureLine({ reason: "upstream_unreachable", status: null })).toBe(
-      "上游不可达：无法连接模型服务",
-    );
+describe("isFailureReason (a stored error_reason column is read back only when it is one of the ten)", () => {
+  it("accepts exactly the ten reasons of the table", () => {
+    for (const reason of Object.keys(SENTENCES)) {
+      expect(isFailureReason(reason), reason).toBe(true);
+    }
+    for (const other of ["", "AUTH_FAILED", "unknown", "toString", "__proto__", "constructor"]) {
+      expect(isFailureReason(other), other).toBe(false);
+    }
   });
 });

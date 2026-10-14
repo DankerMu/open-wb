@@ -34,6 +34,7 @@ const MESSAGE_KEYS = [
   "attachments",
   "content",
   "createdAt",
+  "error",
   "id",
   "role",
   "status",

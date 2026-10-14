@@ -80,6 +80,7 @@ function open(warn?: (record: TodoRejection) => void): World {
         () => 1,
         [],
         null,
+        (text) => text,
       ),
   };
   opened.push(world);

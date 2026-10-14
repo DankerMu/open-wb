@@ -56,6 +56,7 @@ function userMessage(approvals: SnapshotApproval[] = []): SnapshotMessage {
     steps: [],
     approvals,
     thinking: null,
+    error: null,
   };
 }
 
@@ -75,6 +76,7 @@ function assistantMessage(
     steps: [],
     approvals,
     thinking: null,
+    error: null,
   };
 }
 
@@ -306,6 +308,7 @@ describe("approval snapshot and event reduction", () => {
       approvals: [view(7, null)],
       thinking: null,
       error: null,
+      retrying: false,
     });
     expect(next.status).toBe("done");
     expect(next.messages[0]).toBe(state.messages[0]);

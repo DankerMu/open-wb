@@ -2,8 +2,8 @@
  * Issue #909 groups 4 and 5 at the supervisor (production createApp → registerSessions over
  * scripted controlled children, real SQLite, injected clock): `turn.retry` is published and
  * replayable but never stored (upstream-failure「重试提示事件」), the thinking of a failed round
- * survives a successful retry (design D11, accepted residual), the published `error` stays the two
- * keys `{messageId, message}` with the sentence projection, and the sessions `log` port gets one
+ * survives a successful retry (design D11, accepted residual), the published `error` carries the
+ * five keys of upstream-failure「失败的公开形状」(PR 4; PR 3 published two), and the sessions `log` port gets one
  * `upstream_failed` record per failed turn whose reason is not `agent_failed`
  * (upstream-failure「上游失败日志」). Expected payloads are spec literals.
  */
@@ -31,7 +31,7 @@ const BUSY =
   "502 模型服务返回 HTTP 503：busy\n模型服务返回 HTTP 503：busy (type=wb_upstream param=status.503)";
 const KEY_401 =
   "401 Incorrect API key provided\nIncorrect API key provided (type=invalid_request_error)";
-const AUTH_LINE = "鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）";
+const AUTH_SENTENCE = "鉴权失败：模型服务拒绝了配置的 API 密钥";
 
 const START: OmpFrame = { type: "agent_start" };
 const TERMINAL: OmpFrame = { type: "agent_end", messages: [], isTerminal: true };
@@ -176,6 +176,11 @@ describe("upstream-failure「重试提示可回放不可快照」", () => {
         const after = await messagesOf(world);
         expect(after).toEqual(before);
         expect(messageRow(world.fixture.db, assistant).status).toBe("running");
+        // PR 4: the snapshot's error key exists and the retry did not set it.
+        expect((after as Array<{ error: unknown }>).map((message) => message.error)).toEqual([
+          null,
+          null,
+        ]);
         child.emitLine(TERMINAL);
         await waitForTurn(world.fixture, world.session, "failed");
       } finally {
@@ -215,9 +220,9 @@ describe("chat-stream retry at the supervisor (design D11)", () => {
   );
 });
 
-describe("the published error event of PR 3 (two keys, sentence projection)", () => {
+describe("the published error event (five keys since #909 PR 4; two in PR 3)", () => {
   it(
-    "a 401 turn publishes exactly {messageId, message} with 鉴权失败…（HTTP 401）",
+    "a 401 turn publishes exactly {messageId, message, reason, status, detail} with the bare sentence",
     REAL,
     async () => {
       const { world } = await openWorld();
@@ -228,9 +233,21 @@ describe("the published error event of PR 3 (two keys, sentence projection)", ()
         const assistant = assistantIdFor(world.fixture, world.session);
         expect(error).toEqual({
           type: "error",
-          data: { messageId: assistant, message: AUTH_LINE },
+          data: {
+            messageId: assistant,
+            message: AUTH_SENTENCE,
+            reason: "auth_failed",
+            status: 401,
+            detail: KEY_401,
+          },
         });
-        expect(Object.keys(error?.data ?? {}).sort()).toEqual(["message", "messageId"]);
+        expect(Object.keys(error?.data ?? {}).sort()).toEqual([
+          "detail",
+          "message",
+          "messageId",
+          "reason",
+          "status",
+        ]);
       } finally {
         await world.fixture.close();
       }
@@ -279,6 +296,9 @@ describe("upstream-failure「每个失败回合一行」", () => {
             data: {
               messageId: assistantIdFor(world.fixture, sessions[2] ?? ""),
               message: "Agent 运行失败",
+              reason: "agent_failed",
+              status: null,
+              detail: "child exited",
             },
           },
         ]);

@@ -13,7 +13,20 @@ const USER_CONTENT = "\u0000\uFEFFKeep BOM 中文 😀";
 const BASH_START_DETAIL = '{"command":"echo workbuddy-smoke"}';
 const BASH_OUTPUT = "workbuddy-smoke";
 const STREAMED_BODY = "Hello \u0000\uFEFF中文 😀";
-const AGENT_FAILURE = "Agent execution failed";
+/** The published failure of a runtime fault (#909: an object, the sentence and the raw detail). */
+const AGENT_FAILURE = {
+  reason: "agent_failed",
+  message: "Agent 运行失败",
+  status: null,
+  detail: "Agent execution failed",
+};
+/** A failure whose detail keeps NUL, BOM, CJK, an astral character and edge spaces. */
+const EXACT_FAILURE = {
+  reason: "model_call_failed",
+  message: "模型调用失败",
+  status: null,
+  detail: " exact error \u0000\uFEFF中文 😀 ",
+};
 
 const runningSession = {
   id: SESSION_ID,
@@ -35,6 +48,7 @@ const historyUser = {
   createdAt: -1,
   steps: [] as [],
   thinking: null,
+  error: null,
 };
 
 const userView = {
@@ -48,6 +62,7 @@ const userView = {
   status: "done" as const,
   steps: [] as [],
   error: null,
+  retrying: false,
 };
 
 function deepFreeze<T>(value: T): T {
@@ -83,6 +98,7 @@ function reducerSnapshot(
       createdAt: 0,
       steps: options.steps ?? [],
       thinking: null,
+      error: null,
     });
   }
   return {
@@ -148,6 +164,7 @@ describe("Chat stream reducer", () => {
           ],
           thinking: null,
           error: null,
+          retrying: false,
         },
       ],
     };
@@ -171,6 +188,7 @@ describe("Chat stream reducer", () => {
             steps: [],
             thinking: null,
             error: null,
+            retrying: false,
           },
         ],
       });
@@ -218,7 +236,7 @@ describe("Chat stream reducer", () => {
     const afterError = deepFreeze(
       applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
         type: "error",
-        data: { messageId: 0, message: AGENT_FAILURE },
+        data: { messageId: 0, ...AGENT_FAILURE },
       }),
     );
 
@@ -247,6 +265,7 @@ describe("Chat stream reducer", () => {
           ],
           thinking: null,
           error: AGENT_FAILURE,
+          retrying: false,
         },
       ],
     });
@@ -279,6 +298,7 @@ describe("Chat stream reducer", () => {
           ],
           thinking: null,
           error: AGENT_FAILURE,
+          retrying: false,
         },
       ],
     });
@@ -293,7 +313,7 @@ describe("Chat stream reducer", () => {
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));
     const afterError = applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
       type: "error",
-      data: { messageId: 0, message: AGENT_FAILURE },
+      data: { messageId: 0, ...AGENT_FAILURE },
     });
     const dirty = deepFreeze(
       applyChatEvent(afterError, { type: "turn.end", data: { messageId: 0, status: "failed" } }),
@@ -320,6 +340,7 @@ describe("Chat stream reducer", () => {
       ],
       thinking: null,
       error: AGENT_FAILURE,
+      retrying: false,
     });
 
     const reset = applyChatEvent(dirty, { type: "turn.start", data: { messageId: 0 } });
@@ -336,6 +357,7 @@ describe("Chat stream reducer", () => {
       steps: [],
       thinking: null,
       error: null,
+      retrying: false,
     });
     expect(frozenSnapshot).toEqual(snapshot);
   });
@@ -368,6 +390,7 @@ describe("Chat stream reducer", () => {
           steps: [],
           thinking: null,
           error: null,
+          retrying: false,
         },
       ]);
       expect(initial.messages).toHaveLength(1);
@@ -383,7 +406,7 @@ describe("Chat stream reducer", () => {
     const frozenSnapshot = deepFreeze(structuredClone(snapshot));
     const afterError = applyChatEvent(deepFreeze(chatStateFromSnapshot(frozenSnapshot)), {
       type: "error",
-      data: { messageId: 0, message: " exact error \u0000\uFEFF中文 😀 " },
+      data: { messageId: 0, ...EXACT_FAILURE },
     });
 
     expect(afterError.status).toBe("running");
@@ -399,7 +422,8 @@ describe("Chat stream reducer", () => {
         status: "failed",
         steps: [],
         thinking: null,
-        error: " exact error \u0000\uFEFF中文 😀 ",
+        error: EXACT_FAILURE,
+        retrying: false,
       },
     ]);
 
@@ -409,7 +433,7 @@ describe("Chat stream reducer", () => {
     });
     expect(afterEnd.status).toBe("failed");
     expect(afterEnd.messages).toHaveLength(2);
-    expect(afterEnd.messages[1]?.error).toBe(" exact error \u0000\uFEFF中文 😀 ");
+    expect(afterEnd.messages[1]?.error).toEqual(EXACT_FAILURE);
     expect(frozenSnapshot).toEqual(snapshot);
   });
 
@@ -430,7 +454,7 @@ describe("Chat stream reducer", () => {
         type: "step.end",
         data: { messageId: -3, stepId: 1, status: "failed", output: "bad" },
       },
-      { type: "error", data: { messageId: -3, message: "bad" } },
+      { type: "error", data: { messageId: -3, ...AGENT_FAILURE } },
       { type: "turn.end", data: { messageId: -3, status: "failed" } },
     ];
 
@@ -524,7 +548,7 @@ describe("Chat stream reducer", () => {
     const snapshot = reducerSnapshot({ includeAssistant: false });
     const afterError = applyChatEvent(chatStateFromSnapshot(snapshot), {
       type: "error",
-      data: { messageId: 0, message: AGENT_FAILURE },
+      data: { messageId: 0, ...AGENT_FAILURE },
     });
     const done = applyChatEvent(afterError, {
       type: "turn.end",
@@ -542,6 +566,7 @@ describe("Chat stream reducer", () => {
       steps: [],
       thinking: null,
       error: null,
+      retrying: false,
     });
   });
 });

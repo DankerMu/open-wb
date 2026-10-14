@@ -135,41 +135,41 @@ Minimal mergeable slice: atomic - 句子投影与日志读的是同一个分类�
 
 ## 6. upstream-failure — 错误落库（组 6）
 
-- [ ] 6.1 开工核对：`ls server/src/core/db/migrations | tail -1` 仍为 `042`、`git ls-remote` 的各分支没有 `043`；`grep -rn MIGRATION_042 server/test` 列出所有枚举迁移的测试。
+- [x] 6.1 开工核对：`ls server/src/core/db/migrations | tail -1` 仍为 `042`、`git ls-remote` 的各分支没有 `043`；`grep -rn MIGRATION_042 server/test` 列出所有枚举迁移的测试。
   验证：核对写进 PR；`043` 已被占用时停下来报告。
-- [ ] 6.2 迁移 `server/src/core/db/migrations/043_chat_message_error.sql`（头注释照 `042`）；`server/test/core-db-helpers.ts` 的迁移清单与受信迁移计数加一，6.1 命中的其它测试同步。
+- [x] 6.2 迁移 `server/src/core/db/migrations/043_chat_message_error.sql`（头注释照 `042`）；`server/test/core-db-helpers.ts` 的迁移清单与受信迁移计数加一，6.1 命中的其它测试同步。
   验证：upstream-failure「新库与存量库」「中途失败可重试」通过。
-- [ ] 6.3 净化与写入：`createApp`（`server/src/app.ts`）用 `upstreamSecretList({apiKey, baseUrl, paths})` 构造密钥集一次——`assembly.upstream` 的 apiKey 与 baseUrl，`runtime.stateDir`、`runtime.sandboxRoot` 及二者的 `realpathSync`（与原值不同才加入，取不到时跳过）——再构造 `redactUpstream` 闭包交给 sessions 装配（未配置上游时只有两组路径）；`agent_failed` 的运行时文本同样只经它；`persistEvent` 的 `error` 分支先净化 `detail`、写三列，再返回供发布的事件（线上负载仍是组 5 的两键）。写三列的 store 方法放新模块（如 `store-error.ts`）。
+- [x] 6.3 净化与写入：`createApp`（`server/src/app.ts`）用 `upstreamSecretList({apiKey, baseUrl, paths})` 构造密钥集一次——`assembly.upstream` 的 apiKey 与 baseUrl，`runtime.stateDir`、`runtime.sandboxRoot` 及二者的 `realpathSync`（与原值不同才加入，取不到时跳过）——再构造 `redactUpstream` 闭包交给 sessions 装配（未配置上游时只有两组路径）；`agent_failed` 的运行时文本同样只经它；`persistEvent` 的 `error` 分支先净化 `detail`、写三列，再返回供发布的事件（线上负载仍是组 5 的两键）。写三列的 store 方法放新模块（如 `store-error.ts`）。
   验证：upstream-failure「落库先于发布」与「上游地址与服务器路径」的 `runtime` 一例（桩运行时以含状态目录绝对路径的文本失败）通过；`secret` 正文的 400 回合落库的 `error_detail` 不含密钥、bearer、`sk-` 串与 `raw-http-request=`。
-- [ ] 6.4 fork 的行拷贝（`server/src/sessions/store-branch.ts`）带上三列；启动对账不写三列。
+- [x] 6.4 fork 的行拷贝（`server/src/sessions/store-branch.ts`）带上三列；启动对账不写三列。
   验证：upstream-failure「拷贝、删除与对账」通过；`bash scripts/size-guard.sh` 退出 0；chat-sessions「会话 store 源码模块划分」场景通过。
-- [ ] 6.5 官方 omp（同一文件）：同样**不新增 503 运行**——在 3.2 第一例上追加库里三列为 `upstream_error`、503、含 `模型服务返回 HTTP 503`；新增一例 `WORKBUDDY_FAKE_STATUS=400 WORKBUDDY_FAKE_BODY=empty`（约 2 s）→ `request_rejected`、400，`error_detail` 不含 `raw-http-request=`（实测 case 12 的路径行）。
+- [x] 6.5 官方 omp（同一文件）：同样**不新增 503 运行**——在 3.2 第一例上追加库里三列为 `upstream_error`、503、含 `模型服务返回 HTTP 503`；新增一例 `WORKBUDDY_FAKE_STATUS=400 WORKBUDDY_FAKE_BODY=empty`（约 2 s）→ `request_rejected`、400，`error_detail` 不含 `raw-http-request=`（实测 case 12 的路径行）。
   验证：两例通过。
-- [ ] 6.6 文档：`docs/architecture/system.md` 的数据一节列出三列及其含义。
+- [x] 6.6 文档：`docs/architecture/system.md` 的数据一节列出三列及其含义。
   验证：PR 里贴出改动段落。
-- [ ] 6.7 变异证据：把写三列挪到发布之后 → 「落库先于发布」判红；fork 不拷三列 → 「拷贝、删除与对账」判红；写入前不净化 → 6.3 的 `secret` 断言判红；闭包只用 `[apiKey]` 构造 → 6.3 的 `runtime` 路径一例判红；迁移改为带 `DEFAULT ''` → 「新库与存量库」判红。
-- [ ] 6.8 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿。
+- [x] 6.7 变异证据：把写三列挪到发布之后 → 「落库先于发布」判红；fork 不拷三列 → 「拷贝、删除与对账」判红；写入前不净化 → 6.3 的 `secret` 断言判红；闭包只用 `[apiKey]` 构造 → 6.3 的 `runtime` 路径一例判红；迁移改为带 `DEFAULT ''` → 「新库与存量库」判红。
+- [x] 6.8 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk`、`WORKBUDDY_OMP_TEST=1` 全部官方用例全绿。
 
 Suggested fixture level: expanded - 新迁移与持久化；落库与发布的次序
 Minimal mergeable slice: atomic - 迁移没有写入方是死列，写入方没有迁移无处可写；fork 拷贝与写入同刀，否则 fork 在合入后的窗口里静默丢列
 
 ## 7. chat-sessions / chat-web — 快照与事件的公开形状、前端呈现（组 7）
 
-- [ ] 7.1 服务端公开形状：REST 快照每条消息加 `error`（upstream-failure「失败的公开形状」）；`error` 事件发布完整五键，去掉组 5 的两键投影；`toPublicHistory`（`server/src/sessions/rest.ts:464-499`）同步。
+- [x] 7.1 服务端公开形状：REST 快照每条消息加 `error`（upstream-failure「失败的公开形状」）；`error` 事件发布完整五键，去掉组 5 的两键投影；`toPublicHistory`（`server/src/sessions/rest.ts:464-499`）同步。
   验证：chat-sessions「会话 REST」改写后的两个场景与 upstream-failure「刷新后看到同一条错误」通过。
-- [ ] 7.2 web 快照解析：`error` 键按严格键集 `{reason,message,status,detail}` 或 `null` 解析，user 消息必须为 `null`；解析放新模块。`web/src/lib/session-contract.ts:365` 的消息键集加 `error`。
+- [x] 7.2 web 快照解析：`error` 键按严格键集 `{reason,message,status,detail}` 或 `null` 解析，user 消息必须为 `null`；解析放新模块。`web/src/lib/session-contract.ts:365` 的消息键集加 `error`。
   验证：chat-web「API 客户端扩展」的「消息 error 键严格解析」通过——接受（`null`、四键对象、`status:null`、`detail:""`）与拒绝（缺 `error`、多键、缺 `detail`、`status:"401"` / `700` / `401.5`、`detail:null`、`reason:""`、user 消息非 null）；`grep -rln 'attachments:' web/test web/e2e` 命中的每个构造消息 DTO 的夹具与支撑文件（含 `web/e2e/route-hold.ts`）都补上 `error` 键，名单写进 PR。
-- [ ] 7.3 web 事件解码：`error` 五键、`turn.retry` 一键，`turn.retry` 加入数据事件清单；解码与归约放新模块（如 `stream-failure.ts`）。
+- [x] 7.3 web 事件解码：`error` 五键、`turn.retry` 一键，`turn.retry` 加入数据事件清单；解码与归约放新模块（如 `stream-failure.ts`）。
   验证：chat-web「失败与重试事件严格解码」通过；既有「命名错误与原生自动续连」通过。
-- [ ] 7.4 归约：视图消息的 `error` 改为对象、新增 `retrying`；`chatStateFromSnapshot` 取快照 `error`、`retrying` 为 `false`；十二类事件的置真 / 置假规则；`runtime-convert.ts` 的透传字段随类型更新。
+- [x] 7.4 归约：视图消息的 `error` 改为对象、新增 `retrying`；`chatStateFromSnapshot` 取快照 `error`、`retrying` 为 `false`；十二类事件的置真 / 置假规则；`runtime-convert.ts` 的透传字段随类型更新。
   验证：chat-web「失败对象与重试标记归约」与既有归约场景、`convertMessage` 场景通过。
-- [ ] 7.5 呈现：`web/src/features/chat/message-thread.tsx` 的 `MessageError`（`:153-163`）按 chat-web「消息线程」的错误文本段落渲染句子、`（HTTP s）`、`查看原文` 与原文块；同一位置的重试提示。原文以文本节点渲染。输入框解锁与 `重新生成` 不改代码（design D19），只在既有输入框锁定测试里加一例「上游失败结束后解锁」。
+- [x] 7.5 呈现：`web/src/features/chat/message-thread.tsx` 的 `MessageError`（`:153-163`）按 chat-web「消息线程」的错误文本段落渲染句子、`（HTTP s）`、`查看原文` 与原文块；同一位置的重试提示。原文以文本节点渲染。输入框解锁与 `重新生成` 不改代码（design D19），只在既有输入框锁定测试里加一例「上游失败结束后解锁」。
   验证：「失败消息的分类说明与原文」「重试提示」两个场景通过（jsdom）；含 `<b>x</b>` 的原文不产生 `b` 元素；亮暗主题下错误块颜色沿用既有 `--wb-status-error-text`。
-- [ ] 7.6 验收清单（`docs/acceptance/functional-checklist.md`，结论一律 `待签`，不代签）：CH-48 的期望改为「失败的回答里有一句分类说明（带状态码时显示 HTTP 状态码），可点『查看原文』展开；刷新页面后仍在」；新增五行，ID 接在现有最大号之后：(a) 把服务的上游密钥改成格式合法但上游不接受的值后重启（含换行等非法字符的密钥会让服务拒绝启动，见组 2），发一句话——几秒内出现「鉴权失败…（HTTP 401）」，展开原文里没有密钥，输入框可用，重发与重新生成可点；(b) 把上游地址指向一个总回 503 的服务后重启，发一句话——约半分钟后出现「上游出错，正在重试…」，约一分钟后以「上游出错…（HTTP 503）」结束；(c) 把上游地址指向一个能完成连接、收下请求但永不回应的服务后重启，发一句话——约两分钟后以「上游超时…」结束，期间不出现重试提示；(d) 把上游地址指向一个只接受 TCP 连接、从不完成握手的 `https` 地址后重启，发一句话——约十秒后以「上游不可达…」结束（不显示 HTTP 状态码），期间不出现重试提示；(e) 把上游地址指向一个总回 504 的服务后重启，发一句话——几秒内以「上游超时…（HTTP 504）」结束，期间不出现重试提示。
+- [x] 7.6 验收清单（`docs/acceptance/functional-checklist.md`，结论一律 `待签`，不代签）：CH-48 的期望改为「失败的回答里有一句分类说明（带状态码时显示 HTTP 状态码），可点『查看原文』展开；刷新页面后仍在」；新增五行，ID 接在现有最大号之后：(a) 把服务的上游密钥改成格式合法但上游不接受的值后重启（含换行等非法字符的密钥会让服务拒绝启动，见组 2），发一句话——几秒内出现「鉴权失败…（HTTP 401）」，展开原文里没有密钥，输入框可用，重发与重新生成可点；(b) 把上游地址指向一个总回 503 的服务后重启，发一句话——约半分钟后出现「上游出错，正在重试…」，约一分钟后以「上游出错…（HTTP 503）」结束；(c) 把上游地址指向一个能完成连接、收下请求但永不回应的服务后重启，发一句话——约两分钟后以「上游超时…」结束，期间不出现重试提示；(d) 把上游地址指向一个只接受 TCP 连接、从不完成握手的 `https` 地址后重启，发一句话——约十秒后以「上游不可达…」结束（不显示 HTTP 状态码），期间不出现重试提示；(e) 把上游地址指向一个总回 504 的服务后重启，发一句话——几秒内以「上游超时…（HTTP 504）」结束，期间不出现重试提示。
   验证：清单格式守卫通过；行里没有像素值与选择器。
-- [ ] 7.7 规格对照：chat-sessions、chat-web 的 MODIFIED（含「API 客户端扩展」）与 upstream-failure「失败的公开形状」的每个场景各有对应测试名。
-- [ ] 7.8 变异证据：服务端快照少发 `error` 键 → web 解析拒收用例与 7.1 判红；web 解析器放宽为接受多余键 → 拒收用例判红；原文改为 `dangerouslySetInnerHTML` → `<b>x</b>` 用例判红；`text.delta` 不清 `retrying` → 「失败对象与重试标记归约」判红；`status` 为 null 时仍渲染 `（HTTP` → 第二条消息断言判红。
-- [ ] 7.9 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`bash scripts/size-guard.sh` 退出 0。
+- [x] 7.7 规格对照：chat-sessions、chat-web 的 MODIFIED（含「API 客户端扩展」）与 upstream-failure「失败的公开形状」的每个场景各有对应测试名。
+- [x] 7.8 变异证据：服务端快照少发 `error` 键 → web 解析拒收用例与 7.1 判红；web 解析器放宽为接受多余键 → 拒收用例判红；原文改为 `dangerouslySetInnerHTML` → `<b>x</b>` 用例判红；`text.delta` 不清 `retrying` → 「失败对象与重试标记归约」判红；`status` 为 null 时仍渲染 `（HTTP` → 第二条消息断言判红。
+- [x] 7.9 整组验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`bash scripts/size-guard.sh` 退出 0。
 
 Suggested fixture level: expanded - 改公开 API（快照键集与事件负载），web 的严格解析与服务端必须同刀
 Minimal mergeable slice: atomic - **Width 例外**：快照消息与 `error` 事件的键集两侧都是严格解析（`session-contract.ts:365`、`stream.ts:718`），服务端先加键则现网页面整体拒收快照、打不开会话，web 先收紧则拒收现网快照，所以 7.1–7.4 必须同刀；7.5 的呈现可以拆出，但拆出后 7.1–7.4 的新字段没有任何可见效果、无法走查，故一并合入。替代方案（#1025 先例的先宽后严三步）见 design D18

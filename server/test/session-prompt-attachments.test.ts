@@ -64,6 +64,7 @@ const MESSAGE_KEYS = [
   "undo",
   "attachments",
   "steps",
+  "error",
 ];
 
 const scratch: string[] = [];

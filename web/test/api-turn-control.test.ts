@@ -295,6 +295,7 @@ describe("Stopped status in sessions and snapshots", () => {
         createdAt: -1,
         steps: [],
         thinking: null,
+        error: null,
       },
       {
         id: 0,
@@ -317,6 +318,7 @@ describe("Stopped status in sessions and snapshots", () => {
           },
         ],
         thinking: null,
+        error: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 7 },

@@ -33,6 +33,7 @@ import type {
   StepView,
 } from "./store.js";
 import type { StoredAttachment } from "./store-attachments.js";
+import type { MessageError } from "./store-error.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { UndoState } from "./store-undo.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
@@ -127,6 +128,8 @@ interface PublicMessage {
   /** The list recorded at admission; never re-checked against the files on a read. */
   attachments: StoredAttachment[];
   steps: PublicStep[];
+  /** upstream-failure「失败的公开形状」: null, or exactly {reason, message, status, detail}. */
+  error: MessageError | null;
 }
 
 interface OwnedSnapshot {
@@ -491,10 +494,16 @@ function toPublicHistory(
         changes: step.changes,
         status: step.status,
       })),
+      error: message.error === null ? null : toPublicError(message.error),
     })),
     streamCursor: snapshot.streamCursor,
     todo: snapshot.todo,
   };
+}
+
+/** Exactly the four declared keys, in the declared order. */
+function toPublicError({ reason, message, status, detail }: MessageError): MessageError {
+  return { reason, message, status, detail };
 }
 
 function toPublicApproval(approval: ApprovalEntry): ApprovalEntry {

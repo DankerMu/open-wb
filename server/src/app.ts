@@ -1,4 +1,4 @@
-import { lstatSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,7 @@ import { emit } from "./core/audit/index.js";
 import { HttpError } from "./core/errors/index.js";
 import { ensureSharedDir } from "./core/sandbox/dirs.js";
 import { createSandbox } from "./core/sandbox/index.js";
+import { sanitizeUpstreamText, upstreamSecretList } from "./core/upstream-failure.js";
 import {
   handleHttpError,
   registerAuthGuard,
@@ -242,6 +243,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
+    redactUpstream: upstreamRedactor(assembly?.upstream, runtime),
   });
   app.decorate("sessions", registered);
   app.decorate("workspaces", { store, sandbox });
@@ -318,6 +320,37 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   });
 
   return app;
+}
+
+/**
+ * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：每次净化时构造密钥集——上游的 apiKey
+ * 与 base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根，以及二者此刻与原值不同的 realpath
+ * （目录还没建出、取不到时只列原值）。realpath 在净化时才取：生产入口在 `ensureOmpStateLayout` 之前
+ * 调用 createApp，沙箱根到第一次建会话才建。只有失败的回合调用它。
+ */
+function upstreamRedactor(
+  upstream: AssemblyDependencies["upstream"],
+  runtime: SessionRuntime,
+): (text: string) => string {
+  return (text) => {
+    const paths = [runtime.stateDir, runtime.sandboxRoot];
+    for (const path of [runtime.stateDir, runtime.sandboxRoot]) {
+      try {
+        const real = realpathSync(path);
+        if (real !== path) {
+          paths.push(real);
+        }
+      } catch {
+        // Not there yet: the original path is still listed.
+      }
+    }
+    const secrets = upstreamSecretList({
+      apiKey: upstream?.apiKey,
+      baseUrl: upstream?.baseUrl,
+      paths,
+    });
+    return sanitizeUpstreamText(text, secrets);
+  };
 }
 
 /** 两个上传上限的生效值：装配没给的取缺省。 */

@@ -56,6 +56,7 @@ const snapshot = {
       createdAt: -1,
       steps: [],
       thinking: null,
+      error: null,
     },
     {
       id: 0,
@@ -68,6 +69,7 @@ const snapshot = {
       createdAt: 0,
       steps: [snapshotStep],
       thinking: null,
+      error: null,
     },
   ],
   streamCursor: { epoch: 1, seq: null as number | null },
@@ -297,6 +299,7 @@ describe("Sessions API client snapshot domain contract", () => {
           createdAt: -SAFE_INTEGER_MAX,
           steps: [],
           thinking: null,
+          error: null,
         },
         {
           id: SAFE_INTEGER_MAX,
@@ -319,6 +322,7 @@ describe("Sessions API client snapshot domain contract", () => {
             },
           ],
           thinking: null,
+          error: null,
         },
       ],
       streamCursor: { epoch: SAFE_INTEGER_MAX, seq: SAFE_INTEGER_MAX },

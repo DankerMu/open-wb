@@ -320,10 +320,14 @@ describe("Chat stream recovery", () => {
     context.source.emitOpen();
     context.loads[1]?.resolve(chatSnapshot());
     await settle();
-    context.source.emitData("error", "1:1", { messageId: 0, message: "exact failure 世界" });
-    expect(context.state.messages.find((message) => message.id === 0)?.error).toBe(
-      "exact failure 世界",
-    );
+    const failure = {
+      reason: "model_call_failed",
+      message: "exact failure 世界",
+      status: null,
+      detail: "",
+    };
+    context.source.emitData("error", "1:1", { messageId: 0, ...failure });
+    expect(context.state.messages.find((message) => message.id === 0)?.error).toEqual(failure);
     expect(context.state.messages.find((message) => message.id === 0)?.status).toBe("failed");
     expect(context.state.status).toBe("running");
     context.source.emitData("turn.end", "1:2", { messageId: 0, status: "failed" });
@@ -406,8 +410,9 @@ describe("Chat stream recovery", () => {
     context.handle.close();
   });
 
-  // Issue 909 (PR 3): the server publishes turn.retry before this web listens for it.
-  it("ignores a server turn.retry between deltas without a resync or a gap", async () => {
+  // Issue 909: PR 3 proved the old web ignored turn.retry; since PR 4 it is a data event, delivered
+  // in order through the same cursor filter.
+  it("delivers a server turn.retry between deltas without a resync or a gap", async () => {
     const context = connectChat(chatSnapshot());
     context.source.emitOpen();
     context.loads[0]?.resolve(chatSnapshot());
@@ -415,7 +420,11 @@ describe("Chat stream recovery", () => {
     context.source.emitData("text.delta", "1:1", { messageId: 0, delta: "A" });
     context.source.emitData("turn.retry", "1:2", { messageId: 0 });
     context.source.emitData("text.delta", "1:3", { messageId: 0, delta: "B" });
-    expect(context.events.map((event) => event.type)).toEqual(["text.delta", "text.delta"]);
+    expect(context.events.map((event) => event.type)).toEqual([
+      "text.delta",
+      "turn.retry",
+      "text.delta",
+    ]);
     expect(assistantContent(context.state)).toBe("AB");
     expect(context.loads).toHaveLength(1);
     expect(context.gaps).toBe(0);

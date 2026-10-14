@@ -64,4 +64,35 @@ describe("会话页：锁定不等于生成中（输入框）", () => {
     expectLockedNotGenerating();
     expect(screen.getByText(GUIDANCE)).toBeTruthy();
   });
+
+  // issue 909 design D19: no new code unlocks it — the existing turn.end failed path does.
+  it("上游失败结束后解锁：错误块出现，输入框可用、发送键回到原位，没有 生成中 与 停止", async () => {
+    const snapshot = chatSnapshot({ content: "Hello ", cursor: { epoch: 1, seq: 3 } });
+    const { source } = await mountRunningSnapshot(snapshot);
+    act(() => {
+      source.emitOpen();
+    });
+    expect(await screen.findByRole("button", { name: "停止" })).toBeTruthy();
+    expect(composer().disabled).toBe(true);
+
+    act(() => {
+      source.emitData("error", "1:4", {
+        messageId: 0,
+        reason: "auth_failed",
+        message: "鉴权失败：模型服务拒绝了配置的 API 密钥",
+        status: 401,
+        detail: "401 Incorrect API key provided",
+      });
+      source.emitData("turn.end", "1:5", { messageId: 0, status: "failed" });
+    });
+
+    expect(
+      await screen.findByText("鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）"),
+    ).toBeTruthy();
+    await waitFor(() => expect(composer().disabled).toBe(false));
+    expect(screen.queryByText("生成中", { exact: true })).toBeNull();
+    expect(screen.queryByRole("button", { name: "停止" })).toBeNull();
+    expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重新生成" })).toBeTruthy();
+  });
 });

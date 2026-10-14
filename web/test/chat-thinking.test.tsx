@@ -64,6 +64,7 @@ function assistant(id: number, status: Status, fields: Partial<Message> = {}): M
     approvals: [],
     undo: null,
     attachments: [],
+    error: null,
   };
   return { id, role: "assistant", status, ...base, ...fields };
 }
@@ -277,6 +278,7 @@ describe("thinking snapshot mapping and reduction", () => {
       steps: [],
       approvals: [],
       error: null,
+      retrying: false,
     });
     expect(next.status).toBe("done");
     expect(next.messages[0]).toBe(state.messages[0]);
@@ -609,7 +611,12 @@ describe("深度思考过程 fold on the chat page", () => {
     const block = fold();
     expect(isOpen(block)).toBe(true);
 
-    emit(source, 4, "error", { message: "上游失败" });
+    emit(source, 4, "error", {
+      reason: "model_call_failed",
+      message: "上游失败",
+      status: null,
+      detail: "",
+    });
     expect(screen.getByRole("alert").textContent).toBe("上游失败");
     expect(isOpen(block)).toBe(false);
     emit(source, 5, "turn.end", { status: "failed" });
@@ -622,7 +629,7 @@ describe("深度思考过程 fold on the chat page", () => {
         (part) => part.getAttribute("data-slot") ?? `${part.localName}.${part.className}`,
       ),
     ).toEqual(["reasoning-root", "message-body", "message-error", "message-actions"]);
-    expect(screen.getByRole("alert")).toBe(main.children[2]);
+    expect(screen.getByRole("alert").parentElement).toBe(main.children[2]);
   });
 
   it("T9 removes the fold when the same message starts a new turn", async () => {

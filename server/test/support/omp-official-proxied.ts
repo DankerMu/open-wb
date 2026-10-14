@@ -16,12 +16,15 @@
  * one above (createApp's own `/v1` cannot take injected deadlines); it shares the app's
  * `TokenRegistry`, so a spawn's bearer resolves exactly as in production. The child's stdout is
  * teed into `frames` (the runtime still reads every byte), so the omp-level assertions still hold.
+ * Group 6 hands createApp the proxy's own upstream (key and base URL), as production does, so the
+ * sessions-side sanitiser works with the same secret list, and exposes the app's database.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { StringDecoder } from "node:string_decoder";
 import fastify, { type FastifyInstance } from "fastify";
 import { createApp } from "../../src/app.js";
@@ -68,6 +71,8 @@ type LogRecord = Record<string, unknown>;
 
 export interface ProxiedApp {
   app: FastifyInstance;
+  /** The app's database (the three error columns, #909 group 6). */
+  db: DatabaseSync;
   upstream: FakeUpstreamServer;
   stalled: StalledHandshake;
   cookie: string;
@@ -90,6 +95,8 @@ interface Proxied {
   upstream: FakeUpstreamServer;
   stalled: StalledHandshake;
   tokens: TokenRegistry;
+  /** What the proxy forwards to; createApp gets the same (production's one `upstream`). */
+  target: { baseUrl: string; apiKey: string };
 }
 
 /** The layout, upstream, stalled listener and proxy shared by both worlds; torn down per case. */
@@ -111,16 +118,17 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   const tokens = new TokenRegistry();
   const proxy = fastify({ logger: false });
   proxy.setErrorHandler((error, request, reply) => handleHttpError(error, request, reply));
+  const target = {
+    baseUrl:
+      options.target === "stalled-handshake"
+        ? `https://127.0.0.1:${String(stalled.port)}`
+        : `http://127.0.0.1:${String(upstream.port)}/v1`,
+    apiKey: UPSTREAM_KEY,
+  };
   registerModelProxy(proxy, {
     tokens,
     allowedModels: new Set(PROXIED_MODELS),
-    upstream: {
-      baseUrl:
-        options.target === "stalled-handshake"
-          ? `https://127.0.0.1:${String(stalled.port)}`
-          : `http://127.0.0.1:${String(upstream.port)}/v1`,
-      apiKey: UPSTREAM_KEY,
-    },
+    upstream: target,
     ...(options.firstByteDeadlineMs === undefined
       ? {}
       : { firstByteDeadlineMs: options.firstByteDeadlineMs }),
@@ -135,7 +143,7 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
     models: PROXIED_MODELS.map((id) => ({ id, name: id, reasoning: false, vision: false })),
   });
   await writeHostOverlay(stateDir);
-  return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens };
+  return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens, target };
 }
 
 export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promise<ProxiedWorld> {
@@ -195,6 +203,7 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
     authRuntime: fixedRuntime(() => FIXED_NOW),
     assembly: {
       tokens: proxied.tokens,
+      upstream: proxied.target,
       runtime: {
         bin: proxied.bin,
         sandboxRoot: proxied.sandboxRoot,
@@ -231,7 +240,7 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
   });
   const cookie = await cookieFor(app, "zhangsan");
   const { upstream, stalled } = proxied;
-  return { app, upstream, stalled, cookie, events, frames, log, denied, faults };
+  return { app, db, upstream, stalled, cookie, events, frames, log, denied, faults };
 }
 
 /** One prompt of `openProxiedApp`, as the browser and omp saw it. */

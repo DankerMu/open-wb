@@ -10,6 +10,8 @@ import {
   userView,
 } from "./chat-stream-support.js";
 
+/** A published failure (#909: the error event carries the classified object). */
+const FAILURE = { reason: "model_call_failed", message: "x", status: null, detail: "" };
 const bashStep = {
   id: 1,
   ordinal: 0,
@@ -72,6 +74,7 @@ describe("turn.end stopped reduction", () => {
       ],
       thinking: null,
       error: null,
+      retrying: false,
     });
     expect(next.messages[0]).toBe(state.messages[0]);
     expect(next.messages[0]).toEqual(userView);
@@ -100,15 +103,16 @@ describe("turn.end stopped reduction", () => {
       steps: [],
       thinking: null,
       error: null,
+      retrying: false,
     });
   });
 
   it("clears a prior error text when the turn ends stopped", () => {
     const failed = applyChatEvent(runningState(), {
       type: "error",
-      data: { messageId: 0, message: "x" },
+      data: { messageId: 0, ...FAILURE },
     });
-    expect(failed.messages[1]?.error).toBe("x");
+    expect(failed.messages[1]?.error).toEqual(FAILURE);
 
     const next = applyChatEvent(failed, {
       type: "turn.end",
@@ -123,7 +127,7 @@ describe("turn.end stopped reduction", () => {
   it("keeps done clearing and failed preserving the error text", () => {
     const failed = applyChatEvent(runningState(), {
       type: "error",
-      data: { messageId: 0, message: "x" },
+      data: { messageId: 0, ...FAILURE },
     });
 
     const done = applyChatEvent(failed, {
@@ -137,7 +141,7 @@ describe("turn.end stopped reduction", () => {
 
     expect(done.messages[1]).toMatchObject({ status: "done", error: null });
     expect(done.messages[1]?.steps.map((step) => step.status)).toEqual(["done", "done"]);
-    expect(failedEnd.messages[1]).toMatchObject({ status: "failed", error: "x" });
+    expect(failedEnd.messages[1]).toMatchObject({ status: "failed", error: FAILURE });
     expect(failedEnd.messages[1]?.steps.map((step) => step.status)).toEqual(["failed", "done"]);
   });
 });

@@ -19,6 +19,7 @@ import { ArtifactCards } from "./artifact-card.js";
 import { FileChangesCard } from "./file-changes-card.js";
 import { MarkdownBody } from "./markdown-body.js";
 import { AssistantActions, UserActions } from "./message-action-row.js";
+import { MessageError } from "./message-error.js";
 import { type ChatMessageCustom, messageCustom } from "./runtime-convert.js";
 import type { ChatState } from "./stream.js";
 import { ThinkingFold } from "./thinking-fold.js";
@@ -113,7 +114,7 @@ const UserMessage = memo(function UserMessage({
         )}
         <MessageAttachments attachments={custom.attachments} />
         <ToolCallGroup steps={custom.steps} />
-        <MessageError error={custom.error} />
+        <MessageError error={custom.error} retrying={custom.retrying} status={custom.status} />
         {archived ? null : (
           <UserActions
             disabled={locked}
@@ -148,18 +149,6 @@ function MessageAttachments({ attachments }: { attachments: ChatMessageCustom["a
       ))}
     </ul>
   );
-}
-
-function MessageError({ error }: { error: string | null }) {
-  return error ? (
-    <p
-      className="m-0 rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-(--wb-status-error-text)"
-      data-slot="message-error"
-      role="alert"
-    >
-      {error}
-    </p>
-  ) : null;
 }
 
 /** 正文：Markdown，或已停止且为空时的占位；运行中在末尾带光标（减少动态效果时不闪）。 */
@@ -206,7 +195,7 @@ const AssistantMessage = memo(function AssistantMessage({
   text: string;
   thinking: string;
 }) {
-  const { approvals, error, status, steps } = custom;
+  const { approvals, error, retrying, status, steps } = custom;
   const running = status === "running";
   return (
     <MessagePrimitive.Root asChild>
@@ -227,7 +216,7 @@ const AssistantMessage = memo(function AssistantMessage({
           <MessageBody status={status} text={text} />
           <ToolCallGroup steps={steps} />
           <ApprovalRecords approvals={approvals} />
-          <MessageError error={error} />
+          <MessageError error={error} retrying={retrying} status={status} />
           <FileChangesCard onReveal={onReveal} space={space} steps={steps} />
           <ArtifactCards client={client} onReveal={onReveal} space={space} steps={steps} />
           {status === "stopped" ? (
