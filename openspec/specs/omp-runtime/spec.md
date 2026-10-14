@@ -381,9 +381,15 @@ images:
   urls:
     enabled: false
     command: null
+retry:
+  enabled: true
+  maxRetries: 1
+  baseDelayMs: 500
+  maxDelayMs: 300000
+  modelFallback: false
 ```
 
-各键的作用（真实 omp v18.0.10 实测）：`tools.approval: []` 以数组整体替换项目层的逐工具放行记录（对象会被深合并，替换不掉未列出的工具）；`bash.patterns: []` 清掉项目层的 bash 放行规则；`shellPath: null` 与三个 `interpreter: ""` 使项目层不能指定被宿主执行的可执行文件；`bash.direnv: "off"` 关闭 bash 调用前的 `direnv export`；`mcp.enableProjectConfig: false` 使项目层 MCP 配置文件里的 stdio server 不在 spawn 时被拉起；`todo.reminders: false` 关闭未完成 todo 的隐藏提醒与同回合自动续跑（会让助手正文出现两段回复）；`images.urls.enabled: false` 关掉图片发布 broker——项目层把它打开后，会话创建时的 prewarm 会按项目给的参数拉起 `ssh`/`cloudflared` 等外部进程（`blob-broker/service.ts:623`、`exposure.ts:488-503`），`images.urls.command` 则被直接执行（`uploaders.ts:100`）；这一组的效果是读源码得出的，omp 接受该取值已实测。`tools.approvalMode: write` 的优先级低于 argv：omp v18.0.10 在启动段把 `--approval-mode` 的取值经 `settings.override("tools.approvalMode", …)` 写入高于 overlay 的运行期覆盖层，所以会话的有效档位为 `always-ask` 或 `yolo` 时生效的是 argv 的值，overlay 的这一行只在 argv 缺席时才起作用（argv 恒在，见「子进程 spawn 契约」），作为 `write` 的兜底保留。overlay 的内容 SHALL NOT 随会话档位变化：全部会话、全部档位共用上面这一份文件，逐字节不变。其余各键在三个档位下的作用相同——`always-ask` 下项目层的逐工具放行与 bash 放行规则同样被清掉；`yolo` 下工具本来就不因档位请求审批，项目层无从再放宽，而项目层自己写的收紧规则照旧被清掉（ADR-0012 已登记的残余）。「argv 压过 overlay」这一点由 session-permission-tier「档位与 omp 审批模式」的真实 omp 场景钉住。overlay 不做 schema 校验，上述取值依赖 v18.0.10 的消费代码：升级 omp 时 SHALL 重新验证。
+各键的作用（真实 omp v18.0.10 实测）：`tools.approval: []` 以数组整体替换项目层的逐工具放行记录（对象会被深合并，替换不掉未列出的工具）；`bash.patterns: []` 清掉项目层的 bash 放行规则；`shellPath: null` 与三个 `interpreter: ""` 使项目层不能指定被宿主执行的可执行文件；`bash.direnv: "off"` 关闭 bash 调用前的 `direnv export`；`mcp.enableProjectConfig: false` 使项目层 MCP 配置文件里的 stdio server 不在 spawn 时被拉起；`todo.reminders: false` 关闭未完成 todo 的隐藏提醒与同回合自动续跑（会让助手正文出现两段回复）；`images.urls.enabled: false` 关掉图片发布 broker——项目层把它打开后，会话创建时的 prewarm 会按项目给的参数拉起 `ssh`/`cloudflared` 等外部进程（`blob-broker/service.ts:623`、`exposure.ts:488-503`），`images.urls.command` 则被直接执行（`uploaders.ts:100`）；这一组的效果是读源码得出的，omp 接受该取值已实测。`retry:` 段把 omp 的会话级自动重试封顶为一轮（owner 2026-10-13，#909）：v18.0.10 的传输层（6 次）与 provider 层（整轮重放 1 次）重试是硬编码，一轮 502 约 32 秒 / 12 次上游请求（实测），缺省 10 次会话级重试时一次 5xx 回合约 402.7 秒才失败（实测）；`enabled`、`baseDelayMs`、`maxDelayMs` 取 omp 缺省值，写出来是为了让项目层改不动重试的时长；`modelFallback: false` 关闭 omp 的模型兜底（缺省 `true`）——否则项目层一条 `retry.fallbackChains` 就能在重试预算用尽时换模型并重置预算，对不可重试的错误（含模型代理的 424）也会换模型重放（读源码得出，#909 design D12）；这与「多上游切换不在范围内」（owner 2026-10-06）一致，即本 overlay 关闭了 omp 的模型兜底。`tools.approvalMode: write` 的优先级低于 argv：omp v18.0.10 在启动段把 `--approval-mode` 的取值经 `settings.override("tools.approvalMode", …)` 写入高于 overlay 的运行期覆盖层，所以会话的有效档位为 `always-ask` 或 `yolo` 时生效的是 argv 的值，overlay 的这一行只在 argv 缺席时才起作用（argv 恒在，见「子进程 spawn 契约」），作为 `write` 的兜底保留。overlay 的内容 SHALL NOT 随会话档位变化：全部会话、全部档位共用上面这一份文件，逐字节不变。其余各键在三个档位下的作用相同——`always-ask` 下项目层的逐工具放行与 bash 放行规则同样被清掉；`yolo` 下工具本来就不因档位请求审批，项目层无从再放宽，而项目层自己写的收紧规则照旧被清掉（ADR-0012 已登记的残余）。「argv 压过 overlay」这一点由 session-permission-tier「档位与 omp 审批模式」的真实 omp 场景钉住。overlay 不做 schema 校验，上述取值依赖 v18.0.10 的消费代码：升级 omp 时 SHALL 重新验证。
 
 overlay 缺失、不可读或不是 YAML mapping 时 omp 以非零退出且不发任何帧——宿主按既有的握手失败处理（`agent_unavailable`），SHALL NOT 回退为不带 `--config` 的 spawn。写入失败 SHALL 走与 `models.yml` 写入失败相同的 partial-start failure 路径。
 
@@ -412,6 +418,12 @@ overlay 缺失、不可读或不是 YAML mapping 时 omp 以非零退出且不�
 #### Scenario: overlay 不随档位变化
 - **WHEN** 编译入口冷启动后，先后有 `always-ask`、`write`、`yolo` 三个档位的会话各 spawn 一次
 - **THEN** `host-overlay.yml` 的字节在三次 spawn 前后都等于上文（仍含 `approvalMode: write`），托管 agent 目录里没有按档位另写的 overlay 文件；三次 spawn 的 `--config` 与 `PI_CONFIG_FILES` 都指向这同一个路径
+
+#### Scenario: 会话级重试封顶一轮（真实 omp）
+- **WHEN** 官方 omp v18.0.10 经模型代理连接一个对每次请求都答 503 的假上游，会话发一个 prompt
+- **THEN** omp 恰发一个 `auto_retry_start`（`attempt` 1、`maxAttempts` 1），随后 `auto_retry_end{success:false}` 与终止 `agent_end`；上游恰收到两轮请求（v18.0.10 下为 24 次），回合以 `failed` 结束；实测时长写进实现 PR
+- **WHEN** 托管 `models.yml` 在同一 provider 下列出两个白名单模型 A、B，会话以 A 运行，会话 cwd 下预置 `.omp/config.yml`，含 `retry: {maxRetries: 10, baseDelayMs: 3600000, modelFallback: true, fallbackChains: {default: ["<provider>/B"]}}`
+- **THEN** 结果与上一例相同（overlay 压过项目层）：恰一个 `auto_retry_start`，上游收到的每个请求体的 `model` 都是 A、没有一个是 B
 
 ### Requirement: 工作目录 dotenv 钉住
 官方 omp 二进制在启动时依次读取 `<cwd>/.env`、`<agent 目录>/.env`、`$HOME/.omp/.env`、`$HOME/.env`，把其中宿主环境里**没有或为空**的变量写入自己的环境（`OMP_X` 在同一文件内镜像为 `PI_X`；`resource/oh-my-pi/packages/utils/src/env.ts:228-247`，官方 v18.0.10 二进制实测）。cwd 是 agent 无需审批即可写的目录，`<state>/home` 对 omp uid 可写，因此未加处理时一份 `.env` 就能把 agent 目录改到 agent 可写的位置（`PI_CODING_AGENT_DIR`，实测 `agent.db` 落到该目录）或让该目录的 spawn 持续失败（`PI_CONFIG_FILES` 指向不存在的文件）。宿主 SHALL：

@@ -1,8 +1,9 @@
-## Purpose
+# upstream-failure Specification
 
+## Purpose
 定义回合失败对用户与运维的呈现契约：把每次失败归为一个固定原因并配一句中文说明，净化上游原文（去密钥、去上游地址的敏感部分、去服务器路径、纯文本、截断），把失败落库进快照，经事件推送，记录一行服务日志，并把 omp 的会话级重试显示为「正在重试」。
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: 回合失败分类
 服务端 SHALL 把每个以 `error` 事件结束的回合归为下表恰一个 `reason`，按序取第一条命中的规则。输入是失败来源（`message_end`：omp 报告的 assistant 失败；`runtime`：prompt 失败应答或 supervisor 的 `applyFailure`）、`errorStatus`（可缺；不是 100–599 之间的整数时按缺失处理——web 只接受该范围，见 chat-web「API 客户端扩展」，#909 PR 4 实施补入）与 `errorMessage`。「末尾记号」指 `errorMessage` 整段文本以 `(type=wb_upstream param=<种类>)` 结尾，`<种类>` 为 `status.<三位数>`、`connect.<1–64 个 [A-Z0-9_]>`、`gateway_504`、`gateway_524`、`no_connect` 或 `no_response` 之一（model-proxy「透传端点与 bearer 鉴权」的失败摘要经 omp 后的形状），**且** `errorStatus` 等于代理为该种类发出的状态：`status.*` 与 `connect.*` 为 502，`gateway_*`、`no_connect` 与 `no_response` 为 424。出现在其它位置的同样字样、以及 `errorStatus` 不符的末尾记号（例如原样透传的 `< 500` 上游正文自带的 `type` / `param`）SHALL NOT 被采信，此时按下表其余各行分类。
@@ -51,7 +52,7 @@
 
 控制字符在去密钥之前删除，使被控制字符劈开的密钥不能躲过替换后被拼回；去密钥在截断之前，使密钥不会因被截成半截而漏网。
 
-**密钥集**由同一模块的一个纯函数从配置导出，SHALL 包含：配置的 `MODEL_UPSTREAM_API_KEY`；配置的上游 base URL 原串；其 userinfo 原串与其中的密码段（存在时）；其 pathname 整串（不为空、不为 `/` 时）以及其中长度不小于 8 的每个路径段；其查询串（去掉 `?`，非空时）；OMP 状态目录与沙箱根的绝对路径，以及二者的 realpath（与原值不同时）。未配置上游时只有两组路径。模型代理对 ≥500 正文节选 SHALL 使用由它自己的 `upstream` 导出的部分（apiKey 与 base URL 各部分）；sessions 对每个 `detail`——含 `agent_failed` 的运行时文本（prompt 失败应答、进程异常退出等）——SHALL 使用完整的密钥集。sessions 模块 SHALL NOT 持有密钥值本身：装配方把绑定了密钥集的净化闭包交给它。展示 `detail` 的界面 SHALL 把它当纯文本。
+**密钥集**由同一模块的一个纯函数从配置导出，SHALL 包含：配置的 `MODEL_UPSTREAM_API_KEY`；配置的上游 base URL 原串；其 userinfo 原串与其中的密码段（存在时）；其 pathname 整串（不为空、不为 `/` 时）以及其中长度不小于 8 的每个路径段；其查询串（去掉 `?`，非空时）；OMP 状态目录与沙箱根各四种写法——配置原值、`normalize()` 后的形式、去掉尾部 `/` 的形式（根目录 `/` 除外）、净化时现取的 `realpathSync.native`（取不到时略去）——去重后列入（#909 PR 4 / PR 5 实施补入）。未配置上游时只有两组路径。模型代理对 ≥500 正文节选 SHALL 使用由它自己的 `upstream` 导出的部分（apiKey 与 base URL 各部分）；sessions 对每个 `detail`——含 `agent_failed` 的运行时文本（prompt 失败应答、进程异常退出等）——SHALL 使用完整的密钥集。sessions 模块 SHALL NOT 持有密钥值本身：装配方把绑定了密钥集的净化闭包交给它。展示 `detail` 的界面 SHALL 把它当纯文本。
 
 #### Scenario: 去密钥与去路径
 - **WHEN** 配置的密钥为 `k-123`，净化 `401 bad key k-123\nAuthorization: Bearer abc.def\nuse sk-AAAAAAAAAAAAAAAAAAAA\nraw-http-request=/srv/state/xdg/state/omp/logs/http-400-requests/1.json\r\nend\u0007`
