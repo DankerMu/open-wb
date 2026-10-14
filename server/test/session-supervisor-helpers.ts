@@ -9,6 +9,7 @@ import { openDb } from "../src/core/db/index.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { SpawnImpl } from "../src/sessions/omp/process.js";
+import type { SpawnLog } from "../src/sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout } from "../src/sessions/omp/state-layout.js";
 import type { SessionStore } from "../src/sessions/store.js";
 import type { ComposerConfig } from "../src/sessions/store-composer.js";
@@ -95,9 +96,10 @@ export interface OpenSessionOptions {
   snapshots?: TurnSnapshotService;
   /**
    * The app's model whitelist and approval cap (#1007); omitted → one model, cap `yolo`. And the
-   * attachment count limit of a prompt (#1019); omitted → the default.
+   * attachment count limit of a prompt (#1019); omitted → the default. And the sessions `log`
+   * port (#909 upstream_failed records); omitted → discarded.
    */
-  assembly?: Partial<ComposerConfig> & { uploadMaxFiles?: number };
+  assembly?: Partial<ComposerConfig> & { uploadMaxFiles?: number; log?: SpawnLog };
 }
 
 export function createRealFakeRuntime(

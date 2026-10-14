@@ -2,6 +2,7 @@
  * Issue #652 bounded concurrent spawn: `limit` permits, FIFO waiters, cancellable while queued.
  * A permit covers one acquisition from grant until its startup (spawn + handshake) settles.
  */
+import type { UpstreamFailedRecord } from "../upstream-failure-log.js";
 import { AgentUnavailableError } from "./process.js";
 
 interface Waiter {
@@ -68,8 +69,11 @@ export interface HandshakeTimeoutRecord {
   elapsedMs: number;
 }
 
-/** Synchronous observation port; omitted → records are discarded. */
-export type SpawnLog = (record: HandshakeTimeoutRecord) => void;
+/**
+ * The sessions module's synchronous observation port (handshake timeouts; #909 adds the
+ * upstream_failed record); omitted → records are discarded.
+ */
+export type SpawnLog = (record: HandshakeTimeoutRecord | UpstreamFailedRecord) => void;
 
 /**
  * One record for a handshake-deadline failure only; `began` is `performance.now()` at acquisition
@@ -102,7 +106,8 @@ export function reportHandshakeTimeout(
   }
 }
 
-function consumeThenable(value: unknown): void {
+/** A thenable a log port returned has its rejection consumed; anything else is ignored. */
+export function consumeThenable(value: unknown): void {
   if ((typeof value !== "object" && typeof value !== "function") || value === null) {
     return;
   }

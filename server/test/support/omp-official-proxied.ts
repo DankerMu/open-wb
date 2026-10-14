@@ -8,20 +8,37 @@
  * completes TLS. Both deadlines can be injected (production passes neither). Every approval is
  * denied and recorded. Opt-in through `WORKBUDDY_OMP_TEST=1` with the pinned binary, as the
  * direct world.
+ *
+ * Tasks 4.4 / 5.5 add `openProxiedApp`: the same proxy and upstream, with the production sessions
+ * assembly (createApp → registerSessions → SessionSupervisor, SQLite, the system clock) in front of
+ * the official binary instead of a bare `SessionRuntime`, so a case sees what the browser sees (the
+ * published events), the sessions `log` port and the stop route. The proxy stays the standalone
+ * one above (createApp's own `/v1` cannot take injected deadlines); it shares the app's
+ * `TokenRegistry`, so a spawn's bearer resolves exactly as in production. The child's stdout is
+ * teed into `frames` (the runtime still reads every byte), so the omp-level assertions still hold.
  */
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import fastify from "fastify";
+import { StringDecoder } from "node:string_decoder";
+import fastify, { type FastifyInstance } from "fastify";
+import { createApp } from "../../src/app.js";
+import { openDb } from "../../src/core/db/index.js";
 import { handleHttpError } from "../../src/http/errors.js";
 import { registerModelProxy } from "../../src/model-proxy/index.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
+import type { ChatEvent } from "../../src/sessions/events.js";
+import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import { writeHostOverlay } from "../../src/sessions/omp/host-overlay.js";
+import type { SpawnImpl } from "../../src/sessions/omp/process.js";
 import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
 import { ensureOmpStateLayout, ompAgentDir } from "../../src/sessions/omp/state-layout.js";
 import type { ApprovalRequest } from "../../src/sessions/omp/ui-requests.js";
 import { TokenRegistry } from "../../src/sessions/tokens.js";
+import { FIXED_NOW, fixedRuntime } from "../session-db-helpers.js";
+import { cookieFor } from "../session-rest-helpers.js";
 import { type FakeUpstreamServer, start } from "./fake-upstream.mjs";
 import { officialBin, onTeardown } from "./omp-official.js";
 import { type StalledHandshake, startStalledHandshake } from "./stalled-handshake.js";
@@ -46,7 +63,37 @@ export interface ProxiedWorld {
   approvals: ApprovalRequest[];
 }
 
-export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promise<ProxiedWorld> {
+/** What the sessions `log` port received, in order. */
+type LogRecord = Record<string, unknown>;
+
+export interface ProxiedApp {
+  app: FastifyInstance;
+  upstream: FakeUpstreamServer;
+  stalled: StalledHandshake;
+  cookie: string;
+  /** Every published event of every session, in publication order. */
+  events: Array<{ sessionId: string; event: ChatEvent<number> }>;
+  /** Every frame omp wrote to stdout, across spawns, in arrival order. */
+  frames: OmpFrame[];
+  log: LogRecord[];
+  /** Approval ids the world denied (the direct world's 「deny unless the case says otherwise」). */
+  denied: number[];
+  /** Faults the supervisor retained; a passing case leaves it empty. */
+  faults: Error[];
+}
+
+interface Proxied {
+  bin: string;
+  stateDir: string;
+  sandboxRoot: string;
+  workspaceRoot: string;
+  upstream: FakeUpstreamServer;
+  stalled: StalledHandshake;
+  tokens: TokenRegistry;
+}
+
+/** The layout, upstream, stalled listener and proxy shared by both worlds; torn down per case. */
+async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   const bin = officialBin();
   const root = realpathSync(mkdtempSync(join(tmpdir(), "omp-official-proxied-")));
   onTeardown(() => rmSync(root, { recursive: true, force: true }));
@@ -83,28 +130,187 @@ export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promi
   });
   await proxy.listen({ host: "127.0.0.1", port: 0 });
   onTeardown(() => proxy.close());
-  const agentDir = ompAgentDir(stateDir);
-  await writeManagedModelsYml(agentDir, {
+  await writeManagedModelsYml(ompAgentDir(stateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(proxy.server.address() as AddressInfo),
     models: PROXIED_MODELS.map((id) => ({ id, name: id, reasoning: false, vision: false })),
   });
   await writeHostOverlay(stateDir);
+  return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens };
+}
+
+export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promise<ProxiedWorld> {
+  const proxied = await openProxy(options);
   const approvals: ApprovalRequest[] = [];
   const runtime: SessionRuntime = new SessionRuntime({
     sessionId: "omp-official-proxied",
-    bin,
-    sandboxRoot,
-    stateDir,
+    bin: proxied.bin,
+    sandboxRoot: proxied.sandboxRoot,
+    stateDir: proxied.stateDir,
     ownerId: OWNER_ID,
-    cwd: workspaceRoot,
+    cwd: proxied.workspaceRoot,
     modelId: PROXIED_MODELS[0],
     approvalMode: "write",
-    tokens,
+    tokens: proxied.tokens,
     onApproval: (request) => {
       approvals.push(request);
       runtime.respondApproval(request.id, "deny");
     },
   });
   onTeardown(() => runtime.shutdown());
+  const { upstream, stalled, workspaceRoot } = proxied;
   return { runtime, upstream, stalled, workspaceRoot, approvals };
+}
+
+/** Appends every complete JSONL line of `child`'s stdout to `frames`; omp's own reader is untouched. */
+function teeFrames(child: ChildProcessWithoutNullStreams, frames: OmpFrame[]): void {
+  const decoder = new StringDecoder("utf8");
+  let partial = "";
+  child.stdout.on("data", (chunk: Buffer) => {
+    partial += decoder.write(chunk);
+    for (let end = partial.indexOf("\n"); end !== -1; end = partial.indexOf("\n")) {
+      const line = partial.slice(0, end).trim();
+      partial = partial.slice(end + 1);
+      if (line.startsWith("{")) {
+        frames.push(JSON.parse(line) as OmpFrame);
+      }
+    }
+  });
+}
+
+export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise<ProxiedApp> {
+  const proxied = await openProxy(options);
+  const frames: OmpFrame[] = [];
+  const events: ProxiedApp["events"] = [];
+  const log: LogRecord[] = [];
+  const denied: number[] = [];
+  const faults: Error[] = [];
+  const teeing: SpawnImpl = (command, args, spawnOptions) => {
+    const child = (spawn as SpawnImpl)(command, args, spawnOptions);
+    teeFrames(child, frames);
+    return child;
+  };
+  const db = openDb(":memory:");
+  const app: FastifyInstance = createApp({
+    db,
+    authRuntime: fixedRuntime(() => FIXED_NOW),
+    assembly: {
+      tokens: proxied.tokens,
+      runtime: {
+        bin: proxied.bin,
+        sandboxRoot: proxied.sandboxRoot,
+        stateDir: proxied.stateDir,
+        modelId: PROXIED_MODELS[0],
+        spawnImpl: teeing,
+      },
+      onError: (error) => {
+        faults.push(error);
+      },
+      onEvent: (sessionId, _epoch, event) => {
+        events.push({ sessionId, event });
+        if (event.type === "approval.request") {
+          denied.push(event.data.approvalId);
+          // The observer must return synchronously; the answer goes out on the next turn.
+          setImmediate(() => {
+            void app.sessions.supervisor
+              .decide(sessionId, event.data.approvalId, "deny")
+              .catch(() => undefined);
+          });
+        }
+      },
+      log: (record) => {
+        log.push({ ...record });
+      },
+    },
+  });
+  onTeardown(async () => {
+    try {
+      await app.close();
+    } finally {
+      db.close();
+    }
+  });
+  const cookie = await cookieFor(app, "zhangsan");
+  const { upstream, stalled } = proxied;
+  return { app, upstream, stalled, cookie, events, frames, log, denied, faults };
+}
+
+/** One prompt of `openProxiedApp`, as the browser and omp saw it. */
+export interface AppTurn {
+  session: string;
+  /** omp's frames of the turn: the first `agent_start` through the terminal `agent_end`. */
+  frames: OmpFrame[];
+  /** The session's published events. */
+  events: ChatEvent<number>[];
+  /** From the prompt route's call to the published `turn.end` (or to `stopAt`). */
+  ms: number;
+}
+
+const POLL_MS = 20;
+const TURN_BOUND_MS = 170_000;
+
+/** A fresh session of `world`'s account; resolves to its id. */
+export async function openAppSession(world: ProxiedApp): Promise<string> {
+  const response = await world.app.inject({
+    method: "POST",
+    url: "/api/sessions",
+    headers: { cookie: world.cookie },
+  });
+  if (response.statusCode !== 201) {
+    throw new Error(`session creation answered ${String(response.statusCode)}`);
+  }
+  return (response.json() as { id: string }).id;
+}
+
+/** Polls `done` on real time until it holds or the bound passes. */
+export async function until(done: () => boolean, what: string, boundMs = TURN_BOUND_MS) {
+  const deadline = Date.now() + boundMs;
+  while (!done()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out waiting for ${what}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+  }
+}
+
+/** The published events of `session`, in order. */
+export function publishedOf(world: ProxiedApp, session: string): ChatEvent<number>[] {
+  return world.events.filter((entry) => entry.sessionId === session).map((entry) => entry.event);
+}
+
+function turnFrames(frames: readonly OmpFrame[]): OmpFrame[] {
+  const first = frames.findIndex((frame) => frame.type === "agent_start");
+  const last = frames.findIndex(
+    (frame) => frame.type === "agent_end" && frame.isTerminal !== false,
+  );
+  return first === -1 ? [] : frames.slice(first, last === -1 ? undefined : last + 1);
+}
+
+/**
+ * Prompts a fresh session and waits for its published `turn.end`, or until a frame matches `stopAt`
+ * (the turn is then abandoned to the case's teardown).
+ */
+export async function runAppTurn(
+  world: ProxiedApp,
+  text: string,
+  stopAt?: (frame: OmpFrame) => boolean,
+): Promise<AppTurn> {
+  const session = await openAppSession(world);
+  const startedAt = Date.now();
+  const response = await world.app.inject({
+    method: "POST",
+    url: `/api/sessions/${session}/prompt`,
+    headers: { "content-type": "application/json", cookie: world.cookie },
+    payload: JSON.stringify({ message: text }),
+  });
+  if (response.statusCode !== 202) {
+    throw new Error(`prompt answered ${String(response.statusCode)}`);
+  }
+  await until(
+    () =>
+      publishedOf(world, session).some((event) => event.type === "turn.end") ||
+      (stopAt !== undefined && world.frames.some(stopAt)),
+    `the turn of ${text}`,
+  );
+  const ms = Date.now() - startedAt;
+  return { session, frames: turnFrames(world.frames), events: publishedOf(world, session), ms };
 }

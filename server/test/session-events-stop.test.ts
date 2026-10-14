@@ -86,7 +86,16 @@ describe("session event reduction — aborted turn ends stopped", () => {
       ended("aborted"),
     ]);
     expect(applyFrame(state, { type: "agent_end", messages: [] }).events).toEqual([
-      { type: "error", data: { messageId: M, message: "upstream 500" } },
+      {
+        type: "error",
+        data: {
+          messageId: M,
+          message: "模型调用失败",
+          reason: "model_call_failed",
+          status: null,
+          detail: "upstream 500",
+        },
+      },
       { type: "turn.end", data: { messageId: M, status: "failed" } },
     ]);
   });

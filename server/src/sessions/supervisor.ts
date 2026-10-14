@@ -53,6 +53,7 @@ import { ThinkingBuffers } from "./thinking-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 import { type UndoRequest, type UndoResult, Undos } from "./undo.js";
+import { reportUpstreamFailure } from "./upstream-failure-log.js";
 
 export { releasePumpExit } from "./pool.js";
 
@@ -700,6 +701,7 @@ export class SessionSupervisor {
         if (published !== undefined && !(await this.#publish(slot, published, generation))) {
           return false;
         }
+        reportUpstreamFailure(this.#spawn.log, slot.sessionId, event); // #909: errors only
       } catch (error) {
         slot.infraFaulted = true;
         this.#retain(asError(error));

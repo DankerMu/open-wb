@@ -9,6 +9,11 @@
  * Every case prints one `[upstream-failure] ` line (elapsed time, request count, frame types, the
  * final `errorMessage`; shown for passing cases with `--reporter=verbose`), quoted as 实测.
  *
+ * Tasks 4.4 and 5.5 run the cases that assert what the browser sees (the published events, the
+ * sessions `log` port, the stop route) in `openProxiedApp`, the production sessions assembly over
+ * the same proxy; the omp frames there are a tee of the child's stdout. 5.5 adds no 503 run: its
+ * assertions ride on 3.2's first case, (a), (d) and (e).
+ *
  * Run locally: `make omp-fetch`, then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-upstream-failure.test.ts --coverage=false
@@ -18,14 +23,29 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
+import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
 import { OMP_TEST_OFF, OMP_VERSION } from "./support/omp-official.js";
 import {
+  type AppTurn,
+  openAppSession,
+  openProxiedApp,
   openProxiedWorld,
   PROXIED_MODELS,
   type ProxiedWorld,
+  publishedOf,
+  runAppTurn,
+  until,
 } from "./support/omp-official-proxied.js";
 
 const CASE = { timeout: 120_000 };
+/** turn-control's `OMP_ABORT_GRACE_MS` (a spec constant, copied). */
+const ABORT_GRACE_MS = 8_000;
+/** One round of omp v18.0.10's transport and provider retries (design D2, 实测). */
+const ROUND_REQUESTS = 12;
+/** A first round takes about 32 s (实测); twice that is the wait for its `turn.retry`. */
+const FIRST_ROUND_BOUND_MS = 64_000;
+/** The fake upstream's reply parts (support/fake-upstream.mjs `REPLY_PARTS`), copied. */
+const FAKE_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 /** Two rounds of omp's transport and provider retries (about a minute) and the turn's close. */
 const CAPPED = { timeout: 180_000 };
 /** omp-runtime「会话级重试封顶一轮（真实 omp）」: two rounds are 24 upstream requests under v18.0.10. */
@@ -108,7 +128,7 @@ const BEYOND_CAP = (frame: OmpFrame): boolean =>
  * before the first retry and caps any base at 8 s (`retry-fallback-chains.ts:69-77`), so a project
  * base of an hour shows as a delay above 500, not as an hour.
  */
-function expectOneCappedRetry(turn: Turn, world: ProxiedWorld): void {
+function expectOneCappedRetry(turn: Turn, world: { upstream: FakeUpstreamServer }): void {
   const starts = retryStarts(turn.frames).map(({ attempt, maxAttempts }) => ({
     attempt,
     maxAttempts,
@@ -145,6 +165,24 @@ function expectFailedTurn(turn: Turn): AssistantEnd {
   return end;
 }
 
+function publishedTypes(turn: AppTurn): string[] {
+  return turn.events.map((event) => event.type);
+}
+
+/**
+ * The browser's side of a failed turn: exactly one `error` (the two keys of PR 3, chat-stream
+ * 「纯协议事件归约」's sentence projection) right before `turn.end failed`; returns its message.
+ */
+function publishedError(turn: AppTurn): string {
+  const errors = turn.events.filter((event) => event.type === "error");
+  expect(errors).toHaveLength(1);
+  expect(Object.keys(errors[0]?.data ?? {}).sort()).toEqual(["message", "messageId"]);
+  expect(turn.events.slice(-2).map((event) => event.type)).toEqual(["error", "turn.end"]);
+  expect(turn.events.at(-1)).toMatchObject({ type: "turn.end", data: { status: "failed" } });
+  const [error] = errors;
+  return error === undefined ? "" : String((error.data as { message: unknown }).message);
+}
+
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model proxy`, () => {
   it("completes an unmarked prompt through the proxy as done", CASE, async () => {
     const world = await openProxiedWorld();
@@ -157,12 +195,14 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
   });
 
   it("(a) an upstream 401 fails after exactly one upstream request", CASE, async () => {
-    const world = await openProxiedWorld();
-    const turn = await runTurn(world, "你好 WORKBUDDY_FAKE_STATUS=401");
+    const world = await openProxiedApp();
+    const turn = await runAppTurn(world, "你好 WORKBUDDY_FAKE_STATUS=401");
     const end = expectFailedTurn(turn);
     note("a-401", turn, world.upstream.requests().length);
     expect(end.errorStatus).toBe(401);
     expect(world.upstream.requests()).toHaveLength(1);
+    // 5.5: the published sentence.
+    expect(publishedError(turn)).toBe("鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）");
   });
 
   it(
@@ -184,8 +224,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     "3.2 an upstream 503 every time: one capped session retry, then failed, first model only",
     CAPPED,
     async () => {
-      const world = await openProxiedWorld();
-      const turn = await runTurn(world, "你好 WORKBUDDY_FAKE_STATUS=503", BEYOND_CAP);
+      const world = await openProxiedApp();
+      const turn = await runAppTurn(world, "你好 WORKBUDDY_FAKE_STATUS=503", BEYOND_CAP);
       note("cap-503", turn, world.upstream.requests().length);
       expectOneCappedRetry(turn, world);
       // The proxy's summary is what omp retried on and what it failed with (1.7(c) folded in here).
@@ -196,6 +236,17 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       const end = lastAssistantEnd(turn.frames);
       expect(end.errorStatus).toBe(502);
       expect(String(end.errorMessage)).toMatch(/\(type=wb_upstream param=status\.503\)$/u);
+      // 4.3: one turn.retry published for the one omp retry; 5.5: the sentence and one log record.
+      expect(publishedTypes(turn).filter((type) => type === "turn.retry")).toHaveLength(1);
+      expect(publishedError(turn)).toBe("上游出错：模型服务内部错误（HTTP 503）");
+      expect(world.log).toEqual([
+        {
+          event: "upstream_failed",
+          sessionId: turn.session,
+          reason: "upstream_error",
+          status: 503,
+        },
+      ]);
     },
   );
 
@@ -216,11 +267,11 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     "(d) a stalled TLS handshake past the connection deadline: one connection, no retry, no_connect",
     CASE,
     async () => {
-      const world = await openProxiedWorld({
+      const world = await openProxiedApp({
         target: "stalled-handshake",
         connectDeadlineMs: 1_000,
       });
-      const turn = await runTurn(world, "你好", AT_RETRY);
+      const turn = await runAppTurn(world, "你好", AT_RETRY);
       note("d-no-connect", turn, world.stalled.accepted());
       expect(retryStarts(turn.frames)).toEqual([]);
       expect(world.stalled.accepted()).toBe(1);
@@ -228,6 +279,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       const end = expectFailedTurn(turn);
       expect(end.errorStatus).toBe(424);
       expect(String(end.errorMessage)).toMatch(/\(type=wb_upstream param=no_connect\)$/u);
+      // 5.5: the sentence, without a status.
+      expect(publishedError(turn)).toBe("上游不可达：无法连接模型服务");
     },
   );
 
@@ -235,8 +288,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     "(e) an upstream 504 after 2s: one request, no retry, gateway_504 without the upstream body",
     CASE,
     async () => {
-      const world = await openProxiedWorld();
-      const turn = await runTurn(
+      const world = await openProxiedApp();
+      const turn = await runAppTurn(
         world,
         "你好 WORKBUDDY_FAKE_STATUS=504 WORKBUDDY_FAKE_BODY=text WORKBUDDY_FAKE_DELAY=2000",
         AT_RETRY,
@@ -248,6 +301,121 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       expect(end.errorStatus).toBe(424);
       expect(String(end.errorMessage)).toMatch(/\(type=wb_upstream param=gateway_504\)$/u);
       expect(String(end.errorMessage)).not.toContain("Gateway");
+      // 5.5: the sentence with the gateway's status.
+      expect(publishedError(turn)).toBe("上游超时：模型服务没有及时响应（HTTP 504）");
+    },
+  );
+
+  it(
+    "4.4(a) twelve 503s then success: one turn.retry, done, the fake upstream's tool round and reply",
+    CAPPED,
+    async () => {
+      const world = await openProxiedApp();
+      const turn = await runAppTurn(
+        world,
+        "你好 WORKBUDDY_FAKE_STATUS=503 WORKBUDDY_FAKE_FAIL_TIMES=12",
+        BEYOND_CAP,
+      );
+      note("retry-then-done", turn, world.upstream.requests().length);
+      expect(retryStarts(turn.frames)).toHaveLength(1);
+      expect(publishedTypes(turn).filter((type) => type === "turn.start")).toHaveLength(1);
+      expect(publishedTypes(turn).filter((type) => type === "turn.retry")).toHaveLength(1);
+      expect(publishedTypes(turn)).not.toContain("error");
+      expect(turn.events.at(-1)).toMatchObject({ type: "turn.end", data: { status: "done" } });
+      expect(world.denied).toHaveLength(1);
+      const snapshot = await world.app.inject({
+        method: "GET",
+        url: `/api/sessions/${turn.session}/messages`,
+        headers: { cookie: world.cookie },
+      });
+      const assistant = (
+        snapshot.json() as {
+          messages: Array<{ status: string; content: string; steps: Array<{ name: string }> }>;
+        }
+      ).messages[1];
+      expect(assistant?.status).toBe("done");
+      expect(assistant?.content).toBe(FAKE_REPLY);
+      expect(assistant?.steps.map((step) => step.name)).toEqual(["bash"]);
+      expect(world.log).toEqual([]);
+      expect(world.faults).toEqual([]);
+    },
+  );
+
+  it(
+    "4.4(b) stop during the retry backoff: 202, one turn.end stopped within the grace, no error",
+    CASE,
+    async () => {
+      const world = await openProxiedApp();
+      const session = await openAppSession(world);
+      const startedAt = Date.now();
+      const prompted = await world.app.inject({
+        method: "POST",
+        url: `/api/sessions/${session}/prompt`,
+        headers: { "content-type": "application/json", cookie: world.cookie },
+        payload: JSON.stringify({ message: "你好 WORKBUDDY_FAKE_STATUS=503" }),
+      });
+      expect(prompted.statusCode).toBe(202);
+      await until(
+        () => publishedOf(world, session).some((event) => event.type === "turn.retry"),
+        "turn.retry",
+        FIRST_ROUND_BOUND_MS,
+      );
+      const stoppedAt = Date.now();
+      const atStop = world.frames.length;
+      const stop = await world.app.inject({
+        method: "POST",
+        url: `/api/sessions/${session}/stop`,
+        headers: { cookie: world.cookie },
+      });
+      expect(stop.statusCode).toBe(202);
+      expect(stop.json()).toEqual({});
+      await until(
+        () => publishedOf(world, session).some((event) => event.type === "turn.end"),
+        "turn.end after stop",
+        ABORT_GRACE_MS + 4_000,
+      );
+      const closedMs = Date.now() - stoppedAt;
+      const after = world.frames.slice(atStop);
+      // 实测 line: which way the turn closed (omp's own agent_end, or the bounded fallback).
+      console.log(
+        `[upstream-failure] ${JSON.stringify({
+          case: "stop-in-backoff",
+          ms: Date.now() - startedAt,
+          closedMs,
+          requests: world.upstream.requests().length,
+          after: after.map((frame) =>
+            frame.type === "auto_retry_end"
+              ? `auto_retry_end:${String(frame.finalError)}`
+              : frame.type,
+          ),
+        })}`,
+      );
+      // The WHEN: the stop landed in the backoff, so omp cancelled the retry itself (a stop in
+      // the second round would also end stopped, through an aborted message_end).
+      expect(after).toContainEqual(
+        expect.objectContaining({ type: "auto_retry_end", finalError: "Retry cancelled" }),
+      );
+      const events = publishedOf(world, session);
+      expect(events.filter((event) => event.type === "turn.retry")).toHaveLength(1);
+      expect(events.filter((event) => event.type === "error")).toEqual([]);
+      expect(events.filter((event) => event.type === "turn.end")).toEqual([
+        { type: "turn.end", data: { messageId: expect.any(Number), status: "stopped" } },
+      ]);
+      expect(closedMs).toBeLessThanOrEqual(ABORT_GRACE_MS);
+      // No full second round went out (12 requests in every local run, the 实测 line above).
+      expect(world.upstream.requests().length).toBeLessThan(2 * ROUND_REQUESTS);
+      const snapshot = await world.app.inject({
+        method: "GET",
+        url: `/api/sessions/${session}/messages`,
+        headers: { cookie: world.cookie },
+      });
+      const body = snapshot.json() as {
+        session: { status: string };
+        messages: Array<{ status: string }>;
+      };
+      expect(body.session.status).toBe("stopped");
+      expect(body.messages[1]?.status).toBe("stopped");
+      expect(world.log).toEqual([]);
     },
   );
 });

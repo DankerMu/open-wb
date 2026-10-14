@@ -317,7 +317,8 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
       expect(eventsFor(events, session).map((entry) => entry.event)).toEqual([
         {
           type: "error",
-          data: { messageId: assistant.id, message: "fake omp scripted error" },
+          // #909: fake-omp's error carries no errorStatus → 模型调用失败, no （HTTP s）.
+          data: { messageId: assistant.id, message: "模型调用失败" },
         },
         { type: "turn.end", data: { messageId: assistant.id, status: "failed" } },
       ]);

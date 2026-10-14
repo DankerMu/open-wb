@@ -68,6 +68,7 @@ import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
 import type { TodoRejection } from "./sessions/store-todo.js";
+import type { UpstreamFailedRecord } from "./sessions/upstream-failure-log.js";
 import { writeManagedLine } from "./startup-writer.js";
 import { createTrash } from "./workspaces/trash.js";
 
@@ -188,7 +189,11 @@ export function appAssemblyOf(
 }
 
 function writeRecord(
-  record: HandshakeTimeoutRecord | TodoRejection | { event: "preview_work_clear_failed" },
+  record:
+    | HandshakeTimeoutRecord
+    | UpstreamFailedRecord
+    | TodoRejection
+    | { event: "preview_work_clear_failed" },
 ): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
     // Sink unavailable: the record is observation only and never changes the request or exit code.

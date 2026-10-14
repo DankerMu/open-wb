@@ -16,7 +16,9 @@
  * provider layer), so its default ten rounds keep a 5xx turn running for minutes. `enabled`,
  * `baseDelayMs` and `maxDelayMs` restate omp's defaults so the project layer cannot lengthen the
  * wait; `modelFallback: false` turns omp's model fallback off — switching upstreams or models is out
- * of scope, and a project `retry.fallbackChains` would otherwise replay even a non-retryable 424.
+ * of scope, and a project `retry.fallbackChains` would otherwise switch models on a 5xx turn (实测
+ * on the old overlay) and, by omp's `isHardErrorFallbackEligible`, replay even a non-retryable 424
+ * on the next model (读代码推出, not measured).
  */
 import { basename, dirname } from "node:path";
 import { replaceFile } from "../../core/replace-file.js";
