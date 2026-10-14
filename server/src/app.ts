@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, normalize, resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
@@ -324,24 +324,26 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
 
 /**
  * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：每次净化时构造密钥集——上游的 apiKey
- * 与 base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根，以及二者此刻与原值不同的 realpath
- * （目录还没建出、取不到时只列原值）。realpath 在净化时才取：生产入口在 `ensureOmpStateLayout` 之前
- * 调用 createApp，沙箱根到第一次建会话才建。只有失败的回合调用它。
+ * 与 base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根各四种写法：配置原值、`normalize` 后的
+ * 原值（去掉 `//`、`/./` 而不解析符号链接）、再去掉末尾 `/` 的写法（根目录除外）与此刻的 realpath
+ * （`realpathSync.native`，macOS 上连大小写也取盘上的，APFS 上实测；目录不在、取不到时没有这一项），
+ * 相同的只列一次。realpath 在净化时才取：生产入口在 `ensureOmpStateLayout` 之前调用 createApp，沙箱根
+ * 到第一次建会话才建。只有失败的回合调用它；这两次同步 realpath 在挂起的挂载点上会阻塞事件循环，与每次
+ * spawn 重建状态目录布局时的同步 fs 调用（`sessions/omp/process.ts:87`）是同一个暴露面（读代码推出）。
  */
 function upstreamRedactor(
   upstream: AssemblyDependencies["upstream"],
   runtime: SessionRuntime,
 ): (text: string) => string {
   return (text) => {
-    const paths = [runtime.stateDir, runtime.sandboxRoot];
+    const paths: string[] = [];
     for (const path of [runtime.stateDir, runtime.sandboxRoot]) {
+      const normalised = normalize(path);
+      paths.push(path, normalised, withoutTrailingSlash(normalised));
       try {
-        const real = realpathSync(path);
-        if (real !== path) {
-          paths.push(real);
-        }
+        paths.push(realpathSync.native(path));
       } catch {
-        // Not there yet: the original path is still listed.
+        // Not there: the other three forms are still listed.
       }
     }
     const secrets = upstreamSecretList({
@@ -351,6 +353,11 @@ function upstreamRedactor(
     });
     return sanitizeUpstreamText(text, secrets);
   };
+}
+
+/** 去掉末尾的分隔符（`normalize` 后至多一个）；根目录 `/` 原样。 */
+function withoutTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith(sep) ? path.slice(0, -1) : path;
 }
 
 /** 两个上传上限的生效值：装配没给的取缺省。 */

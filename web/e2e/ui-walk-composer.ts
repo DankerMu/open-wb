@@ -38,7 +38,7 @@ type Box = { name: string; left: number; top: number; right: number; bottom: num
 type CreatedSession = { id: string | null };
 type PatchCount = { count(): number; stop(): void };
 
-async function login(page: Page, oracle: AuthOracle, project: WalkProject): Promise<void> {
+export async function login(page: Page, oracle: AuthOracle, project: WalkProject): Promise<void> {
   await page.goto("/files");
   await expect(page.getByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeVisible();
   await page.getByLabel("账号").fill(DEV_ACCOUNT);
@@ -50,7 +50,7 @@ async function login(page: Page, oracle: AuthOracle, project: WalkProject): Prom
   expect([201, 409], "POST /api/workspaces status").toContain(ensured.status());
 }
 
-async function logout(page: Page, oracle: AuthOracle, project: WalkProject): Promise<void> {
+export async function logout(page: Page, oracle: AuthOracle, project: WalkProject): Promise<void> {
   const loginHeading = page.getByRole("heading", { level: 1, name: "登录 WorkBuddy" });
   const sidebar = await openSidebar(page, project);
   await sidebar.locator("footer").getByRole("button", { name: "用户菜单" }).click();

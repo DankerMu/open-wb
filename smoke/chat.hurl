@@ -1,8 +1,9 @@
 # 对话冒烟（chat.hurl）：从空 cookie store 独立可运行，不依赖 public/auth。
 # 登录 → 首轮 prompt → 审批作答 → 仅 messages GET 有界重试至 captured assistant/session done
 # → 回合控制 → (5) yolo 会话（bash 回合不经作答到 done、零审批；上传后带附件再 prompt）
+# → (6) 上游失败（401 回合 failed、error 四个字段与不含密钥的原文；同会话普通回合到 done；删除该会话）
 # → 他账号404 → 本账号删除自己创建的会话 → 无 bearer 代理401。
-# 审批作答、回合控制与 (5) 整块仅在 skip_turn_control=false 时执行。
+# 审批作答、回合控制、(5) 与 (6) 整块仅在 skip_turn_control=false 时执行。
 # 两账号均登出，不留下 live authentication session、running 回合与本文件创建的会话。
 # (5) 以 approvalMode yolo 创建会话会把 zhangsan 的最近选择记为 yolo，下一步即对首会话 PATCH write 改回，
 # 并在本遍内由 options 见证（只动档位一列，不动模型与推理强度，lisi 的不碰）。
@@ -405,6 +406,103 @@ jsonpath "$.messages[?(@.id=={{yolo_followup_assistant_id}})].approvals" count =
 jsonpath "$.messages[?(@.id=={{yolo_followup_user_id}})].attachments" count == 1
 jsonpath "$.messages[?(@.id=={{yolo_followup_user_id}})].attachments[0].path" == "{{attach_path}}"
 jsonpath "$.messages[?(@.id=={{yolo_followup_user_id}})].attachments[0].size" == {{attach_size}}
+
+# (6) 上游失败（#909，chat-harness「上游失败的冒烟与走查」）：新会话，exact 201 idle；捕获会话 id。不重试。
+# 受控上游按 prompt 里的标记答 401，`secret` 正文逐字含它的密钥（CI 与 Makefile 用法下恒为 `fake`）、
+# 一个 bearer 令牌与一个 `sk-` 串；净化器若被跳过，下面「detail 不含密钥」的三条断言必然判红。
+POST {{base_url}}/api/sessions
+[Options]
+skip: {{skip_turn_control}}
+HTTP 201
+[Captures]
+failure_session_id: jsonpath "$.id"
+[Asserts]
+jsonpath "$.status" == "idle"
+
+# (6) 401 标记的 prompt：exact 202；捕获 assistantMessageId。不重试。
+POST {{base_url}}/api/sessions/{{failure_session_id}}/prompt
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"message":"WORKBUDDY_FAKE_STATUS=401 WORKBUDDY_FAKE_BODY=secret"}
+HTTP 202
+[Captures]
+failure_assistant_id: jsonpath "$.assistantMessageId"
+
+# (6) 轮询至 failed（≥90s）：快照 error 为 auth_failed / 401 / 固定句子，detail 非空且不含密钥；会话 failed。
+GET {{base_url}}/api/sessions/{{failure_session_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+retry: 180
+retry-interval: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].status" == "failed"
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.reason" == "auth_failed"
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.status" == 401
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.message" == "鉴权失败：模型服务拒绝了配置的 API 密钥"
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.detail" isString
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.detail" not isEmpty
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.detail" not contains "fake"
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.detail" not contains "leak-token-0123456789"
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.detail" not contains "sk-leakleakleakleakleak"
+jsonpath "$.session.status" == "failed"
+
+# (6) 同一会话的普通 prompt：exact 202；捕获 assistantMessageId。不重试。
+POST {{base_url}}/api/sessions/{{failure_session_id}}/prompt
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"message":"你好"}
+HTTP 202
+[Captures]
+recovered_assistant_id: jsonpath "$.assistantMessageId"
+
+# (6) 审批轮询：历史里没有 tool result，受控上游发 bash；有界 retry（约 20s，须 < 60s 自动允许）直到恰一条 pending 审批。
+GET {{base_url}}/api/sessions/{{failure_session_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+retry: 40
+retry-interval: 500ms
+HTTP 200
+[Captures]
+recovered_approval_id: jsonpath "$.messages[?(@.id=={{recovered_assistant_id}})].approvals[0].id"
+[Asserts]
+jsonpath "$.messages[?(@.id=={{recovered_assistant_id}})].approvals" count == 1
+jsonpath "$.messages[?(@.id=={{recovered_assistant_id}})].approvals[0].decision" == null
+jsonpath "$.messages[?(@.id=={{recovered_assistant_id}})].approvals[0].tool" == "bash"
+
+# (6) 作答 allow：exact 200，不重试；409 即真实故障。
+POST {{base_url}}/api/sessions/{{failure_session_id}}/approvals/{{recovered_approval_id}}
+Content-Type: application/json
+[Options]
+skip: {{skip_turn_control}}
+{"decision":"allow"}
+HTTP 200
+[Asserts]
+jsonpath "$.decision" == "allow"
+
+# (6) 轮询至 done（≥90s）：正文匹配，会话 done；失败的那条助手消息仍带原来的 error。
+GET {{base_url}}/api/sessions/{{failure_session_id}}/messages
+[Options]
+skip: {{skip_turn_control}}
+retry: 180
+retry-interval: 500ms
+HTTP 200
+[Asserts]
+jsonpath "$.messages[?(@.id=={{recovered_assistant_id}})].status" == "done"
+jsonpath "$.messages[?(@.id=={{recovered_assistant_id}})].content" matches "{{content_pattern}}"
+jsonpath "$.messages[?(@.id=={{recovered_assistant_id}})].error" == null
+jsonpath "$.messages[?(@.id=={{failure_assistant_id}})].error.reason" == "auth_failed"
+jsonpath "$.session.status" == "done"
+
+# (6) 删除该会话（连同它的临时空间）：exact 204、空 body；不重试。紧跟在它的最后一步之后、登出之前。
+DELETE {{base_url}}/api/sessions/{{failure_session_id}}
+[Options]
+skip: {{skip_turn_control}}
+HTTP 204
+[Asserts]
+body == ""
 
 # 本账号登出：exact 204 + clear cookie。
 POST {{base_url}}/api/auth/logout
