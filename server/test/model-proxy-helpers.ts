@@ -8,7 +8,7 @@ import {
   type IncomingMessage,
   type ServerResponse,
 } from "node:http";
-import { createServer as createNetServer, type Server as NetServer, type Socket } from "node:net";
+import type { Server as NetServer } from "node:net";
 import type { FastifyInstance } from "fastify";
 import fastify from "fastify";
 import { expect } from "vitest";
@@ -455,10 +455,7 @@ async function listenServer(server: NetServer): Promise<number> {
   return address.port;
 }
 
-async function closeHttp(server: NetServer, sockets: Socket[] = []): Promise<void> {
-  for (const socket of sockets) {
-    socket.destroy();
-  }
+async function closeHttp(server: NetServer): Promise<void> {
   if ("closeAllConnections" in server && typeof server.closeAllConnections === "function") {
     server.closeAllConnections();
   }
@@ -558,19 +555,6 @@ export async function startPendingHeaders(
     }
   });
   return { ...upstream, arrived, release, reclaimed };
-}
-
-export async function startStalledHandshake(): Promise<{
-  port: number;
-  close: () => Promise<void>;
-}> {
-  const sockets: Socket[] = [];
-  const server = createNetServer((socket) => {
-    sockets.push(socket);
-    socket.resume();
-  });
-  const port = await listenServer(server);
-  return { port, close: () => closeHttp(server, sockets) };
 }
 
 async function installModelProxy(app: FastifyInstance, options: ModelProxyOptions): Promise<void> {

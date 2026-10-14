@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  AGENT_UNAVAILABLE_ENVELOPE,
   ALLOWED_MODELS,
   API_KEY,
   createGate,
@@ -249,14 +248,20 @@ describe("cancellation and late stream failure", () => {
     },
     APP_CLOSE_TIMEOUT_MS,
   );
-  it("connection failure before headers is a sanitized 502", async () => {
+  it("connection failure before headers is a sanitized 502 connect summary", async () => {
     const upstream = resources.track(
       await startRecordingUpstream(({ response }) => {
         response.destroy();
       }),
     );
     await withListeningProxy(configured(upstream.origin), async (origin) => {
-      await expectFetchEnvelope(await postCompletions(origin), 502, AGENT_UNAVAILABLE_ENVELOPE);
+      await expectFetchEnvelope(await postCompletions(origin), 502, {
+        error: {
+          message: "无法连接模型服务（ECONNRESET）",
+          type: "wb_upstream",
+          param: "connect.ECONNRESET",
+        },
+      });
     });
   });
 });

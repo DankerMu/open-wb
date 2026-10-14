@@ -5,6 +5,7 @@
  * #554 maps command_output to turn.start (first time) + text.delta, so a command reply is the body;
  * #864 emits a `todo` result's raw `details.phases` as todo.updated immediately before its step.end.
  */
+import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SessionTodo } from "./session-todo.js";
@@ -52,8 +53,6 @@ export type ChatEvent<StepId extends string | number = number> =
 const GENERIC_FAILURE = "Agent execution failed";
 // detail（args）与 output（result 文本）各自的码点上限；环形缓冲最坏成本见 #367 design D3。
 const MAX_STEP_POINTS = 4096;
-/** step detail/output 与 thinking 上限（store-thinking.ts）共用的截断标记，单一来源。 */
-export const TRUNCATED_MARK = "…（已截断）";
 const IMAGE_PLACEHOLDER = "[图片]";
 const NO_TOOLS: readonly ToolEntry[] = Object.freeze([]);
 const NO_IDS: readonly string[] = Object.freeze([]);
