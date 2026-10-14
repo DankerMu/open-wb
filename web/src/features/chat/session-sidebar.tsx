@@ -9,9 +9,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Icon } from "../../components/icon.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { useSidebarNavigate } from "../../lib/sidebar-slot.js";
-import { Icon } from "../../ui/index.js";
 import { ArchivedView } from "./archived-view.js";
 import { type EntryActions, SessionEntryList } from "./session-entry.js";
 import {

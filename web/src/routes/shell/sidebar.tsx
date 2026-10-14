@@ -1,11 +1,12 @@
 import { type ReactElement, useCallback, useRef, useState } from "react";
 import { NavLink } from "react-router";
+import { BrandMark } from "@/components/brand-mark";
+import { Icon } from "@/components/icon";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { AuthFooter } from "@/features/auth/index";
 import { SidebarNavigateProvider, useSidebarSlotContent } from "@/lib/sidebar-slot";
 import { cn } from "@/lib/utils";
-import { BrandMark, Icon } from "@/ui/index";
 import { routeManifest } from "../manifest";
 
 const STORAGE_KEY = "workbuddy-sidebar";

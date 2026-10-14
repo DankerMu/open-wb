@@ -11,10 +11,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useEscapeFallback } from "../../components/escape-fallback.js";
 import type { ApiClient } from "../../lib/api.js";
 import type { ProjectConfigFile } from "../../lib/api-commands.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import { useEscapeFallback } from "../../ui/index.js";
 import { useClipped } from "./use-clipped.js";
 
 const TITLE = "助手会读取的项目配置文件";

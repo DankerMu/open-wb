@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useEscapeFallback } from "../../ui/index.js";
+import { useEscapeFallback } from "../../components/escape-fallback.js";
 
 type ReturnFocus = RefObject<HTMLElement | null>;
 

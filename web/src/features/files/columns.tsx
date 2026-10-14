@@ -12,7 +12,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import { EmptyState } from "./empty-state.js";
 
 /** Error box (the former global alert rule); callers add the font size. */

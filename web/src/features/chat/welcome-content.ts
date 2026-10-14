@@ -1,6 +1,7 @@
 /* Static welcome content ported from resource/workbuddy-live-demo.html:1221-1239 (SCENES, QUICK_PROMPTS; icons limited to registered keys), 2553-2561 (PLAYBOOKS), 2674 (card prompts). */
+
+import type { IconName } from "../../components/icon.js";
 import type { ChatSession } from "../../lib/session-contract.js";
-import type { IconName } from "../../ui/index.js";
 
 export type WelcomePrompt = { label: string; icon: IconName; prompt: string };
 export type WelcomeScene = {

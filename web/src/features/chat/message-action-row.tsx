@@ -6,7 +6,7 @@
 import { ActionBarPrimitive } from "@assistant-ui/react";
 import { Undo2 } from "lucide-react";
 import { type ReactNode, useId } from "react";
-import { Icon, type IconName } from "../../ui/index.js";
+import { Icon, type IconName } from "../../components/icon.js";
 import { useCopyFeedback } from "./copy-feedback.js";
 import type { ChatMessageCustom } from "./runtime-convert.js";
 

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createPortal } from "react-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { useEscapeFallback } from "../src/ui/index.js";
+import { useEscapeFallback } from "../src/components/escape-fallback.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 /*

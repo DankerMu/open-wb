@@ -1,0 +1,93 @@
+/** 拷入层：registry 原样拷入的两个目录（ui-foundation「组件分层」）。 */
+export const COPIED_DIRS = ["web/src/components/ui", "web/src/components/assistant-ui"];
+
+/**
+ * 已迁移区域：目录或单个文件的仓库相对路径。清单内的文件从 `web/src/ui` 只可导入
+ * `MIGRATED_ALLOWED_IMPORTS`，清单内不得有 `.css`。外壳、登录页、设置页迁移时各自加入。
+ * 条目按前缀匹配（见 `isUnder`），所以不写通配、不以 `/` 结尾——否则一个文件也匹配不到。
+ */
+export const MIGRATED_AREAS: string[] = [
+  "web/src/routes",
+  "web/src/features/auth",
+  "web/src/features/settings",
+  "web/src/features/theme",
+  // 会话页按文件逐个登记（s1f-chat-surface D3）；目录本身不登记。
+  "web/src/features/chat/approval-card.tsx",
+  "web/src/features/chat/archived-notice.tsx",
+  "web/src/features/chat/archived-view.tsx",
+  "web/src/features/chat/artifact-card.tsx",
+  "web/src/features/chat/attachment-chips.tsx",
+  "web/src/features/chat/attachments-state.ts",
+  "web/src/features/chat/capability-bar.tsx",
+  "web/src/features/chat/composer-dock.tsx",
+  "web/src/features/chat/composer-locks.ts",
+  "web/src/features/chat/composer-options.ts",
+  "web/src/features/chat/composer.tsx",
+  "web/src/features/chat/conversation-search.tsx",
+  "web/src/features/chat/conversation-view.tsx",
+  "web/src/features/chat/copy-feedback.ts",
+  "web/src/features/chat/delete-dialog.tsx",
+  "web/src/features/chat/errors.ts",
+  "web/src/features/chat/export-markdown.ts",
+  "web/src/features/chat/file-changes-card.tsx",
+  "web/src/features/chat/index.ts",
+  "web/src/features/chat/markdown-body.tsx",
+  "web/src/features/chat/message-action-row.tsx",
+  "web/src/features/chat/message-thread.tsx",
+  "web/src/features/chat/model-picker.tsx",
+  "web/src/features/chat/ownership.ts",
+  "web/src/features/chat/page.tsx",
+  "web/src/features/chat/permission-tier.tsx",
+  "web/src/features/chat/project-config.tsx",
+  "web/src/features/chat/promote-dialog.tsx",
+  "web/src/features/chat/rename-dialog.tsx",
+  "web/src/features/chat/runtime-convert.ts",
+  "web/src/features/chat/scene-pills.tsx",
+  "web/src/features/chat/search-match.ts",
+  "web/src/features/chat/session-actions.ts",
+  "web/src/features/chat/session-entry.tsx",
+  "web/src/features/chat/session-groups.ts",
+  "web/src/features/chat/session-list-prefs.ts",
+  "web/src/features/chat/session-menu.tsx",
+  "web/src/features/chat/session-path.ts",
+  "web/src/features/chat/session-sidebar.tsx",
+  "web/src/features/chat/session-status-mark.tsx",
+  "web/src/features/chat/slash-menu-state.ts",
+  "web/src/features/chat/slash-menu.tsx",
+  "web/src/features/chat/status-label.ts",
+  "web/src/features/chat/step-card.tsx",
+  "web/src/features/chat/step-summary.ts",
+  "web/src/features/chat/stream-approvals.ts",
+  "web/src/features/chat/stream-artifacts.ts",
+  "web/src/features/chat/stream-steps.ts",
+  "web/src/features/chat/stream-thinking.ts",
+  "web/src/features/chat/stream-todo.ts",
+  "web/src/features/chat/stream.ts",
+  "web/src/features/chat/thinking-fold.tsx",
+  "web/src/features/chat/thread-viewport.tsx",
+  "web/src/features/chat/todo-panel.tsx",
+  "web/src/features/chat/tool-call-group.tsx",
+  "web/src/features/chat/topbar-actions.ts",
+  "web/src/features/chat/turn-actions.ts",
+  "web/src/features/chat/types.ts",
+  "web/src/features/chat/undo-conflict-dialog.tsx",
+  "web/src/features/chat/undo-notice.tsx",
+  "web/src/features/chat/use-chat-session.ts",
+  "web/src/features/chat/use-clipped.ts",
+  "web/src/features/chat/use-session-list-events.ts",
+  "web/src/features/chat/use-session-list-view.ts",
+  "web/src/features/chat/use-thread-runtime.ts",
+  "web/src/features/chat/use-workspace-sidebar.ts",
+  "web/src/features/chat/welcome-content.ts",
+  "web/src/features/chat/welcome-options.ts",
+  "web/src/features/chat/welcome.tsx",
+  "web/src/features/chat/workspace-list.ts",
+  "web/src/features/chat/workspace-sidebar.tsx",
+  "web/src/features/files",
+];
+
+export const CHAT_DIR = "web/src/features/chat";
+
+export type SourceFile = { path: string; text: string };
+
+export const isUnder = (path: string, area: string) => path === area || path.startsWith(`${area}/`);

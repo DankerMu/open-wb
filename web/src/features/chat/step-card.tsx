@@ -1,6 +1,6 @@
 // 步骤卡：工具调用组展开后每个步骤一张（design D4）。应用层组件，内容规则不变——卡头图标、步骤名、
 // 状态徽章，来自 `detail` 的一行摘要，`原始输出` 折叠里 detail 与 output 两块（原文，不做路径改写）。
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import { SESSION_STATUS_LABEL } from "./status-label.js";
 import { summarizeStepDetail } from "./step-summary.js";
 import type { ChatStepView } from "./stream-steps.js";

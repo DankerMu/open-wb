@@ -1,5 +1,5 @@
 /* Scene pills adapted from resource/workbuddy-live-demo.html:345-351 (look), 2540-2542 (markup). */
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import { WELCOME_SCENES, type WelcomeScene } from "./welcome-content.js";
 
 type ScenePillsProps = {

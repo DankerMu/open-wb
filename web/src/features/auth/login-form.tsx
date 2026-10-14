@@ -1,9 +1,10 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from "react";
+import { BrandMark } from "@/components/brand-mark";
+import { Icon } from "@/components/icon";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { BrandMark, Icon } from "@/ui/index";
 import { DEV_PASSWORD } from "./dev-accounts";
 import { useAuth } from "./provider";
 import { QuickLogin } from "./quick-login";

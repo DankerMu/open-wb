@@ -20,8 +20,8 @@
  * `preview-archive` is a hook for tests and the UI walk to select by; none in the repository does yet.
  */
 import { useEffect, useState } from "react";
+import { Icon } from "../../../components/icon.js";
 import { ApiError, REQUEST_FAILED_MESSAGE } from "../../../lib/api.js";
-import { Icon } from "../../../ui/index.js";
 import { ALERT_BOX, STATUS_TEXT } from "../columns.js";
 import { errorMessage, isUnauthorized } from "../errors.js";
 import { formatSize } from "../file-meta.js";

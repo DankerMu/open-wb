@@ -3,7 +3,7 @@
 // attachments-state.ts。
 import { type ReactNode, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import { formatSize } from "../files/index.js";
 import { NO_WORKSPACE, type useAttachmentsState } from "./attachments-state.js";
 

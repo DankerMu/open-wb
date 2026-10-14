@@ -1,7 +1,7 @@
 /* File-change card adapted from resource/workbuddy-live-demo.html:2468-2476 (fileChangesHTML) and :519-526 (its frame): the head has no icon, each row shows the logical path `<account>/<dir>/<path>` (never the workspace root) and 查看详情 opens the workspace sidebar of the session page on that file, without navigating. Built from the copied-layer Button and Tailwind classes; each row carries its own classes. */
 import { useId } from "react";
 import { Button } from "@/components/ui/button";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import { useAuth } from "../auth/index.js";
 import { logicalPath } from "../files/index.js";
 import { summarizeChanges } from "./stream-artifacts.js";

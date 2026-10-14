@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 
 type PathList = { count: number; paths: { path: string }[] };
 

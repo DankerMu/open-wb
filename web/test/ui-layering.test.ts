@@ -1,113 +1,25 @@
 import { posix } from "node:path";
 import { describe, expect, it } from "vitest";
-import { blockBody, listRepoFiles, readRepoFile, stripTsComments } from "./ui-support.js";
-
-/** 拷入层：registry 原样拷入的两个目录（ui-foundation「组件分层」）。 */
-const COPIED_DIRS = ["web/src/components/ui", "web/src/components/assistant-ui"];
+import {
+  CHAT_DIR,
+  COPIED_DIRS,
+  isUnder,
+  MIGRATED_AREAS,
+  type SourceFile,
+} from "./ui-layering-support.js";
+import { listRepoFiles, readRepoFile, stripTsComments } from "./ui-support.js";
 
 /**
- * 已迁移区域：目录或单个文件的仓库相对路径。清单内的文件从 `web/src/ui` 只可导入
- * `MIGRATED_ALLOWED_IMPORTS`，清单内不得有 `.css`。外壳、登录页、设置页迁移时各自加入。
- * 条目按前缀匹配（见 `isUnder`），所以不写通配、不以 `/` 结尾——否则一个文件也匹配不到。
+ * 导入白名单已清空：`Icon`、`IconName`、`BrandMark` 与 `useEscapeFallback` 搬到了 `web/src/components/`，
+ * 清单内的文件从 `web/src/ui` 什么都不能导入。
  */
-const MIGRATED_AREAS: string[] = [
-  "web/src/routes",
-  "web/src/features/auth",
-  "web/src/features/settings",
-  "web/src/features/theme",
-  // 会话页按文件逐个登记（s1f-chat-surface D3）；目录本身不登记。
-  "web/src/features/chat/approval-card.tsx",
-  "web/src/features/chat/archived-notice.tsx",
-  "web/src/features/chat/archived-view.tsx",
-  "web/src/features/chat/artifact-card.tsx",
-  "web/src/features/chat/attachment-chips.tsx",
-  "web/src/features/chat/attachments-state.ts",
-  "web/src/features/chat/capability-bar.tsx",
-  "web/src/features/chat/composer-dock.tsx",
-  "web/src/features/chat/composer-locks.ts",
-  "web/src/features/chat/composer-options.ts",
-  "web/src/features/chat/composer.tsx",
-  "web/src/features/chat/conversation-search.tsx",
-  "web/src/features/chat/conversation-view.tsx",
-  "web/src/features/chat/copy-feedback.ts",
-  "web/src/features/chat/delete-dialog.tsx",
-  "web/src/features/chat/errors.ts",
-  "web/src/features/chat/export-markdown.ts",
-  "web/src/features/chat/file-changes-card.tsx",
-  "web/src/features/chat/index.ts",
-  "web/src/features/chat/markdown-body.tsx",
-  "web/src/features/chat/message-action-row.tsx",
-  "web/src/features/chat/message-thread.tsx",
-  "web/src/features/chat/model-picker.tsx",
-  "web/src/features/chat/ownership.ts",
-  "web/src/features/chat/page.tsx",
-  "web/src/features/chat/permission-tier.tsx",
-  "web/src/features/chat/project-config.tsx",
-  "web/src/features/chat/promote-dialog.tsx",
-  "web/src/features/chat/rename-dialog.tsx",
-  "web/src/features/chat/runtime-convert.ts",
-  "web/src/features/chat/scene-pills.tsx",
-  "web/src/features/chat/search-match.ts",
-  "web/src/features/chat/session-actions.ts",
-  "web/src/features/chat/session-entry.tsx",
-  "web/src/features/chat/session-groups.ts",
-  "web/src/features/chat/session-list-prefs.ts",
-  "web/src/features/chat/session-menu.tsx",
-  "web/src/features/chat/session-path.ts",
-  "web/src/features/chat/session-sidebar.tsx",
-  "web/src/features/chat/session-status-mark.tsx",
-  "web/src/features/chat/slash-menu-state.ts",
-  "web/src/features/chat/slash-menu.tsx",
-  "web/src/features/chat/status-label.ts",
-  "web/src/features/chat/step-card.tsx",
-  "web/src/features/chat/step-summary.ts",
-  "web/src/features/chat/stream-approvals.ts",
-  "web/src/features/chat/stream-artifacts.ts",
-  "web/src/features/chat/stream-steps.ts",
-  "web/src/features/chat/stream-thinking.ts",
-  "web/src/features/chat/stream-todo.ts",
-  "web/src/features/chat/stream.ts",
-  "web/src/features/chat/thinking-fold.tsx",
-  "web/src/features/chat/thread-viewport.tsx",
-  "web/src/features/chat/todo-panel.tsx",
-  "web/src/features/chat/tool-call-group.tsx",
-  "web/src/features/chat/topbar-actions.ts",
-  "web/src/features/chat/turn-actions.ts",
-  "web/src/features/chat/types.ts",
-  "web/src/features/chat/undo-conflict-dialog.tsx",
-  "web/src/features/chat/undo-notice.tsx",
-  "web/src/features/chat/use-chat-session.ts",
-  "web/src/features/chat/use-clipped.ts",
-  "web/src/features/chat/use-session-list-events.ts",
-  "web/src/features/chat/use-session-list-view.ts",
-  "web/src/features/chat/use-thread-runtime.ts",
-  "web/src/features/chat/use-workspace-sidebar.ts",
-  "web/src/features/chat/welcome-content.ts",
-  "web/src/features/chat/welcome-options.ts",
-  "web/src/features/chat/welcome.tsx",
-  "web/src/features/chat/workspace-list.ts",
-  "web/src/features/chat/workspace-sidebar.tsx",
-  "web/src/features/files",
-];
-const MIGRATED_ALLOWED_IMPORTS = ["Icon", "IconName", "BrandMark", "useEscapeFallback"];
-
-const CHAT_DIR = "web/src/features/chat";
+const MIGRATED_ALLOWED_IMPORTS: string[] = [];
 
 const FROZEN_DIR = "web/src/ui";
-/** 冻结区：`web/src/ui` 的文件名只能是这 6 个的子集（可以删，不能加）。 */
-const FROZEN_FILES = [
-  "brand-mark.tsx",
-  "escape-fallback.ts",
-  "icon.tsx",
-  "index.ts",
-  "motion.css",
-  "ui.css",
-];
+/** 冻结区：`web/src/ui` 的文件名只能是这 2 个的子集（可以删，不能加）。 */
+const FROZEN_FILES = ["motion.css", "ui.css"];
 
-type SourceFile = { path: string; text: string };
 type LayeringRules = { migrated: string[]; frozen: string[] };
-
-const isUnder = (path: string, area: string) => path === area || path.startsWith(`${area}/`);
 
 /** 把导入说明符解析成仓库相对路径；包名（非 `@/`、非相对路径）返回 `null`。 */
 function resolveSpecifier(from: string, specifier: string): string | null {
@@ -170,18 +82,6 @@ function layeringViolations(files: SourceFile[], rules: LayeringRules): string[]
 }
 
 /**
- * 会话页迁移终态（纯函数）：`CHAT_DIR` 下的每个 `.ts`/`.tsx` 都逐个登记在已迁移清单里（按路径全等，
- * 不走前缀，没有豁免名单），目录里不得有 `.css`。
- */
-function chatEndStateViolations(paths: string[], migrated: string[]): string[] {
-  return paths.flatMap((path) => {
-    if (path.endsWith(".css")) return [`${path}: 会话页目录不得有 .css`];
-    if (!/\.tsx?$/.test(path)) return [];
-    return migrated.includes(path) ? [] : [`${path}: 会话页文件未登记为已迁移`];
-  });
-}
-
-/**
  * 清单条目自检：`isUnder` 只做前缀匹配，写成 `dir/**` 或 `dir/` 的条目匹配不到任何文件，守卫会
  * 在不报错的情况下放空。带通配或以 `/` 结尾的条目、以及匹配不到现存文件的条目都判违例。
  */
@@ -197,16 +97,19 @@ function areaEntryViolations(areas: string[], paths: string[]): string[] {
 }
 
 const ESCAPE_FALLBACK = "useEscapeFallback";
-/** 兜底保留时定义所在的唯一路径。过渡值：`web/src/ui` 退役时（文件搬到 `web/src/components/`）改这里。 */
-const ESCAPE_FALLBACK_HOME = "web/src/ui/escape-fallback.ts";
+/** 兜底保留时定义所在的唯一路径（终态：文件已从 `web/src/ui` 搬来）。 */
+const ESCAPE_FALLBACK_HOME = "web/src/components/escape-fallback.ts";
+/** 搬家之前的位置：无论兜底去留，这个文件都不得再出现。 */
+const ESCAPE_FALLBACK_RETIRED = "web/src/ui/escape-fallback.ts";
 const ESCAPE_FALLBACK_DEFINITION = /\b(?:function|const|let|var|class)\s+useEscapeFallback\b/g;
 
 /**
  * 兜底的两种合法终态（ui-primitives「覆盖层的 Escape 关闭」场景「兜底只有两种合法终态」）：`files` 的
  * `.ts`/`.tsx` 里（注释不算）要么 `useEscapeFallback` 完全不出现，要么它的定义恰一处、写成
  * `export function useEscapeFallback`、在 `home`。`definitions` 是找到的定义所在路径（一处一条）。
+ * 两种终态下 `retired`（搬家前的位置）都不得出现在文件列表里，不管它里面写了什么。
  */
-function escapeFallbackState(files: SourceFile[], home: string) {
+function escapeFallbackState(files: SourceFile[], home: string, retired = ESCAPE_FALLBACK_RETIRED) {
   const sources = files
     .filter((file) => /\.tsx?$/.test(file.path))
     .map((file) => ({ path: file.path, text: stripTsComments(file.text) }))
@@ -226,7 +129,38 @@ function escapeFallbackState(files: SourceFile[], home: string) {
     (file) => file.path === home && file.text.includes(`export function ${ESCAPE_FALLBACK}(`),
   );
   if (atHome === 1 && !exported) violations.push(`${home}: 定义须写成 export function`);
+  if (files.some((file) => file.path === retired)) {
+    violations.push(`${retired}: 兜底搬走之前的位置不得再有文件`);
+  }
   return { definitions, violations };
+}
+
+const COMPONENTS_DIR = "web/src/components";
+/**
+ * 自写共享组件（ui-foundation「组件分层」；s1f-legacy-layer-removal design D1、D2）：本仓自写、直接放在
+ * `web/src/components/` 下的三个文件。这不是 `web/src/components/` 的允许清单——别的文件放进来不归这里管。
+ */
+const SHARED_COMPONENTS = ["brand-mark.tsx", "escape-fallback.ts", "icon.tsx"].map(
+  (name) => `${COMPONENTS_DIR}/${name}`,
+);
+
+/** 自写共享组件的位置（纯函数）：`shared` 的每个路径都在文件列表里，且不在任一拷入目录之下。 */
+function sharedComponentViolations(paths: string[], shared: string[]): string[] {
+  return shared.flatMap((path) => [
+    ...(paths.includes(path) ? [] : [`${path}: 自写共享组件不在这个路径`]),
+    ...(COPIED_DIRS.some((dir) => isUnder(path, dir))
+      ? [`${path}: 自写共享组件不得放进拷入目录`]
+      : []),
+  ]);
+}
+
+/** 没有统一出口（纯函数；design D17）：`web/src/components/` 下不得直接放 `index.ts` / `index.tsx`。 */
+function barrelViolations(paths: string[]): string[] {
+  return paths
+    .filter(
+      (path) => path === `${COMPONENTS_DIR}/index.ts` || path === `${COMPONENTS_DIR}/index.tsx`,
+    )
+    .map((path) => `${path}: web/src/components 不设统一出口`);
 }
 
 describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻结区不增长」）", () => {
@@ -242,7 +176,10 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
         "web/src/routes/shell/sidebar.tsx",
         'import { Button, Icon } from "../../ui/index.js";',
       ),
-    ).toEqual([`web/src/routes/shell/sidebar.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Button`]);
+    ).toEqual([
+      `web/src/routes/shell/sidebar.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Button`,
+      `web/src/routes/shell/sidebar.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Icon`,
+    ]);
     expect(check("web/src/routes/shell/sidebar.css")).toEqual([
       "web/src/routes/shell/sidebar.css: 已迁移区域出现 .css",
     ]);
@@ -257,7 +194,10 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     expect(check(footer, 'import { ConfirmDialog } from "@/ui";')).toHaveLength(1);
     expect(
       check(footer, 'import {\n  Icon,\n  type MenuItem,\n} from "../../ui/index.js";'),
-    ).toEqual([`${footer}: 已迁移区域从 ${FROZEN_DIR} 导入 MenuItem`]);
+    ).toEqual([
+      `${footer}: 已迁移区域从 ${FROZEN_DIR} 导入 Icon`,
+      `${footer}: 已迁移区域从 ${FROZEN_DIR} 导入 MenuItem`,
+    ]);
     expect(check(footer, 'import { Dialog as D } from "../../ui/dialog.js";')).toHaveLength(1);
     expect(check(footer, 'import * as UI from "../../ui/index.js";')).toHaveLength(1);
     expect(check(footer, 'import "../../ui/button.css";')).toHaveLength(1);
@@ -265,15 +205,26 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     expect(check(footer, 'export { Button } from "../../ui/index.js";')).toHaveLength(1);
   });
 
-  it("判定自证：白名单内的导入、拷入层导入、注释与清单外的文件不判失败", () => {
-    const allowed = [
+  it("判定自证：白名单已清空，原先放行的四个名字各判失败；新位置的导入、拷入层导入、注释与清单外的文件不判失败", () => {
+    const sidebar = "web/src/routes/shell/sidebar.tsx";
+    const former = [
       'import { BrandMark as Mark, Icon, type IconName, useEscapeFallback } from "../../ui/index.js";',
       'import type { IconName } from "@/ui/index";',
+    ].join("\n");
+    expect(check(sidebar, former)).toEqual(
+      ["BrandMark", "Icon", "IconName", "useEscapeFallback", "IconName"].map(
+        (name) => `${sidebar}: 已迁移区域从 ${FROZEN_DIR} 导入 ${name}`,
+      ),
+    );
+    const allowed = [
+      'import { BrandMark as Mark } from "../../components/brand-mark.js";',
+      'import { Icon, type IconName } from "@/components/icon";',
+      'import { useEscapeFallback } from "@/components/escape-fallback";',
       'import { Button } from "@/components/ui/button";',
       'import { cn } from "@/lib/utils";',
       '// import { Button } from "../../ui/index.js";',
     ].join("\n");
-    expect(check("web/src/routes/shell/sidebar.tsx", allowed)).toEqual([]);
+    expect(check(sidebar, allowed)).toEqual([]);
     const legacy = 'import { Button } from "../../ui/index.js";';
     expect(check("web/src/features/chat/page.tsx", legacy)).toEqual([]);
     expect(check("web/src/routes-extra/a.css")).toEqual([]);
@@ -313,13 +264,15 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     const composer = `${CHAT_DIR}/composer.tsx`;
     const source = readRepoFile(composer);
     expect(layeringViolations([{ path: composer, text: source }], real)).toEqual([]);
-    const expected = [`${composer}: 已迁移区域从 ${FROZEN_DIR} 导入 useToast`];
-    for (const injected of [
-      'import { useToast } from "../../ui/index.js";',
-      'import { Icon, useToast } from "@/ui";',
-    ]) {
+    const message = (name: string) => `${composer}: 已迁移区域从 ${FROZEN_DIR} 导入 ${name}`;
+    for (const [injected, names] of [
+      ['import { useToast } from "../../ui/index.js";', ["useToast"]],
+      ['import { Icon, useToast } from "@/ui";', ["Icon", "useToast"]],
+      // 白名单清空之后，旧出口上的 `Icon` 同样不放行。
+      ['import { Icon } from "../../ui/index.js";', ["Icon"]],
+    ] as const) {
       const text = `${injected}\n${source}`;
-      expect(layeringViolations([{ path: composer, text }], real)).toEqual(expected);
+      expect(layeringViolations([{ path: composer, text }], real)).toEqual(names.map(message));
     }
     // 已登记的会话列表文件同样受管：各自现状守约，注入旧基元即判失败。
     for (const [name, primitive] of [
@@ -348,12 +301,19 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     expect(
       check(`${dir}/previewers/x.tsx`, 'import { Menu } from "../../../ui/index.js";'),
     ).toEqual([`${dir}/previewers/x.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Menu`]);
-    expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../ui/index.js";')).toEqual([]);
+    expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../ui/index.js";')).toEqual([
+      `${dir}/tree.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Icon`,
+    ]);
+    expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../components/icon.js";')).toEqual(
+      [],
+    );
   });
 
-  it("冻结清单恰为 6 个互不相同的文件名", () => {
-    expect(new Set(FROZEN_FILES).size).toBe(6);
-    expect(FROZEN_FILES).toHaveLength(6);
+  it("冻结清单恰为 motion.css 与 ui.css 两个文件名，导入白名单为空", () => {
+    expect(new Set(FROZEN_FILES).size).toBe(2);
+    expect(FROZEN_FILES).toHaveLength(2);
+    expect(FROZEN_FILES).toEqual(["motion.css", "ui.css"]);
+    expect(MIGRATED_ALLOWED_IMPORTS).toEqual([]);
   });
 
   it("web/src 现状：已迁移区域守约，web/src/ui 的每个文件都在冻结清单里", () => {
@@ -458,13 +418,9 @@ describe("兜底去留（ui-primitives「兜底只有两种合法终态」）", 
   const definition = `export function ${ESCAPE_FALLBACK}() {\n  return {};\n}\n`;
   const caller: SourceFile = {
     path: "web/src/features/chat/delete-dialog.tsx",
-    text: `import { ${ESCAPE_FALLBACK} } from "../../ui/index.js";\nconst fallback = ${ESCAPE_FALLBACK}({});\n`,
+    text: `import { ${ESCAPE_FALLBACK} } from "../../components/escape-fallback.js";\nconst fallback = ${ESCAPE_FALLBACK}({});\n`,
   };
-  const barrel: SourceFile = {
-    path: "web/src/ui/index.ts",
-    text: `export { ${ESCAPE_FALLBACK} } from "./escape-fallback.js";\n`,
-  };
-  const kept: SourceFile[] = [{ path: HOME, text: definition }, barrel, caller];
+  const kept: SourceFile[] = [{ path: HOME, text: definition }, caller];
   const check = (files: SourceFile[]) => escapeFallbackState(files, HOME).violations;
 
   it("判定自证：两种合法状态各判通过——完全不出现（注释里提到不算），或定义恰一处在指定路径", () => {
@@ -498,8 +454,27 @@ describe("兜底去留（ui-primitives「兜底只有两种合法终态」）", 
     ]);
   });
 
+  it("判定自证：搬家前的位置重新出现判失败——带着定义、只是个空文件、或兜底已删除时都一样", () => {
+    const RETIRED = ESCAPE_FALLBACK_RETIRED;
+    const reappeared = `${RETIRED}: 兜底搬走之前的位置不得再有文件`;
+    expect(HOME).toBe("web/src/components/escape-fallback.ts");
+    expect(RETIRED).toBe("web/src/ui/escape-fallback.ts");
+    // 新位置的文件被复制回旧位置：既是指定路径之外的第二处定义，也是旧位置重现。
+    expect(check([...kept, { path: RETIRED, text: definition }])).toEqual([
+      `${RETIRED}: ${ESCAPE_FALLBACK} 的定义只能在 ${HOME}`,
+      reappeared,
+    ]);
+    expect(check([...kept, { path: RETIRED, text: "" }])).toEqual([reappeared]);
+    expect(check([{ path: RETIRED, text: "export {};\n" }])).toEqual([reappeared]);
+    // 只认路径全等：同目录的别的文件、别处的同名文件不归这条管。
+    expect(check([...kept, { path: "web/src/ui/escape.ts", text: "" }])).toEqual([]);
+    expect(check([...kept, { path: "web/src/features/ui/escape-fallback.ts", text: "" }])).toEqual(
+      [],
+    );
+  });
+
   // 取的是保留分支（Escape 实测，ADR-0013 增补）：对真实仓库断言后一种状态，不是「两种都行」。
-  it("web/src 现状：兜底保留，定义恰一处、在指定路径", () => {
+  it("web/src 现状：兜底保留，定义恰一处、在 web/src/components/escape-fallback.ts，旧位置没有文件", () => {
     const files = listRepoFiles("web/src", (path) => /\.tsx?$/.test(path)).map((path) => ({
       path,
       text: readRepoFile(path),
@@ -508,292 +483,72 @@ describe("兜底去留（ui-primitives「兜底只有两种合法终态」）", 
   });
 });
 
-/** 豁免条目指向的目录：去掉结尾的 `/**` 或 `/*`，按配置所在目录补成仓库相对路径。 */
-function exemptedDir(entry: string, base: "" | "web/"): string {
-  return `${base}${entry.replace(/\/\*\*?$/, "")}`;
-}
+describe("自写共享组件的位置（ui-foundation「组件分层」；design D1、D2 的 (a) 与 D17）", () => {
+  const [brand = "", fallback = "", icon = ""] = SHARED_COMPONENTS;
+  const present = [...SHARED_COMPONENTS, `${COMPONENTS_DIR}/ui/button.tsx`];
 
-/** 条目精确：每条去掉结尾通配后恰是一个拷入目录（中间不含通配），且两个目录都被列出。 */
-function isPrecise(entries: string[], base: "" | "web/"): boolean {
-  const dirs = entries.map((entry) => exemptedDir(entry, base));
-  return (
-    entries.every((entry) => /\/\*\*?$/.test(entry)) &&
-    dirs.length === COPIED_DIRS.length &&
-    COPIED_DIRS.every((dir) => dirs.includes(dir))
-  );
-}
-
-function stringLiterals(text: string): string[] {
-  return [...text.matchAll(/"([^"]*)"/g)].map(([, value = ""]) => value);
-}
-
-/** `constraints.yaml` `exemptions.entries` 的各条目原文（按 `- path:` 切开，文本扫描）。 */
-function exemptionEntries(yaml: string): { path: string; body: string }[] {
-  const start = yaml.indexOf("\nexemptions:\n");
-  const end = yaml.indexOf("\n  enforced_by:", start);
-  if (start < 0 || end < 0) throw new Error("constraints.yaml 缺 exemptions 段");
-  return yaml
-    .slice(start, end)
-    .split(/\n {4}- path: /)
-    .slice(1)
-    .map((body) => ({ path: /^"([^"]*)"/.exec(body)?.[1] ?? "", body }));
-}
-
-/** `AGENTS.md` 里「阈值与正则…」说明段之后、`### Known blind spots` 之前的各行。 */
-function agentsNoteLines(agents: string): string[] {
-  const index = agents.indexOf("\n## Enforcement Index\n");
-  const blind = agents.indexOf("\n### Known blind spots", index);
-  const anchor = agents.indexOf("\n阈值与正则的机器可读权威是 `constraints.yaml`", index);
-  if (index < 0 || anchor < 0 || blind < anchor) throw new Error("AGENTS.md 锚点缺失或次序不对");
-  return agents
-    .slice(anchor + 1, blind)
-    .split("\n")
-    .slice(1);
-}
-
-const namesBothDirsAndAdr = (line: string) =>
-  COPIED_DIRS.every((dir) => line.includes(dir)) && line.includes("ADR-0013");
-
-describe("拷入层门槛豁免（ui-foundation「豁免路径精确」）", () => {
-  it("判定自证：能匹配到应用层或冻结区的通配、缺目录、多目录都不算精确", () => {
-    expect(isPrecise(["src/components/ui/**", "src/components/assistant-ui/**"], "web/")).toBe(
-      true,
-    );
-    expect(isPrecise(["web/src/components/ui/*", "web/src/components/assistant-ui/*"], "")).toBe(
-      true,
-    );
-    expect(isPrecise(["src/components/**"], "web/")).toBe(false);
-    expect(isPrecise(["src/components/ui/**"], "web/")).toBe(false);
-    expect(isPrecise(["src/components/*ui/**", "src/components/assistant-ui/**"], "web/")).toBe(
-      false,
-    );
-    expect(isPrecise(["**/ui/**", "web/src/components/assistant-ui/**"], "")).toBe(false);
-    expect(isPrecise(["web/src/ui/**", "web/src/components/assistant-ui/**"], "")).toBe(false);
-    expect(
-      isPrecise(
-        ["web/src/components/ui/**", "web/src/components/assistant-ui/**", "web/src/lib/**"],
-        "",
-      ),
-    ).toBe(false);
-    expect(isPrecise(["web/src/components/ui", "web/src/components/assistant-ui"], "")).toBe(false);
-  });
-
-  it("web/vitest.config.ts：coverage.exclude 只有两个拷入目录，根 vitest.shared.mjs 无排除", () => {
-    const coverage = blockBody(readRepoFile("web/vitest.config.ts"), /coverage:\s*\{/);
-    const exclude = /exclude:\s*\[([^\]]*)\]/.exec(stripTsComments(coverage))?.[1] ?? "";
-    expect(exclude.replace(/"[^"]*"/g, "").replace(/[\s,]/g, "")).toBe("");
-    expect(isPrecise(stringLiterals(exclude), "web/")).toBe(true);
-    expect(readRepoFile("vitest.shared.mjs")).not.toMatch(/exclude/);
-  });
-
-  it(".jscpd.json：ignore 在既有四项之外只多出两个拷入目录", () => {
-    const existing = ["**/node_modules/**", "**/coverage/**", "**/dist/**", "**/.venv/**"];
-    const { ignore } = JSON.parse(readRepoFile(".jscpd.json")) as { ignore: string[] };
-    for (const entry of existing) expect(ignore).toContain(entry);
-    expect(
-      isPrecise(
-        ignore.filter((entry) => !existing.includes(entry)),
-        "",
-      ),
-    ).toBe(true);
-  });
-
-  it("knip.json：只有 web workspace 有 ignore，且只列两个拷入目录", () => {
-    const { workspaces } = JSON.parse(readRepoFile("knip.json")) as {
-      workspaces: Record<string, { ignore?: string[] }>;
-    };
-    expect(isPrecise(workspaces.web?.ignore ?? [], "web/")).toBe(true);
-    const others = Object.entries(workspaces).filter(([name]) => name !== "web");
-    for (const [, workspace] of others) expect(workspace.ignore).toBeUndefined();
-  });
-
-  it("biome.json：唯一的 override 只对两个拷入目录关 linter，formatter 不动", () => {
-    const { overrides, formatter } = JSON.parse(readRepoFile("biome.json")) as {
-      overrides: Record<string, unknown>[];
-      formatter: { enabled: boolean };
-    };
-    expect(overrides).toHaveLength(1);
-    const [override = {}] = overrides;
-    expect(Object.keys(override).sort()).toEqual(["includes", "linter"]);
-    expect(isPrecise(override.includes as string[], "")).toBe(true);
-    expect(override.linter).toEqual({ enabled: false });
-    expect(formatter.enabled).toBe(true);
-  });
-
-  it("scripts/size-guard.sh：循环内唯一的前缀跳过只列两个拷入目录，带 ./ 的写法先归一", () => {
-    const script = readRepoFile("scripts/size-guard.sh");
-    const skips = [...script.matchAll(/^\s*case "([^"]+)" in ([^)\n]+)\) continue ;; esac$/gm)];
-    expect(skips).toHaveLength(1);
-    const [skip = "", subject = "", patterns = ""] = skips[0] ?? [];
-    expect(subject).toMatch(/^\$\{f#\.\/\}$/);
-    expect(isPrecise(patterns.split("|"), "")).toBe(true);
-    // 跳过发生在唯一的逐文件循环里，带参数与无参数两种调用共用。
-    const loop = /^for f in "\$\{files\[@\]\}"; do$/m.exec(script)?.index ?? -1;
-    expect(loop).toBeGreaterThan(-1);
-    expect(script.indexOf(skip)).toBeGreaterThan(loop);
-    expect(script.match(/^for /gm)).toHaveLength(1);
-  });
-
-  it("constraints.yaml：exemptions.entries 登记两个拷入目录，依据 ADR-0013，web 下无其它豁免", () => {
-    const entries = exemptionEntries(readRepoFile("constraints.yaml"));
-    const web = entries.filter((entry) => entry.path.startsWith("web/"));
-    expect(
-      isPrecise(
-        web.map((entry) => entry.path),
-        "",
-      ),
-    ).toBe(true);
-    for (const entry of web) {
-      expect(entry.body).toMatch(/\n {6}rules: \[[^\]]*size_limits[^\]]*\]/);
-      expect(entry.body).toMatch(/\n {6}rules: \[[^\]]*testing[^\]]*\]/);
-      expect(entry.body).toMatch(/\n {6}rules: \[[^\]]*anti_drift[^\]]*\]/);
-      expect(entry.body).not.toMatch(/\n {6}rules: \[[^\]]*\ball\b[^\]]*\]/);
-      expect(entry.body).toMatch(/\n {6}reason: "[^"\n]*ADR-0013/);
-      expect(entry.body).toMatch(/\n {6}expires: never\n/);
+  it("判定自证：缺文件、文件被放进拷入目录或子目录各判失败，三个都在原位判通过", () => {
+    expect(sharedComponentViolations(present, SHARED_COMPONENTS)).toEqual([]);
+    for (const path of SHARED_COMPONENTS) {
+      expect(
+        sharedComponentViolations(
+          present.filter((entry) => entry !== path),
+          SHARED_COMPONENTS,
+        ),
+      ).toEqual([`${path}: 自写共享组件不在这个路径`]);
+    }
+    // 文件挪进拷入目录或别的子目录：原位置上没有了。
+    for (const [path, name] of [
+      [icon, "icon.tsx"],
+      [brand, "brand-mark.tsx"],
+      [fallback, "escape-fallback.ts"],
+    ]) {
+      for (const dir of [...COPIED_DIRS, `${COMPONENTS_DIR}/shared`, "web/src/ui"]) {
+        const moved = present.map((entry) => (entry === path ? `${dir}/${name}` : entry));
+        expect(sharedComponentViolations(moved, SHARED_COMPONENTS)).toEqual([
+          `${path}: 自写共享组件不在这个路径`,
+        ]);
+      }
+    }
+    // 把清单本身改成指向拷入目录：文件在那里也不算数。
+    for (const dir of COPIED_DIRS) {
+      for (const name of ["icon.tsx", "brand-mark.tsx", "escape-fallback.ts"]) {
+        const inside = `${dir}/${name}`;
+        expect(sharedComponentViolations([inside], [inside])).toEqual([
+          `${inside}: 自写共享组件不得放进拷入目录`,
+        ]);
+      }
     }
   });
 
-  it("AGENTS.md：说明段之后、Known blind spots 之前恰有一行注记，点名两个目录与 ADR-0013", () => {
-    const notes = agentsNoteLines(readRepoFile("AGENTS.md")).filter(namesBothDirsAndAdr);
-    expect(notes).toHaveLength(1);
-  });
-
-  it("注记判定自证：缺一个目录、缺 ADR、写在说明段之前或 Known blind spots 之后都不算", () => {
-    const note = `拷入层豁免：\`${COPIED_DIRS[0]}/\` 与 \`${COPIED_DIRS[1]}/\`（ADR-0013）。`;
-    const doc = (before: string, between: string, after: string) =>
-      [
-        "## Enforcement Index",
-        before,
-        "阈值与正则的机器可读权威是 `constraints.yaml`；变更先改那里。",
-        between,
-        "### Known blind spots（交给评审）",
-        after,
-      ].join("\n\n");
-    const count = (text: string) => agentsNoteLines(`\n${text}`).filter(namesBothDirsAndAdr).length;
-    expect(count(doc("", note, ""))).toBe(1);
-    expect(count(doc(note, "", ""))).toBe(0);
-    expect(count(doc("", "", note))).toBe(0);
-    expect(count(doc("", note.replace("ADR-0013", "ADR-0011"), ""))).toBe(0);
-    expect(count(doc("", note.replace(COPIED_DIRS[1] ?? "", "web/src/ui"), ""))).toBe(0);
-    expect(() => agentsNoteLines("## Enforcement Index\n\n### Known blind spots")).toThrow();
-  });
-});
-
-/** 开标签：从 `<名字` 到第一个不属于 `=>` 的 `>`（跨行；属性表达式里的箭头函数不截断）。 */
-const OPENING_TAG = /<[A-Za-z][\w.]*(?:=>|[^>])*>/g;
-
-/**
- * 显式列表语义（纯函数）：开标签带 `list-none` 的也必须带 `role="list"`——去掉列表符号的样式会让
- * Safari 丢掉列表语义。返回缺角色的开标签；标签之外提到 `list-none` 的注释不算。
- */
-function listRoleViolations(file: SourceFile): string[] {
-  return (file.text.match(OPENING_TAG) ?? [])
-    .filter((tag) => tag.includes("list-none") && !tag.includes('role="list"'))
-    .map((tag) => `${file.path}: 带 list-none 的列表缺 role="list"（${tag.split("\n")[0]}）`);
-}
-
-describe("显式列表语义（session-todo「任务清单面板」；s1f-chat-followups 2.1）", () => {
-  const path = `${CHAT_DIR}/todo-panel.tsx`;
-  const violations = (text: string) => listRoleViolations({ path, text });
-
-  it("判定自证：单行与跨行的缺角色各判失败，带角色、标签之外的注释与别的元素上的角色不误判", () => {
-    expect(violations('<ul className="m-0 list-none p-0">')).toHaveLength(1);
-    expect(
-      violations('<ul\n  onClick={() => pick()}\n  className={`list-none`}\n  data-slot="x"\n>'),
-    ).toHaveLength(1);
-    expect(violations('<ul className="m-0 list-none p-0" role="list">')).toEqual([]);
-    expect(
-      violations('<ul\n  onClick={() => pick()}\n  className="list-none"\n  role="list"\n>'),
-    ).toEqual([]);
-    expect(violations('{/* list-none 的说明 */}\n<ul className="p-0">')).toEqual([]);
-    // 角色写在子元素或相邻元素上不算数；`listbox` 不是 `list`。
-    expect(violations('<ul className="list-none">\n  <li role="list">')).toHaveLength(1);
-    expect(violations('<div role="list" />\n<ul className="list-none">')).toHaveLength(1);
-    expect(violations('<ul className="list-none" role="listbox">')).toHaveLength(1);
-    // 真实文件去掉角色判失败。
-    const source = readRepoFile(path);
-    expect(violations(source)).toEqual([]);
-    expect(source).toContain('role="list"');
-    expect(violations(source.replace(/\s*role="list"/, ""))).toHaveLength(1);
-  });
-
-  it('web/src 现状：已迁移区域的 .tsx 里带 list-none 的开标签都带 role="list"', () => {
-    const files = listRepoFiles("web/src", (file) => file.endsWith(".tsx"))
-      .filter((file) => MIGRATED_AREAS.some((area) => isUnder(file, area)))
-      .map((file) => ({ path: file, text: readRepoFile(file) }));
-    // 扫描没有放空：这四个文件确有带 list-none 的开标签。
-    const withLists = files
-      .filter((file) =>
-        (file.text.match(OPENING_TAG) ?? []).some((tag) => tag.includes("list-none")),
-      )
-      .map((file) => file.path);
-    expect(withLists).toEqual(
-      expect.arrayContaining(
-        ["capability-bar.tsx", "project-config.tsx", "todo-panel.tsx", "welcome.tsx"].map(
-          (name) => `${CHAT_DIR}/${name}`,
-        ),
-      ),
-    );
-    expect(files.flatMap(listRoleViolations)).toEqual([]);
-  });
-});
-
-describe("会话页迁移终态（ui-foundation「会话页迁移终态」）", () => {
-  const chatPaths = () => listRepoFiles(CHAT_DIR, () => true);
-
-  it("判定自证：未登记的文件、未登记的会话列表文件、目录下的 .css（含 chat.css）各判失败", () => {
-    const paths = ["page.tsx", "session-menu.tsx", "stream.ts"].map(
-      (name) => `${CHAT_DIR}/${name}`,
-    );
-    expect(chatEndStateViolations(paths, MIGRATED_AREAS)).toEqual([]);
-    const extra = `${CHAT_DIR}/extra.ts`;
-    expect(chatEndStateViolations([...paths, extra], MIGRATED_AREAS)).toEqual([
-      `${extra}: 会话页文件未登记为已迁移`,
+  it("web/src/components 现状：icon.tsx、brand-mark.tsx 与 escape-fallback.ts 直接放在该目录下，不在拷入目录里", () => {
+    expect(SHARED_COMPONENTS).toEqual([
+      "web/src/components/brand-mark.tsx",
+      "web/src/components/escape-fallback.ts",
+      "web/src/components/icon.tsx",
     ]);
-    const nested = `${CHAT_DIR}/parts/session-menu.tsx`;
-    expect(chatEndStateViolations([nested], MIGRATED_AREAS)).toHaveLength(1);
-    for (const css of [`${CHAT_DIR}/chat.css`, `${CHAT_DIR}/messages.css`]) {
-      expect(chatEndStateViolations([...paths, css], MIGRATED_AREAS)).toEqual([
-        `${css}: 会话页目录不得有 .css`,
+    const paths = listRepoFiles(COMPONENTS_DIR, () => true);
+    expect(sharedComponentViolations(paths, SHARED_COMPONENTS)).toEqual([]);
+  });
+
+  it("判定自证：web/src/components 下直接出现 index.ts 或 index.tsx 判失败，别处的 index 与名字相近的文件不误判", () => {
+    for (const name of ["index.ts", "index.tsx"]) {
+      const barrel = `${COMPONENTS_DIR}/${name}`;
+      expect(barrelViolations([...present, barrel])).toEqual([
+        `${barrel}: web/src/components 不设统一出口`,
       ]);
     }
-    // 没有豁免残留：页面文件与会话列表文件从清单里滤掉后都判失败。
-    for (const path of [`${CHAT_DIR}/page.tsx`, `${CHAT_DIR}/session-menu.tsx`]) {
-      expect(
-        chatEndStateViolations(
-          paths,
-          MIGRATED_AREAS.filter((entry) => entry !== path),
-        ),
-      ).toEqual([`${path}: 会话页文件未登记为已迁移`]);
-    }
-    // 登记目录本身不算数：终态按路径全等，逐个文件登记。
-    expect(chatEndStateViolations([`${CHAT_DIR}/page.tsx`], [CHAT_DIR])).toHaveLength(1);
+    expect(barrelViolations(present)).toEqual([]);
+    expect(
+      barrelViolations([
+        `${COMPONENTS_DIR}/indexes.ts`,
+        `${COMPONENTS_DIR}/index.test.ts`,
+        "web/src/features/chat/index.ts",
+      ]),
+    ).toEqual([]);
   });
 
-  it("web/src/features/chat 现状：每个 .ts/.tsx 都已登记，没有 .css 与 session-filter.tsx，legacy.css 不导入会话页", () => {
-    const paths = chatPaths();
-    expect(paths.filter((path) => path.endsWith(".css"))).toEqual([]);
-    expect(paths).not.toContain(`${CHAT_DIR}/session-filter.tsx`);
-    expect(readRepoFile("web/src/styles/legacy.css")).not.toContain("features/chat");
-    expect(chatEndStateViolations(paths, MIGRATED_AREAS)).toEqual([]);
-    // 反向：会话页的清单条目恰是目录里的源文件，不多不少。
-    expect(MIGRATED_AREAS.filter((entry) => isUnder(entry, CHAT_DIR))).toEqual(
-      paths.filter((path) => /\.tsx?$/.test(path)),
-    );
-  });
-
-  it("web/src/components/assistant-ui 只有三个组件、它们的 registry 依赖与 styles.d.ts", () => {
-    const dir = "web/src/components/assistant-ui";
-    const files = listRepoFiles(dir, () => true);
-    expect(files).toEqual([
-      `${dir}/elements/markdown-text.tsx`,
-      `${dir}/elements/reasoning.aui.tsx`,
-      `${dir}/elements/reasoning.tsx`,
-      `${dir}/elements/tool-group.aui.tsx`,
-      `${dir}/elements/tooltip-icon-button.tsx`,
-      `${dir}/hooks/use-copy-to-clipboard.ts`,
-      `${dir}/styles.d.ts`,
-    ]);
-    expect(files.filter((path) => /\/(thread|tool-fallback)\b/.test(path))).toEqual([]);
+  it("web/src/components 现状：没有统一出口（index.ts 与 index.tsx 都不存在）", () => {
+    expect(barrelViolations(listRepoFiles(COMPONENTS_DIR, () => true))).toEqual([]);
   });
 });

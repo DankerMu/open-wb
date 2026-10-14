@@ -3,7 +3,7 @@
 // 工具名徽章是 `tool` 字段（不解析 `title`），正文是 `title` 全文、保留换行。
 import { type KeyboardEvent, type MouseEvent, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 import type { ChatApprovalView } from "./stream-approvals.js";
 import { useClipped } from "./use-clipped.js";
 

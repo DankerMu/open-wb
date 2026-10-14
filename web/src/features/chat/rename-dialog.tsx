@@ -8,7 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { useEscapeFallback } from "../../ui/index.js";
+import { useEscapeFallback } from "../../components/escape-fallback.js";
 
 /** 一次打开的名字对话框的状态与回调：重命名与另存为工作空间共用。 */
 export type NameDialogState = {

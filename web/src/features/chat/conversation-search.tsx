@@ -12,7 +12,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Icon, type IconName } from "../../ui/index.js";
+import { Icon, type IconName } from "../../components/icon.js";
 import { matchMessages } from "./search-match.js";
 import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";

@@ -1,5 +1,7 @@
 import { LoaderCircle } from "lucide-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEscapeFallback } from "@/components/escape-fallback";
+import { Icon } from "@/components/icon";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -16,7 +18,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Icon, useEscapeFallback } from "@/ui/index";
 import { useAuth } from "./provider";
 
 /**

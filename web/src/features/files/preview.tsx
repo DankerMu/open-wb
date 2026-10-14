@@ -20,8 +20,8 @@
  */
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Icon } from "../../components/icon.js";
 import { downloadUrl } from "../../lib/api.js";
-import { Icon } from "../../ui/index.js";
 import { ALERT_BOX, STATUS_TEXT } from "./columns.js";
 import { EmptyState } from "./empty-state.js";
 import { fileIcon, formatMtime, formatSize, withSize } from "./file-meta.js";

@@ -8,7 +8,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { useEscapeFallback } from "../../ui/index.js";
+import { useEscapeFallback } from "../../components/escape-fallback.js";
 
 type ConflictProps = {
   /** 关闭后把焦点还给被点的 `撤回` 按钮（消息已被撤回时落到输入框）。 */

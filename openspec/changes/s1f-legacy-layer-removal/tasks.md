@@ -103,7 +103,7 @@ Minimal mergeable slice: atomic - `ToastProvider` 从入口与测试包装里一
 - [x] 3.2 分支一——十处全部通过：删除 `web/src/ui/escape-fallback.ts`、10 处调用与 `web/test/escape-fallback.test.tsx`；四处借用其 `ref` 的地方换成 `useRef<HTMLDivElement>(null)`、行为不变——`footer.tsx:74`（忙碌期焦点救回）、`app-shell.tsx:52`（打开者焦点归还）、`project-config.tsx:148`（`onOpenAutoFocus` 里把焦点定位到 `关闭`，不许删掉这段）、`dialogs.tsx:157`（内容元素引用）；`web/src/ui/index.ts` 去掉该导出；
   `web/test/ui-layering.test.ts` 的白名单去掉 `useEscapeFallback`、`FROZEN_FILES` 收缩为 5 个；2.6 改过的六处注释里随 hook 消失的删掉，其余改写为现状（`app-shell.tsx:42`、`workspace-sidebar.tsx:208`、`web/e2e/ui-walk-session-list.ts:39-41`）。
   验证：`grep -rn useEscapeFallback web/src web/test web/e2e` 只剩守卫里的注入样本；`npm test --workspace web` 与 `make ui-walk` 全绿（`ui-walk-project-config.ts` 的「打开时焦点在 `关闭`」步骤仍通过）。（未取此分支时：在本条后注明「未取，见 3.1 的结果表」并勾选。）
-  **未取，见 3.1 的结果表**（#1399 的 PR，2026-10-13）：十处里三处不通过——顶栏入口的重命名 / 另存为、项目配置弹层、窄屏工作空间侧边栏模态层；触发器的 tooltip 还在退出动画里时紧接着按下的 Escape 被 tooltip 层吃掉。取 3.3。
+  **未取，见 3.1 的结果表**（#1399 的 PR，2026-10-13）：十处里三处不通过——顶栏入口的重命名、项目配置弹层、窄屏工作空间侧边栏模态层；触发器的 tooltip 还在退出动画里时紧接着按下的 Escape 被 tooltip 层吃掉。取 3.3。
 - [x] 3.3 分支二——任一处不通过：撤销 3.1(a) 的改动，10 处调用**全部**保留、原样不动（不做局部删除）；`web/src/ui/escape-fallback.ts` 的头注释与 2.6 改过的另五处注释改写为实测得到的真实原因与需要它的覆盖层（不再提 Toast）；文件留在原处，组 4 搬到 `web/src/components/escape-fallback.ts`。`web/test/escape-fallback.test.tsx` 保留（兜底三条性质的常驻证据）。
   不通过的现象必须留下常驻证据，二者必居其一：jsdom 能复现的，补一条单测（先红后绿：去掉该调用点的 hook 时红，保留时绿），放在该覆盖层既有的测试文件里；只在真实浏览器复现的，把 3.1(d) 里对应的那一步固化为 `make ui-walk` 的常驻步骤（放进该覆盖层所在页面的走查文件，两个 project 里它适用的那个），同样先红后绿。
   验证：补的用例或走查步骤在去掉该调用点的 hook 时判红；`npm test --workspace web` 与 `make ui-walk` 全绿。（未取此分支时：在本条后注明「未取，见 3.1 的结果表」并勾选。）
@@ -122,20 +122,20 @@ Minimal mergeable slice: atomic - 实测的改动与所取分支的终态落在�
 
 ## 4. ui-foundation / ui-primitives — 搬 `Icon`、`IconName`、`BrandMark`，改导入方（子 issue C1）
 
-- [ ] 4.1 搬文件、改导入（design D1、D2、D17）：`git mv web/src/ui/icon.tsx web/src/components/icon.tsx`、`git mv web/src/ui/brand-mark.tsx web/src/components/brand-mark.tsx`，文件内容不改；若组 3 取了 3.3，`git mv web/src/ui/escape-fallback.ts web/src/components/escape-fallback.ts`。删除 `web/src/ui/index.ts`，不新建统一出口。样式规则本组不动：`.ui-icon*`、`.ui-brand*` 仍在 `web/src/ui/ui.css`，类名没变，所以计算样式不变。
+- [x] 4.1 搬文件、改导入（design D1、D2、D17）：`git mv web/src/ui/icon.tsx web/src/components/icon.tsx`、`git mv web/src/ui/brand-mark.tsx web/src/components/brand-mark.tsx`，文件内容不改；若组 3 取了 3.3，`git mv web/src/ui/escape-fallback.ts web/src/components/escape-fallback.ts`。删除 `web/src/ui/index.ts`，不新建统一出口。样式规则本组不动：`.ui-icon*`、`.ui-brand*` 仍在 `web/src/ui/ui.css`，类名没变，所以计算样式不变。
   改导入路径：`Icon` 的 32 个文件、`IconName` 的 8 个、`BrandMark` 的 4 个（去重后 36 个文件；名单见 #1393「清点一」，开工时以 `grep -rln 'ui/index' web/src` 为准），若保留 hook 再加它的 9 个导入方。各文件沿用自己现有的写法（别名 `@/components/icon` 或相对路径带 `.js`）。
   测试侧：`web/test/chat-stop-button.test.tsx:4`、`topbar-actions.test.tsx:13`、`ui-icon-brand.test.tsx:3` 改导入路径（若保留 hook，`web/test/escape-fallback.test.tsx` 同样）；`web/test/chat-module-layout.test.ts:147` 的样本字符串改为新路径。`ATTRIBUTION.md` lucide 条目里的 `web/src/ui/icon.tsx` 改为 `web/src/components/icon.tsx`。
   验证：`grep -rnE '/ui/index|"@/ui' web/src web/test web/e2e` 的命中恰为守卫里的注入样本——`ui-layering.test.ts` 的各行与 `ui-guardrails.test.ts:114`（预期命中，不要改）；`git diff -M --stat` 显示两个（或三个）文件为 100% 相似度的重命名；`web/test/ui-icon-brand.test.tsx` 不改断言即通过；`make typecheck` 通过。
-- [ ] 4.2 过渡守卫与自写共享文件的断言：`web/test/ui-layering.test.ts`——导入白名单清空（任何文件都不得从 `web/src/ui` 导入）、`FROZEN_FILES` 收缩为 `motion.css` 与 `ui.css`；新增 design D1/D2 的 (a)：两个文件存在于 `web/src/components/` 且不在拷入目录下；
+- [x] 4.2 过渡守卫与自写共享文件的断言：`web/test/ui-layering.test.ts`——导入白名单清空（任何文件都不得从 `web/src/ui` 导入）、`FROZEN_FILES` 收缩为 `motion.css` 与 `ui.css`；新增 design D1/D2 的 (a)：两个文件存在于 `web/src/components/` 且不在拷入目录下；
   新增「没有统一出口」：`web/src/components/index.ts` 与 `index.tsx` 不存在（design D17），注入样本（文件列表里出现 `web/src/components/index.ts`）判失败；
   「拷入层门槛豁免」一组补 (c) 的两个样本（`src/components/**`、`src/components/icon.tsx` 写进排除项都不算精确）。
   `web/test/ui-guardrails.test.ts`——取色与内联 `style={` 的扫描对象由 `web/src/ui` 下的 `.tsx` 改为直接放在 `web/src/components/` 下的 `.tsx`（断言非空）；依赖方向一组补 (b) 的样本（`web/src/components/icon.tsx` 导入 `radix-ui` 判失败）。`web/src/ui` 下 `.css` 的取色扫描保留到组 6。
   若保留 hook：3.4 的守卫把指定路径改为 `web/src/components/escape-fallback.ts`，并断言 `web/src/ui/escape-fallback.ts` 不存在（终态，组 6 不再改）；(a)(b)(c) 各为 `escape-fallback.ts` 补一个样本。
   验证：两个守卫文件通过；(a)(b)(c) 与「没有统一出口」各有注入样本用例。
-- [ ] 4.3 变异证据（逐条做、逐条撤销，结果贴进 PR）：在 `web/src/components/icon.tsx` 加 `import { Slot } from "radix-ui"` → 依赖方向守卫判红；在 `web/vitest.config.ts` 的 `coverage.exclude` 加 `src/components/icon.tsx` → 「豁免路径精确」判红；
+- [x] 4.3 变异证据（逐条做、逐条撤销，结果贴进 PR）：在 `web/src/components/icon.tsx` 加 `import { Slot } from "radix-ui"` → 依赖方向守卫判红；在 `web/vitest.config.ts` 的 `coverage.exclude` 加 `src/components/icon.tsx` → 「豁免路径精确」判红；
   在 `web/src/features/chat/composer.tsx` 加 `import { Icon } from "../../ui/index.js"` → 分层守卫判红；新建 `web/src/components/index.ts`（再导出 `Icon`）→ 「没有统一出口」判红；
   若保留 hook：把 `web/src/components/escape-fallback.ts` 复制回 `web/src/ui/escape-fallback.ts` → 3.4 的守卫判红。
-- [ ] 4.4 整刀验证：`make check`（含覆盖率——搬入的文件计入统计）、`make test-guardrails`、`make ui-walk` 全绿（图标的 `display` 探针 `ui-walk-files.ts:14-24` 不改即通过）；`npm run build --workspace web` 成功。
+- [x] 4.4 整刀验证：`make check`（含覆盖率——搬入的文件计入统计）、`make test-guardrails`、`make ui-walk` 全绿（图标的 `display` 探针 `ui-walk-files.ts:14-24` 不改即通过）；`npm run build --workspace web` 成功。
 
 Suggested fixture level: compact - 两个（或三个）文件 100% 相似度的重命名加 36 个以上文件的导入路径替换，样式规则不动；正确性由类型检查、`git diff -M` 与不改断言的 `ui-icon-brand` 证明，风险在守卫样本
 Minimal mergeable slice: atomic - `git mv`、导入方改路径与删除 `ui/index.ts` 必须同刀：只搬不改导入，类型检查红；想分批改导入就得让 `ui/index.ts` 暂时再导出新位置的组件，那正是 design D17 不许建的统一出口；守卫（`ui-guardrails:46-56` 的非空断言）在文件搬走的同时变红

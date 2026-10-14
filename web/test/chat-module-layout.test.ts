@@ -144,7 +144,7 @@ describe("会话页源码模块划分", () => {
     expect(from(TURN, 'import { ChatPage } from "./index.js";', index)).toBe(true);
     expect(from(TURN, 'import { ChatPage } from ".";', index)).toBe(true);
     expect(from("web/src/routes/a.tsx", 'import { C } from "../features/chat";', index)).toBe(true);
-    expect(from(TURN, 'import { Icon } from "../../ui/index.js";', index)).toBe(false);
+    expect(from(TURN, 'import { Icon } from "../../components/icon.js";', index)).toBe(false);
   });
 
   it("turn-actions.ts 的导出只被 use-chat-session.ts 消费，后者的导出只被 page.tsx 消费", () => {

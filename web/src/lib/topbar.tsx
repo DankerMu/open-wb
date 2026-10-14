@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { IconName } from "../ui/index.js";
+import type { IconName } from "../components/icon.js";
 
 /**
  * 页面注入顶栏的按钮描述符（不是 React 节点，可比较）：`key` 在数组内唯一（调用方契约，不校验）；

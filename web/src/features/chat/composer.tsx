@@ -15,7 +15,7 @@ import {
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Icon } from "../../ui/index.js";
+import { Icon } from "../../components/icon.js";
 
 type StopTurn = () => Promise<"stopping" | null>;
 type OnFiles = ((files: File[]) => void) | undefined;
