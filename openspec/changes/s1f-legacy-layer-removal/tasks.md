@@ -142,23 +142,23 @@ Minimal mergeable slice: atomic - `git mv`、导入方改路径与删除 `ui/ind
 
 ## 5. ui-foundation — 活规则搬进 `theme.css` 的 `base` 块（子 issue C2）
 
-- [ ] 5.1 先写 `theme.css` `base` 块的守卫（红）：`web/test/ui-foundation-entry.test.ts` 按 design D11 的 G2 第四条改写 `borderBaselineViolations`——`@layer` 块恰为一个 `base`、第一条是边框色基线、块内选择器集合等于清单（清单按 design「逐规则去向」两张表列全）、块外的顶层规则块只有既有的五项（四条无花括号的 `@custom-variant` 声明不是规则块，不计）；
+- [x] 5.1 先写 `theme.css` `base` 块的守卫（红）：`web/test/ui-foundation-entry.test.ts` 按 design D11 的 G2 第四条改写 `borderBaselineViolations`——`@layer` 块恰为一个 `base`、第一条是边框色基线、块内选择器集合等于清单（清单按 design「逐规则去向」两张表列全）、块外的顶层规则块只有既有的五项（四条无花括号的 `@custom-variant` 声明不是规则块，不计）；
   `:282-290` 对 `legacy.css` 的 `body` 的断言改为对 `theme.css` `base` 块内 `body` 的断言（含 `font-size: 14px`、`line-height: 22px`，不含底色与文字色），块外的 `body` 仍只声明底色与文字色；`:299`「reduce 覆盖规则不在任何层里」的写法改为不依赖「文件里 `@layer` 只出现在它之前」。`base` 块里嵌套的 `@media (max-width: 760px)` 块单独断言（恰一个、只含 `body { overflow: auto; }`），不混进选择器清单；它在块内保持缩进，不要挪到行首——`:299` 与 `:295` 用 `^@media` 找文件顶层的 reduce 块。
   判定自证的变异表同步：原「缺边框色基线」「基线换层」「基线改色」「多一个入层块」四条保留并适配，新增「块内多一个选择器」「`button` 的 reset 挪到块外」两条。
   `themeViolations` 变异表里以 `body {` 为锚点的两条（「`.dark` 类」「多一个入层块」，都是 `theme.replace("body {", …)` 取首次匹配）改成只命中块外未分层的 `body`（行首匹配，如 `/^body \{/m`）：规则搬入后首个 `body {` 是块内缩进的那条，不改的话变异打进块内、同时触发选择器清单判定，不再是「恰一条违例」。「hex 字面量」「oklch 字面量」两条的锚点（`var(--background)`、`var(--foreground)`）在被搬的规则里不出现，不用改。
   验证：此时该文件判红（规则还没搬）；5.2 之后变异表里每条变异恰好只触发它对应的那一条判定（含改过锚点的两条）。
-- [ ] 5.2 搬规则（design D7 与「逐规则去向」表）：把 `web/src/ui/ui.css:18-78`（`.ui-icon`、五个 `.ui-icon-<size>`、五条 `.ui-brand*`）与 `web/src/styles/legacy.css:10-127` 的全部规则**逐字**移进 `web/src/styles/theme.css` 的 `@layer base` 块，次序为：边框色基线、`ui.css` 的规则、`legacy.css` 的规则（各自内部顺序不变，760px 的媒体块留在最后）。
+- [x] 5.2 搬规则（design D7 与「逐规则去向」表）：把 `web/src/ui/ui.css:18-78`（`.ui-icon`、五个 `.ui-icon-<size>`、五条 `.ui-brand*`）与 `web/src/styles/legacy.css:10-127` 的全部规则**逐字**移进 `web/src/styles/theme.css` 的 `@layer base` 块，次序为：边框色基线、`ui.css` 的规则、`legacy.css` 的规则（各自内部顺序不变，760px 的媒体块留在最后）。
   从 `ui.css` 与 `legacy.css` 里删掉被搬走的规则（`ui.css` 只剩 `.ui-sr-only`，`legacy.css` 只剩文件头与两条 `@import`）。
   注释同步：`theme.css` 文件头与边框色基线上方的注释（不再提 `web/src/ui` 与「低于 `legacy`」）、`web/src/features/chat/tool-call-group.tsx:13`（「`legacy` 层的全局 `:focus-visible`」→ `base` 层）、`web/src/features/chat/message-action-row.tsx:116-117`（「冻结的图标注册表」）、`web/e2e/ui-walk-login.ts:34`。
   验证：5.1 的守卫转绿；`git diff` 里被搬的每条规则在删除侧与新增侧除缩进外逐字相同；`web/test/ui-tokens.test.ts`（未定义的 `--wb-*` 引用）与 `ui-reduced-motion.test.ts` 通过；`make ui-walk` 全绿（层序探针此时仍在、仍应通过）。
-- [ ] 5.3 计算样式比对（design D15，验收的硬条件）：一次性 Playwright 脚本按 D15 的十四项探针清单输出——亮暗两种主题 × 1440×900 与 390×844 两种视口，每个探针输出全部计算属性。每次运行都是独立构建、独立起服务，不是对着同一个运行中的服务比。
+- [x] 5.3 计算样式比对（design D15，验收的硬条件）：一次性 Playwright 脚本按 D15 的十四项探针清单输出——亮暗两种主题 × 1440×900 与 390×844 两种视口，每个探针输出全部计算属性。每次运行都是独立构建、独立起服务，不是对着同一个运行中的服务比。
   (a) **A/A 对照**：基线（组 4 合入后的 `master`）独立跑两遍，两份输出做 diff。为空则排除清单为空；不为空则逐个列出不稳定的「探针 × 属性」作为排除清单。被搬的规则声明过的属性（两张去向表里那些规则的属性名）不得进排除清单——它们抖动就固定该探针的数据或等待条件，重跑 A/A 直到它们稳定。
   (b) **A/B**：基线与本分支各跑一遍，去掉 (a) 的排除清单后做 diff。
   验证：A/B 的 diff **为空**；A/A 的原始 diff、排除清单与 A/B 的 diff 三样都贴进 PR；排除清单只来自 A/A，不得根据 A/B 的差异增补；读不到计算值的三条滚动条规则以搬运前后规则文本逐字相同代替并注明；靠注入元素读取的探针逐个注明。
   A/B 非空则不合入——先查原因，属于本刀引入的差异就修正搬运，不调整探针、不扩排除清单。
-- [ ] 5.4 变异证据（逐条做、逐条撤销，结果贴进 PR）：把 `theme.css` `base` 块里的 `.ui-icon` 规则挪到块外（未分层）→ 5.1 的守卫判红；在块内加一条 `.ui-new { margin: 0 }` → 判红；
+- [x] 5.4 变异证据（逐条做、逐条撤销，结果贴进 PR）：把 `theme.css` `base` 块里的 `.ui-icon` 规则挪到块外（未分层）→ 5.1 的守卫判红；在块内加一条 `.ui-new { margin: 0 }` → 判红；
   把块内 `button { … }` 的 `padding: 0` 挪到块外 → 守卫判红，且 `make ui-walk` 的登录页断言或 5.3 的脚本显示按钮内边距变化（证明「不能未分层」不是空话，也证明 5.3 的脚本看得见差异；记录现象后撤销）。
-- [ ] 5.5 整刀验证：`make check`、`make test-guardrails`、`make ui-walk` 全绿（层序探针此时仍在、仍应通过）；`npm run build --workspace web` 成功。
+- [x] 5.5 整刀验证：`make check`、`make test-guardrails`、`make ui-walk` 全绿（层序探针此时仍在、仍应通过）；`npm run build --workspace web` 成功。
 
 Suggested fixture level: expanded - 改全站共用的样式入口链（全局规则换层），每个页面的层叠结果都在影响面内；「计算样式不变」要有 A/A 与 A/B 两份逐探针的证据
 Minimal mergeable slice: atomic - 守卫（5.1）在规则搬完（5.2）之前是红的；规则必须整批搬——design D7 的层叠论证以「`ui.css` 的规则在前、`legacy.css` 的规则在后、同处一层」为前提，分批搬会让一部分在 `base`、一部分在 `legacy`，相对次序要另行证明；5.3 是对整批搬运的验收，没有可以先行合入的一半

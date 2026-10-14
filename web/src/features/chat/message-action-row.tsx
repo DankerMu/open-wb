@@ -113,8 +113,8 @@ const UNDO_REASONS: Record<Exclude<UndoState, "available">, string> = {
 
 /**
  * `撤回`：消息不可撤回时不是原生禁用而是 `aria-disabled` 加一个视觉隐藏的原因文本（读屏可达），点击
- * 不调用 `onUndo`；输入框锁定时原生禁用。二者同时成立时两个属性都带。图标直接取自 lucide：冻结的
- * 图标注册表里没有它。
+ * 不调用 `onUndo`；输入框锁定时原生禁用。二者同时成立时两个属性都带。图标直接取自 lucide：`Icon`
+ * 的图标名集合（`web/src/components/icon.tsx`）里没有它。
  */
 function UndoAction({
   disabled,

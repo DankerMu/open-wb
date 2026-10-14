@@ -31,7 +31,7 @@ export async function expectLoginCascade(page: Page, project: WalkProject): Prom
   const theme = project === "desktop-light" ? "light" : "dark";
   await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 
-  // 主按钮底色等于 --primary：`bg-primary`（utilities 层）压过 legacy 层的 `button { background: none }`。
+  // 主按钮底色等于 --primary：`bg-primary`（utilities 层）压过 base 层的 `button { background: none }`。
   const primary = await resolvedColor(page, "--primary");
   expect(primary, `--primary resolves to a colour under ${theme}`).not.toBe(TRANSPARENT);
   if (theme === "light")
