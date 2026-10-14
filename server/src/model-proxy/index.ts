@@ -386,8 +386,8 @@ async function failureReply(
     upstreamResponse.destroy();
     return gatewayReply(status);
   }
-  const body = await readErrorBody(upstreamResponse);
-  return statusReply(status, upstreamExcerpt(body.toString("utf8"), secrets));
+  const { body, cut } = await readErrorBody(upstreamResponse);
+  return statusReply(status, upstreamExcerpt(body.toString("utf8"), secrets, cut));
 }
 
 function passthroughHeaders(upstreamResponse: IncomingMessage): OutgoingHttpHeaders {

@@ -215,4 +215,20 @@ describe("failure envelopes", () => {
     expect(cut).toBe(`${"字".repeat(994)}${TRUNCATED_MARK}`);
     expect(points(upstreamExcerpt("字".repeat(1000), []))).toBe(1000);
   });
+
+  it("drops a tail that is the start of a secret when the body was cut, and only then", () => {
+    const key = "wb-issue909-cut-boundary-key";
+    for (let length = 1; length < key.length; length += 1) {
+      const excerpt = upstreamExcerpt(`busy\n${key.slice(0, length)}`, [key], true);
+      expect(excerpt).toBe("busy");
+    }
+    // A whole key followed by more text is replaced, and nothing of it is cut away.
+    const after = "0123456789abcdefghij";
+    expect(upstreamExcerpt(`${key}${after}`, [key], true)).toBe(`[已移除]${after}`);
+    // Control characters at the tail do not hide the half key; an `sk-` run under 16 goes too.
+    expect(upstreamExcerpt(`busy ${key.slice(0, 20)}\u0001\u0001`, [key], true)).toBe("busy");
+    expect(upstreamExcerpt("busy sk-abcdefghijklmno", [], true)).toBe("busy");
+    // A body that ended on its own is not trimmed.
+    expect(upstreamExcerpt(`busy ${key.slice(0, 20)}`, [key])).toBe(`busy ${key.slice(0, 20)}`);
+  });
 });

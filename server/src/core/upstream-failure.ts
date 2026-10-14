@@ -18,6 +18,7 @@ const MAX_REASON_CODE = 64;
 const DUMP_LINE = /^raw-http-request(?:-save-failed)?=/u;
 const BEARER = /Bearer\s+\S+/giu;
 const SK_KEY = /sk-[A-Za-z0-9_-]{16,}/gu;
+const SK_TAIL = /sk-[A-Za-z0-9_-]*$/u;
 
 /** One answer the proxy writes instead of the upstream's: status and the exact JSON body. */
 export interface UpstreamFailureReply {
@@ -62,32 +63,63 @@ function envelope(status: 502 | 424, message: string, param: string): UpstreamFa
 
 /**
  * The excerpt of a ≥500 body: sanitised, every run of line feeds and tabs folded into one space,
- * at most 1000 code points (994 and the mark when longer).
+ * at most 1000 code points (994 and the mark when longer). `cut` means the body was cut short
+ * before it reached here (error-body.ts); then a tail that is the start of a secret is dropped.
  */
-export function upstreamExcerpt(text: string, secrets: readonly string[]): string {
-  const flat = sanitizeUpstreamText(text, secrets).replace(/[\n\t]+/gu, " ");
+export function upstreamExcerpt(text: string, secrets: readonly string[], cut = false): string {
+  const replaced = redact(text, secrets);
+  const kept = cut ? dropSecretHead(replaced, secrets) : replaced;
+  const flat = capPoints(kept.trimEnd(), MAX_SANITIZED_POINTS).replace(/[\n\t]+/gu, " ");
   return capPoints(flat, MAX_EXCERPT_POINTS);
 }
 
 /**
  * The six steps of upstream-failure「上游原文净化」, in their order: control characters go before
  * the secrets are replaced (a secret split by `\0` cannot slip through and be joined again), the
- * secrets before the cut (a secret cannot survive as a half).
+ * listed secrets before the 2000-point cut (no whole one is left for that cut to halve). A secret
+ * the caller's own cut already halved is not recognised here; only `upstreamExcerpt` with `cut`
+ * drops such a tail (the proxy's 16 KiB / 5 s read is that caller).
  */
 export function sanitizeUpstreamText(text: string, secrets: readonly string[]): string {
+  return capPoints(redact(text, secrets).trimEnd(), MAX_SANITIZED_POINTS);
+}
+
+/** Steps 1–5 of「上游原文净化」: everything before the cut. */
+function redact(text: string, secrets: readonly string[]): string {
   const lines = normalize(text)
     .split("\n")
     .filter((line) => !DUMP_LINE.test(line));
   let result = lines.join("\n");
-  const ordered = secrets
+  for (const secret of orderedSecrets(secrets)) {
+    result = result.split(secret).join(REMOVED);
+  }
+  return result.replace(BEARER, `Bearer ${REMOVED}`).replace(SK_KEY, REMOVED);
+}
+
+function orderedSecrets(secrets: readonly string[]): string[] {
+  return secrets
     .map(normalize)
     .filter((secret) => secret !== "")
     .sort((a, b) => b.length - a.length);
-  for (const secret of ordered) {
-    result = result.split(secret).join(REMOVED);
+}
+
+/**
+ * After the replacement every whole secret is gone, so what a cut can leave is a tail that is a
+ * proper prefix of a listed secret, or an `sk-` run too short for `SK_KEY`: the longest such tail
+ * is dropped. A `Bearer` token cut short is still caught by `BEARER`.
+ */
+function dropSecretHead(text: string, secrets: readonly string[]): string {
+  let end = text.length;
+  for (const secret of orderedSecrets(secrets)) {
+    for (let length = Math.min(secret.length - 1, text.length); length > 0; length -= 1) {
+      if (text.endsWith(secret.slice(0, length))) {
+        end = Math.min(end, text.length - length);
+        break;
+      }
+    }
   }
-  result = result.replace(BEARER, `Bearer ${REMOVED}`).replace(SK_KEY, REMOVED);
-  return capPoints(result.trimEnd(), MAX_SANITIZED_POINTS);
+  const sk = SK_TAIL.exec(text);
+  return text.slice(0, sk === null ? end : Math.min(end, sk.index));
 }
 
 function normalize(text: string): string {
