@@ -74,7 +74,12 @@ afterEach(async () => {
   }
 });
 
-function officialBin(): string {
+/** Registers a teardown step of the running case (also used by the proxied world, #909). */
+export function onTeardown(step: () => unknown): void {
+  cleanups.push(step);
+}
+
+export function officialBin(): string {
   const bin = process.env.OMP_BIN;
   if (bin === undefined || bin === "") {
     throw new Error("WORKBUDDY_OMP_TEST=1 requires OMP_BIN (run `make omp-fetch`)");

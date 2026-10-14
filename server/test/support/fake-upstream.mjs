@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { createFailureScript } from "./fake-upstream-failures.mjs";
 
 const PATHS = new Set(["/chat/completions", "/v1/chat/completions"]);
 const DEFAULT_KEY = "fake";
@@ -46,8 +47,12 @@ export async function start(options = {}) {
   const gates = new Map();
   /** Accepted chat-completions requests in arrival order: `{model, messages}` only, latest 1000. */
   const requests = [];
+  const failures = createFailureScript(expectedKey);
   const server = createServer((request, response) => {
-    void handleRequest(request, response, expectedKey, gates, ttlMs, requests, scope);
+    void handleRequest(request, response, expectedKey, gates, ttlMs, requests, {
+      scope,
+      failures,
+    });
   });
   await listen(server, requested);
   const address = server.address();
@@ -65,6 +70,7 @@ export async function start(options = {}) {
         return;
       }
       closed = true;
+      failures.close();
       for (const id of [...gates.keys()]) {
         destroyGate(gates, id);
       }
@@ -76,7 +82,7 @@ export async function start(options = {}) {
   };
 }
 
-async function handleRequest(request, response, expectedKey, gates, ttlMs, requests, scope) {
+async function handleRequest(request, response, expectedKey, gates, ttlMs, requests, script) {
   const path = request.url === undefined ? "" : request.url.split("?")[0];
   if (path === REQUESTS_PATH) {
     readRequests(request, response, expectedKey, requests);
@@ -98,7 +104,7 @@ async function handleRequest(request, response, expectedKey, gates, ttlMs, reque
   if (parsed === undefined) {
     return;
   }
-  serveChat(response, gates, parsed, scope);
+  serveChat(response, gates, parsed, script);
 }
 
 function readRequests(request, response, expectedKey, requests) {
@@ -150,7 +156,7 @@ async function readChatMessages(request, response, requests) {
   return { messages: body.messages, model: body.model };
 }
 
-function serveChat(response, gates, parsed, scope) {
+function serveChat(response, gates, parsed, { scope, failures }) {
   if (lastUserHasMarker(parsed.messages)) {
     writeJson(response, 500, { error: { message: "fake upstream error" } });
     return;
@@ -158,6 +164,10 @@ function serveChat(response, gates, parsed, scope) {
   const id = `chatcmpl-${randomUUID()}`;
   const created = Math.floor(Date.now() / 1000);
   const model = typeof parsed.model === "string" ? parsed.model : "fake";
+  const contentChunk = (delta) => chunk(id, created, model, delta, null);
+  if (failures.serve(response, lastUserTextFrom(parsed.messages), contentChunk)) {
+    return;
+  }
   const answered =
     scope === "turn" ? toolFollowsLastUser(parsed.messages) : hasToolRole(parsed.messages);
   if (!answered) {

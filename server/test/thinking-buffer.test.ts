@@ -9,8 +9,8 @@ import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/core/db/index.js";
+import { TRUNCATED_MARK } from "../src/core/upstream-failure.js";
 import type { ChatEvent } from "../src/sessions/events.js";
-import { TRUNCATED_MARK } from "../src/sessions/events.js";
 import type { Generation, Slot } from "../src/sessions/pool.js";
 import { appendThinking } from "../src/sessions/store-thinking.js";
 import { ThinkingBuffers } from "../src/sessions/thinking-buffer.js";
@@ -367,13 +367,15 @@ describe("M6 discard and clearTimer", () => {
 });
 
 describe("M7 one truncation mark", () => {
-  it("events.ts exports the step mark and store-thinking imports it instead of a copy", () => {
+  // #909 moved the mark to core/upstream-failure.ts (upstream text is cut with it too).
+  it("core exports the mark and events.ts and store-thinking import it instead of a copy", () => {
     expect(TRUNCATED_MARK).toBe(MARK);
-    const source = readFileSync(
-      new URL("../src/sessions/store-thinking.ts", import.meta.url),
-      "utf8",
-    );
-    expect(source).toMatch(/import \{[^}]*\bTRUNCATED_MARK\b[^}]*\} from "\.\/events\.js";/u);
-    expect(source).not.toContain(MARK);
+    for (const file of ["events.ts", "store-thinking.ts"]) {
+      const source = readFileSync(new URL(`../src/sessions/${file}`, import.meta.url), "utf8");
+      expect(source).toMatch(
+        /import \{[^}]*\bTRUNCATED_MARK\b[^}]*\} from "\.\.\/core\/upstream-failure\.js";/u,
+      );
+      expect(source).not.toContain(MARK);
+    }
   });
 });

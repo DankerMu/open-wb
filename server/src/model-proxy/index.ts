@@ -6,10 +6,23 @@ import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { FastifyInstance, FastifyReply, FastifyRequest, onRequestHookHandler } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import {
+  connectReply,
+  gatewayReply,
+  NO_CONNECT_REPLY,
+  NO_RESPONSE_REPLY,
+  statusReply,
+  type UpstreamFailureReply,
+  upstreamExcerpt,
+  upstreamSecretList,
+} from "../core/upstream-failure.js";
+import { readErrorBody } from "./error-body.js";
 import { isAllowedModel } from "./model-guard.js";
 
 const BODY_LIMIT = 4 * 1024 * 1024;
-const CONNECT_DEADLINE_MS = 10_000;
+/** The two deadlines when the caller passes none, which is what production assembly does (#909). */
+export const DEFAULT_CONNECT_DEADLINE_MS = 10_000;
+export const DEFAULT_FIRST_BYTE_DEADLINE_MS = 120_000;
 const TOKEN_PATTERN = /^[0-9A-Fa-f]{64}$/u;
 const JSON_MEDIA = /^application\/json(?:\s*;.*)?$/iu;
 
@@ -27,6 +40,29 @@ export interface ModelProxyOptions {
   upstream?: ModelProxyUpstream | undefined;
   /** 白名单模型 id 的非空集合，由装配方给出；本模块不读环境。 */
   allowedModels: ReadonlySet<string>;
+  /** 自发起连接到传输（DNS/TCP/TLS）建立的期限，到期回 424 `no_connect`；生产装配不传。 */
+  connectDeadlineMs?: number | undefined;
+  /** 自发出上游请求到收到响应头的期限，到期回 424 `no_response`；生产装配不传。 */
+  firstByteDeadlineMs?: number | undefined;
+}
+
+/** The configured upstream with what the proxy derives from it once, at registration. */
+interface UpstreamLink {
+  upstream: ModelProxyUpstream;
+  /** The excerpt's secret list: the API key and the base URL's parts (design D9). */
+  secrets: readonly string[];
+  connectMs: number;
+  firstByteMs: number;
+}
+
+/** A failure the proxy answers itself, with a `wb_upstream` envelope instead of the upstream's. */
+class UpstreamFailure extends Error {
+  readonly reply: UpstreamFailureReply;
+
+  constructor(reply: UpstreamFailureReply) {
+    super("upstream failure");
+    this.reply = reply;
+  }
 }
 
 interface Exchange {
@@ -34,6 +70,7 @@ interface Exchange {
   req: ClientRequest | undefined;
   response: IncomingMessage | undefined;
   connectTimer: ReturnType<typeof setTimeout> | undefined;
+  firstByteTimer: ReturnType<typeof setTimeout> | undefined;
   cancelled: boolean;
   cancel(): void;
 }
@@ -56,6 +93,7 @@ export function registerModelProxy(app: FastifyInstance, options: ModelProxyOpti
   if (allowedModels.size === 0) {
     throw new Error("model proxy needs at least one allowed model");
   }
+  const link = upstreamLink(options);
   const secureSockets = new WeakSet<Socket>();
   const exchanges = new Set<Exchange>();
   const uploads = new Set<IncomingUpload>();
@@ -91,14 +129,13 @@ export function registerModelProxy(app: FastifyInstance, options: ModelProxyOpti
       next();
     });
     instance.post("/v1/chat/completions", { bodyLimit: BODY_LIMIT }, async (request, reply) => {
-      const upstream = options.upstream;
-      if (upstream === undefined) {
+      if (link === undefined) {
         throw new HttpError("agent_unavailable");
       }
       await proxyCompletion(
         request,
         reply,
-        upstream,
+        link,
         exchanges,
         secureSockets,
         uploadsByRequest.get(request),
@@ -106,6 +143,19 @@ export function registerModelProxy(app: FastifyInstance, options: ModelProxyOpti
     });
     done();
   });
+}
+
+function upstreamLink(options: ModelProxyOptions): UpstreamLink | undefined {
+  const upstream = options.upstream;
+  if (upstream === undefined) {
+    return undefined;
+  }
+  return {
+    upstream,
+    secrets: upstreamSecretList({ apiKey: upstream.apiKey, baseUrl: upstream.baseUrl, paths: [] }),
+    connectMs: options.connectDeadlineMs ?? DEFAULT_CONNECT_DEADLINE_MS,
+    firstByteMs: options.firstByteDeadlineMs ?? DEFAULT_FIRST_BYTE_DEADLINE_MS,
+  };
 }
 
 function parseJsonBytes(
@@ -232,7 +282,7 @@ function bearerToken(header: string | string[] | undefined): string | null {
 async function proxyCompletion(
   request: FastifyRequest,
   reply: FastifyReply,
-  upstream: ModelProxyUpstream,
+  link: UpstreamLink,
   exchanges: Set<Exchange>,
   secureSockets: WeakSet<Socket>,
   upload: IncomingUpload | undefined,
@@ -246,19 +296,18 @@ async function proxyCompletion(
   request.raw.once("aborted", exchange.cancel);
   reply.raw.once("close", exchange.cancel);
   try {
-    const response = await requestUpstream(
-      upstream,
-      request,
-      request.body,
-      exchange,
-      secureSockets,
-    );
+    const response = await requestUpstream(link, request, request.body, exchange, secureSockets);
     exchange.response = response;
-    await sendUpstream(reply, response, exchange);
+    await sendUpstream(reply, response, exchange, link.secrets);
   } catch (error) {
-    if (!exchange.cancelled) {
-      throw error instanceof HttpError ? error : new HttpError("agent_unavailable");
+    if (exchange.cancelled) {
+      return;
     }
+    if (error instanceof UpstreamFailure) {
+      reply.code(error.reply.status).type("application/json").send(error.reply.body);
+      return;
+    }
+    throw error instanceof HttpError ? error : new HttpError("agent_unavailable");
   } finally {
     request.raw.off("aborted", exchange.cancel);
     reply.raw.off("close", exchange.cancel);
@@ -274,6 +323,7 @@ function createExchange(reply: FastifyReply): Exchange {
     req: undefined,
     response: undefined,
     connectTimer: undefined,
+    firstByteTimer: undefined,
     cancelled: false,
     cancel(): void {
       if (exchange.cancelled) {
@@ -282,6 +332,7 @@ function createExchange(reply: FastifyReply): Exchange {
       exchange.cancelled = true;
       controller.abort();
       clearTimeout(exchange.connectTimer);
+      clearTimeout(exchange.firstByteTimer);
       exchange.req?.destroy();
       exchange.response?.destroy();
       if (!reply.raw.writableEnded && !reply.raw.destroyed) {
@@ -294,6 +345,7 @@ function createExchange(reply: FastifyReply): Exchange {
 
 function disposeExchange(exchange: Exchange): void {
   clearTimeout(exchange.connectTimer);
+  clearTimeout(exchange.firstByteTimer);
   if (exchange.cancelled) {
     exchange.req?.destroy();
     exchange.response?.destroy();
@@ -304,12 +356,11 @@ async function sendUpstream(
   reply: FastifyReply,
   upstreamResponse: IncomingMessage,
   exchange: Exchange,
+  secrets: readonly string[],
 ): Promise<void> {
   const status = upstreamResponse.statusCode ?? 502;
   if (status >= 500) {
-    upstreamResponse.resume();
-    upstreamResponse.destroy();
-    throw new HttpError("agent_unavailable");
+    throw new UpstreamFailure(await failureReply(status, upstreamResponse, secrets));
   }
   reply.hijack();
   if (!reply.raw.headersSent) {
@@ -325,6 +376,20 @@ async function sendUpstream(
   }
 }
 
+/** 504 / 524 are answered without reading a byte; any other ≥500 with its sanitised excerpt. */
+async function failureReply(
+  status: number,
+  upstreamResponse: IncomingMessage,
+  secrets: readonly string[],
+): Promise<UpstreamFailureReply> {
+  if (status === 504 || status === 524) {
+    upstreamResponse.destroy();
+    return gatewayReply(status);
+  }
+  const { body, cut } = await readErrorBody(upstreamResponse);
+  return statusReply(status, upstreamExcerpt(body.toString("utf8"), secrets, cut));
+}
+
 function passthroughHeaders(upstreamResponse: IncomingMessage): OutgoingHttpHeaders {
   const headers: OutgoingHttpHeaders = { "cache-control": "no-store" };
   for (const name of ["content-type", "content-encoding", "location"] as const) {
@@ -337,68 +402,67 @@ function passthroughHeaders(upstreamResponse: IncomingMessage): OutgoingHttpHead
 }
 
 function requestUpstream(
-  upstream: ModelProxyUpstream,
+  link: UpstreamLink,
   request: FastifyRequest,
   body: Buffer,
   exchange: Exchange,
   secureSockets: WeakSet<Socket>,
 ): Promise<IncomingMessage> {
-  const endpoint = joinChatCompletions(upstream.baseUrl);
-  const client = endpoint.protocol === "https:" ? https : http;
-  const headers: OutgoingHttpHeaders = {
-    authorization: `Bearer ${upstream.apiKey}`,
-    "content-length": body.length,
-    host: endpoint.host,
-  };
-  const contentType = request.headers["content-type"];
-  if (typeof contentType === "string") {
-    headers["content-type"] = contentType;
-  }
   return new Promise((resolve, reject) => {
     let settled = false;
     let removeSocketListener: (() => void) | undefined;
-    const cleanupSocketListener = (): void => {
+    const settle = (): boolean => {
+      if (settled) {
+        return false;
+      }
       removeSocketListener?.();
       removeSocketListener = undefined;
+      settled = true;
+      clearTimeout(exchange.connectTimer);
+      clearTimeout(exchange.firstByteTimer);
+      return true;
     };
     const rejectOnce = (error: unknown): void => {
-      if (settled) {
-        return;
+      if (settle()) {
+        reject(error);
       }
-      cleanupSocketListener();
-      settled = true;
-      clearTimeout(exchange.connectTimer);
-      reject(error);
     };
-    const req = client.request(endpoint, { method: "POST", headers }, (response) => {
-      if (settled || exchange.cancelled) {
-        response.destroy();
-        rejectOnce(new HttpError("agent_unavailable"));
-        return;
-      }
-      cleanupSocketListener();
-      settled = true;
-      clearTimeout(exchange.connectTimer);
-      resolve(response);
-    });
+    let opened: { req: ClientRequest; tls: boolean };
+    try {
+      opened = openUpstreamRequest(link.upstream, request, body.length, (response) => {
+        if (settled || exchange.cancelled) {
+          response.destroy();
+          rejectOnce(new HttpError("agent_unavailable"));
+          return;
+        }
+        settle();
+        resolve(response);
+      });
+    } catch (error) {
+      // 构造上游请求时同步抛错（如密钥里的非法头字符）：与连接失败同一种可重试应答。
+      rejectOnce(new UpstreamFailure(connectReply(errorCode(error))));
+      return;
+    }
+    const { req, tls } = opened;
     exchange.req = req;
+    // 期限到期先以期限的应答落定、再销毁请求：销毁引出的 error 事件不得把 424 改成 connect.*。
     exchange.connectTimer = setTimeout(() => {
+      rejectOnce(new UpstreamFailure(NO_CONNECT_REPLY));
       req.destroy();
-      rejectOnce(new HttpError("agent_unavailable"));
-    }, CONNECT_DEADLINE_MS);
-    req.on("error", rejectOnce);
+    }, link.connectMs);
+    exchange.firstByteTimer = setTimeout(() => {
+      rejectOnce(new UpstreamFailure(NO_RESPONSE_REPLY));
+      req.destroy();
+    }, link.firstByteMs);
+    req.on("error", (error) => {
+      rejectOnce(new UpstreamFailure(connectReply(errorCode(error))));
+    });
     req.on("socket", (socket) => {
-      removeSocketListener = clearAfterConnection(
-        req,
-        socket,
-        endpoint.protocol === "https:",
-        secureSockets,
-        () => {
-          if (!settled) {
-            clearTimeout(exchange.connectTimer);
-          }
-        },
-      );
+      removeSocketListener = clearAfterConnection(req, socket, tls, secureSockets, () => {
+        if (!settled) {
+          clearTimeout(exchange.connectTimer);
+        }
+      });
     });
     exchange.controller.signal.addEventListener(
       "abort",
@@ -415,6 +479,31 @@ function requestUpstream(
     }
     req.end(body);
   });
+}
+
+function openUpstreamRequest(
+  upstream: ModelProxyUpstream,
+  request: FastifyRequest,
+  contentLength: number,
+  onResponse: (response: IncomingMessage) => void,
+): { req: ClientRequest; tls: boolean } {
+  const endpoint = joinChatCompletions(upstream.baseUrl);
+  const tls = endpoint.protocol === "https:";
+  const headers: OutgoingHttpHeaders = {
+    authorization: `Bearer ${upstream.apiKey}`,
+    "content-length": contentLength,
+    host: endpoint.host,
+  };
+  const contentType = request.headers["content-type"];
+  if (typeof contentType === "string") {
+    headers["content-type"] = contentType;
+  }
+  const req = (tls ? https : http).request(endpoint, { method: "POST", headers }, onResponse);
+  return { req, tls };
+}
+
+function errorCode(error: unknown): unknown {
+  return typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
 }
 
 function clearAfterConnection(

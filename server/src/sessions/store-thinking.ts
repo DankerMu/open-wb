@@ -8,7 +8,7 @@
  */
 import type { DatabaseSync } from "node:sqlite";
 import { createSqliteTextDecoder } from "../core/db/index.js";
-import { TRUNCATED_MARK } from "./events.js";
+import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { decodeNullableText, requireChanges } from "./store-branch.js";
 
 const MAX_THINKING_POINTS = 32_768;

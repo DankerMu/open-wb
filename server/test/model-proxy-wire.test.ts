@@ -1,14 +1,12 @@
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  AGENT_UNAVAILABLE_ENVELOPE,
   ALLOWED_MODELS,
   API_KEY,
   expectFetchEnvelope,
   expectReplacedCredentials,
   FOUR_MIB,
   jsonBodyOfSize,
-  LIVE_TOKEN,
   liveTokenTable,
   MODEL_BODY,
   postCompletions,
@@ -34,6 +32,10 @@ const USER_HELLO = { role: "user", content: "hello from workbuddy" };
 const EXPECTED_COMMAND = "echo workbuddy-smoke";
 const EXPECTED_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
+
+function wbEnvelope(message: string, param: string): unknown {
+  return { error: { message, type: "wb_upstream", param } };
+}
 
 function configured(origin: string, basePath = "/v1") {
   return {
@@ -248,24 +250,27 @@ describe("non5xx passthrough and 5xx sanitization", () => {
     });
   });
 
-  it("maps upstream 5xx to local 502, discards the raw body, and does not retry", async () => {
+  // Upstream failures normalized (#909): the local 502 is the `wb_upstream` summary, not the raw
+  // body; the upstream never receives the session bearer, so only the API key can come back.
+  it("maps upstream 5xx to the local status.503 summary, removes the key, and does not retry", async () => {
     const upstream = resources.track(
       await startRecordingUpstream(({ response }) => {
         response.writeHead(503, { "content-type": "text/plain" });
-        response.end(`private ${API_KEY} ${LIVE_TOKEN}`);
+        response.end(`private ${API_KEY}`);
       }),
     );
     await withListeningProxy(configured(upstream.origin), async (origin) => {
       await expectFetchEnvelope(
         await postCompletions(origin, { body: '{"model":"m1","mode":"error"}' }),
         502,
-        AGENT_UNAVAILABLE_ENVELOPE,
+        wbEnvelope("模型服务返回 HTTP 503：private [已移除]", "status.503"),
       );
       expect(upstream.requests).toHaveLength(1);
+      expect(upstream.requests[0]?.headers.authorization).toBe(`Bearer ${API_KEY}`);
     });
   });
 
-  it("maps a refused configured port to 502 without leaking the API key", async () => {
+  it("maps a refused configured port to 502 connect.ECONNREFUSED without leaking the API key", async () => {
     const occupier = resources.track(
       await startRecordingUpstream(({ response }) => {
         response.writeHead(200);
@@ -275,13 +280,17 @@ describe("non5xx passthrough and 5xx sanitization", () => {
     const closedPort = occupier.port;
     await occupier.close();
     await withListeningProxy(configured(`http://127.0.0.1:${closedPort}`), async (origin) => {
-      await expectFetchEnvelope(await postCompletions(origin), 502, AGENT_UNAVAILABLE_ENVELOPE);
+      await expectFetchEnvelope(
+        await postCompletions(origin),
+        502,
+        wbEnvelope("无法连接模型服务（ECONNREFUSED）", "connect.ECONNREFUSED"),
+      );
     });
   });
 });
 
 describe("real #88 fake-upstream composition", () => {
-  it("replays the two-round script and sanitizes the fixture 500", async () => {
+  it("replays the two-round script and summarises the fixture 500", async () => {
     const fake = resources.track(await start({ apiKey: API_KEY }));
     await withListeningProxy(configured(`http://127.0.0.1:${fake.port}`), async (origin) => {
       const first = await postCompletions(origin, {
@@ -306,7 +315,14 @@ describe("real #88 fake-upstream composition", () => {
           stream: true,
         }),
       });
-      await expectFetchEnvelope(failed, 502, AGENT_UNAVAILABLE_ENVELOPE);
+      await expectFetchEnvelope(
+        failed,
+        502,
+        wbEnvelope(
+          '模型服务返回 HTTP 500：{"error":{"message":"fake upstream error"}}',
+          "status.500",
+        ),
+      );
     });
   });
 });
