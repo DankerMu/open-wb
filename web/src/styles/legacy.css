@@ -1,6 +1,0 @@
-/* Imported by ../styles.css into the `legacy` cascade layer. The global base rules that used to
-   live here moved to the @layer base block of ./theme.css; what is left is the two imports below
-   (./tokens.css holds the design tokens, see ATTRIBUTION.md §4). */
-
-@import "../ui/motion.css";
-@import "../ui/ui.css";

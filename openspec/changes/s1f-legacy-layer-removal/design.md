@@ -206,7 +206,7 @@ owner 最初定的是四个；2026-10-12 看过 tasks 审核之后改判为六�
     两条的锚点改成只命中块外未分层 `body` 的写法（行首匹配，如 `/^body \{/m`；块内的规则保持缩进，C2 的任务已要求）。「hex 字面量」「oklch 字面量」两条以 `var(--background)` / `var(--foreground)` 为锚点，被搬的规则里没有这两个引用，不受影响。
 - **G3 `web/test/ui-guardrails.test.ts`（依赖方向与取色）**
   - Radix 只在两个拷入目录：`RADIX_ALLOWED_DIRS` 去掉 `web/src/ui/`。变异：`web/src/features` 下一个文件导入 `@radix-ui/react-dialog` → 红；`web/src/components/icon.tsx` 导入 `radix-ui` → 红；`isApplicationLayer("web/src/ui/dialog.tsx")` 由 `false` 变为 `true`（旧目录不再是例外，重新出现在那里的文件若导入 Radix 同样判红，且先被 G1 判红）。
-  - 「导入一个已卸载的 Radix 单包」：在拷入层之外由上一条判红；在拷入层之内不归分层守卫管——包不在 `package.json` 里，`make check` 的类型检查与 knip 的未登记依赖检查会拦下。
+  - 「导入一个已卸载的 Radix 单包」：在拷入层之外由上一条判红；在拷入层之内不归分层守卫管——包不在 `package.json` 里，`make check` 的类型检查与 knip 的未登记依赖检查会拦下。（**实施更正，#1402 实测**：类型检查与构建**不**报——这些单包仍作为合包 `radix-ui` 的传递依赖装在 `node_modules` 里；报的是 knip 的 Unlisted dependencies 与依赖方向守卫。）
   - 取色扫描的对象由「features、routes、`web/src/ui` 的 css 与 tsx」改为「features、routes、直接放在 `web/src/components/` 下的 `.tsx`」，三组都断言非空。内联 `style={` 的扫描对象同样改为后者。
   - `motion.css` 一组删除；`ATTRIBUTION.md` 一组去掉「单包数大于 0」，其余不变。
 - **走查**：`web/e2e/ui-walk-files.ts` 的 `expectLegacyOverPreflight` 与 `ui-walk-layout.ts` 里对它的调用删除（D）。新增的走查步骤至多一种：B2 取保留分支且不通过的现象只在真实浏览器复现时，那一步成为常驻步骤（D4）。「全局基础规则压过 preflight」改由 G2 的静态断言与入口导入次序保证（规格场景「旧页面规则压过 preflight」的正文随之改为静态判定）。
@@ -381,7 +381,7 @@ C2 之后 `legacy.css` 只剩文件头与两条 `@import`；D 删除。
 - **[删测试时把仍然有效的断言一起删掉]** → D14 逐文件规定哪些用例要留下并搬到哪里；删除的文件在 PR 的偏离记录里逐个列出「里面有没有与已删代码无关的用例」。B1 成批删除查 Toast 元素的断言是唯一被许可的例外，条件是逐用例有整页范围的文本或角色断言兜底（D3、D14）。
 - **[`theme.css` 的 `base` 块变成新的杂物间]** → G2 把块内选择器钉成清单，加一个就红；规格写明只减不增。
 - **[A 至 C2 的过渡守卫写错，留下一个放空的断言]** → 每一刀的变异证据任务要求对真实文件做一次变异并看到红；清单类断言同时断言长度与「目录里的每个文件都在清单里」。
-- **[卸载单包后某处仍隐式依赖它]** → 类型检查、构建与 knip 在 `make check` 里都会报；`make ui-walk` 证明运行时没有缺模块。
+- **[卸载单包后某处仍隐式依赖它]** → 类型检查、构建与 knip 在 `make check` 里都会报；`make ui-walk` 证明运行时没有缺模块。（**实施更正，#1402 实测**：类型检查与构建**不**报——这些单包仍作为合包 `radix-ui` 的传递依赖装在 `node_modules` 里；报的是 knip 的 Unlisted dependencies 与依赖方向守卫。）
 - **取舍**：保留 `ui-*` 类名意味着仓库里还有十几条非 Tailwind 的类规则。它们现在集中在一个受清单约束的块里，不再是「第二套样式体系」，但也不是零。把它们改写成 Tailwind 类是可以以后单独做的事，本 change 不做。
 
 ## Migration Plan

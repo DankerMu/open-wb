@@ -1,10 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  blockBody,
   COLOR_LITERAL_PATTERNS,
   listRepoFiles,
   readRepoFile,
-  stripComments,
   stripTsComments,
 } from "./ui-support.js";
 
@@ -41,7 +39,6 @@ describe("颜色 grep 守卫", () => {
 
   const features = () => listRepoFiles("web/src/features", (path) => /\.(css|tsx)$/.test(path));
   const routes = () => listRepoFiles("web/src/routes", () => true);
-  const uiCss = () => listRepoFiles("web/src/ui", (path) => path.endsWith(".css"));
   /** 直接放在 `web/src/components/` 下的 `.tsx`（自写共享组件）；两个拷入目录里的文件不算。 */
   const isSharedTsx = (path: string) => /^web\/src\/components\/[^/]+\.tsx$/.test(path);
   const sharedTsx = () => listRepoFiles("web/src/components", isSharedTsx);
@@ -59,19 +56,18 @@ describe("颜色 grep 守卫", () => {
     );
   });
 
-  it("features/routes、web/src/ui 的 css 与直接放在 web/src/components 下的 tsx 无 hex/rgba 字面颜色（含注释行）", () => {
-    const groups = [features(), routes(), uiCss(), sharedTsx()];
+  it("features/routes 与直接放在 web/src/components 下的 tsx 无 hex/rgba 字面颜色（含注释行）", () => {
+    const groups = [features(), routes(), sharedTsx()];
     for (const group of groups) expect(group.length).toBeGreaterThan(0);
     expect(hitsIn(groups.flat(), literalHits)).toEqual([]);
   });
 
-  it("features/routes 与直接放在 web/src/components 下的 tsx 无 --wb-palette-（仅 ui css 豁免）", () => {
-    // web/src/ui/**/*.css 是调色板 → 组件的唯一映射边界（demo 组件规则直接引用调色板），
-    // 故只有它可引用 --wb-palette-*；feature/routes 只用语义 token，自写共享组件的 tsx 只写类名。
-    const shared = sharedTsx();
-    expect(shared.length).toBeGreaterThan(0);
-    const paths = [...features(), ...routes(), ...shared];
-    expect(hitsIn(paths, paletteHits)).toEqual([]);
+  it("features/routes 与直接放在 web/src/components 下的 tsx 无 --wb-palette-（只有 theme.css 可引用）", () => {
+    // web/src/styles/theme.css 是调色板 → 组件的唯一映射边界（ui-foundation「主题映射」），故只有它可引用
+    // --wb-palette-*；feature/routes 只用语义 token，自写共享组件的 tsx 只写类名。
+    const groups = [features(), routes(), sharedTsx()];
+    for (const group of groups) expect(group.length).toBeGreaterThan(0);
+    expect(hitsIn(groups.flat(), paletteHits)).toEqual([]);
   });
 
   it("去注释自证：行注释与块注释被剥掉且行号不变，字符串里的 // 与颜色保留", () => {
@@ -116,12 +112,8 @@ describe("依赖方向 grep 守卫", () => {
   /** 静态 `from "…"`、副作用 `import "…"` 与动态 `import("…")`，目标为 `@radix-ui/…` 单包或 `radix-ui` 合包。 */
   const RADIX_IMPORT_PATTERNS = [/(?:from|import)\s*\(?\s*["'](?:@radix-ui\/|radix-ui["'/])/];
   const radixHits = (text: string) => lineHits(text, RADIX_IMPORT_PATTERNS);
-  /** 只有拷入层与冻结区可以导入 Radix；其余 `web/src` 都是应用层。 */
-  const RADIX_ALLOWED_DIRS = [
-    "web/src/components/ui/",
-    "web/src/components/assistant-ui/",
-    "web/src/ui/",
-  ];
+  /** 只有两个拷入目录可以导入 Radix；其余 `web/src` 都是应用层。 */
+  const RADIX_ALLOWED_DIRS = ["web/src/components/ui/", "web/src/components/assistant-ui/"];
   const isApplicationLayer = (path: string) =>
     /\.tsx?$/.test(path) && !RADIX_ALLOWED_DIRS.some((dir) => path.startsWith(dir));
 
@@ -143,7 +135,7 @@ describe("依赖方向 grep 守卫", () => {
     expect(radixHits('import { Button } from "@/components/ui/button";')).toEqual([]);
   });
 
-  it("应用层判定：只有两个拷入目录与 web/src/ui 之下的文件不算应用层", () => {
+  it("应用层判定：只有两个拷入目录之下的文件不算应用层，已删除的 web/src/ui 不再是例外", () => {
     expect(isApplicationLayer("web/src/main.tsx")).toBe(true);
     expect(isApplicationLayer("web/src/lib/utils.ts")).toBe(true);
     expect(isApplicationLayer("web/src/features/auth/footer.tsx")).toBe(true);
@@ -156,11 +148,12 @@ describe("依赖方向 grep 守卫", () => {
     expect(isApplicationLayer("web/src/uix/a.ts")).toBe(true);
     expect(isApplicationLayer("web/src/components/ui/button.tsx")).toBe(false);
     expect(isApplicationLayer("web/src/components/assistant-ui/thread.tsx")).toBe(false);
-    expect(isApplicationLayer("web/src/ui/dialog.tsx")).toBe(false);
+    // 旧基元层的目录不再是例外：重新出现在那里的文件按应用层判。
+    expect(isApplicationLayer("web/src/ui/dialog.tsx")).toBe(true);
     expect(isApplicationLayer("web/src/styles.css")).toBe(false);
   });
 
-  it("应用层（web/src 除拷入层与 web/src/ui 外的全部 .ts/.tsx）不直接 import Radix", () => {
+  it("应用层（web/src 除两个拷入目录外的全部 .ts/.tsx）不直接 import Radix", () => {
     const paths = listRepoFiles("web/src", isApplicationLayer);
     for (const dir of ["web/src/features/", "web/src/routes/", "web/src/lib/"]) {
       expect(paths.some((path) => path.startsWith(dir))).toBe(true);
@@ -178,7 +171,7 @@ describe("依赖方向 grep 守卫", () => {
     expect(radixHits(readRepoFile("web/src/components/ui/button.tsx"))).toHaveLength(1);
   });
 
-  it("判定自证：自写共享组件导入 Radix 判失败，同样的导入放在拷入目录里不判", () => {
+  it("判定自证：自写共享组件、features 下的文件与 web/src/ui 下重新出现的文件导入 Radix 各判失败，同样的导入放在拷入目录里不判", () => {
     /** 与上一条同一个判定拆成按文件的形式：应用层的文件才扫，命中即违例。 */
     const violations = (path: string, text: string) =>
       isApplicationLayer(path) ? radixHits(text).map((hit) => `${path}:${hit}`) : [];
@@ -195,6 +188,13 @@ describe("依赖方向 grep 守卫", () => {
     expect(
       violations("web/src/components/icon.tsx", 'import { Check } from "lucide-react";'),
     ).toEqual([]);
+    // 已卸载的单包与合包在应用层都判；旧目录下重新出现的文件同样判。
+    const single = 'import * as Dialog from "@radix-ui/react-dialog";';
+    const tree = "web/src/features/files/tree.tsx";
+    expect(violations(tree, single)).toEqual([`${tree}:1: ${single}`]);
+    expect(violations(tree, 'import { Dialog } from "radix-ui";')).toHaveLength(1);
+    expect(violations("web/src/ui/x.tsx", slot)).toEqual([`web/src/ui/x.tsx:1: ${slot}`]);
+    expect(violations("web/src/ui/x.tsx", single)).toHaveLength(1);
   });
 });
 
@@ -212,42 +212,6 @@ describe("旧按钮类 grep 守卫", () => {
     const paths = listRepoFiles("web/src", (path) => /\.(tsx?|css)$/.test(path));
     expect(paths.length).toBeGreaterThan(0);
     expect(hitsIn(paths, legacyButtonHits)).toEqual([]);
-  });
-});
-
-describe("motion.css", () => {
-  const UTILITIES = ["ui-fadein", "ui-pop", "ui-pulse", "ui-caret", "ui-spin"];
-  const KEYFRAMES = ["wb-fadein", "wb-pop", "wb-pulse", "wb-caret", "wb-spin", "wb-drawer-in"];
-
-  it("提供六组关键帧与五个工具类", () => {
-    const motion = stripComments(readRepoFile("web/src/ui/motion.css"));
-    for (const name of KEYFRAMES) expect(motion).toMatch(new RegExp(`@keyframes ${name}\\s*\\{`));
-    for (const name of UTILITIES) {
-      expect(motion).toMatch(
-        new RegExp(`\\.${name}\\s*\\{[^}]*animation:\\s*wb-${name.slice(3)}\\b`),
-      );
-    }
-    expect(motion).not.toMatch(/wb-float|wb-shimmer/);
-  });
-
-  it("reduced-motion 块把每个工具类置为 animation: none 与 transition: none", () => {
-    const motion = stripComments(readRepoFile("web/src/ui/motion.css"));
-    const reduced = blockBody(motion, /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{/);
-    const rules = [...reduced.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(
-      ([, selectors = "", body = ""]) => ({
-        selectors: selectors.split(",").map((selector) => selector.trim()),
-        body,
-      }),
-    );
-    for (const name of UTILITIES) {
-      const covering = rules.filter(
-        (rule) =>
-          rule.selectors.includes(`.${name}`) &&
-          /animation:\s*none/.test(rule.body) &&
-          /transition:\s*none/.test(rule.body),
-      );
-      expect(covering, name).not.toHaveLength(0);
-    }
   });
 });
 

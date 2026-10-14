@@ -395,7 +395,9 @@ describe("manifest 与静态契约 (S10)", () => {
     ]);
     expect(readRepoFile("web/src/routes/router.tsx")).not.toContain("export const routeManifest");
     expect(readRepoFile("web/src/routes/shell/sidebar.tsx")).not.toContain("@radix-ui");
-    const styles = readRepoFile("web/src/styles/legacy.css");
+    const styles = readRepoFile("web/src/styles/theme.css");
+    // 读到的确是全局样式所在的那份文件（base 块里有 `.ui-alert`），下面的「不含」才不是空话。
+    expect(styles).toContain("  .ui-alert {");
     expect(styles).not.toContain(".account-footer");
     expect(styles).not.toContain(".sidebar-link");
     expect(styles).not.toContain("routes/shell/");

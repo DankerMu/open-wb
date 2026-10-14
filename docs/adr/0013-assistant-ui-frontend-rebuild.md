@@ -167,7 +167,7 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
     断言它关闭、外层仍在、其间没有发出任何写请求（撤回冲突确认框用 `page.route` 造 409）；(4) 同一脚本的时序探针在「接着兜底」与「去掉兜底」两份构建上各跑一遍，逐项比对。
   - 十个调用点的结论（去掉兜底时）：`导航` 覆盖层、退出确认框、会话删除确认框、撤回冲突确认框、`全部自动` 确认框、文件的创建 / 重命名 / 移动对话框、文件删除确认框——七处通过，
     (1)(2)(3) 全绿（(3) 含嵌套：`导航` 覆盖层里的确认框与对话框、窄屏工作空间侧边栏模态层里的文件对话框都只关最内一层，外层再按一次才关）。
-    (4) 只覆盖了其中一部分——打开后不等焦点落定就按 Escape（退出确认框、`导航` 覆盖层），以及嵌套层上间隔 0–600ms 的两次 Escape（六种组合）——两份构建结果相同；其余四处没有做两份构建的时序比对。
+    (4) 只覆盖了其中一部分——打开后不等焦点落定就按 Escape（退出确认框、`导航` 覆盖层），以及嵌套层上间隔 0–600ms 的两次 Escape（六种组合）——两份构建结果相同；其余四处（会话删除确认框、撤回冲突确认框、`全部自动` 确认框、文件删除确认框）没有做两份构建的时序比对（出处：#1399 的 PR #1421 十行结果表的「两份构建的时序比对」一列；文件的创建 / 重命名 / 移动对话框只经嵌套双击一项比对过——侧边栏模态层内的文件重命名）。
     重命名 / 另存为工作空间对话框、项目配置弹层、窄屏的工作空间侧边栏模态层——三处**不通过**：(1)(2)(3) 同样全绿，但 (4) 里由顶栏按钮经键盘打开时，紧跟着 Enter 的那次 Escape 关不掉它们。
   - 现象（实测，Chromium，真实按键）：键盘聚焦顶栏按钮，它的 tooltip 出现；按 Enter 打开覆盖层、焦点进入其内，随即按 Escape——按键被标为已处理，覆盖层仍开着，再按一次才关闭。
     项目配置弹层上聚焦、Enter、Escape 紧挨着发出时，去掉兜底 12 次里 12 次没关，接着兜底 12 次里 0 次；Enter 与 Escape 之间隔 20ms 或 50ms 时两边都是 12 次里 0 次。
@@ -187,3 +187,20 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
     （任务组 4，#1400 已改：文件现在在 `web/src/components/escape-fallback.ts`，内容未变；同一条守卫的指定路径改为这个位置，并断言 `web/src/ui/escape-fallback.ts` 不再存在——这是终态。上面各条里的 `web/src/ui/…` 是实测当时的位置。）
   - 输入法：组合中的 Escape 在两份构建上表现相同（实测，Chromium，用 CDP `Input.imeSetComposition` 合成组合：页面收到 `key: "Escape"`、`isComposing: true`，重命名对话框在两份构建上都是 6 次里 6 次关闭）——
     关闭它的是 Radix，兜底的组合判断只管兜底自己那条路径。真实输入法在各平台上发出的按键没有测。
+- **终态达成：旧基元层与 `legacy` 层删除**（任务组 6，#1402）。
+  - 删了什么：`web/src/styles/legacy.css`、`web/src/ui/ui.css`、`web/src/ui/motion.css`，`web/src/ui/` 目录随之不存在；入口 `web/src/styles.css` 的层声明改为
+    `@layer theme, base, components, utilities;`，不再有 `legacy` 层与对 `legacy.css` 的导入。`web/src` 下的样式文件恰为三个：`styles.css`、`styles/tokens.css`、`styles/theme.css`。
+    随文件消失的规则只有三组，删除前都没有使用方（`grep` 实测：`web/src`、`web/test`、`web/e2e`）：`.ui-sr-only`，`motion.css` 的六组 `@keyframes wb-*`，五个动效工具类及其 reduce 块。
+  - 全局基础规则与 `ui-*` 类在哪：`theme.css` 的 `@layer base` 块（任务组 5，#1401 搬入；本刀不改它）——边框色基线、`Icon` / `BrandMark` 的 `ui-icon*` / `ui-brand*`、全局 reset 与
+    `:focus-visible`、选区、滚动条、`.ui-alert` / `.ui-muted` / `.ui-empty`。理由（design D7）：这些规则必须排在 preflight 之后、utilities 之下。未分层会压过 utilities（全局 `:focus-visible` 的圆角盖掉所有 `rounded-*`，
+    `button { padding: 0 }` 盖掉所有 `px-*`）；放进 `base` 层则与 preflight 同层，靠靠后的源码顺序与不低于它的特异性取胜，使用处的 Tailwind 类照旧压过它们。原样搬、不去重、不改写成 Tailwind 类。
+    块内的选择器由 `web/test/ui-foundation-entry.test.ts` 按清单钉住，只减不增。
+  - 删层不改变计算样式：这是读代码推出的，本刀没有再做计算样式比对——#1401 之后 `legacy` 层里已没有被使用的规则（上一条的 `grep`），而逐探针的 A/A 与 A/B 比对是 #1401 做的（记录在它的 PR 里）。
+    本刀的实测只有 `make ui-walk` 两个 project 通过。
+  - 守卫改为终态断言：三份清单（冻结区文件、已迁移区域、导入白名单）退役。`web/test/ui-layering.test.ts` 断言 `web/src/ui` 下没有文件、`web/src` 的任何 `.ts`/`.tsx` 都不从它导入（不再只查清单内的文件）、
+    源码里不出现 `useToast` 与 `ToastProvider`、三个样式文件之外没有 `.css`；`ui-layering-chat.test.ts` 的显式列表语义改为扫描除两个拷入目录之外的全部 `.tsx`；`ui-foundation-entry.test.ts` 断言层声明、七条导入与
+    「样式文件恰为三个」；`ui-guardrails.test.ts` 的 Radix 允许目录只剩两个拷入目录，`web/src/ui` 不再是例外。
+  - 走查的层序探针（`expectLegacyOverPreflight`）删除，没有新增走查步骤：「全局基础规则压过 preflight」改由上述静态断言与入口的导入次序保证，真实浏览器里不再有专门读这一点的探针。
+  - 依赖：七个 `@radix-ui/react-*` 单包（`dialog`、`dropdown-menu`、`popover`、`radio-group`、`switch`、`tooltip` 在 #1397，`toast` 在 #1398）已卸载，本刀不增删依赖。被卸的是直接依赖声明：
+    它们仍作为合包 `radix-ui` 的传递依赖留在 lockfile 与产物里（design D13）。
+  - 没有做的：包体上限仍不设（见 2026-10-12 增补）；两份主规格的 `## Purpose` 在归档时由编排方改（design D21）。

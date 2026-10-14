@@ -49,7 +49,7 @@ const namesBothDirsAndAdr = (line: string) =>
   COPIED_DIRS.every((dir) => line.includes(dir)) && line.includes("ADR-0013");
 
 describe("拷入层门槛豁免（ui-foundation「豁免路径精确」）", () => {
-  it("判定自证：能匹配到应用层或冻结区的通配、缺目录、多目录都不算精确", () => {
+  it("判定自证：能匹配到应用层或已删除的 web/src/ui 的通配、缺目录、多目录都不算精确", () => {
     expect(isPrecise(["src/components/ui/**", "src/components/assistant-ui/**"], "web/")).toBe(
       true,
     );

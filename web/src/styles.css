@@ -1,7 +1,8 @@
-@layer theme, base, legacy, components, utilities;
+@layer theme, base, components, utilities;
 
-/* Single style entry. Cascade: unlayered > utilities > components > legacy > base > theme.
-   Pre-Tailwind styles live in ./styles/legacy.css; tokens, the theme mapping and the global
+/* Single style entry. Cascade: unlayered > utilities > components > base > theme.
+   The global base rules and the ui-* classes live in the @layer base block of ./styles/theme.css:
+   after preflight in the same layer, below utilities. Tokens, the theme mapping and the global
    reduced-motion block below stay unlayered so they win over Tailwind utilities. */
 
 @import "tailwindcss/theme.css" layer(theme);
@@ -11,7 +12,6 @@
 @import "tw-shimmer";
 @import "./styles/tokens.css";
 @import "./styles/theme.css";
-@import "./styles/legacy.css" layer(legacy);
 
 @media (prefers-reduced-motion: reduce) {
   *,

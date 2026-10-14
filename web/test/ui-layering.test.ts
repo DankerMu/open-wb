@@ -1,25 +1,14 @@
 import { posix } from "node:path";
 import { describe, expect, it } from "vitest";
-import {
-  CHAT_DIR,
-  COPIED_DIRS,
-  isUnder,
-  MIGRATED_AREAS,
-  type SourceFile,
-} from "./ui-layering-support.js";
+import { CHAT_DIR, COPIED_DIRS, isUnder, type SourceFile } from "./ui-layering-support.js";
 import { listRepoFiles, readRepoFile, stripTsComments } from "./ui-support.js";
 
-/**
- * 导入白名单已清空：`Icon`、`IconName`、`BrandMark` 与 `useEscapeFallback` 搬到了 `web/src/components/`，
- * 清单内的文件从 `web/src/ui` 什么都不能导入。
- */
-const MIGRATED_ALLOWED_IMPORTS: string[] = [];
-
-const FROZEN_DIR = "web/src/ui";
-/** 冻结区：`web/src/ui` 的文件名只能是这 2 个的子集（可以删，不能加）。 */
-const FROZEN_FILES = ["motion.css", "ui.css"];
-
-type LayeringRules = { migrated: string[]; frozen: string[] };
+/** 旧基元层原来的目录：已随 s1f-legacy-layer-removal 整体删除，其下不得再有任何文件，也没有模块从它导入。 */
+const RETIRED_DIR = "web/src/ui";
+/** `web/src` 下仅有的三个样式文件（ui-foundation「Tailwind 入口与层叠顺序」）；应用代码不新增 `.css`。 */
+const STYLE_FILES = ["web/src/styles.css", "web/src/styles/theme.css", "web/src/styles/tokens.css"];
+/** 随 Toast 一起删除的两个标识符：`web/src` 的源码里不得再出现（注释不算）。 */
+const TOAST_IDENTIFIER = /\b(?:useToast|ToastProvider)\b/g;
 
 /** 把导入说明符解析成仓库相对路径；包名（非 `@/`、非相对路径）返回 `null`。 */
 function resolveSpecifier(from: string, specifier: string): string | null {
@@ -40,59 +29,50 @@ function importedNames(clause: string): string[] {
     .map((part) => part.split(/\s+as\s+/)[0] ?? part);
 }
 
-/** 已迁移文件里指向冻结区的导入：具名导入逐名对照白名单，其它写法（默认/命名空间/副作用/动态/再导出）一律不允许。 */
-function frozenImportViolations(file: SourceFile): string[] {
-  const code = stripTsComments(file.text);
-  const intoFrozen = (specifier: string) => {
-    const target = resolveSpecifier(file.path, specifier);
-    return target !== null && isUnder(target, FROZEN_DIR);
+/** 指向旧目录的导入：具名导入逐名报告，其它写法（默认/命名空间/副作用/动态/再导出）各报一条。没有放行的名字。 */
+function retiredImportViolations(path: string, code: string): string[] {
+  const intoRetired = (specifier: string) => {
+    const target = resolveSpecifier(path, specifier);
+    return target !== null && isUnder(target, RETIRED_DIR);
   };
   const violations: string[] = [];
   const rest = code.replace(NAMED_IMPORT, (statement, _type, clause: string, specifier: string) => {
-    if (!intoFrozen(specifier)) return statement;
+    if (!intoRetired(specifier)) return statement;
     for (const name of importedNames(clause)) {
-      if (!MIGRATED_ALLOWED_IMPORTS.includes(name)) {
-        violations.push(`${file.path}: 已迁移区域从 ${FROZEN_DIR} 导入 ${name}`);
-      }
+      violations.push(`${path}: 从 ${RETIRED_DIR} 导入 ${name}`);
     }
     return "";
   });
   for (const [, specifier = ""] of rest.matchAll(ANY_SPECIFIER)) {
-    if (intoFrozen(specifier)) {
-      violations.push(`${file.path}: 已迁移区域以非具名导入引用 ${FROZEN_DIR}（${specifier}）`);
+    if (intoRetired(specifier)) {
+      violations.push(`${path}: 以非具名导入引用 ${RETIRED_DIR}（${specifier}）`);
     }
   }
   return violations;
 }
 
-function migratedViolations(file: SourceFile): string[] {
-  if (file.path.endsWith(".css")) return [`${file.path}: 已迁移区域出现 .css`];
-  return /\.tsx?$/.test(file.path) ? frozenImportViolations(file) : [];
-}
-
-/** 分层判定（纯函数）：输入 `web/src` 的文件与两份清单，返回全部违例。 */
-function layeringViolations(files: SourceFile[], rules: LayeringRules): string[] {
-  return files.flatMap((file) => {
-    if (isUnder(file.path, FROZEN_DIR)) {
-      const name = file.path.slice(FROZEN_DIR.length + 1);
-      return rules.frozen.includes(name) ? [] : [`${file.path}: 冻结区新增文件`];
-    }
-    return rules.migrated.some((area) => isUnder(file.path, area)) ? migratedViolations(file) : [];
-  });
+function sourceViolations(file: SourceFile): string[] {
+  const code = stripTsComments(file.text);
+  const toast = [...new Set(Array.from(code.matchAll(TOAST_IDENTIFIER), ([name]) => name))];
+  return [
+    ...retiredImportViolations(file.path, code),
+    ...toast.map((name) => `${file.path}: 出现已删除的 ${name}`),
+  ];
 }
 
 /**
- * 清单条目自检：`isUnder` 只做前缀匹配，写成 `dir/**` 或 `dir/` 的条目匹配不到任何文件，守卫会
- * 在不报错的情况下放空。带通配或以 `/` 结尾的条目、以及匹配不到现存文件的条目都判违例。
+ * 分层终态（纯函数；ui-foundation「组件分层」）：输入 `web/src` 的全部文件，返回全部违例——
+ * 旧目录下有文件；三个样式文件之外有 `.css`；`.ts`/`.tsx` 从旧目录导入，或出现 Toast 的两个标识符。
+ * 没有清单：哪个目录、哪个文件都一样受管（拷入层的两个目录也在内）。
  */
-function areaEntryViolations(areas: string[], paths: string[]): string[] {
-  return areas.flatMap((area) => {
-    if (area.includes("*") || area.endsWith("/")) {
-      return [`${area}: 已迁移区域条目不得含通配或以 / 结尾`];
+function layeringViolations(files: SourceFile[]): string[] {
+  return files.flatMap((file) => {
+    if (isUnder(file.path, RETIRED_DIR))
+      return [`${file.path}: ${RETIRED_DIR} 已删除，不得再有文件`];
+    if (file.path.endsWith(".css")) {
+      return STYLE_FILES.includes(file.path) ? [] : [`${file.path}: 应用代码不得新增 .css`];
     }
-    return paths.some((path) => isUnder(path, area))
-      ? []
-      : [`${area}: 已迁移区域条目未匹配任何文件`];
+    return /\.tsx?$/.test(file.path) ? sourceViolations(file) : [];
   });
 }
 
@@ -164,40 +144,35 @@ function barrelViolations(paths: string[]): string[] {
 }
 
 describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻结区不增长」）", () => {
-  const rules: LayeringRules = {
-    migrated: ["web/src/routes", "web/src/features/auth"],
-    frozen: FROZEN_FILES,
-  };
-  const check = (path: string, text = "") => layeringViolations([{ path, text }], rules);
+  const check = (path: string, text = "") => layeringViolations([{ path, text }]);
+  const imported = (path: string, name: string) => `${path}: 从 ${RETIRED_DIR} 导入 ${name}`;
+  const retired = (path: string) => `${path}: ${RETIRED_DIR} 已删除，不得再有文件`;
+  const strayCss = (path: string) => `${path}: 应用代码不得新增 .css`;
 
-  it("判定自证：已迁移文件导入 Button、已迁移目录出现 .css、冻结区多出文件各判失败", () => {
-    expect(
-      check(
-        "web/src/routes/shell/sidebar.tsx",
-        'import { Button, Icon } from "../../ui/index.js";',
-      ),
-    ).toEqual([
-      `web/src/routes/shell/sidebar.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Button`,
-      `web/src/routes/shell/sidebar.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Icon`,
+  it("判定自证：导入 Button、目录下出现 .css、web/src/ui 下出现文件各判失败", () => {
+    const sidebar = "web/src/routes/shell/sidebar.tsx";
+    expect(check(sidebar, 'import { Button, Icon } from "../../ui/index.js";')).toEqual([
+      imported(sidebar, "Button"),
+      imported(sidebar, "Icon"),
     ]);
     expect(check("web/src/routes/shell/sidebar.css")).toEqual([
-      "web/src/routes/shell/sidebar.css: 已迁移区域出现 .css",
+      strayCss("web/src/routes/shell/sidebar.css"),
     ]);
-    expect(check("web/src/ui/card.tsx")).toEqual(["web/src/ui/card.tsx: 冻结区新增文件"]);
-    expect(check("web/src/ui/extra/button.tsx")).toEqual([
-      "web/src/ui/extra/button.tsx: 冻结区新增文件",
+    // 旧目录下任何文件都算，不看内容：组件、子目录里的文件、原先留到最后的两个样式文件、兜底的旧位置。
+    for (const name of ["card.tsx", "extra/button.tsx", "motion.css", "ui.css"]) {
+      expect(check(`${RETIRED_DIR}/${name}`)).toEqual([retired(`${RETIRED_DIR}/${name}`)]);
+    }
+    expect(check(ESCAPE_FALLBACK_RETIRED, "export function useEscapeFallback() {}")).toEqual([
+      retired(ESCAPE_FALLBACK_RETIRED),
     ]);
   });
 
-  it("判定自证：别名、多行、type、as 改名、单文件清单项与非具名写法都被识别", () => {
+  it("判定自证：别名、多行、type、as 改名与非具名写法都被识别", () => {
     const footer = "web/src/features/auth/footer.tsx";
     expect(check(footer, 'import { ConfirmDialog } from "@/ui";')).toHaveLength(1);
     expect(
       check(footer, 'import {\n  Icon,\n  type MenuItem,\n} from "../../ui/index.js";'),
-    ).toEqual([
-      `${footer}: 已迁移区域从 ${FROZEN_DIR} 导入 Icon`,
-      `${footer}: 已迁移区域从 ${FROZEN_DIR} 导入 MenuItem`,
-    ]);
+    ).toEqual([imported(footer, "Icon"), imported(footer, "MenuItem")]);
     expect(check(footer, 'import { Dialog as D } from "../../ui/dialog.js";')).toHaveLength(1);
     expect(check(footer, 'import * as UI from "../../ui/index.js";')).toHaveLength(1);
     expect(check(footer, 'import "../../ui/button.css";')).toHaveLength(1);
@@ -205,15 +180,15 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
     expect(check(footer, 'export { Button } from "../../ui/index.js";')).toHaveLength(1);
   });
 
-  it("判定自证：白名单已清空，原先放行的四个名字各判失败；新位置的导入、拷入层导入、注释与清单外的文件不判失败", () => {
+  it("判定自证：没有放行的名字，原白名单的四个各判失败；哪个目录的文件都受管；新位置的导入、拷入层导入与注释不判失败", () => {
     const sidebar = "web/src/routes/shell/sidebar.tsx";
     const former = [
       'import { BrandMark as Mark, Icon, type IconName, useEscapeFallback } from "../../ui/index.js";',
       'import type { IconName } from "@/ui/index";',
     ].join("\n");
     expect(check(sidebar, former)).toEqual(
-      ["BrandMark", "Icon", "IconName", "useEscapeFallback", "IconName"].map(
-        (name) => `${sidebar}: 已迁移区域从 ${FROZEN_DIR} 导入 ${name}`,
+      ["BrandMark", "Icon", "IconName", "useEscapeFallback", "IconName"].map((name) =>
+        imported(sidebar, name),
       ),
     );
     const allowed = [
@@ -223,193 +198,107 @@ describe("组件分层（ui-foundation「已迁移区域不回用旧基元，冻
       'import { Button } from "@/components/ui/button";',
       'import { cn } from "@/lib/utils";',
       '// import { Button } from "../../ui/index.js";',
+      "// useToast 与 ToastProvider 已删除",
     ].join("\n");
     expect(check(sidebar, allowed)).toEqual([]);
-    const legacy = 'import { Button } from "../../ui/index.js";';
-    expect(check("web/src/features/chat/page.tsx", legacy)).toEqual([]);
-    expect(check("web/src/routes-extra/a.css")).toEqual([]);
-    for (const name of FROZEN_FILES) expect(check(`web/src/ui/${name}`)).toEqual([]);
-  });
-
-  it("判定自证：带通配、以 / 结尾或匹配不到文件的清单条目各判失败", () => {
-    const paths = ["web/src/routes/shell/sidebar.tsx", "web/src/features/auth/footer.tsx"];
-    expect(areaEntryViolations(["web/src/routes/**"], paths)).toEqual([
-      "web/src/routes/**: 已迁移区域条目不得含通配或以 / 结尾",
-    ]);
-    expect(areaEntryViolations(["web/src/routes/"], paths)).toEqual([
-      "web/src/routes/: 已迁移区域条目不得含通配或以 / 结尾",
-    ]);
-    expect(areaEntryViolations(["web/src/*.tsx"], paths)).toHaveLength(1);
-    expect(areaEntryViolations(["web/src/features/settings"], paths)).toEqual([
-      "web/src/features/settings: 已迁移区域条目未匹配任何文件",
-    ]);
-    // 前缀按路径段比较：`web/src/route` 不是 `web/src/routes` 的上级目录。
-    expect(areaEntryViolations(["web/src/route"], paths)).toHaveLength(1);
-    expect(
-      areaEntryViolations(["web/src/routes", "web/src/features/auth/footer.tsx"], paths),
-    ).toEqual([]);
-    // 被拒的写法确实匹配不到文件：不拦下来的话分层判定会对整个目录放空。
+    // 没有「已迁移清单」：清单之外的目录同样受管——会话页、lib、入口、拷入层、任何新目录。
     const button = 'import { Button } from "../../ui/index.js";';
-    const file = { path: "web/src/routes/shell/sidebar.tsx", text: button };
-    for (const entry of ["web/src/routes/**", "web/src/routes/"]) {
-      expect(layeringViolations([file], { migrated: [entry], frozen: FROZEN_FILES })).toEqual([]);
-    }
+    expect(check("web/src/features/chat/page.tsx", button)).toEqual([
+      imported("web/src/features/chat/page.tsx", "Button"),
+    ]);
+    expect(check("web/src/lib/topbar.tsx", 'import "../ui/ui.css";')).toEqual([
+      `web/src/lib/topbar.tsx: 以非具名导入引用 ${RETIRED_DIR}（../ui/ui.css）`,
+    ]);
+    expect(check("web/src/main.tsx", 'import { Button } from "./ui/index.js";')).toHaveLength(1);
     expect(
-      layeringViolations([file], { migrated: ["web/src/routes"], frozen: FROZEN_FILES }),
+      check("web/src/components/ui/button.tsx", 'import { Button } from "@/ui/button";'),
     ).toHaveLength(1);
+    expect(check("web/src/routes-extra/a.css")).toEqual([strayCss("web/src/routes-extra/a.css")]);
+    expect(check("web/src/styles/base.css")).toEqual([strayCss("web/src/styles/base.css")]);
+    // 目标按解析后的路径判：拷入目录 `components/ui` 与名字相近的目录不是旧目录。
+    expect(check("web/src/components/shell.tsx", 'import { Button } from "./ui/button";')).toEqual(
+      [],
+    );
+    expect(check("web/src/main.tsx", 'import { a } from "./uix/a.js";')).toEqual([]);
+    for (const path of STYLE_FILES) expect(check(path)).toEqual([]);
   });
 
-  it("判定自证：真实清单内的文件（含会话列表文件）注入 useToast 或 Menu 导入判失败", () => {
-    const real: LayeringRules = { migrated: MIGRATED_AREAS, frozen: FROZEN_FILES };
+  it("判定自证：真实文件（含会话列表文件）注入 useToast、ToastProvider 或 Menu 导入判失败", () => {
     const composer = `${CHAT_DIR}/composer.tsx`;
     const source = readRepoFile(composer);
-    expect(layeringViolations([{ path: composer, text: source }], real)).toEqual([]);
-    const message = (name: string) => `${composer}: 已迁移区域从 ${FROZEN_DIR} 导入 ${name}`;
-    for (const [injected, names] of [
-      ['import { useToast } from "../../ui/index.js";', ["useToast"]],
-      ['import { Icon, useToast } from "@/ui";', ["Icon", "useToast"]],
-      // 白名单清空之后，旧出口上的 `Icon` 同样不放行。
-      ['import { Icon } from "../../ui/index.js";', ["Icon"]],
+    expect(check(composer, source)).toEqual([]);
+    const toast = (name: string) => `${composer}: 出现已删除的 ${name}`;
+    for (const [injected, expected] of [
+      // 标识符本身就判，不看它从哪里导入：旧出口、自写共享组件的位置、或只是一次调用。
+      [
+        'import { useToast } from "../../ui/index.js";',
+        [imported(composer, "useToast"), toast("useToast")],
+      ],
+      ['import { useToast } from "@/components/toast";', [toast("useToast")]],
+      [
+        'import { ToastProvider, useToast } from "@/components/toast";',
+        [toast("ToastProvider"), toast("useToast")],
+      ],
+      ["const toast = useToast();", [toast("useToast")]],
+      [
+        'import { Icon, useToast } from "@/ui";',
+        [imported(composer, "Icon"), imported(composer, "useToast"), toast("useToast")],
+      ],
+      ['import { Icon } from "../../ui/index.js";', [imported(composer, "Icon")]],
     ] as const) {
-      const text = `${injected}\n${source}`;
-      expect(layeringViolations([{ path: composer, text }], real)).toEqual(names.map(message));
+      expect(check(composer, `${injected}\n${source}`), injected).toEqual(expected);
     }
-    // 已登记的会话列表文件同样受管：各自现状守约，注入旧基元即判失败。
-    for (const [name, primitive] of [
-      ["session-actions.ts", "useToast"],
-      ["session-menu.tsx", "Menu"],
-    ]) {
+    // 词边界：名字相近的标识符不误判。
+    expect(check(composer, "const useToaster = 1; const MyToastProvider = 2;")).toEqual([]);
+    // 会话列表文件同样受管：各自现状守约，注入旧基元即判失败。
+    for (const name of ["session-actions.ts", "session-menu.tsx"]) {
       const path = `${CHAT_DIR}/${name}`;
       const own = readRepoFile(path);
-      expect(layeringViolations([{ path, text: own }], real)).toEqual([]);
-      const text = `import { ${primitive} } from "../../ui/index.js";\n${own}`;
-      expect(layeringViolations([{ path, text }], real)).toEqual([
-        `${path}: 已迁移区域从 ${FROZEN_DIR} 导入 ${primitive}`,
+      expect(check(path, own)).toEqual([]);
+      expect(check(path, `import { Menu } from "../../ui/index.js";\n${own}`)).toEqual([
+        imported(path, "Menu"),
       ]);
     }
   });
 
-  it("判定自证：文件页整目录受管，目录下的旧基元导入、.css 与子目录文件各判失败", () => {
-    const real: LayeringRules = { migrated: MIGRATED_AREAS, frozen: FROZEN_FILES };
+  it("判定自证：文件页目录下的旧基元导入、.css 与子目录文件各判失败", () => {
     const dir = "web/src/features/files";
-    const check = (path: string, text = "") => layeringViolations([{ path, text }], real);
     expect(check(`${dir}/tree.tsx`, 'import { Dialog } from "../../ui/index.js";')).toEqual([
-      `${dir}/tree.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Dialog`,
+      imported(`${dir}/tree.tsx`, "Dialog"),
     ]);
-    expect(check(`${dir}/files.css`)).toEqual([`${dir}/files.css: 已迁移区域出现 .css`]);
-    // 子目录自动在内：不必逐个文件登记。
+    expect(check(`${dir}/files.css`)).toEqual([strayCss(`${dir}/files.css`)]);
     expect(
       check(`${dir}/previewers/x.tsx`, 'import { Menu } from "../../../ui/index.js";'),
-    ).toEqual([`${dir}/previewers/x.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Menu`]);
+    ).toEqual([imported(`${dir}/previewers/x.tsx`, "Menu")]);
     expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../ui/index.js";')).toEqual([
-      `${dir}/tree.tsx: 已迁移区域从 ${FROZEN_DIR} 导入 Icon`,
+      imported(`${dir}/tree.tsx`, "Icon"),
     ]);
     expect(check(`${dir}/tree.tsx`, 'import { Icon } from "../../components/icon.js";')).toEqual(
       [],
     );
   });
 
-  it("冻结清单恰为 motion.css 与 ui.css 两个文件名，导入白名单为空", () => {
-    expect(new Set(FROZEN_FILES).size).toBe(2);
-    expect(FROZEN_FILES).toHaveLength(2);
-    expect(FROZEN_FILES).toEqual(["motion.css", "ui.css"]);
-    expect(MIGRATED_ALLOWED_IMPORTS).toEqual([]);
-  });
-
-  it("web/src 现状：已迁移区域守约，web/src/ui 的每个文件都在冻结清单里", () => {
+  it("web/src 现状：web/src/ui 下没有文件，没有模块从它导入，不出现 useToast 与 ToastProvider，.css 只有三个样式文件", () => {
     const files = listRepoFiles("web/src", () => true).map((path) => ({
       path,
       text: /\.tsx?$/.test(path) ? readRepoFile(path) : "",
     }));
-    expect(files.some((file) => isUnder(file.path, FROZEN_DIR))).toBe(true);
-    expect(MIGRATED_AREAS).toEqual([
-      "web/src/routes",
-      "web/src/features/auth",
-      "web/src/features/settings",
-      "web/src/features/theme",
-      "web/src/features/chat/approval-card.tsx",
-      "web/src/features/chat/archived-notice.tsx",
-      "web/src/features/chat/archived-view.tsx",
-      "web/src/features/chat/artifact-card.tsx",
-      "web/src/features/chat/attachment-chips.tsx",
-      "web/src/features/chat/attachments-state.ts",
-      "web/src/features/chat/capability-bar.tsx",
-      "web/src/features/chat/composer-dock.tsx",
-      "web/src/features/chat/composer-locks.ts",
-      "web/src/features/chat/composer-options.ts",
-      "web/src/features/chat/composer.tsx",
-      "web/src/features/chat/conversation-search.tsx",
-      "web/src/features/chat/conversation-view.tsx",
-      "web/src/features/chat/copy-feedback.ts",
-      "web/src/features/chat/delete-dialog.tsx",
-      "web/src/features/chat/errors.ts",
-      "web/src/features/chat/export-markdown.ts",
-      "web/src/features/chat/file-changes-card.tsx",
-      "web/src/features/chat/index.ts",
-      "web/src/features/chat/markdown-body.tsx",
-      "web/src/features/chat/message-action-row.tsx",
-      "web/src/features/chat/message-thread.tsx",
-      "web/src/features/chat/model-picker.tsx",
-      "web/src/features/chat/ownership.ts",
-      "web/src/features/chat/page.tsx",
-      "web/src/features/chat/permission-tier.tsx",
-      "web/src/features/chat/project-config.tsx",
-      "web/src/features/chat/promote-dialog.tsx",
-      "web/src/features/chat/rename-dialog.tsx",
-      "web/src/features/chat/runtime-convert.ts",
-      "web/src/features/chat/scene-pills.tsx",
-      "web/src/features/chat/search-match.ts",
-      "web/src/features/chat/session-actions.ts",
-      "web/src/features/chat/session-entry.tsx",
-      "web/src/features/chat/session-groups.ts",
-      "web/src/features/chat/session-list-prefs.ts",
-      "web/src/features/chat/session-menu.tsx",
-      "web/src/features/chat/session-path.ts",
-      "web/src/features/chat/session-sidebar.tsx",
-      "web/src/features/chat/session-status-mark.tsx",
-      "web/src/features/chat/slash-menu-state.ts",
-      "web/src/features/chat/slash-menu.tsx",
-      "web/src/features/chat/status-label.ts",
-      "web/src/features/chat/step-card.tsx",
-      "web/src/features/chat/step-summary.ts",
-      "web/src/features/chat/stream-approvals.ts",
-      "web/src/features/chat/stream-artifacts.ts",
-      "web/src/features/chat/stream-steps.ts",
-      "web/src/features/chat/stream-thinking.ts",
-      "web/src/features/chat/stream-todo.ts",
-      "web/src/features/chat/stream.ts",
-      "web/src/features/chat/thinking-fold.tsx",
-      "web/src/features/chat/thread-viewport.tsx",
-      "web/src/features/chat/todo-panel.tsx",
-      "web/src/features/chat/tool-call-group.tsx",
-      "web/src/features/chat/topbar-actions.ts",
-      "web/src/features/chat/turn-actions.ts",
-      "web/src/features/chat/types.ts",
-      "web/src/features/chat/undo-conflict-dialog.tsx",
-      "web/src/features/chat/undo-notice.tsx",
-      "web/src/features/chat/use-chat-session.ts",
-      "web/src/features/chat/use-clipped.ts",
-      "web/src/features/chat/use-session-list-events.ts",
-      "web/src/features/chat/use-session-list-view.ts",
-      "web/src/features/chat/use-thread-runtime.ts",
-      "web/src/features/chat/use-workspace-sidebar.ts",
-      "web/src/features/chat/welcome-content.ts",
-      "web/src/features/chat/welcome-options.ts",
-      "web/src/features/chat/welcome.tsx",
-      "web/src/features/chat/workspace-list.ts",
-      "web/src/features/chat/workspace-sidebar.tsx",
-      "web/src/features/files",
-    ]);
-    expect(MIGRATED_AREAS).not.toContain("web/src/features/chat");
-    expect(
-      areaEntryViolations(
-        MIGRATED_AREAS,
-        files.map((file) => file.path),
-      ),
-    ).toEqual([]);
-    expect(layeringViolations(files, { migrated: MIGRATED_AREAS, frozen: FROZEN_FILES })).toEqual(
-      [],
+    const paths = files.map((file) => file.path);
+    // 扫描没有放空：入口、lib、会话页、文件页、自写共享组件与拷入层的文件都在扫描对象里。
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "web/src/main.tsx",
+        "web/src/lib/topbar.tsx",
+        `${CHAT_DIR}/composer.tsx`,
+        "web/src/features/files/tree.tsx",
+        "web/src/components/icon.tsx",
+        "web/src/components/ui/button.tsx",
+      ]),
     );
+    expect(files.find((file) => file.path === "web/src/main.tsx")?.text).toContain("import ");
+    expect(paths.filter((path) => isUnder(path, RETIRED_DIR))).toEqual([]);
+    expect(paths.filter((path) => path.endsWith(".css"))).toEqual(STYLE_FILES);
+    expect(layeringViolations(files)).toEqual([]);
   });
 });
 
@@ -549,6 +438,9 @@ describe("自写共享组件的位置（ui-foundation「组件分层」；design
   });
 
   it("web/src/components 现状：没有统一出口（index.ts 与 index.tsx 都不存在）", () => {
-    expect(barrelViolations(listRepoFiles(COMPONENTS_DIR, () => true))).toEqual([]);
+    const paths = listRepoFiles(COMPONENTS_DIR, () => true);
+    // 扫描没有放空：目录枚举坏掉（空表）时下面的「没有违例」不能悄悄通过。
+    expect(paths).toContain(`${COMPONENTS_DIR}/icon.tsx`);
+    expect(barrelViolations(paths)).toEqual([]);
   });
 });

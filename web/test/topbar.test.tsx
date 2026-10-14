@@ -273,7 +273,10 @@ describe("静态契约 (T8)", () => {
       expect(readRepoFile(path), path).not.toContain("<h1");
     }
     expect(readRepoFile("web/src/features/chat/welcome.tsx")).toContain(HERO);
-    for (const path of ["web/src/styles.css", "web/src/styles/legacy.css"]) {
+    // 两份都确是带规则的样式文件（入口的 reduce 块、theme.css 的 base 块），下面的「不含」才不是空话。
+    expect(readRepoFile("web/src/styles.css")).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(readRepoFile("web/src/styles/theme.css")).toContain("  .ui-alert {");
+    for (const path of ["web/src/styles.css", "web/src/styles/theme.css"]) {
       expect(readRepoFile(path), path).not.toContain("ui-page-heading");
     }
     const topbar = readRepoFile("web/src/routes/shell/topbar.tsx");
