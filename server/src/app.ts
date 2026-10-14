@@ -323,32 +323,34 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
 }
 
 /**
- * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：密钥集在此构造一次——上游的 apiKey 与
- * base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根，以及二者与原值不同的 realpath（取不到
- * 时跳过）。读代码推出：生产入口在 `ensureOmpStateLayout` 之前调用 createApp、沙箱根到第一次建会话或
- * spawn 才建，所以全新部署的第一次启动两个 realpath 通常都取不到（下次启动才有）。
+ * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：每次净化时构造密钥集——上游的 apiKey
+ * 与 base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根，以及二者此刻与原值不同的 realpath
+ * （目录还没建出、取不到时只列原值）。realpath 在净化时才取：生产入口在 `ensureOmpStateLayout` 之前
+ * 调用 createApp，沙箱根到第一次建会话才建。只有失败的回合调用它。
  */
 function upstreamRedactor(
   upstream: AssemblyDependencies["upstream"],
   runtime: SessionRuntime,
 ): (text: string) => string {
-  const paths = [runtime.stateDir, runtime.sandboxRoot];
-  for (const path of [runtime.stateDir, runtime.sandboxRoot]) {
-    try {
-      const real = realpathSync(path);
-      if (real !== path) {
-        paths.push(real);
+  return (text) => {
+    const paths = [runtime.stateDir, runtime.sandboxRoot];
+    for (const path of [runtime.stateDir, runtime.sandboxRoot]) {
+      try {
+        const real = realpathSync(path);
+        if (real !== path) {
+          paths.push(real);
+        }
+      } catch {
+        // Not there yet: the original path is still listed.
       }
-    } catch {
-      // Not there yet: the original path is still listed.
     }
-  }
-  const secrets = upstreamSecretList({
-    apiKey: upstream?.apiKey,
-    baseUrl: upstream?.baseUrl,
-    paths,
-  });
-  return (text) => sanitizeUpstreamText(text, secrets);
+    const secrets = upstreamSecretList({
+      apiKey: upstream?.apiKey,
+      baseUrl: upstream?.baseUrl,
+      paths,
+    });
+    return sanitizeUpstreamText(text, secrets);
+  };
 }
 
 /** 两个上传上限的生效值：装配没给的取缺省。 */

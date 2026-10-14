@@ -5,7 +5,7 @@ import type { MessageRole, MessageStatus, MessageView, StepStatus, StepView } fr
 import { parseAttachments } from "./store-attachments.js";
 import { type ComposerConfig, storedModeUnderCap } from "./store-composer.js";
 import type { MessageError } from "./store-error.js";
-import { failureSentence, isFailureReason } from "./upstream-classify.js";
+import { failureSentence, httpStatusOrNull, isFailureReason } from "./upstream-classify.js";
 
 export type MessageDbRow = ErrorColumns & {
   id: number;
@@ -83,7 +83,7 @@ export function toMessageView(
 /**
  * The snapshot's `error` (upstream-failure「失败的公开形状」): the sentence is looked up from `reason`
  * (never stored); a user message, and a row whose `reason` is not in the classification table (only a
- * hand-edited database has one), reads `null`.
+ * hand-edited database has one), reads `null`; so does a stored status outside 100–599.
  */
 function messageError(
   role: MessageRole,
@@ -94,11 +94,10 @@ function messageError(
   if (role !== "assistant" || typeof reason !== "string" || !isFailureReason(reason)) {
     return null;
   }
-  const status = row.error_status;
   return {
     reason,
     message: failureSentence(reason),
-    status: typeof status === "number" && Number.isInteger(status) ? status : null,
+    status: httpStatusOrNull(row.error_status),
     detail: row.error_detail === null ? "" : decoder.decode(row.error_detail),
   };
 }

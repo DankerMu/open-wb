@@ -73,15 +73,18 @@ export function classifyTurnFailure(input: {
   if (input.source === "runtime") {
     return { reason: "agent_failed", status: null, detail: text };
   }
-  // Outside 100–599 counts as missing (the web accepts only that range): never stored or published.
-  const status =
-    typeof input.errorStatus === "number" &&
-    Number.isInteger(input.errorStatus) &&
-    input.errorStatus >= 100 &&
-    input.errorStatus <= 599
-      ? input.errorStatus
-      : null;
+  const status = httpStatusOrNull(input.errorStatus);
   return markerFailure(status, text) ?? statusFailure(status, text);
+}
+
+/**
+ * An integer in 100–599, else `null`: outside that range counts as missing (the web accepts only
+ * that range), never stored, published or read back from a hand-edited row.
+ */
+export function httpStatusOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
+    ? value
+    : null;
 }
 
 /** Rows 2–4: a credited marker at the end of the text. */

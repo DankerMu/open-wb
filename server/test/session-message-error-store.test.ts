@@ -162,4 +162,27 @@ describe("a stored row the classification table does not know reads null", () =>
       null,
     ]);
   });
+
+  it("a stored error_status outside 100–599 or not an integer reads status null", () => {
+    const { db, store } = open();
+    const source = failedSession(store);
+    const statusOf = (value: number) => {
+      db.prepare("UPDATE chat_messages SET error_status = ? WHERE id = ?").run(
+        value,
+        source.assistantMessageId,
+      );
+      return store.getMessages(source.session, OWNER)?.messages[1]?.error;
+    };
+    // The web rejects a snapshot whose status is not an HTTP status (「消息 error 键严格解析」).
+    expect([99, 100, 599, 600, 0, -401, 1.5].map((value) => statusOf(value)?.status)).toEqual([
+      null,
+      100,
+      599,
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(statusOf(70000)).toEqual({ ...FAILURE, status: null, detail: "401 bad key [已移除]" });
+  });
 });

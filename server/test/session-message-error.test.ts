@@ -6,7 +6,7 @@
  * payloads are spec literals (the sentence table, the detail rules of「回合失败分类」and the
  * sanitiser's six steps), never computed by the code under test.
  */
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -17,12 +17,17 @@ import { ensureOmpStateLayout } from "../src/sessions/omp/state-layout.js";
 import { ofType, sessionEvents, waitForEvent } from "./session-approval-helpers.js";
 import { postPrompt } from "./session-rest-helpers.js";
 import {
+  assertRetainedFaultOnShutdown,
   assistantIdFor,
+  closeAfterRetainedFault,
   closeOnEof,
   createControlledRuntime,
   createSession,
   openRecordingSession,
   type RecordingWorld,
+  requiredCall,
+  requiredToken,
+  waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
 import type { FakeChild } from "./support/omp-rpc.js";
@@ -31,7 +36,9 @@ const REAL = { timeout: 15_000 };
 const START: OmpFrame = { type: "agent_start" };
 const TERMINAL: OmpFrame = { type: "agent_end", messages: [], isTerminal: true };
 const KEY = "k-909-secret";
-const BASE_URL = "http://u:p4ss-secret@127.0.0.1:9/tenant-0123456789/v1";
+const BASE_URL = "http://u:p4ss-secret@127.0.0.1:9/tenant-0123456789/v1?key=q-secret-0123";
+/** The configured base URL whole, then its password, long path segment and query string alone. */
+const BASE_URL_LINE = `via ${BASE_URL}; p4ss-secret; tenant-0123456789; key=q-secret-0123`;
 const KEY_401 =
   "401 Incorrect API key provided\nIncorrect API key provided (type=invalid_request_error)";
 const STATUS_500 =
@@ -266,7 +273,8 @@ describe("upstream-failure「上游原文净化」through createApp's secret lis
       const scripted = scriptedRuntime(scripts);
       // omp's own dump line names a file under the state dir (design Context, case 1 / 12).
       const dump = `raw-http-request=${scripted.runtime.stateDir}/xdg/state/omp/logs/http-400-requests/1.json`;
-      const text = `400 ${SECRET_MESSAGE}\n${SECRET_MESSAGE} (type=scripted_error)\n${dump}`;
+      // The base URL parts sit on a line of their own: a dump line would be dropped whole.
+      const text = `400 ${SECRET_MESSAGE}\n${SECRET_MESSAGE} (type=scripted_error)\n${BASE_URL_LINE}\n${dump}`;
       scripts["fail 400"] = [START, failedEnd(400, text), TERMINAL];
       const world = await openRecordingSession(scripted.runtime, {
         assembly: { upstream: { baseUrl: BASE_URL, apiKey: KEY } },
@@ -275,9 +283,11 @@ describe("upstream-failure「上游原文净化」through createApp's secret lis
         await prompt(world, world.session, "fail 400");
         await waitForTurn(world.fixture, world.session, "failed");
         const assistant = assistantIdFor(world.fixture, world.session);
-        // Step 2 drops both dump lines, the second one taking the JSON message's tail with it.
-        const expected = `400 ${SECRET_LINE}\n${SECRET_LINE}`;
-        expect(errorColumns(world.fixture.db, assistant)).toEqual({
+        // Step 2 drops both dump lines, the second one taking the JSON message's tail with it;
+        // step 3 replaces each listed base URL part.
+        const expected = `400 ${SECRET_LINE}\n${SECRET_LINE}\nvia [已移除]; [已移除]; [已移除]; [已移除]`;
+        const stored = errorColumns(world.fixture.db, assistant);
+        expect(stored).toEqual({
           status: "failed",
           error_reason: "request_rejected",
           error_status: 400,
@@ -292,8 +302,12 @@ describe("upstream-failure「上游原文净化」through createApp's secret lis
           status: 400,
           detail: expected,
         });
-        for (const leak of [KEY, "leak-token-0123456789", "sk-leak", "raw-http-request="]) {
-          expect(expected).not.toContain(leak);
+        const leaks = [KEY, "leak-token-0123456789", "sk-leak", "raw-http-request=", "127.0.0.1"];
+        leaks.push("p4ss-secret", "tenant-0123456789", "q-secret-0123");
+        for (const actual of [stored?.error_detail, error?.data.detail, reply?.error]) {
+          for (const leak of leaks) {
+            expect(JSON.stringify(actual)).not.toContain(leak);
+          }
         }
       } finally {
         await world.fixture.close();
@@ -317,17 +331,7 @@ describe("upstream-failure「上游原文净化」through createApp's secret lis
       const sandbox = scripted.runtime.sandboxRoot;
       mkdirSync(sandbox, { recursive: true });
       const literal = `spawn failed: ${link}/home/.omp/agent/models.yml unreadable`;
-      const text = `${literal}; ${real}/b; ${sandbox}/ws/c.txt`;
-      // 钩子辅助: the runtime's own failure texts are fixed strings, so the turn's frame stream is
-      // wrapped to throw one that names the server paths after its agent_start.
-      const original = SessionRuntime.prototype.prompt;
-      vi.spyOn(SessionRuntime.prototype, "prompt").mockImplementation(function (
-        this: SessionRuntime,
-        message: string,
-      ) {
-        const stream = original.call(this, message);
-        return Object.assign(throwAfterStart(stream, text), { dispatched: stream.dispatched });
-      });
+      throwOnPrompt(`${literal}; ${real}/b; ${sandbox}/ws/c.txt`);
       const world = await openRecordingSession(scripted.runtime, {
         assembly: { upstream: { baseUrl: BASE_URL, apiKey: KEY } },
       });
@@ -361,6 +365,89 @@ describe("upstream-failure「上游原文净化」through createApp's secret lis
         });
       } finally {
         await world.fixture.close();
+      }
+    },
+  );
+});
+
+describe("upstream-failure「上游原文净化」: realpaths are taken when a failure is sanitised", () => {
+  for (const key of ["stateDir", "sandboxRoot"] as const) {
+    it(
+      `${key} under a symlinked parent, missing at createApp and created before the failure: its realpath form is removed`,
+      REAL,
+      async () => {
+        const scripted = scriptedRuntime({ "spawn fails": [START] });
+        const real = realpathSync(mkdtempSync(join(tmpdir(), "wb-909-parent-real-")));
+        const links = mkdtempSync(join(tmpdir(), "wb-909-parent-link-"));
+        temps.push(real, links);
+        symlinkSync(real, join(links, "parent"));
+        const configured = join(links, "parent", "dir");
+        scripted.runtime[key] = configured;
+        throwOnPrompt(`cannot open ${real}/dir/a.json; ${configured}/b`);
+        expect(existsSync(configured)).toBe(false);
+        const world = await openRecordingSession(scripted.runtime);
+        try {
+          if (key === "stateDir") {
+            ensureOmpStateLayout(configured);
+          } else {
+            mkdirSync(configured, { recursive: true });
+          }
+          await prompt(world, world.session, "spawn fails");
+          await waitForTurn(world.fixture, world.session, "failed");
+          const assistant = assistantIdFor(world.fixture, world.session);
+          const expected = "cannot open [已移除]/a.json; [已移除]/b";
+          expect(errorColumns(world.fixture.db, assistant)).toMatchObject({
+            error_reason: "agent_failed",
+            error_detail: expected,
+          });
+          expect(ofType(sessionEvents(world), "error")[0]?.data.detail).toBe(expected);
+        } finally {
+          await world.fixture.close();
+        }
+      },
+    );
+  }
+});
+
+describe("upstream-failure「落库先于发布」: a failed column write publishes nothing", () => {
+  it(
+    "recordError throwing: no error event, the fault is retained and the slot retired",
+    REAL,
+    async () => {
+      const runtime = scriptedRuntime({
+        "fail 500": [START, failedEnd(502, STATUS_500), TERMINAL],
+      });
+      const world = await openRecordingSession(runtime.runtime);
+      let shutdownReported = false;
+      try {
+        world.fixture.db.exec(`CREATE TEMP TRIGGER reject_error_columns
+          BEFORE UPDATE OF error_reason ON chat_messages
+          BEGIN SELECT RAISE(ABORT, 'error column sentinel'); END`);
+        await prompt(world, world.session, "fail 500");
+        const published = () => ofType(sessionEvents(world), "error");
+        await waitFor(
+          () => (world.errors.length > 0 || published().length > 0 ? true : undefined),
+          "the store fault or a published error",
+        );
+        expect(published()).toEqual([]);
+        expect(world.errors.map(String)).toEqual([
+          expect.stringContaining("error column sentinel"),
+        ]);
+        const assistant = assistantIdFor(world.fixture, world.session);
+        expect(errorColumns(world.fixture.db, assistant)).toMatchObject({
+          error_reason: null,
+          error_status: null,
+          error_detail: null,
+        });
+        const token = requiredToken(requiredCall(runtime.calls, 0).token);
+        await waitFor(
+          () => (world.fixture.tokens.lookup(token) === null ? true : undefined),
+          "the retired slot's token revocation",
+        );
+        await assertRetainedFaultOnShutdown(world.fixture, "error column sentinel");
+        shutdownReported = true;
+      } finally {
+        await closeAfterRetainedFault(world.fixture, shutdownReported);
       }
     },
   );
@@ -402,6 +489,21 @@ describe("chat-sessions「会话 REST」: every message carries an error value",
     },
   );
 });
+
+/**
+ * 钩子辅助: the runtime's own failure texts are fixed strings, so every turn's frame stream is
+ * wrapped to throw `text` (naming the server paths) after its agent_start.
+ */
+function throwOnPrompt(text: string): void {
+  const original = SessionRuntime.prototype.prompt;
+  vi.spyOn(SessionRuntime.prototype, "prompt").mockImplementation(function (
+    this: SessionRuntime,
+    message: string,
+  ) {
+    const stream = original.call(this, message);
+    return Object.assign(throwAfterStart(stream, text), { dispatched: stream.dispatched });
+  });
+}
 
 /** Yields the stream's frames through its first `agent_start`, then throws `message`. */
 function throwAfterStart(
