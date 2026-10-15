@@ -149,10 +149,12 @@ Minimal mergeable slice（3a）: atomic - 一个迁移文件及其测试。
   - **纯层** `server/test/thinking-span.test.ts`（注入时钟 + 假端口，仿 2.2 的写法；帧序列由测试直接喂给 `thinking-span.ts`）覆盖全部带毫秒值的场景：
     - thinking-fold「思考时长记录与下发」：「单段思考以 thinking_end 闭合」「工具参数的生成不计入」「没有 thinking_end 时以下一事件闭合」「多段思考累计」（含第二段开段时列被清空）「停止与失败」「中断后无法恢复」「墙钟回拨」「写库失败」；
     - 「上限与截断标记」中的计时例；
-    - chat-stream「两类交错保持次序」里 `thinking.end` 的位置。
+    - chat-stream「两类交错保持次序」里 `thinking.end` 的位置；
+    - thinking-fold「其它事件前冲刷」两个 WHEN（未收到 `thinking_end` 时由 `step.start` 闭段；合并器未冲刷时以 `turn.end stopped` 结束）。
   - **集成层** `server/test/session-thinking-span.test.ts`（fake-omp，既有 `thinking` / `edit-write` / 无思考场景）只证次序与接线：
     - thinking-fold「合并与落库」：`thinking.end` 紧随 `thinking_end` 冲刷出的 `thinking.delta`，先于第一条 `text.delta`；
-    - 「其它事件前冲刷」的相邻次序（不需要审批的工具）；
+    - `edit-write` 场景下 `thinking.delta`、`thinking.end`、`step.start` 的相邻次序（该场景在工具前已发 `thinking_end`，这里只证接线）；
+    - 启动对账不碰 `thinking_ms`：开段后（列已清空）关闭 store 并以 `reconcileOnStartup` 重开，该消息为 failed、`thinking_ms` 仍为 NULL（thinking-fold「中断后无法恢复」的对账一半）；
     - 「无 reasoning 的模型」：没有 `thinking.end`，列为 NULL；
     - `thinking_ms` 列在回合结束后为非负整数；
     - chat-stream 改写后的「Ordered publication after persistence」（含 `thinking.end`）。
@@ -285,7 +287,7 @@ Minimal mergeable slice（6a）: atomic - 一个控件的文案规则及其走�
   验证：
   - jsdom 覆盖「终态消息主体限高」里在 jsdom 能观察的部分：`data-running`、类名、渐隐层隐藏，以及盒内上滚后不被拉回（手动触发桩 `ResizeObserver` 的回调）；
   - 走查覆盖 chat-harness「等待与思考呈现的冒烟与走查」第 3 步（`WORKBUDDY_THINK_LONG` 加 `HOLD_AT:thinking`）；
-  - 既有 `web/test/chat-thinking.test.tsx:688-697`「leaves a running one uncapped (#725)」（断言 `max-h-none`）按通用纪律第 3 种改法改写为「running 主体限高 12rem 且为预览」，列进偏离记录；6.1 的盘点同时 grep `max-h-none` 找同类用例。
+  - 既有 `web/test/chat-thinking.test.tsx:689-703`「leaves a running one uncapped (#725)」（断言 `max-h-none`）按通用纪律第 3 种改法改写为「running 主体限高 12rem 且为预览」，列进偏离记录；6.1 的盘点同时 grep `max-h-none` 找同类用例。
 Suggested fixture level（6b）: compact - 前端呈现。
 Minimal mergeable slice（6b）: atomic - 预览开关、限高与渐隐处理是同一个呈现模式。缺任何一项，预览要么不限高，要么被渐隐层遮挡。
 

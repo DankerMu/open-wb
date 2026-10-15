@@ -26,7 +26,7 @@ Because the model proxy relays the upstream SSE bytes unchanged and omp's openai
 - **THEN** the marked request streams one `write` tool call with the exact documented arguments and finish reason `tool_calls`, no bash call; the unmarked request streams the unchanged bash tool call
 
 #### Scenario: 无标记请求字节不变
-- **WHEN** requests without any of the three markers are sent for the tool round and the answering round, with and without a gate
+- **WHEN** requests without any of the three markers (and without any marker of「受控上游节奏与闸门停点标记」) are sent for the tool round and the answering round, with and without a gate
 - **THEN** the frames are identical to the pre-change fixture output (no `reasoning_content` key, bash tool call, fixed reply), and every existing gate scenario passes unchanged
 
 #### Scenario: 任务清单标记替换 bash 工具轮
