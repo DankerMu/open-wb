@@ -162,7 +162,11 @@ function MessageAttachments({ attachments }: { attachments: ChatMessageCustom["a
   );
 }
 
-/** 正文：Markdown，或已停止且为空时的占位；运行中在末尾带光标（减少动态效果时不闪）。 */
+/**
+ * 正文：Markdown，或已停止且为空时的占位；运行中在末尾带一个脉动的小圆点（design D6），减少动态效果时
+ * 无动画。圆形写 `rounded-[50%]` 而不是 rounded-full：规格要求计算 `border-radius` 恰为 50%，Tailwind 4 的
+ * rounded-full 编译成一个极大的像素值（实测：计算值为 3.35544e+07px）。
+ */
 function MessageBody({ status, text }: { status: ChatMessageCustom["status"]; text: string }) {
   return (
     <div className="text-sm leading-7 wrap-anywhere text-foreground" data-slot="message-body">
@@ -174,7 +178,7 @@ function MessageBody({ status, text }: { status: ChatMessageCustom["status"]; te
       {status === "running" ? (
         <span
           aria-hidden="true"
-          className="ml-0.5 inline-block h-[15px] w-[7px] animate-caret-blink rounded-[1px] bg-(--wb-brand-primary) align-[-2px] motion-reduce:animate-none"
+          className="ml-0.5 inline-block size-2 animate-pulse rounded-[50%] bg-(--wb-brand-primary) align-middle motion-reduce:animate-none"
           data-slot="message-caret"
         />
       ) : null}

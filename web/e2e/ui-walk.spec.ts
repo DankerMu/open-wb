@@ -32,6 +32,7 @@ import {
   expectReducedMotionShell,
   expectReducedMotionToggle,
   expectRouteViewports,
+  expectRunningDot,
   expectScrollableX,
   expectSelectedSessionStatus,
   expectSessionListInSidebar,
@@ -404,7 +405,8 @@ async function walkHeldDialogue(
     await expectRunningPrefix(page, project, sessionId, prompt);
     const preReload = await fetchSessionSnapshot(page, sessionId);
     expectRunningSnapshot(preReload, prompt, sessionId, promptIds);
-    if (project === "desktop-light") await expectReducedMotionToggle(page);
+    const dot = await expectRunningDot(page);
+    if (project === "desktop-light") await expectReducedMotionToggle(page, dot);
 
     const postReload = watchSessionTraffic(page, sessionId);
     try {

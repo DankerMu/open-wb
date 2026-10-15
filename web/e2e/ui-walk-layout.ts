@@ -356,16 +356,24 @@ export async function expectScrollableX(container: Locator): Promise<void> {
   expect(await container.evaluate((el) => getComputedStyle(el).overflowX)).toBe("auto");
 }
 
-// 必须在受控回合 held 期间调用：运行中的会话项带转动的状态标记，运行中的助手正文末尾有流式光标
-// （chat-harness「流式光标在减少动态效果下不闪烁」）。
-export async function expectReducedMotionToggle(page: Page): Promise<void> {
+const animationOf = (target: Locator) => () =>
+  target.evaluate((el) => getComputedStyle(el).animationName);
+
+// chat-harness「等待与思考呈现的冒烟与走查」第 1 步，两个 project 都在受控回合 held 期间调用：running
+// 助手正文末尾恰一个小圆点，计算 `border-radius` 为 50%，no-preference 下有动画。返回它给 reduce 切换用。
+export async function expectRunningDot(page: Page): Promise<Locator> {
+  const dot = page.getByRole("article", { name: "助手" }).locator('[data-slot="message-caret"]');
+  await expect(dot).toHaveCount(1);
+  expect(await dot.evaluate((el) => getComputedStyle(el).borderRadius), "round dot").toBe("50%");
+  await expect.poll(animationOf(dot), "the running dot pulses").not.toBe("none");
+  return dot;
+}
+
+// 必须在受控回合 held 期间、expectRunningDot 之后调用：运行中的会话项带转动的状态标记，运行中的助手
+// 正文末尾有小圆点（chat-harness「流式光标在减少动态效果下不闪烁」）。
+export async function expectReducedMotionToggle(page: Page, caret: Locator): Promise<void> {
   const pulse = page.locator('[data-status-mark="running"]:visible').first();
   await expect(pulse).toBeVisible();
-  const caret = page.getByRole("article", { name: "助手" }).locator('[data-slot="message-caret"]');
-  await expect(caret).toHaveCount(1);
-  const animationOf = (target: Locator) => () =>
-    target.evaluate((el) => getComputedStyle(el).animationName);
-  await expect.poll(animationOf(caret), "the running caret blinks").not.toBe("none");
   // tw-shimmer：闪光由 ::before 承载。受控回合没有思考内容，用带同一类名的探针读编译后的规则。
   const shimmer = () =>
     page.evaluate(() => {
