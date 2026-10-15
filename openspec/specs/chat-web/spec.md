@@ -20,6 +20,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 新方法沿用既有 same-origin 请求、可选 AbortSignal、错误信封与 401 通知机制，路径 id 编码；409 `undo_conflict`、409 `session_archived`、409 `conflict` 与其它 4xx/5xx SHALL 保留 `ApiError` 的 status/code/message，供页面按 code 区分（`undo_conflict` 打开冲突对话框）。列表事件连接不经 `ApiClient` 的请求方法，见 session-list-push「web 列表事件消费」。
 **S1g 输入框能力**。会话 DTO 的严格键集 SHALL 在上文十一键之上增加恰三键 `approvalMode`、`modelId`、`reasoningEffort`，共十四键：`approvalMode ∈ {"always-ask","write","yolo"}`，`modelId` 为非空字符串，`reasoningEffort` 为 `off|minimal|low|medium|high|xhigh|max` 之一或 `null`（七个强度名，`auto` 不在其内）；缺键、多键或取值不符整体拒绝（只有十一键的会话对象同样整体拒绝）。消息 DTO 的严格键集 SHALL 增加 `attachments`：数组，元素严格键集 `{path, size}`（`path` 为非空字符串、`size` 为非负安全整数），助手消息恒为 `[]`（非空整体拒绝）。`forkSession` 的响应严格键集为 `{session, draft, attachments}`；`undoMessage` 的 200 同样带 `attachments`（见上文该方法）。本条规定的是落地完成后的最终形状：这几处键集变化不与服务端同刀落地（上文各次「同刀落地、不设兼容窗口」的做法不适用于本次，落地次序属实施安排，见 change `s1g-composer-capabilities` 的 design D16），过渡期的放宽解析 SHALL NOT 留存。
 **#909 失败对象**。消息 DTO 的严格键集 SHALL 在上述最终形状之上再增加 `error`，即 `{id,role,content,status,createdAt,steps,approvals,thinking,undo,attachments,error}`：`error` 在每条消息上都存在，为 `null` 或恰含四键的对象 `{reason,message,status,detail}`（upstream-failure「失败的公开形状」）——`reason` 与 `message` 为非空字符串，`status` 为 `null` 或 100–599 的整数，`detail` 为字符串（可为空串）；user 消息恒为 `null`。缺 `error` 键、对象缺键或多键、`status` 为字符串或越界、`detail` 非字符串、user 消息 `error` 非 null 时整个快照按非法响应拒绝，不部分安装。该键与服务端快照的 `error` 键同刀落地，不设兼容窗口（理由同上：严格键集使任一侧先合入都会让会话页整体失效；#909 design D18 组 7）。
+**#910 思考时长**。消息 DTO 的严格键集 SHALL 在上述最终形状之上再增加 `thinkingMs`，即 `{id,role,content,status,createdAt,steps,approvals,thinking,undo,attachments,error,thinkingMs}`：`thinkingMs` 在每条消息上都存在，为 `null` 或非负安全整数（thinking-fold「思考时长记录与下发」）；user 消息恒为 `null`。缺 `thinkingMs` 键、取值为负数、非整数、非安全整数或字符串、user 消息 `thinkingMs` 非 null 时整个快照按非法响应拒绝，不部分安装。该键与服务端快照的 `thinkingMs` 键同刀落地，不设兼容窗口（理由同 #909）。
 `createSession(input)` 的 input 另可含 `approvalMode`、`modelId`、`reasoningEffort`（取值域同上，`reasoningEffort` 不得为 `null`），与既有两键一样只发送所给的键。`patchSession(id, patch)` 的 `patch` 另可含这三键（同样不得为 `null`）。`prompt(id, message, options?)` 的 `options` 另可带 `attachments: string[]`：非空时 body 为 `{message, attachments}`，缺席或空数组时 body 仍恰为 `{message}`。`message` 原样发送，客户端不裁剪、不因它是空串而拒绝或省略该键（只发附件时即 `{"message":"","attachments":[…]}`；能不能发由输入框的启用条件与服务端决定）。
 `ApiClient` SHALL 另提供两个方法。`getComposerOptions(options?)`：GET `/api/composer/options`，禁止缓存，200 返回严格解析的 `{approvalModes, models, defaults, upload}`——`approvalModes` 为上述三个取值的非空、不重复数组；`models` 为非空数组，元素严格键集 `{id, name, reasoning, vision, efforts, defaultEffort}`（`efforts` 为强度名数组，`defaultEffort` 为强度名或 `null`；强度名即上述七个，出现 `auto` 或其它字符串按非法响应处理）；`defaults` 严格键集 `{approvalMode, modelId, reasoningEffort}`；`upload` 严格键集 `{maxBytes, maxFiles}`（正安全整数）；任何不符整体拒绝。
 `uploadFile(workspaceId, file, {signal?, onProgress?})`：POST `/api/workspaces/:id/uploads?name=<编码后的 file.name>`，`Content-Type: application/octet-stream`，请求体为该 `File` 本身（不读入内存、不封装 multipart）；201 返回严格解析的 `{path, name, size}`。它 SHALL 经 `XMLHttpRequest` 发送（`fetch` 没有上传进度），实现放在 `web/src/lib/` 的单独文件里并由 `api.ts` 注入 same-origin、错误信封解析、request_failed 构造与 401 通知——与其它方法共用同一套，不另行实现；`onProgress` 以 0 到 100 的整数百分比被调用（`lengthComputable` 为假时不调用）；`signal` 中止时调用 `abort()` 并以与其它方法相同的中止语义结束；非 2xx 按信封解析为 `ApiError`（含 413 `upload_too_large`、403 `sandbox_denied`、404、409 `conflict`、400），网络错误与非法响应为既有的 request_failed。
@@ -104,9 +105,15 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **WHEN** 另一例消息缺 `error` 键；或 assistant 消息 `error` 对象多一个键或缺 `detail`；或 `status` 为 `"401"`、`700` 或 `401.5`；或 `detail` 为 `null`；或 `reason` 为空串；或 user 消息 `error` 为上述合法对象
 - **THEN** 均以不泄露响应内容的 request_failed 错误整体拒绝，不部分安装
 
+#### Scenario: 消息 thinkingMs 键严格解析
+- **WHEN** 快照里 user 消息 `thinkingMs` 为 `null`；assistant 消息 `thinkingMs` 分别为 `null`、`0` 与 `61500`
+- **THEN** 快照整体通过并逐值保留
+- **WHEN** 另一例消息缺 `thinkingMs` 键；或 assistant 消息 `thinkingMs` 为 `-1`、`1.5`、`"1500"` 或 `2**53`；或 user 消息 `thinkingMs` 为 `0`
+- **THEN** 均以不泄露响应内容的 request_failed 错误整体拒绝，不部分安装
+
 ### Requirement: 纯会话视图归约
-`chatStateFromSnapshot` SHALL 从完整消息快照生成有序聊天视图，不编造 SSE 缺失的时间戳或 ordinal；每条消息视图 SHALL 携带 `approvals: {id,tool,title,expiresAt,decision}[]`（由快照 `approvals` 逐项映射并保持按 `id` 升序，user 消息与无审批记录的 assistant 消息恒为 `[]`；`requestedAt` 不进视图），并携带 `thinking: string|null`（取快照原值）、`error`（取快照原值：`null` 或 `{reason,message,status,detail}`）与重试中标记 `retrying: boolean`（由快照生成时恒为 `false`）；每个步骤视图携带 `changes`（取快照原值，`null` 或变更数组）；视图状态 `ChatState` SHALL 携带会话级的 `todo`（取快照 `todo` 原值：归一化任务清单或 `null`）。`applyChatEvent(state,event)` SHALL 为确定性的纯函数，只复制改变的分支、不修改输入；未知事件类型 SHALL 保持原状态。
-归约器 SHALL 处理服务端十二类事件：turn.start 重置对应 assistant 正文/步骤/错误并把 `approvals` 置为 `[]`、`thinking` 置为 `null`、置 running（不重置 `todo`）；thinking.delta `{messageId, delta}` 把 `delta` 原样追加到对应 assistant 的 `thinking`（`null` 视为空串），会话状态不变，不存在的 assistant 按消息事件补建；files.changed `{messageId, stepId, files}` 把该消息内 `stepId` 步骤的 `changes` 整体替换为 `files`（同一步骤后到者胜），该步骤或该消息不存在时保持原状态（同一引用），不编造步骤也不补建消息，会话状态不变；todo.updated `{messageId, todo}` 把 `ChatState.todo` 整体替换为事件的 `todo`（归一化任务清单或 `null`），不补建消息，不改任何消息、步骤与会话状态（`messages` 保持同一引用），新值与当前值深相等时返回原状态（同一引用），且 `turn.start`、`turn.end`、`error` 及其它事件 SHALL NOT 重置或改动 `todo`（清单属于会话，不属于某条消息；见 session-todo `web 契约解析与归约`）；text.delta 原样追加；step.start 按 messageId 内的 stepId 新建 running 步骤（`changes` 为 `null`）且不重复；step.end 更新已有步骤的状态和 output，detail 与 `changes` 保持 step.start、files.changed 或快照中的值不变；error 将对应 assistant 标记 failed、把 `error` 置为事件的 `{reason,message,status,detail}` 并把 `retrying` 置为 `false`，但会话保持 running 等待 turn.end；turn.retry `{messageId}` 只把对应 assistant 的 `retrying` 置为 `true`（不存在的 assistant 按消息事件补建），正文、`thinking`、步骤、`error` 与会话状态不变；同一 assistant 随后的 turn.start、text.delta、thinking.delta、step.start、error、turn.end 都把 `retrying` 置为 `false`；turn.end 将消息、会话和仍 running 的步骤置为其 done/failed/stopped 状态（`stopped` 不设置 error 文案）；审批按 `approvalId` 为键增改：approval.request `{messageId, approvalId, tool, title, expiresAt}` 向对应 assistant 的 `approvals` **追加** pending 项 `{id: approvalId, tool, title, expiresAt, decision: null}` 并保持按 `id` 升序，绝不覆盖或移除同消息的其它审批项（同一消息可同时有多条 pending）；若该 `approvalId` 已存在于该消息则保持原状态（同一引用）；会话保持 running；approval.resolved `{messageId, approvalId, decision}` 仅更新该消息 `approvals` 中 `id === approvalId` 的那一项的 `decision`，其余项与其顺序不变；未知 `approvalId`（该消息无此 id、消息无审批或消息不存在）保持原状态（同一引用），不补建。不存在的 assistant 可按消息事件补建；不得重写 user 消息。未知 step.end 不得编造缺失的步骤名称。没有先前 turn.start 或 error 的终态 SHALL 有效。
+`chatStateFromSnapshot` SHALL 从完整消息快照生成有序聊天视图，不编造 SSE 缺失的时间戳或 ordinal；每条消息视图 SHALL 携带 `approvals: {id,tool,title,expiresAt,decision}[]`（由快照 `approvals` 逐项映射并保持按 `id` 升序，user 消息与无审批记录的 assistant 消息恒为 `[]`；`requestedAt` 不进视图），并携带 `thinking: string|null`（取快照原值）、`thinkingMs: number|null`（取快照原值）、思考进行中标记 `thinkingActive: boolean`（由快照生成时为「消息 status 为 `running`、`thinking` 为非空字符串且 `thinkingMs` 为 `null`」）、`error`（取快照原值：`null` 或 `{reason,message,status,detail}`）与重试中标记 `retrying: boolean`（由快照生成时恒为 `false`）；每个步骤视图携带 `changes`（取快照原值，`null` 或变更数组）；视图状态 `ChatState` SHALL 携带会话级的 `todo`（取快照 `todo` 原值：归一化任务清单或 `null`）。`applyChatEvent(state,event)` SHALL 为确定性的纯函数，只复制改变的分支、不修改输入；未知事件类型 SHALL 保持原状态。
+归约器 SHALL 处理服务端十三类事件：turn.start 重置对应 assistant 正文/步骤/错误并把 `approvals` 置为 `[]`、`thinking` 置为 `null`、`thinkingMs` 置为 `null`、`thinkingActive` 置为 `false`、置 running（不重置 `todo`）；thinking.delta `{messageId, delta}` 把 `delta` 原样追加到对应 assistant 的 `thinking`（`null` 视为空串）并把 `thinkingActive` 置为 `true`，会话状态不变，不存在的 assistant 按消息事件补建；thinking.end `{messageId, thinkingMs}` 把对应 assistant 的 `thinkingMs` 置为事件值、`thinkingActive` 置为 `false`，正文、`thinking`、步骤与会话状态不变，不存在的 assistant 按消息事件补建，指向 user 消息时保持原状态（同一引用）；files.changed `{messageId, stepId, files}` 把该消息内 `stepId` 步骤的 `changes` 整体替换为 `files`（同一步骤后到者胜），该步骤或该消息不存在时保持原状态（同一引用），不编造步骤也不补建消息，会话状态不变；todo.updated `{messageId, todo}` 把 `ChatState.todo` 整体替换为事件的 `todo`（归一化任务清单或 `null`），不补建消息，不改任何消息、步骤与会话状态（`messages` 保持同一引用），新值与当前值深相等时返回原状态（同一引用），且 `turn.start`、`turn.end`、`error` 及其它事件 SHALL NOT 重置或改动 `todo`（清单属于会话，不属于某条消息；见 session-todo `web 契约解析与归约`）；text.delta 原样追加；step.start 按 messageId 内的 stepId 新建 running 步骤（`changes` 为 `null`）且不重复；step.end 更新已有步骤的状态和 output，detail 与 `changes` 保持 step.start、files.changed 或快照中的值不变；error 将对应 assistant 标记 failed、把 `error` 置为事件的 `{reason,message,status,detail}` 并把 `retrying` 置为 `false`，但会话保持 running 等待 turn.end；turn.retry `{messageId}` 只把对应 assistant 的 `retrying` 置为 `true`（不存在的 assistant 按消息事件补建），正文、`thinking`、步骤、`error` 与会话状态不变；同一 assistant 随后的 turn.start、text.delta、thinking.delta、step.start、error、turn.end 都把 `retrying` 置为 `false`；turn.end 将消息、会话和仍 running 的步骤置为其 done/failed/stopped 状态并把该消息的 `thinkingActive` 置为 `false`（`stopped` 不设置 error 文案）；审批按 `approvalId` 为键增改：approval.request `{messageId, approvalId, tool, title, expiresAt}` 向对应 assistant 的 `approvals` **追加** pending 项 `{id: approvalId, tool, title, expiresAt, decision: null}` 并保持按 `id` 升序，绝不覆盖或移除同消息的其它审批项（同一消息可同时有多条 pending）；若该 `approvalId` 已存在于该消息则保持原状态（同一引用）；会话保持 running；approval.resolved `{messageId, approvalId, decision}` 仅更新该消息 `approvals` 中 `id === approvalId` 的那一项的 `decision`，其余项与其顺序不变；未知 `approvalId`（该消息无此 id、消息无审批或消息不存在）保持原状态（同一引用），不补建。不存在的 assistant 可按消息事件补建；不得重写 user 消息。未知 step.end 不得编造缺失的步骤名称。没有先前 turn.start 或 error 的终态 SHALL 有效。
 
 #### Scenario: 流式归约与重置
 - WHEN 对初始状态应用 turn.start、step.start(bash)、text.delta×3、step.end(done,output)、turn.end(done)
@@ -152,9 +159,17 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **WHEN** 对 running assistant 依次应用 turn.retry、text.delta(`x`)；另一例依次应用 turn.retry、error `{reason:"upstream_error",message:"上游出错：模型服务内部错误",status:503,detail:"模型服务返回 HTTP 503"}`、turn.end(failed)；再由一份末条助手 `error` 为 `{reason:"auth_failed",message:"鉴权失败：模型服务拒绝了配置的 API 密钥",status:401,detail:"…"}` 的快照调用 `chatStateFromSnapshot`
 - **THEN** 第一例 turn.retry 后该消息 `retrying` 为 `true`、会话仍 running，text.delta 后为 `false`；第二例最终该消息 `failed`、`retrying` 为 `false`、`error` 逐值等于事件对象，会话 `failed`；由快照生成的视图 `error` 逐值等于快照对象、`retrying` 为 `false`；输入与未改分支不被修改
 
+#### Scenario: 思考时长与进行中标记归约
+- **WHEN** 对 running assistant（`thinking` 为 `null`、`thinkingMs` 为 `null`）依次应用 thinking.delta(`先`)、thinking.end(`thinkingMs` 400)、step.start、thinking.delta(`想`)、thinking.end(`thinkingMs` 1200)、turn.end(done)
+- **THEN** 各步之后 `thinkingActive` 依次为 `true`、`false`、`false`、`true`、`false`、`false`，`thinkingMs` 依次为 `null`、400、400、400、1200、1200；`thinking` 最终为 `先想`；正文与步骤不受 thinking.end 影响
+- **WHEN** 以快照生成视图：一条 running assistant `thinking` 为 `先`、`thinkingMs` 为 `null`；一条 running assistant `thinking` 为 `先`、`thinkingMs` 为 400；一条 done assistant `thinking` 为 `先`、`thinkingMs` 为 `null`
+- **THEN** 三者 `thinkingActive` 依次为 `true`、`false`、`false`，`thinkingMs` 取快照原值
+- **WHEN** 对视图中不存在的 messageId 应用 thinking.end(`thinkingMs` 900)，或对 user 消息的 id 应用它
+- **THEN** 前者在末尾补建一条 running assistant，其 `thinkingMs` 为 900、`thinkingActive` 为 `false`；后者保持原状态（同一引用）
+
 ### Requirement: 事件流消费与续流
 `connectSessionEvents` SHALL 使用注入的 EventSourceCtor 建立编码 sessionId 的同源 events URL，并设置 withCredentials:true。调用方先取得初始完整快照并传入 initialCursor；连接器 SHALL 提供 close，并通过 loadSnapshot(signal)、同步 onSnapshot/onEvent、可选 onGap 和 onError 管理恢复与错误。API 方法和页面由其他模块拥有。
-连接器 SHALL 从命名 MessageEvent 的 data 解码负载、从 lastEventId 读取 canonical 安全整数 epoch:seq；十二类数据事件（含 `approval.request`、`approval.resolved`、`thinking.delta`、`files.changed`、`todo.updated`、`turn.retry`）均经过同一游标过滤。`error` 按严格键集 `{messageId,message,reason,status,detail}` 解码（`messageId` 安全整数，`message`、`reason` 非空字符串，`status` 为 `null` 或 100–599 的整数，`detail` 字符串，可为空串），`turn.retry` 按严格键集 `{messageId}`（安全整数）解码。`thinking.delta` 按严格键集 `{messageId,delta}`（`messageId` 安全整数、`delta` 非空字符串）解码，`files.changed` 按严格键集 `{messageId,stepId,files}`（`messageId`/`stepId` 安全整数，`files` 的规则同快照步骤的非 null `changes`：1 至 50 项，每项严格键集 `{path,added,removed,kind}`）解码，`todo.updated` 按严格键集 `{messageId,todo}`（`messageId` 安全整数，`todo` 的规则同快照的 `todo`，含 `null`，见 session-todo `web 契约解析与归约`）解码。原生传输 error 不得被当作业务 error：CONNECTING 时保留状态并交给原生自动重连，CLOSED 时关闭并报告，不推断 HTTP 状态。已知事件的非法 payload/id SHALL 触发重新同步，未知事件类型忽略。
+连接器 SHALL 从命名 MessageEvent 的 data 解码负载、从 lastEventId 读取 canonical 安全整数 epoch:seq；十三类数据事件（含 `approval.request`、`approval.resolved`、`thinking.delta`、`thinking.end`、`files.changed`、`todo.updated`、`turn.retry`）均经过同一游标过滤。`error` 按严格键集 `{messageId,message,reason,status,detail}` 解码（`messageId` 安全整数，`message`、`reason` 非空字符串，`status` 为 `null` 或 100–599 的整数，`detail` 字符串，可为空串），`turn.retry` 按严格键集 `{messageId}`（安全整数）解码。`thinking.delta` 按严格键集 `{messageId,delta}`（`messageId` 安全整数、`delta` 非空字符串）解码，`thinking.end` 按严格键集 `{messageId,thinkingMs}`（`messageId` 安全整数、`thinkingMs` 非负安全整数）解码，`files.changed` 按严格键集 `{messageId,stepId,files}`（`messageId`/`stepId` 安全整数，`files` 的规则同快照步骤的非 null `changes`：1 至 50 项，每项严格键集 `{path,added,removed,kind}`）解码，`todo.updated` 按严格键集 `{messageId,todo}`（`messageId` 安全整数，`todo` 的规则同快照的 `todo`，含 `null`，见 session-todo `web 契约解析与归约`）解码。原生传输 error 不得被当作业务 error：CONNECTING 时保留状态并交给原生自动重连，CLOSED 时关闭并报告，不推断 HTTP 状态。已知事件的非法 payload/id SHALL 触发重新同步，未知事件类型忽略。
 每次 open（含首次连接和自动重连）、replay.gap 或1000条待处理数据队列溢出 SHALL 开启新的完整快照恢复；gap 额外调用 onGap。恢复期间排队，并以 generation/AbortController 使旧加载失效；只有仍有效且属于当前会话、未倒退的快照可安装。安装后丢弃旧 epoch，同 epoch 的 seq:null 覆盖整代，否则丢弃 seq≤边界，仅按到达顺序消费后继；已经成功交付的 watermark 继续去重。过滤包含 turn.start，不能清空已覆盖快照。
 再次 gap/溢出 SHALL 废弃旧队列并重新同步，不以截断后继续消费替代恢复。同步回调重入时仍须保持先后次序，并在关闭/替代后停止旧 drain。loadSnapshot 失败或消费者回调违反同步合同 SHALL 关闭并报告，不能留下未处理拒绝、失效安装或继续追加；不新增自动重试策略。close SHALL 幂等关闭底层源、移除监听、abort加载并使所有迟到结果失效。切换/卸载/未登录由页面生命周期调用 close。
 
@@ -198,6 +213,12 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **WHEN** 快照游标为 1:2，随后到达 turn.retry(1:3)、error(1:4，五键齐全、`status` 为 `null`) 与 turn.end failed(1:5)
 - **THEN** 三者按到达顺序交付 onEvent
 - **WHEN** error 只有旧的两键 `{messageId,message}`、多一个键、`status` 为 `"401"` 或 `700`、`reason` 为空串；或 turn.retry 多一个键
+- **THEN** 触发完整快照重新同步，不交付该事件
+
+#### Scenario: 思考结束事件经同一游标过滤并严格解码
+- **WHEN** 快照游标为 1:3，随后到达 thinking.end(1:3) 与 thinking.end(1:4) `{messageId:7, thinkingMs:1200}`
+- **THEN** 1:3 被丢弃，1:4 按到达顺序交付 onEvent，负载逐值保留
+- **WHEN** thinking.end 的 `thinkingMs` 为 `-1`、`1.5`、字符串或缺失，或 payload 多一个键，或 `messageId` 不是安全整数
 - **THEN** 触发完整快照重新同步，不交付该事件
 
 ### Requirement: 会话页
@@ -376,7 +397,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 
 三者之间的值导入 SHALL 只沿 `page.tsx → use-chat-session.ts → turn-actions.ts` 方向：`use-chat-session.ts` 与 `turn-actions.ts` SHALL 不导入 `./page.js`，`turn-actions.ts` SHALL 不导入 `./use-chat-session.js`。`use-chat-session.ts` 的导出 SHALL 只供 `page.tsx` 使用，`turn-actions.ts` 的导出 SHALL 只供 `use-chat-session.ts` 使用；二者都不经 `index.ts` 对外暴露，也不新增未被引用的导出。
 
-`runtime-convert.ts` SHALL 是纯模块（不渲染 UI、无副作用、不持有状态），导出把会话视图消息映射为运行时消息的 `convertMessage`：消息 `id` 映射为其十进制字符串；内容 part 的顺序固定为 reasoning（仅 `thinking` 非空时）、text（`content` 原文）、每个步骤一个 tool-call（`toolCallId` 为步骤 id、`toolName` 为步骤名、参数文本为 `detail`、结果为 `output`，`failed` 步骤标为错误）；消息状态 `running` 映射为运行中，`done` 映射为完成，`failed` 与 `stopped` 映射为未完成；`approvals`、步骤 `changes`、`error` 与原始 `status` 作为应用自有字段原值透传给应用层组件。同一输入 SHALL 得到相等的输出，且 SHALL 不修改输入。
+`runtime-convert.ts` SHALL 是纯模块（不渲染 UI、无副作用、不持有状态），导出把会话视图消息映射为运行时消息的 `convertMessage`：消息 `id` 映射为其十进制字符串；内容 part 的顺序固定为 reasoning（仅 `thinking` 非空时）、text（`content` 原文）、每个步骤一个 tool-call（`toolCallId` 为步骤 id、`toolName` 为步骤名、参数文本为 `detail`、结果为 `output`，`failed` 步骤标为错误）；消息状态 `running` 映射为运行中，`done` 映射为完成，`failed` 与 `stopped` 映射为未完成；`approvals`、步骤 `changes`、`error`、`thinkingMs`、`thinkingActive` 与原始 `status` 作为应用自有字段原值透传给应用层组件。同一输入 SHALL 得到相等的输出，且 SHALL 不修改输入。
 
 `stream-steps.ts` SHALL 不移动、不改名。
 
@@ -393,7 +414,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 
 #### Scenario: convertMessage 映射
 - **WHEN** 以一条 `stopped` 助手视图消息调用 `convertMessage`：`id` 为 12，`thinking` 为 `先想一想`，`content` 为 `部分回答`，含一条 `done` 的 `bash` 步骤与一条 `failed` 的 `write` 步骤，`approvals` 含一条已结算审批；再以一条 `thinking` 为 `null`、无步骤的 `running` 助手消息调用
-- **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批、步骤 `changes`、`error` 与原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
+- **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批、步骤 `changes`、`error`、`thinkingMs`、`thinkingActive` 与原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
 
 ### Requirement: 连接器按需重新同步
 `connectSessionEvents` 返回的句柄 SHALL 在 `close` 之外提供 `resync()`。未关闭时，`resync()` SHALL 以与 open 相同的方式开启一次新的完整快照恢复：使旧加载失效（abort 且其迟到结果不安装）、废弃待处理队列、经 `loadSnapshot(signal)` 取快照，只安装属于当前会话且未倒退的快照（倒退则关闭并报告），恢复期间到达的帧排队、安装后按既有游标规则只交付后继；`resync()` SHALL 不调用 `onGap`。已关闭后调用 SHALL 为空操作，不再加载。
@@ -428,7 +449,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 
 **错误文本**（#909）SHALL 在消息有 `error` 对象时渲染：第一行为 `error.message`，`error.status` 非 `null` 时其后接 `（HTTP <status>）`；`error.detail` 非空时其下有一个 `查看原文` 按钮（带 `aria-expanded`，缺省收起），展开后以纯文本显示 `detail`——保留换行与空白、自动折行、超出一定高度时块内滚动，SHALL NOT 按 Markdown 或 HTML 渲染。消息为 running 且 `retrying` 为 `true` 时，同一位置渲染一行 `role="status"` 的 `上游出错，正在重试…`。`error` 为 `null` 的失败消息不渲染错误文本。
 
-**助手消息** SHALL 渲染为左侧的无气泡块，带装饰性的助手头像标记（不进入可访问名）。块内各部分 SHALL 按以下次序渲染，每项仅在存在时渲染：深度思考折叠块 `深度思考过程`（thinking-fold）→ 正文（Markdown，或 `（已停止生成）` 占位）→ 工具调用组 → 已结算审批记录（tool-approval）→ 错误文本（含重试提示）→ `文件变更（N 个）` 卡 → 产物卡（turn-artifacts）→ `已停止` 徽章 → 操作行。待决审批 SHALL NOT 渲染在消息内（见 `输入框上方停靠区` 与 tool-approval）。思考折叠块、已结算审批记录、文件变更卡与产物卡 SHALL NOT 改变本条规定的复制、重新生成、分叉与已停止行为。
+**助手消息** SHALL 渲染为左侧的无气泡块，带装饰性的助手头像标记（不进入可访问名）。块内各部分 SHALL 按以下次序渲染，每项仅在存在时渲染：深度思考折叠块（标题见 thinking-fold「深度思考折叠块呈现」）→ 正文（Markdown，或 `（已停止生成）` 占位；运行中尚无任何可见块时代之以等待指示，见下文）→ 工具调用组 → 已结算审批记录（tool-approval）→ 错误文本（含重试提示）→ `文件变更（N 个）` 卡 → 产物卡（turn-artifacts）→ `已停止` 徽章 → 操作行。待决审批 SHALL NOT 渲染在消息内（见 `输入框上方停靠区` 与 tool-approval）。思考折叠块、已结算审批记录、文件变更卡与产物卡 SHALL NOT 改变本条规定的复制、重新生成、分叉与已停止行为。
 
 **正文** SHALL 经 `@assistant-ui/react-markdown`（加 `remark-gfm`，不启用任何把源 HTML 转成元素的插件）渲染，不经 `web/src/lib/md-render.ts`（该模块留给文件页）：
 - 源文本中的 HTML SHALL 作为文本出现，不生成对应元素；
@@ -436,7 +457,11 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 - 图片 SHALL 不加载：不生成 `img` 元素、不向图片地址发请求，在原位渲染其 alt 文本，无 alt 时渲染其 URL 文本；
 - 代码块 SHALL 带复制按钮，复制该代码块的原文——写入剪贴板的文本 SHALL 去掉末尾恰一个换行（代码内部的换行与原文末尾多出的空行都保留），使粘贴到终端时末行不会被直接执行；成功只把按钮图标换成对勾、不弹提示；复制失败（剪贴板 API 不存在、抛错或 reject）时 SHALL 在该按钮旁渲染 `role="alert"` 的一行文字 `复制失败`（与消息级 `复制` 同一规则：下一次复制成功或再次点击时清除），异常与 rejection 不外泄；不做语法高亮。
 
-运行中的助手消息 SHALL 在正文最后一个字符之后显示闪烁光标，进入终态后光标消失；`prefers-reduced-motion: reduce` 下光标 SHALL 不闪烁（可观察量：光标元素计算样式的 `animation-name` 为 `none`，由 ui-walk 在真实浏览器里断言）。
+**等待指示与小圆点**：运行中的助手消息 SHALL 恰好显示二者之一，进入终态后二者都不显示。
+- **等待指示**：消息 running 且还没有任何可见块——`thinking` 为 `null` 或空串、正文为空、没有步骤、没有已结算审批、`error` 为 `null` 且不在重试中——时，SHALL 在正文的位置显示一行 `role="status"`、可见文本为 `正在思考…` 的等待指示（`data-slot="message-waiting"`），带流光；`prefers-reduced-motion: reduce` 下流光动画暂停。任一可见块出现后它 SHALL 消失，同一回合不再出现。不区分模型是否支持推理。
+- **小圆点**：消息 running 且已有可见块时，SHALL 在正文之后、今天方块光标所在的位置（`MarkdownBody` 之后）显示一个小圆点（`data-slot="message-caret"`、`aria-hidden`，计算样式 `border-radius` 为 50%），非减少动态效果时带动画（计算样式 `animation-name` 不为 `none`）；`prefers-reduced-motion: reduce` 下无动画（`animation-name` 为 `none`）。可观察量由 ui-walk 在真实浏览器里断言。
+
+**正文逐字展开**：运行中、非减少动态效果时，正文 SHALL 按 `@assistant-ui/react` `useSmooth` 的规则逐字展开：显示的文本始终是已收到正文的前缀，每字间隔为 min(5ms, 250ms ÷ 尚未显示的字数)，积压越多越快。消息组件首次挂载（打开会话、切换会话）时已有的正文 SHALL 立即全部显示，只有此后到达的部分逐字展开（原地重新安装快照时组件不重新挂载，快照比当前多出的部分按同一规则展开）；展开期间转录区的贴底跟随与 `回到最新` 的判定照常（贴着底时持续贴底，用户上滚后不被拉回）；消息进入任一终态时 SHALL 立即显示全文，不拖尾；`prefers-reduced-motion: reduce` 下 SHALL 不逐字展开，收到即显示。逐字展开期间消息内 SHALL 不出现小圆点之外的运行指示（Markdown 基元的容器 `data-status` 不为 `running`）。`复制` 写入的文本与对话内搜索匹配的文本 SHALL 取已收到的全文，与当前已显示到哪里无关。
 
 状态为 `stopped` 的助手消息 SHALL 在正文之后、操作行之前渲染一个 `role="status"` 徽章，可见文本 `已停止`、可访问名 `助手消息 已停止`（不带错误文本）；其正文为空时 SHALL 以占位文本 `（已停止生成）` 代替空块。这一消息级呈现不改变会话列表状态点、步骤徽章与输入框的呈现。
 
@@ -455,7 +480,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 
 #### Scenario: 消息呈现与流式光标
 - **WHEN** 一次回合的快照包含多行用户消息与含 Markdown（标题 + 代码块 + 源 HTML）的助手正文，先处于 running、随后收到 `turn.end` done；另一例在 `prefers-reduced-motion: reduce` 下渲染同一条 running 助手消息
-- **THEN** 用户消息为右侧气泡且多行文本换行与前导空白保留；助手块带装饰性头像标记，正文渲染出 heading 与 code 元素，源 HTML 作为文本出现、不生成对应元素；代码块带复制按钮；running 时正文末尾有光标，done 后消失；减少动态效果的一例中光标存在但不闪烁（计算样式 `animation-name` 为 `none`）；两条消息的根元素都是 `article`，可访问名分别为 `用户` 与 `助手`，各带自己的 `data-message-id`
+- **THEN** 用户消息为右侧气泡且多行文本换行与前导空白保留；助手块带装饰性头像标记，正文渲染出 heading 与 code 元素，源 HTML 作为文本出现、不生成对应元素；代码块带复制按钮；running 时正文末尾有小圆点，done 后消失；减少动态效果的一例中小圆点存在但无动画（计算样式 `animation-name` 为 `none`）；两条消息的根元素都是 `article`，可访问名分别为 `用户` 与 `助手`，各带自己的 `data-message-id`
 
 #### Scenario: 代码块复制失败就地提示
 - **WHEN** 助手正文含一个代码块，点击其复制按钮：先在剪贴板可用时点击，再在 `writeText` reject 时点击，最后在剪贴板恢复可用后再点击一次
@@ -504,7 +529,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 - **THEN** 第一例线程区显示一个图标、`还没有消息，发一条开始吧` 与 `工作空间 项目A`，没有场景分组、快捷任务与最佳实践卡，没有 hero，页面 level-1 heading 仍是顶栏面包屑 `我的工作 / <title>`，输入框草稿仍为 `草稿`、可发送；未绑定与空间名解析不出来的两例都有图标与 `还没有消息，发一条开始吧`，但没有以 `工作空间` 开头的那一行；历史请求尚未返回的一例在历史返回之前不显示空态；发送被受理后空态消失、出现用户消息
 
 #### Scenario: 助手块次序
-- **WHEN** 快照含一条 `stopped` 助手消息：`thinking` 为 `先想一想`，`approvals` 含一条已结算审批，正文为 `部分回答`，一个已结束 `write` 步骤的 `changes` 为 `[{path:"out/index.html",added:null,removed:null,kind:"write"}]`，会话绑定到本账号的空间
+- **WHEN** 快照含一条 `stopped` 助手消息：`thinking` 为 `先想一想`、`thinkingMs` 为 `null`，`approvals` 含一条已结算审批，正文为 `部分回答`，一个已结束 `write` 步骤的 `changes` 为 `[{path:"out/index.html",added:null,removed:null,kind:"write"}]`，会话绑定到本账号的空间
 - **THEN** 该消息内按文档顺序依次为 `深度思考过程` 折叠块（收起）、正文、工具调用组（收起）、已结算审批记录、名为 `文件变更（1 个）` 的卡片、`index.html` 的 HTML 产物卡、名为 `助手消息 已停止` 的徽章与操作行；消息内没有名为 `需要你的确认` 的区域；`复制` 仍只复制 `部分回答`
 
 #### Scenario: 用户消息操作行的按钮与次序
@@ -542,6 +567,20 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 #### Scenario: 重试提示
 - **WHEN** running 助手消息收到 turn.retry，随后收到 text.delta；另一例收到 turn.retry 后收到 error 与 turn.end(failed)
 - **THEN** turn.retry 后错误文本位置出现一行 `role="status"` 的 `上游出错，正在重试…`；text.delta 后它消失；另一例中它被分类说明取代
+
+#### Scenario: 等待指示
+- **WHEN** 发送一条消息后，running 助手消息还没有任何事件内容；随后先到达一条 `thinking.delta`；另一例中随后先到达一条 `step.start`；第三例中随后先到达一条 `text.delta`
+- **THEN** 内容到达之前该消息内只有 `role="status"` 的 `正在思考…`，没有小圆点、没有折叠块；三例中第一块内容到达后等待指示消失、小圆点出现，此后直到回合结束不再出现等待指示
+- **WHEN** running 助手消息尚无可见块时收到 `turn.retry`；另一例收到 error 与 `turn.end(failed)`
+- **THEN** 前者重试提示出现、等待指示消失；后者等待指示与小圆点都不显示，只显示分类错误
+
+#### Scenario: 正文逐字展开
+- **WHEN** 非减少动态效果下，一条 running 助手消息已显示正文 `A`，随后收到一条 200 字的 `text.delta`
+- **THEN** 此后的若干帧中显示的正文由短到长增长，每一帧都是 `A` 加该 200 字的前缀，在有限时间内等于全文（时长按「正文逐字展开」的间隔规则，积压越多越快；200 字约 0.6s）；其间正文的 Markdown 容器没有 `data-status="running"`，消息内只有一个小圆点；其间点开对话内搜索输入该 200 字中最后五个字，该消息被匹配
+- **WHEN** 该消息在正文尚未显示全文时收到 `turn.end(done)`；另一例以快照打开一条 running 助手消息，其正文已有 500 字
+- **THEN** 前者终态后立即显示全文，`复制` 写入全文；后者首次渲染即显示全部 500 字，不从头逐字展开
+- **WHEN** `prefers-reduced-motion: reduce` 下 running 助手消息收到一条 200 字的 `text.delta`
+- **THEN** 收到后立即显示全文
 
 ### Requirement: 输入框与能力栏
 会话页的输入框 SHALL 是 `web/src/features/chat/` 内的应用层组件：由拷入层的普通受控多行文本框与按钮组成，文本框的值即应用自有的 `draft` 状态（唯一事实来源），提交走页面既有的发送路径；SHALL NOT 使用 assistant-ui 的 `ComposerPrimitive`。它含附件标签区（仅在有附件时渲染，位于文本框上方，message-attachments「输入框附件标签」）、带标签的多行文本框（可访问名 `给助手发消息`；欢迎态占位 `今天帮你做些什么`，已选会话占位 `继续追问，或派一个新任务…`）、文本框下方的一行能力行与发送按钮（可访问名 `发送`）。`发送` 的启用条件 SHALL 是：草稿不是空白（去掉首尾空白后非空），或至少有一个附件标签且全部标签都处于可发送状态（已上传，或欢迎态的 `待上传`；message-attachments「输入框附件标签」）——只发附件、不发文字是允许的（owner 2026-10-06 改判）；任一附件标签处于 `上传中` 或 `失败` 时不可发送，输入框锁定时不可发送，这两条不变。提示 `Enter 发送 · Shift+Enter 换行` SHALL 保留。键盘规则不变：无修饰的 Enter 经同一表单受理路径发送一次原始草稿，Shift+Enter 换行，输入法组合态（`isComposing`）与键码 229 不发送，长按重复的 Enter 不新增提交，锁定期间不可发送，空白草稿在没有满足上述条件的附件标签时不可发送（Enter 与 `发送` 按钮同一判定）。
