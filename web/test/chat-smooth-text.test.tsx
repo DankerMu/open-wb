@@ -178,6 +178,40 @@ describe("正文逐字展开", () => {
     expect(writeText).toHaveBeenCalledWith(`A${TWO_HUNDRED}`);
   });
 
+  // 规格说「任一终态」：done 之外的两个终态各一例（issue 1450 补测，7a 评审 P3）。
+  it("展开到一半时收到 turn.end(stopped)：立即显示全文，没有小圆点", async () => {
+    const article = await openRunning("A");
+    vi.useFakeTimers({ toFake: [...PAGE_CLOCK] });
+    await emit(4, "text.delta", { delta: TWO_HUNDRED });
+    for (let i = 0; i < 5; i += 1) frame();
+    expect(bodyText(article).length).toBeLessThan(201);
+
+    await emit(5, "turn.end", { status: "stopped" });
+
+    expect(bodyText(article)).toBe(`A${TWO_HUNDRED}`);
+    expect(article.querySelectorAll(CARET)).toHaveLength(0);
+  });
+
+  it("展开到一半时收到 error 与 turn.end(failed)：error 一到即显示全文，没有小圆点", async () => {
+    const article = await openRunning("A");
+    vi.useFakeTimers({ toFake: [...PAGE_CLOCK] });
+    await emit(4, "text.delta", { delta: TWO_HUNDRED });
+    for (let i = 0; i < 5; i += 1) frame();
+    expect(bodyText(article).length).toBeLessThan(201);
+
+    await emit(5, "error", {
+      reason: "model_call_failed",
+      message: "上游失败",
+      status: null,
+      detail: "",
+    });
+
+    expect(bodyText(article)).toBe(`A${TWO_HUNDRED}`);
+    expect(article.querySelectorAll(CARET)).toHaveLength(0);
+    await emit(6, "turn.end", { status: "failed" });
+    expect(bodyText(article)).toBe(`A${TWO_HUNDRED}`);
+  });
+
   it("以快照打开一条正文已有 500 字的 running 消息：首次渲染即显示全部 500 字，不从头展开", async () => {
     const five = "春夏秋冬甲".repeat(100);
     // 挂载前就冻住帧：首次渲染若从空串起步，在这里不会有机会追上。

@@ -324,7 +324,7 @@ Minimal mergeable slice（6b）: atomic - 预览开关、限高与渐隐处理�
 Suggested fixture level（7a）: compact - 前端呈现，复用已安装依赖的现成规则；依赖风险由钉子用例覆盖。
 Minimal mergeable slice（7a）: atomic - 一个包装组件及其在正文上的接入；思考侧放在 7b。
 
-- [ ] 7.3 **7b**：思考平滑。`thinking-fold.tsx` 经 `smooth-text.tsx` 取主体文本。
+- [x] 7.3 **7b**：思考平滑。`thinking-fold.tsx` 经 `smooth-text.tsx` 取主体文本。
   验证：
   - jsdom 覆盖 thinking-fold「思考的逐字展开」的全部 WHEN；
   - 7.1 盘点出的思考侧同类用例，按第 3 种改法改写；
