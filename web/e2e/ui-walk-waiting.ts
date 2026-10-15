@@ -67,6 +67,10 @@ export async function walkWaitingIndicator(
     await expect(caret).toHaveCount(0);
     await expect(third.locator('[data-slot="reasoning-root"]')).toHaveCount(0);
     await expect(third.locator('[data-slot="message-body"]')).toHaveCount(0);
+    // self-start：这一行宽度贴着文字，不被纵向 flex 拉成整条消息宽。
+    const lineWidth = (await waiting.boundingBox())?.width ?? Infinity;
+    const content = await third.locator('[data-slot="message-content"]').boundingBox();
+    expect(lineWidth, "the waiting line hugs its text").toBeLessThan((content?.width ?? 0) / 2);
     expect(await shimmerOf(waiting), "the waiting line shimmers").toBe(
       "tw-shimmer-translate running",
     );

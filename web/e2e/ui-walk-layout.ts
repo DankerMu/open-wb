@@ -360,16 +360,22 @@ const animationOf = (target: Locator) => () =>
   target.evaluate((el) => getComputedStyle(el).animationName);
 
 // chat-harness「等待与思考呈现的冒烟与走查」第 1 步，两个 project 都在受控回合 held 期间调用：running
-// 助手正文末尾恰一个可见的 8×8 小圆点，计算 `border-radius` 为 50%，no-preference 下有动画。返回它给
-// reduce 切换用。
+// 助手正文末尾恰一个可见的 8×8 小圆点，计算 `border-radius` 为 50%，no-preference 下有动画；已有可见块，
+// 所以没有等待指示（场景「走查量到等待指示…」第二个 WHEN：正文出现后仍显示它的候选实现在此判红）。返回
+// 小圆点给 reduce 切换用。
 export async function expectRunningDot(page: Page): Promise<Locator> {
-  const dot = page.getByRole("article", { name: "助手" }).locator('[data-slot="message-caret"]');
+  const message = page.getByRole("article", { name: "助手" });
+  const dot = message.locator('[data-slot="message-caret"]');
   await expect(dot).toHaveCount(1);
   await expect(dot).toBeVisible();
   const box = await dot.boundingBox();
   expect([box?.width, box?.height], "an 8px dot (size-2)").toEqual([8, 8]);
   expect(await dot.evaluate((el) => getComputedStyle(el).borderRadius), "round dot").toBe("50%");
   await expect.poll(animationOf(dot), "the running dot pulses").not.toBe("none");
+  await expect(
+    message.locator('[data-slot="message-waiting"]'),
+    "no waiting indicator once a visible block exists",
+  ).toHaveCount(0);
   return dot;
 }
 
