@@ -287,6 +287,7 @@ Minimal mergeable slice（6a）: atomic - 一个控件的文案规则及其走�
   验证：
   - jsdom 覆盖「终态消息主体限高」里在 jsdom 能观察的部分：`data-running`、类名、渐隐层隐藏，以及盒内上滚后不被拉回（手动触发桩 `ResizeObserver` 的回调）；
   - 走查覆盖 chat-harness「等待与思考呈现的冒烟与走查」第 3 步（`WORKBUDDY_THINK_LONG` 加 `HOLD_AT:thinking`）；
+  - 验收清单改写 CH-14（运行中的折叠块：限高 12rem、盒内贴到最新行）；
   - 既有 `web/test/chat-thinking.test.tsx:689-703`「leaves a running one uncapped (#725)」（断言 `max-h-none`）按通用纪律第 3 种改法改写为「running 主体限高 12rem 且为预览」，列进偏离记录；6.1 的盘点同时 grep `max-h-none` 找同类用例。
 Suggested fixture level（6b）: compact - 前端呈现。
 Minimal mergeable slice（6b）: atomic - 预览开关、限高与渐隐处理是同一个呈现模式。缺任何一项，预览要么不限高，要么被渐隐层遮挡。
