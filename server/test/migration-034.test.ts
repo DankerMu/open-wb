@@ -32,6 +32,7 @@ import {
   MIGRATION_041,
   MIGRATION_042,
   MIGRATION_043,
+  MIGRATION_044,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -129,6 +130,7 @@ const TABLE_INFO: Record<string, Array<[string, string, number, string | null, n
     ["error_reason", "TEXT", 0, null, 0],
     ["error_status", "INTEGER", 0, null, 0],
     ["error_detail", "TEXT", 0, null, 0],
+    ["thinking_ms", "INTEGER", 0, null, 0],
   ],
   chat_steps: [
     ["id", "INTEGER", 0, null, 1],
@@ -264,6 +266,7 @@ function seed033Database(path: string, seed: (db: DatabaseSync) => void): void {
         MIGRATION_041,
         MIGRATION_042,
         MIGRATION_043,
+        MIGRATION_044,
       ].includes(asset.filename),
   );
   const filenames = assets.map((asset) => asset.filename);

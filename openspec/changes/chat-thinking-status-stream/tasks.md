@@ -128,7 +128,7 @@ Minimal mergeable slice（2b）: atomic - 2.3、2.4b、2.5 是同一个行为变
   - 重读 web 的 `session-contract.ts` 消息解码器、`stream.ts` 事件解码表、`stream-thinking.ts`。
 
   验证：核对结果写进 PR。
-- [ ] 3.2 **3a**：按 thinking-fold「迁移 044 思考时长列」实现迁移 `server/src/core/db/migrations/044_chat_message_thinking_ms.sql`，只加列，不读不写。上面四处精确列清单夹具同步加列，并列进偏离记录。
+- [x] 3.2 **3a**：按 thinking-fold「迁移 044 思考时长列」实现迁移 `server/src/core/db/migrations/044_chat_message_thinking_ms.sql`，只加列，不读不写。上面四处精确列清单夹具同步加列，并列进偏离记录。
   验证：
   - 迁移测试覆盖规格两例：新库与存量库、中途失败可重试；
   - 受信迁移计数加一；
