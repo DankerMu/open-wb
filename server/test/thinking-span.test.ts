@@ -485,6 +485,16 @@ describe("thinking-fold 写库失败", () => {
     expect(world.faults).toHaveLength(1);
     expect(columns(world.db, world.messageId).thinking).toBeNull();
   });
+
+  it("both duration writes throw for a message id that names no row", () => {
+    const world = openWorld();
+    const store = createThinkingMsStore(world.db);
+    const missing = world.messageId + 1;
+    const receipt = "thinking duration must change exactly 1 row";
+    expect(() => store.setThinkingMs(missing, 500)).toThrow(receipt);
+    expect(() => store.clearThinkingMs(missing)).toThrow(receipt);
+    expect(columns(world.db, world.messageId).thinkingMs).toBeNull();
+  });
 });
 
 describe("thinking-fold 上限与截断标记（计时）", () => {

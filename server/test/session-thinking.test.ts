@@ -184,6 +184,8 @@ async function openScriptedWorld(
 ): Promise<{
   world: ThinkingWorld;
   child: () => FakeChild;
+  /** Every child spawned so far. */
+  children: readonly FakeChild[];
 }> {
   const controlled = createControlledRuntime((child) => {
     closeOnEof(child);
@@ -203,6 +205,7 @@ async function openScriptedWorld(
   const world = await openWorld(controlled.runtime, extra, faulted);
   return {
     world,
+    children: controlled.children,
     child: () => {
       const child = controlled.children[0];
       if (child === undefined) {
@@ -360,7 +363,7 @@ describe("S4 flush before the terminal", () => {
     "a held buffer is published and saved before the failure events of a crash",
     REAL,
     async () => {
-      const { world, child } = await openHeldWorld();
+      const { world, child, children } = await openHeldWorld();
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -371,6 +374,7 @@ describe("S4 flush before the terminal", () => {
       ]);
       expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
 
+      expect(children).toHaveLength(1);
       expect(child().kill("SIGKILL")).toBe(true);
       await waitForTurn(world.fixture, world.session, "failed");
       expect(types(world)).toEqual([

@@ -278,6 +278,33 @@ describe("thinking-fold 中断后无法恢复（启动对账一半）", () => {
   );
 
   it(
+    "killed while answering after a closed span: reconciliation keeps the written value",
+    REAL,
+    async () => {
+      const { world, child } = await openThinkingChild(PLANT);
+      await prompted(world);
+      await waitForEvent(world, "thinking.delta");
+      const assistant = assistantIdFor(world.fixture, world.session);
+      world.clock.advance(500);
+      child().emitLine(THINKING_END);
+      await waitForEvent(world, "thinking.end");
+      expect(thinkingMs(world.fixture.db, assistant)).toBe(500);
+
+      world.clock.advance(300);
+      child().emitLine(update({ type: "text_delta", delta: "答" }));
+      await waitForEvent(world, "text.delta");
+      expect(thinkingMs(world.fixture.db, assistant)).toBe(500);
+
+      const published = events(world).length;
+      restartReconcile(world);
+      expect(messageRow(world.fixture.db, assistant).status).toBe("failed");
+      expect(thinkingMs(world.fixture.db, assistant)).toBe(500);
+      expect(events(world)).toHaveLength(published);
+      expect(ofType(sessionEvents(world), "thinking.end")).toHaveLength(1);
+    },
+  );
+
+  it(
     "an infra fault inside a span writes no duration and publishes no thinking.end",
     REAL,
     async () => {
