@@ -261,7 +261,7 @@ store 只看到已发布的增量，所以：
 - 迁移 044 只加列，不回填，回滚即不再读该列。
 - 线协议只增不改：
   - 新 SSE 事件 `thinking.end`：旧前端按「未知事件保持原状态」忽略，服务端可以先于 web 发布它。
-  - 快照新键 `thinkingMs`：web 的消息解码是严格键集，缺键或多键都整体拒绝。所以服务端快照加键与 web 解析器加键必须同一 PR 落地，不设兼容窗口（#909 `error` 键的先例；tasks 组 3 的 3.3 与 3.4）。
+  - 快照新键 `thinkingMs`：web 的消息解码是严格键集，缺键或多键都整体拒绝。所以服务端快照加键与 web 解析器加键必须同一 PR 落地，不设兼容窗口（#909 `error` 键的先例；tasks 3.4，切片 3c）。
 - 按 Stage 5 的子 issue 顺序合并：服务端合并器 → 时长 → web 契约与视图 → 呈现 → 走查。每一刀都保绿。
 
 ## Not yet specified
@@ -271,7 +271,8 @@ store 只看到已发布的增量，所以：
 ## Sketch seams under test
 
 - **`createDeltaCoalescer` + 注入时钟（新，纯）**：前沿、时间窗、换类冲刷、终态冲刷、发布失败。选它是因为规则全在这里，单测最便宜。
-- **`SessionSupervisor` + fake-omp（既有）**：ring 次序、快照前缀、`thinking.end` 与 `thinking_ms`、停止 / 失败 / 崩溃路径的闭段。这是既有服务端集成测试的最高接缝。
+- **`createThinkingSpans` + 注入时钟 + 假端口（新，纯）**：开段清空、两种闭段信号、累计与钳位、多段、停止 / 失败 / 宿主退出 / 回拨的时长值。fake-omp 造不出「思考进行中尚未 `thinking_end`」「两段思考夹工具」「工具参数流式」这些帧序列（它的 `--hold-after-thinking` 在 `thinking_end` 之后才挂起），所以带毫秒值的场景都在这一层证。
+- **`SessionSupervisor` + fake-omp（既有）**：ring 次序、快照前缀、`thinking.end` 紧随 `thinking_end` 发布且先于下一事件、`thinking_ms` 列有值、无 reasoning 时无 `thinking.end`。这是既有服务端集成测试的最高接缝，只证次序与接线，不证毫秒值。
 - **官方 omp + 受控假上游（既有，`WORKBUDDY_OMP_TEST=1`）**：`WORKBUDDY_PACE` 下的事件数与首段即时。只有真 omp 的帧节奏能证明合并在真实链路上生效。
 - **`Thread` + jsdom（既有）**：等待指示 / 小圆点互斥、标题三态、平滑的三条边界、复制与搜索读全文。
 - **`make ui-walk` / `make smoke`（既有）**：计算样式（小圆点动画、预览限高）、终态标题、快照字段。

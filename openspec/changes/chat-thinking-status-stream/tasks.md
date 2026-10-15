@@ -4,7 +4,7 @@
 >
 > 依赖（「X ← Y」读作「X 的前提是 Y」）：
 > - 1 与 2a 互不依赖；2b ← 1（节奏标记）、2b ← 2a。
-> - 3a 无依赖；3b ← 2a（闭段先冲刷合并器）、3b ← 3a（写 `thinking_ms`）；3c ← 3b。
+> - 3a 无依赖；3b ← 2b（闭段先冲刷合并器；3.3 要往 2.5 新建的官方 omp 用例里追加断言；supervisor 行数预算链 2a → 2b → 3b）、3b ← 3a（写 `thinking_ms`）；3c ← 3b。
 > - 4a 无依赖；4b ← 4a（同改 `holdFinal`）。
 > - 5a 无依赖；5b ← 5a（同改 `message-thread.tsx`）、5b ← 4a（零内容停点）。
 > - 6a ← 3c（视图字段）、6a ← 5b（同改 `message-thread.tsx:226` 的 `ThinkingFold` 调用）；6b ← 6a、6b ← 4b（思考停点与长思考）。
@@ -20,7 +20,7 @@
 > - **既有断言不删不削弱。** 因本 change 而变化的既有断言，在 PR 的偏离记录里逐条列出旧 → 新。只允许三种改法：
 >   1. 改为「拼接逐字相等」；
 >   2. 在注入时钟下改为确定条数；
->   3. 如果断言钉住的正是被 owner 裁定推翻的旧行为，改写为钉住新行为的反向断言，并在偏离记录里引用该裁定。目前这样的旧行为只有两条：「正文不落后于已到达的数据」（O2/O6）与「折叠块标题恒为 `深度思考过程`」（O1）。
+>   3. 如果断言钉住的正是被 owner 裁定推翻的旧行为，改写为钉住新行为的反向断言，并在偏离记录里引用该裁定。目前这样的旧行为有三条：「正文不落后于已到达的数据」（O2/O6）、「折叠块标题恒为 `深度思考过程`」（O1）、「运行中的折叠块主体不限高」（O4，Q15）。实现中发现别的，先停下更新本条，不自行扩大。
 > - **拷入层不改**（design D8）。`web/src/components/ui/` 与 `web/src/components/assistant-ui/` 零改动；非改不可时停下报告。
 > - **不实现 design 的 Non-Goals。** 不把 `thinking_start` / `thinking_end` 当内容来源，不回填时长，不给其它事件做合并，不在首块之后再显示等待指示。
 > - **验收清单。** 每个切片改到的呈现，同步改写 `docs/acceptance/functional-checklist.md` 的对应行或新增行；结论一律 `待签`，agent 不代签。
@@ -89,7 +89,7 @@ Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半�
 - [ ] 2.4a 改写 2.1 清单里**思考类**的既有用例：
   - 原 `thinking-buffer.test.ts` 的 M1–M7 逐条迁移到 2.2 的测试文件。M1 字节阈值改为「不设字节阈值」，其余各条按「通用纪律」三种改法之一处理。
   - `server/test/session-thinking.test.ts` 等 supervisor 级用例按新节奏改写，并覆盖 thinking-fold「合并与落库」「回放与刷新」：
-    - 前沿发一条，`thinking_end` 前冲刷一条；
+    - 前沿发一条，其余在下一个非思考事件（正文到达）前冲刷为一条（2a 尚无 `thinking_end` 闭段，3b 起冲刷时刻提前到 `thinking_end`）；
     - 缓冲期间读到的快照不含该段，续流不重复。
   - `thinking.end` 的断言留给 3.3。
 
@@ -145,16 +145,17 @@ Minimal mergeable slice（3a）: atomic - 一个迁移文件及其测试。
   - **行数**：`supervisor.ts` 只加两处对 `thinking-span.ts` 的调用：pump 读帧处一处，`#commit` / `#publish` 经 `delta-coalescer` 的分派一处。合入后 ≤ 795 行。
   - **本切片不加快照键。**
 
-  验证：`server/test/session-thinking-span.test.ts`（fake-omp + 注入时钟）直接读 `thinking_ms` 列与 ring；需要停住时用 `--hold-after-thinking`，推进时钟后再停止。覆盖：
-  - thinking-fold「思考时长记录与下发」的各场景（列值部分）：
-    - 「单段思考以 thinking_end 闭合」「工具参数的生成不计入」「没有 thinking_end 时以下一事件闭合」；
-    - 「多段思考累计」「停止与失败」「中断后无法恢复」「墙钟回拨」「写库失败」；
-    - 「上限与截断标记」中的计时例。
-  - 2.2 留下的含 `thinking.end` 的部分：
-    - chat-stream「两类交错保持次序」；
-    - thinking-fold「合并与落库」「其它事件前冲刷」（用不需要审批的工具）；
-    - thinking-fold「无 reasoning 的模型」：没有 `thinking.end`，列为 NULL。
-  - chat-stream 改写后的「Ordered publication after persistence」（含 `thinking.end`）。
+  验证分两层（design「Sketch seams under test」）：
+  - **纯层** `server/test/thinking-span.test.ts`（注入时钟 + 假端口，仿 2.2 的写法；帧序列由测试直接喂给 `thinking-span.ts`）覆盖全部带毫秒值的场景：
+    - thinking-fold「思考时长记录与下发」：「单段思考以 thinking_end 闭合」「工具参数的生成不计入」「没有 thinking_end 时以下一事件闭合」「多段思考累计」（含第二段开段时列被清空）「停止与失败」「中断后无法恢复」「墙钟回拨」「写库失败」；
+    - 「上限与截断标记」中的计时例；
+    - chat-stream「两类交错保持次序」里 `thinking.end` 的位置。
+  - **集成层** `server/test/session-thinking-span.test.ts`（fake-omp，既有 `thinking` / `edit-write` / 无思考场景）只证次序与接线：
+    - thinking-fold「合并与落库」：`thinking.end` 紧随 `thinking_end` 冲刷出的 `thinking.delta`，先于第一条 `text.delta`；
+    - 「其它事件前冲刷」的相邻次序（不需要审批的工具）；
+    - 「无 reasoning 的模型」：没有 `thinking.end`，列为 NULL；
+    - `thinking_ms` 列在回合结束后为非负整数；
+    - chat-stream 改写后的「Ordered publication after persistence」（含 `thinking.end`）。
   - 2.5 的官方 omp 用例追加断言：恰有一条 `thinking.end`，且位于第一条 `text.delta` 之前。
 Suggested fixture level（3b）: expanded - 新的公开事件、开段 / 闭段写库与 pump 读帧，跨持久化与次序两类风险。
 Minimal mergeable slice（3b）: atomic - 开段清空、闭段写列与发布 `thinking.end` 是同一段的生命周期。只做一端，要么列值永远是 NULL，要么残留旧值、违背 O3。
@@ -283,7 +284,8 @@ Minimal mergeable slice（6a）: atomic - 一个控件的文案规则及其走�
   web 测试按 `chat-scroll-follow.test.tsx` 的先例桩 `ResizeObserver`；页面级测试经 `radix-platform.ts` 已有空实现。
   验证：
   - jsdom 覆盖「终态消息主体限高」里在 jsdom 能观察的部分：`data-running`、类名、渐隐层隐藏，以及盒内上滚后不被拉回（手动触发桩 `ResizeObserver` 的回调）；
-  - 走查覆盖 chat-harness「等待与思考呈现的冒烟与走查」第 3 步（`WORKBUDDY_THINK_LONG` 加 `HOLD_AT:thinking`）。
+  - 走查覆盖 chat-harness「等待与思考呈现的冒烟与走查」第 3 步（`WORKBUDDY_THINK_LONG` 加 `HOLD_AT:thinking`）；
+  - 既有 `web/test/chat-thinking.test.tsx:688-697`「leaves a running one uncapped (#725)」（断言 `max-h-none`）按通用纪律第 3 种改法改写为「running 主体限高 12rem 且为预览」，列进偏离记录；6.1 的盘点同时 grep `max-h-none` 找同类用例。
 Suggested fixture level（6b）: compact - 前端呈现。
 Minimal mergeable slice（6b）: atomic - 预览开关、限高与渐隐处理是同一个呈现模式。缺任何一项，预览要么不限高，要么被渐隐层遮挡。
 
@@ -299,14 +301,14 @@ Minimal mergeable slice（6b）: atomic - 预览开关、限高与渐隐处理�
     - reduce 下停用；
     - part 状态为「已完成」时，基元不置 `running`。
   - 实测 `TextMessagePartProvider` 在文本增长时 `aui.part` 是否保持同一引用；
-  - 盘点在 running 消息增量之后同步断言正文或思考文本的既有用例：已知有 `web/test/chat-markdown.test.tsx:223-256`「流式正文不落后于数据」，另查 `chat-thinking.test.tsx` 的同类用例。
+  - 盘点在 running 消息增量之后同步断言正文或思考文本的既有用例：已知有 `web/test/chat-markdown.test.tsx:224-248`「流式正文不落后于数据」，另查 `chat-thinking.test.tsx` 的同类用例。
 
   验证：核对结果与盘点清单写进 PR；与 D8 不符时先改 design。
 - [ ] 7.2 **7a**：正文平滑。
   - **新模块** `web/src/features/chat/smooth-text.tsx`：应用层的 `useSmooth` 包装，正文与思考共用。如果 7.1 发现 `aui.part` 引用不稳定，就在模块内保持一个稳定的 provider，只更新文本。
   - **接入**：助手正文经它把要显示的前缀交给 `MarkdownBody`，消息 running 时启用。
   - **不变的部分**：`markdown-body.tsx` 仍传 `smooth={false}`，只把注释改写为新理由；`复制` 与搜索的数据源不变。
-  - **既有用例**：`chat-markdown.test.tsx:223-256` 按通用纪律第 3 种改法，改写为反向钉子：展开期间显示的是前缀，进入终态立即全文。
+  - **既有用例**：`chat-markdown.test.tsx:224-248` 按通用纪律第 3 种改法，改写为反向钉子：展开期间显示的是前缀，进入终态立即全文。
   - **ADR**：ADR-0013 增补一条，记录正文逐字显现重新启用（owner 2026-10-06 / 2026-10-14，#910）：在应用层用 `useSmooth` 实现，取代「正文不能落后于已到达的数据」；基元的 `smooth` 仍关。
 
   验证：jsdom 用 `vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "Date", "setTimeout", "clearTimeout"] })`（以 7.1 实测可用的配置为准，写进测试注释）覆盖：
