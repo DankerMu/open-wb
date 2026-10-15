@@ -1,10 +1,13 @@
 /**
- * Issue #519 supervisor thinking merge: production assembly (createApp → registerSessions) over
+ * Issue #519 supervisor thinking merge, on the #910 delta coalescer's 250 ms window (slice 2a:
+ * thinking only, text still per frame): production assembly (createApp → registerSessions) over
  * real fake-omp `thinking` children (knobs `--thinking-repeat` / `--hold-after-thinking` appended
  * by a spawn wrapper) or scripted controlled children. Oracles are the recorded onEvent stream,
- * the stream cursor, real SSE bytes and the `chat_messages.thinking` column read directly (never
- * the snapshot projection). The merge buffer's timer is the only 2000 ms timer on the injected
- * clock (idle 10000 ms, stop grace 8000 ms, text flush on real timers).
+ * the stream cursor, real SSE bytes and the `chat_messages.thinking` column read directly (the
+ * snapshot projection only where S6 compares the two). The coalescer's timer is the only timer of
+ * at most 250 ms on the injected clock (idle 10000 ms, stop grace 8000 ms, text flush on real
+ * timers); the clock never moves unless a test advances it, so deltas arriving together after
+ * the first one are held until a non-thinking event or the terminal flushes them.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
@@ -42,16 +45,19 @@ import type { TestClock } from "./support/omp-runtime.js";
 
 /** fake-omp THINKING_PARTS joined and DELTAS (support/fake-omp*.mjs); copied, not imported. */
 const THOUGHT = "先读需求，再列要点，最后作答。";
+/** THINKING_PARTS[0], published at once, and the two parts the window holds. */
+const FIRST = "先读需求，";
+const HELD = "再列要点，最后作答。";
 const TEXT_DELTAS = ["Hello ", "from ", "fake-omp"];
 /** thinking-fold spec literals. */
 const MARK = "…（已截断）";
 const CAP = 32_768;
-const BUFFER_MS = 2_000;
+const WINDOW_MS = 250;
 const SENTINEL = "thinking write sentinel";
 
 interface ThinkingWorld extends RecordingWorld {
   clock: TestClock;
-  /** Merge-buffer timers (2000 ms on the injected clock) armed and neither fired nor cleared. */
+  /** Coalescer timers (≤ 250 ms on the injected clock) armed and neither fired nor cleared. */
   bufferTimers(): number;
 }
 
@@ -63,13 +69,13 @@ afterEach(async () => {
   }
 });
 
-/** Counts only 2000 ms timers; wraps the clock every consumer shares, before the app opens. */
+/** Counts only timers ≤ 250 ms; wraps the clock every consumer shares, before the app opens. */
 function trackBufferTimers(clock: TestClock): () => number {
   const live = new Set<unknown>();
   const arm = clock.setTimeout.bind(clock);
   const disarm = clock.clearTimeout.bind(clock);
   clock.setTimeout = (callback, ms) => {
-    if (ms !== BUFFER_MS) {
+    if (ms > WINDOW_MS) {
       return arm(callback, ms);
     }
     const id = arm(() => {
@@ -113,8 +119,9 @@ function fakeRuntime(
   return runtime;
 }
 
+/** The first thinking write (the leading-edge publication) passes, every later one fails. */
 const REJECT_THINKING = `CREATE TEMP TRIGGER reject_thinking
-  BEFORE UPDATE OF thinking ON chat_messages
+  BEFORE UPDATE OF thinking ON chat_messages WHEN OLD.thinking IS NOT NULL
   BEGIN SELECT RAISE(ABORT, '${SENTINEL}'); END`;
 
 /** The raw column, not the snapshot projection. */
@@ -151,6 +158,24 @@ async function ownerPost(world: RecordingWorld, path: string, body?: object): Pr
     ...(body === undefined ? {} : { payload: JSON.stringify(body) }),
   });
   return response.statusCode;
+}
+
+/** The REST snapshot: the assistant message's `thinking` and the stream cursor read with it. */
+async function snapshotOf(
+  world: RecordingWorld,
+): Promise<{ thinking: string | null; cursor: { epoch: number; seq: number | null } }> {
+  const response = await world.fixture.app.inject({
+    method: "GET",
+    url: `/api/sessions/${world.session}/messages`,
+    headers: { cookie: world.cookie },
+  });
+  expect(response.statusCode).toBe(200);
+  const body = response.json() as {
+    messages: Array<{ role: string; thinking: string | null }>;
+    streamCursor: { epoch: number; seq: number | null };
+  };
+  const answer = body.messages.find((message) => message.role === "assistant");
+  return { thinking: answer?.thinking ?? null, cursor: body.streamCursor };
 }
 
 function thinkingFrame(delta: string): OmpFrame {
@@ -211,7 +236,7 @@ async function allowToEnd(
 
 describe("S1 merge and persist", () => {
   it(
-    "three small deltas become one thinking.delta persisted before its publication",
+    "three deltas at one instant: the first at once, the rest as one before the text, each persisted first",
     REAL,
     async () => {
       let db: DatabaseSync | undefined;
@@ -230,7 +255,9 @@ describe("S1 merge and persist", () => {
       const assistant = assistantIdFor(world.fixture, world.session);
       expect(events(world)).toEqual([
         { type: "turn.start", data: { messageId: assistant } },
-        { type: "thinking.delta", data: { messageId: assistant, delta: THOUGHT } },
+        { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } },
+        // Slice 2a: the first text.delta flushes the held parts (3b moves this to thinking_end).
+        { type: "thinking.delta", data: { messageId: assistant, delta: HELD } },
         ...TEXT_DELTAS.map((delta) => ({
           type: "text.delta",
           data: { messageId: assistant, delta },
@@ -242,7 +269,7 @@ describe("S1 merge and persist", () => {
         epoch,
         seq: events(world).length,
       });
-      expect(columnsAtPublish).toEqual([THOUGHT]);
+      expect(columnsAtPublish).toEqual([FIRST, THOUGHT]);
       expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);
       expect(world.errors).toEqual([]);
     },
@@ -269,16 +296,18 @@ describe("S3 cap", () => {
   it("past 32768 code points exactly one marked thinking.delta ends the message's thinking", {
     timeout: 60_000,
   }, async () => {
-    // 6900 deltas of 5 code points / 15 bytes: a byte-threshold flush every 137 deltas (685 code
-    // points). The 48th crosses the cap (32880 > 32768); the 49th and 50th and the closing flush
-    // of the last 50 deltas find the column capped and publish nothing.
+    // 6900 deltas of 5 code points: no byte threshold and a clock that does not move, so the
+    // first is published at once and the other 6899 (34495 code points) are held until the first
+    // text.delta flushes them as one, which crosses the cap. That later deltas publish nothing is
+    // pinned at module level (delta-coalescer.test.ts「上限与截断标记」).
     const world = await openWorld(fakeRuntime("thinking", ["--thinking-repeat", "2300"]));
     await prompted(world);
     await waitForTurn(world.fixture, world.session, "done");
 
     const assistant = assistantIdFor(world.fixture, world.session);
     const published = thinkingDeltas(world);
-    expect(published).toHaveLength(48);
+    expect(published).toHaveLength(2);
+    expect(published[0]).toBe(FIRST);
     expect(published).not.toContain("");
     const marked = published.filter((delta) => delta.endsWith(MARK));
     expect(marked).toHaveLength(1);
@@ -288,8 +317,8 @@ describe("S3 cap", () => {
     expect([...(column ?? "")].length).toBe(CAP + [...MARK].length);
     expect(column?.startsWith(THOUGHT.repeat(Math.floor(CAP / [...THOUGHT].length)))).toBe(true);
     expect(world.fixture.supervisor.streamCursor(world.session).seq).toBe(events(world).length);
-    // turn.start, 48 thinking.delta, three text.delta, turn.end.
-    expect(events(world)).toHaveLength(53);
+    // turn.start, 2 thinking.delta, three text.delta, turn.end.
+    expect(events(world)).toHaveLength(7);
     expect(world.errors).toEqual([]);
   });
 });
@@ -300,14 +329,19 @@ describe("S4 flush before the terminal", () => {
     await prompted(world);
     await waitForBufferTimer(world);
     const assistant = assistantIdFor(world.fixture, world.session);
-    expect(events(world)).toEqual([{ type: "turn.start", data: { messageId: assistant } }]);
-    expect(thinkingColumn(world.fixture.db, assistant)).toBeNull();
+    const leading = { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } };
+    expect(events(world)).toEqual([
+      { type: "turn.start", data: { messageId: assistant } },
+      leading,
+    ]);
+    expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
 
     expect(await ownerPost(world, "stop")).toBe(202);
     await waitForEvent(world, "turn.end");
     expect(events(world)).toEqual([
       { type: "turn.start", data: { messageId: assistant } },
-      { type: "thinking.delta", data: { messageId: assistant, delta: THOUGHT } },
+      leading,
+      { type: "thinking.delta", data: { messageId: assistant, delta: HELD } },
       { type: "turn.end", data: { messageId: assistant, status: "stopped" } },
     ]);
     expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);
@@ -324,24 +358,35 @@ describe("S4 flush before the terminal", () => {
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
-      expect(events(world)).toEqual([{ type: "turn.start", data: { messageId: assistant } }]);
-      expect(thinkingColumn(world.fixture.db, assistant)).toBeNull();
+      const leading = { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } };
+      expect(events(world)).toEqual([
+        { type: "turn.start", data: { messageId: assistant } },
+        leading,
+      ]);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
 
       expect(spawned).toHaveLength(1);
       expect(spawned[0]?.kill("SIGKILL")).toBe(true);
       await waitForTurn(world.fixture, world.session, "failed");
-      expect(types(world)).toEqual(["turn.start", "thinking.delta", "error", "turn.end"]);
-      // The timer is armed by the first of the child's three thinking writes, so the kill may land
-      // before the rest: whatever had arrived is published once and is exactly what was saved.
-      const [flushed, ...rest] = thinkingDeltas(world);
+      expect(types(world)).toEqual([
+        "turn.start",
+        "thinking.delta",
+        "thinking.delta",
+        "error",
+        "turn.end",
+      ]);
+      // The timer is armed by the second of the child's three thinking writes, so the kill may
+      // land before the third: whatever was held is published once and is exactly what was saved.
+      const [first, flushed, ...rest] = thinkingDeltas(world);
+      expect(first).toBe(FIRST);
       expect(rest).toEqual([]);
-      expect(flushed).not.toBe("");
-      expect(THOUGHT.startsWith(String(flushed))).toBe(true);
+      expect(String(flushed).startsWith("再列要点，")).toBe(true);
+      expect(THOUGHT.startsWith(`${FIRST}${String(flushed)}`)).toBe(true);
       expect(events(world).at(-1)).toEqual({
         type: "turn.end",
         data: { messageId: assistant, status: "failed" },
       });
-      expect(thinkingColumn(world.fixture.db, assistant)).toBe(flushed);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(`${FIRST}${String(flushed)}`);
       expect(world.bufferTimers()).toBe(0);
       expect(world.errors).toEqual([]);
     },
@@ -367,20 +412,25 @@ describe("S5 persistence failure", () => {
       const assistant = assistantIdFor(world.fixture, world.session);
       const { epoch } = world.fixture.supervisor.streamCursor(world.session);
       const stream = await openEventStream(world.fixture, world.session, world.cookie);
-      await readUntil(stream, (text) => text.includes(`id: ${String(epoch)}:1`));
+      await readUntil(stream, (text) => text.includes(`id: ${String(epoch)}:2`));
+      const leading = [
+        { type: "turn.start", data: { messageId: assistant } },
+        { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } },
+      ];
 
-      world.clock.advance(BUFFER_MS);
-      expect(world.fixture.supervisor.streamCursor(world.session)).toEqual({ epoch, seq: 1 });
-      expect(events(world)).toEqual([{ type: "turn.start", data: { messageId: assistant } }]);
+      world.clock.advance(WINDOW_MS);
+      expect(world.fixture.supervisor.streamCursor(world.session)).toEqual({ epoch, seq: 2 });
+      expect(events(world)).toEqual(leading);
       expect(world.errors.some((error) => containsMessage(error, SENTINEL))).toBe(true);
 
       await settle();
       stream.resume();
       expect(parseSse(await readUntil(stream, () => true)).map((frame) => frame.id)).toEqual([
         `${String(epoch)}:1`,
+        `${String(epoch)}:2`,
       ]);
-      expect(thinkingDeltas(world)).toEqual([]);
-      expect(thinkingColumn(world.fixture.db, assistant)).toBeNull();
+      expect(thinkingDeltas(world)).toEqual([FIRST]);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
       stream.abort();
     },
   );
@@ -412,7 +462,10 @@ describe("S5 persistence failure", () => {
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
-      const started = [{ type: "turn.start", data: { messageId: assistant } }];
+      const started = [
+        { type: "turn.start", data: { messageId: assistant } },
+        { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } },
+      ];
       expect(events(world)).toEqual(started);
 
       expect(await ownerPost(world, "stop")).toBe(202);
@@ -424,9 +477,35 @@ describe("S5 persistence failure", () => {
 
       await settle();
       expect(events(world)).toEqual(started);
-      expect(thinkingColumn(world.fixture.db, assistant)).toBeNull();
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
       expect(messageRow(world.fixture.db, assistant).status).toBe("running");
       expect(sessionRow(world.fixture.db, world.session).status).toBe("running");
+      expect(world.bufferTimers()).toBe(0);
+    },
+  );
+
+  it(
+    "a failing flush before a crash's error stops the commit: neither error nor turn.end follows",
+    REAL,
+    async () => {
+      const spawned: ChildProcessWithoutNullStreams[] = [];
+      const runtime = fakeRuntime("thinking", ["--hold-after-thinking"], spawned);
+      const world = await openWorld(runtime, { prepare: (db) => db.exec(REJECT_THINKING) }, true);
+      await prompted(world);
+      await waitForBufferTimer(world);
+      const assistant = assistantIdFor(world.fixture, world.session);
+      const started = events(world);
+      expect(thinkingDeltas(world)).toEqual([FIRST]);
+
+      expect(spawned[0]?.kill("SIGKILL")).toBe(true);
+      await waitFor(
+        () => (world.errors.some((error) => containsMessage(error, SENTINEL)) ? true : undefined),
+        "thinking write sentinel in the error sink",
+      );
+      await settle();
+      expect(events(world)).toEqual(started);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
+      expect(messageRow(world.fixture.db, assistant).status).toBe("running");
       expect(world.bufferTimers()).toBe(0);
     },
   );
@@ -437,10 +516,8 @@ describe("S6 replay and refresh", () => {
     "a published thinking.delta replays once after the preceding id and in a running refresh",
     REAL,
     async () => {
-      // 138 deltas of 15 bytes: the 137th crosses 2048 bytes; the last stays buffered.
-      const world = await openWorld(
-        fakeRuntime("thinking", ["--thinking-repeat", "46", "--hold-after-thinking"]),
-      );
+      // The first delta is published at once; the other two stay held.
+      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]));
       await prompted(world);
       const [published] = await waitForEvent(world, "thinking.delta");
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -448,7 +525,7 @@ describe("S6 replay and refresh", () => {
       const first = `${String(epoch)}:1`;
       const second = `${String(epoch)}:2`;
       const data = { messageId: assistant, delta: published?.data.delta };
-      expect(published?.data.delta).toBe(`${THOUGHT.repeat(45)}先读需求，再列要点，`);
+      expect(published?.data.delta).toBe(FIRST);
       expect(thinkingColumn(world.fixture.db, assistant)).toBe(published?.data.delta);
 
       const resumed = await openEventStream(world.fixture, world.session, world.cookie, first);
@@ -465,12 +542,50 @@ describe("S6 replay and refresh", () => {
       fresh.abort();
     },
   );
+
+  it(
+    "a snapshot read while thinking is held omits it; the held text follows the snapshot cursor once",
+    REAL,
+    async () => {
+      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]));
+      await prompted(world);
+      await waitForBufferTimer(world);
+      const assistant = assistantIdFor(world.fixture, world.session);
+      const held = await snapshotOf(world);
+      expect(held.thinking).toBe(FIRST);
+      expect(held.cursor.seq).toBe(2);
+      const cursor = `${String(held.cursor.epoch)}:2`;
+
+      // The window ends: the held text is published as the cursor's successor.
+      world.clock.advance(WINDOW_MS);
+      expect(await ownerPost(world, "stop")).toBe(202);
+      await waitForEvent(world, "turn.end");
+      const resumed = await openEventStream(world.fixture, world.session, world.cookie, cursor);
+      const frames = parseSse(await readUntil(resumed, (text) => text.includes("event: turn.end")));
+      resumed.abort();
+      expect(frames[0]?.id).toBe(`${String(held.cursor.epoch)}:3`);
+      expect(frames.map((frame) => frame.event)).toEqual([
+        ...frames.slice(0, -1).map(() => "thinking.delta"),
+        "turn.end",
+      ]);
+      expect(frames.length).toBeGreaterThan(1);
+      const appended = frames.slice(0, -1).map((frame) => String(frame.data.delta));
+      // The client's text (snapshot + resumed events) equals the final column and snapshot.
+      expect(`${String(held.thinking)}${appended.join("")}`).toBe(THOUGHT);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);
+      expect((await snapshotOf(world)).thinking).toBe(THOUGHT);
+      expect(world.errors).toEqual([]);
+    },
+  );
 });
 
+// Each script sends two thinking frames: the first is published at once, the second is what the
+// following event has to flush.
 describe("S7 flush before other events through the publication funnel", () => {
   it("thinking.delta immediately precedes the step.start of a following tool", REAL, async () => {
     const { world } = await openScriptedWorld((child) => {
-      child.emitLine(thinkingFrame("想一想"));
+      child.emitLine(thinkingFrame("想"));
+      child.emitLine(thinkingFrame("一想"));
       child.emitLine({
         type: "tool_execution_start",
         toolCallId: "call-1",
@@ -490,11 +605,12 @@ describe("S7 flush before other events through the publication funnel", () => {
     expect(types(world)).toEqual([
       "turn.start",
       "thinking.delta",
+      "thinking.delta",
       "step.start",
       "step.end",
       "turn.end",
     ]);
-    expect(thinkingDeltas(world)).toEqual(["想一想"]);
+    expect(thinkingDeltas(world)).toEqual(["想", "一想"]);
     const assistant = assistantIdFor(world.fixture, world.session);
     expect(thinkingColumn(world.fixture.db, assistant)).toBe("想一想");
   });
@@ -504,20 +620,27 @@ describe("S7 flush before other events through the publication funnel", () => {
     REAL,
     async () => {
       const { world } = await openScriptedWorld((child) => {
-        child.emitLine(thinkingFrame("先想"));
+        child.emitLine(thinkingFrame("先"));
+        child.emitLine(thinkingFrame("想"));
         child.emitLine(SELECT);
       });
       await prompted(world);
       const [request] = await waitForEvent(world, "approval.request");
-      expect(types(world)).toEqual(["turn.start", "thinking.delta", "approval.request"]);
+      expect(types(world)).toEqual([
+        "turn.start",
+        "thinking.delta",
+        "thinking.delta",
+        "approval.request",
+      ]);
       expect(await allowToEnd(world, request)).toEqual([
         "turn.start",
+        "thinking.delta",
         "thinking.delta",
         "approval.request",
         "approval.resolved",
         "turn.end",
       ]);
-      expect(thinkingDeltas(world)).toEqual(["先想"]);
+      expect(thinkingDeltas(world)).toEqual(["先", "想"]);
     },
   );
 
@@ -530,18 +653,20 @@ describe("S7 flush before other events through the publication funnel", () => {
       });
       await prompted(world);
       const [request] = await waitForEvent(world, "approval.request");
-      child().emitLine(thinkingFrame("后想"));
+      child().emitLine(thinkingFrame("后"));
+      child().emitLine(thinkingFrame("想"));
       await waitForBufferTimer(world);
-      expect(types(world)).toEqual(["turn.start", "approval.request"]);
+      expect(types(world)).toEqual(["turn.start", "approval.request", "thinking.delta"]);
 
       expect(await allowToEnd(world, request)).toEqual([
         "turn.start",
         "approval.request",
         "thinking.delta",
+        "thinking.delta",
         "approval.resolved",
         "turn.end",
       ]);
-      expect(thinkingDeltas(world)).toEqual(["后想"]);
+      expect(thinkingDeltas(world)).toEqual(["后", "想"]);
       const assistant = assistantIdFor(world.fixture, world.session);
       expect(thinkingColumn(world.fixture.db, assistant)).toBe("后想");
     },
@@ -571,15 +696,75 @@ describe("S8 timer lifecycle", () => {
       const settled = { events: events(world).length, writes: writes() };
       expect(world.bufferTimers()).toBe(0);
 
-      world.clock.advance(BUFFER_MS);
+      world.clock.advance(WINDOW_MS);
       await settle();
       expect({ events: events(world).length, writes: writes() }).toEqual(settled);
 
       await world.fixture.supervisor.retire(world.session);
-      world.clock.advance(BUFFER_MS);
+      world.clock.advance(WINDOW_MS);
       await settle();
       expect({ events: events(world).length, writes: writes() }).toEqual(settled);
       expect(world.bufferTimers()).toBe(0);
+      expect(world.errors).toEqual([]);
+    },
+  );
+});
+
+describe("S9 held thinking at retirement", () => {
+  it(
+    "an infra fault drops the held thinking and its timer: never saved, never published",
+    REAL,
+    async () => {
+      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]), {}, true);
+      await prompted(world);
+      await waitForBufferTimer(world);
+      const assistant = assistantIdFor(world.fixture, world.session);
+      const leading = events(world);
+      expect(thinkingDeltas(world)).toEqual([FIRST]);
+
+      const error = new Error("text flush sentinel");
+      world.fixture.supervisor.handleFlushError({
+        sessionId: world.session,
+        assistantMessageId: assistant,
+        error,
+      });
+      expect(world.bufferTimers()).toBe(0);
+      world.clock.advance(WINDOW_MS);
+      await settle();
+      expect(events(world)).toEqual(leading);
+      expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
+      expect(world.errors).toContain(error);
+    },
+  );
+
+  it(
+    "a shutdown clears the timer at once and the held text is published before the turn ends",
+    REAL,
+    async () => {
+      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]), {}, true);
+      await prompted(world);
+      await waitForBufferTimer(world);
+      const assistant = assistantIdFor(world.fixture, world.session);
+
+      const closing = world.fixture.supervisor.shutdown();
+      expect(world.bufferTimers()).toBe(0);
+      await closing.catch(() => undefined);
+      const published = thinkingDeltas(world);
+      expect(published[0]).toBe(FIRST);
+      expect(published.join("")).toBe(thinkingColumn(world.fixture.db, assistant));
+      expect(String(published[1]).startsWith("再列要点，")).toBe(true);
+      // The shutdown failure path (chat-stream: graceful shutdown is a terminal) flushes first.
+      expect(types(world)).toEqual([
+        "turn.start",
+        "thinking.delta",
+        "thinking.delta",
+        "error",
+        "turn.end",
+      ]);
+      expect(events(world).at(-1)).toEqual({
+        type: "turn.end",
+        data: { messageId: assistant, status: "failed" },
+      });
       expect(world.errors).toEqual([]);
     },
   );

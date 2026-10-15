@@ -38,6 +38,8 @@ import { seedUnboundSession } from "./support/temporary-workspace.js";
 /** fake-omp `edit-write` literals (support/fake-omp-thinking.mjs); copied, not imported. */
 const UNBOUND_SESSION = "7".repeat(32);
 const THOUGHT = "先读需求，再列要点，最后作答。";
+/** #910 coalescer on the never-advanced injected clock: the first part at once, the rest held. */
+const THOUGHT_CUTS = ["先读需求，", "再列要点，最后作答。"];
 const ANSWER = ["Edited notes.md ", "and wrote out/report.html."];
 const EDIT_OUTPUT = "Updated notes.md";
 const WRITE_OUTPUT = "Successfully wrote 58 bytes to out/report.html";
@@ -168,6 +170,7 @@ function expectPlainTurn(world: World): void {
   expect(types(world)).toEqual([
     "turn.start",
     "thinking.delta",
+    "thinking.delta",
     "step.start",
     "step.end",
     "step.start",
@@ -228,7 +231,10 @@ describe("files.changed in a workspace-bound session", () => {
       expect([edit?.name, write?.name]).toEqual(["edit", "write"]);
       expect(events(world)).toEqual([
         { type: "turn.start", data: { messageId: assistant } },
-        { type: "thinking.delta", data: { messageId: assistant, delta: THOUGHT } },
+        ...THOUGHT_CUTS.map((delta) => ({
+          type: "thinking.delta",
+          data: { messageId: assistant, delta },
+        })),
         {
           type: "step.start",
           data: {
@@ -260,10 +266,10 @@ describe("files.changed in a workspace-bound session", () => {
         ...ANSWER.map((delta) => ({ type: "text.delta", data: { messageId: assistant, delta } })),
         { type: "turn.end", data: { messageId: assistant, status: "done" } },
       ]);
-      // Eleven events took eleven consecutive ring ids (F2 reads the ids off the SSE stream).
+      // Twelve events took twelve consecutive ring ids (F2 reads the ids off the SSE stream).
       expect(world.fixture.supervisor.streamCursor(world.session)).toEqual({
         epoch: sessionEvents(world)[0]?.epoch,
-        seq: 11,
+        seq: 12,
       });
 
       const published = ofType(sessionEvents(world), "files.changed");
@@ -314,14 +320,15 @@ describe("files.changed in a workspace-bound session", () => {
         world.cookie,
         `${epoch}:1`,
       );
-      const bytes = await readUntil(stream, (text) => text.includes(`id: ${epoch}:11\n`));
+      const bytes = await readUntil(stream, (text) => text.includes(`id: ${epoch}:12\n`));
       stream.abort();
       const frames = parseSse(bytes);
 
       expect(frames.map((frame) => frame.id)).toEqual(
-        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map((seq) => `${epoch}:${String(seq)}`),
+        [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((seq) => `${epoch}:${String(seq)}`),
       );
       expect(frames.map((frame) => frame.event)).toEqual([
+        "thinking.delta",
         "thinking.delta",
         "step.start",
         "files.changed",
@@ -340,8 +347,8 @@ describe("files.changed in a workspace-bound session", () => {
           .map((event) => event.data),
       );
       const [edit, write] = stepRows(world.fixture.db);
-      expect(frames[2]?.data).toEqual({ messageId: assistant, stepId: edit?.id, files: NOTES });
-      expect(frames[5]?.data).toEqual({ messageId: assistant, stepId: write?.id, files: REPORT });
+      expect(frames[3]?.data).toEqual({ messageId: assistant, stepId: edit?.id, files: NOTES });
+      expect(frames[6]?.data).toEqual({ messageId: assistant, stepId: write?.id, files: REPORT });
       expectNoHostPath(world, bytes, String(world.workspaceRoot));
 
       const history = await world.fixture.app.inject({
@@ -359,10 +366,12 @@ describe("files.changed in a workspace-bound session", () => {
       };
       const answer = snapshot.messages.find((message) => message.role === "assistant");
       expect(answer?.thinking).toBe(THOUGHT);
-      expect(answer?.thinking).toBe(frames[0]?.data.delta);
+      expect(answer?.thinking).toBe(
+        `${String(frames[0]?.data.delta)}${String(frames[1]?.data.delta)}`,
+      );
       expect(answer?.steps.map((step) => [step.id, step.changes])).toEqual([
-        [frames[2]?.data.stepId, frames[2]?.data.files],
-        [frames[5]?.data.stepId, frames[5]?.data.files],
+        [frames[3]?.data.stepId, frames[3]?.data.files],
+        [frames[6]?.data.stepId, frames[6]?.data.files],
       ]);
       expect(answer?.steps.map((step) => step.changes)).toEqual([NOTES, REPORT]);
       expectNoHostPath(world, history.body, String(world.workspaceRoot));
@@ -429,7 +438,7 @@ describe("files.changed whose changes write fails", () => {
         "changes write sentinel in the error sink",
       );
       const epoch = String(sessionEvents(world)[0]?.epoch);
-      await readUntil(stream, (text) => text.includes(`id: ${epoch}:3\n`));
+      await readUntil(stream, (text) => text.includes(`id: ${epoch}:4\n`));
       await settle();
 
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -442,10 +451,16 @@ describe("files.changed whose changes write fails", () => {
       expect(frames.map((frame) => [frame.id, frame.event])).toEqual([
         [`${epoch}:1`, "turn.start"],
         [`${epoch}:2`, "thinking.delta"],
-        [`${epoch}:3`, "step.start"],
+        [`${epoch}:3`, "thinking.delta"],
+        [`${epoch}:4`, "step.start"],
       ]);
-      expect(frames[2]?.data).toMatchObject({ messageId: assistant, stepId: edit?.id });
-      expect(types(world)).toEqual(["turn.start", "thinking.delta", "step.start"]);
+      expect(frames[3]?.data).toMatchObject({ messageId: assistant, stepId: edit?.id });
+      expect(types(world)).toEqual([
+        "turn.start",
+        "thinking.delta",
+        "thinking.delta",
+        "step.start",
+      ]);
       expect(world.errors.filter((error) => containsMessage(error, SENTINEL))).toHaveLength(1);
     },
   );
