@@ -2,6 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { createFailureScript } from "./fake-upstream-failures.mjs";
+import { PACE_MARKER, writePacedSse } from "./fake-upstream-pace.mjs";
 
 const PATHS = new Set(["/chat/completions", "/v1/chat/completions"]);
 const DEFAULT_KEY = "fake";
@@ -182,8 +183,20 @@ function serveFinal(response, gates, messages, id, created, model) {
   const text = lastUserTextFrom(messages);
   const think = text.includes(THINK_MARKER);
   const walkId = walkGateId(text);
-  if (walkId === undefined) {
+  // Issue 1437: WORKBUDDY_PACE replaces only the ungated writes; held / armed gates are untouched.
+  const reply = () => {
+    if (text.includes(PACE_MARKER)) {
+      writePacedSse(
+        response,
+        (delta, finish) => chunk(id, created, model, delta, finish),
+        THINK_PARTS,
+      );
+      return;
+    }
     writeSse(response, textFrames(id, created, model, think));
+  };
+  if (walkId === undefined) {
+    reply();
     return;
   }
   const gate = gates.get(walkId);
@@ -195,7 +208,7 @@ function serveFinal(response, gates, messages, id, created, model) {
     holdFinal(response, gates, walkId, id, created, model, think);
     return;
   }
-  writeSse(response, textFrames(id, created, model, think));
+  reply();
 }
 
 function handleControl(request, response, path, expectedKey, gates, ttlMs) {
