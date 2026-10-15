@@ -6,6 +6,8 @@
 // [0, scrollHeight − clientHeight]；`ResizeObserver` 换成手动触发的桩（`chat-scroll-follow.test.tsx` 的先例）。
 // 程序写 `scrollTop` 时 jsdom 不派发 scroll 事件，浏览器会派发：每次贴底之后测试补发一次，拷入组件靠它记下
 // 「上一次的盒内位置」，否则用户上滚读不成上滚。
+// 主体逐字展开（issue 1450，design D8）：思考增量到达的那一刻主体还是原文，此后逐帧补齐。增长用例在连上事件源
+// 之后只假 rAF、cAF、Date（chat-smooth-text.test.tsx 的整页配置），逐帧推到全文再报尺寸变化。
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessageSnapshot } from "../src/lib/session-contract.js";
@@ -22,6 +24,7 @@ const BOX_CLIENT = 192;
 const box = { scrollHeight: 400, scrollTop: 0 };
 const pane = { scrollHeight: 3000, clientHeight: 500, scrollTop: 0 };
 const METRIC_NAMES = ["scrollHeight", "clientHeight", "scrollTop"] as const;
+const PAGE_CLOCK = ["requestAnimationFrame", "cancelAnimationFrame", "Date"] as const;
 
 function metricsOf(element: HTMLElement) {
   if (element.matches(BODY)) return { ...box, clientHeight: BOX_CLIENT, target: box };
@@ -105,6 +108,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanupChatPage();
+  vi.useRealTimers();
   for (const name of METRIC_NAMES) Reflect.deleteProperty(HTMLElement.prototype, name);
 });
 
@@ -160,10 +164,21 @@ function scrolled(scrollTop = box.scrollTop) {
   fireEvent.scroll(body());
 }
 
-/** 思考再长一截：先改盒内内容高度，再推一条 `thinking.delta`，最后报一次内容尺寸变化。 */
+/**
+ * 思考再长一截：先改盒内内容高度，再推一条 `thinking.delta`；收到的那一刻主体还是原文，逐帧推到全文，最后报
+ * 一次内容尺寸变化。调用前须已假上 `PAGE_CLOCK`。
+ */
 function grow(emit: Awaited<ReturnType<typeof openRunningThinking>>, height: number, line: number) {
+  const before = body().textContent ?? "";
+  const after = `${before}\n思考第 ${String(line)} 行`;
   box.scrollHeight = height;
   emit("thinking.delta", { delta: `\n思考第 ${String(line)} 行` });
+  expect(body().textContent).toBe(before);
+  for (let i = 0; i < 60 && body().textContent !== after; i += 1) {
+    act(() => {
+      vi.advanceTimersByTime(16);
+    });
+  }
   resize(content());
 }
 
@@ -180,6 +195,7 @@ describe("thinking-fold「终态消息主体限高」running 主体是流式预�
     expect(box.scrollTop).toBe(bottom());
     expect(pane.scrollTop).toBe(2500);
     scrolled();
+    vi.useFakeTimers({ toFake: [...PAGE_CLOCK] });
 
     grow(emit, 900, 2);
     expect(body().textContent).toBe("思考第 1 行\n思考第 2 行");
@@ -198,6 +214,33 @@ describe("thinking-fold「终态消息主体限高」running 主体是流式预�
     scrolled(bottom());
     grow(emit, 1900, 5);
     expect(box.scrollTop).toBe(1708);
+    expect(pane.scrollTop).toBe(2500);
+  });
+
+  // 6b 评审补测：一段思考结束、回合仍在进行时折叠块仍是预览（预览只看 running，不看思考段是否开着）。
+  it("thinking.end 后回合仍在进行：主体仍是预览；step.start 与新一段思考之后盒内上滚位置保持", async () => {
+    const emit = await openRunningThinking();
+    scrolled();
+    vi.useFakeTimers({ toFake: [...PAGE_CLOCK] });
+    grow(emit, 900, 2);
+    scrolled();
+    scrolled(300);
+
+    emit("thinking.end", { thinkingMs: 400 });
+
+    expect(control().textContent).toBe("已思考 1 秒");
+    expect(fold().getAttribute("data-running")).toBe("");
+    expect(body().textContent).toBe("思考第 1 行\n思考第 2 行");
+    expect(observing(content())).toHaveLength(1);
+    expect(fold().querySelectorAll('[data-slot="reasoning-fade"]')).toHaveLength(2);
+    expect(box.scrollTop).toBe(300);
+
+    emit("step.start", { stepId: 21, name: "bash", detail: "ls" });
+    grow(emit, 1400, 3);
+
+    expect(control().textContent).toBe("正在思考…");
+    expect(body().textContent).toBe("思考第 1 行\n思考第 2 行\n思考第 3 行");
+    expect(box.scrollTop).toBe(300);
     expect(pane.scrollTop).toBe(2500);
   });
 

@@ -20,6 +20,9 @@
 // - 隐藏 Content 的两个渐隐遮罩（`reasoning-fade`，z-10、取页面底色）：顶部那个恒渲染，底部那个只在
 //   预览时渲染，二者都是 Content 的直接子元素。它们盖住滚动层的 回到最新 按钮，在搜索命中的消息底色上
 //   露出一条页面底色，并把首行 / 末行压灰。拷入文件不改，从父元素的类上一并关掉。
+// - 主体文本经 smooth-text.tsx 逐字展开（D8）：与正文同一个 `SmoothText`、同一条 `useSmooth` 规则，running
+//   时展开，终态立即全文，reduce 下不展开。收起的退场动画放完后 Radix 卸下主体，再展开是重新挂载，挂载时
+//   显示全文（读代码推出）。
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 import {
@@ -28,6 +31,7 @@ import {
   ReasoningText,
 } from "@/components/assistant-ui/elements/reasoning";
 import { CollapsibleTrigger } from "@/components/ui/collapsible";
+import { SmoothText } from "./smooth-text.js";
 
 type ThinkingFoldProps = {
   running: boolean;
@@ -79,7 +83,9 @@ export function ThinkingFold({ running, text, thinkingMs, thinkingActive }: Thin
       </CollapsibleTrigger>
       <ReasoningContent className="[&>[data-slot=reasoning-fade]]:hidden">
         <ReasoningText className="wrap-anywhere whitespace-pre-wrap max-h-48 overflow-auto">
-          {text}
+          <SmoothText running={running} text={text}>
+            {(shown) => shown}
+          </SmoothText>
         </ReasoningText>
       </ReasoningContent>
     </ReasoningRoot>
