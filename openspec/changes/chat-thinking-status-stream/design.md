@@ -163,7 +163,7 @@ store 只看到已发布的增量，所以：
 
 **D8 标题与平滑都在应用层，拷入层不改。**
 
-- **标题**：`ReasoningTrigger` 的文案写死，而换文案不在六类修改里，所以 `thinking-fold.tsx` 不再用它。改用拷入的 `@/components/ui/collapsible` 的 `CollapsibleTrigger` 在应用层组合同样的结构（图标 `BrainIcon`、文案 span、`ChevronDownIcon`；类名照抄拷入 Trigger 的视觉类）。文案按 D5 三态，进行中带 `shimmer motion-reduce:animate-none`。可访问名等于可见文案。沿用拷入 Trigger 的三个 `data-slot`（`reasoning-trigger`、`reasoning-trigger-label`、`reasoning-trigger-chevron`），既有用例（`web/test/chat-thinking.test.tsx` 按 slot 定位流光与箭头）不用换定位器，只改文案断言。
+- **标题**：`ReasoningTrigger` 的文案写死，而换文案不在六类修改里，所以 `thinking-fold.tsx` 不再用它。改用拷入的 `@/components/ui/collapsible` 的 `CollapsibleTrigger` 在应用层组合同样的结构（图标 `BrainIcon`、文案 span、`ChevronDownIcon`；类名照抄拷入 Trigger 的视觉类）。文案按 D5 三态，进行中带 `shimmer motion-reduce:animate-none`。可访问名等于可见文案。沿用拷入 Trigger 的三个 `data-slot`（`reasoning-trigger`、`reasoning-trigger-label`、`reasoning-trigger-chevron`），既有用例（`web/test/chat-thinking.test.tsx` 按 slot 定位流光与箭头）的 slot 定位不变；但按钮本身原先按可访问名 `深度思考过程` 查找，6a 把这个名字匹配换成三态正则，并改文案断言（6a 实测）。
 - **正文平滑**：不打开 `MarkdownText` 的 `smooth`，`markdown-body.tsx` 仍传 `smooth={false}`。原因是基元在平滑追赶期间把容器的 `data-status` 置为 `running`，拷入样式 `@assistant-ui/react-markdown/styles/dot.css` 会因此在最后一块之后加一个脉动的 `●`（读 `node_modules/@assistant-ui/react-markdown/dist/primitives/MarkdownText.js:118-126` 与 `styles/dot.css`），与 D6 的小圆点叠成两个运行指示。
 
   改为在应用层调用同一个 `useSmooth`：新模块 `web/src/features/chat/smooth-text.tsx` 提供一个组件。它在 `TextMessagePartProvider text={原文}` 内以 `useSmooth(useMessagePartText(), running)` 取出要显示的前缀，再交给子渲染。`MarkdownBody` 收到的就是这个前缀；part 状态始终是「已完成」，所以基元的 `data-status` 不会变成 `running`，`●` 不出现。`useSmooth` 的分支因此如下：

@@ -57,6 +57,8 @@ const REPORT_FILE = "workbuddy-report.html";
 const LOGICAL_PATH = "zhangsan/ui-walk-sessions/workbuddy-report.html";
 const EXPECTED_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 const EXPECTED_THINKING = "先读需求，再列要点，最后作答。";
+/** 终态折叠块标题：`已思考 N 秒`，N 为正整数。 */
+const THOUGHT_TITLE = /^已思考 [1-9]\d* 秒$/;
 // 真 omp 对无参数 `/todo` 的原文（新会话没有 todo）；`<task>` 在页面上是转义后的文本。
 const TODO_REPLY = "No todos. Use /todo append <task> to start one.";
 const SLASH_LABELS = ["整理上下文", "任务清单"];
@@ -78,6 +80,7 @@ type SessionSnapshot = {
     content: string;
     status: string;
     thinking: string | null;
+    thinkingMs: number | null;
     steps: { name: string; changes: unknown }[];
   }[];
 };
@@ -320,9 +323,11 @@ async function step4ThinkingFold(page: Page): Promise<void> {
   await expect(fold).toHaveCount(1);
   // 同一父元素内先于回答正文。
   await expect(fold.locator(':scope ~ [data-slot="message-body"]')).toHaveCount(1);
-  const summary = fold.getByRole("button", { name: "深度思考过程", exact: true });
+  // 终态标题为服务端记录的时长（thinking-fold「深度思考折叠块呈现」；issue 1447），可见文本即可访问名。
+  // N 与快照 `thinkingMs` 的对应在 `expectServerSnapshot` 里回读。
+  const summary = fold.getByRole("button", { name: THOUGHT_TITLE });
   await expect(summary).toHaveAttribute("aria-expanded", "false");
-  await expect(summary).toHaveText("深度思考过程");
+  await expect(summary).toHaveText(THOUGHT_TITLE);
   await summary.click();
   await expect(summary).toHaveAttribute("aria-expanded", "true");
   const body = fold.locator('[data-slot="reasoning-text"]');
@@ -357,6 +362,12 @@ async function expectServerSnapshot(
   const assistants = snapshot.messages.filter((message) => message.role === "assistant");
   expect(assistants).toHaveLength(1);
   expect(assistants[0]?.thinking).toBe(EXPECTED_THINKING);
+  const thinkingMs = assistants[0]?.thinkingMs;
+  expect(Number.isSafeInteger(thinkingMs) && Number(thinkingMs) >= 0, "thinkingMs").toBe(true);
+  const seconds = Math.max(1, Math.round(Number(thinkingMs) / 1000));
+  await expect(
+    page.getByRole("article", { name: "助手" }).locator('[data-slot="reasoning-trigger"]'),
+  ).toHaveText(`已思考 ${String(seconds)} 秒`);
   expect(assistants[0]?.steps.map((step) => step.name)).toEqual(["write"]);
   expect(assistants[0]?.steps[0]?.changes).toStrictEqual(EXPECTED_CHANGES);
 }
