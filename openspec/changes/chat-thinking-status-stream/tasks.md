@@ -43,12 +43,12 @@
 
 ## 1. omp-test-harness — 受控上游节奏标记 `WORKBUDDY_PACE`
 
-- [ ] 1.1 开工核对：
+- [x] 1.1 开工核对：
   - 重读 `server/test/support/fake-upstream.mjs` 的标记查找（`lastUserTextFrom`）、答复轮判定、`textFrames` / `thinkFrames` 与 `writeSse`，以及闸门路径 `serveFinal`（`:181-198`）；
   - 确认 `WORKBUDDY_PACE` 遇到已武装闸门时可以走「忽略」分支，不碰 `holdFinal`。
 
   验证：核对结果写进 PR。
-- [ ] 1.2 实现 `WORKBUDDY_PACE`（omp-test-harness「受控上游节奏与闸门停点标记」的第一项）：
+- [x] 1.2 实现 `WORKBUDDY_PACE`（omp-test-harness「受控上游节奏与闸门停点标记」的第一项）：
   - 答复轮按 25ms 间隔逐个写出：角色帧、三个思考分片、40 个 `字`、finish、`[DONE]`；
   - 同带 `WORKBUDDY_THINK` 时，不重复发思考分片；
   - 带已武装闸门时忽略本标记；
