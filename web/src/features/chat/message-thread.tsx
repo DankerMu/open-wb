@@ -22,6 +22,7 @@ import { AssistantActions, UserActions } from "./message-action-row.js";
 import { MessageError } from "./message-error.js";
 import { hasVisibleBlock, MessageWaiting } from "./message-waiting.js";
 import { type ChatMessageCustom, messageCustom } from "./runtime-convert.js";
+import { SmoothText } from "./smooth-text.js";
 import type { ChatState } from "./stream.js";
 import { ThinkingFold } from "./thinking-fold.js";
 import { ThreadViewport, type TranscriptHandle } from "./thread-viewport.js";
@@ -167,7 +168,8 @@ function MessageAttachments({ attachments }: { attachments: ChatMessageCustom["a
  * 正文：Markdown，或已停止且为空时的占位；`dot`（运行中且已有可见块，见 message-waiting.tsx）时在末尾带
  * 一个脉动的小圆点（design D6），减少动态效果时无动画。圆形写 `rounded-[50%]` 而不是 rounded-full：规格
  * 要求计算 `border-radius` 恰为 50%，Tailwind 4 的 rounded-full 编译成一个极大的像素值（实测：计算值为
- * 3.35544e+07px）。
+ * 3.35544e+07px）。running 时正文经 smooth-text.tsx 逐字展开（design D8）；等待指示让位时本组件才挂载，
+ * 此时的首段与「从空串开始的第一段」同样直接整段显示（useSmooth 的分支，7a 实测）。
  */
 function MessageBody({
   dot,
@@ -183,7 +185,9 @@ function MessageBody({
       {status === "stopped" && text === "" ? (
         <p className="text-(--wb-text-tertiary)">（已停止生成）</p>
       ) : (
-        <MarkdownBody text={text} />
+        <SmoothText running={status === "running"} text={text}>
+          {(shown) => <MarkdownBody text={shown} />}
+        </SmoothText>
       )}
       {dot ? (
         <span

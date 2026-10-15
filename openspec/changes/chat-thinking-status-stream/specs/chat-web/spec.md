@@ -384,7 +384,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 
 #### Scenario: 正文逐字展开
 - **WHEN** 非减少动态效果下，一条 running 助手消息已显示正文 `A`，随后收到一条 200 字的 `text.delta`
-- **THEN** 此后的若干帧中显示的正文由短到长增长，每一帧都是 `A` 加该 200 字的前缀，至多约 250ms 后等于全文；其间正文的 Markdown 容器没有 `data-status="running"`，消息内只有一个小圆点；其间点开对话内搜索输入该 200 字中最后五个字，该消息被匹配
+- **THEN** 此后的若干帧中显示的正文由短到长增长，每一帧都是 `A` 加该 200 字的前缀，在有限时间内等于全文（时长按「正文逐字展开」的间隔规则，积压越多越快；200 字约 0.6s）；其间正文的 Markdown 容器没有 `data-status="running"`，消息内只有一个小圆点；其间点开对话内搜索输入该 200 字中最后五个字，该消息被匹配
 - **WHEN** 该消息在正文尚未显示全文时收到 `turn.end(done)`；另一例以快照打开一条 running 助手消息，其正文已有 500 字
 - **THEN** 前者终态后立即显示全文，`复制` 写入全文；后者首次渲染即显示全部 500 字，不从头逐字展开
 - **WHEN** `prefers-reduced-motion: reduce` 下 running 助手消息收到一条 200 字的 `text.delta`

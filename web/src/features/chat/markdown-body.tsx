@@ -47,9 +47,10 @@ function CodeHeader({ code, language }: CodeHeaderProps) {
 const COMPONENTS = { a: InertLink, img: ImageText, CodeHeader };
 
 /**
- * 应用在这里关掉逐字显现（`smooth={false}`）：正文不能落后于已到达的数据。正文以「已完成」的
- * text part 交给 `MarkdownText`，压掉的是基元自带的运行指示点；流式进度与光标由应用自己呈现
- * （message-thread.tsx）。
+ * 基元的逐字显现在这里仍关着（`smooth={false}`）：它追赶期间把容器 `data-status` 置为 `running`，拷入的
+ * dot.css 会在末块之后加一个脉动点，与消息自己的小圆点叠成两个运行指示。逐字展开改在应用层做
+ * （smooth-text.tsx，design D8），`text` 收到的已是要显示的前缀，并以「已完成」的 text part 交给
+ * `MarkdownText`；流式进度与小圆点由应用自己呈现（message-thread.tsx）。
  */
 export function MarkdownBody({ text }: { text: string }) {
   return (

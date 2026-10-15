@@ -167,7 +167,7 @@ store 只看到已发布的增量，所以：
 - **正文平滑**：不打开 `MarkdownText` 的 `smooth`，`markdown-body.tsx` 仍传 `smooth={false}`。原因是基元在平滑追赶期间把容器的 `data-status` 置为 `running`，拷入样式 `@assistant-ui/react-markdown/styles/dot.css` 会因此在最后一块之后加一个脉动的 `●`（读 `node_modules/@assistant-ui/react-markdown/dist/primitives/MarkdownText.js:118-126` 与 `styles/dot.css`），与 D6 的小圆点叠成两个运行指示。
 
   改为在应用层调用同一个 `useSmooth`：新模块 `web/src/features/chat/smooth-text.tsx` 提供一个组件。它在 `TextMessagePartProvider text={原文}` 内以 `useSmooth(useMessagePartText(), running)` 取出要显示的前缀，再交给子渲染。`MarkdownBody` 收到的就是这个前缀；part 状态始终是「已完成」，所以基元的 `data-status` 不会变成 `running`，`●` 不出现。`useSmooth` 的分支因此如下：
-  - 挂载时显示全文（打开或切换到运行中的会话不会从头打字）。原地重新安装快照（重连、gap 恢复）时消息组件不重新挂载，快照比当前多出的那一截按规则在 ≤250ms 内展开，这是可接受的；
+  - 挂载时显示全文（打开或切换到运行中的会话不会从头打字）。原地重新安装快照（重连、gap 恢复）时消息组件不重新挂载，快照比当前多出的那一截按同一规则展开，这是可接受的。展开时长随积压增长：积压 ≤50 字约 5ms/字，更多时约 250·ln(N/50)+250ms，例如 200 字约 0.6s（7a 实测，`useSmooth.js:41` 的 250 是间隔公式参数，不是总时长上限）；
   - 之后的增长按 `min(5ms, 250ms ÷ 积压)` 逐字展开；
   - 从空串开始的第一段直接提交；
   - 终态传 `false`：`useSmooth` 停用并立即返回原文，不拖尾；
