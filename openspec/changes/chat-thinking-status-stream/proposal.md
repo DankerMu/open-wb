@@ -63,10 +63,13 @@
 - `chat-harness`：
   - 改写「UI 走查会话元数据」：终态折叠块标题为 `已思考 N 秒`。
   - 新增「等待与思考呈现的冒烟与走查」：冒烟 `thinkingMs`，走查小圆点、等待指示、预览与标题变化。
-- `omp-test-harness`：新增「受控上游节奏与闸门停点标记」（`WORKBUDDY_PACE`、`WORKBUDDY_HOLD_AT`）。
+- `omp-test-harness`：
+  - 新增「受控上游节奏与闸门停点标记」：`WORKBUDDY_PACE`、`WORKBUDDY_THINK_LONG`、`WORKBUDDY_HOLD_AT`。
+  - 改写「Isolated bounded upstream dialogue gate」「受控上游思考与写入标记」：各加一句指向新要求。
+- `chat-sessions`：改写「会话 REST」：消息形状、严格键集与 fork 拷贝列表加 `thinkingMs` / `thinking_ms`。
 - `turn-control`：改写「从此处分叉 REST」：拷贝断言加 `thinkingMs`。
 
-chat-sessions「会话持久化与回合刷盘」的正文落库规则（2048 字节 / 2000ms）与「Complete snapshot overlap boundary」在本 change 之后仍成立：合并器在 `appendDelta` 之前，store 只看到已发布的增量。不改，理由见 design「规格影响」。
+chat-sessions 的另外两条要求在本 change 之后仍成立：「会话持久化与回合刷盘」的正文落库规则（2048 字节 / 2000ms），以及「Complete snapshot overlap boundary」：合并器在 `appendDelta` 之前，store 只看到已发布的增量。不改，理由见 design「规格影响」。
 
 ## Impact
 
@@ -80,9 +83,10 @@ chat-sessions「会话持久化与回合刷盘」的正文落库规则（2048 �
   - `message-thread.tsx`（等待指示、小圆点、平滑）。
   - `thinking-fold.tsx`（应用层标题、预览、平滑）。
   - `smooth-text.tsx`（新，应用层的 `useSmooth` 包装，正文与思考共用）。
+  - `message-waiting.tsx`（新，等待指示与判据）。
   - 拷入层不改（design D8）。
 - **测试与夹具**：
-  - `server/test/support/fake-upstream.mjs`（`WORKBUDDY_PACE`）。
+  - `server/test/support/fake-upstream.mjs` 与新模块 `fake-upstream-pace.mjs`（`WORKBUDDY_PACE`、`WORKBUDDY_THINK_LONG`、`WORKBUDDY_HOLD_AT`）。
   - `thinking-buffer.test.ts` / `session-thinking.test.ts` 等改为新节奏。
   - ui-walk 的光标与折叠块步骤。
   - `smoke/session-meta.hurl`。
@@ -92,7 +96,8 @@ chat-sessions「会话持久化与回合刷盘」的正文落库规则（2048 �
 - **线协议**：
   - 新增一类 SSE 事件 `thinking.end`。旧客户端按「未知事件保持原状态」忽略它，不破坏既有消费者。
   - 快照消息多一个字段 `thinkingMs: number | null`。
-- **依赖**：无新增（`useSmooth` 来自已安装的 `@assistant-ui/react`）。CI 文件不改。
+- **依赖**：无新增（`useSmooth` 来自已安装的 `@assistant-ui/react`）。
+- **CI**：`.github/scripts/ci-uid-isolation.sh` 的官方 omp 用例列表加一个文件，`scripts/test-ci-harness.sh` 的钉子同步改（tasks 2.5）。
 
 ## 流程记录
 

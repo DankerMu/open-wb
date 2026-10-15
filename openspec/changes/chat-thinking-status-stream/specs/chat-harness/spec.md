@@ -37,10 +37,15 @@ A `finally` block around steps 2–11 SHALL delete the created session through t
 
 ### Requirement: 等待与思考呈现的冒烟与走查
 `make smoke` 的 `smoke/session-meta.hurl` SHALL 在既有 `WORKBUDDY_THINK` 用例的 done 快照上另断言：被捕获助手消息的 `thinkingMs` 为整数（`isInteger`）且不小于 0，同一快照里 user 消息的 `thinkingMs` 为 `null`。`make smoke-live` 与 `smoke/chat.hurl` 不断言 `thinkingMs`（真实上游是否返回思考不确定）。
-既有 Playwright 生产旅程 SHALL 在两个 project（`desktop-light`、`mobile-dark`）中各走一遍以下步骤，均经受控上游（omp-test-harness「受控上游节奏与闸门停点标记」）与真 omp，不调用真实模型端点，步骤结束放行闸门、会话按既有清理规则删除：
-1. **小圆点**：在既有「流式光标在减少动态效果下不闪烁」的 held 回合里，断言 running 助手消息的 `[data-slot="message-caret"]` 计算样式 `border-radius` 为 `50%`，`animation-name` 在 `no-preference` 下不为 `none`、在 `reduce` 下为 `none`。
-2. **等待指示**：以同时含 `WORKBUDDY_UI_WALK:<uuid>`（已武装闸门）与 `WORKBUDDY_HOLD_AT:empty` 的 prompt 发送一条，闸门 held 后断言该助手消息内有可见文本 `正在思考…` 的 `role="status"` 元素，没有 `[data-slot="message-caret"]`，没有思考折叠块；放行后等待指示消失、正文出现，回合结束后小圆点消失。
-3. **思考进行中与预览**：以同时含 `WORKBUDDY_UI_WALK:<uuid>`、`WORKBUDDY_THINK` 与 `WORKBUDDY_HOLD_AT:thinking` 的 prompt 发送一条，闸门 held 后断言：思考折叠块展开、根元素带 `data-running`、展开/收起控件的可见文本与可访问名为 `正在思考…`；主体计算 `max-height` 为 `192px`，主体 `scrollTop + clientHeight` 与 `scrollHeight` 相差不超过 1px；转录滚动容器距底不超过 4px；放行后、回合结束前控件文本变为匹配 `已思考 N 秒`（N 为正整数），回合结束后折叠块收起、不带 `data-running`。
+既有 Playwright 生产旅程（`web/e2e/ui-walk.spec.ts`）SHALL 在两个 project（`desktop-light`、`mobile-dark`）中各走一遍以下步骤。步骤 2、3 SHALL 在主旅程既有步骤全部完成之后、清理之前，于主旅程的受闸会话中发送（该会话历史已含 `tool` 消息，受控上游把后续请求当作答复轮，闸门作用于它；既有步骤里的消息计数断言因此不受影响）。全程经受控上游（omp-test-harness「受控上游节奏与闸门停点标记」）与真 omp，不调用真实模型端点；每步结束放行闸门，会话按既有清理规则删除：
+1. **小圆点**：在既有 held 回合里，两个 project 都断言 running 助手消息的 `[data-slot="message-caret"]` 计算样式 `border-radius` 为 `50%`、`animation-name` 在 `no-preference` 下不为 `none`；`reduce` 下为 `none` 沿用既有切换，只在 `desktop-light` 运行（「UI 走查对话步骤」的「流式光标在减少动态效果下不闪烁」）。
+2. **等待指示**：以同时含 `WORKBUDDY_UI_WALK:<uuid>`（已武装闸门）与 `WORKBUDDY_HOLD_AT:empty` 的 prompt 发送一条。闸门 held 后断言：该助手消息内有可见文本 `正在思考…` 的 `role="status"` 元素，没有 `[data-slot="message-caret"]`，没有思考折叠块。放行后断言：等待指示消失、正文出现；回合结束后小圆点消失。
+3. **思考进行中与预览**：以同时含 `WORKBUDDY_UI_WALK:<uuid>`、`WORKBUDDY_THINK_LONG` 与 `WORKBUDDY_HOLD_AT:thinking` 的 prompt 发送一条。闸门 held 后断言：
+   - 思考折叠块展开、根元素带 `data-running`，展开/收起控件的可见文本与可访问名为 `正在思考…`；
+   - 主体计算 `max-height` 为 `192px`，`scrollHeight` 大于 `clientHeight`，`scrollTop + clientHeight` 与 `scrollHeight` 相差不超过 1px；
+   - 转录滚动容器距底不超过 4px。
+
+   放行后（含回合结束后）断言：控件文本匹配 `已思考 N 秒`（N 为正整数），回合结束后折叠块收起、不带 `data-running`。「闭段时即切换标题」的时刻由 web 单测证明，不在走查里量（放行时剩余分片一次发完）。
 4. 全程沿用既有 error oracle（console error、pageerror、意外的 `/api/auth/me`、失败的静态资源），不新增例外。
 
 #### Scenario: 冒烟断言思考时长
@@ -50,7 +55,7 @@ A `finally` block around steps 2–11 SHALL delete the created session through t
 - **THEN** 该用例失败
 
 #### Scenario: 走查量到等待指示、预览与标题变化
-- **WHEN** `make ui-walk` 在两个 project 中运行上述三步
-- **THEN** 每个 project 中等待指示只在零内容 held 期间出现、放行后消失；小圆点是圆形且只在非减少动态效果下有动画；思考 held 期间标题为 `正在思考…`、主体限高 192px 且贴到最新行、转录贴底；放行后标题为 `已思考 N 秒`
-- **WHEN** 一个候选实现让等待指示在正文出现后仍显示、让预览主体不限高（`max-height` 为 `none`）、或在思考进行中显示 `深度思考过程`
+- **WHEN** `make ui-walk` 在两个 project 中运行上述步骤
+- **THEN** 每个 project 中：等待指示只在零内容 held 期间出现、放行后消失；小圆点是圆形、在非减少动态效果下有动画；思考 held 期间标题为 `正在思考…`，主体限高 192px、内容溢出且贴到最新行，转录贴底；放行后标题为 `已思考 N 秒`
+- **WHEN** 一个候选实现让等待指示在正文出现后仍显示、让预览主体不限高（`max-height` 为 `none`）、让预览不贴到最新行，或在思考进行中显示 `深度思考过程`
 - **THEN** 对应步骤失败

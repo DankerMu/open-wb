@@ -248,7 +248,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 
 #### Scenario: convertMessage 映射
 - **WHEN** 以一条 `stopped` 助手视图消息调用 `convertMessage`：`id` 为 12，`thinking` 为 `先想一想`，`content` 为 `部分回答`，含一条 `done` 的 `bash` 步骤与一条 `failed` 的 `write` 步骤，`approvals` 含一条已结算审批；再以一条 `thinking` 为 `null`、无步骤的 `running` 助手消息调用
-- **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批、步骤 `changes`、`error` 与原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
+- **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批、步骤 `changes`、`error`、`thinkingMs`、`thinkingActive` 与原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
 
 ### Requirement: 消息线程
 会话页 SHALL 以 `web/src/features/chat/` 内的应用层组件渲染选中会话的消息线程：线程、消息、步骤卡与操作行直接由 `@assistant-ui/react` 的基元（`ThreadPrimitive`、`MessagePrimitive`、`ActionBarPrimitive`）组合而成；拷入层（`web/src/components/assistant-ui/`）只提供 `markdown-text`、`reasoning`、`tool-group` 三个组件及其 registry 依赖（ui-foundation `组件分层`），不拷入 registry 的 `thread` 与 `tool-fallback`。链接惰性、图片不加载、块次序、失败自动展开、不提供编辑/分支、不使用 runtime 的附件适配器等行为定制 SHALL 都在应用层实现（例如经 `markdown-text` 的 `components` 覆盖，以及组合 `tool-group` / `reasoning` 的 Root/Trigger/Content），不为此修改拷入文件。每条消息的根元素（用户与助手）SHALL 是 `article`，可访问名分别为 `用户` 与 `助手`，并带 `data-message-id="<message id>"`；对话内搜索的当前匹配标记 `aria-current="true"` 与当前匹配的高亮样式落在同一个根元素上（conversation-search）。根元素 SHALL 是整条消息：消息的全部内容与操作行都在它之内。
@@ -269,7 +269,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **等待指示**：消息 running 且还没有任何可见块——`thinking` 为 `null` 或空串、正文为空、没有步骤、没有已结算审批、`error` 为 `null` 且不在重试中——时，SHALL 在正文的位置显示一行 `role="status"`、可见文本为 `正在思考…` 的等待指示（`data-slot="message-waiting"`），带流光；`prefers-reduced-motion: reduce` 下流光动画暂停。任一可见块出现后它 SHALL 消失，同一回合不再出现。不区分模型是否支持推理。
 - **小圆点**：消息 running 且已有可见块时，SHALL 在正文最后一个字符之后显示一个小圆点（`data-slot="message-caret"`、`aria-hidden`，计算样式 `border-radius` 为 50%），非减少动态效果时带动画（计算样式 `animation-name` 不为 `none`）；`prefers-reduced-motion: reduce` 下无动画（`animation-name` 为 `none`）。可观察量由 ui-walk 在真实浏览器里断言。
 
-**正文逐字展开**：运行中、非减少动态效果时，正文 SHALL 按 `@assistant-ui/react` `useSmooth` 的规则逐字展开：显示的文本始终是已收到正文的前缀，每字间隔为 min(5ms, 250ms ÷ 尚未显示的字数)，积压越多越快。消息首次渲染（打开会话、切换会话、重连后安装快照）时已有的正文 SHALL 立即全部显示，只有此后到达的部分逐字展开；消息进入任一终态时 SHALL 立即显示全文，不拖尾；`prefers-reduced-motion: reduce` 下 SHALL 不逐字展开，收到即显示。逐字展开期间消息内 SHALL 不出现小圆点之外的运行指示（Markdown 基元的容器 `data-status` 不为 `running`）。`复制` 写入的文本与对话内搜索匹配的文本 SHALL 取已收到的全文，与当前已显示到哪里无关。
+**正文逐字展开**：运行中、非减少动态效果时，正文 SHALL 按 `@assistant-ui/react` `useSmooth` 的规则逐字展开：显示的文本始终是已收到正文的前缀，每字间隔为 min(5ms, 250ms ÷ 尚未显示的字数)，积压越多越快。消息组件首次挂载（打开会话、切换会话）时已有的正文 SHALL 立即全部显示，只有此后到达的部分逐字展开（原地重新安装快照时组件不重新挂载，快照比当前多出的部分按同一规则展开）；展开期间转录区的贴底跟随与 `回到最新` 的判定照常（贴着底时持续贴底，用户上滚后不被拉回）；消息进入任一终态时 SHALL 立即显示全文，不拖尾；`prefers-reduced-motion: reduce` 下 SHALL 不逐字展开，收到即显示。逐字展开期间消息内 SHALL 不出现小圆点之外的运行指示（Markdown 基元的容器 `data-status` 不为 `running`）。`复制` 写入的文本与对话内搜索匹配的文本 SHALL 取已收到的全文，与当前已显示到哪里无关。
 
 状态为 `stopped` 的助手消息 SHALL 在正文之后、操作行之前渲染一个 `role="status"` 徽章，可见文本 `已停止`、可访问名 `助手消息 已停止`（不带错误文本）；其正文为空时 SHALL 以占位文本 `（已停止生成）` 代替空块。这一消息级呈现不改变会话列表状态点、步骤徽章与输入框的呈现。
 
@@ -337,7 +337,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **THEN** 第一例线程区显示一个图标、`还没有消息，发一条开始吧` 与 `工作空间 项目A`，没有场景分组、快捷任务与最佳实践卡，没有 hero，页面 level-1 heading 仍是顶栏面包屑 `我的工作 / <title>`，输入框草稿仍为 `草稿`、可发送；未绑定与空间名解析不出来的两例都有图标与 `还没有消息，发一条开始吧`，但没有以 `工作空间` 开头的那一行；历史请求尚未返回的一例在历史返回之前不显示空态；发送被受理后空态消失、出现用户消息
 
 #### Scenario: 助手块次序
-- **WHEN** 快照含一条 `stopped` 助手消息：`thinking` 为 `先想一想`，`approvals` 含一条已结算审批，正文为 `部分回答`，一个已结束 `write` 步骤的 `changes` 为 `[{path:"out/index.html",added:null,removed:null,kind:"write"}]`，会话绑定到本账号的空间
+- **WHEN** 快照含一条 `stopped` 助手消息：`thinking` 为 `先想一想`、`thinkingMs` 为 `null`，`approvals` 含一条已结算审批，正文为 `部分回答`，一个已结束 `write` 步骤的 `changes` 为 `[{path:"out/index.html",added:null,removed:null,kind:"write"}]`，会话绑定到本账号的空间
 - **THEN** 该消息内按文档顺序依次为 `深度思考过程` 折叠块（收起）、正文、工具调用组（收起）、已结算审批记录、名为 `文件变更（1 个）` 的卡片、`index.html` 的 HTML 产物卡、名为 `助手消息 已停止` 的徽章与操作行；消息内没有名为 `需要你的确认` 的区域；`复制` 仍只复制 `部分回答`
 
 #### Scenario: 用户消息操作行的按钮与次序

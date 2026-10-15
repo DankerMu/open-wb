@@ -40,3 +40,7 @@ SessionSupervisor SHALL 为每个 slot 持有一个增量合并器，处理同�
 #### Scenario: 崩溃时的缓冲
 - **WHEN** fake-omp 发两段正文后退出（第二段仍在合并器中），回合以 error 与 failed `turn.end` 结算
 - **THEN** 第二段在 error 之前作为一条 `text.delta` 发布，failed 助手消息正文含两段；基础设施故障退役的另一例中合并器里的段不发布
+
+#### Scenario: 本地完成路径的冲刷
+- **WHEN** 一个只有本地命令输出的回合（无映射器终态，chat-sessions「Supervisor ordered persistence and publication」的本地完成路径）在 250ms 内到达两段 `command_output`，第二段仍在合并器中时运行时确认本地完成
+- **THEN** 第二段在 `turn.end{status:"done"}` 之前作为一条 `text.delta` 发布并进入正文缓冲；终态事务提交后助手正文等于两段输出按规则拼接的全文；没有任何 `text.delta` 晚于 `turn.end`

@@ -1,30 +1,32 @@
 ## MODIFIED Requirements
 
 ### Requirement: thinking.delta 合并发布与持久化
-纯归约器 SHALL 把回合内（`agent_start` 之后、终态之前）助手消息的每个 `message_update{assistantMessageEvent:{type:"thinking_delta",delta}}`（`delta` 为非空字符串）映射为一条 `thinking.delta{messageId,delta}`（映射规则见 chat-stream）；`thinking_start`/`thinking_end` 帧、`message_end.message.content[]` 中的 `thinking`/`redactedThinking` 块 SHALL 不产生任何事件，也不作为 thinking 来源（只认增量帧；只在 `message_end` 给出整块思考而无增量帧的上游，其思考不落库、不呈现）。
+纯归约器 SHALL 把回合内（`agent_start` 之后、终态之前）助手消息的每个 `message_update{assistantMessageEvent:{type:"thinking_delta",delta}}`（`delta` 为非空字符串）映射为一条 `thinking.delta{messageId,delta}`（映射规则见 chat-stream）；`thinking_start`/`thinking_end` 帧、`message_end.message.content[]` 中的 `thinking`/`redactedThinking` 块 SHALL 不经纯归约器产生任何事件，也不作为 thinking 内容来源（只认增量帧；只在 `message_end` 给出整块思考而无增量帧的上游，其思考不落库、不呈现）；`thinking_end` 帧的到达时刻只由 supervisor 用作一段思考的结束信号（「思考时长记录与下发」）。
 SessionSupervisor SHALL 用 chat-stream「正文与思考增量的时间窗合并」定义的合并器合并同一助手消息的 thinking 增量（空闲后的首段立即发布，之后每 250ms 至多一条，即将发布同一回合的任何其它事件之前与回合进入终态之前立即冲刷；不设字节阈值）。合并器每发布一条 `thinking.delta`，SHALL 先把该条的文本追加进 `chat_messages.thinking`，再在同一同步段内（中间无 await）入 ring（与既有「先持久化/缓冲、后入 ring」纪律一致）。由此 ring 中 `thinking.delta` 与同回合其它事件的相对次序等于上游帧到达次序；除此之外不作任何次序保证——只有上游先于正文发送 thinking 时，`thinking.delta` 才先于该回合第一条 `text.delta`。落库失败 SHALL 不发布该条事件，并沿既有 owned error-sink 路径处理；slot 因基础设施故障退役时合并器里尚未发布的 thinking SHALL 被丢弃（不落库、不发布）。
 `chat_messages.thinking`（可空 TEXT 列，由 chat-sessions 的 035 迁移新增）SHALL 以追加方式保存该消息全部已发布 thinking：首段非空 thinking 落库前为 NULL，此后为已保存文本。某条消息是否有 thinking 只取决于上游响应是否带思考增量（omp 在响应侧无条件把 `reasoning_content`/`reasoning`/`reasoning_text` 映射为 thinking 帧），与托管 `models.yml` 的 `reasoning` 声明无关；「无 reasoning 不渲染」即上游未返回思考增量时 `thinking` 为 `null`、不渲染折叠块。保存与发布 SHALL 共享同一上限：至多 32768 个 Unicode 码点，不拆分代理对；使累计超过上限的那一次发布只保留恰好填满上限的前缀并紧接追加标记 `…（已截断）`，该次发布的 `delta` 即「保留前缀 + 标记」；此后同一消息的 thinking 增量 SHALL 既不落库也不发布（不再产生 `thinking.delta`）。累计恰为 32768 码点时不追加标记。由此实时视图与重载快照的 thinking 文本逐字相同。
 `thinking.delta` SHALL 是普通 ring 事件：消费一个正常 `<epoch>:<seq>` id，受既有保留、`min−1` 回放、`replay.gap` 与「从活跃 turn.start 起刷新」规则约束，SSE 以 `event:thinking.delta` 投递，无任何特殊处理。消息快照 SHALL 为每条消息给出 `thinking: string | null`：user 消息恒为 `null`，无 reasoning 的助手消息为 `null`，否则为该列原文（含可能的截断标记）；合并器里尚未发布的 thinking 不在快照中。regenerate 删除旧助手行时其 thinking 随行删除；新回合从 NULL 重新开始。
 
 #### Scenario: 合并与落库
 - **WHEN** fake-omp `thinking` 场景在 agent_start 之后连续发 `thinking_start`、三个拼接为 `先读需求，再列要点，最后作答。` 的 `thinking_delta`（`先读需求，`、`再列要点，`、`最后作答。`，在同一时刻到达）、`thinking_end`，随后发正文 `text_delta` 与终态 agent_end
-- **THEN** ring 中恰有两条 `thinking.delta`：先 `先读需求，`（前沿立即发布），再 `再列要点，最后作答。`（在第一条 `text.delta` 之前冲刷），二者都在 turn.start 之后、第一条 `text.delta` 之前；`thinking_start`/`thinking_end` 未产生事件；快照该助手消息 `thinking` 为 `先读需求，再列要点，最后作答。`，user 消息 `thinking` 为 `null`
+- **THEN** ring 中恰有两条 `thinking.delta`：先 `先读需求，`（前沿立即发布），再 `再列要点，最后作答。`（`thinking_end` 到达时冲刷），其后紧接一条 `thinking.end`，三者都在 turn.start 之后、第一条 `text.delta` 之前；`thinking_start` 未产生事件，`thinking_end` 只触发闭段；快照该助手消息 `thinking` 为 `先读需求，再列要点，最后作答。`，user 消息 `thinking` 为 `null`
 
 #### Scenario: 字节阈值与时钟阈值
-- **WHEN** 一回合中首段 thinking 增量发布后，注入时钟每 100ms 再到达一段增量，共五段，其间无其它事件
-- **THEN** 首段立即落库并发布；其后的增量在首段之后 250ms 到点时合成一条落库并发布，再之后的在又一个 250ms 到点时合成一条；任何两条 `thinking.delta` 的发布时刻相隔不少于 250ms；全部 `thinking.delta` 拼接与快照 `thinking` 逐字相同
+- **WHEN** 注入时钟下一回合的首段 thinking 增量在 t=0 到达，其后在 t=90、180、270、360、450ms 各到达一段，其间无其它事件，t=600ms 回合结束
+- **THEN** 恰有三条 `thinking.delta`：t=0 发布首段；t=250ms 到点发布 t=90 与 t=180 两段合成的一条；t=500ms 到点发布 t=270、360、450 三段合成的一条；每条都先落库再发布；全部 `thinking.delta` 拼接与快照 `thinking` 逐字相同
 - **WHEN** 一段增量到达时，该消息上一次发布 `thinking.delta` 已过去至少 250ms 且合并器为空
 - **THEN** 该段立即发布，不等待
 - **WHEN** 首段发布后 100ms 内合计到达 6000 UTF-8 字节的增量，其间无其它事件
 - **THEN** 不因字节数提前发布（不设字节阈值）：这些增量在首段之后 250ms 到点时合成一条落库并发布
 
 #### Scenario: 其它事件前冲刷
-- **WHEN** 合并器中有未发布的 thinking 时到达同一回合的 `tool_execution_start`，另一回合中合并器未冲刷时回合以 `turn.end stopped` 结束
+- **WHEN** 合并器中有未发布的 thinking、且该段思考尚未收到 `thinking_end` 帧时，到达同一回合一个不需要审批的工具的 `tool_execution_start`；另一回合中合并器未冲刷时回合以 `turn.end stopped` 结束
 - **THEN** 前者 ring 中依次为该 `thinking.delta`、`thinking.end`、该 `step.start`，三者相邻；后者 `thinking.delta` 与 `thinking.end` 先于 `turn.end`，快照中该段内容已保存
 
 #### Scenario: 上限与截断标记
 - **WHEN** 一条助手消息的 thinking 增量合计 40000 码点，截断点恰落在一个星体字符（代理对）处，之后还有增量到达
 - **THEN** `chat_messages.thinking` 为前 32768 码点（不含孤立代理项）加 `…（已截断）`；跨过上限的那条 `thinking.delta` 的 `delta` 为到上限为止的前缀加该标记；之后不再有该消息的 `thinking.delta`；把全部已发布 `thinking.delta` 拼接的结果与快照 `thinking` 逐字相同
+- **WHEN** 注入时钟下上例的思考在 t=0 开始，上限在 t=300ms 被跨过，此后的增量持续到 t=900ms，t=1000ms 到达 `thinking_end`
+- **THEN** 该段照常在 t=1000ms 闭合，`thinking.end{thinkingMs:1000}` 照常发布（计入上限之后的时间），`thinking_ms` 为 1000
 - **WHEN** thinking 合计恰为 32768 码点
 - **THEN** 全文保存，无标记
 
@@ -94,25 +96,46 @@ SessionSupervisor SHALL 用 chat-stream「正文与思考增量的时间窗合�
 ## ADDED Requirements
 
 ### Requirement: 思考时长记录与下发
-SessionSupervisor SHALL 用服务端注入时钟为每条助手消息记录思考时长。一段思考（span）SHALL 从 supervisor 处理该回合一条 `thinking.delta`（合并之前、按帧到达时刻）且当前没有开着的段时开始，到 supervisor 即将处理同一回合的任何非 `thinking.delta` 事件（含 `text.delta`、`step.*`、`files.changed`、`approval.*`、`todo.updated`、`turn.retry`、`error`、`turn.end`，以及经 `applyFailure`/`applyStop` 合成的终态）时结束。段结束时 supervisor SHALL 依次：冲刷合并器；把本段时长（结束时刻减开始时刻，毫秒）累加到该消息本回合的累计值；把累计值（整数，`Math.round`）写入 `chat_messages.thinking_ms`；在同一同步段内发布 `thinking.end{messageId, thinkingMs}`（`thinkingMs` 为该累计值）；然后才处理触发闭段的事件。达到 32768 码点上限后 thinking 不再发布，但段照常开始、结束与计时。被停止或失败的回合，段在其 `turn.end` 之前结束，即按回合结束时刻计。
-`thinking.end` SHALL 是普通 ring 事件（同 `thinking.delta` 的规则），先落库后发布；写库失败 SHALL 不发布该事件并沿 owned error-sink 处理。slot 因基础设施故障退役、或进程在段开着时退出时，该段 SHALL 不补写：`thinking_ms` 保持最后一次闭段写入的值，从未闭段则为 NULL；启动对账不写 `thinking_ms`。
-消息快照 SHALL 为每条消息给出 `thinkingMs: number | null`：user 消息恒为 `null`；助手消息为 `thinking_ms` 列值（NULL 为 `null`）。fork 拷贝助手行时 `thinking_ms` 随行拷贝；regenerate 删除旧助手行时随行删除；新回合的助手行从 NULL 开始。
+SessionSupervisor SHALL 用服务端注入时钟为每条助手消息记录思考时长。一段思考（span）SHALL 在 supervisor 处理该回合一条 `thinking.delta`（合并之前、按帧到达时刻）且当前没有开着的段时开始。开段时 supervisor SHALL 把该消息的 `chat_messages.thinking_ms` 置为 NULL（同步写；写失败沿 owned error-sink 处理）。由此段开着期间快照的 `thinkingMs` 为 `null`。
+段 SHALL 在以下两者先到者的时刻结束：(a) pump 读到同一回合的原始 `message_update{assistantMessageEvent:{type:"thinking_end"}}` 帧；(b) supervisor 即将处理同一回合的任何非 `thinking.delta` 事件（含 `text.delta`、`step.*`、`files.changed`、`approval.*`、`todo.updated`、`turn.retry`、`error`、`turn.end`，以及经 `applyFailure`/`applyStop` 合成的终态）。
+段结束时 supervisor SHALL 依次：
+1. 冲刷合并器；
+2. 把本段时长 `max(0, 结束时刻 − 开始时刻)`（毫秒；墙钟回拨时该段记 0）累加到该消息本回合的累计值；
+3. 把累计值（整数，`Math.round`）写入 `chat_messages.thinking_ms`；
+4. 在同一同步段内发布 `thinking.end{messageId, thinkingMs}`（`thinkingMs` 为该累计值）；
+5. 在 (b) 的情形下，才处理触发闭段的事件。
 
-#### Scenario: 单段思考
-- **WHEN** 注入时钟下，一回合在 t=1000ms 到达首段 thinking，t=1100ms、t=1300ms 再到达两段，t=3400ms 到达第一段正文，随后 agent_end
-- **THEN** ring 中最后一条 `thinking.delta` 之后紧接 `thinking.end{thinkingMs:2400}`，再之后是第一条 `text.delta`；`chat_messages.thinking_ms` 为 2400；快照该助手消息 `thinkingMs` 为 2400，user 消息为 `null`
+`thinking_end` 帧只用作时间信号：它不产生内容，也不改变「thinking.delta 合并发布与持久化」的内容来源规则。达到 32768 码点上限后 thinking 不再发布，但段照常开始、结束与计时。被停止或失败的回合（含 omp 子进程崩溃经 `applyFailure` 的退回），若段仍开着，在其 `turn.end`（或 `error`）之前结束，即按回合结束时刻计。
+`thinking.end` SHALL 是普通 ring 事件（同 `thinking.delta` 的规则），先落库后发布；写库失败 SHALL 不发布该事件并沿 owned error-sink 处理。slot 因基础设施故障退役、或 WorkBuddy 服务端（宿主）进程在段开着时退出时，该段 SHALL 不补写：开段时已置 NULL，所以该消息的 `thinking_ms` 为 NULL，标题为 `深度思考过程`。启动对账不写 `thinking_ms`。
+消息快照 SHALL 为每条消息给出 `thinkingMs: number | null`：user 消息恒为 `null`；助手消息为 `thinking_ms` 列值（NULL 为 `null`）。快照的消息形状见 chat-sessions「会话 REST」。fork 拷贝助手行时 `thinking_ms` 随行拷贝；regenerate 删除旧助手行时随行删除；新回合的助手行从 NULL 开始。
+
+#### Scenario: 单段思考以 thinking_end 闭合
+- **WHEN** 注入时钟下，一回合在 t=1000ms 到达首段 thinking，t=1100ms、t=1300ms 再到达两段，t=3000ms 到达 `thinking_end` 帧，t=3400ms 到达第一段正文，随后 agent_end
+- **THEN** t=3000ms 时 ring 中依次追加合并器冲刷出的 `thinking.delta` 与 `thinking.end{thinkingMs:2000}`，第一条 `text.delta` 在其后；`chat_messages.thinking_ms` 为 2000；快照该助手消息 `thinkingMs` 为 2000，user 消息为 `null`
+
+#### Scenario: 工具参数的生成不计入
+- **WHEN** 一回合思考从 t=0 到 t=500ms，t=500ms 到达 `thinking_end`，随后模型流式生成工具参数（toolcall 帧，被归约器丢弃）直到 t=9000ms 到达该工具的 `tool_execution_start`
+- **THEN** `thinking.end{thinkingMs:500}` 在 t=500ms 发布，早于 `step.start`；`thinking_ms` 为 500
+
+#### Scenario: 没有 thinking_end 时以下一事件闭合
+- **WHEN** 一回合思考从 t=0 开始，从未到达 `thinking_end`，t=800ms 到达第一段正文
+- **THEN** `thinking.end{thinkingMs:800}` 紧先于第一条 `text.delta`
 
 #### Scenario: 多段思考累计
-- **WHEN** 一回合依次为：思考 500ms → `tool_execution_start`（工具执行 3000ms）→ `tool_execution_end` → 思考 700ms → 正文 → agent_end
-- **THEN** 恰有两条 `thinking.end`，`thinkingMs` 依次为 500 与 1200；工具执行的 3000ms 不计入；快照 `thinkingMs` 为 1200
+- **WHEN** 一回合依次为：思考 500ms 后 `thinking_end` → 工具执行 3000ms → 思考 700ms 后 `thinking_end` → 正文 → agent_end；第二段思考进行中读取一次快照
+- **THEN** 恰有两条 `thinking.end`，`thinkingMs` 依次为 500 与 1200；工具执行的 3000ms 不计入；第二段进行中的快照 `thinkingMs` 为 `null`；回合结束后快照 `thinkingMs` 为 1200
 
 #### Scenario: 停止与失败
-- **WHEN** 一回合思考进行中用户停止生成，该回合在其首段思考开始后 900ms 以 `turn.end stopped` 结束（思考期间无其它事件）；另一回合思考进行中运行时崩溃，该回合在首段思考开始后 600ms 以 error 与 `turn.end failed` 结束
+- **WHEN** 一回合思考进行中（未收到 `thinking_end`）用户停止生成，该回合在其首段思考开始后 900ms 以 `turn.end stopped` 结束；另一回合思考进行中 omp 子进程崩溃，该回合在首段思考开始后 600ms 以 error 与 `turn.end failed` 结束
 - **THEN** 前者 `thinking.end{thinkingMs:900}` 在 `turn.end` 之前；后者 `thinking.end{thinkingMs:600}` 在 error 之前；两者 `thinking_ms` 分别为 900 与 600
 
 #### Scenario: 中断后无法恢复
-- **WHEN** 一回合在开着的第一段思考中进程被杀，重启后启动对账把该消息置为 failed
-- **THEN** `thinking_ms` 为 NULL，快照 `thinkingMs` 为 `null`，没有补发的 `thinking.end`
+- **WHEN** 一回合在开着的第一段思考中宿主进程被杀；另一回合第一段已闭合（`thinking_ms` 为 500）、在开着的第二段中宿主进程被杀；重启后启动对账把两条消息置为 failed
+- **THEN** 两条消息的 `thinking_ms` 都为 NULL，快照 `thinkingMs` 为 `null`，没有补发的 `thinking.end`
+
+#### Scenario: 墙钟回拨
+- **WHEN** 注入时钟在一段思考开始后回拨 5000ms，随后到达 `thinking_end`
+- **THEN** 该段记 0，`thinking.end` 的 `thinkingMs` 为此前的累计值（首段时为 0），`thinking_ms` 不为负数
 
 #### Scenario: 写库失败
 - **WHEN** 闭段时写 `thinking_ms` 在 SQLite 中失败
