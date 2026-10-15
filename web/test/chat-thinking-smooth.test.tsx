@@ -146,6 +146,26 @@ describe("thinking-fold「思考的逐字展开」", () => {
     expect(lengths).toEqual([...lengths].sort((a, b) => a - b));
   });
 
+  it("回合仍在进行时 thinking.delta 紧跟 thinking.end：段末这一块仍逐字展开，不整段出现", async () => {
+    await openRunningThinking("想");
+    vi.useFakeTimers({ toFake: [...PAGE_CLOCK] });
+
+    // 服务端冲出段内最后一条 thinking.delta 后在同一同步段里发布 thinking.end：两条一起投递、一起让出。
+    await act(async () => {
+      latestSource().emitData("thinking.delta", "1:4", { messageId: 0, delta: TWO_HUNDRED });
+      latestSource().emitData("thinking.end", "1:5", { messageId: 0, thinkingMs: 400 });
+      await settle();
+    });
+
+    const full = `想${TWO_HUNDRED}`;
+    expect(control().textContent).toBe("已思考 1 秒");
+    const right = shown() ?? "";
+    expect(right.length).toBeLessThan(full.length);
+    expect(full.startsWith(right)).toBe(true);
+    for (let i = 0; i < 125 && shown() !== full; i += 1) frame();
+    expect(shown()).toBe(full);
+  });
+
   it("展开到一半时收到 turn.end(stopped)：收起的退场动画里主体已是全文，动画放完再展开仍是全文", async () => {
     const finish = emulateCollapseAnimation();
     await openRunningThinking("想");
