@@ -301,8 +301,10 @@ export function persistEvent(
         ? undefined
         : { type: "todo.updated", data: { messageId: event.data.messageId, todo: stored.todo } };
     }
-    // thinking.delta never reaches here: the supervisor's delta coalescer (#910) takes it first.
+    // thinking.delta never reaches here: the supervisor's delta coalescer (#910) takes it first;
+    // thinking.end is published by its thinking spans (thinking-span.ts), never mapped.
     case "thinking.delta":
+    case "thinking.end":
       return undefined;
   }
 }

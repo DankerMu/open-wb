@@ -1,7 +1,7 @@
 /**
  * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle. #910: text and
  * thinking deltas go through the per-slot delta coalescer (delta-coalescer.ts), flushed before any
- * other event.
+ * other event; it also times thinking spans (thinking-span.ts), closed early by omp's thinking_end.
  */
 import { availableParallelism } from "node:os";
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
@@ -50,6 +50,7 @@ import {
   SubscriberTable,
   streamCursorOf,
 } from "./supervisor-subscribers.js";
+import { endsThinking } from "./thinking-span.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 import { type UndoRequest, type UndoResult, Undos } from "./undo.js";
@@ -184,6 +185,7 @@ export class SessionSupervisor {
       },
       publish: (slot, event, generation) => this.#pushNow(slot, event, generation),
       fault: (slot, error) => this.#faultSlot(slot, error),
+      durations: this.#store,
     });
     this.#stops = new TurnStops({
       clock,
@@ -618,7 +620,9 @@ export class SessionSupervisor {
         this.#pool.touch(slot.entry);
         const applied = applyFrame(mapper, frame);
         mapper = applied.state;
+        // omp's raw thinking_end closes an open thinking span (the reducer maps it to nothing).
         if (
+          !this.#deltas.endSpan(slot, endsThinking(frame)) ||
           !(await commit(applied.events)) ||
           !(await this.#approvals.publishRequest(slot, frame))
         ) {
