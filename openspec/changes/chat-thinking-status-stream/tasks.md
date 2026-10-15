@@ -159,7 +159,7 @@ Minimal mergeable slice（3a）: atomic - 一个迁移文件及其测试。
     - `thinking_ms` 列在回合结束后为非负整数；
     - chat-stream 改写后的「Ordered publication after persistence」（含 `thinking.end`）。
   - 2.5 的官方 omp 用例追加断言：恰有一条 `thinking.end`，且位于第一条 `text.delta` 之前。
-  - 夹具改换（3b 实施时确认，编排方 2026-10-15 记录）：fake-omp `--hold-after-thinking` 在 `thinking_end` 之后才挂起，3b 起 `thinking_end` 即冲刷并闭段，`session-thinking.test.ts` 中依赖「挂起时缓冲仍有思考」的用例改用受控子进程（只发思考帧、不发 `thinking_end`）；断言内容逐字保留、只插入 `thinking.end`，不算削弱，在偏离记录逐条列出。
+  - 夹具改换（3b 实施时确认，编排方 2026-10-15 记录）：fake-omp `--hold-after-thinking` 在 `thinking_end` 之后才挂起，3b 起 `thinking_end` 即冲刷并闭段，`session-thinking.test.ts` 中依赖「挂起时缓冲仍有思考」的用例改用受控子进程（只发思考帧、不发 `thinking_end`）；断言内容逐字保留，只插入 `thinking.end` 及由此带来的计数平移，并把子进程句柄改名（`spawned` → `children` / `child()`），不算削弱，在偏离记录逐条列出。
 Suggested fixture level（3b）: expanded - 新的公开事件、开段 / 闭段写库与 pump 读帧，跨持久化与次序两类风险。
 Minimal mergeable slice（3b）: atomic - 开段清空、闭段写列与发布 `thinking.end` 是同一段的生命周期。只做一端，要么列值永远是 NULL，要么残留旧值、违背 O3。
 
