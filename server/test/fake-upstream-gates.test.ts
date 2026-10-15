@@ -50,6 +50,8 @@ interface OpenStream {
   abort: AbortController;
   buffer: Buffer;
   ended: boolean;
+  /** Set only when a read rejected: the response was destroyed, not ended. */
+  failed: boolean;
   pendingRead: Promise<ReadableStreamReadResult<Uint8Array>> | null;
 }
 
@@ -314,6 +316,8 @@ describe("fake-upstream gate cleanup", () => {
     expect(expired).toBe(true);
     const text = await drainUntil(held.stream, FETCH_MS);
     expect(isSuccessfulTextCompletion(text)).toBe(false);
+    // A clean end without [DONE] would pass the line above; the spec says destroy, not end.
+    expect(held.stream.failed).toBe(true);
     expectOk(await armGate(held.handle.port, held.id, DEFAULT_KEY));
   }, 10_000);
 
@@ -474,6 +478,7 @@ async function openChatStream(
     abort,
     buffer: Buffer.alloc(0),
     ended: false,
+    failed: false,
     pendingRead: null,
   };
   streams.push(stream);
@@ -506,7 +511,8 @@ async function drainUntil(stream: OpenStream, ms: number): Promise<string> {
       }
     }
   } catch {
-    /* abort, reset, or destroy is the cleanup under test */
+    // Abort, reset, or destroy is the cleanup under test.
+    stream.failed = true;
   }
   return stream.buffer.toString("utf8");
 }

@@ -2,9 +2,13 @@
  * Issue 1437 WORKBUDDY_PACE marker of the fake upstream (omp-test-harness「受控上游节奏与闸门停点标记」,
  * scenario「节奏标记」). Expected bytes are literal strings written from the spec delta and the
  * pre-change fixture output; fixture constants are not imported. Bodies are compared as raw text
- * after pinning only the random ids and `created`. Arrival gaps use only the spec's lower bounds.
+ * after pinning only the random ids and `created`. Timing uses only the spec's lower bounds: the
+ * 25ms spacing is read where the fixture writes. Client arrival gaps went as low as 8.5ms in a
+ * loaded `make check` (实测); the client shares the server's event loop, so neighbouring frames'
+ * arrival latency can differ by more than the 5ms margin (读代码推出).
  */
 import { randomUUID } from "node:crypto";
+import { OutgoingMessage } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseDataRecords, startTrackedFakeUpstream } from "./fake-upstream-helpers.js";
 import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
@@ -107,18 +111,29 @@ afterEach(async () => {
 describe("节奏标记: WORKBUDDY_PACE without a gate", () => {
   it("streams role, three reasoning chunks, 40 字 chunks, stop and [DONE], each ≥20ms apart and ≥1000ms first to last", async () => {
     const port = await upstream();
-    // Warm the client path first: a slow first read alone would eat the 5ms margin under 25ms.
+    // Warm the client path first: a slow first read would shorten the client-side span below.
     expect(rawOf(await chat(port, toolRound("warm up")))).toBe(body(BASH_ROUND));
-    const live = await openLive(port, answerRound(`please ${PACE}`), PACE_MODEL);
-    const arrivals = await readTimed(live);
+    const writes = recordWrites();
+    let arrivals: number[];
+    let live: LiveStream;
+    try {
+      live = await openLive(port, answerRound(`please ${PACE}`), PACE_MODEL);
+      arrivals = await readTimed(live);
+    } finally {
+      writes.restore();
+    }
     expect(normalize(live.text)).toBe(body(PACED_MODEL));
     const ids = live.text.match(COMPLETION_ID) ?? [];
     expect(ids).toHaveLength(PACED.length - 1);
     expect(new Set(ids).size).toBe(1);
     expect(live.ended).toBe(true);
-    expect(arrivals).toHaveLength(PACED.length);
-    const gaps = arrivals.slice(1).map((at, index) => at - (arrivals[index] ?? at));
+    // One write per record, in order: nothing bunched into a single write.
+    expect(writes.chunks.map(normalize)).toEqual(PACED_MODEL.map((record) => body([record])));
+    const gaps = writes.times.slice(1).map((at, index) => at - (writes.times[index] ?? at));
     expect(Math.min(...gaps)).toBeGreaterThanOrEqual(MIN_GAP_MS);
+    expect((writes.times.at(-1) ?? 0) - (writes.times[0] ?? 0)).toBeGreaterThanOrEqual(MIN_SPAN_MS);
+    // The client sees the same span; per-record arrival gaps carry client jitter and are not used.
+    expect(arrivals).toHaveLength(PACED.length);
     expect((arrivals.at(-1) ?? 0) - (arrivals[0] ?? 0)).toBeGreaterThanOrEqual(MIN_SPAN_MS);
   });
 
@@ -335,6 +350,34 @@ async function openLive(port: number, messages: unknown[], model?: string): Prom
   };
   lives.push(live);
   return live;
+}
+
+interface WriteLog {
+  chunks: string[];
+  times: number[];
+  restore(): void;
+}
+
+/**
+ * Stamps every server-side `response.write` (the fixture runs in this process) until `restore()`.
+ * `end()` without data does not go through `write`, so each stamp is one written record.
+ */
+function recordWrites(): WriteLog {
+  const proto = OutgoingMessage.prototype as unknown as { write: (...args: unknown[]) => boolean };
+  const original = proto.write;
+  const log: WriteLog = {
+    chunks: [],
+    times: [],
+    restore: () => {
+      proto.write = original;
+    },
+  };
+  proto.write = function (this: unknown, ...args: unknown[]): boolean {
+    log.times.push(performance.now());
+    log.chunks.push(String(args[0]));
+    return original.apply(this, args);
+  };
+  return log;
 }
 
 /** Reads to the end; each record is stamped with the time of the read that completed it. */
