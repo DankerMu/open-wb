@@ -69,6 +69,7 @@ export function assistantRow(
     steps: [],
     thinking: null,
     error: null,
+    thinkingMs: null,
   };
 }
 

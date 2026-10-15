@@ -91,6 +91,7 @@ const MESSAGE_KEYS = [
   "attachments",
   "steps",
   "error",
+  "thinkingMs",
 ];
 
 const worlds = forkWorlds();

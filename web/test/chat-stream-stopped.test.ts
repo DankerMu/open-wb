@@ -75,6 +75,8 @@ describe("turn.end stopped reduction", () => {
       thinking: null,
       error: null,
       retrying: false,
+      thinkingMs: null,
+      thinkingActive: false,
     });
     expect(next.messages[0]).toBe(state.messages[0]);
     expect(next.messages[0]).toEqual(userView);
@@ -104,6 +106,8 @@ describe("turn.end stopped reduction", () => {
       thinking: null,
       error: null,
       retrying: false,
+      thinkingMs: null,
+      thinkingActive: false,
     });
   });
 

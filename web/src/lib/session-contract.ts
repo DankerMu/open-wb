@@ -68,6 +68,8 @@ export type ChatMessage = {
   attachments: ChatAttachment[];
   /** 失败回合的分类说明与原文（issue 909）；用户消息与未失败的助手消息为 null。 */
   error: ChatMessageError | null;
+  /** 思考累计毫秒（issue 910）：非负安全整数；用户消息、无思考与思考段进行中为 null。 */
+  thinkingMs: number | null;
 };
 
 export type ChatStreamCursor = {
@@ -377,17 +379,20 @@ function parseMessage(value: unknown): ChatMessage | null {
       "undo",
       "attachments",
       "error",
+      "thinkingMs",
     ])
   ) {
     return null;
   }
 
-  const { approvals, content, createdAt, id, role, status, steps, thinking, undo } = value;
+  const { approvals, content, createdAt, id, role, status, steps, thinking, thinkingMs, undo } =
+    value;
   if (
     !isSafeInteger(id) ||
     !isMessageRole(role) ||
     typeof content !== "string" ||
     !isMessageThinking(thinking, role) ||
+    !isMessageThinkingMs(thinkingMs, role) ||
     !isDeliveryStatus(status) ||
     !isSafeInteger(createdAt) ||
     !isMessageUndo(undo, role)
@@ -422,6 +427,7 @@ function parseMessage(value: unknown): ChatMessage | null {
     undo,
     attachments,
     error,
+    thinkingMs,
   };
 }
 
@@ -433,6 +439,11 @@ function isMessageUndo(value: unknown, role: ChatMessageRole): value is ChatUndo
 /** A string or null on assistant messages; a user message never carries thinking. */
 function isMessageThinking(value: unknown, role: ChatMessageRole): value is string | null {
   return value === null || (role === "assistant" && typeof value === "string");
+}
+
+/** Null, or a non-negative safe integer on an assistant message; a user message reads null. */
+function isMessageThinkingMs(value: unknown, role: ChatMessageRole): value is number | null {
+  return value === null || (role === "assistant" && isSafeInteger(value) && value >= 0);
 }
 
 /** Strictly ascending, duplicate-free ids; a user message never carries approvals. */

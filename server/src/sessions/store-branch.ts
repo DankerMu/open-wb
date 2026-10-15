@@ -17,6 +17,8 @@ export type MessageDbRow = ErrorColumns & {
   thinking: Uint8Array | null;
   /** Bare column: whatever storage class it holds is judged by `parseAttachments`. */
   attachments: unknown;
+  /** Bare column (044, no CHECK): judged by `thinkingMsOf`. */
+  thinking_ms: unknown;
 };
 
 /** The three error columns (migration 043) as SQLite returned them: any storage class a hand edit left. */
@@ -40,7 +42,7 @@ export type StepDbRow = {
 };
 
 export const MESSAGE_COLUMNS =
-  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments, error_reason, error_status, CAST(error_detail AS BLOB) AS error_detail";
+  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments, error_reason, error_status, CAST(error_detail AS BLOB) AS error_detail, thinking_ms";
 export const STEP_COLUMNS =
   "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at, CAST(s.changes AS BLOB) AS changes";
 export const INSERT_MESSAGE =
@@ -77,7 +79,24 @@ export function toMessageView(
     createdAt: Number(row.created_at),
     attachments: parseAttachments(row.attachments),
     error: messageError(row.role, row, decoder),
+    thinkingMs: thinkingMsOf(row.role, row.thinking_ms),
   };
+}
+
+/**
+ * The snapshot's `thinkingMs` (#910, thinking-fold「思考时长记录与下发」): an assistant row's
+ * `thinking_ms`; null for a user row and for NULL. 044 has no CHECK, so a value only a hand edit
+ * leaves (negative, fractional, text) also reads null rather than one the strict web decoder
+ * would reject the whole snapshot for (读代码推出: the spans write only `Math.round` of a
+ * `max(0, …)` sum).
+ */
+function thinkingMsOf(role: MessageRole, value: unknown): number | null {
+  return role === "assistant" &&
+    typeof value === "number" &&
+    Number.isSafeInteger(value) &&
+    value >= 0
+    ? value
+    : null;
 }
 
 /**
@@ -228,7 +247,7 @@ const FORK_SESSION =
 const FORK_HISTORY =
   "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
 const FORK_MESSAGE =
-  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail) SELECT ?, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail FROM chat_messages WHERE id = ?";
+  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms) SELECT ?, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms FROM chat_messages WHERE id = ?";
 const FORK_STEPS =
   "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at, changes) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at, changes FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
 const FORK_APPROVALS =

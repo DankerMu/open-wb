@@ -6,8 +6,8 @@
  * children, real SQLite, REST and SSE, on the injected clock. Oracles: the recorded onEvent
  * stream, the raw `chat_messages.thinking_ms` column (read inside the publication where the order
  * of the write matters), SSE bytes, and a second store opened over the same rows for the startup
- * reconciliation a restarted host runs. The snapshot `thinkingMs` key is slice 3c's; here the
- * column stands in for it.
+ * reconciliation a restarted host runs; slice 3c adds the snapshot `thinkingMs` key, read over the
+ * history route across two spans.
  */
 import { mkdirSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -326,6 +326,76 @@ describe("thinking-fold 中断后无法恢复（启动对账一半）", () => {
       expect(events(world)).toEqual(leading);
       expect(thinkingMs(world.fixture.db, assistant)).toBeNull();
       expect(world.errors).toContain(error);
+    },
+  );
+});
+
+/** The snapshot's `[role, thinkingMs]` of every message, read over the history route. */
+async function snapshotDurations(world: RecordingWorld): Promise<Array<[string, unknown]>> {
+  const history = await world.fixture.app.inject({
+    method: "GET",
+    url: `/api/sessions/${world.session}/messages`,
+    headers: { cookie: world.cookie },
+  });
+  expect(history.statusCode).toBe(200);
+  const { messages } = history.json() as { messages: Array<{ role: string; thinkingMs: unknown }> };
+  return messages.map((message) => [message.role, message.thinkingMs]);
+}
+
+describe("thinking-fold 多段思考累计（快照，#910 slice 3c）", () => {
+  it(
+    "500 ms, a 3000 ms tool, 700 ms: the snapshot reads 500, null inside the second span, then 1200",
+    REAL,
+    async () => {
+      const { world, child } = await openThinkingChild();
+      await prompted(world);
+      await waitForEvent(world, "thinking.delta");
+      expect(await snapshotDurations(world)).toEqual([
+        ["user", null],
+        ["assistant", null],
+      ]);
+      world.clock.advance(500);
+      child().emitLine(THINKING_END);
+      await waitForEvent(world, "thinking.end");
+      expect(await snapshotDurations(world)).toEqual([
+        ["user", null],
+        ["assistant", 500],
+      ]);
+
+      child().emitLine({
+        type: "tool_execution_start",
+        toolCallId: "call-1",
+        toolName: "bash",
+        args: { command: "ls" },
+      });
+      world.clock.advance(3000);
+      child().emitLine({
+        type: "tool_execution_end",
+        toolCallId: "call-1",
+        toolName: "bash",
+        result: { content: [{ type: "text", text: "ok" }] },
+      });
+      child().emitLine(thinkingFrame("再想"));
+      await waitForEvent(world, "thinking.delta", 2);
+      // The second span's opening cleared the column: mid-span the snapshot reads null.
+      expect(await snapshotDurations(world)).toEqual([
+        ["user", null],
+        ["assistant", null],
+      ]);
+
+      world.clock.advance(700);
+      child().emitLine(THINKING_END);
+      child().emitLine(update({ type: "text_delta", delta: "答" }));
+      child().emitLine({ type: "agent_end", messages: [], isTerminal: true });
+      await waitForTurn(world.fixture, world.session, "done");
+      expect(ofType(sessionEvents(world), "thinking.end").map((e) => e.data.thinkingMs)).toEqual([
+        500, 1200,
+      ]);
+      expect(await snapshotDurations(world)).toEqual([
+        ["user", null],
+        ["assistant", 1200],
+      ]);
+      expect(world.errors).toEqual([]);
     },
   );
 });

@@ -184,6 +184,7 @@ describe("session REST", () => {
             steps: [],
             thinking: null,
             error: null,
+            thinkingMs: null,
           },
           {
             id: second.userMessageId,
@@ -224,6 +225,7 @@ describe("session REST", () => {
             ],
             thinking: null,
             error: null,
+            thinkingMs: null,
           },
         ],
         streamCursor: { epoch: 1, seq: null },
@@ -764,6 +766,7 @@ describe("session REST", () => {
               steps: [],
               thinking: null,
               error: null,
+              thinkingMs: null,
             },
             {
               id: body.userMessageId,
@@ -785,6 +788,7 @@ describe("session REST", () => {
               steps: [],
               thinking: null,
               error: null,
+              thinkingMs: null,
             },
           ],
           streamCursor: { epoch: 0, seq: null },

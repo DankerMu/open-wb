@@ -120,7 +120,7 @@ Minimal mergeable slice（2b）: atomic - 2.3、2.4b、2.5 是同一个行为变
 
 ## 3. thinking-fold / chat-sessions / chat-web — 思考时长
 
-- [ ] 3.1 开工核对：
+- [x] 3.1 开工核对：
   - 重读 043 迁移与它的测试；
   - 重读四处精确列清单夹具：`server/test/core-db-message-error.test.ts:96-98`、`core-db-chat-schema.test.ts:304-316`、`core-db-session-fixture.ts:69-81`、`migration-034.test.ts:120-132`；
   - 重读 `store.ts` 的 `MESSAGE_COLUMNS` / `getMessages`、`store-branch.ts:43,231` 的拷贝列清单、`rest.ts` 的快照形状；
@@ -163,7 +163,7 @@ Minimal mergeable slice（3a）: atomic - 一个迁移文件及其测试。
 Suggested fixture level（3b）: expanded - 新的公开事件、开段 / 闭段写库与 pump 读帧，跨持久化与次序两类风险。
 Minimal mergeable slice（3b）: atomic - 开段清空、闭段写列与发布 `thinking.end` 是同一段的生命周期。只做一端，要么列值永远是 NULL，要么残留旧值、违背 O3。
 
-- [ ] 3.4 **3c**：服务端快照与 web 契约同刀。消息 DTO 是严格键集，见 chat-web「API 客户端扩展」#910 段。
+- [x] 3.4 **3c**：服务端快照与 web 契约同刀。消息 DTO 是严格键集，见 chat-web「API 客户端扩展」#910 段。
   - **服务端**：
     - 快照的 `MessageView` 加 `thinkingMs`，按 chat-sessions「会话 REST」改写后的形状输出，`store.ts` ≤ 795 行；
     - fork 拷贝 `thinking_ms`（`store-branch.ts` 的列清单）；

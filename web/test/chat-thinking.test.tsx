@@ -65,6 +65,7 @@ function assistant(id: number, status: Status, fields: Partial<Message> = {}): M
     undo: null,
     attachments: [],
     error: null,
+    thinkingMs: null,
   };
   return { id, role: "assistant", status, ...base, ...fields };
 }
@@ -279,6 +280,8 @@ describe("thinking snapshot mapping and reduction", () => {
       approvals: [],
       error: null,
       retrying: false,
+      thinkingMs: null,
+      thinkingActive: true,
     });
     expect(next.status).toBe("done");
     expect(next.messages[0]).toBe(state.messages[0]);

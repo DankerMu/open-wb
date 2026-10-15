@@ -69,6 +69,7 @@ function snapshotFor(session: ChatSession, content: string): ChatMessageSnapshot
         steps: [],
         thinking: null,
         error: null,
+        thinkingMs: null,
       },
     ],
     streamCursor: { epoch: 1, seq: 0 },

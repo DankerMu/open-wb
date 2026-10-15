@@ -88,6 +88,7 @@ export function assistantMessage(
     steps: [],
     approvals: [],
     error: null,
+    thinkingMs: null,
     ...fields,
   };
 }

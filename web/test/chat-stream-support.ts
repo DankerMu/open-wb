@@ -32,6 +32,7 @@ export const historyUser = {
   createdAt: -1,
   steps: [] as [],
   error: null,
+  thinkingMs: null,
 };
 
 export const userView = {
@@ -46,6 +47,8 @@ export const userView = {
   thinking: null,
   error: null,
   retrying: false,
+  thinkingMs: null,
+  thinkingActive: false,
 };
 
 export function runningSession(status: "idle" | "running" | "done" | "failed" = "running") {
@@ -89,6 +92,7 @@ export function chatSnapshot(
         steps: options.steps ?? [],
         thinking: null,
         error: null,
+        thinkingMs: null,
       },
     ],
     streamCursor: options.cursor ?? { epoch: 1, seq: 0 },

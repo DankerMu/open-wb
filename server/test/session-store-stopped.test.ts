@@ -191,6 +191,7 @@ describe("session REST — stopped read-back", () => {
             steps: [],
             thinking: null,
             error: null,
+            thinkingMs: null,
           },
           {
             id: accepted.assistantMessageId,
@@ -214,6 +215,7 @@ describe("session REST — stopped read-back", () => {
             ],
             thinking: null,
             error: null,
+            thinkingMs: null,
           },
         ],
         streamCursor: { epoch: 0, seq: null },
