@@ -228,14 +228,15 @@ afterEach(() => {
 });
 
 describe("fork button: availability", () => {
-  it("F1 puts exactly one enabled 从此处分叉 after 撤回 at the end of every user bubble only", async () => {
+  it("F1 puts exactly one enabled 从此处分叉 after 复制 and 撤回 at the end of every user message only", async () => {
     await mount(S);
     const users = userArticles();
     expect(users).toHaveLength(2);
     for (const user of users) {
       const button = forkButton(user);
+      const copy = within(user).getByRole("button", { name: "复制" });
       const undo = within(user).getByRole("button", { name: "撤回" });
-      expect(within(user).getAllByRole("button")).toEqual([undo, button]);
+      expect(within(user).getAllByRole("button")).toEqual([copy, undo, button]);
       expect(button.disabled).toBe(false);
       expect(button.type).toBe("button");
       expect(button.title).toBe(FORK_LABEL);

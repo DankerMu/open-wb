@@ -3,6 +3,11 @@
 // 这里的 props 决定，不读运行时的可见性。不用 `ActionBarPrimitive.Copy` / `Reload`：前者复制的是运行时
 // 拼出的文本且吞掉失败（没有就地提示的出口），后者的禁用条件来自运行时而不是输入框锁定。
 // 不渲染编辑、分支切换与附件。不弹轻提示。
+// 显隐（issue 908，design D3、D4）：能悬停的设备（`(hover: hover)`）上行缺省 `opacity-0`，悬停本条消息
+// （根元素 `article` 是具名组 `group/message`，具名是为了不被祖先的组串到）、行内有焦点或有 `复制失败`
+// 时 `opacity-100`；不能悬停的设备不命中隐藏，行常显。只改不透明度：行仍占位，按钮仍在 Tab 顺序与无障碍
+// 树里——不用 `hidden` / `invisible` / `aria-hidden` / `inert` / `tabindex`，也不开 `ActionBarPrimitive`
+// 的自动隐藏（它让按钮不可聚焦）。`transition-opacity` 在减少动态效果下由 theme.css 的全局规则置零。
 import { ActionBarPrimitive } from "@assistant-ui/react";
 import { Undo2 } from "lucide-react";
 import { type ReactNode, useId } from "react";
@@ -15,7 +20,10 @@ const ACTION_BUTTON =
 
 function Row({ children }: { children: ReactNode }) {
   return (
-    <ActionBarPrimitive.Root className="mt-2 flex items-center gap-0.5" data-slot="message-actions">
+    <ActionBarPrimitive.Root
+      className="mt-2 flex items-center gap-0.5 transition-opacity group-hover/message:opacity-100 focus-within:opacity-100 has-[[role=alert]]:opacity-100 [@media(hover:hover)]:opacity-0"
+      data-slot="message-actions"
+    >
       {children}
     </ActionBarPrimitive.Root>
   );
@@ -153,24 +161,35 @@ function UndoAction({
 }
 
 /**
- * 用户消息的操作行：`撤回`、`从此处分叉`，依此次序。`onUndo` 收到被点的按钮（冲突对话框关闭后焦点
- * 还给它）；两个回调都自行落定每个分支，从不 reject。`undo` 为 null（不是用户消息的数据）时没有 `撤回`。
+ * 用户消息的操作行：`复制`（文本非空时）、`撤回`、`从此处分叉`，依此次序；`archived` 时只有 `复制`。
+ * `disabled`（输入框锁定）只禁用后两个。`onUndo` 收到被点的按钮（冲突对话框关闭后焦点还给它）；两个
+ * 回调都自行落定每个分支，从不 reject。`undo` 为 null（不是用户消息的数据）时没有 `撤回`。行里一个按钮
+ * 都没有（归档且文本为空）时由调用方不渲染这一行。
  */
 export function UserActions({
+  archived,
   disabled,
   onFork,
   onUndo,
+  text,
   undo,
 }: {
+  archived: boolean;
   disabled: boolean;
   onFork(): void;
   onUndo(trigger: HTMLElement): void;
+  text: string;
   undo: ChatMessageCustom["undo"];
 }) {
   return (
     <Row>
-      {undo === null ? null : <UndoAction disabled={disabled} onUndo={onUndo} undo={undo} />}
-      <ActionButton disabled={disabled} icon="git-branch" label="从此处分叉" onClick={onFork} />
+      {text === "" ? null : <CopyAction text={text} />}
+      {archived || undo === null ? null : (
+        <UndoAction disabled={disabled} onUndo={onUndo} undo={undo} />
+      )}
+      {archived ? null : (
+        <ActionButton disabled={disabled} icon="git-branch" label="从此处分叉" onClick={onFork} />
+      )}
     </Row>
   );
 }

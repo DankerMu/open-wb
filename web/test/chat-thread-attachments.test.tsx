@@ -111,11 +111,20 @@ function listed(article: HTMLElement) {
     .map((item) => item.textContent);
 }
 
-/** 只有附件的气泡：根元素与操作行照旧，除列表项 `item` 外没有任何文字，也没有文本块。 */
+/**
+ * 只有附件的气泡：根元素与操作行照旧，除列表项 `item` 外没有任何文字，也没有文本块；气泡里只有列表，
+ * 操作行在气泡之外、没有 `复制`。
+ */
 function expectAttachmentOnly(item: string) {
   const article = userBubble();
   expect(article.getAttribute("data-message-id")).toBe(String(historyUser.id));
   expect(listed(article)).toEqual([item]);
+  const bubble = article.querySelector('[data-slot="message-bubble"]') as HTMLElement;
+  expect(Array.from(bubble.children, (child) => child.getAttribute("data-slot"))).toEqual([
+    "message-attachments",
+  ]);
+  expect(bubble.querySelector('[data-slot="message-actions"]')).toBeNull();
+  expect(article.lastElementChild?.getAttribute("data-slot")).toBe("message-actions");
   expect(body(article)).toBeNull();
   expect(article.querySelector("p")).toBeNull();
   expect(article.textContent).toBe(item);
@@ -146,11 +155,13 @@ describe("受理后与刷新后一致", () => {
     expect(within(list).queryAllByRole("link")).toEqual([]);
     expect(within(list).queryAllByRole("button")).toEqual([]);
     expect(list.querySelector("a, button, [title]")).toBeNull();
-    // 文本在上，列表在下，操作行在最后。
-    expect(Array.from(article.children, (child) => child.getAttribute("data-slot"))).toEqual([
+    // 气泡里文本在上、列表在下；操作行在气泡之后（issue 908：行出气泡）。
+    const slots = (element: Element) =>
+      Array.from(element.children, (child) => child.getAttribute("data-slot"));
+    expect(slots(article)).toEqual(["message-bubble", "message-actions"]);
+    expect(slots(article.querySelector('[data-slot="message-bubble"]') as Element)).toEqual([
       "message-body",
       "message-attachments",
-      "message-actions",
     ]);
   }
 

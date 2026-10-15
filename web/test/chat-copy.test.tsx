@@ -280,11 +280,15 @@ describe("(C4) render conditions", () => {
       article.querySelector('[data-slot="message-content"] > [data-slot="tool-group-root"]'),
     ).not.toBeNull();
     expect(article.querySelector('[data-slot="message-content"]')?.lastElementChild).toBe(actions);
+    // 用户消息也有 `复制`（issue 908；用户消息的复制见 chat-message-actions.test.tsx）。
     const user = screen.getByRole("article", { name: "用户" });
-    expect(within(user).queryByRole("button", { name: "复制" })).toBeNull();
     expect(user.querySelector(ROW)?.classList.contains("mt-2")).toBe(true);
     const userButtons = within(user).getAllByRole("button");
-    expect(userButtons.map((b) => b.getAttribute("aria-label"))).toEqual(["撤回", "从此处分叉"]);
+    expect(userButtons.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "复制",
+      "撤回",
+      "从此处分叉",
+    ]);
   });
 });
 
