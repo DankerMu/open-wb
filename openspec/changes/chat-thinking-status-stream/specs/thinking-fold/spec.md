@@ -77,7 +77,7 @@ SessionSupervisor SHALL 用 chat-stream「正文与思考增量的时间窗合�
 
 #### Scenario: 思考的逐字展开
 - **WHEN** 非减少动态效果下，一条 running 助手消息的折叠块展开着，收到一条 200 字的 `thinking.delta`
-- **THEN** 主体显示的文本在此后的若干帧中由短到长增长，每一帧都是已收到 thinking 的前缀，至多约 250ms 后等于已收到的全文
+- **THEN** 主体显示的文本在此后的若干帧中由短到长增长，每一帧都是已收到 thinking 的前缀，在有限时间内等于已收到的全文（时长按 chat-web「正文逐字展开」的间隔规则，积压越多越快）
 - **WHEN** 该消息在主体尚未显示全文时进入终态；另一例在 `prefers-reduced-motion: reduce` 下收到同一条 `thinking.delta`
 - **THEN** 前者终态后立即显示全文；后者收到后立即显示全文
 
