@@ -143,15 +143,21 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
           omp_session_file: "/tmp/open-wb-fake-session.jsonl",
           stream_epoch: 1,
         });
+        // #910: fake-omp's three text frames arrive at one injected instant; the first is
+        // published at once, the other two as one, flushed by the step.start.
         expect(eventsFor(events, session).map((entry) => entry.event.type)).toEqual([
           "turn.start",
-          "text.delta",
           "text.delta",
           "text.delta",
           "step.start",
           "step.end",
           "turn.end",
         ]);
+        expect(
+          eventsFor(events, session).flatMap(({ event }) =>
+            event.type === "text.delta" ? [event.data.delta] : [],
+          ),
+        ).toEqual(["Hello ", "from fake-omp"]);
         expect(terminalStates).toEqual(["done"]);
 
         const firstCall = requiredCall(runtime.calls, 0);

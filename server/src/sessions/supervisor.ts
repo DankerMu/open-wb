@@ -1,6 +1,7 @@
 /**
- * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle. #910: thinking deltas
- * go through the per-slot delta coalescer (delta-coalescer.ts), flushed before any other event.
+ * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle. #910: text and
+ * thinking deltas go through the per-slot delta coalescer (delta-coalescer.ts), flushed before any
+ * other event.
  */
 import { availableParallelism } from "node:os";
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
@@ -173,7 +174,14 @@ export class SessionSupervisor {
     });
     this.#deltas = new DeltaCoalescer({
       clock,
-      save: { thinking: (messageId, chunk) => this.#store.appendThinking(messageId, chunk) },
+      save: {
+        thinking: (messageId, chunk) => this.#store.appendThinking(messageId, chunk),
+        // The store's text buffer (flush unchanged); its boolean is ignored, as persistEvent did.
+        text: (messageId, chunk) => {
+          this.#store.appendDelta(messageId, chunk);
+          return chunk;
+        },
+      },
       publish: (slot, event, generation) => this.#pushNow(slot, event, generation),
       fault: (slot, error) => this.#faultSlot(slot, error),
     });

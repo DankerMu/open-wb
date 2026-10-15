@@ -97,7 +97,7 @@ Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半�
 Suggested fixture level（2a）: expanded - 改的是发布次序与落库的交界（并发 / 次序 / 部分输出风险包），回归面是全部思考事件。
 Minimal mergeable slice（2a）: 2.1、2.2、2.4a。合并器只接思考，正文仍逐帧发布；单独合入后思考按新节奏发布、正文不变，全部测试保绿。
 
-- [ ] 2.3 接入正文（2b）：`#commit` 把 `text.delta`（含 `command_output` 映射出的）交给合并器；发布时在同一同步段内 `persistEvent` 并入 ring。2b 合入后 `supervisor.ts` ≤ 780 行。
+- [x] 2.3 接入正文（2b）：`#commit` 把 `text.delta`（含 `command_output` 映射出的）交给合并器；发布时在同一同步段内 `persistEvent` 并入 ring。2b 合入后 `supervisor.ts` ≤ 780 行。
   验证：`server/test/session-delta-coalescing.test.ts`（fake-omp + 注入时钟）覆盖：
   - chat-stream「首段立即、之后按时间窗」：快照与发布内容逐字相同；
   - 「非增量事件前冲刷」：store pending 含 `xy`；
@@ -105,9 +105,9 @@ Minimal mergeable slice（2a）: 2.1、2.2、2.4a。合并器只接思考，正�
   - 「崩溃时的缓冲」两例；
   - 「本地完成路径的冲刷」：fake-omp `slash` 场景下的两段 `command_output`；
   - 停止路径：`turn.end stopped` 之前冲刷。
-- [ ] 2.4b 改写 2.1 清单里**正文类**的既有用例。chat-sessions 的 `Normal actual-child turn`、`Crash with unflushed residual`、`Local command output…` 等场景照旧成立，原断言保留。
+- [x] 2.4b 改写 2.1 清单里**正文类**的既有用例。chat-sessions 的 `Normal actual-child turn`、`Crash with unflushed residual`、`Local command output…` 等场景照旧成立，原断言保留。
   验证：`make check` 全绿；偏离记录逐条列出旧 → 新。
-- [ ] 2.5 官方 omp 取证：
+- [x] 2.5 官方 omp 取证：
   - 新增 `server/test/omp-official-delta-coalescing.test.ts`，经 `server/test/support/omp-official-proxied.ts` 的代理夹具发送含 `WORKBUDDY_PACE` 的 prompt。
   - 断言 omp-test-harness「官方 omp 上的合并取证」里关于 `text.delta` 与 `thinking.delta` 的部分：少于 40 条、首条恰为一个 `字`、拼接逐字相等。`thinking.end` 与 `thinkingMs` 在 3b、3c 追加。
   - 实测 `text.delta` 的实际条数与时长，贴进 PR，不写进断言。

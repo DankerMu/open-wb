@@ -89,7 +89,7 @@ function thinkingOf(db: DatabaseSync, messageId: number): string | null {
   return (row as { thinking: string | null }).thinking;
 }
 
-/** `kinds` limits the save ports: the supervisor of slice 2a passes only `thinking`. */
+/** `kinds` limits the save ports (the supervisor passes both since slice 2b). */
 function openWorld(kinds: DeltaKind[] = ["thinking", "text"], refuse = false): World {
   const { db, messageId } = openMessageDb();
   const clock = createClock();
@@ -173,6 +173,10 @@ function deltas(world: World): string[] {
   return cuts(world).map(([, delta]) => delta);
 }
 
+function deltaOf(event: ChatEvent<number>): string {
+  return event.type === "thinking.delta" || event.type === "text.delta" ? event.data.delta : "";
+}
+
 function points(text: string): number {
   return [...text].length;
 }
@@ -190,7 +194,11 @@ describe("chat-stream 首段立即、之后按时间窗", () => {
       at(world, index * 10);
       expect(send(world, "text", segment)).toBe("taken");
     }
-    at(world, 1000);
+    // agent_end arrives at t=1000, the instant the window ends, before the timer runs: the fifth
+    // publication is the terminal flush, which also clears the armed timer.
+    world.clock.nowMs = 1000;
+    expect(world.clock.pending()).toBe(1);
+    expect(deltas(world)).toHaveLength(4);
     expect(other(world, turnEnd(world))).toBe("pass");
 
     expect(world.published.map(({ at: time }) => time)).toEqual([0, 250, 500, 750, 1000]);
@@ -315,6 +323,35 @@ describe("thinking-fold 字节阈值与时钟阈值", () => {
     ]);
     expect(world.clock.pending()).toBe(0);
   });
+
+  it("held text of one message is published under its own id before another message's text", () => {
+    const world = openWorld();
+    const next = world.messageId + 1;
+    send(world, "text", "旧");
+    send(world, "text", "旧二");
+    expect(world.clock.pending()).toBe(1);
+    expect(send(world, "text", "回", next)).toBe("taken");
+    expect(world.published.map(({ event }) => [event.data.messageId, deltaOf(event)])).toEqual([
+      [world.messageId, "旧"],
+      [world.messageId, "旧二"],
+      [next, "回"],
+    ]);
+    expect(world.clock.pending()).toBe(0);
+  });
+
+  it("a wall clock stepped back between two sends holds the second for at most one window", () => {
+    const world = openWorld();
+    at(world, 1000);
+    send(world, "text", "前");
+    // Stepped back 500 ms: "last publication + 250" would be 750 ms away.
+    world.clock.nowMs = 500;
+    expect(send(world, "text", "后")).toBe("taken");
+    world.clock.advance(WINDOW - 1);
+    expect(deltas(world)).toEqual(["前"]);
+    world.clock.advance(1);
+    expect(deltas(world)).toEqual(["前", "后"]);
+    expect(world.published.map(({ at: time }) => time)).toEqual([1000, 500 + WINDOW]);
+  });
 });
 
 describe("chat-stream 两类交错保持次序", () => {
@@ -345,7 +382,7 @@ describe("chat-stream 两类交错保持次序", () => {
     expect(world.clock.pending()).toBe(0);
   });
 
-  it("a kind without a save port passes through after flushing the held kind (slice 2a text)", () => {
+  it("a kind without a save port passes through after flushing the held kind", () => {
     const world = openWorld(["thinking"]);
     send(world, "thinking", "a");
     send(world, "thinking", "b");
@@ -357,6 +394,58 @@ describe("chat-stream 两类交错保持次序", () => {
     expect(world.texts).toEqual([]);
     expect(world.clock.pending()).toBe(0);
   });
+
+  for (const failure of ["save throws", "publish refuses"] as const) {
+    it(`held text whose flush on a kind switch fails (${failure}): route is false, the thinking is neither saved nor published`, () => {
+      const world = openWorld();
+      const saves: Array<[DeltaKind, string]> = [];
+      const published: string[] = [];
+      const faults: Error[] = [];
+      let failing = false;
+      const coalescer = new DeltaCoalescer({
+        clock: world.clock,
+        save: {
+          text(_id, chunk) {
+            saves.push(["text", chunk]);
+            if (failing && failure === "save throws") {
+              throw new Error("text buffer sentinel");
+            }
+            return chunk;
+          },
+          thinking(_id, chunk) {
+            saves.push(["thinking", chunk]);
+            return chunk;
+          },
+        },
+        publish(_slot, event) {
+          published.push(deltaOf(event));
+          return !(failing && failure === "publish refuses");
+        },
+        fault(_slot, error) {
+          faults.push(error);
+        },
+      });
+      const route = (type: "text.delta" | "thinking.delta", delta: string) =>
+        coalescer.route(world.slot, world.generation, {
+          type,
+          data: { messageId: world.messageId, delta },
+        });
+      expect(route("text.delta", "甲")).toBe("taken");
+      expect(route("text.delta", "乙")).toBe("taken");
+      expect(world.clock.pending()).toBe(1);
+      failing = true;
+      expect(route("thinking.delta", "想")).toBe(false);
+      expect(saves).toEqual([
+        ["text", "甲"],
+        ["text", "乙"],
+      ]);
+      expect(published).toEqual(failure === "save throws" ? ["甲"] : ["甲", "乙"]);
+      expect(faults.map((error) => error.message)).toEqual(
+        failure === "save throws" ? ["text buffer sentinel"] : [],
+      );
+      expect(world.clock.pending()).toBe(0);
+    });
+  }
 });
 
 describe("chat-stream 非增量事件前冲刷", () => {
@@ -545,6 +634,30 @@ describe("M5 save failure", () => {
     expect(world.published).toEqual([]);
     expect(world.faults).toHaveLength(1);
     expect(world.column()).toBeNull();
+  });
+
+  it("a held chunk whose flush fails faults once and leaves neither the chunk nor its timer", () => {
+    const world = openWorld();
+    send(world, "thinking", "a");
+    send(world, "thinking", "b");
+    expect(world.clock.pending()).toBe(1);
+    world.db.exec(trigger);
+    expect(world.coalescer.flush(world.slot)).toBe(false);
+    expect(world.faults.map(({ error }) => error.message)).toEqual([
+      expect.stringContaining("thinking write sentinel"),
+    ]);
+    expect(deltas(world)).toEqual(["a"]);
+    expect(world.clock.pending()).toBe(0);
+
+    world.db.exec("DROP TRIGGER reject_thinking");
+    expect(world.coalescer.flush(world.slot)).toBe(true);
+    world.clock.advance(5000);
+    expect(world.saves).toEqual([
+      ["thinking", "a"],
+      ["thinking", "b"],
+    ]);
+    expect(deltas(world)).toEqual(["a"]);
+    expect(world.column()).toBe("a");
   });
 
   it("a timer flush that fails faults from the callback", () => {

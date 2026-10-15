@@ -1,6 +1,6 @@
 /**
- * Issue #519 supervisor thinking merge, on the #910 delta coalescer's 250 ms window (slice 2a:
- * thinking only, text still per frame): production assembly (createApp → registerSessions) over
+ * Issue #519 supervisor thinking merge, on the #910 delta coalescer's 250 ms window (text joins
+ * the same coalescer in slice 2b): production assembly (createApp → registerSessions) over
  * real fake-omp `thinking` children (knobs `--thinking-repeat` / `--hold-after-thinking` appended
  * by a spawn wrapper) or scripted controlled children. Oracles are the recorded onEvent stream,
  * the stream cursor, real SSE bytes and the `chat_messages.thinking` column read directly (the
@@ -37,6 +37,7 @@ import {
   openRecordingSession,
   type RecordingWorld,
   type RuntimeOptions,
+  trackBufferTimers,
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
@@ -49,6 +50,8 @@ const THOUGHT = "先读需求，再列要点，最后作答。";
 const FIRST = "先读需求，";
 const HELD = "再列要点，最后作答。";
 const TEXT_DELTAS = ["Hello ", "from ", "fake-omp"];
+/** The two text frames the coalescer holds after the first (slice 2b). */
+const TEXT_TAIL = TEXT_DELTAS.slice(1).join("");
 /** thinking-fold spec literals. */
 const MARK = "…（已截断）";
 const CAP = 32_768;
@@ -68,29 +71,6 @@ afterEach(async () => {
     await cleanup();
   }
 });
-
-/** Counts only timers ≤ 250 ms; wraps the clock every consumer shares, before the app opens. */
-function trackBufferTimers(clock: TestClock): () => number {
-  const live = new Set<unknown>();
-  const arm = clock.setTimeout.bind(clock);
-  const disarm = clock.clearTimeout.bind(clock);
-  clock.setTimeout = (callback, ms) => {
-    if (ms > WINDOW_MS) {
-      return arm(callback, ms);
-    }
-    const id = arm(() => {
-      live.delete(id);
-      callback();
-    }, ms);
-    live.add(id);
-    return id;
-  };
-  clock.clearTimeout = (id) => {
-    live.delete(id);
-    disarm(id);
-  };
-  return () => live.size;
-}
 
 async function openWorld(
   runtime: RuntimeOptions,
@@ -256,12 +236,11 @@ describe("S1 merge and persist", () => {
       expect(events(world)).toEqual([
         { type: "turn.start", data: { messageId: assistant } },
         { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } },
-        // Slice 2a: the first text.delta flushes the held parts (3b moves this to thinking_end).
+        // The first text delta flushes the held parts (3b moves this to thinking_end).
         { type: "thinking.delta", data: { messageId: assistant, delta: HELD } },
-        ...TEXT_DELTAS.map((delta) => ({
-          type: "text.delta",
-          data: { messageId: assistant, delta },
-        })),
+        // Slice 2b: text is coalesced too; the second and third frames are flushed by turn.end.
+        { type: "text.delta", data: { messageId: assistant, delta: TEXT_DELTAS[0] } },
+        { type: "text.delta", data: { messageId: assistant, delta: TEXT_TAIL } },
         { type: "turn.end", data: { messageId: assistant, status: "done" } },
       ]);
       const epoch = sessionEvents(world)[0]?.epoch;
@@ -317,8 +296,8 @@ describe("S3 cap", () => {
     expect([...(column ?? "")].length).toBe(CAP + [...MARK].length);
     expect(column?.startsWith(THOUGHT.repeat(Math.floor(CAP / [...THOUGHT].length)))).toBe(true);
     expect(world.fixture.supervisor.streamCursor(world.session).seq).toBe(events(world).length);
-    // turn.start, 2 thinking.delta, three text.delta, turn.end.
-    expect(events(world)).toHaveLength(7);
+    // turn.start, 2 thinking.delta, 2 text.delta (the first frame, then the other two), turn.end.
+    expect(events(world)).toHaveLength(6);
     expect(world.errors).toEqual([]);
   });
 });

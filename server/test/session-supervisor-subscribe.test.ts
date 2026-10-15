@@ -13,6 +13,7 @@ import {
   openHeldPromptSession,
   openStartHeldSession,
   startHeldTurn,
+  TEXT_WINDOW_MS,
   waitFor,
   waitForContent,
   waitForTurn,
@@ -26,7 +27,7 @@ describe("SessionSupervisor subscribe replay", () => {
   it("replays retained successors then delivers later live events once", {
     timeout: 15_000,
   }, async () => {
-    const { fixture, session, child } = await openHeldPromptSession();
+    const { runtime, fixture, session, child } = await openHeldPromptSession();
     try {
       expect(fixture.supervisor.streamCursor(session)).toEqual({ epoch: 1, seq: 2 });
 
@@ -42,6 +43,8 @@ describe("SessionSupervisor subscribe replay", () => {
       });
       expect(fixture.supervisor.sessionStreamSubscriberCount(session)).toBe(1);
 
+      // #910: a coalescer window after "Hello", so "!" is published at once as its own delta.
+      runtime.clock.advance(TEXT_WINDOW_MS);
       emitAssistantDelta(child, "!");
       await waitForContent(fixture, session, "Hello!");
       expect(live.map(idOf)).toEqual(["1:3"]);

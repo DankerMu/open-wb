@@ -20,6 +20,7 @@ import {
   openHeldPromptSession,
   type RealFakeRuntime,
   type SupervisorApp,
+  TEXT_WINDOW_MS,
   waitFor,
 } from "./session-supervisor-helpers.js";
 
@@ -141,12 +142,14 @@ export async function openGapBackpressuredStream(): Promise<GapBackpressuredStre
 }
 
 export async function openLiveWriteFalseDelta(holdEnd: boolean) {
-  const { fixture, cookie, session, child } = await openHeldPromptSession();
+  const { runtime, fixture, cookie, session, child } = await openHeldPromptSession();
   try {
     const stream = await openEventStream(fixture, session, cookie, "1:2");
     const observed = observeRaw(stream.raw, { writeFalse: true, holdEnd });
+    // #910: a window after "Hello", so "!" is published at once as its own text.delta.
+    runtime.clock.advance(TEXT_WINDOW_MS);
     emitAssistantDelta(child, "!");
-    return { fixture, session, child, stream, observed };
+    return { runtime, fixture, session, child, stream, observed };
   } catch (error) {
     await closeFixture(fixture);
     throw error;

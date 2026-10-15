@@ -76,8 +76,8 @@ export interface ProxiedApp {
   upstream: FakeUpstreamServer;
   stalled: StalledHandshake;
   cookie: string;
-  /** Every published event of every session, in publication order. */
-  events: Array<{ sessionId: string; event: ChatEvent<number> }>;
+  /** Every published event of every session, in publication order, with its `Date.now()`. */
+  events: Array<{ sessionId: string; event: ChatEvent<number>; at: number }>;
   /** Every frame omp wrote to stdout, across spawns, in arrival order. */
   frames: OmpFrame[];
   log: LogRecord[];
@@ -215,7 +215,7 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
         faults.push(error);
       },
       onEvent: (sessionId, _epoch, event) => {
-        events.push({ sessionId, event });
+        events.push({ sessionId, event, at: Date.now() });
         if (event.type === "approval.request") {
           denied.push(event.data.approvalId);
           // The observer must return synchronously; the answer goes out on the next turn.
