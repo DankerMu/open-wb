@@ -243,6 +243,48 @@ describe("chat-stream 首段立即、之后按时间窗", () => {
       expect(world.errors).toEqual([]);
     },
   );
+
+  it(
+    "an empty command_output publishes nothing yet counts as a publication: output 100 ms later waits until 250",
+    REAL,
+    async () => {
+      // PR deviation D4: the empty segment is no event, but its emission marks the window.
+      const { world, child } = await openScripted((scripted) => {
+        // One stdout chunk, so the empty segment is routed before turn.start is observed.
+        const frames = [{ type: "agent_start" }, { type: "command_output", text: "" }];
+        scripted.emitRaw(frames.map((frame) => `${JSON.stringify(frame)}\n`).join(""));
+      });
+      await prompted(world);
+      await waitForEvent(world, "turn.start");
+      await settle();
+      expect(types(world)).toEqual(["turn.start"]);
+      expect(world.bufferTimers()).toBe(0);
+
+      world.clock.advance(100);
+      child().emitLine({ type: "command_output", text: "输出" });
+      await waitForBufferTimer(world);
+      world.clock.advance(149);
+      await settle();
+      expect(textDeltas(world)).toEqual([]);
+      expect((await snapshotOf(world)).content).toBe("");
+      world.clock.advance(1);
+      await waitForEvent(world, "text.delta");
+      child().emitLine(AGENT_END);
+      await waitForTurn(world.fixture, world.session, "done");
+
+      const assistant = assistantIdFor(world.fixture, world.session);
+      // events.ts: a command_output after the first is "\n" + its text.
+      expect(events(world)).toEqual([
+        { type: "turn.start", data: { messageId: assistant } },
+        { type: "text.delta", data: { messageId: assistant, delta: "\n输出" } },
+        { type: "turn.end", data: { messageId: assistant, status: "done" } },
+      ]);
+      expect(publicationOf(world, "text.delta").map(({ at }) => at)).toEqual([WINDOW_MS]);
+      expect(messageRow(world.fixture.db, assistant).content).toBe("\n输出");
+      expect(world.bufferTimers()).toBe(0);
+      expect(world.errors).toEqual([]);
+    },
+  );
 });
 
 describe("chat-stream 非增量事件前冲刷", () => {
@@ -391,6 +433,43 @@ describe("chat-stream 崩溃时的缓冲", () => {
         "头",
       );
       expect(world.errors).toContain(error);
+    },
+  );
+
+  it(
+    "a shutdown clears the timer at once; the held segment is published before the turn ends",
+    REAL,
+    async () => {
+      const controlled = createControlledRuntime((child) => {
+        closeOnEof(child);
+        child.onCommand("prompt", () => {
+          child.emitLine({ type: "agent_start" });
+          emitText(child, "头", "尾");
+        });
+      });
+      const world = await openWorld(controlled.runtime, true);
+      await prompted(world);
+      await waitForBufferTimer(world);
+      expect(textDeltas(world)).toEqual(["头"]);
+
+      // An ordinary (not infra-fault) retirement, before any terminal: the window no longer ends.
+      const closing = world.fixture.supervisor.shutdown();
+      expect(world.bufferTimers()).toBe(0);
+      world.clock.advance(WINDOW_MS);
+      expect(textDeltas(world)).toEqual(["头"]);
+      await closing.catch(() => undefined);
+
+      const assistant = assistantIdFor(world.fixture, world.session);
+      // The shutdown failure path (chat-stream: graceful shutdown is a terminal) flushes first.
+      expect(textDeltas(world)).toEqual(["头", "尾"]);
+      expect(types(world)).toEqual(["turn.start", "text.delta", "text.delta", "error", "turn.end"]);
+      expect(events(world).at(-1)).toEqual({
+        type: "turn.end",
+        data: { messageId: assistant, status: "failed" },
+      });
+      expect(publicationOf(world, "error").map(({ body }) => body)).toEqual(["头尾"]);
+      expect(messageRow(world.fixture.db, assistant).content).toBe("头尾");
+      expect(world.errors).toEqual([]);
     },
   );
 });

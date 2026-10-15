@@ -273,7 +273,11 @@ describe("SessionSupervisor generation streamCursor", () => {
   it("covers 1000 start-evicted deltas then a 1048-byte flush at cursor 1:1002", {
     timeout: 15_000,
   }, async () => {
-    // #910: each delta in its own coalescer window, so the ring still takes 1001 text.delta.
+    // #910: each delta in its own coalescer window, so the ring still takes 1001 text.delta. The
+    // windows run on the injected clock; the store's 2000 ms flush timer is a global setTimeout,
+    // faked here so the 1001 real-time round trips cannot flush a prefix before the 2048-byte
+    // inline flush the database assertion relies on.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const runtime = createOpenTurnRuntime();
     const opened = { runtime, ...(await openBareSession(runtime.runtime)) };
     const { fixture, cookie, session } = opened;
@@ -310,6 +314,7 @@ describe("SessionSupervisor generation streamCursor", () => {
       expect(body.streamCursor).toEqual({ epoch: 1, seq: 1_002 });
       expect(messageRow(fixture.db, assistantId(fixture, session)).content).toBe(expected);
     } finally {
+      vi.useRealTimers();
       await closeFixture(fixture);
     }
   });
