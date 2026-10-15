@@ -1,7 +1,6 @@
 /**
- * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle. #519: thinking deltas
- * are merged per slot (thinking-buffer.ts) and flushed before any other event of the slot enters
- * the ring.
+ * Issue #100 session supervisor: dispatch, persistence, and owned lifecycle. #910: thinking deltas
+ * go through the per-slot delta coalescer (delta-coalescer.ts), flushed before any other event.
  */
 import { availableParallelism } from "node:os";
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
@@ -9,6 +8,7 @@ import { HttpError } from "../core/errors/index.js";
 import { ApprovalRegistry } from "./approvals.js";
 import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
 import { alignModel, effectiveOf, reusable } from "./composer-align.js";
+import { DeltaCoalescer } from "./delta-coalescer.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SpawnImpl } from "./omp/process.js";
@@ -49,7 +49,6 @@ import {
   SubscriberTable,
   streamCursorOf,
 } from "./supervisor-subscribers.js";
-import { ThinkingBuffers } from "./thinking-buffer.js";
 import type { TokenRegistry } from "./tokens.js";
 import { ControlClaims, drain, persistEvent, TurnStops } from "./turn-control.js";
 import { type UndoRequest, type UndoResult, Undos } from "./undo.js";
@@ -138,7 +137,7 @@ export class SessionSupervisor {
   readonly #spawn: SpawnShared;
   readonly #approvals: ApprovalRegistry;
   readonly #stops: TurnStops;
-  readonly #thinking: ThinkingBuffers;
+  readonly #deltas: DeltaCoalescer;
   readonly #controls = new ControlClaims();
   readonly #regenerations: Regenerations;
   readonly #forks: Forks;
@@ -172,9 +171,9 @@ export class SessionSupervisor {
       publish: (slot, event, generation) => this.#publish(slot, event, generation),
       fault: (slot, error) => this.#faultSlot(slot, error),
     });
-    this.#thinking = new ThinkingBuffers({
+    this.#deltas = new DeltaCoalescer({
       clock,
-      append: (messageId, chunk) => this.#store.appendThinking(messageId, chunk),
+      save: { thinking: (messageId, chunk) => this.#store.appendThinking(messageId, chunk) },
       publish: (slot, event, generation) => this.#pushNow(slot, event, generation),
       fault: (slot, error) => this.#faultSlot(slot, error),
     });
@@ -601,6 +600,8 @@ export class SessionSupervisor {
       ordinal += 1;
       return current;
     };
+    const commit = (events: ChatEvent<string>[]) =>
+      this.#commit(slot, assistantMessageId, events, toolIds, nextOrdinal, generation);
     try {
       for await (const frame of stream) {
         if (slot.infraFaulted) {
@@ -610,14 +611,7 @@ export class SessionSupervisor {
         const applied = applyFrame(mapper, frame);
         mapper = applied.state;
         if (
-          !(await this.#commit(
-            slot,
-            assistantMessageId,
-            applied.events,
-            toolIds,
-            nextOrdinal,
-            generation,
-          )) ||
+          !(await commit(applied.events)) ||
           !(await this.#approvals.publishRequest(slot, frame))
         ) {
           return;
@@ -630,29 +624,13 @@ export class SessionSupervisor {
       if (mapper.ended) {
         return;
       }
-      if (
-        !(await this.#commit(
-          slot,
-          assistantMessageId,
-          [{ type: "turn.end", data: { messageId: assistantMessageId, status: "done" } }],
-          toolIds,
-          nextOrdinal,
-          generation,
-        ))
-      ) {
+      const done = { messageId: assistantMessageId, status: "done" } as const;
+      if (!(await commit([{ type: "turn.end", data: done }]))) {
         return;
       }
     } catch (error) {
       if (!slot.infraFaulted && !mapper.ended) {
-        const applied = this.#failure(mapper, assistantMessageId, error);
-        await this.#commit(
-          slot,
-          assistantMessageId,
-          applied.events,
-          toolIds,
-          nextOrdinal,
-          generation,
-        );
+        await commit(this.#failure(mapper, assistantMessageId, error).events);
       }
       if (!slot.infraFaulted) {
         await this.#retireSlot(slot);
@@ -676,16 +654,11 @@ export class SessionSupervisor {
     generation: Generation | undefined,
   ): Promise<boolean> {
     for (const event of events) {
-      // thinking.delta goes to the slot's buffer, never to persistEvent; any other event (also
-      // files.changed) flushes it first, so a failed flush leaves no stored terminal off the ring.
-      const thinking = event.type === "thinking.delta";
-      const buffered = thinking
-        ? this.#thinking.add(slot, generation, assistantMessageId, event.data.delta)
-        : this.#thinking.flush(slot);
-      if (!buffered) {
-        return false;
-      }
-      if (thinking) {
+      // A coalesced delta never reaches persistEvent; any other event flushes the coalescer first,
+      // so a failed flush leaves no stored terminal off the ring.
+      const routed = this.#deltas.route(slot, generation, event);
+      if (routed !== "pass") {
+        if (routed === false) return false;
         continue;
       }
       try {
@@ -718,17 +691,17 @@ export class SessionSupervisor {
   }
 
   /**
-   * Every non-thinking publication: the slot's buffered thinking is flushed first, in the same
-   * synchronous segment as this event's ring push (no await between them), so a timer or a REST
-   * settlement cannot interleave and the ring keeps the upstream arrival order. A no-op on
-   * the pump path (#commit already flushed); the approval publications rely on it.
+   * Every non-delta publication: the coalescer is flushed first, in the same synchronous segment as
+   * this event's ring push (no await between them), so a timer or a REST settlement cannot
+   * interleave and the ring keeps the upstream arrival order. A no-op on the pump path (#commit
+   * already flushed); the approval publications rely on it.
    */
   async #publish(
     slot: Slot,
     event: ChatEvent<number>,
     generation: Generation | undefined,
   ): Promise<boolean> {
-    if (this.#thinking.flush(slot) && this.#pushNow(slot, event, generation)) {
+    if (this.#deltas.flush(slot) && this.#pushNow(slot, event, generation)) {
       return true;
     }
     await this.#retireSlot(slot);
@@ -773,10 +746,10 @@ export class SessionSupervisor {
       sealGeneration(slot, generation);
     }
     if (slot.infraFaulted) {
-      this.#thinking.discard(slot);
+      this.#deltas.discard(slot);
       for (const error of this.#approvals.abandon(slot)) this.#retain(error);
     } else {
-      this.#thinking.clearTimer(slot);
+      this.#deltas.clearTimer(slot);
     }
     await slot.retiring;
     this.#pool.release(slot.entry);

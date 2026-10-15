@@ -66,13 +66,13 @@ Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半�
 
 ## 2. chat-stream / thinking-fold — 正文与思考共用的 250ms 合并器
 
-- [ ] 2.1 开工核对（2a）：
+- [x] 2.1 开工核对（2a）：
   - 重读 `server/src/sessions/supervisor.ts`：`#commit`（`:672-715`）、`#publish`（`:721-735`）、`#retireSlot`，以及 pump 读帧处（`:610-625`）；
   - 重读 `thinking-buffer.ts` 全文、`turn-control.ts:236-244` 的 `persistEvent`、`store.ts:522-542` 的 `appendDelta`；
   - 用 `grep -rn '"text.delta"\|"thinking.delta"\|thinking-buffer' server/test` 找出所有断言条数或逐条内容的既有用例，按思考、正文两类分列，作为 2.4a 与 2.4b 的改写清单。
 
   验证：清单与核对结果写进 PR。
-- [ ] 2.2 新建 `server/src/sessions/delta-coalescer.ts`，实现 chat-stream「正文与思考增量的时间窗合并」：
+- [x] 2.2 新建 `server/src/sessions/delta-coalescer.ts`，实现 chat-stream「正文与思考增量的时间窗合并」：
   - **规则**：前沿发布、250ms 时间窗、一次只缓冲一类、换类时冲刷、非增量事件前冲刷、终态前冲刷、注入时钟。
   - **对外接口**：增量分派、`flush`、`discard`、`clearTimer`。
   - **发布端口**：按类别分两条。
@@ -86,7 +86,7 @@ Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半�
   - chat-stream「首段立即、之后按时间窗」「两类交错保持次序」「非增量事件前冲刷」中增量的切分与先后；
   - thinking-fold「字节阈值与时钟阈值」，以及「上限与截断标记」的落库前缀；
   - 发布失败返回 false 且不推进；`discard` 之后不再发布。
-- [ ] 2.4a 改写 2.1 清单里**思考类**的既有用例：
+- [x] 2.4a 改写 2.1 清单里**思考类**的既有用例：
   - 原 `thinking-buffer.test.ts` 的 M1–M7 逐条迁移到 2.2 的测试文件。M1 字节阈值改为「不设字节阈值」，其余各条按「通用纪律」三种改法之一处理。
   - `server/test/session-thinking.test.ts` 等 supervisor 级用例按新节奏改写，并覆盖 thinking-fold「合并与落库」「回放与刷新」：
     - 前沿发一条，其余在下一个非思考事件（正文到达）前冲刷为一条（2a 尚无 `thinking_end` 闭段，3b 起冲刷时刻提前到 `thinking_end`）；
