@@ -11,6 +11,9 @@ const WALK_MARKER = "WORKBUDDY_UI_WALK:";
 const THINK_MARKER = "WORKBUDDY_THINK";
 const WRITE_MARKER = "WORKBUDDY_WRITE";
 const TODO_MARKER = "WORKBUDDY_TODO";
+const HOLD_AT_MARKER = "WORKBUDDY_HOLD_AT:";
+/** Hold points of `WORKBUDDY_HOLD_AT:<point>` (issue 1440); any other value is ignored. */
+const HOLD_POINTS = new Set(["empty"]);
 const TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
 const REPLY_PARTS = ["你好，", "这是 WorkBuddy 的", "第一条流式回复。"];
 const THINK_PARTS = ["先读需求，", "再列要点，", "最后作答。"];
@@ -205,7 +208,7 @@ function serveFinal(response, gates, messages, id, created, model) {
     return;
   }
   if (gate !== undefined && gate.phase === "armed") {
-    holdFinal(response, gates, walkId, id, created, model, think);
+    holdFinal(response, gates, walkId, id, created, model, think, holdPointOf(text));
     return;
   }
   reply();
@@ -335,26 +338,24 @@ function releaseHeld(controlResponse, gates, id) {
   writeJson(controlResponse, 200, { phase: "released" });
 }
 
-function holdFinal(response, gates, walkId, completionId, created, model, think) {
+/**
+ * Splits the unchanged answering frames at the hold point: the prefix is written now, the rest is
+ * kept for `releaseHeld`. Without a hold point the prefix runs to the first content chunk;
+ * `empty` stops after the role chunk.
+ */
+function holdFinal(response, gates, walkId, completionId, created, model, think, point) {
   const gate = gates.get(walkId);
   if (gate === undefined || gate.phase !== "armed") {
     writeSse(response, textFrames(completionId, created, model, think));
     return;
   }
-  const remaining = [];
-  for (let index = 1; index < REPLY_PARTS.length; index += 1) {
-    remaining.push(chunk(completionId, created, model, { content: REPLY_PARTS[index] }, null));
-  }
-  remaining.push(chunk(completionId, created, model, {}, "stop"));
+  const frames = textFrames(completionId, created, model, think);
+  const cut = point === "empty" ? 1 : 1 + (think ? THINK_PARTS.length : 0) + 1;
   gate.phase = "held";
   gate.response = response;
-  gate.remaining = remaining;
+  gate.remaining = frames.slice(cut);
   writeSseHeaders(response);
-  writeSseFrames(response, [
-    chunk(completionId, created, model, { role: "assistant" }, null),
-    ...thinkFrames(completionId, created, model, think),
-    chunk(completionId, created, model, { content: REPLY_PARTS[0] }, null),
-  ]);
+  writeSseFrames(response, frames.slice(0, cut));
   const onClose = () => {
     if (response.writableEnded) {
       return;
@@ -407,6 +408,20 @@ function lastUserTextFrom(messages) {
     return userText(message.content);
   }
   return "";
+}
+
+/**
+ * `WORKBUDDY_HOLD_AT:<point>`: the value runs from the colon to the next whitespace (`\s`, so also
+ * U+3000) or the end of the text, and counts only when it is exactly a known point. The first
+ * occurrence decides (no spec sentence covers several; this fixture's choice).
+ */
+function holdPointOf(text) {
+  const index = text.indexOf(HOLD_AT_MARKER);
+  if (index === -1) {
+    return undefined;
+  }
+  const [value] = text.slice(index + HOLD_AT_MARKER.length).split(/\s/u, 1);
+  return HOLD_POINTS.has(value) ? value : undefined;
 }
 
 function walkGateId(text) {

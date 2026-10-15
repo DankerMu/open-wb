@@ -190,12 +190,12 @@ Minimal mergeable slice（3c）: atomic - 快照键与 web 的严格解析必须
 
 ## 4. omp-test-harness — 闸门停点 `WORKBUDDY_HOLD_AT` 与长思考 `WORKBUDDY_THINK_LONG`
 
-- [ ] 4.1 开工核对：
+- [x] 4.1 开工核对：
   - 重读 `fake-upstream.mjs` 的 `holdFinal`（`:325-357`）、`releaseHeld`（`:297-323`）与 `thinkFrames`；
   - 确认停点只影响两件事：停住前写出哪些帧，`remaining` 里放哪些帧。
 
   验证：核对结果写进 PR。
-- [ ] 4.2 **4a**：实现 `WORKBUDDY_HOLD_AT:empty`，并定好 `<point>` 的取值边界：
+- [x] 4.2 **4a**：实现 `WORKBUDDY_HOLD_AT:empty`，并定好 `<point>` 的取值边界：
   - `<point>` 取到空白字符或文本末尾为止；
   - 取值非法、或请求没有已武装闸门时，输出逐字节不变；
   - 放行仍只能一次，TTL 与 409 规则不变。
