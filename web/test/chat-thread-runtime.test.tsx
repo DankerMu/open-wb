@@ -232,7 +232,9 @@ describe("会话页：首次发送前不出现占位助手块", () => {
     await waitFor(() => expect(assistants()).toHaveLength(1));
     expect(assistants()[0]?.getAttribute("data-message-id")).toBe("0");
     expect(screen.getAllByRole("article")).toHaveLength(2);
-    expect(document.querySelectorAll(CARET)).toHaveLength(1);
+    // turn.start 给出的助手消息还没有内容：运行指示是等待指示，不是小圆点（issue 1446），恰一个。
+    expect(document.querySelectorAll(CARET)).toHaveLength(0);
+    expect(document.querySelectorAll('[data-slot="message-waiting"]')).toHaveLength(1);
     expectLockedAndGenerating();
   });
 });
