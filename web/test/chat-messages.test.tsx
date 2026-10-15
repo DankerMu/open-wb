@@ -87,8 +87,8 @@ describe("(M2) user bubble keeps the raw text", () => {
   });
 });
 
-describe("(M3) streaming caret lifecycle", () => {
-  it("shows a trailing decorative caret while running and drops it at done", async () => {
+describe("(M3) streaming dot lifecycle", () => {
+  it("shows a trailing decorative pulsing dot while running and drops it at done", async () => {
     mountSnapshot(
       chatSnapshot({
         content: "# 进行中\n\n正文",
@@ -104,7 +104,15 @@ describe("(M3) streaming caret lifecycle", () => {
     expect(caret?.tagName).toBe("SPAN");
     expect(caret?.matches(CARET)).toBe(true);
     expect(caret?.getAttribute("aria-hidden")).toBe("true");
-    // 减少动态效果时不闪：工具类在这里，计算样式 `animation-name: none` 由 ui-walk 断言。
+    // 小圆点（design D6）：jsdom 不加载样式表、不算计算样式，这里只钉工具类——圆形取 `50%` 是为了让
+    // 计算 `border-radius` 恰为 `50%`（实测：Tailwind 4 的 rounded-full 计算为极大的像素值）；计算样式的
+    // `border-radius: 50%` 与 `animation-name` 由 ui-walk 在真实浏览器断言。
+    const classes = [...(caret?.classList ?? [])];
+    expect(classes).toEqual(expect.arrayContaining(["size-2", "rounded-[50%]", "animate-pulse"]));
+    expect(classes).not.toContain("animate-caret-blink");
+    expect(classes.filter((name) => name.startsWith("rounded"))).toEqual(["rounded-[50%]"]);
+    expect(classes).toContain("bg-(--wb-brand-primary)");
+    // 减少动态效果时无动画：工具类在这里，计算样式 `animation-name: none` 由 ui-walk 断言。
     expect(caret?.classList.contains("motion-reduce:animate-none")).toBe(true);
 
     await waitFor(() => expect(latestSource().url).toBe(`/api/sessions/${SESSION_ID}/events`));
@@ -121,7 +129,7 @@ describe("(M3) streaming caret lifecycle", () => {
     expect(await within(article).findByText("正文！", exactText)).toBeTruthy();
   });
 
-  it("shows no caret on a failed assistant turn", async () => {
+  it("shows no dot on a failed assistant turn", async () => {
     mountSnapshot(
       chatSnapshot({
         status: "failed",

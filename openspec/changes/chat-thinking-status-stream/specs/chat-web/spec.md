@@ -267,7 +267,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 
 **等待指示与小圆点**：运行中的助手消息 SHALL 恰好显示二者之一，进入终态后二者都不显示。
 - **等待指示**：消息 running 且还没有任何可见块——`thinking` 为 `null` 或空串、正文为空、没有步骤、没有已结算审批、`error` 为 `null` 且不在重试中——时，SHALL 在正文的位置显示一行 `role="status"`、可见文本为 `正在思考…` 的等待指示（`data-slot="message-waiting"`），带流光；`prefers-reduced-motion: reduce` 下流光动画暂停。任一可见块出现后它 SHALL 消失，同一回合不再出现。不区分模型是否支持推理。
-- **小圆点**：消息 running 且已有可见块时，SHALL 在正文最后一个字符之后显示一个小圆点（`data-slot="message-caret"`、`aria-hidden`，计算样式 `border-radius` 为 50%），非减少动态效果时带动画（计算样式 `animation-name` 不为 `none`）；`prefers-reduced-motion: reduce` 下无动画（`animation-name` 为 `none`）。可观察量由 ui-walk 在真实浏览器里断言。
+- **小圆点**：消息 running 且已有可见块时，SHALL 在正文之后、今天方块光标所在的位置（`MarkdownBody` 之后）显示一个小圆点（`data-slot="message-caret"`、`aria-hidden`，计算样式 `border-radius` 为 50%），非减少动态效果时带动画（计算样式 `animation-name` 不为 `none`）；`prefers-reduced-motion: reduce` 下无动画（`animation-name` 为 `none`）。可观察量由 ui-walk 在真实浏览器里断言。
 
 **正文逐字展开**：运行中、非减少动态效果时，正文 SHALL 按 `@assistant-ui/react` `useSmooth` 的规则逐字展开：显示的文本始终是已收到正文的前缀，每字间隔为 min(5ms, 250ms ÷ 尚未显示的字数)，积压越多越快。消息组件首次挂载（打开会话、切换会话）时已有的正文 SHALL 立即全部显示，只有此后到达的部分逐字展开（原地重新安装快照时组件不重新挂载，快照比当前多出的部分按同一规则展开）；展开期间转录区的贴底跟随与 `回到最新` 的判定照常（贴着底时持续贴底，用户上滚后不被拉回）；消息进入任一终态时 SHALL 立即显示全文，不拖尾；`prefers-reduced-motion: reduce` 下 SHALL 不逐字展开，收到即显示。逐字展开期间消息内 SHALL 不出现小圆点之外的运行指示（Markdown 基元的容器 `data-status` 不为 `running`）。`复制` 写入的文本与对话内搜索匹配的文本 SHALL 取已收到的全文，与当前已显示到哪里无关。
 

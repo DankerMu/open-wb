@@ -223,13 +223,13 @@ Minimal mergeable slice（4b）: atomic - 两者只服务同一个走查步骤�
 
 ## 5. chat-web — 小圆点与等待指示
 
-- [ ] 5.1 开工核对：
+- [x] 5.1 开工核对：
   - 重读 `message-thread.tsx:166-183` 的光标、`MessageBody` 的调用处，以及构成「可见块」的各部分（思考、正文、工具调用组、已结算审批、错误 / 重试提示）的渲染条件；
   - `grep -rn 'message-caret' web/test web/e2e`，列出全部引用；
   - `grep -rn 'ByRole("status"\|ByRole(.status' web/test`，列出可能因新增 `role="status"` 受影响的断言。
 
   验证：核对结果写进 PR。
-- [ ] 5.2 **5a**：小圆点。方块光标换成小圆点：
+- [x] 5.2 **5a**：小圆点。方块光标换成小圆点：
   - 沿用 `data-slot="message-caret"` 与 `aria-hidden`；
   - 圆形，带脉动动画，reduce 下无动画；
   - 显示条件暂不变：消息 running 就显示。

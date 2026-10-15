@@ -145,7 +145,7 @@ store 只看到已发布的增量，所以：
 **D6 等待指示与小圆点：运行中二者恰好显示一个。** 判据「这条助手消息还没有可见块」：思考为 null 或空串、正文为空、没有步骤、没有已结算审批、`error` 为 null 且不在重试中（重试提示本身是可见块）。
 
 - **等待指示**：消息 running 且无可见块时，在正文的位置渲染 `div[data-slot=message-waiting][role=status]`，文本 `正在思考…`，带 `shimmer`；reduce 下动画暂停，沿用折叠块标题的 `shimmer motion-reduce:animate-none`。读屏经 `role=status` 礼貌播报一次。
-- **小圆点**：消息 running 且有可见块时，在正文末尾（与今天的光标同一位置，`MarkdownBody` 之后）渲染 `span[data-slot=message-caret][aria-hidden]`：小圆点（`size-2 rounded-full`、品牌色）加一个脉动动画；reduce 下 `animation-name` 为 `none`。保留 `data-slot=message-caret`，走查与单测的定位器不用换名，只换外观与动画断言。
+- **小圆点**：消息 running 且有可见块时，在正文末尾（与今天的光标同一位置，`MarkdownBody` 之后）渲染 `span[data-slot=message-caret][aria-hidden]`：小圆点（`size-2 rounded-[50%]`、品牌色；Tailwind 4 的 `rounded-full` 计算值不是 50%，5a 实测）加一个脉动动画；reduce 下 `animation-name` 为 `none`。保留 `data-slot=message-caret`，走查与单测的定位器不用换名，只换外观与动画断言。
 - 终态时二者都不渲染。
 - 「同一回合不再出现」由判据自然成立：可见块一旦出现就不会在 running 期间消失（`turn.start` 重置只发生在新回合）。
 
