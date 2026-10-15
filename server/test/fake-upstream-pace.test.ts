@@ -132,6 +132,8 @@ describe("节奏标记: WORKBUDDY_PACE without a gate", () => {
     const gaps = writes.times.slice(1).map((at, index) => at - (writes.times[index] ?? at));
     expect(Math.min(...gaps)).toBeGreaterThanOrEqual(MIN_GAP_MS);
     expect((writes.times.at(-1) ?? 0) - (writes.times[0] ?? 0)).toBeGreaterThanOrEqual(MIN_SPAN_MS);
+    // Never corked when a write starts: no record is held back to leave with the next one.
+    expect(writes.corked).toEqual(writes.chunks.map(() => 0));
     // The client sees the same span; per-record arrival gaps carry client jitter and are not used.
     expect(arrivals).toHaveLength(PACED.length);
     expect((arrivals.at(-1) ?? 0) - (arrivals[0] ?? 0)).toBeGreaterThanOrEqual(MIN_SPAN_MS);
@@ -355,12 +357,15 @@ async function openLive(port: number, messages: unknown[], model?: string): Prom
 interface WriteLog {
   chunks: string[];
   times: number[];
+  corked: number[];
   restore(): void;
 }
 
 /**
  * Stamps every server-side `response.write` (the fixture runs in this process) until `restore()`.
- * `end()` without data does not go through `write`, so each stamp is one written record.
+ * `end()` without data does not go through `write`, so each stamp is one written record. `corked`
+ * is `writableCorked` on entry: a cork still held from an earlier write would ship that record
+ * together with this one, which the 25ms write gaps alone cannot show.
  */
 function recordWrites(): WriteLog {
   const proto = OutgoingMessage.prototype as unknown as { write: (...args: unknown[]) => boolean };
@@ -368,12 +373,14 @@ function recordWrites(): WriteLog {
   const log: WriteLog = {
     chunks: [],
     times: [],
+    corked: [],
     restore: () => {
       proto.write = original;
     },
   };
-  proto.write = function (this: unknown, ...args: unknown[]): boolean {
+  proto.write = function (this: OutgoingMessage, ...args: unknown[]): boolean {
     log.times.push(performance.now());
+    log.corked.push(this.writableCorked);
     log.chunks.push(String(args[0]));
     return original.apply(this, args);
   };
