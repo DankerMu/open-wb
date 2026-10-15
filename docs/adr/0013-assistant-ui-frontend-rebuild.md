@@ -204,3 +204,13 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
   - 依赖：七个 `@radix-ui/react-*` 单包（`dialog`、`dropdown-menu`、`popover`、`radio-group`、`switch`、`tooltip` 在 #1397，`toast` 在 #1398）已卸载，本刀不增删依赖。被卸的是直接依赖声明：
     它们仍作为合包 `radix-ui` 的传递依赖留在 lockfile 与产物里（design D13）。
   - 没有做的：包体上限仍不设（见 2026-10-12 增补）；两份主规格的 `## Purpose` 在归档时由编排方改（design D21）。
+
+## 增补（2026-10-15，change `chat-thinking-status-stream` 切片 7a，#1449）
+
+- **正文逐字显现重新启用，在应用层做**（owner 2026-10-06 / 2026-10-14，#910 O2/O6）：取代关闭逐字显现时的理由「正文不能落后于已到达的数据」（2026-10-04 增补所记的 `smooth={false}`；该理由原写在 `markdown-body.tsx` 的注释里，本切片已改写）。
+  运行中的助手正文经 `web/src/features/chat/smooth-text.tsx` 调用 `@assistant-ui/react` 的 `useSmooth`，把要显示的前缀交给 `MarkdownBody`；终态立即全文，`prefers-reduced-motion: reduce` 下不展开。
+  `复制` 与对话内搜索仍读已收到的全文。
+- **基元的 `smooth` 仍关**：`markdown-body.tsx` 照旧传 `smooth={false}`。基元追赶期间把容器 `data-status` 置为 `running`，拷入的 `dot.css` 会在末块之后加一个脉动点，与消息自己的小圆点叠成两个运行指示（design D8）。
+  应用层交给基元的 part 状态恒为「已完成」，所以不出这个点。拷入层零改动，第六类修改（`markdown-text` 透传 `smooth`）保留。
+- **依赖 0.x 内部分支**：挂载显示全文、从空串开始的第一段直接提交、传 `false` 立即全文、reduce 停用、文本增长时 `aui.part` 引用不变——在已装的 0.15.23 上实测，由 `web/test/chat-smooth-text.test.tsx` 的两条
+  「依赖 @assistant-ui/react useSmooth 分支」用例与同文件的页面用例钉住，升级改了分支时先在那里判红。展开时长随积压增长（200 字约 0.6s，design D8），不是 250ms 上限。

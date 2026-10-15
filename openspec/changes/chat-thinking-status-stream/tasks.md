@@ -296,7 +296,7 @@ Minimal mergeable slice（6b）: atomic - 预览开关、限高与渐隐处理�
 
 ## 7. chat-web / thinking-fold — 正文与思考的逐字展开
 
-- [ ] 7.1 开工核对：
+- [x] 7.1 开工核对：
   - 重读 `markdown-body.tsx:48-57`（含注释）与拷入的 `markdown-text.tsx` 的 `smooth` 透传；
   - 重读 `node_modules/@assistant-ui/react/dist/utils/smooth/useSmooth.js`；
   - 重读 `node_modules/@assistant-ui/react-markdown/dist/primitives/MarkdownText.js` 的 `data-status`，以及 `styles/dot.css`；
@@ -309,7 +309,7 @@ Minimal mergeable slice（6b）: atomic - 预览开关、限高与渐隐处理�
   - 盘点在 running 消息增量之后同步断言正文或思考文本的既有用例：已知有 `web/test/chat-markdown.test.tsx:224-248`「流式正文不落后于数据」，另查 `chat-thinking.test.tsx` 的同类用例。
 
   验证：核对结果与盘点清单写进 PR；与 D8 不符时先改 design。
-- [ ] 7.2 **7a**：正文平滑。
+- [x] 7.2 **7a**：正文平滑。
   - **新模块** `web/src/features/chat/smooth-text.tsx`：应用层的 `useSmooth` 包装，正文与思考共用。如果 7.1 发现 `aui.part` 引用不稳定，就在模块内保持一个稳定的 provider，只更新文本。
   - **接入**：助手正文经它把要显示的前缀交给 `MarkdownBody`，消息 running 时启用。
   - **不变的部分**：`markdown-body.tsx` 仍传 `smooth={false}`，只把注释改写为新理由；`复制` 与搜索的数据源不变。

@@ -11,7 +11,13 @@ import {
   SESSION_PROMPT,
 } from "./chat-page-ownership-support.js";
 import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
-import { chatSnapshot, historyUser, latestSource, SESSION_ID } from "./chat-stream-support.js";
+import {
+  chatSnapshot,
+  historyUser,
+  latestSource,
+  SESSION_ID,
+  settle,
+} from "./chat-stream-support.js";
 import { calls, deferredResponse, jsonResponse } from "./support.js";
 import { waitMs } from "./ui-support.js";
 
@@ -577,6 +583,58 @@ describe("(R) size changes without a content change", () => {
     expect(jumpButton()).toBeNull();
     await growAndStream(3500, "增量一");
     expect(distance()).toBeLessThanOrEqual(4);
+  });
+
+  /* Issue 1449: while a running body unrolls (smooth-text.tsx) every frame grows the body without
+     a message change, so following rests on the content root's resize callback alone. The height
+     is a function of the body text on screen; the callback is fired after each frame as a browser
+     would. Fake clock: `useSmooth` reads only rAF and `Date.now`; setTimeout stays real for
+     `settle` (measured in 7a). */
+  async function unroll(each: () => void) {
+    renderedHeight = () => 3000 + 2 * (assistantText().length - 2);
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "Date"] });
+    try {
+      await act(async () => {
+        seq += 1;
+        const delta = "展开".repeat(100);
+        latestSource().emitData("text.delta", `1:${seq}`, { messageId: 0, delta });
+        await settle();
+      });
+      for (let i = 0; i < 8; i += 1) {
+        act(() => {
+          vi.advanceTimersByTime(16);
+        });
+        resizeElement(thread());
+        each();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  it("(R9) a pinned transcript stays at the bottom of each frame while the body unrolls", async () => {
+    await openLongSession();
+    const tops: number[] = [];
+    await unroll(() => {
+      expect(metrics.scrollTop).toBe(transcript().scrollHeight - metrics.clientHeight);
+      expect(jumpButton()).toBeNull();
+      tops.push(metrics.scrollTop);
+    });
+    // The body really grew frame by frame, and the transcript followed every step.
+    for (let i = 1; i < tops.length; i += 1) {
+      expect(tops[i]).toBeGreaterThan(tops[i - 1] ?? 0);
+    }
+  });
+
+  it("(R9) a scrolled-up transcript is not pulled back while the body unrolls", async () => {
+    await openLongSession();
+    userScroll(2000);
+    expect(jumpButton()).toBeNull();
+    await unroll(() => {
+      expect(metrics.scrollTop).toBe(2000);
+    });
+    expect(transcript().scrollHeight - 2000 - metrics.clientHeight).toBeGreaterThan(500);
+    expect(jumpButton()).not.toBeNull();
   });
 
   /* Sits under (R) on purpose: the viewport primitive mounts only where `ResizeObserver` is

@@ -221,8 +221,10 @@ describe("代码块复制", () => {
   });
 });
 
-describe("流式正文不落后于数据", () => {
-  it("增量一到就整段可见：不等逐字显现", async () => {
+// 原用例「流式正文不落后于数据 / 增量一到就整段可见」钉的是被 owner 裁定推翻的旧行为（issue 910 O2/O6）：
+// 按通用纪律第 3 种改法改为反向钉子。假时钟只假 rAF / cAF / Date（`useSmooth` 只读这两样，7a 实测）。
+describe("流式正文逐字展开、终态立即全文", () => {
+  it("展开期间显示的是前缀，进入终态立即全文", async () => {
     const delta = "后续的一整段增量文字，长度足以让逐字显现跨过好几帧。";
     const snapshot = chatSnapshot({
       content: "开头。",
@@ -236,14 +238,31 @@ describe("流式正文不落后于数据", () => {
     const article = await screen.findByRole("article", { name: "助手" });
     await waitFor(() => expect(latestSource().url).toBe(`/api/sessions/${SESSION_ID}/events`));
     const source = latestSource();
+    const shown = () => article.querySelector(BODY)?.querySelector("p")?.textContent ?? "";
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "Date"] });
+    try {
+      await act(async () => {
+        source.emitOpen();
+        source.emitData("text.delta", "1:4", { messageId: 0, delta });
+        await settle();
+      });
+      act(() => {
+        vi.advanceTimersByTime(16);
+      });
 
-    await act(async () => {
-      source.emitOpen();
-      source.emitData("text.delta", "1:4", { messageId: 0, delta });
-      await settle();
-    });
+      const prefix = shown();
+      expect(prefix.length).toBeGreaterThan("开头。".length);
+      expect(prefix.length).toBeLessThan(`开头。${delta}`.length);
+      expect(`开头。${delta}`.startsWith(prefix)).toBe(true);
 
-    // 只让出一个宏任务就断言，不用 waitFor：轮询等待会让逐字显现有时间追上。
-    expect(article.querySelector(BODY)?.querySelector("p")?.textContent).toBe(`开头。${delta}`);
+      await act(async () => {
+        source.emitData("turn.end", "1:5", { messageId: 0, status: "done" });
+        await settle();
+      });
+
+      expect(shown()).toBe(`开头。${delta}`);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
