@@ -1,5 +1,5 @@
 /**
- * Issue #534 `thinking.delta` decoding/reduction and the 深度思考过程 fold (parent tasks 7.4),
+ * Issue #534 `thinking.delta` decoding/reduction and the thinking fold (parent tasks 7.4),
  * T1–T12 of openspec/changes/thinking-fold-block/design.md. Seams: `chatStateFromSnapshot` /
  * `applyChatEvent` on frozen inputs, `connectSessionEvents` over the fake EventSource, the jsdom
  * chat page. Expected values are literals from the spec deltas.
@@ -35,6 +35,8 @@ type Status = Message["status"];
 
 const MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
 const SUMMARY = "深度思考过程";
+/** The control's accessible name is one of the three title states (issue 1447, owner ruling O1). */
+const TITLE = /^(正在思考…|已思考 [1-9]\d* 秒|深度思考过程)$/;
 const TRUNCATED = "想了很久很久…（已截断）";
 const PLAIN = "**粗** <b>x</b>\n  缩进";
 const BASH_STEP: Message["steps"][number] = {
@@ -360,7 +362,7 @@ function fold() {
 
 /** The expand/collapse control, found by role and accessible name. */
 function control(block = fold()) {
-  return within(block).getByRole("button", { name: SUMMARY });
+  return within(block).getByRole("button", { name: TITLE });
 }
 
 function isOpen(block = fold()) {
@@ -410,7 +412,7 @@ async function copiedTexts(writeText: ReturnType<typeof stubClipboard>) {
   return writeText.mock.calls;
 }
 
-describe("深度思考过程 fold on the chat page", () => {
+describe("thinking fold on the chat page", () => {
   it("T6 opens while streaming, collapses on turn.end and stays out of 复制", async () => {
     const writeText = stubClipboard();
     const { source } = await mountThread(turnSnapshot("running"));
@@ -424,7 +426,7 @@ describe("深度思考过程 fold on the chat page", () => {
     expect(main.firstElementChild).toBe(block);
     expect(block.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const summary = control(block);
-    expect(summary.textContent).toBe(SUMMARY);
+    expect(summary.textContent).toBe("正在思考…");
     const icon = summary.firstElementChild as Element;
     expect(icon.localName).toBe("svg");
     expect(icon.getAttribute("aria-hidden")).toBe("true");

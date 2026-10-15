@@ -46,6 +46,16 @@ describe("chat-web「思考结束事件经同一游标过滤并严格解码」",
     expect(connector.errors).toEqual([]);
   });
 
+  it("delivers thinking.end with thinkingMs 0 verbatim and starts no resync (0 is in range)", async () => {
+    const connector = await installed();
+    connector.source.emitData("thinking.end", "1:4", { messageId: 7, thinkingMs: 0 });
+    expect(connector.events).toStrictEqual([
+      { type: "thinking.end", data: { messageId: 7, thinkingMs: 0 } },
+    ]);
+    expect(connector.loads).toHaveLength(1);
+    expect(connector.errors).toEqual([]);
+  });
+
   const invalid: Array<[string, unknown]> = [
     ["thinkingMs -1", { messageId: 7, thinkingMs: -1 }],
     ["thinkingMs 1.5", { messageId: 7, thinkingMs: 1.5 }],
@@ -198,4 +208,19 @@ describe("chat-web「思考时长与进行中标记归约」", () => {
     });
     expect(assistant(ended)).toMatchObject({ retrying: true, thinkingMs: 400 });
   });
+
+  it.each(["idle", "done", "failed"] as const)(
+    "thinking.end on a view whose session is %s leaves the session status unchanged",
+    (status) => {
+      const settled = deepFreeze(
+        chatStateFromSnapshot(chatSnapshot({ status, assistantStatus: "done", content: "答" })),
+      );
+      const ended = applyChatEvent(settled, {
+        type: "thinking.end",
+        data: { messageId: 0, thinkingMs: 400 },
+      });
+      expect(ended.status).toBe(status);
+      expect(assistant(ended)).toMatchObject({ status: "done", thinkingMs: 400 });
+    },
+  );
 });

@@ -220,7 +220,7 @@ const AssistantMessage = memo(function AssistantMessage({
   text: string;
   thinking: string;
 }) {
-  const { approvals, error, retrying, status, steps } = custom;
+  const { approvals, error, retrying, status, steps, thinkingActive, thinkingMs } = custom;
   const running = status === "running";
   // 运行中等待指示与小圆点恰好一个（design D6）：同一个判据的两面。
   const shown = hasVisibleBlock({ approvals, error, retrying, steps, text, thinking });
@@ -239,7 +239,14 @@ const AssistantMessage = memo(function AssistantMessage({
           <BrandMark size={28} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-2.5" data-slot="message-content">
-          {thinking ? <ThinkingFold running={running} text={thinking} /> : null}
+          {thinking ? (
+            <ThinkingFold
+              running={running}
+              text={thinking}
+              thinkingActive={thinkingActive}
+              thinkingMs={thinkingMs}
+            />
+          ) : null}
           {running && !shown ? (
             <MessageWaiting />
           ) : (

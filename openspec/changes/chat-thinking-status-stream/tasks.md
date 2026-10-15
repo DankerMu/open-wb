@@ -258,13 +258,13 @@ Minimal mergeable slice（5b）: atomic - 「等待指示」与「小圆点只�
 
 ## 6. thinking-fold — 折叠块标题三态与流式预览
 
-- [ ] 6.1 开工核对：
+- [x] 6.1 开工核对：
   - 重读 `thinking-fold.tsx` 全文与文件头注释；
   - 重读拷入的 `reasoning.tsx`：`ReasoningRoot`（受控时 `isPreview = streaming && open`）、`ReasoningText`（预览贴底）、`ReasoningContent`（渐隐层）；
   - 重读 `web/test/chat-thinking.test.tsx` 里按 `reasoning-trigger-*` slot 定位的用例，以及 `web/e2e/ui-walk-sessions.spec.ts:317-340`。
 
   验证：核对结果写进 PR。
-- [ ] 6.2 **6a**：标题三态。
+- [x] 6.2 **6a**：标题三态。
   - 在应用层用拷入的 `CollapsibleTrigger` 组合触发器，不用 `ReasoningTrigger`（design D8）；
   - 沿用 `reasoning-trigger`、`reasoning-trigger-label`、`reasoning-trigger-chevron` 三个 slot；
   - 文案规则见 thinking-fold「深度思考折叠块呈现」第二段；
