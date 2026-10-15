@@ -1,19 +1,25 @@
-// 深度思考折叠块（thinking-fold；design D4、D13，issue 910 的 D5、D8）：应用层组合拷入层 `reasoning` 的
+// 深度思考折叠块（thinking-fold；design D4、D13，issue 910 的 D5、D7、D8）：应用层组合拷入层 `reasoning` 的
 // Root / Content / Text，控件由拷入的 `CollapsibleTrigger` 在这里组合。行为在这里定，不用 registry 的默认：
-// - 折叠态受控。拷入组件的 `streaming` 模式在第一次手动切换后永久沿用该选择；规格要的是每次
-//   running ↔ 终态迁移都回到默认态（进行中展开、终态收起），两次迁移之间才保留手动选择。
-//   不传 `streaming` 也就不进它的预览路径（那条路径无条件构造 `ResizeObserver`）。
+// - 折叠态受控。拷入组件不受控时在第一次手动切换后永久沿用该选择；规格要的是每次 running ↔ 终态迁移
+//   都回到默认态（进行中展开、终态收起），两次迁移之间才保留手动选择。受控时 `streaming` 只决定预览
+//   （拷入 Root 的 `isPreview = streaming && open`），不碰开合。
 // - 用不带滚动锁的 Root：`reasoning.aui.tsx` 的 Root 在切换时锁住转录滚动容器 200ms，与滚动层的
 //   贴底跟随冲突。
-// - 主体限高：终态 12rem 并在盒内滚动，进行中不限高（由转录贴底跟随）；拷入组件默认恒为 16rem。
+// - 主体两态都限高 12rem 并在盒内滚动（拷入组件默认 16rem，与终态不一致会在展开 / 收起间跳高度）。
+//   running 且展开时是流式预览（D7）：拷入的 `ReasoningText` 用自己的 `ResizeObserver` 把盒内贴到最新
+//   一行，用户在盒内上滚即暂停、滚回盒底恢复。它不再与转录区的贴底跟随冲突（读代码推出）：限高后思考
+//   增长只改盒内 `scrollHeight`，折叠块外框长到 12rem 就不再变高；盒内的 scroll 事件不冒泡，
+//   `thread-viewport.tsx` 的 `onScroll` 只看视口自己的 `scrollTop`；转录区观察的是内容根，外框长满
+//   12rem 之后思考增长不再改变它的尺寸。终态不是预览，主体不自动滚动。
 // - 标题三态（D5）：消息 running 且思考段进行中为 `正在思考…`，带 `shimmer` 类（`tw-shimmer`，经
 //   styles.css 导入；reduce 下该插件自己把动画置为 paused，全局 reduce 块再把时长压到 0.01ms）；否则有
 //   时长为 `已思考 N 秒`（N = max(1, round(ms ÷ 1000))）；否则 `深度思考过程`（历史消息、未闭段即中断）。
 //   拷入的 `ReasoningTrigger` 把文案写死，换文案不在拷入层的六类修改里，所以不用它（D8）：结构、视觉类与
 //   三个 `reasoning-trigger*` slot 照抄它，可见文本即可访问名。标题不带 `role="status"`：等待指示才是
 //   播报用的状态（message-waiting.tsx），标题只是控件的名字。
-// - 隐藏 Content 恒渲染的顶部渐隐遮罩（`reasoning-fade`，z-10、取页面底色）：它盖住滚动层的 回到最新
-//   按钮，在搜索命中的消息底色上露出一条页面底色，并把首行压灰。拷入文件不改，从父元素的类上关掉。
+// - 隐藏 Content 的两个渐隐遮罩（`reasoning-fade`，z-10、取页面底色）：顶部那个恒渲染，底部那个只在
+//   预览时渲染，二者都是 Content 的直接子元素。它们盖住滚动层的 回到最新 按钮，在搜索命中的消息底色上
+//   露出一条页面底色，并把首行 / 末行压灰。拷入文件不改，从父元素的类上一并关掉。
 import { BrainIcon, ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 import {
@@ -52,6 +58,7 @@ export function ThinkingFold({ running, text, thinkingMs, thinkingActive }: Thin
       data-running={running ? "" : undefined}
       onOpenChange={setOpen}
       open={open}
+      streaming={running}
       variant="ghost"
     >
       <CollapsibleTrigger
@@ -71,9 +78,7 @@ export function ThinkingFold({ running, text, thinkingMs, thinkingActive }: Thin
         />
       </CollapsibleTrigger>
       <ReasoningContent className="[&>[data-slot=reasoning-fade]]:hidden">
-        <ReasoningText
-          className={`wrap-anywhere whitespace-pre-wrap ${running ? "max-h-none" : "max-h-48 overflow-auto"}`}
-        >
+        <ReasoningText className="wrap-anywhere whitespace-pre-wrap max-h-48 overflow-auto">
           {text}
         </ReasoningText>
       </ReasoningContent>

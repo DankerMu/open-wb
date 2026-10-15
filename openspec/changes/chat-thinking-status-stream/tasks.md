@@ -279,7 +279,7 @@ Minimal mergeable slice（5b）: atomic - 「等待指示」与「小圆点只�
 Suggested fixture level（6a）: compact - 前端呈现；契约由 3c 提供。
 Minimal mergeable slice（6a）: atomic - 一个控件的文案规则及其走查改写。
 
-- [ ] 6.3 **6b**：流式预览。
+- [x] 6.3 **6b**：流式预览。
   - 传 `streaming={running}`；
   - 主体在两种状态下都用 `max-h-48 overflow-auto`；
   - 父类同时隐藏底部渐隐层；

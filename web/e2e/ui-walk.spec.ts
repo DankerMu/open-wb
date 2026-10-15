@@ -52,6 +52,7 @@ import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js"
 import { walkScrollFollow } from "./ui-walk-scroll.js";
 import { expandToolGroup } from "./ui-walk-steps.js";
 import { walkFork, walkRegenerate, walkStop } from "./ui-walk-stop.js";
+import { walkThinkingPreview } from "./ui-walk-thinking-preview.js";
 import { walkUpstreamFailure } from "./ui-walk-upstream-failure.js";
 import { walkWaitingIndicator } from "./ui-walk-waiting.js";
 
@@ -439,6 +440,8 @@ async function walkHeldDialogue(
     await walkFork(page, project, sessionId, prompt);
     // chat-harness「等待与思考呈现的冒烟与走查」第 2 步：既有步骤之后、清理之前，回到这个受闸会话再发一条。
     await walkWaitingIndicator(page, project, sessionId, sessionUrl, EXPECTED_REPLY);
+    // 第 3 步：同一会话紧接着再发一条长思考，held 在思考中量预览。
+    await walkThinkingPreview(page, project, sessionId, EXPECTED_REPLY);
   } finally {
     await deleteGate(origin, gateId);
   }
