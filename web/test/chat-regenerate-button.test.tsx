@@ -158,7 +158,7 @@ function expectUnlocked() {
   expect(bar().queryByText("生成中")).toBeNull();
 }
 
-function expectTranscript(bodies: string[]) {
+function expectTranscript(bodies: (string | undefined)[]) {
   const articles = assistantArticles();
   expect(
     articles.map((article) => article.querySelector('[data-slot="message-body"]')?.textContent),
@@ -433,7 +433,13 @@ describe("regenerate button: request, lock and reconcile", () => {
     await flush();
     expect(calls(fetchMock, MESSAGES)).toHaveLength(reads + 1);
     expect(FakeEventSource.instances).toHaveLength(sources + 1);
-    expectTranscript([""]);
+    // 新的运行中助手行还没有内容：正文的位置是等待指示（issue 1446），没有正文块。
+    expectTranscript([undefined]);
+    expect(
+      assistantArticles().map(
+        (article) => article.querySelector('[data-slot="message-waiting"]')?.textContent,
+      ),
+    ).toEqual(["正在思考…"]);
     expect(screen.queryByText("旧回答")).toBeNull();
   });
 

@@ -53,6 +53,7 @@ import { walkScrollFollow } from "./ui-walk-scroll.js";
 import { expandToolGroup } from "./ui-walk-steps.js";
 import { walkFork, walkRegenerate, walkStop } from "./ui-walk-stop.js";
 import { walkUpstreamFailure } from "./ui-walk-upstream-failure.js";
+import { walkWaitingIndicator } from "./ui-walk-waiting.js";
 
 const DEV_PASSWORD = "demo";
 const PRODUCTION_SERVICE_NAME = "workbuddy-app-server";
@@ -436,6 +437,8 @@ async function walkHeldDialogue(
     await walkRegenerate(page, project, sessionId, stopGate);
     await walkActionRow(page, project, oracle);
     await walkFork(page, project, sessionId, prompt);
+    // chat-harness「等待与思考呈现的冒烟与走查」第 2 步：既有步骤之后、清理之前，回到这个受闸会话再发一条。
+    await walkWaitingIndicator(page, project, sessionId, sessionUrl, EXPECTED_REPLY);
   } finally {
     await deleteGate(origin, gateId);
   }

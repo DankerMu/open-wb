@@ -20,6 +20,7 @@ import { FileChangesCard } from "./file-changes-card.js";
 import { MarkdownBody } from "./markdown-body.js";
 import { AssistantActions, UserActions } from "./message-action-row.js";
 import { MessageError } from "./message-error.js";
+import { hasVisibleBlock, MessageWaiting } from "./message-waiting.js";
 import { type ChatMessageCustom, messageCustom } from "./runtime-convert.js";
 import type { ChatState } from "./stream.js";
 import { ThinkingFold } from "./thinking-fold.js";
@@ -163,11 +164,20 @@ function MessageAttachments({ attachments }: { attachments: ChatMessageCustom["a
 }
 
 /**
- * 正文：Markdown，或已停止且为空时的占位；运行中在末尾带一个脉动的小圆点（design D6），减少动态效果时
- * 无动画。圆形写 `rounded-[50%]` 而不是 rounded-full：规格要求计算 `border-radius` 恰为 50%，Tailwind 4 的
- * rounded-full 编译成一个极大的像素值（实测：计算值为 3.35544e+07px）。
+ * 正文：Markdown，或已停止且为空时的占位；`dot`（运行中且已有可见块，见 message-waiting.tsx）时在末尾带
+ * 一个脉动的小圆点（design D6），减少动态效果时无动画。圆形写 `rounded-[50%]` 而不是 rounded-full：规格
+ * 要求计算 `border-radius` 恰为 50%，Tailwind 4 的 rounded-full 编译成一个极大的像素值（实测：计算值为
+ * 3.35544e+07px）。
  */
-function MessageBody({ status, text }: { status: ChatMessageCustom["status"]; text: string }) {
+function MessageBody({
+  dot,
+  status,
+  text,
+}: {
+  dot: boolean;
+  status: ChatMessageCustom["status"];
+  text: string;
+}) {
   return (
     <div className="text-sm leading-7 wrap-anywhere text-foreground" data-slot="message-body">
       {status === "stopped" && text === "" ? (
@@ -175,7 +185,7 @@ function MessageBody({ status, text }: { status: ChatMessageCustom["status"]; te
       ) : (
         <MarkdownBody text={text} />
       )}
-      {status === "running" ? (
+      {dot ? (
         <span
           aria-hidden="true"
           className="ml-0.5 inline-block size-2 animate-pulse rounded-[50%] bg-(--wb-brand-primary) align-middle motion-reduce:animate-none"
@@ -212,6 +222,8 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const { approvals, error, retrying, status, steps } = custom;
   const running = status === "running";
+  // 运行中等待指示与小圆点恰好一个（design D6）：同一个判据的两面。
+  const shown = hasVisibleBlock({ approvals, error, retrying, steps, text, thinking });
   return (
     <MessagePrimitive.Root asChild>
       <article
@@ -228,7 +240,11 @@ const AssistantMessage = memo(function AssistantMessage({
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-2.5" data-slot="message-content">
           {thinking ? <ThinkingFold running={running} text={thinking} /> : null}
-          <MessageBody status={status} text={text} />
+          {running && !shown ? (
+            <MessageWaiting />
+          ) : (
+            <MessageBody dot={running} status={status} text={text} />
+          )}
           <ToolCallGroup steps={steps} />
           <ApprovalRecords approvals={approvals} />
           <MessageError error={error} retrying={retrying} status={status} />
