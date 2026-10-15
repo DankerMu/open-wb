@@ -21,13 +21,15 @@ const IDLE_MS = 250;
 const MIN_GAP_MS = 20;
 const MIN_SPAN_MS = 1_000;
 const PACE_STEP_MS = 25;
+const PACE_MODEL = "pace-model-x";
+const CONFLICT = '{"error":{"message":"Conflict"}}';
 
 const COMPLETION_ID = /chatcmpl-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu;
 const CALL_ID = /call_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu;
 const CREATED = /"created":\d+/gu;
 
-function frame(delta: string, finish: string): string {
-  return `{"id":"chatcmpl-ID","object":"chat.completion.chunk","created":0,"model":"fake","choices":[{"index":0,"delta":${delta},"finish_reason":${finish}}]}`;
+function frame(delta: string, finish: string, model = "fake"): string {
+  return `{"id":"chatcmpl-ID","object":"chat.completion.chunk","created":0,"model":"${model}","choices":[{"index":0,"delta":${delta},"finish_reason":${finish}}]}`;
 }
 
 function body(records: string[]): string {
@@ -60,6 +62,9 @@ const BASH_ROUND = [
 const ANSWER = [ROLE, ...CONTENT, STOP, DONE];
 const THINK_ANSWER = [ROLE, ...REASONING, ...CONTENT, STOP, DONE];
 const PACED = [ROLE, ...REASONING, ...Array.from({ length: 40 }, () => CHAR), STOP, DONE];
+const PACED_MODEL = PACED.map((record) =>
+  record === DONE ? DONE : record.replace('"model":"fake"', `"model":"${PACE_MODEL}"`),
+);
 const HELD_PREFIX = [ROLE, FIRST_CONTENT];
 const THINK_HELD_PREFIX = [ROLE, ...REASONING, FIRST_CONTENT];
 const RELEASED_REST = [...CONTENT.slice(1), STOP, DONE];
@@ -102,9 +107,14 @@ afterEach(async () => {
 describe("节奏标记: WORKBUDDY_PACE without a gate", () => {
   it("streams role, three reasoning chunks, 40 字 chunks, stop and [DONE], each ≥20ms apart and ≥1000ms first to last", async () => {
     const port = await upstream();
-    const live = await openLive(port, answerRound(`please ${PACE}`));
+    // Warm the client path first: a slow first read alone would eat the 5ms margin under 25ms.
+    expect(rawOf(await chat(port, toolRound("warm up")))).toBe(body(BASH_ROUND));
+    const live = await openLive(port, answerRound(`please ${PACE}`), PACE_MODEL);
     const arrivals = await readTimed(live);
-    expect(normalize(live.text)).toBe(body(PACED));
+    expect(normalize(live.text)).toBe(body(PACED_MODEL));
+    const ids = live.text.match(COMPLETION_ID) ?? [];
+    expect(ids).toHaveLength(PACED.length - 1);
+    expect(new Set(ids).size).toBe(1);
     expect(live.ended).toBe(true);
     expect(arrivals).toHaveLength(PACED.length);
     const gaps = arrivals.slice(1).map((at, index) => at - (arrivals[index] ?? at));
@@ -153,6 +163,23 @@ describe("节奏标记: WORKBUDDY_PACE under an armed gate is ignored", () => {
       expect(paced.completedEnded).toBe(true);
     },
   );
+
+  it("a held gate still answers 409 Conflict to a request carrying the marker", async () => {
+    const port = await upstream();
+    const id = randomUUID();
+    expect((await send(port, "POST", `/__control/gates/${id}`)).status).toBe(201);
+    const live = await openLive(port, answerRound(`${WALK}${id}`));
+    await readUntil(live, WAIT_MS, (records) => records.includes(FIRST_CONTENT));
+    expect(await (await send(port, "GET", `/__control/gates/${id}`)).text()).toBe(
+      '{"phase":"held"}',
+    );
+    const reply = await chat(port, answerRound(`${PACE} ${WALK}${id}`));
+    expect(reply.status).toBe(409);
+    expect(reply.text).toBe(CONFLICT);
+    expect((await send(port, "POST", `/__control/gates/${id}/release`)).status).toBe(200);
+    await readUntil(live, WAIT_MS, () => false);
+    expect(normalize(live.text)).toBe(body([...HELD_PREFIX, ...RELEASED_REST]));
+  });
 });
 
 describe("requests without WORKBUDDY_PACE keep the pre-change bytes", () => {
@@ -284,13 +311,13 @@ async function armedGateRun(extra: string): Promise<GateRun> {
   return { prefix, prefixEnded, completed: normalize(live.text), completedEnded: live.ended };
 }
 
-async function openLive(port: number, messages: unknown[]): Promise<LiveStream> {
+async function openLive(port: number, messages: unknown[], model?: string): Promise<LiveStream> {
   const abort = new AbortController();
   const response = await send(
     port,
     "POST",
     "/v1/chat/completions",
-    { messages, stream: true },
+    { messages, stream: true, ...(model === undefined ? {} : { model }) },
     abort.signal,
   );
   expect(response.status).toBe(200);
