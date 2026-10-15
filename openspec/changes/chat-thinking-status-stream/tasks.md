@@ -207,7 +207,7 @@ Minimal mergeable slice（3c）: atomic - 快照键与 web 的严格解析必须
 Suggested fixture level（4a）: compact - 只动测试夹具；行为由单测直接钉住。
 Minimal mergeable slice（4a）: atomic - 一个停点取值加上取值边界。
 
-- [ ] 4.3 **4b**：
+- [x] 4.3 **4b**：
   - 实现 `WORKBUDDY_HOLD_AT:thinking`，不带思考标记时等同 `empty`；
   - 实现 `WORKBUDDY_THINK_LONG`：
     - 120 行，分三片发出；

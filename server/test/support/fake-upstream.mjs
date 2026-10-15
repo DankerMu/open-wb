@@ -9,14 +9,23 @@ const DEFAULT_KEY = "fake";
 const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
 const THINK_MARKER = "WORKBUDDY_THINK";
+const THINK_LONG_MARKER = "WORKBUDDY_THINK_LONG";
 const WRITE_MARKER = "WORKBUDDY_WRITE";
 const TODO_MARKER = "WORKBUDDY_TODO";
 const HOLD_AT_MARKER = "WORKBUDDY_HOLD_AT:";
-/** Hold points of `WORKBUDDY_HOLD_AT:<point>` (issue 1440); any other value is ignored. */
-const HOLD_POINTS = new Set(["empty"]);
+/** Hold points of `WORKBUDDY_HOLD_AT:<point>` (issues 1440, 1445); any other value is ignored. */
+const HOLD_POINTS = new Set(["empty", "thinking"]);
 const TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
 const REPLY_PARTS = ["你好，", "这是 WorkBuddy 的", "第一条流式回复。"];
 const THINK_PARTS = ["先读需求，", "再列要点，", "最后作答。"];
+/** Issue 1445: `思考第 1 行` … `思考第 120 行`, 40 lines per part; parts 1 and 2 end with `\n`. */
+const THINK_LONG_PARTS = [0, 1, 2].map((part) => {
+  const lines = [];
+  for (let line = 40 * part + 1; line <= 40 * part + 40; line += 1) {
+    lines.push(`思考第 ${line} 行`);
+  }
+  return lines.join("\n") + (part < 2 ? "\n" : "");
+});
 const WRITE_ARGS = JSON.stringify({
   path: "workbuddy-report.html",
   content: "<!doctype html><title>WorkBuddy</title><h1>WorkBuddy</h1>\n",
@@ -184,9 +193,10 @@ function serveChat(response, gates, parsed, { scope, failures }) {
 
 function serveFinal(response, gates, messages, id, created, model) {
   const text = lastUserTextFrom(messages);
-  const think = text.includes(THINK_MARKER);
+  const think = thinkPartsOf(text);
   const walkId = walkGateId(text);
   // Issue 1437: WORKBUDDY_PACE replaces only the ungated writes; held / armed gates are untouched.
+  // It keeps THINK_PARTS even with WORKBUDDY_THINK_LONG: the spec names its three parts literally.
   const reply = () => {
     if (text.includes(PACE_MARKER)) {
       writePacedSse(
@@ -341,7 +351,8 @@ function releaseHeld(controlResponse, gates, id) {
 /**
  * Splits the unchanged answering frames at the hold point: the prefix is written now, the rest is
  * kept for `releaseHeld`. Without a hold point the prefix runs to the first content chunk;
- * `empty` stops after the role chunk.
+ * `empty` stops after the role chunk; `thinking` after the reasoning chunks, so with no thinking
+ * marker it is `empty`.
  */
 function holdFinal(response, gates, walkId, completionId, created, model, think, point) {
   const gate = gates.get(walkId);
@@ -350,7 +361,8 @@ function holdFinal(response, gates, walkId, completionId, created, model, think,
     return;
   }
   const frames = textFrames(completionId, created, model, think);
-  const cut = point === "empty" ? 1 : 1 + (think ? THINK_PARTS.length : 0) + 1;
+  const reasoned = 1 + think.length;
+  const cut = point === "empty" ? 1 : point === "thinking" ? reasoned : reasoned + 1;
   gate.phase = "held";
   gate.response = response;
   gate.remaining = frames.slice(cut);
@@ -422,6 +434,14 @@ function holdPointOf(text) {
   }
   const [value] = text.slice(index + HOLD_AT_MARKER.length).split(/\s/u, 1);
   return HOLD_POINTS.has(value) ? value : undefined;
+}
+
+/** Reasoning parts of the answering round: THINK_LONG wins over THINK (which it contains). */
+function thinkPartsOf(text) {
+  if (text.includes(THINK_LONG_MARKER)) {
+    return THINK_LONG_PARTS;
+  }
+  return text.includes(THINK_MARKER) ? THINK_PARTS : [];
 }
 
 function walkGateId(text) {
@@ -532,10 +552,7 @@ function textFrames(id, created, model, think) {
 }
 
 function thinkFrames(id, created, model, think) {
-  if (!think) {
-    return [];
-  }
-  return THINK_PARTS.map((part) => chunk(id, created, model, { reasoning_content: part }, null));
+  return think.map((part) => chunk(id, created, model, { reasoning_content: part }, null));
 }
 
 function chunk(id, created, model, delta, finishReason) {

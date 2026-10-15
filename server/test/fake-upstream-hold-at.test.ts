@@ -1,9 +1,11 @@
 /**
- * Issue 1440 WORKBUDDY_HOLD_AT:<point> of the fake upstream (omp-test-harness「受控上游节奏与闸门停点
- * 标记」, scenario「闸门停点」: `empty`, `middle`, `emptyX` and the ungated case). Expected bytes are
- * literal strings written from the spec delta and the pre-change fixture output; fixture constants
- * are not imported. Bodies are compared as raw text after pinning only the random ids and
- * `created`. A hold is observed as "these records, then nothing for IDLE_MS, stream still open".
+ * Issues 1440 / 1445 WORKBUDDY_HOLD_AT:<point> and WORKBUDDY_THINK_LONG of the fake upstream
+ * (omp-test-harness「受控上游节奏与闸门停点标记」, scenarios「闸门停点」: `empty`, `thinking` with and
+ * without a thinking marker, `middle`, `emptyX` and the ungated case;「长思考标记」). Expected bytes
+ * are literal strings written from the spec delta and the pre-change fixture output; fixture
+ * constants are not imported (the 120 long-thinking lines are rebuilt here from the spec formula).
+ * Bodies are compared as raw text after pinning only the random ids and `created`. A hold is
+ * observed as "these records, then nothing for IDLE_MS, stream still open".
  */
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
@@ -13,7 +15,9 @@ import type { FakeUpstreamServer } from "./support/fake-upstream.mjs";
 const KEY = "fake";
 const HOLD_AT = "WORKBUDDY_HOLD_AT:";
 const EMPTY = `${HOLD_AT}empty`;
+const THINKING = `${HOLD_AT}thinking`;
 const THINK = "WORKBUDDY_THINK";
+const THINK_LONG = "WORKBUDDY_THINK_LONG";
 const PACE = "WORKBUDDY_PACE";
 const WALK = "WORKBUDDY_UI_WALK:";
 const TOOL_RESULT = { role: "tool", content: "workbuddy-smoke" };
@@ -21,6 +25,9 @@ const WAIT_MS = 8_000;
 // Localhost idle bound: frames already written are readable immediately.
 const IDLE_MS = 250;
 const SHORT_TTL_MS = 600;
+// Wait for the TTL to end a held stream; stays under vitest's 5s test timeout, so a stream the TTL
+// fails to end reaches the `ended` assertion instead of timing the test out.
+const TTL_WAIT_MS = 3_000;
 const CONFLICT = '{"error":{"message":"Conflict"}}';
 
 const COMPLETION_ID = /chatcmpl-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gu;
@@ -65,6 +72,19 @@ const PACED = [ROLE, ...REASONING, ...Array.from({ length: 40 }, () => CHAR), ST
 const HELD_PREFIX = [ROLE, FIRST_CONTENT];
 const THINK_HELD_PREFIX = [ROLE, ...REASONING, FIRST_CONTENT];
 const RELEASED_REST = [...CONTENT.slice(1), STOP, DONE];
+// Spec「长思考标记」: part k (k=1,2,3) is lines 40(k−1)+1 … 40k of `思考第 N 行`, joined by `\n`;
+// parts 1 and 2 end with `\n`, part 3 does not.
+const LONG_PARTS = [1, 2, 3].map((k) => {
+  const lines = Array.from(
+    { length: 40 },
+    (_unused, index) => `思考第 ${40 * (k - 1) + index + 1} 行`,
+  );
+  return lines.join("\n") + (k < 3 ? "\n" : "");
+});
+const LONG_REASONING = LONG_PARTS.map((part) =>
+  frame(JSON.stringify({ reasoning_content: part }), "null"),
+);
+const LONG_ANSWER = [ROLE, ...LONG_REASONING, ...CONTENT, STOP, DONE];
 
 interface Reply {
   status: number;
@@ -185,11 +205,23 @@ describe("闸门停点 empty: an armed gate holds after the role chunk only", ()
     expect((await send(handle.port, "POST", `/__control/gates/${id}`)).status).toBe(201);
     const live = await openLive(handle.port, answerRound(`${EMPTY} ${WALK}${id}`));
     await readUntil(live, WAIT_MS, (records) => records.includes(ROLE));
-    await readUntil(live, WAIT_MS, () => false);
+    await readUntil(live, TTL_WAIT_MS, () => false);
     expect(normalize(live.text)).toBe(body([ROLE]));
     expect(parseDataRecords(live.text)).not.toContain(DONE);
+    expect(live.ended).toBe(true);
     expect((await send(handle.port, "GET", `/__control/gates/${id}`)).status).toBe(404);
     expect((await send(handle.port, "POST", `/__control/gates/${id}/release`)).status).toBe(404);
+  });
+
+  it("only the last user text counts: a stop point in an earlier user message is ignored", async () => {
+    const run = await armedGateRun(
+      (walk) => walk,
+      (text) => [{ role: "user", content: EMPTY }, TOOL_RESULT, { role: "user", content: text }],
+    );
+    expect(run.prefix).toBe(body(HELD_PREFIX));
+    expect(run.prefixEnded).toBe(false);
+    expect(run.completed).toBe(body([...HELD_PREFIX, ...RELEASED_REST]));
+    expect(run.completedEnded).toBe(true);
   });
 });
 
@@ -236,6 +268,135 @@ describe("闸门停点 without an armed gate: WORKBUDDY_HOLD_AT:empty changes no
     expect(await (await send(port, "GET", `/__control/gates/${id}`)).text()).toBe(
       '{"phase":"armed"}',
     );
+  });
+});
+
+describe("闸门停点 thinking: an armed gate holds after the reasoning chunks", () => {
+  it("with WORKBUDDY_THINK: role and three reasoning chunks before the hold, every content chunk on release", async () => {
+    const run = await armedGateRun(`${THINK} ${THINKING}`);
+    expect(run.prefix).toBe(body([ROLE, ...REASONING]));
+    expect(run.prefixEnded).toBe(false);
+    expect(run.heldPhase).toBe('{"phase":"held"}');
+    expect(run.completed).toBe(body(THINK_ANSWER));
+    expect(run.completedEnded).toBe(true);
+    const records = parseDataRecords(run.completed);
+    for (const record of THINK_ANSWER) {
+      expect(records.filter((item) => item === record)).toHaveLength(1);
+    }
+    expect(run.secondRelease).toBe(404);
+  });
+
+  it("without a thinking marker it is the same as empty", async () => {
+    const run = await armedGateRun(THINKING);
+    expect(run.prefix).toBe(body([ROLE]));
+    expect(run.prefixEnded).toBe(false);
+    expect(run.completed).toBe(body(ANSWER));
+    expect(run.completedEnded).toBe(true);
+    expect(run.secondRelease).toBe(404);
+    expect(run).toEqual(await armedGateRun(EMPTY));
+  });
+
+  it("with WORKBUDDY_THINK_LONG: role and the three long chunks before the hold", async () => {
+    const run = await armedGateRun(`${THINK_LONG} ${THINKING}`);
+    expect(run.prefix).toBe(body([ROLE, ...LONG_REASONING]));
+    expect(run.prefixEnded).toBe(false);
+    expect(run.completed).toBe(body(LONG_ANSWER));
+    expect(run.completedEnded).toBe(true);
+    expect(run.secondRelease).toBe(404);
+  });
+
+  it("WORKBUDDY_PACE stays ignored under the gate: bytes equal the same request without it", async () => {
+    const paced = await armedGateRun(`${PACE} ${THINK} ${THINKING}`);
+    expect(paced.prefix).toBe(body([ROLE, ...REASONING]));
+    expect(paced).toEqual(await armedGateRun(`${THINK} ${THINKING}`));
+  });
+
+  it("without an armed gate it changes nothing", async () => {
+    const port = await upstream();
+    expect(rawOf(await chat(port, answerRound(THINKING)))).toBe(body(ANSWER));
+    expect(rawOf(await chat(port, answerRound(`${THINK} ${THINKING}`)))).toBe(body(THINK_ANSWER));
+    expect(rawOf(await chat(port, answerRound(`${THINK_LONG} ${THINKING}`)))).toBe(
+      body(LONG_ANSWER),
+    );
+    expect(rawOf(await chat(port, toolRound(`${THINK} ${THINKING}`)))).toBe(body(BASH_ROUND));
+  });
+});
+
+describe("长思考标记: WORKBUDDY_THINK_LONG sends 120 lines in three reasoning chunks", () => {
+  it("the expected chunks follow the spec text", () => {
+    expect(LONG_PARTS[0]?.startsWith("思考第 1 行\n思考第 2 行\n")).toBe(true);
+    expect(LONG_PARTS[0]?.endsWith("\n思考第 40 行\n")).toBe(true);
+    expect(LONG_PARTS[1]?.startsWith("思考第 41 行\n")).toBe(true);
+    expect(LONG_PARTS[2]?.endsWith("\n思考第 120 行")).toBe(true);
+    expect(LONG_PARTS.join("").split("\n")).toHaveLength(120);
+  });
+
+  it.each([
+    ["alone", THINK_LONG],
+    ["with WORKBUDDY_THINK before it", `${THINK} ${THINK_LONG}`],
+    ["with WORKBUDDY_THINK after it", `${THINK_LONG} ${THINK}`],
+  ])("%s: role, three long reasoning chunks, then the unchanged reply", async (_label, text) => {
+    const port = await upstream();
+    const raw = rawOf(await chat(port, answerRound(text)));
+    expect(raw).toBe(body(LONG_ANSWER));
+    const reasoning = parseDataRecords(raw)
+      .filter((record) => record !== DONE)
+      .map((record) => JSON.parse(record) as { choices: Array<{ delta: Record<string, unknown> }> })
+      .map((chunk) => chunk.choices[0]?.delta.reasoning_content)
+      .filter((part): part is string => typeof part === "string");
+    expect(reasoning).toHaveLength(3);
+    expect(reasoning.join("")).toBe(
+      Array.from({ length: 120 }, (_unused, index) => `思考第 ${index + 1} 行`).join("\n"),
+    );
+  });
+
+  it("the tool round is unchanged", async () => {
+    const port = await upstream();
+    expect(rawOf(await chat(port, toolRound(THINK_LONG)))).toBe(body(BASH_ROUND));
+  });
+
+  it("under an armed gate the long chunks are part of the prefix before today's hold point", async () => {
+    const run = await armedGateRun(`${THINK} ${THINK_LONG}`);
+    expect(run.prefix).toBe(body([ROLE, ...LONG_REASONING, FIRST_CONTENT]));
+    expect(run.prefixEnded).toBe(false);
+    expect(run.completed).toBe(body(LONG_ANSWER));
+    expect(run.completedEnded).toBe(true);
+    expect(run.secondRelease).toBe(404);
+  });
+
+  it("under an armed gate with WORKBUDDY_HOLD_AT:empty the long chunks wait for release", async () => {
+    const run = await armedGateRun(`${THINK_LONG} ${EMPTY}`);
+    expect(run.prefix).toBe(body([ROLE]));
+    expect(run.completed).toBe(body(LONG_ANSWER));
+  });
+
+  it("WORKBUDDY_PACE keeps its own three short reasoning chunks (slice 1 unchanged)", async () => {
+    const port = await upstream();
+    expect(rawOf(await chat(port, answerRound(`${PACE} ${THINK_LONG}`)))).toBe(body(PACED));
+  });
+});
+
+describe("无标记请求逐字节不变: requests without the new markers keep the pre-change bytes", () => {
+  it.each([
+    ["answering round", answerRound("你好"), ANSWER],
+    ["answering round with WORKBUDDY_THINK", answerRound(`${THINK} 你好`), THINK_ANSWER],
+    ["tool round", toolRound("你好"), BASH_ROUND],
+    ["tool round with WORKBUDDY_THINK", toolRound(THINK), BASH_ROUND],
+  ])("%s", async (_label, messages, records) => {
+    const port = await upstream();
+    expect(rawOf(await chat(port, messages))).toBe(body(records));
+  });
+
+  it.each([
+    ["gated answering round", "", HELD_PREFIX],
+    ["gated answering round with WORKBUDDY_THINK", THINK, THINK_HELD_PREFIX],
+  ])("%s holds after the first content chunk", async (_label, extra, held) => {
+    const run = await armedGateRun(extra);
+    expect(run.prefix).toBe(body(held));
+    expect(run.prefixEnded).toBe(false);
+    expect(run.completed).toBe(body([...held, ...RELEASED_REST]));
+    expect(run.completedEnded).toBe(true);
+    expect(run.secondRelease).toBe(404);
   });
 });
 
@@ -294,15 +455,19 @@ async function chat(port: number, messages: unknown[]): Promise<Reply> {
 
 /**
  * Arms a gate, sends the answering round and waits out the hold. A string is followed by the walk
- * marker; a function places the walk marker itself.
+ * marker; a function places the walk marker itself. `history` turns the text into the request's
+ * messages (default: that text as the only user message, then a tool result).
  */
-async function armedGateRun(extra: string | ((walk: string) => string)): Promise<GateRun> {
+async function armedGateRun(
+  extra: string | ((walk: string) => string),
+  history: (text: string) => unknown[] = answerRound,
+): Promise<GateRun> {
   const port = await upstream();
   const id = randomUUID();
   expect((await send(port, "POST", `/__control/gates/${id}`)).status).toBe(201);
   const walk = `${WALK}${id}`;
   const text = typeof extra === "string" ? `${extra} ${walk}`.trim() : extra(walk);
-  const live = await openLive(port, answerRound(text));
+  const live = await openLive(port, history(text));
   await readUntil(live, WAIT_MS, (records) => records.includes(ROLE));
   await readUntil(live, IDLE_MS, () => false);
   const prefix = normalize(live.text);
