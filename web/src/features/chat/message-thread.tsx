@@ -29,7 +29,10 @@ import { useThreadRuntime } from "./use-thread-runtime.js";
 import type { SessionSpace, Workspace } from "./workspace-list.js";
 
 type ThreadProps = {
-  /** 选中的会话已归档（只读）：不渲染 `撤回`、`从此处分叉` 与 `重新生成`，零消息时也不显示空态。 */
+  /**
+   * 选中的会话已归档（只读）：不渲染 `撤回`、`从此处分叉` 与 `重新生成`（`复制` 照常），零消息时也不
+   * 显示空态。
+   */
   archived: boolean;
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
@@ -102,24 +105,32 @@ const UserMessage = memo(function UserMessage({
       <article
         aria-current={current ? "true" : undefined}
         aria-label="用户"
-        className={`flex max-w-[80%] min-w-0 flex-col gap-2 self-end rounded-2xl rounded-br-sm bg-(--wb-bg-hover-light) px-[15px] py-2.5 narrow:max-w-full ${CURRENT_MATCH}`}
+        className={`group/message flex max-w-[80%] min-w-0 flex-col items-end self-end narrow:max-w-full aria-[current=true]:rounded-2xl ${CURRENT_MATCH}`}
       >
-        {text === "" ? null : (
-          <p
-            className="m-0 text-sm leading-[1.65] wrap-anywhere whitespace-pre-wrap text-foreground"
-            data-slot="message-body"
-          >
-            {text}
-          </p>
-        )}
-        <MessageAttachments attachments={custom.attachments} />
-        <ToolCallGroup steps={custom.steps} />
-        <MessageError error={custom.error} retrying={custom.retrying} status={custom.status} />
-        {archived ? null : (
+        <div
+          className="flex max-w-full min-w-0 flex-col gap-2 rounded-2xl rounded-br-sm bg-(--wb-bg-hover-light) px-[15px] py-2.5"
+          data-slot="message-bubble"
+        >
+          {text === "" ? null : (
+            <p
+              className="m-0 text-sm leading-[1.65] wrap-anywhere whitespace-pre-wrap text-foreground"
+              data-slot="message-body"
+            >
+              {text}
+            </p>
+          )}
+          <MessageAttachments attachments={custom.attachments} />
+          <ToolCallGroup steps={custom.steps} />
+          <MessageError error={custom.error} retrying={custom.retrying} status={custom.status} />
+        </div>
+        {/* 归档时只剩 `复制`；文本也为空（只发附件）时行里没有按钮，不渲染。 */}
+        {archived && text === "" ? null : (
           <UserActions
+            archived={archived}
             disabled={locked}
             onFork={() => void onFork(id)}
             onUndo={(trigger) => void onUndo(id, trigger)}
+            text={text}
             undo={custom.undo}
           />
         )}
@@ -202,7 +213,7 @@ const AssistantMessage = memo(function AssistantMessage({
       <article
         aria-current={current ? "true" : undefined}
         aria-label="助手"
-        className={`flex max-w-full min-w-0 gap-2.5 self-stretch aria-[current=true]:rounded-lg ${CURRENT_MATCH}`}
+        className={`group/message flex max-w-full min-w-0 gap-2.5 self-stretch aria-[current=true]:rounded-lg ${CURRENT_MATCH}`}
       >
         <span
           aria-hidden="true"

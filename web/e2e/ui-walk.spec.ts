@@ -8,6 +8,7 @@ import {
   test,
 } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
+import { walkActionRow } from "./ui-walk-action-row.js";
 import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-walk-approval.js";
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
@@ -164,7 +165,7 @@ async function walkProductionOrigin(
   // 且先于退出登录。第 #424 步还要用到它们，所以 `finally` 包到进入设置页为止。
   const created = watchCreatedSessions(page);
   try {
-    await walkHeldDialogue(page, project, created);
+    await walkHeldDialogue(page, project, created, oracle);
     // 放在建会话之后：列表非空时仍须满足首屏约束（#424）。
     await clickRoute(page, project, "会话");
     await expectAuthenticatedRoute(page, project, "/", ROUTES[0].heading, "会话");
@@ -380,6 +381,7 @@ async function walkHeldDialogue(
   page: Page,
   project: WalkProject,
   created: CreatedSessions,
+  oracle: AuthOracle,
 ): Promise<void> {
   const gateId = randomUUID();
   const prompt = `${WALK_MARKER}${gateId}`;
@@ -430,6 +432,7 @@ async function walkHeldDialogue(
     );
     const stopGate = await walkStop(page, project, sessionId);
     await walkRegenerate(page, project, sessionId, stopGate);
+    await walkActionRow(page, project, oracle);
     await walkFork(page, project, sessionId, prompt);
   } finally {
     await deleteGate(origin, gateId);

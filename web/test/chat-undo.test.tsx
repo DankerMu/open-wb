@@ -64,7 +64,7 @@ import { FakeXhr, installFakeXhr } from "./upload-support.js";
 afterEach(cleanupUndoPage);
 
 describe("撤回按钮", () => {
-  it("用户消息操作行的按钮与次序：done 会话里 撤回 在 从此处分叉 之前，二者可用；助手消息没有", async () => {
+  it("用户消息操作行的按钮与次序：done 会话里 复制、撤回、从此处分叉 依次排列，三者可用；助手消息没有 撤回", async () => {
     await mount(S);
     const users = userArticles();
     expect(users).toHaveLength(2);
@@ -72,11 +72,15 @@ describe("撤回按钮", () => {
       const row = article.querySelector<HTMLElement>('[data-slot="message-actions"]');
       expect(row).not.toBeNull();
       const all = within(row as HTMLElement).getAllByRole<HTMLButtonElement>("button");
-      expect(all.map((b) => b.getAttribute("aria-label"))).toEqual([UNDO_LABEL, FORK_LABEL]);
-      expect(all.map((b) => b.title)).toEqual([UNDO_LABEL, FORK_LABEL]);
-      expect(all.map((b) => b.disabled)).toEqual([false, false]);
-      expect(all.map((b) => b.getAttribute("aria-disabled"))).toEqual([null, null]);
-      expect(all.map((b) => b.type)).toEqual(["button", "button"]);
+      expect(all.map((b) => b.getAttribute("aria-label"))).toEqual([
+        "复制",
+        UNDO_LABEL,
+        FORK_LABEL,
+      ]);
+      expect(all.map((b) => b.title)).toEqual(["复制", UNDO_LABEL, FORK_LABEL]);
+      expect(all.map((b) => b.disabled)).toEqual([false, false, false]);
+      expect(all.map((b) => b.getAttribute("aria-disabled"))).toEqual([null, null, null]);
+      expect(all.map((b) => b.type)).toEqual(["button", "button", "button"]);
       expect(description(undoButton(article))).toBeNull();
     }
     for (const article of screen.getAllByRole("article", { name: "助手" })) {

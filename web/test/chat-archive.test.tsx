@@ -160,8 +160,8 @@ async function findRound() {
 }
 
 /**
- * 只读呈现：说明与 `恢复` 在；没有输入框、`发送`、能力栏与停靠区；用户消息没有操作行，助手消息没有
- * `重新生成`、仍有 `复制`。
+ * 只读呈现：说明与 `恢复` 在；没有输入框、`发送`、能力栏与停靠区；用户消息的操作行只有 `复制`（issue
+ * 908），助手消息没有 `重新生成`、仍有 `复制`。
  */
 async function expectReadOnly() {
   const { assistant, user } = await findRound();
@@ -173,7 +173,13 @@ async function expectReadOnly() {
   for (const label of ["撤回", FORK, REGENERATE]) {
     expect(screen.queryByRole("button", { name: label }), label).toBeNull();
   }
-  expect(user.querySelector('[data-slot="message-actions"]')).toBeNull();
+  const userRow = user.querySelector<HTMLElement>('[data-slot="message-actions"]');
+  expect(userRow).not.toBeNull();
+  expect(
+    within(userRow as HTMLElement)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label")),
+  ).toEqual(["复制"]);
   expect(within(assistant).getByRole("button", { name: "复制" })).toBeTruthy();
 }
 

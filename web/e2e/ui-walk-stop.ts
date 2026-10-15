@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, type Page, type Request } from "@playwright/test";
+import { revealActions } from "./ui-walk-action-row.js";
 import { generatingStatus } from "./ui-walk-approval.js";
 import { armGate, controlOrigin, deleteGate, gatePhase } from "./ui-walk-gate.js";
 import { inspectSidebar, type WalkProject } from "./ui-walk-layout.js";
@@ -129,6 +130,8 @@ export async function walkRegenerate(
   await expect.poll(() => gatePhase(origin, gateId)).toBe("status:404");
   await expect(stoppedBadge).toBeVisible();
 
+  // 操作行悬停才显现（issue 908）：点击前先证明它隐藏、悬停后显现。
+  await revealActions(page, second);
   const accepted = sessionPost(page, sessionId, "regenerate");
   await regenerate.click();
   expect((await accepted).status()).toBe(202);
@@ -192,6 +195,7 @@ export async function walkFork(
   await expect(bubble).toHaveCSS("white-space", "pre-wrap");
   await expect(first).toHaveCSS("align-self", "flex-end");
   await expect(fork).toBeEnabled();
+  await revealActions(page, first);
   page.on("request", onRequest);
   try {
     const created = sessionPost(page, sessionId, "fork");

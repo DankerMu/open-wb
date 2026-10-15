@@ -6,6 +6,7 @@
 // 从它开头的一次导航到第 6 步结束，页面不再导航或刷新：侧栏的变化都来自那一条列表事件连接。
 import { randomUUID } from "node:crypto";
 import { expect, type Locator, type Page, type Request } from "@playwright/test";
+import { revealActions } from "./ui-walk-action-row.js";
 import { deleteCreatedSession, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { inspectSidebar, sessionList, type WalkProject } from "./ui-walk-layout.js";
 import { walkOpenWebPreview } from "./ui-walk-workspace-sidebar.js";
@@ -339,6 +340,7 @@ async function undoFirstTurn(walk: TempWalk, { sessionId, workspaceId }: TempSes
   const messageId = await onlyUserMessageId(page, sessionId);
   await expect(undo).toBeEnabled();
   await expect(undo).not.toHaveAttribute("aria-disabled");
+  await revealActions(page, user);
 
   const undos = watchRequests(page, "POST", (pathname) => UNDO_PATH.test(pathname));
   await undo.click();
