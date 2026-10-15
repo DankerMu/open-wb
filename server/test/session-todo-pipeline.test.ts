@@ -57,13 +57,16 @@ const T3_FIRST_TASKS = [
   { content: "读取需求", status: "completed" },
   { content: "列出要点", status: "in_progress" },
 ];
-/** One fake-omp `todo` turn: the tool call, three text deltas, the terminal. */
+/**
+ * One fake-omp `todo` turn: the tool call, the text, the terminal. #910: the three text frames
+ * arrive at one injected instant, so the first is published at once and the other two as one,
+ * flushed by turn.end.
+ */
 const TURN_WITH_UPDATE = [
   "turn.start",
   "step.start",
   "todo.updated",
   "step.end",
-  "text.delta",
   "text.delta",
   "text.delta",
   "turn.end",

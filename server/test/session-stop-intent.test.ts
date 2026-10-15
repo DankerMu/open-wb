@@ -24,6 +24,7 @@ import {
   afterPrompt,
   expectNoError,
   GRACE_MS,
+  heldSecondDelta,
   history,
   listedStatus,
   probeFrames,
@@ -139,7 +140,7 @@ describe("stop intent before the dispatch receipt (#490)", () => {
       const early = stopBeforeDispatch(world);
       await Promise.all(early.stops);
       await early.prompt;
-      await waitForEvent(world, "text.delta", 2);
+      await heldSecondDelta(world);
       const { child, stdin } = spawnedAt(world, 0);
       // Honored by the receipt itself, before any later stop could take the dispatched path.
       expect(abortCount(stdin)).toBe(1);

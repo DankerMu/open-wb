@@ -446,16 +446,63 @@ export function createStartHeldRuntime(): ControlledRuntime {
   });
 }
 
-function createManyDeltaRuntime(count: number, delta: string): ControlledRuntime {
+/** The prompt opens the turn; the case writes its text frames (`emitEachInWindow`). */
+export function createOpenTurnRuntime(): ControlledRuntime {
   return createControlledRuntime((child) => {
     closeOnEof(child);
     child.onCommand("prompt", () => {
       child.emitLine({ type: "agent_start" });
-      for (let n = 0; n < count; n += 1) {
-        emitAssistantDelta(child, delta);
-      }
     });
   });
+}
+
+/** chat-stream「正文与思考增量的时间窗合并」: one delta coalescer window. */
+export const TEXT_WINDOW_MS = 250;
+
+/**
+ * #910: writes each text delta in its own coalescer window (the injected clock advances 250 ms,
+ * the frame is written, the ring is awaited), so every delta is published at once as its own
+ * text.delta: the one-event-per-frame stream the ring and replay cases are about.
+ */
+export async function emitEachInWindow(
+  opened: ControlledSession,
+  child: FakeChild,
+  deltas: readonly string[],
+): Promise<void> {
+  const seq = () => opened.fixture.supervisor.streamCursor(opened.session).seq ?? 0;
+  for (const delta of deltas) {
+    const before = seq();
+    opened.runtime.clock.advance(TEXT_WINDOW_MS);
+    emitAssistantDelta(child, delta);
+    await waitFor(() => (seq() > before ? true : undefined), "a text delta in its own window");
+  }
+}
+
+/**
+ * #910: the delta coalescer's timers armed and neither fired nor cleared. Counts only timers of at
+ * most 250 ms (every other timer on the injected clock is ≥ 1000 ms); wraps the clock every
+ * consumer shares, so it is called before the app opens.
+ */
+export function trackBufferTimers(clock: TestClock): () => number {
+  const live = new Set<unknown>();
+  const arm = clock.setTimeout.bind(clock);
+  const disarm = clock.clearTimeout.bind(clock);
+  clock.setTimeout = (callback, ms) => {
+    if (ms > 250) {
+      return arm(callback, ms);
+    }
+    const id = arm(() => {
+      live.delete(id);
+      callback();
+    }, ms);
+    live.add(id);
+    return id;
+  };
+  clock.clearTimeout = (id) => {
+    live.delete(id);
+    disarm(id);
+  };
+  return () => live.size;
 }
 
 export function completeHeldTurn(child: { emitLine(frame: object): void }): void {
@@ -510,7 +557,7 @@ export async function openBulkDeltaSession(
   count: number,
   delta: string,
 ): Promise<ControlledSession> {
-  const runtime = createManyDeltaRuntime(count, delta);
+  const runtime = createOpenTurnRuntime();
   const opened = { runtime, ...(await openBareSession(runtime.runtime)) };
   return closeOnFixtureFailure(opened.fixture, async () => {
     const response = await postPrompt(
@@ -520,6 +567,8 @@ export async function openBulkDeltaSession(
       JSON.stringify({ message: "bulk" }),
     );
     expect(response.statusCode).toBe(202);
+    const deltas = Array.from({ length: count }, () => delta);
+    await emitEachInWindow(opened, await waitForChild(runtime), deltas);
     await waitForContent(opened.fixture, opened.session, delta.repeat(count));
     return opened;
   });

@@ -239,6 +239,7 @@ export function persistEvent(
       store.recordError(assistantMessageId, failure);
       return { type: "error", data: { messageId, message, ...failure } };
     }
+    // #910: the supervisor's delta coalescer takes text.delta first and calls appendDelta itself.
     case "text.delta":
       store.appendDelta(assistantMessageId, event.data.delta);
       return event;
@@ -300,7 +301,7 @@ export function persistEvent(
         ? undefined
         : { type: "todo.updated", data: { messageId: event.data.messageId, todo: stored.todo } };
     }
-    // thinking.delta never reaches here: the supervisor's merge buffer (#519) takes it first.
+    // thinking.delta never reaches here: the supervisor's delta coalescer (#910) takes it first.
     case "thinking.delta":
       return undefined;
   }

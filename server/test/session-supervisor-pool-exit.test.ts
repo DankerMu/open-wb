@@ -24,6 +24,7 @@ import {
   IDLE_MS,
   OWNER_ID,
   resumePath,
+  TEXT_WINDOW_MS,
   waitFor,
   waitForContent,
 } from "./session-supervisor-helpers.js";
@@ -243,6 +244,8 @@ describe("SessionSupervisor process exit releases capacity", () => {
       expect(supervisor.streamCursor(a)).toEqual({ epoch: 1, seq: 2 });
       expect(runtimes.shutdowns()).toEqual([]);
 
+      // #910: a coalescer window after "Hello", so "!" is published at once as its own delta.
+      rt.clock.advance(TEXT_WINDOW_MS);
       emitAssistantDelta(childA, "!");
       await waitForContent(world.fixture, a, "Hello!");
       expect(supervisor.streamCursor(a)).toEqual({ epoch: 1, seq: 3 });

@@ -28,6 +28,7 @@ import {
   openHeldPromptSession,
   openStartHeldSession,
   startHeldTurn,
+  TEXT_WINDOW_MS,
   waitFor,
   waitForContent,
 } from "./session-supervisor-helpers.js";
@@ -125,6 +126,8 @@ describe("authenticated session event stream", () => {
     const { runtime, fixture, cookie, session, child } = await openHeldPromptSession();
     try {
       const special = "line1\nline2\u0000\uFEFFπ";
+      // #910: a coalescer window after "Hello", so the delta is published at once, alone.
+      runtime.clock.advance(TEXT_WINDOW_MS);
       emitAssistantDelta(child, special);
       await waitForContent(fixture, session, `Hello${special}`);
 
@@ -302,6 +305,7 @@ describe("authenticated session event stream", () => {
       expect(stream.bufferedBytes()).toBeLessThan(900 * LARGE_DELTA.length);
       const lastId = lastDataId(stream.preview());
       expect(lastId).toMatch(/^1:\d+$/u);
+      runtime.clock.advance(TEXT_WINDOW_MS);
       emitAssistantDelta(child, "!");
       await waitForContent(fixture, session, `${LARGE_DELTA.repeat(900)}!`);
       await waitFor(
@@ -344,7 +348,8 @@ describe("authenticated session event stream", () => {
   it("ends an ordinary live write-false client without queueing later events", {
     timeout: 15_000,
   }, async () => {
-    const { fixture, session, child, stream, observed } = await openLiveWriteFalseDelta(false);
+    const { runtime, fixture, session, child, stream, observed } =
+      await openLiveWriteFalseDelta(false);
     try {
       await waitForContent(fixture, session, "Hello!");
       await waitFor(
@@ -358,6 +363,7 @@ describe("authenticated session event stream", () => {
       );
       expect(body).toContain("id: 1:3");
       expect(body).not.toContain("id: 1:4");
+      runtime.clock.advance(TEXT_WINDOW_MS);
       emitAssistantDelta(child, "later");
       await waitForContent(fixture, session, "Hello!later");
       expect(collected(stream)).not.toContain("id: 1:4");

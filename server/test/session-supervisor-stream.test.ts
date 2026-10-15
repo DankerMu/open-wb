@@ -4,11 +4,12 @@ import { postPrompt } from "./session-rest-helpers.js";
 import { messageRow } from "./session-store-helpers.js";
 import {
   closeFixture,
-  closeOnEof,
   completeHeldTurn,
   createControlledRuntime,
+  createOpenTurnRuntime,
   createStartHeldRuntime,
   emitAssistantDelta,
+  emitEachInWindow,
   expectHistory,
   IDLE_MS,
   OWNER_ID,
@@ -16,6 +17,7 @@ import {
   requiredCall,
   requiredToken,
   type SupervisorApp,
+  TEXT_WINDOW_MS,
   waitFor,
   waitForChild,
   waitForTurn,
@@ -107,6 +109,8 @@ describe("SessionSupervisor generation streamCursor", () => {
       await expectHistory(fixture, cookie, session, { epoch: 1, seq: 2 });
       expect(messageRow(fixture.db, assistantId(fixture, session)).content).toBe("");
 
+      // #910: a coalescer window after "Hello", so "!" is published at once as its own delta.
+      runtime.clock.advance(TEXT_WINDOW_MS);
       emitAssistantDelta(child, "!");
       await waitFor(
         () =>
@@ -269,17 +273,14 @@ describe("SessionSupervisor generation streamCursor", () => {
   it("covers 1000 start-evicted deltas then a 1048-byte flush at cursor 1:1002", {
     timeout: 15_000,
   }, async () => {
-    const runtime = createControlledRuntime((child) => {
-      closeOnEof(child);
-      child.onCommand("prompt", () => {
-        child.emitLine({ type: "agent_start" });
-        for (let n = 0; n < 1_000; n += 1) {
-          emitAssistantDelta(child, "a");
-        }
-        emitAssistantDelta(child, "b".repeat(1_048));
-      });
-    });
-    const { fixture, cookie, session } = await openBareSession(runtime.runtime);
+    // #910: each delta in its own coalescer window, so the ring still takes 1001 text.delta. The
+    // windows run on the injected clock; the store's 2000 ms flush timer is a global setTimeout,
+    // faked here so the 1001 real-time round trips cannot flush a prefix before the 2048-byte
+    // inline flush the database assertion relies on.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const runtime = createOpenTurnRuntime();
+    const opened = { runtime, ...(await openBareSession(runtime.runtime)) };
+    const { fixture, cookie, session } = opened;
     try {
       const accepted = await postPrompt(
         fixture.app,
@@ -288,6 +289,8 @@ describe("SessionSupervisor generation streamCursor", () => {
         JSON.stringify({ message: "overlap" }),
       );
       expect(accepted.statusCode).toBe(202);
+      const deltas = [...Array.from({ length: 1_000 }, () => "a"), "b".repeat(1_048)];
+      await emitEachInWindow(opened, await waitForChild(runtime), deltas);
       const expected = `${"a".repeat(1_000)}${"b".repeat(1_048)}`;
       await waitFor(
         () =>
@@ -311,6 +314,7 @@ describe("SessionSupervisor generation streamCursor", () => {
       expect(body.streamCursor).toEqual({ epoch: 1, seq: 1_002 });
       expect(messageRow(fixture.db, assistantId(fixture, session)).content).toBe(expected);
     } finally {
+      vi.useRealTimers();
       await closeFixture(fixture);
     }
   });

@@ -18,6 +18,7 @@ import {
   waitForEvent,
 } from "./session-approval-helpers.js";
 import { postPrompt } from "./session-rest-helpers.js";
+import { waitFor } from "./session-supervisor-helpers.js";
 
 export type StopScenario =
   | "abort-ok"
@@ -27,6 +28,8 @@ export type StopScenario =
   | "approval-chain-abort-ignored";
 
 export const GRACE_MS = 8_000;
+/** chat-stream「正文与思考增量的时间窗合并」. */
+const WINDOW_MS = 250;
 
 interface PublicStep {
   id: number;
@@ -62,10 +65,21 @@ export function stop(world: ApprovalWorld): Promise<void> {
   return world.fixture.supervisor.stop(world.session);
 }
 
-/** Prompts and waits until the turn published its first two text deltas ("Hello ", "from "). */
+/**
+ * Prompts and waits until the turn published its first text delta ("Hello ") and holds the second
+ * ("from "): #910's coalescer keeps it for the 250 ms window on a clock that does not move, so the
+ * turn's terminal flushes it right before turn.end.
+ */
 export async function heldTurn(world: ApprovalWorld): Promise<void> {
   await prompted(world);
-  await waitForEvent(world, "text.delta", 2);
+  await heldSecondDelta(world);
+}
+
+/** The wait of `heldTurn` after the prompt: "Hello " published, "from " held. */
+export async function heldSecondDelta(world: ApprovalWorld): Promise<void> {
+  await waitForEvent(world, "text.delta");
+  const due = world.clock.now() + WINDOW_MS;
+  await waitFor(() => (world.timersDueAt(due) === 1 ? true : undefined), "held second text delta");
 }
 
 /** Frames the child read after the turn's first `prompt` frame. */
