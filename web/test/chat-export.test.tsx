@@ -73,6 +73,7 @@ function user(id: number, content: string) {
     undo: "none" as const,
     attachments: [],
     error: null,
+    thinkingMs: null,
   };
 }
 
@@ -105,6 +106,7 @@ function assistant(
     undo: null,
     attachments: [],
     error: null,
+    thinkingMs: null,
   };
 }
 

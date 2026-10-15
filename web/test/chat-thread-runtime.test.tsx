@@ -43,6 +43,8 @@ function view(id: number, role: View["role"], status: View["status"], content = 
     approvals: [],
     error: null,
     retrying: false,
+    thinkingMs: null,
+    thinkingActive: false,
   };
   return { id, role, content, status, undo, ...empty };
 }

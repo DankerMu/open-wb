@@ -32,7 +32,7 @@ const session = {
   ...NULL_SESSION_META,
 };
 
-/** A message with every key but `error`. */
+/** A message with every key but `error` (`thinkingMs` null, issue 910). */
 function message(id: number, role: "user" | "assistant") {
   return {
     id,
@@ -45,6 +45,7 @@ function message(id: number, role: "user" | "assistant") {
     steps: [],
     undo: role === "user" ? "available" : null,
     attachments: [],
+    thinkingMs: null,
   };
 }
 

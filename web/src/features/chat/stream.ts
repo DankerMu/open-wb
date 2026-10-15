@@ -24,7 +24,14 @@ import {
   markRetrying,
 } from "./stream-failure.js";
 import { type ChatStepView, endStep, startStep } from "./stream-steps.js";
-import { appendThinking, type ChatThinkingEvent, decodeThinkingDelta } from "./stream-thinking.js";
+import {
+  appendThinking,
+  type ChatThinkingEvent,
+  decodeThinkingDelta,
+  decodeThinkingEnd,
+  endThinking,
+  snapshotThinkingActive,
+} from "./stream-thinking.js";
 import { type ChatTodoEvent, decodeTodoUpdated, setTodo } from "./stream-todo.js";
 
 type ChatMessageView = {
@@ -40,6 +47,8 @@ type ChatMessageView = {
   error: ChatMessage["error"];
   /** omp 正在会话级重试（`turn.retry` 之后、该消息的下一个事件之前）；快照里恒为 false。 */
   retrying: boolean;
+  thinkingMs: ChatMessage["thinkingMs"];
+  thinkingActive: boolean;
 };
 
 export type ChatState = {
@@ -98,6 +107,7 @@ const DATA_EVENTS = [
   "approval.request",
   "approval.resolved",
   "thinking.delta",
+  "thinking.end",
   "files.changed",
   "todo.updated",
   "turn.retry",
@@ -131,6 +141,8 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
       approvals: approvalViews(message.approvals),
       error: message.error,
       retrying: false,
+      thinkingMs: message.thinkingMs,
+      thinkingActive: snapshotThinkingActive(message),
     })),
     todo: snapshot.todo,
   };
@@ -139,24 +151,8 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
 export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
   switch (event.type) {
     case "turn.start":
-      return replaceAssistant(
-        state,
-        event.data.messageId,
-        (message) => ({
-          id: message.id,
-          role: "assistant",
-          content: "",
-          thinking: null,
-          status: "running",
-          undo: null,
-          attachments: [],
-          steps: [],
-          approvals: [],
-          error: null,
-          retrying: false,
-        }),
-        "running",
-      );
+      // A new turn starts from an empty running assistant (approvals, thinking and its time reset).
+      return replaceAssistant(state, event.data.messageId, (m) => emptyAssistant(m.id), "running");
     case "text.delta":
       return replaceAssistant(state, event.data.messageId, (message) => ({
         ...message,
@@ -196,6 +192,8 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       return replaceAssistant(state, event.data.messageId, (m) =>
         appendThinking(clearRetrying(m), event.data.delta),
       );
+    case "thinking.end":
+      return replaceAssistant(state, event.data.messageId, (m) => endThinking(m, event.data));
     // files.changed only replaces one step's changes; the session status is left untouched.
     case "files.changed":
       return replaceAssistant(state, event.data.messageId, (m) => setStepChanges(m, event.data));
@@ -216,6 +214,7 @@ function endTurn(state: ChatState, messageId: number, status: ChatTurnEndStatus)
       status,
       error: status === "failed" ? message.error : null,
       retrying: false,
+      thinkingActive: false,
       steps: message.steps.some((step) => step.status === "running")
         ? message.steps.map((step) => (step.status === "running" ? { ...step, status } : step))
         : message.steps,
@@ -237,6 +236,8 @@ function emptyAssistant(messageId: number): ChatMessageView {
     approvals: [],
     error: null,
     retrying: false,
+    thinkingMs: null,
+    thinkingActive: false,
   };
 }
 
@@ -673,6 +674,8 @@ function decodeEvent(type: ChatEventType, value: unknown): ChatEvent | undefined
       return decodeApprovalResolved(value);
     case "thinking.delta":
       return decodeThinkingDelta(value);
+    case "thinking.end":
+      return decodeThinkingEnd(value);
     case "files.changed":
       return decodeFilesChanged(value);
     case "todo.updated":

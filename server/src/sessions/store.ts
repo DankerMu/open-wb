@@ -99,6 +99,8 @@ export interface MessageView {
   attachments: StoredAttachment[];
   /** The three error columns (#909, store-error.ts); null for a user message and when unset. */
   error: MessageError | null;
+  /** `thinking_ms` (044, store-branch.ts `thinkingMsOf`); null for a user message and when unset. */
+  thinkingMs: number | null;
   steps: StepView[];
   /** Every approval row of this message in ascending id order; `[]` for user messages. */
   approvals: ApprovalEntry[];

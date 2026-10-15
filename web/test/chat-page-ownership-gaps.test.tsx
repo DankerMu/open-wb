@@ -64,6 +64,7 @@ describe("chat page confirmed ownership gaps", () => {
       steps: [] as [],
       thinking: null,
       error: null,
+      thinkingMs: null,
     };
     const idleSnapshot: ChatMessageSnapshot = {
       session: { ...runningSession("idle"), title: "saved title" },
@@ -87,6 +88,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
         {
           id: 1,
@@ -100,6 +102,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
       ],
       streamCursor: { epoch: 2, seq: 3 },
@@ -219,6 +222,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
         {
           id: 1,
@@ -232,6 +236,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
       ],
       streamCursor: { epoch: 1, seq: 6 },
@@ -276,6 +281,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
         {
           id: 2,
@@ -289,6 +295,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
       ],
       streamCursor: { epoch: 1, seq: 9 },
@@ -388,6 +395,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
         {
           id: 0,
@@ -401,6 +409,7 @@ describe("chat page confirmed ownership gaps", () => {
           steps: [],
           thinking: null,
           error: null,
+          thinkingMs: null,
         },
       ],
       streamCursor: { epoch: 1, seq: 3 },

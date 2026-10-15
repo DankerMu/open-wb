@@ -6,7 +6,8 @@
  * are created over `POST /api/workspaces` (the sandbox root is created first: the workspace store
  * realpaths it); the source is created over `POST /api/sessions {workspaceId?, scene}` and pinned
  * over `PATCH /api/sessions/:id {pinned:true}`; its history is written through the store
- * (`seedTwoTurns`), its steps and the `thinking`/`changes` columns by direct SQL. Oracles: the
+ * (`seedTwoTurns`), its steps and the `thinking`/`thinking_ms`/`changes` columns by direct SQL
+ * (`thinking_ms`: #910 slice 3c, turn-control「从此处分叉 REST」). Oracles: the
  * fork 201 body, `GET /api/sessions`, the public snapshot, SQLite columns (with `typeof`), the
  * admin `GET /api/audit` view, spawn argv and the probe turn's reported `cwd=`. Paths are compared
  * through realpath (macOS tmpdir is /var → /private/var).
@@ -45,6 +46,8 @@ const JSON_TYPE = "application/json";
 const UNBOUND_SOURCE = "7".repeat(32);
 /** Copied assistant a1's thinking: multi-byte on purpose (CJK and an astral emoji). */
 const THINKING = "先读 README，再改 src/app.ts 🤔";
+/** Copied assistant a1's duration (#910 slice 3c); a2 keeps the NULL its turn left. */
+const THINKING_MS_A1 = 61_500;
 const CHANGES_A1 = [
   { path: "src/app.ts", added: 3, removed: 1, kind: "edit" },
   { path: "notes/计划.md", added: null, removed: null, kind: "write" },
@@ -96,6 +99,7 @@ interface PublicHistory {
   messages: Array<{
     role: string;
     thinking: string | null;
+    thinkingMs: number | null;
     attachments: unknown;
     steps: Array<{ ordinal: number; changes: unknown }>;
   }>;
@@ -212,6 +216,15 @@ function thinkingColumn(db: DatabaseSync, session: string) {
     .all(session);
 }
 
+/** `thinking_ms` of every message of `session`, in snapshot order, with its storage class. */
+function thinkingMsColumn(db: DatabaseSync, session: string) {
+  return db
+    .prepare(
+      "SELECT thinking_ms, typeof(thinking_ms) AS type FROM chat_messages WHERE session_id = ? ORDER BY created_at, id",
+    )
+    .all(session);
+}
+
 /** `attachments` of every message of `session`, in snapshot order, with its storage class. */
 function attachmentsColumn(db: DatabaseSync, session: string) {
   return db
@@ -238,8 +251,9 @@ function insertStep(db: DatabaseSync, messageId: number, ordinal: number, change
 
 /**
  * u1 → a1 → u2 → a2 → u3 (QUESTION) → a3 through the store; a1 carries THINKING and two steps
- * (CHANGES_A1, then NULL), a2 a NULL thinking and one CHANGES_A2 step; a3 (after the fork point)
- * carries its own thinking and step, which must stay behind. u1 and u2 hold attachment columns no
+ * (CHANGES_A1, then NULL) and THINKING_MS_A1, a2 a NULL thinking, a NULL thinking_ms and one
+ * CHANGES_A2 step; a3 (after the fork point) carries its own thinking, thinking_ms and step, which
+ * must stay behind. u1 and u2 hold attachment columns no
  * admission writes (`[]` and `not json`, #1019): both read as no attachment, so alignment is as
  * without them, and a copy that re-serialized instead of copying would not reproduce either.
  */
@@ -248,6 +262,8 @@ function seedHistory(world: RegenWorld, session: string): Seeded {
   const seeded = seedTwoTurns(world, { extraTurn: true }, session);
   const setThinking = db.prepare("UPDATE chat_messages SET thinking = ? WHERE id = ?");
   expect(Number(setThinking.run(THINKING, seeded.a1).changes)).toBe(1);
+  const setThinkingMs = db.prepare("UPDATE chat_messages SET thinking_ms = ? WHERE id = ?");
+  expect(Number(setThinkingMs.run(THINKING_MS_A1, seeded.a1).changes)).toBe(1);
   insertStep(db, seeded.a1, 0, JSON.stringify(CHANGES_A1));
   insertStep(db, seeded.a1, 1, null);
   insertStep(db, seeded.a2, 0, JSON.stringify(CHANGES_A2));
@@ -258,6 +274,7 @@ function seedHistory(world: RegenWorld, session: string): Seeded {
     .prepare("SELECT MAX(id) AS id FROM chat_messages WHERE session_id = ? AND role = 'assistant'")
     .get(session) as { id: number };
   setThinking.run("after the fork point", a3.id);
+  setThinkingMs.run(999, a3.id);
   insertStep(
     db,
     a3.id,
@@ -464,6 +481,30 @@ describe("fork inherits workspace and scene but not pin", () => {
         { thinking: null, type: "null" },
       ]);
       expect(column).toEqual(thinkingColumn(db, source).slice(0, 4));
+    },
+  );
+
+  it(
+    "every copied message's thinkingMs equals the source's verbatim, NULL staying null",
+    REAL,
+    async () => {
+      const { db, source, fresh, copy, original } = await copiedHistories();
+
+      expect(copy.map((m) => [m.role, m.thinkingMs])).toEqual([
+        ["user", null],
+        ["assistant", THINKING_MS_A1],
+        ["user", null],
+        ["assistant", null],
+      ]);
+      expect(copy.map((m) => m.thinkingMs)).toEqual(original.map((m) => m.thinkingMs));
+      const column = thinkingMsColumn(db, fresh);
+      expect(column).toEqual([
+        { thinking_ms: null, type: "null" },
+        { thinking_ms: THINKING_MS_A1, type: "integer" },
+        { thinking_ms: null, type: "null" },
+        { thinking_ms: null, type: "null" },
+      ]);
+      expect(column).toEqual(thinkingMsColumn(db, source).slice(0, 4));
     },
   );
 

@@ -52,6 +52,8 @@ function stoppedView(): View {
     approvals: [SETTLED],
     error: FAILURE,
     retrying: false,
+    thinkingMs: 1400,
+    thinkingActive: false,
   };
 }
 
@@ -68,6 +70,8 @@ function runningView(): View {
     approvals: [],
     error: null,
     retrying: false,
+    thinkingMs: null,
+    thinkingActive: false,
   };
 }
 
@@ -99,7 +103,7 @@ describe("convertMessage 映射", () => {
     expect(converted.status).toEqual({ type: "incomplete", reason: "cancelled" });
   });
 
-  it("审批、步骤 changes、error、retrying 与原始状态原值透传，应用层组件读得到", () => {
+  it("审批、步骤 changes、error、retrying、thinkingMs、thinkingActive 与原始状态原值透传，应用层组件读得到", () => {
     const view = stoppedView();
     const custom = messageCustom(convertMessage(view).metadata?.custom ?? {});
 
@@ -113,6 +117,13 @@ describe("convertMessage 映射", () => {
       convertMessage({ ...runningView(), retrying: true }).metadata?.custom ?? {},
     );
     expect(retrying.retrying).toBe(true);
+    expect(custom.thinkingMs).toBe(1400);
+    expect(custom.thinkingActive).toBe(false);
+    const thinking = messageCustom(
+      convertMessage({ ...runningView(), thinking: "想", thinkingActive: true }).metadata?.custom ??
+        {},
+    );
+    expect([thinking.thinkingMs, thinking.thinkingActive]).toEqual([null, true]);
   });
 
   it("thinking 为 null、无步骤的 running 助手消息：只有一个 text part，状态为运行中", () => {
@@ -184,6 +195,7 @@ describe("附件透传：快照 → 视图消息 → 运行时消息的应用自
       undo: role === "user" ? "available" : null,
       attachments,
       error: null,
+      thinkingMs: null,
     };
   }
 

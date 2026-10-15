@@ -34,6 +34,7 @@ function message(id: number, role: "user" | "assistant") {
     steps: [],
     attachments: [],
     error: null,
+    thinkingMs: null,
   };
 }
 

@@ -7,7 +7,7 @@
 #     → 无 body 新建沿用 yolo + 创建审计（from null）→ 非法档位 400 → 改回 write + 审计 → options 复原
 #     → 删除该新建会话 → 其临时空间 tree 404
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
-# → (5) thinking 逐字、bash 步骤 done、标题仍为 PATCH 所设
+# → (5) thinking 逐字、thinkingMs 为非负整数（user 为 null）、bash 步骤 done、标题仍为 PATCH 所设
 # → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤、无 thinking
 #     → /session WORKBUDDY_THINK 冒烟 回合：正文按原样落库、固定回复、thinking 逐字（转义文本到了模型）、无步骤
 # → (7) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
@@ -319,15 +319,17 @@ GET {{base_url}}/api/workspaces/{{composer_ws}}/tree
 HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
-# (4) 发送含 WORKBUDDY_THINK 标记的 prompt：exact 202；捕获 assistantMessageId。不重试本 POST。
+# (4) 发送含 WORKBUDDY_THINK 标记的 prompt：exact 202；捕获 assistantMessageId 与 userMessageId。不重试本 POST。
 POST {{base_url}}/api/sessions/{{session_id}}/prompt
 Content-Type: application/json
 {"message":"WORKBUDDY_THINK 会话元数据冒烟"}
 HTTP 202
 [Captures]
 assistant_id: jsonpath "$.assistantMessageId"
+user_id: jsonpath "$.userMessageId"
 [Asserts]
 jsonpath "$.assistantMessageId" exists
+jsonpath "$.userMessageId" exists
 
 # (4) 审批轮询：有界 retry（约 20s，须 < 60s 自动允许）直到 captured assistant 恰一条 pending bash 审批。
 GET {{base_url}}/api/sessions/{{session_id}}/messages
@@ -353,8 +355,9 @@ jsonpath "$.tool" == "bash"
 jsonpath "$.decision" == "allow"
 
 # (4)(5) 轮询 messages：仅 GET 有界 retry（≥90s，覆盖 60s 自动允许），直到 captured assistant 与 session 均为 done。
-# done 快照：正文匹配 content_pattern，thinking 逐字为受控上游的三分片拼接，bash 步骤 done、步骤全 done，
-# 审批为作答的 allow，首条 prompt 不覆盖 PATCH 设下的标题。
+# done 快照：正文匹配 content_pattern，thinking 逐字为受控上游的三分片拼接，thinkingMs 为非负整数而同一快照的
+# user 消息为 null（#910，键缺失或取值不符都判红），bash 步骤 done、步骤全 done，审批为作答的 allow，
+# 首条 prompt 不覆盖 PATCH 设下的标题。
 GET {{base_url}}/api/sessions/{{session_id}}/messages
 [Options]
 retry: 180
@@ -364,6 +367,9 @@ HTTP 200
 jsonpath "$.messages[?(@.id=={{assistant_id}})].status" == "done"
 jsonpath "$.messages[?(@.id=={{assistant_id}})].content" matches "{{content_pattern}}"
 jsonpath "$.messages[?(@.id=={{assistant_id}})].thinking" == "先读需求，再列要点，最后作答。"
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingMs" isInteger
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingMs" >= 0
+jsonpath "$.messages[?(@.id=={{user_id}})].thinkingMs" == null
 jsonpath "$.messages[?(@.id=={{assistant_id}})].steps[?(@.name=='bash')].status" == "done"
 jsonpath "$.messages[?(@.id=={{assistant_id}})].steps[?(@.status!='done')]" not exists
 jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals[0].decision" == "allow"

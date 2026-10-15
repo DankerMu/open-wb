@@ -49,6 +49,7 @@ const historyUser = {
   steps: [] as [],
   thinking: null,
   error: null,
+  thinkingMs: null,
 };
 
 const userView = {
@@ -63,6 +64,8 @@ const userView = {
   steps: [] as [],
   error: null,
   retrying: false,
+  thinkingMs: null,
+  thinkingActive: false,
 };
 
 function deepFreeze<T>(value: T): T {
@@ -99,6 +102,7 @@ function reducerSnapshot(
       steps: options.steps ?? [],
       thinking: null,
       error: null,
+      thinkingMs: null,
     });
   }
   return {
@@ -165,6 +169,8 @@ describe("Chat stream reducer", () => {
           thinking: null,
           error: null,
           retrying: false,
+          thinkingMs: null,
+          thinkingActive: false,
         },
       ],
     };
@@ -189,6 +195,8 @@ describe("Chat stream reducer", () => {
             thinking: null,
             error: null,
             retrying: false,
+            thinkingMs: null,
+            thinkingActive: false,
           },
         ],
       });
@@ -266,6 +274,8 @@ describe("Chat stream reducer", () => {
           thinking: null,
           error: AGENT_FAILURE,
           retrying: false,
+          thinkingMs: null,
+          thinkingActive: false,
         },
       ],
     });
@@ -299,6 +309,8 @@ describe("Chat stream reducer", () => {
           thinking: null,
           error: AGENT_FAILURE,
           retrying: false,
+          thinkingMs: null,
+          thinkingActive: false,
         },
       ],
     });
@@ -341,6 +353,8 @@ describe("Chat stream reducer", () => {
       thinking: null,
       error: AGENT_FAILURE,
       retrying: false,
+      thinkingMs: null,
+      thinkingActive: false,
     });
 
     const reset = applyChatEvent(dirty, { type: "turn.start", data: { messageId: 0 } });
@@ -358,6 +372,8 @@ describe("Chat stream reducer", () => {
       thinking: null,
       error: null,
       retrying: false,
+      thinkingMs: null,
+      thinkingActive: false,
     });
     expect(frozenSnapshot).toEqual(snapshot);
   });
@@ -391,6 +407,8 @@ describe("Chat stream reducer", () => {
           thinking: null,
           error: null,
           retrying: false,
+          thinkingMs: null,
+          thinkingActive: false,
         },
       ]);
       expect(initial.messages).toHaveLength(1);
@@ -424,6 +442,8 @@ describe("Chat stream reducer", () => {
         thinking: null,
         error: EXACT_FAILURE,
         retrying: false,
+        thinkingMs: null,
+        thinkingActive: false,
       },
     ]);
 
@@ -567,6 +587,8 @@ describe("Chat stream reducer", () => {
       thinking: null,
       error: null,
       retrying: false,
+      thinkingMs: null,
+      thinkingActive: false,
     });
   });
 });

@@ -34,6 +34,7 @@ const MESSAGE_KEYS = [
   "attachments",
   "steps",
   "error",
+  "thinkingMs",
 ];
 const STEP_KEYS = ["id", "ordinal", "name", "detail", "output", "changes", "status"];
 const STORED_CHANGES = [
@@ -57,6 +58,7 @@ interface PublicMessageBody {
   id: number;
   role: string;
   thinking: string | null;
+  thinkingMs: number | null;
   steps: PublicStepBody[];
 }
 
@@ -89,6 +91,14 @@ function writeThinking(db: DatabaseSync, messageId: number, thinking: string): v
   const receipt = db
     .prepare("UPDATE chat_messages SET thinking = ? WHERE id = ?")
     .run(thinking, messageId);
+  expect(receipt.changes).toBe(1);
+}
+
+/** A raw `thinking_ms` write (044 has no CHECK: any storage class a hand edit leaves is kept). */
+function writeThinkingMs(db: DatabaseSync, messageId: number, value: unknown): void {
+  const receipt = db
+    .prepare("UPDATE chat_messages SET thinking_ms = ? WHERE id = ?")
+    .run(value as number | string | null, messageId);
   expect(receipt.changes).toBe(1);
 }
 
@@ -197,6 +207,56 @@ describe("session DTO metadata: message thinking", () => {
       }
     });
   });
+});
+
+describe("session DTO metadata: message thinkingMs (#910 slice 3c)", () => {
+  it("reads the thinking_ms column on assistant rows, null for NULL and for every user row", async () => {
+    await withSessionRest(async ({ app, db, store }) => {
+      const session = store.create("u1");
+      const first = completeTurn(store, session.id, "first");
+      expect(store.finishTurn(first.assistantMessageId, "done")).toBe(true);
+      const second = completeTurn(store, session.id, "second");
+      expect(store.finishTurn(second.assistantMessageId, "done")).toBe(true);
+      const third = completeTurn(store, session.id, "third");
+      expect(store.finishTurn(third.assistantMessageId, "done")).toBe(true);
+      writeThinkingMs(db, first.assistantMessageId, 61_500);
+      writeThinkingMs(db, second.assistantMessageId, 0);
+      // A user row never carries a duration; one planted by hand still reads null.
+      writeThinkingMs(db, first.userMessageId, 1_500);
+
+      const snapshot = await snapshotOf(app, session.id);
+      expect(snapshot.messages.map((message) => [message.id, message.thinkingMs])).toEqual([
+        [first.userMessageId, null],
+        [first.assistantMessageId, 61_500],
+        [second.userMessageId, null],
+        [second.assistantMessageId, 0],
+        [third.userMessageId, null],
+        [third.assistantMessageId, null],
+      ]);
+      for (const message of snapshot.messages) {
+        expect(Object.keys(message)).toEqual(MESSAGE_KEYS);
+      }
+    });
+  });
+
+  it.each([
+    ["a negative integer", -1],
+    ["a fraction", 1.5],
+    ["text the INTEGER affinity cannot convert", "1.5 s"],
+  ])(
+    "a hand-edited %s reads null, never a value the strict web decoder rejects",
+    async (_, value) => {
+      await withSessionRest(async ({ app, db, store }) => {
+        const session = store.create("u1");
+        const turn = completeTurn(store, session.id, "edited");
+        expect(store.finishTurn(turn.assistantMessageId, "done")).toBe(true);
+        writeThinkingMs(db, turn.assistantMessageId, value);
+
+        const snapshot = await snapshotOf(app, session.id);
+        expect(snapshot.messages.map((message) => message.thinkingMs)).toEqual([null, null]);
+      });
+    },
+  );
 });
 
 describe("session DTO metadata: step changes", () => {

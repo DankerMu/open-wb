@@ -51,6 +51,7 @@ function message(id: number, role: "user" | "assistant") {
     approvals: [],
     undo: role === "user" ? "available" : null,
     error: null,
+    thinkingMs: null,
   };
 }
 

@@ -7,11 +7,20 @@ type ChatStepView = ChatMessageView["steps"][number];
 
 /**
  * 应用自有字段，经 `metadata.custom` 原值透传给应用层组件：审批、原始状态、失败对象与重试标记、步骤
- * （步骤带 `changes` 与四态 `status`，tool-call part 表达不了它们）、用户消息的可撤回状态与附件。
+ * （步骤带 `changes` 与四态 `status`，tool-call part 表达不了它们）、用户消息的可撤回状态与附件、
+ * 思考时长与进行中标记（issue 910）。
  */
 export type ChatMessageCustom = Pick<
   ChatMessageView,
-  "approvals" | "attachments" | "error" | "retrying" | "status" | "steps" | "undo"
+  | "approvals"
+  | "attachments"
+  | "error"
+  | "retrying"
+  | "status"
+  | "steps"
+  | "thinkingActive"
+  | "thinkingMs"
+  | "undo"
 >;
 
 const STATUS: Record<ChatMessageView["status"], MessageStatus> = {
@@ -45,6 +54,8 @@ export function convertMessage(message: ChatMessageView): ThreadMessageLike {
     retrying: message.retrying,
     status: message.status,
     steps: message.steps,
+    thinkingActive: message.thinkingActive,
+    thinkingMs: message.thinkingMs,
     undo: message.undo,
   };
   const text = { type: "text" as const, text: message.content };

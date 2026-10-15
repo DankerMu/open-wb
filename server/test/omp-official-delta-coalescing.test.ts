@@ -5,8 +5,9 @@
  * assembly on the system clock. Asserted is omp-test-harness「官方 omp 上的合并取证」for
  * `text.delta` and `thinking.delta`: fewer than 40 text events, the first exactly one `字` (the
  * leading edge does not wait 250 ms), both concatenations verbatim; slice 3b adds exactly one
- * `thinking.end`, before the first `text.delta` (omp's raw `thinking_end` closes the span). The
- * snapshot's `thinkingMs` is slice 3c's. No upper bound on the count: it depends on how the 40
+ * `thinking.end`, before the first `text.delta` (omp's raw `thinking_end` closes the span); slice 3c
+ * adds the done snapshot: the assistant's `thinkingMs` a non-negative integer (the published
+ * `thinking.end` value), the user's null. No upper bound on the count: it depends on how the 40
  * chunks spread under load (design D9).
  *
  * The case prints one `[delta-coalescing] ` line (text.delta count, first-to-last publication span,
@@ -75,5 +76,22 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: coalesced deltas`, 
     expect(types.filter((type) => type === "thinking.end")).toHaveLength(1);
     expect(types.indexOf("thinking.end")).toBeGreaterThan(types.lastIndexOf("thinking.delta"));
     expect(types.indexOf("thinking.end")).toBeLessThan(types.indexOf("text.delta"));
+
+    const history = await world.app.inject({
+      method: "GET",
+      url: `/api/sessions/${turn.session}/messages`,
+      headers: { cookie: world.cookie },
+    });
+    expect(history.statusCode).toBe(200);
+    const { messages } = history.json() as {
+      messages: Array<{ role: string; thinkingMs: unknown }>;
+    };
+    const [end] = published.flatMap(({ event }) => (event.type === "thinking.end" ? [event] : []));
+    const answer = messages.find((message) => message.role === "assistant");
+    expect(Number.isSafeInteger(answer?.thinkingMs) && Number(answer?.thinkingMs) >= 0).toBe(true);
+    expect(answer?.thinkingMs).toBe(end?.data.thinkingMs);
+    expect(messages.filter((message) => message.role === "user").map((m) => m.thinkingMs)).toEqual([
+      null,
+    ]);
   });
 });

@@ -130,6 +130,8 @@ interface PublicMessage {
   steps: PublicStep[];
   /** upstream-failure「失败的公开形状」: null, or exactly {reason, message, status, detail}. */
   error: MessageError | null;
+  /** thinking-fold「思考时长记录与下发」: null, or a non-negative safe integer (ms). */
+  thinkingMs: number | null;
 }
 
 interface OwnedSnapshot {
@@ -495,6 +497,7 @@ function toPublicHistory(
         status: step.status,
       })),
       error: message.error === null ? null : toPublicError(message.error),
+      thinkingMs: message.thinkingMs,
     })),
     streamCursor: snapshot.streamCursor,
     todo: snapshot.todo,
