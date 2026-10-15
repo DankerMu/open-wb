@@ -4,9 +4,10 @@
  * parts, then 40 `字` content chunks 25 ms apart), in `openProxiedApp`, the production sessions
  * assembly on the system clock. Asserted is omp-test-harness「官方 omp 上的合并取证」for
  * `text.delta` and `thinking.delta`: fewer than 40 text events, the first exactly one `字` (the
- * leading edge does not wait 250 ms), both concatenations verbatim. `thinking.end` and the
- * snapshot's `thinkingMs` are added by slices 3b and 3c. No upper bound on the count: it depends on
- * how the 40 chunks spread under load (design D9).
+ * leading edge does not wait 250 ms), both concatenations verbatim; slice 3b adds exactly one
+ * `thinking.end`, before the first `text.delta` (omp's raw `thinking_end` closes the span). The
+ * snapshot's `thinkingMs` is slice 3c's. No upper bound on the count: it depends on how the 40
+ * chunks spread under load (design D9).
  *
  * The case prints one `[delta-coalescing] ` line (text.delta count, first-to-last publication span,
  * turn time, omp's own text_delta frame count; shown with `--reporter=verbose`), quoted as 实测.
@@ -57,6 +58,9 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: coalesced deltas`, 
         turnMs: turn.ms,
         ompTextFrames: frames,
         thinkingDeltas: thinking.length,
+        thinkingEnds: published.flatMap(({ event }) =>
+          event.type === "thinking.end" ? [event.data.thinkingMs] : [],
+        ),
         cuts: texts.map((entry) => [...delta(entry)].length),
       })}`,
     );
@@ -67,5 +71,9 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: coalesced deltas`, 
     expect(texts.length).toBeLessThan(40);
     expect(delta(texts[0] as (typeof published)[number])).toBe("字");
     expect(thinking.map(delta).join("")).toBe(THOUGHT);
+    const types = published.map((entry) => entry.event.type);
+    expect(types.filter((type) => type === "thinking.end")).toHaveLength(1);
+    expect(types.indexOf("thinking.end")).toBeGreaterThan(types.lastIndexOf("thinking.delta"));
+    expect(types.indexOf("thinking.end")).toBeLessThan(types.indexOf("text.delta"));
   });
 });

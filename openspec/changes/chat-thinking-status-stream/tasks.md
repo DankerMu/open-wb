@@ -136,7 +136,7 @@ Minimal mergeable slice（2b）: atomic - 2.3、2.4b、2.5 是同一个行为变
 Suggested fixture level（3a）: compact - 只加一个可空列（expand），没有读写方；风险只在迁移账本与列清单夹具。
 Minimal mergeable slice（3a）: atomic - 一个迁移文件及其测试。
 
-- [ ] 3.3 **3b**：新建 `server/src/sessions/thinking-span.ts`，按 thinking-fold「思考时长记录与下发」实现：
+- [x] 3.3 **3b**：新建 `server/src/sessions/thinking-span.ts`，按 thinking-fold「思考时长记录与下发」实现：
   - **开段**：按帧到达时刻开段，并同步把 `thinking_ms` 写为 NULL。
   - **闭段**：pump 读到原始 `thinking_end` 帧，或即将处理非思考事件，二者先到者触发。依次做四步：冲刷合并器、累计 `max(0, …)`、写列、在同一同步段内发布 `thinking.end`。
   - **终态**：终态之前先闭段。
@@ -159,6 +159,7 @@ Minimal mergeable slice（3a）: atomic - 一个迁移文件及其测试。
     - `thinking_ms` 列在回合结束后为非负整数；
     - chat-stream 改写后的「Ordered publication after persistence」（含 `thinking.end`）。
   - 2.5 的官方 omp 用例追加断言：恰有一条 `thinking.end`，且位于第一条 `text.delta` 之前。
+  - 夹具改换（3b 实施时确认，编排方 2026-10-15 记录）：fake-omp `--hold-after-thinking` 在 `thinking_end` 之后才挂起，3b 起 `thinking_end` 即冲刷并闭段，`session-thinking.test.ts` 中依赖「挂起时缓冲仍有思考」的用例改用受控子进程（只发思考帧、不发 `thinking_end`）；断言内容逐字保留，只插入 `thinking.end` 及由此带来的计数平移，并把子进程句柄改名（`spawned` → `children` / `child()`），不算削弱，在偏离记录逐条列出。
 Suggested fixture level（3b）: expanded - 新的公开事件、开段 / 闭段写库与 pump 读帧，跨持久化与次序两类风险。
 Minimal mergeable slice（3b）: atomic - 开段清空、闭段写列与发布 `thinking.end` 是同一段的生命周期。只做一端，要么列值永远是 NULL，要么残留旧值、违背 O3。
 

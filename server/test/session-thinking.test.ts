@@ -1,15 +1,17 @@
 /**
  * Issue #519 supervisor thinking merge, on the #910 delta coalescer's 250 ms window (text joins
  * the same coalescer in slice 2b): production assembly (createApp → registerSessions) over
- * real fake-omp `thinking` children (knobs `--thinking-repeat` / `--hold-after-thinking` appended
- * by a spawn wrapper) or scripted controlled children. Oracles are the recorded onEvent stream,
- * the stream cursor, real SSE bytes and the `chat_messages.thinking` column read directly (the
- * snapshot projection only where S6 compares the two). The coalescer's timer is the only timer of
- * at most 250 ms on the injected clock (idle 10000 ms, stop grace 8000 ms, text flush on real
- * timers); the clock never moves unless a test advances it, so deltas arriving together after
- * the first one are held until a non-thinking event or the terminal flushes them.
+ * real fake-omp `thinking` children (knob `--thinking-repeat` appended by a spawn wrapper) or
+ * scripted controlled children. Since slice 3b omp's `thinking_end` flushes held thinking and
+ * closes the thinking span (thinking.end), so a held buffer at a stop, crash, fault or shutdown
+ * needs a scripted child that sends thinking without `thinking_end`, as a turn interrupted
+ * mid-thought does; fake-omp's `--hold-after-thinking` holds after it. Oracles are the recorded
+ * onEvent stream, the stream cursor, real SSE bytes and the `chat_messages.thinking` column read
+ * directly (the snapshot projection only where S6 compares the two). The coalescer's timer is the
+ * only timer of at most 250 ms on the injected clock (idle 10000 ms, stop grace 8000 ms, text
+ * flush on real timers); the clock never moves unless a test advances it, so deltas arriving
+ * together after the first one are held until a non-thinking event or the terminal flushes them.
  */
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatEvent } from "../src/sessions/events.js";
@@ -57,6 +59,8 @@ const MARK = "…（已截断）";
 const CAP = 32_768;
 const WINDOW_MS = 250;
 const SENTINEL = "thinking write sentinel";
+/** Slice 3b: a span on the injected clock, which no case here advances before it closes. */
+const SPAN_MS = 0;
 
 interface ThinkingWorld extends RecordingWorld {
   clock: TestClock;
@@ -83,19 +87,11 @@ async function openWorld(
   return { ...world, clock: runtime.clock, bufferTimers };
 }
 
-/** fake-omp `scenario` with `extraArgs` appended to every spawn's argv; `spawned` collects them. */
-function fakeRuntime(
-  scenario: string | undefined,
-  extraArgs: string[] = [],
-  spawned: ChildProcessWithoutNullStreams[] = [],
-): RuntimeOptions {
+/** fake-omp `scenario` with `extraArgs` appended to every spawn's argv. */
+function fakeRuntime(scenario: string | undefined, extraArgs: string[] = []): RuntimeOptions {
   const { runtime } = createRealFakeRuntime(scenario);
   const inner: SpawnImpl = runtime.spawnImpl;
-  runtime.spawnImpl = (command, args, options) => {
-    const child = inner(command, [...args, ...extraArgs], options);
-    spawned.push(child);
-    return child;
-  };
+  runtime.spawnImpl = (command, args, options) => inner(command, [...args, ...extraArgs], options);
   return runtime;
 }
 
@@ -174,11 +170,22 @@ const SELECT: OmpFrame = {
   options: ["Approve", "Deny"],
 };
 const AGENT_END: OmpFrame = { type: "agent_end", messages: [], isTerminal: true };
+/** fake-omp's answer to `abort` in a running turn (emitAbortedEnd, ungated). */
+const ABORTED_END: OmpFrame = {
+  type: "message_end",
+  message: { role: "assistant", content: [], stopReason: "aborted" },
+};
 
 /** A controlled child: `script` on prompt; any extension_ui_response ends the turn. */
-async function openScriptedWorld(script: (child: FakeChild) => void): Promise<{
+async function openScriptedWorld(
+  script: (child: FakeChild) => void,
+  extra: OpenSessionOptions = {},
+  faulted = false,
+): Promise<{
   world: ThinkingWorld;
   child: () => FakeChild;
+  /** Every child spawned so far. */
+  children: readonly FakeChild[];
 }> {
   const controlled = createControlledRuntime((child) => {
     closeOnEof(child);
@@ -189,10 +196,16 @@ async function openScriptedWorld(script: (child: FakeChild) => void): Promise<{
     child.onCommand("extension_ui_response", () => {
       child.emitLine(AGENT_END);
     });
+    child.onCommand("abort", (frame) => {
+      child.emitLine(ABORTED_END);
+      child.emitLine(AGENT_END);
+      child.emitLine({ id: frame.id, type: "response", command: "abort", success: true });
+    });
   });
-  const world = await openWorld(controlled.runtime);
+  const world = await openWorld(controlled.runtime, extra, faulted);
   return {
     world,
+    children: controlled.children,
     child: () => {
       const child = controlled.children[0];
       if (child === undefined) {
@@ -201,6 +214,21 @@ async function openScriptedWorld(script: (child: FakeChild) => void): Promise<{
       return child;
     },
   };
+}
+
+/**
+ * fake-omp's three thinking parts in one stdout chunk, without `thinking_end`: the first is
+ * published at once, the other two are held with the window's timer armed.
+ */
+function openHeldWorld(extra: OpenSessionOptions = {}, faulted = false) {
+  return openScriptedWorld(
+    (child) => {
+      const parts = [FIRST, "再列要点，", "最后作答。"];
+      child.emitRaw(parts.map((part) => `${JSON.stringify(thinkingFrame(part))}\n`).join(""));
+    },
+    extra,
+    faulted,
+  );
 }
 
 /** Answers the published request with allow; the scripted child then ends the turn. */
@@ -236,8 +264,9 @@ describe("S1 merge and persist", () => {
       expect(events(world)).toEqual([
         { type: "turn.start", data: { messageId: assistant } },
         { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } },
-        // The first text delta flushes the held parts (3b moves this to thinking_end).
+        // omp's thinking_end flushes the held parts and closes the span (slice 3b).
         { type: "thinking.delta", data: { messageId: assistant, delta: HELD } },
+        { type: "thinking.end", data: { messageId: assistant, thinkingMs: SPAN_MS } },
         // Slice 2b: text is coalesced too; the second and third frames are flushed by turn.end.
         { type: "text.delta", data: { messageId: assistant, delta: TEXT_DELTAS[0] } },
         { type: "text.delta", data: { messageId: assistant, delta: TEXT_TAIL } },
@@ -276,8 +305,8 @@ describe("S3 cap", () => {
     timeout: 60_000,
   }, async () => {
     // 6900 deltas of 5 code points: no byte threshold and a clock that does not move, so the
-    // first is published at once and the other 6899 (34495 code points) are held until the first
-    // text.delta flushes them as one, which crosses the cap. That later deltas publish nothing is
+    // first is published at once and the other 6899 (34495 code points) are held until
+    // thinking_end flushes them as one, which crosses the cap. That later deltas publish nothing is
     // pinned at module level (delta-coalescer.test.ts「上限与截断标记」).
     const world = await openWorld(fakeRuntime("thinking", ["--thinking-repeat", "2300"]));
     await prompted(world);
@@ -296,15 +325,16 @@ describe("S3 cap", () => {
     expect([...(column ?? "")].length).toBe(CAP + [...MARK].length);
     expect(column?.startsWith(THOUGHT.repeat(Math.floor(CAP / [...THOUGHT].length)))).toBe(true);
     expect(world.fixture.supervisor.streamCursor(world.session).seq).toBe(events(world).length);
-    // turn.start, 2 thinking.delta, 2 text.delta (the first frame, then the other two), turn.end.
-    expect(events(world)).toHaveLength(6);
+    // turn.start, 2 thinking.delta, thinking.end, 2 text.delta (the first frame, then the other
+    // two), turn.end.
+    expect(events(world)).toHaveLength(7);
     expect(world.errors).toEqual([]);
   });
 });
 
 describe("S4 flush before the terminal", () => {
   it("a held buffer is published and saved before turn.end stopped", REAL, async () => {
-    const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]));
+    const { world } = await openHeldWorld();
     await prompted(world);
     await waitForBufferTimer(world);
     const assistant = assistantIdFor(world.fixture, world.session);
@@ -321,6 +351,7 @@ describe("S4 flush before the terminal", () => {
       { type: "turn.start", data: { messageId: assistant } },
       leading,
       { type: "thinking.delta", data: { messageId: assistant, delta: HELD } },
+      { type: "thinking.end", data: { messageId: assistant, thinkingMs: SPAN_MS } },
       { type: "turn.end", data: { messageId: assistant, status: "stopped" } },
     ]);
     expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);
@@ -332,8 +363,7 @@ describe("S4 flush before the terminal", () => {
     "a held buffer is published and saved before the failure events of a crash",
     REAL,
     async () => {
-      const spawned: ChildProcessWithoutNullStreams[] = [];
-      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"], spawned));
+      const { world, child, children } = await openHeldWorld();
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -344,18 +374,18 @@ describe("S4 flush before the terminal", () => {
       ]);
       expect(thinkingColumn(world.fixture.db, assistant)).toBe(FIRST);
 
-      expect(spawned).toHaveLength(1);
-      expect(spawned[0]?.kill("SIGKILL")).toBe(true);
+      expect(children).toHaveLength(1);
+      expect(child().kill("SIGKILL")).toBe(true);
       await waitForTurn(world.fixture, world.session, "failed");
       expect(types(world)).toEqual([
         "turn.start",
         "thinking.delta",
         "thinking.delta",
+        "thinking.end",
         "error",
         "turn.end",
       ]);
-      // The timer is armed by the second of the child's three thinking writes, so the kill may
-      // land before the third: whatever was held is published once and is exactly what was saved.
+      // Whatever was held is published once and is exactly what was saved.
       const [first, flushed, ...rest] = thinkingDeltas(world);
       expect(first).toBe(FIRST);
       expect(rest).toEqual([]);
@@ -377,8 +407,7 @@ describe("S5 persistence failure", () => {
     "a failing timer flush publishes nothing, spends no sequence and takes the error sink",
     REAL,
     async () => {
-      const world = await openWorld(
-        fakeRuntime("thinking", ["--hold-after-thinking"]),
+      const { world } = await openHeldWorld(
         {
           prepare(db) {
             db.exec(REJECT_THINKING);
@@ -421,8 +450,7 @@ describe("S5 persistence failure", () => {
       let db: DatabaseSync | undefined;
       /** Message and session status read inside the error sink, the instant the flush failed. */
       const atFault: Array<{ message: string; session: string }> = [];
-      const world = await openWorld(
-        fakeRuntime("thinking", ["--hold-after-thinking"]),
+      const { world } = await openHeldWorld(
         {
           prepare(opened) {
             db = opened;
@@ -467,16 +495,17 @@ describe("S5 persistence failure", () => {
     "a failing flush before a crash's error stops the commit: neither error nor turn.end follows",
     REAL,
     async () => {
-      const spawned: ChildProcessWithoutNullStreams[] = [];
-      const runtime = fakeRuntime("thinking", ["--hold-after-thinking"], spawned);
-      const world = await openWorld(runtime, { prepare: (db) => db.exec(REJECT_THINKING) }, true);
+      const { world, child } = await openHeldWorld(
+        { prepare: (db) => db.exec(REJECT_THINKING) },
+        true,
+      );
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
       const started = events(world);
       expect(thinkingDeltas(world)).toEqual([FIRST]);
 
-      expect(spawned[0]?.kill("SIGKILL")).toBe(true);
+      expect(child().kill("SIGKILL")).toBe(true);
       await waitFor(
         () => (world.errors.some((error) => containsMessage(error, SENTINEL)) ? true : undefined),
         "thinking write sentinel in the error sink",
@@ -496,7 +525,7 @@ describe("S6 replay and refresh", () => {
     REAL,
     async () => {
       // The first delta is published at once; the other two stay held.
-      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]));
+      const { world } = await openHeldWorld();
       await prompted(world);
       const [published] = await waitForEvent(world, "thinking.delta");
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -526,7 +555,7 @@ describe("S6 replay and refresh", () => {
     "a snapshot read while thinking is held omits it; the held text follows the snapshot cursor once",
     REAL,
     async () => {
-      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]));
+      const { world } = await openHeldWorld();
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -543,12 +572,14 @@ describe("S6 replay and refresh", () => {
       const frames = parseSse(await readUntil(resumed, (text) => text.includes("event: turn.end")));
       resumed.abort();
       expect(frames[0]?.id).toBe(`${String(held.cursor.epoch)}:3`);
+      // The stop closes the open span: thinking.end between the held text and turn.end.
       expect(frames.map((frame) => frame.event)).toEqual([
-        ...frames.slice(0, -1).map(() => "thinking.delta"),
+        ...frames.slice(0, -2).map(() => "thinking.delta"),
+        "thinking.end",
         "turn.end",
       ]);
-      expect(frames.length).toBeGreaterThan(1);
-      const appended = frames.slice(0, -1).map((frame) => String(frame.data.delta));
+      expect(frames.length).toBeGreaterThan(2);
+      const appended = frames.slice(0, -2).map((frame) => String(frame.data.delta));
       // The client's text (snapshot + resumed events) equals the final column and snapshot.
       expect(`${String(held.thinking)}${appended.join("")}`).toBe(THOUGHT);
       expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);
@@ -558,8 +589,8 @@ describe("S6 replay and refresh", () => {
   );
 });
 
-// Each script sends two thinking frames: the first is published at once, the second is what the
-// following event has to flush.
+// Each script sends two thinking frames without thinking_end: the first is published at once, the
+// second is what the following event has to flush, and that event closes the span (slice 3b).
 describe("S7 flush before other events through the publication funnel", () => {
   it("thinking.delta immediately precedes the step.start of a following tool", REAL, async () => {
     const { world } = await openScriptedWorld((child) => {
@@ -585,6 +616,7 @@ describe("S7 flush before other events through the publication funnel", () => {
       "turn.start",
       "thinking.delta",
       "thinking.delta",
+      "thinking.end",
       "step.start",
       "step.end",
       "turn.end",
@@ -609,12 +641,14 @@ describe("S7 flush before other events through the publication funnel", () => {
         "turn.start",
         "thinking.delta",
         "thinking.delta",
+        "thinking.end",
         "approval.request",
       ]);
       expect(await allowToEnd(world, request)).toEqual([
         "turn.start",
         "thinking.delta",
         "thinking.delta",
+        "thinking.end",
         "approval.request",
         "approval.resolved",
         "turn.end",
@@ -642,6 +676,7 @@ describe("S7 flush before other events through the publication funnel", () => {
         "approval.request",
         "thinking.delta",
         "thinking.delta",
+        "thinking.end",
         "approval.resolved",
         "turn.end",
       ]);
@@ -694,7 +729,7 @@ describe("S9 held thinking at retirement", () => {
     "an infra fault drops the held thinking and its timer: never saved, never published",
     REAL,
     async () => {
-      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]), {}, true);
+      const { world } = await openHeldWorld({}, true);
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -720,7 +755,7 @@ describe("S9 held thinking at retirement", () => {
     "a shutdown clears the timer at once and the held text is published before the turn ends",
     REAL,
     async () => {
-      const world = await openWorld(fakeRuntime("thinking", ["--hold-after-thinking"]), {}, true);
+      const { world } = await openHeldWorld({}, true);
       await prompted(world);
       await waitForBufferTimer(world);
       const assistant = assistantIdFor(world.fixture, world.session);
@@ -737,6 +772,7 @@ describe("S9 held thinking at retirement", () => {
         "turn.start",
         "thinking.delta",
         "thinking.delta",
+        "thinking.end",
         "error",
         "turn.end",
       ]);

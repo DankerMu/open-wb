@@ -6,11 +6,15 @@
  * held at a time: a delta of the other kind, any other event and the turn's terminal flush it
  * first. Every publication is one synchronous segment, save then publish with no await between,
  * so the store only ever holds published text and the ring keeps the upstream arrival order. No
- * byte threshold.
+ * byte threshold. Slice 3b: given the `durations` port, the dispatch also drives the thinking spans
+ * (thinking-span.ts) — a `thinking.delta` opens one, anything else (and `endSpan`, omp's raw
+ * `thinking_end`) closes the open one right after flushing; the window's own timer never does.
  */
 import type { ChatEvent } from "./events.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { Generation, Slot } from "./pool.js";
+import type { ThinkingMsStore } from "./store-thinking.js";
+import { ThinkingSpans } from "./thinking-span.js";
 
 const WINDOW_MS = 250;
 
@@ -27,6 +31,8 @@ interface CoalescerPorts {
   publish(slot: Slot, event: ChatEvent<number>, generation: Generation | undefined): boolean;
   /** Owned error sink: retain the fault and retire the slot without awaiting. */
   fault(slot: Slot, error: Error): void;
+  /** `chat_messages.thinking_ms`; omitted → no thinking span is timed (and no thinking.end). */
+  durations?: ThinkingMsStore;
 }
 
 interface Chunk {
@@ -62,12 +68,18 @@ export class DeltaCoalescer {
   readonly #fault: CoalescerPorts["fault"];
   readonly #held = new Map<Slot, Chunk>();
   readonly #marks = new WeakMap<Slot, TurnMarks>();
+  readonly #spans: ThinkingSpans | undefined;
 
   constructor(ports: CoalescerPorts) {
     this.#clock = ports.clock ?? systemClock;
     this.#save = ports.save;
     this.#publish = ports.publish;
     this.#fault = ports.fault;
+    const { durations: store, publish, fault } = ports;
+    this.#spans =
+      store === undefined
+        ? undefined
+        : new ThinkingSpans({ clock: this.#clock, store, publish, fault });
   }
 
   /** The `#commit` dispatch of one mapped event: a coalesced delta is taken, any other flushes. */
@@ -77,27 +89,36 @@ export class DeltaCoalescer {
       const save = this.#save[kind];
       if (save !== undefined) {
         const { messageId, delta } = event.data;
-        return this.#take(slot, {
-          kind,
-          save,
-          messageId,
-          generation,
-          text: delta,
-          timer: undefined,
-        })
-          ? "taken"
-          : false;
+        // Thinking opens a span (at frame arrival, before coalescing); text closes the open one.
+        const spanned =
+          kind === "thinking"
+            ? (this.#spans?.open(slot, generation, messageId) ?? true)
+            : this.endSpan(slot, true);
+        const chunk: Chunk = { kind, save, messageId, generation, text: delta, timer: undefined };
+        return spanned && this.#take(slot, chunk) ? "taken" : false;
       }
     }
     return this.flush(slot) ? "pass" : false;
   }
 
   /**
-   * Synchronous, never throws: saves and publishes the held text as one event. True when there is
-   * nothing to publish; false when the save faulted (nothing is published) or the publication
-   * refused.
+   * Synchronous, never throws: before any non-delta event, saves and publishes the held text as one
+   * event, then closes the open thinking span. True when there is nothing to publish; false when
+   * a write faulted (nothing more is published) or a publication refused.
    */
   flush(slot: Slot): boolean {
+    return this.#flushHeld(slot) && (this.#spans?.close(slot) ?? true);
+  }
+
+  /**
+   * When `signal` (omp's raw `thinking_end` read by the pump, or a text delta): flush and close an
+   * open span. A no-op otherwise, and without an open span (held text stays held).
+   */
+  endSpan(slot: Slot, signal: boolean): boolean {
+    return !signal || this.#spans?.isOpen(slot) !== true || this.flush(slot);
+  }
+
+  #flushHeld(slot: Slot): boolean {
     const held = this.#held.get(slot);
     if (held === undefined) {
       return true;
@@ -134,7 +155,7 @@ export class DeltaCoalescer {
       held.text += delta.text;
       return true;
     }
-    if (!this.flush(slot)) {
+    if (!this.#flushHeld(slot)) {
       return false;
     }
     const now = this.#clock.now();
@@ -184,7 +205,7 @@ export class DeltaCoalescer {
   /** Timer callback: synchronous, never throws; a failed flush has already taken the sink. */
   #expire(slot: Slot, held: Chunk): void {
     if (!slot.infraFaulted && this.#held.get(slot) === held) {
-      this.flush(slot);
+      this.#flushHeld(slot);
     }
   }
 }

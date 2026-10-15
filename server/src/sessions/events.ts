@@ -7,6 +7,7 @@
  * #909 maps omp's session-level retry (`auto_retry_start` → turn.retry; the next round's outcome
  * replaces the remembered failure; `Retry cancelled` is an interruption) and classifies the
  * failure an error event carries (upstream-classify.ts).
+ * #910 declares thinking.end; the supervisor's thinking spans publish it, never this reducer.
  */
 import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
@@ -30,6 +31,7 @@ export type ChatEvent<StepId extends string | number = number> =
   | { type: "turn.start"; data: { messageId: number } }
   | { type: "text.delta"; data: { messageId: number; delta: string } }
   | { type: "thinking.delta"; data: { messageId: number; delta: string } }
+  | { type: "thinking.end"; data: { messageId: number; thinkingMs: number } }
   | { type: "files.changed"; data: { messageId: number; stepId: StepId; files: FileChange[] } }
   // Mapper output (string step ids) carries the raw candidate; the published event the stored list.
   | {

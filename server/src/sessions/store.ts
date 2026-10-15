@@ -53,7 +53,7 @@ import {
   type MessageError,
   type SessionErrorStore,
 } from "./store-error.js";
-import { appendThinking as appendThinkingText } from "./store-thinking.js";
+import { appendThinking, createThinkingMsStore, type ThinkingMsStore } from "./store-thinking.js";
 import {
   createSessionTodoStore,
   type SessionTodoOptions,
@@ -180,7 +180,7 @@ interface StartStepInput {
   detail: string;
 }
 
-export interface SessionStore extends SessionTodoStore, SessionErrorStore {
+export interface SessionStore extends SessionTodoStore, SessionErrorStore, ThinkingMsStore {
   create(ownerId: string): SessionView;
   list(ownerId: string): SessionView[];
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
@@ -281,6 +281,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
   return {
     ...createSessionTodoStore(db, options),
     ...createSessionErrorStore(db),
+    ...createThinkingMsStore(db),
     create(ownerId) {
       assertOpen(closed);
       const now = Date.now();
@@ -544,7 +545,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
 
     appendThinking(messageId, chunk) {
       assertOpen(closed);
-      return appendThinkingText(db, messageId, chunk);
+      return appendThinking(db, messageId, chunk);
     },
 
     startStep(assistantMessageId, input) {

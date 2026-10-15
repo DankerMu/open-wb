@@ -111,7 +111,7 @@ SessionSupervisor SHALL 用服务端注入时钟为每条助手消息记录思�
 
 #### Scenario: 单段思考以 thinking_end 闭合
 - **WHEN** 注入时钟下，一回合在 t=1000ms 到达首段 thinking，t=1100ms、t=1300ms 再到达两段，t=3000ms 到达 `thinking_end` 帧，t=3400ms 到达第一段正文，随后 agent_end
-- **THEN** t=3000ms 时 ring 中依次追加合并器冲刷出的 `thinking.delta` 与 `thinking.end{thinkingMs:2000}`，第一条 `text.delta` 在其后；`chat_messages.thinking_ms` 为 2000；快照该助手消息 `thinkingMs` 为 2000，user 消息为 `null`
+- **THEN** 三段 thinking 按 250ms 时间窗在 t=1000ms、t=1250ms、t=1500ms 各发布一条 `thinking.delta`；t=3000ms 时 ring 中追加 `thinking.end{thinkingMs:2000}`（此刻合并器若仍缓冲着思考，先冲刷出该 `thinking.delta`），第一条 `text.delta` 在其后；`chat_messages.thinking_ms` 为 2000；快照该助手消息 `thinkingMs` 为 2000，user 消息为 `null`
 
 #### Scenario: 工具参数的生成不计入
 - **WHEN** 一回合思考从 t=0 到 t=500ms，t=500ms 到达 `thinking_end`，随后模型流式生成工具参数（toolcall 帧，被归约器丢弃）直到 t=9000ms 到达该工具的 `tool_execution_start`
