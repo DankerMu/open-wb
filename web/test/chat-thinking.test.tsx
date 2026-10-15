@@ -691,20 +691,25 @@ describe("thinking fold on the chat page", () => {
     expect(bodyOf()?.classList.contains("whitespace-pre-wrap")).toBe(true);
   });
 
-  it("caps the body of a settled fold at 12rem and leaves a running one uncapped (#725)", async () => {
+  // Owner ruling O4 (issue 1448) overturns the old running `max-h-none`: both states cap at 12rem,
+  // and a running body is the streaming preview (the copied Content adds its bottom fade only then).
+  it("caps the body at 12rem in both states, the running one as the streaming preview (issue 725, O4)", async () => {
     const { source } = await mountThread(turnSnapshot("running", { thinking: "想" }));
     const block = fold();
     const capOf = () =>
       [...(bodyOf()?.classList ?? [])].filter((name) => /^(max-h-|overflow-)/.test(name)).sort();
+    const fades = () => block.querySelectorAll('[data-slot="reasoning-fade"]').length;
 
     expect(block.getAttribute("data-running")).toBe("");
-    expect(capOf()).toEqual(["max-h-none", "overflow-y-auto"]);
+    expect(capOf()).toEqual(["max-h-48", "overflow-auto"]);
+    expect(fades()).toBe(2);
 
     emit(source, 4, "turn.end", { status: "done" });
     expect(block.hasAttribute("data-running")).toBe(false);
     toggle();
 
     expect(capOf()).toEqual(["max-h-48", "overflow-auto"]);
+    expect(fades()).toBe(1);
   });
 
   it("shimmers the title only while the turn runs (tw-shimmer `shimmer` class)", async () => {
@@ -721,13 +726,14 @@ describe("thinking fold on the chat page", () => {
     expect(label()?.classList.contains("shimmer")).toBe(false);
   });
 
-  it("hides the copied component's top fade mask on an expanded fold", async () => {
+  it("hides the copied component's top and bottom fade masks on an expanded running fold", async () => {
     await mountThread(turnSnapshot("running", { thinking: "想" }));
     const content = fold().querySelector('[data-slot="reasoning-content"]');
     const fades = [...fold().querySelectorAll('[data-slot="reasoning-fade"]')];
 
     expect(isOpen()).toBe(true);
-    expect(fades).toHaveLength(1);
+    // Top fade always, bottom fade while previewing (issue 1448, O4).
+    expect(fades).toHaveLength(2);
     // The hiding class is an arbitrary variant on the fade's parent; resolve it as a selector.
     const hiding = [...(content?.classList ?? [])].filter((name) => name.endsWith(":hidden"));
     expect(hiding).toEqual(["[&>[data-slot=reasoning-fade]]:hidden"]);
