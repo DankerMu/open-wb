@@ -98,6 +98,8 @@ interface LiveStream {
   decoder: TextDecoder;
   text: string;
   ended: boolean;
+  /** Set only when a read rejected: the response was destroyed, not ended. */
+  failed: boolean;
   next: Promise<ReadableStreamReadResult<Uint8Array>> | null;
 }
 
@@ -209,6 +211,8 @@ describe("闸门停点 empty: an armed gate holds after the role chunk only", ()
     expect(normalize(live.text)).toBe(body([ROLE]));
     expect(parseDataRecords(live.text)).not.toContain(DONE);
     expect(live.ended).toBe(true);
+    // A clean end without [DONE] would pass the lines above; the spec says destroy, not end.
+    expect(live.failed).toBe(true);
     expect((await send(handle.port, "GET", `/__control/gates/${id}`)).status).toBe(404);
     expect((await send(handle.port, "POST", `/__control/gates/${id}/release`)).status).toBe(404);
   });
@@ -506,6 +510,7 @@ async function openLive(port: number, messages: unknown[]): Promise<LiveStream> 
     decoder: new TextDecoder(),
     text: "",
     ended: false,
+    failed: false,
     next: null,
   };
   lives.push(live);
@@ -539,6 +544,7 @@ async function readUntil(
       // A destroyed held response (TTL / close) surfaces as a failed read: the stream is over.
       live.next = null;
       live.ended = true;
+      live.failed = true;
       return;
     } finally {
       clearTimeout(timer);

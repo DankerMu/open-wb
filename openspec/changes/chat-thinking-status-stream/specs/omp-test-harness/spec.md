@@ -54,7 +54,7 @@ Because the model proxy relays the upstream SSE bytes unchanged and omp's openai
 
 #### Scenario: 节奏标记
 - **WHEN** 一个答复轮请求的最后一条 user 文本含 `WORKBUDDY_PACE`，不带闸门
-- **THEN** 流为角色帧、三个 `reasoning_content` 分片、40 个各为 `字` 的 `content` 分片、finish、`[DONE]`；相邻分片的到达间隔不小于 20ms，首末分片相隔不小于 1000ms
+- **THEN** 流为角色帧、三个 `reasoning_content` 分片、40 个各为 `字` 的 `content` 分片、finish、`[DONE]`；服务端相邻两次写出的间隔不小于 20ms（测试与夹具同进程，客户端到达时刻受事件循环抖动影响，故在写出处计时），首末分片相隔不小于 1000ms
 - **WHEN** 同一请求还带已武装闸门
 - **THEN** 流与不带 `WORKBUDDY_PACE` 的闸门请求逐字节相同（生成的 id 与时间戳除外）
 
