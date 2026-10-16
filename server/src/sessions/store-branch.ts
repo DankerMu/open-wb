@@ -250,6 +250,9 @@ const FORK_MESSAGE =
   "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms) SELECT ?, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms FROM chat_messages WHERE id = ?";
 const FORK_STEPS =
   "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at, changes, body_offset) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at, changes, body_offset FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
+// Issue 1472 (design D7): segment rows value for value, NULL included, in their row order.
+const FORK_SEGMENTS =
+  "INSERT INTO chat_thinking_segments(message_id, body_offset, thinking_offset, steps_before, thinking_length, thinking_ms) SELECT ?, body_offset, thinking_offset, steps_before, thinking_length, thinking_ms FROM chat_thinking_segments WHERE message_id = ? ORDER BY id ASC";
 const FORK_APPROVALS =
   "INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, decision, decided_at) SELECT ?, request_id, tool, title, requested_at, expires_at, decision, decided_at FROM chat_approvals WHERE message_id = ? ORDER BY id ASC";
 const FORK_STATUS =
@@ -268,7 +271,8 @@ export interface ForkCommit {
 /**
  * Fork CAS (#466), one transaction: unless the source is gone, running, has another last assistant
  * than the prechecked one or lost the fork point (session_busy, no write), insert the new session
- * and copy, by explicit columns, every message before the fork point with its steps and approvals.
+ * and copy, by explicit columns, every message before the fork point with its steps, thinking
+ * segments and approvals.
  * The new session takes the last copied assistant's status (a `running` one fails the whole copy).
  * Its row copies the source's columns as they are, except `approval_mode`: the source's raw mode as
  * read in this transaction, stored no higher than `composer.approvalMaxMode` (`storedModeUnderCap`,
@@ -312,6 +316,7 @@ export function copyForkHistory(
       requireChanges(copied.changes, 1, "fork message copy");
       const copy = Number(copied.lastInsertRowid);
       db.prepare(FORK_STEPS).run(copy, message.id);
+      db.prepare(FORK_SEGMENTS).run(copy, message.id);
       db.prepare(FORK_APPROVALS).run(copy, message.id);
       status = message.role === "assistant" ? message.status : status;
     }

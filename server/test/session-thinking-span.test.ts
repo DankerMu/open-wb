@@ -7,7 +7,9 @@
  * stream, the raw `chat_messages.thinking_ms` column (read inside the publication where the order
  * of the write matters), SSE bytes, and a second store opened over the same rows for the startup
  * reconciliation a restarted host runs; slice 3c adds the snapshot `thinkingMs` key, read over the
- * history route across two spans.
+ * history route across two spans. Issue 1472 (3b) adds the `chat_thinking_segments` rows of those
+ * turns, read raw: one per span, and an open span's length and milliseconds stay NULL across the
+ * startup reconciliation.
  */
 import { mkdirSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -69,6 +71,16 @@ afterEach(async () => {
 function thinkingMs(db: DatabaseSync, messageId: number): number | null {
   const row = db.prepare("SELECT thinking_ms FROM chat_messages WHERE id = ?").get(messageId);
   return (row as { thinking_ms: number | null }).thinking_ms;
+}
+
+/** Issue 1472: "body_offset thinking_offset thinking_length steps_before thinking_ms" per row. */
+function segmentRows(db: DatabaseSync, messageId: number): string[] {
+  const sql = `SELECT body_offset, thinking_offset, thinking_length, steps_before, thinking_ms
+    FROM chat_thinking_segments WHERE message_id = ? ORDER BY id`;
+  return db
+    .prepare(sql)
+    .all(messageId)
+    .map((row) => Object.values(row).map(String).join(" "));
 }
 
 async function openWorld(
@@ -184,6 +196,10 @@ describe("thinking-fold 合并与落库", () => {
       expect(Number.isSafeInteger(value) && Number(value) >= 0).toBe(true);
       expect(world.atEnd).toEqual([value]);
       expect(thinkingMs(world.fixture.db, assistant)).toBe(value);
+      // One segment: opened before any text or step, its length the whole stored thought.
+      expect(segmentRows(world.fixture.db, assistant)).toEqual([
+        `0 0 ${String(THOUGHT.length)} 0 ${String(value)}`,
+      ]);
       expect(world.fixture.supervisor.streamCursor(world.session).seq).toBe(7);
       expect(world.errors).toEqual([]);
     },
@@ -207,6 +223,12 @@ describe("thinking-fold edit-write wiring", () => {
       ]);
       expect(sequence.filter((type) => type === "thinking.end")).toHaveLength(1);
       expect(sequence.indexOf("step.start")).toBe(end + 1);
+      // The thinking precedes both steps: steps_before 0, the two steps after it.
+      const assistant = assistantIdFor(world.fixture, world.session);
+      const [end1] = ofType(sessionEvents(world), "thinking.end");
+      expect(segmentRows(world.fixture.db, assistant)).toEqual([
+        `0 0 ${String(THOUGHT.length)} 0 ${String(end1?.data.thinkingMs)}`,
+      ]);
       expect(world.errors).toEqual([]);
     },
   );
@@ -244,6 +266,7 @@ describe("thinking-fold 中断后无法恢复（启动对账一半）", () => {
       restartReconcile(world);
       expect(messageRow(world.fixture.db, assistant).status).toBe("failed");
       expect(thinkingMs(world.fixture.db, assistant)).toBeNull();
+      expect(segmentRows(world.fixture.db, assistant)).toEqual(["0 0 null 0 null"]);
       expect(events(world)).toHaveLength(published);
       expect(types(world)).not.toContain("thinking.end");
     },
@@ -272,6 +295,7 @@ describe("thinking-fold 中断后无法恢复（启动对账一半）", () => {
       restartReconcile(world);
       expect(messageRow(world.fixture.db, assistant).status).toBe("failed");
       expect(thinkingMs(world.fixture.db, assistant)).toBeNull();
+      expect(segmentRows(world.fixture.db, assistant)).toEqual(["0 0 1 0 500", "0 1 null 0 null"]);
       expect(events(world)).toHaveLength(published);
       expect(ofType(sessionEvents(world), "thinking.end")).toHaveLength(1);
     },
@@ -299,6 +323,7 @@ describe("thinking-fold 中断后无法恢复（启动对账一半）", () => {
       restartReconcile(world);
       expect(messageRow(world.fixture.db, assistant).status).toBe("failed");
       expect(thinkingMs(world.fixture.db, assistant)).toBe(500);
+      expect(segmentRows(world.fixture.db, assistant)).toEqual(["0 0 1 0 500"]);
       expect(events(world)).toHaveLength(published);
       expect(ofType(sessionEvents(world), "thinking.end")).toHaveLength(1);
     },
@@ -325,6 +350,7 @@ describe("thinking-fold 中断后无法恢复（启动对账一半）", () => {
       await world.fixture.supervisor.shutdown().catch(() => undefined);
       expect(events(world)).toEqual(leading);
       expect(thinkingMs(world.fixture.db, assistant)).toBeNull();
+      expect(segmentRows(world.fixture.db, assistant)).toEqual(["0 0 null 0 null"]);
       expect(world.errors).toContain(error);
     },
   );
@@ -395,6 +421,8 @@ describe("thinking-fold 多段思考累计（快照，#910 slice 3c）", () => {
         ["user", null],
         ["assistant", 1200],
       ]);
+      const assistant = assistantIdFor(world.fixture, world.session);
+      expect(segmentRows(world.fixture.db, assistant)).toEqual(["0 0 1 0 500", "0 1 2 1 700"]);
       expect(world.errors).toEqual([]);
     },
   );

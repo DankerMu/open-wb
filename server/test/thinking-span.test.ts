@@ -5,10 +5,10 @@
  * (`endsThinking` +
  * `DeltaCoalescer.endSpan`), then the pure reducer maps the frame and every mapped event goes
  * through `DeltaCoalescer.route`; an event it passes on is recorded as published (persistEvent's
- * stand-in). The coalescer owns the spans through its `durations` port, here the real
- * `createThinkingMsStore` over an in-memory SQLite `chat_messages.thinking_ms` column (044); the
- * thinking save port is the real bounded `appendThinking`. The clock is injected; the fault port
- * does what the supervisor's owned error sink does to the coalescer (mark the slot, discard).
+ * stand-in; a `step.start` also seeds its step row). The spans write through the `durations` port,
+ * the real `createThinkingSegmentStore` over in-memory SQLite (`thinking_ms`, 045 segment rows; body
+ * length = the text port's count); thinking is saved by the real `appendThinking`. Injected clock;
+ * the fault port does what the supervisor's owned error sink does (mark the slot, discard).
  * Expected milliseconds are the spec's literals.
  */
 import type { DatabaseSync } from "node:sqlite";
@@ -24,9 +24,10 @@ import {
 } from "../src/sessions/events.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { Generation, Slot } from "../src/sessions/pool.js";
+import { createThinkingSegmentStore } from "../src/sessions/store-segments.js";
 import { appendThinking, createThinkingMsStore } from "../src/sessions/store-thinking.js";
 import { endsThinking } from "../src/sessions/thinking-span.js";
-import { seedMessage, seedSession, sessionId } from "./session-store-helpers.js";
+import { seedMessage, seedSession, seedStep, sessionId } from "./session-store-helpers.js";
 import { createClock, type TestClock } from "./support/omp-runtime.js";
 
 /** thinking-fold spec literals. */
@@ -95,6 +96,7 @@ function openWorld(prepare?: (db: DatabaseSync) => void): World {
   const published: Published[] = [];
   const faults: Error[] = [];
   const slot = { sessionId: "s", infraFaulted: false } as unknown as Slot;
+  let body = 0; // Slice 3b: the turn's published body length, as appendDelta counts it.
   const record = (event: ChatEvent<number>) => {
     published.push({ at: clock.now(), event, ...columns(db, messageId) });
     return true;
@@ -103,9 +105,12 @@ function openWorld(prepare?: (db: DatabaseSync) => void): World {
     clock,
     save: {
       thinking: (id, chunk) => appendThinking(db, id, chunk),
-      text: (_id, chunk) => chunk,
+      text: (_id, chunk) => {
+        body += chunk.length;
+        return chunk;
+      },
     },
-    durations: createThinkingMsStore(db),
+    durations: createThinkingSegmentStore(db, () => ({ publishedLength: body })),
     publish: (_slot, event) => record(event),
     fault(faulted, error) {
       faults.push(error);
@@ -134,6 +139,11 @@ function commit(world: World, events: ChatEvent<string>[]): boolean {
       return false;
     }
     if (routed === "pass") {
+      if (event.type === "step.start") {
+        const ordinal = world.published.filter((p) => p.event.type === "step.start").length;
+        const step = { name: "bash", detail: "{}", status: "running", endedAt: null } as const;
+        seedStep(world.db, { ...step, messageId: world.messageId, ordinal, startedAt: 0 });
+      }
       world.published.push({
         at: world.clock.now(),
         event: event as ChatEvent<number>,
@@ -205,6 +215,16 @@ function trace(world: World): Array<[string, string | number]> {
 
 function ends(world: World): Published[] {
   return world.published.filter(({ event }) => event.type === "thinking.end");
+}
+
+/** Slice 3b: "body_offset thinking_offset thinking_length steps_before thinking_ms" per row. */
+function segments(world: World): string[] {
+  const sql = `SELECT body_offset, thinking_offset, thinking_length, steps_before, thinking_ms
+    FROM chat_thinking_segments WHERE message_id = ? ORDER BY id`;
+  return world.db
+    .prepare(sql)
+    .all(world.messageId)
+    .map((row) => Object.values(row).map(String).join(" "));
 }
 
 describe("thinking-fold 单段思考以 thinking_end 闭合", () => {
@@ -305,6 +325,7 @@ describe("thinking-fold 多段思考累计", () => {
     feed(world, 3500, thinking("再想"));
     // The second span's opening clears the column: a snapshot now reads thinkingMs null.
     expect(columns(world.db, world.messageId).thinkingMs).toBeNull();
+    expect(segments(world)).toEqual(["0 0 2 0 500", "0 2 null 1 null"]);
     feed(world, 4200, THINKING_END);
     feed(world, 4300, text("答"));
     feed(world, 4300, AGENT_END);
@@ -321,6 +342,7 @@ describe("thinking-fold 多段思考累计", () => {
     ]);
     expect(ends(world).map(({ thinkingMs }) => thinkingMs)).toEqual([500, 1200]);
     expect(columns(world.db, world.messageId).thinkingMs).toBe(1200);
+    expect(segments(world)).toEqual(["0 0 2 0 500", "0 2 2 1 700"]);
   });
 
   it("a new assistant message on the same slot starts from zero", () => {
@@ -361,6 +383,7 @@ describe("thinking-fold 停止与失败", () => {
       ["turn.end", ""],
     ]);
     expect(columns(world.db, world.messageId).thinkingMs).toBe(900);
+    expect(segments(world)).toEqual(["0 0 1 0 900"]);
   });
 
   it("an omp crash 600 ms after the first thinking: thinking.end{600} before the error", () => {
@@ -375,6 +398,7 @@ describe("thinking-fold 停止与失败", () => {
       ["turn.end", ""],
     ]);
     expect(columns(world.db, world.messageId).thinkingMs).toBe(600);
+    expect(segments(world)).toEqual(["0 0 1 0 600"]);
   });
 });
 
@@ -388,6 +412,7 @@ describe("thinking-fold 中断后无法恢复", () => {
     // The host process dies here: nothing else runs.
     expect(ends(world)).toEqual([]);
     expect(columns(world.db, world.messageId).thinkingMs).toBeNull();
+    expect(segments(world)).toEqual(["0 0 null 0 null"]);
   });
 
   it("killed inside the second span: the first span's 500 is cleared, no thinking.end", () => {
@@ -400,6 +425,7 @@ describe("thinking-fold 中断后无法恢复", () => {
     world.clock.advance(5000);
     expect(ends(world).map(({ thinkingMs }) => thinkingMs)).toEqual([500]);
     expect(columns(world.db, world.messageId).thinkingMs).toBeNull();
+    expect(segments(world)).toEqual(["0 0 1 0 500", "0 1 null 1 null"]);
   });
 
   it("an infra fault inside a span writes nothing later and publishes no thinking.end", () => {
@@ -494,6 +520,60 @@ describe("thinking-fold 写库失败", () => {
     expect(() => store.setThinkingMs(missing, 500)).toThrow(receipt);
     expect(() => store.clearThinkingMs(missing)).toThrow(receipt);
     expect(columns(world.db, world.messageId).thinkingMs).toBeNull();
+  });
+});
+
+describe("thinking-fold 段行（chat-interleaved-segments 3b）", () => {
+  it("相邻的两段不合并: 300 ms, thinking_end, at once 400 ms more: two rows, two thinking.end", () => {
+    const world = started();
+    feed(world, 0, thinking("想"));
+    feed(world, 300, THINKING_END);
+    feed(world, 300, thinking("再"));
+    feed(world, 700, text("答"));
+    expect(ends(world).map(({ thinkingMs }) => thinkingMs)).toEqual([300, 700]);
+    expect(segments(world)).toEqual(["0 0 1 0 300", "0 1 1 0 400"]);
+  });
+
+  it("上限之后的段: offsets in UTF-16 units of the stored text, the mark included; length 0", () => {
+    const world = started();
+    feed(world, 0, thinking(`😀${"思".repeat(CAP - 1)}`));
+    feed(world, 300, thinking("考考"));
+    feed(world, 500, THINKING_END);
+    feed(world, 600, toolStart("call-1"));
+    feed(world, 700, toolEnd("call-1"));
+    feed(world, 800, thinking("后"));
+    feed(world, 1000, THINKING_END);
+    // 32768 code points stored, the mark appended: 😀 is two UTF-16 units, so one more unit.
+    const units = String(CAP + 1 + MARK.length);
+    expect(columns(world.db, world.messageId).thinking).toBe(`😀${"思".repeat(CAP - 1)}${MARK}`);
+    expect(trace(world).filter(([type]) => type === "thinking.delta")).toHaveLength(2);
+    expect(ends(world).map(({ thinkingMs }) => thinkingMs)).toEqual([500, 700]);
+    expect(segments(world)).toEqual([`0 0 ${units} 0 500`, `0 ${units} 0 1 200`]);
+  });
+
+  it("写库失败: a failing row insert publishes no thinking.delta and keeps thinking_ms", () => {
+    const world = started((db) => {
+      db.prepare("UPDATE chat_messages SET thinking_ms = 4242").run();
+      db.exec(`CREATE TEMP TRIGGER reject_open BEFORE INSERT ON chat_thinking_segments
+        BEGIN SELECT RAISE(ABORT, '${SENTINEL}'); END`);
+    });
+    expect(feed(world, 0, thinking("想"))).toBe(false);
+    expect(trace(world)).toEqual([]);
+    expect(world.faults.map((fault) => fault.message)).toEqual([expect.stringContaining(SENTINEL)]);
+    expect(columns(world.db, world.messageId)).toEqual({ thinkingMs: 4242, thinking: null });
+    expect(segments(world)).toEqual([]);
+  });
+
+  it("写库失败: a failing row close publishes no thinking.end and writes no total", () => {
+    const world = started((db) => {
+      db.exec(`CREATE TEMP TRIGGER reject_close BEFORE UPDATE ON chat_thinking_segments
+        BEGIN SELECT RAISE(ABORT, '${SENTINEL}'); END`);
+    });
+    feed(world, 0, thinking("想"));
+    expect(feed(world, 800, text("答"))).toBe(false);
+    expect(ends(world)).toEqual([]);
+    expect(columns(world.db, world.messageId).thinkingMs).toBeNull();
+    expect(segments(world)).toEqual(["0 0 null 0 null"]);
   });
 });
 

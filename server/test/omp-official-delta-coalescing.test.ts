@@ -15,6 +15,13 @@
  * The fake upstream's first request is the bash tool round (default `toolRoundScope`), which the
  * world denies; the paced answer is the second request.
  *
+ * Issue 1472 (chat-interleaved-segments 3.10) adds the `WORKBUDDY_INTERLEAVE` answering round (content,
+ * content 25 ms later, reasoning, content): the text published before the first `thinking.delta` is
+ * exactly the two leading parts, and the message's one `chat_thinking_segments` row records that
+ * length as its `body_offset` (the coalescer flushes the held second part before the segment
+ * opens, design D3). It prints one `[interleave-segments] ` line (text.delta count and cuts, omp's
+ * text_delta frame count, the segment rows), quoted as 实测. The snapshot half lands with slice 5.
+ *
  * Run locally: `make omp-fetch`, then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-delta-coalescing.test.ts --coverage=false
@@ -29,6 +36,9 @@ const CASE = { timeout: 120_000 };
 /** omp-test-harness「受控上游节奏与闸门停点标记」literals, copied. */
 const PACED_TEXT = "字".repeat(40);
 const THOUGHT = "先读需求，再列要点，最后作答。";
+/** omp-test-harness「受控上游交错标记」: the two content parts before the reasoning part, and it. */
+const INTERLEAVED_LEAD = "先说一句，再补一句。";
+const INTERLEAVED_THOUGHT = "想一想";
 
 function textDeltaFrames(frames: readonly OmpFrame[]): number {
   return frames.filter((frame) => {
@@ -94,4 +104,44 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: coalesced deltas`, 
       null,
     ]);
   });
+
+  it(
+    "WORKBUDDY_INTERLEAVE: the one segment's body_offset is the 10 units published before it",
+    CASE,
+    async () => {
+      const world = await openProxiedApp();
+      const turn = await runAppTurn(world, "你好 WORKBUDDY_INTERLEAVE");
+      expect(turn.events.at(-1)).toMatchObject({ type: "turn.end", data: { status: "done" } });
+      expect(world.faults).toEqual([]);
+
+      const firstThinking = turn.events.findIndex((event) => event.type === "thinking.delta");
+      const texts = turn.events.flatMap((event, index) =>
+        event.type === "text.delta" ? [{ index, delta: event.data.delta }] : [],
+      );
+      const messageId = turn.events[0]?.data.messageId;
+      const rows = world.db
+        .prepare(
+          "SELECT body_offset, thinking_offset, thinking_length, steps_before, thinking_ms FROM chat_thinking_segments WHERE message_id = ? ORDER BY id",
+        )
+        .all(Number(messageId));
+      console.log(
+        `[interleave-segments] ${JSON.stringify({
+          textDeltas: texts.length,
+          cuts: texts.map((text) => text.delta),
+          ompTextFrames: textDeltaFrames(turn.frames),
+          segments: rows,
+        })}`,
+      );
+
+      expect(firstThinking).toBeGreaterThan(-1);
+      const lead = texts.filter((text) => text.index < firstThinking).map((text) => text.delta);
+      expect(lead.join("")).toBe(INTERLEAVED_LEAD);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        body_offset: 10,
+        thinking_offset: 0,
+        thinking_length: INTERLEAVED_THOUGHT.length,
+      });
+    },
+  );
 });

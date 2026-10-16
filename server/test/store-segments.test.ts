@@ -4,7 +4,9 @@
  * units) when the step starts — pending deltas included, reset for every new turn, written by the
  * step insert itself — and fork copies it value for value. Expected offsets are literals from the
  * chat-stream「分段位置的记录与下发」and turn-control「拷贝分段位置」scenarios or plain arithmetic
- * on the deltas the test appends; rows are read with the test's own SQL.
+ * on the deltas the test appends; rows are read with the test's own SQL. Issue 1472 (3b, design D7)
+ * adds the `chat_thinking_segments` rows: fork copies them value for value in row order, and
+ * regenerate's delete of the old assistant cascades them (no code, the 045 foreign key).
  */
 import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
@@ -218,6 +220,170 @@ describe("turn-control「拷贝分段位置」: fork copies each step's body_off
         const sourceIds = new Set(sourceSteps.flat().map((row) => row.id));
         expect(copied.flat().filter((row) => sourceIds.has(row.id))).toEqual([]);
         expect([stepsOf(db, positioned), stepsOf(db, legacy)]).toEqual(sourceSteps);
+      });
+    });
+  });
+});
+
+const INSERT_SEGMENT =
+  "INSERT INTO chat_thinking_segments(message_id, body_offset, thinking_offset, steps_before, thinking_length, thinking_ms) VALUES (?, ?, ?, ?, ?, ?)";
+
+function segmentsOf(db: DatabaseSync, messageId: number) {
+  return db
+    .prepare(
+      "SELECT id, body_offset, thinking_offset, steps_before, thinking_length, thinking_ms FROM chat_thinking_segments WHERE message_id = ? ORDER BY id",
+    )
+    .all(messageId) as Array<Record<string, number | null>>;
+}
+
+/** The row values without the row id. */
+function values(rows: Array<Record<string, number | null>>) {
+  return rows.map(({ id: _id, ...rest }) => rest);
+}
+
+const segment = (
+  body_offset: number,
+  thinking_offset: number,
+  steps_before: number,
+  thinking_length: number | null,
+  thinking_ms: number | null,
+) => ({ body_offset, thinking_offset, steps_before, thinking_length, thinking_ms });
+
+describe("turn-control「拷贝分段位置」: fork copies the thinking segment rows (issue 1472)", () => {
+  it("value for value in row order, NULL kept, new ids; none for a message without rows", () => {
+    withFakeClock(FIXED_NOW, () => {
+      withSessionStore(({ db, store }) => {
+        const source = store.create(OWNER).id;
+        const turn = (text: string) => {
+          const reply = store.acceptPrompt(source, OWNER, text).assistantMessageId;
+          expect(store.finishTurn(reply, "done")).toBe(true);
+          return reply;
+        };
+        const first = turn("one");
+        const second = turn("two");
+        const legacy = turn("legacy");
+        // Interleaved inserts: within each message the copy keeps the source's row order.
+        db.prepare(INSERT_SEGMENT).run(first, 0, 0, 0, 4, 120);
+        db.prepare(INSERT_SEGMENT).run(second, 2, 0, 0, 3, 50);
+        db.prepare(INSERT_SEGMENT).run(first, 9, 4, 2, null, null);
+        const tail = store.acceptPrompt(source, OWNER, "fork here");
+        expect(store.finishTurn(tail.assistantMessageId, "done")).toBe(true);
+        const sourceRows = [first, second, legacy].map((id) => segmentsOf(db, id));
+
+        store.commitFork({
+          sourceId: source,
+          sessionId: FORK_ID,
+          ownerId: OWNER,
+          messageId: tail.userMessageId,
+          expectedAssistantId: tail.assistantMessageId,
+          sessionFile: "/fork.jsonl",
+        });
+        const copies = (store.getMessages(FORK_ID, OWNER)?.messages ?? []).filter(
+          (message) => message.role === "assistant",
+        );
+        const copied = copies.map((message) => segmentsOf(db, message.id));
+        expect(copied.map(values)).toEqual([
+          [segment(0, 0, 0, 4, 120), segment(9, 4, 2, null, null)],
+          [segment(2, 0, 0, 3, 50)],
+          [],
+        ]);
+        const sourceIds = new Set(sourceRows.flat().map((row) => row.id));
+        expect(copied.flat().filter((row) => sourceIds.has(row.id))).toEqual([]);
+        expect([first, second, legacy].map((id) => segmentsOf(db, id))).toEqual(sourceRows);
+      });
+    });
+  });
+});
+
+describe("chat-sessions「Regenerate replaces only the last assistant message」: segment rows", () => {
+  it("the old assistant's segments, steps and approvals cascade away; the new row has none", () => {
+    withFakeClock(FIXED_NOW, () => {
+      withSessionStore(({ db, store }) => {
+        const session = store.create(OWNER).id;
+        const earlier = store.acceptPrompt(session, OWNER, "one").assistantMessageId;
+        store.appendDelta(earlier, "abc");
+        const earlierStep = step(store, earlier, 0);
+        expect(store.finishTurn(earlier, "done")).toBe(true);
+        const last = store.acceptPrompt(session, OWNER, "two").assistantMessageId;
+        const lastStep = step(store, last, 0);
+        expect(store.finishTurn(last, "done")).toBe(true);
+        const approval = db.prepare(
+          "INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, decision, decided_at, step_id) VALUES (?, ?, 'bash', 't', 1, 60001, 'deny', 2, ?)",
+        );
+        for (const [id, stepId] of [
+          [earlier, earlierStep],
+          [last, lastStep],
+        ] as const) {
+          db.prepare(INSERT_SEGMENT).run(id, 0, 0, 0, 2, 30);
+          db.prepare(INSERT_SEGMENT).run(id, 3, 2, 1, null, null);
+          approval.run(id, `r-${String(id)}`, stepId);
+        }
+        const kept = () => ({
+          segments: segmentsOf(db, earlier),
+          steps: stepsOf(db, earlier),
+          approvals: db.prepare("SELECT * FROM chat_approvals WHERE message_id = ?").all(earlier),
+        });
+        const before = kept();
+
+        const regenerated = store.acceptRegenerate(session, last, "/r.jsonl");
+        expect(segmentsOf(db, regenerated)).toEqual([]);
+        const count = (table: string) =>
+          db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE message_id = ?`).get(last);
+        for (const table of ["chat_thinking_segments", "chat_steps", "chat_approvals"]) {
+          expect(count(table)).toEqual({ n: 0 });
+        }
+        const orphans = db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM chat_thinking_segments WHERE message_id NOT IN (SELECT id FROM chat_messages)",
+          )
+          .get();
+        expect(orphans).toEqual({ n: 0 });
+        expect(kept()).toEqual(before);
+        expect(before.steps.map((row) => row.body_offset)).toEqual([3]);
+        expect(values(before.segments)).toEqual([
+          segment(0, 0, 0, 2, 30),
+          segment(3, 2, 1, null, null),
+        ]);
+        expect(store.finishTurn(regenerated, "done")).toBe(true);
+      });
+    });
+  });
+});
+
+describe("thinking-fold「思考时长记录与下发」: segment rows count this message's steps only", () => {
+  it("steps of an earlier message do not count: steps_before 0, then 1 after its own step", () => {
+    withFakeClock(FIXED_NOW, () => {
+      withSessionStore(({ db, store }) => {
+        const session = store.create(OWNER).id;
+        const earlier = store.acceptPrompt(session, OWNER, "one").assistantMessageId;
+        step(store, earlier, 0);
+        step(store, earlier, 1);
+        expect(store.finishTurn(earlier, "done")).toBe(true);
+
+        const reply = store.acceptPrompt(session, OWNER, "two").assistantMessageId;
+        const first = store.openThinkingSegment(reply);
+        store.closeThinkingSegment(reply, first, 10, 10);
+        step(store, reply, 0);
+        const second = store.openThinkingSegment(reply);
+        expect(segmentsOf(db, reply).map((row) => [row.id, row.steps_before])).toEqual([
+          [first, 0],
+          [second, 1],
+        ]);
+
+        // A close names its own message's row: another message's or a missing id changes nothing.
+        const state = () => ({
+          segments: segmentsOf(db, reply),
+          ms: db.prepare("SELECT id, thinking_ms FROM chat_messages ORDER BY id").all(),
+        });
+        const before = state();
+        for (const id of [second + 1, first]) {
+          expect(() => store.closeThinkingSegment(earlier, id, 99, 99)).toThrow(
+            "thinking segment close must change exactly 1 row",
+          );
+        }
+        expect(db.isTransaction).toBe(false);
+        expect(state()).toEqual(before);
+        expect(store.finishTurn(reply, "done")).toBe(true);
       });
     });
   });

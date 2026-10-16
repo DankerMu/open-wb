@@ -8,28 +8,32 @@
  * message's total, writes it and publishes `thinking.end` in the same synchronous segment. The
  * frame is only a time signal, never a content source. Nothing is written on an infra-faulted
  * slot, and a host that dies with a span open leaves the NULL its opening wrote; startup
- * reconciliation does not touch the column.
+ * reconciliation does not touch the column. Issue 1472 (design D3/D4): each span is one
+ * `chat_thinking_segments` row, inserted by the opening's transaction (after the coalescer flushed
+ * held text, so its body offset counts it) and given its length and own milliseconds by the
+ * closing's; two spans are two rows even with nothing between them. `thinking.end` is unchanged.
  */
 import type { ChatEvent } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { Generation, Slot } from "./pool.js";
-import type { ThinkingMsStore } from "./store-thinking.js";
+import type { ThinkingSegmentStore } from "./store-segments.js";
 
 interface SpanPorts {
   clock: SessionClock;
-  store: ThinkingMsStore;
+  store: ThinkingSegmentStore;
   /** Synchronous ring + observer publication; false means the slot is being retired. */
   publish(slot: Slot, event: ChatEvent<number>, generation: Generation | undefined): boolean;
   /** Owned error sink: retain the fault and retire the slot without awaiting. */
   fault(slot: Slot, error: Error): void;
 }
 
-/** One slot's current message: its accumulated milliseconds and the open span, if any. */
+/** One slot's current message: its accumulated milliseconds and the open span (row), if any. */
 interface Span {
   messageId: number;
   generation: Generation | undefined;
   start: number | null;
+  segment: number;
   total: number;
 }
 
@@ -63,16 +67,18 @@ export class ThinkingSpans {
     }
     let span = this.#spans.get(slot);
     if (span?.messageId !== messageId) {
-      span = { messageId, generation, start: null, total: 0 };
+      span = { messageId, generation, start: null, segment: 0, total: 0 };
       this.#spans.set(slot, span);
     }
     if (span.start !== null) {
       return true;
     }
     const start = this.#ports.clock.now();
-    if (!this.#write(slot, () => this.#ports.store.clearThinkingMs(messageId))) {
+    const segment = this.#write(slot, () => this.#ports.store.openThinkingSegment(messageId));
+    if (segment === false) {
       return false;
     }
+    span.segment = segment;
     span.start = start;
     span.generation = generation;
     return true;
@@ -89,21 +95,24 @@ export class ThinkingSpans {
       return true;
     }
     // A wall clock stepped backwards counts the span as 0, never a negative duration.
-    span.total += Math.max(0, this.#ports.clock.now() - span.start);
+    const ms = Math.max(0, this.#ports.clock.now() - span.start);
+    span.total += ms;
     span.start = null;
     const thinkingMs = Math.round(span.total);
-    const { messageId } = span;
-    if (!this.#write(slot, () => this.#ports.store.setThinkingMs(messageId, thinkingMs))) {
+    const { messageId, segment } = span;
+    const close = () =>
+      this.#ports.store.closeThinkingSegment(messageId, segment, thinkingMs, Math.round(ms));
+    if (this.#write(slot, close) === false) {
       return false;
     }
     const event: ChatEvent<number> = { type: "thinking.end", data: { messageId, thinkingMs } };
     return this.#ports.publish(slot, event, span.generation);
   }
 
-  #write(slot: Slot, write: () => void): boolean {
+  /** The write's result; false when it threw (the fault is reported). */
+  #write<T>(slot: Slot, write: () => T): T | false {
     try {
-      write();
-      return true;
+      return write();
     } catch (error) {
       this.#ports.fault(slot, error instanceof Error ? error : new Error(String(error)));
       return false;
