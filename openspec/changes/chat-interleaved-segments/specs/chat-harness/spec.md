@@ -52,7 +52,7 @@ The preexisting login/four-route/theme/logout journey and browser error classifi
 ### Requirement: 分段呈现的冒烟与走查
 `make smoke` 的 `smoke/session-meta.hurl` SHALL 在既有 `WORKBUDDY_THINK` 用例的 done 快照上另断言（该回合先是 bash 工具轮、后是带思考的答复轮）：被捕获助手消息的 bash 步骤 `bodyOffset` 为 0；唯一审批的 `stepId` 等于该 bash 步骤的 `id`；`thinkingSegments` 恰一段，其 `bodyOffset` 为 0、`thinkingOffset` 为 0、`thinkingLength` 为 15（`先读需求，再列要点，最后作答。` 的 UTF-16 长度）、`stepsBefore` 为 1、`thinkingMs` 为非负整数；user 消息 `thinkingSegments` 为 `[]`。
 
-`make ui-walk` SHALL 在主旅程（`web/e2e/ui-walk.spec.ts`）的受闸会话上、既有步骤全部完成之后、清理之前（分叉步骤把页面导航到了新会话，先以 `?session=<被走查会话 id>` 回到被走查的会话），由新文件 `web/e2e/ui-walk-segments.ts` 的步骤在两个 project 下各断言：
+`make ui-walk` SHALL 在主旅程（`web/e2e/ui-walk.spec.ts`）的受闸会话上、既有步骤全部完成之后、清理之前（页面此时已在被走查的会话上——等待指示步骤以 `?session=<被走查会话 id>` 回到了该会话；新步骤先断言 URL 与消息数），由新文件 `web/e2e/ui-walk-segments.ts` 的步骤在两个 project 下各断言：
 1. **工具段在正文之前**：第一条助手消息（真 omp 的 bash 工具轮在答复轮之前）的分段区按文档顺序为一个工具段、一个正文段；工具段为收起态（`aria-expanded="false"`），摘要为 `执行 1 条命令`；消息内没有名为 `已允许执行` 的记录；展开后 bash 步骤卡没有确认标记。
 2. **交错**：在同一会话发送一条含 `WORKBUDDY_INTERLEAVE` 的消息（之后的回合不再有工具轮），回合结束后该助手消息的分段区按文档顺序为正文段、标题匹配 `已思考 \d+ 秒` 的折叠块（收起）、正文段，两个正文段的文本依次为该标记前后两部分正文（omp-test-harness「受控上游交错标记」）；`复制` 写入的文本为两段正文拼接。
 3. **刷新一致**：重新加载页面后，以上两条助手消息的分段区逐项相同（块的种类、次序、正文文本、折叠块标题与工具段摘要），且经页面的请求上下文读到的快照中该消息 `thinkingSegments` 恰一段、`bodyOffset` 等于第一部分正文的长度。
