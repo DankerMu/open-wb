@@ -1,5 +1,4 @@
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
-import { constants as osConstants } from "node:os";
+import { closeSync, lstatSync, readSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import { Readable } from "node:stream";
 import type {
@@ -24,6 +23,7 @@ import {
   sniffText,
 } from "./preview.js";
 import { sendFileRange } from "./range-send.js";
+import { isStructuralAbsence, openRegularFile, type RegularFile } from "./regular-file.js";
 import { WorkspaceRootOccupiedError, type WorkspaceStore } from "./store.js";
 import type { createTrash } from "./trash.js";
 import { listOneLevel } from "./tree.js";
@@ -189,65 +189,23 @@ export function lstatExisting(path: string) {
 }
 
 /**
- * Opens for reading a file a route has just lstat-ed as regular; the caller closes the descriptor.
- * The path may have been replaced since that lstat, so the open neither follows a final symlink
- * nor waits on a pipe, and what was opened is checked from its descriptor before it is handed
- * out: anything but a regular file is closed here and is the same `not_found` as in the route. So
- * is an open refused because nothing is there any more (ENOENT, ENOTDIR), because a symlink is
- * (ELOOP), or because a socket is (ENXIO on Linux, EOPNOTSUPP on macOS); any other failure is
- * thrown as is. Only the last component is guarded: `O_NOFOLLOW` does not keep the open from
- * following a symlink that has replaced a directory on the way to it.
+ * Whether the first SNIFF_BYTES of the file the route has opened read as text: one read through
+ * the descriptor the response will stream from, so the file is not opened a second time.
  */
-export function openRegularFile(absPath: string): number {
-  let fd: number;
-  try {
-    fd = openSync(absPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-  } catch (error) {
-    const { code, errno } = error instanceof Error ? (error as NodeJS.ErrnoException) : {};
-    if (
-      isStructuralAbsence(error) ||
-      code === "ELOOP" ||
-      code === "ENXIO" ||
-      // By number: Node has no name for macOS's EOPNOTSUPP and reports "Unknown system error".
-      errno === -osConstants.errno.EOPNOTSUPP
-    ) {
-      throw new HttpError("not_found");
-    }
-    throw error;
-  }
-  try {
-    if (!fstatSync(fd).isFile()) {
-      throw new HttpError("not_found");
-    }
-  } catch (error) {
-    closeSync(fd);
-    throw error;
-  }
-  return fd;
+function sniffedAsText(fd: number): boolean {
+  const buffer = Buffer.alloc(SNIFF_BYTES);
+  const bytesRead = readSync(fd, buffer, 0, SNIFF_BYTES, 0);
+  return sniffText(buffer.subarray(0, bytesRead));
 }
 
-/**
- * Reads at most the first SNIFF_BYTES of a file the route has just lstat-ed as regular and says
- * whether they read as text; what is not a regular file any more is `not_found` and is not read.
- */
-function sniffedAsText(absPath: string): boolean {
-  const fd = openRegularFile(absPath);
+/** What `classify` gives, or its error once the descriptor is closed: a refused file sends nothing. */
+function classifiedOrClosed<T>(file: RegularFile, classify: () => T): T {
   try {
-    const buffer = Buffer.alloc(SNIFF_BYTES);
-    const bytesRead = readSync(fd, buffer, 0, SNIFF_BYTES, 0);
-    return sniffText(buffer.subarray(0, bytesRead));
-  } finally {
-    closeSync(fd);
+    return classify();
+  } catch (error) {
+    closeSync(file.fd);
+    throw error;
   }
-}
-
-function isStructuralAbsence(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error.code === "ENOENT" || error.code === "ENOTDIR")
-  );
 }
 
 export function registerWorkspaceRest(
@@ -377,16 +335,21 @@ export function registerWorkspaceRest(
         throw new HttpError("not_found");
       }
       const name = basename(absPath);
-      // A known extension is never opened here: only a name the table does not decide is sniffed.
-      const preview = classifyPreview(absPath, name, status.size, {
-        limits,
-        ...(needsTextSniff(name) ? { sniffedText: sniffedAsText(absPath) } : {}),
-      });
+      // The lstat refused what was never a file without opening it; from here on the descriptor
+      // and its fstat decide, whatever happens to the path.
+      const file = openRegularFile(absPath);
+      const preview = classifiedOrClosed(file, () =>
+        // Only a name the table does not decide is sniffed: a known extension is not read here.
+        classifyPreview(absPath, name, file.size, {
+          limits,
+          ...(needsTextSniff(name) ? { sniffedText: sniffedAsText(file.fd) } : {}),
+        }),
+      );
       if (preview.rangeable) {
-        // Audio and video only, and only here: after the sandbox, the lstat and the classifier.
+        // Audio and video only, and only here: after the sandbox, the open and the classifier.
         return sendFileRange(request, reply, {
-          absPath,
-          size: status.size,
+          fd: file.fd,
+          size: file.size,
           headers: preview.headers,
           unsatisfiableHeaders: { "X-Content-Type-Options": "nosniff" },
         });
@@ -395,7 +358,7 @@ export function registerWorkspaceRest(
         reply.header(header, value);
       }
       // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write -- classifier permits text/plain, raster images, audio and video only (html/svg/xml go out as text/plain); nosniff remains set.
-      return reply.send(openPreviewStream(absPath, preview.limit));
+      return reply.send(openPreviewStream(file, preview.limit));
     },
   );
   // A scope of its own: the only content type it knows is the one that hands the request stream

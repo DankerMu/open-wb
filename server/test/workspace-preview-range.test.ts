@@ -1,13 +1,8 @@
-import { fstatSync, writeFileSync } from "node:fs";
+import { fstatSync, openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openRangeStream, parseRange, type RangeResult } from "../src/workspaces/preview.js";
-import {
-  collectBytes,
-  waitForClose,
-  waitForOpen,
-  workspaceTempDir,
-} from "./workspace-file-helpers.js";
+import { collectBytes, waitForClose, workspaceTempDir } from "./workspace-file-helpers.js";
 
 type RangeRow = [header: string | undefined, size: number, expected: RangeResult];
 
@@ -55,11 +50,11 @@ describe("parseRange", () => {
 });
 
 describe("openRangeStream", () => {
-  /** 64 bytes, each equal to its own offset. */
-  function indexedFile(): string {
+  /** A descriptor of 64 bytes, each equal to its own offset. */
+  function indexedFile(): { fd: number } {
     const path = join(workspaceTempDir(), "clip.mp4");
     writeFileSync(path, Buffer.from(Array.from({ length: 64 }, (_, index) => index)));
-    return path;
+    return { fd: openSync(path, "r") };
   }
 
   it("yields exactly bytes 10 through 19 of the file, both ends included", async () => {
@@ -69,28 +64,20 @@ describe("openRangeStream", () => {
   });
 
   it("releases the descriptor once the interval has been read to its end", async () => {
-    const stream = openRangeStream(indexedFile(), 10, 19);
-    const opened = waitForOpen(stream);
+    const file = indexedFile();
+    const stream = openRangeStream(file, 10, 19);
     const closed = waitForClose(stream);
     expect((await collectBytes(stream)).length).toBe(10);
     await closed;
-    const fd = await opened;
-    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+    expect(() => fstatSync(file.fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
   });
 
   it("releases the descriptor when destroyed before the interval is read", async () => {
-    const stream = openRangeStream(indexedFile(), 10, 19);
+    const file = indexedFile();
+    const stream = openRangeStream(file, 10, 19);
     const closed = waitForClose(stream);
-    const fd = await waitForOpen(stream);
     stream.destroy();
     await closed;
-    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
-  });
-
-  it("rejects with ENOENT for a missing path and still closes, never an empty body", async () => {
-    const stream = openRangeStream(join(workspaceTempDir(), "gone.mp4"), 10, 19);
-    const closed = waitForClose(stream);
-    await expect(collectBytes(stream)).rejects.toMatchObject({ code: "ENOENT" });
-    await closed;
+    expect(() => fstatSync(file.fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
   });
 });

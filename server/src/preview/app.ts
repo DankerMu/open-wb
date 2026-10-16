@@ -14,22 +14,24 @@
  * 失败一律是固定的短纯文本加三项公共头，不是 JSON 信封，不含令牌、路径或任何请求内容；
  * 所以框架自己会回显路径的几处（坏百分号序列、超长参数、未命中路由；实测）与缺省错误处理器都被接管。
  *
- * 已知残余（design D22「已知残余」、D-23，#1286 未闭合；以下为读代码推出，未测）：`lstat` 判定为普通文件
- * 之后，文件由区间发送函数按路径打开，不带 `O_NOFOLLOW` / `O_NONBLOCK`。其间条目或中间分量若被换成
- * 符号链接，读到的是链接目标；被换成命名管道，则占住一个线程池线程。这与主站 `file` / `download`
- * 是同一个窗口，本路由是它的第三条。与 `file` 的文本 / 图片 / 笔记本分支不同，`/w/` 没有字节上限
- * （`download` 与 `file` 的音视频分支同样没有）；读到的至多是 `lstat` 时 `size` 个字节，该值由换入方
- * 决定。凭据是路径里的令牌而不是 cookie，持令牌者包括被预览文档自己的脚本（成功响应带
+ * 读文件（change sandbox-boundary-closure）：`lstat` 判定为普通文件之后，`/w/` 以 `openRegularFile`
+ * 不跟随、不阻塞地打开，按描述符 `fstat` 判普通文件并取大小，此后只从该描述符读；`Content-Length` 与
+ * 区间取那次 `fstat` 的大小，打开之后路径被删除或替换不影响本次响应。其间末段被换成符号链接、命名管道、
+ * 目录或套接字，或条目已消失，答 404，描述符已关闭、不读任何字节——末段这一半已闭合（钩子辅助复现：
+ * `preview-app-swap.test.ts` 以包住打开的钩子自己换入，不是自然竞态）。与主站 `file` / `download`
+ * 同一个打开函数。已知残余（design D4「书面残余」，owner B1；读代码推出，未测）：只守末段——中间目录
+ * 分量在 `resolve` 之后被换成符号链接时打开仍跟随它，读到空间外同名普通文件。与 `file` 的文本 / 图片 /
+ * 笔记本分支不同，`/w/` 没有字节上限（`download` 与 `file` 的音视频分支同样没有）。凭据是路径里的令牌
+ * 而不是 cookie，持令牌者包括被预览文档自己的脚本（成功响应带
  * `Access-Control-Allow-Origin: *`，CSP 允许脚本且不设取源指令，文档地址里就有令牌）：该文档由 omp
  * 侧写入，与能换路径的是同一方，它可以自行重复请求去撞窗口，并把读到的内容发往外部；它也可以把令牌
  * 本身发往外部，此后任何持令牌方（含换路径的 omp 侧进程——生产入口把预览监听器绑在主监听器的
  * `HOST` 上，缺省 `127.0.0.1`，同机的 omp 用户进程连得到这个端口；读代码推出，未测）在令牌有效期内
  * （900 秒，主站每次签发都会续期）都可以直接请求并与自己的替换动作对时，
  * 不限于预览打开期间，也不需要浏览器；`file` / `download` 的字节只回到带 cookie 的主站页面。`/w/` 的
- * 成功读取不写审计行（`download` 写 `file.download`）。`Content-Length` 取 `lstat` 时的大小，其间
- * 文件变短则正文短于声明。
+ * 成功读取不写审计行（`download` 写 `file.download`）。
  *
- * `/o/`（#1074）是这个读窗口的第四条路由，有两段，同样没有闭合（除标明实测的一句外，以下为读代码推出，未测）：
+ * `/o/`（#1074）是这个读窗口的第四条路由，有两段（除标明实测与钩子辅助复现的句子外，以下为读代码推出，未测）：
  * ① `resolve` / `lstat` 判定之后，转换进程才按路径打开输入。排队把这段间隔从毫秒级拉长到最坏约
  *    `ceil(8 / concurrency) × timeoutMs`（缺省并发 2、超时 60 秒时约 4 分钟，并发为 1 时约 8 分钟）。
  *    其间条目或中间分量被换成符号链接时，转换进程读的是链接目标；文档上限比的是 `lstat` 那一刻的
@@ -48,9 +50,9 @@
  *    「任意本地文本文件能否进 PDF」同样未知；已证实能进 PDF 的只是能被当作图片解码的文件。https、回环
  *    以外的网络目标（实测的 http 目标是容器内回环监听器）、DNS 与重定向、xlsx 里的链接图片、关闭链接
  *    更新之后的行为、其它版本：未测。
- * ② `convert` 落定之后，路由对缓存里的 PDF 再 `lstat`，由区间发送函数按路径打开，同样不带
- *    `O_NOFOLLOW` / `O_NONBLOCK`。`pdf/` 为 `0700`、属应用用户，omp 用户进不去；能换这一段的只有
- *    以应用用户身份运行的代码。
+ * ② `convert` 落定之后，路由对缓存里的 PDF 再 `lstat`，再以 `openRegularFile` 打开、从描述符发送：
+ *    末段被换入或已被清理 → 502，描述符已关闭、不读（已闭合，钩子辅助复现）；中间分量的残余同 `/w/`。
+ *    `pdf/` 为 `0700`、属应用用户，omp 用户进不去；能换这一段的只有以应用用户身份运行的代码。
  * 凭据与 `/w/` 相同（路径里的令牌，持令牌方的范围见上），成功的转换同样不写审计行。
  */
 import type { Socket } from "node:net";
@@ -64,6 +66,7 @@ import {
   validateListenerCloseBudget,
 } from "../http/listener-shutdown.js";
 import { sendFileRange } from "../workspaces/range-send.js";
+import { openRegularFile, type RegularFile } from "../workspaces/regular-file.js";
 import { isOrdinaryDirectory, lstatExisting, ownedRootOf } from "../workspaces/rest.js";
 import type { WorkspaceStore } from "../workspaces/store.js";
 import { previewFailureHeaders, previewHeaders } from "./headers.js";
@@ -101,7 +104,7 @@ const TIMEOUT_TEXT = "文档转换超时，请下载后查看";
 const OFFICE_EXTENSIONS: ReadonlySet<string> = new Set(["docx", "xlsx", "pptx"]);
 /** 响应里 PDF 的名字：类型只由它算出，原文件名不进任何头。 */
 const PDF_NAME = "a.pdf";
-/** 成功响应才有的头：流在打开文件时失败，这些头已经写在 reply 上，500 之前要清掉。 */
+/** 成功响应才有的头：流在读文件时失败，这些头已经写在 reply 上，500 之前要清掉。 */
 const SUCCESS_ONLY_HEADERS = [
   "Access-Control-Allow-Origin",
   "Cross-Origin-Resource-Policy",
@@ -129,6 +132,18 @@ function convertFailure(kind: OfficeConvertError["kind"]): [FailureStatus, strin
       return [504, TIMEOUT_TEXT];
     default:
       return [502, FAILED_TEXT];
+  }
+}
+
+/** 打开转出的 PDF；`not_found`（已不在或已不是普通文件）为 `null`，其它打开错误原样抛出（无文案的 500）。 */
+function openedOrGone(absPath: string): RegularFile | null {
+  try {
+    return openRegularFile(absPath);
+  } catch (error) {
+    if (error instanceof HttpError && error.code === "not_found") {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -168,7 +183,8 @@ export function createPreviewApp(options: PreviewAppOptions): FastifyInstance {
     if (error instanceof HttpError && error.code === "not_found") {
       return fail(reply, 404, NOT_FOUND_TEXT);
     }
-    // 其余失败（含 lstat 之后文件消失、打开失败、转换器抛出种类之外的错误）：有状态无文案。框架
+    // `not_found`（含打开时才发现被换入或已消失）已在上面答 404，`/o/` 的转出 PDF 在路由里答 502。其余
+    // 失败（`not_found` 之外的打开错误、对描述符的读失败、转换器抛出种类之外的错误）：有状态无文案。框架
     // 缺省的处理器把错误消息写进 JSON 体（实测）；Node 的打开失败消息里有宿主上的绝对路径（读代码推出）。
     for (const name of SUCCESS_ONLY_HEADERS) {
       reply.removeHeader(name);
@@ -219,9 +235,11 @@ export function createPreviewApp(options: PreviewAppOptions): FastifyInstance {
     if (target === null) {
       return reply;
     }
+    // `lstat` 之后被换入或已消失：`not_found`，由错误处理器答 404。大小取打开时的 `fstat`。
+    const file = openRegularFile(target.absPath);
     return sendFileRange(request, reply, {
-      absPath: target.absPath,
-      size: target.size,
+      fd: file.fd,
+      size: file.size,
       // 类型只看文件自己的名字。
       headers: previewHeaders(basename(target.absPath), target.embedOrigin),
       unsatisfiableHeaders: previewFailureHeaders(),
@@ -294,13 +312,14 @@ export function createPreviewApp(options: PreviewAppOptions): FastifyInstance {
       return fail(reply, ...convertFailure(outcome.kind));
     }
     const converted = lstatExisting(outcome);
-    // 缓存文件刚被周期清理删掉：按转换失败答。
-    if (converted === undefined || !converted.isFile()) {
+    // 缓存文件刚被周期清理删掉（或在 `lstat` 之后被换入）：按转换失败答。
+    const file = converted?.isFile() === true ? openedOrGone(outcome) : null;
+    if (file === null) {
       return fail(reply, 502, FAILED_TEXT);
     }
     return sendFileRange(request, reply, {
-      absPath: outcome,
-      size: converted.size,
+      fd: file.fd,
+      size: file.size,
       // 固定的名字：类型恒为 PDF（CSP 因此不带 `sandbox`），原文件名不参与。
       headers: previewHeaders(PDF_NAME, target.embedOrigin),
       unsatisfiableHeaders: previewFailureHeaders(),

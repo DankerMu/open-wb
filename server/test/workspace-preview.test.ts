@@ -1,4 +1,11 @@
-import fs, { fstatSync, mkdirSync, truncateSync, writeFileSync } from "node:fs";
+import fs, {
+  constants,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -14,7 +21,6 @@ import {
   spyMetadataIo,
   TEXT_MIME,
   waitForClose,
-  waitForOpen,
   workspaceTempDir,
 } from "./workspace-file-helpers.js";
 
@@ -190,19 +196,22 @@ describe("openPreviewStream", () => {
     const jpegPlan = classifyPreview(jpegPath, "photo.jpeg", JPEG_BYTES.length, DEFAULTS);
     expect(pngPlan.headers).toEqual(expectedImageHeaders("image/png", PNG_BYTES.length));
     expect(jpegPlan.headers).toEqual(expectedImageHeaders("image/jpeg", JPEG_BYTES.length));
-    expect(await collectBytes(openPreviewStream(pngPath, pngPlan.limit))).toEqual(PNG_BYTES);
-    expect(await collectBytes(openPreviewStream(jpegPath, jpegPlan.limit))).toEqual(JPEG_BYTES);
+    const png = { fd: openSync(pngPath, "r") };
+    const jpeg = { fd: openSync(jpegPath, "r") };
+    expect(await collectBytes(openPreviewStream(png, pngPlan.limit))).toEqual(PNG_BYTES);
+    expect(await collectBytes(openPreviewStream(jpeg, jpegPlan.limit))).toEqual(JPEG_BYTES);
   });
 
-  it("returns an empty binary Readable for zero-byte text without a negative end", async () => {
+  it("returns an empty binary Readable for zero-byte text without a negative end, closing the descriptor", async () => {
     const emptyPath = join(workspaceTempDir(), "empty.txt");
     writeFileSync(emptyPath, "");
     const plan = classifyPreview(emptyPath, "empty.txt", 0, DEFAULTS);
     expect(plan.headers).toEqual(expectedTextHeaders(0, false));
 
+    const fd = openSync(emptyPath, "r");
     const nativeCreate = vi.spyOn(fs, "createReadStream");
     syncBuiltinESMExports();
-    const stream = openPreviewStream(emptyPath, plan.limit);
+    const stream = openPreviewStream({ fd }, plan.limit);
 
     expect(plan.limit).toBe(0);
     expect(stream.readableObjectMode).toBe(false);
@@ -214,6 +223,8 @@ describe("openPreviewStream", () => {
         expect(options.end === undefined || options.end >= 0).toBe(true);
       }
     }
+    // No stream was opened to close it: the helper closed it itself.
+    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
   });
 
   it("cuts text at the raw 1 MiB prefix even when a multibyte UTF-8 sequence straddles the cutoff", async () => {
@@ -232,7 +243,7 @@ describe("openPreviewStream", () => {
     expect(plan.headers["X-Workbuddy-Size"]).toBe(String(body.length));
     expect(plan.headers["X-Workbuddy-Truncated"]).toBe("1");
 
-    const actual = await collectBytes(openPreviewStream(path, plan.limit));
+    const actual = await collectBytes(openPreviewStream({ fd: openSync(path, "r") }, plan.limit));
     expect(actual.equals(body.subarray(0, TEXT_LIMIT))).toBe(true);
     expect(actual.length).toBe(TEXT_LIMIT);
     expect(actual.subarray(TEXT_LIMIT - 1)).toEqual(Buffer.from([0xe4]));
@@ -241,11 +252,10 @@ describe("openPreviewStream", () => {
   it("releases the captured descriptor after a fully consumed stream closes", async () => {
     const path = join(workspaceTempDir(), "notes.txt");
     writeFileSync(path, "abcdef");
-    const stream = openPreviewStream(path, 6);
-    const opened = waitForOpen(stream);
+    const fd = openSync(path, "r");
+    const stream = openPreviewStream({ fd }, 6);
     const closed = waitForClose(stream);
     expect(await collectBytes(stream)).toEqual(Buffer.from("abcdef"));
-    const fd = await opened;
     await closed;
     expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
   });
@@ -253,30 +263,23 @@ describe("openPreviewStream", () => {
   it("releases the captured descriptor after early destroy", async () => {
     const path = join(workspaceTempDir(), "notes.txt");
     writeFileSync(path, Buffer.alloc(64, 0x61));
-    const stream = openPreviewStream(path, 64);
-    const opened = waitForOpen(stream);
+    const fd = openSync(path, "r");
+    const stream = openPreviewStream({ fd }, 64);
     const closed = waitForClose(stream);
-    const fd = await opened;
     stream.destroy();
     await closed;
     expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
   });
 
-  it("propagates a missing-file open error without fabricating an empty body", async () => {
-    const missing = join(workspaceTempDir(), "gone.txt");
-    const stream = openPreviewStream(missing, 4);
-    const closed = waitForClose(stream);
-    await expect(collectBytes(stream)).rejects.toMatchObject({ code: "ENOENT" });
-    await closed;
-  });
-
   it("propagates a real filesystem read error from an existing directory target", async () => {
     const path = join(workspaceTempDir(), "blocked");
     mkdirSync(path);
-    const stream = openPreviewStream(path, 6);
+    const fd = openSync(path, constants.O_RDONLY);
+    const stream = openPreviewStream({ fd }, 6);
     const closed = waitForClose(stream);
     await expect(collectBytes(stream)).rejects.toMatchObject({ code: "EISDIR" });
     await closed;
+    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
   });
 });
 
@@ -298,7 +301,7 @@ describe("classifier and stream stay sequenced as metadata then bounded bytes", 
     vi.restoreAllMocks();
     syncBuiltinESMExports();
     expect(
-      (await collectBytes(openPreviewStream(path, plan.limit))).equals(
+      (await collectBytes(openPreviewStream({ fd: openSync(path, "r") }, plan.limit))).equals(
         body.subarray(0, TEXT_LIMIT),
       ),
     ).toBe(true);

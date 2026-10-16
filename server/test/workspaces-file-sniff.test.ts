@@ -1,5 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import fs, {
+  fstatSync,
   lstatSync,
   mkdirSync,
   rmSync,
@@ -20,7 +21,13 @@ import {
   loginSessionId,
   NOT_FOUND_ENVELOPE,
 } from "./auth-lifecycle-helpers.js";
-import { spyBodyIo, TEXT_MIME } from "./workspace-file-helpers.js";
+import {
+  descriptorsOf,
+  spyBodyIo,
+  streamOn,
+  TEXT_MIME,
+  waitForClose,
+} from "./workspace-file-helpers.js";
 import {
   expectWorkspaceResponse,
   insertWorkspace,
@@ -194,6 +201,9 @@ describe("file route: sniff reads", () => {
       });
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
       const io = spyOpenAndRead();
+      const readCount = () => io.read.mock.calls.length + vi.mocked(fs.read).mock.calls.length;
+      const asyncClose = vi.spyOn(fs, "close");
+      syncBuiltinESMExports();
 
       for (const [path, status] of [
         ["readme.md", 200],
@@ -202,18 +212,30 @@ describe("file route: sniff reads", () => {
         ["a.ipynb", 200],
         ["Dockerfile", 200],
       ] as const) {
+        const [readsBefore, closesBefore] = [readCount(), io.closed().length];
         const response = await requestWorkspaceFile(app, U1_SNIFF, cookie, path);
         expect(response.statusCode, path).toBe(status);
-        expect(io.opensOf(join(root, path)), path).toEqual([]);
-        // The one asynchronous open is the response stream's; the refused one has no stream.
-        expect(io.asyncOpensOf(join(root, path)), path).toHaveLength(status === 200 ? 1 : 0);
+        // Opened once, synchronously: for the stream, or (the refused one) for its size.
+        expect(io.opensOf(join(root, path)), path).toHaveLength(1);
+        // Never by path again: the stream reads the descriptor the route opened.
+        expect(io.asyncOpensOf(join(root, path)), path).toEqual([]);
+        if (status === 415) {
+          // Refused after the open: closed again with nothing read through it.
+          expect(readCount(), path).toBe(readsBefore);
+          expect(io.closed().slice(closesBefore), path).toEqual(descriptorsOf(join(root, path)));
+        }
       }
-      // No descriptor was opened by path, so nothing was read through one either.
-      expect(io.open.mock.calls.filter(([opened]) => String(opened).startsWith(root))).toEqual([]);
+      // One open by path per request below the workspace, none of them a sniff's.
+      const opensBelowRoot = io.open.mock.calls.filter(([opened]) =>
+        String(opened).startsWith(root),
+      );
+      expect(opensBelowRoot).toHaveLength(5);
       expect(io.sniffReads()).toEqual([]);
       // Nor was any of them read whole by path: the response stream is all there is.
       expect(io.wholeReadsBelow(root)).toEqual([]);
-      expect(io.opensBelow(join(root, "doc.pdf"))).toEqual([]);
+      expect(io.opensBelow(join(root, "doc.pdf"))).toEqual([join(root, "doc.pdf")]);
+      const closedBefore = io.closed();
+      const asyncClosesBefore = asyncClose.mock.calls.length;
 
       const license = await requestWorkspaceFile(app, U1_SNIFF, cookie, "LICENSE");
       expect(license.statusCode).toBe(200);
@@ -225,7 +247,19 @@ describe("file route: sniff reads", () => {
       const [, buffer, offset, length, position] = reads[0] as unknown[];
       expect((buffer as Buffer).length).toBe(8192);
       expect([offset, length, position]).toEqual([0, 8192, 0]);
-      expect(io.closed()).toEqual([opened?.value]);
+      // The sniff and the stream share that descriptor; the stream closes it, once, and nothing
+      // else: the only `closeSync` is still doc.pdf's.
+      expect(closedBefore).toHaveLength(1);
+      expect(io.closed()).toEqual(closedBefore);
+      const stream = streamOn(opened?.value as number);
+      if (stream !== undefined && !stream.closed) {
+        await waitForClose(stream);
+      }
+      expect(stream).toBeDefined();
+      expect(
+        asyncClose.mock.calls.slice(asyncClosesBefore).filter(([fd]) => fd === opened?.value),
+      ).toHaveLength(1);
+      expect(() => fstatSync(opened?.value as number)).toThrow(/EBADF/);
     });
   });
 });

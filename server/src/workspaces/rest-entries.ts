@@ -39,11 +39,12 @@
  *   swapped in as `from` is itself moved, one at `to` is the case above. The audit row names
  *   the logical paths either way.
  */
-import { renameSync } from "node:fs";
+import { closeSync, renameSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { FastifyInstance, onErrorHookHandler } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import { openPreviewStream } from "./preview.js";
+import { openRegularFile } from "./regular-file.js";
 import {
   currentPrincipal,
   ensureOwnedRoot,
@@ -137,21 +138,29 @@ export function registerWorkspaceEntries(
       if (status === undefined || !status.isFile()) {
         throw new HttpError("not_found");
       }
-      // Before the stream exists: a download that cannot be audited opens nothing.
-      dependencies.audit.emit({
-        kind: "file.download",
-        actorId: principal.id,
-        workspaceId,
-        title: `下载 ${path}`,
-        detail: { path, size: status.size },
-      });
+      // Opened before the audit: what was swapped in after the lstat is 404 with no audit row, and
+      // the row records what is sent — the opened inode, whatever happens to the path after.
+      const file = openRegularFile(absPath);
+      try {
+        dependencies.audit.emit({
+          kind: "file.download",
+          actorId: principal.id,
+          workspaceId,
+          title: `下载 ${path}`,
+          detail: { path, size: file.size },
+        });
+      } catch (error) {
+        // A download that cannot be audited sends nothing and keeps no descriptor.
+        closeSync(file.fd);
+        throw error;
+      }
       reply.header("Content-Type", "application/octet-stream");
       reply.header("Content-Disposition", attachmentDisposition(basename(absPath)));
-      reply.header("Content-Length", String(status.size));
+      reply.header("Content-Length", String(file.size));
       reply.header("X-Content-Type-Options", "nosniff");
-      // Any size and no Range. Bounded by the size just read: a file that grows meanwhile
+      // Any size and no Range. Bounded by the size of the open: a file that grows meanwhile
       // sends no byte beyond the declared length.
-      return reply.send(openPreviewStream(absPath, status.size));
+      return reply.send(openPreviewStream(file, file.size));
     },
   );
   // No body semantics and not an owned-parser route: a well-formed body is ignored.

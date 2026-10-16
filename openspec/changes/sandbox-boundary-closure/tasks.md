@@ -105,7 +105,7 @@ Minimal mergeable slice: atomic - 建根、校正、失败阶段与同 uid 记�
 
 ## 2. S2 — 四条读路由改为 fd 锚定（workspaces / file-operations / preview-origin / office-preview）
 
-- [ ] 2.1 开工核对：
+- [x] 2.1 开工核对：
   - 重读 `server/src/workspaces/preview.ts:166-171`、`:209-211`，`range-send.ts` 全文，`rest.ts:191-250`、`:366-400`，`rest-entries.ts:122-156`，`rest-archive.ts:100-124`，`preview/app.ts:164-170`、`:184-229`、`:285-308`；
   - `grep -rn "createReadStream\|openPreviewStream\|openRangeStream\|openRegularFile\|sendFileRange" server/src server/test`、`grep -n "openSync).mock.calls\|opensOf\|asyncOpensOf\|opensBelow\|descriptors).toEqual\|waitForOpen\|io.closed()" server/test/workspaces-*.test.ts server/test/workspace-*.test.ts server/test/preview-*.test.ts` 与 `grep -n 'addHook("onSend"' server/test`（抓「交接后删文件 → 500」形状的四例）列出全部调用方、spy 与注入钩子，与 design D5 表逐条对照；表外的按路径钉住读流、钉零次打开、等 `open` 事件或靠 `onSend` 删文件的断言停下更新 D5；
   - 重读换入钩子先例 `server/test/workspaces-file-sniff.test.ts:395-505` 与 `workspaces-archive-route.test.ts:534-600`，确认 `spyBodyIo` / `spyOpenAndRead` 可直接复用；
@@ -113,15 +113,15 @@ Minimal mergeable slice: atomic - 建根、校正、失败阶段与同 uid 记�
   - **开工前提**（D5 第 4 种改法的 `EIO` 接缝）：核对本仓库所装 Fastify 的 `reply.send(stream)`——在流的第一个数据块写出之前不 flush 响应头、流在 `!res.headersSent` 时 `error` 交给错误处理器（读 `node_modules/fastify/lib/reply.js` 的 `sendStream` / `onErrorHook` 路径，并用一个最小 `app.inject` 实验核实）；若 Fastify 先 flush 头，**停下报告**，不自行换接缝、不改用例。
 
   验证：核对结果、调用方清单与 Fastify 核对结论写进 PR。
-- [ ] 2.2 先写 helper 与打开函数的测试（`server/test/workspace-preview.test.ts` 扩写 + 新文件 `server/test/workspaces-file-swap.test.ts` 的 helper 部分）：workspaces「预览分类元数据与有界字节流」的「打开只认普通文件」六例（普通文件返回 `{fd, size}`；FIFO 与目录打开过一次又关闭；符号链接、不存在、套接字无描述符；FIFO 1500ms 内返回；零字节读出）与改写后的「流关闭和错误」（传入描述符被关闭；`openRangeStream({fd}, 10, 19)`；`openPreviewStream({fd}, 0)` 不开流且描述符已关闭）；`sendFileRange` 的 416 与 HEAD 关闭描述符。
+- [x] 2.2 先写 helper 与打开函数的测试（`server/test/workspace-preview.test.ts` 扩写 + 新文件 `server/test/workspaces-file-swap.test.ts` 的 helper 部分）：workspaces「预览分类元数据与有界字节流」的「打开只认普通文件」六例（普通文件返回 `{fd, size}`；FIFO 与目录打开过一次又关闭；符号链接、不存在、套接字无描述符；FIFO 1500ms 内返回；零字节读出）与改写后的「流关闭和错误」（传入描述符被关闭；`openRangeStream({fd}, 10, 19)`；`openPreviewStream({fd}, 0)` 不开流且描述符已关闭）；`sendFileRange` 的 416 与 HEAD 关闭描述符。
   验证：在未改动的代码上判红。
-- [ ] 2.3 先写路由的换入测试：
+- [x] 2.3 先写路由的换入测试：
   - `workspaces-file-swap.test.ts`：workspaces「文件预览」的「lstat 之后目标被换入」六例与「大小以打开的 inode 为准」三例；另加**新例**（不是改写）「打开之后路径被 `unlink` / 被替换 → 照常应答」两例：`readme.md` 文本流 200、`clip.mp4` 带 `Range: bytes=0-99` 206，注入点沿用 `workspaces-download.test.ts:67-82` 的 `onSend` 钩子（fd 锚定后它落在打开之后），断言正文与 `Content-Length` / `X-Workbuddy-Size` 来自已打开的 inode；
   - `workspaces-download.test.ts` 扩写：file-operations「下载」的「lstat 之后被换入的目标不下载也不审计」三例、「审计失败不发文件」改写后的描述符断言、「大小以打开的 inode 为准」；另加新例「审计行写出之后文件被 `unlink` → 200 完整字节、`Content-Length` 与审计 `detail.size` 为 `fstat` 值」（新语义，proposal Impact）；
   - 新文件 `server/test/preview-app-swap.test.ts`：preview-origin「预览监听器」的「lstat 之后目标被换入」三例与「范围请求」改写后的 416 描述符断言；另加新例「`/w/` 打开之后路径被 `unlink` → 206 照常」；office-preview「办公文档预览路由」的「转出的 PDF 在发送之前被换入」三例（注入转换器替身，钩子在替身返回路径与路由打开之间换入）。
 
   验证：在未改动的代码上判红（换入后旧代码读到链接目标或挂住 / 审计行先写出；「打开之后被删 → 照常」四例在旧代码上得到 500）。
-- [ ] 2.4 实现：
+- [x] 2.4 实现：
   - 新模块 `server/src/workspaces/regular-file.ts`：`openRegularFile(absPath): {fd, size}`（从 `rest.ts:201-227` 移入，errno 表逐字保留，`size` 取同一次 `fstat`），头注释写明只守末段、中间分量残余（design D4）；
   - `preview.ts`：两个 helper 改收 `{fd}`（design D4）；`range-send.ts`：收 `{fd, size, …}`，416 / HEAD 关闭描述符，头注释改写；
   - `rest.ts` `/file`：`lstat` → `openRegularFile` → 嗅探改从该 `fd` 读（不再二次打开）→ `classifyPreview(…, fstat.size, …)`，抛出时 `closeSync(fd)` 再抛 → `sendFileRange` / `openPreviewStream`；`rest-archive.ts` 改 import 并用返回的 `size`；
@@ -130,8 +130,8 @@ Minimal mergeable slice: atomic - 建根、校正、失败阶段与同 uid 记�
   - 按 design D5 表改写标「S2」的全部行，逐条列进偏离记录：第 3 种（`workspaces-download.test.ts:391`，`workspaces-file-range.test.ts:245-246`，`workspaces-file-sniff.test.ts:207/:209/:212/:216`，ENOENT 两例 `workspace-preview.test.ts:265-271` 与 `workspace-preview-range.test.ts:90-95` 移到 `openRegularFile` 的测试）；第 4 种（`workspaces-download.test.ts:84-87`、`:417-437`，`workspaces-file-range.test.ts:150-152`、`:304-335`、`:339-367`、`:428-433`、`:514-530`，`workspaces-http.test.ts:691-735`，`preview-app-headers.test.ts:166-197`，`workspace-preview.test.ts:193-194/:197-217/:235/:244-245/:256-257/:276/:301`，`workspace-preview-range.test.ts:66/:72-73/:82-84`，`workspaces-preview-classify.test.ts:395`，`workspaces-file-sniff.test.ts:228`）；`sniff:213` 的 `sniffReads()` 为空与 `:220` 不动；`workspaces-download.test.ts:67-70` 的钩子注释改为「after the handler opened the file」。
 
   验证：2.2、2.3 全绿；除 D5 表列出的行外不改任何既有断言（`workspaces-file-sniff.test.ts:404-452` 与 `workspaces-archive-route.test.ts:540-577` 的换入用例只改 import、全绿）；预算表各文件在上限内；knip 无未用导出。
-- [ ] 2.5 变异证据（逐条做、逐条撤销）：去掉 `O_NOFOLLOW` → 四条路由的符号链接换入例判红（`/o/` 一例答 200 而不是 502）；去掉 `fstat` 的 `isFile` 判定 → FIFO 与目录换入例判红；去掉 `O_NONBLOCK` → FIFO 换入例超过 1500ms（判红）；`/download` 把审计挪回打开之前 → 「不下载也不审计」判红；`/download` 的 `catch` 里不 `closeSync(fd)` → 「审计失败不发文件」的描述符断言判红；`sendFileRange` 416 分支不关描述符 → 416 的描述符断言判红；`sendFileRange` HEAD 分支不关描述符 → HEAD 例（`workspaces-file-range.test.ts:304-335` 改写后「全部关闭」）判红；`openPreviewStream({fd}, 0)` 不关描述符 → 「流关闭和错误」的「描述符已关闭」判红；`/file` 分类抛出时不关描述符 → 改写后的 `doc.pdf` 415「打开一次又关闭」判红；`Content-Length` 改回 `lstat` 的大小 → 「大小以打开的 inode 为准」判红；`/o/` 的 `not_found` 不映射 502 → PDF 换入例判红（答成 404）。
-- [ ] 2.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（走查里的预览与下载路径走真实栈）。PR 请求白盒审查（design D11 S2 清单），PR 写明 416 现在会打开一次文件、`createReadStream` 的路径参数恒为 `null`。
+- [x] 2.5 变异证据（逐条做、逐条撤销）：去掉 `O_NOFOLLOW` → 四条路由的符号链接换入例判红（`/o/` 一例答 200 而不是 502）；去掉 `fstat` 的 `isFile` 判定 → FIFO 与目录换入例判红；去掉 `O_NONBLOCK` → FIFO 换入例超过 1500ms（判红）；`/download` 把审计挪回打开之前 → 「不下载也不审计」判红；`/download` 的 `catch` 里不 `closeSync(fd)` → 「审计失败不发文件」的描述符断言判红；`sendFileRange` 416 分支不关描述符 → 416 的描述符断言判红；`sendFileRange` HEAD 分支不关描述符 → HEAD 例（`workspaces-file-range.test.ts:304-335` 改写后「全部关闭」）判红；`openPreviewStream({fd}, 0)` 不关描述符 → 「流关闭和错误」的「描述符已关闭」判红；`/file` 分类抛出时不关描述符 → 改写后的 `doc.pdf` 415「打开一次又关闭」判红；`Content-Length` 改回 `lstat` 的大小 → 「大小以打开的 inode 为准」判红；`/o/` 的 `not_found` 不映射 502 → PDF 换入例判红（答成 404）。
+- [x] 2.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（走查里的预览与下载路径走真实栈）。PR 请求白盒审查（design D11 S2 清单），PR 写明 416 现在会打开一次文件、`createReadStream` 的路径参数恒为 `null`。
 Suggested fixture level: expanded - 改共享的文件打开与读流路径（file IO / path safety 风险包，Critical Path），四条路由同刀。
 Minimal mergeable slice: atomic - owner B5 把修法定在共享 helper：helper 签名一改，四条路由与它们的测试必须同刀；先改一条路由等于在 helper 之外另写一份打开逻辑，与 B5 相悖。
 
