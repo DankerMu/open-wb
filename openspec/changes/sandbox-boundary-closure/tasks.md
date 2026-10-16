@@ -62,12 +62,12 @@
 
 ## 0. S0 — B9：`session-delete-temp-workspace.test.ts:511` 断言竞态的最小修复（temporary-workspaces「删除失败不影响响应」）
 
-- [ ] 0.1 开工核对：重读 `server/test/session-delete-temp-workspace.test.ts:60-120`（夹具 `TREE`、`names`、`seedTemporary`）与 `:510-540`；`wc -l` 仍 ≤ 785 且余量够加一行；读 Node v24.13.1 源码 tag 里的 `lib/internal/fs/rimraf.js`（该文件编进了 node 二进制、磁盘上没有：从 `github.com/nodejs/node` 的 `v24.13.1` tag 取）确认 `_rmdir` 先 `rmdir`、只在 `ENOTEMPTY` / `EEXIST` / `EPERM` 时列举子项、`_rmchildren` 并行且首错即回调（design D8 的依据）；与读到的不一致先改 design。
+- [x] 0.1 开工核对：重读 `server/test/session-delete-temp-workspace.test.ts:60-120`（夹具 `TREE`、`names`、`seedTemporary`）与 `:510-540`；`wc -l` 仍 ≤ 785 且余量够加一行；读 Node v24.13.1 源码 tag 里的 `lib/internal/fs/rimraf.js`（该文件编进了 node 二进制、磁盘上没有：从 `github.com/nodejs/node` 的 `v24.13.1` tag 取）确认 `_rmdir` 先 `rmdir`、只在 `ENOTEMPTY` / `EEXIST` / `EPERM` 时列举子项、`_rmchildren` 并行且首错即回调（design D8 的依据）；与读到的不一致先改 design。
   验证：核对结果（含 rimraf 的相关行号）写进 PR。
-- [ ] 0.2 最小修复（design D8）：`:510-540` 用例在 `chmodSync(join(temporary.dir, "sub"), 0o500)` 之前加 `rmSync(join(temporary.dir, "notes.md"))`，`:525` 断言不变（这里的 `rmSync` 删的是测试自有夹具里的一个普通文件，不是递归删用户目录树，不在 temporary-workspaces 的 `rmSync` 禁令内）；PR 注记 PR #1459 的 CI 红与本机 APFS 0/800 的观测。
+- [x] 0.2 最小修复（design D8）：`:510-540` 用例在 `chmodSync(join(temporary.dir, "sub"), 0o500)` 之前加 `rmSync(join(temporary.dir, "notes.md"))`，`:525` 断言不变（这里的 `rmSync` 删的是测试自有夹具里的一个普通文件，不是递归删用户目录树，不在 temporary-workspaces 的 `rmSync` 禁令内）；PR 注记 PR #1459 的 CI 红与本机 APFS 0/800 的观测。
   验证：`cd server && ../node_modules/.bin/vitest run test/session-delete-temp-workspace.test.ts --coverage=false` 全绿；`for i in $(seq 20); do (cd server && ../node_modules/.bin/vitest run test/session-delete-temp-workspace.test.ts --coverage=false) || break; done` 20 轮全绿（本机）。
-- [ ] 0.3 规格随刀：核对 temporary-workspaces delta「删除失败不影响响应」的 WHEN 已是「唯一顶层条目」，与 0.2 一致。
-- [ ] 0.4 整刀验证：`make check`、`make test-guardrails` 全绿（只改一个测试文件，smoke / ui-walk 按合入门槛照跑）。PR 请求白盒审查（design D11 S0 清单：只删 `notes.md`、`:525` 不动）。
+- [x] 0.3 规格随刀：核对 temporary-workspaces delta「删除失败不影响响应」的 WHEN 已是「唯一顶层条目」，与 0.2 一致。
+- [x] 0.4 整刀验证：`make check`、`make test-guardrails` 全绿（只改一个测试文件，smoke / ui-walk 按合入门槛照跑）。PR 请求白盒审查（design D11 S0 清单：只删 `notes.md`、`:525` 不动）。
 Suggested fixture level: none - 只改一个既有测试用例的夹具一行，不改产品代码、不改断言。
 Minimal mergeable slice: atomic - 一行修复，没有可再拆的部分；独立于其它切片，可最先合入。
 
