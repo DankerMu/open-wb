@@ -286,12 +286,12 @@ Minimal mergeable slice: atomic - 去掉已配对的记录卡与加上步骤卡�
 
 ## 9. chat-harness — 分段走查集成
 
-- [ ] 9.1 开工核对：重读 `web/e2e/ui-walk.spec.ts` 主旅程的末段（分叉步骤导航到新会话之后、清理之前）与受闸会话的 id 来源；确认 `ui-walk-layout.ts`（789 行）不需要改。
+- [x] 9.1 开工核对：重读 `web/e2e/ui-walk.spec.ts` 主旅程的末段（分叉步骤导航到新会话之后、清理之前）与受闸会话的 id 来源；确认 `ui-walk-layout.ts`（789 行）不需要改。
   验证：核对结果写进 PR。
-- [ ] 9.2 新建 `web/e2e/ui-walk-segments.ts`，按 chat-harness「分段呈现的冒烟与走查」实现三步（工具段在正文之前、交错、刷新一致），在 `ui-walk.spec.ts` 主旅程末段调用；只打受控假上游与官方 omp。本组只做集成，不改产品代码。
+- [x] 9.2 新建 `web/e2e/ui-walk-segments.ts`，按 chat-harness「分段呈现的冒烟与走查」实现三步（工具段在正文之前、交错、刷新一致），在 `ui-walk.spec.ts` 主旅程末段调用；只打受控假上游与官方 omp。本组只做集成，不改产品代码。
   验证：两个 project 下通过；`ui-walk.spec.ts` ≤ 700 行；PR 写明新步骤时长与主旅程总时长（`globalTimeout` 300s）。
-- [ ] 9.3 变异证据（对产品代码临时变异，逐条撤销）：`message-segments-view.tsx` 按旧次序（思考 → 全部正文 → 工具段）渲染 → 第 1、2 步判红；`chatStateFromSnapshot` 丢掉 `thinkingSegments` → 第 3 步判红（刷新后变旧布局）；去掉开段前冲刷（3.11 的次序改回）→ 第 2 步正文段文本判红或第 3 步快照偏移判红（如实记录）。
-- [ ] 9.4 验收核对：`grep -n "个步骤\|已允许执行\|正文上方" docs/acceptance/functional-checklist.md` 不再命中 design D15 表里改写过的行；D15 表每一行都已在其切片里改写。
-- [ ] 9.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
+- [x] 9.3 变异证据（对产品代码临时变异，逐条撤销）：`message-segments-view.tsx` 按旧次序（思考 → 全部正文 → 工具段）渲染 → 第 1、2 步判红；`chatStateFromSnapshot` 丢掉 `thinkingSegments` → 第 3 步判红（刷新后变旧布局）；去掉开段前冲刷（3.11 的次序改回）→ 第 2 步正文段文本判红或第 3 步快照偏移判红（如实记录）。
+- [x] 9.4 验收核对：`grep -n "个步骤\|已允许执行\|正文上方" docs/acceptance/functional-checklist.md` 不再命中 design D15 表里改写过的行；D15 表每一行都已在其切片里改写。
+- [x] 9.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level: none - 只加走查步骤与验收核对，不改产品行为。
 Minimal mergeable slice: atomic - 一个走查文件及其接线。
