@@ -7,6 +7,7 @@
 // - 摘要行是 `tool-summary.ts` 按动作归类的计数（B6），失败与进行中的后缀在同一个 `span` 的同一段文字里、
 //   不另加颜色类（B7）；有步骤在跑时 `active`，摘要带 `shimmer`（`tw-shimmer`）与转圈图标，减少动态效果时
 //   由插件与全局 reduce 块停掉。
+// - 每张步骤卡取配上它的审批（`stepId` 等于步骤 id，至多取一条）的结算结果画确认小标记（step-card.tsx）。
 // - 拷入的 Root 在每次手动切换时调用 `useScrollLock`：从 Root 自身起向上找第一个 `overflow-y` 为
 //   auto / scroll 的元素，200ms 内把它的 `scrollTop` 钉回原值并改它的滚动条与内边距。落到转录滚动
 //   容器上会被滚动层读成用户上滚、解除贴底。Root 自己带 `overflow-y-auto`（不限高，永不滚动）后锁只
@@ -23,15 +24,22 @@ import {
   ToolGroupTrigger,
 } from "@/components/assistant-ui/elements/tool-group.aui";
 import { StepCard } from "./step-card.js";
+import type { ChatApprovalView } from "./stream-approvals.js";
 import type { ChatStepView } from "./stream-steps.js";
 import { summarizeTools } from "./tool-summary.js";
 
+type GroupProps = {
+  /** 所属消息的全部审批；只用来找配上各步骤的那一条。 */
+  approvals: readonly ChatApprovalView[];
+  steps: readonly ChatStepView[];
+};
+
 /** 一条消息的工具调用组；没有步骤时不渲染。 */
-export function ToolCallGroup({ steps }: { steps: readonly ChatStepView[] }) {
-  return steps.length > 0 ? <Group steps={steps} /> : null;
+export function ToolCallGroup({ approvals, steps }: GroupProps) {
+  return steps.length > 0 ? <Group approvals={approvals} steps={steps} /> : null;
 }
 
-function Group({ steps }: { steps: readonly ChatStepView[] }) {
+function Group({ approvals, steps }: GroupProps) {
   const [open, setOpen] = useState(false);
   return (
     <ToolGroupRoot
@@ -52,7 +60,11 @@ function Group({ steps }: { steps: readonly ChatStepView[] }) {
       </ToolGroupTrigger>
       <ToolGroupContent>
         {steps.map((step) => (
-          <StepCard key={step.id} step={step} />
+          <StepCard
+            decision={approvals.find((approval) => approval.stepId === step.id)?.decision ?? null}
+            key={step.id}
+            step={step}
+          />
         ))}
       </ToolGroupContent>
     </ToolGroupRoot>

@@ -8,6 +8,7 @@
 // - 已停止且没有正文段时，`（已停止生成）` 占位是分段区末尾的一个 `message-body`；此外分段布局不为空正文
 //   或只含空白的正文渲染 `message-body`（空白正文段由切段函数丢掉）。
 // - 折叠块的「进行中」取该段的（只展开正在思考的那一段，owner 裁定 B12），标题取该段的时长（B5）。
+// - 工具段拿到整条消息的审批，各步骤卡按 `stepId` 取配上自己的那一条画确认小标记（D12）。
 import { MarkdownBody } from "./markdown-body.js";
 import type { MessageSegment } from "./message-segments.js";
 import type { ChatMessageCustom } from "./runtime-convert.js";
@@ -16,6 +17,7 @@ import { ThinkingFold } from "./thinking-fold.js";
 import { ToolCallGroup } from "./tool-call-group.js";
 
 type Status = ChatMessageCustom["status"];
+type Approvals = ChatMessageCustom["approvals"];
 
 /**
  * 脉动的小圆点（design D6），减少动态效果时无动画。圆形写 `rounded-[50%]` 而不是 rounded-full：规格要求
@@ -52,7 +54,17 @@ export function MessageBody({ dot, status, text }: { dot: boolean; status: Statu
   );
 }
 
-function Block({ block, dot, status }: { block: MessageSegment; dot: boolean; status: Status }) {
+function Block({
+  approvals,
+  block,
+  dot,
+  status,
+}: {
+  approvals: Approvals;
+  block: MessageSegment;
+  dot: boolean;
+  status: Status;
+}) {
   switch (block.kind) {
     case "text":
       return <MessageBody dot={dot} status={status} text={block.text} />;
@@ -66,7 +78,7 @@ function Block({ block, dot, status }: { block: MessageSegment; dot: boolean; st
         />
       );
     default:
-      return <ToolCallGroup steps={block.steps} />;
+      return <ToolCallGroup approvals={approvals} steps={block.steps} />;
   }
 }
 
@@ -74,10 +86,12 @@ function Block({ block, dot, status }: { block: MessageSegment; dot: boolean; st
  * 分段布局的分段区。`dot` 为「运行中且已有可见块」（message-waiting.tsx 的判据）；等待指示由调用方在其后渲染。
  */
 export function MessageSegments({
+  approvals,
   blocks,
   dot,
   status,
 }: {
+  approvals: Approvals;
   blocks: readonly MessageSegment[];
   dot: boolean;
   status: Status;
@@ -88,7 +102,13 @@ export function MessageSegments({
   return (
     <>
       {blocks.map((block) => (
-        <Block block={block} dot={dotInText && block === last} key={block.key} status={status} />
+        <Block
+          approvals={approvals}
+          block={block}
+          dot={dotInText && block === last}
+          key={block.key}
+          status={status}
+        />
       ))}
       {placeholder ? <MessageBody dot={false} status={status} text="" /> : null}
       {dot && !dotInText ? (

@@ -9,7 +9,7 @@ import {
 } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
 import { walkActionRow } from "./ui-walk-action-row.js";
-import { allowFirstApproval, expectAllowedBar, generatingStatus } from "./ui-walk-approval.js";
+import { allowFirstApproval, expectNoSettledRecord, generatingStatus } from "./ui-walk-approval.js";
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
@@ -430,7 +430,7 @@ async function walkHeldDialogue(
     await page.reload();
     await expect.poll(() => page.url()).toBe(sessionUrl);
     await expectCompletedPair(page, project, sessionId, prompt);
-    await expectAllowedBar(page);
+    await expectNoSettledRecord(page);
     await walkScrollFollow(page, project, () =>
       expectCompletedPair(page, project, sessionId, prompt),
     );

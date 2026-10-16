@@ -2,7 +2,7 @@
 // 受控上游。欢迎态首次发送一条带 401 标记与 `secret` 正文的消息：受控上游答 401，正文逐字含它的密钥（走查
 // 用法下恒为 `fake`）、一个 bearer 令牌与一个 `sk-` 串。回合结束后助手消息显示分类句子与 `（HTTP 401）`，
 // `查看原文` 展开的原文不含密钥与令牌，输入框已解锁；随后同一会话发一条普通消息：历史里没有 tool result，
-// 受控上游发 bash，点 `允许` 后回合完成。会话 id 取自被观察的 `POST /api/sessions` 201 响应，`finally`
+// 受控上游发 bash，点 `允许` 后回合完成（该审批配上 bash 步骤：没有记录卡，步骤卡也不标记）。会话 id 取自被观察的 `POST /api/sessions` 201 响应，`finally`
 // 里先回欢迎态再删除（停在该会话上删除，事件流重连拿到 404，error oracle 会记一条意外的 console error）。
 
 import { randomUUID } from "node:crypto";
@@ -12,6 +12,7 @@ import { login, logout } from "./ui-walk-composer.js";
 import type { WalkProject } from "./ui-walk-layout.js";
 import type { AuthOracle } from "./ui-walk-oracle.js";
 import { welcomeHeading } from "./ui-walk-session-list.js";
+import { expandToolGroup } from "./ui-walk-steps.js";
 
 const FAILURE_LINE = "鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）";
 const UPSTREAM_KEY = "fake";
@@ -88,8 +89,16 @@ async function recoveredTurn(page: Page, reply: string): Promise<void> {
   await expect(latest.locator('[data-slot="message-body"]')).toHaveText(reply, {
     timeout: TURN_TIMEOUT_MS,
   });
-  await expect(latest.getByRole("group", { name: "已允许执行" })).toBeVisible();
+  // 该审批配上了 bash 步骤：消息里没有记录卡，展开工具段后步骤卡没有确认标记（正常允许不标）。
   await expect(pending).toHaveCount(0);
+  await expect(
+    latest.getByRole("group", { name: /^(已允许执行|已拒绝执行|超时自动允许)$/u }),
+  ).toHaveCount(0);
+  await expandToolGroup(latest);
+  await expect(latest.getByRole("status", { name: "bash 已完成" })).toBeVisible();
+  await expect(
+    latest.getByRole("region", { name: "bash" }).locator('[data-slot="step-approval-mark"]'),
+  ).toHaveCount(0);
   await expect(latest.locator('[data-slot="message-error"]')).toHaveCount(0);
   // 失败的那条仍在原处显示同一句话。
   await expect(
