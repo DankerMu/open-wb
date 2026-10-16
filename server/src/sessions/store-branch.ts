@@ -253,8 +253,13 @@ const FORK_STEPS =
 // Issue 1472 (design D7): segment rows value for value, NULL included, in their row order.
 const FORK_SEGMENTS =
   "INSERT INTO chat_thinking_segments(message_id, body_offset, thinking_offset, steps_before, thinking_length, thinking_ms) SELECT ?, body_offset, thinking_offset, steps_before, thinking_length, thinking_ms FROM chat_thinking_segments WHERE message_id = ? ORDER BY id ASC";
-const FORK_APPROVALS =
-  "INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, decision, decided_at) SELECT ?, request_id, tool, title, requested_at, expires_at, decision, decided_at FROM chat_approvals WHERE message_id = ? ORDER BY id ASC";
+// Issue 1473 (design D7): `step_id` names the copy's step of the same ordinal (steps are copied
+// first); NULL, or a step not of this message, stays NULL.
+const FORK_APPROVALS = `INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, decision, decided_at, step_id)
+  SELECT ?, a.request_id, a.tool, a.title, a.requested_at, a.expires_at, a.decision, a.decided_at,
+    (SELECT copy.id FROM chat_steps AS step JOIN chat_steps AS copy ON copy.message_id = ? AND copy.ordinal = step.ordinal
+      WHERE step.id = a.step_id AND step.message_id = a.message_id)
+  FROM chat_approvals AS a WHERE a.message_id = ? ORDER BY a.id ASC`;
 const FORK_STATUS =
   "UPDATE chat_sessions SET status = ?, updated_at = ? WHERE id = ? AND status = 'idle'";
 
@@ -317,7 +322,7 @@ export function copyForkHistory(
       const copy = Number(copied.lastInsertRowid);
       db.prepare(FORK_STEPS).run(copy, message.id);
       db.prepare(FORK_SEGMENTS).run(copy, message.id);
-      db.prepare(FORK_APPROVALS).run(copy, message.id);
+      db.prepare(FORK_APPROVALS).run(copy, copy, message.id);
       status = message.role === "assistant" ? message.status : status;
     }
     if (status === "running") {

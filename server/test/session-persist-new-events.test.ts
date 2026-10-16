@@ -5,6 +5,7 @@
  * tool call, both the case below, still drops `files.changed` (persist-files-changed.test.ts).
  */
 import { describe, expect, it, vi } from "vitest";
+import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import type { SessionStore, SettledApproval } from "../src/sessions/store.js";
 import { persistEvent } from "../src/sessions/turn-control.js";
@@ -49,20 +50,12 @@ function recordingStore(): { store: SessionStore; touched: string[] } {
 
 function persistAlone(event: ChatEvent<string>) {
   const { store, touched } = recordingStore();
-  const toolIds = new Map<string, number>([["call_prior", 7]]);
-  const nextOrdinal = vi.fn(() => 1);
+  const steps = new PumpSteps(ASSISTANT_ID);
+  steps.toolIds.set("call_prior", 7);
+  const nextOrdinal = vi.spyOn(steps, "nextOrdinal");
   const settled: SettledApproval[] = [];
-  const published = persistEvent(
-    store,
-    ASSISTANT_ID,
-    event,
-    toolIds,
-    nextOrdinal,
-    settled,
-    null,
-    (text) => text,
-  );
-  return { published, touched, toolIds: [...toolIds], nextOrdinal, settled };
+  const published = persistEvent(store, ASSISTANT_ID, event, steps, settled, null, (text) => text);
+  return { published, touched, toolIds: [...steps.toolIds], nextOrdinal, settled };
 }
 
 describe("persistEvent — thinking.delta and files.changed are neither stored nor published", () => {

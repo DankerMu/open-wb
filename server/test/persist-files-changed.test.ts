@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import type { FileChange } from "../src/sessions/file-changes.js";
 import type { SessionStore, SettledApproval } from "../src/sessions/store.js";
@@ -99,22 +100,22 @@ function recorder(failure?: Error): Recorder {
 
 /** One `persistEvent` call for a turn whose only registered tool call is CALL_ID → STEP_ID. */
 function persist(event: ChatEvent<string>, workspaceRoot: string | null, double = recorder()) {
-  const toolIds = new Map([[CALL_ID, STEP_ID]]);
-  const ordinals = vi.fn(() => 1);
+  const steps = new PumpSteps(MESSAGE_ID);
+  steps.toolIds.set(CALL_ID, STEP_ID);
+  const ordinals = vi.spyOn(steps, "nextOrdinal");
   const settled: SettledApproval[] = [];
   fsCalls.length = 0;
   const published = persistEvent(
     double.store,
     MESSAGE_ID,
     event,
-    toolIds,
-    ordinals,
+    steps,
     settled,
     workspaceRoot,
     (text) => text,
   );
   const accessed = [...fsCalls];
-  expect([...toolIds]).toEqual([[CALL_ID, STEP_ID]]);
+  expect([...steps.toolIds]).toEqual([[CALL_ID, STEP_ID]]);
   expect(ordinals).not.toHaveBeenCalled();
   expect(settled).toEqual([]);
   return { published, touched: double.touched, calls: double.calls, accessed };
@@ -239,7 +240,7 @@ describe("SessionStore.setStepChanges", () => {
       const session = store.create("u1");
       const turn = store.acceptPrompt(session.id, "u1", "edit two files");
       const start = (ordinal: number) =>
-        store.startStep(turn.assistantMessageId, { ordinal, name: "edit", detail: "{}" });
+        store.startStep(turn.assistantMessageId, { ordinal, name: "edit", detail: "{}" }).stepId;
 
       const running = start(0);
       const untouched = start(1);

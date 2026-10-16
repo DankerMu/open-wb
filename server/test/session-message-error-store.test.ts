@@ -9,6 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/core/db/index.js";
 import { sanitizeUpstreamText } from "../src/core/upstream-failure.js";
+import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
 import { persistEvent } from "../src/sessions/turn-control.js";
@@ -50,8 +51,7 @@ function failTurn(store: SessionStore, assistant: number): ChatEvent<number> | u
     store,
     assistant,
     { type: "error", data: { messageId: assistant, ...FAILURE } },
-    new Map(),
-    () => 0,
+    new PumpSteps(assistant),
     [],
     null,
     (text) => sanitizeUpstreamText(text, ["k-1"]),

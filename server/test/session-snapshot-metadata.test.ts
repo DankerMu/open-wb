@@ -268,12 +268,12 @@ describe("session DTO metadata: step changes", () => {
         ordinal: 0,
         name: "edit",
         detail: '{"path":"src/app.ts"}',
-      });
+      }).stepId;
       const bashStep = store.startStep(turn.assistantMessageId, {
         ordinal: 1,
         name: "bash",
         detail: '{"command":"ls"}',
-      });
+      }).stepId;
       expect(store.finishStep(editStep, "done", "edited")).toBe(true);
       expect(store.finishStep(bashStep, "done", "listed")).toBe(true);
       expect(store.finishTurn(turn.assistantMessageId, "done")).toBe(true);

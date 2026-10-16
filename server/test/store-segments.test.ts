@@ -41,7 +41,7 @@ function stepsOf(db: DatabaseSync, messageId: number) {
 }
 
 function step(store: SessionStore, messageId: number, ordinal: number): number {
-  return store.startStep(messageId, { ordinal, name: "bash", detail: "{}" });
+  return store.startStep(messageId, { ordinal, name: "bash", detail: "{}" }).stepId;
 }
 
 /** The snapshot's body for the message: stored content plus the running turn's pending deltas. */

@@ -7,6 +7,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/core/db/index.js";
+import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
 import type { TodoRejection } from "../src/sessions/store-todo.js";
@@ -76,8 +77,7 @@ function open(warn?: (record: TodoRejection) => void): World {
         store,
         messageId,
         { type: "todo.updated", data: { messageId, todo } },
-        new Map(),
-        () => 1,
+        new PumpSteps(messageId),
         [],
         null,
         (text) => text,

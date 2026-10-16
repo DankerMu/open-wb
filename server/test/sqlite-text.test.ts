@@ -188,7 +188,7 @@ describe("SessionStore lossless free-text reads", () => {
         ordinal: 0,
         name: STEP_NAME_WITH_NUL,
         detail: STEP_DETAIL_WITH_NUL,
-      });
+      }).stepId;
       expect(store.finishStep(stepId, "done", STEP_OUTPUT_WITH_NUL)).toBe(true);
       expect(store.finishTurn(accepted.assistantMessageId, "done")).toBe(true);
       expect(store.getMessages(session.id, "u1")?.messages[1]?.steps[0]).toEqual(

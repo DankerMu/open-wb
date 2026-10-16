@@ -49,13 +49,13 @@ describe("SessionStore owner-scoped persisted views", () => {
           ordinal: 2,
           name: "later work",
           detail: "queued second",
-        });
+        }).stepId;
         vi.setSystemTime(FIXED_NOW + 22);
         const firstStepId = store.startStep(accepted.assistantMessageId, {
           ordinal: 0,
           name: "first work",
           detail: "queued first",
-        });
+        }).stepId;
 
         expect(store.getMessages(oldest.id, "u1")).toEqual({
           session: {
@@ -186,7 +186,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           ordinal: 0,
           name: "observed step",
           detail: "persisted without delta",
-        });
+        }).stepId;
         const afterStep = persistenceSnapshot(db);
         expect(
           captureThrown(() => store.rollbackPrompt(persistedTurn.assistantMessageId)),

@@ -40,7 +40,7 @@ function stopShapedTurn(store: SessionStore, sessionId: string) {
     ordinal: 1,
     name: "bash",
     detail: '{"command":"sleep 9"}',
-  });
+  }).stepId;
   return { accepted, runningStep };
 }
 
@@ -58,12 +58,12 @@ describe("session store — stopped settlement", () => {
           ordinal: 0,
           name: "read",
           detail: '{"path":"a.md"}',
-        });
+        }).stepId;
         const runningStep = store.startStep(accepted.assistantMessageId, {
           ordinal: 1,
           name: "bash",
           detail: '{"command":"sleep 9"}',
-        });
+        }).stepId;
         expect(store.finishStep(doneStep, "done", "ok")).toBe(true);
         const doneBefore = stepRow(db, doneStep);
 

@@ -13,6 +13,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { openDb } from "../src/core/db/index.js";
+import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import { DeltaCoalescer } from "../src/sessions/delta-coalescer.js";
 import { applyFrame, type ChatEvent, createEventState } from "../src/sessions/events.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
@@ -35,8 +36,7 @@ interface World {
   generation: Generation;
   coalescer: DeltaCoalescer;
   mapper: ReturnType<typeof createEventState>;
-  toolIds: Map<string, number>;
-  ordinal: number;
+  steps: PumpSteps;
   published: Array<{ at: number; event: ChatEvent<number> }>;
   faults: Error[];
 }
@@ -89,8 +89,7 @@ function openWorld(): World {
     generation: { epoch: 1, sealed: false } as unknown as Generation,
     coalescer,
     mapper: createEventState({ messageId, promptRequestId: "p1" }),
-    toolIds: new Map(),
-    ordinal: 0,
+    steps: new PumpSteps(messageId),
     published,
     faults,
   };
@@ -108,8 +107,7 @@ function commit(world: World, events: ChatEvent<string>[]): boolean {
         world.store,
         world.messageId,
         event,
-        world.toolIds,
-        () => world.ordinal++,
+        world.steps,
         [],
         null,
         (text) => text,

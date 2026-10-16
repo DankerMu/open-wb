@@ -107,7 +107,7 @@ describe("SessionStore flush and close fault ownership", () => {
           ordinal: 0,
           name: "running during failure",
           detail: "unsettled",
-        });
+        }).stepId;
         const beforeFailure = persistenceSnapshot(db);
         db.exec(`CREATE TEMP TRIGGER reject_terminal_session
           BEFORE UPDATE OF status ON chat_sessions
@@ -172,7 +172,7 @@ describe("SessionStore flush and close fault ownership", () => {
           ordinal: 0,
           name: "close step",
           detail: "running",
-        });
+        }).stepId;
         expect(store.appendDelta(accepted.assistantMessageId, "close residual")).toBe(true);
         db.exec(`CREATE TEMP TRIGGER reject_close_session
           BEFORE UPDATE OF status ON chat_sessions
