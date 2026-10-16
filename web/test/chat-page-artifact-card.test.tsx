@@ -548,6 +548,7 @@ describe("产物卡 placement", () => {
       tool: "write",
       title: "Allow tool: write",
       requestedAt: 1_760_000_000_000,
+      stepId: null,
       expiresAt: 1_760_000_090_000,
       decision: "allow",
     };

@@ -46,6 +46,7 @@ function bashStep(status: SnapshotStep["status"]): SnapshotStep {
   return {
     id: 11,
     ordinal: 0,
+    bodyOffset: null,
     name: "bash",
     detail: '{"command":"sleep 9"}',
     output: "",
@@ -340,6 +341,7 @@ describe("stop button: layout and outcomes", () => {
       tool: "bash",
       title: "Allow tool: bash",
       expiresAt: Date.now() + 60_000,
+      stepId: null,
     });
     const article = assistants()[0] as HTMLElement;
     expect(within(article).queryAllByRole("group", { name: "需要你的确认" })).toHaveLength(0);

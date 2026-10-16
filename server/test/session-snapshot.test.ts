@@ -142,6 +142,7 @@ describe("session REST snapshot capture", () => {
             thinking: null,
             error: null,
             thinkingMs: null,
+            thinkingSegments: [],
           },
           {
             id: accepted.assistantMessageId,
@@ -156,6 +157,7 @@ describe("session REST snapshot capture", () => {
             thinking: null,
             error: null,
             thinkingMs: null,
+            thinkingSegments: [],
           },
         ],
         streamCursor: { epoch: 1, seq: 1002 },

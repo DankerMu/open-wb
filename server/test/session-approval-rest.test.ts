@@ -134,7 +134,7 @@ function resolvedFor(world: ApprovalWorld, session = world.session) {
   return ofType(sessionEvents(world, session), "approval.resolved").map((event) => event.data);
 }
 
-function publicApproval(row: ApprovalRow, decision: "allow" | "deny") {
+function publicApproval(row: ApprovalRow, decision: "allow" | "deny", stepId: number | null) {
   return {
     id: row.id,
     tool: "bash",
@@ -142,6 +142,7 @@ function publicApproval(row: ApprovalRow, decision: "allow" | "deny") {
     requestedAt: T,
     expiresAt: T + TTL_MS,
     decision,
+    stepId,
   };
 }
 
@@ -199,18 +200,21 @@ async function expectWireEnvelope(response: Response, status: number, envelope: 
 
 describe("approval answers over REST", () => {
   it(
-    "E1 allow returns the six-key approval and settles, answers and publishes once",
+    "E1 allow returns the seven-key approval and settles, answers and publishes once",
     REAL,
     async () => {
       const world = await open();
       const row = await pendingApproval(world);
+      // Issue 1474: the bash step starts without waiting for the answer and takes the approval.
+      await waitForEvent(world, "step.start");
+      const stepId = assistantSteps(world).steps[0]?.id ?? null;
       world.clock.nowMs = T + 1_000;
 
       const response = await answer(world, world.session, row.id, ALLOW);
 
       expect(response.statusCode).toBe(200);
       expect(response.headers["cache-control"]).toBe("no-store");
-      expect(response.json()).toStrictEqual(publicApproval(row, "allow"));
+      expect(response.json()).toStrictEqual(publicApproval(row, "allow", stepId));
       expect(approvalRow(world.fixture.db, row.id)).toMatchObject({
         decision: "allow",
         decided_at: T + 1_000,
@@ -233,13 +237,15 @@ describe("approval answers over REST", () => {
   it("E2 deny answers Deny; the bash step fails and the turn ends done", REAL, async () => {
     const world = await open();
     const row = await pendingApproval(world);
+    await waitForEvent(world, "step.start");
+    const stepId = assistantSteps(world).steps[0]?.id ?? null;
     world.clock.nowMs = T + 1_000;
 
     const response = await answer(world, world.session, row.id, DENY);
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
-    expect(response.json()).toStrictEqual(publicApproval(row, "deny"));
+    expect(response.json()).toStrictEqual(publicApproval(row, "deny", stepId));
     expect(approvalRow(world.fixture.db, row.id)).toMatchObject({
       decision: "deny",
       decided_at: T + 1_000,

@@ -72,10 +72,10 @@ describe("颜色 grep 守卫", () => {
 
   it("去注释自证：行注释与块注释被剥掉且行号不变，字符串里的 // 与颜色保留", () => {
     const hits = (text: string) => literalHits(stripTsComments(text));
-    const line44 = readRepoFile("web/src/features/chat/stream-steps.ts").split("\n")[43] ?? "";
-    expect(line44).toContain("（#367）");
-    expect(literalHits(line44)).toHaveLength(1);
-    expect(hits(line44)).toEqual([]);
+    const line46 = readRepoFile("web/src/features/chat/stream-steps.ts").split("\n")[45] ?? "";
+    expect(line46).toContain("（#367）");
+    expect(literalHits(line46)).toHaveLength(1);
+    expect(hits(line46)).toEqual([]);
     expect(hits("const a = 1; // 见 #1234\n/* #abc\n rgba(0,0,0,.5) */")).toEqual([]);
     expect(hits('/* 注释 */\n// 注释\nconst c = "#abcdef";')).toEqual(['3: const c = "#abcdef";']);
     expect(hits('const u = "https://example.test/#fff";')).toHaveLength(1);

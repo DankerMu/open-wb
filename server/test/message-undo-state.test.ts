@@ -49,6 +49,7 @@ const MESSAGE_KEYS = [
   "steps",
   "error",
   "thinkingMs",
+  "thinkingSegments",
 ];
 
 interface Viewed {

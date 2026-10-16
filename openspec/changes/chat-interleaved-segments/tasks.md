@@ -192,7 +192,7 @@ Minimal mergeable slice: atomic - 队列、写列、fork 重映射与实测是�
 
 ## 5. chat-sessions / chat-stream / chat-web — 快照、REST 与事件字段（同刀）
 
-- [ ] 5.1 开工核对：
+- [x] 5.1 开工核对：
   - 重读 `rest.ts:480-502` 的快照形状、`store.ts` 的 `MessageView` / `StepView` / `ApprovalEntry`（`:78-160`）与读出、`events.ts` 的 `step.start` / `thinking.end` / `approval.request` 类型、`approvals.ts` 的 `register` 里 request 负载的构造与 `publishRequest`；
   - 重读 web `session-contract.ts:266-372`、`stream.ts:655-720` 的事件解码与 `:367-371` 的重新同步、`stream-steps.ts`、`stream-approvals.ts`、`stream-thinking.ts`、`runtime-convert.ts`；
   - 列出全部要补键的严格键集夹具，用下面四组 grep，结果全部写进 PR：
@@ -203,26 +203,26 @@ Minimal mergeable slice: atomic - 队列、写列、fork 重映射与实测是�
   - Stage 3 已点名、必须出现在清单里的文件——服务端：`session-prompt-attachments.test.ts:56`、`session-approval-snapshot.test.ts:32`、`message-undo-state.test.ts:39`、`session-composer-align.test.ts:82`、`session-snapshot-metadata.test.ts:25`（`STEP_KEYS` `:39`）、`session-supervisor.test.ts:442-478`、`session-file-changes.test.ts:239-260`、`session-approval-events.test.ts:24-27`、`:122-126`、`session-approvals-parallel.test.ts:256`、`session-approval-rest.test.ts:213`、`:242`、`session-fork-rest-real.test.ts:220-229`、`session-rest.test.ts:157-229`、`:745-792`、`session-thinking.test.ts:269`、`:354`，以及 `session-fork-helpers.ts:214` 的 `approvalsOf`（显式列清单、不含 `step_id`，4.2 的 fork 重映射断言若用它要先加列）；web：`chat-message-waiting.test.tsx`、`chat-page-file-changes.test.tsx`（:184-233 的步骤视图）、`chat-page-ownership.test.tsx`、`chat-stream-failure.test.ts`、`chat-stream-recovery.test.ts`、`chat-stream-todo.test.ts`、`chat-workspace-sidebar-filter-select.test.tsx`、`chat-workspace-sidebar-refresh.test.tsx`、`chat-workspace-sidebar-relocate.test.tsx`（四键 `step.start`），`chat-approval-bar.test.tsx`、`chat-stop-button.test.tsx`、`chat-unknown-turn.test.tsx`（五键 `approval.request`），以及 `grep -rln thinkingMs web/test web/e2e` 的全部命中。
 
   验证：补键清单写进 PR。
-- [ ] 5.2 先写服务端测试（新断言进新文件），按验证路径分三项：
+- [x] 5.2 先写服务端测试（新断言进新文件），按验证路径分三项：
   - **5.2a 快照与 REST**：chat-sessions「会话 REST」：消息 13 键、步骤 8 键、审批 7 键，`decideApproval` 的 200 为七键；「Snapshot carries segment positions」；「Fork copies history…」与「Regenerate…」中新键的取值；tool-approval「审批作答 REST」改写后的「允许」（200 七键含 `stepId`）；
   - **5.2b 事件负载**：chat-stream：「Ordered publication after persistence」（`thinking.end.segment` 与段行相等）、「步骤的正文偏移」（`step.start.bodyOffset` 与快照相同）、「合并器缓冲着正文时开段」的快照部分；
   - thinking-fold 改写后带 `segment` 负载的场景；tool-approval「审批快照」（`stepId` 与归约）、改写后的「审批事件」两例（`approval.request` 六键、`stepId`）；chat-stream 改写后的「审批事件发布」全部场景（含 select 时配对写失败不发布）；tool-approval「步骤先于审批 select 到达」的事件部分（`approval.request.stepId` 为该步骤 id）；「作答先于 pump 读到 select」的事件部分（作答路径补发的 `approval.request.stepId` 为 `null`，随后 `step.start.approvalId` 为该审批 id，实时视图与快照的 `stepId` 相同）；
   - **5.2c 官方 omp 追加**（`WORKBUDDY_OMP_TEST=1`）：3.10 的用例追加快照断言（`thinkingSegments` 恰一段，值同库行）；4.4 的用例追加快照 `stepId` 断言（按所取分支）。
 
   验证：在未改动的代码上判红。
-- [ ] 5.3 先写 web 测试：chat-web「分段位置三键严格解析」「分段位置归约」「步骤开始事件的两个新字段严格解码」（含：缺键或多键的 `step.start` 触发重新同步，与其它已知事件一致）、「审批请求事件的 stepId 严格解码」、「审批请求与结算归约」与「分段位置归约」中 `approval.request` 带 `stepId` 的部分、改写后的「convertMessage 映射」（新字段透传，part 次序不变）；chat-web「实时与快照切段一致」的视图部分（事件归约出的视图与快照视图的 `thinkingSegments`、步骤 `bodyOffset`、审批 `stepId` 逐值相等；切段函数的比较在 6.2）。
+- [x] 5.3 先写 web 测试：chat-web「分段位置三键严格解析」「分段位置归约」「步骤开始事件的两个新字段严格解码」（含：缺键或多键的 `step.start` 触发重新同步，与其它已知事件一致）、「审批请求事件的 stepId 严格解码」、「审批请求与结算归约」与「分段位置归约」中 `approval.request` 带 `stepId` 的部分、改写后的「convertMessage 映射」（新字段透传，part 次序不变）；chat-web「实时与快照切段一致」的视图部分（事件归约出的视图与快照视图的 `thinkingSegments`、步骤 `bodyOffset`、审批 `stepId` 逐值相等；切段函数的比较在 6.2）。
   验证：在未改动的代码上判红。
-- [ ] 5.4 实现服务端：读出与快照形状加三处键（读写函数在 `store-segments.ts`）；`step.start` 发布 `bodyOffset` 与 `approvalId`；`thinking.end` 发布 `segment`；`approval.request` 发布 `stepId`（pump 把 4.3 的 select 时配对结果传给 `publishRequest`；作答路径补发 request 时为 `null`）；纯协议事件归约的输出不变；`approvals.ts` 只改 request 负载，不改发布时机与任何作答路径。
+- [x] 5.4 实现服务端：读出与快照形状加三处键（读写函数在 `store-segments.ts`）；`step.start` 发布 `bodyOffset` 与 `approvalId`；`thinking.end` 发布 `segment`；`approval.request` 发布 `stepId`（pump 把 4.3 的 select 时配对结果传给 `publishRequest`；作答路径补发 request 时为 `null`）；纯协议事件归约的输出不变；`approvals.ts` 只改 request 负载，不改发布时机与任何作答路径。
   验证：5.2 全绿；`store.ts` ≤ 784、`events.ts` ≤ 540、`rest.ts` ≤ 590、`store-approvals.ts` ≤ 412 行。
-- [ ] 5.5 实现 web：新模块 `web/src/lib/session-contract-segments.ts`（新键的严格解析）与 `web/src/features/chat/stream-segments.ts`（`thinking.delta` 临时段、`thinking.end` 取代、`step.start` 记偏移与 `stepId`、`approval.request` 取事件的 `stepId`、`turn.start` 清空）；`stream.ts`、`session-contract.ts`、`stream-thinking.ts`、`stream-approvals.ts` 只加类型字段与分派（行数见预算表）；`runtime-convert.ts` 透传新字段并把 `:44-48` 的注释改为「part 不承载分段，分段由 `message-segments.ts` 从透传字段算」。本切片不改任何呈现。
+- [x] 5.5 实现 web：新模块 `web/src/lib/session-contract-segments.ts`（新键的严格解析）与 `web/src/features/chat/stream-segments.ts`（`thinking.delta` 临时段、`thinking.end` 取代、`step.start` 记偏移与 `stepId`、`approval.request` 取事件的 `stepId`、`turn.start` 清空）；`stream.ts`、`session-contract.ts`、`stream-thinking.ts`、`stream-approvals.ts` 只加类型字段与分派（行数见预算表）；`runtime-convert.ts` 透传新字段并把 `:44-48` 的注释改为「part 不承载分段，分段由 `message-segments.ts` 从透传字段算」。本切片不改任何呈现。
   验证：5.3 全绿；`stream.ts` ≤ 790、`session-contract.ts` ≤ 710 行。
-- [ ] 5.6 补键（通用纪律第 4 种改法，逐条列进偏离记录），按 5.1 的清单分两项、各自可单独核对：
+- [x] 5.6 补键（通用纪律第 4 种改法，逐条列进偏离记录），按 5.1 的清单分两项、各自可单独核对：
   - **5.6a 服务端**：键集常量、事件负载断言、整快照断言（`session-rest.test.ts` 改用共享助手视图常量，见预算表）、`approvalsOf` 加列；验证 `npm test --workspace server` 全绿，`session-rest.test.ts` ≤ 800、`session-thinking.test.ts` ≤ 800 行。
   - **5.6b web**：快照夹具取 `bodyOffset: null`、`stepId: null`、`thinkingSegments: []`；事件里 `step.start` 的 `bodyOffset` 取此刻已收到正文的长度、`approvalId` 取 `null`；`approval.request` 的 `stepId` 取 `null`；`thinking.end` 的 `segment` 取该段在用例事件下的真实取值——快照起头、快照里已有思考的用例（`chat-thinking-smooth.test.tsx`、`chat-thinking-preview.test.tsx` 等），`segment.thinkingOffset` 取快照思考的长度，与客户端临时段一致，使消息保持旧布局（design D14 的判定）；验证 `npm test --workspace web` 全绿，且 D14「不需要改写」清单里的断言一条未改。
-- [ ] 5.7 冒烟：`smoke/session-meta.hurl` 的 `WORKBUDDY_THINK` 用例加 chat-harness「冒烟断言分段位置」的断言。
+- [x] 5.7 冒烟：`smoke/session-meta.hurl` 的 `WORKBUDDY_THINK` 用例加 chat-harness「冒烟断言分段位置」的断言。
   验证：`make smoke` 全绿；把 `stepId` 断言改成期望 `null` 时判红（证明断言在跑）。
-- [ ] 5.8 变异证据：服务端漏发 `step.start.approvalId` → web 解码用例与 5.2 判红；web 归约不在 `thinking.end` 取代临时段 → 「分段位置归约」判红；快照漏输出审批 `stepId` → 键数用例与冒烟判红；`thinking.end.segment` 取自内存而非库行（例如不含截断标记）→ 「Ordered publication」判红（如实记录）；`approval.request` 恒发 `stepId: null` → 「步骤先于审批 select 到达」的事件断言判红。
-- [ ] 5.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 3.10 与 4.4 的两个文件全绿。PR 写明部署须服务端与 web 同一版本，以及部署时已打开的旧标签页会关流提示刷新（design Migration Plan）；PR 请求白盒审查（`approvals.ts` 的 request 负载，design D18）。
+- [x] 5.8 变异证据：服务端漏发 `step.start.approvalId` → web 解码用例与 5.2 判红；web 归约不在 `thinking.end` 取代临时段 → 「分段位置归约」判红；快照漏输出审批 `stepId` → 键数用例与冒烟判红；`thinking.end.segment` 取自内存而非库行（例如不含截断标记）→ 「Ordered publication」判红（如实记录）；`approval.request` 恒发 `stepId: null` → 「步骤先于审批 select 到达」的事件断言判红。
+- [x] 5.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 3.10 与 4.4 的两个文件全绿。PR 写明部署须服务端与 web 同一版本，以及部署时已打开的旧标签页会关流提示刷新（design Migration Plan）；PR 请求白盒审查（`approvals.ts` 的 request 负载，design D18）。
 Suggested fixture level: expanded - 公开快照键、REST 形状与事件负载（严格键集），旧解析器重新同步后关流报错。
 Minimal mergeable slice: atomic - 服务端事件字段、快照键与 web 的解析、归约必须同一 PR（design D8）；任一侧先合，会话页整体拒收快照、关流报错。
 

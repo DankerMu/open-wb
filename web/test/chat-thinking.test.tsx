@@ -42,6 +42,7 @@ const PLAIN = "**粗** <b>x</b>\n  缩进";
 const BASH_STEP: Message["steps"][number] = {
   id: 11,
   ordinal: 0,
+  bodyOffset: null,
   name: "bash",
   detail: '{"command":"ls"}',
   output: "a.md",
@@ -53,6 +54,7 @@ const SETTLED_APPROVAL: Message["approvals"][number] = {
   tool: "bash",
   title: "Allow tool: bash",
   requestedAt: 1_750_000_000_000,
+  stepId: null,
   expiresAt: 1_750_000_060_000,
   decision: "allow",
 };
@@ -68,6 +70,7 @@ function assistant(id: number, status: Status, fields: Partial<Message> = {}): M
     attachments: [],
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
   return { id, role: "assistant", status, ...base, ...fields };
 }
@@ -283,6 +286,15 @@ describe("thinking snapshot mapping and reduction", () => {
       error: null,
       retrying: false,
       thinkingMs: null,
+      thinkingSegments: [
+        {
+          bodyOffset: 0,
+          thinkingOffset: 0,
+          thinkingLength: null,
+          stepsBefore: 0,
+          thinkingMs: null,
+        },
+      ],
       thinkingActive: true,
     });
     expect(next.status).toBe("done");
@@ -475,7 +487,13 @@ describe("thinking fold on the chat page", () => {
     emit(source, 5, "thinking.delta", { delta: "二" });
     emit(source, 6, "thinking.delta", { delta: "三" });
     emit(source, 7, "text.delta", { delta: "正文" });
-    emit(source, 8, "step.start", { stepId: 21, name: "bash", detail: "ls" });
+    emit(source, 8, "step.start", {
+      stepId: 21,
+      name: "bash",
+      detail: "ls",
+      bodyOffset: 2,
+      approvalId: null,
+    });
 
     expandToolGroups();
     expect(screen.getByRole("region", { name: "bash" })).toBeTruthy();
@@ -543,7 +561,7 @@ describe("thinking fold on the chat page", () => {
     expect(article.getByRole("status", { name: "bash 运行中" })).toBeTruthy();
 
     const { id: approvalId, tool, title, expiresAt } = SETTLED_APPROVAL;
-    emit(source, 4, "approval.request", { approvalId, tool, title, expiresAt });
+    emit(source, 4, "approval.request", { approvalId, tool, title, expiresAt, stepId: null });
     // 待决审批在输入框上方的停靠区里，不在消息内
     expect(article.queryAllByRole("group", { name: "需要你的确认" })).toHaveLength(0);
     expect(

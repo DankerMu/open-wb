@@ -63,6 +63,7 @@ export function reportConversation(): Snapshot {
   const step = {
     id: 11,
     ordinal: 0,
+    bodyOffset: null,
     name: "bash",
     detail: "ls out",
     output: "report.pdf",

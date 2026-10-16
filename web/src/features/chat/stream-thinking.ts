@@ -1,8 +1,12 @@
 import { hasExactlyKeys } from "../../lib/api-json.js";
+import { type ChatClosedSegment, parseClosedSegment } from "../../lib/session-contract-segments.js";
 
 export type ChatThinkingEvent =
   | { type: "thinking.delta"; data: { messageId: number; delta: string } }
-  | { type: "thinking.end"; data: { messageId: number; thinkingMs: number } };
+  | {
+      type: "thinking.end";
+      data: { messageId: number; thinkingMs: number; segment: ChatClosedSegment };
+    };
 
 /** 消息视图的思考字段（issue 910）：快照原值或事件值；`thinkingActive` 为「思考段进行中」。 */
 type ThinkingView = { thinking: string | null; thinkingMs: number | null; thinkingActive: boolean };
@@ -17,16 +21,15 @@ export function decodeThinkingDelta(value: unknown): ChatThinkingEvent | undefin
     : undefined;
 }
 
-/** Strict key set `{messageId, thinkingMs}`: a safe-integer id and a non-negative safe integer. */
+/** Strict key set `{messageId, thinkingMs, segment}` (issue 1474): the segment as a closed row. */
 export function decodeThinkingEnd(value: unknown): ChatThinkingEvent | undefined {
-  return hasExactlyKeys(value, ["messageId", "thinkingMs"]) &&
-    isSafeInteger(value.messageId) &&
-    isSafeInteger(value.thinkingMs) &&
-    value.thinkingMs >= 0
-    ? {
-        type: "thinking.end",
-        data: { messageId: value.messageId, thinkingMs: value.thinkingMs },
-      }
+  if (!hasExactlyKeys(value, ["messageId", "thinkingMs", "segment"])) {
+    return undefined;
+  }
+  const { messageId, thinkingMs } = value;
+  const segment = parseClosedSegment(value.segment);
+  return segment && isSafeInteger(messageId) && isSafeInteger(thinkingMs) && thinkingMs >= 0
+    ? { type: "thinking.end", data: { messageId, thinkingMs, segment } }
     : undefined;
 }
 

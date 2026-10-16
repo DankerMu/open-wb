@@ -8,6 +8,7 @@
 #     → 删除该新建会话 → 其临时空间 tree 404
 # → (4) WORKBUDDY_THINK prompt → 作答唯一 bash 审批 → 仅 messages GET 有界重试至 done
 # → (5) thinking 逐字、thinkingMs 为非负整数（user 为 null）、bash 步骤 done、标题仍为 PATCH 所设
+#     → 分段位置：bash 步骤 bodyOffset 0、审批 stepId 为该步骤、thinkingSegments 恰一段（user 为 []）
 # → (6) GET /api/commands 恰两条内建 → /todo 回合：omp 原文、无步骤、无 thinking
 #     → /session WORKBUDDY_THINK 冒烟 回合：正文按原样落库、固定回复、thinking 逐字（转义文本到了模型）、无步骤
 # → (7) DELETE 204 + session.delete 审计 → messages 404 → 列表不含 → 再 DELETE 404
@@ -357,12 +358,14 @@ jsonpath "$.decision" == "allow"
 # (4)(5) 轮询 messages：仅 GET 有界 retry（≥90s，覆盖 60s 自动允许），直到 captured assistant 与 session 均为 done。
 # done 快照：正文匹配 content_pattern，thinking 逐字为受控上游的三分片拼接，thinkingMs 为非负整数而同一快照的
 # user 消息为 null（#910，键缺失或取值不符都判红），bash 步骤 done、步骤全 done，审批为作答的 allow，
-# 首条 prompt 不覆盖 PATCH 设下的标题。
+# 首条 prompt 不覆盖 PATCH 设下的标题。捕获 bash 步骤 id，供下一条断言审批的 stepId。
 GET {{base_url}}/api/sessions/{{session_id}}/messages
 [Options]
 retry: 180
 retry-interval: 500ms
 HTTP 200
+[Captures]
+bash_step_id: jsonpath "$.messages[?(@.id=={{assistant_id}})].steps[?(@.name=='bash')].id"
 [Asserts]
 jsonpath "$.messages[?(@.id=={{assistant_id}})].status" == "done"
 jsonpath "$.messages[?(@.id=={{assistant_id}})].content" matches "{{content_pattern}}"
@@ -375,6 +378,24 @@ jsonpath "$.messages[?(@.id=={{assistant_id}})].steps[?(@.status!='done')]" not 
 jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals[0].decision" == "allow"
 jsonpath "$.session.status" == "done"
 jsonpath "$.session.title" == "冒烟会话"
+
+# (4) 分段位置（#1474，chat-harness「冒烟断言分段位置」）：同一 done 快照，不重试。该回合先是 bash 工具轮、后是带
+# 思考的答复轮：bash 步骤 bodyOffset 为 0；唯一审批的 stepId 等于该 bash 步骤 id；thinkingSegments 恰一段
+# {0, 0, 15（先读需求，再列要点，最后作答。的 UTF-16 长度）, stepsBefore 1, thinkingMs 非负整数}；user 消息为 []。
+GET {{base_url}}/api/sessions/{{session_id}}/messages
+HTTP 200
+[Asserts]
+jsonpath "$.messages[?(@.id=={{assistant_id}})].steps[?(@.name=='bash')].bodyOffset" == 0
+jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals" count == 1
+jsonpath "$.messages[?(@.id=={{assistant_id}})].approvals[0].stepId" == {{bash_step_id}}
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingSegments" count == 1
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingSegments[0].bodyOffset" == 0
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingSegments[0].thinkingOffset" == 0
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingSegments[0].thinkingLength" == 15
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingSegments[0].stepsBefore" == 1
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingSegments[0].thinkingMs" isInteger
+jsonpath "$.messages[?(@.id=={{assistant_id}})].thinkingSegments[0].thinkingMs" >= 0
+jsonpath "$.messages[?(@.id=={{user_id}})].thinkingSegments" count == 0
 
 # (6) 命令目录：exact 200，恰两条内建，name 依次 compact、todo（冒烟状态目录不装 skill）。
 GET {{base_url}}/api/commands

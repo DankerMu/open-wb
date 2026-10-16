@@ -211,7 +211,7 @@ export function stepsOf(db: DatabaseSync, messageId: number) {
 export function approvalsOf(db: DatabaseSync, messageId: number) {
   return db
     .prepare(
-      "SELECT request_id, tool, title, requested_at, expires_at, decision, decided_at FROM chat_approvals WHERE message_id = ? ORDER BY id",
+      "SELECT request_id, tool, title, requested_at, expires_at, decision, decided_at, step_id FROM chat_approvals WHERE message_id = ? ORDER BY id",
     )
     .all(messageId);
 }

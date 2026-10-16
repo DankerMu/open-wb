@@ -66,6 +66,7 @@ const MESSAGE_KEYS = [
   "steps",
   "error",
   "thinkingMs",
+  "thinkingSegments",
 ];
 
 const scratch: string[] = [];

@@ -68,7 +68,7 @@ export function toolStep(
   status: Step["status"] = "done",
 ): Step {
   const output = status === "running" ? "" : "ok";
-  return { id, ordinal, name, detail: `${name} args`, output, changes, status };
+  return { id, ordinal, name, detail: `${name} args`, output, changes, status, bodyOffset: null };
 }
 
 /** An empty assistant message (id 0) in `status`, overridden by `fields`. */
@@ -89,6 +89,7 @@ export function assistantMessage(
     approvals: [],
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
     ...fields,
   };
 }
@@ -124,6 +125,17 @@ export const viewOf = (snapshot: Snapshot): ChatState =>
 
 export function filesChanged(messageId: number, stepId: number, ...files: Change[]): ChatEvent {
   return { type: "files.changed", data: { messageId, stepId, files } };
+}
+
+/** An unpaired `step.start` of message 0, `bodyOffset` code units into the body (issue 1474). */
+export function stepStart(
+  stepId: number,
+  name: string,
+  detail: string,
+  bodyOffset: number,
+): ChatEvent {
+  const data = { messageId: 0, stepId, name, detail, bodyOffset, approvalId: null };
+  return { type: "step.start", data };
 }
 
 /** Applies `events` in order, freezing every intermediate state. */

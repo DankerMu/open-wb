@@ -35,6 +35,7 @@ function message(id: number, role: "user" | "assistant") {
     attachments: [],
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 

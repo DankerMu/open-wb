@@ -225,6 +225,7 @@ describe("fork REST on real fake-omp branch children", () => {
           requestedAt: 70,
           expiresAt: 60_070,
           decision: "allow",
+          stepId: null,
         },
       ]);
 

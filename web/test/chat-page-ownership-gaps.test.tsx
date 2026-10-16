@@ -65,6 +65,7 @@ describe("chat page confirmed ownership gaps", () => {
       thinking: null,
       error: null,
       thinkingMs: null,
+      thinkingSegments: [],
     };
     const idleSnapshot: ChatMessageSnapshot = {
       session: { ...runningSession("idle"), title: "saved title" },
@@ -89,6 +90,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
         {
           id: 1,
@@ -103,6 +105,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
       ],
       streamCursor: { epoch: 2, seq: 3 },
@@ -223,6 +226,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
         {
           id: 1,
@@ -237,6 +241,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
       ],
       streamCursor: { epoch: 1, seq: 6 },
@@ -282,6 +287,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
         {
           id: 2,
@@ -296,6 +302,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
       ],
       streamCursor: { epoch: 1, seq: 9 },
@@ -396,6 +403,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
         {
           id: 0,
@@ -410,6 +418,7 @@ describe("chat page confirmed ownership gaps", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
       ],
       streamCursor: { epoch: 1, seq: 3 },

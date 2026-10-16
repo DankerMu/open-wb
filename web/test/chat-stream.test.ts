@@ -50,6 +50,7 @@ const historyUser = {
   thinking: null,
   error: null,
   thinkingMs: null,
+  thinkingSegments: [],
 };
 
 const userView = {
@@ -65,6 +66,7 @@ const userView = {
   error: null,
   retrying: false,
   thinkingMs: null,
+  thinkingSegments: [],
   thinkingActive: false,
 };
 
@@ -103,6 +105,7 @@ function reducerSnapshot(
       thinking: null,
       error: null,
       thinkingMs: null,
+      thinkingSegments: [],
     });
   }
   return {
@@ -116,6 +119,7 @@ function reducerSnapshot(
 const runningBashStep = {
   id: 11,
   ordinal: 0,
+  bodyOffset: null,
   name: "bash",
   detail: BASH_START_DETAIL,
   output: "",
@@ -130,7 +134,14 @@ describe("Chat stream reducer", () => {
       { type: "turn.start", data: { messageId: 0 } },
       {
         type: "step.start",
-        data: { messageId: 0, stepId: 11, name: "bash", detail: BASH_START_DETAIL },
+        data: {
+          messageId: 0,
+          stepId: 11,
+          name: "bash",
+          detail: BASH_START_DETAIL,
+          bodyOffset: 0,
+          approvalId: null,
+        },
       },
       { type: "text.delta", data: { messageId: 0, delta: "Hel" } },
       { type: "text.delta", data: { messageId: 0, delta: "lo " } },
@@ -164,12 +175,14 @@ describe("Chat stream reducer", () => {
               output: BASH_OUTPUT,
               changes: null,
               status: "done",
+              bodyOffset: 0,
             },
           ],
           thinking: null,
           error: null,
           retrying: false,
           thinkingMs: null,
+          thinkingSegments: [],
           thinkingActive: false,
         },
       ],
@@ -196,6 +209,7 @@ describe("Chat stream reducer", () => {
             error: null,
             retrying: false,
             thinkingMs: null,
+            thinkingSegments: [],
             thinkingActive: false,
           },
         ],
@@ -216,7 +230,14 @@ describe("Chat stream reducer", () => {
     const started = deepFreeze(
       applyChatEvent(deepFreeze(chatStateFromSnapshot(reducerSnapshot())), {
         type: "step.start",
-        data: { messageId: 0, stepId: 11, name: "bash", detail: BASH_START_DETAIL },
+        data: {
+          messageId: 0,
+          stepId: 11,
+          name: "bash",
+          detail: BASH_START_DETAIL,
+          bodyOffset: 0,
+          approvalId: null,
+        },
       }),
     );
     const ended = applyChatEvent(started, {
@@ -231,6 +252,7 @@ describe("Chat stream reducer", () => {
         output: "workbuddy-smoke",
         changes: null,
         status: "done",
+        bodyOffset: 0,
       },
     ]);
   });
@@ -269,12 +291,14 @@ describe("Chat stream reducer", () => {
               output: "",
               changes: null,
               status: "running",
+              bodyOffset: null,
             },
           ],
           thinking: null,
           error: AGENT_FAILURE,
           retrying: false,
           thinkingMs: null,
+          thinkingSegments: [],
           thinkingActive: false,
         },
       ],
@@ -304,12 +328,14 @@ describe("Chat stream reducer", () => {
               output: "",
               changes: null,
               status: "failed",
+              bodyOffset: null,
             },
           ],
           thinking: null,
           error: AGENT_FAILURE,
           retrying: false,
           thinkingMs: null,
+          thinkingSegments: [],
           thinkingActive: false,
         },
       ],
@@ -348,12 +374,14 @@ describe("Chat stream reducer", () => {
           output: "",
           changes: null,
           status: "failed",
+          bodyOffset: null,
         },
       ],
       thinking: null,
       error: AGENT_FAILURE,
       retrying: false,
       thinkingMs: null,
+      thinkingSegments: [],
       thinkingActive: false,
     });
 
@@ -373,6 +401,7 @@ describe("Chat stream reducer", () => {
       error: null,
       retrying: false,
       thinkingMs: null,
+      thinkingSegments: [],
       thinkingActive: false,
     });
     expect(frozenSnapshot).toEqual(snapshot);
@@ -408,6 +437,7 @@ describe("Chat stream reducer", () => {
           error: null,
           retrying: false,
           thinkingMs: null,
+          thinkingSegments: [],
           thinkingActive: false,
         },
       ]);
@@ -443,6 +473,7 @@ describe("Chat stream reducer", () => {
         error: EXACT_FAILURE,
         retrying: false,
         thinkingMs: null,
+        thinkingSegments: [],
         thinkingActive: false,
       },
     ]);
@@ -468,7 +499,14 @@ describe("Chat stream reducer", () => {
       { type: "text.delta", data: { messageId: -3, delta: "bad" } },
       {
         type: "step.start",
-        data: { messageId: -3, stepId: 1, name: "bad", detail: "bad" },
+        data: {
+          messageId: -3,
+          stepId: 1,
+          name: "bad",
+          detail: "bad",
+          bodyOffset: 0,
+          approvalId: null,
+        },
       },
       {
         type: "step.end",
@@ -497,6 +535,7 @@ describe("Chat stream reducer", () => {
         {
           id: 3,
           ordinal: 0,
+          bodyOffset: null,
           name: "first",
           detail: "done",
           output: "ok",
@@ -506,6 +545,7 @@ describe("Chat stream reducer", () => {
         {
           id: 4,
           ordinal: 1,
+          bodyOffset: null,
           name: "second",
           detail: "running",
           output: "",
@@ -515,6 +555,7 @@ describe("Chat stream reducer", () => {
         {
           id: 5,
           ordinal: 2,
+          bodyOffset: null,
           name: "third",
           detail: "failed",
           output: "err",
@@ -530,7 +571,15 @@ describe("Chat stream reducer", () => {
       data: { messageId: 0, stepId: 4, status: "done", output: "result 世界" },
     });
     expect(continued.messages[1]?.steps).toEqual([
-      { id: 3, name: "first", detail: "done", output: "ok", changes: null, status: "done" },
+      {
+        id: 3,
+        name: "first",
+        detail: "done",
+        output: "ok",
+        changes: null,
+        status: "done",
+        bodyOffset: null,
+      },
       {
         id: 4,
         name: "second",
@@ -538,13 +587,29 @@ describe("Chat stream reducer", () => {
         output: "result 世界",
         changes: null,
         status: "done",
+        bodyOffset: null,
       },
-      { id: 5, name: "third", detail: "failed", output: "err", changes: null, status: "failed" },
+      {
+        id: 5,
+        name: "third",
+        detail: "failed",
+        output: "err",
+        changes: null,
+        status: "failed",
+        bodyOffset: null,
+      },
     ]);
 
     const started = applyChatEvent(continued, {
       type: "step.start",
-      data: { messageId: 0, stepId: 4, name: "second", detail: "duplicate" },
+      data: {
+        messageId: 0,
+        stepId: 4,
+        name: "second",
+        detail: "duplicate",
+        bodyOffset: 0,
+        approvalId: null,
+      },
     });
     expect(started.messages[1]?.steps).toHaveLength(3);
     expect(
@@ -588,6 +653,7 @@ describe("Chat stream reducer", () => {
       error: null,
       retrying: false,
       thinkingMs: null,
+      thinkingSegments: [],
       thinkingActive: false,
     });
   });

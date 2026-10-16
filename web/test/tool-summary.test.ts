@@ -9,7 +9,15 @@ let nextId = 1;
 /** 一个步骤；`read` 一律读同一个文件，按文件数计时会与按步骤数计分开。 */
 function step(name: string, status: ChatStepView["status"] = "done"): ChatStepView {
   const id = nextId++;
-  return { id, name, detail: '{"path":"notes.md"}', output: "", changes: null, status };
+  return {
+    id,
+    name,
+    detail: '{"path":"notes.md"}',
+    output: "",
+    changes: null,
+    status,
+    bodyOffset: null,
+  };
 }
 
 function steps(...names: string[]): ChatStepView[] {

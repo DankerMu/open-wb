@@ -23,7 +23,14 @@ import {
   failureOf,
   markRetrying,
 } from "./stream-failure.js";
-import { type ChatStepView, endStep, startStep } from "./stream-steps.js";
+import {
+  type ChatStepStartData,
+  closeSegment,
+  decodeStepStart,
+  openSegment,
+  startSegmentStep,
+} from "./stream-segments.js";
+import { type ChatStepView, endStep } from "./stream-steps.js";
 import {
   appendThinking,
   type ChatThinkingEvent,
@@ -49,6 +56,7 @@ type ChatMessageView = {
   retrying: boolean;
   thinkingMs: ChatMessage["thinkingMs"];
   thinkingActive: boolean;
+  thinkingSegments: ChatMessage["thinkingSegments"];
 };
 
 export type ChatState = {
@@ -65,7 +73,7 @@ type ChatTurnEndStatus = ChatStepEndStatus | "stopped";
 export type ChatEvent =
   | { type: "turn.start"; data: ChatMessageTarget }
   | { type: "text.delta"; data: ChatMessageTarget & { delta: string } }
-  | { type: "step.start"; data: ChatStepTarget & { name: string; detail: string } }
+  | { type: "step.start"; data: ChatStepStartData }
   | { type: "step.end"; data: ChatStepTarget & { status: ChatStepEndStatus; output: string } }
   | { type: "turn.end"; data: ChatMessageTarget & { status: ChatTurnEndStatus } }
   | ChatFailureEvent
@@ -137,12 +145,14 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
         output: step.output,
         changes: step.changes,
         status: step.status,
+        bodyOffset: step.bodyOffset,
       })),
       approvals: approvalViews(message.approvals),
       error: message.error,
       retrying: false,
       thinkingMs: message.thinkingMs,
       thinkingActive: snapshotThinkingActive(message),
+      thinkingSegments: message.thinkingSegments,
     })),
     todo: snapshot.todo,
   };
@@ -161,7 +171,7 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
       }));
     case "step.start":
       return replaceAssistant(state, event.data.messageId, (m) =>
-        startStep(clearRetrying(m), event.data),
+        startSegmentStep(clearRetrying(m), event.data),
       );
     case "step.end":
       return replaceAssistant(state, event.data.messageId, (m) => endStep(m, event.data));
@@ -190,10 +200,12 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
     // thinking.delta only appends to the message; the session status is left untouched.
     case "thinking.delta":
       return replaceAssistant(state, event.data.messageId, (m) =>
-        appendThinking(clearRetrying(m), event.data.delta),
+        appendThinking(openSegment(clearRetrying(m)), event.data.delta),
       );
     case "thinking.end":
-      return replaceAssistant(state, event.data.messageId, (m) => endThinking(m, event.data));
+      return replaceAssistant(state, event.data.messageId, (m) =>
+        closeSegment(endThinking(m, event.data), event.data.segment),
+      );
     // files.changed only replaces one step's changes; the session status is left untouched.
     case "files.changed":
       return replaceAssistant(state, event.data.messageId, (m) => setStepChanges(m, event.data));
@@ -238,6 +250,7 @@ function emptyAssistant(messageId: number): ChatMessageView {
     retrying: false,
     thinkingMs: null,
     thinkingActive: false,
+    thinkingSegments: [],
   };
 }
 
@@ -694,24 +707,6 @@ function decodeTextDelta(value: unknown): ChatEvent | undefined {
     isSafeInteger(value.messageId) &&
     typeof value.delta === "string"
     ? { type: "text.delta", data: { messageId: value.messageId, delta: value.delta } }
-    : undefined;
-}
-
-function decodeStepStart(value: unknown): ChatEvent | undefined {
-  return hasExactlyKeys(value, ["messageId", "stepId", "name", "detail"]) &&
-    isSafeInteger(value.messageId) &&
-    isSafeInteger(value.stepId) &&
-    typeof value.name === "string" &&
-    typeof value.detail === "string"
-    ? {
-        type: "step.start",
-        data: {
-          messageId: value.messageId,
-          stepId: value.stepId,
-          name: value.name,
-          detail: value.detail,
-        },
-      }
     : undefined;
 }
 

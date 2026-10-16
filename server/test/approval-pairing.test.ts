@@ -170,6 +170,18 @@ describe("names, ended steps, published requests and the turn's end", () => {
     expect(steps.takeApproval("bash")).toBe("r2");
   });
 
+  // Issue 1474 (carried from the PR 1483 review): the later of two steps ends first; the ended one is
+  // removed by its id, so the select still pairs the earlier one, which is still running.
+  it("the later step ending first leaves the earlier one to pair: r1 → c1", () => {
+    const steps = new PumpSteps(MESSAGE);
+    const store = recordingStore();
+    steps.started("c1", 10, "bash", null);
+    steps.started("c2", 11, "bash", null);
+    steps.ended(11);
+    steps.select(select("r1", "bash"), PUBLISHES, store);
+    expect(store.writes).toEqual([[MESSAGE, "r1", 10]]);
+  });
+
   it("a select whose request was already published only queues, a running step notwithstanding", () => {
     const steps = new PumpSteps(MESSAGE);
     const store = recordingStore();
@@ -233,7 +245,7 @@ describe("ApprovalRegistry.publishesRequest: publishRequest's own predicate, rea
     expect(registry.publishesRequest(slot, { type: "tool_execution_start" })).toBe(false);
     expect(published).toEqual([]);
 
-    await registry.publishRequest(slot, select("r1", "bash"));
+    await registry.publishRequest(slot, select("r1", "bash"), null);
     expect(published).toEqual(["approval.request"]);
     expect(registry.publishesRequest(slot, select("r1", "bash"))).toBe(false);
   });

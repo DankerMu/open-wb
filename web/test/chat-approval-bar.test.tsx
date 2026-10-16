@@ -603,6 +603,7 @@ describe("approval prompt card: ownership fences", () => {
         tool: "bash",
         title: TITLE,
         expiresAt: T0 + 60_000,
+        stepId: null,
       });
     });
     await flush();

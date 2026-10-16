@@ -243,12 +243,13 @@ export function persistEvent(
     case "text.delta":
       store.appendDelta(assistantMessageId, event.data.delta);
       return event;
-    // Issue 1473 (design D6 rule 1): the queued approval is paired in the step insert's transaction.
+    // Issue 1473 (design D6 rule 1): the queued approval is paired in the step insert's transaction;
+    // issue 1474 publishes the stored body offset and the paired approval's id with the step.
     case "step.start": {
       const { name, detail } = event.data;
       const approval = steps.takeApproval(name);
       const ordinal = steps.nextOrdinal();
-      const { stepId, approvalId } = store.startStep(assistantMessageId, {
+      const { stepId, bodyOffset, approvalId } = store.startStep(assistantMessageId, {
         ordinal,
         name,
         detail,
@@ -257,12 +258,7 @@ export function persistEvent(
       steps.started(event.data.stepId, stepId, name, approvalId);
       return {
         type: "step.start",
-        data: {
-          messageId: event.data.messageId,
-          stepId,
-          name: event.data.name,
-          detail: event.data.detail,
-        },
+        data: { messageId: event.data.messageId, stepId, name, detail, bodyOffset, approvalId },
       };
     }
     case "step.end": {

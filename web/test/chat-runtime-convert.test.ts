@@ -13,6 +13,7 @@ const SETTLED = {
   title: "Allow tool: write",
   expiresAt: 1_750_000_060_000,
   decision: "allow" as const,
+  stepId: null,
 };
 const CHANGES = [{ path: "out/index.html", added: null, removed: null, kind: "write" as const }];
 const FAILURE = {
@@ -39,6 +40,7 @@ function stoppedView(): View {
         output: "a.txt",
         changes: null,
         status: "done",
+        bodyOffset: null,
       },
       {
         id: 32,
@@ -47,12 +49,14 @@ function stoppedView(): View {
         output: "EACCES",
         changes: CHANGES,
         status: "failed",
+        bodyOffset: null,
       },
     ],
     approvals: [SETTLED],
     error: FAILURE,
     retrying: false,
     thinkingMs: 1400,
+    thinkingSegments: [],
     thinkingActive: false,
   };
 }
@@ -71,6 +75,7 @@ function runningView(): View {
     error: null,
     retrying: false,
     thinkingMs: null,
+    thinkingSegments: [],
     thinkingActive: false,
   };
 }
@@ -196,6 +201,7 @@ describe("附件透传：快照 → 视图消息 → 运行时消息的应用自
       attachments,
       error: null,
       thinkingMs: null,
+      thinkingSegments: [],
     };
   }
 

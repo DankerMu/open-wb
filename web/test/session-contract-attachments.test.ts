@@ -52,6 +52,7 @@ function message(id: number, role: "user" | "assistant") {
     undo: role === "user" ? "available" : null,
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 

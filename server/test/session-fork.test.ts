@@ -164,7 +164,9 @@ describe("fork over real fake-omp branch children (#466)", () => {
     const approvals = approvalsOf(db, copy) as Array<Record<string, unknown>>;
     expect(approvals).toEqual(approvalsOf(db, a1.id));
     expect(approvals.map((a) => a.decision)).toEqual(["deny", "timeout"]);
-    expect(approvals.some((a) => Object.values(a).includes(null))).toBe(false);
+    // `step_id` (045, issue 1474) is NULL on these unpaired seeds; every other column is set.
+    expect(approvals.map(({ step_id }) => step_id)).toEqual([null, null]);
+    expect(approvals.some(({ step_id: _s, ...a }) => Object.values(a).includes(null))).toBe(false);
 
     expect(snapshot(db, source, true)).toEqual(before);
     real.unchanged();

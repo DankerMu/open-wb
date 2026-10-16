@@ -143,7 +143,14 @@ describe("RingBuffer", () => {
     const ring = new RingBuffer(11);
     ring.push({
       type: "step.start",
-      data: { messageId: 4, stepId: 12, name: "read", detail: "README.md" },
+      data: {
+        messageId: 4,
+        stepId: 12,
+        name: "read",
+        detail: "README.md",
+        bodyOffset: 0,
+        approvalId: null,
+      },
     });
     ring.push({
       type: "step.end",
@@ -157,7 +164,14 @@ describe("RingBuffer", () => {
         {
           id: "11:1",
           type: "step.start",
-          data: { messageId: 4, stepId: 12, name: "read", detail: "README.md" },
+          data: {
+            messageId: 4,
+            stepId: 12,
+            name: "read",
+            detail: "README.md",
+            bodyOffset: 0,
+            approvalId: null,
+          },
         },
         {
           id: "11:2",
@@ -228,7 +242,14 @@ describe("RingBuffer", () => {
     ring.push({ type: "text.delta", data: { messageId: 2, delta: "live" } });
     ring.push({
       type: "step.start",
-      data: { messageId: 2, stepId: 11, name: "read", detail: "README.md" },
+      data: {
+        messageId: 2,
+        stepId: 11,
+        name: "read",
+        detail: "README.md",
+        bodyOffset: 4,
+        approvalId: null,
+      },
     });
 
     expect(ring.since(null, { turnRunning: true })).toEqual({
@@ -239,7 +260,14 @@ describe("RingBuffer", () => {
         {
           id: "6:5",
           type: "step.start",
-          data: { messageId: 2, stepId: 11, name: "read", detail: "README.md" },
+          data: {
+            messageId: 2,
+            stepId: 11,
+            name: "read",
+            detail: "README.md",
+            bodyOffset: 4,
+            approvalId: null,
+          },
         },
       ],
     });

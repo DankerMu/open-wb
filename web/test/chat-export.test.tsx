@@ -74,6 +74,7 @@ function user(id: number, content: string) {
     attachments: [],
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 
@@ -81,6 +82,7 @@ function step(id: number, name: string, status: StepStatus) {
   return {
     id,
     ordinal: id,
+    bodyOffset: null,
     name,
     detail: "步骤的详情",
     output: "步骤的输出",
@@ -107,6 +109,7 @@ function assistant(
     attachments: [],
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 
@@ -213,6 +216,8 @@ describe("导出记录（session-sidebar）", () => {
         stepId: 7,
         name: "bash",
         detail: "ls",
+        bodyOffset: 4,
+        approvalId: null,
       });
     });
     await screen.findByText("流式正文", { exact: true });

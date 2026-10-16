@@ -479,12 +479,16 @@ describe("Chat stream recovery", () => {
           stepId: 11,
           name: "bash",
           detail: '{"command":"echo workbuddy-smoke"}',
+          bodyOffset: 0,
+          approvalId: null,
         });
         context.source.emitData("step.start", "1:5", {
           messageId: 0,
           stepId: 11,
           name: "bash",
           detail: '{"command":"echo workbuddy-smoke"}',
+          bodyOffset: 0,
+          approvalId: null,
         });
         context.source.emitData("step.end", "1:6", {
           messageId: 0,
@@ -501,6 +505,8 @@ describe("Chat stream recovery", () => {
               stepId: 11,
               name: "bash",
               detail: '{"command":"echo workbuddy-smoke"}',
+              bodyOffset: 0,
+              approvalId: null,
             },
           },
           {
@@ -521,6 +527,7 @@ describe("Chat stream recovery", () => {
             output: "workbuddy-smoke",
             changes: null,
             status: "done",
+            bodyOffset: 0,
           },
         ]);
 
@@ -535,6 +542,7 @@ describe("Chat stream recovery", () => {
             output: "workbuddy-smoke",
             changes: null,
             status: "done",
+            bodyOffset: 0,
           },
         ]);
         context.loads[1]?.resolve(

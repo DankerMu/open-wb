@@ -35,8 +35,9 @@ const MESSAGE_KEYS = [
   "steps",
   "error",
   "thinkingMs",
+  "thinkingSegments",
 ];
-const STEP_KEYS = ["id", "ordinal", "name", "detail", "output", "changes", "status"];
+const STEP_KEYS = ["id", "ordinal", "name", "detail", "output", "changes", "status", "bodyOffset"];
 const STORED_CHANGES = [
   { path: "src/app.ts", added: 2, removed: 1, kind: "edit" },
   { path: "out/index.html", added: null, removed: null, kind: "write" },
@@ -292,6 +293,8 @@ describe("session DTO metadata: step changes", () => {
           output: "edited",
           changes: STORED_CHANGES,
           status: "done",
+          // Issue 1474: both steps start after the turn published "answer to edit files".
+          bodyOffset: "answer to edit files".length,
         },
         {
           id: bashStep,
@@ -301,6 +304,7 @@ describe("session DTO metadata: step changes", () => {
           output: "listed",
           changes: null,
           status: "done",
+          bodyOffset: "answer to edit files".length,
         },
       ]);
       for (const step of steps ?? []) {

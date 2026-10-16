@@ -8,6 +8,7 @@ export type ChatStepView = {
   output: ChatStep["output"];
   changes: ChatStep["changes"];
   status: ChatStep["status"];
+  bodyOffset: ChatStep["bodyOffset"];
 };
 
 type WithSteps = { steps: ChatStepView[] };
@@ -15,7 +16,7 @@ type WithSteps = { steps: ChatStepView[] };
 /** Appends a running step without changes; a `stepId` already present returns the same message. */
 export function startStep<M extends WithSteps>(
   message: M,
-  data: { stepId: number; name: string; detail: string },
+  data: { stepId: number; name: string; detail: string; bodyOffset: number },
 ): M {
   if (message.steps.some((step) => step.id === data.stepId)) {
     return message;
@@ -31,6 +32,7 @@ export function startStep<M extends WithSteps>(
         output: "",
         changes: null,
         status: "running",
+        bodyOffset: data.bodyOffset,
       },
     ],
   };
@@ -49,6 +51,7 @@ export function endStep<M extends WithSteps>(
     output: data.output,
     changes: current.changes,
     status: data.status,
+    bodyOffset: current.bodyOffset,
   }));
 }
 

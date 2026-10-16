@@ -133,7 +133,17 @@ describe("task list reduction", () => {
     ["thinking.delta", { type: "thinking.delta", data: { messageId: M, delta: "x" } }],
     [
       "step.start",
-      { type: "step.start", data: { messageId: M, stepId: 1, name: "bash", detail: "" } },
+      {
+        type: "step.start",
+        data: {
+          messageId: M,
+          stepId: 1,
+          name: "bash",
+          detail: "",
+          bodyOffset: 0,
+          approvalId: null,
+        },
+      },
     ],
     [
       "error",
@@ -149,7 +159,7 @@ describe("task list reduction", () => {
       "approval.request",
       {
         type: "approval.request",
-        data: { messageId: M, approvalId: 9, tool: "bash", title: "t", expiresAt: 1 },
+        data: { messageId: M, approvalId: 9, tool: "bash", title: "t", expiresAt: 1, stepId: null },
       },
     ],
   ])("%s changes the view and keeps the list", (_label, event) => {

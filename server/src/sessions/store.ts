@@ -60,7 +60,9 @@ import {
   type StartedStep,
   type StartStepInput,
   startStep,
+  type ThinkingSegment,
   type ThinkingSegmentStore,
+  thinkingSegmentsBySession,
 } from "./store-segments.js";
 import { appendThinking } from "./store-thinking.js";
 import {
@@ -95,6 +97,8 @@ export interface StepView {
   status: StepStatus;
   startedAt: number;
   endedAt: number | null;
+  /** `chat_steps.body_offset`; null for a step stored before migration 045 (issue 1474). */
+  bodyOffset: number | null;
 }
 
 export interface MessageView {
@@ -113,6 +117,8 @@ export interface MessageView {
   steps: StepView[];
   /** Every approval row of this message in ascending id order; `[]` for user messages. */
   approvals: ApprovalEntry[];
+  /** Its `chat_thinking_segments` rows in row id order (issue 1474); `[]` for user messages. */
+  thinkingSegments: ThinkingSegment[];
 }
 
 export interface SessionMessageTree {
@@ -159,6 +165,8 @@ export interface ApprovalEntry {
   requestedAt: number;
   expiresAt: number;
   decision: ApprovalOutcome | null;
+  /** `chat_approvals.step_id`: the step it paired (approval-pairing.ts), null when unpaired. */
+  stepId: number | null;
 }
 
 /** One settled approval, the shape `decide` resolves with (a snapshot element, never pending). */
@@ -352,6 +360,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
         }
       }
       const approvalsByMessage = approvalsBySession(db, sessionId, decoder);
+      const segmentsByMessage = thinkingSegmentsBySession(db, sessionId);
       const views: MessageView[] = [];
       for (const message of messages) {
         const view = toMessageView(message, decoder);
@@ -361,6 +370,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           ...view,
           steps: stepsByMessage.get(message.id) ?? [],
           approvals: approvalsByMessage.get(message.id) ?? [],
+          thinkingSegments: segmentsByMessage.get(message.id) ?? [],
         });
       }
       return { session: toSessionView(session, decoder, options.composer), messages: views };

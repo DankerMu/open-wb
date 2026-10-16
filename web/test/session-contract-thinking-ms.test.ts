@@ -34,6 +34,7 @@ function message(id: number, role: "user" | "assistant") {
     undo: role === "user" ? "available" : null,
     attachments: [],
     error: null,
+    thinkingSegments: [],
   };
 }
 

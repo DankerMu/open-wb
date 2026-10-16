@@ -116,6 +116,8 @@ describe("chat page create and acceptance ownership", () => {
         stepId: 11,
         name: "bash",
         detail: BASH_START_DETAIL,
+        bodyOffset: 0,
+        approvalId: null,
       });
       source.emitData("step.end", "1:3", {
         messageId: 0,
@@ -303,6 +305,7 @@ describe("chat page isolation and errors", () => {
         {
           id: 11,
           ordinal: 0,
+          bodyOffset: null,
           name: "bash",
           detail: BASH_START_DETAIL,
           output: "",

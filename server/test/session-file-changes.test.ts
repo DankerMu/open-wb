@@ -238,7 +238,20 @@ describe("files.changed in a workspace-bound session", () => {
           type: "thinking.delta",
           data: { messageId: assistant, delta },
         })),
-        { type: "thinking.end", data: { messageId: assistant, thinkingMs: SPAN_MS } },
+        {
+          type: "thinking.end",
+          data: {
+            messageId: assistant,
+            thinkingMs: SPAN_MS,
+            segment: {
+              bodyOffset: 0,
+              thinkingOffset: 0,
+              thinkingLength: THOUGHT.length,
+              stepsBefore: 0,
+              thinkingMs: SPAN_MS,
+            },
+          },
+        },
         {
           type: "step.start",
           data: {
@@ -246,6 +259,8 @@ describe("files.changed in a workspace-bound session", () => {
             stepId: edit?.id,
             name: "edit",
             detail: expect.any(String),
+            bodyOffset: 0,
+            approvalId: null,
           },
         },
         { type: "files.changed", data: { messageId: assistant, stepId: edit?.id, files: NOTES } },
@@ -260,6 +275,8 @@ describe("files.changed in a workspace-bound session", () => {
             stepId: write?.id,
             name: "write",
             detail: expect.any(String),
+            bodyOffset: 0,
+            approvalId: null,
           },
         },
         { type: "files.changed", data: { messageId: assistant, stepId: write?.id, files: REPORT } },

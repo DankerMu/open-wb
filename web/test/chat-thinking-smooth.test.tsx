@@ -153,7 +153,18 @@ describe("thinking-fold「思考的逐字展开」", () => {
     // 服务端冲出段内最后一条 thinking.delta 后在同一同步段里发布 thinking.end：两条一起投递、一起让出。
     await act(async () => {
       latestSource().emitData("thinking.delta", "1:4", { messageId: 0, delta: TWO_HUNDRED });
-      latestSource().emitData("thinking.end", "1:5", { messageId: 0, thinkingMs: 400 });
+      latestSource().emitData("thinking.end", "1:5", {
+        messageId: 0,
+        thinkingMs: 400,
+        // 快照里已有思考 `想`：段从它之后起（与客户端临时段一致），消息保持旧布局（design D14）。
+        segment: {
+          bodyOffset: 0,
+          thinkingOffset: 1,
+          thinkingLength: TWO_HUNDRED.length,
+          stepsBefore: 0,
+          thinkingMs: 400,
+        },
+      });
       await settle();
     });
 

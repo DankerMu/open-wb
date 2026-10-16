@@ -8,11 +8,13 @@
  * replaces the remembered failure; `Retry cancelled` is an interruption) and classifies the
  * failure an error event carries (upstream-classify.ts).
  * #910 declares thinking.end; the supervisor's thinking spans publish it, never this reducer.
+ * Issue 1474 (design D8): published step.start, approval.request and thinking.end gain fields.
  */
 import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SessionTodo } from "./session-todo.js";
+import type { ClosedSegment } from "./store-segments.js";
 import { classifyTurnFailure, type FailureReason, failureSentence } from "./upstream-classify.js";
 
 /**
@@ -31,17 +33,14 @@ export type ChatEvent<StepId extends string | number = number> =
   | { type: "turn.start"; data: { messageId: number } }
   | { type: "text.delta"; data: { messageId: number; delta: string } }
   | { type: "thinking.delta"; data: { messageId: number; delta: string } }
-  | { type: "thinking.end"; data: { messageId: number; thinkingMs: number } }
+  | { type: "thinking.end"; data: ThinkingEnd }
   | { type: "files.changed"; data: { messageId: number; stepId: StepId; files: FileChange[] } }
   // Mapper output (string step ids) carries the raw candidate; the published event the stored list.
   | {
       type: "todo.updated";
       data: { messageId: number; todo: StepId extends number ? SessionTodo | null : unknown };
     }
-  | {
-      type: "step.start";
-      data: { messageId: number; stepId: StepId; name: string; detail: string };
-    }
+  | { type: "step.start"; data: StepStart<StepId> }
   | {
       type: "step.end";
       data: {
@@ -62,12 +61,22 @@ export type ChatEvent<StepId extends string | number = number> =
         tool: string;
         title: string;
         expiresAt: number;
+        stepId: number | null;
       };
     }
   | {
       type: "approval.resolved";
       data: { messageId: number; approvalId: number; decision: "allow" | "deny" | "timeout" };
     };
+
+/** The mapper's step.start has four keys; the persisted one adds its offset and paired approval. */
+type StepStart<StepId> = {
+  messageId: number;
+  stepId: StepId;
+  name: string;
+  detail: string;
+} & (StepId extends number ? { bodyOffset: number; approvalId: number | null } : unknown);
+type ThinkingEnd = { messageId: number; thinkingMs: number; segment: ClosedSegment };
 
 const GENERIC_FAILURE = "Agent execution failed";
 // detail（args）与 output（result 文本）各自的码点上限；环形缓冲最坏成本见 #367 design D3。

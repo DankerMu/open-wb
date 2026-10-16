@@ -33,6 +33,7 @@ export const historyUser = {
   steps: [] as [],
   error: null,
   thinkingMs: null,
+  thinkingSegments: [],
 };
 
 export const userView = {
@@ -48,6 +49,7 @@ export const userView = {
   error: null,
   retrying: false,
   thinkingMs: null,
+  thinkingSegments: [],
   thinkingActive: false,
 };
 
@@ -93,6 +95,7 @@ export function chatSnapshot(
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
     ],
     streamCursor: options.cursor ?? { epoch: 1, seq: 0 },

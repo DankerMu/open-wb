@@ -79,6 +79,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               thinking: null,
               error: null,
               thinkingMs: null,
+              thinkingSegments: [],
             },
             {
               id: accepted.assistantMessageId,
@@ -99,6 +100,7 @@ describe("SessionStore owner-scoped persisted views", () => {
                   startedAt: FIXED_NOW + 22,
                   endedAt: null,
                   changes: null,
+                  bodyOffset: 0,
                 },
                 {
                   id: secondStepId,
@@ -110,11 +112,13 @@ describe("SessionStore owner-scoped persisted views", () => {
                   startedAt: FIXED_NOW + 21,
                   endedAt: null,
                   changes: null,
+                  bodyOffset: 0,
                 },
               ],
               thinking: null,
               error: null,
               thinkingMs: null,
+              thinkingSegments: [],
             },
           ],
         });

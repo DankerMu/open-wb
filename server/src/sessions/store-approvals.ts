@@ -26,6 +26,7 @@ type ApprovalDbRow = {
   title: Uint8Array;
   requested_at: number;
   expires_at: number;
+  step_id: number | null;
 };
 
 type SnapshotApprovalDbRow = {
@@ -36,6 +37,7 @@ type SnapshotApprovalDbRow = {
   requested_at: number;
   expires_at: number;
   decision: ApprovalOutcome | null;
+  step_id: number | null;
 };
 
 type PendingDbRow = Pick<ApprovalDbRow, "id" | "session_id" | "owner_id" | "tool">;
@@ -94,7 +96,7 @@ export function approvalsBySession(
   const rows = db
     .prepare(
       `SELECT a.id, a.message_id, CAST(a.tool AS BLOB) AS tool, CAST(a.title AS BLOB) AS title,
-              a.requested_at, a.expires_at, a.decision
+              a.requested_at, a.expires_at, a.decision, a.step_id
          FROM chat_approvals AS a
          JOIN chat_messages AS m ON m.id = a.message_id
         WHERE m.session_id = ? AND m.role = 'assistant'
@@ -111,6 +113,7 @@ export function approvalsBySession(
       requestedAt: Number(row.requested_at),
       expiresAt: Number(row.expires_at),
       decision: row.decision,
+      stepId: row.step_id === null ? null : Number(row.step_id),
     };
     const current = byMessage.get(messageId);
     if (current === undefined) {
@@ -137,7 +140,7 @@ export function settlePendingApproval(
     const row = db
       .prepare(
         `SELECT a.id, a.message_id, m.session_id, s.owner_id, CAST(a.tool AS BLOB) AS tool,
-                CAST(a.title AS BLOB) AS title, a.requested_at, a.expires_at
+                CAST(a.title AS BLOB) AS title, a.requested_at, a.expires_at, a.step_id
            FROM chat_approvals AS a
            JOIN chat_messages AS m ON m.id = a.message_id
            JOIN chat_sessions AS s ON s.id = m.session_id
@@ -174,6 +177,7 @@ export function settlePendingApproval(
       requestedAt: Number(row.requested_at),
       expiresAt: Number(row.expires_at),
       decision,
+      stepId: row.step_id === null ? null : Number(row.step_id),
     };
   });
 }

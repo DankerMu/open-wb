@@ -44,6 +44,7 @@ function view(id: number, role: View["role"], status: View["status"], content = 
     error: null,
     retrying: false,
     thinkingMs: null,
+    thinkingSegments: [],
     thinkingActive: false,
   };
   return { id, role, content, status, undo, ...empty };

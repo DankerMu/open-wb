@@ -105,6 +105,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
       {
         id: 0,
@@ -119,6 +120,7 @@ export function runningCreatedSnapshot(): ChatMessageSnapshot {
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
     ],
     streamCursor: { epoch: 1, seq: 0 },
@@ -143,6 +145,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
       {
         id: 0,
@@ -157,6 +160,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
           {
             id: 11,
             ordinal: 0,
+            bodyOffset: null,
             name: "bash",
             detail: BASH_START_DETAIL,
             output: BASH_OUTPUT,
@@ -167,6 +171,7 @@ export function completedCreatedSnapshot(): ChatMessageSnapshot {
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
     ],
     streamCursor: { epoch: 1, seq: 7 },
@@ -202,6 +207,7 @@ export function otherSnapshot(): ChatMessageSnapshot {
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
     ],
     streamCursor: { epoch: 1, seq: null },

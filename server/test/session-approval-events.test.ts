@@ -23,7 +23,14 @@ type Decision = Extract<ChatEvent<number>, { type: "approval.resolved" }>["data"
 const TURN_START = { type: "turn.start", data: { messageId: 1 } } as const;
 const REQUEST = {
   type: "approval.request",
-  data: { messageId: 1, approvalId: 7, tool: "bash", title: "t", expiresAt: 1700000060000 },
+  data: {
+    messageId: 1,
+    approvalId: 7,
+    tool: "bash",
+    title: "t",
+    expiresAt: 1700000060000,
+    stepId: null,
+  },
 } as const;
 const RESOLVED = {
   type: "approval.resolved",
@@ -123,7 +130,14 @@ describe("approval events are ordinary ring events", () => {
       {
         id: "3:2",
         type: "approval.request",
-        data: { messageId: 1, approvalId: 7, tool: "bash", title: "t", expiresAt: 1700000060000 },
+        data: {
+          messageId: 1,
+          approvalId: 7,
+          tool: "bash",
+          title: "t",
+          expiresAt: 1700000060000,
+          stepId: null,
+        },
       },
       {
         id: "3:3",
@@ -154,7 +168,14 @@ describe("approval events are ordinary ring events", () => {
       {
         id: "3:2",
         event: "approval.request",
-        data: { messageId: 1, approvalId: 7, tool: "bash", title: "t", expiresAt: 1700000060000 },
+        data: {
+          messageId: 1,
+          approvalId: 7,
+          tool: "bash",
+          title: "t",
+          expiresAt: 1700000060000,
+          stepId: null,
+        },
       },
       {
         id: "3:3",
@@ -185,7 +206,14 @@ describe("approval events are ordinary ring events", () => {
       {
         id: "3:2",
         event: "approval.request",
-        data: { messageId: 1, approvalId: 7, tool: "bash", title: "t", expiresAt: 1700000060000 },
+        data: {
+          messageId: 1,
+          approvalId: 7,
+          tool: "bash",
+          title: "t",
+          expiresAt: 1700000060000,
+          stepId: null,
+        },
       },
     ]);
 

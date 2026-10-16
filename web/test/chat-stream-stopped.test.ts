@@ -15,6 +15,7 @@ const FAILURE = { reason: "model_call_failed", message: "x", status: null, detai
 const bashStep = {
   id: 1,
   ordinal: 0,
+  bodyOffset: null,
   name: "bash",
   detail: "ls",
   output: "o",
@@ -25,6 +26,7 @@ const bashStep = {
 const readStep = {
   id: 2,
   ordinal: 1,
+  bodyOffset: null,
   name: "read",
   detail: "a.txt",
   output: "text",
@@ -69,13 +71,30 @@ describe("turn.end stopped reduction", () => {
       content: "partial",
       status: "stopped",
       steps: [
-        { id: 1, name: "bash", detail: "ls", output: "o", changes: null, status: "stopped" },
-        { id: 2, name: "read", detail: "a.txt", output: "text", changes: null, status: "done" },
+        {
+          id: 1,
+          name: "bash",
+          detail: "ls",
+          output: "o",
+          changes: null,
+          status: "stopped",
+          bodyOffset: null,
+        },
+        {
+          id: 2,
+          name: "read",
+          detail: "a.txt",
+          output: "text",
+          changes: null,
+          status: "done",
+          bodyOffset: null,
+        },
       ],
       thinking: null,
       error: null,
       retrying: false,
       thinkingMs: null,
+      thinkingSegments: [],
       thinkingActive: false,
     });
     expect(next.messages[0]).toBe(state.messages[0]);
@@ -107,6 +126,7 @@ describe("turn.end stopped reduction", () => {
       error: null,
       retrying: false,
       thinkingMs: null,
+      thinkingSegments: [],
       thinkingActive: false,
     });
   });

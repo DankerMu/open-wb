@@ -4,8 +4,8 @@
  * `body_offset` equals the UTF-16 length of the `text.delta` deltas published before that
  * `step.start` (the recorded onEvent stream, i.e. ring order); the fake's deltas are fixed
  * (`fake-omp.mjs` DELTAS: "Hello ", "from ", "fake-omp"), so both offsets are also the literal 19.
- * The event field `bodyOffset` arrives with slice 5 (design D8): until then `step.start` keeps its
- * four keys.
+ * The event field `bodyOffset` arrived with slice 5 (design D8, issue 1474): `step.start` now has
+ * six keys (`bodyOffset`, `approvalId` added).
  *
  * Issue 1472 (3b, carried from the PR 1481 review) adds a scripted controlled child on the injected
  * clock that never advances: `看` is published at once, `一下` arrives inside the 250 ms window and is
@@ -78,7 +78,14 @@ describe("chat-stream「步骤的正文偏移」at the database layer", () => {
       );
 
       for (const start of ofType(sessionEvents(world), "step.start")) {
-        expect(Object.keys(start.data).sort()).toEqual(["detail", "messageId", "name", "stepId"]);
+        expect(Object.keys(start.data).sort()).toEqual([
+          "approvalId",
+          "bodyOffset",
+          "detail",
+          "messageId",
+          "name",
+          "stepId",
+        ]);
       }
       await world.fixture.supervisor.decide(world.session, r2.id, "deny");
       await world.fixture.supervisor.decide(world.session, r1.id, "allow");

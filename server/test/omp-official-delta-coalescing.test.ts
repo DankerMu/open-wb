@@ -142,6 +142,27 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: coalesced deltas`, 
         thinking_offset: 0,
         thinking_length: INTERLEAVED_THOUGHT.length,
       });
+
+      // Issue 1474 (5.2c): the snapshot's one segment carries the row's values.
+      const history = await world.app.inject({
+        method: "GET",
+        url: `/api/sessions/${turn.session}/messages`,
+        headers: { cookie: world.cookie },
+      });
+      expect(history.statusCode).toBe(200);
+      const answer = (
+        history.json() as { messages: Array<{ id: number; thinkingSegments: unknown }> }
+      ).messages.find((message) => message.id === Number(messageId));
+      const row = rows[0] as Record<string, unknown>;
+      expect(answer?.thinkingSegments).toStrictEqual([
+        {
+          bodyOffset: row.body_offset,
+          thinkingOffset: row.thinking_offset,
+          thinkingLength: row.thinking_length,
+          stepsBefore: row.steps_before,
+          thinkingMs: row.thinking_ms,
+        },
+      ]);
     },
   );
 });

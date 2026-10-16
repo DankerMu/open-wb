@@ -64,7 +64,13 @@ const changed = (status: "done" | "running", ...changes: Change[]) =>
 
 /** 一个从开始到结束的步骤，`files.changed` 在 `step.end` 之前（服务端的次序）。 */
 function endedStep(send: Send, stepId: number, ...files: Change[]) {
-  send("step.start", { stepId, name: "write", detail: "write args" });
+  send("step.start", {
+    stepId,
+    name: "write",
+    detail: "write args",
+    bodyOffset: 3,
+    approvalId: null,
+  });
   send("files.changed", { stepId, files });
   send("step.end", { stepId, status: "done", output: "ok" });
 }

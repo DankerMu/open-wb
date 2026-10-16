@@ -47,6 +47,7 @@ const runningSnapshot = chatSnapshot({
     {
       id: 11,
       ordinal: 0,
+      bodyOffset: null,
       name: "bash",
       detail: BASH_START_DETAIL,
       output: "",

@@ -35,6 +35,7 @@ const runningSession = {
 const snapshotStep = {
   id: -7,
   ordinal: 0,
+  bodyOffset: null,
   name: "first work",
   detail: SNAPSHOT_CONTENT,
   output: `out\n${SNAPSHOT_CONTENT}`,
@@ -58,6 +59,7 @@ const snapshot = {
       thinking: null,
       error: null,
       thinkingMs: null,
+      thinkingSegments: [],
     },
     {
       id: 0,
@@ -72,6 +74,7 @@ const snapshot = {
       thinking: null,
       error: null,
       thinkingMs: null,
+      thinkingSegments: [],
     },
   ],
   streamCursor: { epoch: 1, seq: null as number | null },
@@ -303,6 +306,7 @@ describe("Sessions API client snapshot domain contract", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
         {
           id: SAFE_INTEGER_MAX,
@@ -317,6 +321,7 @@ describe("Sessions API client snapshot domain contract", () => {
             {
               id: -SAFE_INTEGER_MAX,
               ordinal: SAFE_INTEGER_MAX,
+              bodyOffset: null,
               name: "",
               detail: "",
               output: "",
@@ -327,6 +332,7 @@ describe("Sessions API client snapshot domain contract", () => {
           thinking: null,
           error: null,
           thinkingMs: null,
+          thinkingSegments: [],
         },
       ],
       streamCursor: { epoch: SAFE_INTEGER_MAX, seq: SAFE_INTEGER_MAX },
@@ -481,6 +487,7 @@ describe("Sessions API client snapshot rejection contract", () => {
               {
                 id: -7,
                 ordinal: 0,
+                bodyOffset: null,
                 name: "first work",
                 output: "",
                 status: "running",

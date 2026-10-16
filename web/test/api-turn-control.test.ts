@@ -28,6 +28,7 @@ const settledApproval = {
   tool: "bash",
   title: "rm -rf build",
   requestedAt: 1_740_000_000_000,
+  stepId: null,
   expiresAt: 1_740_000_060_000,
   decision: "allow" as const,
 };
@@ -297,6 +298,7 @@ describe("Stopped status in sessions and snapshots", () => {
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
       {
         id: 0,
@@ -311,6 +313,7 @@ describe("Stopped status in sessions and snapshots", () => {
           {
             id: 2,
             ordinal: 0,
+            bodyOffset: null,
             name: "bash",
             detail: "ls",
             output: "o",
@@ -321,6 +324,7 @@ describe("Stopped status in sessions and snapshots", () => {
         thinking: null,
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
     ],
     streamCursor: { epoch: 1, seq: 7 },

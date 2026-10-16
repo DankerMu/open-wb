@@ -139,7 +139,17 @@ describe("chat-web「失败对象与重试标记归约」", () => {
     ["thinking.delta", { type: "thinking.delta", data: { messageId: 0, delta: "想" } }],
     [
       "step.start",
-      { type: "step.start", data: { messageId: 0, stepId: 1, name: "bash", detail: "" } },
+      {
+        type: "step.start",
+        data: {
+          messageId: 0,
+          stepId: 1,
+          name: "bash",
+          detail: "",
+          bodyOffset: 2,
+          approvalId: null,
+        },
+      },
     ],
     ["error", { type: "error", data: { messageId: 0, ...AUTH } }],
     ["turn.end done", { type: "turn.end", data: { messageId: 0, status: "done" } }],

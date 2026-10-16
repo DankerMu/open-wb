@@ -24,10 +24,11 @@ const NOTHING = {
   thinking: "",
 } satisfies Parameters<typeof hasVisibleBlock>[0];
 
-const APPROVAL = { id: 1, tool: "bash", title: "ls", expiresAt: 1 };
+const APPROVAL = { id: 1, tool: "bash", title: "ls", expiresAt: 1, stepId: null };
 const STEP = {
   id: 1,
   ordinal: 0,
+  bodyOffset: null,
   name: "bash",
   detail: "ls",
   output: "",
@@ -129,7 +130,14 @@ describe("chat-web「等待指示」：首块到达前只有等待指示，之�
 
     emit("text.delta", { messageId: 0, delta: "答" });
     await expectDotOnly(article);
-    emit("step.start", { messageId: 0, stepId: 1, name: "bash", detail: "ls" });
+    emit("step.start", {
+      messageId: 0,
+      stepId: 1,
+      name: "bash",
+      detail: "ls",
+      bodyOffset: 1,
+      approvalId: null,
+    });
     await expectDotOnly(article);
     emit("turn.end", { messageId: 0, status: "done" });
     await expectNeither(article);
@@ -139,7 +147,14 @@ describe("chat-web「等待指示」：首块到达前只有等待指示，之�
     const { article, emit } = await mountWaiting();
     expectWaitingOnly(article);
 
-    emit("step.start", { messageId: 0, stepId: 1, name: "bash", detail: "ls" });
+    emit("step.start", {
+      messageId: 0,
+      stepId: 1,
+      name: "bash",
+      detail: "ls",
+      bodyOffset: 0,
+      approvalId: null,
+    });
     await waitFor(() =>
       expect(within(article).getByRole("button", { name: "执行 1 条命令，进行中" })).toBeTruthy(),
     );

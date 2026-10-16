@@ -259,6 +259,7 @@ describe("approval ring order", () => {
         tool: "bash",
         title: TITLE,
         expiresAt: T + TTL_MS,
+        stepId: null,
       });
       expect(frames[resolved]?.data).toEqual({
         messageId: row.message_id,
