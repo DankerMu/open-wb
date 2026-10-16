@@ -1,12 +1,14 @@
 import fs, {
   fstatSync,
   mkdirSync,
+  openSync,
+  readFileSync,
   symlinkSync,
   truncateSync,
-  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { get as httpGet } from "node:http";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import fastify, { type FastifyInstance, type LightMyRequestResponse } from "fastify";
@@ -19,7 +21,15 @@ import {
   NOT_FOUND_ENVELOPE,
 } from "./auth-lifecycle-helpers.js";
 import { rawHttpRequest, withListeningApp } from "./raw-http-helpers.js";
-import { spyBodyIo, TEXT_MIME, waitForClose, workspaceTempDir } from "./workspace-file-helpers.js";
+import {
+  descriptorsOf,
+  failFirstReadOf,
+  spyBodyIo,
+  streamOn,
+  TEXT_MIME,
+  waitForClose,
+  workspaceTempDir,
+} from "./workspace-file-helpers.js";
 import {
   expectWorkspaceResponse,
   insertWorkspace,
@@ -147,8 +157,27 @@ function expectUnsatisfiable(
   expectGuardHeaders(response, label);
 }
 
-function streamsOpened(): unknown[] {
-  return vi.mocked(fs.createReadStream).mock.calls.map(([opened]) => opened);
+/** Every path `openSync` was asked to open, after `spyBodyIo()`. */
+function opened(): unknown[] {
+  return vi.mocked(fs.openSync).mock.calls.map(([path]) => path);
+}
+
+/** `spyBodyIo()` plus `closeSync`: what a 416 or a HEAD does with the descriptor it opened. */
+function spyOpenClose() {
+  spyBodyIo();
+  const closeSync = vi.spyOn(fs, "closeSync");
+  syncBuiltinESMExports();
+  return { closed: () => closeSync.mock.calls.map(([fd]) => fd) };
+}
+
+/** Opened once per request, closed by `closeSync`, and never read or streamed. */
+function expectOpenedUnread(target: string, requests: number, closed: unknown[]): void {
+  const descriptors = descriptorsOf(target);
+  expect(descriptors).toHaveLength(requests);
+  expect(closed).toEqual(descriptors);
+  expect(vi.mocked(fs.read)).not.toHaveBeenCalled();
+  expect(vi.mocked(fs.readSync)).not.toHaveBeenCalled();
+  expect(vi.mocked(fs.createReadStream)).not.toHaveBeenCalled();
 }
 
 describe("file route: range requests for audio and video", () => {
@@ -232,9 +261,9 @@ describe("file route: range requests for audio and video", () => {
     });
   });
 
-  it("answers an unsatisfiable range with an empty 416 and opens nothing", async () => {
-    await withRangeWorkspace(async ({ app, cookie }) => {
-      spyBodyIo();
+  it("answers an unsatisfiable range with an empty 416, closing unread the file it opened for its size", async () => {
+    await withRangeWorkspace(async ({ app, cookie, root }) => {
+      const io = spyOpenClose();
 
       for (const range of ["bytes=1000-", "bytes=-0", "bytes=5000-6000"]) {
         const response = await requestFile(app, cookie, "clip.mp4", { range });
@@ -242,8 +271,7 @@ describe("file route: range requests for audio and video", () => {
         expect(response.rawPayload.length, range).toBe(0);
       }
 
-      expect(streamsOpened()).toEqual([]);
-      expect(vi.mocked(fs.openSync).mock.calls).toEqual([]);
+      expectOpenedUnread(join(root, "clip.mp4"), 3, io.closed());
     });
   });
 
@@ -301,9 +329,9 @@ describe("file route: range requests for audio and video", () => {
     });
   });
 
-  it("HEAD carries the status and headers of its GET with no body and without opening the file", async () => {
-    await withRangeWorkspace(async ({ app, cookie }) => {
-      spyBodyIo();
+  it("HEAD carries the status and headers of its GET with no body, closing unread the file it opened", async () => {
+    await withRangeWorkspace(async ({ app, cookie, root }) => {
+      const io = spyOpenClose();
 
       const whole = await requestFile(app, cookie, "clip.mp4", { method: "HEAD" });
       expect(whole.statusCode).toBe(200);
@@ -332,38 +360,28 @@ describe("file route: range requests for audio and video", () => {
       });
       expectUnsatisfiable(unsatisfiable, "HEAD bytes=1000-", "bytes */1000");
 
-      expect(streamsOpened()).toEqual([]);
+      expectOpenedUnread(join(root, "clip.mp4"), 3, io.closed());
     });
   });
 
-  it("an open failure on a ranged request is the sanitized 500 without any range header", async () => {
-    await withRangeWorkspace(
-      async ({ app, cookie, root }) => {
-        const response = await requestFile(app, cookie, "clip.mp4", { range: "bytes=0-99" });
+  it("a read failure on a ranged request is the sanitized 500 without any range header", async () => {
+    await withRangeWorkspace(async ({ app, cookie, root }) => {
+      const failedReads = failFirstReadOf(join(root, "clip.mp4"));
 
-        expectWorkspaceResponse(response, 500, INTERNAL_ERROR_ENVELOPE);
-        expect(response.headers["content-type"]).toContain("application/json");
-        expect(response.headers["content-range"]).toBeUndefined();
-        expect(response.headers["accept-ranges"]).toBeUndefined();
-        expect(response.headers["x-workbuddy-size"]).toBeUndefined();
-        expect(response.headers["content-length"]).toBe(
-          String(Buffer.byteLength(JSON.stringify(INTERNAL_ERROR_ENVELOPE))),
-        );
-        expect(response.payload).not.toContain(root);
-        expect(fs.existsSync(join(root, "clip.mp4"))).toBe(false);
-      },
-      ({ app, sandboxRoot }) => {
-        const target = join(sandboxRoot, "u1", "range", "clip.mp4");
-        let removed = false;
-        app.addHook("onSend", (request, _reply, _payload, done) => {
-          if (!removed && request.routeOptions.url === "/api/workspaces/:id/file") {
-            removed = true;
-            unlinkSync(target);
-          }
-          done();
-        });
-      },
-    );
+      const response = await requestFile(app, cookie, "clip.mp4", { range: "bytes=0-99" });
+
+      expectWorkspaceResponse(response, 500, INTERNAL_ERROR_ENVELOPE);
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(response.headers["content-range"]).toBeUndefined();
+      expect(response.headers["accept-ranges"]).toBeUndefined();
+      expect(response.headers["x-workbuddy-size"]).toBeUndefined();
+      expect(response.headers["content-length"]).toBe(
+        String(Buffer.byteLength(JSON.stringify(INTERNAL_ERROR_ENVELOPE))),
+      );
+      expect(response.payload).not.toContain(root);
+      expect(failedReads()).toBe(1);
+      expect(readFileSync(join(root, "clip.mp4")).equals(CLIP)).toBe(true);
+    });
   });
 });
 
@@ -414,7 +432,7 @@ describe("file route: a ranged request stays behind the sandbox", () => {
           rel_path: path,
         })),
       );
-      expect(streamsOpened()).toEqual([]);
+      expect(opened()).toEqual([]);
     });
   });
 });
@@ -424,14 +442,20 @@ describe("sendFileRange: a caller other than the file route", () => {
     const absPath = join(workspaceTempDir(), "doc.bin");
     writeFileSync(absPath, CLIP);
     const app = fastify();
-    app.get("/doc", (request, reply) =>
-      sendFileRange(request, reply, {
-        absPath,
+    // One descriptor per request, opened by the caller as the routes do; the sender owns it then.
+    const descriptors: number[] = [];
+    const expectReleased = () =>
+      vi.waitFor(() => expect(() => fstatSync(descriptors.at(-1) as number)).toThrow(/EBADF/));
+    app.get("/doc", (request, reply) => {
+      const fd = openSync(absPath, "r");
+      descriptors.push(fd);
+      return sendFileRange(request, reply, {
+        fd,
         size: CLIP.length,
         headers: { "Content-Type": "application/pdf", "X-Frame-Options": "DENY" },
         unsatisfiableHeaders: { "Referrer-Policy": "no-referrer" },
-      }),
-    );
+      });
+    });
     try {
       const whole = await app.inject({ method: "GET", url: "/doc" });
       expect(whole.statusCode).toBe(200);
@@ -441,6 +465,7 @@ describe("sendFileRange: a caller other than the file route", () => {
       expect(whole.headers["content-length"]).toBe("1000");
       expect(whole.headers["referrer-policy"]).toBeUndefined();
       expect(whole.rawPayload.equals(CLIP)).toBe(true);
+      await expectReleased();
 
       const partial = await app.inject({
         method: "GET",
@@ -454,6 +479,7 @@ describe("sendFileRange: a caller other than the file route", () => {
       expect(partial.headers["content-length"]).toBe("10");
       // Byte i is i % 251: the interval crosses the wrap at 251.
       expect([...partial.rawPayload]).toEqual([250, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+      await expectReleased();
 
       const unsatisfiable = await app.inject({
         method: "GET",
@@ -467,6 +493,15 @@ describe("sendFileRange: a caller other than the file route", () => {
       expect(unsatisfiable.headers["x-frame-options"]).toBeUndefined();
       expect(unsatisfiable.headers["accept-ranges"]).toBeUndefined();
       expect(unsatisfiable.payload).toBe("");
+      // Closed before the 416 went out, not by a stream.
+      expect(() => fstatSync(descriptors.at(-1) as number)).toThrow(/EBADF/);
+
+      const head = await app.inject({ method: "HEAD", url: "/doc" });
+      expect(head.statusCode).toBe(200);
+      expect(head.headers["content-length"]).toBe("1000");
+      expect(head.rawPayload.length).toBe(0);
+      expect(() => fstatSync(descriptors.at(-1) as number)).toThrow(/EBADF/);
+      expect(descriptors).toHaveLength(4);
     } finally {
       await app.close();
     }
@@ -518,14 +553,13 @@ describe("file route: range requests over a real connection", () => {
       truncateSync(big, BIG_BYTES);
       await withListeningApp(app, async (origin) => {
         spyBodyIo();
+        // The descriptor the route opened for big.mp4, and the stream it handed it to.
         const served = () => {
-          const spied = vi.mocked(fs.createReadStream);
-          const index = spied.mock.calls.findIndex(([opened]) => opened === big);
-          // `fd` is the descriptor while the stream is open; the typings leave it out.
-          return spied.mock.results[index]?.value as
-            | (fs.ReadStream & { fd: number | null })
-            | undefined;
+          const [fd] = descriptorsOf(big);
+          return fd === undefined ? undefined : streamOn(fd);
         };
+        // What the route's `openSync` returned, while the stream still holds it.
+        const held = () => (typeof served()?.fd === "number" ? descriptorsOf(big)[0] : undefined);
 
         // Aborts at the first body chunk and reports the descriptor the server held open then.
         const descriptor = await new Promise<number>((resolve, reject) => {
@@ -534,7 +568,7 @@ describe("file route: range requests over a real connection", () => {
             { headers: { cookie, range: "bytes=0-" } },
             (response) => {
               response.once("data", () => {
-                const fd = served()?.fd;
+                const fd = held();
                 response.destroy();
                 if (
                   response.statusCode === 206 &&

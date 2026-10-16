@@ -4,7 +4,7 @@
  * `preview-headers.test.ts`; here is the wiring — which function answers which response, with the
  * file's own name and the `embedOrigin` registered for the token. Oracles: the spec's literals.
  */
-import { unlinkSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { removeTempDirs } from "./core-db-helpers.js";
@@ -21,10 +21,10 @@ import {
   WORKSPACE_A,
   withPreviewWorld,
 } from "./preview-app-helpers.js";
+import { failFirstReadOf } from "./workspace-file-helpers.js";
 
 const SANDBOXED = "sandbox allow-scripts allow-forms allow-modals";
 const HTML_AS_TEXT = "<!doctype html><script>alert(1)</script>";
-const VANISH_HEADER = "x-test-vanish";
 
 afterEach(removeTempDirs);
 
@@ -163,35 +163,22 @@ describe("preview listener headers: a failure", () => {
     });
   });
 
-  it("answers an empty 500 with the four failure headers when the file is gone by the time it is opened", async () => {
-    await withPreviewWorld(
-      async (world) => {
-        writeFileSync(join(world.root, "gone.html"), HTML_AS_TEXT);
-        const { token } = await world.issueToken(world.zhangsan, WORKSPACE_A);
-        const answer = await rawAnswer(world.origin, `/w/${token}/gone.html`, {
-          headers: { range: "bytes=0-9", [VANISH_HEADER]: "1" },
-        });
+  it("answers an empty 500 with the four failure headers when the first read of the opened file fails", async () => {
+    await withPreviewWorld(async (world) => {
+      writeFileSync(join(world.root, "gone.html"), HTML_AS_TEXT);
+      const { token } = await world.issueToken(world.zhangsan, WORKSPACE_A);
+      const failedReads = failFirstReadOf(join(world.root, "gone.html"));
+      const answer = await rawAnswer(world.origin, `/w/${token}/gone.html`, {
+        headers: { range: "bytes=0-9" },
+      });
 
-        expect(answer.status).toBe(500);
-        expect(answer.body).toBe("");
-        expect(specHeaders(answer)).toEqual({ ...FAILURE_HEADERS, "content-length": "0" });
-        expectNoSuccessHeaders(answer);
-        // The framework's own answer would name the host path of the file it could not open.
-        expect(JSON.stringify(answer)).not.toContain(world.sandboxRoot);
-      },
-      {
-        // After the handler handed its stream over and before the stream opens the file.
-        beforeListen: (preview, root) => {
-          let removed = false;
-          preview.addHook("onSend", (incoming, _reply, _payload, done) => {
-            if (!removed && incoming.headers[VANISH_HEADER] !== undefined) {
-              removed = true;
-              unlinkSync(join(root, "gone.html"));
-            }
-            done();
-          });
-        },
-      },
-    );
+      expect(failedReads()).toBe(1);
+      expect(answer.status).toBe(500);
+      expect(answer.body).toBe("");
+      expect(specHeaders(answer)).toEqual({ ...FAILURE_HEADERS, "content-length": "0" });
+      expectNoSuccessHeaders(answer);
+      // The framework's own answer would carry the error it got.
+      expect(JSON.stringify(answer)).not.toContain(world.sandboxRoot);
+    });
   });
 });

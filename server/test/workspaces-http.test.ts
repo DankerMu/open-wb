@@ -8,7 +8,6 @@ import {
   readFileSync,
   symlinkSync,
   truncateSync,
-  unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -23,6 +22,7 @@ import {
   UNAUTHORIZED_ENVELOPE,
 } from "./auth-lifecycle-helpers.js";
 import { removeTempDirs } from "./core-db-helpers.js";
+import { failFirstReadOf } from "./workspace-file-helpers.js";
 import {
   expectEmptyWorkspaceAuditAndOwnerRoot,
   expectWorkspaceResponse,
@@ -688,49 +688,38 @@ describe("workspace REST", () => {
       expect(db.prepare("SELECT count(*) AS count FROM audit_events").get()).toEqual(beforeAudits);
     });
   });
-  it("maps a real native preview-open failure before headers to the canonical sanitized error", async () => {
-    await withWorkspacesApp(
-      async ({ app, db, sandboxRoot }) => {
-        const root = join(sandboxRoot, "u1", "preview-open-failure");
-        const target = join(root, "denied.txt");
-        mkdirSync(root, { recursive: true });
-        writeFileSync(target, "must-not-stream");
-        insertWorkspace(
-          db,
-          U1_STREAM_FAILURE,
-          "u1",
-          "preview-open-failure",
-          "preview-open-failure",
-          1,
-        );
+  it("maps a real native preview-read failure before headers to the canonical sanitized error", async () => {
+    await withWorkspacesApp(async ({ app, db, sandboxRoot }) => {
+      const root = join(sandboxRoot, "u1", "preview-open-failure");
+      const target = join(root, "denied.txt");
+      mkdirSync(root, { recursive: true });
+      writeFileSync(target, "must-not-stream");
+      insertWorkspace(
+        db,
+        U1_STREAM_FAILURE,
+        "u1",
+        "preview-open-failure",
+        "preview-open-failure",
+        1,
+      );
+      const failedReads = failFirstReadOf(target);
 
-        const response = await requestWorkspaceFile(
-          app,
-          U1_STREAM_FAILURE,
-          bearerCookie(await loginSessionId(app, "zhangsan")),
-          "denied.txt",
-        );
+      const response = await requestWorkspaceFile(
+        app,
+        U1_STREAM_FAILURE,
+        bearerCookie(await loginSessionId(app, "zhangsan")),
+        "denied.txt",
+      );
 
-        expectWorkspaceResponse(response, 500, INTERNAL_ERROR_ENVELOPE);
-        expect(response.headers["content-type"]).toContain("application/json");
-        expect(response.headers["x-content-type-options"]).toBe("nosniff");
-        expect(response.headers["x-workbuddy-size"]).toBeUndefined();
-        expect(response.headers["x-workbuddy-truncated"]).toBeUndefined();
-        expect(response.payload).not.toContain(target);
-        expect(response.payload).not.toContain("FST_ERR_REP_INVALID_PAYLOAD_TYPE");
-        expect(existsSync(target)).toBe(false);
-      },
-      ({ app, sandboxRoot }) => {
-        const target = join(sandboxRoot, "u1", "preview-open-failure", "denied.txt");
-        let removed = false;
-        app.addHook("onSend", (request, _reply, _payload, done) => {
-          if (!removed && request.routeOptions.url === "/api/workspaces/:id/file") {
-            removed = true;
-            unlinkSync(target);
-          }
-          done();
-        });
-      },
-    );
+      expectWorkspaceResponse(response, 500, INTERNAL_ERROR_ENVELOPE);
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(response.headers["x-content-type-options"]).toBe("nosniff");
+      expect(response.headers["x-workbuddy-size"]).toBeUndefined();
+      expect(response.headers["x-workbuddy-truncated"]).toBeUndefined();
+      expect(response.payload).not.toContain(target);
+      expect(response.payload).not.toContain("FST_ERR_REP_INVALID_PAYLOAD_TYPE");
+      expect(failedReads()).toBe(1);
+      expect(readFileSync(target, "utf8")).toBe("must-not-stream");
+    });
   });
 });

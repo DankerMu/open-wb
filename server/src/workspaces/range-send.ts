@@ -2,9 +2,12 @@
  * workspaces/range-send — answers one request for a file whose body may be asked for in a single
  * byte range: 200 with the whole file, 206 with one interval, or 416.
  *
- * The caller has resolved `absPath` through the sandbox, found a regular file there and read its
- * `size`; nothing here checks either again, and the only header of the request it reads is `Range`.
+ * The caller has resolved `absPath` through the sandbox, opened it with `openRegularFile` and
+ * fstat-ed it: `fd` is a regular file and `size` is that fstat's, so nothing here checks either
+ * again, and the only header of the request it reads is `Range`. The descriptor is the caller's
+ * no more: it goes to the stream, or is closed here for a 416 and for a HEAD.
  */
+import { closeSync } from "node:fs";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { openPreviewStream, openRangeStream, parseRange } from "./preview.js";
 
@@ -12,7 +15,7 @@ export function sendFileRange(
   request: Pick<FastifyRequest, "method" | "headers">,
   reply: FastifyReply,
   file: {
-    absPath: string;
+    fd: number;
     size: number;
     /** Written on 200 and 206. */
     headers: Readonly<Record<string, string>>;
@@ -20,10 +23,11 @@ export function sendFileRange(
     unsatisfiableHeaders: Readonly<Record<string, string>>;
   },
 ): FastifyReply {
-  const { absPath, size } = file;
+  const { fd, size } = file;
   const range = parseRange(request.headers.range, size);
   if (range === "unsatisfiable") {
-    // Not an error envelope (416 is in no definition map) and no file is opened: an empty body.
+    // Not an error envelope (416 is in no definition map); opened for its size, nothing read.
+    closeSync(fd);
     return reply
       .code(416)
       .headers(file.unsatisfiableHeaders)
@@ -41,10 +45,10 @@ export function sendFileRange(
   }
   if (request.method === "HEAD") {
     // The framework's HEAD twin drains whatever stream it is given, so it gets an empty one that
-    // opens nothing; sending no payload at all would rewrite Content-Length to 0.
-    return reply.send(openPreviewStream(absPath, 0));
+    // closes the descriptor unread; sending no payload at all would rewrite Content-Length to 0.
+    return reply.send(openPreviewStream({ fd }, 0));
   }
   return reply.send(
-    partial ? openRangeStream(absPath, range.start, range.end) : openPreviewStream(absPath, size),
+    partial ? openRangeStream({ fd }, range.start, range.end) : openPreviewStream({ fd }, size),
   );
 }

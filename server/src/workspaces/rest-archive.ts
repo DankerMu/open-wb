@@ -34,18 +34,18 @@
  * - After the open everything goes through the descriptor: a file cut short meanwhile reads
  *   short, which the listing treats as damage (derived from the code, not tested).
  */
-import { closeSync, fstatSync, read } from "node:fs";
+import { closeSync, read } from "node:fs";
 import { basename } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import { archiveFormat, listArchive } from "./archive.js";
 import { DEFAULT_PREVIEW_LIMITS } from "./preview.js";
+import { openRegularFile } from "./regular-file.js";
 import {
   currentPrincipal,
   ensureOwnedRoot,
   lstatExisting,
   noStoreWorkspaceResponse,
-  openRegularFile,
   parsePathQuery,
   type WorkspaceRestDependencies,
 } from "./rest.js";
@@ -110,13 +110,13 @@ export function registerWorkspaceArchive(
       if (format === null) {
         throw new HttpError("preview_unsupported");
       }
-      const fd = openRegularFile(absPath);
+      const { fd, size } = openRegularFile(absPath);
       try {
         // The size of what was opened, not of what the lstat saw; a bare gz reads nothing.
         return await listArchive(format, name, (position, length) => readAt(fd, position, length), {
           maxEntries,
           now: () => performance.now(),
-          size: fstatSync(fd).size,
+          size,
         });
       } finally {
         closeSync(fd);

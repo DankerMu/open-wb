@@ -8,8 +8,10 @@
  * streams native bytes up to a nonnegative caller-supplied limit; HTTP status
  * mapping and sandbox resolve remain outside this module. Range parsing
  * (parseRange) and the closed-interval stream (openRangeStream) live here too.
+ * Both streams read a descriptor the caller opened (`openRegularFile`) and close it
+ * when they end, fail or are destroyed; neither opens anything by path.
  */
-import { createReadStream } from "node:fs";
+import { closeSync, createReadStream, type PathLike } from "node:fs";
 import { Readable } from "node:stream";
 import { HttpError } from "../core/errors/index.js";
 
@@ -163,11 +165,20 @@ export function sniffText(bytes: Uint8Array): boolean {
   }
 }
 
-export function openPreviewStream(absPath: string, limit: number): Readable {
+/** Bytes start through end of the descriptor, both included; the stream closes it. */
+function streamOf(fd: number, start: number, end: number): Readable {
+  // With `fd` the path argument is ignored (Node docs); `null` says there is none, which the
+  // typings do not admit.
+  return createReadStream(null as unknown as PathLike, { fd, start, end, autoClose: true });
+}
+
+/** The first `limit` bytes; with none to send, the descriptor is closed here and no stream opened. */
+export function openPreviewStream(file: { fd: number }, limit: number): Readable {
   if (limit === 0) {
+    closeSync(file.fd);
     return Readable.from([], { objectMode: false });
   }
-  return createReadStream(absPath, { start: 0, end: limit - 1 });
+  return streamOf(file.fd, 0, limit - 1);
 }
 
 /** A single satisfiable byte interval (both ends included), a 416, or a header to disregard. */
@@ -206,8 +217,8 @@ export function parseRange(header: string | undefined, size: number): RangeResul
 }
 
 /** Bytes start through end, both included. Callers pass a parseRange interval; nothing is validated here. */
-export function openRangeStream(absPath: string, start: number, end: number): Readable {
-  return createReadStream(absPath, { start, end });
+export function openRangeStream(file: { fd: number }, start: number, end: number): Readable {
+  return streamOf(file.fd, start, end);
 }
 
 function text(size: number, textLimit: number): PreviewClassification {

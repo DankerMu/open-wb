@@ -1,5 +1,15 @@
 import { execFileSync } from "node:child_process";
-import fs, { appendFileSync, mkdirSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import fs, {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  ftruncateSync,
+  mkdirSync,
+  openSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { constants, type DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
@@ -14,7 +24,15 @@ import {
   UNAUTHORIZED_ENVELOPE,
 } from "./auth-lifecycle-helpers.js";
 // Its `afterEach` restores the spies and removes the temporary directories of this file too.
-import { spyBodyIo } from "./workspace-file-helpers.js";
+import {
+  descriptorsOf,
+  expectSwappedUnread,
+  failFirstReadOf,
+  type SwapKind,
+  spyBodyIo,
+  swapIn,
+  swapOnFirstOpen,
+} from "./workspace-file-helpers.js";
 import {
   auditRows,
   expectWorkspaceResponse,
@@ -65,8 +83,8 @@ function patternedBytes(size: number): Buffer {
 }
 
 /**
- * For `withWorkspacesApp`: runs `action` once, on the first download, after the handler handed
- * its stream over and before the stream opens the file.
+ * For `withWorkspacesApp`: runs `action` once, on the first download, after the handler opened
+ * the file and handed its descriptor over to the response stream.
  */
 function onceBeforeDownloadSend(action: (root: string) => void) {
   return ({ app, sandboxRoot }: Fixture): void => {
@@ -81,9 +99,9 @@ function onceBeforeDownloadSend(action: (root: string) => void) {
   };
 }
 
-/** How often the file was opened for streaming, after `spyBodyIo()`. */
+/** How often the file was opened (the one open a download makes), after `spyBodyIo()`. */
 function readStreamOpens(target: string): number {
-  return vi.mocked(fs.createReadStream).mock.calls.filter(([path]) => path === target).length;
+  return vi.mocked(fs.openSync).mock.calls.filter(([path]) => path === target).length;
 }
 
 describe("workspace download: any file as an attachment", () => {
@@ -368,7 +386,7 @@ describe("workspace download: refusals", () => {
 });
 
 describe("workspace download: failures around the audit", () => {
-  it("sends no file byte and opens nothing when the audit cannot be written", async () => {
+  it("sends no file byte, and closes the one descriptor it opened unread, when the audit cannot be written", async () => {
     await withWorkspacesApp(async (fixture) => {
       const { app, db } = fixture;
       const target = join(seedWorkspace(fixture), "readme.md");
@@ -388,7 +406,13 @@ describe("workspace download: failures around the audit", () => {
         expect(response.headers["content-disposition"]).toBeUndefined();
         expect(response.payload).not.toContain("must-not-leave-unaudited");
         expect(response.payload).not.toContain("audit_events");
-        expect(readStreamOpens(target)).toBe(0);
+        // Opened (and fstat-ed) before the audit, so once; closed again without a read.
+        const [descriptor] = descriptorsOf(target);
+        expect(descriptorsOf(target)).toHaveLength(1);
+        expect(() => fstatSync(descriptor as number)).toThrow(/EBADF/);
+        expect(vi.mocked(fs.read).mock.calls.filter(([fd]) => fd === descriptor)).toEqual([]);
+        expect(vi.mocked(fs.readSync).mock.calls.filter(([fd]) => fd === descriptor)).toEqual([]);
+        expect(vi.mocked(fs.createReadStream)).not.toHaveBeenCalled();
       } finally {
         db.setAuthorizer(null);
       }
@@ -414,27 +438,116 @@ describe("workspace download: failures around the audit", () => {
     );
   });
 
-  it("answers a clean 500 and keeps the audit row when the file vanishes after the audit", async () => {
+  it("answers a clean 500 and keeps the audit row when the first read of the opened file fails after the audit", async () => {
+    await withWorkspacesApp(async (fixture) => {
+      const { app, db } = fixture;
+      const target = join(seedWorkspace(fixture), "gone.txt");
+      writeFileSync(target, "must-not-stream");
+      const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+      const failedReads = failFirstReadOf(target);
+
+      const response = await download(app, cookie, "gone.txt");
+
+      expect(failedReads()).toBe(1);
+      expectWorkspaceResponse(response, 500, INTERNAL_ERROR_ENVELOPE);
+      expect(response.headers["content-type"]).toContain("application/json");
+      expect(response.headers["content-disposition"]).toBeUndefined();
+      expect(response.headers["content-length"]).toBe(
+        String(Buffer.byteLength(JSON.stringify(INTERNAL_ERROR_ENVELOPE))),
+      );
+      expect(response.payload).not.toContain("gone.txt");
+      expect(auditRows(db, "file.download")).toEqual([downloadAudit("gone.txt", 15)]);
+    });
+  });
+
+  it("downloads the whole file from the opened inode when the path is unlinked after the audit", async () => {
     await withWorkspacesApp(
       async (fixture) => {
         const { app, db } = fixture;
-        writeFileSync(join(seedWorkspace(fixture), "gone.txt"), "must-not-stream");
+        const target = join(seedWorkspace(fixture), "gone.txt");
+        writeFileSync(target, "still-streams");
         const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
 
         const response = await download(app, cookie, "gone.txt");
 
-        expectWorkspaceResponse(response, 500, INTERNAL_ERROR_ENVELOPE);
-        expect(response.headers["content-type"]).toContain("application/json");
-        expect(response.headers["content-disposition"]).toBeUndefined();
-        expect(response.headers["content-length"]).toBe(
-          String(Buffer.byteLength(JSON.stringify(INTERNAL_ERROR_ENVELOPE))),
-        );
-        expect(response.payload).not.toContain("gone.txt");
-        expect(auditRows(db, "file.download")).toEqual([downloadAudit("gone.txt", 15)]);
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["content-length"]).toBe("13");
+        expect(response.payload).toBe("still-streams");
+        expect(auditRows(db, "file.download")).toEqual([downloadAudit("gone.txt", 13)]);
+        expect(fs.existsSync(target)).toBe(false);
       },
       onceBeforeDownloadSend((root) => unlinkSync(join(root, "gone.txt"))),
     );
   });
+});
+
+describe("workspace download: what was opened is what is sent and audited", () => {
+  it.each<SwapKind>(["pipe", "symlink", "directory"])(
+    "answers 404 without a download audit or a byte when readme.md is swapped for a %s after the lstat",
+    async (kind) => {
+      await withWorkspacesApp(async (fixture) => {
+        const { app, db, sandboxRoot } = fixture;
+        const root = seedWorkspace(fixture);
+        writeFileSync(join(root, "readme.md"), "owner-only");
+        mkdirSync(join(sandboxRoot, "u2"));
+        writeFileSync(join(sandboxRoot, "u2", "secret.txt"), "another-owner-secret");
+        const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+        const swapped = swapOnFirstOpen(join(root, "readme.md"), (target) =>
+          swapIn(kind, target, join(sandboxRoot, "u2", "secret.txt")),
+        );
+        const started = performance.now();
+        try {
+          const response = await download(app, cookie, "readme.md");
+          const elapsedMs = performance.now() - started;
+
+          expectWorkspaceResponse(response, 404, NOT_FOUND_ENVELOPE);
+          expect(response.headers["content-disposition"]).toBeUndefined();
+          expect(response.payload).not.toContain("secret");
+          expectSwappedUnread(swapped.record(), kind, elapsedMs);
+          expect(auditRows(db, "file.download")).toEqual([]);
+          expect(auditCount(db)).toEqual({ count: 0 });
+        } finally {
+          swapped.cleanup();
+        }
+      });
+    },
+    15_000,
+  );
+
+  it.each([
+    ["cut short", 600],
+    ["grown to 1400 bytes", 1400],
+  ] as const)(
+    "sends and audits the size of the opened inode when the file is %s after the lstat",
+    async (_label, size) => {
+      await withWorkspacesApp(async (fixture) => {
+        const { app, db } = fixture;
+        const target = join(seedWorkspace(fixture), "big.bin");
+        const bytes = patternedBytes(1000);
+        writeFileSync(target, bytes);
+        const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+        // Through a descriptor opened beforehand: the change adds no open of the target of its own.
+        const writer = openSync(target, "r+");
+        const swapped = swapOnFirstOpen(target, () => {
+          ftruncateSync(writer, size);
+          return () => closeSync(writer);
+        });
+        try {
+          const response = await download(app, cookie, "big.bin");
+
+          expect(swapped.record().swaps).toBe(1);
+          expect(response.statusCode).toBe(200);
+          expect(response.headers["content-length"]).toBe(String(size));
+          expect(response.rawPayload.length).toBe(size);
+          const expected = Buffer.concat([bytes, Buffer.alloc(400)]).subarray(0, size);
+          expect(response.rawPayload.equals(expected)).toBe(true);
+          expect(auditRows(db, "file.download")).toEqual([downloadAudit("big.bin", size)]);
+        } finally {
+          swapped.cleanup();
+        }
+      });
+    },
+  );
 });
 
 describe("attachmentDisposition", () => {

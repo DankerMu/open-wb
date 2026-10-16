@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -392,7 +392,7 @@ describe("classifyPreview never returns a document type", () => {
       expect(plan.headers["Content-Type"], name).not.toContain("html");
       expect(plan.headers["Content-Type"], name).not.toContain("svg");
 
-      const actual = await collectBytes(openPreviewStream(path, plan.limit));
+      const actual = await collectBytes(openPreviewStream({ fd: openSync(path, "r") }, plan.limit));
       expect(actual.equals(body.subarray(0, 1_048_576)), name).toBe(true);
       expect(actual.subarray(1_048_575), name).toEqual(Buffer.from([0xe4]));
     }
