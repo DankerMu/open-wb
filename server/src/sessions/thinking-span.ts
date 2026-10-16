@@ -11,7 +11,8 @@
  * reconciliation does not touch the column. Issue 1472 (design D3/D4): each span is one
  * `chat_thinking_segments` row, inserted by the opening's transaction (after the coalescer flushed
  * held text, so its body offset counts it) and given its length and own milliseconds by the
- * closing's; two spans are two rows even with nothing between them. `thinking.end` is unchanged.
+ * closing's; two spans are two rows even with nothing between them. Issue 1474 (design D8):
+ * `thinking.end` carries that closed row as its `segment`, as the closing's UPDATE returned it.
  */
 import type { ChatEvent } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
@@ -102,11 +103,12 @@ export class ThinkingSpans {
     const { messageId, segment } = span;
     const close = () =>
       this.#ports.store.closeThinkingSegment(messageId, segment, thinkingMs, Math.round(ms));
-    if (this.#write(slot, close) === false) {
+    const row = this.#write(slot, close);
+    if (row === false) {
       return false;
     }
-    const event: ChatEvent<number> = { type: "thinking.end", data: { messageId, thinkingMs } };
-    return this.#ports.publish(slot, event, span.generation);
+    const data = { messageId, thinkingMs, segment: row };
+    return this.#ports.publish(slot, { type: "thinking.end", data }, span.generation);
   }
 
   /** The write's result; false when it threw (the fault is reported). */

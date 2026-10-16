@@ -23,6 +23,20 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** chat-web scenario literal: the segment a `thinking.end` of 1200 ms carries (issue 1474). */
+const SEGMENT = {
+  bodyOffset: 5,
+  thinkingOffset: 0,
+  thinkingLength: 8,
+  stepsBefore: 0,
+  thinkingMs: 1200,
+};
+
+/** A closed segment of `ms` with no thinking text before it, at body offset `body`. */
+function segmentOf(ms: number, body = 0) {
+  return { bodyOffset: body, thinkingOffset: 0, thinkingLength: 0, stepsBefore: 0, thinkingMs: ms };
+}
+
 /** Connector with the `1:3` snapshot installed: one load, no events. */
 async function installed() {
   const snapshot = chatSnapshot({ cursor: { epoch: 1, seq: 3 } });
@@ -37,10 +51,18 @@ async function installed() {
 describe("chat-web「思考结束事件经同一游标过滤并严格解码」", () => {
   it("drops thinking.end 1:3 at the 1:3 snapshot cursor and delivers 1:4 with its payload", async () => {
     const connector = await installed();
-    connector.source.emitData("thinking.end", "1:3", { messageId: 7, thinkingMs: 900 });
-    connector.source.emitData("thinking.end", "1:4", { messageId: 7, thinkingMs: 1200 });
+    connector.source.emitData("thinking.end", "1:3", {
+      messageId: 7,
+      thinkingMs: 900,
+      segment: { ...SEGMENT, thinkingMs: 900 },
+    });
+    connector.source.emitData("thinking.end", "1:4", {
+      messageId: 7,
+      thinkingMs: 1200,
+      segment: SEGMENT,
+    });
     expect(connector.events).toStrictEqual([
-      { type: "thinking.end", data: { messageId: 7, thinkingMs: 1200 } },
+      { type: "thinking.end", data: { messageId: 7, thinkingMs: 1200, segment: SEGMENT } },
     ]);
     expect(connector.loads).toHaveLength(1);
     expect(connector.errors).toEqual([]);
@@ -48,22 +70,27 @@ describe("chat-web「思考结束事件经同一游标过滤并严格解码」",
 
   it("delivers thinking.end with thinkingMs 0 verbatim and starts no resync (0 is in range)", async () => {
     const connector = await installed();
-    connector.source.emitData("thinking.end", "1:4", { messageId: 7, thinkingMs: 0 });
+    const zero = { ...SEGMENT, thinkingMs: 0 };
+    connector.source.emitData("thinking.end", "1:4", {
+      messageId: 7,
+      thinkingMs: 0,
+      segment: zero,
+    });
     expect(connector.events).toStrictEqual([
-      { type: "thinking.end", data: { messageId: 7, thinkingMs: 0 } },
+      { type: "thinking.end", data: { messageId: 7, thinkingMs: 0, segment: zero } },
     ]);
     expect(connector.loads).toHaveLength(1);
     expect(connector.errors).toEqual([]);
   });
 
   const invalid: Array<[string, unknown]> = [
-    ["thinkingMs -1", { messageId: 7, thinkingMs: -1 }],
-    ["thinkingMs 1.5", { messageId: 7, thinkingMs: 1.5 }],
-    ['thinkingMs "1200"', { messageId: 7, thinkingMs: "1200" }],
-    ["a missing thinkingMs", { messageId: 7 }],
-    ["one more key", { messageId: 7, thinkingMs: 1200, total: 1200 }],
-    ["messageId 7.5", { messageId: 7.5, thinkingMs: 1200 }],
-    ["messageId 2**53", { messageId: 2 ** 53, thinkingMs: 1200 }],
+    ["thinkingMs -1", { messageId: 7, thinkingMs: -1, segment: SEGMENT }],
+    ["thinkingMs 1.5", { messageId: 7, thinkingMs: 1.5, segment: SEGMENT }],
+    ['thinkingMs "1200"', { messageId: 7, thinkingMs: "1200", segment: SEGMENT }],
+    ["a missing thinkingMs", { messageId: 7, segment: SEGMENT }],
+    ["one more key", { messageId: 7, thinkingMs: 1200, segment: SEGMENT, total: 1200 }],
+    ["messageId 7.5", { messageId: 7.5, thinkingMs: 1200, segment: SEGMENT }],
+    ["messageId 2**53", { messageId: 2 ** 53, thinkingMs: 1200, segment: SEGMENT }],
   ];
 
   it.each(invalid)("%s starts a full-snapshot resync and is not delivered", async (_l, data) => {
@@ -85,17 +112,37 @@ function runningState(): ChatState {
 
 const STEP: ChatEvent = {
   type: "step.start",
-  data: { messageId: 0, stepId: 1, name: "bash", detail: "" },
+  data: { messageId: 0, stepId: 1, name: "bash", detail: "", bodyOffset: 2, approvalId: null },
 };
 
 describe("chat-web「思考时长与进行中标记归约」", () => {
   it("delta, end 400, step, delta, end 1200, turn.end: active and duration after each event", () => {
     const sequence: ChatEvent[] = [
       { type: "thinking.delta", data: { messageId: 0, delta: "先" } },
-      { type: "thinking.end", data: { messageId: 0, thinkingMs: 400 } },
+      {
+        type: "thinking.end",
+        data: {
+          messageId: 0,
+          thinkingMs: 400,
+          segment: { ...segmentOf(400, 2), thinkingLength: 1 },
+        },
+      },
       STEP,
       { type: "thinking.delta", data: { messageId: 0, delta: "想" } },
-      { type: "thinking.end", data: { messageId: 0, thinkingMs: 1200 } },
+      {
+        type: "thinking.end",
+        data: {
+          messageId: 0,
+          thinkingMs: 1200,
+          segment: {
+            bodyOffset: 2,
+            thinkingOffset: 1,
+            thinkingLength: 1,
+            stepsBefore: 1,
+            thinkingMs: 800,
+          },
+        },
+      },
       { type: "turn.end", data: { messageId: 0, status: "done" } },
     ];
     let state = runningState();
@@ -149,7 +196,7 @@ describe("chat-web「思考时长与进行中标记归约」", () => {
     const before = runningState();
     const appended = applyChatEvent(before, {
       type: "thinking.end",
-      data: { messageId: 9, thinkingMs: 900 },
+      data: { messageId: 9, thinkingMs: 900, segment: segmentOf(900) },
     });
     expect(appended.messages.at(-1)).toMatchObject({
       id: 9,
@@ -162,14 +209,17 @@ describe("chat-web「思考时长与进行中标记归约」", () => {
     });
     expect(appended.messages.slice(0, -1)).toEqual(before.messages);
     expect(
-      applyChatEvent(before, { type: "thinking.end", data: { messageId: -3, thinkingMs: 900 } }),
+      applyChatEvent(before, {
+        type: "thinking.end",
+        data: { messageId: -3, thinkingMs: 900, segment: segmentOf(900) },
+      }),
     ).toBe(before);
   });
 
   it("turn.start resets thinkingMs to null and thinkingActive to false", () => {
     let state = runningState();
     for (const event of [
-      { type: "thinking.end", data: { messageId: 0, thinkingMs: 400 } },
+      { type: "thinking.end", data: { messageId: 0, thinkingMs: 400, segment: segmentOf(400, 2) } },
       { type: "thinking.delta", data: { messageId: 0, delta: "想" } },
     ] satisfies ChatEvent[]) {
       state = deepFreeze(applyChatEvent(state, event));
@@ -204,7 +254,7 @@ describe("chat-web「思考时长与进行中标记归约」", () => {
     );
     const ended = applyChatEvent(retried, {
       type: "thinking.end",
-      data: { messageId: 0, thinkingMs: 400 },
+      data: { messageId: 0, thinkingMs: 400, segment: segmentOf(400, 2) },
     });
     expect(assistant(ended)).toMatchObject({ retrying: true, thinkingMs: 400 });
   });
@@ -217,7 +267,7 @@ describe("chat-web「思考时长与进行中标记归约」", () => {
       );
       const ended = applyChatEvent(settled, {
         type: "thinking.end",
-        data: { messageId: 0, thinkingMs: 400 },
+        data: { messageId: 0, thinkingMs: 400, segment: segmentOf(400, 1) },
       });
       expect(ended.status).toBe(status);
       expect(assistant(ended)).toMatchObject({ status: "done", thinkingMs: 400 });

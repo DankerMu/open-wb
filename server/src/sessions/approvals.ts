@@ -31,7 +31,8 @@ interface Registration {
   requestId: string;
   expiresAt: number;
   timer: unknown;
-  request: RequestEvent;
+  /** The request without `stepId`, which only its publication adds (issue 1474). */
+  request: { type: "approval.request"; data: Omit<RequestEvent["data"], "stepId"> };
   requestPublished: boolean;
 }
 
@@ -90,9 +91,9 @@ export class ApprovalRegistry {
   }
 
   /** Pump hook after each frame's own events: publishes a select's staged request once. */
-  publishRequest(slot: Slot, frame: OmpFrame): Promise<boolean> {
+  publishRequest(slot: Slot, frame: OmpFrame, stepId: number | null): Promise<boolean> {
     const registration = this.#staged(slot, frame);
-    return registration ? this.#publishRequestOnce(registration) : Promise.resolve(true);
+    return registration ? this.#publishRequestOnce(registration, stepId) : Promise.resolve(true);
   }
 
   /** Read-only (issue 1473, design D6): whether `publishRequest` would publish for `frame` now. */
@@ -254,10 +255,14 @@ export class ApprovalRegistry {
     }
   }
 
-  /** The flag is set before publishing, so the pump and a settlement never both publish. */
-  #publishRequestOnce(registration: Registration): Promise<boolean> {
+  /**
+   * The flag is set before publishing, so the pump and a settlement never both publish. `stepId` is
+   * the step the pump's select paired; a settlement publishing first passes none (null).
+   */
+  #publishRequestOnce(registration: Registration, stepId: number | null = null): Promise<boolean> {
     registration.requestPublished = true;
-    return this.#emit(registration, registration.request);
+    const data = { ...registration.request.data, stepId };
+    return this.#emit(registration, { type: "approval.request", data });
   }
 
   /** Only to the generation captured at registration, and only while it is unsealed. */

@@ -135,6 +135,8 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             output: TOOL_OUTPUT,
             status: "done",
             changes: null,
+            // Issue 1474: the step starts after the fake's text "Hello from fake-omp".
+            bodyOffset: "Hello from fake-omp".length,
           },
         ]);
         expect(typeof firstAssistant.steps[0]?.id).toBe("number");
@@ -447,6 +449,8 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             stepId: firstDbSteps[0]?.id,
             name: "bash",
             detail: '{"command":"first-a"}',
+            bodyOffset: 0,
+            approvalId: null,
           },
         },
         {
@@ -456,6 +460,8 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             stepId: firstDbSteps[1]?.id,
             name: "read",
             detail: '{"path":"notes.md"}',
+            bodyOffset: 0,
+            approvalId: null,
           },
         },
         {
@@ -512,6 +518,8 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
             stepId: secondDbSteps[0]?.id,
             name: "bash",
             detail: '{"command":"second"}',
+            bodyOffset: 0,
+            approvalId: null,
           },
         },
         {

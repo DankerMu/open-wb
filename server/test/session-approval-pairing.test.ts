@@ -11,15 +11,13 @@
  * before its select (design Context「审批行早于 pump 插入」).
  *
  * Oracles are SQLite rows read with the test's own SQL, the stdin frames the child received, the
- * audit rows and the recorded onEvent stream. The decision, `decided_at`, audit, frame and
+ * audit rows and the recorded onEvent stream (the scripted children live in session-approval-script.ts). The decision, `decided_at`, audit, frame and
  * `approval.resolved` values are literals from tool-approval「审批作答 REST」「审批事件」and the
  * injected clock, the same values the existing R11 (`session-approvals-parallel.test.ts`) pins:
  * pairing writes only `step_id` (design D6「不碰作答路径」).
  */
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import type { ChatEvent } from "../src/sessions/events.js";
-import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import {
   type ApprovalWorld,
   ofType,
@@ -37,149 +35,38 @@ import {
   waitForEvent,
   waitForRows,
 } from "./session-approval-helpers.js";
+import {
+  AGENT_END,
+  chunk,
+  closeScripted,
+  decide,
+  end,
+  finishing,
+  openScripted,
+  pairingRows,
+  select,
+  start,
+  stepIds,
+  stepRows,
+  TEXT,
+} from "./session-approval-script.js";
 import { FIXED_NOW, withFakeClock, withSessionStore } from "./session-store-helpers.js";
 import {
   assistantIdFor,
-  closeAfterRetainedFault,
-  closeOnEof,
   containsMessage,
-  createControlledRuntime,
   OWNER_ID,
-  openRecordingSession,
   type RecordingWorld,
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
-import type { FakeChild } from "./support/omp-rpc.js";
+
+afterEach(closeScripted);
 
 const AUDIT_TITLE = "工具执行审批";
 const SENTINEL = "pairing write sentinel";
 /** Every write of `step_id` fails: the step insert's transaction and the select-time update. */
 const REJECT_PAIRING = `CREATE TEMP TRIGGER reject_pairing BEFORE UPDATE OF step_id ON chat_approvals
   BEGIN SELECT RAISE(ABORT, '${SENTINEL}'); END`;
-
-const AGENT_END: OmpFrame = { type: "agent_end", messages: [], isTerminal: true };
-const ABORTED_END: OmpFrame = {
-  type: "message_end",
-  message: { role: "assistant", content: [], stopReason: "aborted" },
-};
-
-function start(call: string, tool = "bash"): OmpFrame {
-  return {
-    type: "tool_execution_start",
-    toolCallId: call,
-    toolName: tool,
-    args: { command: `echo ${call}` },
-  };
-}
-
-function end(call: string, tool = "bash"): OmpFrame {
-  return {
-    type: "tool_execution_end",
-    toolCallId: call,
-    toolName: tool,
-    result: { content: [{ type: "text", text: `${call} ok` }], details: {} },
-  };
-}
-
-function select(id: string, tool = "bash"): OmpFrame {
-  return {
-    type: "extension_ui_request",
-    id,
-    method: "select",
-    title: `Allow tool: ${tool}\nCommand: echo ${id}`,
-    options: ["Approve", "Deny"],
-  };
-}
-
-const TEXT: OmpFrame = {
-  type: "message_update",
-  assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "x" },
-  message: { role: "assistant", content: [] },
-};
-
-function chunk(...frames: OmpFrame[]): string {
-  return frames.map((frame) => `${JSON.stringify(frame)}\n`).join("");
-}
-
-interface Scripted {
-  world: RecordingWorld;
-  /** The extension_ui_response frames the child received, in order. */
-  answers: OmpFrame[];
-}
-
-interface Script {
-  /** Written after agent_start on the prompt. */
-  prompt(child: FakeChild): void;
-  /** On each extension_ui_response; nothing by default (the turn then ends by stop or fault). */
-  answer?(child: FakeChild, frame: OmpFrame): void;
-  onEvent?(world: RecordingWorld, event: ChatEvent<number>): void;
-  /** A retained fault is expected: the shutdown report is tolerated. */
-  faulted?: boolean;
-}
-
-const cleanups: Array<() => Promise<void>> = [];
-
-afterEach(async () => {
-  for (const cleanup of cleanups.splice(0).reverse()) {
-    await cleanup();
-  }
-});
-
-async function openScripted(script: Script): Promise<Scripted> {
-  const answers: OmpFrame[] = [];
-  const controlled = createControlledRuntime((child) => {
-    closeOnEof(child);
-    child.onCommand("prompt", () => {
-      child.emitLine({ type: "agent_start" });
-      script.prompt(child);
-    });
-    child.onCommand("extension_ui_response", (frame) => {
-      answers.push(frame);
-      script.answer?.(child, frame);
-    });
-    child.onCommand("abort", (frame) => {
-      child.emitRaw(chunk(ABORTED_END, AGENT_END));
-      child.emitLine({ id: frame.id, type: "response", command: "abort", success: true });
-    });
-  });
-  controlled.clock.nowMs = T;
-  let world: RecordingWorld | undefined;
-  world = await openRecordingSession(controlled.runtime, {
-    onEvent(_session, _epoch, event) {
-      if (world !== undefined) script.onEvent?.(world, event);
-    },
-  });
-  const opened = world;
-  cleanups.push(() => closeAfterRetainedFault(opened.fixture, script.faulted === true));
-  return { world, answers };
-}
-
-interface PairingRow {
-  request_id: string;
-  decision: string | null;
-  decided_at: number | null;
-  step_id: number | null;
-}
-
-function pairingRows(db: DatabaseSync, messageId: number): PairingRow[] {
-  return db
-    .prepare(
-      "SELECT request_id, decision, decided_at, step_id FROM chat_approvals WHERE message_id = ? ORDER BY id",
-    )
-    .all(messageId) as unknown as PairingRow[];
-}
-
-/** The message's steps by ordinal: id, the omp call's name and status. */
-function stepRows(db: DatabaseSync, messageId: number) {
-  return db
-    .prepare("SELECT id, name, status FROM chat_steps WHERE message_id = ? ORDER BY ordinal")
-    .all(messageId) as Array<{ id: number; name: string; status: string }>;
-}
-
-function stepIds(db: DatabaseSync, messageId: number): number[] {
-  return stepRows(db, messageId).map((row) => row.id);
-}
 
 function audits(db: DatabaseSync) {
   return db
@@ -196,14 +83,6 @@ function approvalEvents(world: RecordingWorld) {
     .filter((event) => event.type.startsWith("approval."));
 }
 
-async function decide(world: RecordingWorld, requestId: string, decision: "allow" | "deny") {
-  const messageId = assistantIdFor(world.fixture, world.session);
-  const row = world.fixture.db
-    .prepare("SELECT id FROM chat_approvals WHERE message_id = ? AND request_id = ?")
-    .get(messageId, requestId) as { id: number };
-  return world.fixture.supervisor.decide(world.session, row.id, decision);
-}
-
 async function ownerStop(world: RecordingWorld): Promise<void> {
   const response = await world.fixture.app.inject({
     method: "POST",
@@ -211,13 +90,6 @@ async function ownerStop(world: RecordingWorld): Promise<void> {
     headers: { cookie: world.cookie },
   });
   expect(response.statusCode).toBe(202);
-}
-
-/** Ends the turn after an answer: each call's end, then agent_end. */
-function finishing(...frames: OmpFrame[]): (child: FakeChild) => void {
-  return (child) => {
-    child.emitRaw(chunk(...frames, AGENT_END));
-  };
 }
 
 const worlds: ApprovalWorld[] = [];
@@ -285,7 +157,7 @@ describe("tool-approval「确认与步骤配对」: same name, first in first ou
       ]);
       const request = (approvalId: number | undefined, title: string) => ({
         type: "approval.request",
-        data: { messageId, approvalId, tool: "bash", title, expiresAt: T + TTL_MS },
+        data: { messageId, approvalId, tool: "bash", title, expiresAt: T + TTL_MS, stepId: null },
       });
       const resolved = (approvalId: number | undefined, decision: string) => ({
         type: "approval.resolved",

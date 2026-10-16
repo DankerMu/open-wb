@@ -101,8 +101,14 @@ async function land() {
 }
 
 /** 一个从开始到结束的步骤：`files` 非空时在 `step.end` 之前推 `files.changed`（服务端的次序）。 */
-function endedStep(send: Send, stepId: number, name: string, ...files: ReturnType<typeof write>[]) {
-  send("step.start", { stepId, name, detail: `${name} args` });
+function endedStep(
+  send: Send,
+  stepId: number,
+  name: string,
+  bodyOffset: number,
+  ...files: ReturnType<typeof write>[]
+) {
+  send("step.start", { stepId, name, detail: `${name} args`, bodyOffset, approvalId: null });
   if (files.length > 0) send("files.changed", { stepId, files });
   send("step.end", { stepId, status: "done", output: "ok" });
 }
@@ -140,7 +146,13 @@ describe("随助手改动刷新", () => {
     freezeTimers();
 
     // 步骤还在跑：它的 `changes` 不算，过了一个窗口也没有请求。
-    send("step.start", { stepId: 1, name: "write", detail: "write args" });
+    send("step.start", {
+      stepId: 1,
+      name: "write",
+      detail: "write args",
+      bodyOffset: 0,
+      approvalId: null,
+    });
     send("files.changed", { stepId: 1, files: [write("out/a.md"), write("src/x.ts")] });
     await advance(WINDOW);
     expect(since()).toStrictEqual(NONE);
@@ -149,7 +161,7 @@ describe("随助手改动刷新", () => {
     current.out = [file("a.md"), file("b.md")];
     send("step.end", { stepId: 1, status: "done", output: "ok" });
     await advance(100);
-    endedStep(send, 2, "write", write("out/b.md"));
+    endedStep(send, 2, "write", 0, write("out/b.md"));
     send("text.delta", { delta: "写好了" });
     await advance(199);
     expect(since()).toStrictEqual(NONE);
@@ -189,7 +201,7 @@ describe("随助手改动刷新", () => {
     expect(since()).toStrictEqual(ROUND);
 
     // 后一轮：窗口重新从这一批起算，只带这一批的路径（`out` 与 `out/a.md` 不再请求）。
-    endedStep(send, 3, "write", write("docs/c.md"));
+    endedStep(send, 3, "write", 8, write("docs/c.md"));
     await advance(WINDOW - 1);
     expect(since()).toStrictEqual(ROUND);
 
@@ -213,7 +225,7 @@ describe("随助手改动刷新", () => {
     const since = requestsSince(fetchMock);
     freezeTimers();
 
-    endedStep(send, 1, "write", write("out/b.md"));
+    endedStep(send, 1, "write", 0, write("out/b.md"));
     await advance(WINDOW);
 
     expect(since()).toStrictEqual({ files: [], trees: [ROOT, OUT].sort() });
@@ -233,7 +245,7 @@ describe("随助手改动刷新", () => {
     const since = requestsSince(fetchMock);
     freezeTimers();
 
-    endedStep(send, 2, "edit", write("readme.md"));
+    endedStep(send, 2, "edit", 0, write("readme.md"));
     await advance(WINDOW - 1);
     expect(since()).toStrictEqual(NONE);
 
@@ -255,7 +267,7 @@ describe("随助手改动刷新", () => {
     const since = requestsSince(fetchMock);
 
     current.data = [file("old.csv"), file("raw.csv")];
-    endedStep(send, 1, "bash");
+    endedStep(send, 1, "bash", 0);
     await settled();
     expect(since()).toStrictEqual(NONE);
     expect(within(region).queryByRole("button", { name: "raw.csv" })).toBeNull();
@@ -282,7 +294,7 @@ describe("随助手改动刷新", () => {
     const since = requestsSince(fetchMock);
     freezeTimers();
 
-    endedStep(send, 1, "write", write("out/b.md"));
+    endedStep(send, 1, "write", 0, write("out/b.md"));
     await advance(100);
     expect(since()).toStrictEqual(NONE);
 
@@ -304,7 +316,7 @@ describe("随助手改动刷新", () => {
       const since = requestsSince(fetchMock);
       freezeTimers();
 
-      endedStep(send, 1, "bash");
+      endedStep(send, 1, "bash", 0);
       await advance(WINDOW);
       expect(since()).toStrictEqual(NONE);
 
@@ -329,9 +341,9 @@ describe("随助手改动刷新", () => {
     const closed = requestsSince(fetchMock);
     freezeTimers();
 
-    endedStep(send, 1, "write", write("readme.md"));
-    endedStep(send, 2, "write", write("out/b.md"));
-    endedStep(send, 3, "edit", write("src/app.ts"));
+    endedStep(send, 1, "write", 0, write("readme.md"));
+    endedStep(send, 2, "write", 0, write("out/b.md"));
+    endedStep(send, 3, "edit", 0, write("src/app.ts"));
     await advance(WINDOW);
     expect(closed()).toStrictEqual(NONE);
 
@@ -362,7 +374,7 @@ describe("随助手改动刷新", () => {
     const since = requestsSince(fetchMock);
     freezeTimers();
 
-    endedStep(send, 1, "write", write("readme.md"));
+    endedStep(send, 1, "write", 0, write("readme.md"));
     await advance(100);
     fireEvent.click(button(region, CLOSE));
     expect(sidebarRegion()).toBeNull();
@@ -425,7 +437,7 @@ describe("随助手改动刷新", () => {
     const since = requestsSince(fetchMock);
 
     current.root = () => envelope(500, "internal", FAILED);
-    endedStep(send, 1, "write", write("new.md"));
+    endedStep(send, 1, "write", 0, write("new.md"));
 
     expect((await within(tree).findByRole("alert")).textContent).toBe(FAILED);
     expect(rowNames(region)).toStrictEqual(BEFORE);

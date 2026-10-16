@@ -25,6 +25,7 @@ function mountRunningSteps() {
       {
         id: 11,
         ordinal: 0,
+        bodyOffset: null,
         name: "bash",
         detail: BASH_START,
         output: "",
@@ -34,6 +35,7 @@ function mountRunningSteps() {
       {
         id: 12,
         ordinal: 1,
+        bodyOffset: null,
         name: "read",
         detail: READ_START,
         output: "",
@@ -157,6 +159,7 @@ describe("step cards split args and output under 原始输出 (#367)", () => {
         {
           id: 31,
           ordinal: 0,
+          bodyOffset: null,
           name: "legacy",
           detail: '{"text":"old"}',
           output: "",
@@ -166,6 +169,7 @@ describe("step cards split args and output under 原始输出 (#367)", () => {
         {
           id: 32,
           ordinal: 1,
+          bodyOffset: null,
           name: "bash",
           detail: '{"command":"false"}',
           output: "boom",
@@ -175,6 +179,7 @@ describe("step cards split args and output under 原始输出 (#367)", () => {
         {
           id: 33,
           ordinal: 2,
+          bodyOffset: null,
           name: "empty",
           detail: "",
           output: "",
@@ -184,6 +189,7 @@ describe("step cards split args and output under 原始输出 (#367)", () => {
         {
           id: 34,
           ordinal: 3,
+          bodyOffset: null,
           name: "noargs",
           detail: "",
           output: "only output",
@@ -251,6 +257,7 @@ describe("step cards keep absolute sandbox paths verbatim (ADR-0011)", () => {
         {
           id: 21,
           ordinal: 0,
+          bodyOffset: null,
           name: "read",
           detail: SANDBOX_DETAIL,
           output: `# a.md at ${SANDBOX_PATH}`,

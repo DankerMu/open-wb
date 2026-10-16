@@ -41,6 +41,7 @@ const MESSAGE_KEYS = [
   "steps",
   "thinking",
   "thinkingMs",
+  "thinkingSegments",
   "undo",
 ];
 
@@ -51,6 +52,7 @@ interface SnapshotApproval {
   requestedAt: number;
   expiresAt: number;
   decision: "allow" | "deny" | "timeout" | null;
+  stepId: number | null;
 }
 
 interface SnapshotMessage {
@@ -119,6 +121,7 @@ function pending(id: number, requestedAt = T): SnapshotApproval {
     requestedAt,
     expiresAt: requestedAt + 60_000,
     decision: null,
+    stepId: null,
   };
 }
 
@@ -145,7 +148,7 @@ function worldSnapshot(world: ApprovalWorld) {
   return snapshot(world.fixture.app, world.session, world.cookie);
 }
 
-function worldPending(id: number, title = TITLE): SnapshotApproval {
+function worldPending(id: number, stepId: number | null, title = TITLE): SnapshotApproval {
   return {
     id,
     tool: "bash",
@@ -153,7 +156,18 @@ function worldPending(id: number, title = TITLE): SnapshotApproval {
     requestedAt: WORLD_T,
     expiresAt: WORLD_T + TTL_MS,
     decision: null,
+    stepId,
   };
+}
+
+/** Issue 1474: the bash step ids by ordinal (test SQL); FIFO pairs r1 → ordinal 0, r2 → 1. */
+function bashSteps(world: ApprovalWorld): number[] {
+  return world.fixture.db
+    .prepare(
+      "SELECT s.id FROM chat_steps AS s JOIN chat_messages AS m ON m.id = s.message_id WHERE m.session_id = ? ORDER BY s.ordinal",
+    )
+    .all(world.session)
+    .map((row) => Number((row as { id: number }).id));
 }
 
 describe("message snapshot approvals projection (deterministic store)", () => {
@@ -173,7 +187,7 @@ describe("message snapshot approvals projection (deterministic store)", () => {
     });
   });
 
-  it("S2 a pending row projects exactly six keys with decision null", async () => {
+  it("S2 a pending row projects exactly seven keys with decision null", async () => {
     await withSessionRest(async ({ app, store }) => {
       const session = store.create("u1");
       store.acceptPrompt(session.id, "u1", "one pending");
@@ -190,6 +204,7 @@ describe("message snapshot approvals projection (deterministic store)", () => {
           requestedAt: T,
           expiresAt: E,
           decision: null,
+          stepId: null,
         },
       ]);
     });
@@ -215,6 +230,7 @@ describe("message snapshot approvals projection (deterministic store)", () => {
           requestedAt: T,
           expiresAt: E,
           decision: "deny",
+          stepId: null,
         },
       ]);
     });
@@ -306,11 +322,14 @@ describe("message snapshot approvals over the real fake-omp approval flow", () =
     async () => {
       const world = await open();
       const row = await pendingApproval(world);
+      await waitForEvent(world, "step.start");
 
       const before = await worldSnapshot(world);
       expect(before.session.status).toBe("running");
       expect(message(before, 0).approvals).toStrictEqual([]);
-      expect(message(before, 1).approvals).toStrictEqual([worldPending(row.id)]);
+      expect(message(before, 1).approvals).toStrictEqual([
+        worldPending(row.id, bashSteps(world)[0] ?? null),
+      ]);
 
       const answered = await settledAnswer(world, row.id, "allow");
       expect(answered.decision).toBe("allow");
@@ -325,6 +344,8 @@ describe("message snapshot approvals over the real fake-omp approval flow", () =
   it("S8 a denied approval stays visible after the turn is done", REAL, async () => {
     const world = await open();
     const row = await pendingApproval(world);
+    // Issue 1474: answer after the bash step took the approval, so the 200 carries its stepId.
+    await waitForEvent(world, "step.start");
 
     const answered = await settledAnswer(world, row.id, "deny");
     await waitForTurn(world.fixture, world.session, "done");
@@ -344,7 +365,7 @@ describe("message snapshot approvals over the real fake-omp approval flow", () =
 
     const after = await worldSnapshot(world);
     expect(message(after, 1).approvals[0]).toStrictEqual({
-      ...worldPending(row.id),
+      ...worldPending(row.id, bashSteps(world)[0] ?? null),
       decision: "timeout",
     });
   });
@@ -357,17 +378,19 @@ describe("message snapshot approvals over the real fake-omp approval flow", () =
       throw new Error("expected two pending approvals");
     }
     await waitForEvent(world, "approval.request", 2);
+    await waitForEvent(world, "step.start", 2);
     expect(r2.id).toBeGreaterThan(r1.id);
+    const [s1 = null, s2 = null] = bashSteps(world);
 
     const both = await worldSnapshot(world);
     expect(message(both, 1).approvals).toStrictEqual([
-      worldPending(r1.id),
-      worldPending(r2.id, TITLE_2),
+      worldPending(r1.id, s1),
+      worldPending(r2.id, s2, TITLE_2),
     ]);
 
     const second = await settledAnswer(world, r2.id, "allow");
     const afterSecond = await worldSnapshot(world);
-    expect(message(afterSecond, 1).approvals).toStrictEqual([worldPending(r1.id), second]);
+    expect(message(afterSecond, 1).approvals).toStrictEqual([worldPending(r1.id, s1), second]);
     expect(message(afterSecond, 1).approvals.map((entry) => entry.decision)).toEqual([
       null,
       "allow",

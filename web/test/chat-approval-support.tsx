@@ -41,6 +41,7 @@ export function approval(id: number, overrides: Partial<Approval> = {}): Approva
     tool: "bash",
     title: TITLE,
     requestedAt: T0,
+    stepId: null,
     expiresAt: T0 + 60_000,
     decision: null,
     ...overrides,
@@ -70,6 +71,7 @@ export function assistantRow(
     thinking: null,
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 
@@ -127,6 +129,7 @@ export function emitRequest(
       tool: "bash",
       title: TITLE,
       expiresAt: T0 + 60_000,
+      stepId: null,
       ...overrides,
     });
   });

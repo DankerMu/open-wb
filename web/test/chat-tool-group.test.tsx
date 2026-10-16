@@ -28,6 +28,7 @@ function step(id: number, name: string, status: Step["status"]): Step {
   return {
     id,
     ordinal: id,
+    bodyOffset: null,
     name,
     detail: `{"path":"${name}.md"}`,
     output: status === "running" ? "" : `${name} output`,
@@ -50,6 +51,7 @@ function assistant(id: number, steps: Step[], status: Message["status"] = "done"
     thinking: null,
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 
@@ -233,6 +235,8 @@ describe("tool-call group: collapsed by default, failed or not; only a click cha
         stepId: 2,
         name: "bash",
         detail: '{"command":"ls"}',
+        bodyOffset: 5,
+        approvalId: null,
       });
     });
     await waitFor(() =>
@@ -306,6 +310,8 @@ describe("tool-call group: collapsed by default, failed or not; only a click cha
         stepId: 2,
         name: "read",
         detail: "a.md",
+        bodyOffset: 0,
+        approvalId: null,
       }),
     );
     await waitFor(() => expect(trigger(article).textContent).toBe("读取 1 个文件，进行中"));
@@ -356,6 +362,8 @@ describe("tool-call group: collapsed by default, failed or not; only a click cha
         stepId: item.id,
         name: item.name,
         detail: item.detail,
+        bodyOffset: 3,
+        approvalId: null,
       });
       source.emitData("step.end", `1:${seq + 1}`, {
         messageId: 0,

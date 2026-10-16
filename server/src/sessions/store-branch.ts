@@ -39,12 +39,13 @@ export type StepDbRow = {
   started_at: number;
   ended_at: number | null;
   changes: Uint8Array | null;
+  body_offset: number | null;
 };
 
 export const MESSAGE_COLUMNS =
   "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments, error_reason, error_status, CAST(error_detail AS BLOB) AS error_detail, thinking_ms";
 export const STEP_COLUMNS =
-  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at, CAST(s.changes AS BLOB) AS changes";
+  "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at, CAST(s.changes AS BLOB) AS changes, s.body_offset";
 export const INSERT_MESSAGE =
   "INSERT INTO chat_messages(session_id, role, content, status, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?)";
 
@@ -69,7 +70,7 @@ export function titlePrefix(text: string): string {
 export function toMessageView(
   row: MessageDbRow,
   decoder: TextDecoder,
-): Omit<MessageView, "steps" | "approvals"> {
+): Omit<MessageView, "steps" | "approvals" | "thinkingSegments"> {
   return {
     id: Number(row.id),
     role: row.role,
@@ -135,6 +136,7 @@ export function toStepView(row: StepDbRow, decoder: TextDecoder): StepView {
     status: row.status,
     startedAt: Number(row.started_at),
     endedAt: row.ended_at === null ? null : Number(row.ended_at),
+    bodyOffset: row.body_offset === null ? null : Number(row.body_offset),
   };
 }
 

@@ -97,6 +97,7 @@ describe("approval registration", () => {
           tool: "bash",
           title: TITLE,
           expiresAt: T + TTL_MS,
+          stepId: null,
         },
       ]);
       expectQuiet(world);
@@ -109,6 +110,9 @@ describe("approval answers", () => {
   it("R2 allow settles the row, answers Approve once and completes the turn", REAL, async () => {
     const world = await open();
     const row = await pendingApproval(world);
+    // Issue 1474: the bash step starts without waiting for the answer and takes the approval.
+    await waitForEvent(world, "step.start");
+    const stepId = assistantSteps(world).steps[0]?.id ?? null;
     world.clock.nowMs = T + 1_000;
 
     const settled = await world.fixture.supervisor.decide(world.session, row.id, "allow");
@@ -120,6 +124,7 @@ describe("approval answers", () => {
       requestedAt: T,
       expiresAt: T + TTL_MS,
       decision: "allow",
+      stepId,
     });
     expect(approvalRow(world.fixture.db, row.id)).toMatchObject({
       decision: "allow",
@@ -486,6 +491,7 @@ describe("approvals of an always-ask session (#1009)", () => {
           tool: "write",
           title: WRITE_TITLE,
           expiresAt: T + TTL_MS,
+          stepId: null,
         },
       ]);
       // The PATCH wrote a `session.permission`: only the approval audits are counted.

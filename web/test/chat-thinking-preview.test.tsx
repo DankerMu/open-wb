@@ -226,7 +226,9 @@ describe("thinking-fold「终态消息主体限高」running 主体是流式预�
     scrolled();
     scrolled(300);
 
-    emit("thinking.end", { thinkingMs: 400 });
+    // 快照里已有思考 `思考第 1 行`：段从它之后起（与客户端临时段一致），消息保持旧布局（design D14）。
+    const segment = { bodyOffset: 0, thinkingOffset: 7, thinkingLength: 8, stepsBefore: 0 };
+    emit("thinking.end", { thinkingMs: 400, segment: { ...segment, thinkingMs: 400 } });
 
     expect(control().textContent).toBe("已思考 1 秒");
     expect(fold().getAttribute("data-running")).toBe("");
@@ -235,7 +237,7 @@ describe("thinking-fold「终态消息主体限高」running 主体是流式预�
     expect(fold().querySelectorAll('[data-slot="reasoning-fade"]')).toHaveLength(2);
     expect(box.scrollTop).toBe(300);
 
-    emit("step.start", { stepId: 21, name: "bash", detail: "ls" });
+    emit("step.start", { stepId: 21, name: "bash", detail: "ls", bodyOffset: 0, approvalId: null });
     grow(emit, 1400, 3);
 
     expect(control().textContent).toBe("正在思考…");

@@ -65,6 +65,7 @@ describe("SessionStore approval settlement", () => {
         requestedAt: T,
         expiresAt: T + 60_000,
         decision: "allow",
+        stepId: null,
       });
       expect(decisionOf(db, second.pending.approvalId)).toEqual({
         decision: "allow",

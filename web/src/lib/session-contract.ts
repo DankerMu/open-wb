@@ -1,5 +1,6 @@
 import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-json.js";
 import { type ChatMessageError, parseMessageError } from "./message-error-contract.js";
+import { type ChatThinkingSegment, parseThinkingSegments } from "./session-contract-segments.js";
 
 type ChatSessionStatus = "idle" | "running" | "done" | "failed" | "stopped";
 type ChatMessageRole = "user" | "assistant";
@@ -51,6 +52,7 @@ export type ChatStep = {
   output: string;
   changes: ChatFileChange[] | null;
   status: ChatDeliveryStatus;
+  bodyOffset: number | null;
 };
 
 export type ChatMessage = {
@@ -70,6 +72,8 @@ export type ChatMessage = {
   error: ChatMessageError | null;
   /** 思考累计毫秒（issue 910）：非负安全整数；用户消息、无思考与思考段进行中为 null。 */
   thinkingMs: number | null;
+  /** 各段思考的位置（issue 1474），按开始次序；用户消息恒为空数组。 */
+  thinkingSegments: ChatThinkingSegment[];
 };
 
 export type ChatStreamCursor = {
@@ -148,11 +152,15 @@ type ChatApproval = {
   requestedAt: number;
   expiresAt: number;
   decision: ChatApprovalDecision | null;
+  stepId: number | null;
 };
 
 export type ChatSettledApproval = ChatApproval & { decision: ChatApprovalDecision };
 
 const SESSION_ID = /^[0-9a-f]{32}$/;
+// Issue 1474 adds `bodyOffset` (null before migration 045) and `stepId` (null when unpaired).
+const STEP_KEYS = ["id", "ordinal", "name", "detail", "output", "changes", "status", "bodyOffset"];
+const APPROVAL_KEYS = ["id", "tool", "title", "requestedAt", "expiresAt", "decision", "stepId"];
 const WORKSPACE_ID = /^[0-9a-f]{32}$/;
 const MAX_FILE_CHANGES = 50;
 const UNDO_STATES: ReadonlySet<unknown> = new Set<ChatUndoState>([
@@ -329,11 +337,11 @@ export function parseFileChanges(value: unknown): ChatFileChange[] | null {
 }
 
 function parseStep(value: unknown): ChatStep | null {
-  if (!hasExactlyKeys(value, ["id", "ordinal", "name", "detail", "output", "changes", "status"])) {
+  if (!hasExactlyKeys(value, STEP_KEYS)) {
     return null;
   }
 
-  const { changes, detail, id, name, ordinal, output, status } = value;
+  const { bodyOffset, changes, detail, id, name, ordinal, output, status } = value;
   const parsedChanges = changes === null ? null : parseFileChanges(changes);
   if (
     !isSafeInteger(id) ||
@@ -342,12 +350,13 @@ function parseStep(value: unknown): ChatStep | null {
     typeof detail !== "string" ||
     typeof output !== "string" ||
     (changes !== null && !parsedChanges) ||
-    !isDeliveryStatus(status)
+    !isDeliveryStatus(status) ||
+    (bodyOffset !== null && !isNonNegativeSafeInteger(bodyOffset))
   ) {
     return null;
   }
 
-  return { id, ordinal, name, detail, output, changes: parsedChanges, status };
+  return { id, ordinal, name, detail, output, changes: parsedChanges, status, bodyOffset };
 }
 
 function parseAttachment(value: unknown): ChatAttachment | null {
@@ -380,6 +389,7 @@ function parseMessage(value: unknown): ChatMessage | null {
       "attachments",
       "error",
       "thinkingMs",
+      "thinkingSegments",
     ])
   ) {
     return null;
@@ -404,10 +414,12 @@ function parseMessage(value: unknown): ChatMessage | null {
   const parsedApprovals = parseMessageApprovals(approvals, role);
   const attachments = parseAttachments(value.attachments);
   const error = parseMessageError(value.error, role);
+  const thinkingSegments = parseThinkingSegments(value.thinkingSegments, role);
   // 附件只属于用户消息。
   if (
     !parsedSteps ||
     !parsedApprovals ||
+    !thinkingSegments ||
     !attachments ||
     (role === "assistant" && attachments.length > 0) ||
     error === undefined
@@ -428,6 +440,7 @@ function parseMessage(value: unknown): ChatMessage | null {
     attachments,
     error,
     thinkingMs,
+    thinkingSegments,
   };
 }
 
@@ -667,23 +680,24 @@ export function parseSessionUndo(value: unknown): ChatSessionUndo | null {
 }
 
 function parseApproval(value: unknown): ChatApproval | null {
-  if (!hasExactlyKeys(value, ["id", "tool", "title", "requestedAt", "expiresAt", "decision"])) {
+  if (!hasExactlyKeys(value, APPROVAL_KEYS)) {
     return null;
   }
 
-  const { decision, expiresAt, id, requestedAt, title, tool } = value;
+  const { decision, expiresAt, id, requestedAt, stepId, title, tool } = value;
   if (
     !isSafeInteger(id) ||
     typeof tool !== "string" ||
     typeof title !== "string" ||
     !isSafeInteger(requestedAt) ||
     !isSafeInteger(expiresAt) ||
-    (decision !== null && !isApprovalDecision(decision))
+    (decision !== null && !isApprovalDecision(decision)) ||
+    (stepId !== null && !isSafeInteger(stepId))
   ) {
     return null;
   }
 
-  return { id, tool, title, requestedAt, expiresAt, decision };
+  return { id, tool, title, requestedAt, expiresAt, decision, stepId };
 }
 
 export function parseSettledApproval(value: unknown): ChatSettledApproval | null {

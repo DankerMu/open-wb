@@ -43,7 +43,10 @@ export const UNBOUND_USER_VIEW = {
   thinking: null,
   error: null,
   thinkingMs: null,
+  thinkingSegments: [],
 } as const;
+/** The same for an assistant message with no approvals, steps, thinking or error (issue 1474). */
+export const PLAIN_ASSISTANT_VIEW = { ...UNBOUND_USER_VIEW, undo: null } as const;
 
 const oversizedParserInput = PARSER_INPUTS.find((entry) => entry.name === "oversized body");
 if (oversizedParserInput === undefined) {

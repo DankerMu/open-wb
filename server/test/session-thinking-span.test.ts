@@ -502,7 +502,18 @@ describe("chat-stream Ordered publication after persistence", () => {
           .slice(1)
           .map((event) => event.data),
       );
-      expect(frames[2]?.data).toEqual({ messageId: assistant, thinkingMs: value });
+      expect(frames[2]?.data).toEqual({
+        messageId: assistant,
+        thinkingMs: value,
+        // Issue 1474: the turn's one segment, as its row reads (the edit-write case above).
+        segment: {
+          bodyOffset: 0,
+          thinkingOffset: 0,
+          thinkingLength: THOUGHT.length,
+          stepsBefore: 0,
+          thinkingMs: value,
+        },
+      });
 
       const history = await world.fixture.app.inject({
         method: "GET",

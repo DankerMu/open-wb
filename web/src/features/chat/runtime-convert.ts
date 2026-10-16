@@ -8,7 +8,7 @@ type ChatStepView = ChatMessageView["steps"][number];
 /**
  * 应用自有字段，经 `metadata.custom` 原值透传给应用层组件：审批、原始状态、失败对象与重试标记、步骤
  * （步骤带 `changes` 与四态 `status`，tool-call part 表达不了它们）、用户消息的可撤回状态与附件、
- * 思考时长与进行中标记（issue 910）。
+ * 思考时长与进行中标记（issue 910）、分段位置（issue 1474：段、步骤 `bodyOffset`、审批 `stepId`）。
  */
 export type ChatMessageCustom = Pick<
   ChatMessageView,
@@ -20,6 +20,7 @@ export type ChatMessageCustom = Pick<
   | "steps"
   | "thinkingActive"
   | "thinkingMs"
+  | "thinkingSegments"
   | "undo"
 >;
 
@@ -42,9 +43,9 @@ function toolCall(step: ChatStepView) {
 }
 
 /**
- * part 顺序固定为 reasoning（仅 `thinking` 非空时）、text、每个步骤一个 tool-call：数据里正文与步骤
- * 没有交错信息。运行时只接受助手消息带 `status`、reasoning 与 tool-call，用户消息只有 text part，
- * 它的步骤仍在透传字段里。
+ * part 顺序固定为 reasoning（仅 `thinking` 非空时）、text、每个步骤一个 tool-call：part 不承载分段，
+ * 分段由 `message-segments.ts` 从透传字段算。运行时只接受助手消息带 `status`、reasoning 与
+ * tool-call，用户消息只有 text part，它的步骤仍在透传字段里。
  */
 export function convertMessage(message: ChatMessageView): ThreadMessageLike {
   const custom: ChatMessageCustom = {
@@ -56,6 +57,7 @@ export function convertMessage(message: ChatMessageView): ThreadMessageLike {
     steps: message.steps,
     thinkingActive: message.thinkingActive,
     thinkingMs: message.thinkingMs,
+    thinkingSegments: message.thinkingSegments,
     undo: message.undo,
   };
   const text = { type: "text" as const, text: message.content };

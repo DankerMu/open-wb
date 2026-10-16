@@ -70,6 +70,7 @@ function step(id: number, changes: unknown) {
   return {
     id,
     ordinal: id,
+    bodyOffset: null,
     name: id === 0 ? "bash" : "edit",
     detail: "{}",
     output: "",
@@ -97,6 +98,7 @@ function snapshotWith(
         approvals: [],
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
         ...overrides.user,
       },
       {
@@ -112,6 +114,7 @@ function snapshotWith(
         approvals: [],
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
         ...overrides.assistant,
       },
       {
@@ -127,6 +130,7 @@ function snapshotWith(
         approvals: [],
         error: null,
         thinkingMs: null,
+        thinkingSegments: [],
       },
     ],
     streamCursor: { epoch: 1, seq: null },
@@ -338,6 +342,7 @@ describe("Session contract: SSE step.end stays four keys", () => {
     const runningEdit = {
       id: 11,
       ordinal: 0,
+      bodyOffset: null,
       name: "edit",
       detail: "{}",
       output: "",
@@ -358,7 +363,15 @@ describe("Session contract: SSE step.end stays four keys", () => {
       expect(context.loads).toHaveLength(2);
       expect(context.events).toEqual([]);
       expect(assistantSteps(context.state)).toEqual([
-        { id: 11, name: "edit", detail: "{}", output: "", changes: null, status: "running" },
+        {
+          id: 11,
+          name: "edit",
+          detail: "{}",
+          output: "",
+          changes: null,
+          status: "running",
+          bodyOffset: null,
+        },
       ]);
 
       context.loads[1]?.resolve(withEdit(5));
@@ -368,7 +381,15 @@ describe("Session contract: SSE step.end stays four keys", () => {
       expect(context.loads).toHaveLength(2);
       expect(context.events).toEqual([{ type: "step.end", data: stepEnd }]);
       expect(assistantSteps(context.state)).toEqual([
-        { id: 11, name: "edit", detail: "{}", output: "edited", changes: null, status: "done" },
+        {
+          id: 11,
+          name: "edit",
+          detail: "{}",
+          output: "edited",
+          changes: null,
+          status: "done",
+          bodyOffset: null,
+        },
       ]);
       context.handle.close();
       expect(observer.unhandled).toEqual([]);

@@ -35,6 +35,7 @@ import type {
 import type { StoredAttachment } from "./store-attachments.js";
 import type { MessageError } from "./store-error.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
+import type { ThinkingSegment } from "./store-segments.js";
 import type { UndoState } from "./store-undo.js";
 import type { SessionSupervisor, StreamCursor } from "./supervisor.js";
 import type { TurnSnapshots } from "./turn-snapshot.js";
@@ -113,6 +114,8 @@ interface PublicStep {
   output: string;
   changes: StepView["changes"];
   status: string;
+  /** chat-stream「分段位置的记录与下发」: null for a step stored before migration 045. */
+  bodyOffset: number | null;
 }
 
 interface PublicMessage {
@@ -132,6 +135,8 @@ interface PublicMessage {
   error: MessageError | null;
   /** thinking-fold「思考时长记录与下发」: null, or a non-negative safe integer (ms). */
   thinkingMs: number | null;
+  /** The message's segment rows, each exactly five keys; `[]` for a user message (issue 1474). */
+  thinkingSegments: ThinkingSegment[];
 }
 
 interface OwnedSnapshot {
@@ -495,9 +500,11 @@ function toPublicHistory(
         output: step.output,
         changes: step.changes,
         status: step.status,
+        bodyOffset: step.bodyOffset,
       })),
       error: message.error === null ? null : toPublicError(message.error),
       thinkingMs: message.thinkingMs,
+      thinkingSegments: message.thinkingSegments.map(toPublicSegment),
     })),
     streamCursor: snapshot.streamCursor,
     todo: snapshot.todo,
@@ -517,7 +524,14 @@ function toPublicApproval(approval: ApprovalEntry): ApprovalEntry {
     requestedAt: approval.requestedAt,
     expiresAt: approval.expiresAt,
     decision: approval.decision,
+    stepId: approval.stepId,
   };
+}
+
+/** Exactly the five declared keys, in the declared order. */
+function toPublicSegment(segment: ThinkingSegment): ThinkingSegment {
+  const { bodyOffset, thinkingOffset, thinkingLength, stepsBefore, thinkingMs } = segment;
+  return { bodyOffset, thinkingOffset, thinkingLength, stepsBefore, thinkingMs };
 }
 
 /** Canonical positive safe integer; anything else (incl. a missing param) is the session 404. */

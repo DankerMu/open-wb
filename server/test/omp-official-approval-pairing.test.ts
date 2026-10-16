@@ -12,6 +12,9 @@
  * ring order of `approval.resolved` and `step.start` is this world's prompt auto-deny, not omp's,
  * and is not asserted. An omp upgrade that changes any of it turns this case red first.
  *
+ * Issue 1474 (5.2c) adds the published pairing (the request's `stepId` null, the step.start's
+ * `approvalId` the denied row) and the snapshot's `stepId`.
+ *
  * The case prints one `[approval-pairing] ` line (frame labels of the turn, the step and approval
  * rows), quoted as 实测.
  *
@@ -96,6 +99,34 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the denied call's s
       expect(steps).toEqual([{ id: steps[0]?.id, name: "bash", status: "failed" }]);
       expect(approvals).toEqual([
         { id: world.denied[0], tool: "bash", decision: "deny", step_id: steps[0]?.id },
+      ]);
+
+      // Issue 1474 (5.2c, branch one): the request went out unpaired (its select came first), the
+      // step.start delivered the pairing, and the snapshot's stepId is that step.
+      const published = turn.events.flatMap((event) =>
+        event.type === "approval.request"
+          ? [["request", event.data.stepId]]
+          : event.type === "step.start"
+            ? [["start", event.data.approvalId]]
+            : [],
+      );
+      expect(published).toEqual([
+        ["request", null],
+        ["start", world.denied[0]],
+      ]);
+      const history = await world.app.inject({
+        method: "GET",
+        url: `/api/sessions/${turn.session}/messages`,
+        headers: { cookie: world.cookie },
+      });
+      expect(history.statusCode).toBe(200);
+      const answer = (
+        history.json() as {
+          messages: Array<{ id: number; approvals: Array<{ id: number; stepId: unknown }> }>;
+        }
+      ).messages.find((message) => message.id === messageId);
+      expect(answer?.approvals.map((approval) => [approval.id, approval.stepId])).toEqual([
+        [world.denied[0], steps[0]?.id],
       ]);
     },
   );

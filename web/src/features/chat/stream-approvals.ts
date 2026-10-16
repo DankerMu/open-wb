@@ -1,5 +1,6 @@
 import { hasExactlyKeys } from "../../lib/api-json.js";
 import type { ChatMessage } from "../../lib/session-contract.js";
+import { isNullableId } from "../../lib/session-contract-segments.js";
 
 type ChatSnapshotApproval = ChatMessage["approvals"][number];
 type ChatApprovalOutcome = Exclude<ChatSnapshotApproval["decision"], null>;
@@ -13,6 +14,8 @@ type ApprovalRequestData = {
   tool: string;
   title: string;
   expiresAt: number;
+  /** 审批在 select 时已配上的步骤 id（issue 1474），否则 null。 */
+  stepId: number | null;
 };
 
 type ApprovalResolvedData = {
@@ -34,6 +37,7 @@ export function approvalViews(approvals: ChatMessage["approvals"]): ChatApproval
     title: approval.title,
     expiresAt: approval.expiresAt,
     decision: approval.decision,
+    stepId: approval.stepId,
   }));
 }
 
@@ -51,6 +55,7 @@ export function requestApproval<M extends WithApprovals>(message: M, data: Appro
     title: data.title,
     expiresAt: data.expiresAt,
     decision: null,
+    stepId: data.stepId,
   };
   const at = message.approvals.findIndex((approval) => approval.id > data.approvalId);
   const approvals = message.approvals.slice();
@@ -75,12 +80,13 @@ export function resolveApproval<M extends WithApprovals>(
 
 export function decodeApprovalRequest(value: unknown): ChatApprovalEvent | undefined {
   if (
-    !hasExactlyKeys(value, ["messageId", "approvalId", "tool", "title", "expiresAt"]) ||
+    !hasExactlyKeys(value, ["messageId", "approvalId", "tool", "title", "expiresAt", "stepId"]) ||
     !isSafeInteger(value.messageId) ||
     !isSafeInteger(value.approvalId) ||
     typeof value.tool !== "string" ||
     typeof value.title !== "string" ||
-    !isSafeInteger(value.expiresAt)
+    !isSafeInteger(value.expiresAt) ||
+    !isNullableId(value.stepId)
   ) {
     return undefined;
   }
@@ -92,6 +98,7 @@ export function decodeApprovalRequest(value: unknown): ChatApprovalEvent | undef
       tool: value.tool,
       title: value.title,
       expiresAt: value.expiresAt,
+      stepId: value.stepId,
     },
   };
 }

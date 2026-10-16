@@ -117,7 +117,16 @@ describe("thinking-fold「流式展开、终态收起」", () => {
     expect(content?.firstElementChild?.getAttribute("data-slot")).toBe("reasoning-root");
     expect([title(), expanded(), thinkingShown()]).toEqual([[ACTIVE, true], true, "先想一想"]);
 
-    session.emit("thinking.end", { thinkingMs: 1400 });
+    session.emit("thinking.end", {
+      thinkingMs: 1400,
+      segment: {
+        bodyOffset: 0,
+        thinkingOffset: 0,
+        thinkingLength: 4,
+        stepsBefore: 0,
+        thinkingMs: 1400,
+      },
+    });
     expect([title(), expanded()]).toEqual([["已思考 1 秒", false], true]);
 
     session.emit("text.delta", { delta: "答案" });
@@ -147,10 +156,34 @@ describe("thinking-fold「标题三态与多段思考」", () => {
     const seen: Array<[string, boolean]> = [];
     const events: Array<[string, Record<string, unknown>]> = [
       ["thinking.delta", { delta: "先" }],
-      ["thinking.end", { thinkingMs: 400 }],
-      ["step.start", { stepId: 21, name: "bash", detail: "ls" }],
+      [
+        "thinking.end",
+        {
+          thinkingMs: 400,
+          segment: {
+            bodyOffset: 0,
+            thinkingOffset: 0,
+            thinkingLength: 1,
+            stepsBefore: 0,
+            thinkingMs: 400,
+          },
+        },
+      ],
+      ["step.start", { stepId: 21, name: "bash", detail: "ls", bodyOffset: 0, approvalId: null }],
       ["thinking.delta", { delta: "再想" }],
-      ["thinking.end", { thinkingMs: 2600 }],
+      [
+        "thinking.end",
+        {
+          thinkingMs: 2600,
+          segment: {
+            bodyOffset: 0,
+            thinkingOffset: 1,
+            thinkingLength: 2,
+            stepsBefore: 1,
+            thinkingMs: 2200,
+          },
+        },
+      ],
       ["turn.end", { status: "done" }],
     ];
     for (const [type, data] of events) {
@@ -236,7 +269,16 @@ describe("thinking-fold「用户手动切换保留」", () => {
     session.emit("thinking.delta", { delta: "二" });
     session.emit("thinking.delta", { delta: "三" });
     expect([title(), expanded()]).toEqual([[ACTIVE, true], false]);
-    session.emit("thinking.end", { thinkingMs: 2600 });
+    session.emit("thinking.end", {
+      thinkingMs: 2600,
+      segment: {
+        bodyOffset: 0,
+        thinkingOffset: 0,
+        thinkingLength: 3,
+        stepsBefore: 0,
+        thinkingMs: 2600,
+      },
+    });
     expect([title(), expanded()]).toEqual([["已思考 3 秒", false], false]);
 
     fireEvent.click(triggerOf(assistantAt()));

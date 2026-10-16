@@ -8,168 +8,24 @@
  * `persistEvent` (`step.start` inserts the step row) and then recorded as published, as `#commit`
  * does. An approval publication outside the pump is `flush` then push, as `#publish` does.
  * Oracles: the recorded ring order and the raw `chat_thinking_segments` / `chat_steps` rows; the
- * expected values are the chat-stream「分段位置的记录与下发」literals.
+ * expected values are the chat-stream「分段位置的记录与下发」literals. The world lives in
+ * coalescer-world.ts (issue 1474 moved it there unchanged, to share it).
  */
-import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { openDb } from "../src/core/db/index.js";
-import { PumpSteps } from "../src/sessions/approval-pairing.js";
-import { DeltaCoalescer } from "../src/sessions/delta-coalescer.js";
-import { applyFrame, type ChatEvent, createEventState } from "../src/sessions/events.js";
-import type { OmpFrame } from "../src/sessions/omp/frame.js";
-import type { Generation, Slot } from "../src/sessions/pool.js";
-import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
-import { endsThinking } from "../src/sessions/thinking-span.js";
-import { persistEvent } from "../src/sessions/turn-control.js";
-import { TEST_COMPOSER } from "./session-meta-fixtures.js";
-import { createClock, type TestClock } from "./support/omp-runtime.js";
+import {
+  closeWorlds,
+  feed,
+  OWNER,
+  segments,
+  started,
+  TOOL_START,
+  text,
+  thinking,
+  trace,
+  type World,
+} from "./coalescer-world.js";
 
-const OWNER = "u1";
-
-interface World {
-  db: DatabaseSync;
-  store: SessionStore;
-  session: string;
-  messageId: number;
-  clock: TestClock;
-  slot: Slot;
-  generation: Generation;
-  coalescer: DeltaCoalescer;
-  mapper: ReturnType<typeof createEventState>;
-  steps: PumpSteps;
-  published: Array<{ at: number; event: ChatEvent<number> }>;
-  faults: Error[];
-}
-
-const closers: Array<() => void> = [];
-
-afterEach(() => {
-  for (const close of closers.splice(0).reverse()) {
-    close();
-  }
-});
-
-function openWorld(): World {
-  const db = openDb(":memory:");
-  const store = createSessionStore(db, { onFlushError() {}, composer: TEST_COMPOSER });
-  closers.push(() => db.close());
-  closers.push(() => store.close());
-  const session = store.create(OWNER).id;
-  const { assistantMessageId: messageId } = store.acceptPrompt(session, OWNER, "问");
-  const clock = createClock();
-  const published: World["published"] = [];
-  const faults: Error[] = [];
-  const coalescer: DeltaCoalescer = new DeltaCoalescer({
-    clock,
-    save: {
-      thinking: (id, chunk) => store.appendThinking(id, chunk),
-      text: (id, chunk) => {
-        store.appendDelta(id, chunk);
-        return chunk;
-      },
-    },
-    durations: store,
-    publish: (_slot, event) => {
-      published.push({ at: clock.now(), event });
-      return true;
-    },
-    fault(slot, error) {
-      faults.push(error);
-      slot.infraFaulted = true;
-      coalescer.discard(slot);
-    },
-  });
-  return {
-    db,
-    store,
-    session,
-    messageId,
-    clock,
-    slot: { sessionId: session, infraFaulted: false } as unknown as Slot,
-    generation: { epoch: 1, sealed: false } as unknown as Generation,
-    coalescer,
-    mapper: createEventState({ messageId, promptRequestId: "p1" }),
-    steps: new PumpSteps(messageId),
-    published,
-    faults,
-  };
-}
-
-/** `#commit`: route, then persist a passed event (`persistEvent`) and record it as published. */
-function commit(world: World, events: ChatEvent<string>[]): boolean {
-  for (const event of events) {
-    const routed = world.coalescer.route(world.slot, world.generation, event);
-    if (routed === false) {
-      return false;
-    }
-    if (routed === "pass") {
-      const persisted = persistEvent(
-        world.store,
-        world.messageId,
-        event,
-        world.steps,
-        [],
-        null,
-        (text) => text,
-      );
-      if (persisted !== undefined) {
-        world.published.push({ at: world.clock.now(), event: persisted });
-      }
-    }
-  }
-  return true;
-}
-
-/** The pump's read of one raw frame at time `t`. */
-function feed(world: World, t: number, frame: OmpFrame): boolean {
-  world.clock.advance(t - world.clock.now());
-  if (!world.coalescer.endSpan(world.slot, endsThinking(frame))) {
-    return false;
-  }
-  const applied = applyFrame(world.mapper, frame);
-  world.mapper = applied.state;
-  return commit(world, applied.events);
-}
-
-function update(event: Record<string, unknown>): OmpFrame {
-  return {
-    type: "message_update",
-    assistantMessageEvent: { contentIndex: 0, ...event },
-    message: { role: "assistant", content: [] },
-  };
-}
-
-const thinking = (delta: string) => update({ type: "thinking_delta", delta });
-const text = (delta: string) => update({ type: "text_delta", delta });
-const TOOL_START: OmpFrame = {
-  type: "tool_execution_start",
-  toolCallId: "call-1",
-  toolName: "bash",
-  args: { command: "ls" },
-};
-
-function started(): World {
-  const world = openWorld();
-  expect(feed(world, 0, { type: "agent_start" })).toBe(true);
-  return world;
-}
-
-/** [type, delta or ""] of every publication after turn.start, and when it was published. */
-function trace(world: World): Array<[string, string, number]> {
-  return world.published.slice(1).map(({ at, event }) => {
-    const delta =
-      event.type === "text.delta" || event.type === "thinking.delta" ? event.data.delta : "";
-    return [event.type, delta, at];
-  });
-}
-
-function segments(world: World) {
-  return world.db
-    .prepare(
-      "SELECT body_offset, thinking_offset, thinking_length, steps_before, thinking_ms FROM chat_thinking_segments WHERE message_id = ? ORDER BY id",
-    )
-    .all(world.messageId);
-}
+afterEach(closeWorlds);
 
 function stepOffsets(world: World): unknown[] {
   return world.db
@@ -306,6 +162,7 @@ describe("chat-stream「分段位置的记录与下发」闭段时长度含缓�
           tool: "bash",
           title: "Allow tool: bash",
           expiresAt: 60_150,
+          stepId: null,
         },
       },
     });

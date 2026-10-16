@@ -619,8 +619,7 @@ export class SessionSupervisor {
         if (
           !this.#deltas.endSpan(slot, endsThinking(frame)) ||
           !(await commit(applied.events)) ||
-          !this.#pairSelect(slot, steps, frame) ||
-          !(await this.#approvals.publishRequest(slot, frame))
+          !(await this.#pairAndPublish(slot, steps, frame))
         ) {
           return;
         }
@@ -646,15 +645,17 @@ export class SessionSupervisor {
     }
   }
 
-  /** Issue 1473 (design D6 rule 2): a failed select-time pairing write takes the owned error sink. */
-  #pairSelect(slot: Slot, steps: PumpSteps, frame: OmpFrame): boolean {
+  /** Issue 1473/1474 (D6 rule 2, D8): a failed pairing write sinks; else publish with the step id. */
+  async #pairAndPublish(slot: Slot, steps: PumpSteps, frame: OmpFrame): Promise<boolean> {
+    const publishes = () => this.#approvals.publishesRequest(slot, frame);
+    let paired: number | null;
     try {
-      steps.select(frame, () => this.#approvals.publishesRequest(slot, frame), this.#store);
-      return true;
+      paired = steps.select(frame, publishes, this.#store);
     } catch (error) {
       this.#faultSlot(slot, asError(error));
       return false;
     }
+    return this.#approvals.publishRequest(slot, frame, paired);
   }
 
   /** Pump catch outcome: a stop past its grace ends `stopped` without error (#473). */

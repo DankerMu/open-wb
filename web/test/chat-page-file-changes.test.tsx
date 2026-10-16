@@ -39,6 +39,7 @@ import {
   rowCells,
   rowTexts,
   stepBadge,
+  stepStart,
   tagAndClass,
   toolStep,
   turn,
@@ -189,10 +190,7 @@ describe("files.changed reduction and the step view shape", () => {
       state,
       { type: "thinking.delta", data: { messageId: 0, delta: "先" } },
       { type: "thinking.delta", data: { messageId: 0, delta: "想" } },
-      {
-        type: "step.start",
-        data: { messageId: 0, stepId: 5, name: "write", detail: "write args" },
-      },
+      stepStart(5, "write", "write args", 2),
       filesChanged(0, 5, write("a.html")),
     );
     const second = reduce(first, filesChanged(0, 5, write("b.html")));
@@ -209,6 +207,7 @@ describe("files.changed reduction and the step view shape", () => {
         output: "",
         changes: [{ path: "a.html", added: null, removed: null, kind: "write" }],
         status: "running",
+        bodyOffset: 2,
       },
     ]);
     expect(assistantSteps(second)?.map((step) => step.changes)).toStrictEqual([
@@ -222,6 +221,7 @@ describe("files.changed reduction and the step view shape", () => {
         output: "written",
         changes: [{ path: "b.html", added: null, removed: null, kind: "write" }],
         status: "done",
+        bodyOffset: 2,
       },
     ]);
     expect(ended.messages[1]?.thinking).toBe("先想");
@@ -263,7 +263,15 @@ describe("files.changed reduction and the step view shape", () => {
 
     const changes = [{ path: "src/app.ts", added: 2, removed: 1, kind: "edit" }];
     expect(assistantSteps(ended)).toStrictEqual([
-      { id: 7, name: "edit", detail: "edit args", output: "boom", changes, status: "failed" },
+      {
+        id: 7,
+        name: "edit",
+        detail: "edit args",
+        output: "boom",
+        changes,
+        status: "failed",
+        bodyOffset: null,
+      },
     ]);
     expect(assistantSteps(ended)?.[0]?.changes).toBe(assistantSteps(state)?.[0]?.changes);
   });
@@ -288,10 +296,7 @@ describe("files.changed reduction and the step view shape", () => {
   });
 
   const moved: Array<[string, ChatEvent]> = [
-    [
-      "a repeated step.start",
-      { type: "step.start", data: { messageId: 0, stepId: 5, name: "write", detail: "again" } },
-    ],
+    ["a repeated step.start", stepStart(5, "write", "again", 1)],
     [
       "a step.end for a step the message does not hold",
       { type: "step.end", data: { messageId: 0, stepId: 99, status: "done", output: "x" } },
@@ -319,7 +324,15 @@ describe("files.changed reduction and the step view shape", () => {
     const state = chatStateFromSnapshot(deepFrozen(structuredClone(snapshot)));
 
     expect(assistantSteps(state)).toStrictEqual([
-      { id: 11, name: "bash", detail: "bash args", output: "ok", changes: null, status: "done" },
+      {
+        id: 11,
+        name: "bash",
+        detail: "bash args",
+        output: "ok",
+        changes: null,
+        status: "done",
+        bodyOffset: null,
+      },
       {
         id: 12,
         name: "edit",
@@ -327,6 +340,7 @@ describe("files.changed reduction and the step view shape", () => {
         output: "ok",
         changes: [{ path: "src/app.ts", added: 2, removed: 1, kind: "edit" }],
         status: "done",
+        bodyOffset: null,
       },
     ]);
   });
@@ -334,13 +348,18 @@ describe("files.changed reduction and the step view shape", () => {
   it("C5 step.start creates a running step whose changes are null", () => {
     const state = viewOf(turn("running"));
 
-    const next = applyChatEvent(state, {
-      type: "step.start",
-      data: { messageId: 0, stepId: 21, name: "edit", detail: "edit args" },
-    });
+    const next = applyChatEvent(state, stepStart(21, "edit", "edit args", 0));
 
     expect(assistantSteps(next)).toStrictEqual([
-      { id: 21, name: "edit", detail: "edit args", output: "", changes: null, status: "running" },
+      {
+        id: 21,
+        name: "edit",
+        detail: "edit args",
+        output: "",
+        changes: null,
+        status: "running",
+        bodyOffset: 0,
+      },
     ]);
   });
 
@@ -359,7 +378,7 @@ describe("summarizeChanges", () => {
     id: number,
     status: StepView["status"],
     changes: StepView["changes"],
-  ): StepView => ({ id, name: "edit", detail: "", output: "", changes, status });
+  ): StepView => ({ id, name: "edit", detail: "", output: "", changes, status, bodyOffset: null });
 
   it("C6 skips running steps and counts done, failed and stopped ones", () => {
     const steps = deepFrozen([
@@ -404,7 +423,13 @@ describe("文件变更 card on the chat page", () => {
     await openSession(turn("running"));
     const send = await goLive();
 
-    send("step.start", { stepId: 5, name: "write", detail: '{"path":"out/index.html"}' });
+    send("step.start", {
+      stepId: 5,
+      name: "write",
+      detail: '{"path":"out/index.html"}',
+      bodyOffset: 0,
+      approvalId: null,
+    });
     send("files.changed", { stepId: 5, files: [write("out/index.html")] });
 
     expect(stepBadge("write 运行中").textContent).toBe("运行中");
@@ -676,6 +701,7 @@ describe("文件变更 card on the chat page", () => {
             tool: "write",
             title: "Allow tool: write",
             requestedAt: 1_750_000_000_000,
+            stepId: null,
             expiresAt: 1_750_000_060_000,
             decision: "allow",
           },

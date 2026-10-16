@@ -61,6 +61,12 @@ const WINDOW_MS = 250;
 const SENTINEL = "thinking write sentinel";
 /** Slice 3b: a span on the injected clock, which no case here advances before it closes. */
 const SPAN_MS = 0;
+/** Issue 1474: thinking.end of the turn's one span (body 0, no step before, the whole thought). */
+const SPAN_SEGMENT = { bodyOffset: 0, thinkingOffset: 0, stepsBefore: 0, thinkingMs: SPAN_MS };
+const SPAN_END = {
+  thinkingMs: SPAN_MS,
+  segment: { ...SPAN_SEGMENT, thinkingLength: THOUGHT.length },
+};
 
 interface ThinkingWorld extends RecordingWorld {
   clock: TestClock;
@@ -266,7 +272,7 @@ describe("S1 merge and persist", () => {
         { type: "thinking.delta", data: { messageId: assistant, delta: FIRST } },
         // omp's thinking_end flushes the held parts and closes the span (slice 3b).
         { type: "thinking.delta", data: { messageId: assistant, delta: HELD } },
-        { type: "thinking.end", data: { messageId: assistant, thinkingMs: SPAN_MS } },
+        { type: "thinking.end", data: { messageId: assistant, ...SPAN_END } },
         // Slice 2b: text is coalesced too; the second and third frames are flushed by turn.end.
         { type: "text.delta", data: { messageId: assistant, delta: TEXT_DELTAS[0] } },
         { type: "text.delta", data: { messageId: assistant, delta: TEXT_TAIL } },
@@ -351,7 +357,7 @@ describe("S4 flush before the terminal", () => {
       { type: "turn.start", data: { messageId: assistant } },
       leading,
       { type: "thinking.delta", data: { messageId: assistant, delta: HELD } },
-      { type: "thinking.end", data: { messageId: assistant, thinkingMs: SPAN_MS } },
+      { type: "thinking.end", data: { messageId: assistant, ...SPAN_END } },
       { type: "turn.end", data: { messageId: assistant, status: "stopped" } },
     ]);
     expect(thinkingColumn(world.fixture.db, assistant)).toBe(THOUGHT);

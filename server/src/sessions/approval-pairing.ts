@@ -60,19 +60,21 @@ export class PumpSteps {
    * without one is no approval, or one the runtime dropped (读代码推出). A select whose request
    * publishes now pairs the earliest-started running step of its tool (that write commits first);
    * with no such step, a zero-row write, or a request a settlement already published, it queues.
+   * The paired step's id is the request's `stepId` (issue 1474); null when none was paired.
    */
-  select(frame: OmpFrame, publishes: () => boolean, store: PairingStore): void {
+  select(frame: OmpFrame, publishes: () => boolean, store: PairingStore): number | null {
     const id = frame.type === "extension_ui_request" ? frame.id : undefined;
     const tool = typeof id === "string" ? store.approvalTool(this.#messageId, id) : undefined;
     if (typeof id !== "string" || tool === undefined) {
-      return;
+      return null;
     }
     const index = publishes() ? this.#running.findIndex((step) => step.name === tool) : -1;
     const step = this.#running[index];
     if (step !== undefined && store.pairApproval(this.#messageId, id, step.stepId) !== null) {
       this.#running.splice(index, 1);
-      return;
+      return step.stepId;
     }
     this.#queue.push({ requestId: id, tool });
+    return null;
   }
 }

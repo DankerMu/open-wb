@@ -255,6 +255,7 @@ describe("(C4) render conditions", () => {
           {
             id: 11,
             ordinal: 0,
+            bodyOffset: null,
             name: "bash",
             detail: "",
             output: "",

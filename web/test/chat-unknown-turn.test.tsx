@@ -65,6 +65,7 @@ function approval(id: number): Approval {
     tool: "bash",
     title: TITLE,
     requestedAt: T0,
+    stepId: null,
     expiresAt: T0 + 60_000,
     decision: null,
   };
@@ -291,6 +292,7 @@ describe("unknown turn resync: own prompt", () => {
         tool: "bash",
         title: TITLE,
         expiresAt: T0 + 60_000,
+        stepId: null,
       });
     });
   }

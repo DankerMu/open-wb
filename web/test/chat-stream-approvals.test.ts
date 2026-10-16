@@ -37,11 +37,20 @@ function approval(
   decision: SnapshotApproval["decision"],
   overrides: Partial<SnapshotApproval> = {},
 ): SnapshotApproval {
-  return { id, tool: "bash", title: TITLE, requestedAt: T, expiresAt: E, decision, ...overrides };
+  return {
+    id,
+    tool: "bash",
+    title: TITLE,
+    requestedAt: T,
+    expiresAt: E,
+    decision,
+    stepId: null,
+    ...overrides,
+  };
 }
 
 function view(id: number, decision: SnapshotApproval["decision"]) {
-  return { id, tool: "bash", title: TITLE, expiresAt: E, decision };
+  return { id, tool: "bash", title: TITLE, expiresAt: E, decision, stepId: null };
 }
 
 function userMessage(approvals: SnapshotApproval[] = []): SnapshotMessage {
@@ -58,6 +67,7 @@ function userMessage(approvals: SnapshotApproval[] = []): SnapshotMessage {
     thinking: null,
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 
@@ -79,6 +89,7 @@ function assistantMessage(
     thinking: null,
     error: null,
     thinkingMs: null,
+    thinkingSegments: [],
   };
 }
 
@@ -95,6 +106,7 @@ function parsedSnapshot(): Snapshot {
           {
             id: 2,
             ordinal: 0,
+            bodyOffset: null,
             name: "bash",
             detail: "ls",
             output: "o",
@@ -144,7 +156,7 @@ function frozenState(snapshot: Snapshot): ChatState {
 function requestEvent(messageId: number, approvalId: number): ChatEvent {
   return {
     type: "approval.request",
-    data: { messageId, approvalId, tool: "bash", title: TITLE, expiresAt: E },
+    data: { messageId, approvalId, tool: "bash", title: TITLE, expiresAt: E, stepId: null },
   };
 }
 
@@ -312,6 +324,7 @@ describe("approval snapshot and event reduction", () => {
       error: null,
       retrying: false,
       thinkingMs: null,
+      thinkingSegments: [],
       thinkingActive: false,
     });
     expect(next.status).toBe("done");
@@ -374,6 +387,7 @@ describe("approval events through the connector", () => {
       tool: "bash",
       title: TITLE,
       expiresAt: E,
+      stepId: null,
     });
     context.source.emitData("approval.resolved", "1:6", {
       messageId: 0,
@@ -392,7 +406,14 @@ describe("approval events through the connector", () => {
 
   it("W10 decoded approval events reach onEvent and the reduced view", async () => {
     const context = await connectInstalled(runningSnapshot([], { cursor: { epoch: 1, seq: 5 } }));
-    const requestData = { messageId: 0, approvalId: 7, tool: "bash", title: TITLE, expiresAt: E };
+    const requestData = {
+      messageId: 0,
+      approvalId: 7,
+      tool: "bash",
+      title: TITLE,
+      expiresAt: E,
+      stepId: null,
+    };
 
     context.source.emitData("approval.request", "1:6", requestData);
     context.source.emitData("approval.resolved", "1:7", {
@@ -409,7 +430,14 @@ describe("approval events through the connector", () => {
     expect(context.loads).toHaveLength(1);
   });
 
-  const validRequest = { messageId: 0, approvalId: 7, tool: "bash", title: TITLE, expiresAt: E };
+  const validRequest = {
+    messageId: 0,
+    approvalId: 7,
+    tool: "bash",
+    title: TITLE,
+    expiresAt: E,
+    stepId: null,
+  };
   const invalid: Array<[string, string, string, unknown]> = [
     ["request with an extra key", "approval.request", "1:6", { ...validRequest, extra: 1 }],
     [

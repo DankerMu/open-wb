@@ -177,6 +177,9 @@ const AGENT_START: OmpFrame = { type: "agent_start" };
 const AGENT_END: OmpFrame = { type: "agent_end", messages: [], isTerminal: true };
 const THINKING_START = update({ type: "thinking_start" });
 const THINKING_END = update({ type: "thinking_end", content: "" });
+/** Issue 1474: thinking.end's segment of a first span at body 0 before any step. */
+const first = (thinkingLength: number, thinkingMs: number) =>
+  ({ bodyOffset: 0, thinkingOffset: 0, thinkingLength, stepsBefore: 0, thinkingMs }) as const;
 const thinking = (delta: string) => update({ type: "thinking_delta", delta });
 const text = (delta: string) => update({ type: "text_delta", delta });
 const toolStart = (id: string): OmpFrame => ({
@@ -258,7 +261,7 @@ describe("thinking-fold 单段思考以 thinking_end 闭合", () => {
     ]);
     expect(ends(world)[0]?.event).toEqual({
       type: "thinking.end",
-      data: { messageId: world.messageId, thinkingMs: 2000 },
+      data: { messageId: world.messageId, thinkingMs: 2000, segment: first(5, 2000) },
     });
     expect(columns(world.db, world.messageId)).toEqual({
       thinkingMs: 2000,
@@ -276,7 +279,7 @@ describe("thinking-fold 单段思考以 thinking_end 闭合", () => {
     expect(world.published.at(-1)?.thinkingMs).toBeNull();
     feed(world, 70, THINKING_END);
     expect(ends(world).map(({ thinkingMs, event }) => [thinkingMs, event.data])).toEqual([
-      [60, { messageId: world.messageId, thinkingMs: 60 }],
+      [60, { messageId: world.messageId, thinkingMs: 60, segment: first(1, 60) }],
     ]);
   });
 });
@@ -364,7 +367,7 @@ describe("thinking-fold 多段思考累计", () => {
     expect(world.coalescer.endSpan(world.slot, true)).toBe(true);
     expect(world.published.at(-1)?.event).toEqual({
       type: "thinking.end",
-      data: { messageId: next, thinkingMs: 300 },
+      data: { messageId: next, thinkingMs: 300, segment: first(1, 300) },
     });
     expect(columns(world.db, next).thinkingMs).toBe(300);
     expect(columns(world.db, world.messageId).thinkingMs).toBe(500);
@@ -468,7 +471,7 @@ describe("thinking-fold 墙钟回拨", () => {
     world.clock.nowMs = 1000;
     feed(world, 1000, THINKING_END);
     expect(ends(world).map(({ event }) => event.data)).toEqual([
-      { messageId: world.messageId, thinkingMs: 0 },
+      { messageId: world.messageId, thinkingMs: 0, segment: first(1, 0) },
     ]);
     expect(columns(world.db, world.messageId).thinkingMs).toBe(0);
   });

@@ -51,7 +51,9 @@ describe("matchMessages", () => {
       ...answer,
       content: "已生成",
       thinking: "先写 needle",
-      approvals: [{ id: 9, tool: "bash", title: "needle", expiresAt: 0, decision: "allow" }],
+      approvals: [
+        { id: 9, tool: "bash", title: "needle", expiresAt: 0, decision: "allow", stepId: null },
+      ],
       error: { reason: "upstream_error", message: "needle 失败", status: 500, detail: "needle" },
       thinkingMs: null,
       steps: answer.steps.map((step) => ({

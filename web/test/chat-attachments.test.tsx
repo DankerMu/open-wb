@@ -70,6 +70,7 @@ function answered(attachments: string[]) {
       thinking: null,
       error: null,
       thinkingMs: null,
+      thinkingSegments: [],
     },
   ]);
 }
