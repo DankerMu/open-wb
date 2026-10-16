@@ -175,6 +175,33 @@ describe("chat-web「消息线程」：分段布局下的小圆点", () => {
     expect(bodies().map((body) => body.textContent)).toEqual(["（已停止生成）"]);
     expect(carets()).toEqual([]);
   });
+
+  it("已停止且有正文段：没有（已停止生成）占位", async () => {
+    const live = await openSession(session("running"));
+    live.emit("text.delta", { delta: "答" });
+    live.emit("step.start", {
+      stepId: 21,
+      name: "bash",
+      detail: "ls",
+      bodyOffset: 1,
+      approvalId: null,
+    });
+
+    live.emit("turn.end", { status: "stopped" });
+
+    expect(slots().slice(0, 3)).toEqual(["message-body", "tool-group-root", "message-stopped"]);
+    expect(bodies().map((body) => body.textContent)).toEqual(["答"]);
+  });
+
+  it("旧布局、已停止、正文只有 \\n：仍是（已停止生成）占位，没有 复制（与正文为空串时相同）", async () => {
+    await openSession(
+      session("done", { status: "stopped", content: "\n", steps: [step(21, 0, "bash", null)] }),
+    );
+
+    expect(slots().slice(0, 3)).toEqual(["message-body", "tool-group-root", "message-stopped"]);
+    expect(bodies().map((body) => body.textContent)).toEqual(["（已停止生成）"]);
+    expect(within(assistant()).queryByRole("button", { name: "复制" })).toBeNull();
+  });
 });
 
 describe("chat-web「消息线程」：分段区没有块时的小圆点", () => {
@@ -288,5 +315,36 @@ describe("chat-web「工具段摘要与折叠」：展开态只随用户点击�
     fireEvent.click(triggerOf(first));
     live.emit("step.end", { stepId: 23, status: "done", output: "" });
     expect(states()).toEqual([false, false]);
+  });
+
+  it("快照原地重装在展开的工具段之前插入一个思考段：工具段按块键保留展开态与元素身份", async () => {
+    const live = await openSession(session("running"));
+    live.emit("text.delta", { delta: "先" });
+    live.emit("step.start", {
+      stepId: 21,
+      name: "read",
+      detail: "a",
+      bodyOffset: 1,
+      approvalId: null,
+    });
+    const [group] = groups() as [HTMLElement];
+    fireEvent.click(triggerOf(group));
+    expect(isOpen(group)).toBe(true);
+
+    await live.resync(
+      session("running", {
+        content: "先",
+        thinking: "想",
+        thinkingMs: 300,
+        thinkingSegments: [segment(1, 0, 1, 0, 300)],
+        steps: [{ ...step(21, 0, "read", 1, "running"), detail: "a" }],
+      }),
+    );
+
+    await waitFor(() =>
+      expect(slots().slice(0, 3)).toEqual(["message-body", "reasoning-root", "tool-group-root"]),
+    );
+    expect(groups()).toEqual([group]);
+    expect(isOpen(group)).toBe(true);
   });
 });

@@ -169,8 +169,9 @@ describe("chat-web「助手消息分段」：旧布局判定", () => {
     [
       "第一段 thinkingLength 为 null 而后面还有一段",
       {
-        thinking: "想想",
-        thinkingSegments: [segment(0, 0, null, 0, null), segment(2, 1, 1, 0, 1)],
+        // 第二段与第一段（长度按 0 计）首尾相接、不越界：只有「开着的段不是末段」这一条不成立。
+        thinking: "想",
+        thinkingSegments: [segment(0, 0, null, 0, null), segment(2, 0, 1, 0, 1)],
       },
     ],
     [

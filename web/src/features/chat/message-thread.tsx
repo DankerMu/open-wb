@@ -248,6 +248,8 @@ const AssistantMessage = memo(function AssistantMessage({
 }) {
   const { approvals, error, retrying, status, steps } = custom;
   const running = status === "running";
+  // 只含空白的正文不给 `复制`：与改读透传原文之前（运行时丢掉空白 text part、正文为空串）相同。
+  const copyText = /\S/u.test(text) ? text : "";
   return (
     <MessagePrimitive.Root asChild>
       <article
@@ -278,10 +280,10 @@ const AssistantMessage = memo(function AssistantMessage({
               已停止
             </p>
           ) : null}
-          {!running && (text !== "" || regenerable) ? (
+          {!running && (copyText !== "" || regenerable) ? (
             <AssistantActions
               regenerate={regenerable ? { disabled: locked, onRegenerate } : undefined}
-              text={text}
+              text={copyText}
             />
           ) : null}
         </div>

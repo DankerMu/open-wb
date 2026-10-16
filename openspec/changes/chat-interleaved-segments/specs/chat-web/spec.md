@@ -262,7 +262,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 
 三者之间的值导入 SHALL 只沿 `page.tsx → use-chat-session.ts → turn-actions.ts` 方向：`use-chat-session.ts` 与 `turn-actions.ts` SHALL 不导入 `./page.js`，`turn-actions.ts` SHALL 不导入 `./use-chat-session.js`。`use-chat-session.ts` 的导出 SHALL 只供 `page.tsx` 使用，`turn-actions.ts` 的导出 SHALL 只供 `use-chat-session.ts` 使用；二者都不经 `index.ts` 对外暴露，也不新增未被引用的导出。
 
-`runtime-convert.ts` SHALL 是纯模块（不渲染 UI、无副作用、不持有状态），导出把会话视图消息映射为运行时消息的 `convertMessage`：消息 `id` 映射为其十进制字符串；内容 part 的顺序固定为 reasoning（仅 `thinking` 非空时）、text（`content` 原文）、每个步骤一个 tool-call（`toolCallId` 为步骤 id、`toolName` 为步骤名、参数文本为 `detail`、结果为 `output`，`failed` 步骤标为错误）；消息状态 `running` 映射为运行中，`done` 映射为完成，`failed` 与 `stopped` 映射为未完成；`approvals`（含 `stepId`）、步骤 `changes` 与 `bodyOffset`、`error`、`thinkingMs`、`thinkingActive`、`thinkingSegments` 与原始 `status` 作为应用自有字段原值透传给应用层组件。part 的次序不承载分段：运行时 part 只是正文、思考与步骤的载体，正文、思考与工具段的交替次序由应用层的切段函数（「助手消息分段」）从透传字段与 part 文本算出。同一输入 SHALL 得到相等的输出，且 SHALL 不修改输入。
+`runtime-convert.ts` SHALL 是纯模块（不渲染 UI、无副作用、不持有状态），导出把会话视图消息映射为运行时消息的 `convertMessage`：消息 `id` 映射为其十进制字符串；内容 part 的顺序固定为 reasoning（仅 `thinking` 非空时）、text（`content` 原文）、每个步骤一个 tool-call（`toolCallId` 为步骤 id、`toolName` 为步骤名、参数文本为 `detail`、结果为 `output`，`failed` 步骤标为错误）；消息状态 `running` 映射为运行中，`done` 映射为完成，`failed` 与 `stopped` 映射为未完成；`approvals`（含 `stepId`）、步骤 `changes` 与 `bodyOffset`、`error`、`thinkingMs`、`thinkingActive`、`thinkingSegments`、原始 `status` 以及消息的 `content` 与 `thinking` 原文（运行时会丢弃只含空白的 text / reasoning part，分段与占位判定须读原文）作为应用自有字段原值透传给应用层组件。part 的次序不承载分段：运行时 part 只是正文、思考与步骤的载体，正文、思考与工具段的交替次序由应用层的切段函数（「助手消息分段」）从透传字段（含 `content`、`thinking` 原文）算出。同一输入 SHALL 得到相等的输出，且 SHALL 不修改输入。
 
 `message-segments.ts` SHALL 是纯模块（不渲染 UI、无副作用、不持有状态），导出「助手消息分段」规定的切段函数；`tool-summary.ts` SHALL 是纯模块，导出「工具段摘要与折叠」规定的动作归类与摘要函数。分段的渲染 SHALL 在 `message-thread.tsx` 之外的应用层组件模块里（`message-thread.tsx` 只决定用分段布局还是旧布局并把消息级部件排在分段之后）。实时视图与快照恢复的视图 SHALL 经同一个切段函数得到分段，不另写第二套切段逻辑。
 
@@ -519,7 +519,7 @@ N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1�
 - **THEN** 摘要为 `执行 2 条命令、读取 1 个文件，1 步失败，进行中`，控件带转圈图标；`read` 结束为 `done` 后摘要为 `执行 2 条命令、读取 1 个文件，1 步失败`，转圈图标消失；`，1 步失败` 与摘要其余文字在同一个文本元素里，不单独成元素，该元素不带颜色类（`text-*` 颜色工具类）
 
 #### Scenario: 展开态只随用户点击变化
-- **WHEN** 一条 running 助手消息有两个工具段，用户展开第一个；随后第二个工具段里一个步骤以 `failed` 结束，第一个工具段又并入一个新步骤；再随后快照原地重新安装（内容不变）
+- **WHEN** 一条 running 助手消息有两个工具段，用户展开第一个；随后第二个工具段里一个步骤以 `failed` 结束、又并入一个新步骤（偏移单调，新步骤只会并入最后一个工具段）；再随后快照原地重新安装（内容不变）
 - **THEN** 第一个工具段始终为展开态，第二个始终为收起态；之后用户收起第一个，它保持收起直到下次点击
 
 #### Scenario: 对话内搜索不改变段的展开态

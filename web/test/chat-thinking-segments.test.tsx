@@ -66,6 +66,21 @@ describe("thinking-fold「标题三态与多段思考」分段布局的快照", 
   });
 });
 
+describe("thinking-fold「深度思考折叠块呈现」只含空白的思考段", () => {
+  it("思考原文只有 \\n、有一段：照样渲染折叠块（只有原文为空串的段不渲染）", async () => {
+    await openSession(
+      session("done", {
+        content: "答",
+        thinking: "\n",
+        thinkingMs: 500,
+        thinkingSegments: [segment(0, 0, 1, 0, 500)],
+      }),
+    );
+
+    expect(folds().map(titleOf)).toEqual([["已思考 1 秒", false]]);
+  });
+});
+
 describe("thinking-fold「用户手动切换保留」分段布局", () => {
   it("第一段结束收起后用户展开它：正文、第二段思考、第二段的 thinking.end 与 turn.end 都不改变它；第二段在其 thinking.end 时收起", async () => {
     const live = await openSession(session("running"));

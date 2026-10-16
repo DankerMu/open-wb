@@ -57,7 +57,7 @@ export function segment(
 
 /**
  * 打开会话并接通事件流；`emit` 从 `1:1` 起编号、同步生效，`emitAsync` 另让出宏任务（假时钟用例），
- * `resync` 让事件源重开并按 `next` 原地重装快照。
+ * `resync` 让事件源重开并按 `next`（游标对齐到已投递的最后一条事件）原地重装快照。
  */
 export async function openSession(first: ChatMessageSnapshot) {
   let served = first;
@@ -89,7 +89,8 @@ export async function openSession(first: ChatMessageSnapshot) {
       });
     },
     async resync(next: ChatMessageSnapshot) {
-      served = next;
+      // 游标取已投递的最后一条，快照与已收到的事件对齐。
+      served = { ...next, streamCursor: { epoch: 1, seq } };
       act(() => source.emitOpen());
       await settleAll();
     },

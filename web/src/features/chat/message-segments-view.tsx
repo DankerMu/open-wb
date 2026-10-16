@@ -33,14 +33,14 @@ function Caret() {
 }
 
 /**
- * 正文：Markdown，或已停止且为空时的占位；`dot` 时在末尾带小圆点。running 时正文经 smooth-text.tsx 逐字展开
+ * 正文：Markdown，或已停止且为空（含只有空白：运行时消息里它本来就是空串）时的占位；`dot` 时在末尾带小圆点。running 时正文经 smooth-text.tsx 逐字展开
  * （design D8）；等待指示让位时本组件才挂载，此时的首段与「从空串开始的第一段」同样直接整段显示（useSmooth
  * 的分支，7a 实测）。已被后续块隔开的正文段不再增长，只有最后一个正文段会逐字展开。
  */
 export function MessageBody({ dot, status, text }: { dot: boolean; status: Status; text: string }) {
   return (
     <div className="text-sm leading-7 wrap-anywhere text-foreground" data-slot="message-body">
-      {status === "stopped" && text === "" ? (
+      {status === "stopped" && !/\S/u.test(text) ? (
         <p className="text-(--wb-text-tertiary)">（已停止生成）</p>
       ) : (
         <SmoothText running={status === "running"} text={text}>
