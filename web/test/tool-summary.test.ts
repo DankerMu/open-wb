@@ -62,6 +62,10 @@ describe("summarizeTools", () => {
     expect(summarizeTools([step("bash", "failed"), step("todo", "failed")])).toBe(
       "执行 1 条命令、其它 1 步，2 步失败",
     );
+    // 失败按步骤计，不按类：同一类里两个失败步骤记 2。
+    expect(summarizeTools([step("bash", "failed"), step("bash", "failed")])).toBe(
+      "执行 2 条命令，2 步失败",
+    );
   });
 
   it("counts a stopped step in its action without a suffix", () => {
