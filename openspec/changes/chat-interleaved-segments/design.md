@@ -376,7 +376,7 @@ B1–B13 与编排方 T1–T11 之外由起草者决定的事项。第一轮的 
 
 | 文件 | 现在 | 预计合入后上限 | 改动的切片 |
 |---|---|---|---|
-| `server/src/sessions/store.ts` | 791 | 3a 后 ≤ 765（`startStep` 移出、加计数）；3b 后 ≤ 770；4 后 ≤ 774（`startStep` 返回 `{stepId, approvalId}`、select 时配对写的委托）；5 后 ≤ 784 | 3a、3b、4、5 |
+| `server/src/sessions/store.ts` | 791 | 3a 后 ≤ 765（`startStep` 移出、加计数）；3b、4 不论先后，单独合入后 ≤ 770、两刀都合入后 ≤ 774（`startStep` 返回 `{stepId, approvalId}`、select 时配对写的委托）；5 后 ≤ 784 | 3a、3b、4、5 |
 | `server/src/sessions/supervisor.ts` | 776 | 4 后 ≤ 781；5 后 ≤ 783（D16 的 per-pump 对象） | 4、5 |
 | `server/src/sessions/delta-coalescer.ts` | 211 | ≤ 220 | 3b |
 | `server/src/sessions/thinking-span.ts` | 112 | 3b 后 ≤ 150；5 后 ≤ 160（发布 `segment`） | 3b、5 |

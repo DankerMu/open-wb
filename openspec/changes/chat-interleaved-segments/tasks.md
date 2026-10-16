@@ -91,7 +91,7 @@ Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半�
 - [ ] 2.3 实现 `server/src/core/db/migrations/045_chat_interleaved_segments.sql`，DDL 逐字按规格；只加列、加表，不读不写。2.1 清单里的列清单夹具补列（通用纪律第 4 种改法），逐条列进偏离记录。
   验证：2.2 全绿；`make check` 全绿。
 - [ ] 2.4 变异证据：去掉段表的 `ON DELETE CASCADE` → 「约束与级联」判红；去掉非负 CHECK → 同上判红；`step_id` 写成 `NOT NULL DEFAULT 0` → 「新库与存量库」判红。
-- [ ] 2.5 整刀验证：`make check`、`make test-guardrails`、`make smoke` 全绿。
+- [ ] 2.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level: expanded - 迁移（一张新表、两个新列），是 schema 变化；没有读写方，风险只在迁移账本与列清单夹具。
 Minimal mergeable slice: atomic - 一个迁移文件及其测试与补列。
 
