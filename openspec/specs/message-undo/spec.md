@@ -62,7 +62,7 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 2. 经 omp-pool 准入一个**临时** `SessionRuntime`（与 fork 相同的 spawn 契约、`--resume <omp_session_file>`、`--cwd` 为该会话的工作目录、不绑定 slot、不是 generation、不改 `stream_epoch`、不拥有事件环）；准入失败 503 `agent_capacity`。
 3. `get_branch_messages` → 按 chat-sessions「Slash 命令白名单与命令目录」的 Branch alignment 自前向后首次匹配对位，取对位到该用户消息的条目；无对位 SHALL 502 `agent_unavailable`，不发 `branch` → `branch{entryId}` → `get_state` 取新 `sessionFile` → 关停临时进程（token 撤销、名额释放）。任何失败 SHALL 502 `agent_unavailable` 并关停临时进程。
 4. `files` 不是 `keep` 时还原工作空间（「文件还原与结果」）。
-5. 一个 SQLite 事务：先以 CAS 复核会话仍非 `running`、未归档、其末条助手消息 id 等于前置校验读到的值、该用户消息行仍在；复核失败 SHALL 不写任何行并 409 `session_busy`。复核通过则：删除该会话中 `(created_at,id)` 不早于该用户消息的全部 `chat_messages` 行（其 `chat_steps`、`chat_approvals`、`chat_turn_snapshots` 行随外键级联删除）；把 `omp_session_file` 置为新文件；`status` 置为剩余消息中末条助手消息的状态（`done` / `failed` / `stopped`），没有剩余助手消息时为 `idle`；`updated_at` 置为当前毫秒；`todo` 置为被撤回消息快照行的 `todo` 值（含 NULL）；写一条 `session.undo` 审计（「撤回审计与通知」）。`title`、`scene`、`pinned_at`、`archived_at`、`workspace_id`、`stream_epoch`、`parent_session_id` SHALL 不变。审计失败则事务回滚。
+5. 一个 SQLite 事务：先以 CAS 复核会话仍非 `running`、未归档、其末条助手消息 id 等于前置校验读到的值、该用户消息行仍在；复核失败 SHALL 不写任何行并 409 `session_busy`。复核通过则：删除该会话中 `(created_at,id)` 不早于该用户消息的全部 `chat_messages` 行（其 `chat_steps`、`chat_approvals`、`chat_thinking_segments`、`chat_turn_snapshots` 行随外键级联删除）；把 `omp_session_file` 置为新文件；`status` 置为剩余消息中末条助手消息的状态（`done` / `failed` / `stopped`），没有剩余助手消息时为 `idle`；`updated_at` 置为当前毫秒；`todo` 置为被撤回消息快照行的 `todo` 值（含 NULL）；写一条 `session.undo` 审计（「撤回审计与通知」）。`title`、`scene`、`pinned_at`、`archived_at`、`workspace_id`、`stream_epoch`、`parent_session_id` SHALL 不变。审计失败则事务回滚。
 6. 提交后：删除被移除的各用户消息的快照目录（workspace-snapshots「快照清理」）；发通知；返回 200。
 
 第 1–4 步的任何失败 SHALL 不改动任何 `chat_*` 行与 `omp_session_file`（被退役的进程不恢复，下次 prompt 按既有 `--resume` 懒 spawn）。响应返回之前临时进程 SHALL 已退出。被放弃的旧会话文件与 `branch` 失败时可能产生的新文件留在磁盘上，与 regenerate 的旧分支文件同一处理（不在删除清理范围内）。撤回之后，该会话的下一条 prompt SHALL 以 `--resume <新文件>` 冷启动一个新 generation（`stream_epoch` 按既有规则 +1），模型看到的历史不含被撤回的消息及其后的内容。撤回的编排 SHALL 位于 `server/src/sessions/` 下的独立模块，其导出只供 `sessions/` 内使用；`store.ts` 与 `supervisor.ts` 不因此越过 800 行上限。
@@ -94,6 +94,10 @@ prompt 路由的 202 SHALL 为 `{userMessageId, assistantMessageId, undo}`，`un
 #### Scenario: 撤回后模型看不到被撤回的内容
 - **WHEN** 在真实 omp（`make ui-walk` 的栈）上，会话只有一轮，撤回这条用户消息后发送一条新消息并等回合结束，再对这条新消息调用 fork
 - **THEN** 新回合正常完成；fork 返回 201——分支对位要求 omp 当前分支上的用户条目恰与存储的用户消息一一对应，被撤回的那一条若仍在分支上，对位会失败并得到 502
+
+#### Scenario: 撤回连带删除分段数据
+- **WHEN** 会话为 u1→a1→u2→a2，a1、a2 各有两行思考段、带 `bodyOffset` 的步骤与配上步骤的审批，撤回 u2
+- **THEN** a2 的思考段、步骤与审批行都不存在（无孤儿行）；a1 的思考段、步骤 `bodyOffset` 与审批 `stepId` 与撤回前逐值相同，快照里 a1 经 chat-web「助手消息分段」得到与撤回前逐块相等的分段
 
 ### Requirement: 文件还原与结果
 `files` 为 `restore` 或 `force` 时，undo SHALL 在「对话原地回退」的第 4 步，用被撤回消息的快照（`<快照根>/<workspaceId>/<messageId>`）对会话的工作空间根调用 workspace-snapshots「还原」，使工作空间回到该消息发出之前的状态（快照里有的都还原，含 `.git`；`skipped` 里的路径——超限文件、排除的依赖目录、读不了的条目、挂载点——以及还原时才发现的挂载点（含其下在快照里的条目）保持现状）；`force` 与 `restore` 的差别只在前置校验是否因冲突而拒绝。`files` 为 `keep` 时 SHALL NOT 读取快照、SHALL NOT 改动工作空间内的任何条目。还原在本会话没有存活进程时进行（第 1 步已退役）。还原抛错（清单缺失或损坏、工作空间根不是目录等结构性失败）SHALL 使请求以通用 5xx 结束，不执行第 5 步，对话保持原样；再次请求可重试。

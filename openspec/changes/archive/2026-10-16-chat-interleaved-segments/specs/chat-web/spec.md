@@ -281,7 +281,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 
 #### Scenario: convertMessage 映射
 - **WHEN** 以一条 `stopped` 助手视图消息调用 `convertMessage`：`id` 为 12，`thinking` 为 `先想一想`，`content` 为 `部分回答`，含一条 `done` 的 `bash` 步骤与一条 `failed` 的 `write` 步骤，`approvals` 含一条已结算审批；再以一条 `thinking` 为 `null`、无步骤的 `running` 助手消息调用
-- **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批（含 `stepId`）、步骤 `changes` 与 `bodyOffset`、`error`、`thinkingMs`、`thinkingActive`、`thinkingSegments` 与原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
+- **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批（含 `stepId`）、步骤 `changes` 与 `bodyOffset`、`error`、`thinkingMs`、`thinkingActive`、`thinkingSegments`、原文 `content`（`部分回答`）与 `thinking`（`先想一想`）以及原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
 
 ### Requirement: 步骤 args 与输出分栏
 客户端 SHALL 把步骤 `output` 作为与 `detail` 并列的字符串字段贯穿快照解析（`steps[]` 严格键集 `{id,ordinal,name,detail,output,status,changes,bodyOffset}`，`bodyOffset` 规则见 `API 客户端扩展` 的 #915 段，`changes` 规则见 `API 客户端扩展`）、SSE `step.end` 解码（严格键集 `{messageId,stepId,status,output}`，不含 `changes`；步骤变更只经 `files.changed` 事件与快照送达）、归约与呈现；缺 `output`、缺 `changes`、缺 `bodyOffset` 或多余字段仍整体拒绝。运行中步骤的 output 为空串；迁移前旧行与非 edit/write 步骤的 `changes` 为 `null`。
