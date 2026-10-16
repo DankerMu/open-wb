@@ -59,22 +59,22 @@
 
 ## 1. omp-test-harness — 受控上游交错标记 `WORKBUDDY_INTERLEAVE`
 
-- [ ] 1.1 开工核对：
+- [x] 1.1 开工核对：
   - 重读 `server/test/support/fake-upstream.mjs` 的标记查找、答复轮与工具轮的判定、已武装闸门路径（`serveFinal` / `holdFinal`）与 `WORKBUDDY_PACE` 的分派处；
   - 重读 `server/test/support/fake-upstream-pace.mjs`（47 行）的写出函数，确认交错序列可以直接交给它写（只换记录列表），不复制节奏逻辑。
 
   验证：核对结果写进 PR。
-- [ ] 1.2 先写测试 `server/test/fake-upstream-interleave.test.ts`（`fake-upstream-pace.test.ts` 已 441 行，另开文件），覆盖 omp-test-harness「受控上游交错标记」：
+- [x] 1.2 先写测试 `server/test/fake-upstream-interleave.test.ts`（`fake-upstream-pace.test.ts` 已 441 行，另开文件），覆盖 omp-test-harness「受控上游交错标记」：
   - 「交错写出」：记录次序与内容逐字相等；服务端写出间隔 ≥ 20ms（只设下限，同 #910 的 PACE 测量位置）；每次写出时 `writableCorked` 为 0；
   - 「不改变其它请求」四例：无标记、同带 `WORKBUDDY_PACE`、带已武装闸门、工具轮，各与对照输出逐字节相同；
   - 同带 `WORKBUDDY_THINK` 时不另发其思考片；
   - 连接中途关闭时停止写出，不留未处理拒绝。
 
   验证：在未改动的代码上新用例判红。
-- [ ] 1.3 实现标记：`fake-upstream.mjs` 只加标记识别与一次调用，记录列表与写出交给 `fake-upstream-pace.mjs`。`fake-upstream.mjs` 合入后 ≤ 670 行。
+- [x] 1.3 实现标记：`fake-upstream.mjs` 只加标记识别与一次调用，记录列表与写出交给 `fake-upstream-pace.mjs`。`fake-upstream.mjs` 合入后 ≤ 670 行。
   验证：1.2 全绿。
-- [ ] 1.4 变异证据（逐条做、逐条撤销，结果贴进 PR）：去掉 25ms 间隔 → 间隔断言判红；把思考片挪到两片正文之前 → 「交错写出」判红；让本标记在同带 `WORKBUDDY_PACE` 时生效 → 「不改变其它请求」判红；带闸门时不忽略本标记 → 同上判红。
-- [ ] 1.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（通用纪律的合入门槛）。
+- [x] 1.4 变异证据（逐条做、逐条撤销，结果贴进 PR）：去掉 25ms 间隔 → 间隔断言判红；把思考片挪到两片正文之前 → 「交错写出」判红；让本标记在同带 `WORKBUDDY_PACE` 时生效 → 「不改变其它请求」判红；带闸门时不忽略本标记 → 同上判红。
+- [x] 1.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（通用纪律的合入门槛）。
 Suggested fixture level: compact - 只动测试夹具，不碰产品代码；行为由单测直接钉住（#910 组 1 先例）。
 Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半个标记，无法独立验证。
 

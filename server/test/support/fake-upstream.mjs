@@ -2,7 +2,12 @@
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { createFailureScript } from "./fake-upstream-failures.mjs";
-import { PACE_MARKER, writePacedSse } from "./fake-upstream-pace.mjs";
+import {
+  INTERLEAVE_MARKER,
+  PACE_MARKER,
+  writeInterleavedSse,
+  writePacedSse,
+} from "./fake-upstream-pace.mjs";
 
 const PATHS = new Set(["/chat/completions", "/v1/chat/completions"]);
 const DEFAULT_KEY = "fake";
@@ -197,13 +202,15 @@ function serveFinal(response, gates, messages, id, created, model) {
   const walkId = walkGateId(text);
   // Issue 1437: WORKBUDDY_PACE replaces only the ungated writes; held / armed gates are untouched.
   // It keeps THINK_PARTS even with WORKBUDDY_THINK_LONG: the spec names its three parts literally.
+  // Issue 1468: WORKBUDDY_INTERLEAVE likewise, yielding to WORKBUDDY_PACE and ignoring `think`.
   const reply = () => {
+    const frame = (delta, finish) => chunk(id, created, model, delta, finish);
     if (text.includes(PACE_MARKER)) {
-      writePacedSse(
-        response,
-        (delta, finish) => chunk(id, created, model, delta, finish),
-        THINK_PARTS,
-      );
+      writePacedSse(response, frame, THINK_PARTS);
+      return;
+    }
+    if (text.includes(INTERLEAVE_MARKER)) {
+      writeInterleavedSse(response, frame);
       return;
     }
     writeSse(response, textFrames(id, created, model, think));
