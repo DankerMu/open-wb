@@ -137,13 +137,13 @@ Minimal mergeable slice（3a）: atomic - 计数、写列与 fork 拷贝是同�
 - [x] 3.10 官方 omp 取证（3b）：在 `server/test/omp-official-delta-coalescing.test.ts` 追加一例，经 `openProxiedApp` 发送含 `WORKBUDDY_INTERLEAVE` 的 prompt（第一个请求是被世界拒绝的 bash 工具轮，第二个是交错答复轮）。断言 chat-stream「真 omp 链路上的开段偏移」在库这一层的部分：第一条 `thinking.delta` 之前的 `text.delta` 拼接恰为 `先说一句，再补一句。`；该消息恰一行段，`body_offset` 等于该拼接长度（10）、`thinking_offset` 0、`thinking_length` 3。快照断言在 5.2 追加。打印一行实测（`text.delta` 条数、段行），贴进 PR，不写进断言。该文件已在 `.github/scripts/ci-uid-isolation.sh:292` 的列表里，不改 CI。
   验证：`WORKBUDDY_OMP_TEST=1 OMP_BIN=<repo>/var/omp/omp` 下该文件通过。
 - [x] 3.11 实现（3b）：
-  - `delta-coalescer.ts` 的 `route`：思考分支改为「先冲刷缓冲着的正文 → 再 `spans.open` → 再 `#take`」（design D3）；
+  - `delta-coalescer.ts`：思考到达时「先冲刷缓冲着的正文 → 再开段 → 再取入本条」（design D3；实现为 `#take` 内 `#flushFor` → `#span`，单一冲刷点）；
   - `thinking-span.ts`：开段在清空 `thinking_ms` 的同一事务里插入段行；闭段在写累计时长的同一事务里写段的长度与毫秒（读写函数在 `store-segments.ts`）；`thinking.end` 负载本切片不变；
   - `store-branch.ts` 加段行拷贝（design D7）；撤回与重新生成不改代码（外键级联）。
   - 3.6 清单里的既有断言按通用纪律改写，逐条列进偏离记录。
 
   验证：3.7–3.10 全绿；`store.ts` ≤ 770 行（若 4 已先合入则 ≤ 774）。
-- [x] 3.12 变异证据（3b）：把 `route` 的次序改回「先开段后冲刷」→ 「合并器缓冲着正文时开段」判红，3.10 也应判红（偏移为 5；若 omp 把两片正文并成一帧发出则不判红，如实记录并贴实测行）；相邻两段合并成一行 → 「相邻的两段不合并」判红；`thinking_offset` 改按码点计 → 「上限之后的段」或截断用例判红（如实记录是哪一个）；拷贝漏掉段行 → 3.9 分叉用例判红。
+- [x] 3.12 变异证据（3b）：把 `#take` 的次序改回「先开段（`#span`）后冲刷（`#flushFor`）」→ 「合并器缓冲着正文时开段」判红，3.10 也应判红（偏移为 5；若 omp 把两片正文并成一帧发出则不判红，如实记录并贴实测行）；相邻两段合并成一行 → 「相邻的两段不合并」判红；`thinking_offset` 改按码点计 → 「上限之后的段」或截断用例判红（如实记录是哪一个）；拷贝漏掉段行 → 3.9 分叉用例判红。
 - [x] 3.13 整刀验证（3b）：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 `omp-official-delta-coalescing.test.ts` 全绿。
 Suggested fixture level（3b）: expanded - 改合并器的冲刷次序（并发 / 次序风险包）与开段、闭段的持久化。
 Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭、fork 拷贝是同一段数据的产生与搬运；先冲刷而不记段没有可观察的价值，记段而不先冲刷则记下的偏移是错的。

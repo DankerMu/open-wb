@@ -349,3 +349,42 @@ describe("chat-sessions「Regenerate replaces only the last assistant message」
     });
   });
 });
+
+describe("thinking-fold「思考时长记录与下发」: segment rows count this message's steps only", () => {
+  it("steps of an earlier message do not count: steps_before 0, then 1 after its own step", () => {
+    withFakeClock(FIXED_NOW, () => {
+      withSessionStore(({ db, store }) => {
+        const session = store.create(OWNER).id;
+        const earlier = store.acceptPrompt(session, OWNER, "one").assistantMessageId;
+        step(store, earlier, 0);
+        step(store, earlier, 1);
+        expect(store.finishTurn(earlier, "done")).toBe(true);
+
+        const reply = store.acceptPrompt(session, OWNER, "two").assistantMessageId;
+        const first = store.openThinkingSegment(reply);
+        store.closeThinkingSegment(reply, first, 10, 10);
+        step(store, reply, 0);
+        const second = store.openThinkingSegment(reply);
+        expect(segmentsOf(db, reply).map((row) => [row.id, row.steps_before])).toEqual([
+          [first, 0],
+          [second, 1],
+        ]);
+
+        // A close names its own message's row: another message's or a missing id changes nothing.
+        const state = () => ({
+          segments: segmentsOf(db, reply),
+          ms: db.prepare("SELECT id, thinking_ms FROM chat_messages ORDER BY id").all(),
+        });
+        const before = state();
+        for (const id of [second + 1, first]) {
+          expect(() => store.closeThinkingSegment(earlier, id, 99, 99)).toThrow(
+            "thinking segment close must change exactly 1 row",
+          );
+        }
+        expect(db.isTransaction).toBe(false);
+        expect(state()).toEqual(before);
+        expect(store.finishTurn(reply, "done")).toBe(true);
+      });
+    });
+  });
+});
