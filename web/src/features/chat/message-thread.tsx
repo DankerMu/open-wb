@@ -2,6 +2,9 @@
 // thread-viewport.tsx，思考折叠在 thinking-fold.tsx，工具调用组在 tool-call-group.tsx，操作行在
 // message-action-row.tsx，已结算审批记录在 approval-card.tsx（待决审批不在消息里，见 composer-dock.tsx）。
 // 文件变更卡在 file-changes-card.tsx，产物卡在 artifact-card.tsx，按 D4 的块次序挂在助手消息里。
+// 助手消息的分段区（change chat-interleaved-segments D9、D10）：本文件只按 message-segments.ts 判布局——
+// 分段布局交给 message-segments-view.tsx 逐块渲染，旧布局仍是「思考 → 正文 → 一个工具段」——其后各部件
+// 一律排在分段区之后。
 // 用户消息的附件列表（design D15）就在本文件，数据取自透传字段。
 import {
   AssistantRuntimeProvider,
@@ -17,12 +20,12 @@ import { formatSize } from "../files/index.js";
 import { ApprovalRecords } from "./approval-card.js";
 import { ArtifactCards } from "./artifact-card.js";
 import { FileChangesCard } from "./file-changes-card.js";
-import { MarkdownBody } from "./markdown-body.js";
 import { AssistantActions, UserActions } from "./message-action-row.js";
 import { MessageError } from "./message-error.js";
+import { segmentMessage } from "./message-segments.js";
+import { MessageBody, MessageSegments } from "./message-segments-view.js";
 import { hasVisibleBlock, MessageWaiting } from "./message-waiting.js";
 import { type ChatMessageCustom, messageCustom } from "./runtime-convert.js";
-import { SmoothText } from "./smooth-text.js";
 import type { ChatState } from "./stream.js";
 import { ThinkingFold } from "./thinking-fold.js";
 import { ThreadViewport, type TranscriptHandle } from "./thread-viewport.js";
@@ -76,9 +79,10 @@ const REGENERABLE: ReadonlySet<ChatState["status"]> = new Set(["done", "failed",
 const CURRENT_MATCH =
   "aria-[current=true]:bg-(--wb-brand-primary-subtle) aria-[current=true]:shadow-[0_0_0_6px_var(--wb-brand-primary-subtle)]";
 
-function partText(message: MessageState, type: "reasoning" | "text"): string {
+/** 用户消息的正文：运行时原样保留用户消息的 text part（助手消息的原文另从透传字段读）。 */
+function partText(message: MessageState): string {
   for (const part of message.content) {
-    if (part.type === type) return part.text;
+    if (part.type === "text") return part.text;
   }
   return "";
 }
@@ -165,38 +169,56 @@ function MessageAttachments({ attachments }: { attachments: ChatMessageCustom["a
 }
 
 /**
- * 正文：Markdown，或已停止且为空时的占位；`dot`（运行中且已有可见块，见 message-waiting.tsx）时在末尾带
- * 一个脉动的小圆点（design D6），减少动态效果时无动画。圆形写 `rounded-[50%]` 而不是 rounded-full：规格
- * 要求计算 `border-radius` 恰为 50%，Tailwind 4 的 rounded-full 编译成一个极大的像素值（实测：计算值为
- * 3.35544e+07px）。running 时正文经 smooth-text.tsx 逐字展开（design D8）；等待指示让位时本组件才挂载，
- * 此时的首段与「从空串开始的第一段」同样直接整段显示（useSmooth 的分支，7a 实测）。
+ * 分段区（change chat-interleaved-segments D9、D10）：切段函数判为旧布局时是「思考 → 正文 → 一个工具段」
+ * （issue 910 的次序与开合规则），否则逐块渲染。运行中等待指示与小圆点恰好一个（design D6）：同一个判据的
+ * 两面；等待指示在分段区末尾（旧布局下即正文的位置）。
  */
-function MessageBody({
-  dot,
-  status,
+function SegmentArea({
+  custom,
   text,
+  thinking,
 }: {
-  dot: boolean;
-  status: ChatMessageCustom["status"];
+  custom: ChatMessageCustom;
   text: string;
+  thinking: string;
 }) {
+  const { approvals, error, retrying, status, steps, thinkingActive, thinkingMs } = custom;
+  const running = status === "running";
+  const shown = hasVisibleBlock({ approvals, error, retrying, steps, text, thinking });
+  const { thinkingSegments } = custom;
+  const blocks = segmentMessage({
+    content: text,
+    status,
+    steps,
+    thinking,
+    thinkingActive,
+    thinkingSegments,
+  });
+  if (blocks !== null) {
+    return (
+      <>
+        <MessageSegments blocks={blocks} dot={running && shown} status={status} />
+        {running && !shown ? <MessageWaiting /> : null}
+      </>
+    );
+  }
   return (
-    <div className="text-sm leading-7 wrap-anywhere text-foreground" data-slot="message-body">
-      {status === "stopped" && text === "" ? (
-        <p className="text-(--wb-text-tertiary)">（已停止生成）</p>
-      ) : (
-        <SmoothText running={status === "running"} text={text}>
-          {(shown) => <MarkdownBody text={shown} />}
-        </SmoothText>
-      )}
-      {dot ? (
-        <span
-          aria-hidden="true"
-          className="ml-0.5 inline-block size-2 animate-pulse rounded-[50%] bg-(--wb-brand-primary) align-middle motion-reduce:animate-none"
-          data-slot="message-caret"
+    <>
+      {thinking ? (
+        <ThinkingFold
+          inProgress={running}
+          text={thinking}
+          thinkingActive={thinkingActive}
+          thinkingMs={thinkingMs}
         />
       ) : null}
-    </div>
+      {running && !shown ? (
+        <MessageWaiting />
+      ) : (
+        <MessageBody dot={running} status={status} text={text} />
+      )}
+      <ToolCallGroup steps={steps} />
+    </>
   );
 }
 
@@ -224,10 +246,10 @@ const AssistantMessage = memo(function AssistantMessage({
   text: string;
   thinking: string;
 }) {
-  const { approvals, error, retrying, status, steps, thinkingActive, thinkingMs } = custom;
+  const { approvals, error, retrying, status, steps } = custom;
   const running = status === "running";
-  // 运行中等待指示与小圆点恰好一个（design D6）：同一个判据的两面。
-  const shown = hasVisibleBlock({ approvals, error, retrying, steps, text, thinking });
+  // 只含空白的正文不给 `复制`：与改读透传原文之前（运行时丢掉空白 text part、正文为空串）相同。
+  const copyText = /\S/u.test(text) ? text : "";
   return (
     <MessagePrimitive.Root asChild>
       <article
@@ -243,20 +265,7 @@ const AssistantMessage = memo(function AssistantMessage({
           <BrandMark size={28} />
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-2.5" data-slot="message-content">
-          {thinking ? (
-            <ThinkingFold
-              running={running}
-              text={thinking}
-              thinkingActive={thinkingActive}
-              thinkingMs={thinkingMs}
-            />
-          ) : null}
-          {running && !shown ? (
-            <MessageWaiting />
-          ) : (
-            <MessageBody dot={running} status={status} text={text} />
-          )}
-          <ToolCallGroup steps={steps} />
+          <SegmentArea custom={custom} text={text} thinking={thinking} />
           <ApprovalRecords approvals={approvals} />
           <MessageError error={error} retrying={retrying} status={status} />
           <FileChangesCard onReveal={onReveal} space={space} steps={steps} />
@@ -271,10 +280,10 @@ const AssistantMessage = memo(function AssistantMessage({
               已停止
             </p>
           ) : null}
-          {!running && (text !== "" || regenerable) ? (
+          {!running && (copyText !== "" || regenerable) ? (
             <AssistantActions
               regenerate={regenerable ? { disabled: locked, onRegenerate } : undefined}
-              text={text}
+              text={copyText}
             />
           ) : null}
         </div>
@@ -335,7 +344,6 @@ export function Thread({
     ({ message }: { message: MessageState }) => {
       const custom = messageCustom(message.metadata.custom);
       const current = message.id === String(currentId);
-      const text = partText(message, "text");
       return message.role === "assistant" ? (
         <AssistantMessage
           client={client}
@@ -346,8 +354,8 @@ export function Thread({
           onReveal={onReveal}
           regenerable={message.id === regenerableId}
           space={space}
-          text={text}
-          thinking={partText(message, "reasoning")}
+          text={custom.content}
+          thinking={custom.thinking ?? ""}
         />
       ) : (
         <UserMessage
@@ -358,7 +366,7 @@ export function Thread({
           locked={locked}
           onFork={onFork}
           onUndo={onUndo}
-          text={text}
+          text={partText(message)}
         />
       );
     },

@@ -8,18 +8,23 @@ type ChatStepView = ChatMessageView["steps"][number];
 /**
  * 应用自有字段，经 `metadata.custom` 原值透传给应用层组件：审批、原始状态、失败对象与重试标记、步骤
  * （步骤带 `changes` 与四态 `status`，tool-call part 表达不了它们）、用户消息的可撤回状态与附件、
- * 思考时长与进行中标记（issue 910）、分段位置（issue 1474：段、步骤 `bodyOffset`、审批 `stepId`）。
+ * 思考时长与进行中标记（issue 910）、分段位置（issue 1474：段、步骤 `bodyOffset`、审批 `stepId`），
+ * 以及助手消息的正文与思考原文（issue 1475）：运行时把只含空白的 text / reasoning part 整个丢掉
+ * （`@assistant-ui/core` 0.3.22 `runtime/utils/thread-message-like.js:51`、`:54`），而分段的偏移、等待指示
+ * 的「正文为空」都要按原文算。
  */
 export type ChatMessageCustom = Pick<
   ChatMessageView,
   | "approvals"
   | "attachments"
+  | "content"
   | "error"
   | "retrying"
   | "status"
   | "steps"
   | "thinkingActive"
   | "thinkingMs"
+  | "thinking"
   | "thinkingSegments"
   | "undo"
 >;
@@ -51,10 +56,12 @@ export function convertMessage(message: ChatMessageView): ThreadMessageLike {
   const custom: ChatMessageCustom = {
     approvals: message.approvals,
     attachments: message.attachments,
+    content: message.content,
     error: message.error,
     retrying: message.retrying,
     status: message.status,
     steps: message.steps,
+    thinking: message.thinking,
     thinkingActive: message.thinkingActive,
     thinkingMs: message.thinkingMs,
     thinkingSegments: message.thinkingSegments,

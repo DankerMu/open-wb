@@ -228,13 +228,13 @@ Minimal mergeable slice: atomic - 服务端事件字段、快照键与 web 的�
 
 ## 6. chat-web / thinking-fold — 分段呈现
 
-- [ ] 6.1 开工核对：
+- [x] 6.1 开工核对：
   - 重读 `message-thread.tsx:230-258` 的 `AssistantMessage`、`thinking-fold.tsx`、`message-waiting.tsx`、正文逐字展开的组件与 `MessageBody`；
   - 对 design D14 清单项 3（块次序）逐条确认：表外列出的「不需要改写」的块次序断言（`chat-page-file-changes.test.tsx:685-700`、`:717-724`，`chat-thinking.test.tsx:655-680`，`chat-page-artifact-card.test.tsx:555-575`）的夹具在 5.6 之后确为旧布局（步骤 `bodyOffset: null` 或有思考而无段）。不是的停下更新 D14；
   - 对 D14 清单项 5、6（B12、B5）逐条确认：D14 表里两行 `chat-thinking-title.test.tsx` 之外，「不需要改写」列出的思考用例与走查步骤（`chat-thinking.test.tsx` T8 与其余（T6 已移入 D14 改写表）、`chat-thinking-preview.test.tsx`、`chat-thinking-smooth.test.tsx`、`chat-thinking-title.test.tsx:171-257`、`ui-walk-thinking-preview.ts`、`ui-walk-sessions.spec.ts:320-340`）按 D14 的判定确为旧布局，或为分段布局而断言与 B12 一致。
 
   验证：核对结果写进 PR。
-- [ ] 6.2 先写测试：
+- [x] 6.2 先写测试：
   - `web/test/message-segments.test.ts`（纯）：chat-web「助手消息分段」四个场景全部 WHEN；
   - jsdom `Thread`：chat-web「消息线程」的「分段布局的块次序」（只断言分段区的块与次序、操作行与 `复制`；同一场景里「消息内没有兜底确认记录」与「`bash` 步骤卡带 `超时自动允许` 小标记」两条依赖切片 8，留给 8.2）「分段布局下的小圆点」（含分段区一个块也没有时小圆点的位置、`（已停止生成）` 占位是 `message-body`、只有思考时没有空的 `message-body`）「助手块次序」（旧布局）「正文逐字展开」（分段下只有最后一个正文段增长）、「实时与快照切段一致」（事件归约出的视图与快照视图经切段函数逐块相等）；
   - thinking-fold「深度思考折叠块呈现」改写后的「流式展开、终态收起」（分段一例：`thinking.end` 即收起；旧布局一例：展开到终态）「标题三态与多段思考」（任何时刻至多一个折叠块展开）「用户手动切换保留」（含分段布局下展开已结束的段后跨过其它事件与终态保持展开）「分段布局下只展开进行中的一段」（`data-running` 与流式预览只在进行中那一段）「终态消息主体限高」的 running 例、「快照中的思考与截断标记」；
@@ -242,13 +242,13 @@ Minimal mergeable slice: atomic - 服务端事件字段、快照键与 web 的�
   - turn-control「拷贝分段位置」与 message-undo「撤回连带删除分段数据」里「经 chat-web『助手消息分段』得到逐块相等的分段」的子句：用 3.9 的服务端测试读出的源与副本（撤回前与撤回后）两组值作夹具，经切段函数断言输出逐块相等（服务端测试调不到 web 函数，这一半在这里做）。
 
   验证：在未改动的代码上判红。
-- [ ] 6.3 实现：新模块 `web/src/features/chat/message-segments.ts`（纯切段函数）与 `message-segments-view.tsx`（按块渲染：`MessageBody`、`ThinkingFold`、`ToolCallGroup`，React key 取块键）；`message-thread.tsx` 只判布局并把其后各部件排在分段区之后；`thinking-fold.tsx` 的标题取段数据，开合、`data-running` 与预览的依据由消息的 `running` 换成传入的「进行中」（旧布局传消息 running，行为与 #910 相同；分段布局传该段的进行中，design D10）。拷入层零改动。
+- [x] 6.3 实现：新模块 `web/src/features/chat/message-segments.ts`（纯切段函数）与 `message-segments-view.tsx`（按块渲染：`MessageBody`、`ThinkingFold`、`ToolCallGroup`，React key 取块键）；`message-thread.tsx` 只判布局并把其后各部件排在分段区之后；`thinking-fold.tsx` 的标题取段数据，开合、`data-running` 与预览的依据由消息的 `running` 换成传入的「进行中」（旧布局传消息 running，行为与 #910 相同；分段布局传该段的进行中，design D10）。拷入层零改动。
   验证：6.2 全绿；`message-thread.tsx` ≤ 425 行；knip 无未用导出。
-- [ ] 6.3a 按 design D14 表改写标「6」的全部行（`chat-thinking.test.tsx:422-427`、`:443` 的 T6，清单项 3；`chat-thinking-title.test.tsx:107-139`、`:145-169`，清单项 5、6；通用纪律第 3 种改法，引用 issue 需求 1、B12、B5），逐条列进偏离记录；表外的思考用例只补键（5.6），不改断言。
-- [ ] 6.4 对话内搜索（design D13）：jsdom 用例覆盖 chat-web「工具段摘要与折叠」的「对话内搜索不改变段的展开态」；conversation-search 的既有用例不改、全绿。
-- [ ] 6.5 验收清单：按 design D15 改写 CH-14、CH-117（先调用工具的回答，小圆点在工具段之下）、CH-118（含 B12：一段思考结束即收起），新增「分段交替显示与刷新后一致」一行（受控上游带 `WORKBUDDY_INTERLEAVE`），结论 `待签`。
-- [ ] 6.6 变异证据：块键去掉种类前缀 → 「先思考后正文的消息里块键互不相同」判红（并在控制台出现 React 同级重复键警告）；分段区没有块时不渲染小圆点 → 「分段区没有块时的小圆点」判红；切段函数忽略 `stepsBefore`（思考段一律排在同偏移的步骤之后）→ 「交替切段」第二个 WHEN 判红；旧布局判定漏掉条件 2 → 「旧布局判定」判红；只含空白的正文段照常输出 → 「空白与空思考不分隔工具段」判红；工具段的 React key 改用数组下标并在前面插入一段 → 双工具段展开态用例判红；折叠块共用一个开合状态 → 「用户手动切换保留」判红；分段布局下折叠块仍按消息 running 开合（不在段结束时收起）→ 「分段布局下只展开进行中的一段」与改写后的「流式展开、终态收起」判红；旧布局也改成按段开合 → 「流式展开、终态收起」的旧布局例判红。
-- [ ] 6.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（走查此时看到的真 omp 消息已是分段布局；走查里若有表外的块次序断言变红，停下更新 D14）。
+- [x] 6.3a 按 design D14 表改写标「6」的全部行（`chat-thinking.test.tsx:422-427`、`:443` 的 T6，清单项 3；`chat-thinking-title.test.tsx:107-139`、`:145-169`，清单项 5、6；通用纪律第 3 种改法，引用 issue 需求 1、B12、B5），逐条列进偏离记录；表外的思考用例只补键（5.6），不改断言。
+- [x] 6.4 对话内搜索（design D13）：jsdom 用例覆盖 chat-web「工具段摘要与折叠」的「对话内搜索不改变段的展开态」；conversation-search 的既有用例不改、全绿。
+- [x] 6.5 验收清单：按 design D15 改写 CH-14、CH-117（先调用工具的回答，小圆点在工具段之下）、CH-118（含 B12：一段思考结束即收起），新增「分段交替显示与刷新后一致」一行（受控上游带 `WORKBUDDY_INTERLEAVE`），结论 `待签`。
+- [x] 6.6 变异证据：块键去掉种类前缀 → 「先思考后正文的消息里块键互不相同」判红（并在控制台出现 React 同级重复键警告）；分段区没有块时不渲染小圆点 → 「分段区没有块时的小圆点」判红；切段函数忽略 `stepsBefore`（思考段一律排在同偏移的步骤之后）→ 「交替切段」第二个 WHEN 判红；旧布局判定漏掉条件 2 → 「旧布局判定」判红；只含空白的正文段照常输出 → 「空白与空思考不分隔工具段」判红；工具段的 React key 改用数组下标并在前面插入一段 → 双工具段展开态用例判红；折叠块共用一个开合状态 → 「用户手动切换保留」判红；分段布局下折叠块仍按消息 running 开合（不在段结束时收起）→ 「分段布局下只展开进行中的一段」与改写后的「流式展开、终态收起」判红；旧布局也改成按段开合 → 「流式展开、终态收起」的旧布局例判红。
+- [x] 6.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（走查此时看到的真 omp 消息已是分段布局；走查里若有表外的块次序断言变红，停下更新 D14）。
 Suggested fixture level: expanded - 旧消息兼容（045 之前的消息走旧布局）是本切片的核心判定；渲染次序波及全部助手消息。
 Minimal mergeable slice: atomic - 切段函数与渲染器必须一起合入（knip 禁止未用导出），且不能出现半分段的呈现。
 

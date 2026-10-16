@@ -95,6 +95,15 @@ function expanded(article = assistantAt()) {
   return triggerOf(article).getAttribute("aria-expanded") === "true";
 }
 
+/** 消息内每个折叠块的 `[标题, 是否带流光, 是否展开]`，按文档次序（分段布局下每段一个）。 */
+function foldTitles(article = assistantAt()): Array<[string, boolean, boolean]> {
+  const roots = article.querySelectorAll<HTMLElement>('[data-slot="reasoning-root"]');
+  return [...roots].map((fold) => {
+    const [text, shimmer] = title(fold);
+    return [text, shimmer, expanded(fold)];
+  });
+}
+
 function thinkingShown(article = assistantAt()) {
   return article.querySelector('[data-slot="reasoning-text"]')?.textContent;
 }
@@ -104,7 +113,9 @@ function answerShown(article = assistantAt()) {
 }
 
 describe("thinking-fold「流式展开、终态收起」", () => {
-  it("正在思考…（流光）→ thinking.end 1400 后 已思考 1 秒 → turn.end done 收起、标题不变，主体与复制不变", async () => {
+  // change chat-interleaved-segments D14 清单项 5（owner 2026-10-15 B12）：从空思考由事件驱动，是分段布局，
+  // 该段的 thinking.end 即收起、不再带 data-running，不等 turn.end。
+  it("正在思考…（流光）→ thinking.end 1400 后 已思考 1 秒 且立即收起 → turn.end done 仍收起、标题不变，主体与复制不变", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(window.navigator, "clipboard", {
       configurable: true,
@@ -127,7 +138,8 @@ describe("thinking-fold「流式展开、终态收起」", () => {
         thinkingMs: 1400,
       },
     });
-    expect([title(), expanded()]).toEqual([["已思考 1 秒", false], true]);
+    expect([title(), expanded()]).toEqual([["已思考 1 秒", false], false]);
+    expect(triggerOf(assistantAt()).closest("[data-running]")).toBeNull();
 
     session.emit("text.delta", { delta: "答案" });
     session.emit("turn.end", { status: "done" });
@@ -151,9 +163,11 @@ describe("thinking-fold「流式展开、终态收起」", () => {
 });
 
 describe("thinking-fold「标题三态与多段思考」", () => {
-  it("delta、end 400、step.start、delta、end 2600、turn.end：正在思考… → 已思考 1 秒 → 正在思考… → 已思考 3 秒，终态后不变", async () => {
+  // change chat-interleaved-segments D14 清单项 5、6（B5、B12，issue 需求 2）：分段布局下每段一个折叠块，各算本段
+  // 时长（第二段 segment.thinkingMs 2200），只展开进行中的一段。
+  it("delta、end 400、step.start、delta、end 2600（本段 2200）、turn.end：第一个折叠块 正在思考… → 已思考 1 秒 后不变，第二个在工具段之后 正在思考… → 已思考 2 秒；任何时刻至多一个展开", async () => {
     const session = await openSession(transcript("running", {}));
-    const seen: Array<[string, boolean]> = [];
+    const seen: Array<Array<[string, boolean, boolean]>> = [];
     const events: Array<[string, Record<string, unknown>]> = [
       ["thinking.delta", { delta: "先" }],
       [
@@ -188,16 +202,26 @@ describe("thinking-fold「标题三态与多段思考」", () => {
     ];
     for (const [type, data] of events) {
       session.emit(type, data);
-      seen.push(title());
+      seen.push(foldTitles());
     }
 
+    const first: [string, boolean, boolean] = ["已思考 1 秒", false, false];
+    const second: [string, boolean, boolean] = ["已思考 2 秒", false, false];
     expect(seen).toEqual([
-      [ACTIVE, true],
-      ["已思考 1 秒", false],
-      ["已思考 1 秒", false],
-      [ACTIVE, true],
-      ["已思考 3 秒", false],
-      ["已思考 3 秒", false],
+      [[ACTIVE, true, true]],
+      [first],
+      [first],
+      [first, [ACTIVE, true, true]],
+      [first, second],
+      [first, second],
+    ]);
+    expect(seen.every((states) => states.filter(([, , open]) => open).length <= 1)).toBe(true);
+    const content = assistantAt().querySelector('[data-slot="message-content"]');
+    expect([...(content?.children ?? [])].map((child) => child.getAttribute("data-slot"))).toEqual([
+      "reasoning-root",
+      "tool-group-root",
+      "reasoning-root",
+      "message-actions",
     ]);
   });
 
