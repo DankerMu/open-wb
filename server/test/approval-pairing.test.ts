@@ -127,6 +127,16 @@ describe("rule 2: a select whose request publishes now pairs the earliest runnin
     ]);
   });
 
+  // Issue 1474: select's return value is the request's stepId; a zero-row write pairs nothing.
+  it("select returns the paired step id, and null when the pairing write hit no row", () => {
+    const steps = new PumpSteps(MESSAGE);
+    const store = recordingStore((requestId) => (requestId === "r1" ? null : 5));
+    steps.started("c1", 10, "bash", null);
+    expect(steps.select(select("r1", "bash"), PUBLISHES, store)).toBeNull();
+    expect(steps.takeApproval("bash")).toBe("r1");
+    expect(steps.select(select("r2", "bash"), PUBLISHES, store)).toBe(10);
+  });
+
   it("frames that are no approval select are neither paired nor queued", () => {
     const steps = new PumpSteps(MESSAGE);
     const store = recordingStore();

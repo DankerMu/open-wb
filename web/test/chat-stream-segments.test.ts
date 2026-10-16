@@ -270,6 +270,26 @@ describe("chat-web「分段位置归约」", () => {
     );
   });
 
+  it("a thinking.end after a closed segment appends: the closed one is kept, [A, B]", () => {
+    const input = deepFreeze(chatStateFromSnapshot(snapshotWith()));
+    const a = {
+      bodyOffset: 0,
+      thinkingOffset: 0,
+      thinkingLength: 1,
+      stepsBefore: 0,
+      thinkingMs: 300,
+    };
+    const b = {
+      bodyOffset: 0,
+      thinkingOffset: 1,
+      thinkingLength: 0,
+      stepsBefore: 0,
+      thinkingMs: 100,
+    };
+    const states = run(input, [think("想"), thinkingEnd(a), thinkingEnd(b)]);
+    expect(assistant(states.at(-1) as ChatState).thinkingSegments).toStrictEqual([a, b]);
+  });
+
   it("thinking.end on no segments appends; an unknown approvalId is ignored; turn.start clears", () => {
     const input = deepFreeze(chatStateFromSnapshot(snapshotWith()));
     const zero = {
