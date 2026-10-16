@@ -476,7 +476,7 @@ describe("file route: the target is swapped between lstat and the sniff open", (
           closed: io.closed(),
           streamsOfTarget: vi
             .mocked(fs.createReadStream)
-            .mock.calls.filter(([opened]) => opened === target).length,
+            .mock.calls.filter(([, options]) => descriptors.includes(Object(options).fd)).length,
           audits: auditCount(db),
         };
       } finally {

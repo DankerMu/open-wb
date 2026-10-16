@@ -12,7 +12,9 @@ import fs, {
   lstatSync,
   mkdirSync,
   openSync,
+  renameSync,
   symlinkSync,
+  truncateSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -25,7 +27,12 @@ import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
 import { openRegularFile } from "../src/workspaces/regular-file.js";
-import { bearerCookie, loginSessionId, NOT_FOUND_ENVELOPE } from "./auth-lifecycle-helpers.js";
+import {
+  bearerCookie,
+  INTERNAL_ERROR_ENVELOPE,
+  loginSessionId,
+  NOT_FOUND_ENVELOPE,
+} from "./auth-lifecycle-helpers.js";
 import {
   descriptorsOf,
   expectSwappedUnread,
@@ -122,6 +129,30 @@ describe("openRegularFile: only a regular file opens", () => {
     expect(fstatSync(opened.descriptors[0] as number).isFile()).toBe(true);
     expect(opened.closed).toEqual([]);
     expect(opened.reads).toBe(0);
+    fs.closeSync(opened.descriptors[0] as number);
+  });
+
+  it("keeps the size of the inode it opened when another file is renamed onto the path after the open", () => {
+    const path = join(workspaceTempDir(), "readme.md");
+    writeFileSync(path, README);
+    writeFileSync(`${path}.next`, Buffer.alloc(5000, 0x61));
+    const realOpenSync = fs.openSync;
+    let renamed = false;
+    // The window between the open and its fstat: the real open returns, then the path changes.
+    vi.spyOn(fs, "openSync").mockImplementation(((file, flags, mode) => {
+      const fd = realOpenSync(file, flags, mode);
+      if (file === path && !renamed) {
+        renamed = true;
+        renameSync(`${path}.next`, path);
+      }
+      return fd;
+    }) as typeof fs.openSync);
+    const opened = open(path);
+
+    expect(renamed).toBe(true);
+    expect(lstatSync(path).size).toBe(5000);
+    expect(opened.outcome).toEqual({ fd: opened.descriptors[0], size: README.length });
+    expect(opened.closed).toEqual([]);
     fs.closeSync(opened.descriptors[0] as number);
   });
 
@@ -293,7 +324,7 @@ describe("file route: the size is the opened inode's", () => {
   });
 });
 
-describe("file route: a sniffed 415 closes the one descriptor it read", () => {
+describe("file route: a refused file closes the one descriptor it opened", () => {
   it("answers 415 for blob.bin after one read of at most 8192 bytes through its only descriptor, then closes it", async () => {
     await withFiles(async (files) => {
       const target = join(files.root, "blob.bin");
@@ -315,6 +346,62 @@ describe("file route: a sniffed 415 closes the one descriptor it read", () => {
       expect(vi.mocked(fs.read)).not.toHaveBeenCalled();
       expect(vi.mocked(fs.createReadStream)).not.toHaveBeenCalled();
       expect(closeSync.mock.calls.map(([closed]) => closed)).toEqual([fd]);
+    });
+  });
+
+  it("answers 413 for a 21 MiB huge.png after opening it once and reading nothing, then closes it", async () => {
+    await withFiles(async (files) => {
+      const target = join(files.root, "huge.png");
+      writeFileSync(target, "");
+      truncateSync(target, 21 * 1024 * 1024);
+      spyBodyIo();
+      const closeSync = vi.spyOn(fs, "closeSync");
+      syncBuiltinESMExports();
+
+      const response = await requestFile(files, "huge.png");
+
+      expectWorkspaceResponse(response, 413, {
+        error: { code: "preview_too_large", message: "文件过大，无法预览" },
+      });
+      const [fd] = descriptorsOf(target);
+      expect(descriptorsOf(target)).toHaveLength(1);
+      expect(vi.mocked(fs.readSync).mock.calls.filter(([read]) => read === fd)).toEqual([]);
+      expect(vi.mocked(fs.read)).not.toHaveBeenCalled();
+      expect(vi.mocked(fs.createReadStream)).not.toHaveBeenCalled();
+      expect(closeSync.mock.calls.map(([closed]) => closed)).toEqual([fd]);
+    });
+  });
+
+  it("answers a clean 500 when the sniff read of blob.bin fails, and closes the descriptor it opened", async () => {
+    await withFiles(async (files) => {
+      const target = join(files.root, "blob.bin");
+      writeFileSync(target, "must-not-leave");
+      const realReadSync = fs.readSync as (...args: unknown[]) => number;
+      spyBodyIo();
+      let failed = 0;
+      vi.mocked(fs.readSync).mockImplementation(((fd: number, ...rest: unknown[]) => {
+        if (!descriptorsOf(target).includes(fd)) {
+          return realReadSync(fd, ...rest);
+        }
+        failed += 1;
+        throw Object.assign(new Error("EIO: i/o error, read"), {
+          code: "EIO",
+          errno: -5,
+          syscall: "read",
+        });
+      }) as typeof fs.readSync);
+      syncBuiltinESMExports();
+
+      const response = await requestFile(files, "blob.bin");
+
+      expect(failed).toBe(1);
+      expectWorkspaceResponse(response, 500, INTERNAL_ERROR_ENVELOPE);
+      expect(response.payload).not.toContain("must-not-leave");
+      expect(response.headers["x-workbuddy-size"]).toBeUndefined();
+      const [fd] = descriptorsOf(target);
+      expect(descriptorsOf(target)).toHaveLength(1);
+      expect(() => fstatSync(fd as number)).toThrow(/EBADF/);
+      expect(vi.mocked(fs.createReadStream)).not.toHaveBeenCalled();
     });
   });
 });

@@ -1,10 +1,12 @@
 import { execFileSync } from "node:child_process";
 import fs, {
   appendFileSync,
+  closeSync,
   fstatSync,
+  ftruncateSync,
   mkdirSync,
+  openSync,
   symlinkSync,
-  truncateSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -512,27 +514,40 @@ describe("workspace download: what was opened is what is sent and audited", () =
     15_000,
   );
 
-  it("sends and audits the size of the opened inode when the file is cut short after the lstat", async () => {
-    await withWorkspacesApp(async (fixture) => {
-      const { app, db } = fixture;
-      const target = join(seedWorkspace(fixture), "big.bin");
-      const bytes = patternedBytes(1000);
-      writeFileSync(target, bytes);
-      const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
-      const swapped = swapOnFirstOpen(target, () => {
-        truncateSync(target, 600);
-        return undefined;
+  it.each([
+    ["cut short", 600],
+    ["grown to 1400 bytes", 1400],
+  ] as const)(
+    "sends and audits the size of the opened inode when the file is %s after the lstat",
+    async (_label, size) => {
+      await withWorkspacesApp(async (fixture) => {
+        const { app, db } = fixture;
+        const target = join(seedWorkspace(fixture), "big.bin");
+        const bytes = patternedBytes(1000);
+        writeFileSync(target, bytes);
+        const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
+        // Through a descriptor opened beforehand: the change adds no open of the target of its own.
+        const writer = openSync(target, "r+");
+        const swapped = swapOnFirstOpen(target, () => {
+          ftruncateSync(writer, size);
+          return () => closeSync(writer);
+        });
+        try {
+          const response = await download(app, cookie, "big.bin");
+
+          expect(swapped.record().swaps).toBe(1);
+          expect(response.statusCode).toBe(200);
+          expect(response.headers["content-length"]).toBe(String(size));
+          expect(response.rawPayload.length).toBe(size);
+          const expected = Buffer.concat([bytes, Buffer.alloc(400)]).subarray(0, size);
+          expect(response.rawPayload.equals(expected)).toBe(true);
+          expect(auditRows(db, "file.download")).toEqual([downloadAudit("big.bin", size)]);
+        } finally {
+          swapped.cleanup();
+        }
       });
-
-      const response = await download(app, cookie, "big.bin");
-
-      expect(swapped.record().swaps).toBe(1);
-      expect(response.statusCode).toBe(200);
-      expect(response.headers["content-length"]).toBe("600");
-      expect(response.rawPayload.equals(bytes.subarray(0, 600))).toBe(true);
-      expect(auditRows(db, "file.download")).toEqual([downloadAudit("big.bin", 600)]);
-    });
-  });
+    },
+  );
 });
 
 describe("attachmentDisposition", () => {
