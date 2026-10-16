@@ -326,6 +326,7 @@ describe("core/db chat schema", () => {
         ["ended_at", "INTEGER", 0, null, 0, 0],
         ["output", "TEXT", 0, null, 0, 0],
         ["changes", "TEXT", 0, null, 0, 0],
+        ["body_offset", "INTEGER", 0, null, 0, 0],
       ]);
       expect(db.prepare("PRAGMA foreign_key_list('chat_sessions')").all()).toEqual([
         expect.objectContaining({

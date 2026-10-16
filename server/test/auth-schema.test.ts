@@ -502,6 +502,7 @@ function expectAuthSchema(db: DatabaseSync): void {
     "chat_messages",
     "chat_sessions",
     "chat_steps",
+    "chat_thinking_segments",
     "chat_turn_snapshots",
     "workspaces",
   ]);
