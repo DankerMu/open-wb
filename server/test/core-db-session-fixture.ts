@@ -45,7 +45,8 @@ export const W_MISSING = "99999999999999999999999999999999";
 
 // [name, type, notnull, dflt_value, pk] of the current schema: 032/033/034 columns, the 035 tail,
 // then the 036 `todo`, 037 `archived_at` and 040 composer-setting tails on chat_sessions and the
-// 042 `attachments`, 043 error and 044 `thinking_ms` tails on chat_messages.
+// 042 `attachments`, 043 error and 044 `thinking_ms` tails on chat_messages and the 045 `body_offset`
+// tail on chat_steps.
 type ColumnInfo = [string, string, number, string | null, number];
 const CHAT_TABLE_INFO = {
   chat_sessions: [
@@ -92,6 +93,7 @@ const CHAT_TABLE_INFO = {
     ["ended_at", "INTEGER", 0, null, 0],
     ["output", "TEXT", 0, null, 0],
     ["changes", "TEXT", 0, null, 0],
+    ["body_offset", "INTEGER", 0, null, 0],
   ],
 } satisfies Record<string, ColumnInfo[]>;
 const SESSION_FOREIGN_KEYS = [
@@ -100,7 +102,7 @@ const SESSION_FOREIGN_KEYS = [
   { from: "workspace_id", table: "workspaces", to: "id", on_delete: "SET NULL" },
 ];
 
-/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three; on messages 042 one more, 043 three, 044 one). */
+/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three; on messages 042 one more, 043 three, 044 one; on steps 045 one more). */
 function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
   return info.slice(0, info.length - newColumns).map(([name]) => name);
 }
@@ -111,7 +113,7 @@ export const PRIOR_COLUMNS = {
   workspaces: ["id", "owner_id", "name", "dir", "created_at"],
   chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 8),
   chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 6),
-  chat_steps: namesBefore035(CHAT_TABLE_INFO.chat_steps, 1),
+  chat_steps: namesBefore035(CHAT_TABLE_INFO.chat_steps, 2),
   chat_approvals: [
     "id",
     "message_id",
@@ -277,8 +279,8 @@ export function chatSequences(db: DatabaseSync) {
 /**
  * Everything an ADD COLUMN upgrade must not touch, for the given pre-upgrade columns (default: those
  * before 035): SQL-literal row values, prior column shape, keys, indexes, sequences. The indexes are
- * those of every table but `chat_turn_snapshots` and `account_composer_prefs`, which 039 and 041
- * create whole (their own tests cover them).
+ * those of every table but `chat_turn_snapshots`, `account_composer_prefs` and `chat_thinking_segments`,
+ * which 039, 041 and 045 create whole (their own tests cover them).
  */
 export function preservedState(
   db: DatabaseSync,
@@ -303,7 +305,7 @@ export function preservedState(
     indexes: perTable((table) => tableIndexKeys(db, table)),
     indexSql: db
       .prepare(
-        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs') ORDER BY name",
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs','chat_thinking_segments') ORDER BY name",
       )
       .all(),
     sequences: chatSequences(db),

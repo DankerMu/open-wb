@@ -80,18 +80,18 @@ Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半�
 
 ## 2. chat-sessions — 迁移 045
 
-- [ ] 2.1 开工核对：
+- [x] 2.1 开工核对：
   - 重读迁移 042–044 与它们的测试、受信迁移计数所在处；
   - 用 `grep -rn "ended_at\|decided_at" server/test` 找出钉住 `chat_steps` 与 `chat_approvals` 精确列清单的夹具（#910 时的四处列清单夹具 `core-db-message-error.test.ts`、`core-db-chat-schema.test.ts`、`core-db-session-fixture.ts`、`migration-034.test.ts` 先看），列成本组的补列清单；
   - 确认 045 仍未被任何分支或打开的 PR 占用（`git ls-remote` 只读、`gh pr list` 只读）。
 
   验证：清单与核对结果写进 PR。
-- [ ] 2.2 先写测试 `server/test/migration-045.test.ts`，覆盖 chat-sessions「迁移 045 分段位置与确认关联」三例：「新库与存量库」（存量行新列为 NULL、无回填）、「约束与级联」（负值被 CHECK 拒绝；删除消息级联删除段行）、「中途失败可重试」；受信迁移计数加一。
+- [x] 2.2 先写测试 `server/test/migration-045.test.ts`，覆盖 chat-sessions「迁移 045 分段位置与确认关联」三例：「新库与存量库」（存量行新列为 NULL、无回填）、「约束与级联」（负值被 CHECK 拒绝；删除消息级联删除段行）、「中途失败可重试」；受信迁移计数加一。
   验证：在未改动的代码上判红。
-- [ ] 2.3 实现 `server/src/core/db/migrations/045_chat_interleaved_segments.sql`，DDL 逐字按规格；只加列、加表，不读不写。2.1 清单里的列清单夹具补列（通用纪律第 4 种改法），逐条列进偏离记录。
+- [x] 2.3 实现 `server/src/core/db/migrations/045_chat_interleaved_segments.sql`，DDL 逐字按规格；只加列、加表，不读不写。2.1 清单里的列清单夹具补列（通用纪律第 4 种改法），逐条列进偏离记录。
   验证：2.2 全绿；`make check` 全绿。
-- [ ] 2.4 变异证据：去掉段表的 `ON DELETE CASCADE` → 「约束与级联」判红；去掉非负 CHECK → 同上判红；`step_id` 写成 `NOT NULL DEFAULT 0` → 「新库与存量库」判红。
-- [ ] 2.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
+- [x] 2.4 变异证据：去掉段表的 `ON DELETE CASCADE` → 「约束与级联」判红；去掉非负 CHECK → 同上判红；`step_id` 写成 `NOT NULL DEFAULT 0` → 「新库与存量库」判红。
+- [x] 2.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level: expanded - 迁移（一张新表、两个新列），是 schema 变化；没有读写方，风险只在迁移账本与列清单夹具。
 Minimal mergeable slice: atomic - 一个迁移文件及其测试与补列。
 
