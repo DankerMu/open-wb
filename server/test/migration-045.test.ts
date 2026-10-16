@@ -91,6 +91,20 @@ const SEGMENT_INDEXES = [{ name: "chat_thinking_segments_message" }];
 // The shared fixture keeps steps 1–4 and approvals 1–3; every one reads NULL in the new columns.
 const NO_OFFSETS = [1, 2, 3, 4].map((id) => ({ id, body_offset: null }));
 const NO_STEP_IDS = [1, 2, 3].map((id) => ({ id, step_id: null }));
+// One row per table that meets every pre-045 constraint and carries -1 in the new column. `message_id` -1
+// matches no message: the probe defers the foreign key and rolls back before it would be checked.
+const NEGATIVE_PROBES = [
+  [
+    "chat_steps",
+    "body_offset",
+    "INSERT INTO chat_steps(message_id, ordinal, name, status, started_at, body_offset) VALUES (-1, 0, 'probe', 'done', 0, -1)",
+  ],
+  [
+    "chat_approvals",
+    "step_id",
+    "INSERT INTO chat_approvals(message_id, request_id, tool, title, requested_at, expires_at, step_id) VALUES (-1, 'probe', 'probe', 'probe', 0, 0, -1)",
+  ],
+] as const;
 const CHECK_FAILED = /CHECK constraint failed/;
 const FOREIGN_KEY_FAILED = /FOREIGN KEY constraint failed/;
 const TABLE_EXISTS = /table chat_thinking_segments already exists/;
@@ -105,7 +119,7 @@ const LEGAL_ROWS = [
     body_offset: 0,
     thinking_offset: 0,
     steps_before: 0,
-    thinking_length: 3,
+    thinking_length: 0,
     thinking_ms: 0,
   },
   {
@@ -142,6 +156,23 @@ function segmentRows(db: DatabaseSync) {
   return db.prepare(`SELECT id, ${COLUMNS} FROM ${TABLE} ORDER BY id`).all();
 }
 
+/** Neither new column carries a CHECK (invisible to `table_info`): a -1 write is stored, then rolled back. */
+function expectNegativeAccepted(db: DatabaseSync): void {
+  for (const [table, column, insert] of NEGATIVE_PROBES) {
+    db.exec("BEGIN");
+    try {
+      db.exec("PRAGMA defer_foreign_keys = ON");
+      const { lastInsertRowid } = db.prepare(insert).run();
+      expect(
+        db.prepare(`SELECT ${column} FROM ${table} WHERE id = ?`).get(lastInsertRowid),
+        column,
+      ).toEqual({ [column]: -1 });
+    } finally {
+      db.exec("ROLLBACK");
+    }
+  }
+}
+
 function insertLegalRows(db: DatabaseSync): void {
   const insert = db.prepare(INSERT);
   for (const row of LEGAL_ROWS) {
@@ -150,7 +181,7 @@ function insertLegalRows(db: DatabaseSync): void {
   }
 }
 
-/** 045's receipt sits right after 044's, once; the two columns are last; the table is the spec's. */
+/** 045's receipt sits right after 044's, once; the two columns are last and unchecked; the table is the spec's. */
 function expect045Applied(db: DatabaseSync): void {
   expect(POS).toBeGreaterThan(0);
   const ledger = ledgerRows(db);
@@ -170,6 +201,7 @@ function expect045Applied(db: DatabaseSync): void {
     const indexed = tableIndexKeys(db, table).flatMap((index) => index.columns.map(([c]) => c));
     expect(indexed, table).not.toContain(column);
   }
+  expectNegativeAccepted(db);
   expect(
     db
       .prepare(`PRAGMA table_info('${TABLE}')`)
