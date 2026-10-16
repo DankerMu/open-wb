@@ -137,8 +137,8 @@ function entryOf(server: StartedServer, port: number, attempt: Attempt): Entry {
 }
 
 /**
- * 入口启动时不建 SANDBOX_ROOT，而它不存在时 `POST /api/workspaces` 答 500（既有行为，不属本文件）：
- * 要建正式工作空间的用例先把它建好。
+ * 启动的 `sandbox_root` 阶段已建根（把这里按 umask 预建的根校正为 3770），入口用例不再需要预建：现有调用方
+ * 都在 `prepare` 里经入口启动，预建与否结果相同（读代码推出）；helper 留给不经入口的装配。
  */
 export function makeSandboxRoot(root: string): void {
   mkdirSync(join(root, "sandbox"));

@@ -1,7 +1,8 @@
 /**
  * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档转换器 → createApp →
- * listen → 托管布局 → 预览监听器 listen → 两个托管文件 → 预览缓存目录（含清空 `work/`）→ 转换器开始
- * 受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局紧随其后，#1337）。
+ * listen → 托管布局 → 沙箱根 → 预览监听器 listen → 两个托管文件 → 预览缓存目录（含清空 `work/`）→
+ * 转换器开始受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局紧随其后，#1337；
+ * 沙箱根紧随托管布局，change sandbox-boundary-closure）。
  *
  * ESM main guard：import 本模块只暴露纯配置 seam（resolveServerConfig），不产生任何
  * startup/signal/filesystem 副作用；只有直接执行本模块（import.meta.main）才进入主路径。
@@ -20,7 +21,10 @@
  *   （owner 2026-10-13 裁决）：主 `listen` resolve 之后到 `ensureOmpStateLayout` 返回是同步代码，
  *   没有 await，主监听器受理的第一个请求到达时布局已在（这段时间到达的 prompt 建得出快照目录：
  *   钩子辅助复现，预加载推迟预览监听器的原生 listen，`test/server-startup-preview.test.ts`）。
- *   布局失败时主监听器已绑定，随失败清理关闭。`models.yml` 与宿主 overlay 仍在两次绑定之后写：
+ *   同一段同步代码随后经 `ensureSandboxRoot` 建出并校正 `SANDBOX_ROOT`（`sandbox_root` 阶段，owner
+ *   B2/B3/B4）：第一个请求的处理体运行时根已建出、已校正为 `3770`（读代码推出：其间没有 await）；
+ *   校正失败时 `OMP_USER` 模式启动失败；同 uid 模式不再纠正、不回滚，只写一行 `sandbox_root_unchanged`。
+ *   布局或沙箱根失败时主监听器已绑定，随失败清理关闭。`models.yml` 与宿主 overlay 仍在两次绑定之后写：
  *   overlay 写出之前 spawn 的 omp v18.0.10 以 `Config overlay not found` 退出码 1 退出、不到
  *   `ready`（实测范围：macOS arm64、无 `OMP_USER`、手工按 `spawnOmp` 的 argv/env 运行官方二进制；
  *   Linux、sudo/setpriv 形状与入口对这次退出的处置未测，见 ADR-0014 的 #1337 行）；
@@ -57,7 +61,7 @@ import type { FastifyInstance } from "fastify";
 import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { type AssemblyDependencies, createApp, type SessionRuntime } from "./app.js";
 import { openDb } from "./core/db/index.js";
-import { ensureOwnedDir } from "./core/sandbox/dirs.js";
+import { ensureOwnedDir, ensureSandboxRoot } from "./core/sandbox/dirs.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { createPreviewApp } from "./preview/app.js";
 import { createOfficeConverter, type OfficeConverter } from "./preview/office.js";
@@ -295,6 +299,7 @@ type StartupStage =
   | "app"
   | "listen"
   | "state_layout"
+  | "sandbox_root"
   | "preview_listen"
   | "models_yml"
   | "host_overlay"
@@ -320,6 +325,11 @@ function emitListenerForceClose(): void {
  */
 function emitSessionFault(): void {
   void emitStderrRecord({ event: "session_fault" });
+}
+
+/** 同 uid 模式下沙箱根没能校正（owner B3）：恰 `event` 一个键；以 void 调用，启动不等它、写失败吞掉。 */
+function emitSandboxRootUnchanged(): void {
+  void emitStderrRecord({ event: "sandbox_root_unchanged" });
 }
 
 /** generic application stderr 一行；sink 不可用时吞掉（不递归/不抛原始 stack）。 */
@@ -461,9 +471,14 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       await releaseOwned(owned);
       return;
     }
-    // 主 listen resolve 之后到这里返回没有 await：主监听器受理的第一个请求到达时托管布局已在。
+    // 主 listen resolve 之后到沙箱根返回没有 await：主监听器受理的第一个请求到达时两者都已在。
     owned.stage = "state_layout";
     ensureOmpStateLayout(config.ompStateDir);
+    owned.stage = "sandbox_root";
+    const strict = config.ompUser !== undefined;
+    if (ensureSandboxRoot(config.sandboxRoot, { strict }).outcome === "unchanged") {
+      emitSandboxRootUnchanged();
+    }
     owned.stage = "preview_listen";
     await owned.preview.listen({
       host: config.host,

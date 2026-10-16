@@ -7,7 +7,15 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { connect as connectTcp } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -132,7 +140,8 @@ describe("production entry lifecycle", () => {
       expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
       expect(readdirSync(join(state, "sessions"))).toEqual([]);
       expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
-      expect(existsSync(sandbox)).toBe(false);
+      // Startup makes SANDBOX_ROOT at exactly 3770 (owner B4, 编排方默认 3770).
+      expect(lstatSync(sandbox).mode & 0o7777).toBe(0o3770);
       expect(existsSync(join(scratchRoot, "bin"))).toBe(false);
     } finally {
       await server.dispose();

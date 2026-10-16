@@ -229,8 +229,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     runtime,
     workspaceRootOf: (ownerId, workspaceId) => store.rootOf({ id: ownerId }, workspaceId),
     createTemporaryWorkspace: (ownerId) => {
-      // Startup creates no sandbox directory: like the first spawn before it, the first session
-      // created without a workspace makes the root (the workspace store resolves its real path).
+      // The entry's `sandbox_root` stage (server.ts) has made the root: this finds it and changes
+      // nothing (read from the code). Only assemblies that bypass the entry make it here, at 2770;
+      // the store makes the account root.
       ensureSharedDir(runtime.sandboxRoot);
       return store.createTemporary({ id: ownerId });
     },
@@ -327,9 +328,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
  * 与 base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根各四种写法：配置原值、`normalize` 后的
  * 原值（去掉 `//`、`/./` 而不解析符号链接）、再去掉末尾 `/` 的写法（根目录除外）与此刻的 realpath
  * （`realpathSync.native`，macOS 上连大小写也取盘上的，APFS 上实测；目录不在、取不到时没有这一项），
- * 相同的只列一次。realpath 在净化时才取：生产入口在 `ensureOmpStateLayout` 之前调用 createApp，沙箱根
- * 到第一次建会话才建。只有失败的回合调用它；这两次同步 realpath 在挂起的挂载点上会阻塞事件循环，与每次
- * spawn 重建状态目录布局时的同步 fs 调用（`sessions/omp/process.ts:87`）是同一个暴露面（读代码推出）。
+ * 相同的只列一次。realpath 在净化时才取：生产入口在建托管布局与 `sandbox_root` 阶段（都在 listen
+ * 之后）之前调用 createApp。只有失败的回合调用它；这两次同步 realpath 在挂起的挂载点上会阻塞事件循环，
+ * 与每次 spawn 重建状态目录布局时的同步 fs 调用（`sessions/omp/process.ts:87`）是同一个暴露面（读代码推出）。
  */
 function upstreamRedactor(
   upstream: AssemblyDependencies["upstream"],

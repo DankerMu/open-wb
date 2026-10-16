@@ -6,9 +6,11 @@
 import {
   closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -18,6 +20,7 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   type CompiledServerEntry,
+  captureSpawnHook,
   compiledFixtureEnv,
   compileServerEntry,
   expectBindable,
@@ -234,6 +237,8 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     expect(existsSync(join(root, "db", "dev.db"))).toBe(true);
     // 托管布局在主绑定成功之后、预览绑定之前建立（#1337）：目录在，两个托管文件没有写出。
     expectLayoutWithoutManagedFiles(join(root, "state"));
+    // 沙箱根阶段先于预览绑定（D1）：预览绑定失败时根已建好、已是 3770。
+    expect(lstatSync(join(root, "sandbox")).mode & 0o7777).toBe(0o3770);
     expect(existsSync(join(root, "preview-cache"))).toBe(false);
     // 主监听器先绑定成功（#1337），随预览绑定失败的清理关闭：PORT 与 DB 立即可由后继进程复用。
     await expectBindable("127.0.0.1", failure.port);
@@ -248,6 +253,33 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     expectReason(failure.stderr, "state_layout");
     await expectBindable("127.0.0.1", failure.port);
   }, 60_000);
+
+  // Both modes fail on a non-directory (sandbox-core「沙箱根目录」step 3); the root's path carries
+  // the sentinel. OMP_USER needs setpriv present (agent-config): the capture hook fakes it.
+  it.each([
+    ["same uid", {}],
+    ["OMP_USER", { OMP_USER: "omp", PATH: "/usr/bin:/bin" }],
+  ] as const)(
+    "sandbox_root (%s): SANDBOX_ROOT is a regular file",
+    async (mode, extra) => {
+      const root = scratchRoot();
+      const sandbox = join(root, `sandbox-${PATH_SENTINEL}`);
+      writeFileSync(sandbox, "not-a-directory");
+      const hook = join(root, "setpriv.cjs");
+      writeFileSync(hook, captureSpawnHook("present"));
+      const env = { SANDBOX_ROOT: sandbox, ...extra };
+      const failure = await failStartup(root, env, mode === "OMP_USER" ? hook : undefined);
+      const output = failure.stdout + failure.stderr;
+      expect(output).not.toContain(PATH_SENTINEL);
+      expect(output).not.toContain(root);
+      expectReason(failure.stderr, "sandbox_root");
+      expect(readFileSync(sandbox, "utf8")).toBe("not-a-directory");
+      // The managed layout comes first (D1): it stands; nothing after this stage ran.
+      expectLayoutWithoutManagedFiles(join(root, "state"));
+      await expectBindable("127.0.0.1", failure.port);
+    },
+    60_000,
+  );
 
   it("models_yml: models.yml is occupied by a directory", async () => {
     const root = scratchRoot();

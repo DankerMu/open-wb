@@ -73,7 +73,7 @@ Minimal mergeable slice: atomic - 一行修复，没有可再拆的部分；独�
 
 ## 1. S1 — 启动建沙箱根并校正为 `3770`（sandbox-core / http-service-skeleton / omp-uid-isolation）
 
-- [ ] 1.1 开工核对：
+- [x] 1.1 开工核对：
   - 重读 `server/src/core/sandbox/dirs.ts` 全文、`server/src/sessions/omp/state-layout.ts:97-116`、`server/src/server.ts:292-306`（`StartupStage` 与失败记录）、`:405-488`（`start()`，尤其 `:464-467` 的无 `await` 注释）、`:495-530`（`publishStarted` 的阶段赋值）、`server/src/app.ts:231-236`；
   - `grep -rn "sandbox" server/test/server-startup-*.test.ts` 与 design D5 表逐条对照：成功启动后断言沙箱不存在 / 保持 mode 的只应是 `server-startup-layout.test.ts:136`、`server-startup-private-state.test.ts:113`、`:155-157`、`:196`、`server-startup-order.test.ts:135`；表外命中的停下更新 D5；
   - `wc -l server/test/server-startup-private-state.test.ts`，决定新例写在本文件还是 `server-startup-sandbox-root.test.ts`；
@@ -81,25 +81,25 @@ Minimal mergeable slice: atomic - 一行修复，没有可再拆的部分；独�
   - 重读 `.github/scripts/ci-uid-isolation.sh:92-97`、`.github/scripts/ci-compiled-server.sh:9-16` 与 `scripts/test-ci-harness.sh` 里 `SANDBOX_ROOT` / `chmod 2770` 的全部命中，确认没有一处钉沙箱根启动后的 mode（design D10）；有则停下报告——那意味着 S1 需要 CI 改动，须交 owner 决定。
 
   验证：核对结果写进 PR。
-- [ ] 1.2 先写单元测试（`server/test/sandbox-dirs.test.ts`，新 `describe("core/sandbox ensureSandboxRoot")`），覆盖 sandbox-core「沙箱根目录」三个场景的全部 WHEN：冷建、`2770` → `3770`、`0755` → `3770`、已是 `3770` 时不发 chmod（`vi.spyOn(fs, "chmodSync")` 计数）、属组与 umask 不变、根下无新增条目；根是符号链接时作用于目标；位置是普通文件时两种 `strict` 都抛且文件不变；属别的 uid（沿用 `:336` 造法，`it.skipIf(geteuid === 0)`）与 chmod 被替换为抛 `EPERM` 两例在 `strict: true` 抛（错误文本不含环境值）、`strict: false` 返回 `unchanged` 且 mode / 属主不变、没有第二次 chmod；再加一例：chmod 只落下 `0o1770`（内核静默丢掉 setgid、复查失败）时 `strict: true` 抛、`strict: false` 返回 `unchanged`、不回滚、没有第二次 chmod（sandbox-core「沙箱根目录」第二个 WHEN，B3 不纠正）。另加 sandbox-core「共享目录权限位」新场景「已建出的沙箱根不被惰性路径改动」。
+- [x] 1.2 先写单元测试（`server/test/sandbox-dirs.test.ts`，新 `describe("core/sandbox ensureSandboxRoot")`），覆盖 sandbox-core「沙箱根目录」三个场景的全部 WHEN：冷建、`2770` → `3770`、`0755` → `3770`、已是 `3770` 时不发 chmod（`vi.spyOn(fs, "chmodSync")` 计数）、属组与 umask 不变、根下无新增条目；根是符号链接时作用于目标；位置是普通文件时两种 `strict` 都抛且文件不变；属别的 uid（沿用 `:336` 造法，`it.skipIf(geteuid === 0)`）与 chmod 被替换为抛 `EPERM` 两例在 `strict: true` 抛（错误文本不含环境值）、`strict: false` 返回 `unchanged` 且 mode / 属主不变、没有第二次 chmod；再加一例：chmod 只落下 `0o1770`（内核静默丢掉 setgid、复查失败）时 `strict: true` 抛、`strict: false` 返回 `unchanged`、不回滚、没有第二次 chmod（sandbox-core「沙箱根目录」第二个 WHEN，B3 不纠正）。另加 sandbox-core「共享目录权限位」新场景「已建出的沙箱根不被惰性路径改动」。
   验证：在未改动的代码上判红（函数不存在即红）。
-- [ ] 1.3 先写编译入口测试：
+- [x] 1.3 先写编译入口测试：
   - 先把 `captureSpawnHook`（`server/test/server-startup-omp-user.test.ts:135-160`，今天是未导出的 ESM 文本）迁入 `server/test/server-startup-helpers.ts` 并导出，改写为 CJS 文本（`require('node:child_process')` / `require('node:fs')` / `require('node:module')`，与 `denyChmodHook` 同形），`server-startup-omp-user.test.ts` 改为 import 它（`.mjs` 文件名随之改 `.cjs`）；再加一个拼接 helper（或照 `childUmaskHook` 的写法，把第二段的 `'use strict';` 去掉后拼进同一个字符串），使一个 `--require` 文件同时伪装 setpriv 与拒绝 chmod（`requireHook` 只收一个路径，`server-startup-helpers.ts:127`）；`server-startup-helpers.ts` 699 → ≤ 760。
   - `server/test/server-startup-failure-reason.test.ts`：「`SANDBOX_ROOT` 位置是普通文件 → `sandbox_root`」——同 uid 与 `OMP_USER`（上面迁入的 `captureSpawnHook("present")` 伪装 setpriv）各一例；stdout + stderr 不含根路径（沿用 `PATH_SENTINEL` 写法：根路径里放哨兵段）；占位文件字节不变；`<root>/state` 已建出（托管布局先于本阶段）；主端口在进程退出后可重新绑定（`expectBindable`，`server-startup-helpers.ts:352`）；
   - http-service-skeleton「同 uid 模式下沙箱根的 chmod 被拒」两例：**先** `mkdirSync(sandbox)`（`0o755`）把根建好，**再**以 `denyChmodHook([realpathSync.native(sandbox)])` 构造钩子——`denyChmodHook` 按字面路径匹配（`server-startup-helpers.ts:450-470` 的 `denied.has(path)`），而 `ensureSandboxRoot` chmod 的是 realpath；macOS 上 `mkdtempSync(join(tmpdir(), …))` 的根在 `/var/folders/…`、realpath 是 `/private/var/…`，按字面路径构造在本机 `make check` 必红（design D2）；同 uid 启动成功、stderr 恰多一行 `{"event":"sandbox_root_unchanged"}`、根 mode 仍 `0o755`；同一钩子拼上 `captureSpawnHook("present")` 后 `OMP_USER` 模式 → `sandbox_root`；
   - 「完整装配路由与惰性根」（标题是历史名）的新 THEN：冷启动后根存在、`0o3770`、无条目、`u1` 不存在；预置 `2770` 与 `0755` 的根启动后为 `3770`、属组不变、umask 不变（写在 `server-startup-private-state.test.ts` 或 1.1 决定的新文件）。
 
   验证：在未改动的代码上判红（钩子迁移本身不改断言，`server-startup-omp-user.test.ts` 迁移后在未改动代码上仍全绿）。
-- [ ] 1.4 实现：
+- [x] 1.4 实现：
   - `dirs.ts` 加 `ensureSandboxRoot(configuredPath, {strict})`（design D2 五步，复用 `ensureOwnedDir`），头注释加一段；
   - `server.ts`：`StartupStage` 加 `sandbox_root`；在 `ensureOmpStateLayout(config.ompStateDir)` 之后、`owned.stage = "preview_listen"` 之前同步调用；`outcome === "unchanged"` 时经 `emitStderrRecord({event: "sandbox_root_unchanged"})` 写一行（不 `await` 阻塞启动次序的话要确认受管 writer 的既有用法——`session_fault` 的写法）；
   - `app.ts:232-233` 注释改为 design D3 的措辞；`app.ts:330-332`「沙箱根到第一次建会话才建」改为「启动的 `sandbox_root` 阶段已建根」；`server/test/server-startup-preview-helpers.ts:139-145`「入口启动时不建 SANDBOX_ROOT…」改为「启动已建根；`makeSandboxRoot` 只为不经入口的装配保留」（只改注释）；
   - 按 design D5 表改写标「S1」的五处断言（第 3 种改法，引用 B2 / B4 与编排方默认 `3770`），逐条列进偏离记录。
 
   验证：1.2、1.3 全绿；`dirs.ts` ≤ 150、`server.ts` ≤ 730 行；`npm test --workspace server` 全绿（含 `omp-process.test.ts:213` 原样通过）。
-- [ ] 1.5 规格与文档随刀：本 change 的 http-service-skeleton、sandbox-core、omp-uid-isolation 三个 delta 由归档合入主规格，本任务只核对实现与 delta 逐句一致；PR 正文写明 `OMP_USER` 部署的升级前提（proposal Impact 的措辞），并写明 uid-isolation job 的 smoke 阶段作为 chmod 分支的「失败可见、取值不断言」证据（design D10）——不改 CI。
-- [ ] 1.6 变异证据（逐条做、逐条撤销，结果贴进 PR）：去掉 `ensureOwnedDir` 调用（只 mkdir）→ 「冷建与校正」与「完整装配」的 `3770` 断言判红；`strict` 下吞掉属主错误 → 「属主不符或 chmod 被拒」的 strict 例判红；把阶段挪到 `listen` 之前 → `server-startup-layout.test.ts:256`（`state_layout` 失败后沙箱不存在）判红；失败记录带上路径 → 哨兵断言判红；同 uid 模式漏写 `sandbox_root_unchanged` → 该例判红；`sandbox_root_unchanged` 行多带一个 `path` 键 → 该例的整行精确断言判红；lenient 分支对已落下的 `0o1770` 做回滚 → 「不回滚」断言判红。
-- [ ] 1.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；CI 的 uid-isolation job 绿（PR 里贴 job 链接与 `make smoke` 阶段的成功行）。PR 请求白盒审查（design D11 S1 清单）。
+- [x] 1.5 规格与文档随刀：本 change 的 http-service-skeleton、sandbox-core、omp-uid-isolation 三个 delta 由归档合入主规格，本任务只核对实现与 delta 逐句一致；PR 正文写明 `OMP_USER` 部署的升级前提（proposal Impact 的措辞），并写明 uid-isolation job 的 smoke 阶段作为 chmod 分支的「失败可见、取值不断言」证据（design D10）——不改 CI。
+- [x] 1.6 变异证据（逐条做、逐条撤销，结果贴进 PR）：去掉 `ensureOwnedDir` 调用（只 mkdir）→ 「冷建与校正」与「完整装配」的 `3770` 断言判红；`strict` 下吞掉属主错误 → 「属主不符或 chmod 被拒」的 strict 例判红；把阶段挪到 `listen` 之前 → `server-startup-layout.test.ts:256`（`state_layout` 失败后沙箱不存在）判红；失败记录带上路径 → 哨兵断言判红；同 uid 模式漏写 `sandbox_root_unchanged` → 该例判红；`sandbox_root_unchanged` 行多带一个 `path` 键 → 该例的整行精确断言判红；lenient 分支对已落下的 `0o1770` 做回滚 → 「不回滚」断言判红。
+- [x] 1.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；CI 的 uid-isolation job 绿（PR 里贴 job 链接与 `make smoke` 阶段的成功行）。PR 请求白盒审查（design D11 S1 清单）。
 Suggested fixture level: expanded - 改沙箱根的权限位与属主检查、新增启动失败阶段（auth/permissions + config 风险包，Critical Path「沙箱与文件边界」）。
 Minimal mergeable slice: atomic - 建根、校正、失败阶段与同 uid 记录是同一个启动步骤的四个分支；只合其中一部分会留下「建了根却不校正」或「校正失败无出口」的窗口，且 D5 的五处改写只对完整行为成立。
 
