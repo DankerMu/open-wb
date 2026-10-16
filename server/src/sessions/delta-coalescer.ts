@@ -13,7 +13,7 @@
 import type { ChatEvent } from "./events.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { Generation, Slot } from "./pool.js";
-import type { ThinkingMsStore } from "./store-thinking.js";
+import type { ThinkingSegmentStore } from "./store-segments.js";
 import { ThinkingSpans } from "./thinking-span.js";
 
 const WINDOW_MS = 250;
@@ -31,8 +31,8 @@ interface CoalescerPorts {
   publish(slot: Slot, event: ChatEvent<number>, generation: Generation | undefined): boolean;
   /** Owned error sink: retain the fault and retire the slot without awaiting. */
   fault(slot: Slot, error: Error): void;
-  /** `chat_messages.thinking_ms`; omitted → no thinking span is timed (and no thinking.end). */
-  durations?: ThinkingMsStore;
+  /** `thinking_ms` and segment rows; omitted → no thinking span is timed (and no thinking.end). */
+  durations?: ThinkingSegmentStore;
 }
 
 interface Chunk {
@@ -89,13 +89,8 @@ export class DeltaCoalescer {
       const save = this.#save[kind];
       if (save !== undefined) {
         const { messageId, delta } = event.data;
-        // Thinking opens a span (at frame arrival, before coalescing); text closes the open one.
-        const spanned =
-          kind === "thinking"
-            ? (this.#spans?.open(slot, generation, messageId) ?? true)
-            : this.endSpan(slot, true);
         const chunk: Chunk = { kind, save, messageId, generation, text: delta, timer: undefined };
-        return spanned && this.#take(slot, chunk) ? "taken" : false;
+        return this.#take(slot, chunk) ? "taken" : false;
       }
     }
     return this.flush(slot) ? "pass" : false;
@@ -150,13 +145,13 @@ export class DeltaCoalescer {
     if (slot.infraFaulted) {
       return true; // 读代码推出: a delta reaching a faulted slot is dropped like a discarded one.
     }
+    if (!this.#flushFor(slot, delta) || !this.#span(slot, delta)) {
+      return false;
+    }
     const held = this.#held.get(slot);
-    if (held?.kind === delta.kind && held.messageId === delta.messageId) {
+    if (held !== undefined) {
       held.text += delta.text;
       return true;
-    }
-    if (!this.#flushHeld(slot)) {
-      return false;
     }
     const now = this.#clock.now();
     const last = this.#marksOf(slot, delta.messageId)[delta.kind];
@@ -173,6 +168,20 @@ export class DeltaCoalescer {
     );
     this.#held.set(slot, delta);
     return true;
+  }
+
+  /** Held text `chunk` cannot join goes first, so a span opened next counts it (issue 1472, D3). */
+  #flushFor(slot: Slot, chunk: Chunk): boolean {
+    const held = this.#held.get(slot);
+    const joins = held?.kind === chunk.kind && held.messageId === chunk.messageId;
+    return joins || this.#flushHeld(slot);
+  }
+
+  /** At frame arrival, before coalescing: thinking opens a span, text closes the open one. */
+  #span(slot: Slot, { kind, generation, messageId }: Chunk): boolean {
+    return kind === "text"
+      ? this.endSpan(slot, true)
+      : (this.#spans?.open(slot, generation, messageId) ?? true);
   }
 
   #emit(slot: Slot, chunk: Chunk): boolean {

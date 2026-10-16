@@ -431,3 +431,41 @@ describe("undo transaction: audit and return value", () => {
     });
   });
 });
+
+describe("message-undo「撤回连带删除分段数据」(issue 1472)", () => {
+  it("a2's segment rows, steps and approvals go; a1's segments, body_offset and step_id stay", () => {
+    const h = history();
+    const segment = h.db.prepare(
+      "INSERT INTO chat_thinking_segments(message_id, body_offset, thinking_offset, steps_before, thinking_length, thinking_ms) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    for (const id of [h.a1, h.a2]) {
+      segment.run(id, 0, 0, 0, 1, 300);
+      segment.run(id, 5, 1, 1, null, null);
+      h.db.prepare("UPDATE chat_steps SET body_offset = 5 WHERE message_id = ?").run(id);
+      h.db
+        .prepare(
+          "UPDATE chat_approvals SET step_id = (SELECT id FROM chat_steps WHERE message_id = ?) WHERE message_id = ?",
+        )
+        .run(id, id);
+    }
+    const rowsOf = (table: string, id: number) =>
+      h.db.prepare(`SELECT * FROM ${table} WHERE message_id = ? ORDER BY id`).all(id);
+    const tables = ["chat_thinking_segments", "chat_steps", "chat_approvals"];
+    const a1Before = tables.map((table) => rowsOf(table, h.a1));
+    expect(tables.map((table) => rowsOf(table, h.a2).length)).toEqual([2, 1, 1]);
+
+    commitUndo(h.db, emit, h.input);
+
+    expect(tables.map((table) => rowsOf(table, h.a2))).toEqual([[], [], []]);
+    expect(tables.map((table) => rowsOf(table, h.a1))).toEqual(a1Before);
+    expect(a1Before[1]).toEqual([expect.objectContaining({ body_offset: 5 })]);
+    const [a1Step] = (a1Before[1] ?? []) as Array<{ id: number }>;
+    expect(a1Before[2]).toEqual([expect.objectContaining({ step_id: a1Step?.id })]);
+    const orphans = h.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM chat_thinking_segments WHERE message_id NOT IN (SELECT id FROM chat_messages)",
+      )
+      .get();
+    expect(orphans).toEqual({ n: 0 });
+  });
+});

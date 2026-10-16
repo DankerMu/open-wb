@@ -53,8 +53,13 @@ import {
   type MessageError,
   type SessionErrorStore,
 } from "./store-error.js";
-import { type StartStepInput, startStep } from "./store-segments.js";
-import { appendThinking, createThinkingMsStore, type ThinkingMsStore } from "./store-thinking.js";
+import {
+  createThinkingSegmentStore,
+  type StartStepInput,
+  startStep,
+  type ThinkingSegmentStore,
+} from "./store-segments.js";
+import { appendThinking } from "./store-thinking.js";
 import {
   createSessionTodoStore,
   type SessionTodoOptions,
@@ -177,7 +182,7 @@ export interface PendingApproval {
   expiresAt: number;
 }
 
-export interface SessionStore extends SessionTodoStore, SessionErrorStore, ThinkingMsStore {
+export interface SessionStore extends SessionTodoStore, SessionErrorStore, ThinkingSegmentStore {
   create(ownerId: string): SessionView;
   list(ownerId: string): SessionView[];
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
@@ -280,7 +285,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
   return {
     ...createSessionTodoStore(db, options),
     ...createSessionErrorStore(db),
-    ...createThinkingMsStore(db),
+    ...createThinkingSegmentStore(db, (id) => currentTurn(activeTurns, activeSessions, id)),
     create(ownerId) {
       assertOpen(closed);
       const now = Date.now();

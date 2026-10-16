@@ -6,7 +6,8 @@
  * stored, which is what the supervisor then publishes, so the column always equals the
  * concatenation of the published `thinking.delta` fragments. #910 (slice 3b) adds the two writes
  * of `chat_messages.thinking_ms` (044) a thinking span makes (thinking-span.ts): NULL when a span
- * opens, the message's accumulated milliseconds when it closes.
+ * opens, the message's accumulated milliseconds when it closes; issue 1472 runs each inside the
+ * transaction that also writes the span's segment row (store-segments.ts).
  */
 import type { DatabaseSync } from "node:sqlite";
 import { createSqliteTextDecoder } from "../core/db/index.js";
@@ -40,17 +41,21 @@ export function createThinkingMsStore(db: DatabaseSync): ThinkingMsStore {
   };
 }
 
+/** The message's stored thinking; NULL and a missing row read as null. */
+export function storedThinking(db: DatabaseSync, messageId: number): string | null {
+  const row = db.prepare(SELECT_THINKING).get(messageId) as
+    | { thinking: Uint8Array | null }
+    | undefined;
+  return row === undefined ? null : decodeNullableText(createSqliteTextDecoder(db), row.thinking);
+}
+
 /** The stored fragment; "" (and no write) for an empty chunk or once the cap is reached. */
 export function appendThinking(db: DatabaseSync, messageId: number, chunk: string): string {
   if (chunk.length === 0) {
     return "";
   }
-  const row = db.prepare(SELECT_THINKING).get(messageId) as
-    | { thinking: Uint8Array | null }
-    | undefined;
   // A missing row reads as empty; the UPDATE below then fails its one-row receipt.
-  const stored =
-    row === undefined ? null : decodeNullableText(createSqliteTextDecoder(db), row.thinking);
+  const stored = storedThinking(db, messageId);
   const used = stored === null ? 0 : [...stored].length;
   if (used > MAX_THINKING_POINTS) {
     return "";
