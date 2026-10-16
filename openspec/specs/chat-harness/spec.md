@@ -170,7 +170,7 @@ Note (non-normative): the `thinking` assertion proves that reasoning frames reac
 1. Log in as `zhangsan` through the UI and, before the chat page is opened (the chat page reads the workspace list when it mounts), ensure the workspace `ui-walk-sessions` exists via the page's authenticated request context (`POST /api/workspaces` → 201 or 409 only).
 2. On the welcome state, click `代码开发` in the scene group control (the `role="group"` named `场景`): it becomes the selected scene (`aria-pressed="true"`, the other two `日常办公`/`创意设计` `aria-pressed="false"`, session-sidebar「欢迎页场景胶囊与场景化快捷任务」) and the `快捷任务` chips switch to the code-scene list. The workspace selector at the left end of the composer's capability bar is a button reading `任务启动于 未选择`; opening it shows the search input `搜索工作空间`, typing `ui-walk-sessions` and choosing it makes the button read `任务启动于 ui-walk-sessions`.
 3. Send `WORKBUDDY_THINK WORKBUDDY_WRITE 会话走查 <uuid>` (a fresh UUID per project). The `POST /api/sessions` request, observed and not fulfilled, SHALL carry a body that parses to a JSON object deep-equal to `{"workspaceId":<that workspace id>,"scene":"code"}`. The turn raises no approval prompt card above the composer (the tool round is a write-tier `write`), the `write` step reaches `已完成` (its status badge `write 已完成`, read after the walk expands the assistant message's tool-call group, which is collapsed by default because no step failed), and the assistant reaches the exact fixed reply and done state.
-4. Thinking fold: the assistant message shows, before its answer body, a collapsed fold named `深度思考过程` (its toggle carries that accessible name and `aria-expanded="false"`, the message being terminal); expanding it shows exactly `先读需求，再列要点，最后作答。`.
+4. Thinking fold: the assistant message shows, before its answer body, a collapsed fold whose toggle's visible text and accessible name match `已思考 N 秒` with N a positive integer (the server-recorded duration, thinking-fold「深度思考折叠块呈现」) and carry `aria-expanded="false"` (the message being terminal); expanding it shows exactly `先读需求，再列要点，最后作答。`.
 5. File changes: the assistant message shows a card headed `文件变更（1 个）` with one row whose path reads `zhangsan/ui-walk-sessions/workbuddy-report.html` (ADR-0011 logical path, never the sandbox root), marked `写入` with no +/− counts, and whose `查看详情` opens the workspace sidebar (a `complementary` region named `工作空间侧边栏` on `desktop-light`, a dialog of that name on `mobile-dark`) with `workbuddy-report.html` selected in its tree and carrying the `本会话已改动` mark, the URL staying on the session (no navigation to `/files`); the sidebar's preview shows that file in its rendered view: an `iframe` whose `src` starts with the `base` answered by `POST /api/workspaces/<workspace id>/preview-token`, whose `sandbox` attribute is exactly `allow-scripts allow-forms allow-modals` (no `allow-same-origin`) and whose document shows the heading `WorkBuddy`; an `HTML` artifact card offers `打开网页预览`, which leads to that same state and opens no dialog; on `desktop-light` the topbar `工作空间侧边栏` button closes and reopens the sidebar with its `aria-expanded` following (on `mobile-dark` the sidebar is a modal layer covering the topbar, so it is closed with its own `关闭` and reopened with the topbar button, `aria-expanded` following likewise); with `只看本会话改动` switched on the tree lists exactly that one file. (Edit `+N/−N` counts are not reachable through real omp with the controlled upstream; they are proven by the fake omp `edit-write` scenario in server tests.) The values shown in steps 4 and 5 SHALL also be read back from `GET /api/sessions/<id>/messages` through the page's request context: the assistant message's `thinking` equals that text, its one step's `changes` deep-equals `[{"path":"workbuddy-report.html","added":null,"removed":null,"kind":"write"}]`, and the session view carries `scene` `code` and that `workspaceId`.
 6. Sidebar: the session is listed exactly once, inside the group named `ui-walk-sessions` (grouping by workspace is the default), not inside `置顶任务` or `临时空间` (on `mobile-dark` through the sidebar overlay, as in the existing journey), and no control named `筛选任务` exists. Then, in the same sidebar (on `mobile-dark` with the overlay still open): a real pointer click (Playwright's actionability hit test, no `force`) on the group's header button makes it `aria-expanded="false"` and removes the entry from the sidebar, a second click restores it; typing the session title into the search box `搜索任务` keeps exactly that entry, typing a fresh UUID shows `没有匹配的任务`, and clearing the box restores the list; `分组方式` → `按时间` lists the session inside the group `今天`, and `分组方式` → `按工作空间` restores the `ui-walk-sessions` group. None of these closes the `导航` overlay on `mobile-dark`.
 7. Pin: the entry's row menu (the button named `更多操作：<title>` of that entry; on `mobile-dark` inside the sidebar overlay) → `置顶任务` moves the entry to the `置顶任务` section (still exactly one entry for the session, gone from the `ui-walk-sessions` group), and the menu then offers `取消置顶` and no longer `置顶任务`.
@@ -297,3 +297,28 @@ A `finally` block around steps 2–11 SHALL delete the created session through t
 #### Scenario: 触屏上下文常显
 - **WHEN** 走查在 `hasTouch` 的浏览器上下文里打开同一会话
 - **THEN** 该上下文里 `matchMedia("(hover: none)").matches` 为 `true`，不移动鼠标时两条消息的操作行计算 `opacity` 都为 `1`；把隐藏改成不论能否悬停都生效时这条断言判红
+
+### Requirement: 等待与思考呈现的冒烟与走查
+`make smoke` 的 `smoke/session-meta.hurl` SHALL 在既有 `WORKBUDDY_THINK` 用例的 done 快照上另断言：被捕获助手消息的 `thinkingMs` 为整数（`isInteger`）且不小于 0，同一快照里 user 消息的 `thinkingMs` 为 `null`。`make smoke-live` 与 `smoke/chat.hurl` 不断言 `thinkingMs`（真实上游是否返回思考不确定）。
+既有 Playwright 生产旅程（`web/e2e/ui-walk.spec.ts`）SHALL 在两个 project（`desktop-light`、`mobile-dark`）中各走一遍以下步骤。步骤 2、3 SHALL 在主旅程既有步骤全部完成之后、清理之前，于主旅程的受闸会话中发送（该会话历史已含 `tool` 消息，受控上游把后续请求当作答复轮，闸门作用于它；既有步骤里的消息计数断言因此不受影响）。全程经受控上游（omp-test-harness「受控上游节奏与闸门停点标记」）与真 omp，不调用真实模型端点；每步结束放行闸门，会话按既有清理规则删除：
+1. **小圆点**：在既有 held 回合里，两个 project 都断言 running 助手消息的 `[data-slot="message-caret"]` 计算样式 `border-radius` 为 `50%`、`animation-name` 在 `no-preference` 下不为 `none`；`reduce` 下为 `none` 沿用既有切换，只在 `desktop-light` 运行（「UI 走查对话步骤」的「流式光标在减少动态效果下不闪烁」）。
+2. **等待指示**：以同时含 `WORKBUDDY_UI_WALK:<uuid>`（已武装闸门）与 `WORKBUDDY_HOLD_AT:empty` 的 prompt 发送一条。闸门 held 后断言：该助手消息内有可见文本 `正在思考…` 的 `role="status"` 元素，没有 `[data-slot="message-caret"]`，没有思考折叠块。放行后断言：等待指示消失、正文出现；回合结束后小圆点消失。
+3. **思考进行中与预览**：以同时含 `WORKBUDDY_UI_WALK:<uuid>`、`WORKBUDDY_THINK_LONG` 与 `WORKBUDDY_HOLD_AT:thinking` 的 prompt 发送一条。闸门 held 后断言：
+   - 思考折叠块展开、根元素带 `data-running`，展开/收起控件的可见文本与可访问名为 `正在思考…`；
+   - 主体计算 `max-height` 为 `192px`，`scrollHeight` 大于 `clientHeight`，`scrollTop + clientHeight` 与 `scrollHeight` 相差不超过 1px；
+   - 转录滚动容器距底不超过 4px。
+
+   放行后（含回合结束后）断言：控件文本匹配 `已思考 N 秒`（N 为正整数），回合结束后折叠块收起、不带 `data-running`。「闭段时即切换标题」的时刻由 web 单测证明，不在走查里量（放行时剩余分片一次发完）。
+4. 全程沿用既有 error oracle（console error、pageerror、意外的 `/api/auth/me`、失败的静态资源），不新增例外。
+
+#### Scenario: 冒烟断言思考时长
+- **WHEN** `make smoke` 运行 `smoke/session-meta.hurl` 的 `WORKBUDDY_THINK` 用例
+- **THEN** done 快照里被捕获助手消息的 `thinking` 恰为 `先读需求，再列要点，最后作答。` 且 `thinkingMs` 为非负整数，user 消息的 `thinkingMs` 为 `null`
+- **WHEN** 一个候选实现在快照里省略 `thinkingMs`、给助手消息 `null` 或给 user 消息一个整数
+- **THEN** 该用例失败
+
+#### Scenario: 走查量到等待指示、预览与标题变化
+- **WHEN** `make ui-walk` 在两个 project 中运行上述步骤
+- **THEN** 每个 project 中：等待指示只在零内容 held 期间出现、放行后消失；小圆点是圆形、在非减少动态效果下有动画；思考 held 期间标题为 `正在思考…`，主体限高 192px、内容溢出且贴到最新行，转录贴底；放行后标题为 `已思考 N 秒`
+- **WHEN** 一个候选实现让等待指示在正文出现后仍显示、让预览主体不限高（`max-height` 为 `none`）、让预览不贴到最新行，或在思考进行中显示 `深度思考过程`
+- **THEN** 对应步骤失败
