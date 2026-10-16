@@ -21,7 +21,7 @@ const INTERLEAVE = "WORKBUDDY_INTERLEAVE";
 const LEAD = "先说一句，再补一句。";
 const TAIL = "然后作答。";
 const TOOL_SUMMARY = "执行 1 条命令";
-const THOUGHT_TITLE = /^已思考 \d+ 秒$/u;
+const THOUGHT_TITLE = /^已思考 [1-9]\d* 秒$/u;
 const SETTLED_RECORD = /^(已允许执行|已拒绝执行|超时自动允许)$/u;
 
 /** 分段区的一块：种类与可见文本（正文全文、折叠块标题、工具段摘要），以及折叠块 / 工具段是否展开。 */

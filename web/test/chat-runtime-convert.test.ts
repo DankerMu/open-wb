@@ -108,11 +108,13 @@ describe("convertMessage 映射", () => {
     expect(converted.status).toEqual({ type: "incomplete", reason: "cancelled" });
   });
 
-  it("审批、步骤 changes、error、retrying、thinkingMs、thinkingActive 与原始状态原值透传，应用层组件读得到", () => {
+  it("审批、步骤 changes、error、retrying、thinkingMs、thinkingActive、正文与思考原文和原始状态原值透传，应用层组件读得到", () => {
     const view = stoppedView();
     const custom = messageCustom(convertMessage(view).metadata?.custom ?? {});
 
     expect(custom.status).toBe("stopped");
+    expect(custom.content).toBe("部分回答");
+    expect(custom.thinking).toBe("先想一想");
     expect(custom.error).toBe(FAILURE);
     expect(custom.approvals).toBe(view.approvals);
     expect(custom.steps).toBe(view.steps);
