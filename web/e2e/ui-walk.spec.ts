@@ -660,9 +660,9 @@ async function expectCompletedPair(
 ): Promise<void> {
   const pair = await dialoguePair(page, sessionId, prompt);
   await expect(pair.assistant.locator('[data-slot="message-body"]')).toHaveText(EXPECTED_REPLY);
-  // 工具调用组默认收起：摘要行是步骤数与末位步骤的名称、状态；展开后才有步骤卡。
+  // 工具调用组默认收起：摘要行按动作归类计数（B6）；展开后才有步骤卡。
   await expect(
-    pair.assistant.getByRole("button", { name: "1 个步骤 · bash 已完成", exact: true }),
+    pair.assistant.getByRole("button", { name: "执行 1 条命令", exact: true }),
   ).toBeVisible();
   const steps = await expandToolGroup(pair.assistant);
   await expect(page.getByRole("status", { name: "bash 已完成" })).toBeVisible();
