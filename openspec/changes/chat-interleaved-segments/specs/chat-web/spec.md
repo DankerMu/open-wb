@@ -397,6 +397,10 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **WHEN** 一条 running 助手消息依次收到 text.delta(`先看一下。`)、step.start(read，`bodyOffset` 5)；随后收到 step.end 与 text.delta(`好了`)
 - **THEN** step.start 之后分段区为正文段与工具段，小圆点恰一个、位于工具段之下而不在正文段内；text.delta(`好了`) 之后小圆点位于第二个正文段的 `MarkdownBody` 之后；`turn.end` 后没有小圆点
 
+#### Scenario: 分段区没有块时的小圆点
+- **WHEN** 一条 running 助手消息只收到 text.delta(`\n`)（正文只有空白，分段区一个块也不渲染）
+- **THEN** 消息内小圆点恰一个，单独一行位于分段区的位置（等待指示原本所在处），消息内没有 `data-slot="message-body"`；随后收到 text.delta(`好了`) 后小圆点位于该正文段的 `MarkdownBody` 之后
+
 #### Scenario: 用户消息操作行的按钮与次序
 - **WHEN** 渲染一个 `done` 会话里 `undo` 为 `available` 的用户消息；另一例回合进行中；再一例会话已归档（另含一条只发附件的用户消息）
 - **THEN** 第一例操作行的按钮依次为 `复制`、`撤回`、`从此处分叉`，三者可用；第二例 `撤回` 与 `从此处分叉` 禁用、`复制` 可用；第三例操作行里只有 `复制`，没有 `撤回` 与 `从此处分叉`；同一已归档会话里一条只发附件的用户消息不渲染操作行（`article` 内没有 `message-actions`）

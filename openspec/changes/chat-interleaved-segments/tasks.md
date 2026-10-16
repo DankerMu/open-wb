@@ -171,7 +171,7 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
 - [ ] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
 - [ ] 4.2 先写测试：
   - `server/test/approval-pairing.test.ts`（纯）：select 先到时 start 按名字先进先出取出；start 先到时 select 配给最早开始、仍在运行的同名步骤；名字不同两个方向都不配；已结束的步骤不再配；request 已发布的 select 只入队（含登记已被删除的情形）；回合结束丢弃；
-  - `server/test/session-approval-pairing.test.ts`（fake-omp + 真 SQLite）：tool-approval「确认与步骤配对」的「同名工具按先进先出配对」（`approval-parallel`；`decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 与改动前逐值相同）、「步骤先于审批 select 到达」（审批行已插入而 pump 未读到 select；配对写在 select 时、`approval.request` 发布之前）、「已结束的步骤不再配对」「工具名不同不配对」两例、「没有步骤的审批保持未配对」两例、「配对写失败」两例；
+  - `server/test/session-approval-pairing.test.ts`（fake-omp + 真 SQLite）：tool-approval「确认与步骤配对」的「同名工具按先进先出配对」（`approval-parallel`；`decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 与改动前逐值相同）、「步骤先于审批 select 到达」（审批行已插入而 pump 未读到 select；配对写在 select 时、`approval.request` 发布之前）、「已结束的步骤不再配对」「工具名不同不配对」两例、「没有步骤的审批保持未配对」两例、「配对写失败」两例、「作答先于 pump 读到 select」（作答路径已补发 `approval.request`、登记已删除；select 时只入队、不写 `step_id`，后到的同名 `step.start` 取出它）；
   - 分叉：turn-control「拷贝审批记录」里 `step_id` 按步骤序号重映射、原值 NULL 时为 NULL。
 
   验证：在未改动的代码上判红。
@@ -185,7 +185,7 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
 
   验证：4.2 全绿；`approvals.ts` 的 diff 只有那一个只读查询，`store-approvals.ts` 无改动。
 - [ ] 4.7 CI：把 `omp-official-approval-pairing.test.ts` 加进 `.github/scripts/ci-uid-isolation.sh:292` 的官方 omp 用例列表，同步改 `scripts/test-ci-harness.sh` 里钉住该命令的断言；PR 单列 CI 一节，写明 uid-isolation job 的实测总时长（上限 15 分钟）。
-- [ ] 4.8 变异证据：配对改为「库里 `step_id IS NULL` 的最小 `id`」→ 「步骤先于审批 select 到达」判红（`step.start` 提前配上了 pump 尚未读到的审批）；select 时只入队、不查运行中步骤 → 同一场景判红；`step.end` 不移出运行中列表 → 「已结束的步骤不再配对」判红；select 时的 `UPDATE` 挪到 `approval.request` 发布之后 → 「配对写失败」第二例判红；取出时不比对名字 → 「工具名不同不配对」判红；配对写在步骤事务之外 → 「配对写失败」判红；配对时顺手改 `decision` 或 `decided_at` → 「同名工具按先进先出配对」的逐值断言判红；拷贝不重映射 `step_id`（原样拷贝）→ 分叉用例判红。
+- [ ] 4.8 变异证据：配对改为「库里 `step_id IS NULL` 的最小 `id`」→ 「步骤先于审批 select 到达」判红（`step.start` 提前配上了 pump 尚未读到的审批）；select 时只入队、不查运行中步骤 → 同一场景判红；`step.end` 不移出运行中列表 → 「已结束的步骤不再配对」判红；select 时的 `UPDATE` 挪到 `approval.request` 发布之后 → 「配对写失败」第二例判红；取出时不比对名字 → 「工具名不同不配对」判红；配对写在步骤事务之外 → 「配对写失败」判红；select 时不判「request 是否已发布」、一律按运行中步骤配对 →「作答先于 pump 读到 select」判红（实时视图的 `stepId` 为 null 而快照有值）；配对时顺手改 `decision` 或 `decided_at` → 「同名工具按先进先出配对」的逐值断言判红；拷贝不重映射 `step_id`（原样拷贝）→ 分叉用例判红。
 - [ ] 4.9 整刀验证：4.4 结果表补记被拒绝审批的 `chat_approvals.step_id`；`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 `omp-official-approval-pairing.test.ts` 与 `omp-official-approval-modes.test.ts` 全绿；CI 的 uid-isolation job 绿。PR 请求白盒审查（design D18），审查重点是「配对没有改变任何作答与结算路径」。
 Suggested fixture level: expanded - 与审批闸门同表、同一 pump 的持久化写入；并发次序（审批行早于 pump 插入、select 与 start 的先后不保证）；fork 重映射。
 Minimal mergeable slice: atomic - 队列、写列、fork 重映射与实测是同一个关联的产生、搬运与真链路证据；拆开会留下「分叉出的会话配错步骤」的窗口。
@@ -206,15 +206,15 @@ Minimal mergeable slice: atomic - 队列、写列、fork 重映射与实测是�
 - [ ] 5.2 先写服务端测试（新断言进新文件），按验证路径分三项：
   - **5.2a 快照与 REST**：chat-sessions「会话 REST」：消息 13 键、步骤 8 键、审批 7 键，`decideApproval` 的 200 为七键；「Snapshot carries segment positions」；「Fork copies history…」与「Regenerate…」中新键的取值；tool-approval「审批作答 REST」改写后的「允许」（200 七键含 `stepId`）；
   - **5.2b 事件负载**：chat-stream：「Ordered publication after persistence」（`thinking.end.segment` 与段行相等）、「步骤的正文偏移」（`step.start.bodyOffset` 与快照相同）、「合并器缓冲着正文时开段」的快照部分；
-  - thinking-fold 改写后带 `segment` 负载的场景；tool-approval「审批快照」（`stepId` 与归约）、改写后的「审批事件」两例（`approval.request` 六键、`stepId`）；chat-stream 改写后的「审批事件发布」全部场景（含 select 时配对写失败不发布）；tool-approval「步骤先于审批 select 到达」的事件部分（`approval.request.stepId` 为该步骤 id）；
+  - thinking-fold 改写后带 `segment` 负载的场景；tool-approval「审批快照」（`stepId` 与归约）、改写后的「审批事件」两例（`approval.request` 六键、`stepId`）；chat-stream 改写后的「审批事件发布」全部场景（含 select 时配对写失败不发布）；tool-approval「步骤先于审批 select 到达」的事件部分（`approval.request.stepId` 为该步骤 id）；「作答先于 pump 读到 select」的事件部分（作答路径补发的 `approval.request.stepId` 为 `null`，随后 `step.start.approvalId` 为该审批 id，实时视图与快照的 `stepId` 相同）；
   - **5.2c 官方 omp 追加**（`WORKBUDDY_OMP_TEST=1`）：3.10 的用例追加快照断言（`thinkingSegments` 恰一段，值同库行）；4.4 的用例追加快照 `stepId` 断言（按所取分支）。
 
   验证：在未改动的代码上判红。
 - [ ] 5.3 先写 web 测试：chat-web「分段位置三键严格解析」「分段位置归约」「步骤开始事件的两个新字段严格解码」（含：缺键或多键的 `step.start` 触发重新同步，与其它已知事件一致）、「审批请求事件的 stepId 严格解码」、「审批请求与结算归约」与「分段位置归约」中 `approval.request` 带 `stepId` 的部分、改写后的「convertMessage 映射」（新字段透传，part 次序不变）；chat-web「实时与快照切段一致」的视图部分（事件归约出的视图与快照视图的 `thinkingSegments`、步骤 `bodyOffset`、审批 `stepId` 逐值相等；切段函数的比较在 6.2）。
   验证：在未改动的代码上判红。
 - [ ] 5.4 实现服务端：读出与快照形状加三处键（读写函数在 `store-segments.ts`）；`step.start` 发布 `bodyOffset` 与 `approvalId`；`thinking.end` 发布 `segment`；`approval.request` 发布 `stepId`（pump 把 4.3 的 select 时配对结果传给 `publishRequest`；作答路径补发 request 时为 `null`）；纯协议事件归约的输出不变；`approvals.ts` 只改 request 负载，不改发布时机与任何作答路径。
-  验证：5.2 全绿；`store.ts` ≤ 780、`events.ts` ≤ 540、`rest.ts` ≤ 590、`store-approvals.ts` ≤ 412 行。
-- [ ] 5.5 实现 web：新模块 `web/src/lib/session-contract-segments.ts`（新键的严格解析）与 `web/src/features/chat/stream-segments.ts`（`thinking.delta` 临时段、`thinking.end` 取代、`step.start` 记偏移与 `stepId`、`approval.request` 取事件的 `stepId`、`turn.start` 清空）；`stream.ts` 与 `session-contract.ts` 只加类型字段与分派；`runtime-convert.ts` 透传新字段并把 `:44-48` 的注释改为「part 不承载分段，分段由 `message-segments.ts` 从透传字段算」。本切片不改任何呈现。
+  验证：5.2 全绿；`store.ts` ≤ 784、`events.ts` ≤ 540、`rest.ts` ≤ 590、`store-approvals.ts` ≤ 412 行。
+- [ ] 5.5 实现 web：新模块 `web/src/lib/session-contract-segments.ts`（新键的严格解析）与 `web/src/features/chat/stream-segments.ts`（`thinking.delta` 临时段、`thinking.end` 取代、`step.start` 记偏移与 `stepId`、`approval.request` 取事件的 `stepId`、`turn.start` 清空）；`stream.ts`、`session-contract.ts`、`stream-thinking.ts`、`stream-approvals.ts` 只加类型字段与分派（行数见预算表）；`runtime-convert.ts` 透传新字段并把 `:44-48` 的注释改为「part 不承载分段，分段由 `message-segments.ts` 从透传字段算」。本切片不改任何呈现。
   验证：5.3 全绿；`stream.ts` ≤ 790、`session-contract.ts` ≤ 710 行。
 - [ ] 5.6 补键（通用纪律第 4 种改法，逐条列进偏离记录），按 5.1 的清单分两项、各自可单独核对：
   - **5.6a 服务端**：键集常量、事件负载断言、整快照断言（`session-rest.test.ts` 改用共享助手视图常量，见预算表）、`approvalsOf` 加列；验证 `npm test --workspace server` 全绿，`session-rest.test.ts` ≤ 800、`session-thinking.test.ts` ≤ 800 行。
@@ -231,7 +231,7 @@ Minimal mergeable slice: atomic - 服务端事件字段、快照键与 web 的�
 - [ ] 6.1 开工核对：
   - 重读 `message-thread.tsx:230-258` 的 `AssistantMessage`、`thinking-fold.tsx`、`message-waiting.tsx`、正文逐字展开的组件与 `MessageBody`；
   - 对 design D14 清单项 3（块次序）逐条确认：表外列出的「不需要改写」的块次序断言（`chat-page-file-changes.test.tsx:685-700`、`:717-724`，`chat-thinking.test.tsx:655-680`，`chat-page-artifact-card.test.tsx:555-575`）的夹具在 5.6 之后确为旧布局（步骤 `bodyOffset: null` 或有思考而无段）。不是的停下更新 D14；
-  - 对 D14 清单项 5、6（B12、B5）逐条确认：D14 表里两行 `chat-thinking-title.test.tsx` 之外，「不需要改写」列出的思考用例与走查步骤（`chat-thinking.test.tsx` T6 / T8 与其余、`chat-thinking-preview.test.tsx`、`chat-thinking-smooth.test.tsx`、`chat-thinking-title.test.tsx:171-257`、`ui-walk-thinking-preview.ts`、`ui-walk-sessions.spec.ts:320-340`）按 D14 的判定确为旧布局，或为分段布局而断言与 B12 一致。
+  - 对 D14 清单项 5、6（B12、B5）逐条确认：D14 表里两行 `chat-thinking-title.test.tsx` 之外，「不需要改写」列出的思考用例与走查步骤（`chat-thinking.test.tsx` T8 与其余（T6 已移入 D14 改写表）、`chat-thinking-preview.test.tsx`、`chat-thinking-smooth.test.tsx`、`chat-thinking-title.test.tsx:171-257`、`ui-walk-thinking-preview.ts`、`ui-walk-sessions.spec.ts:320-340`）按 D14 的判定确为旧布局，或为分段布局而断言与 B12 一致。
 
   验证：核对结果写进 PR。
 - [ ] 6.2 先写测试：
@@ -247,7 +247,7 @@ Minimal mergeable slice: atomic - 服务端事件字段、快照键与 web 的�
 - [ ] 6.3a 按 design D14 表改写标「6」的全部行（`chat-thinking.test.tsx:422-427`、`:443` 的 T6，清单项 3；`chat-thinking-title.test.tsx:107-139`、`:145-169`，清单项 5、6；通用纪律第 3 种改法，引用 issue 需求 1、B12、B5），逐条列进偏离记录；表外的思考用例只补键（5.6），不改断言。
 - [ ] 6.4 对话内搜索（design D13）：jsdom 用例覆盖 chat-web「工具段摘要与折叠」的「对话内搜索不改变段的展开态」；conversation-search 的既有用例不改、全绿。
 - [ ] 6.5 验收清单：按 design D15 改写 CH-14、CH-117（先调用工具的回答，小圆点在工具段之下）、CH-118（含 B12：一段思考结束即收起），新增「分段交替显示与刷新后一致」一行（受控上游带 `WORKBUDDY_INTERLEAVE`），结论 `待签`。
-- [ ] 6.6 变异证据：块键去掉种类前缀 → 「先思考后正文的消息里块键互不相同」判红（并在控制台出现 React 同级重复键警告）；分段区没有块时不渲染小圆点 → 「分段布局下的小圆点」的空分段例判红；切段函数忽略 `stepsBefore`（思考段一律排在同偏移的步骤之后）→ 「交替切段」第二个 WHEN 判红；旧布局判定漏掉条件 2 → 「旧布局判定」判红；只含空白的正文段照常输出 → 「空白与空思考不分隔工具段」判红；工具段的 React key 改用数组下标并在前面插入一段 → 双工具段展开态用例判红；折叠块共用一个开合状态 → 「用户手动切换保留」判红；分段布局下折叠块仍按消息 running 开合（不在段结束时收起）→ 「分段布局下只展开进行中的一段」与改写后的「流式展开、终态收起」判红；旧布局也改成按段开合 → 「流式展开、终态收起」的旧布局例判红。
+- [ ] 6.6 变异证据：块键去掉种类前缀 → 「先思考后正文的消息里块键互不相同」判红（并在控制台出现 React 同级重复键警告）；分段区没有块时不渲染小圆点 → 「分段区没有块时的小圆点」判红；切段函数忽略 `stepsBefore`（思考段一律排在同偏移的步骤之后）→ 「交替切段」第二个 WHEN 判红；旧布局判定漏掉条件 2 → 「旧布局判定」判红；只含空白的正文段照常输出 → 「空白与空思考不分隔工具段」判红；工具段的 React key 改用数组下标并在前面插入一段 → 双工具段展开态用例判红；折叠块共用一个开合状态 → 「用户手动切换保留」判红；分段布局下折叠块仍按消息 running 开合（不在段结束时收起）→ 「分段布局下只展开进行中的一段」与改写后的「流式展开、终态收起」判红；旧布局也改成按段开合 → 「流式展开、终态收起」的旧布局例判红。
 - [ ] 6.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（走查此时看到的真 omp 消息已是分段布局；走查里若有表外的块次序断言变红，停下更新 D14）。
 Suggested fixture level: expanded - 旧消息兼容（045 之前的消息走旧布局）是本切片的核心判定；渲染次序波及全部助手消息。
 Minimal mergeable slice: atomic - 切段函数与渲染器必须一起合入（knip 禁止未用导出），且不能出现半分段的呈现。
