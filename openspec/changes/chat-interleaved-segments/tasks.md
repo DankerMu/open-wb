@@ -168,7 +168,7 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
 
   验证：一张结果表（帧、线上先后、事件、库行，三次各一列）。有没有步骤三次不一致时停下报告，不取分支；线上先后三次不一致时如实记录，不固化先后断言（配对规则本来就不依赖它，design D6），并在 PR 里写明。
 - [x] 4.5 分支一——被拒绝的调用有步骤：4.4(a) 的用例固化为常驻断言：恰一个 bash 步骤，以 `failed` 结束；被拒绝审批的 `step_id` 等于该步骤 id；`decision` 为 `deny`；4.4 观察到的 select 与 start 的先后（三次一致时）作为常驻断言。design D6 的「被拒绝的调用」改写为实测结论（删去「没有步骤」一支的推演，保留规格的两支合法终态不动）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「该步骤卡标 `已拒绝`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
-- [x] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
+- [x] 4.6 （未取，见 4.4 的结果表；#1473 实测取分支一）分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
 - [x] 4.2 先写测试：
   - `server/test/approval-pairing.test.ts`（纯）：select 先到时 start 按名字先进先出取出；start 先到时 select 配给最早开始、仍在运行的同名步骤；名字不同两个方向都不配；已结束的步骤不再配；request 已发布的 select 只入队（含登记已被删除的情形）；回合结束丢弃；
   - `server/test/session-approval-pairing.test.ts`（fake-omp + 真 SQLite）：tool-approval「确认与步骤配对」的「同名工具按先进先出配对」（`approval-parallel`；`decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 与改动前逐值相同）、「步骤先于审批 select 到达」（审批行已插入而 pump 未读到 select；配对写在 select 时、`approval.request` 发布之前）、「已结束的步骤不再配对」「工具名不同不配对」两例、「没有步骤的审批保持未配对」两例、「配对写失败」两例、「作答先于 pump 读到 select」（作答路径已补发 `approval.request`、登记已删除；select 时只入队、不写 `step_id`，后到的同名 `step.start` 取出它）；

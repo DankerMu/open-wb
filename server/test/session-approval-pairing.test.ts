@@ -363,6 +363,33 @@ describe("tool-approval「确认与步骤配对」: the later arrival pairs, in 
   );
 
   it(
+    "a step paired at its start takes no second approval: select r1, start c1, select r2, start c2",
+    REAL,
+    async () => {
+      let answered = 0;
+      const { world } = await openScripted({
+        prompt: (child) =>
+          child.emitRaw(chunk(select("r1"), start("c1"), select("r2"), start("c2"))),
+        answer: (child) => {
+          answered += 1;
+          if (answered === 2) child.emitRaw(chunk(end("c1"), end("c2"), AGENT_END));
+        },
+      });
+      await prompted(world);
+      await waitForEvent(world, "step.start", 2);
+      await waitForEvent(world, "approval.request", 2);
+      await decide(world, "r1", "allow");
+      await decide(world, "r2", "allow");
+      await waitForTurn(world.fixture, world.session, "done");
+
+      const messageId = assistantIdFor(world.fixture, world.session);
+      const [c1, c2] = stepIds(world.fixture.db, messageId);
+      expect(pairingRows(world.fixture.db, messageId).map((row) => row.step_id)).toEqual([c1, c2]);
+      expect(world.errors).toEqual([]);
+    },
+  );
+
+  it(
     "工具名不同不配对: a queued bash approval skips the read step and goes to the bash one",
     REAL,
     async () => {
@@ -524,7 +551,10 @@ describe("tool-approval「确认与步骤配对」: stops and failed pairing wri
 
       const messageId = assistantIdFor(world.fixture, world.session);
       expect(stepRows(world.fixture.db, messageId)).toEqual([]);
-      expect(pairingRows(world.fixture.db, messageId).map((row) => row.step_id)).toEqual([null]);
+      // The infra-fault retire settles the still-pending approval `deny` on the injected clock.
+      expect(pairingRows(world.fixture.db, messageId)).toEqual([
+        { request_id: "r1", decision: "deny", decided_at: T, step_id: null },
+      ]);
       const types = sessionEvents(world).map((entry) => entry.event.type);
       expect(types).toContain("approval.request");
       expect(types).not.toContain("step.start");
@@ -546,7 +576,9 @@ describe("tool-approval「确认与步骤配对」: stops and failed pairing wri
 
     const messageId = assistantIdFor(world.fixture, world.session);
     expect(stepRows(world.fixture.db, messageId).map((row) => row.name)).toEqual(["bash"]);
-    expect(pairingRows(world.fixture.db, messageId).map((row) => row.step_id)).toEqual([null]);
+    expect(pairingRows(world.fixture.db, messageId)).toEqual([
+      { request_id: "r1", decision: "deny", decided_at: T, step_id: null },
+    ]);
     const types = sessionEvents(world).map((entry) => entry.event.type);
     expect(types).toContain("step.start");
     expect(types).not.toContain("approval.request");

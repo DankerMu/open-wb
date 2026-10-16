@@ -77,6 +77,23 @@ describe("rule 1: a step start takes the first queued approval of its name", () 
   });
 });
 
+describe("rule 1 then rule 2: a step paired at its start never takes a second approval", () => {
+  it("select r1, start c1, select r2, start c2: r1 → c1 at the start, r2 queues and goes to c2", () => {
+    const steps = new PumpSteps(MESSAGE);
+    const store = recordingStore();
+    steps.select(select("r1", "bash"), PUBLISHES, store);
+    expect(steps.takeApproval("bash")).toBe("r1");
+    steps.started("c1", 10, "bash", 101);
+
+    // c1 already holds r1: it is not a running unpaired step, so r2 writes nothing and queues.
+    steps.select(select("r2", "bash"), PUBLISHES, store);
+    expect(store.writes).toEqual([]);
+    expect(steps.takeApproval("bash")).toBe("r2");
+    steps.started("c2", 11, "bash", 102);
+    expect(steps.takeApproval("bash")).toBeUndefined();
+  });
+});
+
 describe("rule 2: a select whose request publishes now pairs the earliest running step", () => {
   it("start first: each select pairs the earliest-started same-name step still unpaired", () => {
     const steps = new PumpSteps(MESSAGE);
