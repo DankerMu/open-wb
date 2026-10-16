@@ -270,8 +270,8 @@ owner 裁定见 proposal「Why」与下文「owner 的裁定」表（grill ledge
 
 ## Migration Plan
 
-- 切片次序：S0（B9 的一行夹具修复，fixture level none，独立、原子、可最先合入）不依赖任何切片；S1 与 S2 互不依赖，可并行；S3a（FUSE 用例 + 实测 + temporary-workspaces 规格）不依赖任何切片；S3b（文档、ADR、头注释、验收行、关闭 issue）← S1、S2，以及 S3a 取「绿」时 ← S3a（终态措辞与实测结果都要先落地）。
-- **S3a 的红分支**：S3a 不合并；temporary-workspaces 的 delta 从本 change 撤出、另开后续 change；S0 已合入的「`sub` 为唯一顶层条目」只是测试夹具的收窄，不随 delta 撤出；S3b 只写 #1286 的部分（ADR-0010 补充里不写挂载规则已钉住，改写实测观察与「待重议」），只关闭 #1286；#1237 保持打开，实测结果表贴到 #1237 上。S0 不受影响（已先合）。
+- 切片次序：S0（B9 的一行夹具修复，fixture level none，独立、原子、可最先合入）不依赖任何切片；S1 与 S2 互不依赖，可并行；S3a（FUSE 用例 + 实测 + temporary-workspaces 规格）只依赖 S0（3.5 ③ 以 S0 的夹具收窄为前提）；S3b（文档、ADR、头注释、验收行、关闭 issue）← S1、S2，以及 S3a 取「绿」时 ← S3a（终态措辞与实测结果都要先落地）。
+- **S3a 的红分支**：S3a 不合并；temporary-workspaces 的 delta 从本 change 撤出、另开后续 change（由编排方单独提交 docs PR 删除该 delta 文件，不属任何子 issue 的 PR）；S0 已合入的「`sub` 为唯一顶层条目」只是测试夹具的收窄，不随 delta 撤出；S3b 只写 #1286 的部分（ADR-0010 补充里不写挂载规则已钉住，改写实测观察与「待重议」），只关闭 #1286；#1237 保持打开，实测结果表贴到 #1237 上。S0 不受影响（已先合）。
 - **部署**（随 S1 发布）：`OMP_USER` 模式部署在升级前核对 `SANDBOX_ROOT`（realpath）属应用 uid、应用 uid 在共享组；不符则 `chown <app-uid> <root>`（不动属组），或 `install -d -m 3770 -o <app-uid> -g <group> <root>`。同 uid 部署无动作。回滚到旧版本：根上的粘滞位无害（旧代码不检查也不改既有分量），可留着。
 - S2 无部署动作；行为差异只在被换入的目标（旧版读链接目标或挂住，新版 404）与 416 多一次打开。
 - S3a / S3b 无部署动作；运维文档新增的手工步骤只在出现带挂载的残骸时用到。

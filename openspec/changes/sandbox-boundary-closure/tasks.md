@@ -4,13 +4,13 @@
 >
 > 依赖（「X ← Y」读作「X 的前提是 Y」）：
 > - S0（B9 的一行夹具修复）不依赖任何切片，可最先合入；只有 S3a 依赖它（3.5 ③ 以 S0 的夹具收窄已合入为前提）；它是 CI 抖动修复，与挂载规则无关，不等测试主机的实测。
-> - S1、S2、S3a 互不依赖，可立即并行（S1 改 `dirs.ts` / `server.ts`，S2 改 `workspaces/` 与 `preview/app.ts`，S3a 只改一个新测试文件与 temporary-workspaces 规格；没有共同文件）。
+> - S1、S2 互不依赖，可立即并行；S3a 只依赖 S0（3.5 ③）（S1 改 `dirs.ts` / `server.ts`，S2 改 `workspaces/` 与 `preview/app.ts`，S3a 只改一个新测试文件与 temporary-workspaces 规格；没有共同文件）。
 > - S3b ← S1、S2；S3a 取「绿」时 S3b ← S3a：终态措辞（ADR-0010 补充、ADR-0014 的 #1286 表、头注释）要写的是已合入的行为，实测结果（S3a 的任务 3.6）要写进 ADR。S3a 取「红」时 S3a 不合并、temporary-workspaces 的 delta 撤出本 change 另开后续，S3b 只写 #1286 的部分（design Migration Plan）。
 >
 > 通用纪律：见 design「通用纪律」，本文不复述；每组的「验证」都以它的合入门槛为底线。补充三条只与任务写法有关的：
 > - **测试先行。** 有行为的任务先写测试并在未改动的代码上看到红（或在 PR 写明为何不可能红，例如新模块），再实现。
 > - **开工核对。** 每组第一个任务是核对；核对出入先改 design 与本组任务，再继续（design「行号核对」）。
-> - **白盒。** 五个切片全部触及 AGENTS.md 关键路径「沙箱与文件边界」：每个 PR 请求人工白盒审查，并把 design D11 该切片的审查清单贴进 PR 正文。
+> - **白盒。** S1、S2、S3a 触及 AGENTS.md 关键路径「沙箱与文件边界」：这三个 PR 请求人工白盒审查；S0、S3b 不含运行时代码，触发不成立，但同样把 design D11 该切片的审查清单贴进 PR 正文请一次轻量复核。
 
 ## 风险包
 
@@ -81,7 +81,7 @@ Minimal mergeable slice: atomic - 一行修复，没有可再拆的部分；独�
   - 重读 `.github/scripts/ci-uid-isolation.sh:92-97`、`.github/scripts/ci-compiled-server.sh:9-16` 与 `scripts/test-ci-harness.sh` 里 `SANDBOX_ROOT` / `chmod 2770` 的全部命中，确认没有一处钉沙箱根启动后的 mode（design D10）；有则停下报告——那意味着 S1 需要 CI 改动，须交 owner 决定。
 
   验证：核对结果写进 PR。
-- [ ] 1.2 先写单元测试（`server/test/sandbox-dirs.test.ts`，新 `describe("core/sandbox ensureSandboxRoot")`），覆盖 sandbox-core「沙箱根目录」三个场景的全部 WHEN：冷建、`2770` → `3770`、`0755` → `3770`、已是 `3770` 时不发 chmod（`vi.spyOn(fs, "chmodSync")` 计数）、属组与 umask 不变、根下无新增条目；根是符号链接时作用于目标；位置是普通文件时两种 `strict` 都抛且文件不变；属别的 uid（沿用 `:336` 造法，`it.skipIf(geteuid === 0)`）与 chmod 被替换为抛 `EPERM` 两例在 `strict: true` 抛（错误文本不含环境值）、`strict: false` 返回 `unchanged` 且 mode / 属主不变、没有第二次 chmod。另加 sandbox-core「共享目录权限位」新场景「已建出的沙箱根不被惰性路径改动」。
+- [ ] 1.2 先写单元测试（`server/test/sandbox-dirs.test.ts`，新 `describe("core/sandbox ensureSandboxRoot")`），覆盖 sandbox-core「沙箱根目录」三个场景的全部 WHEN：冷建、`2770` → `3770`、`0755` → `3770`、已是 `3770` 时不发 chmod（`vi.spyOn(fs, "chmodSync")` 计数）、属组与 umask 不变、根下无新增条目；根是符号链接时作用于目标；位置是普通文件时两种 `strict` 都抛且文件不变；属别的 uid（沿用 `:336` 造法，`it.skipIf(geteuid === 0)`）与 chmod 被替换为抛 `EPERM` 两例在 `strict: true` 抛（错误文本不含环境值）、`strict: false` 返回 `unchanged` 且 mode / 属主不变、；再加一例：chmod 只落下 `0o1770`（内核静默丢掉 setgid、复查失败）时 `strict: true` 抛、`strict: false` 返回 `unchanged`、不回滚、没有第二次 chmod（sandbox-core「沙箱根目录」第二个 WHEN，B3 不纠正）。另加 sandbox-core「共享目录权限位」新场景「已建出的沙箱根不被惰性路径改动」。
   验证：在未改动的代码上判红（函数不存在即红）。
 - [ ] 1.3 先写编译入口测试：
   - 先把 `captureSpawnHook`（`server/test/server-startup-omp-user.test.ts:135-160`，今天是未导出的 ESM 文本）迁入 `server/test/server-startup-helpers.ts` 并导出，改写为 CJS 文本（`require('node:child_process')` / `require('node:fs')` / `require('node:module')`，与 `denyChmodHook` 同形），`server-startup-omp-user.test.ts` 改为 import 它（`.mjs` 文件名随之改 `.cjs`）；再加一个拼接 helper（或照 `childUmaskHook` 的写法，把第二段的 `'use strict';` 去掉后拼进同一个字符串），使一个 `--require` 文件同时伪装 setpriv 与拒绝 chmod（`requireHook` 只收一个路径，`server-startup-helpers.ts:127`）；`server-startup-helpers.ts` 699 → ≤ 760。
@@ -98,7 +98,7 @@ Minimal mergeable slice: atomic - 一行修复，没有可再拆的部分；独�
 
   验证：1.2、1.3 全绿；`dirs.ts` ≤ 150、`server.ts` ≤ 730 行；`npm test --workspace server` 全绿（含 `omp-process.test.ts:213` 原样通过）。
 - [ ] 1.5 规格与文档随刀：本 change 的 http-service-skeleton、sandbox-core、omp-uid-isolation 三个 delta 由归档合入主规格，本任务只核对实现与 delta 逐句一致；PR 正文写明 `OMP_USER` 部署的升级前提（proposal Impact 的措辞），并写明 uid-isolation job 的 smoke 阶段作为 chmod 分支的「失败可见、取值不断言」证据（design D10）——不改 CI。
-- [ ] 1.6 变异证据（逐条做、逐条撤销，结果贴进 PR）：去掉 `ensureOwnedDir` 调用（只 mkdir）→ 「冷建与校正」与「完整装配」的 `3770` 断言判红；`strict` 下吞掉属主错误 → 「属主不符或 chmod 被拒」的 strict 例判红；把阶段挪到 `listen` 之前 → `server-startup-layout.test.ts:256`（`state_layout` 失败后沙箱不存在）判红；失败记录带上路径 → 哨兵断言判红；同 uid 模式漏写 `sandbox_root_unchanged` → 该例判红；`sandbox_root_unchanged` 行多带一个 `path` 键 → 该例的整行精确断言判红。
+- [ ] 1.6 变异证据（逐条做、逐条撤销，结果贴进 PR）：去掉 `ensureOwnedDir` 调用（只 mkdir）→ 「冷建与校正」与「完整装配」的 `3770` 断言判红；`strict` 下吞掉属主错误 → 「属主不符或 chmod 被拒」的 strict 例判红；把阶段挪到 `listen` 之前 → `server-startup-layout.test.ts:256`（`state_layout` 失败后沙箱不存在）判红；失败记录带上路径 → 哨兵断言判红；同 uid 模式漏写 `sandbox_root_unchanged` → 该例判红；`sandbox_root_unchanged` 行多带一个 `path` 键 → 该例的整行精确断言判红；lenient 分支对已落下的 `0o1770` 做回滚 → 「不回滚」断言判红。
 - [ ] 1.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；CI 的 uid-isolation job 绿（PR 里贴 job 链接与 `make smoke` 阶段的成功行）。PR 请求白盒审查（design D11 S1 清单）。
 Suggested fixture level: expanded - 改沙箱根的权限位与属主检查、新增启动失败阶段（auth/permissions + config 风险包，Critical Path「沙箱与文件边界」）。
 Minimal mergeable slice: atomic - 建根、校正、失败阶段与同 uid 记录是同一个启动步骤的四个分支；只合其中一部分会留下「建了根却不校正」或「校正失败无出口」的窗口，且 D5 的五处改写只对完整行为成立。
@@ -169,6 +169,6 @@ Minimal mergeable slice: atomic - 用例文件与实测是同一条规格句子�
 - [ ] 4.4 源码头注释终态：`server.ts:34-38`、`trash.ts:18-60`（删去「`SANDBOX_ROOT` 无粘滞位」前提下的推演，保留批次内部句柄残余与源侧中间分量残余）、`rest-entries.ts:8-9`、`rest-archive.ts:25`（「#1286 stays open」→ 已有界闭合、中间分量残余按 B1 保留）、`preview/app.ts` 头（S2 已改的段落之外的 #1286 措辞）、`server/test/workspaces-http-boundary.test.ts:15` 与 `web/src/lib/api-files.ts:534`、`:545` 的「stays open / known residual」措辞；`office-cache.ts:36-40` 核对后不改（`work/` 不在 `SANDBOX_ROOT` 下）。只改注释，`npm test --workspace server` 与 `npm test --workspace web` 全绿、行数净减。
 - [ ] 4.5 验收清单：新增 `FL-38`（design D9 的措辞），结论 `待签`；FL-01 原样保留。
   验证：`npm test --workspace web -- functional-checklist` 通过（四列与结论格式）。
-- [ ] 4.6 整刀验证与关闭：`make check`、`make test-guardrails` 全绿（docs-only，smoke / ui-walk 按合入门槛照跑）；PR 合并后关闭 #1286 与 #1237，关闭评论各引用本 change 的归档路径、S0/S1/S2/S3a 的 PR 号与 3.6 的实测结果；3.6 若取了「红」分支则只关闭 #1286，#1237 保持打开、把实测结果表与「待重议」原因贴到 #1237 上，temporary-workspaces 的 delta 在归档前撤出本 change（另开后续 change 承接）。
+- [ ] 4.6 整刀验证与关闭：`make check`、`make test-guardrails` 全绿（docs-only，smoke / ui-walk 按合入门槛照跑）；PR 合并后关闭 #1286 与 #1237，关闭评论各引用本 change 的归档路径、S0/S1/S2/S3a 的 PR 号与 3.6 的实测结果；3.6 若取了「红」分支则只关闭 #1286，#1237 保持打开、把实测结果表与「待重议」原因贴到 #1237 上，temporary-workspaces 的 delta 在归档前撤出本 change（另开后续 change 承接；撤出由编排方单独提交一个 docs PR 删除 `specs/temporary-workspaces/spec.md` 并在 design Migration Plan 记一笔，不属任何子 issue 的 PR）。
 Suggested fixture level: none - 只改文档、ADR、头注释与验收行，无运行时行为。
 Minimal mergeable slice: atomic - 一次文档终态更新；拆开会让 ADR 与头注释在一段时间内对同一事实说两种话。
