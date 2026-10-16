@@ -152,7 +152,7 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
 
 > 执行次序：4.1 → 4.4 → 4.5 / 4.6 → 4.2 → 4.3 → 4.7 → 4.8 → 4.9。4.4 的实测不依赖配对代码，放在本组最前面，先定下 8.5 要取的分支；编号不变，其它产物按编号引用它。
 
-- [ ] 4.1 开工核对：
+- [x] 4.1 开工核对：
   - 重读 `supervisor.ts` 的 `#pump`（`:598-651`，`toolIds` `:606`、`publishRequest` 处 `:624-628`）、`approvals.ts` 的 `register` / `publishRequest` / `#finish`（`:61-107`、`:200-231`）、`omp/ui-requests.ts:19-36`、`omp/process.ts:602-621`、`omp/runtime.ts:570-580`；
   - 重读 3a 移出的 `startStep` 与 `store-branch.ts` 的审批拷贝 SQL；
   - 确认审批行确实可能早于 pump 处理前面的帧插入（design Context），写出可以造出这个次序的 fake-omp 帧序列；
@@ -161,21 +161,21 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
   - 确认 fake-omp 能否发出「`tool_execution_start` 先于其审批 select」的帧序列；不能时用受控子进程（#910 `session-thinking.test.ts` 先例），不改 fake-omp 的既有脚本。
 
   验证：核对结果写进 PR。
-- [ ] 4.4 被拒绝调用的实测（design D6；本组第一个动手的任务；临时打印与探针不提交，用例文件随 4.5 / 4.6 固化后提交）。范围收窄为两件事：用户作答拒绝的那次调用有没有 `tool_execution_start` / `tool_execution_end{isError:true}`，以及 select 与 start 的线上先后（4.1 已列出 smoke 里的既有证据）：
+- [x] 4.4 被拒绝调用的实测（design D6；本组第一个动手的任务；临时打印与探针不提交，用例文件随 4.5 / 4.6 固化后提交）。范围收窄为两件事：用户作答拒绝的那次调用有没有 `tool_execution_start` / `tool_execution_end{isError:true}`，以及 select 与 start 的线上先后（4.1 已列出 smoke 里的既有证据）：
   (a) 新建 `server/test/omp-official-approval-pairing.test.ts`，经 `openProxiedApp`（世界拒绝每个审批）发送 `跑一个命令`：第一个请求是 bash 工具轮，审批被拒绝；
   (b) 记录：帧里是否有该调用的 `tool_execution_start` 与 `tool_execution_end`（及其 `isError`）、该调用的审批 select（`extension_ui_request`）与 `tool_execution_start` 在帧序列里的先后（没有 start 时记「无」）、ring 里是否有该步骤的 `step.start` / `step.end`、库里 `chat_steps` 的行（`chat_approvals.step_id` 一项要等 4.3 的配对写入，到 4.9 时补记进结果表）；同一用例连跑三次；
   (c) omp 用 `make omp-fetch` 拉到的 v18.0.10（`OMP_BIN=<repo>/var/omp/omp`），不用 brew 装的版本；只打受控假上游。
 
   验证：一张结果表（帧、线上先后、事件、库行，三次各一列）。有没有步骤三次不一致时停下报告，不取分支；线上先后三次不一致时如实记录，不固化先后断言（配对规则本来就不依赖它，design D6），并在 PR 里写明。
-- [ ] 4.5 分支一——被拒绝的调用有步骤：4.4(a) 的用例固化为常驻断言：恰一个 bash 步骤，以 `failed` 结束；被拒绝审批的 `step_id` 等于该步骤 id；`decision` 为 `deny`；4.4 观察到的 select 与 start 的先后（三次一致时）作为常驻断言。design D6 的「被拒绝的调用」改写为实测结论（删去「没有步骤」一支的推演，保留规格的两支合法终态不动）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「该步骤卡标 `已拒绝`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
-- [ ] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
-- [ ] 4.2 先写测试：
+- [x] 4.5 分支一——被拒绝的调用有步骤：4.4(a) 的用例固化为常驻断言：恰一个 bash 步骤，以 `failed` 结束；被拒绝审批的 `step_id` 等于该步骤 id；`decision` 为 `deny`；4.4 观察到的 select 与 start 的先后（三次一致时）作为常驻断言。design D6 的「被拒绝的调用」改写为实测结论（删去「没有步骤」一支的推演，保留规格的两支合法终态不动）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「该步骤卡标 `已拒绝`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
+- [x] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
+- [x] 4.2 先写测试：
   - `server/test/approval-pairing.test.ts`（纯）：select 先到时 start 按名字先进先出取出；start 先到时 select 配给最早开始、仍在运行的同名步骤；名字不同两个方向都不配；已结束的步骤不再配；request 已发布的 select 只入队（含登记已被删除的情形）；回合结束丢弃；
   - `server/test/session-approval-pairing.test.ts`（fake-omp + 真 SQLite）：tool-approval「确认与步骤配对」的「同名工具按先进先出配对」（`approval-parallel`；`decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 与改动前逐值相同）、「步骤先于审批 select 到达」（审批行已插入而 pump 未读到 select；配对写在 select 时、`approval.request` 发布之前）、「已结束的步骤不再配对」「工具名不同不配对」两例、「没有步骤的审批保持未配对」两例、「配对写失败」两例、「作答先于 pump 读到 select」（作答路径已补发 `approval.request`、登记已删除；select 时只入队、不写 `step_id`，后到的同名 `step.start` 取出它）；
   - 分叉：turn-control「拷贝审批记录」里 `step_id` 按步骤序号重映射、原值 NULL 时为 NULL。
 
   验证：在未改动的代码上判红。
-- [ ] 4.3 实现：
+- [x] 4.3 实现：
   - 新模块 `server/src/sessions/approval-pairing.ts`（未配对审批队列与未配对的运行中步骤两份状态，design D6）；
   - pump 在 `publishRequest` 之前的同一处：读到审批 select 且其 request 尚未发布时，查运行中的同名步骤，有则执行 `step_id` 的 `UPDATE` 并提交，否则入队（`supervisor.ts` 只加这一处调用，≤ 781 行）；「此刻 `publishRequest` 是否会为该帧发布 request」（登记仍在且未发布；登记已删除即为否）由 `approvals.ts` 新加的一个只读查询给出，与 `publishRequest` 共用判定；
   - `turn-control.ts` 的 `step.start` 分支取出同名审批交给 `startStep`，后者在插入步骤行的同一事务里写 `step_id` 并返回配上的审批 id；没有配上的步骤记入运行中列表；`step.end` 分支把步骤移出列表；
@@ -184,9 +184,9 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
   - `ApprovalRegistry` 的登记、计时、作答、结算，`settleApproval`、审计与两类审批事件的发布代码零改动（design D6）。
 
   验证：4.2 全绿；`approvals.ts` 的 diff 只有那一个只读查询，`store-approvals.ts` 无改动。
-- [ ] 4.7 CI：把 `omp-official-approval-pairing.test.ts` 加进 `.github/scripts/ci-uid-isolation.sh:292` 的官方 omp 用例列表，同步改 `scripts/test-ci-harness.sh` 里钉住该命令的断言；PR 单列 CI 一节，写明 uid-isolation job 的实测总时长（上限 15 分钟）。
-- [ ] 4.8 变异证据：配对改为「库里 `step_id IS NULL` 的最小 `id`」→ 「步骤先于审批 select 到达」判红（`step.start` 提前配上了 pump 尚未读到的审批）；select 时只入队、不查运行中步骤 → 同一场景判红；`step.end` 不移出运行中列表 → 「已结束的步骤不再配对」判红；select 时的 `UPDATE` 挪到 `approval.request` 发布之后 → 「配对写失败」第二例判红；取出时不比对名字 → 「工具名不同不配对」判红；配对写在步骤事务之外 → 「配对写失败」判红；select 时不判「request 是否已发布」、一律按运行中步骤配对 →「作答先于 pump 读到 select」判红（实时视图的 `stepId` 为 null 而快照有值）；配对时顺手改 `decision` 或 `decided_at` → 「同名工具按先进先出配对」的逐值断言判红；拷贝不重映射 `step_id`（原样拷贝）→ 分叉用例判红。
-- [ ] 4.9 整刀验证：4.4 结果表补记被拒绝审批的 `chat_approvals.step_id`；`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 `omp-official-approval-pairing.test.ts` 与 `omp-official-approval-modes.test.ts` 全绿；CI 的 uid-isolation job 绿。PR 请求白盒审查（design D18），审查重点是「配对没有改变任何作答与结算路径」。
+- [x] 4.7 CI：把 `omp-official-approval-pairing.test.ts` 加进 `.github/scripts/ci-uid-isolation.sh:292` 的官方 omp 用例列表，同步改 `scripts/test-ci-harness.sh` 里钉住该命令的断言；PR 单列 CI 一节，写明 uid-isolation job 的实测总时长（上限 15 分钟）。
+- [x] 4.8 变异证据：配对改为「库里 `step_id IS NULL` 的最小 `id`」→ 「步骤先于审批 select 到达」判红（`step.start` 提前配上了 pump 尚未读到的审批）；select 时只入队、不查运行中步骤 → 同一场景判红；`step.end` 不移出运行中列表 → 「已结束的步骤不再配对」判红；select 时的 `UPDATE` 挪到 `approval.request` 发布之后 → 「配对写失败」第二例判红；取出时不比对名字 → 「工具名不同不配对」判红；配对写在步骤事务之外 → 「配对写失败」判红；select 时不判「request 是否已发布」、一律按运行中步骤配对 →「作答先于 pump 读到 select」判红（实时视图的 `stepId` 为 null 而快照有值）；配对时顺手改 `decision` 或 `decided_at` → 「同名工具按先进先出配对」的逐值断言判红；拷贝不重映射 `step_id`（原样拷贝）→ 分叉用例判红。
+- [x] 4.9 整刀验证：4.4 结果表补记被拒绝审批的 `chat_approvals.step_id`；`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 `omp-official-approval-pairing.test.ts` 与 `omp-official-approval-modes.test.ts` 全绿；CI 的 uid-isolation job 绿。PR 请求白盒审查（design D18），审查重点是「配对没有改变任何作答与结算路径」。
 Suggested fixture level: expanded - 与审批闸门同表、同一 pump 的持久化写入；并发次序（审批行早于 pump 插入、select 与 start 的先后不保证）；fork 重映射。
 Minimal mergeable slice: atomic - 队列、写列、fork 重映射与实测是同一个关联的产生、搬运与真链路证据；拆开会留下「分叉出的会话配错步骤」的窗口。
 

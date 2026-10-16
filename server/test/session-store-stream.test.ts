@@ -101,7 +101,7 @@ describe("SessionStore steps and terminal identity", () => {
           ordinal: 0,
           name: "real step",
           detail: "started",
-        });
+        }).stepId;
         expect(stepRow(db, stepId)).toEqual({
           id: stepId,
           message_id: accepted.assistantMessageId,
@@ -142,7 +142,7 @@ describe("SessionStore steps and terminal identity", () => {
           ordinal: 0,
           name: "preserve failure",
           detail: "original failure",
-        });
+        }).stepId;
         vi.setSystemTime(FIXED_NOW + 6);
         expect(store.finishStep(alreadyFailed, "failed", "boom")).toBe(true);
         vi.setSystemTime(FIXED_NOW + 7);
@@ -150,7 +150,7 @@ describe("SessionStore steps and terminal identity", () => {
           ordinal: 1,
           name: "settle on finish",
           detail: "waiting",
-        });
+        }).stepId;
 
         const liveSteps = store.getMessages(session.id, "u1")?.messages[1]?.steps;
         expect(liveSteps?.map((step) => [step.detail, step.output, step.status])).toEqual([
@@ -194,7 +194,7 @@ describe("SessionStore steps and terminal identity", () => {
           ordinal: 0,
           name: "first step",
           detail: "first detail",
-        });
+        }).stepId;
         expect(store.finishTurn(first.assistantMessageId, "done")).toBe(true);
 
         vi.setSystemTime(FIXED_NOW + 1);

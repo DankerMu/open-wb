@@ -54,7 +54,10 @@ import {
   type SessionErrorStore,
 } from "./store-error.js";
 import {
+  approvalTool,
   createThinkingSegmentStore,
+  pairApproval,
+  type StartedStep,
   type StartStepInput,
   startStep,
   type ThinkingSegmentStore,
@@ -206,7 +209,9 @@ export interface SessionStore extends SessionTodoStore, SessionErrorStore, Think
   appendDelta(assistantMessageId: number, delta: string): boolean;
   /** Bounded thinking append (#519, store-thinking.ts): the fragment stored, "" once capped. */
   appendThinking(messageId: number, chunk: string): string;
-  startStep(assistantMessageId: number, input: StartStepInput): number;
+  startStep(assistantMessageId: number, input: StartStepInput): StartedStep;
+  approvalTool(messageId: number, requestId: string): string | undefined;
+  pairApproval(messageId: number, requestId: string, stepId: number): number | null;
   /** Owned file changes of a still-running step (#522, store-changes.ts); throws off one row. */
   setStepChanges(stepId: number, json: string): void;
   // step.end 不扩展：stopped 步骤只由 finishTurn 结算（output 保持 NULL）。
@@ -632,6 +637,8 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     },
 
     attachmentPaths: (sessionId) => readAttachmentPaths(db, sessionId),
+    approvalTool: (messageId, requestId) => approvalTool(db, messageId, requestId),
+    pairApproval: (messageId, requestId, stepId) => pairApproval(db, messageId, requestId, stepId),
 
     runtimeState(sessionId) {
       const decoder = createSqliteTextDecoder(db);

@@ -91,8 +91,19 @@ export class ApprovalRegistry {
 
   /** Pump hook after each frame's own events: publishes a select's staged request once. */
   publishRequest(slot: Slot, frame: OmpFrame): Promise<boolean> {
+    const registration = this.#staged(slot, frame);
+    return registration ? this.#publishRequestOnce(registration) : Promise.resolve(true);
+  }
+
+  /** Read-only (issue 1473, design D6): whether `publishRequest` would publish for `frame` now. */
+  publishesRequest(slot: Slot, frame: OmpFrame): boolean {
+    return this.#staged(slot, frame) !== undefined;
+  }
+
+  /** The select's registration while its request is unpublished; none once settled (deleted). */
+  #staged(slot: Slot, frame: OmpFrame): Registration | undefined {
     if (frame.type !== "extension_ui_request") {
-      return Promise.resolve(true);
+      return undefined;
     }
     for (const registration of this.#registrations.values()) {
       if (
@@ -100,10 +111,10 @@ export class ApprovalRegistry {
         registration.requestId === frame.id &&
         !registration.requestPublished
       ) {
-        return this.#publishRequestOnce(registration);
+        return registration;
       }
     }
-    return Promise.resolve(true);
+    return undefined;
   }
 
   /** Read-only snapshot for stop (#473): this slot's registered approvalIds, ascending. */

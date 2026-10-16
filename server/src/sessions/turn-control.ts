@@ -8,6 +8,7 @@
  * branching.ts.
  */
 import { HttpError } from "../core/errors/index.js";
+import type { PumpSteps } from "./approval-pairing.js";
 import type { ChatEvent } from "./events.js";
 import { ownedChanges } from "./file-changes-ownership.js";
 import type { SessionClock } from "./omp/runtime.js";
@@ -220,8 +221,7 @@ export function persistEvent(
   store: SessionStore,
   assistantMessageId: number,
   event: ChatEvent<string>,
-  toolIds: Map<string, number>,
-  nextOrdinal: () => number,
+  steps: PumpSteps,
   settled: SettledApproval[],
   workspaceRoot: string | null,
   redactUpstream: (text: string) => string,
@@ -243,13 +243,18 @@ export function persistEvent(
     case "text.delta":
       store.appendDelta(assistantMessageId, event.data.delta);
       return event;
+    // Issue 1473 (design D6 rule 1): the queued approval is paired in the step insert's transaction.
     case "step.start": {
-      const stepId = store.startStep(assistantMessageId, {
-        ordinal: nextOrdinal(),
-        name: event.data.name,
-        detail: event.data.detail,
+      const { name, detail } = event.data;
+      const approval = steps.takeApproval(name);
+      const ordinal = steps.nextOrdinal();
+      const { stepId, approvalId } = store.startStep(assistantMessageId, {
+        ordinal,
+        name,
+        detail,
+        approval,
       });
-      toolIds.set(event.data.stepId, stepId);
+      steps.started(event.data.stepId, stepId, name, approvalId);
       return {
         type: "step.start",
         data: {
@@ -261,11 +266,12 @@ export function persistEvent(
       };
     }
     case "step.end": {
-      const stepId = toolIds.get(event.data.stepId);
+      const stepId = steps.toolIds.get(event.data.stepId);
       if (stepId === undefined) {
         return undefined;
       }
       store.finishStep(stepId, event.data.status, event.data.output);
+      steps.ended(stepId);
       return {
         type: "step.end",
         data: {
@@ -282,7 +288,7 @@ export function persistEvent(
     // An unregistered call or an unbound session drops the event before any filesystem access;
     // otherwise the files owned by the workspace root are stored first, then returned to publish.
     case "files.changed": {
-      const stepId = toolIds.get(event.data.stepId);
+      const stepId = steps.toolIds.get(event.data.stepId);
       if (stepId === undefined || workspaceRoot === null) {
         return undefined;
       }

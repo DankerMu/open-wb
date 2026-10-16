@@ -6,6 +6,7 @@
 import { availableParallelism } from "node:os";
 import { DEFAULT_OMP_MAX_PROCESSES } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
+import { PumpSteps } from "./approval-pairing.js";
 import { ApprovalRegistry } from "./approvals.js";
 import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
 import { alignModel, effectiveOf, reusable } from "./composer-align.js";
@@ -603,15 +604,9 @@ export class SessionSupervisor {
     generation: Generation | undefined,
   ): Promise<void> {
     let mapper = createEventState({ messageId: assistantMessageId, promptRequestId: requestId });
-    const toolIds = new Map<string, number>();
-    let ordinal = 0;
-    const nextOrdinal = (): number => {
-      const current = ordinal;
-      ordinal += 1;
-      return current;
-    };
+    const steps = new PumpSteps(assistantMessageId);
     const commit = (events: ChatEvent<string>[]) =>
-      this.#commit(slot, assistantMessageId, events, toolIds, nextOrdinal, generation);
+      this.#commit(slot, assistantMessageId, events, steps, generation);
     try {
       for await (const frame of stream) {
         if (slot.infraFaulted) {
@@ -624,6 +619,7 @@ export class SessionSupervisor {
         if (
           !this.#deltas.endSpan(slot, endsThinking(frame)) ||
           !(await commit(applied.events)) ||
+          !this.#pairSelect(slot, steps, frame) ||
           !(await this.#approvals.publishRequest(slot, frame))
         ) {
           return;
@@ -650,6 +646,17 @@ export class SessionSupervisor {
     }
   }
 
+  /** Issue 1473 (design D6 rule 2): a failed select-time pairing write takes the owned error sink. */
+  #pairSelect(slot: Slot, steps: PumpSteps, frame: OmpFrame): boolean {
+    try {
+      steps.select(frame, () => this.#approvals.publishesRequest(slot, frame), this.#store);
+      return true;
+    } catch (error) {
+      this.#faultSlot(slot, asError(error));
+      return false;
+    }
+  }
+
   /** Pump catch outcome: a stop past its grace ends `stopped` without error (#473). */
   #failure(mapper: ReturnType<typeof createEventState>, turn: number, error: unknown) {
     return this.#stops.expired(turn)
@@ -661,8 +668,7 @@ export class SessionSupervisor {
     slot: Slot,
     assistantMessageId: number,
     events: ChatEvent<string>[],
-    toolIds: Map<string, number>,
-    nextOrdinal: () => number,
+    steps: PumpSteps,
     generation: Generation | undefined,
   ): Promise<boolean> {
     for (const event of events) {
@@ -679,8 +685,7 @@ export class SessionSupervisor {
           this.#store,
           assistantMessageId,
           event,
-          toolIds,
-          nextOrdinal,
+          steps,
           settled,
           slot.workspaceRoot,
           this.#redactUpstream,

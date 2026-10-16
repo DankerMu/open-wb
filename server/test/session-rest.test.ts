@@ -142,13 +142,13 @@ describe("session REST", () => {
         ordinal: 2,
         name: "later work",
         detail: "queued second",
-      });
+      }).stepId;
       vi.setSystemTime(SESSION_NOW + 22);
       const firstStep = store.startStep(second.assistantMessageId, {
         ordinal: 0,
         name: "first work",
         detail: "queued first",
-      });
+      }).stepId;
       expect(store.finishStep(laterStep, "failed", "stopped")).toBe(true);
       vi.setSystemTime(SESSION_NOW + 23);
       expect(store.finishTurn(second.assistantMessageId, "done")).toBe(true);
