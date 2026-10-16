@@ -137,18 +137,18 @@ Minimal mergeable slice: atomic - owner B5 把修法定在共享 helper：helper
 
 ## 3. S3a — #1237 挂载规则：FUSE 对照用例与实测（temporary-workspaces）
 
-- [ ] 3.1 开工核对：
+- [x] 3.1 开工核对：
   - 重读 `server/src/workspaces/temp-dir-remove.ts` 全文（确认 `rm` 来自 `fs/promises`、没有任何 `rmSync` 兜底）、`server/test/linux/uid-isolation.test.ts:98-120`（门控与前提检查写法）、design D7「测试主机探针」；
   - 读 Node v24.13.1 源码 tag 里的 `lib/internal/fs/rimraf.js`（该文件编进了 node 二进制、磁盘上没有：从 `github.com/nodejs/node` 的 `v24.13.1` tag 取）确认 `_rmdir` 先 `rmdir`、只在 `ENOTEMPTY` / `EEXIST` / `EPERM` 时列举子项、`_rmchildren` 并行且首错即回调（design D7 的依据；0.1 若已核对则引用其结论）；与读到的不一致先改 design；
   - `grep -rn "rmSync" server/src` 确认用户持有的目录树没有任何 `rmSync` 递归删除（今天只有 `server/src/preview/office.ts:203` 与 `server/src/preview/office-cache.ts:186`，都是应用持有的转换工作目录，不在范围内）；有新增命中则停下报告。
 
   验证：核对结果（含 rimraf 的相关行号与 `rmSync` 命中清单）写进 PR。
-- [ ] 3.2 新建 `server/test/linux/temp-dir-remove-fuse.test.ts`，按 temporary-workspaces「临时空间目录的删除」三个新场景实现：门控 `describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_FUSE_TEST !== "1")`；opt-in 后前提检查（`bindfs`、`fusermount3` 在 PATH，`/dev/fuse` 存在，`WORKBUDDY_FUSE_ALT_FS_DIR` 为另一文件系统上的可写目录——以 `statSync(...).dev` 与账号根的 `dev` 不同为判据）缺一即 `throw`，不 skip；seam 为 `removeTemporaryWorkspaceDir`（design D7）；两例（trash 路径、EXDEV 原地路径）的 `tmp-<id>` 内**只有** `mnt` 一个顶层条目（每例新建空 `mnt`——非空挂载点不能被 bindfs 复用，实测），各断言：函数正常 resolve、源目录校验和不变、挂载仍在（以 `/proc/self/mountinfo` 里挂载点**路径**判断——bindfs 的 fstype 显示为 `fuse`，不要 grep `bindfs`，实测）、残骸位置恰为 `trash/<随机名>/mnt` / `tmp-<id>/mnt`、`report` 恰一次 `code === "EBUSY"`；不断言任何同级条目的去留；`afterEach` 用 `fusermount3 -u` 卸载，失败抛出。测试注释与文件里不出现任何主机标识。
+- [x] 3.2 新建 `server/test/linux/temp-dir-remove-fuse.test.ts`，按 temporary-workspaces「临时空间目录的删除」三个新场景实现：门控 `describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_FUSE_TEST !== "1")`；opt-in 后前提检查（`bindfs`、`fusermount3` 在 PATH，`/dev/fuse` 存在，`WORKBUDDY_FUSE_ALT_FS_DIR` 为另一文件系统上的可写目录——以 `statSync(...).dev` 与账号根的 `dev` 不同为判据）缺一即 `throw`，不 skip；seam 为 `removeTemporaryWorkspaceDir`（design D7）；两例（trash 路径、EXDEV 原地路径）的 `tmp-<id>` 内**只有** `mnt` 一个顶层条目（每例新建空 `mnt`——非空挂载点不能被 bindfs 复用，实测），各断言：函数正常 resolve、源目录校验和不变、挂载仍在（以 `/proc/self/mountinfo` 里挂载点**路径**判断——bindfs 的 fstype 显示为 `fuse`，不要 grep `bindfs`，实测）、残骸位置恰为 `trash/<随机名>/mnt` / `tmp-<id>/mnt`、`report` 恰一次 `code === "EBUSY"`；不断言任何同级条目的去留；`afterEach` 用 `fusermount3 -u` 卸载，失败抛出。测试注释与文件里不出现任何主机标识。
   验证：本机（macOS）与 CI 上该文件 skipped（`cd server && ../node_modules/.bin/vitest run test/linux/temp-dir-remove-fuse.test.ts --coverage=false` 报 skipped）；`WORKBUDDY_FUSE_TEST=1` 而无 `bindfs` 时在 Linux 容器里失败而非 skip（3.6 一并演示）。
-- [ ] 3.3 规格随刀：本 change 的 temporary-workspaces delta 由归档合入；本任务核对 3.2 的断言与三个场景逐句一致，并核对 delta 里的「`fs.rmSync` 禁令」与 3.1 的 `rmSync` 清单一致。
-- [ ] 3.4 结果表模板：交付一张空表（3.6 (d) 的列，含「变异」列），由 3.6 的执行者填写。
-- [ ] 3.5 变异证据（**执行者是编排方 / owner 本人**，在 3.6 的同一个一次性容器里做，实现子代理不得执行；结果填进 3.6 结果表的「变异」列；逐条做、逐条撤销）：① 3.2 的用例里把 `EBUSY` 断言改成期望 `report` 零次 → 判红（证明挂载确实阻止了删除）；② **保留**源目录校验和断言，在产品代码 `temp-dir-remove.ts` 里临时把 `rm` 换成「递归 `readdir` 进入每个子目录（含挂载点）、逐项 `unlink` 再 `rmdir`」的手写删除（模拟进入挂载）→ 校验和断言判红、源文件被删（源目录是测试自有的；design D7 探针 (2) 表明换成 `fs.rmSync({recursive: true})` 也会得到同一种红，可作对照）；③ B9：把 S0 的 `rmSync(notes.md)` 临时去掉 → 在该容器（ext4 / overlay）里循环 200 轮 `cd server && ../node_modules/.bin/vitest run test/session-delete-temp-workspace.test.ts --coverage=false`，观察是否出现残骸含 `notes.md` 的红（如实记录出现次数，0 次也记）。
-- [ ] 3.6 实测（owner B7；只在测试主机，一次性容器）。**执行者是编排方 / owner 本人**：实现子代理不得接触远端主机，它只交付 3.2 的用例文件与 3.4 的模板，由编排方按 (a)–(e) 跑完后把表贴进 PR：
+- [x] 3.3 规格随刀：本 change 的 temporary-workspaces delta 由归档合入；本任务核对 3.2 的断言与三个场景逐句一致，并核对 delta 里的「`fs.rmSync` 禁令」与 3.1 的 `rmSync` 清单一致。
+- [x] 3.4 结果表模板：交付一张空表（3.6 (d) 的列，含「变异」列），由 3.6 的执行者填写。
+- [x] 3.5 变异证据（**执行者是编排方 / owner 本人**，在 3.6 的同一个一次性容器里做，实现子代理不得执行；结果填进 3.6 结果表的「变异」列；逐条做、逐条撤销）：① 3.2 的用例里把 `EBUSY` 断言改成期望 `report` 零次 → 判红（证明挂载确实阻止了删除）；② **保留**源目录校验和断言，在产品代码 `temp-dir-remove.ts` 里临时把 `rm` 换成「递归 `readdir` 进入每个子目录（含挂载点）、逐项 `unlink` 再 `rmdir`」的手写删除（模拟进入挂载）→ 校验和断言判红、源文件被删（源目录是测试自有的；design D7 探针 (2) 表明换成 `fs.rmSync({recursive: true})` 也会得到同一种红，可作对照）；③ B9：把 S0 的 `rmSync(notes.md)` 临时去掉 → 在该容器（ext4 / overlay）里循环 200 轮 `cd server && ../node_modules/.bin/vitest run test/session-delete-temp-workspace.test.ts --coverage=false`，观察是否出现残骸含 `notes.md` 的红（如实记录出现次数，0 次也记）。
+- [x] 3.6 实测（owner B7；只在测试主机，一次性容器）。**执行者是编排方 / owner 本人**：实现子代理不得接触远端主机，它只交付 3.2 的用例文件与 3.4 的模板，由编排方按 (a)–(e) 跑完后把表贴进 PR：
   (a) 容器：`node:24.13.1-bookworm` 基础镜像（宿主已有），`apt-get install bindfs fuse3`，`--device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined`（design D7 探针 (7) 实测可用的配方），`--tmpfs /altfs` 作另一文件系统；仓库以当前分支 `git clone`（不挂宿主目录），`npm ci`，`npm run build --workspace server`；
   (b) 运行 `cd server && WORKBUDDY_FUSE_TEST=1 WORKBUDDY_FUSE_ALT_FS_DIR=/altfs ../node_modules/.bin/vitest run test/linux/temp-dir-remove-fuse.test.ts --coverage=false`，连跑三次；另跑一次不装 `bindfs` 的容器确认 opt-in 缺前提时失败而非 skip；
   (c) 在同一容器里做 3.5 的三条变异；
@@ -156,7 +156,7 @@ Minimal mergeable slice: atomic - owner B5 把修法定在共享 helper：helper
   (e) 容器用完即删，宿主不留任何文件；PR 与 ADR 里只称「测试主机」。
 
   验证：结果表贴进 PR 正文，并交 4.2 写进 ADR-0010 补充（S3b）。两种结果按 design D7 处理：三次两例全绿且变异 ①② 判红 → 继续；任一例红（尤其「源目录有文件被删」）→ 停下报告、不改规格、不改产品代码、不改用例为绿：S3a 不合并，temporary-workspaces 的 delta 撤出本 change 另开后续，S3b 只写 #1286 的部分并只关闭 #1286，#1237 保持打开、结果表贴到 #1237 上（design Migration Plan）。
-- [ ] 3.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；新文件在 CI 的 unit-tests job 里显示为 skipped 而不是 failed（PR 贴日志行）。PR 请求白盒审查（design D11 S3a 清单）。
+- [x] 3.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；新文件在 CI 的 unit-tests job 里显示为 skipped 而不是 failed（PR 贴日志行）。PR 请求白盒审查（design D11 S3a 清单）。
 Suggested fixture level: compact - 不改产品代码；一个默认跳过的 Linux 用例文件与一次手工实测；行为由规格 delta 与实测结果表钉住。
 Minimal mergeable slice: atomic - 用例文件与实测是同一条规格句子的两个证据；先合用例不实测等于合入一个从未在任何机器上绿过的测试。
 

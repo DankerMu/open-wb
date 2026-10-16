@@ -7,7 +7,7 @@
     "server": {
       "entry": ["src/server.ts", "src/service-info.ts", "test/**/*.test.ts"],
       "project": ["src/**", "test/**"],
-      "ignoreBinaries": ["mkfifo", "pgrep"]
+      "ignoreBinaries": ["mkfifo", "pgrep", "bindfs", "fusermount3"]
     },
     "web": {
       "entry": [
