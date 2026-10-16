@@ -9,7 +9,7 @@
 > - 4 ← 3a（配对写在 3a 移出的 `startStep` 事务里）。4 与 3b 互不依赖：二者同改 `store-branch.ts` 的拷贝段与 `store-segments.ts`，后合入者 rebase。
 > - 5 ← 3b（段行与段时长）、5 ← 4（`step_id` 与 `approvalId`）。
 > - 6 ← 5（视图字段）、6 ← 7（6.2 的「展开态只随用户点击变化」双工具段部分要 7 去掉的自动展开；6 反正等 5，先合 7 不增加等待）。
-> - 8 ← 6（同改 `message-thread.tsx` 的块次序段；兜底记录排在分段区之后）。
+> - 8 ← 6（同改 `message-thread.tsx` 的块次序段；兜底记录排在分段区之后）、8 ← 4（8.5 的 CH-20 / CH-22 / CH-50 取 4.4 实测所取的分支；传递地已含于 6 ← 5 ← 4，这里显式列出）。
 > - 9 ← 8（传递地含 5、6、7）、9 ← 1（交错标记）。
 >
 > 通用纪律：见 design「通用纪律」，本文不复述；下面每组的「验证」都以它的合入门槛为底线。补充两条只与任务写法有关的：
@@ -20,9 +20,9 @@
 
 | 风险包 | 选中 | 落点 |
 |---|---|---|
-| Public API / CLI / script entry | 选中：`step.start` 两个新字段、`thinking.end` 的 `segment`、快照与 REST 三处新键（严格键集，服务端与 web 同刀，旧解析器会反复重新同步） | 5 |
+| Public API / CLI / script entry | 选中：`step.start` 两个新字段、`approval.request` 的 `stepId`、`thinking.end` 的 `segment`、快照与 REST 三处新键（严格键集，服务端与 web 同刀；部署时已打开的旧标签页重新同步一次后关流提示刷新，design Migration Plan） | 5 |
 | Schema / columns / units / field names | 选中：迁移 045（两列一表）；偏移单位 UTF-16 码元；上限按码点 | 2、3a、3b |
-| Concurrency / shared state / ordering | 选中：开段前冲刷合并器；审批行早于 pump 插入，配对按线上次序；配对与作答的先后 | 3b、4 |
+| Concurrency / shared state / ordering | 选中：开段前冲刷与闭段量长；审批行早于 pump 插入；select 与 start 的线上先后不保证，配对在后到的一方；配对与作答的先后 | 3b、4 |
 | Error handling / rollback / partial outputs | 选中：步骤插入与配对同一事务；段行写失败不发布；宿主崩溃留下越界偏移 | 3a、3b、4、6 |
 | Legacy compatibility / examples | 选中：045 之前的消息无位置信息走旧布局；既有夹具补键 | 5、6 |
 | Resource limits / large input / discovery | 选中：32768 码点上限之后的零长度段 | 3b、6 |
@@ -120,7 +120,7 @@ Minimal mergeable slice（3a）: atomic - 计数、写列与 fork 拷贝是同�
 
   验证：核对结果与清单写进 PR。
 - [ ] 3.7 先写纯层测试（3b，注入时钟 + 假端口，扩写既有 `delta-coalescer.test.ts` / `thinking-span.test.ts`）：
-  - chat-stream「合并器缓冲着正文时开段」：ring 次序与段行 `body_offset` 为 3；
+  - chat-stream「合并器缓冲着正文时开段」：ring 次序与段行 `body_offset` 为 3；「闭段时长度含缓冲的思考」：正文与 `approval.request` 两例下 `thinking_length` 为 3、`thinking.end` 先于它们；
   - thinking-fold「思考时长记录与下发」：「多段思考累计」（每段一行、各自 `thinking_length` 与 `thinking_ms`，消息累计不变）、「相邻的两段不合并」、「上限之后的段」（零长度段照常计时）、「写库失败」（段行写失败时不发布该 `thinking.delta` / `thinking.end`）、「停止与失败」「中断后无法恢复」中段行的取值；
   - 段的 `thinking_offset` / `thinking_length` 按已保存文本的 UTF-16 长度（含截断标记），`steps_before` 为开段时已开始的步骤数。
 
@@ -146,40 +146,44 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
 - [ ] 4.1 开工核对：
   - 重读 `supervisor.ts` 的 `#pump`（`:598-651`，`toolIds` `:606`、`publishRequest` 处 `:624-628`）、`approvals.ts` 的 `register` / `publishRequest` / `#finish`（`:61-107`、`:200-231`）、`omp/ui-requests.ts:19-36`、`omp/process.ts:602-621`、`omp/runtime.ts:570-580`；
   - 重读 3a 移出的 `startStep` 与 `store-branch.ts` 的审批拷贝 SQL；
-  - 确认审批行确实可能早于 pump 处理前面的帧插入（design Context），写出可以造出这个次序的 fake-omp 帧序列。
+  - 确认审批行确实可能早于 pump 处理前面的帧插入（design Context），写出可以造出这个次序的 fake-omp 帧序列；
+  - 重读 design Context「select 与 start 的线上先后不是保证」所引的 omp v18.0.10 源码（`agent-loop.ts:2547-2555`、`wrapper.ts:276-332`、`rpc-mode.ts:716-739`、`:978-980`、`agent-session.ts:2188-2240`），有出入先改 design；
+  - 确认 fake-omp 能否发出「`tool_execution_start` 先于其审批 select」的帧序列；不能时用受控子进程（#910 `session-thinking.test.ts` 先例），不改 fake-omp 的既有脚本。
 
   验证：核对结果写进 PR。
 - [ ] 4.2 先写测试：
-  - `server/test/approval-pairing.test.ts`（纯）：按名字先进先出、名字不同留在原位、回合结束丢弃；
-  - `server/test/session-approval-pairing.test.ts`（fake-omp + 真 SQLite）：tool-approval「确认与步骤配对」的「同名工具按先进先出配对」（`approval-parallel`；`decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 与改动前逐值相同）、「按线上次序而非插入次序」「工具名不同不配对」「没有步骤的审批保持未配对」两例、「配对写失败」；
+  - `server/test/approval-pairing.test.ts`（纯）：select 先到时 start 按名字先进先出取出；start 先到时 select 配给最早开始、仍在运行的同名步骤；名字不同两个方向都不配；已结束的步骤不再配；request 已发布的 select 只入队；回合结束丢弃；
+  - `server/test/session-approval-pairing.test.ts`（fake-omp + 真 SQLite）：tool-approval「确认与步骤配对」的「同名工具按先进先出配对」（`approval-parallel`；`decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 与改动前逐值相同）、「步骤先于审批 select 到达」（审批行已插入而 pump 未读到 select；配对写在 select 时、`approval.request` 发布之前）、「已结束的步骤不再配对」「工具名不同不配对」两例、「没有步骤的审批保持未配对」两例、「配对写失败」两例；
   - 分叉：turn-control「拷贝审批记录」里 `step_id` 按步骤序号重映射、原值 NULL 时为 NULL。
 
   验证：在未改动的代码上判红。
 - [ ] 4.3 实现：
-  - 新模块 `server/src/sessions/approval-pairing.ts`；pump 在 `publishRequest` 同一处把 `{requestId, tool}` 入队（`supervisor.ts` 只加这一处调用，≤ 781 行）；
-  - `turn-control.ts` 的 `step.start` 分支取出同名项交给 `startStep`，后者在插入步骤行的同一事务里写 `step_id` 并返回配上的审批 id（本切片不发布，到 5 才进事件）；
+  - 新模块 `server/src/sessions/approval-pairing.ts`（未配对审批队列与未配对的运行中步骤两份状态，design D6）；
+  - pump 在 `publishRequest` 之前的同一处：读到审批 select 且其 request 尚未发布时，查运行中的同名步骤，有则执行 `step_id` 的 `UPDATE` 并提交，否则入队（`supervisor.ts` 只加这一处调用，≤ 781 行）；request 是否已发布由 `approvals.ts` 新加的一个只读查询给出；
+  - `turn-control.ts` 的 `step.start` 分支取出同名审批交给 `startStep`，后者在插入步骤行的同一事务里写 `step_id` 并返回配上的审批 id；没有配上的步骤记入运行中列表；`step.end` 分支把步骤移出列表；
+  - 本切片不改任何事件负载：`step.start.approvalId` 与 `approval.request.stepId` 到 5 才发布；
   - `store-branch.ts` 的审批拷贝按 design D7 重映射 `step_id`；
-  - `ApprovalRegistry`、`settleApproval`、审计与两类审批事件的代码零改动（design D6）。
+  - `ApprovalRegistry` 的登记、计时、作答、结算，`settleApproval`、审计与两类审批事件的发布代码零改动（design D6）。
 
-  验证：4.2 全绿；`git diff --stat` 里 `approvals.ts` 与 `store-approvals.ts` 无改动。
+  验证：4.2 全绿；`approvals.ts` 的 diff 只有那一个只读查询，`store-approvals.ts` 无改动。
 - [ ] 4.4 被拒绝调用的实测（design D6；临时打印与探针不提交，用例文件随 4.5 / 4.6 固化后提交）：
   (a) 新建 `server/test/omp-official-approval-pairing.test.ts`，经 `openProxiedApp`（世界拒绝每个审批）发送 `跑一个命令`：第一个请求是 bash 工具轮，审批被拒绝；
-  (b) 记录：帧里是否有该调用的 `tool_execution_start` 与 `tool_execution_end`（及其 `isError`）、ring 里是否有该步骤的 `step.start` / `step.end`、库里 `chat_steps` 的行与 `chat_approvals.step_id`；同一用例连跑三次；
+  (b) 记录：帧里是否有该调用的 `tool_execution_start` 与 `tool_execution_end`（及其 `isError`）、该调用的审批 select（`extension_ui_request`）与 `tool_execution_start` 在帧序列里的先后（没有 start 时记「无」）、ring 里是否有该步骤的 `step.start` / `step.end`、库里 `chat_steps` 的行与 `chat_approvals.step_id`；同一用例连跑三次；
   (c) omp 用 `make omp-fetch` 拉到的 v18.0.10（`OMP_BIN=<repo>/var/omp/omp`），不用 brew 装的版本；只打受控假上游。
 
-  验证：一张结果表（帧、事件、库行，三次各一列）。三次结果不一致时停下报告，不取分支。
-- [ ] 4.5 分支一——被拒绝的调用有步骤：4.4(a) 的用例固化为常驻断言：恰一个 bash 步骤，以 `failed` 结束；被拒绝审批的 `step_id` 等于该步骤 id；`decision` 为 `deny`。design D6 的「被拒绝的调用」改写为实测结论（删去「没有步骤」一支的推演，保留规格的两支合法终态不动）；design D15 的 CH-20 / CH-50 取「该步骤卡标 `已拒绝`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
-- [ ] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
+  验证：一张结果表（帧、线上先后、事件、库行，三次各一列）。有没有步骤三次不一致时停下报告，不取分支；线上先后三次不一致时如实记录，不固化先后断言（配对规则本来就不依赖它，design D6），并在 PR 里写明。
+- [ ] 4.5 分支一——被拒绝的调用有步骤：4.4(a) 的用例固化为常驻断言：恰一个 bash 步骤，以 `failed` 结束；被拒绝审批的 `step_id` 等于该步骤 id；`decision` 为 `deny`；4.4 观察到的 select 与 start 的先后（三次一致时）作为常驻断言。design D6 的「被拒绝的调用」改写为实测结论（删去「没有步骤」一支的推演，保留规格的两支合法终态不动）；design D15 的 CH-20 / CH-22 / CH-50 取「该步骤卡标 `已拒绝`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
+- [ ] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
 - [ ] 4.7 CI：把 `omp-official-approval-pairing.test.ts` 加进 `.github/scripts/ci-uid-isolation.sh:292` 的官方 omp 用例列表，同步改 `scripts/test-ci-harness.sh` 里钉住该命令的断言；PR 单列 CI 一节，写明 uid-isolation job 的实测总时长（上限 15 分钟）。
-- [ ] 4.8 变异证据：配对改为「库里 `step_id IS NULL` 的最小 `id`」→ 「按线上次序而非插入次序」判红；取出时不比对名字 → 「工具名不同不配对」判红；配对写在步骤事务之外 → 「配对写失败」判红；配对时顺手改 `decision` 或 `decided_at` → 「同名工具按先进先出配对」的逐值断言判红；拷贝不重映射 `step_id`（原样拷贝）→ 分叉用例判红。
+- [ ] 4.8 变异证据：配对改为「库里 `step_id IS NULL` 的最小 `id`」→ 「步骤先于审批 select 到达」判红（`step.start` 提前配上了 pump 尚未读到的审批）；select 时只入队、不查运行中步骤 → 同一场景判红；`step.end` 不移出运行中列表 → 「已结束的步骤不再配对」判红；select 时的 `UPDATE` 挪到 `approval.request` 发布之后 → 「配对写失败」第二例判红；取出时不比对名字 → 「工具名不同不配对」判红；配对写在步骤事务之外 → 「配对写失败」判红；配对时顺手改 `decision` 或 `decided_at` → 「同名工具按先进先出配对」的逐值断言判红；拷贝不重映射 `step_id`（原样拷贝）→ 分叉用例判红。
 - [ ] 4.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 `omp-official-approval-pairing.test.ts` 与 `omp-official-approval-modes.test.ts` 全绿；CI 的 uid-isolation job 绿。PR 请求白盒审查（design D18），审查重点是「配对没有改变任何作答与结算路径」。
-Suggested fixture level: expanded - 与审批闸门同表、同一 pump 的持久化写入；并发次序（审批行早于 pump 插入）；fork 重映射。
+Suggested fixture level: expanded - 与审批闸门同表、同一 pump 的持久化写入；并发次序（审批行早于 pump 插入、select 与 start 的先后不保证）；fork 重映射。
 Minimal mergeable slice: atomic - 队列、写列、fork 重映射与实测是同一个关联的产生、搬运与真链路证据；拆开会留下「分叉出的会话配错步骤」的窗口。
 
 ## 5. chat-sessions / chat-stream / chat-web — 快照、REST 与事件字段（同刀）
 
 - [ ] 5.1 开工核对：
-  - 重读 `rest.ts:480-502` 的快照形状、`store.ts` 的 `MessageView` / `StepView` / `ApprovalEntry`（`:78-160`）与读出、`events.ts` 的 `step.start` / `thinking.end` 类型；
+  - 重读 `rest.ts:480-502` 的快照形状、`store.ts` 的 `MessageView` / `StepView` / `ApprovalEntry`（`:78-160`）与读出、`events.ts` 的 `step.start` / `thinking.end` / `approval.request` 类型、`approvals.ts` 的 `register` 里 request 负载的构造与 `publishRequest`；
   - 重读 web `session-contract.ts:266-372`、`stream.ts:655-720` 的事件解码与 `:367-371` 的重新同步、`stream-steps.ts`、`stream-approvals.ts`、`stream-thinking.ts`、`runtime-convert.ts`；
   - 列出全部要补键的严格键集夹具：服务端 `grep -rn "MESSAGE_KEYS\|STEP_KEYS\|APPROVAL_KEYS" server/test`（已知五处 `MESSAGE_KEYS`：`session-prompt-attachments.test.ts:56`、`session-approval-snapshot.test.ts:32`、`message-undo-state.test.ts:39`、`session-composer-align.test.ts:82`、`session-snapshot-metadata.test.ts:25`，`STEP_KEYS` 在后者 `:39`）；web `grep -rln "thinkingMs" web/test web/e2e` 找出手写快照与事件夹具。
 
@@ -187,43 +191,45 @@ Minimal mergeable slice: atomic - 队列、写列、fork 重映射与实测是�
 - [ ] 5.2 先写服务端测试（新断言进新文件，`session-rest.test.ts` 不动）：
   - chat-sessions「会话 REST」：消息 13 键、步骤 8 键、审批 7 键，`decideApproval` 的 200 为七键；「Snapshot carries segment positions」；「Fork copies history…」与「Regenerate…」中新键的取值；
   - chat-stream：「Ordered publication after persistence」（`thinking.end.segment` 与段行相等）、「步骤的正文偏移」（`step.start.bodyOffset` 与快照相同）、「合并器缓冲着正文时开段」的快照部分；
-  - thinking-fold 改写后带 `segment` 负载的场景；tool-approval「审批快照」（`stepId` 与归约）；
+  - thinking-fold 改写后带 `segment` 负载的场景；tool-approval「审批快照」（`stepId` 与归约）、改写后的「审批事件」两例（`approval.request` 六键、`stepId`）；chat-stream 改写后的「审批事件发布」全部场景（含 select 时配对写失败不发布）；tool-approval「步骤先于审批 select 到达」的事件部分（`approval.request.stepId` 为该步骤 id）；
   - 官方 omp：3.10 的用例追加快照断言（`thinkingSegments` 恰一段，值同库行）；4.4 的用例追加快照 `stepId` 断言（按所取分支）。
 
   验证：在未改动的代码上判红。
-- [ ] 5.3 先写 web 测试：chat-web「分段位置三键严格解析」「分段位置归约」「步骤开始事件的两个新字段严格解码」（含：缺键或多键的 `step.start` 触发重新同步，与其它已知事件一致）、改写后的「convertMessage 映射」（新字段透传，part 次序不变）；chat-web「实时与快照切段一致」的视图部分（事件归约出的视图与快照视图的 `thinkingSegments`、步骤 `bodyOffset`、审批 `stepId` 逐值相等；切段函数的比较在 6.2）。
+- [ ] 5.3 先写 web 测试：chat-web「分段位置三键严格解析」「分段位置归约」「步骤开始事件的两个新字段严格解码」（含：缺键或多键的 `step.start` 触发重新同步，与其它已知事件一致）、「审批请求事件的 stepId 严格解码」、「审批请求与结算归约」与「分段位置归约」中 `approval.request` 带 `stepId` 的部分、改写后的「convertMessage 映射」（新字段透传，part 次序不变）；chat-web「实时与快照切段一致」的视图部分（事件归约出的视图与快照视图的 `thinkingSegments`、步骤 `bodyOffset`、审批 `stepId` 逐值相等；切段函数的比较在 6.2）。
   验证：在未改动的代码上判红。
-- [ ] 5.4 实现服务端：读出与快照形状加三处键（读写函数在 `store-segments.ts`）；`step.start` 发布 `bodyOffset` 与 `approvalId`；`thinking.end` 发布 `segment`；纯协议事件归约的输出不变。
+- [ ] 5.4 实现服务端：读出与快照形状加三处键（读写函数在 `store-segments.ts`）；`step.start` 发布 `bodyOffset` 与 `approvalId`；`thinking.end` 发布 `segment`；`approval.request` 发布 `stepId`（pump 把 4.3 的 select 时配对结果传给 `publishRequest`；作答路径补发 request 时为 `null`）；纯协议事件归约的输出不变；`approvals.ts` 只改 request 负载，不改发布时机与任何作答路径。
   验证：5.2 全绿；`store.ts` ≤ 780、`events.ts` ≤ 540、`rest.ts` ≤ 590、`store-approvals.ts` ≤ 412 行。
-- [ ] 5.5 实现 web：新模块 `web/src/lib/session-contract-segments.ts`（新键的严格解析）与 `web/src/features/chat/stream-segments.ts`（`thinking.delta` 临时段、`thinking.end` 取代、`step.start` 记偏移与 `stepId`、`turn.start` 清空）；`stream.ts` 与 `session-contract.ts` 只加类型字段与分派；`runtime-convert.ts` 透传新字段并把 `:44-48` 的注释改为「part 不承载分段，分段由 `message-segments.ts` 从透传字段算」。本切片不改任何呈现。
+- [ ] 5.5 实现 web：新模块 `web/src/lib/session-contract-segments.ts`（新键的严格解析）与 `web/src/features/chat/stream-segments.ts`（`thinking.delta` 临时段、`thinking.end` 取代、`step.start` 记偏移与 `stepId`、`approval.request` 取事件的 `stepId`、`turn.start` 清空）；`stream.ts` 与 `session-contract.ts` 只加类型字段与分派；`runtime-convert.ts` 透传新字段并把 `:44-48` 的注释改为「part 不承载分段，分段由 `message-segments.ts` 从透传字段算」。本切片不改任何呈现。
   验证：5.3 全绿；`stream.ts` ≤ 790、`session-contract.ts` ≤ 710 行。
-- [ ] 5.6 补键：5.1 清单里的服务端与 web 严格键集夹具补新键（通用纪律第 4 种改法：无位置语义的取 `bodyOffset: null`、`stepId: null`、`thinkingSegments: []`、`approvalId: null`），逐条列进偏离记录。
+- [ ] 5.6 补键：5.1 清单里的服务端与 web 严格键集夹具补新键（通用纪律第 4 种改法：快照无位置语义的取 `bodyOffset: null`、`stepId: null`、`thinkingSegments: []`；事件里 `step.start` 的 `bodyOffset` 取此刻已收到正文的长度、`approvalId` 取 `null`，`thinking.end` 的 `segment` 取该段在用例事件下的真实取值，`approval.request` 的 `stepId` 取 `null`），逐条列进偏离记录。
 - [ ] 5.7 冒烟：`smoke/session-meta.hurl` 的 `WORKBUDDY_THINK` 用例加 chat-harness「冒烟断言分段位置」的断言。
   验证：`make smoke` 全绿；把 `stepId` 断言改成期望 `null` 时判红（证明断言在跑）。
-- [ ] 5.8 变异证据：服务端漏发 `step.start.approvalId` → web 解码用例与 5.2 判红；web 归约不在 `thinking.end` 取代临时段 → 「分段位置归约」判红；快照漏输出审批 `stepId` → 键数用例与冒烟判红；`thinking.end.segment` 取自内存而非库行（例如不含截断标记）→ 「Ordered publication」判红（如实记录）。
-- [ ] 5.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 3.10 与 4.4 的两个文件全绿。PR 写明部署须服务端与 web 同一版本（design D8）。
-Suggested fixture level: expanded - 公开快照键、REST 形状与事件负载（严格键集），旧解析器会反复重新同步。
-Minimal mergeable slice: atomic - 服务端事件字段、快照键与 web 的解析、归约必须同一 PR（design D8）；任一侧先合，会话页反复重新同步或整体拒收快照。
+- [ ] 5.8 变异证据：服务端漏发 `step.start.approvalId` → web 解码用例与 5.2 判红；web 归约不在 `thinking.end` 取代临时段 → 「分段位置归约」判红；快照漏输出审批 `stepId` → 键数用例与冒烟判红；`thinking.end.segment` 取自内存而非库行（例如不含截断标记）→ 「Ordered publication」判红（如实记录）；`approval.request` 恒发 `stepId: null` → 「步骤先于审批 select 到达」的事件断言判红。
+- [ ] 5.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 3.10 与 4.4 的两个文件全绿。PR 写明部署须服务端与 web 同一版本，以及部署时已打开的旧标签页会关流提示刷新（design Migration Plan）；PR 请求白盒审查（`approvals.ts` 的 request 负载，design D18）。
+Suggested fixture level: expanded - 公开快照键、REST 形状与事件负载（严格键集），旧解析器重新同步后关流报错。
+Minimal mergeable slice: atomic - 服务端事件字段、快照键与 web 的解析、归约必须同一 PR（design D8）；任一侧先合，会话页整体拒收快照、关流报错。
 
 ## 6. chat-web / thinking-fold — 分段呈现
 
 - [ ] 6.1 开工核对：
   - 重读 `message-thread.tsx:230-258` 的 `AssistantMessage`、`thinking-fold.tsx`、`message-waiting.tsx`、正文逐字展开的组件与 `MessageBody`；
-  - 对 design D14 清单项 3（块次序）逐条确认：表外列出的「不需要改写」的块次序断言（`chat-page-file-changes.test.tsx:685-700`、`:717-724`，`chat-thinking.test.tsx:655-680`，`chat-page-artifact-card.test.tsx:555-575`）的夹具在 5.6 之后确为旧布局（步骤 `bodyOffset: null` 或有思考而无段）。不是的停下更新 D14。
+  - 对 design D14 清单项 3（块次序）逐条确认：表外列出的「不需要改写」的块次序断言（`chat-page-file-changes.test.tsx:685-700`、`:717-724`，`chat-thinking.test.tsx:655-680`，`chat-page-artifact-card.test.tsx:555-575`）的夹具在 5.6 之后确为旧布局（步骤 `bodyOffset: null` 或有思考而无段）。不是的停下更新 D14；
+  - 对 D14 清单项 5、6（B12、B5）逐条确认：D14 表里两行 `chat-thinking-title.test.tsx` 之外，「不需要改写」列出的思考用例与走查步骤（`chat-thinking.test.tsx` T6 / T8 与其余、`chat-thinking-preview.test.tsx`、`chat-thinking-smooth.test.tsx`、`chat-thinking-title.test.tsx:171-257`、`ui-walk-thinking-preview.ts`、`ui-walk-sessions.spec.ts:320-340`）按 D14 的判定确为旧布局，或为分段布局而断言与 B12 一致。
 
   验证：核对结果写进 PR。
 - [ ] 6.2 先写测试：
   - `web/test/message-segments.test.ts`（纯）：chat-web「助手消息分段」四个场景全部 WHEN；
   - jsdom `Thread`：chat-web「消息线程」的「分段布局的块次序」「分段布局下的小圆点」「助手块次序」（旧布局）「正文逐字展开」（分段下只有最后一个正文段增长）、「实时与快照切段一致」（事件归约出的视图与快照视图经切段函数逐块相等）；
-  - thinking-fold「深度思考折叠块呈现」改写后的「流式展开、终态收起」「标题三态与多段思考」「用户手动切换保留」（逐个折叠块）、「快照中的思考与截断标记」；
+  - thinking-fold「深度思考折叠块呈现」改写后的「流式展开、终态收起」（分段一例：`thinking.end` 即收起；旧布局一例：展开到终态）「标题三态与多段思考」（任何时刻至多一个折叠块展开）「用户手动切换保留」（含分段布局下展开已结束的段后跨过其它事件与终态保持展开）「分段布局下只展开进行中的一段」（`data-running` 与流式预览只在进行中那一段）「终态消息主体限高」的 running 例、「快照中的思考与截断标记」；
   - chat-web「工具段摘要与折叠」「展开态只随用户点击变化」的双工具段部分（两个工具段互不影响、块键保留展开态）。
 
   验证：在未改动的代码上判红。
-- [ ] 6.3 实现：新模块 `web/src/features/chat/message-segments.ts`（纯切段函数）与 `message-segments-view.tsx`（按块渲染：`MessageBody`、`ThinkingFold`、`ToolCallGroup`，React key 取块键）；`message-thread.tsx` 只判布局并把其后各部件排在分段区之后；`thinking-fold.tsx` 的标题取段数据。拷入层零改动。
+- [ ] 6.3 实现：新模块 `web/src/features/chat/message-segments.ts`（纯切段函数）与 `message-segments-view.tsx`（按块渲染：`MessageBody`、`ThinkingFold`、`ToolCallGroup`，React key 取块键）；`message-thread.tsx` 只判布局并把其后各部件排在分段区之后；`thinking-fold.tsx` 的标题取段数据，开合、`data-running` 与预览的依据由消息的 `running` 换成传入的「进行中」（旧布局传消息 running，行为与 #910 相同；分段布局传该段的进行中，design D10）。拷入层零改动。
   验证：6.2 全绿；`message-thread.tsx` ≤ 425 行；knip 无未用导出。
+- [ ] 6.3a 按 design D14 表改写清单项 5、6 中标「6」的两行（`chat-thinking-title.test.tsx:107-139`、`:145-169`，通用纪律第 3 种改法，引用 B12、B5），逐条列进偏离记录；表外的思考用例只补键（5.6），不改断言。
 - [ ] 6.4 对话内搜索（design D13）：jsdom 用例覆盖 chat-web「工具段摘要与折叠」的「对话内搜索不改变段的展开态」；conversation-search 的既有用例不改、全绿。
-- [ ] 6.5 验收清单：按 design D15 改写 CH-14、CH-118，新增「分段交替显示与刷新后一致」一行（受控上游带 `WORKBUDDY_INTERLEAVE`），结论 `待签`。
-- [ ] 6.6 变异证据：切段函数忽略 `stepsBefore`（思考段一律排在同偏移的步骤之后）→ 「交替切段」第二个 WHEN 判红；旧布局判定漏掉条件 2 → 「旧布局判定」判红；只含空白的正文段照常输出 → 「空白与空思考不分隔工具段」判红；工具段的 React key 改用数组下标并在前面插入一段 → 双工具段展开态用例判红；折叠块共用一个开合状态 → 「用户手动切换保留」判红。
+- [ ] 6.5 验收清单：按 design D15 改写 CH-14、CH-118（含 B12：一段思考结束即收起），新增「分段交替显示与刷新后一致」一行（受控上游带 `WORKBUDDY_INTERLEAVE`），结论 `待签`。
+- [ ] 6.6 变异证据：切段函数忽略 `stepsBefore`（思考段一律排在同偏移的步骤之后）→ 「交替切段」第二个 WHEN 判红；旧布局判定漏掉条件 2 → 「旧布局判定」判红；只含空白的正文段照常输出 → 「空白与空思考不分隔工具段」判红；工具段的 React key 改用数组下标并在前面插入一段 → 双工具段展开态用例判红；折叠块共用一个开合状态 → 「用户手动切换保留」判红；分段布局下折叠块仍按消息 running 开合（不在段结束时收起）→ 「分段布局下只展开进行中的一段」与改写后的「流式展开、终态收起」判红；旧布局也改成按段开合 → 「流式展开、终态收起」的旧布局例判红。
 - [ ] 6.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（走查此时看到的真 omp 消息已是分段布局；走查里若有表外的块次序断言变红，停下更新 D14）。
 Suggested fixture level: expanded - 旧消息兼容（045 之前的消息走旧布局）是本切片的核心判定；渲染次序波及全部助手消息。
 Minimal mergeable slice: atomic - 切段函数与渲染器必须一起合入（knip 禁止未用导出），且不能出现半分段的呈现。
@@ -254,7 +260,7 @@ Minimal mergeable slice: atomic - 摘要与折叠规则同属 B7；拆开会让�
 - [ ] 8.3 实现：`step-card.tsx` 卡头加 `span[data-slot="step-approval-mark"]`（状态徽章之前、纯文本、不进徽章可访问名）；`ApprovalRecords` 只渲染 `stepId` 不指向本消息步骤的已结算审批；`message-thread.tsx` 把兜底记录排在分段区之后。文案与样式不变；拷入层零改动。
   验证：8.2 全绿；`message-thread.tsx` ≤ 430 行。
 - [ ] 8.4 按 design D14 表改写清单项 2 中标「8」的断言：`web/e2e/ui-walk-approval.ts:12` 及其使用处、`web/e2e/ui-walk-upstream-failure.ts:91`，按 chat-harness「UI 走查对话步骤」改为「消息里没有记录卡，展开工具段后步骤卡无标记（允许）」；逐条列进偏离记录。
-- [ ] 8.5 验收清单：按 design D15 改写 CH-20、CH-21、CH-22、CH-23、CH-24、CH-50、CH-56（CH-20 / CH-50 的措辞按 4.4 所取分支），结论 `待签`。
+- [ ] 8.5 验收清单：按 design D15 改写 CH-20、CH-21、CH-22、CH-23、CH-24、CH-50、CH-56，结论 `待签`。CH-20、CH-22、CH-50 里「被拒绝之后看到什么」一律取切片 4 的实测（任务 4.4）所取的分支——4.5 取了就写「展开工具段后该步骤卡标 `已拒绝`」，4.6 取了就写「消息末尾 `已拒绝执行`」；不写两可的措辞。开工前先读 4.4 的结果表与 design D6 里记下的结论。
 - [ ] 8.6 变异证据：`allow` 也显示标记 → 「超时、拒绝与正常允许」判红；不按 `stepId` 过滤记录 → 「已配对的已结算确认不渲染记录」与走查判红；标记放进状态徽章 → 徽章可访问名断言判红；兜底记录挪回分段区之前 → 块次序用例判红。
 - [ ] 8.7 整刀验证：`make check`、`make test-guardrails`、`make ui-walk` 全绿。
 Suggested fixture level: compact - 两个组件的显示规则，数据与协议已在 5 就位。

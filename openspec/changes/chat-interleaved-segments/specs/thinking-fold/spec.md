@@ -3,17 +3,23 @@
 ### Requirement: 深度思考折叠块呈现
 会话页 SHALL 为助手消息的每个思考段渲染一个深度思考折叠块，位于该段在分段区中的位置（chat-web「助手消息分段」：分段布局下每段思考各在它发生的位置，同一消息可有多个折叠块；旧布局下整条消息的 `thinking` 是一个折叠块，位于所有其它消息内容之前）。每个折叠块是一个可展开/收起的折叠块，其展开/收起控件带前置装饰性图标与一个标题，并以 `aria-expanded` 反映折叠态，主体为该段的思考原文（旧布局下为整条 thinking），以纯文本呈现（`white-space: pre-wrap`，不经 Markdown 渲染、不注入 HTML）。原文为空串的段与 `thinking` 为 `null` 或空串的旧布局消息 SHALL 不渲染折叠块。
 标题（即控件的可见文本，也是其可访问名）SHALL 取以下三者之一（判定所用的视图字段见 chat-web「纯会话视图归约」；分段布局下「进行中」与「时长」取该段的——进行中按 chat-web「助手消息分段」的定义，时长为该段的 `thinkingMs`；旧布局下取消息的 `thinkingActive` 与 `thinkingMs`）：进行中（旧布局：消息 running 且 `thinkingActive` 为 `true`）时为 `正在思考…`，并带流光（`prefers-reduced-motion: reduce` 下流光动画暂停，与既有做法一致）；否则时长不为 `null` 时为 `已思考 N 秒`，N 为 `max(1, round(时长 ÷ 1000))`，不带流光；否则为 `深度思考过程`，不带流光。由此（分段布局）：一段思考进行中，它的折叠块为 `正在思考…`；这段思考结束后它的折叠块为 `已思考 N 秒`（N 只算这一段），此后它不再变化；再次进入思考时在新位置出现一个新的折叠块，从 `正在思考…` 开始。旧布局：思考中为 `正在思考…`，一段思考结束后为按消息累计时长的 `已思考 N 秒`，再次进入思考时回到 `正在思考…`。没有时长数据的段或消息（#910 之前的历史消息、从未闭段即中断的段）为 `深度思考过程`。
-折叠态（每个折叠块各自按以下规则，互不影响）：消息 status 为 `running` 时展开，消息由 `running` 进入任一终态（`done|failed|stopped`）时收起；从快照打开一条已终态消息时为收起，从快照打开一条 running 消息时为展开；两次状态迁移之间用户手动展开/收起的选择 SHALL 保留，不被随后到达的 `thinking.delta`、`thinking.end`、其它事件或同状态的快照重新同步重置。截断标记 `…（已截断）` 作为原文的一部分逐字显示。
-主体 SHALL 在两种状态下都限高 `12rem` 并在盒内滚动（`overflow: auto`，与步骤卡 `原始输出` 一致）。消息 status 为 `running` 时折叠块根元素带 `data-running` 属性，且展开着的主体为流式预览：主体内容增长时盒内 SHALL 自动滚到最新一行；用户在盒内向上滚动后暂停自动滚动，滚回盒底后恢复；预览不锁定、不改变转录区的滚动位置，转录区的贴底跟随与 `回到最新` 按 chat-web「消息线程」的规则照常工作。终态消息的折叠块不带 `data-running`，主体不自动滚动；因此贴底时手动展开一条终态消息的折叠块，转录区跟随位移不超过主体限高加其上外边距。主体 SHALL 不渲染遮盖内容的渐隐层。
-运行中且非减少动态效果时，主体显示的文本 SHALL 按 chat-web「消息线程」正文逐字展开的同一规则展开；消息进入终态时立即显示全文；`prefers-reduced-motion: reduce` 下不逐字展开。折叠块不参与复制（`复制` 仍只复制正文）。
+折叠态（每个折叠块各自按以下规则，互不影响）：
+- **旧布局**（#910 的规则，不变）：消息 status 为 `running` 时展开，消息由 `running` 进入任一终态（`done|failed|stopped`）时收起；从快照打开一条已终态消息时为收起，从快照打开一条 running 消息时为展开。
+- **分段布局**（owner 2026-10-15 B12：只展开正在思考的那一段）：一个折叠块的状态迁移是它那一段在「进行中」与「不在进行中」之间的变化（进行中的定义见 chat-web「助手消息分段」）。该段进行中时展开；该段结束时收起——该段的 `thinking.end` 到达、消息进入任一终态、或快照原地重装后该段不再进行中，三者先到者——不等整条消息结束。由于一段思考在任何可见的正文、步骤或审批出现之前就已闭合（chat-stream「分段位置的记录与下发」的闭段），一段思考之后正文或工具开始时，这段思考的折叠块已经收起。折叠块首次出现时（实时到达或从快照打开），按该段此刻是否进行中决定展开或收起。整条消息进入终态不是已结束的段的状态迁移：它们保持当时的折叠态。
+
+两种布局下，两次状态迁移之间用户手动展开/收起的选择 SHALL 保留，不被随后到达的 `thinking.delta`、`thinking.end`（分段布局下另一段的）、其它事件或同状态的快照重新同步重置。截断标记 `…（已截断）` 作为原文的一部分逐字显示。
+主体 SHALL 在两种状态下都限高 `12rem` 并在盒内滚动（`overflow: auto`，与步骤卡 `原始输出` 一致）。旧布局下消息 status 为 `running` 时、分段布局下只有进行中的那一段（其余段即使消息仍在 running 也不算），折叠块根元素带 `data-running` 属性，且展开着的主体为流式预览：主体内容增长时盒内 SHALL 自动滚到最新一行；用户在盒内向上滚动后暂停自动滚动，滚回盒底后恢复；预览不锁定、不改变转录区的滚动位置，转录区的贴底跟随与 `回到最新` 按 chat-web「消息线程」的规则照常工作。终态消息的折叠块与分段布局下已结束的段的折叠块不带 `data-running`，主体不自动滚动；因此贴底时手动展开一条终态消息的折叠块，转录区跟随位移不超过主体限高加其上外边距。主体 SHALL 不渲染遮盖内容的渐隐层。
+运行中（分段布局下指该段进行中）且非减少动态效果时，主体显示的文本 SHALL 按 chat-web「消息线程」正文逐字展开的同一规则展开；消息进入终态（分段布局下该段结束）时立即显示全文；`prefers-reduced-motion: reduce` 下不逐字展开。折叠块不参与复制（`复制` 仍只复制正文）。
 
 #### Scenario: 流式展开、终态收起
-- **WHEN** running 助手消息先收到 `thinking.delta{delta:"先想一想"}`，再收到 `thinking.end{thinkingMs:1400}`、正文 delta 与 `turn.end done`
-- **THEN** 折叠块在正文之前出现、处于展开态，标题为 `正在思考…` 且带流光，主体最终为 `先想一想`；`thinking.end` 后标题为 `已思考 1 秒` 且不带流光；`turn.end done` 后折叠块收起，标题仍为 `已思考 1 秒`，再展开时主体文本不变，正文与 `复制` 按钮行为不变
+- **WHEN** running 助手消息（正文、思考为空，分段布局）先收到 `thinking.delta{delta:"先想一想"}`，再收到 `thinking.end{thinkingMs:1400, segment:{bodyOffset:0,thinkingOffset:0,thinkingLength:4,stepsBefore:0,thinkingMs:1400}}`、正文 delta 与 `turn.end done`
+- **THEN** 折叠块在正文之前出现、处于展开态、带 `data-running`，标题为 `正在思考…` 且带流光，主体为 `先想一想`；`thinking.end` 后标题为 `已思考 1 秒` 且不带流光，折叠块立即收起、不带 `data-running`（不等 `turn.end`）；正文到达与 `turn.end done` 后折叠块仍收起、标题不变，再展开时主体文本不变，正文与 `复制` 按钮行为不变
+- **WHEN** 以快照打开一条 running 助手消息（旧布局：`thinking` 为 `先想一想`、`thinkingSegments` 为 `[]`），随后到达 `thinking.end{thinkingMs:1400, …}`、正文 delta 与 `turn.end done`
+- **THEN** 折叠块一直展开到 `turn.end done` 才收起（#910 的规则），`thinking.end` 后标题为 `已思考 1 秒`
 
 #### Scenario: 标题三态与多段思考
 - **WHEN** running 助手消息依次收到 `thinking.delta(先)`、`thinking.end{thinkingMs:400, segment:{bodyOffset:0,thinkingOffset:0,thinkingLength:1,stepsBefore:0,thinkingMs:400}}`、`step.start(bodyOffset 0)`、`thinking.delta(想)`、`thinking.end{thinkingMs:2600, segment:{bodyOffset:0,thinkingOffset:1,thinkingLength:1,stepsBefore:1,thinkingMs:2200}}`、`turn.end done`
-- **THEN** 消息内依次为第一个折叠块、工具段、第二个折叠块；第一个折叠块的标题依次为 `正在思考…`、`已思考 1 秒`（400ms 按至少 1 秒显示），此后不再变化；第二个折叠块在第二条 `thinking.delta` 时出现，标题依次为 `正在思考…`、`已思考 2 秒`（只算第二段的 2200ms），终态后两个标题不变
+- **THEN** 消息内依次为第一个折叠块、工具段、第二个折叠块；第一个折叠块的标题依次为 `正在思考…`、`已思考 1 秒`（400ms 按至少 1 秒显示），此后不再变化；第二个折叠块在第二条 `thinking.delta` 时出现，标题依次为 `正在思考…`、`已思考 2 秒`（只算第二段的 2200ms），终态后两个标题不变；每个折叠块在自己那一段进行中时展开、在自己的 `thinking.end` 时收起，所以任何时刻至多一个折叠块是展开的
 - **WHEN** 以 `/?session=<id>` 加载快照（旧布局：`thinkingSegments` 为 `[]`）：一条 done 助手消息 `thinking` 非空、`thinkingMs` 为 `61500`；一条 done 助手消息 `thinking` 非空、`thinkingMs` 为 `null`；一条 running 助手消息 `thinking` 非空、`thinkingMs` 为 `null`
 - **THEN** 三者各有一个位于正文之前的折叠块，标题依次为 `已思考 62 秒`、`深度思考过程`、`正在思考…`
 - **WHEN** 以快照加载一条 failed 助手消息（分段布局），其 `thinkingSegments` 为两段：第一段 `thinkingMs` 为 1500，第二段 `thinkingLength` 与 `thinkingMs` 为 `null`（宿主进程在第二段开着时退出）
@@ -26,14 +32,16 @@
 #### Scenario: 用户手动切换保留
 - **WHEN** running 期间用户收起折叠块，随后又到达两条 `thinking.delta` 与一条 `thinking.end`
 - **THEN** 折叠块保持收起，标题按三态规则更新，展开后主体包含新增文本
+- **WHEN** 分段布局下一段思考结束（其折叠块已收起）后用户展开它，随后到达正文、第二段思考（新折叠块展开）、第二段的 `thinking.end` 与 `turn.end done`
+- **THEN** 第一个折叠块始终保持展开（这些都不是它的状态迁移）；第二个折叠块在其 `thinking.end` 时收起
 - **WHEN** 用户展开一条 done 消息的折叠块，随后页面以一份该消息状态与思考不变、正文不同的快照重新同步
 - **THEN** 正文更新为新快照的内容，折叠块保持展开
 
 #### Scenario: 终态消息主体限高
 - **WHEN** 转录贴底（距底 ≤4px），用户展开一条 done 助手消息的折叠块，其 thinking 为 120 行，点击前展开/收起控件距转录滚动容器顶不少于 198px（视口 390×844 与 1440×900）
 - **THEN** 主体高度为 `12rem`（192px）且可在盒内滚动到末行；展开/收起控件仍在转录滚动容器的可视区内；转录保持贴底
-- **WHEN** 转录贴底时一条 running 助手消息的 thinking 增长到 120 行
-- **THEN** 折叠块根元素带 `data-running` 属性；主体高度为 `12rem`，盒内滚动位置在底部（`scrollTop + clientHeight` 等于 `scrollHeight`，容差 1px），最新一行可见；转录保持贴底；`turn.end` 后该属性消失
+- **WHEN** 转录贴底时一条 running 助手消息的 thinking（分段布局下为进行中的那一段）增长到 120 行
+- **THEN** 折叠块根元素带 `data-running` 属性；主体高度为 `12rem`，盒内滚动位置在底部（`scrollTop + clientHeight` 等于 `scrollHeight`，容差 1px），最新一行可见；转录保持贴底；`turn.end` 后（分段布局下该段的 `thinking.end` 后）该属性消失
 - **WHEN** 上一例中用户在主体盒内向上滚动，随后又到达若干 `thinking.delta`
 - **THEN** 盒内滚动位置不再被改到底部，转录区的滚动位置不变；用户滚回盒底后，下一次增长重新贴到最新一行
 
@@ -42,6 +50,12 @@
 - **THEN** 主体显示的文本在此后的若干帧中由短到长增长，每一帧都是已收到 thinking 的前缀，在有限时间内等于已收到的全文（时长按 chat-web「正文逐字展开」的间隔规则，积压越多越快）
 - **WHEN** 该消息在主体尚未显示全文时进入终态；另一例在 `prefers-reduced-motion: reduce` 下收到同一条 `thinking.delta`
 - **THEN** 前者终态后立即显示全文；后者收到后立即显示全文
+
+#### Scenario: 分段布局下只展开进行中的一段
+- **WHEN** running 助手消息（分段布局）依次收到 `thinking.delta(先)`、`thinking.end`（第一段）、`text.delta(看)`、`thinking.delta(想)`
+- **THEN** 此刻第一个折叠块收起、不带 `data-running`，标题为 `已思考 N 秒`；第二个折叠块展开、带 `data-running`、主体为流式预览，标题为 `正在思考…`；消息内只有第二个折叠块的主体在 DOM 中
+- **WHEN** 随后到达第二段的 `thinking.end` 与 `text.delta(好)`
+- **THEN** 两个折叠块都收起、都不带 `data-running`，消息仍为 running
 
 ### Requirement: 思考时长记录与下发
 SessionSupervisor SHALL 用服务端注入时钟为每条助手消息记录思考时长。一段思考（span）SHALL 在 supervisor 处理该回合一条 `thinking.delta`（合并之前、按帧到达时刻）且当前没有开着的段时开始。开段之前 SHALL 先冲刷合并器（chat-stream「分段位置的记录与下发」的边界前冲刷：合并器里缓冲着的正文先发布）。开段时 supervisor SHALL 在同一事务里（同步写；写失败沿 owned error-sink 处理）把该消息的 `chat_messages.thinking_ms` 置为 NULL，并为这一段插入一行 `chat_thinking_segments`：`body_offset` 为此刻的正文已发布长度（chat-stream「分段位置的记录与下发」），`thinking_offset` 为此刻 `chat_messages.thinking` 已保存文本的 UTF-16 码元长度（含可能的截断标记；NULL 记 0），`steps_before` 为该消息此刻已开始的步骤数，`thinking_length` 与 `thinking_ms` 为 NULL。由此段开着期间快照的 `thinkingMs` 为 `null`，`thinkingSegments` 的末段 `thinkingLength` 与 `thinkingMs` 为 `null`。每一段（span）恰一行：前一段结束后即使中间没有正文、步骤或其它事件，再开的段也是新的一行，不与前一段合并。
