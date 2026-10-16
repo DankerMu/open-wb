@@ -9,7 +9,7 @@
 > - 4 ← 3a（配对写在 3a 移出的 `startStep` 事务里）。4 与 3b 互不依赖：二者同改 `store-branch.ts` 的拷贝段与 `store-segments.ts`，后合入者 rebase。
 > - 5 ← 3b（段行与段时长）、5 ← 4（`step_id` 与 `approvalId`）。
 > - 6 ← 5（视图字段）、6 ← 7（6.2 的「展开态只随用户点击变化」双工具段部分要 7 去掉的自动展开；6 反正等 5，先合 7 不增加等待）。
-> - 8 ← 6（同改 `message-thread.tsx` 的块次序段；兜底记录排在分段区之后）、8 ← 4（8.5 的 CH-20 / CH-22 / CH-50 取 4.4 实测所取的分支；传递地已含于 6 ← 5 ← 4，这里显式列出）。
+> - 8 ← 6（同改 `message-thread.tsx` 的块次序段；兜底记录排在分段区之后）、8 ← 4（8.5 的 CH-20 / CH-22 / CH-24 / CH-50 取 4.4 实测所取的分支；传递地已含于 6 ← 5 ← 4，这里显式列出）。
 > - 9 ← 8（传递地含 5、6、7）、9 ← 1（交错标记）。
 >
 > 通用纪律：见 design「通用纪律」，本文不复述；下面每组的「验证」都以它的合入门槛为底线。补充两条只与任务写法有关的：
@@ -34,7 +34,7 @@
 
 | 文件 | 现在 | 合入后上限 | 改动的切片 |
 |---|---|---|---|
-| `server/src/sessions/store.ts` | 791 | 3a ≤ 765；3b ≤ 770；4 ≤ 774；5 ≤ 784 | 3a、3b、4、5 |
+| `server/src/sessions/store.ts` | 791 | 3a ≤ 765；3b、4 两刀不论先后，单独合入后 ≤ 770、两刀都合入后 ≤ 774；5 ≤ 784 | 3a、3b、4、5 |
 | `server/src/sessions/supervisor.ts` | 776 | 4 ≤ 781；5 ≤ 783（per-pump 对象 `PumpSteps`，design D16） | 4、5 |
 | `server/src/sessions/thinking-span.ts` | 112 | 3b ≤ 150；5 ≤ 160 | 3b、5 |
 | `server/src/sessions/approvals.ts` | 264 | 4 ≤ 275；5 ≤ 280 | 4、5 |
@@ -74,7 +74,7 @@
 - [ ] 1.3 实现标记：`fake-upstream.mjs` 只加标记识别与一次调用，记录列表与写出交给 `fake-upstream-pace.mjs`。`fake-upstream.mjs` 合入后 ≤ 670 行。
   验证：1.2 全绿。
 - [ ] 1.4 变异证据（逐条做、逐条撤销，结果贴进 PR）：去掉 25ms 间隔 → 间隔断言判红；把思考片挪到两片正文之前 → 「交错写出」判红；让本标记在同带 `WORKBUDDY_PACE` 时生效 → 「不改变其它请求」判红；带闸门时不忽略本标记 → 同上判红。
-- [ ] 1.5 整刀验证：`make check`、`make test-guardrails` 全绿。
+- [ ] 1.5 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿（通用纪律的合入门槛）。
 Suggested fixture level: compact - 只动测试夹具，不碰产品代码；行为由单测直接钉住（#910 组 1 先例）。
 Minimal mergeable slice: atomic - 一个标记加它的单测；再切就是半个标记，无法独立验证。
 
@@ -142,7 +142,7 @@ Minimal mergeable slice（3a）: atomic - 计数、写列与 fork 拷贝是同�
   - `store-branch.ts` 加段行拷贝（design D7）；撤回与重新生成不改代码（外键级联）。
   - 3.6 清单里的既有断言按通用纪律改写，逐条列进偏离记录。
 
-  验证：3.7–3.10 全绿；`store.ts` ≤ 770 行。
+  验证：3.7–3.10 全绿；`store.ts` ≤ 770 行（若 4 已先合入则 ≤ 774）。
 - [ ] 3.12 变异证据（3b）：把 `route` 的次序改回「先开段后冲刷」→ 「合并器缓冲着正文时开段」判红，3.10 也应判红（偏移为 5；若 omp 把两片正文并成一帧发出则不判红，如实记录并贴实测行）；相邻两段合并成一行 → 「相邻的两段不合并」判红；`thinking_offset` 改按码点计 → 「上限之后的段」或截断用例判红（如实记录是哪一个）；拷贝漏掉段行 → 3.9 分叉用例判红。
 - [ ] 3.13 整刀验证（3b）：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；`WORKBUDDY_OMP_TEST=1` 下 `omp-official-delta-coalescing.test.ts` 全绿。
 Suggested fixture level（3b）: expanded - 改合并器的冲刷次序（并发 / 次序风险包）与开段、闭段的持久化。
@@ -167,8 +167,8 @@ Minimal mergeable slice（3b）: atomic - 开段前冲刷、段行的开与闭�
   (c) omp 用 `make omp-fetch` 拉到的 v18.0.10（`OMP_BIN=<repo>/var/omp/omp`），不用 brew 装的版本；只打受控假上游。
 
   验证：一张结果表（帧、线上先后、事件、库行，三次各一列）。有没有步骤三次不一致时停下报告，不取分支；线上先后三次不一致时如实记录，不固化先后断言（配对规则本来就不依赖它，design D6），并在 PR 里写明。
-- [ ] 4.5 分支一——被拒绝的调用有步骤：4.4(a) 的用例固化为常驻断言：恰一个 bash 步骤，以 `failed` 结束；被拒绝审批的 `step_id` 等于该步骤 id；`decision` 为 `deny`；4.4 观察到的 select 与 start 的先后（三次一致时）作为常驻断言。design D6 的「被拒绝的调用」改写为实测结论（删去「没有步骤」一支的推演，保留规格的两支合法终态不动）；design D15 的 CH-20 / CH-22 / CH-50 取「该步骤卡标 `已拒绝`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
-- [ ] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
+- [ ] 4.5 分支一——被拒绝的调用有步骤：4.4(a) 的用例固化为常驻断言：恰一个 bash 步骤，以 `failed` 结束；被拒绝审批的 `step_id` 等于该步骤 id；`decision` 为 `deny`；4.4 观察到的 select 与 start 的先后（三次一致时）作为常驻断言。design D6 的「被拒绝的调用」改写为实测结论（删去「没有步骤」一支的推演，保留规格的两支合法终态不动）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「该步骤卡标 `已拒绝`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
+- [ ] 4.6 分支二——被拒绝的调用没有步骤：4.4(a) 的用例固化为常驻断言：没有 bash 步骤；被拒绝审批的 `step_id` 为 NULL；`decision` 为 `deny`；帧里没有该调用的 `tool_execution_start`。design D6 写明实测结论与「同回合后一个同名步骤会配走被拒绝的审批」这一已知局限（Risks 同步）；design D15 的 CH-20 / CH-22 / CH-24 / CH-50 取「消息末尾 `已拒绝执行`」。（未取此分支时：在本条后注明「未取，见 4.4 的结果表」并勾选。）
 - [ ] 4.2 先写测试：
   - `server/test/approval-pairing.test.ts`（纯）：select 先到时 start 按名字先进先出取出；start 先到时 select 配给最早开始、仍在运行的同名步骤；名字不同两个方向都不配；已结束的步骤不再配；request 已发布的 select 只入队（含登记已被删除的情形）；回合结束丢弃；
   - `server/test/session-approval-pairing.test.ts`（fake-omp + 真 SQLite）：tool-approval「确认与步骤配对」的「同名工具按先进先出配对」（`approval-parallel`；`decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 与改动前逐值相同）、「步骤先于审批 select 到达」（审批行已插入而 pump 未读到 select；配对写在 select 时、`approval.request` 发布之前）、「已结束的步骤不再配对」「工具名不同不配对」两例、「没有步骤的审批保持未配对」两例、「配对写失败」两例、「作答先于 pump 读到 select」（作答路径已补发 `approval.request`、登记已删除；select 时只入队、不写 `step_id`，后到的同名 `step.start` 取出它）；
@@ -265,7 +265,7 @@ Minimal mergeable slice: atomic - 切段函数与渲染器必须一起合入（k
 - [ ] 7.4 按 design D14 表改写清单项 1、4 中标「7」的全部断言（通用纪律第 3 种改法，引用 B6、B7），逐条列进偏离记录；其中 `web/e2e/ui-walk-approval.ts:110` 按 chat-harness「UI 走查对话步骤」改为 `执行 1 条命令，进行中`，`ui-walk-todo.ts:90` 改为 `其它 1 步`。
 - [ ] 7.5 验收清单：按 design D15 改写 CH-15、CH-19，结论 `待签`。
 - [ ] 7.6 变异证据：恢复失败自动展开 → 「展开态只随用户点击变化」与改写后的消息线程场景判红；按文件数而非步骤数计 `读取` → 「归类计数与次序」判红；类的次序按出现次序 → 同上判红；失败后缀单独成一个 `span` 并加 `text-destructive` → 「不着色」的结构断言判红；去掉 `，进行中` → 「失败与进行中后缀」判红。
-- [ ] 7.7 整刀验证：`make check`、`make test-guardrails`、`make ui-walk` 全绿。
+- [ ] 7.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level: compact - 一个组件的显示与折叠规则加一个纯函数，不碰数据与协议。
 Minimal mergeable slice: atomic - 摘要与折叠规则同属 B7；拆开会让同一组件在一刀里摘要已新、折叠仍旧，验收行无法改写。
 
@@ -280,7 +280,7 @@ Minimal mergeable slice: atomic - 摘要与折叠规则同属 B7；拆开会让�
 - [ ] 8.4 按 design D14 表改写清单项 2 中标「8」的断言：`web/e2e/ui-walk-approval.ts:12` 及其使用处、`web/e2e/ui-walk-upstream-failure.ts:91`，按 chat-harness「UI 走查对话步骤」改为「消息里没有记录卡，展开工具段后步骤卡无标记（允许）」；逐条列进偏离记录。
 - [ ] 8.5 验收清单：按 design D15 改写 CH-20、CH-21、CH-22、CH-23、CH-24、CH-50、CH-56，结论 `待签`。CH-20、CH-22、CH-24、CH-50 里「被拒绝之后看到什么」一律取切片 4 的实测（任务 4.4）所取的分支——4.5 取了就写「展开工具段后该步骤卡标 `已拒绝`」，4.6 取了就写「消息末尾 `已拒绝执行`」；不写两可的措辞。开工前先读 4.4 的结果表与 design D6 里记下的结论。
 - [ ] 8.6 变异证据：`allow` 也显示标记 → 「超时、拒绝与正常允许」判红；不按 `stepId` 过滤记录 → 「已配对的已结算确认不渲染记录」与走查判红；标记放进状态徽章 → 徽章可访问名断言判红；兜底记录挪回分段区之前 → 块次序用例判红；`timeout` 不显示标记 → 「分段布局的块次序」的标记断言判红。
-- [ ] 8.7 整刀验证：`make check`、`make test-guardrails`、`make ui-walk` 全绿。
+- [ ] 8.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level: compact - 两个组件的显示规则，数据与协议已在 5 就位。
 Minimal mergeable slice: atomic - 去掉已配对的记录卡与加上步骤卡标记必须同刀：只去不加，超时与拒绝在消息里就没有痕迹了（B4）。
 
