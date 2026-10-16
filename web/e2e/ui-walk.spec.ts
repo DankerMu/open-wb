@@ -50,6 +50,7 @@ import {
 import { expectLoginCascade } from "./ui-walk-login.js";
 import { type AuthOracle, runWithBrowserErrorOracle } from "./ui-walk-oracle.js";
 import { walkScrollFollow } from "./ui-walk-scroll.js";
+import { walkSegments } from "./ui-walk-segments.js";
 import { expandToolGroup } from "./ui-walk-steps.js";
 import { walkFork, walkRegenerate, walkStop } from "./ui-walk-stop.js";
 import { walkThinkingPreview } from "./ui-walk-thinking-preview.js";
@@ -442,6 +443,8 @@ async function walkHeldDialogue(
     await walkWaitingIndicator(page, project, sessionId, sessionUrl, EXPECTED_REPLY);
     // 第 3 步：同一会话紧接着再发一条长思考，held 在思考中量预览。
     await walkThinkingPreview(page, project, sessionId, EXPECTED_REPLY);
+    // chat-harness「分段呈现的冒烟与走查」：仍在这个会话上，工具段次序、交错消息与刷新一致。
+    await walkSegments(page, project, sessionId, sessionUrl, EXPECTED_REPLY);
   } finally {
     await deleteGate(origin, gateId);
   }
