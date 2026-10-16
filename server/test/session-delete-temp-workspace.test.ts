@@ -514,6 +514,8 @@ describe("临时空间目录的删除 — DELETE (#928)", () => {
       const { db } = world.fixture;
       const temporary = seedTemporary(world);
       const trash = trashDir(world.rt.runtime.stateDir);
+      // Only `sub`: per Node's rimraf source, rm runs siblings in parallel and fails fast (#1490).
+      rmSync(join(temporary.dir, "notes.md"));
       // A read-only (0500) directory: its entry cannot be unlinked, so the removal is partial.
       chmodSync(join(temporary.dir, "sub"), 0o500);
       let residue: string[] = [];
