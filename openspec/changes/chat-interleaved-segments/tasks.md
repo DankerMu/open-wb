@@ -97,27 +97,27 @@ Minimal mergeable slice: atomic - 一个迁移文件及其测试与补列。
 
 ## 3. chat-stream / thinking-fold / chat-sessions — 位置的记录
 
-- [ ] 3.1 开工核对（3a）：
+- [x] 3.1 开工核对（3a）：
   - 重读 `server/src/sessions/store.ts` 的 `Turn`（`:247-262`）、`openTurn`（`:725-745`）、`appendDelta`（`:525-546`）、`startStep`（`:553-585`）与快照 `content` 的拼接（`:352`）；
   - 重读 `turn-control.ts:246-262` 的 `step.start` 分支、`store-branch.ts:248-254` 的拷贝 SQL；
   - `grep -rn "startStep" server/src server/test` 列出全部调用方，确认移模块不改签名之外的东西。
 
   验证：核对结果写进 PR。
-- [ ] 3.2 先写测试（3a）：
+- [x] 3.2 先写测试（3a）：
   - `server/test/store-segments.test.ts`（真 SQLite）：正文已发布长度按 UTF-16 码元累加（chat-stream「码元而非码点」：`a😀` 后开始的步骤 `body_offset` 为 3）；跨过 2048 字节 / 2000ms 落库后仍等于已发布正文长度（pending 不丢计）；新回合从 0 开始；`body_offset` 与步骤行同一事务写入，事务失败两者都不在；
   - `server/test/session-segment-offsets.test.ts`（fake-omp `approval-parallel`）：chat-stream「步骤的正文偏移」在库这一层成立——两个步骤的 `body_offset` 等于各自 `step.start` 之前 ring 中 `text.delta` 拼接的长度（事件字段到 5 才有）；
   - 分叉：chat-sessions「Fork copies history before the chosen user message」与 turn-control「拷贝分段位置」里关于步骤 `body_offset` 的部分，读新会话的库行断言。
 
   验证：在未改动的代码上判红。
-- [ ] 3.3 实现（3a）：
+- [x] 3.3 实现（3a）：
   - 新模块 `server/src/sessions/store-segments.ts`，把 `startStep` 整体移入并在插入步骤行时写 `body_offset`；`store.ts` 留接口声明与委托；
   - `Turn` 加正文已发布长度，`appendDelta` 按 `delta.length` 累加，`openTurn` 置 0（design D2）；
   - `store-branch.ts` 的步骤拷贝加 `body_offset`（design D7，同一刀补，不留丢数据的窗口）；
   - 对外形状不变：`step.start` 负载与快照都不加字段（design D8）。
 
   验证：3.2 全绿；`store.ts` ≤ 765 行。
-- [ ] 3.4 变异证据（3a）：计数改用 `Buffer.byteLength` → 「码元而非码点」判红；偏移改读库里 `content` 的长度 → pending 用例判红；`openTurn` 不清零 → 新回合用例判红；拷贝漏掉 `body_offset` → 分叉用例判红。
-- [ ] 3.5 整刀验证（3a）：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
+- [x] 3.4 变异证据（3a）：计数改用 `Buffer.byteLength` → 「码元而非码点」判红；偏移改读库里 `content` 的长度 → pending 用例判红；`openTurn` 不清零 → 新回合用例判红；拷贝漏掉 `body_offset` → 分叉用例判红。
+- [x] 3.5 整刀验证（3a）：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level（3a）: expanded - 改持久化（步骤插入事务）与回合共享状态，并改 fork 拷贝。
 Minimal mergeable slice（3a）: atomic - 计数、写列与 fork 拷贝是同一个数据的产生与搬运；只做一半，分叉出的会话要么缺偏移、要么偏移错。
 

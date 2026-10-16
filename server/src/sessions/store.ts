@@ -53,6 +53,7 @@ import {
   type MessageError,
   type SessionErrorStore,
 } from "./store-error.js";
+import { type StartStepInput, startStep } from "./store-segments.js";
 import { appendThinking, createThinkingMsStore, type ThinkingMsStore } from "./store-thinking.js";
 import {
   createSessionTodoStore,
@@ -176,12 +177,6 @@ export interface PendingApproval {
   expiresAt: number;
 }
 
-interface StartStepInput {
-  ordinal: number;
-  name: string;
-  detail: string;
-}
-
 export interface SessionStore extends SessionTodoStore, SessionErrorStore, ThinkingMsStore {
   create(ownerId: string): SessionView;
   list(ownerId: string): SessionView[];
@@ -254,6 +249,8 @@ export type Turn = {
   previousUpdatedAt: number;
   pending: string[];
   pendingBytes: number;
+  /** Body published this turn in UTF-16 code units: stored + pending (design D2, store-segments.ts). */
+  publishedLength: number;
   progress: boolean;
   titleTouched: boolean;
   timer: NodeJS.Timeout | undefined;
@@ -537,6 +534,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       turn.progress = true;
       turn.pending.push(delta);
       turn.pendingBytes += Buffer.byteLength(delta, "utf8");
+      turn.publishedLength += delta.length;
       if (turn.pendingBytes >= FLUSH_BYTES) {
         flushPending(db, turn);
       } else {
@@ -553,35 +551,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     startStep(assistantMessageId, input) {
       assertOpen(closed);
       const turn = currentTurn(activeTurns, activeSessions, assistantMessageId);
-      if (turn === undefined) {
-        throw new HttpError("not_found");
-      }
-      turn.progress = true;
-      const now = Date.now();
-      const stepId = runOwnedTransaction(db, "step start rollback failed", () => {
-        const receipt = db
-          .prepare(
-            `INSERT INTO chat_steps(message_id, ordinal, name, detail, status, started_at)
-           SELECT ?, ?, ?, ?, 'running', ?
-           WHERE EXISTS (
-             SELECT 1 FROM chat_messages
-             WHERE id = ? AND session_id = ? AND role = 'assistant' AND status = 'running'
-           )`,
-          )
-          .run(
-            turn.assistantMessageId,
-            input.ordinal,
-            input.name,
-            input.detail,
-            now,
-            turn.assistantMessageId,
-            turn.sessionId,
-          );
-        requireChanges(receipt.changes, 1, "step insert");
-        return Number(receipt.lastInsertRowid);
-      });
-      activeSteps.set(stepId, turn.assistantMessageId);
-      return stepId;
+      return startStep(db, turn, activeSteps, input);
     },
 
     setStepChanges(stepId, json) {
@@ -733,6 +703,7 @@ function openTurn(
     ...admitted,
     pending: [],
     pendingBytes: 0,
+    publishedLength: 0,
     progress,
     titleTouched: false,
     timer: undefined,
