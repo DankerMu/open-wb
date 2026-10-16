@@ -502,18 +502,21 @@ describe("core/sandbox ensureSandboxRoot", () => {
     return root;
   }
 
-  /** strict: throws, the error text carrying no environment value; lenient: `unchanged`. */
-  function expectNotCorrected(root: string, strict: boolean): void {
-    if (!strict) {
-      expect(ensureSandboxRoot(root, { strict })).toEqual({ ...ok(root), outcome: "unchanged" });
-      return;
-    }
+  function expectThrowWithoutPathOrEnv(path: string, strict: boolean): void {
     vi.stubEnv("WORKBUDDY_CANARY_SECRET", "sandbox-root-canary");
     try {
-      expect(thrownBy(() => ensureSandboxRoot(root, { strict })).message).not.toContain("canary");
+      const { message } = thrownBy(() => ensureSandboxRoot(path, { strict }));
+      expect(message).toMatch(/^sandbox root /u);
+      const leaks = [path, realpathSync.native(path), "canary"];
+      expect(leaks.filter((leak) => message.includes(leak))).toEqual([]);
     } finally {
       vi.unstubAllEnvs();
     }
+  }
+
+  function expectNotCorrected(root: string, strict: boolean): void {
+    if (strict) expectThrowWithoutPathOrEnv(root, strict);
+    else expect(ensureSandboxRoot(root, { strict })).toEqual({ ...ok(root), outcome: "unchanged" });
   }
 
   // Also sandbox-core「共享目录权限位」「已建出的沙箱根不被惰性路径改动」.
@@ -551,7 +554,6 @@ describe("core/sandbox ensureSandboxRoot", () => {
     expectUnchangedMetadata(join(root, "u1"), below);
     expect(chownSpy).not.toHaveBeenCalled();
     expect(process.umask()).toBe(umaskBefore);
-    // Already 3770: no chmod at all.
     const chmodSpy = vi.spyOn(fs, "chmodSync");
     syncBuiltinESMExports();
     expect(ensureSandboxRoot(root, { strict: true })).toEqual(ok(root));
@@ -573,7 +575,7 @@ describe("core/sandbox ensureSandboxRoot", () => {
     const file = join(createParent(), "sandbox");
     writeFileSync(file, "not-a-directory");
     chmodSync(file, 0o644);
-    expect(thrownBy(() => ensureSandboxRoot(file, { strict })).message).toContain(file);
+    expectThrowWithoutPathOrEnv(file, strict);
     expect(modeOf(file)).toBe(0o644);
     expect(readFileSync(file, "utf8")).toBe("not-a-directory");
   });
@@ -603,8 +605,7 @@ describe("core/sandbox ensureSandboxRoot", () => {
     expectUnchangedMetadata(root, before);
   });
 
-  // The kernel drops setgid (app uid outside the root's group) and the re-check fails after the
-  // chmod landed: undoing the landed bits would be a correction too (B3), so they stay.
+  // Kernel drops setgid, the re-check fails after the chmod landed; undoing it would correct (B3).
   it.each([true, false])("keeps a landed 0o1770 (strict: %s): no rollback", (strict) => {
     const root = rootAt(0o755);
     const nativeChmod = fs.chmodSync;

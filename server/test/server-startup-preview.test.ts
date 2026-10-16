@@ -11,6 +11,7 @@ import {
   closeSync,
   existsSync,
   ftruncateSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -561,6 +562,8 @@ describe("production entry between the main bind and the preview bind", () => {
       const cookie = await login(port);
       const session = await createSession(port, cookie);
       await prompt(port, cookie, session, "stay-alive");
+      // 沙箱根阶段先于预览绑定（D1）：窗口里建会话时根已是 3770，惰性路径没有以 2770 建它。
+      expect(lstatSync(join(root, "sandbox")).mode & 0o7777).toBe(0o3770);
       expect(await server.stop()).toBe(0);
       // 没有 success record，也没有 failure record，也没有 `session_fault`：托管布局在主绑定成功之后、
       // 预览绑定之前已经建好，窗口里的 prompt 建得出它的快照目录。

@@ -6,6 +6,7 @@
 import {
   closeSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   openSync,
@@ -236,6 +237,8 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     expect(existsSync(join(root, "db", "dev.db"))).toBe(true);
     // 托管布局在主绑定成功之后、预览绑定之前建立（#1337）：目录在，两个托管文件没有写出。
     expectLayoutWithoutManagedFiles(join(root, "state"));
+    // 沙箱根阶段先于预览绑定（D1）：预览绑定失败时根已建好、已是 3770。
+    expect(lstatSync(join(root, "sandbox")).mode & 0o7777).toBe(0o3770);
     expect(existsSync(join(root, "preview-cache"))).toBe(false);
     // 主监听器先绑定成功（#1337），随预览绑定失败的清理关闭：PORT 与 DB 立即可由后继进程复用。
     await expectBindable("127.0.0.1", failure.port);

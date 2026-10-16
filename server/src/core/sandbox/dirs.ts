@@ -50,26 +50,35 @@ export function ensureSharedDir(absPath: string): void {
 }
 
 /**
- * 沙箱根（sandbox-core「沙箱根目录」）：缺失时递归建出它与缺失的父级（父级权限位不改），取内核
- * realpath（根可以是运维放置的、指向目录的符号链接；配置值照旧交给 store 与 spawn），不是目录即抛，
- * 再以 `ensureOwnedDir(root, 0o3770)` 校正属主与精确 mode。校正失败（属别的 uid、chmod 被拒、复查
- * 发现 setgid 被内核丢掉）：`strict`（`OMP_USER` 已配置）原样抛出；否则返回 `unchanged`、不再
- * chmod——已落下的权限位也不回滚（B3：同 uid 模式不纠正，回滚也是纠正）。不碰根之下任何条目。
+ * 沙箱根（sandbox-core「沙箱根目录」）：递归建出缺失的根与父级（父级权限位不改），取内核 realpath
+ * （根可以是指向目录的符号链接），不是目录即抛，再 `ensureOwnedDir(root, 0o3770)`。校正失败：`strict`
+ * （`OMP_USER`）抛出；否则返回 `unchanged`、不再 chmod、已落下的位不回滚（B3）。不碰根之下的条目。
+ * 抛出的文本固定、不含路径（规格：不含环境值），原始错误（含 errno `code`）留在 `cause`。
  */
 export function ensureSandboxRoot(
   configuredPath: string,
   options: { strict: boolean },
 ): { root: string; outcome: "ok" | "unchanged" } {
-  mkdirSync(configuredPath, { recursive: true });
-  const root = realpathSync.native(configuredPath);
-  if (!lstatSync(root).isDirectory()) {
-    throw new Error(`sandbox root ${root}: is not a directory`);
+  const fail = (reason: string, cause?: unknown): never => {
+    throw new Error(`sandbox root ${reason}`, { cause });
+  };
+  let root = "";
+  let isDirectory = false;
+  try {
+    mkdirSync(configuredPath, { recursive: true });
+    root = realpathSync.native(configuredPath);
+    isDirectory = lstatSync(root).isDirectory();
+  } catch (error) {
+    fail("cannot be created or resolved", error);
+  }
+  if (!isDirectory) {
+    fail("is not a directory");
   }
   try {
     ensureOwnedDir(root, SANDBOX_ROOT_MODE);
   } catch (error) {
     if (options.strict) {
-      throw error;
+      fail("is not owned by this process or cannot be held at mode 0o3770", error);
     }
     return { root, outcome: "unchanged" };
   }
