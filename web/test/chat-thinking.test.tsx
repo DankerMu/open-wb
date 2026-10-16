@@ -434,9 +434,9 @@ describe("thinking fold on the chat page", () => {
 
     const block = fold();
     const main = mainOf(articles()[0] as HTMLElement);
-    const text = main.querySelector('[data-slot="message-body"]') as Element;
     expect(main.firstElementChild).toBe(block);
-    expect(block.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 分段布局（change chat-interleaved-segments D14 清单项 3，issue 需求 1）：首段思考之后还没有正文块。
+    expect(main.querySelector('[data-slot="message-body"]')).toBeNull();
     const summary = control(block);
     expect(summary.textContent).toBe("正在思考…");
     const icon = summary.firstElementChild as Element;
@@ -447,6 +447,9 @@ describe("thinking fold on the chat page", () => {
     expect(block.getAttribute("data-running")).toBe("");
 
     emit(source, 5, "text.delta", { delta: "答案" });
+    // 正文到达后正文段出现在折叠块之后。
+    const text = main.querySelector('[data-slot="message-body"]') as Element;
+    expect(block.compareDocumentPosition(text) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     emit(source, 6, "turn.end", { status: "done" });
 
     expect(fold()).toBe(block);
