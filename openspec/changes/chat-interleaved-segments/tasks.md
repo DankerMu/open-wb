@@ -271,16 +271,16 @@ Minimal mergeable slice: atomic - 摘要与折叠规则同属 B7；拆开会让�
 
 ## 8. chat-web / tool-approval — 步骤卡的确认标记与兜底记录
 
-- [ ] 8.1 开工核对：重读 `approval-card.tsx:166-228` 的 `ApprovalRecords`、`step-card.tsx` 卡头、`message-waiting.tsx` 的判据；按 design D14 表对清单项 2 重跑 `grep -rn "已允许执行\|已拒绝执行\|超时自动允许\|approval-record" web/test web/e2e`，与表逐条对照；表外命中的停下更新 D14。
+- [x] 8.1 开工核对：重读 `approval-card.tsx:166-228` 的 `ApprovalRecords`、`step-card.tsx` 卡头、`message-waiting.tsx` 的判据；按 design D14 表对清单项 2 重跑 `grep -rn "已允许执行\|已拒绝执行\|超时自动允许\|approval-record" web/test web/e2e`，与表逐条对照；表外命中的停下更新 D14。
   验证：对照结果写进 PR。
-- [ ] 8.2 先写测试：chat-web「步骤卡的确认标记」；tool-approval「web 审批条」的「已配对的已结算确认不渲染记录」；兜底记录位于分段区之后、错误文本之前；接手 6.2 留下的 chat-web「分段布局的块次序」两条断言（消息内没有兜底确认记录、展开第二个工具段后 `bash` 步骤卡带 `超时自动允许`）；「web 审批条」既有记录场景在未配对夹具下照旧通过；chat-web「等待指示」不变。
+- [x] 8.2 先写测试：chat-web「步骤卡的确认标记」；tool-approval「web 审批条」的「已配对的已结算确认不渲染记录」；兜底记录位于分段区之后、错误文本之前；接手 6.2 留下的 chat-web「分段布局的块次序」两条断言（消息内没有兜底确认记录、展开第二个工具段后 `bash` 步骤卡带 `超时自动允许`）；「web 审批条」既有记录场景在未配对夹具下照旧通过；chat-web「等待指示」不变。
   验证：在未改动的代码上判红。
-- [ ] 8.3 实现：`step-card.tsx` 卡头加 `span[data-slot="step-approval-mark"]`（状态徽章之前、纯文本、不进徽章可访问名）；`ApprovalRecords` 只渲染 `stepId` 不指向本消息步骤的已结算审批；`message-thread.tsx` 把兜底记录排在分段区之后。文案与样式不变；拷入层零改动。
+- [x] 8.3 实现：`step-card.tsx` 卡头加 `span[data-slot="step-approval-mark"]`（状态徽章之前、纯文本、不进徽章可访问名）；`ApprovalRecords` 只渲染 `stepId` 不指向本消息步骤的已结算审批；`message-thread.tsx` 把兜底记录排在分段区之后。文案与样式不变；拷入层零改动。
   验证：8.2 全绿；`message-thread.tsx` ≤ 430 行。
-- [ ] 8.4 按 design D14 表改写清单项 2 中标「8」的断言：`web/e2e/ui-walk-approval.ts:12` 及其使用处、`web/e2e/ui-walk-upstream-failure.ts:91`，按 chat-harness「UI 走查对话步骤」改为「消息里没有记录卡，展开工具段后步骤卡无标记（允许）」；逐条列进偏离记录。
-- [ ] 8.5 验收清单：按 design D15 改写 CH-20、CH-21、CH-22、CH-23、CH-24、CH-50、CH-56，结论 `待签`。CH-20、CH-22、CH-24、CH-50 里「被拒绝之后看到什么」一律取切片 4 的实测（任务 4.4）所取的分支——4.5 取了就写「展开工具段后该步骤卡标 `已拒绝`」，4.6 取了就写「消息末尾 `已拒绝执行`」；不写两可的措辞。开工前先读 4.4 的结果表与 design D6 里记下的结论。
-- [ ] 8.6 变异证据：`allow` 也显示标记 → 「超时、拒绝与正常允许」判红；不按 `stepId` 过滤记录 → 「已配对的已结算确认不渲染记录」与走查判红；标记放进状态徽章 → 徽章可访问名断言判红；兜底记录挪回分段区之前 → 块次序用例判红；`timeout` 不显示标记 → 「分段布局的块次序」的标记断言判红。
-- [ ] 8.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
+- [x] 8.4 按 design D14 表改写清单项 2 中标「8」的断言：`web/e2e/ui-walk-approval.ts:12` 及其使用处、`web/e2e/ui-walk-upstream-failure.ts:91`，按 chat-harness「UI 走查对话步骤」改为「消息里没有记录卡，展开工具段后步骤卡无标记（允许）」；逐条列进偏离记录。
+- [x] 8.5 验收清单：按 design D15 改写 CH-20、CH-21、CH-22、CH-23、CH-24、CH-50、CH-56，结论 `待签`。CH-20、CH-22、CH-24、CH-50 里「被拒绝之后看到什么」一律取切片 4 的实测（任务 4.4）所取的分支——4.5 取了就写「展开工具段后该步骤卡标 `已拒绝`」，4.6 取了就写「消息末尾 `已拒绝执行`」；不写两可的措辞。开工前先读 4.4 的结果表与 design D6 里记下的结论。
+- [x] 8.6 变异证据：`allow` 也显示标记 → 「超时、拒绝与正常允许」判红；不按 `stepId` 过滤记录 → 「已配对的已结算确认不渲染记录」与走查判红；标记放进状态徽章 → 徽章可访问名断言判红；兜底记录挪回分段区之前 → 块次序用例判红；`timeout` 不显示标记 → 「分段布局的块次序」的标记断言判红。
+- [x] 8.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level: compact - 两个组件的显示规则，数据与协议已在 5 就位。
 Minimal mergeable slice: atomic - 去掉已配对的记录卡与加上步骤卡标记必须同刀：只去不加，超时与拒绝在消息里就没有痕迹了（B4）。
 
