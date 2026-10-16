@@ -1,10 +1,12 @@
-// 审批的两种呈现（design D7）：待决审批是输入框上方停靠区里的提问卡（composer-dock.tsx 叠放），已结算
-// 审批是所属助手消息内的记录（message-thread.tsx 按 D4 的块次序挂载）。二者只读归约出的 `approvals`：
+// 审批的两种呈现（design D7）：待决审批是输入框上方停靠区里的提问卡（composer-dock.tsx 叠放），配不上本消息
+// 步骤的已结算审批是所属助手消息内的兜底记录（message-thread.tsx 排在分段区之后、错误文本之前；配上的只在
+// 步骤卡上标记，change chat-interleaved-segments D12）。二者只读归约出的 `approvals`：
 // 工具名徽章是 `tool` 字段（不解析 `title`），正文是 `title` 全文、保留换行。
 import { type KeyboardEvent, type MouseEvent, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../components/icon.js";
 import type { ChatApprovalView } from "./stream-approvals.js";
+import type { ChatStepView } from "./stream-steps.js";
 import { useClipped } from "./use-clipped.js";
 
 type ApprovalAnswer = "allow" | "deny";
@@ -210,9 +212,21 @@ function ApprovalRecord({
   );
 }
 
-/** 一条助手消息的已结算审批记录，按给定（id 升序）次序各一条；没有已结算审批时不渲染。 */
-export function ApprovalRecords({ approvals }: { approvals: readonly ChatApprovalView[] }) {
-  const settled = approvals.filter((approval) => approval.decision !== null);
+/**
+ * 一条助手消息的兜底记录（tool-approval「web 审批条」，change chat-interleaved-segments D12、owner 裁定 B4）：
+ * 已结算、且 `stepId` 不指向本消息任一步骤的审批，按给定（id 升序）次序各一条；配上步骤的只在步骤卡上标记
+ * （step-card.tsx）。没有这样的审批时不渲染。
+ */
+export function ApprovalRecords({
+  approvals,
+  steps,
+}: {
+  approvals: readonly ChatApprovalView[];
+  steps: readonly ChatStepView[];
+}) {
+  const settled = approvals.filter(
+    (approval) => approval.decision !== null && !steps.some((step) => step.id === approval.stepId),
+  );
   if (settled.length === 0) {
     return null;
   }

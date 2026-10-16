@@ -1,7 +1,9 @@
 // UI walk approval steps: the first-turn bash approval is a prompt card in the dock directly above
 // the composer (never inside a message). Assert the dock layout while that one card is pending,
 // answer it from the keyboard (focus `允许`, press Enter) while the final model turn is still behind
-// the fake-upstream gate, then prove the settled record inside the message survives a reload.
+// the fake-upstream gate. The allowed approval is paired with the bash step (tool-approval
+// 「确认与步骤配对」), so the message gains no settled record and the step card no mark (a normal allow
+// is unmarked, chat-web「步骤卡的确认标记」), before and after a reload.
 
 import { expect, type Locator, type Page } from "@playwright/test";
 import { holdRoute } from "./route-hold.js";
@@ -9,7 +11,7 @@ import { gatePhase } from "./ui-walk-gate.js";
 import { expandToolGroup, toolGroup } from "./ui-walk-steps.js";
 
 const PENDING = "需要你的确认";
-const ALLOWED = "已允许执行";
+const SETTLED_RECORD = /^(已允许执行|已拒绝执行|超时自动允许)$/u;
 
 export function generatingStatus(page: Page) {
   return page
@@ -129,16 +131,20 @@ export async function allowFirstApproval(
   } finally {
     await answer.release();
   }
-  // 结算后提问卡收起，所属助手消息内出现已允许的记录。
-  await expect(assistant.getByRole("group", { name: ALLOWED })).toBeVisible();
+  // 结算（approval.resolved）后提问卡收起；该审批配上了 bash 步骤，所属助手消息内没有记录卡，
+  // 已展开的 bash 步骤卡上也没有确认标记（正常允许不标）。
   await expect(pending).toHaveCount(0);
   await expect(page.locator('[data-slot="composer-dock"]')).toHaveCount(0);
+  await expect(assistant.getByRole("group", { name: SETTLED_RECORD })).toHaveCount(0);
   await expect(assistant.getByRole("status", { name: "bash 已完成" })).toBeVisible();
+  await expect(
+    assistant.getByRole("region", { name: "bash" }).locator('[data-slot="step-approval-mark"]'),
+  ).toHaveCount(0);
 }
 
-// 完成后 reload：快照恢复出恰一条已允许的记录（在助手消息内），整页没有待决提问卡。
-export async function expectAllowedBar(page: Page): Promise<void> {
+// 完成后 reload：快照里该审批仍配着 bash 步骤，助手消息内没有记录卡，整页没有待决提问卡。
+export async function expectNoSettledRecord(page: Page): Promise<void> {
   const assistant = assistantArticle(page);
-  await expect(assistant.getByRole("group", { name: ALLOWED })).toHaveCount(1);
+  await expect(assistant.getByRole("group", { name: SETTLED_RECORD })).toHaveCount(0);
   await expect(page.getByRole("group", { name: PENDING })).toHaveCount(0);
 }

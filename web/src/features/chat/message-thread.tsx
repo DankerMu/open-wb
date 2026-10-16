@@ -1,6 +1,7 @@
 // 消息线程骨架（design D4）：应用层组件，直接由 ThreadPrimitive / MessagePrimitive 组合；滚动层在
 // thread-viewport.tsx，思考折叠在 thinking-fold.tsx，工具调用组在 tool-call-group.tsx，操作行在
-// message-action-row.tsx，已结算审批记录在 approval-card.tsx（待决审批不在消息里，见 composer-dock.tsx）。
+// message-action-row.tsx，配不上步骤的已结算审批的兜底记录在 approval-card.tsx（配上的只在步骤卡上标记，
+// step-card.tsx；待决审批不在消息里，见 composer-dock.tsx）。
 // 文件变更卡在 file-changes-card.tsx，产物卡在 artifact-card.tsx，按 D4 的块次序挂在助手消息里。
 // 助手消息的分段区（change chat-interleaved-segments D9、D10）：本文件只按 message-segments.ts 判布局——
 // 分段布局交给 message-segments-view.tsx 逐块渲染，旧布局仍是「思考 → 正文 → 一个工具段」——其后各部件
@@ -126,7 +127,7 @@ const UserMessage = memo(function UserMessage({
             </p>
           )}
           <MessageAttachments attachments={custom.attachments} />
-          <ToolCallGroup steps={custom.steps} />
+          <ToolCallGroup approvals={custom.approvals} steps={custom.steps} />
           <MessageError error={custom.error} retrying={custom.retrying} status={custom.status} />
         </div>
         {/* 归档时只剩 `复制`；文本也为空（只发附件）时行里没有按钮，不渲染。 */}
@@ -197,7 +198,12 @@ function SegmentArea({
   if (blocks !== null) {
     return (
       <>
-        <MessageSegments blocks={blocks} dot={running && shown} status={status} />
+        <MessageSegments
+          approvals={approvals}
+          blocks={blocks}
+          dot={running && shown}
+          status={status}
+        />
         {running && !shown ? <MessageWaiting /> : null}
       </>
     );
@@ -217,7 +223,7 @@ function SegmentArea({
       ) : (
         <MessageBody dot={running} status={status} text={text} />
       )}
-      <ToolCallGroup steps={steps} />
+      <ToolCallGroup approvals={approvals} steps={steps} />
     </>
   );
 }
@@ -266,7 +272,7 @@ const AssistantMessage = memo(function AssistantMessage({
         </span>
         <div className="flex min-w-0 flex-1 flex-col gap-2.5" data-slot="message-content">
           <SegmentArea custom={custom} text={text} thinking={thinking} />
-          <ApprovalRecords approvals={approvals} />
+          <ApprovalRecords approvals={approvals} steps={steps} />
           <MessageError error={error} retrying={retrying} status={status} />
           <FileChangesCard onReveal={onReveal} space={space} steps={steps} />
           <ArtifactCards client={client} onReveal={onReveal} space={space} steps={steps} />

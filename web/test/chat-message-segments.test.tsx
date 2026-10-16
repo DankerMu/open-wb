@@ -1,8 +1,8 @@
 // change chat-interleaved-segments 切片 6（issue 1475）：chat-web「消息线程」的「分段布局的块次序」「分段布局下的
 // 小圆点」「分段区没有块时的小圆点」与分段下的「正文逐字展开」，以及「工具段摘要与折叠」「展开态只随用户点击
 // 变化」的双工具段部分。seam：整页挂载 + 假 API / 假 EventSource（chat-segments-support.tsx），期望值取自规格
-// 场景的字面量。「分段布局的块次序」里「消息内没有兜底确认记录」与「bash 步骤卡带 超时自动允许」两条依赖切片 8，
-// 留给 8.2，这里只断言分段区的块与次序、操作行与 `复制`。
+// 场景的字面量。「分段布局的块次序」里「消息内没有兜底确认记录」与「bash 步骤卡带 超时自动允许」两条由切片 8
+// （issue 1476）补上。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanupChatPage } from "./chat-page-support.js";
@@ -94,6 +94,14 @@ describe("chat-web「消息线程」：分段布局的块次序", () => {
     expect(folds()).toEqual([parts[2]]);
     expect(titleOf(parts[2] as HTMLElement)).toEqual(["已思考 2 秒", false]);
     expect(isOpen(parts[2] as HTMLElement)).toBe(false);
+    // 配上 bash 步骤的超时确认不是兜底记录，只在展开第二个工具段后的 bash 步骤卡上标 `超时自动允许`。
+    expect(contentOf().querySelector('[data-slot="approval-records"]')).toBeNull();
+    expect(within(assistant()).queryAllByRole("group", { name: "超时自动允许" })).toEqual([]);
+    fireEvent.click(triggerOf(second as HTMLElement));
+    const bashCard = within(second as HTMLElement).getByRole("region", { name: "bash" });
+    expect(bashCard.querySelector('[data-slot="step-approval-mark"]')?.textContent).toBe(
+      "超时自动允许",
+    );
 
     fireEvent.click(within(assistant()).getByRole("button", { name: "复制" }));
     await screen.findByText("已复制");
