@@ -254,18 +254,18 @@ Minimal mergeable slice: atomic - 切段函数与渲染器必须一起合入（k
 
 ## 7. chat-web — 工具段摘要与默认收起
 
-- [ ] 7.1 开工核对：重读 `tool-call-group.tsx`（`:37-44` 自动展开、`:58-60` 摘要）与 ui-foundation「组件分层」的定制清单；按 design D14 表对清单项 1、4 重跑 `grep -rn "个步骤\|aria-expanded" web/test web/e2e`，与表逐条对照；表外命中的停下更新 D14。
+- [x] 7.1 开工核对：重读 `tool-call-group.tsx`（`:37-44` 自动展开、`:58-60` 摘要）与 ui-foundation「组件分层」的定制清单；按 design D14 表对清单项 1、4 重跑 `grep -rn "个步骤\|aria-expanded" web/test web/e2e`，与表逐条对照；表外命中的停下更新 D14。
   验证：对照结果写进 PR。
-- [ ] 7.2 先写测试：
+- [x] 7.2 先写测试：
   - `web/test/tool-summary.test.ts`（纯）：chat-web「工具段摘要与折叠」的「归类计数与次序」「失败与进行中后缀」（转圈图标随 `running` 出现与消失）；颜色在 jsdom 里量不到（`web/vitest.config.ts:7-8` 不加载 Tailwind），「不着色」在 `chat-tool-group.test.tsx` 里按结构断言：`，1 步失败` 与其余摘要文字在同一个文本元素里、不单独成元素，该元素的 `className` 不含任何 `text-*` 颜色类（同文件 `:192` 的类名断言先例）；
   - `web/test/chat-tool-group.test.tsx`：「展开态只随用户点击变化」的单工具段部分（新失败步骤不展开、手动展开在新步骤并入与快照原地重装后保留）；chat-web「消息线程」改写后的「工具调用组默认收起与失败自动展开」。
 
   验证：在未改动的代码上判红。
-- [ ] 7.3 实现：新模块 `web/src/features/chat/tool-summary.ts`；`tool-call-group.tsx` 去掉 `failedCount` 比较与自动展开、摘要改用 `summarizeTools`，转圈与流光保留。拷入层零改动。
-- [ ] 7.4 按 design D14 表改写清单项 1、4 中标「7」的全部断言（通用纪律第 3 种改法，引用 B6、B7），逐条列进偏离记录；其中 `web/e2e/ui-walk-approval.ts:110` 按 chat-harness「UI 走查对话步骤」改为 `执行 1 条命令，进行中`，`ui-walk-todo.ts:90` 改为 `其它 1 步`。
-- [ ] 7.5 验收清单：按 design D15 改写 CH-15、CH-19，结论 `待签`。
-- [ ] 7.6 变异证据：恢复失败自动展开 → 「展开态只随用户点击变化」与改写后的消息线程场景判红；按文件数而非步骤数计 `读取` → 「归类计数与次序」判红；类的次序按出现次序 → 同上判红；失败后缀单独成一个 `span` 并加 `text-destructive` → 「不着色」的结构断言判红；去掉 `，进行中` → 「失败与进行中后缀」判红。
-- [ ] 7.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
+- [x] 7.3 实现：新模块 `web/src/features/chat/tool-summary.ts`；`tool-call-group.tsx` 去掉 `failedCount` 比较与自动展开、摘要改用 `summarizeTools`，转圈与流光保留。拷入层零改动。
+- [x] 7.4 按 design D14 表改写清单项 1、4 中标「7」的全部断言（通用纪律第 3 种改法，引用 B6、B7），逐条列进偏离记录；其中 `web/e2e/ui-walk-approval.ts:110` 按 chat-harness「UI 走查对话步骤」改为 `执行 1 条命令，进行中`，`ui-walk-todo.ts:90` 改为 `其它 1 步`。
+- [x] 7.5 验收清单：按 design D15 改写 CH-15、CH-19，结论 `待签`。
+- [x] 7.6 变异证据：恢复失败自动展开 → 「展开态只随用户点击变化」与改写后的消息线程场景判红；按文件数而非步骤数计 `读取` → 「归类计数与次序」判红；类的次序按出现次序 → 同上判红；失败后缀单独成一个 `span` 并加 `text-destructive` → 「不着色」的结构断言判红；去掉 `，进行中` → 「失败与进行中后缀」判红。
+- [x] 7.7 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿。
 Suggested fixture level: compact - 一个组件的显示与折叠规则加一个纯函数，不碰数据与协议。
 Minimal mergeable slice: atomic - 摘要与折叠规则同属 B7；拆开会让同一组件在一刀里摘要已新、折叠仍旧，验收行无法改写。
 

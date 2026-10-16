@@ -13,7 +13,7 @@ export function toolGroup(message: Locator): Locator {
 // 行内 `scrollbar-width` 置为 `none`：必须落在组自身，转录滚动容器不被碰（否则贴底跟随会被它解除）。
 export async function expandToolGroup(message: Locator): Promise<Locator> {
   const group = toolGroup(message);
-  const trigger = group.getByRole("button", { name: /个步骤/u });
+  const trigger = group.getByRole("button", { name: /^(执行|读取|新建|修改|搜索|其它) \d+ /u });
   await expect(trigger).toBeVisible();
   await expectFocusRingInside(trigger);
   const locked = await trigger.evaluate((el) => {

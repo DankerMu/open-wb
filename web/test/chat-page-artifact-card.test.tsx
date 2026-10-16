@@ -633,7 +633,7 @@ describe("产物卡 placement", () => {
     await openSession({ ...turn("done"), messages: [asker, answer] });
 
     const question = screen.getByRole("article", { name: "用户" });
-    expect(within(question).getAllByRole("button", { name: /个步骤 · write/ })).toHaveLength(1);
+    expect(within(question).getAllByRole("button", { name: "新建 1 个文件" })).toHaveLength(1);
     expect(listedGroup()).not.toBeNull();
     expect(artifactCards()).toEqual([]);
     expect(screen.queryByRole("button", { name: /^复制代码/ })).toBeNull();

@@ -87,7 +87,7 @@ export async function walkTodoPanel(
     `202 /api/sessions/${sessionId}/prompt`,
   ]);
   // 真 omp 执行了 `todo` 工具（一个步骤），没有为它发起审批：整页没有提问卡，也没有已结算的记录。
-  await expect(toolGroup(assistant).getByRole("button")).toHaveText("1 个步骤 · todo 已完成");
+  await expect(toolGroup(assistant).getByRole("button")).toHaveText("其它 1 步");
   await expect(page.getByRole("group", { name: APPROVAL_GROUPS })).toHaveCount(0);
   await expect(composer).toBeEnabled();
 

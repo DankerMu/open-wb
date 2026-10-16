@@ -218,10 +218,11 @@
 
 | 文件:行 | 钉住的旧行为 | 清单项 | 改写切片 |
 |---|---|---|---|
-| `web/test/chat-tool-group.test.tsx:84-133`（describe 名与「done 收起、failed 展开」用例；`:118`、`:124` 的 `aria-expanded="true"`） | 失败自动展开 | 1 | 7 |
+| `web/test/chat-tool-group.test.tsx:84-133`（describe 名与「done 收起、failed 展开」用例；`:124` 的 `aria-expanded="true"`；`:118` 跟在 `:117` 的手动点击之后，B7 下仍成立，不改——#1470 核对） | 失败自动展开 | 1 | 7 |
 | `web/test/chat-tool-group.test.tsx:135-178`（`:160`、`:174` 失败后展开、手动收起到下次失败） | 失败自动展开 | 1 | 7 |
 | `web/test/chat-tool-group.test.tsx:108`、`:111`、`:125`、`:150`、`:175`、`:189`、`:207`、`:232`、`:246-248`、`:276`（摘要文本；`:68`、`:132` 的 `/个步骤/` 定位） | 摘要 | 4 | 7 |
 | `web/test/chat-page-file-changes.test.tsx:739` | 摘要 | 4 | 7 |
+| `web/test/chat-page-file-changes.test.tsx:748`（C14：夹具含 `failed` 步骤，两张步骤卡靠自动展开出现在 DOM；#1470 全量运行发现，grep 不可见） | 失败自动展开 | 1 | 7 |
 | `web/test/chat-stop-button.test.tsx:242` | 摘要 | 4 | 7 |
 | `web/test/chat-message-waiting.test.tsx:144` | 摘要 | 4 | 7 |
 | `web/test/chat-page-artifact-card.test.tsx:636` | 摘要 | 4 | 7 |

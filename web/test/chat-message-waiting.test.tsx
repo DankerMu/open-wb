@@ -141,7 +141,7 @@ describe("chat-web「等待指示」：首块到达前只有等待指示，之�
 
     emit("step.start", { messageId: 0, stepId: 1, name: "bash", detail: "ls" });
     await waitFor(() =>
-      expect(within(article).getByRole("button", { name: "1 个步骤 · bash 运行中" })).toBeTruthy(),
+      expect(within(article).getByRole("button", { name: "执行 1 条命令，进行中" })).toBeTruthy(),
     );
     await expectDotOnly(article);
 

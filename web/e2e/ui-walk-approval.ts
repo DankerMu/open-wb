@@ -107,7 +107,7 @@ export async function allowFirstApproval(
   await expectDockLayout(page, pending);
   // 组默认收起：只有一行摘要，步骤卡不在页面上。
   await expect(toolGroup(assistant).getByRole("button")).toHaveAttribute("aria-expanded", "false");
-  await expect(toolGroup(assistant).getByRole("button")).toHaveText("1 个步骤 · bash 运行中");
+  await expect(toolGroup(assistant).getByRole("button")).toHaveText("执行 1 条命令，进行中");
   await expect(assistant.getByRole("region", { name: "bash" })).toHaveCount(0);
   await expandToolGroup(assistant);
   await expect(assistant.getByRole("status", { name: "bash 运行中" })).toBeVisible();

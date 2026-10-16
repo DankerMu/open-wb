@@ -238,8 +238,8 @@ describe("stop button: layout and outcomes", () => {
     const body = article.querySelector('[data-slot="message-body"]');
     expect(body?.textContent).toBe(PLACEHOLDER);
     expect(article.querySelector('[data-slot="message-caret"]')).toBeNull();
-    // 步骤收在默认收起的工具调用组里：摘要行已读作 已停止，展开后徽章同名。
-    expect(within(article).getByRole("button", { name: "1 个步骤 · bash 已停止" })).toBeTruthy();
+    // 步骤收在默认收起的工具调用组里：已停止的步骤照常计入其类、不加后缀（B6），展开后徽章读作 已停止。
+    expect(within(article).getByRole("button", { name: "执行 1 条命令" })).toBeTruthy();
     expect(within(article).queryByRole("status", { name: /^bash / })).toBeNull();
     expandToolGroups(article);
     const stepBadge = within(article).getByRole("status", { name: "bash 已停止" });

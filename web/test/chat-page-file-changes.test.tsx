@@ -736,7 +736,7 @@ describe("文件变更 card on the chat page", () => {
     await openSession({ ...base, messages: [asker, ...base.messages.slice(1)] });
 
     const user = screen.getByRole("article", { name: "用户" });
-    expect(within(user).getByRole("button", { name: "1 个步骤 · edit 已完成" })).toBeTruthy();
+    expect(within(user).getByRole("button", { name: "修改 1 个文件" })).toBeTruthy();
     expect(cards()).toEqual([]);
     expect(screen.queryByRole("group", { name: /文件变更/ })).toBeNull();
   });
@@ -745,6 +745,8 @@ describe("文件变更 card on the chat page", () => {
     const steps = [toolStep(11, 0, "bash", null), toolStep(12, 1, "read", null, "failed")];
     await openSession(turn("done", { content: "答", steps }));
 
+    // 含失败步骤的工具段同样默认收起（B7），步骤卡在展开后才在 DOM 里。
+    expandToolGroups(reply());
     expect(within(reply()).getAllByRole("region")).toHaveLength(2);
     expect(cards()).toEqual([]);
     expect(screen.queryByRole("group", { name: /文件变更/ })).toBeNull();
