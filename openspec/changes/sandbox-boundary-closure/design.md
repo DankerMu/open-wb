@@ -202,7 +202,7 @@ owner 裁定见 proposal「Why」与下文「owner 的裁定」表（grill ledge
 
 **D10 CI 证据的等级（B7）。** uid-isolation job 不改：它预置的 `SANDBOX_ROOT`（`2770`、属 runner uid、共享组）在 S1 合入后由 `make smoke` 阶段的编译服务校正为 `3770`，chmod 失败即启动失败、job 红——「失败可见」；job 没有任何一步断言沙箱根启动后的 mode（`check_omp_modes` 只看 `OMP_STATE_DIR`；`test-ci-harness.sh` 只钉预置行）——「取值不断言」。这是 S1 chmod 分支在真实 uid 分离 Linux 上的旁证，不是对照用例；真正的断言在单元与编译入口测试（D2）。给它加一行 `stat` 断言是 CI 改动，B7 不做。
 
-**D11 关键路径与白盒（AGENTS.md「沙箱与文件边界」）。** 每个切片都触及沙箱权限位或文件打开，**每个切片的 PR 都请求人工白盒审查**，审查清单（owner 必读的每一处权限 / 打开调用）：
+**D11 关键路径与白盒（AGENTS.md「沙箱与文件边界」）。** 每个切片都触及沙箱权限位或文件打开，**S1、S2、S3a 的 PR 请求人工白盒审查；S0、S3b 不含运行时代码、触发不成立，但同样贴清单请一次轻量复核**，审查清单（owner 必读的每一处权限 / 打开调用）：
 
 - S1：`dirs.ts` 新函数全部（`mkdirSync` 递归、`realpathSync.native`、`lstatSync`、`ensureOwnedDir(root, 0o3770)` 调用与 strict / lenient 分支）；`server.ts` 的阶段位置（`:465-467` 之间）与 `sandbox_root_unchanged` 的写出；`app.ts:232-234` 注释。
 - S2：`regular-file.ts` 的 `openSync` 标志位与 errno 表、`fstatSync` 判定与关闭；`preview.ts` 两个 helper 的 `createReadStream(null, {fd, …, autoClose: true})`；`range-send.ts` 的 416 / HEAD 关闭；`rest.ts` `/file` 的 `lstat → open → classify → send` 次序；`rest-entries.ts` `/download` 的 `open → audit → headers → send` 与审计抛错关闭；`preview/app.ts` `/w/` 的打开与 `/o/` PDF 的 502 映射。
