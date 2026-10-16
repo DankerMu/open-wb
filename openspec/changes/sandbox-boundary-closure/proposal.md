@@ -71,6 +71,6 @@ owner 2026-10-13 / 2026-10-16 拍板（grill ledger B1–B9）：两个 issue �
 ```text
 Issue type: bugfix（安全边界）
 Pipeline: stage-change-pipeline（owner B8：#1286 与 #1237 合为一个 change，走完整流水线）；grill 已过，ledger B1–B9，开放项无
-Tracking: #1286 与 #1237 都保持打开直到全部切片合并；Stage 5 不另建 Epic，子 issue 以 #1286（涉及挂载规则的切片同时以 #1237）为父，子 issue 按 tasks.md 的切片（S0、S1、S2、S3a、S3b；S0 = B9 一行修复，独立先合；S3a 取「红」分支时 S3a 不合、temporary-workspaces delta 撤出、只关闭 #1286）
+Tracking: #1286 与 #1237 都保持打开直到全部切片合并；Stage 5 不另建 Epic，子 issue 以 #1286（涉及挂载规则的切片同时以 #1237）为父，子 issue 按 tasks.md 的切片（S0、S1、S2、S3a、S3b；S0 = B9 一行修复，独立先合、S3a 依赖它；S3a 取「红」分支时 S3a 不合、temporary-workspaces delta 撤出、只关闭 #1286）
 B7 记录: #1237 正文要求对照用例进 uid-isolation job；owner 2026-10-16 裁定改为测试主机手工实测（一次性容器），用例默认跳过（环境变量门控），不改 CI、不加依赖
 ```

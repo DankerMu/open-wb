@@ -202,7 +202,7 @@ owner 裁定见 proposal「Why」与下文「owner 的裁定」表（grill ledge
 
 **D10 CI 证据的等级（B7）。** uid-isolation job 不改：它预置的 `SANDBOX_ROOT`（`2770`、属 runner uid、共享组）在 S1 合入后由 `make smoke` 阶段的编译服务校正为 `3770`，chmod 失败即启动失败、job 红——「失败可见」；job 没有任何一步断言沙箱根启动后的 mode（`check_omp_modes` 只看 `OMP_STATE_DIR`；`test-ci-harness.sh` 只钉预置行）——「取值不断言」。这是 S1 chmod 分支在真实 uid 分离 Linux 上的旁证，不是对照用例；真正的断言在单元与编译入口测试（D2）。给它加一行 `stat` 断言是 CI 改动，B7 不做。
 
-**D11 关键路径与白盒（AGENTS.md「沙箱与文件边界」）。** 每个切片都触及沙箱权限位或文件打开，**每个切片的 PR 都请求人工白盒审查**，审查清单（owner 必读的每一处权限 / 打开调用）：
+**D11 关键路径与白盒（AGENTS.md「沙箱与文件边界」）。** 每个切片都触及沙箱权限位或文件打开，**S1、S2、S3a 的 PR 请求人工白盒审查；S0、S3b 不含运行时代码、触发不成立，但同样贴清单请一次轻量复核**，审查清单（owner 必读的每一处权限 / 打开调用）：
 
 - S1：`dirs.ts` 新函数全部（`mkdirSync` 递归、`realpathSync.native`、`lstatSync`、`ensureOwnedDir(root, 0o3770)` 调用与 strict / lenient 分支）；`server.ts` 的阶段位置（`:465-467` 之间）与 `sandbox_root_unchanged` 的写出；`app.ts:232-234` 注释。
 - S2：`regular-file.ts` 的 `openSync` 标志位与 errno 表、`fstatSync` 判定与关闭；`preview.ts` 两个 helper 的 `createReadStream(null, {fd, …, autoClose: true})`；`range-send.ts` 的 416 / HEAD 关闭；`rest.ts` `/file` 的 `lstat → open → classify → send` 次序；`rest-entries.ts` `/download` 的 `open → audit → headers → send` 与审计抛错关闭；`preview/app.ts` `/w/` 的打开与 `/o/` PDF 的 502 映射。
@@ -270,8 +270,8 @@ owner 裁定见 proposal「Why」与下文「owner 的裁定」表（grill ledge
 
 ## Migration Plan
 
-- 切片次序：S0（B9 的一行夹具修复，fixture level none，独立、原子、可最先合入）不依赖任何切片；S1 与 S2 互不依赖，可并行；S3a（FUSE 用例 + 实测 + temporary-workspaces 规格）不依赖任何切片；S3b（文档、ADR、头注释、验收行、关闭 issue）← S1、S2，以及 S3a 取「绿」时 ← S3a（终态措辞与实测结果都要先落地）。
-- **S3a 的红分支**：S3a 不合并；temporary-workspaces 的 delta 从本 change 撤出、另开后续 change；S0 已合入的「`sub` 为唯一顶层条目」只是测试夹具的收窄，不随 delta 撤出；S3b 只写 #1286 的部分（ADR-0010 补充里不写挂载规则已钉住，改写实测观察与「待重议」），只关闭 #1286；#1237 保持打开，实测结果表贴到 #1237 上。S0 不受影响（已先合）。
+- 切片次序：S0（B9 的一行夹具修复，fixture level none，独立、原子、可最先合入）不依赖任何切片；S1 与 S2 互不依赖，可并行；S3a（FUSE 用例 + 实测 + temporary-workspaces 规格）只依赖 S0（3.5 ③ 以 S0 的夹具收窄为前提）；S3b（文档、ADR、头注释、验收行、关闭 issue）← S1、S2，以及 S3a 取「绿」时 ← S3a（终态措辞与实测结果都要先落地）。
+- **S3a 的红分支**：S3a 不合并；temporary-workspaces 的 delta 从本 change 撤出、另开后续 change（由编排方单独提交 docs PR 删除该 delta 文件，不属任何子 issue 的 PR）；S0 已合入的「`sub` 为唯一顶层条目」只是测试夹具的收窄，不随 delta 撤出；S3b 只写 #1286 的部分（ADR-0010 补充里不写挂载规则已钉住，改写实测观察与「待重议」），只关闭 #1286；#1237 保持打开，实测结果表贴到 #1237 上。S0 不受影响（已先合）。
 - **部署**（随 S1 发布）：`OMP_USER` 模式部署在升级前核对 `SANDBOX_ROOT`（realpath）属应用 uid、应用 uid 在共享组；不符则 `chown <app-uid> <root>`（不动属组），或 `install -d -m 3770 -o <app-uid> -g <group> <root>`。同 uid 部署无动作。回滚到旧版本：根上的粘滞位无害（旧代码不检查也不改既有分量），可留着。
 - S2 无部署动作；行为差异只在被换入的目标（旧版读链接目标或挂住，新版 404）与 416 多一次打开。
 - S3a / S3b 无部署动作；运维文档新增的手工步骤只在出现带挂载的残骸时用到。
