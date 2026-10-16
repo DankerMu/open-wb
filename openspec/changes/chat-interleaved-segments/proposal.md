@@ -56,12 +56,12 @@
 
 - `chat-web`：
   - 改写「消息线程」：块次序改为分段交替，旧布局的判定，工具段与兜底记录卡的位置，小圆点与等待指示的位置（判据不变）。
-  - 改写「API 客户端扩展」「纯会话视图归约」「事件流消费与续流」「会话页源码模块划分」：三处新键、事件新字段、归约与透传。
+  - 改写「API 客户端扩展」「纯会话视图归约」「事件流消费与续流」「会话页源码模块划分」「步骤 args 与输出分栏」：三处新键、事件新字段、归约与透传。
   - 新增「助手消息分段」（纯切段函数与旧布局判定）、「工具段摘要与折叠」、「步骤卡的确认标记」。
 - `chat-sessions`：改写「会话 REST」（快照键集、fork 拷贝列表）；新增「迁移 045 分段位置与确认关联」。
 - `chat-stream`：改写「思考与文件变更事件发布」（`thinking.end` 负载）与「审批事件发布」（`approval.request` 负载）；新增「分段位置的记录与下发」（正文偏移计数、边界前冲刷、`step.start` 两个新字段）。
 - `thinking-fold`：改写「深度思考折叠块呈现」（多段、各自位置与时长）与「思考时长记录与下发」（段行、段时长、开段前冲刷）。
-- `tool-approval`：改写「审批事件」（负载加 `stepId`；select 与 start 的线上先后不作保证）「审批快照」「web 审批条」；新增「确认与步骤配对」。
+- `tool-approval`：改写「审批作答 REST」（200 七键）「审批事件」（负载加 `stepId`；select 与 start 的线上先后不作保证）「审批快照」「web 审批条」；新增「确认与步骤配对」。
 - `turn-control`：改写「从此处分叉 REST」（拷贝思考段、偏移与重新映射的 `step_id`）。
 - `message-undo`：改写「对话原地回退」（级联删除列表加新表）。
 - `chat-harness`：改写「UI 走查对话步骤」（确认后不再有记录卡、新摘要）；新增「分段呈现的冒烟与走查」。
@@ -93,7 +93,7 @@
 
 ```text
 Issue type: feature
-Pipeline: stage-change-pipeline（owner 2026-10-13 Q11 = B2：#915 走完整流水线）；grill 已过，ledger B1–B10，开放项无
+Pipeline: stage-change-pipeline（owner 2026-10-13 Q11 = B2：#915 走完整流水线）；grill 已过，ledger B1–B13，开放项无
 Order: #910 已合并并归档（B10），本 change 在其代码上设计
 Tracking: #915 为父 issue，Stage 5 按 tasks.md 的切片在其下建子 issue；全部子 issue 合并后关闭 #915（不是 Epic）
 ```

@@ -244,7 +244,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 #### Scenario: 审批请求事件的 stepId 严格解码
 - **WHEN** 快照游标为 1:2，随后到达 approval.request(1:3) `{messageId:7, approvalId:9, tool:"bash", title:"Allow tool: bash", expiresAt:1000, stepId:5}` 与 approval.request(1:4) `{…, approvalId:10, stepId:null}`
 - **THEN** 两条都交付 onEvent，`stepId` 分别为 5 与 `null`
-- **WHEN** approval.request 只有旧的五键，或 `stepId` 为字符串、`-1`、`1.5`，或多一个键
+- **WHEN** approval.request 只有旧的五键，或 `stepId` 为字符串或 `1.5`，或多一个键
 - **THEN** 触发重新同步，与其它已知事件的非法 payload 相同
 
 ### Requirement: 会话页源码模块划分
@@ -283,6 +283,21 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **WHEN** 以一条 `stopped` 助手视图消息调用 `convertMessage`：`id` 为 12，`thinking` 为 `先想一想`，`content` 为 `部分回答`，含一条 `done` 的 `bash` 步骤与一条 `failed` 的 `write` 步骤，`approvals` 含一条已结算审批；再以一条 `thinking` 为 `null`、无步骤的 `running` 助手消息调用
 - **THEN** 第一条的 `id` 为 `"12"`，part 依次为一个 reasoning、一个 text（`部分回答`）、两个 tool-call（按步骤原序，第二个标为错误），状态为未完成，审批（含 `stepId`）、步骤 `changes` 与 `bodyOffset`、`error`、`thinkingMs`、`thinkingActive`、`thinkingSegments` 与原始状态 `stopped` 可由应用层组件从透传字段读到；第二条只有一个 text part、状态为运行中；两次调用都未修改输入对象
 
+### Requirement: 步骤 args 与输出分栏
+客户端 SHALL 把步骤 `output` 作为与 `detail` 并列的字符串字段贯穿快照解析（`steps[]` 严格键集 `{id,ordinal,name,detail,output,status,changes,bodyOffset}`，`bodyOffset` 规则见 `API 客户端扩展` 的 #915 段，`changes` 规则见 `API 客户端扩展`）、SSE `step.end` 解码（严格键集 `{messageId,stepId,status,output}`，不含 `changes`；步骤变更只经 `files.changed` 事件与快照送达）、归约与呈现；缺 `output`、缺 `changes`、缺 `bodyOffset` 或多余字段仍整体拒绝。运行中步骤的 output 为空串；迁移前旧行与非 edit/write 步骤的 `changes` 为 `null`。
+
+#### Scenario: 旧行与失败步骤
+- WHEN 快照含一条 output 为空串的 done 步骤（迁移前旧行），以及一条 detail 为 `{"command":"false"}`、output 为 `boom` 的 failed bash 步骤
+- THEN 旧行只渲染 detail 块、无 output 块且不报错；失败卡徽章 `失败`、摘要行 `command: false`，`原始输出` 含 detail 块与内容为 `boom` 的 output 块
+
+#### Scenario: 长输出不影响摘要
+- WHEN step.end 带回一条超过 120 码点的多行 output
+- THEN 摘要行仍由 detail 派生不变，output 块完整保留换行
+
+#### Scenario: 步骤变更字段贯穿
+- **WHEN** 快照含一条 `changes` 为 `null` 的 done bash 步骤与一条 `changes` 为一项 edit 变更的 done edit 步骤，SSE 另送达一条带 `changes` 键的 step.end
+- **THEN** 快照两步骤逐值保留（步骤卡呈现不变，变更只出现在文件变更卡）；带 `changes` 键的 step.end 视为非法 payload 触发重新同步
+
 ### Requirement: 消息线程
 会话页 SHALL 以 `web/src/features/chat/` 内的应用层组件渲染选中会话的消息线程：线程、消息、步骤卡与操作行直接由 `@assistant-ui/react` 的基元（`ThreadPrimitive`、`MessagePrimitive`、`ActionBarPrimitive`）组合而成；拷入层（`web/src/components/assistant-ui/`）只提供 `markdown-text`、`reasoning`、`tool-group` 三个组件及其 registry 依赖（ui-foundation `组件分层`），不拷入 registry 的 `thread` 与 `tool-fallback`。链接惰性、图片不加载、分段次序、不提供编辑/分支、不使用 runtime 的附件适配器等行为定制 SHALL 都在应用层实现（例如经 `markdown-text` 的 `components` 覆盖，以及组合 `tool-group` / `reasoning` 的 Root/Trigger/Content），不为此修改拷入文件。每条消息的根元素（用户与助手）SHALL 是 `article`，可访问名分别为 `用户` 与 `助手`，并带 `data-message-id="<message id>"`；对话内搜索的当前匹配标记 `aria-current="true"` 与当前匹配的高亮样式落在同一个根元素上（conversation-search）。根元素 SHALL 是整条消息：消息的全部内容与操作行都在它之内。
 
@@ -290,7 +305,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 
 **错误文本**（#909）SHALL 在消息有 `error` 对象时渲染：第一行为 `error.message`，`error.status` 非 `null` 时其后接 `（HTTP <status>）`；`error.detail` 非空时其下有一个 `查看原文` 按钮（带 `aria-expanded`，缺省收起），展开后以纯文本显示 `detail`——保留换行与空白、自动折行、超出一定高度时块内滚动，SHALL NOT 按 Markdown 或 HTML 渲染。消息为 running 且 `retrying` 为 `true` 时，同一位置渲染一行 `role="status"` 的 `上游出错，正在重试…`。`error` 为 `null` 的失败消息不渲染错误文本。
 
-**助手消息** SHALL 渲染为左侧的无气泡块，带装饰性的助手头像标记（不进入可访问名）。块内各部分 SHALL 按以下次序渲染，每项仅在存在时渲染：分段区 → 兜底确认记录（配不上步骤的已结算确认，tool-approval「web 审批条」）→ 错误文本（含重试提示）→ `文件变更（N 个）` 卡 → 产物卡（turn-artifacts）→ `已停止` 徽章 → 操作行。分段区不另设包裹元素：各块按次序直接是消息内容容器（`data-slot="message-content"`）的子元素，其后的兜底确认记录等部件与之同级。分段区由「助手消息分段」的切段函数决定：分段布局下为正文段、思考段（每段一个深度思考折叠块，标题见 thinking-fold「深度思考折叠块呈现」）与工具段按发生次序交替；旧布局（该函数判为旧布局的消息，含本 change 之前的全部历史消息）下依次为深度思考折叠块 → 正文 → 一个工具段。消息没有任何正文段时，已停止的以 `（已停止生成）` 占位、运行中尚无任何可见块的代之以等待指示（见下文），二者都位于分段区末尾（旧布局下即正文的位置）。待决审批 SHALL NOT 渲染在消息内（见 `输入框上方停靠区` 与 tool-approval）。思考折叠块、工具段、兜底确认记录、文件变更卡与产物卡 SHALL NOT 改变本条规定的复制、重新生成、分叉与已停止行为：`复制` 仍复制整条消息的正文原文（各正文段按次序拼接即为原文，不含思考与步骤）。
+**助手消息** SHALL 渲染为左侧的无气泡块，带装饰性的助手头像标记（不进入可访问名）。块内各部分 SHALL 按以下次序渲染，每项仅在存在时渲染：分段区 → 兜底确认记录（配不上步骤的已结算确认，tool-approval「web 审批条」）→ 错误文本（含重试提示）→ `文件变更（N 个）` 卡 → 产物卡（turn-artifacts）→ `已停止` 徽章 → 操作行。分段区不另设包裹元素：各块按次序直接是消息内容容器（`data-slot="message-content"`）的子元素，其后的兜底确认记录等部件与之同级。分段区由「助手消息分段」的切段函数决定：分段布局下为正文段、思考段（每段一个深度思考折叠块，标题见 thinking-fold「深度思考折叠块呈现」）与工具段按发生次序交替；旧布局（该函数判为旧布局的消息，含本 change 之前的全部历史消息）下依次为深度思考折叠块 → 正文 → 一个工具段。消息没有任何正文段时，已停止的以 `（已停止生成）` 占位、运行中尚无任何可见块的代之以等待指示（见下文），二者都位于分段区末尾（旧布局下即正文的位置）；占位 SHALL 是一个 `data-slot="message-body"` 元素（与 #910 之前的占位同一元素）。分段布局下 SHALL NOT 为空正文或只含空白的正文渲染空的 `message-body`：例如一条 running 消息只有一段思考时，消息内没有 `message-body` 元素，第一个正文段到达时才出现。待决审批 SHALL NOT 渲染在消息内（见 `输入框上方停靠区` 与 tool-approval）。思考折叠块、工具段、兜底确认记录、文件变更卡与产物卡 SHALL NOT 改变本条规定的复制、重新生成、分叉与已停止行为：`复制` 仍复制整条消息的正文原文（各正文段按次序拼接即为原文，不含思考与步骤）。
 
 **正文** SHALL 经 `@assistant-ui/react-markdown`（加 `remark-gfm`，不启用任何把源 HTML 转成元素的插件）渲染，不经 `web/src/lib/md-render.ts`（该模块留给文件页）；分段布局下每个正文段各自独立渲染为一个 `data-slot="message-body"` 的块，规则相同：
 - 源文本中的 HTML SHALL 作为文本出现，不生成对应元素；
@@ -300,7 +315,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 
 **等待指示与小圆点**：运行中的助手消息 SHALL 恰好显示二者之一，进入终态后二者都不显示。
 - **等待指示**：消息 running 且还没有任何可见块——`thinking` 为 `null` 或空串、正文为空、没有步骤、没有已结算审批、`error` 为 `null` 且不在重试中——时，SHALL 在正文的位置显示一行 `role="status"`、可见文本为 `正在思考…` 的等待指示（`data-slot="message-waiting"`），带流光；`prefers-reduced-motion: reduce` 下流光动画暂停。任一可见块出现后它 SHALL 消失，同一回合不再出现。不区分模型是否支持推理。
-- **小圆点**：消息 running 且已有可见块时，SHALL 在分段区的最后一段之后显示一个小圆点——最后一段是正文段时位于该段 `MarkdownBody` 之后（旧布局下即正文之后，与 #910 的位置相同），否则单独位于最后一段之下，全条消息恰一个（`data-slot="message-caret"`、`aria-hidden`，计算样式 `border-radius` 为 50%），非减少动态效果时带动画（计算样式 `animation-name` 不为 `none`）；`prefers-reduced-motion: reduce` 下无动画（`animation-name` 为 `none`）。可观察量由 ui-walk 在真实浏览器里断言。
+- **小圆点**：消息 running 且已有可见块时，SHALL 在分段区的最后一段之后显示一个小圆点——最后一段是正文段时位于该段 `MarkdownBody` 之后（旧布局下即正文之后，与 #910 的位置相同），否则单独位于最后一段之下；分段区一个块也没有渲染时（例如重试提示先于任何内容出现、正文只有空白、或只有一条兜底确认记录），小圆点单独一行位于分段区的位置，即等待指示原本所在的位置。全条消息恰一个（`data-slot="message-caret"`、`aria-hidden`，计算样式 `border-radius` 为 50%），非减少动态效果时带动画（计算样式 `animation-name` 不为 `none`）；`prefers-reduced-motion: reduce` 下无动画（`animation-name` 为 `none`）。可观察量由 ui-walk 在真实浏览器里断言。
 
 **正文逐字展开**：运行中、非减少动态效果时，正文 SHALL 按 `@assistant-ui/react` `useSmooth` 的规则逐字展开：显示的文本始终是已收到正文的前缀，每字间隔为 min(5ms, 250ms ÷ 尚未显示的字数)，积压越多越快；分段布局下这一规则作用于每个正文段，已被后续段隔开的正文段不再增长，只有仍在增长的最后一个正文段会逐字展开。消息组件首次挂载（打开会话、切换会话）时已有的正文 SHALL 立即全部显示，只有此后到达的部分逐字展开（原地重新安装快照时组件不重新挂载，快照比当前多出的部分按同一规则展开）；展开期间转录区的贴底跟随与 `回到最新` 的判定照常（贴着底时持续贴底，用户上滚后不被拉回）；消息进入任一终态时 SHALL 立即显示全文，不拖尾；`prefers-reduced-motion: reduce` 下 SHALL 不逐字展开，收到即显示。逐字展开期间消息内 SHALL 不出现小圆点之外的运行指示（Markdown 基元的容器 `data-status` 不为 `running`）。`复制` 写入的文本与对话内搜索匹配的文本 SHALL 取已收到的全文，与当前已显示到哪里无关。
 
@@ -435,7 +450,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 ## ADDED Requirements
 
 ### Requirement: 助手消息分段
-web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视图与快照恢复的视图都只经这一个函数（「会话页源码模块划分」的 `message-segments.ts`）。输入为消息的 `content`、`thinking`、步骤（按 `ordinal` 升序，各带 `bodyOffset`）与 `thinkingSegments`（按给出次序）；输出为「旧布局」，或一个有序的块列表，每块是正文段（一段正文原文）、思考段（一段思考原文及该段的时长与是否进行中）或工具段（一串步骤）之一。所有偏移与长度都按 UTF-16 码元（JavaScript 字符串的 `length` 与 `slice`）计。
+web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视图与快照恢复的视图都只经这一个函数（「会话页源码模块划分」的 `message-segments.ts`）。输入为消息的 `content`、`thinking`、步骤（按视图里的数组次序，各带 `bodyOffset`；快照生成的视图按 `ordinal` 升序，实时归约的视图按 `step.start` 到达次序，二者对同一回合相同——`ordinal` 由 pump 按 `tool_execution_start` 的到达次序分配；视图步骤不带 `ordinal`，见「纯会话视图归约」）与 `thinkingSegments`（按给出次序）；输出为「旧布局」，或一个有序的块列表，每块是正文段（一段正文原文）、思考段（一段思考原文及该段的时长与是否进行中）或工具段（一串步骤）之一。所有偏移与长度都按 UTF-16 码元（JavaScript 字符串的 `length` 与 `slice`）计。
 
 **旧布局判定**：以下任一条成立时 SHALL 输出旧布局（不切段，消息按「消息线程」规定的旧布局呈现），不出现部分分段、部分不分段的消息：
 1. 任一步骤的 `bodyOffset` 为 `null`；
@@ -443,14 +458,14 @@ web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视�
 3. `thinkingSegments` 不自洽：第一段的 `thinkingOffset` 不为 0；某段的 `thinkingOffset` 不等于前一段的 `thinkingOffset + thinkingLength`；末段之外有段的 `thinkingLength` 为 `null`；末段的 `thinkingOffset` 加其长度（`null` 时为 0）超过 `thinking` 的长度；`stepsBefore` 不是非递减的，或大于步骤数；
 4. 按下文合并后的次序，正文偏移出现递减。
 
-**合并次序**：步骤按 `ordinal` 次序、思考段按给出次序，第 j 段排在第 k 个步骤（0 起）之前当且仅当该段的 `stepsBefore ≤ k`；由此每段思考恰排在它开始时已开始的那些步骤之后、其余步骤之前。各项的正文偏移取其 `bodyOffset`，大于 `content` 长度的按 `content` 长度计（宿主进程崩溃会丢掉尚未落库的正文尾部而留下偏移，chat-sessions「会话持久化与回合刷盘」）。
+**合并次序**：步骤按输入的数组次序、思考段按给出次序，第 j 段排在第 k 个步骤（0 起）之前当且仅当该段的 `stepsBefore ≤ k`；由此每段思考恰排在它开始时已开始的那些步骤之后、其余步骤之前。各项的正文偏移取其 `bodyOffset`，大于 `content` 长度的按 `content` 长度计（宿主进程崩溃会丢掉尚未落库的正文尾部而留下偏移，chat-sessions「会话持久化与回合刷盘」）。
 
-**切段**：自正文起点起依次处理合并后的各项：项的正文偏移大于当前游标时，先输出 `content` 在 [游标, 偏移) 的正文段并把游标移到偏移；然后输出该项——思考段的原文为 `thinking` 在 [`thinkingOffset`, `thinkingOffset + thinkingLength`) 的部分（末段 `thinkingLength` 为 `null` 时到 `thinking` 末尾）；步骤并入紧挨着的前一块，前一块是工具段时并入它，否则新起一个工具段。全部项处理完后输出余下的正文段。以下两类块 SHALL 不输出，也不分隔它两侧的工具段：只含空白字符的正文段；原文为空串的思考段（达到 32768 码点上限之后才开始的段即如此，见 thinking-fold）。每块带一个在消息内稳定的键：正文段取其起点偏移，思考段取其 `thinkingOffset`，工具段取其第一个步骤的 id；流式增长与快照重新安装不改变已有块的键。
+**切段**：自正文起点起依次处理合并后的各项：项的正文偏移大于当前游标时，先输出 `content` 在 [游标, 偏移) 的正文段并把游标移到偏移；然后输出该项——思考段的原文为 `thinking` 在 [`thinkingOffset`, `thinkingOffset + thinkingLength`) 的部分（末段 `thinkingLength` 为 `null` 时到 `thinking` 末尾）；步骤并入紧挨着的前一块，前一块是工具段时并入它，否则新起一个工具段。全部项处理完后输出余下的正文段。以下两类块 SHALL 不输出，也不分隔它两侧的工具段：只含空白字符的正文段；原文为空串的思考段（达到 32768 码点上限之后才开始的段即如此，见 thinking-fold）。每块带一个在消息内稳定、且各块互不相同的键，按块的种类加前缀：正文段为 `text:<起点偏移>`，思考段为 `thinking:<thinkingOffset>`，工具段为 `tool:<第一个步骤的 id>`（不加前缀时，先思考后正文的消息里思考段与第一个正文段的键都会是 0）；流式增长与快照重新安装不改变已有块的键。
 
 **思考段的标题数据**：思考段带该段的 `thinkingMs` 与「进行中」标记；进行中当且仅当它是末段、末段的 `thinkingLength` 为 `null`、消息 `running` 且消息的 `thinkingActive` 为 `true`。
 
 #### Scenario: 交替切段
-- **WHEN** 以 `content` 为 `先看一下。看完了。`、`thinking` 为 `想`、步骤 `read`(ordinal 0, `bodyOffset` 5) 与 `bash`(ordinal 1, `bodyOffset` 5)、`thinkingSegments` 为 `[{bodyOffset:5,thinkingOffset:0,thinkingLength:1,stepsBefore:2,thinkingMs:800}]` 调用切段函数
+- **WHEN** 以 `content` 为 `先看一下。看完了。`、`thinking` 为 `想`、步骤依次为 `read`(`bodyOffset` 5) 与 `bash`(`bodyOffset` 5)、`thinkingSegments` 为 `[{bodyOffset:5,thinkingOffset:0,thinkingLength:1,stepsBefore:2,thinkingMs:800}]` 调用切段函数
 - **THEN** 输出为正文段 `先看一下。`、工具段 [`read`,`bash`]、思考段 `想`（`thinkingMs` 800，不在进行中）、正文段 `看完了。`
 - **WHEN** 同一输入里思考段的 `stepsBefore` 改为 1
 - **THEN** 输出为正文段、工具段 [`read`]、思考段、工具段 [`bash`]、正文段
@@ -460,7 +475,7 @@ web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视�
 - **THEN** 两例都只输出一个含两个步骤的工具段，没有正文段与思考段
 
 #### Scenario: 旧布局判定
-- **WHEN** 分别以下列消息调用：一个步骤的 `bodyOffset` 为 `null`；`thinking` 为 `想` 而 `thinkingSegments` 为 `[]`；两段思考的第二段 `thinkingOffset` 与第一段的结尾不相接；第一段 `thinkingLength` 为 `null` 而后面还有一段；`stepsBefore` 为 3 而只有 2 个步骤；步骤 ordinal 1 的 `bodyOffset` 小于 ordinal 0 的
+- **WHEN** 分别以下列消息调用：一个步骤的 `bodyOffset` 为 `null`；`thinking` 为 `想` 而 `thinkingSegments` 为 `[]`；两段思考的第二段 `thinkingOffset` 与第一段的结尾不相接；第一段 `thinkingLength` 为 `null` 而后面还有一段；`stepsBefore` 为 3 而只有 2 个步骤；第二个步骤的 `bodyOffset` 小于第一个的
 - **THEN** 每一例都输出旧布局
 - **WHEN** 一条没有步骤、没有思考的消息；另一条步骤 `bodyOffset` 为 12 而 `content` 只有 8 个码元（宿主崩溃丢了尾部）
 - **THEN** 前者输出唯一的正文段；后者不判旧布局，工具段排在全部 8 个码元的正文之后
@@ -483,7 +498,7 @@ web SHALL 用一个纯函数（「会话页源码模块划分」的 `tool-summar
 | 搜索 | `grep`、`glob`、`ast_grep`、`web_search`、`search`、`find` | `搜索 N 次` |
 | 其它 | 其余任何名字 | `其它 N 步` |
 
-N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1）。摘要 SHALL 为各非零类按上表次序以 `、` 连接；段内有 `failed` 步骤时末尾接 `，N 步失败`（N 为失败步骤数）；段内有 `running` 步骤时再接 `，进行中`。`stopped` 步骤照常计入其类，不另加后缀。摘要是工具段展开/收起控件的可见文本与可访问名；失败后缀与其余文字同色（不着色）。段内有 `running` 步骤时控件另带转圈图标与流光（`prefers-reduced-motion: reduce` 下静止），与 #910 之前的运行中样式相同。
+N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1）。摘要 SHALL 为各非零类按上表次序以 `、` 连接；段内有 `failed` 步骤时末尾接 `，N 步失败`（N 为失败步骤数）；段内有 `running` 步骤时再接 `，进行中`。`stopped` 步骤照常计入其类，不另加后缀。摘要是工具段展开/收起控件的可见文本与可访问名；失败后缀与其余文字同色（不着色）：它与摘要其余文字在同一个文本元素里，该元素与后缀都不带任何颜色类。段内有 `running` 步骤时控件另带转圈图标与流光（`prefers-reduced-motion: reduce` 下静止），与 #910 之前的运行中样式相同。
 
 **折叠**：每个工具段 SHALL 在首次出现时为收起态，无论其中有没有 `failed` 步骤，也无论消息是否在运行；此后只有用户点击控件才改变它的展开态：步骤的开始与结束（含新的失败步骤）、新到的正文与思考、快照的原地重新安装都 SHALL NOT 改变它。展开一个工具段不影响同一消息或其它消息的其它工具段。展开态以「助手消息分段」的块键为身份保留：同一工具段因新步骤并入而增长时保留展开态；新回合（turn.start 清空步骤）之后出现的工具段从收起态开始。
 
@@ -497,7 +512,7 @@ N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1�
 
 #### Scenario: 失败与进行中后缀
 - **WHEN** 一个工具段为 `bash`(failed)、`bash`(done)、`read`(running)
-- **THEN** 摘要为 `执行 2 条命令、读取 1 个文件，1 步失败，进行中`，控件带转圈图标；`read` 结束为 `done` 后摘要为 `执行 2 条命令、读取 1 个文件，1 步失败`，转圈图标消失；`，1 步失败` 的计算颜色与摘要其余文字相同
+- **THEN** 摘要为 `执行 2 条命令、读取 1 个文件，1 步失败，进行中`，控件带转圈图标；`read` 结束为 `done` 后摘要为 `执行 2 条命令、读取 1 个文件，1 步失败`，转圈图标消失；`，1 步失败` 与摘要其余文字在同一个文本元素里，不单独成元素，该元素不带颜色类（`text-*` 颜色工具类）
 
 #### Scenario: 展开态只随用户点击变化
 - **WHEN** 一条 running 助手消息有两个工具段，用户展开第一个；随后第二个工具段里一个步骤以 `failed` 结束，第一个工具段又并入一个新步骤；再随后快照原地重新安装（内容不变）

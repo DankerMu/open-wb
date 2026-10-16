@@ -11,6 +11,35 @@ supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 
 - **WHEN** fake-omp `approval-parallel` 脚本在同一回合对两个 bash 调用先后发 `extension_ui_request` `r1` 与 `r2`（均未应答），用户先对 `r2` 作答 deny、再对 `r1` 作答 allow
 - **THEN** 两个 `approval.request` 的 `approvalId` 不同且都保留，二者的 `stepId` 都为 `null`（select 先于 start，配对发生在 `step.start`）；fake-omp 先收到 `extension_ui_response{id:"r2",value:"Deny"}`、后收到 `{id:"r1",value:"Approve"}`，每个 id 恰一帧；发布两个 `approval.resolved`，分别携带各自 `approvalId` 与 `deny`/`allow`；`r2` 对应步骤 `failed`、`r1` 对应步骤 `done`
 
+### Requirement: 审批作答 REST
+`POST /api/sessions/:id/approvals/:approvalId` SHALL 只接受 `application/json` 且 body 恰为 `{decision:"allow"|"deny"}`，其 content-parser 错误由归属集映射为 400 `bad_request`；其它形态（缺键/多键/其它值）400。受 cookie guard 与 owner 校验：未认证 401；会话不存在/属他人、或 `approvalId` 不属于该会话的消息 SHALL 一律 404 `not_found`；未认证 401、会话 404 与非 canonical 正十进制整数 `approvalId` 的 404 SHALL 在 body 解析前返回，`approvalId` 不属于该会话的 404 SHALL 先于任何写入与发帧；均无写入。结算 SHALL 以 `decision IS NULL` 为条件的 CAS 执行，作答与超时、停止、崩溃/有界退回、优雅关停、启动对账共用这同一 CAS：`decision` 已非 NULL（已 allow/deny/timeout，同一审批第二次作答，或该消息所属进程已退出/回合已终态而被非作答路径结算为 `deny`）SHALL 409 `approval_settled`，无写入、不向 omp 发帧；并发作答时 CAS 的后到者 SHALL 409。CAS 命中时 SHALL 依序：在同一 SQLite 事务内写入 `decision`/`decided_at=now` 与审计行 → 向 omp 发 `{type:"extension_ui_response", id:<request_id>, value: decision==="allow" ? "Approve" : "Deny"}` → 取消该 `approvalId` 的超时计时器 → 发布 `approval.resolved` → 200，body 恰为已结算的审批对象 `{id, tool, title, requestedAt, expiresAt, decision, stepId}`（与快照 `approvals` 数组元素同形；`stepId` 为该行此刻的 `step_id`，见「确认与步骤配对」，作答本身从不写它）。`deny` 后 omp 对该工具产出 `tool_execution_end{isError:true}` 时，仅该步骤 `failed`，回合按既有规则可以 `done` 收尾。session supervisor 关停开始后到达结算端口的作答 SHALL 以 `agent_unavailable`（502）拒绝，无写入、不向 omp 发帧。`core/errors` SHALL 新增 `approval_settled`(409, `该审批已处理`)，响应 no-store。
+
+#### Scenario: 允许
+- **WHEN** pending 审批收到 `{decision:"allow"}`
+- **THEN** 200 `{id,tool:"bash",title,requestedAt,expiresAt,decision:"allow",stepId}`（`stepId` 为作答时该行的 `step_id`：步骤已开始并配上时为其 id，否则为 `null`）；fake-omp 收到 `extension_ui_response{id:"r1",value:"Approve"}`；发布 `approval.resolved{decision:"allow"}`；随后 bash 步骤 `done`，回合 `done`
+
+#### Scenario: 拒绝
+- **WHEN** pending 审批收到 `{decision:"deny"}`
+- **THEN** 200 `decision:"deny"`；fake-omp 收到 `value:"Deny"` 并发 `tool_execution_end{isError:true}`；该步骤 `failed`、assistant 与会话最终 `done`（非 `failed`）
+
+#### Scenario: 已结算与重复作答
+- **WHEN** 对已 allow、已 deny、已 timeout 的审批再次作答，或对同一 pending 审批并发两次作答
+- **THEN** 后到者 409 `{error:{code:"approval_settled",message:"该审批已处理"}}`；`chat_approvals` 该行 `decision` 与首次一致；omp 只收到一帧应答
+
+#### Scenario: 作答与进程退出竞争
+- **WHEN** 审批挂起时子进程退出，其非作答结算把该审批 CAS 为 `deny`，随后（或与之并发）用户对该审批作答 allow
+- **THEN** CAS 仅一方命中：进程退出后到达的作答返回 409 `approval_settled`；该行 `decision="deny"` 不变；无任何 `extension_ui_response` 写出；审计恰一条 `decision=deny`
+
+#### Scenario: 形态、鉴权与归属
+- **WHEN** body 为 `{decision:"maybe"}`、`{}`、`{decision:"allow",x:1}` 或非 JSON
+- **THEN** 400 `bad_request`，无写入
+- **WHEN** 匿名、他人会话、不存在的 approvalId、或 approvalId 属于另一会话
+- **THEN** 401 或一致的 404，无写入、无入站帧
+
+#### Scenario: 关停后作答
+- **WHEN** 审批挂起时 session supervisor 已开始关停，随后 owner 对该审批作答 allow
+- **THEN** 502 `{error:{code:"agent_unavailable",message:"Agent 运行时不可用"}}` 且 no-store；该请求不改变该行 `decision`/`decided_at`，不新增审计行，不写出 `extension_ui_response`
+
 ### Requirement: 审批快照
 `GET /api/sessions/:id/messages` 的每条消息 SHALL 带 `approvals` 字段，类型为数组：assistant 消息为该消息全部 `chat_approvals` 行按 `id` 升序的投影 `{id, tool, title, requestedAt, expiresAt, decision, stepId}`（`decision` 为 `"allow"|"deny"|"timeout"|null`；`stepId` 为 `chat_approvals.step_id`，未配对为 `null`，见「确认与步骤配对」）；user 消息与无审批记录的 assistant 消息为 `[]`。web `session-contract.ts` 的 `hasExactlyKeys` SHALL 同步（消息键集含 `approvals`，数组元素键集恰为上述七键）；归约器 SHALL 以 `approval.request` 按 `approvalId` 为键向对应消息 `approvals` 插入一条 `decision:null`、`stepId` 取事件值的记录（同一 `approvalId` 重复到达——如回放——SHALL 不产生第二条、不覆盖其它审批），以 `approval.resolved` 只更新同一 `approvalId` 记录的 `decision`，以 `step.start` 的 `approvalId` 只设置同一 `approvalId` 记录的 `stepId`（chat-web「纯会话视图归约」），并保持按 `id` 升序。刷新后 pending 审批 SHALL 可从快照恢复并继续作答。
 
@@ -110,16 +139,16 @@ SessionSupervisor SHALL 在每个回合（一条助手消息）内维护两份�
 审批行由运行时在解析 select 帧时插入，可能早于 pump 处理在它之前到达的帧；配对 SHALL 只按上述两份状态（即 pump 次序），不按审批行的插入次序或 `id`。配对在一对同名的审批与步骤中**后到的一方**到达时发生，与二者谁先到无关（omp 不保证 select 与 `tool_execution_start` 在线上的先后，见「审批事件」）：
 
 1. **步骤开始**：持久化一条 `step.start` 时（chat-stream「分段位置的记录与下发」），SHALL 从队列中取出第一个 `tool` 等于该步骤名的项（名字不同的项留在原位），并在插入步骤行的同一事务里执行 `UPDATE chat_approvals SET step_id = <新步骤 id> WHERE message_id = <本消息> AND request_id = <该项的 request_id> AND step_id IS NULL`；更新恰一行时，该行 `id` 即发布的 `step.start` 的 `approvalId`。队列里没有同名项、或更新零行时，`approvalId` 为 `null`，该步骤记入未配对的运行中步骤。
-2. **审批 select**：pump 读到一个被「审批请求识别」认作审批的帧、且该审批的 `approval.request` 尚未发布时，若未配对的运行中步骤里有步骤名等于该审批 `tool` 的步骤，SHALL 取其中最早开始的一个，执行 `UPDATE chat_approvals SET step_id = <该步骤 id> WHERE message_id = <本消息> AND request_id = <该帧的 id> AND step_id IS NULL`，提交之后再发布该审批的 `approval.request`，其 `stepId` 为该步骤 id，并把该步骤移出未配对列表；更新零行时按没有可配的步骤处理。没有可配的步骤，或该审批的 `approval.request` 已经发布（作答先于 pump 读到 select 时，作答路径先发布它，见「审批事件」），SHALL 把 `{request_id, tool}` 追加到队尾，发布的 `approval.request` 的 `stepId` 为 `null`。
+2. **审批 select**：pump 读到一个被「审批请求识别」认作审批的帧、且此刻对该帧的 `approval.request` 发布会真正发出（该帧的审批登记仍在、其 request 尚未发布；作答、超时与终态结算发布 request 后会删除登记）时，若未配对的运行中步骤里有步骤名等于该审批 `tool` 的步骤，SHALL 取其中最早开始的一个，执行 `UPDATE chat_approvals SET step_id = <该步骤 id> WHERE message_id = <本消息> AND request_id = <该帧的 id> AND step_id IS NULL`，提交之后再发布该审批的 `approval.request`，其 `stepId` 为该步骤 id，并把该步骤移出未配对列表；更新零行时按没有可配的步骤处理。没有可配的步骤，或此刻对该帧不会再发布 `approval.request`（作答、超时或终态结算先于 pump 读到 select，结算路径已先发布它并删除登记，见「审批事件」），SHALL 把 `{request_id, tool}` 追加到队尾，发布的 `approval.request` 的 `stepId` 为 `null`。
 3. **步骤结束**：一条 `step.end` 持久化后，该步骤若仍在未配对列表里则移出；已结束的步骤不再配对。
 
 配对与该审批是否已作答无关：真 omp 的步骤开始不等作答，所以在步骤开始时配对的审批通常仍是 pending。实时视图从 `step.start` 的 `approvalId` 与 `approval.request` 的 `stepId` 两个方向得到同一个关联，与快照的 `stepId` 一致（chat-web「纯会话视图归约」）。
 
 配对 SHALL 只写 `chat_approvals.step_id` 这一列：它 SHALL NOT 改变审批的 `decision`、`decided_at`、`expires_at`，不改变计时器、向子进程写的帧、`session.approval` 审计、`approval.resolved` 的发布与次序、`pendingApproval`、停止与终态对挂起审批的结算——这些仍只由本 spec 的其余要求决定；`approval.request` 只多出 `stepId` 一个字段，发布的时机与次序不变。步骤开始时的写入与步骤插入同属一个事务，失败时不发布该 `step.start`；审批 select 时的写入失败时不发布该 `approval.request`；二者都沿既有 owned error-sink 处理（回合按既有规则结束，仍挂起的审批按「停止与终态对挂起审批的结算」以 `deny` 结算）。已配对的行此后不再改配；没有配上的行保持 `step_id` 为 NULL。审批只与同一消息的步骤配对。
 
-**已知局限**（owner 2026-10-15 B3 的启发式本身）：只凭工具名配对。同一批并行调用里同名工具有的需要审批、有的不需要时（例如一个普通 `read` 与一个读 PDF 的 `read`），两种线上次序下审批都可能配给同一批里另一个同名步骤；后果只是步骤卡上的标记落在同段的另一张同名卡上，审批记录、审计与作答不受影响（design Risks）。
+**已知局限**（owner 2026-10-15 B3 的启发式本身）：只凭工具名配对。同一批并行调用里同名工具有的需要审批、有的不需要时（例如一个普通 `read` 与一个读 PDF 的 `read`），两种线上次序下审批都可能配给同一批里另一个同名步骤；另一种情形：被拒绝的调用若没有步骤（见下文「被拒绝的调用」），它的审批留在队列里，同一回合其后开始的同名步骤会按规则 1 把它配走。两种情形的后果都只是步骤卡上的标记落在另一张同名卡上，审批记录、审计与作答不受影响（design Risks）。
 
-被拒绝的调用：真 omp v18.0.10 对被拒绝的调用是否仍发出 `tool_execution_start` / `tool_execution_end`、以及 select 与 start 的线上先后，以官方二进制实测为准（design D6，结果记入设计与 PR）。两种结果都合法：发出时，被拒绝的审批照常与该步骤配对（该步骤以失败结束），web 在步骤卡上显示 `已拒绝`；不发出时，该审批没有可配的步骤，保持未配对，web 显示兜底记录（「web 审批条」）。
+被拒绝的调用：真 omp v18.0.10 对被拒绝的调用是否仍发出 `tool_execution_start` / `tool_execution_end`、以及 select 与 start 的线上先后，以官方二进制实测为准（design D6，结果记入设计与 PR）。两种结果都合法：发出时，被拒绝的审批照常与该步骤配对（该步骤以失败结束），web 在步骤卡上显示 `已拒绝`；不发出时，该审批没有可配的步骤，留在队列里：同一回合其后没有同名步骤开始时保持未配对，web 显示兜底记录（「web 审批条」）；其后若有同名步骤开始，按规则 1 被它配走（见已知局限）。
 
 #### Scenario: 同名工具按先进先出配对
 - **WHEN** fake-omp `approval-parallel` 回合依次发出两个 bash 审批 select（`r1`、`r2`）与两个 bash 的 `tool_execution_start`，owner 先拒绝 `r2`、再允许 `r1`
@@ -132,6 +161,10 @@ SessionSupervisor SHALL 在每个回合（一条助手消息）内维护两份�
 #### Scenario: 已结束的步骤不再配对
 - **WHEN** 一个 bash 步骤开始并结束（没有配上审批）之后到达一个 bash 审批 select，随后另一个 bash 步骤开始
 - **THEN** 该 `approval.request` 的 `stepId` 为 `null`；后一个 `step.start` 的 `approvalId` 为该审批的 id
+
+#### Scenario: 作答先于 pump 读到 select
+- **WHEN** 一个 bash 步骤已开始、未配对时，审批行已插入，客户端从快照读到它并作答，作答路径先发布了它的 `approval.request`（`stepId` 为 `null`）与 `approval.resolved`；随后 pump 才读到该审批的 select 帧
+- **THEN** select 时不配对、只把它入队：该行 `step_id` 仍为 NULL，不再发布第二条 `approval.request`；同一回合其后若有 bash 步骤开始，该 `step.start` 的 `approvalId` 为这条审批的 id 且行的 `step_id` 为该步骤 id，否则回合结束后快照 `stepId` 为 `null`；两种情况下实时视图与快照的 `stepId` 一致
 
 #### Scenario: 工具名不同不配对
 - **WHEN** 队列里有一个 `bash` 审批时到达 `read` 的 `tool_execution_start`，随后到达 `bash` 的 `tool_execution_start`
