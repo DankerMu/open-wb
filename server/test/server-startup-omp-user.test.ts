@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  captureSpawnHook,
   compiledFixtureEnv,
   compileServerEntry,
   createSession,
@@ -37,7 +38,7 @@ describe("production entry forwards OMP_USER to the captured spawn", () => {
       const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-omp-forward-"));
       scratch.push(scratchRoot);
       const tracePath = join(scratchRoot, "spawn.jsonl");
-      const hookPath = join(scratchRoot, "capture-spawn.mjs");
+      const hookPath = join(scratchRoot, "capture-spawn.cjs");
       writeFileSync(hookPath, captureSpawnHook("present"));
       const bin = join(scratchRoot, "bin", "omp");
       const forwardedTmpdir = "/tmp/workbuddy compiled:forward $;";
@@ -91,7 +92,7 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
       const compiled = await compileServerEntry();
       const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-omp-user-"));
       scratch.push(scratchRoot);
-      const hookPath = join(scratchRoot, "missing-setpriv.mjs");
+      const hookPath = join(scratchRoot, "missing-setpriv.cjs");
       if (setpriv !== undefined) {
         writeFileSync(hookPath, captureSpawnHook(setpriv));
       }
@@ -131,30 +132,3 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
     90_000,
   );
 });
-
-/** Also replaces fs.accessSync for /usr/bin/setpriv only (Issue #351 launcher precondition). */
-function captureSpawnHook(setpriv: "present" | "ENOENT"): string {
-  return `import cp from 'node:child_process';
-import fs, { appendFileSync } from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
-const nativeAccess = fs.accessSync;
-fs.accessSync = function access(path, mode) {
-  if (path !== '/usr/bin/setpriv') return nativeAccess.call(this, path, mode);
-  if (${JSON.stringify(setpriv)} !== 'present') throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
-};
-const nativeSpawn = cp.spawn;
-cp.spawn = function capture(command, args, options) {
-  if (command === 'sudo' || command === process.env.OMP_BIN) {
-    appendFileSync(process.env.PROBE_TRACE, JSON.stringify({ command, args }) + '\\n');
-    return nativeSpawn(process.execPath, ['-e', 'process.exit(7)'], {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: options.stdio,
-      shell: false,
-    });
-  }
-  return nativeSpawn(command, args, options);
-};
-syncBuiltinESMExports();
-`;
-}

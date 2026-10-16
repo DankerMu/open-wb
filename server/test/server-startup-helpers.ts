@@ -483,6 +483,46 @@ syncBuiltinESMExports();
 `;
 }
 
+/**
+ * Captures the `sudo` / `OMP_BIN` spawn into `PROBE_TRACE` (the child exits 7 instead) and answers
+ * `fs.accessSync('/usr/bin/setpriv')` as `setpriv` says (Issue #351 launcher precondition).
+ */
+export function captureSpawnHook(setpriv: "present" | "ENOENT"): string {
+  return `'use strict';
+const cp = require('node:child_process');
+const fs = require('node:fs');
+const { syncBuiltinESMExports } = require('node:module');
+const nativeAccess = fs.accessSync;
+fs.accessSync = function access(path, mode) {
+  if (path !== '/usr/bin/setpriv') return nativeAccess.call(this, path, mode);
+  if (${JSON.stringify(setpriv)} !== 'present') throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+};
+const nativeSpawn = cp.spawn;
+cp.spawn = function capture(command, args, options) {
+  if (command === 'sudo' || command === process.env.OMP_BIN) {
+    fs.appendFileSync(process.env.PROBE_TRACE, JSON.stringify({ command, args }) + '\\n');
+    return nativeSpawn(process.execPath, ['-e', 'process.exit(7)'], {
+      cwd: options.cwd,
+      env: options.env,
+      stdio: options.stdio,
+      shell: false,
+    });
+  }
+  return nativeSpawn(command, args, options);
+};
+syncBuiltinESMExports();
+`;
+}
+
+/**
+ * One `--require` file from several hooks (`requireHook` takes a single path): each body runs in
+ * its own block, so their module-level `const fs` and friends do not collide.
+ */
+export function combinedHook(...hooks: string[]): string {
+  const bodies = hooks.map((hook) => `{\n${hook.replace(/^'use strict';\n/u, "")}}\n`);
+  return `'use strict';\n${bodies.join("")}`;
+}
+
 function track(child: ChildProcess): OwnedChild {
   let stdout = "";
   let stderr = "";

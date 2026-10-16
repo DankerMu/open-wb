@@ -133,7 +133,9 @@ describe("production entry managed omp state layout", () => {
       expect(lstatSync(join(legacy, "models.yml")).mtimeMs).toBe(legacyBefore.mtimeMs);
       expect(lstatSync(legacy).mode & 0o7777).toBe(0o2770);
       expect(readdirSync(legacy).toSorted()).toEqual(["models.yml", "skills"]);
-      expect(existsSync(join(root, "sandbox"))).toBe(false);
+      // Startup makes SANDBOX_ROOT at exactly 3770 with nothing below it (owner B4, 编排方默认 3770).
+      expect(lstatSync(join(root, "sandbox")).mode & 0o7777).toBe(0o3770);
+      expect(readdirSync(join(root, "sandbox"))).toEqual([]);
     } finally {
       await server.dispose();
     }

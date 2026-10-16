@@ -10,7 +10,9 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -20,7 +22,9 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { withOpenDb } from "./core-db-helpers.js";
 import {
   type CompiledServerEntry,
+  captureSpawnHook,
   childUmaskHook,
+  combinedHook,
   compiledFixtureEnv,
   compileServerEntry,
   denyChmodHook,
@@ -35,6 +39,8 @@ const PRIVATE_FILE_MODE = 0o600;
 /** 托管布局（#706）：托管配置目录与状态根都是 app 持有、组只读。 */
 const MANAGED_DIR_MODE = 0o2750;
 const EXISTING_DIR_MODE = 0o755;
+/** sandbox-core「沙箱根目录」: startup makes SANDBOX_ROOT exactly this (owner B2/B4, 编排方默认 3770). */
+const SANDBOX_ROOT_MODE = 0o3770;
 const MARKER_TITLE = "owned-state-marker";
 const scratch: string[] = [];
 
@@ -110,7 +116,8 @@ describe("production entry private state permissions", () => {
       expect(firstOpen.shm === null || firstOpen.shm === PRIVATE_FILE_MODE).toBe(true);
       expectLivePrivateFiles(dbPath);
       expect(lstatSync(join(state, "home", ".omp", "agent")).mode & 0o7777).toBe(MANAGED_DIR_MODE);
-      expect(existsSync(sandbox)).toBe(false);
+      expect(lstatSync(sandbox).mode & 0o7777).toBe(SANDBOX_ROOT_MODE);
+      expect(readdirSync(sandbox)).toEqual([]);
       expect(lstatSync(dbParent).mode & 0o7777).toBe(EXISTING_DIR_MODE);
     } finally {
       restoreUmask();
@@ -152,9 +159,10 @@ describe("production entry private state permissions", () => {
       expect(firstRestart.shm).toBe(PRIVATE_FILE_MODE);
       expectLivePrivateFiles(dbPath);
       expect(readOwnedMarker(dbPath)).toBe(MARKER_TITLE);
-      // The sandbox root keeps its mode; the state root is corrected to the managed layout's.
+      // Both existing roots are corrected: the state root to the managed layout's mode, the sandbox
+      // root from 0755 to 3770 (owner B2, 编排方默认 3770).
       expect(lstatSync(existingState).mode & 0o7777).toBe(MANAGED_DIR_MODE);
-      expect(lstatSync(existingSandbox).mode & 0o7777).toBe(EXISTING_DIR_MODE);
+      expect(lstatSync(existingSandbox).mode & 0o7777).toBe(SANDBOX_ROOT_MODE);
       expect(lstatSync(join(existingState, "home", ".omp", "agent")).mode & 0o7777).toBe(
         MANAGED_DIR_MODE,
       );
@@ -193,7 +201,7 @@ describe("production entry private state permissions", () => {
       expect(existsSync(dbParent)).toBe(false);
       expect(existsSync(join(scratchRoot, "dev.db"))).toBe(false);
       expect(existsSync(join(state, "home", ".omp", "agent", "models.yml"))).toBe(true);
-      expect(existsSync(sandbox)).toBe(false);
+      expect(lstatSync(sandbox).mode & 0o7777).toBe(SANDBOX_ROOT_MODE);
     } finally {
       await server.dispose();
     }
@@ -298,7 +306,115 @@ describe("production entry private state permissions", () => {
       await server.dispose();
     }
   }, 40_000);
+
+  // http-service-skeleton「完整装配路由与惰性根」second WHEN: a pre-created root of the process uid.
+  it.each(["2770", "755"])(
+    "corrects a pre-created %s SANDBOX_ROOT to 3770, keeping its group and the umask",
+    async (octal) => {
+      const scratchRoot = mkdtempSync(join(tmpdir(), "open-wb-sandbox-root-"));
+      scratch.push(scratchRoot);
+      const sandbox = join(scratchRoot, "sandbox");
+      mkdirSync(sandbox);
+      chmodSync(sandbox, Number.parseInt(octal, 8));
+      const before = lstatSync(sandbox);
+      const umaskLog = join(scratchRoot, "umask.txt");
+      const hookPath = join(scratchRoot, "umask-at-exit.cjs");
+      writeFileSync(hookPath, UMASK_AT_EXIT_HOOK);
+      const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
+          MODEL_ID,
+          UMASK_LOG: umaskLog,
+        }),
+        requireHook: hookPath,
+      }));
+      try {
+        await server.waitForStarted();
+        expect(lstatSync(sandbox).mode & 0o7777).toBe(SANDBOX_ROOT_MODE);
+        expect(lstatSync(sandbox).uid).toBe(before.uid);
+        expect(lstatSync(sandbox).gid).toBe(before.gid);
+        expect(readdirSync(sandbox)).toEqual([]);
+        expect(await server.stop()).toBe(0);
+        expect(readFileSync(umaskLog, "utf8")).toBe("27");
+      } finally {
+        await server.dispose();
+      }
+    },
+    40_000,
+  );
+
+  // http-service-skeleton「同 uid 模式下沙箱根的 chmod 被拒」. The hook matches literal paths and the
+  // entry chmods the realpath (macOS tmpdir: /var/folders → /private/var/folders), so the root is
+  // made first and the hook built from its realpath.
+  it("same uid: a refused chmod of the root starts anyway with one sandbox_root_unchanged line", async () => {
+    const { scratchRoot, sandbox, hookPath } = deniedSandboxRoot("open-wb-root-unchanged-");
+    writeFileSync(hookPath, denyChmodHook([realpathSync.native(sandbox)]));
+    const before = lstatSync(sandbox);
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
+      requireHook: hookPath,
+    }));
+    try {
+      await server.waitForStarted();
+      expect(await server.stop()).toBe(0);
+      expect(applicationStderr(server.stderr())).toBe('{"event":"sandbox_root_unchanged"}\n');
+      expect(lstatSync(sandbox).mode & 0o7777).toBe(EXISTING_DIR_MODE);
+      expect(lstatSync(sandbox).uid).toBe(before.uid);
+    } finally {
+      await server.dispose();
+    }
+  }, 40_000);
+
+  it("OMP_USER: the same refused chmod fails startup at sandbox_root without the root's path", async () => {
+    const { scratchRoot, sandbox, hookPath } = deniedSandboxRoot("open-wb-root-denied-");
+    // One --require file: refuse the root's chmod and fake setpriv for OMP_USER (agent-config).
+    const deny = denyChmodHook([realpathSync.native(sandbox)]);
+    writeFileSync(hookPath, combinedHook(deny, captureSpawnHook("present")));
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
+        MODEL_ID,
+        OMP_USER: "omp",
+        PATH: "/usr/bin:/bin",
+      }),
+      requireHook: hookPath,
+    }));
+    try {
+      expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
+      const output = server.stdout() + server.stderr();
+      expect(output).not.toContain(scratchRoot);
+      expect(output).not.toContain(realpathSync.native(scratchRoot));
+      expect(server.stdout()).toBe("");
+      expect(applicationStderr(server.stderr())).toBe(
+        '{"event":"server_start_failed","reason":"sandbox_root"}\n',
+      );
+      expect(lstatSync(sandbox).mode & 0o7777).toBe(EXISTING_DIR_MODE);
+      await expectRefused("127.0.0.1", port);
+    } finally {
+      await server.dispose();
+    }
+  }, 40_000);
 });
+
+/** The child sets umask 027 at preload and writes the umask it exits with to `UMASK_LOG`. */
+const UMASK_AT_EXIT_HOOK = `'use strict';
+process.umask(0o027);
+process.on('exit', () => {
+  require('node:fs').writeFileSync(process.env.UMASK_LOG, process.umask().toString(8));
+});
+`;
+
+/** A pre-created 0755 `<scratch>/sandbox` and where its hook goes. */
+function deniedSandboxRoot(prefix: string): {
+  scratchRoot: string;
+  sandbox: string;
+  hookPath: string;
+} {
+  const scratchRoot = mkdtempSync(join(tmpdir(), prefix));
+  scratch.push(scratchRoot);
+  const sandbox = join(scratchRoot, "sandbox");
+  mkdirSync(sandbox);
+  chmodSync(sandbox, EXISTING_DIR_MODE);
+  return { scratchRoot, sandbox, hookPath: join(scratchRoot, "deny-root-chmod.cjs") };
+}
 
 function readModeObservations(path: string): Array<{
   path: string;

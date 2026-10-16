@@ -6,6 +6,7 @@ import fs, {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   type Stats,
   symlinkSync,
@@ -15,7 +16,12 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ensureOwnedDir, ensureOwnedFile, ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import {
+  ensureOwnedDir,
+  ensureOwnedFile,
+  ensureSandboxRoot,
+  ensureSharedDir,
+} from "../src/core/sandbox/dirs.js";
 
 const tmpDirs: string[] = [];
 const SHARED_MODE = 0o2770;
@@ -480,5 +486,134 @@ describe("core/sandbox ensureOwnedFile", () => {
     expect(error.message).toContain(foreign);
     expect(lstatSync(foreign).mode).toBe(before.mode);
     expect(readFileSync(foreign).equals(bytes)).toBe(true);
+  });
+});
+
+// sandbox-core「沙箱根目录」: made at startup and corrected to exactly 3770 (owner B2/B4); when the
+// correction fails, `strict` (OMP_USER) throws and lenient answers `unchanged`, correcting nothing (B3).
+describe("core/sandbox ensureSandboxRoot", () => {
+  const ROOT_MODE = 0o3770;
+  const ok = (path: string) => ({ root: realpathSync.native(path), outcome: "ok" });
+
+  function rootAt(mode: number): string {
+    const root = join(createParent(), "sandbox");
+    mkdirSync(root);
+    chmodSync(root, mode);
+    return root;
+  }
+
+  /** strict: throws, the error text carrying no environment value; lenient: `unchanged`. */
+  function expectNotCorrected(root: string, strict: boolean): void {
+    if (!strict) {
+      expect(ensureSandboxRoot(root, { strict })).toEqual({ ...ok(root), outcome: "unchanged" });
+      return;
+    }
+    vi.stubEnv("WORKBUDDY_CANARY_SECRET", "sandbox-root-canary");
+    try {
+      expect(thrownBy(() => ensureSandboxRoot(root, { strict })).message).not.toContain("canary");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  }
+
+  // Also sandbox-core「共享目录权限位」「已建出的沙箱根不被惰性路径改动」.
+  it("cold-creates a missing root at 3770, parent as mkdir made it; ensureSharedDir keeps it", () => {
+    const parent = createParent();
+    const configured = join(parent, "var", "sandbox");
+    const umaskBefore = process.umask();
+    expect(ensureSandboxRoot(configured, { strict: true })).toEqual(ok(configured));
+    expect(modeOf(configured)).toBe(ROOT_MODE);
+    expect(lstatSync(configured).uid).toBe(process.geteuid?.());
+    expect(lstatSync(configured).gid).toBe(lstatSync(join(parent, "var")).gid);
+    expect(modeOf(join(parent, "var")) & 0o777).toBe(0o777 & ~umaskBefore);
+    expect(readdirSync(configured)).toEqual([]);
+    expect(process.umask()).toBe(umaskBefore);
+    ensureSharedDir(join(configured, "u1", "ws"));
+    expect(modeOf(join(configured, "u1"))).toBe(SHARED_MODE);
+    expect(modeOf(join(configured, "u1", "ws"))).toBe(SHARED_MODE);
+    expect(modeOf(configured)).toBe(ROOT_MODE);
+  });
+
+  it.each(["2770", "755"])("corrects %s to 3770 once; group and contents kept", (octal) => {
+    const root = rootAt(Number.parseInt(octal, 8));
+    mkdirSync(join(root, "u1"));
+    chmodSync(join(root, "u1"), 0o755);
+    const before = lstatSync(root);
+    const below = lstatSync(join(root, "u1"));
+    const umaskBefore = process.umask();
+    const chownSpy = vi.spyOn(fs, "chownSync");
+    syncBuiltinESMExports();
+    expect(ensureSandboxRoot(root, { strict: true })).toEqual(ok(root));
+    expect(modeOf(root)).toBe(ROOT_MODE);
+    expect(lstatSync(root).uid).toBe(before.uid);
+    expect(lstatSync(root).gid).toBe(before.gid);
+    expect(readdirSync(root)).toEqual(["u1"]);
+    expectUnchangedMetadata(join(root, "u1"), below);
+    expect(chownSpy).not.toHaveBeenCalled();
+    expect(process.umask()).toBe(umaskBefore);
+    // Already 3770: no chmod at all.
+    const chmodSpy = vi.spyOn(fs, "chmodSync");
+    syncBuiltinESMExports();
+    expect(ensureSandboxRoot(root, { strict: true })).toEqual(ok(root));
+    expect(chmodSpy).not.toHaveBeenCalled();
+    expect(modeOf(root)).toBe(ROOT_MODE);
+  });
+
+  it("corrects the real directory behind a symlinked root and leaves the link unchanged", () => {
+    const target = rootAt(0o755);
+    const link = `${target}-link`;
+    symlinkSync(target, link);
+    const linkBefore = lstatSync(link);
+    expect(ensureSandboxRoot(link, { strict: true })).toEqual(ok(target));
+    expect(modeOf(target)).toBe(ROOT_MODE);
+    expectUnchangedSymlink(link, linkBefore);
+  });
+
+  it.each([true, false])("throws (strict: %s) on a regular file and leaves it alone", (strict) => {
+    const file = join(createParent(), "sandbox");
+    writeFileSync(file, "not-a-directory");
+    chmodSync(file, 0o644);
+    expect(thrownBy(() => ensureSandboxRoot(file, { strict })).message).toContain(file);
+    expect(modeOf(file)).toBe(0o644);
+    expect(readFileSync(file, "utf8")).toBe("not-a-directory");
+  });
+
+  // ensureOwnedDir's foreign-uid construction: the owner check fails before any chmod.
+  it.skipIf(process.geteuid?.() === 0)("is not corrected when another uid owns it", () => {
+    const foreign = "/usr";
+    const before = lstatSync(foreign);
+    expect(before.uid).toBe(0);
+    const chmodSpy = vi.spyOn(fs, "chmodSync");
+    syncBuiltinESMExports();
+    expectNotCorrected(foreign, true);
+    expectNotCorrected(foreign, false);
+    expect(chmodSpy).not.toHaveBeenCalled();
+    expectUnchangedMetadata(foreign, before);
+  });
+
+  it.each([true, false])("is not corrected (strict: %s) when chmod is refused", (strict) => {
+    const root = rootAt(0o755);
+    const before = lstatSync(root);
+    const chmodSpy = vi.spyOn(fs, "chmodSync").mockImplementation(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+    syncBuiltinESMExports();
+    expectNotCorrected(root, strict);
+    expect(chmodSpy).toHaveBeenCalledTimes(1);
+    expectUnchangedMetadata(root, before);
+  });
+
+  // The kernel drops setgid (app uid outside the root's group) and the re-check fails after the
+  // chmod landed: undoing the landed bits would be a correction too (B3), so they stay.
+  it.each([true, false])("keeps a landed 0o1770 (strict: %s): no rollback", (strict) => {
+    const root = rootAt(0o755);
+    const nativeChmod = fs.chmodSync;
+    const chmodSpy = vi
+      .spyOn(fs, "chmodSync")
+      .mockImplementation((path, mode) => nativeChmod(path, Number(mode) & ~0o2000));
+    syncBuiltinESMExports();
+    expectNotCorrected(root, strict);
+    expect(modeOf(root)).toBe(0o1770);
+    expect(chmodSpy).toHaveBeenCalledTimes(1);
   });
 });

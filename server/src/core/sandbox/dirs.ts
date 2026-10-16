@@ -5,11 +5,28 @@
  * （SANDBOX_ROOT 一侧）。`ensureOwnedDir`：单个目录，每次校正到精确 mode 并校验归属
  * （OMP_STATE_DIR 托管布局）。`ensureOwnedFile`：同一语义的单个普通文件，内容不管。
  * 三者都不 chown、不改进程 umask；组归属由部署 setgid 继承。
+ *
+ * `ensureSandboxRoot`：`SANDBOX_ROOT` 自身（change sandbox-boundary-closure，owner B2/B3/B4）。启动的
+ * `sandbox_root` 阶段建出并经 `ensureOwnedDir` 校正为精确 `0o3770`。粘滞位的用意：omp uid 在根下
+ * 只能新建自己的条目，不能改名或删除应用 uid 建出的 `.trash` 与账号根——这是 POSIX 粘滞目录的语义，
+ * 本仓库的用例只钉住 mode 位，没有在 uid 分离的 Linux 上实测改名被拒（读代码推出）。根之下的分量
+ * 仍由 `ensureSharedDir` 惰性建出。
  */
 
-import { chmodSync, closeSync, constants, lstatSync, mkdirSync, openSync, statSync } from "node:fs";
+import {
+  chmodSync,
+  closeSync,
+  constants,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 
 const SHARED_DIR_MODE = 0o2770;
+/** setgid + sticky: the `<state>/home` precedent (omp-runtime「OMP_STATE_DIR 托管布局」). */
+const SANDBOX_ROOT_MODE = 0o3770;
 
 export function ensureSharedDir(absPath: string): void {
   let start = 1;
@@ -30,6 +47,33 @@ export function ensureSharedDir(absPath: string): void {
     }
     chmodSync(current, SHARED_DIR_MODE);
   }
+}
+
+/**
+ * 沙箱根（sandbox-core「沙箱根目录」）：缺失时递归建出它与缺失的父级（父级权限位不改），取内核
+ * realpath（根可以是运维放置的、指向目录的符号链接；配置值照旧交给 store 与 spawn），不是目录即抛，
+ * 再以 `ensureOwnedDir(root, 0o3770)` 校正属主与精确 mode。校正失败（属别的 uid、chmod 被拒、复查
+ * 发现 setgid 被内核丢掉）：`strict`（`OMP_USER` 已配置）原样抛出；否则返回 `unchanged`、不再
+ * chmod——已落下的权限位也不回滚（B3：同 uid 模式不纠正，回滚也是纠正）。不碰根之下任何条目。
+ */
+export function ensureSandboxRoot(
+  configuredPath: string,
+  options: { strict: boolean },
+): { root: string; outcome: "ok" | "unchanged" } {
+  mkdirSync(configuredPath, { recursive: true });
+  const root = realpathSync.native(configuredPath);
+  if (!lstatSync(root).isDirectory()) {
+    throw new Error(`sandbox root ${root}: is not a directory`);
+  }
+  try {
+    ensureOwnedDir(root, SANDBOX_ROOT_MODE);
+  } catch (error) {
+    if (options.strict) {
+      throw error;
+    }
+    return { root, outcome: "unchanged" };
+  }
+  return { root, outcome: "ok" };
 }
 
 /**
