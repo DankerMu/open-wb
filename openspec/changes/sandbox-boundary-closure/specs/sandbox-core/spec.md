@@ -5,7 +5,7 @@
 1. `configuredPath` 缺失时以递归 `mkdir` 建出它及缺失的父级，父级的权限位不改（与 omp-runtime「OMP_STATE_DIR 托管布局」对 `<state>` 的做法相同）；
 2. 取 `configuredPath` 的内核 realpath 作为 `root`——`SANDBOX_ROOT` 自身可以是运维放置的、指向目录的符号链接，建立、校正与属主检查都作用于真实目录；此后 store、spawn 与 argv 仍使用配置值；
 3. `root` 不是目录（普通文件或其它类型占位）时 SHALL 抛出，`strict` 与否都一样；
-4. 对 `root` 以「托管目录权限位」的 `ensureOwnedDir(root, 0o3770)` 校正：必须属本进程 uid，`mode & 0o7777` 精确为 `0o3770`（setgid + 粘滞位 + 属主/组 rwx，其他人无权限），chmod 之后复查（内核静默丢掉 setgid 同样算失败）；`strict` 为真时它的任何失败 SHALL 原样抛出；为假时 SHALL 捕获并返回 `outcome: "unchanged"`，根的 mode 与属主原样留下；
+4. 对 `root` 以「托管目录权限位」的 `ensureOwnedDir(root, 0o3770)` 校正：必须属本进程 uid，`mode & 0o7777` 精确为 `0o3770`（setgid + 粘滞位 + 属主/组 rwx，其他人无权限），chmod 之后复查（内核静默丢掉 setgid 同样算失败）；`strict` 为真时它的任何失败 SHALL 原样抛出；为假时 SHALL 捕获并返回 `outcome: "unchanged"`，不再做第二次 chmod：属主不符或 chmod 被拒时根的 mode 与属主不变；内核静默丢掉 setgid 导致复查失败时，已落下的权限位不回滚（B3：不纠正）；
 5. 成功时 `outcome` 为 `"ok"`。它 SHALL NOT chown、SHALL NOT 改进程 umask、SHALL NOT 触碰 `root` 之下的任何条目。
 
 `strict` 由调用方按「`OMP_USER` 已配置」给出（http-service-skeleton「服务启动与装配」的 `sandbox_root` 阶段）。粘滞位使 omp uid 不能改名、删除或替换 `root` 之下由应用 uid 建出的条目（`.trash`、账号根），只能新建自己的；`.trash` 各级与账号根的既有逐级校验（file-operations）不因此放松。
@@ -21,6 +21,8 @@
 #### Scenario: 属主不符或 chmod 被拒
 - **WHEN** `root` 属别的 uid（测试以 `sandbox-dirs` 既有造法构造），或对 `root` 的 `chmodSync` 被替换为抛 `EPERM`
 - **THEN** `strict: true` 时抛出，错误文本不含任何环境变量的值；`strict: false` 时返回 `outcome: "unchanged"`，`root` 的 mode 与属主与调用前相同，没有第二次 chmod
+- **WHEN** 对 `root` 的 `chmodSync` 被替换为只落下 `0o1770`（模拟内核静默丢掉 setgid），`strict: false`（仅单元层：编译入口没有非特权造法）
+- **THEN** 返回 `outcome: "unchanged"`，`root` 的 mode 为 `0o1770`（已落下的权限位不回滚），没有第二次 chmod
 
 ## MODIFIED Requirements
 
