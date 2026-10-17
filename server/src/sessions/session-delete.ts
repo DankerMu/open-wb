@@ -221,7 +221,9 @@ async function discardSnapshots(
  * resolves elsewhere and is reported, and nothing behind it is touched. A missing sandbox or
  * account root means the directory is gone too. The trash is the one under the state dir's
  * realpath, as for artifact directories. The root's sticky bit (3770, #1286; read from the code)
- * keeps the omp uid from swapping the account root before `removeTemporaryWorkspaceDir` acts.
+ * keeps the omp uid, before `removeTemporaryWorkspaceDir` acts, from swapping an account root the
+ * app created; in same-uid mode it guards nothing. Residual: `ensureSharedDir` does not check the
+ * owner, so for an account root the omp uid created first the #976 swap stays (read from the code).
  */
 async function removeTemporaryWorkspace(
   workspace: { id: string; ownerId: string },
