@@ -393,5 +393,5 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 
 1. 找残骸：沙箱根与 `OMP_STATE_DIR` 在同一文件系统时在 `<OMP_STATE_DIR>/trash/<32 位十六进制>/` 下（挂载点随目录一起移了过去）；不在同一文件系统时原地留在 `<SANDBOX_ROOT>/<账号 id>/tmp-<32 位十六进制>/`，这时该目录在数据库里已没有对应的行。`grep -F '<残骸目录的绝对路径>' /proc/self/mountinfo` 列出其下仍在的挂载点。
 2. 先卸载：对每个挂载点 `fusermount3 -u <挂载点>`（不是 FUSE 的挂载用对应的卸载命令，如 `umount`），确认 `/proc/self/mountinfo` 里已没有它。
-3. 再以**应用用户**的身份递归删除残骸目录（`<OMP_STATE_DIR>/trash` 是 `0700`；残骸的顶层 `trash/<随机名>` 或 `tmp-<id>` 由应用用户建出，其下 omp 用户写出的条目按双方 umask `007` 组可写，omp 一侧由 sudoers 强制——读代码推出）。卸载之后递归删除一次即成功（测试主机实测，design D7 探针 (4)；探针容器以 root 运行，未区分执行删除的 uid）。不需要停服务。
+3. 再以**应用用户**的身份递归删除残骸目录（`<OMP_STATE_DIR>/trash` 是 `0700`；残骸的顶层 `trash/<随机名>` 或 `tmp-<id>` 由应用用户建出，omp 用户按默认 mode 写出的条目在双方 umask `007` 下组可写，omp 一侧由 sudoers 强制——读代码推出）。umask 只收窄、不放宽：omp 用户以显式 mode 建出的条目（如 `mkdtemp` 的 `0700`；同类现象 ADR-0010 `:267` 实测）应用用户删不掉，遇 `EACCES` 改以 root 删除（读代码推出）。卸载之后递归删除一次即成功（测试主机实测，design D7 探针 (4)；探针容器以 root 运行，未区分执行删除的 uid）。不需要停服务。
 4. 不要在卸载之前删：挂载还在时递归删除可能进入挂载、删掉挂载源里的数据（`rm -rf` 不带 `--one-file-system` 时会进入，读 `rm(1)` 手册推出；Node 的 `rmSync` 测试主机实测会进入）。
