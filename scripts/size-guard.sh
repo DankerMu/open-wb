@@ -10,15 +10,16 @@ if [ "$#" -gt 0 ]; then
 else
   while IFS= read -r -d '' f; do
     files+=("$f")
-  done < <(find server/src server/test web/src web/test kbservice/src kbservice/tests \
-    -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.py' \) -print0 2>/dev/null || true)
+  done < <(find server/src server/test web/src web/test kbservice/src kbservice/tests converter \
+    -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.py' -o -name '*.mjs' \) -print0 \
+    2>/dev/null || true)
 fi
 [ "${#files[@]}" -eq 0 ] && exit 0
 fail=0
 for f in "${files[@]}"; do
   [ -f "$f" ] || continue
   case "${f#./}" in web/src/components/ui/*|web/src/components/assistant-ui/*) continue ;; esac
-  case "$f" in *.ts|*.tsx|*.py) ;; *) continue ;; esac
+  case "$f" in *.ts|*.tsx|*.py|*.mjs) ;; *) continue ;; esac
   lines=$(wc -l < "$f")
   if [ "$lines" -gt "$MAX" ]; then
     echo "BLOCK 文件超过 ${MAX} 行（${lines}）：拆分它，而不是调阈值: $f"; fail=1

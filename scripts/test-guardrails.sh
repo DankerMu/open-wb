@@ -43,6 +43,10 @@ seq 800 | sed 's/^/# line /' > "$tmp/ok.py"
 seq 801 | sed 's/^/# line /' > "$tmp/over_a.py"
 seq 802 | sed 's/^/# line /' > "$tmp/over_b.py"
 expect_accept "行数守卫放行 800 行文件"        bash scripts/size-guard.sh "$tmp/ok.py"
+seq 800 | sed 's/^/\/\/ line /' > "$tmp/ok.mjs"
+seq 801 | sed 's/^/\/\/ line /' > "$tmp/over.mjs"
+expect_accept "行数守卫放行 800 行 .mjs"        bash scripts/size-guard.sh "$tmp/ok.mjs"
+expect_reject "行数守卫拒绝 801 行 .mjs"        bash scripts/size-guard.sh "$tmp/over.mjs"
 out=$(bash scripts/size-guard.sh "$tmp/over_a.py" "$tmp/over_b.py" 2>&1)
 rc=$?
 desc="行数守卫拒绝超限文件并报告每文件 BLOCK 计数与路径"

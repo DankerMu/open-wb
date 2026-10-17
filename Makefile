@@ -15,11 +15,11 @@ hooks:
 	git config core.hooksPath .githooks
 
 lint: ## Biome(TS) + Ruff(Py)，格式与复杂度≤15 皆在此
-	npx biome check server web scripts vitest.shared.mjs
+	npx biome check server web scripts converter vitest.shared.mjs
 	cd kbservice && uv run ruff check . && uv run ruff format --check .
 
 fmt:
-	npx biome check --write server web scripts vitest.shared.mjs
+	npx biome check --write server web scripts converter vitest.shared.mjs
 	cd kbservice && uv run ruff check --fix . && uv run ruff format .
 
 typecheck:

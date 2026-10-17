@@ -5,6 +5,7 @@
       "server/**",
       "web/**",
       "scripts/**",
+      "converter/**",
       "vitest.shared.mjs",
       "!**/node_modules",
       "!**/coverage",

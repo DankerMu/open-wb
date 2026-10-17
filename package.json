@@ -7,8 +7,8 @@
     "web"
   ],
   "scripts": {
-    "lint": "biome check server web scripts",
-    "fmt": "biome check --write server web scripts",
+    "lint": "biome check server web scripts converter",
+    "fmt": "biome check --write server web scripts converter",
     "typecheck": "npm run typecheck --workspaces",
     "test": "npm test --workspaces",
     "deadcode": "knip",
