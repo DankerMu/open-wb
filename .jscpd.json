@@ -1,6 +1,6 @@
 {
   "threshold": 3,
-  "pattern": "{server,web,kbservice}/**/*.{ts,tsx,py}",
+  "pattern": "{server,web,kbservice,converter}/**/*.{ts,tsx,py,mjs}",
   "ignore": [
     "**/node_modules/**",
     "**/coverage/**",

@@ -2,7 +2,11 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "workspaces": {
     ".": {
-      "entry": ["scripts/inspect-ci-workflow.js"]
+      "entry": [
+        "scripts/inspect-ci-workflow.js",
+        "converter/sidecar.mjs",
+        "converter/healthcheck.mjs"
+      ]
     },
     "server": {
       "entry": ["src/server.ts", "src/service-info.ts", "test/**/*.test.ts"],

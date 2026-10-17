@@ -1,0 +1,29 @@
+# 办公文档转换 sidecar（office-preview「转换 sidecar 实现与镜像」；design D6、D7）。
+# 裸机部署：WORKBUDDY_UID=$(id -u <app 用户>) WORKBUDDY_GID=$(id -g <app 用户>) \
+#   OFFICE_SPOOL_DIR=<与 app 相同的路径> docker compose -f converter/compose.yml up -d --build
+# 容器化的 app：把本文件 include 进 app 的 compose，app 服务加
+#   depends_on: { converter: { condition: service_healthy } }，挂同一个 bind mount、同一个 user。
+# 三个 `:?` 变量缺席时 compose 拒绝启动；spool 由部署方预先建好、属 app 用户、0700。
+services:
+  converter:
+    build: .
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp
+    init: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    user: "${WORKBUDDY_UID:?set to the app user's uid}:${WORKBUDDY_GID:?set to the app user's gid}"
+    # bind mount，不用命名卷：命名卷的根属 root，与 app 用户对不上（design D6、D7）。
+    volumes:
+      - "${OFFICE_SPOOL_DIR:?set to the app's OFFICE_SPOOL_DIR}:/spool"
+    environment:
+      - CONVERTER_CONCURRENCY=${OFFICE_CONVERT_CONCURRENCY:-2}
+    healthcheck:
+      test: ["CMD", "node", "/app/healthcheck.mjs"]
+      interval: 5s
+      start_period: 10s
+    restart: unless-stopped
