@@ -374,3 +374,24 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 - **回合失败的分类与日志**（#909）：回合以 `error` 事件结束时，sessions 把它归为十个原因之一（`server/src/sessions/upstream-classify.ts`，规则与句子见 upstream-failure「回合失败分类」，术语见 `CONTEXT.md`「回合失败原因」）。SSE 的 `error` 事件是五键 `{messageId, message, reason, status, detail}`：`message` 是该原因的固定句子（不带状态码），`status` 是从 omp 文本里取到的 HTTP 状态码或 `null`，`detail` 是净化后的上游原文（见下一条）。界面显示句子，`status` 非空时后接 `（HTTP <s>）`（如 `鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）`），原文非空时可点「查看原文」按纯文本展开。原因不是 `agent_failed` 的每个失败回合写一行 application stderr：`{"event":"upstream_failed","sessionId":"<id>","reason":"<reason>","status":<整数或 null>}`，恰这四个键，不含上游原文、路径或密钥；写失败不影响回合。重试后成功的回合、被停止的回合与 omp 进程异常退出（`agent_failed`）不写。
 - **失败的落库**（#909，迁移 043）：`chat_messages` 增三列，都可为空、没有缺省值，存量行读作没有失败：`error_reason`（`TEXT`，十个原因名之一）、`error_status`（`INTEGER`，HTTP 状态码或 NULL）、`error_detail`（`TEXT`，净化后的原文，可为空串）。只有以 `error` 结束的助手行写这三列，写入发生在 `error` 事件发布之前（刷新页面后看到的与实时收到的是同一个对象）；`done` / `stopped` 的回合、用户行与崩溃后对账成 `failed` 的行都不写。分叉拷贝这三列，重新生成删掉旧助手行时一并删除。消息快照的每条消息带 `error`：失败的助手消息为 `{reason, message, status, detail}`（`message` 由 `reason` 在读取时查表得出，不落库），其余为 `null`；`error_reason` 不是十个原因名之一的行同样读作 `null`。
 - **原文净化**：写库之前，`detail` 里的上游密钥、上游 base URL 原串及其 userinfo、密码、路径与查询串、`OMP_STATE_DIR` 与 `SANDBOX_ROOT`（各按四种写法：配置原值、规范化后的原值——去掉 `//` 与 `/./`、不解析符号链接——、再去掉末尾 `/` 的写法（根目录除外）与 realpath，macOS 上 realpath 连大小写也取盘上的，APFS 上实测）都替换为 `[已移除]`，`Bearer …` 与 `sk-…` 同样替换，omp 的 `raw-http-request=` 行删去。两个 realpath 在每次净化时现取（目录不在时只按前三种写法替换），所以首次启动后才建出的目录同样带上 realpath。这两次 realpath 是同步调用，挂载点挂起时会阻塞服务进程——每次 spawn 重建状态目录布局时的同步文件调用（`server/src/sessions/omp/process.ts:87`）早已有同样的暴露（读代码推出）。
+
+### 9.6 沙箱根与带挂载的临时空间残骸（#1286、#1237，change `sandbox-boundary-closure`）
+
+决定、证据与实测结果表的权威是 [ADR-0010](../adr/0010-dedicated-omp-uid.md) 的「2026-10-16 补充」，这里只写部署要知道的。
+
+**`SANDBOX_ROOT` 由启动建出并保持 `3770`**（属应用 uid，setgid + 粘滞位）：启动的 `sandbox_root` 阶段（托管布局之后、预览监听器绑定之前）在根缺失时建出它，既有的根每次启动都校正为精确 `3770`；不 chown、不碰根之下的条目（账号根与空间根仍是 `2770`）。根可以是指向目录的符号链接，校正作用于目标。粘滞位使 omp 用户在根下只能新建自己的条目，不能改名或删除应用建出的 `.trash` 与账号根（读代码推出）。
+
+| 标准错误里的一行 | 何时出现 | 补救 |
+|---|---|---|
+| `{"event":"server_start_failed","reason":"sandbox_root"}`（退出码 1，不带路径） | `OMP_USER` 模式：根（realpath）不属应用 uid、chmod 被拒，或复查时 setgid 没落下（应用 uid 不在共享组里；网络文件系统）。两种模式都会：根的位置被普通文件占着，或 `SANDBOX_ROOT` 是悬空符号链接（`mkdir` 得 `ENOENT`） | `chown <app-uid> <root>`（不动属组），或升级前预建 `install -d -m 3770 -o <app-uid> -g <group> <root>`；应用 uid 须在共享组里；沙箱根放在本地文件系统；挪走占位的文件、修正链接。然后重启 |
+| `{"event":"sandbox_root_unchanged"}`（启动继续） | 同 uid 模式（未配置 `OMP_USER`）下属主不符或 chmod 被拒：根保持原样，不纠正、不回滚 | 不影响运行（该模式下 omp 与应用同 uid）；要根成为 `3770` 就按上一行补救后重启 |
+
+- 升级只对 `OMP_USER` 部署有前提：由 root 建出、`chgrp` 给共享组的既有根，升级后启动失败于 `sandbox_root`，按上表补救。同 uid 部署无动作（开发机上 `var/sandbox` 由 `2770` / `0755` 变为 `3770`）。回滚到旧版本时根上的粘滞位无害，可留着。
+- `SANDBOX_ROOT` 缺失的父目录由启动以普通递归 `mkdir` 建出（`0o777 & ~umask`，不带 setgid）；`OMP_USER` 模式下 umask 严时 omp 用户可能进不去，事先建好父目录（读代码推出）。
+
+**带挂载的临时空间残骸**（#1237）：临时空间随最后一个会话删除时，目录里若挂着活的挂载，递归删除在挂载点以 `EBUSY` 停住、不进入挂载，挂载内的文件不被改动；挂载点之外的同级条目照常删掉（测试主机实测的是 bindfs 挂载；rclone、sshfs 与 bind mount 按同一规则，未测）。删除会话的请求仍成功（204），标准错误多一行不带内容的 `{"event":"session_fault"}`（读代码推出）。宿主不卸载、不重试、不清扫，残骸不被任何数据库行引用。手工清理：
+
+1. 找残骸：沙箱根与 `OMP_STATE_DIR` 在同一文件系统时在 `<OMP_STATE_DIR>/trash/<32 位十六进制>/` 下（挂载点随目录一起移了过去）；不在同一文件系统时原地留在 `<SANDBOX_ROOT>/<账号 id>/tmp-<32 位十六进制>/`，这时该目录在数据库里已没有对应的行。`grep -F '<残骸目录的绝对路径>' /proc/self/mountinfo` 列出其下仍在的挂载点。
+2. 先卸载：对每个挂载点 `fusermount3 -u <挂载点>`（不是 FUSE 的挂载用对应的卸载命令，如 `umount`），确认 `/proc/self/mountinfo` 里已没有它。
+3. 再以**应用用户**的身份递归删除残骸目录（`<OMP_STATE_DIR>/trash` 是 `0700`）。卸载之后一次删除即可（测试主机实测）。不需要停服务。
+4. 不要在卸载之前删：挂载还在时递归删除可能进入挂载、删掉挂载源里的数据（`rm -rf` 不带 `--one-file-system` 时会进入，读 `rm(1)` 手册推出；Node 的 `rmSync` 测试主机实测会进入）。

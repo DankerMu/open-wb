@@ -35,11 +35,11 @@
  *   不占监听器的关停预算；
  * - 转换器在第一次 `listen` 之前构造（构造不碰文件系统、不起进程），但 `/o/` 要到 `clearWork`
  *   落定之后才启动转换（此前答 503）：那条清空会删掉在途转换的作业目录；
- * - 已知残余（#1286 未闭合，owner D-23）：自本入口起，回收目录的 `sweep`、预览监听器的 `/w/` 与
- *   `/o/`、启动时对 `work/` 的 `clearWork` 有了生产调用方，`sweep` 每次启动与每 6 小时无需任何用户
- *   动作就走一遍。它们检查之后按路径操作的替换窗口原样存在，各自的陈述与证据等级见
- *   `workspaces/trash.ts`、`preview/app.ts`、`preview/office-cache.ts` 的头注释；本入口只是调用方，
- *   没有为它们加任何检查；
+ * - #1286（change sandbox-boundary-closure 有界闭合，owner B1）：本入口给 `sweep`（每次启动与每 6 小时）、
+ *   `/w/`、`/o/`、`clearWork` 提供生产调用方。`sweep` 的 `.trash` 换入随根的粘滞位关闭（根为 `3770` 时；
+ *   读代码推出），四条读路由的末段换入已闭合（钩子辅助复现）；`clearWork` 的 `work/` 与中间分量残余仍在。
+ *   陈述与证据等级见 `workspaces/trash.ts`、`preview/app.ts`、`preview/office-cache.ts` 的头注释；本入口
+ *   只是调用方，没有为它们加任何检查；
  * - 启动成功/失败发布都走 Promise 管理的单行 writer：同步 throw / write callback /
  *   stream error 三路只 settle 一次，error 事件被消费后才移除监听，绝不抛原始 stack。
  */

@@ -22,8 +22,8 @@
  * one (derived from the code, not tested). What the listings in flight hold together therefore
  * has no bound of its own.
  *
- * Known residual (design D22 / D-23, #1286 stays open; nothing here closes it): this is one more
- * route that resolves, lstats and then opens by path.
+ * #1286 (closed within bounds by change sandbox-boundary-closure; the intermediate-component
+ * residual stays, owner B1): this route resolves, lstats, then opens with `openRegularFile`.
  * - The last component replaced after the lstat — by a symlink, a named pipe, a directory, or by
  *   nothing — answers 404 with nothing read and the descriptor closed. Reproduced through this
  *   handler only with the window held open by a hook around `openSync` that does the swap itself

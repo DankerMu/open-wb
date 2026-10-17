@@ -15,9 +15,16 @@
  * symlink), owned by this process's euid, with no group or other permission bit. A level that fails
  * is skipped as it is: not read, not removed, not chmod'ed. The sweep touches nothing but expired
  * batch directories, creates nothing, and never rejects: whatever fails is left for the next round.
- * Residual, not closed here (issue #1286 stays open; owner ruling D-23 registers it as a known
- * residual of this change, left to the deployment model of ADR-0010: one dedicated omp uid and
- * trusted accounts). In the sweep: the checks and the `rm` go by path. Node gives its callers no
+ * Residual (issue #1286, closed within bounds by change sandbox-boundary-closure, owner B1; what
+ * is left stays with the deployment model of ADR-0010: one dedicated omp uid, trusted accounts).
+ * `SANDBOX_ROOT` is 3770 since that change (its `sandbox_root` startup stage): the omp uid can add
+ * entries there but cannot rename or remove `.trash` or an account root the app made, so neither
+ * can it swap `.trash` for a symlink after its check, nor rename an account root to `.trash` (read
+ * from the sticky bit's POSIX semantics, not measured on a uid-separated deployment; `OMP_USER`
+ * mode does not start unless the root is 3770, and in same-uid mode no uid separates the two).
+ * A `.trash` it makes before the app does is its own symlink, file or directory: `ensureOwnedDir`
+ * refuses it and the deletion fails (refusal measured on ext4, #1318; the 500 read from the code).
+ * In the sweep: the checks and the `rm` go by path. Node gives its callers no
  * `*at` calls, and the one recursion found to use them is not the one used here: `rmSync` walks by
  * descriptor below its top level (Node 24.13.1 on Linux, strace: `openat` with
  * `O_NOFOLLOW|O_DIRECTORY`, then `unlinkat`), while this `rm` is the `fs/promises` one, in that
@@ -27,42 +34,20 @@
  * and the recursion inside `rm` goes by path too, so nothing here is atomic. The
  * per-level check stops a level from being replaced by a directory the omp uid can write: every
  * level has to be a 0700 directory of this uid, and the app creates none on the workspace side.
- * It does not tie the walk to the real `.trash`. `SANDBOX_ROOT` is group-writable without the
- * sticky bit, so after `.trash` has passed its check the omp uid can put a symlink in its place,
- * and every later path goes through that link. The three levels below then pass wherever the link
- * points at a tree of this uid's 0700 directories — the snapshot store has that shape, with its
- * last level named after a top-level workspace directory, a name the omp uid chooses. Winning that
- * one window lets the sweep remove a directory outside `.trash`, so the batch-name pattern is not a
- * security boundary either. Separately, the content of a batch is not checked: a process that still
+ * The content of a batch is not checked: a process that still
  * holds a handle (an open descriptor, a working directory) on a directory that was moved into a
  * batch can swap links inside it under the recursion.
- * The same residual in `moveToTrash`, also not closed and with no re-check (a `realpath` before the
- * rename would not close it). Source side: the caller's sandbox check and its `lstat` are done
- * when `absPath` arrives, and the `rename` goes by path. The workspace root and every directory
+ * The same residual in `moveToTrash`, source side, also not closed and with no re-check (a
+ * `realpath` before the rename would not close it): the caller's sandbox check and its `lstat` are
+ * done when `absPath` arrives, and the `rename` goes by path. The workspace root and every directory
  * below it are writable by the omp uid, so an intermediate component of `absPath` can be replaced
  * by a symlink after the check; the rename follows it and takes the entry of that name out of the
  * link's target — another account's workspace, anything on the same file system this uid may
  * move — into the batch, where the sweep later removes it, while the audit row names the path
  * inside the workspace. A replaced last component is only moved as the link it is. Target side:
- * each of the four levels is checked once and not tied to the real `.trash` either. With `.trash`
- * replaced by a symlink after its check, the three levels below are made and chmod'ed under the
- * link's target: the batch then lies outside `.trash`, where no sweep finds it, and with the link
- * pointing at `SANDBOX_ROOT` itself the owner level is the account root `<SANDBOX_ROOT>/<ownerId>`,
- * which `ensureOwnedDir` corrects from 2770 to 0700 — the omp uid is then locked out of all of
- * that account's workspaces until an administrator restores the mode. The `rmdir` after a failed
- * rename goes by path as well.
- * One case on the target side needs no race (measured on a uid-separated Linux deployment, ext4
- * and overlayfs, Node 24.13.1, driving the compiled `moveToTrash` and `sweep`, not the route, with
- * no `.trash` present). `ensureOwnedDir` refuses a symlink, a regular file and a directory of
- * another uid (measured at `.trash`, the last one at the owner level as well; on ext4 only),
- * but an existing directory of this uid is taken whatever its mode and whoever moved it there. An
- * account root is such a directory, and the omp uid can rename it to `<SANDBOX_ROOT>/.trash`,
- * before `.trash` exists or after moving the real one aside. The next deletion by any other
- * account corrects that root to 0700, makes the three lower levels inside it, renames the entry
- * there (measured); that the DELETE route answers 204 and writes its audit row for it is read
- * from the code, not run. The omp uid is locked out of that account as above; the batches of a
- * `.trash` moved aside are out of the sweep's reach, and the new batch is in it only while the
- * root keeps that name.
+ * each of the four levels is checked once; with `.trash` held by the sticky root and the levels
+ * below it inside 0700 directories, the omp uid has nothing there to swap (read from the code).
+ * The `rmdir` after a failed rename goes by path as well.
  */
 import { randomBytes } from "node:crypto";
 import { renameSync, rmdirSync } from "node:fs";

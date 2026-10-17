@@ -12,7 +12,7 @@
  *
  * What it does not show: it pins the order of the checks, one request at a time, through `inject`
  * and the source handlers. No row opens a window between a check and the open or the rename that
- * follows it (design D22 / D-23, #1286 stays open; nothing here closes or widens it).
+ * follows it (#1286 closed within bounds, its intermediate-component residual kept: owner B1).
  */
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

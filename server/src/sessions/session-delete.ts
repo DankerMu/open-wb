@@ -220,8 +220,8 @@ async function discardSnapshots(
  * `SANDBOX_ROOT` is writable for the omp uid (ADR-0010), so a symlink standing at the account root
  * resolves elsewhere and is reported, and nothing behind it is touched. A missing sandbox or
  * account root means the directory is gone too. The trash is the one under the state dir's
- * realpath, as for artifact directories. Residual: the account root can still be swapped between
- * this check and the `lstat` / `rename` in `removeTemporaryWorkspaceDir` (Node has no `*at` calls).
+ * realpath, as for artifact directories. The root's sticky bit (3770, #1286; read from the code)
+ * keeps the omp uid from swapping the account root before `removeTemporaryWorkspaceDir` acts.
  */
 async function removeTemporaryWorkspace(
   workspace: { id: string; ownerId: string },

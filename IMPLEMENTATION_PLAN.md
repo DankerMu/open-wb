@@ -353,7 +353,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
     - 本 change 留下的后续：
       1. 旧样式层整体移除（当时的冻结区 `web/src/ui` 与 `web/src/styles/legacy.css`；design「Not yet specified」）：已完成，change `s1f-legacy-layer-removal`（Epic #1393，子 issue #1397–#1402）。
       2. 包体上限：仍不设。ADR-0013 已定「S1f 的全部 change 完成后再定」，本 change 只量并记录（数字随 #1120 写入 ADR-0013），尚无对应 issue。
-      3. 开着的跟进 issue：#1286（检查之后按路径操作的替换窗口，owner 裁决登记为已知残余）、#1337、#1340、#1350、#1372、#1380。
+      3. 开着的跟进 issue：#1286（检查之后按路径操作的替换窗口，owner 裁决登记为已知残余；2026-10-16 由 change `sandbox-boundary-closure` 有界闭合，中间目录分量的残余书面保留，见 ADR-0010「2026-10-16 补充」）、#1337、#1340、#1350、#1372、#1380。
 - 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。
 - 必读增量：ADR-0013（含试验结论与未覆盖项）；assistant-ui 文档 ExternalStoreRuntime / Thread / ThreadList / Attachment。
 - Verify：`make check` + `make ui-walk`（视口矩阵无横向溢出、无 console error）+ 功能验收清单签收；真实端点走一轮含审批的回合；
