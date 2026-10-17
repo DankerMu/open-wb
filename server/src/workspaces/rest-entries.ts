@@ -5,8 +5,8 @@
  * The same order as every scoped workspace route: principal, owned root (404 for another
  * owner's and for an unknown id alike), then the query or the body, then the sandbox.
  *
- * Known residual of the move route (design D22 / D-23, #1286 stays open; nothing here closes
- * it): every check is by path and the `rename` resolves both paths again, re-checking nothing.
+ * Known residual of the move route (#1286 is closed within bounds; this residual stays, owner B1):
+ * every check is by path and the `rename` resolves both paths again, re-checking nothing.
  * Evidence, from a uid-separated Linux deployment (ext4 and overlayfs, Node 24.13.1). Measured
  * with bare `renameSync`: a same-named file and an empty directory replaced through a symlinked
  * component, the hard-link no-op, `EXDEV` across filesystems, a case-only rename succeeding.

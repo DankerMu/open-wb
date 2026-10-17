@@ -53,7 +53,7 @@ export function ensureSharedDir(absPath: string): void {
  * 沙箱根（sandbox-core「沙箱根目录」）：递归建出缺失的根与父级（父级权限位不改），取内核 realpath
  * （根可以是指向目录的符号链接），不是目录即抛，再 `ensureOwnedDir(root, 0o3770)`。校正失败：`strict`
  * （`OMP_USER`）抛出；否则返回 `unchanged`、不再 chmod、已落下的位不回滚（B3）。不碰根之下的条目。
- * 抛出的文本固定、不含路径（规格：不含环境值），原始错误（含 errno `code`）留在 `cause`。
+ * 抛出的文本固定、不含路径；mkdir / realpath / lstat 的 errno 在 `cause`，strict 下 `ensureOwnedDir` 的在 `cause.cause`。
  */
 export function ensureSandboxRoot(
   configuredPath: string,

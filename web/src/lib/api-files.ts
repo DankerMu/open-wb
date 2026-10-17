@@ -531,7 +531,7 @@ export function createFileMethods(
       // No body, no Content-Type; 204 is the only success and has no body to parse. The path is
       // data: encoded whole, not trimmed or normalised, the empty string included — the server's
       // sandbox decides. This method has no resolve-then-act step of its own (read from this
-      // code); the known residual of the route it calls (#1286) is neither closed nor widened.
+      // code); the route's remaining #1286 residual (intermediate components) is not widened.
       await noContentRequest(
         `${workspaceEndpoint(workspaceId, "entries")}?path=${encodeURIComponent(path)}`,
         { ...requestOptions(options?.signal), method: "DELETE" },
@@ -542,9 +542,9 @@ export function createFileMethods(
     async listArchive(workspaceId, path, options) {
       // The path is data: encoded whole, not trimmed or normalised, the empty string included —
       // the server's sandbox decides. This method has no resolve-then-open step of its own (read
-      // from this code, not measured); the known read window of the route it calls (#1286) is
-      // neither closed nor widened, so a 200 is not proof the listing came from a file inside
-      // the workspace.
+      // from this code). The route opens the last component without following it (hook-assisted
+      // server tests); an intermediate directory swapped for a symlink is still followed (#1286
+      // residual, read from code), so a 200 is no proof the listing came from the workspace.
       const response = await request(
         `${workspaceEndpoint(workspaceId, "archive")}?path=${encodeURIComponent(path)}`,
         getRequestOptions(options?.signal),

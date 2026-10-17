@@ -33,7 +33,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   S0b 的环境白名单原样传入且不继承 app-server 其它环境；stdio 直通，RPC 帧层不变。`OMP_USER` 未设置时
   直接 spawn（macOS 开发机、单测）。否决项：`systemd-run --uid`（引入 systemd 与 polkit 依赖，容器内不稳）、
   自研 setuid 包装器（多一个需审计的特权二进制）。
-- **权限模型**：两用户同属组 `workbuddy`；`SANDBOX_ROOT`、`OMP_STATE_DIR` 及其下目录 `2770`（setgid 继承组），
+- **权限模型**：两用户同属组 `workbuddy`；`SANDBOX_ROOT`、`OMP_STATE_DIR` 及其下目录 `2770`（setgid 继承组；2026-10-16 订正：`SANDBOX_ROOT` 自身由启动建为 `3770`、多一个粘滞位，其下各级仍 `2770`，见文末「2026-10-16 补充」），
   双方 umask `007`（omp 一侧由 sudoers 强制，见文末 2026-10-02 补充）；app-server 自有状态（SQLite、配置、环境）放在沙箱与 omp 状态目录之外且 `0700`/`0600`。
   `core/sandbox` 的目录创建路径负责施加位。否决项：POSIX ACL（依赖 acl 工具与 FUSE 支持，S1b 挂载不保证）、
   app-server 经 sudo 代操作文件（每次列举/预览起进程）。
@@ -101,7 +101,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   spawn 环境里 agent 目录取 omp 的默认值 `$HOME/.omp/agent`（#802 起显式设置 `PI_CODING_AGENT_DIR` 为这同一路径，见文末 dotenv 一条），新增 `XDG_DATA_HOME|XDG_STATE_HOME|XDG_CACHE_HOME=<state>/xdg/*`；
   `--preserve-env` 列表同步。omp 只在 agent 目录为默认值且 `$XDG_*_HOME/omp` 已存在时才重定向运行期状态，所以三个 `omp` 目录由宿主预建。
   宿主在启动与每次 spawn 时把上表校正到精确值，并拒绝不属于 app uid 的目录、符号链接与非目录条目（启动失败 / 该次 spawn 502）。
-  `SANDBOX_ROOT` 一侧仍是 `2770`，不变。sudoers 规则不变。
+  `SANDBOX_ROOT` 一侧仍是 `2770`，不变（2026-10-16 订正：根自身由启动建为 `3770`，其下各级仍 `2770`，见文末「2026-10-16 补充」）。sudoers 规则不变。
 - **HOME 为什么可写**（owner 决定）：HOME 只读时 `npm install`（`~/.npm`）、`git config --global` 等工具链直接失败。
 - **部署前提（宿主不检查）**：`<state>` 的父目录不得对 omp uid 可写（否则 `<state>` 可被整体改名替换）；
   `skills/` 由运维以 app uid（或 root）安装，目录与文件不对 omp uid 可写；app uid 必须属于共享组（否则 setgid 位设不上，启动失败）。
@@ -121,7 +121,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   与 #708 的同类残余一并登记；要关闭需要每会话独立 uid 或一次性的运行期状态目录，不在 S1 范围。
 - **会话删除（#706 2b）**：同名产物目录先被移入 app 私有的 `<state>/trash`（`0700`）再递归删除，omp uid 不能再按路径替换其下的目录。
   删除前就把工作目录或目录 fd 留在该目录树内的 omp uid 进程仍可经相对路径替换子目录（Node 无 `*at` 系调用）——受信局域网下接受。
-  递归删除部分失败的残余留在 `<state>/trash`，宿主不自动清理，运维可在停服务后清空。
+  递归删除部分失败的残余留在 `<state>/trash`，宿主不自动清理，运维可在停服务后清空（2026-10-16 补：残余里有活挂载时，管理员先卸载、再以应用 uid 删除，见文末「2026-10-16 补充」）。
 - **dotenv（#802）**：omp 启动时加载 `$HOME/.env`。`<state>/home/.env` 由宿主预建并持有（`0640`，内容不管，运维可在其中为 omp 放环境变量），
   粘滞位使 omp uid 不能替换它。升级时若该文件已被 omp uid 建出，启动因归属不符失败，移走后重启。
   spawn 环境显式设置 `PI_CODING_AGENT_DIR`、`PI_CONFIG_FILES`、`PI_CONFIG_DIR=.omp`、`OMP_PROFILE=default`、`PI_PROFILE=default`，
@@ -181,8 +181,8 @@ change `s1f-session-list-temp-space`（design D8、D9、D10）落地后的登记
   - 任何失败只经服务错误通道报告，不改变删除会话的响应。
   - 残余：
     - 账号根在 realpath 校验与随后的 `lstat` / `rename` 之间被替换。
-    - trash 路径：移动之前就把工作目录或目录 fd 留在该树内的 omp uid 进程仍可经相对路径替换子目录（与 #706「会话删除」同一条）；删不掉的部分留在 `<state>/trash`，宿主不自动清理。
-    - `EXDEV` 路径：递归删除期间整棵树仍可被 omp uid 按路径到达，子目录被换成符号链接时删除会被引向别处；删不掉的部分留在账号根下。两者同一文件系统的部署不走这条路径。
+    - trash 路径：移动之前就把工作目录或目录 fd 留在该树内的 omp uid 进程仍可经相对路径替换子目录（与 #706「会话删除」同一条）；删不掉的部分留在 `<state>/trash`，宿主不自动清理（2026-10-16 补：其中有活挂载时，管理员先卸载、再以应用 uid 手工删除，见文末「2026-10-16 补充」）。
+    - `EXDEV` 路径：递归删除期间整棵树仍可被 omp uid 按路径到达，子目录被换成符号链接时删除会被引向别处；删不掉的部分留在账号根下（2026-10-16 补：有活挂载时同上，先卸载再删）。两者同一文件系统的部署不走这条路径。
 - **快照遍历（`take`）读到工作空间之外**：遍历在等上一回合的进程退出之前执行，同空间的其它会话也可能在运行。
   - 缓解：每个条目先 `lstat` 分类；普通文件以 `O_RDONLY | O_NOFOLLOW | O_NONBLOCK` 打开，清单里的身份与元数据取自该句柄的 `fstat`，内容从句柄读出。分类之后被换成符号链接的文件打不开（快照 `failed`），被换成 FIFO 或设备的不挂住遍历、按 `special` 跳过。
   - 残余一：路径的**中间分量**在其父目录被列举之后被换成指向外部的符号链接，`lstat` 与打开都会穿过它。
@@ -285,3 +285,70 @@ change `s1f-files-page`（design D17、D18；owner D-21、D-24、D-25、D-26）�
   - **超时终止一次之后残留出现了**：把超时设成 3 秒请求一份不被打断时要 84.5 秒的 docx，请求在 3.03 秒得到 504；`sudo` 消失，`oosplash` 随之被杀；
     进程名 `soffice.bin`、属 omp 用户、被 1 号进程收养的残留又运行了约 75 秒把整份转完才自行退出，在被放弃的作业目录里留下与不被打断时字节数相同的 PDF（4,682,817 字节），该 PDF 没有进缓存。
     只做了一次，与上面实测 1.3 的 5 次是同一个现象；终止的做法不因此改变（owner D-21、D-25）。
+
+## 2026-10-16 补充：#1286 有界闭合与 #1237 挂载规则
+
+change `sandbox-boundary-closure`（owner 裁定 B1–B9，2026-10-13 / 2026-10-16）落地后的登记：S0 = PR #1496（测试夹具收窄）、S1 = PR #1497（沙箱根）、S2 = PR #1498（读路由按描述符读）、S3a = PR #1499（FUSE 对照用例与测试主机实测）。上文标着「2026-10-16 订正」「2026-10-16 补」的就地订正（权限模型、#706 的布局、两处残骸句）都指向本节；其余历史记录不动。证据等级逐条标注：实测 / 钩子辅助复现 / 读代码推出。
+
+- **沙箱根在启动时建出并校正（B2、B3、B4）**：启动多一个阶段 `sandbox_root`，在托管布局（`state_layout`）之后、预览监听器绑定之前同步执行 `ensureSandboxRoot`（`server/src/core/sandbox/dirs.ts`）：缺失时递归建出根与缺失的父级，取 realpath（根可以是指向目录的符号链接，作用于目标），不是目录即失败，再以 `ensureOwnedDir` 把根校正为精确 `3770`（属应用 uid、setgid + 粘滞位，chmod 后复查）；不 chown、不改 umask、不碰根之下的条目。`config`、`db`、`app`、`listen`、`state_layout` 任一失败时仍不建根。根之下的账号根与空间根仍由惰性路径建为 `2770`。证据：单元与编译入口用例（PR #1497；实测，本机 Node 24.13.1）。
+  - `OMP_USER` 模式：根不属应用 uid、chmod 被拒或复查不通过（例如应用 uid 不在共享组里、setgid 位被内核丢掉）时启动失败，标准错误恰一行 `{"event":"server_start_failed","reason":"sandbox_root"}`，不带路径与原始错误。两种模式共有的失败：根的位置被普通文件占着（递归 `mkdir` 得 `EEXIST`），或 `SANDBOX_ROOT` 是悬空符号链接（递归 `mkdir` 得 `ENOENT`）——两者都在 realpath 之前整体失败（实测，Node 24.13.1，macOS）。
+  - 同 uid 模式（未配置 `OMP_USER`）：属主不符或 chmod 被拒时不失败、不纠正、不回滚，标准错误恰一行 `{"event":"sandbox_root_unchanged"}`（只有 `event` 一个键），启动继续，根可能没有粘滞位。该模式下 omp 与应用本就同 uid，粘滞位在两者之间不挡任何东西。
+  - **排障与补救**（升级前提，只影响 `OMP_USER` 部署）：`SANDBOX_ROOT`（realpath）必须属应用 uid，应用 uid 必须在共享组里。由 root 建出、`chgrp` 给共享组的既有根，升级后启动失败于 `sandbox_root`。补救：`chown <app-uid> <root>`（不动属组）；或升级前预建 `install -d -m 3770 -o <app-uid> -g <group> <root>`；两者都要求应用 uid 在 `<group>` 里。同 uid 部署无动作（开发机上 `var/sandbox` 由 `2770` / `0755` 变为 `3770`，实测）。沙箱根须在本地文件系统：NFS / SMB 上 chmod 可能被拒或粘滞位被静默丢掉，`OMP_USER` 模式因复查失败而启动失败，同 uid 模式记一行 `sandbox_root_unchanged` 后继续（读代码推出）。缺失的父目录由递归 `mkdir` 以 `0o777 & ~umask` 建出、不带 setgid，umask 严时 omp uid 可能无法穿越——部署方预建父目录（读代码推出）。回滚到旧版本时根上的粘滞位无害，可留着。
+  - CI `uid-isolation` 预置 `2770` 的根，在 `make smoke` 起编译服务时被校正为 `3770`；chmod 失败会让该 job 变红，但没有任何一步断言启动后根的 mode——失败可见、取值不断言（design D10，读代码推出）。
+- **粘滞位之后（#1286 ①）**：omp uid 在根下只能新建自己的条目，不能改名、删除或替换应用 uid 建出的 `.trash` 与账号根（POSIX 粘滞目录的语义，读代码推出；仓库用例只钉 mode 位，没有在 uid 分离的 Linux 上实测改名被拒）。所以：ADR-0014 #1286 表的 ①（把另一账号的根改名成 `.trash`）不再成立；`sweep` 与 `moveToTrash` 目标一侧「`.trash` 在校验之后被换成符号链接」的窗口关闭；上文 #976 补充里「账号根在 realpath 校验与随后的 `lstat` / `rename` 之间被替换」对应用 uid 建出的账号根不再成立（同为读代码推出）。同 uid 模式下 omp 与应用同 uid，粘滞位不挡任何东西。残余：omp uid 抢先建出的账号根仍属它自己——账号 id 可猜（种子数据 `u1` / `u2`），它可以先在 `3770` 的根下建出 `<root>/<另一账号 id>`；`ensureSharedDir` 遇到已存在的分量只查是不是目录、不查属主，应用照样复用；作为属主它仍能在 realpath 校验之后把这个账号根改名，#976 的替换残余对这样的账号根仍在（读代码推出）。omp uid 抢先建出的 `.trash`（它自己的符号链接、文件或目录）照旧被 `ensureOwnedDir` 拒绝、该次删除失败（拒绝为实测，#1318，仅 ext4）。`.trash` 各级与账号根的逐级校验不因粘滞位放松。
+- **读路由的末段换入已闭合，中间分量残余保留（B1、B5）**：`GET …/file`、`GET …/download`、`/w/`、`/o/` 的转出 PDF 在 `lstat` 之后经同一个 `openRegularFile`（`server/src/workspaces/regular-file.ts`）以 `O_RDONLY | O_NOFOLLOW | O_NONBLOCK` 打开、对描述符 `fstat` 判普通文件并取大小，此后只从该描述符读。`lstat` 之后末段被换成符号链接、命名管道、目录或套接字，或条目已消失：`file` / `download` 404、`/w/` 404 纯文本、`/o/` 转出 PDF 502，描述符已关闭、零字节读出、`download` 不写 `file.download`（钩子辅助复现：包住打开的钩子自己换入，PR #1498；不是自然竞态）。
+  - 书面残余（design D4「书面残余」，owner B1）：`resolve` / `lstat` 之后、`open` 之前，路径的**中间目录分量**被换成符号链接时 `open` 仍跟随它（`O_NOFOLLOW` 只管末段），读到的是空间外同名普通文件；要关它得按目录描述符逐级 `openat`，Node 不提供。利用前提仍在本 ADR 的部署模型之外：以 omp uid 运行代码、卡准 `lstat` 与 `open` 之间的窗口、链接目标是应用 uid 可读的同名文件。读代码推出，未测、未防。移动路由与 `moveToTrash` 源侧的中间分量残余同样保留（ADR-0014 的 #1286 表）。
+  - 对外语义变化：打开之后路径被删除或替换，不影响本次响应——响应从已打开的 inode 发出，`Content-Length`、区间与 `download` 审计的 `detail.size` 都是打开时 `fstat` 的值（钩子辅助复现）。用户可见的只有一处：`download` 在审计行写出之后文件被删，以前是净化 500，现在照常完整下载；`file` 的 200 / 206 与 `/w/` 的 206 同理。`download` 先打开、后写审计：被换入的目标没有审计行。416、HEAD、415、413 各多一次打开与关闭；服务 uid 打不开（`EACCES` 等）的文件，以前不经打开即可答出的 415 / 413 / 416 / HEAD，现在答净化 500（读代码推出）。
+  - 不在本 change：`/o/` 的转换输入仍由转换进程按路径打开，文档引用的资源由它去取（#1350）。
+- **#1237 挂载规则（B6、B7）**：temporary-workspaces「临时空间目录的删除」规定递归删除不跨越挂载点，由 `server/test/linux/temp-dir-remove-fuse.test.ts` 用真实 FUSE 挂载钉住，并在测试主机的一次性容器里实测通过（下表，「绿」分支）。
+  - 判据：挂载点以 Linux 对它 `rmdir` 返回 `EBUSY`、且出现在 `/proc/self/mountinfo` 里为准，不按 `dev` 比较——FUSE 挂载带自己的 `st_dev`，同一文件系统内的普通 bind mount 则与宿主同 `st_dev` 却同样 `EBUSY`（快照的「挂载目录」按 `dev` 判，见上文 #1190 补充，两者边界不同）。
+  - 行为：递归删除在挂载点以 `EBUSY` 失败，挂载内的文件不被修改或删除（实测，下表）；挂载点之外的同级普通条目仍被并发删除、不恢复（实测，design D7 探针）。残骸连同挂载留在 `<state>/trash/<随机名>/mnt`（同设备 `rename` 成功，挂载点随目录移动）或原地 `tmp-<id>/mnt`（`EXDEV` 路径）；`DELETE` 仍 204，服务错误通道恰报告一次。宿主不检测挂载、不卸载、不重试、不清扫。
+  - **残骸处置**：管理员先 `fusermount3 -u <挂载点>`（其它挂载用对应的卸载命令），再手工删除残骸目录：卸载之后递归删除一次成功、目录消失（实测，design D7 探针 (4)；探针容器以 root 运行，没有区分执行删除的 uid）；先以应用 uid 删除——残骸的顶层（`trash/<随机名>` 或 `tmp-<id>`）由应用 uid 建出，omp uid 按默认 mode 写出的条目在双方 umask `007`（omp 一侧由 sudoers 强制，见 2026-10-02 补充）下组可写，应用 uid 在共享组里；umask 只收窄、不放宽，omp uid 以显式 mode 建出的条目（如 `mkdtemp` 的 `0700`；同类现象上文 `:267` 实测）应用 uid 删不掉，遇 `EACCES` 改以 root 删除（读代码推出）。残骸不被任何数据库行引用，删除不影响服务。
+  - **纪律**：用户持有的目录树只经 `fs/promises` 的 `rm`（或回调式 `fs.rm`）删除；`fs.rmSync({recursive: true})` 不得用于可能含挂载点的用户目录树——Node 24.13.1 上它是另一套实现（C++ `binding.rmSync`），测试主机实测它穿过 FUSE 挂载点把源数据删掉、再抛 `code === ""`、`errno === -4094` 的错误（不是 `EBUSY`，按 `code` 捕不到）。生产里 `rmSync` 只用于应用持有的转换 `work/`（`server/src/preview/office.ts`、`server/src/preview/office-cache.ts`），不在 `SANDBOX_ROOT` 下。
+  - 用例默认跳过：只在 Linux 且 `WORKBUDDY_FUSE_TEST=1` 时运行（另需 `bindfs`、`fusermount3`、`/dev/fuse` 与 `WORKBUDDY_FUSE_ALT_FS_DIR` 指向另一文件系统上的可写目录，缺一即失败而不是跳过）；不进任何 CI job（owner B7）。换 Node 版本须在测试主机重跑。
+  - 没有钉住的（读代码推出）：「不重试」——把 `rm` 改成带 `maxRetries` 时两例仍绿；「挂载内文件不被读取」只由「不被修改或删除」间接钉住（`rm` 对挂载点本身做一次 `lstat`）；只测了 bindfs，普通 bind mount、rclone、sshfs 未测。
+
+**测试主机实测结果（S3a 任务 3.5 / 3.6，2026-10-16）**——以下自 PR #1499 正文「3.5 / 3.6 结果表」逐字转录（省去该节开头只与合并流程有关的提示）；表中 `:行号` 指该 PR 合入时的 `server/test/linux/temp-dir-remove-fuse.test.ts`。
+
+环境（实测）：
+
+| 项 | 值 |
+|---|---|
+| 容器形态 | 测试主机上的一次性容器：`node:24.13.1-bookworm` 基础镜像，`docker run --rm -i --network host --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined --tmpfs /altfs`，容器内 `apt-get install bindfs fuse3 git`、`git clone -b feat/issue-1493-fuse-control`（公开仓库，`d4e2f168`，不挂宿主目录）、`npm ci`、`npm run build --workspace server`；用完即删，宿主无容器、无文件残留（`docker ps -a` 为零）。宿主 `docker0` 网桥缺失故用 `--network host`（owner 事项） |
+| Node 版本（`node -v`） | v24.13.1 |
+| 内核版本（`uname -r`） | 6.8.0-117-generic |
+| 文件系统：账号根所在（`tmpdir()`） | overlayfs（`/tmp` 与 `/` 同 `st_dev` 50） |
+| 文件系统：`/altfs`（`WORKBUDDY_FUSE_ALT_FS_DIR`） | tmpfs（`st_dev` 103，与账号根不同） |
+| bindfs / fusermount3 版本 | bindfs 1.14.7-1、fuse3 3.14.0-4（Debian bookworm 包）；挂载在 mountinfo 里 fstype 为 `fuse` |
+| 默认（未 opt-in）运行 | `Test Files 1 skipped (1)`、`Tests 2 skipped (2)`，exit 0 |
+| opt-in 但未装 `bindfs`（另一容器）：失败而非 skip | `Test Files 1 failed (1)`、exit 1；`Error: WORKBUDDY_FUSE_TEST=1 but the FUSE prerequisites are missing: bindfs is not on PATH; fusermount3 is not on PATH`（`requirePrerequisites` `:140`，自 `beforeAll` `:73` 抛出）。vitest 把两个用例显示为 `2 skipped`，判据是「文件 FAIL + 非零退出码」，不是用例状态（评审 P3-2 实测确认） |
+
+逐次结果：
+
+| 运行 | 用例 | `report` errno | 挂载是否仍在（mountinfo 路径） | 源目录校验和 前 / 后 | 残骸清单（trash 下 / 原地） | 结果 |
+|---|---|---|---|---|---|---|
+| 1 | trash 路径 | `EBUSY` ×1（断言 `toEqual(["EBUSY"])` 通过） | 仍在（mountinfo 第 5 字段含挂载点路径，断言通过） | 相等（断言 `source directory bytes` 通过） | `trash/<随机名>/mnt`（断言恰为该路径，通过） | 绿 |
+| 1 | EXDEV 原地路径 | `EBUSY` ×1（断言 `toEqual(["EBUSY"])` 通过） | 仍在（mountinfo 第 5 字段含挂载点路径，断言通过） | 相等（断言 `source directory bytes` 通过） | `tmp-<id>/mnt`（断言恰为该路径，通过） | 绿 |
+| 2 | trash 路径 | `EBUSY` ×1（断言 `toEqual(["EBUSY"])` 通过） | 仍在（mountinfo 第 5 字段含挂载点路径，断言通过） | 相等（断言 `source directory bytes` 通过） | `trash/<随机名>/mnt`（断言恰为该路径，通过） | 绿 |
+| 2 | EXDEV 原地路径 | `EBUSY` ×1（断言 `toEqual(["EBUSY"])` 通过） | 仍在（mountinfo 第 5 字段含挂载点路径，断言通过） | 相等（断言 `source directory bytes` 通过） | `tmp-<id>/mnt`（断言恰为该路径，通过） | 绿 |
+| 3 | trash 路径 | `EBUSY` ×1（断言 `toEqual(["EBUSY"])` 通过） | 仍在（mountinfo 第 5 字段含挂载点路径，断言通过） | 相等（断言 `source directory bytes` 通过） | `trash/<随机名>/mnt`（断言恰为该路径，通过） | 绿 |
+| 3 | EXDEV 原地路径 | `EBUSY` ×1（断言 `toEqual(["EBUSY"])` 通过） | 仍在（mountinfo 第 5 字段含挂载点路径，断言通过） | 相等（断言 `source directory bytes` 通过） | `tmp-<id>/mnt`（断言恰为该路径，通过） | 绿 |
+| — | 三次是否一致 | 一致 | 一致 | 一致 | 一致 | 3 × `Tests 2 passed (2)`，exit 0；每次 ≈ 30ms |
+
+变异：
+
+| 变异 | 结果（红 / 绿、红在哪条断言、源文件是否被删、200 轮中含 `notes.md` 的红次数） |
+|---|---|
+| ① `EBUSY` 断言改为零次 | 红：两例都红在 `:217` `AssertionError: expected [ 'EBUSY' ] to deeply equal []`（`sed` 只改一行，跑完还原，`git diff --quiet` 为零） |
+| ② 手写递归删除进入挂载 | 红：两例都红在 `:89` / `:111` `source directory bytes: expected 'e3b0c442…' to be 'e2085c5f…'`——后值是空目录的校验和，**源文件被删**（经挂载 `unlink` 到了 bindfs 源）；此断言先于 EBUSY 断言触发。产品代码临时改为 `readdir` 递归 + `unlink` + `rmdir`（+16/−3），跑完还原 |
+| ③ B9：去掉 `rmSync(notes.md)`，200 轮 | 200 轮 `session-delete-temp-workspace.test.ts` 全绿：red=0、含 `notes.md` 的红 0 次（overlayfs，容器）；对照组（S0 行在）20 轮 red=0。自然竞态在该文件系统上 200 轮内不可观察；S0 的收窄仍以钩子辅助复现为据（PR #1496） |
+
+定案（绿 / 红，依据）：**绿**——三次两例全绿，变异 ①② 都判红（② 并证明进入挂载会删掉源文件，与 design D7 探针 (2) 一致）；按 D7 继续，temporary-workspaces delta 留在本 change，S3b 关闭 #1286 与 #1237。
+
+附带探针（S2 复审提出的验证缺口，实测同一容器）：bindfs 挂载上的普通文件以 `O_RDONLY|O_NOFOLLOW|O_NONBLOCK` 打开后 `fstat.isFile()` 为真、`size` 70000，`readSync` 循环读满 70000 字节，`createReadStream(null, {fd, start, end})` 也读满 70000 字节、无 error——`O_NONBLOCK` 在 FUSE 上对普通文件读没有 EAGAIN 之类副作用。
+
+容器内命令（相对形式，`server/` 下）：
+
+```
+WORKBUDDY_FUSE_TEST=1 WORKBUDDY_FUSE_ALT_FS_DIR=/altfs ../node_modules/.bin/vitest run test/linux/temp-dir-remove-fuse.test.ts --coverage=false
+```
