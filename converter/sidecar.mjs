@@ -19,7 +19,8 @@
  *   （缺省 2）。
  * - 校验：键集恰为三键；`version` = 1；`input` 是单一路径段（不含 `/` 与 NUL、不是 `.` / `..`）、
  *   扩展名小写后为 `docx` / `xlsx` / `pptx`；`timeoutMs` 是 ≤ 2147483647 的正整数；`request.json`
- *   与 `in/<input>` 都是普通文件（`lstat`，不跟随链接）。任一不成立 → `failed: bad-request`，不启动进程。
+ *   与 `in/<input>` 都是普通文件（`lstat`，不跟随链接）。任一不成立 → `failed: bad-request`，不启动进程；
+ *   读 `request.json` 时它（或作业目录）已不在 → 与 `cancel` 同等，`cancelled`。
  * - 转换：`detached` 启动 `CONVERTER_SOFFICE_BIN`（缺省 `/usr/bin/soffice`），`cwd` 与 `HOME` 都是
  *   作业目录，环境恰为 `PATH`、`HOME` 与存在时的 `LANG`，标准流丢弃；`in/<input>` 作为 `--outdir`
  *   之后的最后一项、以作业目录开头的绝对路径传入，所以以 `-` 开头的名字不会被当成选项。
@@ -30,10 +31,14 @@
  * - 结果：退出码 0 且 `out/<去最后一个扩展名>.pdf` 是大小 > 0 的普通文件（`lstat`）→ `done`（空）；
  *   否则 `failed`，内容恰为一个原因码：`bad-request` / `exit`（非 0 退出）/ `signal`（被本进程之外的
  *   信号结束）/ `timeout` / `cancelled` / `no-output`。标记先写 `<名>.part` 再 `rename`，读者看不到
- *   半截内容；作业目录已被 app 删掉时写入与改名的 `ENOENT` 吞掉（那个作业 app 已经不等了）。
- *   `ENOENT` 只在这里、列 `jobs/` 与探测文件（连同 `ENOTDIR`）时吞，`kill` 只吞 `ESRCH`；spawn 的
- *   错误不吞——写一行 `fatal`、杀全部在途进程组、以 1 退出（作业目录恰在 spawn 前一刻被删时也走
- *   这条路，容器按 `restart` 重启后重新领取仍在的作业；读代码推出，未测）。
+ *   半截内容（同目录的 `.part` 名可能被短暂看到）。
+ * - 吞掉的错误恰为这些：标记写入与改名的 `ENOENT`（作业目录已被 app 删掉，那个作业 app 已经不等了）；
+ *   列 `jobs/` 的 `ENOENT`（app 还没建它）；探测文件在不在时的 `ENOENT` / `ENOTDIR`；读 `request.json`
+ *   时的 `ENOENT` / `ENOTDIR`（落为 `cancelled`）；spawn 报 `ENOENT` 且作业目录已不在（app 在核对之后、
+ *   子进程 chdir 之前收尾，落为 `cancelled`，其它作业不受影响）；`kill` 的 `ESRCH`。其余一律不吞，
+ *   stderr 写一行 `{"event":"fatal","reason":…,"code":…}`（只带错误码，不带路径与栈）、杀全部在途
+ *   进程组、以 1 退出：启动时配置不合法 → `config`、spool 写不了 → `spool`；spawn 的其它错误（如
+ *   可执行文件缺失）→ `spawn`；运行期任何未捕获的错误（含心跳 touch 失败）→ `internal`。
  * - 日志：stderr 每作业恰一行 `{"event":"convert","id":…,"result":"done|failed","reason":"<码或空>",
  *   "ms":…}`，不含输入名、不含路径；它进容器日志，不进 app 的 stderr。
  *
@@ -64,12 +69,16 @@ const EXTENSIONS = new Set(["docx", "xlsx", "pptx"]);
 const REQUEST_KEYS = ["input", "timeoutMs", "version"];
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
-/** 启动不了就以 1 退出：只写原因与错误码，不写路径。 */
+/** 不吞的错误都到这里：只写原因与错误码（不写路径与栈），杀全部在途进程组，以 1 退出。 */
 function fatal(reason, code) {
   const line = code === undefined ? { event: "fatal", reason } : { event: "fatal", reason, code };
   process.stderr.write(`${JSON.stringify(line)}\n`);
   for (const job of running.values()) {
-    killGroup(job.child);
+    try {
+      killGroup(job.child);
+    } catch {
+      // 已在退出路径上：一组杀不掉不挡其余，也不能再抛（那会把栈写进 stderr）。
+    }
   }
   process.exit(1);
 }
@@ -88,6 +97,11 @@ function positiveInt(name, fallback) {
 
 /** 在途作业：id → `{dir, child, startedAt, timer, stopped}`。 */
 const running = new Map();
+/** `readRequest` 的第三种答案：`request.json` 或作业目录已不在。 */
+const GONE = Symbol("gone");
+
+process.on("uncaughtException", (error) => fatal("internal", errorCode(error)));
+process.on("unhandledRejection", (error) => fatal("internal", errorCode(error)));
 
 const spool = process.env.CONVERTER_SPOOL_DIR ?? "/spool";
 const soffice = process.env.CONVERTER_SOFFICE_BIN ?? "/usr/bin/soffice";
@@ -174,17 +188,27 @@ function validInput(input) {
   return EXTENSIONS.has(extname(input).slice(1).toLowerCase());
 }
 
-/** 合法 → `{input, timeoutMs}`；任何不合法（含读不出、不是普通文件）→ `undefined`。 */
-function readRequest(dir) {
-  const path = join(dir, "request.json");
-  let request;
+/** 读出并解析 `request.json`：已不在 → `GONE`；不是普通文件或不是 JSON → `undefined`；其它 I/O 错误照抛。 */
+function loadRequest(path) {
   try {
-    if (!lstatSync(path).isFile()) {
-      return undefined;
+    return lstatSync(path).isFile() ? JSON.parse(readFileSync(path, "utf8")) : undefined;
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return GONE;
     }
-    request = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
+    if (code !== undefined) {
+      throw error;
+    }
     return undefined;
+  }
+}
+
+/** 合法 → `{input, timeoutMs}`；已不在 → `GONE`；任何不合法 → `undefined`。 */
+function readRequest(dir) {
+  const request = loadRequest(join(dir, "request.json"));
+  if (request === GONE) {
+    return GONE;
   }
   if (request === null || typeof request !== "object" || Array.isArray(request)) {
     return undefined;
@@ -247,11 +271,21 @@ function launch(id, dir, startedAt, { input, timeoutMs }) {
   job.timer = setTimeout(() => stop(job, "timeout"), timeoutMs);
   running.set(id, job);
   child.once("error", (error) => {
-    if (child.pid === undefined) {
-      fatal("spawn", errorCode(error));
+    if (child.pid !== undefined) {
+      return;
     }
+    if (errorCode(error) === "ENOENT" && probe(dir) === undefined) {
+      clearTimeout(job.timer);
+      running.delete(id);
+      settle(id, dir, startedAt, "cancelled");
+      return;
+    }
+    fatal("spawn", errorCode(error));
   });
   child.once("exit", (code, signal) => {
+    if (running.get(id) !== job) {
+      return;
+    }
     clearTimeout(job.timer);
     running.delete(id);
     settle(id, dir, startedAt, outcome(job, input, code, signal));
@@ -272,6 +306,10 @@ function start(id, dir) {
     return;
   }
   const request = readRequest(dir);
+  if (request === GONE) {
+    settle(id, dir, startedAt, "cancelled");
+    return;
+  }
   if (request === undefined) {
     settle(id, dir, startedAt, "bad-request");
     return;

@@ -1,225 +1,53 @@
 /**
  * Issue #1504：转换 sidecar 脚本（office-preview「转换 sidecar 实现与镜像」场景「sidecar 脚本对着
- * 假 soffice」；「转换隔离边界」第 4、5 条的 sidecar 一侧）。
- *
- * 以子进程启动 `node converter/sidecar.mjs`（它是守护进程，有顶层副作用，所以从不 import），
- * `CONVERTER_SOFFICE_BIN` 指向 `fixtures/fake-soffice.mjs`；测试充当 app：在临时 spool 的 `jobs/`
- * 下建作业目录、经 `.part` + `rename` 写出 `request.json`，再读 sidecar 写回的 `done` / `failed`。
+ * 假 soffice」；「转换隔离边界」第 4、5 条的 sidecar 一侧）。子进程夹具见 `support/converter-sidecar.ts`；
+ * 错误路径与覆盖补充在 `converter-sidecar-errors.test.ts`。
  * 「杀整组」用夹具既有的 `@spawn-sleep` 标记：它派生一个同进程组的子进程并把两个 pid 记进
  * `jobs/<id>.record.json`。期望的 argv、PDF 字节与日志行是照规格抄的字面量，不引用脚本常量。
  */
-import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
-  renameSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  cleanUpSidecars,
+  everyCommand,
+  expectGone,
+  expectNoRealConverter,
+  type FakeRecord,
+  lineFor,
+  linesOf,
+  MARKER_WITHIN_MS,
+  makeSpool,
+  markerOf,
+  PARENT_ONLY,
+  readRecord,
+  recordPath,
+  settled,
+  spawnedPair,
+  startSidecar,
+  waitFor,
+  writeJob,
+} from "./support/converter-sidecar.js";
 
-const SIDECAR = fileURLToPath(new URL("../../converter/sidecar.mjs", import.meta.url));
-const FAKE = fileURLToPath(new URL("./fixtures/fake-soffice.mjs", import.meta.url));
 /** 假 soffice 正常转换写出的全部字节（与夹具各持一份字面量）。 */
 const PDF = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
-/** 夹具睡 30 秒；这里的时限远小于它，所以「已不存在」只能是被杀掉的结果。 */
-const GONE_WITHIN_MS = 4_000;
-const MARKER_WITHIN_MS = 6_000;
-/** 不测超时的作业：sidecar 自己的时限不该先到。 */
-const LONG_TIMEOUT_MS = 20_000;
-/** 每例的时限：大于上面的等待之和，先报错的是带说明的那个。 */
+/** 每例的时限：大于夹具里的等待之和，先报错的是带说明的那个。 */
 vi.setConfig({ testTimeout: 15_000 });
-/** 低熵占位值：只用来证明 sidecar 自己的环境不进转换进程。 */
-const PARENT_ONLY = "placeholder";
 const LOG_KEYS = ["event", "id", "result", "reason", "ms"];
 
-type Exit = { code: number | null; signal: NodeJS.Signals | null };
-
-interface Sidecar {
-  child: ChildProcess;
-  spool: string;
-  jobs: string;
-  exit: Promise<Exit>;
-  stderr(): string;
-}
-
-interface FakeRecord {
-  /** `x.record.json` 那样的非夹具文件里没有它。 */
-  argv?: string[];
-  env: Record<string, string>;
-  pid: number;
-  childPid?: number;
-}
-
-const roots: string[] = [];
-const sidecars: Sidecar[] = [];
-/** 本文件启动过的每一个可执行文件（含交给 sidecar 的 `CONVERTER_SOFFICE_BIN`），给文末断言用。 */
-const everyCommand: string[] = [];
-
-function isGone(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ESRCH";
-  }
-}
-
-function recordsUnder(jobs: string): FakeRecord[] {
-  return (existsSync(jobs) ? readdirSync(jobs) : [])
-    .filter((name) => name.endsWith(".record.json"))
-    .map((name) => JSON.parse(readFileSync(join(jobs, name), "utf8")) as FakeRecord);
-}
-
-afterEach(() => {
-  for (const sidecar of sidecars.splice(0)) {
-    sidecar.child.kill("SIGKILL");
-    for (const record of recordsUnder(sidecar.jobs)) {
-      everyCommand.push(record.argv?.[0] ?? "");
-      for (const pid of [record.pid, record.childPid]) {
-        if (pid !== undefined && !isGone(pid)) {
-          process.kill(pid, "SIGKILL");
-        }
-      }
-    }
-  }
-  for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-function makeSpool(withJobs = true): string {
-  const spool = mkdtempSync(join(tmpdir(), "wb-sidecar-"));
-  roots.push(spool);
-  if (withJobs) {
-    mkdirSync(join(spool, "jobs"));
-  }
-  return spool;
-}
-
-function startSidecar(
-  spool: string,
-  overrides: Record<string, string | undefined> = {},
-  nodeFlags: string[] = [],
-): Sidecar {
-  const given: Record<string, string | undefined> = {
-    PATH: process.env.PATH,
-    LANG: "C.UTF-8",
-    WB_PARENT_ONLY: PARENT_ONLY,
-    CONVERTER_SPOOL_DIR: spool,
-    CONVERTER_SOFFICE_BIN: FAKE,
-    CONVERTER_POLL_MS: "20",
-    CONVERTER_HEARTBEAT_MS: "50",
-    CONVERTER_CONCURRENCY: "1",
-    ...overrides,
-  };
-  const env = Object.fromEntries(Object.entries(given).filter(([, value]) => value !== undefined));
-  everyCommand.push(process.execPath, given.CONVERTER_SOFFICE_BIN ?? "");
-  const child = spawn(process.execPath, [...nodeFlags, SIDECAR], {
-    env,
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  let stderr = "";
-  child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-  const exit = new Promise<Exit>((resolve) =>
-    child.once("exit", (code, signal) => resolve({ code, signal })),
-  );
-  const sidecar: Sidecar = {
-    child,
-    spool,
-    jobs: join(spool, "jobs"),
-    exit,
-    stderr: () => stderr,
-  };
-  sidecars.push(sidecar);
-  return sidecar;
-}
-
-/** 照 app 的次序写一个作业：`in/<name>` → `request.json.part` → `rename`。 */
-function writeJob(
-  jobs: string,
-  name: string,
-  request: unknown = { version: 1, input: name, timeoutMs: LONG_TIMEOUT_MS },
-  id = randomBytes(16).toString("hex"),
-): string {
-  const job = join(jobs, id);
-  const input = join(job, "in", name);
-  mkdirSync(join(input, ".."), { recursive: true });
-  writeFileSync(input, "input bytes");
-  writeFileSync(join(job, "request.json.part"), JSON.stringify(request));
-  renameSync(join(job, "request.json.part"), join(job, "request.json"));
-  return job;
-}
-
-async function waitFor<T>(what: string, probe: () => T | undefined, withinMs: number): Promise<T> {
-  const deadline = Date.now() + withinMs;
-  for (;;) {
-    const value = probe();
-    if (value !== undefined) {
-      return value;
-    }
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${what}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-}
-
-/** `done` → `"done"`；`failed` → `failed:<内容>`；都没有 → `undefined`。 */
-function markerOf(job: string): string | undefined {
-  if (existsSync(join(job, "done"))) {
-    return "done";
-  }
-  const failed = join(job, "failed");
-  return existsSync(failed) ? `failed:${readFileSync(failed, "utf8")}` : undefined;
-}
-
-function settled(job: string): Promise<string> {
-  return waitFor(`a marker in ${basename(job)}`, () => markerOf(job), MARKER_WITHIN_MS);
-}
-
-function recordPath(job: string): string {
-  return `${job}.record.json`;
-}
-
-function readRecord(job: string): FakeRecord {
-  return JSON.parse(readFileSync(recordPath(job), "utf8")) as FakeRecord;
-}
-
-/** 等 `@spawn-sleep` 记下自己与子进程的 pid。 */
-function spawnedPair(job: string): Promise<FakeRecord> {
-  return waitFor(
-    "the fake soffice to record its child",
-    () => {
-      const record = existsSync(recordPath(job)) ? readRecord(job) : undefined;
-      return record?.childPid === undefined ? undefined : record;
-    },
-    MARKER_WITHIN_MS,
-  );
-}
-
-async function expectGone(record: FakeRecord): Promise<void> {
-  const pids = [record.pid, record.childPid ?? Number.NaN];
-  await waitFor(
-    `processes ${pids.join(", ")} to disappear`,
-    () => (pids.every(isGone) ? true : undefined),
-    GONE_WITHIN_MS,
-  );
-}
+afterEach(cleanUpSidecars);
 
 function contractArgs(job: string, name: string): string[] {
   const head = "--headless --norestore --nolockcheck --nodefault --nofirststartwizard".split(" ");
@@ -239,16 +67,6 @@ function cwdOf(pid: number): string {
   const out = execFileSync("lsof", ["-a", "-p", `${pid}`, "-d", "cwd", "-Fn"]).toString();
   const line = out.split("\n").find((entry) => entry.startsWith("n"));
   return line?.slice(1) ?? "";
-}
-
-function linesOf(sidecar: Sidecar): Record<string, unknown>[] {
-  const lines = sidecar.stderr().split("\n");
-  return lines.filter(Boolean).map((line) => JSON.parse(line));
-}
-
-function lineFor(sidecar: Sidecar, job: string): Promise<Record<string, unknown>> {
-  const probe = () => linesOf(sidecar).find((line) => line.id === basename(job));
-  return waitFor("the log line", probe, 2_000);
 }
 
 describe("sidecar 脚本：正常转换", () => {
@@ -507,11 +325,6 @@ describe("sidecar 脚本：启动与 spawn 失败不被吞掉", () => {
 
 describe("真实转换的人工验证：自动化测试不需要 LibreOffice 与 Docker", () => {
   it("本文件启动过的可执行文件（含 sidecar 启动的）没有一个名为 soffice、libreoffice 或 docker", () => {
-    const names = new Set(everyCommand.map((command) => basename(command)));
-    for (const forbidden of ["soffice", "libreoffice", "docker"]) {
-      expect(names.has(forbidden)).toBe(false);
-    }
-    expect(names.has(basename(process.execPath))).toBe(true);
-    expect(names.has("fake-soffice.mjs")).toBe(true);
+    expectNoRealConverter();
   });
 });

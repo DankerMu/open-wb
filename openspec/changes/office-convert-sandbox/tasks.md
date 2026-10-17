@@ -39,6 +39,8 @@
 | `converter/Dockerfile`（新） | — | ≤ 30 | S1a |
 | `converter/compose.yml`（新） | — | ≤ 40 | S1a |
 | `server/test/converter-sidecar.test.ts`（新） | — | ≤ 520 | S1a |
+| `server/test/converter-sidecar-errors.test.ts`（新，S1a 评审后拆出） | — | ≤ 200 | S1a |
+| `server/test/support/converter-sidecar.ts`（新，两份 sidecar 测试的共享夹具，避免 jscpd 克隆） | — | ≤ 250 | S1a |
 | `server/test/converter-healthcheck.test.ts`（新） | — | ≤ 60 | S1a |
 | `server/test/fixtures/fake-soffice.mjs` | 152 | ≤ 170 | S1a |
 | `biome.json`、`Makefile`、根 `package.json`、`knip.json`、`.jscpd.json`、`scripts/size-guard.sh`、`scripts/test-guardrails.sh` | — | 各 ≤ +6 行（接线） | S1a |
@@ -74,7 +76,7 @@
   - 本机核对 `docker build converter/`（有 Docker 的机器上）与 `node:24-bookworm-slim` 里 Debian 的 `libreoffice-*-nogui` / `fonts-noto-cjk` 包名可解析；没有 Docker 的开发机写明「未构建，S2a / S2b 首次构建」。
 
   验证：核对结果写进 PR。
-- [x] 1a.2 先写 sidecar 脚本测试（新 `server/test/converter-sidecar.test.ts`），覆盖 office-preview「转换 sidecar 实现与镜像」场景「sidecar 脚本对着假 soffice」的全部 WHEN：以子进程启动 `node converter/sidecar.mjs`（`CONVERTER_SPOOL_DIR` 临时目录、`CONVERTER_SOFFICE_BIN=fake-soffice.mjs`、`CONVERTER_POLL_MS=20`、`CONVERTER_HEARTBEAT_MS=50`、`CONVERTER_CONCURRENCY=1`），测试充当 app：正常 → `done` + argv / 环境 / `HOME` / cwd 断言 + PDF 字节；`@exit1` → `exit`；`@empty` → `no-output`；`@sleep`+`timeoutMs 200` → `timeout` 且假 `soffice` 与其派生子进程不存在；`@sleep`+`cancel` → `cancelled`、同上；**`@sleep` 作业目录在落定前被整个删除 → 假 `soffice` 及其派生子进程在有界时间内不存在、sidecar 不退出、随后的作业照常**（design D3「目录消失即杀」）；六种 `bad-request`（缺键、多键、`input` 含 `/`、`input` 为 `..`、扩展名 `html`、`timeoutMs` 为 `0` 或字符串）；`jobs/` 下一个普通文件（模拟 `<id>.record.json`）被跳过、不产生日志行；心跳周期；并发 1 的次序；`jobs/` 晚于 sidecar 300 ms 建出时不崩；`SIGTERM` 杀组退出 0；日志行不含输入名；标记原子性（紧循环读目录直到标记出现，从未观察到 `.part` 名或半截 `failed`）。**不 import** `sidecar.mjs`。断言：本文件里 spawn 过的每个可执行文件的 basename 都不是 `soffice`、`libreoffice`、`docker`（是 `node` 与 `fake-soffice.mjs`）。
+- [x] 1a.2 先写 sidecar 脚本测试（新 `server/test/converter-sidecar.test.ts`），覆盖 office-preview「转换 sidecar 实现与镜像」场景「sidecar 脚本对着假 soffice」的全部 WHEN：以子进程启动 `node converter/sidecar.mjs`（`CONVERTER_SPOOL_DIR` 临时目录、`CONVERTER_SOFFICE_BIN=fake-soffice.mjs`、`CONVERTER_POLL_MS=20`、`CONVERTER_HEARTBEAT_MS=50`、`CONVERTER_CONCURRENCY=1`），测试充当 app：正常 → `done` + argv / 环境 / `HOME` / cwd 断言 + PDF 字节；`@exit1` → `exit`；`@empty` → `no-output`；`@sleep`+`timeoutMs 200` → `timeout` 且假 `soffice` 与其派生子进程不存在；`@sleep`+`cancel` → `cancelled`、同上；**`@sleep` 作业目录在落定前被整个删除 → 假 `soffice` 及其派生子进程在有界时间内不存在、sidecar 不退出、随后的作业照常**（design D3「目录消失即杀」）；六种 `bad-request`（缺键、多键、`input` 含 `/`、`input` 为 `..`、扩展名 `html`、`timeoutMs` 为 `0` 或字符串）；`jobs/` 下一个普通文件（模拟 `<id>.record.json`）被跳过、不产生日志行；心跳周期；并发 1 的次序；`jobs/` 晚于 sidecar 300 ms 建出时不崩；`SIGTERM` 杀组退出 0；日志行不含输入名；标记原子性（紧循环读目录直到标记出现，`failed` 一出现内容即完整；同目录 `.part` 名可被短暂观察到，不算红；以 `--import` 钩子放慢 `writeFileSync` 让「直接写最终名」判红）。**不 import** `sidecar.mjs`。断言：本文件里 spawn 过的每个可执行文件的 basename 都不是 `soffice`、`libreoffice`、`docker`（是 `node` 与 `fake-soffice.mjs`）。
   新 `server/test/converter-healthcheck.test.ts`：以子进程运行 `node converter/healthcheck.mjs`（`CONVERTER_SPOOL_DIR` 临时目录）：`heartbeat` 新鲜 → 退出码 0；`utimes` 设为 30 s 前 → 1；缺席 → 1。
   验证：在未改动的代码上判红（脚本不存在即红）。
 - [x] 1a.3 实现 `converter/`：

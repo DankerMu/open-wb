@@ -4,8 +4,8 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 # 拷入层豁免探针：前缀规则只认仓库内相对路径（$tmp 路径命中不了），故写在仓库内；用后即删，trap 兜底。
 app_probe="web/src/features/_probe.tsx"
-ui_probe="web/src/components/ui/_probe.tsx"
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"; rm -f "$app_probe" "$ui_probe"' EXIT
+ui_probe="web/src/components/ui/_probe.tsx"; mjs_probe="converter/_probe.mjs"
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"; rm -f "$app_probe" "$ui_probe" "$mjs_probe"' EXIT
 pass=0; fail=0
 expect_reject() { # $1 描述, 其余为命令
   local desc="$1"; shift
@@ -70,6 +70,7 @@ expect_reject "行数守卫全量扫描拒绝应用层 801 行" bash scripts/siz
 rm -f "$app_probe"
 expect_accept "行数守卫全量扫描放行拷入层 801 行" bash scripts/size-guard.sh
 rm -f "$ui_probe"
+seq 801 | sed 's/^/\/\/ line /' > "$mjs_probe"; expect_reject "行数守卫全量扫描拒绝 converter/ 801 行 .mjs" bash scripts/size-guard.sh; rm -f "$mjs_probe"
 expect_accept "行数守卫放行现有源码"          bash scripts/size-guard.sh
 expect_reject "commit-msg 拒绝非规范信息"     bash .githooks/commit-msg <(echo "随手改一下")
 expect_accept "commit-msg 放行规范信息"       bash .githooks/commit-msg <(echo "feat(server): 新增健康探针")
