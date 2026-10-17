@@ -110,7 +110,7 @@ owner 裁定见 proposal「Why」与下文「owner 的裁定」表（grill ledge
 
 **D2 `ensureSandboxRoot(path, {strict})`（B2、B3、B4，T1；编排方补充 4、5）。** 放在 `server/src/core/sandbox/dirs.ts`，与 `ensureSharedDir` / `ensureOwnedDir` 并列（同一文件、同一套不 chown / 不改 umask 的纪律），签名 `ensureSandboxRoot(configuredPath: string, options: {strict: boolean}): {root: string; outcome: "ok" | "unchanged"}`，`strict = config.ompUser !== undefined`。步骤照抄 `state-layout.ts:101-103`：
 
-1. `mkdirSync(configuredPath, {recursive: true})`：缺失时建出它与缺失的父级，父级权限位不改（与 `<state>` 一致）。`mkdir` 对一个悬空符号链接返回 `EEXIST`，下一步 realpath 失败即整体失败。
+1. `mkdirSync(configuredPath, {recursive: true})`：缺失时建出它与缺失的父级，父级权限位不改（与 `<state>` 一致）。`mkdir` 对一个悬空符号链接返回 `ENOENT`（S1 实测，PR #1497；设计时写的 `EEXIST` 有误），下一步 realpath 失败即整体失败。
 2. `root = realpathSync.native(configuredPath)`：`SANDBOX_ROOT` 自身可以是运维放置的、指向目录的符号链接（与 `OMP_STATE_DIR` 同一既有部署形态；`workspaces/store.ts:139-141` 与 `temp-dir-remove.ts` 的账号根 realpath 校验也都按真实目录算）。建根、校正、属主检查全部作用于 `root`。不另设「根是符号链接 → 失败」的模式（编排方补充 4）；配置路径仍原样交给 `SessionRuntime` 与 store（argv / env 用配置值，与托管布局相同）。
 3. `lstatSync(root).isDirectory()` 不成立（普通文件、设备等占着）→ 两种模式都抛：这不是 B3 说的「属主」问题，惰性点 `ensureSharedDir` 今天遇到它也抛（`dirs.ts:26-28`），启动时就失败只是把同一个失败提前。
 4. `ensureOwnedDir(root, 0o3770)`——owner 检查（`stats.uid === process.geteuid()`）、精确 mode、chmod 后复查（内核静默丢掉 setgid 时失败：应用 uid 不在共享组里本来就是 ADR-0010 的部署前提）。`strict` 为真时它的抛出原样向上抛（启动失败 `sandbox_root`）；为假时捕获、返回 `outcome: "unchanged"`，由 `server.ts` 写 D1 的那一行，不做第二次 chmod：属主不符或 chmod 被拒时根的 mode 与属主不变；内核静默丢掉 setgid 时 `ensureOwnedDir` 是先 `chmodSync` 再复查（`dirs.ts:86-96`），已落下的权限位（例如 `0755` → `1770`）不回滚——B3 是「不纠正」，回滚也是纠正。

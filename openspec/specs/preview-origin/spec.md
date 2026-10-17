@@ -42,7 +42,7 @@
 ### Requirement: 预览监听器
 `createPreviewApp({store, sandbox, tokens, converter, limits})` SHALL 返回一个独立的 Fastify 实例，只响应 `GET`（及其 `HEAD`）`/w/<token>/<path>` 与 `/o/<token>/<path>`（后者见 office-preview）。它 SHALL NOT 注册认证插件、SHALL NOT 读取 `Cookie` 头或任何会话表、SHALL NOT 托管静态文件或 SPA、SHALL NOT 提供任何 `/api` 路由：是否放行只取决于路径里的令牌。`<path>` 为令牌之后的全部路径，按 URL 解码一次后原样作为工作空间内的相对路径。
 
-对 `/w/<token>/<path>`，每次请求 SHALL 依次：`tokens.lookup(token)` 为 `null` → 404；`store.rootOf({id: ownerId}, workspaceId)` 为 `null` 或不是已存在的目录 → 404；`sandbox.resolve({id: ownerId}, workspaceId, path, "read")`——被拒时沙箱照常写一条 `sandbox.reject` 审计（actor 为令牌的账号），响应 403；目标不存在、是目录或不是普通文件 → 404（不列目录、不回退到 `index.html`）；否则以「预览响应头与内容类型」规定的头流式返回文件的完整字节（没有大小上限），支持与 workspaces「文件预览」相同语义的单段 `Range`（206 / 416）。空 `<path>`、其它方法、其它路径一律 404。对监听器的请求 SHALL NOT 推后令牌的到期时间。
+对 `/w/<token>/<path>`，每次请求 SHALL 依次：`tokens.lookup(token)` 为 `null` → 404；`store.rootOf({id: ownerId}, workspaceId)` 为 `null` 或不是已存在的目录 → 404；`sandbox.resolve({id: ownerId}, workspaceId, path, "read")`——被拒时沙箱照常写一条 `sandbox.reject` 审计（actor 为令牌的账号），响应 403；目标不存在、是目录或不是普通文件（`lstat`）→ 404（不列目录、不回退到 `index.html`）；随后 SHALL 以 workspaces「预览分类元数据与有界字节流」的 `openRegularFile` 打开目标（change sandbox-boundary-closure，owner B1/B5）——`lstat` 之后被换成符号链接、命名管道、目录、套接字或已被删除的目标同样 → 404（同一固定文案，不写审计），描述符已关闭、零字节读出；否则以「预览响应头与内容类型」规定的头从该描述符流式返回文件的完整字节（没有大小上限），`Content-Length` 与 `Range` 区间以打开那一刻 `fstat` 的大小为准，支持与 workspaces「文件预览」相同语义的单段 `Range`（206 / 416；416 时描述符已关闭）；打开之后路径被删除或替换，不影响本次响应（正文与 `Content-Length` 仍来自已打开的 inode）。空 `<path>`、其它方法、其它路径一律 404。对监听器的请求 SHALL NOT 推后令牌的到期时间。
 
 失败响应 SHALL 为 `text/plain; charset=utf-8` 的固定短文案（404 `预览不存在或已过期`、403 `路径不在工作空间内`、416 空体），带与成功响应相同的 `nosniff`、`no-store`、`Referrer-Policy`；它不是 JSON 错误信封，SHALL NOT 回显令牌、路径或任何请求内容。
 
@@ -68,7 +68,11 @@
 
 #### Scenario: 范围请求
 - **WHEN** 对 1000 字节的 `/w/<T>/clip.mp4` 带 `Range: bytes=0-99`、`bytes=1000-` 与不带 `Range` 各请求一次
-- **THEN** 依次为 206（`Content-Range: bytes 0-99/1000`、100 字节）、416（`Content-Range: bytes */1000`、空体）、200（1000 字节、`Accept-Ranges: bytes`）
+- **THEN** 依次为 206（`Content-Range: bytes 0-99/1000`、100 字节）、416（`Content-Range: bytes */1000`、空体，文件被打开过一次且描述符已关闭）、200（1000 字节、`Accept-Ranges: bytes`）
+
+#### Scenario: lstat 之后目标被换入
+- **WHEN** 以有效令牌 `T` 请求 `/w/<T>/site/index.html`，在路由的 `lstat` 之后、打开之前（测试钩子包裹 `fs.openSync`），目标分别被换成一个没有写端的命名管道、一个指向另一账号文件的符号链接、一个目录
+- **THEN** 三次都是 404 纯文本 `预览不存在或已过期`，响应体不含 `<T>`、路径或被链接文件的内容；没有 `sandbox.reject` 审计行；命名管道与目录各被打开一次又关闭，符号链接没有打开成功；没有读出任何字节；命名管道一例在 1500ms 内返回
 
 ### Requirement: 预览响应头与内容类型
 预览监听器的**每一个**响应（成功与失败）SHALL 带 `X-Content-Type-Options: nosniff`、`Cache-Control: no-store`、`Referrer-Policy: no-referrer`。`/w/` 与 `/o/` 的成功响应 SHALL 另带 `Access-Control-Allow-Origin: *`、`Cross-Origin-Resource-Policy: cross-origin` 与 `Content-Security-Policy`：`Content-Type` 为 `application/pdf` 的响应为 `frame-ancestors <E>`；其余一律为 `sandbox allow-scripts allow-forms allow-modals; frame-ancestors <E>`。`<E>` 由写响应头的这一步从该令牌登记的 `embedOrigin` 得出：当且仅当它不是 `null`、能被解析为 URL、解析结果的 `origin` 与它逐字相等（即它恰是一个序列化的来源 `scheme://host[:port]`），并且不含 `*`、`;`、`,`、`'` 四个字符中的任何一个时，`<E>` SHALL 逐字为该值；其余一切情况（含 `null`）`<E>` SHALL 为 `'none'`。这项校验只在写头处做：「预览令牌登记表」原样保存 `embedOrigin`，不做校验。CSP SHALL NOT 含 `allow-same-origin`、`allow-top-navigation`、`allow-popups`，SHALL NOT 含任何限制取源的指令（`default-src`、`script-src`、`connect-src` 等）——HTML 预览加载外部资源是被允许的。
