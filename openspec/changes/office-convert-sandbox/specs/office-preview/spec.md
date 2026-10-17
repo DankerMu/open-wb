@@ -149,7 +149,7 @@ sidecar 的健康 SHALL 由 `<OFFICE_SPOOL_DIR>/heartbeat` 的修改时间表示
 #### Scenario: 镜像与 compose 的标志（CI e2e）
 - **WHEN** CI job `office-sidecar` 在 `ubuntu-24.04` runner 上 `docker build converter/`，以与 `compose.yml` 逐项相同的标志（`--network none --read-only --tmpfs /tmp --init --cap-drop ALL --security-opt no-new-privileges --user <runner uid>:<gid> -v <spool>:/spool`）运行它
 - **THEN** `heartbeat` 在 30 s 内出现；以产品代码的 `createOfficeConverter` 转换一份 runner 上由 `python3 zipfile` 生成、含 `TargetMode="External"` http 图片链接的 docx 成功（见「转换隔离边界」第一个场景）；runner 的 uid 不在镜像 `/etc/passwd` 里而转换仍成功；`docker stop` 后容器以 0 退出
-- **WHEN** 去掉 `--network none`（变异，做后撤销）
+- **WHEN** 把 `--network none` 换成 `--network host`（变异，做后撤销；换成缺省 bridge 判不红——容器里的 `127.0.0.1` 是它自己的回环，打不到 runner 的监听器）
 - **THEN** 监听器收到请求、PDF 含图——「0 次请求」断言判红
 
 ## MODIFIED Requirements

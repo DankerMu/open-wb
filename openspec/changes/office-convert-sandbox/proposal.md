@@ -18,7 +18,7 @@ owner 裁定（grill ledger B1–B10）：数据类向量登记为「未测、�
 - **切片**：S1a（`converter/` + 其测试 + 守卫接线，不碰 `server/`）→ S1b（app 侧客户端、预检、D9 退役，原子）→ S2a / S2b → S3。
 - **CI**（「CI 改动」，S2a；owner 已于 2026-10-17 批准，B10）：新 job `office-sidecar`（`runs-on: ubuntu-24.04`）构建镜像、`--network none` 起 sidecar、以产品代码的 spool 客户端转换一份 runner 上生成的带 http 外链图片的 docx → 0 请求 0 图；对照 `--network host` 直接 `soffice` → 有请求有图；runner 的 uid 不在镜像 passwd 里，顺带实测该项。入 `all-checks-passed.needs`（九 → 十）；harness / constraints / AGENTS 合同同步；`fast-checks` 的 `biome check` 加 `converter`。uid-isolation job 不动。
 - **实测**（S2b，编排方 / owner 本人）：两种部署形态下经 `/o/` 的 http 图 / `file://` 图 / docx·xlsx·pptx·中文、终止链 5 次、fail-closed 两个方向、耗时；结果表进 ADR。
-- **文档**（S3）：ADR-0010 新补充（2026-10-12 补充整节加「已退役」头注）、ADR-0014（决定 6、残余表、`OFFICE_BIN` 节、环境变量表、运维）、system.md 9.7（两种部署形态的步骤、排障、fail-closed 表现）、头注释（`app.ts` `office.ts` `office-cache.ts` `server.ts`）、FL-25/26/27 改键名 + 新增 FL-39、CONTEXT.md 术语、IMPLEMENTATION_PLAN 两处；S3 合并后关闭 #1350。
+- **文档**（S3）：ADR-0010 新补充（2026-10-12 补充整节加「已退役」头注）、ADR-0014（决定 6、残余表、`OFFICE_BIN` 节、环境变量表、运维）、system.md 9.7（两种部署形态的步骤、排障、fail-closed 表现）、头注释（`app.ts` `office.ts` `office-cache.ts` `server.ts`）、FL-25/26/27 改键名 + 新增 FL-39、CONTEXT.md 术语、IMPLEMENTATION_PLAN 三处；S3 合并后关闭 #1350。
 - **不做**：bubblewrap 与任何第二种机制；B1 向量的实测；omp 的沙箱；app 的容器化与 compose 里的 app 服务；多 sidecar / 跨主机；非 Debian 镜像；`/o/` 输入侧换入残余的全闭合（收窄到与 `/w/` 一致：只守末段）。
 
 ## Capabilities
