@@ -138,7 +138,8 @@ Minimal mergeable slice: atomic - app 侧客户端、预检与 D9 退役互为�
 - [x] 2a.4 合同同步（按 2a.1 的被拒清单）：`scripts/test-ci-harness.sh` `aggregate` 字面、新 job 的存在 / `runs-on`（基线 `ubuntu-24.04`，变异到 `ubuntu-latest` 应被拒）/ `if` / `continue-on-error` / `timeout` 合同、`fast-checks` 步骤字面；`constraints.yaml` `ci.matrix`（加 `ubuntu-24.04` 或为该 job 单列，取 2a.1 的拒绝项所指）；`AGENTS.md` Enforcement Index 加一行「办公文档转换隔离 | `.github/workflows/ci.yml`（job `office-sidecar`） | CI `office-sidecar`/`all-checks-passed` | block」，并加对应的 harness 合同（`cm` 行）；`scripts/inspect-ci-workflow.js` 若解析 job 清单则同步。
   验证：`make test-guardrails` 全绿，且 2a.1 的每条被拒项现在是 PASS；去掉新 job 的 `needs` 项或把 `runs-on` 改回 `ubuntu-latest` 时 harness 判红（两条变异做后撤销）。
 - [x] 2a.5 规格随刀：omp-uid-isolation「CI uid-isolation job」delta（九 → 十）与 office-preview「真实转换的人工验证」场景「CI 端到端」由归档合入；本任务核对 job 名、`needs` 与两处措辞一致。
-- [ ] 2a.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；十个 job 绿，贴 `office-sidecar` 的 job 链接与脚本输出里「0 次请求 / 对照 ≥ 1 次」两行；PR 标题与正文都标「CI 改动」（owner 已于 2026-10-17 批准，B10）；请求白盒审查（design D13 S2a 清单）。
+- [x] 2a.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；十个 job 绿，贴 `office-sidecar` 的 job 链接与脚本输出里「0 次请求 / 对照 ≥ 1 次」两行；PR 标题与正文都标「CI 改动」（owner 已于 2026-10-17 批准，B10）；请求白盒审查（design D13 S2a 清单）。
+  **完成记录（2026-10-17，编排方补勾于归档时）**：PR #1512 CI 11/11 绿；`office-sidecar` job 脚本输出产品路径 `requests=0 images=0`、对照 `1/1`；两个固定 runner 的 Runner Image 均为 `ubuntu-24.04`。
 Suggested fixture level: compact - 不改产品代码；新增一个 CI job、一个脚本与合同同步；行为由规格 delta、合同行与 job 输出钉住。
 Minimal mergeable slice: atomic - 新 job、`needs`、harness 合同与 AGENTS 行互为前提（少任一项 `make test-guardrails` 或聚合门禁之一必红）。
 
