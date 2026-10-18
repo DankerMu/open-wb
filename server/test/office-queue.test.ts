@@ -2,36 +2,27 @@
  * Issue #1073（任务 14.2，含分摊的 14.5 / 14.6 条款）：office-preview「并发上限与排队」——并发上限、
  * 排队上限 8、按缓存键去重、中止与出队、名额的释放。
  *
- * 经 `createOfficeCache` 这一个公开入口测，转换对着 `fixtures/fake-soffice.mjs` 真实 spawn。`@gate`
- * 的假进程写好输出后一直等 `<输入路径>.release` 出现才退出，所以「谁在运行、谁在排队」由测试定。
- * 准入是同步的：`convert()` 返回时该启动的已经记在 `launches` 里，「至多 2 个」「零启动」直接断言它，
- * 不靠定时等待；「立即」一律指只让微任务跑完（`microtasks()`），其间没有任何进程事件。期望的缓存
- * 路径照规格的键字面拼，不引用源码。
+ * 经 `createOfficeCache` 这一个公开入口测，转换对着进程内的假 sidecar（issue 1505 起）。`@gate`
+ * 的作业写好输出后一直等 `release()` 才写 `done`，所以「谁在运行、谁在排队」由测试定。准入是同步
+ * 的：转换器在 `convert()` 返回之前建出作业目录，`watch()` 每记一次调用就扫一遍 spool，`launches`
+ * 的次序因此就是作业出现的次序，「至多 2 个」「零作业」直接断言它，不靠定时等待；「立即」一律指只让
+ * 微任务跑完（`microtasks()`）。期望的缓存路径照规格的键字面拼，不引用源码。
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
 import { createOfficeConverter, OfficeConvertError } from "../src/preview/office.js";
 import { createOfficeCache } from "../src/preview/office-cache.js";
 import { createOfficeQueue } from "../src/preview/office-queue.js";
-import {
-  type Bench,
-  bench,
-  closers,
-  FAKE_SOFFICE,
-  PDF,
-  setEnv,
-  useOfficeBenches,
-} from "./office-cache-helpers.js";
-import { useSetprivStub } from "./support/setpriv.js";
+import { type Bench, bench, closers, PDF, useOfficeBenches } from "./office-cache-helpers.js";
 
 const BAD_CONCURRENCY = "concurrency must be a positive integer";
-/** 等一个被杀的假进程真的退出；夹具自己要 30 秒才退，所以到时还在就是没被杀。 */
+/** 等假 sidecar 看到 `cancel`、作业目录被删。 */
 const GONE_WITHIN = { timeout: 6_000, interval: 10 };
 
 interface Rig extends Bench {
-  /** 每次启动那一刻，此前启动的假进程里还没退出的个数。 */
+  /** 每个作业被发现的那一刻，spool 里其它尚未落定（目录还在）的作业个数。 */
   runningAtLaunch: number[];
 }
 
@@ -43,42 +34,34 @@ interface Call {
 
 const rigs: Rig[] = [];
 
-// 先注册的后执行：`useOfficeBenches` 的钩子关掉转换器之后，这里核对没有留下任何假进程。
-afterEach(() => {
-  const alive = rigs.splice(0).flatMap((on) => on.launches.filter(({ child }) => isRunning(child)));
-  for (const { child } of alive) {
-    child.kill("SIGKILL");
-  }
-  expect(alive.map(({ child }) => child.pid)).toEqual([]);
+// 转换器关掉、假 sidecar 停下之后、临时目录删掉之前：核对没有留下任何作业目录。
+useOfficeBenches(() => {
+  expect(rigs.splice(0).flatMap((on) => jobDirs(on))).toEqual([]);
 });
-useSetprivStub();
-useOfficeBenches();
 
-function isRunning(child: { exitCode: number | null; signalCode: string | null }): boolean {
-  return child.exitCode === null && child.signalCode === null;
-}
-
-function rig(layout?: { sudo: boolean }): Rig {
-  const on = Object.assign(bench(layout), { runningAtLaunch: [] as number[] });
-  const spawnRecorded = on.spawn;
-  on.spawn = (command, args, options) => {
-    on.runningAtLaunch.push(on.launches.filter(({ child }) => isRunning(child)).length);
-    return spawnRecorded(command, args, options);
-  };
+function rig(): Rig {
+  const on = Object.assign(bench(), { runningAtLaunch: [] as number[] });
   rigs.push(on);
   return on;
 }
 
+/** 扫一遍 spool：新发现的作业按次序记下，同时记下那一刻别的作业还剩几个目录在。 */
+function seen(on: Rig): void {
+  const jobs = on.launches;
+  for (const job of jobs.slice(on.runningAtLaunch.length)) {
+    on.runningAtLaunch.push(jobDirs(on).filter((id) => id !== job.id).length);
+  }
+}
+
 function cacheOn(
   on: Rig,
-  options: { concurrency: number; timeoutMs?: number; ompUser?: string },
+  options: { concurrency: number; timeoutMs?: number },
 ): ReturnType<typeof createOfficeCache> {
   const converter = createOfficeConverter({
-    officeBin: FAKE_SOFFICE,
+    spoolDir: on.spool,
     cacheDir: on.cacheDir,
     timeoutMs: options.timeoutMs ?? 20_000,
-    spawn: on.spawn,
-    ...(options.ompUser === undefined ? {} : { ompUser: options.ompUser }),
+    pollMs: 20,
   });
   const cache = createOfficeCache({
     cacheDir: on.cacheDir,
@@ -96,6 +79,7 @@ function slotOf(on: Rig, input: string): string {
 }
 
 function watch(promise: Promise<string>): Call {
+  rigs.forEach(seen);
   const call: Call = { promise, state: "pending" };
   promise.then(
     (path) => {
@@ -121,17 +105,23 @@ async function microtasks(): Promise<void> {
 
 function release(...inputs: string[]): void {
   for (const input of inputs) {
-    writeFileSync(`${input}.release`, "");
+    for (const on of rigs) {
+      on.sidecar.release(basename(input));
+    }
   }
 }
 
-/** 每次启动的输入路径（argv 的最后一项），按启动次序。 */
+/** 每个作业的输入在「工作空间」里的路径，按作业出现的次序。 */
 function launched(on: Rig): Array<string | undefined> {
-  return on.launches.map(({ args }) => args.at(-1));
+  seen(on);
+  return on.launches.map(({ name }) =>
+    name === undefined ? undefined : join(on.root, "ws", name),
+  );
 }
 
-function jobDirs(on: Rig): string[] {
-  return readdirSync(on.work, { withFileTypes: true })
+/** spool 里此刻还在的作业目录。 */
+function jobDirs(on: Bench): string[] {
+  return readdirSync(on.jobs, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
 }
@@ -168,82 +158,46 @@ describe("并发上限与排队：不超过上限并按序启动", { timeout: 20
   it.each<[kind: string, name: string, timeoutMs: number]>([
     ["timeout", "a@sleep.docx", 2_000],
     ["failed", "a@exit1.docx", 20_000],
-  ])(
-    "超时与非 0 退出之后名额已释放：下一个立即启动（同 uid）——%s",
-    async (kind, name, timeoutMs) => {
-      const on = rig();
-      const cache = cacheOn(on, { concurrency: 1, timeoutMs });
-      const failing = on.input(name);
-      const next = on.input("b@gate.docx");
+  ])("超时与非 0 退出之后名额已释放：下一个立即启动——%s", async (kind, name, timeoutMs) => {
+    const on = rig();
+    const cache = cacheOn(on, { concurrency: 1, timeoutMs });
+    const failing = on.input(name);
+    const next = on.input("b@gate.docx");
 
-      const first = watch(cache.convert(failing));
-      const second = watch(cache.convert(next));
-      expect(on.launches).toHaveLength(1);
-      await first.promise.catch(() => undefined);
+    const first = watch(cache.convert(failing));
+    const second = watch(cache.convert(next));
+    expect(on.launches).toHaveLength(1);
+    await first.promise.catch(() => undefined);
 
-      // 第一个的失败刚通知到这里，第二个已经启动了。
-      expect(first.state).toBe(kind);
-      expect(launched(on)).toEqual([failing, next]);
-      release(next);
-      expect(await second.promise).toBe(slotOf(on, next));
-    },
-  );
+    // 第一个的失败刚通知到这里，第二个已经启动了。
+    expect(first.state).toBe(kind);
+    expect(launched(on)).toEqual([failing, next]);
+    release(next);
+    expect(await second.promise).toBe(slotOf(on, next));
+  });
 
-  it("运行中的组全部中止：名额等被杀的进程落定才放，此前下一个没有启动", async () => {
+  it("运行中的组全部中止：名额等转换器落定（cancel 已写、作业目录已删）才放，此前下一个没有启动", async () => {
     const on = rig();
     const cache = cacheOn(on, { concurrency: 1 });
     const abort = new AbortController();
     const next = on.input("b@gate.docx");
     const first = watch(cache.convert(on.input("a@sleep.docx"), abort.signal));
     const second = watch(cache.convert(next));
-    const dying = on.launches[0]?.child;
-    let launchesAtExit: number | undefined;
-    // 排在转换器自己的 exit 监听之后、它引出的微任务之前。
-    dying?.once("exit", () => {
-      launchesAtExit = on.launches.length;
-    });
+    const [dying] = on.launches;
+    await vi.waitFor(() => expect(dying?.request).toBeDefined(), GONE_WITHIN);
 
     abort.abort();
-    await microtasks();
 
-    // 调用方立即落定，进程此刻还没退出：名额还占着。
+    // 同一拍里：cancel 已写，作业目录还在，名额还占着。
+    expect(existsSync(join(dying?.dir ?? "", "cancel"))).toBe(true);
+    expect(jobDirs(on)).toEqual([dying?.id]);
+    await microtasks();
     expect(first.state).toBe("aborted");
-    expect(dying?.exitCode).toBe(null);
-    expect(on.launches).toHaveLength(1);
-    await vi.waitFor(() => expect(on.launches).toHaveLength(2), GONE_WITHIN);
-    expect(dying?.signalCode).toBe("SIGKILL");
-    expect(launchesAtExit).toBe(1);
+    await vi.waitFor(() => expect(launched(on)).toHaveLength(2), GONE_WITHIN);
+    expect(existsSync(dying?.dir ?? "")).toBe(false);
+    await vi.waitFor(() => expect(dying?.cancelAt).toBeDefined(), GONE_WITHIN);
     release(next);
     expect(await second.promise).toBe(slotOf(on, next));
-  });
-
-  it("OMP_USER 模式：假 sudo 被 SIGKILL 后名额已释放，随后的转换立即启动", async () => {
-    const on = rig({ sudo: false });
-    symlinkSync(FAKE_SOFFICE, join(on.bin, "sudo"));
-    setEnv("PATH", `${on.bin}:${dirname(process.execPath)}:/usr/bin:/bin`);
-    const cache = cacheOn(on, { concurrency: 1, timeoutMs: 3_000, ompUser: "omp" });
-    const next = on.input("b.docx");
-
-    const first = watch(cache.convert(on.input("a@spawn-sleep.docx")));
-    const second = watch(cache.convert(next));
-    expect(on.launches).toHaveLength(1);
-    await first.promise.catch(() => undefined);
-
-    const job = String(on.launches[0]?.options.cwd);
-    const record = JSON.parse(
-      readFileSync(join(on.work, `${basename(job)}.record.json`), "utf8"),
-    ) as { childPid: number };
-    try {
-      expect(first.state).toBe("timeout");
-      // 两次转换各恰启动一次假 sudo；第二次在第一次落定的同时就启动了。
-      expect(on.launches.map(({ command }) => command)).toEqual(["sudo", "sudo"]);
-      expect(on.launches[0]?.child.signalCode).toBe("SIGKILL");
-      // 假 sudo 派生的进程没有随它结束（D-25 残余的同 uid 等价物）：它不占名额。
-      expect(() => process.kill(record.childPid, 0)).not.toThrow();
-      expect(await second.promise).toBe(slotOf(on, next));
-    } finally {
-      process.kill(record.childPid, "SIGKILL");
-    }
   });
 });
 
@@ -382,11 +336,11 @@ describe("并发上限与排队：队满", { timeout: 20_000 }, () => {
 });
 
 describe("并发上限与排队：同一输入只转一次", { timeout: 20_000 }, () => {
-  it("同一输入并发三次：恰启动一次、同一路径；一个中止其余两个成功，进程没被杀", async () => {
+  it("同一输入并发三次：恰启动一次、同一路径；一个中止其余两个成功，作业没被 cancel", async () => {
     const on = rig();
     const cache = cacheOn(on, { concurrency: 2 });
     const input = on.input("a@gate.docx");
-    // 中止的是开出这一组的那个调用：把它的 signal 直接交给转换器的实现会在这里杀掉进程。
+    // 中止的是开出这一组的那个调用：把它的 signal 直接交给转换器的实现会在这里写下 cancel。
     const opener = new AbortController();
     const calls = [
       watch(cache.convert(input, opener.signal)),
@@ -400,6 +354,8 @@ describe("并发上限与排队：同一输入只转一次", { timeout: 20_000 }
     expect(launched(on)).toEqual([input, other]);
 
     opener.abort();
+    const shared = on.launches[0];
+    expect(existsSync(join(shared?.dir ?? "", "cancel"))).toBe(false);
     await microtasks();
     expect(states(calls)).toEqual(["aborted", "pending", "pending"]);
 
@@ -409,9 +365,8 @@ describe("并发上限与排队：同一输入只转一次", { timeout: 20_000 }
       slotOf(on, input),
       slotOf(on, other),
     ]);
-    const child = on.launches[0]?.child;
-    await vi.waitFor(() => expect(child?.exitCode).toBe(0), GONE_WITHIN);
-    expect(child?.signalCode).toBe(null);
+    expect(shared?.answer).toBe("done");
+    expect(shared?.cancelAt).toBeUndefined();
     expect(on.launches).toHaveLength(2);
     expect(readFileSync(slotOf(on, input), "utf8")).toBe(PDF);
     expect(readdirSync(on.pdf).sort()).toEqual(
@@ -419,7 +374,7 @@ describe("并发上限与排队：同一输入只转一次", { timeout: 20_000 }
     );
   });
 
-  it("同键三个调用全部中止：进程被 SIGKILL、pdf/ 为空，随后同一输入重新启动并成功", async () => {
+  it("同键三个调用全部中止：作业被 cancel、pdf/ 为空，随后同一输入重新启动并成功", async () => {
     const on = rig();
     const cache = cacheOn(on, { concurrency: 2 });
     const input = on.input("a@gate.docx");
@@ -430,16 +385,17 @@ describe("并发上限与排队：同一输入只转一次", { timeout: 20_000 }
     for (const abort of aborts) {
       abort.abort();
     }
+    const dying = on.launches[0];
+    expect(existsSync(join(dying?.dir ?? "", "cancel"))).toBe(true);
     // 同一拍里再来的同键调用另开一组，不挂在将死的那一组上。
     const again = watch(cache.convert(input));
     expect(on.launches).toHaveLength(2);
     await microtasks();
     expect(states([...calls, again])).toEqual(["aborted", "aborted", "aborted", "pending"]);
 
-    const dying = on.launches[0]?.child;
-    await vi.waitFor(() => expect(dying?.signalCode).toBe("SIGKILL"), GONE_WITHIN);
+    await vi.waitFor(() => expect(dying?.cancelAt).toBeDefined(), GONE_WITHIN);
     expect(readdirSync(on.pdf)).toEqual([]);
-    // 被杀的那一组落定、放了名额（作业目录只剩新组的）：它从键表里只删自己，再来的同键调用加入新组。
+    // 被 cancel 的那一组落定、放了名额（作业目录只剩新组的）：它从键表里只删自己，再来的同键调用加入新组。
     await vi.waitFor(() => expect(jobDirs(on)).toHaveLength(1), GONE_WITHIN);
     await microtasks();
     const joiner = watch(cache.convert(input));
@@ -477,22 +433,21 @@ describe("并发上限与排队：关停与参数", { timeout: 20_000 }, () => {
     const head = watch(cache.convert(running));
     // 最后一组有两个调用方。
     const calls = [...queued, queued[2] as string].map((input) => watch(cache.convert(input)));
-    const child = on.launches[0]?.child;
+    const [job] = on.launches;
 
     const closing = cache.close();
+    // 运行中的作业在 close() 调用的同一拍里就被写下 cancel，目录此刻还在。
+    expect(existsSync(join(job?.dir ?? "", "cancel"))).toBe(true);
     await microtasks();
 
-    // 排队的在 close() 调用的同一拍里就落定了：运行中的那个进程此刻还没退出。
+    // 排队的在 close() 调用的同一拍里就落定了。
     expect(states(calls)).toEqual(["aborted", "aborted", "aborted", "aborted"]);
-    expect(head.state).toBe("pending");
-    expect(child?.exitCode).toBe(null);
-    expect(child?.signalCode).toBe(null);
 
     await closing;
 
-    // close() 返回时排队者已全部落定，运行中的进程已经退出。
+    // close() 返回时排队者已全部落定，运行中的作业目录已删。
     expect(states([head, ...calls])).toEqual(new Array(5).fill("aborted"));
-    expect(child?.signalCode).toBe("SIGKILL");
+    await vi.waitFor(() => expect(job?.cancelAt).toBeDefined(), GONE_WITHIN);
     expect(on.launches).toHaveLength(1);
     expect(jobDirs(on)).toEqual([]);
 
@@ -506,7 +461,7 @@ describe("并发上限与排队：关停与参数", { timeout: 20_000 }, () => {
   it("close()：转换器已交回副本、正在改名的共用任务——等它落定才返回，返回时位置上已是 PDF", async () => {
     const on = rig();
     const input = on.input("a.docx");
-    const produced = join(on.work, "produced.pdf");
+    const produced = join(on.root, "produced.pdf");
     writeFileSync(produced, PDF);
     // 替身转换器：立即交回一个真实文件，它的 close() 不等任何东西——等改名的只能是缓存自己。
     const cache = createOfficeCache({
@@ -529,7 +484,7 @@ describe("并发上限与排队：关停与参数", { timeout: 20_000 }, () => {
     expect(returned).toBe(false);
     await closing;
     expect(readFileSync(slotOf(on, input), "utf8")).toBe(PDF);
-    expect(readdirSync(on.work)).toEqual([]);
+    expect(existsSync(produced)).toBe(false);
   });
 
   it("concurrency 为 0、负数、小数：构造即抛固定 message", () => {

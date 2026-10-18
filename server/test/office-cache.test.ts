@@ -1,15 +1,14 @@
 /**
- * Issue #1072（任务 14.3，含分摊的 14.5 / 14.6 条款）：office-preview「转换缓存」——键、命中、
- * 复制、失败不入缓存与 `pdf` 的周期清理。启动时对 `work` 的清空在 `office-work-clear.test.ts`。
+ * Issue #1072（任务 14.3，含分摊的 14.5 / 14.6 条款）：office-preview「转换缓存与作业目录清理」——
+ * 键、命中、复制、失败不入缓存、`pdf` 的周期清理与启动时对 spool `jobs/` 的清空（issue 1505）。
  *
- * 转换对着 `fixtures/fake-soffice.mjs` 真实 spawn；注入的 spawn 包装器（`office-cache-helpers.ts`）
- * 记录每次启动，是「零启动」「重新启动」的判据。期望的键与 PDF 字节是照规格抄的字面量，不引用
- * 源码常量，也不拿 `officeCacheKey` 的返回值当期望。
+ * 转换对着进程内的假 sidecar（`office-cache-helpers.ts`）；它发现的作业（`launches`）是「零作业」
+ * 「重新转换」的判据。期望的键与 PDF 字节是照规格抄的字面量，不引用源码常量，也不拿
+ * `officeCacheKey` 的返回值当期望。
  */
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  existsSync,
   lstatSync,
   lutimesSync,
   mkdirSync,
@@ -35,14 +34,13 @@ import {
   BODY,
   bench,
   closers,
-  FAKE_SOFFICE,
   INPUT_MTIME_S,
   PDF,
   useOfficeBenches,
 } from "./office-cache-helpers.js";
 
 const DAY_MS = 86_400_000;
-const BAD_PATHS = "cacheDir and officeBin must be absolute paths";
+const BAD_PATHS = "cacheDir and spoolDir must be absolute paths";
 const isRoot = process.geteuid?.() === 0;
 
 useOfficeBenches();
@@ -59,13 +57,13 @@ function literalKey(path: string, mtimeMs: string, size: string): string {
   return createHash("sha256").update(preimage).digest("hex");
 }
 
-function cacheOn(on: Bench, overrides: { officeBin?: string | null; timeoutMs?: number } = {}) {
-  const { officeBin = FAKE_SOFFICE, timeoutMs = 20_000 } = overrides;
+function cacheOn(on: Bench, overrides: { spoolDir?: string | null; timeoutMs?: number } = {}) {
+  const { spoolDir = on.spool, timeoutMs = 20_000 } = overrides;
   const converter = createOfficeConverter({
-    ...(officeBin === null ? {} : { officeBin }),
+    ...(spoolDir === null ? {} : { spoolDir }),
     cacheDir: on.cacheDir,
     timeoutMs,
-    spawn: on.spawn,
+    pollMs: 20,
   });
   const cache = createOfficeCache({ cacheDir: on.cacheDir, converter, concurrency: 2 });
   closers.push(cache);
@@ -119,7 +117,7 @@ describe("转换缓存：命中、失效与复制", () => {
   it("缓存文件是本进程新建的副本：0600、属本进程，inode 不是作业目录里的那个输出", async () => {
     const on = bench();
     const input = on.input("a.docx");
-    const probe = await open(FAKE_SOFFICE);
+    const probe = await open(input);
     const proto = Object.getPrototypeOf(probe) as FileHandle;
     await probe.close();
     const fstat = proto.stat as (this: FileHandle) => Promise<Stats>;
@@ -127,7 +125,7 @@ describe("转换缓存：命中、失效与复制", () => {
     const jobOutputInodes: number[] = [];
     vi.spyOn(proto, "stat").mockImplementation(async function (this: FileHandle) {
       const seen = await fstat.call(this);
-      const job = String(on.launches.at(-1)?.options.cwd);
+      const job = String(on.launches.at(-1)?.dir);
       const output = lstatSync(join(job, "out", "a.pdf"), { throwIfNoEntry: false });
       if (output?.ino === seen.ino && output.dev === seen.dev) {
         jobOutputInodes.push(seen.ino);
@@ -188,7 +186,7 @@ describe("转换缓存：命中、失效与复制", () => {
     expect(readdirSync(on.pdf).sort()).toEqual([basename(first), basename(second)].sort());
   });
 
-  it("输入是指向另一个文件的符号链接：键取自链接自己的 lstat，不是目标的大小与修改时间", async () => {
+  it("输入是指向另一个文件的符号链接：键取自链接自己的 lstat；转换 failed，不建作业目录，pdf/ 为空", async () => {
     const on = bench();
     const target = on.input("a.docx");
     const link = join(on.root, "ws", "link.docx");
@@ -200,10 +198,10 @@ describe("转换缓存：命中、失效与复制", () => {
     const key = literalKey(link, "1700000001000", "6");
 
     expect(await officeCacheKey(link)).toBe(key);
-    expect(await cacheOn(on).convert(link)).toBe(join(on.pdf, `${key}.pdf`));
-
-    expect(on.launches).toHaveLength(1);
-    expect(readdirSync(on.pdf)).toEqual([`${key}.pdf`]);
+    // change office-convert-sandbox「sidecar 转换契约」：输入以 `openRegularFile` 打开，末段是链接即 failed。
+    expect(await kindOf(cacheOn(on).convert(link))).toBe("failed");
+    expect(on.launches).toEqual([]);
+    expect([readdirSync(on.jobs), readdirSync(on.pdf)]).toEqual([[], []]);
   });
 
   it("键的位置上是 0 字节文件：不算命中，重新转换", async () => {
@@ -268,9 +266,9 @@ describe("转换缓存：命中、失效与复制", () => {
     expect(on.launches).toHaveLength(1);
   });
 
-  it("未配置 officeBin：available 为 false，对不存在的输入也是 unavailable，零启动", async () => {
+  it("未配置 spoolDir：available 为 false，对不存在的输入也是 unavailable，零启动", async () => {
     const on = bench();
-    const cache = cacheOn(on, { officeBin: null });
+    const cache = cacheOn(on, { spoolDir: null });
 
     expect(cache.available).toBe(false);
     expect(await kindOf(cache.convert(join(on.root, "ws", "missing.docx")))).toBe("unavailable");
@@ -292,13 +290,13 @@ describe("转换缓存：命中、失效与复制", () => {
     expect(readdirSync(on.pdf)).toEqual([basename(planted)]);
   });
 
-  it("输入不存在：failed，零启动，work 与 pdf 下都没有新增", async () => {
+  it("输入不存在：failed，零启动，jobs 与 pdf 下都没有新增", async () => {
     const on = bench();
 
     expect(await kindOf(cacheOn(on).convert(join(on.root, "ws", "missing.docx")))).toBe("failed");
 
     expect(on.launches).toEqual([]);
-    expect(readdirSync(on.work)).toEqual([]);
+    expect(readdirSync(on.jobs)).toEqual([]);
     expect(readdirSync(on.pdf)).toEqual([]);
   });
 
@@ -316,7 +314,7 @@ describe("转换缓存：命中、失效与复制", () => {
     expect(readdirSync(slot)).toEqual(["keep"]);
   });
 
-  it("cacheDir 不是绝对路径：两个工厂都同步抛固定 message；清理工厂对相对的 officeBin 同样", () => {
+  it("cacheDir 不是绝对路径：两个工厂都同步抛固定 message；清理工厂对相对的 spoolDir 同样", () => {
     const on = bench();
     const converter = createOfficeConverter({ cacheDir: on.cacheDir, timeoutMs: 1_000 });
 
@@ -326,56 +324,43 @@ describe("转换缓存：命中、失效与复制", () => {
     expect(() => createOfficeCleanup({ cacheDir: "var/preview-cache" })).toThrow(
       new Error(BAD_PATHS),
     );
-    expect(() => createOfficeCleanup({ cacheDir: on.cacheDir, officeBin: "./soffice" })).toThrow(
+    expect(() => createOfficeCleanup({ cacheDir: on.cacheDir, spoolDir: "spool" })).toThrow(
       new Error(BAD_PATHS),
     );
   });
 });
 
 describe("转换缓存：失败不入缓存", () => {
-  /**
-   * 第一次启动的替身：先在作业目录里写出完好的 PDF（D-25 的真实形状——被终止的作业留下完整的
-   * 输出），写一个「已写完」的标记，再按模式退出 1 或一直睡。
-   */
-  const WRITE_THEN_FAIL = [
-    'const { mkdirSync, writeFileSync } = require("node:fs");',
-    'mkdirSync("out");',
-    `writeFileSync("out/a.pdf", ${JSON.stringify(PDF)});`,
-    'writeFileSync(process.argv[2], "written");',
-    'if (process.argv[1] === "exit1") { process.exit(1); }',
-    "setTimeout(() => {}, 30000);",
-  ].join("\n");
-
+  // 假 sidecar 对第一个作业先写出完好的 PDF（D-25 的形状），再写 `failed: exit` 或一直不写标记。
   it.each<[kind: string, mode: string, timeoutMs: number]>([
     ["failed", "exit1", 20_000],
-    ["timeout", "sleep", 1_000],
-    ["aborted", "sleep", 20_000],
+    ["timeout", "hang", 1_000],
+    ["aborted", "hang", 20_000],
   ])(
-    "写出完好 PDF 之后以 %s 结束：pdf/ 为空；同一输入再转换启动了进程并成功",
+    "写出完好 PDF 之后以 %s 结束：pdf/ 为空；同一输入再转换写了新作业并成功",
     async (kind, mode, timeoutMs) => {
       const on = bench();
       const input = on.input("a.docx");
-      const written = join(on.root, "written");
       const cache = cacheOn(on, { timeoutMs });
       const controller = new AbortController();
-      on.standIn = [WRITE_THEN_FAIL, mode, written];
+      on.sidecar.next = mode;
 
       const attempt = kindOf(cache.convert(input, controller.signal));
       if (kind === "aborted") {
-        await until("the stand-in to write its PDF", () => existsSync(written));
+        await until("the stand-in to write its PDF", () => on.launches[0]?.output !== undefined);
         controller.abort();
       }
 
       expect(await attempt).toBe(kind);
-      // 替身确实把 PDF 写出来了：下面的「为空」不是因为根本没有输出可收。
-      expect(existsSync(written)).toBe(true);
+      // 假 sidecar 确实把 PDF 写出来了：下面的「为空」不是因为根本没有输出可收。
+      expect(on.launches[0]?.output).toBe(join("out", "a.pdf"));
       expect(on.launches).toHaveLength(1);
       expect(readdirSync(on.pdf)).toEqual([]);
 
       const result = await cache.convert(input);
 
       expect(on.launches).toHaveLength(2);
-      expect(on.launches[1]?.command).toBe(FAKE_SOFFICE);
+      expect(on.launches[1]?.answer).toBe("done");
       expect(result).toBe(join(on.pdf, `${literalKey(input, "1700000000000", "26")}.pdf`));
       expect(readFileSync(result, "utf8")).toBe(PDF);
       expect(readdirSync(on.pdf)).toEqual([basename(result)]);
@@ -449,14 +434,37 @@ describe("转换缓存：周期清理", () => {
     expect(readdirSync(on.pdf)).toEqual(["old.pdf"]);
   });
 
-  it("pdf 与 work 都不存在：两个清理函数都不抛", async () => {
+  it("pdf 与 jobs 都不存在：两个清理函数都不抛", async () => {
     const on = bench();
     rmSync(on.pdf, { recursive: true });
-    rmSync(on.work, { recursive: true });
-    const cleanup = createOfficeCleanup({ cacheDir: on.cacheDir });
+    rmSync(on.jobs, { recursive: true });
+    const cleanup = createOfficeCleanup({ cacheDir: on.cacheDir, spoolDir: on.spool });
 
     await expect(cleanup.sweepPdf(NOW)).resolves.toBe(undefined);
     await expect(cleanup.clearWork()).resolves.toBe(undefined);
     expect(readdirSync(on.cacheDir)).toEqual([]);
   });
+
+  it.skipIf(isRoot)(
+    "启动清空 jobs/：遗留作业与指向外部的链接被删（链接不被跟随），0500 的非空目录留下，jobs 自身仍在；不给 spoolDir 时不碰 spool",
+    async () => {
+      const on = bench();
+      const outside = join(on.root, "outside");
+      mkdirSync(join(outside, "nested"), { recursive: true });
+      writeFileSync(join(outside, "nested", "keep"), "not ours");
+      for (const name of ["0123", "4567", "89ab"]) {
+        mkdirSync(join(on.jobs, name, "in"), { recursive: true });
+      }
+      symlinkSync(join(outside, "nested"), join(on.jobs, "4567", "link"));
+      symlinkSync(outside, join(on.jobs, "link"));
+      chmodSync(join(on.jobs, "89ab"), 0o500);
+      await createOfficeCleanup({ cacheDir: on.cacheDir }).clearWork();
+      expect(readdirSync(on.jobs)).toHaveLength(4);
+
+      await createOfficeCleanup({ cacheDir: on.cacheDir, spoolDir: on.spool }).clearWork();
+      expect(readdirSync(on.jobs)).toEqual(["89ab"]);
+      expect(readFileSync(join(outside, "nested", "keep"), "utf8")).toBe("not ours");
+      expect(readdirSync(on.spool).sort()).toEqual(["heartbeat", "jobs"]);
+    },
+  );
 });

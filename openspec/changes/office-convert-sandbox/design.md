@@ -200,6 +200,8 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 | `server/test/office-converter-output.test.ts`（189 行） | 输出复制的四种边界 | 4 | 输出由假 sidecar 写而不是假 `soffice`，断言不变 | S1b |
 | `server/test/office-queue.test.ts:72-90`（`cacheOn`）、`:220-249` | 构造带 `officeBin`；`sudo` 链到假 `soffice`、`commands toEqual(["sudo","sudo"])`、派生子进程不随之结束（`:241` D-25 等价物） | 4 / 5 | `cacheOn` 改传 `spoolDir`（假 sidecar）；`:220-249` 整例删除（它钉的是 `OMP_USER` 终止只杀 `sudo`——REMOVED） | S1b |
 | `server/test/office-cache.test.ts:45`（`BAD_PATHS`）、`:319-331`（两个工厂 + `createOfficeCleanup({cacheDir, officeBin: "./soffice"})`） | message `cacheDir and officeBin must be absolute paths`（`office.ts:213`、`office-cache.ts:63`） | 3 | 两个工厂的 message 都改为 `cacheDir and spoolDir must be absolute paths`；`officeBin: "./soffice"` → `spoolDir: "spool"` | S1b |
+| `server/test/office-cache.test.ts:189-205`（符号链接输入经缓存转换成功；S1b 开工后补登，2026-10-17） | 符号链接输入可转换 | 3 | 新规格「sidecar 转换契约」：输入本就是符号链接 → `failed`；保留 `officeCacheKey(link)` 断言，`convert(link)` 期望 `failed`、无作业目录、`pdf/` 为空 | S1b |
+| `server/test/office-queue.test.ts:179-201`（中止例：`launchesAtExit === 1`、`exitCode/signalCode`、微任务后 `launches` 仍 1）、`:429-459`（`close()` 例：`head.state === "pending"`、子进程 `exitCode/signalCode === null`；同日补登） | 中止 / 关停时的子进程退出状态与「前一个落定后下一个才启动」的直接观察 | 4 / 5 | sidecar 下 app 不再有子进程，「被杀但未退出」窗口不存在：中止例改为「同一拍 `cancel` 已写、`jobDirs` 恰为 `[dying.id]`」；`close()` 例删子进程状态断言。排队次序由未改动的 `office-queue.ts` 自身用例保证（读代码推出） | S1b |
 | `office-cache.test.ts:62-70`、`:271-279`（`cacheOn(on, { officeBin: null })`）、`:297-303`（`readdirSync(on.work)`）、`:335-384`（`standIn` 换 `node -e`） | 构造带 `officeBin`；`officeBin` 缺席 → `unavailable`；`work/` 为空；`standIn` 换下一次启动的命令 | 4 | 改传 `spoolDir`；`officeBin: null` → 不传 `spoolDir`（同一事实：`unavailable`）；`readdirSync(work)` → `readdirSync(<spool>/jobs)` 为空；`standIn` 改为让假 sidecar 对下一个作业按指定行为应答（同一事实：失败不入缓存、再次转换成功） | S1b |
 | `server/test/office-cache-helpers.ts:27`（`FAKE_SUDO`）、`:117-126`（`bench(layout = {sudo: true})`：建 `work` `2770`、`bin/sudo` 链到 `FAKE_SUDO`） | `sudo` 夹具与 `work` 布局 | 4 / 5 | 删 `FAKE_SUDO` 与 `layout.sudo`（REMOVED 的 `sudo` 形状）；`bench()` 不建 `work`、建临时 spool 并启动假 sidecar；导出 `FAKE_SIDECAR` | S1b |
 | `server/test/server-startup-office.test.ts:80-85`（`sofficeRecords` 读 `preview-cache/work/*.record.json`）、`:104-272` | 读假 `soffice` 的记录；`OFFICE_BIN` 指向假 `soffice`；SIGTERM 杀在途 `soffice` | 4 | `sofficeRecords` 改读进程内假 sidecar 的记录；env 改 `OFFICE_SPOOL_DIR`；杀在途改为「假 sidecar 记录到 `cancel`」 | S1b |
@@ -269,6 +271,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - **仍成立、不改**：preview-origin 其余；sandbox-core；omp-uid-isolation 其余四条；office-preview「办公文档预览路由」的五个场景与路由代码（只有 requirement 正文一句进 MODIFIED）。
 
 ## Risks / Trade-offs
+- **`heartbeat` 属主检查未被单独钉住**（S1b 实测，2026-10-17）：`office-sidecar-health.ts` 的预检对 spool 根与 `heartbeat` 用同一个注入 uid，根属主检查先命中，删掉 `heartbeat` 属主分支后单元测试仍绿；分支本身保留（读代码推出：属主不符 → `available=false`）。要单独钉住需给测试注入两个 uid，本 change 不改接口；S2b (d) 的实测不覆盖它。
 
 - **[Docker 成为办公文档预览的前提]** → 没有 Docker 的主机办公文档预览不可用（fail-closed，其余功能不受影响）。owner B7 接受；system.md 写明。
 - **[spool 协议是新造的]** → 两侧实现对不上就是 `failed` / 超时。缓解：协议只有三个文件名、三个 JSON 键、六个原因码；单一真相写在 sidecar 头注释与规格；sidecar 测试与 app 侧测试用同一份假 `soffice` 字面量；CI e2e 走产品代码两端。

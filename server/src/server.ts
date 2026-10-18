@@ -1,8 +1,8 @@
 /**
- * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档转换器 → createApp →
- * listen → 托管布局 → 沙箱根 → 预览监听器 listen → 两个托管文件 → 预览缓存目录（含清空 `work/`）→
- * 转换器开始受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局紧随其后，#1337；
- * 沙箱根紧随托管布局，change sandbox-boundary-closure）。
+ * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档 sidecar 预检 → 转换器 →
+ * createApp → listen → 托管布局 → 沙箱根 → 预览监听器 listen → 两个托管文件 → 预览缓存目录（含清空
+ * spool 的 `jobs/`）→ 转换器开始受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局
+ * 紧随其后，#1337；沙箱根紧随托管布局，change sandbox-boundary-closure；预检，change office-convert-sandbox）。
  *
  * ESM main guard：import 本模块只暴露纯配置 seam（resolveServerConfig），不产生任何
  * startup/signal/filesystem 副作用；只有直接执行本模块（import.meta.main）才进入主路径。
@@ -28,18 +28,18 @@
  *   overlay 写出之前 spawn 的 omp v18.0.10 以 `Config overlay not found` 退出码 1 退出、不到
  *   `ready`（实测范围：macOS arm64、无 `OMP_USER`、手工按 `spawnOmp` 的 argv/env 运行官方二进制；
  *   Linux、sudo/setpriv 形状与入口对这次退出的处置未测，见 ADR-0014 的 #1337 行）；
- * - 关停与失败清理同一条路：终止启动时那条 `sudo … find`（若仍在途）→ 转换器 `close()`（终止在途
- *   转换并等自己启动的进程退出）→ 两个周期清理的定时器 → 预览监听器 → 主实例（其 preClose 里
- *   runtime 退出，再关主监听器）→ DB。预览监听器先于 runtime 关：omp 只连主监听器上的模型代理，
- *   预览实例没有 `/api` 与 `/v1`。转换器先于预览监听器关：在途的 `/o/` 请求因此立即以断开结束，
- *   不占监听器的关停预算；
- * - 转换器在第一次 `listen` 之前构造（构造不碰文件系统、不起进程），但 `/o/` 要到 `clearWork`
- *   落定之后才启动转换（此前答 503）：那条清空会删掉在途转换的作业目录；
+ * - 关停与失败清理同一条路：转换器 `close()`（对在途作业写 `cancel` 并等它们落定）→ 两个周期清理的
+ *   定时器 → 预览监听器 → 主实例（其 preClose 里 runtime 退出，再关主监听器）→ DB。预览监听器先于
+ *   runtime 关：omp 只连主监听器上的模型代理，预览实例没有 `/api` 与 `/v1`。转换器先于预览监听器关：
+ *   在途的 `/o/` 请求因此立即以断开结束，不占监听器的关停预算；
+ * - sidecar 预检（`app` 阶段，至多 `await` 5 秒，永不使启动失败）之后、写失败行之前核对信号，与主
+ *   listen 之后同形；转换器随后构造（构造不碰文件系统、不起进程），但 `/o/` 要到 `clearWork`（清空
+ *   spool 的 `jobs/`）落定之后才启动转换（此前答 503）：那次清空会删掉在途转换的作业目录；
  * - #1286（change sandbox-boundary-closure 有界闭合，owner B1）：本入口给 `sweep`（每次启动与每 6 小时）、
  *   `/w/`、`/o/`、`clearWork` 提供生产调用方。`sweep` 的 `.trash` 换入随根的粘滞位关闭（根为 `3770` 时；
- *   读代码推出），四条读路由的末段换入已闭合（钩子辅助复现）；`clearWork` 的 `work/` 与中间分量残余仍在。
- *   陈述与证据等级见 `workspaces/trash.ts`、`preview/app.ts`、`preview/office-cache.ts` 的头注释；本入口
- *   只是调用方，没有为它们加任何检查；
+ *   读代码推出），四条读路由的末段换入已闭合（钩子辅助复现）；`clearWork` 对 `jobs/` 的递归删除仍有
+ *   中间分量的残余。陈述与证据等级见 `workspaces/trash.ts`、`preview/app.ts`、`preview/office-cache.ts`
+ *   的头注释；本入口只是调用方，没有为它们加任何检查；
  * - 启动成功/失败发布都走 Promise 管理的单行 writer：同步 throw / write callback /
  *   stream error 三路只 settle 一次，error 事件被消费后才移除监听，绝不抛原始 stack。
  */
@@ -66,6 +66,7 @@ import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-
 import { createPreviewApp } from "./preview/app.js";
 import { createOfficeConverter, type OfficeConverter } from "./preview/office.js";
 import { createOfficeCache, createOfficeCleanup } from "./preview/office-cache.js";
+import { preflightOfficeSidecar } from "./preview/office-sidecar-health.js";
 import { createPreviewTokens, type PreviewTokens } from "./preview/tokens.js";
 import { type PreviewSettings, resolvePreviewSettings } from "./preview-config.js";
 import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
@@ -77,10 +78,12 @@ import { writeManagedLine } from "./startup-writer.js";
 import { createTrash } from "./workspaces/trash.js";
 
 const PRIVATE_DB_FILE_MODE = 0o600;
-/** 预览缓存目录的三个 mode（design D18）：根、`work`（omp 用户可写）、`pdf`。 */
+/** 预览缓存目录的两个 mode（design D18）与 spool 的 `jobs/`（change office-convert-sandbox）。 */
 const PREVIEW_CACHE_DIR_MODE = 0o2750;
-const PREVIEW_WORK_DIR_MODE = 0o2770;
 const PREVIEW_PDF_DIR_MODE = 0o700;
+const SPOOL_JOBS_DIR_MODE = 0o700;
+/** 启动预检的三个时间参数（office-preview「转换 sidecar 的健康与 fail-closed」）；写死。 */
+const SIDECAR_PREFLIGHT = { waitMs: 5_000, pollMs: 100, freshMs: 10_000 };
 /** 回收目录的清理周期（design D22）：6 小时。 */
 const TRASH_SWEEP_INTERVAL_MS = 21_600_000;
 /** 转换缓存 `pdf/` 的清理周期（office-preview「转换缓存」）：24 小时。 */
@@ -197,33 +200,35 @@ function writeRecord(
     | HandshakeTimeoutRecord
     | UpstreamFailedRecord
     | TodoRejection
-    | { event: "preview_work_clear_failed" },
+    | { event: "office_convert_sidecar_unavailable" },
 ): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
     // Sink unavailable: the record is observation only and never changes the request or exit code.
   });
 }
 
-type OfficeCleanup = ReturnType<typeof createOfficeCleanup>;
+type Office = ReturnType<typeof officeOf>;
 
 /**
- * 办公文档转换器（单次转换外面包缓存、排队与去重）与预览缓存目录的清理对象。构造不碰文件系统、
- * 不起进程；`OFFICE_BIN` 未配置时转换器的 `available` 为 `false`。两者拿到的是同一组
- * `cacheDir` / `officeBin` / `ompUser`：`clearWork` 只在后两者同时配置时执行 `sudo … find`。
+ * 办公文档转换器（外面包缓存、排队与去重）、清理对象与要建的 `jobs/`；构造不碰文件系统、不起进程。
+ * 只有预检通过（`sidecarOk`）时两者才拿到 spool，否则转换器 `available` 为 `false`、清理不碰 spool。
+ * `OMP_USER` 不参与；转换器的 `log` 是同一受管 stderr writer。
  */
-function officeOf(config: ServerConfig): { converter: OfficeConverter; cleanup: OfficeCleanup } {
-  const identity = {
+function officeOf(config: ServerConfig, sidecarOk: boolean) {
+  const spoolDir = sidecarOk ? config.officeSpoolDir : undefined;
+  const spool = {
     cacheDir: config.previewCacheDir,
-    ...(config.officeBin === undefined ? {} : { officeBin: config.officeBin }),
-    ...(config.ompUser === undefined ? {} : { ompUser: config.ompUser }),
+    ...(spoolDir === undefined ? {} : { spoolDir }),
   };
+  const timeoutMs = config.officeConvertTimeoutMs;
   return {
     converter: createOfficeCache({
       cacheDir: config.previewCacheDir,
-      converter: createOfficeConverter({ ...identity, timeoutMs: config.officeConvertTimeoutMs }),
+      converter: createOfficeConverter({ ...spool, timeoutMs, log: writeRecord }),
       concurrency: config.officeConvertConcurrency,
     }),
-    cleanup: createOfficeCleanup({ ...identity, log: writeRecord }),
+    cleanup: createOfficeCleanup(spool),
+    jobs: spoolDir === undefined ? undefined : join(spoolDir, "jobs"),
   };
 }
 
@@ -356,8 +361,6 @@ interface OwnedResources {
   preview: FastifyInstance | undefined;
   /** 办公文档转换器：先于两个监听器关闭。 */
   converter: OfficeConverter | undefined;
-  /** 终止启动时那条 `sudo … find`；调用过之后 `clearWork` 不再启动它。 */
-  stopWorkClear: (() => void) | undefined;
   /** `clearWork` 落定之后才为真：此前 `/o/` 不启动转换。 */
   officeReady: boolean;
   /** 回收目录清理的周期定时器（已 unref）。 */
@@ -393,7 +396,6 @@ function runEntrypoint(): void {
     app: undefined,
     preview: undefined,
     converter: undefined,
-    stopWorkClear: undefined,
     officeReady: false,
     trashTimer: undefined,
     pdfTimer: undefined,
@@ -420,6 +422,18 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     }
     owned.db = openDb(config.dbPath);
     owned.stage = "app";
+    // 预检永不 reject；等待中到达的信号在这里核对：此时只拥有 DB，返回即干净取消、不写那一行。
+    const spoolDir = config.officeSpoolDir;
+    const sidecarOk =
+      spoolDir !== undefined && (await preflightOfficeSidecar({ spoolDir, ...SIDECAR_PREFLIGHT }));
+    if (owned.signalReceived) {
+      await releaseOwned(owned);
+      return;
+    }
+    // 没过（owner B3）：恰 `event` 一个键的一行，位于 `server_started` 之前；写失败吞掉。
+    if (spoolDir !== undefined && !sidecarOk) {
+      void emitStderrRecord({ event: "office_convert_sidecar_unavailable" });
+    }
     // 启动失败一经判定，失败路径只留 generic 失败记录：强制回收不再发布。两个实例共用这一个回调。
     const onListenerForceClose = (): void => {
       if (!owned.failed && !owned.forceCloseEmitted) {
@@ -431,10 +445,9 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     // 签发端点据此按未装配作答。
     let previewPort = 0;
     const tokens = createPreviewTokens();
-    // 先登记到 owned 再做别的：此后任何一步失败或收到信号，releaseOwned 都会关掉转换器、终止清空。
-    const office = officeOf(config);
+    // 先登记到 owned 再做别的：此后任何一步失败或收到信号，releaseOwned 都会关掉转换器。
+    const office = officeOf(config, sidecarOk);
     owned.converter = office.converter;
-    owned.stopWorkClear = office.cleanup.stopWorkClear;
     const assembly = appAssemblyOf(config, {
       tokens,
       port: () => previewPort,
@@ -491,7 +504,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       return;
     }
     previewPort = boundAddressOf(owned.preview, "preview").port;
-    await publishStarted(owned, config, assembly.trash, office.cleanup);
+    await publishStarted(owned, config, assembly.trash, office);
   } catch {
     // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
     // generic 发布，也不得把退出码降为 0（sticky failure）。
@@ -504,15 +517,16 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
 
 /**
  * 成功记录：两次 listen 之后（托管布局已在两次绑定之间建好）写托管 models 与宿主 overlay、建预览
- * 缓存目录并清空 `work/`，然后才让 `/o/` 受理转换、扫一轮转换缓存并起它的周期清理，再发主监听器
- * 实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。
+ * 缓存目录并清空 spool 的 `jobs/`，然后才让 `/o/` 受理转换、扫一轮转换缓存并起它的周期清理，再发
+ * 主监听器实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。
  */
 async function publishStarted(
   owned: OwnedResources,
   config: ServerConfig,
   trash: ReturnType<typeof createTrash>,
-  cleanup: OfficeCleanup,
+  office: Office,
 ): Promise<void> {
+  const { cleanup } = office;
   // publish 涵盖发布步骤里具名子步骤之外的一切，包括开头这两项核对。
   owned.stage = "publish";
   const app = owned.app;
@@ -530,13 +544,12 @@ async function publishStarted(
   });
   owned.stage = "host_overlay";
   await writeHostOverlay(config.ompStateDir);
-  // 上面两步等待期间收到的信号：`releaseOwned` 的 `stopWorkClear` 已经调用过，那时没有在途的
-  // `sudo`。不建目录、不清空、不记日志，与前面几处核对同样直接返回。
+  // 上面两步等待期间收到的信号：`releaseOwned` 已经开始。不建目录、不清空，同样直接返回。
   if (owned.signalReceived) {
     return;
   }
   owned.stage = "preview_cache";
-  await preparePreviewCache(config.previewCacheDir, cleanup);
+  await preparePreviewCache(config.previewCacheDir, office);
   owned.stage = "publish";
   if (owned.signalReceived || owned.app === undefined) {
     return;
@@ -547,9 +560,9 @@ async function publishStarted(
   }
   // 上面的 signalReceived 核对到这里是同步代码（没有 await）：releaseOwned 若已开始，上面已经返回；
   // 之后才开始的 releaseOwned 会清掉这两个定时器。
-  // `clearWork` 已经落定（成功、失败、超时或被终止都算）：从这里起 `/o/` 才启动转换。
+  // `clearWork` 已经落定（永不 reject；预检未过时不碰 spool）：从这里起 `/o/` 才启动转换。
   owned.officeReady = true;
-  // 不等待：sweepPdf 永不 reject。启动时扫一轮，此后每 24 小时一轮；不看 OFFICE_BIN 是否配置。
+  // 不等待：sweepPdf 永不 reject。启动时扫一轮，此后每 24 小时一轮；不看 OFFICE_SPOOL_DIR 是否配置。
   void cleanup.sweepPdf(Date.now());
   owned.pdfTimer = setInterval(() => void cleanup.sweepPdf(Date.now()), PDF_SWEEP_INTERVAL_MS);
   owned.pdfTimer.unref();
@@ -571,18 +584,19 @@ async function publishStarted(
 }
 
 /**
- * 预览缓存目录（office-preview「转换缓存」）：三个目录各自校正到精确 mode，再清空 `work` 的遗留。
- * `ensureOwnedDir` 不递归，所以先建缺失的父目录（与 DB 父目录同一做法）。同时配置了 `OMP_USER` 与
- * `OFFICE_BIN` 时 `clearWork` 先以 omp 用户执行那条固定参数的 `sudo … find`（owner D-24；有 10 秒
- * 时限，关停时由 `stopWorkClear` 终止，此后也不再启动，owner D-26），否则不提权、不 spawn；两种情况下都再删本进程
- * 删得掉的条目。`clearWork` 永不 reject：它失败只记一行 `preview_work_clear_failed`，不是启动失败。
+ * 预览缓存目录（office-preview「转换缓存与作业目录清理」）：缓存根与 `pdf` 校正到精确 mode（不再建
+ * `work`）；预检通过时再建出 spool 的 `jobs/`（`0700`；spool 根是部署方的卷，不建、不校正），然后本进程
+ * 递归删 `jobs/` 下的遗留条目（`jobs` 自身不删、不启动子进程、不提权）。`ensureOwnedDir` 不递归，所以
+ * 先建缺失的父目录；建目录失败是启动失败（`preview_cache`），`clearWork` 永不 reject。
  */
-async function preparePreviewCache(cacheDir: string, cleanup: OfficeCleanup): Promise<void> {
+async function preparePreviewCache(cacheDir: string, office: Office): Promise<void> {
   mkdirSync(dirname(cacheDir), { recursive: true });
   ensureOwnedDir(cacheDir, PREVIEW_CACHE_DIR_MODE);
-  ensureOwnedDir(join(cacheDir, "work"), PREVIEW_WORK_DIR_MODE);
   ensureOwnedDir(join(cacheDir, "pdf"), PREVIEW_PDF_DIR_MODE);
-  await cleanup.clearWork();
+  if (office.jobs !== undefined) {
+    ensureOwnedDir(office.jobs, SPOOL_JOBS_DIR_MODE);
+  }
+  await office.cleanup.clearWork();
 }
 
 /** 已绑定的 TCP 地址；未绑定（含 listen 被 signal 中止后 resolve 的情形）即抛出。 */
@@ -627,8 +641,7 @@ function addressOf(app: FastifyInstance): AddressInfo | undefined {
 async function releaseOwned(owned: OwnedResources): Promise<void> {
   if (owned.releasing === undefined) {
     owned.releasing = (async () => {
-      // 先终止仍在途的 `sudo … find`，再关转换器：两者都只处置本进程自己启动的子进程。
-      owned.stopWorkClear?.();
+      // 先关转换器：对在途作业写 `cancel`、等它们落定。
       await closeOwnedConverter(owned);
       clearInterval(owned.trashTimer);
       clearInterval(owned.pdfTimer);
@@ -640,7 +653,7 @@ async function releaseOwned(owned: OwnedResources): Promise<void> {
   await owned.releasing;
 }
 
-/** 终止在途转换并等它们落定；此后的 `/o/` 请求以断开结束。 */
+/** 对在途转换写 `cancel` 并等它们落定；此后的 `/o/` 请求以断开结束。 */
 async function closeOwnedConverter(owned: OwnedResources): Promise<void> {
   const converter = owned.converter;
   if (converter === undefined) {

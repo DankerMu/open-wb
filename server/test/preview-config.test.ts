@@ -41,8 +41,8 @@ const OVERRIDES: readonly (readonly [string, string, string, string | number])[]
     "https://preview.example.test",
   ],
   ["PREVIEW_CACHE_DIR", "cache/p", "previewCacheDir", join(REPO_ROOT, "cache", "p")],
-  // 绝对路径原样保留：不绑 repo root，也不规范化。
-  ["OFFICE_BIN", "/opt/x/../soffice", "officeBin", "/opt/x/../soffice"],
+  // 绝对路径原样保留：不绑 repo root，也不规范化（change office-convert-sandbox：`OFFICE_BIN` 的位置）。
+  ["OFFICE_SPOOL_DIR", "/srv/x/../spool", "officeSpoolDir", "/srv/x/../spool"],
   ...NUMERIC.map(([key, field, , value]) => [key, String(value), field, value] as const),
 ];
 const FIELDS = OVERRIDES.map(([, , field]) => field);
@@ -71,8 +71,10 @@ const PORT_RANGE = "must be within 0..65535";
 const ORIGIN_RULE = "must be a scheme and authority only";
 const NOT_EMPTY = "must not be empty";
 const ABSOLUTE = "must be an absolute path";
+/** owner B8：退役键被设置即启动失败，message 点名它与替代者，不含取值。 */
+const RETIRED = "is retired; configure OFFICE_SPOOL_DIR";
 
-/** 规格场景「预览与文件键的非法值」逐键逐值：6 + 5 + 1 + 2 + 8×7 + 1 = 71 例，每例带完整的期望句尾。 */
+/** 规格场景「预览与文件键的非法值」逐键逐值：6 + 5 + 1 + 2 + 1 + 8×7 + 1 = 72 例，每例带完整的期望句尾。 */
 const SPEC_INVALID: readonly (readonly [string, string, string])[] = [
   ["PREVIEW_PORT", "", CANONICAL],
   ["PREVIEW_PORT", "abc", CANONICAL],
@@ -86,8 +88,9 @@ const SPEC_INVALID: readonly (readonly [string, string, string])[] = [
   ["PREVIEW_ORIGIN", "https://a.test/x", ORIGIN_RULE],
   ["PREVIEW_ORIGIN", "ftp://a.test", ORIGIN_RULE],
   ["PREVIEW_CACHE_DIR", "", NOT_EMPTY],
-  ["OFFICE_BIN", "", ABSOLUTE],
-  ["OFFICE_BIN", "soffice", ABSOLUTE],
+  ["OFFICE_SPOOL_DIR", "", ABSOLUTE],
+  ["OFFICE_SPOOL_DIR", "spool", ABSOLUTE],
+  ["OFFICE_BIN", "/usr/bin/soffice", RETIRED],
   ...NUMERIC_KEYS.flatMap((key) =>
     (
       [
@@ -117,8 +120,10 @@ const EXTRA_INVALID: readonly (readonly [string, string, string])[] = [
   ["PREVIEW_ORIGIN", "https://a.test#f", ORIGIN_RULE],
   ["PREVIEW_ORIGIN", "https://a.test\n", ORIGIN_RULE],
   ["PREVIEW_ORIGIN", "https://a b", ORIGIN_RULE],
-  ["OFFICE_BIN", "./soffice", ABSOLUTE],
-  ["OFFICE_BIN", "bin/soffice", ABSOLUTE],
+  ["OFFICE_SPOOL_DIR", "./spool", ABSOLUTE],
+  ["OFFICE_SPOOL_DIR", "var/spool", ABSOLUTE],
+  ["OFFICE_BIN", "", RETIRED],
+  ["OFFICE_BIN", "soffice", RETIRED],
 ];
 
 function configOf(env: Record<string, string | undefined>, entry = SOURCE_ENTRY): ServerConfig {
@@ -160,7 +165,7 @@ describe("resolveServerConfig — 预览与文件键的缺省", () => {
     expect(config.previewPort).toBe(0);
     expect(config.previewOrigin).toBeUndefined();
     expect(config.previewCacheDir).toBe(join(REPO_ROOT, "var", "preview-cache"));
-    expect(config.officeBin).toBeUndefined();
+    expect(config.officeSpoolDir).toBeUndefined();
     expect(config.officeConvertTimeoutMs).toBe(60_000);
     expect(config.officeConvertConcurrency).toBe(2);
     expect(config.previewTextMaxBytes).toBe(1_048_576);
@@ -170,7 +175,7 @@ describe("resolveServerConfig — 预览与文件键的缺省", () => {
     expect(config.previewArchiveMaxEntries).toBe(1_000);
     expect(config.trashRetentionDays).toBe(30);
     expect(Object.hasOwn(config, "previewOrigin")).toBe(false);
-    expect(Object.hasOwn(config, "officeBin")).toBe(false);
+    expect(Object.hasOwn(config, "officeSpoolDir")).toBe(false);
   });
 
   it("十二个键显式为 undefined 与未设置同一结果", () => {
@@ -178,7 +183,7 @@ describe("resolveServerConfig — 预览与文件键的缺省", () => {
 
     expect(explicit).toEqual(configOf({}));
     expect(Object.hasOwn(explicit, "previewOrigin")).toBe(false);
-    expect(Object.hasOwn(explicit, "officeBin")).toBe(false);
+    expect(Object.hasOwn(explicit, "officeSpoolDir")).toBe(false);
   });
 });
 
@@ -234,8 +239,17 @@ describe("resolveServerConfig — 预览与文件键的覆盖", () => {
 });
 
 describe("resolveServerConfig — 预览与文件键的非法值", () => {
-  it("规格列出的非法取值共七十一例", () => {
-    expect(SPEC_INVALID).toHaveLength(71);
+  it("规格列出的非法取值共七十二例", () => {
+    expect(SPEC_INVALID).toHaveLength(72);
+  });
+
+  it("OFFICE_BIN 与合法的 OFFICE_SPOOL_DIR 同时给出仍被拒：message 恰为退役句，不含取值", () => {
+    expect(() =>
+      resolveServerConfig(
+        { OFFICE_BIN: "/opt/zq/soffice", OFFICE_SPOOL_DIR: "/srv/spool" },
+        SOURCE_ENTRY,
+      ),
+    ).toThrow(new Error("OFFICE_BIN is retired; configure OFFICE_SPOOL_DIR"));
   });
 
   it("句尾自身含输入取值的只有一例：PREVIEW_ARCHIVE_MAX_ENTRIES=0", () => {
