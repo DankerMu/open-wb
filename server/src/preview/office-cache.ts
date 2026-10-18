@@ -28,9 +28,20 @@
  *   `O_NOFOLLOW|O_DIRECTORY`）再 `unlinkat`，按描述符。经真实的 `clearWork`，预先放好的顶层与嵌套
  *   链接都只删掉链接本身（`office-cache.test.ts`，实测）；删除途中换入没有测过。这是该运行时版本的
  *   实现，不是 Node 的承诺（仓库只为开发与 CI 钉了版本）：仍登记在此，换版本须重新核实。
+ * - `jobs` 自身先以 `O_NOFOLLOW|O_DIRECTORY` 打开核对（链接或不在即不动），之后仍按路径 `readdir` /
+ *   `rmSync`：核对之后被同 uid 的 sidecar 换成链接，删的就是链接目标下的子项（竞态残余，读代码推出；
+ *   根治要 `openat` 族，Node 没有）。
  */
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, rmSync, utimesSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  lstatSync,
+  openSync,
+  readdirSync,
+  rmSync,
+  utimesSync,
+} from "node:fs";
 import { lstat, readdir, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { OfficeConvertError, type OfficeConverter } from "./office.js";
@@ -154,6 +165,8 @@ export function createOfficeCache(options: {
 function removeOwnEntries(jobs: string): void {
   let names: string[];
   try {
+    // 类型核对：`jobs` 本身是链接或不在即什么都不做（`O_NOFOLLOW|O_DIRECTORY`，打开即关）。
+    closeSync(openSync(jobs, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY));
     names = readdirSync(jobs);
   } catch {
     return;

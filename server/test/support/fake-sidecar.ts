@@ -8,46 +8,43 @@
  * `out/<去最后一个扩展名>.pdf` 后 `done`；`exit1` → PDF 后 `failed: exit`；`bad-request`；`empty` →
  * 0 字节后 `done`；`symlink` / `fifo` → 链接 / 无写端的命名管道后 `done`；`nopdf` → 无 `out/` 的
  * `done`；`sparse-limit` / `sparse-over` → 恰 200 MiB / 多 1 字节；`hang`（= `sleep`）→ PDF、无标记；
- * `gate` → PDF，`release(<输入名>)` 后 `done`。追加与截短由 output 测试的 `fstat` 探针在 app 侧做。
+ * `gate` → `release(<输入名>)` 后 `done`；`locked-dir` → 另放 `0500` 的非空 `locked/`（app 删不掉）；
+ * `out-symlink` → `out` 是指向另一目录的链接。追加与截短由 output 测试的 `fstat` 探针在 app 侧做。
  *
- * 观察：递归 `fs.watch`（`jobs/` 出现后才挂）加 100 ms 轮询，记下发现次序、`in/` 的名字与字节、
- * 领取那一刻的全部文件、看到 `cancel` 的时刻（app 写完随即删目录，靠递归监听的事件：macOS 实测；
- * Linux 上未测，推算同样报出）。心跳：`fresh` 每 500 ms touch，`stale` 钉在 30 秒前，`none` 不写。
+ * 观察：递归 `fs.watch`、Linux 上另加每个作业目录的非递归 `fs.watch`，与 100 ms 轮询。app 写完 `cancel`
+ * 随即删目录：macOS 上递归监听报出它；Linux 上 Node 的递归监听是 JS 实现，目录已删即不发子项事件，只有
+ * 逐目录的 inotify 监听报出（两边实测，Linux 为 node:24 容器）。macOS 上加挂逐目录监听反而偶发漏记（实测；
+ * 推算为 libuv 的 FSEvents 增减监听时重建事件流）。心跳：`fresh` 每 500 ms touch，`stale` 钉在 30 秒前。
  */
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
-import { join, parse, relative } from "node:path";
+import { join, parse } from "node:path";
 
 /** 模块求值时取下的原函数：转换器测试数 `child_process` 的调用，夹具建命名管道不算进去。 */
 const runFile = execFileSync;
-/** 与 `fake-soffice.mjs` 各持一份的 PDF 字面量。 */
 export const PDF =
   "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
 const SPARSE: Record<string, number> = { "sparse-limit": 209_715_200, "sparse-over": 209_715_201 };
 const HELD = ["hang", "sleep", "gate"];
-
 export type Heartbeat = "fresh" | "stale" | "none";
 
+/** 发现时读 `name`；领取时记 `request`、`files`（相对路径 → 字节）与 `bytes`；`answer` 为 `done` 或 `failed:<码>`。 */
 export interface FakeJob {
   id: string;
   dir: string;
-  /** `in/` 下的名字（发现时就读）与领取那一刻的字节。 */
   name?: string | undefined;
   bytes?: Buffer | undefined;
-  /** `request.json` 原文与领取那一刻作业目录里每个普通文件（相对路径 → 字节）。 */
   request?: string | undefined;
   files: Record<string, Buffer>;
   cancelAt?: number | undefined;
-  /** 写出的输出（相对作业目录）与应答：`done` 或 `failed:<原因码>`。 */
   output?: string;
   answer?: string;
 }
 
+/** `jobs()` 先同步扫一遍再交出全部作业（发现次序）；`next` 让下一个领取的作业按该标记应答，只用一次。 */
 export interface FakeSidecar {
-  /** 同步扫一遍 `jobs/` 再交出至今发现的全部作业，按发现的次序。 */
   jobs(): FakeJob[];
   release(name: string): void;
-  /** 下一个被领取的作业按这个标记应答，不看输入名；只用一次。 */
   next: string | undefined;
   heartbeat(mode: Heartbeat): void;
   stop(): void;
@@ -55,7 +52,6 @@ export interface FakeSidecar {
 
 const running: FakeSidecar[] = [];
 
-/** `afterEach` 用：停掉全部定时器与监听。 */
 export function stopFakeSidecars(): void {
   for (const sidecar of running.splice(0)) {
     sidecar.stop();
@@ -78,10 +74,17 @@ function produce(job: FakeJob, marker: string): string | undefined {
   if (marker === "bad-request" || marker === "nopdf") {
     return marker === "nopdf" ? "done" : marker;
   }
-  fs.mkdirSync(join(job.dir, "out"), { recursive: true });
-  const output = join(job.dir, "out", `${parse(job.name ?? "").name}.pdf`);
-  job.output = relative(job.dir, output);
+  const out = join(job.dir, marker === "out-symlink" ? "real-out" : "out");
+  fs.mkdirSync(out, { recursive: true });
+  const output = join(out, `${parse(job.name ?? "").name}.pdf`);
+  job.output = join("out", parse(output).base);
   writeOutput(job, marker, output);
+  if (marker === "out-symlink") {
+    fs.symlinkSync(out, join(job.dir, "out"));
+  } else if (marker === "locked-dir") {
+    fs.mkdirSync(join(job.dir, "locked", "keep"), { recursive: true });
+    fs.chmodSync(join(job.dir, "locked"), 0o500);
+  }
   return HELD.includes(marker) ? undefined : marker === "exit1" ? "exit" : "done";
 }
 
@@ -100,13 +103,24 @@ function writeOutput(job: FakeJob, marker: string, output: string): void {
 }
 
 function snapshot(dir: string): Record<string, Buffer> {
-  const files: Record<string, Buffer> = {};
-  for (const name of fs.readdirSync(dir, { recursive: true, encoding: "utf8" })) {
-    if (fs.lstatSync(join(dir, name)).isFile()) {
-      files[name] = fs.readFileSync(join(dir, name));
-    }
+  const names = fs.readdirSync(dir, { recursive: true, encoding: "utf8" });
+  const files = names.filter((name) => fs.lstatSync(join(dir, name)).isFile());
+  return Object.fromEntries(files.map((name) => [name, fs.readFileSync(join(dir, name))]));
+}
+
+function noteCancel(job: FakeJob | undefined, name: unknown): void {
+  if (job !== undefined && name === "cancel") {
+    job.cancelAt ??= Date.now();
   }
-  return files;
+}
+
+function watchJob(job: FakeJob, into: fs.FSWatcher[]): void {
+  try {
+    const watch = fs.watch(job.dir, (_event, name) => noteCancel(job, name));
+    into.push(watch.on("error", () => watch.close()));
+  } catch {
+    // 作业目录已被删掉。
+  }
 }
 
 export function startFakeSidecar(spool: string, heartbeat: Heartbeat = "fresh"): FakeSidecar {
@@ -115,7 +129,8 @@ export function startFakeSidecar(spool: string, heartbeat: Heartbeat = "fresh"):
   const byId = new Map<string, FakeJob>();
   const released = new Set<string>();
   const gated = new Set<FakeJob>();
-  let watcher: fs.FSWatcher | undefined;
+  const watchers: fs.FSWatcher[] = [];
+  let recursive = false;
   let beat = heartbeat;
   const has = (job: FakeJob, name: string): boolean => fs.existsSync(join(job.dir, name));
 
@@ -128,18 +143,12 @@ export function startFakeSidecar(spool: string, heartbeat: Heartbeat = "fresh"):
   }
 
   function scan(): void {
-    let names: string[] = [];
-    try {
-      names = fs.readdirSync(jobsDir, { withFileTypes: true }).flatMap((entry) => {
-        return entry.isDirectory() && !byId.has(entry.name) ? [entry.name] : [];
-      });
-    } catch {
-      // `jobs/` 还没建出。
-    }
-    for (const id of names) {
+    const entries = fs.existsSync(jobsDir) ? fs.readdirSync(jobsDir, { withFileTypes: true }) : [];
+    for (const { name: id } of entries.filter((e) => e.isDirectory() && !byId.has(e.name))) {
       const job: FakeJob = { id, dir: join(jobsDir, id), files: {} };
       byId.set(id, job);
       found.push(job);
+      process.platform === "linux" && watchJob(job, watchers);
     }
     for (const job of found) {
       job.name ??= has(job, "in") ? fs.readdirSync(join(job.dir, "in"))[0] : undefined;
@@ -173,15 +182,14 @@ export function startFakeSidecar(spool: string, heartbeat: Heartbeat = "fresh"):
   }
 
   function tick(): void {
-    if (watcher === undefined && fs.existsSync(jobsDir)) {
-      watcher = fs.watch(jobsDir, { recursive: true }, (_event, name) => {
+    if (!recursive && fs.existsSync(jobsDir)) {
+      recursive = true;
+      const watcher = fs.watch(jobsDir, { recursive: true }, (_event, name) => {
         const [id, file] = String(name).split(/[\\/]/u);
-        const job = byId.get(id ?? "");
-        if (job !== undefined && file === "cancel") {
-          job.cancelAt ??= Date.now();
-        }
+        noteCancel(byId.get(id ?? ""), file);
         tick();
       });
+      watchers.push(watcher);
     }
     scan();
     for (const job of found) {
@@ -210,7 +218,9 @@ export function startFakeSidecar(spool: string, heartbeat: Heartbeat = "fresh"):
     },
     stop() {
       timers.forEach(clearInterval);
-      watcher?.close();
+      for (const watch of watchers) {
+        watch.close();
+      }
     },
   };
   touch();

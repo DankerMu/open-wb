@@ -53,6 +53,8 @@ const CONVERT_TIMEOUT_MS = 3_000;
 /** 「无 heartbeat」一例 `server_started` 的窗口：预检等满 5 s，δ 给编译入口其余步骤与慢机器。 */
 const WAIT_MS = 5_000;
 const DELTA_MS = 1_500;
+/** 预检失败三例预置在 `jobs/` 里的遗留作业：入口不碰 spool，它应原样留着。 */
+const LEFTOVER_ID = "0123456789abcdef0123456789abcdef";
 
 beforeAll(compileEntry, 90_000);
 afterEach(stopFakeSidecars);
@@ -214,6 +216,37 @@ describe("production entry with the office converter on a spool", () => {
     }
   }, 60_000);
 
+  it("answers 503 once the heartbeat goes stale at runtime, with exactly one unavailable line through the managed writer, while the cached document is still served", async () => {
+    const { entry, sidecar } = await spoolEntry();
+    const { server } = entry;
+    try {
+      await server.waitForStarted();
+      const workspace = await openWorkspace(entry);
+      for (const name of ["a.docx", "b.docx", "c.docx"]) {
+        writeFileSync(join(workspace.root, name), "not a real office document");
+      }
+      expect(await (await fetch(officeUrl(workspace.base, "a.docx"))).text()).toBe(PDF);
+      // 不靠墙钟：假 sidecar 把心跳钉到 30 秒前，下一次转换前的检查即见不新鲜。
+      sidecar?.heartbeat("stale");
+      for (const name of ["b.docx", "c.docx"]) {
+        const refused = await rawAnswer(
+          new URL(workspace.base).origin,
+          new URL(officeUrl(workspace.base, name)).pathname,
+        );
+        expect([refused.status, refused.body]).toEqual([503, UNAVAILABLE_TEXT]);
+      }
+      const cached = await fetch(officeUrl(workspace.base, "a.docx"));
+      expect([cached.status, await cached.text()]).toEqual([200, PDF]);
+      expect(sidecar?.jobs()).toHaveLength(1);
+
+      expect(await server.stop()).toBe(0);
+      // 边沿触发：两次 unavailable 只有一行。
+      expect(applicationStderr(server.stderr())).toBe(UNAVAILABLE_LINE);
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
   it("runs one conversion at a time under OFFICE_CONVERT_CONCURRENCY=1: the second job appears only after the first has settled", async () => {
     const { entry, sidecar } = await spoolEntry({ env: { OFFICE_CONVERT_CONCURRENCY: "1" } });
     const { server } = entry;
@@ -297,7 +330,17 @@ describe("production entry when the sidecar preflight fails", () => {
     "%s: starts anyway with exactly one unavailable line before server_started, officeAvailable false, 503 and no job",
     async (_case, layout) => {
       const launchedAt = performance.now();
-      const { entry } = await spoolEntry({ layout, held: true, prepare: placeExpiredPdf });
+      const prepare = (root: string): void => {
+        placeExpiredPdf(root);
+        if (layout !== "absent") {
+          mkdirSync(join(root, "spool", "jobs", LEFTOVER_ID, "in"), {
+            recursive: true,
+            mode: 0o700,
+          });
+          writeFileSync(join(root, "spool", "jobs", LEFTOVER_ID, "in", "x"), "stale");
+        }
+      };
+      const { entry } = await spoolEntry({ layout, held: true, prepare });
       const { server } = entry;
       try {
         await server.waitForStarted();
@@ -325,8 +368,14 @@ describe("production entry when the sidecar preflight fails", () => {
         );
         expect(refused.status).toBe(503);
         expect(refused.body).toBe(UNAVAILABLE_TEXT);
-        // 预检未过：入口不碰 spool（不建 `jobs/`），`pdf/` 的启动清理照常。
-        expect(existsSync(join(entry.root, "spool", "jobs"))).toBe(false);
+        // 预检未过：入口不碰 spool（不建 `jobs/`、预置的遗留原样留着），`pdf/` 的启动清理照常。
+        const jobs = join(entry.root, "spool", "jobs");
+        if (layout === "absent") {
+          expect(existsSync(jobs)).toBe(false);
+        } else {
+          expect(readdirSync(jobs)).toEqual([LEFTOVER_ID]);
+          expect(existsSync(join(jobs, LEFTOVER_ID, "in", "x"))).toBe(true);
+        }
         await until(
           () => !existsSync(join(entry.root, "preview-cache", "pdf", "expired.pdf")),
           10_000,

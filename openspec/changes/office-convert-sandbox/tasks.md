@@ -45,12 +45,12 @@
 | `server/test/fixtures/fake-soffice.mjs` | 152 | ≤ 170 | S1a |
 | `biome.json`、`Makefile`、根 `package.json`、`knip.json`、`.jscpd.json`、`scripts/size-guard.sh`、`scripts/test-guardrails.sh` | — | 各 ≤ +6 行（接线） | S1a |
 | `server/src/preview/office-sidecar-health.ts`（新） | — | ≤ 100 | S1b |
-| `server/src/preview/office.ts` | 332 | ≤ 330 | S1b、S3 |
+| `server/src/preview/office.ts` | 332 | ≤ 340（评审后放宽） | S1b、S3 |
 | `server/src/preview/office-cache.ts` | 326 | ≤ 230 | S1b、S3 |
 | `server/src/preview-config.ts` | 153 | ≤ 165 | S1b |
 | `server/src/server.ts` | 726 | ≤ 740（预检 `await` + 信号核对 + `emit`；删 `stopWorkClear`、`preview_work_clear_failed` 与五处过期注释） | S1b |
 | `server/src/preview/app.ts` | 330 | ≤ 330（只改头注释与 `:10`、`:84-88` 两处注释，净零或净减） | S3 |
-| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 220 | S1b |
+| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 230（评审后放宽） | S1b |
 | `server/test/office-converter.test.ts` | 795 | ≤ 700（重写） | S1b |
 | `server/test/office-sidecar-health.test.ts`（新） | — | ≤ 200 | S1b |
 | `server/test/office-converter-output.test.ts` | 189 | ≤ 200 | S1b |

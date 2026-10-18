@@ -136,7 +136,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
   - `done` 与 `failed` 互斥；两者都不出现、`request.json` 也不在 → 作业从未就绪或已被 app 删掉。
 - **顺序与原子性**：app：`mkdir jobs/<id>` → `mkdir in` → 写 `in/<name>` → `rename` 出 `request.json` → 轮询 `done` / `failed`（100 ms）→ 读 PDF → `rm -r jobs/<id>`。sidecar：轮询 `jobs/`（200 ms；只看目录条目，普通文件如 `fake-soffice.mjs` 的 `jobs/<id>.record.json` 跳过、不记日志）找「有 `request.json`、没有 `done` / `failed`、不在自己的在途表里」的目录，按 `request.json` 的 mtime 升序领取，受 `CONVERTER_CONCURRENCY` 上限；领取后先 `cancel` 核对、再 spawn；每轮对每个在途作业核对 `cancel` 与目录是否仍在（D2 第 4 条）；结束后 `rename` 出 `done` 或 `failed`。**`jobs/` 由 app 建**（`preview_cache` 阶段，预检通过后）；sidecar 在它出现之前每轮 `readdir` 得到 `ENOENT`，视为空列表、不建目录、不限次数——两个容器谁先起都行。**sidecar 从不删除作业目录**（归 app）；app 删目录时 sidecar 若正好在写标记，`rename` 得到 `ENOENT`，sidecar 吞掉——那个作业 app 已经不等了。**重启（读代码推出，S2b 不单测它）**：sidecar 重启——在途作业的 `soffice` 随容器死；重启后它看到的「有 `request.json`、无标记」目录会被重新领取——app 侧要么还在等（正常收到结果），要么已超时并删掉目录（目录没了 → 不领取）；app 重启——`preview_cache` 阶段清空 `jobs/*`（D6），sidecar 下一轮看到在途作业的目录没了 → 杀组（D2 第 4 条），不用等 `soffice` 自己因写不进目录而退出。两种重启都不会让一个作业被重复计入缓存：缓存写入只发生在 app 读到 `done` 之后、由 app 自己复制。
 - **超时**：app 的 `timeoutMs`（`OFFICE_CONVERT_TIMEOUT_MS`）与 `request.json` 的 `timeoutMs` 是同一个数。app 到期 → 写 `cancel`、结果 `timeout`、删目录；sidecar 到期 → 杀组、`failed: timeout`。正常情况下 app 先到期（它先开始计时）；两边都有时限是为了 sidecar 不依赖 app 活着才能回收。
-- **并发**：app 的队列（`OFFICE_CONVERT_CONCURRENCY`，缺省 2）是限流器；sidecar 的 `CONVERTER_CONCURRENCY`（缺省 2）是它自己的保险，部署时 SHALL ≥ app 的值（system.md 写明；sidecar 不知道 app 的配置，也不该知道）。小于时 app 看到的只是作业排在 spool 里多等一会儿，不会出错。
+- **并发**：app 的队列（`OFFICE_CONVERT_CONCURRENCY`，缺省 2）是限流器；sidecar 的 `CONVERTER_CONCURRENCY`（缺省 2）是它自己的保险，部署时 SHALL ≥ app 的值（system.md 写明；sidecar 不知道 app 的配置，也不该知道）。小于时作业排在 spool 里等待，而 app 侧 `timeoutMs` 从建作业目录起计（`office.ts` 的 `track`），排队时间照样消耗时限——排得久的作业会以 timeout（504）结束，不是「不会出错」（S1b 评审订正，2026-10-17）。
 - **为什么是文件标记而不是 socket / HTTP**：零协议栈、零依赖、天然经卷共享、原子 `rename` 是文件系统给的；sidecar 的攻击面只有「读 `request.json`、写两个标记」。代价是 ≤ 300 ms 的轮询延迟（两侧之和），相对 1–2 s 的转换可忽略。
 - **为什么输入复制字节而不是把输入所在目录挂进去**：挂目录等于把 `SANDBOX_ROOT` 的一部分给 sidecar，B2 明令只给输入；复制走 `openRegularFile` 的 fd（D4），还顺带把 `/o/` 输入侧的换入残余收窄到与 `/w/` 一致。
 
@@ -201,6 +201,8 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 | `server/test/office-queue.test.ts:72-90`（`cacheOn`）、`:220-249` | 构造带 `officeBin`；`sudo` 链到假 `soffice`、`commands toEqual(["sudo","sudo"])`、派生子进程不随之结束（`:241` D-25 等价物） | 4 / 5 | `cacheOn` 改传 `spoolDir`（假 sidecar）；`:220-249` 整例删除（它钉的是 `OMP_USER` 终止只杀 `sudo`——REMOVED） | S1b |
 | `server/test/office-cache.test.ts:45`（`BAD_PATHS`）、`:319-331`（两个工厂 + `createOfficeCleanup({cacheDir, officeBin: "./soffice"})`） | message `cacheDir and officeBin must be absolute paths`（`office.ts:213`、`office-cache.ts:63`） | 3 | 两个工厂的 message 都改为 `cacheDir and spoolDir must be absolute paths`；`officeBin: "./soffice"` → `spoolDir: "spool"` | S1b |
 | `server/test/office-cache.test.ts:189-205`（符号链接输入经缓存转换成功；S1b 开工后补登，2026-10-17） | 符号链接输入可转换 | 3 | 新规格「sidecar 转换契约」：输入本就是符号链接 → `failed`；保留 `officeCacheKey(link)` 断言，`convert(link)` 期望 `failed`、无作业目录、`pdf/` 为空 | S1b |
+| `server/test/office-converter.test.ts:432-444`（旧树行号；「作业目录里有删不掉的残留时转换仍然成功」；S1b 评审后补登） | 删作业目录失败不改变结果 | 4 | 保留：假 sidecar 加 `locked-dir` 标记（作业目录里放 0500 非空子目录），断言结果仍为成功、`removeJob` 失败被吞 | S1b |
+| `server/test/office-queue.test.ts:46-52`、`:412-414`、`:439-440`、`:532`；`office-cache.test.ts:121`、`:128`、`:452-461`（旧树行号；S1b 评审后补登） | 夹具接缝：`rig` / `launched` / `work` 路径与假 `soffice` 常量 | 4 | 换成假 sidecar 接缝（`jobDirs`、`jobs/`、`bench().sidecar`），断言强度不变 | S1b |
 | `server/test/office-queue.test.ts:179-201`（中止例：`launchesAtExit === 1`、`exitCode/signalCode`、微任务后 `launches` 仍 1）、`:429-459`（`close()` 例：`head.state === "pending"`、子进程 `exitCode/signalCode === null`；同日补登） | 中止 / 关停时的子进程退出状态与「前一个落定后下一个才启动」的直接观察 | 4 / 5 | sidecar 下 app 不再有子进程，「被杀但未退出」窗口不存在：中止例改为「同一拍 `cancel` 已写、`jobDirs` 恰为 `[dying.id]`」；`close()` 例删子进程状态断言。排队次序由未改动的 `office-queue.ts` 自身用例保证（读代码推出） | S1b |
 | `office-cache.test.ts:62-70`、`:271-279`（`cacheOn(on, { officeBin: null })`）、`:297-303`（`readdirSync(on.work)`）、`:335-384`（`standIn` 换 `node -e`） | 构造带 `officeBin`；`officeBin` 缺席 → `unavailable`；`work/` 为空；`standIn` 换下一次启动的命令 | 4 | 改传 `spoolDir`；`officeBin: null` → 不传 `spoolDir`（同一事实：`unavailable`）；`readdirSync(work)` → `readdirSync(<spool>/jobs)` 为空；`standIn` 改为让假 sidecar 对下一个作业按指定行为应答（同一事实：失败不入缓存、再次转换成功） | S1b |
 | `server/test/office-cache-helpers.ts:27`（`FAKE_SUDO`）、`:117-126`（`bench(layout = {sudo: true})`：建 `work` `2770`、`bin/sudo` 链到 `FAKE_SUDO`） | `sudo` 夹具与 `work` 布局 | 4 / 5 | 删 `FAKE_SUDO` 与 `layout.sudo`（REMOVED 的 `sudo` 形状）；`bench()` 不建 `work`、建临时 spool 并启动假 sidecar；导出 `FAKE_SIDECAR` | S1b |
@@ -271,6 +273,8 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - **仍成立、不改**：preview-origin 其余；sandbox-core；omp-uid-isolation 其余四条；office-preview「办公文档预览路由」的五个场景与路由代码（只有 requirement 正文一句进 MODIFIED）。
 
 ## Risks / Trade-offs
+- **app 跟随 spool 中间分量**（S1b 评审登记，读代码推出）：`O_NOFOLLOW` 只管路径末段。被攻破的 sidecar（与 app 同 uid、spool 可写）可在写 `done` 之前把 `<job>/out` 换成指向 app 命名空间的符号链接，让 app 代读任意它能读的文件并当 PDF 交出；也可在启动清空的 `lstat` 与 `readdir` 之间把 `jobs` 换成链接让 app 删目标目录的子项。缓解：app 在打开输出前 `lstat` 作业目录与 `out/` 均须为非链接目录，清空只经 `O_NOFOLLOW|O_DIRECTORY` 打开的顶层描述符遍历——把确定性利用降为微秒级竞态；竞态本身登记为残余（根治需 `openat` 族，Node 无）。ADR-0014 残余表（S3）同句。
+- **假 sidecar 的 `fs.watch`**（S1b 实测，Linux 容器 Node 24）：Linux 上递归 `fs.watch` 是 JS 实现，作业目录在同一拍被删时子项事件不会发出；逐作业目录的非递归 inotify watch 能看到 `cancel`，macOS 则相反——夹具两者都挂。真 sidecar 不用 `fs.watch`，不受影响。
 - **`heartbeat` 属主检查未被单独钉住**（S1b 实测，2026-10-17）：`office-sidecar-health.ts` 的预检对 spool 根与 `heartbeat` 用同一个注入 uid，根属主检查先命中，删掉 `heartbeat` 属主分支后单元测试仍绿；分支本身保留（读代码推出：属主不符 → `available=false`）。要单独钉住需给测试注入两个 uid，本 change 不改接口；S2b (d) 的实测不覆盖它。
 
 - **[Docker 成为办公文档预览的前提]** → 没有 Docker 的主机办公文档预览不可用（fail-closed，其余功能不受影响）。owner B7 接受；system.md 写明。
@@ -362,14 +366,14 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 | `server/test/fixtures/fake-soffice.mjs` | 152 | ≤ 170（若需 `@spawn-child` 类标记） | S1a |
 | `biome.json`、`Makefile`、根 `package.json`、`knip.json`、`.jscpd.json`、`scripts/size-guard.sh`、`scripts/test-guardrails.sh` | — | 各 ≤ +6 行（七处接线） | S1a |
 | `server/src/preview/office-sidecar-health.ts`（新） | — | ≤ 100 | S1b |
-| `server/src/preview/office.ts` | 332 | ≤ 330（重写 spawn 段为 spool 客户端） | S1b、S3（头注释） |
+| `server/src/preview/office.ts` | 332 | ≤ 340（S1b 评审后由 330 放宽：打开输出前 `lstat` 作业目录与 `out/`）（重写 spawn 段为 spool 客户端） | S1b、S3（头注释） |
 | `server/src/preview/office-cache.ts` | 326 | ≤ 230（`sudo … find` 段删除） | S1b、S3（头注释） |
 | `server/src/preview/office-queue.ts` | 194 | 不改 | — |
 | `server/src/preview-config.ts` | 153 | ≤ 165 | S1b |
 | `server/src/server.ts` | 726 | ≤ 740（预检 + 信号核对 + `emit`；删 `stopWorkClear`、事件与过期注释） | S1b |
 | `server/src/preview/app.ts` | 330 | ≤ 330（只改注释：头注释 ① 段、`:10`、`:84-88`；净零或净减） | S3 |
 | `server/src/workspaces/regular-file.ts` | 68 | 不改 | — |
-| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 220 | S1b |
+| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 230（S1b 评审后由 220 放宽：Linux 需逐作业目录再挂一个非递归 `fs.watch`） | S1b |
 | `server/test/office-converter.test.ts` | 795 | ≤ 700（重写） | S1b |
 | `server/test/office-sidecar-health.test.ts`（新） | — | ≤ 200 | S1b |
 | `server/test/office-converter-output.test.ts` | 189 | ≤ 200 | S1b |

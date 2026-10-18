@@ -29,6 +29,7 @@ import { basename, dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOfficeConverter, OfficeConvertError } from "../src/preview/office.js";
+import { countLaunches } from "./office-cache-helpers.js";
 import {
   type FakeJob,
   type FakeSidecar,
@@ -46,7 +47,6 @@ const WITHIN_MS = 6_000;
 const UNAVAILABLE_RECORD = { event: "office_convert_sidecar_unavailable" };
 /** 三个 app 一侧路径里各放一个哨兵段：spool 里任何一个字节都不该含它们。 */
 const SENTINELS = ["zq-sentinel-sandbox", "zq-sentinel-cache", "zq-sentinel-state"];
-const LAUNCHERS = ["spawn", "spawnSync", "exec", "execSync", "execFile", "execFileSync", "fork"];
 
 interface Stage {
   root: string;
@@ -67,16 +67,7 @@ const converters: Converter[] = [];
 const launched: string[] = [];
 const savedEnv = new Map<string, string | undefined>();
 
-beforeEach(() => {
-  for (const name of LAUNCHERS) {
-    const real = childProcess[name as keyof typeof childProcess] as (...args: unknown[]) => unknown;
-    vi.spyOn(childProcess, name as "spawn").mockImplementation(((...args: unknown[]) => {
-      launched.push(String(args[0]));
-      return real(...args);
-    }) as never);
-  }
-  syncBuiltinESMExports();
-});
+beforeEach(() => countLaunches(launched));
 
 afterEach(async () => {
   await Promise.all(converters.splice(0).map((converter) => converter.close()));
@@ -271,6 +262,51 @@ describe("sidecar 转换契约：作业目录里只有字节与三键", () => {
     expect(readFileSync(first, "utf8")).toBe(PDF);
     expect(readFileSync(second, "utf8")).toBe(PDF);
   });
+
+  it("request.json 只经 rename 出现：直接写入的目标只有 request.json.part", async () => {
+    const on = stage();
+    const writes: string[] = [];
+    const renames: string[][] = [];
+    const realWrite = fs.writeFileSync;
+    const realRename = fs.renameSync;
+    vi.spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof realWrite>) => {
+      writes.push(String(args[0]));
+      return realWrite(...args);
+    }) as typeof fs.writeFileSync);
+    vi.spyOn(fs, "renameSync").mockImplementation(((from, to) => {
+      renames.push([String(from), String(to)]);
+      return realRename(from, to);
+    }) as typeof fs.renameSync);
+    syncBuiltinESMExports();
+
+    await converterFor(on).convert(on.input("a.docx"));
+
+    const request = join(on.sidecar.jobs()[0]?.dir ?? "", "request.json");
+    expect(writes.filter((path) => basename(path).startsWith("request.json"))).toEqual([
+      `${request}.part`,
+    ]);
+    expect(renames).toContainEqual([`${request}.part`, request]);
+  });
+
+  it("openRegularFile 返回之后输入被换成另一个文件：in/ 的字节来自已打开的那个描述符（钩子辅助复现）", async () => {
+    const on = stage();
+    const input = on.input("a.docx", "original bytes");
+    const realOpenSync = fs.openSync;
+    vi.spyOn(fs, "openSync").mockImplementation(((path, flags, mode) => {
+      const fd = realOpenSync(path, flags, mode);
+      if (path === input) {
+        rmSync(input);
+        writeFileSync(input, "replaced bytes");
+      }
+      return fd;
+    }) as typeof fs.openSync);
+    syncBuiltinESMExports();
+
+    await converterFor(on).convert(input);
+
+    expect(readFileSync(input, "utf8")).toBe("replaced bytes");
+    expect(on.sidecar.jobs()[0]?.bytes?.toString("utf8")).toBe("original bytes");
+  });
 });
 
 describe("sidecar 转换契约：输入在 lstat 之后被换成符号链接", () => {
@@ -332,6 +368,7 @@ describe("sidecar 转换契约：标记到 kind", () => {
     ["把输出写成符号链接后 done", "a@symlink.docx"],
     ["把输出写成没有写端的命名管道后 done", "a@fifo.docx"],
     ["不建 out/ 直接写 done", "a@nopdf.docx"],
+    ["把 out/ 换成指向另一目录（内有 a.pdf）的符号链接后 done", "a@out-symlink.docx"],
   ])("假 sidecar %s：failed，pdf/ 没有新增，作业目录被删，错误不含路径", async (_case, name) => {
     const on = stage();
     const input = on.input(name);
@@ -347,6 +384,23 @@ describe("sidecar 转换契约：标记到 kind", () => {
     expect(existsSync(job?.dir ?? "")).toBe(false);
     expectNothingLeft(on);
   });
+});
+
+describe("sidecar 转换契约：作业目录删不掉", () => {
+  it.skipIf(process.geteuid?.() === 0)(
+    "作业目录里有删不掉的残留时转换仍然成功，结果可读",
+    async () => {
+      const on = stage();
+
+      const result = await converterFor(on).convert(on.input("a@locked-dir.docx"));
+
+      expect(readFileSync(result, "utf8")).toBe(PDF);
+      // 删除确实失败过：0500 的非空子目录还在，删除失败被吞掉。
+      const locked = join(on.sidecar.jobs()[0]?.dir ?? "", "locked");
+      expect(existsSync(join(locked, "keep"))).toBe(true);
+      fs.chmodSync(locked, 0o700);
+    },
+  );
 });
 
 describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeout: 15_000 }, () => {
@@ -449,6 +503,22 @@ describe("sidecar 转换契约：检查次序与构造参数", () => {
       expectNothingLeft(on);
     },
   );
+
+  it.each<[string, string, (on: Stage) => [string, AbortSignal | undefined]]>([
+    ["signal 已中止", "aborted", (on) => [on.input("a.docx"), AbortSignal.abort()]],
+    ["absInput 不是绝对路径", "failed", () => ["ws/a.docx", undefined]],
+  ])("心跳不新鲜且%s：答 %s（它排在心跳之前），不写 log、不建作业", async (_case, kind, args) => {
+    const on = stage();
+    on.sidecar.heartbeat("stale");
+    const records: unknown[] = [];
+    const [input, signal] = args(on);
+
+    const converter = converterFor(on, { log: (record) => records.push(record) });
+    expectBareKind(await failureOf(converter.convert(input, signal)), kind, []);
+
+    expect(records).toEqual([]);
+    expect(on.sidecar.jobs()).toEqual([]);
+  });
 
   it("jobs/ 不存在：failed，不替调用方建它；pdf/ 不存在：sidecar 写了 done 也算 failed，作业目录照删", async () => {
     const bare = stage({ jobs: false });

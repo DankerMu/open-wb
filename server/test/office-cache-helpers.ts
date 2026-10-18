@@ -6,6 +6,7 @@
  * 「重新转换」的判据：转换器在 `convert` 返回之前同步建出作业目录与 `in/<名字>`，所以调用一返回
  * 它就看得见。
  */
+import childProcess from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -16,6 +17,7 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, vi } from "vitest";
@@ -60,6 +62,31 @@ function unlock(dir: string): void {
   }
 }
 
+const LAUNCHERS = [
+  "spawn",
+  "spawnSync",
+  "exec",
+  "execSync",
+  "execFile",
+  "execFileSync",
+  "fork",
+] as const;
+
+/**
+ * `child_process` 的七个启动函数改为先把命令记进 `into` 再照常执行；`syncBuiltinESMExports` 让源码的
+ * 具名导入也经过它。随后的 `vi.restoreAllMocks()` 之后须再 `syncBuiltinESMExports()`（本文件的钩子做）。
+ */
+export function countLaunches(into: string[]): void {
+  for (const name of LAUNCHERS) {
+    const real = childProcess[name] as (...args: unknown[]) => unknown;
+    vi.spyOn(childProcess, name as "spawn").mockImplementation(((...args: unknown[]) => {
+      into.push(String(args[0]));
+      return real(...args);
+    }) as never);
+  }
+  syncBuiltinESMExports();
+}
+
 /** 在测试文件顶层调用一次：关转换器、停假 sidecar、跑 `settled`、还原探针、删临时目录。 */
 export function useOfficeBenches(settled?: () => void): void {
   afterEach(async () => {
@@ -69,6 +96,7 @@ export function useOfficeBenches(settled?: () => void): void {
       settled?.();
     } finally {
       vi.restoreAllMocks();
+      syncBuiltinESMExports();
       for (const root of roots.splice(0)) {
         unlock(root);
         rmSync(root, { recursive: true, force: true });

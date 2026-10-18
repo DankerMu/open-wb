@@ -27,6 +27,7 @@ import {
   createReadStream,
   createWriteStream,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   type ReadStream,
@@ -126,13 +127,17 @@ async function copyExact(
  * 成功判定与复制用同一个 fd：`O_RDONLY|O_NOFOLLOW|O_NONBLOCK` 打开 `out/<去最后一个扩展名>.pdf`
  * （符号链接即失败；命名管道的 open 立即返回，随后被 `fstat` 拒）、`fstat` 为大小大于 0、不超过
  * 上限的普通文件，再从这个 fd 恰复制 `size` 字节：超过上限的一个字节都不读，此后追加的不读。
- * 任何一步不成立都返回 `null`。
+ * 任何一步不成立都返回 `null`。`O_NOFOLLOW` 只管末段，所以打开之前先 `lstat` 作业目录与 `out/`
+ * 都是目录（不是链接）；这之后到 `open` 之间同 uid 的 sidecar 仍可换入，是登记的竞态残余（读代码推出）。
  */
 async function collectOutput(job: string, name: string, pdfDir: string): Promise<string | null> {
   const produced = join(job, "out", `${parse(name).name}.pdf`);
   const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = constants;
   let source: Awaited<ReturnType<typeof open>>;
   try {
+    if (![job, join(job, "out")].every((dir) => lstatSync(dir).isDirectory())) {
+      return null;
+    }
     source = await open(produced, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
   } catch {
     return null;

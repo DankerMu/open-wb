@@ -34,6 +34,7 @@ import {
   BODY,
   bench,
   closers,
+  countLaunches,
   INPUT_MTIME_S,
   PDF,
   useOfficeBenches,
@@ -75,16 +76,6 @@ async function kindOf(attempt: Promise<string>): Promise<string> {
   const outcome: unknown = await attempt.catch((reason: unknown) => reason);
   expect(outcome).toBeInstanceOf(OfficeConvertError);
   return (outcome as OfficeConvertError).kind;
-}
-
-async function until(what: string, done: () => boolean): Promise<void> {
-  const deadline = Date.now() + 6_000;
-  while (!done()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${what}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
 }
 
 describe("转换缓存：命中、失效与复制", () => {
@@ -347,7 +338,7 @@ describe("转换缓存：失败不入缓存", () => {
 
       const attempt = kindOf(cache.convert(input, controller.signal));
       if (kind === "aborted") {
-        await until("the stand-in to write its PDF", () => on.launches[0]?.output !== undefined);
+        await vi.waitFor(() => expect(on.launches[0]?.output).toBeDefined(), { timeout: 6_000 });
         controller.abort();
       }
 
@@ -434,7 +425,7 @@ describe("转换缓存：周期清理", () => {
     expect(readdirSync(on.pdf)).toEqual(["old.pdf"]);
   });
 
-  it("pdf 与 jobs 都不存在：两个清理函数都不抛", async () => {
+  it("pdf 与 jobs 都不存在：两个清理函数都不抛；jobs 是指向别处的链接：不跟随、什么都不删", async () => {
     const on = bench();
     rmSync(on.pdf, { recursive: true });
     rmSync(on.jobs, { recursive: true });
@@ -443,12 +434,18 @@ describe("转换缓存：周期清理", () => {
     await expect(cleanup.sweepPdf(NOW)).resolves.toBe(undefined);
     await expect(cleanup.clearWork()).resolves.toBe(undefined);
     expect(readdirSync(on.cacheDir)).toEqual([]);
+    mkdirSync(join(on.root, "elsewhere", "x"), { recursive: true });
+    symlinkSync(join(on.root, "elsewhere"), on.jobs);
+    await cleanup.clearWork();
+    expect(readdirSync(join(on.root, "elsewhere"))).toEqual(["x"]);
   });
 
   it.skipIf(isRoot)(
-    "启动清空 jobs/：遗留作业与指向外部的链接被删（链接不被跟随），0500 的非空目录留下，jobs 自身仍在；不给 spoolDir 时不碰 spool",
+    "启动清空 jobs/：遗留作业与指向外部的链接被删（链接不被跟随），0500 的非空目录留下，jobs 自身仍在；不给 spoolDir 时不碰 spool；不启动子进程",
     async () => {
       const on = bench();
+      const launched: string[] = [];
+      countLaunches(launched);
       const outside = join(on.root, "outside");
       mkdirSync(join(outside, "nested"), { recursive: true });
       writeFileSync(join(outside, "nested", "keep"), "not ours");
@@ -465,6 +462,7 @@ describe("转换缓存：周期清理", () => {
       expect(readdirSync(on.jobs)).toEqual(["89ab"]);
       expect(readFileSync(join(outside, "nested", "keep"), "utf8")).toBe("not ours");
       expect(readdirSync(on.spool).sort()).toEqual(["heartbeat", "jobs"]);
+      expect(launched).toEqual([]);
     },
   );
 });

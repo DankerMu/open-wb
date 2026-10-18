@@ -51,15 +51,15 @@ function beatAfter(spool: string, ms: number): void {
   timers.push(setTimeout(() => beat(spool), ms));
 }
 
-/** 落定的值与用时；reject 会让 `await` 抛出，用例因此红。 */
+/** 落定的值与用时（与实现同用 `Date.now`，下界因此不受两个时钟的取整差影响）；reject 会让 `await` 抛出。 */
 async function timed(spool: string, uid?: number): Promise<{ ok: boolean; ms: number }> {
-  const startedAt = performance.now();
+  const startedAt = Date.now();
   const ok = await preflightOfficeSidecar({
     spoolDir: spool,
     ...UNIT,
     ...(uid === undefined ? {} : { uid }),
   });
-  return { ok, ms: performance.now() - startedAt };
+  return { ok, ms: Date.now() - startedAt };
 }
 
 /** spool 根之下的全部条目与根自己的 mode：「不建目录、不 chmod」的判据。 */
@@ -75,6 +75,7 @@ describe("转换 sidecar 的健康与 fail-closed：预检的两个方向（单�
   const cases: Array<[string, () => string, boolean, number?]> = [
     ["spool 根缺席", () => join(spoolRoot(), "absent"), false],
     ["spool 根是 0770（heartbeat 新鲜）", () => tapped(spoolRoot(0o770), 0), false],
+    ["spool 根是 0707（heartbeat 新鲜）", () => tapped(spoolRoot(0o707), 0), false],
     ["heartbeat 的 mtime 为 30 s 前", () => tapped(spoolRoot(), 30), false],
     ["heartbeat 在 100 ms 后才写出", () => delayed(spoolRoot(), 100), true],
     ["heartbeat 在 600 ms 后才写出", () => delayed(spoolRoot(), 600), false],
@@ -91,7 +92,7 @@ describe("转换 sidecar 的健康与 fail-closed：预检的两个方向（单�
     return spool;
   }
 
-  it.each(cases)("%s → %s", async (_case, arrange, expected, uid) => {
+  it.each(cases)("%s", async (_case, arrange, expected, uid) => {
     const spool = arrange();
     const before = layoutOf(spool);
 
