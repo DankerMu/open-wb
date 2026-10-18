@@ -106,6 +106,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 | B8 | 旧配置 `OFFICE_BIN` 仍被设置 → 启动失败、明确报错。**细节（owner 同日补裁）**：stderr **不点名**退役键——沿用 hss 既有一行 `{"event":"server_start_failed","reason":"config"}`，不新增 `reason` 取值；键名只在抛出的错误 message `OFFICE_BIN is retired; configure OFFICE_SPOOL_DIR` 与升级文档（Migration Plan、ADR-0014、system.md 9.7）里。原句「stderr 一行指出该键已退役」作废 | 2026-10-17 | D6；http-service-skeleton「服务启动与装配」MODIFIED；office-preview「转换 sidecar 的健康与 fail-closed」编译入口场景；Migration Plan |
 | B9 | 镜像交付：仓库给 `converter/Dockerfile` + compose 片段，部署方自建；本 change 不引入镜像发布流水线；CI 只在 job 里现场构建一次做实测 | 2026-10-17 | Non-Goals、D7、D10；office-preview「转换 sidecar 实现与镜像」；Not yet specified（版本钉） |
 | B10 | **批准 S2a**：新增 CI job `office-sidecar`（`runs-on: ubuntu-24.04`，job 内现场构建 converter 镜像，`--network none` 跑一次真实转换 + http 外链对照，并入 `all-checks-passed`）；「未批」分支与「CI 不 lint `converter/`」的盲区登记不再需要 | 2026-10-17 | D10、通用纪律（CI 文件只在 S2a 改）、Risks、Migration Plan；tasks S2a；office-preview「真实转换的人工验证」场景「CI 端到端」；omp-uid-isolation MODIFIED |
+| B12 | **#1502 并入 S2a**：`uid-isolation` job 的 `runs-on` 固定为 `ubuntu-24.04`（与 `office-sidecar` 同一 runner 标签，harness 合同同样钉住），S2a 的 PR 写 `Closes #1502` | 2026-10-17 | D10；verification-harness delta；tasks 2a.3/2a.4 |
 
 编排方默认（sidecar 协议；本设计核对后的采用情况写在各 D 里）：spool 目录 `OFFICE_SPOOL_DIR`（采用，D3）；每作业 `jobs/<id>/`、输入**字节**从已打开的 fd 复制、`request.json`、原子 rename 的标记（采用；标记形状见 D3）；sidecar 轮询 ≤ 200 ms（采用 200 ms 固定；不用 inotify，D7）；逐作业独立 `UserInstallation`（采用）；作业内自己的超时与 kill（采用，D7）；app 等 `done` / `failed` / 超时、取 PDF 进既有缓存、删作业目录（采用，D4）；健康 = `heartbeat` 文件 mtime 新鲜 < 10 s（采用；启动预检加 5 s 有界等待，D5）；sidecar 代码 = 仓库内小 Node 脚本 `converter/`、镜像 `node:24-bookworm-slim` + LibreOffice 三件 nogui + fonts、非 root、`--read-only`、只挂 spool（采用，D7；uid 由部署方以 `user:` 对齐，D6）；app 侧用临时目录假 sidecar、sidecar 脚本用 `fake-soffice.mjs`（采用，D8）；真实端到端在 CI 新 job（`ubuntu-24.04`）——CI 改动，owner 已于 2026-10-17 批准（B10；采用，D10）。与默认不同的：spool 目录 `0700` + 同一数值 uid/gid，不用 `2770` + 共享组（D6，理由在那里）。
 
@@ -217,7 +218,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 
 - **新 job `office-sidecar`**（`runs-on: ubuntu-24.04`，`timeout-minutes: 15`）：checkout → setup-node（同其它 job）→ `npm ci` → `npm run build --workspace server` → `docker build -t workbuddy-converter:ci converter/` → `bash .github/scripts/ci-office-sidecar.sh`。脚本：(1) 建 spool（`0700`，runner 用户）**并先建 `<spool>/jobs`（`0700`）与 `<cache>/pdf`（`0700`）**——脚本直接调 `createOfficeConverter`，没有 app 的 `preparePreviewCache` 替它建；(2) `docker run -d --network none --read-only --tmpfs /tmp --init --cap-drop ALL --security-opt no-new-privileges --user "$(id -u):$(id -g)" -v "$spool:/spool" workbuddy-converter:ci`——与 `compose.yml` 逐项相同的标志（harness 合同里把这一行钉成字面）；等 `heartbeat` 出现（≤ 30 s，LibreOffice 不参与心跳）；(3) 在 runner 上起一个记录请求的 `python3 -m http.server`；用 `python3` 的 `zipfile` 生成一份最小 docx（`word/document.xml` 里一张 `r:link` 指向 `http://127.0.0.1:<port>/probe.png` 的外部图片，`TargetMode="External"`；不提交二进制、不进仓库）——这是 issue 2026-10-12 表里的那一种向量，不是 B1 的数据类向量；(4) **走产品代码**：`node --input-type=module -e` 导入 `server/dist/preview/office.js` 的 `createOfficeConverter({spoolDir, cacheDir, timeoutMs: 60000})` 转换该 docx（`snapshot_probe` 的手法，bash 里没有第二份协议实现）→ 断言结果 PDF 存在、`grep -a -c '/Subtype */Image'` 为 0、监听器 0 次请求、`jobs/` 为空、PDF 属 runner uid；(5) **对照**：`docker run --rm --network host --entrypoint /usr/bin/soffice -e HOME=/job -v "$tmp:/job" --user … workbuddy-converter:ci --headless … -env:UserInstallation=file:///job/profile --convert-to pdf --outdir /job/out /job/<同一 docx>`——镜像的 `ENTRYPOINT` 是 `node /app/sidecar.mjs`，不覆盖就起不了 `soffice`；`HOME` 要显式给，否则非 passwd uid 下 LibreOffice 没有可写的家目录 → 监听器 ≥ 1 次请求且 PDF 含图（对照红就是 fixture 失效，不是产品红）；(6) `docker stop` → 容器退出 0、无残留进程。runner 的 uid 不在 `node:24-bookworm-slim` 的 `/etc/passwd` 里——这一跑顺带实测 D6 的未测项。
 - **合同同步**（同一 PR）：`ci.yml` `all-checks-passed.needs` 加 `office-sidecar`；`scripts/test-ci-harness.sh` 的 `aggregate` 字面、job 存在 / `runs-on` / `if` / `continue-on-error` / `timeout` 的变异合同为新 job 各加一条（`runs-on` 合同以 `ubuntu-24.04` 为基线，变异到 `ubuntu-latest` 应被拒——与其它 job 相反，因为本 job 的全部实测只对 24.04 成立）、`check_wf` 对 `constraints.yaml` `ci.matrix` 的核对（`matrix` 加 `ubuntu-24.04` 或为该 job 单列——由第一次 `make test-guardrails` 的拒绝项定）、`fast-checks` 的 `biome check` 加 `converter`；`AGENTS.md` Enforcement Index 加一行「办公文档转换隔离 | `.github/workflows/ci.yml`（job `office-sidecar`） | CI `office-sidecar`/`all-checks-passed` | block」并补 harness 合同；`omp-uid-isolation`「CI uid-isolation job」场景「九个 direct job」→ 十个（delta 已写）。**第一个任务是把 job 桩放进去跑 `make test-guardrails`**：合同会自己列出每一处被拒的地方，那是测量，不是猜。
-- **uid-isolation job 不动**：它没有办公文档规则（Context），本 change 不触碰它；它的 `runs-on: ubuntu-latest` 在 2026-10-19 之后迁到 Ubuntu 26 是仓库级风险，**不在 #1350 范围**，列在「待编排方确认」9 由编排方另开 issue。
+- **uid-isolation job 只改 `runs-on`**（owner B12，2026-10-17，#1502 并入 S2a）：它没有办公文档规则（Context），本 change 不改它的步骤，只把 `runs-on` 固定为 `ubuntu-24.04`；`ubuntu-latest` → Ubuntu 26（2026-10-19 起）的迁移风险因此对该 job 关闭。
 - **证据等级**：这个 job 证明 GitHub 24.04 runner 上「真镜像 + `--network none` + 产品代码的 spool 客户端」能转换一份 docx 且 http 外链不被取回、runner uid 能跑 LibreOffice；不证明 xlsx / pptx、字体、长文档——那些是 D11。
 
 **D11 测试主机实测与两种结果（S2b）。** 执行者是编排方 / owner 本人（实现子代理不接触远端主机），在 S1a、S1b 合并之后、以它们的构建按 **B6 的两种部署形态**各做一次：app 裸机 + sidecar 容器（`converter/compose.yml`）；app 容器 + sidecar 容器（临时 compose，`include` 本仓库的 `compose.yml`）。
@@ -326,7 +327,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 6. **输入在 spool 里的名字 = `basename(absInput)`**（已是单一路径段），不改成固定名——让 `fake-soffice.mjs` 的 `@标记` 机制在 sidecar 测试里原样可用，也让 `out/<stem>.pdf` 的推导与今天同形；sidecar 校验它是单一路径段且扩展名在三种之内（D3）。
 7. **`converter/` 不是 npm workspace**，零依赖 `.mjs`；lint（`Makefile` + 根 `package.json`）/ size-guard / jscpd 以显式加目录的方式纳入，knip 以根 workspace `entry` 纳入（不用 `ignore`，`ui-layering-exemptions` 禁止）（D7）。
 8. **CI e2e 的 docx 由 `python3 zipfile` 在 runner 上生成**（外部链接图片 docx），不提交二进制夹具；xlsx / pptx / 中文留给测试主机（D10、D11）。
-9. **uid-isolation job 的 `runs-on` 不在本 change 范围**（它不含办公文档规则，本 change 不触碰它）；`ubuntu-latest` → Ubuntu 26 的迁移风险建议编排方另开仓库级 issue。
+9. **uid-isolation job 的 `runs-on`**：原建议另开仓库级 issue（#1502 已开）；owner 2026-10-17 裁定并入 S2a 一刀（B12），S2a 的 PR 固定为 `ubuntu-24.04` 并写 `Closes #1502`。
 10. **office-preview 两条 REMOVED + 五条 ADDED** 的形状由 openspec `--strict` 的规则决定（MODIFIED 不得丢场景），不是起草者偏好；归档后主规格里 requirement 的名字随之变化（「转换器调用契约」→「sidecar 转换契约」，「转换缓存」→「转换缓存与作业目录清理」）。
 11. **sidecar 的 CJK 字体包 `fonts-noto-cjk`** 进镜像（产品中文界面）；镜像体积因此 +~100 MB（D7）。
 12. **`request.json` 只有三键**（`version`、`input`、`timeoutMs`），不带原文件名之外的任何元数据（D3）。
@@ -415,7 +416,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 | T8 | D14、行数预算；待编排方确认 16 |
 | T9 | D13 |
 | 编排方补充 1（真预检、假转换） | D8、D10 |
-| 编排方补充 2（`ubuntu-24.04`） | D10（新 job）；待编排方确认 9 |
+| 编排方补充 2（`ubuntu-24.04`） | D10（新 job 与 uid-isolation 两处，B12）；待编排方确认 9 |
 | 编排方补充 3（部署形态） | B6/B7 → D7、Migration Plan |
 | 编排方补充 4（对照证据） | Context 第 2、7 行；D10 (5)、D11 (b) |
 | 编排方补充 5（原子性断言措辞，S1a 评审后 2026-10-17） | D8 变异「标记不原子」、tasks 1a.2、office-preview「sidecar 脚本对着假 soffice」：断言改为「最终名一出现内容即完整」，同目录 `.part` 可被短暂观察到；`.part` 不另放子目录（KISS，D3 不变） |
