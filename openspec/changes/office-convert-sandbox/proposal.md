@@ -16,7 +16,7 @@ owner 裁定（grill ledger B1–B10）：数据类向量登记为「未测、�
 - **配置** **BREAKING**：`OFFICE_BIN` → `OFFICE_SPOOL_DIR`（绝对路径，未配置即办公文档预览关闭；十二个预览键仍是十二个）；`OFFICE_BIN` 仍被设置 → 启动失败；stderr 只有 `server_start_failed` / `reason:"config"`、不点名该键，抛出的 message 命名该键（owner B8 与细节）。`OFFICE_CONVERT_TIMEOUT_MS` / `OFFICE_CONVERT_CONCURRENCY` 不变（后者 SHALL ≤ sidecar 的 `CONVERTER_CONCURRENCY`）。
 - **测试**：app 侧对着进程内假 sidecar（临时 spool 目录的应答器，与 `fake-soffice.mjs` 同一套 `@标记`，多出 `fifo` 与多点扩展名）；sidecar 脚本以子进程对着 `fake-soffice.mjs`；单元与编译入口测试不需要 Docker 与 LibreOffice（启动过的可执行文件 basename 没有 `soffice` / `libreoffice` / `docker`）；旧 spawn 形状的断言随 REMOVED 的 requirement 在同一 PR（S1b）删除（design D9 封闭表，第 5 种改法）。
 - **切片**：S1a（`converter/` + 其测试 + 守卫接线，不碰 `server/`）→ S1b（app 侧客户端、预检、D9 退役，原子）→ S2a / S2b → S3。
-- **CI**（「CI 改动」，S2a；owner 已于 2026-10-17 批准，B10）：新 job `office-sidecar`（`runs-on: ubuntu-24.04`）构建镜像、`--network none` 起 sidecar、以产品代码的 spool 客户端转换一份 runner 上生成的带 http 外链图片的 docx → 0 请求 0 图；对照 `--network host` 直接 `soffice` → 有请求有图；runner 的 uid 不在镜像 passwd 里，顺带实测该项。入 `all-checks-passed.needs`（九 → 十）；harness / constraints / AGENTS 合同同步；`fast-checks` 的 `biome check` 加 `converter`。uid-isolation job 不动。
+- **CI**（「CI 改动」，S2a；owner 已于 2026-10-17 批准，B10）：新 job `office-sidecar`（`runs-on: ubuntu-24.04`）构建镜像、`--network none` 起 sidecar、以产品代码的 spool 客户端转换一份 runner 上生成的带 http 外链图片的 docx → 0 请求 0 图；对照 `--network host` 直接 `soffice` → 有请求有图；runner 的 uid 不在镜像 passwd 里，顺带实测该项。入 `all-checks-passed.needs`（九 → 十）；harness / constraints / AGENTS 合同同步；`fast-checks` 的 `biome check` 加 `converter`。uid-isolation job 的 `runs-on` 同样固定 `ubuntu-24.04`（#1502 并入，owner B12），其余不动。
 - **实测**（S2b，编排方 / owner 本人）：两种部署形态下经 `/o/` 的 http 图 / `file://` 图 / docx·xlsx·pptx·中文、终止链 5 次、fail-closed 两个方向、耗时；结果表进 ADR。
 - **文档**（S3）：ADR-0010 新补充（2026-10-12 补充整节加「已退役」头注）、ADR-0014（决定 6、残余表、`OFFICE_BIN` 节、环境变量表、运维）、system.md 9.7（两种部署形态的步骤、排障、fail-closed 表现）、头注释（`app.ts` `office.ts` `office-cache.ts` `server.ts`）、FL-25/26/27 改键名 + 新增 FL-39、CONTEXT.md 术语、IMPLEMENTATION_PLAN 三处；S3 合并后关闭 #1350。
 - **不做**：bubblewrap 与任何第二种机制；B1 向量的实测；omp 的沙箱；app 的容器化与 compose 里的 app 服务；多 sidecar / 跨主机；非 Debian 镜像；`/o/` 输入侧换入残余的全闭合（收窄到与 `/w/` 一致：只守末段）。
@@ -33,6 +33,7 @@ owner 裁定（grill ledger B1–B10）：数据类向量登记为「未测、�
 - `http-service-skeleton`：MODIFIED「服务启动与装配」（`OFFICE_SPOOL_DIR` 替换 `OFFICE_BIN`、`OFFICE_BIN` 被拒、成功顺序句插入预检一步、预检等待期间的信号 → 干净退出零记录）、「预览监听器的装配与关停」（建 `pdf/` 与 `jobs/`、无 `work`、无 `sudo`、无 `preview_work_clear_failed`；关停首步并入转换器 `close()` 的 `cancel`）。
 - `preview-origin`：MODIFIED「预览令牌签发端点」（`officeAvailable` 当且仅当配置了 `OFFICE_SPOOL_DIR` 且启动预检通过；新增场景）。
 - `omp-uid-isolation`：MODIFIED「CI uid-isolation job」——只改场景里「九个 direct job」→「十个」（新 job 入聚合，S2a 已获批，B10）。uid-isolation job 本身不动。
+- `verification-harness`：MODIFIED「CI 接线与控制面同步」「第三方 CI action 使用 Node 24 runtime」（新 direct job `office-sidecar`、`runs-on: ubuntu-24.04`；S2a 实现后补登）
 
 ## Impact
 
@@ -46,6 +47,6 @@ owner 裁定（grill ledger B1–B10）：数据类向量登记为「未测、�
 ## 流程记录
 
 - 2026-10-13 grill（Q5/Q6/Q7/Q11）→ B1–B4；2026-10-16 owner 批准测试主机安装与实测 → B5；bubblewrap 两轮实测（容器缺省 / root+SYS_ADMIN / 裸机无 profile / 裸机有 profile / setuid 五档）；2026-10-16 owner B6（容器部署必须可用）；2026-10-17 owner B7（sidecar 单机制，采纳编排方推荐）。
-- 编排方补充（2026-10-16）：真预检 / 假转换的测试分层；`runs-on: ubuntu-24.04`（现落在新 job 上，uid-isolation job 不动）；部署形态两列 → B6/B7 定为同一容器；裸机对照 (b) 无效、只引用容器对照与 issue 表。
+- 编排方补充（2026-10-16）：真预检 / 假转换的测试分层；`runs-on: ubuntu-24.04`（新 job 与 uid-isolation 两处，#1502 并入 S2a，owner B12）；部署形态两列 → B6/B7 定为同一容器；裸机对照 (b) 无效、只引用容器对照与 issue 表。
 - Stage 2 两次改稿：2026-10-16 行为级（机制开放）→ 2026-10-17 定稿（sidecar）。
 - Stage 3 三席 revise → Stage 4 修订（2026-10-17）：24 条裁定项；owner 同日补 B8（`OFFICE_BIN` 残留即启动失败）、B9（镜像由部署方自建、不发布）；第二轮修订落 B8 细节（stderr 不点名退役键）与 B10（批准 S2a）。

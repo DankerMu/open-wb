@@ -15,7 +15,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
       - run: npm ci
       - run: cd kbservice && uv sync
-      - run: npx biome check server web scripts
+      - run: npx biome check server web scripts converter
       - run: cd kbservice && uv run ruff check . && uv run ruff format --check .
       - run: npm run typecheck --workspaces
       - run: npx openspec validate --all --strict --no-interactive
@@ -130,7 +130,7 @@ jobs:
         run: bash .github/scripts/ci-compiled-server.sh ui-walk
 
   uid-isolation:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -156,11 +156,23 @@ jobs:
           FAKE_UPSTREAM_PORT: "19018"
         run: bash .github/scripts/ci-uid-isolation.sh
 
+  office-sidecar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace server
+      - run: docker build -t workbuddy-converter:ci converter/
+      - run: bash .github/scripts/ci-office-sidecar.sh
+
   all-checks-passed:
     # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
     # required check 当通过，这个洞必须在这里堵死。
     if: always()
-    needs: [fast-checks, unit-tests, unit-tests-web, anti-drift, secret-scan, sast, smoke, ui-walk, uid-isolation]
+    needs: [fast-checks, unit-tests, unit-tests-web, anti-drift, secret-scan, sast, smoke, ui-walk, uid-isolation, office-sidecar]
     runs-on: ubuntu-latest
     steps:
       - name: verify all required jobs succeeded
