@@ -103,7 +103,7 @@ ci:
   risk_layers: 5
   fast_checks_timeout_minutes: 10
   anti_drift_timeout_minutes: 10
-  matrix: ["ubuntu-latest"]
+  matrix: ["ubuntu-latest", "ubuntu-24.04"]
 
 verification:
   surfaces:
