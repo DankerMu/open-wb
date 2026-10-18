@@ -170,7 +170,7 @@ describe("openRegularFile: only a regular file opens", () => {
         expectNotFound(opened.outcome);
         expect(opened.descriptors).toHaveLength(1);
         expect(opened.closed).toEqual(opened.descriptors);
-        // By path: the pipe or directory swapped in during the open is still there.
+        // By path: the pipe or directory swapped in before the open is still there.
         expectDescriptorReleased(opened.descriptors[0] as number, identityOf(path));
         expect(opened.reads).toBe(0);
         expect(opened.elapsedMs).toBeLessThan(1500);

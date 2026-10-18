@@ -105,7 +105,8 @@ export function identityOf(target: number | string): FileIdentity {
 /**
  * `fd` no longer refers to the file it was opened on. EBADF alone is not the test: once closed,
  * the number is free, and under load another open in the process may take it before the check, so
- * an fstat that succeeds on some other file passes too.
+ * an fstat that succeeds on some other file passes too. An asynchronous close (a stream's) is done
+ * only once the stream has emitted `close`: wait for that before calling this.
  */
 export function expectDescriptorReleased(fd: number, before: FileIdentity): void {
   let after: FileIdentity;
@@ -267,10 +268,13 @@ export function failFirstReadOf(target: string): () => number {
   return () => failed;
 }
 
-/** The stream `createReadStream` made on `fd`, after `spyBodyIo()`. */
+/**
+ * The latest stream `createReadStream` made on `fd`, after `spyBodyIo()`: a closed descriptor's
+ * number is handed out again, so earlier streams of the test may have had the same one.
+ */
 export function streamOn(fd: number): (fs.ReadStream & { fd: number | null }) | undefined {
   const spied = vi.mocked(fs.createReadStream);
-  const index = spied.mock.calls.findIndex(
+  const index = spied.mock.calls.findLastIndex(
     ([, options]) => typeof options === "object" && options.fd === fd,
   );
   return spied.mock.results[index]?.value;

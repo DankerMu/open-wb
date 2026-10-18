@@ -254,10 +254,12 @@ describe("file route: sniff reads", () => {
       expect(closedBefore).toHaveLength(1);
       expect(io.closed()).toEqual(closedBefore);
       const stream = streamOn(opened?.value as number);
+      // LICENSE's own stream, the last one made, not an earlier one on the same descriptor number.
+      expect(stream).toBeDefined();
+      expect(stream).toBe(vi.mocked(fs.createReadStream).mock.results.at(-1)?.value);
       if (stream !== undefined && !stream.closed) {
         await waitForClose(stream);
       }
-      expect(stream).toBeDefined();
       expect(
         asyncClose.mock.calls.slice(asyncClosesBefore).filter(([fd]) => fd === opened?.value),
       ).toHaveLength(1);
