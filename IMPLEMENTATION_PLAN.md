@@ -333,13 +333,15 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
          网页的渲染视图、PDF 与办公文档转出的 PDF 从这里加载。
       4. 办公文档转 PDF（任务组 14、15）：经 `OFFICE_BIN` 指向的 LibreOffice 转换，有超时、并发上限、排队与缓存；
          **不配 `OFFICE_BIN` 即功能关闭**。自动化测试只对着假可执行文件，不需要 LibreOffice。
+         2026-10-17 起（#1350，change `office-convert-sandbox`）键改为 `OFFICE_SPOOL_DIR`、转换在 sidecar 容器里（`converter/`，
+         `network_mode: none`、只挂 spool），部署要求 Docker 与该 sidecar；`OFFICE_BIN` 仍被设置即启动失败。
       5. 文件操作（任务组 4、8、9、22）：`DELETE /api/workspaces/:id/entries`（移进回收目录 `<SANDBOX_ROOT>/.trash`，保留
          `TRASH_RETENTION_DAYS` 天，启动后清理一轮、此后每 6 小时一轮；界面不提供回收站）、`POST /api/workspaces/:id/move`
          （重命名与同空间内移动，目标同名时 409）、`GET /api/workspaces/:id/download`（所有文件可下载）；
          审计 `file.delete` / `file.move` / `file.download`；sandbox `op` 增 `delete`、`move`。
       6. 工作空间侧边栏（任务组 23–25）：会话页右侧的文件树 + 预览，宽屏并排可拖宽、窄屏覆盖全屏，本会话改动标记与 `只看本会话改动`；
          文件变更卡的 `查看详情` 与产物卡的 `打开网页预览` 改为打开它并定位到文件。产物面板与网页预览对话框已删除（后者 #1110）。
-      7. 契约增量：配置项 +12（`PREVIEW_PORT`、`PREVIEW_ORIGIN`、`PREVIEW_CACHE_DIR`、`OFFICE_BIN`、`OFFICE_CONVERT_TIMEOUT_MS`、
+      7. 契约增量：配置项 +12（`PREVIEW_PORT`、`PREVIEW_ORIGIN`、`PREVIEW_CACHE_DIR`、`OFFICE_BIN`（2026-10-17 起 1:1 换成 `OFFICE_SPOOL_DIR`）、`OFFICE_CONVERT_TIMEOUT_MS`、
          `OFFICE_CONVERT_CONCURRENCY`、`PREVIEW_TEXT_MAX_BYTES`、`PREVIEW_IMAGE_MAX_BYTES`、`PREVIEW_DOCUMENT_MAX_BYTES`、
          `PREVIEW_NOTEBOOK_MAX_BYTES`、`PREVIEW_ARCHIVE_MAX_ENTRIES`、`TRASH_RETENTION_DAYS`）；无数据库迁移；
          新增依赖 `lowlight`、`highlight.js`、`hast-util-to-jsx-runtime`、`react-resizable-panels`、`yauzl`（已登记 `ATTRIBUTION.md`）。
@@ -460,7 +462,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 **S4b 单机部署包**
 - Outcome：部署产物（app-server+SPA+kbservice+减肥 omp+fuse3/rclone+onnx 与嵌入模型捆包）；冒烟脚本全绿。**P4 里程碑验收：无公网服务器全新部署跑通。**
-- 部署要求（S1f 的 D 留下，压测第 5 条，#1122）：部署镜像安装 LibreOffice 并设 `OFFICE_BIN`（绝对路径；不设即办公文档预览关闭），发布 `PREVIEW_PORT`（缺省 0 由系统分配，部署须设为固定端口；经反向代理时另设 `PREVIEW_ORIGIN`）。
+- 部署要求（S1f 的 D 留下，压测第 5 条，#1122；办公文档一项 2026-10-17 由 #1350 改写）：部署主机装 Docker（含 compose 插件）并按 `converter/compose.yml` 起转换 sidecar（镜像由部署方自建），app 设 `OFFICE_SPOOL_DIR`（绝对路径，与 sidecar 同一 spool；不设即办公文档预览关闭；步骤见 `docs/architecture/system.md` 9.7），发布 `PREVIEW_PORT`（缺省 0 由系统分配，部署须设为固定端口；经反向代理时另设 `PREVIEW_ORIGIN`）。
 - 覆盖：F-OPS-4。
 - 必读增量：已定决策"模型分发=捆进部署包"（backend-research §3）。
 - Verify：干净 Linux 环境（测试 VPS 的全新 docker 容器）一键部署 + 全量 smoke + 双账号走查。
