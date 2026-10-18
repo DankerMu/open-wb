@@ -84,9 +84,9 @@
 
 #### Scenario: 终止结束作业的全部进程（测试主机）
 - **WHEN** `OFFICE_CONVERT_TIMEOUT_MS=3000`，经 `/o/` 请求一份转换耗时约 25 s 的文档，504 之后在 1.5 s、5 s、30 s 三个时刻查看 sidecar 容器的进程；重复 5 次
-- **THEN** 每次 504 的文案为「文档转换超时，请下载后查看」；三个时刻都没有命令行含该作业目录的进程（含 `soffice.bin`）；`jobs/` 下该作业目录已不存在；实际观察到的次数与结果如实写进 ADR-0010 补充，有存活时按观察改写措辞而不改本条的 SHALL
+- **THEN** 每次 504 的文案为「文档转换超时，请下载后查看」；三个时刻都没有命令行含该作业目录的进程（含 `soffice.bin`）；`jobs/` 下该作业目录已不存在——app 删目录与 sidecar 写标记恰好同时而删不掉的，留到下一次启动清空（S2b 实测 26 次终止里 1 次，如实记录）；实际观察到的次数与结果如实写进 ADR-0010 补充，有存活时按观察改写措辞而不改本条的 SHALL
 - **WHEN** 以缺省超时请求同一文档，2 s 后客户端关闭连接，在关闭后 1.5 s、5 s、30 s 查看
-- **THEN** 没有为该请求写出响应字节；三个时刻同样没有该作业目录相关的进程；`jobs/` 下该作业目录已不存在
+- **THEN** 没有为该请求写出响应字节；三个时刻同样没有该作业目录相关的进程；`jobs/` 下该作业目录已不存在（删除竞态的残留同上一场景）
 
 ### Requirement: 转换 sidecar 的健康与 fail-closed
 sidecar 的健康 SHALL 由 `<OFFICE_SPOOL_DIR>/heartbeat` 的修改时间表示：sidecar 每 2 s 更新一次，新鲜 = `now − mtime < 10000 ms`。
@@ -155,7 +155,7 @@ sidecar 的健康 SHALL 由 `<OFFICE_SPOOL_DIR>/heartbeat` 的修改时间表示
 ## MODIFIED Requirements
 
 ### Requirement: 并发上限与排队
-同一时刻运行中的转换数 SHALL 不超过 `concurrency`（`OFFICE_CONVERT_CONCURRENCY`，缺省 2）；这里计的是由转换器写入 spool、其 `convert` 尚未落定的作业。超出的调用 SHALL 排队，按到达次序在有空位时启动；排队中的调用数达到 8 时，新到的调用 SHALL 立即以 `busy` 失败、不入队。同一个缓存键（见「转换缓存与作业目录清理」）的并发调用 SHALL 共用同一次转换与同一个结果，只占一个运行或排队位置。排队中的调用被其 `signal` 中止时 SHALL 出队并以 `aborted` 失败，不写 spool；共用同一次转换的多个调用里只有全部都中止时才对该作业写 `cancel`。sidecar 自己的 `CONVERTER_CONCURRENCY` 是它的保险，部署 SHALL 使它不小于 `OFFICE_CONVERT_CONCURRENCY`；小于时作业只是在 spool 里多等，不出错。
+同一时刻运行中的转换数 SHALL 不超过 `concurrency`（`OFFICE_CONVERT_CONCURRENCY`，缺省 2）；这里计的是由转换器写入 spool、其 `convert` 尚未落定的作业。超出的调用 SHALL 排队，按到达次序在有空位时启动；排队中的调用数达到 8 时，新到的调用 SHALL 立即以 `busy` 失败、不入队。同一个缓存键（见「转换缓存与作业目录清理」）的并发调用 SHALL 共用同一次转换与同一个结果，只占一个运行或排队位置。排队中的调用被其 `signal` 中止时 SHALL 出队并以 `aborted` 失败，不写 spool；共用同一次转换的多个调用里只有全部都中止时才对该作业写 `cancel`。sidecar 自己的 `CONVERTER_CONCURRENCY` 是它的保险，部署 SHALL 使它不小于 `OFFICE_CONVERT_CONCURRENCY`；小于时作业在 spool 里多等；app 的时限从建作业目录起算，等得久的以超时（504）结束，不出别的错。
 
 #### Scenario: 不超过上限并按序启动
 - **WHEN** `concurrency` 为 2，假 sidecar 在收到放行信号前不写标记，对五个不同的输入同时调用 `convert`

@@ -286,7 +286,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - **[spool 协议是新造的]** → 两侧实现对不上就是 `failed` / 超时。缓解：协议只有三个文件名、三个 JSON 键、六个原因码；单一真相写在 sidecar 头注释与规格；sidecar 测试与 app 侧测试用同一份假 `soffice` 字面量；CI e2e 走产品代码两端。
 - **[冷启动竞态]** → app 预检早于 sidecar 第一次心跳 → 每次开机 fail-closed。缓解：预检等 5 s + compose `depends_on: service_healthy`；编译入口测试钉住「2 s 后出现 → 可用」「无心跳 → `server_started` 落在 [5 s, 5 s + δ]」。
 - **[预检等待期间的信号]** → 新增的 ≤ 5 s `await` 是 `app` 阶段里信号可能落入的空档；处置与主 listen 之后同形（`signalReceived` 核对 → `releaseOwned` → 退出 0、零记录），等待不被打断所以退出时延有界。编译入口一例 + 变异钉住。
-- **[同一 sidecar 内并发作业互相可见]** → 共享 fs / ipc / uid，作业间只靠 128 位随机 id 隔离；LibreOffice 代码执行漏洞下另一在途作业的输入 / 输出可读可伪造（读代码推出，未测）。登记不缓解（Non-Goals）；ADR-0010 补充、ADR-0014 残余表与 `app.ts` 头注释同句（D12 四处）。
+- **[同一 sidecar 内并发作业互相可见]** → 同一 sidecar 内并发作业共享 fs / ipc / uid，作业间隔离只靠 128 位随机作业 id；LibreOffice 代码执行漏洞下另一在途作业的输入 / 输出可读可伪造（读代码推出，未测）。登记不缓解（Non-Goals）；ADR-0010 补充、ADR-0014 残余表与 `app.ts` 头注释同句（D12 四处）。
 - **[非 passwd uid 跑 LibreOffice 未测]** → D10 的 CI e2e 以 runner uid 实测；红即回 design（可能要 `nss_wrapper` 或镜像内建用户）。
 - **[CJK 字体 / xlsx / pptx 在镜像里未测]** → D11 (b)；红即停下，镜像配方回 design。
 - **[sidecar 死在作业中途表现为 504 而不是 503]** → 文档写明；下一次请求才 503。接受（否则 app 要在等待期间持续看心跳——多一个定时器换一次更准的状态码，不值）。
@@ -299,7 +299,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - **[`OFFICE_BIN` 被设置即启动失败]** → 升级时部署方必须改配置；Migration Plan 写明；比静默忽略安全。
 - **[`/o/` 输入侧换入残余收窄而不闭合]** → 只守末段（与 `/w/` 一致）；头注释与 ADR-0014 表按此写。
 - **[B1 向量未测]** → 登记「未测、视为跟随」，按构造覆盖（读手册推出）；不造文档（owner B1）。
-- **[超时取消后作业目录残留]**（S2b 实测 2026-10-18：13 次取消类终止里 1 次，A 同 uid c#4；该次 sidecar 日志为 `cancelled`）→ 残留到下次 app 启动由 `clearWork` 清掉（实测）。机制读代码推出：app `removeJob` 的 `rmSync` 与 sidecar 写 `failed.part` / `failed` 标记竞态，目录非空删不掉，`office.ts` 的 `removeJob` 注释已预言「删不掉的留给下一次启动」。残留只是输入副本与标记、无进程（探针 8 次无残留）。接受、不改代码；ADR-0014 残余表登记一行。
+- **[超时取消后作业目录残留]**（S2b 实测 2026-10-18：26 次终止里 1 次（app 取消路径 6 次里的 1 次），A 同 uid c#4；该次 sidecar 日志为 `cancelled`）→ 残留到下次 app 启动由 `clearWork` 清掉（实测）。机制读代码推出：app `removeJob` 的 `rmSync` 与 sidecar 写 `failed.part` / `failed` 标记竞态，目录非空删不掉，`office.ts` 的 `removeJob` 注释已预言「删不掉的留给下一次启动」。残留只是输入副本与标记、无进程（探针 8 次无残留）。接受、不改代码；ADR-0014 残余表登记一行。
 - **[macOS 开发机没有 Docker Desktop 时]** → 配了 `OFFICE_SPOOL_DIR` 的服务 fail-closed；真实转换本来就只在 Linux 主机验证。接受；`make smoke` / `ui-walk` 不设 `OFFICE_SPOOL_DIR`。
 - **[轮询延迟 ≤ 300 ms]** → 相对转换时长可忽略。接受。
 
