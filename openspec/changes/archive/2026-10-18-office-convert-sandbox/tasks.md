@@ -138,7 +138,8 @@ Minimal mergeable slice: atomic - app 侧客户端、预检与 D9 退役互为�
 - [x] 2a.4 合同同步（按 2a.1 的被拒清单）：`scripts/test-ci-harness.sh` `aggregate` 字面、新 job 的存在 / `runs-on`（基线 `ubuntu-24.04`，变异到 `ubuntu-latest` 应被拒）/ `if` / `continue-on-error` / `timeout` 合同、`fast-checks` 步骤字面；`constraints.yaml` `ci.matrix`（加 `ubuntu-24.04` 或为该 job 单列，取 2a.1 的拒绝项所指）；`AGENTS.md` Enforcement Index 加一行「办公文档转换隔离 | `.github/workflows/ci.yml`（job `office-sidecar`） | CI `office-sidecar`/`all-checks-passed` | block」，并加对应的 harness 合同（`cm` 行）；`scripts/inspect-ci-workflow.js` 若解析 job 清单则同步。
   验证：`make test-guardrails` 全绿，且 2a.1 的每条被拒项现在是 PASS；去掉新 job 的 `needs` 项或把 `runs-on` 改回 `ubuntu-latest` 时 harness 判红（两条变异做后撤销）。
 - [x] 2a.5 规格随刀：omp-uid-isolation「CI uid-isolation job」delta（九 → 十）与 office-preview「真实转换的人工验证」场景「CI 端到端」由归档合入；本任务核对 job 名、`needs` 与两处措辞一致。
-- [ ] 2a.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；十个 job 绿，贴 `office-sidecar` 的 job 链接与脚本输出里「0 次请求 / 对照 ≥ 1 次」两行；PR 标题与正文都标「CI 改动」（owner 已于 2026-10-17 批准，B10）；请求白盒审查（design D13 S2a 清单）。
+- [x] 2a.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；十个 job 绿，贴 `office-sidecar` 的 job 链接与脚本输出里「0 次请求 / 对照 ≥ 1 次」两行；PR 标题与正文都标「CI 改动」（owner 已于 2026-10-17 批准，B10）；请求白盒审查（design D13 S2a 清单）。
+  **完成记录（2026-10-17，编排方补勾于归档时）**：PR #1512 CI 11/11 绿；`office-sidecar` job 脚本输出产品路径 `requests=0 images=0`、对照 `1/1`；两个固定 runner 的 Runner Image 均为 `ubuntu-24.04`。
 Suggested fixture level: compact - 不改产品代码；新增一个 CI job、一个脚本与合同同步；行为由规格 delta、合同行与 job 输出钉住。
 Minimal mergeable slice: atomic - 新 job、`needs`、harness 合同与 AGENTS 行互为前提（少任一项 `make test-guardrails` 或聚合门禁之一必红）。
 
@@ -163,6 +164,7 @@ Minimal mergeable slice: atomic - 没有 PR；实测项互为对照（http 例�
 - [x] 3.6 验收清单：FL-25 / FL-26 / FL-27 的 `OFFICE_BIN` 改为 `OFFICE_SPOOL_DIR`（含「由启动服务的人启动 / 停掉 sidecar 容器」的操作措辞）；新增 `FL-39`——操作：「由启动服务的人确认 sidecar 容器在跑（`docker compose ps` 为 healthy）且服务 stderr 没有 `office_convert_sidecar_unavailable`；由有服务器访问权的人在**服务器上、工作空间之外**放一张图片，并在服务器上起一个记录请求的本机监听器（如 `python3 -m http.server`，服务器自己能访问的地址）；在本机备一个 fl-link.docx（正文里插入一张『链接到文件』而不是嵌入的图片，链接指向服务器上那张图；另插入一张链接到该监听器地址的 http 图片）；经「+」菜单上传后在文件页点它」——预期：「浏览器自带的 PDF 查看器里显示转换出的文档，两张链接图片的位置是空白或占位框，没有图片内容；其余文字可辨认；**监听器的访问日志里没有任何请求**」，结论 `待签`。
 - [x] 3.7 `CONTEXT.md:25` 术语里的 `OFFICE_BIN` 改为 `OFFICE_SPOOL_DIR` 并加一句「转换在 sidecar 容器里」；`IMPLEMENTATION_PLAN.md:334-335`、`:342`、`:463` 同步键名与部署要求（Docker + sidecar）。
 - [x] 3.8 规格核对：归档后主规格（office-preview 五条新 requirement 与三条 MODIFIED、http-service-skeleton 两条、preview-origin、omp-uid-isolation）与 ADR / system.md / 头注释对同一事实说同一种话；D-25 与 B1 的措辞不强于证据；并发作业残余的句子四处（design D12 列的 Risks、ADR-0010 补充、ADR-0014 残余表、`app.ts` 头注释）一致。
-- [ ] 3.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；PR 贴 design D13 S3 清单请轻量复核；合并后关闭 #1350，关闭评论引用本 change 的归档路径、S1a / S1b / S2a / S3 的 PR 号与 S2b 结果表。
+- [x] 3.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；PR 贴 design D13 S3 清单请轻量复核；合并后关闭 #1350，关闭评论引用本 change 的归档路径、S1a / S1b / S2a / S3 的 PR 号与 S2b 结果表。
 Suggested fixture level: none - 只改文档、ADR、头注释与验收行，无运行时行为。
+  **完成记录（2026-10-18）**：PR #1514 CI 11/11 绿（含 smoke / ui-walk），1 席评审 1 轮修正后 clean（owner B13）；合并后关闭 #1350 与归档本 change 由编排方执行（归档 PR）。
 Minimal mergeable slice: atomic - 一次文档终态更新；拆开会让 ADR 与头注释在一段时间内对同一事实说两种话。
