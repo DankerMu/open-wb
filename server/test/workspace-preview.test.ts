@@ -1,11 +1,4 @@
-import fs, {
-  constants,
-  fstatSync,
-  mkdirSync,
-  openSync,
-  truncateSync,
-  writeFileSync,
-} from "node:fs";
+import fs, { constants, mkdirSync, openSync, truncateSync, writeFileSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -17,7 +10,9 @@ import {
 import {
   collectBytes,
   expectCanonicalError,
+  expectDescriptorReleased,
   expectedTextHeaders,
+  identityOf,
   spyMetadataIo,
   TEXT_MIME,
   waitForClose,
@@ -209,6 +204,7 @@ describe("openPreviewStream", () => {
     expect(plan.headers).toEqual(expectedTextHeaders(0, false));
 
     const fd = openSync(emptyPath, "r");
+    const before = identityOf(fd);
     const nativeCreate = vi.spyOn(fs, "createReadStream");
     syncBuiltinESMExports();
     const stream = openPreviewStream({ fd }, plan.limit);
@@ -224,7 +220,7 @@ describe("openPreviewStream", () => {
       }
     }
     // No stream was opened to close it: the helper closed it itself.
-    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+    expectDescriptorReleased(fd, before);
   });
 
   it("cuts text at the raw 1 MiB prefix even when a multibyte UTF-8 sequence straddles the cutoff", async () => {
@@ -253,33 +249,36 @@ describe("openPreviewStream", () => {
     const path = join(workspaceTempDir(), "notes.txt");
     writeFileSync(path, "abcdef");
     const fd = openSync(path, "r");
+    const before = identityOf(fd);
     const stream = openPreviewStream({ fd }, 6);
     const closed = waitForClose(stream);
     expect(await collectBytes(stream)).toEqual(Buffer.from("abcdef"));
     await closed;
-    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+    expectDescriptorReleased(fd, before);
   });
 
   it("releases the captured descriptor after early destroy", async () => {
     const path = join(workspaceTempDir(), "notes.txt");
     writeFileSync(path, Buffer.alloc(64, 0x61));
     const fd = openSync(path, "r");
+    const before = identityOf(fd);
     const stream = openPreviewStream({ fd }, 64);
     const closed = waitForClose(stream);
     stream.destroy();
     await closed;
-    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+    expectDescriptorReleased(fd, before);
   });
 
   it("propagates a real filesystem read error from an existing directory target", async () => {
     const path = join(workspaceTempDir(), "blocked");
     mkdirSync(path);
     const fd = openSync(path, constants.O_RDONLY);
+    const before = identityOf(fd);
     const stream = openPreviewStream({ fd }, 6);
     const closed = waitForClose(stream);
     await expect(collectBytes(stream)).rejects.toMatchObject({ code: "EISDIR" });
     await closed;
-    expect(() => fstatSync(fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+    expectDescriptorReleased(fd, before);
   });
 });
 

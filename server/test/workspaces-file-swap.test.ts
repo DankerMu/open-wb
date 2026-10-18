@@ -35,7 +35,9 @@ import {
 } from "./auth-lifecycle-helpers.js";
 import {
   descriptorsOf,
+  expectDescriptorReleased,
   expectSwappedUnread,
+  identityOf,
   type SwapKind,
   spyBodyIo,
   swapIn,
@@ -168,7 +170,8 @@ describe("openRegularFile: only a regular file opens", () => {
         expectNotFound(opened.outcome);
         expect(opened.descriptors).toHaveLength(1);
         expect(opened.closed).toEqual(opened.descriptors);
-        expect(() => fstatSync(opened.descriptors[0] as number)).toThrow(/EBADF/);
+        // By path: the pipe or directory swapped in during the open is still there.
+        expectDescriptorReleased(opened.descriptors[0] as number, identityOf(path));
         expect(opened.reads).toBe(0);
         expect(opened.elapsedMs).toBeLessThan(1500);
       } finally {
@@ -376,6 +379,7 @@ describe("file route: a refused file closes the one descriptor it opened", () =>
     await withFiles(async (files) => {
       const target = join(files.root, "blob.bin");
       writeFileSync(target, "must-not-leave");
+      const file = identityOf(target);
       const realReadSync = fs.readSync as (...args: unknown[]) => number;
       spyBodyIo();
       let failed = 0;
@@ -400,7 +404,7 @@ describe("file route: a refused file closes the one descriptor it opened", () =>
       expect(response.headers["x-workbuddy-size"]).toBeUndefined();
       const [fd] = descriptorsOf(target);
       expect(descriptorsOf(target)).toHaveLength(1);
-      expect(() => fstatSync(fd as number)).toThrow(/EBADF/);
+      expectDescriptorReleased(fd as number, file);
       expect(vi.mocked(fs.createReadStream)).not.toHaveBeenCalled();
     });
   });

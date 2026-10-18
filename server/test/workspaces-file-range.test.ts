@@ -1,5 +1,4 @@
 import fs, {
-  fstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -23,7 +22,10 @@ import {
 import { rawHttpRequest, withListeningApp } from "./raw-http-helpers.js";
 import {
   descriptorsOf,
+  expectDescriptorReleased,
+  type FileIdentity,
   failFirstReadOf,
+  identityOf,
   spyBodyIo,
   streamOn,
   TEXT_MIME,
@@ -443,12 +445,15 @@ describe("sendFileRange: a caller other than the file route", () => {
     writeFileSync(absPath, CLIP);
     const app = fastify();
     // One descriptor per request, opened by the caller as the routes do; the sender owns it then.
-    const descriptors: number[] = [];
-    const expectReleased = () =>
-      vi.waitFor(() => expect(() => fstatSync(descriptors.at(-1) as number)).toThrow(/EBADF/));
+    const descriptors: { fd: number; file: FileIdentity }[] = [];
+    const released = () => {
+      const { fd, file } = descriptors.at(-1) as { fd: number; file: FileIdentity };
+      expectDescriptorReleased(fd, file);
+    };
+    const expectReleased = () => vi.waitFor(released);
     app.get("/doc", (request, reply) => {
       const fd = openSync(absPath, "r");
-      descriptors.push(fd);
+      descriptors.push({ fd, file: identityOf(fd) });
       return sendFileRange(request, reply, {
         fd,
         size: CLIP.length,
@@ -494,13 +499,13 @@ describe("sendFileRange: a caller other than the file route", () => {
       expect(unsatisfiable.headers["accept-ranges"]).toBeUndefined();
       expect(unsatisfiable.payload).toBe("");
       // Closed before the 416 went out, not by a stream.
-      expect(() => fstatSync(descriptors.at(-1) as number)).toThrow(/EBADF/);
+      released();
 
       const head = await app.inject({ method: "HEAD", url: "/doc" });
       expect(head.statusCode).toBe(200);
       expect(head.headers["content-length"]).toBe("1000");
       expect(head.rawPayload.length).toBe(0);
-      expect(() => fstatSync(descriptors.at(-1) as number)).toThrow(/EBADF/);
+      released();
       expect(descriptors).toHaveLength(4);
     } finally {
       await app.close();
@@ -558,24 +563,28 @@ describe("file route: range requests over a real connection", () => {
           const [fd] = descriptorsOf(big);
           return fd === undefined ? undefined : streamOn(fd);
         };
-        // What the route's `openSync` returned, while the stream still holds it.
-        const held = () => (typeof served()?.fd === "number" ? descriptorsOf(big)[0] : undefined);
+        // What the route's `openSync` returned, while the stream still holds it, and its file.
+        const held = () => {
+          const fd = typeof served()?.fd === "number" ? descriptorsOf(big)[0] : undefined;
+          return fd === undefined ? undefined : { fd, file: identityOf(fd) };
+        };
 
-        // Aborts at the first body chunk and reports the descriptor the server held open then.
-        const descriptor = await new Promise<number>((resolve, reject) => {
+        // Aborts at the first body chunk and reports the descriptor the server held open then,
+        // with the file it was open on.
+        const aborted = await new Promise<{ fd: number; file: FileIdentity }>((resolve, reject) => {
           const request = httpGet(
             `${origin}${fileUrl("big.mp4")}`,
             { headers: { cookie, range: "bytes=0-" } },
             (response) => {
               response.once("data", () => {
-                const fd = held();
+                const opened = held();
                 response.destroy();
                 if (
                   response.statusCode === 206 &&
                   response.headers["content-range"] === `bytes 0-${BIG_BYTES - 1}/${BIG_BYTES}` &&
-                  typeof fd === "number"
+                  opened !== undefined
                 ) {
-                  resolve(fd);
+                  resolve(opened);
                 } else {
                   reject(new Error(`unexpected answer ${response.statusCode} or no open stream`));
                 }
@@ -595,7 +604,7 @@ describe("file route: range requests over a real connection", () => {
         expect(stream.destroyed).toBe(true);
         // Otherwise the stream simply ran to its end and closed on its own.
         expect(stream.bytesRead).toBeLessThan(BIG_BYTES);
-        expect(() => fstatSync(descriptor)).toThrow(/EBADF/);
+        expectDescriptorReleased(aborted.fd, aborted.file);
       });
       // `withListeningApp` has closed the app: an open stream would have kept it from returning.
     });

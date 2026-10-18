@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import fs, {
   appendFileSync,
   closeSync,
-  fstatSync,
   ftruncateSync,
   mkdirSync,
   openSync,
@@ -26,8 +25,10 @@ import {
 // Its `afterEach` restores the spies and removes the temporary directories of this file too.
 import {
   descriptorsOf,
+  expectDescriptorReleased,
   expectSwappedUnread,
   failFirstReadOf,
+  identityOf,
   type SwapKind,
   spyBodyIo,
   swapIn,
@@ -391,6 +392,7 @@ describe("workspace download: failures around the audit", () => {
       const { app, db } = fixture;
       const target = join(seedWorkspace(fixture), "readme.md");
       writeFileSync(target, "must-not-leave-unaudited");
+      const file = identityOf(target);
       const cookie = bearerCookie(await loginSessionId(app, "zhangsan"));
       spyBodyIo();
       db.setAuthorizer((actionCode, table) =>
@@ -409,7 +411,7 @@ describe("workspace download: failures around the audit", () => {
         // Opened (and fstat-ed) before the audit, so once; closed again without a read.
         const [descriptor] = descriptorsOf(target);
         expect(descriptorsOf(target)).toHaveLength(1);
-        expect(() => fstatSync(descriptor as number)).toThrow(/EBADF/);
+        expectDescriptorReleased(descriptor as number, file);
         expect(vi.mocked(fs.read).mock.calls.filter(([fd]) => fd === descriptor)).toEqual([]);
         expect(vi.mocked(fs.readSync).mock.calls.filter(([fd]) => fd === descriptor)).toEqual([]);
         expect(vi.mocked(fs.createReadStream)).not.toHaveBeenCalled();

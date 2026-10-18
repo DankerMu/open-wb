@@ -90,6 +90,34 @@ export function waitForClose(stream: Readable): Promise<void> {
   });
 }
 
+/** Which file a descriptor or a path refers to, whatever number the descriptor has. */
+export interface FileIdentity {
+  dev: number;
+  ino: number;
+}
+
+/** `fstat` of a descriptor, `stat` of a path: for a regular file both name the same inode. */
+export function identityOf(target: number | string): FileIdentity {
+  const { dev, ino } = typeof target === "number" ? fs.fstatSync(target) : fs.statSync(target);
+  return { dev, ino };
+}
+
+/**
+ * `fd` no longer refers to the file it was opened on. EBADF alone is not the test: once closed,
+ * the number is free, and under load another open in the process may take it before the check, so
+ * an fstat that succeeds on some other file passes too.
+ */
+export function expectDescriptorReleased(fd: number, before: FileIdentity): void {
+  let after: FileIdentity;
+  try {
+    after = identityOf(fd);
+  } catch (error) {
+    expect(error).toMatchObject({ code: "EBADF" });
+    return;
+  }
+  expect(after, `descriptor ${fd} is still open on the file`).not.toEqual(before);
+}
+
 /** What the requests made of the target `swapOnFirstOpen` replaced. */
 export interface SwapRecord {
   swaps: number;
