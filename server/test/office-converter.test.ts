@@ -476,6 +476,27 @@ describe("sidecar 转换契约：作业目录或 request.json.part 被换成链�
     expect(readFileSync(sentinel, "utf8")).toBe("sentinel bytes");
     expectNothingLeft(on);
   });
+
+  it("等待中 cancel 已是指向 app 可写文件的链接、随后超时：timeout，该文件的字节不变，删目录前 cancel 仍是链接", async () => {
+    const on = stage();
+    const sentinel = join(on.root, "app-writable.txt");
+    writeFileSync(sentinel, "sentinel bytes");
+    const convert = converterFor(on, { timeoutMs: 1_500 }).convert(on.input("a@hang.docx"));
+    const attempt = failureOf(convert);
+    const cancel = join((await claimed(on)).dir, "cancel");
+    symlinkSync(sentinel, cancel);
+    const realRm = fs.rmSync;
+    let linkAtRemoval: boolean | undefined;
+    vi.spyOn(fs, "rmSync").mockImplementation(((path: fs.PathLike, options?: fs.RmOptions) => {
+      linkAtRemoval ??= path === dirname(cancel) ? lstatSync(cancel).isSymbolicLink() : undefined;
+      return realRm(path, options);
+    }) as typeof fs.rmSync);
+    syncBuiltinESMExports();
+    expectBareKind(await attempt, "timeout", [on.spool, sentinel]);
+    expect(readFileSync(sentinel, "utf8")).toBe("sentinel bytes");
+    expect(linkAtRemoval).toBe(true);
+    expectNothingLeft(on);
+  });
 });
 
 describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeout: 15_000 }, () => {
