@@ -1,0 +1,22 @@
+# Spec Delta
+
+## MODIFIED Requirements
+
+### Requirement: 组件分层
+web SHALL 采用拷入层与应用层两层（自 s1f-legacy-layer-removal 起不再有冻结区）：`web/src/components/ui/`（由 shadcn/ui registry 拷入的组件，Radix 版式）与 `web/src/components/assistant-ui/`（由 assistant-ui registry 拷入的组件）是**拷入层**；`web/src` 下除拷入层之外的全部 `.ts`/`.tsx`（features、routes、lib、入口，以及直接放在 `web/src/components/` 下的自写共享组件）是**应用层**。自写共享组件——`web/src/components/icon.tsx`（`Icon`、`IconName`）与 `web/src/components/brand-mark.tsx`（`BrandMark`），以及仅当 ui-primitives「覆盖层的 Escape 关闭」的实测结论为保留时的 `web/src/components/escape-fallback.ts`——是本仓自写代码，不是 registry 拷入的组件：SHALL 直接放在 `web/src/components/` 下、不进两个拷入目录，适用应用层的全部门槛（「拷入层的门槛豁免」不覆盖它们），SHALL NOT 导入 Radix。`web/src/ui/` SHALL 不存在（旧基元层已删除），`web/src` 下 SHALL NOT 有任何模块从它导入；`ToastProvider` 与 `useToast` 随之删除，`web/src` 下 SHALL NOT 再出现这两个标识符（s1f-legacy-layer-removal 不提供替代的通知机制）。`web/components.json` SHALL 入库并记录 registry 配置（Radix 版式 style、别名指向 `@/components`、`@/components/ui`、`@/lib/utils`，以及把 registry 的 hooks 落到拷入层的 `@/components/assistant-ui/hooks`）。`radix-ui` 与 `@radix-ui/*` 只能在拷入层中导入；`lucide-react` 可在拷入层与应用层直接导入。自 s1f-chat-surface 起 `web/src/components/assistant-ui/`（`components.json` 产生的 registry 落点）只含 assistant-ui registry 的 `markdown-text`、`reasoning`、`tool-group` 三个组件与它们的 registry 依赖（例如 `tooltip-icon-button`、`use-copy-to-clipboard`），外加一个只声明样式模块类型的 `styles.d.ts`，各在首次用到它的改动里拷入；它们依赖的 shadcn/ui 组件（`collapsible` 等，不含 `avatar`）拷入 `web/src/components/ui/`；registry 的 `thread` 与 `tool-fallback` SHALL NOT 拷入。会话页工作空间侧边栏（workspace-sidebar）用到的 shadcn/ui `resizable` 随 s1f-files-page 拷入 `web/src/components/ui/`，它的 npm 依赖 `react-resizable-panels` 同样随之加入并登记。拷入的组件需要的 npm 包（例如 `tw-shimmer`）随该组件一起加入依赖并登记到 `ATTRIBUTION.md`。它们与 shadcn/ui 组件适用同一组修改限制。会话页的线程、消息、步骤卡、停靠区与输入框是应用层组件（`web/src/features/chat/` 内），直接由 `@assistant-ui/react` 的基元（`ThreadPrimitive`、`MessagePrimitive`、`ActionBarPrimitive`）组合，并组合上述三个拷入组件；全部行为定制（源 HTML 的消毒与链接 / 图片的目标规则、分段次序、工具段折叠与摘要、不提供编辑/分支/附件 UI）SHALL 在应用层实现（例如经 `markdown-text` 的 `components` 覆盖与 `rehypePlugins` 透传、组合 `tool-group` / `reasoning` 的 Root/Trigger/Content），拷入文件只受下述六类修改。拷入后的组件只允许六类修改：把颜色字面量换成主题变量、中文化可见文案与 aria 文案、按 Biome 格式化、把 `cn` 的导入归一到 `@/lib/utils`（不引入 npm 包 `cn`）、为本仓严格 TS 选项做纯类型适配（不改运行时行为）、把被 registry 原文丢弃的调用方 `children` 或属性原样透传给它包着的底层基元（只增不改：拷入文件只转发调用方给的值，不写默认值，调用方不传时行为与原文一致）。s1f-ui-foundation 至 s1f-files-page 期间的冻结区文件清单、已迁移区域清单与导入白名单（`Icon`、`IconName`、`BrandMark`、`useEscapeFallback`）已随旧基元层一起退役，守卫 SHALL NOT 再保留这些清单；取而代之的终态由守卫断言：`web/src/ui` 下没有文件、没有模块从它导入；`web/src/features`、`web/src/routes`、`web/src/lib`、`web/src/components` 下没有 `.css` 文件（见「Tailwind 入口与层叠顺序」）；`web/src/features/chat` 下没有 `session-filter.tsx`。会话列表用到的 shadcn/ui 组件只限已拷入的 `button`、`input`、`dialog`、`alert-dialog`、`dropdown-menu`、`collapsible`、`tooltip`；s1f-session-list-temp-space 与 s1f-legacy-layer-removal 都不为列表拷入新的 registry 组件。
+
+#### Scenario: 应用层不直接引 Radix
+- **WHEN** 扫描 `web/src` 下除 `components/ui`、`components/assistant-ui` 之外的全部 `.ts`/`.tsx`（含直接放在 `web/src/components/` 下的文件）
+- **THEN** 没有文件静态或动态导入 `radix-ui` 或 `@radix-ui/*`；对注入样本（`web/src/features` 下一个文件导入 `@radix-ui/react-dialog`、`web/src/components/icon.tsx` 导入 `radix-ui`、`web/src/ui/` 下重新出现的一个文件导入 Radix）守卫各判失败
+
+#### Scenario: 已迁移区域不回用旧基元，冻结区不增长
+- **WHEN** 列出 `web/src` 下的全部文件并扫描全部 `.ts`/`.tsx`
+- **THEN** `web/src/ui` 下没有任何文件；没有模块从解析到 `web/src/ui` 的路径导入（具名、`type`、`as` 改名、命名空间、副作用、再导出与动态导入都算）；`web/src` 下不出现标识符 `useToast` 与 `ToastProvider`；`web/src/components/icon.tsx` 与 `web/src/components/brand-mark.tsx` 存在，且不在两个拷入目录之下；对注入样本（`web/src/ui/card.tsx` 重新出现、一个文件写了 `import { Button } from "../../ui/index.js"`、一个文件导入 `useToast`）守卫各判失败
+
+#### Scenario: 会话页迁移终态
+- **WHEN** 列出 `web/src/features/chat` 下的全部文件，并列出 `web/src/components/assistant-ui` 下的组件文件
+- **THEN** `web/src/features/chat` 下没有 `.css` 文件，也没有 `session-filter.tsx`；`web/src/components/assistant-ui` 下只有 `markdown-text`、`reasoning`、`tool-group` 三个组件、它们的 registry 依赖与 `styles.d.ts`，没有 `thread` 与 `tool-fallback`；对注入样本（该目录下出现一个 `.css`）守卫判失败
+
+#### Scenario: 文件页整目录已迁移
+- **WHEN** 扫描 `web/src/features/files`
+- **THEN** 该目录下没有 `.css`，没有文件从 `web/src/ui` 导入；对注入样本（该目录下一个文件导入旧 `Dialog`、目录下出现一个 `.css`）守卫各判失败
