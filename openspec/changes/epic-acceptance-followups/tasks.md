@@ -1,0 +1,54 @@
+# Tasks: epic-acceptance-followups
+
+> 跟踪：Stage 5 建一个小 Epic；组 1、组 2 各一个子 issue、各一个 PR；组 3 按首刀拆成「图标」与「保留规则」两个子 issue（见组尾声明）。各组互不依赖，可任意次序合入（CH-39 一行：组 2 改结论列、组 3 改期望列，互不覆盖）。
+> 通用纪律见 design「通用纪律」：测试先行（先改断言、在未改动代码上看到红）；每组第一个任务是核对 design「Context」的行号与现状，出入先改 design 再继续；不碰 `server/src/sessions`、`stream.ts`、`chat_sessions`。
+> 验收清单只重写「操作 / 期望」并把结论置回 `待签`，签署由 owner 另行进行。
+
+## 风险包
+
+| 风险包 | 选中 | 落点 |
+|---|---|---|
+| Auth / permissions / secrets | 选中：源 HTML 进入 DOM 是 XSS 边界——`script`/`style`/`iframe`/`on*`/`javascript:` 一律剥除且不漏文本，`style` 只剥资源函数（含 CSS 转义与 `image-set(` 绕过）；链接 `noopener noreferrer`；图片 `no-referrer` | 组 1 |
+| Config / project setup | 选中：`MODEL_CATALOG` 新键 `maxTokens`（1–128000，缺省 32768）；错误只点名键不回显取值；未设白名单的缺省从 8192 变 32768 | 组 2 |
+| Legacy compatibility / examples | 选中：规格「字节不变」场景改为「只差一行」，改前夹具不动；全部钉 `8192` 字节的启动 / 代理测试改取值；system.md 示例加 `maxTokens`；既有安全断言全部保留 | 组 1、组 2 |
+| Error handling / rollback / partial outputs | 选中：流式半截 HTML 的容错解析与终态一致；图片加载失败不弹提示；点「发送」即消失、之后被拒 / 停止 / 快照失败都不复现，快照重装而清单内容不变时保留 | 组 1、组 3 |
+| Release / packaging / dependency compatibility | 选中：web 新增 `rehype-raw@7.0.0`、`rehype-sanitize@6.0.0`（PR 正文按 AGENTS.md:40 说明为何现有工具做不到）；`ATTRIBUTION.md` 登记 + 守卫断言；lockfile 同步 | 组 1 |
+| Public API / CLI / script entry | 选中：`GET /api/composer/options` 的模型项不带 `maxTokens`（显式断言不漏）；`max_tokens` 到达上游由官方二进制对照用例证明 | 组 2 |
+| Documentation / migration notes | 选中：system.md `MODEL_CATALOG` 表与示例、保持 8192 的写法；验收清单 CH-04 / CH-39 / CH-40 / CH-42 | 组 2、组 1、组 3 |
+| File IO / path safety / overwrite、Schema / columns、Concurrency、Resource limits | 未选：不碰文件系统、数据库列与并发路径；流式解析成本登记在 Not yet specified | — |
+
+## 1. 助手正文渲染源 HTML 并消毒（chat-web + ui-foundation）
+
+- [ ] 1.1 核对 design「Context」第一条的行号与现状（`markdown-body.tsx` 的 `components`、`markdown-text.tsx` 的 `remarkPlugins`/`defer`、`chat-markdown.test.tsx:66-125`、`chat-messages.test.tsx:56-72`、`react-markdown` 10.1.0 的 `rehypePlugins`/`urlTransform`、`node_modules` 无 sanitize 包；`git grep -n '<b>\|example.com\|img.example' web/test` 列出全部钉旧行为的断言）；安装后核对 `hast-util-sanitize` 缺省 schema 与 Context 所述一致；出入先改 design 再继续
+- [ ] 1.2 `web/package.json` 加 `rehype-raw@7.0.0`、`rehype-sanitize@6.0.0`，`npm install` 更新根 lockfile；`ATTRIBUTION.md` 按既有条目格式新增两条（MIT，Titus Wormer）；`web/test/ui-guardrails.test.ts` 补两个 `hasEntry` + dependencies 断言；验证：`npm ls rehype-raw rehype-sanitize --workspace web` 恰各一份、`npx vitest run web/test/ui-guardrails.test.ts` 绿
+- [ ] 1.3 测试先行：`web/test/chat-markdown.test.tsx` 按 delta 三个场景改写「Markdown 链接惰性与图片不加载」一组（不安全目标只留文字且地址不出现；可点链接的 `href`/`target`/`rel` 与无 `onclick`/`class`/`name`/任何 `id`；两张 `img` 的 `src`/`loading`/`referrerpolicy`；`data:` 图片显示 URL 文本；`color` 声明保留而 `url(`/`\75 rl(`/`image-set(` 三例无 `style` 且无 `t.example` 请求；`script`/`style`/`iframe` 不存在、`__pwned` 未定义、标签字样与 `body{display:none}` 不出现；`details`/`table` 成元素；`input[type=text]` 不存在而任务列表 checkbox 存在；流式半截 HTML 终态一致）；`web/test/chat-messages.test.tsx` M1 改为「`<b>` 成 `b` 元素、文本无 `<b>`、https 链接成可点 `a`、`script` 仍不存在」（夹具 `:22` 加 `<b>粗</b>`；其中 `<img src=x onerror=alert(1)>` 的 `src=x` 是相对路径，按新规则渲染为文本 `x`——原断言 `toContain("<img src=x onerror=alert(1)>")` 改为「没有 `img` 元素、页面文本与属性不含 `onerror`」）；保留代码块与逐字展开用例；验证：在未改动代码上跑两个文件，新断言红、其余绿
+- [ ] 1.4 实现 design D1：新文件 `web/src/features/chat/markdown-html.ts`（`inertUnsafeTargets`、显式 schema、`styleGuard` 含转义解码与七个资源函数）；`markdown-body.tsx` 的 `a`/`img` 组件与 `rehypePlugins` 顺序 raw → inert → sanitize → styleGuard；`markdown-text.tsx` 透传 `rehypePlugins`（第六类修改，注释引用 ADR-0013）；核对 `message-body` 容器有 `min-w-0` 与横向溢出约束；验证：1.3 全绿、`npm test --workspace web` 全绿、`make check`（含 knip 不报未用依赖）、`scripts/size-guard.sh` 过
+- [ ] 1.5 文档：`docs/acceptance/functional-checklist.md` CH-04 的「操作 / 期望」按新规格重写（可点链接新标签页、图片加载、`<b>`/表格/折叠生效、`<script>` 既不执行也不显示、红色 span 为红），结论 `待签`；`markdown-body.tsx` 头注释改写；验证：`npx vitest run web/test/functional-checklist.test.ts` 绿，`grep -c 'CH-04 .* 待签' docs/acceptance/functional-checklist.md` 为 1
+- [ ] 1.6 PR 正文：两个新依赖的理由（AGENTS.md:40）、D1 四步与 schema 清单；请求一次人工白盒复核（XSS 边界）；ui-walk（CI 同款脚本）本地绿
+
+Suggested fixture level: expanded - 源 HTML 进 DOM 是 XSS 边界（Auth/permissions 风险包），且引入两个新依赖。
+Minimal mergeable slice: atomic - 依赖、插件链、组件覆盖与测试改写是同一条行为的四面：少任何一面规格场景「链接、图片与源 HTML 的渲染与消毒」都不成立（例如只加 raw 不加 sanitize 会把 `script` 放进 DOM）。
+
+## 2. 模型输出上限按模型可配（model-selection + model-proxy + omp-test-harness）
+
+- [ ] 2.1 核对 design「Context」第二条的行号与现状（`models-yml.ts:40`、`model-catalog.ts:17-32`、`rest-composer.ts:49-51`、改前夹具与 `LIMITS` 常量；`git grep -n 'maxTokens: 8192\|vision: false\|vision:false' server/test` 列出全部钉 8192 字节与构造 `CatalogModel` 字面量的位置，与 Context 清单核对）；出入先改 design 再继续
+- [ ] 2.2 测试先行：`server/test/model-catalog.test.ts` 加 `maxTokens` 用例（缺省 32768、显式 8192、边界 1 与 128000 接受、未设 `MODEL_CATALOG` 的单模型项带 32768、「规格场景恰列出 N 个取值」改为 22 个并加六个非法值各自点名 `MODEL_CATALOG` 且不回显取值）；`server/test/model-proxy-models-yml.test.ts` 与 `models-yml-helpers.ts` 按 delta 改（三模型 32768/8192/32768、「只差一行」的替换比对、夹具不动）；`server-startup-layout.test.ts`、`server-startup-order.test.ts`、`model-proxy-reasoning.test.ts` 的 `maxTokens: 8192` 改为按白名单取值；`server-config*.test.ts` 的 `toStrictEqual` 单模型加 `maxTokens: 32768`；`session-meta-fixtures.ts`、`session-composer-helpers.ts`、`session-composer-store.test.ts`、`server-assembly.test.ts`、`support/omp-official*.ts`、`linux/uid-isolation.test.ts` 的 `CatalogModel` 字面量补 `maxTokens`（优先改共享夹具）；`rest-composer` 既有测试加断言「模型项没有 `maxTokens` 键」；`server/test/support/fake-upstream.mjs` 的 `recordRequest` 与 `fake-upstream.d.mts` 的 `FakeUpstreamRequest` 加 `maxTokens`，`fake-upstream-requests.test.ts` 的全部精确比对（`:144,179,196,230-231,255`）与 `fake-upstream-tool-rounds.test.ts:229` 的精确比对补该字段并按 omp-test-harness delta 加三种取值（数字 `max_tokens`、数字 `max_completion_tokens`、字符串得 `null`）；官方二进制对照用例（`omp-official-model-commands.test.ts` 或同组）加「该回合每条请求记录的 `maxTokens` 等于 32768 / 8192」（实测为 `null` 或不等时停下回 owner，见 design D3）；验证：在未改动代码上跑这些文件，新断言红、其余绿；`npm run typecheck --workspace server` 的失败只来自 `maxTokens` 缺失
+- [ ] 2.3 实现 design D3 / D4：`CatalogModel.maxTokens: number`，`CATALOG_KEYS` 加 `maxTokens`，`parseCatalogEntry` 校验整数与 1–128000、缺省 32768，单模型分支补 32768；`modelLines` 写 `maxTokens: ${model.maxTokens}`；`rest-composer.ts` 不加字段；验证：2.2 全绿、`npm test --workspace server` 全绿（含官方二进制用例，本机 `var/omp/omp` 为 v18.0.10）、`npm run typecheck --workspace server`
+- [ ] 2.4 文档：`docs/architecture/system.md` 的 `MODEL_CATALOG` 表（`maxTokens` 键、缺省 32768、范围 1–128000）与示例（一项写 `"maxTokens": 8192` 示范保持旧值）、「未设置 `MODEL_CATALOG`」一段补「输出上限 32768」；`docs/acceptance/functional-checklist.md` CH-39 的结论从「不通过：模型输出被截断…」置回 `待签`（只改结论列）；验证：`grep -c 'maxTokens' docs/architecture/system.md` ≥ 4 且 `grep -c '"maxTokens": 8192' docs/architecture/system.md` ≥ 1 且 `grep -c '32768' docs/architecture/system.md` ≥ 2 且 `grep -c '128000' docs/architecture/system.md` ≥ 1；`npx vitest run web/test/functional-checklist.test.ts` 绿
+- [ ] 2.5 真实上游验证：在已启动的编译版服务上 `make smoke-live`（DMXAPI `deepseek-v4.1-flash`，缺省 32768）通过，结果写进 PR 正文；验证：hurl 退出码 0
+
+Suggested fixture level: compact - 纯配置解析与一行 YAML 输出，既有纯函数 seam 与官方二进制对照用例都有完整骨架，无运行时边界变化。
+Minimal mergeable slice: atomic - 解析器缺省与 writer 的 `maxTokens` 行是同一条 requirement 的两端：只合解析器则 `models.yml` 仍写 8192、规格「只差一行」场景不成立；只合 writer 则没有字段可写。
+
+## 3. 任务清单面板：状态图标与已完结清单保留（session-todo + chat-harness）
+
+- [ ] 3.1 核对 design「Context」第三条的行号与现状（`todo-panel.tsx:17-23,48-50,130-134`、`composer-dock.tsx:34,41,52`、`turn-actions.ts:290-318` 无乐观插入、`icon.tsx` 的映射与 lucide 导出 `Circle`/`LoaderCircle`/`CircleX`/`Ban`、`web/e2e/ui-walk-todo.ts:33,39-40` 的断言、`chat-todo-panel.test.tsx` 的 `items()` 与 G6、验收清单 CH-42）；出入先改 design 再继续
+- [ ] 3.2a 测试先行（图标，D5）：`web/test/chat-todo-panel.test.tsx` 的 T1–T3 改为「列表项以 `aria-hidden` 图标开头、`data-slot="todo-status"` 节点文本为状态词且带 `sr-only`、克隆面板移除 `.sr-only` 后 `textContent` 不含五个状态词、可访问名以状态词开头」；验证：在未改动代码上跑该文件，新断言红、其余绿
+- [ ] 3.3a 实现 D5：`icon.tsx` 加 `circle`、`loader-circle`、`circle-x`、`ban`；`todo-panel.tsx` 的状态图标 + `sr-only` 文本（`data-slot="todo-status"` 留在文本节点）、`STATUS_TONE` 挪到图标；验证：3.2a 全绿、`npm test --workspace web` 全绿、`scripts/size-guard.sh` 过
+- [ ] 3.2b 测试先行（保留规则，D6）：V1 替换为 delta 场景「已完结清单保留到下一条用户消息」的两组（回合进行中就地完结后仍显示 `3/3` → `turn.end` 后仍在 → 点发送即消失、400 被拒解锁后仍不在 → `pending` 清单复现 → 再就地完结、点发送消失、202 受理装入后仍不在；另七例：`null` 消失、上传阶段停止、受理后读快照失败、重新生成后快照重装仍在、流恢复快照重装仍在、保留期间换成另一份已完结清单仍在且计数更新、流恢复快照里清单由未完结变已完结时显示）与「全部完成或放弃时隐藏」的四例（首次装入即完结、切会话再切回、经欢迎态往返、重新加载）；G6（running 快照下 `emitTodo(ALL_CLOSED)`）改为「就地完结后面板仍在 → `turn.end` → 点发送后消失」；V2 保留；验证：在未改动代码上跑该文件，新断言红、其余绿
+- [ ] 3.3b 实现 D6：导出 `stream-todo.ts` 的 `sameTodo` 供可见条件按内容比对；`use-chat-session.ts` 返回 `sending`、经 `page.tsx` / `conversation-view.tsx` 传给 `ComposerDock`；`composer-dock.tsx` 的 `kept` 内存规则（就地完结记下；保留期间到来另一份已完结清单时替换；`sending` 为真、`sessionId` 变化、`todo` 为 `null` 或含未完结任务时清掉）与可见条件；验证：3.2b 全绿、`npm test --workspace web` 全绿、`scripts/size-guard.sh` 过
+- [ ] 3.4 文档：`docs/acceptance/functional-checklist.md` CH-39「期望」的「每项前面有文字状态…」改为「每项前面是状态图标（空心圆 / 半圆弧 / 勾 / 叉 / 禁止符），读屏读出状态词」（不动结论列）；CH-40「操作」加一步「让清单全部完成后看面板；再发一句话」、「期望」加「全部完成后面板仍在、头部为 N/N；点发送的那一刻面板消失；刷新后不再出现」；CH-42「期望」的「面板整个从输入框上方消失」改为「面板仍在、头部为 N/N；点发送的那一刻消失」；CH-40、CH-42 结论 `待签`；`todo-panel.tsx` / `composer-dock.tsx` 头注释改写；验证：`npx vitest run web/test/functional-checklist.test.ts` 绿
+- [ ] 3.5 ui-walk（CI 同款脚本）本地绿：`web/e2e/ui-walk-todo.ts:39` 的 `todo-status` 文本断言不变、`:33` 头部按钮名不变，新增「列表项的可见文本里没有状态词、图标元素存在」一条；验证：`make ui-walk` 对着编译版服务通过
+
+Suggested fixture level: compact - 两处前端呈现逻辑的改动，整页挂载 seam 已覆盖面板的全部可观察量，无服务端与持久化变化。
+Minimal mergeable slice: D5 图标（3.2a + 3.3a + CH-39 的期望文字（解决 CH-40 结论里的原因①） + 3.5 的 e2e 核对）先合——它只改 `icon.tsx`、`todo-panel.tsx` 与 T1–T3，不碰可见条件，单独合入 `npm test --workspace web` 与 ui-walk 都绿；剩余 D6 保留规则（3.2b + 3.3b + CH-40② / CH-42 的期望）作后继切片，自身 atomic（可见条件与其测试是一条规格场景的两面）。
