@@ -357,7 +357,7 @@ WORKBUDDY_FUSE_TEST=1 WORKBUDDY_FUSE_ALT_FS_DIR=/altfs ../node_modules/.bin/vite
 
 ## 2026-10-17 补充：#1350 办公文档转换移入 `--network none` 的 sidecar
 
-change `office-convert-sandbox`（owner 裁定 B1–B10、B12，2026-10-13 至 2026-10-17）落地后的登记：S1a = PR #1510（`converter/`：sidecar 脚本、镜像、compose、守卫接线）、S1b = PR #1511（app 侧 spool 客户端、启动预检与 fail-closed、退役）、S2a = PR #1512（CI job `office-sidecar`）、S2b = #1507（测试主机实测，2026-10-18，结果表见本节末）。上文「补充（2026-10-12，#1119）」整节由此退役。
+change `office-convert-sandbox`（owner 裁定 B1–B10、B12、B13，2026-10-13 至 2026-10-18）落地后的登记：S1a = PR #1510（`converter/`：sidecar 脚本、镜像、compose、守卫接线）、S1b = PR #1511（app 侧 spool 客户端、启动预检与 fail-closed、退役）、S2a = PR #1512（CI job `office-sidecar`）、S2b = #1507（测试主机实测，2026-10-18，结果表见本节末）。上文「补充（2026-10-12，#1119）」整节由此退役。
 规格在 office-preview「sidecar 转换契约」「转换缓存与作业目录清理」「转换隔离边界」「转换 sidecar 的健康与 fail-closed」「转换 sidecar 实现与镜像」；部署步骤与排障在 ADR-0014「转换 sidecar 与 `OFFICE_SPOOL_DIR`」与 `docs/architecture/system.md` 9.7。
 证据等级：**实测**（注明平台、版本、次数）/ **实测（CI）**（GitHub `ubuntu-24.04` runner 上的 `office-sidecar` job 与单元测试）/ **读代码推出** / **读手册推出**（Docker、LibreOffice 文档，未在本仓库场景下验证）。
 
@@ -372,6 +372,7 @@ change `office-convert-sandbox`（owner 裁定 B1–B10、B12，2026-10-13 至 2
   - B8（2026-10-17）：旧键 `OFFICE_BIN` 仍被设置 → 启动失败。**细节**（同日补裁）：stderr **不点名**退役键——只有既有的一行 `{"event":"server_start_failed","reason":"config"}`，不新增 `reason` 取值；键名只出现在 `resolveServerConfig` 抛出的错误 message `OFFICE_BIN is retired; configure OFFICE_SPOOL_DIR` 与升级文档（ADR-0014、system.md 9.7）里。
   - B9（2026-10-17）：仓库给 `converter/Dockerfile` 与 `converter/compose.yml`，镜像由部署方自建；不引入镜像发布流水线、不引用镜像仓库；CI 只在 job 里现场构建一次做实测。
   - B10（2026-10-17）：批准 CI job `office-sidecar`（`runs-on: ubuntu-24.04`，并入 `all-checks-passed`）。B12（同日）：`uid-isolation` 的 `runs-on` 同样固定为 `ubuntu-24.04`（#1502 并入 S2a）。
+  - B13（2026-10-18）：S2b 实测到 1 次取消后作业目录残留（26 次终止里 1 次）→ **放宽规格、登记为残余**：office-preview「终止结束作业的全部进程」两个场景的 THEN 加「删不掉的留到下一次启动清空」；不改代码；ADR-0014 残余表登记一行。
 - **为什么不是 bubblewrap**（背景，不是选项；实测，2026-10-16，测试主机，两轮，记录在该 change `design.md` Context）：
   - 一次性 `ubuntu:24.04` 容器（docker 缺省 flags，宿主 `apparmor_restrict_unprivileged_userns=1`）里非特权用户 `bwrap --unshare-all` 得 `No permissions to create new namespace`；容器 root 加 `SYS_ADMIN`、seccomp / AppArmor unconfined 得 `Can't mount proc on /newroot/proc`；setuid-root 的 bwrap 在五个特权档全部 `bwrap: capset failed: Operation not permitted`。
   - 裸机上只有装 `apparmor-profiles` 并载入 `bwrap-userns-restrict` 之后非特权 bwrap 才可用（三个 HTML 输入 0 命中 0 图，终止后无存活，一次）——B6 否决了只支持裸机。
