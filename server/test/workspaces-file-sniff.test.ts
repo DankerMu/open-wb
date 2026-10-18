@@ -1,6 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
 import fs, {
-  fstatSync,
   lstatSync,
   mkdirSync,
   rmSync,
@@ -23,6 +22,8 @@ import {
 } from "./auth-lifecycle-helpers.js";
 import {
   descriptorsOf,
+  expectDescriptorReleased,
+  identityOf,
   spyBodyIo,
   streamOn,
   TEXT_MIME,
@@ -236,6 +237,7 @@ describe("file route: sniff reads", () => {
       expect(io.opensBelow(join(root, "doc.pdf"))).toEqual([join(root, "doc.pdf")]);
       const closedBefore = io.closed();
       const asyncClosesBefore = asyncClose.mock.calls.length;
+      const licenseFile = identityOf(join(root, "LICENSE"));
 
       const license = await requestWorkspaceFile(app, U1_SNIFF, cookie, "LICENSE");
       expect(license.statusCode).toBe(200);
@@ -252,14 +254,16 @@ describe("file route: sniff reads", () => {
       expect(closedBefore).toHaveLength(1);
       expect(io.closed()).toEqual(closedBefore);
       const stream = streamOn(opened?.value as number);
+      // LICENSE's own stream, the last one made, not an earlier one on the same descriptor number.
+      expect(stream).toBeDefined();
+      expect(stream).toBe(vi.mocked(fs.createReadStream).mock.results.at(-1)?.value);
       if (stream !== undefined && !stream.closed) {
         await waitForClose(stream);
       }
-      expect(stream).toBeDefined();
       expect(
         asyncClose.mock.calls.slice(asyncClosesBefore).filter(([fd]) => fd === opened?.value),
       ).toHaveLength(1);
-      expect(() => fstatSync(opened?.value as number)).toThrow(/EBADF/);
+      expectDescriptorReleased(opened?.value as number, licenseFile);
     });
   });
 });

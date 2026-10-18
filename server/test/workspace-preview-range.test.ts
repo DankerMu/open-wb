@@ -1,8 +1,14 @@
-import { fstatSync, openSync, writeFileSync } from "node:fs";
+import { openSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { openRangeStream, parseRange, type RangeResult } from "../src/workspaces/preview.js";
-import { collectBytes, waitForClose, workspaceTempDir } from "./workspace-file-helpers.js";
+import {
+  collectBytes,
+  expectDescriptorReleased,
+  identityOf,
+  waitForClose,
+  workspaceTempDir,
+} from "./workspace-file-helpers.js";
 
 type RangeRow = [header: string | undefined, size: number, expected: RangeResult];
 
@@ -65,19 +71,21 @@ describe("openRangeStream", () => {
 
   it("releases the descriptor once the interval has been read to its end", async () => {
     const file = indexedFile();
+    const before = identityOf(file.fd);
     const stream = openRangeStream(file, 10, 19);
     const closed = waitForClose(stream);
     expect((await collectBytes(stream)).length).toBe(10);
     await closed;
-    expect(() => fstatSync(file.fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+    expectDescriptorReleased(file.fd, before);
   });
 
   it("releases the descriptor when destroyed before the interval is read", async () => {
     const file = indexedFile();
+    const before = identityOf(file.fd);
     const stream = openRangeStream(file, 10, 19);
     const closed = waitForClose(stream);
     stream.destroy();
     await closed;
-    expect(() => fstatSync(file.fd)).toThrow(expect.objectContaining({ code: "EBADF" }));
+    expectDescriptorReleased(file.fd, before);
   });
 });

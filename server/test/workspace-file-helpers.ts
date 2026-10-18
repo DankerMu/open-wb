@@ -90,6 +90,35 @@ export function waitForClose(stream: Readable): Promise<void> {
   });
 }
 
+/** Which file a descriptor or a path refers to, whatever number the descriptor has. */
+export interface FileIdentity {
+  dev: number;
+  ino: number;
+}
+
+/** `fstat` of a descriptor, `stat` of a path: for a regular file both name the same inode. */
+export function identityOf(target: number | string): FileIdentity {
+  const { dev, ino } = typeof target === "number" ? fs.fstatSync(target) : fs.statSync(target);
+  return { dev, ino };
+}
+
+/**
+ * `fd` no longer refers to the file it was opened on. EBADF alone is not the test: once closed,
+ * the number is free, and under load another open in the process may take it before the check, so
+ * an fstat that succeeds on some other file passes too. An asynchronous close (a stream's) is done
+ * only once the stream has emitted `close`: wait for that before calling this.
+ */
+export function expectDescriptorReleased(fd: number, before: FileIdentity): void {
+  let after: FileIdentity;
+  try {
+    after = identityOf(fd);
+  } catch (error) {
+    expect(error).toMatchObject({ code: "EBADF" });
+    return;
+  }
+  expect(after, `descriptor ${fd} is still open on the file`).not.toEqual(before);
+}
+
 /** What the requests made of the target `swapOnFirstOpen` replaced. */
 export interface SwapRecord {
   swaps: number;
@@ -239,10 +268,13 @@ export function failFirstReadOf(target: string): () => number {
   return () => failed;
 }
 
-/** The stream `createReadStream` made on `fd`, after `spyBodyIo()`. */
+/**
+ * The latest stream `createReadStream` made on `fd`, after `spyBodyIo()`: a closed descriptor's
+ * number is handed out again, so earlier streams of the test may have had the same one.
+ */
 export function streamOn(fd: number): (fs.ReadStream & { fd: number | null }) | undefined {
   const spied = vi.mocked(fs.createReadStream);
-  const index = spied.mock.calls.findIndex(
+  const index = spied.mock.calls.findLastIndex(
     ([, options]) => typeof options === "object" && options.fd === fd,
   );
   return spied.mock.results[index]?.value;
