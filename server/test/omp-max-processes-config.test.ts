@@ -299,8 +299,9 @@ describe("production entry rejects invalid preview and file settings before effe
       (raw) => ["PREVIEW_ORIGIN", raw] as const,
     ),
     ["PREVIEW_CACHE_DIR", ""],
-    ["OFFICE_BIN", ""],
-    ["OFFICE_BIN", "soffice"],
+    ["OFFICE_SPOOL_DIR", ""],
+    ["OFFICE_SPOOL_DIR", "spool"],
+    ["OFFICE_BIN", "/usr/bin/soffice"],
     ...[
       "OFFICE_CONVERT_TIMEOUT_MS",
       "OFFICE_CONVERT_CONCURRENCY",
@@ -320,8 +321,8 @@ describe("production entry rejects invalid preview and file settings before effe
     compiled = await compileServerEntry();
   }, 90_000);
 
-  it("规格列出的非法取值共七十一例", () => {
-    expect(PREVIEW_INVALID).toHaveLength(71);
+  it("规格列出的非法取值共七十二例", () => {
+    expect(PREVIEW_INVALID).toHaveLength(72);
   });
 
   it.each(PREVIEW_INVALID)(

@@ -147,9 +147,7 @@ describe("production entry with the preview listener", () => {
   it("binds the main listener first, prepares the cache directories and releases both ports on SIGTERM", async () => {
     const entry = await startEntry({
       prepare: (root) => {
-        // 上一次运行的遗留：work 下的作业目录要清掉，pdf 下的缓存留着；mode 故意不对。
-        mkdirSync(join(root, "preview-cache", "work", "stale"), { recursive: true });
-        writeFileSync(join(root, "preview-cache", "work", "stale", "x"), "stale");
+        // 上一次运行的遗留：pdf 下的缓存留着；mode 故意不对。
         mkdirSync(join(root, "preview-cache", "pdf"), { recursive: true });
         writeFileSync(join(root, "preview-cache", "pdf", "keep.pdf"), "kept");
       },
@@ -174,9 +172,9 @@ describe("production entry with the preview listener", () => {
 
       const cache = join(entry.root, "preview-cache");
       expect(modeOf(cache)).toBe(0o2750);
-      expect(modeOf(join(cache, "work"))).toBe(0o2770);
+      // change office-convert-sandbox：不再建 `work`（作业目录在 spool 的 `jobs/`）。
+      expect(existsSync(join(cache, "work"))).toBe(false);
       expect(modeOf(join(cache, "pdf"))).toBe(0o700);
-      expect(readdirSync(join(cache, "work"))).toEqual([]);
       expect(readFileSync(join(cache, "pdf", "keep.pdf"), "utf8")).toBe("kept");
 
       expect(await server.stop()).toBe(0);

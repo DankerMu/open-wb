@@ -1,13 +1,13 @@
 /**
- * Issue #1302（任务 14.7）：office-preview「转换器调用契约」场景「输出复制的字节上界」。
+ * Issue #1302（任务 14.7）：office-preview「sidecar 转换契约」场景「输出复制的字节上界」（issue 1505
+ * 起输出由进程内的假 sidecar 写出，断言不变）。
  *
- * 对着 `fixtures/fake-soffice.mjs` 真实 spawn。「取得大小之后」这个时刻由 `FileHandle.prototype.stat`
+ * 对着 `support/fake-sidecar.ts`。「取得大小之后」这个时刻由 `FileHandle.prototype.stat`
  * 上的探针给出：它先调原函数，认出这是输出文件（设备号与 inode 相同）之后、把结果交还转换器之前
  * 同步改动文件——追加与截短因此落在 `fstat` 与第一次读取之间，没有竞态，也不需要源码里的 seam。
  * 同一个句柄上的 `read` 被逐次记下，是「没有读取输出的内容」的判据。上限与 PDF 字节是照规格抄的
  * 字面量，不引用源码常量。
  */
-import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import {
   appendFileSync,
   lstatSync,
@@ -25,12 +25,10 @@ import {
 import { type FileHandle, open } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOfficeConverter, OfficeConvertError } from "../src/preview/office.js";
+import { PDF, startFakeSidecar, stopFakeSidecars } from "./support/fake-sidecar.js";
 
-const FAKE = fileURLToPath(new URL("./fixtures/fake-soffice.mjs", import.meta.url));
-const PDF = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
 /** 200 MiB。 */
 const LIMIT = 209_715_200;
 /** 恰到上限的一例真的要写出 200 MiB 的零（本机实测 0.12–0.27 秒）；时限给慢盘留余量。 */
@@ -50,6 +48,7 @@ const converters: Converter[] = [];
 
 afterEach(async () => {
   await Promise.all(converters.splice(0).map((converter) => converter.close()));
+  stopFakeSidecars();
   vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
     rmSync(root, { recursive: true, force: true });
@@ -68,26 +67,23 @@ async function convertWatched(
   roots.push(root);
   const cacheDir = join(root, "cache");
   const pdf = join(cacheDir, "pdf");
-  for (const dir of [cacheDir, pdf, join(cacheDir, "work"), join(root, "ws")]) {
+  const spool = join(root, "spool");
+  for (const dir of [cacheDir, pdf, spool, join(spool, "jobs"), join(root, "ws")]) {
     mkdirSync(dir, 0o700);
   }
   const input = join(root, "ws", name);
   writeFileSync(input, "not a real office document");
 
-  let produced: string | undefined;
-  const converter = createOfficeConverter({
-    officeBin: FAKE,
-    cacheDir,
-    timeoutMs: 20_000,
-    spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess {
-      // 作业目录就是子进程的 cwd；输出名是输入名去掉最后一个扩展名。
-      produced = join(String(options.cwd), "out", `${name.slice(0, name.lastIndexOf("."))}.pdf`);
-      return spawn(command, [...args], options);
-    },
-  });
+  const sidecar = startFakeSidecar(spool);
+  const converter = createOfficeConverter({ spoolDir: spool, cacheDir, timeoutMs: 20_000 });
   converters.push(converter);
+  /** 假 sidecar 写出的输出（作业目录名只有它知道）；输出名是输入名去掉最后一个扩展名。 */
+  const outputOf = (): string | undefined => {
+    const job = sidecar.jobs().find(({ output }) => output !== undefined);
+    return job === undefined ? undefined : join(job.dir, job.output ?? "");
+  };
 
-  const probe = await open(FAKE);
+  const probe = await open(input);
   const proto = Object.getPrototypeOf(probe) as FileHandle;
   await probe.close();
   const realStat = proto.stat as (this: FileHandle) => Promise<Stats>;
@@ -97,6 +93,7 @@ async function convertWatched(
   let outputHandle: FileHandle | undefined;
   vi.spyOn(proto, "stat").mockImplementation(async function (this: FileHandle) {
     const stats = await realStat.call(this);
+    const produced = outputOf();
     const onDisk =
       produced === undefined ? undefined : statSync(produced, { throwIfNoEntry: false });
     if (produced !== undefined && onDisk?.ino === stats.ino && onDisk.dev === stats.dev) {
@@ -128,7 +125,7 @@ async function failureOf(attempt: Promise<string>): Promise<{ kind: string; mess
   return { kind, message };
 }
 
-describe("转换器调用契约：输出复制的字节上界", () => {
+describe("sidecar 转换契约：输出复制的字节上界", () => {
   it("取得大小之后又被追加的字节不进结果：结果恰是那一刻的前缀", async () => {
     const { pdf, watch, attempt } = await convertWatched("a.docx", (produced) => {
       appendFileSync(produced, "appended after fstat\n".repeat(4096));

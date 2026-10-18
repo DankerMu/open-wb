@@ -35,8 +35,8 @@ export interface PreviewSettings {
   previewOrigin?: string;
   /** 预览缓存目录（PREVIEW_CACHE_DIR，缺省 repo root 下 var/preview-cache）。 */
   previewCacheDir: string;
-  /** 办公文档转换程序的绝对路径（OFFICE_BIN，可选；未配置即转换关闭）。 */
-  officeBin?: string;
+  /** 与转换 sidecar 共享的 spool 目录的绝对路径（OFFICE_SPOOL_DIR，可选；未配置即转换关闭）。 */
+  officeSpoolDir?: string;
   /** 一次办公文档转换的时限（OFFICE_CONVERT_TIMEOUT_MS，缺省 60000）。 */
   officeConvertTimeoutMs: number;
   /** 同时进行的办公文档转换个数上限（OFFICE_CONVERT_CONCURRENCY，缺省 2）。 */
@@ -60,7 +60,7 @@ export function resolvePreviewSettings(
   repoRoot: string,
 ): PreviewSettings {
   const previewOrigin = resolvePreviewOrigin(env.PREVIEW_ORIGIN);
-  const officeBin = resolveOfficeBin(env.OFFICE_BIN);
+  const officeSpoolDir = resolveOfficeSpoolDir(env.OFFICE_SPOOL_DIR, env.OFFICE_BIN);
   return {
     previewPort: resolvePreviewPort(env.PREVIEW_PORT),
     ...(previewOrigin === undefined ? {} : { previewOrigin }),
@@ -70,7 +70,7 @@ export function resolvePreviewSettings(
       repoRoot,
       "PREVIEW_CACHE_DIR",
     ),
-    ...(officeBin === undefined ? {} : { officeBin }),
+    ...(officeSpoolDir === undefined ? {} : { officeSpoolDir }),
     officeConvertTimeoutMs: resolvePositiveInteger(
       env.OFFICE_CONVERT_TIMEOUT_MS,
       DEFAULT_OFFICE_CONVERT_TIMEOUT_MS,
@@ -141,13 +141,23 @@ function resolvePreviewOrigin(raw: string | undefined): string | undefined {
   return raw;
 }
 
-/** 给出时须为绝对路径（原样保留，不绑 repo root、不规范化、不查存在性）；空串同样非法。 */
-function resolveOfficeBin(raw: string | undefined): string | undefined {
+/**
+ * 给出时须为绝对路径（原样保留，不绑 repo root、不规范化、不查存在性、不建目录——存在性、属主与
+ * mode 归启动预检）；空串同样非法。它 1:1 替换了 `OFFICE_BIN`（change office-convert-sandbox，owner
+ * B8）：旧键仍被设置时不论取值都拒绝启动，免得升级后的部署把「没配 spool」看成 sidecar 宕机。
+ */
+function resolveOfficeSpoolDir(
+  raw: string | undefined,
+  retired: string | undefined,
+): string | undefined {
+  if (retired !== undefined) {
+    throw new Error("OFFICE_BIN is retired; configure OFFICE_SPOOL_DIR");
+  }
   if (raw === undefined) {
     return undefined;
   }
   if (!isAbsolute(raw)) {
-    throw new Error("OFFICE_BIN must be an absolute path");
+    throw new Error("OFFICE_SPOOL_DIR must be an absolute path");
   }
   return raw;
 }

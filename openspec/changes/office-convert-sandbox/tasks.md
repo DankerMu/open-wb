@@ -45,12 +45,12 @@
 | `server/test/fixtures/fake-soffice.mjs` | 152 | ≤ 170 | S1a |
 | `biome.json`、`Makefile`、根 `package.json`、`knip.json`、`.jscpd.json`、`scripts/size-guard.sh`、`scripts/test-guardrails.sh` | — | 各 ≤ +6 行（接线） | S1a |
 | `server/src/preview/office-sidecar-health.ts`（新） | — | ≤ 100 | S1b |
-| `server/src/preview/office.ts` | 332 | ≤ 330 | S1b、S3 |
+| `server/src/preview/office.ts` | 332 | ≤ 340（评审后放宽） | S1b、S3 |
 | `server/src/preview/office-cache.ts` | 326 | ≤ 230 | S1b、S3 |
 | `server/src/preview-config.ts` | 153 | ≤ 165 | S1b |
 | `server/src/server.ts` | 726 | ≤ 740（预检 `await` + 信号核对 + `emit`；删 `stopWorkClear`、`preview_work_clear_failed` 与五处过期注释） | S1b |
 | `server/src/preview/app.ts` | 330 | ≤ 330（只改头注释与 `:10`、`:84-88` 两处注释，净零或净减） | S3 |
-| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 220 | S1b |
+| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 250（评审后放宽） | S1b |
 | `server/test/office-converter.test.ts` | 795 | ≤ 700（重写） | S1b |
 | `server/test/office-sidecar-health.test.ts`（新） | — | ≤ 200 | S1b |
 | `server/test/office-converter-output.test.ts` | 189 | ≤ 200 | S1b |
@@ -93,7 +93,7 @@ Minimal mergeable slice: atomic - 脚本、测试、镜像配方与守卫接线�
 
 ## 1b. S1b — app 侧 spool 客户端、预检与 fail-closed、D9 退役（office-preview / http-service-skeleton / preview-origin）
 
-- [ ] 1b.1 开工核对：
+- [x] 1b.1 开工核对：
   - 重读 `server/src/preview/office.ts` 全文（尤其 `:31`、`:51-69`、`:158-200`、`:270-302`）、`office-cache.ts:71-173`（保留）与 `:176-326`（`sudo` 段退役）、`office-queue.ts` 全文（不改）、`server.ts:1-5`、`:36-40`、`:196-227`、`:430-445`、`:470-472`、`:507`、`:533-534`、`:550-552`、`:575-586`、`:606-641`、`preview-config.ts:38-39`、`:63`、`:73`、`:144-153`、`preview/app.ts:10`、`:84-88`、`:100`、`:125-`、`:253-266`、`:284`、`:304`、`workspaces/regular-file.ts` 全文、`core/process-path.ts` 全文；
   - `grep -rn "fake-sudo-find\|officeBin\|OFFICE_BIN\|preview_work_clear_failed\|stopWorkClear\|clearWork\|FAKE_SUDO" server/src server/test` 与 design D9 表逐条对照：每一处命中都应在表里；表外命中停下先补 D9；
   - `grep -rn "work/\|\"work\"\|on\.work" server/src/preview server/src/server.ts server/test` 列出 `work` 目录的全部引用（建目录、mode 断言、清空、`readdirSync`），确认 D6「`work` 不再建」没有漏掉的消费方（已知：`server-startup-preview.test.ts:151-152,:177,:179`、`office-cache.test.ts:297-303`、`office-cache-helpers.ts:117-126`、`server-startup-office.test.ts:80-82`）；
@@ -102,7 +102,7 @@ Minimal mergeable slice: atomic - 脚本、测试、镜像配方与守卫接线�
   - 过期注释清单（design D6「过期注释」）：`server.ts:1-5`、`:36-40`、`:507`、`:533-534`、`:550-552`（本切片改）；`preview/app.ts:10`、`:84-88`、`:34-52`（S3 改）。
 
   验证：核对结果写进 PR。
-- [ ] 1b.2 先写 app 侧测试：
+- [x] 1b.2 先写 app 侧测试：
   - 新 `server/test/office-sidecar-health.test.ts`：覆盖「转换 sidecar 的健康与 fail-closed」场景「预检的两个方向（单元）」（`pollMs 20`、`waitMs 400`、`utimes` 伪造心跳年龄、注入 `uid` 伪造 `heartbeat` 属主不符、六例、永不 reject、不建目录不 chmod）；
   - 新 `server/test/support/fake-sidecar.ts`（design D8：`fs.watch` + 100 ms 轮询、`@标记` 词汇与假 `soffice` 一致并多出 `fifo`（输出是没有写端的命名管道）与多点扩展名的 stem 推导、`nopdf`（不建 `out/`）、记录 `request.json` / `in/` 字节 / `cancel` 时刻、心跳线程与 `"stale"` 模式；头注释写明不做隔离）；
   - 重写 `server/test/office-converter.test.ts`（按 D9 表：保留检查次序三例、构造参数例、作业目录被删例的骨架；`:421-433` 多点扩展名、`:518` `@fifo`、`:596`「`pdf/` 不存在也算 failed」三例改接缝保留；其余删除），覆盖「sidecar 转换契约」六个场景的全部 WHEN（三键、字节相等、哨兵不泄露、换入成符号链接 → `failed`、六种标记 → kind（含 fifo）、多点扩展名 `report.v2@named.tar.docx` → `out/report.v2@named.tar.pdf`、`cancel` 三个写点、四种输出边界（`office-converter-output.test.ts` 改接缝）、检查次序与 message `cacheDir and spoolDir must be absolute paths`）与「转换 sidecar 的健康与 fail-closed」场景「运行期心跳的边沿触发」；断言 app 侧转换器**没有启动任何子进程**（`child_process.spawn` 计数为 0）；
@@ -113,7 +113,7 @@ Minimal mergeable slice: atomic - 脚本、测试、镜像配方与守卫接线�
   - 删除 `office-work-clear.test.ts`、`fixtures/fake-sudo-find.mjs`（第 5 种；偏离记录逐文件对应 REMOVED 的 requirement）。
 
   验证：在未改动的代码上判红（新键未解析、`spoolDir` 选项不存在、无预检行即红）；`office-converter.test.ts` ≤ 700 行。
-- [ ] 1b.3 实现 app 侧：
+- [x] 1b.3 实现 app 侧：
   - `server/src/preview/office.ts`：按 design D4 重写 spawn 段为 spool 客户端（`spoolDir` / `pollMs` / `log` 选项；`openRegularFile` 复制字节；三键 `request.json` 经 `.part` + `rename`；轮询 `done` / `failed`；`cancel` 三个写点；心跳检查与 `staleReported` 边沿 + 注入的 `log`；`collectOutput` 改读 `jobs/<id>/out/<stem>.pdf`，`O_RDONLY|O_NOFOLLOW|O_NONBLOCK` 与 200 MiB 纪律不变；删 `buildLaunch` / `spawnAndWait` / `terminate` / `OfficeSpawn` / `ompUser` / `officeBin` / `process-path` import；错误 message `cacheDir and spoolDir must be absolute paths`）；
   - `server/src/preview/office-cache.ts`：删 `runSudoFind` / `stopWorkClear` / `log` 选项 / `FIND_PATH` / 两个时限常量 / `terminate` import；`createOfficeCleanup({cacheDir, spoolDir?})` 的 `clearWork` 改为本进程递归删 `<spoolDir>/jobs` 下条目（未配置或预检未过时不碰 spool）；`:63` 的构造校验 message 同样改为 `cacheDir and spoolDir must be absolute paths`；`sweepPdf` 不变；头注释改写（去掉 `sudo … find` 段，`rmSync` 不跟随链接一段保留并改为「`jobs/` 下」）；
   - `server/src/preview-config.ts`：`officeSpoolDir?`、`resolveOfficeSpoolDir`（形状同 `resolveOfficeBin`）、`OFFICE_BIN` 被设置即抛 `OFFICE_BIN is retired; configure OFFICE_SPOOL_DIR`（owner B8）；头注释「十二个」不变、注释里的键名换掉；
@@ -122,9 +122,9 @@ Minimal mergeable slice: atomic - 脚本、测试、镜像配方与守卫接线�
   - `server/src/preview/app.ts` 本切片不改（头注释与 `:10`、`:84-88` 归 S3）。
 
   验证：1b.2 全绿；预算表里的每个 `server/` 文件在上限内；`npm test --workspace server` 全绿（含 `preview-office-route*.test.ts`、`uid-isolation.test.ts` 原样通过）。
-- [ ] 1b.4 规格随刀：本 change 的 office-preview（2 REMOVED + 5 ADDED + 3 MODIFIED，其中「办公文档预览路由」只改一句、五个场景原样）、http-service-skeleton、preview-origin 三份 delta 由归档合入主规格，本任务只核对实现与 delta 逐句一致（尤其「sidecar 转换契约」的六步、「转换 sidecar 的健康与 fail-closed」的预检各项与边沿日志、http-service-skeleton 预检等待中的信号一句）；PR 正文写明 Migration Plan 的五条部署步骤与回滚。
-- [ ] 1b.5 变异证据（逐条做、逐条撤销，结果贴进 PR）：design D8「变异证据」的 app 侧 14 条——`request.json` 多键 / 不经 `openRegularFile` / 去心跳检查 / `staleReported` 不复位 / 每次 `unavailable` 都写一行 / 超时不写 `cancel` / 忽略预检 / 不写预检失败行 / 该行多一个键 / 写两行 / `waitMs` 0 / `waitMs` 30 s / 删掉预检后的 `signalReceived` 核对 / `collectOutput` 去掉 `O_NONBLOCK`——每条写出判红的用例名。
-- [ ] 1b.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；CI 九个既有 job 绿（本切片不改 CI）。PR 请求白盒审查（design D13 S1b 清单）。
+- [x] 1b.4 规格随刀：本 change 的 office-preview（2 REMOVED + 5 ADDED + 3 MODIFIED，其中「办公文档预览路由」只改一句、五个场景原样）、http-service-skeleton、preview-origin 三份 delta 由归档合入主规格，本任务只核对实现与 delta 逐句一致（尤其「sidecar 转换契约」的六步、「转换 sidecar 的健康与 fail-closed」的预检各项与边沿日志、http-service-skeleton 预检等待中的信号一句）；PR 正文写明 Migration Plan 的五条部署步骤与回滚。
+- [x] 1b.5 变异证据（逐条做、逐条撤销，结果贴进 PR）：design D8「变异证据」的 app 侧 14 条——`request.json` 多键 / 不经 `openRegularFile` / 去心跳检查 / `staleReported` 不复位 / 每次 `unavailable` 都写一行 / 超时不写 `cancel` / 忽略预检 / 不写预检失败行 / 该行多一个键 / 写两行 / `waitMs` 0 / `waitMs` 30 s / 删掉预检后的 `signalReceived` 核对 / `collectOutput` 去掉 `O_NONBLOCK`——每条写出判红的用例名。
+- [x] 1b.6 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；CI 九个既有 job 绿（本切片不改 CI）。PR 请求白盒审查（design D13 S1b 清单）。
 Suggested fixture level: expanded - 改转换子系统的进程边界与文件交接协议、启动期预检与信号路径（auth/permissions + file IO + error handling 风险包，Critical Path「沙箱与文件边界」「omp 子进程治理」）。
 Minimal mergeable slice: atomic - app 侧客户端、预检与 D9 退役互为前提：两条 REMOVED 的 requirement 与它们的测试必须随替代者同一 PR 退役，否则主干上有一段时间 `OFFICE_BIN` 与 `OFFICE_SPOOL_DIR` 两套契约并存；预检没有客户端就无物可探。
 

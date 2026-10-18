@@ -1,15 +1,17 @@
 /**
- * Issue #1071：办公文档转换器的单次转换契约（office-preview「转换器调用契约」的六个场景，以及
- * 「真实转换的人工验证」里的「自动化测试不需要 LibreOffice」）。
+ * Issue 1505：app 侧办公文档转换器对 spool 的单次转换契约（office-preview「sidecar 转换契约」的六个
+ * 场景、「转换 sidecar 的健康与 fail-closed」场景「运行期心跳的边沿触发」，以及「真实转换的人工
+ * 验证」里的「自动化测试不需要 LibreOffice」）。
  *
- * 全部用例对着 `fixtures/fake-soffice.mjs` 真实 spawn；注入的 spawn 包装器记录每次启动的命令、
- * argv、选项与 `ChildProcess`，是「恰启动一次」「命令为 sudo」「被 SIGKILL 结束」的判据。假 `sudo`
- * 是临时 bin 目录里名为 `sudo`、指向同一个夹具的符号链接，靠 `PATH` 首项命中——从不执行真的
- * `sudo`，包装器在启动前复核这一点。期望的 argv 与 PDF 字节是照规格抄的字面量，不引用源码常量。
+ * 全部用例对着进程内的假 sidecar（`support/fake-sidecar.ts`，不做任何隔离）：它记下每个作业的
+ * `request.json` 原文、`in/` 的字节、领取那一刻作业目录里的全部文件与看到 `cancel` 的时刻，是
+ * 「三键」「字节相等」「不泄露路径」「写了 cancel」的判据。`child_process` 的七个启动函数整文件都被
+ * 计数（`syncBuiltinESMExports` 让源码的具名导入也经过计数器），是「没有启动任何子进程」的判据。
+ * 期望的键集、PDF 字节与 message 是照规格抄的字面量，不引用源码常量。
  */
-import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
-import {
-  chmodSync,
+import childProcess from "node:child_process";
+import { randomBytes } from "node:crypto";
+import fs, {
   existsSync,
   lstatSync,
   mkdirSync,
@@ -21,96 +23,57 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { setTimeout as delay } from "node:timers/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createOfficeConverter, OfficeConvertError } from "../src/preview/office.js";
-import { stubSetpriv, useSetprivStub } from "./support/setpriv.js";
+import { countLaunches } from "./office-cache-helpers.js";
+import {
+  type FakeJob,
+  type FakeSidecar,
+  PDF,
+  startFakeSidecar,
+  stopFakeSidecars,
+} from "./support/fake-sidecar.js";
 
-const FAKE = fileURLToPath(new URL("./fixtures/fake-soffice.mjs", import.meta.url));
-/** 假 soffice 正常转换写出的全部字节（与夹具各持一份字面量）。 */
-const PDF = "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
 const HEX_32 = /^[0-9a-f]{32}$/u;
 const HEX_32_PDF = /^[0-9a-f]{32}\.pdf$/u;
-/** 夹具睡 30 秒；这里的时限远小于它，所以「已不存在」只能是被杀掉的结果。 */
-const GONE_WITHIN_MS = 4_000;
-const RECORD_WITHIN_MS = 6_000;
 /** 转换器自己的超时：不测超时的用例里它不该先到。 */
 const LONG_TIMEOUT_MS = 20_000;
-/** 等记录、等进程消失的两组用例的单测时限：大于上面两个等待之和，先报错的是带说明的那个。 */
-const SLOW_TEST_MS = 15_000;
-/** 低熵占位值：只用来证明父环境里的键不进子进程。 */
-const PARENT_ONLY = { MODEL_UPSTREAM_API_KEY: "placeholder", DB_PATH: "/placeholder/app.db" };
-
-interface Launch {
-  command: string;
-  args: readonly string[];
-  options: SpawnOptions;
-  child: ChildProcess;
-}
-
-interface FakeRecord {
-  argv: string[];
-  env: Record<string, string>;
-  pid: number;
-  childPid?: number;
-}
+const POLL_MS = 20;
+const WITHIN_MS = 6_000;
+const UNAVAILABLE_RECORD = { event: "office_convert_sidecar_unavailable" };
+/** 三个 app 一侧路径里各放一个哨兵段：spool 里任何一个字节都不该含它们。 */
+const SENTINELS = ["zq-sentinel-sandbox", "zq-sentinel-cache", "zq-sentinel-state"];
 
 interface Stage {
+  root: string;
   cacheDir: string;
-  work: string;
   pdf: string;
-  /** 假 `sudo` 所在的临时 bin 目录。 */
-  bin: string;
-  launches: Launch[];
-  spawn(command: string, args: readonly string[], options: SpawnOptions): ChildProcess;
-  /** 在「工作空间」里写一个输入文件，返回它的绝对路径。 */
-  input(name: string, content?: string): string;
+  spool: string;
+  jobs: string;
+  sidecar: FakeSidecar;
+  /** 在「工作空间」（路径含哨兵段）里写一个输入文件，返回它的绝对路径。 */
+  input(name: string, content?: string | Buffer): string;
 }
 
 type Converter = ReturnType<typeof createOfficeConverter>;
 
 const roots: string[] = [];
 const converters: Converter[] = [];
-const stages: Stage[] = [];
-/** 整个文件里启动过的每一个命令，给「不需要 LibreOffice」用。 */
-const everyCommand: string[] = [];
+/** 整个文件里经 `child_process` 启动过的每一个命令。 */
+const launched: string[] = [];
 const savedEnv = new Map<string, string | undefined>();
 
-function setEnv(key: string, value: string | undefined): void {
-  if (!savedEnv.has(key)) {
-    savedEnv.set(key, process.env[key]);
-  }
-  if (value === undefined) {
-    delete process.env[key];
-  } else {
-    process.env[key] = value;
-  }
-}
-
-/** 作业目录里可能留着 0500 的子目录：先放开权限再删。 */
-function unlock(dir: string): void {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) {
-      const child = join(dir, entry.name);
-      chmodSync(child, 0o700);
-      unlock(child);
-    }
-  }
-}
-
-useSetprivStub();
+beforeEach(() => countLaunches(launched));
 
 afterEach(async () => {
   await Promise.all(converters.splice(0).map((converter) => converter.close()));
-  const alive = stages
-    .splice(0)
-    .flatMap((stage) => stage.launches)
-    .filter(({ child }) => child.pid !== undefined && isRunning(child));
-  for (const { child } of alive) {
-    child.kill("SIGKILL");
-  }
+  stopFakeSidecars();
+  vi.restoreAllMocks();
+  syncBuiltinESMExports();
   for (const [key, value] of savedEnv) {
     if (value === undefined) {
       delete process.env[key];
@@ -119,134 +82,67 @@ afterEach(async () => {
     }
   }
   savedEnv.clear();
-  vi.restoreAllMocks();
   for (const root of roots.splice(0)) {
-    unlock(root);
     rmSync(root, { recursive: true, force: true });
   }
-  expect(alive.map(({ child }) => child.pid)).toEqual([]);
 });
 
-function isRunning(child: ChildProcess): boolean {
-  return child.exitCode === null && child.signalCode === null;
+function setEnv(key: string, value: string): void {
+  if (!savedEnv.has(key)) {
+    savedEnv.set(key, process.env[key]);
+  }
+  process.env[key] = value;
 }
 
-/** 缓存目录的三层由调用方（15.1 的入口）建；这里照它的权限位建出来。 */
-function stage(layout: { work: boolean } = { work: true }): Stage {
+/** 入口建好的布局：`<cache>/pdf`（`0700`）、spool（`0700`）与其下 `jobs/`；假 sidecar 心跳新鲜。 */
+function stage(layout: { jobs: boolean } = { jobs: true }): Stage {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "office-converter-")));
   roots.push(root);
-  const cacheDir = join(root, "cache");
-  const work = join(cacheDir, "work");
-  const pdf = join(cacheDir, "pdf");
-  const ws = join(root, "ws");
-  const bin = join(root, "bin");
-  for (const dir of [cacheDir, pdf, ws, bin]) {
-    mkdirSync(dir, 0o700);
+  const cacheDir = join(root, SENTINELS[1] ?? "", "cache");
+  const ws = join(root, SENTINELS[0] ?? "", "u1", "ws", "dir");
+  const spool = join(root, "spool");
+  for (const dir of [join(cacheDir, "pdf"), ws, spool]) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
   }
-  if (layout.work) {
-    mkdirSync(work);
-    chmodSync(work, 0o2770);
+  if (layout.jobs) {
+    mkdirSync(join(spool, "jobs"), { mode: 0o700 });
   }
-  symlinkSync(FAKE, join(bin, "sudo"));
-  const launches: Launch[] = [];
-  const created: Stage = {
+  setEnv("SANDBOX_ROOT", join(root, SENTINELS[0] ?? ""));
+  setEnv("PREVIEW_CACHE_DIR", cacheDir);
+  setEnv("OMP_STATE_DIR", join(root, SENTINELS[2] ?? "", "state"));
+  return {
+    root,
     cacheDir,
-    work,
-    pdf,
-    bin,
-    launches,
-    spawn(command, args, options) {
-      // 真的 sudo 一次都不许跑：命令是裸名时，子进程环境的 PATH 首项必须是放着假 sudo 的目录。
-      const path = options.env?.PATH ?? "";
-      if (!command.includes("/") && !path.startsWith(`${bin}:`)) {
-        throw new Error(`refusing to resolve ${command} outside the test bin dir`);
-      }
-      const child = spawn(command, [...args], options);
-      launches.push({ command, args, options, child });
-      everyCommand.push(command);
-      return child;
-    },
+    pdf: join(cacheDir, "pdf"),
+    spool,
+    jobs: join(spool, "jobs"),
+    sidecar: startFakeSidecar(spool),
     input(name, content = "not a real office document") {
       const path = join(ws, name);
       writeFileSync(path, content);
       return path;
     },
   };
-  stages.push(created);
-  return created;
 }
 
 function converterFor(
   on: Stage,
-  overrides: { officeBin?: string | null; timeoutMs?: number; ompUser?: string } = {},
+  overrides: { spoolDir?: string | null; timeoutMs?: number; log?: (record: unknown) => void } = {},
 ): Converter {
-  const { officeBin = FAKE, timeoutMs = LONG_TIMEOUT_MS, ompUser } = overrides;
+  const { spoolDir = on.spool, timeoutMs = LONG_TIMEOUT_MS, log } = overrides;
   const converter = createOfficeConverter({
-    ...(officeBin === null ? {} : { officeBin }),
+    ...(spoolDir === null ? {} : { spoolDir }),
     cacheDir: on.cacheDir,
     timeoutMs,
-    ...(ompUser === undefined ? {} : { ompUser }),
-    spawn: on.spawn,
+    pollMs: POLL_MS,
+    ...(log === undefined ? {} : { log }),
   });
   converters.push(converter);
   return converter;
 }
 
-/** 假 sudo 靠 PATH 首项命中；`#!/usr/bin/env node` 还需要 node 所在目录。 */
-function useFakeSudo(on: Stage): void {
-  setEnv("PATH", `${on.bin}:${dirname(process.execPath)}:/usr/bin:/bin`);
-}
-
-/** 契约所列的 argv（自 `officeBin` 之后的部分）。 */
-function contractArgs(job: string, input: string): string[] {
-  return [
-    "--headless",
-    "--norestore",
-    "--nolockcheck",
-    "--nodefault",
-    "--nofirststartwizard",
-    `-env:UserInstallation=file://${job}/profile`,
-    "--convert-to",
-    "pdf",
-    "--outdir",
-    `${job}/out`,
-    input,
-  ];
-}
-
-function sudoPrefix(user: string): string[] {
-  return [
-    "-n",
-    "-u",
-    user,
-    "--preserve-env=PATH,LANG,HOME",
-    "--",
-    "/usr/bin/setpriv",
-    "--pdeathsig",
-    "KILL",
-    "--",
-    FAKE,
-  ];
-}
-
-function jobOf(launch: Launch | undefined): string {
-  const cwd = launch?.options.cwd;
-  if (typeof cwd !== "string") {
-    throw new Error("the launch has no job directory");
-  }
-  return cwd;
-}
-
-function recordPath(job: string): string {
-  return join(dirname(job), `${basename(job)}.record.json`);
-}
-
-function readRecord(job: string): FakeRecord {
-  return JSON.parse(readFileSync(recordPath(job), "utf8")) as FakeRecord;
-}
-
-async function waitFor<T>(what: string, probe: () => T | undefined, withinMs: number): Promise<T> {
-  const deadline = Date.now() + withinMs;
+async function waitFor<T>(what: string, probe: () => T | undefined): Promise<T> {
+  const deadline = Date.now() + WITHIN_MS;
   for (;;) {
     const value = probe();
     if (value !== undefined) {
@@ -255,51 +151,16 @@ async function waitFor<T>(what: string, probe: () => T | undefined, withinMs: nu
     if (Date.now() > deadline) {
       throw new Error(`timed out waiting for ${what}`);
     }
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await delay(10);
   }
 }
 
-/** 等假进程把记录写出来（`needChild` 时还要等它记下子进程的 pid）。 */
-async function waitForRecord(on: Stage, needChild = false): Promise<FakeRecord> {
-  return waitFor(
-    "the fake process record",
-    () => {
-      const launch = on.launches[0];
-      if (launch === undefined || !existsSync(recordPath(jobOf(launch)))) {
-        return undefined;
-      }
-      const record = readRecord(jobOf(launch));
-      return needChild && record.childPid === undefined ? undefined : record;
-    },
-    RECORD_WITHIN_MS,
-  );
-}
-
-function isGone(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return false;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "ESRCH";
-  }
-}
-
-/** 全部 pid 共用一个时限。 */
-async function expectGone(pids: Array<number | undefined>): Promise<void> {
-  const known = pids.filter((pid) => pid !== undefined);
-  if (known.length !== pids.length) {
-    throw new Error("a pid that should have been recorded is missing");
-  }
-  await waitFor(
-    `processes ${known.join(", ")} to disappear`,
-    () => (known.every(isGone) ? true : undefined),
-    GONE_WITHIN_MS,
-  );
-}
-
-/** 转换器经 `process.kill` 发出的信号（不含探测存活用的信号 0）。 */
-function signalsSent(spy: { mock: { calls: unknown[][] } }): unknown[][] {
-  return spy.mock.calls.filter(([, signal]) => signal !== 0);
+/** 等假 sidecar 领取第 `index` 个作业（读到了 `request.json`）。 */
+function claimed(on: Stage, index = 0): Promise<FakeJob> {
+  return waitFor("the fake sidecar to claim the job", () => {
+    const job = on.sidecar.jobs()[index];
+    return job?.request === undefined ? undefined : job;
+  });
 }
 
 async function failureOf(attempt: Promise<string>): Promise<OfficeConvertError> {
@@ -322,57 +183,55 @@ function expectBareKind(error: OfficeConvertError, kind: string, forbidden: stri
   expect(error.name).toBe("OfficeConvertError");
   expect(Object.keys(error).sort()).toEqual(["kind", "name"]);
   for (const path of forbidden) {
-    expect(error.message).not.toContain(path);
     expect(JSON.stringify(error)).not.toContain(path);
   }
 }
 
-function dirsIn(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name);
-}
-
-/** 「缓存目录里没有新增文件」：`pdf/` 为空，`work/` 下没有目录（只可能剩假进程的记录文件）。 */
+/** 「缓存与 spool 里没有新增」：`pdf/` 为空，`jobs/` 下没有目录。 */
 function expectNothingLeft(on: Stage): void {
   expect(readdirSync(on.pdf)).toEqual([]);
-  expect(dirsIn(on.work)).toEqual([]);
+  expect(readdirSync(on.jobs)).toEqual([]);
 }
 
-describe("转换器调用契约：argv、环境与成功判定", () => {
-  it("假 soffice 收到的 argv 与环境恰为契约所列，结果是复制进 pdf/ 的新文件，作业目录已不存在", async () => {
+/** spool 树里每个普通文件的字节（递归）。 */
+function spoolFiles(dir: string): Buffer[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    return entry.isDirectory() ? spoolFiles(path) : entry.isFile() ? [readFileSync(path)] : [];
+  });
+}
+
+describe("sidecar 转换契约：作业目录里只有字节与三键", () => {
+  it("1 MiB 随机内容的「报告 v2.docx」：in/ 字节相等、request.json 恰三键、spool 不含任何哨兵段，结果是 pdf/ 下 0600 的新文件，作业目录已删", async () => {
     const on = stage();
-    for (const [key, value] of Object.entries(PARENT_ONLY)) {
-      setEnv(key, value);
-    }
-    setEnv("LANG", "C.UTF-8");
-    const input = on.input("报告 v2.docx");
+    const content = randomBytes(1_048_576);
+    const input = on.input("报告 v2.docx", content);
     const converter = converterFor(on);
     expect(converter.available).toBe(true);
 
-    const result = await converter.convert(input);
+    const attempt = converter.convert(input);
+    // 作业目录在 `convert` 返回之前同步建出。
+    const [created] = on.sidecar.jobs();
+    expect(created?.id).toMatch(HEX_32);
+    expect(lstatSync(created?.dir ?? "").mode & 0o7777).toBe(0o700);
+    const result = await attempt;
 
-    expect(on.launches).toHaveLength(1);
-    const [launch] = on.launches;
-    const job = jobOf(launch);
-    expect(dirname(job)).toBe(on.work);
-    expect(basename(job)).toMatch(HEX_32);
-    expect(launch?.command).toBe(FAKE);
-    expect(launch?.args).toEqual(contractArgs(job, input));
-    expect(launch?.options).toEqual({
-      cwd: job,
-      env: { PATH: process.env.PATH, LANG: "C.UTF-8", HOME: job },
-      stdio: "ignore",
-      shell: false,
-      detached: true,
-    });
-
-    const record = readRecord(job);
-    expect(record.argv.slice(1)).toEqual(contractArgs(job, input));
-    // macOS 的运行时会给每个进程塞这一个键；它不是转换器传的。
-    const { __CF_USER_TEXT_ENCODING: _injected, ...childEnv } = record.env;
-    expect(childEnv).toEqual({ PATH: process.env.PATH, LANG: "C.UTF-8", HOME: job });
-    expect(JSON.stringify(record.env)).not.toContain("placeholder");
+    const [job, ...others] = on.sidecar.jobs();
+    expect(others).toEqual([]);
+    expect(job?.name).toBe("报告 v2.docx");
+    expect(job?.bytes?.equals(content)).toBe(true);
+    const request = JSON.parse(job?.request ?? "{}") as Record<string, unknown>;
+    expect(Object.keys(request).sort()).toEqual(["input", "timeoutMs", "version"]);
+    expect(request).toEqual({ version: 1, input: "报告 v2.docx", timeoutMs: LONG_TIMEOUT_MS });
+    expect(Object.keys(job?.files ?? {}).sort()).toEqual([
+      join("in", "报告 v2.docx"),
+      "request.json",
+    ]);
+    for (const bytes of [...Object.values(job?.files ?? {}), ...spoolFiles(on.spool)]) {
+      for (const leak of [...SENTINELS, input, dirname(input)]) {
+        expect(bytes.includes(leak)).toBe(false);
+      }
+    }
 
     expect(dirname(result)).toBe(on.pdf);
     expect(basename(result)).toMatch(HEX_32_PDF);
@@ -382,53 +241,152 @@ describe("转换器调用契约：argv、环境与成功判定", () => {
     expect(stats.mode & 0o7777).toBe(0o600);
     expect(stats.uid).toBe(process.geteuid?.());
     expect(readdirSync(on.pdf)).toEqual([basename(result)]);
-    expect(existsSync(job)).toBe(false);
-    expect(dirsIn(on.work)).toEqual([]);
+    expect(existsSync(job?.dir ?? "")).toBe(false);
+    expect(readdirSync(on.jobs)).toEqual([]);
+    expect(launched).toEqual([]);
   });
 
-  it("父进程没有 LANG 时子进程环境里也没有这个键", async () => {
-    const on = stage();
-    setEnv("LANG", undefined);
-
-    await converterFor(on).convert(on.input("a.docx"));
-
-    const [launch] = on.launches;
-    const job = jobOf(launch);
-    expect(launch?.options.env).toEqual({ PATH: process.env.PATH, HOME: job });
-    const { __CF_USER_TEXT_ENCODING: _injected, ...childEnv } = readRecord(job).env;
-    expect(Object.keys(childEnv).sort()).toEqual(["HOME", "PATH"]);
-  });
-
-  it("每次转换用各自新建的作业目录与 UserInstallation，结果互不覆盖", async () => {
+  it("每次转换用各自新建的作业目录，结果互不覆盖；0 字节的输入照样以 0 字节复制", async () => {
     const on = stage();
     const converter = converterFor(on);
     const input = on.input("表格.xlsx");
 
     const first = await converter.convert(input);
     const second = await converter.convert(input);
+    await converter.convert(on.input("空.docx", ""));
 
-    expect(on.launches).toHaveLength(2);
-    const jobs = on.launches.map(jobOf);
-    expect(new Set(jobs).size).toBe(2);
-    expect(on.launches.map(({ args }) => args[5])).toEqual(
-      jobs.map((job) => `-env:UserInstallation=file://${job}/profile`),
-    );
+    const jobs = on.sidecar.jobs();
+    expect(new Set(jobs.map(({ id }) => id)).size).toBe(3);
+    expect(jobs[2]?.bytes?.length).toBe(0);
     expect(first).not.toBe(second);
     expect(readFileSync(first, "utf8")).toBe(PDF);
     expect(readFileSync(second, "utf8")).toBe(PDF);
   });
 
-  it("输入文件名有多个点时只去掉最后一个扩展名", async () => {
+  it("request.json 只经 rename 出现：直接写入的目标只有 request.json.part", async () => {
     const on = stage();
-    // 假 soffice 把 PDF 写到输入内容给出的名字上；转换器找的不是这个名字就拿不到输出。
-    const input = on.input("report.v2@named.tar.docx", "report.v2@named.tar.pdf");
+    const writes: string[] = [];
+    const renames: string[][] = [];
+    const realWrite = fs.writeFileSync;
+    const realRename = fs.renameSync;
+    vi.spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof realWrite>) => {
+      writes.push(String(args[0]));
+      return realWrite(...args);
+    }) as typeof fs.writeFileSync);
+    vi.spyOn(fs, "renameSync").mockImplementation(((from, to) => {
+      renames.push([String(from), String(to)]);
+      return realRename(from, to);
+    }) as typeof fs.renameSync);
+    syncBuiltinESMExports();
 
-    const result = await converterFor(on).convert(input);
+    await converterFor(on).convert(on.input("a.docx"));
 
-    expect(on.launches[0]?.child.exitCode).toBe(0);
-    expect(readFileSync(result, "utf8")).toBe(PDF);
+    const request = join(on.sidecar.jobs()[0]?.dir ?? "", "request.json");
+    expect(writes.filter((path) => basename(path).startsWith("request.json"))).toEqual([
+      `${request}.part`,
+    ]);
+    expect(renames).toContainEqual([`${request}.part`, request]);
   });
 
+  it("openRegularFile 返回之后输入被换成另一个文件：in/ 的字节来自已打开的那个描述符（钩子辅助复现）", async () => {
+    const on = stage();
+    const input = on.input("a.docx", "original bytes");
+    const realOpenSync = fs.openSync;
+    vi.spyOn(fs, "openSync").mockImplementation(((path, flags, mode) => {
+      const fd = realOpenSync(path, flags, mode);
+      if (path === input) {
+        rmSync(input);
+        writeFileSync(input, "replaced bytes");
+      }
+      return fd;
+    }) as typeof fs.openSync);
+    syncBuiltinESMExports();
+
+    await converterFor(on).convert(input);
+
+    expect(readFileSync(input, "utf8")).toBe("replaced bytes");
+    expect(on.sidecar.jobs()[0]?.bytes?.toString("utf8")).toBe("original bytes");
+  });
+});
+
+describe("sidecar 转换契约：输入在 lstat 之后被换成符号链接", () => {
+  /** 钩子辅助复现：输入的第一次 `openSync` 之前把它换成指向工作空间外文件的符号链接。 */
+  function swapOnOpen(input: string, outside: string): () => number {
+    const realOpenSync = fs.openSync;
+    let swaps = 0;
+    vi.spyOn(fs, "openSync").mockImplementation(((path, flags, mode) => {
+      if (path === input && swaps === 0) {
+        swaps += 1;
+        rmSync(input);
+        symlinkSync(outside, input);
+      }
+      return realOpenSync(path, flags, mode);
+    }) as typeof fs.openSync);
+    syncBuiltinESMExports();
+    return () => swaps;
+  }
+
+  it.each(["打开之前被换入", "本就是符号链接"])(
+    "%s：failed，spool 里没有为它建作业目录与 in/，错误不含路径",
+    async (when) => {
+      const on = stage();
+      const outside = join(on.root, "outside.docx");
+      writeFileSync(outside, "outside the workspace");
+      const input = on.input("a.docx");
+      let swaps = (): number => 1;
+      if (when === "本就是符号链接") {
+        rmSync(input);
+        symlinkSync(outside, input);
+      } else {
+        swaps = swapOnOpen(input, outside);
+      }
+
+      const error = await failureOf(converterFor(on).convert(input));
+
+      expect(swaps()).toBe(1);
+      expectBareKind(error, "failed", [input, outside, on.root]);
+      expect(on.sidecar.jobs()).toEqual([]);
+      expectNothingLeft(on);
+    },
+  );
+});
+
+describe("sidecar 转换契约：标记到 kind", () => {
+  it("done 且输出完好：成功；多点扩展名的输入取 out/report.v2@named.tar.pdf", async () => {
+    const on = stage();
+
+    const result = await converterFor(on).convert(on.input("report.v2@named.tar.docx"));
+
+    expect(readFileSync(result, "utf8")).toBe(PDF);
+    expect(on.sidecar.jobs()[0]?.output).toBe(join("out", "report.v2@named.tar.pdf"));
+  });
+
+  it.each([
+    ["写 failed（原因码 exit）", "a@exit1.docx"],
+    ["写 failed（原因码 bad-request）", "a@bad-request.docx"],
+    ["写出 0 字节的 PDF 后 done", "a@empty.docx"],
+    ["把输出写成符号链接后 done", "a@symlink.docx"],
+    ["把输出写成没有写端的命名管道后 done", "a@fifo.docx"],
+    ["不建 out/ 直接写 done", "a@nopdf.docx"],
+    ["把 out/ 换成指向另一目录（内有 a.pdf）的符号链接后 done", "a@out-symlink.docx"],
+  ])("假 sidecar %s：failed，pdf/ 没有新增，作业目录被删，错误不含路径", async (_case, name) => {
+    const on = stage();
+    const input = on.input(name);
+    const startedAt = performance.now();
+    const attempt = failureOf(converterFor(on).convert(input));
+    const outcome = await Promise.race([attempt, delay(1_500).then(() => "still pending")]);
+
+    expect(outcome).not.toBe("still pending");
+    expect(performance.now() - startedAt).toBeLessThan(1_500);
+    expectBareKind(await attempt, "failed", [input, on.cacheDir, on.spool]);
+    const [job] = on.sidecar.jobs();
+    expect(job?.answer).toMatch(/^(done|failed:exit|failed:bad-request)$/u);
+    expect(existsSync(job?.dir ?? "")).toBe(false);
+    expectNothingLeft(on);
+  });
+});
+
+describe("sidecar 转换契约：作业目录删不掉", () => {
   it.skipIf(process.geteuid?.() === 0)(
     "作业目录里有删不掉的残留时转换仍然成功，结果可读",
     async () => {
@@ -437,359 +395,285 @@ describe("转换器调用契约：argv、环境与成功判定", () => {
       const result = await converterFor(on).convert(on.input("a@locked-dir.docx"));
 
       expect(readFileSync(result, "utf8")).toBe(PDF);
-      // 删除确实失败过：0500 的非空子目录还在。
-      expect(existsSync(join(jobOf(on.launches[0]), "locked", "keep"))).toBe(true);
+      // 删除确实失败过：0500 的非空子目录还在，删除失败被吞掉。
+      const locked = join(on.sidecar.jobs()[0]?.dir ?? "", "locked");
+      expect(existsSync(join(locked, "keep"))).toBe(true);
+      fs.chmodSync(locked, 0o700);
     },
   );
 });
 
-describe("转换器调用契约：sudo 前缀", () => {
-  it("提供 ompUser 时启动的命令是 sudo，argv 以契约的前缀开头，不以新进程组启动", async () => {
+describe("sidecar 转换契约：作业目录或 request.json.part 被换成链接", { timeout: 15_000 }, () => {
+  /** 把作业目录换成指向 `<spool>/decoy-<id>`（空）的链接，原目录挪到 `<spool>/moved-<id>`。 */
+  function swapJob(on: Stage, job: string): { decoy: string; moved: string } {
+    const id = basename(job);
+    const [decoy, moved] = [join(on.spool, `decoy-${id}`), join(on.spool, `moved-${id}`)];
+    fs.renameSync(job, moved);
+    mkdirSync(decoy);
+    symlinkSync(decoy, job);
+    return { decoy, moved };
+  }
+
+  it("领取后作业目录被换成链接（目标内有 out/a.pdf）再 done：failed，链接目标里没有 cancel 与 request.json*", async () => {
     const on = stage();
-    useFakeSudo(on);
-    setEnv("LANG", "C.UTF-8");
-    for (const [key, value] of Object.entries(PARENT_ONLY)) {
-      setEnv(key, value);
-    }
-    const input = on.input("报告.docx");
 
-    const result = await converterFor(on, { ompUser: "omp" }).convert(input);
+    const error = await failureOf(converterFor(on).convert(on.input("a@job-symlink.docx")));
 
-    expect(on.launches).toHaveLength(1);
-    const [launch] = on.launches;
-    const job = jobOf(launch);
-    expect(launch?.command).toBe("sudo");
-    expect(launch?.args).toEqual([...sudoPrefix("omp"), ...contractArgs(job, input)]);
-    expect(launch?.options).toEqual({
-      cwd: job,
-      env: { PATH: process.env.PATH, LANG: "C.UTF-8", HOME: job },
-      stdio: "ignore",
-      shell: false,
-      detached: false,
-    });
-    // 被启动的确实是临时 bin 目录里的假 sudo，它自身的环境也只有这三个键。
-    const record = readRecord(job);
-    expect(record.argv[0]).toBe(join(on.bin, "sudo"));
-    const { __CF_USER_TEXT_ENCODING: _injected, ...sudoEnv } = record.env;
-    expect(sudoEnv).toEqual({ PATH: process.env.PATH, LANG: "C.UTF-8", HOME: job });
-    expect(JSON.stringify(record.env)).not.toContain("placeholder");
-    expect(readFileSync(result, "utf8")).toBe(PDF);
-  });
-
-  it("sudo 立即失败就是转换失败，不回退为直接启动 officeBin", async () => {
-    const on = stage();
-    useFakeSudo(on);
-    const input = on.input("a@exit1.docx");
-
-    const error = await failureOf(converterFor(on, { ompUser: "omp" }).convert(input));
-
-    expectBareKind(error, "failed", [input, on.cacheDir]);
-    expect(on.launches.map(({ command }) => command)).toEqual(["sudo"]);
+    expectBareKind(error, "failed", [on.spool]);
+    const decoy = join(on.spool, `decoy-${on.sidecar.jobs()[0]?.id ?? ""}`);
+    expect(readdirSync(decoy).sort()).toEqual(["done", "out"]);
     expectNothingLeft(on);
   });
 
-  it("setpriv 不可执行或 PATH 不是绝对路径时不启动任何进程，也不建作业目录", async () => {
+  it("等待中作业目录被换成链接、随后超时：timeout，cancel 不写进链接目标（钩子辅助复现）", async () => {
     const on = stage();
-    useFakeSudo(on);
-    const converter = converterFor(on, { ompUser: "omp" });
-    const input = on.input("a.docx");
+    const attempt = failureOf(
+      converterFor(on, { timeoutMs: 1_500 }).convert(on.input("a@hang.docx")),
+    );
+    const { decoy, moved } = swapJob(on, (await claimed(on)).dir);
 
-    const missing = stubSetpriv("ENOENT");
-    try {
-      expectBareKind(await failureOf(converter.convert(input)), "failed", [input, on.cacheDir]);
-    } finally {
-      missing.restore();
-    }
-    setEnv("PATH", "relative-bin:/usr/bin");
-    expectBareKind(await failureOf(converter.convert(input)), "failed", [input, on.cacheDir]);
+    expectBareKind(await attempt, "timeout", [on.spool]);
+    expect(readdirSync(decoy)).toEqual([]);
+    expect(readdirSync(moved)).not.toContain("cancel");
+  });
 
-    expect(on.launches).toEqual([]);
-    expect(readdirSync(on.work)).toEqual([]);
+  it("写 request.json.part 之前作业目录被换成链接：failed，哪边都没有 request.json*（钩子辅助复现）", async () => {
+    const on = stage();
+    const realLstat = fs.lstatSync;
+    let swapped: { decoy: string; moved: string } | undefined;
+    vi.spyOn(fs, "lstatSync").mockImplementation(((path: string, options?: fs.StatSyncOptions) => {
+      if (swapped === undefined && dirname(String(path)) === on.jobs) {
+        swapped = swapJob(on, String(path));
+      }
+      return realLstat(path, options);
+    }) as typeof fs.lstatSync);
+    syncBuiltinESMExports();
+
+    const error = await failureOf(converterFor(on).convert(on.input("a.docx")));
+
+    expectBareKind(error, "failed", [on.spool]);
+    expect(readdirSync(swapped?.decoy ?? "")).toEqual([]);
+    expect(readdirSync(swapped?.moved ?? "")).toEqual(["in"]);
+    expect(on.sidecar.jobs()[0]?.request).toBeUndefined();
+  });
+
+  it("request.json.part 已是指向 app 可写文件的链接：failed，该文件的字节不变（钩子辅助复现）", async () => {
+    const on = stage();
+    const sentinel = join(on.root, "app-writable.txt");
+    writeFileSync(sentinel, "sentinel bytes");
+    const realWrite = fs.writeFileSync;
+    vi.spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof realWrite>) => {
+      if (String(args[0]).endsWith("request.json.part")) {
+        symlinkSync(sentinel, String(args[0]));
+      }
+      return realWrite(...args);
+    }) as typeof fs.writeFileSync);
+    syncBuiltinESMExports();
+
+    const error = await failureOf(converterFor(on).convert(on.input("a.docx")));
+
+    expectBareKind(error, "failed", [on.spool, sentinel]);
+    expect(readFileSync(sentinel, "utf8")).toBe("sentinel bytes");
+    expectNothingLeft(on);
   });
 });
 
-describe("转换器调用契约：各类失败", () => {
-  it.each([
-    ["以退出码 1 结束", "a@exit1.docx", 1],
-    ["写出完好的 PDF 后以退出码 2 结束", "a@exit2.docx", 2],
-    ["以 0 结束但不写输出", "a@no-output.docx", 0],
-    ["写出 0 字节的 PDF", "a@empty.docx", 0],
-    ["把输出写成指向别处的符号链接", "a@symlink.docx", 0],
-    ["把输出写成命名管道", "a@fifo.docx", 0],
-  ])(
-    "假 soffice %s：failed，作业目录被删，缓存里没有新增文件，错误不含路径",
-    async (_case, name, exitCode) => {
+describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeout: 15_000 }, () => {
+  it("timeoutMs 200、假 sidecar 不写标记：timeout，假 sidecar 记录到 cancel，作业目录被删", async () => {
+    const on = stage();
+    const startedAt = Date.now();
+
+    const error = await failureOf(
+      converterFor(on, { timeoutMs: 200 }).convert(on.input("a@hang.docx")),
+    );
+
+    expectBareKind(error, "timeout", [on.spool]);
+    const [job] = on.sidecar.jobs();
+    const cancelAt = await waitFor("the cancel record", () => job?.cancelAt);
+    expect(cancelAt - startedAt).toBeGreaterThanOrEqual(150);
+    expect(existsSync(job?.dir ?? "")).toBe(false);
+    expectNothingLeft(on);
+  });
+
+  it("等待中中止调用方的 signal：aborted，cancel 已写，作业目录被删", async () => {
+    const on = stage();
+    const abort = new AbortController();
+    const attempt = failureOf(converterFor(on).convert(on.input("a@hang.docx"), abort.signal));
+    const job = await claimed(on);
+
+    abort.abort();
+
+    expectBareKind(await attempt, "aborted", [on.spool]);
+    await waitFor("the cancel record", () => job.cancelAt);
+    expect(existsSync(job.dir)).toBe(false);
+    expectNothingLeft(on);
+  });
+
+  it("等待中 close()：aborted、cancel 已写、作业目录已删；其后的 convert 立即 aborted 且不建作业", async () => {
+    const on = stage();
+    const converter = converterFor(on);
+    const attempt = failureOf(converter.convert(on.input("a@hang.docx")));
+    const job = await claimed(on);
+
+    await converter.close();
+
+    // close() 落定时作业目录已删、cancel 已写。
+    expect(existsSync(job.dir)).toBe(false);
+    expectBareKind(await attempt, "aborted", [on.spool]);
+    await waitFor("the cancel record", () => job.cancelAt);
+    expectBareKind(await failureOf(converter.convert(on.input("b.docx"))), "aborted", []);
+    await converter.close();
+    expect(on.sidecar.jobs()).toHaveLength(1);
+    expectNothingLeft(on);
+  });
+
+  it("调用时 signal 已中止：aborted，不建作业目录；成功之后再中止 signal 不改变结果", async () => {
+    const on = stage();
+    const converter = converterFor(on);
+
+    expectBareKind(
+      await failureOf(converter.convert(on.input("a.docx"), AbortSignal.abort())),
+      "aborted",
+      [],
+    );
+    expect(on.sidecar.jobs()).toEqual([]);
+    const abort = new AbortController();
+    const result = await converter.convert(on.input("b.docx"), abort.signal);
+    abort.abort();
+    expect(readFileSync(result, "utf8")).toBe(PDF);
+    expect(on.sidecar.jobs()[0]?.cancelAt).toBeUndefined();
+  });
+});
+
+describe("sidecar 转换契约：检查次序与构造参数", () => {
+  it("不提供 spoolDir：available 为 false，convert 以 unavailable 失败，spool 里没有新建目录", async () => {
+    const on = stage();
+    const converter = converterFor(on, { spoolDir: null });
+
+    expect(converter.available).toBe(false);
+    expectBareKind(await failureOf(converter.convert(on.input("a.docx"))), "unavailable", []);
+    // 对不存在的输入同样是 unavailable：次序上它在一切文件操作之前。
+    const missing = join(on.root, "missing.docx");
+    expectBareKind(await failureOf(converter.convert(missing)), "unavailable", []);
+    expect(on.sidecar.jobs()).toEqual([]);
+    expectNothingLeft(on);
+  });
+
+  it("已 close() 后调用：aborted，不建作业目录", async () => {
+    const on = stage();
+    const converter = converterFor(on);
+    await converter.close();
+
+    expectBareKind(await failureOf(converter.convert(on.input("a.docx"))), "aborted", []);
+    expect(on.sidecar.jobs()).toEqual([]);
+  });
+
+  it.each([["ws/a.docx"], ["-env:UserInstallation=file:///x.docx"], ["--accept=x.docx"]])(
+    "absInput 为 %s：failed，不建作业目录",
+    async (input) => {
       const on = stage();
-      const input = on.input(name);
 
-      const error = await failureOf(converterFor(on).convert(input));
-
-      expect(on.launches).toHaveLength(1);
-      expect(on.launches[0]?.child.exitCode).toBe(exitCode);
-      expectBareKind(error, "failed", [input, jobOf(on.launches[0]), on.cacheDir]);
+      expectBareKind(await failureOf(converterFor(on).convert(input)), "failed", [input]);
+      expect(on.sidecar.jobs()).toEqual([]);
       expectNothingLeft(on);
     },
   );
 
-  it("假 soffice 写出完好的 PDF 后被信号结束：failed，转换器没有发信号，缓存里没有新增文件", async () => {
+  it.each<[string, string, (on: Stage) => [string, AbortSignal | undefined]]>([
+    ["signal 已中止", "aborted", (on) => [on.input("a.docx"), AbortSignal.abort()]],
+    ["absInput 不是绝对路径", "failed", () => ["ws/a.docx", undefined]],
+  ])("心跳不新鲜且%s：答 %s（它排在心跳之前），不写 log、不建作业", async (_case, kind, args) => {
     const on = stage();
-    const kill = vi.spyOn(process, "kill");
-    const input = on.input("a@self-kill.docx");
+    on.sidecar.heartbeat("stale");
+    const records: unknown[] = [];
+    const [input, signal] = args(on);
 
-    const error = await failureOf(converterFor(on).convert(input));
+    const converter = converterFor(on, { log: (record) => records.push(record) });
+    expectBareKind(await failureOf(converter.convert(input, signal)), kind, []);
 
-    expect(on.launches).toHaveLength(1);
-    const child = on.launches[0]?.child;
-    expect(child?.signalCode).toBe("SIGTERM");
-    expect(child?.exitCode).toBeNull();
-    // 信号是假进程自己发给自己的，不是转换器发的。
-    expect(signalsSent(kill)).toEqual([]);
-    expectBareKind(error, "failed", [input, jobOf(on.launches[0]), on.cacheDir]);
-    expectNothingLeft(on);
+    expect(records).toEqual([]);
+    expect(on.sidecar.jobs()).toEqual([]);
   });
 
-  it("officeBin 指向不存在的文件：failed，作业目录被删，缓存里没有新增文件", async () => {
-    const on = stage();
-    const input = on.input("a.docx");
-    const absent = join(on.bin, "absent-office-bin");
+  it("jobs/ 不存在：failed，不替调用方建它；pdf/ 不存在：sidecar 写了 done 也算 failed，作业目录照删", async () => {
+    const bare = stage({ jobs: false });
+    expectBareKind(await failureOf(converterFor(bare).convert(bare.input("a.docx"))), "failed", [
+      bare.spool,
+    ]);
+    expect(existsSync(bare.jobs)).toBe(false);
 
-    const error = await failureOf(converterFor(on, { officeBin: absent }).convert(input));
-
-    expect(on.launches).toHaveLength(1);
-    expect(on.launches[0]?.child.pid).toBeUndefined();
-    expectBareKind(error, "failed", [input, jobOf(on.launches[0]), on.cacheDir, absent]);
-    expectNothingLeft(on);
-  });
-
-  it("officeBin 不存在时中止：没有 pid 可杀，不发任何信号", async () => {
-    const on = stage();
-    const kill = vi.spyOn(process, "kill");
-    const abort = new AbortController();
-    const absent = join(on.bin, "absent-office-bin");
-
-    const attempt = converterFor(on, { officeBin: absent }).convert(
-      on.input("a.docx"),
-      abort.signal,
-    );
-    // spawn 已经返回、error 事件还没到：此刻 child.pid 是 undefined。
-    abort.abort();
-    const error = await failureOf(attempt);
-
-    expect(on.launches[0]?.child.pid).toBeUndefined();
-    expect(kill).not.toHaveBeenCalled();
-    expectBareKind(error, "aborted", [on.cacheDir]);
-    expectNothingLeft(on);
-  });
-
-  it("work/ 不存在：failed，不启动进程（本模块不替调用方建目录）", async () => {
-    const on = stage({ work: false });
-    const input = on.input("a.docx");
-
-    const error = await failureOf(converterFor(on).convert(input));
-
-    expectBareKind(error, "failed", [input, on.cacheDir]);
-    expect(on.launches).toEqual([]);
-    expect(existsSync(on.work)).toBe(false);
-    expect(readdirSync(on.pdf)).toEqual([]);
-  });
-
-  it("pdf/ 不存在：进程成功也算 failed，作业目录照删", async () => {
     const on = stage();
     rmSync(on.pdf, { recursive: true });
-    const input = on.input("a.docx");
-
-    const error = await failureOf(converterFor(on).convert(input));
-
-    expectBareKind(error, "failed", [input, on.cacheDir]);
-    expect(on.launches[0]?.child.exitCode).toBe(0);
-    expect(dirsIn(on.work)).toEqual([]);
+    expectBareKind(await failureOf(converterFor(on).convert(on.input("a.docx"))), "failed", [
+      on.cacheDir,
+    ]);
+    expect(on.sidecar.jobs()[0]?.answer).toBe("done");
+    expect(readdirSync(on.jobs)).toEqual([]);
     expect(existsSync(on.pdf)).toBe(false);
   });
-});
-
-describe("转换器调用契约：超时与中止（同 uid 模式）", { timeout: SLOW_TEST_MS }, () => {
-  it("超时：timeout，假进程及其子进程都已不存在，作业目录被删", async () => {
-    const on = stage();
-    const kill = vi.spyOn(process, "kill");
-    const attempt = failureOf(
-      converterFor(on, { timeoutMs: 2_000 }).convert(on.input("a@spawn-sleep.docx")),
-    );
-
-    const record = await waitForRecord(on, true);
-    const error = await attempt;
-
-    expectBareKind(error, "timeout", [on.cacheDir]);
-    expect(on.launches).toHaveLength(1);
-    const [launch] = on.launches;
-    expect(launch?.child.pid).toBe(record.pid);
-    expect(launch?.child.signalCode).toBe("SIGKILL");
-    // 信号发给了进程组（负的 pid），恰一次。
-    expect(signalsSent(kill)).toEqual([[-record.pid, "SIGKILL"]]);
-    expect(record.childPid).toEqual(expect.any(Number));
-    await expectGone([record.pid, record.childPid]);
-    expectNothingLeft(on);
-  });
-
-  it("转换进行中中止 signal：aborted，假进程及其子进程都已不存在，作业目录被删", async () => {
-    const on = stage();
-    const abort = new AbortController();
-    const attempt = failureOf(
-      converterFor(on).convert(on.input("a@spawn-sleep.docx"), abort.signal),
-    );
-
-    const record = await waitForRecord(on, true);
-    const job = jobOf(on.launches[0]);
-    expect(lstatSync(job).mode & 0o7777).toBe(0o2770);
-    abort.abort();
-    const error = await attempt;
-
-    expectBareKind(error, "aborted", [on.cacheDir]);
-    expect(on.launches[0]?.child.signalCode).toBe("SIGKILL");
-    await expectGone([record.pid, record.childPid]);
-    expect(existsSync(job)).toBe(false);
-    expectNothingLeft(on);
-  });
-
-  it("转换进行中 close()：aborted，进程都已不存在；其后的 convert 立即 aborted 且不启动进程", async () => {
-    const on = stage();
-    const converter = converterFor(on);
-    const attempt = failureOf(converter.convert(on.input("a@spawn-sleep.docx")));
-    const record = await waitForRecord(on, true);
-
-    await converter.close();
-
-    // close() 落定时被启动的那个进程已经退出。
-    expect(on.launches[0]?.child.signalCode).toBe("SIGKILL");
-    expectBareKind(await attempt, "aborted", [on.cacheDir]);
-    await expectGone([record.pid, record.childPid]);
-    expectNothingLeft(on);
-
-    expectBareKind(await failureOf(converter.convert(on.input("b.docx"))), "aborted", []);
-    await converter.close();
-    expect(on.launches).toHaveLength(1);
-    expectNothingLeft(on);
-  });
-
-  it("调用时 signal 已中止：aborted，不启动进程，不建作业目录", async () => {
-    const on = stage();
-
-    const error = await failureOf(
-      converterFor(on).convert(on.input("a.docx"), AbortSignal.abort()),
-    );
-
-    expectBareKind(error, "aborted", [on.cacheDir]);
-    expect(on.launches).toEqual([]);
-    expect(readdirSync(on.work)).toEqual([]);
-  });
-
-  it("转换成功之后再中止 signal 不改变结果", async () => {
-    const on = stage();
-    const abort = new AbortController();
-
-    const result = await converterFor(on).convert(on.input("a.docx"), abort.signal);
-    abort.abort();
-
-    expect(readFileSync(result, "utf8")).toBe(PDF);
-  });
-});
-
-describe("转换器调用契约：OMP_USER 模式下终止的是 sudo", { timeout: SLOW_TEST_MS }, () => {
-  it("超时：timeout，假 sudo 被 SIGKILL 结束且恰被启动一次，没有别的信号与进程", async () => {
-    const on = stage();
-    useFakeSudo(on);
-    const kill = vi.spyOn(process, "kill");
-
-    const error = await failureOf(
-      converterFor(on, { ompUser: "omp", timeoutMs: 200 }).convert(on.input("a@sleep.docx")),
-    );
-
-    expectBareKind(error, "timeout", [on.cacheDir]);
-    expect(on.launches.map(({ command }) => command)).toEqual(["sudo"]);
-    const child = on.launches[0]?.child;
-    expect(on.launches[0]?.options.detached).toBe(false);
-    expect(child?.signalCode).toBe("SIGKILL");
-    // 没有对任何进程组或别的 pid 发信号：只有 child.kill。
-    expect(signalsSent(kill)).toEqual([]);
-    await expectGone([child?.pid]);
-  });
-
-  it("close()：aborted，假 sudo 被 SIGKILL 结束且恰被启动一次", async () => {
-    const on = stage();
-    useFakeSudo(on);
-    const kill = vi.spyOn(process, "kill");
-    const converter = converterFor(on, { ompUser: "omp" });
-    const attempt = failureOf(converter.convert(on.input("a@sleep.docx")));
-    const record = await waitForRecord(on);
-
-    await converter.close();
-
-    const child = on.launches[0]?.child;
-    expect(child?.pid).toBe(record.pid);
-    expect(child?.signalCode).toBe("SIGKILL");
-    expectBareKind(await attempt, "aborted", [on.cacheDir]);
-    expect(on.launches.map(({ command }) => command)).toEqual(["sudo"]);
-    expect(signalsSent(kill)).toEqual([]);
-    await expectGone([record.pid]);
-  });
-});
-
-describe("转换器调用契约：只接受绝对路径", () => {
-  it.each([["-env:UserInstallation=file:///x.docx"], ["--accept=x.docx"], ["ws/a.docx"]])(
-    "absInput 为 %s：failed，不启动进程，不建作业目录",
-    async (input) => {
-      const on = stage();
-
-      const error = await failureOf(converterFor(on).convert(input));
-
-      expectBareKind(error, "failed", [input, on.cacheDir]);
-      expect(on.launches).toEqual([]);
-      expect(readdirSync(on.work)).toEqual([]);
-    },
-  );
 
   it.each([
-    ["cacheDir", { officeBin: FAKE, cacheDir: "var/preview-cache" }],
-    ["cacheDir（未配置 officeBin 时同样）", { cacheDir: "var/preview-cache" }],
-    ["officeBin（裸名）", { officeBin: "soffice", cacheDir: tmpdir() }],
-    ["officeBin（./ 开头）", { officeBin: "./soffice", cacheDir: tmpdir() }],
-  ])("%s 不是绝对路径：构造即抛错，错误不含该值，不启动进程", (_which, paths) => {
-    const on = stage();
-    const construct = (): Converter =>
-      createOfficeConverter({ ...paths, timeoutMs: LONG_TIMEOUT_MS, spawn: on.spawn });
-
-    expect(construct).toThrow(new Error("cacheDir and officeBin must be absolute paths"));
-    expect(on.launches).toEqual([]);
+    ["cacheDir", { spoolDir: tmpdir(), cacheDir: "var/preview-cache" }],
+    ["cacheDir（未提供 spoolDir 时同样）", { cacheDir: "var/preview-cache" }],
+    ["spoolDir", { spoolDir: "spool", cacheDir: tmpdir() }],
+    ["spoolDir（./ 开头）", { spoolDir: "./spool", cacheDir: tmpdir() }],
+  ])("%s 不是绝对路径：构造即抛固定 message 的普通错误", (_which, paths) => {
+    expect(() => createOfficeConverter({ ...paths, timeoutMs: LONG_TIMEOUT_MS })).toThrow(
+      new Error("cacheDir and spoolDir must be absolute paths"),
+    );
   });
 });
 
-describe("转换器调用契约：未配置", () => {
-  it("不提供 officeBin：available 为 false，convert 以 unavailable 失败，不启动进程，work 下没有新建目录", async () => {
+describe("转换 sidecar 的健康与 fail-closed：运行期心跳的边沿触发", () => {
+  it("新鲜 → 成功；不新鲜 → 三次 unavailable、零作业、log 恰一条；恢复 → 成功；再不新鲜 → 恰再一条", async () => {
     const on = stage();
-    const converter = converterFor(on, { officeBin: null });
+    const records: unknown[] = [];
+    const converter = converterFor(on, { log: (record) => records.push(record) });
 
-    expect(converter.available).toBe(false);
-    const error = await failureOf(converter.convert(on.input("a.docx")));
+    expect(readFileSync(await converter.convert(on.input("a.docx")), "utf8")).toBe(PDF);
+    on.sidecar.heartbeat("stale");
+    for (const name of ["b.docx", "c.docx", "d.docx"]) {
+      expectBareKind(await failureOf(converter.convert(on.input(name))), "unavailable", []);
+    }
+    expect(on.sidecar.jobs()).toHaveLength(1);
+    expect(readdirSync(on.jobs)).toEqual([]);
+    expect(records).toEqual([UNAVAILABLE_RECORD]);
 
-    expectBareKind(error, "unavailable", [on.cacheDir]);
-    expect(on.launches).toEqual([]);
-    expect(readdirSync(on.work)).toEqual([]);
-    await converter.close();
+    on.sidecar.heartbeat("fresh");
+    expect(readFileSync(await converter.convert(on.input("e.docx")), "utf8")).toBe(PDF);
+    expect(records).toEqual([UNAVAILABLE_RECORD]);
+    on.sidecar.heartbeat("stale");
+    expectBareKind(await failureOf(converter.convert(on.input("f.docx"))), "unavailable", []);
+    expect(records).toEqual([UNAVAILABLE_RECORD, UNAVAILABLE_RECORD]);
+    expect(Object.keys(records[1] as object)).toEqual(["event"]);
+  });
+
+  it("log 抛出：吞掉，结果仍是 unavailable；heartbeat 缺席同样不新鲜", async () => {
+    const on = stage();
+    rmSync(join(on.spool, "heartbeat"));
+    on.sidecar.heartbeat("none");
+    const converter = converterFor(on, {
+      log: () => {
+        throw new Error("sink unavailable");
+      },
+    });
+
+    expectBareKind(await failureOf(converter.convert(on.input("a.docx"))), "unavailable", []);
+    expect(on.sidecar.jobs()).toEqual([]);
   });
 });
 
 describe("真实转换的人工验证：自动化测试不需要 LibreOffice", () => {
-  it("两种模式各转换一次，启动过的可执行文件没有一个名为 soffice 或 libreoffice", async () => {
+  it("本文件经 child_process 启动过的命令里没有 soffice、libreoffice、docker——转换器一个都没启动；计数器本身是活的", async () => {
     const on = stage();
     await converterFor(on).convert(on.input("a.pptx"));
-    useFakeSudo(on);
-    await converterFor(on, { ompUser: "omp" }).convert(on.input("b.pptx"));
+    await failureOf(converterFor(on).convert(on.input("b@fifo.pptx")));
+    expect(launched).toEqual([]);
 
-    expect(on.launches.map(({ command }) => command)).toEqual([FAKE, "sudo"]);
-    expect(everyCommand.length).toBeGreaterThanOrEqual(2);
-    for (const command of everyCommand) {
-      expect(["soffice", "libreoffice"]).not.toContain(basename(command));
+    childProcess.spawnSync(process.execPath, ["--version"]);
+    expect(launched).toEqual([process.execPath]);
+    for (const command of launched) {
+      expect(["soffice", "libreoffice", "docker"]).not.toContain(basename(command));
     }
-    // sudo 之后真正被点名的可执行文件同样不是它们。
-    expect(basename(on.launches[1]?.args[9] ?? "")).toBe("fake-soffice.mjs");
   });
 });
