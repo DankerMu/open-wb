@@ -395,3 +395,41 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 2. 先卸载：对每个挂载点 `fusermount3 -u <挂载点>`（不是 FUSE 的挂载用对应的卸载命令，如 `umount`），确认 `/proc/self/mountinfo` 里已没有它。
 3. 再以**应用用户**的身份递归删除残骸目录（`<OMP_STATE_DIR>/trash` 是 `0700`；残骸的顶层 `trash/<随机名>` 或 `tmp-<id>` 由应用用户建出，omp 用户按默认 mode 写出的条目在双方 umask `007` 下组可写，omp 一侧由 sudoers 强制——读代码推出）。umask 只收窄、不放宽：omp 用户以显式 mode 建出的条目（如 `mkdtemp` 的 `0700`；同类现象 ADR-0010 `:267` 实测）应用用户删不掉，遇 `EACCES` 改以 root 删除（读代码推出）。卸载之后递归删除一次即成功（测试主机实测，design D7 探针 (4)；探针容器以 root 运行，未区分执行删除的 uid）。不需要停服务。
 4. 不要在卸载之前删：挂载还在时递归删除可能进入挂载、删掉挂载源里的数据（`rm -rf` 不带 `--one-file-system` 时会进入，读 `rm(1)` 手册推出；Node 的 `rmSync` 测试主机实测会进入）。
+
+### 9.7 办公文档转换的 sidecar 容器（#1350，change `office-convert-sandbox`）
+
+决定、spool 协议、证据与测试主机实测结果表的权威是 [ADR-0010](../adr/0010-dedicated-omp-uid.md) 的「2026-10-17 补充」，运维细节在 [ADR-0014](../adr/0014-isolated-preview-origin.md)「转换 sidecar 与 `OFFICE_SPOOL_DIR`」，这里只写部署要知道的。
+
+**前提**：办公文档（docx / xlsx / pptx）预览要求主机上有 Docker（含 compose 插件），并跑着 `converter/compose.yml` 的 `converter` 服务——一个 `network_mode: none`、只读根、只挂 spool 卷、与 app 同 uid 的转换容器；app 自己不运行 LibreOffice，app 主机也不需要装它。没有这个容器时，配了 `OFFICE_SPOOL_DIR` 的服务照常启动，办公文档预览 fail-closed（503 固定页 + 标准错误一行，见下），其余功能不受影响。不配 `OFFICE_SPOOL_DIR` 即办公文档预览关闭。镜像由部署方按 `converter/Dockerfile` 自建（`up -d --build` 现场构建；不发布、不引用镜像仓库）。
+
+**两种部署形态跑的是同一个容器**：
+
+1. app 裸机：
+   1. 建 spool 目录：属应用用户、`0700`（app 不建、不校正它）。其下的 `jobs/` 由 app 在启动预检通过后建出（`0700`），部署方只建 spool 根。
+   2. 同一主机上 `WORKBUDDY_UID=$(id -u <应用用户>) WORKBUDDY_GID=$(id -g <应用用户>) OFFICE_SPOOL_DIR=<该路径> docker compose -f converter/compose.yml up -d --build`。三个变量缺一 compose 即拒绝启动；`WORKBUDDY_UID/GID` 必须是应用用户的值——sidecar 以同一数值 uid/gid 运行，spool 里的一切才属应用用户。
+   3. app 的环境去掉 `OFFICE_BIN`、加 `OFFICE_SPOOL_DIR=<同一路径>`，重启 app；看标准错误里有没有 `office_convert_sidecar_unavailable`。
+2. app 容器：仓库**没有** app 的 Dockerfile，也不定义 app 的 compose 服务，app 镜像由部署方自备。把 `converter/compose.yml` `include` 进 app 自己的 compose，app 服务加 `depends_on: converter: condition: service_healthy`（sidecar 的 `healthcheck` 看 `heartbeat` 年龄），两个服务挂同一个 bind mount（不用命名卷：命名卷的根属 root，预检会拒），app 服务的 `user:` 与 `converter` 相同（`include` 写法本身未实测：S2b 的形态 B 以 `docker run --network host` 加同样的卷与 `--user` 代替，见 ADR-0010「2026-10-17 补充」结果表；compose 写法读手册推出）。
+3. `OMP_USER` 部署另外删掉两行办公文档 sudoers（`… setpriv --pdeathsig KILL -- <OFFICE_BIN> *` 与 `… /usr/bin/find <PREVIEW_CACHE_DIR>/work -mindepth 1 -delete`）；omp 的规则与 `Defaults>omp umask=0007` 不动。`OMP_USER` 不影响办公文档转换。
+
+`CONVERTER_CONCURRENCY`（compose 里取 `${OFFICE_CONVERT_CONCURRENCY:-2}`）须不小于 app 的 `OFFICE_CONVERT_CONCURRENCY`：给两边同一个 `OFFICE_CONVERT_CONCURRENCY` 即相等；小于时作业在 spool 里排队，排得久的会以 504 结束（读代码推出）。
+
+**升级提示**（owner B8）：`OFFICE_BIN` 已退役，仍被设置时 app 启动失败，标准错误只有一行 `{"event":"server_start_failed","reason":"config"}`，**不点名**该键。升级后启动失败、`reason` 为 `config` 时先查 `OFFICE_BIN` 是否已去掉。旧的 `<PREVIEW_CACHE_DIR>/work` 不再使用，可手工删除。
+
+**用户看到的 fail-closed**：
+
+| 情形 | 令牌的 `officeAvailable` | 未缓存的文档 | 已缓存的文档 | 标准错误 |
+|---|---|---|---|---|
+| 启动预检失败（spool 不在、属主或 mode 不对、`heartbeat` 缺席或 5 秒内未新鲜、`heartbeat` 属主不对） | `false`，直到重启 app | 503「服务器未启用文档转换，请下载后查看」 | 同样 503 | `server_started` 之前恰一行 `{"event":"office_convert_sidecar_unavailable"}` |
+| 运行期 sidecar 宕机（`heartbeat` 超过 10 秒没更新） | 仍为 `true`：它是启动时的快照，运行期不翻转 | 503，同一句 | 照常 200 | 一次宕机至多一行同名记录，恢复后再宕再一行 |
+| sidecar 死在一次转换中途 | 不变 | 这一次 504「文档转换超时，请下载后查看」，下一次才 503 | 不受影响 | 下一次请求时同上一行 |
+
+前两行的状态码、令牌与行数是测试主机实测（2026-10-18，两种部署形态与两种 uid 模式各一次——容器形态的 app 以 `docker run` 起、非 compose `include`，ADR-0010 结果表 d0–d4）；第三行读代码推出。运行期宕机在 sidecar 恢复（`heartbeat` 重新新鲜）后自愈，不必重启 app；启动时那一行意味着这次进程里办公文档预览一直关着，修好 sidecar 之后要重启 app。
+
+**排障 `office_convert_sidecar_unavailable`**：
+
+1. `docker compose -f converter/compose.yml ps`：`converter` 在跑且是 healthy。不在跑先看 `docker compose -f converter/compose.yml logs converter`——sidecar 配置不对或 spool 写不了时写一行 `{"event":"fatal","reason":…}` 后以 1 退出（`restart: unless-stopped` 会反复重启它）。
+2. `<OFFICE_SPOOL_DIR>/heartbeat`：修改时间在 10 秒内（sidecar 每 2 秒 touch 一次）、属主是应用用户。属主不对说明 `WORKBUDDY_UID/GID` 没有对齐。
+3. spool 根：属应用用户、mode `0700`；带组或其它写位即被预检拒绝，app 不替你 chmod。
+4. `CONVERTER_*` 与 compose 变量：`WORKBUDDY_UID` / `WORKBUDDY_GID` 等于应用用户的 `id -u` / `id -g`，`OFFICE_SPOOL_DIR` 与 app 的同一路径，`CONVERTER_CONCURRENCY` 不小于 `OFFICE_CONVERT_CONCURRENCY`。
+
+已知残余（证据见 ADR-0010「2026-10-17 补充」）：同一 sidecar 内并发作业共享 fs / ipc / uid，作业间隔离只靠 128 位随机作业 id；LibreOffice 代码执行漏洞下另一在途作业的输入 / 输出可读可伪造（读代码推出，未测）。另外，取消之后偶有一个作业目录留在 `<OFFICE_SPOOL_DIR>/jobs/` 下，下次 app 启动时被清掉（测试主机实测 26 次终止里 1 次）。

@@ -72,7 +72,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 
 - 每次办公文档转换都在一个 app 进程之外、**没有网络、只看得见 spool 卷**的转换容器（sidecar）里运行：`SANDBOX_ROOT`、工作空间路径、状态目录、数据库对它不存在；app 与 sidecar 之间只经 spool 目录交接**字节**与一个小 JSON，不经 docker socket、不给任何容器特权。同一 sidecar 内并发的作业彼此可见（共享 fs / ipc / uid）——这是登记的残余（D2 第 2 条、D12、Risks），不是目标。
 - 裸机与容器部署同一形态：都跑这个 sidecar 容器（Docker 成为办公文档预览的部署前提）。
-- sidecar 不在 / 不健康就不转换：启动预检与每次转换前的心跳检查失败 → `/o/` 答既有 503 固定页、令牌 `officeAvailable=false`、stderr 一行 `office_convert_sidecar_unavailable`；绝不回退为 app 进程内的 `soffice`。
+- sidecar 不在 / 不健康就不转换：启动预检与每次转换前的心跳检查失败 → `/o/` 答既有 503 固定页、令牌 `officeAvailable=false`（启动预检失败的形态；运行期心跳失败时令牌是启动快照、不翻转——D5、Risks，S2b 实测 (d) ①）、stderr 一行 `office_convert_sidecar_unavailable`；绝不回退为 app 进程内的 `soffice`。
 - `sudo → setpriv → soffice` 链与两行办公文档 sudoers 规则从转换路径上**退役**；`OMP_USER` 不再影响办公文档转换；D-25 残余（`soffice.bin` 存活）预期不再出现——sidecar 里只有同 uid 杀组一种终止（读代码推出），由 D11 (c) 在测试主机实测后按观察写进 ADR。
 - 终止（超时、断开、关停）结束 sidecar 里本次作业的全部进程。
 - 单元与编译入口测试不需要 Docker、LibreOffice：app 侧对着进程内的假 sidecar（临时 spool 目录的应答器），sidecar 脚本对着既有的假 `soffice`；真实端到端（含 http 外链 0 请求对照）在 CI 的新 job 或测试主机做一次。
@@ -106,6 +106,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 | B8 | 旧配置 `OFFICE_BIN` 仍被设置 → 启动失败、明确报错。**细节（owner 同日补裁）**：stderr **不点名**退役键——沿用 hss 既有一行 `{"event":"server_start_failed","reason":"config"}`，不新增 `reason` 取值；键名只在抛出的错误 message `OFFICE_BIN is retired; configure OFFICE_SPOOL_DIR` 与升级文档（Migration Plan、ADR-0014、system.md 9.7）里。原句「stderr 一行指出该键已退役」作废 | 2026-10-17 | D6；http-service-skeleton「服务启动与装配」MODIFIED；office-preview「转换 sidecar 的健康与 fail-closed」编译入口场景；Migration Plan |
 | B9 | 镜像交付：仓库给 `converter/Dockerfile` + compose 片段，部署方自建；本 change 不引入镜像发布流水线；CI 只在 job 里现场构建一次做实测 | 2026-10-17 | Non-Goals、D7、D10；office-preview「转换 sidecar 实现与镜像」；Not yet specified（版本钉） |
 | B10 | **批准 S2a**：新增 CI job `office-sidecar`（`runs-on: ubuntu-24.04`，job 内现场构建 converter 镜像，`--network none` 跑一次真实转换 + http 外链对照，并入 `all-checks-passed`）；「未批」分支与「CI 不 lint `converter/`」的盲区登记不再需要 | 2026-10-17 | D10、通用纪律（CI 文件只在 S2a 改）、Risks、Migration Plan；tasks S2a；office-preview「真实转换的人工验证」场景「CI 端到端」；omp-uid-isolation MODIFIED |
+| B13 | **作业目录删除竞态的残留：放宽规格、登记为残余**（S2b 实测 26 次终止里 1 次，`clearWork` 下次启动清掉）——office-preview「终止结束作业的全部进程」两个场景的 THEN 加「删不掉的留到下一次启动清空」；不改代码；ADR-0014 残余表登记一行 | 2026-10-18 | D11「S2b 结果」、Risks；specs office-preview 该场景；ADR-0010 补充、ADR-0014 残余表 |
 | B12 | **#1502 并入 S2a**：`uid-isolation` job 的 `runs-on` 固定为 `ubuntu-24.04`（与 `office-sidecar` 同一 runner 标签，harness 合同同样钉住），S2a 的 PR 写 `Closes #1502` | 2026-10-17 | D10；verification-harness delta；tasks 2a.3/2a.4 |
 
 编排方默认（sidecar 协议；本设计核对后的采用情况写在各 D 里）：spool 目录 `OFFICE_SPOOL_DIR`（采用，D3）；每作业 `jobs/<id>/`、输入**字节**从已打开的 fd 复制、`request.json`、原子 rename 的标记（采用；标记形状见 D3）；sidecar 轮询 ≤ 200 ms（采用 200 ms 固定；不用 inotify，D7）；逐作业独立 `UserInstallation`（采用）；作业内自己的超时与 kill（采用，D7）；app 等 `done` / `failed` / 超时、取 PDF 进既有缓存、删作业目录（采用，D4）；健康 = `heartbeat` 文件 mtime 新鲜 < 10 s（采用；启动预检加 5 s 有界等待，D5）；sidecar 代码 = 仓库内小 Node 脚本 `converter/`、镜像 `node:24-bookworm-slim` + LibreOffice 三件 nogui + fonts、非 root、`--read-only`、只挂 spool（采用，D7；uid 由部署方以 `user:` 对齐，D6）；app 侧用临时目录假 sidecar、sidecar 脚本用 `fake-soffice.mjs`（采用，D8）；真实端到端在 CI 新 job（`ubuntu-24.04`）——CI 改动，owner 已于 2026-10-17 批准（B10；采用，D10）。与默认不同的：spool 目录 `0700` + 同一数值 uid/gid，不用 `2770` + 共享组（D6，理由在那里）。
@@ -227,6 +228,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - (b) 经文件页与 `/o/`：真 docx 带 http 图片（2026-10-12 的那份）→ 监听器 0 次、PDF 无图；docx / pptx 带 `file://` 外部图 → PDF 无图；docx / xlsx / pptx 各一份普通文档（含中文正文）→ 可翻页、中文可辨认（CJK 字体）；对照：同一 docx 以同一镜像 `--network host --entrypoint /usr/bin/soffice -e HOME=/job` 直接转 → 监听器命中、PDF 含图。
 - (b′) 「两种 uid 模式转换链相同」的四项核对（全部实测）：① PDF 等价——两种模式转同一 docx，`pdfinfo` 页数相同、`pdftotext -layout` 输出 `diff` 为空、`grep -a -c '/Subtype */Image'` 相同（LibreOffice 的 PDF 带 `CreationDate` 与随机文档 id，逐字节不可比）；② 属主——`stat -c %U` 看 `jobs/<id>/`（转换中抓）与 `pdf/<key>.pdf` 都是应用用户；③ 无 `sudo`——`pstree -p <app pid>` 与 `ps -o comm= --ppid <app pid>` 全程没有 `sudo`；④ `OMP_USER` 模式下 `ps -u <omp 用户> -o comm=` 没有 `soffice` / `soffice.bin`。
 - (c) 终止链：`OFFICE_CONVERT_TIMEOUT_MS=3000` 请求归档 D17 那种约 25 s 的文档 → 504 之后 1.5 s、5 s、30 s 三个时刻 `docker top <converter>` 与 `ps` 看作业目录相关进程；重复 5 次；记录 `jobs/` 是否为空。**另一次客户端断开**：缺省超时请求同一文档，2 s 后 `curl` 断开（`--max-time 2`），断开后同样三个时刻看进程（D2 第 4 条「目录消失即杀」的实测）。D-25 残余的 ADR 措辞按这 6 次观察写。
+  **S2b 实际参数（2026-10-18）**：测试主机上没有归档 D17 那份文档，改用 12000 段纯文本 docx（直接 `soffice` 实测 ≈6.6 s；300→12000 段耗时线性 1.8→6.6 s）配 `OFFICE_CONVERT_TIMEOUT_MS=3000`——504 后 +1.5 s 的检查仍有判别力（未被杀的 `soffice` 本会跑到 ≈6.6 s），+5 s / +30 s 只证明无存活；断开例按本条在缺省超时下做，+1.5 s（≈请求后 3.5 s）同样有判别力。另加同 uid 下 8 次探针（504 前 +1.0 s 看 `soffice`=1、作业目录属主；504 后 +0.5 / 2.5 s）。
 - (d) fail-closed（**每次 `stop` 之后等 ≥ 10 s 让 `heartbeat` 过期**——不等就还在新鲜窗口里；「新文档」每次都是一份未缓存的新文档；「已缓存文档」是 (a) 备好的同一份对照。缓存命中只在 `available=true` 时生效——`preview/app.ts:262-264` 在 `convert` 之前对 `!converter.available` 答 503、`office-cache.ts:159` 在不可用时绕过缓存——所以对照在运行期宕机与预检失败两种形态下的期望不同）。依次：
   0. 可用形态起步：`start converter`、等 `heartbeat` 新鲜、启动 app → 令牌 `officeAvailable=true`、stderr 无该行。
   1. app 在跑时 `stop converter` → ≥ 10 s → 已缓存文档 200（缓存命中、`available` 不变）；新文档 503 固定页、stderr 恰一行 `office_convert_sidecar_unavailable`；**同一次宕机里再请求第二份新文档 → 503、无新行**（边沿触发，不是每次 unavailable 一行）；令牌仍 `officeAvailable=true`（快照不翻转）。
@@ -236,6 +238,8 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - (e) 耗时：三个小文档各 3 次，与对照的直接 `soffice` 比；冷 / 热 profile 各记。
 - (f) 结果表（内核、Docker、镜像基底与 LibreOffice 版本、(b)–(e)、变异列：临时把 `network_mode` 改成 `host` 重跑 (b) 的 http 例 → 应命中（不用 `bridge`：容器内 `127.0.0.1` 打不到宿主监听器，且测试主机缺省 bridge 网络不可用）；临时把输入所在目录挂进 sidecar 并把外部图放进同目录重跑 `file://` 例 → 应有图；两条撤销）。宿主不留文件，被跟踪文本只称「测试主机」。
 - **两种结果**：(1) 全绿 → S3 按此写 ADR；D-25 残余在 ADR 改为「sidecar 下不再出现（测试主机实测 6 次：5 次超时 + 1 次断开，含 25 s 文档）」或按观察改写。(2) (b) 任一例有命中 / 有图、或 xlsx / pptx / 中文转不出 → **停下报告**（字体或包缺失是 D7 镜像配方的变更，回 design；不在实现 PR 里自行加包）；(d) 任一步的任一期望不成立 → S1b 缺陷，回 S1b。
+
+**S2b 结果（2026-10-18，测试主机；结果表全文在 #1507 的评论与 S3 PR 正文）**：取「两种结果」之 **(1) 全绿**——三列（形态 A 同 uid / 形态 A `OMP_USER` / 形态 B 同 uid）(b) 全部 0 命中、0 图、三格式中文可辨认，对照与两条变异均命中 / 有图；(b′) 四项核对相同（7 份 PDF 页数 / `pdftotext` / 图数三列相同；作业目录与 `pdf/` 属应用用户；进程树无 `sudo`；omp 用户无 `soffice`）；(c) 5 次超时 + 1 次断开 ×3 列 + 8 次探针，504 / 断开后 ≤ 1.5 s converter 内 `soffice` 为 0；(d) ⓪–④ 每项符合（含 ③ 已缓存文档 503、启动行在 `server_started` 之前）；(e) 经 `/o/` 0.92–1.12 s 对 对照冷容器 1.15–1.23 s。**终止路径的区分**（读 sidecar 日志）：(c) 里 app 的 3 s 时限与 `request.json` 的 `timeoutMs` 同值而竞争——26 次终止中 20 次是 sidecar 自身时限先到（日志 `timeout`），6 次是 app 的 `cancel` 先到（`cancelled`：c#4、c#5、探针 1 次、断开 3 次，断开例 ms≈2002），两条路径观察结果相同；D-25 残余的 ADR 措辞写「sidecar 下未再出现」时带这组数字，不写得更强。**观察到的残余**：A 同 uid c#4 之后 `jobs/` 残留 1 个目录直到下次 app 启动被 `clearWork` 清掉（登记在 Risks）。形态 B 的 app 容器以 `docker run --network host` 复用 sidecar 镜像（`--entrypoint node`）起，不是本条写的「临时 compose `include`」——容器参数相同，少一层 compose 文件；仓库仍无 app Dockerfile（Not yet specified）。(e) 没有「热 profile」一栏：每作业独立 `UserInstallation`，经 `/o/` 的每次都是冷 profile。
 
 **D12 B1 向量的登记（B1，T7）。** xlsx 外部工作簿、`WEBSERVICE()`、DDE、链接 OLE、`INCLUDETEXT` / `INCLUDEPICTURE`、odt 链接节、ods 外部引用：**未测，视为跟随**。sidecar 覆盖它们的方式是构造性的——要读的本地文件不在容器里（只有镜像根、`/tmp`、spool），要走的网络不存在（`network_mode: none`），DDE 的进程间通信在容器自己的 ipc 命名空间里——那里只有 sidecar 与其它在途作业的 `soffice`，没有 app、没有 omp——读代码 / 读 Docker 手册推出，不是实测；不写得比这更强，不为验证它们造文档（owner B1）。**与之并列登记的残余**：同一 sidecar 内并发作业共享 fs / ipc / uid，作业间隔离只靠 128 位随机作业 id；LibreOffice 代码执行漏洞下另一在途作业的输入 / 输出可读可伪造（读代码推出，未测；D2 第 2 条）。登记位置（同一句话四处一致）：Risks、ADR-0010 补充、ADR-0014 残余表、`app.ts` 头注释。
 
@@ -283,7 +287,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - **[spool 协议是新造的]** → 两侧实现对不上就是 `failed` / 超时。缓解：协议只有三个文件名、三个 JSON 键、六个原因码；单一真相写在 sidecar 头注释与规格；sidecar 测试与 app 侧测试用同一份假 `soffice` 字面量；CI e2e 走产品代码两端。
 - **[冷启动竞态]** → app 预检早于 sidecar 第一次心跳 → 每次开机 fail-closed。缓解：预检等 5 s + compose `depends_on: service_healthy`；编译入口测试钉住「2 s 后出现 → 可用」「无心跳 → `server_started` 落在 [5 s, 5 s + δ]」。
 - **[预检等待期间的信号]** → 新增的 ≤ 5 s `await` 是 `app` 阶段里信号可能落入的空档；处置与主 listen 之后同形（`signalReceived` 核对 → `releaseOwned` → 退出 0、零记录），等待不被打断所以退出时延有界。编译入口一例 + 变异钉住。
-- **[同一 sidecar 内并发作业互相可见]** → 共享 fs / ipc / uid，作业间只靠 128 位随机 id 隔离；LibreOffice 代码执行漏洞下另一在途作业的输入 / 输出可读可伪造（读代码推出，未测）。登记不缓解（Non-Goals）；ADR-0010 补充、ADR-0014 残余表与 `app.ts` 头注释同句（D12 四处）。
+- **[同一 sidecar 内并发作业互相可见]** → 同一 sidecar 内并发作业共享 fs / ipc / uid，作业间隔离只靠 128 位随机作业 id；LibreOffice 代码执行漏洞下另一在途作业的输入 / 输出可读可伪造（读代码推出，未测）。登记不缓解（Non-Goals）；ADR-0010 补充、ADR-0014 残余表与 `app.ts` 头注释同句（D12 四处）。
 - **[非 passwd uid 跑 LibreOffice 未测]** → D10 的 CI e2e 以 runner uid 实测；红即回 design（可能要 `nss_wrapper` 或镜像内建用户）。
 - **[CJK 字体 / xlsx / pptx 在镜像里未测]** → D11 (b)；红即停下，镜像配方回 design。
 - **[sidecar 死在作业中途表现为 504 而不是 503]** → 文档写明；下一次请求才 503。接受（否则 app 要在等待期间持续看心跳——多一个定时器换一次更准的状态码，不值）。
@@ -296,6 +300,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - **[`OFFICE_BIN` 被设置即启动失败]** → 升级时部署方必须改配置；Migration Plan 写明；比静默忽略安全。
 - **[`/o/` 输入侧换入残余收窄而不闭合]** → 只守末段（与 `/w/` 一致）；头注释与 ADR-0014 表按此写。
 - **[B1 向量未测]** → 登记「未测、视为跟随」，按构造覆盖（读手册推出）；不造文档（owner B1）。
+- **[超时取消后作业目录残留]**（S2b 实测 2026-10-18：26 次终止里 1 次（app 取消路径 6 次里的 1 次），A 同 uid c#4；该次 sidecar 日志为 `cancelled`）→ 残留到下次 app 启动由 `clearWork` 清掉（实测）。机制读代码推出：app `removeJob` 的 `rmSync` 与 sidecar 写 `failed.part` / `failed` 标记竞态，目录非空删不掉，`office.ts` 的 `removeJob` 注释已预言「删不掉的留给下一次启动」。残留只是输入副本与标记、无进程（探针 8 次无残留）。接受、不改代码；ADR-0014 残余表登记一行。
 - **[macOS 开发机没有 Docker Desktop 时]** → 配了 `OFFICE_SPOOL_DIR` 的服务 fail-closed；真实转换本来就只在 Linux 主机验证。接受；`make smoke` / `ui-walk` 不设 `OFFICE_SPOOL_DIR`。
 - **[轮询延迟 ≤ 300 ms]** → 相对转换时长可忽略。接受。
 
