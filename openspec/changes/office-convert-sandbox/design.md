@@ -273,8 +273,8 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 - **仍成立、不改**：preview-origin 其余；sandbox-core；omp-uid-isolation 其余四条；office-preview「办公文档预览路由」的五个场景与路由代码（只有 requirement 正文一句进 MODIFIED）。
 
 ## Risks / Trade-offs
-- **app 跟随 spool 中间分量**（S1b 评审登记，读代码推出）：`O_NOFOLLOW` 只管路径末段。被攻破的 sidecar（与 app 同 uid、spool 可写）可在写 `done` 之前把 `<job>/out` 换成指向 app 命名空间的符号链接，让 app 代读任意它能读的文件并当 PDF 交出；也可在启动清空的 `lstat` 与 `readdir` 之间把 `jobs` 换成链接让 app 删目标目录的子项。缓解：app 在打开输出前 `lstat` 作业目录与 `out/` 均须为非链接目录，清空只经 `O_NOFOLLOW|O_DIRECTORY` 打开的顶层描述符遍历——把确定性利用降为微秒级竞态；竞态本身登记为残余（根治需 `openat` 族，Node 无）。ADR-0014 残余表（S3）同句。
-- **假 sidecar 的 `fs.watch`**（S1b 实测，Linux 容器 Node 24）：Linux 上递归 `fs.watch` 是 JS 实现，作业目录在同一拍被删时子项事件不会发出；逐作业目录的非递归 inotify watch 能看到 `cancel`，macOS 则相反——夹具两者都挂。真 sidecar 不用 `fs.watch`，不受影响。
+- **app 跟随 spool 中间分量**（S1b 评审登记，读代码推出）：`O_NOFOLLOW` 只管路径末段。被攻破的 sidecar（与 app 同 uid、spool 可写）可在写 `done` 之前把 `<job>/out` 换成指向 app 命名空间的符号链接，让 app 代读任意它能读的文件并当 PDF 交出；也可在启动清空的 `lstat` 与 `readdir` 之间把 `jobs` 换成链接让 app 删目标目录的子项。同类写侧向量（S1b 第 2 轮复审）：`request.json.part` 若以跟随链接的 `w` 写入，sidecar 可在 `copyExact` 窗口内放链接让 app 截断任意可写文件；作业目录本身被换成链接时 `cancel` / `.part` 的写入也会落进目标目录。缓解：读侧打开输出前 `lstat` 作业目录与 `out/` 均须为非链接目录；写侧 `.part` 用 `wx`、写 `cancel` 与 `.part` 前 `lstat` 作业目录为非链接目录；清空前以 `O_NOFOLLOW|O_DIRECTORY` 打开 `jobs` 核对类型（Node 无 `openat` 族，之后仍按路径删除）。这些把确定性利用降为「核对与操作之间」的竞态窗口——窗口长度是一次系统调用间隔，不是零；竞态本身登记为残余。ADR-0014 残余表（S3）同句。
+- **假 sidecar 的 `fs.watch`**（S1b 实测，Linux 容器 Node 24）：Linux 上递归 `fs.watch` 是 JS 实现，作业目录在同一拍被删时子项事件不会发出；逐作业目录的非递归 inotify watch 能看到 `cancel`，macOS 则相反——夹具在 Linux 两者都挂、macOS 只挂递归（两者都挂时 macOS 偶发漏记，实测）。真 sidecar 不用 `fs.watch`，不受影响。
 - **`heartbeat` 属主检查未被单独钉住**（S1b 实测，2026-10-17）：`office-sidecar-health.ts` 的预检对 spool 根与 `heartbeat` 用同一个注入 uid，根属主检查先命中，删掉 `heartbeat` 属主分支后单元测试仍绿；分支本身保留（读代码推出：属主不符 → `available=false`）。要单独钉住需给测试注入两个 uid，本 change 不改接口；S2b (d) 的实测不覆盖它。
 
 - **[Docker 成为办公文档预览的前提]** → 没有 Docker 的主机办公文档预览不可用（fail-closed，其余功能不受影响）。owner B7 接受；system.md 写明。
@@ -373,7 +373,7 @@ owner 裁定见「owner 的裁定」表（grill ledger B1–B10）。本节记�
 | `server/src/server.ts` | 726 | ≤ 740（预检 + 信号核对 + `emit`；删 `stopWorkClear`、事件与过期注释） | S1b |
 | `server/src/preview/app.ts` | 330 | ≤ 330（只改注释：头注释 ① 段、`:10`、`:84-88`；净零或净减） | S3 |
 | `server/src/workspaces/regular-file.ts` | 68 | 不改 | — |
-| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 230（S1b 评审后由 220 放宽：Linux 需逐作业目录再挂一个非递归 `fs.watch`） | S1b |
+| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 250（S1b 两轮评审后由 220 放宽：Linux 逐作业目录非递归 `fs.watch` + `error` 监听 + `job-symlink` 标记） | S1b |
 | `server/test/office-converter.test.ts` | 795 | ≤ 700（重写） | S1b |
 | `server/test/office-sidecar-health.test.ts`（新） | — | ≤ 200 | S1b |
 | `server/test/office-converter-output.test.ts` | 189 | ≤ 200 | S1b |

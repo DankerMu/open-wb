@@ -403,6 +403,81 @@ describe("sidecar 转换契约：作业目录删不掉", () => {
   );
 });
 
+describe("sidecar 转换契约：作业目录或 request.json.part 被换成链接", { timeout: 15_000 }, () => {
+  /** 把作业目录换成指向 `<spool>/decoy-<id>`（空）的链接，原目录挪到 `<spool>/moved-<id>`。 */
+  function swapJob(on: Stage, job: string): { decoy: string; moved: string } {
+    const id = basename(job);
+    const [decoy, moved] = [join(on.spool, `decoy-${id}`), join(on.spool, `moved-${id}`)];
+    fs.renameSync(job, moved);
+    mkdirSync(decoy);
+    symlinkSync(decoy, job);
+    return { decoy, moved };
+  }
+
+  it("领取后作业目录被换成链接（目标内有 out/a.pdf）再 done：failed，链接目标里没有 cancel 与 request.json*", async () => {
+    const on = stage();
+
+    const error = await failureOf(converterFor(on).convert(on.input("a@job-symlink.docx")));
+
+    expectBareKind(error, "failed", [on.spool]);
+    const decoy = join(on.spool, `decoy-${on.sidecar.jobs()[0]?.id ?? ""}`);
+    expect(readdirSync(decoy).sort()).toEqual(["done", "out"]);
+    expectNothingLeft(on);
+  });
+
+  it("等待中作业目录被换成链接、随后超时：timeout，cancel 不写进链接目标（钩子辅助复现）", async () => {
+    const on = stage();
+    const attempt = failureOf(
+      converterFor(on, { timeoutMs: 1_500 }).convert(on.input("a@hang.docx")),
+    );
+    const { decoy, moved } = swapJob(on, (await claimed(on)).dir);
+
+    expectBareKind(await attempt, "timeout", [on.spool]);
+    expect(readdirSync(decoy)).toEqual([]);
+    expect(readdirSync(moved)).not.toContain("cancel");
+  });
+
+  it("写 request.json.part 之前作业目录被换成链接：failed，哪边都没有 request.json*（钩子辅助复现）", async () => {
+    const on = stage();
+    const realLstat = fs.lstatSync;
+    let swapped: { decoy: string; moved: string } | undefined;
+    vi.spyOn(fs, "lstatSync").mockImplementation(((path: string, options?: fs.StatSyncOptions) => {
+      if (swapped === undefined && dirname(String(path)) === on.jobs) {
+        swapped = swapJob(on, String(path));
+      }
+      return realLstat(path, options);
+    }) as typeof fs.lstatSync);
+    syncBuiltinESMExports();
+
+    const error = await failureOf(converterFor(on).convert(on.input("a.docx")));
+
+    expectBareKind(error, "failed", [on.spool]);
+    expect(readdirSync(swapped?.decoy ?? "")).toEqual([]);
+    expect(readdirSync(swapped?.moved ?? "")).toEqual(["in"]);
+    expect(on.sidecar.jobs()[0]?.request).toBeUndefined();
+  });
+
+  it("request.json.part 已是指向 app 可写文件的链接：failed，该文件的字节不变（钩子辅助复现）", async () => {
+    const on = stage();
+    const sentinel = join(on.root, "app-writable.txt");
+    writeFileSync(sentinel, "sentinel bytes");
+    const realWrite = fs.writeFileSync;
+    vi.spyOn(fs, "writeFileSync").mockImplementation(((...args: Parameters<typeof realWrite>) => {
+      if (String(args[0]).endsWith("request.json.part")) {
+        symlinkSync(sentinel, String(args[0]));
+      }
+      return realWrite(...args);
+    }) as typeof fs.writeFileSync);
+    syncBuiltinESMExports();
+
+    const error = await failureOf(converterFor(on).convert(on.input("a.docx")));
+
+    expectBareKind(error, "failed", [on.spool, sentinel]);
+    expect(readFileSync(sentinel, "utf8")).toBe("sentinel bytes");
+    expectNothingLeft(on);
+  });
+});
+
 describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeout: 15_000 }, () => {
   it("timeoutMs 200、假 sidecar 不写标记：timeout，假 sidecar 记录到 cancel，作业目录被删", async () => {
     const on = stage();

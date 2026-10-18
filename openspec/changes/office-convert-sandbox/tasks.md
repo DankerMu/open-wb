@@ -50,7 +50,7 @@
 | `server/src/preview-config.ts` | 153 | ≤ 165 | S1b |
 | `server/src/server.ts` | 726 | ≤ 740（预检 `await` + 信号核对 + `emit`；删 `stopWorkClear`、`preview_work_clear_failed` 与五处过期注释） | S1b |
 | `server/src/preview/app.ts` | 330 | ≤ 330（只改头注释与 `:10`、`:84-88` 两处注释，净零或净减） | S3 |
-| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 230（评审后放宽） | S1b |
+| `server/test/support/fake-sidecar.ts`（新） | — | ≤ 250（评审后放宽） | S1b |
 | `server/test/office-converter.test.ts` | 795 | ≤ 700（重写） | S1b |
 | `server/test/office-sidecar-health.test.ts`（新） | — | ≤ 200 | S1b |
 | `server/test/office-converter-output.test.ts` | 189 | ≤ 200 | S1b |

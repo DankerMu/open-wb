@@ -5,11 +5,11 @@
  * `converter/sidecar.mjs` 头注释），等它写回标记，再把它写出的 PDF 复制成本进程自己的新文件
  * `<cacheDir>/pdf/<随机名>.pdf`，最后删掉作业目录。
  *
- * 作业：`jobs/<32 个十六进制字符>/`（`0700`）→ `in/<basename>`（输入经 `openRegularFile` 打开——末段
- * `O_NOFOLLOW`、`fstat` 判普通文件——从那个描述符恰复制 `size` 字节，`wx`、`0600`）→ `request.json`
- * （恰 `version`、`input`、`timeoutMs` 三键，先写 `.part` 再 `rename`）→ 每 `pollMs` 看 `done` /
- * `failed`。超时、调用方中止与 `close()` 都写 `cancel`（sidecar 看到它或看到目录已不在都杀整组）。
- * app 一侧的任何路径都不进 spool：输入只以 basename 出现，`request.json` 里没有路径字段。
+ * 作业：`jobs/<32 hex>/`（`0700`）→ `in/<basename>`（`openRegularFile` 打开，从那个描述符恰复制 `size`
+ * 字节，`wx`、`0600`）→ `request.json`（恰三键，先以 `wx` 写 `.part` 再 `rename`）→ 每 `pollMs` 看 `done`
+ * / `failed`。超时、中止与 `close()` 都写 `cancel`（sidecar 看到它或目录已不在都杀整组）。写 `cancel` 与
+ * `.part` 之前作业目录先经 `realDir` 核对不是链接；核对与写入之间的窗口是一次系统调用间隔，不是零（读
+ * 代码推出）。app 一侧的任何路径都不进 spool：输入只以 basename 出现，`request.json` 里没有路径字段。
  *
  * 不再有提权与杀进程：`OMP_USER` 不影响这里的任何一步，两种 uid 模式下对 spool 做的事完全相同。
  * 旧链的 D-25 残余（终止之后 `soffice.bin` 存活）在 sidecar 里预期不再出现——那里只有同 uid 杀进程组
@@ -124,20 +124,17 @@ async function copyExact(
 }
 
 /**
- * 成功判定与复制用同一个 fd：`O_RDONLY|O_NOFOLLOW|O_NONBLOCK` 打开 `out/<去最后一个扩展名>.pdf`
- * （符号链接即失败；命名管道的 open 立即返回，随后被 `fstat` 拒）、`fstat` 为大小大于 0、不超过
- * 上限的普通文件，再从这个 fd 恰复制 `size` 字节：超过上限的一个字节都不读，此后追加的不读。
- * 任何一步不成立都返回 `null`。`O_NOFOLLOW` 只管末段，所以打开之前先 `lstat` 作业目录与 `out/`
- * 都是目录（不是链接）；这之后到 `open` 之间同 uid 的 sidecar 仍可换入，是登记的竞态残余（读代码推出）。
+ * 成功判定与复制用同一个 fd：`O_RDONLY|O_NOFOLLOW|O_NONBLOCK` 打开 `out/<去最后一个扩展名>.pdf`（符号
+ * 链接即失败；命名管道的 open 立即返回，随后被 `fstat` 拒）、`fstat` 为大小大于 0、不超过上限的普通
+ * 文件，再从这个 fd 恰复制 `size` 字节：超过上限的一个字节都不读，此后追加的不读；任何一步不成立都返回
+ * `null`。`O_NOFOLLOW` 只管末段，作业目录与 `out/` 先经 `realDir` 核对；到 `open` 之间的换入是竞态残余。
  */
 async function collectOutput(job: string, name: string, pdfDir: string): Promise<string | null> {
   const produced = join(job, "out", `${parse(name).name}.pdf`);
   const { O_RDONLY, O_NOFOLLOW, O_NONBLOCK } = constants;
   let source: Awaited<ReturnType<typeof open>>;
   try {
-    if (![job, join(job, "out")].every((dir) => lstatSync(dir).isDirectory())) {
-      return null;
-    }
+    realDir(join(realDir(job), "out"));
     source = await open(produced, O_RDONLY | O_NOFOLLOW | O_NONBLOCK);
   } catch {
     return null;
@@ -157,6 +154,14 @@ async function collectOutput(job: string, name: string, pdfDir: string): Promise
   } finally {
     await source.close().catch(() => undefined);
   }
+}
+
+/** `lstat` 为目录（非链接）才交回原路径，否则抛：作业目录或 `out/` 被换成链接时 app 的读写不跟随进别处。 */
+function realDir(path: string): string {
+  if (!lstatSync(path).isDirectory()) {
+    throw new Error("not a directory");
+  }
+  return path;
 }
 
 /** 删除失败不改变结果：sidecar 与本进程同 uid，删不掉的留给下一次启动对 `jobs/` 的清空。 */
@@ -219,9 +224,9 @@ export function createOfficeConverter(options: OfficeConverterOptions): OfficeCo
       if (reason === undefined) {
         reason = why;
         try {
-          writeFileSync(join(job, "cancel"), "", { flag: "wx" });
+          writeFileSync(join(realDir(job), "cancel"), "", { flag: "wx" });
         } catch {
-          // 已经在（sidecar 只认它出现），或作业目录已不在。
+          // 已经在（sidecar 只认它出现）、作业目录已不在或被换成了链接。
         }
         wake();
       }
@@ -284,8 +289,9 @@ export function createOfficeConverter(options: OfficeConverterOptions): OfficeCo
       if (early !== undefined) {
         throw new OfficeConvertError(early);
       }
-      const request = join(job, "request.json");
-      writeFileSync(`${request}.part`, JSON.stringify({ version: 1, input: name, timeoutMs }));
+      const request = join(realDir(job), "request.json");
+      const body = JSON.stringify({ version: 1, input: name, timeoutMs });
+      writeFileSync(`${request}.part`, body, { flag: "wx" });
       renameSync(`${request}.part`, request);
       const outcome = await tracked.wait();
       if (outcome !== "done") {
