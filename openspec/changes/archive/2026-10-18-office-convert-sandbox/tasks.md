@@ -163,6 +163,7 @@ Minimal mergeable slice: atomic - 没有 PR；实测项互为对照（http 例�
 - [x] 3.6 验收清单：FL-25 / FL-26 / FL-27 的 `OFFICE_BIN` 改为 `OFFICE_SPOOL_DIR`（含「由启动服务的人启动 / 停掉 sidecar 容器」的操作措辞）；新增 `FL-39`——操作：「由启动服务的人确认 sidecar 容器在跑（`docker compose ps` 为 healthy）且服务 stderr 没有 `office_convert_sidecar_unavailable`；由有服务器访问权的人在**服务器上、工作空间之外**放一张图片，并在服务器上起一个记录请求的本机监听器（如 `python3 -m http.server`，服务器自己能访问的地址）；在本机备一个 fl-link.docx（正文里插入一张『链接到文件』而不是嵌入的图片，链接指向服务器上那张图；另插入一张链接到该监听器地址的 http 图片）；经「+」菜单上传后在文件页点它」——预期：「浏览器自带的 PDF 查看器里显示转换出的文档，两张链接图片的位置是空白或占位框，没有图片内容；其余文字可辨认；**监听器的访问日志里没有任何请求**」，结论 `待签`。
 - [x] 3.7 `CONTEXT.md:25` 术语里的 `OFFICE_BIN` 改为 `OFFICE_SPOOL_DIR` 并加一句「转换在 sidecar 容器里」；`IMPLEMENTATION_PLAN.md:334-335`、`:342`、`:463` 同步键名与部署要求（Docker + sidecar）。
 - [x] 3.8 规格核对：归档后主规格（office-preview 五条新 requirement 与三条 MODIFIED、http-service-skeleton 两条、preview-origin、omp-uid-isolation）与 ADR / system.md / 头注释对同一事实说同一种话；D-25 与 B1 的措辞不强于证据；并发作业残余的句子四处（design D12 列的 Risks、ADR-0010 补充、ADR-0014 残余表、`app.ts` 头注释）一致。
-- [ ] 3.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；PR 贴 design D13 S3 清单请轻量复核；合并后关闭 #1350，关闭评论引用本 change 的归档路径、S1a / S1b / S2a / S3 的 PR 号与 S2b 结果表。
+- [x] 3.9 整刀验证：`make check`、`make test-guardrails`、`make smoke`、`make ui-walk` 全绿；PR 贴 design D13 S3 清单请轻量复核；合并后关闭 #1350，关闭评论引用本 change 的归档路径、S1a / S1b / S2a / S3 的 PR 号与 S2b 结果表。
 Suggested fixture level: none - 只改文档、ADR、头注释与验收行，无运行时行为。
+  **完成记录（2026-10-18）**：PR #1514 CI 11/11 绿（含 smoke / ui-walk），1 席评审 1 轮修正后 clean（owner B13）；合并后关闭 #1350 与归档本 change 由编排方执行（归档 PR）。
 Minimal mergeable slice: atomic - 一次文档终态更新；拆开会让 ADR 与头注释在一段时间内对同一事实说两种话。
