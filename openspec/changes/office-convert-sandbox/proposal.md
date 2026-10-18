@@ -33,6 +33,7 @@ owner 裁定（grill ledger B1–B10）：数据类向量登记为「未测、�
 - `http-service-skeleton`：MODIFIED「服务启动与装配」（`OFFICE_SPOOL_DIR` 替换 `OFFICE_BIN`、`OFFICE_BIN` 被拒、成功顺序句插入预检一步、预检等待期间的信号 → 干净退出零记录）、「预览监听器的装配与关停」（建 `pdf/` 与 `jobs/`、无 `work`、无 `sudo`、无 `preview_work_clear_failed`；关停首步并入转换器 `close()` 的 `cancel`）。
 - `preview-origin`：MODIFIED「预览令牌签发端点」（`officeAvailable` 当且仅当配置了 `OFFICE_SPOOL_DIR` 且启动预检通过；新增场景）。
 - `omp-uid-isolation`：MODIFIED「CI uid-isolation job」——只改场景里「九个 direct job」→「十个」（新 job 入聚合，S2a 已获批，B10）。uid-isolation job 本身不动。
+- `verification-harness`：MODIFIED「CI 接线与控制面同步」「第三方 CI action 使用 Node 24 runtime」（新 direct job `office-sidecar`、`runs-on: ubuntu-24.04`；S2a 实现后补登）
 
 ## Impact
 
