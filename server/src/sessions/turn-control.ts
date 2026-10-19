@@ -245,8 +245,9 @@ export function persistEvent(
       return event;
     // Issue 1473 (design D6 rule 1): the queued approval is paired in the step insert's transaction;
     // issue 1474 publishes the stored body offset and the paired approval's id with the step.
+    // #1526: a browser step's audit fields go to the insert's transaction only, never published.
     case "step.start": {
-      const { name, detail } = event.data;
+      const { name, detail, browser } = event.data;
       const approval = steps.takeApproval(name);
       const ordinal = steps.nextOrdinal();
       const { stepId, bodyOffset, approvalId } = store.startStep(assistantMessageId, {
@@ -254,6 +255,7 @@ export function persistEvent(
         name,
         detail,
         approval,
+        ...(browser === undefined ? {} : { browser }),
       });
       steps.started(event.data.stepId, stepId, name, approvalId);
       return {

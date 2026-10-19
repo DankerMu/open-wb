@@ -571,7 +571,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     startStep(assistantMessageId, input) {
       assertOpen(closed);
       const turn = currentTurn(activeTurns, activeSessions, assistantMessageId);
-      return startStep(db, turn, activeSteps, input);
+      return startStep(db, turn, activeSteps, input, options.emit);
     },
 
     setStepChanges(stepId, json) {

@@ -186,3 +186,51 @@ describe("fileChangeCandidates: prototype keys are not read", () => {
     ]);
   });
 });
+
+/**
+ * Issue #1526 turn-artifacts scenario「浏览器截图进入文件变更」, the reducer side: the raw screenshot
+ * candidates of a call registered as `browser` (the TMPDIR path is dropped later, by the supervisor).
+ */
+describe("fileChangeCandidates: browser screenshots", () => {
+  const TMP_SHOT = "/tmp/omp-sshots-9.png";
+  const xdev = (inner: unknown, tool = "browser") => ({
+    xdev: { tool, mode: "execute", tier: "exec", inner },
+  });
+  const screenshots = [
+    { dest: "screenshots/s1.png" },
+    { dest: TMP_SHOT },
+    { dest: "" },
+    { bytes: 3 },
+  ];
+
+  it("each own nonempty dest is one write candidate, in order, without counts", () => {
+    expect(fileChangeCandidates("browser", ok(xdev({ action: "run", screenshots })))).toEqual([
+      { path: "screenshots/s1.png", added: null, removed: null, kind: "write" },
+      { path: TMP_SHOT, added: null, removed: null, kind: "write" },
+    ]);
+  });
+
+  it.each([
+    ["a failed result", { ...ok(xdev({ action: "run", screenshots })), isError: true }],
+    ["xdev.tool other", ok(xdev({ action: "run", screenshots }, "other"))],
+    ["screenshots only on the inner prototype", ok(xdev(Object.create({ screenshots })))],
+    ["screenshots an object", ok(xdev({ action: "run", screenshots: { 0: screenshots[0] } }))],
+    ["no inner (a thrown device error)", ok({ xdev: { tool: "browser", mode: "execute" } })],
+    ["inner without screenshots (open)", ok(xdev({ action: "open", name: "main" }))],
+    ["xdev only on the details prototype", { details: Object.create(xdev({ screenshots })) }],
+  ])("%s yields nothing", (_name, result) => {
+    expect(fileChangeCandidates("browser", result)).toEqual([]);
+  });
+
+  it("a dest only on an element's prototype is skipped", () => {
+    const inherited = Object.create({ dest: "screenshots/p.png" });
+    const result = ok(xdev({ screenshots: [inherited, { dest: "screenshots/q.png" }] }));
+    expect(fileChangeCandidates("browser", result)).toEqual([
+      { path: "screenshots/q.png", added: null, removed: null, kind: "write" },
+    ]);
+  });
+
+  it("the same details under the name write yield nothing (no resolvedPath)", () => {
+    expect(fileChangeCandidates("write", ok(xdev({ action: "run", screenshots })))).toEqual([]);
+  });
+});

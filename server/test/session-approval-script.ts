@@ -15,6 +15,7 @@ import {
   createControlledRuntime,
   openRecordingSession,
   type RecordingWorld,
+  type SpawnCall,
 } from "./session-supervisor-helpers.js";
 import type { FakeChild } from "./support/omp-rpc.js";
 
@@ -66,6 +67,8 @@ export interface Scripted {
   world: RecordingWorld;
   /** The extension_ui_response frames the child received, in order. */
   answers: OmpFrame[];
+  /** Every spawn the runtime made (argv, env), in order. */
+  calls: SpawnCall[];
 }
 
 export interface Script {
@@ -113,7 +116,7 @@ export async function openScripted(script: Script): Promise<Scripted> {
   });
   const opened = world;
   cleanups.push(() => closeAfterRetainedFault(opened.fixture, script.faulted === true));
-  return { world, answers };
+  return { world, answers, calls: controlled.calls };
 }
 
 export interface PairingRow {
