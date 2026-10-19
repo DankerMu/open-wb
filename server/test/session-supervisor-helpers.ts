@@ -40,6 +40,7 @@ export interface RuntimeOptions {
   idleMs: number;
   maxProcesses?: number;
   ompUser?: string;
+  browserBin?: string;
   clock: TestClock;
   spawnImpl: SpawnImpl;
 }
@@ -391,7 +392,7 @@ export function sudoPrefix(user: string, bin: string, tmpdir?: string): string[]
     "-n",
     "-u",
     user,
-    "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN",
+    "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_EXECUTABLE_PATH",
     ...(tmpdir === undefined ? [] : [`TMPDIR=${tmpdir}`]),
     "--",
     "/usr/bin/setpriv",

@@ -1,3 +1,4 @@
+import { accessSync, constants, statSync } from "node:fs";
 import { validateHeaderValue } from "node:http";
 import { availableParallelism } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -55,6 +56,8 @@ export interface AgentSettings {
   /** 模型白名单与缺省模型（MODEL_CATALOG；未设置时为 MODEL_ID / MODEL_REASONING 的单模型）。 */
   modelCatalog: ModelCatalog;
   ompUser?: string;
+  /** omp 浏览器工具的可执行文件（BROWSER_BIN，绝对路径；缺席即部署没有浏览器）。 */
+  browserBin?: string;
   /** 所有会话可用审批档位的上界（APPROVAL_MAX_MODE，缺省 yolo 即三档都开放）。 */
   approvalMaxMode: ApprovalMode;
   /** 单个上传文件的字节上限（UPLOAD_MAX_BYTES，缺省 524288000）。 */
@@ -113,6 +116,7 @@ export function resolveAgentSettings(
     ...(modelUpstreamApiKey === undefined ? {} : { modelUpstreamApiKey }),
     modelCatalog,
     ...(env.OMP_USER === undefined ? {} : { ompUser: resolveOmpUser(env.OMP_USER, env.PATH) }),
+    ...(env.BROWSER_BIN === undefined ? {} : { browserBin: resolveBrowserBin(env.BROWSER_BIN) }),
     approvalMaxMode: resolveApprovalMaxMode(env.APPROVAL_MAX_MODE),
     uploadMaxBytes: resolvePositiveInteger(
       env.UPLOAD_MAX_BYTES,
@@ -235,6 +239,26 @@ function assertHeaderSafeKey(key: string): void {
     validateHeaderValue("authorization", `Bearer ${key}`);
   } catch {
     throw new Error("MODEL_UPSTREAM_API_KEY must be a valid HTTP header value");
+  }
+}
+
+/**
+ * 绝对路径，跟随符号链接后是当前进程可执行的普通文件；取值原样返回（不解析链接）。
+ * stat 与 access 的原生错误带路径，一律改抛只点名键的固定消息。
+ */
+function resolveBrowserBin(raw: string): string {
+  if (!isAbsolute(raw) || !isExecutableFile(raw)) {
+    throw new Error("BROWSER_BIN must be an absolute path to an executable regular file");
+  }
+  return raw;
+}
+
+function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return statSync(path).isFile();
+  } catch {
+    return false;
   }
 }
 

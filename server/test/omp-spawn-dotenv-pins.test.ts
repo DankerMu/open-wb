@@ -2,7 +2,8 @@
  * Issue #802 omp-runtime「子进程 spawn 契约」/「工作目录 dotenv 钉住」: the five variables that decide
  * where omp reads its managed configuration are set explicitly on every spawn, so a `.env` that omp
  * loads cannot supply them. Key set, literal values and the sudo prefix are written out from the
- * spec, not derived from `src/sessions/omp/process.ts`.
+ * spec, not derived from `src/sessions/omp/process.ts`. #1529: the key set also holds the two
+ * browser pins, and the sudo list ends in them and `PUPPETEER_EXECUTABLE_PATH`.
  */
 import type { SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -97,6 +98,8 @@ describe("spawnOmp dotenv pins", () => {
         "LANG",
         "OMP_PROFILE",
         "PATH",
+        "PI_BROWSER_CMUX",
+        "PI_BROWSER_RELAY",
         "PI_CODING_AGENT_DIR",
         "PI_CONFIG_DIR",
         "PI_CONFIG_FILES",
@@ -135,7 +138,7 @@ describe("spawnOmp dotenv pins", () => {
       "-n",
       "-u",
       "omp_user",
-      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN",
+      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_EXECUTABLE_PATH",
       "TMPDIR=/tmp/pins tmp",
       "--",
       "/usr/bin/setpriv",

@@ -537,6 +537,8 @@ describe("spawned child environment under the managed layout", () => {
       "LANG",
       "OMP_PROFILE",
       "PATH",
+      "PI_BROWSER_CMUX",
+      "PI_BROWSER_RELAY",
       "PI_CODING_AGENT_DIR",
       "PI_CONFIG_DIR",
       "PI_CONFIG_FILES",

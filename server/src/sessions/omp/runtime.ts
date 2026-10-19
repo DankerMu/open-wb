@@ -68,7 +68,8 @@ export interface SessionRuntimeOpts {
   modelId: string;
   approvalMode: ApprovalMode;
   tokens: SessionTokens;
-  ompUser?: string;
+  ompUser?: string | undefined;
+  browserBin?: string | undefined;
   cwd: string;
   idleMs?: number;
   resumePath?: string | null;
@@ -115,7 +116,7 @@ export class SessionRuntime {
   readonly #ownerId: string;
   readonly #modelId: string;
   readonly #approvalMode: ApprovalMode;
-  readonly #ompUser: string | undefined;
+  readonly #spawnIdentity: { ompUser: string | undefined; browserBin: string | undefined };
   readonly #cwd: string;
   readonly #tokens: SessionTokens;
   readonly #idleMs: number;
@@ -149,7 +150,7 @@ export class SessionRuntime {
     this.#ownerId = opts.ownerId;
     this.#modelId = opts.modelId;
     this.#approvalMode = opts.approvalMode;
-    this.#ompUser = opts.ompUser;
+    this.#spawnIdentity = { ompUser: opts.ompUser, browserBin: opts.browserBin };
     this.#cwd = opts.cwd;
     this.#tokens = opts.tokens;
     this.#idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
@@ -432,7 +433,7 @@ export class SessionRuntime {
       approvalMode: this.#approvalMode,
       token,
       resumePath: this.#resumePath,
-      ...(this.#ompUser === undefined ? {} : { ompUser: this.#ompUser }),
+      ...this.#spawnIdentity,
       cwd: this.#cwd,
       spawnImpl,
       ...(this.#handshakeTimeoutMs === undefined

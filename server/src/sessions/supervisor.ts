@@ -83,6 +83,7 @@ export interface SessionSupervisorRuntime {
   /** Concurrent spawn cap resolved by agent-config; undefined → os.availableParallelism(). */
   spawnConcurrency?: number;
   ompUser?: string;
+  browserBin?: string;
   spawnImpl?: SpawnImpl;
   clock?: SessionClock;
   handshakeTimeoutMs?: number;
