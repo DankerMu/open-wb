@@ -21,7 +21,7 @@
 
 ## 2. 屏障
 
-- [x] 2.1 `web/package.json` devDependencies 加 `"scheduler": "0.27.0"`，`npm install` 同步根 lockfile（只多一条 devDependency 声明，不新增包；核对 `grep -c '"node_modules/scheduler"' package-lock.json` 为 1、`npm ls scheduler --workspace web` 只有 0.27.0）；新 setup 文件（`web/test/` 下）按 design D1：先导入 `@testing-library/react`，取 `getConfig().asyncWrapper` 包一层，回调 resolve 后反复等 `unstable_scheduleCallback(unstable_IdlePriority, …)` 直至两次探针之间没有任务入队（design D1）；`scheduler` 的最小类型声明（只声明用到的导出，无 `any`）；`web/vitest.config.ts` `test.setupFiles` 挂上它。验证：1.1 转绿（连跑 5 次全绿）
+- [x] 2.1 `web/package.json` devDependencies 加 `"scheduler": "0.27.0"`，`npm install` 同步根 lockfile（只多一条 devDependency 声明，不新增包；核对 `grep -c '"node_modules/scheduler"' package-lock.json` 为 1、`npm ls scheduler --workspace web` 只有 0.27.0）；新 setup 文件（`web/test/` 下）按 design D1：先导入 `@testing-library/react`，取 `getConfig().asyncWrapper` 包一层，回调 resolve 后反复等 `unstable_scheduleCallback(unstable_IdlePriority, …)` 直至两次探针之间除屏障探针外没有任务入队（design D1）；`scheduler` 的最小类型声明（只声明用到的导出，无 `any`）；`web/vitest.config.ts` `test.setupFiles` 挂上它。验证：1.1 转绿（连跑 5 次全绿）
 - [x] 2.2 文件头注释写明机理与 #1541、为什么在 `previous` 之内、为什么是 Idle 优先级（一处说明，不在用例里复述）
 
 ## 3. 用例按规范修正（design D4，只改等待、不减断言）
@@ -39,4 +39,4 @@
 - [x] 4.2 不扰动：`npm test --workspace web`（含 coverage）绿；记录修复前后耗时（同一机器、同一命令）
 - [x] 4.3 满载（≥2×核数个 `yes`）下 5 个文件 + `scheduler-drain.test.tsx` 循环 10 次全绿；使用 `vi.useFakeTimers` 的 web 测试文件全绿（随 4.2）
 - [x] 4.4 `make check` 绿（含 knip：`scheduler` 已列依赖、新 setup 文件不被判死代码；jscpd；size-guard）
-- [ ] 4.5 PR 正文：复现方法（scratch 配置原文）、前后对照表、依赖理由（AGENTS.md 依赖政策）、`偏离记录`
+- [x] 4.5 PR 正文：复现方法（scratch 配置原文）、前后对照表、依赖理由（AGENTS.md 依赖政策）、`偏离记录`
