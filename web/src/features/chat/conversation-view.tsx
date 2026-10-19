@@ -155,6 +155,7 @@ type ConversationViewProps = {
   /** 对话内搜索：搜索框（未打开时为 null）、当前匹配的消息 id、交给转录区的句柄。 */
   search: { box: ReactNode; currentId: number | null; handleRef: Ref<TranscriptHandle> };
   sendDisabled: boolean;
+  sending: boolean;
   /** 斜杠命令候选：输入框上方的面板（不可见时为 null）、先于 Enter 规则的按键拦截，以及「+」菜单的状态。 */
   slash: ReturnType<typeof useSlashMenu>;
   /** 当前会话可解析的空间（文件变更卡与产物卡用；临时空间也算），不可解析时为 null。 */
@@ -200,6 +201,7 @@ export function ConversationView({
   requestedSessionId,
   search,
   sendDisabled,
+  sending,
   slash,
   space,
   streamError,
@@ -296,6 +298,7 @@ export function ConversationView({
           inputLocked={composerDisabled}
           inputRef={composerRef}
           onAnswerApproval={onAnswerApproval}
+          sending={sending}
           sessionId={requestedSessionId}
           view={archived ? null : historyView}
         />

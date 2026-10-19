@@ -2,11 +2,13 @@
 // `任务清单 <完成数>/<总数>` 切换展开与收起；收起时列表不渲染。列表有自己的限高并在内部滚动，头部按钮
 // 在它之外。限高分两档：停靠区里有待决提问卡时（`compact`）取小——展开的面板要与第一张提问卡（正文
 // 顶满限高、带超长提示与失败文案时）一起落在停靠区的半列高之内，1440×900 与 390×844 下都是如此；没有
-// 提问卡时取大，多显示几项。显隐（`hasUnfinishedTask`）与按会话保存的展开状态由 composer-dock.tsx 决定。
+// 提问卡时取大，多显示几项。显隐（含未完结任务，或本页保留的已完结清单，epic-acceptance-followups D6）与
+// 按会话保存的展开状态由 composer-dock.tsx 决定。
 // 状态标记（epic-acceptance-followups D5，owner C1）：每项开头是 `aria-hidden` 的状态图标，颜色在图标的外包
 // span 上（svg 取 `currentColor`）；状态词放在 `data-slot="todo-status"` 的 `sr-only` 节点里，只供读屏，
-// 列表项的可访问文本因此以状态词开头、视觉上只见图标。`name` 与 `content` 按文本渲染。列表被限高裁掉时带
-// `tabindex="0"`（可由键盘聚焦滚动，design D3）：它不是控件，没有角色之外的交互。
+// 列表项的可访问文本因此以状态词开头、视觉上只见图标。任务项带 `relative`：`sr-only` 节点绝对定位，没有
+// 定位祖先时以初始包含块为准，长清单会撑高文档（390×844 下 20 项实测 895 > 844）。`name` 与 `content`
+// 按文本渲染。列表被限高裁掉时带 `tabindex="0"`（可由键盘聚焦滚动，design D3）：它不是控件，没有角色之外的交互。
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon, type IconName } from "../../components/icon.js";
@@ -56,7 +58,7 @@ function tasksOf(todo: Todo) {
   return todo.phases.flatMap((phase) => phase.tasks);
 }
 
-/** 面板的可见条件：至少有一个任务既没完成也没放弃。 */
+/** 至少有一个任务既没完成也没放弃；全部完结的清单只在 composer-dock.tsx 保留它时显示。 */
 export function hasUnfinishedTask(todo: Todo): boolean {
   return tasksOf(todo).some((task) => task.status !== "completed" && task.status !== "abandoned");
 }
@@ -132,7 +134,7 @@ function Phase({ name, tasks }: { name: string | null; tasks: Todo["phases"][num
       )}
       {tasks.map((task, at) => (
         <li
-          className="flex min-w-0 flex-none items-start gap-2 text-[12.5px] leading-normal"
+          className="relative flex min-w-0 flex-none items-start gap-2 text-[12.5px] leading-normal"
           data-slot="todo-task"
           // biome-ignore lint/suspicious/noArrayIndexKey: 同上，任务文本可以重复。
           key={at}

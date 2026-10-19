@@ -702,8 +702,9 @@ export function useChatSession() {
   );
   const ownedBusy = ownsMutation(mutationOwner, client, requestedSessionId);
   const ownedStreamError = visibleOwnedAlert(streamError, client, requestedSessionId);
+  const sending = ownedBusy && (creating || submitting);
   const { composerDisabled, generating, sendDisabled } = composerLocks({
-    sending: ownedBusy && (creating || submitting),
+    sending,
     regenerating: ownsMutation(regenerateOwner, client, requestedSessionId),
     running: historyView?.status === "running",
     historyLoading: ownedHistory && historyState.status === "loading",
@@ -771,6 +772,7 @@ export function useChatSession() {
     selected,
     sendDisabled,
     sendPrompt,
+    sending,
     sessionActions,
     sessions: listForClient?.sessions ?? null,
     setDraft,

@@ -34,7 +34,7 @@ export function setTodo<S extends { todo: ChatTodo }>(state: S, todo: ChatTodo):
   return sameTodo(state.todo, todo) ? state : { ...state, todo };
 }
 
-function sameTodo(a: ChatTodo, b: ChatTodo): boolean {
+export function sameTodo(a: ChatTodo, b: ChatTodo): boolean {
   if (a === null || b === null) {
     return a === b;
   }

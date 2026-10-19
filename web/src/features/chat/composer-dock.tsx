@@ -2,6 +2,11 @@
 // 自上而下承载选中会话的任务清单面板（design D10，todo-panel.tsx）与待决审批提问卡——全部消息里
 // `decision === null` 的审批按 `id` 升序各一张。二者都没有时不渲染（不占位）；欢迎态没有视图（`view` 为
 // null），同样不渲染，但组件保持挂载：面板的展开状态按会话记在这里（内存，默认展开），切换会话与往返欢迎态都保留。
+// 面板的显隐（epic-acceptance-followups D6，owner C2）：清单含未完结任务时显示；全部完成或放弃的清单只在
+// 本页内存里「保留」时显示——同一会话里上一次渲染的清单还有未完结任务、这一次全部完结（就地完结，经事件或
+// 快照重装都算）即记下，保留期间到来另一份已完结清单就换成它；本页点「发送」（`sending`）、换会话或回欢迎态、
+// 清单变为 null 或又含未完结任务时清掉。按内容比对（`sameTodo`）：快照重装给的是新对象。重新生成不经
+// `sending`，不清；刷新后组件重建，快照里的已完结清单不显示。
 // 整体限高为列高的一半并在内部滚动；面板与卡不随它收缩（`flex-none`）。
 // 防误点：停靠区底边贴着输入框，下方的卡消失会让上方的卡滑到同一位置；停靠区滚动时，面板出现、消失、
 // 收起或换了内容也会把它下方的卡整体推移。已有卡显示期间卡的集合或面板的形状一变，此后
@@ -14,9 +19,42 @@
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { type AnswerApproval, ApprovalPromptCard } from "./approval-card.js";
 import type { ChatState } from "./stream.js";
+import { sameTodo } from "./stream-todo.js";
 import { hasUnfinishedTask, TodoPanel } from "./todo-panel.js";
 
 const MOVED_CLICK_GUARD_MS = 400;
+
+type Todo = ChatState["todo"];
+type Kept = { sessionId: string | null; todo: NonNullable<Todo> } | null;
+
+/** 这一次渲染之后的保留清单：`prev` 是上一次渲染的会话、清单与保留（规则见文件头）。 */
+function nextKept(
+  prev: { sessionId: string | null; todo: Todo; kept: Kept },
+  sessionId: string | null,
+  todo: Todo,
+  sending: boolean,
+): Kept {
+  if (sending || sessionId !== prev.sessionId || todo === null || hasUnfinishedTask(todo)) {
+    return null;
+  }
+  if (prev.todo !== null && hasUnfinishedTask(prev.todo)) return { sessionId, todo };
+  if (prev.kept !== null && !sameTodo(prev.kept.todo, todo)) return { sessionId, todo };
+  return prev.kept;
+}
+
+/** 面板要显示的清单，不显示为 null；渲染期间比对上一次渲染的会话与清单（同 `ComposerDock` 的 `layout`）。 */
+function useShownTodo(sessionId: string | null, latest: Todo, sending: boolean): Todo {
+  const [retained, setRetained] = useState({ sessionId, todo: latest, kept: null as Kept });
+  const kept = nextKept(retained, sessionId, latest, sending);
+  if (retained.sessionId !== sessionId || retained.todo !== latest || retained.kept !== kept) {
+    setRetained({ sessionId, todo: latest, kept });
+  }
+  const shown =
+    latest !== null &&
+    (hasUnfinishedTask(latest) ||
+      (kept !== null && kept.sessionId === sessionId && sameTodo(kept.todo, latest)));
+  return shown ? latest : null;
+}
 
 function pendingApprovals(view: ChatState | null) {
   return (view?.messages ?? [])
@@ -34,6 +72,7 @@ export function ComposerDock({
   inputLocked,
   inputRef,
   onAnswerApproval,
+  sending,
   sessionId,
   view,
 }: {
@@ -42,6 +81,8 @@ export function ComposerDock({
   /** 输入框元素：最后一张卡消失后焦点的去处。 */
   inputRef: RefObject<HTMLTextAreaElement | null>;
   onAnswerApproval: AnswerApproval;
+  /** 本页的创建或提交请求在途（点「发送」时置位）：保留的已完结清单在这一刻放下。 */
+  sending: boolean;
   /** 选中的会话；欢迎态为 null。 */
   sessionId: string | null;
   /** 选中会话的视图；欢迎态与历史尚未到达时为 null。 */
@@ -49,7 +90,7 @@ export function ComposerDock({
 }) {
   const pending = pendingApprovals(view);
   const hasPending = pending.length > 0;
-  const todo = view?.todo && hasUnfinishedTask(view.todo) ? view.todo : null;
+  const todo = useShownTodo(sessionId, view?.todo ?? null, sending);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
   const expanded = sessionId === null || !collapsed.has(sessionId);
   const toggle = () => {
