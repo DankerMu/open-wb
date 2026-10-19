@@ -46,18 +46,19 @@
 **D1 源 HTML 的管线：raw → 不安全目标转文字 → 白名单消毒（自定 schema）→ `style` 过滤。**
 `react-markdown` 的渲染基于 hast，源 HTML 要先由 `rehype-raw`（parse5）解析进树，再由 `rehype-sanitize` 按白名单消毒。两个仓库自写的小步骤与 schema 放在新文件 `web/src/features/chat/markdown-html.ts`：
 - `inertUnsafeTargets`（在 sanitize **之前**跑；另外删掉 `type` 不分大小写不等于 `checkbox` 的 `input` 元素，见下条 schema）：`a` 的 `href` 不是 `http:`/`https:`/`mailto:`、或 `img` 的 `src` 不是 `http:`/`https:` 时，把元素换成文本——`a` 换成其子节点，`img` 换成 `alt || src` 的文本节点。放在 sanitize 之前是为了还拿得到原始 URL（sanitize 与 `defaultUrlTransform` 都会先把 `javascript:`/`data:` 删掉，之后就无法按规格「无 alt 时渲染其 URL 文本」）。
+- `literalUnknownTags`（在 sanitize **之前**跑；owner 2026-10-18 第二轮裁决：白名单外标签按原文显示，不丢 `<task>` 这类占位符）：元素的 `tagName` 既不在 schema 的 `tagNames` 也不在 `strip` 里时，以 `position.start.offset` 为锚在 `String(file)` 上取起始标签原文（`rehype-raw` 以 `sourceCodeLocationInfo` 解析，源 HTML 产生的元素带源位置；只信起始位置——未闭合且无内容、落在段落或列表项末尾的标签，`rehype-raw` 给的结束位置是 0，所以 `slice(start, end)` 不可用）：源文本自 `start.offset` 起以 `<` + `tagName` 起头（不分大小写）才算源 HTML 写出的——把元素换成「起始标签原文（线性正则截到起始标签收尾的 `>`，引号内的 `>` 不算）的文本节点、原有子节点、源文本在 `end.offset` 处以 `</tagName\s*>` 收尾且 `end.offset ≥ start.offset + 起始标签长度` 时的结束标签原文文本节点」；源文本不以该标签起头或没有位置信息（Markdown 自身生成的 GFM 脚注 `section` 等）则换成其子节点，与原先 sanitize 去壳留文字相同。`strip` 表的七个元素不经此步，照旧由 sanitize 连内容删掉。ui-walk 第 10 步（chat-harness）要求 `/todo` 回复里的 `<task>` 原样可见，这一步是它的保证。
 - schema（显式写出；`hast-util-sanitize` 以 `{...defaultSchema, ...options}` 浅合并，传入的键整体取代缺省，所以下列键都要写全）：`tagNames` 恰为 chat-web delta 的元素白名单——`p`、`h1`–`h6`、`b`、`strong`、`i`、`em`、`u`、`s`、`del`、`ins`、`mark`、`kbd`、`code`、`pre`、`sub`、`sup`、`span`、`br`、`hr`、`div`、`blockquote`、`q`、`ul`、`ol`、`li`、`dl`、`dt`、`dd`、`table`、`thead`、`tbody`、`tfoot`、`tr`、`th`、`td`、`details`、`summary`、`a`、`img`、`input`（缺省里的 `picture`/`source`/`samp`/`var`/`tt`/`strike`/`ruby`/`rp`/`rt`/`section` 等不在其内，去元素留文字；GFM 脚注的 `section` 与锚点链接因此退化为文字，与「只有锚点的链接只留文字」一致）；`strip: ['script','style','noscript','textarea','iframe','object','embed']`（连内容去掉）；`attributes`：`'*': ['style','title','lang','dir']`，`a: ['href']`，`img: ['src','alt','width','height']`，`td`/`th: ['colSpan','rowSpan','align']`，`ol: ['start', ['className','contains-task-list']]`，`ul: [['className','contains-task-list']]`，`li: [['className','task-list-item']]`，`code: [['className', /^language-./]]`，`input: [['type','checkbox'], ['disabled', true], 'checked']`（取值元组：只放行这些取值）；`clobber: []`（`id`/`name` 不在白名单即剥除，不以前缀保留）；`protocols`、`required`、`ancestors` 沿用缺省（`required.input = {type:'checkbox', disabled:true}` 只给缺失的键补值、不限制取值）。`target`、`rel` 不在 schema 里，由 `components.a` 统一写出。`sanitize` 本身删不掉 `type` 不是 checkbox 的 `input`（取值元组只丢掉这一属性，`required` 再补成 disabled checkbox），所以这一类由下一步之前的 `inertUnsafeTargets` 整个删掉。
 - `styleGuard`（在 sanitize **之后**跑）：对 `style` 取值先去掉 `/* */` 注释、解码 CSS 转义（`\HH…` 十六进制与 `\x` 单字符两种形式）、小写化、去空白，再查是否含 `url(`、`image(`、`image-set(`、`-webkit-image-set(`、`cross-fade(`、`src(`、`expression(` 之一；含则删掉整个 `style` 属性。只过滤资源函数，不过滤布局声明（A2）。
-- `components.a`：有 `href` 才到这里（没有的已被第一步转成文字）——渲染 `<a href target="_blank" rel="noopener noreferrer">`；`components.img`：渲染 `<img src alt loading="lazy" referrerPolicy="no-referrer" className="max-w-full">`。`CodeHeader` 不变。
+- `components.a`：有 `href` 才到这里（没有的已被第一步转成文字）——渲染 `<a href target="_blank" rel="noopener noreferrer" className="aui-md-a text-primary hover:text-primary/80 underline underline-offset-2">`（固定类与拷入层 `markdown-text.tsx` 自带的 `a` 组件相同；owner 2026-10-18 第二轮裁决——`theme.css:227` 基础层把 `a` 重置为 `color: inherit; text-decoration: none`，而 ui-foundation 禁止在 `styles.css`/`theme.css` 基础块增加规则，所以由组件写 Tailwind 类）；`components.img`：渲染 `<img src alt loading="lazy" referrerPolicy="no-referrer" className="max-w-full">`。`CodeHeader` 不变。
 - `MarkdownText` 新增 `rehypePlugins` 透传——拷入层的第六类修改（ADR-0013 2026-10-04 放宽：只转发调用方的值、不写默认值，调用方不传时行为与原文一致；`MarkdownTextPrimitiveProps` 已含 `react-markdown` 的 `Options`）。ui-foundation「组件分层」:51 与 chat-web 首段的举例随之改写（两处 delta）。
 - 顺序：`rehypePlugins = [rehypeRaw, inertUnsafeTargets, [rehypeSanitize, schema], styleGuard]`。
 备选：DOMPurify 对 HTML 字符串消毒——与 hast 管线不兼容，还得再解析一次；`skipHtml` + 自写 remark 插件——要自己写 HTML 解析器，否决；沿用缺省 schema 再打补丁——缺省会把 `style` 的 CSS 文本留下、把 `id` 加前缀保留，正是 Stage 3 抓到的三处不一致，所以 schema 显式写全。
 
-**D2 依赖：`rehype-raw@7.0.0`、`rehype-sanitize@6.0.0`（web 的 dependencies），登记 `ATTRIBUTION.md`。** 现有工具做不到：解析 HTML 片段需要 parse5 的容错解析（流式期间大量未闭合标签），白名单消毒需要按 hast 节点处理属性与协议。两者都是 unified 官方包（MIT）、无运行时网络、与 `react-markdown` 10 同一 hast 版本线。`ATTRIBUTION.md` 按既有条目（`remark-gfm`、`hast-util-to-jsx-runtime`）加两条，`web/test/ui-guardrails.test.ts` 的 `hasEntry` 守卫补对应断言。PR 正文按 AGENTS.md:40 写明。
+**D2 依赖：`rehype-raw@7.0.0`、`rehype-sanitize@6.0.0`（web 的 dependencies），登记 `ATTRIBUTION.md`。** 现有工具做不到：解析 HTML 片段需要 parse5 的容错解析（流式期间大量未闭合标签），白名单消毒需要按 hast 节点处理属性与协议。两者都是 unified 官方包（MIT；`rehype-raw` 经 `parse5` 带入的间接依赖 `entities`@6 为 BSD-2-Clause，在 `ATTRIBUTION.md` 条目里写明）、无运行时网络、与 `react-markdown` 10 同一 hast 版本线。`ATTRIBUTION.md` 按既有条目（`remark-gfm`、`hast-util-to-jsx-runtime`）加两条，`web/test/ui-guardrails.test.ts` 的 `hasEntry` 守卫补对应断言。PR 正文按 AGENTS.md:40 写明。
 
 **D3 `maxTokens` 是白名单模型的必有字段，缺省在解析器里补齐。** `CatalogModel.maxTokens: number`（解析后恒有，与 `vision` 同一做法），`MODEL_CATALOG` 条目可选键 `maxTokens`：`Number.isInteger` 且 1 ≤ n ≤ 128000，否则启动失败并点名 `MODEL_CATALOG`（错误信息不回显取值，沿用 `catalogError`）；缺省 32768；未设 `MODEL_CATALOG` 的单模型项也带 `maxTokens: 32768`。`models-yml.ts` 的 `modelLines` 写 `maxTokens: ${model.maxTokens}`。`rest-composer.ts` 的序列化**不加**该字段（显式只挑五个键，现状即如此；测试加「没有 `maxTokens` 键」的断言）。Context 列出的全部 server 测试随之改：钉 `8192` 字节的改为按白名单取值（单模型 32768；三模型用例把 `m2` 写成 `"maxTokens": 8192` 以同时覆盖显式值），`CatalogModel` 字面量补 `maxTokens`——优先改共享夹具（`models-yml-helpers.ts`、`session-meta-fixtures.ts`、`session-composer-helpers.ts`、`support/omp-official*.ts`）。假上游的请求记录加一个字段 `maxTokens`（数字的 `max_tokens`，否则数字的 `max_completion_tokens`，否则 `null`；omp-test-harness「受控上游请求记录」一处 delta），官方二进制对照用例加一条：该回合每条记录的 `maxTokens` 等于 `models.yml` 写出的值（32768 与 8192 两跑）——这是 CH-39「不再截断」唯一的机器可观察量。**实测记录为 `null` 或不等于写出的值时停下回 owner**：那说明 omp 没有按 `models.yml` 发上限，CH-39 的截断根因另有所在，改 `maxTokens` 修不了它。备选：环境变量 `MODEL_MAX_TOKENS` 全局一个值——owner 选了按模型可配。
 
-**D4 「字节不变」场景改为「只差一行」。** 规格 model-proxy 要求未设白名单时输出与改前夹具字节相同；改缺省必然破坏它。改写为：把 checked-in 的改前夹具里唯一的 `maxTokens: 8192` 行替换成 `maxTokens: 32768` 后与新输出字节相同，并断言与未改的夹具恰差这一行。夹具文件不动（它们就是「改前」的定义）。
+**D4 「字节不变」场景改为「只差一行」。** 规格 model-proxy 要求未设白名单时输出与改前夹具字节相同；改缺省必然破坏它。改写为：把 checked-in 的改前夹具里唯一的 `maxTokens: 8192` 行替换成 `maxTokens: 32768` 后与新输出字节相同，并断言与未改的夹具恰差这一行。夹具文件不动（它们就是「改前」的定义）。引用这条「字节不变」的另两处——thinking-fold 场景「关闭 reasoning」与 http-service-skeleton「服务启动与装配」的「单模型时写出的字节不变」——同步改为指向 model-proxy 的单模型输出（两个 delta，只改这一句）；对应的字节断言（`model-proxy-reasoning` 等）已在组 2 的 `maxTokens: 8192` 清单里随之更新，不另增测试。
 
 **D5 状态图标进 `Icon` 映射，文字改视觉隐藏，`data-slot="todo-status"` 留在文字节点上。** `icon.tsx` 加 `circle`（待办）、`loader-circle`（进行中：lucide 的半圆弧）、`circle-x`（已放弃）、`ban`（受阻）；`circle-check` 已有。`todo-panel.tsx` 每项渲染 `<Icon name aria-hidden/>`（颜色 `STATUS_TONE` 挪到图标）+ `<span data-slot="todo-status" class="sr-only">{STATUS_LABEL}</span>` + content；列表项的可访问文本因此仍以状态文字开头，ui-walk `:39` 的 `toHaveText` 读 `textContent`、照常通过（chat-harness 两处措辞改为「`todo-status` 节点文本」，一处 delta）。单测里「可见文本不含状态词」的判定方法：克隆面板、移除带 `sr-only` 类的节点后看 `textContent`（jsdom 不加载 Tailwind，不能靠计算样式）；`sr-only` 类本身由 ui-walk 的真实浏览器用包围盒断言（面板里没有可见的状态词文本节点）。备选：`aria-label` 放在列表项上——会覆盖 `content` 的可访问文本，否决；把 `data-slot` 挪到图标上——ui-walk 立刻红，否决。
 
@@ -78,14 +79,16 @@
 ## Risks / Trade-offs
 
 - [外站图片直连泄露访问者 IP 与在线状态] → owner 已知并选择；`referrerpolicy="no-referrer"`、`loading="lazy"`（不滚到就不请求）；Non-Goals 登记代理。
-- [完整 `style` 让模型把气泡内容画成假界面（`position:fixed`、超大尺寸）] → owner Q1 明确接受；只剥资源函数；正文容器的 `overflow` 与 `max-width` 限制越界范围（实现时核对 `message-body` 容器有 `min-w-0` / `overflow-x-auto`；没有则加）。
+- [完整 `style` 让模型把气泡内容画成假界面（`position:fixed`/`absolute` 覆盖层能盖住输入框、审批停靠区乃至整页；超大尺寸）] → owner Q1 明确接受，登记为**已接受的残余**：只剥资源函数，不加容器 containment（会改变 owner 裁定保留的 `style` 行为）；正文容器（`message-segments-view.tsx:44`，现只有 `wrap-anywhere`）不在本 change 改动范围内，正常排版的内容沿用既有折行。
 - [`style` 借 CSS 转义或 `image-set()` 等绕过字面匹配外连] → D1 的 `styleGuard` 先解码转义、去注释，再匹配七个资源函数；规格场景钉了 `\75 rl(` 与 `image-set(` 两例。
-- [流式期间 parse5 每个 token 重解析长正文的 CPU] → `MarkdownText` 已传 `defer`（低优先级重解析）且 `smooth={false}`；先量 ui-walk 栈的长回合（既有 `WORKBUDDY_*` 回合），阈值与进一步手段登记在 Not yet specified。
+- [流式期间 parse5 每个 token 重解析长正文的 CPU] → `MarkdownText` 已传 `defer`（低优先级重解析）且 `smooth={false}`；任务 1.6 在本地 ui-walk 栈量一次既有 `WORKBUDDY_*` 长回合并把结果写进 PR，阈值与进一步手段登记在 Not yet specified。
 - [未闭合标签的中间态闪动（如 `<det` → `<details>` 展开）] → 终态一致是规格要求；中间态不作断言。
 - [sanitize 剥除 `class` 让 GFM 任务列表 checkbox / 代码块语言 class 失效] → schema 显式放行 `code` 的 `language-*` 与任务列表 class、`input[type=checkbox][disabled]`；规格场景钉了任务列表 checkbox 的存在；既有代码块用例回归。
 - [`maxTokens` 32768 超过某上游模型的最大输出，上游 400] → 由部署方按模型写 `maxTokens`（这正是按模型可配的理由）；`make smoke-live` 打 DMXAPI 的 `deepseek-v4.1-flash` 验证缺省值可用，结果写进 PR。
 - [点了「发送」但 prompt 被拒或中途停止，已完结清单不再出现] → C2 定的是「点发送那一刻」消失；清单仍在快照里，刷新也不显示（与「刷新不显示」同一规则），任务结果在线程里可见；规格场景钉了被拒、上传停止、快照失败三例。
 - [`sr-only` 文字让 `getByText("待办")` 类测试与 ui-walk 断言失效] → ui-walk 按 `todo-status` 节点的 `toHaveText` 断言，节点与文本都保留（D5）；单测按 `todo-status` 节点与可访问名改写，G6 的触发改为用户提交。
+
+- 「白名单外标签按原文显示」依赖 hast 位置偏移与 `String(file)` 一致（同一份 Markdown 源）；流式半截的起始标签（如 `<tas`）被 parse5 当作文本，终态与一次性渲染一致由场景「流式期间的半截 HTML 不留痕」覆盖。副作用：`<font color="red">彩</font>` 这类过时元素也按原文显示（与旧行为相同），不再去壳。
 
 ## Migration Plan
 
@@ -95,6 +98,14 @@
 ## Not yet specified
 
 - 长正文流式期间源 HTML 重解析的性能预算：`defer` 已开，但多长的正文、多高的 token 速率下会掉帧，以及超阈值时是节流解析还是只在段落边界重解析——要先有真实栈的量测，现在说不清阈值与手段。
+
+## Sibling surfaces（组 1）
+
+- `MarkdownText` 只有两个调用方：`web/src/features/chat/markdown-body.tsx:58`（本 change 透传插件）与 `web/src/components/assistant-ui/elements/reasoning.aui.tsx:49`（不传插件——透传 SHALL NOT 写缺省值，这里的 HTML 仍按文本显示）。
+- 思考折叠块不走 markdown（`web/src/features/chat/thinking-fold.tsx:90` 的纯文本 `ReasoningText`）；审批卡、任务清单内容、错误详情、附件名都是纯文本，不进这条管线。
+- 钉住这些地方 `<b>` 按文本显示的既有测试 SHALL 不改且保持绿：`web/test/chat-thinking.test.tsx:710`、`web/test/chat-todo-panel.test.tsx:257`、`web/test/chat-message-error.test.tsx:91`。
+- 用户消息气泡（`web/src/features/chat/message-thread.tsx:124` 的纯文本 `<p>`，既有测试 `web/test/chat-messages.test.tsx:74-87` 的 M2）与步骤卡的「原始输出」折叠块（`web/test/chat-steps.test.tsx`）同样不进这条管线、按文本渲染（Non-Goals）；这两处目前没有以 HTML 为输入的既有测试钉住，本 change 不为它们新增断言。
+- 对话内搜索（`web/src/features/chat/search-match.ts` 只读 `content`）与复制 / 导出按原文工作，不依赖渲染后的 DOM。
 
 ## Sketch seams under test
 
@@ -112,7 +123,7 @@
 | `web/src/components/assistant-ui/elements/markdown-text.tsx` | 241 | ≤ 250 | 1 |
 | `web/test/chat-markdown.test.tsx` | 268 | ≤ 460（超出则拆 `chat-markdown-html.test.tsx` ≤ 320） | 1 |
 | `web/test/chat-messages.test.tsx` | — | +10 | 1 |
-| `web/test/ui-guardrails.test.ts`、`ATTRIBUTION.md` | — | 各 +4 | 1 |
+| `web/test/ui-guardrails.test.ts`、`ATTRIBUTION.md` | — | +4、+8（既有条目每条 3 行，两条至少 6 行） | 1 |
 | `server/src/model-catalog.ts` | 233 | ≤ 270 | 2 |
 | `server/src/model-proxy/models-yml.ts` | 72 | ≤ 75 | 2 |
 | `server/test/model-catalog.test.ts` | 529 | ≤ 620 | 2 |

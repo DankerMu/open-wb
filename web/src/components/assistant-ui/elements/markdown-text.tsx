@@ -10,7 +10,7 @@ import {
   useIsMarkdownCodeBlock,
 } from "@assistant-ui/react-markdown";
 import { CheckIcon, CopyIcon } from "lucide-react";
-import { type FC, memo, useMemo, useRef } from "react";
+import { type ComponentProps, type FC, memo, useMemo, useRef } from "react";
 import remarkGfm from "remark-gfm";
 
 import { TooltipIconButton } from "@/components/assistant-ui/elements/tooltip-icon-button";
@@ -21,6 +21,8 @@ type MarkdownTextProps = Partial<TextMessagePartProps> & {
   components?: Parameters<typeof memoizeMarkdownComponents>[0];
   // 本仓改动（第六类，纯透传）：registry 原文丢弃了调用方的 `smooth`；这里原样交给基元，不设默认值。
   smooth?: boolean;
+  // 本仓改动（第六类，纯透传，ADR-0013 2026-10-04 放宽）：调用方的 `rehypePlugins` 原样交给基元，不设默认值。
+  rehypePlugins?: ComponentProps<typeof MarkdownTextPrimitive>["rehypePlugins"];
 };
 
 const useShallowStable = <T extends Record<string, unknown> | undefined>(value: T): T => {
@@ -37,7 +39,7 @@ const useShallowStable = <T extends Record<string, unknown> | undefined>(value: 
   return ref.current;
 };
 
-const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components, smooth }) => {
+const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components, rehypePlugins, smooth }) => {
   const stableComponents = useShallowStable(components);
   const markdownComponents = useMemo(() => {
     if (!stableComponents) return defaultComponents;
@@ -50,6 +52,7 @@ const MarkdownTextImpl: FC<MarkdownTextProps> = ({ components, smooth }) => {
   return (
     <MarkdownTextPrimitive
       remarkPlugins={[remarkGfm]}
+      rehypePlugins={rehypePlugins}
       className="aui-md"
       components={markdownComponents}
       defer

@@ -1,6 +1,11 @@
-import { cleanup, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, vi } from "vitest";
-import { FakeEventSource, resetFakeEventSources } from "./chat-stream-support.js";
+import {
+  chatSnapshot,
+  FakeEventSource,
+  resetFakeEventSources,
+  SESSION_ID,
+} from "./chat-stream-support.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
@@ -75,4 +80,22 @@ export function expandToolGroups(root: ParentNode = document) {
   )) {
     fireEvent.click(trigger);
   }
+}
+
+/** 挂载一条已完成的助手回复（正文为 `content`），返回其 `article`、首个正文块与假 fetch。 */
+export async function mountAssistantReply(content: string) {
+  const snapshot = chatSnapshot({
+    status: "done",
+    assistantStatus: "done",
+    content,
+    cursor: { epoch: 1, seq: null },
+  });
+  const mounted = renderChatPage(`/?session=${SESSION_ID}`, {
+    "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
+    [`/api/sessions/${SESSION_ID}/messages`]: () => jsonResponse(snapshot),
+  });
+  const article = await screen.findByRole("article", { name: "助手" });
+  const body = article.querySelector('[data-slot="message-body"]');
+  if (!body) throw new Error("助手消息缺少正文");
+  return { article, body, fetchMock: mounted.fetchMock };
 }
