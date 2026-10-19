@@ -2,8 +2,9 @@
 import type { ComposerConfig } from "../src/sessions/store-composer.js";
 
 /**
- * 缺省配置下 store 拿到的输入框配置（未设 `APPROVAL_MAX_MODE` / `MODEL_CATALOG` / `MODEL_ID` /
- * `MODEL_REASONING`）：最高档 `yolo`，白名单只有缺省模型一项、支持推理、不带 efforts。
+ * store 拿到的输入框配置（未设 `APPROVAL_MAX_MODE` / `MODEL_CATALOG` / `MODEL_ID` / `MODEL_REASONING`，
+ * `MODEL_VISION=off`——自 #1530 起缺省 on，这已不是缺省配置）：最高档 `yolo`，白名单只有缺省模型一项、
+ * 支持推理、不看图、不带 efforts。
  * 手写字面量，不经 `resolveModelCatalog`：夹具不拿被测代码当判据。
  */
 export const TEST_COMPOSER: ComposerConfig = {
@@ -51,8 +52,9 @@ export const THREE_MODEL_CATALOG: ComposerConfig["modelCatalog"] = {
 
 /**
  * `GET /api/composer/options` 在缺省配置下的响应体（session-composer-settings「输入框选项端点」的
- * 「缺省配置」场景），键序同规格。手写字面量，不经 `selectableEfforts` / `defaultEffort`；与 web 的
- * `DEFAULT_COMPOSER_OPTIONS`（`web/test/session-meta-fixtures.ts`）逐键相同。
+ * 「缺省配置」场景），键序同规格。手写字面量，不经 `selectableEfforts` / `defaultEffort`。与 web 的
+ * `DEFAULT_COMPOSER_OPTIONS`（`web/test/session-meta-fixtures.ts`）自 #1530 起只差 `vision`：这里是
+ * `MODEL_VISION` 缺省 on 的服务端响应（`true`）；web 夹具仍为 `false`，它喂的模型选择器用例只钉「推理」标签。
  */
 export const DEFAULT_COMPOSER_OPTIONS = {
   approvalModes: ["always-ask", "write", "yolo"],
@@ -61,7 +63,7 @@ export const DEFAULT_COMPOSER_OPTIONS = {
       id: "deepseek-v4.1-flash",
       name: "deepseek-v4.1-flash",
       reasoning: true,
-      vision: false,
+      vision: true,
       efforts: ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
       defaultEffort: "high",
     },

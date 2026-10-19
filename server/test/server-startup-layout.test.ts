@@ -20,11 +20,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { reasoningYaml, withMaxTokens } from "./models-yml-helpers.js";
+import { reasoningYaml, withMaxTokens, withVisionInput } from "./models-yml-helpers.js";
 import {
   expectHomeDotenv,
   expectHostOverlay,
   expectLayout,
+  HOST_OVERLAY_YAML,
+  hostOverlayVisionBlock,
   seedLegacyAgentDir,
 } from "./omp-layout-helpers.js";
 import {
@@ -39,6 +41,8 @@ import {
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const MODEL_ID = "issue-706-layout-model";
+/** Default deployment (#1530: MODEL_VISION defaults on): the single model is the vision role. */
+const DEFAULT_OVERLAY = HOST_OVERLAY_YAML + hostOverlayVisionBlock(MODEL_ID);
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
 const scratch: string[] = [];
@@ -61,7 +65,10 @@ function scratchRoot(prefix: string): string {
   return root;
 }
 
-/** Default startup (no MODEL_CATALOG, MODEL_REASONING unset): one entry, pre-change bytes at 32768. */
+/**
+ * Default startup (no MODEL_CATALOG, MODEL_REASONING and MODEL_VISION unset): one entry, the
+ * pre-change bytes at 32768 plus the three `input` lines.
+ */
 function expectManagedModels(agentDir: string, port: number): void {
   const models = join(agentDir, "models.yml");
   const text = readFileSync(models, "utf8");
@@ -72,7 +79,8 @@ function expectManagedModels(agentDir: string, port: number): void {
     },
   });
   expect(modelEntries(text)).toHaveLength(1);
-  expect(text).toBe(withMaxTokens(reasoningYaml(`http://127.0.0.1:${port}/v1`, MODEL_ID), 32768));
+  const before = reasoningYaml(`http://127.0.0.1:${port}/v1`, MODEL_ID);
+  expect(text).toBe(withVisionInput(withMaxTokens(before, 32768)));
   expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
 }
 
@@ -118,7 +126,7 @@ describe("production entry managed omp state layout", () => {
       await server.waitForStarted();
       expectLayout(state);
       expectManagedModels(join(state, "home", ".omp", "agent"), port);
-      expectHostOverlay(state);
+      expectHostOverlay(state, DEFAULT_OVERLAY);
       expectHomeDotenv(state);
       expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
       expect(readdirSync(state).toSorted()).toEqual([
@@ -269,7 +277,7 @@ describe("production entry managed omp state layout", () => {
       }));
       try {
         await server.waitForStarted();
-        expectHostOverlay(state);
+        expectHostOverlay(state, DEFAULT_OVERLAY);
         expectManagedModels(agentDir, port);
       } finally {
         await server.dispose();

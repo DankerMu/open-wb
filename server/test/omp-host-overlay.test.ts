@@ -28,7 +28,7 @@ import {
 } from "./omp-layout-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
 
-/** The default deployment: no `BROWSER_BIN`, no vision model in the whitelist. */
+/** No `BROWSER_BIN`, no vision model in the whitelist (since #1530 not the default deployment). */
 const DEFAULT = { browserEnabled: false, visionModelId: null } as const;
 
 let root: string;

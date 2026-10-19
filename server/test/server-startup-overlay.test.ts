@@ -1,11 +1,13 @@
 /**
  * Issue #1527: the host overlay as the real compiled production entry writes it — omp-runtime
- * 「宿主 overlay」, scenarios「overlay 写入」and「overlay 不随档位变化」with the new bytes (fixed block
- * then the browser block; this group never configures a browser, so `enabled: false`), and the
+ * 「宿主 overlay」, scenarios「overlay 写入」and「overlay 不随档位变化」with the new bytes (fixed block,
+ * the browser block — `enabled: false` unless `BROWSER_BIN` is set — then the vision block), and the
  * `MODEL_CATALOG` example of「看图块随白名单」(the first `vision:true` whitelist model is the vision
  * role). The expected bytes are the spec's, kept in `omp-layout-helpers.ts`. #1529 (the owning
  * group of「浏览器块随 BROWSER_BIN」): cold starts without and with `BROWSER_BIN` differ in exactly
- * the `enabled` line.
+ * the `enabled` line. #1530 (the owning group of「看图块随白名单」's single-model examples):
+ * `MODEL_VISION` defaults on, so a deployment without `MODEL_CATALOG` names its one model as the
+ * vision role; `MODEL_VISION=off` writes no `modelRoles`.
  */
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +18,7 @@ import {
   HOST_OVERLAY_FIXED,
   HOST_OVERLAY_YAML,
   hostOverlayBrowserBlock,
+  hostOverlayVisionBlock,
 } from "./omp-layout-helpers.js";
 import {
   type CompiledServerEntry,
@@ -28,6 +31,8 @@ import {
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const MODEL_ID = "issue-1527-overlay-model";
+/** This file's default deployment (`MODEL_ID` set, `MODEL_VISION` unset): `MODEL_ID` is the vision role. */
+const DEFAULT_OVERLAY = HOST_OVERLAY_YAML + hostOverlayVisionBlock(MODEL_ID);
 const scratch: string[] = [];
 let compiled: CompiledServerEntry;
 
@@ -90,7 +95,7 @@ async function createSessionIn(port: number, cookie: string, approvalMode: strin
 }
 
 describe("production entry host overlay (#1527)", () => {
-  it("cold start writes the fixed block then the browser block (enabled: false), the same bytes after a restart", async () => {
+  it("cold start writes the fixed block, the browser block (enabled: false) and the vision block, the same bytes after a restart", async () => {
     const root = scratchRoot("open-wb-overlay-cold-");
     const state = join(root, "state");
     expect(HOST_OVERLAY_YAML).toBe(HOST_OVERLAY_FIXED + hostOverlayBrowserBlock(false));
@@ -100,10 +105,16 @@ describe("production entry host overlay (#1527)", () => {
       }));
       try {
         await server.waitForStarted();
-        expectHostOverlay(state, HOST_OVERLAY_FIXED + hostOverlayBrowserBlock(false));
+        expectHostOverlay(
+          state,
+          HOST_OVERLAY_FIXED + hostOverlayBrowserBlock(false) + hostOverlayVisionBlock(MODEL_ID),
+        );
         const text = readFileSync(join(agentDirOf(root), "host-overlay.yml"), "utf8");
-        expect(text.endsWith("\n  screenshotDir: screenshots\n")).toBe(true);
-        expect(text).not.toContain("modelRoles");
+        expect(
+          text.endsWith(
+            `\n  screenshotDir: screenshots\nmodelRoles:\n  vision: "workbuddy/${MODEL_ID}"\n`,
+          ),
+        ).toBe(true);
         expect(readdirSync(agentDirOf(root)).toSorted()).toEqual([
           "host-overlay.yml",
           "models.yml",
@@ -150,6 +161,28 @@ describe("production entry host overlay (#1527)", () => {
     expect(differing).toEqual([["  enabled: false", "  enabled: true"]]);
   }, 90_000);
 
+  it("without MODEL_CATALOG, MODEL_ID and MODEL_VISION the default model is the vision role", async () => {
+    const root = scratchRoot("open-wb-overlay-single-vision-");
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {}),
+    }));
+    try {
+      await server.waitForStarted();
+      expectHostOverlay(
+        join(root, "state"),
+        HOST_OVERLAY_YAML + hostOverlayVisionBlock("deepseek-v4.1-flash"),
+      );
+      const text = readFileSync(join(agentDirOf(root), "host-overlay.yml"), "utf8");
+      expect(
+        text.endsWith(
+          '\n  screenshotDir: screenshots\nmodelRoles:\n  vision: "workbuddy/deepseek-v4.1-flash"\n',
+        ),
+      ).toBe(true);
+    } finally {
+      await server.dispose();
+    }
+  }, 90_000);
+
   it("a MODEL_CATALOG with vision models appends modelRoles.vision for the first of them", async () => {
     const root = scratchRoot("open-wb-overlay-vision-");
     const catalog = '[{"id":"m1"},{"id":"m2","vision":true},{"id":"m3","vision":true}]';
@@ -187,12 +220,12 @@ describe("production entry host overlay (#1527)", () => {
       await server.waitForStarted();
       const state = join(root, "state");
       const overlay = join(agentDirOf(root), "host-overlay.yml");
-      expectHostOverlay(state);
+      expectHostOverlay(state, DEFAULT_OVERLAY);
       const cookie = await login(port);
       for (const mode of ["always-ask", "write", "yolo"]) {
         const session = await createSessionIn(port, cookie, mode);
         await expectPromptStatus(port, cookie, session, `mode ${mode}`, 502);
-        expectHostOverlay(state);
+        expectHostOverlay(state, DEFAULT_OVERLAY);
         expect(readdirSync(agentDirOf(root)).toSorted()).toEqual([
           "host-overlay.yml",
           "models.yml",

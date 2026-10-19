@@ -51,3 +51,14 @@ export function withMaxTokens(fixture: string, maxTokens: number): string {
   }
   return fixture.replace(line, `        maxTokens: ${String(maxTokens)}\n`);
 }
+
+/**
+ * model-proxy「Single-model default declares image input」（#1530）：单模型输出在模型条目末尾恰多
+ * `input` 三行（键与 `text`、`image` 两项），其余行不变。只接受单模型夹具（以换行结尾）。
+ */
+export function withVisionInput(singleModelYaml: string): string {
+  if (!singleModelYaml.endsWith("\n")) {
+    throw new Error("the single-model output must end with a newline");
+  }
+  return `${singleModelYaml}        input:\n          - text\n          - image\n`;
+}

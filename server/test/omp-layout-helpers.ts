@@ -27,8 +27,9 @@ export const LAYOUT_TABLE: ReadonlyArray<readonly [string, number]> = [
 /**
  * Issue #708 host overlay: the bytes of the omp-runtime spec's `host-overlay.yml`, written out here
  * (not imported from `src/sessions/omp/host-overlay.ts`). `HOST_OVERLAY_FIXED` is the fixed block;
- * `HOST_OVERLAY_YAML` is the file of the default deployment (#1527: fixed block, then the browser
- * block with `enabled: false`, no vision block).
+ * `HOST_OVERLAY_YAML` is the file of a deployment without `BROWSER_BIN` and without a vision model
+ * (#1527: fixed block, then the browser block with `enabled: false`, no vision block). Since #1530
+ * (`MODEL_VISION` defaults on) the default deployment adds `hostOverlayVisionBlock(<MODEL_ID>)`.
  */
 export const HOST_OVERLAY_FIXED = `tools:
   approval: []
@@ -80,7 +81,7 @@ export const HOST_OVERLAY_YAML = HOST_OVERLAY_FIXED + hostOverlayBrowserBlock(fa
 
 /**
  * `<state>/home/.omp/agent/host-overlay.yml` is a 0640 regular file holding exactly `expected`
- * (the default deployment's bytes when absent).
+ * (`HOST_OVERLAY_YAML` when absent: no `BROWSER_BIN`, no vision model).
  */
 export function expectHostOverlay(state: string, expected = HOST_OVERLAY_YAML): void {
   const overlay = join(state, "home", ".omp", "agent", "host-overlay.yml");

@@ -55,14 +55,14 @@ function messageOf(env: Record<string, string | undefined>): string {
 }
 
 describe("模型白名单配置 — 未配置白名单等于单模型", () => {
-  it("MODEL_ID 与 MODEL_REASONING 均未设置：恰一项缺省模型，不带 efforts 键", () => {
+  it("MODEL_ID、MODEL_REASONING 与 MODEL_VISION 均未设置：恰一项缺省模型，能看图，不带 efforts 键", () => {
     expect(resolveModelCatalog({})).toStrictEqual({
       models: [
         {
           id: "deepseek-v4.1-flash",
           name: "deepseek-v4.1-flash",
           reasoning: true,
-          vision: false,
+          vision: true,
           maxTokens: 32768,
         },
       ],
@@ -70,8 +70,24 @@ describe("模型白名单配置 — 未配置白名单等于单模型", () => {
     });
   });
 
-  it("MODEL_ID=qwen-x、MODEL_REASONING=off：恰一项，不支持推理", () => {
-    expect(resolveModelCatalog({ MODEL_ID: "qwen-x", MODEL_REASONING: "off" })).toStrictEqual({
+  it("MODEL_VISION=on 与未设置相同：恰一项缺省模型，能看图", () => {
+    expect(resolveModelCatalog({ MODEL_VISION: "on" })).toStrictEqual({
+      models: [
+        {
+          id: "deepseek-v4.1-flash",
+          name: "deepseek-v4.1-flash",
+          reasoning: true,
+          vision: true,
+          maxTokens: 32768,
+        },
+      ],
+      defaultModelId: "deepseek-v4.1-flash",
+    });
+  });
+
+  it("MODEL_ID=qwen-x、MODEL_REASONING=off、MODEL_VISION=off：恰一项，不支持推理也不看图", () => {
+    const env = { MODEL_ID: "qwen-x", MODEL_REASONING: "off", MODEL_VISION: "off" };
+    expect(resolveModelCatalog(env)).toStrictEqual({
       models: [{ id: "qwen-x", name: "qwen-x", reasoning: false, vision: false, maxTokens: 32768 }],
       defaultModelId: "qwen-x",
     });
@@ -83,13 +99,14 @@ describe("模型白名单配置 — 未配置白名单等于单模型", () => {
         MODEL_CATALOG: undefined,
         MODEL_ID: undefined,
         MODEL_REASONING: undefined,
+        MODEL_VISION: undefined,
       }),
     ).toStrictEqual(resolveModelCatalog({}));
   });
 
   it.each([" custom-model "])("旧式单模型的 MODEL_ID 原样保留，不去首尾空格（%j）", (raw) => {
     expect(resolveModelCatalog({ MODEL_ID: raw })).toStrictEqual({
-      models: [{ id: raw, name: raw, reasoning: true, vision: false, maxTokens: 32768 }],
+      models: [{ id: raw, name: raw, reasoning: true, vision: true, maxTokens: 32768 }],
       defaultModelId: raw,
     });
   });
@@ -277,6 +294,31 @@ describe("模型白名单配置 — 非法白名单使启动失败", () => {
       expect(message).not.toContain("bogus");
     },
   );
+
+  it.each(["on", "off", "", "bogus"])(
+    "白名单合法且同时设置 MODEL_VISION=%j：点名 MODEL_VISION",
+    (raw) => {
+      const message = messageOf({ [KEY]: THREE_MODELS, MODEL_VISION: raw });
+      expect(message).toContain("MODEL_VISION");
+      expect(message).not.toContain(KEY);
+      expect(message).not.toContain("MODEL_ID");
+      expect(message).not.toContain("MODEL_REASONING");
+      expect(message).not.toContain("bogus");
+    },
+  );
+
+  it("未配置白名单时 MODEL_VISION 为空串、yes、ON、true：各自点名 MODEL_VISION，消息与取值无关", () => {
+    const messages = ["", "yes", "ON", "true"].map((raw) => messageOf({ MODEL_VISION: raw }));
+    for (const message of messages) {
+      expect(message).toContain("MODEL_VISION");
+      expect(message).not.toContain(KEY);
+      expect(message).not.toContain("MODEL_REASONING");
+      // `ON` 是 `MODEL_VISION` 的子串，「不含取值」只对另两个非空取值有意义；四条消息相同即不随取值变。
+      expect(message).not.toContain("yes");
+      expect(message).not.toContain("true");
+    }
+    expect(new Set(messages).size).toBe(1);
+  });
 });
 
 describe("推理强度集合 — 可选强度与缺省强度", () => {
@@ -350,7 +392,7 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
   const defaultModelOf = (catalog: ModelCatalog): CatalogModel | undefined =>
     catalog.models.find((model) => model.id === catalog.defaultModelId);
 
-  it("缺省：modelCatalog 为单模型，缺省模型即该项且支持推理", () => {
+  it("缺省：modelCatalog 为单模型，缺省模型即该项且支持推理、能看图", () => {
     const settings = resolveAgentSettings({}, root);
     expect(settings.modelCatalog).toStrictEqual({
       models: [
@@ -358,7 +400,7 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
           id: "deepseek-v4.1-flash",
           name: "deepseek-v4.1-flash",
           reasoning: true,
-          vision: false,
+          vision: true,
           maxTokens: 32768,
         },
       ],
@@ -368,8 +410,9 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
     expect(defaultModelOf(settings.modelCatalog)?.reasoning).toBe(true);
   });
 
-  it("旧式单模型：MODEL_ID 与 MODEL_REASONING 原样进入 modelCatalog", () => {
-    const settings = resolveAgentSettings({ MODEL_ID: "qwen-x", MODEL_REASONING: "off" }, root);
+  it("旧式单模型：MODEL_ID、MODEL_REASONING 与 MODEL_VISION 原样进入 modelCatalog", () => {
+    const env = { MODEL_ID: "qwen-x", MODEL_REASONING: "off", MODEL_VISION: "off" };
+    const settings = resolveAgentSettings(env, root);
     expect(settings.modelCatalog).toStrictEqual({
       models: [{ id: "qwen-x", name: "qwen-x", reasoning: false, vision: false, maxTokens: 32768 }],
       defaultModelId: "qwen-x",

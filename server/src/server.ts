@@ -111,7 +111,7 @@ export interface ServerConfig extends AgentSettings, PreviewSettings {
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费三十六项应用 key——四项自有，agent 二十项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费三十七项应用 key——四项自有，agent 二十一项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,

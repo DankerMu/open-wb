@@ -17,8 +17,8 @@
 #     → 删除该会话 → 其临时空间 tree 404 → 登出。
 # 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control。
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
-# 三项输入框设置的逐键断言只在缺省单模型配置的服务上成立（未设 MODEL_CATALOG / MODEL_ID / MODEL_REASONING，
-# APPROVAL_MAX_MODE 未设或为 write / yolo）。
+# 三项输入框设置的逐键断言只在缺省单模型配置的服务上成立（未设 MODEL_CATALOG / MODEL_ID / MODEL_REASONING /
+# MODEL_VISION——推理开、看图开，APPROVAL_MAX_MODE 未设或为 write / yolo）。
 # (3c) 只动 zhangsan 的最近选择里的档位一列，并在本遍内改回 write（不动模型与推理强度，lisi 的不碰）。
 # 在 (3c) 的改档位与恢复之间失败的一遍，会把 zhangsan 的最近选择留在 yolo：库若保留，下一遍 (1) 的 approvalMode 断言即判红。
 # 恢复办法：以 zhangsan 对自己的任一会话 PATCH {"approvalMode":"write"}，或换一个新库（连同 SANDBOX_ROOT）。
@@ -199,11 +199,11 @@ jsonpath "$.pinnedAt" == null
 jsonpath "$.title" == "冒烟会话"
 jsonpath "$.scene" == "design"
 
-# (3c) 输入框设置的可选项：exact 200，body 逐字（缺省单模型配置：档位上界 yolo、推理开、上传 524288000 字节 / 10 个；
-# 该账号的最近选择为空或 write）。请求不带 query：路由对任何 `?` 都回 400。
+# (3c) 输入框设置的可选项：exact 200，body 逐字（缺省单模型配置：档位上界 yolo、推理开、看图开（未设 MODEL_VISION）、
+# 上传 524288000 字节 / 10 个；该账号的最近选择为空或 write）。请求不带 query：路由对任何 `?` 都回 400。
 GET {{base_url}}/api/composer/options
 HTTP 200
-{"approvalModes":["always-ask","write","yolo"],"models":[{"id":"deepseek-v4.1-flash","name":"deepseek-v4.1-flash","reasoning":true,"vision":false,"efforts":["off","minimal","low","medium","high","xhigh","max"],"defaultEffort":"high"}],"defaults":{"approvalMode":"write","modelId":"deepseek-v4.1-flash","reasoningEffort":"high"},"upload":{"maxBytes":524288000,"maxFiles":10}}
+{"approvalModes":["always-ask","write","yolo"],"models":[{"id":"deepseek-v4.1-flash","name":"deepseek-v4.1-flash","reasoning":true,"vision":true,"efforts":["off","minimal","low","medium","high","xhigh","max"],"defaultEffort":"high"}],"defaults":{"approvalMode":"write","modelId":"deepseek-v4.1-flash","reasoningEffort":"high"},"upload":{"maxBytes":524288000,"maxFiles":10}}
 
 # (3c) 改档位：exact 200，恰十四键，approvalMode yolo，title/scene 与另两项设置不变。不重试。
 # 本文件不对非 write 的会话发 prompt：(4) 之前改回 write。
@@ -307,7 +307,7 @@ jsonpath "$.events[1].id" == {{create_audit_id}}
 # (3c) 最近选择已恢复：options 的 body 与本块开头逐字相同（本遍内见证，不留给下一遍）。
 GET {{base_url}}/api/composer/options
 HTTP 200
-{"approvalModes":["always-ask","write","yolo"],"models":[{"id":"deepseek-v4.1-flash","name":"deepseek-v4.1-flash","reasoning":true,"vision":false,"efforts":["off","minimal","low","medium","high","xhigh","max"],"defaultEffort":"high"}],"defaults":{"approvalMode":"write","modelId":"deepseek-v4.1-flash","reasoningEffort":"high"},"upload":{"maxBytes":524288000,"maxFiles":10}}
+{"approvalModes":["always-ask","write","yolo"],"models":[{"id":"deepseek-v4.1-flash","name":"deepseek-v4.1-flash","reasoning":true,"vision":true,"efforts":["off","minimal","low","medium","high","xhigh","max"],"defaultEffort":"high"}],"defaults":{"approvalMode":"write","modelId":"deepseek-v4.1-flash","reasoningEffort":"high"},"upload":{"maxBytes":524288000,"maxFiles":10}}
 
 # (3c) 删除沿用 yolo 的那个会话（从未 prompt、未起进程）：exact 204、空 body。不重试。
 DELETE {{base_url}}/api/sessions/{{composer_id}}
