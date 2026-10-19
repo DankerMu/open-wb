@@ -102,5 +102,7 @@ For a known running call whose toolName (the name registered by its tool_executi
 - **THEN** it emits only its step.end (failed for the first), and no files.changed
 - **WHEN** a `write` start has `args:{path:"[xd://browser]",content:"{\"action\":\"close\",\"all\":true}"}`; another has `args.path` `xd://browser` and `content` `{"action":"run","code":"x` (unparsable); another has `content` the number 7; another has `path` `xd://browser` only on the prototype of `args`
 - **THEN** the first registers `browser` with detail first line `浏览器：关闭全部标签页`; the second and third register `browser` with detail `浏览器操作` followed by the compact JSON of `args` and carry `browser:{action:null,url:null,external:null}`; the fourth registers `write` with the compact JSON detail and no `browser` field
+- **WHEN** a browser start's `content` is `{"action":"open","url":"https://a/<5000 x>","app":{"path":"/bin/sh"}}`
+- **THEN** its detail's first line is the summary with the url cut to 200 codepoints plus `…`, and its second line is `⚠ 启动外部程序：/bin/sh` (the 4096-codepoint cap falls in the JSON part); its `browser` field keeps the full `url`
 - **WHEN** a browser start's `content` is `{"action":"run","code":"<5000 codepoints>","app":{"path":"/bin/sh"}}`
 - **THEN** its detail is capped at 4096 codepoints with the marker, while its mapper output `browser` field is `{action:"run",url:null,external:{path:"/bin/sh"}}`

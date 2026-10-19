@@ -9,10 +9,13 @@
  * failure an error event carries (upstream-classify.ts).
  * #910 declares thinking.end; the supervisor's thinking spans publish it, never this reducer.
  * Issue 1474 (design D8): published step.start, approval.request and thinking.end gain fields.
+ * #1526 registers a `write` to `xd://browser` as a `browser` step with a readable detail; its mapper
+ * step.start carries the audit fields as `browser` (never stored or published).
  */
 import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
+import { type BrowserAudit, browserStart } from "./omp/xd-browser.js";
 import type { SessionTodo } from "./session-todo.js";
 import type { ClosedSegment } from "./store-segments.js";
 import { classifyTurnFailure, type FailureReason, failureSentence } from "./upstream-classify.js";
@@ -69,13 +72,18 @@ export type ChatEvent<StepId extends string | number = number> =
       data: { messageId: number; approvalId: number; decision: "allow" | "deny" | "timeout" };
     };
 
-/** The mapper's step.start has four keys; the persisted one adds its offset and paired approval. */
+/**
+ * The mapper's step.start has four keys (a browser one adds `browser`, for the audit); the persisted
+ * one adds its offset and paired approval instead.
+ */
 type StepStart<StepId> = {
   messageId: number;
   stepId: StepId;
   name: string;
   detail: string;
-} & (StepId extends number ? { bodyOffset: number; approvalId: number | null } : unknown);
+} & (StepId extends number
+  ? { bodyOffset: number; approvalId: number | null }
+  : { browser?: BrowserAudit });
 type ThinkingEnd = { messageId: number; thinkingMs: number; segment: ClosedSegment };
 
 const GENERIC_FAILURE = "Agent execution failed";
@@ -230,15 +238,20 @@ function applyToolStart(state: EventState, frame: OmpFrame): ApplyResult {
   ) {
     return { state, events: [] };
   }
-  const detail = "args" in frame ? truncateStep(serializeArgs(frame.args)) : "";
+  // A browser call: summary and flag lines, then its content's JSON (else the args'); `args` absent → "".
+  const browser = name === "write" ? browserStart(frame.args) : undefined;
+  const json = browser?.json === undefined ? frame.args : browser.json;
+  const detail = truncateStep([...(browser?.head ?? []), serializeArgs(json)].join("\n"));
+  const registered = browser === undefined ? name : "browser";
+  const audit = browser === undefined ? {} : { browser: browser.browser };
   return {
     state: evolve(state, {
-      running: Object.freeze([...state.running, { id, name }]),
+      running: Object.freeze([...state.running, { id, name: registered }]),
     }),
     events: [
       {
         type: "step.start",
-        data: { messageId: state.messageId, stepId: id, name, detail },
+        data: { messageId: state.messageId, stepId: id, name: registered, detail, ...audit },
       },
     ],
   };

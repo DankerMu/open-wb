@@ -14,7 +14,7 @@ import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { AgentUnavailableError, OmpProcess, type SpawnImpl } from "../src/sessions/omp/process.js";
 import { SessionRuntime } from "../src/sessions/omp/runtime.js";
-import type { ApprovalRequest } from "../src/sessions/omp/ui-requests.js";
+import { type ApprovalRequest, approvalRequest } from "../src/sessions/omp/ui-requests.js";
 import { createRealFakeRuntime, type RealFakeRuntime } from "./session-supervisor-helpers.js";
 import {
   asRecord,
@@ -495,5 +495,87 @@ describe("omp source boundary guards", () => {
     expect(source("ui-requests.ts")).not.toMatch(
       /from "\.\/(process|runtime|commands)\.js"|stdin/u,
     );
+  });
+});
+
+/**
+ * Issue #1526 tool-approval「审批请求识别」 scenario「浏览器调用的审批改写为浏览器操作」: the three WHEN
+ * groups at the pure `approvalRequest(frame, id)` seam, plus one synthetic frame through OmpProcess.
+ * Expected tools and titles are literals from that scenario.
+ */
+describe("browser approvals are rewritten as browser operations (#1526)", () => {
+  const BROWSER = "Allow tool: write\nPath: xd://browser\nContent:\n";
+  const OPEN = '{"action":"open","url":"https://example.com/a"}';
+  const RUN =
+    '{"action":"run","name":"main","code":"return await tab.screenshot()","app":{"cdp_url":"http://10.0.0.5:9222"}}';
+  const CUT = '{"action":"run","code":"x[…5000ch elided…]"';
+  const classify = (title: string) =>
+    approvalRequest(selectFrame("b1", title, ["Approve", "Deny"]), "b1");
+
+  it("open, run with cdp_url and a truncated content: tool browser, rewritten titles", () => {
+    expect([OPEN, RUN, CUT].map((content) => classify(BROWSER + content))).toEqual([
+      { id: "b1", tool: "browser", title: "浏览器：打开 https://example.com/a" },
+      {
+        id: "b1",
+        tool: "browser",
+        title:
+          "浏览器：在标签页 main 执行脚本\n⚠ 连接外部浏览器：http://10.0.0.5:9222\n代码：\nreturn await tab.screenshot()",
+      },
+      {
+        id: "b1",
+        tool: "browser",
+        title: `浏览器操作（参数过长，以下为原文）\n⚠ 参数被截断，无法确认是否启动外部程序或连接外部浏览器\n${CUT}`,
+      },
+    ]);
+  });
+
+  it('a relay written as "yes": the summary, the unverified line, then 原文 and the raw text', () => {
+    const relay = '{"action":"open","url":"https://a","app":{"relay":"yes"}}';
+    expect(classify(BROWSER + relay)).toEqual({
+      id: "b1",
+      tool: "browser",
+      title: `浏览器：打开 https://a\n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n${relay}`,
+    });
+  });
+
+  it("an action with trailing spaces: the other branch verbatim, no 代码 section, then 原文", () => {
+    const run = '{"action":"run   ","code":"Bun.spawn([\'id\'])"}';
+    expect(classify(BROWSER + run)).toEqual({
+      id: "b1",
+      tool: "browser",
+      title: `浏览器：run   \n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n{"action":"run   ","code":"Bun.spawn(['id'])"}`,
+    });
+  });
+
+  it.each([
+    "Path: [xd://browser]",
+    "Path: [xd://browser#0A1B]",
+    "Path: XD://browser",
+    "Path: xd://browser\n",
+  ])("the device path written as %j is the same browser device", (pathLine) => {
+    expect(classify(`Allow tool: write\n${pathLine}\nContent:\n${OPEN}`)).toEqual({
+      id: "b1",
+      tool: "browser",
+      title: "浏览器：打开 https://example.com/a",
+    });
+  });
+
+  it.each([
+    "Allow tool: write\nPath: notes/xd://browser",
+    "Allow tool: write\nPath: xd://browser2\nContent:\n{}",
+    "Allow tool: write\nPath: xd://Browser\nContent:\n{}",
+  ])("%j stays an ordinary write approval with its title unchanged", (title) => {
+    expect(classify(title)).toEqual({ id: "b1", tool: "write", title });
+  });
+
+  it("OmpProcess surfaces the rewritten browser approval without cancelling it", async () => {
+    const run = await startSynthetic();
+    run.child.emitLine(selectFrame("w9", BROWSER + OPEN, ["Approve", "Deny"]));
+    await harness.waitFrame(run.proc, isUi("w9"), 8_000, run.frames);
+    expect(run.approvals).toEqual([
+      { id: "w9", tool: "browser", title: "浏览器：打开 https://example.com/a" },
+    ]);
+    await quiet(run.proc, () => false);
+    expect(uiAnswers(run.written)).toEqual([]);
   });
 });
