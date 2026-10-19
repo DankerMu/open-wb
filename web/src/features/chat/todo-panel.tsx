@@ -3,11 +3,13 @@
 // 在它之外。限高分两档：停靠区里有待决提问卡时（`compact`）取小——展开的面板要与第一张提问卡（正文
 // 顶满限高、带超长提示与失败文案时）一起落在停靠区的半列高之内，1440×900 与 390×844 下都是如此；没有
 // 提问卡时取大，多显示几项。显隐（`hasUnfinishedTask`）与按会话保存的展开状态由 composer-dock.tsx 决定。
-// 状态标记是可见的文字（不只靠颜色）；`name` 与 `content` 按文本渲染。列表被限高裁掉时带 `tabindex="0"`
-// （可由键盘聚焦滚动，design D3）：它不是控件，没有角色之外的交互。
+// 状态标记（epic-acceptance-followups D5，owner C1）：每项开头是 `aria-hidden` 的状态图标，颜色在图标的外包
+// span 上（svg 取 `currentColor`）；状态词放在 `data-slot="todo-status"` 的 `sr-only` 节点里，只供读屏，
+// 列表项的可访问文本因此以状态词开头、视觉上只见图标。`name` 与 `content` 按文本渲染。列表被限高裁掉时带
+// `tabindex="0"`（可由键盘聚焦滚动，design D3）：它不是控件，没有角色之外的交互。
 import { useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { Icon } from "../../components/icon.js";
+import { Icon, type IconName } from "../../components/icon.js";
 import type { ChatState } from "./stream.js";
 import { useClipped } from "./use-clipped.js";
 
@@ -20,6 +22,15 @@ const STATUS_LABEL: Record<TaskStatus, string> = {
   completed: "已完成",
   abandoned: "已放弃",
   blocked: "受阻",
+};
+
+/** owner C1：待办空心圆、进行中半圆弧、完成带勾的圆、放弃带叉的圆、受阻禁止符。 */
+const STATUS_ICON: Record<TaskStatus, IconName> = {
+  pending: "circle",
+  in_progress: "loader-circle",
+  completed: "circle-check",
+  abandoned: "circle-x",
+  blocked: "ban",
 };
 
 const STATUS_TONE: Record<TaskStatus, string> = {
@@ -121,16 +132,18 @@ function Phase({ name, tasks }: { name: string | null; tasks: Todo["phases"][num
       )}
       {tasks.map((task, at) => (
         <li
-          className="flex min-w-0 flex-none items-baseline gap-2 text-[12.5px] leading-normal"
+          className="flex min-w-0 flex-none items-start gap-2 text-[12.5px] leading-normal"
           data-slot="todo-task"
           // biome-ignore lint/suspicious/noArrayIndexKey: 同上，任务文本可以重复。
           key={at}
         >
           <span
-            className={`min-w-[3em] flex-none text-[11.5px] whitespace-nowrap ${STATUS_TONE[task.status]}`}
-            data-slot="todo-status"
-            data-status={task.status}
+            aria-hidden="true"
+            className={`flex h-lh flex-none items-center ${STATUS_TONE[task.status]}`}
           >
+            <Icon name={STATUS_ICON[task.status]} size={14} />
+          </span>
+          <span className="sr-only" data-slot="todo-status" data-status={task.status}>
             {STATUS_LABEL[task.status]}
           </span>
           <span

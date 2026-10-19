@@ -149,6 +149,43 @@ function textOf(root: HTMLElement, name: string) {
   return slot(name, root)?.textContent;
 }
 
+const STATUS_WORDS = ["待办", "进行中", "已完成", "已放弃", "受阻"];
+/** 颜色类（`STATUS_TONE` 的 `text-(--wb-…)`）。 */
+const tones = (element: Element) =>
+  [...element.classList].filter((name) => name.startsWith("text-(--wb-"));
+
+/**
+ * 每项的状态标记（design D5）：第一个子节点是 `aria-hidden` 的图标外包 span（带颜色类、内含一个 svg），
+ * 第一个不带 `aria-hidden` 的子节点是带 `sr-only` 的 `todo-status` 文本节点（无颜色类），列表项文本以状态词
+ * 开头；各项 svg 依次带 `lucide-<glyphs[i]>` 类。
+ */
+function expectStatusIcons(glyphs: string[]) {
+  const listed = within(panel()).getAllByRole("listitem");
+  expect(listed).toHaveLength(glyphs.length);
+  listed.forEach((item, at) => {
+    const wrapper = item.firstElementChild as HTMLElement;
+    expect(wrapper.tagName).toBe("SPAN");
+    expect(wrapper.getAttribute("aria-hidden")).toBe("true");
+    expect(wrapper.querySelectorAll("svg")).toHaveLength(1);
+    expect(tones(wrapper)).toHaveLength(1);
+    const status = slot("todo-status", item) as HTMLElement;
+    const shown = [...item.children].find((child) => child.getAttribute("aria-hidden") !== "true");
+    expect(shown).toBe(status);
+    expect(status.classList.contains("sr-only")).toBe(true);
+    expect(tones(status)).toEqual([]);
+    expect(STATUS_WORDS).toContain(status.textContent);
+    expect(item.textContent?.startsWith(status.textContent as string)).toBe(true);
+    expect(wrapper.querySelector("svg")?.classList.contains(`lucide-${glyphs[at]}`)).toBe(true);
+  });
+}
+
+/** 去掉视觉隐藏节点后面板的文本（jsdom 不加载 Tailwind，按 `sr-only` 类判定）：不含任何状态词。 */
+function expectNoVisibleStatusWord() {
+  const copy = panel().cloneNode(true) as HTMLElement;
+  for (const hidden of copy.querySelectorAll(".sr-only")) hidden.remove();
+  for (const word of STATUS_WORDS) expect(copy.textContent).not.toContain(word);
+}
+
 function doneSnapshot(todo: ChatMessageSnapshot["todo"]) {
   return chatSnapshot({
     status: "done",
@@ -194,7 +231,7 @@ afterEach(() => {
 });
 
 describe("task-list panel: content", () => {
-  it("T1 sits at the top of the dock above the pending card and the composer, with phases, five items and their status text, read-only", async () => {
+  it("T1 sits at the top of the dock above the pending card and the composer, with phases, five items, their status icons and screen-reader status text, read-only", async () => {
     const { fetchMock } = await mountPage({ ...snapshotWith([approval(7)]), todo: FIVE });
     const requests = fetchMock.mock.calls.length;
 
@@ -224,6 +261,9 @@ describe("task-list panel: content", () => {
       ["受阻", "等评审"],
     ]);
     expect(within(list).getAllByRole("listitem")).toHaveLength(5);
+    // owner C1：完成勾、进行中半圆弧、待办空心圆、放弃叉、受阻禁止符
+    expectStatusIcons(["circle-check", "loader-circle", "circle", "circle-x", "ban"]);
+    expectNoVisibleStatusWord();
     // 只读：除头部按钮外没有任何可交互控件。五项的清单没有被限高裁掉（jsdom 里内容高度不超过可见高度），
     // 所以列表也不带 tabindex；被裁掉时列表可聚焦，见 S1。
     expect(within(panel()).getAllByRole("button")).toEqual([header]);
@@ -249,6 +289,8 @@ describe("task-list panel: content", () => {
       ["进行中", "整理需求"],
       ["待办", "输出结论"],
     ]);
+    expectStatusIcons(["loader-circle", "circle"]);
+    expectNoVisibleStatusWord();
     expect(slotTexts("todo-phase")).toEqual([]);
     expect(screen.queryAllByText("走查")).toHaveLength(0);
   });
@@ -266,6 +308,8 @@ describe("task-list panel: content", () => {
 
     expect(slotTexts("todo-phase")).toEqual(["# <i>阶段</i>", "二"]);
     expect(items()[0]).toEqual(["待办", raw]);
+    expectStatusIcons(["circle", "ban"]);
+    expectNoVisibleStatusWord();
     expect(panel().querySelectorAll("b, strong, i, a, h1")).toHaveLength(0);
   });
 });
