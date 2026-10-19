@@ -180,7 +180,7 @@ browser:
 
 | 文件 | 合入后上限 | 组 |
 |---|---|---|
-| `server/src/sessions/omp/xd-browser.ts`（新，含照搬的 hashline 剥离） | ≤ 200 | 1 |
+| `server/src/sessions/omp/xd-browser.ts`（新，含照搬的 hashline 剥离与「规范」判定） | ≤ 260 | 1 |
 | `server/src/sessions/omp/ui-requests.ts`（现 45） | ≤ 90 | 1 |
 | `server/src/sessions/events.ts`（现 540） | 现有 + ≤ 20 | 1 |
 | `server/src/sessions/file-changes.ts`（现 103） | ≤ 140 | 1 |
