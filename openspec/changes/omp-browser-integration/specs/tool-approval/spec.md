@@ -28,3 +28,7 @@ omp 子进程 SHALL 按 omp-runtime 的 spawn 契约以该会话的有效审批�
 - **THEN** 四者都识别为 `browser`，`title` 与第一例相同
 - **WHEN** 审批 `title` 为 `Allow tool: write\nPath: notes/xd://browser`，或 `Allow tool: write\nPath: xd://browser2\nContent:\n{}`，或 `Allow tool: write\nPath: xd://Browser\nContent:\n{}`
 - **THEN** 三者都按普通 `write` 审批处理，`tool="write"`，`title` 为原文
+
+#### Scenario: 浏览器审批与浏览器步骤配对
+- **WHEN** 档位 `write` 的绑定会话一个回合里，omp 先发 `Path: xd://browser`、`Content:` 为 `{"action":"open","url":"https://a"}` 的审批并被允许，随后发同一调用的 `tool_execution_start`（`toolName:"write"`、`args.path` 为 `xd://browser`）；之后再发 `Path: notes.md` 的普通 `write` 审批、允许并开始该步骤
+- **THEN** 浏览器步骤登记名为 `browser`、其 `approvalId` 为那条浏览器审批的 id，ring 与 SSE 里它的 step.start 的 `data` 恰为 `{messageId, stepId, name:"browser", detail, bodyOffset, approvalId}` 六键、不带 `browser` 键；普通 `write` 步骤的 `approvalId` 为它自己那条审批的 id；回合结束时没有滞留的未配对审批
