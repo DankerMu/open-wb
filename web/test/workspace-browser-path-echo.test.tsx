@@ -188,6 +188,44 @@ describe("被取代的自身上报回声", () => {
     expect(onPathChange.mock.calls).toStrictEqual([["a.md"], ["b.md"], ["a.md"]]);
     expect(onSelectionChange.mock.calls).toStrictEqual([["a.md"], ["b.md"], ["a.md"]]);
   });
+
+  it("E：回声被合并跳过（上报 a、b、c 后只写回 b、c）——c.md 不被换掉，之后点 d.md 照常，file 四次点击各一次", async () => {
+    const { onPathChange, onSelectionChange, requests, setPath } = mount({
+      ...PLAIN,
+      [ROOT]: () =>
+        jsonResponse({ path: "", entries: ["a.md", "b.md", "c.md", "d.md"].map(fileEntry) }),
+      [fileOf("d.md")]: text("丁的正文"),
+    });
+    await within(column()).findByRole("button", { name: "d.md" });
+
+    fireEvent.click(row("a.md"));
+    fireEvent.click(row("b.md"));
+    fireEvent.click(row("c.md"));
+    expect(selectedRows()).toStrictEqual(["c.md"]);
+
+    setPath("b.md");
+    expect(selectedRows()).toStrictEqual(["c.md"]);
+    setPath("c.md");
+    expect(selectedRows()).toStrictEqual(["c.md"]);
+    expect(await pane().findByText("丙的正文", { exact: true })).toBeTruthy();
+    await settle();
+    expect(requests()).toStrictEqual([ROOT, fileOf("a.md"), fileOf("b.md"), fileOf("c.md")]);
+
+    fireEvent.click(row("d.md"));
+    setPath("d.md");
+    expect(await pane().findByText("丁的正文", { exact: true })).toBeTruthy();
+    await settle();
+    expect(selectedRows()).toStrictEqual(["d.md"]);
+    expect(requests()).toStrictEqual([
+      ROOT,
+      fileOf("a.md"),
+      fileOf("b.md"),
+      fileOf("c.md"),
+      fileOf("d.md"),
+    ]);
+    expect(onPathChange.mock.calls).toStrictEqual([["a.md"], ["b.md"], ["c.md"], ["d.md"]]);
+    expect(onSelectionChange.mock.calls).toStrictEqual([["a.md"], ["b.md"], ["c.md"], ["d.md"]]);
+  });
 });
 
 describe("宿主自己的值照旧套用", () => {

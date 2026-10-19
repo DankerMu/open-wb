@@ -6,7 +6,7 @@
 
 | 风险包 | 选中 | 落点 |
 |---|---|---|
-| Concurrency / shared state / ordering | 选中：正确性依赖「回声按上报顺序到达、可被合并跳过但不倒序」；须由 404、`reveal` 两种上报与同值重复证明 | 1.1、1.2、1.4 |
+| Concurrency / shared state / ordering | 选中：正确性依赖「回声按上报顺序到达、可被合并跳过但不倒序」；须由 404、`reveal` 两种上报、同值重复与合并跳过证明 | 1.1、1.2、1.4、1.5 |
 | Legacy compatibility / examples | 选中：宿主主动下发（深链、`pathSeq` 重新定位）不得被误判为回声；既有用例不改即绿 | 1.3、3.1 |
 | Error handling / rollback / partial outputs | 选中：404 后的清除与在途预览的取消只能由宿主的新要求或组件自己触发，不能由陈旧回声触发 | 1.1 |
 | Public API、Config、File IO、Schema、Auth、Resource limits、Release、Documentation | 未选：`WorkspaceBrowser` 的属性与回调签名不变，不改配置、依赖或文档 | — |
@@ -17,6 +17,7 @@
 - [x] 1.2 用例 B（`reveal` 落地 → 点击）：在未改动代码上红
 - [x] 1.3 用例 C1（`pathSeq` 下发 `null`）、C2（普通树里未上报过的 `c.md`）照常套用：改前改后都绿
 - [x] 1.4 用例 D（`R=[a,b,a]` 逐个回声）：改前红（多出的 `file` 请求），改后绿
+- [x] 1.5 用例 E（回声被合并跳过、splice 落在 index≥1，cross-review r1 G1）：改前红，改后绿
 
 ## 2. 实现
 
