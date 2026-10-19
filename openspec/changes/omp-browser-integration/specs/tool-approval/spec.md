@@ -26,6 +26,8 @@ omp 子进程 SHALL 按 omp-runtime 的 spawn 契约以该会话的有效审批�
 - **THEN** 三者都作为审批请求上抛，`tool="browser"`；`title` 依次恰为 `浏览器：打开 https://example.com/a`、`浏览器：在标签页 main 执行脚本\n⚠ 连接外部浏览器：http://10.0.0.5:9222\n代码：\nreturn await tab.screenshot()`、`浏览器操作（参数过长，以下为原文）\n⚠ 参数被截断，无法确认是否启动外部程序或连接外部浏览器\n{"action":"run","code":"x[…5000ch elided…]"`；`chat_approvals` 的 `tool`/`title` 与 `approval.request` 事件同为这些值，作答后 `session.approval` 审计的 `detail.tool="browser"`；随后同一调用的 `browser` 步骤与该审批配对
 - **WHEN** 审批 `title` 为 `Allow tool: write\nPath: xd://browser\nContent:\n{"action":"open","url":"https://a","app":{"relay":"yes"}}`
 - **THEN** `tool="browser"`，`title` 恰为 `浏览器：打开 https://a\n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n{"action":"open","url":"https://a","app":{"relay":"yes"}}`
+- **WHEN** 审批 `title` 为 `Allow tool: write\nPath: xd://browser\nContent:\n{"action":"run   ","code":"Bun.spawn(['id'])"}`
+- **THEN** `title` 恰为 `浏览器：run   \n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n{"action":"run   ","code":"Bun.spawn(['id'])"}`（`action` 不是三个值之一：摘要行走「其它」分支、原样带三个空格；`代码：` 段只在 `action` 恰为 `run` 时出现，原文段让审批人看到代码）
 - **WHEN** 审批 `title` 的第二行分别为 `Path: [xd://browser]`、`Path: [xd://browser#0A1B]`、`Path: XD://browser`，以及路径为 `xd://browser` 后接一个换行（`Path: xd://browser` 与 `Content:` 之间多出一个空行），其余与第一例相同
 - **THEN** 四者都识别为 `browser`，`title` 与第一例相同
 - **WHEN** 审批 `title` 为 `Allow tool: write\nPath: notes/xd://browser`，或 `Allow tool: write\nPath: xd://browser2\nContent:\n{}`，或 `Allow tool: write\nPath: xd://Browser\nContent:\n{}`

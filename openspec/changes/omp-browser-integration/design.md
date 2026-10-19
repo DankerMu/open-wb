@@ -146,7 +146,7 @@ browser:
 - [截断的审批 `Content` 无法解析、`app` 可能被截掉] → 卡片退回原文，并固定带一行「参数被截断，无法确认是否启动外部程序或连接外部浏览器」；步骤 detail 与审计用 `tool_execution_start` 的完整参数，不受此影响。
 - [omp 改了 `xd://` 路径的解包规则或 hashline 前缀剥离规则] → `isBrowserDevicePath` 与 `parseBrowserContent` 的剥离都照搬 omp 并注明来源（`plan-mode-guard.ts`、`internal-urls/`、`hashline/src/prefixes.ts`）；升级 omp 须重核（同 overlay）。
 - [照搬的 `read` 元数据正则（`hashline/src/prefixes.ts` `READ_TRUNCATION_NOTICE_RE`）对特制的单行仍是平方级] → 剥离只在文本不超过 16384 个码元时做，实测近 16384 字符的特制行约 113 ms、每行查两到三次，最坏几百毫秒且有上限；行号前缀正则已改成等价的线性写法（PR #1540 修复 1）。登记为残余。
-- [omp 的参数修复（`validateToolArguments`）比宿主的「规范」判定认得多] → 不照搬修复，不规范即无法确认（多判只多一行警示与一个审计标记）；规范的参数 omp 不做修复，两边看到的字段一致。升级 omp 时与 schema 一起重核。
+- [omp 的参数修复（`validateToolArguments`）比宿主的「规范」判定认得多] → 不照搬修复，不规范即无法确认（多判只多一行警示与一个审计标记）；「规范」收紧到 omp 首轮校验必然通过（`action` 必填、枚举取值精确、`viewport` 形态精确——PR #1540 复审 1：枚举只查「是字符串」时，夹带 `</arg_key>` 的取值让首轮失败、spill 修复拆出 `app`），修复只在首轮失败后运行，所以规范的参数两边看到的字段一致。升级 omp 时与 schema 一起重核。
 - [审计 `detail` 无长度上限（`core/audit/index.ts:55`），`url`、`external.args`、`cdpUrl` 全长写入] → 与审批 `title` 同样不截；接受。
 - [审批 title 的 `Path:` 也会被 omp 截到 2000 码元（`approval.ts:258-262`）：浏览器设备路径后接近两千个填充字符时，审批侧看到的是截断路径、判为 `write`，步骤侧用完整参数判为 `browser`，按名配对错开、该审批滞留] → 审计不受影响（来自步骤侧的完整参数）；只是卡片退回普通 `write` 原文且配对滞留，需要模型刻意构造超长路径，登记为残余。
 - [`MODEL_VISION` 缺省 on 改变既有部署] → system.md 升级提示；上游不支持图片输入的部署写 `off`。
