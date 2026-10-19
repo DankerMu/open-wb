@@ -568,6 +568,8 @@ export function useChatSession() {
           }
           attachments.adopt(session.id, session.workspaceId);
           refreshList(client);
+          // Sync commit only holds while routes have no loader/lazy/middleware; adding one reopens
+          // #1543 (guarded by chat-page-welcome-handoff.test.tsx).
           navigate(
             sessionNavigation(location.pathname, location.search, location.hash, session.id),
             { flushSync: true },

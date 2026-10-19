@@ -130,14 +130,20 @@ describe("welcome-state create-send handoff followed by another navigation (#154
     await expectNextSend(fetchMock);
   });
 
-  it("C: selecting the created session afterwards does not send its prompt again", async () => {
-    const { fetchMock } = await sendThenLeave(replaceToWelcome);
-    await expectWelcomeReady(fetchMock);
-    const nav = await findList(TITLE_FALLBACK);
-    fireEvent.click(within(nav).getByRole("button", { name: TITLE_FALLBACK }));
-    await waitFor(() => expect(currentLocation()).toBe(`/?session=${FIRST}`));
-    await screen.findByRole("region", { name: "消息" });
-    await act(macrotask);
-    expect(promptRequests(fetchMock, FIRST)).toEqual([["POST", '{"message":"你好"}']]);
-  });
+  it.each([
+    ["replace", replaceToWelcome],
+    ["history back", historyBack],
+  ] as const)(
+    "C: after a %s, selecting the created session does not send its prompt again",
+    async (_, leave) => {
+      const { fetchMock } = await sendThenLeave(leave);
+      await expectWelcomeReady(fetchMock);
+      const nav = await findList(TITLE_FALLBACK);
+      fireEvent.click(within(nav).getByRole("button", { name: TITLE_FALLBACK }));
+      await waitFor(() => expect(currentLocation()).toBe(`/?session=${FIRST}`));
+      await screen.findByRole("region", { name: "消息" });
+      await act(macrotask);
+      expect(promptRequests(fetchMock, FIRST)).toEqual([["POST", '{"message":"你好"}']]);
+    },
+  );
 });

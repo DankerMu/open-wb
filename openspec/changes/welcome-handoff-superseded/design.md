@@ -19,7 +19,7 @@
 
 ## Change surface / 约束
 
-- Change surface：`web/src/features/chat/use-chat-session.ts`（一处 `navigate` 选项）、`web/src/main.tsx`、上列测试 helper / 测试的导入、新测试文件（建议 `web/test/chat-page-welcome-handoff.test.tsx`，复用 `chat-page-welcome-scene-support.tsx` 的 `CREATED_IDS` / `welcomeRoutes`）。
+- Change surface：`web/src/features/chat/use-chat-session.ts`（一处 `navigate` 选项与一条说明其依赖「路由无 loader/lazy/middleware」的注释）、`web/src/main.tsx`、`biome.json`（`noRestrictedImports` 禁止从 `react-router` 导入 `RouterProvider`，守卫 D2 不被悄悄回退；放在顶层而非 override，因 `ui-layering-exemptions` 守卫只允许一个 override）、上列测试 helper / 测试的导入、新测试文件（建议 `web/test/chat-page-welcome-handoff.test.tsx`，复用 `chat-page-welcome-scene-support.tsx` 的 `CREATED_IDS` / `welcomeRoutes`）。
 - Must preserve：
   - 创建在途（`sessionId === null`）时欢迎态的「停止」（禁用）与锁定不变。
   - 正常首次发送恰一次创建、恰一次 prompt；#872「新建会话」在交接未完成时不导航；选中别的会话时既有作废路径。

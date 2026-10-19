@@ -10,7 +10,7 @@
 
 - **自己的那次导航同步提交**：创建返回后的 `navigate(<?session=id>)` 带 `flushSync: true`。目标 location 在创建续延里同步提交，同步 lane 的被动 effect 在 commit 末同步执行，派发 effect 随即发出 prompt、把 owner 改写为该会话；之后任何导航（后退、replace、地址栏）都是另一个宏任务，落进既有的「回合在途时离开」路径（清理 effect 按 `requestedSessionId` 变化收尾，欢迎态不再认领 owner，输入框可发送）。不新增状态机分支。
 - **Provider 换成 `react-router/dom`**：`web/src/main.tsx` 的 `RouterProvider` 改从 `react-router/dom` 导入（它与 `react-router` 的同名组件只差接上了 `ReactDOM.flushSync`；不传 `flushSync` 的导航行为不变）。渲染应用路由的测试 helper 同样改导入，否则 `flushSync` 在测试里是静默的空操作（router 只 `warnOnce`）。
-- **语义（issue 允许「按实现者定的语义」）**：prompt **会**发给新会话（恰一次，绝不为零）；该会话在侧栏里照常出现并运行；用户随后离开不丢 prompt、不补发；此保证限于此刻没有待上传附件的发送——有待上传附件时派发要等上传，上传期间离开按既有规则作废（0 次 prompt、空会话留存），行为不变、属非目标。这与 chat-web「会话页」的「the create-send operation's own URL handoff SHALL NOT lose its prompt」一致，而检测-作废方案会与之冲突。#235 当时「不切 provider」是针对那个对账缺陷的范围限定，不是对 provider 的长期约束。
+- **语义（issue 允许「按实现者定的语义」）**：prompt **请求**会发给新会话（恰一次，绝不为零）；该会话照常出现在侧栏；用户随后离开不再卡住、不补发。离开时在途的 prompt 请求按「会话页」既有规则被客户端中止，服务端是否已处理取决于请求是否已到达——极快的后退仍可能留下空会话（与「prompt 在途时导航走」相同）；此保证限于此刻没有待上传附件的发送——有待上传附件时派发要等上传，上传期间离开按既有规则作废（0 次 prompt、空会话留存），行为不变、属非目标。这与 chat-web「会话页」的「the create-send operation's own URL handoff SHALL NOT lose its prompt」一致，而检测-作废方案会与之冲突。#235 当时「不切 provider」是针对那个对账缺陷的范围限定，不是对 provider 的长期约束。
 - 新增确定性用例：同一个 `act()` 里创建落定后立即 `replace("/")`；以及创建落定后立即后退（POP）。
 
 ## Capabilities
