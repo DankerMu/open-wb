@@ -38,7 +38,7 @@ Minimal mergeable slice: atomic - 共享 seam 是一个：`events.ts` 对浏览�
 - [x] 2.4 测试先行（overlay）：`omp-host-overlay.test.ts` 按 omp-runtime「宿主 overlay」改字节断言并加「浏览器块随 BROWSER_BIN」的两种 `browserEnabled` 输出（该场景归组 3，本组只做 `writeHostOverlay` 层的部分覆盖）与「看图块随白名单」的 `MODEL_CATALOG` 三模型一例（该场景归组 4，本组部分覆盖第三例）；`omp-layout-helpers.ts` 的期望字节改为固定块 + 浏览器块（`enabled: false`）；新 `server/test/server-startup-overlay.test.ts` 在编译入口上断言「overlay 写入」「overlay 不随档位变化」的新字节与 `MODEL_CATALOG` 带 `vision:true` 时的看图块；官方二进制对照用例（新 `server/test/omp-official-browser.test.ts`，加进 `.github/scripts/ci-uid-isolation.sh:292` 的清单并同步 `scripts/test-ci-harness.sh` 的清单断言）加「未配置浏览器时浏览器调用失败且不下载」；验证：在未改动代码上跑，新断言红、其余绿
 - [x] 2.5 实现 design D2：`writeHostOverlay(stateDir, {browserEnabled, visionModelId})` 模板化，本组 `browserEnabled` 恒为 `false`（组 3 接 `BROWSER_BIN`），启动时传入白名单第一个 `vision:true` 的 id；四个调用方同步；验证：2.4 全绿、`npm test --workspace server`（含本机 `WORKBUDDY_OMP_TEST=1` 的官方用例）、typecheck、size-guard
 - [x] 2.6 文档：`docs/architecture/system.md` 新增 9.8「浏览器与参考镜像」的 overlay 部分（钉的六个浏览器键与理由、截图目录、看图角色取白名单第一个 vision 模型）；`docs/adr/0012-omp-project-config-host-overlay.md` 补充一节（浏览器键已钉；`app.path`/`app.args`/`app.cdp_url`/`app.relay` 是工具参数、钉不住，由确认卡与审计显著标出；`modelRoles` 只压 `vision`）；验证：`grep -c 'screenshotDir' docs/architecture/system.md` ≥ 1，`grep -c 'cdp_url' docs/adr/0012-omp-project-config-host-overlay.md` ≥ 1
-- [ ] 2.7 PR 正文：2.3 实测结果；本组合入后浏览器工具对全部部署消失（不再超时），由组 3 按 `BROWSER_BIN` 恢复
+- [x] 2.7 PR 正文：2.3 实测结果；本组合入后浏览器工具对全部部署消失（不再超时），由组 3 按 `BROWSER_BIN` 恢复
 
 Suggested fixture level: expanded - 改宿主 overlay 的字节契约（omp 子进程治理的配置面），并有一个先行实测决定截图落点。
 Minimal mergeable slice: atomic - overlay 模板与它的浏览器块是同一份文件的同一次改写；假上游标记是本组实测（2.3）与官方二进制场景的输入，拆出去后两者都无从运行；`BROWSER_BIN` 的接线已作为组 3 拆出（本组单独合入即消除超时：浏览器在所有部署上被禁用）。
