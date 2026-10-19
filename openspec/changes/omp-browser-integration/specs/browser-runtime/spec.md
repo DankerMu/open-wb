@@ -27,11 +27,12 @@
 ### Requirement: 浏览器操作的可读描述
 服务端 SHALL 有一个无 IO 的纯函数模块（`server/src/sessions/omp/xd-browser.ts`），供 tool-approval「审批请求识别」、chat-stream「纯协议事件归约」与「浏览器调用审计」共用，三处 SHALL NOT 各自另写判定或解析：
 - 设备路径判定：一个路径字符串指向浏览器设备，当且仅当它按 omp 执行路径的同一判定指向 `browser`（依赖 omp v18.0.10 的消费代码，升级 omp 时 SHALL 重新核对）：对原串做 omp 的方括号解包（`plan-mode-guard.ts` `unwrapHashlineHeaderPath`：去掉结尾 JS 空白后若形如 `[<内层>]`，且 `<内层>` 为非空的 `P` 或 `P#XXXX`（`XXXX` 恰四个十六进制字符、`P` 不含 `#`），取 `P`，否则取原串），结果匹配 `^[a-z][a-z0-9+.-]*://`（不分大小写，`internal-urls/router.ts:80`），以 WHATWG `new URL()` 解析成功（`internal-urls/parse.ts:59`），且其 `href` 以不分大小写的 `xd://` 开头、其后恰为 `browser`（`xd-protocol.ts:41`；URL 序列化会去掉首尾 C0 控制字符与空格、全部制表符与换行、空端口与空 userinfo，所以 `xd://browser:`、`xd://@browser` 也在内；`xd:` 是非特殊 scheme，主机名不转小写，设备名区分大小写）。判定 SHALL NOT 在解包前去掉首部空白或控制字符：omp 以未去空白的原串判 `canHandle`（`tools/write.ts:1141`），首部带空白或控制字符的路径被当作普通文件写入，判为浏览器会把这次文件写入登记成浏览器步骤、漏掉它的文件变更。
-- 解析：参数文本经 `JSON.parse` 得到普通对象、且其自有 `action` 为非空字符串时成功；原文不成功时，按 omp 写入前的 hashline 前缀剥离（`tools/write.ts:332-363` `stripWriteContent`，规则取自 `hashline/src/prefixes.ts` 的 `stripHashlinePrefixes`：每个非空内容行（长度不为 0 的行；只含空白的行也算内容行）都匹配行号前缀时，去掉 `[<路径>#XXXX]` 头行与 `read` 的元数据行、逐行去掉行号前缀；没有剥离时，首个非空行为松散头行 `[<路径>#<任意>]` 的，去掉该行后再按同一规则剥离）处理后再解析一次，仍不成功即失败。宿主不知道 omp 是否处在 hashline 模式，所以两次取先成功者；合法 JSON 对象的首个非空行以 `{` 起头、不会被剥离，原文能解析时两者一致。只读自有属性；`name`、`url`、`code` 取非空字符串，`all`、`kill` 取布尔，`app` 取普通对象，其中 `path`、`cdp_url` 取非空字符串、`relay` 取布尔、`args` 取全部元素为字符串的非空数组；类型不符的字段视同缺席。
-- 摘要行（恰一行）：`action` 为 `open` 时，有 `url` 为 `浏览器：打开 <url>`，否则为 `浏览器：打开标签页 <name>`；`run` 为 `浏览器：在标签页 <name> 执行脚本`；`close` 时 `all` 为真为 `浏览器：关闭全部标签页`，否则为 `浏览器：关闭标签页 <name>`，两者在 `kill` 为真时都再接 `并结束外部浏览器`；其它 `action` 为 `浏览器：<action>`。`<name>` 缺席时为 `main`（omp 的缺省标签页名）。解析失败时摘要行为 `浏览器操作`。
-- 标志行（零到三行，按此次序，有才写）：`app.path` 存在为 `⚠ 启动外部程序：<path>`，`app.args` 存在时其后再接一个空格与 `参数 <args 的紧凑 JSON>`；`app.cdp_url` 存在为 `⚠ 连接外部浏览器：<cdp_url>`；`app.relay` 为真为 `⚠ 经中继连接用户自己的浏览器`。解析失败时没有标志行。
-- 审计字段：解析成功时为 `{action, url, external}`——`url` 缺席为 `null`，`external` 为 `{path, args, cdpUrl, relay}` 中出现的项（`relay` 只在为真时出现）组成的对象，都没有为 `null`；解析失败时为 `{action:null, url:null, external:null}`。
-插入摘要行与标志行的字符串值 SHALL 先把其中的 CR、LF、U+2028、U+2029 各换成一个空格，使每一行确实只占一行。
+- 解析：参数文本经 `JSON.parse` 得到普通对象时成功；原文不成功、且文本不超过 16384 个 UTF-16 码元时，按 omp 写入前的 hashline 前缀剥离（`tools/write.ts:332-363` `stripWriteContent`，规则取自 `hashline/src/prefixes.ts` 的 `stripHashlinePrefixes`：每个非空内容行（长度不为 0 的行；只含空白的行也算内容行）都匹配行号前缀时，去掉 `[<路径>#XXXX]` 头行与 `read` 的元数据行、逐行去掉行号前缀；没有剥离时，首个非空行为松散头行 `[<路径>#<任意>]` 的，去掉该行后再按同一规则剥离）处理后再解析一次，仍不成功即失败（超过 16384 个码元不做剥离：剥离的逐行正则与重复去前缀在超长输入上是平方级，而宿主进程为所有会话共用；行号前缀正则可改写成匹配集合与匹配终点都相同的线性写法）。宿主不知道 omp 是否处在 hashline 模式，所以两次取先成功者；合法 JSON 对象的首个非空行以 `{` 起头、不会被剥离，原文能解析时两者一致。只读自有属性：`action`、`name`、`url`、`code` 取非空字符串，`all`、`kill` 取布尔，`app` 取普通对象，其中 `path`、`cdp_url` 取非空字符串、`relay` 取布尔、`args` 取全部元素为字符串的非空数组；不符的不取。
+- 规范与无法确认：解析得到的对象恰为 omp v18.0.10 浏览器工具参数 schema 的形态（`tools/browser.ts:48-74`）时称为规范——自有键都在 `action`、`name`、`url`、`app`、`viewport`、`wait_until`、`dialogs`、`code`、`timeout`、`all`、`kill`、`i` 之中；`action`、`name`、`url`、`code`、`wait_until`、`dialogs` 为字符串，`timeout` 为数，`all`、`kill` 为布尔，`viewport` 为普通对象，`i` 不限；`app` 出现时为普通对象，其自有键都在 `path`、`cdp_url`、`relay`、`args`、`target` 之中，`path`、`cdp_url`、`target` 为字符串，`relay` 为布尔，`args` 为全部元素为字符串的数组。omp 执行的不是 `JSON.parse` 的结果，而是经 `validateToolArguments`（`ai/src/utils/validation.ts:1930`；`tools/xdev.ts:427,457`）修复后的参数：解开多套一层引号的键、把扁平路径键拼回对象、把 JSON 字符串解析成对象、把 `"yes"`/`"true"`/`1` 等转成布尔、把数转成字符串——不规范的参数可能在 omp 里成为带 `app.path`、`app.cdp_url` 或 `app.relay` 的调用。宿主不照搬这些修复，而是把下列两种情形判为**无法确认**（失败即关闭，多判只多一行警示与一个审计标记）：解析成功但不规范；解析失败且文本超过 16384 个码元（未做剥离）。依赖 omp v18.0.10 的 schema 与修复逻辑，升级 omp 时 SHALL 重新核对。
+- 摘要行（恰一行）：`action` 为 `open` 时，有 `url` 为 `浏览器：打开 <url>`，否则为 `浏览器：打开标签页 <name>`；`run` 为 `浏览器：在标签页 <name> 执行脚本`；`close` 时 `all` 为真为 `浏览器：关闭全部标签页`，否则为 `浏览器：关闭标签页 <name>`，两者在 `kill` 为真时都再接 `并结束外部浏览器`；其它 `action` 为 `浏览器：<action>`。`<name>` 缺席时为 `main`（omp 的缺省标签页名）。解析失败或 `action` 缺席时摘要行为 `浏览器操作`。
+- 标志行（零到四行，按此次序，有才写）：`app.path` 存在为 `⚠ 启动外部程序：<path>`，`app.args` 存在时其后再接一个空格与 `参数 <args 的紧凑 JSON>`；`app.cdp_url` 存在为 `⚠ 连接外部浏览器：<cdp_url>`；`app.relay` 为真为 `⚠ 经中继连接用户自己的浏览器`；无法确认时最后为 `⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器`。
+- 审计字段：`{action, url, external}`——`action`、`url` 缺席（含解析失败）为 `null`；`external` 为 `{path, args, cdpUrl, relay, unverified}` 中出现的项组成的对象（`relay` 只在为真时出现，`unverified` 只在无法确认时出现、取 `true`），都没有为 `null`。
+插入摘要行与标志行的字符串值（`args` 为其紧凑 JSON）SHALL 先把其中的 C0 控制字符（含 CR、LF）、U+007F–U+009F、U+2028、U+2029 与双向控制字符 U+202A–U+202E、U+2066–U+2069 各换成一个空格，再只保留前 200 个码点（超出时接 `…`），使每一行确实只占一行、显示不被控制字符伪装，且步骤 detail 的 4096 码点截断切不到标志行。
 
 #### Scenario: 设备路径判定
 - **WHEN** 判定 `xd://browser`、`XD://browser`、`[xd://browser]`、`[xd://browser#0a1B]`、`xd://browser `（尾部空格）、`xd://Browser`、`xd://browser2`、`[xd://browser#XYZ1]`、`notes/xd://browser`、`xd://browser/x`
@@ -53,7 +54,15 @@
 
 #### Scenario: 越界形态的标志行
 - **WHEN** 描述 `{"action":"open","url":"https://a","app":{"path":"/bin/sh","args":["-c","id"],"cdp_url":"http://10.0.0.5:9222","relay":true}}`；另一次 `app` 为 `{"path":"","relay":"yes","args":[1]}`；另一次 `url` 含换行 `https://a\nb`
-- **THEN** 第一次在摘要行后恰为三行 `⚠ 启动外部程序：/bin/sh 参数 ["-c","id"]`、`⚠ 连接外部浏览器：http://10.0.0.5:9222`、`⚠ 经中继连接用户自己的浏览器`，审计字段 `external` 为 `{path:"/bin/sh",args:["-c","id"],cdpUrl:"http://10.0.0.5:9222",relay:true}`；第二次没有标志行、`external` 为 `null`；第三次摘要行为 `浏览器：打开 https://a b`
+- **THEN** 第一次在摘要行后恰为三行 `⚠ 启动外部程序：/bin/sh 参数 ["-c","id"]`、`⚠ 连接外部浏览器：http://10.0.0.5:9222`、`⚠ 经中继连接用户自己的浏览器`，审计字段 `external` 为 `{path:"/bin/sh",args:["-c","id"],cdpUrl:"http://10.0.0.5:9222",relay:true}`；第二次（`relay` 不是布尔、`args` 含数）恰一行 `⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器`、`external` 为 `{unverified:true}`；第三次摘要行为 `浏览器：打开 https://a b`
+- **WHEN** 描述 `{"action":"open","url":"https://a/<5000 个 x>","app":{"path":"/bin/sh"}}`；另一次 `url` 为 `https://a\u202Eb`（含真实的 U+202E）
+- **THEN** 第一次摘要行为 `浏览器：打开 ` 接 `https://a/<x…>` 的前 200 个码点再接 `…`，其后仍恰一行 `⚠ 启动外部程序：/bin/sh`，审计 `url` 为完整原值；第二次摘要行为 `浏览器：打开 https://a b`
+
+#### Scenario: 不规范的参数无法确认
+- **WHEN** 依次描述 `{"action":"open","url":"https://a","app":"{\"path\":\"/bin/sh\"}"}`（`app` 为 JSON 字符串）、`{"action":"open","url":"https://a","app":{"relay":"yes"}}`、`{"action":"open","url":"https://a","app":{"path":123}}`、`{"action":"open","url":"https://a","\"app\"":{"path":"/bin/sh"}}`（键多套一层引号）、`{"action":"open","url":"https://a","app.path":"/bin/sh"}`、`{"\"action\"":"open","app":{"path":"/bin/sh"}}`
+- **THEN** 前五个摘要行为 `浏览器：打开 https://a`、第六个为 `浏览器操作`；六个的标志行最后都恰为一行 `⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器`（第六个在它之前另有 `⚠ 启动外部程序：/bin/sh`）；审计 `external` 前五个为 `{unverified:true}`、第六个为 `{path:"/bin/sh",unverified:true}`
+- **WHEN** 描述 `{"action":"open","url":"https://a","viewport":{"width":800,"height":600},"wait_until":"load","dialogs":"accept","timeout":5,"i":"x"}`；另描述 `{"action":"open"}`、换行、再接 20000 个空格与 `x` 的文本（原文不是 JSON、超过 16384 个码元）
+- **THEN** 前者规范：恰为摘要行 `浏览器：打开 https://a`、没有标志行、`external` 为 `null`；后者在 1 秒内返回，摘要行为 `浏览器操作`、恰一行 `⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器`、审计字段为 `{action:null, url:null, external:{unverified:true}}`
 
 ### Requirement: 浏览器调用审计
 每个登记名为 `browser` 的工具步骤 SHALL 有一条审计：supervisor 落库该步骤 `step.start` 时（`server/src/sessions/turn-control.ts` 的 step.start 分支经 `store.startStep`），在插入步骤行的同一 SQLite 事务内经 audit-core 的 `emit` 写入 `kind="session.browser"`、`actorId` 为会话 `owner_id`、`title="浏览器操作"`、`detail={sessionId, messageId, action, url, external}`，其中 `action`、`url`、`external` 取归约器为该 step.start 给出的 `browser` 字段（chat-stream「纯协议事件归约」；由完整、未截断的参数算出，「浏览器操作的可读描述」的审计字段）。三个档位都写（`yolo` 档没有审批，这是唯一的痕迹）；审批照旧另写 `session.approval`。`detail` SHALL NOT 含 `code` 或其它参数原文。审计写入失败、或 store 未配置 `emit` 时，该步骤不落库、不发布（与审批结算缺 `emit` 时一样 fail closed），沿既有 owned error-sink 路径处理。
@@ -61,6 +70,8 @@
 #### Scenario: 每次浏览器调用一条审计
 - **WHEN** 档位 `yolo` 的绑定会话一个回合里有两个浏览器步骤（`open` 带 `url`；`run` 带长度超过 4096 码点的 `code` 与 `app.cdp_url`）和一个 bash 步骤
 - **THEN** 审计恰多两条 `session.browser`，`actorId` 为会话所有者；第一条 `detail` 为 `{sessionId, messageId, action:"open", url:<url>, external:null}`，第二条为 `{…, action:"run", url:null, external:{cdpUrl:<cdp_url>}}`（不因 detail 截断而丢失），两条都不含 `code` 原文；bash 步骤没有 `session.browser`
+- **WHEN** 同一档位的另一回合里一个浏览器步骤的 `content` 为 `{"action":"open","url":"https://a","app":"{\"path\":\"/bin/sh\"}"}`
+- **THEN** 它的 `session.browser` 的 `detail.external` 为 `{unverified:true}`
 
 #### Scenario: 审计失败时步骤不落库
 - **WHEN** 浏览器步骤 `step.start` 的审计写入失败；另一次 store 未配置 `emit`
