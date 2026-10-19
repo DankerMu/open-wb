@@ -13,7 +13,7 @@
 | Legacy compatibility / examples | 选中：规格「字节不变」场景改为「只差一行」，改前夹具不动；全部钉 `8192` 字节的启动 / 代理测试改取值；system.md 示例加 `maxTokens`；既有安全断言全部保留 | 组 1、组 2 |
 | Error handling / rollback / partial outputs | 选中：流式半截 HTML 的容错解析与终态一致；图片加载失败不弹提示；点「发送」即消失、之后被拒 / 停止 / 快照失败都不复现，快照重装而清单内容不变时保留；组 2：非法 `maxTokens` 在任何文件系统 / 数据库 / 监听动作之前启动失败、不写出 `models.yml`（model-selection 场景既有断言）；「实测为 null / 不等时停下回 owner」是流程闸门，不是代码路径 | 组 1、组 2、组 3 |
 | Release / packaging / dependency compatibility | 选中：web 新增 `rehype-raw@7.0.0`、`rehype-sanitize@6.0.0`（PR 正文按 AGENTS.md:40 说明为何现有工具做不到）；`ATTRIBUTION.md` 登记 + 守卫断言；lockfile 同步。组 2 不选：不改依赖包，omp 仍钉 v18.0.10 | 组 1 |
-| Public API / CLI / script entry | 选中：`GET /api/composer/options` 的模型项不带 `maxTokens`（显式断言不漏）；`max_tokens` 到达上游由官方二进制对照用例证明 | 组 2 |
+| Public API / CLI / script entry | 选中：`GET /api/composer/options` 的模型项不带 `maxTokens`（显式断言不漏）；输出上限（本托管 provider 为 `max_completion_tokens`）到达上游由官方二进制对照用例证明 | 组 2 |
 | Documentation / migration notes | 选中：system.md `MODEL_CATALOG` 表与示例、保持 8192 的写法；验收清单 CH-04 / CH-39 / CH-40 / CH-42 | 组 2、组 1、组 3 |
 | File IO / path safety / overwrite、Schema / columns、Concurrency、Resource limits | 未选：不碰文件系统、数据库列与并发路径；流式解析成本登记在 Not yet specified | — |
 
