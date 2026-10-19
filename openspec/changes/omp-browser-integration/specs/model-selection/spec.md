@@ -3,7 +3,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 模型白名单配置
-服务端 SHALL 持有一份启动时确定、此后不变的模型白名单：一个有序的模型列表与其中一个缺省模型。每个模型为 `{id, name, reasoning, vision, maxTokens, efforts?}`：`id` 是发给上游的模型名（也是托管 `models.yml` 条目的 `id`）；`name` 是界面显示名；`reasoning` 表示支持推理；`vision` 表示支持看图；`maxTokens` 是该模型单次回复的输出上限（写进托管 `models.yml` 的 `maxTokens`，omp 以它作上游请求的 `max_tokens`；owner 2026-10-18 裁决：按模型可配，缺省 32768）；`efforts` 是该模型支持的推理强度子集（推理模型必带，`MODEL_CATALOG` 未设置时的那一项除外；`reasoning` 不为真的模型不带）。
+服务端 SHALL 持有一份启动时确定、此后不变的模型白名单：一个有序的模型列表与其中一个缺省模型。每个模型为 `{id, name, reasoning, vision, maxTokens, efforts?}`：`id` 是发给上游的模型名（也是托管 `models.yml` 条目的 `id`）；`name` 是界面显示名；`reasoning` 表示支持推理；`vision` 表示支持看图；`maxTokens` 是该模型单次回复的输出上限（写进托管 `models.yml` 的 `maxTokens`，omp 以 `min(maxTokens, 64000)` 作普通回合上游请求的输出上限（64000 是 omp v18.0.10 的 OpenAI 系夹取值；字段按 omp 的 compat 推断，本托管 provider 发 `max_completion_tokens`；compaction、分支摘要等 omp 内部请求另设更小的上限）；owner 2026-10-18 裁决：按模型可配，缺省 32768）；`efforts` 是该模型支持的推理强度子集（推理模型必带，`MODEL_CATALOG` 未设置时的那一项除外；`reasoning` 不为真的模型不带）。
 白名单由 `agent-config.ts` 的同一个 resolver 从环境变量得出，全部校验 SHALL 先于任何文件系统、数据库或监听动作；配置错误 SHALL 使启动失败，错误信息只点名出错的键、不回显取值：
 
 - `MODEL_CATALOG` **未设置**：白名单恰一项 `{id:<MODEL_ID 的生效值>, name:<同一个值>, reasoning:<MODEL_REASONING 的生效值>, vision:<MODEL_VISION 的生效值>, maxTokens:32768}`，它就是缺省模型，不带 `efforts`。`MODEL_VISION` 取 `on`（缺省）或 `off`，映射为 `true`/`false`，其它取值（含空串）启动失败并点名 `MODEL_VISION`（owner 2026-10-18，#912：单模型配置可声明看图，缺省 `on`——当前模型 deepseek-v4.1-flash 能看图）。除 `maxTokens`（此前固定 8192）与 `vision`（此前固定 `false`）外与最初的单模型配置相同。

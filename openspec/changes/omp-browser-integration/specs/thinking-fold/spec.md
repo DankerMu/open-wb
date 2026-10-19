@@ -12,4 +12,4 @@
 
 #### Scenario: 关闭 reasoning
 - **WHEN** 以 `MODEL_REASONING=off` 启动，托管 `models.yml` 被写出
-- **THEN** 模型条目无 `reasoning` 与 `compat` 键，文件与 model-proxy「托管 models.yml」规定的单模型输出逐字节相同（同时 `MODEL_VISION=off` 时即其「Single-model output is unchanged」所比对的 vision-false 输出；`MODEL_VISION` 缺省 `on` 时另有 `input` 三行，见其「Single-model default declares image input」）；以 `MODEL_REASONING=maybe` 或空串启动时进程在写 `models.yml` 之前以配置错误退出（错误信息含变量名）
+- **THEN** 模型条目无 `reasoning` 与 `compat` 键，文件与 model-proxy「托管 models.yml」规定的单模型输出逐字节相同（同时 `MODEL_VISION=off` 时即其「Single-model output is unchanged」所比对的 vision-false 输出：改前夹具替换了 `maxTokens` 行之后的内容；`MODEL_VISION` 缺省 `on` 时另有 `input` 三行，见其「Single-model default declares image input」）；以 `MODEL_REASONING=maybe` 或空串启动时进程在写 `models.yml` 之前以配置错误退出（错误信息含变量名）
