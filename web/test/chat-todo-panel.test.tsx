@@ -26,10 +26,10 @@ import {
   stopButton,
   T0,
 } from "./chat-approval-support.js";
-import { cleanupChatLifecycle, typeDraft } from "./chat-page-lifecycle-support.js";
-import { OTHER_MESSAGES, otherSnapshot } from "./chat-page-ownership-support.js";
+import { cleanupChatLifecycle, clickSend, typeDraft } from "./chat-page-lifecycle-support.js";
+import { OTHER_MESSAGES, otherSnapshot, promptAccepted } from "./chat-page-ownership-support.js";
 import { chatSnapshot, type FakeEventSource, latestSource } from "./chat-stream-support.js";
-import { calls, jsonResponse } from "./support.js";
+import { calls, deferredResponse, jsonResponse } from "./support.js";
 
 type Todo = NonNullable<ChatMessageSnapshot["todo"]>;
 type Status = Todo["phases"][number]["tasks"][number]["status"];
@@ -215,6 +215,7 @@ async function select(title: "saved title" | "other session", shown: string) {
   await flush();
 }
 
+const PROMPT = MESSAGES.replace(/messages$/, "prompt");
 const OTHER_ROUTE = {
   [OTHER_MESSAGES]: () => jsonResponse({ ...otherSnapshot(), todo: OTHER_TODO }),
 };
@@ -315,27 +316,6 @@ describe("task-list panel: content", () => {
 });
 
 describe("task-list panel: visibility", () => {
-  it("V1 hides when every task is completed or abandoned, returns with a pending task and hides again on null, leaving the card and the composer alone", async () => {
-    const { source } = await mountPage({ ...snapshotWith([approval(7)]), todo: TWO });
-    expect(toggle().textContent).toBe("任务清单 0/2");
-    const [card] = cards() as [HTMLElement];
-    const input = composerInput();
-
-    emitTodo(source, 1, ALL_CLOSED);
-    expect(toggles()).toHaveLength(0);
-    expect(slot("todo-panel")).toBeNull();
-    expect(cards()).toEqual([card]);
-    expect(composerInput()).toBe(input);
-
-    emitTodo(source, 2, ONE_DONE);
-    expect(toggle().textContent).toBe("任务清单 1/2");
-    expect(toggle().getAttribute("aria-expanded")).toBe("true");
-
-    emitTodo(source, 3, null);
-    expect(toggles()).toHaveLength(0);
-    expect(cards()).toEqual([card]);
-  });
-
   it("V2 renders no panel and no dock for todo: null, nor for a list that is closed from the start", async () => {
     await mountPage(doneSnapshot(null));
     expect(toggles()).toHaveLength(0);
@@ -659,30 +639,48 @@ describe("task-list panel: click guard of the cards below it", () => {
     expect(bodies(fetchMock, approvalPath(7))).toEqual([{ decision: "deny" }]);
   });
 
-  it("G6 ignores answers for 400 ms after the panel above a shown card disappears, whether it was expanded or collapsed, then answers once", async () => {
+  it("G6 ignores answers for 400 ms after the panel above a shown card closes in place, after it disappears at 发送 while the card stays, and after a collapsed panel disappears on null, then answers once", async () => {
     // 面板与卡一开始就都在：不设防的起点
-    const { fetchMock, source } = await mountPage(
+    const prompt = deferredResponse();
+    const { fetchMock, page, source } = await mountPage(
       { ...snapshotWith([approval(7)]), todo: TWO },
-      { [approvalPath(7)]: () => settledBody(7, "allow") },
+      { [approvalPath(7)]: () => settledBody(7, "allow"), [PROMPT]: () => prompt.promise },
     );
     const [card] = cards() as [HTMLElement];
     const sent = () => bodies(fetchMock, approvalPath(7));
     const blockedClick = () => expectBlocked(card, sent);
     expect(toggle().getAttribute("aria-expanded")).toBe("true");
 
-    // 展开的面板消失：清单全部结束
+    // 就地完结：面板留着、内容变了
     emitTodo(source, 1, ALL_CLOSED);
+    expect(toggle().textContent).toBe("任务清单 1/2");
+    await blockedClick();
+    // turn.end 不动审批：卡留着，输入框解锁
+    act(() => source.emitData("turn.end", "1:2", { messageId: 0, status: "done" }));
+    await flush();
+    expect(cards()).toEqual([card]);
+    // 点发送（请求在途）：面板消失、卡还在
+    page.snapshot = { ...snapshotWith([approval(7)], 2), todo: ALL_CLOSED };
+    typeDraft("继续");
+    clickSend();
+    await flush();
     expect(toggles()).toHaveLength(0);
+    expect(cards()).toEqual([card]);
     await blockedClick();
-    // 重新出现
-    emitTodo(source, 2, ONE_DONE);
+    // 202 受理、快照（同一份已完结清单）装入：面板仍不在
+    await act(async () => prompt.resolve(jsonResponse(promptAccepted, 202)));
+    const renewed = latestSource();
+    act(() => renewed.emitOpen());
+    await flush();
+    expect(toggles()).toHaveLength(0);
+    expect(cards()[0]).toBe(card);
+    // 重新出现、收起，收起的面板消失：清单为 null
+    emitTodo(renewed, 3, ONE_DONE);
     await blockedClick();
-    // 收起
     fireEvent.click(toggle());
     expect(toggle().getAttribute("aria-expanded")).toBe("false");
     await blockedClick();
-    // 收起的面板消失：清单为 null
-    emitTodo(source, 3, null);
+    emitTodo(renewed, 4, null);
     expect(toggles()).toHaveLength(0);
     expect(cards()).toEqual([card]);
     await blockedClick();

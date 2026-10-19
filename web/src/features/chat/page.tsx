@@ -128,6 +128,7 @@ export function ChatPage() {
           requestedSessionId={requestedSessionId}
           search={search}
           sendDisabled={session.sendDisabled}
+          sending={session.sending}
           slash={slash}
           space={session.space}
           streamError={session.streamError}
