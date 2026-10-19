@@ -52,8 +52,9 @@ interface OfficialRuntimeOptions {
    */
   spawnArgs?: { approvalMode?: "always-ask" | "write" | "yolo"; hostOverlay?: boolean };
   /**
-   * `false` drops the two browser pins (`PI_BROWSER_RELAY`, `PI_BROWSER_CMUX`) from the env
-   * `spawnOmp` built (#1529's negative contrast; the product always sets them).
+   * `false` drops the relay/cmux pins (`PI_BROWSER_RELAY`, `PI_BROWSER_CMUX`) from the env
+   * `spawnOmp` built (#1529's negative contrast; the product always sets them). The two
+   * `PUPPETEER_PROXY*` pins stay.
    */
   browserPins?: boolean;
   /** The answer to an approval request; deny when absent, so nothing is executed. */
@@ -127,7 +128,7 @@ const rewritingSpawn: SpawnImpl = (command, args, options) => {
   return (spawn as SpawnImpl)(command, argv, { ...options, env });
 };
 
-/** Test-only spawn wrapper for #1529's negative contrast: drops the two browser pins from the env. */
+/** Test-only spawn wrapper for #1529's negative contrast: drops the relay/cmux pins from the env. */
 const unpinnedSpawn: SpawnImpl = (command, args, options) => {
   const env = { ...options.env };
   delete env.PI_BROWSER_RELAY;
@@ -171,7 +172,17 @@ function liveBrokers(daemons: string): number[] {
     if (!existsSync(file)) {
       return [];
     }
-    const { pid } = JSON.parse(readFileSync(file, "utf8")) as { pid: number };
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (error) {
+      // The broker removed its pid file between `existsSync` and here: it has exited.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    const { pid } = JSON.parse(text) as { pid: number };
     try {
       process.kill(pid, 0);
       return [pid];

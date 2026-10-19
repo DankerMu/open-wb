@@ -1,11 +1,13 @@
 /**
- * Issue #1529 omp-runtime「子进程 spawn 契约」scenario「环境白名单」(the `PUPPETEER_EXECUTABLE_PATH`
- * and `PI_BROWSER_*` WHENs) and omp-uid-isolation「OMP_USER 配置与 sudo spawn 前缀」scenario「sudo 保留
- * 浏览器路径」, on the captured `spawnOmp` call. `PUPPETEER_EXECUTABLE_PATH` comes only from the
- * deployment's `BROWSER_BIN` (`browserBin`), after `LANG`/`TMPDIR`; `PI_BROWSER_RELAY=0` and
- * `PI_BROWSER_CMUX=0` are always set; nothing of the parent's browser variables reaches the child;
- * the sudo `--preserve-env=` element is one fixed string. Expected keys, order and the literal are
- * the spec's, not derived from `src/sessions/omp/`.
+ * Issue #1529 omp-runtime「子进程 spawn 契约」scenario「环境白名单」(the `PUPPETEER_EXECUTABLE_PATH`,
+ * `PI_BROWSER_*` and `PUPPETEER_PROXY*` WHENs) and omp-uid-isolation「OMP_USER 配置与 sudo spawn
+ * 前缀」scenario「sudo 保留浏览器路径」, on the captured `spawnOmp` call. `PUPPETEER_EXECUTABLE_PATH`
+ * comes only from the deployment's `BROWSER_BIN` (`browserBin`), after `LANG`/`TMPDIR`;
+ * `PI_BROWSER_RELAY=0`, `PI_BROWSER_CMUX=0`, `PUPPETEER_PROXY=direct://` and
+ * `PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0` are always set; nothing of the parent's browser or proxy
+ * variables reaches the child; the sudo `--preserve-env=` element is one fixed string. The key set,
+ * the pinned values and the literal are the spec's; the key order is from the implementation and
+ * design D4 (the spec fixes the set). None of it is derived from `src/sessions/omp/`.
  */
 import type { SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -29,10 +31,13 @@ const PARENT: Record<string, string> = {
   PI_BROWSER_RELAY: "1",
   PI_BROWSER_CMUX: "1",
   CMUX_SOCKET_PATH: "/tmp/x.sock",
+  PUPPETEER_PROXY: "http://192.0.2.1:9",
+  PUPPETEER_PROXY_IGNORE_CERT_ERRORS: "1",
+  http_proxy: "http://192.0.2.1:9",
 };
 const PRESERVE_ENV =
-  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_EXECUTABLE_PATH";
-/** The closed key set in the order the contract builds it; `PUPPETEER_EXECUTABLE_PATH` comes last. */
+  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH";
+/** The closed key set in the order D4 builds it; `PUPPETEER_EXECUTABLE_PATH` comes last. */
 const KEYS = [
   "PATH",
   "HOME",
@@ -47,6 +52,8 @@ const KEYS = [
   "WORKBUDDY_MODEL_TOKEN",
   "PI_BROWSER_RELAY",
   "PI_BROWSER_CMUX",
+  "PUPPETEER_PROXY",
+  "PUPPETEER_PROXY_IGNORE_CERT_ERRORS",
   "LANG",
   "TMPDIR",
 ];
@@ -107,28 +114,42 @@ async function capture(options: { ompUser?: string; browserBin?: string }): Prom
   };
 }
 
-/** No parent browser value anywhere in the call, and no browser `KEY=value` argv element. */
+/** The four pins hold their literals whatever the parent carries. */
+function expectPins(call: Captured): void {
+  expect(call.env.PI_BROWSER_RELAY).toBe("0");
+  expect(call.env.PI_BROWSER_CMUX).toBe("0");
+  expect(call.env.PUPPETEER_PROXY).toBe("direct://");
+  expect(call.env.PUPPETEER_PROXY_IGNORE_CERT_ERRORS).toBe("0");
+}
+
+/** No parent browser or proxy value anywhere in the call, and no browser `KEY=value` argv element. */
 function expectNoParentBrowserValues(call: Captured): void {
   const dump = JSON.stringify([call.env, call.args]);
-  for (const value of ["/opt/other", "/opt/parent-browser-bin", "/tmp/x.sock"]) {
+  for (const value of ["/opt/other", "/opt/parent-browser-bin", "/tmp/x.sock", "192.0.2.1"]) {
     expect(dump).not.toContain(value);
   }
   expect(call.env).not.toHaveProperty("BROWSER_BIN");
   expect(call.env).not.toHaveProperty("CMUX_SOCKET_PATH");
-  for (const key of ["PUPPETEER_EXECUTABLE_PATH", "PI_BROWSER_RELAY", "PI_BROWSER_CMUX"]) {
+  expect(call.env).not.toHaveProperty("http_proxy");
+  for (const key of [
+    "PUPPETEER_EXECUTABLE_PATH",
+    "PI_BROWSER_RELAY",
+    "PI_BROWSER_CMUX",
+    "PUPPETEER_PROXY",
+    "PUPPETEER_PROXY_IGNORE_CERT_ERRORS",
+  ]) {
     expect(call.args.some((arg) => arg.startsWith(`${key}=`))).toBe(false);
   }
 }
 
 describe("spawnOmp browser environment", () => {
   it.each([undefined, "omp"])(
-    "BROWSER_BIN unset (ompUser %s): no PUPPETEER_EXECUTABLE_PATH, both pins 0",
+    "BROWSER_BIN unset (ompUser %s): no PUPPETEER_EXECUTABLE_PATH, the four pins hold",
     async (ompUser) => {
       const call = await capture(ompUser === undefined ? {} : { ompUser });
 
       expect(Object.keys(call.env)).toEqual(KEYS);
-      expect(call.env.PI_BROWSER_RELAY).toBe("0");
-      expect(call.env.PI_BROWSER_CMUX).toBe("0");
+      expectPins(call);
       expect(call.env).not.toHaveProperty("PUPPETEER_EXECUTABLE_PATH");
       expectNoParentBrowserValues(call);
     },
@@ -144,8 +165,7 @@ describe("spawnOmp browser environment", () => {
 
       expect(Object.keys(call.env)).toEqual([...KEYS, "PUPPETEER_EXECUTABLE_PATH"]);
       expect(call.env.PUPPETEER_EXECUTABLE_PATH).toBe(CHROMIUM);
-      expect(call.env.PI_BROWSER_RELAY).toBe("0");
-      expect(call.env.PI_BROWSER_CMUX).toBe("0");
+      expectPins(call);
       expectNoParentBrowserValues(call);
     },
   );
@@ -161,7 +181,7 @@ describe("spawnOmp browser environment", () => {
     expect(relative(set)).toEqual(relative(unset));
   });
 
-  it("sudo: one fixed --preserve-env element ending in the three browser keys, set or unset", async () => {
+  it("sudo: one fixed --preserve-env element ending in the five browser keys, set or unset", async () => {
     const unset = await capture({ ompUser: "omp" });
     const set = await capture({ ompUser: "omp", browserBin: CHROMIUM });
 
@@ -181,10 +201,9 @@ describe("spawnOmp browser environment", () => {
         call.bin,
       ]);
       expect(call.args.find((arg) => arg.startsWith("--preserve-env="))).toMatch(
-        /,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_EXECUTABLE_PATH$/u,
+        /,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH$/u,
       );
-      expect(call.env.PI_BROWSER_RELAY).toBe("0");
-      expect(call.env.PI_BROWSER_CMUX).toBe("0");
+      expectPins(call);
       expectNoParentBrowserValues(call);
     }
     expect(set.env.PUPPETEER_EXECUTABLE_PATH).toBe(CHROMIUM);

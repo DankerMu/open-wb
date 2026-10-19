@@ -6,11 +6,11 @@
 import { ompAgentDir, ompHome, ompHostOverlayPath, ompXdgHome } from "./state-layout.js";
 
 /**
- * Fixed whether or not `BROWSER_BIN` is set; sudo keeps exactly these names. The two browser pins
+ * Fixed whether or not `BROWSER_BIN` is set; sudo keeps exactly these names. The four browser pins
  * must be here too, or sudo drops them and they stop pinning.
  */
 export const SUDO_PRESERVE_ENV =
-  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_EXECUTABLE_PATH";
+  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH";
 
 export function ompSpawnEnv(opts: {
   stateDir: string;
@@ -37,6 +37,11 @@ export function ompSpawnEnv(opts: {
     // overrides it; an empty string would not hold.
     PI_BROWSER_RELAY: "0",
     PI_BROWSER_CMUX: "0",
+    // omp turns these into the browser's `--proxy-server` / `--ignore-certificate-errors`: a
+    // workspace `.env` could proxy it and drop certificate checks (#1529). `direct://` makes
+    // Chromium connect directly, over any `http_proxy`; the literal 0 holds as above.
+    PUPPETEER_PROXY: "direct://",
+    PUPPETEER_PROXY_IGNORE_CERT_ERRORS: "0",
   };
   if (process.env.LANG !== undefined) {
     env.LANG = process.env.LANG;

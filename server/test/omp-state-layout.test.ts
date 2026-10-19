@@ -543,6 +543,8 @@ describe("spawned child environment under the managed layout", () => {
       "PI_CONFIG_DIR",
       "PI_CONFIG_FILES",
       "PI_PROFILE",
+      "PUPPETEER_PROXY",
+      "PUPPETEER_PROXY_IGNORE_CERT_ERRORS",
       "TMPDIR",
       "WORKBUDDY_MODEL_TOKEN",
       "XDG_CACHE_HOME",
