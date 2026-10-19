@@ -25,6 +25,23 @@ const EXPECTED_TODO = {
   ],
 };
 
+// 状态词视觉隐藏、图标可见（session-todo「任务清单面板」，design D5）：Tailwind `sr-only` 是 1×1px 加
+// `clip-path`，Playwright 仍视为可见（`toBeHidden()` / `innerText` 判不了），所以按包围盒断言。
+async function expectStatusIcons(items: Locator): Promise<void> {
+  const glyphs = ["lucide-loader-circle", "lucide-circle"];
+  for (const [at, item] of (await items.all()).entries()) {
+    const status = await item.locator('[data-slot="todo-status"]').boundingBox();
+    if (!status) throw new Error(`task list item ${at}: no status box`);
+    expect(status.width, `item ${at} status word width`).toBeLessThanOrEqual(1);
+    expect(status.height, `item ${at} status word height`).toBeLessThanOrEqual(1);
+    const icon = item.locator('svg[aria-hidden="true"]');
+    await expect(icon).toHaveCount(1);
+    const box = await icon.boundingBox();
+    expect(box?.width ?? 0, `item ${at} icon width`).toBeGreaterThan(1);
+    expect(await icon.evaluate((svg) => [...svg.classList])).toContain(glyphs[at]);
+  }
+}
+
 // 面板展开：头部按钮在所有消息之外、输入框之上；恰两项，状态与正文按序；不显示唯一阶段的名字。
 async function expectExpandedPanel(page: Page): Promise<Locator> {
   const dock = page.locator('[data-slot="composer-dock"]');
@@ -38,6 +55,7 @@ async function expectExpandedPanel(page: Page): Promise<Locator> {
   await expect(items).toHaveCount(2);
   await expect(items.locator('[data-slot="todo-status"]')).toHaveText(["进行中", "待办"]);
   await expect(items.locator('[data-slot="todo-content"]')).toHaveText(["整理需求", "输出结论"]);
+  await expectStatusIcons(items);
   await expect(dock).not.toContainText("走查");
   const toggleBox = await toggle.boundingBox();
   const inputBox = await page.getByLabel("给助手发消息").boundingBox();
