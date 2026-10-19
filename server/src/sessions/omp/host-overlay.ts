@@ -19,6 +19,15 @@
  * of scope, and a project `retry.fallbackChains` would otherwise switch models on a 5xx turn (实测
  * on the old overlay) and, by omp's `isHardErrorFallbackEligible`, replay even a non-retryable 424
  * on the next model (读代码推出, not measured).
+ *
+ * Issue #1527 (design D2): the bytes are a pure function of the deployment — the fixed block, then
+ * the browser block, then the vision block when the whitelist has a vision model. `enabled` is the
+ * browser switch (`BROWSER_BIN` set, group 3); while false omp mounts no browser tool and so never
+ * downloads Chrome-for-Testing. `cdpUrl: ""`, `relay: false` and `cmux: false` void the project
+ * layer's external browser, relay and cmux; `headless: true` refuses a headed window;
+ * `screenshotDir: screenshots` is relative, so screenshots land in `<cwd>/screenshots/` (omp's
+ * process cwd is the session cwd; 实测 task 2.3). `modelRoles` is an object: the deep merge pins
+ * only `vision`, the project's other roles stay (ADR-0012 residual).
  */
 import { basename, dirname } from "node:path";
 import { replaceFile } from "../../core/replace-file.js";
@@ -56,14 +65,41 @@ const HOST_OVERLAY = [
   "  maxDelayMs: 300000",
   // No model fallback: a project fallback chain would switch models and reset the retry budget.
   "  modelFallback: false",
-  "",
 ].join("\n");
 
+/** What the overlay depends on; both are fixed at startup. */
+export interface HostOverlayOptions {
+  /** Whether the deployment configures a browser (`BROWSER_BIN`). */
+  browserEnabled: boolean;
+  /** The first `vision: true` whitelist model, or null when there is none. */
+  visionModelId: string | null;
+}
+
+function hostOverlayText({ browserEnabled, visionModelId }: HostOverlayOptions): string {
+  const lines = [
+    HOST_OVERLAY,
+    "browser:",
+    `  enabled: ${String(browserEnabled)}`,
+    '  cdpUrl: ""',
+    "  relay: false",
+    "  cmux: false",
+    "  headless: true",
+    "  screenshotDir: screenshots",
+  ];
+  if (visionModelId !== null) {
+    lines.push("modelRoles:", `  vision: ${JSON.stringify(`workbuddy/${visionModelId}`)}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 /**
- * Writes the constant overlay to `ompHostOverlayPath(stateDir)` the way the managed `models.yml` is
- * written. The managed agent dir must exist: the state layout creates it, this writer never does.
+ * Writes the overlay for `options` to `ompHostOverlayPath(stateDir)` the way the managed `models.yml`
+ * is written. The managed agent dir must exist: the state layout creates it, this writer never does.
  */
-export async function writeHostOverlay(stateDir: string): Promise<void> {
+export async function writeHostOverlay(
+  stateDir: string,
+  options: HostOverlayOptions,
+): Promise<void> {
   const path = ompHostOverlayPath(stateDir);
-  await replaceFile(dirname(path), basename(path), HOST_OVERLAY);
+  await replaceFile(dirname(path), basename(path), hostOverlayText(options));
 }

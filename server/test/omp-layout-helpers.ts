@@ -26,9 +26,11 @@ export const LAYOUT_TABLE: ReadonlyArray<readonly [string, number]> = [
 
 /**
  * Issue #708 host overlay: the bytes of the omp-runtime spec's `host-overlay.yml`, written out here
- * (not imported from `src/sessions/omp/host-overlay.ts`).
+ * (not imported from `src/sessions/omp/host-overlay.ts`). `HOST_OVERLAY_FIXED` is the fixed block;
+ * `HOST_OVERLAY_YAML` is the file of the default deployment (#1527: fixed block, then the browser
+ * block with `enabled: false`, no vision block).
  */
-export const HOST_OVERLAY_YAML = `tools:
+export const HOST_OVERLAY_FIXED = `tools:
   approval: []
   approvalMode: write
 bash:
@@ -57,13 +59,35 @@ retry:
   modelFallback: false
 `;
 
-/** `<state>/home/.omp/agent/host-overlay.yml` is a 0640 regular file holding exactly the spec bytes. */
-export function expectHostOverlay(state: string): void {
+/** The spec's browser block (#1527); `enabled` is whether the deployment configures `BROWSER_BIN`. */
+export function hostOverlayBrowserBlock(enabled: boolean): string {
+  return `browser:
+  enabled: ${String(enabled)}
+  cdpUrl: ""
+  relay: false
+  cmux: false
+  headless: true
+  screenshotDir: screenshots
+`;
+}
+
+/** The spec's vision block (#1527): `modelRoles.vision`, the JSON string literal of `workbuddy/<id>`. */
+export function hostOverlayVisionBlock(id: string): string {
+  return `modelRoles:\n  vision: ${JSON.stringify(`workbuddy/${id}`)}\n`;
+}
+
+export const HOST_OVERLAY_YAML = HOST_OVERLAY_FIXED + hostOverlayBrowserBlock(false);
+
+/**
+ * `<state>/home/.omp/agent/host-overlay.yml` is a 0640 regular file holding exactly `expected`
+ * (the default deployment's bytes when absent).
+ */
+export function expectHostOverlay(state: string, expected = HOST_OVERLAY_YAML): void {
   const overlay = join(state, "home", ".omp", "agent", "host-overlay.yml");
   const stats = lstatSync(overlay);
   expect(stats.isFile()).toBe(true);
   expect(stats.mode & 0o7777).toBe(0o640);
-  expect(readFileSync(overlay, "utf8")).toBe(HOST_OVERLAY_YAML);
+  expect(readFileSync(overlay, "utf8")).toBe(expected);
 }
 
 /**

@@ -250,7 +250,7 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
             { id: MODEL_ID, name: MODEL_ID, reasoning: false, vision: false, maxTokens: 32768 },
           ],
         });
-        await writeHostOverlay(state);
+        await writeHostOverlay(state, { browserEnabled: false, visionModelId: null });
         const modelsBefore = readFileSync(models);
         const overlayBefore = readFileSync(overlay);
         // An operator's line: the omp uid can read the file but not change or replace it (#802).

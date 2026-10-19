@@ -26,6 +26,8 @@ const UPSTREAM_KEY = "fake";
 const OWNER_ID = "u1";
 
 export interface OfficialDirs {
+  /** The managed `OMP_STATE_DIR` of the world (#1527: its cache and log directories are checked). */
+  stateDir: string;
   agentDir: string;
   sandboxRoot: string;
   ownerRoot: string;
@@ -148,8 +150,8 @@ export async function openOfficialWorld(
   } else {
     writeFileSync(join(agentDir, "models.yml"), options.modelsYml(proxyBaseUrl), { mode: 0o640 });
   }
-  await writeHostOverlay(stateDir);
-  const dirs = { agentDir, sandboxRoot, ownerRoot, workspaceRoot };
+  await writeHostOverlay(stateDir, { browserEnabled: false, visionModelId: null });
+  const dirs = { stateDir, agentDir, sandboxRoot, ownerRoot, workspaceRoot };
   plant(dirs);
   const approvals: ApprovalRequest[] = [];
 

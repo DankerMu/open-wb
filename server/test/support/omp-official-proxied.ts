@@ -148,7 +148,7 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
       maxTokens: 32768,
     })),
   });
-  await writeHostOverlay(stateDir);
+  await writeHostOverlay(stateDir, { browserEnabled: false, visionModelId: null });
   return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens, target };
 }
 

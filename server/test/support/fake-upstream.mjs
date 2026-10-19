@@ -18,6 +18,10 @@ const THINK_LONG_MARKER = "WORKBUDDY_THINK_LONG";
 const WRITE_MARKER = "WORKBUDDY_WRITE";
 const TODO_MARKER = "WORKBUDDY_TODO";
 const HOLD_AT_MARKER = "WORKBUDDY_HOLD_AT:";
+const BROWSER_OPEN_MARKER = "WORKBUDDY_BROWSER_OPEN:";
+const BROWSER_SHOT_MARKER = "WORKBUDDY_BROWSER_SHOT";
+/** First text part of omp's synthetic user message carrying tool-result images (#1527). */
+const ATTACHED_IMAGES_TEXT = "Attached image(s) from tool result:";
 /** Hold points of `WORKBUDDY_HOLD_AT:<point>` (issues 1440, 1445); any other value is ignored. */
 const HOLD_POINTS = new Set(["empty", "thinking"]);
 const TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
@@ -39,6 +43,7 @@ const TODO_ARGS = JSON.stringify({
   op: "init",
   list: [{ phase: "走查", items: ["整理需求", "输出结论"] }],
 });
+const BROWSER_SHOT_ARGS = browserArgs({ action: "run", code: "return await tab.screenshot()" });
 const GATE_PREFIX = "/__control/gates/";
 const REQUESTS_PATH = "/__control/requests";
 const REQUESTS_CAP = 1000;
@@ -423,7 +428,7 @@ function lastUserHasMarker(messages) {
 function lastUserTextFrom(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message === null || typeof message !== "object" || message.role !== "user") {
+    if (message?.role !== "user" || isImageAttachment(messages, index)) {
       continue;
     }
     return userText(message.content);
@@ -506,20 +511,55 @@ function toolFollowsLastUser(messages) {
     if (message.role === "tool") {
       return true;
     }
-    if (message.role === "user") {
+    if (message.role === "user" && !isImageAttachment(messages, index)) {
       return false;
     }
   }
   return false;
 }
 
-/** 工具轮只发一个调用：WRITE 优先于 TODO，都没有即缺省 bash。 */
+/**
+ * omp v18.0.10 appends, after tool results carrying images, a `user` message whose content starts
+ * with the text `Attached image(s) from tool result:` (openai-completions.ts:2338-2357). It belongs
+ * to the tool results: the round rule and the last-user-text lookup skip it (#1527, design D9).
+ */
+function isImageAttachment(messages, index) {
+  const first = Array.isArray(messages[index].content) ? messages[index].content[0] : undefined;
+  return (
+    messages[index - 1]?.role === "tool" &&
+    first?.type === "text" &&
+    first.text === ATTACHED_IMAGES_TEXT
+  );
+}
+
+/** `WORKBUDDY_BROWSER_OPEN:<url>`: the url runs to the next whitespace; empty is no marker. */
+function browserOpenUrl(text) {
+  const index = text.indexOf(BROWSER_OPEN_MARKER);
+  if (index === -1) {
+    return undefined;
+  }
+  const [url] = text.slice(index + BROWSER_OPEN_MARKER.length).split(/\s/u, 1);
+  return url === "" ? undefined : url;
+}
+
+function browserArgs(content) {
+  return JSON.stringify({ path: "xd://browser", content: JSON.stringify(content) });
+}
+
+/** 工具轮只发一个调用：WRITE 优先于 TODO，再到浏览器 OPEN、SHOT（#1527），都没有即缺省 bash。 */
 function toolRoundCall(text) {
   if (text.includes(WRITE_MARKER)) {
     return { name: "write", arguments: WRITE_ARGS };
   }
   if (text.includes(TODO_MARKER)) {
     return { name: "todo", arguments: TODO_ARGS };
+  }
+  const url = browserOpenUrl(text);
+  if (url !== undefined) {
+    return { name: "write", arguments: browserArgs({ action: "open", url }) };
+  }
+  if (text.includes(BROWSER_SHOT_MARKER)) {
+    return { name: "write", arguments: BROWSER_SHOT_ARGS };
   }
   return { name: "bash", arguments: TOOL_ARGS };
 }
