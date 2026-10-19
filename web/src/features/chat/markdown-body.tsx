@@ -1,6 +1,6 @@
 // 助手正文（epic-acceptance-followups design D1）：拷入层 `MarkdownText` 负责排版；源 HTML 经 `rehypePlugins`
-// 解析、不安全目标转文字、白名单外标签按原文显示、消毒与 `style` 过滤（markdown-html.ts），链接 / 图片的写出
-// 规则与代码块复制经 `components` 覆盖写在这里。
+// 解析、不安全目标转文字、白名单外标签按原文显示（markdown-literal.ts）、消毒与 `style` 过滤（markdown-html.ts），
+// 链接 / 图片的写出规则与代码块复制经 `components` 覆盖写在这里。
 import { TextMessagePartProvider } from "@assistant-ui/react";
 import type { CodeHeaderProps } from "@assistant-ui/react-markdown";
 import type { ComponentProps } from "react";
@@ -9,12 +9,8 @@ import rehypeSanitize from "rehype-sanitize";
 import { MarkdownText } from "@/components/assistant-ui/elements/markdown-text";
 import { Icon } from "../../components/icon.js";
 import { useCopyFeedback } from "./copy-feedback.js";
-import {
-  inertUnsafeTargets,
-  literalUnknownTags,
-  SANITIZE_SCHEMA,
-  styleGuard,
-} from "./markdown-html.js";
+import { inertUnsafeTargets, SANITIZE_SCHEMA, styleGuard } from "./markdown-html.js";
+import { literalUnknownTags, recordRawSegments } from "./markdown-literal.js";
 
 type Rendered<T extends "a" | "img"> = ComponentProps<T> & { node?: unknown };
 const LINK_CLASS = "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2";
@@ -75,8 +71,12 @@ function CodeHeader({ code, language }: CodeHeaderProps) {
 }
 
 const COMPONENTS = { a: ExternalLink, img: ExternalImage, CodeHeader };
-/** 顺序即 design D1 的四步；模块常量，保持引用稳定（基元只对插件数组做一层比较，内层元组按引用比）。 */
+/**
+ * 顺序即 design D1 的五步：raw → inert → literal → sanitize → styleGuard；recordRawSegments 在 raw 之前只读地记下
+ * raw 段供 literal 取原文。模块常量，保持引用稳定（基元只对插件数组做一层比较，内层元组按引用比）。
+ */
 const REHYPE_PLUGINS = [
+  recordRawSegments,
   rehypeRaw,
   inertUnsafeTargets,
   literalUnknownTags,

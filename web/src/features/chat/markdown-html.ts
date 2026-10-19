@@ -1,9 +1,10 @@
 // 助手正文源 HTML 的处理步骤与消毒白名单（epic-acceptance-followups design D1；chat-web「消息线程」的「正文」规则）。
-// 管线顺序在 markdown-body.tsx：rehype-raw → inertUnsafeTargets → literalUnknownTags → rehype-sanitize → styleGuard。
+// 管线顺序在 markdown-body.tsx：rehype-raw → inertUnsafeTargets → literalUnknownTags（markdown-literal.ts）→
+// rehype-sanitize → styleGuard。
 import type { Options as SanitizeSchema } from "rehype-sanitize";
 
 /** 语法树节点的最小结构（hast 的子集）：只读写这里用到的字段，不引入 `hast` 类型包。 */
-type TreeNode = {
+export type TreeNode = {
   type: string;
   tagName?: string;
   properties?: Record<string, unknown>;
@@ -12,16 +13,19 @@ type TreeNode = {
   position?: { start?: { offset?: number }; end?: { offset?: number } };
 };
 
-/** 可点链接与可加载图片只认这几个协议；按字面前缀比对，与 sanitize 的协议表（区分大小写）同一口径。 */
-const LINK_TARGET = /^(?:https?|mailto):/;
-const IMAGE_SOURCE = /^https?:/;
+/**
+ * 可点链接与可加载图片只认这几个协议；按字面前缀比对，与 sanitize 的协议表（区分大小写）同一口径。http(s) 后必须是
+ * `//`：`https:evil`、`https:/api/x` 会被浏览器按相对地址解析成同源请求。
+ */
+const LINK_TARGET = /^(?:https?:\/\/|mailto:)/;
+const IMAGE_SOURCE = /^https?:\/\//;
 
 function stringProperty(node: TreeNode, name: string): string {
   const value = node.properties?.[name];
   return typeof value === "string" ? value : "";
 }
 
-function mapChildren(node: TreeNode, step: (child: TreeNode) => TreeNode[]) {
+export function mapChildren(node: TreeNode, step: (child: TreeNode) => TreeNode[]) {
   if (node.children) node.children = node.children.flatMap(step);
 }
 
@@ -80,40 +84,6 @@ export const SANITIZE_SCHEMA: SanitizeSchema = {
   clobber: [],
 };
 
-const KEPT = new Set([...(SANITIZE_SCHEMA.tagNames ?? []), ...(SANITIZE_SCHEMA.strip ?? [])]);
-
-/** 起始标签原文（粘在 lastIndex 上）：到第一个不在属性值引号里的 `>`；引号只在 `=` 之后开启（HTML 分词同一规则），分支互斥、线性。 */
-const START_TAG = /<(?:[^>"'=]|=\s*"[^"]*"|=\s*'[^']*'|=(?!\s*["'])|["'])*>/uy;
-
-/** 先处理子树；白名单外、源 HTML 写出的元素换成「起始标签原文、子节点、自己的结束标签原文」（无结束标签时结束位置收在末个子节点尾上，故先取 tailEnd）。 */
-function literal(source: string, node: TreeNode): TreeNode[] {
-  const tailEnd = node.children?.at(-1)?.position?.end?.offset;
-  mapChildren(node, (child) => literal(source, child));
-  if (node.type !== "element" || !node.tagName || KEPT.has(node.tagName)) return [node];
-  const children = node.children ?? [];
-  // 只信起始位置（段尾未闭合又没有内容的 `<file>`，rehype-raw 给的结束位置是 0）；结束位置只用来认结束标签。
-  const from = node.position?.start?.offset ?? -1;
-  START_TAG.lastIndex = from;
-  const open = from < 0 ? undefined : START_TAG.exec(source)?.[0];
-  const name = node.tagName.toLowerCase();
-  if (!open?.toLowerCase().startsWith(`<${name}`)) return children;
-  const to = node.position?.end?.offset ?? 0;
-  const inner = to >= from + open.length ? source.slice(from + open.length, to) : "";
-  const close = inner.slice(inner.lastIndexOf("</"));
-  const owned = /^<\/(\S+?)\s*>$/u.exec(close)?.[1]?.toLowerCase() === name && tailEnd !== to;
-  const text = (value: string): TreeNode[] => [{ type: "text", value }];
-  return [...text(open), ...children, ...(owned ? text(close) : [])];
-}
-
-/** inertUnsafeTargets 之后、sanitize 之前跑（owner 2026-10-18：`<task>` 这类占位符不丢）。没有位置或源文本在该处不以
- * 该标签起头（GFM 脚注的 `section` 等 Markdown 自己生成的）换成其子节点，与 sanitize 去壳留文字相同。 */
-export function literalUnknownTags() {
-  return (tree: TreeNode, file: { toString(): string }) => {
-    const source = String(file);
-    mapChildren(tree, (node) => literal(source, node));
-  };
-}
-
 /** 借 CSS 函数外连的取值（A2：只剥这些，布局声明放行）。 */
 const RESOURCE_FUNCTIONS =
   "url( image( image-set( -webkit-image-set( cross-fade( src( expression(".split(" ");
@@ -135,14 +105,13 @@ function decodeEscapes(css: string): string {
 const normalized = (css: string) => decodeEscapes(css).toLowerCase().replace(/\s+/gu, "");
 
 /**
- * 取值去注释、解码转义、小写、去空白后含任一资源函数即判外连。另按不去注释的写法再查一遍：字符串里的
- * `/*` 在 CSS 里不是注释，单按去注释的结果会把其后真实生效的 `url(` 一并删掉而漏判。
+ * 含 `/*` 即判外连：渲染器（inline-style-parser）先按 `;` 切声明再逐值去注释，整串去注释的判法会跨声明配对
+ * （`content:'/*';background:u/**\/rl(…)` 渲染后是 `url(`）；CSS 转义造不出 `/*`，一刀切不误伤布局声明。
+ * 否则解码转义、小写、去空白后含任一资源函数即判外连。
  */
 function loadsResource(style: string): boolean {
-  const withoutComments = style.replace(/\/\*[\s\S]*?(?:\*\/|$)/gu, "");
-  return [normalized(withoutComments), normalized(style)].some((css) =>
-    RESOURCE_FUNCTIONS.some((fn) => css.includes(fn)),
-  );
+  const css = normalized(style);
+  return style.includes("/*") || RESOURCE_FUNCTIONS.some((fn) => css.includes(fn));
 }
 
 function guardStyle(node: TreeNode): TreeNode[] {

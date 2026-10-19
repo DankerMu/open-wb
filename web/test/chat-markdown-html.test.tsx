@@ -143,6 +143,8 @@ describe("链接、图片与源 HTML 的渲染与消毒", () => {
     const task = body.querySelector<HTMLInputElement>('input[type="checkbox"][disabled]');
     expect(task?.checked).toBe(true);
     expect(body.querySelector('input[type="checkbox"][disabled][checked]')).not.toBeNull();
+    expect(task?.closest("li")?.classList.contains("task-list-item")).toBe(true);
+    expect(task?.closest("ul")?.classList.contains("contains-task-list")).toBe(true);
     expect(body.innerHTML).not.toContain('value="v"');
   });
 
@@ -168,6 +170,8 @@ describe("白名单之外的元素与 style 的外连写法", () => {
       "background:\\000075rl(a.png)",
       "background:\\55\\52\\4c (a.png)",
       "content:'/*'; background:url(https://t.example/s.png) /* '*/",
+      "content:'/*';background:u/**/rl(https://t.example/q.png)",
+      "color:red/*;background:u/**/rl(https://t.example/p.png)",
     ];
     const html = styles.map((style, i) => `<span style="${style}">s${i}</span>`).join(" ");
     const { body } = await mountAssistantReply(

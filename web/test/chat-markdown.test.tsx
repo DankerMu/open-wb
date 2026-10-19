@@ -1,5 +1,6 @@
 // 助手正文的 Markdown 规则（epic-acceptance-followups design D1；chat-web「Markdown 链接惰性与图片不加载」
-// 「代码块复制失败就地提示」）。源 HTML 的渲染与消毒、流式半截 HTML 见 chat-markdown-html.test.tsx。
+// 「代码块复制失败就地提示」、属性白名单的放行一侧、列表项 / 引用块里的多行 HTML 块）。源 HTML 的渲染与消毒
+// 主场景、流式半截 HTML 见 chat-markdown-html.test.tsx。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -78,6 +79,73 @@ describe("Markdown 链接惰性与图片不加载", () => {
   });
 });
 
+describe("协议后必须是 //：https:evil 一类按相对地址解析，只留文字", () => {
+  it("不生成 a / img，这些地址不出现在任何属性里；链接留文字，图片留 alt 或地址", async () => {
+    const { body } = await mountReply(
+      '[r](https:evil) ![i](https:t.png) <img src="https:/t.example/x.png">',
+    );
+
+    expect(body.querySelector("a, img")).toBeNull();
+    expect(body.textContent).toBe("r i https:/t.example/x.png");
+    const attributes = [...body.querySelectorAll("*")].flatMap((node) =>
+      [...node.attributes].map((attribute) => attribute.value),
+    );
+    for (const target of ["https:evil", "https:t.png", "https:/t.example"]) {
+      expect(
+        attributes.filter((value) => value.includes(target)),
+        target,
+      ).toEqual([]);
+    }
+  });
+});
+
+describe("属性白名单的放行一侧", () => {
+  it("img 宽高、单元格 colspan/align、ol start、通用 title/lang/dir 保留；srcset/tabindex/accesskey 去掉", async () => {
+    const { body } = await mountReply(
+      [
+        '<img src="https://img.example.com/w.png" width="10" height="10" srcset="https://t.example/s.png 2x" tabindex="0">',
+        '<table><tr><td colspan="2" align="right">c</td></tr></table>',
+        '<ol start="3"><li>n</li></ol>',
+        '<span title="t" lang="en" dir="rtl" accesskey="k">s</span>',
+      ].join("\n\n"),
+    );
+
+    const img = body.querySelector("img");
+    expect([img?.getAttribute("width"), img?.getAttribute("height")]).toEqual(["10", "10"]);
+    expect(img?.hasAttribute("srcset") || img?.hasAttribute("tabindex")).toBe(false);
+    const cell = body.querySelector("td");
+    // `align` 由渲染器（hast-util-to-jsx-runtime 的 tableCellAlignToStyle）转写成 text-align 样式。
+    expect([cell?.getAttribute("colspan"), cell?.style.textAlign]).toEqual(["2", "right"]);
+    expect(body.querySelector("ol")?.getAttribute("start")).toBe("3");
+    const span = [...body.querySelectorAll("span")].find((node) => node.textContent === "s");
+    const kept = ["title", "lang", "dir"].map((name) => span?.getAttribute(name));
+    expect(kept).toEqual(["t", "en", "rtl"]);
+    expect(span?.hasAttribute("accesskey")).toBe(false);
+    expect(body.innerHTML).not.toContain("t.example");
+  });
+});
+
+describe("列表项与引用块里的多行 HTML 块：白名单外标签仍按原文显示", () => {
+  it.each([
+    [
+      "列表项里的 details",
+      "1. 步骤\n   <details>\n   <summary>输出</summary>\n   运行 <task> 查看\n   </details>",
+      "运行 <task> 查看",
+    ],
+    [
+      "引用块里的 div",
+      "> <div>\n> Use /todo append <task> to start one.\n> </div>",
+      "Use /todo append <task> to start one.",
+    ],
+    ["引用块里成对的 task", "> <task>\n> body\n> </task>", "<task>\nbody\n</task>"],
+  ])("%s", async (_, content, visible) => {
+    const { body } = await mountReply(content);
+
+    expect(body.textContent).toContain(visible);
+    expect(body.querySelector("task")).toBeNull();
+  });
+});
+
 describe("源 HTML 的脚本与事件不生效", () => {
   it("script / iframe 连内容去掉、不执行；img 没有 onerror；b 成元素；标签字样不出现", async () => {
     const { body } = await mountReply(RAW_HTML);
@@ -106,6 +174,7 @@ describe("代码块复制", () => {
 
     expect(body.querySelector("pre > code")?.textContent).toBe(CODE);
     expect(body.querySelector("pre > code")?.children).toHaveLength(0);
+    expect(body.querySelector("pre > code")?.classList.contains("language-ts")).toBe(true);
     expect(within(article).getAllByRole("button", { name: "复制代码" })).toHaveLength(1);
     expect(copyButton(article).getAttribute("type")).toBe("button");
     expect(within(article).getByRole("button", { name: "复制" })).not.toBe(copyButton(article));
