@@ -543,6 +543,10 @@ function allowlist(
     OMP_PROFILE: "default",
     PI_PROFILE: "default",
     WORKBUDDY_MODEL_TOKEN: CALLER_TOKEN,
+    PI_BROWSER_RELAY: "0",
+    PI_BROWSER_CMUX: "0",
+    PUPPETEER_PROXY: "direct://",
+    PUPPETEER_PROXY_IGNORE_CERT_ERRORS: "0",
   };
   if (extra.LANG !== undefined) {
     env.LANG = extra.LANG;

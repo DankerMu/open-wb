@@ -12,16 +12,44 @@
  * `Downloading Chromium for puppeteer`). Before this change the overlay had no browser block, so
  * the project layer's `enabled: true` won and omp on macOS started downloading Chrome-for-Testing.
  *
+ * Issue #1529 (task 3.2): omp-runtime「子进程 spawn 契约」, scenario「工作目录 .env 不能打开浏览器中继
+ *（真实 omp）」. A deployment with `BROWSER_BIN` (overlay `enabled: true`, the runtime's `browserBin`
+ * through the product wiring) whose workspace `.env` turns relay and cmux on, points the browser at a
+ * TEST-NET-1 proxy and turns certificate errors off, and whose project layer points the relay at
+ * TEST-NET-1. `BROWSER_BIN` is a wrapper that appends its argv to a marker file it names itself and
+ * exits 1: the marker exists only if omp took the local launch path (relay and cmux both off), and
+ * its argv shows the proxy pins won (`--proxy-server=direct://`, no `192.0.2.1`, no
+ * `--ignore-certificate-errors`). The committed negative contrast drops the relay/cmux spawn-env
+ * pins with a test-only spawn wrapper: then the relay wins, no marker, and the tool times out
+ * (`Browser open timed out after`; the relay waits 35 s, the tool's default timeout is 30 s) instead
+ * of reporting the broker unavailable.
+ *
  * Run locally: `make omp-fetch`, then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-browser.test.ts --coverage=false
  * Without `WORKBUDDY_OMP_TEST=1` the file is skipped; the CI uid-isolation job runs it.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
-import { OMP_TEST_OFF, OMP_VERSION, openOfficialWorld } from "./support/omp-official.js";
+import {
+  type OfficialDirs,
+  OMP_TEST_OFF,
+  OMP_VERSION,
+  onTeardown,
+  openOfficialWorld,
+} from "./support/omp-official.js";
 import { collectPrompt } from "./support/omp-runtime.js";
 
 // A turn takes seconds; the bound stays short so the pre-change red (a download) ends quickly.
@@ -66,6 +94,104 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: no browser configur
     },
   );
 });
+
+// The negative contrast waits out the tool's 30 s default timeout; the bound is deliberate.
+const RELAY_TURN = { timeout: 90_000 };
+
+describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: workspace .env and the relay`, () => {
+  it(
+    "the spawn-env pins beat a workspace .env: omp launches BROWSER_BIN, not the relay",
+    RELAY_TURN,
+    async () => {
+      const browser = fakeBrowser();
+      const world = await openOfficialWorld(plantRelay(browser), {
+        spawnArgs: { approvalMode: "yolo" },
+        browserEnabled: true,
+        browserBin: browser.bin,
+      });
+
+      const frames = await collectPrompt(
+        world.runtime.prompt("打开页面 WORKBUDDY_BROWSER_OPEN:about:blank"),
+      );
+
+      expect(frames.filter((frame) => frame.type === "tool_execution_start")).toHaveLength(1);
+      expect(frames.at(-1)?.type).toBe("agent_end");
+      expect(existsSync(browser.marker)).toBe(true);
+      const argv = readFileSync(browser.marker, "utf8");
+      expect(argv).toContain("--proxy-server=direct://");
+      expect(argv).not.toContain("192.0.2.1");
+      expect(argv).not.toContain("--ignore-certificate-errors");
+    },
+  );
+
+  it(
+    "negative contrast: without the relay/cmux pins the .env turns the relay on and the open times out",
+    RELAY_TURN,
+    async () => {
+      const browser = fakeBrowser();
+      const world = await openOfficialWorld(plantRelay(browser), {
+        spawnArgs: { approvalMode: "yolo" },
+        browserPins: false,
+        browserEnabled: true,
+        browserBin: browser.bin,
+      });
+
+      const frames = await collectPrompt(
+        world.runtime.prompt("打开页面 WORKBUDDY_BROWSER_OPEN:about:blank"),
+      );
+
+      const ends = frames.filter((frame) => frame.type === "tool_execution_end");
+      expect(ends.map((frame) => frame.isError)).toEqual([true]);
+      expect(resultText(ends[0])).toContain("Browser open timed out after");
+      expect(resultText(ends[0])).not.toContain("Shared browser daemon unavailable");
+      expect(frames.at(-1)?.type).toBe("agent_end");
+      expect(existsSync(browser.marker)).toBe(false);
+    },
+  );
+});
+
+interface FakeBrowser {
+  dir: string;
+  bin: string;
+  marker: string;
+}
+
+/** A `BROWSER_BIN` appending its argv (a line each) to a marker it names, then exiting 1 (omp may retry). */
+function fakeBrowser(): FakeBrowser {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "omp-browser-bin-")));
+  onTeardown(() => rmSync(dir, { recursive: true, force: true }));
+  const marker = join(dir, "launched");
+  const bin = join(dir, "chromium");
+  writeFileSync(bin, `#!/bin/sh\nprintf '%s\\n' "$@" >> ${JSON.stringify(marker)}\nexit 1\n`, {
+    mode: 0o755,
+  });
+  return { dir, bin, marker };
+}
+
+/**
+ * The workspace `.env` turning relay and cmux on, proxying the browser through TEST-NET-1 with
+ * certificate errors ignored, and a project layer pointing the relay at TEST-NET-1.
+ */
+function plantRelay(browser: FakeBrowser): (dirs: OfficialDirs) => void {
+  return ({ workspaceRoot }) => {
+    writeFileSync(
+      join(workspaceRoot, ".env"),
+      [
+        "PI_BROWSER_RELAY=1",
+        "PI_BROWSER_CMUX=1",
+        `CMUX_SOCKET_PATH=${join(browser.dir, "cmux.sock")}`,
+        "PUPPETEER_PROXY=http://192.0.2.1:9",
+        "PUPPETEER_PROXY_IGNORE_CERT_ERRORS=1",
+        "",
+      ].join("\n"),
+    );
+    mkdirSync(join(workspaceRoot, ".omp"));
+    writeFileSync(
+      join(workspaceRoot, ".omp", "config.yml"),
+      'browser:\n  relay: true\n  relayUrl: "http://192.0.2.1:9"\n',
+    );
+  };
+}
 
 function resultText(frame: OmpFrame | undefined): string {
   const result = frame?.result as { content?: Array<{ text?: string }> } | undefined;

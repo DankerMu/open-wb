@@ -7,9 +7,19 @@
  * binary (`make omp-fetch`) — a missing or different one fails, it is never skipped.
  */
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach } from "vitest";
 import { writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
 import { writeHostOverlay } from "../../src/sessions/omp/host-overlay.js";
@@ -41,6 +51,12 @@ interface OfficialRuntimeOptions {
    * overlay is dropped from both of its sources (argv `--config` and env `PI_CONFIG_FILES`).
    */
   spawnArgs?: { approvalMode?: "always-ask" | "write" | "yolo"; hostOverlay?: boolean };
+  /**
+   * `false` drops the relay/cmux pins (`PI_BROWSER_RELAY`, `PI_BROWSER_CMUX`) from the env
+   * `spawnOmp` built (#1529's negative contrast; the product always sets them). The two
+   * `PUPPETEER_PROXY*` pins stay.
+   */
+  browserPins?: boolean;
   /** The answer to an approval request; deny when absent, so nothing is executed. */
   onApproval?: (request: ApprovalRequest) => ApprovalDecision;
 }
@@ -55,6 +71,10 @@ interface OfficialWorldOptions extends OfficialRuntimeOptions {
   toolRoundScope?: FakeUpstreamStartOptions["toolRoundScope"];
   /** The `maxTokens` of the writer's single entry (production's default, 32768, when absent). */
   maxTokens?: number;
+  /** The overlay's browser block `enabled` (production: whether `BROWSER_BIN` is set); `false` when absent. */
+  browserEnabled?: boolean;
+  /** Handed to every runtime as `browserBin`, the product's `BROWSER_BIN` wiring (#1529). */
+  browserBin?: string;
 }
 
 export interface OfficialWorld extends OfficialDirs {
@@ -72,11 +92,12 @@ export interface OfficialWorld extends OfficialDirs {
 /** Teardown steps of the running case, executed last-registered first. */
 const cleanups: Array<() => unknown> = [];
 
+// A browser world waits for omp's daemon broker to exit (its 3 s idle grace) before removal.
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
     await cleanup();
   }
-});
+}, 30_000);
 
 /** Registers a teardown step of the running case (also used by the proxied world, #909). */
 export function onTeardown(step: () => unknown): void {
@@ -107,6 +128,70 @@ const rewritingSpawn: SpawnImpl = (command, args, options) => {
   return (spawn as SpawnImpl)(command, argv, { ...options, env });
 };
 
+/** Test-only spawn wrapper for #1529's negative contrast: drops the relay/cmux pins from the env. */
+const unpinnedSpawn: SpawnImpl = (command, args, options) => {
+  const env = { ...options.env };
+  delete env.PI_BROWSER_RELAY;
+  delete env.PI_BROWSER_CMUX;
+  return (spawn as SpawnImpl)(command, args, { ...options, env });
+};
+
+const BROKER_EXIT_MS = 15_000;
+
+/**
+ * A compiled omp runs headless Chromium under a per-project daemon broker that it starts detached
+ * and that outlives omp by a 3 s idle grace (`<XDG_STATE_HOME>/omp/run/daemons/<hash>/broker.pid`).
+ * Waits until no recorded broker is alive, then requires that no process names the world's root.
+ */
+async function expectBrokersGone(stateDir: string, root: string): Promise<void> {
+  const daemons = join(stateDir, "xdg", "state", "omp", "run", "daemons");
+  const deadline = Date.now() + BROKER_EXIT_MS;
+  for (let live = liveBrokers(daemons); live.length > 0; live = liveBrokers(daemons)) {
+    if (Date.now() > deadline) {
+      throw new Error(`omp daemon broker still running: ${live.join(",")}`);
+    }
+    await delay(100);
+  }
+  let leftovers = "";
+  try {
+    leftovers = execFileSync("pgrep", ["-fl", root], { encoding: "utf8" });
+  } catch {
+    // pgrep exits 1 when nothing matches.
+  }
+  if (leftovers.trim() !== "") {
+    throw new Error(`processes left under ${root}:\n${leftovers}`);
+  }
+}
+
+function liveBrokers(daemons: string): number[] {
+  if (!existsSync(daemons)) {
+    return [];
+  }
+  return readdirSync(daemons).flatMap((scope) => {
+    const file = join(daemons, scope, "broker.pid");
+    if (!existsSync(file)) {
+      return [];
+    }
+    let text: string;
+    try {
+      text = readFileSync(file, "utf8");
+    } catch (error) {
+      // The broker removed its pid file between `existsSync` and here: it has exited.
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return [];
+      }
+      throw error;
+    }
+    const { pid } = JSON.parse(text) as { pid: number };
+    try {
+      process.kill(pid, 0);
+      return [pid];
+    } catch {
+      return [];
+    }
+  });
+}
+
 /**
  * Opens the world. `plant` writes the project files before anything is spawned (the process
  * starts with the first command or prompt); everything is torn down after the running case.
@@ -126,6 +211,9 @@ export async function openOfficialWorld(
   // Test device: ends omp's own upward walk at the sandbox root, so nothing above the temporary
   // directory can be loaded (design D1 assumes no `.omp` above the sandbox root).
   mkdirSync(join(sandboxRoot, ".git"));
+  if (options.browserEnabled === true) {
+    cleanups.push(() => expectBrokersGone(stateDir, root));
+  }
   const agentDir = ompAgentDir(stateDir);
   ensureOmpStateLayout(stateDir);
   const upstream: FakeUpstreamServer = await start({
@@ -150,7 +238,10 @@ export async function openOfficialWorld(
   } else {
     writeFileSync(join(agentDir, "models.yml"), options.modelsYml(proxyBaseUrl), { mode: 0o640 });
   }
-  await writeHostOverlay(stateDir, { browserEnabled: false, visionModelId: null });
+  await writeHostOverlay(stateDir, {
+    browserEnabled: options.browserEnabled ?? false,
+    visionModelId: null,
+  });
   const dirs = { stateDir, agentDir, sandboxRoot, ownerRoot, workspaceRoot };
   plant(dirs);
   const approvals: ApprovalRequest[] = [];
@@ -167,7 +258,9 @@ export async function openOfficialWorld(
       approvalMode: runtimeOptions.spawnArgs?.approvalMode ?? "write",
       tokens: { issue: () => UPSTREAM_KEY, revoke: () => {} },
       resumePath,
+      ...(options.browserBin === undefined ? {} : { browserBin: options.browserBin }),
       ...(runtimeOptions.spawnArgs?.hostOverlay === false ? { spawnImpl: rewritingSpawn } : {}),
+      ...(runtimeOptions.browserPins === false ? { spawnImpl: unpinnedSpawn } : {}),
       onApproval: (request) => {
         approvals.push(request);
         runtime.respondApproval(request.id, runtimeOptions.onApproval?.(request) ?? "deny");

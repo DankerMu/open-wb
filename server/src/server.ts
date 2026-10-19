@@ -111,7 +111,7 @@ export interface ServerConfig extends AgentSettings, PreviewSettings {
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费三十五项应用 key——四项自有，agent 十九项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费三十六项应用 key——四项自有，agent 二十项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -143,6 +143,7 @@ export function sessionRuntimeOf(config: ServerConfig): SessionRuntime {
     snapshotMaxEntries: config.snapshotMaxEntries,
     snapshotExcludeNames: config.snapshotExcludeNames,
     ...(config.ompUser === undefined ? {} : { ompUser: config.ompUser }),
+    ...(config.browserBin === undefined ? {} : { browserBin: config.browserBin }),
   };
 }
 
@@ -544,8 +545,7 @@ async function publishStarted(
   });
   owned.stage = "host_overlay";
   await writeHostOverlay(config.ompStateDir, {
-    // No browser for any deployment until group 3 wires BROWSER_BIN (#1527, design D2).
-    browserEnabled: false,
+    browserEnabled: config.browserBin !== undefined,
     visionModelId: config.modelCatalog.models.find((model) => model.vision)?.id ?? null,
   });
   // 上面两步等待期间收到的信号：`releaseOwned` 已经开始。不建目录、不清空，同样直接返回。

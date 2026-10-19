@@ -69,6 +69,11 @@ const REQUIRED_CHILD_ENV_KEYS = [
   "OMP_PROFILE",
   "PI_PROFILE",
   "WORKBUDDY_MODEL_TOKEN",
+  // Always pinned (#1529); PUPPETEER_EXECUTABLE_PATH is not required: this job sets no BROWSER_BIN.
+  "PI_BROWSER_RELAY",
+  "PI_BROWSER_CMUX",
+  "PUPPETEER_PROXY",
+  "PUPPETEER_PROXY_IGNORE_CERT_ERRORS",
 ] as const;
 const REPORT_LABELS = [
   "uid",

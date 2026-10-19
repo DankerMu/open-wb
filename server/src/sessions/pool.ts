@@ -239,6 +239,7 @@ export function sessionRuntimeOpts(
     ...(per.onApproval === undefined ? {} : { onApproval: per.onApproval }),
     ...(base.idleMs === undefined ? {} : { idleMs: base.idleMs }),
     ...(base.ompUser === undefined ? {} : { ompUser: base.ompUser }),
+    ...(base.browserBin === undefined ? {} : { browserBin: base.browserBin }),
     ...(base.spawnImpl === undefined ? {} : { spawnImpl: base.spawnImpl }),
     ...(base.clock === undefined ? {} : { clock: base.clock }),
     ...(base.handshakeTimeoutMs === undefined

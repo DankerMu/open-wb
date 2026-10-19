@@ -18,14 +18,12 @@ import {
   type OmpFrame,
   RpcChunkDecoder,
 } from "./frame.js";
+import { ompSpawnEnv, SUDO_PRESERVE_ENV } from "./spawn-env.js";
 import {
   ensureOmpSessionDir,
   ensureOmpStateLayout,
-  ompAgentDir,
-  ompHome,
   ompHostOverlayPath,
   ompSessionDir,
-  ompXdgHome,
 } from "./state-layout.js";
 import {
   type ApprovalDecision,
@@ -48,7 +46,9 @@ export interface SpawnOmpOpts {
   approvalMode: ApprovalMode;
   token: string;
   resumePath: string | null;
-  ompUser?: string;
+  ompUser?: string | undefined;
+  /** BROWSER_BIN; becomes the child's PUPPETEER_EXECUTABLE_PATH (spawn-env.ts). */
+  browserBin?: string | undefined;
   /** Caller-resolved working directory; only the owner root is created, any other must exist. */
   cwd: string;
 }
@@ -78,7 +78,6 @@ export async function spawnOmp(
   const ownerRoot = join(opts.sandboxRoot, opts.ownerId);
   const cwd = opts.cwd;
   const sessionDir = ompSessionDir(opts.stateDir, opts.ownerId);
-  const home = ompHome(opts.stateDir);
   // Only the owner root is ours to create; a missing bound cwd must not be silently rebuilt.
   if (resolve(cwd) === resolve(ownerRoot)) {
     ensureSharedDir(ownerRoot);
@@ -111,28 +110,7 @@ export async function spawnOmp(
     args.push("--resume", opts.resumePath);
   }
 
-  const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "",
-    HOME: home,
-    XDG_DATA_HOME: ompXdgHome(opts.stateDir, "data"),
-    XDG_STATE_HOME: ompXdgHome(opts.stateDir, "state"),
-    XDG_CACHE_HOME: ompXdgHome(opts.stateDir, "cache"),
-    // omp loads `<cwd>/.env` but never over a non-empty variable: these five are what omp does
-    // by default, set so a dotenv cannot move the managed config (issue #802). The agent dir must
-    // stay the default string itself, or omp stops redirecting runtime state to XDG.
-    PI_CODING_AGENT_DIR: ompAgentDir(opts.stateDir),
-    PI_CONFIG_FILES: ompHostOverlayPath(opts.stateDir),
-    PI_CONFIG_DIR: ".omp",
-    OMP_PROFILE: "default",
-    PI_PROFILE: "default",
-    WORKBUDDY_MODEL_TOKEN: opts.token,
-  };
-  if (process.env.LANG !== undefined) {
-    env.LANG = process.env.LANG;
-  }
-  if (process.env.TMPDIR !== undefined) {
-    env.TMPDIR = process.env.TMPDIR;
-  }
+  const env = ompSpawnEnv(opts);
 
   const command = opts.ompUser === undefined ? opts.bin : "sudo";
   const commandArgs =
@@ -142,7 +120,7 @@ export async function spawnOmp(
           "-n",
           "-u",
           opts.ompUser,
-          "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN",
+          SUDO_PRESERVE_ENV,
           ...(env.TMPDIR === undefined ? [] : [`TMPDIR=${env.TMPDIR}`]),
           "--",
           // setpriv execs omp in place; the kernel SIGKILLs omp when sudo dies.

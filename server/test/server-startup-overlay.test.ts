@@ -3,9 +3,11 @@
  * 「宿主 overlay」, scenarios「overlay 写入」and「overlay 不随档位变化」with the new bytes (fixed block
  * then the browser block; this group never configures a browser, so `enabled: false`), and the
  * `MODEL_CATALOG` example of「看图块随白名单」(the first `vision:true` whitelist model is the vision
- * role). The expected bytes are the spec's, kept in `omp-layout-helpers.ts`.
+ * role). The expected bytes are the spec's, kept in `omp-layout-helpers.ts`. #1529 (the owning
+ * group of「浏览器块随 BROWSER_BIN」): cold starts without and with `BROWSER_BIN` differ in exactly
+ * the `enabled` line.
  */
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -110,6 +112,42 @@ describe("production entry host overlay (#1527)", () => {
         await server.dispose();
       }
     }
+  }, 90_000);
+
+  it("the browser block follows BROWSER_BIN: enabled false unset, true set; only that line differs", async () => {
+    const texts: string[] = [];
+    for (const configured of [false, true]) {
+      const root = scratchRoot("open-wb-overlay-browser-");
+      const browser = join(root, "chromium");
+      writeFileSync(browser, "#!/bin/sh\nexit 0\n");
+      chmodSync(browser, 0o755);
+      const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {
+          MODEL_ID,
+          MODEL_VISION: "off",
+          ...(configured ? { BROWSER_BIN: browser } : {}),
+        }),
+      }));
+      try {
+        await server.waitForStarted();
+        expectHostOverlay(
+          join(root, "state"),
+          HOST_OVERLAY_FIXED + hostOverlayBrowserBlock(configured),
+        );
+        const text = readFileSync(join(agentDirOf(root), "host-overlay.yml"), "utf8");
+        expect(text.endsWith("\n  screenshotDir: screenshots\n")).toBe(true);
+        expect(text).not.toContain("modelRoles");
+        texts.push(text);
+      } finally {
+        await server.dispose();
+      }
+    }
+    const [unset, set] = texts.map((text) => text.split("\n"));
+    const differing = (unset ?? []).flatMap((line, index) =>
+      line === set?.[index] ? [] : [[line, set?.[index]]],
+    );
+    expect(set).toHaveLength(unset?.length ?? -1);
+    expect(differing).toEqual([["  enabled: false", "  enabled: true"]]);
   }, 90_000);
 
   it("a MODEL_CATALOG with vision models appends modelRoles.vision for the first of them", async () => {
