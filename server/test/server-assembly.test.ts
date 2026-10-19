@@ -484,6 +484,7 @@ describe("真实 createApp 把白名单交给模型代理", () => {
       name: id,
       reasoning: false,
       vision: false,
+      maxTokens: 32768,
     }));
     expect(
       await proxyStatuses({ models, defaultModelId: "m1" }, [

@@ -121,7 +121,7 @@ describe("production entry lifecycle", () => {
                 id: MODEL_ID,
                 name: MODEL_ID,
                 contextWindow: 128000,
-                maxTokens: 8192,
+                maxTokens: 32768,
                 reasoning: true,
                 compat: { reasoningContentField: "reasoning_content" },
               },

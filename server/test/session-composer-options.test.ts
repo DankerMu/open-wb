@@ -82,6 +82,10 @@ describe("输入框选项端点", () => {
     expect(jia.statusCode).toBe(200);
     expect(jia.json()).toEqual(cappedWith("write", "m3", "low"));
     expect(jia.payload).toBe(JSON.stringify(cappedWith("write", "m3", "low")));
+    // model-selection「模型白名单配置」: the output limit (m2 declares 8192) stays in models.yml.
+    for (const model of (jia.json() as { models: object[] }).models) {
+      expect(Object.hasOwn(model, "maxTokens")).toBe(false);
+    }
     expect(yi.statusCode).toBe(200);
     expect(yi.json()).toEqual(cappedWith("write", "m1", "high"));
     expect(yi.headers["cache-control"]).toBe("no-store");

@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
 import { resolveServerConfig } from "../src/server.js";
-import { plainYaml, reasoningYaml } from "./models-yml-helpers.js";
+import { plainYaml, reasoningYaml, withMaxTokens } from "./models-yml-helpers.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -33,8 +33,12 @@ const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
 
 function plainModel(): Record<string, unknown> {
-  return { id: MODEL_ID, name: MODEL_ID, contextWindow: 128000, maxTokens: 8192 };
+  return { id: MODEL_ID, name: MODEL_ID, contextWindow: 128000, maxTokens: 32768 };
 }
+
+/** The single-model output today: the pre-change fixture with its maxTokens line at 32768. */
+const plainNow = (baseUrl: string) => withMaxTokens(plainYaml(baseUrl, MODEL_ID), 32768);
+const reasoningNow = (baseUrl: string) => withMaxTokens(reasoningYaml(baseUrl, MODEL_ID), 32768);
 
 function documentWith(baseUrl: string, model: Record<string, unknown>): unknown {
   return {
@@ -129,7 +133,7 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
   function single(reasoning: boolean): Parameters<typeof writeManagedModelsYml>[1] {
     return {
       proxyBaseUrl: PROXY_BASE_URL,
-      models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false }],
+      models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false, maxTokens: 32768 }],
     };
   }
 
@@ -147,14 +151,14 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
   it("reasoning: true 写出精确 13 行，解析后模型条目恰多 reasoning 与 compat", async () => {
     const bytes = await written(true);
     const text = bytes.toString("utf8");
-    expect(text).toBe(reasoningYaml(PROXY_BASE_URL, MODEL_ID));
+    expect(text).toBe(reasoningNow(PROXY_BASE_URL));
     expect(text.split("\n")).toHaveLength(14);
     expect(parse(text)).toEqual(documentWith(PROXY_BASE_URL, REASONING_MODEL));
   });
 
-  it("reasoning: false 等于变更前输出", async () => {
+  it("reasoning: false 等于变更前输出换掉 maxTokens 一行", async () => {
     const text = (await written(false)).toString("utf8");
-    expect(text).toBe(plainYaml(PROXY_BASE_URL, MODEL_ID));
+    expect(text).toBe(plainNow(PROXY_BASE_URL));
     expect(text.split("\n")).toHaveLength(11);
     expect(parse(text)).toEqual(documentWith(PROXY_BASE_URL, plainModel()));
   });
@@ -163,13 +167,13 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
     const agentDir = scratch("open-wb-reasoning-overwrite-");
     const path = join(agentDir, "models.yml");
     await writeManagedModelsYml(agentDir, single(true));
-    expect(readFileSync(path, "utf8")).toBe(reasoningYaml(PROXY_BASE_URL, MODEL_ID));
+    expect(readFileSync(path, "utf8")).toBe(reasoningNow(PROXY_BASE_URL));
     await writeManagedModelsYml(agentDir, single(false));
     const text = readFileSync(path, "utf8");
     for (const stale of ["reasoning", "compat", "reasoningContentField"]) {
       expect(text).not.toContain(stale);
     }
-    expect(text).toBe(plainYaml(PROXY_BASE_URL, MODEL_ID));
+    expect(text).toBe(plainNow(PROXY_BASE_URL));
   });
 });
 
@@ -220,13 +224,13 @@ describe("production entry — MODEL_REASONING", () => {
       const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
       const baseUrl = `http://127.0.0.1:${port}/v1`;
       expect(parse(text)).toEqual(documentWith(baseUrl, REASONING_MODEL));
-      expect(text).toBe(reasoningYaml(baseUrl, MODEL_ID));
+      expect(text).toBe(reasoningNow(baseUrl));
     } finally {
       await server.dispose();
     }
   }, 30_000);
 
-  it("MODEL_REASONING=off 时写出与变更前逐字节相同的 models.yml", async () => {
+  it("MODEL_REASONING=off 时写出与变更前只差 maxTokens 一行的 models.yml", async () => {
     const root = scratch("open-wb-reasoning-off-");
     const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
       env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: "off" }),
@@ -236,7 +240,7 @@ describe("production entry — MODEL_REASONING", () => {
       const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
       const baseUrl = `http://127.0.0.1:${port}/v1`;
       expect(parse(text)).toEqual(documentWith(baseUrl, plainModel()));
-      expect(text).toBe(plainYaml(baseUrl, MODEL_ID));
+      expect(text).toBe(plainNow(baseUrl));
     } finally {
       await server.dispose();
     }

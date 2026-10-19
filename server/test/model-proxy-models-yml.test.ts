@@ -18,7 +18,7 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
-import { plainYaml, reasoningYaml } from "./models-yml-helpers.js";
+import { plainYaml, reasoningYaml, withMaxTokens } from "./models-yml-helpers.js";
 
 const PROXY_BASE_URL = "http://127.0.0.1:18016/v1";
 const MODEL_ID = "deepseek-v4.1-flash";
@@ -31,26 +31,34 @@ const SENTINELS = {
   WORKBUDDY_MODEL_TOKEN: "session-bearer-SENTINEL-89-token",
 } as const;
 
-/** A whitelist of an installation without MODEL_CATALOG: name equals id, no efforts, no vision. */
+/** A whitelist of an installation without MODEL_CATALOG: name equals id, no efforts, no vision, 32768. */
 function singleModel(proxyBaseUrl: string, modelId: string) {
   return {
     proxyBaseUrl,
-    models: [{ id: modelId, name: modelId, reasoning: false, vision: false }],
+    models: [{ id: modelId, name: modelId, reasoning: false, vision: false, maxTokens: 32768 }],
   };
 }
 
 /** model-proxy「托管 models.yml」scenario "Several models in whitelist order", verbatim. */
-const M2 = { id: "m2", name: "m2", reasoning: false, vision: false } as const;
+const M2 = { id: "m2", name: "m2", reasoning: false, vision: false, maxTokens: 8192 } as const;
 const THREE_MODELS = [
   {
     id: "m1",
     name: "通用",
     reasoning: true,
     vision: false,
+    maxTokens: 32768,
     efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
   },
   M2,
-  { id: "m3", name: "深度", reasoning: true, vision: true, efforts: ["low", "high"] },
+  {
+    id: "m3",
+    name: "深度",
+    reasoning: true,
+    vision: true,
+    maxTokens: 32768,
+    efforts: ["low", "high"],
+  },
 ] as const;
 
 const THREE_MODELS_YAML = `providers:
@@ -62,7 +70,7 @@ const THREE_MODELS_YAML = `providers:
       - id: "m1"
         name: "通用"
         contextWindow: 128000
-        maxTokens: 8192
+        maxTokens: 32768
         reasoning: true
         compat:
           reasoningContentField: reasoning_content
@@ -82,7 +90,7 @@ const THREE_MODELS_YAML = `providers:
       - id: "m3"
         name: "深度"
         contextWindow: 128000
-        maxTokens: 8192
+        maxTokens: 32768
         reasoning: true
         compat:
           reasoningContentField: reasoning_content
@@ -96,7 +104,7 @@ const THREE_MODELS_YAML = `providers:
           - image
 `;
 
-const LIMITS = { contextWindow: 128000, maxTokens: 8192 };
+const LIMITS = { contextWindow: 128000, maxTokens: 32768 };
 const REASONING_KEYS = {
   reasoning: true,
   compat: { reasoningContentField: "reasoning_content" },
@@ -118,7 +126,7 @@ const THREE_MODELS_DOCUMENT = {
             efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
           },
         },
-        { id: "m2", name: "m2", ...LIMITS },
+        { id: "m2", name: "m2", contextWindow: 128000, maxTokens: 8192 },
         {
           id: "m3",
           name: "深度",
@@ -401,16 +409,22 @@ describe("writeManagedModelsYml", () => {
     [true, reasoningYaml(PROXY_BASE_URL, MODEL_ID)],
     [false, plainYaml(PROXY_BASE_URL, MODEL_ID)],
   ])(
-    "single-model output without MODEL_CATALOG is byte-identical to the pre-change file (reasoning %s)",
+    "single-model output without MODEL_CATALOG differs from the pre-change file in the maxTokens line only (reasoning %s)",
     async (reasoning, before) => {
       const agentDir = makeAgentDir();
       await writeManagedModelsYml(agentDir, {
         proxyBaseUrl: PROXY_BASE_URL,
-        models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false }],
+        models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false, maxTokens: 32768 }],
       });
-      expect(readFileSync(join(agentDir, "models.yml")).equals(Buffer.from(before, "utf8"))).toBe(
-        true,
+      const written = readFileSync(join(agentDir, "models.yml"));
+      expect(written.equals(Buffer.from(withMaxTokens(before, 32768), "utf8"))).toBe(true);
+      const now = written.toString("utf8").split("\n");
+      const old = before.split("\n");
+      expect(now).toHaveLength(old.length);
+      const differing = now.flatMap((line, index) =>
+        line === old[index] ? [] : [[old[index], line]],
       );
+      expect(differing).toEqual([["        maxTokens: 8192", "        maxTokens: 32768"]]);
     },
   );
 
@@ -462,7 +476,7 @@ function expectedDocument(proxyBaseUrl: string, modelId: string): unknown {
             id: modelId,
             name: modelId,
             contextWindow: 128000,
-            maxTokens: 8192,
+            maxTokens: 32768,
           },
         ],
       },

@@ -227,8 +227,8 @@ describe('toolRoundScope "turn" is identical to the default scope', () => {
       await chat(handle.port, [...laterTurn(TODO), TOOL_RESULT], "m2");
     }
     expect(byTurn.requests()).toEqual([
-      { model: "m1", messages: 5 },
-      { model: "m2", messages: 6 },
+      { model: "m1", messages: 5, maxTokens: null },
+      { model: "m2", messages: 6, maxTokens: null },
     ]);
     expect(byTurn.requests()).toEqual(byDefault.requests());
   });

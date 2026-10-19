@@ -22,11 +22,17 @@ const USER = { role: "user", content: SECRET_TEXT };
 const ASSISTANT = { role: "assistant", content: "ok" };
 const TOOL = { role: "tool", content: "workbuddy-smoke" };
 
-/** The three requests of the scenario: `m1` / 1 message, `m3` / 3 messages, no model / 2. */
+/**
+ * The three requests of the scenario: `m1` / 1 message / `max_tokens` 32768, `m3` / 3 messages /
+ * `max_completion_tokens` 8192, no model / 2 messages / a string `max_tokens`.
+ */
 const SCENARIO: Array<{ path: string; body: Record<string, unknown> }> = [
-  { path: PATH_ROOT, body: { model: "m1", messages: [USER] } },
-  { path: PATH_V1, body: { model: "m3", messages: [USER, ASSISTANT, TOOL] } },
-  { path: PATH_ROOT, body: { messages: [USER, TOOL] } },
+  { path: PATH_ROOT, body: { model: "m1", messages: [USER], max_tokens: 32768 } },
+  {
+    path: PATH_V1,
+    body: { model: "m3", messages: [USER, ASSISTANT, TOOL], max_completion_tokens: 8192 },
+  },
+  { path: PATH_ROOT, body: { messages: [USER, TOOL], max_tokens: "32768" } },
 ];
 
 function sse(records: string[]): string {
@@ -139,12 +145,12 @@ describe("fake-upstream request record", () => {
       status: 200,
       contentType: "application/json",
       cacheControl: "no-store",
-      text: '{"requests":[{"model":"m1","messages":1},{"model":"m3","messages":3},{"model":null,"messages":2}]}',
+      text: '{"requests":[{"model":"m1","messages":1,"maxTokens":32768},{"model":"m3","messages":3,"maxTokens":8192},{"model":null,"messages":2,"maxTokens":null}]}',
     });
     expect(handle.requests()).toEqual([
-      { model: "m1", messages: 1 },
-      { model: "m3", messages: 3 },
-      { model: null, messages: 2 },
+      { model: "m1", messages: 1, maxTokens: 32768 },
+      { model: "m3", messages: 3, maxTokens: 8192 },
+      { model: null, messages: 2, maxTokens: null },
     ]);
     expect(anonymous).toEqual({
       status: 401,
@@ -176,7 +182,7 @@ describe("fake-upstream request record", () => {
     expect(wrong).toEqual(gate);
     expect(wrong.text).not.toContain("m1");
     expect(posted.status).toBe(404);
-    expect(handle.requests()).toEqual([{ model: "m1", messages: 1 }]);
+    expect(handle.requests()).toEqual([{ model: "m1", messages: 1, maxTokens: null }]);
   });
 
   it("records a request the fixture then rejects for its messages, with messages 0 and a non-string model as null", async () => {
@@ -194,8 +200,8 @@ describe("fake-upstream request record", () => {
       });
     }
     expect(handle.requests()).toEqual([
-      { model: "m1", messages: 0 },
-      { model: null, messages: 0 },
+      { model: "m1", messages: 0, maxTokens: null },
+      { model: null, messages: 0, maxTokens: null },
     ]);
   });
 
@@ -227,12 +233,12 @@ describe("fake-upstream request record", () => {
 
     const kept = handle.requests();
     expect(kept).toHaveLength(1000);
-    expect(kept[0]).toEqual({ model: "m1", messages: 2 });
-    expect(kept[999]).toEqual({ model: "m1000", messages: 2 });
+    expect(kept[0]).toEqual({ model: "m1", messages: 2, maxTokens: null });
+    expect(kept[999]).toEqual({ model: "m1000", messages: 2, maxTokens: null });
     expect(JSON.parse((await record(handle)).text)).toEqual({ requests: kept });
   }, 60_000);
 
-  it("holds the two keys only: no message text, header or key, and the accessor hands out a copy", async () => {
+  it("holds the three keys only: no message text, header or key, and the accessor hands out a copy", async () => {
     const handle = await open();
     await chat(handle, PATH_ROOT, {
       model: "m1",
@@ -246,12 +252,12 @@ describe("fake-upstream request record", () => {
     for (const entry of copy) {
       entry.model = "tampered";
     }
-    copy.push({ model: "extra", messages: 9 });
+    copy.push({ model: "extra", messages: 9, maxTokens: 9 });
 
-    expect(listed.text).toBe('{"requests":[{"model":"m1","messages":1}]}');
+    expect(listed.text).toBe('{"requests":[{"model":"m1","messages":1,"maxTokens":null}]}');
     expect(listed.text).not.toContain(SECRET_TEXT);
     expect(listed.text).not.toContain(KEY);
     expect(JSON.stringify(copy)).not.toContain(SECRET_TEXT);
-    expect(handle.requests()).toEqual([{ model: "m1", messages: 1 }]);
+    expect(handle.requests()).toEqual([{ model: "m1", messages: 1, maxTokens: null }]);
   });
 });

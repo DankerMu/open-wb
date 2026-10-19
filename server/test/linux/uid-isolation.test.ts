@@ -246,7 +246,9 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         ensureOmpStateLayout(state);
         await writeManagedModelsYml(agent, {
           proxyBaseUrl: "http://127.0.0.1:18016/v1",
-          models: [{ id: MODEL_ID, name: MODEL_ID, reasoning: false, vision: false }],
+          models: [
+            { id: MODEL_ID, name: MODEL_ID, reasoning: false, vision: false, maxTokens: 32768 },
+          ],
         });
         await writeHostOverlay(state);
         const modelsBefore = readFileSync(models);

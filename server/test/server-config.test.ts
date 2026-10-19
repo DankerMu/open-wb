@@ -89,8 +89,9 @@ describe("resolveServerConfig — 缺省身份", () => {
       expect(config.snapshotMaxEntries).toBe(50_000);
       expect(config.snapshotExcludeNames).toEqual(["node_modules", ".venv", "__pycache__"]);
       // 未设置 MODEL_CATALOG 的单模型一项不带 efforts 键（toStrictEqual 连键的有无一起比）。
+      const id = DEFAULT_MODEL_ID;
       expect(config.modelCatalog).toStrictEqual({
-        models: [{ id: DEFAULT_MODEL_ID, name: DEFAULT_MODEL_ID, reasoning: true, vision: false }],
+        models: [{ id, name: id, reasoning: true, vision: false, maxTokens: 32768 }],
         defaultModelId: DEFAULT_MODEL_ID,
       });
       expect(config.approvalMaxMode).toBe("yolo");
@@ -321,6 +322,7 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
         modelCatalog: { defaultModelId: "model-bytes" },
         repoRoot: REPO_ROOT,
       });
+      const plain = "plain-model";
       for (const config of [fromSource, fromDist]) {
         expect(config.snapshotMaxFileBytes).toBe(4096);
         expect(config.snapshotMaxTotalBytes).toBe(65_536);
@@ -328,12 +330,13 @@ describe("resolveServerConfig — 新增七项缺省与逐项覆盖", () => {
         expect(config.snapshotExcludeNames).toEqual(["target", ".cache"]);
         expect(config.modelCatalog).toStrictEqual({
           models: [
-            { id: "plain-model", name: "plain-model", reasoning: false, vision: true },
+            { id: plain, name: plain, reasoning: false, vision: true, maxTokens: 32768 },
             {
               id: "model-bytes",
               name: "Model Bytes",
               reasoning: true,
               vision: false,
+              maxTokens: 32768,
               efforts: ["low", "high"],
             },
           ],

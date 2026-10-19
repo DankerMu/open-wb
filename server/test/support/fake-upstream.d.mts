@@ -9,10 +9,14 @@ export interface FakeUpstreamStartOptions {
   toolRoundScope?: "history" | "turn";
 }
 
-/** One accepted chat-completions request: its top-level `model` and the length of `messages`. */
+/**
+ * One accepted chat-completions request: its top-level `model`, the length of `messages`, and the
+ * number `max_tokens` (else the number `max_completion_tokens`, else `null`).
+ */
 export interface FakeUpstreamRequest {
   model: string | null;
   messages: number;
+  maxTokens: number | null;
 }
 
 export interface FakeUpstreamServer {

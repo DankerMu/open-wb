@@ -10,7 +10,13 @@ export const TEST_COMPOSER: ComposerConfig = {
   approvalMaxMode: "yolo",
   modelCatalog: {
     models: [
-      { id: "deepseek-v4.1-flash", name: "deepseek-v4.1-flash", reasoning: true, vision: false },
+      {
+        id: "deepseek-v4.1-flash",
+        name: "deepseek-v4.1-flash",
+        reasoning: true,
+        vision: false,
+        maxTokens: 32768,
+      },
     ],
     defaultModelId: "deepseek-v4.1-flash",
   },
@@ -27,10 +33,18 @@ export const THREE_MODEL_CATALOG: ComposerConfig["modelCatalog"] = {
       name: "M One",
       reasoning: true,
       vision: false,
+      maxTokens: 32768,
       efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
     },
-    { id: "m2", name: "M Two", reasoning: false, vision: false },
-    { id: "m3", name: "M Three", reasoning: true, vision: true, efforts: ["low", "high"] },
+    { id: "m2", name: "M Two", reasoning: false, vision: false, maxTokens: 8192 },
+    {
+      id: "m3",
+      name: "M Three",
+      reasoning: true,
+      vision: true,
+      maxTokens: 32768,
+      efforts: ["low", "high"],
+    },
   ],
   defaultModelId: "m1",
 };
