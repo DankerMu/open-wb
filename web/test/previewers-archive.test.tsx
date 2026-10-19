@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewPane } from "../src/features/files/preview.js";
@@ -362,10 +362,14 @@ describe("压缩包预览器：请求归属", () => {
     expect((await rows()).map((row) => cellsOf(row)[0]?.textContent)).toStrictEqual(["old.txt"]);
 
     next.resolve(listing([file("new-1.txt", 3), file("new-2.txt", 4)]));
-    expect((await rows()).map((row) => cellsOf(row)[0]?.textContent)).toStrictEqual([
-      "new-1.txt",
-      "new-2.txt",
-    ]);
+    // 旧表此刻仍在：等的是新列表本身，而不是「有一张表」。
+    await waitFor(() =>
+      expect(
+        within(screen.getByRole("table"))
+          .getAllByRole("row")
+          .map((row) => cellsOf(row)[0]?.textContent),
+      ).toStrictEqual(["new-1.txt", "new-2.txt"]),
+    );
     expect(screen.getByText("共 2 项", { exact: true })).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.queryByText("old.txt")).toBeNull();

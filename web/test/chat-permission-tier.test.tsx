@@ -518,6 +518,8 @@ describe("权限档位控件：欢迎态的选择进入创建请求", () => {
     clickSend();
     await waitFor(() => expect(currentLocation()).toBe(`/?session=${CREATED_IDS[0]}`));
     expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"office"}')]);
+    // 先等新会话页收敛到运行中（停止）再离开：没收敛就回欢迎态，欢迎态的按钮会停在「停止」（#1541）。
+    await screen.findByRole("button", { name: "停止" });
 
     // 没选过档位：回到欢迎态仍取缺省档。
     await act(() => router.navigate("/", { replace: true }));
