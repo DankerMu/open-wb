@@ -25,7 +25,7 @@
 
 ### Modified Capabilities
 
-- `omp-runtime`：MODIFIED「宿主 overlay」（浏览器块与 `modelRoles.vision` 进 overlay；按部署配置确定的字节）；MODIFIED「子进程 spawn 契约」（环境白名单在设置了 `BROWSER_BIN` 时多一个 `PUPPETEER_EXECUTABLE_PATH`；恒钉 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`，使工作目录 `.env` 打不开浏览器中继与 cmux（#1529，owner 2026-10-19）；直连与 sudo 两种模式同一份）。
+- `omp-runtime`：MODIFIED「宿主 overlay」（浏览器块与 `modelRoles.vision` 进 overlay；按部署配置确定的字节）；MODIFIED「子进程 spawn 契约」（环境白名单在设置了 `BROWSER_BIN` 时多一个 `PUPPETEER_EXECUTABLE_PATH`；恒钉 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`、`PUPPETEER_PROXY=direct://`、`PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0`，使工作目录 `.env` 打不开浏览器中继与 cmux、也不能给浏览器挂代理或关证书校验（#1529，owner 2026-10-19）；直连与 sudo 两种模式同一份）。
 - `tool-approval`：MODIFIED「审批请求识别」（`xd://browser` 的审批工具名为 `browser`、标题改写为可读的浏览器操作）。
 - `chat-stream`：MODIFIED「纯协议事件归约」（`xd://browser` 的步骤名为 `browser`、detail 首行为可读摘要；浏览器步骤的截图候选）。
 - `turn-artifacts`：MODIFIED「文件变更推导与归属」（工具名集合加 `browser`，候选取自截图路径）。
@@ -34,7 +34,7 @@
 - `session-composer-settings`：MODIFIED「输入框选项端点」（缺省配置的单模型 `vision` 为 `true`）。
 - `thinking-fold`：MODIFIED「reasoning 前提与真运行时取证」（「关闭 reasoning」的字节比对改为引用 model-proxy 的单模型定义）。
 - `http-service-skeleton`：MODIFIED「服务启动与装配」（配置键 35 → 37：`BROWSER_BIN`、`MODEL_VISION`；「单模型字节不变」改为引用 model-proxy）。
-- `omp-uid-isolation`：MODIFIED「OMP_USER 配置与 sudo spawn 前缀」（固定的 `--preserve-env` 列表末尾依次加 `PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_EXECUTABLE_PATH`，两个恒钉的键在 sudo 下才不被丢掉，#1529）；MODIFIED「CI uid-isolation job」（聚合门禁的 direct job 数十 → 十一）。
+- `omp-uid-isolation`：MODIFIED「OMP_USER 配置与 sudo spawn 前缀」（固定的 `--preserve-env` 列表末尾依次加 `PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH`，四个恒钉的键在 sudo 下才不被丢掉，#1529）；MODIFIED「CI uid-isolation job」（聚合门禁的 direct job 数十 → 十一）。
 - `verification-harness`：MODIFIED「CI 接线与控制面同步」与「第三方 CI action 使用 Node 24 runtime」（direct job 十 → 十一、checkout/setup-node 次数 10/8 → 11/9、Enforcement Index 加「浏览器参考镜像」行、`browser-image` 钉在 `ubuntu-24.04`）。
 - `omp-test-harness`：MODIFIED「受控上游思考与写入标记」（「无标记字节不变」的标记集合加上浏览器标记；omp 补的图片附件消息不算用户消息）；ADDED「受控上游浏览器标记」（`WORKBUDDY_BROWSER_OPEN:<url>` 与 `WORKBUDDY_BROWSER_SHOT` 工具轮、图片附件消息的跳过规则）。
 
