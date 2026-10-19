@@ -7,8 +7,8 @@
  * as `tools/plan-mode-guard.ts:57-74` unwraps it, the untrimmed scheme test (`tools/write.ts:1141`,
  * `internal-urls/router.ts:80`), `new URL()` (`parse.ts:59`) and its `href`'s device (`xd-protocol.ts:41`);
  * the content as `tools/write.ts:332-363` strips it (`hashline/src/prefixes.ts`) before `JSON.parse`,
- * and the schema shape of `tools/browser.ts:48-74`: omp runs `validateToolArguments`' repairs
- * (`ai/src/utils/validation.ts:1930`), so any other shape is judged unverified (fail closed).
+ * and the schema shape of `tools/browser.ts:48-74`: only it passes omp's first validation unrepaired
+ * (`ai/src/utils/validation.ts:1930,2019-2042`), so any other shape is unverified (fail closed).
  */
 import { asPlain, own } from "../file-changes.js";
 
@@ -127,31 +127,34 @@ function parseJson(text: string | undefined): unknown {
 type Check = (value: unknown) => boolean;
 const isString: Check = (v) => typeof v === "string";
 const isFlag: Check = (v) => typeof v === "boolean";
-const isStrings: Check = (v) => Array.isArray(v) && v.every(isString);
-/** Every own key is known and of its type: the schema shape (`tools/browser.ts:48-74`, v18.0.10). */
-const conforms = (record: Record<string, unknown> | undefined, shape: Map<string, Check>) =>
+const isNumber: Check = (v) => typeof v === "number";
+const oneOf = (...values: unknown[]): Check => values.includes.bind(values);
+/** The required `keys` are own, and every own key is known and passes its check (enums exact). */
+const conforms = (shape: Map<string, Check>, record?: Record<string, unknown>, ...keys: string[]) =>
   record !== undefined &&
+  keys.every((key) => Object.hasOwn(record, key)) &&
   Object.keys(record).every((key) => shape.get(key)?.(record[key]) === true);
 const APP = new Map<string, Check>([
   ["path", isString],
   ["cdp_url", isString],
   ["target", isString],
   ["relay", isFlag],
-  ["args", isStrings],
+  ["args", (v) => Array.isArray(v) && v.every(isString)],
 ]);
+const VIEWPORT = new Map(["width", "height", "scale"].map((key) => [key, isNumber] as const));
 const BROWSER = new Map<string, Check>([
-  ["action", isString],
+  ["action", oneOf("open", "close", "run")],
   ["name", isString],
   ["url", isString],
   ["code", isString],
-  ["wait_until", isString],
-  ["dialogs", isString],
+  ["wait_until", oneOf("load", "domcontentloaded", "networkidle0", "networkidle2")],
+  ["dialogs", oneOf("accept", "dismiss")],
   ["all", isFlag],
   ["kill", isFlag],
-  ["timeout", (v) => typeof v === "number"],
+  ["timeout", isNumber],
   ["i", () => true],
-  ["viewport", (v) => asPlain(v) !== undefined],
-  ["app", (v) => conforms(asPlain(v), APP)],
+  ["viewport", (v) => conforms(VIEWPORT, asPlain(v), "width", "height")],
+  ["app", (v) => conforms(APP, asPlain(v))],
 ]);
 
 function toCall(record: Record<string, unknown>): BrowserCall {
@@ -159,7 +162,7 @@ function toCall(record: Record<string, unknown>): BrowserCall {
   const args = own(app, "args");
   const valid = Array.isArray(args) && args.length > 0 && args.every(isString);
   return compact<BrowserCall>({
-    unverified: conforms(record, BROWSER) ? undefined : true,
+    unverified: conforms(BROWSER, record, "action") ? undefined : true,
     unparsed: undefined,
     action: text(own(record, "action")),
     name: text(own(record, "name")),

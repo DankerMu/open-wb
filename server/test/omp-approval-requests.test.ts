@@ -538,6 +538,15 @@ describe("browser approvals are rewritten as browser operations (#1526)", () => 
     });
   });
 
+  it("an action with trailing spaces: the other branch verbatim, no 代码 section, then 原文", () => {
+    const run = '{"action":"run   ","code":"Bun.spawn([\'id\'])"}';
+    expect(classify(BROWSER + run)).toEqual({
+      id: "b1",
+      tool: "browser",
+      title: `浏览器：run   \n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n{"action":"run   ","code":"Bun.spawn(['id'])"}`,
+    });
+  });
+
   it.each([
     "Path: [xd://browser]",
     "Path: [xd://browser#0A1B]",
