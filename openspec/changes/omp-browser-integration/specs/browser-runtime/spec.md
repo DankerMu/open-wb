@@ -26,26 +26,30 @@
 
 ### Requirement: 浏览器操作的可读描述
 服务端 SHALL 有一个无 IO 的纯函数模块（`server/src/sessions/omp/xd-browser.ts`），供 tool-approval「审批请求识别」、chat-stream「纯协议事件归约」与「浏览器调用审计」共用，三处 SHALL NOT 各自另写判定或解析：
-- 设备路径判定：一个路径字符串在下列两条任一成立时指向浏览器设备（取并集：判得比 omp 宽只多一条审计与一张改写的卡，判得窄则漏审计）。这两条依赖 omp v18.0.10 的消费代码，升级 omp 时 SHALL 重新核对。
-  - (a) omp 执行路径的同一判定：对原串做 omp 的方括号解包（`plan-mode-guard.ts` `unwrapHashlineHeaderPath`：去掉结尾 JS 空白后若形如 `[<内层>]`，且 `<内层>` 为非空的 `P` 或 `P#XXXX`（`XXXX` 恰四个十六进制字符、`P` 不含 `#`），取 `P`，否则取原串），结果匹配 `^[a-z][a-z0-9+.-]*://`（不分大小写，`internal-urls/router.ts:80`），以 WHATWG `new URL()` 解析成功（`internal-urls/parse.ts:59`），且其 `href` 以不分大小写的 `xd://` 开头、其后恰为 `browser`（`xd-protocol.ts:41`；URL 序列化会去掉首尾 C0 控制字符与空格、全部制表符与换行、空端口与空 userinfo，所以 `xd://browser:`、`xd://@browser` 也在内；`xd:` 是非特殊 scheme，主机名不转小写，设备名区分大小写）。
-  - (b) 宽松串判定：先删去全部 U+0009、U+000A、U+000D，再去掉首尾的 U+0000–U+0020 与 JS `trim()` 所认的空白，做同样的方括号解包并再去一次首尾，结果以不分大小写的 `xd://` 开头、其后恰为 `browser`。
-- 解析：参数文本经 `JSON.parse` 得到普通对象、且其自有 `action` 为非空字符串时成功，否则失败。只读自有属性；`name`、`url`、`code` 取非空字符串，`all`、`kill` 取布尔，`app` 取普通对象，其中 `path`、`cdp_url` 取非空字符串、`relay` 取布尔、`args` 取全部元素为字符串的非空数组；类型不符的字段视同缺席。
+- 设备路径判定：一个路径字符串指向浏览器设备，当且仅当它按 omp 执行路径的同一判定指向 `browser`（依赖 omp v18.0.10 的消费代码，升级 omp 时 SHALL 重新核对）：对原串做 omp 的方括号解包（`plan-mode-guard.ts` `unwrapHashlineHeaderPath`：去掉结尾 JS 空白后若形如 `[<内层>]`，且 `<内层>` 为非空的 `P` 或 `P#XXXX`（`XXXX` 恰四个十六进制字符、`P` 不含 `#`），取 `P`，否则取原串），结果匹配 `^[a-z][a-z0-9+.-]*://`（不分大小写，`internal-urls/router.ts:80`），以 WHATWG `new URL()` 解析成功（`internal-urls/parse.ts:59`），且其 `href` 以不分大小写的 `xd://` 开头、其后恰为 `browser`（`xd-protocol.ts:41`；URL 序列化会去掉首尾 C0 控制字符与空格、全部制表符与换行、空端口与空 userinfo，所以 `xd://browser:`、`xd://@browser` 也在内；`xd:` 是非特殊 scheme，主机名不转小写，设备名区分大小写）。判定 SHALL NOT 在解包前去掉首部空白或控制字符：omp 以未去空白的原串判 `canHandle`（`tools/write.ts:1141`），首部带空白或控制字符的路径被当作普通文件写入，判为浏览器会把这次文件写入登记成浏览器步骤、漏掉它的文件变更。
+- 解析：参数文本经 `JSON.parse` 得到普通对象、且其自有 `action` 为非空字符串时成功；原文不成功时，按 omp 写入前的 hashline 前缀剥离（`tools/write.ts:332-363` `stripWriteContent`，规则取自 `hashline/src/prefixes.ts` 的 `stripHashlinePrefixes`：每个非空内容行都匹配行号前缀时，去掉 `[<路径>#XXXX]` 头行与 `read` 的元数据行、逐行去掉行号前缀；没有剥离时，首个非空行为松散头行 `[<路径>#<任意>]` 的，去掉该行后再按同一规则剥离）处理后再解析一次，仍不成功即失败。宿主不知道 omp 是否处在 hashline 模式，所以两次取先成功者；合法 JSON 对象的首个非空行以 `{` 起头、不会被剥离，原文能解析时两者一致。只读自有属性；`name`、`url`、`code` 取非空字符串，`all`、`kill` 取布尔，`app` 取普通对象，其中 `path`、`cdp_url` 取非空字符串、`relay` 取布尔、`args` 取全部元素为字符串的非空数组；类型不符的字段视同缺席。
 - 摘要行（恰一行）：`action` 为 `open` 时，有 `url` 为 `浏览器：打开 <url>`，否则为 `浏览器：打开标签页 <name>`；`run` 为 `浏览器：在标签页 <name> 执行脚本`；`close` 时 `all` 为真为 `浏览器：关闭全部标签页`，否则为 `浏览器：关闭标签页 <name>`，两者在 `kill` 为真时都再接 `并结束外部浏览器`；其它 `action` 为 `浏览器：<action>`。`<name>` 缺席时为 `main`（omp 的缺省标签页名）。解析失败时摘要行为 `浏览器操作`。
 - 标志行（零到三行，按此次序，有才写）：`app.path` 存在为 `⚠ 启动外部程序：<path>`，`app.args` 存在时其后再接一个空格与 `参数 <args 的紧凑 JSON>`；`app.cdp_url` 存在为 `⚠ 连接外部浏览器：<cdp_url>`；`app.relay` 为真为 `⚠ 经中继连接用户自己的浏览器`。解析失败时没有标志行。
 - 审计字段：解析成功时为 `{action, url, external}`——`url` 缺席为 `null`，`external` 为 `{path, args, cdpUrl, relay}` 中出现的项（`relay` 只在为真时出现）组成的对象，都没有为 `null`；解析失败时为 `{action:null, url:null, external:null}`。
 插入摘要行与标志行的字符串值 SHALL 先把其中的 CR、LF、U+2028、U+2029 各换成一个空格，使每一行确实只占一行。
 
 #### Scenario: 设备路径判定
-- **WHEN** 判定 `xd://browser`、` xd://browser `、`XD://browser`、`[xd://browser]`、`[xd://browser#0a1B]`、`xd://Browser`、`xd://browser2`、`[xd://browser#XYZ1]`、`notes/xd://browser`、`xd://browser/x`
+- **WHEN** 判定 `xd://browser`、`XD://browser`、`[xd://browser]`、`[xd://browser#0a1B]`、`xd://browser `（尾部空格）、`xd://Browser`、`xd://browser2`、`[xd://browser#XYZ1]`、`notes/xd://browser`、`xd://browser/x`
 - **THEN** 前五个为真，后五个为假
-- **WHEN** 判定 `xd://bro\twser`、`xd://browser\n`、`[xd://brow\rser]`、`xd://browser\u0001`、`[xd://browser\u001f]`、`\u0000xd://browser`（`\t`、`\n`、`\r`、`\uXXXX` 为真实控制字符）
-- **THEN** 六个都为真
+- **WHEN** 判定 `xd://bro\twser`、`xd://browser\n`、`[xd://brow\rser]`、`xd://browser\u0001`、`[xd://browser\u001f]`（`\t`、`\n`、`\r`、`\uXXXX` 为真实控制字符）
+- **THEN** 五个都为真
+- **WHEN** 判定 ` xd://browser`、`\txd://browser`、`\u0000xd://browser`、` [xd://browser]`、`xd://browser\u00a0`
+- **THEN** 五个都为假（omp 把前四个当普通文件写入或拒绝，第五个报没有该设备）
 - **WHEN** 判定 `xd://browser:`、`xd://@browser`、`xd://:@browser`、`[xd://browser:]`；另判 `xd://browser/`、`xd://browser:80`
 - **THEN** 前四个为真（经 (a)：`new URL()` 的 `href` 为 `xd://browser`）；后两个为假（`href` 分别为 `xd://browser/` 与 `xd://browser:80`）
 
 #### Scenario: 各类操作的摘要
 - **WHEN** 依次描述 `{"action":"open","url":"https://example.com"}`、`{"action":"open","name":"b"}`、`{"action":"open","url":""}`、`{"action":"run","code":"1"}`、`{"action":"close","name":"b","kill":true}`、`{"action":"close","all":true}`、`{"action":"help"}`、`{"action":""}`、`[1]`、`not json`
 - **THEN** 摘要行依次为 `浏览器：打开 https://example.com`、`浏览器：打开标签页 b`、`浏览器：打开标签页 main`、`浏览器：在标签页 main 执行脚本`、`浏览器：关闭标签页 b并结束外部浏览器`、`浏览器：关闭全部标签页`、`浏览器：help`、`浏览器操作`、`浏览器操作`、`浏览器操作`，均无标志行；第三例的审计字段为 `{action:"open",url:null,external:null}`，后三例为三个 `null`
+
+#### Scenario: 带 hashline 行号前缀的参数
+- **WHEN** 描述 `1:{"action":"open","url":"https://a","app":{"path":"/bin/sh"}}`；另一次为两行 `1:{"action":"run",` 与 `2:"code":"1"}`；另一次为三行 `[a.json#0A1B]`、`1:{"action":"open",`、`2:"url":"https://a"}`；另一次为两行 `1:{"action":"open",` 与 `"url":"https://a"}`（第二行没有前缀）
+- **THEN** 第一次摘要行为 `浏览器：打开 https://a`、恰一行标志行 `⚠ 启动外部程序：/bin/sh`，审计字段 `external` 为 `{path:"/bin/sh"}`；第二次摘要行为 `浏览器：在标签页 main 执行脚本`；第三次摘要行为 `浏览器：打开 https://a`；第四次不剥离、解析失败，摘要行为 `浏览器操作`
 
 #### Scenario: 越界形态的标志行
 - **WHEN** 描述 `{"action":"open","url":"https://a","app":{"path":"/bin/sh","args":["-c","id"],"cdp_url":"http://10.0.0.5:9222","relay":true}}`；另一次 `app` 为 `{"path":"","relay":"yes","args":[1]}`；另一次 `url` 含换行 `https://a\nb`
