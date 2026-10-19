@@ -165,7 +165,7 @@ function readEverywhere(store: SessionStore, sessionId: string): unknown[] {
 
 describe("会话视图发出三键：三列为 NULL 的行读成缺省有效值", () => {
   const offCatalog: ComposerConfig["modelCatalog"] = {
-    models: [{ id: "solo", name: "solo", reasoning: false, vision: false }],
+    models: [{ id: "solo", name: "solo", reasoning: false, vision: false, maxTokens: 32768 }],
     defaultModelId: "solo",
   };
   const cases: Array<[string, ComposerConfig, Composer]> = [

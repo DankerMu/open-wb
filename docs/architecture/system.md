@@ -269,20 +269,21 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 
 **`MODEL_CATALOG`**：
 
-- 1 到 32 个对象的 JSON 数组；每个对象只接受 `id`、`name`、`reasoning`、`vision`、`efforts` 五个键。
+- 1 到 32 个对象的 JSON 数组；每个对象只接受 `id`、`name`、`reasoning`、`vision`、`maxTokens`、`efforts` 六个键。
 - `id` 是发给上游的模型名：1 到 128 个 UTF-8 字节、无控制字符、不重复。`name` 是界面显示名：1 到 64 个码点、无控制字符，缺省等于 `id`（省略 `name` 时 `id` 也得满足这一条）。`reasoning`（是否支持推理）、`vision`（是否接受图片输入）是布尔，缺省 `false`。
+- `maxTokens` 是该模型单次回复的输出上限：1 到 128000 的整数（128000 即托管 `models.yml` 对每个模型固定的 `contextWindow`），缺省 32768。它写进托管 `models.yml`，omp 以它作发给上游的输出上限；配到 64000 以上时 omp 实际发出的仍是 64000（omp 自身的夹取）。不是整数或超出范围时启动失败（阶段 `config`，不回显取值）。此前每个模型固定为 8192，升级后不写这个键的模型即以 32768 作上限；要保持旧值，在该项写 `"maxTokens": 8192`。上游模型的最大输出低于所配值时上游可能拒绝请求，需按模型写明。
 - `reasoning: true` 的元素必须写 `efforts`，其余元素不得写；`efforts` 是 `minimal`、`low`、`medium`、`high`、`xhigh`、`max` 的非空子集，按此次序升序书写，不写 `off`。
 - 界面可选的强度是 `off` 加所声明的各档。缺省强度：声明了 `high` 取 `high`，否则取低于 `high` 的最高一档，再否则取声明的第一档。
 
-示例（占位的模型名；地址与密钥不在这一项里）：
+示例（占位的模型名；地址与密钥不在这一项里；`model-b` 保持旧的输出上限 8192，`model-a` 取缺省 32768）：
 
 ```sh
-MODEL_CATALOG='[{"id":"model-a","name":"通用","reasoning":true,"efforts":["low","medium","high"]},{"id":"model-b","name":"快速"}]'
+MODEL_CATALOG='[{"id": "model-a", "name": "通用", "reasoning": true, "efforts": ["low", "medium", "high"]}, {"id": "model-b", "name": "快速", "maxTokens": 8192}]'
 ```
 
 与 `MODEL_ID` / `MODEL_REASONING` 的关系：
 
-- 未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项（缺省 `deepseek-v4.1-flash`），是否支持推理取 `MODEL_REASONING`（恰为 `on` 或 `off`，缺省 `on`）。这一项不带 `efforts`，`MODEL_REASONING` 为 `on` 时界面列出 `off` 加全部六档（为 `off` 时不列强度），而 omp 按模型 id 自定强度集合并静默夹取——界面显示的强度可能与实际使用的不同。要两者一致，就配置 `MODEL_CATALOG` 并写明 `efforts`。
+- 未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项（缺省 `deepseek-v4.1-flash`），是否支持推理取 `MODEL_REASONING`（恰为 `on` 或 `off`，缺省 `on`）。这一项的输出上限（`maxTokens`）为 32768（此前 8192），不带 `efforts`，`MODEL_REASONING` 为 `on` 时界面列出 `off` 加全部六档（为 `off` 时不列强度），而 omp 按模型 id 自定强度集合并静默夹取——界面显示的强度可能与实际使用的不同。要两者一致，就配置 `MODEL_CATALOG` 并写明 `efforts`。
 - `MODEL_ID` 的取值规则（有没有 `MODEL_CATALOG` 都一样）：未设置取缺省；设置了就必须是 1 到 128 个 UTF-8 字节、不含控制字符（U+0000–U+001F 与 U+007F）的字符串，与白名单条目的 `id` 同一条规则。空串、含换行等控制字符、超过 128 字节都是启动失败（失败记录的阶段是 `config`，错误只点名键、不回显取值）。取值逐字节原样使用，不去首尾空格——首尾空格算模型名的一部分，只含空格的值也不拒。
 - 设置了 `MODEL_CATALOG`：同时设置 `MODEL_REASONING` 则启动失败；`MODEL_ID` 未设置时数组第一项是缺省模型，设置了就必须等于某一项的 `id`，否则启动失败。
 - 所有模型共用同一个上游（`MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`）。

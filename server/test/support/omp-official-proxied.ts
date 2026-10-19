@@ -140,7 +140,13 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   onTeardown(() => proxy.close());
   await writeManagedModelsYml(ompAgentDir(stateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(proxy.server.address() as AddressInfo),
-    models: PROXIED_MODELS.map((id) => ({ id, name: id, reasoning: false, vision: false })),
+    models: PROXIED_MODELS.map((id) => ({
+      id,
+      name: id,
+      reasoning: false,
+      vision: false,
+      maxTokens: 32768,
+    })),
   });
   await writeHostOverlay(stateDir);
   return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens, target };

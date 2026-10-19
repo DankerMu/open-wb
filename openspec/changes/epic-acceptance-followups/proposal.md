@@ -27,7 +27,7 @@ owner 裁决（2026-10-18 grill，逐分支见 design「owner 的裁定」）：
 ### Modified Capabilities
 
 - `chat-web`：MODIFIED「消息线程」——「正文」段的三条规则改写（源 HTML 渲染与消毒、链接、图片），场景「消息呈现与流式光标」一句改写，场景「Markdown 链接惰性与图片不加载」收窄到不安全 / 无法解析的目标（名字保留——strict 校验不接受 MODIFIED 块丢场景），新增场景「链接、图片与源 HTML 的渲染与消毒」与「流式期间的半截 HTML 不留痕」；首段「行为定制在应用层实现」一句的举例换成源 HTML 消毒与链接 / 图片规则，并点名 `rehypePlugins` 透传属 ui-foundation 第六类修改。其余段落原样。
-- `model-selection`：MODIFIED「模型白名单配置」——模型形状加 `maxTokens`，两种配置形态的缺省与校验，三个场景补 `maxTokens` 取值与四个非法值。
+- `model-selection`：MODIFIED「模型白名单配置」——模型形状加 `maxTokens`，两种配置形态的缺省与校验，三个场景补 `maxTokens` 取值与六个非法值。
 - `model-proxy`：MODIFIED「托管 models.yml」——`maxTokens` 行取自模型的 `maxTokens`；「未设白名单时输出字节不变」改为「只差 `maxTokens` 一行」；三个场景随之改写（「Single-model output is unchanged」保留名字，改为与替换了 `maxTokens` 行的改前夹具比对）。
 - `thinking-fold`：MODIFIED「reasoning 前提与真运行时取证」——场景「关闭 reasoning」的「文件与本 change 之前的托管输出逐字节相同」改为与 model-proxy「托管 models.yml」规定的单模型输出逐字节相同（改前夹具替换 `maxTokens` 行之后），其余原样。
 - `http-service-skeleton`：MODIFIED「服务启动与装配」——「单模型时写出的字节不变」改为「单模型时写出的内容见 model-proxy「托管 models.yml」（与改前只差 `maxTokens` 一行）」，其余原样。

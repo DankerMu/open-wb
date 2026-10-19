@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { reasoningYaml } from "./models-yml-helpers.js";
+import { reasoningYaml, withMaxTokens } from "./models-yml-helpers.js";
 import {
   expectHomeDotenv,
   expectHostOverlay,
@@ -61,7 +61,7 @@ function scratchRoot(prefix: string): string {
   return root;
 }
 
-/** Default startup (no MODEL_CATALOG, MODEL_REASONING unset): exactly one entry, pre-change bytes. */
+/** Default startup (no MODEL_CATALOG, MODEL_REASONING unset): one entry, pre-change bytes at 32768. */
 function expectManagedModels(agentDir: string, port: number): void {
   const models = join(agentDir, "models.yml");
   const text = readFileSync(models, "utf8");
@@ -72,7 +72,7 @@ function expectManagedModels(agentDir: string, port: number): void {
     },
   });
   expect(modelEntries(text)).toHaveLength(1);
-  expect(text).toBe(reasoningYaml(`http://127.0.0.1:${port}/v1`, MODEL_ID));
+  expect(text).toBe(withMaxTokens(reasoningYaml(`http://127.0.0.1:${port}/v1`, MODEL_ID), 32768));
   expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
 }
 
@@ -147,7 +147,7 @@ describe("production entry managed omp state layout", () => {
     const root = scratchRoot("open-wb-layout-catalog-");
     const catalog = [
       { id: "m1", name: "通用", reasoning: true, efforts: ["minimal", "low", "medium", "high"] },
-      { id: "m2" },
+      { id: "m2", maxTokens: 8192 },
       { id: "m3", name: "深度", reasoning: true, vision: true, efforts: ["low", "high"] },
     ];
     const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
@@ -161,7 +161,8 @@ describe("production entry managed omp state layout", () => {
     try {
       await server.waitForStarted();
       const agentDir = join(root, "state", "home", ".omp", "agent");
-      const limits = { contextWindow: 128000, maxTokens: 8192 };
+      // m1 and m3 take the default limit, m2 the one it declares.
+      const limits = { contextWindow: 128000, maxTokens: 32768 };
       const reasoning = { reasoning: true, compat: { reasoningContentField: "reasoning_content" } };
       expect(modelEntries(readFileSync(join(agentDir, "models.yml"), "utf8"))).toEqual([
         {
@@ -171,7 +172,7 @@ describe("production entry managed omp state layout", () => {
           ...reasoning,
           thinking: { mode: "effort", efforts: ["minimal", "low", "medium", "high"] },
         },
-        { id: "m2", name: "m2", ...limits },
+        { id: "m2", name: "m2", contextWindow: 128000, maxTokens: 8192 },
         {
           id: "m3",
           name: "深度",

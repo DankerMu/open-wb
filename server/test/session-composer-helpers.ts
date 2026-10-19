@@ -31,7 +31,7 @@ export const BAD_LEVEL = "workbuddy-bad-level";
 export const FAILING_MODEL_CATALOG: ComposerConfig["modelCatalog"] = {
   models: [
     ...THREE_MODEL_CATALOG.models,
-    { id: MISSING_MODEL, name: "Missing", reasoning: false, vision: false },
+    { id: MISSING_MODEL, name: "Missing", reasoning: false, vision: false, maxTokens: 32768 },
   ],
   defaultModelId: THREE_MODEL_CATALOG.defaultModelId,
 };

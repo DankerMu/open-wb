@@ -63,7 +63,7 @@ export async function start(options = {}) {
       ? options.gateTtlMs
       : DEFAULT_TTL_MS;
   const gates = new Map();
-  /** Accepted chat-completions requests in arrival order: `{model, messages}` only, latest 1000. */
+  /** Chat-completions requests in arrival order: `{model, messages, maxTokens}`, latest 1000. */
   const requests = [];
   const failures = createFailureScript(expectedKey);
   const server = createServer((request, response) => {
@@ -145,6 +145,8 @@ function recordRequest(requests, body) {
   requests.push({
     model: typeof body.model === "string" ? body.model : null,
     messages: Array.isArray(body.messages) ? body.messages.length : 0,
+    maxTokens:
+      [body.max_tokens, body.max_completion_tokens].find((v) => typeof v === "number") ?? null,
   });
   if (requests.length > REQUESTS_CAP) {
     requests.shift();

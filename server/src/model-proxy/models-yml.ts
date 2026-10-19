@@ -37,7 +37,7 @@ function modelLines(model: CatalogModel): string[] {
     `      - id: ${JSON.stringify(model.id)}`,
     `        name: ${JSON.stringify(model.name)}`,
     "        contextWindow: 128000",
-    "        maxTokens: 8192",
+    `        maxTokens: ${String(model.maxTokens)}`,
     ...(model.reasoning
       ? [
           "        reasoning: true",

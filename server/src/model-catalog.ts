@@ -20,6 +20,8 @@ export interface CatalogModel {
   name: string;
   reasoning: boolean;
   vision: boolean;
+  /** 单次回复的输出上限：写进托管 models.yml 的 `maxTokens`，omp 以它作上游请求的上限。 */
+  maxTokens: number;
   /** 该模型声明的强度档；`MODEL_CATALOG` 里的推理模型必带，其余情形没有这个键。 */
   efforts?: readonly Effort[];
 }
@@ -29,10 +31,20 @@ export interface ModelCatalog {
   defaultModelId: string;
 }
 
-const CATALOG_KEYS: readonly string[] = ["id", "name", "reasoning", "vision", "efforts"];
+const CATALOG_KEYS: readonly string[] = [
+  "id",
+  "name",
+  "reasoning",
+  "vision",
+  "maxTokens",
+  "efforts",
+];
 const MAX_CATALOG_MODELS = 32;
 const MAX_ID_BYTES = 128;
 const MAX_NAME_CODE_POINTS = 64;
+/** 缺省输出上限（owner 2026-10-18；此前固定 8192）与上限（托管 models.yml 固定的 contextWindow）。 */
+const DEFAULT_MAX_TOKENS = 32768;
+const MAX_MAX_TOKENS = 128000;
 
 export function resolveModelCatalog(env: Record<string, string | undefined>): ModelCatalog {
   // MODEL_ID 给出时与白名单条目的 id 同一条规则，有没有 MODEL_CATALOG 都先过这一关；取值不 trim。
@@ -44,7 +56,10 @@ export function resolveModelCatalog(env: Record<string, string | undefined>): Mo
     // 单模型配置：MODEL_ID 逐字节成为这一项的 id 与 name（首尾空格属于模型名），这一项不带 efforts。
     const id = env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID;
     const reasoning = resolveOnOff(env.MODEL_REASONING, true, "MODEL_REASONING");
-    return { models: [{ id, name: id, reasoning, vision: false }], defaultModelId: id };
+    return {
+      models: [{ id, name: id, reasoning, vision: false, maxTokens: DEFAULT_MAX_TOKENS }],
+      defaultModelId: id,
+    };
   }
   const models = parseCatalog(rawCatalog);
   if (env.MODEL_REASONING !== undefined) {
@@ -151,13 +166,16 @@ function parseCatalogEntry(entry: unknown): CatalogModel {
     throw catalogError("entries must be objects");
   }
   if (Object.keys(entry).some((key) => !CATALOG_KEYS.includes(key))) {
-    throw catalogError("entries accept only the keys id, name, reasoning, vision and efforts");
+    throw catalogError(
+      "entries accept only the keys id, name, reasoning, vision, maxTokens and efforts",
+    );
   }
   const {
     id,
     name = id,
     reasoning = false,
     vision = false,
+    maxTokens = DEFAULT_MAX_TOKENS,
     efforts,
   } = entry as Record<string, unknown>;
   if (typeof id !== "string" || !isModelId(id)) {
@@ -173,13 +191,21 @@ function parseCatalogEntry(entry: unknown): CatalogModel {
   if (typeof reasoning !== "boolean" || typeof vision !== "boolean") {
     throw catalogError("entry reasoning and vision must be booleans");
   }
+  if (
+    typeof maxTokens !== "number" ||
+    !Number.isInteger(maxTokens) ||
+    maxTokens < 1 ||
+    maxTokens > MAX_MAX_TOKENS
+  ) {
+    throw catalogError("entry maxTokens must be an integer from 1 to 128000");
+  }
   if (reasoning !== (efforts !== undefined)) {
     throw catalogError("entries must declare efforts exactly when reasoning is true");
   }
   if (efforts === undefined) {
-    return { id, name, reasoning, vision };
+    return { id, name, reasoning, vision, maxTokens };
   }
-  return { id, name, reasoning, vision, efforts: parseEfforts(efforts) };
+  return { id, name, reasoning, vision, maxTokens, efforts: parseEfforts(efforts) };
 }
 
 /** 六个强度档的非空子集，严格按强度升序（因此也不重复）。 */

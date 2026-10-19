@@ -21,17 +21,25 @@ import {
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const KEY = "MODEL_CATALOG";
 const THREE_MODELS =
-  '[{"id":"m1","name":"通用","reasoning":true,"efforts":["minimal","low","medium","high","xhigh","max"]},{"id":"m2"},{"id":"m3","name":"深度","reasoning":true,"vision":true,"efforts":["low","high"]}]';
+  '[{"id":"m1","name":"通用","reasoning":true,"efforts":["minimal","low","medium","high","xhigh","max"]},{"id":"m2","maxTokens":8192},{"id":"m3","name":"深度","reasoning":true,"vision":true,"efforts":["low","high"]}]';
 const THREE_MODELS_PARSED: readonly CatalogModel[] = [
   {
     id: "m1",
     name: "通用",
     reasoning: true,
     vision: false,
+    maxTokens: 32768,
     efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
   },
-  { id: "m2", name: "m2", reasoning: false, vision: false },
-  { id: "m3", name: "深度", reasoning: true, vision: true, efforts: ["low", "high"] },
+  { id: "m2", name: "m2", reasoning: false, vision: false, maxTokens: 8192 },
+  {
+    id: "m3",
+    name: "深度",
+    reasoning: true,
+    vision: true,
+    maxTokens: 32768,
+    efforts: ["low", "high"],
+  },
 ];
 
 function messageOf(env: Record<string, string | undefined>): string {
@@ -55,6 +63,7 @@ describe("模型白名单配置 — 未配置白名单等于单模型", () => {
           name: "deepseek-v4.1-flash",
           reasoning: true,
           vision: false,
+          maxTokens: 32768,
         },
       ],
       defaultModelId: "deepseek-v4.1-flash",
@@ -63,7 +72,7 @@ describe("模型白名单配置 — 未配置白名单等于单模型", () => {
 
   it("MODEL_ID=qwen-x、MODEL_REASONING=off：恰一项，不支持推理", () => {
     expect(resolveModelCatalog({ MODEL_ID: "qwen-x", MODEL_REASONING: "off" })).toStrictEqual({
-      models: [{ id: "qwen-x", name: "qwen-x", reasoning: false, vision: false }],
+      models: [{ id: "qwen-x", name: "qwen-x", reasoning: false, vision: false, maxTokens: 32768 }],
       defaultModelId: "qwen-x",
     });
   });
@@ -80,7 +89,7 @@ describe("模型白名单配置 — 未配置白名单等于单模型", () => {
 
   it.each([" custom-model "])("旧式单模型的 MODEL_ID 原样保留，不去首尾空格（%j）", (raw) => {
     expect(resolveModelCatalog({ MODEL_ID: raw })).toStrictEqual({
-      models: [{ id: raw, name: raw, reasoning: true, vision: false }],
+      models: [{ id: raw, name: raw, reasoning: true, vision: false, maxTokens: 32768 }],
       defaultModelId: raw,
     });
   });
@@ -119,6 +128,13 @@ describe("模型白名单配置 — 多模型白名单与缺省模型", () => {
     });
   });
 
+  it.each([1, 128000])("maxTokens 的边界值 %i 包含在内", (maxTokens) => {
+    expect(resolveModelCatalog({ [KEY]: JSON.stringify([{ id: "a", maxTokens }]) })).toStrictEqual({
+      models: [{ id: "a", name: "a", reasoning: false, vision: false, maxTokens }],
+      defaultModelId: "a",
+    });
+  });
+
   it("m2 不带 efforts 键", () => {
     const m2 = resolveModelCatalog({ [KEY]: THREE_MODELS }).models[1];
     expect(m2 !== undefined && Object.hasOwn(m2, "efforts")).toBe(false);
@@ -130,13 +146,13 @@ describe("模型白名单配置 — 多模型白名单与缺省模型", () => {
     const id = "é".repeat(64);
     const name = "😀".repeat(64);
     expect(resolveModelCatalog({ [KEY]: JSON.stringify([{ id, name }]) })).toStrictEqual({
-      models: [{ id, name, reasoning: false, vision: false }],
+      models: [{ id, name, reasoning: false, vision: false, maxTokens: 32768 }],
       defaultModelId: id,
     });
   });
 });
 
-/** 规格场景「非法白名单使启动失败」逐一列出的十六个取值。 */
+/** 规格场景「非法白名单使启动失败」逐一列出的二十二个取值。 */
 const SPEC_ILLEGAL: readonly string[] = [
   "",
   "not json",
@@ -154,6 +170,12 @@ const SPEC_ILLEGAL: readonly string[] = [
   '[{"id":"a","reasoning":true,"efforts":["high","low"]}]',
   '[{"id":"a","reasoning":true,"efforts":["ultra"]}]',
   '[{"id":"a","reasoning":true,"efforts":["auto"]}]',
+  '[{"id":"a","maxTokens":0}]',
+  '[{"id":"a","maxTokens":128001}]',
+  '[{"id":"a","maxTokens":1.5}]',
+  '[{"id":"a","maxTokens":"32768"}]',
+  '[{"id":"a","maxTokens":null}]',
+  '[{"id":"a","maxTokens":-1}]',
 ];
 
 /** 条文里写明、场景未逐一枚举的约束（id / name 的长度与控制字符、类型不符、重复强度等）。 */
@@ -196,9 +218,18 @@ describe("模型白名单配置 — 非法白名单使启动失败", () => {
     }
   });
 
-  it("规格场景恰列出十六个取值", () => {
-    expect(SPEC_ILLEGAL).toHaveLength(16);
+  it("规格场景恰列出二十二个取值", () => {
+    expect(SPEC_ILLEGAL).toHaveLength(22);
   });
+
+  it.each(["128001", "1.5", '"32768"', "null", "-1"])(
+    "maxTokens 为 %s：点名 MODEL_CATALOG，不回显该取值",
+    (value) => {
+      const message = messageOf({ [KEY]: `[{"id":"a","maxTokens":${value}}]` });
+      expect(message).toContain(KEY);
+      expect(message).not.toContain(value.replaceAll('"', ""));
+    },
+  );
 
   it.each([...REQUIREMENT_ILLEGAL])("条文约束的取值 %j 点名 MODEL_CATALOG 且不回显取值", (raw) => {
     const message = messageOf({ [KEY]: raw });
@@ -249,7 +280,7 @@ describe("模型白名单配置 — 非法白名单使启动失败", () => {
 });
 
 describe("推理强度集合 — 可选强度与缺省强度", () => {
-  const base = { id: "m", name: "m", vision: false };
+  const base = { id: "m", name: "m", vision: false, maxTokens: 32768 };
   const cases: readonly [string, CatalogModel, readonly Effort[], Effort | null][] = [
     ["不支持推理", { ...base, reasoning: false }, [], null],
     [
@@ -328,6 +359,7 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
           name: "deepseek-v4.1-flash",
           reasoning: true,
           vision: false,
+          maxTokens: 32768,
         },
       ],
       defaultModelId: "deepseek-v4.1-flash",
@@ -339,7 +371,7 @@ describe("resolveAgentSettings — 白名单进入配置", () => {
   it("旧式单模型：MODEL_ID 与 MODEL_REASONING 原样进入 modelCatalog", () => {
     const settings = resolveAgentSettings({ MODEL_ID: "qwen-x", MODEL_REASONING: "off" }, root);
     expect(settings.modelCatalog).toStrictEqual({
-      models: [{ id: "qwen-x", name: "qwen-x", reasoning: false, vision: false }],
+      models: [{ id: "qwen-x", name: "qwen-x", reasoning: false, vision: false, maxTokens: 32768 }],
       defaultModelId: "qwen-x",
     });
     expect(settings.modelCatalog.defaultModelId).toBe("qwen-x");

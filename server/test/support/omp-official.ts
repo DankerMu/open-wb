@@ -51,6 +51,8 @@ interface OfficialWorldOptions extends OfficialRuntimeOptions {
    * tool result open another tool round; absent, only the first turn of a session has one.
    */
   toolRoundScope?: FakeUpstreamStartOptions["toolRoundScope"];
+  /** The `maxTokens` of the writer's single entry (production's default, 32768, when absent). */
+  maxTokens?: number;
 }
 
 export interface OfficialWorld extends OfficialDirs {
@@ -133,7 +135,15 @@ export async function openOfficialWorld(
   if (options.modelsYml === undefined) {
     await writeManagedModelsYml(agentDir, {
       proxyBaseUrl,
-      models: [{ id: MODEL_ID, name: MODEL_ID, reasoning: false, vision: false }],
+      models: [
+        {
+          id: MODEL_ID,
+          name: MODEL_ID,
+          reasoning: false,
+          vision: false,
+          maxTokens: options.maxTokens ?? 32768,
+        },
+      ],
     });
   } else {
     writeFileSync(join(agentDir, "models.yml"), options.modelsYml(proxyBaseUrl), { mode: 0o640 });
