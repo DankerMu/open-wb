@@ -19,7 +19,7 @@ const MARKDOWN_REPLY = [
   "<script>alert(1)</script>",
   "```",
   "",
-  "<img src=x onerror=alert(1)> [链接](https://example.com)",
+  "<img src=x onerror=alert(1)> <b>粗</b> [链接](https://example.com)",
 ].join("\n");
 const MULTILINE_USER = "第一行\n  第二行\n\n末行";
 
@@ -54,7 +54,7 @@ async function assistantArticle(): Promise<HTMLElement> {
 const CARET = '[data-slot="message-caret"]';
 
 describe("(M1) assistant Markdown renders through the assistant-ui Markdown renderer", () => {
-  it("renders heading/strong/code, keeps source HTML as text and links inert", async () => {
+  it("renders heading/strong/code, source HTML as sanitized elements and https links clickable", async () => {
     mountSnapshot(doneSnapshot(MARKDOWN_REPLY));
     const article = await assistantArticle();
     const view = within(article);
@@ -63,12 +63,17 @@ describe("(M1) assistant Markdown renders through the assistant-ui Markdown rend
     expect(article.querySelector("pre > code")?.textContent).toBe("<script>alert(1)</script>\n");
     expect(article.querySelector("p code")?.textContent).toBe("行内");
     expect(document.querySelector("script")).toBeNull();
+    // 源 HTML 的 `<b>` 成元素；`src=x` 是相对路径，按图片规则原位显示地址文本 `x`、不生成 img。
+    expect(article.querySelector("b")?.textContent).toBe("粗");
+    expect(article.textContent).not.toContain("<b>");
     expect(document.querySelector("img")).toBeNull();
-    expect(article.textContent).toContain("<img src=x onerror=alert(1)>");
-    expect(view.getByText(/链接$/)).toBeTruthy();
-    expect(view.queryByRole("link")).toBeNull();
-    expect(article.querySelector("a")).toBeNull();
-    expect(article.innerHTML).not.toContain("example.com");
+    expect(article.innerHTML).not.toContain("onerror");
+    const link = view.getByRole("link", { name: "链接" });
+    expect(link.parentElement?.textContent).toBe("x 粗 链接");
+    expect(link.getAttribute("href")).toBe("https://example.com");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect((link as HTMLAnchorElement).relList.contains("noopener")).toBe(true);
+    expect((link as HTMLAnchorElement).relList.contains("noreferrer")).toBe(true);
   });
 });
 

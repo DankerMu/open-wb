@@ -1,7 +1,13 @@
-// 助手正文的 Markdown 规则（design D5；chat-web「Markdown 链接惰性与图片不加载」「代码块复制失败就地提示」）。
+// 助手正文的 Markdown 规则（epic-acceptance-followups design D1；chat-web「Markdown 链接惰性与图片不加载」
+// 「代码块复制失败就地提示」、属性白名单的放行一侧、列表项 / 引用块里的多行 HTML 块）。源 HTML 的渲染与消毒
+// 主场景、流式半截 HTML 见 chat-markdown-html.test.tsx。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
+import {
+  cleanupChatPage,
+  mountAssistantReply as mountReply,
+  renderChatPage,
+} from "./chat-page-support.js";
 import {
   chatSnapshot,
   latestSource,
@@ -9,20 +15,21 @@ import {
   SESSION_ID,
   settle,
 } from "./chat-stream-support.js";
-import { jsonResponse, paths } from "./support.js";
+import { jsonResponse } from "./support.js";
 
 const messagesPath = `/api/sessions/${SESSION_ID}/messages`;
 const BODY = '[data-slot="message-body"]';
 
-const LINKS_AND_IMAGES = [
-  "[官网](https://example.com/a)",
-  "[明文](http://plain.example/b)",
+/** 规格场景「Markdown 链接惰性与图片不加载」的正文：全部是不安全或无法解析的目标。 */
+const UNSAFE_TARGETS = [
   "[脚本](javascript:alert(1))",
   "[数据](data:text/html,x)",
   "[相对](docs/a.md)",
-  "![示意图](https://img.example.com/a.png)",
-  "![](https://img.example.com/b.png)",
-  '<a href="https://evil.example">x</a>',
+  "[锚点](#top)",
+  "![](data:image/png;base64,AAAA)",
+  "![本地](./a.png)",
+  '<a href="javascript:void(0)">j</a>',
+  '<img src="data:image/gif;base64,R0lGOD" alt="内联">',
 ].join(" ");
 const RAW_HTML = [
   "<script>window.__pwned = 1</script>",
@@ -39,23 +46,6 @@ afterEach(() => {
   Reflect.deleteProperty(window.navigator, "clipboard");
 });
 
-async function mountReply(content: string) {
-  const snapshot = chatSnapshot({
-    status: "done",
-    assistantStatus: "done",
-    content,
-    cursor: { epoch: 1, seq: null },
-  });
-  const mounted = renderChatPage(`/?session=${SESSION_ID}`, {
-    "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
-    [messagesPath]: () => jsonResponse(snapshot),
-  });
-  const article = await screen.findByRole("article", { name: "助手" });
-  const body = article.querySelector(BODY);
-  if (!body) throw new Error("助手消息缺少正文");
-  return { article, body, fetchMock: mounted.fetchMock };
-}
-
 function mockClipboard(writeText: (text: string) => Promise<void>) {
   Object.defineProperty(window.navigator, "clipboard", {
     configurable: true,
@@ -64,23 +54,16 @@ function mockClipboard(writeText: (text: string) => Promise<void>) {
 }
 
 describe("Markdown 链接惰性与图片不加载", () => {
-  it("任何目标的链接都只留可见文字：没有 a 元素，目标地址不出现在文本与属性里", async () => {
-    const { article, body } = await mountReply(LINKS_AND_IMAGES);
+  it("不安全目标的链接只留可见文字：没有 a 元素，目标地址不出现在文本与属性里", async () => {
+    const { article, body } = await mountReply(UNSAFE_TARGETS);
 
-    for (const text of ["官网", "明文", "脚本", "数据", "相对"]) {
+    for (const text of ["脚本", "数据", "相对", "锚点", "j"]) {
       expect(body.textContent).toContain(text);
     }
     expect(body.querySelector("a")).toBeNull();
     expect(within(article).queryByRole("link")).toBeNull();
     const html = article.innerHTML;
-    for (const target of [
-      "example.com/a",
-      "plain.example",
-      "javascript:",
-      "alert(1)",
-      "data:text",
-      "docs/a.md",
-    ]) {
+    for (const target of ["javascript:", "alert(1)", "data:text", "docs/a.md", "#top", "void(0)"]) {
       expect(html, target).not.toContain(target);
     }
     for (const attribute of ["href", "src", "srcset"]) {
@@ -88,39 +71,95 @@ describe("Markdown 链接惰性与图片不加载", () => {
     }
   });
 
-  it("图片不生成 img、不发请求：原位显示 alt，没有 alt 时显示地址", async () => {
-    const { body, fetchMock } = await mountReply(LINKS_AND_IMAGES);
+  it("不安全目标的图片不生成 img：原位依次显示地址（无 alt）、本地、内联", async () => {
+    const { body } = await mountReply(UNSAFE_TARGETS);
 
     expect(document.querySelector("img")).toBeNull();
-    expect(body.textContent).toContain("示意图");
-    expect(body.textContent).toContain("https://img.example.com/b.png");
-    expect(body.textContent).not.toContain("a.png");
-    expect(paths(fetchMock).filter((path) => path.includes("img.example.com"))).toEqual([]);
+    expect(body.textContent).toBe("脚本 数据 相对 锚点 data:image/png;base64,AAAA 本地 j 内联");
   });
+});
 
-  it("源 HTML 的 a 标签作为文本出现，不生成链接元素", async () => {
-    const { body } = await mountReply(LINKS_AND_IMAGES);
+describe("协议后必须是 //：https:evil 一类按相对地址解析，只留文字", () => {
+  it("不生成 a / img，这些地址不出现在任何属性里；链接留文字，图片留 alt 或地址", async () => {
+    const { body } = await mountReply(
+      '[r](https:evil) ![i](https:t.png) <img src="https:/t.example/x.png">',
+    );
 
-    expect(body.textContent).toContain('<a href="https://evil.example">x</a>');
-    expect(body.querySelector("a")).toBeNull();
+    expect(body.querySelector("a, img")).toBeNull();
+    expect(body.textContent).toBe("r i https:/t.example/x.png");
+    const attributes = [...body.querySelectorAll("*")].flatMap((node) =>
+      [...node.attributes].map((attribute) => attribute.value),
+    );
+    for (const target of ["https:evil", "https:t.png", "https:/t.example"]) {
+      expect(
+        attributes.filter((value) => value.includes(target)),
+        target,
+      ).toEqual([]);
+    }
   });
+});
 
-  it("源 HTML 的 script / img / iframe / b 都不生成元素，按文本出现", async () => {
+describe("属性白名单的放行一侧", () => {
+  it("img 宽高、单元格 colspan/align、ol start、通用 title/lang/dir 保留；srcset/tabindex/accesskey 去掉", async () => {
+    const { body } = await mountReply(
+      [
+        '<img src="https://img.example.com/w.png" width="10" height="10" srcset="https://t.example/s.png 2x" tabindex="0">',
+        '<table><tr><td colspan="2" align="right">c</td></tr></table>',
+        '<ol start="3"><li>n</li></ol>',
+        '<span title="t" lang="en" dir="rtl" accesskey="k">s</span>',
+      ].join("\n\n"),
+    );
+
+    const img = body.querySelector("img");
+    expect([img?.getAttribute("width"), img?.getAttribute("height")]).toEqual(["10", "10"]);
+    expect(img?.hasAttribute("srcset") || img?.hasAttribute("tabindex")).toBe(false);
+    const cell = body.querySelector("td");
+    // `align` 由渲染器（hast-util-to-jsx-runtime 的 tableCellAlignToStyle）转写成 text-align 样式。
+    expect([cell?.getAttribute("colspan"), cell?.style.textAlign]).toEqual(["2", "right"]);
+    expect(body.querySelector("ol")?.getAttribute("start")).toBe("3");
+    const span = [...body.querySelectorAll("span")].find((node) => node.textContent === "s");
+    const kept = ["title", "lang", "dir"].map((name) => span?.getAttribute(name));
+    expect(kept).toEqual(["t", "en", "rtl"]);
+    expect(span?.hasAttribute("accesskey")).toBe(false);
+    expect(body.innerHTML).not.toContain("t.example");
+  });
+});
+
+describe("列表项与引用块里的多行 HTML 块：白名单外标签仍按原文显示", () => {
+  it.each([
+    [
+      "列表项里的 details",
+      "1. 步骤\n   <details>\n   <summary>输出</summary>\n   运行 <task> 查看\n   </details>",
+      "运行 <task> 查看",
+    ],
+    [
+      "引用块里的 div",
+      "> <div>\n> Use /todo append <task> to start one.\n> </div>",
+      "Use /todo append <task> to start one.",
+    ],
+    ["引用块里成对的 task", "> <task>\n> body\n> </task>", "<task>\nbody\n</task>"],
+  ])("%s", async (_, content, visible) => {
+    const { body } = await mountReply(content);
+
+    expect(body.textContent).toContain(visible);
+    expect(body.querySelector("task")).toBeNull();
+  });
+});
+
+describe("源 HTML 的脚本与事件不生效", () => {
+  it("script / iframe 连内容去掉、不执行；img 没有 onerror；b 成元素；标签字样不出现", async () => {
     const { body } = await mountReply(RAW_HTML);
 
-    for (const tag of ["script", "img", "iframe", "b"]) {
-      expect(body.querySelector(tag), tag).toBeNull();
-    }
     expect(document.querySelector("script")).toBeNull();
     expect(document.querySelector("iframe")).toBeNull();
     expect((window as { __pwned?: number }).__pwned).toBeUndefined();
-    expect(body.textContent).toContain("<script>window.__pwned = 1</script>");
-    expect(body.textContent).toContain(
-      '<img src="https://img.example.com/c.png" onerror="alert(1)">',
-    );
-    expect(body.textContent).toContain('<iframe src="https://evil.example/frame"></iframe>');
-    expect(body.textContent).toContain("<b>粗</b>");
     expect(body.querySelector("[onerror]")).toBeNull();
+    expect(body.innerHTML).not.toContain("onerror");
+    expect(body.querySelector("b")?.textContent).toBe("粗");
+    expect(body.querySelector("img")?.getAttribute("src")).toBe("https://img.example.com/c.png");
+    for (const leaked of ["<script", "__pwned", "<iframe", "evil.example", "<b>", "<img"]) {
+      expect(body.textContent, leaked).not.toContain(leaked);
+    }
   });
 });
 
@@ -135,6 +174,7 @@ describe("代码块复制", () => {
 
     expect(body.querySelector("pre > code")?.textContent).toBe(CODE);
     expect(body.querySelector("pre > code")?.children).toHaveLength(0);
+    expect(body.querySelector("pre > code")?.classList.contains("language-ts")).toBe(true);
     expect(within(article).getAllByRole("button", { name: "复制代码" })).toHaveLength(1);
     expect(copyButton(article).getAttribute("type")).toBe("button");
     expect(within(article).getByRole("button", { name: "复制" })).not.toBe(copyButton(article));

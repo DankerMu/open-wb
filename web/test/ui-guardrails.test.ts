@@ -267,7 +267,7 @@ describe("ATTRIBUTION.md", () => {
     expect(Object.keys(dependencies)).toContain("yauzl");
   });
 
-  it("登记 lowlight（MIT）、highlight.js（BSD-3-Clause）与 hast-util-to-jsx-runtime（MIT），且三者都在 web 的 dependencies 里", () => {
+  it("登记 lowlight（MIT）、highlight.js（BSD-3-Clause）、hast-util-to-jsx-runtime、rehype-raw 与 rehype-sanitize（MIT），且都在 web 的 dependencies 里", () => {
     const attribution = readRepoFile("ATTRIBUTION.md");
     expect(hasEntry(attribution, "lowlight", /\bMIT\b/)).toBe(true);
     expect(hasEntry(attribution, "highlight.js", /\bBSD-3-Clause\b/)).toBe(true);
@@ -278,6 +278,10 @@ describe("ATTRIBUTION.md", () => {
     expect(Object.keys(dependencies)).toEqual(
       expect.arrayContaining(["lowlight", "highlight.js", "hast-util-to-jsx-runtime"]),
     );
+    for (const name of ["rehype-raw", "rehype-sanitize"]) {
+      expect(hasEntry(attribution, name, /\bMIT\b/), name).toBe(true);
+      expect(Object.keys(dependencies), name).toContain(name);
+    }
   });
 
   it("登记判定自证：缺许可、名称只出现在正文、名称不全等都不算登记", () => {

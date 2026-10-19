@@ -85,6 +85,14 @@
   - 用途：把 lowlight 产出的语法树变成 React 元素（同在 `highlight.ts`）,文件内容因此不经任何 HTML 解析。此前已是 `@assistant-ui/react-markdown` → `react-markdown` 的间接依赖,随任务 18.1 转为 `web/` 的直接依赖,版本不变。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `license`,随打包产物分发时须附带该 MIT 声明。
 
+- **rehype-raw** —— `MIT License`,版权归 Titus Wormer（https://github.com/rehypejs/rehype-raw）
+  - 用途：把助手正文里的源 HTML 经 parse5 的容错解析放进语法树（`web/src/features/chat/markdown-body.tsx`,epic-acceptance-followups 任务 1.2）,之后一律经 `rehype-sanitize` 白名单消毒才渲染;构建时打包进 `web/dist`。它带入的间接依赖（`hast-util-raw`、`parse5`@7、`hastscript` 等）均为 MIT,唯 `parse5` 的依赖 `entities`@6 为 `BSD-2-Clause`（版权归 Felix Böhm）,随之打包。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `license`,随打包产物分发时须附带该 MIT 声明;`entities` 的 BSD-2-Clause 要求再分发时保留其版权声明、条件列表与免责声明（包自带 `LICENSE`）。
+
+- **rehype-sanitize** —— `MIT License`,版权归 Titus Wormer（https://github.com/rehypejs/rehype-sanitize）
+  - 用途：按显式写出的白名单 schema 消毒助手正文的语法树（`web/src/features/chat/markdown-html.ts`,同上任务）;构建时打包进 `web/dist`。它带入的 `hast-util-sanitize`（MIT,同一作者）随之打包。
+  - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `license`,随打包产物分发时须附带该 MIT 声明。
+
 - **OpenSpec CLI**（`@fission-ai/openspec`）—— `MIT License`,版权归 OpenSpec Contributors（https://github.com/Fission-AI/OpenSpec）
   - 用途：校验 `openspec/specs/` 与 `openspec/changes/` 的规格格式。根 `package.json` 的开发依赖,版本写死 `1.13.2`（#1126）,一律经 `npx openspec` 调用;CI 的 `fast-checks` 以 `npx openspec validate --all --strict --no-interactive` 执行。只在开发期与 CI 使用,不被 `server/`、`web/` 导入,不进任何构建产物。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本;包自带 `LICENSE`。它与它带入的间接依赖只装在开发期的 `node_modules`,当前不随发行物分发;**若日后把它打进发行物**,须附带该 MIT 声明并逐个核对间接依赖的许可。
