@@ -94,7 +94,7 @@ overlay 缺失、不可读或不是 YAML mapping 时 omp 以非零退出且不�
 - **THEN** 第一次文件在浏览器块之后恰为 `modelRoles:` 与 `  vision: "workbuddy/deepseek-v4.1-flash"` 两行；第二次没有 `modelRoles` 键；第三次为 `  vision: "workbuddy/m2"`
 
 #### Scenario: 未配置浏览器时浏览器调用失败且不下载（真实 omp）
-- **WHEN** 官方 omp v18.0.10 经宿主 overlay（`enabled: false`）、未设置 `BROWSER_BIN`、档位 `yolo`，连接受控假上游；会话的 prompt 含 `WORKBUDDY_BROWSER_OPEN:about:blank`（omp-test-harness「受控上游浏览器标记」），回合结束
+- **WHEN** 官方 omp v18.0.10 经宿主 overlay（`enabled: false`）、未设置 `BROWSER_BIN`、档位 `yolo`，会话工作目录里预置项目层 `.omp/config.yml` 写 `browser: { enabled: true }`（overlay 须压过项目层），连接受控假上游；会话的 prompt 含 `WORKBUDDY_BROWSER_OPEN:about:blank`（omp-test-harness「受控上游浏览器标记」），回合结束
 - **THEN** 该回合恰有一个工具步骤且它以 `failed` 结束（不论其登记名是 `write` 还是 `browser`），回合以 `done` 结束；会话工作目录里没有名为 `xd:` 的条目（写入没有落成普通文件）；`<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome` 不存在；`<OMP_STATE_DIR>/xdg/state/omp/logs/` 下的日志不含 `Downloading Chromium for puppeteer`
 
 ### Requirement: 子进程 spawn 契约
