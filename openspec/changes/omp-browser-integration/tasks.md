@@ -1,0 +1,87 @@
+# Tasks: omp-browser-integration
+
+> 跟踪：Stage 5 建一个 Epic，六个任务组各一个子 issue、各一个 PR。依赖（真实依赖，不串成线性链）：组 1、组 2、组 5 互不依赖；组 3 依赖组 2（overlay 模板的 `browserEnabled` 入参）；组 4 依赖组 2（overlay 看图块）与 #1522（`maxTokens` 进白名单，model-selection / model-proxy delta 的底本）；组 6 依赖组 1（步骤名、截图候选、审计）、组 3（`BROWSER_BIN` 抵达 omp）、组 4（截图送到能看图的模型）与组 5（镜像）。
+> 通用纪律见 design「通用纪律」：测试先行；每组第一个任务核对 design「Context」的行号与事实，出入先改 design 再继续；测试主机地址、账号、密钥不进任何被跟踪文件；贴近 800 行的测试文件不再往里加（design 行数预算），新用例进新文件。
+> 文档与验收行随组走（AGENTS.md:169）；验收清单新增或改写的行结论一律 `待签`，签署由 owner 另行进行。
+
+## 风险包
+
+| 风险包 | 选中 | 落点 |
+|---|---|---|
+| Auth / permissions / secrets | 选中：浏览器调用在 `write` / `always-ask` 档经审批，确认卡写明地址与越界形态、截断时固定警示；`yolo` 档靠取完整参数的审计留痕；设备路径与 omp 同规则判定；容器两 uid + sudoers + 私有数据目录 `0700`；镜像不含密钥；spawn 环境只认 `BROWSER_BIN` | 组 1、组 3、组 5 |
+| Config / project setup | 选中：`BROWSER_BIN`（绝对路径、可执行普通文件）与 `MODEL_VISION`（`on`/`off`，缺省 `on`，与 `MODEL_CATALOG` 互斥）；错误只点名键、不回显取值；配置键清单 35 → 37 | 组 3、组 4 |
+| Legacy compatibility / examples | 选中：overlay 字节、spawn env 键集、sudo `--preserve-env` 字符串、单模型 `models.yml` 字节、`GET /api/composer/options` 缺省响应与 `smoke/session-meta.hurl` 的精确断言改为新规格（不删）；`MODEL_VISION` 缺省 `on` 改变未设白名单的部署（system.md 升级提示） | 组 2、组 3、组 4 |
+| File IO / path safety / overwrite | 选中：截图候选走 turn-artifacts 既有归属判定（相对 `--cwd`、空间外丢弃）；截图写进工作空间 `screenshots/` | 组 1、组 2、组 6 |
+| Error handling / rollback / partial outputs | 选中：截断的审批 `Content` 退回原文并警示；浏览器出错无截图候选；审计失败或缺 `emit` 时步骤不落库；未配置浏览器时调用失败且不下载 | 组 1、组 2 |
+| Release / packaging / dependency compatibility | 选中：新基底镜像 `node:24.13.1-bookworm(-slim)` 与五个 Debian 包 `chromium`、`fonts-noto-cjk`、`fonts-dejavu-core`、`sudo`、`ca-certificates`（PR 正文按 AGENTS.md:40 说明）；npm 无新依赖 | 组 5 |
+| Public API / CLI / script entry | 选中：审批与步骤的工具名 `browser` 是 SSE 与快照里可见的新取值（前端按原文显示，不改）；审计新 kind `session.browser`；`GET /api/composer/options` 单模型 `vision` 缺省变 `true` | 组 1、组 4 |
+| Documentation / migration notes | 选中：system.md 9.7 第 2 条改写、新增 9.8「浏览器与参考镜像」、9.3 `MODEL_VISION`；ADR-0012 补充（浏览器键已钉、工具参数层残余）、ADR-0010 补充（参考镜像落实两 uid）；验收清单 CH-121、CH-122、CH-123 | 组 1–组 6 |
+| Schema / columns、Concurrency、Resource limits | 未选：不加列（审计用既有表、`kind` 自由）；无新并发路径；浏览器进程资源与截图累积登记在 Non-Goals / Not yet specified | — |
+
+## 1. 浏览器调用识别与审计（tool-approval + chat-stream + turn-artifacts + browser-runtime 可读描述与审计）
+
+- [ ] 1.1 核对 design「Context」宿主侧与 omp 侧各条：`ui-requests.ts:20-37`、`turn-control.ts:247-266`（配对取归约器事件的 `name`）、`store-segments.ts:82-113` 的 `startStep` 事务、`store.ts:152-153` 的可选 `emit` 与审批结算缺 `emit` 时的 fail closed 写法（`store-approvals.ts:130-170`）、`events.ts:218-243,258-290`、`file-changes.ts:40-57`、`step-summary.ts:33-45`；omp 源码 `33cc6b9a` 的审批三行形状（`approval.ts:258-290`，不带 `Reason:` 行的前提）、`unwrapHashlineHeaderPath` 与 `parseXdUrl` 的规则、`details.xdev.inner.screenshots` 形状（`xdev.ts:416-473`、`tab-protocol.ts:30-36`）、`app.args` 的类型；出入先改 design 再继续
+- [ ] 1.2 测试先行（纯函数）：新 `server/test/xd-browser.test.ts` 覆盖 browser-runtime「浏览器操作的可读描述」三个场景；`server/test/omp-approval-requests.test.ts` 加 tool-approval delta「浏览器调用的审批改写为浏览器操作」三组 WHEN；新 `server/test/session-events-browser.test.ts`（`session-events.test.ts` 已 721 行）加 chat-stream delta「Browser write becomes a browser step」四组 WHEN；`server/test/file-changes.test.ts` 加 turn-artifacts delta「浏览器截图进入文件变更」的归约器侧两组 WHEN；验证：在未改动代码上跑，新断言红、其余绿
+- [ ] 1.3 测试先行（supervisor 整体挂载）：`server/test/session-file-changes.test.ts` 加截图候选的归属判定（`screenshots/s1.png` 进入、`TMPDIR` 路径丢弃）；新 `server/test/session-browser-audit.test.ts`（沿用 `session-approval-script.ts` 的脚本化子进程）覆盖 browser-runtime「浏览器调用审计」两个场景（`yolo` 档两条、长 `code` 不丢 `external`、无 `code` 原文、审计失败与缺 `emit` 时步骤不落库）与「browser 审批与 browser 步骤配对」；验证：在未改动代码上跑，新断言红、其余绿
+- [ ] 1.4 实现 design D5 / D6：新文件 `server/src/sessions/omp/xd-browser.ts`；`ui-requests.ts` 的识别与改写；`events.ts` 的登记名、detail 与映射输出的 `browser` 字段；`file-changes.ts` 的 `browser` 候选；`turn-control.ts` → `store.startStep` 的审计写入（放在 `store-segments.ts` 或新文件；`store.ts` 只在 `startStep` 委托处把 `options.emit` 传下去）；验证：1.2、1.3 全绿、`npm test --workspace server`、`npm run typecheck --workspace server`、`scripts/size-guard.sh`
+- [ ] 1.5 验收清单：会话节新增 CH-121（在 `write` 档会话里让助手用浏览器打开一个网址：确认卡标题为「浏览器：打开 …」、步骤名为 browser；让它带外部程序参数时卡上有 ⚠ 行），结论 `待签`；验证：`npx vitest run web/test/functional-checklist.test.ts` 绿
+- [ ] 1.6 PR 正文：三处共用一个判定与解析模块、前端不改（`browser` 显示为原文与通用图标）；请求一次人工白盒复核（审批改写是确认卡上用户唯一看到的内容；审计是 `yolo` 档唯一痕迹）
+
+Suggested fixture level: expanded - 改写的是用户批准浏览器调用时看到的唯一文字（Auth/permissions），且审批与步骤按名配对、审计写入在步骤插入的同一事务。
+Minimal mergeable slice: atomic - 共享 seam 是一个：`events.ts` 对浏览器 start 的识别同时决定登记名（审批配对的键，只改一边则配对断裂、审批卡挂起）、映射输出的 `browser` 字段（审计唯一的数据来源）与截图候选所依的登记名；审批侧的改写与它用同一个判定函数。拆出的任何一刀都要先合这个识别，余下的审计或截图候选各自只是对同一识别结果的十几行消费，单独成 PR 没有独立可验收的行为。
+
+## 2. overlay 模板与浏览器块、假上游浏览器标记（omp-runtime「宿主 overlay」+ omp-test-harness）
+
+- [ ] 2.1 核对 design「Context」omp 侧（`browser.enabled` 门 `tools/index.ts:670`、`launch.ts:192-270` 的 `PUPPETEER_EXECUTABLE_PATH` 优先与 `PATH` 扫描、下载缓存与日志的实际位置、`openai-completions.ts:2338-2357` 的图片附件消息）与宿主侧 `host-overlay.ts:27-60`、`server.ts:546` 及全部 `writeHostOverlay` 调用方（`support/omp-official.ts:141`、`support/omp-official-proxied.ts:145`、`linux/uid-isolation.test.ts:251`）、`omp-layout-helpers.ts:31,61` 的 `HOST_OVERLAY_YAML`/`expectHostOverlay`、`fake-upstream.mjs:499-547` 的轮次判定与标记；出入先改 design 再继续
+- [ ] 2.2 假上游标记（测试先行再实现，design D9）：`server/test/fake-upstream-markers.test.ts` 或 `fake-upstream-tool-rounds.test.ts` 加 omp-test-harness「受控上游浏览器标记」四个场景（含 omp 图片附件消息不算用户回合），既有「无标记字节不变」场景照旧通过；在未改动代码上看到红后实现 `fake-upstream.mjs` 的两个标记与附件消息跳过规则；验证：`npx vitest run server/test/fake-upstream-*.test.ts` 全绿
+- [ ] 2.3 实测相对 `screenshotDir` 的落点（design D2，先于 overlay 实现）：本机以官方 omp v18.0.10（`var/omp/omp`，不是 brew 版）、`PUPPETEER_EXECUTABLE_PATH` 手动指向本机已装的 Chrome、一个带 `browser.screenshotDir: screenshots` 的临时 `--config` 文件、`--cwd` 为一个临时目录、`--approval-mode yolo`，经 2.2 的假上游先发 `WORKBUDDY_BROWSER_OPEN:about:blank` 再发 `WORKBUDDY_BROWSER_SHOT`（同一进程、`toolRoundScope:"turn"`），看 `details.xdev.inner.screenshots[0].dest` 与文件实际位置；同时确认浏览器未挂载（`browser.enabled: false`）时写 `xd://browser` 以失败结束、没有在 `--cwd` 下落出名为 `xd:` 的条目；落在 `<cwd>/screenshots/` 则继续，否则按 D2 的退路改 design D2 所列的全部连带处后继续；临时脚本不提交，实测结果写进 PR
+- [ ] 2.4 测试先行（overlay）：`omp-host-overlay.test.ts` 按 omp-runtime「宿主 overlay」改字节断言并加「浏览器块随 BROWSER_BIN」的两种 `browserEnabled` 输出（该场景归组 3，本组只做 `writeHostOverlay` 层的部分覆盖）与「看图块随白名单」的 `MODEL_CATALOG` 三模型一例（该场景归组 4，本组部分覆盖第三例）；`omp-layout-helpers.ts` 的期望字节改为固定块 + 浏览器块（`enabled: false`）；新 `server/test/server-startup-overlay.test.ts` 在编译入口上断言「overlay 写入」「overlay 不随档位变化」的新字节与 `MODEL_CATALOG` 带 `vision:true` 时的看图块；官方二进制对照用例（新 `server/test/omp-official-browser.test.ts`，加进 `.github/scripts/ci-uid-isolation.sh:292` 的清单并同步 `scripts/test-ci-harness.sh` 的清单断言）加「未配置浏览器时浏览器调用失败且不下载」；验证：在未改动代码上跑，新断言红、其余绿
+- [ ] 2.5 实现 design D2：`writeHostOverlay(stateDir, {browserEnabled, visionModelId})` 模板化，本组 `browserEnabled` 恒为 `false`（组 3 接 `BROWSER_BIN`），启动时传入白名单第一个 `vision:true` 的 id；四个调用方同步；验证：2.4 全绿、`npm test --workspace server`（含本机 `WORKBUDDY_OMP_TEST=1` 的官方用例）、typecheck、size-guard
+- [ ] 2.6 文档：`docs/architecture/system.md` 新增 9.8「浏览器与参考镜像」的 overlay 部分（钉的六个浏览器键与理由、截图目录、看图角色取白名单第一个 vision 模型）；`docs/adr/0012-omp-project-config-host-overlay.md` 补充一节（浏览器键已钉；`app.path`/`app.args`/`app.cdp_url`/`app.relay` 是工具参数、钉不住，由确认卡与审计显著标出；`modelRoles` 只压 `vision`）；验证：`grep -c 'screenshotDir' docs/architecture/system.md` ≥ 1，`grep -c 'cdp_url' docs/adr/0012-omp-project-config-host-overlay.md` ≥ 1
+- [ ] 2.7 PR 正文：2.3 实测结果；本组合入后浏览器工具对全部部署消失（不再超时），由组 3 按 `BROWSER_BIN` 恢复
+
+Suggested fixture level: expanded - 改宿主 overlay 的字节契约（omp 子进程治理的配置面），并有一个先行实测决定截图落点。
+Minimal mergeable slice: atomic - overlay 模板与它的浏览器块是同一份文件的同一次改写；假上游标记是本组实测（2.3）与官方二进制场景的输入，拆出去后两者都无从运行；`BROWSER_BIN` 的接线已作为组 3 拆出（本组单独合入即消除超时：浏览器在所有部署上被禁用）。
+
+## 3. `BROWSER_BIN` 与 spawn 环境（browser-runtime「浏览器可执行文件配置」+ omp-runtime「子进程 spawn 契约」+ omp-uid-isolation「OMP_USER 配置与 sudo spawn 前缀」+ http-service-skeleton 的 `BROWSER_BIN` 一项）
+
+- [ ] 3.1 核对：`agent-config.ts` 的 resolver 与配置错误路径、`process.ts:114-145`、`ompUser` 的接线链（`server.ts:145` → `supervisor.ts:85` → `pool.ts:241` → `omp/runtime.ts:71,435`）与 fork / regenerate 的 spawn 入口；`git grep -n 'preserve-env\|WORKBUDDY_MODEL_TOKEN' server/test` 列出全部钉 env 键集与 `--preserve-env` 字符串的位置（至少 `omp-spawn-dotenv-pins.test.ts:95-107,138`、`session-supervisor-helpers.ts:394`、`omp-process.test.ts:146-178,530-554`）；http-service-skeleton「服务启动与装配」的键清单测试（组 3 与组 4 各自只在合入时的清单上加自己的键与缺省值，两组都合入后为 delta 所写的 37 项，先后不限）；出入先改 design 再继续
+- [ ] 3.2 测试先行：新 `server/test/server-config-browser.test.ts`（`server-config.test.ts` 已 792 行）加 browser-runtime「未设置 / 合法 / 非法的 BROWSER_BIN」三个场景（含编译入口两例）；新 `server/test/omp-process-browser.test.ts`（`omp-process.test.ts` 已 787 行）与 `omp-spawn-dotenv-pins.test.ts` 按「子进程 spawn 契约」与「OMP_USER 配置与 sudo spawn 前缀」改精确断言并加新场景（父进程 `PUPPETEER_EXECUTABLE_PATH` 不继承、sudo 列表固定、`BROWSER_BIN` 不作 env 键）；新装配级测试文件（照 `server-assembly.test.ts:261` 的 configured/unset 写法）覆盖「配置实际抵达每种 spawn」（会话、fork、regenerate）；完成 omp-runtime「浏览器块随 BROWSER_BIN」（本组是该场景的归属组：编译入口以 `BROWSER_BIN` 设置与否冷启动的两份文件）；验证：在未改动代码上跑，新断言红、其余绿
+- [ ] 3.3 实现 design D1 / D4：resolver 读 `BROWSER_BIN`；接线链加 `browserBin`；`writeHostOverlay` 的 `browserEnabled` 取其是否设置；`process.ts` 的 env 与 `--preserve-env` 常量（≤ 800 行，放不下时抽 env 组装到新文件）；`runtime.ts`（现 799）按 design 行数预算的退路接 `browserBin`；验证：3.2 全绿、`npm test --workspace server`、typecheck、size-guard
+- [ ] 3.4 文档：`system.md` 9.8 补配置部分（`BROWSER_BIN` 的含义与校验、未设置即无浏览器、`OMP_USER` 下 omp 用户须能执行、sudo 自动保留 `PUPPETEER_EXECUTABLE_PATH`）；验证：`grep -c 'BROWSER_BIN' docs/architecture/system.md` ≥ 3
+- [ ] 3.5 PR 正文：请求一次人工白盒复核（Critical Path「omp 子进程治理」：spawn 环境白名单与 sudo 前缀）
+
+Suggested fixture level: expanded - 改 omp 子进程的环境白名单与 sudo 前缀（Critical Path「omp 子进程治理」）。
+Minimal mergeable slice: atomic - `BROWSER_BIN` → overlay `enabled` → spawn 的 `PUPPETEER_EXECUTABLE_PATH` 是同一开关的三端：只开 overlay 不传 env，omp 在 macOS 与 `PATH` 上没有浏览器的 Linux 上会去下载（正是 #912 的超时）；只传 env 不开 overlay，浏览器工具仍不挂载，配置无效果。
+
+## 4. 单模型看图（model-selection + model-proxy + session-composer-settings + thinking-fold + http-service-skeleton 的 `MODEL_VISION` 一项）
+
+- [ ] 4.1 核对：#1522 已合入（`CatalogModel.maxTokens` 存在、`models.yml` 写 `maxTokens`）；组 2 已合入（`writeHostOverlay` 的 `visionModelId`）；`model-catalog.ts` 单模型分支的 `vision:false`、`models-yml.ts:57` 的 `input` 三行、`rest-composer` 的序列化；`git grep -n 'vision: false\|vision:false\|"vision":false' server/test smoke web/test web/e2e` 列出全部钉单模型 `vision:false` 的断言（至少 `smoke/session-meta.hurl:206,310`），并列出编译入口 overlay 字节断言（`omp-layout-helpers.ts`、`server-startup-overlay.test.ts`）——缺省 `on` 后单模型部署会多出看图块；出入先改 design 再继续
+- [ ] 4.2 测试先行：`model-catalog.test.ts` 按 model-selection delta 改（单模型缺省 `vision:true`、`MODEL_VISION=on` 与 `off`、四个非法值与和 `MODEL_CATALOG` 同设各自点名 `MODEL_VISION`）；`model-proxy-models-yml.test.ts` 加「Single-model default declares image input」（比对 vision-false 输出加三行）与启动期三种取值；`omp-host-overlay.test.ts` 与 `server-startup-overlay.test.ts` 加「看图块随白名单」的前两例（本组是该场景的归属组）；`GET /api/composer/options` 的服务端测试按 session-composer-settings delta 改缺省 `vision:true`；thinking-fold「关闭 reasoning」的用例按 delta 以 `MODEL_VISION=off` 比对；`smoke/session-meta.hurl:206,310` 两处响应体改 `"vision":true`；http-service-skeleton 的键清单测试加 `MODEL_VISION`；验证：在未改动代码上跑 server 测试，新断言红、其余绿
+- [ ] 4.3 实现 design D3：resolver 读 `MODEL_VISION`；单模型项的 `vision` 取其生效值（overlay 看图块经组 2 的传入自动跟随）；验证：4.2 全绿、`npm test --workspace server`、typecheck；对编译版服务 `make smoke` 全绿
+- [ ] 4.4 文档与验收行：`system.md` 9.3「未设置 `MODEL_CATALOG`」一段补 `MODEL_VISION`（缺省 `on`、`off` 的写法、与 `MODEL_CATALOG` 互斥）与升级提示（上游不能看图的部署写 `off`）；验收清单会话节新增 CH-122（不设 `MODEL_CATALOG` 时模型选择器的唯一模型带「看图」标签，上传一张图片后助手能描述图片内容），结论 `待签`；验证：`grep -c 'MODEL_VISION' docs/architecture/system.md` ≥ 3，`npx vitest run web/test/functional-checklist.test.ts` 绿
+- [ ] 4.5 真实上游验证：在已启动的编译版服务上 `make smoke-live`（DMXAPI `deepseek-v4.1-flash`，`MODEL_VISION` 缺省 `on`）通过，结果写进 PR 正文；验证：hurl 退出码 0
+
+Suggested fixture level: compact - 一个布尔配置键与几处确定性的文本输出（`models.yml` 三行、overlay 两行、选项端点一个布尔），既有纯函数 seam 与 smoke 齐全。
+Minimal mergeable slice: atomic - 本组只剩 `MODEL_VISION` 一个布尔键：它的生效值即单模型项的 `vision`，同时进 `models.yml`、overlay 看图块与选项端点，且 `smoke/session-meta.hurl` 的两处断言必须与它同一 PR 改，否则 CI smoke 红；没有更小的可独立合入的部分。
+
+## 5. 参考部署镜像（browser-runtime「参考部署镜像」）
+
+- [ ] 5.1 核对：`scripts/omp-fetch.sh` 的输出位置与校验；`converter/Dockerfile` 与 `converter/compose.yml` 的写法（先例）；ADR-0010 的 sudoers 行与 `:37` 的 app 自有状态权限；Debian bookworm `chromium` 包的可执行路径（`/usr/bin/chromium` 是否为包装脚本）、`setpriv` 是否在 slim 基底的 util-linux 里、`fonts-noto-cjk` 的字体文件路径；出入先改 design 再继续
+- [ ] 5.2 新增 `deploy/app/Dockerfile`、`deploy/app/entrypoint.sh`、`deploy/app/compose.yml`（design D7，含三个挂载点的 mode 注释）；在测试主机的 docker 上构建与运行（`docker build --network host`、`docker run --network host`：测试主机默认 bridge 不可用），以假上游起服务、走一次登录与一个回合，逐个去掉 capability 定出最小集合（起点 `SETUID`、`SETGID`、`AUDIT_WRITE`；需要更多或需要 `privileged` 时停下回 owner）；人工预跑「镜像可构建且身份正确」的全部检查（该场景归组 6，持续门禁在 CI）；测试主机上的镜像、容器与目录用完即删，结果写进 PR（测试主机地址不进 PR 正文）
+- [ ] 5.3 文档：`system.md` 9.7 第 2 条改写为指向 9.8；9.8 补参考镜像部分（构建命令、三个挂载与各自 mode、可写范围即挂载与 `/tmp`、`no-new-privileges` 与 sudo 不能共存故不设、仓库不发布镜像）；`docs/adr/0010-dedicated-omp-uid.md` 补一句「参考镜像 `deploy/app/` 落实两 uid 与 sudoers」；验证：`grep -c 'deploy/app' docs/architecture/system.md` ≥ 2，`grep -cF '**没有** app 的 Dockerfile' docs/architecture/system.md` 为 0（改前为 1）
+- [ ] 5.4 PR 正文：新基底镜像与五个 Debian 包的理由（AGENTS.md:40）；capability 实测表；说明持续门禁由组 6 的 CI job 接手
+
+Suggested fixture level: expanded - 镜像定义的是 sudoers、capability 与挂载权限这一组权限边界（Auth/permissions），合入时只有人工实测、持续门禁要到组 6。
+Minimal mergeable slice: atomic - Dockerfile、入口脚本与 compose 片段是同一个镜像的三面：入口脚本的 `umask` 与 compose 的 capability 集合只能对着同一个镜像实测，拆开任何一面都无法运行验证。
+
+## 6. CI browser-image job 与截图验收行（browser-runtime「CI browser-image job」+ verification-harness + omp-uid-isolation 聚合数）
+
+- [ ] 6.1 核对：`ci.yml` 现有十个 direct job、`all-checks-passed.needs` 与 office-sidecar 的步骤；`scripts/test-ci-harness.sh` 对 `office-sidecar` 的全部合同与变异（`:187-196` 一带；既有变异里以 `]` 收尾的 `needs` 锚点——如 `"uid-isolation, office-sidecar]"`——在 `needs` 尾部变成 `office-sidecar, browser-image]` 后失配，生成失败不能充当拒绝，须一并改）、`AGENTS.md:153` 的 Enforcement Index 行、`constraints.yaml` 的 `ci.matrix`（已含 `ubuntu-24.04`，不改）；verification-harness 两条要求里的计数（11/9）；omp pool 的空闲退役条件（两回合之间不得退役）；在 v18.0.10 上确认图片附件消息的形状；出入先改 design 再继续
+- [ ] 6.2 新增 `.github/scripts/ci-browser-image.sh` 与 `.github/scripts/ci-browser-e2e.mjs`（design D8 四步：镜像检查、挂载目录与浏览器包装脚本、与 compose 同标志 `docker run`、进程内 `start({toolRoundScope:"turn"})` 的两回合驱动），断言 browser-runtime「真实浏览器打开工作空间页面并截图」与「镜像可构建且身份正确」（本组是两者的归属组）的全部条目；`ci.yml` 加 job（checkout → setup-node → `npm ci` → `docker build` → 脚本）与 `needs`
+- [ ] 6.3 合同同步：`scripts/test-ci-harness.sh` 按 office-sidecar 先例加合同与变异（job 缺失、`runs-on` 改 `ubuntu-latest`、从 `needs` 去掉、镜像 tag 漂移、脚本步骤加 `if: false`、`set -euo pipefail` 去掉、setup-node 缺失、action major 回退）并修正失配的既有锚点；`AGENTS.md` Enforcement Index 加「浏览器参考镜像」行；验证：`make test-guardrails` 绿且新变异均被拒；PR CI 上 `browser-image` 与 `all-checks-passed` 绿
+- [ ] 6.4 验收清单：会话节新增 CH-123（在绑定工作空间的会话里让助手写一个 html、用浏览器打开并截图：回答在期限内完成，文件变更卡出现 `screenshots/` 下的 png，回答描述了截图内容），结论 `待签`；验证：`npx vitest run web/test/functional-checklist.test.ts` 绿
+- [ ] 6.5 PR 正文：job 时长、断言输出摘录（不含 token）
+
+Suggested fixture level: expanded - 新增 CI 门禁 job 并改 harness 合同（verification-harness），失败会挡住所有 PR。
+Minimal mergeable slice: atomic - job、驱动脚本与 harness 合同必须同一个 PR：只加 job 不改合同则 `make test-guardrails` 因 direct job 计数不符而红；只改合同不加 job 同样红；验收行描述的正是这个 job 证明的用户可见行为。
