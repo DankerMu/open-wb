@@ -6,9 +6,9 @@
 
 ## What Changes
 
-- **测试基建**：web 的 vitest 新增一个 `setupFiles`，包裹 RTL 现有 `asyncWrapper`：回调 resolve 后、RTL 自己的 `setTimeout(0)` drain 之前，等一个 IdlePriority 的 Scheduler 回调。只挂 `web/vitest.config.ts`。
+- **测试基建**：web 的 vitest 新增一个 `setupFiles`，包裹 RTL 现有 `asyncWrapper`：回调 resolve 后、RTL 自己的 `setTimeout(0)` drain 之前，反复等 IdlePriority 的 Scheduler 回调，直到两次探针之间没有外来任务入队（design D1）。只挂 `web/vitest.config.ts`。
 - **依赖**：`web/package.json` devDependencies 加 `scheduler`，钉锁文件已解析的 `0.27.0`（react-dom 19.2.8 自身依赖的版本，不新增安装内容）。理由：React 没有公开 API 能观察「Scheduler 队列已排空」；在同一 Scheduler 实例上排一个 Idle 任务是唯一有原理保证的屏障。
-- **5 个用例按既有规范修正**（`verification-harness`「Web assertions await the committed outcome they check」）：断言改等它检查的结果本身。
+- **4 个用例按既有规范修正**（第 5 个 `workspace-browser-only-paths` 不改，由屏障覆盖）（`verification-harness`「Web assertions await the committed outcome they check」）：断言改等它检查的结果本身。
 - **回归测试**：一个确定性用例证明屏障的契约（去掉 setup 红、加上绿）。
 
 ## Capabilities
@@ -19,7 +19,7 @@
 
 ## Impact
 
-- 改动面：`web/vitest.config.ts`、新 `web/test/` setup 文件、`web/package.json` + 根 `package-lock.json`、5 个测试文件、1 个回归测试文件。不碰 `server/`、`vitest.shared.mjs`、CI workflow、任何超时 / 重试 / pool 配置、产品代码。
+- 改动面：`web/vitest.config.ts`、新 `web/test/` setup 文件、`web/package.json` + 根 `package-lock.json`、4 个测试文件、1 个回归测试文件。不碰 `server/`、`vitest.shared.mjs`、CI workflow、任何超时 / 重试 / pool 配置、产品代码。
 - 另案：`workspace-browser.tsx` 的 `path` effect 迟到时清掉用户新选中并重复请求（复现时取栈确认），另案 #1542，不在本 change。
 
 ## Triage

@@ -16,7 +16,7 @@
 
 ## 1. 测试先行
 
-- [x] 1.1 新增 `web/test/scheduler-drain.test.tsx`（design D5）：第一例按 D5 的组件与次序（第二次渲染忙等 ≥8ms），`await screen.findByText(标记)` 后同步断言第二次 commit 的 effect 已记 1 次；第二例：`waitFor` 回调始终抛错时以原错误拒绝。在**未加** setup 的普通配置上跑该文件：第一例确定性红（连跑 5 次全红，记录输出），第二例绿
+- [x] 1.1 新增 `web/test/scheduler-drain.test.tsx`（design D5）：第一例按 D5 的组件与次序（两次渲染都忙等 ≥8ms），`await screen.findByText(标记)` 后同步断言第二次 commit 的 effect 已记 1 次；第二例：`waitFor` 回调始终抛错时以原错误拒绝；第三例：两个并发 `findByText` 在短超时内通过。普通配置、去掉 setup：第一例确定性红（连跑 3 次全红，记录输出），第二例绿；setup 换成只等一次 Idle：第一例红；setup 原样：三例绿
 - [x] 1.2 用 #1541 的扰动配置（scratch `setupFiles`：Scheduler 加载前把 `setImmediate` 包成 3ms `setTimeout`）在未改动的 web 上跑全量：记录恰 5 红（3 例 CI + 2 例潜伏）
 
 ## 2. 屏障

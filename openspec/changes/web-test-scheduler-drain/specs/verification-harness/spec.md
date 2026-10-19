@@ -18,8 +18,12 @@ Web unit-test assertions on DOM that changes only after a route transition commi
 - **THEN** the walk first waits for the running UI prefix (`expectRunningPrefix`: status `运行中`, the assistant body starting with the first reply part, and the `bash` step), and only then fetches the pre-reload REST snapshot and runs `expectRunningSnapshot` with unchanged strength (`running`, user/assistant ids, `content` starting with the first reply part)
 
 #### Scenario: Scheduler work cascaded from the awaited commit has run when the wait returns
-- **WHEN** a commit made outside `act` shows the awaited element, its passive effect sets state, the resulting render contains a child that busy-waits longer than the Scheduler's 5 ms frame so the Scheduler yields before that commit's passive effects, and that passive effect records a call
-- **THEN** after `await findBy*` for that element the call is already recorded when asserted synchronously; in the ordinary configuration with the setup file removed, the same test fails on every run, because the busy-wait starts after RTL's trailing `setTimeout(0)` is registered and so that timer has expired before the yielded passive effect runs
+- **WHEN** a commit made outside `act` shows the awaited element, its passive effect sets state, both renders contain a child that busy-waits longer than the Scheduler's 5 ms frame so the Scheduler yields before each commit's passive effects, and the second commit's passive effect records a call
+- **THEN** after `await findBy*` for that element the call is already recorded when asserted synchronously; in the ordinary configuration with the setup file removed, the same test fails on every run, because the busy-wait starts after RTL's trailing `setTimeout(0)` is registered and so that timer has expired before the yielded passive effect runs; and a barrier that waits for a single idle callback instead of repeating until drained fails the same test, because the first commit's passive effect enqueues the second render from a microtask after that idle callback has already run
+
+#### Scenario: Concurrent waits each drain without blocking one another
+- **WHEN** one commit shows two elements and a test awaits `Promise.all` of a `findBy*` for each
+- **THEN** both waits resolve within a short timeout; a barrier never treats another barrier's idle probes as pending React work
 
 #### Scenario: Delayed Scheduler ticks no longer reorder web assertions
 - **WHEN** the web suite runs with the React Scheduler's `setImmediate` delayed by 3 ms (a scratch `setupFiles` entry that wraps it in `setTimeout` before react-dom loads; the reproduction for #1541)
