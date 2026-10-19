@@ -434,3 +434,49 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 4. `CONVERTER_*` 与 compose 变量：`WORKBUDDY_UID` / `WORKBUDDY_GID` 等于应用用户的 `id -u` / `id -g`，`OFFICE_SPOOL_DIR` 与 app 的同一路径，`CONVERTER_CONCURRENCY` 不小于 `OFFICE_CONVERT_CONCURRENCY`。
 
 已知残余（证据见 ADR-0010「2026-10-17 补充」）：同一 sidecar 内并发作业共享 fs / ipc / uid，作业间隔离只靠 128 位随机作业 id；LibreOffice 代码执行漏洞下另一在途作业的输入 / 输出可读可伪造（读代码推出，未测）。另外，取消之后偶有一个作业目录留在 `<OFFICE_SPOOL_DIR>/jobs/` 下，下次 app 启动时被清掉（测试主机实测 26 次终止里 1 次）。
+
+### 9.8 浏览器与参考镜像（#912，change `omp-browser-integration`）
+
+本节目前只写宿主 overlay 的浏览器部分（#1527）。规格权威是 omp-runtime「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
+
+**overlay 的浏览器块**：`host-overlay.yml` 在固定块之后恒有下面一段，overlay 高于项目层，会话工作目录里的 `.omp/config.yml` 改不动它：
+
+```yaml
+browser:
+  enabled: false
+  cdpUrl: ""
+  relay: false
+  cmux: false
+  headless: true
+  screenshotDir: screenshots
+```
+
+| 键 | 作用 |
+|---|---|
+| `enabled` | 浏览器开关。为 `false` 时 omp 不挂载浏览器工具，也就不会去下载 Chrome-for-Testing。#912 的超时就出在这次下载上：约 181 MB，下载未完时 30 s / 90 s 期限先到。现在对**全部部署**为 `false`，浏览器工具不存在，调用以失败结束、不再超时。后续由 `BROWSER_BIN` 配置项决定取值 |
+| `cdpUrl: ""` | 使项目层写的外部浏览器 CDP 地址失效（omp 只在取值非空时连接） |
+| `relay: false`、`cmux: false` | 关掉经设置启用的浏览器中继与 cmux |
+| `headless: true` | 不让项目层要求有头窗口 |
+| `screenshotDir: screenshots` | `tab.screenshot()` 的全分辨率截图写到会话工作目录下的 `screenshots/`，即绑定空间的根下 |
+
+`screenshotDir` 是相对路径。omp 不解析它，按进程工作目录落盘，而宿主 spawn 时进程工作目录恒等于会话 `--cwd`。实测（2026-10-19，官方 v18.0.10，本机 Chrome）：截图结果的 `dest` 为 `screenshots/screenshot-<时间>.png`，文件落在 `<cwd>/screenshots/`。截图因此进入用户工作空间、回合快照与撤回范围，并随回合累积；清理策略未定。
+
+**看图角色**：模型白名单里有 `vision: true` 的模型时，浏览器块之后再接两行，`<id>` 取白名单次序里第一个 `vision: true` 的模型：
+
+```yaml
+modelRoles:
+  vision: "workbuddy/<id>"
+```
+
+没有这样的模型就不写 `modelRoles`。未设 `MODEL_CATALOG` 的单模型配置 `vision` 为假，所以缺省部署没有这两行。`modelRoles` 是对象，overlay 只压住 `vision` 一键，项目层写的其它角色照常生效。
+
+**字节与升级**：
+
+- overlay 的字节由部署配置决定：是否配置浏览器，以及白名单。它在启动时写出，同一配置下重启不变，全部会话、全部档位共用一份。
+- 回滚即 revert，下次启动按旧内容重写。
+- 取值不经 omp 的 schema 校验，升级 omp 时与其余各键一起重新验证。
+
+**排障**：omp 若去下载浏览器，会留下两处痕迹。
+
+1. 下载缓存目录 `<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome`。同级的 `puppeteer/package.json` 每次加载 puppeteer 都会写，不算下载。
+2. omp 文件日志（`<OMP_STATE_DIR>/xdg/state/omp/logs/`）里的一行 `Downloading Chromium for puppeteer`。该日志不进服务的 stdout。

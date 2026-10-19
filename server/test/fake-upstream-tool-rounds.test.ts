@@ -38,6 +38,24 @@ const WAIT_MS = 8_000;
 // Localhost idle bound: frames already written are readable immediately.
 const IDLE_MS = 250;
 
+// Issue #1527: omp-test-harness「受控上游浏览器标记」, written from the spec.
+const OPEN = "WORKBUDDY_BROWSER_OPEN:";
+const SHOT = "WORKBUDDY_BROWSER_SHOT";
+const SHOT_ARGS =
+  '{"path":"xd://browser","content":"{\\"action\\":\\"run\\",\\"code\\":\\"return await tab.screenshot()\\"}"}';
+const ATTACHED = {
+  role: "user",
+  content: [
+    { type: "text", text: "Attached image(s) from tool result:" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,iVBORw0KGgo=" } },
+  ],
+};
+
+/** The `open` call's arguments for `url`, as the spec spells them. */
+function openArgs(url: string): string {
+  return `{"path":"xd://browser","content":"{\\"action\\":\\"open\\",\\"url\\":\\"${url}\\"}"}`;
+}
+
 const TURN: FakeUpstreamStartOptions = { toolRoundScope: "turn" };
 const TOOL_RESULT = { role: "tool", tool_call_id: "call_2", content: "done" };
 /** A finished first turn as omp resends it: prompt, tool call, tool result, answer. */
@@ -251,6 +269,114 @@ describe("toolRoundScope validation", () => {
       expect(handle.port).toBe(port);
     },
   );
+});
+
+describe("browser markers (#1527): the tool round issues one write to xd://browser", () => {
+  it("WORKBUDDY_BROWSER_OPEN:<url> opens the url up to the next whitespace", async () => {
+    const port = await upstream();
+    const text = `看页面 ${OPEN}file:///srv/ws/index.html 然后说结论`;
+    const round = toolRoundOf(await chat(port, [{ role: "user", content: text }]));
+    expect(round).toEqual({
+      calls: [{ name: "write", arguments: openArgs("file:///srv/ws/index.html") }],
+      content: [],
+    });
+    const args = JSON.parse((round.calls[0] as { arguments: string }).arguments) as unknown;
+    expect(args).toEqual({
+      path: "xd://browser",
+      content: '{"action":"open","url":"file:///srv/ws/index.html"}',
+    });
+  });
+
+  it("WORKBUDDY_BROWSER_SHOT takes a screenshot, on a first turn and on a later turn under turn scope", async () => {
+    const shot = { calls: [{ name: "write", arguments: SHOT_ARGS }], content: [] };
+    const byDefault = await upstream();
+    expect(toolRoundOf(await chat(byDefault, [{ role: "user", content: `截图 ${SHOT}` }]))).toEqual(
+      shot,
+    );
+    const byTurn = await upstream(TURN);
+    expect(toolRoundOf(await chat(byTurn, laterTurn(`截图 ${SHOT}`)))).toEqual(shot);
+  });
+
+  it.each([
+    ["WORKBUDDY_WRITE wins over OPEN", `${OPEN}about:blank ${WRITE}`, "write", WRITE_ARGS],
+    ["WORKBUDDY_TODO wins over SHOT", `${SHOT} ${TODO}`, "todo", TODO_ARGS],
+    ["OPEN wins over SHOT", `${SHOT} ${OPEN}about:blank`, "write", openArgs("about:blank")],
+    ["an empty url is no marker", `${OPEN} 看看`, "bash", BASH_ARGS],
+    ["an empty url at the end of the text is no marker", `看看 ${OPEN}`, "bash", BASH_ARGS],
+    ["OPEN with WORKBUDDY_THINK", `${THINK} ${OPEN}about:blank`, "write", openArgs("about:blank")],
+  ])("precedence: %s", async (_label, text, name, args) => {
+    const port = await upstream();
+    const reply = await chat(port, [{ role: "user", content: text }]);
+    expect(toolRoundOf(reply)).toEqual({ calls: [{ name, arguments: args }], content: [] });
+  });
+
+  it.each([[`${OPEN}about:blank`], [SHOT]])(
+    "%s on a request whose history holds a tool message (default scope) is the fixed reply",
+    async (text) => {
+      const port = await upstream();
+      const reply = await chat(port, [{ role: "user", content: text }, TOOL_RESULT]);
+      expect(answerOf(reply)).toEqual({ calls: [], content: REPLY, reasoning: "" });
+    },
+  );
+});
+
+describe("omp's image attachment message (#1527) is not a user turn", () => {
+  /** A screenshot turn as omp sends its answering round when the model takes images. */
+  function screenshotTurn(text: string): unknown[] {
+    return [
+      { role: "user", content: text },
+      {
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          { id: "call_1", type: "function", function: { name: "write", arguments: SHOT_ARGS } },
+        ],
+      },
+      { role: "tool", tool_call_id: "call_1", content: "screenshot taken" },
+      ATTACHED,
+    ];
+  }
+
+  it('under toolRoundScope "turn" the screenshot turn stays the answering round', async () => {
+    const port = await upstream(TURN);
+    const reply = await chat(port, screenshotTurn(`截图 ${SHOT}`));
+    expect(answerOf(reply)).toEqual({ calls: [], content: REPLY, reasoning: "" });
+  });
+
+  it("under the default scope the lookup skips it and finds the real user's WORKBUDDY_THINK", async () => {
+    const port = await upstream();
+    const reply = await chat(port, screenshotTurn(`截图 ${SHOT} ${THINK}`));
+    expect(answerOf(reply)).toEqual({ calls: [], content: REPLY, reasoning: THINKING });
+    // Exactly three reasoning chunks, all before the first content chunk.
+    const keys = streamSnapshot(reply.text).chunks.flatMap((chunk) =>
+      Object.keys(deltaOf(chunk)).filter((key) => key === "reasoning_content" || key === "content"),
+    );
+    expect(keys).toEqual([
+      "reasoning_content",
+      "reasoning_content",
+      "reasoning_content",
+      "content",
+      "content",
+      "content",
+    ]);
+  });
+
+  it("the error marker of the real user still decides, under both scopes", async () => {
+    for (const port of await pair()) {
+      const reply = await chat(port, screenshotTurn(`截图 ${SHOT} ${FAKE_ERROR}`));
+      expect([reply.status, reply.text]).toEqual([500, ERROR_BODY]);
+    }
+  });
+
+  it("is an ordinary user message when no tool message precedes it: a tool round with the bash call", async () => {
+    for (const messages of [[ATTACHED], [{ role: "user", content: `截图 ${SHOT}` }, ATTACHED]]) {
+      const reply = await chat(await upstream(), messages);
+      expect(toolRoundOf(reply)).toEqual({
+        calls: [{ name: "bash", arguments: BASH_ARGS }],
+        content: [],
+      });
+    }
+  });
 });
 
 async function upstream(options?: FakeUpstreamStartOptions): Promise<number> {

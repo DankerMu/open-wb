@@ -543,7 +543,11 @@ async function publishStarted(
     models: config.modelCatalog.models,
   });
   owned.stage = "host_overlay";
-  await writeHostOverlay(config.ompStateDir);
+  await writeHostOverlay(config.ompStateDir, {
+    // No browser for any deployment until group 3 wires BROWSER_BIN (#1527, design D2).
+    browserEnabled: false,
+    visionModelId: config.modelCatalog.models.find((model) => model.vision)?.id ?? null,
+  });
   // 上面两步等待期间收到的信号：`releaseOwned` 已经开始。不建目录、不清空，同样直接返回。
   if (owned.signalReceived) {
     return;
