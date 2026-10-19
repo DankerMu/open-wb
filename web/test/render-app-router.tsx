@@ -1,6 +1,6 @@
 import { render } from "@testing-library/react";
 import { StrictMode } from "react";
-import { RouterProvider } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { vi } from "vitest";
 import { createAppRouter } from "../src/routes/index.js";
 import "./radix-platform.js";

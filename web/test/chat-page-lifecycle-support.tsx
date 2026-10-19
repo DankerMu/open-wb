@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { Profiler } from "react";
-import { createBrowserRouter, RouterProvider, useLocation } from "react-router";
+import { createBrowserRouter, useLocation } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { expect, vi } from "vitest";
 import { AuthFooter, AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { ChatPage } from "../src/features/chat/index.js";

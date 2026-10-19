@@ -35,6 +35,19 @@
           }
         }
       },
+      "style": {
+        "noRestrictedImports": {
+          "level": "error",
+          "options": {
+            "paths": {
+              "react-router": {
+                "importNames": ["RouterProvider"],
+                "message": "Import RouterProvider from \"react-router/dom\": the bare one ignores navigate({ flushSync: true }) and reopens #1543."
+              }
+            }
+          }
+        }
+      },
       "suspicious": {
         "noConsole": "off"
       }
