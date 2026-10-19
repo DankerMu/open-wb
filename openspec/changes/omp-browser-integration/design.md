@@ -18,7 +18,8 @@
   - 步骤：`server/src/sessions/events.ts:219-245` 以帧的 `toolName` 登记步骤名、detail 为 args 的单行 JSON；`:247-302` 只对 `edit`/`write`/`todo` 派生 `files.changed` / `todo.updated`；`write` 候选要 `details.resolvedPath`，xd 写入没有，故今天无文件变更（`file-changes.ts:40-57`）。step.end output 里的图片块是 `[图片]`。
   - web：步骤卡与提问卡的工具名按原文显示，只有 `bash` 有专门图标（`step-card.tsx:43`、`approval-card.tsx:26-37`）；步骤摘要取 detail 的第一行（detail 是 JSON 对象时取 `text`/`content`/首键，`step-summary.ts:33-45`）。
   - overlay：`server/src/sessions/omp/host-overlay.ts:27-60` 无任何 `browser.*` / `modelRoles`（`:30` 的 `approval: []` 整体替换项目层的逐工具审批记录，`yolo` 不问的前提由此成立）；omp-runtime「宿主 overlay」要求内容逐字节等于一份字面量。
-  - spawn 环境：`server/src/sessions/omp/process.ts:114-145` 组 env，`:145` 的 sudo `--preserve-env=` 是写死的字符串；精确断言在 `server/test/omp-spawn-dotenv-pins.test.ts:95-107,138`、`session-supervisor-helpers.ts:394`、`omp-process.test.ts:146-178,530-554`；规格 omp-uid-isolation「OMP_USER 配置与 sudo spawn 前缀」逐字钉 argv；ADR-0010 `:23,102` 列键。`ompUser` 的接线链是 `server.ts:145` → `supervisor.ts:85` → `pool.ts:241` → `omp/runtime.ts:71,435` → `process.ts`，`browserBin` 走同一条。
+  - spawn 环境：`server/src/sessions/omp/process.ts:114-145` 组 env，`:145` 的 sudo `--preserve-env=` 是写死的字符串；精确断言在 `server/test/omp-spawn-dotenv-pins.test.ts:95-107,138`、`session-supervisor-helpers.ts:394`（`sudoPrefix()`，经它间接钉的有 `omp-spawn-cwd.test.ts:335`、`server-assembly.test.ts:242,304`、`server-startup-omp-user.test.ts:71`、`session-supervisor.test.ts:206`）、`omp-process.test.ts:63-75,146-178,526-554`、`omp-state-layout.test.ts:535-549`（真实 fake-omp 报告的 env 键集 `toEqual`）；`linux/uid-isolation.test.ts:58-71,513` 是子集断言（`toContain`）；规格 omp-uid-isolation「OMP_USER 配置与 sudo spawn 前缀」逐字钉 argv；ADR-0010 `:23,102` 以占位写键列表、不逐键。`ompUser` 的接线链是 `server.ts:145` → `supervisor.ts:85` → `pool.ts:241` → `omp/runtime.ts:71,435` → `process.ts`，`browserBin` 走同一条；`new SessionRuntime` 在 `src/` 只有 `supervisor.ts:500-516`（会话；regenerate 经 `branching.ts:86` → `ports.acquire` 也落在这里）与 `branch-temp.ts:98-114`（fork 临时进程，取 `supervisor.ts:222` 的同一 runtime 设置）两处，都经 `pool.ts:222-253` 的 `sessionRuntimeOpts`，所以只在那里加一个字段即三种入口都到（#1529 开工核对）。官方二进制夹具（`test/support/omp-official.ts:159`、`omp-official-proxied.ts:158`、`omp-rpc.ts:266,350`）绕过这条链直接构造运行时。
+  - 工作目录 `.env` 与浏览器中继（#1529 开工核对，读 omp 源码）：omp 在模块加载时按 `<cwd>/.env`、agent 目录、配置根、`$HOME` 的次序读四个 `.env`，只写未设或为空的变量（`utils/src/env.ts:227-247`，文件里的 `OMP_*` 镜像成 `PI_*`）；官方二进制关了 Bun 自带的 dotenv（`scripts/compile-binary.ts:58-61`）。`PI_BROWSER_RELAY` / `PI_BROWSER_CMUX` 是中继与 cmux 的最终开关，非空时压过设置，`app.relay: true` 也经同一开关（`tools/browser/relay/kind.ts:36`、`cmux/rpc.ts:187-190`、`browser.ts:102-107`；`parseFlag` 只认 `1|y|true|yes|on` 为真，`utils/src/env.ts:424-427`）。宿主今天不设它们，模型写进工作目录的 `.env` 在下一次 spawn 时生效，绕过 overlay 的 `relay: false` / `cmux: false`，且参数里没有 `app`，卡与审计都看不到。中继地址为本机时 omp 会拉起一个全机共享的 broker 守护进程（`registry.ts:215-224`、`relay/daemon.ts:54`）。
   - 审计：`kind` 是至少两段点分小写名（`030_audit_events.sql` CHECK、audit-core），无封闭列表；现有 `session.approval` 只在审批结算时写。
   - 夹具：官方二进制对照用例只在 CI `uid-isolation` job 里以 `WORKBUDDY_OMP_TEST=1` 运行（`.github/scripts/ci-uid-isolation.sh:292`）；假上游的工具轮由最后一条 user 文本里的标记决定（`server/test/support/fake-upstream.mjs:515-547`，规格 omp-test-harness「受控上游思考与写入标记」）；假 omp 文件已 797 行、规格钉死其模块集合（omp-test-harness `:10,196`）。
 - **部署**：仓库没有 app 的 Dockerfile（system.md 9.7 第 2 条，`system.md:412`）；`converter/` 是部署方自建、不发布的 sidecar 镜像先例；CI `office-sidecar` job 是「现场构建镜像 + 容器里实测」的先例（`ci.yml:159-169`：checkout → setup-node → `npm ci` → build → `docker build` → 脚本；合同在 `scripts/test-ci-harness.sh:187-196` 与 `AGENTS.md:153`，`constraints.yaml` 没有按 job 的行，其 `ci.matrix` 已含 `ubuntu-24.04`）。测试主机缺 `docker0`，默认 bridge 网络不可用，`docker build` 与 `docker run` 都要 `--network host`。
@@ -86,7 +87,10 @@ browser:
 
 **D3 `MODEL_VISION`：单模型配置的看图开关。** 与 `MODEL_REASONING` 同形（`on`/`off`，其它取值启动失败点名 `MODEL_VISION`；缺省 `on`）；`MODEL_CATALOG` 已设置时 SHALL NOT 同设，同设即启动失败点名 `MODEL_VISION`。单模型项的 `vision` 取其生效值，它同时进 `models.yml` 的 `input` 三行、overlay 看图块与 `GET /api/composer/options`。缺省 `on` 改变既有部署：`models.yml` 单模型项多出 `input` 三行、模型选择器出现「看图」标签、用户上传的图片附件按图片送给模型——上游模型不能看图的部署写 `MODEL_VISION=off`（system.md 升级提示）。连带改的现行陈述见 Context「看图」末句：session-composer-settings、thinking-fold、http-service-skeleton 各一个 MODIFIED，`smoke/session-meta.hurl` 两处响应体改 `"vision":true`（thinking-fold 与 http-service-skeleton 的「字节不变」陈述在 change `epic-acceptance-followups` 改 `maxTokens` 时已经不成立，本 change 的 MODIFIED 改为引用 model-proxy 的定义，一并修正）。
 
-**D4 spawn 环境：设置了 `BROWSER_BIN` 时多一个 `PUPPETEER_EXECUTABLE_PATH`。** 直连模式的 env 在 `LANG`/`TMPDIR` 两个可选键之后加 `PUPPETEER_EXECUTABLE_PATH=<BROWSER_BIN>`（未设置即缺席）；sudo 模式的 `--preserve-env=` 列表恒在末尾多 `PUPPETEER_EXECUTABLE_PATH`（列表是固定字符串；变量缺席时 sudo 无可保留，行为不变）。不继承 `process.env` 里的同名键（父进程里的 `PUPPETEER_EXECUTABLE_PATH` 不起作用，只认 `BROWSER_BIN`）。CI uid-isolation 的 sudoers 用 `SETENV:`，不需要改。`process.ts` 已 793 行：只加一个可选键，放不下时把 env 组装抽到同目录新文件。
+**D4 spawn 环境：设置了 `BROWSER_BIN` 时多一个 `PUPPETEER_EXECUTABLE_PATH`；恒钉 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`。** 直连模式的 env 在 `LANG`/`TMPDIR` 两个可选键之后加 `PUPPETEER_EXECUTABLE_PATH=<BROWSER_BIN>`（未设置即缺席）；sudo 模式的 `--preserve-env=` 列表恒在末尾多 `PUPPETEER_EXECUTABLE_PATH`（列表是固定字符串；变量缺席时 sudo 无可保留，行为不变）。不继承 `process.env` 里的同名键（父进程里的 `PUPPETEER_EXECUTABLE_PATH` 不起作用，只认 `BROWSER_BIN`）。CI uid-isolation 的 sudoers 用 `SETENV:`，不需要改。
+另外恒写 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`（owner 2026-10-19，#1529 开工核对之后裁定「始终钉」）：不随 `BROWSER_BIN` 变，键集固定；sudo 的 `--preserve-env=` 列表在 `WORKBUDDY_MODEL_TOKEN` 之后依次为 `PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_EXECUTABLE_PATH`——只写进直连 env 而不进这个列表，sudo 模式下两个钉会被丢掉。取值必须是字面量 `0`：omp 的 dotenv 只填未设或为空的变量，空串挡不住。效果：工作目录 `.env` 打不开中继与 cmux；`app.relay: true` 的调用不再走中继、退回本地浏览器——ADR-0012 已接受残余里的「`app.relay` 走中继」一项随之堵上，`app.path`、`app.cdp_url` 仍钉不住。卡上的 `⚠ 经中继连接用户自己的浏览器` 与审计 `external.relay` 照旧按参数写出（记录的是模型的请求，多报不漏报；组 1 已合入，不回改）。`CMUX_SOCKET_PATH` 不钉：`PI_BROWSER_CMUX=0` 一个就够，钉成空串反而会被 `.env` 覆盖。
+备选：只在设了 `BROWSER_BIN` 时钉——没开浏览器时中继本来就到不了，收益为零而键集随配置变、钉点翻倍，owner 否决；不改、记为残余——owner 否决。
+`process.ts`（793）放不下这三个键与注释：env 组装（闭合白名单、两个钉、`PUPPETEER_EXECUTABLE_PATH`、`LANG`/`TMPDIR`）与 `--preserve-env=` 常量抽到同目录新文件 `spawn-env.ts`，`process.ts` 只调用它；不压缩既有代码。
 
 **D5 `xd://browser` 的识别是一个纯函数模块，三处共用。** 新文件 `server/src/sessions/omp/xd-browser.ts`，规则全文在 browser-runtime「浏览器操作的可读描述」：
 - `isBrowserDevicePath(raw)`（全文见 browser-runtime）：照搬 omp 执行路径——方括号解包 → scheme 正则 → `new URL()` → `href` 是否恰为 `xd://browser`（不分 scheme 大小写）；URL 序列化会吃掉尾部控制字符、制表符与换行、空端口、空 userinfo，手写字符串规则总会漏掉某一种，所以直接用同一个解析器。**开工核对改判（#1526，2026-10-19）**：Stage 4.5 加的宽松串判定 (b) 已删——按源码逐行复刻 omp 判定链、Node 24.13.1 与 Bun 1.2.19 各跑 40 万随机样例，与上述判定零差异；(b) 多认的只有首部空白 / 控制字符（omp 当普通文件写入，`write.ts:1141`）与尾部 Unicode 空白（omp 报无此设备），判为浏览器会把真实的文件写入登记成浏览器步骤、漏掉它的文件变更，并多一条没有对应调用的审计。omp v18.0.10 自带的 Bun 1.4.0 未实测，升级 omp 时与本判定一起重核。
@@ -131,6 +135,14 @@ browser:
 - 本组未选、留给后续组：`browser.relayUrl` 未钉（只在钉不住的工具参数 `app.relay:true` 下生效），在 ADR-0012 补充里顺带登记。
 - 红检查的副作用：在未改动代码上跑「未配置浏览器时浏览器调用失败且不下载」时 `browser.enabled` 缺省为真，macOS 会真的去下载约 181 MB 的 Chrome-for-Testing——红检查用带超时的一次性状态目录，跑完删掉。
 
+**组 3 兄弟面与必须保持（开工核对，#1529）**：
+- resolver：`agent-config.ts:74-144` 的可选键用展开写法，键缺席时对象上没有这个属性（`:112-115`）；`resolveOwnedPath`（`:146-159`）会把相对路径拼到仓库根，与 `BROWSER_BIN`「必须绝对」相反，不能复用。仓库里没有现成的「绝对路径 + 可执行普通文件」校验，形状照 omp `tools/browser/launch.ts:262-272` 的 `isExecutableFile`（`statSync().isFile()` + `accessSync(X_OK)`）；两者的原生报错带路径，必须 `try/catch` 后改抛只点名键的固定消息。编译入口 `server.ts:383-391` 吞掉 message，所以点名键只能在 `resolveServerConfig` 的抛错层测；编译入口非法值的写法照 `omp-max-processes-config.test.ts:248-275`；缺席的写法照 `server-config.test.ts:458-462`（`toBeUndefined()` 与 `Object.hasOwn(...) === false`）。
+- 配置键清单没有测试钉（只在 http-service-skeleton 规格正文里，基线 35 项）；只合入组 3 时为 36 项，两组都合入后为 delta 的 37 项。
+- `writeHostOverlay` 已带 `browserEnabled` 参数（`server.ts:546-550` 现传 `false`，注释写明等组 3）；`server-startup-overlay.test.ts` 与 `omp-layout-helpers.ts:62-79` 的 `hostOverlayBrowserBlock(enabled)` 已参数化，「浏览器块随 BROWSER_BIN」直接复用，`host-overlay.ts` 不改。
+- `runtime.ts` 现 799 行，接 `browserBin` 至少四处（接口 `:71`、私有字段 `:118`、构造 `:152`、`openProcess` 的展开 `:435`），裸字段必超：把 `ompUser`、`browserBin` 收成一个 spawn 身份 / 环境对象透传（或抽到同目录新文件），不压缩既有代码。
+- 钉点见 Context「spawn 环境」：精确钉的随新契约改断言，不删；`linux/uid-isolation.test.ts` 的子集断言加 `PI_BROWSER_RELAY`、`PI_BROWSER_CMUX`（恒在），不加 `PUPPETEER_EXECUTABLE_PATH`（该 job 不设 `BROWSER_BIN`）。
+- 必须保持：env 不继承 `process.env` 的其它键（只取 `PATH`、`LANG`、`TMPDIR`）；`TMPDIR=<值>` argv 元素的位置与有无；未设 `OMP_USER` 时直连 argv 不变；fork / regenerate 不另起 argv/env 组装。
+
 **D10 两个 change 的次序。** 本 change 的 model-selection 与 model-proxy delta 以 `epic-acceptance-followups` 的同名 delta 为底本（`maxTokens` 已在其中），实现上组 4 依赖 #1522 先合入，归档时 `epic-acceptance-followups` 先归档。
 
 ### 通用纪律
@@ -149,7 +161,8 @@ browser:
 
 - [不限制访问范围：浏览器能读 omp 用户能读的一切（`file://`）、访问内网与元数据地址] → owner Q2 明确接受；确认卡写明地址（`write` / `always-ask` 档）、每次调用写 `session.browser` 审计（三档都写）、omp 用户与容器挂载限定可见与可写的文件。
 - [`yolo` 档下浏览器调用不经确认] → 与 bash 同级，是该档位的既有含义；审计是唯一痕迹，因此审计取完整参数（D6）。
-- [`app.path`（含 `app.args`）启动任意可执行文件、`app.cdp_url` / `app.relay` 连外部浏览器] → 工具参数钉不住；卡上 ⚠ 行与审计 `external` 字段显著标出；登记为残余（ADR-0012 补充）。
+- [`app.path`（含 `app.args`）启动任意可执行文件、`app.cdp_url` 连外部浏览器] → 工具参数钉不住；卡上 ⚠ 行与审计 `external` 字段显著标出；登记为残余（ADR-0012 补充）。`app.relay` 由 spawn env 的 `PI_BROWSER_RELAY=0` 关掉（D4，#1529），卡与审计仍照参数标出，多报不漏报。
+- [其它未被宿主设置的 `PI_*` / `OMP_*` 变量仍可经工作目录 `.env` 注入] → ADR-0012 既有残余，无法穷举；本 change 只钉浏览器的两个开关（D4）。
 - [截断的审批 `Content` 无法解析、`app` 可能被截掉] → 卡片退回原文，并固定带一行「参数被截断，无法确认是否启动外部程序或连接外部浏览器」；步骤 detail 与审计用 `tool_execution_start` 的完整参数，不受此影响。
 - [omp 改了 `xd://` 路径的解包规则或 hashline 前缀剥离规则] → `isBrowserDevicePath` 与 `parseBrowserContent` 的剥离都照搬 omp 并注明来源（`plan-mode-guard.ts`、`internal-urls/`、`hashline/src/prefixes.ts`）；升级 omp 须重核（同 overlay）。
 - [照搬的 `read` 元数据正则（`hashline/src/prefixes.ts` `READ_TRUNCATION_NOTICE_RE`）对特制的单行仍是平方级] → 剥离只在文本不超过 16384 个码元时做，实测近 16384 字符的特制行约 113 ms、每行查两到三次，最坏几百毫秒且有上限；行号前缀正则已改成等价的线性写法（PR #1540 修复 1）。登记为残余。
@@ -169,6 +182,7 @@ browser:
 - 升级后未设 `BROWSER_BIN` 的部署：浏览器工具消失（以前会超时失败），无其它变化。
 - 未设 `MODEL_CATALOG` 的部署：单模型变为能看图（`models.yml` 多 `input` 三行、`GET /api/composer/options` 的 `vision` 为 `true`、选择器出现「看图」）；不想要写 `MODEL_VISION=off`。
 - `OMP_USER` 部署：sudoers 不需改（`SETENV:` 已允许保留环境）；`BROWSER_BIN` 指向的文件须 omp 用户可执行。
+- 所有部署：omp 子进程恒带 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`，部署方或工作目录 `.env` 里的这两个变量不再起作用（宿主本就不支持中继与 cmux）。
 - 回滚即 revert；overlay 下次启动按旧字面量重写。
 
 ## Not yet specified
@@ -179,7 +193,7 @@ browser:
 
 - 组 1：`approvalRequest(frame, id)`、`applyFrame(state, frame)`、`fileChangeCandidates(name, result)` 三个纯函数与新的 `xd-browser.ts`（帧常量取自 Context 所列的 omp 源码形状）；审计经 `session-approval-script.ts` 一类的脚本化子进程走 supervisor 的整体挂载（新测试文件）。
 - 组 2：`writeHostOverlay` 的输出字节（`omp-host-overlay.test.ts`）与编译入口的 overlay（`server-startup-layout.test.ts` 经 `omp-layout-helpers.ts`）；假上游帧（`fake-upstream-*.test.ts`）；官方二进制对照用例（overlay 被接受、未配置浏览器时不下载）。
-- 组 3：`resolveAgentSettings(env, repoRoot)`（新的 `server-config-browser.test.ts`）；spawn 的 argv/env 捕获（`omp-spawn-dotenv-pins.test.ts`、新的 `omp-process-browser.test.ts`）；装配级捕获（新文件，照 `server-assembly.test.ts:261` 的 configured/unset 写法）。
+- 组 3：`resolveAgentSettings(env, repoRoot)`（新的 `server-config-browser.test.ts`）；spawn 的 argv/env 捕获（`omp-spawn-dotenv-pins.test.ts`、新的 `omp-process-browser.test.ts`）；装配级捕获（新文件，照 `server-assembly.test.ts:261` 的 configured/unset 写法）；官方二进制对照用例「工作目录 .env 不能打开浏览器中继」（`omp-official-browser.test.ts`，夹具经 `PUPPETEER_EXECUTABLE_PATH` 指向写标记的包装脚本，不需要真浏览器）。
 - 组 4：`resolveModelCatalog(env)`（`model-catalog.test.ts`）、`writeManagedModelsYml` 的输出字节、编译入口 overlay 的看图块、`GET /api/composer/options`、`smoke/session-meta.hurl`。
 - 组 5：测试主机 docker 上的构建与容器内检查。
 - 组 6：容器里的端到端驱动（`ci-browser-e2e.mjs`）对着真实 omp + Chromium + 假上游；`scripts/test-ci-harness.sh` 的合同与变异。
@@ -198,7 +212,7 @@ browser:
 | `server/src/sessions/omp/host-overlay.ts`（现 69） | ≤ 110 | 2 |
 | `server/test/support/fake-upstream.mjs`（现 649） | 现有 + ≤ 40 | 2 |
 | `server/src/agent-config.ts`（现 248）、`server/src/model-catalog.ts`（现 259） | 各现有 + ≤ 25 | 3、4 |
-| `server/src/sessions/omp/process.ts`（现 793） | ≤ 800；放不下时把 env 组装抽到同目录新文件，不压缩既有代码 | 3 |
+| `server/src/sessions/omp/process.ts`（现 793） | ≤ 800；env 组装与 `--preserve-env=` 常量抽到新文件 `server/src/sessions/omp/spawn-env.ts`（≤ 80），不压缩既有代码 | 3 |
 | `server/test/server-config.test.ts`（现 795）、`omp-process.test.ts`（现 787）、`server-assembly.test.ts`（现 776）、`session-events.test.ts`（现 721） | 不再往里加，新用例进新文件 | 1、3、4 |
 | `deploy/app/Dockerfile` ≤ 60、`compose.yml` ≤ 50、`entrypoint.sh` ≤ 20 | — | 5 |
 | `.github/scripts/ci-browser-image.sh` ≤ 200、`ci-browser-e2e.mjs` ≤ 300 | — | 6 |
