@@ -1,7 +1,8 @@
 // 整页测试里与外壳相关的两件夹具：每个用例收尾的钩子，以及带续期探针的外壳挂载（顶栏按钮只在外壳里
 // 才有）。页面搭法来自 chat-page-file-changes-support.tsx 与 chat-page-artifact-card-support.tsx。
 import { render, screen } from "@testing-library/react";
-import { createBrowserRouter, RouterProvider } from "react-router";
+import { createBrowserRouter } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { afterEach, vi } from "vitest";
 import { AuthGuard, AuthProvider, useAuth } from "../src/features/auth/index.js";
 import { ChatPage } from "../src/features/chat/index.js";

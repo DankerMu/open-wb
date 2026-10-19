@@ -1,6 +1,6 @@
 // settings-footer 与 settings-page 两个测试文件共用的渲染、外壳断言与清理 helper。
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { RouterProvider } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { expect, vi } from "vitest";
 import { createAppRouter } from "../src/routes/index.js";
 import {

@@ -1,7 +1,8 @@
 import "./radix-platform.js";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { type ReactNode, StrictMode, useReducer } from "react";
-import { createMemoryRouter, MemoryRouter, Outlet, RouterProvider } from "react-router";
+import { createMemoryRouter, MemoryRouter, Outlet } from "react-router";
+import { RouterProvider } from "react-router/dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Icon, type IconName } from "../src/components/icon.js";
 import {

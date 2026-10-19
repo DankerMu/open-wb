@@ -570,6 +570,7 @@ export function useChatSession() {
           refreshList(client);
           navigate(
             sessionNavigation(location.pathname, location.search, location.hash, session.id),
+            { flushSync: true },
           );
         })
         .catch((error: unknown) => {
