@@ -6,6 +6,8 @@
  *   one level at a time, each requested once whether or not the level above lists it, then a file
  *   is selected (one `file` request) and a directory only expanded. A selection made this way is
  *   not reported through `onPathChange`; a click and `reveal` report there once the file is found.
+ *   A `path` equal to an own report that a later report has superseded (the host's echo arriving
+ *   late, `usePathEcho` in `host-channel.ts`) is only recorded as applied; nothing else changes.
  * - `onSelectionChange` (issue 1380, `host-channel.ts`) is told the file actually selected, `null`
  *   for none, once per change and however it changed — a walk that ended without a file included.
  *   A new `pathSeq` applies `path` again although its value is the same: the walk is repeated,
@@ -88,7 +90,7 @@ import { isNotFound, isUnauthorized } from "./errors.js";
 import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
 import { useFollowEntry } from "./follow-entry.js";
-import { usePathReapply, useSelectionReport } from "./host-channel.js";
+import { usePathEcho, usePathReapply, useSelectionReport } from "./host-channel.js";
 import { filteredRow, listedPaths, usePathRecords } from "./path-records.js";
 import {
   failedPreview,
@@ -181,6 +183,8 @@ export function WorkspaceBrowser({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [selectedFile, setSelectedFile] = useState<SelectedFile | null>(null);
   const appliedPathRef = useRef<string | null | undefined>(undefined);
+  // 组件的上报一律经 `reportPath`，`path` effect 据它认出被取代的自身上报回声（`host-channel.ts`）。
+  const { report: reportPath, takePath } = usePathEcho(appliedPathRef, onPathChange);
   const cacheRef = useRef<DirectoryCache>({});
   const directoryRequestsRef = useRef(new Map<string, AbortController>());
   const expandedPathsRef = useRef<ReadonlySet<string>>(new Set([""]));
@@ -320,10 +324,10 @@ export function WorkspaceBrowser({
 
       recordMissing(path);
       clearSelection();
-      onPathChange(null);
+      reportPath(null);
       return true;
     },
-    [clearMissing, clearSelection, onPathChange, recordMissing, subtreeOnly],
+    [clearMissing, clearSelection, recordMissing, reportPath, subtreeOnly],
   );
 
   /**
@@ -476,9 +480,9 @@ export function WorkspaceBrowser({
     (entry: TreeRow, path: string) => {
       revealRef.current = null;
       selectFile(entry, path);
-      onPathChange(path);
+      reportPath(path);
     },
-    [onPathChange, selectFile],
+    [reportPath, selectFile],
   );
 
   /**
@@ -539,10 +543,10 @@ export function WorkspaceBrowser({
     (row: TreeRow, target: Reveal) => {
       selectFile(row, target.path);
       if (target.notify) {
-        onPathChange(target.path);
+        reportPath(target.path);
       }
     },
-    [onPathChange, selectFile],
+    [reportPath, selectFile],
   );
 
   /**
@@ -558,10 +562,10 @@ export function WorkspaceBrowser({
         endWithoutFile(target, MISSING_FILE);
       } else if (selectedFileRef.current) {
         clearSelection();
-        onPathChange(null);
+        reportPath(null);
       }
     },
-    [clearSelection, endWithoutFile, land, onPathChange, recordsRef],
+    [clearSelection, endWithoutFile, land, recordsRef, reportPath],
   );
 
   /**
@@ -613,15 +617,14 @@ export function WorkspaceBrowser({
 
   // `pathSeq` 换了新值时把已套用的 `path` 作废：须排在下面那个 effect 之前（`host-channel.ts`）。
   usePathReapply(appliedPathRef, pathSeq);
-  // `path` 属性只在变化时生效一次（`pathSeq` 换了新值时算它变了），每次都顶掉进行中的定位。与当前选中
-  // 逐字相同（点击后宿主送回来的就是这样）只是放弃它，不看它的写法。其余先过 `normalizedPath`，比的、
-  // 走的都是之后的写法：与当前选中相同同样只是放弃；`null` 与去掉空段、点段后什么都不剩的清掉选中；含
-  // `..` 段的同样清掉选中并显示 `文件不存在`，不定位（因此不为它发请求）；其余换成对它的定位。其后每当
-  // 目录列表或进行中的目录请求有变化，推进定位。
+  // `path` 属性只在变化时生效一次（`pathSeq` 换了新值时算它变了；被取代的自身上报回声不算，只记为已
+  // 套用，见 `usePathEcho`），每次都顶掉进行中的定位。与当前选中逐字相同（点击后宿主送回来的就是这样）
+  // 只是放弃它，不看它的写法。其余先过 `normalizedPath`，比的、走的都是之后的写法：与当前选中相同同样
+  // 只是放弃；`null` 与去掉空段、点段后什么都不剩的清掉选中；含 `..` 段的同样清掉选中并显示 `文件不存在`，
+  // 不定位（因此不为它发请求）；其余换成对它的定位。其后每当目录列表或进行中的目录请求有变化，推进定位。
   // biome-ignore lint/correctness/useExhaustiveDependencies: `directories`、`loadingPaths` 与 `pathSeq` 是推进或重新套用定位的触发条件。
   useEffect(() => {
-    if (appliedPathRef.current !== path) {
-      appliedPathRef.current = path;
+    if (takePath(path)) {
       revealRef.current = null;
       const selected = selectedFileRef.current?.path;
       const target = path === selected ? path : normalizedPath(path ?? "");
@@ -633,7 +636,7 @@ export function WorkspaceBrowser({
       }
     }
     continueReveal();
-  }, [clearSelection, continueReveal, directories, loadingPaths, path, pathSeq]);
+  }, [clearSelection, continueReveal, directories, loadingPaths, path, pathSeq, takePath]);
 
   // `renderedSeq` 换成新值才生效（挂载时的值不算），排在 `path` 的 effect 之后。选中的不是 `path`（定位
   // 还在走，或没落在文件上）时不动。不经 `selectFile`：源码视图下它会再发一次 `file`。
@@ -675,7 +678,7 @@ export function WorkspaceBrowser({
     expandedPathsRef,
     failedDirectoriesRef,
     loadDirectory,
-    onPathChange,
+    onPathChange: reportPath,
     revealRef,
     selectFile,
     selectedFileRef,
