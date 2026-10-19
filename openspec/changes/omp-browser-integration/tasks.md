@@ -25,7 +25,7 @@
 - [x] 1.3 测试先行（supervisor 整体挂载）：`server/test/session-file-changes.test.ts` 加截图候选的归属判定（`screenshots/s1.png` 进入、`TMPDIR` 路径丢弃）；新 `server/test/session-browser-audit.test.ts`（沿用 `session-approval-script.ts` 的脚本化子进程）覆盖 browser-runtime「浏览器调用审计」两个场景（`yolo` 档两条、长 `code` 不丢 `external`、无 `code` 原文、审计失败与缺 `emit` 时步骤不落库）与 tool-approval「浏览器审批与浏览器步骤配对」（含已发布 step.start 恰为六键、不带 `browser` 键）；验证：在未改动代码上跑，新断言红、其余绿
 - [x] 1.4 实现 design D5 / D6：新文件 `server/src/sessions/omp/xd-browser.ts`；`ui-requests.ts` 的识别与改写；`events.ts` 的登记名、detail 与映射输出的 `browser` 字段；`file-changes.ts` 的 `browser` 候选；`turn-control.ts` → `store.startStep` 的审计写入（放在 `store-segments.ts` 或新文件；`store.ts` 只在 `startStep` 委托处把 `options.emit` 传下去）；验证：1.2、1.3 全绿、`npm test --workspace server`、`npm run typecheck --workspace server`、`scripts/size-guard.sh`
 - [x] 1.5 验收清单：会话节新增 CH-121（在 `write` 档会话里让助手用浏览器打开一个网址：确认卡标题为「浏览器：打开 …」、步骤名为 browser；让它带外部程序参数时卡上有 ⚠ 行），结论 `待签`；验证：`npx vitest run web/test/functional-checklist.test.ts` 绿
-- [ ] 1.6 PR 正文：三处共用一个判定与解析模块、前端不改（`browser` 显示为原文与通用图标）；请求一次人工白盒复核（审批改写是确认卡上用户唯一看到的内容；审计是 `yolo` 档唯一痕迹）
+- [x] 1.6 PR 正文：三处共用一个判定与解析模块、前端不改（`browser` 显示为原文与通用图标）；请求一次人工白盒复核（审批改写是确认卡上用户唯一看到的内容；审计是 `yolo` 档唯一痕迹）
 
 Suggested fixture level: expanded - 改写的是用户批准浏览器调用时看到的唯一文字（Auth/permissions），且审批与步骤按名配对、审计写入在步骤插入的同一事务。
 Minimal mergeable slice: atomic - 共享 seam 是一个：`events.ts` 对浏览器 start 的识别同时决定登记名（审批配对的键，只改一边则配对断裂、审批卡挂起）、映射输出的 `browser` 字段（审计唯一的数据来源）与截图候选所依的登记名；审批侧的改写与它用同一个判定函数。拆出的任何一刀都要先合这个识别，余下的审计或截图候选各自只是对同一识别结果的十几行消费，单独成 PR 没有独立可验收的行为。
