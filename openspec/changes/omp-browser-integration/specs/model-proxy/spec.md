@@ -51,7 +51,7 @@ The writer SHALL NOT create agentDir or any parent — the directory is establis
 
 #### Scenario: maxTokens reaches the upstream request
 - **WHEN** the official pinned omp 18.0.10 binary is started against the fake upstream with a managed `models.yml` whose model entry carries `maxTokens: 32768`, and one prompt turn runs; another run uses an entry with `maxTokens: 8192`
-- **THEN** every entry the fake upstream records for that turn (omp-test-harness「受控上游请求记录」) has `maxTokens` equal to 32768, and 8192 in the second run — omp passes the limit through rather than dropping or clamping it (re-verified on an omp upgrade like the other official-binary comparison cases)
+- **THEN** every entry the fake upstream records for that turn (omp-test-harness「受控上游请求记录」) has `maxTokens` equal to 32768, and 8192 in the second run — omp passes these two values through rather than dropping or clamping them (omp v18.0.10 clamps values above 64000 to 64000 and sends the field `max_completion_tokens` for this provider; re-verified on an omp upgrade like the other official-binary comparison cases)
 
 #### Scenario: Single-model default declares image input
 - **WHEN** generation runs with `[{id:"deepseek-v4.1-flash",name:"deepseek-v4.1-flash",reasoning:true,vision:true,maxTokens:32768}]`, and with the same element whose `reasoning` is false
