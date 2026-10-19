@@ -82,14 +82,14 @@
 ### Requirement: 参考部署镜像
 仓库 SHALL 在 `deploy/app/` 提供部署方自建、不发布的 app 参考镜像（owner 2026-10-18，#912 Q1/Q6/Q10）：
 - `Dockerfile`：构建阶段以 `node:24.13.1-bookworm` 运行 `npm ci`、构建 web 与 server、经 `scripts/omp-fetch.sh` 取得官方 omp v18.0.10（SHA256 校验）；运行阶段以 `node:24.13.1-bookworm-slim` 为底，装 Debian 包 `chromium`、`fonts-noto-cjk`、`fonts-dejavu-core`、`sudo`、`ca-certificates`（`--no-install-recommends`），只拷入运行所需的编译产物、生产依赖与 omp 二进制。
-- 身份（ADR-0010）：应用用户 `workbuddy` 与 omp 用户 `omp` 两个 uid，同属组 `workbuddy`；`/etc/sudoers.d/workbuddy-omp` 恰含 `workbuddy ALL=(omp) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- <镜像内 OMP_BIN> *` 与 `Defaults>omp umask=0007` 两条规则，构建时经 `visudo -c` 校验；容器以 `workbuddy` 运行，入口脚本先 `umask 007` 再 `exec` 编译版服务。
-- 镜像内固定 `OMP_USER=omp`、`OMP_BIN`、`BROWSER_BIN=/usr/bin/chromium`、`SANDBOX_ROOT`、`OMP_STATE_DIR`、`DB_PATH`、`STATIC_ROOT` 与 `PREVIEW_CACHE_DIR`（在 app 私有数据目录之下）——服务启动时创建或写入的每个路径 SHALL 落在三个可写挂载或 `/tmp` 之下，使只读根文件系统下启动成功；上游地址、密钥与认证配置 SHALL NOT 进入镜像，由部署方在运行时给出。
+- 身份（ADR-0010）：应用用户 `workbuddy`（uid 10001）与 omp 用户 `omp`（uid 10002）两个 uid，主组都是 `workbuddy`（gid 10001）；`/etc/sudoers.d/workbuddy-omp` 恰含 `workbuddy ALL=(omp) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- <镜像内 OMP_BIN> *` 与 `Defaults>omp umask=0007` 两条规则，构建时经 `visudo -c` 校验；容器以 `workbuddy` 运行，入口脚本先 `umask 007` 再 `exec` 编译版服务。
+- 镜像内固定 `OMP_USER=omp`、`OMP_BIN`、`BROWSER_BIN=/usr/bin/chromium`、`SANDBOX_ROOT`、`OMP_STATE_DIR`、`DB_PATH`、`STATIC_ROOT`、`PREVIEW_CACHE_DIR`（在 app 私有数据目录之下）、`HOST=0.0.0.0` 与 `PREVIEW_PORT`——服务启动时创建或写入的每个路径 SHALL 落在三个可写挂载或 `/tmp` 之下，使只读根文件系统下启动成功（可选的 `OFFICE_SPOOL_DIR` 例外：它是部署方另挂的、与 converter 共享的目录）；上游地址、密钥与认证配置 SHALL NOT 进入镜像，由部署方在运行时给出。
 - `compose.yml`：根文件系统只读、`/tmp` 为 tmpfs、`shm_size` 不小于 `1g`、三个可写 bind mount（沙箱根、omp 状态目录、app 私有数据目录）、`cap_drop: [ALL]` 再只加回 sudo 降权实测所需的最小集合、不 `privileged`。可写范围即这三个挂载与 `/tmp`（owner Q5：写范围由挂载决定，omp 内不另限）。三个挂载点的宿主目录 SHALL 属应用用户：app 私有数据目录 `0700`（ADR-0010：app 自有状态不对 omp 用户开放）；沙箱根与 omp 状态目录属组 `workbuddy`，权限位由服务启动时按 sandbox-core「沙箱根目录」与 omp-runtime「OMP_STATE_DIR 托管布局」校正。`compose.yml` 的注释与 `docs/architecture/system.md` 写明这三项。
 仓库 SHALL NOT 发布该镜像或引用镜像仓库。
 
 #### Scenario: 镜像可构建且身份正确
 - **WHEN** 在任一 Docker 主机上（CI 由「CI browser-image job」执行）`docker build -f deploy/app/Dockerfile .`，再在该镜像的容器内检查
-- **THEN** 构建成功；以 compose 的安全标志（只读根、三个挂载、`/tmp` tmpfs）运行时服务启动成功、`GET /api/healthz` 为 200；`id -u workbuddy` 与 `id -u omp` 不同且两者都在组 `workbuddy`；`visudo -c` 通过且 `/etc/sudoers.d/workbuddy-omp` 恰为上述两条规则；`/usr/bin/chromium` 可执行；`/usr/share/fonts/opentype/noto/` 下有 Noto CJK 字体文件；`docker image inspect` 的环境变量与镜像文件系统里都没有 `MODEL_UPSTREAM_API_KEY` 的取值
+- **THEN** 构建成功；以 compose 的安全标志（只读根、三个挂载、`/tmp` tmpfs）运行时服务启动成功、`GET /api/healthz` 为 200；`id -u workbuddy` 为 `10001`、`id -u omp` 为 `10002`，两者的主组都是 `workbuddy`（gid `10001`）；`visudo -c` 通过且 `/etc/sudoers.d/workbuddy-omp` 恰为上述两条规则；`/usr/bin/chromium` 可执行；`/usr/share/fonts/opentype/noto/` 下有 Noto CJK 字体文件；`docker image inspect` 的环境变量与镜像文件系统里都没有 `MODEL_UPSTREAM_API_KEY` 的取值
 
 ### Requirement: CI browser-image job
 `.github/workflows/ci.yml` SHALL 有 job `browser-image`（`runs-on: ubuntu-24.04`、`timeout-minutes: 20`）：checkout → setup-node（与其它 node job 相同 `with`）→ `npm ci` → `docker build -t workbuddy-app:ci -f deploy/app/Dockerfile .` → `bash .github/scripts/ci-browser-image.sh`。脚本 SHALL：
