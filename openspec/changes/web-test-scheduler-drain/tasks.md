@@ -16,27 +16,27 @@
 
 ## 1. 测试先行
 
-- [ ] 1.1 新增 `web/test/scheduler-drain.test.tsx`（design D5）：第一例按 D5 的组件与次序（第二次渲染忙等 ≥8ms），`await screen.findByText(标记)` 后同步断言第二次 commit 的 effect 已记 1 次；第二例：`waitFor` 回调始终抛错时以原错误拒绝。在**未加** setup 的普通配置上跑该文件：第一例确定性红（连跑 5 次全红，记录输出），第二例绿
-- [ ] 1.2 用 #1541 的扰动配置（scratch `setupFiles`：Scheduler 加载前把 `setImmediate` 包成 3ms `setTimeout`）在未改动的 web 上跑全量：记录恰 5 红（3 例 CI + 2 例潜伏）
+- [x] 1.1 新增 `web/test/scheduler-drain.test.tsx`（design D5）：第一例按 D5 的组件与次序（第二次渲染忙等 ≥8ms），`await screen.findByText(标记)` 后同步断言第二次 commit 的 effect 已记 1 次；第二例：`waitFor` 回调始终抛错时以原错误拒绝。在**未加** setup 的普通配置上跑该文件：第一例确定性红（连跑 5 次全红，记录输出），第二例绿
+- [x] 1.2 用 #1541 的扰动配置（scratch `setupFiles`：Scheduler 加载前把 `setImmediate` 包成 3ms `setTimeout`）在未改动的 web 上跑全量：记录恰 5 红（3 例 CI + 2 例潜伏）
 
 ## 2. 屏障
 
-- [ ] 2.1 `web/package.json` devDependencies 加 `"scheduler": "0.27.0"`，`npm install` 同步根 lockfile（只多一条 devDependency 声明，不新增包；核对 `grep -c '"node_modules/scheduler"' package-lock.json` 为 1、`npm ls scheduler --workspace web` 只有 0.27.0）；新 setup 文件（`web/test/` 下）按 design D1：先导入 `@testing-library/react`，取 `getConfig().asyncWrapper` 包一层，回调 resolve 后等 `unstable_scheduleCallback(unstable_IdlePriority, …)`；`scheduler` 的最小类型声明（只声明用到的导出，无 `any`）；`web/vitest.config.ts` `test.setupFiles` 挂上它。验证：1.1 转绿（连跑 5 次全绿）
-- [ ] 2.2 文件头注释写明机理与 #1541、为什么在 `previous` 之内、为什么是 Idle 优先级（一处说明，不在用例里复述）
+- [x] 2.1 `web/package.json` devDependencies 加 `"scheduler": "0.27.0"`，`npm install` 同步根 lockfile（只多一条 devDependency 声明，不新增包；核对 `grep -c '"node_modules/scheduler"' package-lock.json` 为 1、`npm ls scheduler --workspace web` 只有 0.27.0）；新 setup 文件（`web/test/` 下）按 design D1：先导入 `@testing-library/react`，取 `getConfig().asyncWrapper` 包一层，回调 resolve 后反复等 `unstable_scheduleCallback(unstable_IdlePriority, …)` 直至两次探针之间没有任务入队（design D1）；`scheduler` 的最小类型声明（只声明用到的导出，无 `any`）；`web/vitest.config.ts` `test.setupFiles` 挂上它。验证：1.1 转绿（连跑 5 次全绿）
+- [x] 2.2 文件头注释写明机理与 #1541、为什么在 `previous` 之内、为什么是 Idle 优先级（一处说明，不在用例里复述）
 
 ## 3. 用例按规范修正（design D4，只改等待、不减断言）
 
-- [ ] 3.1 `previewers-loading.test.tsx:177`：`loadPreviewer` 调用记录在 `waitFor` 里等到 `[["code"]]`
-- [ ] 3.2 `chat-permission-tier.test.tsx`「缺省档位是 全部自动…」两处 `clickSend()` 之前 `await screen.findByRole("button", { name: "发送" })`
-- [ ] 3.3 `chat-message-waiting.test.tsx` `expectNeither`：两个 `toBeNull` 放进同一个 `waitFor`
-- [ ] 3.4 `previewers-archive.test.tsx:365`：在 `waitFor` 里断言新列表行文字 `["new-1.txt", "new-2.txt"]`
-- [ ] 3.5 `workspace-browser-only-paths.test.tsx`「选中后 file 答 404…」：不改（交错没有可等的 DOM 信号，由 2.1 保证；产品侧交错另案 #1542）
-- [ ] 3.6 3.1–3.4 每处：在扰动配置、**不带**屏障的基建上该例转绿（证明修正本身成立，不依赖屏障）
+- [x] 3.1 `previewers-loading.test.tsx:177`：`loadPreviewer` 调用记录在 `waitFor` 里等到 `[["code"]]`
+- [x] 3.2 `chat-permission-tier.test.tsx`「缺省档位是 全部自动…」：第一次发送后、回欢迎态之前 `await screen.findByRole("button", { name: "停止" })`（design D4；原写法实测不成立）
+- [x] 3.3 `chat-message-waiting.test.tsx` `expectNeither`：两个 `toBeNull` 放进同一个 `waitFor`
+- [x] 3.4 `previewers-archive.test.tsx:365`：在 `waitFor` 里断言新列表行文字 `["new-1.txt", "new-2.txt"]`
+- [x] 3.5 `workspace-browser-only-paths.test.tsx`「选中后 file 答 404…」：不改（交错没有可等的 DOM 信号，由 2.1 保证；产品侧交错另案 #1542）
+- [x] 3.6 3.1–3.4 每处：在扰动配置、**不带**屏障的基建上该例转绿（证明修正本身成立，不依赖屏障）
 
 ## 4. 证据
 
-- [ ] 4.1 扰动配置 + 屏障：web 全量 0 红（对照 1.2 的 5 红）
-- [ ] 4.2 不扰动：`npm test --workspace web`（含 coverage）绿；记录修复前后耗时（同一机器、同一命令）
-- [ ] 4.3 满载（≥2×核数个 `yes`）下 5 个文件 + `scheduler-drain.test.tsx` 循环 10 次全绿；使用 `vi.useFakeTimers` 的 web 测试文件全绿（随 4.2）
-- [ ] 4.4 `make check` 绿（含 knip：`scheduler` 已列依赖、新 setup 文件不被判死代码；jscpd；size-guard）
+- [x] 4.1 扰动配置 + 屏障：web 全量 0 红（对照 1.2 的 5 红）
+- [x] 4.2 不扰动：`npm test --workspace web`（含 coverage）绿；记录修复前后耗时（同一机器、同一命令）
+- [x] 4.3 满载（≥2×核数个 `yes`）下 5 个文件 + `scheduler-drain.test.tsx` 循环 10 次全绿；使用 `vi.useFakeTimers` 的 web 测试文件全绿（随 4.2）
+- [x] 4.4 `make check` 绿（含 knip：`scheduler` 已列依赖、新 setup 文件不被判死代码；jscpd；size-guard）
 - [ ] 4.5 PR 正文：复现方法（scratch 配置原文）、前后对照表、依赖理由（AGENTS.md 依赖政策）、`偏离记录`

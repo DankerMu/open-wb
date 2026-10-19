@@ -10,7 +10,7 @@
 
 ## 决策
 
-- **D1 屏障**：新 setup 文件在导入 `@testing-library/react`（它在导入时 `configure` 自己的 `asyncWrapper`）之后，取 `getConfig().asyncWrapper` 为 `previous`，再 `configure({ asyncWrapper: (cb) => previous(async () => { const result = await cb(); await schedulerIdle(); return result; }) })`。`schedulerIdle()` 在 `scheduler` 包的同一实例上 `unstable_scheduleCallback(unstable_IdlePriority, resolve)`。
+- **D1 屏障**：新 setup 文件在导入 `@testing-library/react`（它在导入时 `configure` 自己的 `asyncWrapper`）之后，取 `getConfig().asyncWrapper` 为 `previous`，再 `configure({ asyncWrapper: (cb) => previous(async () => { const result = await cb(); await schedulerIdle(); return result; }) })`。`schedulerDrained()` 在 `scheduler` 包的同一实例上反复排 `unstable_scheduleCallback(unstable_IdlePriority, resolve)`：等完一个 Idle 后再排一个探针，探针的任务 `id` 紧接上一个（期间没有任务入队）即已排空，撤掉探针返回；否则等它再探。一次 Idle 不够（实施时实测）：effect 里 setState 引起的渲染由 React 先 `queueMicrotask`、在微任务里才 `scheduleCallback`，那个 effect 与 Idle 同片时 Idle 先跑、渲染后入队——D5 第一例在只等一次 Idle 时仍红。`id` 是 `unstable_scheduleCallback` 返回记录的内部字段，版本钉在 0.27.0，字段消失时每次等待显式抛错。
   - 屏障跑在 `previous` 之内：RTL 此时已把 `IS_REACT_ACT_ENVIRONMENT` 置为 false，与那批工作被排进真实 Scheduler 时的环境一致，不触发 act 警告；屏障在 RTL 自己的 `setTimeout(0)` drain 之前，flush 出来的 effect 再排的 timer 仍被那次 drain 接住。
   - Idle 任务的过期时间是 `maxSigned31BitInt`，Scheduler 按过期时间取最小者，因此它排在所有已排队的、以及 flush 期间级联新排的 Normal / UserBlocking / Low 任务之后。
   - 不以 IdlePriority 排工作的代码不受影响；本仓 `web/src` 没有直接用 Scheduler。
@@ -18,7 +18,7 @@
 - **D3 只挂 web**：`web/vitest.config.ts` 的 `test.setupFiles`；`vitest.shared.mjs` 是 server 共用的，不动。
 - **D4 用例修正**（每例只改等待，不改断言强度）：
   - `previewers-loading.test.tsx:177`：`loadPreviewer` 的调用记录改在 `waitFor` 里等到 `[["code"]]`；后面「再选 other.ts 不再加载」的终态断言不变。
-  - `chat-permission-tier.test.tsx:530`（以及同例 `:518` 的第一处）：`clickSend` 之前先 `await screen.findByRole("button", { name: "发送" })`。
+  - `chat-permission-tier.test.tsx`「缺省档位是 全部自动…」：第一次发送后、`router.navigate("/")` 之前先 `await screen.findByRole("button", { name: "停止" })`，等新会话页收敛到运行中再离开（与 `leaveForWelcome` 注释的「创建—发送交接未完成时不离开」同一前提）。实施时实测：在 `clickSend` 前等「发送」不成立——没收敛就回欢迎态时，欢迎态按钮停在「停止」超过 1s（范围外观察，另行登记）。
   - `chat-message-waiting.test.tsx:110-113` `expectNeither`：两个 `toBeNull` 放进同一个 `waitFor`。
   - `previewers-archive.test.tsx:365`：等的是新列表本身：在 `waitFor` 里断言行文字为 `["new-1.txt", "new-2.txt"]`，不靠立即命中旧表的 `findByRole("table")`。
   - `workspace-browser-only-paths.test.tsx`「选中后 file 答 404…」：点 x.md 之前须等宿主套用 `path=null`。这个交错没有可等的 DOM 信号，由 D1 保证（`waitFor` 返回时宿主的 `path` effect 已执行）；用例文本不改，复现表证明它在扰动下由红转绿。

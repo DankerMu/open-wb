@@ -108,8 +108,10 @@ async function expectDotOnly(article: HTMLElement) {
 
 /** 终态：二者都不显示。 */
 async function expectNeither(article: HTMLElement) {
-  await waitFor(() => expect(article.querySelector(CARET)).toBeNull());
-  expect(article.querySelector(WAITING)).toBeNull();
+  await waitFor(() => {
+    expect(article.querySelector(CARET)).toBeNull();
+    expect(article.querySelector(WAITING)).toBeNull();
+  });
 }
 
 describe("chat-web「等待指示」：首块到达前只有等待指示，之后只有小圆点", () => {

@@ -11,6 +11,8 @@ export default mergeConfig(sharedConfig, {
   test: {
     environment: "jsdom",
     exclude: [...configDefaults.exclude, "e2e/**"],
+    // RTL 等待返回前排空 React Scheduler（#1541）；只挂 web，不进 vitest.shared.mjs。
+    setupFiles: ["./test/scheduler-drain-setup.ts"],
     coverage: {
       // 拷入层（registry 原样拷入的组件）不计覆盖率，依据 ADR-0013；只列这两个目录。
       exclude: ["src/components/ui/**", "src/components/assistant-ui/**"],

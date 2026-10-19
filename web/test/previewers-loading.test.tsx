@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CodePreviewer } from "../src/features/files/previewers/code.js";
@@ -174,7 +174,7 @@ describe("文件页的预览器按需加载", () => {
       fireEvent.click(screen.getByRole("button", { name: "main.py" }));
       expect((await screen.findByText("正在加载预览…")).getAttribute("role")).toBe("status");
       expect(screen.queryByRole("row")).toBeNull();
-      expect(stub.loadPreviewer.mock.calls).toStrictEqual([["code"]]);
+      await waitFor(() => expect(stub.loadPreviewer.mock.calls).toStrictEqual([["code"]]));
 
       await act(async () => {
         gate.resolve(CodePreviewer);
