@@ -53,7 +53,7 @@ export interface AgentSettings {
   sandboxRoot: string;
   modelUpstreamBaseUrl?: string;
   modelUpstreamApiKey?: string;
-  /** 模型白名单与缺省模型（MODEL_CATALOG；未设置时为 MODEL_ID / MODEL_REASONING 的单模型）。 */
+  /** 模型白名单与缺省模型（MODEL_CATALOG；未设置时为 MODEL_ID / MODEL_REASONING / MODEL_VISION 的单模型）。 */
   modelCatalog: ModelCatalog;
   ompUser?: string;
   /** omp 浏览器工具的可执行文件（BROWSER_BIN，绝对路径；缺席即部署没有浏览器）。 */

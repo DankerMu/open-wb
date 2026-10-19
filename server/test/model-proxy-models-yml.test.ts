@@ -18,7 +18,7 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
-import { plainYaml, reasoningYaml, withMaxTokens } from "./models-yml-helpers.js";
+import { plainYaml, reasoningYaml, withMaxTokens, withVisionInput } from "./models-yml-helpers.js";
 
 const PROXY_BASE_URL = "http://127.0.0.1:18016/v1";
 const MODEL_ID = "deepseek-v4.1-flash";
@@ -31,7 +31,7 @@ const SENTINELS = {
   WORKBUDDY_MODEL_TOKEN: "session-bearer-SENTINEL-89-token",
 } as const;
 
-/** A whitelist of an installation without MODEL_CATALOG: name equals id, no efforts, no vision, 32768. */
+/** A whitelist without MODEL_CATALOG and with MODEL_VISION=off: name equals id, no efforts, no vision, 32768. */
 function singleModel(proxyBaseUrl: string, modelId: string) {
   return {
     proxyBaseUrl,
@@ -425,6 +425,35 @@ describe("writeManagedModelsYml", () => {
         line === old[index] ? [] : [[old[index], line]],
       );
       expect(differing).toEqual([["        maxTokens: 8192", "        maxTokens: 32768"]]);
+    },
+  );
+
+  it.each([
+    [true, reasoningYaml(PROXY_BASE_URL, MODEL_ID)],
+    [false, plainYaml(PROXY_BASE_URL, MODEL_ID)],
+  ])(
+    "single-model default declares image input: the vision-false output plus the three input lines at the entry's end (reasoning %s)",
+    async (reasoning, before) => {
+      const agentDir = makeAgentDir();
+      await writeManagedModelsYml(agentDir, {
+        proxyBaseUrl: PROXY_BASE_URL,
+        models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: true, maxTokens: 32768 }],
+      });
+      const written = readFileSync(join(agentDir, "models.yml"), "utf8");
+      const visionFalse = withMaxTokens(before, 32768);
+      expect(written).toBe(withVisionInput(visionFalse));
+      const now = written.split("\n");
+      const old = visionFalse.split("\n");
+      // Both end with a newline: the last element is "", so the three new lines precede it.
+      expect(now.slice(0, old.length - 1)).toEqual(old.slice(0, -1));
+      expect(now.slice(old.length - 1)).toEqual([
+        "        input:",
+        "          - text",
+        "          - image",
+        "",
+      ]);
+      const document = parse(written) as { providers: { workbuddy: { models: [unknown] } } };
+      expect(document.providers.workbuddy.models[0]).toMatchObject({ input: ["text", "image"] });
     },
   );
 

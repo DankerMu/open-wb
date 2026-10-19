@@ -84,7 +84,7 @@ describe("resolveServerConfig — MODEL_ID 的取值规则（#1261）", () => {
     ["只有一个空格", " "],
   ])("%s 的取值通过，白名单唯一一项的 id 与 name 逐字节等于它", (_label, raw) => {
     expect(resolveServerConfig({ MODEL_ID: raw }, SOURCE_ENTRY).modelCatalog).toStrictEqual({
-      models: [{ id: raw, name: raw, reasoning: true, vision: false, maxTokens: 32768 }],
+      models: [{ id: raw, name: raw, reasoning: true, vision: true, maxTokens: 32768 }],
       defaultModelId: raw,
     });
   });

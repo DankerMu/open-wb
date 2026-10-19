@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
 import { resolveServerConfig } from "../src/server.js";
-import { plainYaml, reasoningYaml, withMaxTokens } from "./models-yml-helpers.js";
+import { plainYaml, reasoningYaml, withMaxTokens, withVisionInput } from "./models-yml-helpers.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -129,7 +129,7 @@ describe("resolveServerConfig — MODEL_REASONING", () => {
 });
 
 describe("writeManagedModelsYml — reasoning 声明", () => {
-  /** 未设置 MODEL_CATALOG 的单模型白名单：name 同 id、不带 efforts、vision 为假。 */
+  /** 未设置 MODEL_CATALOG、MODEL_VISION=off 的单模型白名单：name 同 id、不带 efforts、vision 为假。 */
   function single(reasoning: boolean): Parameters<typeof writeManagedModelsYml>[1] {
     return {
       proxyBaseUrl: PROXY_BASE_URL,
@@ -214,7 +214,7 @@ describe("production entry — MODEL_REASONING", () => {
     20_000,
   );
 
-  it("未设置时写出含 reasoning 声明的 models.yml", async () => {
+  it("未设置时写出含 reasoning 声明的 models.yml（MODEL_VISION 缺省 on：另有 input 三行）", async () => {
     const root = scratch("open-wb-reasoning-default-");
     const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
       env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {}),
@@ -223,26 +223,40 @@ describe("production entry — MODEL_REASONING", () => {
       await server.waitForStarted();
       const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
       const baseUrl = `http://127.0.0.1:${port}/v1`;
-      expect(parse(text)).toEqual(documentWith(baseUrl, REASONING_MODEL));
-      expect(text).toBe(reasoningNow(baseUrl));
+      const model = { ...REASONING_MODEL, input: ["text", "image"] };
+      expect(parse(text)).toEqual(documentWith(baseUrl, model));
+      expect(text).toBe(withVisionInput(reasoningNow(baseUrl)));
     } finally {
       await server.dispose();
     }
   }, 30_000);
 
-  it("MODEL_REASONING=off 时写出与变更前只差 maxTokens 一行的 models.yml", async () => {
-    const root = scratch("open-wb-reasoning-off-");
-    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
-      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: "off" }),
-    }));
-    try {
-      await server.waitForStarted();
-      const text = readFileSync(join(root, "state", "home", ".omp", "agent", "models.yml"), "utf8");
-      const baseUrl = `http://127.0.0.1:${port}/v1`;
-      expect(parse(text)).toEqual(documentWith(baseUrl, plainModel()));
-      expect(text).toBe(plainNow(baseUrl));
-    } finally {
-      await server.dispose();
-    }
-  }, 30_000);
+  // thinking-fold「关闭 reasoning」：同时 MODEL_VISION=off 时即 vision-false 的单模型输出（改前夹具换掉
+  // maxTokens 一行）；MODEL_VISION 缺省 on 时另有 input 三行。
+  it.each([
+    ["MODEL_VISION=off：与变更前只差 maxTokens 一行", { MODEL_VISION: "off" }, false],
+    ["MODEL_VISION 缺省：再多 input 三行", {}, true],
+  ] as const)(
+    "MODEL_REASONING=off，%s",
+    async (_label, vision, declared) => {
+      const root = scratch("open-wb-reasoning-off-");
+      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: "off", ...vision }),
+      }));
+      try {
+        await server.waitForStarted();
+        const text = readFileSync(
+          join(root, "state", "home", ".omp", "agent", "models.yml"),
+          "utf8",
+        );
+        const baseUrl = `http://127.0.0.1:${port}/v1`;
+        const model = declared ? { ...plainModel(), input: ["text", "image"] } : plainModel();
+        expect(parse(text)).toEqual(documentWith(baseUrl, model));
+        expect(text).toBe(declared ? withVisionInput(plainNow(baseUrl)) : plainNow(baseUrl));
+      } finally {
+        await server.dispose();
+      }
+    },
+    30_000,
+  );
 });

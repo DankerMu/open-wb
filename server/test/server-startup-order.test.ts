@@ -124,6 +124,8 @@ describe("production entry lifecycle", () => {
                 maxTokens: 32768,
                 reasoning: true,
                 compat: { reasoningContentField: "reasoning_content" },
+                // #1530: MODEL_VISION defaults on, so the single model declares image input.
+                input: ["text", "image"],
               },
             ],
           },

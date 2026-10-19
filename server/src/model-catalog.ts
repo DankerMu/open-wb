@@ -56,14 +56,19 @@ export function resolveModelCatalog(env: Record<string, string | undefined>): Mo
     // 单模型配置：MODEL_ID 逐字节成为这一项的 id 与 name（首尾空格属于模型名），这一项不带 efforts。
     const id = env.MODEL_ID === undefined ? DEFAULT_MODEL_ID : env.MODEL_ID;
     const reasoning = resolveOnOff(env.MODEL_REASONING, true, "MODEL_REASONING");
+    // 单模型的看图开关（#912，owner 2026-10-18：缺省 on，deepseek-v4.1-flash 能看图）。
+    const vision = resolveOnOff(env.MODEL_VISION, true, "MODEL_VISION");
     return {
-      models: [{ id, name: id, reasoning, vision: false, maxTokens: DEFAULT_MAX_TOKENS }],
+      models: [{ id, name: id, reasoning, vision, maxTokens: DEFAULT_MAX_TOKENS }],
       defaultModelId: id,
     };
   }
   const models = parseCatalog(rawCatalog);
   if (env.MODEL_REASONING !== undefined) {
     throw new Error("MODEL_REASONING must not be set when a model catalog is configured");
+  }
+  if (env.MODEL_VISION !== undefined) {
+    throw new Error("MODEL_VISION must not be set when a model catalog is configured");
   }
   // MODEL_ID 未设置时第一项是缺省模型；设置了就必须是其中一项的 id。
   const chosen =

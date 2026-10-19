@@ -253,7 +253,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 
 输入框上的权限档位、模型与推理强度、附件上传各带来几项部署事项。档位的决策与残余的权威是 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md) 的「补充（S1g）：审批档位按会话取值」，模型代理与凭证是 [ADR-0008](../adr/0008-model-proxy-credentials.md)，这里只写部署要知道的。
 
-**配置**（`server/src/agent-config.ts` 与 `server/src/model-catalog.ts`；四项都可选）：
+**配置**（`server/src/agent-config.ts` 与 `server/src/model-catalog.ts`；五项都可选）：
 
 | 环境变量 | 默认 | 单位 | 含义 |
 |---|---|---|---|
@@ -261,8 +261,9 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 | `UPLOAD_MAX_BYTES` | `524288000`（500 MiB） | 字节 | 单个上传文件的上限；恰等于上限的文件被接受 |
 | `UPLOAD_MAX_FILES` | `10` | 个 | 一条消息可带的附件个数上限；超过时发送消息的请求得到 400 |
 | `MODEL_CATALOG` | 未设置（白名单只有 `MODEL_ID` 一个模型） | JSON 数组 | 模型白名单，格式见下 |
+| `MODEL_VISION` | `on` | `on`、`off` 之一 | 未设置 `MODEL_CATALOG` 时那一个模型是否接受图片输入；不得与 `MODEL_CATALOG` 同时设置 |
 
-- `APPROVAL_MAX_MODE`：要与三个取值之一逐字符相同，不去空格、不改大小写。
+- `APPROVAL_MAX_MODE`、`MODEL_VISION`：要与各自的取值之一逐字符相同，不去空格、不改大小写（`MODEL_VISION` 的空串、`ON`、`true` 都是非法）。
 - 两个数值：规范十进制正整数（无前导零），范围 `1..2147483647`——单文件上限因此调不过约 2 GiB。
 - 任一项非法，服务启动失败：退出码 1，标准错误只有一行 `{"event":"server_start_failed","reason":"config"}`，不指出是哪一项、也不回显取值，需自行逐项核对。
 - 界面经 `GET /api/composer/options` 取可选档位、模型清单、两个上传上限与该账号的缺省值；取到一次后，页面打开期间不再重取。改配置要重启服务，已打开的页面要刷新。
@@ -281,11 +282,12 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 MODEL_CATALOG='[{"id": "model-a", "name": "通用", "reasoning": true, "efforts": ["low", "medium", "high"]}, {"id": "model-b", "name": "快速", "maxTokens": 8192}]'
 ```
 
-与 `MODEL_ID` / `MODEL_REASONING` 的关系：
+与 `MODEL_ID` / `MODEL_REASONING` / `MODEL_VISION` 的关系：
 
-- 未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项（缺省 `deepseek-v4.1-flash`），是否支持推理取 `MODEL_REASONING`（恰为 `on` 或 `off`，缺省 `on`）。这一项的输出上限（`maxTokens`）为 32768（此前 8192），不带 `efforts`，`MODEL_REASONING` 为 `on` 时界面列出 `off` 加全部六档（为 `off` 时不列强度），而 omp 按模型 id 自定强度集合并静默夹取——界面显示的强度可能与实际使用的不同。要两者一致，就配置 `MODEL_CATALOG` 并写明 `efforts`。
+- 未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项（缺省 `deepseek-v4.1-flash`），是否支持推理取 `MODEL_REASONING`（恰为 `on` 或 `off`，缺省 `on`）。这一项的输出上限（`maxTokens`）为 32768（此前 8192），不带 `efforts`，`MODEL_REASONING` 为 `on` 时界面列出 `off` 加全部六档（为 `off` 时不列强度），而 omp 按模型 id 自定强度集合并静默夹取——界面显示的强度可能与实际使用的不同。要两者一致，就配置 `MODEL_CATALOG` 并写明 `efforts`。这一项是否接受图片输入（`vision`）取 `MODEL_VISION`（恰为 `on` 或 `off`，缺省 `on`）：`on` 时托管 `models.yml` 的这一项多出 `input`（`text`、`image`）三行，模型选择器给它标「看图」，host overlay 把它定为 omp 的看图模型（`modelRoles.vision`，见 9.8）；`off` 时三者都没有。
+- 升级提示（#1530）：`MODEL_VISION` 缺省 `on` 会改变未设置 `MODEL_CATALOG` 的既有部署——此前这一项固定不看图，升级后托管 `models.yml` 多出 `input` 三行、模型选择器出现「看图」标签、用户上传的图片附件按图片送给模型。上游模型不能看图的部署要写 `MODEL_VISION=off`（否则带图片的请求可能被上游拒绝）。另外，当前模型能看图时 omp 不注册 `inspect_image` 工具，`read` 读图片直接把图片交给模型（omp `utils/inspect-image-mode.ts:37-40`），所以缺省部署里助手少了这一个工具。
 - `MODEL_ID` 的取值规则（有没有 `MODEL_CATALOG` 都一样）：未设置取缺省；设置了就必须是 1 到 128 个 UTF-8 字节、不含控制字符（U+0000–U+001F 与 U+007F）的字符串，与白名单条目的 `id` 同一条规则。空串、含换行等控制字符、超过 128 字节都是启动失败（失败记录的阶段是 `config`，错误只点名键、不回显取值）。取值逐字节原样使用，不去首尾空格——首尾空格算模型名的一部分，只含空格的值也不拒。
-- 设置了 `MODEL_CATALOG`：同时设置 `MODEL_REASONING` 则启动失败；`MODEL_ID` 未设置时数组第一项是缺省模型，设置了就必须等于某一项的 `id`，否则启动失败。
+- 设置了 `MODEL_CATALOG`：同时设置 `MODEL_REASONING` 或 `MODEL_VISION`（空串也算设置）则启动失败，各自点名该键；`MODEL_ID` 未设置时数组第一项是缺省模型，设置了就必须等于某一项的 `id`，否则启动失败。
 - 所有模型共用同一个上游（`MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`）。
 - `MODEL_UPSTREAM_API_KEY` 设置了就必须是合法的 HTTP 头取值：模型代理把它作为 `authorization: Bearer <密钥>` 发给上游，由 Node 自己的头校验（`http.validateHeaderValue`）判定，不另列字符集——含换行、NUL 等控制字符（制表符除外）或 U+00FF 以上的字符（如中文）都会被拒，空格、制表符与 Latin-1 字符（如 `é`）可以。不合法时服务拒绝启动（失败记录的阶段是 `config`，抛出的错误只点名键、不回显取值；标准错误仍只有那一行）。以前这样的密钥能启动，但每次模型请求都在代理里发不出去；升级前先核对密钥（#909）。
 - 从清单里拿掉一个模型后，存着它的会话与账号的最近选择在读取时回落到缺省模型，不需要改库。
@@ -478,7 +480,7 @@ modelRoles:
   vision: "workbuddy/<id>"
 ```
 
-没有这样的模型就不写 `modelRoles`。未设 `MODEL_CATALOG` 的单模型配置 `vision` 为假，所以缺省部署没有这两行。`modelRoles` 是对象，overlay 只压住 `vision` 一键，项目层写的其它角色照常生效。
+没有这样的模型就不写 `modelRoles`。未设 `MODEL_CATALOG` 时单模型的 `vision` 取 `MODEL_VISION`（缺省 `on`，9.3），所以缺省部署有这两行、`<id>` 即 `MODEL_ID`；写 `MODEL_VISION=off` 才没有。`modelRoles` 是对象，overlay 只压住 `vision` 一键，项目层写的其它角色照常生效。
 
 **字节与升级**：
 

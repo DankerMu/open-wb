@@ -91,7 +91,7 @@ describe("resolveServerConfig — 缺省身份", () => {
       // 未设置 MODEL_CATALOG 的单模型一项不带 efforts 键（toStrictEqual 连键的有无一起比）。
       const id = DEFAULT_MODEL_ID;
       expect(config.modelCatalog).toStrictEqual({
-        models: [{ id, name: id, reasoning: true, vision: false, maxTokens: 32768 }],
+        models: [{ id, name: id, reasoning: true, vision: true, maxTokens: 32768 }],
         defaultModelId: DEFAULT_MODEL_ID,
       });
       expect(config.approvalMaxMode).toBe("yolo");
