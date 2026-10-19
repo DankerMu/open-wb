@@ -111,7 +111,9 @@ omp 在 `--resume <file>` 时以该会话文件头记录的 cwd 为准（该目�
 
 #### Scenario: 工作目录 .env 不能打开浏览器中继（真实 omp）
 - **WHEN** 官方 omp v18.0.10 经宿主 overlay（浏览器块 `enabled: true`、`relay: false`、`cmux: false`）与宿主 spawn 环境（`PUPPETEER_EXECUTABLE_PATH` 指向一个执行时先写标记文件再以非零退出的包装脚本）、档位 `yolo` 启动；会话工作目录里预置 `.env`，写 `PI_BROWSER_RELAY=1`、`PI_BROWSER_CMUX=1` 与 `CMUX_SOCKET_PATH=<临时目录下一个不存在的套接字路径>`，并预置项目层 `.omp/config.yml` 写 `browser: { relay: true, relayUrl: "http://192.0.2.1:9" }`（TEST-NET-1，不是本机地址，omp 不为它拉起中继守护进程）；会话的 prompt 含 `WORKBUDDY_BROWSER_OPEN:about:blank`（omp-test-harness「受控上游浏览器标记」），回合结束
-- **THEN** 包装脚本的标记文件存在（omp 选了本地浏览器启动路径：中继与 cmux 都被关掉时才会走到它，`tools/browser.ts:92-131`）；同一用例在宿主 spawn 环境不含这两个变量时（未改动代码上的红）标记文件不存在
+- **THEN** 包装脚本的标记文件存在（omp 选了本地浏览器启动路径：中继与 cmux 都被关掉时才会走到它，`tools/browser.ts:92-131`；编译版经每项目 broker 执行该文件，`tools/browser/registry.ts:175-183`、`shared-daemon.ts:66-110`）
+- **WHEN** 同一用例，但 spawn 环境里去掉 `PI_BROWSER_RELAY` 与 `PI_BROWSER_CMUX` 两个键（测试专用的 spawn 包装删除它们，作为入库的负向对照）
+- **THEN** 标记文件不存在，且该次浏览器调用的工具结果含 `192.0.2.1`（走了中继，约 30 s 后以工具超时失败）
 
 #### Scenario: 参数与目录
 - **WHEN** 对 owner `u1` 的未绑定空间会话（`workspace_id` 为 null，有效档位 `write`，有效模型为缺省模型 `<MODEL_ID>`）首次 spawn 与 resume spawn
