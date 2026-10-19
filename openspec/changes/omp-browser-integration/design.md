@@ -90,7 +90,7 @@ browser:
 
 **D5 `xd://browser` 的识别是一个纯函数模块，三处共用。** 新文件 `server/src/sessions/omp/xd-browser.ts`，规则全文在 browser-runtime「浏览器操作的可读描述」：
 - `isBrowserDevicePath(raw)`（全文见 browser-runtime）：照搬 omp 执行路径——方括号解包 → scheme 正则 → `new URL()` → `href` 是否恰为 `xd://browser`（不分 scheme 大小写）；URL 序列化会吃掉尾部控制字符、制表符与换行、空端口、空 userinfo，手写字符串规则总会漏掉某一种，所以直接用同一个解析器。**开工核对改判（#1526，2026-10-19）**：Stage 4.5 加的宽松串判定 (b) 已删——按源码逐行复刻 omp 判定链、Node 24.13.1 与 Bun 1.2.19 各跑 40 万随机样例，与上述判定零差异；(b) 多认的只有首部空白 / 控制字符（omp 当普通文件写入，`write.ts:1141`）与尾部 Unicode 空白（omp 报无此设备），判为浏览器会把真实的文件写入登记成浏览器步骤、漏掉它的文件变更，并多一条没有对应调用的审计。omp v18.0.10 自带的 Bun 1.4.0 未实测，升级 omp 时与本判定一起重核。
-- `parseBrowserContent(text)`：`JSON.parse` 成普通对象且自有 `action` 为非空字符串时成功；原文不成功时照搬 omp 的 hashline 前缀剥离（`stripWriteContent` 的严格规则与松散头行回退，正则取自 `hashline/src/prefixes.ts`）后再解析一次——宿主不知道 omp 是否处在 hashline 模式，取先成功者：omp 不剥离时调用本就失败，多算的只是一条审计；不照搬则 `1:{…"app":{"path":…}}` 这种照抄前缀的参数在 `yolo` 档下审计为三个 `null`、`app.path` 漏记（开工核对发现，#1526）。剥离只对不超过 16384 个码元的文本做（PR #1540 审查：照搬的正则与重复去前缀在超长输入上是平方级，宿主进程为所有会话共用）。
+- `parseBrowserContent(text)`：`JSON.parse` 成普通对象时成功（`action` 缺席时摘要行为 `浏览器操作`）；原文不成功时照搬 omp 的 hashline 前缀剥离（`stripWriteContent` 的严格规则与松散头行回退，正则取自 `hashline/src/prefixes.ts`）后再解析一次——宿主不知道 omp 是否处在 hashline 模式，取先成功者：omp 不剥离时调用本就失败，多算的只是一条审计；不照搬则 `1:{…"app":{"path":…}}` 这种照抄前缀的参数在 `yolo` 档下审计为三个 `null`、`app.path` 漏记（开工核对发现，#1526）。剥离只对不超过 16384 个码元的文本做（PR #1540 审查：照搬的正则与重复去前缀在超长输入上是平方级，宿主进程为所有会话共用）。
   **审查改判（PR #1540 round 1）**：omp 执行的是 `validateToolArguments` 修复后的参数（`xdev.ts:427,457`；解开多套引号的键、拼回扁平路径键、JSON 字符串转对象、`"yes"` 转布尔、数转字符串），原先的「类型不符视同缺席」会让 `"app":"{\"path\":…}"`、`"app":{"relay":"yes"}` 这类参数在卡上零条 ⚠、审计 `external:null`，而 omp 照样启动外部程序或走中继。照搬整套修复不现实（规则多、随 omp 版本变），改为失败即关闭：参数对象不恰为 omp 浏览器 schema 的形态（键集与类型，browser-runtime「规范与无法确认」）即判为无法确认——标志行末加一行 `⚠ 参数写法不规范，…`、确认卡再附 `原文：` 与原文、审计 `external` 带 `unverified:true`。插入卡片的值另清掉控制字符与双向控制符、截到 200 码点，使步骤 detail 的截断切不到标志行。`name`/`url`/`code`/`app.path`/`app.cdp_url` 取非空字符串，`all`/`kill`/`app.relay` 取布尔，`app.args` 取全部元素为字符串的非空数组，类型不符当缺席；否则失败。
 - `browserSummary`、`browserFlags`、`browserAuditFields`：摘要行、⚠ 标志行（`app.path` 行带 `app.args`）、审计字段 `{action, url, external}`，字符串值里的换行换成空格。
 三处用法：
@@ -145,6 +145,7 @@ browser:
 - [`app.path`（含 `app.args`）启动任意可执行文件、`app.cdp_url` / `app.relay` 连外部浏览器] → 工具参数钉不住；卡上 ⚠ 行与审计 `external` 字段显著标出；登记为残余（ADR-0012 补充）。
 - [截断的审批 `Content` 无法解析、`app` 可能被截掉] → 卡片退回原文，并固定带一行「参数被截断，无法确认是否启动外部程序或连接外部浏览器」；步骤 detail 与审计用 `tool_execution_start` 的完整参数，不受此影响。
 - [omp 改了 `xd://` 路径的解包规则或 hashline 前缀剥离规则] → `isBrowserDevicePath` 与 `parseBrowserContent` 的剥离都照搬 omp 并注明来源（`plan-mode-guard.ts`、`internal-urls/`、`hashline/src/prefixes.ts`）；升级 omp 须重核（同 overlay）。
+- [照搬的 `read` 元数据正则（`hashline/src/prefixes.ts` `READ_TRUNCATION_NOTICE_RE`）对特制的单行仍是平方级] → 剥离只在文本不超过 16384 个码元时做，实测近 16384 字符的特制行约 113 ms、每行查两到三次，最坏几百毫秒且有上限；行号前缀正则已改成等价的线性写法（PR #1540 修复 1）。登记为残余。
 - [omp 的参数修复（`validateToolArguments`）比宿主的「规范」判定认得多] → 不照搬修复，不规范即无法确认（多判只多一行警示与一个审计标记）；规范的参数 omp 不做修复，两边看到的字段一致。升级 omp 时与 schema 一起重核。
 - [审计 `detail` 无长度上限（`core/audit/index.ts:55`），`url`、`external.args`、`cdpUrl` 全长写入] → 与审批 `title` 同样不截；接受。
 - [审批 title 的 `Path:` 也会被 omp 截到 2000 码元（`approval.ts:258-262`）：浏览器设备路径后接近两千个填充字符时，审批侧看到的是截断路径、判为 `write`，步骤侧用完整参数判为 `browser`，按名配对错开、该审批滞留] → 审计不受影响（来自步骤侧的完整参数）；只是卡片退回普通 `write` 原文且配对滞留，需要模型刻意构造超长路径，登记为残余。
