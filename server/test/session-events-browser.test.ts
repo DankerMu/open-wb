@@ -174,6 +174,19 @@ describe("Browser write becomes a browser step", () => {
     expect("browser" in (starts[3] ?? {})).toBe(false);
   });
 
+  it("a 5000-x url: the capped summary, then the flag line; the browser field keeps the url", () => {
+    const url = `https://a/${"x".repeat(5000)}`;
+    const content = JSON.stringify({ action: "open", url, app: { path: "/bin/sh" } });
+    const [step] = stepStarts(run([browserStart("u1", content)]));
+    const lines = step?.detail.split("\n") ?? [];
+    expect(lines.slice(0, 2)).toEqual([
+      `浏览器：打开 https://a/${"x".repeat(190)}…`,
+      "⚠ 启动外部程序：/bin/sh",
+    ]);
+    expect(step?.detail.endsWith(MARK)).toBe(true);
+    expect(step?.browser).toEqual({ action: "open", url, external: { path: "/bin/sh" } });
+  });
+
   it("a long run is capped at 4096 code points while its browser field keeps the external program", () => {
     const content = JSON.stringify({
       action: "run",

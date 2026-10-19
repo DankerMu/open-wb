@@ -314,6 +314,31 @@ describe("browser-runtime「浏览器调用审计」", () => {
     },
   );
 
+  it("yolo: app written as a JSON string audits external as unverified", REAL, async () => {
+    const content = '{"action":"open","url":"https://a","app":"{\\"path\\":\\"/bin/sh\\"}"}';
+    const { world } = await openScripted({
+      prompt: (child) =>
+        child.emitRaw(
+          chunk(writeStart("b1", "xd://browser", content), browserEnd("b1"), AGENT_END),
+        ),
+    });
+    setTier(world, "yolo");
+    await prompted(world);
+    await waitForTurn(world.fixture, world.session, "done");
+
+    const messageId = assistantIdFor(world.fixture, world.session);
+    expect(auditRows(world.fixture.db, "session.browser").map((row) => row.detail)).toEqual([
+      {
+        sessionId: world.session,
+        messageId,
+        action: "open",
+        url: "https://a",
+        external: { unverified: true },
+      },
+    ]);
+    expect(world.errors).toEqual([]);
+  });
+
   it(
     "a failing audit write: the browser step is neither stored nor published, the ring stops",
     REAL,

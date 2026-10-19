@@ -529,6 +529,15 @@ describe("browser approvals are rewritten as browser operations (#1526)", () => 
     ]);
   });
 
+  it('a relay written as "yes": the summary, the unverified line, then 原文 and the raw text', () => {
+    const relay = '{"action":"open","url":"https://a","app":{"relay":"yes"}}';
+    expect(classify(BROWSER + relay)).toEqual({
+      id: "b1",
+      tool: "browser",
+      title: `浏览器：打开 https://a\n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n${relay}`,
+    });
+  });
+
   it.each([
     "Path: [xd://browser]",
     "Path: [xd://browser#0A1B]",

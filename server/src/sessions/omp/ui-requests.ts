@@ -58,7 +58,8 @@ export function approvalRequest(frame: OmpFrame, id: string): ApprovalRequest | 
 /**
  * The rewritten title when the path before the first `\nContent:\n` is the browser device (the same
  * judgment as the step's, so the two pair by name): summary and flag lines, then `代码：` and the code
- * of a `run`; a content that does not parse (omp truncated it) keeps its text under a fixed warning.
+ * of a `run`, then `原文：` and the content when unverified; a content that does not parse (omp
+ * truncated it) keeps its text under a fixed warning.
  */
 function browserTitle(title: string): string | undefined {
   const contentAt = title.startsWith(WRITE_PATH) ? title.indexOf(CONTENT, WRITE_PATH.length) : -1;
@@ -67,11 +68,12 @@ function browserTitle(title: string): string | undefined {
   }
   const content = title.slice(contentAt + CONTENT.length);
   const call = parseBrowserContent(content);
-  if (call === undefined) {
+  if (call === undefined || call.unparsed === true) {
     return [...TRUNCATED, content].join("\n");
   }
   const code = call.action === "run" && call.code !== undefined ? ["代码：", call.code] : [];
-  return [browserSummary(call), ...browserFlags(call), ...code].join("\n");
+  const raw = call.unverified === true ? ["原文：", content] : [];
+  return [browserSummary(call), ...browserFlags(call), ...code, ...raw].join("\n");
 }
 
 export function cancelFrame(id: string): OmpFrame {

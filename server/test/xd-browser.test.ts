@@ -1,6 +1,7 @@
 /**
  * Issue #1526 (omp-browser-integration design D5) pure `xd://browser` module: browser-runtime
- * 「浏览器操作的可读描述」 scenarios 设备路径判定 / 各类操作的摘要 / 带 hashline 行号前缀的参数 / 越界形态的标志行.
+ * 「浏览器操作的可读描述」 scenarios 设备路径判定 / 各类操作的摘要 / 带 hashline 行号前缀的参数 / 越界形态的标志行 /
+ * 不规范的参数无法确认.
  * Every expected value is a literal copied from that spec delta, not derived from production code.
  */
 import { describe, expect, it } from "vitest";
@@ -23,6 +24,7 @@ function describeText(text: unknown) {
 }
 
 const NO_AUDIT = { action: null, url: null, external: null };
+const UNVERIFIED = "⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器";
 
 describe("设备路径判定 (omp v18.0.10 write → xd:// dispatch)", () => {
   it.each([
@@ -174,12 +176,12 @@ describe("越界形态的标志行", () => {
     });
   });
 
-  it("fields of the wrong type are absent: no flag line, external null", () => {
+  it("a non-boolean relay and a number in args: only the unverified line, external unverified", () => {
     const described = describeText(
       '{"action":"open","url":"https://a","app":{"path":"","relay":"yes","args":[1]}}',
     );
-    expect(described.flags).toEqual([]);
-    expect(described.audit.external).toBeNull();
+    expect(described.flags).toEqual([UNVERIFIED]);
+    expect(described.audit.external).toEqual({ unverified: true });
   });
 
   it("a newline inside a string value becomes a space, so each line stays one line", () => {
@@ -195,5 +197,94 @@ describe("越界形态的标志行", () => {
   it("only own properties are read", () => {
     const call = parseBrowserContent('{"action":"open","__proto__":{"url":"https://x"}}');
     expect(browserSummary(call)).toBe("浏览器：打开标签页 main");
+  });
+});
+
+describe("越界形态的标志行: inserted values are capped and sanitised", () => {
+  it("a 5000-x url is cut to 200 code points plus …; the flag line follows; the audit keeps it", () => {
+    const url = `https://a/${"x".repeat(5000)}`;
+    const described = describeText(`{"action":"open","url":"${url}","app":{"path":"/bin/sh"}}`);
+    expect(described).toEqual({
+      summary: `浏览器：打开 https://a/${"x".repeat(190)}…`,
+      flags: ["⚠ 启动外部程序：/bin/sh"],
+      audit: { action: "open", url, external: { path: "/bin/sh" } },
+    });
+  });
+
+  it("a real U+202E in the url becomes a space", () => {
+    expect(describeText('{"action":"open","url":"https://a\u202Eb"}').summary).toBe(
+      "浏览器：打开 https://a b",
+    );
+  });
+
+  it("C0, C1 and bidi controls in flag values become spaces; args JSON is one capped value", () => {
+    const args = Array.from({ length: 30 }, (_, i) => `arg-${i}`);
+    const json = JSON.stringify(args);
+    const flags = describeText(
+      JSON.stringify({
+        action: "run",
+        app: { path: "/a\u0007b\u0085c\u2066d\u202Ae\u007f", args, cdp_url: "ws://h\u0000z" },
+      }),
+    ).flags;
+    expect(json.length).toBeGreaterThan(200);
+    expect(flags).toEqual([
+      `⚠ 启动外部程序：/a b c d e  参数 ${json.slice(0, 200)}…`,
+      "⚠ 连接外部浏览器：ws://h z",
+    ]);
+  });
+
+  it("the 200 cap counts code points, not UTF-16 units", () => {
+    const summary = describeText(JSON.stringify({ action: "open", name: "𝒳".repeat(300) })).summary;
+    expect(summary).toBe(`浏览器：打开标签页 ${"𝒳".repeat(200)}…`);
+  });
+});
+
+describe("不规范的参数无法确认", () => {
+  it.each([
+    [
+      '{"action":"open","url":"https://a","app":"{\\"path\\":\\"/bin/sh\\"}"}',
+      "app as a JSON string",
+    ],
+    ['{"action":"open","url":"https://a","app":{"relay":"yes"}}', "relay as a string"],
+    ['{"action":"open","url":"https://a","app":{"path":123}}', "path as a number"],
+    ['{"action":"open","url":"https://a","\\"app\\"":{"path":"/bin/sh"}}', "a double-quoted key"],
+    ['{"action":"open","url":"https://a","app.path":"/bin/sh"}', "a flattened path key"],
+  ])("%s (%s): the summary, then only the unverified line; external unverified", (text) => {
+    expect(describeText(text)).toEqual({
+      summary: "浏览器：打开 https://a",
+      flags: [UNVERIFIED],
+      audit: { action: "open", url: "https://a", external: { unverified: true } },
+    });
+  });
+
+  it("a double-quoted action key: no action, the path flag then the unverified line", () => {
+    expect(describeText('{"\\"action\\"":"open","app":{"path":"/bin/sh"}}')).toEqual({
+      summary: "浏览器操作",
+      flags: ["⚠ 启动外部程序：/bin/sh", UNVERIFIED],
+      audit: { action: null, url: null, external: { path: "/bin/sh", unverified: true } },
+    });
+  });
+
+  it("the schema shape with viewport, wait_until, dialogs, timeout and i is canonical", () => {
+    const text =
+      '{"action":"open","url":"https://a","viewport":{"width":800,"height":600},' +
+      '"wait_until":"load","dialogs":"accept","timeout":5,"i":"x"}';
+    expect(describeText(text)).toEqual({
+      summary: "浏览器：打开 https://a",
+      flags: [],
+      audit: { action: "open", url: "https://a", external: null },
+    });
+  });
+
+  it("an unparsable text over 16384 code units returns within 1 s, unverified", () => {
+    const text = `{"action":"open"}\n${" ".repeat(20000)}x`;
+    const started = performance.now();
+    const described = describeText(text);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(described).toEqual({
+      summary: "浏览器操作",
+      flags: [UNVERIFIED],
+      audit: { action: null, url: null, external: { unverified: true } },
+    });
   });
 });
