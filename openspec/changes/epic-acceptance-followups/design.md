@@ -118,8 +118,8 @@
 
 - `hasUnfinishedTask` 只有 `composer-dock.tsx:52` 一个调用方；可见条件只在 dock 里改。
 - `layout.panel` 的防误点比对字符串以实际渲染的清单（含保留的已完结清单）为准。
-- 归档会话：`view={archived ? null : historyView}`（`conversation-view.tsx:300`），`todo` 为 `null` 按规则清掉。
-- `historyView` 只在换会话时变为 null（`use-chat-session.ts:337,485`）；对账、重装走 `installSnapshot`（`:287`），同一会话里不误清。
+- 归档会话：`view={archived ? null : historyView}`（`conversation-view.tsx:303`），`todo` 为 `null` 按规则清掉；换账号、404 置 `idle`、读取出错置 `error`（`use-chat-session.ts:235,366,372`）同样让 `view` 为 null 而清掉，都在「面板可见期间」之外。
+- `historyView` 在换会话、以及同一会话里 URL（pathname / search / hash）变化时重载历史而变为 null（`use-chat-session.ts:337,380-389,485,499`）——后者会清掉保留的清单；会话页里没有同会话改 URL 的入口（#1521 起只有锚点的链接只渲染文字，脚注锚点不改 URL），按此接受。对账、重装走 `installSnapshot`（`:287`），同一会话里不误清。
 - 分叉与新建会话都换 `sessionId`，清掉。
 - 非目标：别的标签页发的消息不经过本页的 `sending`，保留照旧（规格认可，不加测试）。
 - Review focus：(1) `sameTodo` 只导出、`setTodo` 与归约逻辑字节不变；(2) V1 第一步（回合进行中、输入框锁定时就地完结）是区分 `sending` 与 `inputLocked` 的那一步；(3) `kept` 与上一次**渲染**的值比，不是与上一个事件比；(4) 「点击的那一刻」在请求在途时断言（`deferredResponse`）；(5) 202 / 失败路径的快照带同一份已完结清单，「仍不在」不空转。
