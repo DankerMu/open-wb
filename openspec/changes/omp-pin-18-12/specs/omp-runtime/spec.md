@@ -177,7 +177,7 @@ overlay 缺失、不可读或不是 YAML mapping 时 omp 以非零退出且不�
 #### Scenario: rpc-ui 下模型拿不到 ask 工具（真实 omp）
 - **WHEN** 官方 omp v18.12.3 按「子进程 spawn 契约」（`--mode rpc-ui`）与原样的宿主 overlay、档位 `write` 启动，受控上游在一个回合里发出 `WORKBUDDY_ASK` 标记的工具轮（omp-test-harness「受控上游 ask 标记」：一个 `ask` 调用）
 - **THEN** 该回合没有 `method` 为 `select` 且 `title` 不以 `Allow tool: ` 开头的 `extension_ui_request`，也没有其它非审批 UI 请求被 cancel；回合以 `agent_end` 正常结束、宿主记为 `done`；受控上游记录到的第二个请求携带名为 `ask` 的那次工具调用的错误结果（omp 把未知工具作为错误结果回给模型，具体结果文本由首跑记入实现 PR）；`chat_approvals` 没有新行
-- **WHEN** 同一用例以测试专用 spawn 包装把 `--config` 指向一份去掉 `ask:` 块、其余逐字节相同的 overlay（负向对照）
+- **WHEN** 同一用例以测试专用 spawn 包装把 argv 的 `--config` 与环境变量 `PI_CONFIG_FILES` 都指向一份去掉 `ask:` 块、其余逐字节相同的 overlay（负向对照；omp 先读 `PI_CONFIG_FILES` 再追加 `--config`，只换其一则钉仍生效）
 - **THEN** 该回合出现至少一个非审批形状的 `extension_ui_request`，宿主 cancel 它之后回合以 `stopped` 结束（omp 的 `ask` 取消即中止回合）
 - **WHEN** 同一进程配置分别以 `--mode rpc-ui` 与（测试专用包装改写为）`--mode rpc` 各跑一个相同的 bash 回合
 - **THEN** 受控上游记录到的请求数相同、每个请求的 `model` 相同
