@@ -115,6 +115,13 @@ describe("production entry host overlay (#1527)", () => {
             `\n  screenshotDir: screenshots\nmodelRoles:\n  vision: "workbuddy/${MODEL_ID}"\n`,
           ),
         ).toBe(true);
+        // #1564: approval is null, ruby/julia are empty (until v18.12.3), ask closes the block.
+        const fixed = text.slice(0, text.indexOf("\nbrowser:\n") + 1);
+        expect(fixed.split("\n").filter((line) => line.includes("approval:"))).toEqual([
+          "  approval: null",
+        ]);
+        expect(fixed).toContain('\nruby:\n  interpreter: ""\njulia:\n  interpreter: ""\nmcp:\n');
+        expect(fixed.endsWith("\nask:\n  enabled: false\n")).toBe(true);
         expect(readdirSync(agentDirOf(root)).toSorted()).toEqual([
           "host-overlay.yml",
           "models.yml",

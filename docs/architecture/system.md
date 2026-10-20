@@ -439,7 +439,7 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 
 ### 9.8 浏览器与参考镜像（#912，change `omp-browser-integration`）
 
-本节写配置项 `BROWSER_BIN`（#1529）、宿主 overlay 的浏览器部分（#1527）与参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
+本节写配置项 `BROWSER_BIN`（#1529）、宿主 overlay 的固定块（#1564）与浏览器部分（#1527）、参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
 
 **配置 `BROWSER_BIN`**：可选，omp 浏览器工具使用的 Chromium/Chrome 可执行文件。
 
@@ -450,6 +450,73 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 - 启动校验之后该文件被删除或替换，不在宿主的检查范围内。omp 照样用 `PUPPETEER_EXECUTABLE_PATH` 的取值、不检查它是否存在，浏览器启动失败，不另行查找或下载（读 v18.0.10 源码 `tools/browser/launch.ts:192-194` 推出）。
 
 **spawn 环境恒钉中继与 cmux**：每个 omp 子进程的环境都带 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`，与是否设置 `BROWSER_BIN` 无关，sudo 的 `--preserve-env=` 也保留这两个键。omp 以这两个变量为浏览器中继与 cmux 的最终开关，非空时压过设置与工具参数；不钉的话，模型写进工作目录 `.env` 的 `PI_BROWSER_RELAY=1` 会在下一次 spawn 时打开中继，绕过 overlay 的 `relay: false`，且确认卡与审计都看不到。取值必须是字面量 `0`：omp 的 dotenv 只填未设或为空的变量，空串挡不住。结果是中继与 cmux 在任何设置与参数下都不启用，`app.relay: true` 的调用退回本地浏览器。部署方自己在服务环境里设的这两个变量同样不起作用。同理恒钉 `PUPPETEER_PROXY=direct://`、`PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0`（sudo 同样保留）：omp 从这两个变量拼浏览器的 `--proxy-server` 与 `--ignore-certificate-errors`，不钉的话工作目录 `.env` 能给浏览器挂代理、关证书校验；钉住后浏览器恒直连（`direct://` 也压过环境里的 `http_proxy` 等）、校验证书。实测见 `server/test/omp-official-browser.test.ts`（官方 v18.0.10）。
+
+**overlay 的固定块**（#1564，change `omp-pin-18-12` design D4）：`host-overlay.yml` 以下面这段开头，之后才是浏览器块与看图块。它不随部署配置变化，残余与取舍登记在 ADR-0012「2026-10-20 补充（#1563）」：
+
+```yaml
+tools:
+  approval: null
+  approvalMode: write
+bash:
+  patterns: []
+  direnv: "off"
+shellPath: null
+python:
+  interpreter: ""
+ruby:
+  interpreter: ""
+julia:
+  interpreter: ""
+mcp:
+  enableProjectConfig: false
+todo:
+  reminders: false
+images:
+  urls:
+    enabled: false
+    command: null
+retry:
+  enabled: true
+  maxRetries: 1
+  baseDelayMs: 500
+  maxDelayMs: 300000
+  modelFallback: false
+telemetry:
+  otlpExportEnabled: false
+archive:
+  enabled: false
+disabledProviders:
+  - ollama
+  - llama.cpp
+  - lm-studio
+  - apple
+ask:
+  enabled: false
+```
+
+| 键 | 作用 |
+|---|---|
+| `tools.approval: null` | 整体替换项目层的逐工具放行记录。`null` 在 omp 的深合并里走替换分支，再被当作未设、回落默认 `{}`，两个版本都无警告；对象会与项目层深合并、项目条目幸存；数组 `[]`（#1564 之前的写法）在 v18.12.3 被 record 校验丢弃并每次启动写一条 `Settings: ignoring invalid value` |
+| `tools.approvalMode: write` | 只在 argv 缺席时起作用的兜底，argv 的 `--approval-mode` 压过它 |
+| `bash.patterns: []`、`bash.direnv: "off"` | 清掉项目层的 bash 放行规则；bash 调用前不跑 `direnv export` |
+| `shellPath: null`、`python.interpreter: ""` | 项目层不能指定被宿主执行的可执行文件 |
+| `ruby.interpreter: ""`、`julia.interpreter: ""` | 钉住版本为 v18.0.10 期间保留（owner 2026-10-20）：v18.0.10 关掉 JS eval 后会在 spawn 预检里执行项目层指定的这两个解释器，不经审批（实测见下）。v18.12.3 的 eval 只剩 py 与 js、没有这两个键，翻转到 v18.12.3 时随版本一起删 |
+| `mcp.enableProjectConfig: false` | 项目层 MCP 的 stdio server 不在 spawn 时被拉起 |
+| `todo.reminders: false` | 关掉未完成 todo 的隐藏提醒与同回合续跑（#772） |
+| `images.urls.enabled: false`、`command: null` | 关掉图片发布 broker，项目层拉不起外部进程 |
+| `retry:` 段 | 会话级重试封顶一轮、关闭模型兜底（#909，ADR-0012「2026-10-14 补充」） |
+| `telemetry.otlpExportEnabled: false` | 关掉 OTLP 导出。缺省开，有 `OTEL_*` 端点才真正导出，而工作目录 `.env` 能注入端点 |
+| `archive.enabled: false` | 关掉 `archive` prelude（只读、不请求审批，读 omp 自己的 `sessions` 目录，与宿主的 `--session-dir` 不重叠，属卫生项） |
+| `disabledProviders` | 关掉对本机 `ollama`（11434）、`llama.cpp`（8080）、`lm-studio`（1234）端口的隐式探测与 macOS 上的 `apple` 提供者；托管 `models.yml` 的 `workbuddy` provider 不受影响。数组整体替换项目层的同名键：项目层写的 `disabledProviders` 不再生效（实测见下） |
+| `ask.enabled: false` | omp 不创建 `ask` 工具。它只在有 UI 时创建，即 `--mode rpc-ui`（#1563 组 2 起宿主的启动模式），宿主对它的提问只会 cancel，而 `ask` 被取消时先中止整个回合，用户看到回答无故「已停止」。钉掉后 `rpc-ui` 下的工具集与 `rpc` 相同 |
+
+实测（2026-10-20，#1564，本机官方 v18.0.10 与 v18.12.3，`--mode rpc-ui`，overlay 为本块加浏览器块；v18.12.3 对不认识的 `ruby` / `julia` 静默忽略）：
+
+- 两个版本的 stderr 与 omp 日志（`xdg/state/omp/logs/`）都没有 `Settings:` 行（含 v18.12.3 上的 `ruby` / `julia` 两键）。对照：换回旧固定块（`approval: []`）时 v18.12.3 的日志有一条 `Settings: ignoring invalid value`（`setting: tools.approval`）。
+- `get_state` 正常应答，`dumpTools` 里没有 `ask`；旧固定块下两个版本都多出 `ask`。
+- `get_available_models` 列出 `workbuddy/m1`，日志里没有对本机三个端口的 `model discovery failed`；去掉 `disabledProviders` 时两个版本都对这三个端口探测失败各一条。
+- `ruby` / `julia` 的钉（v18.0.10）：cwd 的 `.omp/config.yml` 写 `eval: {js: false, ruby: true}` 与 `ruby.interpreter: ./x.sh`。带本块时 `x.sh` 不被执行；overlay 去掉这两段时 omp 在 spawn 预检里执行了 `<cwd>/x.sh`（参数 `-e exit 0`）。
+- 项目层同名键被整体替换：cwd 放 `.claude/skills/x/SKILL.md`，`.omp/config.yml` 写 `disabledProviders: [claude]`。带本块时 `get_available_commands` 列出 `skill:x`；overlay 去掉 `disabledProviders` 时不列，即项目层的 `[claude]` 只在 overlay 不写该键时生效。两个版本结果相同。
 
 **overlay 的浏览器块**：`host-overlay.yml` 在固定块之后恒有下面一段（这里是未设 `BROWSER_BIN` 的样子），overlay 高于项目层，会话工作目录里的 `.omp/config.yml` 改不动它：
 
