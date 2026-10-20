@@ -14,7 +14,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { resolveServerConfig } from "../src/server.js";
-import { reasoningYaml, withMaxTokens, withVisionInput } from "./models-yml-helpers.js";
+import { baselineYaml, withVisionInput } from "./models-yml-helpers.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -145,11 +145,12 @@ describe("production entry — MODEL_VISION", () => {
           join(root, "state", "home", ".omp", "agent", "models.yml"),
           "utf8",
         );
-        const plain = withMaxTokens(reasoningYaml(`http://127.0.0.1:${port}/v1`, MODEL_ID), 32768);
+        const plain = baselineYaml(true, `http://127.0.0.1:${port}/v1`, MODEL_ID);
         expect(text).toBe(vision ? withVisionInput(plain) : plain);
-        const entry = (parse(text) as { providers: { workbuddy: { models: [object] } } }).providers
-          .workbuddy.models[0];
-        expect(Object.hasOwn(entry, "input")).toBe(vision);
+        const entry = (
+          parse(text) as { providers: { workbuddy: { models: [{ input: unknown }] } } }
+        ).providers.workbuddy.models[0];
+        expect(entry.input).toEqual(vision ? ["text", "image"] : ["text"]);
       } finally {
         await server.dispose();
       }

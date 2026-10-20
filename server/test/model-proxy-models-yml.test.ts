@@ -18,7 +18,13 @@ import { basename, dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
-import { plainYaml, reasoningYaml, withMaxTokens, withVisionInput } from "./models-yml-helpers.js";
+import {
+  baselineYaml,
+  plainYaml,
+  reasoningYaml,
+  withMaxTokens,
+  withVisionInput,
+} from "./models-yml-helpers.js";
 
 const PROXY_BASE_URL = "http://127.0.0.1:18016/v1";
 const MODEL_ID = "deepseek-v4.1-flash";
@@ -83,10 +89,15 @@ const THREE_MODELS_YAML = `providers:
             - "high"
             - "xhigh"
             - "max"
+        input:
+          - text
       - id: "m2"
         name: "m2"
         contextWindow: 128000
         maxTokens: 8192
+        reasoning: false
+        input:
+          - text
       - id: "m3"
         name: "深度"
         contextWindow: 128000
@@ -102,6 +113,22 @@ const THREE_MODELS_YAML = `providers:
         input:
           - text
           - image
+`;
+
+/** The single `m2` entry of the same scenario's second run (its own 8192 limit). */
+const M2_ONLY_YAML = `providers:
+  workbuddy:
+    api: openai-completions
+    baseUrl: "http://127.0.0.1:18016/v1"
+    apiKey: WORKBUDDY_MODEL_TOKEN
+    models:
+      - id: "m2"
+        name: "m2"
+        contextWindow: 128000
+        maxTokens: 8192
+        reasoning: false
+        input:
+          - text
 `;
 
 const LIMITS = { contextWindow: 128000, maxTokens: 32768 };
@@ -125,8 +152,16 @@ const THREE_MODELS_DOCUMENT = {
             mode: "effort",
             efforts: ["minimal", "low", "medium", "high", "xhigh", "max"],
           },
+          input: ["text"],
         },
-        { id: "m2", name: "m2", contextWindow: 128000, maxTokens: 8192 },
+        {
+          id: "m2",
+          name: "m2",
+          contextWindow: 128000,
+          maxTokens: 8192,
+          reasoning: false,
+          input: ["text"],
+        },
         {
           id: "m3",
           name: "深度",
@@ -398,62 +433,96 @@ describe("writeManagedModelsYml", () => {
 
     await writeManagedModelsYml(agentDir, { proxyBaseUrl: PROXY_BASE_URL, models: [M2] });
     const text = readFileSync(target, "utf8");
-    expect(text).toBe(plainYaml(PROXY_BASE_URL, "m2"));
-    for (const stale of ["m1", "m3", "通用", "深度", "thinking", "input", "reasoning"]) {
+    expect(text).toBe(M2_ONLY_YAML);
+    for (const stale of [
+      "m1",
+      "m3",
+      "通用",
+      "深度",
+      "thinking",
+      "compat",
+      "reasoning: true",
+      "image",
+    ]) {
       expect(text).not.toContain(stale);
     }
     expect(readdirSync(agentDir)).toEqual(["models.yml"]);
   });
 
   it.each([
-    [true, reasoningYaml(PROXY_BASE_URL, MODEL_ID)],
-    [false, plainYaml(PROXY_BASE_URL, MODEL_ID)],
+    [true, "models-yml-reasoning-true.yml", reasoningYaml(PROXY_BASE_URL, MODEL_ID)],
+    [false, "models-yml-reasoning-false.yml", plainYaml(PROXY_BASE_URL, MODEL_ID)],
   ])(
-    "single-model output without MODEL_CATALOG differs from the pre-change file in the maxTokens line only (reasoning %s)",
-    async (reasoning, before) => {
+    "single-model output without MODEL_CATALOG equals the #1563 baseline file and is the pre-change file plus the reasoning/input lines only (reasoning %s)",
+    async (reasoning, fixture, before) => {
       const agentDir = makeAgentDir();
       await writeManagedModelsYml(agentDir, {
         proxyBaseUrl: PROXY_BASE_URL,
         models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false, maxTokens: 32768 }],
       });
       const written = readFileSync(join(agentDir, "models.yml"));
-      expect(written.equals(Buffer.from(withMaxTokens(before, 32768), "utf8"))).toBe(true);
+      const baseline = readFileSync(new URL(`./${fixture}`, import.meta.url));
+      expect(written.equals(baseline)).toBe(true);
+      expect(baselineYaml(reasoning, PROXY_BASE_URL, MODEL_ID)).toBe(baseline.toString("utf8"));
+
+      // Line sequences: the old file (maxTokens line substituted) with insertions only.
+      const old = withMaxTokens(before, 32768).split("\n");
       const now = written.toString("utf8").split("\n");
-      const old = before.split("\n");
-      expect(now).toHaveLength(old.length);
-      const differing = now.flatMap((line, index) =>
-        line === old[index] ? [] : [[old[index], line]],
-      );
-      expect(differing).toEqual([["        maxTokens: 8192", "        maxTokens: 32768"]]);
+      const input = ["        input:", "          - text"];
+      const anchor = reasoning
+        ? "          reasoningContentField: reasoning_content"
+        : "        maxTokens: 32768";
+      const inserted = reasoning ? input : ["        reasoning: false", ...input];
+      const at = old.indexOf(anchor) + 1;
+      expect(at).toBeGreaterThan(0);
+      expect(now).toHaveLength(old.length + (reasoning ? 2 : 3));
+      expect(now).toEqual([...old.slice(0, at), ...inserted, ...old.slice(at)]);
     },
   );
 
-  it.each([
-    [true, reasoningYaml(PROXY_BASE_URL, MODEL_ID)],
-    [false, plainYaml(PROXY_BASE_URL, MODEL_ID)],
-  ])(
-    "single-model default declares image input: the vision-false output plus the three input lines at the entry's end (reasoning %s)",
-    async (reasoning, before) => {
+  it.each([true, false])(
+    "single-model default declares image input: the vision-false output plus one `- image` line at the end of the input list (reasoning %s)",
+    async (reasoning) => {
       const agentDir = makeAgentDir();
       await writeManagedModelsYml(agentDir, {
         proxyBaseUrl: PROXY_BASE_URL,
         models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: true, maxTokens: 32768 }],
       });
       const written = readFileSync(join(agentDir, "models.yml"), "utf8");
-      const visionFalse = withMaxTokens(before, 32768);
+      const visionFalse = baselineYaml(reasoning, PROXY_BASE_URL, MODEL_ID);
       expect(written).toBe(withVisionInput(visionFalse));
       const now = written.split("\n");
       const old = visionFalse.split("\n");
-      // Both end with a newline: the last element is "", so the three new lines precede it.
+      // Both end with a newline: the last element is "", so the new line precedes it.
       expect(now.slice(0, old.length - 1)).toEqual(old.slice(0, -1));
-      expect(now.slice(old.length - 1)).toEqual([
-        "        input:",
-        "          - text",
-        "          - image",
-        "",
-      ]);
+      expect(now.slice(old.length - 1)).toEqual(["          - image", ""]);
       const document = parse(written) as { providers: { workbuddy: { models: [unknown] } } };
       expect(document.providers.workbuddy.models[0]).toMatchObject({ input: ["text", "image"] });
+    },
+  );
+
+  it.each([true, false])(
+    "reasoning declaration toggles: reasoning %s parses to exactly the reasoning keys and input",
+    async (reasoning) => {
+      const agentDir = makeAgentDir();
+      const options = {
+        proxyBaseUrl: PROXY_BASE_URL,
+        models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false, maxTokens: 32768 }],
+      };
+      await writeManagedModelsYml(agentDir, options);
+      const first = readFileSync(join(agentDir, "models.yml"));
+      await writeManagedModelsYml(agentDir, options);
+      expect(readFileSync(join(agentDir, "models.yml")).equals(first)).toBe(true);
+      const document = parse(first.toString("utf8")) as {
+        providers: { workbuddy: { models: [unknown] } };
+      };
+      expect(document.providers.workbuddy.models[0]).toEqual({
+        id: MODEL_ID,
+        name: MODEL_ID,
+        ...LIMITS,
+        ...(reasoning ? REASONING_KEYS : { reasoning: false }),
+        input: ["text"],
+      });
     },
   );
 
@@ -506,6 +575,8 @@ function expectedDocument(proxyBaseUrl: string, modelId: string): unknown {
             name: modelId,
             contextWindow: 128000,
             maxTokens: 32768,
+            reasoning: false,
+            input: ["text"],
           },
         ],
       },

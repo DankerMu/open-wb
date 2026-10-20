@@ -1,6 +1,7 @@
 /**
  * Issue #511：MODEL_REASONING 启动配置键与托管 models.yml 的 reasoning 声明。
- * 期望值取自 issue/spec（缺省 on、只接受精确 on/off、固定错误文本、8/10 格三行），不引用源码常量。
+ * 期望值取自 issue/spec（缺省 on、只接受精确 on/off、固定错误文本、8/10 格三行；#1563 起 reasoning 恒写、
+ * input 恒写，字节取 #1563 基线文件），不引用源码常量。
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { connect } from "node:net";
@@ -11,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
 import { resolveServerConfig } from "../src/server.js";
-import { plainYaml, reasoningYaml, withMaxTokens, withVisionInput } from "./models-yml-helpers.js";
+import { baselineYaml, withVisionInput } from "./models-yml-helpers.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -32,13 +33,21 @@ const FAILED_RECORD = `${JSON.stringify({ event: "server_start_failed", reason: 
 const NODE_SQLITE_WARNING =
   /^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)\n/u;
 
+/** The reasoning-false entry with MODEL_VISION=off: `reasoning: false` and `input: [text]` (#1563). */
 function plainModel(): Record<string, unknown> {
-  return { id: MODEL_ID, name: MODEL_ID, contextWindow: 128000, maxTokens: 32768 };
+  return {
+    id: MODEL_ID,
+    name: MODEL_ID,
+    contextWindow: 128000,
+    maxTokens: 32768,
+    reasoning: false,
+    input: ["text"],
+  };
 }
 
-/** The single-model output today: the pre-change fixture with its maxTokens line at 32768. */
-const plainNow = (baseUrl: string) => withMaxTokens(plainYaml(baseUrl, MODEL_ID), 32768);
-const reasoningNow = (baseUrl: string) => withMaxTokens(reasoningYaml(baseUrl, MODEL_ID), 32768);
+/** The single-model output with MODEL_VISION=off: the #1563 baseline files. */
+const plainNow = (baseUrl: string) => baselineYaml(false, baseUrl, MODEL_ID);
+const reasoningNow = (baseUrl: string) => baselineYaml(true, baseUrl, MODEL_ID);
 
 function documentWith(baseUrl: string, model: Record<string, unknown>): unknown {
   return {
@@ -148,31 +157,32 @@ describe("writeManagedModelsYml — reasoning 声明", () => {
     return second;
   }
 
-  it("reasoning: true 写出精确 13 行，解析后模型条目恰多 reasoning 与 compat", async () => {
+  it("reasoning: true 写出精确 15 行，解析后模型条目恰有 reasoning、compat 与 input", async () => {
     const bytes = await written(true);
     const text = bytes.toString("utf8");
     expect(text).toBe(reasoningNow(PROXY_BASE_URL));
-    expect(text.split("\n")).toHaveLength(14);
+    expect(text.split("\n")).toHaveLength(16);
     expect(parse(text)).toEqual(documentWith(PROXY_BASE_URL, REASONING_MODEL));
   });
 
-  it("reasoning: false 等于变更前输出换掉 maxTokens 一行", async () => {
+  it("reasoning: false 写出精确 13 行：显式 reasoning: false、无 compat、input 只有 text", async () => {
     const text = (await written(false)).toString("utf8");
     expect(text).toBe(plainNow(PROXY_BASE_URL));
-    expect(text.split("\n")).toHaveLength(11);
+    expect(text.split("\n")).toHaveLength(14);
     expect(parse(text)).toEqual(documentWith(PROXY_BASE_URL, plainModel()));
   });
 
-  it("同一 agentDir 先写 true 再写 false：无 reasoning/compat 残留", async () => {
+  it("同一 agentDir 先写 true 再写 false：reasoning: false，无 reasoning: true / compat 残留", async () => {
     const agentDir = scratch("open-wb-reasoning-overwrite-");
     const path = join(agentDir, "models.yml");
     await writeManagedModelsYml(agentDir, single(true));
     expect(readFileSync(path, "utf8")).toBe(reasoningNow(PROXY_BASE_URL));
     await writeManagedModelsYml(agentDir, single(false));
     const text = readFileSync(path, "utf8");
-    for (const stale of ["reasoning", "compat", "reasoningContentField"]) {
+    for (const stale of ["reasoning: true", "compat", "reasoningContentField"]) {
       expect(text).not.toContain(stale);
     }
+    expect(text).toContain("\n        reasoning: false\n");
     expect(text).toBe(plainNow(PROXY_BASE_URL));
   });
 });
@@ -214,7 +224,7 @@ describe("production entry — MODEL_REASONING", () => {
     20_000,
   );
 
-  it("未设置时写出含 reasoning 声明的 models.yml（MODEL_VISION 缺省 on：另有 input 三行）", async () => {
+  it("未设置时写出含 reasoning 声明的 models.yml（MODEL_VISION 缺省 on：input 另有 image 一行）", async () => {
     const root = scratch("open-wb-reasoning-default-");
     const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
       env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), {}),
@@ -231,11 +241,11 @@ describe("production entry — MODEL_REASONING", () => {
     }
   }, 30_000);
 
-  // thinking-fold「关闭 reasoning」：同时 MODEL_VISION=off 时即 vision-false 的单模型输出（改前夹具换掉
-  // maxTokens 一行）；MODEL_VISION 缺省 on 时另有 input 三行。
+  // thinking-fold「关闭 reasoning」：reasoning 恰为 false、无 compat；MODEL_VISION=off 时 input 恰为
+  // [text]，字节即 #1563 reasoning-false 基线文件；MODEL_VISION 缺省 on 时 input 为 [text, image]。
   it.each([
-    ["MODEL_VISION=off：与变更前只差 maxTokens 一行", { MODEL_VISION: "off" }, false],
-    ["MODEL_VISION 缺省：再多 input 三行", {}, true],
+    ["MODEL_VISION=off：即 reasoning-false 基线文件", { MODEL_VISION: "off" }, false],
+    ["MODEL_VISION 缺省：input 再多 image 一行", {}, true],
   ] as const)(
     "MODEL_REASONING=off，%s",
     async (_label, vision, declared) => {
@@ -252,6 +262,7 @@ describe("production entry — MODEL_REASONING", () => {
         const baseUrl = `http://127.0.0.1:${port}/v1`;
         const model = declared ? { ...plainModel(), input: ["text", "image"] } : plainModel();
         expect(parse(text)).toEqual(documentWith(baseUrl, model));
+        expect(text).not.toContain("compat");
         expect(text).toBe(declared ? withVisionInput(plainNow(baseUrl)) : plainNow(baseUrl));
       } finally {
         await server.dispose();

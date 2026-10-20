@@ -13,8 +13,8 @@ The writer SHALL NOT create agentDir or any parent — the directory is establis
 - THEN that address and actual port are retained with correct IPv6 brackets
 
 #### Scenario: Credential-safe managed output
-- WHEN generation runs with proxyBaseUrl http://127.0.0.1:18016/v1 and the single-model whitelist `[{id:"deepseek-v4.1-flash",name:"deepseek-v4.1-flash",reasoning:true,vision:false,maxTokens:32768}]` while parent upstream/token environment sentinels exist
-- THEN parsed output contains only the declared workbuddy provider/model, literal env-name apiKey, required limits, `reasoning: true` with its `compat` mapping, `input: ["text"]` and no authHeader; file content contains none of the unrelated sentinel values
+- WHEN generation runs with proxyBaseUrl http://127.0.0.1:18016/v1 and the single-model whitelist `[{id:"deepseek-v4.1-flash",name:"deepseek-v4.1-flash",reasoning:false,vision:false,maxTokens:32768}]` while parent upstream/token environment sentinels exist
+- THEN parsed output contains only the declared workbuddy provider/model, literal env-name apiKey, required limits, `reasoning: false` with no `compat` key, `input: ["text"]` and no authHeader; file content contains none of the unrelated sentinel values
 
 #### Scenario: Deterministic overwrite and escaped model identity
 - WHEN identical options are written twice, then a single-model whitelist whose id and name contain quotes, newline and YAML-significant characters is written

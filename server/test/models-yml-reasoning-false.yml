@@ -1,0 +1,13 @@
+providers:
+  workbuddy:
+    api: openai-completions
+    baseUrl: "http://127.0.0.1:18016/v1"
+    apiKey: WORKBUDDY_MODEL_TOKEN
+    models:
+      - id: "deepseek-v4.1-flash"
+        name: "deepseek-v4.1-flash"
+        contextWindow: 128000
+        maxTokens: 32768
+        reasoning: false
+        input:
+          - text
