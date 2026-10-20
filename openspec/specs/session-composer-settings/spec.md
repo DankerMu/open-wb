@@ -108,8 +108,8 @@ sessions 模块 SHALL 注册 `GET /api/composer/options`，受既有 cookie guar
 响应 SHALL NOT 含上游地址、密钥或任何其它配置。
 
 #### Scenario: 缺省配置
-- **WHEN** 四个新环境变量与 `MODEL_CATALOG` 都未设置、`MODEL_ID` 与 `MODEL_REASONING` 取缺省，一个从未做过选择的账号请求该端点
-- **THEN** 200 且 body 恰为 `{approvalModes:["always-ask","write","yolo"], models:[{id:"deepseek-v4.1-flash", name:"deepseek-v4.1-flash", reasoning:true, vision:false, efforts:["off","minimal","low","medium","high","xhigh","max"], defaultEffort:"high"}], defaults:{approvalMode:"write", modelId:"deepseek-v4.1-flash", reasoningEffort:"high"}, upload:{maxBytes:524288000, maxFiles:10}}`，带 no-store
+- **WHEN** 四个新环境变量与 `MODEL_CATALOG` 都未设置、`MODEL_ID`、`MODEL_REASONING` 与 `MODEL_VISION` 取缺省（`MODEL_VISION` 缺省 `on`，model-selection「模型白名单配置」，#912），一个从未做过选择的账号请求该端点
+- **THEN** 200 且 body 恰为 `{approvalModes:["always-ask","write","yolo"], models:[{id:"deepseek-v4.1-flash", name:"deepseek-v4.1-flash", reasoning:true, vision:true, efforts:["off","minimal","low","medium","high","xhigh","max"], defaultEffort:"high"}], defaults:{approvalMode:"write", modelId:"deepseek-v4.1-flash", reasoningEffort:"high"}, upload:{maxBytes:524288000, maxFiles:10}}`，带 no-store
 
 #### Scenario: 封顶、白名单与账号各自的缺省
 - **WHEN** `APPROVAL_MAX_MODE=write`、白名单为前述三项、`UPLOAD_MAX_BYTES=1048576`、`UPLOAD_MAX_FILES=3`；账号甲的最近选择为 `yolo`、`m3`、`low`，账号乙没有最近选择；两个账号各请求一次；匿名请求一次

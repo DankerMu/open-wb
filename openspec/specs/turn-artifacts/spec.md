@@ -6,10 +6,11 @@
 ## Requirements
 
 ### Requirement: 文件变更推导与归属
-纯归约器 SHALL 只对已知 running 调用的 `tool_execution_end` 推导候选变更，且仅当该调用在 `tool_execution_start` 登记的工具名 ∈ {`edit`, `write`}（`ast_edit` 的 details 无 `diff`/`path`/`perFileResults`，不在集合内；结束帧自带的 `toolName` 不参与判定）、帧与结果都未标记失败（`isError` 与 `result.isError` 均不为 `true`）、`result.details` 为普通对象时；读取 SHALL 不访问对象原型（只读自有属性）。
+纯归约器 SHALL 只对已知 running 调用的 `tool_execution_end` 推导候选变更，且仅当该调用在 `tool_execution_start` 登记的工具名 ∈ {`edit`, `write`, `browser`}（`browser` 是写到 `xd://browser` 的 `write` 调用登记的名字，chat-stream「纯协议事件归约」；`ast_edit` 的 details 无 `diff`/`path`/`perFileResults`，不在集合内；结束帧自带的 `toolName` 不参与判定）、帧与结果都未标记失败（`isError` 与 `result.isError` 均不为 `true`）、`result.details` 为普通对象时；读取 SHALL 不访问对象原型（只读自有属性）。
 - `edit`：`details.perFileResults` 为非空数组时，对其中每个 `path` 为非空字符串且 `diff` 为字符串的元素各产生一个候选；否则 `details.path` 为非空字符串且 `details.diff` 为字符串时产生一个候选；两者皆不满足则不产生。候选 `kind:"edit"`，`added` 为该 diff 按 `\n` 切分后匹配 `^\+\d+\|` 的行数，`removed` 为匹配 `^-\d+\|` 的行数（omp 编号 diff 格式 `+N|text`/`-N|text`/` N|text`，上下文行与其它行不计）。
 - `write`：`details.resolvedPath` 为非空字符串时产生一个候选 `{kind:"write", added:null, removed:null}`（omp write 帧无 diff，故无行数）；缺失则不产生。
-有候选时，归约器 SHALL 在该调用的 `step.end` 之前、同一返回结果中紧邻输出一条 `files.changed{messageId, stepId:<toolCallId 字符串>, files:[{path:<details 中的原始路径>, added, removed, kind}]}`（候选按上述出现次序）；无候选时不输出。`bash`、`read`、`memory_edit` 及其它任何工具 SHALL 永不产生 `files.changed`：经 bash/heredoc/脚本等途径写入的文件不进入文件变更卡，这是明确的覆盖边界而非遗漏。
+- `browser`（#912，浏览器截图）：`details.xdev` 为普通对象且自有 `tool` 恰为 `"browser"`、`xdev.inner` 为普通对象、`inner.screenshots` 为数组时，其中每个自有 `dest` 为非空字符串的元素产生一个候选 `{path:<dest>, kind:"write", added:null, removed:null}`（omp v18.0.10 `tab.screenshot()` 记录的保存路径；宿主 overlay 的 `screenshotDir: screenshots` 使它是相对会话 `<CWD>` 的路径）；其它情形（`open`/`close`、没有截图的 `run`、`help` 模式）不产生。截图写到 `TMPDIR`、状态目录等空间外位置时由下面的归属判定丢弃。
+有候选时，归约器 SHALL 在该调用的 `step.end` 之前、同一返回结果中紧邻输出一条 `files.changed{messageId, stepId:<toolCallId 字符串>, files:[{path:<details 中的原始路径>, added, removed, kind}]}`（候选按上述出现次序）；无候选时不输出。`bash`、`read`、`memory_edit` 及其它任何工具 SHALL 永不产生 `files.changed`（浏览器 `run` 脚本经页面下载等途径写出的文件同样不进入）：经 bash/heredoc/脚本等途径写入的文件不进入文件变更卡，这是明确的覆盖边界而非遗漏。
 SessionSupervisor SHALL 在持久化前对候选做归属判定（归约器无 IO，此步属 supervisor）；归约器输出里的原始路径 SHALL NOT 出现在 SSE 或 `chat_steps.changes` 中：
 1. 会话未绑定工作空间（`workspace_id` 为 NULL）→ 丢弃整条事件，不落库、不发布，该步骤 `changes` 保持 NULL；此时不做任何文件系统访问。事件的 `stepId` 不是本回合已登记的调用时同样丢弃。
 2. 原始候选上限：一条事件的候选超过 100 个时，只判定派生次序中的前 100 个，其余丢弃且 SHALL NOT 为它们做任何文件系统访问（不记录被丢弃的数量）。路径解析：绝对路径原样使用；相对路径以该会话 omp 进程的 `--cwd`（即绑定空间根，见 session-metadata）为基准拼接；随后做词法规范化（折叠 `.`、`..`、重复与结尾的路径分隔符，等同 Node `path.resolve`），后续各步只使用规范化后的路径。规范化后的路径 UTF-8 编码超过 4096 字节或路径分量超过 128 个时 SHALL 直接丢弃该候选，不做任何文件系统访问（`realpath` 逐分量解析，代价随分量数平方增长；穿过空间内自指符号链接的超长路径解析结果很短，第 4 步的 1024 字节规则拦不住）。同一条事件内规范化后相同的路径 SHALL 只做一次第 3 步的文件系统判定，其余复用首次的第 3–4 步结果（判定为丢弃的同样复用）。
@@ -18,8 +19,8 @@ SessionSupervisor SHALL 在持久化前对候选做归属判定（归约器无 I
 5. 同一步骤内解析到同一相对路径的多个候选合并为一项，`added`/`removed` 求和（`kind:"write"` 的项保持 `null`），位置与 `kind` 取首次出现处。
 6. 合并后超过 50 项时只保留派生次序中的前 50 项，其余丢弃，不记录被丢弃的数量（因第 2 步，这 50 项取自前 100 个原始候选）。单条事件的同步文件系统判定因此至多 100 个互不相同的路径，每个路径不超过 4096 字节、128 个分量。
 7. 无候选幸存 → 不落库、不发布、不占 ring 序号。
-取证分工：`±` 行数推导只由 fake-omp `edit-write` 场景驱动的服务端集成测试证明；真 omp 链路（ui-walk，受控假上游 `WORKBUDDY_WRITE` 标记，见 omp-test-harness `受控上游思考与写入标记`）只能证明 `write` 变更（`写入`、无行数）。
-有幸存项时，supervisor SHALL 先提交该步骤行的 `chat_steps.changes`（JSON 数组文本，元素键恰为 `path`、`added`、`removed`、`kind` 且按此次序；只写入仍为 `running` 的步骤行，写不到恰一行即为失败），提交成功后以持久化步骤数字 id 发布 `files.changed{messageId, stepId:<数字步骤 id>, files}`（`files` 与该列解析后等值），随后才落库并发布该调用的 `step.end`（`step.end` 的落库不读写 `changes`）；落库失败 SHALL 不发布该事件并沿既有 owned error-sink 路径处理，ring 序号不因失败发布而推进。`files.changed` SHALL 是普通 ring 事件（正常 `<epoch>:<seq>`、保留、`min−1` 回放、`replay.gap` 与活跃 turn.start 刷新规则，SSE `event:files.changed`）。消息快照中每个步骤 SHALL 带 `changes: {path, added, removed, kind}[] | null`：无变更的步骤（含全部非 edit/write 步骤、未绑定会话的步骤与未收到工具结束帧即被结算的步骤）为 `null`，否则为该列解析后的数组（1..50 项，`kind:"edit"` 时 `added`/`removed` 为非负安全整数，`kind:"write"` 时二者为 `null`）。步骤随消息删除（regenerate、删会话）时一并删除。
+取证分工：`±` 行数推导只由 fake-omp `edit-write` 场景驱动的服务端集成测试证明；真 omp 链路（ui-walk，受控假上游 `WORKBUDDY_WRITE` 标记，见 omp-test-harness `受控上游思考与写入标记`）只能证明 `write` 变更（`写入`、无行数）；浏览器截图候选由真实 omp + Chromium 的 browser-runtime「CI browser-image job」证明，服务端测试以帧常量驱动归约器与归属判定。
+有幸存项时，supervisor SHALL 先提交该步骤行的 `chat_steps.changes`（JSON 数组文本，元素键恰为 `path`、`added`、`removed`、`kind` 且按此次序；只写入仍为 `running` 的步骤行，写不到恰一行即为失败），提交成功后以持久化步骤数字 id 发布 `files.changed{messageId, stepId:<数字步骤 id>, files}`（`files` 与该列解析后等值），随后才落库并发布该调用的 `step.end`（`step.end` 的落库不读写 `changes`）；落库失败 SHALL 不发布该事件并沿既有 owned error-sink 路径处理，ring 序号不因失败发布而推进。`files.changed` SHALL 是普通 ring 事件（正常 `<epoch>:<seq>`、保留、`min−1` 回放、`replay.gap` 与活跃 turn.start 刷新规则，SSE `event:files.changed`）。消息快照中每个步骤 SHALL 带 `changes: {path, added, removed, kind}[] | null`：无变更的步骤（含全部非 edit/write/browser 步骤、未绑定会话的步骤与未收到工具结束帧即被结算的步骤）为 `null`，否则为该列解析后的数组（1..50 项，`kind:"edit"` 时 `added`/`removed` 为非负安全整数，`kind:"write"` 时二者为 `null`）。步骤随消息删除（regenerate、删会话）时一并删除。
 
 #### Scenario: 归约器候选提取
 - **WHEN** 已知 `edit` 调用成功结束，`details:{diff:"+3|a\n+4|b\n-3|x\n 2|ctx", path:"/ws/src/app.ts"}`；已知 `write` 调用成功结束，`details:{resolvedPath:"/ws/out/index.html"}`；另一已知 `edit` 调用的 `details.perFileResults` 为 `[{path:"a.md",diff:"+1|x"},{path:"",diff:"+1|y"},{path:"b.md",diff:7},{path:"c.md",diff:"-2|z"}]` 且顶层另有 `path`/`diff`
@@ -76,6 +77,12 @@ SessionSupervisor SHALL 在持久化前对候选做归属判定（归约器无 I
 #### Scenario: 超长或过深的候选不触达文件系统
 - **WHEN** 空间内有符号链接 `l -> .`，一条事件的候选为 `l/` 重复 200 次后接 `a.txt`（分量超过 128 个，解析结果是空间内的 `a.txt`），以及一个规范化后超过 4096 字节的路径
 - **THEN** 两个候选都不在 `changes` 中，且没有任何以它们为目标的文件系统访问；同一事件里的普通候选 `a.txt` 照常进入 `changes`
+
+#### Scenario: 浏览器截图进入文件变更
+- **WHEN** 绑定空间根为 `<ws>` 的会话中，已登记为 `browser` 的调用成功结束，`details.xdev` 为 `{tool:"browser",mode:"execute",inner:{action:"run",screenshots:[{dest:"screenshots/s1.png"},{dest:"<TMPDIR>/omp-sshots-9.png"},{dest:""},{bytes:3}]}}`，且 `<ws>/screenshots/s1.png` 存在
+- **THEN** 该步骤 ring 中 `files.changed` 紧先于其 `step.end`，`files` 恰为 `[{path:"screenshots/s1.png",added:null,removed:null,kind:"write"}]`（相对路径以 `--cwd` 为基准，空间外的 `TMPDIR` 路径被丢弃，空串与缺 `dest` 的元素不产生候选）；快照中该步骤 `changes` 等值
+- **WHEN** 已登记为 `browser` 的调用以 `isError:true` 结束；`details.xdev.tool` 为 `"other"`；`inner` 只在原型上有 `screenshots`；`inner.screenshots` 为对象；未绑定会话中带截图的 `browser` 调用成功结束
+- **THEN** 均无 `files.changed`，`changes` 为 `null`，`step.end` 照常发布
 
 ### Requirement: 文件变更卡
 会话页 SHALL 为每条助手消息汇总其**已结束**步骤（status 非 `running`）的 `changes`：按路径去重，同一路径取步骤 ordinal 最大者的值、位置取首次出现处；汇总非空时渲染一张文件变更卡（`role="group"`，accessible name 为头部文本），位置见 chat-web `消息线程` 的助手块次序；它在工具调用组之外，不随工具调用组的收起而隐藏。卡头为 `文件变更（N 个）`（N 为去重后的项数），每行依次为：`kind:"edit"` 时 `added > 0` 显示 `+<added>`、`removed > 0` 显示 `-<removed>`（两者皆 0 时不显示计数）；`kind:"write"` 时显示 `写入`；随后是逻辑路径 `<account>/<dir>/<path>`（`account` 取当前 Principal，`dir` 取该会话 `workspaceId` 在 `listWorkspaces` 结果中的空间 `dir`，按 ADR-0011 不渲染绝对 `root`）；行尾 `查看详情` 按钮（`Icon chevron-right`，accessible name 与 tooltip `查看详情 <逻辑路径>`），点击打开会话页的工作空间侧边栏并定位到该文件（workspace-sidebar「从卡片定位到文件」），不导航、不改变地址。会话 `workspaceId` 不在空间列表中、空间列表读取中或读取失败时，行只显示空间内相对路径（无从拼出逻辑路径），`查看详情` 照常渲染，其 accessible name 与 tooltip 为 `查看详情 <相对路径>`——侧边栏只需要 `workspaceId`。会话 `workspaceId` 为 `null` 时行只显示空间内相对路径，不渲染 `查看详情`（没有工作空间就没有侧边栏）。用临时空间的会话（会话视图 `temporaryWorkspace` 为 true，session-metadata「会话视图扩展键」）属于这一情形的行呈现——临时空间不在 `listWorkspaces` 结果里，行只显示空间内相对路径，`查看详情 <相对路径>` 照常渲染（文件页不列临时空间；这个按钮打开的工作空间侧边栏就是从会话进入临时空间文件的入口）——且它的空间是**可解析**的（见下）。
