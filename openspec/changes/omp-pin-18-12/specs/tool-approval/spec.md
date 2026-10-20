@@ -102,3 +102,18 @@ supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 
 #### Scenario: 两条并行审批分别作答
 - **WHEN** fake-omp `approval-parallel` 脚本在同一回合对两个 bash 调用先后发 `extension_ui_request` `r1` 与 `r2`（均未应答），用户先对 `r2` 作答 deny、再对 `r1` 作答 allow
 - **THEN** 两个 `approval.request` 的 `approvalId` 不同且都保留，二者的 `stepId` 分别为各自步骤的 id（start 先于 select，配对发生在 pump 读到 select 时；两条 `step.start` 的 `approvalId` 为 `null`）；fake-omp 先收到 `extension_ui_response{id:"r2",value:"Deny"}`、后收到 `{id:"r1",value:"Approve"}`，每个 id 恰一帧；发布两个 `approval.resolved`，分别携带各自 `approvalId` 与 `deny`/`allow`；`r2` 对应步骤 `failed`、`r1` 对应步骤 `done`
+
+### Requirement: 审批快照
+`GET /api/sessions/:id/messages` 的每条消息 SHALL 带 `approvals` 字段，类型为数组：assistant 消息为该消息全部 `chat_approvals` 行按 `id` 升序的投影 `{id, tool, title, requestedAt, expiresAt, decision, stepId}`（`decision` 为 `"allow"|"deny"|"timeout"|null`；`stepId` 为 `chat_approvals.step_id`，未配对为 `null`，见「确认与步骤配对」）；user 消息与无审批记录的 assistant 消息为 `[]`。web `session-contract.ts` 的 `hasExactlyKeys` SHALL 同步（消息键集含 `approvals`，数组元素键集恰为上述七键）；归约器 SHALL 以 `approval.request` 按 `approvalId` 为键向对应消息 `approvals` 插入一条 `decision:null`、`stepId` 取事件值的记录（同一 `approvalId` 重复到达——如回放——SHALL 不产生第二条、不覆盖其它审批），以 `approval.resolved` 只更新同一 `approvalId` 记录的 `decision`，以 `step.start` 的 `approvalId` 只设置同一 `approvalId` 记录的 `stepId`（chat-web「纯会话视图归约」），并保持按 `id` 升序。刷新后 pending 审批 SHALL 可从快照恢复并继续作答。
+
+#### Scenario: 刷新后继续作答
+- **WHEN** 审批挂起时重新加载页面并请求 messages
+- **THEN** running assistant 消息 `approvals=[{id,tool:"bash",title,requestedAt,expiresAt,decision:null,stepId}]`（该 bash 步骤已开始并配上时 `stepId` 为其 id（v18.12.3 与 fake-omp 先 start 后 select，配对在 pump 读到 select 时写入），否则为 `null`），其它消息 `approvals:[]`；页面渲染审批条；此时作答 allow 返回 200 且回合继续
+
+#### Scenario: 历史决定可见
+- **WHEN** 回合已 `done` 且审批曾以 deny 结算；一例该审批配上了步骤，另一例没有（`stepId` 为 `null`）
+- **THEN** 快照该消息 `approvals[0].decision="deny"`；配上步骤的一例 web 在该步骤卡上显示 `已拒绝` 小标记、消息内没有记录卡；没有配上的一例 web 在消息末尾显示 `已拒绝执行` 兜底记录
+
+#### Scenario: 多条审批的快照与归约
+- **WHEN** 同一消息先后收到 `approval.request` `a1`、`a2`，随后收到 `approval.resolved{approvalId:a2,decision:"deny"}`，再重连回放同一批事件
+- **THEN** 该消息 `approvals` 为 `[{id:a1,decision:null},{id:a2,decision:"deny"}]`（按 `id` 升序、无重复）；`a1` 仍可作答；重新拉取的快照与归约结果一致
