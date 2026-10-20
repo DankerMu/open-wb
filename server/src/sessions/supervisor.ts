@@ -33,6 +33,7 @@ import {
   sessionRuntimeOpts,
   turnFree,
 } from "./pool.js";
+import { ScreenshotDiff } from "./screenshot-diff.js";
 import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { ComposerConfig } from "./store-composer.js";
@@ -606,6 +607,7 @@ export class SessionSupervisor {
   ): Promise<void> {
     let mapper = createEventState({ messageId: assistantMessageId, promptRequestId: requestId });
     const steps = new PumpSteps(assistantMessageId);
+    const screenshots = new ScreenshotDiff(slot.workspaceRoot, steps); // #1569 (D8)
     const commit = (events: ChatEvent<string>[]) =>
       this.#commit(slot, assistantMessageId, events, steps, generation);
     try {
@@ -619,7 +621,7 @@ export class SessionSupervisor {
         // omp's raw thinking_end closes an open thinking span (the reducer maps it to nothing).
         if (
           !this.#deltas.endSpan(slot, endsThinking(frame)) ||
-          !(await commit(applied.events)) ||
+          !(await commit(screenshots.annotate(applied.events))) ||
           !(await this.#pairAndPublish(slot, steps, frame))
         ) {
           return;
