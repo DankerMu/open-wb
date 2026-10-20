@@ -14,7 +14,11 @@ import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { AgentUnavailableError, OmpProcess, type SpawnImpl } from "../src/sessions/omp/process.js";
 import { SessionRuntime } from "../src/sessions/omp/runtime.js";
-import { type ApprovalRequest, approvalRequest } from "../src/sessions/omp/ui-requests.js";
+import {
+  type ApprovalRequest,
+  approvalRequest,
+  isPreludeCard,
+} from "../src/sessions/omp/ui-requests.js";
 import { createRealFakeRuntime, type RealFakeRuntime } from "./session-supervisor-helpers.js";
 import {
   asRecord,
@@ -577,5 +581,137 @@ describe("browser approvals are rewritten as browser operations (#1526)", () => 
     ]);
     await quiet(run.proc, () => false);
     expect(uiAnswers(run.written)).toEqual([]);
+  });
+});
+
+/**
+ * Issue #1566 (omp-pin-18-12 task 2.2, design D3): the three kinds at the pure seams
+ * `approvalRequest(frame, id)` and `isPreludeCard(frame)`. Frames are literals from tool-approval
+ * 「识别为审批」「非审批 UI 请求仍回绝」「浏览器 prelude 的卡不是审批」 and omp-runtime「Extension UI
+ * cancellation」; the three-item options are omp v18.12.3's (design Context「审批 options」).
+ */
+describe("approval shape whitelist and prelude card (#1566)", () => {
+  const BASH = "Allow tool: bash\nCommand: echo workbuddy-smoke";
+  const TWO = ["Approve", "Deny"];
+  const ui = (method: string, title: string, options?: unknown): OmpFrame => ({
+    type: "extension_ui_request",
+    id: "x1",
+    method,
+    title,
+    ...(options === undefined ? {} : { options }),
+  });
+  const APPROVALS: Array<[string, OmpFrame]> = [
+    [
+      "the session grant naming the tool",
+      ui("select", BASH, ["Approve", "Approve bash for this session", "Deny"]),
+    ],
+    [
+      "the session grant naming a policy key",
+      ui("select", BASH, ["Approve", "Approve shell:echo for this session", "Deny"]),
+    ],
+    ["the two-item shape", ui("select", BASH, TWO)],
+  ];
+  const CANCELLED: Array<[string, OmpFrame]> = [
+    ["confirm", ui("confirm", "Allow tool: bash")],
+    ["input", ui("input", "Allow tool: bash")],
+    ["options [A,B]", ui("select", "Allow tool: bash", ["A", "B"])],
+    ["a title without the prefix", ui("select", "Pick one", TWO)],
+    [
+      "a middle item without for this session",
+      ui("select", "Allow tool: bash", ["Approve", "Approve bash", "Deny"]),
+    ],
+    [
+      "four items",
+      ui("select", "Allow tool: bash", [
+        "Approve",
+        "Approve bash for this session",
+        "Deny",
+        "Other",
+      ]),
+    ],
+    ["options [Approve]", ui("select", "Allow tool: bash", ["Approve"])],
+    [
+      "options [Approve,Deny,Other]",
+      ui("select", "Allow tool: bash", ["Approve", "Deny", "Other"]),
+    ],
+    [
+      "a session grant spanning two lines",
+      ui("select", "Allow tool: bash", ["Approve", "Approve a\nb for this session", "Deny"]),
+    ],
+    [
+      "the three-item browser card",
+      ui("select", "Allow tool: browser", ["Approve", "Approve browser for this session", "Deny"]),
+    ],
+  ];
+  const PRELUDES = ["Allow tool: browser", "Allow tool: browser\nReason: target not yet approved"];
+  const BROWSER_CANCELLED: Array<[string, OmpFrame]> = [
+    ["confirm", ui("confirm", "Allow tool: browser", TWO)],
+    [
+      "omp v18.0.10's real browser tool card",
+      ui("select", "Allow tool: browser\nAction: open\nTab: main\nURL: https://example.com", TWO),
+    ],
+    ["a line after Reason:", ui("select", "Allow tool: browser\nReason: a\nb", TWO)],
+    ["a trailing space", ui("select", "Allow tool: browser ", TWO)],
+    ["a trailing newline", ui("select", "Allow tool: browser\n", TWO)],
+    ["an empty Reason:", ui("select", "Allow tool: browser\nReason: ", TWO)],
+    ["options [Deny, Approve]", ui("select", "Allow tool: browser", ["Deny", "Approve"])],
+  ];
+
+  it.each(APPROVALS)(
+    "recognises %s as an approval of tool bash with the original title",
+    (_label, frame) => {
+      expect(approvalRequest(frame, "x1")).toEqual({ id: "x1", tool: "bash", title: BASH });
+    },
+  );
+
+  it("the three-item write prompt is an approval of tool write", () => {
+    const title = "Allow tool: write\nPath: workbuddy-report.html";
+    const frame = ui("select", title, ["Approve", "Approve write for this session", "Deny"]);
+    expect(approvalRequest(frame, "x1")).toEqual({ id: "x1", tool: "write", title });
+  });
+
+  it.each(CANCELLED)("%s is not an approval (cancel)", (_label, frame) => {
+    expect(approvalRequest(frame, "x1")).toBeUndefined();
+  });
+
+  it.each(PRELUDES)("%j with [Approve, Deny] is the prelude card, not an approval", (title) => {
+    const frame = ui("select", title, TWO);
+    expect(isPreludeCard(frame)).toBe(true);
+    expect(approvalRequest(frame, "x1")).toBeUndefined();
+  });
+
+  it.each(BROWSER_CANCELLED)(
+    "a browser card with %s is not an approval (cancel)",
+    (_label, frame) => {
+      expect(approvalRequest(frame, "x1")).toBeUndefined();
+    },
+  );
+
+  it("no approval, other shape or browser variant above is a prelude card", () => {
+    const frames = [...APPROVALS, ...CANCELLED, ...BROWSER_CANCELLED].map(([, frame]) => frame);
+    expect(frames.filter((frame) => isPreludeCard(frame))).toEqual([]);
+  });
+
+  it("OmpProcess cancels the new non-approval shapes of「Extension UI cancellation」", async () => {
+    const run = await startSynthetic();
+    const shapes: OmpFrame[] = [
+      selectFrame("c1", "Allow tool: bash", ["Approve"]),
+      selectFrame("c2", "Allow tool: bash", ["Approve", "Deny", "Other"]),
+      selectFrame("c3", "Allow tool: bash", ["Approve", "Approve bash", "Deny"]),
+      selectFrame("c4", "Allow tool: bash", [
+        "Approve",
+        "Approve bash for this session",
+        "Deny",
+        "X",
+      ]),
+    ];
+    for (const shape of shapes) {
+      run.child.emitLine(shape);
+    }
+    await quiet(run.proc, () => false);
+    expect(uiAnswers(run.written)).toEqual(
+      shapes.map((shape) => ({ type: "extension_ui_response", id: shape.id, cancelled: true })),
+    );
+    expect(run.approvals).toEqual([]);
   });
 });

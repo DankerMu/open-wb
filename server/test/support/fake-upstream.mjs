@@ -20,6 +20,7 @@ const TODO_MARKER = "WORKBUDDY_TODO";
 const HOLD_AT_MARKER = "WORKBUDDY_HOLD_AT:";
 const BROWSER_OPEN_MARKER = "WORKBUDDY_BROWSER_OPEN:";
 const BROWSER_SHOT_MARKER = "WORKBUDDY_BROWSER_SHOT";
+const ASK_MARKER = "WORKBUDDY_ASK";
 /** First text part of omp's synthetic user message carrying tool-result images (#1527). */
 const ATTACHED_IMAGES_TEXT = "Attached image(s) from tool result:";
 /** Hold points of `WORKBUDDY_HOLD_AT:<point>` (issues 1440, 1445); any other value is ignored. */
@@ -42,6 +43,10 @@ const WRITE_ARGS = JSON.stringify({
 const TODO_ARGS = JSON.stringify({
   op: "init",
   list: [{ phase: "走查", items: ["整理需求", "输出结论"] }],
+});
+// omp's `ask` schema (#1566): the call omp lacks under `ask.enabled: false`.
+const ASK_ARGS = JSON.stringify({
+  questions: [{ id: "q1", question: "继续吗？", options: [{ label: "是" }, { label: "否" }] }],
 });
 const BROWSER_SHOT_ARGS = browserArgs({ action: "run", code: "return await tab.screenshot()" });
 const GATE_PREFIX = "/__control/gates/";
@@ -546,13 +551,16 @@ function browserArgs(content) {
   return JSON.stringify({ path: "xd://browser", content: JSON.stringify(content) });
 }
 
-/** 工具轮只发一个调用：WRITE 优先于 TODO，再到浏览器 OPEN、SHOT（#1527），都没有即缺省 bash。 */
+/** 工具轮只发一个调用：WRITE、TODO、ASK（#1566）、浏览器 OPEN、SHOT（#1527）依次优先，都没有即缺省 bash。 */
 function toolRoundCall(text) {
   if (text.includes(WRITE_MARKER)) {
     return { name: "write", arguments: WRITE_ARGS };
   }
   if (text.includes(TODO_MARKER)) {
     return { name: "todo", arguments: TODO_ARGS };
+  }
+  if (text.includes(ASK_MARKER)) {
+    return { name: "ask", arguments: ASK_ARGS };
   }
   const url = browserOpenUrl(text);
   if (url !== undefined) {

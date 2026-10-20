@@ -11,7 +11,7 @@ const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 /** 与生产 spawn argv（src/sessions/omp/process.ts）一致：缺省即 `--approval-mode write`（#620）。 */
 const OMP_FLAGS = [
   "--mode",
-  "rpc",
+  "rpc-ui",
   "--cwd",
   "/tmp",
   "--session-dir",

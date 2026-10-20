@@ -439,7 +439,7 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 
 ### 9.8 浏览器与参考镜像（#912，change `omp-browser-integration`）
 
-本节写配置项 `BROWSER_BIN`（#1529）、宿主 overlay 的固定块（#1564）与浏览器部分（#1527）、参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
+本节写配置项 `BROWSER_BIN`（#1529）、omp 的启动模式与宿主自答的浏览器盲卡（#1566）、宿主 overlay 的固定块（#1564）与浏览器部分（#1527）、参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
 
 **配置 `BROWSER_BIN`**：可选，omp 浏览器工具使用的 Chromium/Chrome 可执行文件。
 
@@ -450,6 +450,14 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 - 启动校验之后该文件被删除或替换，不在宿主的检查范围内。omp 照样用 `PUPPETEER_EXECUTABLE_PATH` 的取值、不检查它是否存在，浏览器启动失败，不另行查找或下载（读 v18.0.10 源码 `tools/browser/launch.ts:192-194` 推出）。
 
 **spawn 环境恒钉中继与 cmux**：每个 omp 子进程的环境都带 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`，与是否设置 `BROWSER_BIN` 无关，sudo 的 `--preserve-env=` 也保留这两个键。omp 以这两个变量为浏览器中继与 cmux 的最终开关，非空时压过设置与工具参数；不钉的话，模型写进工作目录 `.env` 的 `PI_BROWSER_RELAY=1` 会在下一次 spawn 时打开中继，绕过 overlay 的 `relay: false`，且确认卡与审计都看不到。取值必须是字面量 `0`：omp 的 dotenv 只填未设或为空的变量，空串挡不住。结果是中继与 cmux 在任何设置与参数下都不启用，`app.relay: true` 的调用退回本地浏览器。部署方自己在服务环境里设的这两个变量同样不起作用。同理恒钉 `PUPPETEER_PROXY=direct://`、`PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0`（sudo 同样保留）：omp 从这两个变量拼浏览器的 `--proxy-server` 与 `--ignore-certificate-errors`，不钉的话工作目录 `.env` 能给浏览器挂代理、关证书校验；钉住后浏览器恒直连（`direct://` 也压过环境里的 `http_proxy` 等）、校验证书。实测见 `server/test/omp-official-browser.test.ts`（官方 v18.0.10）。
+
+**omp 以 `--mode rpc-ui` 启动**（#1566，change `omp-pin-18-12` design D2 / D3）：此前是 `--mode rpc`。两者的握手、帧、命令与 `get_state` 相同（官方 v18.0.10 与 v18.12.3 实测逐项相同），区别只在工具 UI：v18.12.3 的浏览器是 `eval` 工具的 prelude，`write` / `always-ask` 档下 prelude 对每次 `browser.*` 调用另要一次审批，这次审批只有 `rpc-ui` 送到协议上，plain `rpc` 下调用直接失败。宿主把 omp 的 UI 请求分三类：
+
+- 审批：`select`、标题以 `Allow tool: ` 开头、首行工具名不是 `browser`、`options` 恰为 `["Approve","Deny"]` 或 `["Approve","Approve <名字> for this session","Deny"]`（v18.12.3 对被档位抬高的提示附带「本会话内放行」）。照常出确认卡；宿主只回 `Approve` / `Deny`，从不回中间项，omp 的会话内放行永远不生效。
+- 浏览器盲卡：标题整体恰为 `Allow tool: browser`、或其后恰一行 `Reason: …`，`options` 恰为两项。这是宿主唯一自己应答的卡：立即回 `Approve`，不出卡、不写 `chat_approvals`、不审计。卡上没有动作与 URL，它只出现在用户已批准（或档位放行）的 `eval` 执行过程中，要执行的代码已经在 eval 卡上给用户看过。标题按整体匹配：v18.0.10 真 `browser` 工具的卡是 `Allow tool: browser\nAction: …`，落入下一类。
+- 其它一律 cancel，包括 omp 每回合即发即弃的 `setWidget` 显示帧（`rpc` 下本来如此）。
+
+`ask` 工具被 overlay 钉掉（下表 `ask.enabled`）：`rpc-ui` 下它会成为模型可调的工具，宿主对它的提问只能 cancel，而取消即中止整个回合。实测（`server/test/omp-official-rpc-ui.test.ts`，官方 v18.0.10）：钉住时模型调 `ask` 得到错误结果 `Tool ask not found`、回合正常结束；去掉钉时回合以「已停止」收场。eval 里经桥调用的工具（`tool.bash(...)`）照常弹自己的确认卡（v18.0.10 与 v18.12.3 实测），批准 eval 不等于批准桥调。
 
 **overlay 的固定块**（#1564，change `omp-pin-18-12` design D4）：`host-overlay.yml` 以下面这段开头，之后才是浏览器块与看图块。它不随部署配置变化，残余与取舍登记在 ADR-0012「2026-10-20 补充（#1563）」：
 
