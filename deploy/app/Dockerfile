@@ -38,7 +38,7 @@ COPY --from=build /src/server/package.json /app/server/package.json
 COPY --from=build /src/server/dist /app/server/dist
 COPY --from=build /src/web/dist /app/web/dist
 COPY --chmod=0755 deploy/app/entrypoint.sh /app/entrypoint.sh
-# 缺省指向仓库根的六个键全部钉到挂载或镜像内；上游地址、密钥、认证由部署方运行时给出。
+# 缺省指向仓库根的六个键全部钉到挂载或镜像内；上游地址与密钥由部署方运行时给出。
 ENV OMP_USER=omp \
   OMP_BIN=/opt/workbuddy/omp \
   BROWSER_BIN=/usr/bin/chromium \

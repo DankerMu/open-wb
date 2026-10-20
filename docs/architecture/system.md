@@ -511,8 +511,9 @@ modelRoles:
   - `SANDBOX_ROOT=/srv/workbuddy/sandbox`、`OMP_STATE_DIR=/srv/workbuddy/omp-state`。
   - `DB_PATH=/srv/workbuddy/private/app.db`、`PREVIEW_CACHE_DIR=/srv/workbuddy/private/preview-cache`、`STATIC_ROOT=/app/web/dist`。
   - `HOST=0.0.0.0`、`PORT=3000`、`PREVIEW_PORT=3001`。
-  - 上游地址与密钥、认证、`PREVIEW_ORIGIN`（预览的对外地址）由部署方在 `env_file` 里给，不进镜像。
-- **三个挂载**：宿主目录由部署方预先建好，属 `10001:10001`（服务不 chown）。
+  - 上游地址与密钥、`PREVIEW_ORIGIN`（预览的对外地址）由部署方在 `env_file` 里给，不进镜像。
+  - compose 形态下 `env_file` 不得覆盖 `PORT`、`PREVIEW_PORT`、`HOST`：`ports` 与健康检查固定在 `3000`/`3001`，要改端口就同时改 `ports` 和健康检查。
+- **三个挂载**：宿主目录由部署方预先建好，属 `10001:10001`（服务不 chown）。三个目录变量与 `WORKBUDDY_ENV_FILE` 给绝对路径：compose 把相对路径按 `deploy/app/` 解析。
 
   | 宿主变量 | 容器路径 | mode |
   |---|---|---|
@@ -524,7 +525,8 @@ modelRoles:
   - 例外是可选的 `OFFICE_SPOOL_DIR`：它是与 converter 共享的 bind mount，由部署方另挂（9.7 第 2 条）。
   - sudo 在只读根下不写 `/run`，不需要另挂 tmpfs。
 - **端口**：compose 把 `3000`（服务）和 `3001`（预览）发布在 `${WORKBUDDY_BIND:-127.0.0.1}` 上。要对外，就放开 `WORKBUDDY_BIND`，或在前面加反向代理。
-  - `docker run --network host` 时容器直接用宿主网络，`HOST=0.0.0.0` 会在宿主所有网卡上暴露服务，连同预置的演示账号。这种形态要覆盖 `HOST=127.0.0.1`。
+  - 服务目前没有可配置的认证：唯一的登录方式是迁移预置的演示账号，口令公开（`demo`），不可修改或停用，其中有管理员。真实认证落地之前，不得把端口放开到不可信网络；前置的反向代理须自带访问控制。
+  - `docker run --network host` 时容器直接用宿主网络，`HOST=0.0.0.0` 会在宿主所有网卡上暴露服务。这种形态要覆盖 `HOST=127.0.0.1`。
 - **capability**：`cap_drop: [ALL]` 后只加回 `SETUID`、`SETGID`、`KILL`，不用 `privileged`。下表是测试主机实测（2026-10-19）。
   - 判据两项：一是经编译版服务登录、走一个回合；二是信号转发探针：以 `workbuddy` 手工经 sudo 起 omp，对 sudo 发 SIGTERM，看 omp 是否在约 1 s 内退出。
 

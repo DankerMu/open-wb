@@ -1,12 +1,15 @@
 # app 参考部署（browser-runtime「参考部署镜像」；design D7）。部署方自建，不发布、不引用镜像仓库：
 #   WORKBUDDY_SANDBOX=… WORKBUDDY_OMP_STATE=… WORKBUDDY_PRIVATE=… WORKBUDDY_ENV_FILE=… \
 #     docker compose -f deploy/app/compose.yml up -d --build
+# 这四个变量给绝对路径（相对路径按 deploy/app/ 解析）；`:?` 变量缺席时 compose 拒绝启动。
 # 三个宿主目录由部署方预先建好，属容器内 workbuddy（uid:gid 10001:10001），服务不 chown：
 #   WORKBUDDY_PRIVATE    0700：app.db 与预览缓存；omp 用户同组也进不去（ADR-0010）
 #   WORKBUDDY_SANDBOX    属组 workbuddy，服务启动校正为 3770
 #   WORKBUDDY_OMP_STATE  属组 workbuddy，服务启动校正为 2750
-# 可写范围即这三个挂载与 /tmp。上游地址与密钥、认证、PREVIEW_ORIGIN 写进 env_file，不进镜像。
-# `:?` 变量缺席时 compose 拒绝启动。
+# 可写范围即这三个挂载与 /tmp。上游地址与密钥、PREVIEW_ORIGIN 写进 env_file，不进镜像。
+# env_file 不得覆盖 PORT/PREVIEW_PORT/HOST：ports 与 healthcheck 固定 3000/3001，改端口就改这两处。
+# 服务目前没有可配置的认证，唯一的登录是迁移预置的演示账号（口令公开 `demo`，不可修改或停用，含管理员）：
+# 真实认证落地之前不得把端口放开到不可信网络，前置反代须自带访问控制。
 services:
   app:
     build:
