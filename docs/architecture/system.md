@@ -411,7 +411,7 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
    1. 建 spool 目录：属应用用户、`0700`（app 不建、不校正它）。其下的 `jobs/` 由 app 在启动预检通过后建出（`0700`），部署方只建 spool 根。
    2. 同一主机上 `WORKBUDDY_UID=$(id -u <应用用户>) WORKBUDDY_GID=$(id -g <应用用户>) OFFICE_SPOOL_DIR=<该路径> docker compose -f converter/compose.yml up -d --build`。三个变量缺一 compose 即拒绝启动；`WORKBUDDY_UID/GID` 必须是应用用户的值——sidecar 以同一数值 uid/gid 运行，spool 里的一切才属应用用户。
    3. app 的环境去掉 `OFFICE_BIN`、加 `OFFICE_SPOOL_DIR=<同一路径>`，重启 app；看标准错误里有没有 `office_convert_sidecar_unavailable`。
-2. app 容器：仓库**没有** app 的 Dockerfile，也不定义 app 的 compose 服务，app 镜像由部署方自备。把 `converter/compose.yml` `include` 进 app 自己的 compose，app 服务加 `depends_on: converter: condition: service_healthy`（sidecar 的 `healthcheck` 看 `heartbeat` 年龄），两个服务挂同一个 bind mount（不用命名卷：命名卷的根属 root，预检会拒），app 服务的 `user:` 与 `converter` 相同（`include` 写法本身未实测：S2b 的形态 B 以 `docker run --network host` 加同样的卷与 `--user` 代替，见 ADR-0010「2026-10-17 补充」结果表；compose 写法读手册推出）。
+2. app 容器：参考镜像与 compose 片段在 `deploy/app/`（9.8「参考部署镜像」），部署方也可自备 app 镜像；converter 仍是单独的镜像。把 `converter/compose.yml` `include` 进 app 的 compose，app 服务加 `depends_on: converter: condition: service_healthy`（sidecar 的 `healthcheck` 看 `heartbeat` 年龄），两个服务挂同一个 bind mount（不用命名卷：命名卷的根属 root，预检会拒），app 的 `OFFICE_SPOOL_DIR` 指向该挂载在 app 容器里的路径；两边以同一数值 uid/gid 运行——参考镜像的应用用户固定为 `10001:10001`，`WORKBUDDY_UID/GID` 取这对数值，自备镜像则让 app 服务的 `user:` 与 `converter` 相同（`include` 写法与参考镜像加挂 spool 都未实测：S2b 的形态 B 以 `docker run --network host` 加同样的卷与 `--user` 代替，见 ADR-0010「2026-10-17 补充」结果表；compose 写法读手册推出）。
 3. `OMP_USER` 部署另外删掉两行办公文档 sudoers（`… setpriv --pdeathsig KILL -- <OFFICE_BIN> *` 与 `… /usr/bin/find <PREVIEW_CACHE_DIR>/work -mindepth 1 -delete`）；omp 的规则与 `Defaults>omp umask=0007` 不动。`OMP_USER` 不影响办公文档转换。
 
 `CONVERTER_CONCURRENCY`（compose 里取 `${OFFICE_CONVERT_CONCURRENCY:-2}`）须不小于 app 的 `OFFICE_CONVERT_CONCURRENCY`：给两边同一个 `OFFICE_CONVERT_CONCURRENCY` 即相等；小于时作业在 spool 里排队，排得久的会以 504 结束（读代码推出）。
@@ -439,7 +439,7 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 
 ### 9.8 浏览器与参考镜像（#912，change `omp-browser-integration`）
 
-本节目前写配置项 `BROWSER_BIN`（#1529）与宿主 overlay 的浏览器部分（#1527）。规格权威是 browser-runtime「浏览器可执行文件配置」、omp-runtime「子进程 spawn 契约」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
+本节写配置项 `BROWSER_BIN`（#1529）、宿主 overlay 的浏览器部分（#1527）与参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
 
 **配置 `BROWSER_BIN`**：可选，omp 浏览器工具使用的 Chromium/Chrome 可执行文件。
 
@@ -492,3 +492,54 @@ modelRoles:
 
 1. 下载缓存目录 `<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome`。同级的 `puppeteer/package.json` 每次加载 puppeteer 都会写，不算下载。
 2. omp 文件日志（`<OMP_STATE_DIR>/xdg/state/omp/logs/`）里的一行 `Downloading Chromium for puppeteer`。该日志不进服务的 stdout。
+
+**参考部署镜像 `deploy/app/`**（#1528；规格 browser-runtime「参考部署镜像」）：app、omp v18.0.10、Debian `chromium` 与中文字体装在一个镜像里，按 ADR-0010 以两个 uid 运行。由部署方自建，仓库不发布镜像、不引用镜像仓库（同 converter）。converter 仍是单独的镜像（9.7）。
+
+- **构建**：在仓库根执行 `docker build -f deploy/app/Dockerfile .`，或 `docker compose -f deploy/app/compose.yml up -d --build`（compose 的构建上下文已指向仓库根）。
+  - 镜像只有 `linux/amd64`，因为 `scripts/omp-fetch.sh` 只取 Linux x86_64 的 omp。Apple 芯片的机器用 `docker buildx build --platform linux/amd64 -f deploy/app/Dockerfile -t <tag> --load .`。
+  - 构建要能访问 GitHub release、Debian 源与 npm 源。
+  - 忽略清单是 `deploy/app/Dockerfile.dockerignore`，只有 BuildKit 认它。若用旧构建器，本机的 `node_modules` 和 `var/omp/omp`（darwin 版）会被带进构建，`omp-fetch.sh` 校验哈希不符就失败。
+- **镜像内容**：构建阶段以 `node:24.13.1-bookworm` 跑 `npm ci` 和 web、server 构建，再跑 `omp-fetch.sh`（SHA256 校验）。运行阶段以 `node:24.13.1-bookworm-slim` 为底，装五个包 `chromium`、`fonts-noto-cjk`、`fonts-dejavu-core`、`sudo`、`ca-certificates`，只拷入编译产物、server 的生产依赖和 omp（`/opt/workbuddy/omp`，`0755 root`）。
+  - `/usr/bin/chromium` 是 Debian 的 shell 包装脚本，是合法的 `BROWSER_BIN`。
+  - `fontconfig` 随 `chromium` 作为依赖装入，字体缓存在构建时生成。只读根下以 omp 身份截图，没有 `No writable cache directories` 告警。
+- **身份**：应用用户 `workbuddy` uid `10001`，omp 用户 `omp` uid `10002`，主组都是 `workbuddy`（gid `10001`），数值固定。
+  - 宿主挂载目录与 converter 的 `WORKBUDDY_UID/GID` 都按 `10001:10001` 对齐。
+  - `/etc/sudoers.d/workbuddy-omp`（`0440 root:root`）恰为 ADR-0010 的两行：`workbuddy ALL=(omp) NOPASSWD: SETENV: /usr/bin/setpriv --pdeathsig KILL -- /opt/workbuddy/omp *` 与 `Defaults>omp umask=0007`，构建时经 `visudo -c` 校验。
+  - 容器以 `workbuddy` 运行，入口 `deploy/app/entrypoint.sh` 先 `umask 007` 再 `exec` 编译版服务。
+- **镜像固定的环境**：
+  - `OMP_USER=omp`、`OMP_BIN=/opt/workbuddy/omp`、`BROWSER_BIN=/usr/bin/chromium`。
+  - `SANDBOX_ROOT=/srv/workbuddy/sandbox`、`OMP_STATE_DIR=/srv/workbuddy/omp-state`。
+  - `DB_PATH=/srv/workbuddy/private/app.db`、`PREVIEW_CACHE_DIR=/srv/workbuddy/private/preview-cache`、`STATIC_ROOT=/app/web/dist`。
+  - `HOST=0.0.0.0`、`PORT=3000`、`PREVIEW_PORT=3001`。
+  - 上游地址与密钥、认证、`PREVIEW_ORIGIN`（预览的对外地址）由部署方在 `env_file` 里给，不进镜像。
+- **三个挂载**：宿主目录由部署方预先建好，属 `10001:10001`（服务不 chown）。
+
+  | 宿主变量 | 容器路径 | mode |
+  |---|---|---|
+  | `WORKBUDDY_PRIVATE` | `/srv/workbuddy/private`（`app.db`、预览缓存） | `0700`，部署方保证，服务不校正；omp 同组也进不去 |
+  | `WORKBUDDY_SANDBOX` | `/srv/workbuddy/sandbox` | 属组 `workbuddy`，服务启动校正为 `3770` |
+  | `WORKBUDDY_OMP_STATE` | `/srv/workbuddy/omp-state` | 属组 `workbuddy`，服务启动校正为 `2750` |
+
+- **可写范围**：根文件系统只读，可写的只有这三个挂载与 `/tmp`（tmpfs，Chromium 的配置目录在这里），另有 `/dev/shm`（`shm_size: 1g`）。
+  - 例外是可选的 `OFFICE_SPOOL_DIR`：它是与 converter 共享的 bind mount，由部署方另挂（9.7 第 2 条）。
+  - sudo 在只读根下不写 `/run`，不需要另挂 tmpfs。
+- **端口**：compose 把 `3000`（服务）和 `3001`（预览）发布在 `${WORKBUDDY_BIND:-127.0.0.1}` 上。要对外，就放开 `WORKBUDDY_BIND`，或在前面加反向代理。
+  - `docker run --network host` 时容器直接用宿主网络，`HOST=0.0.0.0` 会在宿主所有网卡上暴露服务，连同预置的演示账号。这种形态要覆盖 `HOST=127.0.0.1`。
+- **capability**：`cap_drop: [ALL]` 后只加回 `SETUID`、`SETGID`、`KILL`，不用 `privileged`。下表是测试主机实测（2026-10-19）。
+  - 判据两项：一是经编译版服务登录、走一个回合；二是信号转发探针：以 `workbuddy` 手工经 sudo 起 omp，对 sudo 发 SIGTERM，看 omp 是否在约 1 s 内退出。
+
+  | 集合 | 回合 | 转发 SIGTERM |
+  |---|---|---|
+  | `SETUID SETGID KILL`（采用） | 成功 | 约 0.1 s 内退出 |
+  | 去掉 `KILL` | 成功 | 3 s 后仍在，sudo 报 `kill(<pid>, SIGTERM): Operation not permitted` |
+  | 去掉 `SETUID` | 失败（sudo 起不来） | — |
+  | 去掉 `SETGID` | 失败（sudo 起不来） | — |
+  | 加 `AUDIT_WRITE` | 成功 | 约 0.1 s 内退出 |
+
+  两行「去掉 `SETUID` / `SETGID`」实测时还带着 `AUDIT_WRITE`（能力更多尚且失败）；「去掉 `KILL`」一行实测的就是 `SETUID SETGID`。
+
+  - 需要 `KILL`，是因为 sudo 以 euid 0 把应用的 SIGTERM 转发给 omp uid 的进程。缺了它，转发失败，3 s 后应用改发 SIGKILL，omp 被 pdeathsig 硬杀，跳过自己的退役清理（含浏览器回收）。
+  - 不加 `AUDIT_WRITE` 的代价：sudo 每次 spawn 在 stderr 写一行 `unable to send audit message`（服务读走不记录），内核 audit 也不留 sudo 的记录。
+  - 不设 `no-new-privileges`：它与 sudo 不能共存，设了 sudo 的 setuid 位不生效，omp 起不来。
+  - 不分配 tty（不设 `tty: true`，不用 `docker run -t`）：镜像的 `/etc/sudoers` 带 `Defaults use_pty`，有 tty 时 sudo 会插入 monitor 进程，pdeathsig 的保证失效（ADR-0010）。
+- **健康检查**：compose 用内联的 `node -e`，对 `http://127.0.0.1:3000/api/healthz` 发请求，非 200 即退出 1。slim 基底没有 curl/wget。

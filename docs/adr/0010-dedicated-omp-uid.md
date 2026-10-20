@@ -37,6 +37,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   双方 umask `007`（omp 一侧由 sudoers 强制，见文末 2026-10-02 补充）；app-server 自有状态（SQLite、配置、环境）放在沙箱与 omp 状态目录之外且 `0700`/`0600`。
   `core/sandbox` 的目录创建路径负责施加位。否决项：POSIX ACL（依赖 acl 工具与 FUSE 支持，S1b 挂载不保证）、
   app-server 经 sudo 代操作文件（每次列举/预览起进程）。
+- **参考镜像**（2026-10-19 补充，#1528）：参考镜像 `deploy/app/` 落实两 uid 与 sudoers——`workbuddy`（10001）与 `omp`（10002）主组都是 `workbuddy`（10001），`/etc/sudoers.d/workbuddy-omp` 恰为下文 2026-09-25 的 launcher 规则与 2026-10-02 的 `Defaults>omp umask=0007` 两行，入口以 umask `007` 启动服务（system.md 9.8「参考部署镜像」）。
 - **验证**：CI 新增 ubuntu job `uid-isolation`（useradd、写 sudoers、`OMP_USER` 起编译服务）跑 Linux-only 集成测试：
   子进程 `Uid` 为 omp、omp 用户读 app-server `/proc/<pid>/environ` 得 `EACCES`、沙箱目录可读写；进入 `all-checks-passed`。
   测试 VPS 保留为部署演练。S0b `constraints.yaml downgrades` 的 `/proc` 向量条目于本 job 全绿时删除。
