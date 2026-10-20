@@ -168,11 +168,22 @@ jobs:
       - run: docker build -t workbuddy-converter:ci converter/
       - run: bash .github/scripts/ci-office-sidecar.sh
 
+  browser-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: docker build -t workbuddy-app:ci -f deploy/app/Dockerfile .
+      - run: bash .github/scripts/ci-browser-image.sh
+
   all-checks-passed:
     # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
     # required check 当通过，这个洞必须在这里堵死。
     if: always()
-    needs: [fast-checks, unit-tests, unit-tests-web, anti-drift, secret-scan, sast, smoke, ui-walk, uid-isolation, office-sidecar]
+    needs: [fast-checks, unit-tests, unit-tests-web, anti-drift, secret-scan, sast, smoke, ui-walk, uid-isolation, office-sidecar, browser-image]
     runs-on: ubuntu-latest
     steps:
       - name: verify all required jobs succeeded

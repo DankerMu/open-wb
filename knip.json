@@ -5,7 +5,8 @@
       "entry": [
         "scripts/inspect-ci-workflow.js",
         "converter/sidecar.mjs",
-        "converter/healthcheck.mjs"
+        "converter/healthcheck.mjs",
+        ".github/scripts/ci-browser-e2e.mjs"
       ]
     },
     "server": {
