@@ -82,7 +82,7 @@ Minimal mergeable slice: atomic - Dockerfile、入口脚本与 compose 片段是
 - [ ] 6.2 新增 `.github/scripts/ci-browser-image.sh` 与 `.github/scripts/ci-browser-e2e.mjs`（design D8 四步：镜像检查、挂载目录与浏览器包装脚本、与 compose 同标志 `docker run`、进程内 `start({toolRoundScope:"turn"})` 的两回合驱动），断言 browser-runtime「真实浏览器打开工作空间页面并截图」与「镜像可构建且身份正确」（本组是两者的归属组）的全部条目；`ci.yml` 加 job（checkout → setup-node → `npm ci` → `docker build` → 脚本）与 `needs`；驱动内放转发监听器观测 `image_url`，页面 URL 为 `file://<root>/uploads/index.html`（design「组 6 开工核对」）；本地预跑按 design「组 6 开工核对」的「本地预跑」：测试主机上以脚本临时副本（去掉构建与哨兵）跑容器与驱动部分，完整脚本首跑即 PR CI
 - [ ] 6.3 合同同步：`scripts/test-ci-harness.sh` 按 office-sidecar 先例加合同与变异（job 缺失、`runs-on` 改 `ubuntu-latest`、从 `needs` 去掉、镜像 tag 漂移、脚本步骤加 `if: false`、`set -euo pipefail` 去掉、setup-node 缺失、action major 回退；Enforcement Index「浏览器参考镜像」行的缺失、wrong-job、wrong-level、注释、重复；新脚本整行 `docker run` 的去 `--cap-drop ALL`、去 `--read-only`、加 `--privileged`）并修正失配的既有锚点；`scripts/inspect-ci-workflow.js` 期望计数改 11 / 9；`knip.json` 根 `entry` 加 `.github/scripts/ci-browser-e2e.mjs`；`AGENTS.md` Enforcement Index 加「浏览器参考镜像」行；验证：`make test-guardrails` 绿且新变异均被拒；PR CI 上 `browser-image` 与 `all-checks-passed` 绿
 - [ ] 6.4 验收清单：会话节新增 CH-123（在绑定工作空间的会话里让助手写一个 html、用浏览器打开并截图：回答在期限内完成，文件变更卡出现 `screenshots/` 下的 png，回答描述了截图内容），结论 `待签`；验证：`npx vitest run web/test/functional-checklist.test.ts` 绿
-- [ ] 6.5 PR 正文：job 时长、断言输出摘录（不含 token）
+- [ ] 6.5 PR 正文：job 时长、断言输出摘录（不含 token）、omp 日志目录的实际情况（design「组 6 开工核对」否定断言一条）
 
 Suggested fixture level: expanded - 新增 CI 门禁 job 并改 harness 合同（verification-harness），失败会挡住所有 PR。
 Minimal mergeable slice: atomic - job、驱动脚本与 harness 合同必须同一个 PR：只加 job 不改合同则 `make test-guardrails` 因 direct job 计数不符而红；只改合同不加 job 同样红；验收行描述的正是这个 job 证明的用户可见行为。
