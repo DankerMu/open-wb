@@ -40,7 +40,7 @@ in_box() { docker exec "$cid" "$@"; }
 sentinel="wbsentinel-$(openssl rand -hex 12)"
 env_file="$root/.env"
 printf 'MODEL_UPSTREAM_API_KEY=%s\n' "$sentinel" > "$env_file"
-(export MODEL_UPSTREAM_API_KEY="$sentinel"; docker build -q -t "$sentinel_image" -f "$root/deploy/app/Dockerfile" "$root" >/dev/null) || die "the sentinel build failed"
+(export MODEL_UPSTREAM_API_KEY="$sentinel"; docker build -q --build-arg MODEL_UPSTREAM_API_KEY -t "$sentinel_image" -f "$root/deploy/app/Dockerfile" "$root" >/dev/null) || die "the sentinel build failed"
 rm -f "$env_file"; env_file=""
 # 先取全文再搜：pipefail 下 `grep -q` 提前退出会让上游吃 SIGPIPE，管道失败即把命中当成未命中。
 config="$(docker image inspect "$sentinel_image")"; hist="$(docker history --no-trunc "$sentinel_image")"
@@ -92,10 +92,12 @@ echo "browser-image: visudo -c ok, sudoers exactly two rules, service Umask 0007
 # (4) 两回合驱动，然后在容器里查 BROWSER_BIN 抵达 omp、没有下载浏览器（以镜像缺省用户 workbuddy 读）。
 timeout 600 node "$root/.github/scripts/ci-browser-e2e.mjs" "http://127.0.0.1:$port" "$forward_port" || die "the browser e2e driver failed"
 in_box test -e /tmp/browser-wrapper.ran || die "no wrapper marker: BROWSER_BIN did not reach omp"
+marker_uid="$(in_box stat -c %u /tmp/browser-wrapper.ran)"
+[ "$marker_uid" = 10002 ] || die "the wrapper marker is owned by uid $marker_uid, want 10002 (omp)"
 in_box test -e "$state_in/xdg/cache/omp/puppeteer/package.json" || die "control: puppeteer/package.json is missing"
 ! in_box test -e "$state_in/xdg/cache/omp/puppeteer/chrome" || die "omp downloaded a browser (puppeteer/chrome exists)"
 logs="$state_in/xdg/state/omp/logs"
-in_box sh -c 'if [ -d "$1" ]; then ! grep -rqF "Downloading Chromium for puppeteer" "$1"; fi' sh "$logs" || die "the omp log mentions a Chromium download"
-echo "browser-image: wrapper marker present; puppeteer/package.json present, puppeteer/chrome absent; no download in the omp log"
+in_box sh -c 'if [ -d "$1" ]; then grep -rqF "Downloading Chromium for puppeteer" "$1"; [ "$?" -eq 1 ]; fi' sh "$logs" || die "the omp log mentions a Chromium download, or the log dir is unreadable"
+echo "browser-image: wrapper marker present (uid 10002); puppeteer/package.json present, puppeteer/chrome absent; no download in the omp log"
 echo "browser-image: omp log dir: $(in_box sh -c 'if [ -d "$1" ]; then echo "$(find "$1" -name "*.log" | wc -l) log file(s), $(find "$1" -name "*.log" -size +0 | wc -l) non-empty"; else echo absent; fi' sh "$logs")"
 echo "browser-image: PASS"

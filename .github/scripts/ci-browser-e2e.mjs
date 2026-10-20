@@ -128,6 +128,7 @@ try {
   check(space.status === 201 && typeof space.json.root === "string", "workspace", space.status);
   const upload = await call("POST", `/api/workspaces/${space.json.id}/uploads?name=index.html`, undefined, PAGE);
   check(upload.status === 201 && typeof upload.json.path === "string", "upload", upload.json);
+  check(upload.json.path === "uploads/index.html", "upload path", upload.json.path);
   const session = await call("POST", "/api/sessions", { workspaceId: space.json.id, approvalMode: "write" });
   check(session.status === 201, "session status", session.status);
   const sessionId = session.json.id;
