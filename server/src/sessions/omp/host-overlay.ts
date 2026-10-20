@@ -2,23 +2,33 @@
  * Host overlay (issue #708, ADR-0012): omp deep-merges the project settings found under the
  * session cwd, a directory the agent writes without approval, over the global layer. This file is
  * passed to every spawn as `--config` (global < project < overlay < CLI) and pins the keys that
- * would skip an approval or run a command outside one. The values were verified against omp
- * v18.0.10 and are not schema-checked by it: re-verify them on an omp upgrade.
+ * would skip an approval or run a command outside one. omp does not schema-check an overlay file
+ * as a whole, so each value depends on the pinned omp's consuming code: re-verify them on an omp
+ * upgrade (#1564 ran this block on v18.0.10: no `Settings:` warning).
  *
- * `tools.approvalMode: write` sits below argv: omp v18.0.10 writes `--approval-mode` into a runtime
+ * `tools.approvalMode: write` sits below argv: omp writes `--approval-mode` into a runtime
  * override layer above the overlay, so for an `always-ask` or `yolo` session the argv value is the
  * one in effect and that line is only the fallback for a spawn without the flag (every spawn
  * passes it). All sessions and all approval modes share this one file and its bytes never vary
  * with the mode: a session changes mode by being re-spawned, never by rewriting the overlay.
  *
- * `retry:` (issue #909, ADR-0012) caps omp's session-level retry at one round: v18.0.10 already
- * retries each failed request inside a round (6 transport attempts, the round replayed once by the
- * provider layer), so its default ten rounds keep a 5xx turn running for minutes. `enabled`,
+ * `retry:` (issue #909, ADR-0012) caps omp's session-level retry at one round: omp already retries
+ * each failed request inside a round (on v18.0.10, 6 transport attempts and the round replayed once
+ * by the provider layer), so its default ten rounds keep a 5xx turn running for minutes. `enabled`,
  * `baseDelayMs` and `maxDelayMs` restate omp's defaults so the project layer cannot lengthen the
  * wait; `modelFallback: false` turns omp's model fallback off — switching upstreams or models is out
  * of scope, and a project `retry.fallbackChains` would otherwise switch models on a 5xx turn (实测
  * on the old overlay) and, by omp's `isHardErrorFallbackEligible`, replay even a non-retryable 424
  * on the next model (读代码推出, not measured).
+ *
+ * Issue #1564 (#1563 design D4) appends four pins after `retry:`: `telemetry.otlpExportEnabled`
+ * (OTLP export defaults on and a cwd `.env` can supply the `OTEL_*` endpoint), `archive.enabled`
+ * (the read-tier `archive` prelude; hygiene), `disabledProviders` (no implicit probing of the local
+ * ollama / llama.cpp / lm-studio ports and no macOS `apple` provider; the managed `workbuddy`
+ * provider is untouched) and `ask.enabled` (under `--mode rpc-ui` omp creates `ask`, the host can
+ * only cancel its question, and a cancelled `ask` aborts the whole turn). `ruby` / `julia` stay
+ * until the pin moves to v18.12.3 (see below). `browser.tern` and `dev.autoqa` are deliberately not
+ * pinned (owner 2026-10-20, ADR-0012).
  *
  * Issue #1527 (design D2): the bytes are a pure function of the deployment — the fixed block, then
  * the browser block, then the vision block when the whitelist has a vision model. `enabled` is the
@@ -35,8 +45,10 @@ import { ompHostOverlayPath } from "./state-layout.js";
 
 const HOST_OVERLAY = [
   "tools:",
-  // An array replaces the project's per-tool record as a whole; an object would be deep-merged.
-  "  approval: []",
+  // null takes omp's replace branch of the deep merge, so the project's per-tool record is dropped
+  // as a whole, and reads as unset (default `{}`, no warning). An object would be deep-merged with
+  // the project's; an array is dropped by v18.12.3's record check with a `Settings:` warning.
+  "  approval: null",
   "  approvalMode: write",
   "bash:",
   "  patterns: []",
@@ -44,6 +56,10 @@ const HOST_OVERLAY = [
   "shellPath: null",
   "python:",
   '  interpreter: ""',
+  // Kept while omp is pinned to v18.0.10 (owner 2026-10-20, decision B): its spawn precheck
+  // (`tools/index.ts:554-570`) runs a project-set `ruby.interpreter` / `julia.interpreter` without
+  // approval once JS eval is off (measured, #1564). v18.12.3 has no such keys: the flip to it
+  // deletes these four lines.
   "ruby:",
   '  interpreter: ""',
   "julia:",
@@ -65,6 +81,20 @@ const HOST_OVERLAY = [
   "  maxDelayMs: 300000",
   // No model fallback: a project fallback chain would switch models and reset the retry budget.
   "  modelFallback: false",
+  "telemetry:",
+  "  otlpExportEnabled: false",
+  "archive:",
+  "  enabled: false",
+  // The array replaces the project's list as a whole: a project `disabledProviders` no longer
+  // applies (measured on both versions, #1564; ADR-0012).
+  "disabledProviders:",
+  "  - ollama",
+  "  - llama.cpp",
+  "  - lm-studio",
+  "  - apple",
+  // No `ask` tool under `--mode rpc-ui`: a cancelled `ask` aborts the turn.
+  "ask:",
+  "  enabled: false",
 ].join("\n");
 
 /** What the overlay depends on; both are fixed at startup. */

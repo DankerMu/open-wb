@@ -123,3 +123,27 @@ openspec 变更 `omp-browser-integration` design D2。overlay 由固定字面量
 - **`modelRoles` 只压 `vision`。** 看图块只写 `modelRoles.vision: "workbuddy/<白名单里第一个 vision 模型>"`。`modelRoles` 是对象，overlay 深合并只压住这一键，项目层写的其它角色照常生效，登记为残余。白名单没有 `vision: true` 的模型时不写 `modelRoles`，项目层的 `vision` 角色也照常生效。
 - **截图落点。** `screenshotDir: screenshots` 是相对路径，实测落在会话 `--cwd` 下的 `screenshots/`（2026-10-19，官方 v18.0.10 加本机 Chrome，`dest` 为 `screenshots/screenshot-<时间>.png`）。截图进入工作空间，随回合累积。
 - 升级 omp 时与其余各键一样重新验证：浏览器键的名字与取值、`PUPPETEER_EXECUTABLE_PATH` 优先与下载逻辑、截图 `dest` 的相对解析都依赖 v18.0.10。
+
+## 补充（2026-10-20，#1563）：迁到 omp v18.12.3
+
+openspec 变更 `omp-pin-18-12`。本节分几部分随各子 issue 写入。
+
+### 一、overlay 固定块（#1564，design D4）
+
+固定块改了两处：`tools.approval` 由 `[]` 改为 `null`，`retry:` 段之后新钉四个键；`ruby` / `julia` 两段保留到翻转（见下），浏览器块与看图块不变。逐键说明见 system.md 9.8「overlay 的固定块」。上文 S1g 补充里「`tools.approval: []`」的写法自此由本节取代。
+
+- **`tools.approval: []` → `approval: null`。** v18.12.3 给设置加了类型校验，`tools.approval` 是 record，数组不合格，被丢弃、回落默认 `{}`，每次启动写一条 `Settings: ignoring invalid value`。项目值没有复活（合并先于校验，项目层的对象已被数组整体替换），但这是靠校验失败兜底。`null` 在深合并里走替换分支，再被当作未设、回落默认，两个版本都不报警告。实测：v18.0.10 上官方用例 (c)「`always-ask` 下项目层 `tools.approval: {write: allow}` 仍弹写文件卡」在 `null` 下照旧通过；v18.12.3 的同一结论由组 6 的翻转 PR 证明。
+- **`ruby.interpreter`、`julia.interpreter` 保留到翻转（owner 2026-10-20，改订 Q7 的「删 ruby / julia」）。** v18.12.3 的 eval 只剩 py 与 js 两个后端，这两个键已不存在，overlay 里的未知键被静默忽略（实测无 `Settings:` 警告）。但组 6 翻转之前宿主仍跑 v18.0.10，而 v18.0.10 上两键有效：实测（2026-10-20，#1564，本机官方 v18.0.10，`--mode rpc-ui`），cwd 的 `.omp/config.yml` 写 `eval: {js: false, ruby: true}` 与 `ruby.interpreter: ./x.sh` 时，overlay 去掉这两段则 omp 在 spawn 时的 Ruby 预检执行了 `<cwd>/x.sh`（参数 `-e exit 0`），不经审批；保留 `ruby.interpreter: ""` 时不执行（预检代码见 v18.0.10 `tools/index.ts:554-570`，Julia 走同一路径，读代码推出）。所以两段留在固定块里，由翻转到 v18.12.3 的组 6 随版本一起删。
+- **新钉四个键（owner 2026-10-20，grill Q7；`ask` 为起草者补钉）。**
+  - `telemetry.otlpExportEnabled: false`：OTLP 导出缺省开，有 `OTEL_*` 端点才真正导出，而工作目录 `.env` 能注入端点。
+  - `archive.enabled: false`：关掉 `archive` prelude。它只读、不请求审批，读的是 omp 自己的 `sessions` 目录，与宿主的 `--session-dir` 不重叠，属卫生项。
+  - `disabledProviders: [ollama, llama.cpp, lm-studio, apple]`：不让 omp 隐式探测本机的 11434、8080、1234 端口，不启用 macOS 的 `apple` 提供者。托管 `models.yml` 的 `workbuddy` provider 不受影响。
+  - `ask.enabled: false`：`ask` 工具只在有 UI 时创建，宿主改用 `--mode rpc-ui`（本变更组 2）后模型就能调它。宿主对它的提问只会 cancel，而 `ask` 被取消时先中止整个回合，用户看到回答无故「已停止」。钉掉后 `rpc-ui` 下的工具集与 `rpc` 相同。
+- **实测（2026-10-20，本机官方 v18.0.10 与 v18.12.3，`--mode rpc-ui`，overlay 为新固定块加浏览器块）。**
+  - 两个版本的 stderr 与 omp 日志都没有 `Settings:` 行。对照：旧固定块在 v18.12.3 的日志里有一条 `tools.approval` 的 `Settings: ignoring invalid value`。
+  - `get_state` 的 `dumpTools` 里没有 `ask`，旧固定块下两个版本都有。
+  - `get_available_models` 列出 `workbuddy/m1`；去掉 `disabledProviders` 时，两个版本的日志对 `ollama`、`llama.cpp`、`lm-studio` 各有一条 `model discovery failed`，带上则没有。
+- **`disabledProviders` 整体替换项目层的同名键（已接受后果，实测）。** cwd 放 `.claude/skills/x/SKILL.md`、`.omp/config.yml` 写 `disabledProviders: [claude]`：带新 overlay 时 `get_available_commands` 列出 `skill:x`；overlay 去掉 `disabledProviders` 的对照不列。两个版本相同。即 overlay 的数组替换掉项目层的数组，项目自己写的 `disabledProviders`（关掉 `claude`、`codex` 等发现源）不再生效；同理，若部署方在全局层写了 `disabledProviders`，也被 overlay 压住。这与上文「项目层写的收紧规则被 overlay 一并清掉」同类，接受。
+  上文「第三方配置目录不用 `disabledProviders` 关」与「方案 A」说的是关掉 `claude`、`codex` 等发现源，本节没有改变那个结论：overlay 只列这四个模型提供者，发现源一个都不关。
+- **有意不钉（owner 2026-10-20）：** `browser.tern` 与环境变量 `PI_BROWSER_TERN`、`dev.autoqa` 与环境变量 `PI_AUTO_QA`。登记为已知风险。
+- **否决 `tools.approval.browser: allow`。** 为让浏览器 prelude 在 plain `rpc` 下可用而在 overlay 里放行 `browser`，会把 `tools.approval` 变成对象；对象与项目层深合并，项目写的 `{bash: allow}` 等逐工具放行随之复活，等于撤掉 #708 的钉子。改走 `--mode rpc-ui` 与宿主审批（本变更组 2）。

@@ -6,7 +6,7 @@
  * (`browserEnabled`, `visionModelId`): the fixed block, the browser block and, when the whitelist
  * has a vision model, the vision block.
  */
-import { chmodSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -74,7 +74,7 @@ describe("writeHostOverlay", () => {
 
   it("pins every key the spec lists, as omp will parse them", () => {
     expect(parse(HOST_OVERLAY_YAML)).toEqual({
-      tools: { approval: [], approvalMode: "write" },
+      tools: { approval: null, approvalMode: "write" },
       bash: { patterns: [], direnv: "off" },
       shellPath: null,
       python: { interpreter: "" },
@@ -90,6 +90,10 @@ describe("writeHostOverlay", () => {
         maxDelayMs: 300_000,
         modelFallback: false,
       },
+      telemetry: { otlpExportEnabled: false },
+      archive: { enabled: false },
+      disabledProviders: ["ollama", "llama.cpp", "lm-studio", "apple"],
+      ask: { enabled: false },
       browser: {
         enabled: false,
         cdpUrl: "",
@@ -99,6 +103,21 @@ describe("writeHostOverlay", () => {
         screenshotDir: "screenshots",
       },
     });
+  });
+
+  it("the fixed block (#1564): approval null, empty ruby/julia interpreters, ends with the ask pin", async () => {
+    const state = stateDir();
+    ensureOmpStateLayout(state);
+    await writeHostOverlay(state, DEFAULT);
+    const text = readFileSync(ompHostOverlayPath(state), "utf8");
+    const fixed = text.slice(0, text.indexOf("\nbrowser:\n") + 1);
+    expect(fixed).toBe(HOST_OVERLAY_FIXED);
+    expect(fixed.split("\n").filter((line) => line.includes("approval:"))).toEqual([
+      "  approval: null",
+    ]);
+    // Present and empty while omp is pinned to v18.0.10; the flip to v18.12.3 removes them.
+    expect(fixed).toContain('\nruby:\n  interpreter: ""\njulia:\n  interpreter: ""\nmcp:\n');
+    expect(fixed.endsWith("\nask:\n  enabled: false\n")).toBe(true);
   });
 
   it("the browser block follows browserEnabled: the two files differ in exactly that line", async () => {
