@@ -27,12 +27,10 @@ import {
   copyForkHistory,
   decodeNullableText,
   type ForkCommit,
-  hasChanges,
   INSERT_MESSAGE,
   MESSAGE_COLUMNS,
   type MessageDbRow,
   replaceLastAssistant,
-  requireAtMostOne,
   requireChanges,
   runOwnedTransaction,
   STEP_COLUMNS,
@@ -41,6 +39,7 @@ import {
   toMessageView,
   toStepView,
 } from "./store-branch.js";
+import { type EvalBrowserAudit, finishStep } from "./store-browser-audit.js";
 import { setStepChanges as setStepChangesText } from "./store-changes.js";
 import {
   COMPOSER_COLUMNS,
@@ -223,7 +222,13 @@ export interface SessionStore extends SessionTodoStore, SessionErrorStore, Think
   /** Owned file changes of a still-running step (#522, store-changes.ts); throws off one row. */
   setStepChanges(stepId: number, json: string): void;
   // step.end 不扩展：stopped 步骤只由 finishTurn 结算（output 保持 NULL）。
-  finishStep(stepId: number, status: "done" | "failed", output: string): boolean;
+  /** An eval step's `browser` is audited in the same transaction (store-browser-audit.ts, #1568). */
+  finishStep(
+    stepId: number,
+    status: "done" | "failed",
+    output: string,
+    browser?: EvalBrowserAudit,
+  ): boolean;
   /** Pending approvals denied in the terminal transaction are appended to `settled` once committed. */
   finishTurn(
     assistantMessageId: number,
@@ -579,30 +584,15 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       setStepChangesText(db, stepId, json);
     },
 
-    finishStep(stepId, status, output) {
+    finishStep(stepId, status, output, browser) {
       assertOpen(closed);
       const assistantMessageId = activeSteps.get(stepId);
       if (assistantMessageId === undefined) {
         return false;
       }
       const turn = currentTurn(activeTurns, activeSessions, assistantMessageId);
-      if (turn === undefined) {
-        activeSteps.delete(stepId);
-        return false;
-      }
-      const changed = runOwnedTransaction(db, "step finish rollback failed", () => {
-        const receipt = db
-          .prepare(
-            `UPDATE chat_steps
-           SET status = ?, output = ?, ended_at = ?
-           WHERE id = ? AND message_id = ? AND status = 'running'`,
-          )
-          .run(status, output, Date.now(), stepId, turn.assistantMessageId);
-        requireAtMostOne(receipt.changes, "step finish");
-        return hasChanges(receipt.changes);
-      });
-      activeSteps.delete(stepId);
-      return changed;
+      const step = { stepId, status, output };
+      return finishStep(db, turn, activeSteps, step, browser, options.emit);
     },
 
     finishTurn(assistantMessageId, status, settled) {

@@ -17,7 +17,7 @@
 
 #### Scenario: 审计失败时步骤不落库
 - **WHEN** 带 `browser` 字段的 `eval` step.end 的审计写入失败；另一次 store 未配置 `emit`
-- **THEN** 两次该步骤的结束都没有写入（步骤仍为 running，由回合终态结算）、`step.end` 不发布、ring 序号不推进，失败沿 owned error-sink 路径处理；不带 `browser` 字段的 eval 与其它步骤在未配置 `emit` 时照常落库
+- **THEN** 两次该步骤的结束都没有写入（步骤仍为 running、`output` 为 NULL，由下次启动的 `reconcileOnStartup` 结算——整体挂载下 infra-faulted 的 pump 不提交 turn.end）、`step.end` 不发布、ring 序号不推进，失败沿 owned error-sink 路径处理；不带 `browser` 字段的 eval 与其它步骤在未配置 `emit` 时照常落库
 
 ### Requirement: 参考部署镜像
 仓库 SHALL 在 `deploy/app/` 提供部署方自建、不发布的 app 参考镜像（owner 2026-10-18，#912 Q1/Q6/Q10）：
