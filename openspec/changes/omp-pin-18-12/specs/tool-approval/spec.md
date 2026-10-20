@@ -91,3 +91,14 @@ SessionSupervisor SHALL 在每个回合（一条助手消息）内维护两份�
 #### Scenario: 配对写失败
 - **WHEN** 持久化一条 `step.start` 时，步骤插入与配对所在的事务在 SQLite 中失败；另一例在审批 select 时配对的 `step_id` 写入失败
 - **THEN** 前者步骤行与 `step_id` 都没有写入、该 `step.start` 不进入 ring；后者 `step_id` 仍为 NULL、该 `approval.request` 不进入 ring；两者都沿既有 owned error-sink 处理
+
+### Requirement: 审批事件
+supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 `approval.request{messageId, approvalId, tool, title, expiresAt, stepId}`（消费一个 seq；`stepId` 为发布时该审批已配上的步骤 id，没有为 `null`，见「确认与步骤配对」。omp 在工具执行里先推出 `tool_execution_start`、再发审批 select，但二者在 stdout 上的先后由 omp 的调度决定，不作保证（design D6 的 Context）：真 omp v18.12.3 与 fake-omp（#1563 组 7 起）都是 `tool_execution_start` 先于 select、并行时各 start 均先于各 select，此时该事件位于对应 `step.start` 之后、`stepId` 已为该步骤 id（v18.0.10 是相反的次序，配对规则对两种次序都成立）；本 spec 的其余要求与配对不依赖这一先后。start 不等作答，工具在作答后才执行，故该事件总在该步骤 `step.end` 之前）；每条审批结算后（该审批登记时所属的 generation 的 ring 尚未封口时，见停止与终态对挂起审批的结算；但该 Requirement 第 7 条「基础设施故障 retire」的结算除外，它 SHALL 不发布）SHALL 发布恰一个 `approval.resolved{messageId, approvalId, decision}`，`decision ∈ {allow,deny,timeout}`。同一回合可有多条审批同时挂起（omp 并行执行多个工具时各自下发 select），其 `approval.request`/`approval.resolved` 可与其它步骤的 `step.*`、`text.delta` 事件交错；每条审批事件 SHALL 只作用于自身 `approvalId`，后到的 `approval.request` SHALL 不覆盖先前审批。两类事件 SHALL 进入 ring 回放、SSE 扇出与 `Last-Event-ID` 语义与其它事件一致。
+
+#### Scenario: 事件序与回放
+- **WHEN** fake-omp `approval` 脚本（`--approval-mode write`）的审批请求于注入时钟 T 到达后用户 allow，回合继续到 `agent_end`
+- **THEN** 该回合 SSE 事件满足以下次序约束（不断言完整固定序列）：`turn.start` 为首个事件；`step.start(bash)` 先于 `approval.request{…,expiresAt:T+60000, stepId:<该步骤 id>}`；`approval.request` 先于 `approval.resolved{decision:"allow"}`；`approval.resolved` 先于该步骤的 `step.end(done)`；以上全部先于恰一个 `turn.end(done)`，且它是该回合末个事件；`text.delta` 可出现在 `step.start` 之前与 `step.end` 之后（fake 在工具轮之前发出正文增量）；事件 id 严格单调；用户在 `approval.request` 送达之后才作答时，`step.start(bash)`、`approval.request`、`approval.resolved` 的事件 id 连续；以 `step.start(bash)` 的 id 作 `Last-Event-ID` 重连，回放首个事件为 `approval.request`；以该 `approval.request` 的 id 重连，回放首个事件为 `approval.resolved`
+
+#### Scenario: 两条并行审批分别作答
+- **WHEN** fake-omp `approval-parallel` 脚本在同一回合对两个 bash 调用先后发 `extension_ui_request` `r1` 与 `r2`（均未应答），用户先对 `r2` 作答 deny、再对 `r1` 作答 allow
+- **THEN** 两个 `approval.request` 的 `approvalId` 不同且都保留，二者的 `stepId` 分别为各自步骤的 id（start 先于 select，配对发生在 pump 读到 select 时；两条 `step.start` 的 `approvalId` 为 `null`）；fake-omp 先收到 `extension_ui_response{id:"r2",value:"Deny"}`、后收到 `{id:"r1",value:"Approve"}`，每个 id 恰一帧；发布两个 `approval.resolved`，分别携带各自 `approvalId` 与 `deny`/`allow`；`r2` 对应步骤 `failed`、`r1` 对应步骤 `done`

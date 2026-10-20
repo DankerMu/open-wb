@@ -105,3 +105,32 @@ For a known running call whose toolName (the name registered by its tool_executi
 - **THEN** e1 emits step.start{name:"eval",detail:"{\"language\":\"js\",\"code\":\"await browser.open({ name: \\\"main\\\", url: \\\"file:///ws/index.html\\\" });\"}"} (the compact JSON of its args) and, on its end, step.end{status:"done",output:"(no output)"} whose mapper output additionally carries `browser:{calls:[{detail:"open main file:///ws/index.html",error:null}],elided:null}` and no files.changed; e2 emits step.start{name:"eval"} and on its end step.end whose output contains `[图片]` and whose mapper output carries `browser:{calls:[{detail:"main.screenshot()",error:null}],elided:3}` and no files.changed; the third start registers the name `write` with the compact JSON detail of its args
 - **WHEN** an `eval` call ends with `isError:true` and `details.statusEvents:[{op:"browser",error:"Browser open timed out after 30000ms"}]`; another ends with `details` lacking `statusEvents`; another with `statusEvents:[{op:"browser"}]` only on the prototype of `details`; another whose `statusEvents` holds `{op:"browser",detail:7}`; and a `bash` call ends with `details.statusEvents:[{op:"browser",detail:"open main x"}]`
 - **THEN** the first emits step.end{status:"failed"} carrying `browser:{calls:[{detail:null,error:"Browser open timed out after 30000ms"}],elided:null}`; the second, third and the bash end carry no `browser` field; the fourth carries `browser:{calls:[{detail:null,error:null}],elided:null}`
+
+### Requirement: 分段位置的记录与下发
+SessionSupervisor SHALL 为每个回合（一条助手消息）维护「正文已发布长度」：该回合每发布一条 `text.delta`（含 `command_output` 映射出的）就加上其 `delta` 的 UTF-16 码元数（JavaScript 字符串的 `length`；不是字节数，也不是码点数），回合开始时为 0。由于正文缓冲（chat-sessions「会话持久化与回合刷盘」的 `appendDelta`）只收已发布的增量，这个值恒等于「已落库正文 + 回合 pending」的长度，即快照 `content` 的长度，也等于客户端按序拼接已收到的 `text.delta` 得到的长度。
+
+**边界前冲刷**：在记录任何位置边界之前，SHALL 先冲刷增量合并器（「正文与思考增量的时间窗合并」），使记录的偏移把合并器里尚未发布的正文也发布出去并计入。边界有三种：步骤开始（`step.start`；它作为非增量事件本来就先冲刷合并器，次序不变）；一段思考开始（thinking-fold「思考时长记录与下发」的开段：合并器里缓冲着正文时，SHALL 先把那段正文作为一条 `text.delta` 发布，再开段；即使这段思考的第一条增量本身会被缓冲）；一段思考结束（闭段）。由此每个记录的正文偏移都等于该边界之前 ring 中同一消息全部 `text.delta` 拼接后的长度。
+
+**闭段**：开着的一段思考在以下三者中最先发生的时刻闭合（#910 的既有时机，不变）：pump 读到 omp 原始的 `thinking_end` 帧；一条 `text.delta` 到达；任何非增量事件发布之前（`step.start`、`approval.request`、`approval.resolved`——含 pump 之外的作答与超时路径——、`turn.retry`、`error`、`turn.end` 等，它们都先冲刷合并器）。闭段时 SHALL 先把合并器里缓冲着的思考作为一条 `thinking.delta` 保存并发布，再量该段：`thinking_length` 为此刻已保存 `thinking` 的长度减去该段的 `thinking_offset`。所以一段思考永远不会跨过可见的正文、步骤或审批而保持开着：同一位置之后任何可见块出现之前，该段已闭合并发布 `thinking.end`。
+
+**步骤**：`step.start` 的持久化 SHALL 在插入步骤行的同一事务里写 `chat_steps.body_offset` 为此刻的正文已发布长度（并按 tool-approval「确认与步骤配对」写配对）；发布的 `step.start` 负载 SHALL 为 `{messageId,stepId,name,detail,bodyOffset,approvalId}`：`bodyOffset` 即所写的值，`approvalId` 为本步骤配上的 `chat_approvals.id` 或 `null`。纯协议事件归约（「纯协议事件归约」）输出的 `step.start` 形状不变，这两个字段只出现在持久化之后发布的事件里。写入失败沿既有 owned error-sink 处理，不发布该 `step.start`。
+
+#### Scenario: 合并器缓冲着正文时开段
+- **WHEN** 注入时钟下一回合在 t=0 到达正文 `看`（前沿立即发布），t=100ms 到达正文 `一下`（缓冲），t=120ms 到达第一条思考增量 `想`
+- **THEN** ring 中依次为 `text.delta{看}`、`text.delta{一下}`（t=120ms 因开段被冲刷）、`thinking.delta{想}`；该段的 `chat_thinking_segments.body_offset` 为 3，等于两条 `text.delta` 拼接后的长度；同一时刻读取的快照 `content` 为 `看一下`，其 `thinkingSegments` 末段 `bodyOffset` 为 3、`thinkingLength` 为 `null`
+
+#### Scenario: 步骤的正文偏移
+- **WHEN** fake-omp `approval-parallel` 回合先发正文增量，再发两个 bash 的 `tool_execution_start` 与两个审批的 select（v18.12.3 的次序）
+- **THEN** 两条 `step.start` 的 `bodyOffset` 都等于其前全部 `text.delta` 的 `delta` 拼接后的 UTF-16 长度，与快照中两个步骤的 `bodyOffset` 相同；每条 `step.start` 之前 ring 中没有晚于它到达的正文
+
+#### Scenario: 闭段时长度含缓冲的思考
+- **WHEN** 注入时钟下一段思考在 t=0 到达 `先`（前沿发布）、t=100ms 到达 `想想`（缓冲），t=150ms 到达正文 `好`；另一例 t=150ms 到达的不是正文而是一个 `approval.request`
+- **THEN** 两例 ring 中依次为 `thinking.delta{先}`、`thinking.delta{想想}`、`thinking.end`（其 `segment.thinkingLength` 为 3），然后才是 `text.delta{好}` 或 `approval.request`；该段行的 `thinking_length` 为 3
+
+#### Scenario: 码元而非码点
+- **WHEN** 一回合发布正文 `a😀`（`😀` 为一个码点、两个 UTF-16 码元）后开始一个步骤
+- **THEN** 该步骤的 `bodyOffset` 为 3
+
+#### Scenario: 真 omp 链路上的开段偏移
+- **WHEN** 官方 omp v18.0.10 经受控假上游运行一个带 `WORKBUDDY_INTERLEAVE` 的回合（omp-test-harness「受控上游交错标记」：正文两片相隔 25ms，随后一片思考，再一片正文）
+- **THEN** ring 中第一条 `thinking.delta` 之前的 `text.delta` 拼接恰为前两片正文；回合结束后快照 `thinkingSegments` 恰一段，其 `bodyOffset` 等于该拼接的长度，`thinkingOffset` 为 0、`thinkingLength` 等于思考片的长度
