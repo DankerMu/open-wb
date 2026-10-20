@@ -1,0 +1,46 @@
+# app 参考部署（browser-runtime「参考部署镜像」；design D7）。部署方自建，不发布、不引用镜像仓库：
+#   WORKBUDDY_SANDBOX=… WORKBUDDY_OMP_STATE=… WORKBUDDY_PRIVATE=… WORKBUDDY_ENV_FILE=… \
+#     docker compose -f deploy/app/compose.yml up -d --build
+# 这四个变量给绝对路径（相对路径按 deploy/app/ 解析）；`:?` 变量缺席时 compose 拒绝启动。
+# 三个宿主目录由部署方预先建好，属容器内 workbuddy（uid:gid 10001:10001），服务不 chown：
+#   WORKBUDDY_PRIVATE    0700：app.db 与预览缓存；omp 用户同组也进不去（ADR-0010）
+#   WORKBUDDY_SANDBOX    属组 workbuddy，服务启动校正为 3770
+#   WORKBUDDY_OMP_STATE  属组 workbuddy，服务启动校正为 2750
+# 可写范围即这三个挂载与 /tmp。上游地址与密钥、PREVIEW_ORIGIN 写进 env_file，不进镜像。
+# env_file 不得覆盖 PORT/PREVIEW_PORT/HOST：ports 与 healthcheck 固定 3000/3001，改端口就改这两处。
+# 服务目前没有可配置的认证，唯一的登录是迁移预置的演示账号（口令公开 `demo`，不可修改或停用，含管理员）：
+# 真实认证落地之前不得把端口放开到不可信网络，前置反代须自带访问控制。
+services:
+  app:
+    build:
+      context: ../..
+      dockerfile: deploy/app/Dockerfile
+    read_only: true
+    tmpfs:
+      - /tmp
+    shm_size: 1g
+    init: true
+    cap_drop:
+      - ALL
+    # 实测最小集合（design D7，2026-10-19）：SETUID/SETGID 供 sudo 降权；KILL 供 sudo 以 euid 0
+    # 把应用的 SIGTERM 转发给 omp uid（缺它 kill 得 EPERM，omp 跳过退役清理）。不加 AUDIT_WRITE：
+    # 缺它 sudo 每次 spawn 在 stderr 写一行 `unable to send audit message`（服务读走不记录），内核 audit 不留 sudo 记录。
+    cap_add:
+      - SETUID
+      - SETGID
+      - KILL
+    # 不设 no-new-privileges：它让 sudo 的 setuid 位失效，omp 起不来。
+    env_file: "${WORKBUDDY_ENV_FILE:?set to the deployment env file}"
+    # bind mount，不用命名卷：命名卷的根属 root，与 workbuddy 对不上。
+    volumes:
+      - "${WORKBUDDY_SANDBOX:?set to the sandbox root}:/srv/workbuddy/sandbox"
+      - "${WORKBUDDY_OMP_STATE:?set to the omp state dir}:/srv/workbuddy/omp-state"
+      - "${WORKBUDDY_PRIVATE:?set to the app private dir}:/srv/workbuddy/private"
+    ports:
+      - "${WORKBUDDY_BIND:-127.0.0.1}:3000:3000"
+      - "${WORKBUDDY_BIND:-127.0.0.1}:3001:3001"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/healthz').then((r) => process.exit(r.status === 200 ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      start_period: 10s
+    restart: unless-stopped
