@@ -21,7 +21,7 @@
 
 - [x] 2.1 `.github/workflows/ci.yml` 中 `unit-tests-web` 的 `timeout-minutes: 10` 改为 20，其它行不动；`make test-guardrails` 绿。
 - [x] 2.2 `make check` 0。
-- [ ] 2.3 PR CI 中 `unit-tests-web` 成功（合并前由 orchestrator 确认）。
+- [x] 2.3 PR CI 中 `unit-tests-web` 成功（PR #1555 run 39352679856，9m32s）。
 
 ## 3. 规格归属
 
