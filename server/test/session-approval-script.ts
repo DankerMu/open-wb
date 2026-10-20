@@ -69,6 +69,8 @@ export interface Scripted {
   answers: OmpFrame[];
   /** Every spawn the runtime made (argv, env), in order. */
   calls: SpawnCall[];
+  /** The runtime's sandbox root (owner roots and temporary workspaces live under it). */
+  sandboxRoot: string;
 }
 
 export interface Script {
@@ -116,7 +118,7 @@ export async function openScripted(script: Script): Promise<Scripted> {
   });
   const opened = world;
   cleanups.push(() => closeAfterRetainedFault(opened.fixture, script.faulted === true));
-  return { world, answers, calls: controlled.calls };
+  return { world, answers, calls: controlled.calls, sandboxRoot: controlled.runtime.sandboxRoot };
 }
 
 export interface PairingRow {

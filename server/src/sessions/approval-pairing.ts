@@ -17,6 +17,8 @@ type PairingStore = Pick<SessionStore, "approvalTool" | "pairApproval">;
 export class PumpSteps {
   /** omp's toolCallId → the stored step id. */
   readonly toolIds = new Map<string, number>();
+  /** omp's toolCallId → the registered tool name (#1569: the screenshot diff runs on `eval`). */
+  readonly toolNames = new Map<string, string>();
   readonly #messageId: number;
   #ordinal = 0;
   readonly #queue: Array<{ requestId: string; tool: string }> = [];
@@ -41,6 +43,7 @@ export class PumpSteps {
   /** After the committed insert: a step that paired no approval row runs unpaired. */
   started(toolCallId: string, stepId: number, name: string, approvalId: number | null): void {
     this.toolIds.set(toolCallId, stepId);
+    this.toolNames.set(toolCallId, name);
     if (approvalId === null) {
       this.#running.push({ stepId, name });
     }
