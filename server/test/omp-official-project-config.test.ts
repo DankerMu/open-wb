@@ -15,7 +15,8 @@
  * (`unmarked`); rows that plant their own `${CWD}/.git/` and the depth-0 rows run as the product
  * does; the agents rows, which no `.git` bounds, run both ways; the「with the host marker」rows are
  * the product's outcome for the same files one level up (omp-runtime「祖先的系统提示不再进入会话
- * （真实 omp）」, the part v18.0.10 can show).
+ * （真实 omp）」, the part v18.0.10 can show). `.clinerules` is not bounded by `.git` (omp's cline
+ * provider walks to the filesystem root), pinned here as the residual ADR-0012 part 三 registers.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -178,6 +179,12 @@ const CASES: Case[] = [
     unread: ["MARK-D1"],
     host: [agent(".omp/agents/far.md", 1)],
   },
+  {
+    name: "with the host marker, an alwaysApply .clinerules one level up is read",
+    files: { "MARK-D1": `${UP}/.clinerules` },
+    read: ["MARK-D1"],
+    host: [],
+  },
 ];
 
 /** Every case once per way it starts omp. */
@@ -191,11 +198,15 @@ const RUNS = CASES.flatMap(
       : [{ ...testCase, unmarked: testCase.via === "unmarked" }],
 );
 
-/** An agent definition whose `description` is the marker; any other file is the marker alone. */
+/**
+ * An agent definition whose `description` is the marker; a `.clinerules` whose frontmatter makes
+ * omp inject it whole (`alwaysApply: true`) around the marker; any other file is the marker alone.
+ */
 function bodyOf(path: string, marker: string): string {
-  return path.includes("/agents/")
-    ? `---\nname: ${marker.toLowerCase()}\ndescription: ${marker}\n---\n正文\n`
-    : `${marker}\n`;
+  if (path.includes("/agents/")) {
+    return `---\nname: ${marker.toLowerCase()}\ndescription: ${marker}\n---\n正文\n`;
+  }
+  return path.endsWith(".clinerules") ? `---\nalwaysApply: true\n---\n${marker}\n` : `${marker}\n`;
 }
 
 function plant(sandboxRoot: string, testCase: Case): void {
