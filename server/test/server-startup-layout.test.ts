@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { reasoningYaml, withMaxTokens, withVisionInput } from "./models-yml-helpers.js";
+import { baselineYaml, withVisionInput } from "./models-yml-helpers.js";
 import {
   expectHomeDotenv,
   expectHostOverlay,
@@ -67,7 +67,7 @@ function scratchRoot(prefix: string): string {
 
 /**
  * Default startup (no MODEL_CATALOG, MODEL_REASONING and MODEL_VISION unset): one entry, the
- * pre-change bytes at 32768 plus the three `input` lines.
+ * #1563 reasoning-true baseline plus the `- image` line.
  */
 function expectManagedModels(agentDir: string, port: number): void {
   const models = join(agentDir, "models.yml");
@@ -79,8 +79,8 @@ function expectManagedModels(agentDir: string, port: number): void {
     },
   });
   expect(modelEntries(text)).toHaveLength(1);
-  const before = reasoningYaml(`http://127.0.0.1:${port}/v1`, MODEL_ID);
-  expect(text).toBe(withVisionInput(withMaxTokens(before, 32768)));
+  const before = baselineYaml(true, `http://127.0.0.1:${port}/v1`, MODEL_ID);
+  expect(text).toBe(withVisionInput(before));
   expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
 }
 
@@ -179,8 +179,16 @@ describe("production entry managed omp state layout", () => {
           ...limits,
           ...reasoning,
           thinking: { mode: "effort", efforts: ["minimal", "low", "medium", "high"] },
+          input: ["text"],
         },
-        { id: "m2", name: "m2", contextWindow: 128000, maxTokens: 8192 },
+        {
+          id: "m2",
+          name: "m2",
+          contextWindow: 128000,
+          maxTokens: 8192,
+          reasoning: false,
+          input: ["text"],
+        },
         {
           id: "m3",
           name: "深度",

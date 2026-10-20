@@ -31,7 +31,10 @@ export async function writeManagedModelsYml(
   await replaceFile(agentDir, "models.yml", yaml);
 }
 
-/** Key order is read by omp: limits, the reasoning pair, `thinking`, then `input`. */
+/**
+ * Key order is read by omp: limits, the reasoning pair, `thinking`, then `input`. `reasoning` and
+ * `input` are always written: omp fills an omitted field from its built-in catalog by id (#1563).
+ */
 function modelLines(model: CatalogModel): string[] {
   return [
     `      - id: ${JSON.stringify(model.id)}`,
@@ -44,7 +47,7 @@ function modelLines(model: CatalogModel): string[] {
           "        compat:",
           "          reasoningContentField: reasoning_content",
         ]
-      : []),
+      : ["        reasoning: false"]),
     // Only a MODEL_CATALOG reasoning model carries efforts; without them omp derives its own set.
     ...(model.efforts === undefined
       ? []
@@ -54,7 +57,9 @@ function modelLines(model: CatalogModel): string[] {
           "          efforts:",
           ...model.efforts.map((effort) => `            - ${JSON.stringify(effort)}`),
         ]),
-    ...(model.vision ? ["        input:", "          - text", "          - image"] : []),
+    "        input:",
+    "          - text",
+    ...(model.vision ? ["          - image"] : []),
   ];
 }
 
