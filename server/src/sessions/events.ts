@@ -11,12 +11,14 @@
  * Issue 1474 (design D8): published step.start, approval.request and thinking.end gain fields.
  * #1526 registers a `write` to `xd://browser` as a `browser` step with a readable detail; its mapper
  * step.start carries the audit fields as `browser` (never stored or published).
+ * #1568 (design D7): an `eval` step.end carries its `op:"browser"` status events as `browser` (ditto).
  */
 import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
 import type { OmpFrame } from "./omp/frame.js";
 import { type BrowserAudit, browserStart } from "./omp/xd-browser.js";
 import type { SessionTodo } from "./session-todo.js";
+import type { EvalBrowserAudit } from "./store-browser-audit.js";
 import type { ClosedSegment } from "./store-segments.js";
 import { classifyTurnFailure, type FailureReason, failureSentence } from "./upstream-classify.js";
 
@@ -51,7 +53,7 @@ export type ChatEvent<StepId extends string | number = number> =
         stepId: StepId;
         status: "done" | "failed";
         output: string;
-      };
+      } & (StepId extends number ? unknown : { browser?: EvalBrowserAudit });
     }
   | { type: "turn.end"; data: { messageId: number; status: "done" | "failed" | "stopped" } }
   | { type: "turn.retry"; data: { messageId: number } }
@@ -272,9 +274,10 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
   const { messageId } = state;
   const output = truncateStep(normalizeOutput(frame.result));
   const failed = frame.isError === true;
+  const browser = entry.name === "eval" ? evalBrowser(frame.result) : undefined;
   const stepEnd: ChatEvent<string> = {
     type: "step.end",
-    data: { messageId, stepId: id, status: failed ? "failed" : "done", output },
+    data: { messageId, stepId: id, status: failed ? "failed" : "done", output, ...browser },
   };
   // 工具名以 tool_execution_start 登记的为准；失败帧不推导候选。
   const events: ChatEvent<string>[] = [];
@@ -296,6 +299,25 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
     }),
     events,
   };
+}
+
+/**
+ * `eval`（不论成败）的 `details.statusEvents` 里自有 `op === "browser"` 的普通对象各成一项（自有字符串
+ * `detail` / `error`，否则 null），`statusEventsElided` 为正安全整数时记下；两者皆空则无字段。只读自有属性。
+ */
+function evalBrowser(result: unknown): { browser: EvalBrowserAudit } | undefined {
+  const details = asPlain(own(asPlain(result) ?? {}, "details")) ?? {};
+  const events = own(details, "statusEvents");
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  const calls = (Array.isArray(events) ? events : []).flatMap((item: unknown) => {
+    const event = asPlain(item);
+    return event === undefined || own(event, "op") !== "browser"
+      ? []
+      : [{ detail: text(own(event, "detail")), error: text(own(event, "error")) }];
+  });
+  const count = own(details, "statusEventsElided");
+  const elided = Number.isSafeInteger(count) && (count as number) > 0 ? (count as number) : null;
+  return calls.length > 0 || elided !== null ? { browser: { calls, elided } } : undefined;
 }
 
 /**

@@ -125,6 +125,16 @@ describe("fileChangeCandidates: rejected results", () => {
     ["read", { resolvedPath: "/ws/a.md" }],
     ["bash", { exitCode: 0, path: "a.md", diff: "+1|x" }],
     ["memory_edit", { path: "a.md", diff: "+1|x", resolvedPath: "/ws/a.md" }],
+    // #1568 turn-artifacts reducer side: an eval's screenshots are the supervisor's directory diff.
+    [
+      "eval",
+      {
+        language: "js",
+        images: [{ data: "AAAA", mimeType: "image/png" }],
+        statusEvents: [{ op: "browser", detail: "main.screenshot()" }],
+        resolvedPath: "/ws/screenshots/screenshot-1.png",
+      },
+    ],
   ])("tool %s never yields candidates", (toolName, details) => {
     expect(fileChangeCandidates(toolName, ok(details))).toEqual([]);
   });

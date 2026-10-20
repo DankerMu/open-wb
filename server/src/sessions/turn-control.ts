@@ -263,12 +263,13 @@ export function persistEvent(
         data: { messageId: event.data.messageId, stepId, name, detail, bodyOffset, approvalId },
       };
     }
+    // #1568: an eval step's browser calls are audited in the step end's transaction, never published.
     case "step.end": {
       const stepId = steps.toolIds.get(event.data.stepId);
       if (stepId === undefined) {
         return undefined;
       }
-      store.finishStep(stepId, event.data.status, event.data.output);
+      store.finishStep(stepId, event.data.status, event.data.output, event.data.browser);
       steps.ended(stepId);
       return {
         type: "step.end",
