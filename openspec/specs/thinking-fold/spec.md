@@ -112,7 +112,7 @@ SessionSupervisor SHALL 用 chat-stream「正文与思考增量的时间窗合�
 
 #### Scenario: 关闭 reasoning
 - **WHEN** 以 `MODEL_REASONING=off` 启动，托管 `models.yml` 被写出
-- **THEN** 模型条目无 `reasoning` 与 `compat` 键，文件与 model-proxy「托管 models.yml」规定的单模型输出逐字节相同（即其「Single-model output is unchanged」所比对的输出：改前夹具替换了 `maxTokens` 行之后的内容）；以 `MODEL_REASONING=maybe` 或空串启动时进程在写 `models.yml` 之前以配置错误退出（错误信息含变量名）
+- **THEN** 模型条目无 `reasoning` 与 `compat` 键，文件与 model-proxy「托管 models.yml」规定的单模型输出逐字节相同（同时 `MODEL_VISION=off` 时即其「Single-model output is unchanged」所比对的 vision-false 输出：改前夹具替换了 `maxTokens` 行之后的内容；`MODEL_VISION` 缺省 `on` 时另有 `input` 三行，见其「Single-model default declares image input」）；以 `MODEL_REASONING=maybe` 或空串启动时进程在写 `models.yml` 之前以配置错误退出（错误信息含变量名）
 
 ### Requirement: 思考时长记录与下发
 SessionSupervisor SHALL 用服务端注入时钟为每条助手消息记录思考时长。一段思考（span）SHALL 在 supervisor 处理该回合一条 `thinking.delta`（合并之前、按帧到达时刻）且当前没有开着的段时开始。开段之前 SHALL 先冲刷合并器（chat-stream「分段位置的记录与下发」的边界前冲刷：合并器里缓冲着的正文先发布）。开段时 supervisor SHALL 在同一事务里（同步写；写失败沿 owned error-sink 处理）把该消息的 `chat_messages.thinking_ms` 置为 NULL，并为这一段插入一行 `chat_thinking_segments`：`body_offset` 为此刻的正文已发布长度（chat-stream「分段位置的记录与下发」），`thinking_offset` 为此刻 `chat_messages.thinking` 已保存文本的 UTF-16 码元长度（含可能的截断标记；NULL 记 0），`steps_before` 为该消息此刻已开始的步骤数，`thinking_length` 与 `thinking_ms` 为 NULL。由此段开着期间快照的 `thinkingMs` 为 `null`，`thinkingSegments` 的末段 `thinkingLength` 与 `thinkingMs` 为 `null`。每一段（span）恰一行：前一段结束后即使中间没有正文、步骤或其它事件，再开的段也是新的一行，不与前一段合并。
