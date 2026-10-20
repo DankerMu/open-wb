@@ -41,7 +41,7 @@ omp 在 `--resume <file>` 时以该会话文件头记录的 cwd 为准（该目�
 - **WHEN** 官方 omp v18.12.3 经宿主 overlay（浏览器块 `enabled: true`、`relay: false`、`cmux: false`）与宿主 spawn 环境（`PUPPETEER_EXECUTABLE_PATH` 指向一个执行时先写标记文件再以非零退出的包装脚本）、档位 `yolo` 启动；会话工作目录里预置 `.env`，写 `PI_BROWSER_RELAY=1`、`PI_BROWSER_CMUX=1`、`CMUX_SOCKET_PATH=<临时目录下一个不存在的套接字路径>`、`PUPPETEER_PROXY=http://192.0.2.1:9` 与 `PUPPETEER_PROXY_IGNORE_CERT_ERRORS=1`，并预置项目层 `.omp/config.yml` 写 `browser: { relay: true, relayUrl: "http://192.0.2.1:9" }`（TEST-NET-1，不是本机地址，omp 不为它拉起中继守护进程）；会话的 prompt 含 `WORKBUDDY_BROWSER_OPEN:about:blank`（omp-test-harness「受控上游浏览器标记」：一个 `eval` 调用，JS 里 `browser.open`），回合结束
 - **THEN** 包装脚本的标记文件存在，且它记下的启动参数含 `--proxy-server=direct://`、不含 `192.0.2.1` 与 `--ignore-certificate-errors`（omp 选了本地浏览器启动路径：中继与 cmux 都被关掉时才会走到它）
 - **WHEN** 同一用例，但 spawn 环境里去掉 `PI_BROWSER_RELAY` 与 `PI_BROWSER_CMUX` 两个键（测试专用的 spawn 包装删除它们，作为入库的负向对照）
-- **THEN** 标记文件不存在，且该次 `eval` 步骤以失败结束、其结果文本含浏览器打开超时或中继不可用的 omp 原文而不含 `Shared browser daemon unavailable`（走了中继；具体文本由实现 PR 按首跑记入本场景）
+- **THEN** 标记文件不存在，且该次 `eval` 步骤以失败结束、其结果文本含浏览器打开超时或中继不可用的 omp 原文而不含 `Shared browser daemon unavailable`（走了中继；v18.12.3 首跑原文：`ToolError: Browser open timed out after 30000ms while launching or connecting to the browser (relay:http://192.0.2.1:9)`）
 
 #### Scenario: 参数与目录
 - **WHEN** 对 owner `u1` 的未绑定空间会话（`workspace_id` 为 null，有效档位 `write`，有效模型为缺省模型 `<MODEL_ID>`）首次 spawn 与 resume spawn
