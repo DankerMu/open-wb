@@ -34,7 +34,7 @@
 | server（app-server） | TypeScript + Node LTS | `.tool-versions`（nodejs 24.13.1） |
 | web（浏览器 SPA） | TypeScript，P0 引入 React + Vite | 同上 |
 | kbservice（知识库） | Python + uv | `kbservice/.python-version`（3.13） |
-| agent 后端 | omp fork（另仓，冻结 v18.0.10） | `resource/backend-research.md` §2 |
+| agent 后端 | omp fork（另仓，冻结 v18.12.3） | `resource/backend-research.md` §2 |
 | 工具 | Biome、Ruff、vitest、pytest、knip、jscpd | 根 `package.json` / `kbservice/pyproject.toml` |
 
 依赖政策：新增依赖须在 PR 说明为什么现有工具做不到；主版本升级须人工评审。
@@ -90,7 +90,7 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 | 守卫自身 | 注入违例自证 | `make test-guardrails` | 全 PASS |
 | HTTP smoke | Hurl（调用方拥有已运行服务） | `make smoke` | 退出码 0；public.hurl、auth.hurl、chat.hurl、files.hurl、session-meta.hurl 五文件真实 HTTP 断言全绿 |
 | UI 走查 | Playwright Chromium（调用方拥有已运行服务） | `make ui-walk` | 退出码 0；真实浏览器走查与 error oracle 全绿 |
-| omp-fetch | 官方 omp v18.0.10 二进制供给（SHA 校验） | `make omp-fetch` | 退出码 0；官方 v18.0.10 版本输出与 SHA256 校验 |
+| omp-fetch | 官方 omp v18.12.3 二进制供给（SHA 校验） | `make omp-fetch` | 退出码 0；官方 v18.12.3 版本输出与 SHA256 校验 |
 | 手动真实上游冒烟 | Hurl（调用方拥有已运行服务与真实上游） | `make smoke-live` | 退出码 0；非空 done 回复 |
 
 每行命令必须解析到真实 Makefile 目标；无验证命令的 surface 的改动是 review-only，PR 必须写明。

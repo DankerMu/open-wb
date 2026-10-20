@@ -1,6 +1,6 @@
 /**
  * Issue #984 (s1g tasks 1.1–1.3): the three approval tiers checked against the official omp
- * v18.0.10 binary — session-permission-tier Requirement「档位与 omp 审批模式」, the three real-omp
+ * v18.12.3 binary — session-permission-tier Requirement「档位与 omp 审批模式」, the three real-omp
  * scenarios, and design D2 checks (a)–(d), in the world of support/omp-official.ts. The host
  * overlay is the unchanged product file (it still says `tools.approvalMode: write`); only the argv
  * `--approval-mode` differs between cases. The oracles are omp's own approval requests as the
@@ -17,7 +17,7 @@
  * omp store a prompt text that starts with newlines (the wire text of an attachment-only message)
  * byte for byte, in `get_branch_messages` and in the reply to `branch`?
  *
- * Run locally: `make omp-fetch` (fetches the official v18.0.10 binary), then in `server/`
+ * Run locally: `make omp-fetch` (fetches the official v18.12.3 binary), then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-approval-modes.test.ts \
  *     test/omp-official-model-commands.test.ts --coverage=false
@@ -27,7 +27,7 @@
  * `make check` does not mean these checks ran: the output of the CI uid-isolation job is the
  * authority. When an omp upgrade turns a case red, the spec changes first.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
@@ -68,27 +68,30 @@ function asked(world: OfficialWorld): string[][] {
 }
 
 /**
- * Issue #1566 (task 2.3): every approval select of the turn has one of the two closed option shapes
- * of tool-approval「审批请求识别」 — `["Approve","Deny"]` (v18.0.10) or `["Approve","Approve <subject>
- * for this session","Deny"]` (v18.12.3). Group 6 narrows this to the three-item shape.
+ * Issue #1570 (task 6.3): every approval select of the turn is the tier-raised prompt's three-item
+ * shape of tool-approval「审批请求识别」, `["Approve","Approve <tool> for this session","Deny"]`
+ * (v18.12.3 `approvalChoiceLabels`; the subject is the tool name: no user policy record).
  */
-function expectApprovalOptions(frames: OmpFrame[], count: number): void {
+function expectApprovalOptions(frames: OmpFrame[], tool: Tool, count: number): void {
   const selects = frames.filter(
     (frame) =>
       frame.type === "extension_ui_request" &&
       frame.method === "select" &&
       String(frame.title).startsWith("Allow tool: "),
   );
-  expect(selects).toHaveLength(count);
-  for (const { options } of selects) {
-    const shape = Array.isArray(options) ? options.map(String) : [];
-    const three =
-      shape.length === 3 &&
-      shape[0] === "Approve" &&
-      /^Approve .+ for this session$/u.test(shape[1] ?? "") &&
-      shape[2] === "Deny";
-    expect(three || JSON.stringify(shape) === '["Approve","Deny"]', JSON.stringify(options)).toBe(
-      true,
+  expect(selects.map(({ options }) => options)).toEqual(
+    Array.from({ length: count }, () => ["Approve", `Approve ${tool} for this session`, "Deny"]),
+  );
+}
+
+/** omp-runtime「项目层放行不再绕过审批」: omp's file log has no settings fallback warning. */
+function expectNoSettingsWarning(world: OfficialWorld): void {
+  const logs = join(world.stateDir, "xdg", "state", "omp", "logs");
+  const names = readdirSync(logs).filter((name) => name.endsWith(".log"));
+  expect(names.length).toBeGreaterThan(0);
+  for (const name of names) {
+    expect(readFileSync(join(logs, name), "utf8")).not.toContain(
+      "Settings: ignoring invalid value",
     );
   }
 }
@@ -143,7 +146,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: approval tiers`, ()
       const frames = await collectPrompt(world.runtime.prompt(PROMPT[tool]));
 
       expect(asked(world)).toEqual(asks ? [[tool, `Allow tool: ${tool}`]] : []);
-      expectApprovalOptions(frames, asks ? 1 : 0);
+      expectApprovalOptions(frames, tool, asks ? 1 : 0);
       expectExecuted(world, frames, tool);
     },
   );
@@ -160,8 +163,9 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: approval tiers`, ()
       const frames = await collectPrompt(world.runtime.prompt(PROMPT.write));
 
       expect(asked(world)).toEqual([["write", "Allow tool: write"]]);
-      expectApprovalOptions(frames, 1);
+      expectApprovalOptions(frames, "write", 1);
       expectExecuted(world, frames, "write");
+      expectNoSettingsWarning(world);
     },
   );
 

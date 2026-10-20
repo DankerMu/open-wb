@@ -11,9 +11,9 @@
  *   tool, answers the model with an error result and the turn ends `done` with no UI request; the
  *   negative control swaps in the same overlay without its `ask:` block — through **both** argv
  *   `--config` and env `PI_CONFIG_FILES`, because omp reads `PI_CONFIG_FILES` first and appends
- *   `--config` (v18.0.10 `config/settings.ts:501-503`), so replacing only one keeps the pin — and the
- *   cancelled `ask` UI request aborts the turn (`stopped`). The scenario is worded for v18.12.3;
- *   v18.0.10 creates `ask` under the same gate (`tools/ask.ts:833`) and aborts on cancel the same way.
+ *   `--config` (v18.12.3 `config/settings.ts:676-677`), so replacing only one keeps the pin — and the
+ *   cancelled `ask` UI request aborts the turn (`stopped`): v18.12.3 creates `ask` only under
+ *   `canPromptUser ?? hasUI` (`tools/ask.ts:581`) and aborts the turn on a cancel (`:785-786`).
  * - The same scenario's request-count clause: one bash turn as the product spawns it and one with
  *   the argv rewritten to `--mode rpc` reach the fake upstream with the same number of requests,
  *   each naming the same model (`hasUI` must not add model calls).
@@ -58,15 +58,16 @@ const MODEL_ID = "deepseek-v4.1-flash";
 const UPSTREAM_KEY = "fake";
 const BASH_PROMPT = "跑一个命令";
 const ASK_PROMPT = "问我 WORKBUDDY_ASK 再说";
-/** The overlay's `ask` block, the last two lines of its fixed block (omp-runtime「overlay 写入」). */
+/** The overlay's `ask` block, two lines of its fixed block (omp-runtime「overlay 写入」). */
 const ASK_BLOCK = "\nask:\n  enabled: false\n";
 /**
  * The extension UI methods omp waits on for an answer. The others (`setWidget`, `setStatus`,
- * `notify`, `setTitle`, …) are fire-and-forget display frames (v18.0.10 `modes/rpc/rpc-mode.ts`):
- * the host cancels them like any non-approval request, and omp reads no answer.
+ * `notify`, `setTitle`, …) are fire-and-forget display frames (v18.12.3
+ * `modes/rpc/rpc-mode.ts:1482-1520`): the host cancels them like any non-approval request, and omp
+ * reads no answer.
  */
 const ANSWERED = new Set(["select", "confirm", "input", "editor"]);
-/** omp's whole tool result for a tool it does not have (#1566 first run; v18.0.10 = v18.12.3). */
+/** omp's whole tool result for a tool it does not have (#1566 first run, unchanged on v18.12.3). */
 const NO_ASK = "Tool ask not found";
 
 type Mode = "always-ask" | "write" | "yolo";

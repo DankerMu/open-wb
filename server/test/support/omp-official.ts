@@ -31,7 +31,7 @@ import { ensureOmpStateLayout, ompAgentDir } from "../../src/sessions/omp/state-
 import type { ApprovalDecision, ApprovalRequest } from "../../src/sessions/omp/ui-requests.js";
 import { type FakeUpstreamServer, type FakeUpstreamStartOptions, start } from "./fake-upstream.mjs";
 
-export const OMP_VERSION = "18.0.10";
+export const OMP_VERSION = "18.12.3";
 export const OMP_TEST_OFF = process.env.WORKBUDDY_OMP_TEST !== "1";
 const MODEL_ID = "deepseek-v4.1-flash";
 const UPSTREAM_KEY = "fake";

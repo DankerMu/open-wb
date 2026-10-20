@@ -3,7 +3,7 @@
 # 场景「真实浏览器打开工作空间页面并截图」；change omp-browser-integration design D8）。
 # 前提：同一 job 里已 `docker build -t workbuddy-app:ci -f deploy/app/Dockerfile .`；本脚本不推送、不发布。
 # (1) 构建期哨兵：随机值进构建 shell 环境与上下文根的点开头环境文件，以同一 Dockerfile 另建哨兵 tag
-#     （全程命中缓存），在镜像 Env、history、导出的根文件系统里搜；再在镜像里查身份、字体、无源码与开发依赖。
+#     （全程命中缓存），在镜像 Env、history、导出的根文件系统里搜；再在镜像里查身份、字体、无源码与开发依赖、omp 版本。
 # (2) 三个挂载目录属容器内 workbuddy（10001:10001），浏览器包装脚本只读挂到不在 PATH 上的 /opt/ci。
 # (3) 与 deploy/app/compose.yml 逐项相同的安全标志起容器（scripts/test-ci-harness.sh 把这一行钉成字面）；
 #     --network host 访问驱动在回环上的假上游，因此覆盖 HOST=127.0.0.1 与 job 专用端口——这是对 compose
@@ -64,6 +64,9 @@ docker run --rm --network none --entrypoint sh workbuddy-app:ci -c '
     ! test -e "$p" || { echo "$p is in the runtime image"; exit 1; }
   done' >&2 || die "image content check failed"
 echo "browser-image: identities $ids; chromium, Noto CJK present; no server sources or dev dependencies"
+omp_version="$(docker run --rm --network none --entrypoint /opt/workbuddy/omp workbuddy-app:ci --version)"
+[ "$omp_version" = "omp/18.12.3" ] || die "/opt/workbuddy/omp --version is '$omp_version', want 'omp/18.12.3'"
+echo "browser-image: $omp_version"
 
 # (2) 挂载目录与浏览器包装脚本（执行时在 /tmp 留标记，再交给镜像里的 chromium）。
 sudo install -d -o 10001 -g 10001 -m 0700 "$private"
@@ -71,9 +74,9 @@ sudo install -d -o 10001 -g 10001 -m 0750 "$sandbox" "$state"
 printf '%s\n' '#!/bin/sh' ': > /tmp/browser-wrapper.ran' 'exec /usr/bin/chromium "$@"' > "$wrapper"
 chmod 0755 "$wrapper"
 
-# (3) 起服务；MODEL_CATALOG / MODEL_VISION 不设，上游密钥显式给假值（哨兵不得漏进来）。
-# omp v18.0.10 ai/src/providers/vision-guard.ts（isTextOnlyDeepSeek）对任何 DeepSeek id 都剥掉图片部分、不看 models.yml 的 input，所以看图链路以中性的 MODEL_ID 证明。
-cid="$(docker run -d --network host --read-only --tmpfs /tmp --shm-size 1g --init --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL -v "$sandbox:/srv/workbuddy/sandbox" -v "$state:/srv/workbuddy/omp-state" -v "$private:/srv/workbuddy/private" -v "$wrapper:/opt/ci/browser-wrapper.sh:ro" -e HOST=127.0.0.1 -e PORT="$port" -e PREVIEW_PORT="$preview_port" -e BROWSER_BIN=/opt/ci/browser-wrapper.sh -e MODEL_UPSTREAM_BASE_URL="http://127.0.0.1:$forward_port/v1" -e MODEL_UPSTREAM_API_KEY=fake -e MODEL_ID=ci-vision-model workbuddy-app:ci)"
+# (3) 起服务；MODEL_CATALOG / MODEL_VISION / MODEL_ID 不设（缺省单模型 deepseek-v4.1-flash、看图缺省 on：#1560 的关闭凭据），
+#     上游密钥显式给假值（哨兵不得漏进来）。
+cid="$(docker run -d --network host --read-only --tmpfs /tmp --shm-size 1g --init --cap-drop ALL --cap-add SETUID --cap-add SETGID --cap-add KILL -v "$sandbox:/srv/workbuddy/sandbox" -v "$state:/srv/workbuddy/omp-state" -v "$private:/srv/workbuddy/private" -v "$wrapper:/opt/ci/browser-wrapper.sh:ro" -e HOST=127.0.0.1 -e PORT="$port" -e PREVIEW_PORT="$preview_port" -e BROWSER_BIN=/opt/ci/browser-wrapper.sh -e MODEL_UPSTREAM_BASE_URL="http://127.0.0.1:$forward_port/v1" -e MODEL_UPSTREAM_API_KEY=fake workbuddy-app:ci)"
 start=$SECONDS
 until [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port/api/healthz" || true)" = 200 ]; do
   [ "$(docker inspect -f '{{.State.Running}}' "$cid")" = true ] || die "the container exited before healthz"

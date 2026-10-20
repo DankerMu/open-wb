@@ -8,13 +8,11 @@
  * (design D6) adds the two `chat_approvals.step_id` writes of approval-pairing.ts: the step insert's
  * own transaction and the select-time update; both only ever set a NULL `step_id`. Issue 1474
  * (design D8) publishes them: the inserted step's offset, the closed segment's row and the snapshot's
- * segment rows are read here. Issue #1526 (design D6): a browser step's `session.browser` audit row is
- * written by the step insert's own transaction; without it (no emit, a failed write) no step row exists.
+ * segment rows are read here. Issue #1570 deletes #1526's `session.browser` row of the step insert:
+ * the audit is the eval step end's (store-browser-audit.ts).
  */
 import type { DatabaseSync } from "node:sqlite";
-import type { emit as auditEmit } from "../core/audit/index.js";
 import { HttpError } from "../core/errors/index.js";
-import type { BrowserAudit } from "./omp/xd-browser.js";
 import type { Turn } from "./store.js";
 import { requireChanges, runOwnedTransaction } from "./store-branch.js";
 import { createThinkingMsStore, storedThinking } from "./store-thinking.js";
@@ -25,8 +23,6 @@ export interface StartStepInput {
   detail: string;
   /** The queued approval's request id the step takes (approval-pairing.ts rule 1). */
   approval?: string | undefined;
-  /** A browser step's audit fields (the reducer's, from the full arguments). */
-  browser?: BrowserAudit;
 }
 
 /** The new step, its stored `body_offset` and the id of the approval row it paired (or null). */
@@ -89,7 +85,6 @@ export function startStep(
   turn: Turn | undefined,
   activeSteps: Map<number, number>,
   input: StartStepInput,
-  emit?: typeof auditEmit,
 ): StartedStep {
   if (turn === undefined) {
     throw new HttpError("not_found");
@@ -115,34 +110,10 @@ export function startStep(
     const { approval } = input;
     const paired =
       approval === undefined ? null : pairApproval(db, turn.assistantMessageId, approval, stepId);
-    if (input.browser !== undefined) {
-      auditBrowser(db, emit, turn.assistantMessageId, input.browser);
-    }
     return { stepId, bodyOffset, approvalId: paired };
   });
   activeSteps.set(started.stepId, turn.assistantMessageId);
   return started;
-}
-
-const SESSION_OWNER = `SELECT m.session_id, s.owner_id FROM chat_messages AS m
-           JOIN chat_sessions AS s ON s.id = m.session_id WHERE m.id = ?`;
-
-/** In the caller's transaction: the owner's `session.browser` row; throws without an emit. */
-function auditBrowser(
-  db: DatabaseSync,
-  emit: typeof auditEmit | undefined,
-  messageId: number,
-  { action, url, external }: BrowserAudit,
-): void {
-  if (emit === undefined) {
-    throw new Error("browser step requires an audit emit");
-  }
-  const row = db.prepare(SESSION_OWNER).get(messageId) as Record<string, string> | undefined;
-  if (row?.session_id === undefined || row.owner_id === undefined) {
-    throw new HttpError("not_found");
-  }
-  const detail = { sessionId: row.session_id, messageId, action, url, external };
-  emit(db, { kind: "session.browser", actorId: row.owner_id, title: "浏览器操作", detail });
 }
 
 /** Issue 1472 (design D3/D4): the thinking span's two writes, each one transaction. */

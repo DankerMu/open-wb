@@ -1,6 +1,6 @@
 /**
  * `GET /api/project-config` (#773 design D4): the project configuration files that exist at the
- * locations omp v18.0.10 reads for the cwd a session of the caller would run in. A list of files
+ * locations omp v18.12.3 reads for the cwd a session of the caller would run in. A list of files
  * present, not of files in effect: omp keeps one instruction file per directory level by provider
  * priority, and the host does not reproduce that. Same request rules as `GET /api/commands`
  * (`requestCwd`), same resolved directories as the project skills (`projectDirs`). The sandbox is
@@ -28,6 +28,10 @@ type EntryType = "dir" | "file" | "link" | "none";
 
 /** Agent definitions listed: the first ones in code-point order. */
 const MAX_AGENT_FILES = 64;
+/** The two `kind:"system"` files of `.omp`, `.agent(s)`, `.claude` and `.codex` (#1570). */
+const SYSTEM_FILES = ["SYSTEM.md", "SYSTEM_TEMPLATE.md"];
+/** `.gemini`'s two (#1570): its literal file is lower-case (omp `discovery/gemini.ts`). */
+const GEMINI_SYSTEM_FILES = ["system.md", "SYSTEM_TEMPLATE.md"];
 
 export function registerProjectConfigRoutes(
   app: FastifyInstance,
@@ -42,10 +46,12 @@ export function registerProjectConfigRoutes(
 
 /**
  * The files present at omp's read locations, ordered by depth, then by path in code-point order:
- * in every directory of the walk `AGENTS.md` and `.agents/AGENTS.md`; in the cwd `.claude/CLAUDE.md`;
- * in the nearest directory of the walk whose `.omp` holds an entry `.omp/AGENTS.md`, `.omp/RULES.md`
- * and, when that directory is the cwd, `.omp/SYSTEM.md`; and the agent definitions of the nearest
- * `.omp/agents`. `[]` when the cwd cannot be resolved inside the sandbox root. Never throws.
+ * in every directory of the walk `AGENTS.md` and, under `.agent` and `.agents`, `AGENTS.md` and the
+ * system files; in the cwd `.claude/CLAUDE.md`, the system files of `.claude` and `.codex`, and
+ * `.gemini/system.md` and `.gemini/SYSTEM_TEMPLATE.md`; in the nearest directory of the walk whose
+ * `.omp` holds an entry `.omp/AGENTS.md`, `.omp/RULES.md` and the system files; and the agent
+ * definitions of the nearest `.omp/agents`. `[]` when the cwd cannot be resolved inside the sandbox
+ * root. Never throws.
  */
 export function listProjectConfig(cwd: string, sandboxRoot: string): ConfigFile[] {
   const { chain, walk } = projectDirs(cwd, sandboxRoot);
@@ -55,22 +61,26 @@ export function listProjectConfig(cwd: string, sandboxRoot: string): ConfigFile[
       files.push({ path, kind, depth });
     }
   };
+  // Under a real directory `dir` only: its instruction files, then its system files.
+  const addUnder = (depth: number, dir: string, instructions: readonly string[]): void => {
+    if (entryType(chain[depth], dir) === "dir") {
+      for (const name of instructions) add(depth, `${dir}/${name}`);
+      for (const name of SYSTEM_FILES) add(depth, `${dir}/${name}`, "system");
+    }
+  };
   for (let depth = 0; depth < walk; depth += 1) {
     add(depth, "AGENTS.md");
-    if (entryType(chain[depth], ".agents") === "dir") {
-      add(depth, ".agents/AGENTS.md");
-    }
+    addUnder(depth, ".agent", ["AGENTS.md"]);
+    addUnder(depth, ".agents", ["AGENTS.md"]);
   }
-  if (entryType(chain[0], ".claude") === "dir") {
-    add(0, ".claude/CLAUDE.md");
+  addUnder(0, ".claude", ["CLAUDE.md"]);
+  addUnder(0, ".codex", []);
+  if (entryType(chain[0], ".gemini") === "dir") {
+    for (const name of GEMINI_SYSTEM_FILES) add(0, `.gemini/${name}`, "system");
   }
   const omp = nearestDir(chain.slice(0, walk), [".omp"], (entries) => entries.length > 0);
   if (omp !== null) {
-    add(omp.depth, ".omp/AGENTS.md");
-    add(omp.depth, ".omp/RULES.md");
-    if (omp.depth === 0) {
-      add(0, ".omp/SYSTEM.md", "system");
-    }
+    addUnder(omp.depth, ".omp", ["AGENTS.md", "RULES.md"]);
   }
   files.push(...agentFiles(chain));
   return files.sort(

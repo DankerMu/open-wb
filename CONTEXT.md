@@ -6,7 +6,7 @@
 ## 项目本质
 
 内网多用户 AI Agent Web 服务。三个自研/组装组件：**app-server**（业务后端）、**web SPA**、
-**kbservice**（知识库）；agent 执行由 **omp fork**（另仓，冻结 v18.0.10）以每会话子进程承担。
+**kbservice**（知识库）；agent 执行由 **omp**（钉住官方二进制 v18.12.3，ADR-0001）以每会话子进程承担。
 
 ## 领域术语
 

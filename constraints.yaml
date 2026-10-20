@@ -141,7 +141,7 @@ verification:
       required_at: "L2+"
     omp-fetch:
       command: "make omp-fetch"
-      evidence: "exit-code; verified official omp v18.0.10 version output and SHA256 match"
+      evidence: "exit-code; verified official omp v18.12.3 version output and SHA256 match"
       required_at: "prerequisite"
     smoke-live:
       command: "make smoke-live"

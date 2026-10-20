@@ -38,11 +38,10 @@ const WAIT_MS = 8_000;
 // Localhost idle bound: frames already written are readable immediately.
 const IDLE_MS = 250;
 
-// Issue #1527: omp-test-harness「受控上游浏览器标记」, written from the spec.
+// Issue #1527, eval form since #1570: omp-test-harness「受控上游浏览器标记」, written from the spec.
 const OPEN = "WORKBUDDY_BROWSER_OPEN:";
 const SHOT = "WORKBUDDY_BROWSER_SHOT";
-const SHOT_ARGS =
-  '{"path":"xd://browser","content":"{\\"action\\":\\"run\\",\\"code\\":\\"return await tab.screenshot()\\"}"}';
+const SHOT_ARGS = '{"language":"js","code":"await browser.tab(\\"main\\").screenshot();"}';
 const ATTACHED = {
   role: "user",
   content: [
@@ -51,9 +50,9 @@ const ATTACHED = {
   ],
 };
 
-/** The `open` call's arguments for `url`, as the spec spells them. */
+/** The `open` call's arguments for a `url` without `"` or `\\`, as the spec spells them. */
 function openArgs(url: string): string {
-  return `{"path":"xd://browser","content":"{\\"action\\":\\"open\\",\\"url\\":\\"${url}\\"}"}`;
+  return `{"language":"js","code":"await browser.open({ name: \\"main\\", url: \\"${url}\\" });"}`;
 }
 
 const TURN: FakeUpstreamStartOptions = { toolRoundScope: "turn" };
@@ -271,24 +270,40 @@ describe("toolRoundScope validation", () => {
   );
 });
 
-describe("browser markers (#1527): the tool round issues one write to xd://browser", () => {
+describe("browser markers (#1527, #1570): the tool round issues one eval call", () => {
   it("WORKBUDDY_BROWSER_OPEN:<url> opens the url up to the next whitespace", async () => {
     const port = await upstream();
     const text = `看页面 ${OPEN}file:///srv/ws/index.html 然后说结论`;
     const round = toolRoundOf(await chat(port, [{ role: "user", content: text }]));
     expect(round).toEqual({
-      calls: [{ name: "write", arguments: openArgs("file:///srv/ws/index.html") }],
+      calls: [{ name: "eval", arguments: openArgs("file:///srv/ws/index.html") }],
       content: [],
     });
     const args = JSON.parse((round.calls[0] as { arguments: string }).arguments) as unknown;
     expect(args).toEqual({
-      path: "xd://browser",
-      content: '{"action":"open","url":"file:///srv/ws/index.html"}',
+      language: "js",
+      code: 'await browser.open({ name: "main", url: "file:///srv/ws/index.html" });',
     });
   });
 
+  it("a url with a double quote and a backslash is embedded as its JSON string literal", async () => {
+    const port = await upstream();
+    const url = 'file:///a"b\\c.html';
+    const round = toolRoundOf(await chat(port, [{ role: "user", content: `${OPEN}${url} 看看` }]));
+    const [call] = round.calls as Array<{ name: string; arguments: string }>;
+    expect([round.calls.length, call?.name, round.content]).toEqual([1, "eval", []]);
+    const { language, code } = JSON.parse(call?.arguments ?? "") as Record<string, string>;
+    expect(language).toBe("js");
+    const head = 'await browser.open({ name: "main", url: ';
+    const tail = " });";
+    expect([code?.startsWith(head), code?.endsWith(tail)]).toEqual([true, true]);
+    expect(JSON.parse(code?.slice(head.length, -tail.length) ?? "")).toBe(url);
+    // No other escaping: the literal is exactly `"file:///a\"b\\c.html"`.
+    expect(code).toBe('await browser.open({ name: "main", url: "file:///a\\"b\\\\c.html" });');
+  });
+
   it("WORKBUDDY_BROWSER_SHOT takes a screenshot, on a first turn and on a later turn under turn scope", async () => {
-    const shot = { calls: [{ name: "write", arguments: SHOT_ARGS }], content: [] };
+    const shot = { calls: [{ name: "eval", arguments: SHOT_ARGS }], content: [] };
     const byDefault = await upstream();
     expect(toolRoundOf(await chat(byDefault, [{ role: "user", content: `截图 ${SHOT}` }]))).toEqual(
       shot,
@@ -300,10 +315,10 @@ describe("browser markers (#1527): the tool round issues one write to xd://brows
   it.each([
     ["WORKBUDDY_WRITE wins over OPEN", `${OPEN}about:blank ${WRITE}`, "write", WRITE_ARGS],
     ["WORKBUDDY_TODO wins over SHOT", `${SHOT} ${TODO}`, "todo", TODO_ARGS],
-    ["OPEN wins over SHOT", `${SHOT} ${OPEN}about:blank`, "write", openArgs("about:blank")],
+    ["OPEN wins over SHOT", `${SHOT} ${OPEN}about:blank`, "eval", openArgs("about:blank")],
     ["an empty url is no marker", `${OPEN} 看看`, "bash", BASH_ARGS],
     ["an empty url at the end of the text is no marker", `看看 ${OPEN}`, "bash", BASH_ARGS],
-    ["OPEN with WORKBUDDY_THINK", `${THINK} ${OPEN}about:blank`, "write", openArgs("about:blank")],
+    ["OPEN with WORKBUDDY_THINK", `${THINK} ${OPEN}about:blank`, "eval", openArgs("about:blank")],
   ])("precedence: %s", async (_label, text, name, args) => {
     const port = await upstream();
     const reply = await chat(port, [{ role: "user", content: text }]);

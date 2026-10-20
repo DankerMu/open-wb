@@ -7,23 +7,13 @@
  * `chat_steps.changes` column (never the snapshot projection, except where F2 compares the two)
  * and the error sink.
  */
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  realpathSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatEvent } from "../src/sessions/events.js";
-import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import {
-  assistantSteps,
   ofType,
   parseSse,
   prompted,
@@ -35,9 +25,7 @@ import { openEventStream, readUntil } from "./session-sse-helpers.js";
 import {
   assistantIdFor,
   closeAfterRetainedFault,
-  closeOnEof,
   containsMessage,
-  createControlledRuntime,
   createRealFakeRuntime,
   OWNER_ID,
   openRecordingSession,
@@ -501,151 +489,4 @@ describe("files.changed whose changes write fails", () => {
       expect(world.errors.filter((error) => containsMessage(error, SENTINEL))).toHaveLength(1);
     },
   );
-});
-
-/**
- * Issue #1526 turn-artifacts scenario「浏览器截图进入文件变更」 through the production assembly: omp's
- * browser frames (a `write` to `xd://browser` with `details.xdev.inner.screenshots`) come from a
- * scripted controlled child, as fake-omp has no browser scenario (design D9: it stays unchanged).
- * The screenshot file is created under the bound workspace before the turn, as omp would have.
- */
-describe("browser screenshots become file changes (#1526)", () => {
-  const SHOT_CONTENT = '{"action":"run","code":"return await tab.screenshot()"}';
-  const S1 = [{ path: "screenshots/s1.png", added: null, removed: null, kind: "write" }];
-
-  function browserCall(
-    id: string,
-    inner: unknown,
-    extra: { isError?: boolean; tool?: string } = {},
-  ) {
-    const start: OmpFrame = {
-      type: "tool_execution_start",
-      toolCallId: id,
-      toolName: "write",
-      args: { path: "xd://browser", content: SHOT_CONTENT },
-    };
-    const xdev = { tool: extra.tool ?? "browser", mode: "execute", inner };
-    const end: OmpFrame = {
-      type: "tool_execution_end",
-      toolCallId: id,
-      toolName: "write",
-      isError: extra.isError === true,
-      result: {
-        content: [{ type: "image", data: "AAAA", mimeType: "image/png" }],
-        details: { xdev },
-      },
-    };
-    return [start, end];
-  }
-
-  function shots(): unknown[] {
-    return [
-      { dest: "screenshots/s1.png" },
-      { dest: join(tmpdir(), "omp-sshots-9.png") },
-      { dest: "" },
-      { bytes: 3 },
-    ];
-  }
-
-  async function openBrowserWorld(bound: boolean, frames: OmpFrame[]): Promise<World> {
-    const controlled = createControlledRuntime((child) => {
-      closeOnEof(child);
-      child.onCommand("prompt", () => {
-        child.emitRaw(
-          [
-            { type: "agent_start" },
-            ...frames,
-            { type: "agent_end", messages: [], isTerminal: true },
-          ]
-            .map((frame) => `${JSON.stringify(frame)}\n`)
-            .join(""),
-        );
-      });
-    });
-    const { runtime } = controlled;
-    runtime.sandboxRoot = join(realpathSync(dirname(runtime.sandboxRoot)), "sandbox");
-    const world = await openRecordingSession(runtime);
-    cleanups.push(() => closeAfterRetainedFault(world.fixture, false));
-    if (!bound) {
-      const session = seedUnboundSession(world.fixture.db, OWNER_ID, UNBOUND_SESSION);
-      return { ...world, session, sandboxRoot: runtime.sandboxRoot, workspaceRoot: null };
-    }
-    const workspaceRoot = await bindWorkspace(world, runtime.sandboxRoot);
-    mkdirSync(join(workspaceRoot, "screenshots"));
-    writeFileSync(join(workspaceRoot, "screenshots", "s1.png"), "png");
-    return { ...world, sandboxRoot: runtime.sandboxRoot, workspaceRoot };
-  }
-
-  it(
-    "the workspace screenshot is the step's changes; the TMPDIR one, empty and missing dests are not",
-    REAL,
-    async () => {
-      const world = await openBrowserWorld(
-        true,
-        browserCall("b1", { action: "run", screenshots: shots() }),
-      );
-      await runTurn(world);
-
-      const assistant = assistantIdFor(world.fixture, world.session);
-      const [step] = stepRows(world.fixture.db);
-      expect(types(world)).toEqual([
-        "turn.start",
-        "step.start",
-        "files.changed",
-        "step.end",
-        "turn.end",
-      ]);
-      expect(events(world)[2]).toEqual({
-        type: "files.changed",
-        data: { messageId: assistant, stepId: step?.id, files: S1 },
-      });
-      expect([step?.name, step?.status, step?.changes]).toEqual([
-        "browser",
-        "done",
-        JSON.stringify(S1),
-      ]);
-      expect(assistantSteps(world).steps.map((row) => row.changes)).toEqual([S1]);
-      expect(world.errors).toEqual([]);
-    },
-  );
-
-  it(
-    "a failed call, xdev.tool other, object screenshots: no files.changed, changes null (prototypes: file-changes.test.ts)",
-    REAL,
-    async () => {
-      const world = await openBrowserWorld(true, [
-        ...browserCall("e1", { action: "run", screenshots: shots() }, { isError: true }),
-        ...browserCall("e2", { action: "run", screenshots: shots() }, { tool: "other" }),
-        ...browserCall("e4", { action: "run", screenshots: { 0: { dest: "screenshots/s1.png" } } }),
-      ]);
-      await runTurn(world);
-
-      expect(ofType(sessionEvents(world), "files.changed")).toEqual([]);
-      expect(ofType(sessionEvents(world), "step.end").map((event) => event.data.status)).toEqual([
-        "failed",
-        "done",
-        "done",
-      ]);
-      expect(stepRows(world.fixture.db).map((row) => [row.name, row.changes])).toEqual([
-        ["browser", null],
-        ["browser", null],
-        ["browser", null],
-      ]);
-      expect(world.errors).toEqual([]);
-    },
-  );
-
-  it("an unbound session's screenshot run publishes no files.changed", REAL, async () => {
-    const world = await openBrowserWorld(
-      false,
-      browserCall("u1", { action: "run", screenshots: shots() }),
-    );
-    await runTurn(world);
-
-    expect(types(world)).toEqual(["turn.start", "step.start", "step.end", "turn.end"]);
-    expect(stepRows(world.fixture.db).map((row) => [row.name, row.changes])).toEqual([
-      ["browser", null],
-    ]);
-    expect(world.errors).toEqual([]);
-  });
 });

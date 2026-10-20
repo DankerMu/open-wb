@@ -1,6 +1,6 @@
 /**
  * Issue #985 (s1g tasks 1.4, 1.5): model and effort commands checked against the official omp
- * v18.0.10 binary — model-selection Scenario「真实 omp 上的模型与强度」, design D8 checks (a)–(e), the
+ * v18.12.3 binary — model-selection Scenario「真实 omp 上的模型与强度」, design D8 checks (a)–(e), the
  * two D7 checks and D18 check (f), in the world of support/omp-official.ts. The managed
  * `models.yml` is hand-written with two models (the multi-model writer is s1g group 3, which waits
  * for these results). The oracles are omp's own RPC answers (`get_available_models`, `get_state`),
@@ -15,7 +15,7 @@
  * run and frozen; every observed value is also printed as a `[model-commands] ` line, which is what
  * s1g task 1.6 transcribes from the CI log.
  *
- * Run locally: `make omp-fetch` (fetches the official v18.0.10 binary), then in `server/`
+ * Run locally: `make omp-fetch` (fetches the official v18.12.3 binary), then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-approval-modes.test.ts \
  *     test/omp-official-model-commands.test.ts --coverage=false
@@ -40,15 +40,23 @@ import { collectPrompt } from "./support/omp-runtime.js";
 /** `/compact` answers its prompt first and reports late: the runtime waits up to 120 s for it. */
 const CASE = { timeout: 480_000 };
 const PROVIDER = "workbuddy";
-/** The world's argv `--model`; in `models.yml` it declares `reasoning: true` and nothing else. */
+/**
+ * The world's argv `--model`. omp v18.12.3's built-in catalog knows this id as `reasoning: true`,
+ * `input: [text, image]`; `models.yml` declares both the other way round (`reasoning: false`,
+ * `input: [text]`, no `compat`), so the listed values prove the explicit keys win (#1570, D6).
+ */
 const PLAIN = "deepseek-v4.1-flash";
 /** The second model: `thinking` with two efforts, and image input. */
 const EFFORT = "workbuddy-second";
 const ALLOWED = [PLAIN, EFFORT];
 const LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "auto"] as const;
-/** Set on the first model before the switch: does `set_model` carry the level over or reset it? */
+/**
+ * Set on the first model before the switch: does `set_model` carry the level over or reset it?
+ * v18.12.3 first run (#1570): the `reasoning: false` model accepts `off` and the effort model then
+ * reports `off`.
+ */
 const CARRIED_LEVEL = "off";
-/** Left on the second model after its table, so the resumed `get_state` has something to keep. */
+/** Left on the second model after its table: does the resumed `get_state` keep it? */
 const LEFT_LEVEL = "low";
 
 type Row = [level: string, observed: unknown];
@@ -66,9 +74,8 @@ function modelsYml(proxyBaseUrl: string): string {
     `        name: ${JSON.stringify(PLAIN)}`,
     "        contextWindow: 128000",
     "        maxTokens: 8192",
-    "        reasoning: true",
-    "        compat:",
-    "          reasoningContentField: reasoning_content",
+    "        reasoning: false",
+    "        input: [text]",
     `      - id: ${JSON.stringify(EFFORT)}`,
     `        name: ${JSON.stringify(EFFORT)}`,
     "        contextWindow: 128000",
@@ -186,20 +193,22 @@ const counts = (requests: FakeUpstreamRequest[]) => requests.map((request) => re
 
 /**
  * Frozen from the first run (2026-10-07, darwin-arm64): what omp does, not what the spec hoped for.
- * `get_available_models` gives the `reasoning: true`-only entry an effort set of its own, and
- * `set_thinking_level` never refuses a value: it reports the nearest declared effort at or below the
- * one asked for (else the lowest), and `auto` comes back as `high`.
+ * `set_thinking_level` never refuses a value: on the effort model it reports the nearest declared
+ * effort at or below the one asked for (else the lowest), and `auto` comes back as `high`.
+ * Re-frozen on v18.12.3 (#1570 first run, 2026-10-20, darwin-arm64) with the first model now
+ * `reasoning: false`: `get_available_models` lists it without `thinking`, and after every level but
+ * `off` its `get_state` carries no `thinkingLevel` (omp omits undefined keys; `null` here).
  */
-const PLAIN_THINKING = { mode: "effort", efforts: ["low", "high", "max"] };
+const PLAIN_THINKING = undefined;
 const PLAIN_TABLE: Row[] = [
   ["off", "off"],
-  ["minimal", "low"],
-  ["low", "low"],
-  ["medium", "low"],
-  ["high", "high"],
-  ["xhigh", "high"],
-  ["max", "max"],
-  ["auto", "high"],
+  ["minimal", null],
+  ["low", null],
+  ["medium", null],
+  ["high", null],
+  ["xhigh", null],
+  ["max", null],
+  ["auto", null],
 ];
 const EFFORT_TABLE: Row[] = [
   ["off", "off"],
@@ -211,8 +220,12 @@ const EFFORT_TABLE: Row[] = [
   ["max", "high"],
   ["auto", "high"],
 ];
-/** Frozen: the resumed process is on the argv `--model` again, with the level the session had. */
-const RESUMED = { model: [PROVIDER, PLAIN], level: LEFT_LEVEL };
+/**
+ * Frozen: the resumed process is on the argv `--model` again. Re-frozen on v18.12.3 (#1570): that
+ * model is `reasoning: false`, so `get_state` carries no level (the previous pin's `reasoning: true`
+ * first model reported the session's `LEFT_LEVEL`).
+ */
+const RESUMED = { model: [PROVIDER, PLAIN], level: null };
 
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: model and effort commands`, () => {
   it(
@@ -292,8 +305,10 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: model and effort co
       // D7.
       expect(listed.get(EFFORT)?.thinking).toEqual({ mode: "effort", efforts: ["low", "high"] });
       expect(listed.get(EFFORT)?.input).toEqual(["text", "image"]);
+      expect(listed.get(EFFORT)?.reasoning).toBe(true);
       expect(listed.get(PLAIN)?.thinking).toEqual(PLAIN_THINKING);
       expect(listed.get(PLAIN)?.input).toEqual(["text"]);
+      expect(listed.get(PLAIN)?.reasoning).toBe(false);
       // The tool round ran, and nothing but turns reached the upstream.
       expect(firstFrames.at(-1)?.type).toBe("agent_end");
       expect(firstFrames.filter((frame) => frame.type === "tool_execution_end")).toHaveLength(1);

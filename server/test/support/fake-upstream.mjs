@@ -48,7 +48,7 @@ const TODO_ARGS = JSON.stringify({
 const ASK_ARGS = JSON.stringify({
   questions: [{ id: "q1", question: "继续吗？", options: [{ label: "是" }, { label: "否" }] }],
 });
-const BROWSER_SHOT_ARGS = browserArgs({ action: "run", code: "return await tab.screenshot()" });
+const BROWSER_SHOT_ARGS = evalArgs('await browser.tab("main").screenshot();');
 const GATE_PREFIX = "/__control/gates/";
 const REQUESTS_PATH = "/__control/requests";
 const REQUESTS_CAP = 1000;
@@ -524,9 +524,9 @@ function toolFollowsLastUser(messages) {
 }
 
 /**
- * omp v18.0.10 appends, after tool results carrying images, a `user` message whose content starts
- * with the text `Attached image(s) from tool result:` (openai-completions.ts:2338-2357). It belongs
- * to the tool results: the round rule and the last-user-text lookup skip it (#1527, design D9).
+ * omp v18.12.3 appends, after tool results carrying images, a `user` message whose content starts
+ * with the text `Attached image(s) from tool result:` (openai-completions.ts:2830). It belongs to the
+ * tool results: the round rule and the last-user-text lookup skip it (#1527, design D9).
  */
 function isImageAttachment(messages, index) {
   const first = Array.isArray(messages[index].content) ? messages[index].content[0] : undefined;
@@ -547,8 +547,9 @@ function browserOpenUrl(text) {
   return url === "" ? undefined : url;
 }
 
-function browserArgs(content) {
-  return JSON.stringify({ path: "xd://browser", content: JSON.stringify(content) });
+/** omp v18.12.3 drives its browser from the `eval` tool's JS prelude (#1570): one js cell. */
+function evalArgs(code) {
+  return JSON.stringify({ language: "js", code });
 }
 
 /** 工具轮只发一个调用：WRITE、TODO、ASK（#1566）、浏览器 OPEN、SHOT（#1527）依次优先，都没有即缺省 bash。 */
@@ -564,10 +565,11 @@ function toolRoundCall(text) {
   }
   const url = browserOpenUrl(text);
   if (url !== undefined) {
-    return { name: "write", arguments: browserArgs({ action: "open", url }) };
+    const code = `await browser.open({ name: "main", url: ${JSON.stringify(url)} });`;
+    return { name: "eval", arguments: evalArgs(code) };
   }
   if (text.includes(BROWSER_SHOT_MARKER)) {
-    return { name: "write", arguments: BROWSER_SHOT_ARGS };
+    return { name: "eval", arguments: BROWSER_SHOT_ARGS };
   }
   return { name: "bash", arguments: TOOL_ARGS };
 }

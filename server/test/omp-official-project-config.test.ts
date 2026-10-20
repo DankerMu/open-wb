@@ -1,6 +1,6 @@
 /**
  * Issue #815 (#773 task 3.1): the location table of chat-sessions Requirement「项目配置文件列表」
- * pinned against the official omp v18.0.10 binary, in the world of support/omp-official.ts (cwd
+ * pinned against the official omp v18.12.3 binary, in the world of support/omp-official.ts (cwd
  * `u1/proj`, depth 1 `u1`, the sandbox root at depth 2 holding the `.git` test device). Each case
  * plants only the files it names, each with a unique marker, and asks the freshly started process
  * for `get_state`: an instruction or system file is read when its marker is in `systemPrompt`, an
@@ -15,8 +15,15 @@
  * (`unmarked`); rows that plant their own `${CWD}/.git/` and the depth-0 rows run as the product
  * does; the agents rows, which no `.git` bounds, run both ways; the「with the host marker」rows are
  * the product's outcome for the same files one level up (omp-runtime「祖先的系统提示不再进入会话
- * （真实 omp）」, the part v18.0.10 can show). `.clinerules` is not bounded by `.git` (omp's cline
- * provider walks to the filesystem root), pinned here as the residual ADR-0012 part 三 registers.
+ * （真实 omp）」). `.clinerules` is not bounded by `.git` (omp's cline provider walks to the
+ * filesystem root), pinned here as the residual ADR-0012 part 三 registers.
+ *
+ * #1570 (task 6.3): the system-file rows of v18.12.3, by code reading first and then run here —
+ * `.omp/SYSTEM.md` and the new `.omp/SYSTEM_TEMPLATE.md` come from the nearest non-empty `.omp` of
+ * the walk, `.agent|.agents` add `AGENTS.md` / `SYSTEM.md` / `SYSTEM_TEMPLATE.md` at every level of
+ * it, `.claude|.codex` `SYSTEM.md` / `SYSTEM_TEMPLATE.md` and `.gemini` `system.md` /
+ * `SYSTEM_TEMPLATE.md` are read in the cwd only. omp keeps one project system file (a `SYSTEM.md`
+ * beats a `SYSTEM_TEMPLATE.md`, which replaces the whole prompt), so each row plants one file alone.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -55,6 +62,7 @@ const instructions = (path: string, depth: number): Listed => ({
   kind: "instructions",
   depth,
 });
+const system = (path: string, depth: number): Listed => ({ path, kind: "system", depth });
 const agent = (path: string, depth: number): Listed => ({ path, kind: "agent", depth });
 
 /** One table row: the file alone at depth 0 and alone at depth 1, with no `.git` in between. */
@@ -94,7 +102,17 @@ const CASES: Case[] = [
   ...row(".claude/CLAUDE.md", "instructions", false),
   ...row(".omp/AGENTS.md", "instructions", true),
   ...row(".omp/RULES.md", "instructions", true),
-  ...row(".omp/SYSTEM.md", "system", false),
+  ...row(".omp/SYSTEM.md", "system", true),
+  ...row(".omp/SYSTEM_TEMPLATE.md", "system", true),
+  ...row(".agent/AGENTS.md", "instructions", true),
+  ...[".agent", ".agents"].flatMap((dir) =>
+    ["SYSTEM.md", "SYSTEM_TEMPLATE.md"].flatMap((name) => row(`${dir}/${name}`, "system", true)),
+  ),
+  ...[".claude", ".codex"].flatMap((dir) =>
+    ["SYSTEM.md", "SYSTEM_TEMPLATE.md"].flatMap((name) => row(`${dir}/${name}`, "system", false)),
+  ),
+  // Gemini's literal file is lower-case `system.md` (`discovery/gemini.ts`).
+  ...["system.md", "SYSTEM_TEMPLATE.md"].flatMap((name) => row(`.gemini/${name}`, "system", false)),
   ...row(".omp/agents/reviewer.md", "agent", true),
   {
     name: "a cwd .omp holding only an unrelated entry hides the parent's .omp/AGENTS.md and .omp/RULES.md",
@@ -171,7 +189,20 @@ const CASES: Case[] = [
     host: [instructions("AGENTS.md", 2)],
     via: "unmarked",
   },
-  ...["AGENTS.md", ".agents/AGENTS.md", ".omp/AGENTS.md", ".omp/RULES.md"].map(marked),
+  ...[
+    "AGENTS.md",
+    ".agents/AGENTS.md",
+    ".omp/AGENTS.md",
+    ".omp/RULES.md",
+    ".omp/SYSTEM.md",
+    ".omp/SYSTEM_TEMPLATE.md",
+    ".agent/AGENTS.md",
+    ".agent/SYSTEM.md",
+    ".agent/SYSTEM_TEMPLATE.md",
+    ".agents/SYSTEM.md",
+    ".agents/SYSTEM_TEMPLATE.md",
+  ].map(marked),
+  ...ancestors(),
   {
     name: "with the host marker, AGENTS.md one level up is not read while .omp/agents there is",
     files: { "MARK-D1": `${UP}/AGENTS.md`, "MARK-FAR": `${UP}/.omp/agents/far.md` },
@@ -186,6 +217,46 @@ const CASES: Case[] = [
     host: [],
   },
 ];
+
+/**
+ * omp-runtime「祖先的系统提示不再进入会话（真实 omp）」: four system-prompt markers above the cwd
+ * (`u1/.omp/SYSTEM.md`, `u1/.omp/SYSTEM_TEMPLATE.md`, the sandbox root's `.omp/SYSTEM_TEMPLATE.md`,
+ * `u1/AGENTS.md`) and a `far` agent at the sandbox root, the cwd without `.omp`. With the host marker
+ * none of the four is read and `far` still is; with the marker removed the `u1/.omp/SYSTEM.md`
+ * marker is read (the other three as the first run of 2026-10-20 showed: the nearest non-empty
+ * `.omp` is `u1`'s, whose `SYSTEM.md` beats its template).
+ */
+function ancestors(): Case[] {
+  const files = {
+    "MARK-SYS": `${UP}/.omp/SYSTEM.md`,
+    "MARK-TPL": `${UP}/.omp/SYSTEM_TEMPLATE.md`,
+    "MARK-ROOT-TPL": `${ROOT}/.omp/SYSTEM_TEMPLATE.md`,
+    "MARK-AGENTS": `${UP}/AGENTS.md`,
+    "MARK-FAR": `${ROOT}/.omp/agents/far.md`,
+  };
+  return [
+    {
+      name: "with the host marker, no ancestor system prompt file is read while the far agent is",
+      files,
+      read: ["MARK-FAR"],
+      unread: ["MARK-SYS", "MARK-TPL", "MARK-ROOT-TPL", "MARK-AGENTS"],
+      host: [agent(".omp/agents/far.md", 2)],
+    },
+    {
+      name: "negative control: with the marker removed, the parent's .omp/SYSTEM.md is read",
+      files,
+      read: ["MARK-SYS", "MARK-AGENTS", "MARK-FAR"],
+      unread: ["MARK-TPL", "MARK-ROOT-TPL"],
+      host: [
+        system(".omp/SYSTEM.md", 1),
+        system(".omp/SYSTEM_TEMPLATE.md", 1),
+        instructions("AGENTS.md", 1),
+        agent(".omp/agents/far.md", 2),
+      ],
+      via: "unmarked",
+    },
+  ];
+}
 
 /** Every case once per way it starts omp. */
 const RUNS = CASES.flatMap(

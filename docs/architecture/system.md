@@ -13,7 +13,7 @@ API 端点清单（属 spec 阶段）。
 ## 2. 约束
 
 - 内网单机部署包（P4），无公网依赖；部署包带 fuse3 + rclone（ADR-0003）。
-- omp fork 冻结 v18.0.10，只经 stdio JSONL RPC 驱动（ADR-0001）。
+- omp 钉住官方二进制 v18.12.3（ADR-0001 2026-10-20 补充；原 fork 冻结方案作废），只经 stdio JSONL RPC 驱动。
 - omp 与 kb-service 不感知租户；多租户逻辑全在 app-server（PLAN §2 决策 3）。
 - CONTEXT.md 五条不变量，尤其：凭证不进 omp 环境（不变量 4）、沙箱越界拒绝+审计（不变量 3）。
 - `app-reference/` 只读参照，内容不进产物。
@@ -367,7 +367,7 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 | 10 s 内没有建立 DNS/TCP/TLS 传输 | 424 | `no_connect` | `模型服务在 10 秒内没有建立连接` | 不重试 |
 | 发出请求后 120 s 内没有响应头 | 424 | `no_response` | `模型服务在 120 秒内没有返回响应` | 不重试 |
 
-- **为什么是 424 与这几个记号名**：omp v18.0.10 的传输层对 408、429 与 ≥500 重试，provider 层对 4xx（408、429 除外）不重放，会话层看的是**文本**——出现 `timeout`、`timed out`、独立的 `429|500|502|503|504`、`upstream connect`、`server error` 等就重试。424 不在前两层的重试集合里，三份正文与记号名都避开了这些字样：用 `no_connect` 不用 `connect_timeout`（含 `timeout`），用 `gateway_504` 不用 `status.504`（`.` 是词界，`_5` 不是）。400 / 413 会让 omp 写请求转储并在文本末尾带出服务器路径，401 / 403 会被当成鉴权失败，402 算额度不足，都不能用。依据见 #909 design D6、D7。
+- **为什么是 424 与这几个记号名**：omp 的传输层（v18.12.3 `ai/src/utils/openai-http.ts:33`，每轮 6 次尝试；provider 层再重放一次，一轮 12 次、overlay `maxRetries: 1` 下两轮 24 次，#1570 首跑与翻转前相同）对 408、429 与 ≥500 重试，provider 层对 4xx（408、429 除外）不重放，会话层看的是**文本**——出现 `timeout`、`timed out`、独立的 `429|500|502|503|504`、`upstream connect`、`server error` 等就重试。424 不在前两层的重试集合里，三份正文与记号名都避开了这些字样：用 `no_connect` 不用 `connect_timeout`（含 `timeout`），用 `gateway_504` 不用 `status.504`（`.` 是词界，`_5` 不是）。400 / 413 会让 omp 写请求转储并在文本末尾带出服务器路径，401 / 403 会被当成鉴权失败，402 算额度不足，都不能用。依据见 #909 design D6、D7。
 - **期限**：120 s 只限等响应头，收到响应头之后（流已开始）不再计时。10 s 建连期限在传输建立时结束，与 120 s 并存；到期回不可重试的 424——以前回可重试的 502，omp 会再试多轮。连接被拒、重置这类**快**失败仍是可重试的 502。两个期限是 `registerModelProxy` 的可选项（`connectDeadlineMs`、`firstByteDeadlineMs`），生产装配不传，取缺省 10000 / 120000 ms；没有环境变量能改它们。
 - **实测**（2026-10-14，官方 omp v18.0.10 经代理，本地假上游，`server/test/omp-official-upstream-failure.test.ts`；测试注入了短期限）：首字节期限注入 3 s → 上游 1 次请求、无重试帧，回合 5.1–5.2 s 失败；建连期限注入 1 s、指向只接受 TCP 的监听 → 恰 1 个连接、假上游 0 次请求、无重试帧，3.8–4.0 s 失败；上游延迟 2 s 后答 504 → 1 次请求、无重试帧，4.1–4.2 s 失败（各两次运行）。期限到期或上游应答之后，omp 还要约 2–3 s 才以 failed 收尾（首字节 2.1–2.2 s、建连 2.8–3.0 s、504 2.1–2.2 s；上游 401 的整个回合 2.1–2.3 s）。由此**推算**生产缺省下：建连卡住约 13 s、不回响应头约 122 s、上游自己答 504 / 524 约在它应答后 2 s 结束。
 - **≥500 的节选**：代理最多读上游错误正文的前 16 KiB、自收到响应头起最多 5 s（`content-encoding` 不是缺省或 `identity` 时不读），按 UTF-8 解码，删控制字符与 omp 的 `raw-http-request=` 行，把上游密钥、base URL 原串及其 userinfo、密码、路径（与其中不短于 8 个字符的路径段）、查询串替换为 `[已移除]`，`Bearer …` 与 `sk-…` 同样替换；正文没读到结尾（撞上 16 KiB 或 5 s 上限、出错或连接关闭）时，替换后末尾若是上述某个密钥的开头（按替换后的样子比较：密钥开头里已被替换的较短密钥读作 `[已移除]`）或不足 16 位的 `sk-…`，一并丢掉；换行与制表符折成一个空格，至多 1000 个码点（超出时末尾为 `…（已截断）`）。504 / 524 不读正文，所以这两种失败看不到上游原文。
@@ -439,25 +439,33 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 
 ### 9.8 浏览器与参考镜像（#912，change `omp-browser-integration`）
 
-本节写配置项 `BROWSER_BIN`（#1529）、omp 的启动模式与宿主自答的浏览器盲卡（#1566）、会话工作目录的仓库根标记（#1567）、宿主 overlay 的固定块（#1564）与浏览器部分（#1527）、参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」「会话工作目录的仓库根标记」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
+本节写配置项 `BROWSER_BIN`（#1529）、omp 的启动模式与宿主自答的浏览器盲卡（#1566）、会话工作目录的仓库根标记（#1567）、宿主 overlay 的固定块（#1564）与浏览器部分（#1527）、参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」「会话工作目录的仓库根标记」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」与「2026-10-20 补充（#1563）」；#1570 把钉住的 omp 翻到 v18.12.3，本节以该版本为准，浏览器经 `eval` 驱动的部分见下文「浏览器经 `eval` 驱动」。
 
 **配置 `BROWSER_BIN`**：可选，omp 浏览器工具使用的 Chromium/Chrome 可执行文件。
 
-- 未设置：部署没有浏览器。overlay 浏览器块为 `enabled: false`，助手没有浏览器工具，omp 也不会去下载 Chrome-for-Testing。
+- 未设置：部署没有浏览器。overlay 浏览器块为 `enabled: false`，omp 不装浏览器 prelude（`eval` 的 JS 里没有 `browser` 对象，调用报 `ReferenceError: browser is not defined`），也不会去下载 Chrome-for-Testing。
 - 设置时必须是绝对路径，跟随符号链接后是服务进程（应用用户）可执行的普通文件。Debian 的 `/usr/bin/chromium` 是包装脚本，也合法；取值原样传下去，符号链接不被解析。空串、相对路径、不存在、目录、无执行权限都使启动失败，和其它非法配置一样只留一条 `server_start_failed`（`reason: config`），错误只点名 `BROWSER_BIN`、不回显取值。
 - 合法时 overlay 浏览器块为 `enabled: true`，每个 omp 子进程（会话、fork 临时进程、regenerate；直连与 `OMP_USER` sudo 两种形态）的环境带 `PUPPETEER_EXECUTABLE_PATH=<BROWSER_BIN>`，omp 直接用它，不再自己找浏览器或下载。父进程环境里的 `PUPPETEER_EXECUTABLE_PATH` 不传给 omp，只认 `BROWSER_BIN`。
 - `OMP_USER` 部署：启动校验只以应用用户身份检查，omp 用户能否执行该文件由部署保证（系统包装的 `0755` 文件即可）。sudo 的 `--preserve-env=` 固定列表末尾已含 `PUPPETEER_EXECUTABLE_PATH`，sudoers 不用改（`SETENV:` 已允许）。
-- 启动校验之后该文件被删除或替换，不在宿主的检查范围内。omp 照样用 `PUPPETEER_EXECUTABLE_PATH` 的取值、不检查它是否存在，浏览器启动失败，不另行查找或下载（读 v18.0.10 源码 `tools/browser/launch.ts:192-194` 推出）。
+- 启动校验之后该文件被删除或替换，不在宿主的检查范围内。omp 照样用 `PUPPETEER_EXECUTABLE_PATH` 的取值、不检查它是否存在，浏览器启动失败，不另行查找或下载（读 v18.12.3 源码 `tools/browser/launch.ts:277-294` 推出：`PUPPETEER_EXECUTABLE_PATH` 恒优先）。
 
-**spawn 环境恒钉中继与 cmux**：每个 omp 子进程的环境都带 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`，与是否设置 `BROWSER_BIN` 无关，sudo 的 `--preserve-env=` 也保留这两个键。omp 以这两个变量为浏览器中继与 cmux 的最终开关，非空时压过设置与工具参数；不钉的话，模型写进工作目录 `.env` 的 `PI_BROWSER_RELAY=1` 会在下一次 spawn 时打开中继，绕过 overlay 的 `relay: false`，且确认卡与审计都看不到。取值必须是字面量 `0`：omp 的 dotenv 只填未设或为空的变量，空串挡不住。结果是中继与 cmux 在任何设置与参数下都不启用，`app.relay: true` 的调用退回本地浏览器。部署方自己在服务环境里设的这两个变量同样不起作用。同理恒钉 `PUPPETEER_PROXY=direct://`、`PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0`（sudo 同样保留）：omp 从这两个变量拼浏览器的 `--proxy-server` 与 `--ignore-certificate-errors`，不钉的话工作目录 `.env` 能给浏览器挂代理、关证书校验；钉住后浏览器恒直连（`direct://` 也压过环境里的 `http_proxy` 等）、校验证书。实测见 `server/test/omp-official-browser.test.ts`（官方 v18.0.10）。
+**spawn 环境恒钉中继与 cmux**：每个 omp 子进程的环境都带 `PI_BROWSER_RELAY=0`、`PI_BROWSER_CMUX=0`，与是否设置 `BROWSER_BIN` 无关，sudo 的 `--preserve-env=` 也保留这两个键。omp 以这两个变量为浏览器中继与 cmux 的最终开关，非空时压过设置与工具参数；不钉的话，模型写进工作目录 `.env` 的 `PI_BROWSER_RELAY=1` 会在下一次 spawn 时打开中继，绕过 overlay 的 `relay: false`，且确认卡与审计都看不到。取值必须是字面量 `0`：omp 的 dotenv 只填未设或为空的变量，空串挡不住。结果是中继与 cmux 在任何设置与参数下都不启用，`app.relay: true` 的调用退回本地浏览器。部署方自己在服务环境里设的这两个变量同样不起作用。同理恒钉 `PUPPETEER_PROXY=direct://`、`PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0`（sudo 同样保留）：omp 从这两个变量拼浏览器的 `--proxy-server` 与 `--ignore-certificate-errors`，不钉的话工作目录 `.env` 能给浏览器挂代理、关证书校验；钉住后浏览器恒直连（`direct://` 也压过环境里的 `http_proxy` 等）、校验证书。实测见 `server/test/omp-official-browser.test.ts`（官方 v18.12.3；中继被钉时 `app.relay: true` 退回本地启动、argv 带 `--proxy-server=direct://`，去掉钉的对照以 `Browser open timed out … (relay:http://192.0.2.1:9)` 失败）。
 
-**omp 以 `--mode rpc-ui` 启动**（#1566，change `omp-pin-18-12` design D2 / D3）：此前是 `--mode rpc`。两者的握手、帧、命令与 `get_state` 相同（官方 v18.0.10 与 v18.12.3 实测逐项相同），区别只在工具 UI：v18.12.3 的浏览器是 `eval` 工具的 prelude，`write` / `always-ask` 档下 prelude 对每次 `browser.*` 调用另要一次审批，这次审批只有 `rpc-ui` 送到协议上，plain `rpc` 下调用直接失败。宿主把 omp 的 UI 请求分三类：
+**omp 以 `--mode rpc-ui` 启动**（#1566，change `omp-pin-18-12` design D2 / D3）：此前是 plain `rpc` 模式。两者的握手、帧、命令与 `get_state` 相同（2026-10-20 实测，官方 v18.0.10 与 v18.12.3 逐项相同），区别只在工具 UI：v18.12.3 的浏览器是 `eval` 工具的 prelude，`write` / `always-ask` 档下 prelude 对每次 `browser.*` 调用另要一次审批，这次审批只有 `rpc-ui` 送到协议上，plain `rpc` 下调用直接失败。宿主把 omp 的 UI 请求分三类：
 
 - 审批：`select`、标题以 `Allow tool: ` 开头、首行工具名不是 `browser`、`options` 恰为 `["Approve","Deny"]` 或 `["Approve","Approve <名字> for this session","Deny"]`（v18.12.3 对被档位抬高的提示附带「本会话内放行」）。照常出确认卡；宿主只回 `Approve` / `Deny`，从不回中间项，omp 的会话内放行永远不生效。
-- 浏览器盲卡：标题整体恰为 `Allow tool: browser`、或其后恰一行 `Reason: …`，`options` 恰为两项。这是宿主唯一自己应答的卡：立即回 `Approve`，不出卡、不写 `chat_approvals`、不审计。卡上没有动作与 URL，它只出现在用户已批准（或档位放行）的 `eval` 执行过程中，要执行的代码已经在 eval 卡上给用户看过。标题按整体匹配：v18.0.10 真 `browser` 工具的卡是 `Allow tool: browser\nAction: …`，落入下一类。
+- 浏览器盲卡：标题整体恰为 `Allow tool: browser`、或其后恰一行 `Reason: …`，`options` 恰为两项。这是宿主唯一自己应答的卡：立即回 `Approve`，不出卡、不写 `chat_approvals`、不审计。卡上没有动作与 URL，它只出现在用户已批准（或档位放行）的 `eval` 执行过程中，要执行的代码已经在 eval 卡上给用户看过。标题按整体匹配：翻转前（v18.0.10，2026-10-20 实测）真 `browser` 工具的卡是 `Allow tool: browser\nAction: …`，落入下一类；v18.12.3 没有该工具，整体匹配保留为形状上的保险。#1570 实测（v18.12.3，`write` / `always-ask`）每回合的盲卡标题恰为 `Allow tool: browser`，没有 `Reason:` 行。
 - 其它一律 cancel，包括 omp 每回合即发即弃的 `setWidget` 显示帧（`rpc` 下本来如此）。
 
-`ask` 工具被 overlay 钉掉（下表 `ask.enabled`）：`rpc-ui` 下它会成为模型可调的工具，宿主对它的提问只能 cancel，而取消即中止整个回合。实测（`server/test/omp-official-rpc-ui.test.ts`，官方 v18.0.10）：钉住时模型调 `ask` 得到错误结果 `Tool ask not found`、回合正常结束；去掉钉时回合以「已停止」收场。eval 里经桥调用的工具（`tool.bash(...)`）照常弹自己的确认卡（v18.0.10 与 v18.12.3 实测），批准 eval 不等于批准桥调。
+`ask` 工具被 overlay 钉掉（下表 `ask.enabled`）：`rpc-ui` 下它会成为模型可调的工具，宿主对它的提问只能 cancel，而取消即中止整个回合。实测（`server/test/omp-official-rpc-ui.test.ts`，官方 v18.12.3；翻转前在 v18.0.10 上结论相同）：钉住时模型调 `ask` 得到错误结果 `Tool ask not found`、回合正常结束；去掉钉时回合以「已停止」收场。eval 里经桥调用的工具（`tool.bash(...)`）照常弹自己的确认卡（2026-10-20 实测，两个版本相同），批准 eval 不等于批准桥调。
+
+**浏览器经 `eval` 驱动**（#1570，change `omp-pin-18-12` design D7 / D8；#1527 的 `xd://browser` 设备识别、旧截图候选与旧审计随翻转删除）：v18.12.3 没有独立的 `browser` 工具，助手在 `eval` 的 JS 里调 `browser.open({ name, url })`、`browser.tab("main").screenshot()` 等。
+
+- 确认卡：`write` / `always-ask` 档下是 eval 卡，标题 `Allow tool: eval\nLanguage: javascript\nCode:\n<代码>`，三项 options（中间项 `Approve eval for this session`，宿主永不回它）。代码原样可见（前 2000 字符，翻转前同值），URL、`app.path`、`app.cdp_url` 这类参数都在代码里；宿主不再改写标题，没有「浏览器：打开 …」一类摘要。随后每次 `browser.*` 宿主调用再出一张盲卡（上文），宿主自答。
+- 步骤与审计：步骤名 `eval`；eval 结果 `details.statusEvents` 的每一条 `{op:"browser", detail}`（detail 如 `open main <url>`、`main.screenshot()`）写一条 `session.browser` 审计（#1568），`statusEventsElided` 为正时另写一条登记条数。`details` 的键为 `language, languages, cells, statusEvents`，没有 `images`。
+- 截图：`screenshotDir: screenshots` 相对会话 cwd，文件落在 `<cwd>/screenshots/screenshot-<时间>.png`（PNG）。宿主按回合开始时 `screenshots/` 的名字集合比对，每个 `eval` 步骤结束时把新出现的普通文件登记进文件变更卡（#1569；名字超过 4096 个时该回合不报候选）。
+- 未配置浏览器（`enabled: false`）时 eval 失败文本为 `ReferenceError: browser is not defined`（步骤 `isError`）；中继被钉住时 `app.relay: true` 退回本地启动。
+- 实测（2026-10-20，#1570，本机官方 v18.12.3 + 本机 Chrome，三档各两回合：打开工作空间里的页面、再截图）：每回合一个 `eval` 步骤；`write` / `always-ask` 每回合一张 eval 卡加一张盲卡，`yolo` 无卡；第二回合 `tab("main")` 命中第一回合的标签页，截图里是该页标题；三档的 stderr 都为空。
 
 **会话工作目录的仓库根标记**（#1567，change `omp-pin-18-12` design D5）：每个会话的工作目录（绑定空间的根；未绑定会话为 owner 根）下恒有一个空的 `.git` 目录。
 
@@ -466,10 +474,10 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 - 用户在工作目录里 `git init` 会直接把它填成真仓库，之后宿主不再碰它。
 - 它是普通的空目录：出现在文件页与工作空间侧边栏的目录里（前端不过滤点开头条目），也进回合快照。本变更之前建的存量空间，第一回合的快照取在 spawn 之前、里面没有它，撤回 / 还原到那份快照会删掉它，到下一次 spawn 重建。同理，存量空间升级后的第一条 `/` 提示词按还没有标记的目录分类（命令目录的上溯仍到 owner 根，`/skill:<owner 根的 skill>` 被当作命令、不取回合前快照），随后 spawn 才建出标记、omp 看不到那个 skill；只发生一次，还原存量快照后再发生一次。
 - 后果：owner 根与沙箱根上的 `.omp/` skills、`AGENTS.md`、`RULES.md`、`SYSTEM(_TEMPLATE).md`（及 `.agent(s)/` 的同类文件）不再对工作空间会话生效；`GET /api/project-config` 与命令目录的上溯同样止于空间根，绑定空间的命令目录不再列 owner 根的 skill。需要平台级 skill 时装到托管 `HOME`（ADR-0012 #773 补充）。
-- 封不住的：`.omp/agents` 下的 agent 定义，以及 `.clinerules`。omp 的 `task` 工具从工作目录一直向上找到文件系统根，不认 `.git`，所以沙箱根 / owner 根的 `.omp/agents` 仍对其它账号的会话生效；`cline` provider 同样逐级到文件系统根取最近一个 `.clinerules`，带 frontmatter `alwaysApply: true` 时整段进入系统提示（实测，官方 v18.0.10；固定块未禁用 `cline`，是否禁用待 owner）；ADR-0012「#1563 补充」第三部分登记为已接受残余，部署前提「`SANDBOX_ROOT` 的任何祖先目录不得带 `.omp/`」照旧必须，另加「`SANDBOX_ROOT` 不得位于 `OMP_STATE_DIR/home` 之下」。
-- 实测（2026-10-20，官方 v18.0.10，三档各一回合）：工作目录下空 `.git` 时没有报错帧，stderr 与 omp 日志没有 git 相关输出，`get_state` 的 `systemPrompt` 与没有 `.git` 时逐字相同。git 不把空目录当有效仓库、会继续向上找：没有祖先是真仓库时在该目录报 `not a git repository`，某个祖先是真仓库时把工作目录当作那个仓库的子目录（3.1 实跑没有执行 git 命令，这一条是 git 的发现规则，单独验证过）；两种情况都不影响回合。
+- 封不住的：`.omp/agents` 下的 agent 定义，以及 `.clinerules`。omp 的 `task` 工具从工作目录一直向上找到文件系统根，不认 `.git`，所以沙箱根 / owner 根的 `.omp/agents` 仍对其它账号的会话生效；`cline` provider 同样逐级到文件系统根取最近一个 `.clinerules`，带 frontmatter `alwaysApply: true` 时整段进入系统提示（2026-10-20 实测，官方 v18.0.10；#1570 翻转后同一官方用例行在 v18.12.3 上仍绿；固定块未禁用 `cline`，是否禁用待 owner）；ADR-0012「#1563 补充」第三部分登记为已接受残余，部署前提「`SANDBOX_ROOT` 的任何祖先目录不得带 `.omp/`」照旧必须，另加「`SANDBOX_ROOT` 不得位于 `OMP_STATE_DIR/home` 之下」。
+- 实测（2026-10-20，官方 v18.0.10，三档各一回合）：工作目录下空 `.git` 时没有报错帧，stderr 与 omp 日志没有 git 相关输出，`get_state` 的 `systemPrompt` 与没有 `.git` 时逐字相同。git 不把空目录当有效仓库、会继续向上找：没有祖先是真仓库时在该目录报 `not a git repository`，某个祖先是真仓库时把工作目录当作那个仓库的子目录（3.1 实跑没有执行 git 命令，这一条是 git 的发现规则，单独验证过）；两种情况都不影响回合。#1570 在 v18.12.3 上三档重跑：同样无报错帧、stderr 为空、日志无 git 相关行；祖先目录被 `git init` 成真仓库时回合同样正常（vcs 工具是否把祖先当仓库根未实跑到，读码推断会）。
 
-**overlay 的固定块**（#1564，change `omp-pin-18-12` design D4）：`host-overlay.yml` 以下面这段开头，之后才是浏览器块与看图块。它不随部署配置变化，残余与取舍登记在 ADR-0012「2026-10-20 补充（#1563）」：
+**overlay 的固定块**（#1564，change `omp-pin-18-12` design D4；#1570 翻转时删 `ruby` / `julia`、加 `advisor` 与 `ida`，design D9）：`host-overlay.yml` 以下面这段开头，之后才是浏览器块与看图块。它不随部署配置变化，残余与取舍登记在 ADR-0012「2026-10-20 补充（#1563）」：
 
 ```yaml
 tools:
@@ -480,10 +488,6 @@ bash:
   direnv: "off"
 shellPath: null
 python:
-  interpreter: ""
-ruby:
-  interpreter: ""
-julia:
   interpreter: ""
 mcp:
   enableProjectConfig: false
@@ -510,6 +514,10 @@ disabledProviders:
   - apple
 ask:
   enabled: false
+advisor:
+  enabled: false
+ida:
+  enabled: false
 ```
 
 | 键 | 作用 |
@@ -518,7 +526,6 @@ ask:
 | `tools.approvalMode: write` | 只在 argv 缺席时起作用的兜底，argv 的 `--approval-mode` 压过它 |
 | `bash.patterns: []`、`bash.direnv: "off"` | 清掉项目层的 bash 放行规则；bash 调用前不跑 `direnv export` |
 | `shellPath: null`、`python.interpreter: ""` | 项目层不能指定被宿主执行的可执行文件 |
-| `ruby.interpreter: ""`、`julia.interpreter: ""` | 钉住版本为 v18.0.10 期间保留（owner 2026-10-20）：v18.0.10 关掉 JS eval 后会在 spawn 预检里执行项目层指定的这两个解释器，不经审批（实测见下）。v18.12.3 的 eval 只剩 py 与 js、没有这两个键，翻转到 v18.12.3 时随版本一起删 |
 | `mcp.enableProjectConfig: false` | 项目层 MCP 的 stdio server 不在 spawn 时被拉起 |
 | `todo.reminders: false` | 关掉未完成 todo 的隐藏提醒与同回合续跑（#772） |
 | `images.urls.enabled: false`、`command: null` | 关掉图片发布 broker，项目层拉不起外部进程 |
@@ -527,14 +534,23 @@ ask:
 | `archive.enabled: false` | 关掉 `archive` prelude（只读、不请求审批，读 omp 自己的 `sessions` 目录，与宿主的 `--session-dir` 不重叠，属卫生项） |
 | `disabledProviders` | 关掉对本机 `ollama`（11434）、`llama.cpp`（8080）、`lm-studio`（1234）端口的隐式探测与 macOS 上的 `apple` 提供者；托管 `models.yml` 的 `workbuddy` provider 不受影响。数组整体替换项目层的同名键：项目层写的 `disabledProviders` 不再生效（实测见下） |
 | `ask.enabled: false` | omp 不创建 `ask` 工具。它只在有 UI 时创建，即 `--mode rpc-ui`（#1563 组 2 起宿主的启动模式），宿主对它的提问只会 cancel，而 `ask` 被取消时先中止整个回合，用户看到回答无故「已停止」。钉掉后 `rpc-ui` 下的工具集与 `rpc` 相同 |
+| `advisor.enabled: false` | v18.12.3 的缺省是 `false`，但任何一层配置都压过缺省，项目层 `.omp/config.yml` 写 `advisor.enabled: true` 即开启；开启后 `WATCHDOG.md` / `.yml` 的上溯以 git 仓库根为界，原生发现要求 `.git/HEAD`、宿主的空 `.git` 标记被跳过，会走到文件系统根。与 `ask` / `ida` 同类的零成本钉（#1570 fixture review 裁定，owner 可否决） |
+| `ida.enabled: false` | v18.12.3 缺省 `true`；项目层可设 `ida.installDir`（任意含 `libidalib.*` 的目录）与 `ida.python: ./x.sh`，之后 `read` 读到带可执行头的文件就会以项目层指定的解释器起进程、不经审批。Epic #1563 (f) 的缺省方案（owner 未否决） |
 
-实测（2026-10-20，#1564，本机官方 v18.0.10 与 v18.12.3，`--mode rpc-ui`，overlay 为本块加浏览器块；v18.12.3 对不认识的 `ruby` / `julia` 静默忽略）：
+实测（2026-10-20，#1564，本机官方 v18.0.10 与 v18.12.3，`--mode rpc-ui`，overlay 为翻转前的固定块（含 `ruby` / `julia`）加浏览器块；v18.12.3 对不认识的 `ruby` / `julia` 静默忽略）：
 
 - 两个版本的 stderr 与 omp 日志（`xdg/state/omp/logs/`）都没有 `Settings:` 行（含 v18.12.3 上的 `ruby` / `julia` 两键）。对照：换回旧固定块（`approval: []`）时 v18.12.3 的日志有一条 `Settings: ignoring invalid value`（`setting: tools.approval`）。
 - `get_state` 正常应答，`dumpTools` 里没有 `ask`；旧固定块下两个版本都多出 `ask`。
 - `get_available_models` 列出 `workbuddy/m1`，日志里没有对本机三个端口的 `model discovery failed`；去掉 `disabledProviders` 时两个版本都对这三个端口探测失败各一条。
-- `ruby` / `julia` 的钉（v18.0.10）：cwd 的 `.omp/config.yml` 写 `eval: {js: false, ruby: true}` 与 `ruby.interpreter: ./x.sh`。带本块时 `x.sh` 不被执行；overlay 去掉这两段时 omp 在 spawn 预检里执行了 `<cwd>/x.sh`（参数 `-e exit 0`）。
+- `ruby` / `julia` 的钉（翻转前的 v18.0.10 钉，2026-10-20 实测；#1570 已删，v18.12.3 没有这两个键）：cwd 的 `.omp/config.yml` 写 `eval: {js: false, ruby: true}` 与 `ruby.interpreter: ./x.sh`。带本块时 `x.sh` 不被执行；overlay 去掉这两段时 omp 在 spawn 预检里执行了 `<cwd>/x.sh`（参数 `-e exit 0`）。
 - 项目层同名键被整体替换：cwd 放 `.claude/skills/x/SKILL.md`，`.omp/config.yml` 写 `disabledProviders: [claude]`。带本块时 `get_available_commands` 列出 `skill:x`；overlay 去掉 `disabledProviders` 时不列，即项目层的 `[claude]` 只在 overlay 不写该键时生效。两个版本结果相同。
+
+实测（2026-10-20，#1570，本机官方 v18.12.3，`--mode rpc-ui`，固定块为上面这段加浏览器块）：
+
+- stderr 为空、omp 日志没有 `Settings:` 行；官方用例 (c) 断言该日志没有 `Settings: ignoring invalid value`，把 overlay 换回 `approval: []` 时变红。
+- `ida` 是 discoverable 工具，不进 `get_state.dumpTools`，只在找到 IDA 安装时以 `xd://ida` 设备出现在系统提示里：项目层写 `ida.enabled: true` 与 `ida.installDir`（放一个空的 `libidalib.dylib` 即被认作安装）时，带本块的系统提示没有 `ida` 设备，去掉 `ida:` 块时有。
+- `advisor.enabled` 没有 RPC 读回，只能看行为：项目层写 `advisor.enabled: true` 与 `modelRoles.advisor` 时，带本块一个 bash 回合 2 次上游请求、只有 `advisor_cost_changed` 帧；去掉 `advisor:` 块时 5 次并出现 `advisor_yielded`。
+- `dev.autoqa` 缺省开、系统提示里有 `xd://report_issue` 设备；owner 2026-10-20 决定不钉，这里只记一笔。
 
 **overlay 的浏览器块**：`host-overlay.yml` 在固定块之后恒有下面一段（这里是未设 `BROWSER_BIN` 的样子），overlay 高于项目层，会话工作目录里的 `.omp/config.yml` 改不动它：
 
@@ -550,13 +566,13 @@ browser:
 
 | 键 | 作用 |
 |---|---|
-| `enabled` | 浏览器开关，设了 `BROWSER_BIN` 为 `true`，未设为 `false`。为 `false` 时 omp 不挂载浏览器工具，也就不会去下载 Chrome-for-Testing。#912 的超时就出在这次下载上：约 181 MB，下载未完时 30 s / 90 s 期限先到。未配置浏览器的部署里浏览器工具不存在，调用以失败结束、不再超时 |
+| `enabled` | 浏览器开关，设了 `BROWSER_BIN` 为 `true`，未设为 `false`。为 `false` 时 omp 不装浏览器 prelude，也就不会去下载 Chrome-for-Testing。#912 的超时就出在这次下载上：约 181 MB，下载未完时 30 s / 90 s 期限先到。未配置浏览器的部署里浏览器工具不存在，调用以失败结束、不再超时 |
 | `cdpUrl: ""` | 使项目层写的外部浏览器 CDP 地址失效（omp 只在取值非空时连接） |
 | `relay: false`、`cmux: false` | 关掉经设置启用的浏览器中继与 cmux |
 | `headless: true` | 不让项目层要求有头窗口 |
 | `screenshotDir: screenshots` | `tab.screenshot()` 的全分辨率截图写到会话工作目录下的 `screenshots/`，即绑定空间的根下 |
 
-`screenshotDir` 是相对路径。omp 不解析它，按进程工作目录落盘，而宿主 spawn 时进程工作目录恒等于会话 `--cwd`。实测（2026-10-19，官方 v18.0.10，本机 Chrome）：截图结果的 `dest` 为 `screenshots/screenshot-<时间>.png`，文件落在 `<cwd>/screenshots/`。截图因此进入用户工作空间、回合快照与撤回范围，并随回合累积；清理策略未定。
+`screenshotDir` 是相对路径。omp 不解析它，按进程工作目录落盘，而宿主 spawn 时进程工作目录恒等于会话 `--cwd`。实测（2026-10-19，官方 v18.0.10，本机 Chrome）：截图结果的 `dest` 为 `screenshots/screenshot-<时间>.png`，文件落在 `<cwd>/screenshots/`；#1570 在 v18.12.3 上经 `eval` 重跑，落点相同（`screenshot-<时间>.png`，PNG）。截图因此进入用户工作空间、回合快照与撤回范围，并随回合累积；清理策略未定。
 
 **看图角色**：模型白名单里有 `vision: true` 的模型时，浏览器块之后再接两行，`<id>` 取白名单次序里第一个 `vision: true` 的模型：
 
@@ -578,7 +594,7 @@ modelRoles:
 1. 下载缓存目录 `<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome`。同级的 `puppeteer/package.json` 每次加载 puppeteer 都会写，不算下载。
 2. omp 文件日志（`<OMP_STATE_DIR>/xdg/state/omp/logs/`）里的一行 `Downloading Chromium for puppeteer`。该日志不进服务的 stdout。
 
-**参考部署镜像 `deploy/app/`**（#1528；规格 browser-runtime「参考部署镜像」）：app、omp v18.0.10、Debian `chromium` 与中文字体装在一个镜像里，按 ADR-0010 以两个 uid 运行。由部署方自建，仓库不发布镜像、不引用镜像仓库（同 converter）。converter 仍是单独的镜像（9.7）。
+**参考部署镜像 `deploy/app/`**（#1528；规格 browser-runtime「参考部署镜像」）：app、omp v18.12.3（构建时校验 `/opt/workbuddy/omp --version` 为 `omp/18.12.3`）、Debian `chromium` 与中文字体装在一个镜像里，按 ADR-0010 以两个 uid 运行。由部署方自建，仓库不发布镜像、不引用镜像仓库（同 converter）。converter 仍是单独的镜像（9.7）。
 
 - **构建**：在仓库根执行 `docker build -f deploy/app/Dockerfile .`，或 `docker compose -f deploy/app/compose.yml up -d --build`（compose 的构建上下文已指向仓库根）。
   - 镜像只有 `linux/amd64`，因为 `scripts/omp-fetch.sh` 只取 Linux x86_64 的 omp。Apple 芯片的机器用 `docker buildx build --platform linux/amd64 -f deploy/app/Dockerfile -t <tag> --load .`。
