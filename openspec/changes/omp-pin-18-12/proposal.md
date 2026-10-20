@@ -1,5 +1,10 @@
 # Proposal: omp-pin-18-12
 
+> Issue type: feature（版本升级 + 行为对齐）
+> Fixture level: expanded（整个 change；各任务组的级别见 tasks.md 组尾声明——组 7 为 compact）
+> Blast radius: 每个 omp 子进程的启动配置与审批通路（审批形状不认则 write / always-ask 档所有工具调用被静默拒绝）、跨账号系统提示注入口、CI 两个 Linux job 的断言、所有陈述钉住版本的文档与合同
+> Evidence floor: `npm test --workspace server`（含 `WORKBUDDY_OMP_TEST=1` 官方用例）、typecheck、size-guard、`make check`、`make test-guardrails`、PR CI `uid-isolation` 与 `browser-image`、`make smoke`
+
 ## Why
 
 #1560：缺省配置（`MODEL_ID=deepseek-v4.1-flash`）下助手看不到图。根因在钉住的 omp v18.0.10：`ai/src/providers/vision-guard.ts` 的 `isTextOnlyDeepSeek` 对任何 id 含 `deepseek` 的模型一律剥掉图片部分、不看 `models.yml` 的 `input`；上游 DMXAPI 对同一模型实测能看图（带图回答颜色正确，prompt_tokens 241 对 57）。这个守卫只存在于 v18.0.10 / v18.0.11，v18.1.0 起删除。owner 2026-10-20 拍板走方向 A：钉住版本升到 18.12.x（#1563），不做代理别名改写。
