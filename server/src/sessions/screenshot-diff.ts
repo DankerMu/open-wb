@@ -1,21 +1,22 @@
 /**
  * Issue #1569 (omp-pin-18-12 design D8, turn-artifacts「浏览器截图」): omp writes browser screenshots
- * to `<cwd>/screenshots/` and an `eval` end frame names none, so the pump diffs that directory. One
- * per pump: on `turn.start` (no tool running yet) the direct entry names of `<root>/screenshots` are
- * the turn's baseline; on each `eval` step.end the names not in it are merged into it, and those
- * whose dirent is a regular file (no stat) become write candidates, inserted as `files.changed` right
- * before that step.end. Reads go through a directory handle and stop past 4096 entries. Baseline
- * `ENOENT`/`ENOTDIR` → empty; any other baseline failure or overflow → no comparison this turn; a
- * failed or overflowing step-end read → no candidates, baseline unchanged. A null root (an unbound
- * session) never reads. Ownership, storage and publishing stay with persistEvent's files.changed.
+ * to `<cwd>/screenshots/` and an `eval` end frame names none, so the pump diffs that directory. On
+ * `turn.start` (no tool running yet) the direct entry names of `<root>/screenshots` are the turn's
+ * baseline; on each `eval` step.end new names merge into it, and those whose dirent is a regular
+ * file (no stat) become write candidates in code-point order, a `files.changed` right before that
+ * step.end. Reads (via a dir handle) stop past 4096 entries. Baseline ENOENT/ENOTDIR → empty;
+ * other baseline failure or overflow → no comparison this turn; failed or overflowing step-end read
+ * → no candidates, baseline unchanged; a merge past 4096 names → no candidates and no comparison
+ * for the rest of the turn. A null root never reads. persistEvent owns the files.changed.
  */
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
+import { compareMigrationFilenames as compareCodePoints } from "../core/db/migration-assets.js";
 import type { PumpSteps } from "./approval-pairing.js";
 import type { ChatEvent } from "./events.js";
 import type { FileChange } from "./file-changes.js";
 
-/** The call the diff makes, read at call time so a test can count or fail it. */
+/** Read at call time so a test can count or fail it. */
 export const screenshotFs = { opendirSync: nodeFs.opendirSync };
 
 const LIMIT = 4096;
@@ -46,7 +47,7 @@ function list(dir: string): nodeFs.Dirent[] | "missing" | "failed" {
 export class ScreenshotDiff {
   readonly #dir: string | null;
   readonly #steps: Pick<PumpSteps, "toolNames">;
-  /** This turn's names; null while comparison is off (no root, no turn yet, or a failed baseline). */
+  /** This turn's names; null while comparison is off (no root/turn, failed read, past the cap). */
   #baseline: Set<string> | null = null;
 
   constructor(workspaceRoot: string | null, steps: Pick<PumpSteps, "toolNames">) {
@@ -56,10 +57,8 @@ export class ScreenshotDiff {
 
   turnStart(): void {
     const listing = this.#dir === null ? "failed" : list(this.#dir);
-    this.#baseline =
-      listing === "failed"
-        ? null
-        : new Set(listing === "missing" ? [] : listing.map((e) => e.name));
+    const names = typeof listing === "string" ? [] : listing.map((e) => e.name);
+    this.#baseline = listing === "failed" ? null : new Set(names);
   }
 
   evalEnd(): FileChange[] {
@@ -68,10 +67,11 @@ export class ScreenshotDiff {
     if (baseline === null || typeof listing === "string") return [];
     const fresh = listing.filter((entry) => !baseline.has(entry.name));
     for (const entry of fresh) baseline.add(entry.name);
+    if (baseline.size > LIMIT) this.#baseline = null; // A rotating writer must not grow memory.
+    if (this.#baseline === null) return [];
     return fresh
-      .filter((entry) => entry.isFile())
-      .map((entry) => entry.name)
-      .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+      .flatMap((entry) => (entry.isFile() ? [entry.name] : []))
+      .sort(compareCodePoints)
       .map(
         (name): FileChange => ({
           path: `screenshots/${name}`,

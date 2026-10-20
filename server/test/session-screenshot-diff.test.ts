@@ -428,20 +428,23 @@ describe("turn-artifacts「浏览器截图进入文件变更」", () => {
   );
 
   it(
-    "4097 entries during the first eval, 4096 in the second: it reports both steps' files",
+    "4097 entries during the first eval, fewer in the second: it reports both steps' files",
     REAL,
     async () => {
       const { world, ws, run } = await drive();
       const shots = join(ws, "screenshots");
-      const names = fillers(shots, 4090);
+      // A 4085-name baseline: names removed later stay in it, so it must leave room for the 8 new
+      // names e2 merges (4093 ≤ 4096); e1's overflow comes from transient tmp-* files instead.
+      fillers(shots, 4085);
       const added = ["g-0.png", "g-1.png", "g-2.png", "g-3.png", "g-4.png", "g-5.png"];
+      const transient = ["tmp-0", "tmp-1", "tmp-2", "tmp-3", "tmp-4"];
       await run([
         {
           call: "e1",
           tool: "eval",
-          during: () => writeIn(shots, ...added, "screenshot-6.png"),
+          during: () => writeIn(shots, ...added, "screenshot-6.png", ...transient),
           after() {
-            for (const name of names.slice(0, 2)) rmSync(join(shots, name));
+            for (const name of transient) rmSync(join(shots, name));
           },
         },
         { call: "e2", tool: "eval", during: () => writeIn(shots, "screenshot-8.png") },

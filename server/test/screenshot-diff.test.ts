@@ -110,7 +110,7 @@ describe("baseline at turn start", () => {
     expect(calls()).toBe(1);
   });
 
-  it("4097 entries: no comparison this turn; 4096 is still within the cap", () => {
+  it("4097 entries: no comparison this turn; a 4096-entry read and baseline are within the cap", () => {
     fill(4097);
     const over = diffOf();
     over.turnStart();
@@ -121,10 +121,10 @@ describe("baseline at turn start", () => {
     expect(calls()).toBe(1);
     expect(opened).toBe(closed);
 
+    rmSync(join(shots, "f-0002.png"));
     const atCap = diffOf();
     atCap.turnStart();
-    rmSync(join(shots, "f-0002.png"));
-    write("new-2.png");
+    write("new-2.png"); // a step-end read of 4096 entries, merged to exactly 4096 names
     expect(atCap.evalEnd()).toEqual(shot("new-2.png"));
   });
 
@@ -204,6 +204,62 @@ describe("comparison at an eval step end", () => {
     // Case-distinct names only: the default macOS volume is case-insensitive (b.png ≡ B.png).
     write("c.png", "ä.png", "a.png", "B.png");
     expect(diff.evalEnd()).toEqual(shot("B.png", "a.png", "c.png", "ä.png"));
+  });
+
+  it("candidates are in code-point order, not UTF-16 code-unit order", () => {
+    const diff = diffOf();
+    diff.turnStart();
+    // U+FF10 < U+1F600 by code point, but the emoji's lead surrogate 0xD83D < 0xFF10 by code unit.
+    write("\u{1F600}.png", "\uFF10.png");
+    expect(diff.evalEnd()).toEqual(shot("\uFF10.png", "\u{1F600}.png"));
+  });
+
+  it("the directory gone at step end (removed, or now a file): no candidates, baseline unchanged", () => {
+    write("old.png");
+    const diff = diffOf();
+    diff.turnStart();
+    rmSync(shots, { recursive: true });
+    expect(diff.evalEnd()).toEqual([]);
+    writeFileSync(shots, "not a dir");
+    expect(diff.evalEnd()).toEqual([]);
+    rmSync(shots);
+    write("old.png", "new.png");
+    expect(diff.evalEnd()).toEqual(shot("new.png"));
+  });
+
+  it("a baseline merged past 4096 names: that step reports nothing, the turn stops comparing", () => {
+    write("old.png");
+    const diff = diffOf();
+    diff.turnStart();
+    for (let i = 0; i < 4095; i += 1) mkdirSync(join(shots, `d-${i}`));
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(2);
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(3); // 4096 names: still comparing
+    // Rotate one name: each read stays at 4096 entries, the baseline would reach 4097.
+    rmSync(join(shots, "d-0"), { recursive: true });
+    write("rotated.png");
+    expect(diff.evalEnd()).toEqual([]);
+    const reads = calls();
+    rmSync(join(shots, "d-1"), { recursive: true });
+    write("later.png");
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(reads);
+    rmSync(join(shots, "d-2"), { recursive: true });
+    diff.turnStart();
+    write("next-turn.png");
+    expect(diff.evalEnd()).toEqual(shot("next-turn.png"));
+  });
+
+  it("a baseline of exactly 4096 names keeps comparing", () => {
+    write("old.png");
+    const diff = diffOf();
+    diff.turnStart();
+    for (let i = 0; i < 4094; i += 1) mkdirSync(join(shots, `d-${i}`));
+    write("a.png");
+    expect(diff.evalEnd()).toEqual(shot("a.png"));
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(3);
   });
 
   it("a subdirectory, symlinks and a FIFO are merged into the baseline but never candidates", () => {
