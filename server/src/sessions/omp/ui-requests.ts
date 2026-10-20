@@ -12,7 +12,7 @@ import type { OmpFrame } from "./frame.js";
 const APPROVAL_PREFIX = "Allow tool: ";
 const UNKNOWN_TOOL = "unknown";
 const SESSION_GRANT = /^Approve .+ for this session$/u;
-// The prelude's header alone (omp v18.0.10's real `browser` card has `Action:` lines).
+// The prelude's header alone (the previous pin's real `browser` tool card had `Action:` lines).
 const PRELUDE_TITLE = /^Allow tool: browser(?:\nReason: [^\n]+)?$/u;
 
 /** Owner-facing approval request: the frame id, the full title, the tool. */

@@ -1,19 +1,20 @@
 /**
  * Issue 1473 (chat-interleaved-segments 4.4 / 4.5, design D6): the call the owner denies, on the
- * real chain — official omp v18.0.10, the model proxy and the controlled upstream, in
+ * real chain — official omp v18.12.3, the model proxy and the controlled upstream, in
  * `openProxiedApp` (the production sessions assembly; the world denies every published
  * `approval.request`). `跑一个命令` makes the fake upstream's first request the bash tool round.
  *
  * 实测 (4.4, three runs, all alike): the denied call has its `tool_execution_start` and a
- * `tool_execution_end{isError:true}`, so it has a step that ends `failed`, and the select reaches
- * stdout before that start. Pinned here as branch one (task 4.5): exactly one bash step, `failed`;
- * the denied approval's `step_id` is that step (the select queues it, the later start takes it,
- * tool-approval「确认与步骤配对」rule 1); decision `deny`; select before start on the wire. The
- * ring order of `approval.resolved` and `step.start` is this world's prompt auto-deny, not omp's,
- * and is not asserted. An omp upgrade that changes any of it turns this case red first.
+ * `tool_execution_end{isError:true}`, so it has a step that ends `failed`. Pinned here as branch one
+ * (task 4.5): exactly one bash step, `failed`; the denied approval's `step_id` is that step;
+ * decision `deny`. The ring order of `approval.resolved` and `step.start` is this world's prompt
+ * auto-deny, not omp's, and is not asserted. An omp upgrade that changes any of it turns this case
+ * red first.
  *
- * Issue 1474 (5.2c) adds the published pairing (the request's `stepId` null, the step.start's
- * `approvalId` the denied row) and the snapshot's `stepId`.
+ * Issue #1570 (task 6.3): v18.12.3 writes the `tool_execution_start` before the select (the
+ * previous pin wrote the select first), so the step waits unpaired and the select takes it —
+ * tool-approval「步骤先于审批 select 到达」: the published request carries the step's id, the
+ * step.start carries `approvalId` null, and the snapshot's `stepId` is that step.
  *
  * The case prints one `[approval-pairing] ` line (frame labels of the turn, the step and approval
  * rows), quoted as 实测.
@@ -57,7 +58,7 @@ function label(frame: OmpFrame): string[] {
 
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the denied call's step`, () => {
   it(
-    "the denied bash call has a failed step, paired with its deny; its select is first",
+    "the denied bash call has a failed step, paired with its deny; its start is first",
     CASE,
     async () => {
       const world = await openProxiedApp();
@@ -86,7 +87,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the denied call's s
       ]);
       const select = turn.frames.findIndex(isBashSelect);
       expect(select).toBeGreaterThan(-1);
-      expect(select).toBeLessThan(turn.frames.indexOf(starts[0] as OmpFrame));
+      expect(select).toBeGreaterThan(turn.frames.indexOf(starts[0] as OmpFrame));
 
       const ring = turn.events.flatMap((event) =>
         event.type === "step.start"
@@ -101,8 +102,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the denied call's s
         { id: world.denied[0], tool: "bash", decision: "deny", step_id: steps[0]?.id },
       ]);
 
-      // Issue 1474 (5.2c, branch one): the request went out unpaired (its select came first), the
-      // step.start delivered the pairing, and the snapshot's stepId is that step.
+      // Issue #1570: the step.start went out unpaired (its start came first), the request
+      // delivered the pairing, and the snapshot's stepId is that step.
       const published = turn.events.flatMap((event) =>
         event.type === "approval.request"
           ? [["request", event.data.stepId]]
@@ -111,8 +112,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the denied call's s
             : [],
       );
       expect(published).toEqual([
-        ["request", null],
-        ["start", world.denied[0]],
+        ["start", null],
+        ["request", steps[0]?.id],
       ]);
       const history = await world.app.inject({
         method: "GET",

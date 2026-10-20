@@ -258,7 +258,7 @@ describe("GET /api/project-config: files present at the read locations", () => {
    * Issue #1570 (task 6.2): the rows #1563 adds to the location table, each placed once in the cwd
    * and once one level up with no `.git` in between, plus the host's marker bounding them.
    */
-  it("lists the system rows: .agent|.agents and .omp at every level, .claude|.codex in the cwd only", async () => {
+  it("lists the system rows: .agent|.agents and .omp at every level, .claude|.codex|.gemini in the cwd only", async () => {
     const { app, cookie, sandboxRoot, ownerRoot } = await ownerWorld();
     const here = await createWorkspace(app, cookie, sandboxRoot, "here");
     const below = await createWorkspace(app, cookie, sandboxRoot, "below");
@@ -274,6 +274,8 @@ describe("GET /api/project-config: files present at the read locations", () => {
       ".claude/SYSTEM_TEMPLATE.md",
       ".codex/SYSTEM.md",
       ".codex/SYSTEM_TEMPLATE.md",
+      ".gemini/SYSTEM_TEMPLATE.md",
+      ".gemini/system.md",
       ".omp/SYSTEM.md",
       ".omp/SYSTEM_TEMPLATE.md",
     ];
@@ -294,12 +296,15 @@ describe("GET /api/project-config: files present at the read locations", () => {
           system(".claude/SYSTEM_TEMPLATE.md", 0),
           system(".codex/SYSTEM.md", 0),
           system(".codex/SYSTEM_TEMPLATE.md", 0),
+          // Gemini's literal file is lower-case `system.md` (omp `discovery/gemini.ts`).
+          system(".gemini/SYSTEM_TEMPLATE.md", 0),
+          system(".gemini/system.md", 0),
           system(".omp/SYSTEM.md", 0),
           system(".omp/SYSTEM_TEMPLATE.md", 0),
         ],
       }),
     );
-    // One level up: every row but the cwd-only `.claude` and `.codex` ones.
+    // One level up: every row but the cwd-only `.claude`, `.codex` and `.gemini` ones.
     expect(await listed(app, cookie, below.id)).toBe(
       JSON.stringify({
         files: [
@@ -383,7 +388,7 @@ describe("GET /api/project-config: files present at the read locations", () => {
 });
 
 describe("GET /api/project-config: a sandbox writable by the omp uid", () => {
-  it("lists neither a linked file, a directory, nor a file behind a linked .agent(s), .claude or .codex", async () => {
+  it("lists neither a linked file, a directory, nor a file behind a linked .agent(s), .claude, .codex or .gemini", async () => {
     const { app, cookie, sandboxRoot } = await ownerWorld();
     const workspace = await createWorkspace(app, cookie, sandboxRoot);
     const real = join(workspace.root, "real");
@@ -392,6 +397,7 @@ describe("GET /api/project-config: a sandbox writable by the omp uid", () => {
       "real/CLAUDE.md",
       "real/SYSTEM.md",
       "real/SYSTEM_TEMPLATE.md",
+      "real/system.md",
       "real/x.md",
       "AGENTS.md/",
       ".omp/AGENTS.md",
@@ -403,7 +409,7 @@ describe("GET /api/project-config: a sandbox writable by the omp uid", () => {
     symlinkSync(join(real, "x.md"), join(workspace.root, ".omp", "SYSTEM.md"));
     symlinkSync(join(real, "x.md"), join(workspace.root, ".omp", "SYSTEM_TEMPLATE.md"));
     symlinkSync(join(real, "x.md"), join(workspace.root, ".omp", "agents", "linked.md"));
-    for (const dir of [".agent", ".agents", ".claude", ".codex"]) {
+    for (const dir of [".agent", ".agents", ".claude", ".codex", ".gemini"]) {
       symlinkSync(real, join(workspace.root, dir), "dir");
     }
     const plainLink = await createWorkspace(app, cookie, sandboxRoot, "plain-link");

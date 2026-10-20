@@ -4,7 +4,7 @@
  * passed to every spawn as `--config` (global < project < overlay < CLI) and pins the keys that
  * would skip an approval or run a command outside one. omp does not schema-check an overlay file
  * as a whole, so each value depends on the pinned omp's consuming code: re-verify them on an omp
- * upgrade (#1564 ran its block on v18.0.10 and v18.12.3: no `Settings:` warning).
+ * upgrade (#1564 and #1570 ran the block on v18.12.3: no `Settings:` warning, log or stderr).
  *
  * `tools.approvalMode: write` sits below argv: omp writes `--approval-mode` into a runtime
  * override layer above the overlay, so for an `always-ask` or `yolo` session the argv value is the
@@ -13,13 +13,13 @@
  * with the mode: a session changes mode by being re-spawned, never by rewriting the overlay.
  *
  * `retry:` (issue #909, ADR-0012) caps omp's session-level retry at one round: omp already retries
- * each failed request inside a round (on v18.0.10, 6 transport attempts and the round replayed once
- * by the provider layer), so its default ten rounds keep a 5xx turn running for minutes. `enabled`,
- * `baseDelayMs` and `maxDelayMs` restate omp's defaults so the project layer cannot lengthen the
- * wait; `modelFallback: false` turns omp's model fallback off — switching upstreams or models is out
- * of scope, and a project `retry.fallbackChains` would otherwise switch models on a 5xx turn (实测
- * on the old overlay) and, by omp's `isHardErrorFallbackEligible`, replay even a non-retryable 424
- * on the next model (读代码推出, not measured).
+ * each failed request inside a round (6 transport attempts, the round replayed once by the provider
+ * layer: 12 requests, 实测 on v18.12.3 by #1570), so its default ten rounds keep a 5xx turn running
+ * for minutes. `enabled`, `baseDelayMs` and `maxDelayMs` restate omp's defaults so the project layer
+ * cannot lengthen the wait; `modelFallback: false` turns omp's model fallback off — switching
+ * upstreams or models is out of scope, and a project `retry.fallbackChains` would otherwise switch
+ * models on a 5xx turn (实测 on the old overlay) and, by omp's `isHardErrorFallbackEligible`, replay
+ * even a non-retryable 424 on the next model (读代码推出, not measured).
  *
  * Issue #1564 (#1563 design D4) appends four pins after `retry:`: `telemetry.otlpExportEnabled`
  * (OTLP export defaults on and a cwd `.env` can supply the `OTEL_*` endpoint), `archive.enabled`

@@ -1,6 +1,6 @@
 /**
  * Issue #813 (#773 task 1.5): the host's skill directory and whitelist checked against the
- * official omp v18.0.10 binary — chat-sessions Scenario「A project skill is a command for the
+ * official omp v18.12.3 binary — chat-sessions Scenario「A project skill is a command for the
  * prompt route, regenerate and fork」, real-binary part, in the world of support/omp-official.ts.
  * Oracles are omp's own RPC answers: `get_available_commands` and `get_branch_messages`.
  * Opt-in: skipped unless `WORKBUDDY_OMP_TEST=1`. These pins bind the host's scan rules to that

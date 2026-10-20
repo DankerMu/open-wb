@@ -1,6 +1,6 @@
 /**
  * Issue #1522 (epic-acceptance-followups 2.2, design D3): model-proxy Scenario「maxTokens reaches the
- * upstream request」on the official omp v18.0.10 binary. `models.yml` comes from the writer (the
+ * upstream request」on the official omp v18.12.3 binary. `models.yml` comes from the writer (the
  * world's `maxTokens` option); no compaction is planted, so the record holds this turn only: the
  * bash tool round (default `toolRoundScope`, denied by the world) and the answer.
  *

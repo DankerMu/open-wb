@@ -1,5 +1,5 @@
 /**
- * Issue #910 slice 2b (task 2.5): the delta coalescer on the real chain — official omp v18.0.10,
+ * Issue #910 slice 2b (task 2.5): the delta coalescer on the real chain — official omp v18.12.3,
  * the model proxy and the controlled upstream's `WORKBUDDY_PACE` answering round (three reasoning
  * parts, then 40 `字` content chunks 25 ms apart), in `openProxiedApp`, the production sessions
  * assembly on the system clock. Asserted is omp-test-harness「官方 omp 上的合并取证」for

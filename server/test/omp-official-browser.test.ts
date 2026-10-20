@@ -1,14 +1,16 @@
 /**
  * Issue #1527 (omp-browser-integration task 2.4): omp-runtime「宿主 overlay」, scenario「未配置浏览器时
- * 浏览器调用失败且不下载（真实 omp）」, against the official omp v18.0.10 binary in the world of
+ * 浏览器调用失败且不下载（真实 omp）」, against the official omp v18.12.3 binary in the world of
  * support/omp-official.ts. The host overlay is the product file of a deployment without
  * `BROWSER_BIN` (browser block `enabled: false`); the workspace holds a project layer that turns
  * the browser on, which the overlay must beat. The fake upstream's `WORKBUDDY_BROWSER_OPEN:<url>`
- * (omp-test-harness「受控上游浏览器标记」) makes the tool round a `write` to `xd://browser`.
+ * (omp-test-harness「受控上游浏览器标记」) makes the tool round one `eval` call whose JS cell runs
+ * `browser.open` (#1570: v18.12.3 drives its browser from the eval prelude); every case is `yolo`, so
+ * neither the eval nor the prelude asks.
  *
- * Oracles: the frames of the turn (exactly one tool call, failed; the turn ends with `agent_end`),
- * the workspace on disk (no `xd:` entry: the write did not fall through to a plain file), the omp
- * download cache (`<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome` absent) and omp's file log (no
+ * Oracles: the frames of the turn (exactly one `eval` call, failed — with the prelude off the cell
+ * has no `browser`: `ReferenceError: browser is not defined`, first run 2026-10-20; the turn ends
+ * with `agent_end`), the workspace on disk (nothing written), the omp download cache (`<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome` absent) and omp's file log (no
  * `Downloading Chromium for puppeteer`). Before this change the overlay had no browser block, so
  * the project layer's `enabled: true` won and omp on macOS started downloading Chrome-for-Testing.
  *
@@ -74,9 +76,10 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: no browser configur
 
       const starts = frames.filter((frame) => frame.type === "tool_execution_start");
       const ends = frames.filter((frame) => frame.type === "tool_execution_end");
-      expect(starts).toHaveLength(1);
+      console.log(`[browser] ${JSON.stringify({ unconfigured: resultText(ends[0]) })}`);
+      expect(starts.map((frame) => frame.toolName)).toEqual(["eval"]);
       expect(ends.map((frame) => frame.isError)).toEqual([true]);
-      expect(resultText(ends[0])).toContain("No such tool: xd://browser");
+      expect(resultText(ends[0])).toContain("ReferenceError: browser is not defined");
       expect(frames.at(-1)?.type).toBe("agent_end");
       expect(world.approvals).toEqual([]);
 
@@ -115,7 +118,10 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: workspace .env and 
         world.runtime.prompt("打开页面 WORKBUDDY_BROWSER_OPEN:about:blank"),
       );
 
-      expect(frames.filter((frame) => frame.type === "tool_execution_start")).toHaveLength(1);
+      const starts = frames.filter((frame) => frame.type === "tool_execution_start");
+      const ends = frames.filter((frame) => frame.type === "tool_execution_end");
+      console.log(`[browser] ${JSON.stringify({ pinned: resultText(ends[0]) })}`);
+      expect(starts.map((frame) => frame.toolName)).toEqual(["eval"]);
       expect(frames.at(-1)?.type).toBe("agent_end");
       expect(existsSync(browser.marker)).toBe(true);
       const argv = readFileSync(browser.marker, "utf8");
@@ -142,7 +148,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: workspace .env and 
       );
 
       const ends = frames.filter((frame) => frame.type === "tool_execution_end");
-      expect(ends.map((frame) => frame.isError)).toEqual([true]);
+      console.log(`[browser] ${JSON.stringify({ unpinned: resultText(ends[0]) })}`);
+      expect(ends.map((frame) => [frame.toolName, frame.isError])).toEqual([["eval", true]]);
       expect(resultText(ends[0])).toContain("Browser open timed out after");
       expect(resultText(ends[0])).not.toContain("Shared browser daemon unavailable");
       expect(frames.at(-1)?.type).toBe("agent_end");

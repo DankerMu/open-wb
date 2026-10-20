@@ -1,5 +1,5 @@
 /**
- * Issue #909 (tasks 1.6, 1.7, 3.2): what official omp v18.0.10 does with the model proxy's
+ * Issue #909 (tasks 1.6, 1.7, 3.2): what official omp v18.12.3 does with the model proxy's
  * failure answers, in the proxied world of support/omp-official-proxied.ts. The upstream request
  * count is the fake upstream's record (`requests()`) or the stalled listener's accept count; the
  * frames are omp's own. Design D7 rests on these cases: none of the three 424 answers
@@ -43,7 +43,10 @@ import {
 const CASE = { timeout: 120_000 };
 /** turn-control's `OMP_ABORT_GRACE_MS` (a spec constant, copied). */
 const ABORT_GRACE_MS = 8_000;
-/** One round of omp v18.0.10's transport and provider retries (design D2, 实测). */
+/**
+ * One round of omp's transport and provider retries (design D2, 实测): 6 HTTP attempts
+ * (v18.12.3 `ai/src/utils/openai-http.ts:33`), replayed once by the provider layer.
+ */
 const ROUND_REQUESTS = 12;
 /** A first round takes about 32 s (实测); twice that is the wait for its `turn.retry`. */
 const FIRST_ROUND_BOUND_MS = 64_000;
@@ -51,7 +54,10 @@ const FIRST_ROUND_BOUND_MS = 64_000;
 const FAKE_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 /** Two rounds of omp's transport and provider retries (about a minute) and the turn's close. */
 const CAPPED = { timeout: 180_000 };
-/** omp-runtime「会话级重试封顶一轮（真实 omp）」: two rounds are 24 upstream requests under v18.0.10. */
+/**
+ * omp-runtime「会话级重试封顶一轮（真实 omp）」: two rounds are 24 upstream requests (v18.12.3 first run
+ * 2026-10-20, #1570: the same count as under the previous pin).
+ */
 const UPSTREAM_REQUESTS = 24;
 /** The overlay's `retry.baseDelayMs` (omp-runtime「宿主 overlay」). */
 const OVERLAY_BASE_DELAY_MS = 500;
@@ -127,8 +133,8 @@ const BEYOND_CAP = (frame: OmpFrame): boolean =>
 /**
  * The capped shape: exactly one `auto_retry_start` (attempt 1 of 1) waiting at most the overlay's
  * `baseDelayMs`, one `auto_retry_end` that failed, the terminal `agent_end` last; the upstream saw
- * two rounds of the first model only. omp v18.0.10 waits `baseDelayMs` less up to 25 % jitter
- * before the first retry and caps any base at 8 s (`retry-fallback-chains.ts:69-77`), so a project
+ * two rounds of the first model only. omp v18.12.3 waits `baseDelayMs` less up to 25 % jitter
+ * before the first retry and caps any base at 8 s (`retry-fallback-chains.ts:84-92`), so a project
  * base of an hour shows as a delay above 500, not as an hour.
  */
 function expectOneCappedRetry(turn: Turn, world: { upstream: FakeUpstreamServer }): void {

@@ -17,7 +17,7 @@
 ```mermaid
 flowchart LR
     B["浏览器 SPA<br/>(自研 UI，token 沿用上游)"] -- "HTTPS + SSE/WS" --> S["app-server<br/>(自研业务后端：SSO/会话/工作空间/<br/>权限/沙箱/审计/连接器配置)"]
-    S -- "spawn · stdio JSONL RPC<br/>（每活跃会话一个）" --> A["omp-rpc<br/>(omp fork，冻结 v18.0.10)"]
+    S -- "spawn · stdio JSONL RPC<br/>（每活跃会话一个）" --> A["omp-rpc<br/>(omp 官方二进制 v18.12.3)"]
     S -- "本地端口" --> K["kb-service<br/>(Python，吸收 RAGFlow)"]
     A -- "host_tool_call: KB 检索" --> S -- 转发 --> K
     A -- "OpenAI 兼容" --> P["内网模型注册表<br/>(网关/直连)"]
@@ -28,7 +28,7 @@ flowchart LR
 |---|---|---|
 | 浏览器 SPA | **自研**，demo 即形态基准（设计 token 取自上游 5.3.11，已在 demo 文件头与 `ATTRIBUTION.md` 标注）；上游 renderer 的聊天三层渲染管线（`analysis/02-renderer-ui.md`）作实现参照，源码不复用 | demo 全部页面 |
 | app-server | **自研**。服务域划分参照上游 daemon（workbuddy-server：认证/会话/项目/connector/MCP/专家，`analysis/00-overview.md` §4.1）；上游源码为腾讯版权，不复用 | demo 行为 + 上游服务域 |
-| agent 后端 | **omp fork**（MIT，定死 `33cc6b9a`/v18.0.10），服务端子进程 `omp --mode rpc-ui`，每活跃会话一个，app-server 管生命周期 | `backend-research.md` §2 |
+| agent 后端 | **omp**（MIT；原定 fork 定死 `33cc6b9a`/v18.0.10，2026-10-20 起钉官方 release v18.12.3，ADR-0001 补充），服务端子进程 `omp --mode rpc-ui`，每活跃会话一个，app-server 管生命周期 | `backend-research.md` §2 |
 | 知识库（解析/切片/检索/agentic 环） | **吸收 RAGFlow**（Apache-2.0）组装为 kb-service；吸收/跳过清单见研究文档 | `backend-research.md` §1 |
 | 账号 / 权限 / 沙箱 / 审计 | **自研**。沙箱 = 服务端每账号根目录（demo 已按 `/data/workbuddy/<user>` 建模），越界拒绝入审计 | demo `/center` 权限/审计/账号页 |
 | 会话持久化 | omp `SessionManager`（`.jsonl`，resume/fork）+ app-server 侧索引与元数据 | `backend-research.md` §2.1 |

@@ -1,6 +1,7 @@
 // CI job browser-image, step 4 (browser-runtime「CI browser-image job」, scenario「真实浏览器打开工作空间页面
-// 并截图」; change omp-browser-integration design D8). Driven by .github/scripts/ci-browser-image.sh against
-// the reference image's service on the loopback: usage `node ci-browser-e2e.mjs <base-url> <forward-port>`.
+// 并截图」; change omp-browser-integration design D8, omp-pin-18-12 D9: each turn is one `eval` call). Driven by
+// .github/scripts/ci-browser-image.sh against the reference image's service on the loopback: usage
+// `node ci-browser-e2e.mjs <base-url> <forward-port>`.
 // The controlled upstream runs in process with the per-turn tool-round scope (the screenshot turn's history
 // already holds a `tool` message); in front of it a forwarder on <forward-port> notes whether each request
 // body carries an `image_url` part and passes the bytes on (the upstream's own request log keeps no content).
@@ -107,15 +108,20 @@ async function turn(sessionId, message) {
   throw new Failure(`turn did not finish within ${TURN_MS / 1000} s`);
 }
 
-/** The single browser approval and step of a turn, with the summary line both must start with. */
-function expectBrowserCall(reply, summary) {
-  const approvals = reply.approvals.map((a) => ({ tool: a.tool, title: firstLine(a.title), decision: a.decision }));
-  check(approvals.length === 1 && approvals[0].tool === "browser", "one browser approval", approvals);
-  check(approvals[0].title === summary && approvals[0].decision === "allow", "approval title first line", approvals);
+/**
+ * The single `eval` approval and step of a turn (omp v18.12.3 drives the browser from the eval prelude;
+ * the prelude's own `Allow tool: browser` card is answered by the host and never listed): the card is
+ * `Allow tool: eval`, `Language: javascript`, then the code, which must contain `needle`.
+ */
+function expectEvalCall(reply, needle) {
+  const approvals = reply.approvals.map((a) => ({ tool: a.tool, lines: String(a.title).split("\n"), decision: a.decision }));
+  check(approvals.length === 1 && approvals[0].tool === "eval", "one eval approval", approvals);
+  const [head, language, ...code] = approvals[0].lines;
+  check(head === "Allow tool: eval" && language === "Language: javascript", "eval approval title", approvals);
+  check(code.join("\n").includes(needle) && approvals[0].decision === "allow", `approval code with ${needle}`, approvals);
   const steps = reply.steps.map((s) => ({ name: s.name, status: s.status, detail: firstLine(s.detail), changes: s.changes }));
-  check(steps.length === 1 && steps[0].name === "browser" && steps[0].status === "done", "one done browser step", steps);
-  check(steps[0].detail === summary, "step detail first line", steps);
-  log(`approval and step: browser / ${summary}`);
+  check(steps.length === 1 && steps[0].name === "eval" && steps[0].status === "done", "one done eval step", steps);
+  log(`approval and step: eval / ${needle}`);
   return steps[0];
 }
 
@@ -134,10 +140,11 @@ try {
   const sessionId = session.json.id;
 
   const url = `file://${space.json.root}/${upload.json.path}`;
-  expectBrowserCall(await turn(sessionId, `打开页面 WORKBUDDY_BROWSER_OPEN:${url}`), `浏览器：打开 ${url}`);
+  const open = expectEvalCall(await turn(sessionId, `打开页面 WORKBUDDY_BROWSER_OPEN:${url}`), "browser.open");
+  check(open.changes === null, "no changes on the open step", open.changes);
 
   const second = Date.now();
-  const shot = expectBrowserCall(await turn(sessionId, "截图 WORKBUDDY_BROWSER_SHOT"), "浏览器：在标签页 main 执行脚本");
+  const shot = expectEvalCall(await turn(sessionId, "截图 WORKBUDDY_BROWSER_SHOT"), "screenshot");
   check(Array.isArray(shot.changes) && shot.changes.length === 1, "one screenshot change", shot.changes);
   const [change] = shot.changes;
   check(/^screenshots\/screenshot-[^/]+\.png$/u.test(change.path) && change.kind === "write", "screenshot change", change);
@@ -154,10 +161,14 @@ try {
 
   const audit = await call("GET", "/api/audit?limit=200");
   check(audit.status === 200, "audit status", audit.status);
+  // One audit per browser call, from the eval step's statusEvents (`open main <url>`, `main.screenshot()`).
   const browserEvents = audit.json.events.filter((e) => e.kind === "session.browser" && e.detail?.sessionId === sessionId);
-  const actions = browserEvents.map((e) => e.detail.action).sort();
-  check(browserEvents.length === 2 && actions.join() === "open,run", "two session.browser audits", actions);
-  log("audit: two session.browser events (open, run)");
+  const details = browserEvents.map((e) => e.detail);
+  check(details.length === 2 && details.every((d) => d.error === null && !("elided" in d)), "two session.browser audits", details);
+  const calls = details.map((d) => String(d.detail));
+  check(calls.filter((c) => c.startsWith("open main file://")).length === 1, "an open main file:// audit", calls);
+  check(calls.filter((c) => !c.startsWith("open main ") && c.includes("screenshot")).length === 1, "a screenshot audit", calls);
+  log(`audit: two session.browser events (${calls.map((c) => c.split(" ", 1)[0]).join(", ")})`);
   await call("POST", "/api/auth/logout");
 } catch (error) {
   process.stderr.write(`browser-e2e: FAIL ${error instanceof Failure ? error.message : error}\n`);

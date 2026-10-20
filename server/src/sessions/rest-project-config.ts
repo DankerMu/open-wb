@@ -30,6 +30,8 @@ type EntryType = "dir" | "file" | "link" | "none";
 const MAX_AGENT_FILES = 64;
 /** The two `kind:"system"` files of `.omp`, `.agent(s)`, `.claude` and `.codex` (#1570). */
 const SYSTEM_FILES = ["SYSTEM.md", "SYSTEM_TEMPLATE.md"];
+/** `.gemini`'s two (#1570): its literal file is lower-case (omp `discovery/gemini.ts`). */
+const GEMINI_SYSTEM_FILES = ["system.md", "SYSTEM_TEMPLATE.md"];
 
 export function registerProjectConfigRoutes(
   app: FastifyInstance,
@@ -45,10 +47,11 @@ export function registerProjectConfigRoutes(
 /**
  * The files present at omp's read locations, ordered by depth, then by path in code-point order:
  * in every directory of the walk `AGENTS.md` and, under `.agent` and `.agents`, `AGENTS.md` and the
- * system files; in the cwd `.claude/CLAUDE.md` and the system files of `.claude` and `.codex`; in the
- * nearest directory of the walk whose `.omp` holds an entry `.omp/AGENTS.md`, `.omp/RULES.md` and
- * the system files; and the agent definitions of the nearest `.omp/agents`. `[]` when the cwd cannot
- * be resolved inside the sandbox root. Never throws.
+ * system files; in the cwd `.claude/CLAUDE.md`, the system files of `.claude` and `.codex`, and
+ * `.gemini/system.md` and `.gemini/SYSTEM_TEMPLATE.md`; in the nearest directory of the walk whose
+ * `.omp` holds an entry `.omp/AGENTS.md`, `.omp/RULES.md` and the system files; and the agent
+ * definitions of the nearest `.omp/agents`. `[]` when the cwd cannot be resolved inside the sandbox
+ * root. Never throws.
  */
 export function listProjectConfig(cwd: string, sandboxRoot: string): ConfigFile[] {
   const { chain, walk } = projectDirs(cwd, sandboxRoot);
@@ -72,6 +75,9 @@ export function listProjectConfig(cwd: string, sandboxRoot: string): ConfigFile[
   }
   addUnder(0, ".claude", ["CLAUDE.md"]);
   addUnder(0, ".codex", []);
+  if (entryType(chain[0], ".gemini") === "dir") {
+    for (const name of GEMINI_SYSTEM_FILES) add(0, `.gemini/${name}`, "system");
+  }
   const omp = nearestDir(chain.slice(0, walk), [".omp"], (entries) => entries.length > 0);
   if (omp !== null) {
     addUnder(omp.depth, ".omp", ["AGENTS.md", "RULES.md"]);

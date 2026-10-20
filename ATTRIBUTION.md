@@ -26,7 +26,7 @@
   - 义务：Apache-2.0 要求保留版权声明、许可证副本与变更说明。**若后续实际吸收 RAGFlow 源码**（而非仅参照设计）,须在仓库内附 `LICENSE-RAGFlow`（Apache-2.0 全文）与 `NOTICE`,并在被派生的文件头标注来源与修改点。当前仅为原型层面的概念参照,尚未纳入其源码。
 
 - **oh-my-pi (omp)** —— `MIT License`,版权链：Mario Zechner (2025) → Can Bölük (2025-2026) → Stencil Labs, Inc. (2026)（https://github.com/can1357/oh-my-pi）
-  - 用途：规划中的 agent 后端。决策（2026-08-29）：**fork 并定死在 v18.0.10 / commit `33cc6b9a`**,后续不跟进上游;减肥与集成方案见 `resource/backend-research.md` §2。
+  - 用途：规划中的 agent 后端。决策（2026-08-29）：**fork 并定死在 v18.0.10 / commit `33cc6b9a`**,后续不跟进上游;原定 v18.0.10 / `33cc6b9a`，2026-10-20 起改钉官方 release v18.12.3（ADR-0001 补充，#1570）;减肥与集成方案见 `resource/backend-research.md` §2。
   - 义务：MIT 要求在副本或实质部分中保留版权声明与许可文本。fork 仓库须保留其 `LICENSE`;**若 omp 派生二进制进入本项目发行物**,发行物内须附带该 MIT 声明。当前仅为本地参考副本（`resource/oh-my-pi`,已 gitignore）,未分发。
 
 - **lucide / lucide-react** —— `ISC License`,版权归 Lucide Icons and Contributors（部分图标派生自 Feather,© Cole Bemis,MIT,声明同在该包 `LICENSE`）（https://github.com/lucide-icons/lucide）
