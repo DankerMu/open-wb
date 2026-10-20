@@ -528,7 +528,12 @@ function assertIsolation(
   expect(parsed.environ).toBe("EACCES");
   expect(parsed.wrote).toBe("ok");
 
-  expect(listOneLevel(join(layout.sandboxRoot, OWNER_ID))).toEqual([
+  // #1567: the unbound session's spawn plants the owner root's `.git` repo-root marker (2770).
+  const ownerRoot = join(layout.sandboxRoot, OWNER_ID);
+  const marker = lstatSync(join(ownerRoot, ".git"));
+  expect(marker.mode & 0o7777).toBe(0o2770);
+  expect(listOneLevel(ownerRoot)).toEqual([
+    { name: ".git", type: "dir", size: marker.size, mtime: marker.mtimeMs },
     {
       name: PROBE_FILE,
       type: "file",
