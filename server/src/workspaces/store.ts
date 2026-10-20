@@ -3,7 +3,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { lstatSync, rmdirSync } from "node:fs";
-import { isAbsolute, resolve as resolveFsPath } from "node:path";
+import { isAbsolute, join, resolve as resolveFsPath } from "node:path";
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import type { emit as canonicalEmit } from "../core/audit/index.js";
 import { HttpError } from "../core/errors/index.js";
@@ -29,6 +29,8 @@ interface CreateWorkspaceInput {
 interface WorkspaceStoreOptions {
   sandboxRoot: string;
   ensureSharedDir: (absPath: string) => void;
+  /** Plants `<root>/.git` (omp-runtime「会话工作目录的仓库根标记」); throws when it cannot. */
+  ensureRepoRootMarker: (root: string) => void;
   emit: typeof canonicalEmit;
   /** Row ids of temporary workspaces; tests inject collisions. Default: 16 random bytes as hex. */
   generateId?: () => string;
@@ -139,7 +141,7 @@ export function createWorkspaceStore(
   const sandboxRoot = isAbsolute(options.sandboxRoot)
     ? options.sandboxRoot
     : resolveFsPath(options.sandboxRoot);
-  const { ensureSharedDir, emit } = options;
+  const { emit } = options;
   const generateId = options.generateId ?? (() => randomBytes(16).toString("hex"));
 
   return {
@@ -173,7 +175,7 @@ export function createWorkspaceStore(
       db.exec("BEGIN");
       try {
         insertOwnedWorkspace(db, created, principal.id);
-        ensureRoots(roots, ensureSharedDir);
+        ensureRoots(roots, options, createdPaths);
         emit(db, {
           kind: "workspace.create",
           actorId: principal.id,
@@ -198,7 +200,7 @@ export function createWorkspaceStore(
       const roots = [ownerRoot, workspaceRoot];
       const createdPaths = missingPaths(roots);
       try {
-        ensureRoots(roots, ensureSharedDir);
+        ensureRoots(roots, options, createdPaths);
       } catch (error) {
         throw failAfterCleanup(error, [], createdPaths);
       }
@@ -362,11 +364,17 @@ function missingPaths(roots: string[]): string[] {
   return roots.filter((root) => !pathExists(root));
 }
 
-/** Owner root first, then the workspace root: each parent exists before its child is made. */
-function ensureRoots(roots: string[], ensureSharedDir: (absPath: string) => void): void {
+/**
+ * Owner root first, then the workspace root: each parent exists before its child is made. Then the
+ * workspace root's marker, appended to `createdPaths` when missing so a rollback removes it first.
+ */
+function ensureRoots(roots: string[], options: WorkspaceStoreOptions, created: string[]): void {
   for (const root of roots) {
-    ensureSharedDir(root);
+    options.ensureSharedDir(root);
   }
+  const workspaceRoot = roots.at(-1) as string;
+  created.push(...missingPaths([join(workspaceRoot, ".git")]));
+  options.ensureRepoRootMarker(workspaceRoot);
 }
 
 type InsertableWorkspace = Omit<WorkspaceRecord, "root">;

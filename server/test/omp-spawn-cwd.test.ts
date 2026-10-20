@@ -217,20 +217,19 @@ describe("spawnOmp cwd (direct)", () => {
     expect(call.options.cwd).toBe(spelled);
   });
 
-  it("never creates a missing non-owner-root cwd nor the absent owner root", async () => {
+  it("never creates a missing non-owner-root cwd nor the absent owner root, and does not spawn", async () => {
     const roots = makeRoots();
     const missing = join(roots.ownerRoot, "missing");
     const { calls, spawnImpl } = recorder([...ownDirs(roots), missing]);
-    await spawnOmp(spawnOpts(roots, missing), spawnImpl);
-    expect(calls).toHaveLength(1);
-    const call = calls[0] as Recorded;
-    expect(call.options.cwd).toBe(missing);
-    expect(cwdArg(call.args)).toBe(missing);
-    expect(call.present[missing]).toBe(false);
+    // The cwd's `.git` marker is made non-recursively: a missing cwd fails the preparation.
+    await expect(spawnOmp(spawnOpts(roots, missing), spawnImpl)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(calls).toHaveLength(0);
     expect(existsSync(missing)).toBe(false);
     expect(existsSync(roots.ownerRoot)).toBe(false);
     for (const dir of [roots.sessionDir, roots.home, roots.agent]) {
-      expect(call.present[dir], dir).toBe(true);
+      expect(existsSync(dir), dir).toBe(true);
     }
   });
 });

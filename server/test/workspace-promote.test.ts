@@ -25,6 +25,7 @@ import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { removeTempDirs } from "./core-db-helpers.js";
 import { REAL, settle } from "./session-approval-helpers.js";
@@ -112,7 +113,12 @@ async function withWorld(action: (world: World) => Promise<void>): Promise<void>
     const normal = { ...(created.json() as Workspace), createdAt: 1 };
     // The list orders by creation time: pin 项目A before T instead of racing the clock.
     db.prepare("UPDATE workspaces SET created_at = 1 WHERE id = ?").run(normal.id);
-    const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+    const store = createWorkspaceStore(db, {
+      sandboxRoot,
+      ensureSharedDir,
+      ensureRepoRootMarker,
+      emit,
+    });
     const temporary = seedTemporaryWorkspaceSession(db, store, OWNER, OWNER_SESSION);
     const foreignTemporary = seedTemporaryWorkspaceSession(db, store, OTHER, OTHER_SESSION);
     expect(temporary.root).toBe(join(sandboxRoot, OWNER, `tmp-${temporary.id}`));
@@ -248,7 +254,7 @@ describe("转正：原地转正", () => {
       // Nothing on disk moved, was renamed or rewritten.
       const after = state(db, sandboxRoot);
       expect(after.dirs).toEqual(before.dirs);
-      expect(readdirSync(temporary.root)).toEqual(["notes.md"]);
+      expect(readdirSync(temporary.root)).toEqual([".git", "notes.md"]);
       expect(lstatSync(temporary.root).ino).toBe(inodes.root);
       expect(lstatSync(notes).ino).toBe(inodes.notes);
       expect(readFileSync(notes).equals(NOTES)).toBe(true);
@@ -307,7 +313,12 @@ async function openProcessWorld(hold?: (line: string) => boolean): Promise<Proce
   const world = worlds.track(await openRegenWorld(hold === undefined ? {} : { hold }));
   const sandboxRoot = world.rt.runtime.sandboxRoot;
   mkdirSync(sandboxRoot, { recursive: true });
-  const store = createWorkspaceStore(world.fixture.db, { sandboxRoot, ensureSharedDir, emit });
+  const store = createWorkspaceStore(world.fixture.db, {
+    sandboxRoot,
+    ensureSharedDir,
+    ensureRepoRootMarker,
+    emit,
+  });
   const temporary = seedTemporaryWorkspaceSession(world.fixture.db, store, OWNER_ID, OWNER_SESSION);
   return { world, temporary, session: OWNER_SESSION };
 }

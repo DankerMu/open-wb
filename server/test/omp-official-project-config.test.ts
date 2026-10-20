@@ -9,6 +9,13 @@
  * against literals, so the table and the route cannot drift apart unnoticed. No case puts two
  * instruction files in one directory: omp keeps one per level. Opt-in: skipped
  * unless `WORKBUDDY_OMP_TEST=1`. When an omp upgrade turns a case red, the spec changes first.
+ *
+ * #1567: `spawnOmp` plants a `.git` marker in the cwd, which ends omp's walk there. The rows that
+ * describe omp's own walk above the cwd run with that marker removed by a test-only spawn wrapper
+ * (`unmarked`); rows that plant their own `${CWD}/.git/` and the depth-0 rows run as the product
+ * does; the agents rows, which no `.git` bounds, run both ways; the「with the host marker」rows are
+ * the product's outcome for the same files one level up (omp-runtime「祖先的系统提示不再进入会话
+ * （真实 omp）」, the part v18.0.10 can show).
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -38,6 +45,8 @@ interface Case {
   read: string[];
   unread?: string[];
   host: Listed[];
+  /** `unmarked`: started with the host's fresh `.git` marker removed; `both`: once each way. */
+  via?: "unmarked" | "both";
 }
 
 const instructions = (path: string, depth: number): Listed => ({
@@ -62,8 +71,20 @@ function row(path: string, kind: Listed["kind"], everyLevel: boolean): Case[] {
       read: everyLevel ? ["MARK-D1"] : [],
       unread: everyLevel ? [] : ["MARK-D1"],
       host: everyLevel ? [{ path, kind, depth: 1 }] : [],
+      via: kind === "agent" ? "both" : "unmarked",
     },
   ];
+}
+
+/** The product's outcome: with the host's marker in the cwd, the file one level up is not read. */
+function marked(path: string): Case {
+  return {
+    name: `with the host marker, ${path} one level up is not read`,
+    files: { "MARK-D1": `${UP}/${path}` },
+    read: [],
+    unread: ["MARK-D1"],
+    host: [],
+  };
 }
 
 const CASES: Case[] = [
@@ -81,6 +102,7 @@ const CASES: Case[] = [
     read: [],
     unread: ["MARK-A", "MARK-R"],
     host: [],
+    via: "unmarked",
   },
   {
     name: "an empty cwd .omp does not hide the parent's .omp/AGENTS.md and .omp/RULES.md",
@@ -88,6 +110,7 @@ const CASES: Case[] = [
     extra: [`${CWD}/.omp/`],
     read: ["MARK-A", "MARK-R"],
     host: [instructions(".omp/AGENTS.md", 1), instructions(".omp/RULES.md", 1)],
+    via: "unmarked",
   },
   {
     name: ".omp/AGENTS.md and .omp/RULES.md above the .git level are not read",
@@ -103,6 +126,7 @@ const CASES: Case[] = [
     extra: [`${CWD}/.omp/notes.txt`],
     read: ["MARK-FAR"],
     host: [agent(".omp/agents/far.md", 1)],
+    via: "both",
   },
   {
     name: "the nearest .omp/agents is found past a .git level",
@@ -117,6 +141,7 @@ const CASES: Case[] = [
     read: ["MARK-NEAR"],
     unread: ["MARK-FAR"],
     host: [agent(".omp/agents/near.md", 1)],
+    via: "both",
   },
   {
     name: "an empty nearer .omp/agents hides a farther one",
@@ -125,6 +150,7 @@ const CASES: Case[] = [
     read: [],
     unread: ["MARK-FAR"],
     host: [],
+    via: "both",
   },
   ...["AGENTS.md", ".agents/AGENTS.md"].map(
     (path): Case => ({
@@ -134,6 +160,7 @@ const CASES: Case[] = [
       read: ["MARK-AT"],
       unread: ["MARK-ABOVE"],
       host: [instructions(path, 1)],
+      via: "unmarked",
     }),
   ),
   {
@@ -141,8 +168,28 @@ const CASES: Case[] = [
     files: { "MARK-D2": `${ROOT}/AGENTS.md` },
     read: ["MARK-D2"],
     host: [instructions("AGENTS.md", 2)],
+    via: "unmarked",
+  },
+  ...["AGENTS.md", ".agents/AGENTS.md", ".omp/AGENTS.md", ".omp/RULES.md"].map(marked),
+  {
+    name: "with the host marker, AGENTS.md one level up is not read while .omp/agents there is",
+    files: { "MARK-D1": `${UP}/AGENTS.md`, "MARK-FAR": `${UP}/.omp/agents/far.md` },
+    read: ["MARK-FAR"],
+    unread: ["MARK-D1"],
+    host: [agent(".omp/agents/far.md", 1)],
   },
 ];
+
+/** Every case once per way it starts omp. */
+const RUNS = CASES.flatMap(
+  (testCase): Array<Case & { unmarked: boolean }> =>
+    testCase.via === "both"
+      ? [
+          { ...testCase, name: `(host marker) ${testCase.name}`, unmarked: false },
+          { ...testCase, name: `(marker removed) ${testCase.name}`, unmarked: true },
+        ]
+      : [{ ...testCase, unmarked: testCase.via === "unmarked" }],
+);
 
 /** An agent definition whose `description` is the marker; any other file is the marker alone. */
 function bodyOf(path: string, marker: string): string {
@@ -165,8 +212,10 @@ function plant(sandboxRoot: string, testCase: Case): void {
 }
 
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project config locations`, () => {
-  it.each(CASES)("$name", TURN, async (testCase) => {
-    const world = await openOfficialWorld(({ sandboxRoot }) => plant(sandboxRoot, testCase));
+  it.each(RUNS)("$name", TURN, async (testCase) => {
+    const world = await openOfficialWorld(({ sandboxRoot }) => plant(sandboxRoot, testCase), {
+      hostMarker: !testCase.unmarked,
+    });
 
     const state = (await world.runtime.command({ type: "get_state" })) as {
       systemPrompt: string[];

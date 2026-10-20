@@ -284,7 +284,7 @@ describe("GET /api/commands", () => {
 });
 
 describe("GET /api/commands per workspace (#813)", () => {
-  it("lists the workspace's and its ancestors' project skills with workspaceId, the owner root's without", async () => {
+  it("lists the workspace's project skills with workspaceId, not its ancestors' (the repo-root marker ends the walk), and the owner root's without", async () => {
     const { app, db, root, stateDir } = openWorld();
     const cookie = await loginSessionPair(app);
     const workspace = await createWorkspace(app, cookie, join(root, "sandbox"));
@@ -307,7 +307,7 @@ describe("GET /api/commands per workspace (#813)", () => {
           ...BUILTIN_ENTRIES,
           skillEntry("code-review", "Review a diff", "skill"),
           skillEntry("deploy", "上线到生产", "project"),
-          skillEntry("mine", "我的技能", "project"),
+          // No `skill:mine`: the created workspace root holds the `.git` marker (#1563).
           skillEntry("weekly-report", "项目自己的周报", "project", true),
         ],
       }),

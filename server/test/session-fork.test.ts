@@ -639,7 +639,8 @@ describe("fork alignment of messages with attachments (#1018)", () => {
       const result = await forked(world, u2 ?? -1);
 
       expect(files()).toEqual(onDisk);
-      expect(onDisk).toHaveLength(5);
+      // u1, the workspace directory, its repo-root marker, uploads and the two files.
+      expect(onDisk).toHaveLength(6);
       expect(result).toEqual({ draft: text, attachments: [bPng], branch: ["e-2"] });
       const fresh = String(
         db.prepare("SELECT id FROM chat_sessions WHERE parent_session_id = ?").get(world.session)

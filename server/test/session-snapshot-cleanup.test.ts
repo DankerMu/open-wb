@@ -142,13 +142,16 @@ function names(dir: string): string[] {
   return readdirSync(dir, { recursive: true, encoding: "utf8" }).sort();
 }
 
-/** The snapshot is still there to be read: its manifest lists `a.txt`, its tree holds the bytes. */
+/**
+ * The snapshot is still there to be read: its manifest lists `a.txt` (after the workspace's
+ * repo-root marker), its tree holds the bytes.
+ */
 function expectReadable(workspace: Pick<Workspace, "snapshots">, messageId: number): void {
   const dir = snapshotDir(workspace, messageId);
   const manifest = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")) as {
     entries: Array<{ path: string }>;
   };
-  expect(manifest.entries.map((entry) => entry.path)).toEqual(["a.txt"]);
+  expect(manifest.entries.map((entry) => entry.path)).toEqual([".git", "a.txt"]);
   expect(readFileSync(join(dir, "tree", "a.txt"), "utf8")).toBe(KEPT);
 }
 
@@ -222,7 +225,7 @@ describe("快照清理 — 会话删除 (workspace-snapshots「快照清理」, 
       files: names(workspace.root),
       snapshot: names(snapshotDir(workspace, other)),
     }).toEqual(before);
-    expect(before.files).toEqual(["a.txt"]);
+    expect(before.files).toEqual([".git", "a.txt"]);
     expectReadable(workspace, other);
     expect(readFileSync(join(workspace.root, "a.txt"), "utf8")).toBe(KEPT);
     expect(await auditKindsSince(world, audits)).toEqual(["session.delete"]);
@@ -344,7 +347,7 @@ describe("快照清理 — 归档 (session-metadata「归档保留临时空间�
     at(clock + 10);
     const body = restoredBy(await undoWith(world, Number(u2), "restore"));
     expect(body.files).toMatchObject({ restored: 0, removed: 1 });
-    expect(contents(world)).toEqual({ "a.txt": KEPT });
+    expect(contents(world)).toEqual({ ".git/": null, "a.txt": KEPT });
     expect(existsSync(snapshotDir(world, Number(u2)))).toBe(false);
   });
 });

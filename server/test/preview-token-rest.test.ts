@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
 import { createPreviewTokens, type PreviewTokens } from "../src/preview/tokens.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import type { WorkspacePreviewDependencies } from "../src/workspaces/rest-preview-token.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { removeTempDirs } from "./core-db-helpers.js";
@@ -260,7 +261,12 @@ describe("preview-token: 签发与复用", () => {
 
   it("issues for a temporary workspace like for any other", async () => {
     await withPreviewWorld(async ({ app, db, sandboxRoot, registry, zhangsan }) => {
-      const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+      const store = createWorkspaceStore(db, {
+        sandboxRoot,
+        ensureSharedDir,
+        ensureRepoRootMarker,
+        emit,
+      });
       const temporary = seedTemporaryWorkspaceSession(db, store, ZHANGSAN, TEMP_SESSION);
 
       const { token } = issuedOf(await issueToken(app, temporary.id, zhangsan));

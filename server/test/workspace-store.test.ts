@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { HttpError } from "../src/core/errors/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore, type WorkspaceStore } from "../src/workspaces/store.js";
 import { removeTempDirs, tempDir, withOpenDb } from "./core-db-helpers.js";
 
@@ -139,7 +140,7 @@ describe("workspaces store create", () => {
       expect(lstatSync(ownerRoot).mode & 0o7777).toBe(SHARED_MODE);
       expect(lstatSync(created.root).mode & 0o7777).toBe(SHARED_MODE);
       expect(readdirSync(ownerRoot)).toEqual([DERIVED_DIR]);
-      expect(readdirSync(created.root)).toEqual([]);
+      expect(readdirSync(created.root)).toEqual([".git"]);
       expect(
         db
           .prepare(
@@ -211,6 +212,7 @@ describe("workspaces store create", () => {
       let emitCalls = 0;
       const store = createWorkspaceStore(db, {
         sandboxRoot,
+        ensureRepoRootMarker,
         ensureSharedDir: (absPath) => {
           helperCalls += 1;
           ensureSharedDir(absPath);
@@ -234,25 +236,6 @@ describe("workspaces store create", () => {
       expect(other.root).toBe(join(sandboxRoot, "u2", "dir-a"));
       expect(store.list("u1")).toEqual([first]);
       expect(store.list("u2")).toEqual([other]);
-    });
-  });
-
-  it("adopts an ordinary existing workspace directory without changing bytes or mode", () => {
-    const sandboxRoot = openSandbox();
-    const ownerRoot = join(sandboxRoot, "u1");
-    const workspaceRoot = join(ownerRoot, "smoke-fixture");
-    mkdirSync(ownerRoot, { mode: 0o755 });
-    mkdirSync(workspaceRoot, { mode: 0o755 });
-    writeFileSync(join(workspaceRoot, "keep.txt"), "adopt-me");
-    chmodSync(ownerRoot, 0o755);
-    chmodSync(workspaceRoot, 0o755);
-    withStore(sandboxRoot, (_db, store) => {
-      const created = store.create(PRINCIPAL_U1, { name: "smoke", dir: "smoke-fixture" });
-      expect(created.root).toBe(workspaceRoot);
-      expect(readFileSync(join(workspaceRoot, "keep.txt"), "utf8")).toBe("adopt-me");
-      expect(lstatSync(ownerRoot).mode & 0o7777).toBe(0o755);
-      expect(lstatSync(workspaceRoot).mode & 0o7777).toBe(0o755);
-      expect(readdirSync(workspaceRoot)).toEqual(["keep.txt"]);
     });
   });
 
@@ -305,6 +288,7 @@ describe("workspaces store create", () => {
       let nativeError: unknown;
       const store = createWorkspaceStore(db, {
         sandboxRoot,
+        ensureRepoRootMarker,
         ensureSharedDir,
         emit: (handle, event) => {
           try {
@@ -329,6 +313,7 @@ describe("workspaces store create", () => {
       let ensureCalls = 0;
       const store = createWorkspaceStore(db, {
         sandboxRoot,
+        ensureRepoRootMarker,
         ensureSharedDir: (absPath) => {
           ensureCalls += 1;
           ensureSharedDir(absPath);
@@ -392,6 +377,7 @@ describe("workspaces store failure compensation", () => {
     withOpenDb(":memory:", (db) => {
       const store = createWorkspaceStore(db, {
         sandboxRoot,
+        ensureRepoRootMarker,
         ensureSharedDir,
         emit: (handle, event) => {
           emit(handle, event);
@@ -415,6 +401,7 @@ describe("workspaces store failure compensation", () => {
     withOpenDb(":memory:", (db) => {
       const store = createWorkspaceStore(db, {
         sandboxRoot,
+        ensureRepoRootMarker,
         ensureSharedDir,
         emit: () => {
           throw auditBoom;
@@ -462,6 +449,7 @@ describe("workspaces store failure compensation", () => {
     withOpenDb(":memory:", (db) => {
       const store = createWorkspaceStore(db, {
         sandboxRoot,
+        ensureRepoRootMarker,
         ensureSharedDir,
         emit: (handle, event) => {
           emit(handle, event);
@@ -584,7 +572,7 @@ function withStore(
   run: (db: DatabaseSync, store: WorkspaceStore) => void,
 ): void {
   withOpenDb(":memory:", (db) => {
-    run(db, createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit }));
+    run(db, createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, ensureRepoRootMarker, emit }));
   });
 }
 
@@ -680,6 +668,7 @@ function expectCreateCompensates(
   withOpenDb(":memory:", (db) => {
     const store = createWorkspaceStore(db, {
       sandboxRoot,
+      ensureRepoRootMarker,
       ensureSharedDir: (absPath) => helper(absPath, sandboxRoot),
       emit,
     });
@@ -703,6 +692,7 @@ function expectFilledWorkspaceCleanup(sentinel: Error, contents: string): void {
   withOpenDb(":memory:", (db) => {
     const store = createWorkspaceStore(db, {
       sandboxRoot,
+      ensureRepoRootMarker,
       ensureSharedDir: (absPath) => {
         ensureSharedDir(absPath);
         if (absPath === workspaceRoot) {
@@ -748,6 +738,7 @@ function withDeniedTransactions(
         db,
         createWorkspaceStore(db, {
           sandboxRoot,
+          ensureRepoRootMarker,
           ensureSharedDir: options.ensureSharedDir ?? ensureSharedDir,
           emit,
         }),

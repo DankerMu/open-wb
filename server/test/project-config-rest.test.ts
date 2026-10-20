@@ -7,7 +7,16 @@
  * module under test. What the host touches on the filesystem is observed through the call recorder
  * of slash-commands-skills-hardening.test.ts.
  */
-import { chmodSync, mkdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
@@ -50,6 +59,15 @@ async function ownerWorld(): Promise<DirectoryWorld & { cookie: string; ownerRoo
   const world = openWorld("project-config-rest-");
   const cookie = await loginSessionPair(world.app);
   return { ...world, cookie, ownerRoot: join(world.sandboxRoot, "u1") };
+}
+
+/**
+ * Removes the `.git` repo-root marker the host planted at creation (omp-runtime「会话工作目录的仓库根
+ * 标记」), as the omp uid could: the walk below the marker is then the one a spawn would re-bound.
+ */
+function removeMarker(root: string): void {
+  expect(readdirSync(join(root, ".git"))).toEqual([]);
+  rmdirSync(join(root, ".git"));
 }
 
 function getConfig(app: FastifyInstance, cookie: string, workspaceId?: string) {
@@ -111,7 +129,7 @@ describe("GET /api/project-config: request rules", () => {
 });
 
 describe("GET /api/project-config: files present at the read locations", () => {
-  it("lists the workspace's files and the owner root's AGENTS.md, by depth then path, touching no session or process", async () => {
+  it("lists the workspace's files by depth then path, the owner root's AGENTS.md only once the marker is gone, touching no session or process", async () => {
     const { app, db, cookie, sandboxRoot, ownerRoot } = await ownerWorld();
     const workspace = await createWorkspace(app, cookie, sandboxRoot);
     plant(workspace.root, [
@@ -134,18 +152,19 @@ describe("GET /api/project-config: files present at the read locations", () => {
 
     const bound = await getConfig(app, cookie, workspace.id);
     const unbound = await getConfig(app, cookie);
+    const own = [
+      { path: ".claude/CLAUDE.md", kind: "instructions", depth: 0 },
+      { path: ".omp/RULES.md", kind: "instructions", depth: 0 },
+      { path: ".omp/agents/reviewer.md", kind: "agent", depth: 0 },
+      { path: "AGENTS.md", kind: "instructions", depth: 0 },
+    ];
 
+    // The created workspace root holds the `.git` marker: the walk is that root alone.
     expect(bound.statusCode).toBe(200);
-    expect(bound.payload).toBe(
-      JSON.stringify({
-        files: [
-          { path: ".claude/CLAUDE.md", kind: "instructions", depth: 0 },
-          { path: ".omp/RULES.md", kind: "instructions", depth: 0 },
-          { path: ".omp/agents/reviewer.md", kind: "agent", depth: 0 },
-          { path: "AGENTS.md", kind: "instructions", depth: 0 },
-          { path: "AGENTS.md", kind: "instructions", depth: 1 },
-        ],
-      }),
+    expect(bound.payload).toBe(JSON.stringify({ files: own }));
+    removeMarker(workspace.root);
+    expect(await listed(app, cookie, workspace.id)).toBe(
+      JSON.stringify({ files: [...own, { path: "AGENTS.md", kind: "instructions", depth: 1 }] }),
     );
     // Without a workspaceId the cwd is the owner root: its own cwd-only rows are listed.
     expect(unbound.statusCode).toBe(200);
@@ -170,6 +189,7 @@ describe("GET /api/project-config: files present at the read locations", () => {
     plant(workspace.root, ["AGENTS.md"]);
     plant(ownerRoot, [".agents/AGENTS.md"]);
     plant(sandboxRoot, [".agents/AGENTS.md", "AGENTS.md", ".omp/agents/root.md"]);
+    removeMarker(workspace.root);
 
     expect(await listed(app, cookie, workspace.id)).toBe(
       JSON.stringify({
@@ -189,9 +209,13 @@ describe("GET /api/project-config: files present at the read locations", () => {
     const skillsOnly = await createWorkspace(app, cookie, sandboxRoot, "skills-only");
     const noOmp = await createWorkspace(app, cookie, sandboxRoot, "no-omp");
     const emptyOmp = await createWorkspace(app, cookie, sandboxRoot, "empty-omp");
+    const marked = await createWorkspace(app, cookie, sandboxRoot, "marked");
     plant(skillsOnly.root, [".omp/skills/x/SKILL.md"]);
     plant(emptyOmp.root, [".omp/"]);
     plant(ownerRoot, [".omp/RULES.md", ".omp/agents/far.md"]);
+    for (const workspace of [skillsOnly, noOmp, emptyOmp]) {
+      removeMarker(workspace.root);
+    }
 
     // The nearer non-empty `.omp` has no RULES.md; `agents` is looked up on its own.
     expect(await listed(app, cookie, skillsOnly.id)).toBe(
@@ -203,12 +227,17 @@ describe("GET /api/project-config: files present at the read locations", () => {
     expect(await listed(app, cookie, noOmp.id)).toBe(fromOwnerRoot);
     // An empty `.omp` is not the nearest one (omp's `ifNonEmptyDir`).
     expect(await listed(app, cookie, emptyOmp.id)).toBe(fromOwnerRoot);
+    // With its marker in place the walk ends at the workspace root; the agents lookup does not.
+    expect(await listed(app, cookie, marked.id)).toBe(
+      JSON.stringify({ files: [agent(".omp/agents/far.md", 1)] }),
+    );
   });
 
   it("lists .claude/CLAUDE.md and .omp/SYSTEM.md only for the cwd", async () => {
     const { app, cookie, sandboxRoot, ownerRoot } = await ownerWorld();
     const workspace = await createWorkspace(app, cookie, sandboxRoot);
     plant(ownerRoot, [".claude/CLAUDE.md", ".omp/SYSTEM.md", ".omp/AGENTS.md"]);
+    removeMarker(workspace.root);
 
     // The owner root's `.omp` is the nearest one, yet it is not the cwd: no SYSTEM.md.
     expect(await listed(app, cookie, workspace.id)).toBe(
@@ -218,10 +247,11 @@ describe("GET /api/project-config: files present at the read locations", () => {
 
   it("stops the walk at the .git level but not the agents lookup", async () => {
     const { app, cookie, sandboxRoot, ownerRoot } = await ownerWorld();
+    // The `.git` of `repo` is the marker the host planted at creation; a real repository's is the same.
     const repo = await createWorkspace(app, cookie, sandboxRoot, "repo");
     const plain = await createWorkspace(app, cookie, sandboxRoot, "plain");
-    plant(repo.root, [".git/"]);
     plant(ownerRoot, ["AGENTS.md", ".agents/AGENTS.md", ".omp/RULES.md", ".omp/agents/far.md"]);
+    removeMarker(plain.root);
 
     expect(await listed(app, cookie, repo.id)).toBe(
       JSON.stringify({ files: [agent(".omp/agents/far.md", 1)] }),
@@ -316,6 +346,7 @@ describe("GET /api/project-config: a sandbox writable by the omp uid", () => {
       const workspace = await createWorkspace(app, cookie, sandboxRoot);
       plant(workspace.root, [".agents/AGENTS.md", ".omp/RULES.md", "AGENTS.md"]);
       plant(ownerRoot, [".omp/RULES.md"]);
+      removeMarker(workspace.root);
       const locked = [join(workspace.root, ".agents"), join(workspace.root, ".omp")];
 
       for (const dir of locked) {

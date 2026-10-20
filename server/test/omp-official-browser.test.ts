@@ -80,7 +80,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: no browser configur
       expect(frames.at(-1)?.type).toBe("agent_end");
       expect(world.approvals).toEqual([]);
 
-      expect(readdirSync(world.workspaceRoot).toSorted()).toEqual([".omp"]);
+      // Nothing was downloaded into the workspace: its `.omp` and the host's repo-root marker only.
+      expect(readdirSync(world.workspaceRoot).toSorted()).toEqual([".git", ".omp"]);
       const state = world.stateDir;
       expect(existsSync(join(state, "xdg", "cache", "omp", "puppeteer", "chrome"))).toBe(false);
       const logs = join(state, "xdg", "state", "omp", "logs");

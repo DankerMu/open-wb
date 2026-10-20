@@ -22,6 +22,7 @@ import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
 import { createPreviewTokens } from "../src/preview/tokens.js";
 import { ompAgentDir } from "../src/sessions/omp/process.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { INTERNAL_ERROR_ENVELOPE, NOT_FOUND_ENVELOPE } from "./auth-lifecycle-helpers.js";
 import {
@@ -195,7 +196,12 @@ function listWorkspaces({ app, zhangsan }: World) {
  * same database, with its root directory removed again.
  */
 function temporaryWithoutRoot({ db, sandboxRoot }: World) {
-  const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+  const store = createWorkspaceStore(db, {
+    sandboxRoot,
+    ensureSharedDir,
+    ensureRepoRootMarker,
+    emit,
+  });
   db.exec("BEGIN");
   const { workspace } = store.createTemporary({ id: "u1" });
   db.exec("COMMIT");

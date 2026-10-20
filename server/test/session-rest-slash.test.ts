@@ -222,7 +222,7 @@ describe("prompt route classifies with the session's own skills (#813)", () => {
     expect(world.spawns).toHaveLength(0);
   });
 
-  it("sends an owner-root project skill and a platform skill unchanged on bound and unbound sessions", async () => {
+  it("sends an owner-root project skill unchanged only on the unbound session, a platform skill unchanged on a bound one", async () => {
     const world = await openWorld();
     const bound = await openBound(world, "proj");
     installSkill(world, "mine", projectSkills(join(world.sandboxRoot, "u1")));
@@ -231,8 +231,11 @@ describe("prompt route classifies with the session's own skills (#813)", () => {
     // world's own session uses a temporary workspace, whose root is below the owner root too.
     const unbound = seedUnboundSession(world.fixture.db, "u1", "7".repeat(32));
 
-    for (const session of [await bound.session(), unbound, world.session]) {
-      expect(await promptOn(world, "/skill:mine x", session)).toBe("/skill:mine x");
+    // The bound and the temporary workspace roots hold the `.git` repo-root marker (#1563): the
+    // walk ends there, so the owner root's skill is no command of theirs and goes out escaped.
+    expect(await promptOn(world, "/skill:mine x", unbound)).toBe("/skill:mine x");
+    for (const session of [await bound.session(), world.session]) {
+      expect(await promptOn(world, "/skill:mine x", session)).toBe(" /skill:mine x");
     }
     expect(await promptOn(world, "/skill:weekly-report 写周报", await bound.session())).toBe(
       "/skill:weekly-report 写周报",

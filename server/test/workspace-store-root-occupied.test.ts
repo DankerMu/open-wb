@@ -24,6 +24,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import {
   createWorkspaceStore,
   WorkspaceRootOccupiedError,
@@ -55,7 +56,12 @@ function withWorld(run: (world: World) => void): void {
   const ownerRoot = join(sandboxRoot, "u1");
   mkdirSync(ownerRoot);
   withOpenDb(":memory:", (db) => {
-    const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+    const store = createWorkspaceStore(db, {
+      sandboxRoot,
+      ensureSharedDir,
+      ensureRepoRootMarker,
+      emit,
+    });
     run({ db, store, sandboxRoot, ownerRoot });
   });
 }

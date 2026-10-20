@@ -9,11 +9,13 @@
 import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -57,6 +59,12 @@ interface OfficialRuntimeOptions {
    * `PUPPETEER_PROXY*` pins stay.
    */
   browserPins?: boolean;
+  /**
+   * `false` removes the cwd's `.git` marker `spawnOmp` just made, before the process starts (#1567's
+   * negative contrast; the product always plants it). A cwd that held a `.git` before the first
+   * spawn keeps it. The three spawn wrappers are exclusive: no case combines two of them.
+   */
+  hostMarker?: boolean;
   /** The answer to an approval request; deny when absent, so nothing is executed. */
   onApproval?: (request: ApprovalRequest) => ApprovalDecision;
 }
@@ -135,6 +143,26 @@ const unpinnedSpawn: SpawnImpl = (command, args, options) => {
   delete env.PI_BROWSER_CMUX;
   return (spawn as SpawnImpl)(command, args, { ...options, env });
 };
+
+/**
+ * Test-only spawn wrapper for #1567's negative contrast: removes `<cwd>/.git` when the host made it
+ * (the cwd had none before the first spawn). An empty directory only; `ENOENT` (a host that plants
+ * no marker) is no error.
+ */
+function unmarkedSpawn(hostMade: boolean): SpawnImpl {
+  return (command, args, options) => {
+    if (hostMade) {
+      try {
+        rmdirSync(join(String(options.cwd), ".git"));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }
+    return (spawn as SpawnImpl)(command, args, options);
+  };
+}
 
 const BROKER_EXIT_MS = 15_000;
 
@@ -244,6 +272,8 @@ export async function openOfficialWorld(
   });
   const dirs = { stateDir, agentDir, sandboxRoot, ownerRoot, workspaceRoot };
   plant(dirs);
+  // Whether a `.git` in the cwd after the first spawn is the host's marker or the case's own.
+  const hostMarks = lstatSync(join(workspaceRoot, ".git"), { throwIfNoEntry: false }) === undefined;
   const approvals: ApprovalRequest[] = [];
 
   function open(runtimeOptions: OfficialRuntimeOptions, resumePath: string | null): OfficialWorld {
@@ -261,6 +291,7 @@ export async function openOfficialWorld(
       ...(options.browserBin === undefined ? {} : { browserBin: options.browserBin }),
       ...(runtimeOptions.spawnArgs?.hostOverlay === false ? { spawnImpl: rewritingSpawn } : {}),
       ...(runtimeOptions.browserPins === false ? { spawnImpl: unpinnedSpawn } : {}),
+      ...(runtimeOptions.hostMarker === false ? { spawnImpl: unmarkedSpawn(hostMarks) } : {}),
       onApproval: (request) => {
         approvals.push(request);
         runtime.respondApproval(request.id, runtimeOptions.onApproval?.(request) ?? "deny");

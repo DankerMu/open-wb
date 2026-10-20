@@ -30,6 +30,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { removeTemporaryWorkspaceDir } from "../src/workspaces/temp-dir-remove.js";
 import { expectEnvelope, postSessionAction } from "./session-bodyless-rest-helpers.js";
@@ -70,6 +71,8 @@ const TRASH_UNAVAILABLE = "temporary workspace delete: trash directory is unavai
 const INVALID_NAME = "temporary workspace delete: not a temporary workspace directory name";
 const OUTSIDE_SANDBOX = "temporary workspace delete: account root outside the sandbox root";
 const TREE = ["notes.md", "sub", join("sub", "deep.txt")];
+/** A workspace directory: TREE plus the repo-root marker it was created with. */
+const WORKSPACE_TREE = [".git", ...TREE];
 const FORK_TIMEOUT = { timeout: 30_000 };
 
 type RealWorld = Awaited<ReturnType<typeof openRealWorld>>;
@@ -111,7 +114,12 @@ function seedTemporary(world: RealWorld, session = SOURCE): Temporary {
   const { sandboxRoot, stateDir } = world.rt.runtime;
   // No spawn has run yet, so the runtime's temp sandbox root may not exist.
   mkdirSync(sandboxRoot, { recursive: true });
-  const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+  const store = createWorkspaceStore(db, {
+    sandboxRoot,
+    ensureSharedDir,
+    ensureRepoRootMarker,
+    emit,
+  });
   const { id } = seedTemporaryWorkspaceSession(db, store, OWNER_ID, session);
   const dir = join(realpathSync(sandboxRoot), OWNER_ID, `tmp-${id}`);
   expect(lstatSync(dir).isDirectory()).toBe(true);
@@ -250,7 +258,7 @@ describe("共用与随最后一个会话删除 (#928)", () => {
     const world = await openRealWorld();
     const { app, db } = world.fixture;
     const temporary = seedTemporary(world);
-    expect(names(temporary.dir)).toEqual(TREE);
+    expect(names(temporary.dir)).toEqual(WORKSPACE_TREE);
     const audits = auditRows(db);
 
     await deleted(world, SOURCE);
@@ -287,7 +295,7 @@ describe("共用与随最后一个会话删除 (#928)", () => {
         temporary: 1,
       });
       expect(snapshot(temporary.dir)).toEqual(before);
-      expect(before.map((line) => line.split(" ")[0])).toEqual(TREE);
+      expect(before.map((line) => line.split(" ")[0])).toEqual(WORKSPACE_TREE);
       expect(boundTo(db, fork.id)).toBe(temporary.id);
       expect((await listed(world)).find((view) => view.id === fork.id)).toMatchObject({
         workspaceId: temporary.id,
@@ -348,7 +356,7 @@ describe("共用与随最后一个会话删除 (#928)", () => {
       temporary: 0,
     });
     expect(snapshot(temporary.dir)).toEqual(before);
-    expect(before.map((line) => line.split(" ")[0])).toEqual(TREE);
+    expect(before.map((line) => line.split(" ")[0])).toEqual(WORKSPACE_TREE);
     expect(await workspaceDeletes(world)).toEqual([]);
     expect(world.errors).toEqual([]);
   });
@@ -407,9 +415,9 @@ describe("共用与随最后一个会话删除 (#928)", () => {
 
     expect(workspaceCount(db)).toBe(rows);
     expect(workspaceRow(db, normal.id)?.temporary).toBe(0);
-    expect(names(normalDir)).toEqual(TREE);
+    expect(names(normalDir)).toEqual(WORKSPACE_TREE);
     expect(workspaceRow(db, temporary.id)?.temporary).toBe(1);
-    expect(names(temporary.dir)).toEqual(TREE);
+    expect(names(temporary.dir)).toEqual(WORKSPACE_TREE);
     expect(boundTo(db, SOURCE)).toBe(temporary.id);
     expect(await workspaceDeletes(world)).toEqual([]);
     expect(world.errors).toEqual([]);
@@ -502,7 +510,7 @@ describe("临时空间目录的删除 — DELETE (#928)", () => {
 
     expect(lstatSync(account).isSymbolicLink()).toBe(true);
     expect(snapshot(moved)).toEqual(before);
-    expect(names(join(moved, `tmp-${temporary.id}`))).toEqual(TREE);
+    expect(names(join(moved, `tmp-${temporary.id}`))).toEqual(WORKSPACE_TREE);
     expect(trashOf(world)).toEqual([]);
     expect(messages(world)).toEqual([OUTSIDE_SANDBOX]);
   });

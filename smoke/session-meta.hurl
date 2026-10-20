@@ -138,11 +138,13 @@ HTTP 200
 jsonpath "$.workspaces[?(@.id=='{{temp_ws}}')]" not exists
 jsonpath "$.workspaces[?(@.id=='{{workspace_id}}')]" exists
 
-# (2) 但按 id 可达：其目录树 exact 200，是一个空目录。
+# (2) 但按 id 可达：其目录树 exact 200，恰含宿主建出的仓库根标记 `.git`（空目录），别无其它。
 GET {{base_url}}/api/workspaces/{{temp_ws}}/tree
 HTTP 200
 [Asserts]
-jsonpath "$.entries" count == 0
+jsonpath "$.entries" count == 1
+jsonpath "$.entries[0].name" == ".git"
+jsonpath "$.entries[0].type" == "dir"
 
 # (2) 临时空间不能被显式绑定：exact 404 not_found，与不存在的空间逐字相同。不重试。
 POST {{base_url}}/api/sessions

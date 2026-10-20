@@ -384,7 +384,11 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
       headers: { cookie: ownerCookie },
     });
     expect(tree.statusCode).toBe(200);
-    expect(tree.json()).toEqual({ path: "", entries: [] });
+    // The repo-root marker is the new workspace's one entry (omp-runtime「会话工作目录的仓库根标记」).
+    expect(tree.json()).toEqual({
+      path: "",
+      entries: [{ name: ".git", type: "dir", size: expect.any(Number), mtime: expect.any(Number) }],
+    });
 
     const foreign = await app.inject({
       method: "GET",

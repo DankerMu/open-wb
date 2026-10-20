@@ -18,6 +18,7 @@ import {
   type OmpFrame,
   RpcChunkDecoder,
 } from "./frame.js";
+import { ensureRepoRootMarker } from "./repo-root-marker.js";
 import { ompSpawnEnv, SUDO_PRESERVE_ENV } from "./spawn-env.js";
 import {
   ensureOmpSessionDir,
@@ -85,6 +86,7 @@ export async function spawnOmp(
   }
   // The whole managed layout is re-asserted on every spawn; argv and env keep the configured path.
   ensureOmpSessionDir(ensureOmpStateLayout(opts.stateDir), opts.ownerId);
+  ensureRepoRootMarker(cwd);
   // Preserve the prior async spawn boundary; native lifecycle regression covers it.
   await Promise.resolve();
 
