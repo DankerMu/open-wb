@@ -101,6 +101,6 @@ job SHALL 进入 `all-checks-passed.needs`；`scripts/test-ci-harness.sh` 与 `A
 
 #### Scenario: 真实浏览器打开工作空间页面并截图
 - **WHEN** PR CI 运行 `browser-image`
-- **THEN** 镜像检查全部通过；两次审批的 `tool` 都为 `browser`，`title` 首行分别为 `浏览器：打开 file://<空间根>/uploads/index.html` 与 `浏览器：在标签页 main 执行脚本`；两个步骤名都为 `browser`、`status` 为 `done`，detail 首行同上；第二个步骤的 `changes` 恰一项，`path` 匹配 `^screenshots/screenshot-[^/]+\.png$`、`kind` 为 `write`，该文件经工作空间文件接口读得到且以 PNG 签名开头；第二个回合里经转发监听器的请求中至少一条的 `messages` 含 `image_url` 部分（截图送到了能看图的模型），第一个回合的请求都不含；审计恰有两条 `session.browser`；容器 `/tmp` 下有包装脚本的标记文件；`<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome` 不存在（omp 每次无头启动都会建 `puppeteer/` 并写一个 `package.json`，下载的浏览器才在 `chrome/` 下），`<OMP_STATE_DIR>/xdg/state/omp/logs/` 下的日志不含 `Downloading Chromium for puppeteer`；两条否定断言各带对照：`puppeteer/package.json` 存在，日志目录下至少有一个非空的 omp 日志文件
+- **THEN** 镜像检查全部通过；两次审批的 `tool` 都为 `browser`，`title` 首行分别为 `浏览器：打开 file://<空间根>/uploads/index.html` 与 `浏览器：在标签页 main 执行脚本`；两个步骤名都为 `browser`、`status` 为 `done`，detail 首行同上；第二个步骤的 `changes` 恰一项，`path` 匹配 `^screenshots/screenshot-[^/]+\.png$`、`kind` 为 `write`，该文件经工作空间文件接口读得到且以 PNG 签名开头；第二个回合里经转发监听器的请求中至少一条的 `messages` 含 `image_url` 部分（截图送到了能看图的模型），第一个回合的请求都不含；审计恰有两条 `session.browser`；容器 `/tmp` 下有包装脚本的标记文件；`<OMP_STATE_DIR>/xdg/cache/omp/puppeteer/chrome` 不存在（omp 每次无头启动都会建 `puppeteer/` 并写一个 `package.json`，下载的浏览器才在 `chrome/` 下），`<OMP_STATE_DIR>/xdg/state/omp/logs/` 下的日志不含 `Downloading Chromium for puppeteer`；`chrome/` 不存在一项以 `puppeteer/package.json` 存在作对照
 - **WHEN** 该 job 失败、被取消或被跳过
 - **THEN** `all-checks-passed` 非零
