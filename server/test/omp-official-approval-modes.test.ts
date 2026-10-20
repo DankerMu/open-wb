@@ -67,6 +67,32 @@ function asked(world: OfficialWorld): string[][] {
   return world.approvals.map((request) => [request.tool, request.title.split("\n")[0] ?? ""]);
 }
 
+/**
+ * Issue #1566 (task 2.3): every approval select of the turn has one of the two closed option shapes
+ * of tool-approval「审批请求识别」 — `["Approve","Deny"]` (v18.0.10) or `["Approve","Approve <subject>
+ * for this session","Deny"]` (v18.12.3). Group 6 narrows this to the three-item shape.
+ */
+function expectApprovalOptions(frames: OmpFrame[], count: number): void {
+  const selects = frames.filter(
+    (frame) =>
+      frame.type === "extension_ui_request" &&
+      frame.method === "select" &&
+      String(frame.title).startsWith("Allow tool: "),
+  );
+  expect(selects).toHaveLength(count);
+  for (const { options } of selects) {
+    const shape = Array.isArray(options) ? options.map(String) : [];
+    const three =
+      shape.length === 3 &&
+      shape[0] === "Approve" &&
+      /^Approve .+ for this session$/u.test(shape[1] ?? "") &&
+      shape[2] === "Deny";
+    expect(three || JSON.stringify(shape) === '["Approve","Deny"]', JSON.stringify(options)).toBe(
+      true,
+    );
+  }
+}
+
 /** `[tool, failed, output]` of every tool call the turn finished. */
 function executions(frames: OmpFrame[]): Array<[unknown, unknown, string]> {
   return frames
@@ -117,6 +143,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: approval tiers`, ()
       const frames = await collectPrompt(world.runtime.prompt(PROMPT[tool]));
 
       expect(asked(world)).toEqual(asks ? [[tool, `Allow tool: ${tool}`]] : []);
+      expectApprovalOptions(frames, asks ? 1 : 0);
       expectExecuted(world, frames, tool);
     },
   );
@@ -133,6 +160,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: approval tiers`, ()
       const frames = await collectPrompt(world.runtime.prompt(PROMPT.write));
 
       expect(asked(world)).toEqual([["write", "Allow tool: write"]]);
+      expectApprovalOptions(frames, 1);
       expectExecuted(world, frames, "write");
     },
   );

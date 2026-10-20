@@ -320,6 +320,40 @@ describe("browser markers (#1527): the tool round issues one write to xd://brows
   );
 });
 
+// Issue #1566: omp-test-harness ADDED「受控上游 ask 标记」, scenario「ask 标记替换 bash 工具轮」.
+const ASK = "WORKBUDDY_ASK";
+const ASK_ARGS =
+  '{"questions":[{"id":"q1","question":"继续吗？","options":[{"label":"是"},{"label":"否"}]}]}';
+
+describe("ask marker (#1566): the tool round issues one ask call", () => {
+  it.each([
+    ["the marker alone", `问我 ${ASK} 再说`],
+    ["the marker wins over WORKBUDDY_BROWSER_SHOT", `问我 ${ASK} 再说 ${SHOT}`],
+  ])("%s: exactly one ask call with the spec's arguments, no bash call", async (_label, text) => {
+    const port = await upstream();
+    const reply = await chat(port, [{ role: "user", content: text }]);
+    expect(toolRoundOf(reply)).toEqual({
+      calls: [{ name: "ask", arguments: ASK_ARGS }],
+      content: [],
+    });
+  });
+
+  it("WORKBUDDY_WRITE wins over it: the unchanged write call", async () => {
+    const port = await upstream();
+    const reply = await chat(port, [{ role: "user", content: `问我 ${ASK} 再说 ${WRITE}` }]);
+    expect(toolRoundOf(reply)).toEqual({
+      calls: [{ name: "write", arguments: WRITE_ARGS }],
+      content: [],
+    });
+  });
+
+  it("on a request whose history holds a tool message (default scope) it is the fixed reply", async () => {
+    const port = await upstream();
+    const reply = await chat(port, [{ role: "user", content: `问我 ${ASK} 再说` }, TOOL_RESULT]);
+    expect(answerOf(reply)).toEqual({ calls: [], content: REPLY, reasoning: "" });
+  });
+});
+
 describe("omp's image attachment message (#1527) is not a user turn", () => {
   /** A screenshot turn as omp sends its answering round when the model takes images. */
   function screenshotTurn(text: string): unknown[] {

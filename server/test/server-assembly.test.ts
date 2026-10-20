@@ -740,7 +740,7 @@ function ompArgs(
 ): string[] {
   return [
     "--mode",
-    "rpc",
+    "rpc-ui",
     "--cwd",
     cwd ?? join(roots.sandboxRoot, "u1"),
     "--session-dir",

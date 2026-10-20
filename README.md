@@ -2,7 +2,7 @@
 
 内网多用户 AI Agent Web 服务。三个自研/组装组件：**app-server**（业务后端，TS/Fastify）、
 **web SPA**（React + Vite）、**kbservice**（知识库，Python）；agent 执行由 **omp**（冻结 v18.0.10）
-以每会话子进程 `--mode rpc` 承担。行为基准是 `resource/workbuddy-live-demo.html`（demo 能点出来的行为就是需求）。
+以每会话子进程 `--mode rpc-ui` 承担。行为基准是 `resource/workbuddy-live-demo.html`（demo 能点出来的行为就是需求）。
 
 ## 从哪里读起
 

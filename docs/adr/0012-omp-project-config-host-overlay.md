@@ -147,3 +147,11 @@ openspec 变更 `omp-pin-18-12`。本节分几部分随各子 issue 写入。
   上文「第三方配置目录不用 `disabledProviders` 关」与「方案 A」说的是关掉 `claude`、`codex` 等发现源，本节没有改变那个结论：overlay 只列这四个模型提供者，发现源一个都不关。
 - **有意不钉（owner 2026-10-20）：** `browser.tern` 与环境变量 `PI_BROWSER_TERN`、`dev.autoqa` 与环境变量 `PI_AUTO_QA`。登记为已知风险。
 - **否决 `tools.approval.browser: allow`。** 为让浏览器 prelude 在 plain `rpc` 下可用而在 overlay 里放行 `browser`，会把 `tools.approval` 变成对象；对象与项目层深合并，项目写的 `{bash: allow}` 等逐工具放行随之复活，等于撤掉 #708 的钉子。改走 `--mode rpc-ui` 与宿主审批（本变更组 2）。
+
+### 二、`--mode rpc-ui`、审批形状与浏览器盲卡（#1566，design D2 / D3）
+
+- **启动模式 `--mode rpc-ui`（owner 2026-10-20，grill Q2）。** v18.12.3 的浏览器是 `eval` 工具的 prelude，`write` / `always-ask` 档下 prelude 对每次 `browser.*` 宿主调用另要一次审批；这次审批走工具 UI，只有 `rpc-ui` 把它作为 `extension_ui_request{select}` 送到协议上，plain `rpc` 下调用直接失败。实测（2026-10-20，本机官方 v18.0.10 与 v18.12.3，三档各一个 bash 回合）：两种模式的启动帧、`get_state` 键集合、审批帧、发给模型的工具集与上游请求数逐项相同。`rpc-ui` 下 `ask` 会成为模型可调的工具，由上一部分的 `ask.enabled: false` 钉掉（真实 omp 用例 `omp-official-rpc-ui.test.ts`：钉住时模型得到 `Tool ask not found`、回合正常结束；去掉钉时宿主 cancel 提问、回合「已停止」）。
+- **审批形状显式白名单（owner Q1）。** 只有 `options` 恰为 `["Approve","Deny"]`，或恰三项 `Approve` / 匹配 `^Approve .+ for this session$` 的中间项 / `Deny` 的 `Allow tool:` 卡才是审批，其余形状照旧 cancel。中间项是 v18.12.3 对被档位抬高的提示附带的「本会话内放行」，其中的名字是 omp 的策略键、可以不等于工具名，所以按形状匹配、不钉成工具名。宿主只回 `Approve` / `Deny`、永不回中间项：omp 进程内存里的会话授权集合始终为空，每次调用都回到宿主。
+- **浏览器盲卡自动放行：上文 S1g 补充「宿主不因档位自动应答或丢弃 omp 的确认请求」的唯一例外。** `Allow tool: browser`（或其后恰一行 `Reason: …`）且两项 options 的卡，传输层立即回 `Approve`，不出卡、不写 `chat_approvals`、不写 `session.approval` 审计。理由：卡上没有动作、URL 与调用 id，弹给用户是零信息的确认；它只出现在用户已批准（或档位放行）的 `eval` 执行过程中，真正执行的代码在 eval 卡上已经给用户看过；浏览器调用的痕迹由 eval 步骤的 `session.browser` 审计逐次留下（本变更组 4）。`yolo` 档下 prelude 本来不问。
+- **盲卡按整个标题闭合匹配，不看首行。** 组 6 翻转之前宿主仍跑 v18.0.10，它有真正的 `browser` 工具（`approval: "exec"`），卡是 `Allow tool: browser\nAction: …\nTab: …[\nURL: …][\nCode:\n…]`、同样两项 options；平时它挂在 `xd://` 下、卡题是 `Allow tool: write`，但 overlay 没钉 `tools.xdev`，项目层写 `tools.xdev: false` 就让它成为顶层工具。只看首行会把这类带动作的卡也自动放行，所以 `Action:` 卡、`Reason:` 之后再有行、尾随空格、三项、`confirm` 都落入 cancel。
+- **桥调工具照常问（grill 开放项，实测）。** `write` 档下模型调 `eval`，代码为 `await tool.bash({ command: "echo bridge" })`：宿主批准 eval 卡之后，omp 再弹一张 `Allow tool: bash\nCommand: echo bridge`（v18.12.3 为三项 options），经宿主审批后才执行，v18.0.10 与 v18.12.3 相同。所以「eval 批准后桥调工具不再问」不成立，不登记为残余；这张卡没有自己的步骤，按「没有步骤的审批保持未配对」处理。

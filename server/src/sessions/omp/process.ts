@@ -31,6 +31,7 @@ import {
   answerFrame,
   approvalRequest,
   cancelFrame,
+  isPreludeCard,
 } from "./ui-requests.js";
 
 // The paths have one source, state-layout.ts; these two stay importable from here.
@@ -88,8 +89,9 @@ export async function spawnOmp(
   await Promise.resolve();
 
   const args = [
+    // rpc-ui: tool UI (the browser prelude's approval) reaches the protocol; plain rpc fails it.
     "--mode",
-    "rpc",
+    "rpc-ui",
     "--cwd",
     cwd,
     "--session-dir",
@@ -178,6 +180,8 @@ interface PendingRequest {
 interface OmpEvents {
   frame: [OmpFrame];
   approval: [ApprovalRequest];
+  /** The browser prelude card the transport answered `Approve` (tests and counting only). */
+  preludeApproval: [{ id: string }];
   exit: [OmpExit];
   error: [Error];
 }
@@ -588,15 +592,7 @@ export class OmpProcess {
       typeof frame.id === "string" &&
       !this.#writesClosed
     ) {
-      const approval = approvalRequest(frame, frame.id);
-      if (approval !== undefined) {
-        this.#approvals.add(approval.id);
-        this.#events.emit("approval", approval);
-      } else {
-        void this.#write(cancelFrame(frame.id)).catch((error: unknown) => {
-          this.#failIo(error);
-        });
-      }
+      this.#onUiRequest(frame, frame.id);
     }
     if (frame.type !== "response" || typeof frame.id !== "string") {
       return;
@@ -607,6 +603,24 @@ export class OmpProcess {
     }
     this.#pending.delete(frame.id);
     pending.resolve(frame);
+  }
+
+  /** An approval goes to the owner; the prelude card is answered `Approve` (D3); else cancel. */
+  #onUiRequest(frame: OmpFrame, id: string): void {
+    const approval = approvalRequest(frame, id);
+    if (approval !== undefined) {
+      this.#approvals.add(id);
+      this.#events.emit("approval", approval);
+      return;
+    }
+    const prelude = isPreludeCard(frame);
+    const answer = prelude ? answerFrame(id, "allow") : cancelFrame(id);
+    void this.#write(answer).catch((error: unknown) => {
+      this.#failIo(error);
+    });
+    if (prelude) {
+      this.#events.emit("preludeApproval", { id });
+    }
   }
 
   #onNativeExit(code: number | null, signal: NodeJS.Signals | null): void {

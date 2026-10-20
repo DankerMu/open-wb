@@ -130,7 +130,7 @@ function contractArgs(
 ): string[] {
   return [
     "--mode",
-    "rpc",
+    "rpc-ui",
     "--cwd",
     cwd,
     "--session-dir",

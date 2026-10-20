@@ -208,6 +208,7 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
           expect(resumedCall.args.slice(0, prefix.length)).toEqual(prefix);
         } else {
           expect(firstCall.args[0]).toBe("--mode");
+          expect(firstCall.args[1]).toBe("rpc-ui");
           expect(resumedCall.args.slice(0, firstCall.args.length)).toEqual(firstCall.args);
         }
         expect(resumePath(resumedCall.args)).toBe("/tmp/open-wb-fake-session.jsonl");

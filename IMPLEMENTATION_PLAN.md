@@ -33,7 +33,7 @@
   控制面同步由 `scripts/test-ci-harness.sh` oracle 守住。
 - app-server（S0a/S0b/S1a）：Fastify 装配与错误信封、dev-stub 认证 + session cookie、SQLite WAL + 迁移（`002`–`033`）、
   `core/sandbox`（resolve/越界拒绝 + `sandbox.reject` 审计）、`core/audit`（只追加 + 游标分页 + 只读端点）、
-  `workspaces`（CRUD/树/新建目录/预览）、`sessions`（omp `--mode rpc` 子进程、SSE + 序号回放 + 环形缓冲、
+  `workspaces`（CRUD/树/新建目录/预览）、`sessions`（omp `--mode rpc-ui` 子进程、SSE + 序号回放 + 环形缓冲、
   SQLite 会话/消息/步骤含 args/output 双字段、`--resume`、空闲回收 `idleMs`）、`model-proxy`（omp 环境零凭证）、
   Linux 专用 omp uid（sudo + `setpriv --pdeathsig`，CI `uid-isolation` 证明）。**尚无**：中断/fork 端点、会话数上限、场景/分组字段、挂载。
 - web SPA（S0a/S0b/S1a/S1e）：React + Vite，四路由（`/`、`/files`、`/center` 占位、`/settings`）；S1e 建的 `web/src/ui` 基元层
@@ -177,7 +177,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Review attention：decision-dense（HTTP 骨架、SPA 结构、验证 harness 形态定调）。
 
 **S0b 最小对话链路**
-- Outcome：spawn 官方全量 `omp --mode rpc`（cwd=沙箱雏形目录）；model-proxy 接内网网关；SSE 流 + 事件序号回放；会话落盘可 resume。**P0 里程碑验收：浏览器一次流式对话渲染完整。**
+- Outcome：spawn 官方全量 `omp --mode rpc-ui`（cwd=沙箱雏形目录）；model-proxy 接内网网关；SSE 流 + 事件序号回放；会话落盘可 resume。**P0 里程碑验收：浏览器一次流式对话渲染完整。**
 - Files/components：`server/src/{sessions,model-proxy,models(最小登记)}`、`web/src/features/chat`。
 - 覆盖：F-CHAT-3、F-CHAT-6、F-CHAT-8、F-OPS-2。
 - 必读增量：`resource/backend-research.md` §2.1（RPC 协议行号引用）；ADR-0001、0006、0008；`resource/oh-my-pi/docs/rpc.md`。

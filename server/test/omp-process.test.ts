@@ -509,7 +509,7 @@ function optsOf(roots: SpawnRoots, resumePath: string | null, user?: string): Sp
 function coldArgs(roots: SpawnRoots): string[] {
   return [
     "--mode",
-    "rpc",
+    "rpc-ui",
     "--cwd",
     roots.cwd,
     "--session-dir",
