@@ -151,6 +151,7 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 | 密钥扫描 | gitleaks | CI（本机装有 gitleaks 时 pre-commit 亦 block） | block |
 | SAST | semgrep（p/default） | CI | block |
 | 办公文档转换隔离 | `.github/workflows/ci.yml`（job `office-sidecar`） | CI `office-sidecar`/`all-checks-passed` | block |
+| 浏览器参考镜像 | `.github/workflows/ci.yml`（job `browser-image`） | CI `browser-image`/`all-checks-passed` | block |
 | HTTP smoke | `.github/workflows/ci.yml`（job `smoke`） | `make smoke` + CI `smoke`/`all-checks-passed` | block |
 | UI 走查 | `.github/workflows/ci.yml`（job `ui-walk`） | `make ui-walk` + CI `ui-walk`/`all-checks-passed` | block |
 | omp-fetch | `scripts/omp-fetch.sh` | `make omp-fetch` | prerequisite |
