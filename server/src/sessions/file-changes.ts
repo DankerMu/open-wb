@@ -3,7 +3,6 @@
  * Paths stay raw; resolution, workspace containment, caps and persistence belong to the supervisor.
  * Real omp v18.0.10 (SHA256 bf026b63…fe278a, checked 2026-10-02): a hashline edit's `details.path` echoes the
  * patch header verbatim — relative to the session cwd or absolute, whichever the model wrote; both occur.
- * Issue #1526: a call registered as `browser` yields its screenshots' `dest` paths (`write`, no counts).
  */
 
 /** One file of a `files.changed` event: `added`/`removed` are counts for edit, null for write. */
@@ -35,8 +34,8 @@ export function countDiffLines(diff: string): { added: number; removed: number }
 }
 
 /**
- * 登记名为 `edit`/`write`/`browser`、`result` 与 `details` 皆为普通对象且 `result.isError` 不为 true 时产出候选；
- * 其它工具（含 ast_edit、bash）恒为空。所有键只读自有属性，不走原型链；返回值均为新建对象。
+ * 登记名为 `edit`/`write`、`result` 与 `details` 皆为普通对象且 `result.isError` 不为 true 时产出候选；
+ * 其它工具（含 ast_edit、bash、eval）恒为空。所有键只读自有属性，不走原型链；返回值均为新建对象。
  */
 export function fileChangeCandidates(toolName: string, result: unknown): FileChange[] {
   const record = asPlain(result);
@@ -50,30 +49,8 @@ export function fileChangeCandidates(toolName: string, result: unknown): FileCha
   if (toolName === "edit") {
     return editCandidates(details);
   }
-  if (toolName === "write") {
-    const path = nonemptyString(own(details, "resolvedPath"));
-    return path === undefined ? [] : [{ path, added: null, removed: null, kind: "write" }];
-  }
-  return toolName === "browser" ? screenshotCandidates(details) : [];
-}
-
-/**
- * omp v18.0.10 `details.xdev{tool:"browser", inner:{screenshots:[{dest,…}]}}` (`tools/xdev.ts:416-473`,
- * `browser/tab-protocol.ts:30-36`): each own nonempty `dest`, in order; anything else yields nothing.
- */
-function screenshotCandidates(details: Plain): FileChange[] {
-  const xdev = asPlain(own(details, "xdev"));
-  const inner =
-    xdev === undefined || own(xdev, "tool") !== "browser" ? undefined : asPlain(own(xdev, "inner"));
-  const shots = inner === undefined ? undefined : own(inner, "screenshots");
-  if (!Array.isArray(shots)) {
-    return [];
-  }
-  return shots.flatMap((shot: unknown) => {
-    const record = asPlain(shot);
-    const path = record === undefined ? undefined : nonemptyString(own(record, "dest"));
-    return path === undefined ? [] : [{ path, added: null, removed: null, kind: "write" as const }];
-  });
+  const path = toolName === "write" ? nonemptyString(own(details, "resolvedPath")) : undefined;
+  return path === undefined ? [] : [{ path, added: null, removed: null, kind: "write" }];
 }
 
 /** 非空 `perFileResults` 优先且逐项（无效项跳过、不回落顶层）；否则取顶层 `path`+`diff`。 */

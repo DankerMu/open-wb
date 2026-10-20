@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Pin official can1357/oh-my-pi v18.0.10 into var/omp/omp after SHA256 verify.
+# Pin official can1357/oh-my-pi v18.12.3 into var/omp/omp after SHA256 verify.
 set -euo pipefail
 
-OMP_VERSION="18.0.10"
+OMP_VERSION="18.12.3"
 OMP_RELEASE_URL="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}"
 DEST="var/omp/omp"
-SHA256_DARWIN_ARM64="bf026b63aa3b0acb0afbed8083f76bcec134bf56ffdbbe80fb73a7e079fe278a"
-SHA256_LINUX_X64="b13e6b2a74a5c71e57b9f717e0fc4834bcfe0609f30dc1782a91976b230361a0"
+SHA256_DARWIN_ARM64="f2a657b3320fcafa23055053940a45b26a8d3254e1412a158838013d670d6ec5"
+SHA256_LINUX_X64="065b5079d65ff6b77d961c935ba808e8f0f569ca6a2cb7b5fb6a1e8da72d7dec"
 
 platform="$(uname -sm)"
 case "$platform" in

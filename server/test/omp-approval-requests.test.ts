@@ -503,82 +503,42 @@ describe("omp source boundary guards", () => {
 });
 
 /**
- * Issue #1526 tool-approval「审批请求识别」 scenario「浏览器调用的审批改写为浏览器操作」: the three WHEN
- * groups at the pure `approvalRequest(frame, id)` seam, plus one synthetic frame through OmpProcess.
- * Expected tools and titles are literals from that scenario.
+ * Issue #1570 (omp-pin-18-12 task 6.2) tool-approval「审批请求识别」 scenario「浏览器调用的审批改写为
+ * 浏览器操作」, the recognition side: neither the eval card that drives the browser nor a two-item
+ * `write` to `xd://browser` (the card #1526 used to rewrite) is rewritten any more. Titles are the
+ * scenario's literals; the supervisor side (rows, events, audit, the answer) is in
+ * session-eval-browser-pairing.test.ts.
  */
-describe("browser approvals are rewritten as browser operations (#1526)", () => {
-  const BROWSER = "Allow tool: write\nPath: xd://browser\nContent:\n";
+describe("browser approvals are no longer rewritten (#1570)", () => {
+  const EVAL =
+    'Allow tool: eval\nLanguage: javascript\nCode:\nawait browser.open({ name: "main", url: "https://example.com/a" });';
+  const WRITE = "Allow tool: write\nPath: xd://browser\nContent:\n";
   const OPEN = '{"action":"open","url":"https://example.com/a"}';
   const RUN =
     '{"action":"run","name":"main","code":"return await tab.screenshot()","app":{"cdp_url":"http://10.0.0.5:9222"}}';
   const CUT = '{"action":"run","code":"x[…5000ch elided…]"';
-  const classify = (title: string) =>
-    approvalRequest(selectFrame("b1", title, ["Approve", "Deny"]), "b1");
 
-  it("open, run with cdp_url and a truncated content: tool browser, rewritten titles", () => {
-    expect([OPEN, RUN, CUT].map((content) => classify(BROWSER + content))).toEqual([
-      { id: "b1", tool: "browser", title: "浏览器：打开 https://example.com/a" },
-      {
-        id: "b1",
-        tool: "browser",
-        title:
-          "浏览器：在标签页 main 执行脚本\n⚠ 连接外部浏览器：http://10.0.0.5:9222\n代码：\nreturn await tab.screenshot()",
-      },
-      {
-        id: "b1",
-        tool: "browser",
-        title: `浏览器操作（参数过长，以下为原文）\n⚠ 参数被截断，无法确认是否启动外部程序或连接外部浏览器\n${CUT}`,
-      },
-    ]);
-  });
-
-  it('a relay written as "yes": the summary, the unverified line, then 原文 and the raw text', () => {
-    const relay = '{"action":"open","url":"https://a","app":{"relay":"yes"}}';
-    expect(classify(BROWSER + relay)).toEqual({
-      id: "b1",
-      tool: "browser",
-      title: `浏览器：打开 https://a\n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n${relay}`,
-    });
-  });
-
-  it("an action with trailing spaces: the other branch verbatim, no 代码 section, then 原文", () => {
-    const run = '{"action":"run   ","code":"Bun.spawn([\'id\'])"}';
-    expect(classify(BROWSER + run)).toEqual({
-      id: "b1",
-      tool: "browser",
-      title: `浏览器：run   \n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n{"action":"run   ","code":"Bun.spawn(['id'])"}`,
-    });
+  it("the three-item eval card is an approval of tool eval with its title verbatim", () => {
+    const frame = selectFrame("e1", EVAL, ["Approve", "Approve eval for this session", "Deny"]);
+    expect(approvalRequest(frame, "e1")).toEqual({ id: "e1", tool: "eval", title: EVAL });
   });
 
   it.each([
-    "Path: [xd://browser]",
-    "Path: [xd://browser#0A1B]",
-    "Path: XD://browser",
-    "Path: xd://browser\n",
-  ])("the device path written as %j is the same browser device", (pathLine) => {
-    expect(classify(`Allow tool: write\n${pathLine}\nContent:\n${OPEN}`)).toEqual({
-      id: "b1",
-      tool: "browser",
-      title: "浏览器：打开 https://example.com/a",
-    });
+    WRITE + OPEN,
+    WRITE + RUN,
+    WRITE + CUT,
+    `Allow tool: write\nPath: [xd://browser]\nContent:\n${OPEN}`,
+  ])("%j is an ordinary write approval, title verbatim, no 浏览器： prefix", (title) => {
+    const request = approvalRequest(selectFrame("b1", title, ["Approve", "Deny"]), "b1");
+    expect(request).toEqual({ id: "b1", tool: "write", title });
+    expect(request?.title).not.toMatch(/浏览器|⚠/u);
   });
 
-  it.each([
-    "Allow tool: write\nPath: notes/xd://browser",
-    "Allow tool: write\nPath: xd://browser2\nContent:\n{}",
-    "Allow tool: write\nPath: xd://Browser\nContent:\n{}",
-  ])("%j stays an ordinary write approval with its title unchanged", (title) => {
-    expect(classify(title)).toEqual({ id: "b1", tool: "write", title });
-  });
-
-  it("OmpProcess surfaces the rewritten browser approval without cancelling it", async () => {
+  it("OmpProcess surfaces the xd://browser write approval verbatim without cancelling it", async () => {
     const run = await startSynthetic();
-    run.child.emitLine(selectFrame("w9", BROWSER + OPEN, ["Approve", "Deny"]));
+    run.child.emitLine(selectFrame("w9", WRITE + OPEN, ["Approve", "Deny"]));
     await harness.waitFrame(run.proc, isUi("w9"), 8_000, run.frames);
-    expect(run.approvals).toEqual([
-      { id: "w9", tool: "browser", title: "浏览器：打开 https://example.com/a" },
-    ]);
+    expect(run.approvals).toEqual([{ id: "w9", tool: "write", title: WRITE + OPEN }]);
     await quiet(run.proc, () => false);
     expect(uiAnswers(run.written)).toEqual([]);
   });

@@ -30,8 +30,9 @@ export const LAYOUT_TABLE: ReadonlyArray<readonly [string, number]> = [
  * `HOST_OVERLAY_YAML` is the file of a deployment without `BROWSER_BIN` and without a vision model
  * (#1527: fixed block, then the browser block with `enabled: false`, no vision block). Since #1530
  * (`MODEL_VISION` defaults on) the default deployment adds `hostOverlayVisionBlock(<MODEL_ID>)`.
- * #1564: the fixed block has `approval: null` and ends with the `telemetry`, `archive`,
- * `disabledProviders` and `ask` pins; `ruby` / `julia` stay until the pin moves to v18.12.3.
+ * #1564: the fixed block has `approval: null` and the `telemetry`, `archive`, `disabledProviders`
+ * and `ask` pins. #1570 (the pin moves to v18.12.3): `ruby` / `julia` are gone and the block ends
+ * with the `advisor` and `ida` pins.
  */
 export const HOST_OVERLAY_FIXED = `tools:
   approval: null
@@ -41,10 +42,6 @@ bash:
   direnv: "off"
 shellPath: null
 python:
-  interpreter: ""
-ruby:
-  interpreter: ""
-julia:
   interpreter: ""
 mcp:
   enableProjectConfig: false
@@ -70,6 +67,10 @@ disabledProviders:
   - lm-studio
   - apple
 ask:
+  enabled: false
+advisor:
+  enabled: false
+ida:
   enabled: false
 `;
 

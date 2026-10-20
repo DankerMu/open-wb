@@ -1,5 +1,5 @@
 # open-workbuddy 唯一命令面。所有工作流经此路由；AGENTS.md 验证矩阵与 constraints.yaml
-# verification 段是它的镜像，增删目标须三处同步。omp-fetch 是官方 v18.0.10 二进制供给前置，
+# verification 段是它的镜像，增删目标须三处同步。omp-fetch 是官方 v18.12.3 二进制供给前置，
 # smoke-live 是调用方拥有的真实上游手动验证；
 # 控制面文档行与 Makefile 目标同步。
 SHELL := /bin/bash
@@ -70,7 +70,7 @@ export UI_WALK_BASE_URL
 ui-walk: ## Playwright UI 走查（只消费已运行服务；不 build/start/stop/install）
 	npm run ui-walk --workspace web
 
-omp-fetch: ## 拉取官方 omp v18.0.10 到 var/omp/omp（SHA256 校验；已校验则跳过）
+omp-fetch: ## 拉取官方 omp v18.12.3 到 var/omp/omp（SHA256 校验；已校验则跳过）
 	bash scripts/omp-fetch.sh
 
 ifneq ($(origin MODEL_UPSTREAM_BASE_URL),undefined)

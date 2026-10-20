@@ -78,8 +78,6 @@ describe("writeHostOverlay", () => {
       bash: { patterns: [], direnv: "off" },
       shellPath: null,
       python: { interpreter: "" },
-      ruby: { interpreter: "" },
-      julia: { interpreter: "" },
       mcp: { enableProjectConfig: false },
       todo: { reminders: false },
       images: { urls: { enabled: false, command: null } },
@@ -94,6 +92,8 @@ describe("writeHostOverlay", () => {
       archive: { enabled: false },
       disabledProviders: ["ollama", "llama.cpp", "lm-studio", "apple"],
       ask: { enabled: false },
+      advisor: { enabled: false },
+      ida: { enabled: false },
       browser: {
         enabled: false,
         cdpUrl: "",
@@ -105,7 +105,7 @@ describe("writeHostOverlay", () => {
     });
   });
 
-  it("the fixed block (#1564): approval null, empty ruby/julia interpreters, ends with the ask pin", async () => {
+  it("the fixed block (#1564, #1570): approval null, no ruby/julia, ask then advisor then ida last", async () => {
     const state = stateDir();
     ensureOmpStateLayout(state);
     await writeHostOverlay(state, DEFAULT);
@@ -115,9 +115,14 @@ describe("writeHostOverlay", () => {
     expect(fixed.split("\n").filter((line) => line.includes("approval:"))).toEqual([
       "  approval: null",
     ]);
-    // Present and empty while omp is pinned to v18.0.10; the flip to v18.12.3 removes them.
-    expect(fixed).toContain('\nruby:\n  interpreter: ""\njulia:\n  interpreter: ""\nmcp:\n');
-    expect(fixed.endsWith("\nask:\n  enabled: false\n")).toBe(true);
+    // v18.12.3 has no ruby / julia eval backends: the flip removes both pins.
+    expect(fixed).not.toMatch(/ruby|julia/u);
+    expect(fixed).toContain('\npython:\n  interpreter: ""\nmcp:\n');
+    expect(
+      fixed.endsWith(
+        "\nask:\n  enabled: false\nadvisor:\n  enabled: false\nida:\n  enabled: false\n",
+      ),
+    ).toBe(true);
   });
 
   it("the browser block follows browserEnabled: the two files differ in exactly that line", async () => {

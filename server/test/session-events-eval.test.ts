@@ -1,10 +1,10 @@
 /**
  * Issue #1568 (omp-pin-18-12 design D7) chat-stream「纯协议事件归约」 scenario「Eval step keeps its
  * name and carries browser status events」 at the pure createEventState/applyFrame seam
- * (session-events.test.ts is near its size limit; session-events-browser.test.ts is group 6's to
- * delete). Frames follow omp v18.12.3's `eval` shapes (design Context「浏览器 = eval 的 prelude」) and
- * v18.0.10's tool-bridge summaries (design D7 last sentence); every expected value is a literal from
- * that scenario or from those shapes, never derived from production code.
+ * (session-events.test.ts is near its size limit). Frames follow omp v18.12.3's `eval` shapes
+ * (design Context「浏览器 = eval 的 prelude」) and v18.0.10's tool-bridge summaries (design D7 last
+ * sentence); every expected value is a literal from that scenario or from those shapes, never
+ * derived from production code.
  */
 import { describe, expect, it } from "vitest";
 import { applyFrame, type ChatEvent, createEventState } from "../src/sessions/events.js";
@@ -221,5 +221,67 @@ describe("Eval step keeps its name and carries browser status events", () => {
         "stepId",
       ]);
     }
+  });
+});
+
+/**
+ * Issue #1570 (task 6.2) chat-stream scenario「Browser write becomes a browser step」, inverted by
+ * #1563: a `write` to `xd://browser` (omp v18.0.10's device; v18.12.3 has none) is an ordinary
+ * `write` step — no rename, no `browser` field, no screenshot candidate from `details.xdev`.
+ */
+describe("Browser write becomes a browser step (no longer)", () => {
+  const OPEN = '{"action":"open","url":"https://example.com"}';
+  const SHOT = '{"action":"run","code":"return await tab.screenshot()"}';
+  const xdev = (inner: unknown) => ({ xdev: { tool: "browser", mode: "execute", inner } });
+  const shots = [{ dest: "screenshots/screenshot-1.png", mimeType: "image/png" }];
+
+  it("keeps the name write, its args JSON as detail, four-key step.start, no files.changed", () => {
+    const events = reduce([
+      toolStart("w1", "write", { path: "xd://browser", content: OPEN }),
+      toolEnd("w1", "write", {
+        content: [{ type: "text", text: "Opened" }],
+        details: xdev({ action: "open", name: "main", url: "https://example.com" }),
+      }),
+      toolStart("w2", "write", { path: "xd://browser", content: SHOT }),
+      toolEnd("w2", "write", {
+        content: [{ type: "text", text: "shot" }],
+        details: xdev({ action: "run", screenshots: shots }),
+      }),
+    ]);
+    expect(events.map((event) => event.type)).toEqual([
+      "turn.start",
+      "step.start",
+      "step.end",
+      "step.start",
+      "step.end",
+    ]);
+    expect(events[1]).toEqual({
+      type: "step.start",
+      data: {
+        messageId: MESSAGE_ID,
+        stepId: "w1",
+        name: "write",
+        detail:
+          '{"path":"xd://browser","content":"{\\"action\\":\\"open\\",\\"url\\":\\"https://example.com\\"}"}',
+      },
+    });
+    expect(events[2]).toEqual({
+      type: "step.end",
+      data: { messageId: MESSAGE_ID, stepId: "w1", status: "done", output: "Opened" },
+    });
+    expect(events[3]).toEqual({
+      type: "step.start",
+      data: {
+        messageId: MESSAGE_ID,
+        stepId: "w2",
+        name: "write",
+        detail:
+          '{"path":"xd://browser","content":"{\\"action\\":\\"run\\",\\"code\\":\\"return await tab.screenshot()\\"}"}',
+      },
+    });
+    expect(events[4]).toEqual({
+      type: "step.end",
+      data: { messageId: MESSAGE_ID, stepId: "w2", status: "done", output: "shot" },
+    });
   });
 });

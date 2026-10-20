@@ -43,6 +43,7 @@ type Kind = "instructions" | "system" | "agent";
 
 const file = (path: string, depth: number, kind: Kind = "instructions") => ({ path, kind, depth });
 const agent = (path: string, depth: number) => file(path, depth, "agent");
+const system = (path: string, depth: number) => file(path, depth, "system");
 
 /** Regular files (their content is never read), or directories for paths ending in `/`. */
 function plant(root: string, paths: readonly string[]): void {
@@ -135,8 +136,10 @@ describe("GET /api/project-config: files present at the read locations", () => {
     plant(workspace.root, [
       "AGENTS.md",
       ".omp/RULES.md",
+      ".omp/SYSTEM_TEMPLATE.md",
       ".omp/agents/reviewer.md",
       ".claude/CLAUDE.md",
+      ".claude/SYSTEM.md",
       "GEMINI.md",
       "elsewhere.md",
     ]);
@@ -154,7 +157,9 @@ describe("GET /api/project-config: files present at the read locations", () => {
     const unbound = await getConfig(app, cookie);
     const own = [
       { path: ".claude/CLAUDE.md", kind: "instructions", depth: 0 },
+      { path: ".claude/SYSTEM.md", kind: "system", depth: 0 },
       { path: ".omp/RULES.md", kind: "instructions", depth: 0 },
+      { path: ".omp/SYSTEM_TEMPLATE.md", kind: "system", depth: 0 },
       { path: ".omp/agents/reviewer.md", kind: "agent", depth: 0 },
       { path: "AGENTS.md", kind: "instructions", depth: 0 },
     ];
@@ -212,17 +217,21 @@ describe("GET /api/project-config: files present at the read locations", () => {
     const marked = await createWorkspace(app, cookie, sandboxRoot, "marked");
     plant(skillsOnly.root, [".omp/skills/x/SKILL.md"]);
     plant(emptyOmp.root, [".omp/"]);
-    plant(ownerRoot, [".omp/RULES.md", ".omp/agents/far.md"]);
+    plant(ownerRoot, [".omp/RULES.md", ".omp/SYSTEM.md", ".omp/agents/far.md"]);
     for (const workspace of [skillsOnly, noOmp, emptyOmp]) {
       removeMarker(workspace.root);
     }
 
-    // The nearer non-empty `.omp` has no RULES.md; `agents` is looked up on its own.
+    // The nearer non-empty `.omp` has no RULES.md or SYSTEM.md; `agents` is looked up on its own.
     expect(await listed(app, cookie, skillsOnly.id)).toBe(
       JSON.stringify({ files: [agent(".omp/agents/far.md", 1)] }),
     );
     const fromOwnerRoot = JSON.stringify({
-      files: [file(".omp/RULES.md", 1), agent(".omp/agents/far.md", 1)],
+      files: [
+        file(".omp/RULES.md", 1),
+        system(".omp/SYSTEM.md", 1),
+        agent(".omp/agents/far.md", 1),
+      ],
     });
     expect(await listed(app, cookie, noOmp.id)).toBe(fromOwnerRoot);
     // An empty `.omp` is not the nearest one (omp's `ifNonEmptyDir`).
@@ -233,16 +242,80 @@ describe("GET /api/project-config: files present at the read locations", () => {
     );
   });
 
-  it("lists .claude/CLAUDE.md and .omp/SYSTEM.md only for the cwd", async () => {
+  it("lists .claude/CLAUDE.md only for the cwd and .omp/SYSTEM.md at the nearest non-empty .omp", async () => {
     const { app, cookie, sandboxRoot, ownerRoot } = await ownerWorld();
     const workspace = await createWorkspace(app, cookie, sandboxRoot);
     plant(ownerRoot, [".claude/CLAUDE.md", ".omp/SYSTEM.md", ".omp/AGENTS.md"]);
     removeMarker(workspace.root);
 
-    // The owner root's `.omp` is the nearest one, yet it is not the cwd: no SYSTEM.md.
+    // #1570 (omp v18.12.3): the owner root's `.omp` is the nearest one, so its SYSTEM.md is listed.
     expect(await listed(app, cookie, workspace.id)).toBe(
-      JSON.stringify({ files: [file(".omp/AGENTS.md", 1)] }),
+      JSON.stringify({ files: [file(".omp/AGENTS.md", 1), system(".omp/SYSTEM.md", 1)] }),
     );
+  });
+
+  /**
+   * Issue #1570 (task 6.2): the rows #1563 adds to the location table, each placed once in the cwd
+   * and once one level up with no `.git` in between, plus the host's marker bounding them.
+   */
+  it("lists the system rows: .agent|.agents and .omp at every level, .claude|.codex in the cwd only", async () => {
+    const { app, cookie, sandboxRoot, ownerRoot } = await ownerWorld();
+    const here = await createWorkspace(app, cookie, sandboxRoot, "here");
+    const below = await createWorkspace(app, cookie, sandboxRoot, "below");
+    const marked = await createWorkspace(app, cookie, sandboxRoot, "marked");
+    const rows = [
+      ".agent/AGENTS.md",
+      ".agent/SYSTEM.md",
+      ".agent/SYSTEM_TEMPLATE.md",
+      ".agents/AGENTS.md",
+      ".agents/SYSTEM.md",
+      ".agents/SYSTEM_TEMPLATE.md",
+      ".claude/SYSTEM.md",
+      ".claude/SYSTEM_TEMPLATE.md",
+      ".codex/SYSTEM.md",
+      ".codex/SYSTEM_TEMPLATE.md",
+      ".omp/SYSTEM.md",
+      ".omp/SYSTEM_TEMPLATE.md",
+    ];
+    plant(here.root, rows);
+    plant(ownerRoot, rows);
+    removeMarker(below.root);
+
+    expect(await listed(app, cookie, here.id)).toBe(
+      JSON.stringify({
+        files: [
+          file(".agent/AGENTS.md", 0),
+          system(".agent/SYSTEM.md", 0),
+          system(".agent/SYSTEM_TEMPLATE.md", 0),
+          file(".agents/AGENTS.md", 0),
+          system(".agents/SYSTEM.md", 0),
+          system(".agents/SYSTEM_TEMPLATE.md", 0),
+          system(".claude/SYSTEM.md", 0),
+          system(".claude/SYSTEM_TEMPLATE.md", 0),
+          system(".codex/SYSTEM.md", 0),
+          system(".codex/SYSTEM_TEMPLATE.md", 0),
+          system(".omp/SYSTEM.md", 0),
+          system(".omp/SYSTEM_TEMPLATE.md", 0),
+        ],
+      }),
+    );
+    // One level up: every row but the cwd-only `.claude` and `.codex` ones.
+    expect(await listed(app, cookie, below.id)).toBe(
+      JSON.stringify({
+        files: [
+          file(".agent/AGENTS.md", 1),
+          system(".agent/SYSTEM.md", 1),
+          system(".agent/SYSTEM_TEMPLATE.md", 1),
+          file(".agents/AGENTS.md", 1),
+          system(".agents/SYSTEM.md", 1),
+          system(".agents/SYSTEM_TEMPLATE.md", 1),
+          system(".omp/SYSTEM.md", 1),
+          system(".omp/SYSTEM_TEMPLATE.md", 1),
+        ],
+      }),
+    );
+    // With the host's marker in the cwd, none of them is listed.
+    expect(await listed(app, cookie, marked.id)).toBe(NONE);
   });
 
   it("stops the walk at the .git level but not the agents lookup", async () => {
@@ -310,13 +383,15 @@ describe("GET /api/project-config: files present at the read locations", () => {
 });
 
 describe("GET /api/project-config: a sandbox writable by the omp uid", () => {
-  it("lists neither a linked file, a directory, nor a file behind a linked .agents or .claude", async () => {
+  it("lists neither a linked file, a directory, nor a file behind a linked .agent(s), .claude or .codex", async () => {
     const { app, cookie, sandboxRoot } = await ownerWorld();
     const workspace = await createWorkspace(app, cookie, sandboxRoot);
     const real = join(workspace.root, "real");
     plant(workspace.root, [
       "real/AGENTS.md",
       "real/CLAUDE.md",
+      "real/SYSTEM.md",
+      "real/SYSTEM_TEMPLATE.md",
       "real/x.md",
       "AGENTS.md/",
       ".omp/AGENTS.md",
@@ -326,9 +401,11 @@ describe("GET /api/project-config: a sandbox writable by the omp uid", () => {
     ]);
     symlinkSync(join(real, "x.md"), join(workspace.root, ".omp", "RULES.md"));
     symlinkSync(join(real, "x.md"), join(workspace.root, ".omp", "SYSTEM.md"));
+    symlinkSync(join(real, "x.md"), join(workspace.root, ".omp", "SYSTEM_TEMPLATE.md"));
     symlinkSync(join(real, "x.md"), join(workspace.root, ".omp", "agents", "linked.md"));
-    symlinkSync(real, join(workspace.root, ".agents"), "dir");
-    symlinkSync(real, join(workspace.root, ".claude"), "dir");
+    for (const dir of [".agent", ".agents", ".claude", ".codex"]) {
+      symlinkSync(real, join(workspace.root, dir), "dir");
+    }
     const plainLink = await createWorkspace(app, cookie, sandboxRoot, "plain-link");
     plant(plainLink.root, ["x.md"]);
     symlinkSync(join(plainLink.root, "x.md"), join(plainLink.root, "AGENTS.md"));

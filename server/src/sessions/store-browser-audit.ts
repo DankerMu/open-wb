@@ -4,7 +4,7 @@
  * its browser from the `eval` prelude; the reducer derives the calls from the end frame's
  * `details.statusEvents` (events.ts) and they are audited in the transaction that writes the step's
  * end, so without the audit (no emit, a failed write) the end is not stored and the caller publishes
- * nothing. The #1526 step.start audit (store-segments.ts) coexists until group 6 deletes it.
+ * nothing. It is the only `session.browser` writer since #1570 deleted the #1526 step.start one.
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { emit as auditEmit } from "../core/audit/index.js";
