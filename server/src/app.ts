@@ -49,6 +49,7 @@ import type { ChatEvent } from "./sessions/events.js";
 import { registerSessions } from "./sessions/index.js";
 import type { SessionListNotifier } from "./sessions/list-events.js";
 import { ompAgentDir } from "./sessions/omp/process.js";
+import { ensureRepoRootMarker } from "./sessions/omp/repo-root-marker.js";
 import type { SpawnLog } from "./sessions/omp/spawn-gate.js";
 import { ompSnapshotsDir } from "./sessions/omp/state-layout.js";
 import type { SessionStore } from "./sessions/store.js";
@@ -217,6 +218,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   const store = createWorkspaceStore(db, {
     sandboxRoot: runtime.sandboxRoot,
     ensureSharedDir,
+    ensureRepoRootMarker,
     emit,
   });
   const upload = uploadLimits(assembly);

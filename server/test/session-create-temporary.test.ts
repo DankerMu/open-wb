@@ -201,7 +201,10 @@ function temporaryRoot(world: World, ownerId: string, workspaceId: string): stri
   return join(world.sandboxRoot, ownerId, `tmp-${workspaceId}`);
 }
 
-/** The row is a temporary workspace of `ownerId` named after its id, with an empty 2770 directory. */
+/**
+ * The row is a temporary workspace of `ownerId` named after its id, with a 2770 directory holding
+ * only the repo-root marker, an empty 2770 directory too (omp-runtime「创建工作空间即带标记」).
+ */
 function expectTemporaryWorkspace(world: World, ownerId: string, workspaceId: string): void {
   expect(workspaceRow(world.db, workspaceId)).toEqual({
     owner_id: ownerId,
@@ -213,7 +216,9 @@ function expectTemporaryWorkspace(world: World, ownerId: string, workspaceId: st
   const stats = lstatSync(root);
   expect(stats.isDirectory()).toBe(true);
   expect(stats.mode & 0o7777).toBe(SHARED_MODE);
-  expect(readdirSync(root)).toEqual([]);
+  expect(readdirSync(root)).toEqual([".git"]);
+  expect(lstatSync(join(root, ".git")).mode & 0o7777).toBe(SHARED_MODE);
+  expect(readdirSync(join(root, ".git"))).toEqual([]);
 }
 
 async function audit(world: World, cookie: string): Promise<Array<{ kind: string }>> {

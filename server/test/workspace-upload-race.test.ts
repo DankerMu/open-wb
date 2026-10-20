@@ -124,7 +124,7 @@ describe("POST /api/workspaces/:id/uploads — symbolic-link race (design D11 / 
       expect(readdirSync(uploads)).toEqual(["a.txt"]);
       expect(readFileSync(join(uploads, "a.txt"), "utf8")).toBe("abc");
       expect(readdirSync(elsewhere)).toEqual([]);
-      expect(readdirSync(workspace.root).sort()).toEqual(["elsewhere", "uploads"]);
+      expect(readdirSync(workspace.root).sort()).toEqual([".git", "elsewhere", "uploads"]);
       await expectOneUploadEvent(world, workspace);
     });
 
@@ -177,7 +177,12 @@ describe("POST /api/workspaces/:id/uploads — symbolic-link race (design D11 / 
 
       // With the target inside the workspace, that is the only place written: this follows from
       // the arrangement, it is not a property of the route.
-      expect(readdirSync(workspace.root).sort()).toEqual(["elsewhere", "uploads", "uploads-was"]);
+      expect(readdirSync(workspace.root).sort()).toEqual([
+        ".git",
+        "elsewhere",
+        "uploads",
+        "uploads-was",
+      ]);
       expect(readdirSync(world.sandboxRoot)).toEqual(["u1"]);
       expect(readdirSync(join(world.sandboxRoot, "u1"))).toEqual([basename(workspace.root)]);
       expect(treeOf(base, "sandbox")).toEqual(outsideBefore);

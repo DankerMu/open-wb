@@ -228,12 +228,14 @@ omp v18.12.3 从会话 cwd 向上到最近含名为 `.git` 条目的祖先（文
 #### Scenario: spawn 前建出标记
 - **WHEN** owner `u1` 绑定 `proj` 的会话首次 spawn 时 `<SANDBOX_ROOT>/u1/proj` 下没有 `.git`；同一 owner 的未绑定会话 spawn 时 `<SANDBOX_ROOT>/u1` 下没有 `.git`；随后两者各 resume spawn 一次；另一次 spawn 前 `<SANDBOX_ROOT>/u1/proj/.git` 已是一个带 `HEAD` 文件的真目录；另一次是一个名为 `.git` 的普通文件；另一次是一个悬空符号链接
 - **THEN** 前两次 spawn 后 `<SANDBOX_ROOT>/u1/proj/.git` 与 `<SANDBOX_ROOT>/u1/.git` 各是一个空目录，属应用用户、mode 恰为 `2770`（在 umask `022`、父目录无 setgid 位的临时目录里也是）；resume 时它们不变；后三次 spawn 不改动已有条目（真目录的 `HEAD` 仍在、文件仍是文件、链接仍悬空），且都正常 spawn
-- **WHEN** `<cwd>/.git` 不存在且 `<cwd>` 对应用用户不可写
-- **THEN** `spawnOmp` 不启动子进程、不签发可用 token，调用以目录准备失败结束
+- **WHEN** `<cwd>/.git` 不存在且 `<cwd>` 对应用用户不可写；另一次 `<cwd>` 本身不存在（绑定空间根已被删）；另一次在宿主 `mkdir` 之后、设权限之前 `<cwd>/.git` 被换成指向他处目录的符号链接
+- **THEN** 三次 `spawnOmp` 都不启动子进程、已签发的 token 被撤销（`issued` 恰 1、`revoked` 等于 `issued`、`live` 为空），调用以目录准备失败结束；第二次不重建 `<cwd>`；第三次链接目标的 mode 不变（宿主以 `O_NOFOLLOW` 打开后 `fchmod`，不跟随链接）
+- **WHEN** 宿主 `lstat` 未见 `.git` 而 `mkdir` 撞上 `EEXIST`（omp 并发 `git init`）
+- **THEN** 视同已有条目：不改动它、正常 spawn
 
 #### Scenario: 创建工作空间即带标记
 - **WHEN** owner 经 `POST /api/workspaces` 创建空间 `proj`；另一次经会话创建得到一个临时空间
-- **THEN** 两个空间根在创建响应返回时各恰含一个条目 `.git`（空目录、mode `2770`）；创建事务在建出标记之后失败（审计写入或 `COMMIT` 失败、临时空间的调用方事务失败）时，补偿清理按逆序先删标记再删本次新建的空目录，盘上不留空间根；尚未 spawn 过任何会话时 `GET /api/project-config?workspaceId=<id>` 的 walk 已止于空间根（owner 根的 `AGENTS.md` 不在列表里）；`GET /api/workspaces/<id>/tree` 列出 `.git` 这一个目录条目
+- **THEN** 两个空间根在创建响应返回时各恰含一个条目 `.git`（空目录、mode `2770`）；创建事务在建出标记之后失败（审计写入或 `COMMIT` 失败、临时空间的调用方事务失败）时，补偿清理按逆序先删标记再删本次新建的空目录，盘上不留空间根；标记本身建不出（空间根建出后不可写）时该创建失败——`POST /api/workspaces` 返回通用 500、不留空间行、不写审计、本次新建的目录被删除，临时空间走调用方的清理；尚未 spawn 过任何会话时 `GET /api/project-config?workspaceId=<id>` 的 walk 已止于空间根（owner 根的 `AGENTS.md` 不在列表里）；`GET /api/workspaces/<id>/tree` 列出 `.git` 这一个目录条目
 
 #### Scenario: 祖先的系统提示不再进入会话（真实 omp）
 - **WHEN** 官方 omp v18.12.3 以 cwd `<SANDBOX_ROOT>/u1/proj`（宿主已建 `.git` 标记）启动，`<SANDBOX_ROOT>/u1/.omp/SYSTEM.md`、`<SANDBOX_ROOT>/u1/.omp/SYSTEM_TEMPLATE.md`、`<SANDBOX_ROOT>/.omp/SYSTEM_TEMPLATE.md` 与 `<SANDBOX_ROOT>/u1/AGENTS.md` 各含一个独立标记，`<SANDBOX_ROOT>/.omp/agents/far.md` 定义一个带独立标记的 agent，cwd 下没有 `.omp`

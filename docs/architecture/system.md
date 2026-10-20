@@ -439,7 +439,7 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 
 ### 9.8 浏览器与参考镜像（#912，change `omp-browser-integration`）
 
-本节写配置项 `BROWSER_BIN`（#1529）、omp 的启动模式与宿主自答的浏览器盲卡（#1566）、宿主 overlay 的固定块（#1564）与浏览器部分（#1527）、参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
+本节写配置项 `BROWSER_BIN`（#1529）、omp 的启动模式与宿主自答的浏览器盲卡（#1566）、会话工作目录的仓库根标记（#1567）、宿主 overlay 的固定块（#1564）与浏览器部分（#1527）、参考部署镜像 `deploy/app/`（#1528）。规格权威是 browser-runtime「浏览器可执行文件配置」与「参考部署镜像」、omp-runtime「子进程 spawn 契约」「会话工作目录的仓库根标记」与「宿主 overlay」，残余登记在 [ADR-0012](../adr/0012-omp-project-config-host-overlay.md)「2026-10-19 补充」。
 
 **配置 `BROWSER_BIN`**：可选，omp 浏览器工具使用的 Chromium/Chrome 可执行文件。
 
@@ -458,6 +458,16 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 - 其它一律 cancel，包括 omp 每回合即发即弃的 `setWidget` 显示帧（`rpc` 下本来如此）。
 
 `ask` 工具被 overlay 钉掉（下表 `ask.enabled`）：`rpc-ui` 下它会成为模型可调的工具，宿主对它的提问只能 cancel，而取消即中止整个回合。实测（`server/test/omp-official-rpc-ui.test.ts`，官方 v18.0.10）：钉住时模型调 `ask` 得到错误结果 `Tool ask not found`、回合正常结束；去掉钉时回合以「已停止」收场。eval 里经桥调用的工具（`tool.bash(...)`）照常弹自己的确认卡（v18.0.10 与 v18.12.3 实测），批准 eval 不等于批准桥调。
+
+**会话工作目录的仓库根标记**（#1567，change `omp-pin-18-12` design D5）：每个会话的工作目录（绑定空间的根；未绑定会话为 owner 根）下恒有一个空的 `.git` 目录。
+
+- 目的：omp 从工作目录向上、到最近一个含名为 `.git` 条目的祖先为止读项目层——`AGENTS.md`、`.omp/` 的 `AGENTS.md` / `RULES.md` / skills、`.agent(s)/` 的说明文件，v18.12.3 起还有 `.omp/SYSTEM.md` 与整份替换系统提示的 `SYSTEM_TEMPLATE.md`。沙箱根与 owner 根对单一 omp uid 可写（ADR-0010），没有标记时一个账号的会话写进 `<SANDBOX_ROOT>/.omp/` 的文件会进入其它账号下一次会话的系统提示。有了标记，omp 的仓库根恒为工作目录。
+- 重建时机：每次 spawn 之前（会话、fork 临时进程、regenerate），以及每次创建工作空间时（`POST /api/workspaces`，含收编已有目录；会话创建的临时空间）。已有任何名为 `.git` 的条目（真仓库、文件、符号链接、悬空链接）都不动；没有时非递归地建一个空目录，再经不跟随符号链接打开的文件描述符设为精确 `2770`（不用按路径 `chmod`：omp uid 能在建出与设权限之间把它换成链接；父目录本身被换成链接时三步仍按路径解析，是登记在 ADR-0012 第三部分的已接受残余）。建不出时该次 spawn 视同目录准备失败（502 `agent_unavailable`），该次创建失败（500，本次建的目录删掉）。omp 用户删掉它只影响到下一次 spawn。
+- 用户在工作目录里 `git init` 会直接把它填成真仓库，之后宿主不再碰它。
+- 它是普通的空目录：出现在文件页与工作空间侧边栏的目录里（前端不过滤点开头条目），也进回合快照。本变更之前建的存量空间，第一回合的快照取在 spawn 之前、里面没有它，撤回 / 还原到那份快照会删掉它，到下一次 spawn 重建。同理，存量空间升级后的第一条 `/` 提示词按还没有标记的目录分类（命令目录的上溯仍到 owner 根，`/skill:<owner 根的 skill>` 被当作命令、不取回合前快照），随后 spawn 才建出标记、omp 看不到那个 skill；只发生一次，还原存量快照后再发生一次。
+- 后果：owner 根与沙箱根上的 `.omp/` skills、`AGENTS.md`、`RULES.md`、`SYSTEM(_TEMPLATE).md`（及 `.agent(s)/` 的同类文件）不再对工作空间会话生效；`GET /api/project-config` 与命令目录的上溯同样止于空间根，绑定空间的命令目录不再列 owner 根的 skill。需要平台级 skill 时装到托管 `HOME`（ADR-0012 #773 补充）。
+- 封不住的：`.omp/agents` 下的 agent 定义，以及 `.clinerules`。omp 的 `task` 工具从工作目录一直向上找到文件系统根，不认 `.git`，所以沙箱根 / owner 根的 `.omp/agents` 仍对其它账号的会话生效；`cline` provider 同样逐级到文件系统根取最近一个 `.clinerules`，带 frontmatter `alwaysApply: true` 时整段进入系统提示（实测，官方 v18.0.10；固定块未禁用 `cline`，是否禁用待 owner）；ADR-0012「#1563 补充」第三部分登记为已接受残余，部署前提「`SANDBOX_ROOT` 的任何祖先目录不得带 `.omp/`」照旧必须，另加「`SANDBOX_ROOT` 不得位于 `OMP_STATE_DIR/home` 之下」。
+- 实测（2026-10-20，官方 v18.0.10，三档各一回合）：工作目录下空 `.git` 时没有报错帧，stderr 与 omp 日志没有 git 相关输出，`get_state` 的 `systemPrompt` 与没有 `.git` 时逐字相同。git 不把空目录当有效仓库、会继续向上找：没有祖先是真仓库时在该目录报 `not a git repository`，某个祖先是真仓库时把工作目录当作那个仓库的子目录（3.1 实跑没有执行 git 命令，这一条是 git 的发现规则，单独验证过）；两种情况都不影响回合。
 
 **overlay 的固定块**（#1564，change `omp-pin-18-12` design D4）：`host-overlay.yml` 以下面这段开头，之后才是浏览器块与看图块。它不随部署配置变化，残余与取舍登记在 ADR-0012「2026-10-20 补充（#1563）」：
 

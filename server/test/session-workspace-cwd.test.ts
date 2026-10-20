@@ -286,7 +286,8 @@ describe("绑定不可改与工作目录 — 三种会话的工作目录 (#930)"
       // The legacy row is left as it was: still unbound, no workspace row or directory made for it.
       expect(boundWorkspace(db, legacy)).toBeNull();
       expect(workspaceRows(db)).toBe(rows);
-      expect(readdirSync(ownerRoot).sort()).toEqual(entries);
+      // The legacy row's spawn planted the owner root's repo-root marker.
+      expect(readdirSync(ownerRoot).sort()).toEqual([".git", ...entries]);
     },
   );
 
@@ -326,7 +327,8 @@ describe("绑定不可改与工作目录 — 三种会话的工作目录 (#930)"
       expectSpawnCwd(requiredCall(world.rt.calls, 0), ownerRoot);
       expect(boundWorkspace(db, legacy)).toBeNull();
       expect(workspaceRows(db)).toBe(rows);
-      expect(readdirSync(ownerRoot).sort()).toEqual(entries);
+      // The legacy row's spawn planted the owner root's repo-root marker.
+      expect(readdirSync(ownerRoot).sort()).toEqual([".git", ...entries]);
     },
   );
 });
@@ -391,11 +393,11 @@ describe("a bound session whose workspace root is unusable", () => {
       expectEnvelope(response, 500, INTERNAL_ERROR_ENVELOPE);
       expect(world.rt.calls).toHaveLength(0);
       expect(snapshot(db, world.session, true)).toEqual(before);
-      expect(readdirSync(foreign.root)).toEqual([]);
+      expect(readdirSync(foreign.root)).toEqual([".git"]);
       // No fallback to the owner root: nothing was written into it, and its own temporary
-      // workspace directory is still empty.
+      // workspace directory still holds only its repo-root marker.
       expect(readdirSync(ownerRoot)).toEqual([`tmp-${own}`]);
-      expect(readdirSync(join(ownerRoot, `tmp-${own}`))).toEqual([]);
+      expect(readdirSync(join(ownerRoot, `tmp-${own}`))).toEqual([".git"]);
       expect(supervisor.liveProcessCount()).toBe(0);
     },
   );

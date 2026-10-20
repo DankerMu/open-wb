@@ -299,7 +299,7 @@ async function sendFromWelcome(walk: TempWalk, events: Watched): Promise<TempSes
 }
 
 // 第 1 步后半：能力栏的只读标签、侧栏分组、文件变更卡（空间内相对路径、`查看详情` 以它为名）、产物卡预览，
-// 以及服务端的两处：空间列表不含它，它的 tree 恰有那一个文件。
+// 以及服务端的两处：空间列表不含它，它的 tree 恰有那一个文件（与创建即有的仓库根标记 `.git`）。
 async function expectTemporarySpace(walk: TempWalk, workspaceId: string): Promise<void> {
   const { page, project, file } = walk;
   await expect(page.locator('[data-slot="composer-workspace"]')).toHaveText("任务启动于 临时空间");
@@ -317,7 +317,7 @@ async function expectTemporarySpace(walk: TempWalk, workspaceId: string): Promis
     workspaces.map((workspace) => workspace.id),
     "GET /api/workspaces ids",
   ).not.toContain(workspaceId);
-  expect(await treeNames(page, workspaceId), "temporary workspace tree").toEqual([file]);
+  expect(await treeNames(page, workspaceId), "temporary workspace tree").toEqual([".git", file]);
 
   const card = page
     .getByRole("article", { name: "助手" })

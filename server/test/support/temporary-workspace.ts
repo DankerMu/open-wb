@@ -13,6 +13,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { emit } from "../../src/core/audit/index.js";
 import { ensureSharedDir } from "../../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore, type WorkspaceStore } from "../../src/workspaces/store.js";
 
 type TemporaryWorkspace = ReturnType<WorkspaceStore["createTemporary"]>["workspace"];
@@ -79,6 +80,11 @@ export function temporaryWorkspacePort(
   db: DatabaseSync,
   sandboxRoot: string,
 ): (ownerId: string) => ReturnType<WorkspaceStore["createTemporary"]> {
-  const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+  const store = createWorkspaceStore(db, {
+    sandboxRoot,
+    ensureSharedDir,
+    ensureRepoRootMarker,
+    emit,
+  });
   return (ownerId) => store.createTemporary({ id: ownerId });
 }

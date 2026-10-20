@@ -15,6 +15,7 @@ import { createSandbox } from "../src/core/sandbox/index.js";
 import { createPreviewApp } from "../src/preview/app.js";
 import { OfficeConvertError, type OfficeConverter } from "../src/preview/office.js";
 import { createPreviewTokens, type PreviewTokens } from "../src/preview/tokens.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { rawHttpRequest, withListeningApp } from "./raw-http-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
@@ -128,7 +129,12 @@ export async function withPreviewWorld(
       const root = seedFiles(db, sandboxRoot);
       const zhangsan = await cookieFor(main, "zhangsan");
       const lisi = await cookieFor(main, "lisi");
-      const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+      const store = createWorkspaceStore(db, {
+        sandboxRoot,
+        ensureSharedDir,
+        ensureRepoRootMarker,
+        emit,
+      });
       const sandbox = createSandbox({
         rootOf: store.rootOf,
         audit: { emit: (event) => emit(db, event) },

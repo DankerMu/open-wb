@@ -49,7 +49,7 @@ describe("workspaces「文件上传」 — 名字规则：换行类与双向控�
 
         // Neither the file nor a `.upload-….part` beside it, and no directory made for it.
         expect(uploadsOf(absent)).toBeNull();
-        expect(readdirSync(absent.root)).toEqual([]);
+        expect(readdirSync(absent.root)).toEqual([".git"]);
         expect(uploadsOf(present)).toEqual([]);
         // No `file.upload`, no `upload.reject`, no `sandbox.reject`: no row at all.
         expect(auditCount(world)).toBe(before);
@@ -98,7 +98,7 @@ describe("workspaces「文件上传」 — 名字规则：换行类与双向控�
         expect.objectContaining({ op: "write", relPath: "uploads/a\u2066\\b.txt" }),
       ]);
       expect(uploadsOf(w)).toBeNull();
-      expect(readdirSync(w.root)).toEqual([]);
+      expect(readdirSync(w.root)).toEqual([".git"]);
     });
   });
 

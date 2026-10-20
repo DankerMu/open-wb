@@ -5,6 +5,12 @@
  * Oracles are omp's own RPC answers: `get_available_commands` and `get_branch_messages`.
  * Opt-in: skipped unless `WORKBUDDY_OMP_TEST=1`. These pins bind the host's scan rules to that
  * omp version: when an omp upgrade turns one red, the spec changes first.
+ *
+ * #1567: `spawnOmp` plants a `.git` marker in the cwd, which ends both omp's and the host's walk
+ * there. (a) runs once with that marker removed by a test-only spawn wrapper (omp's own walk to
+ * the owner root) and once as the product does (the owner root's skill listed by neither). (b)
+ * runs as the product does: its owner-root `deploy` is now out of reach anyway, so it no longer
+ * shows a far skill being shadowed — only the nearer providers of the workspace root.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -56,16 +62,39 @@ function firstCodePoints(text: string, count: number): string {
 }
 
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, () => {
-  it(
-    "(a) lists every host-listed skill in get_available_commands with its description or its first 200 code points",
-    TURN,
-    async () => {
-      const world = await openWorld(({ agentDir, ownerRoot, workspaceRoot }) => {
+  async function openSkillsWorld(hostMarker: boolean): Promise<World> {
+    return openWorld(
+      ({ agentDir, ownerRoot, workspaceRoot }) => {
         writeSkill(join(agentDir, "skills"), "platform-only", "平台技能");
         writeSkill(join(ownerRoot, ".omp", "skills"), "owner-wide", "上层目录的技能");
         writeSkill(join(workspaceRoot, ".omp", "skills"), "deploy", "上线到生产");
         writeSkill(join(workspaceRoot, ".omp", "skills"), "long", LONG);
-      });
+      },
+      { hostMarker },
+    );
+  }
+
+  /** Every host-listed skill is in omp's list, with its description or its first 200 code points. */
+  function expectListedByOmp(omp: OmpCommand[], listed: ReturnType<typeof hostSkills>): void {
+    for (const skill of listed) {
+      const matches = omp.filter((command) => command.name === `skill:${skill.name}`);
+      expect(matches, skill.name).toHaveLength(1);
+      const description = matches[0]?.description ?? "";
+      expect([description, firstCodePoints(description, 200)], skill.name).toContain(
+        skill.description,
+      );
+    }
+    expect(listed.find((skill) => skill.name === "long")?.description).toBe(
+      firstCodePoints(LONG, 200),
+    );
+    expect(omp.find((command) => command.name === "skill:long")?.description).toBe(LONG);
+  }
+
+  it(
+    "(a) with the marker removed, lists every host-listed skill in get_available_commands with its description or its first 200 code points",
+    TURN,
+    async () => {
+      const world = await openSkillsWorld(false);
 
       const omp = await availableCommands(world.runtime);
       const listed = hostSkills(world);
@@ -76,18 +105,26 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, ()
         ["long", "project"],
         ["owner-wide", "project"],
       ]);
-      for (const skill of listed) {
-        const matches = omp.filter((command) => command.name === `skill:${skill.name}`);
-        expect(matches, skill.name).toHaveLength(1);
-        const description = matches[0]?.description ?? "";
-        expect([description, firstCodePoints(description, 200)], skill.name).toContain(
-          skill.description,
-        );
-      }
-      expect(listed.find((skill) => skill.name === "long")?.description).toBe(
-        firstCodePoints(LONG, 200),
-      );
-      expect(omp.find((command) => command.name === "skill:long")?.description).toBe(LONG);
+      expectListedByOmp(omp, listed);
+    },
+  );
+
+  it(
+    "(a) with the host marker, neither the host nor omp lists the owner root's skill",
+    TURN,
+    async () => {
+      const world = await openSkillsWorld(true);
+
+      const omp = await availableCommands(world.runtime);
+      const listed = hostSkills(world);
+
+      expect(listed.map((skill) => [skill.name, skill.source])).toEqual([
+        ["platform-only", "skill"],
+        ["deploy", "project"],
+        ["long", "project"],
+      ]);
+      expectListedByOmp(omp, listed);
+      expect(omp.map((command) => command.name)).not.toContain("skill:owner-wide");
     },
   );
 

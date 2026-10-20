@@ -17,6 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { HttpError } from "../src/core/errors/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { createTrash } from "../src/workspaces/trash.js";
 import { removeTempDirs, tempDir, withOpenDb } from "./core-db-helpers.js";
@@ -402,7 +403,12 @@ describe("trash sweep: 账号 id 不以点开头", () => {
       );
       insertAccount.run(".trash", "dotowner", "成员", 0, ACCOUNT_HASH);
       insertAccount.run(".x", "dotother", "成员", 0, ACCOUNT_HASH);
-      const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+      const store = createWorkspaceStore(db, {
+        sandboxRoot,
+        ensureSharedDir,
+        ensureRepoRootMarker,
+        emit,
+      });
 
       expectOwnerPathRejection(() => store.create({ id: ".trash" }, { name: "alpha" }));
       expectOwnerPathRejection(() => store.create({ id: ".x" }, { name: "alpha" }));

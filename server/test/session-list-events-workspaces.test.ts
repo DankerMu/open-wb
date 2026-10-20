@@ -12,6 +12,7 @@ import type { LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { BAD_REQUEST_ENVELOPE, NOT_FOUND_ENVELOPE } from "./session-db-helpers.js";
 import {
@@ -104,6 +105,7 @@ async function openWorld(): Promise<World> {
   expect(lisi.id).not.toBe(zhangsan.id);
   const store = createWorkspaceStore(fixture.db, {
     sandboxRoot: rt.runtime.sandboxRoot,
+    ensureRepoRootMarker,
     ensureSharedDir,
     emit,
   });

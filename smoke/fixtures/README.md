@@ -39,7 +39,7 @@
 
 ## 项目配置夹具
 
-`ui-walk-skills/AGENTS.md` 是 `GET /api/project-config?workspaceId=<ui-walk-skills 的 id>` 列出的唯一文件（`{path:"AGENTS.md",kind:"instructions",depth:0}`；同目录的 `.omp/skills/` 不在位置表里）。真 omp 会把工作目录里的 `AGENTS.md` 当作说明读进系统提示，所以它的内容只是一句占位说明、不含指令，且 ui-walk 不在该空间里发任何消息：`web/e2e/ui-walk-project-config.ts` 用 REST 建一个绑定该空间的会话，只打开、不发送，结束时删除。其它工作空间与 owner 根 `u1/` 下不要放 `AGENTS.md` 等项目配置文件（owner 根的文件会以 depth 1 出现在每个工作空间的列表里，`ui-walk-sessions` 的会话顶栏就不再恰为三个按钮）。
+`ui-walk-skills/AGENTS.md` 是 `GET /api/project-config?workspaceId=<ui-walk-skills 的 id>` 列出的唯一文件（`{path:"AGENTS.md",kind:"instructions",depth:0}`；同目录的 `.omp/skills/` 不在位置表里）。真 omp 会把工作目录里的 `AGENTS.md` 当作说明读进系统提示，所以它的内容只是一句占位说明、不含指令，且 ui-walk 不在该空间里发任何消息：`web/e2e/ui-walk-project-config.ts` 用 REST 建一个绑定该空间的会话，只打开、不发送，结束时删除。其它工作空间与 owner 根 `u1/` 下不要放 `AGENTS.md` 等项目配置文件：每个工作空间根自创建起带宿主的 `.git` 仓库根标记（#1567），owner 根的说明文件不再以 depth 1 出现在工作空间的列表里，但 owner 根的 `.omp/agents/*.md` 不受标记约束、仍以 depth 1 出现（`ui-walk-sessions` 的会话顶栏就不再恰为三个按钮），owner 根的文件也都出现在不带 `workspaceId` 的列表里。收编的 `smoke-fixture/` 等目录在创建时同样多出一个空的 `.git`，夹具本身不带它。
 
 ## 替换夹具时要同步检查
 

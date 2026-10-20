@@ -126,7 +126,7 @@ describe("undo restoring the workspace (message-undo「文件还原与结果」)
       failed: NOTHING_LEFT,
     });
     expect(contents(world)).toEqual(before);
-    expect(before).toEqual({ "a.txt": "before" });
+    expect(before).toEqual({ ".git/": null, "a.txt": "before" });
     expect(existsSync(join(world.root, "out/b.html"))).toBe(false);
     expect(body.draft).toBe(QUESTION);
     expect(await messageIds(world)).toEqual([u1, u1 + 1]);
@@ -187,7 +187,11 @@ describe("undo restoring the workspace (message-undo「文件还原与结果」)
       skipped: { count: 1, paths: [{ path: "big.bin", reason: "too_large" }] },
       failed: NOTHING_LEFT,
     });
-    expect(contents(world)).toEqual({ "a.txt": "small", "big.bin": "y".repeat(40) });
+    expect(contents(world)).toEqual({
+      ".git/": null,
+      "a.txt": "small",
+      "big.bin": "y".repeat(40),
+    });
   });
 
   it("the lists are cut to their first 200 with the total: 201 skipped files", async () => {
@@ -467,7 +471,7 @@ describe("undo in a workspace other sessions share (message-undo「共用空间�
     restoredBy(await undoWith(world, u1, "restore"));
 
     expect(await messageIds(world)).toEqual([]);
-    expect(contents(world)).toEqual({ "a.txt": "before" });
+    expect(contents(world)).toEqual({ ".git/": null, "a.txt": "before" });
   });
 
   // Spawns: 0 S's process, 1 the fork's temporary process, 2 S's next process, 3 F's process
@@ -561,7 +565,8 @@ describe("undo in a workspace other sessions share (message-undo「共用空间�
 
     restoredBy(await undoWith(world, u2, "restore"));
 
-    expect(contents(world)).toEqual({});
+    // Only the repo-root marker the workspace was created with.
+    expect(contents(world)).toEqual({ ".git/": null });
   });
 
   // Spawns: 0 S's process, 1 the fork's temporary process (of an empty fork), 2 F's process,
@@ -587,7 +592,7 @@ describe("undo in a workspace other sessions share (message-undo「共用空间�
     const body = restoredBy(await undoWith(world, u2, "restore"));
 
     expect(body.files).toMatchObject({ restored: 0, removed: 1 });
-    expect(contents(world)).toEqual({ "f.txt": "written by the fork's turn" });
+    expect(contents(world)).toEqual({ ".git/": null, "f.txt": "written by the fork's turn" });
   });
 
   // Spawns: 0 S's process, 1 the fork's temporary process, 2 S's next process (alive), 3 F's

@@ -20,6 +20,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { HttpError } from "../src/core/errors/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore, type WorkspaceStore } from "../src/workspaces/store.js";
 import { removeTempDirs, tempDir, withOpenDb } from "./core-db-helpers.js";
 import { seedTemporaryWorkspaceSession } from "./support/temporary-workspace.js";
@@ -73,6 +74,7 @@ function withWorld(options: WorldOptions, run: (world: World) => void): void {
   withOpenDb(":memory:", (db) => {
     const store = createWorkspaceStore(db, {
       sandboxRoot,
+      ensureRepoRootMarker,
       ensureSharedDir: ensure === undefined ? ensureSharedDir : (path) => ensure(path, sandboxRoot),
       emit,
       ...(ids === undefined
@@ -397,6 +399,8 @@ describe("temporary workspace: compensation exit", () => {
       const created = store.createTemporary(U1);
       db.exec("ROLLBACK");
       expect(readdirSync(join(sandboxRoot, "u1"))).toEqual([TMP_T]);
+      // The repo-root marker is removed first, so the workspace directory is empty again.
+      expect(readdirSync(created.workspace.root)).toEqual([".git"]);
 
       created.removeCreatedDirs();
       expect(readdirSync(sandboxRoot)).toEqual([]);
@@ -547,7 +551,7 @@ describe("temporary workspace: 转正 (store.promote)", () => {
       );
       expect(readdirSync(sandboxRoot)).toEqual(["u1"]);
       expect(readdirSync(ownerRoot)).toEqual([TMP_T]);
-      expect(readdirSync(temporary.root)).toEqual(["notes.md"]);
+      expect(readdirSync(temporary.root)).toEqual([".git", "notes.md"]);
       expect(lstatSync(temporary.root).ino).toBe(inodes.root);
       expect(lstatSync(notes).ino).toBe(inodes.notes);
       expect(readFileSync(notes, "utf8")).toBe("调研笔记");

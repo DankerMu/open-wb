@@ -331,7 +331,7 @@ describe("files.changed in a workspace-bound session", () => {
         ["step.end", REPORT_TEXT, "done"],
       ]);
 
-      expect(readdirSync(root).sort()).toEqual(["notes.md", "out"]);
+      expect(readdirSync(root).sort()).toEqual([".git", "notes.md", "out"]);
       expectNoHostPath(world, events(world), root);
       expectNoHostPath(world, stepRows(world.fixture.db), root);
       expect(world.errors).toEqual([]);
@@ -425,7 +425,8 @@ describe("files.changed in a workspace-bound session", () => {
       // paths beyond the bound root.
       expect(existsSync(join(outside, "notes.md"))).toBe(true);
       expect(existsSync(join(outside, "out", "report.html"))).toBe(true);
-      expect(readdirSync(String(world.workspaceRoot))).toEqual([]);
+      // Only the repo-root marker the host plants.
+      expect(readdirSync(String(world.workspaceRoot))).toEqual([".git"]);
       expectPlainTurn(world);
       expectNoHostPath(world, events(world), outside);
     },

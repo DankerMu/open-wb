@@ -12,6 +12,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import {
   type ApprovalWorld,
@@ -383,7 +384,12 @@ describe("会话视图扩展键 over the production assembly (real fake-omp appr
 
       // A temporary workspace cannot be bound through POST /api/sessions (#925): its session comes
       // from the store's own createTemporary plus a planted row.
-      const workspaces = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+      const workspaces = createWorkspaceStore(db, {
+        sandboxRoot,
+        ensureSharedDir,
+        ensureRepoRootMarker,
+        emit,
+      });
       const temporary = seedTemporaryWorkspaceSession(db, workspaces, OWNER_ID, ORPHAN_SESSION).id;
       const refused = await app.inject({
         method: "POST",

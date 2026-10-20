@@ -56,7 +56,13 @@ describe("workspace-snapshots 受理时做快照 (#945)", () => {
       // The fake's turn rewrote notes.md and added out/report.html in the workspace.
       const afterFirst = contentsOf(world.root);
       expect(afterFirst["notes.md"]).not.toBe("before\n");
-      expect(Object.keys(afterFirst)).toEqual(["keep.txt", "notes.md", "out", "out/report.html"]);
+      expect(Object.keys(afterFirst)).toEqual([
+        ".git",
+        "keep.txt",
+        "notes.md",
+        "out",
+        "out/report.html",
+      ]);
       const second = await turn(world, "again");
 
       expect(rows(world.db)).toEqual([
@@ -71,6 +77,7 @@ describe("workspace-snapshots 受理时做快照 (#945)", () => {
         ]);
       }
       expect(contentsOf(join(world.snapshots, String(first), "tree"))).toEqual({
+        ".git": "dir",
         "keep.txt": "unchanged\n",
         "notes.md": "before\n",
       });
@@ -144,6 +151,7 @@ describe("workspace-snapshots 受理时做快照 (#945)", () => {
       expect(turnEnds(world)).toEqual(["stopped"]);
       expect(rows(world.db)).toEqual([plainRow(world, userMessageId, "ok", since)]);
       expect(contentsOf(join(world.snapshots, String(userMessageId), "tree"))).toEqual({
+        ".git": "dir",
         "a.txt": "1",
       });
       expect(world.errors).toEqual([]);
@@ -482,6 +490,7 @@ describe("http-service-skeleton Shared agent module assembly: the snapshot servi
       // The managed layout's directory: <state dir>/snapshots/<workspaceId>/<userMessageId>.
       const directory = join(world.rt.runtime.stateDir, "snapshots", world.workspaceId, String(id));
       expect(contentsOf(join(directory, "tree"))).toEqual({
+        ".git": "dir",
         "a.txt": "small",
         node_modules: "dir",
         "node_modules/m.js": "kept",
@@ -548,7 +557,10 @@ describe("http-service-skeleton Shared agent module assembly: the snapshot servi
       expect(rows(world.db).map((row) => [row.outcome, row.skipped])).toEqual([
         ["ok", JSON.stringify({ count: 1, paths: [{ path: "node_modules", reason: "excluded" }] })],
       ]);
-      expect(contentsOf(join(world.snapshots, String(id), "tree"))).toEqual({ "a.txt": "1" });
+      expect(contentsOf(join(world.snapshots, String(id), "tree"))).toEqual({
+        ".git": "dir",
+        "a.txt": "1",
+      });
       expect(readFileSync(join(world.snapshots, String(id), "tree", "a.txt"), "utf8")).toBe("1");
     },
   );

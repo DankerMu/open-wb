@@ -15,6 +15,7 @@ import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import { ensureRepoRootMarker } from "../src/sessions/omp/repo-root-marker.js";
 import { createWorkspaceStore } from "../src/workspaces/store.js";
 import { removeTempDirs } from "./core-db-helpers.js";
 import { NOT_FOUND_ENVELOPE, UNAUTHORIZED_ENVELOPE } from "./session-db-helpers.js";
@@ -85,7 +86,12 @@ async function withWorld(action: (world: World) => Promise<void>): Promise<void>
       payload: JSON.stringify({ name: "项目A", dir: "project-a" }),
     });
     expect(created.statusCode).toBe(201);
-    const store = createWorkspaceStore(db, { sandboxRoot, ensureSharedDir, emit });
+    const store = createWorkspaceStore(db, {
+      sandboxRoot,
+      ensureSharedDir,
+      ensureRepoRootMarker,
+      emit,
+    });
     const temporary = seedTemporaryWorkspaceSession(db, store, OWNER, OWNER_SESSION);
     const foreignTemporary = seedTemporaryWorkspaceSession(db, store, OTHER, OTHER_SESSION);
     expect(temporary.root).toBe(join(sandboxRoot, OWNER, `tmp-${temporary.id}`));
@@ -250,7 +256,12 @@ describe("临时空间的可见性：列表不含临时空间而按 id 可达", 
       expect(tree.headers["cache-control"]).toBe("no-store");
       const listing = tree.json() as { path: string; entries: Array<{ name: string }> };
       expect(listing.path).toBe("");
-      expect(listing.entries.map((entry) => entry.name)).toEqual([".omp", "AGENTS.md", "a.txt"]);
+      expect(listing.entries.map((entry) => entry.name)).toEqual([
+        ".git",
+        ".omp",
+        "AGENTS.md",
+        "a.txt",
+      ]);
       expect(listing.entries.find((entry) => entry.name === "a.txt")).toMatchObject({
         type: "file",
         size: FILE_BYTES.length,

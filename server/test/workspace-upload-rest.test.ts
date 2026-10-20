@@ -435,7 +435,7 @@ describe("workspaces「文件上传」 — 越界名字被拒绝并入审计", (
       // Where `uploads/../../etc/passwd` would land: beside the account roots.
       expect(readdirSync(world.sandboxRoot)).toEqual(["u1"]);
       expect(readdirSync(join(world.sandboxRoot, "u1"))).toEqual(["escape"]);
-      expect(readdirSync(w.root)).toEqual([]);
+      expect(readdirSync(w.root)).toEqual([".git"]);
     });
   });
 
@@ -529,7 +529,7 @@ describe("workspaces「文件上传」 — 名字规则与媒体类型", () => {
       }
 
       expect(uploadsOf(absent)).toBeNull();
-      expect(readdirSync(absent.root)).toEqual([]);
+      expect(readdirSync(absent.root)).toEqual([".git"]);
       expect(uploadsOf(present)).toEqual([]);
       expect(auditCount(world)).toBe(before);
     });
@@ -678,7 +678,7 @@ describe("workspaces「文件上传」 — 目录被占与审计失败", () => {
 
       expectWire(response, 409, CONFLICT_ENVELOPE);
       expect(readFileSync(join(w.root, "uploads"), "utf8")).toBe("not a directory");
-      expect(readdirSync(w.root)).toEqual(["uploads"]);
+      expect(readdirSync(w.root)).toEqual([".git", "uploads"]);
       expect(auditCount(world)).toBe(before);
     });
   });
