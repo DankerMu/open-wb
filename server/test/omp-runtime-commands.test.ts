@@ -783,16 +783,15 @@ describe("runtime command/abort source boundary", () => {
   const omp = fileURLToPath(new URL("../src/sessions/omp/", import.meta.url));
   const source = (name: string): string => readFileSync(join(omp, name), "utf8");
 
-  it("G1 commands.ts reaches runtime.js only via import type; runtime.ts has one acquisition call site", () => {
-    const statements =
-      source("commands.ts").match(
-        /\b(?:import|export)\b[^;]*?["']\.\/runtime\.js["']\s*\)?\s*;/gu,
-      ) ?? [];
-    expect(statements.length).toBeGreaterThan(0);
-    for (const statement of statements) {
-      expect(statement).toMatch(/^import type\b/u);
+  it("G1 commands.ts and local-wait.ts reach runtime.js only via import type; runtime.ts has one acquisition call site", () => {
+    // local-wait.ts may drop its runtime.js import entirely; commands.ts must keep at least one.
+    for (const name of ["commands.ts", "local-wait.ts"]) {
+      const statements =
+        source(name).match(/\b(?:import|export)\b[^;]*?["']\.\/runtime\.js["']\s*\)?\s*;/gu) ?? [];
+      if (name === "commands.ts") expect(statements.length).toBeGreaterThan(0);
+      for (const statement of statements) expect(statement, name).toMatch(/^import type\b/u);
+      expect(source(name), name).not.toMatch(/import\s*\(\s*["']\.\/runtime\.js["']/u);
     }
-    expect(source("commands.ts")).not.toMatch(/import\s*\(\s*["']\.\/runtime\.js["']/u);
     expect(source("runtime.ts").split("this.#acquire(").length - 1).toBe(1);
   });
 });
