@@ -7,7 +7,7 @@
 ## What
 
 - `converter/sidecar.mjs`：内存中的已落定 id 集合。`settle` 加入；`readyJobs` 跳过集合里的 id；每轮 `readdir` 之后把本轮不再出现的 id 移出（有界）。重启后为空。头注释（spool 协议的单一真相）的领取条件同步。
-- 测试（真 sidecar，`server/test/support/converter-sidecar.ts` 夹具）：作业 `done` 后测试按「先删 `done` 与 `in/`、保留 `request.json`」拆目录并停留 ≥3 个轮询周期，断言无第二行日志、无 `failed`、最终整目录可删；变异（去掉集合）同用例转红。有界性用例：删除后以同一 id 重建就绪作业，一个轮询周期内被领取。
+- 测试（真 sidecar，`server/test/support/converter-sidecar.ts` 夹具，design D6）：作业 `done` 并出了第一行日志后，测试先删 `in/` 再删 `done`、保留 `request.json`，再写一个哨兵作业并等它落定（屏障，不用固定 sleep），断言该 id 恰一行日志、无 `failed`、最终整目录可删；变异（a，去掉跳过）同用例转红。有界性用例：删除目录后以哨兵作业强制一轮列表，再以同一 id 重建就绪作业，在夹具的标记等待上限内被领取并出第二行日志；变异（b，去掉修剪）该用例超时转红。
 - 规格：office-preview「转换 sidecar 实现与镜像」（领取条件、已落定集合、两个 Scenario）与「sidecar 转换契约」第 (6) 步（删除非原子、cancel 路径残余登记）。
 - 不做：app 侧 `removeJob` 改删除次序或加 `maxRetries`（app 不再等待的作业上首次落定写进删除中目录的残余，已由 owner 接受并登记在案——「终止结束作业的全部进程」、ADR-0014、system.md；design D5）；「`cancelled` 不写标记」（协议变更）；#1574（测试替身的观察问题，已修）；`rmSync` 途中换入符号链接的已登记残余。
 
