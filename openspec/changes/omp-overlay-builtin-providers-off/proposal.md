@@ -17,7 +17,7 @@ owner 2026-10-21 裁定**关闭**这些请求，不作为残余接受。
 
 - **overlay 固定块**：`disabledProviders` 扩成 omp v18.12.3 的全部内置模型 provider，共 87 项。名单的生成规则和排除项见 design D1。托管的 `workbuddy` provider 不在名单里；能力发现源的 id 也一个都不进名单，否则会把项目 skills 一起关掉。
 - **官方 v18.12.3 用例**：
-  - 产品 overlay 下，去掉 no_proxy 钉以便观测。在工作目录 `.env` 写 `ALL_PROXY` 指向本地监听器，断言 `CONNECT` 数为零，`workbuddy/<id>` 和 `skill:x` 都还在。
+  - 产品 overlay 下，去掉 no_proxy 钉以便观测。在工作目录 `.env` 写 `ALL_PROXY` 指向本地监听器，断言监听器零命中（不发模型回合：`ALL_PROXY` 也会代理回环上的模型请求，所以以 `get_available_models` 应答加观测窗口为锚点，而不是 issue 写的「`agent_end` 之后」），`workbuddy/<id>` 和 `skill:x` 都还在。
   - 负对照：换回原来的四项名单，至少收到一个 `CONNECT`，其中包括 `catalog.stencil.so:443`。
 - **单测 / 字节断言**：随名单一起更新。
 - **spec**：omp-runtime「宿主 overlay」的 YAML 块、`disabledProviders` 的说明，再加一个 Scenario。

@@ -6,7 +6,7 @@ Must preserve: overlay 其余键与次序不变；`workbuddy/<id>` 照常可用�
 
 - [ ] 1.1 开工核对（按 tag `v18.12.3` 源码复核）：重新生成 design D1 的名单（KDL 条目 id ∪ bundled `models.json` provider id ∪ `llama.cpp`/`apple`，减去 `cursor`、`local`、`web`），与 spec delta 里的 87 项逐项比对；列出全部能力发现源 id 并确认与名单无交集；复核 `model-registry.ts:215-220,2383-2393,2428-2433,2471-2486`。出入先改本 fixture（spec delta 名单、design D1）再继续。复核过程与结果存 `.workplans/1621/evidence/list-derivation.md`（可引用本机只读源码树，但被跟踪文件只引 tag `v18.12.3`）。
 - [ ] 1.2 先写官方用例（design D3），在当前四项 overlay 上跑：产品形态应看到 `CONNECT`（红），记录命中主机。
-- [ ] 1.3 改 `server/src/sessions/omp/host-overlay.ts`（design D4）：名单常量 + 渲染 + 文件头注释；更新受影响的字节断言测试。
-- [ ] 1.4 重跑官方用例：产品 overlay 零 `CONNECT`、`workbuddy/<id>` 与 `skill:x` 在；负对照（四项）≥1 个 `CONNECT` 且含 `catalog.stencil.so:443`。连跑 3 次。
-- [ ] 1.5 文档：ADR-0012 在 `disabledProviders` 条目后加「2026-10-21 补充，#1621」（裁定、规则与排除项、实测、残余：marketplace 自动更新、带凭证路径靠升级时重新生成、名单可能不全）；`docs/architecture/system.md` 9.8 的 overlay YAML 块、表格 `disabledProviders` 行与相关实测行同步。
+- [ ] 1.3 改 `server/src/sessions/omp/host-overlay.ts`（design D4）：名单常量 + 渲染 + 文件头注释；更新受影响的字节断言测试（至少 `server/test/omp-layout-helpers.ts:64-67` 的固定块副本、`server/test/omp-host-overlay.test.ts:93`）。
+- [ ] 1.4 重跑官方用例：产品 overlay 监听器零命中、`workbuddy/<id>` 与 `skill:x` 在；负对照（四项）≥1 个 `CONNECT` 且含 `catalog.stencil.so:443`。连跑 3 次。
+- [ ] 1.5 文档：ADR-0012 在 `disabledProviders` 条目后加「2026-10-21 补充，#1621」（裁定、规则与排除项、实测、残余：`cursor` 带凭证时的发现请求、marketplace 自动更新、带凭证路径靠升级时重新生成、名单可能不全）；同时改掉 `:149`「overlay 只列这四个模型提供者」的过时说法，并在新节注明 `:166` 的 `cline` 能力发现源残余不受本次影响；`docs/architecture/system.md` 9.8 的 overlay YAML 块、表格 `disabledProviders` 行与相关实测行同步。
 - [ ] 1.6 验证：`WORKBUDDY_OMP_TEST=1 OMP_BIN=$PWD/var/omp/omp npx vitest run --root server --no-file-parallelism test/omp-official-` 全绿；`npx vitest run --root server test/omp-host-overlay test/server-startup-overlay` ×3；`npm test --workspace server`；`make check`；`bash scripts/size-guard.sh`；`git diff --stat` 只含 change 目录、`host-overlay.ts`、受影响测试、ADR-0012、`system.md`。

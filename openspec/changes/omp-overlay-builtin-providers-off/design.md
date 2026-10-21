@@ -18,7 +18,7 @@
 - 能力发现源（项目 skills 等）不受影响。
 
 **Non-Goals**
-- **marketplace 自动更新**：`main.ts:2262-2266` 会无条件安排，但只在已注册 marketplace 时才发请求。宿主的 agent 目录是新建的，没有注册任何 marketplace，读代码看没有请求。登记为残余，不在本次范围。
+- **marketplace 自动更新**：`main.ts:2262-2266` 每次 spawn 都会安排，`marketplace.autoUpdate` 缺省 `notify`（`modes/settings.ts:1139-1143`）；托管 agent 目录跨 spawn 持久，注册过 marketplace 后每次 spawn 都会刷新（`marketplace/manager.ts:751-762`）。没有已注册 marketplace 时不发请求，而注册只能经工具层。不在本 issue「模型目录主机」的范围内，登记为残余；零成本的 `marketplace.autoUpdate: "off"` 钉交 owner 另定。
 - **助手经 bash / eval / 浏览器发起的访问**：属于工具层，另有审批。
 - **模型代理到上游的请求**：见 ADR-0008。
 - **部署侧防火墙**。
@@ -34,7 +34,7 @@
 - 隐式本机探测的 `llama.cpp`、`apple`（`model-registry.ts:1636-1700`）。
 
 再减去三个 id：
-- `cursor`：它同时是能力发现源的 id，列进来会关掉 `.cursor` 下的 MCP、规则、设置发现。
+- `cursor`：它同时是能力发现源的 id，列进来会关掉 `.cursor` 下的规则、设置发现（MCP 已由 `mcp.enableProjectConfig: false` 关掉）。代价：`cursor` 不是无凭证发现的 provider，但 omp 拿到 Cursor 凭证时会请求 Cursor 的模型发现端点（`packages/catalog/src/provider-models/special.ts:131-145`，经 `model-registry.ts:2428-2433` 的 `isAuthenticated` 分支），这条登记为残余（ADR-0012）。
 - `local`、`web`：静态合成的 provider，不发请求（`packages/catalog/src/provider-models/special.ts:393-407`），关掉反而可能影响依赖它们的角色。
 
 结果是 87 项，原有四项（`ollama`、`llama.cpp`、`lm-studio`、`apple`）保持在最前，其余按字母序排。
@@ -58,7 +58,8 @@ omp 没有任何接口能枚举内置 provider：
 - `proxyPins=false`：去掉 `no_proxy` / `NO_PROXY` 两个钉。不去掉的话，omp 的请求会绕过代理直连，监听器什么也看不到。
 - 工作目录 `.env` 写 `ALL_PROXY=http://127.0.0.1:<port>`。#1615 的红跑就是在这个形态下看到 7 个 `CONNECT` 的。
 - **不发模型回合**：`ALL_PROXY` 也会代理回环上的 http 模型请求，监听器回 502 会让回合失败。
-- 等 `get_available_models` 应答之后（rpc 内部会 `awaitBackgroundRefresh`，`packages/coding-agent/src/modes/rpc/rpc-mode.ts:2288`），再等一个固定的观测窗口。
+- 等 `get_available_models` 应答之后（rpc 内部会 `awaitBackgroundRefresh`，`packages/coding-agent/src/modes/rpc/rpc-mode.ts:2288`），再等一个固定的观测窗口：常量 5 s，沿用同文件 OTLP 用例的 `OTLP_WINDOW_MS` 量级，覆盖 refresh 之后迟到的单个 manager 请求。
+- 产品 overlay 下断言监听器零命中（不只是零 `CONNECT`）：不发回合、托管 `models.yml` 也没有 `discovery`，任何命中（含明文 http）都是外联。
 - world 必须是全新的：不能有 `models.db` 缓存，否则 `online-if-uncached` 在缓存新鲜时不发请求，负对照就红不起来。
 - 负对照用同一 world 形态，只把 overlay 的 `disabledProviders` 换回四项。断言至少一个 `CONNECT`，并且含 `catalog.stencil.so:443`。
 - 同一个产品 overlay 启动下，还要断言：
@@ -76,6 +77,7 @@ omp 没有任何接口能枚举内置 provider：
 
 - **升级 omp 后新增的内置 provider 会重新外联**：D2 用例能抓到无凭证的外联；带凭证的外联靠 spec 规定的重新生成。
 - **名单有可能不全**：pi-ai 的 auth / oauth provider 表、扩展注册的 provider 都没有逐个枚举。前者全部需要凭证；后者由扩展引入，项目层扩展已经另有治理。
+- **`cursor` 带凭证的发现请求**：见 D1，登记为残余。
 - **将来如果有人把托管 provider 改名，与内置 id 撞上**：`disabledProviders` 会把它一起关掉。托管名固定是 `workbuddy`，不在名单里。
 
 ## Sketch seams under test
