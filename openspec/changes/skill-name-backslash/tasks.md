@@ -1,0 +1,10 @@
+# Tasks — skill-name-backslash (#1587)
+
+Fixture level: compact. Risk packs: selected — Public API / CLI / script entry（`GET /api/commands` 与 prompt 路由的 skill 判定只少掉 omp 不加载的名字）；not selected — Config、File IO / path safety（目录遍历与链接规则不变）、Schema、Auth / secrets、Concurrency、Resource limits、Error handling、Release / packaging。
+
+Must preserve: 现有 listSkills / listProjectSkills / sessionSkills 用例的期望不变（`weekly-report`、`noname`、`folded` 照列；`bad name` 照跳）；目录名缺省、去引号、链接与条目上限规则不变；`classifyPrompt` 对已列出 skill 的判定与 wire 形态不变；`server/src` 除 `slash-commands.ts` 外不改。
+
+- [x] 1.1 开工核对：`slash-commands.ts:85-95`（`SKILL_NAME` 与注释）、`:400-420`（`readSkill`，`name` 缺省取目录名 `entry`）；`classifyPrompt` 对未列出 skill 的处理；`server/test/slash-commands.test.ts`（平台用例；已 import `listSkills` 与 `classifyPrompt`）与 `server/test/slash-commands-project.test.ts:32-38,76`（`writeSkill` 写死 `name: <entry>`；`listProjectSkills` describe）中对应 chat-sessions 场景「Skills are read from the platform directory under omp's rules」与「Project skills are listed from the session cwd upwards」的用例；tag `v18.12.3` 的 `discovery/helpers.ts:491-499`。出入先改本 fixture 再继续。
+- [x] 1.2 测试先行：platform 用例加 `back/SKILL.md`（`name: a\b`，`description: w`）与 `c\d/SKILL.md`（目录名含 `\`，`description: v`，不写 `name`）——`listSkills` 结果与原期望逐项相同（不含 `a\b`）；同一用例 `classifyPrompt("/skill:a\\b x", list)` 为 `{kind:"text"}`；project 用例在 `server/test/slash-commands-project.test.ts:76` 的 `listProjectSkills` describe：不用该文件的 `writeSkill`（它写死 `name: <entry>`，写不出 `name: a\b`），直接 `mkdirSync` + `writeFileSync` 写 `<workspaceRoot>/.omp/skills/back/SKILL.md`（`name: a\b`，`description: w`），`listProjectSkills` 结果与原期望逐项相同。先红：修复前四处都必须红并记下输出——platform 列出 `a\b`、列出 `{name:"c\\d",description:"v"}`、`classifyPrompt` 返回 `{kind:"skill"}`，project 列出 `a\b`。
+- [x] 1.3 实现：`SKILL_NAME = /^[^\s/\\]+$/`；注释按 proposal What 改写，引用 omp v18.12.3 `discovery/helpers.ts:494-499`。
+- [x] 1.4 验证：`npx vitest run --root server test/slash-commands`；`npm test --workspace server`；typecheck；`make check`；`git diff --stat origin/master` 只含 `openspec/changes/skill-name-backslash/**`、`server/src/sessions/slash-commands.ts` 与 `server/test/**`。

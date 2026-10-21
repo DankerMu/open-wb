@@ -76,6 +76,12 @@ const WORKSPACE_LEVEL = [
 describe("listProjectSkills", () => {
   it("lists .omp/skills from the cwd up to the sandbox root, nearest name first, descriptions cut to 200 code points", () => {
     const { sandboxRoot, workspaceRoot } = plantTree();
+    // Issue #1587: written directly, `writeSkill` cannot give a name other than its entry.
+    mkdirSync(join(workspaceRoot, ".omp", "skills", "back"));
+    writeFileSync(
+      join(workspaceRoot, ".omp", "skills", "back", "SKILL.md"),
+      "---\nname: a\\b\ndescription: w\n---\n正文\n",
+    );
 
     expect(listProjectSkills(workspaceRoot, sandboxRoot)).toEqual([
       { name: "long", description: LONG_CUT },
