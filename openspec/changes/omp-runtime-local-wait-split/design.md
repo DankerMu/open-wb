@@ -18,7 +18,7 @@ Pure move: for every frame sequence, clock schedule and call order, `SessionRunt
 - `server/src/sessions/omp/runtime.ts` (source of both cuts), `commands.ts` (receives receipt functions), new `local-wait.ts`.
 - `local-command.ts` unchanged; `process.ts` untouched.
 - Tests that exercise the moved code: `omp-runtime-local-command.test.ts`, `omp-runtime-abort-start.test.ts`, `omp-runtime*.test.ts`, `fake-omp-slash.test.ts`, `fake-omp.test.ts`, `supervisor-command-output.test.ts`, `omp-dispatch.test.ts`, `session-events-command.test.ts`, session-supervisor tests driving real fake-omp children.
-- Source-reading boundary tests that will walk the new file: `omp-runtime-commands.test.ts:786-797`, `omp-runtime-exit-pending.test.ts:701-732` (G2), `omp-approval-requests.test.ts:494`.
+- Source-reading boundary tests that will walk the new file: `omp-runtime-commands.test.ts:782-799`, `omp-runtime-exit-pending.test.ts:714-732` (G2), `omp-approval-requests.test.ts:490`.
 - Spec: omp-runtime「omp 运行时源码模块划分」.
 
 ## Not yet specified
