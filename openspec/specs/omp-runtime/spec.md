@@ -559,3 +559,16 @@ omp v18.12.3 从会话 cwd 向上到最近含名为 `.git` 条目的祖先（文
 - **THEN** `get_state.systemPrompt` 不含前四个标记中的任何一个；`task` 工具的 agent 列表**仍含** `far`（标记封不住 agent 定义，残余如实钉住）；回合正常结束、没有报错帧、stderr 没有 git 相关噪音进入宿主记录
 - **WHEN** 同一布局但以测试专用 spawn 包装在宿主建出标记之后、起进程之前删掉 cwd 下的 `.git`（负向对照；产品没有不建标记的 spawn）
 - **THEN** `get_state.systemPrompt` 含 `<SANDBOX_ROOT>/u1/.omp/SYSTEM.md` 的标记
+
+### Requirement: overlay 固定块 advisor / ida 钉的真实 omp 回归
+宿主 overlay 固定块里的 `advisor.enabled: false` 与 `ida.enabled: false` 两段（「宿主 overlay」）SHALL 各有一条以钉住的官方 omp 二进制跑的回归用例与一条负对照（`server/test/omp-official-overlay-pins.test.ts`，`WORKBUDDY_OMP_TEST=1` 门下），负对照以去掉对应段的 overlay 变体经 `--config` 与 `PI_CONFIG_FILES` 两路换入，证明观测面可达；观测面以 v18.12.3 为基线：`ida` 是 discoverable 工具、不进 `get_state.dumpTools`，只在项目层 `ida.enabled: true` 且 `ida.installDir` 指向含平台命名库文件（darwin `libidalib.dylib`、linux `libidalib.so`、win32 `idalib.dll`）的目录时以 `xd://ida` 设备出现在 `get_state.systemPrompt`；`advisor` 没有 RPC 读回，只能按行为读——项目层 `advisor.enabled: true` 且 `modelRoles.advisor` 指向白名单模型时，一个 bash 回合的上游请求数与是否出现 `advisor_yielded` 帧。两条回归用例在当前固定块上先绿（对已有钉的特征断言），删去对应段时 SHALL 变红（变异核对记入实现 PR）。
+
+#### Scenario: advisor / ida 钉的回归与负对照
+- **WHEN** 官方 omp v18.12.3 以产品 overlay 启动，cwd 的 `.omp/config.yml` 写 `ida.enabled: true`、`ida.installDir: <cwd>/fake-ida`（目录内有一个空的平台命名库文件），并读取 `get_state`
+- **THEN** `systemPrompt` 的 `xd://` 设备列表含 `ast_edit`、不含 `ida`（`dumpTools` 不含 `ida` 恒成立——discoverable 工具——不作证据）
+- **WHEN** 同一配置，但 overlay 变体去掉了 `ida:\n  enabled: false` 两行
+- **THEN** 设备列表含 `ida`
+- **WHEN** 官方 omp v18.12.3 以产品 overlay 在 `write` 档启动，cwd 的 `.omp/config.yml` 写 `advisor.enabled: true`、`modelRoles.advisor: workbuddy/deepseek-v4.1-flash`，跑一个含 bash 调用的回合并放行审批，回合 `agent_end` 后每 500 ms 读一次假上游的请求数，计数保持不变满 2 s 视为稳定（30 s 内未稳定即失败）
+- **THEN** 请求数恰为 2，子进程 stdout 的全部帧（读到稳定为止）里没有 `advisor_yielded`
+- **WHEN** 同一配置，但 overlay 变体去掉了 `advisor:\n  enabled: false` 两行
+- **THEN** 请求数大于 2，且 stdout 帧里出现 `advisor_yielded`
