@@ -467,18 +467,17 @@ describe("fork over real fake-omp branch children (#466)", () => {
 
   it("G1 cap 2 holds across concurrent prompts, a regenerate and a fork", REAL, async () => {
     const world = worlds.track(await openCappedWorld(2, true));
-    const { app, db, supervisor } = world.fixture;
+    const { app, db } = world.fixture;
     const s3 = await createSession(app, world.cookie);
     const s4 = await createSession(app, world.cookie);
     const s2 = await createSession(app, world.cookie);
     seedDone(world, s3);
     const seeded = seedTwoTurns(world, {}, s4);
     const sessions = rowCounts(db).sessions;
-    const seen: number[] = [];
-    const capacity = (): "capacity" => {
-      seen.push(supervisor.liveProcessCount());
-      return "capacity";
-    };
+    // The live count is not read in the rejection callbacks (issue 1580): by the time a rejection
+    // reaches them the fork's temporary child may have exited and the regenerate child may have
+    // been retired, so the pool can be below the cap. The cap is proven by the spawn-time samples.
+    const capacity = (): "capacity" => "capacity";
 
     const prompts = [world.session, s2].map((session) =>
       sendPrompt(world, "hold", session).then((response) => {
@@ -504,7 +503,6 @@ describe("fork over real fake-omp branch children (#466)", () => {
     const outcomes = await Promise.all([...prompts, ...controls]);
 
     expect(outcomes.every((o) => o === "ok" || o === "capacity")).toBe(true);
-    expect(seen.every((count) => count === 2)).toBe(true);
     expectWithinCap(world.liveAtSpawn, 2);
     expect(rowCounts(db).sessions).toBe(sessions + (outcomes[3] === "ok" ? 1 : 0));
   });
