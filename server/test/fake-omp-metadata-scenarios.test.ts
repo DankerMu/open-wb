@@ -1,6 +1,6 @@
 /**
  * Issue #518 fake-omp `thinking` / `edit-write` scenarios (parent s1c-session-metadata-presentation 6.1).
- * 真实子进程：只看 stdout 帧与磁盘文件。`thinking` 发 omp v18.0.10 形状的 thinking_start/delta/end，
+ * 真实子进程：只看 stdout 帧与磁盘文件。`thinking` 发 omp v18.12.3 形状的 thinking_start/delta/end，
  * 旋钮 `--thinking-repeat <n>` 与 `--hold-after-thinking` 只作用于 `thinking`；`edit-write` 在
  * `<cwd>` 下真实写 `notes.md` 与 `out/report.html` 后才发各自的 tool_execution_end。
  * Issue #863 `todo` 场景（s1f-chat-surface 9a.3）：每回合一次 `todo` 工具调用，`details.phases` 为全量清单，

@@ -344,7 +344,8 @@ describe("message snapshot approvals over the real fake-omp approval flow", () =
   it("S8 a denied approval stays visible after the turn is done", REAL, async () => {
     const world = await open();
     const row = await pendingApproval(world);
-    // Issue 1474: answer after the bash step took the approval, so the 200 carries its stepId.
+    // Issue 1474: the bash step starts before its select (omp v18.12.3), and the select takes that
+    // step; answering after both have arrived means the 200 carries its stepId.
     await waitForEvent(world, "step.start");
 
     const answered = await settledAnswer(world, row.id, "deny");

@@ -25,14 +25,16 @@
 - **THEN** SQLite 拒绝该写入，既有行不变
 
 ### Requirement: 审批请求识别
-omp 子进程 SHALL 按 omp-runtime 的 spawn 契约以该会话的有效审批档位启动（`--approval-mode` 取 `always-ask`、`write` 或 `yolo`，session-permission-tier「档位与 omp 审批模式」）。下面的识别规则与档位无关，也与被请求确认的是哪个工具无关：`always-ask` 档下写文件类工具（`write`、`edit` 等）的确认请求与 `write` 档下 bash 的确认请求走同一条路径；`yolo` 档下 omp 若仍发出符合形状的请求，同样按审批处理。`OmpProcess` 收到 `extension_ui_request` 时 SHALL 分流：`method==="select"` 且 `options` 恰为 `["Approve","Deny"]`（顺序与内容精确）且 `title` 以 `Allow tool: ` 开头 → 视为审批请求向上抛出而不自动应答；其它任何 `extension_ui_request`（含 `confirm`/`input`/`editor`、options 不同的 `select`、title 不匹配的 `select`）SHALL 维持既有行为，立即以 `{type:"extension_ui_response",id,cancelled:true}` 回绝。工具名 SHALL 取 `title` 首行 `Allow tool: <name>` 的 `<name>`（去首尾空白），解析为空则记为 `unknown`，但仍走审批流。例外是浏览器调用（#912）：omp v18.0.10 的浏览器工具不在顶层，模型经 `write` 写虚拟路径 `xd://browser` 调用它，其审批 `title` 为 `Allow tool: write\nPath: xd://browser\nContent:\n<content>`（`<content>` 是浏览器参数 JSON，omp 按字段截到 2000 个 UTF-16 码元并加省略标记，截断后不是合法 JSON；omp 只在 `always-ask` 与 `write` 档对它请求审批）。`title` 以 `Allow tool: write\nPath: ` 开头、其后含 `\nContent:\n`，且两者之间的文本（第一处 `\nContent:\n` 之前的全部，路径本身含换行时也是）按 browser-runtime「浏览器操作的可读描述」判定为浏览器设备的路径时（与 omp 同一规则：`[xd://browser]`、`[xd://browser#ABCD]`、`XD://browser`、夹带制表符或换行的写法同样算），工具名 SHALL 记为 `browser`，`title` SHALL 改写：第一处 `\nContent:\n` 之后的全部文本按 browser-runtime「浏览器操作的可读描述」解析成功时，改写为该描述的摘要行与标志行，`action` 为 `run` 且参数带字符串 `code` 时再接 `代码：` 一行与 `code` 原文，参数无法确认时再接 `原文：` 一行与该处之后的原文，各段以 `\n` 相接；解析失败时改写为 `浏览器操作（参数过长，以下为原文）` 一行、`⚠ 参数被截断，无法确认是否启动外部程序或连接外部浏览器` 一行，再接该处之后的原文。改写在审批登记之前完成：`chat_approvals.tool`/`title`、`approval.request` 事件、与步骤的按名配对（工具步骤的登记名同为 `browser`，chat-stream「纯协议事件归约」）与审计 `detail.tool` 都只用改写后的值。其它任何审批的工具名与 `title` 不变。审批帧 SHALL 不进入 `applyFrame` 归约（归约器对其无事件、无状态变化）。
+omp 子进程 SHALL 按 omp-runtime 的 spawn 契约以该会话的有效审批档位启动（`--approval-mode` 取 `always-ask`、`write` 或 `yolo`，session-permission-tier「档位与 omp 审批模式」）。下面的识别规则与档位无关，也与被请求确认的是哪个工具无关：`always-ask` 档下写文件类工具（`write`、`edit` 等）的确认请求与 `write` 档下 bash、eval 的确认请求走同一条路径；`yolo` 档下 omp 若仍发出符合形状的请求，同样按审批处理。`OmpProcess` 收到 `extension_ui_request` 时 SHALL 分流（omp-runtime「RPC IO and child observation」）：`method==="select"`、`title` 以 `Allow tool: ` 开头、首行工具名不是 `browser`，且 `options` 恰为两种闭合形状之一——`["Approve","Deny"]`，或恰三项、首项 `Approve`、末项 `Deny`、中间一项匹配 `^Approve .+ for this session$`（omp v18.12.3 对被档位抬高的 bash / write / edit / eval / task 提示附带的「本会话内放行」选项，其中的名字是 omp 的策略键、不钉成工具名）→ 视为审批请求向上抛出而不自动应答，`tool` 与 `title` 都是原文；`title` 整体恰为 `Allow tool: browser`、或恰为 `Allow tool: browser\nReason: <不含换行的一行>`，且 `options` 恰为 `["Approve","Deny"]` 的 `select` 是浏览器 eval prelude 的卡，由进程自己立即应答 `Approve`、不作为审批（#1563，owner 2026-10-20；痕迹见 browser-runtime「浏览器调用审计」）——题目按整体匹配：omp v18.0.10 真 `browser` 工具的 `Allow tool: browser\nAction: …` 卡不是 prelude 卡，落入 cancel（omp-runtime「RPC IO and child observation」）；其它任何 `extension_ui_request`（含 `confirm`/`input`/`editor`、options 为其它形状的 `select`、title 不匹配的 `select`）SHALL 维持既有行为，立即以 `{type:"extension_ui_response",id,cancelled:true}` 回绝。工具名 SHALL 取 `title` 首行 `Allow tool: <name>` 的 `<name>`（去首尾空白），解析为空则记为 `unknown`，但仍走审批流。宿主作答 SHALL 只写 `Approve` 或 `Deny`，永远不写中间那一项：omp 的「本会话内放行」是其进程内存里的授权集合，宿主不向用户暴露它。`eval` 的审批 `title` 是 `Allow tool: eval\nLanguage: <语言>\nCode:\n<代码>`（omp 把代码截到 2000 个 UTF-16 码元后加省略标记，与 bash 的 `Command:` 同一规则），宿主 SHALL 原样登记与发布，不改写、不改名（owner 2026-10-20 Q4：用户在卡上看到的就是将要执行的代码）；v18.0.10 时代对 `write xd://browser` 的浏览器改写已删除（browser-runtime「浏览器操作的可读描述」REMOVED）。审批帧 SHALL 不进入 `applyFrame` 归约（归约器对其无事件、无状态变化）。
 
 #### Scenario: 识别为审批
-- **WHEN** fake-omp `approval` 脚本在 `message_end(toolUse)` 之后、bash 的 `tool_execution_start` 之前（与真 omp v18.0.10 实测一致）发 `extension_ui_request{id:"r1",method:"select",title:"Allow tool: bash\nCommand: echo workbuddy-smoke",options:["Approve","Deny"]}`
+- **WHEN** fake-omp `approval` 脚本在 `message_end(toolUse)` 与 bash 的 `tool_execution_start` 之后（与真 omp v18.12.3 实测一致）发 `extension_ui_request{id:"r1",method:"select",title:"Allow tool: bash\nCommand: echo workbuddy-smoke",options:["Approve","Approve bash for this session","Deny"]}`
 - **THEN** stdin 未收到 `cancelled` 应答；`OmpProcess` 的 owner 收到审批请求，`tool="bash"`，`title` 为原文
+- **WHEN** 同一 title 的 select 的 `options` 为 `["Approve","Deny"]`（工具自带的强制提示，如 bash 的 `Critical pattern detected`），或 `["Approve","Approve shell:echo for this session","Deny"]`
+- **THEN** 两者同样作为审批上抛，`tool="bash"`
 
 #### Scenario: 非审批 UI 请求仍回绝
-- **WHEN** 子进程发 `extension_ui_request{method:"confirm"}`、`{method:"input"}`、`{method:"select",options:["A","B"]}` 或 `{method:"select",title:"Pick one",options:["Approve","Deny"]}`
+- **WHEN** 子进程发 `extension_ui_request{method:"confirm"}`、`{method:"input"}`、`{method:"select",options:["A","B"]}`、`{method:"select",title:"Pick one",options:["Approve","Deny"]}`、`{method:"select",title:"Allow tool: bash",options:["Approve","Approve bash","Deny"]}`（中间项不含 `for this session`）或 `{method:"select",title:"Allow tool: bash",options:["Approve","Approve bash for this session","Deny","Other"]}`
 - **THEN** 每个都立即收到对应 id 的 `cancelled:true`，不向 owner 上抛审批请求
 
 #### Scenario: 工具名解析失败
@@ -40,35 +42,33 @@ omp 子进程 SHALL 按 omp-runtime 的 spawn 契约以该会话的有效审批�
 - **THEN** 仍作为审批请求上抛给 owner，`tool="unknown"`，不被自动回绝
 
 #### Scenario: 写文件工具的确认同样识别为审批
-- **WHEN** fake-omp `approval-write` 脚本（argv 含 `--approval-mode always-ask`）在 `message_end(toolUse)` 之后发 `extension_ui_request{id:"w1",method:"select",title:"Allow tool: write\nPath: workbuddy-report.html",options:["Approve","Deny"]}`
+- **WHEN** fake-omp `approval-write` 脚本（argv 含 `--approval-mode always-ask`）在 `message_end(toolUse)` 与 write 的 `tool_execution_start` 之后发 `extension_ui_request{id:"w1",method:"select",title:"Allow tool: write\nPath: workbuddy-report.html",options:["Approve","Approve write for this session","Deny"]}`
 - **THEN** stdin 未收到 `cancelled` 应答；`OmpProcess` 的 owner 收到审批请求，`tool="write"`，`title` 为原文；随后的登记、事件、作答、超时与审计与 bash 审批相同（`chat_approvals.tool="write"`，`session.approval` 的 `detail.tool="write"`）
 
 #### Scenario: 浏览器调用的审批改写为浏览器操作
-- **WHEN** 档位 `write` 的会话里依次收到三个审批请求，`title` 分别为 `Allow tool: write\nPath: xd://browser\nContent:\n{"action":"open","url":"https://example.com/a"}`、`Allow tool: write\nPath: xd://browser\nContent:\n{"action":"run","name":"main","code":"return await tab.screenshot()","app":{"cdp_url":"http://10.0.0.5:9222"}}`、`Allow tool: write\nPath: xd://browser\nContent:\n{"action":"run","code":"x[…5000ch elided…]"`（截断、不是合法 JSON）
-- **THEN** 三者都作为审批请求上抛，`tool="browser"`；`title` 依次恰为 `浏览器：打开 https://example.com/a`、`浏览器：在标签页 main 执行脚本\n⚠ 连接外部浏览器：http://10.0.0.5:9222\n代码：\nreturn await tab.screenshot()`、`浏览器操作（参数过长，以下为原文）\n⚠ 参数被截断，无法确认是否启动外部程序或连接外部浏览器\n{"action":"run","code":"x[…5000ch elided…]"`；`chat_approvals` 的 `tool`/`title` 与 `approval.request` 事件同为这些值，作答后 `session.approval` 审计的 `detail.tool="browser"`；随后同一调用的 `browser` 步骤与该审批配对
-- **WHEN** 审批 `title` 为 `Allow tool: write\nPath: xd://browser\nContent:\n{"action":"open","url":"https://a","app":{"relay":"yes"}}`
-- **THEN** `tool="browser"`，`title` 恰为 `浏览器：打开 https://a\n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n{"action":"open","url":"https://a","app":{"relay":"yes"}}`
-- **WHEN** 审批 `title` 为 `Allow tool: write\nPath: xd://browser\nContent:\n{"action":"run   ","code":"Bun.spawn(['id'])"}`
-- **THEN** `title` 恰为 `浏览器：run   \n⚠ 参数写法不规范，无法确认是否启动外部程序或连接外部浏览器\n原文：\n{"action":"run   ","code":"Bun.spawn(['id'])"}`（`action` 不是三个值之一：摘要行走「其它」分支、原样带三个空格；`代码：` 段只在 `action` 恰为 `run` 时出现，原文段让审批人看到代码）
-- **WHEN** 审批 `title` 的第二行分别为 `Path: [xd://browser]`、`Path: [xd://browser#0A1B]`、`Path: XD://browser`，以及路径为 `xd://browser` 后接一个换行（`Path: xd://browser` 与 `Content:` 之间多出一个空行），其余与第一例相同
-- **THEN** 四者都识别为 `browser`，`title` 与第一例相同
-- **WHEN** 审批 `title` 为 `Allow tool: write\nPath: notes/xd://browser`，或 `Allow tool: write\nPath: xd://browser2\nContent:\n{}`，或 `Allow tool: write\nPath: xd://Browser\nContent:\n{}`
-- **THEN** 三者都按普通 `write` 审批处理，`tool="write"`，`title` 为原文
+- **WHEN** 档位 `write` 的会话里收到 `title` 为 `Allow tool: eval\nLanguage: javascript\nCode:\nawait browser.open({ name: "main", url: "https://example.com/a" });` 的审批请求（`options` 为三项形状）；另一次收到 `title` 为 `Allow tool: write\nPath: xd://browser\nContent:\n{"action":"open","url":"https://example.com/a"}` 的两项审批（#1563 之前被改写成「浏览器：打开 …」的那种 title）
+- **THEN** （标题沿用 #1563 之前的规格以便归档保留该场景；它命名的行为被 #1563 反转）两者都不再改写为浏览器操作——`xd-browser.ts` 已删：前者作为审批上抛，`tool="eval"`，`title` 逐字为原文；`chat_approvals` 的 `tool`/`title` 与 `approval.request` 事件同为这些值，作答后 `session.approval` 审计的 `detail.tool="eval"`；作答 `allow` 时发给子进程的值恰为 `Approve`；后者 `tool="write"`、`title` 原文，没有 `浏览器：` 前缀与 ⚠ 行
 
 #### Scenario: 浏览器审批与浏览器步骤配对
-- **WHEN** 档位 `write` 的绑定会话一个回合里，omp 先发 `Path: xd://browser`、`Content:` 为 `{"action":"open","url":"https://a"}` 的审批并被允许，随后发同一调用的 `tool_execution_start`（`toolName:"write"`、`args.path` 为 `xd://browser`）；之后再发 `Path: notes.md` 的普通 `write` 审批、允许并开始该步骤
-- **THEN** 浏览器步骤登记名为 `browser`、其 `approvalId` 为那条浏览器审批的 id，ring 与 SSE 里它的 step.start 的 `data` 恰为 `{messageId, stepId, name:"browser", detail, bodyOffset, approvalId}` 六键、不带 `browser` 键；普通 `write` 步骤的 `approvalId` 为它自己那条审批的 id；回合结束时没有滞留的未配对审批
+- **WHEN** 上例 `eval` 的审批之后到达同一调用的 `tool_execution_start{toolName:"eval"}`（或反序），其间与之后子进程发出若干 `Allow tool: browser` 的 prelude 卡
+- **THEN** 该审批与该 `eval` 步骤按「确认与步骤配对」以名字 `eval` 配对（`step.start.approvalId` 或 `approval.request.stepId` 之一非 null，快照 `stepId` 为该步骤 id）；prelude 卡不进入未配对审批队列，也不改变配对结果
+
+#### Scenario: 浏览器 prelude 的卡不是审批
+- **WHEN** 一个已批准的 `eval` 步骤运行中，子进程发 `extension_ui_request{id:"p1",method:"select",title:"Allow tool: browser",options:["Approve","Deny"]}`
+- **THEN** 子进程立即收到 `{id:"p1",value:"Approve"}`；owner 没有收到审批请求，`chat_approvals` 没有新行，没有 `approval.request` 事件，没有 `session.approval` 审计；回合结束时没有滞留的未配对审批
+- **WHEN** 子进程发 `{id:"p2",method:"select",title:"Allow tool: browser\nAction: open\nTab: main\nURL: https://example.com",options:["Approve","Deny"]}`（omp v18.0.10 真 `browser` 工具的卡）
+- **THEN** 它收到 `{id:"p2",cancelled:true}`，不被自动放行、也不作为审批上抛
 
 ### Requirement: 审批事件
-supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 `approval.request{messageId, approvalId, tool, title, expiresAt, stepId}`（消费一个 seq；`stepId` 为发布时该审批已配上的步骤 id，没有为 `null`，见「确认与步骤配对」。omp 在工具执行里先推出 `tool_execution_start`、再发审批 select，但二者在 stdout 上的先后由 omp 的调度决定，不作保证（design D6 的 Context）：fake-omp 与目前观察到的真 omp v18.0.10 回合都是 select 先于 start、并行时各 select 均先于各 start，此时该事件位于对应 `step.start` 之前；本 spec 的其余要求与配对不依赖这一先后。start 不等作答，工具在作答后才执行，故该事件总在该步骤 `step.end` 之前）；每条审批结算后（该审批登记时所属的 generation 的 ring 尚未封口时，见停止与终态对挂起审批的结算；但该 Requirement 第 7 条「基础设施故障 retire」的结算除外，它 SHALL 不发布）SHALL 发布恰一个 `approval.resolved{messageId, approvalId, decision}`，`decision ∈ {allow,deny,timeout}`。同一回合可有多条审批同时挂起（omp 并行执行多个工具时各自下发 select），其 `approval.request`/`approval.resolved` 可与其它步骤的 `step.*`、`text.delta` 事件交错；每条审批事件 SHALL 只作用于自身 `approvalId`，后到的 `approval.request` SHALL 不覆盖先前审批。两类事件 SHALL 进入 ring 回放、SSE 扇出与 `Last-Event-ID` 语义与其它事件一致。
+supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 `approval.request{messageId, approvalId, tool, title, expiresAt, stepId}`（消费一个 seq；`stepId` 为发布时该审批已配上的步骤 id，没有为 `null`，见「确认与步骤配对」。omp 在工具执行里先推出 `tool_execution_start`、再发审批 select，但二者在 stdout 上的先后由 omp 的调度决定，不作保证（design D6 的 Context）：真 omp v18.12.3 与 fake-omp（#1563 组 7 起）都是 `tool_execution_start` 先于 select、并行时各 start 均先于各 select，此时该事件位于对应 `step.start` 之后、`stepId` 已为该步骤 id（v18.0.10 是相反的次序，配对规则对两种次序都成立）；本 spec 的其余要求与配对不依赖这一先后。start 不等作答，工具在作答后才执行，故该事件总在该步骤 `step.end` 之前）；每条审批结算后（该审批登记时所属的 generation 的 ring 尚未封口时，见停止与终态对挂起审批的结算；但该 Requirement 第 7 条「基础设施故障 retire」的结算除外，它 SHALL 不发布）SHALL 发布恰一个 `approval.resolved{messageId, approvalId, decision}`，`decision ∈ {allow,deny,timeout}`。同一回合可有多条审批同时挂起（omp 并行执行多个工具时各自下发 select），其 `approval.request`/`approval.resolved` 可与其它步骤的 `step.*`、`text.delta` 事件交错；每条审批事件 SHALL 只作用于自身 `approvalId`，后到的 `approval.request` SHALL 不覆盖先前审批。两类事件 SHALL 进入 ring 回放、SSE 扇出与 `Last-Event-ID` 语义与其它事件一致。
 
 #### Scenario: 事件序与回放
 - **WHEN** fake-omp `approval` 脚本（`--approval-mode write`）的审批请求于注入时钟 T 到达后用户 allow，回合继续到 `agent_end`
-- **THEN** 该回合 SSE 事件满足以下次序约束（不断言完整固定序列）：`turn.start` 为首个事件；`approval.request{…,expiresAt:T+60000}` 先于 `step.start(bash)`；`approval.request` 先于 `approval.resolved{decision:"allow"}`；`approval.resolved` 先于该步骤的 `step.end(done)`；以上全部先于恰一个 `turn.end(done)`，且它是该回合末个事件；`text.delta` 可出现在 `step.start` 之前与 `step.end` 之后（fake 在工具轮之前发出正文增量）；事件 id 严格单调；用户在 `step.start(bash)` 送达之后才作答时，`approval.request`、`step.start(bash)`、`approval.resolved` 的事件 id 连续；以 `approval.request` 的 id 作 `Last-Event-ID` 重连，回放首个事件为 `step.start(bash)`；以该 `step.start` 的 id 重连，回放首个事件为 `approval.resolved`
+- **THEN** 该回合 SSE 事件满足以下次序约束（不断言完整固定序列）：`turn.start` 为首个事件；`step.start(bash)` 先于 `approval.request{…,expiresAt:T+60000, stepId:<该步骤 id>}`；`approval.request` 先于 `approval.resolved{decision:"allow"}`；`approval.resolved` 先于该步骤的 `step.end(done)`；以上全部先于恰一个 `turn.end(done)`，且它是该回合末个事件；`text.delta` 可出现在 `step.start` 之前与 `step.end` 之后（fake 在工具轮之前发出正文增量）；事件 id 严格单调；用户在 `approval.request` 送达之后才作答时，`step.start(bash)`、`approval.request`、`approval.resolved` 的事件 id 连续；以 `step.start(bash)` 的 id 作 `Last-Event-ID` 重连，回放首个事件为 `approval.request`；以该 `approval.request` 的 id 重连，回放首个事件为 `approval.resolved`
 
 #### Scenario: 两条并行审批分别作答
 - **WHEN** fake-omp `approval-parallel` 脚本在同一回合对两个 bash 调用先后发 `extension_ui_request` `r1` 与 `r2`（均未应答），用户先对 `r2` 作答 deny、再对 `r1` 作答 allow
-- **THEN** 两个 `approval.request` 的 `approvalId` 不同且都保留，二者的 `stepId` 都为 `null`（select 先于 start，配对发生在 `step.start`）；fake-omp 先收到 `extension_ui_response{id:"r2",value:"Deny"}`、后收到 `{id:"r1",value:"Approve"}`，每个 id 恰一帧；发布两个 `approval.resolved`，分别携带各自 `approvalId` 与 `deny`/`allow`；`r2` 对应步骤 `failed`、`r1` 对应步骤 `done`
+- **THEN** 两个 `approval.request` 的 `approvalId` 不同且都保留，二者的 `stepId` 分别为各自步骤的 id（start 先于 select，配对发生在 pump 读到 select 时；两条 `step.start` 的 `approvalId` 为 `null`）；fake-omp 先收到 `extension_ui_response{id:"r2",value:"Deny"}`、后收到 `{id:"r1",value:"Approve"}`，每个 id 恰一帧；发布两个 `approval.resolved`，分别携带各自 `approvalId` 与 `deny`/`allow`；`r2` 对应步骤 `failed`、`r1` 对应步骤 `done`
 
 ### Requirement: 审批作答 REST
 `POST /api/sessions/:id/approvals/:approvalId` SHALL 只接受 `application/json` 且 body 恰为 `{decision:"allow"|"deny"}`，其 content-parser 错误由归属集映射为 400 `bad_request`；其它形态（缺键/多键/其它值）400。受 cookie guard 与 owner 校验：未认证 401；会话不存在/属他人、或 `approvalId` 不属于该会话的消息 SHALL 一律 404 `not_found`；未认证 401、会话 404 与非 canonical 正十进制整数 `approvalId` 的 404 SHALL 在 body 解析前返回，`approvalId` 不属于该会话的 404 SHALL 先于任何写入与发帧；均无写入。结算 SHALL 以 `decision IS NULL` 为条件的 CAS 执行，作答与超时、停止、崩溃/有界退回、优雅关停、启动对账共用这同一 CAS：`decision` 已非 NULL（已 allow/deny/timeout，同一审批第二次作答，或该消息所属进程已退出/回合已终态而被非作答路径结算为 `deny`）SHALL 409 `approval_settled`，无写入、不向 omp 发帧；并发作答时 CAS 的后到者 SHALL 409。CAS 命中时 SHALL 依序：在同一 SQLite 事务内写入 `decision`/`decided_at=now` 与审计行 → 向 omp 发 `{type:"extension_ui_response", id:<request_id>, value: decision==="allow" ? "Approve" : "Deny"}` → 取消该 `approvalId` 的超时计时器 → 发布 `approval.resolved` → 200，body 恰为已结算的审批对象 `{id, tool, title, requestedAt, expiresAt, decision, stepId}`（与快照 `approvals` 数组元素同形；`stepId` 为该行此刻的 `step_id`，见「确认与步骤配对」，作答本身从不写它）。`deny` 后 omp 对该工具产出 `tool_execution_end{isError:true}` 时，仅该步骤 `failed`，回合按既有规则可以 `done` 收尾。session supervisor 关停开始后到达结算端口的作答 SHALL 以 `agent_unavailable`（502）拒绝，无写入、不向 omp 发帧。`core/errors` SHALL 新增 `approval_settled`(409, `该审批已处理`)，响应 no-store。
@@ -164,7 +164,7 @@ supervisor SHALL 在审批行持久化之后、经既有 generation ring 发布 
 
 #### Scenario: 刷新后继续作答
 - **WHEN** 审批挂起时重新加载页面并请求 messages
-- **THEN** running assistant 消息 `approvals=[{id,tool:"bash",title,requestedAt,expiresAt,decision:null,stepId}]`（该 bash 步骤已开始时 `stepId` 为其 id，否则为 `null`），其它消息 `approvals:[]`；页面渲染审批条；此时作答 allow 返回 200 且回合继续
+- **THEN** running assistant 消息 `approvals=[{id,tool:"bash",title,requestedAt,expiresAt,decision:null,stepId}]`（该 bash 步骤已开始并配上时 `stepId` 为其 id（v18.12.3 与 fake-omp 先 start 后 select，配对在 pump 读到 select 时写入），否则为 `null`），其它消息 `approvals:[]`；页面渲染审批条；此时作答 allow 返回 200 且回合继续
 
 #### Scenario: 历史决定可见
 - **WHEN** 回合已 `done` 且审批曾以 deny 结算；一例该审批配上了步骤，另一例没有（`stepId` 为 `null`）
@@ -252,26 +252,30 @@ SessionSupervisor SHALL 在每个回合（一条助手消息）内维护两份�
 - **未配对审批队列**：尚未配上步骤的审批 select，每项 `{request_id, tool}`，按到达次序；
 - **未配对的运行中步骤**：已持久化 `step.start`、尚未配上审批、其 `step.end` 尚未持久化的步骤，每项 `{stepId, name}`，按开始次序。
 
-审批行由运行时在解析 select 帧时插入，可能早于 pump 处理在它之前到达的帧；配对 SHALL 只按上述两份状态（即 pump 次序），不按审批行的插入次序或 `id`。配对在一对同名的审批与步骤中**后到的一方**到达时发生，与二者谁先到无关（omp 不保证 select 与 `tool_execution_start` 在线上的先后，见「审批事件」）：
+审批行由运行时在解析 select 帧时插入，可能早于 pump 处理在它之前到达的帧；配对 SHALL 只按上述两份状态（即 pump 次序），不按审批行的插入次序或 `id`。配对在一对同名的审批与步骤中**后到的一方**到达时发生，与二者谁先到无关（omp 不保证 select 与 `tool_execution_start` 在线上的先后：v18.0.10 实测 select 在前，v18.12.3 实测 `tool_execution_start` 在前，见「审批事件」）：
 
 1. **步骤开始**：持久化一条 `step.start` 时（chat-stream「分段位置的记录与下发」），SHALL 从队列中取出第一个 `tool` 等于该步骤名的项（名字不同的项留在原位），并在插入步骤行的同一事务里执行 `UPDATE chat_approvals SET step_id = <新步骤 id> WHERE message_id = <本消息> AND request_id = <该项的 request_id> AND step_id IS NULL`；更新恰一行时，该行 `id` 即发布的 `step.start` 的 `approvalId`。队列里没有同名项、或更新零行时，`approvalId` 为 `null`，该步骤记入未配对的运行中步骤。
 2. **审批 select**：pump 读到一个被「审批请求识别」认作审批的帧、且此刻对该帧的 `approval.request` 发布会真正发出（该帧的审批登记仍在、其 request 尚未发布；作答、超时与终态结算发布 request 后会删除登记）时，若未配对的运行中步骤里有步骤名等于该审批 `tool` 的步骤，SHALL 取其中最早开始的一个，执行 `UPDATE chat_approvals SET step_id = <该步骤 id> WHERE message_id = <本消息> AND request_id = <该帧的 id> AND step_id IS NULL`，提交之后再发布该审批的 `approval.request`，其 `stepId` 为该步骤 id，并把该步骤移出未配对列表；更新零行时按没有可配的步骤处理。没有可配的步骤，或此刻对该帧不会再发布 `approval.request`（作答、超时或终态结算先于 pump 读到 select，结算路径已先发布它并删除登记，见「审批事件」），SHALL 把 `{request_id, tool}` 追加到队尾，发布的 `approval.request` 的 `stepId` 为 `null`。
 3. **步骤结束**：一条 `step.end` 持久化后，该步骤若仍在未配对列表里则移出；已结束的步骤不再配对。
 
-配对与该审批是否已作答无关：真 omp 的步骤开始不等作答，所以在步骤开始时配对的审批通常仍是 pending。实时视图从 `step.start` 的 `approvalId` 与 `approval.request` 的 `stepId` 两个方向得到同一个关联，与快照的 `stepId` 一致（chat-web「纯会话视图归约」）。
+配对与该审批是否已作答无关：真 omp 的步骤开始不等作答，所以在步骤开始时配对的审批通常仍是 pending。实时视图从 `step.start` 的 `approvalId` 与 `approval.request` 的 `stepId` 两个方向得到同一个关联，与快照的 `stepId` 一致（chat-web「纯会话视图归约」）。浏览器 prelude 的卡（「审批请求识别」）不进入任何一份状态。
 
 配对 SHALL 只写 `chat_approvals.step_id` 这一列：它 SHALL NOT 改变审批的 `decision`、`decided_at`、`expires_at`，不改变计时器、向子进程写的帧、`session.approval` 审计、`approval.resolved` 的发布与次序、`pendingApproval`、停止与终态对挂起审批的结算——这些仍只由本 spec 的其余要求决定；`approval.request` 只多出 `stepId` 一个字段，发布的时机与次序不变。步骤开始时的写入与步骤插入同属一个事务，失败时不发布该 `step.start`；审批 select 时的写入失败时不发布该 `approval.request`；二者都沿既有 owned error-sink 处理（回合按既有规则结束，仍挂起的审批按「停止与终态对挂起审批的结算」以 `deny` 结算）。已配对的行此后不再改配；没有配上的行保持 `step_id` 为 NULL。审批只与同一消息的步骤配对。
 
 **已知局限**（owner 2026-10-15 B3 的启发式本身）：只凭工具名配对。同一批并行调用里同名工具有的需要审批、有的不需要时（例如一个普通 `read` 与一个读 PDF 的 `read`），两种线上次序下审批都可能配给同一批里另一个同名步骤；另一种情形：被拒绝的调用若没有步骤（见下文「被拒绝的调用」），它的审批留在队列里，同一回合其后开始的同名步骤会按规则 1 把它配走。两种情形的后果都只是步骤卡上的标记落在另一张同名卡上，审批记录、审计与作答不受影响（design Risks）。
 
-被拒绝的调用：真 omp v18.0.10 对被拒绝的调用是否仍发出 `tool_execution_start` / `tool_execution_end`、以及 select 与 start 的线上先后，以官方二进制实测为准（design D6，结果记入设计与 PR）。两种结果都合法：发出时，被拒绝的审批照常与该步骤配对（该步骤以失败结束），web 在步骤卡上显示 `已拒绝`；不发出时，该审批没有可配的步骤，留在队列里：同一回合其后没有同名步骤开始时保持未配对，web 显示兜底记录（「web 审批条」）；其后若有同名步骤开始，按规则 1 被它配走（见已知局限）。
+被拒绝的调用：真 omp v18.12.3 先发 `tool_execution_start` 再发 select（实测），所以被拒绝的调用也有步骤：审批照常与该步骤配对（该步骤以失败结束，结果文本 `Tool call denied by user: <tool>`），web 在步骤卡上显示 `已拒绝`。假 omp 自 #1563 起同样先 start 后 select（omp-test-harness「假 omp 进程契约」）。
 
 #### Scenario: 同名工具按先进先出配对
-- **WHEN** fake-omp `approval-parallel` 回合依次发出两个 bash 审批 select（`r1`、`r2`）与两个 bash 的 `tool_execution_start`，owner 先拒绝 `r2`、再允许 `r1`
-- **THEN** 两条 `approval.request` 的 `stepId` 都为 `null`；第一条 `step.start` 的 `approvalId` 为 `r1` 行的 id、第二条为 `r2` 行的 id；两行 `step_id` 分别为两个步骤的 id；`r2` 对应的步骤以 `failed` 结束；两条审批的 `decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 事件与本 change 之前逐值相同
+- **WHEN** fake-omp `approval-parallel` 回合依次发出两个 bash 的 `tool_execution_start` 与两个 bash 审批 select（`r1`、`r2`），owner 先拒绝 `r2`、再允许 `r1`
+- **THEN** 两条 `step.start` 的 `approvalId` 都为 `null`（start 先到，队列为空）；第一条 `approval.request` 的 `stepId` 为第一个步骤的 id、第二条为第二个步骤的 id；两行 `step_id` 分别为两个步骤的 id；`r2` 对应的步骤以 `failed` 结束；两条审批的 `decision`、`decided_at`、审计行、发给子进程的帧与 `approval.resolved` 事件与本 change 之前逐值相同
+
+#### Scenario: 审批 select 先于步骤到达
+- **WHEN** 一段 stdout 先是某调用的审批 select、后是它的 `tool_execution_start(bash)`（v18.0.10 的次序，配对规则对两种次序都成立），随后 owner 允许
+- **THEN** 该 `approval.request` 的 `stepId` 为 `null`；该 `step.start` 的 `approvalId` 为审批行的 id，该行 `step_id` 为该步骤 id；回合结束后的快照里该审批的 `stepId` 与之相同
 
 #### Scenario: 步骤先于审批 select 到达
-- **WHEN** 一段 stdout 先是 `tool_execution_start(bash)`、后是该调用的审批 select，运行时在 pump 处理该 start 之前已插入审批行；随后 owner 允许
+- **WHEN** 一段 stdout 先是 `tool_execution_start(bash)`、后是该调用的审批 select（v18.12.3 的次序），运行时在 pump 处理该 start 之前已插入审批行；随后 owner 允许
 - **THEN** 该 `step.start` 的 `approvalId` 为 `null`（审批行已在库里，但 pump 尚未读到其 select）；pump 读到 select 后该审批行的 `step_id` 为该步骤 id，随后发布的 `approval.request` 的 `stepId` 为该步骤 id；回合结束后的快照里该审批的 `stepId` 与之相同；审批的 `decision`、`decided_at`、审计行与发给子进程的帧与本 change 之前逐值相同
 
 #### Scenario: 已结束的步骤不再配对

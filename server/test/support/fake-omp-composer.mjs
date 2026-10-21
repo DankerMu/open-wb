@@ -2,6 +2,7 @@
  * fake-omp 工具调用帧的纯构建部分（#997 自 fake-omp.mjs 原样搬出）：固定 bash 调用常量、
  * `tool_execution_start` / `tool_execution_end` 帧构建。S1g 的纯构建（#998）：`approval-write` 的 write
  * 调用与审批 select、`get_state` 的 data、`set_model` / `set_thinking_level` 的应答与两个失败取值的判定。
+ * 审批作答的放行判定（`approves`：哪个 select 应答放行这次调用）也在这里。
  * 无模块级可变状态、不发帧、不写文件；不导入 fake-omp.mjs 或其它 fake-omp-* 模块。
  * 「最近一次成功应用的模型与强度」由 fake-omp.mjs 持有，这里只返回帧数据与要并入的 patch。
  */
@@ -21,7 +22,10 @@ export const WRITE_CALL = {
   args: { path: "workbuddy-report.html", content: "<!doctype html>\n<h1>workbuddy-smoke</h1>\n" },
 };
 export const WRITE_SELECT_ID = "w1";
-/** 文档化的失败取值。真实 omp v18.0.10 从不拒绝强度：`workbuddy-bad-level` 只是给宿主失败路径用的夹具装置。 */
+/**
+ * 文档化的失败取值。真实 omp v18.0.10 从不拒绝强度；v18.12.3 同（omp-official-model-commands.test.ts
+ * 在翻转后仍绿）：`workbuddy-bad-level` 只是给宿主失败路径用的夹具装置。
+ */
 const MISSING_MODEL = "workbuddy-missing-model";
 const BAD_LEVEL = "workbuddy-bad-level";
 
@@ -61,7 +65,7 @@ export function approves(frame, call) {
 
 /**
  * `set_model` / `set_thinking_level` 的应答与成功时要并入状态的 patch（失败为 `{}`，不改任何状态）。
- * 形状同 omp v18.0.10：set_model 成功带 data `{provider, id}`，set_thinking_level 成功无 data。
+ * 形状同 omp v18.12.3：set_model 成功带 data `{provider, id}`，set_thinking_level 成功无 data。
  */
 export function commandAnswer(frame) {
   const head = { id: frame.id, type: "response", command: frame.type };

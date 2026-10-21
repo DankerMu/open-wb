@@ -2,11 +2,12 @@
  * OMP_STATE_DIR managed layout (issue #706, ADR-0010): the single source of every path under the
  * state dir and of their permission bits. Managed configuration (`home/.omp/agent`: `models.yml`,
  * `host-overlay.yml`, operator-installed `skills/`) is owned by the app uid and read-only for the
- * omp uid; omp's own runtime state goes to `xdg/{data,state,cache}/omp`, which omp v18.0.10 uses
+ * omp uid; omp's own runtime state goes to `xdg/{data,state,cache}/omp`, which omp v18.12.3 uses
  * only when its agent dir is the default one (`$HOME/.omp/agent`; `PI_CODING_AGENT_DIR` is set to
  * that very string) and the directory already exists
- * (`resource/oh-my-pi/packages/utils/src/dirs.ts`), so the host creates all three. `home/.env`,
- * which omp loads at startup, is pre-created and owned by the app uid (issue #802).
+ * (`resource/oh-my-pi/packages/utils/src/dirs.ts` (v18.0.10 源码位置；18.12.3 同义)), so the host
+ * creates all three. `home/.env`, which omp loads at startup, is pre-created and owned by the app
+ * uid (issue #802).
  */
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";

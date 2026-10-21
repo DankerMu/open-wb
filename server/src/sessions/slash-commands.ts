@@ -7,7 +7,7 @@
  * `toWireText` prefixes one U+0020 to plain text so omp's `startsWith("/")` gate is false. That
  * stops builtins and templates only: omp's skill dispatch `trimStart()`s first
  * (`extensibility/skills.ts:455`), so a `/skill:<name>` omp knows but the host does not list runs.
- * `listSkills` reads `<agentDir>/skills/<entry>/SKILL.md` the way omp v18.0.10 discovers user-level
+ * `listSkills` reads `<agentDir>/skills/<entry>/SKILL.md` the way omp v18.12.3 discovers user-level
  * skills (`discovery/helpers.ts` scanSkillsFromDir), with a line-based frontmatter reader instead
  * of a YAML library: a skill it cannot read is left out and its `/skill:` stays plain text.
  * Host restrictions omp does not have (#706): a link is followed only inside `skills/`, and only
@@ -127,7 +127,7 @@ export function listSkills(agentDir: string): Skill[] {
  * The project skills of a session cwd: `<D>/.omp/skills` for every `D` of the walk of
  * `projectDirs`. Each directory is read by the rules of `listSkills` plus the three of
  * `readProjectDir`; a description is cut to `MAX_PROJECT_DESCRIPTION` code points. A name found
- * in a nearer `D` hides the same name farther up (omp v18.0.10: nearest project skill wins).
+ * in a nearer `D` hides the same name farther up (omp v18.12.3: nearest project skill wins).
  * Sorted by name, recomputed on every call, never throws: a failure for one `D` yields nothing
  * for that `D`.
  */

@@ -1,6 +1,6 @@
 /**
  * Issue #95 rpc chunk envelope integrity at the public OmpProcess boundary.
- * Independent literals from frozen rpc.md v18.0.10 — not production code.
+ * Independent literals from frozen rpc.md v18.12.3 — not production code.
  */
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";

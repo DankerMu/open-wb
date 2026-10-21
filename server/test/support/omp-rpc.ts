@@ -423,7 +423,7 @@ export class FakeChild {
       handshake.afterState?.();
     });
     // The two alignment commands a dispatch sends ahead of its prompt (#1010), answered as omp
-    // v18.0.10 does: the model object for `set_model`, no data for `set_thinking_level`.
+    // v18.12.3 does: the model object for `set_model`, no data for `set_thinking_level`.
     this.onCommand("set_model", (frame) => {
       const data = { provider: frame.provider, id: frame.modelId };
       this.emitLine({ id: frame.id, type: "response", command: "set_model", success: true, data });

@@ -3,8 +3,9 @@
  * `--thinking-repeat` 取值校验；S1f 任务清单场景 `todo`（#863）的三组 args/details 常量及按回合序号的选取。
  * 无模块级可变状态、不发帧、不写文件；只依赖 node: 内建，
  * 绝不导入 fake-omp.mjs（它有 argv/ready/stdin 模块级副作用）或 fake-omp-proxy.mjs。
- * 形状对照 omp v18.0.10：ai/src/types.ts:1294-1296（thinking 事件）、coding-agent/src/edit/renderer.ts
- * （EditToolDetails.path/diff）、edit/diff.ts:54-56（`+N|`/`-N|`/` N|` 行格式）、tools/write.ts:314-324
+ * 形状对照 omp v18.12.3 (v18.0.10 源码位置；18.12.3 同义)：ai/src/types.ts:1294-1296（thinking 事件）、
+ * coding-agent/src/edit/renderer.ts（EditToolDetails.path/diff）、edit/diff.ts:54-56
+ * （`+N|`/`-N|`/` N|` 行格式）、tools/write.ts:314-324
  * （WriteToolDetails.resolvedPath，无 diff）；`todo` 工具结果的
  * `details` 为 `{op, phases:[{name, tasks:[{content, status, blocker?}]}], storage, completedTasks?}`，`phases` 是全量。
  */

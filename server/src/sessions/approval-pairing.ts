@@ -4,9 +4,10 @@
  * both in the order the pump reads frames: approvals not yet paired `{requestId, tool}` and running
  * steps not yet paired `{stepId, name}`. A same-name approval and step pair when the later of the
  * two arrives, whichever that is: omp does not order a select against its `tool_execution_start`
- * on stdout (读代码推出, design Context; official v18.0.10 runs showed select first, 实测), and the
- * runtime inserts an approval row before the pump reads the frames ahead of its select (读代码推出),
- * so the database's unpaired rows are never consulted. Only `chat_approvals.step_id` is written; no
+ * on stdout (读代码推出, design Context; official v18.0.10 runs showed select first, 实测; official
+ * v18.12.3 runs show the start first, omp-official-approval-pairing.test.ts), and the runtime
+ * inserts an approval row before the pump reads the frames ahead of its select (读代码推出), so
+ * the database's unpaired rows are never consulted. Only `chat_approvals.step_id` is written; no
  * decision, timer, frame, audit or event depends on it.
  */
 import type { OmpFrame } from "./omp/frame.js";

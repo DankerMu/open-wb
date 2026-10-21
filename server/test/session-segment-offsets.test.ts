@@ -87,6 +87,8 @@ describe("chat-stream「步骤的正文偏移」at the database layer", () => {
           "stepId",
         ]);
       }
+      // Answer only after the pump read both selects, or the answer path publishes stepId null.
+      await waitForEvent(world, "approval.request", 2);
       await world.fixture.supervisor.decide(world.session, r2.id, "deny");
       await world.fixture.supervisor.decide(world.session, r1.id, "allow");
       await waitForTurn(world.fixture, world.session, "done");
