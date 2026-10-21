@@ -261,6 +261,34 @@ export function deferredReceipt(): ReceiptWaiter {
   return { promise, resolve, reject };
 }
 
+export function rejectPendingReceipts(pending: Set<Turn>, error: Error): void {
+  for (const turn of [...pending]) {
+    rejectReceipt(pending, turn, error);
+  }
+}
+
+export function resolveReceipt(
+  pending: Set<Turn>,
+  turn: Turn,
+  receipt: PromptDispatchReceipt,
+): void {
+  if (turn.receiptSettled) {
+    return;
+  }
+  turn.receiptSettled = true;
+  pending.delete(turn);
+  turn.dispatched.resolve(receipt);
+}
+
+export function rejectReceipt(pending: Set<Turn>, turn: Turn, error: Error): void {
+  if (turn.receiptSettled) {
+    return;
+  }
+  turn.receiptSettled = true;
+  pending.delete(turn);
+  turn.dispatched.reject(error);
+}
+
 /**
  * The turn has started once its `agent_start` or its local-only outcome reached the runtime; the
  * deferred `abort` (#650) is written then. omp v18.0.10 dropped a prompt still pre-processing when

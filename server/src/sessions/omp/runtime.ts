@@ -22,10 +22,12 @@ import {
   isTurnStart,
   KILL_GRACE_MS,
   liveChild,
-  localSignal,
   nonempty,
   openDeferredAbort,
   type RuntimeCommandFrame,
+  rejectPendingReceipts,
+  rejectReceipt,
+  resolveReceipt,
   signalLive,
   stateSessionFile,
   TERM_GRACE_MS,
@@ -34,7 +36,7 @@ import {
   watchHeldPipe,
 } from "./commands.js";
 import type { OmpFrame } from "./frame.js";
-import { decideLocalCompletion, LOCAL_COMMAND_GRACE_MS, type LocalState } from "./local-command.js";
+import { LocalCompletionWait } from "./local-wait.js";
 import {
   AgentUnavailableError,
   type OmpExit,
@@ -93,13 +95,6 @@ export class SessionBusyError extends Error {
   }
 }
 
-/** A turn waiting for a late `command_output` after its local-only outcome (design D15). */
-interface LocalWait {
-  turn: Turn;
-  since: number;
-  timer: unknown;
-}
-
 const systemClock: SessionClock = {
   now: () => Date.now(),
   setTimeout: (callback, ms) => setTimeout(callback, ms),
@@ -133,7 +128,7 @@ export class SessionRuntime {
   #generation: Generation | undefined;
   #issuedGenId: number | undefined;
   #turn: Turn | undefined;
-  #localWait: LocalWait | undefined;
+  readonly #localWait: LocalCompletionWait;
   #pendingReceipts = new Set<Turn>();
   #nextGen = 0;
   #nextRequest = 0;
@@ -155,6 +150,11 @@ export class SessionRuntime {
     this.#tokens = opts.tokens;
     this.#idleMs = opts.idleMs ?? DEFAULT_IDLE_MS;
     this.#clock = opts.clock ?? systemClock;
+    this.#localWait = new LocalCompletionWait(
+      this.#clock,
+      () => this.#turn,
+      (turn) => this.#completeTurn(turn),
+    );
     this.#userSpawn = opts.spawnImpl ?? (spawn as SpawnImpl);
     this.#onExit = opts.onExit;
     this.#onApproval = opts.onApproval;
@@ -211,7 +211,7 @@ export class SessionRuntime {
     this.#cancelQueued?.();
     this.#clearIdle();
     this.#failActiveTurn(new AgentUnavailableError("runtime shutdown"));
-    this.#rejectPendingReceipts(new AgentUnavailableError("runtime shutdown"));
+    rejectPendingReceipts(this.#pendingReceipts, new AgentUnavailableError("runtime shutdown"));
     const gen = this.#generation;
     if (gen === undefined) {
       return this.#retired;
@@ -311,7 +311,7 @@ export class SessionRuntime {
       }
       turn.sent = true;
       await gen.proc.send({ id: turn.requestId, type: "prompt", message: text });
-      this.#resolveReceipt(turn, { requestId: turn.requestId, sessionFile });
+      resolveReceipt(this.#pendingReceipts, turn, { requestId: turn.requestId, sessionFile });
     } catch (error) {
       const sanitized = sanitizeError(error);
       if (this.#turn === turn) {
@@ -321,7 +321,7 @@ export class SessionRuntime {
           void this.#retire(gen);
         }
       } else {
-        this.#rejectReceipt(turn, sanitized);
+        rejectReceipt(this.#pendingReceipts, turn, sanitized);
       }
     }
   }
@@ -512,59 +512,12 @@ export class SessionRuntime {
       void this.#retire(gen);
       return;
     }
-    this.#onLocalFrame(turn, frame);
+    this.#localWait.onFrame(turn, frame);
     if (!turn.started && isTurnStart(frame, turn.requestId)) {
-      // After #onLocalFrame: a start frame that also ended the turn rejects instead (#650).
+      // After #localWait.onFrame: a start frame that also ended the turn rejects instead (#650).
       turn.started = true;
       const open = this.#turn === turn && canAbort(gen, turn);
       openDeferredAbort(turn, open ? () => this.#writeAbort(gen) : undefined);
-    }
-  }
-
-  /** Local-only completion: a `/` turn without output waits for it or for the grace. */
-  #onLocalFrame(turn: Turn, frame: OmpFrame): void {
-    const decision = decideLocalCompletion(
-      this.#localState(turn, 0),
-      localSignal(frame, turn.requestId),
-    );
-    if (frame.type === "command_output") {
-      turn.commandOutputSeen = true;
-    }
-    if (decision === "complete") {
-      this.#completeTurn(turn);
-    } else if (decision === "await") {
-      this.#awaitOutput(turn);
-    }
-  }
-
-  #awaitOutput(turn: Turn): void {
-    const wait: LocalWait = { turn, since: this.#clock.now(), timer: undefined };
-    const tick = (): void => {
-      if (this.#localWait !== wait || this.#turn !== turn) {
-        return;
-      }
-      const elapsedMs = this.#clock.now() - wait.since;
-      if (decideLocalCompletion(this.#localState(turn, elapsedMs), "grace-tick") === "complete") {
-        this.#completeTurn(turn);
-        return;
-      }
-      // Wall clock behind the timer (rounding, rollback): re-arm and replace the handle.
-      wait.timer = this.#clock.setTimeout(tick, Math.max(1, LOCAL_COMMAND_GRACE_MS - elapsedMs));
-    };
-    this.#localWait = wait;
-    wait.timer = this.#clock.setTimeout(tick, LOCAL_COMMAND_GRACE_MS);
-  }
-
-  #localState(turn: Turn, elapsedMs: number): LocalState {
-    const awaiting = this.#localWait?.turn === turn;
-    return { slashText: turn.slashText, outputSeen: turn.commandOutputSeen, awaiting, elapsedMs };
-  }
-
-  #clearLocalWait(): void {
-    const wait = this.#localWait;
-    if (wait !== undefined) {
-      this.#localWait = undefined;
-      this.#clock.clearTimeout(wait.timer);
     }
   }
 
@@ -626,7 +579,7 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
-    this.#clearLocalWait();
+    this.#localWait.clear();
     dropDeferredAbort(turn);
     turn.stream.end();
   }
@@ -636,9 +589,9 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
-    this.#clearLocalWait();
+    this.#localWait.clear();
     dropDeferredAbort(turn);
-    this.#rejectReceipt(turn, error);
+    rejectReceipt(this.#pendingReceipts, turn, error);
     turn.stream.fail(error);
   }
 
@@ -654,42 +607,17 @@ export class SessionRuntime {
       return;
     }
     this.#turn = undefined;
-    this.#clearLocalWait();
+    this.#localWait.clear();
     dropDeferredAbort(turn);
-    this.#rejectReceipt(turn, new AgentUnavailableError("runtime shutdown"));
+    rejectReceipt(this.#pendingReceipts, turn, new AgentUnavailableError("runtime shutdown"));
     const gen = this.#generation;
     if (gen !== undefined && (turn.sent || !gen.acquired)) {
       void this.#retire(gen);
     }
   }
 
-  #rejectPendingReceipts(error: Error): void {
-    for (const turn of [...this.#pendingReceipts]) {
-      this.#rejectReceipt(turn, error);
-    }
-  }
-
-  #resolveReceipt(turn: Turn, receipt: PromptDispatchReceipt): void {
-    if (turn.receiptSettled) {
-      return;
-    }
-    turn.receiptSettled = true;
-    this.#pendingReceipts.delete(turn);
-    turn.dispatched.resolve(receipt);
-  }
-
-  #rejectReceipt(turn: Turn, error: Error): void {
-    if (turn.receiptSettled) {
-      return;
-    }
-    turn.receiptSettled = true;
-    this.#pendingReceipts.delete(turn);
-    turn.dispatched.reject(error);
-  }
   #retire(gen: Generation): Promise<void> {
-    if (this.#localWait?.turn.genId === gen.id) {
-      this.#clearLocalWait();
-    }
+    this.#localWait.clearFor(gen.id);
     this.#dropDeferred(gen);
     gen.retiring ??= this.#runRetire(gen);
     if (this.#generation === gen) {
