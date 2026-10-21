@@ -289,7 +289,7 @@ printf '%s\n' "$preflight"
 printf '%s\n' "$preflight" | grep -Fx "HOME=${proof_home}" >/dev/null || { echo "preflight HOME preservation failed" >&2; primary_rc=1; exit 1; }
 honor_cancel
 export TMPDIR="$uid_tmp"
-run_phase test sg workbuddy -c 'umask 007; cd "${GITHUB_WORKSPACE}/server" && WORKBUDDY_UID_TEST=1 OMP_USER=omp ../node_modules/.bin/vitest run test/linux/uid-isolation.test.ts --coverage=false && WORKBUDDY_OMP_TEST=1 ../node_modules/.bin/vitest run test/omp-official-skills.test.ts test/omp-official-project-config.test.ts test/omp-official-approval-modes.test.ts test/omp-official-model-commands.test.ts test/omp-official-upstream-failure.test.ts test/omp-official-delta-coalescing.test.ts test/omp-official-approval-pairing.test.ts test/omp-official-max-tokens.test.ts test/omp-official-browser.test.ts test/omp-official-rpc-ui.test.ts test/omp-official-overlay-pins.test.ts --coverage=false'
+run_phase test sg workbuddy -c 'umask 007; cd "${GITHUB_WORKSPACE}/server" && WORKBUDDY_UID_TEST=1 OMP_USER=omp ../node_modules/.bin/vitest run test/linux/uid-isolation.test.ts --coverage=false && WORKBUDDY_OMP_TEST=1 ../node_modules/.bin/vitest run test/omp-official-skills.test.ts test/omp-official-project-config.test.ts test/omp-official-approval-modes.test.ts test/omp-official-model-commands.test.ts test/omp-official-upstream-failure.test.ts test/omp-official-delta-coalescing.test.ts test/omp-official-approval-pairing.test.ts test/omp-official-max-tokens.test.ts test/omp-official-browser.test.ts test/omp-official-rpc-ui.test.ts test/omp-official-overlay-pins.test.ts test/omp-official-stop-early.test.ts --coverage=false'
 honor_cancel
 reap_owned
 [ "$cleanup_rc" -eq 0 ] || exit 1

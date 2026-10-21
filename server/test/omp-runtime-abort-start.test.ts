@@ -1,12 +1,13 @@
 /**
  * Issue #650 SessionRuntime `abort()` only after the turn started (change stop-after-agent-start,
- * design R1–R7). omp v18.0.10 silently drops a prompt still pre-processing when `abort` arrives
- * before its `agent_start` (#495), so between the dispatch receipt and the start `abort()` defers:
- * the one frame is written as the start frame (`agent_start` or the local-only outcome) reaches the
- * runtime, and the Promise rejects with AgentUnavailableError, writing nothing, when the turn ends,
- * fails or is abandoned first. Real fake-omp children only (`--start-delay-ms` holds the start
- * open); oracles are a stdin tap that snapshots the child's stdout at each write, the iterator, the
- * abort Promise and Node's own exit.
+ * design R1–R7). The window measured on omp v18.0.10, modelled by fake-omp (the v18.12.3
+ * real-binary measurement is omp-official-stop-early.test.ts): omp silently drops a prompt still
+ * pre-processing when `abort` arrives before its `agent_start` (#495), so between the dispatch
+ * receipt and the start `abort()` defers: the one frame is written as the start frame
+ * (`agent_start` or the local-only outcome) reaches the runtime, and the Promise rejects with
+ * AgentUnavailableError, writing nothing, when the turn ends, fails or is abandoned first. Real
+ * fake-omp children only (`--start-delay-ms` holds the start open); oracles are a stdin tap that
+ * snapshots the child's stdout at each write, the iterator, the abort Promise and Node's own exit.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { setTimeout as waitTimeout } from "node:timers/promises";

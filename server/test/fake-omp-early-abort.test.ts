@@ -1,10 +1,12 @@
 /**
- * Issue #650 fake-omp `--start-delay-ms` (change stop-after-agent-start, design F1–F3). omp v18.0.10
- * (#495, parent design Open Question 2 (c)): an `abort` read after the prompt ack but before the
- * turn's `agent_start` makes the still pre-processing prompt bail — the abort is answered success
- * and the turn never emits a frame. `abort-ok`/`slow-ready` model that window with the knob; with
- * the abort after `agent_start` the held turn is unchanged. Real child processes observed only
- * through fake-omp-helpers.ts; timing asserts lower bounds only. Expected frames are literals.
+ * Issue #650 fake-omp `--start-delay-ms` (change stop-after-agent-start, design F1–F3). The window
+ * measured on omp v18.0.10, modelled by fake-omp (#495, parent design Open Question 2 (c); the
+ * v18.12.3 real-binary measurement is omp-official-stop-early.test.ts): an `abort` read after the
+ * prompt ack but before the turn's `agent_start` makes the still pre-processing prompt bail — the
+ * abort is answered success and the turn never emits a frame. `abort-ok`/`slow-ready` model that
+ * window with the knob; with the abort after `agent_start` the held turn is unchanged. Real child
+ * processes observed only through fake-omp-helpers.ts; timing asserts lower bounds only. Expected
+ * frames are literals.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";

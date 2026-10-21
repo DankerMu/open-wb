@@ -1,8 +1,9 @@
 /**
  * Issue #650 stop right after dispatch (change stop-after-agent-start, design S1–S3; turn-control
  * Scenarios「派发后极早停止」and「回合迟迟不开始时仍有界收尾」). The fake's `--start-delay-ms`
- * opens the window between the prompt ack and `agent_start` in which real omp v18.0.10 drops the
- * whole turn on an `abort`. Both stop branches (dispatched: `TurnStops.#run`; intent:
+ * opens the window between the prompt ack and `agent_start` in which omp v18.0.10 dropped the
+ * whole turn on an `abort` (the window measured on v18.0.10, modelled by fake-omp; the v18.12.3
+ * real-binary measurement is omp-official-stop-early.test.ts). Both stop branches (dispatched: `TurnStops.#run`; intent:
  * `dispatched()`) must end the turn through the ordinary aborted reduction without the grace; a
  * turn that never starts still ends by the bounded fallback, with no frame and nothing unhandled.
  * Real fake-omp children, real SQLite, the production assembly and the injected clock.

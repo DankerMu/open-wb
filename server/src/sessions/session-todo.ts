@@ -1,8 +1,10 @@
 /**
  * Issue #863 pure task-list normalisation for the omp `todo` tool's `result.details.phases`
  * (omp v18.12.3: `{op, phases:[{name, tasks:[{content, status, blocker?}]}], storage, completedTasks?}`,
- * `phases` is the complete list). No IO, no logging: persistence, de-duplication and the warn for
- * a rejected candidate belong to the supervisor's ordered persistence path.
+ * `phases` is the complete list; v18.12.3 `TodoItem` also declares optional `details?` / `notes?`,
+ * which the tool result does not carry (`cloneTask`) and the host does not read). No IO, no
+ * logging: persistence, de-duplication and the warn for a rejected candidate belong to the
+ * supervisor's ordered persistence path.
  */
 import { truncateCodepoints } from "./events.js";
 import { asPlain, own } from "./file-changes.js";
