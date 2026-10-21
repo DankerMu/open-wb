@@ -86,8 +86,12 @@ const MAX_PROJECT_DIR_ENTRIES = 4096;
 const MAX_PROJECT_DESCRIPTION = 200;
 const PROJECT_SKILLS = "/.omp/skills";
 const SLASH = 0x2f;
-/** Host rule (omp validates nothing): `/skill:<name>` ends at the first U+0020, `/` is a path. */
-const SKILL_NAME = /^[^\s/]+$/;
+/**
+ * omp v18.12.3 skips a name (given or defaulted from the directory) containing `/` or `\`
+ * (`can1357/oh-my-pi` tag `v18.12.3`, `discovery/helpers.ts:494-499`); whitespace is a host rule
+ * (the name of `/skill:<name>` ends at the first U+0020).
+ */
+const SKILL_NAME = /^[^\s/\\]+$/;
 const TOP_LEVEL_KEY = /^(name|description|enabled):(.*)$/;
 const BLOCK_SCALAR = /^[>|][+-]?$/;
 const QUOTED = /^(["'])(.*)\1$/;

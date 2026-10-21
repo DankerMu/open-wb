@@ -204,6 +204,9 @@ describe("listSkills", () => {
     writeSkill(skillsDir, "nodesc", skillFile(["name: nodesc"]));
     writeSkill(skillsDir, "off", skillFile(["description: y", "enabled: false"]));
     writeSkill(skillsDir, "bad name", skillFile(["name: has space", "description: z"]));
+    // Issue #1587: omp v18.12.3 skips a name, given or defaulted from the directory, containing `\`.
+    writeSkill(skillsDir, "back", skillFile(["name: a\\b", "description: w"]));
+    writeSkill(skillsDir, "c\\d", skillFile(["description: v"]));
     writeSkill(skillsDir, ".hidden", skillFile(["name: hidden", "description: h"]));
     mkdirSync(join(skillsDir, "empty"));
     writeSkill(skillsDir, "folded", skillFile(["description: >", "  第一行", "  第二行"]));
@@ -212,11 +215,13 @@ describe("listSkills", () => {
     symlinkSync(join(elsewhere, "target"), join(skillsDir, "linked"), "dir");
     writeSkill(skillsDir, "zz-copy", skillFile(["name: weekly-report", "description: other"]));
 
-    expect(listSkills(agentDir)).toEqual([
+    const list = listSkills(agentDir);
+    expect.soft(list).toEqual([
       { name: "folded", description: "第一行 第二行" },
       { name: "noname", description: "x" },
       { name: "weekly-report", description: "写周报" },
     ]);
+    expect(classifyPrompt("/skill:a\\b x", list)).toEqual({ kind: "text" });
   });
 
   it("returns [] when the skills path does not exist", () => {
