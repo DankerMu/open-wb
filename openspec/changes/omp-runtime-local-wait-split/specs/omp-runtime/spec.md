@@ -17,4 +17,4 @@
 
 #### Scenario: 本地完成等待独立成模块
 - **WHEN** 运行 `knip`、`bash scripts/size-guard.sh` 与 server 测试，并检查 `server/src/sessions/omp/` 的导入方向
-- **THEN** size-guard 退出 0；`runtime.ts` 从 `./local-wait.js` 引用等待类、从 `./commands.js` 引用回执结算；`local-wait.ts` 与 `commands.ts` 对 `./runtime.js` 都只有 `import type`（或不导入）；knip 无未引用导出；`omp-runtime-local-command.test.ts`、`omp-runtime-abort-start.test.ts` 与其余 runtime / process 测试文件不改一行全绿
+- **THEN** size-guard 退出 0；`runtime.ts` 从 `./local-wait.js` 引用等待类、从 `./commands.js` 引用回执结算；`local-wait.ts` 与 `commands.ts` 对 `./runtime.js` 都只有 `import type`（或不导入）；knip 无未引用导出；`omp-runtime-local-command.test.ts`、`omp-runtime-abort-start.test.ts` 与其余 runtime / process 测试全绿
