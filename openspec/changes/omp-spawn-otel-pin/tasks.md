@@ -1,0 +1,12 @@
+# Tasks — omp-spawn-otel-pin (#1575)
+
+Fixture level: expanded. Risk packs: selected — Auth / permissions / secrets（`.env` 注入端点外发遥测；两道独立的关，真实二进制 + 入库负向对照证明）、Public API / CLI / script entry（sudo `--preserve-env=` 串是部署契约，成员与次序写进规格）、Config / project setup（overlay 的 `telemetry:` 块保留；环境钉不可配置）；not selected — File IO / path safety、Schema、Concurrency、Resource limits、Error handling、Release / packaging（见 proposal Triage）。
+
+Must preserve: 白名单其余键与取值、`PUPPETEER_EXECUTABLE_PATH` 只在配置 `BROWSER_BIN` 时出现且在 preserve 串末位；overlay 文件内容不变（`telemetry.otlpExportEnabled: false` 保留）；`process.ts` 的 spawn 形态与 argv 不变；已有官方用例全绿；不读父进程任何 `OTEL_*`。
+
+- [ ] 1.1 开工核对：`spawn-env.ts:1-60`；`host-overlay.ts:24-25,76-77`；tag `v18.12.3` 的 `packages/coding-agent/src/telemetry-export.ts:70-90`（`OTEL_SDK_DISABLED` 判定在 `resolveSignalConfig` 之前）与 omp 何时 flush（rpc 模式回合结束 / 关停）；`packages/utils/src/env.ts` 的 dotenv 写入条件；design「Sibling surfaces」列的每个测试文件里写死白名单 / preserve 串的位置；`server/test/support/omp-official.ts:60,179`（去钉开关）与 overlay 替换手段（#1570 的 `PI_CONFIG_FILES` / `--config` 测试专用替换）。出入先改本 fixture 再继续。
+- [ ] 1.2 测试先行（单测）：按 omp-runtime delta「环境白名单」新增的 WHEN/THEN 与 omp-uid-isolation delta 的 preserve 串，改 `omp-spawn-dotenv-pins.test.ts` 等写死的键集合 / 取值 / 前缀（从规格逐字写，不从源码推导）；`linux/uid-isolation.test.ts` 必到键表加 `OTEL_SDK_DISABLED`。先红。
+- [ ] 1.3 实现：`ompSpawnEnv` 写 `OTEL_SDK_DISABLED: "true"`（注释同 `PI_BROWSER_RELAY` 一段：omp 的 OTLP 导出只看环境，`.env` 能注入端点；非空值 dotenv 覆盖不了；与 overlay 的 `telemetry.otlpExportEnabled` 是两道独立的关，issue 1575），`SUDO_PRESERVE_ENV` 按 design D3 的位置加名。
+- [ ] 1.4 真实 omp：按 omp-runtime 新 Scenario「工作目录 .env 不能打开 OTLP 导出（真实 omp）」写三种配置；本地监听器只计数、不解析（任何 HTTP 请求都算）；负向对照的等待有界（design D5）。优先加进 `omp-official-overlay-pins.test.ts`；另建文件则同步三处 CI 清单并跑 `make test-guardrails`。记下负向对照收到第一个请求的时刻（回合中 / 回合后 / 关停后）与请求路径。
+- [ ] 1.5 验证：`npm test --workspace server`；`WORKBUDDY_OMP_TEST=1 OMP_BIN=$PWD/var/omp/omp npx vitest run --root server --no-file-parallelism test/omp-official-`；typecheck；`bash scripts/size-guard.sh`；`make check`；（条件）`make test-guardrails`；`git diff --stat origin/master` 只含 change 目录、`server/src/sessions/omp/spawn-env.ts`、`server/test/**`（及条件下的两个 CI 清单脚本）。
+- [ ] 1.6 文档（编排方）：ADR-0012 `:138` 后加「（2026-10-21 补充，#1575）」一条；system.md 9.8 `:452` 段与 `:533` 表补环境钉。
