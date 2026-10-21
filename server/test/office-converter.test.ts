@@ -502,6 +502,15 @@ describe("sidecar 转换契约：作业目录或 request.json.part 被换成链�
 describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeout: 15_000 }, () => {
   it("timeoutMs 200、假 sidecar 不写标记：timeout，假 sidecar 记录到 cancel，作业目录被删", async () => {
     const on = stage();
+    // cancel 由转换器自己的计时器写下，随后同一宏任务里删目录：在删的那一刻同步扫一遍，不靠文件事件（issue 1574）。
+    const realRm = fs.rmSync;
+    vi.spyOn(fs, "rmSync").mockImplementation(((path: fs.PathLike, options?: fs.RmOptions) => {
+      if (dirname(String(path)) === on.jobs) {
+        on.sidecar.jobs();
+      }
+      return realRm(path, options);
+    }) as typeof fs.rmSync);
+    syncBuiltinESMExports();
     const startedAt = Date.now();
 
     const error = await failureOf(
@@ -510,8 +519,8 @@ describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeo
 
     expectBareKind(error, "timeout", [on.spool]);
     const [job] = on.sidecar.jobs();
-    const cancelAt = await waitFor("the cancel record", () => job?.cancelAt);
-    expect(cancelAt - startedAt).toBeGreaterThanOrEqual(150);
+    expect(job?.cancelAt).toBeDefined();
+    expect((job?.cancelAt ?? 0) - startedAt).toBeGreaterThanOrEqual(150);
     expect(existsSync(job?.dir ?? "")).toBe(false);
     expectNothingLeft(on);
   });
@@ -523,9 +532,11 @@ describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeo
     const job = await claimed(on);
 
     abort.abort();
+    // 趁目录还在同步扫一遍，让假 sidecar 记下 cancel：之后目录随即被删，文件事件未必送到（issue 1574）。
+    on.sidecar.jobs();
 
     expectBareKind(await attempt, "aborted", [on.spool]);
-    await waitFor("the cancel record", () => job.cancelAt);
+    expect(job.cancelAt).toBeDefined();
     expect(existsSync(job.dir)).toBe(false);
     expectNothingLeft(on);
   });
@@ -536,12 +547,15 @@ describe("sidecar 转换契约：超时、中止与关停都写 cancel", { timeo
     const attempt = failureOf(converter.convert(on.input("a@hang.docx")));
     const job = await claimed(on);
 
-    await converter.close();
+    const closing = converter.close();
+    // 趁目录还在同步扫一遍，让假 sidecar 记下 cancel：之后目录随即被删，文件事件未必送到（issue 1574）。
+    on.sidecar.jobs();
+    await closing;
 
     // close() 落定时作业目录已删、cancel 已写。
     expect(existsSync(job.dir)).toBe(false);
     expectBareKind(await attempt, "aborted", [on.spool]);
-    await waitFor("the cancel record", () => job.cancelAt);
+    expect(job.cancelAt).toBeDefined();
     expectBareKind(await failureOf(converter.convert(on.input("b.docx"))), "aborted", []);
     await converter.close();
     expect(on.sidecar.jobs()).toHaveLength(1);
