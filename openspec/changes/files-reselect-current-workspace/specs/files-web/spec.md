@@ -8,7 +8,7 @@
 - THEN URL 依次为 `?ws=<第一个>`、`?ws=<第二个>`、`?ws=<新建>`；切换器按钮与树根行显示新名与逻辑路径 `zhangsan/<dir>`，页面任何文本不含服务器绝对路径；刷新后仍停留在 `?ws=` 指向的空间
 
 #### Scenario: 重选当前空间
-- WHEN 已登录且在 `/files?ws=W&path=y` 上：（a）删除当前文件 y（地址随之去掉 `path`），再点击 x，然后打开切换器选择 W；（b）不做其它操作，打开切换器选择 W；（c）作为对照，打开切换器选择另一空间 V（此前没有后退过）
+- WHEN 已登录且在 `/files?ws=W&path=y` 上：（a）删除当前文件 y（地址随之去掉 `path`），再点击 x，然后打开切换器选择 W；（b）展开一个目录后打开切换器选择 W；（c）作为对照，打开切换器选择另一空间 V（此前没有后退过）
 - THEN （a）地址为 `?ws=W&path=x`、树中选中 x，`history.length` 与选择 W 之前相同；（b）地址仍为 `?ws=W&path=y`，选中与展开态不变，`history.length` 不变，切换器弹层关闭，再打开时 W 项为 `aria-pressed="true"`；（c）地址变为 `?ws=V`（无 `path`），`history.length` 加一
 
 #### Scenario: 非法 ?ws= 回退

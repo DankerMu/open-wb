@@ -197,13 +197,23 @@ export function FilesPage() {
     urlMatchesWorkspace,
   ]);
 
+  // 选的就是当前空间：什么都不做（弹层由切换器自己关）。导航过去不会重挂浏览器，同一实例收到的
+  // `path` 变化既非回声也没有 `pathSeq`，会被 `usePathEcho` 当成陈旧回声跳过，地址与选中对不上（issue 1551）。
   const selectWorkspace = useCallback(
     (workspaceId: string) => {
+      if (workspaceId === currentWorkspace?.id) return;
       closeWorkspaceDialog();
       setEmptyFolderError(null);
       navigate(workspaceNavigation(location.pathname, location.search, location.hash, workspaceId));
     },
-    [closeWorkspaceDialog, location.hash, location.pathname, location.search, navigate],
+    [
+      closeWorkspaceDialog,
+      currentWorkspace?.id,
+      location.hash,
+      location.pathname,
+      location.search,
+      navigate,
+    ],
   );
 
   // 在树里选中文件：以 replace 把它写进 `path`，其余参数与页内锚点不动。由地址定位到的选中不经过这里。
