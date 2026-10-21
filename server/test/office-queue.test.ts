@@ -191,11 +191,13 @@ describe("并发上限与排队：不超过上限并按序启动", { timeout: 20
     // 同一拍里：cancel 已写，作业目录还在，名额还占着。
     expect(existsSync(join(dying?.dir ?? "", "cancel"))).toBe(true);
     expect(jobDirs(on)).toEqual([dying?.id]);
+    // 趁目录还在同步扫一遍，让假 sidecar 记下 cancel：之后目录随即被删，文件事件未必送到（issue 1574）。
+    expect(on.launches).toHaveLength(1);
     await microtasks();
     expect(first.state).toBe("aborted");
     await vi.waitFor(() => expect(launched(on)).toHaveLength(2), GONE_WITHIN);
     expect(existsSync(dying?.dir ?? "")).toBe(false);
-    await vi.waitFor(() => expect(dying?.cancelAt).toBeDefined(), GONE_WITHIN);
+    expect(dying?.cancelAt).toBeDefined();
     release(next);
     expect(await second.promise).toBe(slotOf(on, next));
   });
@@ -438,6 +440,8 @@ describe("并发上限与排队：关停与参数", { timeout: 20_000 }, () => {
     const closing = cache.close();
     // 运行中的作业在 close() 调用的同一拍里就被写下 cancel，目录此刻还在。
     expect(existsSync(join(job?.dir ?? "", "cancel"))).toBe(true);
+    // 趁目录还在同步扫一遍，让假 sidecar 记下 cancel：之后目录随即被删，文件事件未必送到（issue 1574）。
+    expect(on.launches).toHaveLength(1);
     await microtasks();
 
     // 排队的在 close() 调用的同一拍里就落定了。
@@ -447,7 +451,7 @@ describe("并发上限与排队：关停与参数", { timeout: 20_000 }, () => {
 
     // close() 返回时排队者已全部落定，运行中的作业目录已删。
     expect(states([head, ...calls])).toEqual(new Array(5).fill("aborted"));
-    await vi.waitFor(() => expect(job?.cancelAt).toBeDefined(), GONE_WITHIN);
+    expect(job?.cancelAt).toBeDefined();
     expect(on.launches).toHaveLength(1);
     expect(jobDirs(on)).toEqual([]);
 

@@ -187,6 +187,9 @@ describe("production entry with the office converter on a spool", () => {
       expect(late.status).toBe(504);
       expect(await late.text()).toBe(TIMEOUT_TEXT);
       // 假 sidecar 从不应答 `hang`：结束它的是配置的超时，作业写了 cancel、目录已删。
+      // 这里与下面关停时的两次 `cancelAt` 等待依赖假 sidecar 的文件事件（issue 1574）：app 是
+      // `startCompiledServer` 起的子进程，写完 cancel 随即删目录，测试进程的扫描无法与它同拍。仍保留：
+      // 它们承载「超时写了 cancel」与「1.5 s 内中止在途作业、早于 2 s 关停预算」两条结论。
       expect(performance.now() - startedAt).toBeGreaterThanOrEqual(CONVERT_TIMEOUT_MS - 1);
       expect(performance.now() - startedAt).toBeLessThan(15_000);
       await until(() => records()[1]?.cancelAt !== undefined, 2_000, "the timed-out job's cancel");
