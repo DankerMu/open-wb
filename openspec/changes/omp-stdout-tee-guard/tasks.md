@@ -1,0 +1,10 @@
+# Tasks — omp-stdout-tee-guard (#1592)
+
+Fixture level: compact. Risk packs: selected — Error handling（坏行跳过不抛、同 chunk 后续行保留）、Concurrency / ordering（tee 是同一流上的第二个监听器，帧序与完整性不变）、Release / packaging（不新开官方文件、不改 CI 清单）；not selected — Public API / CLI、Config、File IO、Schema、Auth / secrets、Resource limits、Legacy compatibility、Documentation（无生产面、无文档面）。
+
+Must preserve: `server/src/` 零改动；`omp-official-overlay-pins` 四条用例与 `omp-official-rpc-ui` 全部用例在官方二进制上照常绿；rpc-ui 的 tee 仍只收 `extension_ui_request` 帧；runtime 自己对 stdout 的读取不受影响（tee 只是旁听）。
+
+- [ ] 1.1 开工核对：`omp-official-overlay-pins.test.ts:103-113`（`teeFrames`）与 `:242`（`log`）、`omp-official-rpc-ui.test.ts:102-115`（`teeUiRequests`；`:90-100` `teeStdin` 解析的是 runtime 写入 stdin 的帧，不动）；`server/src/sessions/omp/process.ts:529-535` 生产解析器的容错写法（只参考，不改）；`server/test/support/omp-official.ts` 的导出面与 `OmpFrame` 类型来源（`server/src/sessions/omp/frame.ts`）；其余 `omp-official-*.test.ts` 没有 stdout `JSON.parse`（grep 复核）。出入先改本 fixture 再继续。
+- [ ] 1.2 测试先行：新 `server/test/omp-stdout-tee.test.ts`（默认套件、不设 `WORKBUDDY_OMP_TEST` 门），用 `node:stream` 的 `PassThrough` 喂数据，按 omp-runtime delta「overlay 固定块 advisor / ida 钉的真实 omp 回归」新增 Scenario 的字面断言：(1) 一个 chunk `{"type":"a"}\nnot json\n{"type":"b"}\n` → sink 恰为 `[a, b]` 按序、坏行计数 1、无异常（`process.on("uncaughtException")` 不触发——用 vitest 的正常完成即可）；(2) 半行跨两个 chunk（`{"ty` + `pe":"c"}\n`）→ 拼成一帧 `c`，计数不变；(3) 以 `{` 开头的截断行后接换行（`{"type":"d"\n`）→ 跳过并计数，后续合法帧照常。先红（helper 不存在），再实现。
+- [ ] 1.3 实现 helper：在 `server/test/support/omp-official.ts` 导出 `teeStdoutFrames(stream, sink): { malformed(): number }`（名字与返回形状可按现有代码风格微调，fixture 以行为为准）；`omp-official-overlay-pins.test.ts` 的 `teeFrames` 改为调用它，`Launch` 携带坏行计数，`log` 读数增加 `malformed` 字段；`omp-official-rpc-ui.test.ts` 的 `teeUiRequests` 改为调用它并在解析后按 `frame.type === "extension_ui_request"` 过滤（去掉子串预过滤，或保留亦可——行为一致即可）。
+- [ ] 1.4 验证：`npm test --workspace server`（默认套件含新单测，绿）；`WORKBUDDY_OMP_TEST=1 OMP_BIN=$PWD/var/omp/omp npx vitest run --root server --no-file-parallelism test/omp-official-overlay-pins.test.ts test/omp-official-rpc-ui.test.ts`（绿，`[overlay-pins]` 读数 `malformed: 0`）；typecheck、size-guard、`make check`；`git diff --stat` 不含 `server/src/`、`.github/`、`scripts/`。
