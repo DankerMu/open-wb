@@ -8,7 +8,7 @@
 
 - 宿主：`selectWorkspace` 对当前空间短路——在一切副作用之前 `return`：不导航（不 push、不 replace、不碰 `path`）、不调 `closeWorkspaceDialog`（切换器打开时新建空间对话框不在场）、不清 `emptyFolderError`（页面状态不变）；切换器自己的 `onClick` 已先 `setOpen(false)`（`workspace-switcher.tsx:109-112`），所以重选的可见效果只有弹层关闭。这去掉了文件页上唯一的同实例非回声 `path` 变化，也不再产生同空间的 push 历史项。切换器不改（当前项仍可点、仍 `aria-pressed`）。
 - 规格：`files-web`「工作空间页」写明「选择当前已选中的空间 SHALL 不导航、不改变地址、展开态与当前文件，只关闭切换器」，补 Scenario「重选当前空间」。
-- 页面级回归用例（真实 router 底座）：(a) 404 上报 `null` → 点 x → 回声写回前重选当前空间 → 地址 `path` 与选中一致（都是 x）、历史长度不变；(b) 同空间历史项 A（`path=y`）→ 重选当前空间 → 不产生新历史项、地址与选中仍为 y；在 B 之类的同空间项上造记账残留 `[y, x]` 再后退的路径因不再有同空间 push 而不复存在——用例以「重选后 `history.length` 不变、后退回到的是另一空间 / 另一路由」证明。
+- 页面级回归用例（真实 router 底座）：(a) 删除当前文件 y（文件页上唯一让浏览器上报 `null` 的路径，`follow-entry.ts:102`）→ 点 x → 重选当前空间 → 地址 `path` 与选中一致（都是 x）、历史长度不变；(b) 在 `path=y` 上重选当前空间 → 地址、选中、展开态与历史长度都不变；(c) 对照：选另一空间仍 push、历史 +1。issue 描述的 404 上报 `null` 只在侧边栏宿主（`clearMissing` / `onlyPaths`）出现，文件页不传这两个 prop（`page.tsx:330-346`）；(b) 的「后退到重选前的同空间历史项」路径因不再有同空间 push 而不复存在。
 - 不做：`usePathEcho` 判定规则、`pathSeq` 语义、会话侧边栏宿主、`{ replace: true }`（备选 1，不够）、给文件页传 `pathSeq`（备选 2，面更大）。
 
 `design.md` 省略：compact 级，一个回调的短路 + 一句规格 + 页面级用例。
@@ -19,6 +19,7 @@
 Issue type: bug
 Fixture level: compact
 Upstream suggested level: absent (issue-scribe filed; S)
+Level rationale: compact despite the Concurrency pack — the fix is a one-callback early return that removes the race source; no shared or persisted state changes and `host-channel.ts` is untouched (precedents: archived `omp-pin-probes`, `omp-stop-early-official`, both compact with Concurrency).
 Blast radius: the files page only; a wrong short-circuit either still navigates (new test (a) red: history grows / path dropped) or short-circuits a real switch (existing「空间切换与新建」test red)
 Selected risk packs: Concurrency / shared state / ordering (the bug is a batching-order race between the host's URL push and the browser's echo bookkeeping; the fix removes the race source rather than tuning timing); not selected — Public API / CLI (no route or prop change; the switcher's props are unchanged), Error handling, Config, File IO, Schema, Auth / secrets, Resource limits, Release / packaging
 Evidence floor: npm test --workspace web (full suite green incl. the new cases; existing files-*, files-deep-link*, workspace-browser* unchanged); new case (a) red before the fix; typecheck; make check; no server/ change
