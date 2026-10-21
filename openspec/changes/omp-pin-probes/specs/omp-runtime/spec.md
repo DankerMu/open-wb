@@ -5,10 +5,10 @@
 
 #### Scenario: advisor / ida 钉的回归与负对照
 - **WHEN** 官方 omp v18.12.3 以产品 overlay 启动，cwd 的 `.omp/config.yml` 写 `ida.enabled: true`、`ida.installDir: <cwd>/fake-ida`（目录内有一个空的平台命名库文件），并读取 `get_state`
-- **THEN** `systemPrompt` 的 `xd://` 设备列表含 `ast_edit`、不含 `ida`；`dumpTools` 不含 `ida`
+- **THEN** `systemPrompt` 的 `xd://` 设备列表含 `ast_edit`、不含 `ida`（`dumpTools` 不含 `ida` 恒成立——discoverable 工具——不作证据）
 - **WHEN** 同一配置，但 overlay 变体去掉了 `ida:\n  enabled: false` 两行
 - **THEN** 设备列表含 `ida`
-- **WHEN** 官方 omp v18.12.3 以产品 overlay 在 `write` 档启动，cwd 的 `.omp/config.yml` 写 `advisor.enabled: true`、`modelRoles.advisor: workbuddy/deepseek-v4.1-flash`，跑一个含 bash 调用的回合并放行审批，回合 `agent_end` 后等到假上游的请求数连续两次读数相同
-- **THEN** 请求数恰为 2，回合帧里没有 `advisor_yielded`
+- **WHEN** 官方 omp v18.12.3 以产品 overlay 在 `write` 档启动，cwd 的 `.omp/config.yml` 写 `advisor.enabled: true`、`modelRoles.advisor: workbuddy/deepseek-v4.1-flash`，跑一个含 bash 调用的回合并放行审批，回合 `agent_end` 后每 500 ms 读一次假上游的请求数，计数保持不变满 2 s 视为稳定（30 s 内未稳定即失败）
+- **THEN** 请求数恰为 2，子进程 stdout 的全部帧（读到稳定为止）里没有 `advisor_yielded`
 - **WHEN** 同一配置，但 overlay 变体去掉了 `advisor:\n  enabled: false` 两行
-- **THEN** 请求数大于 2，且出现 `advisor_yielded`
+- **THEN** 请求数大于 2，且 stdout 帧里出现 `advisor_yielded`
