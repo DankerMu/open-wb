@@ -3,10 +3,14 @@
  * upstream-failure「上游原文净化」(its four scenarios verbatim), one case per sanitiser step, the
  * secret-list rules, and the byte-fixed envelopes of model-proxy「透传端点与 bearer 鉴权」.
  *
- * The three omp patterns below are copied verbatim from omp v18.0.10
- * (`resource/oh-my-pi/packages/ai/src/error/flags.ts`, commit 33cc6b9: `TIMEOUT_PATTERN` :154,
- * `TRANSIENT_TRANSPORT_PATTERN` :158-159, `AUTH_FAILURE_PATTERN` :160-161). omp's session layer
+ * The three omp patterns below are copied verbatim from omp v18.12.3 (`can1357/oh-my-pi` tag
+ * `v18.12.3`, `packages/ai/src/error/flags.ts`: `TIMEOUT_PATTERN` :168,
+ * `TRANSIENT_TRANSPORT_PATTERN` :229-230, `AUTH_FAILURE_PATTERN` :231-232). omp's session layer
  * retries a failure whose text matches the first two (design D7); an omp upgrade re-checks them.
+ * v18.12.3's `isTerminalClientErrorStatus` (:614-616, 4xx except 408/429) makes a 424 skip the
+ * text Transient/Timeout classification (:677-695), so the text check below is the second layer
+ * for retries, while the auth check (`AUTH_FAILURE_PATTERN`, applied to any status) still rests on
+ * wording alone.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -23,7 +27,7 @@ import {
 
 const TIMEOUT_PATTERN = /\b(?:operation\s+)?timed?\s*out\b|\btimeout\b|\bstream stall\b/i;
 const TRANSIENT_TRANSPORT_PATTERN =
-  /\b(?:no[_ -]?capacity|(?:high|peak)[ _-]?demand|(?:at|over|insufficient)[ _-]?capacity|capacity[ _-]?(?:exceeded|exhausted)|peak[ _-]?load)\b|overloaded|provider.?returned.?error|rate.?limit|too many requests|\b(?:429|500|502|503|504)\b|service.?unavailable|server.?error|internal.?error|retry your request|network.?error|connection.?error|connection.?refused|unable.?to.?connect\.\s*is the computer able to access the url\?|other side closed|fetch failed|upstream.?connect|upstream.?request.?failed|reset before headers|socket hang up|timed? out|timeout|terminated|retry delay|stream stall|no error details in response|HTTP2(?:StreamReset|RefusedStream|EnhanceYourCalm)|nghttp2_(?:internal_error|refused_stream)|stream closed with error code nghttp2_(?:internal_error|refused_stream)|malformed.?function.?call/i;
+  /\b(?:no[_ -]?capacity|(?:high|peak)[ _-]?demand|(?:at|over|insufficient)[ _-]?capacity|capacity[ _-]?(?:exceeded|exhausted)|peak[ _-]?load)\b|overloaded|provider.?returned.?error|rate.?limit|too many requests|auth-gateway\s+5\d{2}(?=[:\s]|$)|\b(?:429|500|502|503|504)\b|service.?unavailable|temporar(?:y|ily)[ _-]?unavailable|server.?error|internal.?error|retry your request|network.?error|connection.?error|connection.?refused|unable.?to.?connect\.\s*is the computer able to access the url\?|other side closed|use of closed network connection|fetch failed|upstream.?connect|upstream.?request.?failed|reset before headers|socket hang up|timed? out|timeout|terminated|retry delay|stream stall|no error details in response|HTTP2(?:StreamReset|RefusedStream|EnhanceYourCalm)|nghttp2_(?:internal_error|refused_stream)|stream closed with error code nghttp2_(?:internal_error|refused_stream)|\bE(?:TIMEOUT|NOTFOUND|NETUNREACH|HOSTUNREACH)\b|\bFailedToOpenSocket\b|no internet connection|couldn.?t reach|couldn.?t connect to|tls certificate verification failed|malformed.?function.?call/i;
 const AUTH_FAILURE_PATTERN =
   /\b(?:401|403|unauthorized|forbidden|authentication|auth[_ ]?unavailable|no auth available|(?:invalid|no)[_ ]?api[_ ]?key)\b/i;
 
@@ -189,6 +193,7 @@ describe("failure envelopes", () => {
     // The copied patterns do bite: the names the design turned down would be retried.
     expect(TRANSIENT_TRANSPORT_PATTERN.test("param=connect_timeout")).toBe(true);
     expect(TRANSIENT_TRANSPORT_PATTERN.test("param=status.504")).toBe(true);
+    expect(TRANSIENT_TRANSPORT_PATTERN.test("temporarily unavailable")).toBe(true);
     expect(TRANSIENT_TRANSPORT_PATTERN.test(ompErrorMessage(502, statusReply(503, "").body))).toBe(
       true,
     );
