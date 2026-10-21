@@ -18,7 +18,7 @@
 - 能力发现源（项目 skills 等）不受影响。
 
 **Non-Goals**
-- **marketplace 自动更新**：`main.ts:2262-2266` 每次 spawn 都会安排，`marketplace.autoUpdate` 缺省 `notify`（`modes/settings.ts:1139-1143`）；托管 agent 目录跨 spawn 持久，注册过 marketplace 后每次 spawn 都会刷新（`marketplace/manager.ts:751-762`）。没有已注册 marketplace 时不发请求，而注册只能经工具层。不在本 issue「模型目录主机」的范围内，登记为残余；零成本的 `marketplace.autoUpdate: "off"` 钉交 owner 另定。
+- **marketplace 自动更新**（不再是 Non-goal，移入 D5；保留此条说明来由）：`main.ts:2262-2266` 每次 spawn 都会安排，`marketplace.autoUpdate` 缺省 `notify`（`modes/settings.ts:1139-1143`）；托管 agent 目录跨 spawn 持久，注册过 marketplace 后每次 spawn 都会刷新（`marketplace/manager.ts:751-762`）。没有已注册 marketplace 时不发请求，而注册只能经工具层。owner 2026-10-21 裁定一并钉成 `off`，见 D5。
 - **助手经 bash / eval / 浏览器发起的访问**：属于工具层，另有审批。
 - **模型代理到上游的请求**：见 ADR-0008。
 - **部署侧防火墙**。
@@ -72,6 +72,12 @@ omp 没有任何接口能枚举内置 provider：
 - `host-overlay.ts` 用一个导出常量数组持有名单，固定块里按 `  - <id>` 逐行渲染。overlay 的字节由 spec 的 YAML 块决定，渲染结果必须逐字节等于 spec。
 - 文件头注释改写 `disabledProviders` 一句：说明规则、三个排除项和 #1621。
 - `omp-host-overlay.test.ts` 等字节断言随之更新。
+
+### D5 `marketplace.autoUpdate: "off"`（owner 2026-10-21）
+
+- 键是枚举 `off | notify | auto`，缺省 `notify`（tag `v18.12.3` `packages/coding-agent/src/modes/settings.ts:1139-1143`）；`main.ts:2262-2266` 每次启动以它调 `scheduleMarketplaceAutoUpdate`，`off` 时直接返回（`extensibility/plugins/marketplace-auto-update.ts`）。
+- 固定块里放在 `disabledProviders` 之后、`ask:` 之前（同属出网），写成 `autoUpdate: "off"`：加引号，与已有的 `direnv: "off"` 一致，避免 YAML 把 `off` 读成布尔。
+- 验证：优先做行为用例——托管 agent 目录预置一个过期的已注册 marketplace（来源是 https URL），`ALL_PROXY` 指向监听器；负对照（overlay 去掉 `marketplace` 块）看到对该来源主机的 `CONNECT`，产品 overlay 零命中。若 marketplace 注册表的格式让预置不现实，退回为：启动日志无 `Settings:` 警告 + 代码引用，在 evidence 里写明为什么退回。
 
 ## Risks / Trade-offs
 

@@ -19,6 +19,7 @@ owner 2026-10-21 裁定**关闭**这些请求，不作为残余接受。
 - **官方 v18.12.3 用例**：
   - 产品 overlay 下，去掉 no_proxy 钉以便观测。在工作目录 `.env` 写 `ALL_PROXY` 指向本地监听器，断言监听器零命中（不发模型回合：`ALL_PROXY` 也会代理回环上的模型请求，所以以 `get_available_models` 应答加观测窗口为锚点，而不是 issue 写的「`agent_end` 之后」），`workbuddy/<id>` 和 `skill:x` 都还在。
   - 负对照：换回原来的四项名单，至少收到一个 `CONNECT`，其中包括 `catalog.stencil.so:443`。
+- **`marketplace.autoUpdate: "off"`**（owner 2026-10-21）：关掉启动时的插件 marketplace 刷新与更新检查（design D5）。
 - **单测 / 字节断言**：随名单一起更新。
 - **spec**：omp-runtime「宿主 overlay」的 YAML 块、`disabledProviders` 的说明，再加一个 Scenario。
 - **文档**：
@@ -26,7 +27,6 @@ owner 2026-10-21 裁定**关闭**这些请求，不作为残余接受。
   - ADR-0012 补一节「2026-10-21 补充，#1621」，写明裁定、规则、实测和残余；
   - `docs/architecture/system.md` 9.8 的 overlay 块和表格行。
 - **不做**：
-  - marketplace 自动更新（design 的 Non-goals 说明了为什么不在本次范围）；
   - 助手经工具发起的网络访问；
   - 模型代理到上游的请求；
   - 部署侧防火墙；
