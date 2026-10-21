@@ -7,7 +7,7 @@
 请求从哪来（tag `v18.12.3`，读代码）：
 - 非交互模式下 `main.ts:2330` 会无条件调用 `refreshInBackground()`，缺省策略是 `online-if-uncached`，没有任何设置能关掉它。
 - 内置 provider 满足下面任一条件就会拉目录，无凭证也一样（`model-registry.ts:2428-2433`）：已认证、声明了 `allowUnauthenticated`、或在共享目录兜底集合里。
-- 唯一的关闭手段是 `disabledProviders`，按 id 精确匹配（`model-registry.ts:215-220`、`:2383-2393`、`:2474`）。
+- 唯一的关闭手段是 `disabledProviders`，按 id 精确匹配（`model-registry.ts:217-221`、`:2383-2393`、`:2474`）。
 
 现在的 overlay 只关了本机探测的四项（`host-overlay.ts:82-86`，#1564）。
 

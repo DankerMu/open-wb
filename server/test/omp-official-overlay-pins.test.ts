@@ -39,7 +39,8 @@
  * cases name it as `HTTP_PROXY`, `http_proxy` or `ALL_PROXY` (the last two with an exemption that
  * does not match the loopback upstream, lowercase or uppercase); under the product spawn env
  * (`no_proxy=*`, `NO_PROXY=*`) each turn ends with the fake upstream's reply and the listener sees
- * nothing. The negative control keeps case (1) and deletes both pins in this file's spawn wrapper:
+ * nothing. The negative control keeps case (1) and deletes both pins in the spawn wrapper
+ * (support/omp-official.ts `launchWriteTier`):
  * it waits, bounded, for an absolute-URI request to the fake upstream at the listener (Bun's fetch
  * proxying loopback) and does not assert the turn's end.
  *
@@ -47,35 +48,33 @@
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-overlay-pins.test.ts --coverage=false
  */
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
-import type { SpawnImpl } from "../src/sessions/omp/process.js";
-import { SessionRuntime } from "../src/sessions/omp/runtime.js";
-import { ompHostOverlayPath } from "../src/sessions/omp/state-layout.js";
-import type { ApprovalRequest } from "../src/sessions/omp/ui-requests.js";
 import {
+  expectOverlayAt,
+  launchWriteTier,
   type OfficialDirs,
   type OfficialWorld,
   OMP_TEST_OFF,
   OMP_VERSION,
-  officialBin,
   onTeardown,
   openOfficialWorld,
-  teeStdoutFrames,
+  overlayWithout,
+  type ProxyHit,
+  proxyListener,
+  type WriteTierLaunch,
 } from "./support/omp-official.js";
 import { collectPrompt } from "./support/omp-runtime.js";
 
 const STATE_CASE = { timeout: 90_000 };
 const TURN_CASE = { timeout: 180_000 };
-/** The world's model and upstream key (support/omp-official.ts). */
+/** The world's model (support/omp-official.ts). */
 const MODEL_ID = "deepseek-v4.1-flash";
-const UPSTREAM_KEY = "fake";
 /** Any prompt: the fake upstream's first tool round defaults to one bash call. */
 const BASH_PROMPT = "跑一个命令";
 /** The two pins, as the overlay's fixed block writes them (omp-runtime「overlay 写入」). */
@@ -113,21 +112,6 @@ const FAKE_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
 /** The control's bounded wait for the proxied model request (design D4: 30 s). */
 const PROXY_WAIT_MS = 30_000;
 const PROXY_POLL_MS = 250;
-
-/**
- * One runtime: what it spawned, every stdout frame of its child, the child's stdout lines the tee
- * skipped as malformed (support/omp-official.ts `teeStdoutFrames`) and the approvals it answered.
- */
-interface Launch {
-  runtime: SessionRuntime;
-  argv: string[][];
-  /** The env each spawn handed the child (after this file's wrappers), and when it spawned. */
-  env: NodeJS.ProcessEnv[];
-  spawnedAt: number[];
-  out: OmpFrame[];
-  malformed(): number;
-  approvals: ApprovalRequest[];
-}
 
 /** The project layer turning both features on, and the fake IDA install it points at. */
 function plantPins({ workspaceRoot }: OfficialDirs): void {
@@ -198,79 +182,12 @@ function plantOtlpEnv(port: number): (dirs: OfficialDirs) => void {
   };
 }
 
-/**
- * A `write`-tier runtime on the world's managed state that allows every approval. With `overlay`,
- * both overlay sources point at that file (test-only, like rpc-ui's `overlayAt`); with
- * `otelPin: false` the spawn env loses `OTEL_SDK_DISABLED` (#1575's test-only wrapper; the product
- * always sets it); with `proxyPins: false` it loses `no_proxy` and `NO_PROXY` (#1615's). The
- * runtime is shut down only at teardown, after the case body, so its child and the tee outlive the
- * settle.
- */
-function launch(world: OfficialWorld, overlay?: string, otelPin = true, proxyPins = true): Launch {
-  const argv: string[][] = [];
-  const envs: NodeJS.ProcessEnv[] = [];
-  const spawnedAt: number[] = [];
-  const out: OmpFrame[] = [];
-  const tees: Array<{ malformed(): number }> = [];
-  const approvals: ApprovalRequest[] = [];
-  const spawnImpl: SpawnImpl = (command, args, options) => {
-    const nextArgv = [...args];
-    const env = { ...options.env };
-    if (overlay !== undefined) {
-      nextArgv[nextArgv.indexOf("--config") + 1] = overlay;
-      env.PI_CONFIG_FILES = overlay;
-    }
-    if (!otelPin) {
-      delete env.OTEL_SDK_DISABLED;
-    }
-    if (!proxyPins) {
-      delete env.no_proxy;
-      delete env.NO_PROXY;
-    }
-    argv.push(nextArgv);
-    envs.push(env);
-    spawnedAt.push(Date.now());
-    const child = (spawn as SpawnImpl)(command, nextArgv, { ...options, env });
-    tees.push(teeStdoutFrames(child.stdout, (frame) => out.push(frame)));
-    return child;
-  };
-  const runtime: SessionRuntime = new SessionRuntime({
-    sessionId: "omp-official-overlay-pins",
-    bin: officialBin(),
-    sandboxRoot: world.sandboxRoot,
-    stateDir: world.stateDir,
-    ownerId: "u1",
-    cwd: world.workspaceRoot,
-    modelId: MODEL_ID,
-    approvalMode: "write",
-    tokens: { issue: () => UPSTREAM_KEY, revoke: () => {} },
-    resumePath: null,
-    spawnImpl,
-    onApproval: (request) => {
-      approvals.push(request);
-      runtime.respondApproval(request.id, "allow");
-    },
-  });
-  onTeardown(() => runtime.shutdown());
-  const malformed = (): number => tees.reduce((sum, tee) => sum + tee.malformed(), 0);
-  return { runtime, argv, env: envs, spawnedAt, out, malformed, approvals };
-}
-
-/** The product overlay without `block`, written next to it; the block must occur exactly once. */
-function overlayWithout(world: OfficialWorld, block: string, name: string): string {
-  const product = readFileSync(ompHostOverlayPath(world.stateDir), "utf8");
-  expect(product.split(block)).toHaveLength(2);
-  const path = join(world.stateDir, `overlay-without-${name}.yml`);
-  writeFileSync(path, product.replace(block, ""), { mode: 0o640 });
-  return path;
-}
-
 interface PromptState {
   systemPrompt: string[];
   dumpTools: Array<{ name: string }>;
 }
 
-async function readState(run: Launch): Promise<PromptState> {
+async function readState(run: WriteTierLaunch): Promise<PromptState> {
   return (await run.runtime.command({ type: "get_state" })) as unknown as PromptState;
 }
 
@@ -328,7 +245,11 @@ async function settledRequests(world: OfficialWorld): Promise<number> {
 }
 
 /** One bash turn to `agent_end`, then the settled request count and the frames read until then. */
-async function bashTurn(world: OfficialWorld, run: Launch, waitYield: boolean): Promise<number> {
+async function bashTurn(
+  world: OfficialWorld,
+  run: WriteTierLaunch,
+  waitYield: boolean,
+): Promise<number> {
   const frames = await collectPrompt(run.runtime.prompt(BASH_PROMPT));
   expect(frames.some((frame) => frame.type === "agent_end")).toBe(true);
   expect(run.approvals.map((request) => request.tool)).toEqual(["bash"]);
@@ -341,12 +262,8 @@ async function bashTurn(world: OfficialWorld, run: Launch, waitYield: boolean): 
 }
 
 /** One reading, with the child's malformed stdout line count (#1592). */
-function log(run: Launch, reading: Record<string, unknown>): void {
+function log(run: WriteTierLaunch, reading: Record<string, unknown>): void {
   console.log(`[overlay-pins] ${JSON.stringify({ ...reading, malformed: run.malformed() })}`);
-}
-
-function expectOverlayAt(run: Launch, path: string): void {
-  expect(run.argv[0]?.[run.argv[0].indexOf("--config") + 1]).toBe(path);
 }
 
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / ida pins`, () => {
@@ -355,7 +272,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
     STATE_CASE,
     async () => {
       const world = await openOfficialWorld(plantPins);
-      const run = launch(world);
+      const run = launchWriteTier(world);
 
       const state = await readState(run);
       const devices = xdDevices(state);
@@ -374,7 +291,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
     async () => {
       const world = await openOfficialWorld(plantPins);
       const bare = overlayWithout(world, IDA_BLOCK, "ida");
-      const run = launch(world, bare);
+      const run = launchWriteTier(world, bare);
 
       const state = await readState(run);
       const devices = xdDevices(state);
@@ -390,7 +307,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
     TURN_CASE,
     async () => {
       const world = await openOfficialWorld(plantPins);
-      const run = launch(world);
+      const run = launchWriteTier(world);
 
       const requests = await bashTurn(world, run, false);
       const advisorYielded = yielded(run.out);
@@ -407,7 +324,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
     async () => {
       const world = await openOfficialWorld(plantPins);
       const bare = overlayWithout(world, ADVISOR_BLOCK, "advisor");
-      const run = launch(world, bare);
+      const run = launchWriteTier(world, bare);
 
       const requests = await bashTurn(world, run, true);
       const advisorYielded = yielded(run.out);
@@ -440,7 +357,7 @@ async function otlpTurn(
   const listener = await otlpListener();
   const world = await openOfficialWorld(plantOtlpEnv(listener.port));
   const overlay = overlayPin ? undefined : overlayWithout(world, TELEMETRY_BLOCK, "telemetry");
-  const run = launch(world, overlay, envPin);
+  const run = launchWriteTier(world, overlay, envPin);
 
   const frames = await collectPrompt(run.runtime.prompt(BASH_PROMPT));
   const endedAt = Date.now();
@@ -497,42 +414,6 @@ describe.skipIf(OMP_TEST_OFF)(
   },
 );
 
-/** One request the stand-in proxy saw: its request line and when it arrived. */
-interface ProxyHit {
-  line: string;
-  at: number;
-}
-
-/**
- * A local HTTP listener standing in for an outside proxy: it records each request line (a `CONNECT`
- * too) and its arrival time and answers 502 without forwarding or reading the body. Closed at
- * teardown, after the runtime (call it before the world opens, as `otlpListener`).
- */
-async function proxyListener(): Promise<{ port: number; hits: ProxyHit[] }> {
-  const hits: ProxyHit[] = [];
-  const server = createServer((req, res) => {
-    hits.push({ line: `${String(req.method)} ${String(req.url)}`, at: Date.now() });
-    req.resume();
-    req.on("end", () => {
-      res.writeHead(502, { "content-type": "text/plain" });
-      res.end("proxy stand-in: not forwarded\n");
-    });
-  });
-  server.on("connect", (req, socket) => {
-    hits.push({ line: `CONNECT ${String(req.url)}`, at: Date.now() });
-    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  onTeardown(
-    () =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      }),
-  );
-  return { port: (server.address() as AddressInfo).port, hits };
-}
-
 /** The five `.env` cases of the scenario, given the listener's URL. */
 const PROXY_CASES = [
   { name: "(1) HTTP_PROXY", lines: (url: string) => [`HTTP_PROXY=${url}`] },
@@ -567,13 +448,17 @@ function replyText(frames: readonly OmpFrame[]): string {
 async function proxyWorld(
   lines: (url: string) => readonly string[],
   proxyPins: boolean,
-): Promise<{ proxy: { port: number; hits: ProxyHit[] }; world: OfficialWorld; run: Launch }> {
+): Promise<{
+  proxy: { port: number; hits: ProxyHit[] };
+  world: OfficialWorld;
+  run: WriteTierLaunch;
+}> {
   const proxy = await proxyListener();
   const url = `http://127.0.0.1:${String(proxy.port)}`;
   const world = await openOfficialWorld(({ workspaceRoot }) => {
     writeFileSync(join(workspaceRoot, ".env"), [...lines(url), ""].join("\n"));
   });
-  return { proxy, world, run: launch(world, undefined, true, proxyPins) };
+  return { proxy, world, run: launchWriteTier(world, undefined, true, proxyPins) };
 }
 
 describe.skipIf(OMP_TEST_OFF)(

@@ -32,7 +32,8 @@ export const LAYOUT_TABLE: ReadonlyArray<readonly [string, number]> = [
  * (`MODEL_VISION` defaults on) the default deployment adds `hostOverlayVisionBlock(<MODEL_ID>)`.
  * #1564: the fixed block has `approval: null` and the `telemetry`, `archive`, `disabledProviders`
  * and `ask` pins. #1570 (the pin moves to v18.12.3): `ruby` / `julia` are gone and the block ends
- * with the `advisor` and `ida` pins.
+ * with the `advisor` and `ida` pins. #1621: `disabledProviders` lists the 87 built-in model
+ * providers of v18.12.3 and `marketplace.autoUpdate: "off"` follows it.
  */
 export const HOST_OVERLAY_FIXED = `tools:
   approval: null
@@ -66,6 +67,91 @@ disabledProviders:
   - llama.cpp
   - lm-studio
   - apple
+  - abliteration
+  - aiand
+  - aimlapi
+  - alibaba-coding-plan
+  - alibaba-token-plan
+  - amazon-bedrock
+  - anthropic
+  - azure
+  - baseten
+  - bedrock-mantle
+  - cerebras
+  - charm-hyper
+  - cline-pass
+  - cloudflare-ai-gateway
+  - cloudflare-workers-ai
+  - commandcode
+  - coralbricks
+  - coreweave
+  - deepinfra
+  - deepseek
+  - devin
+  - factory-droid
+  - firepass
+  - fireworks
+  - github-copilot
+  - gitlab-duo
+  - gitlab-duo-agent
+  - gmi-cloud
+  - google
+  - google-antigravity
+  - google-gemini-cli
+  - google-vertex
+  - groq
+  - helmcode
+  - huggingface
+  - kilo
+  - kimi-code
+  - litellm
+  - meta
+  - minimax
+  - minimax-cn
+  - minimax-code
+  - minimax-code-cn
+  - mistral
+  - moonshot
+  - muse-code
+  - nanogpt
+  - novita
+  - nvidia
+  - ollama-cloud
+  - openai
+  - openai-codex
+  - opencode-go
+  - opencode-zen
+  - openrouter
+  - qianfan
+  - qwen-portal
+  - sakana
+  - sambanova
+  - siliconflow
+  - siliconflow-cn
+  - singularityapi-dev
+  - singularityapi-tech
+  - snowflake
+  - stepfun
+  - synthetic
+  - together
+  - typesafe
+  - umans
+  - venice
+  - vercel-ai-gateway
+  - vllm
+  - wafer-serverless
+  - xai
+  - xai-oauth
+  - xiaomi
+  - xiaomi-token-plan-ams
+  - xiaomi-token-plan-cn
+  - xiaomi-token-plan-sgp
+  - yolo-auto
+  - zai
+  - zenmux
+  - zhipu-coding-plan
+marketplace:
+  autoUpdate: "off"
 ask:
   enabled: false
 advisor:

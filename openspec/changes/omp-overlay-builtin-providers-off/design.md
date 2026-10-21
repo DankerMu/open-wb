@@ -2,7 +2,7 @@
 
 ## Context
 
-- **键怎么被消费**（tag `v18.12.3`）：`disabledProviders` 由 `packages/coding-agent/src/config/model-registry.ts:215-220` 读成 `Set`，按 id 精确比较，区分大小写，没有通配。
+- **键怎么被消费**（tag `v18.12.3`）：`disabledProviders` 由 `packages/coding-agent/src/config/model-registry.ts:217-221` 读成 `Set`，按 id 精确比较，区分大小写，没有通配。
 - **三条外联路径，各自按 id 判断**：
   - 内置 descriptor 的发现（`:2383-2388`）；
   - 三个特殊 provider（`:2389-2393`）；
@@ -65,11 +65,11 @@ omp 没有任何接口能枚举内置 provider：
 - 同一个产品 overlay 启动下，还要断言：
   - `get_available_models` 含 `workbuddy/<MODEL_ID>`；
   - 工作目录放 `.claude/skills/x/SKILL.md`，`get_available_commands` 含 `skill:x`（`claude` 能力发现源没被关）。
-- 测试文件现在 641 行。新用例加进去后要保持 ≤800 行（size-guard）。放不下就另开 `server/test/omp-official-provider-egress.test.ts`，把要共用的辅助移到已有的 support 模块，不复制代码（jscpd）。
+- 测试文件现在 641 行。新用例加进去后要保持 ≤800 行（size-guard）。放不下就另开 `server/test/omp-official-provider-egress.test.ts`，把要共用的辅助移到已有的 support 模块，不复制代码（jscpd）。实现时加进去会到 813 行，所以另开了文件，辅助移到 `server/test/support/omp-official.ts`。
 
 ### D4 overlay 源码形态
 
-- `host-overlay.ts` 用一个导出常量数组持有名单，固定块里按 `  - <id>` 逐行渲染。overlay 的字节由 spec 的 YAML 块决定，渲染结果必须逐字节等于 spec。
+- `host-overlay.ts` 用一个模块内常量数组持有名单（不导出：没有消费者，knip 会报；测试从写出的文件读名单，不拿源码验证源码），固定块里按 `  - <id>` 逐行渲染。overlay 的字节由 spec 的 YAML 块决定，渲染结果必须逐字节等于 spec。
 - 文件头注释改写 `disabledProviders` 一句：说明规则、三个排除项和 #1621。
 - `omp-host-overlay.test.ts` 等字节断言随之更新。
 

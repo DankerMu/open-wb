@@ -19,18 +19,24 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { StringDecoder } from "node:string_decoder";
 import { setTimeout as delay } from "node:timers/promises";
-import { afterEach } from "vitest";
+import { afterEach, expect } from "vitest";
 import { writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import { writeHostOverlay } from "../../src/sessions/omp/host-overlay.js";
 import type { SpawnImpl } from "../../src/sessions/omp/process.js";
 import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
-import { ensureOmpStateLayout, ompAgentDir } from "../../src/sessions/omp/state-layout.js";
+import {
+  ensureOmpStateLayout,
+  ompAgentDir,
+  ompHostOverlayPath,
+} from "../../src/sessions/omp/state-layout.js";
 import type { ApprovalDecision, ApprovalRequest } from "../../src/sessions/omp/ui-requests.js";
 import { type FakeUpstreamServer, type FakeUpstreamStartOptions, start } from "./fake-upstream.mjs";
 
@@ -352,4 +358,147 @@ export async function openOfficialWorld(
   }
 
   return open(options, null);
+}
+
+/**
+ * One runtime: what it spawned, every stdout frame of its child, the child's stdout lines the tee
+ * skipped as malformed (`teeStdoutFrames`) and the approvals it answered. This and the helpers
+ * below are shared by omp-official-overlay-pins and omp-official-provider-egress (#1621).
+ */
+export interface WriteTierLaunch {
+  runtime: SessionRuntime;
+  argv: string[][];
+  /** The env each spawn handed the child (after the wrapper's rewrites), and when it spawned. */
+  env: NodeJS.ProcessEnv[];
+  spawnedAt: number[];
+  out: OmpFrame[];
+  malformed(): number;
+  approvals: ApprovalRequest[];
+}
+
+/**
+ * A `write`-tier runtime on the world's managed state that allows every approval. With `overlay`,
+ * both overlay sources point at that file (test-only, like rpc-ui's `overlayAt`); with
+ * `otelPin: false` the spawn env loses `OTEL_SDK_DISABLED` (#1575's test-only wrapper; the product
+ * always sets it); with `proxyPins: false` it loses `no_proxy` and `NO_PROXY` (#1615's). The
+ * runtime is shut down only at teardown, after the case body, so its child and the tee outlive the
+ * settle.
+ */
+export function launchWriteTier(
+  world: OfficialWorld,
+  overlay?: string,
+  otelPin = true,
+  proxyPins = true,
+): WriteTierLaunch {
+  const argv: string[][] = [];
+  const envs: NodeJS.ProcessEnv[] = [];
+  const spawnedAt: number[] = [];
+  const out: OmpFrame[] = [];
+  const tees: Array<{ malformed(): number }> = [];
+  const approvals: ApprovalRequest[] = [];
+  const spawnImpl: SpawnImpl = (command, args, options) => {
+    const nextArgv = [...args];
+    const env = { ...options.env };
+    if (overlay !== undefined) {
+      nextArgv[nextArgv.indexOf("--config") + 1] = overlay;
+      env.PI_CONFIG_FILES = overlay;
+    }
+    if (!otelPin) {
+      delete env.OTEL_SDK_DISABLED;
+    }
+    if (!proxyPins) {
+      delete env.no_proxy;
+      delete env.NO_PROXY;
+    }
+    argv.push(nextArgv);
+    envs.push(env);
+    spawnedAt.push(Date.now());
+    const child = (spawn as SpawnImpl)(command, nextArgv, { ...options, env });
+    tees.push(teeStdoutFrames(child.stdout, (frame) => out.push(frame)));
+    return child;
+  };
+  const runtime: SessionRuntime = new SessionRuntime({
+    sessionId: "omp-official-write-tier",
+    bin: officialBin(),
+    sandboxRoot: world.sandboxRoot,
+    stateDir: world.stateDir,
+    ownerId: "u1",
+    cwd: world.workspaceRoot,
+    modelId: MODEL_ID,
+    approvalMode: "write",
+    tokens: { issue: () => UPSTREAM_KEY, revoke: () => {} },
+    resumePath: null,
+    spawnImpl,
+    onApproval: (request) => {
+      approvals.push(request);
+      runtime.respondApproval(request.id, "allow");
+    },
+  });
+  onTeardown(() => runtime.shutdown());
+  const malformed = (): number => tees.reduce((sum, tee) => sum + tee.malformed(), 0);
+  return { runtime, argv, env: envs, spawnedAt, out, malformed, approvals };
+}
+
+/**
+ * The product overlay with `block` replaced by `replacement`, written next to it as `<name>.yml`;
+ * the block must occur exactly once.
+ */
+export function overlaySwapping(
+  world: OfficialWorld,
+  block: string,
+  replacement: string,
+  name: string,
+): string {
+  const product = readFileSync(ompHostOverlayPath(world.stateDir), "utf8");
+  expect(product.split(block)).toHaveLength(2);
+  const path = join(world.stateDir, `${name}.yml`);
+  writeFileSync(path, product.replace(block, replacement), { mode: 0o640 });
+  return path;
+}
+
+/** The product overlay without `block`, written next to it; the block must occur exactly once. */
+export function overlayWithout(world: OfficialWorld, block: string, name: string): string {
+  return overlaySwapping(world, block, "", `overlay-without-${name}`);
+}
+
+export function expectOverlayAt(run: WriteTierLaunch, path: string): void {
+  expect(run.argv[0]?.[run.argv[0].indexOf("--config") + 1]).toBe(path);
+}
+
+/** One request the stand-in proxy saw: its request line and when it arrived. */
+export interface ProxyHit {
+  line: string;
+  at: number;
+}
+
+/**
+ * A local HTTP listener standing in for an outside proxy: it records each request line (a `CONNECT`
+ * too) and its arrival time and answers 502 without forwarding or reading the body. Closed at
+ * teardown, after the runtime (call it before the world opens).
+ */
+export async function proxyListener(): Promise<{ port: number; hits: ProxyHit[] }> {
+  const hits: ProxyHit[] = [];
+  const server = createServer((req, res) => {
+    hits.push({ line: `${String(req.method)} ${String(req.url)}`, at: Date.now() });
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(502, { "content-type": "text/plain" });
+      res.end("proxy stand-in: not forwarded\n");
+    });
+  });
+  server.on("connect", (req, socket) => {
+    hits.push({ line: `CONNECT ${String(req.url)}`, at: Date.now() });
+    // A client giving up on the refused tunnel resets the socket: not an error of the case.
+    socket.on("error", () => {});
+    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  onTeardown(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  return { port: (server.address() as AddressInfo).port, hits };
 }
