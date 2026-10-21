@@ -22,4 +22,4 @@ Same as #1575: a workspace file that omp loads (`<cwd>/.env`) SHALL NOT be able 
 
 ## Not yet specified
 
-- Nothing open. The product overlay's `disabledProviders` turns off the local-provider probes the issue's overlay-less probe saw (`host-overlay.ts:82-86`), so the control is expected to see only the model POST; the THEN allows others, and the implementer records every request line the control's proxy saw.
+- Nothing open for this change. Recorded by the implementer (red run, case 3, `ALL_PROXY`): under the product overlay omp still opens https connections at start to seven third-party hosts (model catalogs; `disabledProviders` only covers the local providers), seen as `CONNECT …:443` at the proxy before any model request; with the pins they go direct, as before this change. Out of scope here, filed as a follow-up. The control's 30 s full record held only model POSTs to the fake upstream (`ALL_PROXY` is what routes https).

@@ -33,6 +33,16 @@
  * `agent_end` and the listener is read before shutdown. The listener only counts requests (path and
  * arrival time), it never parses them.
  *
+ * Issue #1615 (change omp-spawn-no-proxy): omp-runtime「子进程 spawn 契约」scenario「工作目录 .env 不能
+ * 让模型请求走代理（真实 omp）」. A second local listener stands in for an outside proxy: it records
+ * each request line and arrival time and answers a fixed error, never forwarding. Five cwd `.env`
+ * cases name it as `HTTP_PROXY`, `http_proxy` or `ALL_PROXY` (the last two with an exemption that
+ * does not match the loopback upstream, lowercase or uppercase); under the product spawn env
+ * (`no_proxy=*`, `NO_PROXY=*`) each turn ends with the fake upstream's reply and the listener sees
+ * nothing. The negative control keeps case (1) and deletes both pins in this file's spawn wrapper:
+ * it waits, bounded, for an absolute-URI request to the fake upstream at the listener (Bun's fetch
+ * proxying loopback) and does not assert the turn's end.
+ *
  * Run locally (`OMP_BIN` absolute):
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-overlay-pins.test.ts --coverage=false
@@ -98,6 +108,11 @@ const OTEL_DELAY_MS = 500;
  * `/v1/traces`, 0.46 s after `agent_end` on the first run).
  */
 const OTLP_WINDOW_MS = 5_000;
+/** The fake upstream's reply parts (support/fake-upstream.mjs `REPLY_PARTS`), copied. */
+const FAKE_REPLY = "你好，这是 WorkBuddy 的第一条流式回复。";
+/** The control's bounded wait for the proxied model request (design D4: 30 s). */
+const PROXY_WAIT_MS = 30_000;
+const PROXY_POLL_MS = 250;
 
 /**
  * One runtime: what it spawned, every stdout frame of its child, the child's stdout lines the tee
@@ -187,10 +202,11 @@ function plantOtlpEnv(port: number): (dirs: OfficialDirs) => void {
  * A `write`-tier runtime on the world's managed state that allows every approval. With `overlay`,
  * both overlay sources point at that file (test-only, like rpc-ui's `overlayAt`); with
  * `otelPin: false` the spawn env loses `OTEL_SDK_DISABLED` (#1575's test-only wrapper; the product
- * always sets it). The runtime is shut down only at teardown, after the case body, so its child and
- * the tee outlive the settle.
+ * always sets it); with `proxyPins: false` it loses `no_proxy` and `NO_PROXY` (#1615's). The
+ * runtime is shut down only at teardown, after the case body, so its child and the tee outlive the
+ * settle.
  */
-function launch(world: OfficialWorld, overlay?: string, otelPin = true): Launch {
+function launch(world: OfficialWorld, overlay?: string, otelPin = true, proxyPins = true): Launch {
   const argv: string[][] = [];
   const envs: NodeJS.ProcessEnv[] = [];
   const spawnedAt: number[] = [];
@@ -206,6 +222,10 @@ function launch(world: OfficialWorld, overlay?: string, otelPin = true): Launch 
     }
     if (!otelPin) {
       delete env.OTEL_SDK_DISABLED;
+    }
+    if (!proxyPins) {
+      delete env.no_proxy;
+      delete env.NO_PROXY;
     }
     argv.push(nextArgv);
     envs.push(env);
@@ -472,6 +492,149 @@ describe.skipIf(OMP_TEST_OFF)(
         expect(OTLP_WINDOW_MS).toBeGreaterThanOrEqual(
           2 * Math.max(0, (hits[0]?.at ?? 0) - endedAt),
         );
+      },
+    );
+  },
+);
+
+/** One request the stand-in proxy saw: its request line and when it arrived. */
+interface ProxyHit {
+  line: string;
+  at: number;
+}
+
+/**
+ * A local HTTP listener standing in for an outside proxy: it records each request line (a `CONNECT`
+ * too) and its arrival time and answers 502 without forwarding or reading the body. Closed at
+ * teardown, after the runtime (call it before the world opens, as `otlpListener`).
+ */
+async function proxyListener(): Promise<{ port: number; hits: ProxyHit[] }> {
+  const hits: ProxyHit[] = [];
+  const server = createServer((req, res) => {
+    hits.push({ line: `${String(req.method)} ${String(req.url)}`, at: Date.now() });
+    req.resume();
+    req.on("end", () => {
+      res.writeHead(502, { "content-type": "text/plain" });
+      res.end("proxy stand-in: not forwarded\n");
+    });
+  });
+  server.on("connect", (req, socket) => {
+    hits.push({ line: `CONNECT ${String(req.url)}`, at: Date.now() });
+    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  onTeardown(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  return { port: (server.address() as AddressInfo).port, hits };
+}
+
+/** The five `.env` cases of the scenario, given the listener's URL. */
+const PROXY_CASES = [
+  { name: "(1) HTTP_PROXY", lines: (url: string) => [`HTTP_PROXY=${url}`] },
+  { name: "(2) http_proxy", lines: (url: string) => [`http_proxy=${url}`] },
+  { name: "(3) ALL_PROXY", lines: (url: string) => [`ALL_PROXY=${url}`] },
+  {
+    name: "(4) HTTP_PROXY with a mismatching no_proxy",
+    lines: (url: string) => [`HTTP_PROXY=${url}`, "no_proxy=example.invalid"],
+  },
+  {
+    name: "(5) HTTP_PROXY with a mismatching NO_PROXY",
+    lines: (url: string) => [`HTTP_PROXY=${url}`, "NO_PROXY=example.invalid"],
+  },
+] as const;
+
+/** The concatenated text deltas of a turn's assistant messages. */
+function replyText(frames: readonly OmpFrame[]): string {
+  return frames
+    .map((frame) => {
+      const update = frame.assistantMessageEvent as { type?: unknown; delta?: unknown } | undefined;
+      return frame.type === "message_update" && update?.type === "text_delta"
+        ? String(update.delta)
+        : "";
+    })
+    .join("");
+}
+
+/**
+ * The listener, a world whose cwd `.env` holds `lines(<listener URL>)` and a `write`-tier runtime
+ * with or without the two proxy pins; nothing is sent yet.
+ */
+async function proxyWorld(
+  lines: (url: string) => readonly string[],
+  proxyPins: boolean,
+): Promise<{ proxy: { port: number; hits: ProxyHit[] }; world: OfficialWorld; run: Launch }> {
+  const proxy = await proxyListener();
+  const url = `http://127.0.0.1:${String(proxy.port)}`;
+  const world = await openOfficialWorld(({ workspaceRoot }) => {
+    writeFileSync(join(workspaceRoot, ".env"), [...lines(url), ""].join("\n"));
+  });
+  return { proxy, world, run: launch(world, undefined, true, proxyPins) };
+}
+
+describe.skipIf(OMP_TEST_OFF)(
+  `official omp v${OMP_VERSION}: cwd .env cannot proxy the model requests`,
+  () => {
+    it.each(PROXY_CASES)(
+      "$name: the turn ends with the fake upstream's reply, the proxy gets nothing",
+      TURN_CASE,
+      async ({ name, lines }) => {
+        const { proxy, world, run } = await proxyWorld(lines, true);
+
+        const frames = await collectPrompt(run.runtime.prompt(BASH_PROMPT));
+        const hits = [...proxy.hits];
+        const upstream = world.upstream.requests().length;
+        log(run, {
+          case: `proxy/${name}`,
+          upstream,
+          proxy: hits.map((hit) => hit.line),
+          reply: replyText(frames),
+        });
+
+        expect(hits).toEqual([]);
+        expect(frames.some((frame) => frame.type === "agent_end")).toBe(true);
+        expect(replyText(frames)).toBe(FAKE_REPLY);
+        expect(upstream).toBeGreaterThan(0);
+        expect(run.env).toHaveLength(1);
+        expect([run.env[0]?.no_proxy, run.env[0]?.NO_PROXY]).toEqual(["*", "*"]);
+      },
+    );
+
+    it(
+      "negative control: case (1) with the env lacking no_proxy and NO_PROXY, the proxy gets the model POST",
+      TURN_CASE,
+      async () => {
+        const { proxy, world, run } = await proxyWorld(PROXY_CASES[0].lines, false);
+        const target = `POST http://127.0.0.1:${String(world.upstream.port)}/`;
+
+        // Not awaited: the proxy never forwards, the turn's end is not asserted; teardown stops it.
+        const turn = collectPrompt(run.runtime.prompt(BASH_PROMPT));
+        turn.then(
+          () => {},
+          () => {},
+        );
+        const deadline = Date.now() + PROXY_WAIT_MS;
+        while (!proxy.hits.some((hit) => hit.line.startsWith(target)) && Date.now() < deadline) {
+          await delay(PROXY_POLL_MS);
+        }
+        const hits = [...proxy.hits];
+        const spawnedAt = run.spawnedAt[0] ?? Number.NaN;
+        log(run, {
+          case: "proxy/control",
+          upstream: world.upstream.requests().length,
+          proxy: hits.map((hit) => hit.line),
+          sinceSpawnMs: hits.map((hit) => hit.at - spawnedAt),
+          waitMs: PROXY_WAIT_MS,
+        });
+
+        expect(run.env).toHaveLength(1);
+        expect(run.env[0]).not.toHaveProperty("no_proxy");
+        expect(run.env[0]).not.toHaveProperty("NO_PROXY");
+        expect(hits.some((hit) => hit.line.startsWith(target))).toBe(true);
       },
     );
   },

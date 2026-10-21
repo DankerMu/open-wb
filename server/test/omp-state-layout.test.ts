@@ -535,6 +535,7 @@ describe("spawned child environment under the managed layout", () => {
     expect(keys.filter((key) => key !== "__CF_USER_TEXT_ENCODING")).toEqual([
       "HOME",
       "LANG",
+      "NO_PROXY",
       "OMP_PROFILE",
       "OTEL_SDK_DISABLED",
       "PATH",
@@ -551,6 +552,7 @@ describe("spawned child environment under the managed layout", () => {
       "XDG_CACHE_HOME",
       "XDG_DATA_HOME",
       "XDG_STATE_HOME",
+      "no_proxy",
     ]);
     expect(report).toContain(
       ` home=${join(state, "home")} xdgdata=${join(state, "xdg", "data")} xdgstate=${join(state, "xdg", "state")} xdgcache=${join(state, "xdg", "cache")} environ=`,

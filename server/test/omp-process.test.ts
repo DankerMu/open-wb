@@ -548,6 +548,8 @@ function allowlist(
     PUPPETEER_PROXY: "direct://",
     PUPPETEER_PROXY_IGNORE_CERT_ERRORS: "0",
     OTEL_SDK_DISABLED: "true",
+    no_proxy: "*",
+    NO_PROXY: "*",
   };
   if (extra.LANG !== undefined) {
     env.LANG = extra.LANG;
