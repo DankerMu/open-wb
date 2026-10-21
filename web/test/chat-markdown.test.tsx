@@ -1,6 +1,7 @@
 // 助手正文的 Markdown 规则（epic-acceptance-followups design D1；chat-web「Markdown 链接惰性与图片不加载」
 // 「代码块复制失败就地提示」、属性白名单的放行一侧、列表项 / 引用块里的多行 HTML 块、白名单外格式元素被克隆时
-// 起始标签只显示一次）。源 HTML 的渲染与消毒主场景、流式半截 HTML 见 chat-markdown-html.test.tsx。
+// 起始标签只显示一次、被块元素截断时按解析器重排显示的已知形态）。源 HTML 的渲染与消毒主场景、流式半截 HTML
+// 见 chat-markdown-html.test.tsx。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -165,6 +166,39 @@ describe("白名单外格式元素被克隆时起始标签只显示一次", () =
 
     expect(body.querySelectorAll("b")).toHaveLength(2);
     expect(body.textContent).toBe("a\nb");
+  });
+});
+
+describe("被块元素截断的白名单外格式元素按解析器重排显示（已知形态，issue 1604）", () => {
+  // 登记的已知形态，不是期望的源顺序（owner 2026-10-21 裁定不修）：块元素没有先关闭外层段落时，adoption agency 把
+  // 截断处到结束标签之间的内容移进没有源位置的新建同名元素，结束标签原文跟在原元素自己的内容之后显示。
+  it.each([
+    [
+      "源 HTML 块里被 div 截断的 font",
+      "<div><font>a<div>b</font>c</div></div>",
+      "<font>a</font>bc",
+    ],
+    [
+      "源 HTML 块里被 div 截断的 small",
+      "<div><small>a<div>b</small>c</div></div>",
+      "<small>a</small>bc",
+    ],
+    [
+      "多层嵌套：font 内套未闭合的 small",
+      "<div><font>a<small>x<div>b</font>c</div></div>",
+      "<font>a<small>x</font>bc",
+    ],
+    ["紧凑列表项里被 div 截断的 font", "- <font>a<div>b</font>c", "\n<font>a</font>bc\n"],
+    [
+      "对照：内层块元素先关闭源 HTML 的 p，走克隆形态（issue 1535）",
+      "<div><p><font>a<div>b</font>c</p></div>",
+      "<font>ab</font>c",
+    ],
+  ])("%s", async (_, content, visible) => {
+    const { body } = await mountReply(content);
+
+    expect(body.textContent).toBe(visible);
+    expect(body.querySelector("font, small")).toBeNull();
   });
 });
 
