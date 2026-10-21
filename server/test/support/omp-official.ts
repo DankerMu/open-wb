@@ -21,9 +21,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterEach } from "vitest";
 import { writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
+import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import { writeHostOverlay } from "../../src/sessions/omp/host-overlay.js";
 import type { SpawnImpl } from "../../src/sessions/omp/process.js";
 import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
@@ -110,6 +113,40 @@ afterEach(async () => {
 /** Registers a teardown step of the running case (also used by the proxied world, #909). */
 export function onTeardown(step: () => unknown): void {
   cleanups.push(step);
+}
+
+/**
+ * Tees a child's stdout JSONL into `onFrame`, in order; the runtime still reads every byte (only a
+ * second `data` listener: no `setEncoding` / `pipe` / `read` / `pause`). Like the production parser
+ * (`process.ts`), a line that is not JSON or not an object is skipped and counted; blank lines are
+ * skipped uncounted. #1592.
+ */
+export function teeStdoutFrames(
+  stream: Readable,
+  onFrame: (frame: OmpFrame) => void,
+): { malformed(): number } {
+  const decoder = new StringDecoder("utf8");
+  let partial = "";
+  let malformed = 0;
+  stream.on("data", (chunk: Buffer) => {
+    const lines = (partial + decoder.write(chunk)).split("\n");
+    partial = lines.pop() ?? "";
+    for (const line of lines.filter((part) => part.trim().length > 0)) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        malformed += 1;
+        continue;
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        malformed += 1;
+        continue;
+      }
+      onFrame(parsed as OmpFrame);
+    }
+  });
+  return { malformed: () => malformed };
 }
 
 export function officialBin(): string {

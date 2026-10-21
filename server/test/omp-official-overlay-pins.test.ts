@@ -27,7 +27,7 @@
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-overlay-pins.test.ts --coverage=false
  */
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -45,6 +45,7 @@ import {
   officialBin,
   onTeardown,
   openOfficialWorld,
+  teeStdoutFrames,
 } from "./support/omp-official.js";
 import { collectPrompt } from "./support/omp-runtime.js";
 
@@ -70,11 +71,15 @@ const STABLE_MS = 2_000;
 const SETTLE_LIMIT_MS = 30_000;
 const YIELD_LIMIT_MS = 60_000;
 
-/** One runtime: what it spawned, every stdout frame of its child and the approvals it answered. */
+/**
+ * One runtime: what it spawned, every stdout frame of its child, the child's stdout lines the tee
+ * skipped as malformed (support/omp-official.ts `teeStdoutFrames`) and the approvals it answered.
+ */
 interface Launch {
   runtime: SessionRuntime;
   argv: string[][];
   out: OmpFrame[];
+  malformed(): number;
   approvals: ApprovalRequest[];
 }
 
@@ -100,18 +105,6 @@ function plantPins({ workspaceRoot }: OfficialDirs): void {
   );
 }
 
-/** Keeps every stdout frame of the child for its whole lifetime; the runtime still reads every byte. */
-function teeFrames(child: ChildProcessWithoutNullStreams, sink: OmpFrame[]): void {
-  let rest = "";
-  child.stdout.on("data", (chunk: Buffer | string) => {
-    const lines = (rest + chunk.toString()).split("\n");
-    rest = lines.pop() ?? "";
-    for (const line of lines.filter((part) => part.trim().length > 0)) {
-      sink.push(JSON.parse(line) as OmpFrame);
-    }
-  });
-}
-
 /**
  * A `write`-tier runtime on the world's managed state that allows every approval. With `overlay`,
  * both overlay sources point at that file (test-only, like rpc-ui's `overlayAt`). The runtime is
@@ -120,6 +113,7 @@ function teeFrames(child: ChildProcessWithoutNullStreams, sink: OmpFrame[]): voi
 function launch(world: OfficialWorld, overlay?: string): Launch {
   const argv: string[][] = [];
   const out: OmpFrame[] = [];
+  const tees: Array<{ malformed(): number }> = [];
   const approvals: ApprovalRequest[] = [];
   const spawnImpl: SpawnImpl = (command, args, options) => {
     const nextArgv = [...args];
@@ -130,7 +124,7 @@ function launch(world: OfficialWorld, overlay?: string): Launch {
     }
     argv.push(nextArgv);
     const child = (spawn as SpawnImpl)(command, nextArgv, { ...options, env });
-    teeFrames(child, out);
+    tees.push(teeStdoutFrames(child.stdout, (frame) => out.push(frame)));
     return child;
   };
   const runtime: SessionRuntime = new SessionRuntime({
@@ -151,7 +145,8 @@ function launch(world: OfficialWorld, overlay?: string): Launch {
     },
   });
   onTeardown(() => runtime.shutdown());
-  return { runtime, argv, out, approvals };
+  const malformed = (): number => tees.reduce((sum, tee) => sum + tee.malformed(), 0);
+  return { runtime, argv, out, malformed, approvals };
 }
 
 /** The product overlay without `block`, written next to it; the block must occur exactly once. */
@@ -238,8 +233,9 @@ async function bashTurn(world: OfficialWorld, run: Launch, waitYield: boolean): 
   return settledRequests(world);
 }
 
-function log(reading: Record<string, unknown>): void {
-  console.log(`[overlay-pins] ${JSON.stringify(reading)}`);
+/** One reading, with the child's malformed stdout line count (#1592). */
+function log(run: Launch, reading: Record<string, unknown>): void {
+  console.log(`[overlay-pins] ${JSON.stringify({ ...reading, malformed: run.malformed() })}`);
 }
 
 function expectOverlayAt(run: Launch, path: string): void {
@@ -258,7 +254,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
       const devices = xdDevices(state);
       // `dumpTools` never has `ida` (a discoverable tool): logged, not evidence.
       const tools = state.dumpTools.map((tool) => tool.name);
-      log({ case: "ida/product", devices, dumpToolsHasIda: tools.includes("ida") });
+      log(run, { case: "ida/product", devices, dumpToolsHasIda: tools.includes("ida") });
 
       expect(devices).toContain("ast_edit");
       expect(devices).not.toContain("ida");
@@ -275,7 +271,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
 
       const state = await readState(run);
       const devices = xdDevices(state);
-      log({ case: "ida/without-block", devices });
+      log(run, { case: "ida/without-block", devices });
 
       expectOverlayAt(run, bare);
       expect(devices).toContain("ida");
@@ -291,7 +287,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
 
       const requests = await bashTurn(world, run, false);
       const advisorYielded = yielded(run.out);
-      log({ case: "advisor/product", requests, advisorYielded, frames: run.out.length });
+      log(run, { case: "advisor/product", requests, advisorYielded, frames: run.out.length });
 
       expect(requests).toBe(2);
       expect(advisorYielded).toBe(0);
@@ -308,7 +304,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
 
       const requests = await bashTurn(world, run, true);
       const advisorYielded = yielded(run.out);
-      log({ case: "advisor/without-block", requests, advisorYielded, frames: run.out.length });
+      log(run, { case: "advisor/without-block", requests, advisorYielded, frames: run.out.length });
 
       expectOverlayAt(run, bare);
       expect(requests).toBeGreaterThan(2);

@@ -25,7 +25,6 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { StringDecoder } from "node:string_decoder";
 import fastify, { type FastifyInstance } from "fastify";
 import { createApp } from "../../src/app.js";
 import { openDb } from "../../src/core/db/index.js";
@@ -43,7 +42,7 @@ import { TokenRegistry } from "../../src/sessions/tokens.js";
 import { FIXED_NOW, fixedRuntime } from "../session-db-helpers.js";
 import { cookieFor } from "../session-rest-helpers.js";
 import { type FakeUpstreamServer, start } from "./fake-upstream.mjs";
-import { officialBin, onTeardown } from "./omp-official.js";
+import { officialBin, onTeardown, teeStdoutFrames } from "./omp-official.js";
 import { type StalledHandshake, startStalledHandshake } from "./stalled-handshake.js";
 
 /** The two whitelisted models; the runtime runs the first. */
@@ -175,20 +174,9 @@ export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promi
   return { runtime, upstream, stalled, workspaceRoot, approvals };
 }
 
-/** Appends every complete JSONL line of `child`'s stdout to `frames`; omp's own reader is untouched. */
+/** Appends every stdout frame of `child` to `frames` (`teeStdoutFrames`); omp's own reader is untouched. */
 function teeFrames(child: ChildProcessWithoutNullStreams, frames: OmpFrame[]): void {
-  const decoder = new StringDecoder("utf8");
-  let partial = "";
-  child.stdout.on("data", (chunk: Buffer) => {
-    partial += decoder.write(chunk);
-    for (let end = partial.indexOf("\n"); end !== -1; end = partial.indexOf("\n")) {
-      const line = partial.slice(0, end).trim();
-      partial = partial.slice(end + 1);
-      if (line.startsWith("{")) {
-        frames.push(JSON.parse(line) as OmpFrame);
-      }
-    }
-  });
+  teeStdoutFrames(child.stdout, (frame) => frames.push(frame));
 }
 
 export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise<ProxiedApp> {
