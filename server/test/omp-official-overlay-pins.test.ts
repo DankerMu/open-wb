@@ -87,15 +87,15 @@ const TELEMETRY_BLOCK = "telemetry:\n  otlpExportEnabled: false\n";
 /**
  * The batch delays every `.env` shortens (OpenTelemetry SDK defaults: 5 s, 1 s, 60 s). Only
  * `OTEL_BSP_SCHEDULE_DELAY` takes effect on v18.12.3: the binary holds no `OTEL_BLRP_SCHEDULE_DELAY`
- * or `OTEL_METRIC_EXPORT_INTERVAL` string, and the control's `/v1/traces` moved with it (0.9 s after
- * `agent_end` at 500, 2.9 s at 3000) while `/v1/logs` did not (0.5 s, 0.9 s) and `/v1/metrics`
- * never came (#1575 first run).
+ * or `OTEL_METRIC_EXPORT_INTERVAL` string, and the control's `/v1/traces` moved with it (0.46 s after
+ * `agent_end` at 500, 2.9 s at 3000) while `/v1/logs` stayed at 0.9 s (the 1 s default) and
+ * `/v1/metrics` never came (#1575 first run).
  */
 const OTEL_DELAY_MS = 500;
 /**
  * How long each child stays up after `agent_end` before the listener is read: one constant for all
  * four configurations (design D5: at least 5 s and at least twice the control's first request,
- * which came 0.5 s after `agent_end` on the first run).
+ * `/v1/traces`, 0.46 s after `agent_end` on the first run).
  */
 const OTLP_WINDOW_MS = 5_000;
 
