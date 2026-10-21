@@ -56,9 +56,9 @@
 
 #### Scenario: 白名单外格式元素被克隆时起始标签只显示一次
 - **WHEN** 助手正文分别为 `<font color="red">彩` + 空行 + `下一段`、`<small>a` + 空行 + `b`、两项列表 `- <small>a` / `- b`、`<font>a<div>b</font>c`
-- **THEN** 前三者的正文段 `textContent` 中 `<font color="red">`（或 `<small>`）恰出现一次，`彩`/`下一段`（或 `a`/`b`）照常显示；第四者 `<font>` 与 `</font>` 各恰出现一次，去掉空白后为 `<font>ab</font>c`；四者正文段内都没有 `font`、`small` 元素
+- **THEN** 四者正文段的 `textContent` 依次恰为 `<font color="red">彩\n下一段`、`<small>a\nb`、`\n<small>a\nb\n`、`<font>ab</font>c`（JSON 字符串写法；源中的一个起始标签只出现一次、在原元素的位置），正文段内都没有 `font`、`small` 元素
 - **WHEN** 作为对照，助手正文为白名单内格式元素 `<b>a` + 空行 + `b`
-- **THEN** 渲染出两个 `b` 元素（解析器的克隆照常成为真实元素），页面文本不含 `<b>`
+- **THEN** 正文段渲染出两个 `b` 元素（解析器的克隆照常成为真实元素），`textContent` 恰为 `a\nb`
 
 #### Scenario: 流式期间的半截 HTML 不留痕
 - **WHEN** 一条 running 助手消息的正文先到达 `<b>粗` 与 `<details><summary>折`，随后补齐为 `<b>粗</b>` 与 `<details><summary>折叠</summary>内容</details>` 并以 `turn.end` done 结束
