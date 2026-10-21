@@ -15,8 +15,12 @@
  *   由 app 经 `.part` + `rename` 写出——它的出现就是就绪标记。`jobs/` 下的非目录条目（如测试夹具的
  *   `jobs/<id>.record.json`）跳过、不记日志。
  * - 领取：每 `CONVERTER_POLL_MS`（缺省 200）一轮，取「有 `request.json`、没有 `done` / `failed`、
- *   不在在途表里」的目录，按 `request.json` 的 mtime 升序，同时在途至多 `CONVERTER_CONCURRENCY`
- *   （缺省 2）。
+ *   不在在途表里、本进程未曾落定」的目录，按 `request.json` 的 mtime 升序，同时在途至多
+ *   `CONVERTER_CONCURRENCY`（缺省 2）。落定（写出或试图写出 `done` / `failed`，含领取时即落定的
+ *   `cancelled` / `bad-request`）的 id 记进内存里的已落定集合：app 的递归删除不是原子的，删除途中
+ *   `done` 可能先于 `request.json` 消失，只认标记会把半删的目录当新作业重领（#1601）。每轮列出
+ *   `jobs/` 之后，本轮列表里已不出现的 id 移出集合（`jobs/` 不存在时清空），所以集合不超过
+ *   `jobs/` 的目录数；集合只在内存，重启后为空（与 `SIGTERM` 不写标记、重启后重领一致）。
  * - 校验：键集恰为三键；`version` = 1；`input` 是单一路径段（不含 `/` 与 NUL、不是 `.` / `..`）、
  *   扩展名小写后为 `docx` / `xlsx` / `pptx`；`timeoutMs` 是 ≤ 2147483647 的正整数；`request.json`
  *   与 `in/<input>` 都是普通文件（`lstat`，不跟随链接）。任一不成立 → `failed: bad-request`，不启动进程；
@@ -31,7 +35,8 @@
  * - 结果：退出码 0 且 `out/<去最后一个扩展名>.pdf` 是大小 > 0 的普通文件（`lstat`）→ `done`（空）；
  *   否则 `failed`，内容恰为一个原因码：`bad-request` / `exit`（非 0 退出）/ `signal`（被本进程之外的
  *   信号结束）/ `timeout` / `cancelled` / `no-output`。标记先写 `<名>.part` 再 `rename`，读者看不到
- *   半截内容（同目录的 `.part` 名可能被短暂看到）。
+ *   半截内容（同目录的 `.part` 名可能被短暂看到）。落定之后本进程不再写入该作业目录：目录从第一个
+ *   标记起归 app。
  * - 吞掉的错误恰为这些：标记写入与改名的 `ENOENT`（作业目录已被 app 删掉，那个作业 app 已经不等了）；
  *   列 `jobs/` 的 `ENOENT`（app 还没建它）；探测文件在不在时的 `ENOENT` / `ENOTDIR`；读 `request.json`
  *   时的 `ENOENT` / `ENOTDIR`（落为 `cancelled`）；spawn 报 `ENOENT` 且作业目录已不在（app 在核对之后、
@@ -97,6 +102,8 @@ function positiveInt(name, fallback) {
 
 /** 在途作业：id → `{dir, child, startedAt, timer, stopped}`。 */
 const running = new Map();
+/** 本进程落定过的作业 id；每轮按 `jobs/` 的列表修剪（见头注释「领取」）。 */
+const settledIds = new Set();
 /** `readRequest` 的第三种答案：`request.json` 或作业目录已不在。 */
 const GONE = Symbol("gone");
 
@@ -157,6 +164,7 @@ function writeMarker(dir, name, content) {
 }
 
 function settle(id, dir, startedAt, reason) {
+  settledIds.add(id);
   writeMarker(dir, reason === "" ? "done" : "failed", reason);
   const result = reason === "" ? "done" : "failed";
   const line = { event: "convert", id, result, reason, ms: Date.now() - startedAt };
@@ -317,20 +325,28 @@ function start(id, dir) {
   launch(id, dir, startedAt, request);
 }
 
-/** 就绪作业按 `request.json` 的 mtime 升序；`jobs/` 还不存在就是空列表。 */
+/** 就绪作业按 `request.json` 的 mtime 升序；`jobs/` 还不存在就是空列表。顺带修剪已落定集合。 */
 function readyJobs() {
   let entries;
   try {
     entries = readdirSync(jobsDir, { withFileTypes: true });
   } catch (error) {
     if (errorCode(error) === "ENOENT") {
+      settledIds.clear();
       return [];
     }
     throw error;
   }
+  // 对照本轮全部条目名修剪、不对照就绪列表：删除途中的目录总会被列出，它的 id 不会被提前移出。
+  const listed = new Set(entries.map((entry) => entry.name));
+  for (const id of settledIds) {
+    if (!listed.has(id)) {
+      settledIds.delete(id);
+    }
+  }
   const ready = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || running.has(entry.name)) {
+    if (!entry.isDirectory() || running.has(entry.name) || settledIds.has(entry.name)) {
       continue;
     }
     const dir = join(jobsDir, entry.name);

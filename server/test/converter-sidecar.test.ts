@@ -34,6 +34,7 @@ import {
   PARENT_ONLY,
   readRecord,
   recordPath,
+  type Sidecar,
   settled,
   spawnedPair,
   startSidecar,
@@ -256,6 +257,60 @@ describe("sidecar 脚本：领取、并发、心跳与 jobs/", () => {
     mkdirSync(sidecar.jobs);
     const job = writeJob(sidecar.jobs, "a.docx");
     expect(await settled(job)).toBe("done");
+  });
+});
+
+/** 该 id 的全部 convert 日志行（`lineFor` 只给第一行）。 */
+function linesForId(sidecar: Sidecar, job: string): Record<string, unknown>[] {
+  return linesOf(sidecar).filter((line) => line.id === basename(job));
+}
+
+/** 起一个 sidecar、让它把一个作业落定为 `done`，等到该 id 的日志行（标记先于日志行写出）。 */
+async function settledOnce(): Promise<{ sidecar: Sidecar; job: string }> {
+  const sidecar = startSidecar(makeSpool());
+  const job = writeJob(sidecar.jobs, "a.docx");
+  expect(await lineFor(sidecar, job)).toMatchObject({ result: "done", reason: "" });
+  return { sidecar, job };
+}
+
+/**
+ * Issue #1601（office-preview「转换 sidecar 实现与镜像」的两个场景；change sidecar-settled-claim
+ * design D6）。不用固定 sleep：哨兵作业的 `request.json` 更新，按 mtime 排在被测作业之后，哨兵的
+ * 日志行出现时被测作业至少已被判过一轮（`bad-request` 在领取时同步落定，行先于哨兵的行进 stderr）。
+ */
+describe("sidecar 脚本：已落定的作业不再领取", () => {
+  it("删除途中的作业不被重领：先删 in/ 再删 done、保留 request.json，该 id 恰一行日志、没有 failed，整目录随后可删", async () => {
+    const { sidecar, job } = await settledOnce();
+
+    // `done` 还在时不会被领取，所以先删 `in/` 没有竞态；删掉 `done` 之后才是 app 删除途中的输家次序。
+    rmSync(join(job, "in"), { recursive: true });
+    rmSync(join(job, "done"));
+    expect(existsSync(join(job, "request.json"))).toBe(true);
+    const sentinel = writeJob(sidecar.jobs, "sentinel.docx");
+    expect(await settled(sentinel)).toBe("done");
+    await lineFor(sidecar, sentinel);
+
+    const outcomes = linesForId(sidecar, job).map((line) => `${line.result}:${line.reason}`);
+    expect({ outcomes, failed: existsSync(join(job, "failed")) }).toEqual({
+      outcomes: ["done:"],
+      failed: false,
+    });
+    rmSync(job, { recursive: true });
+    expect(existsSync(job)).toBe(false);
+  });
+
+  it("已落定集合有界：作业目录删除并被列过一次之后，以同一 id 重建的就绪作业在标记等待上限内被领取", async () => {
+    const { sidecar, job } = await settledOnce();
+
+    rmSync(job, { recursive: true });
+    // 哨兵在删除之后才写出：领取到它的那一轮列表里已没有被删的 id。
+    const sentinel = writeJob(sidecar.jobs, "sentinel.docx");
+    expect(await settled(sentinel)).toBe("done");
+
+    writeJob(sidecar.jobs, "a.docx", undefined, basename(job));
+    expect(await settled(job)).toBe("done");
+    await waitFor("the second log line", () => linesForId(sidecar, job)[1], 2_000);
+    expect(linesForId(sidecar, job)).toHaveLength(2);
   });
 });
 
