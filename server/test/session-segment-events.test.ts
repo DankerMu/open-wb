@@ -114,14 +114,17 @@ function textBeforeEachStart(world: RecordingWorld): string[] {
 
 describe("tool-approval「审批事件」: the request and the step carry the pairing", () => {
   it(
-    "事件序与回放 (approval): request{…, stepId null} before step.start{bodyOffset 19, approvalId}",
+    "事件序与回放 (approval): step.start{bodyOffset 19, approvalId null} before request{…, stepId}",
     REAL,
     async () => {
       const world = await open("approval");
       const row = await pendingApproval(world);
-      await waitForEvent(world, "step.start");
       const messageId = assistantIdFor(world.fixture, world.session);
 
+      const [step] = starts(world);
+      expect(Object.keys(step ?? {}).sort()).toEqual(STEP_START_KEYS);
+      expect(step).toMatchObject({ messageId, name: "bash", bodyOffset: 19, approvalId: null });
+      expect(typeof step?.stepId).toBe("number");
       expect(requests(world)).toStrictEqual([
         {
           messageId,
@@ -129,12 +132,11 @@ describe("tool-approval「审批事件」: the request and the step carry the pa
           tool: "bash",
           title: TITLE,
           expiresAt: T + TTL_MS,
-          stepId: null,
+          stepId: step?.stepId,
         },
       ]);
-      const [step] = starts(world);
-      expect(Object.keys(step ?? {}).sort()).toEqual(STEP_START_KEYS);
-      expect(step).toMatchObject({ messageId, name: "bash", bodyOffset: 19, approvalId: row.id });
+      const types = sessionEvents(world).map((entry) => entry.event.type);
+      expect(types.indexOf("step.start")).toBeLessThan(types.indexOf("approval.request"));
       const snapshot = await snapshotMessage(world);
       expect(snapshot.steps.map((entry) => entry.bodyOffset)).toEqual([step?.bodyOffset]);
       expect(snapshot.approvals.map((entry) => entry.stepId)).toEqual([step?.stepId]);
@@ -145,33 +147,37 @@ describe("tool-approval「审批事件」: the request and the step carry the pa
   );
 
   it(
-    "两条并行审批分别作答: both requests stepId null; step.start pairs r1 then r2; offsets = text before",
+    "两条并行审批分别作答: both step.start approvalId null; requests pair r1 then r2; offsets = text before",
     REAL,
     async () => {
       const world = await open("approval-parallel");
       await prompted(world);
       const [r1, r2] = await waitForRows(world, 2);
-      await waitForEvent(world, "step.start", 2);
+      // Answer only after the pump read both selects, or the answer path publishes stepId null.
+      await waitForEvent(world, "approval.request", 2);
       await decide(world, "r2", "deny");
       await decide(world, "r1", "allow");
       await waitForTurn(world.fixture, world.session, "done");
       const messageId = assistantIdFor(world.fixture, world.session);
 
-      const request = (approvalId: number | undefined, title: string) => ({
+      const [first, second] = stepIds(world.fixture.db, messageId);
+      const request = (approvalId: number | undefined, title: string, stepId?: number) => ({
         messageId,
         approvalId,
         tool: "bash",
         title,
         expiresAt: T + TTL_MS,
-        stepId: null,
+        stepId,
       });
-      expect(requests(world)).toStrictEqual([request(r1?.id, TITLE), request(r2?.id, TITLE_2)]);
-      const [first, second] = stepIds(world.fixture.db, messageId);
+      expect(requests(world)).toStrictEqual([
+        request(r1?.id, TITLE, first),
+        request(r2?.id, TITLE_2, second),
+      ]);
       expect(
         starts(world).map(({ stepId, bodyOffset, approvalId }) => [stepId, bodyOffset, approvalId]),
       ).toEqual([
-        [first, FAKE_TEXT.length, r1?.id],
-        [second, FAKE_TEXT.length, r2?.id],
+        [first, FAKE_TEXT.length, null],
+        [second, FAKE_TEXT.length, null],
       ]);
       // 步骤的正文偏移: each offset is the length of the text the ring published before it.
       expect(textBeforeEachStart(world).map((text) => text.length)).toEqual(
@@ -181,6 +187,10 @@ describe("tool-approval「审批事件」: the request and the step carry the pa
       expect(snapshot.steps.map((step) => [step.id, step.bodyOffset])).toEqual(
         starts(world).map((step) => [step.stepId, step.bodyOffset]),
       );
+      expect(snapshot.approvals.map((entry) => [entry.id, entry.stepId])).toEqual([
+        [r1?.id, first],
+        [r2?.id, second],
+      ]);
       expect(world.errors).toEqual([]);
     },
   );

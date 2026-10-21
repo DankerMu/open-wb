@@ -230,11 +230,16 @@ const isUi =
   (frame: OmpFrame): boolean =>
     frame.type === "extension_ui_request" && frame.id === id;
 
-/** omp v18.0.10 (#620): tool-1's start follows the r1 select unanswered, the last frame before r1 is answered. */
+const isToolStart =
+  (toolCallId: string) =>
+  (frame: OmpFrame): boolean =>
+    frame.type === "tool_execution_start" && frame.toolCallId === toolCallId;
+
+/** omp v18.12.3 (#1563): tool-1's start precedes the r1 select, the last frame before r1 is answered. */
 async function iterateToR1Start(runtime: SessionRuntime): Promise<AsyncIterator<OmpFrame>> {
-  const iterator = await iterateTo(runtime, isUi("r1"));
-  const start = await iterator.next();
-  expect(start.value).toMatchObject({ type: "tool_execution_start", toolCallId: "tool-1" });
+  const iterator = await iterateTo(runtime, isToolStart("tool-1"));
+  const select = await iterator.next();
+  expect(select.value).toMatchObject({ type: "extension_ui_request", id: "r1" });
   return iterator;
 }
 

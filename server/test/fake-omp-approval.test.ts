@@ -1,7 +1,7 @@
 /**
  * Issue #458 fake-omp approval scenarios (parent s1c-turn-control-governance 6.3).
  * 只有最后一个 `--approval-mode` 恰为 `write` 时，`approval`/`approval-parallel`/`approval-then-abort`
- * 才门控：同 omp v18.0.10 实测（#620），先发全部 select{r1,r2}，再发全部 tool_execution_start（不等
+ * 才门控：同 omp v18.12.3 实测（#1563），先发全部 tool_execution_start，再发全部 select{r1,r2}（不等
  * 作答）；每条应答只结束自己的调用，每个 tool_execution_end 之后紧跟该调用的 toolResult message_end；
  * select 挂起时的 abort 延后到最后一条应答之后兑现，审批回合以实测的空 aborted 回合收尾。
  * 真实子进程；帧读取复用 fake-omp-helpers.ts（缺省 argv 即生产的 write，非门控基线显式传 yolo）。
@@ -50,14 +50,14 @@ const SELECT_R1 = {
   id: "r1",
   method: "select",
   title: "Allow tool: bash\nCommand: echo workbuddy-smoke",
-  options: ["Approve", "Deny"],
+  options: ["Approve", "Approve bash for this session", "Deny"],
 };
 const SELECT_R2 = {
   type: "extension_ui_request",
   id: "r2",
   method: "select",
   title: "Allow tool: bash\nCommand: echo workbuddy-smoke-2",
-  options: ["Approve", "Deny"],
+  options: ["Approve", "Approve bash for this session", "Deny"],
 };
 
 /** 该调用的 toolResult message_end：content 同 end 的 result.content，isError 恒为布尔。 */
@@ -127,7 +127,7 @@ function delta(text: string): Frame {
   };
 }
 
-/** SELECTED(k)：agent_start、3 段 delta、toolUse message_end、k 个 select、k 个 start。 */
+/** SELECTED(k)：agent_start、3 段 delta、toolUse message_end、k 个 start、k 个 select。 */
 function selected(parallel: boolean): Frame[] {
   const blocks = [{ type: "toolCall", id: "tool-1", name: "bash", arguments: C1_ARGS }];
   if (parallel) {
@@ -139,7 +139,7 @@ function selected(parallel: boolean): Frame[] {
     delta("from "),
     delta("fake-omp"),
     { type: "message_end", message: { role: "assistant", content: blocks, stopReason: "toolUse" } },
-    ...(parallel ? [SELECT_R1, SELECT_R2, START_C1, START_C2] : [SELECT_R1, START_C1]),
+    ...(parallel ? [START_C1, START_C2, SELECT_R1, SELECT_R2] : [START_C1, SELECT_R1]),
   ];
 }
 

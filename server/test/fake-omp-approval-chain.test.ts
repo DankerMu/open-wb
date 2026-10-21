@@ -1,9 +1,9 @@
 /**
  * Issue #470 fake-omp `approval-chain-abort-ignored`（父 s1c-turn-control-governance 6.6）。
- * 仅最后一个 `--approval-mode` 恰为 write 时门控：开头同 `approval`（r1 select 先于 C1 start，#620），
- * r1 任意应答后依次发 C1 结束帧、C1 toolResult、r2 select 与 C2 start；r2 应答后发 C2 结束帧与其
+ * 仅最后一个 `--approval-mode` 恰为 write 时门控：开头同 `approval`（C1 start 先于 r1 select，#1563），
+ * r1 任意应答后依次发 C1 结束帧、C1 toolResult、C2 start 与 r2 select；r2 应答后发 C2 结束帧与其
  * toolResult 并永久挂起。任何时刻的 abort 都不产生帧、不被延后兑现；进程只在 stdin 关闭或 SIGTERM 时
- * 退出。帧形状钉在 omp v18.0.10（见 change tasks.md）。真实子进程；缺省 argv 即生产的 write。
+ * 退出。帧序与 options 钉在 omp v18.12.3（#1563）。真实子进程；缺省 argv 即生产的 write。
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { once } from "node:events";
@@ -52,7 +52,7 @@ function start(call: Call): Frame {
 
 function select(id: string, call: Call): Frame {
   const title = `Allow tool: bash\nCommand: ${call.command}`;
-  const options = ["Approve", "Deny"];
+  const options = ["Approve", "Approve bash for this session", "Deny"];
   return { type: "extension_ui_request", id, method: "select", title, options };
 }
 
@@ -75,7 +75,7 @@ function ended(call: Call, approved: boolean): Frame[] {
   return [frame, { type: "message_end", message: { ...message, isError: !approved } }];
 }
 
-/** ack 之后的门控前缀：agent_start、三段 delta、toolUse message_end（仅 C1 块）、r1 select、C1 start。 */
+/** ack 之后的门控前缀：agent_start、三段 delta、toolUse message_end（仅 C1 块）、C1 start、r1 select。 */
 const PREFIX: Frame[] = [
   { type: "agent_start" },
   ...["Hello ", "from ", "fake-omp"].map((delta) => ({
@@ -91,13 +91,13 @@ const PREFIX: Frame[] = [
       stopReason: "toolUse",
     },
   },
-  select("r1", C1),
   start(C1),
+  select("r1", C1),
 ];
 
 /** r1 应答后恰好新增的四帧。 */
 function chained(approved: boolean): Frame[] {
-  return [...ended(C1, approved), select("r2", C2), start(C2)];
+  return [...ended(C1, approved), start(C2), select("r2", C2)];
 }
 
 function answer(id: string, reply: Frame): Frame {
