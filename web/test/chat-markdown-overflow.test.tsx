@@ -1,8 +1,11 @@
-// 助手正文 Markdown→hast 转换栈溢出时的本地错误边界（#1534，change markdown-body-error-boundary；chat-web「消息线程」
-// 场景「正文转换栈溢出时回退纯文本」）。seam：整页挂载 + 假 API（chat-page-support.tsx），文本变化重试一步直接
-// 渲染 `MessageBody`。N 是固定常量、在 issue 实测值（`> ` 3000 / `<div>` 1700）上留了余量，不是探出的最小值；
-// 断言本身自证溢出——没溢出时会渲染出 `blockquote` / `div`、`<script>` 会被消毒删掉。没有本地边界时异常被
-// react-router 的默认错误边界接住，整页换成 `Unexpected Application Error!`（红态的三个可观测量见各断言）。
+// 助手正文 Markdown→hast 转换栈溢出时的本地错误边界（issue 1534，change markdown-body-error-boundary；chat-web
+// 「消息线程」场景「正文转换栈溢出时回退纯文本」）。seam：整页挂载 + 假 API（chat-page-support.tsx），文本变化重试
+// 一步直接渲染 `MessageBody`。N 是固定常量、在 issue 实测值（`> ` 3000 / `<div>` 1700）上留了余量，不是探出的
+// 最小值；断言本身自证溢出——没溢出时会渲染出 `blockquote` / `div`、`<script>` 会被消毒删掉。抛出的错误类型取决
+// 于栈在哪里耗尽：多数是 `RangeError`，栈恰好在正则里耗尽时是 V8 的 `SyntaxError`「Stack overflow」（x86-64
+// Linux 上用例 4 在 remark-gfm 自动链接的 `RegExp.exec` 里实测如此），所以断言钉的是「本地边界接住」的归属，
+// 不是错误类型。没有本地边界时异常被 react-router 的默认错误边界接住，整页换成 `Unexpected Application Error!`
+// （红态的三个可观测量见 `expectCaughtLocally`）。
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { MessageBody } from "../src/features/chat/message-segments-view.js";
@@ -16,6 +19,8 @@ const QUOTES = `${"> ".repeat(6000)}x`;
 const DIVS = `${"<div>".repeat(4000)}x`;
 const QUOTES_SCRIPT = `${"> ".repeat(6000)}<script>window.__pwned=1</script>`;
 const RR_DEFAULT = "Error handled by React Router default ErrorBoundary";
+/** React 开发态报告被边界接住的渲染错误时点名接住它的边界。 */
+const LOCAL_BOUNDARY = "error boundary you provided, MarkdownErrorBoundary";
 
 let consoleError: MockInstance<typeof console.error>;
 
@@ -30,10 +35,18 @@ afterEach(() => {
   Reflect.deleteProperty(window, "__pwned");
 });
 
-/** 渲染期确实抛过 RangeError（React 报告被边界接住的错误），且 react-router 的默认错误边界没有接到。 */
+/**
+ * 渲染期确实抛过错，且是 `MarkdownErrorBoundary` 接住的：React 的同一条 console.error 里既有错误对象，又点名
+ * 了这个边界（错误类型随栈耗尽处而变，不断言）；react-router 的默认错误边界没有接到，页面不是它的错误页。
+ */
 function expectCaughtLocally() {
   const calls = consoleError.mock.calls;
-  expect(calls.some((args) => args.some((arg) => arg instanceof RangeError))).toBe(true);
+  const caughtHere = calls.some(
+    (args) =>
+      args.some((arg) => arg instanceof Error) &&
+      args.some((arg) => typeof arg === "string" && arg.includes(LOCAL_BOUNDARY)),
+  );
+  expect(caughtHere).toBe(true);
   expect(calls.some((args) => args.some((arg) => String(arg).includes(RR_DEFAULT)))).toBe(false);
   expect(document.body.textContent).not.toContain("Unexpected Application Error!");
 }

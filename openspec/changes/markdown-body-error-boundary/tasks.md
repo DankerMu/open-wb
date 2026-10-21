@@ -1,6 +1,6 @@
 # Tasks — markdown-body-error-boundary (#1534)
 
-Fixture level: compact. Risk packs: selected — Error handling（捕获渲染期 RangeError、纯文本回退、文本变化时重试）、Resource limits / large input（本 bug 就是大输入耗尽栈：测试常量 N 取固定值并留余量——issue 实测 3000 / 1700 或更大，不取探出的最小值，vitest + React + jsdom 的调用栈比裸 node 更深；生产不截断、不限深度）、XSS 面（回退是 React 文本节点）；not selected — Public API / CLI、Config、File IO、Schema、Concurrency、Release / packaging、Documentation（无）。「既有 Markdown 测试保持绿」归 Must preserve，不是 Legacy compatibility 意义上的触发。
+Fixture level: compact. Risk packs: selected — Error handling（捕获渲染期异常（多为 RangeError；栈在正则里耗尽时 V8 报 SyntaxError「Stack overflow」，x86-64 实测）、纯文本回退、文本变化时重试）、Resource limits / large input（本 bug 就是大输入耗尽栈：测试常量 N 取固定值并留余量——issue 实测 3000 / 1700 或更大，不取探出的最小值，vitest + React + jsdom 的调用栈比裸 node 更深；生产不截断、不限深度）、XSS 面（回退是 React 文本节点）；not selected — Public API / CLI、Config、File IO、Schema、Concurrency、Release / packaging、Documentation（无）。「既有 Markdown 测试保持绿」归 Must preserve，不是 Legacy compatibility 意义上的触发。
 
 Must preserve: 正常深度 Markdown 的渲染与既有测试（`chat-markdown.test.tsx`、`chat-markdown-html.test.tsx`、`chat-message-segments.test.tsx`）不变；`MarkdownBody` 本身与 `REHYPE_PLUGINS` 不动；拷入层 `web/src/components/assistant-ui/` 不动（ui-foundation 组件分层）；不加 CSS 规则（只用 Tailwind 类）；`server/` 零改动。
 
