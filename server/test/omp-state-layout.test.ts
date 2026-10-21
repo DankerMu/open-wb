@@ -536,6 +536,7 @@ describe("spawned child environment under the managed layout", () => {
       "HOME",
       "LANG",
       "OMP_PROFILE",
+      "OTEL_SDK_DISABLED",
       "PATH",
       "PI_BROWSER_CMUX",
       "PI_BROWSER_RELAY",

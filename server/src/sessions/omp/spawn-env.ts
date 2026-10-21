@@ -7,10 +7,10 @@ import { ompAgentDir, ompHome, ompHostOverlayPath, ompXdgHome } from "./state-la
 
 /**
  * Fixed whether or not `BROWSER_BIN` is set; sudo keeps exactly these names. The four browser pins
- * must be here too, or sudo drops them and they stop pinning.
+ * and `OTEL_SDK_DISABLED` must be here too, or sudo drops them and they stop pinning.
  */
 export const SUDO_PRESERVE_ENV =
-  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH";
+  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,PUPPETEER_EXECUTABLE_PATH";
 
 export function ompSpawnEnv(opts: {
   stateDir: string;
@@ -42,6 +42,13 @@ export function ompSpawnEnv(opts: {
     // Chromium connect directly, over any `http_proxy`; the literal 0 holds as above.
     PUPPETEER_PROXY: "direct://",
     PUPPETEER_PROXY_IGNORE_CERT_ERRORS: "0",
+    // omp's OTLP export reads only the env: a workspace `.env` naming an `OTEL_EXPORTER_OTLP_*`
+    // endpoint would send traces, logs and metrics (message content too, with
+    // `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`) anywhere (#1575). The literal is non-empty,
+    // so no dotenv overrides it. Independent of the overlay's `telemetry.otlpExportEnabled: false`:
+    // either one alone stops export (`can1357/oh-my-pi` tag `v18.12.3`,
+    // `packages/coding-agent/src/telemetry-export.ts:82`).
+    OTEL_SDK_DISABLED: "true",
   };
   if (process.env.LANG !== undefined) {
     env.LANG = process.env.LANG;

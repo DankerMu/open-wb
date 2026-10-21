@@ -4,8 +4,8 @@
  * 前缀」scenario「sudo 保留浏览器路径」, on the captured `spawnOmp` call. `PUPPETEER_EXECUTABLE_PATH`
  * comes only from the deployment's `BROWSER_BIN` (`browserBin`), after `LANG`/`TMPDIR`;
  * `PI_BROWSER_RELAY=0`, `PI_BROWSER_CMUX=0`, `PUPPETEER_PROXY=direct://` and
- * `PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0` are always set; nothing of the parent's browser or proxy
- * variables reaches the child; the sudo `--preserve-env=` element is one fixed string. The key set,
+ * `PUPPETEER_PROXY_IGNORE_CERT_ERRORS=0` are always set, and so is `OTEL_SDK_DISABLED=true` (#1575);
+ * nothing of the parent's browser or proxy variables reaches the child; the sudo `--preserve-env=` element is one fixed string. The key set,
  * the pinned values and the literal are the spec's; the key order is from the implementation and
  * design D4 (the spec fixes the set). None of it is derived from `src/sessions/omp/`.
  */
@@ -36,7 +36,7 @@ const PARENT: Record<string, string> = {
   http_proxy: "http://192.0.2.1:9",
 };
 const PRESERVE_ENV =
-  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH";
+  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,PUPPETEER_EXECUTABLE_PATH";
 /** The closed key set in the order D4 builds it; `PUPPETEER_EXECUTABLE_PATH` comes last. */
 const KEYS = [
   "PATH",
@@ -54,6 +54,7 @@ const KEYS = [
   "PI_BROWSER_CMUX",
   "PUPPETEER_PROXY",
   "PUPPETEER_PROXY_IGNORE_CERT_ERRORS",
+  "OTEL_SDK_DISABLED",
   "LANG",
   "TMPDIR",
 ];
@@ -114,12 +115,13 @@ async function capture(options: { ompUser?: string; browserBin?: string }): Prom
   };
 }
 
-/** The four pins hold their literals whatever the parent carries. */
+/** The four browser pins and the OTLP pin hold their literals whatever the parent carries. */
 function expectPins(call: Captured): void {
   expect(call.env.PI_BROWSER_RELAY).toBe("0");
   expect(call.env.PI_BROWSER_CMUX).toBe("0");
   expect(call.env.PUPPETEER_PROXY).toBe("direct://");
   expect(call.env.PUPPETEER_PROXY_IGNORE_CERT_ERRORS).toBe("0");
+  expect(call.env.OTEL_SDK_DISABLED).toBe("true");
 }
 
 /** No parent browser or proxy value anywhere in the call, and no browser `KEY=value` argv element. */
@@ -137,6 +139,7 @@ function expectNoParentBrowserValues(call: Captured): void {
     "PI_BROWSER_CMUX",
     "PUPPETEER_PROXY",
     "PUPPETEER_PROXY_IGNORE_CERT_ERRORS",
+    "OTEL_SDK_DISABLED",
   ]) {
     expect(call.args.some((arg) => arg.startsWith(`${key}=`))).toBe(false);
   }
@@ -181,7 +184,7 @@ describe("spawnOmp browser environment", () => {
     expect(relative(set)).toEqual(relative(unset));
   });
 
-  it("sudo: one fixed --preserve-env element ending in the five browser keys, set or unset", async () => {
+  it("sudo: one fixed --preserve-env element ending in the five browser keys and the OTLP pin, set or unset", async () => {
     const unset = await capture({ ompUser: "omp" });
     const set = await capture({ ompUser: "omp", browserBin: CHROMIUM });
 
@@ -201,7 +204,7 @@ describe("spawnOmp browser environment", () => {
         call.bin,
       ]);
       expect(call.args.find((arg) => arg.startsWith("--preserve-env="))).toMatch(
-        /,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH$/u,
+        /,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,PUPPETEER_EXECUTABLE_PATH$/u,
       );
       expectPins(call);
       expectNoParentBrowserValues(call);

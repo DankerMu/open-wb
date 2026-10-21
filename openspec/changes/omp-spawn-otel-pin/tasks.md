@@ -1,0 +1,12 @@
+# Tasks — omp-spawn-otel-pin (#1575)
+
+Fixture level: expanded. Risk packs: selected — Auth / permissions / secrets（`.env` 注入端点外发遥测；两道独立的关，真实二进制 + 入库负向对照证明）、Public API / CLI / script entry（sudo `--preserve-env=` 串是部署契约，成员与次序写进规格）、Config / project setup（overlay 的 `telemetry:` 块保留；环境钉不可配置）；not selected — File IO / path safety、Schema、Concurrency、Resource limits、Error handling、Release / packaging（见 proposal Triage）。
+
+Must preserve: 白名单其余键与取值、`PUPPETEER_EXECUTABLE_PATH` 只在配置 `BROWSER_BIN` 时出现且在 preserve 串末位；overlay 文件内容不变（`telemetry.otlpExportEnabled: false` 保留）；`process.ts` 的 spawn 形态与 argv 不变；已有官方用例全绿；不读父进程任何 `OTEL_*`。
+
+- [x] 1.1 开工核对：`spawn-env.ts:1-60`；`host-overlay.ts:24-25,76-77`；tag `v18.12.3` 的 `packages/coding-agent/src/telemetry-export.ts:70-90`（`OTEL_SDK_DISABLED` 判定在 `resolveSignalConfig` 之前）与导出何时发出（进程存活期间的批处理与周期定时器，宿主关停不 flush，design D5）；`packages/utils/src/env.ts` 的 dotenv 写入条件；design「Sibling surfaces」列的每个测试文件里写死白名单 / preserve 串的位置；`server/test/support/omp-official.ts:60,179`（去钉开关）与 overlay 替换手段（#1570 的 `PI_CONFIG_FILES` / `--config` 测试专用替换）。出入先改本 fixture 再继续。
+- [x] 1.2 测试先行（单测）：按 omp-runtime delta「环境白名单」新增的 WHEN/THEN 与 omp-uid-isolation delta 的 preserve 串，改 `omp-spawn-dotenv-pins.test.ts` 等写死的键集合 / 取值 / 前缀（从规格逐字写，不从源码推导）；`linux/uid-isolation.test.ts` 必到键表加 `OTEL_SDK_DISABLED`。先红。
+- [x] 1.3 实现：`ompSpawnEnv` 写 `OTEL_SDK_DISABLED: "true"`（注释同 `PI_BROWSER_RELAY` 一段：omp 的 OTLP 导出只看环境，`.env` 能注入端点；非空值 dotenv 覆盖不了；与 overlay 的 `telemetry.otlpExportEnabled` 是两道独立的关，issue 1575），`SUDO_PRESERVE_ENV` 按 design D3 的位置加名。
+- [x] 1.4 真实 omp：按 omp-runtime 新 Scenario 写四种配置，放进 `omp-official-overlay-pins.test.ts`（overlay 用该文件已有的 `overlayWithout(world, "telemetry:\n  otlpExportEnabled: false\n", …)` 加 `launch(world, overlay)`；删环境键在该文件局部的 `spawnImpl` 包装里 `delete env.OTEL_SDK_DISABLED`，不改 `omp-official.ts` 的三个互斥 wrapper；`.env` 用新的 plant 函数，不复用打开 advisor / ida 的 `plantPins`）。本地监听器只计数、不解析；每种配置在 `agent_end` 后观察同一窗口（design D5），关停之前断言；记下负向对照首个请求的时刻与路径、所用窗口、短间隔是否生效。CI 三处清单不动。
+- [x] 1.5 验证：`npm test --workspace server`；`WORKBUDDY_OMP_TEST=1 OMP_BIN=$PWD/var/omp/omp npx vitest run --root server --no-file-parallelism test/omp-official-`；typecheck；`bash scripts/size-guard.sh`；`make check`；（条件）`make test-guardrails`；`git diff --stat origin/master` 只含 change 目录、`server/src/sessions/omp/spawn-env.ts`、`server/test/**`（及条件下的两个 CI 清单脚本）。
+- [x] 1.6 文档（编排方）：ADR-0012 `:138` 后加「（2026-10-21 补充，#1575）」一条；system.md 9.8 `:452` 段与 `:533` 表补环境钉，并登记 design D6 的副作用。
