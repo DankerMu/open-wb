@@ -262,8 +262,18 @@ export function deferredReceipt(): ReceiptWaiter {
 }
 
 /**
- * omp v18.0.10 drops a prompt still pre-processing when `abort` arrives (generation bail, #650):
- * the turn has started once its `agent_start` or its local-only outcome reached the runtime.
+ * The turn has started once its `agent_start` or its local-only outcome reached the runtime; the
+ * deferred `abort` (#650) is written then. omp v18.0.10 dropped a prompt still pre-processing when
+ * `abort` arrived. The host's dispatch receipt is the stdin write of `prompt` (runtime.ts
+ * `#runPrompt`, process.ts `send`), not omp's `response` frame, so the window「prompt written →
+ * `agent_start` read」exists by construction on v18.12.3 too, which acknowledges a prompt only
+ * once admitted (`can1357/oh-my-pi` tag `v18.12.3`, `docs/rpc.md:119`, `:315`) and closes an
+ * aborted one with `prompt_result` `status: "aborted"` (`:336-337`). Measured on v18.12.3
+ * (omp-official-stop-early.test.ts, pinned): a stop right after the prompt's 202 sees no
+ * `agent_start` (agentStartBeforeStop false) and the frames run prompt response, `agent_start`,
+ * abort response, `prompt_result`. With the deferral removed (one mutation run) the abort went out
+ * first, omp emitted no `agent_start` and the turn closed only by the 8 s grace: v18.12.3 still
+ * drops a prompt aborted before its start.
  */
 export function isTurnStart(frame: OmpFrame, requestId: string): boolean {
   return frame.type === "agent_start" || isLocalComplete(frame, requestId);

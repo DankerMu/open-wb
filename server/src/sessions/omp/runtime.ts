@@ -244,8 +244,8 @@ export class SessionRuntime {
   }
 
   /**
-   * `false` until the turn's receipt resolved on its live, non-retiring generation. Writes `abort`
-   * only once the turn started (#650); before that the call is deferred to the start.
+   * `false` until the turn's receipt (its `prompt` stdin write) resolved on its live, non-retiring
+   * generation; writes `abort` once the turn started, deferred before that (#650, `isTurnStart`).
    */
   abort(): Promise<OmpFrame> | false {
     const turn = this.#turn;
