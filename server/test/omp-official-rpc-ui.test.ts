@@ -49,6 +49,7 @@ import {
   officialBin,
   onTeardown,
   openOfficialWorld,
+  teeStdoutFrames,
 } from "./support/omp-official.js";
 import { collectPrompt } from "./support/omp-runtime.js";
 
@@ -99,17 +100,11 @@ function teeStdin(child: ChildProcessWithoutNullStreams, sink: OmpFrame[]): void
   }) as typeof child.stdin.write;
 }
 
-/** Keeps the child's extension UI requests; the runtime still reads every byte. */
+/** Keeps the child's extension UI requests (support/omp-official.ts `teeStdoutFrames`). */
 function teeUiRequests(child: ChildProcessWithoutNullStreams, sink: OmpFrame[]): void {
-  let rest = "";
-  child.stdout.on("data", (chunk: Buffer | string) => {
-    const lines = (rest + chunk.toString()).split("\n");
-    rest = lines.pop() ?? "";
-    for (const line of lines.filter((part) => part.includes('"extension_ui_request"'))) {
-      const frame = JSON.parse(line) as OmpFrame;
-      if (frame.type === "extension_ui_request") {
-        sink.push(frame);
-      }
+  teeStdoutFrames(child.stdout, (frame) => {
+    if (frame.type === "extension_ui_request") {
+      sink.push(frame);
     }
   });
 }
