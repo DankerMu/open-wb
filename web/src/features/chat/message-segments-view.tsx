@@ -9,6 +9,7 @@
 //   或只含空白的正文渲染 `message-body`（空白正文段由切段函数丢掉）。
 // - 折叠块的「进行中」取该段的（只展开正在思考的那一段，owner 裁定 B12），标题取该段的时长（B5）。
 // - 工具段拿到整条消息的审批，各步骤卡按 `stepId` 取配上自己的那一条画确认小标记（D12）。
+import { Component, type ReactNode } from "react";
 import { MarkdownBody } from "./markdown-body.js";
 import type { MessageSegment } from "./message-segments.js";
 import type { ChatMessageCustom } from "./runtime-convert.js";
@@ -35,6 +36,32 @@ function Caret() {
 }
 
 /**
+ * 正文段的本地错误边界（issue 1534，chat-web「消息线程」场景「正文转换栈溢出时回退纯文本」）：嵌套过深时
+ * Markdown→hast 转换在渲染期栈溢出抛 `RangeError`，这里接住、回退为原文纯文本（React 文本节点，不经 HTML
+ * 解析），不冒到路由的默认错误页。上一次提交已是回退态且文本变了才清错误态重试（接住错误那次提交的
+ * `prevState` 还不是错误态，不会多试一次）；同一文本再抛只是再落回回退态，不会循环。
+ */
+class MarkdownErrorBoundary extends Component<
+  { text: string; children: ReactNode },
+  { failed: boolean }
+> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  override componentDidUpdate(prevProps: { text: string }, prevState: { failed: boolean }) {
+    if (prevState.failed && prevProps.text !== this.props.text) this.setState({ failed: false });
+  }
+
+  override render() {
+    if (this.state.failed) return <p className="whitespace-pre-wrap">{this.props.text}</p>;
+    return this.props.children;
+  }
+}
+
+/**
  * 正文：Markdown，或已停止且为空（含只有空白：运行时消息里它本来就是空串）时的占位；`dot` 时在末尾带小圆点。running 时正文经 smooth-text.tsx 逐字展开
  * （design D8）；等待指示让位时本组件才挂载，此时的首段与「从空串开始的第一段」同样直接整段显示（useSmooth
  * 的分支，7a 实测）。已被后续块隔开的正文段不再增长，只有最后一个正文段会逐字展开。
@@ -46,7 +73,11 @@ export function MessageBody({ dot, status, text }: { dot: boolean; status: Statu
         <p className="text-(--wb-text-tertiary)">（已停止生成）</p>
       ) : (
         <SmoothText running={status === "running"} text={text}>
-          {(shown) => <MarkdownBody text={shown} />}
+          {(shown) => (
+            <MarkdownErrorBoundary text={shown}>
+              <MarkdownBody text={shown} />
+            </MarkdownErrorBoundary>
+          )}
         </SmoothText>
       )}
       {dot ? <Caret /> : null}
