@@ -89,6 +89,9 @@ describe("approval registration", () => {
           decided_at: null,
         },
       ]);
+      // The bash step started before its select (#1563): the select paired it before the request.
+      const stepId = assistantSteps(world).steps[0]?.id;
+      expect(typeof stepId).toBe("number");
       const requests = ofType(sessionEvents(world), "approval.request");
       expect(requests.map((event) => event.data)).toEqual([
         {
@@ -97,7 +100,7 @@ describe("approval registration", () => {
           tool: "bash",
           title: TITLE,
           expiresAt: T + TTL_MS,
-          stepId: null,
+          stepId,
         },
       ]);
       expectQuiet(world);
@@ -110,7 +113,7 @@ describe("approval answers", () => {
   it("R2 allow settles the row, answers Approve once and completes the turn", REAL, async () => {
     const world = await open();
     const row = await pendingApproval(world);
-    // Issue 1474: the bash step starts without waiting for the answer and takes the approval.
+    // Issue 1474: the bash step starts without waiting for the answer; its select pairs it (#1563).
     await waitForEvent(world, "step.start");
     const stepId = assistantSteps(world).steps[0]?.id ?? null;
     world.clock.nowMs = T + 1_000;
@@ -440,7 +443,7 @@ describe("approval ownership", () => {
 });
 
 describe("approvals of an always-ask session (#1009)", () => {
-  /** fake-omp-composer.mjs WRITE_CALL / WRITE_SELECT_ID, as omp v18.0.10 titles a `write` call. */
+  /** fake-omp-composer.mjs WRITE_CALL / WRITE_SELECT_ID, as omp titles a `write` call (v18.12.3 too). */
   const WRITE_TITLE = "Allow tool: write\nPath: workbuddy-report.html";
 
   /** An `approval-write` world; `always-ask` is chosen over REST before the first prompt. */
@@ -484,6 +487,9 @@ describe("approvals of an always-ask session (#1009)", () => {
           decided_at: null,
         },
       ]);
+      // The write step started before its select (#1563): the select paired it.
+      const [writeStep] = assistantSteps(world).steps;
+      expect(writeStep?.name).toBe("write");
       expect(ofType(sessionEvents(world), "approval.request").map((event) => event.data)).toEqual([
         {
           messageId: assistantId,
@@ -491,7 +497,7 @@ describe("approvals of an always-ask session (#1009)", () => {
           tool: "write",
           title: WRITE_TITLE,
           expiresAt: T + TTL_MS,
-          stepId: null,
+          stepId: writeStep?.id,
         },
       ]);
       // The PATCH wrote a `session.permission`: only the approval audits are counted.

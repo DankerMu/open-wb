@@ -2,10 +2,10 @@
  * Issue 1473 (chat-interleaved-segments 4.2, design D6/D7) through the production assembly
  * (createApp → registerSessions → SessionSupervisor, in-memory SQLite): tool-approval「确认与步骤配对」
  * and turn-control「拷贝审批记录」. The parallel case runs the real fake-omp `approval-parallel`
- * child (both selects before both tool starts, like omp v18.0.10); every other order — a tool start
- * before its select, a step that ended first, another tool's step, an answer before the pump reads
- * the select — needs a scripted controlled child, as fake-omp emits no such sequence and its
- * scripts stay as they are (#910 `session-thinking.test.ts` precedent). Frames of one case are
+ * child (both tool starts before both selects, like omp v18.12.3, #1563); every other order — a
+ * select before its tool start (omp v18.0.10's order), a step that ended first, another tool's step,
+ * an answer before the pump reads the select — needs a scripted controlled child, as fake-omp emits
+ * no such sequence and its scripts stay as they are (#910 `session-thinking.test.ts` precedent). Frames of one case are
  * written as one stdout chunk where the order against the runtime's synchronous approval insert
  * matters: the process layer then registers the approval row before the pump reads the frames
  * before its select (design Context「审批行早于 pump 插入」).
@@ -50,6 +50,7 @@ import {
   stepRows,
   TEXT,
 } from "./session-approval-script.js";
+import { getSessionMessages } from "./session-rest-helpers.js";
 import { FIXED_NOW, withFakeClock, withSessionStore } from "./session-store-helpers.js";
 import {
   assistantIdFor,
@@ -92,6 +93,31 @@ async function ownerStop(world: RecordingWorld): Promise<void> {
   expect(response.statusCode).toBe(202);
 }
 
+/** `chat_approvals.id` of the message's rows, in id order (the test's own SQL). */
+function approvalIds(db: DatabaseSync, messageId: number): number[] {
+  return db
+    .prepare("SELECT id FROM chat_approvals WHERE message_id = ? ORDER BY id")
+    .all(messageId)
+    .map((row) => Number(row.id));
+}
+
+interface SnapshotApproval {
+  stepId: number | null;
+}
+interface SnapshotMessage {
+  id: number;
+  approvals: SnapshotApproval[];
+}
+
+/** The assistant message's `approvals` read over the history route (tool-approval「审批快照」). */
+async function snapshotApprovals(world: RecordingWorld): Promise<SnapshotApproval[]> {
+  const response = await getSessionMessages(world.fixture.app, world.session, world.cookie);
+  expect(response.statusCode).toBe(200);
+  const messageId = assistantIdFor(world.fixture, world.session);
+  const { messages } = response.json() as { messages: SnapshotMessage[] };
+  return messages.find((message) => message.id === messageId)?.approvals ?? [];
+}
+
 const worlds: ApprovalWorld[] = [];
 
 afterEach(async () => {
@@ -113,7 +139,12 @@ describe("tool-approval「确认与步骤配对」: same name, first in first ou
       await waitForEvent(world, "step.start", 2);
       const messageId = assistantIdFor(world.fixture, world.session);
       const [first, second] = stepIds(world.fixture.db, messageId);
-      // Paired when the starts were persisted, before any answer; nothing else on the rows moved.
+      // Start first (#1563): each start found the queue empty; each select paired the earliest
+      // unpaired bash step, before any answer; nothing else on the rows moved.
+      expect(ofType(sessionEvents(world), "step.start").map((e) => e.data.approvalId)).toEqual([
+        null,
+        null,
+      ]);
       expect(pairingRows(world.fixture.db, messageId)).toEqual([
         { request_id: "r1", decision: null, decided_at: null, step_id: first },
         { request_id: "r2", decision: null, decided_at: null, step_id: second },
@@ -155,17 +186,17 @@ describe("tool-approval「确认与步骤配对」: same name, first in first ou
         { type: "extension_ui_response", id: "r2", value: "Deny" },
         { type: "extension_ui_response", id: "r1", value: "Approve" },
       ]);
-      const request = (approvalId: number | undefined, title: string) => ({
+      const request = (approvalId: number | undefined, title: string, stepId?: number) => ({
         type: "approval.request",
-        data: { messageId, approvalId, tool: "bash", title, expiresAt: T + TTL_MS, stepId: null },
+        data: { messageId, approvalId, tool: "bash", title, expiresAt: T + TTL_MS, stepId },
       });
       const resolved = (approvalId: number | undefined, decision: string) => ({
         type: "approval.resolved",
         data: { messageId, approvalId, decision },
       });
       expect(approvalEvents(world)).toEqual([
-        request(r1?.id, TITLE),
-        request(r2?.id, TITLE_2),
+        request(r1?.id, TITLE, first),
+        request(r2?.id, TITLE_2, second),
         resolved(r2?.id, "deny"),
         resolved(r1?.id, "allow"),
       ]);
@@ -235,10 +266,11 @@ describe("tool-approval「确认与步骤配对」: the later arrival pairs, in 
   );
 
   it(
-    "a step paired at its start takes no second approval: select r1, start c1, select r2, start c2",
+    "审批 select 先于步骤到达 / a step paired at its start takes no second approval: select r1, start c1, select r2, start c2",
     REAL,
     async () => {
       let answered = 0;
+      // v18.0.10's order, only scripted now (#1563): the sole carrier of 审批 select 先于步骤到达.
       const { world } = await openScripted({
         prompt: (child) =>
           child.emitRaw(chunk(select("r1"), start("c1"), select("r2"), start("c2"))),
@@ -257,6 +289,13 @@ describe("tool-approval「确认与步骤配对」: the later arrival pairs, in 
       const messageId = assistantIdFor(world.fixture, world.session);
       const [c1, c2] = stepIds(world.fixture.db, messageId);
       expect(pairingRows(world.fixture.db, messageId).map((row) => row.step_id)).toEqual([c1, c2]);
+      const ids = approvalIds(world.fixture.db, messageId);
+      expect(ofType(sessionEvents(world), "approval.request").map((e) => e.data.stepId)).toEqual([
+        null,
+        null,
+      ]);
+      expect(ofType(sessionEvents(world), "step.start").map((e) => e.data.approvalId)).toEqual(ids);
+      expect((await snapshotApprovals(world)).map((entry) => entry.stepId)).toEqual([c1, c2]);
       expect(world.errors).toEqual([]);
     },
   );

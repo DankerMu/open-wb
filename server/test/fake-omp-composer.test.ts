@@ -85,7 +85,7 @@ const SELECT_W1 = {
   id: "w1",
   method: "select",
   title: "Allow tool: write\nPath: workbuddy-report.html",
-  options: ["Approve", "Deny"],
+  options: ["Approve", "Approve write for this session", "Deny"],
 };
 const STOP = [
   { type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } },
@@ -156,11 +156,11 @@ async function applied(session: Session, id: string): Promise<Frame> {
   return { model, thinkingLevel };
 }
 
-/** always-ask 下的门控前缀：toolUse message_end → 唯一的 select → write 的 start，随后观察窗无帧。 */
+/** always-ask 下的门控前缀：toolUse message_end → write 的 start → 唯一的 select，随后观察窗无帧。 */
 async function startWriteGated(): Promise<{ session: Session; writeArgs: Frame }> {
   const session = await startPromptedSession({ scenario: "approval-write", extraArgs: ALWAYS_ASK });
   const ack = session.frames.findIndex(response("req_1", "prompt"));
-  await session.wait((frame) => frame.type === "tool_execution_start");
+  await session.wait(isSelect);
   const turn = session.frames.slice(ack + 1);
   const use = asRecord(turn.find((frame) => frame.type === "message_end")?.message);
   const [block] = use.content as Frame[];
@@ -180,8 +180,8 @@ async function startWriteGated(): Promise<{ session: Session; writeArgs: Frame }
         stopReason: "toolUse",
       },
     },
-    SELECT_W1,
     { type: "tool_execution_start", toolCallId: block?.id, toolName: "write", args: writeArgs },
+    SELECT_W1,
   ]);
   return { session, writeArgs };
 }
@@ -225,7 +225,7 @@ describe("fake omp approval-write scenario (#998)", () => {
       extraArgs: ALWAYS_ASK,
       cwd: tmp,
     });
-    await session.wait((frame) => frame.type === "tool_execution_start");
+    await session.wait(isSelect);
     session.write(reply("w1", { value: "Approve" }));
     await session.wait(isTerminal);
     await closeSession(session);
@@ -377,7 +377,7 @@ describe("fake omp set_model / set_thinking_level answers (#998)", () => {
 describe("fake omp commands arriving mid-turn (#998)", () => {
   it("answers after the terminal agent_end of a turn held on a pending select", async () => {
     const session = await startPromptedSession({ scenario: "approval", extraArgs: WRITE });
-    await session.wait((frame) => frame.type === "tool_execution_start");
+    await session.wait(isSelect);
     await step(session, [setModel("m", "m3"), setLevel("l", BAD_LEVEL), setLevel("l2", "low")], []);
     // 在途期间 get_state 照常应答，且尚未生效。
     expect(await applied(session, "s0")).toEqual(TODAY);

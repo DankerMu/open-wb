@@ -432,17 +432,18 @@ describe("SessionRuntime never answers an outstanding approval", () => {
 
   async function iterateToR1(runtime: SessionRuntime): Promise<AsyncIterator<OmpFrame>> {
     const iterator = runtime.prompt("run the tool")[Symbol.asyncIterator]();
+    let started = false;
     for (;;) {
       const step = await iterator.next();
       if (step.done === true) {
         throw new Error("turn ended before the r1 approval select");
       }
+      // omp v18.12.3 (#1563): tool-1's start precedes r1, the last frame before an answer.
       if (isUi("r1")(step.value)) {
-        // omp v18.0.10 (#620): tool-1's start follows r1 unanswered, the last frame before an answer.
-        const start = await iterator.next();
-        expect(start.value).toMatchObject({ type: "tool_execution_start", toolCallId: "tool-1" });
+        expect(started).toBe(true);
         return iterator;
       }
+      started ||= step.value.type === "tool_execution_start" && step.value.toolCallId === "tool-1";
     }
   }
 

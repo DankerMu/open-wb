@@ -1,9 +1,9 @@
 /**
  * Issue #464 parallel approvals, per-approval timers and ring order (R11–R13, R19). Real fake-omp
- * `approval`/`approval-parallel` children, which (like omp v18.0.10, #620) emit each select before
- * its `tool_execution_start`; a test-side stdout gate holds `r2`'s select (R12), or merges the select
- * with its tool start (R13) or the text deltas through the tool start (R19) into one stdout write so
- * the frame-order race is reproduced deterministically. SSE is the real endpoint; ids are
+ * `approval`/`approval-parallel` children, which (like omp v18.12.3, #1563) emit each
+ * `tool_execution_start` before its select; a test-side stdout gate holds `r2`'s select (R12), or
+ * merges the tool start with its select (R13) or the text deltas through the select (R19) into one
+ * stdout write so the frame-order race is reproduced deterministically. SSE is the real endpoint; ids are
  * `<epoch>:<seq>`.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -78,6 +78,16 @@ async function sse(world: ApprovalWorld, lastEventId: string | undefined): Promi
   return throughTurnEnd(await openSse(world, lastEventId));
 }
 
+/** `chat_approvals.step_id` of the session's rows, in id order (the test's own SQL). */
+function approvalRowsStepIds(world: ApprovalWorld): Array<number | null> {
+  return world.fixture.db
+    .prepare(
+      "SELECT a.step_id FROM chat_approvals AS a JOIN chat_messages AS m ON m.id = a.message_id WHERE m.session_id = ? ORDER BY a.id",
+    )
+    .all(world.session)
+    .map((row) => (row.step_id === null ? null : Number(row.step_id)));
+}
+
 function pair(rows: ApprovalRow[]): [ApprovalRow, ApprovalRow] {
   const [first, second] = rows;
   if (first === undefined || second === undefined) {
@@ -86,17 +96,17 @@ function pair(rows: ApprovalRow[]): [ApprovalRow, ApprovalRow] {
   return [first, second];
 }
 
-/** Waits until the gate holds the select and then its `tool_execution_start`, then writes all at once. */
+/** Waits until the gate holds the `tool_execution_start` and then r1's select, then writes all at once. */
 async function releaseMerged(world: ApprovalWorld): Promise<void> {
   const spawned = await waitFor(() => world.spawned[0], "gated child");
   await waitFor(
-    () => (isToolStart(spawned.gate.held()) ? true : undefined),
-    "held select and tool start",
+    () => (isSelect("r1")(spawned.gate.held()) ? true : undefined),
+    "held tool start and select",
   );
   const held = spawned.gate.held();
-  const select = held.indexOf('"type":"extension_ui_request"');
-  expect(select).toBeGreaterThanOrEqual(0);
-  expect(select).toBeLessThan(held.indexOf('"type":"tool_execution_start"'));
+  const start = held.indexOf('"type":"tool_execution_start"');
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(start).toBeLessThan(held.indexOf('"type":"extension_ui_request"'));
   spawned.gate.release();
 }
 
@@ -147,12 +157,12 @@ describe("parallel approvals", () => {
         "deny",
         "allow",
       ]);
-      // Like omp v18.0.10 (#620): both selects precede both tool starts.
+      // Like omp v18.12.3 (#1563): both tool starts precede both selects.
       expect(
         frames
           .filter((frame) => frame.event === "approval.request" || frame.event === "step.start")
           .map((frame) => frame.event),
-      ).toEqual(["approval.request", "approval.request", "step.start", "step.start"]);
+      ).toEqual(["step.start", "step.start", "approval.request", "approval.request"]);
       const turnEnds = frames.filter((frame) => frame.event === "turn.end");
       expect(turnEnds).toHaveLength(1);
       expect(frames[frames.length - 1]).toBe(turnEnds[0]);
@@ -215,16 +225,15 @@ describe("parallel approvals", () => {
 
 describe("approval ring order", () => {
   it(
-    "R13 request precedes step.start, resolved follows it adjacently, and Last-Event-ID replays",
+    "R13 step.start precedes request, resolved follows it adjacently, and Last-Event-ID replays",
     REAL,
     async () => {
-      const world = await open("approval", { hold: isSelect("r1") });
+      const world = await open("approval", { hold: isToolStart });
       await prompted(world);
       await releaseMerged(world);
       const [row] = await waitForRows(world, 1);
+      // decide publishes resolved outside the pump: answer only once approval.request is in the ring.
       await waitForEvent(world, "approval.request");
-      // decide publishes resolved outside the pump: answer only once step.start(bash) is in the ring.
-      await waitForEvent(world, "step.start");
       if (row === undefined) {
         throw new Error("missing approval row");
       }
@@ -243,9 +252,9 @@ describe("approval ring order", () => {
         (frame) =>
           frame.event === "step.end" && frame.data.stepId === frames[stepStart]?.data.stepId,
       );
-      expect(request).toBeGreaterThan(0);
-      expect(stepStart).toBeGreaterThan(request);
-      expect(resolved).toBeGreaterThan(stepStart);
+      expect(stepStart).toBeGreaterThan(0);
+      expect(request).toBeGreaterThan(stepStart);
+      expect(resolved).toBeGreaterThan(request);
       expect(stepEnd).toBeGreaterThan(resolved);
       expect(frames[stepEnd]?.data.status).toBe("done");
       expect(frames.filter((frame) => frame.event.startsWith("approval."))).toHaveLength(2);
@@ -253,13 +262,16 @@ describe("approval ring order", () => {
         frames[frames.length - 1],
       ]);
       expect(frames[frames.length - 1]?.data.status).toBe("done");
+      const stepId = frames[stepStart]?.data.stepId;
+      expect(typeof stepId).toBe("number");
+      expect(frames[stepStart]?.data.approvalId).toBeNull();
       expect(frames[request]?.data).toEqual({
         messageId: row.message_id,
         approvalId: row.id,
         tool: "bash",
         title: TITLE,
         expiresAt: T + TTL_MS,
-        stepId: null,
+        stepId,
       });
       expect(frames[resolved]?.data).toEqual({
         messageId: row.message_id,
@@ -270,26 +282,26 @@ describe("approval ring order", () => {
       expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
       expect(new Set(seqs).size).toBe(seqs.length);
       expect(new Set(frames.map((frame) => frame.id.split(":")[0])).size).toBe(1);
-      expect(seqOf(frames[request]) + 1).toBe(seqOf(frames[stepStart]));
-      expect(seqOf(frames[stepStart]) + 1).toBe(seqOf(frames[resolved]));
+      expect(seqOf(frames[stepStart]) + 1).toBe(seqOf(frames[request]));
+      expect(seqOf(frames[request]) + 1).toBe(seqOf(frames[resolved]));
 
-      const afterRequest = await sse(world, frames[request]?.id);
-      expect(afterRequest[0]?.event).toBe("step.start");
-      expect(afterRequest.map((frame) => frame.id)).toEqual(
-        frames.slice(request + 1).map((frame) => frame.id),
-      );
       const afterStart = await sse(world, frames[stepStart]?.id);
-      expect(afterStart[0]?.event).toBe("approval.resolved");
+      expect(afterStart[0]?.event).toBe("approval.request");
       expect(afterStart.map((frame) => frame.id)).toEqual(
         frames.slice(stepStart + 1).map((frame) => frame.id),
       );
-      const beforeRequest = await sse(world, frames[request - 1]?.id);
-      expect(beforeRequest.map((frame) => [frame.id, frame.event])).toEqual(
-        frames.slice(request).map((frame) => [frame.id, frame.event]),
+      const afterRequest = await sse(world, frames[request]?.id);
+      expect(afterRequest[0]?.event).toBe("approval.resolved");
+      expect(afterRequest.map((frame) => frame.id)).toEqual(
+        frames.slice(request + 1).map((frame) => frame.id),
       );
-      expect(beforeRequest.slice(0, 3).map((frame) => frame.event)).toEqual([
-        "approval.request",
+      const beforeStart = await sse(world, frames[stepStart - 1]?.id);
+      expect(beforeStart.map((frame) => [frame.id, frame.event])).toEqual(
+        frames.slice(stepStart).map((frame) => [frame.id, frame.event]),
+      );
+      expect(beforeStart.slice(0, 3).map((frame) => frame.event)).toEqual([
         "step.start",
+        "approval.request",
         "approval.resolved",
       ]);
     },
@@ -302,8 +314,9 @@ describe("approval ring order", () => {
       let world: ApprovalWorld | undefined;
       let decided: Promise<unknown> | undefined;
       let requestsAtDecide: number | undefined;
-      // The select arrives in the same chunk as the held text deltas: the process layer has
-      // registered it before the pump publishes the first text.delta, which is where we settle.
+      // The tool start and then the select arrive in the same chunk as the held text deltas: the
+      // process layer has registered r1 before the pump publishes the first text.delta, which is
+      // where we settle (tool-approval「作答先于 pump 读到 select」).
       const onEvent = (sessionId: string, _epoch: number, event: ChatEvent<number>): void => {
         if (world === undefined || decided !== undefined) {
           return;
@@ -333,6 +346,13 @@ describe("approval ring order", () => {
       // The settlement backfills the request inside the text.delta publication and publishes
       // resolved a few microtasks later, before the pump has worked through to the tool start.
       expect(order).toEqual(["approval.request", "approval.resolved", "step.start"]);
+      // The start found an empty queue; the select, read after the settlement published its
+      // request, only queues; no later bash step: the row stays unpaired.
+      const [request] = ofType(sessionEvents(world), "approval.request");
+      const [bashStart] = ofType(sessionEvents(world), "step.start");
+      expect(request?.data.stepId).toBeNull();
+      expect(bashStart?.data.approvalId).toBeNull();
+      expect(approvalRowsStepIds(world)).toEqual([null]);
       expect(responses(spawnedAt(world, 0))).toEqual([
         { type: "extension_ui_response", id: "r1", value: "Approve" },
       ]);

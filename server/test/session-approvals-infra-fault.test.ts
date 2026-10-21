@@ -5,6 +5,9 @@
  * with its audit, its timer revoked, no frame written. Real fake-omp children, real SQLite triggers
  * for injected failures, the production REST assembly and the injected clock. Issue #662: the
  * approval whose own timeout transaction failed keeps its registration, so that retire denies it too.
+ * Issue #1571: fake-omp emits each tool start before its select (omp v18.12.3), so the cases that
+ * fail the step insert hold the start and release it together with r1's select as one chunk: the
+ * runtime registers r1 at parse time, before the pump commits the step.
  */
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +17,7 @@ import {
   approvalRow,
   approvalRows,
   auditCount,
+  isSelect,
   isToolStart,
   ofType,
   openApprovalWorld,
@@ -43,9 +47,13 @@ const SINK_BROKEN = "observation sink broken";
 const TIMEOUT_BLOCKED = "r1 timeout blocked";
 const DENY_BLOCKED = "r1 deny blocked";
 const AUDIT_BLOCKED = "approval audit blocked";
-/** In `approval`, the first persistent write after r1 registers is tool_execution_start's step. */
+const PAIRING_BLOCKED = "r2 pairing blocked";
+/** With start and r1's select in one chunk, the first persistent write after r1 registers is the step. */
 const BLOCK_STEP = `CREATE TRIGGER block_tool_step BEFORE INSERT ON chat_steps
   BEGIN SELECT RAISE(ABORT, '${STEP_BLOCKED}'); END`;
+/** r2's select-time pairing write (tool-approval「配对写失败」, the select-time case). */
+const BLOCK_R2_PAIRING = `CREATE TEMP TRIGGER block_r2_pairing BEFORE UPDATE OF step_id ON chat_approvals
+  WHEN NEW.request_id = 'r2' BEGIN SELECT RAISE(ABORT, '${PAIRING_BLOCKED}'); END`;
 const BLOCK_AUDIT = `CREATE TRIGGER block_approval_audit BEFORE INSERT ON audit_events
   WHEN NEW.kind = 'session.approval' BEGIN SELECT RAISE(ABORT, '${AUDIT_BLOCKED}'); END`;
 
@@ -146,10 +154,18 @@ async function parallelPending(world: ApprovalWorld): Promise<[ApprovalRow, Appr
   return [r1, r2];
 }
 
-/** F1(a)/F3/F4 set-up: r1 pending, then its tool_execution_start step insert fails. */
-async function commitFaulted(prepare: (db: DatabaseSync) => void) {
-  const world = await open("approval", { prepare });
+/** Holds `approval`'s tool start until r1's select is held too, then writes both as one chunk. */
+async function releaseStartWithSelect(world: ApprovalWorld): Promise<void> {
+  const spawned = await waitFor(() => world.spawned[0], "gated child");
+  await waitFor(() => (isSelect("r1")(spawned.gate.held()) ? true : undefined), "held r1 select");
+  spawned.gate.release();
+}
+
+/** F1a/F1b/F3/F4 set-up: r1 registered, then the step commit of its tool start faults. */
+async function commitFaulted(options: Parameters<typeof openApprovalWorld>[1]) {
+  const world = await open("approval", { ...options, hold: isToolStart });
   await prompted(world);
+  await releaseStartWithSelect(world);
   const [row] = await waitForRows(world, 1);
   if (row === undefined) {
     throw new Error("missing pending approval row");
@@ -163,7 +179,7 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
     "F1a a failed #commit write retires the slot and denies r1; the TTL never writes timeout",
     REAL,
     async () => {
-      const { world, row } = await commitFaulted((db) => db.exec(BLOCK_STEP));
+      const { world, row } = await commitFaulted({ prepare: (db) => db.exec(BLOCK_STEP) });
 
       expect(world.errors).toHaveLength(1);
       expect(containsMessage(world.errors[0], STEP_BLOCKED)).toBe(true);
@@ -185,15 +201,13 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
     "F1b an onEvent sink violation retires the slot and denies r1; the TTL never writes timeout",
     REAL,
     async () => {
-      const world = await open("approval", {
+      const { world, row } = await commitFaulted({
         onEvent(_sessionId, _epoch, event) {
           if (event.type === "step.start") {
             throw new Error(SINK_BROKEN);
           }
         },
       });
-      const row = await pendingApproval(world);
-      await infraRetired(world);
 
       expect(world.errors).toHaveLength(1);
       expect(containsMessage(world.errors[0], SINK_BROKEN)).toBe(true);
@@ -257,7 +271,7 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
     "F3 the owner's answer after the infra retire is 409 approval_settled and writes nothing",
     REAL,
     async () => {
-      const { world, row } = await commitFaulted((db) => db.exec(BLOCK_STEP));
+      const { world, row } = await commitFaulted({ prepare: (db) => db.exec(BLOCK_STEP) });
       const rowBefore = approvalRow(world.fixture.db, row.id);
       const auditsBefore = auditCount(world.fixture.db);
 
@@ -274,9 +288,11 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
     "F4 a failed deny transaction never blocks the retire and leaves no timer behind",
     REAL,
     async () => {
-      const { world, row } = await commitFaulted((db) => {
-        db.exec(BLOCK_STEP);
-        db.exec(BLOCK_AUDIT);
+      const { world, row } = await commitFaulted({
+        prepare: (db) => {
+          db.exec(BLOCK_STEP);
+          db.exec(BLOCK_AUDIT);
+        },
       });
 
       expect(world.timersDueAt(T + TTL_MS)).toBe(0);
@@ -306,29 +322,35 @@ describe("infra-fault retire denies pending approvals (#619)", () => {
     "F5 a cascade-deleted approval row is a silent miss of the infra retire, not a second fault",
     REAL,
     async () => {
-      const world = await open("approval", {
-        prepare: (db) => db.exec(BLOCK_STEP),
-        hold: isToolStart,
-      });
-      const row = await pendingApproval(world);
-      // The rows a message-delete cascade removes, while tool_execution_start is still held.
+      const world = await open("approval-parallel", { hold: isSelect("r2") });
+      const r1 = await pendingApproval(world);
+      // r1 paired c1 at its select; c2 still runs unpaired, so r2's select will write step_id.
+      // Created only now: in `prepare` it would have blocked r1's pairing first.
+      world.fixture.db.exec(BLOCK_R2_PAIRING);
+      // The rows a message-delete cascade removes, while r2's select is still held.
       world.fixture.db
         .prepare("DELETE FROM chat_approvals WHERE message_id = ?")
-        .run(row.message_id);
+        .run(r1.message_id);
       spawnedAt(world, 0).gate.release();
       await infraRetired(world);
 
       expect(world.errors).toHaveLength(1);
-      expect(containsMessage(world.errors[0], STEP_BLOCKED)).toBe(true);
+      expect(containsMessage(world.errors[0], PAIRING_BLOCKED)).toBe(true);
       expect(world.timersDueAt(T + TTL_MS)).toBe(0);
+      // r2 was inserted at arrival and denied by the retire; r1's deleted row is the silent miss.
+      const [r2] = approvalRows(world.fixture.db);
+      expect(approvalRows(world.fixture.db)).toEqual([
+        expect.objectContaining({ request_id: "r2", decision: "deny" }),
+      ]);
+      expect(auditedDecisions(world.fixture.db)).toEqual(["deny"]);
       world.clock.advance(TTL_MS + 1);
       await settle();
 
       expect(world.errors).toHaveLength(1);
-      expect(approvalRows(world.fixture.db)).toEqual([]);
-      expect(auditedDecisions(world.fixture.db)).toEqual([]);
+      expect(approvalRows(world.fixture.db)).toStrictEqual([r2]);
+      expect(auditedDecisions(world.fixture.db)).toEqual(["deny"]);
       expectNoTimeoutNoFrames(world);
-      await assertRetainedFaultOnShutdown(world.fixture, STEP_BLOCKED);
+      await assertRetainedFaultOnShutdown(world.fixture, PAIRING_BLOCKED);
     },
   );
 

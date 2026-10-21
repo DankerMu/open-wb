@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs, parseDelay } from "./fake-omp-argv.mjs";
 import {
+  approves,
   CALL_1,
   CALL_2,
   commandAnswer,
@@ -46,8 +47,8 @@ const ABORT_SCENARIOS = new Set(["abort-ok", "abort-ignored", "slow-ready"]);
 const START_SCENARIOS = new Set(["abort-ok", "slow-ready"]);
 /**
  * 审批门控场景（#458）：仅最后一个 `--approval-mode` 恰为 write 时门控，否则同 normal。
- * approval-chain-abort-ignored（#470）：r1 应答后再开 r2/C2，r2 应答后永久挂起；abort 一律无帧。
- * 帧序同 omp v18.0.10 实测（#620）：select 先于 tool_execution_start；每个 end 后紧跟其 toolResult。
+ * approval-chain-abort-ignored（#470）：r1 应答后再开 C2/r2，r2 应答后永久挂起；abort 一律无帧。
+ * 帧序同 omp v18.12.3 实测（#1563）：每个调用先 tool_execution_start 再 select；end 后紧跟 toolResult。
  * approval-write（#998）不在此集合：只在 always-ask 下门控一次 write 调用，作答即完成、不可 abort。
  */
 const APPROVAL_SCENARIOS = new Set([
@@ -499,16 +500,16 @@ function delayHoldTurn() {
   }, startMs);
 }
 
-/** 同 omp v18.0.10 实测：先发全部 select，再发全部 start（不等作答）；随即返回，以免堵住串行队列。 */
+/** 同 omp v18.12.3 实测（#1563）：先发全部 start（不等作答），再按调用序发全部 select；随即返回，以免堵住串行队列。 */
 async function openSelects(calls) {
   await emit({ type: "agent_start" });
   await emitDeltas(DELTAS);
   await emit(toolUseEnd(calls.map((call) => ({ call }))));
-  for (const [index, call] of calls.entries()) {
-    await emitSelect(writeGated ? WRITE_SELECT_ID : `r${index + 1}`, call);
-  }
   for (const call of calls) {
     await emit(toolStart(call));
+  }
+  for (const [index, call] of calls.entries()) {
+    await emitSelect(writeGated ? WRITE_SELECT_ID : `r${index + 1}`, call);
   }
   abortTurn = "selecting";
 }
@@ -520,7 +521,7 @@ async function emitSelect(id, call) {
 
 /**
  * 未知或已答 id 静默忽略（rpc-mode.ts:280-285）；每条应答只结束自己的调用。
- * approval-chain-abort-ignored：C1 结束后同步开出 r2 与 C2 并返回，仍为 selecting。
+ * approval-chain-abort-ignored：C1 结束后同步开出 C2 与 r2 并返回，仍为 selecting。
  */
 async function handleSelect(frame) {
   const call = pendingSelects.get(frame.id);
@@ -528,7 +529,7 @@ async function handleSelect(frame) {
     return;
   }
   pendingSelects.delete(frame.id);
-  const approved = !frame.cancelled && frame.value === "Approve";
+  const approved = approves(frame, call);
   approvedAny ||= approved;
   const end = toolEnd(call, approved);
   await emit(end);
@@ -536,8 +537,8 @@ async function handleSelect(frame) {
   const message = { role: "toolResult", toolCallId: call.id, toolName: call.name, content };
   await emit({ type: "message_end", message: { ...message, isError: !approved } });
   if (scenario === "approval-chain-abort-ignored" && call === CALL_1) {
-    await emitSelect("r2", CALL_2);
     await emit(toolStart(CALL_2));
+    await emitSelect("r2", CALL_2);
     return;
   }
   if (pendingSelects.size === 0) {

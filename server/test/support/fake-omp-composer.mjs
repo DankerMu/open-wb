@@ -39,14 +39,24 @@ export function selectTitle(call) {
   return `Allow tool: ${call.name}\n${path === undefined ? `Command: ${command}` : `Path: ${path}`}`;
 }
 
+/** omp v18.12.3 被档位抬高的提示（#1563）：中间项「本会话内放行」由工具名拼出。 */
+function sessionGrant(call) {
+  return `Approve ${call.name} for this session`;
+}
+
 export function selectRequest(id, call) {
   return {
     type: "extension_ui_request",
     id,
     method: "select",
     title: selectTitle(call),
-    options: ["Approve", "Deny"],
+    options: ["Approve", sessionGrant(call), "Deny"],
   };
+}
+
+/** 应答判定：`Approve` 与中间项都只放行这一次调用（夹具不记授权集合）；其它值与 `cancelled` 按 deny。 */
+export function approves(frame, call) {
+  return !frame.cancelled && (frame.value === "Approve" || frame.value === sessionGrant(call));
 }
 
 /**

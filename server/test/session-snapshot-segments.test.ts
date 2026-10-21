@@ -93,11 +93,13 @@ describe("chat-sessions「会话 REST」: 13 message, 8 step and 7 approval keys
     async () => {
       const world = await openApprovalWorld("approval");
       worlds.push(world);
+      // Read after the approval.request (#1563: the select paired the already started step).
       const row = await pendingApproval(world);
-      await waitForEvent(world, "step.start");
       const messageId = assistantIdFor(world.fixture, world.session);
       const [start] = ofType(sessionEvents(world), "step.start");
       const stepId = start?.data.stepId;
+      expect(typeof stepId).toBe("number");
+      expect(ofType(sessionEvents(world), "approval.request")[0]?.data.stepId).toBe(stepId);
 
       const running = await messages(world.fixture.app, world.session, world.cookie);
       for (const message of running) {
@@ -155,14 +157,15 @@ function seedOldPair(db: DatabaseSync, session: string): number {
 
 describe("chat-sessions「Snapshot carries segment positions」", () => {
   it(
-    "approval-parallel: offsets of the text before each step, stepIds as step.start paired; old rows null",
+    "approval-parallel: offsets of the text before each step, stepIds as approval.request paired; old rows null",
     REAL,
     async () => {
       const world = await openApprovalWorld("approval-parallel");
       worlds.push(world);
       await prompted(world);
       const [r1, r2] = await waitForRows(world, 2);
-      await waitForEvent(world, "step.start", 2);
+      // Answer only after the pump read both selects, or the answer path publishes stepId null.
+      await waitForEvent(world, "approval.request", 2);
       for (const [row, decision] of [
         [r2, "deny"],
         [r1, "allow"],
@@ -180,12 +183,18 @@ describe("chat-sessions「Snapshot carries segment positions」", () => {
         FAKE_TEXT.length,
         FAKE_TEXT.length,
       ]);
-      const paired = ofType(sessionEvents(world), "step.start").map((event) => [
+      const paired = ofType(sessionEvents(world), "approval.request").map((event) => [
         event.data.approvalId,
         event.data.stepId,
       ]);
       expect(assistant.approvals.map((approval) => [approval.id, approval.stepId])).toEqual(paired);
-      expect(paired.map(([approvalId]) => approvalId)).toEqual([r1?.id, r2?.id]);
+      expect(paired).toEqual([
+        [r1?.id, assistant.steps[0]?.id],
+        [r2?.id, assistant.steps[1]?.id],
+      ]);
+      expect(
+        ofType(sessionEvents(world), "step.start").map((event) => event.data.approvalId),
+      ).toEqual([null, null]);
 
       const stored = byId(list, old);
       expect(stored.steps.map((step) => step.bodyOffset)).toEqual([null]);
