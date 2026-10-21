@@ -55,7 +55,7 @@ web SHALL：会话/消息/步骤状态联合与 `turn.end.status` 联合加 `sto
 - **THEN** 两者都恰产出 `turn.end{status:"stopped"}` 一次；之后任何帧/`applyFailure`/`applyStop` 不再产出事件或改变状态；输入不被修改
 
 #### Scenario: 重试退避中停止（真实 omp）
-- **WHEN** 官方 omp v18.0.10 经模型代理连接一个对每次请求都答 503 的假上游，回合发出 `auto_retry_start` 之后、下一轮请求之前调用 stop
+- **WHEN** 官方 omp v18.12.3 经模型代理连接一个对每次请求都答 503 的假上游，回合发出 `auto_retry_start` 之后、下一轮请求之前调用 stop
 - **THEN** stop 返回 202 `{}`；回合在 `abort()` 之后 `OMP_ABORT_GRACE_MS` 内以恰一个 `turn.end{status:"stopped"}` 收尾，没有 `error` 事件；会话与助手消息为 `stopped`，三个错误列为 NULL；实测到的收尾路径（omp 发出 `agent_end`，或有界退回）写进实现 PR
 
 ### Requirement: 停止生成 REST

@@ -1,9 +1,10 @@
 /**
  * Issue #553 local-only completion wait (s1c 10.2, design D15).
- * Independent oracles: omp v18.0.10 rpc-mode.ts:1019-1054 (built-in commands answer with an
- * `agentInvoked:false` receipt and emit `command_output`), todo.ts:246-260 (`/todo` output before the
- * receipt), builtin-lifecycle.ts:176-187 (`/compact` receipt before the output); design.md decision
- * table; injected clock. "Receipt" below always means the frame yielded by the iterator.
+ * Independent oracles: omp v18.12.3 rpc-mode.ts:1019-1054 (v18.0.10 源码位置；18.12.3 同义) (built-in
+ * commands answer with an `agentInvoked:false` receipt and emit `command_output`), todo.ts:246-260
+ * (`/todo` output before the receipt), builtin-lifecycle.ts:176-187 (v18.0.10 源码位置；18.12.3 同义)
+ * (`/compact` receipt before the output); design.md decision table; injected clock. "Receipt"
+ * below always means the frame yielded by the iterator.
  */
 import { setImmediate as waitImmediate } from "node:timers/promises";
 import { fileURLToPath } from "node:url";

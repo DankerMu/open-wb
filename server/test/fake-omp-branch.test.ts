@@ -1,6 +1,6 @@
 /**
  * Issue #457 fake-omp `branch` scenario (parent s1c-turn-control-governance 6.2).
- * `get_branch_messages` 回固定列表（包在 data.messages，同 omp v18.0.10 rpc-mode）；`branch{entryId}`
+ * `get_branch_messages` 回固定列表（包在 data.messages，同 omp v18.12.3 rpc-mode）；`branch{entryId}`
  * 在 `--session-dir` 下真实写出新 .jsonl 及其同名产物目录并切换，`get_state.sessionFile` 随之变为新路径；
  * 未知 entryId 回显 id 的错误帧，不建文件、不切换。真实子进程；帧读取复用 fake-omp-helpers.ts。
  */

@@ -2,7 +2,7 @@
  * Issue #514 thinking reduction: an assistant `thinking_delta` update maps one-to-one to
  * `thinking.delta`, behind the same agent_start and assistant-role gates as `text_delta`.
  * Expected sequences are fixture literals from the thinking-delta-reduction design, not reducer
- * logic; frame shapes follow omp v18.0.10 (ai/src/types.ts thinking events).
+ * logic; frame shapes follow omp v18.12.3 (ai/src/types.ts thinking events).
  */
 import { describe, expect, it } from "vitest";
 import { applyFrame, type ChatEvent, createEventState } from "../src/sessions/events.js";

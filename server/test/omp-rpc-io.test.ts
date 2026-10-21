@@ -1,6 +1,6 @@
 /**
  * Issue #95 controlled-wire RPC cases. Independent literals from frozen rpc.md
- * v18.0.10 (33cc6b9) and the RpcFrameDecoder contract — not production code.
+ * v18.12.3 (53a0377) and the RpcFrameDecoder contract — not production code.
  */
 import { setImmediate as waitImmediate } from "node:timers/promises";
 import { describe, expect, it } from "vitest";

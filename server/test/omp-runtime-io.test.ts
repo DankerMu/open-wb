@@ -1,6 +1,6 @@
 /**
  * Issue #96 SessionRuntime controlled-wire races.
- * Independent literals from frozen rpc.md v18.0.10 and Node child_process.
+ * Independent literals from frozen rpc.md v18.12.3 and Node child_process.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { setImmediate as waitImmediate } from "node:timers/promises";

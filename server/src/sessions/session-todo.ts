@@ -1,6 +1,6 @@
 /**
  * Issue #863 pure task-list normalisation for the omp `todo` tool's `result.details.phases`
- * (omp v18.0.10: `{op, phases:[{name, tasks:[{content, status, blocker?}]}], storage, completedTasks?}`,
+ * (omp v18.12.3: `{op, phases:[{name, tasks:[{content, status, blocker?}]}], storage, completedTasks?}`,
  * `phases` is the complete list). No IO, no logging: persistence, de-duplication and the warn for
  * a rejected candidate belong to the supervisor's ordered persistence path.
  */

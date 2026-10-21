@@ -21,7 +21,7 @@ import {
   stopFakeChildren,
 } from "./fake-omp-helpers.js";
 
-/** omp v18.0.10 的本地命令文本（todo.ts:246-260、builtin-lifecycle.ts）；独立抄写，不从夹具导入。 */
+/** omp v18.12.3 的本地命令文本（todo.ts:246-260、builtin-lifecycle.ts）；独立抄写，不从夹具导入。 */
 const TODO_OUTPUT = {
   type: "command_output",
   text: "No todos. Use /todo append <task> to start one.",

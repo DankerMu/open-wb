@@ -2,7 +2,7 @@
  * Issue #554 command_output reduction (s1c 10.3, design D15): a built-in slash command answers with
  * id-less `command_output{text}` frames and no agent_start/agent_end. Expected sequences are fixture
  * literals from chat-stream「Command output becomes assistant text」, not reducer logic; the `/todo`
- * text is omp v18.0.10's (todo.ts:246-260), copied, not imported.
+ * text is omp v18.12.3's (todo.ts:246-260), copied, not imported.
  */
 import { describe, expect, it } from "vitest";
 import {

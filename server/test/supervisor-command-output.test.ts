@@ -5,7 +5,7 @@
  * `chat_messages`/`chat_steps`/`chat_sessions` rows (the assistant row also read inside the
  * turn.end publication) and the child's stdout lines. The runtime's local-completion wait is the
  * only 120000 ms timer on the injected clock (stop grace 8000 ms, idle 10000 ms unless a case
- * overrides it); the command texts are omp v18.0.10's, copied, not imported.
+ * overrides it); the command texts are omp v18.12.3's, copied, not imported.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import type { DatabaseSync } from "node:sqlite";

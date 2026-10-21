@@ -1,7 +1,7 @@
 /**
  * Issue #456 fake-omp abort scenarios (parent s1c-turn-control-governance 6.1).
  * `abort-ok` 兑现入站 abort：message_end aborted → agent_end → response{command:"abort"}（无 data，
- * 同 omp v18.0.10 rpc-mode）；`abort-ignored` 收到 abort 不回任何帧，但仍可被 stdin 关闭或 SIGTERM 终止。
+ * 同 omp v18.12.3 rpc-mode）；`abort-ignored` 收到 abort 不回任何帧，但仍可被 stdin 关闭或 SIGTERM 终止。
  * 真实子进程；帧读取复用 fake-omp-helpers.ts。
  */
 import { spawn } from "node:child_process";

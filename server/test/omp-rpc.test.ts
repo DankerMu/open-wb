@@ -1,6 +1,6 @@
 /**
  * Issue #95 RPC handshake against the real fake-omp subprocess.
- * Independent oracles: fake-omp.mjs scenario contract and frozen rpc.md v18.0.10.
+ * Independent oracles: fake-omp.mjs scenario contract and frozen rpc.md v18.12.3.
  */
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";

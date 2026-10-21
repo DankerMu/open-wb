@@ -1,6 +1,6 @@
 /**
  * Issue #95 lifecycle and advertised-bound regressions.
- * Independent oracles: Node child_process exit vs stdio close, frozen rpc.md v18.0.10.
+ * Independent oracles: Node child_process exit vs stdio close, frozen rpc.md v18.12.3.
  */
 import { once } from "node:events";
 import { setImmediate as waitImmediate } from "node:timers/promises";
