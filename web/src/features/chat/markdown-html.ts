@@ -1,6 +1,6 @@
 // 助手正文源 HTML 的处理步骤与消毒白名单（epic-acceptance-followups design D1；chat-web「消息线程」的「正文」规则）。
-// 管线顺序在 markdown-body.tsx：rehype-raw → inertUnsafeTargets → literalUnknownTags（markdown-literal.ts）→
-// rehype-sanitize → styleGuard。
+// 管线顺序在 markdown-body.tsx：recordRawSegments → rehype-raw → inertUnsafeTargets → literalUnknownTags（这两步在
+// markdown-literal.ts）→ rehype-sanitize → styleGuard。
 import type { Options as SanitizeSchema } from "rehype-sanitize";
 
 /** 语法树节点的最小结构（hast 的子集）：只读写这里用到的字段，不引入 `hast` 类型包。 */

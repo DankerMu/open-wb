@@ -1,6 +1,6 @@
 // 助手正文的 Markdown 规则（epic-acceptance-followups design D1；chat-web「Markdown 链接惰性与图片不加载」
-// 「代码块复制失败就地提示」、属性白名单的放行一侧、列表项 / 引用块里的多行 HTML 块）。源 HTML 的渲染与消毒
-// 主场景、流式半截 HTML 见 chat-markdown-html.test.tsx。
+// 「代码块复制失败就地提示」、属性白名单的放行一侧、列表项 / 引用块里的多行 HTML 块、白名单外格式元素被克隆时
+// 起始标签只显示一次）。源 HTML 的渲染与消毒主场景、流式半截 HTML 见 chat-markdown-html.test.tsx。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -130,19 +130,41 @@ describe("列表项与引用块里的多行 HTML 块：白名单外标签仍按�
     [
       "列表项里的 details",
       "1. 步骤\n   <details>\n   <summary>输出</summary>\n   运行 <task> 查看\n   </details>",
-      "运行 <task> 查看",
+      "\n步骤\n\n输出\n运行 <task> 查看\n\n\n",
     ],
     [
       "引用块里的 div",
       "> <div>\n> Use /todo append <task> to start one.\n> </div>",
-      "Use /todo append <task> to start one.",
+      "\n\nUse /todo append <task> to start one.\n\n",
     ],
-    ["引用块里成对的 task", "> <task>\n> body\n> </task>", "<task>\nbody\n</task>"],
+    ["引用块里成对的 task", "> <task>\n> body\n> </task>", "\n<task>\nbody\n</task>\n"],
   ])("%s", async (_, content, visible) => {
     const { body } = await mountReply(content);
 
-    expect(body.textContent).toContain(visible);
+    expect(body.textContent).toBe(visible);
     expect(body.querySelector("task")).toBeNull();
+  });
+});
+
+describe("白名单外格式元素被克隆时起始标签只显示一次", () => {
+  // 解析器把跨段落 / 列表项或被块元素截断的格式元素克隆一份，克隆体沿用原起始标签的位置：源里只有一个起始标签。
+  it.each([
+    ["跨空行的 font", '<font color="red">彩\n\n下一段', '<font color="red">彩\n下一段'],
+    ["跨空行的 small", "<small>a\n\nb", "<small>a\nb"],
+    ["跨列表项的 small", "- <small>a\n- b", "\n<small>a\nb\n"],
+    ["被 div 截断的 font：结束标签由克隆体持有", "<font>a<div>b</font>c", "<font>ab</font>c"],
+  ])("%s", async (_, content, visible) => {
+    const { body } = await mountReply(content);
+
+    expect(body.textContent).toBe(visible);
+    expect(body.querySelector("font, small")).toBeNull();
+  });
+
+  it("对照：白名单内的 b 跨空行照常克隆成两个 b 元素", async () => {
+    const { body } = await mountReply("<b>a\n\nb");
+
+    expect(body.querySelectorAll("b")).toHaveLength(2);
+    expect(body.textContent).toBe("a\nb");
   });
 });
 

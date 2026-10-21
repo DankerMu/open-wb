@@ -42,10 +42,10 @@ function segmentAt(segments: Segment[], offset: number): Segment | undefined {
   return undefined;
 }
 
-/** 先处理子树；白名单外、源 HTML 写出的元素换成「起始标签原文、子节点、自己的结束标签原文」（无结束标签时结束位置收在末个子节点尾上，故先取 tailEnd）。 */
-function literal(segments: Segment[], node: TreeNode): TreeNode[] {
+/** 先处理子树；白名单外、源 HTML 写出的元素换成「起始标签原文、子节点、自己的结束标签原文」（无结束标签时结束位置收在末个子节点尾上，故先取 tailEnd）。parse5 重建格式元素的克隆体沿用原起始标签的位置（issue 1535）：克隆体不是原元素的后代，原元素按文档顺序先到；`seen` 里已有的起始偏移只省起始标签，结束标签仍各自判定。 */
+function literal(segments: Segment[], seen: Set<number>, node: TreeNode): TreeNode[] {
   const tailEnd = node.children?.at(-1)?.position?.end?.offset;
-  mapChildren(node, (child) => literal(segments, child));
+  mapChildren(node, (child) => literal(segments, seen, child));
   if (node.type !== "element" || !node.tagName || KEPT.has(node.tagName)) return [node];
   const children = node.children ?? [];
   // 起始标签只认起始位置（段尾未闭合又没有内容的 `<file>`，rehype-raw 给的结束位置是 0）。
@@ -64,13 +64,16 @@ function literal(segments: Segment[], node: TreeNode): TreeNode[] {
   const close = head.slice(head.lastIndexOf("</"));
   const owned = /^<\/(\S+?)\s*>$/u.exec(close)?.[1]?.toLowerCase() === name && tailEnd !== to;
   const text = (value: string): TreeNode[] => [{ type: "text", value }];
-  return [...text(open), ...children, ...(owned ? text(close) : [])];
+  const shown = seen.has(from) ? [] : text(open);
+  seen.add(from);
+  return [...shown, ...children, ...(owned ? text(close) : [])];
 }
 
 /** 找不到所在 raw 段、没有位置或该处不以该标签起头（GFM 脚注的 `section` 等 Markdown 自己生成的）换成其子节点，与 sanitize 去壳留文字相同。 */
 export function literalUnknownTags() {
   return (tree: TreeNode, file: File) => {
     const segments = (file.data[SEGMENTS] as Segment[] | undefined) ?? [];
-    mapChildren(tree, (node) => literal(segments, node));
+    const seen = new Set<number>();
+    mapChildren(tree, (node) => literal(segments, seen, node));
   };
 }
