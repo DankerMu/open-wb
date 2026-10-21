@@ -477,7 +477,7 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 - 封不住的：`.omp/agents` 下的 agent 定义，以及 `.clinerules`。omp 的 `task` 工具从工作目录一直向上找到文件系统根，不认 `.git`，所以沙箱根 / owner 根的 `.omp/agents` 仍对其它账号的会话生效；`cline` provider 同样逐级到文件系统根取最近一个 `.clinerules`，带 frontmatter `alwaysApply: true` 时整段进入系统提示（2026-10-20 实测，官方 v18.0.10；#1570 翻转后同一官方用例行在 v18.12.3 上仍绿；固定块未禁用 `cline`，是否禁用待 owner）；ADR-0012「#1563 补充」第三部分登记为已接受残余，部署前提「`SANDBOX_ROOT` 的任何祖先目录不得带 `.omp/`」照旧必须，另加「`SANDBOX_ROOT` 不得位于 `OMP_STATE_DIR/home` 之下」。
 - 实测（2026-10-20，官方 v18.0.10，三档各一回合）：工作目录下空 `.git` 时没有报错帧，stderr 与 omp 日志没有 git 相关输出，`get_state` 的 `systemPrompt` 与没有 `.git` 时逐字相同。git 不把空目录当有效仓库、会继续向上找：没有祖先是真仓库时在该目录报 `not a git repository`，某个祖先是真仓库时把工作目录当作那个仓库的子目录（3.1 实跑没有执行 git 命令，这一条是 git 的发现规则，单独验证过）；两种情况都不影响回合。#1570 在 v18.12.3 上三档重跑：同样无报错帧、stderr 为空、日志无 git 相关行；祖先目录被 `git init` 成真仓库时回合同样正常（vcs 工具是否把祖先当仓库根未实跑到，读码推断会）。
 
-**overlay 的固定块**（#1564，change `omp-pin-18-12` design D4；#1570 翻转时删 `ruby` / `julia`、加 `advisor` 与 `ida`，design D9）：`host-overlay.yml` 以下面这段开头，之后才是浏览器块与看图块。它不随部署配置变化，残余与取舍登记在 ADR-0012「2026-10-20 补充（#1563）」：
+**overlay 的固定块**（#1564，change `omp-pin-18-12` design D4；#1570 翻转时删 `ruby` / `julia`、加 `advisor` 与 `ida`，design D9；#1621 把 `disabledProviders` 扩成 omp v18.12.3 的全部内置模型 provider、加 `marketplace.autoUpdate`，change `omp-overlay-builtin-providers-off`）：`host-overlay.yml` 以下面这段开头，之后才是浏览器块与看图块。它不随部署配置变化，残余与取舍登记在 ADR-0012「2026-10-20 补充（#1563）」：
 
 ```yaml
 tools:
@@ -512,6 +512,91 @@ disabledProviders:
   - llama.cpp
   - lm-studio
   - apple
+  - abliteration
+  - aiand
+  - aimlapi
+  - alibaba-coding-plan
+  - alibaba-token-plan
+  - amazon-bedrock
+  - anthropic
+  - azure
+  - baseten
+  - bedrock-mantle
+  - cerebras
+  - charm-hyper
+  - cline-pass
+  - cloudflare-ai-gateway
+  - cloudflare-workers-ai
+  - commandcode
+  - coralbricks
+  - coreweave
+  - deepinfra
+  - deepseek
+  - devin
+  - factory-droid
+  - firepass
+  - fireworks
+  - github-copilot
+  - gitlab-duo
+  - gitlab-duo-agent
+  - gmi-cloud
+  - google
+  - google-antigravity
+  - google-gemini-cli
+  - google-vertex
+  - groq
+  - helmcode
+  - huggingface
+  - kilo
+  - kimi-code
+  - litellm
+  - meta
+  - minimax
+  - minimax-cn
+  - minimax-code
+  - minimax-code-cn
+  - mistral
+  - moonshot
+  - muse-code
+  - nanogpt
+  - novita
+  - nvidia
+  - ollama-cloud
+  - openai
+  - openai-codex
+  - opencode-go
+  - opencode-zen
+  - openrouter
+  - qianfan
+  - qwen-portal
+  - sakana
+  - sambanova
+  - siliconflow
+  - siliconflow-cn
+  - singularityapi-dev
+  - singularityapi-tech
+  - snowflake
+  - stepfun
+  - synthetic
+  - together
+  - typesafe
+  - umans
+  - venice
+  - vercel-ai-gateway
+  - vllm
+  - wafer-serverless
+  - xai
+  - xai-oauth
+  - xiaomi
+  - xiaomi-token-plan-ams
+  - xiaomi-token-plan-cn
+  - xiaomi-token-plan-sgp
+  - yolo-auto
+  - zai
+  - zenmux
+  - zhipu-coding-plan
+marketplace:
+  autoUpdate: "off"
 ask:
   enabled: false
 advisor:
@@ -532,7 +617,8 @@ ida:
 | `retry:` 段 | 会话级重试封顶一轮、关闭模型兜底（#909，ADR-0012「2026-10-14 补充」） |
 | `telemetry.otlpExportEnabled: false` | 关掉 OTLP 导出。缺省开，有 `OTEL_*` 端点才真正导出，而工作目录 `.env` 能注入端点；spawn 环境另钉 `OTEL_SDK_DISABLED=true`，两道关各自独立（#1575，见上文「spawn 环境恒钉中继与 cmux」） |
 | `archive.enabled: false` | 关掉 `archive` prelude（只读、不请求审批，读 omp 自己的 `sessions` 目录，与宿主的 `--session-dir` 不重叠，属卫生项） |
-| `disabledProviders` | 关掉对本机 `ollama`（11434）、`llama.cpp`（8080）、`lm-studio`（1234）端口的隐式探测与 macOS 上的 `apple` 提供者；托管 `models.yml` 的 `workbuddy` provider 不受影响。数组整体替换项目层的同名键：项目层写的 `disabledProviders` 不再生效（实测见下） |
+| `disabledProviders` | 列出 omp v18.12.3 的全部内置模型 provider，共 87 项（#1621，owner 2026-10-21）：tag `v18.12.3` 的 `packages/catalog/src/compat/rules/providers/*.kdl` 条目 id、bundled 模型目录的 provider id 与隐式本机探测的 `llama.cpp`、`apple` 的并集，减去 `cursor`（同时是能力发现源的 id）与 `local`、`web`（静态合成、不发请求）。omp 启动后的后台模型发现因此既不探测本机 `ollama`（11434）、`llama.cpp`（8080）、`lm-studio`（1234）端口，也不向第三方模型目录主机（`catalog.stencil.so` 的共享目录、各 provider 的公开 `/models`）发请求，有无凭证都一样；残余是被排除的 `cursor` 拿到 Cursor 凭证时的发现请求（ADR-0012）。托管 `models.yml` 的 `workbuddy` provider 与能力发现源（`claude`、`codex`、`cline` 等）都不在名单里。名单随 omp 版本变化，升级钉住版本时按同一规则重新生成。数组整体替换项目层的同名键：项目层写的 `disabledProviders` 不再生效（实测见下） |
+| `marketplace.autoUpdate: "off"` | 关掉 omp 启动时对已注册插件 marketplace 的刷新与更新检查（缺省 `notify`：托管 agent 目录跨 spawn 持久，注册过 marketplace 后每次 spawn 都会请求其来源；#1621，owner 2026-10-21）。取值加引号，裸 `off` 在 YAML 里是布尔 |
 | `ask.enabled: false` | omp 不创建 `ask` 工具。它只在有 UI 时创建，即 `--mode rpc-ui`（#1563 组 2 起宿主的启动模式），宿主对它的提问只会 cancel，而 `ask` 被取消时先中止整个回合，用户看到回答无故「已停止」。钉掉后 `rpc-ui` 下的工具集与 `rpc` 相同 |
 | `advisor.enabled: false` | v18.12.3 的缺省是 `false`，但任何一层配置都压过缺省，项目层 `.omp/config.yml` 写 `advisor.enabled: true` 即开启；开启后 `WATCHDOG.md` / `.yml` 的上溯以 git 仓库根为界，原生发现要求 `.git/HEAD`、宿主的空 `.git` 标记被跳过，会走到文件系统根。与 `ask` / `ida` 同类的零成本钉（#1570 fixture review 裁定，owner 可否决） |
 | `ida.enabled: false` | v18.12.3 缺省 `true`；项目层可设 `ida.installDir`（任意含 `libidalib.*` 的目录）与 `ida.python: ./x.sh`，之后 `read` 读到带可执行头的文件就会以项目层指定的解释器起进程、不经审批。Epic #1563 (f) 的缺省方案（owner 未否决） |
@@ -551,6 +637,12 @@ ida:
 - `ida` 是 discoverable 工具，不进 `get_state.dumpTools`，只在找到 IDA 安装时以 `xd://ida` 设备出现在系统提示里：项目层写 `ida.enabled: true` 与 `ida.installDir`（放一个空的 `libidalib.dylib` 即被认作安装）时，带本块的系统提示没有 `ida` 设备，去掉 `ida:` 块时有。
 - `advisor.enabled` 没有 RPC 读回，只能看行为：项目层写 `advisor.enabled: true` 与 `modelRoles.advisor` 时，带本块一个 bash 回合 2 次上游请求、只有 `advisor_cost_changed` 帧；去掉 `advisor:` 块时 5 次并出现 `advisor_yielded`。
 - `dev.autoqa` 缺省开、系统提示里有 `xd://report_issue` 设备；owner 2026-10-20 决定不钉，这里只记一笔。
+
+实测（2026-10-21，#1621，本机官方 v18.12.3，`--mode rpc-ui`，官方用例 `server/test/omp-official-provider-egress.test.ts`）：全新 agent 目录（无模型目录缓存），工作目录 `.env` 写 `ALL_PROXY` 指向只记录、一律回 502 的本地监听器，spawn 环境去掉 `no_proxy` / `NO_PROXY` 两个钉以便观测，omp 数据目录预置一个来源为 https URL、上次更新在 2020 年的已注册 marketplace；不发模型回合，`get_available_models` 应答后再等 5 秒。
+
+- 带本块：监听器零命中（`CONNECT` 与明文 http 都没有）；`get_available_models` 列出 `workbuddy/<id>`，`get_available_commands` 列出工作目录 `.claude/skills/x` 的 `skill:x`。
+- `disabledProviders` 换回 #1564 的四项：监听器收到 7 个 `CONNECT`——`catalog.stencil.so`、`coding-intl.dashscope.aliyuncs.com`、`hyper.charm.land`、`api.commandcode.ai`、`api.kilo.ai`、`api.venice.ai`、`zenmux.ai`，均为 `:443`。
+- 去掉 `marketplace:` 块：监听器收到对该 marketplace 主机的 `CONNECT`。
 
 **overlay 的浏览器块**：`host-overlay.yml` 在固定块之后恒有下面一段（这里是未设 `BROWSER_BIN` 的样子），overlay 高于项目层，会话工作目录里的 `.omp/config.yml` 改不动它：
 

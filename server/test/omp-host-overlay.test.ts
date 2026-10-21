@@ -90,7 +90,10 @@ describe("writeHostOverlay", () => {
       },
       telemetry: { otlpExportEnabled: false },
       archive: { enabled: false },
-      disabledProviders: ["ollama", "llama.cpp", "lm-studio", "apple"],
+      // The 87 ids are pinned byte for byte by HOST_OVERLAY_FIXED; their shape is the next case's.
+      disabledProviders: expect.any(Array),
+      // A string, not YAML's boolean false.
+      marketplace: { autoUpdate: "off" },
       ask: { enabled: false },
       advisor: { enabled: false },
       ida: { enabled: false },
@@ -105,7 +108,36 @@ describe("writeHostOverlay", () => {
     });
   });
 
-  it("the fixed block (#1564, #1570): approval null, no ruby/julia, ask then advisor then ida last", async () => {
+  it("disabledProviders (#1621): 87 unique ids, the four local probes first, the rest sorted, none of the kept ids", async () => {
+    const state = stateDir();
+    ensureOmpStateLayout(state);
+    await writeHostOverlay(state, DEFAULT);
+    const written = parse(readFileSync(ompHostOverlayPath(state), "utf8")) as {
+      disabledProviders: string[];
+    };
+    const ids = written.disabledProviders;
+    expect(ids).toHaveLength(87);
+    expect(new Set(ids).size).toBe(87);
+    expect(ids.slice(0, 4)).toEqual(["ollama", "llama.cpp", "lm-studio", "apple"]);
+    const rest = ids.slice(4);
+    expect(rest).toEqual([...rest].sort());
+    // Model providers excluded by the rule, the managed provider, and capability discovery sources
+    // of v18.12.3 (`discovery/*.ts` `PROVIDER_ID`): listing one would hide it.
+    for (const kept of [
+      "cursor",
+      "local",
+      "web",
+      "workbuddy",
+      "claude",
+      "codex",
+      "cline",
+      "native",
+    ]) {
+      expect(ids).not.toContain(kept);
+    }
+  });
+
+  it("the fixed block (#1564, #1570, #1621): approval null, no ruby/julia, marketplace before ask, ida last", async () => {
     const state = stateDir();
     ensureOmpStateLayout(state);
     await writeHostOverlay(state, DEFAULT);
@@ -118,6 +150,7 @@ describe("writeHostOverlay", () => {
     // v18.12.3 has no ruby / julia eval backends: the flip removes both pins.
     expect(fixed).not.toMatch(/ruby|julia/u);
     expect(fixed).toContain('\npython:\n  interpreter: ""\nmcp:\n');
+    expect(fixed).toContain('\n  - zhipu-coding-plan\nmarketplace:\n  autoUpdate: "off"\nask:\n');
     expect(
       fixed.endsWith(
         "\nask:\n  enabled: false\nadvisor:\n  enabled: false\nida:\n  enabled: false\n",
