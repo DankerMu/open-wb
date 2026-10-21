@@ -5,7 +5,8 @@
  * spec, not derived from `src/sessions/omp/process.ts`. #1529: the key set also holds the four
  * browser pins, and the sudo list ends in them and `PUPPETEER_EXECUTABLE_PATH`. #1575: and
  * `OTEL_SDK_DISABLED=true`, whatever the parent's `OTEL_*`, named in the sudo list before
- * `PUPPETEER_EXECUTABLE_PATH`.
+ * `PUPPETEER_EXECUTABLE_PATH`. #1615: and `no_proxy=*` / `NO_PROXY=*`, whatever the parent's proxy
+ * variables, named in the sudo list after `OTEL_SDK_DISABLED`.
  */
 import type { SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -37,6 +38,17 @@ const OTEL_PARENT: Record<string, string> = {
   OTEL_SDK_DISABLED: "false",
   OTEL_EXPORTER_OTLP_ENDPOINT: "http://192.0.2.1:4318",
   OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "true",
+};
+
+/**
+ * omp-runtime「环境白名单」#1615 WHEN: a parent that would proxy the model requests, with exemptions
+ * that do not match the model endpoint.
+ */
+const PROXY_PARENT: Record<string, string> = {
+  HTTP_PROXY: "http://192.0.2.1:9",
+  ALL_PROXY: "http://192.0.2.1:9",
+  no_proxy: "example.invalid",
+  NO_PROXY: "example.invalid",
 };
 
 interface Captured {
@@ -110,6 +122,7 @@ describe("spawnOmp dotenv pins", () => {
       expect(Object.keys(env).toSorted()).toEqual([
         "HOME",
         "LANG",
+        "NO_PROXY",
         "OMP_PROFILE",
         "OTEL_SDK_DISABLED",
         "PATH",
@@ -126,6 +139,7 @@ describe("spawnOmp dotenv pins", () => {
         "XDG_CACHE_HOME",
         "XDG_DATA_HOME",
         "XDG_STATE_HOME",
+        "no_proxy",
       ]);
       expect(env.PI_CONFIG_DIR).toBe(".omp");
       expect(env.OMP_PROFILE).toBe("default");
@@ -140,6 +154,8 @@ describe("spawnOmp dotenv pins", () => {
       expect(env.XDG_DATA_HOME).toBe(join(stateDir, "xdg", "data"));
       expect(env.WORKBUDDY_MODEL_TOKEN).toBe(TOKEN);
       expect(env.OTEL_SDK_DISABLED).toBe("true");
+      expect(env.no_proxy).toBe("*");
+      expect(env.NO_PROXY).toBe("*");
       for (const sentinel of Object.values(PARENT).filter((value) => value.includes("sentinel"))) {
         expect(JSON.stringify([env, args])).not.toContain(sentinel);
       }
@@ -168,6 +184,30 @@ describe("spawnOmp dotenv pins", () => {
     },
   );
 
+  it.each([undefined, "/usr/bin/chromium"])(
+    "pins no_proxy=* and NO_PROXY=* over the parent's proxy variables (BROWSER_BIN %s)",
+    async (browserBin) => {
+      const { env, args } = await capture(undefined, PROXY_PARENT, browserBin);
+
+      expect(env.no_proxy).toBe("*");
+      expect(env.NO_PROXY).toBe("*");
+      expect(env).not.toHaveProperty("HTTP_PROXY");
+      expect(env).not.toHaveProperty("ALL_PROXY");
+      // The browser's own PUPPETEER_PROXY pin aside, the two exemptions are the only proxy keys.
+      const proxyKeys = Object.keys(env).filter(
+        (key) => /proxy/iu.test(key) && !key.startsWith("PUPPETEER_"),
+      );
+      expect(proxyKeys.toSorted()).toEqual(["NO_PROXY", "no_proxy"]);
+      expect(JSON.stringify([env, args])).not.toContain("192.0.2.1");
+      expect(JSON.stringify([env, args])).not.toContain("example.invalid");
+      if (browserBin === undefined) {
+        expect(env).not.toHaveProperty("PUPPETEER_EXECUTABLE_PATH");
+      } else {
+        expect(env.PUPPETEER_EXECUTABLE_PATH).toBe(browserBin);
+      }
+    },
+  );
+
   it("names the five variables in the sudo --preserve-env list, in the contract's order", async () => {
     const { command, args, bin } = await capture("omp_user");
 
@@ -176,7 +216,7 @@ describe("spawnOmp dotenv pins", () => {
       "-n",
       "-u",
       "omp_user",
-      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,PUPPETEER_EXECUTABLE_PATH",
+      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,no_proxy,NO_PROXY,PUPPETEER_EXECUTABLE_PATH",
       "TMPDIR=/tmp/pins tmp",
       "--",
       "/usr/bin/setpriv",

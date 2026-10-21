@@ -6,11 +6,12 @@
 import { ompAgentDir, ompHome, ompHostOverlayPath, ompXdgHome } from "./state-layout.js";
 
 /**
- * Fixed whether or not `BROWSER_BIN` is set; sudo keeps exactly these names. The four browser pins
- * and `OTEL_SDK_DISABLED` must be here too, or sudo drops them and they stop pinning.
+ * Fixed whether or not `BROWSER_BIN` is set; sudo keeps exactly these names. The four browser pins,
+ * `OTEL_SDK_DISABLED` and the two proxy exemptions must be here too, or sudo drops them and they
+ * stop pinning.
  */
 export const SUDO_PRESERVE_ENV =
-  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,PUPPETEER_EXECUTABLE_PATH";
+  "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,no_proxy,NO_PROXY,PUPPETEER_EXECUTABLE_PATH";
 
 export function ompSpawnEnv(opts: {
   stateDir: string;
@@ -49,6 +50,16 @@ export function ompSpawnEnv(opts: {
     // either one alone stops export (`can1357/oh-my-pi` tag `v18.12.3`,
     // `packages/coding-agent/src/telemetry-export.ts:82`).
     OTEL_SDK_DISABLED: "true",
+    // Bun's fetch, which carries every model request (`can1357/oh-my-pi` tag `v18.12.3`,
+    // `packages/ai/src/utils/transport-fetch.ts:25-47`), takes `HTTP_PROXY` / `http_proxy` /
+    // `ALL_PROXY` from the env and proxies loopback too: one such line in a workspace `.env` would
+    // send the whole conversation and the session token, in clear, through any address and take
+    // its reply as the model's (issue 1615). The proxy variables cannot be pinned (any non-empty
+    // value is a proxy, an empty one is overwritten by dotenv), so the exemption is, in both
+    // cases: Bun reads lowercase first, omp's own check uppercase first
+    // (`packages/ai/src/utils/proxy.ts:68`).
+    no_proxy: "*",
+    NO_PROXY: "*",
   };
   if (process.env.LANG !== undefined) {
     env.LANG = process.env.LANG;
