@@ -11,7 +11,7 @@
 
 **助手消息** SHALL 渲染为左侧的无气泡块，带装饰性的助手头像标记（不进入可访问名）。块内各部分 SHALL 按以下次序渲染，每项仅在存在时渲染：分段区 → 兜底确认记录（配不上步骤的已结算确认，tool-approval「web 审批条」）→ 错误文本（含重试提示）→ `文件变更（N 个）` 卡 → 产物卡（turn-artifacts）→ `已停止` 徽章 → 操作行。分段区不另设包裹元素：各块按次序直接是消息内容容器（`data-slot="message-content"`）的子元素，其后的兜底确认记录等部件与之同级。分段区由「助手消息分段」的切段函数决定：分段布局下为正文段、思考段（每段一个深度思考折叠块，标题见 thinking-fold「深度思考折叠块呈现」）与工具段按发生次序交替；旧布局（该函数判为旧布局的消息，含本 change 之前的全部历史消息）下依次为深度思考折叠块 → 正文 → 一个工具段。消息没有任何正文段时，已停止的以 `（已停止生成）` 占位、运行中尚无任何可见块的代之以等待指示（见下文），二者都位于分段区末尾（旧布局下即正文的位置）；占位 SHALL 是一个 `data-slot="message-body"` 元素（与 #910 之前的占位同一元素）。分段布局下 SHALL NOT 为空正文或只含空白的正文渲染空的 `message-body`：例如一条 running 消息只有一段思考时，消息内没有 `message-body` 元素，第一个正文段到达时才出现。待决审批 SHALL NOT 渲染在消息内（见 `输入框上方停靠区` 与 tool-approval）。思考折叠块、工具段、兜底确认记录、文件变更卡与产物卡 SHALL NOT 改变本条规定的复制、重新生成、分叉与已停止行为：`复制` 仍复制整条消息的正文原文（各正文段按次序拼接即为原文，不含思考与步骤）。
 
-**正文** SHALL 经 `@assistant-ui/react-markdown`（加 `remark-gfm`）渲染，源文本里的 HTML 解析成元素并经白名单消毒后渲染（规则见下，owner 2026-10-18 裁决，取代此前「源 HTML 作为文本出现、链接惰性、图片不加载」三条），不经 `web/src/lib/md-render.ts`（该模块留给文件页）；分段布局下每个正文段各自独立渲染为一个 `data-slot="message-body"` 的块，规则相同：
+**正文** SHALL 经 `@assistant-ui/react-markdown`（加 `remark-gfm`）渲染，源文本里的 HTML 解析成元素并经白名单消毒后渲染（规则见下，owner 2026-10-18 裁决，取代此前「源 HTML 作为文本出现、链接惰性、图片不加载」三条；「正文渲染错误边界」的回退态除外），不经 `web/src/lib/md-render.ts`（该模块留给文件页）；分段布局下每个正文段各自独立渲染为一个 `data-slot="message-body"` 的块，规则相同：
 - 源文本中的 HTML SHALL 解析成元素并经白名单消毒后渲染。元素白名单：段落、标题、`b`/`strong`/`i`/`em`/`u`/`s`/`del`/`ins`/`mark`/`kbd`/`code`/`pre`/`sub`/`sup`/`span`/`br`/`hr`/`div`/`blockquote`/`q`、列表（`ul`/`ol`/`li`/`dl`/`dt`/`dd`）、表格（`table`/`thead`/`tbody`/`tfoot`/`tr`/`th`/`td`）、`details`/`summary`、`a`、`img`，以及只允许 Markdown 任务列表形态的 `input`（`type="checkbox"` 且 `disabled`；其它 `input` 去掉）。`script`、`style`、`noscript`、`textarea`、`iframe`、`object`、`embed` SHALL 连同其内容整体去掉（内容不以文本出现）；其它非白名单元素（`form`/`button`/`select`/`link`/`meta`/`base`/`svg`/`math`/`picture`/`source`/`video`/`audio` 等，以及 `<task>`、`<file>` 这类并非 HTML 元素名的占位写法）：源 HTML 写出的 SHALL 按源文本原样显示为文字——起始标签按原文（含其属性字节）显示，源中有结束标签的也按原文显示，二者之间的内容照常渲染（owner 2026-10-18：占位符不丢）；不是源 HTML 写出的（Markdown 自身生成，如 GFM 脚注的 `section`）SHALL 去掉元素、保留其中的文字。属性白名单：所有元素的 `style`、`title`、`lang`、`dir`；`a` 的 `href`；`img` 的 `src`、`alt`、`width`、`height`；`td`/`th` 的 `colspan`/`rowspan`/`align`；`ol` 的 `start`；`input` 的 `type`/`checked`/`disabled`；`code` 的 `language-*` class 与任务列表 `li`/`ul`/`ol` 的 GFM class（`task-list-item`、`contains-task-list`）；其余属性 SHALL 剥除——含其它取值的 `class`、`id`、`name`（不以加前缀的方式保留）、`target`、`rel`（二者只由链接规则写出）、`tabindex`、`accesskey`、`srcset`、`formaction` 与全部 `on*` 事件属性。`style` 属性的取值在解码 CSS 转义（如 `\75 rl(`）之后、不分大小写、忽略空白地含有 `url(`、`image(`、`image-set(`、`-webkit-image-set(`、`cross-fade(`、`src(` 或 `expression(` 时，或取值里出现 `/*`（CSS 注释：渲染器按声明切分后再去注释，与任何整串去注释的判法都可能配对不一致，是已证实的绕过路径；CSS 转义造不出 `/*`，注释在属性里也没有用处）时，SHALL 整个属性丢弃（元素保留）；其余 `style` 取值原样保留（owner 2026-10-18：完整保留 style）。消毒作用于 Markdown 与源 HTML 产生的全部元素。流式期间未闭合的标签按浏览器的容错规则解析；同一份正文在终态渲染的结果 SHALL 与一次性渲染它相同；
 - 链接（Markdown 链接与源 HTML 的 `a`）：目标为 `http://`、`https://`（协议后必须是 `//`——`https:evil`、`https:/path` 会被浏览器按相对地址解析）或 `mailto:` 的 SHALL 渲染为 `a` 元素，`href` 为该目标、`target="_blank"`、`rel` 含 `noopener` 与 `noreferrer`、`class` 恰为链接规则写出的固定样式类 `aui-md-a text-primary hover:text-primary/80 underline underline-offset-2`（owner 2026-10-18：链接要看得出是链接；基础层把 `a` 重置为正文色，源 HTML 的 `class` 仍剥除）；协议前缀按字面、区分大小写比对（与消毒器的协议表同口径，`HTTPS://…` 按其它目标处理）；其它目标（`javascript:`、`data:`、`vbscript:`、相对路径、只有锚点、没有 `href`）SHALL 只渲染链接的可见文字、不生成 `a` 元素，目标地址不出现在页面文本与属性里；
 - 图片（Markdown 图片与源 HTML 的 `img`）：`src` 为 `http://` 或 `https://`（同样要求 `//`）的 SHALL 渲染为 `img` 元素，`src` 为该地址、`alt` 为源文本的 alt（可为空）、`loading="lazy"`、`referrerpolicy="no-referrer"`，宽度不超过正文容器；协议前缀同样按字面、区分大小写比对；其它 `src`（`data:`、`javascript:`、相对路径、没有 `src`）SHALL 不生成 `img`、不发请求，在原位渲染其 alt 文本，无 alt 时渲染其 URL 文本；加载失败由浏览器显示 alt，页面不弹提示、不重试；
@@ -38,7 +38,7 @@
 
 **零消息空态**：选中会话、历史已加载、消息为空且没有回合在跑时，线程区 SHALL 显示一个装饰性图标、一行 `还没有消息，发一条开始吧`，以及该会话绑定的工作空间名（只读，前缀 `工作空间`；会话未绑定时不显示这一行；已绑定但空间名解析不出来时——工作空间列表读取中、读取失败或该空间已删除——同样不显示这一行）。空态 SHALL NOT 显示场景分组、快捷任务或最佳实践卡，SHALL NOT 改动输入框草稿；页面一级标题仍是顶栏面包屑。历史尚在加载或加载失败时 SHALL NOT 显示空态。输入框处于锁定时（回合进行中，或流错误带着刷新指引——例如 prompt 已被受理但随后的快照读取失败）同样 SHALL NOT 显示空态：提示语指向的「发一条」此时做不了。
 
-**正文渲染错误边界**（#1534）SHALL 包住每个助手正文段的 Markdown 渲染：转换在渲染期抛出异常（如超深嵌套的 `>` 或 `<div>` 在 Markdown→hast 转换中栈溢出）时，该正文段 SHALL 回退为保留换行与空白的纯文本原文（React 文本节点，不经 HTML 解析），同一条消息的其它块、同一会话的其它消息与应用壳 SHALL 不受影响；该正文段的文本变化时 SHALL 重新尝试 Markdown 渲染（流式增长不卡在错误态）。应用 SHALL NOT 因助手正文的渲染异常落到路由默认错误页。
+**正文渲染错误边界**（#1534）SHALL 包住每个助手正文段的 Markdown 渲染：转换在渲染期抛出异常（如超深嵌套的 `>` 或 `<div>` 在 Markdown→hast 转换中栈溢出）时，该正文段 SHALL 回退为保留换行与空白的纯文本原文（React 文本节点，不经 HTML 解析），同一条消息的其它块、同一会话的其它消息与应用壳 SHALL 不受影响；该正文段的文本变化（含快照原地重装）时 SHALL 重新尝试 Markdown 渲染——只在文本与抛错时不同才清错误态，同一文本再次抛错只是再落回回退态，不循环。应用 SHALL NOT 因助手正文的渲染异常落到 react-router 的默认错误页（`Unexpected Application Error!`）。
 
 #### Scenario: 消息呈现与流式光标
 - **WHEN** 一次回合的快照包含多行用户消息与含 Markdown（标题 + 代码块 + 源 HTML）的助手正文，先处于 running、随后收到 `turn.end` done；另一例在 `prefers-reduced-motion: reduce` 下渲染同一条 running 助手消息
@@ -167,12 +167,12 @@
 
 #### Scenario: 正文转换栈溢出时回退纯文本
 - **WHEN** 助手正文为 `"> ".repeat(N) + "x"`，N 大到 Markdown→hast 转换在渲染期栈溢出
-- **THEN** 该正文段显示纯文本原文（以 `> > ` 开头、以 `x` 结尾），没有 `blockquote` 元素，没有未捕获异常冒出消息
+- **THEN** 该正文段显示纯文本原文（以 `> > ` 开头、以 `x` 结尾），没有 `blockquote` 元素；助手消息的 `article` 仍在，页面没有 `Unexpected Application Error!`，`console.error` 没有收到 react-router 默认错误边界的那条消息（没有边界时正是这三样翻转：路由层接住异常、整页换成默认错误页）
 - **WHEN** 助手正文为 `"<div>".repeat(N) + "x"`（源 HTML 经 rehype-raw 的路径）
 - **THEN** 同样回退为纯文本，没有 `div` 子元素
 - **WHEN** 溢出正文的末尾是 `<script>window.__pwned=1</script>`
 - **THEN** 回退文本含字面 `<script>`，页面里没有 `script` 元素，`window.__pwned` 未定义
 - **WHEN** 同一会话另有一条含 Markdown 链接的正常消息，且溢出消息里正文段之后还有工具块
 - **THEN** 那条消息的链接、溢出消息的工具块、侧栏与输入框都照常渲染
-- **WHEN** 处于回退态的正文段其文本换成 `**粗**`
+- **WHEN** 处于回退态的正文段其文本换成 `**粗**`（直接渲染 `MessageBody` 后 `rerender`，或快照原地重装——流式 `text.delta` 只会追加，嵌套不会因追加而变浅）
 - **THEN** 渲染出 `strong` 元素，不再是纯文本
