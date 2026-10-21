@@ -62,5 +62,5 @@
 #### Scenario: 派发后极早停止（真实 omp）
 - **WHEN** 官方 omp v18.12.3 在生产装配下（`openProxiedApp`）收到文本 `你好 WORKBUDDY_FAKE_HANG` 的 prompt（假上游对首个模型请求不写头不写体地挂住），`POST /prompt` 返回 202 后不等任何事件立即 `POST /stop`
 - **THEN** stop 返回 202、body `{}`；SSE 恰一个 `turn.end(stopped)`、无 `error`；从 stop 到 `turn.end` 用时小于 8000 ms（未走有界退回）；`GET /messages` 的 `session.status` 为 `stopped`，`messages[0]` 为落盘的用户消息（`role` 为 `user`、`content` 等于 prompt 文本）、`messages[1].status` 为 `stopped`；`turn.end` 之后 2000 ms 内出现 `prompt_result` 帧，`status` 为 `aborted`、`id` 等于 prompt 回执（`type` 为 `response`、`command` 为 `prompt`）的 `id`
-- **THEN** 子进程 stdout 帧里 abort 回执（`type` 为 `response`、`command` 为 `abort`）`success` 为 true 且出现在 `agent_start` 之后；prompt 回执 / `agent_start` / abort 回执 / `prompt_result` 的首次出现次序与「stop 返回时是否已读到 `agent_start`」作为读数打印并记入实现 PR，连跑三次一致则冻结为字面量断言，翻转则保留为读数并写明未钉
+- **THEN** 子进程 stdout 帧里 abort 回执（`type` 为 `response`、`command` 为 `abort`）`success` 为 true 且出现在 `agent_start` 之后；prompt 回执 / `agent_start` / abort 回执 / `prompt_result` 的首次出现次序与「调用 stop 之前 / 返回之后是否已读到 `agent_start`」（两值一致才算定论）作为读数打印并记入实现 PR，连跑三次一致则冻结为字面量断言，翻转则保留为读数并写明未钉
 
