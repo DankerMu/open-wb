@@ -3,7 +3,9 @@
  * where omp reads its managed configuration are set explicitly on every spawn, so a `.env` that omp
  * loads cannot supply them. Key set, literal values and the sudo prefix are written out from the
  * spec, not derived from `src/sessions/omp/process.ts`. #1529: the key set also holds the four
- * browser pins, and the sudo list ends in them and `PUPPETEER_EXECUTABLE_PATH`.
+ * browser pins, and the sudo list ends in them and `PUPPETEER_EXECUTABLE_PATH`. #1575: and
+ * `OTEL_SDK_DISABLED=true`, whatever the parent's `OTEL_*`, named in the sudo list before
+ * `PUPPETEER_EXECUTABLE_PATH`.
  */
 import type { SpawnOptions } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -30,6 +32,13 @@ const PARENT: Record<string, string> = {
   PI_PROFILE: "parentlegacyprofile",
 };
 
+/** omp-runtime「环境白名单」#1575 WHEN: a parent that would turn OTLP export on, to an outside address. */
+const OTEL_PARENT: Record<string, string> = {
+  OTEL_SDK_DISABLED: "false",
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://192.0.2.1:4318",
+  OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "true",
+};
+
 interface Captured {
   command: string;
   args: string[];
@@ -48,12 +57,16 @@ afterEach(() => {
   }
 });
 
-async function capture(ompUser?: string): Promise<Captured> {
+async function capture(
+  ompUser?: string,
+  parent: Record<string, string> = {},
+  browserBin?: string,
+): Promise<Captured> {
   const root = mkdtempSync(join(tmpdir(), "omp-dotenv-pins-"));
   temps.push(root);
   const stateDir = join(root, "state dir");
   const bin = join(root, "bin", "omp");
-  for (const [key, value] of Object.entries(PARENT)) {
+  for (const [key, value] of Object.entries({ ...PARENT, ...parent })) {
     vi.stubEnv(key, value);
   }
   const calls: Array<{ command: string; args: string[]; options: SpawnOptions }> = [];
@@ -73,6 +86,7 @@ async function capture(ompUser?: string): Promise<Captured> {
       token: TOKEN,
       resumePath: null,
       ...(ompUser === undefined ? {} : { ompUser }),
+      ...(browserBin === undefined ? {} : { browserBin }),
     },
     spawnImpl,
   );
@@ -97,6 +111,7 @@ describe("spawnOmp dotenv pins", () => {
         "HOME",
         "LANG",
         "OMP_PROFILE",
+        "OTEL_SDK_DISABLED",
         "PATH",
         "PI_BROWSER_CMUX",
         "PI_BROWSER_RELAY",
@@ -124,11 +139,32 @@ describe("spawnOmp dotenv pins", () => {
       expect(env.PI_CONFIG_FILES).toBe(args[args.indexOf("--config") + 1]);
       expect(env.XDG_DATA_HOME).toBe(join(stateDir, "xdg", "data"));
       expect(env.WORKBUDDY_MODEL_TOKEN).toBe(TOKEN);
+      expect(env.OTEL_SDK_DISABLED).toBe("true");
       for (const sentinel of Object.values(PARENT).filter((value) => value.includes("sentinel"))) {
         expect(JSON.stringify([env, args])).not.toContain(sentinel);
       }
       expect(JSON.stringify([env, args])).not.toContain("parentprofile");
       expect(JSON.stringify([env, args])).not.toContain("parentlegacyprofile");
+    },
+  );
+
+  it.each([undefined, "/usr/bin/chromium"])(
+    "pins OTEL_SDK_DISABLED=true over the parent's OTEL_* (BROWSER_BIN %s)",
+    async (browserBin) => {
+      const { env, args } = await capture(undefined, OTEL_PARENT, browserBin);
+
+      expect(env.OTEL_SDK_DISABLED).toBe("true");
+      expect(env).not.toHaveProperty("OTEL_EXPORTER_OTLP_ENDPOINT");
+      expect(env).not.toHaveProperty("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT");
+      expect(Object.keys(env).filter((key) => key.startsWith("OTEL_"))).toEqual([
+        "OTEL_SDK_DISABLED",
+      ]);
+      expect(JSON.stringify([env, args])).not.toContain("192.0.2.1");
+      if (browserBin === undefined) {
+        expect(env).not.toHaveProperty("PUPPETEER_EXECUTABLE_PATH");
+      } else {
+        expect(env.PUPPETEER_EXECUTABLE_PATH).toBe(browserBin);
+      }
     },
   );
 
@@ -140,7 +176,7 @@ describe("spawnOmp dotenv pins", () => {
       "-n",
       "-u",
       "omp_user",
-      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,PUPPETEER_EXECUTABLE_PATH",
+      "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,PUPPETEER_EXECUTABLE_PATH",
       "TMPDIR=/tmp/pins tmp",
       "--",
       "/usr/bin/setpriv",

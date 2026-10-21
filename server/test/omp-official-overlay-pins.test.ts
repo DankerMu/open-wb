@@ -23,12 +23,24 @@
  * one keeps the pin), as omp-official-rpc-ui.test.ts does for `ask`. They assert presence (the `ida`
  * device, `advisor_yielded`), so the regressions above are not empty assertions.
  *
+ * Issue #1575 (change omp-spawn-otel-pin): omp-runtime「子进程 spawn 契约」scenario「工作目录 .env 不能
+ * 打开 OTLP 导出（真实 omp）」. Every world's cwd `.env` names a local listener as the OTLP endpoint,
+ * turns message-content capture on, writes `OTEL_SDK_DISABLED=false` and shortens the batch delays.
+ * Four configurations differ only in the two independent switches: the overlay's
+ * `telemetry.otlpExportEnabled: false` (dropped through both overlay sources, as above) and the
+ * spawn env's `OTEL_SDK_DISABLED=true` (deleted by this file's spawn wrapper). The host's shutdown
+ * never flushes (omp exits on stdin EOF), so each child stays up for one shared window after
+ * `agent_end` and the listener is read before shutdown. The listener only counts requests (path and
+ * arrival time), it never parses them.
+ *
  * Run locally (`OMP_BIN` absolute):
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-overlay-pins.test.ts --coverage=false
  */
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
@@ -70,6 +82,22 @@ const POLL_MS = 500;
 const STABLE_MS = 2_000;
 const SETTLE_LIMIT_MS = 30_000;
 const YIELD_LIMIT_MS = 60_000;
+/** The overlay's telemetry pin, as its fixed block writes it. */
+const TELEMETRY_BLOCK = "telemetry:\n  otlpExportEnabled: false\n";
+/**
+ * The batch delays every `.env` shortens (OpenTelemetry SDK defaults: 5 s, 1 s, 60 s). Only
+ * `OTEL_BSP_SCHEDULE_DELAY` takes effect on v18.12.3: the binary holds no `OTEL_BLRP_SCHEDULE_DELAY`
+ * or `OTEL_METRIC_EXPORT_INTERVAL` string, and the control's `/v1/traces` moved with it (0.9 s after
+ * `agent_end` at 500, 2.9 s at 3000) while `/v1/logs` did not (0.5 s, 0.9 s) and `/v1/metrics`
+ * never came (#1575 first run).
+ */
+const OTEL_DELAY_MS = 500;
+/**
+ * How long each child stays up after `agent_end` before the listener is read: one constant for all
+ * four configurations (design D5: at least 5 s and at least twice the control's first request,
+ * which came 0.5 s after `agent_end` on the first run).
+ */
+const OTLP_WINDOW_MS = 5_000;
 
 /**
  * One runtime: what it spawned, every stdout frame of its child, the child's stdout lines the tee
@@ -78,6 +106,9 @@ const YIELD_LIMIT_MS = 60_000;
 interface Launch {
   runtime: SessionRuntime;
   argv: string[][];
+  /** The env each spawn handed the child (after this file's wrappers), and when it spawned. */
+  env: NodeJS.ProcessEnv[];
+  spawnedAt: number[];
   out: OmpFrame[];
   malformed(): number;
   approvals: ApprovalRequest[];
@@ -105,13 +136,64 @@ function plantPins({ workspaceRoot }: OfficialDirs): void {
   );
 }
 
+/** One request the OTLP listener saw: its path and when it arrived. */
+interface OtlpHit {
+  path: string;
+  at: number;
+}
+
+/**
+ * A local HTTP listener standing in for an outside OTLP collector: it records each request's path
+ * and arrival time and answers 200 empty, without reading the body as OTLP. Closed at teardown,
+ * after the runtimes (teardown runs last-registered first, so call this before the world opens).
+ */
+async function otlpListener(): Promise<{ port: number; hits: OtlpHit[] }> {
+  const hits: OtlpHit[] = [];
+  const server = createServer((req, res) => {
+    hits.push({ path: String(req.url), at: Date.now() });
+    req.resume();
+    req.on("end", () => res.end());
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  onTeardown(
+    () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  );
+  return { port: (server.address() as AddressInfo).port, hits };
+}
+
+/** The cwd `.env` of every OTLP world: the listener as endpoint, content capture, short delays. */
+function plantOtlpEnv(port: number): (dirs: OfficialDirs) => void {
+  return ({ workspaceRoot }) => {
+    writeFileSync(
+      join(workspaceRoot, ".env"),
+      [
+        `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:${String(port)}`,
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true",
+        "OTEL_SDK_DISABLED=false",
+        `OTEL_BSP_SCHEDULE_DELAY=${String(OTEL_DELAY_MS)}`,
+        `OTEL_BLRP_SCHEDULE_DELAY=${String(OTEL_DELAY_MS)}`,
+        `OTEL_METRIC_EXPORT_INTERVAL=${String(OTEL_DELAY_MS)}`,
+        "",
+      ].join("\n"),
+    );
+  };
+}
+
 /**
  * A `write`-tier runtime on the world's managed state that allows every approval. With `overlay`,
- * both overlay sources point at that file (test-only, like rpc-ui's `overlayAt`). The runtime is
- * shut down only at teardown, after the case body, so its child and the tee outlive the settle.
+ * both overlay sources point at that file (test-only, like rpc-ui's `overlayAt`); with
+ * `otelPin: false` the spawn env loses `OTEL_SDK_DISABLED` (#1575's test-only wrapper; the product
+ * always sets it). The runtime is shut down only at teardown, after the case body, so its child and
+ * the tee outlive the settle.
  */
-function launch(world: OfficialWorld, overlay?: string): Launch {
+function launch(world: OfficialWorld, overlay?: string, otelPin = true): Launch {
   const argv: string[][] = [];
+  const envs: NodeJS.ProcessEnv[] = [];
+  const spawnedAt: number[] = [];
   const out: OmpFrame[] = [];
   const tees: Array<{ malformed(): number }> = [];
   const approvals: ApprovalRequest[] = [];
@@ -122,7 +204,12 @@ function launch(world: OfficialWorld, overlay?: string): Launch {
       nextArgv[nextArgv.indexOf("--config") + 1] = overlay;
       env.PI_CONFIG_FILES = overlay;
     }
+    if (!otelPin) {
+      delete env.OTEL_SDK_DISABLED;
+    }
     argv.push(nextArgv);
+    envs.push(env);
+    spawnedAt.push(Date.now());
     const child = (spawn as SpawnImpl)(command, nextArgv, { ...options, env });
     tees.push(teeStdoutFrames(child.stdout, (frame) => out.push(frame)));
     return child;
@@ -146,7 +233,7 @@ function launch(world: OfficialWorld, overlay?: string): Launch {
   });
   onTeardown(() => runtime.shutdown());
   const malformed = (): number => tees.reduce((sum, tee) => sum + tee.malformed(), 0);
-  return { runtime, argv, out, malformed, approvals };
+  return { runtime, argv, env: envs, spawnedAt, out, malformed, approvals };
 }
 
 /** The product overlay without `block`, written next to it; the block must occur exactly once. */
@@ -312,3 +399,80 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: overlay advisor / i
     },
   );
 });
+
+/** The four configurations of the OTLP scenario: which of the two switches the child keeps. */
+const OTLP_CASES = [
+  { name: "product overlay and product env", overlayPin: true, envPin: true },
+  { name: "env pin alone (overlay without telemetry block)", overlayPin: false, envPin: true },
+  { name: "overlay pin alone (env without OTEL_SDK_DISABLED)", overlayPin: true, envPin: false },
+] as const;
+
+/**
+ * One full turn under the given switches, then `OTLP_WINDOW_MS` with the child alive; returns the
+ * listener's hits (read before shutdown), the `OTEL_SDK_DISABLED` the child was handed (checked by
+ * the caller after the hits, so a missing product pin fails on the export itself first) and the
+ * `agent_end` time.
+ */
+async function otlpTurn(
+  overlayPin: boolean,
+  envPin: boolean,
+): Promise<{ hits: OtlpHit[]; pin: string | undefined; endedAt: number }> {
+  const listener = await otlpListener();
+  const world = await openOfficialWorld(plantOtlpEnv(listener.port));
+  const overlay = overlayPin ? undefined : overlayWithout(world, TELEMETRY_BLOCK, "telemetry");
+  const run = launch(world, overlay, envPin);
+
+  const frames = await collectPrompt(run.runtime.prompt(BASH_PROMPT));
+  const endedAt = Date.now();
+  expect(frames.some((frame) => frame.type === "agent_end")).toBe(true);
+  expect(run.env).toHaveLength(1);
+  if (overlay !== undefined) {
+    expectOverlayAt(run, overlay);
+  }
+  await delay(OTLP_WINDOW_MS);
+  const hits = [...listener.hits];
+  const spawnedAt = run.spawnedAt[0] ?? Number.NaN;
+  log(run, {
+    case: `otlp/${overlayPin ? "overlay" : "no-overlay"}+${envPin ? "env" : "no-env"}`,
+    requests: hits.length,
+    paths: [...new Set(hits.map((hit) => hit.path))].sort(),
+    sinceSpawnMs: hits.map((hit) => hit.at - spawnedAt),
+    sinceAgentEndMs: hits.map((hit) => hit.at - endedAt),
+    turnMs: endedAt - spawnedAt,
+    windowMs: OTLP_WINDOW_MS,
+  });
+  return { hits, pin: run.env[0]?.OTEL_SDK_DISABLED, endedAt };
+}
+
+describe.skipIf(OMP_TEST_OFF)(
+  `official omp v${OMP_VERSION}: cwd .env cannot open OTLP export`,
+  () => {
+    it.each(OTLP_CASES)(
+      "$name: the listener gets no request within the window after agent_end",
+      TURN_CASE,
+      async ({ overlayPin, envPin }) => {
+        const { hits, pin } = await otlpTurn(overlayPin, envPin);
+
+        expect(hits).toEqual([]);
+        expect(pin).toBe(envPin ? "true" : undefined);
+      },
+    );
+
+    it(
+      "negative control: overlay without telemetry block and env without OTEL_SDK_DISABLED, the listener gets OTLP requests",
+      TURN_CASE,
+      async () => {
+        const { hits, pin, endedAt } = await otlpTurn(false, false);
+
+        expect(pin).toBeUndefined();
+        expect(hits.length).toBeGreaterThan(0);
+        expect(hits.every((hit) => hit.path.startsWith("/v1/"))).toBe(true);
+        // The window covers the control's first request at least twice over (design D5).
+        expect(OTLP_WINDOW_MS).toBeGreaterThanOrEqual(5_000);
+        expect(OTLP_WINDOW_MS).toBeGreaterThanOrEqual(
+          2 * Math.max(0, (hits[0]?.at ?? 0) - endedAt),
+        );
+      },
+    );
+  },
+);

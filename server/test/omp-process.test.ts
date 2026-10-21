@@ -547,6 +547,7 @@ function allowlist(
     PI_BROWSER_CMUX: "0",
     PUPPETEER_PROXY: "direct://",
     PUPPETEER_PROXY_IGNORE_CERT_ERRORS: "0",
+    OTEL_SDK_DISABLED: "true",
   };
   if (extra.LANG !== undefined) {
     env.LANG = extra.LANG;
