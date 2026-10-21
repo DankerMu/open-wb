@@ -7,7 +7,7 @@
 ## What
 
 - 测试：`office-queue.test.ts:198` 与 `:450` 所在用例，在 `abort.abort()` / `cache.close()` 之后、`cancel` 已写且作业目录仍在的同一拍里同步读一次 `on.launches`（触发 `scan()`），随后把 `vi.waitFor(() => expect(…cancelAt).toBeDefined())` 改成直接 `expect(…cancelAt).toBeDefined()`；用例的其它断言（cancel 已写、作业目录已删、零额外启动、状态）不变。
-- 按同一判据核查 `server/test/office-converter.test.ts:513/528/544` 与 `server/test/server-startup-office.test.ts:192/200`：`cancel` 写下后作业目录是否可能在任何 `scan()` 之前被删。暴露的照同一样板改；不暴露的在 PR 里逐个写明理由（例如等待期间有轮询读取、目录不随 cancel 删除）。
+- 其它五处按规格的三类处理：`office-converter.test.ts:528/544`（测试同步触发 abort / close）照同一样板改；`:513`（转换器计时器写 cancel、同一宏任务内删目录）改用同文件 `:487-492` 已有的 `fs.rmSync` spy，在删目录那一刻同步扫描；`server-startup-office.test.ts:192/200`（app 在子进程里，无法同拍扫描）保留等待并写明理由，它承载的「1.5 s 内中止、早于 2 s 关停预算」结论不动。
 - 规格：verification-harness 新增 Requirement「假 sidecar 的 cancel 观察不依赖文件事件送达」。
 - 不做：产品代码 `office.ts` 的 cancel / 删目录时序（符合 sidecar 协议）；`fake-sidecar.ts` 的监听实现；加大 `GONE_WITHIN`；假定时器。
 
