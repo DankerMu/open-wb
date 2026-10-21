@@ -17,7 +17,12 @@ const BODY = '[data-slot="message-body"]';
 /** 链接规则写出的固定样式类（与拷入层 markdown-text 自带的 `a` 相同）。 */
 const LINK_CLASS = "aui-md-a text-primary hover:text-primary/80 underline underline-offset-2";
 
-/** 规格场景「链接、图片与源 HTML 的渲染与消毒」的正文，逐字照抄（`\\75` 是 CSS 转义的字面反斜杠）。 */
+/**
+ * 规格场景「链接、图片与源 HTML 的渲染与消毒」的正文（`\\75` 是 CSS 转义的字面反斜杠），比场景少两组（其余逐字、
+ * 同序）：`集` 之后的 `注`、`配` 两个 `span`——其跨声明注释的 style 写法测在本文件「白名单之外的元素与 style 的外连
+ * 写法」；以及 `[r](https:evil) ![i](https:t.png) <img src="https:/t.example/x.png">` 三个协议后不带 `//` 的目标——
+ * 测在 chat-markdown.test.tsx「协议后必须是 //」。
+ */
 const SANITIZE = [
   [
     "[官网](https://example.com/a)",
