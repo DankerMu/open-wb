@@ -6,7 +6,8 @@
  * no tool frame, step row or `files.changed`, and honours absolute paths, `~` and `..`.
  * `toWireText` prefixes one U+0020 to plain text so omp's `startsWith("/")` gate is false. That
  * stops builtins and templates only: omp's skill dispatch `trimStart()`s first
- * (`extensibility/skills.ts:455`), so a `/skill:<name>` omp knows but the host does not list runs.
+ * (`extensibility/skills.ts:640`, omp v18.12.3), so a `/skill:<name>` omp knows but the host does not
+ * list runs.
  * `listSkills` reads `<agentDir>/skills/<entry>/SKILL.md` the way omp v18.12.3 discovers user-level
  * skills (`discovery/helpers.ts` scanSkillsFromDir), with a line-based frontmatter reader instead
  * of a YAML library: a skill it cannot read is left out and its `/skill:` stays plain text.
@@ -251,8 +252,8 @@ export function sessionSkillsResolver(
 
 /**
  * Classifies already-trimmed prompt text. The builtin name ends at the first whitespace or `:`
- * (omp `slash-commands/helpers/parse.ts`); the skill name ends at the first U+0020 only (omp
- * `extensibility/skills.ts` parseSkillInvocation), so a newline belongs to the name. `todo` with
+ * (omp `slash-commands/helpers/parse.ts`); the skill name ends at the first U+0020 only, a host
+ * rule (omp v18.12.3 `parseSkillInvocation` ends it at any whitespace), so a newline belongs to the name. `todo` with
  * the subcommand `import` or `export` is text; the subcommand is cut as omp's parseSubcommand cuts
  * it: the text after the name's separator, trimmed, up to its first whitespace, lower-cased. The
  * path is neither parsed nor validated here.
