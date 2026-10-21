@@ -23,10 +23,10 @@ omp 在 `--resume <file>` 时以该会话文件头记录的 cwd 为准（该目�
 - **THEN** 标记文件不存在，且该次 `eval` 步骤以失败结束、其结果文本含浏览器打开超时或中继不可用的 omp 原文而不含 `Shared browser daemon unavailable`（走了中继；v18.12.3 首跑原文：`ToolError: Browser open timed out after 30000ms while launching or connecting to the browser (relay:http://192.0.2.1:9)`）
 
 #### Scenario: 工作目录 .env 不能打开 OTLP 导出（真实 omp）
-- **WHEN** 官方 omp v18.12.3 经宿主 spawn 环境启动，会话工作目录里预置 `.env`，写 `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<本地监听端口>`、`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true` 与 `OTEL_SDK_DISABLED=false`；分别以（1）产品 overlay 与（2）去掉 `telemetry:` 块的 overlay（测试专用）跑一个完整回合并正常关停
-- **THEN** 两种情况下本地监听器都收不到任何请求
-- **WHEN** 同一用例，overlay 去掉 `telemetry:` 块且 spawn 环境去掉 `OTEL_SDK_DISABLED`（测试专用的 spawn 包装删除它，作为入库的负向对照）
-- **THEN** 本地监听器在回合或关停后的有界时间内收到至少一个 OTLP 请求
+- **WHEN** 官方 omp v18.12.3 经宿主 spawn 环境启动，会话工作目录里预置 `.env`，写 `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:<本地监听端口>`、`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`、`OTEL_SDK_DISABLED=false` 与缩短导出间隔的批处理设置（四种配置的 `.env` 相同）；分别以（1）产品 overlay 与产品 spawn 环境、（2）去掉 `telemetry:` 块的 overlay（测试专用）、（3）产品 overlay 但 spawn 环境去掉 `OTEL_SDK_DISABLED`（测试专用的 spawn 包装删除它）跑一个完整回合，`agent_end` 之后子进程继续存活一个有界的观察窗口，窗口结束、关停之前断言
+- **THEN** 三种配置下本地监听器都收不到任何请求（（2）证明环境钉单独有效，（3）证明 overlay 钉单独有效）
+- **WHEN** 同一用例，（4）overlay 去掉 `telemetry:` 块且 spawn 环境去掉 `OTEL_SDK_DISABLED`（入库的负向对照），同样在 `agent_end` 后的同一观察窗口内、关停之前断言
+- **THEN** 本地监听器至少收到一个 OTLP 请求（宿主的关停路径不 flush：omp 在 stdin EOF 后直接退出，导出只能在进程存活时由批处理与周期定时器发出）
 
 #### Scenario: 参数与目录
 - **WHEN** 对 owner `u1` 的未绑定空间会话（`workspace_id` 为 null，有效档位 `write`，有效模型为缺省模型 `<MODEL_ID>`）首次 spawn 与 resume spawn

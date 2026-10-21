@@ -8,9 +8,9 @@ issue 写于钉住版本还是 v18.0.10 时：那一版没有 `telemetry.otlpExp
 
 ## What
 
-- `server/src/sessions/omp/spawn-env.ts`：`ompSpawnEnv` 恒写 `OTEL_SDK_DISABLED: "true"`（与是否配置 `BROWSER_BIN` 无关），`SUDO_PRESERVE_ENV` 在 `PUPPETEER_PROXY_IGNORE_CERT_ERRORS` 之后、`PUPPETEER_EXECUTABLE_PATH` 之前加 `OTEL_SDK_DISABLED`——与 #1529 的 `PI_BROWSER_RELAY: "0"` 同一做法。宿主今天不传任何 `OTEL_*`，已有部署无行为变化。
+- `server/src/sessions/omp/spawn-env.ts`：`ompSpawnEnv` 恒写 `OTEL_SDK_DISABLED: "true"`（与是否配置 `BROWSER_BIN` 无关），`SUDO_PRESERVE_ENV` 在 `PUPPETEER_PROXY_IGNORE_CERT_ERRORS` 之后、`PUPPETEER_EXECUTABLE_PATH` 之前加 `OTEL_SDK_DISABLED`——与 #1529 的 `PI_BROWSER_RELAY: "0"` 同一做法。宿主今天不传任何 `OTEL_*`，omp 自身无行为变化；副作用是助手经 bash / eval 起的工作区程序也看到 `OTEL_SDK_DISABLED=true`（design D6，接受并登记）。
 - 单测：`omp-spawn-dotenv-pins.test.ts`（键集合、取值、sudo 前缀，按规格写死不从源码推导）、`omp-process*.test.ts` / `session-supervisor-helpers.ts` 中写死白名单与 preserve 串的断言同步；`server/test/linux/uid-isolation.test.ts` 的必到键表加 `OTEL_SDK_DISABLED`（CI `uid-isolation` 在 sudo 形态下证明它到达 omp）。
-- 真实 omp v18.12.3 用例：工作目录 `.env` 写本地监听器端点、内容采集开关与 `OTEL_SDK_DISABLED=false`，三种配置（产品 overlay；去掉 `telemetry:` 块的 overlay；两者都去掉作为入库负向对照）——前两种监听器零请求，负向对照收到请求。优先放进现有 `omp-official-overlay-pins.test.ts`（已在 CI 的三处硬编码清单里）；若另建文件，三处清单（`.github/scripts/ci-uid-isolation.sh:292`、`scripts/test-ci-harness.sh:92`、`:849`）同步并跑 `make test-guardrails`。
+- 真实 omp v18.12.3 用例：工作目录 `.env` 写本地监听器端点、内容采集开关、`OTEL_SDK_DISABLED=false` 与缩短的批处理间隔，四种配置（产品；去掉 overlay `telemetry:` 块；去掉环境钉；两者都去掉作为入库负向对照），每种都在 `agent_end` 后让子进程存活同一个有界观察窗口、关停之前断言（宿主关停不 flush，design D5）——前三种监听器零请求，负向对照收到请求。优先放进现有 `omp-official-overlay-pins.test.ts`（已在 CI 的三处硬编码清单里）；若另建文件，三处清单（`.github/scripts/ci-uid-isolation.sh:292`、`scripts/test-ci-harness.sh:92`、`:849`）同步并跑 `make test-guardrails`。
 - 规格：omp-runtime「子进程 spawn 契约」（白名单集合、钉值说明、环境白名单 WHEN/THEN、新 Scenario「工作目录 .env 不能打开 OTLP 导出（真实 omp）」）；omp-uid-isolation「OMP_USER 配置与 sudo spawn 前缀」（preserve 串、sudo 进程 env、六个键）。
 - 文档（编排方）：`docs/adr/0012-omp-project-config-host-overlay.md` 在 `:138` 的 telemetry 条目后加带日期的补充；`docs/architecture/system.md` 9.8 的 overlay 固定块表（`:533`）与 `:452`「spawn 环境恒钉…」段补上这一环境钉。
 - 不做：overlay 的 `telemetry.otlpExportEnabled` 钉（保留，两道关并存）；穷举 `.env` 能注入的其它非 `PI_*` / `OMP_*` 变量（另起）；剥掉父进程 `OTEL_*`（本来就不传）。
