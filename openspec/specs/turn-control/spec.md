@@ -115,6 +115,11 @@ web SHALL：会话/消息/步骤状态联合与 `turn.end.status` 联合加 `sto
 - **WHEN** fake-omp 以 `abort-ok --start-delay-ms 60000` 运行，派发回执兑现后调用 stop，注入时钟推进 `OMP_ABORT_GRACE_MS`
 - **THEN** 进程不收到 `abort` 帧；回合经有界退回以恰一个 `turn.end(stopped)` 收尾，不产生 `error`，没有未处理的 Promise 拒绝
 
+#### Scenario: 派发后极早停止（真实 omp）
+- **WHEN** 官方 omp v18.12.3 在生产装配下（`openProxiedApp`）收到文本 `你好 WORKBUDDY_FAKE_HANG` 的 prompt（假上游对首个模型请求不写头不写体地挂住），`POST /prompt` 返回 202 后不等任何事件立即 `POST /stop`
+- **THEN** stop 返回 202、body `{}`；SSE 恰一个 `turn.end(stopped)`、无 `error`；从 stop 到 `turn.end` 用时小于 8000 ms（未走有界退回）；`GET /messages` 的 `session.status` 为 `stopped`，`messages[0]` 为落盘的用户消息（`role` 为 `user`、`content` 等于 prompt 文本）、`messages[1].status` 为 `stopped`；`turn.end` 之后 2000 ms 内出现 `prompt_result` 帧，`status` 为 `aborted`、`id` 等于 prompt 回执（`type` 为 `response`、`command` 为 `prompt`）的 `id`
+- **THEN** 子进程 stdout 帧里 abort 回执（`type` 为 `response`、`command` 为 `abort`）`success` 为 true 且出现在 `agent_start` 之后；prompt 回执 / `agent_start` / abort 回执 / `prompt_result` 的首次出现次序与「调用 stop 之前 / 返回之后是否已读到 `agent_start`」（两值一致才算定论）作为读数打印并记入实现 PR，连跑三次一致则冻结为字面量断言，翻转则保留为读数并写明未钉
+
 ### Requirement: 会话级控制占用
 supervisor SHALL 按 `sessionId` 维护"控制占用"（control claim）。regenerate、fork（占用的是**源**会话）、stop 与撤回（message-undo「撤回 REST」，占用的是被撤回的会话）在前置校验通过的同一同步段内登记占用，持有至该操作的 prompt 派发完成（regenerate）或响应返回（fork、stop、撤回，以及任何失败路径），并 SHALL 在每一种结束路径（2xx、409、400、502、503、异常）上释放，使失败后会话仍可正常使用。占用 SHALL 按持有次数计数：同一会话可同时有多个持有者（如 regenerate 执行中到达的 stop），每个持有者只释放自己登记的那一次，全部释放后占用才解除；supervisor SHALL 提供同步可读的"该会话是否持有控制占用"判定，供受理前拒绝使用。持有占用期间，同一会话的 prompt、regenerate、fork、撤回请求与归档（session-metadata「会话归档」的 `archived:true`）SHALL 一律 409 `session_busy`，不写任何行、不向进程发帧、不 spawn。stop 不受占用阻塞、永不因占用返回 409：它按会话 `status` 判定（非 running → 204；running 而 prompt 尚未派发 → 停止意图，见停止生成 REST；regenerate 派发后即为普通 running 回合，可正常停止）。持有占用的会话，其进程与该操作的临时进程在 omp-pool 中视为"回合中"，不可被驱逐。
 
