@@ -317,6 +317,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
       没有变更、无需并回。归档后主规格写十五个错误码、十九项配置，而主干代码已是 16 码（S1g 的 `upload_too_large`，#1012，代码先合入）：
       差额随 S1g 归档补齐。
     - 尚未完成：功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增的 SL-01…SL-18 与 CH-58…CH-65 全部 `待签`。
+    - 2026-10-21：上述各行均已签署，验收清单已无 `待签` 行；Epic #917 已关闭。
   - **D `s1f-files-page`**：文件页重写。范围已扩大、含后端，见下方「2026-10-06 owner 决定」第 4 条。
     - 状态（2026-10-12 留痕，#1124）：Epic #1048，子 issue #1049–#1123 全部关闭、实现与文档已合入主干；
       **change 已归档（2026-10-12，#1124），功能验收未签**。`tasks.md` 全部勾选。归档前对底的结果：本 change 26 条 MODIFIED 的主规格底本
@@ -356,6 +357,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
       1. 旧样式层整体移除（当时的冻结区 `web/src/ui` 与 `web/src/styles/legacy.css`；design「Not yet specified」）：已完成，change `s1f-legacy-layer-removal`（Epic #1393，子 issue #1397–#1402）。
       2. 包体上限：仍不设。ADR-0013 已定「S1f 的全部 change 完成后再定」，本 change 只量并记录（数字随 #1120 写入 ADR-0013），尚无对应 issue。
       3. 开着的跟进 issue：#1286（检查之后按路径操作的替换窗口，owner 裁决登记为已知残余；2026-10-16 由 change `sandbox-boundary-closure` 有界闭合，中间目录分量的残余书面保留，见 ADR-0010「2026-10-16 补充」）、#1337、#1340、#1350、#1372、#1380。
+    - 2026-10-21：上文「尚未完成」三项与「开着的跟进 issue」均已了结——本 change 的清单行全部签署（FL-01 由 owner 签收，#1638），#913 与上列跟进 issue 均已关闭，Epic #1048 已关闭。
 - 覆盖：F-UI-7、F-UI-8、F-CHAT-11a。
 - 必读增量：ADR-0013（含试验结论与未覆盖项）；assistant-ui 文档 ExternalStoreRuntime / Thread / ThreadList / Attachment。
 - Verify：`make check` + `make ui-walk`（视口矩阵无横向溢出、无 console error）+ 功能验收清单签收；真实端点走一轮含审批的回合；
@@ -405,6 +407,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
   - 尚未完成：功能验收清单 `docs/acceptance/functional-checklist.md` 本 change 新增的 CH-66…CH-97 全部 `待签`。
   - 开着的跟进 issue：#1269（欢迎页的档位 / 模型 / 强度缺省值过期）、#1277（首次发送上传阶段的停止与空 prompt）、
     #1282（封顶放开后没有审计记录的全部自动会话）。
+  - 2026-10-21：CH-66…CH-97 均已签署，#1269、#1277、#1282 均已关闭，Epic #982 已关闭。
 
 ### 里程碑 P2 — 知识库
 
@@ -508,6 +511,18 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
 ## Next Step
+
+> 2026-10-21 更新。**P0 与 P1 中除 S1b、S1d 外的子阶段已全部完成**：S0a、S0b、S1a、S1e、S1c（A、B）、S1f（A–D 与旧样式层移除）、S1g
+> 的 change 均已归档，Epic #845、#917、#982、#1048 已关闭；验收清单 `docs/acceptance/functional-checklist.md` 已无 `待签` 行，仓库无开着的 issue。
+> 计划外已交付：omp 浏览器接入（Epic #912，change `omp-browser-integration`）、omp 钉住版本升到 v18.12.3（Epic #1563）、办公文档转换移入
+> sidecar（#1350，change `office-convert-sandbox`）、验收后续（Epic #1520，change `epic-acceptance-followups`），以及宿主 overlay / spawn 环境的一批钉住项。
+>
+> 未开工：S1b、S1d、S2a、S2b、S2c、S3a、S3b、S4a、S4b。依赖已满足、可启动的是三项，彼此独立、可并行：
+> - **S1d 中心能力面**（依赖 S1c、S1f）：前端主线，按 2026-10-06 的原定顺序在 S1f、S1g 之后进行。
+> - **S2a spike**（依赖 S1a）：研究性质，无需 grill 门禁；P2→P3→P4 全部链在它之后（S2b → S2c → S3a → S3b，S2c → S4a，S4a + S3b → S4b）。
+> - **S1b FUSE 挂载**（依赖 S1a）：前置仍是下方 2026-09-26 记录的测试主机验证（rclone / sshfs 尚未安装）。
+>
+> 以下为更早的记录。
 
 > 2026-10-04 更新（ADR-0013）。S1c 的实现已全部合入；其 demo 逐组件签收（25 项待签）不再进行。
 > 2026-10-06 更新：S1f 的 A、B 已交付并归档（B 的功能验收清单 CH-01…CH-57 待 owner 签）。余下三次流水线运行按 C → S1g → D 的顺序进行，
