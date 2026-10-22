@@ -81,6 +81,8 @@ interface WorldOptions {
   seed?: ModelCatalog;
   /** The seed rows' upstream; omitted → the fake upstream with `FAKE_KEY`. */
   seedUpstream?: { baseUrl?: string; apiKey?: string };
+  /** `assembly.probeDeadlines` (group 8: a 1 s total deadline makes `超时` testable). */
+  probeDeadlines?: { connectDeadlineMs?: number; totalDeadlineMs?: number };
 }
 
 export async function openModelsWorld(options: WorldOptions = {}): Promise<ModelsWorld> {
@@ -133,6 +135,7 @@ export async function openModelsWorld(options: WorldOptions = {}): Promise<Model
       onPublishFailed: (record) => {
         failed.push(record);
       },
+      ...(options.probeDeadlines === undefined ? {} : { probeDeadlines: options.probeDeadlines }),
     },
   });
   opened.push(async () => {

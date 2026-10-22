@@ -441,6 +441,7 @@ describe("within: the caller's step inside the write transaction", () => {
     ["update", (s, w) => s.update("m2", { ...BODY, upstream: null }, w), "m2"],
     ["remove", (s, w) => s.remove("m2", w), "m2"],
     ["setDefault", (s, w) => s.setDefault("m2", w), "m2"],
+    ["recordProbe", (s, w) => s.recordProbe("m2", { status: "ok", message: null, at: 7 }, w), "m2"],
   ];
   it.each(writes)(
     "%s calls it once inside the transaction and rolls back when it throws",

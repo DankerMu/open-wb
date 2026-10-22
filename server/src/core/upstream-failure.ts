@@ -64,7 +64,8 @@ function envelope(status: 502 | 424, message: string, param: string): UpstreamFa
 /**
  * The excerpt of a ≥500 body: sanitised, every run of line feeds and tabs folded into one space,
  * at most 1000 code points (994 and the mark when longer). `cut` means the body was cut short
- * before it reached here (error-body.ts); then a tail that is the start of a secret is dropped.
+ * before it reached here (core/error-body.ts); then a tail that is the start of a secret is
+ * dropped.
  */
 export function upstreamExcerpt(text: string, secrets: readonly string[], cut = false): string {
   const replaced = redact(text, secrets);
@@ -152,7 +153,7 @@ function dropControls(text: string): string {
 }
 
 /** Keeps `max` code points, or `max - 6` and the mark; a surrogate pair is never split. */
-function capPoints(text: string, max: number): string {
+export function capPoints(text: string, max: number): string {
   const points = Array.from(text);
   if (points.length <= max) {
     return text;

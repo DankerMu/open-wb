@@ -9,7 +9,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { type IncomingMessage, request } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readErrorBody } from "../src/model-proxy/error-body.js";
+import { readErrorBody } from "../src/core/error-body.js";
 import {
   DEFAULT_CONNECT_DEADLINE_MS,
   DEFAULT_FIRST_BYTE_DEADLINE_MS,
