@@ -1,6 +1,6 @@
 # model-selection Spec Delta
 
-> s1d-model-registry：白名单的来源从启动配置改为注册表快照（model-registry）；六个 `MODEL_*` 键降为种子；每模型自带上游；推理模型可不带 `efforts`（NULL = 不声明）；模型菜单打开时重取 options。三条 requirement 逐字沿用主规格，有意改动只有：「模型白名单配置」的来源句、`efforts` 措辞、种子段、唯一来源段、POST-400 子句、空库子句与新场景；「推理强度集合」的两个 bullet 三句与补救句；「模型与推理强度控件」的括注「两次请求之间注册表变了」（原「配置变了」）、`invalidate()` 句、两处 THEN 增补与新场景。
+> s1d-model-registry：白名单的来源从启动配置改为注册表快照（model-registry）；六个 `MODEL_*` 键降为种子；每模型自带上游；推理模型可不带 `efforts`（NULL = 不声明）；模型菜单打开时重取 options。三条 requirement 逐字沿用主规格，有意改动只有：「模型白名单配置」的来源句、`efforts` 措辞、种子段、唯一来源段、POST-400 子句、空库子句与新场景；「推理强度集合」的两个 bullet 共三句（含补救句）；「模型与推理强度控件」的括注「两次请求之间注册表变了」（原「配置变了」）、`invalidate()` 句、两处 THEN 增补与新场景。
 
 ## MODIFIED Requirements
 

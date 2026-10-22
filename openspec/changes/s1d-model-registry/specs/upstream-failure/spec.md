@@ -1,6 +1,6 @@
 # upstream-failure Spec Delta
 
-> s1d-model-registry：密钥集的来源从环境变量的单一上游改为注册表此刻全部已登记上游（design D18），净化时现取。只改「上游原文净化」的密钥集两句并加一个场景，其余逐字沿用主规格。
+> s1d-model-registry：密钥集的来源从环境变量的单一上游改为注册表此刻全部已登记上游（design D18），净化时现取。只改「上游原文净化」密钥集那一段的四句（来源、无上游时、现取、代理）并加一个场景，其余逐字沿用主规格。
 
 ## MODIFIED Requirements
 

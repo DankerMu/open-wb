@@ -23,9 +23,9 @@
 - **WHEN** 一个会话的 `modelId` 为 `m2`，管理员把缺省换回 `m1` 后删除 `m2`，该会话再发一条 prompt（假 omp 真子进程，进程启动时集合含 `m1`）
 - **THEN** 假 omp 在 `prompt` 之前收到 `set_model{modelId:"m1"}`，没有新的 spawn；会话行的 `model_id` 列不变（仍为 `m2`，有效值解析回落）
 
-#### Scenario: 注册表写入不打断服务端任何东西、但在途回合的下一次上游请求失败
-- **WHEN** 一个以缺省模型 `m1` 进行中的回合在第一轮拿到工具调用（假 omp 真子进程 + 假上游两轮脚本），工具执行期间管理员 `PUT /api/models?id=m1` 以 `upstream: null` 清空其上游
-- **THEN** `PUT` 应答 200，没有进程被退役或终止、没有审批被取消；回合的第二轮上游请求被代理答 502 `agent_unavailable`（model-proxy：登记但无上游），回合以 `failed` 结束且 `detail` 不含任何上游内容；删除非缺省模型对在途回合的效果相同，只是第二轮应答为 400（见 model-proxy「Lookup change does not touch an in-flight stream」）
+#### Scenario: 注册表写入不打断服务端任何东西、但该模型的下一次上游请求失败
+- **WHEN** 一个以缺省模型 `m1` 进行中的回合的上游请求正挂起（假 omp 真子进程 + 假上游 `WORKBUDDY_FAKE_HANG` 标记，代理以注入的 3 s 首字节期限装配），管理员此时 `PUT /api/models?id=m1` 以 `upstream: null` 清空其上游；该回合结束后同一会话再发一条不带标记的 prompt
+- **THEN** `PUT` 应答 200，期间没有进程被退役或终止、没有审批被取消，挂起的请求仍在原上游上直到首字节期限到期（`lookup` 在转发前已完成），回合按既有 424 `no_response` 规则以 `failed` 结束；第二条 prompt 的第一次上游请求被代理答 502 `agent_unavailable`（登记但无上游），回合以 `failed` 结束且 `detail` 不含任何上游内容；删除非缺省模型对该模型后续请求的效果相同，只是应答为 400（model-proxy「Lookup change does not touch an in-flight stream」）
 
 ### Requirement: 环境种子
 启动阶段 `model_registry`（http-service-skeleton「服务启动与装配」）SHALL 在 `models` 表为空时把启动配置解析出的白名单逐项插入：次序即 `created_at` 次序，`defaultModelId` 那项 `is_default = 1`，每项的 `upstream_base_url` / `upstream_api_key` 取 `MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`（两者**未同时配置**时两列都为 NULL，与此前「未同时配置即无上游」相同；环境给出的 base URL 原样写入、不套 REST 的地址规则），单模型配置那一项的 `efforts` 列为 NULL。种子插入与首次快照读取 SHALL 是同步的 node:sqlite 操作，发生在 `db` 之后、createApp 之前。表非空时 SHALL NOT 写入任何行；此时 `MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 中任一键被设置，SHALL 经受管 stderr writer 恰写一行 LF-terminated exact JSON `{"event":"model_env_ignored"}`（只有 `event` 一个键，无键名、无取值；写失败吞掉），位于 `server_started` 之前；六个键都未设置时不写这一行。六个键的解析与校验 SHALL 原样保留（非法值仍为 `reason: "config"` 的启动失败）。
@@ -43,7 +43,7 @@
 - **THEN** 启动失败，`reason` 为 `config`（校验未因表非空而跳过）
 
 ### Requirement: 变更即发布
-每次注册表写入（创建、修改、删除、换缺省；探活除外）提交后，SHALL 在同一请求内依次重写 `<agent dir>/models.yml`（model-proxy「托管 models.yml」的写出器，输入为快照）与 `host-overlay.yml`（omp-runtime「宿主 overlay」的写出器，`visionModelId` 为快照里第一个 `vision` 为真的模型，没有则 null），然后才应答。重写 SHALL 单飞：同一时刻只有一次在跑，期间到达的写入等它结束后再以最新快照重写一次（多次等待合并为一次）。启动阶段 `models_yml` 与 `host_overlay` SHALL 调同一个发布函数的两步，两条路径写出的字节相同。`proxyBaseUrl` 与 agent 目录由装配根注入（两个写出器以函数注入 `createPublisher`，`models` 模块不导入 model-proxy 与 sessions）。例外：启动阶段 `models_yml` 之前（主端口已绑定、代理地址尚未交给发布器）到达的写入 SHALL 只刷新快照、不重写文件并照常应答；随后的 `models_yml` / `host_overlay` 阶段用当时的快照发布一次，所以这类写入不会丢。重写失败时 SHALL 应答 generic 500（不带典型信封），经装配注入的记录函数（`assembly.onPublishFailed`，生产装配传受管 stderr writer；未注入则不写）恰写一行 LF-terminated exact JSON `{"event":"model_publish_failed"}`（只有 `event` 一个键，无路径、无原因；写失败吞掉），数据库与审计行保留，不回滚；下一次写入或启动再发布。正在运行的 omp 进程 SHALL NOT 被发布本身重启或通知：新 spawn 读新文件；下一次派发时有效模型不在该进程启动时的模型集合里则先退役再以新文件 spawn，在集合里则经 `set_model` 对齐（chat-sessions「派发前按会话设置对齐进程」第 1、2 步）。
+每次注册表写入（创建、修改、删除、换缺省；探活除外）提交后，SHALL 在同一请求内依次重写 `<agent dir>/models.yml`（model-proxy「托管 models.yml」的写出器，输入为快照）与 `host-overlay.yml`（omp-runtime「宿主 overlay」的写出器，`visionModelId` 为快照里第一个 `vision` 为真的模型，没有则 null），然后才应答。重写 SHALL 单飞：同一时刻只有一次在跑，期间到达的写入等它结束后再以最新快照重写一次（多次等待合并为一次）。启动阶段 `models_yml` 与 `host_overlay` SHALL 调同一个发布函数的两步，两条路径写出的字节相同。`proxyBaseUrl` 与 agent 目录由装配根注入（两个写出器以函数注入 `createPublisher`，`models` 模块不导入 model-proxy 与 sessions）。例外：启动阶段 `models_yml` 之前（主端口已绑定、代理地址尚未交给发布器）到达的写入 SHALL 只刷新快照、不重写文件并照常应答；随后的 `models_yml` / `host_overlay` 阶段用当时的快照发布一次，所以这类写入不会丢。重写失败时 SHALL 应答 generic 500（不带典型信封），经装配注入的记录 sink（`assembly.onPublishFailed?: (record: ModelPublishFailedRecord) => void`，与既有 `log` / `warn` sink 同一写法：生产装配传受管 stderr writer `writeRecord`，其 union 加入该记录类型；未注入则不写）恰写一行 LF-terminated exact JSON `{"event":"model_publish_failed"}`（只有 `event` 一个键，无路径、无原因；写失败吞掉），数据库与审计行保留，不回滚；下一次写入或启动再发布。正在运行的 omp 进程 SHALL NOT 被发布本身重启或通知：新 spawn 读新文件；下一次派发时有效模型不在该进程启动时的模型集合里则先退役再以新文件 spawn，在集合里则经 `set_model` 对齐（chat-sessions「派发前按会话设置对齐进程」第 1、2 步）。
 
 #### Scenario: 发布字节等于启动写出
 - **WHEN** 在种子后的服务上登记带看图的 `m3`，再把服务以同样的表重启
