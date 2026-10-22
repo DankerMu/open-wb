@@ -8,7 +8,7 @@
  * 不变量：非空表恰有一行缺省——首行自动成为缺省，缺省行不能删除，换缺省在一个事务里清旧立新。
  */
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
-import { validateUpstream } from "../agent-config.js";
+import { validateUpstream, validateUpstreamKey } from "../agent-config.js";
 import { HttpError, type HttpErrorCode } from "../core/errors/index.js";
 import { upstreamSecretList } from "../core/upstream-failure.js";
 import {
@@ -53,6 +53,16 @@ const UPDATE =
   "UPDATE models SET name = ?, reasoning = ?, vision = ?, max_tokens = ?, efforts = ?, upstream_base_url = ?, upstream_api_key = ?, updated_at = ? WHERE id = ?";
 /** PUT 整体替换 `id` 以外的字段：这些键必须给出（`efforts` 可省略 = NULL）。 */
 const UPDATE_REQUIRED_KEYS = ["name", "reasoning", "vision", "maxTokens", "upstream"] as const;
+/** scheme 之后、authority 结束之前到最后一个 `@` 为止的 userinfo。 */
+const USERINFO = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/u;
+
+/**
+ * 地址的视图形式：去掉 userinfo（env 种子行原样入表，可能带 `user:pass@`）。视图只给这个形式；`PUT` 省略
+ * `apiKey` 且送回的正是它时沿用已存地址（`update`）。
+ */
+export function viewBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(USERINFO, "$1");
+}
 
 export function createModelStore(db: DatabaseSync) {
   const select = (id: string): ModelRow | undefined => {
@@ -117,7 +127,12 @@ export function createModelStore(db: DatabaseSync) {
       });
     },
 
-    /** PUT 语义：整体替换；`upstream.apiKey` 省略即保留既有密钥（没有既有密钥则 400）；`null` 清空上游。 */
+    /**
+     * PUT 语义：整体替换；`upstream.apiKey` 省略即保留既有密钥（没有既有密钥则 400）；`null` 清空上游。
+     * `baseUrl` 逐字等于已存地址的视图形式（去掉 userinfo）：沿用已存地址、不再套地址规则（地址规则拒 `@`）——
+     * `apiKey` 省略则密钥也沿用，给了则只换密钥（仍经 header 值校验）。编辑 env 种子行只改名或只换密钥都不丢
+     * 地址里 userinfo 的凭证。
+     */
     update(id: string, body: unknown, within?: Within): ModelRow {
       const { model, upstream } = parseUpdate(id, body);
       return inTransaction(db, () => {
@@ -128,7 +143,9 @@ export function createModelStore(db: DatabaseSync) {
         const next =
           upstream === null
             ? null
-            : checkedUpstream(upstream.baseUrl, upstream.apiKey ?? current?.apiKey);
+            : current !== null && upstream.baseUrl === viewBaseUrl(current.baseUrl)
+              ? { baseUrl: current.baseUrl, apiKey: checkedKey(upstream.apiKey ?? current.apiKey) }
+              : checkedUpstream(upstream.baseUrl, upstream.apiKey ?? current?.apiKey);
         db.prepare(UPDATE).run(
           model.name,
           flag(model.reasoning),
@@ -305,6 +322,14 @@ function upstreamFields(value: unknown): { baseUrl: string; apiKey: string | und
     fail("bad_request");
   }
   return { baseUrl, apiKey };
+}
+
+/** 沿用已存地址时只校验密钥：非空的合法 header 值。 */
+function checkedKey(apiKey: string): string {
+  if (!validateUpstreamKey(apiKey)) {
+    fail("bad_request");
+  }
+  return apiKey;
 }
 
 function checkedUpstream(baseUrl: string, apiKey: string | undefined): Upstream {

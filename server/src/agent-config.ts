@@ -259,11 +259,12 @@ const UPSTREAM_BASE_URL = /^https?:\/\/[^\s#@]+$/u;
  * The env path reuses only the key half: `MODEL_UPSTREAM_BASE_URL` is never held to the URL rule.
  */
 export function validateUpstream(upstream: { baseUrl: string; apiKey: string }): boolean {
-  return (
-    UPSTREAM_BASE_URL.test(upstream.baseUrl) &&
-    upstream.apiKey !== "" &&
-    isHeaderSafeKey(upstream.apiKey)
-  );
+  return UPSTREAM_BASE_URL.test(upstream.baseUrl) && validateUpstreamKey(upstream.apiKey);
+}
+
+/** The key half of `validateUpstream` alone: a non-empty valid header value. */
+export function validateUpstreamKey(apiKey: string): boolean {
+  return apiKey !== "" && isHeaderSafeKey(apiKey);
 }
 
 /**

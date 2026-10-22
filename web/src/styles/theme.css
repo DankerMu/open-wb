@@ -13,6 +13,22 @@
 @custom-variant data-open (&:where([data-state="open"]));
 @custom-variant data-closed (&:where([data-state="closed"]));
 
+/* The other bare data-* variants radix-nova components use for selection and layout (#1706,
+   ADR-0013): bound once with shadcn's own semantics — the data-state / data-orientation Radix
+   outputs, plus the same-named attribute a component may set itself (extend, never replace).
+   Single-line declarations only; a new bare variant in a newly copied component is bound here first.
+   Not bound: data-selected, data-disabled, data-inset, data-placeholder (see ADR-0013). */
+/* biome-ignore format: kept on one line (#1706) */
+@custom-variant data-active (&:where([data-state="active"], [data-active]:not([data-active="false"])));
+/* biome-ignore format: kept on one line (#1706) */
+@custom-variant data-checked (&:where([data-state="checked"], [data-checked]:not([data-checked="false"])));
+/* biome-ignore format: kept on one line (#1706) */
+@custom-variant data-unchecked (&:where([data-state="unchecked"], [data-unchecked]:not([data-unchecked="false"])));
+/* biome-ignore format: kept on one line (#1706) */
+@custom-variant data-horizontal (&:where([data-orientation="horizontal"], [data-horizontal]:not([data-horizontal="false"])));
+/* biome-ignore format: kept on one line (#1706) */
+@custom-variant data-vertical (&:where([data-orientation="vertical"], [data-vertical]:not([data-vertical="false"])));
+
 /* The shell's single breakpoint (≤760px, SHELL_NARROW_QUERY); max-[760px]: compiles to <760px. */
 @custom-variant narrow (@media (max-width: 760px));
 

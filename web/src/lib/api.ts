@@ -17,6 +17,12 @@ import {
   isPlainJsonObject,
   parseJsonArray,
 } from "./api-json.js";
+import {
+  type CreateModelInput,
+  createModelMethods,
+  type ModelView,
+  type UpdateModelInput,
+} from "./api-models.js";
 import { createSessionMethods } from "./api-sessions.js";
 import { createUploadMethods, type UploadedFile } from "./api-upload.js";
 import type { ComposerOptions } from "./composer-contract.js";
@@ -171,6 +177,12 @@ export type ApiClient = {
     file: File,
     options?: { signal?: AbortSignal; onProgress?: (percent: number) => void },
   ): Promise<UploadedFile>;
+  listModels(options?: ApiRequestOptions): Promise<ModelView[]>;
+  createModel(input: CreateModelInput, options?: ApiRequestOptions): Promise<ModelView>;
+  updateModel(id: string, input: UpdateModelInput, options?: ApiRequestOptions): Promise<ModelView>;
+  deleteModel(id: string, options?: ApiRequestOptions): Promise<void>;
+  setDefaultModel(id: string, options?: ApiRequestOptions): Promise<ModelView>;
+  probeModel(id: string, options?: ApiRequestOptions): Promise<ModelView>;
 };
 
 export type ApiClientOptions = {
@@ -418,6 +430,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
       parseJsonResponse,
       requestFailed,
     }),
+    ...createModelMethods(onUnauthorized, transport),
     async listAudit(filter, options) {
       const search = new URLSearchParams();
       if (filter?.limit !== undefined) {
@@ -501,3 +514,9 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
 }
 
 export { downloadUrl, fileUrl } from "./api-files.js";
+export {
+  type CreateModelInput,
+  MODEL_EFFORTS,
+  type ModelView,
+  type UpdateModelInput,
+} from "./api-models.js";

@@ -119,7 +119,7 @@
 | F-CTR-KB2 | 文档摄取与状态 |
 | F-CTR-KB3 | 检索测试 |
 | F-CTR-KB4 | 可见范围四档、共享只读、跨账号检索审计 |
-| F-CTR-MOD | 模型注册表（登记 + 探活） |
+| F-CTR-MOD | 模型注册表（登记 + 探活）——change `s1d-model-registry`（对话模型；嵌入 / 重排随 kb-service） |
 | F-CTR-PERM | 沙箱根目录、白名单派生、越界拦截记录 |
 | F-CTR-AUD | 审计页（权限/共享检索/账号操作，按账号隔离） |
 | F-CTR-ACC | 账号管理（管理员）+ 跨部门项目组 |

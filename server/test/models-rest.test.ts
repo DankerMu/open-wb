@@ -244,6 +244,64 @@ describe("编辑种子行", () => {
   });
 });
 
+describe("种子行带 userinfo 只改名", () => {
+  it("PUT with the view's address keeps the stored userinfo address: no apiKey keeps the key (upstreamChanged false), a new apiKey rotates only the key (true); no sentinel echoed", async () => {
+    const password = "wb-issue1651-userinfo-password";
+    const seedKey = "wb-issue1651-seed-api-key";
+    const stored = `https://u:${password}@host.example/v1`;
+    const world = await openModelsWorld({ seedUpstream: { baseUrl: stored, apiKey: seedKey } });
+
+    const renamed = await call(
+      world,
+      "admin",
+      "PUT",
+      "/api/models?id=m1",
+      putBody("改名", { baseUrl: "https://host.example/v1" }),
+    );
+    expectAnswer(renamed, 200);
+    expect(renamed.json()).toMatchObject({
+      name: "改名",
+      upstream: { baseUrl: "https://host.example/v1", hasApiKey: true },
+    });
+    for (const leak of [password, seedKey, "u:"]) {
+      expect(renamed.payload).not.toContain(leak);
+    }
+    expect(world.store.routeOf("m1")).toEqual({ baseUrl: stored, apiKey: seedKey });
+    expect(modelAudits(world.db)).toEqual([
+      {
+        actorId: "u3",
+        kind: "model.update",
+        title: "修改模型 改名",
+        detail: { modelId: "m1", name: "改名", upstreamChanged: false },
+        workspaceId: null,
+      },
+    ]);
+
+    // Then the same row with the view's address and a new key: only the key rotates.
+    const rotatedKey = "wb-issue1708-rotated-api-key";
+    const rotated = await call(
+      world,
+      "admin",
+      "PUT",
+      "/api/models?id=m1",
+      putBody("改名", { baseUrl: "https://host.example/v1", apiKey: rotatedKey }),
+    );
+    expectAnswer(rotated, 200);
+    expect(rotated.json()).toMatchObject({
+      upstream: { baseUrl: "https://host.example/v1", hasApiKey: true },
+    });
+    for (const leak of [password, seedKey, rotatedKey]) {
+      expect(rotated.payload).not.toContain(leak);
+    }
+    expect(world.store.routeOf("m1")).toEqual({ baseUrl: stored, apiKey: rotatedKey });
+    expect(modelAudits(world.db).at(-1)?.detail).toEqual({
+      modelId: "m1",
+      name: "改名",
+      upstreamChanged: true,
+    });
+  });
+});
+
 describe("修改保留密钥与清空上游", () => {
   it("omitted apiKey keeps the key, null clears both columns, a keyless model cannot omit it", async () => {
     const world = await openModelsWorld();

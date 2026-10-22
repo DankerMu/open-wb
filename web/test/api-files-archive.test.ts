@@ -264,6 +264,13 @@ const OTHER_CLIENT_METHODS = [
   "listProjectConfig",
   // 上传
   "uploadFile",
+  // 模型注册表（model-registry「模型 tab」）
+  "listModels",
+  "createModel",
+  "updateModel",
+  "deleteModel",
+  "setDefaultModel",
+  "probeModel",
   // 登录态与服务信息
   "getMe",
   "getInfo",

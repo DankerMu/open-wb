@@ -39,22 +39,15 @@ export function CenterPage({ tabs = CENTER_TABS }: { tabs?: readonly CenterTab[]
     return <Navigate replace to={tabLocation(pathname, search, hash, first.key)} />;
   }
 
-  // 拷入的 tabs 以 data-horizontal: / data-active: 写布局与选中态，本入口没有绑定这两个变体
-  // （Radix 暴露的是 data-orientation / data-state），这里用 className 按 data-state 补上，不改拷入文件。
   return (
     <div className="overflow-auto px-7 pt-6 pb-10 narrow:px-4">
       <Tabs
-        className="flex-col"
         onValueChange={(key) => navigate(tabLocation(pathname, search, hash, key))}
         value={current.key}
       >
-        <TabsList className="h-8">
+        <TabsList>
           {visible.map((tab) => (
-            <TabsTrigger
-              className="data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm dark:data-[state=active]:border-input dark:data-[state=active]:bg-input/30"
-              key={tab.key}
-              value={tab.key}
-            >
+            <TabsTrigger key={tab.key} value={tab.key}>
               {tab.label}
             </TabsTrigger>
           ))}

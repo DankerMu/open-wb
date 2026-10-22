@@ -14,7 +14,8 @@
  * 写入流水线：store 写方法自持事务，审计经它的 `within` 在 COMMIT 之前同事务写入 → `registry.refresh()` →
  * `await publish()` → 应答。发布失败：经 `onPublishFailed` 恰交出一条 `{"event":"model_publish_failed"}`，
  * 原错误交给共享 handler（generic 500，不是典型信封）；行与审计已提交、不回滚。`default` 对已是缺省的行
- * 不审计、不发布。视图不含密钥；`upstream.baseUrl` 去掉 userinfo（env 种子行原样入表，可能带 `user:pass@`）。
+ * 不审计、不发布。视图不含密钥；`upstream.baseUrl` 是 `store.viewBaseUrl` 去掉 userinfo 的形式（env 种子行原样入表，
+ * 可能带 `user:pass@`）；`PUT` 送回这个形式且不带 `apiKey` 时 store 沿用已存地址，`upstreamChanged` 随之为 false。
  * 审计 detail 只含 `modelId`、`name` 与 `upstreamChanged`——没有 base URL 与密钥。
  */
 import type { DatabaseSync } from "node:sqlite";
@@ -27,7 +28,7 @@ import type {
 import { HttpError } from "../core/errors/index.js";
 import { type ProbeResult, probeUpstream } from "./probe.js";
 import type { ModelPublishFailedRecord } from "./publish.js";
-import type { createModelStore, ModelRow } from "./store.js";
+import { type createModelStore, type ModelRow, viewBaseUrl } from "./store.js";
 
 type ModelStore = Pick<
   ReturnType<typeof createModelStore>,
@@ -71,8 +72,6 @@ const NO_UPSTREAM: ProbeResult = { status: "failed", message: "未配置上游" 
 const MODEL_BODY_LIMIT = 16 * 1024;
 /** Fastify 不接受 0：取最小合法值，显式的 no-body 校验负责「任意 body 即 400」。 */
 const BODYLESS_BODY_LIMIT = 1;
-/** scheme 之后、authority 结束之前到最后一个 `@` 为止的 userinfo。 */
-const USERINFO = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/u;
 
 const noStore: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -92,7 +91,7 @@ function toView(row: ModelRow) {
     upstream:
       upstream === null
         ? null
-        : { baseUrl: upstream.baseUrl.replace(USERINFO, "$1"), hasApiKey: true as const },
+        : { baseUrl: viewBaseUrl(upstream.baseUrl), hasApiKey: true as const },
     isDefault,
     probe,
     updatedAt: row.updatedAt,
