@@ -62,7 +62,7 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 
 - `GET /api/models` → 200 `{models: ModelView[]}`，按快照次序。
 - `POST /api/models`：body 键集 SHALL 为 `{id, name, reasoning, vision, maxTokens, efforts, upstream}` 的子集且含 `id`，`upstream` 为 `{baseUrl, apiKey}`（两键都必填）；缺省与 `MODEL_CATALOG` 条目相同（`name = id`、布尔 `false`、`maxTokens` 32768；非推理模型不得带 `efforts`；推理模型可不带——存 NULL，表示不声明强度集合，model-selection「推理强度集合」）；`baseUrl` SHALL 整体匹配 `^https?://[^\s#@]+$`（允许路径与查询串，不允许 userinfo 与 fragment）；`apiKey` SHALL 通过 `http.validateHeaderValue("authorization", "Bearer " + 取值)`。表为空时该行成为缺省。`id` 已存在 409 `conflict`；已有 32 行 400 `bad_request`；其它非法 400 `bad_request`。→ 201 `ModelView`。
-- `PUT /api/models?id=<id>`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列。→ 200 `ModelView`。
+- `PUT /api/models?id=<id>`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列；`apiKey` 省略且 `baseUrl` 逐字等于已存地址去掉 userinfo 后的视图形式时 SHALL 沿用已存地址（含 userinfo，不再套地址规则），使编辑 env 种子行只改名不丢凭证。→ 200 `ModelView`。
 - `DELETE /api/models?id=<id>`：`is_default = 1` 的行 409 `model_in_use`；否则删除 → 204。
 - `POST /api/models/default?id=<id>`（无 body）：一个事务里把旧缺省清零、该行置 1 → 200 `ModelView`；该行已是缺省时 200、不记审计、不发布。
 - `POST /api/models/probe?id=<id>`（无 body）：见「探活」→ 200 `ModelView`。
@@ -80,6 +80,10 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 #### Scenario: 编辑种子行
 - **WHEN** 管理员对零配置种子行 `deepseek-v4.1-flash`（推理，`efforts` NULL）`PUT` 只改 `name`、不带 `efforts`；再 `PUT` 带 `efforts:["low","high"]`；对一个带 `/` 的 id `Qwen/Qwen2.5-72B-Instruct` 先 `POST` 再 `PUT /api/models?id=Qwen%2FQwen2.5-72B-Instruct`；再对 `PUT /api/models`（无 `id`）与 `PUT /api/models?id=&id=m1` 发合法 body
 - **THEN** 第一次 200、视图 `efforts` 为 null、`models.yml` 该条目仍无 `thinking` 映射；第二次 200 后条目带 `thinking.efforts: [low, high]`；第三例 201 与 200，`GET /api/models` 列出该 id 原文；最后两例 400 `bad_request`，行不变
+
+#### Scenario: 种子行带 userinfo 只改名
+- **WHEN** env 种子行的上游地址为 `https://u:<哨兵>@host/v1`；管理员 `PUT /api/models?id=<该行>` 只改 `name`，`upstream` 为 `{baseUrl: "https://host/v1"}`（视图里的地址，不带 `apiKey`）
+- **THEN** 200；存储地址与密钥逐字不变（仍含 userinfo）；审计 `model.update` 的 `upstreamChanged` 为 false；视图 `upstream.baseUrl` 仍为 `https://host/v1`、响应不含哨兵
 
 #### Scenario: 修改保留密钥与清空上游
 - **WHEN** 管理员 `PUT /api/models?id=m2` body `{name:"深度", reasoning:true, vision:false, maxTokens:8192, efforts:["low","high"], upstream:{baseUrl:"https://gw2.example/v1"}}`；再 `PUT` 同 body 但 `upstream: null`；再对一个从未有密钥的模型 `PUT` 省略 `apiKey` 的 `upstream`
@@ -108,7 +112,7 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 - **THEN** 前两次 URL 都变为 `/center?tab=models`，tab 条恰一项 `模型` 且选中；普通用户看到 `中心暂无可用内容`，没有 tab 条，URL 保持 `/center?tab=models`（没有可见 tab 时不 replace）
 
 ### Requirement: 模型 tab
-`/center?tab=models` SHALL 渲染模型表（拷入层 table）：每行 `id`、`name`、标签 `推理` / `看图`（按布尔）、`maxTokens`、上游（`已配置` / `未配置`）、探活（`从未` / `正常` / `失败：<message>` 与 `at` 的本地时间）、`缺省` 标记，以及行操作 `编辑`、`删除`、`设为缺省`（缺省行不渲染）、`探活`；表上方 `新增模型` 按钮。新增 / 编辑为对话框表单：`id`（编辑时只读）、`name`、`reasoning` / `vision` 复选、`maxTokens` 数字、`efforts` 六个复选（仅 `reasoning` 勾选时启用；视图 `efforts` 为 null 的推理模型预填为一个都不勾，旁注 `不勾选即不声明强度集合，界面列全部档位`；一个都不勾则提交不带 `efforts`）、`上游地址`、`密钥`（编辑时 placeholder `留空保留现有密钥`，空即省略 `apiKey`）；提交前 SHALL 在客户端按与服务端相同的规则逐字段校验并在字段旁显示具体原因（`id` 字节数与控制字符、`name` 码点数、`maxTokens` 范围、地址格式、新建带地址必填密钥），服务端 400 的统一文案只作兜底；提交恰调用一次 `createModel` / `updateModel`，在途禁用提交，失败在对话框内 `role="alert"` 显示 `ApiError.message`。两个对话框 SHALL 接入 ui-primitives 规定的 Escape 关闭回退（`useEscapeFallback`），与既有覆盖层同一行为。保存成功且上游有改动（新建带上游；编辑改了地址或填了密钥）时 SHALL 紧接着恰调用一次 `probeModel`。`删除` 先弹确认（拷入层 alert-dialog，按钮 `取消` / `删除`）；`设为缺省` 与 `探活` 直接调用，在途禁用该行对应按钮。每次操作成功后 SHALL 重取 `listModels` 渲染；收到非信封的 500（发布失败）时同样重取（行已写入）并在页顶 `role="alert"` 显示 `REQUEST_FAILED_MESSAGE`。API 客户端 `web/src/lib/api-models.ts` SHALL 提供 `listModels` / `createModel(input)` / `updateModel(id, input)` / `deleteModel(id)` / `setDefaultModel(id)` / `probeModel(id)`，查询参数 `id` 经 `encodeURIComponent`，响应按 `ModelView` 严格解析（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型。
+`/center?tab=models` SHALL 渲染模型表（拷入层 table）：每行 `id`、`name`、标签 `推理` / `看图`（按布尔）、`maxTokens`、上游（`已配置` / `未配置`）、探活（`从未` / `正常` / `失败：<message>` 与 `at` 的本地时间）、`缺省` 标记，以及行操作 `编辑`、`删除`、`设为缺省`（缺省行不渲染）、`探活`；表上方 `新增模型` 按钮。新增 / 编辑为对话框表单：`id`（编辑时只读）、`name`、`reasoning` / `vision` 复选、`maxTokens` 数字、`efforts` 六个复选（仅 `reasoning` 勾选时启用；视图 `efforts` 为 null 的推理模型预填为一个都不勾，旁注 `不勾选即不声明强度集合，界面列全部档位`；一个都不勾则提交不带 `efforts`）、`上游地址`、`密钥`（编辑时 placeholder `留空保留现有密钥`，空即省略 `apiKey`）；提交前 SHALL 在客户端按与服务端相同的规则逐字段校验并在字段旁显示具体原因（`id` 字节数与控制字符、`name` 码点数与控制字符、`maxTokens` 范围、地址格式、带地址且无已存密钥时必填密钥、填了密钥必填地址），服务端 400 的统一文案只作兜底；提交恰调用一次 `createModel` / `updateModel`，在途禁用提交，失败在对话框内 `role="alert"` 显示 `ApiError.message`。两个对话框 SHALL 接入 ui-primitives 规定的 Escape 关闭回退（`useEscapeFallback`），与既有覆盖层同一行为。保存成功且上游有改动（新建带上游；编辑改了地址或填了密钥）时 SHALL 紧接着恰调用一次 `probeModel`。`删除` 先弹确认（拷入层 alert-dialog，按钮 `取消` / `删除`）；`设为缺省` 与 `探活` 直接调用，在途禁用该行对应按钮。每次操作成功后 SHALL 重取 `listModels` 渲染；收到非信封的 500（发布失败）时同样重取（行已写入）并在页顶 `role="alert"` 显示 `REQUEST_FAILED_MESSAGE`。API 客户端 `web/src/lib/api-models.ts` SHALL 提供 `listModels` / `createModel(input)` / `updateModel(id, input)` / `deleteModel(id)` / `setDefaultModel(id)` / `probeModel(id)`，查询参数 `id` 经 `encodeURIComponent`，响应按 `ModelView` 严格解析（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型。
 
 #### Scenario: 登记、编辑与探活
 - **WHEN** 管理员点 `新增模型`，填 `id` `m2`、勾 `推理`、勾 `low` `high`、填地址与密钥，提交（假客户端返回视图）；随后编辑 `m2` 只改 `name`；再编辑改地址不填密钥
