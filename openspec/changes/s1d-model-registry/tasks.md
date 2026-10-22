@@ -18,7 +18,7 @@
 ## 1. 错误码与管理员判定（http-service-skeleton「统一错误信封」）
 
 - [ ] 1.1 核对 design Context：`core/errors/index.ts:5-22`、`http/errors.ts` 状态表、`core/audit/index.ts:13,81`、三处计数守卫 `http-typed-errors.test.ts:123`、`auth-lifecycle.test.ts:705`、`http-parser-owners.test.ts:50,271`。
-- [ ] 1.2 测试先行：三处「恰十六码」改十八（`auth-lifecycle.test.ts` 只改计数字面）；新文件 `server/test/http-typed-errors-s1d.test.ts`：两码的状态 / message / 与同状态码兄弟的互异（skeleton 场景「两个 s1d 新码」）；新 `server/test/core-roles.test.ts`（`isAdmin`：`管理员` 真；`管理员 `、`admin`、空串假）。
+- [ ] 1.2 测试先行：三处「恰十六码」改十八（`auth-lifecycle.test.ts:705-724` 的 `codes` 表补两条条目——`satisfies` 穷尽守卫要求——与标题，+2 行）；新文件 `server/test/http-typed-errors-s1d.test.ts`：两码的状态 / message / 与同状态码兄弟的互异（skeleton 场景「两个 s1d 新码」）；新 `server/test/core-roles.test.ts`（`isAdmin`：`管理员` 真；`管理员 `、`admin`、空串假）。
 - [ ] 1.3 `core/errors/index.ts` 加 `forbidden`、`model_in_use`；`http/errors.ts` 加 403 / 409 映射（归属集清单不动，归组 7）。
 - [ ] 1.4 新 `server/src/core/roles.ts`（`ADMIN_ROLE`、`isAdmin`）；`core/audit/index.ts` 改导入、删私有常量。
 - [ ] 1.5 `docs/architecture/system.md` 错误码列举（若有）同步两码。
@@ -49,20 +49,20 @@ Minimal mergeable slice: atomic - 快照与发布共用同一份 `current()`，�
 ## 4. 代理按模型路由（model-proxy「透传端点与 bearer 鉴权」）
 
 - [ ] 4.1 核对 Context：`model-proxy/index.ts:38-42,91-96,148-156,161-210,262-271`，`model-guard.ts` 的扫描接口，既有 `model-proxy-*.test.ts` 与 `test/support/omp-official-proxied.ts` 的装配方式（`assembly.modelCatalog` / `upstream`）。
-- [ ] 4.2 测试先行：既有代理用例改经 `lookupFromCatalog`；新 `server/test/model-proxy-routing.test.ts`：未登记 400 不回显 / 登记无上游 502 / malformed + 无上游 400（次序变化）/ 两模型两个假上游各收自己的请求与 bearer / 500 摘要净化覆盖两个上游哨兵与 base URL / 转发后 lookup 改变不影响在途流、第二请求 400；`model-guard` 既有用例不改。
+- [ ] 4.2 测试先行：既有代理用例改经 `staticRegistry`；新 `server/test/model-proxy-routing.test.ts`：未登记 400 不回显 / 登记无上游 502 / malformed + 无上游 400（次序变化）/ 两模型两个假上游各收自己的请求与 bearer / 500 摘要净化覆盖两个上游哨兵与 base URL / 转发后 lookup 改变不影响在途流、第二请求 400；`model-guard` 既有用例不改。
 - [ ] 4.3 `ModelProxyOptions` 改为 `{tokens, models, connectDeadlineMs?, firstByteDeadlineMs?}`；删 `allowedModels` / `upstream` 与注册时的 `upstreamLink`；`authenticate` 只做 bearer；白名单判定改为 `lookup !== undefined`，route 交给转发；净化密钥集 = `models.secrets()` + 本 route。
-- [ ] 4.4 新 `server/src/model-proxy/lookup.ts`：`lookupFromCatalog(catalog, upstream?)` → `{lookup, secrets}`；`app.ts` 装配 `assembly?.models ?? lookupFromCatalog(assembly?.modelCatalog ?? resolveModelCatalog({MODEL_ID: runtime.modelId}), assembly?.upstream)`（`AssemblyDependencies` 加可选 `models`；`modelCatalog` / `upstream` 保留）。
+- [ ] 4.4 新 `server/src/model-proxy/lookup.ts`：`ModelRegistry` 接口（`current`、`lookup`、`secrets(): readonly string[]`、`refresh`）与 `staticRegistry(catalog, upstream?)`（`refresh` 空操作；`secrets` 按 upstream-failure 密钥集规则导出）；`app.ts` 装配 `const registry = assembly?.models ?? staticRegistry(assembly?.modelCatalog ?? resolveModelCatalog({MODEL_ID: runtime.modelId}), assembly?.upstream)`，代理收 `registry`（`AssemblyDependencies.models?: ModelRegistry`；`modelCatalog` / `upstream` 保留）。
 - [ ] 4.5 官方 omp 用例与 `make smoke` 假上游路径保持绿；`docs/architecture/system.md` 9.5 加「按模型路由」一段。
 
 Suggested fixture level: expanded - 改每一次模型转发的放行与凭证选择（Auth / credentials 触发项）。
-Minimal mergeable slice: atomic - 查找契约、次序与净化集是同一个请求路径的三段：只换契约不改次序则「无上游先 502」与按模型上游矛盾；不改净化集则第二个上游的密钥可能出现在第一个上游的失败摘要里；`lookupFromCatalog` 是让组 4 在组 5 之前独立保绿的适配，没有它生产装配无定义。
+Minimal mergeable slice: atomic - 查找契约、次序与净化集是同一个请求路径的三段：只换契约不改次序则「无上游先 502」与按模型上游矛盾；不改净化集则第二个上游的密钥可能出现在第一个上游的失败摘要里；`staticRegistry` 是让组 4 在组 5 之前独立保绿的适配，没有它生产装配无定义。
 
 ## 5. 启动装配：阶段、种子、快照接管与会话侧净化（http-service-skeleton「服务启动与装配」+ model-registry「环境种子」+「注册表快照是白名单的唯一来源」+「变更即发布」的启动两步 + session-composer-settings「输入框选项端点」+ upstream-failure「上游原文净化」+ omp-runtime「宿主 overlay」的重写时机）
 
 - [ ] 5.1 核对 Context：`server.ts:96,137,302-314,425,476,497,532-549`、`app.ts:208-216,241,249,337-358`、`rest-composer.ts:41`、`store-composer.ts:26,104-107`、`composer-align.ts:22`、`store-view.ts:76`、`server-startup-failure-reason.test.ts:284-298`、`server-startup-order.test.ts:222`（完整代理回合）。
-- [ ] 5.2 测试先行：`server-startup-failure-reason.test.ts` 加 `model_registry`（`db` 之后、`app` 之前；迁移后把 `models` 换成只读视图）；新 `server/test/server-startup-model-seed.test.ts`（零配置 / 三模型 + 上游哨兵 / 只设 base URL / 非空表 + `MODEL_ID` → `model_env_ignored` 恰一行 / 非空表 + 六键未设置零行 / 非空表 + `MODEL_CATALOG=not json` 仍 `config` / 主端口绑定后立刻 `GET /api/composer/options` 的 `models` 恰为种子项 / `models.yml` 与 overlay 字节 = 既有基线 / 启动记录八个模块 `models` 居末）；composer options 用例加「store 写入 + `refresh` 后不重启即变化」与甲乙缺省（model-registry 场景「写入后不重启即可见」）；新 `server/test/session-message-error-registry.test.ts`：注册表登记的哨兵密钥经假上游 401 回显后 `chat_messages` / 会话视图 / SSE / stderr 无哨兵与 base URL（upstream-failure 新场景，含 `PUT` 换密钥的第二例）；`omp-host-overlay` 用例加「看图块随注册表重写」（直接调 `publish()`）。
-- [ ] 5.3 `server.ts`：阶段 `model_registry`（`seedIfEmpty` → `refresh`；`model_env_ignored`）插在 `db` 与 `app` 之间；`models_yml` / `host_overlay` 改调注入了真实写出器的 `publish()` 两步（`reason` 不变）；`proxyBaseUrl` getter；`SessionRuntime.modelId` 取快照缺省；`STARTUP_MODULES` 加 `models`（占位注册在组 7 之前为一个空 plugin，保证记录八项——或把八项断言留到组 7：二选一在 PR 里写明，推荐后者、本组记录仍七项）。
-- [ ] 5.4 `app.ts`：`assembly.registry`（生产）→ 代理 `models = registry`；`composer.modelCatalog` 改 getter；`redactUpstream` 改为每次现取 `registry.secrets()`（无 registry 时取 `lookupFromCatalog(...).secrets()`）加两组路径，删 `assembly.upstream` 在净化闭包里的用法。
+- [ ] 5.2 测试先行：`server-startup-failure-reason.test.ts:144-328` 在 `db` 例与 `app` 例之间加 `model_registry`（迁移后把 `models` 换成只读视图）；新 `server/test/server-startup-model-seed.test.ts`（零配置 / 三模型 + 上游哨兵 / 只设 base URL / 非空表 + `MODEL_ID` → `model_env_ignored` 恰一行 / 非空表 + 六键未设置零行 / 非空表 + `MODEL_CATALOG=not json` 仍 `config` / 主端口绑定后立刻 `GET /api/composer/options` 的 `models` 恰为种子项 / `models.yml` 与 overlay 字节 = 既有基线 / `models_yml` 阶段之前经 store 写入 + `refresh` 不触发文件重写、启动随后按新快照发布一次）；composer options 用例加「store 写入 + `refresh` 后不重启即变化」与甲乙缺省（model-registry 场景「写入后不重启即可见」）；新 `server/test/session-message-error-registry.test.ts`：注册表登记的哨兵密钥经假上游 401 回显后 `chat_messages` / 会话视图 / SSE / stderr 无哨兵与 base URL（upstream-failure 新场景，含 `PUT` 换密钥的第二例）；`omp-host-overlay` 用例加「看图块随注册表重写」（直接调 `publish()`）。
+- [ ] 5.3 `server.ts`：阶段 `model_registry`（`seedIfEmpty` → `refresh`；`model_env_ignored`）插在 `db` 与 `app` 之间；`models_yml` / `host_overlay` 改调注入了真实写出器的 `publish()` 两步（`reason` 不变）；`proxyBaseUrl` getter（`models_yml` 之前为 null）；`SessionRuntime.modelId` 取快照缺省；`STARTUP_MODULES` 不动（八模块记录归组 7）。
+- [ ] 5.4 `app.ts`：生产装配经 `assembly.models` 传真注册表（4.4 的同一条装配规则，三处共用那个 `registry` 对象）；`composer.modelCatalog` 改 getter 读 `registry.current()`；`redactUpstream` 改为每次现取 `registry.secrets()` 加两组路径，删 `assembly.upstream` 在净化闭包里的用法；`server.ts` 的 `appAssemblyOf` 传 `models: registry`。
 - [ ] 5.5 `docs/architecture/system.md` 启动阶段表加 `model_registry`、§4 注明写出器注入；部署文档 / `.env.example`（若有）注明六键为首次种子。
 
 Suggested fixture level: expanded - 改生产启动顺序、启动失败枚举、托管文件写出时机与会话侧凭证净化（production config / file publish / credentials 触发项）。
@@ -79,21 +79,21 @@ Minimal mergeable slice: atomic - 集合记录与判据是同一条判断的写�
 
 ## 7. 管理端点与审计（model-registry「模型管理端点」+ http-service-skeleton「统一错误信封」的归属身份与八个模块）
 
-- [ ] 7.1 核对 Context：`http/errors.ts:45-75` 的 `CONTENT_PARSER_OWNED_ROUTES`、`http-parser-owners.test.ts:28-29` 的身份清单；`core/audit` 的 `emit` 签名；`smoke/*.hurl` 的写法。
-- [ ] 7.2 测试先行（新 `server/test/models-rest.test.ts`，整体挂载）：401 / 403 矩阵（普通账号 × 六端点 × malformed JSON、`text/plain`、未知 id、bodyless 带 `{}`：全部 403 且表、审计、假上游请求数不变）/ 404 / 键集严格清单 / 201 视图不含密钥 + `hasApiKey` / `PUT` 四例（保留密钥、清空、无密钥省略 400、种子行省略 `efforts` 存 NULL 与带 `efforts`）/ 带 `/` 的 id 经 `%2F` 往返 / `DELETE` 三例 / `default` 两例（含已是缺省幂等、无审计无发布）/ 五种审计 kind 与 detail 不含哨兵与 base URL / `http-parser-owners` 二十一条身份 + 四条新路由的 content-parser 400 / 发布失败：agent 目录换成普通文件 → 500 非信封 + stderr `model_publish_failed` + 行与审计保留 + 恢复后再写入使 `models.yml` 含该模型 / 启动记录八个模块。
-- [ ] 7.3 新 `server/src/models/rest.ts`（六端点；`:id` 百分号解码后比较；写入事务内 `emit`；成功后 `registry.refresh()` + `publish()`；`model.probe` 的路由骨架返回 501 占位**不允许**——探活端点整体归组 8，本组不注册该路由）。
-- [ ] 7.4 `app.ts` 注册 `registerModels(app, {db, store, registry, publish, emit, isAdmin})` 为第八个模块；`http/errors.ts` 归属集加 `POST /api/models`、`PUT /api/models/:id`、`POST /api/models/:id/default`（probe 由组 8 加）；`server.ts` `STARTUP_MODULES` 加 `models`。
+- [ ] 7.1 核对 Context：`http/errors.ts:45-75` 的 `CONTENT_PARSER_OWNED_ROUTES`、`http-parser-owners.test.ts:28-29` 的身份清单、`http/path-classifier.ts:19-23`（编码路径 404，所以 id 走 `?id=`）、`server-assembly.test.ts:156`、`fake-omp-proxy.mjs:2`（回合只能以列表第一个模型跑）；`core/audit` 的 `emit` 签名；`smoke/*.hurl` 的写法。
+- [ ] 7.2 测试先行（新 `server/test/models-rest.test.ts`，整体挂载）：401 / 403 矩阵（普通账号 × 本组五端点 × malformed JSON、`text/plain`、未知 id、缺失 id、bodyless 带 `{}`：全部 403 且表、审计、假上游请求数不变）/ `id` 缺失、空、多值 400 / 404 / 键集严格清单 / 201 视图不含密钥 + `hasApiKey` / `PUT` 四例（保留密钥、清空、无密钥省略 400、种子行省略 `efforts` 存 NULL 与带 `efforts`）/ 带 `/` 的 id 经 `?id=Qwen%2F…` 往返 / `DELETE` 三例 / `default` 两例（含已是缺省幂等、无审计无发布）/ 四种审计 kind（`model.probe` 在组 8）与 detail 不含哨兵与 base URL / `http-parser-owners` 二十一条身份（本组把四条身份一次加齐，probe 的身份先于其路由存在）+ `POST /api/models`、`PUT /api/models` 的 content-parser 400 + `default` 带 `{}` 400 / 发布失败：agent 目录换成普通文件 → 500 非信封 + 注入的 `onPublishFailed` 收到恰一次记录 + 行与审计保留 + 恢复后再写入使 `models.yml` 含该模型 / 启动记录八个模块（`server-assembly.test.ts:156` 的次序断言同步）/ 在途回合：假 omp 真子进程 + 假上游两轮脚本以缺省模型 `m1` 跑回合，第一轮工具执行期间 `PUT /api/models?id=m1` 以 `upstream: null` → 200、无进程退役、第二轮 502、回合 `failed`、`detail` 无上游内容（model-registry 场景「注册表写入不打断…」）。
+- [ ] 7.3 新 `server/src/models/rest.ts`（五端点：`GET /api/models`、`POST /api/models`、`PUT /api/models?id=`、`DELETE /api/models?id=`、`POST /api/models/default?id=`；`id` 查询参数解码后比较；写入事务内 `emit`；成功后 `registry.refresh()` + `publish()`；探活端点整体归组 8，本组不注册 `POST /api/models/probe`、也不放 501 占位）。
+- [ ] 7.4 `app.ts` 注册 `registerModels(app, {db, store, registry, publish, emit, isAdmin, onPublishFailed})` 为第八个模块（`AssemblyDependencies.onPublishFailed?: () => void`；`server.ts` 传写 `{"event":"model_publish_failed"}` 的受管 stderr writer）；`http/errors.ts` 归属集一次加齐 `POST /api/models`、`PUT /api/models`、`POST /api/models/default`、`POST /api/models/probe`（身份静态存在，probe 路由由组 8 注册）；`server.ts` `STARTUP_MODULES` 加 `models`。
 - [ ] 7.5 `make smoke` 的 hurl 加「管理员登记模型 → `GET /api/composer/options` 含它 → 删除」三步；`docs/architecture/system.md` 加「模型注册表」一节（端点、审计 kind、发布）；ADR-0008 加「2026-10-21 补充（s1d-model-registry）」（密钥落 DB 0600、按模型净化、会话侧密钥集改接注册表）。
 
 Suggested fixture level: expanded - 管理员写路径与凭证入库（Auth / credentials 触发项）。
-Minimal mergeable slice: atomic - 五个端点共用同一套 403 / 404 / 键集 / 审计 / 发布骨架与同一个整体挂载用例文件；归属集与模块记录的计数改动必须与路由同 PR 否则三处守卫红。探活已按宽度门禁拆到组 8。
+Minimal mergeable slice: atomic - 五个端点共用同一套 403 / 404 / 键集 / 审计 / 发布骨架与同一个整体挂载用例文件；归属集（四条身份一次加齐）与八模块记录的改动必须与路由同 PR 否则三处守卫红。探活已按宽度门禁拆到组 8。
 
 ## 8. 探活（model-registry「探活」+ model-proxy「假上游夹具契约」的 `GET /models`）
 
 - [ ] 8.1 核对 Context：`fake-upstream.mjs:123` 的路由分发、`upstream-failure.ts` 的 `upstreamExcerpt` 签名、`http/errors.ts` 归属集。
-- [ ] 8.2 测试先行：假上游夹具自测加「Models listing for probes」三例（200 / 401 回显 bearer / `modelsStatus: 503`；`modelsRequests()`；`requests()` 不变）；新 `server/test/models-probe.test.ts`：四种结果 + 无上游零请求 + 并发串行 + 在途删除 404 且结果丢弃 + 应用 stdout/stderr 无密钥哨兵 + `models.yml` mtime 不变 + 摘要 200 码点截断 + `model.probe` 审计 + 普通账号 403 + bodyless 带 `{}` 400。
+- [ ] 8.2 测试先行：假上游夹具自测加「Models listing for probes」三例（200 / `GET /models` 的 401 回显 bearer / `modelsStatus: 503`；`modelsRequests()`；chat-completions 的 401 正文与 `requests()` 不变）；新 `server/test/models-probe.test.ts`：四种结果 + 无上游零请求 + 并发串行 + 在途删除 404 且结果丢弃 + 应用 stdout/stderr 无密钥哨兵 + `models.yml` mtime 不变 + 摘要 200 码点截断 + `model.probe` 审计 + 普通账号 403（含缺失 id）+ bodyless 带 `{}` 的 content-parser 400。
 - [ ] 8.3 `fake-upstream.mjs` 加 `GET /models` / `GET /v1/models` 与 `start({modelsStatus})`、`modelsRequests()`。
-- [ ] 8.4 新 `server/src/models/probe.ts`（`probeUpstream({baseUrl, apiKey}, {connectDeadlineMs: 10000, totalDeadlineMs: 15000, secrets})` → `{status, message}`；期限常量本模块自有）；`rest.ts` 加 `POST /api/models/:id/probe`（串行、在途删除 404）；归属集加该路由。
+- [ ] 8.4 新 `server/src/models/probe.ts`（`probeUpstream({baseUrl, apiKey}, {connectDeadlineMs: 10000, totalDeadlineMs: 15000, secrets})` → `{status, message}`；期限常量本模块自有）；`rest.ts` 加 `POST /api/models/probe?id=`（串行、在途删除 404；归属身份已由组 7 加齐）。
 - [ ] 8.5 ADR-0008 补充节的探活段（向外发带密钥的请求的边界）。
 
 Suggested fixture level: expanded - 向外发带密钥的请求（outbound with credentials）。
@@ -101,10 +101,10 @@ Minimal mergeable slice: atomic - 夹具的 `GET /models` 没有探活就没有�
 
 ## 9. 中心页外壳（model-registry「中心页外壳」+ spa-shell「路由 IA 与侧栏」+ 验收 SH-01）
 
-- [ ] 9.1 核对 Context：`routes/manifest.ts:29-35`、`web/test/topbar.test.tsx:191-201`、`web/e2e/ui-walk.spec.ts:75`、`features/settings/page.tsx` 的卡片样式、拷入层缺 `tabs`（按 ADR-0013 拷入）、`docs/acceptance/functional-checklist.md:53` SH-01。
-- [ ] 9.2 测试先行：`topbar.test.tsx` 的 `中心暂不可用` 改为 `中心暂无可用内容`；新 `web/test/center-page.test.tsx`（空表：管理员与普通用户都空态、`?tab=models` 不被 replace；注入一张含 `adminOnly` tab 的表：管理员 tab 条 + 选中、普通用户空态、`?tab=unknown` replace 为首个可见 tab）；`e2e/ui-walk.spec.ts` 的 `/center` 断言改空态文案；routeManifest 描述断言。
-- [ ] 9.3 拷入 `tabs` 组件；新 `web/src/features/center/{page.tsx,tabs.ts}`（`CENTER_TABS` 为空表）；`routes/manifest.ts` 描述改 `模型注册表`；路由接入。
-- [ ] 9.4 验收清单 SH-01 的期望改为空态文案、结论改 `待签`；LG-01 核对不动。
+- [ ] 9.1 核对 Context：`routes/manifest.ts:29-35`、`router.tsx:71-94` 的 `PlaceholderPage`、六个断言占位文案的用例（`web/test/topbar.test.tsx:191-201`、`chat-page-session-meta-support.tsx:119`、`chat-fork-button.test.tsx:592`、`chat-stop-button.test.tsx:448`、`chat-undo.test.tsx:726`、`chat-regenerate-button.test.tsx:625`）、`web/e2e/ui-walk-layout.ts:497-521`（无 `/center` 分支）、`features/settings/page.tsx` 的卡片样式、拷入层缺 `tabs`（按 ADR-0013 拷入）、`docs/acceptance/functional-checklist.md:53` SH-01。
+- [ ] 9.2 测试先行：六个用例的 `中心暂不可用` 改为 `中心暂无可用内容`；新 `web/test/center-page.test.tsx`（空表：管理员与普通用户都空态、`?tab=models` 不被 replace；注入一张含 `adminOnly` tab 的表：管理员 tab 条 + 选中、普通用户空态、`?tab=unknown` replace 为首个可见 tab）；`e2e/ui-walk-layout.ts` 的 `expectAuthenticatedRoute` **新增** `/center` 分支断言空态文案；routeManifest 描述 `中心暂无可用内容` 的断言。
+- [ ] 9.3 拷入 `tabs` 组件；新 `web/src/features/center/{page.tsx,tabs.ts}`（`CENTER_TABS` 为空表）；`routes/manifest.ts` 描述改 `中心暂无可用内容`；路由接入。
+- [ ] 9.4 验收清单 SH-01 的期望改为「以成员账号登录，中心页显示『中心暂无可用内容』、没有 tab」、结论改 `待签`；LG-01 核对不动。
 
 Suggested fixture level: compact - 纯前端路由壳，无数据、无权限面；可见变化只有一句文案。
 Minimal mergeable slice: atomic - 页面、tab 表、`?tab=` 规则与 SH-01 改写是同一个可见变化（占位 → 空态壳），拆开任一部分都没有独立可验收行为。
@@ -112,18 +112,18 @@ Minimal mergeable slice: atomic - 页面、tab 表、`?tab=` 规则与 SH-01 改
 ## 10. 模型 tab（model-registry「模型 tab」+ 验收清单 CM 节 + F-CTR-MOD 行）
 
 - [ ] 10.1 核对 Context：拷入层缺 `table`、`checkbox`、`select`（按 ADR-0013 拷入）；`escape-fallback.ts` 的用法；`web/src/lib/composer-contract.ts` 的严格解析写法；`api.ts` 导出面（chat-web「API 客户端源码模块划分」的 800 行与 knip 约束）。
-- [ ] 10.2 测试先行（新 `web/test/center-models*.test.tsx`，假 `ApiClient`）：列表列与标签；新增表单 input 只带碰过的键 + 保存后恰一次 `probeModel`；编辑省略密钥不探活、改地址探活；种子行 `efforts` null 的预填（一个都不勾 + 旁注）与提交不带 `efforts`；客户端逐字段校验文案（五类）；删除确认与 409 行内文案；设缺省；探活在途禁用；非信封 500 后重取 + 页顶提示；两个对话框的 Escape 回退；`api-models.ts` 严格解析（缺键 / 多键 → `requestFailed`）与 id `encodeURIComponent`。
-- [ ] 10.3 拷入三个组件；新 `web/src/lib/api-models.ts` + `api.ts` 导出；`features/center/models/{list.tsx,form-dialog.tsx,use-models.ts}`；`tabs.ts` 追加 `{models, 模型, adminOnly: true}`。
-- [ ] 10.4 验收清单新增「中心·模型（CM）」一节（CM-01 登记并自动探活、CM-02 编辑种子行只改名、CM-03 删缺省被拒 / 换缺省后删除、CM-04 普通用户空态、CM-05 新会话走新缺省模型、CM-06 存活会话切到新模型的第一条消息成功、CM-07 输入框菜单打开看到新模型；结论 `待签`）；`IMPLEMENTATION_PLAN.md` F-CTR-MOD 行指向本 change 并注明「对话模型；嵌入 / 重排随 kb-service」；`web/test/functional-checklist.test.ts` 通过。
+- [ ] 10.2 测试先行（新 `web/test/center-models*.test.tsx`，假 `ApiClient`）：列表列与标签；新增表单 input 只带碰过的键 + 保存后恰一次 `probeModel`；编辑省略密钥不探活、改地址探活；种子行 `efforts` null 的预填（一个都不勾 + 旁注）与提交不带 `efforts`；客户端逐字段校验文案（五类）；删除确认与 409 行内文案；设缺省；探活在途禁用；非信封 500 后重取 + 页顶提示；两个对话框的 Escape 回退；真表下的「管理员与普通用户」场景（管理员见 `模型` tab 且选中、`?tab=nope` 被 replace 为 `models`、普通用户空态且 URL 保持 `/center?tab=models`）；`api-models.ts` 严格解析（缺键 / 多键 → `requestFailed`）与 `?id=` 的 `encodeURIComponent`。
+- [ ] 10.3 拷入三个组件；新 `web/src/lib/api-models.ts` + `api.ts` 导出；`features/center/models/{list.tsx,form-dialog.tsx,use-models.ts}`；`tabs.ts` 追加 `{models, 模型, adminOnly: true}`；`routes/manifest.ts` 描述改 `模型注册表`。
+- [ ] 10.4 验收清单新增「中心·模型（CM）」一节（CM-01 登记并自动探活、CM-02 编辑种子行只改名、CM-03 删缺省被拒 / 换缺省后删除、CM-04 普通用户空态而管理员见 `模型` tab（SH-01 保持成员账号的空态）、CM-05 新会话走新缺省模型、CM-06 存活会话切到新模型的第一条消息成功、CM-07 输入框菜单打开看到新模型；结论 `待签`）；`IMPLEMENTATION_PLAN.md` F-CTR-MOD 行指向本 change 并注明「对话模型；嵌入 / 重排随 kb-service」；`web/test/functional-checklist.test.ts` 通过。
 
 Suggested fixture level: expanded - 管理员录入上游密钥的表单与管理 API 客户端（credentials 触发项），尽管服务端契约已由组 7 / 8 钉住。
 Minimal mergeable slice: atomic - 列表、表单、删除确认与 API 客户端是同一个 tab 的一条组件用例路径；追加 `CENTER_TABS` 项没有面板就是占位（规格禁止）。
 
 ## 11. 模型菜单打开时重取（model-selection「模型与推理强度控件」+ chat-web「输入框与能力栏」）
 
-- [ ] 11.1 核对 Context：`model-picker.tsx` 的 `DropdownMenu` 用法、`use-chat-session.ts:610` 返回的 `invalidate`、`page.tsx:108` / `conversation-view.tsx:92,96` 的传递链、chat-web 既有计数场景的测试文件。
-- [ ] 11.2 测试先行：`model-picker` 用例加「打开模型菜单恰一次 `invalidate()`、强度菜单不调」与「打开菜单看到新登记的模型」（重取落地菜单不关闭、`getComposerOptions` 共两次）；chat-web 既有计数用例核对不打开模型菜单（不变）。
-- [ ] 11.3 `model-picker.tsx` 加 `onModelMenuOpen` prop → `invalidate()`；经既有传递链接入（不改 `use-chat-session.ts`）；`composer-options.ts` 注释同步。
+- [ ] 11.1 核对 Context：`model-picker.tsx` 的 `DropdownMenu` 用法、`use-chat-session.ts:756-793` 的返回对象（没有 `invalidate`）、`page.tsx:108` / `conversation-view.tsx:92,96` 的 props 链、`web/test/chat-composer-options.test.tsx:561-570,588-609`。
+- [ ] 11.2 测试先行：`model-picker` 用例加「打开模型菜单恰一次 `invalidate()`、强度菜单不调」与「打开菜单看到新登记的模型」（重取落地菜单不关闭、`getComposerOptions` 共两次）；`chat-composer-options.test.tsx:561-570`（带 `modelId` 的 patch 失败）与 :588-609（deferred 队列）按「除模型菜单打开引发的之外」调整计数与队列，其余计数用例核对不打开模型菜单。
+- [ ] 11.3 `model-picker.tsx` 加 `onModelMenuOpen` prop → `invalidate()`；`use-chat-session.ts` 返回对象加一行 `invalidateComposerOptions: composer.invalidate`（唯一改动，→796 行），经 `page.tsx` / `conversation-view.tsx` 的 props 链接入；`composer-options.ts` 注释同步。
 
 Suggested fixture level: compact - 单个控件多一次既有的重取调用，无新数据面。
-Minimal mergeable slice: atomic - 一个 prop 与一条用例。
+Minimal mergeable slice: atomic - 一个 prop、返回对象一行与两个计数用例的调整是同一次行为变化。

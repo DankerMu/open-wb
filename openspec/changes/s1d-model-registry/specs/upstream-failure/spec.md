@@ -36,5 +36,5 @@
 - **THEN** 第一个原样返回；第二个为前 1994 个码点加 `…（已截断）`、共 2000 个码点；第三个不出现孤立代理项
 
 #### Scenario: 注册表登记的密钥不进会话
-- **WHEN** 管理员经 `POST /api/models` 登记上游密钥为哨兵（不以 `sk-` 开头）的模型 `m2`，环境里没有 `MODEL_UPSTREAM_*`；一个成员账号的会话以 `m2` 发 prompt，假上游以 401 应答且正文回显该哨兵与 base URL；另一例管理员 `PUT` 把 `m2` 的密钥换成第二个哨兵后再发一次
-- **THEN** 两例的回合都以 `failed` 结束，`chat_messages` 行、会话视图、SSE 帧与应用 stdout/stderr 都不含任一哨兵与 base URL 的各部分，`detail` 里对应位置是 `[已移除]`
+- **WHEN** 管理员经 `POST /api/models` 登记模型 `m2`，上游为一个期望密钥为哨兵（不以 `sk-` 开头）的假上游实例，环境里没有 `MODEL_UPSTREAM_*`；一个成员账号的会话以 `m2` 发含 `WORKBUDDY_FAKE_STATUS=401 WORKBUDDY_FAKE_BODY=secret` 标记的 prompt（夹具正文回显其期望密钥）；另一例管理员 `PUT` 把 `m2` 换到第二个假上游实例（期望密钥为第二个哨兵）后再发一次
+- **THEN** 两例的回合都以 `failed` 结束，`chat_messages` 行、会话视图、SSE 帧与应用 stdout/stderr 都不含任一哨兵，`detail` 里对应位置是 `[已移除]`

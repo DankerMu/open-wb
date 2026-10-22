@@ -13,7 +13,7 @@
 - **THEN** 第二次插入与另一例都被约束拒绝，表内容不变
 
 ### Requirement: 注册表快照是白名单的唯一来源
-服务端 SHALL 在 `server/src/models/` 持有注册表：`store`（表的读写与校验）、`registry`（进程内快照 `current(): ModelCatalog` 与 `lookup(id)`）、`publish`（托管文件重写）。快照 SHALL 由表按 `created_at, id` 次序读出，每行映射为 model-selection「模型白名单配置」的白名单项 `{id, name, reasoning, vision, maxTokens, efforts?}`（`efforts` 列为 NULL 的行不带 `efforts`），`is_default = 1` 的行为缺省模型；每次写入提交后 SHALL 从表重读一次刷新快照（单进程，不做跨进程失效）。`GET /api/composer/options` 的 `models` 与 `defaults`、有效值解析（session-composer-settings「有效值解析」）、派发前对齐（chat-sessions「派发前按会话设置对齐进程」）、托管 `models.yml`、宿主 overlay 的看图角色与模型代理的放行（model-proxy「透传端点与 bearer 鉴权」）SHALL 全部读这一份快照，不再读启动配置。字段校验 SHALL 与 `resolveModelCatalog` 共用同一份规则（`validateCatalogModel`；REST 的差异只有「`id` 以外可省略取缺省」与「推理模型可不带 `efforts`」两处）：错误只点名字段、不回显取值。快照 SHALL 在启动阶段 `model_registry`（`db` 之后、`app` 之前）首次读出，createApp 装配的代理、composer 与会话视图从第一个请求起读到的就是已填好的快照；`secrets()` SHALL 返回此刻全部已登记上游的 `{apiKey, baseUrl}`，供代理（model-proxy）与会话侧净化（upstream-failure「上游原文净化」）现取。
+服务端 SHALL 在 `server/src/models/` 持有注册表：`store`（表的读写与校验）、`registry`（进程内快照 `current(): ModelCatalog` 与 `lookup(id)`）、`publish`（托管文件重写）。快照 SHALL 由表按 `created_at, id` 次序读出，每行映射为 model-selection「模型白名单配置」的白名单项 `{id, name, reasoning, vision, maxTokens, efforts?}`（`efforts` 列为 NULL 的行不带 `efforts`），`is_default = 1` 的行为缺省模型；每次写入提交后 SHALL 从表重读一次刷新快照（单进程，不做跨进程失效）。`GET /api/composer/options` 的 `models` 与 `defaults`、有效值解析（session-composer-settings「有效值解析」）、派发前对齐（chat-sessions「派发前按会话设置对齐进程」）、托管 `models.yml`、宿主 overlay 的看图角色与模型代理的放行（model-proxy「透传端点与 bearer 鉴权」）SHALL 全部读这一份快照，不再读启动配置。字段校验 SHALL 与 `resolveModelCatalog` 共用同一份规则（`validateCatalogModel`；REST 的差异只有「`id` 以外可省略取缺省」与「推理模型可不带 `efforts`」两处）：错误只点名字段、不回显取值。快照 SHALL 在启动阶段 `model_registry`（`db` 之后、`app` 之前）首次读出，createApp 装配的代理、composer 与会话视图从第一个请求起读到的就是已填好的快照；`secrets(): readonly string[]` SHALL 返回由此刻全部已登记上游按 upstream-failure「上游原文净化」的密钥集规则导出的字符串列表（每个上游的 apiKey 与 base URL 各部分，去重），供代理（model-proxy）与会话侧净化现取。注册表对象 SHALL 同时满足代理的 `models` 契约（`lookup`、`secrets`）与 composer 的 `current()`；静态目录的适配 `staticRegistry(catalog, upstream?)`（`server/src/model-proxy/lookup.ts`）实现同一接口（`refresh()` 为空操作），装配规则是 `assembly.models ?? staticRegistry(assembly.modelCatalog ?? <单模型目录>, assembly.upstream)`。
 
 #### Scenario: 写入后不重启即可见
 - **WHEN** 管理员登记第二个模型 `m2` 并把缺省换成它，一个没有最近选择的账号随后请求 `GET /api/composer/options`，一个最近选择为 `m1` 的账号也请求一次
@@ -23,9 +23,9 @@
 - **WHEN** 一个会话的 `modelId` 为 `m2`，管理员把缺省换回 `m1` 后删除 `m2`，该会话再发一条 prompt（假 omp 真子进程，进程启动时集合含 `m1`）
 - **THEN** 假 omp 在 `prompt` 之前收到 `set_model{modelId:"m1"}`，没有新的 spawn；会话行的 `model_id` 列不变（仍为 `m2`，有效值解析回落）
 
-#### Scenario: 删除不打断服务端任何东西、但在途回合的下一次上游请求失败
-- **WHEN** 一个以 `m2` 进行中的回合在第一轮拿到工具调用、工具执行期间管理员删除 `m2`（假上游两轮脚本）
-- **THEN** 删除应答 204，没有进程被退役或终止、没有审批被取消；回合的第二轮上游请求被代理答 400（model-proxy），回合以 `failed` 结束且 `detail` 不含模型名之外的任何上游内容；该会话下一条 prompt 按本条上一场景回落
+#### Scenario: 注册表写入不打断服务端任何东西、但在途回合的下一次上游请求失败
+- **WHEN** 一个以缺省模型 `m1` 进行中的回合在第一轮拿到工具调用（假 omp 真子进程 + 假上游两轮脚本），工具执行期间管理员 `PUT /api/models?id=m1` 以 `upstream: null` 清空其上游
+- **THEN** `PUT` 应答 200，没有进程被退役或终止、没有审批被取消；回合的第二轮上游请求被代理答 502 `agent_unavailable`（model-proxy：登记但无上游），回合以 `failed` 结束且 `detail` 不含任何上游内容；删除非缺省模型对在途回合的效果相同，只是第二轮应答为 400（见 model-proxy「Lookup change does not touch an in-flight stream」）
 
 ### Requirement: 环境种子
 启动阶段 `model_registry`（http-service-skeleton「服务启动与装配」）SHALL 在 `models` 表为空时把启动配置解析出的白名单逐项插入：次序即 `created_at` 次序，`defaultModelId` 那项 `is_default = 1`，每项的 `upstream_base_url` / `upstream_api_key` 取 `MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`（两者**未同时配置**时两列都为 NULL，与此前「未同时配置即无上游」相同；环境给出的 base URL 原样写入、不套 REST 的地址规则），单模型配置那一项的 `efforts` 列为 NULL。种子插入与首次快照读取 SHALL 是同步的 node:sqlite 操作，发生在 `db` 之后、createApp 之前。表非空时 SHALL NOT 写入任何行；此时 `MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 中任一键被设置，SHALL 经受管 stderr writer 恰写一行 LF-terminated exact JSON `{"event":"model_env_ignored"}`（只有 `event` 一个键，无键名、无取值；写失败吞掉），位于 `server_started` 之前；六个键都未设置时不写这一行。六个键的解析与校验 SHALL 原样保留（非法值仍为 `reason: "config"` 的启动失败）。
@@ -43,7 +43,7 @@
 - **THEN** 启动失败，`reason` 为 `config`（校验未因表非空而跳过）
 
 ### Requirement: 变更即发布
-每次注册表写入（创建、修改、删除、换缺省；探活除外）提交后，SHALL 在同一请求内依次重写 `<agent dir>/models.yml`（model-proxy「托管 models.yml」的写出器，输入为快照）与 `host-overlay.yml`（omp-runtime「宿主 overlay」的写出器，`visionModelId` 为快照里第一个 `vision` 为真的模型，没有则 null），然后才应答。重写 SHALL 单飞：同一时刻只有一次在跑，期间到达的写入等它结束后再以最新快照重写一次（多次等待合并为一次）。启动阶段 `models_yml` 与 `host_overlay` SHALL 调同一个发布函数的两步，两条路径写出的字节相同。`proxyBaseUrl` 与 agent 目录由装配根注入（两个写出器以函数注入 `createPublisher`，`models` 模块不导入 model-proxy 与 sessions）。重写失败时 SHALL 应答 generic 500（不带典型信封），经受管 stderr writer 恰写一行 `{"event":"model_publish_failed"}`（只有 `event` 一个键，无路径、无原因；写失败吞掉），数据库与审计行保留，不回滚；下一次写入或启动再发布。正在运行的 omp 进程 SHALL NOT 被发布本身重启或通知：新 spawn 读新文件；下一次派发时有效模型不在该进程启动时的模型集合里则先退役再以新文件 spawn，在集合里则经 `set_model` 对齐（chat-sessions「派发前按会话设置对齐进程」第 1、2 步）。
+每次注册表写入（创建、修改、删除、换缺省；探活除外）提交后，SHALL 在同一请求内依次重写 `<agent dir>/models.yml`（model-proxy「托管 models.yml」的写出器，输入为快照）与 `host-overlay.yml`（omp-runtime「宿主 overlay」的写出器，`visionModelId` 为快照里第一个 `vision` 为真的模型，没有则 null），然后才应答。重写 SHALL 单飞：同一时刻只有一次在跑，期间到达的写入等它结束后再以最新快照重写一次（多次等待合并为一次）。启动阶段 `models_yml` 与 `host_overlay` SHALL 调同一个发布函数的两步，两条路径写出的字节相同。`proxyBaseUrl` 与 agent 目录由装配根注入（两个写出器以函数注入 `createPublisher`，`models` 模块不导入 model-proxy 与 sessions）。例外：启动阶段 `models_yml` 之前（主端口已绑定、代理地址尚未交给发布器）到达的写入 SHALL 只刷新快照、不重写文件并照常应答；随后的 `models_yml` / `host_overlay` 阶段用当时的快照发布一次，所以这类写入不会丢。重写失败时 SHALL 应答 generic 500（不带典型信封），经装配注入的记录函数（`assembly.onPublishFailed`，生产装配传受管 stderr writer；未注入则不写）恰写一行 LF-terminated exact JSON `{"event":"model_publish_failed"}`（只有 `event` 一个键，无路径、无原因；写失败吞掉），数据库与审计行保留，不回滚；下一次写入或启动再发布。正在运行的 omp 进程 SHALL NOT 被发布本身重启或通知：新 spawn 读新文件；下一次派发时有效模型不在该进程启动时的模型集合里则先退役再以新文件 spawn，在集合里则经 `set_model` 对齐（chat-sessions「派发前按会话设置对齐进程」第 1、2 步）。
 
 #### Scenario: 发布字节等于启动写出
 - **WHEN** 在种子后的服务上登记带看图的 `m3`，再把服务以同样的表重启
@@ -58,14 +58,14 @@
 - **THEN** 响应 500 且 body 不是典型信封，stderr 恰一行 `{"event":"model_publish_failed"}`，`models` 表含 `c`，审计有 `model.create`；恢复目录后下一次成功的写入使 `models.yml` 含 `c`
 
 ### Requirement: 模型管理端点
-sessions 之外的 `models` 模块 SHALL 注册六个端点，全部受既有 cookie guard 保护（未认证 401 先于一切）、只对角色恰为 `管理员`（`core/roles.ts` 的 `isAdmin`）的 principal 开放（其余 403 `forbidden`，先于 body 解析与 id 查找）、响应 `Cache-Control: no-store`、未知 `id` 404 `not_found`。路径参数 `:id` SHALL 按百分号解码后的值与模型 id 逐码元比较（客户端对 id 做 `encodeURIComponent`；`Qwen/Qwen2.5-72B-Instruct` 这样带 `/` 的 id 可用）。注册在 createApp 次序的最后、作为第八个模块 `models` 进入启动记录。视图 `ModelView` 恒为 `{id, name, reasoning, vision, maxTokens, efforts, upstream, isDefault, probe, updatedAt}`：`efforts` 为声明的数组或 `null`；`upstream` 为 `{baseUrl, hasApiKey: true}` 或 `null`；`probe` 为 `{status: "never"|"ok"|"failed", at: <epoch ms>|null, message: string|null}`。响应 SHALL NOT 含密钥。
+sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET /api/models`、`POST /api/models`、`PUT /api/models`、`DELETE /api/models`、`POST /api/models/default`、`POST /api/models/probe`），全部受既有 cookie guard 保护（未认证 401 先于一切）、只对角色恰为 `管理员`（`core/roles.ts` 的 `isAdmin`）的 principal 开放（其余 403 `forbidden`，先于 body 解析与 id 查找）、响应 `Cache-Control: no-store`、未知 `id` 404 `not_found`。模型 id SHALL 经查询参数 `?id=<encodeURIComponent(id)>` 传递而不进路径（http-service-skeleton 对 `/api/*` 下任何百分号编码的路径分量一律 typed 404，带 `/` 的 id 如 `Qwen/Qwen2.5-72B-Instruct` 进不了路径）：`id` 缺失、为空、出现多次 → 400 `bad_request`（在管理员判定之后、查找之前）；解码后的值与模型 id 逐码元比较。注册在 createApp 次序的最后、作为第八个模块 `models` 进入启动记录。视图 `ModelView` 恒为 `{id, name, reasoning, vision, maxTokens, efforts, upstream, isDefault, probe, updatedAt}`：`efforts` 为声明的数组或 `null`；`upstream` 为 `{baseUrl, hasApiKey: true}` 或 `null`；`probe` 为 `{status: "never"|"ok"|"failed", at: <epoch ms>|null, message: string|null}`。响应 SHALL NOT 含密钥。
 
 - `GET /api/models` → 200 `{models: ModelView[]}`，按快照次序。
 - `POST /api/models`：body 键集 SHALL 为 `{id, name, reasoning, vision, maxTokens, efforts, upstream}` 的子集且含 `id`，`upstream` 为 `{baseUrl, apiKey}`（两键都必填）；缺省与 `MODEL_CATALOG` 条目相同（`name = id`、布尔 `false`、`maxTokens` 32768；非推理模型不得带 `efforts`；推理模型可不带——存 NULL，表示不声明强度集合，model-selection「推理强度集合」）；`baseUrl` SHALL 整体匹配 `^https?://[^\s#@]+$`（允许路径与查询串，不允许 userinfo 与 fragment）；`apiKey` SHALL 通过 `http.validateHeaderValue("authorization", "Bearer " + 取值)`。表为空时该行成为缺省。`id` 已存在 409 `conflict`；已有 32 行 400 `bad_request`；其它非法 400 `bad_request`。→ 201 `ModelView`。
-- `PUT /api/models/:id`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列。→ 200 `ModelView`。
-- `DELETE /api/models/:id`：`is_default = 1` 的行 409 `model_in_use`；否则删除 → 204。
-- `POST /api/models/:id/default`（无 body）：一个事务里把旧缺省清零、该行置 1 → 200 `ModelView`；该行已是缺省时 200、不记审计、不发布。
-- `POST /api/models/:id/probe`（无 body）：见「探活」→ 200 `ModelView`。
+- `PUT /api/models?id=<id>`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列。→ 200 `ModelView`。
+- `DELETE /api/models?id=<id>`：`is_default = 1` 的行 409 `model_in_use`；否则删除 → 204。
+- `POST /api/models/default?id=<id>`（无 body）：一个事务里把旧缺省清零、该行置 1 → 200 `ModelView`；该行已是缺省时 200、不记审计、不发布。
+- `POST /api/models/probe?id=<id>`（无 body）：见「探活」→ 200 `ModelView`。
 
 每次写入 SHALL 在同一事务里记审计：kind `model.create` / `model.update` / `model.delete` / `model.default` / `model.probe`，actor 为请求 principal，`workspaceId` null，title 为中文（如 `登记模型 <name>`），detail 只含 `{modelId, name?, upstreamChanged?, status?}`——SHALL NOT 含 base URL、密钥或探活摘要。两个带 body 的路由属 content-parser 归属集（exact 400 `bad_request`）；两个无 body 的路由按 `POST /api/sessions/:id/stop` 先例（任意 body 即 400）。
 
@@ -74,41 +74,41 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点，全部受既有 co
 - **THEN** 依次 401、403 `forbidden`（body 为统一信封）、200；创建 201，视图 `upstream` 为 `{baseUrl:"https://gw.example/v1", hasApiKey:true}`，响应与应用 stdout/stderr 不含哨兵；`GET /api/models` 列出种子行与 `m2`，审计有一条 `model.create`，detail 为 `{modelId:"m2", name:"m2", upstreamChanged:true}`
 
 #### Scenario: 非管理员先于 body 与 id
-- **WHEN** 普通账号对 `POST /api/models` 与 `PUT /api/models/m1` 发 malformed JSON 与 `text/plain` 正文；对 `DELETE`、`default`、`probe` 用未知 id；对两个 bodyless 路由带 `{}`
+- **WHEN** 普通账号对 `POST /api/models` 与 `PUT /api/models?id=m1` 发 malformed JSON 与 `text/plain` 正文；对 `DELETE`、`default`、`probe` 用未知 id 与缺失的 `id`；对两个 bodyless 路由带 `{}`
 - **THEN** 全部 403 `forbidden` 统一信封、no-store；表、审计与假上游请求数都不变
 
 #### Scenario: 编辑种子行
-- **WHEN** 管理员对零配置种子行 `deepseek-v4.1-flash`（推理，`efforts` NULL）`PUT` 只改 `name`、不带 `efforts`；再 `PUT` 带 `efforts:["low","high"]`；对一个带 `/` 的 id `Qwen/Qwen2.5-72B-Instruct` 先 `POST` 再 `PUT /api/models/Qwen%2FQwen2.5-72B-Instruct`
-- **THEN** 第一次 200、视图 `efforts` 为 null、`models.yml` 该条目仍无 `thinking` 映射；第二次 200 后条目带 `thinking.efforts: [low, high]`；第三例 201 与 200，`GET /api/models` 列出该 id 原文
+- **WHEN** 管理员对零配置种子行 `deepseek-v4.1-flash`（推理，`efforts` NULL）`PUT` 只改 `name`、不带 `efforts`；再 `PUT` 带 `efforts:["low","high"]`；对一个带 `/` 的 id `Qwen/Qwen2.5-72B-Instruct` 先 `POST` 再 `PUT /api/models?id=Qwen%2FQwen2.5-72B-Instruct`；再对 `PUT /api/models`（无 `id`）与 `PUT /api/models?id=&id=m1` 发合法 body
+- **THEN** 第一次 200、视图 `efforts` 为 null、`models.yml` 该条目仍无 `thinking` 映射；第二次 200 后条目带 `thinking.efforts: [low, high]`；第三例 201 与 200，`GET /api/models` 列出该 id 原文；最后两例 400 `bad_request`，行不变
 
 #### Scenario: 修改保留密钥与清空上游
-- **WHEN** 管理员 `PUT /api/models/m2` body `{name:"深度", reasoning:true, vision:false, maxTokens:8192, efforts:["low","high"], upstream:{baseUrl:"https://gw2.example/v1"}}`；再 `PUT` 同 body 但 `upstream: null`；再对一个从未有密钥的模型 `PUT` 省略 `apiKey` 的 `upstream`
+- **WHEN** 管理员 `PUT /api/models?id=m2` body `{name:"深度", reasoning:true, vision:false, maxTokens:8192, efforts:["low","high"], upstream:{baseUrl:"https://gw2.example/v1"}}`；再 `PUT` 同 body 但 `upstream: null`；再对一个从未有密钥的模型 `PUT` 省略 `apiKey` 的 `upstream`
 - **THEN** 第一次 200、`hasApiKey` 仍为 true 且代理转发该模型时带原密钥与新 base URL；第二次 200、`upstream` 为 null；第三次 400 `bad_request`，行不变
 
 #### Scenario: 删除与缺省
-- **WHEN** 管理员 `DELETE` 缺省模型；再 `POST /api/models/m2/default` 后 `DELETE` 原缺省；再 `DELETE` 一个未知 id
+- **WHEN** 管理员 `DELETE` 缺省模型；再 `POST /api/models/default?id=m2` 后 `DELETE` 原缺省；再 `DELETE` 一个未知 id
 - **THEN** 依次 409 `model_in_use`（行不变）、200 后 204（`models.yml` 不再含原缺省；审计 `model.default` 与 `model.delete` 各一条）、404
 
 #### Scenario: 非法 body 与归属
-- **WHEN** `POST /api/models` 分别以 `{}`、`{id:"a", extra:1}`、`{id:"a", reasoning:true}`（缺 `efforts`）、`{id:"a", upstream:{baseUrl:"ftp://x"}}`、`{id:"a", upstream:{baseUrl:"https://x/v1"}}`（缺 `apiKey`）、第 33 个合法 body、malformed JSON、`text/plain` 媒体类型请求；`POST /api/models/m1/probe` 带 `{}` body
+- **WHEN** `POST /api/models` 分别以 `{}`、`{id:"a", extra:1}`、`{id:"a", efforts:["low"]}`（非推理带 `efforts`）、`{id:"a", upstream:{baseUrl:"ftp://x"}}`、`{id:"a", upstream:{baseUrl:"https://x/v1"}}`（缺 `apiKey`）、第 33 个合法 body、malformed JSON、`text/plain` 媒体类型请求；`POST /api/models/probe?id=m1` 带 `{}` body
 - **THEN** 全部 exact 400 `bad_request`，表与审计不变
 
 ### Requirement: 探活
-`POST /api/models/:id/probe` SHALL 对该模型的上游发 `GET <baseUrl 去掉结尾斜杠>/models`，头 `authorization: Bearer <apiKey>`、`accept: application/json`，建连期限 10 s、整体期限 15 s，不跟随重定向，不重试。结果 SHALL 写入该行：2xx → `probe_status = 'ok'`、`probe_message = NULL`；其它状态 → `'failed'`、`probe_message = "HTTP <status>：<摘要>"`（摘要为 `upstreamExcerpt`（密钥集为全部已登记上游的 base URL 与密钥各部分）的结果再截到 200 码点：超出时保留前 194 个码点并接 `…（已截断）`，不拆代理对）；连接被拒、重置或 DNS 失败 → `'failed'`、`"无法连接"`；建连期限或整体期限到期 → `'failed'`、`"超时"`；模型没有上游 → 不发请求、`'failed'`、`"未配置上游"`。`probe_at` 为完成时刻。探活 SHALL NOT 触发托管文件重写，SHALL 记审计 `model.probe`（detail `{modelId, status}`）。同一模型的并发探活 SHALL 串行；探活在途期间该行被删除时结果 SHALL 丢弃、响应 404 `not_found`。探活 2xx 只证明上游可达且密钥被接受，不核对 `data[].id` 含该模型（design「Not yet specified」）。密钥 SHALL NOT 出现在响应、审计、stdout/stderr。
+`POST /api/models/probe?id=<id>` SHALL 对该模型的上游发 `GET <baseUrl 去掉结尾斜杠>/models`，头 `authorization: Bearer <apiKey>`、`accept: application/json`，建连期限 10 s、整体期限 15 s，不跟随重定向，不重试。结果 SHALL 写入该行：2xx → `probe_status = 'ok'`、`probe_message = NULL`；其它状态 → `'failed'`、`probe_message = "HTTP <status>：<摘要>"`（摘要为 `upstreamExcerpt`（密钥集为全部已登记上游的 base URL 与密钥各部分）的结果再截到 200 码点：超出时保留前 194 个码点并接 `…（已截断）`，不拆代理对）；连接被拒、重置或 DNS 失败 → `'failed'`、`"无法连接"`；建连期限或整体期限到期 → `'failed'`、`"超时"`；模型没有上游 → 不发请求、`'failed'`、`"未配置上游"`。`probe_at` 为完成时刻。探活 SHALL NOT 触发托管文件重写，SHALL 记审计 `model.probe`（detail `{modelId, status}`）。同一模型的并发探活 SHALL 串行；探活在途期间该行被删除时结果 SHALL 丢弃、响应 404 `not_found`。探活 2xx 只证明上游可达且密钥被接受，不核对 `data[].id` 含该模型（design「Not yet specified」）。密钥 SHALL NOT 出现在响应、审计、stdout/stderr。
 
 #### Scenario: 四种结果
 - **WHEN** 对上游为假上游（`GET /models` 答 200）的模型探活；对答 `401 {"error":{"message":"bad key <哨兵>"}}` 的探活；对指向未监听端口的探活；对指向只接受连接不应答的夹具（整体期限注入 1 s）探活；对没有上游的模型探活
 - **THEN** 视图 `probe` 依次为 `{ok, <时刻>, null}`、`{failed, <时刻>, "HTTP 401：…"}`（不含哨兵）、`{failed, <时刻>, "无法连接"}`、`{failed, <时刻>, "超时"}`、`{failed, <时刻>, "未配置上游"}`；假上游记录恰一次 `GET /models` 且 bearer 为该模型密钥；最后一例假上游零请求；每次各一条 `model.probe` 审计；`models.yml` 的 mtime 不变
 
 ### Requirement: 中心页外壳
-`/center` SHALL 由 `web/src/features/center/` 渲染：页内 tab 由查询参数 `?tab=<key>` 表示，tab 表 `CENTER_TABS: readonly {key, label, adminOnly}[]` 在 `tabs.ts`，本 change 结束时只有 `{key:"models", label:"模型", adminOnly:true}`（外壳先以空表合入，模型 tab 的任务组追加这一项）；可见 tab 为 `adminOnly` 为假或当前 principal 角色为 `管理员` 的项。`tab` 缺省、未知或指向不可见 tab 时 SHALL 以 replace 导航到第一个可见 tab；没有可见 tab 时 SHALL 渲染空态文案 `中心暂无可用内容` 且不渲染 tab 条。tab 条用拷入层 tabs 组件（`role="tablist"`，当前项 `aria-selected="true"`，切换只改 `?tab=`）。页面级 heading 仍归顶栏（spa-shell）。routeManifest 的 `/center` 描述 SHALL 为 `模型注册表`（随后续 tab 更新），不宣传未交付能力。
+`/center` SHALL 由 `web/src/features/center/` 渲染：页内 tab 由查询参数 `?tab=<key>` 表示，tab 表 `CENTER_TABS: readonly {key, label, adminOnly}[]` 在 `tabs.ts`，本 change 结束时只有 `{key:"models", label:"模型", adminOnly:true}`（外壳先以空表合入，模型 tab 的任务组追加这一项）；可见 tab 为 `adminOnly` 为假或当前 principal 角色为 `管理员` 的项。`tab` 缺省、未知或指向不可见 tab 时 SHALL 以 replace 导航到第一个可见 tab；没有可见 tab 时 SHALL 渲染空态文案 `中心暂无可用内容` 且不渲染 tab 条。tab 条用拷入层 tabs 组件（`role="tablist"`，当前项 `aria-selected="true"`，切换只改 `?tab=`）。页面级 heading 仍归顶栏（spa-shell）。routeManifest 的 `/center` 描述 SHALL 与可见内容一致：tab 表为空时 `中心暂无可用内容`，有模型 tab 后 `模型注册表`（随后续 tab 更新），不宣传未交付能力。
 
 #### Scenario: 管理员与普通用户
 - **WHEN** 管理员打开 `/center`；再打开 `/center?tab=nope`；普通用户打开 `/center?tab=models`
 - **THEN** 前两次 URL 都变为 `/center?tab=models`，tab 条恰一项 `模型` 且选中；普通用户看到 `中心暂无可用内容`，没有 tab 条，URL 保持 `/center?tab=models`（没有可见 tab 时不 replace）
 
 ### Requirement: 模型 tab
-`/center?tab=models` SHALL 渲染模型表（拷入层 table）：每行 `id`、`name`、标签 `推理` / `看图`（按布尔）、`maxTokens`、上游（`已配置` / `未配置`）、探活（`从未` / `正常` / `失败：<message>` 与 `at` 的本地时间）、`缺省` 标记，以及行操作 `编辑`、`删除`、`设为缺省`（缺省行不渲染）、`探活`；表上方 `新增模型` 按钮。新增 / 编辑为对话框表单：`id`（编辑时只读）、`name`、`reasoning` / `vision` 复选、`maxTokens` 数字、`efforts` 六个复选（仅 `reasoning` 勾选时启用；视图 `efforts` 为 null 的推理模型预填为一个都不勾，旁注 `不勾选即不声明强度集合，界面列全部档位`；一个都不勾则提交不带 `efforts`）、`上游地址`、`密钥`（编辑时 placeholder `留空保留现有密钥`，空即省略 `apiKey`）；提交前 SHALL 在客户端按与服务端相同的规则逐字段校验并在字段旁显示具体原因（`id` 字节数与控制字符、`name` 码点数、`maxTokens` 范围、地址格式、新建带地址必填密钥），服务端 400 的统一文案只作兜底；提交恰调用一次 `createModel` / `updateModel`，在途禁用提交，失败在对话框内 `role="alert"` 显示 `ApiError.message`。两个对话框 SHALL 接入 ui-primitives 规定的 Escape 关闭回退（`useEscapeFallback`），与既有覆盖层同一行为。保存成功且上游有改动（新建带上游；编辑改了地址或填了密钥）时 SHALL 紧接着恰调用一次 `probeModel`。`删除` 先弹确认（拷入层 alert-dialog，按钮 `取消` / `删除`）；`设为缺省` 与 `探活` 直接调用，在途禁用该行对应按钮。每次操作成功后 SHALL 重取 `listModels` 渲染；收到非信封的 500（发布失败）时同样重取（行已写入）并在页顶 `role="alert"` 显示 `REQUEST_FAILED_MESSAGE`。API 客户端 `web/src/lib/api-models.ts` SHALL 提供 `listModels` / `createModel(input)` / `updateModel(id, input)` / `deleteModel(id)` / `setDefaultModel(id)` / `probeModel(id)`，路径里的 id 经 `encodeURIComponent`，响应按 `ModelView` 严格解析（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型。
+`/center?tab=models` SHALL 渲染模型表（拷入层 table）：每行 `id`、`name`、标签 `推理` / `看图`（按布尔）、`maxTokens`、上游（`已配置` / `未配置`）、探活（`从未` / `正常` / `失败：<message>` 与 `at` 的本地时间）、`缺省` 标记，以及行操作 `编辑`、`删除`、`设为缺省`（缺省行不渲染）、`探活`；表上方 `新增模型` 按钮。新增 / 编辑为对话框表单：`id`（编辑时只读）、`name`、`reasoning` / `vision` 复选、`maxTokens` 数字、`efforts` 六个复选（仅 `reasoning` 勾选时启用；视图 `efforts` 为 null 的推理模型预填为一个都不勾，旁注 `不勾选即不声明强度集合，界面列全部档位`；一个都不勾则提交不带 `efforts`）、`上游地址`、`密钥`（编辑时 placeholder `留空保留现有密钥`，空即省略 `apiKey`）；提交前 SHALL 在客户端按与服务端相同的规则逐字段校验并在字段旁显示具体原因（`id` 字节数与控制字符、`name` 码点数、`maxTokens` 范围、地址格式、新建带地址必填密钥），服务端 400 的统一文案只作兜底；提交恰调用一次 `createModel` / `updateModel`，在途禁用提交，失败在对话框内 `role="alert"` 显示 `ApiError.message`。两个对话框 SHALL 接入 ui-primitives 规定的 Escape 关闭回退（`useEscapeFallback`），与既有覆盖层同一行为。保存成功且上游有改动（新建带上游；编辑改了地址或填了密钥）时 SHALL 紧接着恰调用一次 `probeModel`。`删除` 先弹确认（拷入层 alert-dialog，按钮 `取消` / `删除`）；`设为缺省` 与 `探活` 直接调用，在途禁用该行对应按钮。每次操作成功后 SHALL 重取 `listModels` 渲染；收到非信封的 500（发布失败）时同样重取（行已写入）并在页顶 `role="alert"` 显示 `REQUEST_FAILED_MESSAGE`。API 客户端 `web/src/lib/api-models.ts` SHALL 提供 `listModels` / `createModel(input)` / `updateModel(id, input)` / `deleteModel(id)` / `setDefaultModel(id)` / `probeModel(id)`，查询参数 `id` 经 `encodeURIComponent`，响应按 `ModelView` 严格解析（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型。
 
 #### Scenario: 登记、编辑与探活
 - **WHEN** 管理员点 `新增模型`，填 `id` `m2`、勾 `推理`、勾 `low` `high`、填地址与密钥，提交（假客户端返回视图）；随后编辑 `m2` 只改 `name`；再编辑改地址不填密钥
