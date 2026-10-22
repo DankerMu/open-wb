@@ -1,6 +1,6 @@
 # session-sidebar Spec Delta
 
-> s1d-experts-skills：「欢迎页场景胶囊与场景化快捷任务」的首次发送 body 在用户选过时另带 `expertId` / `disabledSkills`，F-CHAT-1「场景决定默认专家」由「有意偏差」改为正式作废，会话内切换场景由「归 S1d」改为不提供；「composer footer 工作空间选择」的位置改为「+」与专家标签之后、权限档位之前，只禁麦克风，「无权限元素与无匹配」场景随之改写（design D9、D11）。其余逐字沿用主规格。
+> s1d-experts-skills：「欢迎页场景胶囊与场景化快捷任务」的首次发送 body 在用户选过时另带 `expertId` / `disabledSkills`，F-CHAT-1「场景决定默认专家」由「有意偏差」改为正式作废，会话内切换场景由「归 S1d」改为不提供；「composer footer 工作空间选择」的位置改为「+」与专家标签之后、权限档位之前，只禁麦克风，「无权限元素与无匹配」场景随之改写；「会话 DTO 严格解析」的 `createSession` input 加 `expertId?`、`disabledSkills?`（会话对象十四键不变），「客户端方法」场景加一例（design D7、D9、D11）。其余逐字沿用主规格。
 
 ## MODIFIED Requirements
 
@@ -55,3 +55,16 @@
 #### Scenario: 未选择空间发送得到临时空间会话
 - **WHEN** 欢迎态按钮显示 `任务启动于 未选择` 时输入并发送，`POST /api/sessions` 返回 `temporaryWorkspace` 为 true 的会话
 - **THEN** 创建请求的 body 为 `{"scene":"office"}`（不含 `workspaceId`）；会话被选中后能力栏同一位置为只读文本 `任务启动于 临时空间`；新会话出现在侧栏的 `临时空间` 分组内；选择器的选项里没有任何临时空间
+
+### Requirement: 会话 DTO 严格解析
+web 的会话解析 SHALL 要求会话对象恰含十四键 `{id,title,status,createdAt,updatedAt,scene,workspaceId,pinnedAt,archivedAt,pendingApproval,temporaryWorkspace,approvalMode,modelId,reasoningEffort}`（`hasExactlyKeys`），并逐键校验：`status` ∈ `idle|running|done|failed|stopped`；`scene` ∈ `office|code|design|null`；`workspaceId` 为 32 位小写十六进制字符串或 null；`pinnedAt` 与 `archivedAt` 为非负安全整数或 null；`pendingApproval` 与 `temporaryWorkspace` 为布尔；`approvalMode` ∈ `always-ask|write|yolo`；`modelId` 为非空字符串；`reasoningEffort` ∈ `off|minimal|low|medium|high|xhigh|max|null`；`workspaceId` 为 null 而 `temporaryWorkspace` 为 true 的对象不合法。缺键、多余键或任一值不合法 SHALL 使该响应按既有规则视为无效成功响应（不部分采用）。该规则 SHALL 统一作用于 `GET /api/sessions` 列表项、`POST /api/sessions` 与 `PATCH /api/sessions/:id` 响应、消息快照的 `session`、fork 与 undo 响应的 `session`。API 客户端的 `patchSession(id, patch)`（`PATCH`，JSON body，成功 200 返回解析后的会话；`patch` 的键为 `title`、`scene`、`pinned`、`archived`、`approvalMode`、`modelId`、`reasoningEffort` 的非空子集）、`deleteSession(id)`（`DELETE`，无 body，成功恰为 204）与 `createSession(input?, options?)`（可选 input `{workspaceId?, scene?, approvalMode?, modelId?, reasoningEffort?, expertId?, disabledSkills?}`——后两键由 change s1d-experts-skills 加入：`expertId` 为字符串、`disabledSkills` 为字符串数组，与其它键一样只发送所给的键，见 session-metadata「会话创建与空间绑定」；会话对象的十四键不因它们改变）沿用既有 same-origin、AbortSignal、错误信封与 401 通知机制，路径 id 编码。键集的服务端一侧见 session-metadata「会话视图扩展键」与 chat-sessions「会话 REST」；`archivedAt`、`pendingApproval`、`temporaryWorkspace` 三键的两侧 SHALL 同一个改动落地，`approvalMode`、`modelId`、`reasoningEffort` 三键的最终形状见 chat-web「API 客户端扩展」的「S1g 输入框能力」一段。
+
+#### Scenario: 十一键接受与其它键集拒绝
+- **WHEN** `GET /api/sessions` 分别返回：合法十四键会话；缺 `archivedAt` 的十三键会话；旧的八键会话；不带 `approvalMode`、`modelId`、`reasoningEffort` 的十一键会话；多一个 `parentSessionId` 的十五键会话；`pendingApproval:"yes"` 的会话；`approvalMode:"auto"` 的会话；`workspaceId:null` 且 `temporaryWorkspace:true` 的会话
+- **THEN** 第一种被接受并渲染；其余七种都使列表读取呈现既有的无效响应失败，不渲染任何部分列表
+
+#### Scenario: 客户端方法
+- **WHEN** 调用 `patchSession(id,{archived:true})`、`patchSession(id,{pinned:true})`、`deleteSession(id)`、`createSession({scene:"code"})` 与无参 `createSession()`
+- **THEN** 请求分别为 `PATCH /api/sessions/<id>` body `{"archived":true}`、同路径 body `{"pinned":true}`、`DELETE /api/sessions/<id>` 无 body、`POST /api/sessions` body `{"scene":"code"}` 且 `Content-Type: application/json`、`POST /api/sessions` 无 body；`deleteSession` 对 200 视为无效响应
+- **WHEN** 调用 `createSession({scene:"office", expertId:"builtin:test-engineer", disabledSkills:["deploy"]})`，服务端返回合法十四键会话
+- **THEN** 请求为 `POST /api/sessions` body `{"scene":"office","expertId":"builtin:test-engineer","disabledSkills":["deploy"]}`，返回值按十四键严格解析被接受

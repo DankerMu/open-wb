@@ -1,6 +1,6 @@
 # session-metadata Spec Delta
 
-> s1d-experts-skills：「会话创建与空间绑定」的 body 键集加 `expertId`、`disabledSkills`（校验 400、`disabled_skills` 初值取 body ?? 账号缺省 ?? `[]`、给专家不给停用时按并集规则去掉专家声明的技能），会话视图键集不变，加一个场景；「fork 继承会话元数据」另复制 `expert_id`、`disabled_skills` 原值、临时进程带源会话的有效能力，加一个场景（design D7）。其余逐字沿用主规格。
+> s1d-experts-skills：「会话创建与空间绑定」的 body 键集加 `expertId`、`disabledSkills`（校验 400、`disabled_skills` 初值取 body ?? 账号缺省 ?? `[]`、给了专家时按并集规则再去掉专家声明的技能），会话视图键集不变，加一个场景；「fork 继承会话元数据」另复制 `expert_id`、`disabled_skills` 原值、临时进程带源会话的有效能力，加一个场景（design D7）。其余逐字沿用主规格。
 
 ## MODIFIED Requirements
 
@@ -11,7 +11,7 @@
 - 给出 `workspaceId`：插入会话行（`workspace_id` 为该值、`scene` 为请求值或 NULL、`pinned_at` 与 `archived_at` NULL、`approval_mode` / `model_id` / `reasoning_effort` 三列按 session-composer-settings「创建会话时的设置与继承」取请求值、该账号的最近选择或 NULL、`expert_id` 与 `disabled_skills` 两列按下文「专家与停用技能的初值」、其余列同既有创建规则），并写一条 `session.bind` 审计（见「会话元数据审计」），审计失败则会话行也不存在；不创建任何目录。
 - 未给出 `workspaceId`：按 temporary-workspaces「临时空间的创建」在同一事务内插入一行临时空间、确保其目录，再插入 `workspace_id` 指向它的会话行（三项设置列与 `expert_id`、`disabled_skills` 的取值规则同上）；不写 `session.bind` 与 `workspace.create` 审计。任一步失败则事务回滚，不留会话行、空间行，本次新建的空目录按该条的补偿规则移除。
 
-**专家与停用技能的初值**（change s1d-experts-skills）：`expert_id` 为请求的 `expertId` 或 NULL；`disabled_skills` 为请求的 `disabledSkills`，请求不带它时为该账号 `account_skill_prefs.disabled_skills`（在同一事务内读取），该账号没有这一行时为 `[]`；给了 `expertId` 而没给 `disabledSkills` 时，再从上述集合中去掉该专家声明的技能（skill-switches「会话能力端点」的并集规则）；存储前去重并按字典序排列。`expertId` 与 `disabledSkills` SHALL NOT 更新该账号的最近选择或 `account_skill_prefs`，也不写审计。
+**专家与停用技能的初值**（change s1d-experts-skills）：`expert_id` 为请求的 `expertId` 或 NULL；`disabled_skills` 为请求的 `disabledSkills`，请求不带它时为该账号 `account_skill_prefs.disabled_skills`（在同一事务内读取），该账号没有这一行时为 `[]`；只要给了 `expertId`（不论是否同时给了 `disabledSkills`），再从上述集合中去掉该专家声明的技能（skill-switches「会话能力端点」的并集规则）；存储前去重并按字典序排列。`expertId` 与 `disabledSkills` SHALL NOT 更新该账号的最近选择或 `account_skill_prefs`，也不写审计。
 
 两种情况 SHALL 在同一事务内另按 session-composer-settings「创建会话时的设置与继承」更新该账号的最近选择（仅当请求带有三项设置中的任一项），并按 session-permission-tier「档位变更审计」决定是否写一条 `session.permission` 审计（触发条件只在该条规定，本条不复述）；其中任一写入或审计失败则事务回滚，不留会话行与空间行。
 
@@ -43,7 +43,7 @@
 
 #### Scenario: 创建时的专家与停用技能
 - **WHEN** 账号的 `account_skill_prefs` 停用 `["deploy","lint"]`，自建专家 E 声明技能 `["deploy"]`；owner 依次以 `{}`、`{expertId:E}`、`{expertId:E, disabledSkills:["deploy"]}`、`{disabledSkills:[]}` 创建会话；再以 `{expertId:null}`、`{expertId:"builtin:nope"}`、`{expertId:<另一账号的专家 id>}`、`{disabledSkills:["a,b"]}`、`{disabledSkills:"deploy"}` 各调用一次
-- **THEN** 前四次 201，视图恰为十四键（不含 `expertId` 与 `disabledSkills`），随后 `GET …/capabilities` 依次为 `{expertId:null, disabledSkills:["deploy","lint"]}`、`{expertId:E, disabledSkills:["lint"]}`、`{expertId:E, disabledSkills:["deploy"]}`、`{expertId:null, disabledSkills:[]}`；`account_skill_prefs` 行与最近选择行不变，审计无新增；后五次均 400 `bad_request` 与 no-store，无会话行、无空间行、无目录、无审计行新增
+- **THEN** 前四次 201，视图恰为十四键（不含 `expertId` 与 `disabledSkills`），随后 `GET …/capabilities` 依次为 `{expertId:null, disabledSkills:["deploy","lint"]}`、`{expertId:E, disabledSkills:["lint"]}`、`{expertId:E, disabledSkills:[]}`、`{expertId:null, disabledSkills:[]}`；`account_skill_prefs` 行与最近选择行不变，审计无新增；后五次均 400 `bad_request` 与 no-store，无会话行、无空间行、无目录、无审计行新增
 
 ### Requirement: fork 继承会话元数据
 `POST /api/sessions/:id/fork`（chat-sessions「会话 REST」fork 段）在其最终事务中插入的新会话行 SHALL 复制源会话的 `workspace_id` 与 `scene`，并复制 `approval_mode`、`model_id`、`reasoning_effort` 三列与 `expert_id`、`disabled_skills` 两列的原始值（含 NULL）——`expert_id` 指向的专家已不可见时同样原样复制（读出时视为没有专家，experts「专家提示词注入」）；`approval_mode` 高于当前 `APPROVAL_MAX_MODE` 时写入上界本身（session-permission-tier「管理员最高档」，owner 2026-10-12，#1282），其余原样；新会话的有效值由 session-composer-settings「有效值解析」读出，与源会话当前的有效值相同，`pinned_at` 与 `archived_at` SHALL 为 NULL；其余列与该段规则一致。该事务拷贝的消息与步骤 SHALL 同时拷贝 `chat_messages.thinking` 与 `chat_steps.changes`（原值，含 NULL），使新会话的快照与源会话被拷贝部分的思考与文件变更一致。fork 响应中的 `session` 与其它会话视图键集相同（「会话视图扩展键」）。源会话用临时空间时，新会话继承同一个 `workspace_id`、与源会话共用该临时空间（temporary-workspaces「共用与随最后一个会话删除」），fork 不复制目录、不新建空间行；fork SHALL NOT 拷贝 `chat_turn_snapshots` 行。fork 临时进程以源会话的有效审批档位、有效模型与有效能力启动（omp-runtime「子进程 spawn 契约」）；fork SHALL NOT 改动该账号的最近选择。fork 会话后续 generation 的 `--cwd` 由其继承的 `workspace_id` 按「绑定不可改与工作目录」计算，与源会话一致（均为源空间根或所有者根）。fork 不写 `session.bind` 审计，也不写 `session.permission` 审计。

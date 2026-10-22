@@ -1,6 +1,6 @@
 # omp-runtime Spec Delta
 
-> s1d-experts-skills：「子进程 spawn 契约」的 argv 在宿主 overlay 的 `--config` 之后加会话配置文件的 `--config` 与（有专家时的）`--append-system-prompt`，新增「会话配置文件」一段（内容、原子写、子进程结束即删、各 spawn 路径同一规则），并改写三个断言 argv 的场景、加三个场景；「OMP_STATE_DIR 托管布局」布局表与路径函数加 `session-config/`，加启动清扫一句与一个场景（design D1）。其余逐字沿用主规格。
+> s1d-experts-skills：「子进程 spawn 契约」的 argv 在宿主 overlay 的 `--config` 之后加会话配置文件的 `--config` 与（有专家时的）`--append-system-prompt`，新增「会话配置文件」一段（内容与 YAML 写法、原子写、子进程结束即删、各 spawn 路径同一规则），并改写三个断言 argv 的场景、加三个场景；「OMP_STATE_DIR 托管布局」布局表与路径函数加 `session-config/`（`2710`）与 `sweepSessionConfig`，加启动清扫一句与一个场景（design D1）。其余逐字沿用主规格。
 
 ## MODIFIED Requirements
 
@@ -9,8 +9,8 @@
 omp 在 `--resume <file>` 时以该会话文件头记录的 cwd 为准（该目录可进入时切换过去，`--cwd` 只决定冷启动会话写入文件头的 cwd），且 RPC 无改 cwd 的命令。宿主 SHALL 依赖这一 omp 行为而不是对抗它：会话的 cwd 在首个 prompt 冷启动时确定，此后不可改（空间绑定不可改的事实依据）；宿主对同一会话的每次 spawn 仍 SHALL 传入按上文规则取得的同一 `<CWD>`，不得借后续 spawn 的不同 `--cwd` 试图迁移已存在的会话。
 
 **会话配置文件**（change s1d-experts-skills）。每一次 spawn——会话 slot 的进程与 fork / branch 的临时进程同样，没有第二条路径——SHALL 在按「OMP_STATE_DIR 托管布局」准备好目录之后、`spawnImpl` 之前，在 `<OMP_STATE_DIR>/session-config/` 下写出本进程专属的会话配置文件，并以它们组装上文 argv 中的第二个 `--config` 与可选的 `--append-system-prompt`。`<key>` SHALL 是每次 spawn 新生成的随机十六进制串，与会话 id、owner 无关，同一 key 不复用。文件内容由调用方给出的有效能力决定（chat-sessions「派发前按会话设置对齐进程」：会话 slot 取该会话的有效能力，fork / branch 临时进程取源会话的有效能力），spawn SHALL NOT 自行读取会话行或专家来决定、缺省或改写它们：
-- `<key>.yml` SHALL 恰有一个顶层键 `disabledExtensions`，其值为字符串数组，元素去重后按字典序排列，为空时写作 `disabledExtensions: []`；元素为会话停用技能的 `skill:<名称>`（skill-switches「停用技能对 omp 生效」），change `s1d-connectors` 将往同一数组加入 `mcp:<名称>`。该文件 SHALL NOT 含其它键，不进 `PI_CONFIG_FILES`（它仍只指向宿主 overlay）。
-- `<key>.md` 只在会话有有效专家时写出，内容为该专家 `prompt` 的原文（UTF-8）；没有有效专家时不写该文件，argv 也不含 `--append-system-prompt`。路径是不含换行的绝对路径，omp 一定按文件读取它。有专家时 omp 不再自行发现项目或用户层的 `APPEND_SYSTEM.md`（omp 只在没给该参数时发现它；接受）。
+- `<key>.yml` SHALL 恰有一个顶层键 `disabledExtensions`，其值为字符串数组，元素去重后按字典序排列；元素为会话停用技能的 `skill:<名称>`（skill-switches「停用技能对 omp 生效」）。文件内容 SHALL 恰为一行 `disabledExtensions: [<e1>, <e2>, …]` 加换行：每个元素写作 JSON 字符串（双引号包围、按 JSON 规则转义，JSON 字符串同时是合法的 YAML 双引号标量），元素之间以 `, ` 分隔，为空时写作 `disabledExtensions: []`；宿主 SHALL NOT 以未加引号的 YAML 标量写元素（技能名可以含 `:`、`#`、`"` 等 YAML 记号）。该文件 SHALL NOT 含其它键，不进 `PI_CONFIG_FILES`（它仍只指向宿主 overlay）。
+- `<key>.md` 只在会话有有效专家时写出，内容为该专家 `prompt` 的原文（UTF-8）；没有有效专家时不写该文件，argv 也不含 `--append-system-prompt`。路径是不含换行的绝对路径，omp 按文件读取它；omp 读该文件的**任何**错误（不只是缺失）都会使它把路径字面当作提示词文本，所以该文件 SHALL 在 spawn 前写成、对 omp uid 可读（目录见「OMP_STATE_DIR 托管布局」，文件 `0640`），且在该子进程结束之前不被删除。有专家时 omp 不再自行发现项目或用户层的 `APPEND_SYSTEM.md`（omp 只在没给该参数时发现它；接受）。
 - 两个文件 SHALL 经与托管 `models.yml` 相同的替换实现原子写入（独占创建的临时文件、mode 精确 `0640`、rename）；任一写入失败视同目录准备失败：已写出的本次文件被删除，SHALL 不 spawn 任何子进程。
 - 该子进程以任何原因结束时（正常关停、空闲回收、退役、驱逐、崩溃、启动或握手失败），宿主 SHALL 删除它的 `<key>.yml` 与 `<key>.md`；删除失败只记日志，不改变退出处理。其它存活进程的文件 SHALL NOT 被删除。
 
@@ -87,6 +87,8 @@ omp 按序深合并配置层，后者胜，只递归普通对象，数组整体�
 #### Scenario: 有专家与停用技能时的 argv
 - **WHEN** 会话的有效专家提示词为 `P`（含换行与中文）、停用技能为 `deploy`、`omp_session_file` 非 null，调用方以这些有效能力 spawn；测试经注入的 spawn 包装在 `spawnImpl` 被调用时读取 `<OMP_STATE_DIR>/session-config/`
 - **THEN** argv 在宿主 overlay 的 `--config` 之后依次为 `--config <OMP_STATE_DIR>/session-config/<k>.yml`、`--append-system-prompt <OMP_STATE_DIR>/session-config/<k>.md`、`--resume <omp_session_file>`（末尾）；`<k>.yml` 解析为恰一个键的 mapping `{disabledExtensions: ["skill:deploy"]}`；`<k>.md` 的字节等于 `P` 的 UTF-8；两者 `mode & 0o7777` 为 `0o640`；`PI_CONFIG_FILES` 仍只是宿主 overlay 的路径；同一会话再 spawn 一次时 `<k>` 不同
+- **WHEN** 停用技能为 `a: #"b`（含 `:`、空格、`#` 与 `"`）与 `deploy`，调用方 spawn
+- **THEN** `<k>.yml` 的字节恰为 `disabledExtensions: ["skill:a: #\"b", "skill:deploy"]` 加换行；以 YAML 解析得到恰一个键的 mapping，其 `disabledExtensions` 恰为 `["skill:a: #\"b", "skill:deploy"]`（元素逐字符等于输入加前缀）
 
 #### Scenario: 无专家时只有会话 yml
 - **WHEN** 会话没有有效专家、停用集合为空，调用方 spawn
@@ -109,7 +111,7 @@ omp 按序深合并配置层，后者胜，只递归普通对象，数组整体�
 | `<state>/home` | `3770` | omp 的 `HOME`；omp uid 可创建自己的条目（工具链缓存等），粘滞位使它不能改名或删除 app 持有的 `.omp` |
 | `<state>/home/.env` | `0640`（普通文件） | omp 启动时加载 `$HOME/.env`；由宿主预建（空文件）并持有，粘滞位使 omp uid 不能替换它，见「工作目录 dotenv 钉住」 |
 | `<state>/home/.omp`、`<state>/home/.omp/agent` | `2750` | 托管配置：`models.yml`（`0640`）与运维安装的 `skills/` 位于 agent 目录 |
-| `<state>/session-config` | `2750` | 托管配置：每次 spawn 的会话配置文件 `<key>.yml` / `<key>.md`（`0640`，「子进程 spawn 契约」），子进程结束即删；服务启动的 `state_layout` 阶段清空其中的残留 |
+| `<state>/session-config` | `2710` | 托管配置：每次 spawn 的会话配置文件 `<key>.yml` / `<key>.md`（`0640`，「子进程 spawn 契约」），子进程结束即删；组只有执行位——omp uid 能按确切路径打开其中的文件，不能列举、新建、改名或删除；服务启动的 `state_layout` 阶段由 `sweepSessionConfig` 清空其中的残留 |
 | `<state>/xdg`、`<state>/xdg/data`、`<state>/xdg/state`、`<state>/xdg/cache` | `2750` | XDG 根 |
 | `<state>/xdg/data/omp`、`<state>/xdg/state/omp`、`<state>/xdg/cache/omp` | `2770` | omp 运行期状态（`agent.db`、日志、原生模块缓存等）；omp 只在该目录已存在时才启用对应的 XDG 重定向，因此三者 SHALL 由宿主预先建出 |
 | `<state>/sessions` | `2750` | 会话目录的父目录 |
@@ -117,9 +119,9 @@ omp 按序深合并配置层，后者胜，只递归普通对象，数组整体�
 | `<state>/trash` | `0700` | app 私有：会话删除先把产物目录移到这里再递归删除（session-metadata「会话删除」），临时空间目录的删除同样经它中转（temporary-workspaces「临时空间目录的删除」）；omp uid 不能进入 |
 | `<state>/snapshots` | `0700` | app 私有：每个回合开始前的工作空间快照（workspace-snapshots「快照的存放位置」）；omp uid 不能进入、列举或改写 |
 
-这些路径 SHALL 只有一个来源：`server/src/sessions/omp/` 下的一个模块导出 `ompTrashDir(stateDir)`、`ompSnapshotsDir(stateDir)`（= `<state>/snapshots`）、`ompHome(stateDir)`、`ompAgentDir(stateDir)`（= `<state>/home/.omp/agent`）、`ompSessionConfigDir(stateDir)`（= `<state>/session-config`）、`ompXdgHome(stateDir, "data"|"state"|"cache")`、`ompSessionDir(stateDir, ownerId)` 与 `ensureOmpStateLayout(stateDir)`；`server.ts`、`createApp`、spawn 与会话删除 SHALL 经它们取路径，不得再拼 `join(stateDir, "agent")` 一类的字面量。旧布局的 `<state>/agent` SHALL 不再被读写（遗留目录原样留在磁盘，宿主不迁移也不删除）。
+这些路径 SHALL 只有一个来源：`server/src/sessions/omp/` 下的一个模块导出 `ompTrashDir(stateDir)`、`ompSnapshotsDir(stateDir)`（= `<state>/snapshots`）、`ompHome(stateDir)`、`ompAgentDir(stateDir)`（= `<state>/home/.omp/agent`）、`ompSessionConfigDir(stateDir)`（= `<state>/session-config`）、`ompXdgHome(stateDir, "data"|"state"|"cache")`、`ompSessionDir(stateDir, ownerId)`、`ensureOmpStateLayout(stateDir)` 与 `sweepSessionConfig(stateDir)`；`server.ts`、`createApp`、spawn 与会话删除 SHALL 经它们取路径，不得再拼 `join(stateDir, "agent")` 一类的字面量。旧布局的 `<state>/agent` SHALL 不再被读写（遗留目录原样留在磁盘，宿主不迁移也不删除）。
 
-`ensureOmpStateLayout(stateDir)` SHALL 先在 `<state>` 缺失时以递归 `mkdir` 建出它及缺失的父级（不改父级权限位），再取 `<state>` 的内核 realpath（`OMP_STATE_DIR` 自身可以是运维放置的、指向目录的符号链接——既有部署形态，会话删除按同一 realpath 校验），然后对表中除 `sessions/<ownerId>` 之外的每个目录、以解析后的根为基、按父先于子的顺序调用 sandbox-core「托管目录权限位」的 `ensureOwnedDir(path, mode)`；根以下的各级不得是符号链接。`<state>/home` 缺失时 SHALL 先以不对组开放的权限位建出，待 `home/.omp` 与 `home/.omp/agent` 建好之后才校正为 `3770`——否则冷建期间一个残留的 omp uid 进程可以抢先建出 `home/.omp`，使布局因归属不符而失败；`ensureOwnedDir` 新建目录时 SHALL 直接以目标 mode 的权限位创建（不经过一个更宽的中间状态）。argv 与环境里的路径仍用配置值（未解析）拼出，与此前一致。它 SHALL 在两处被调用：服务启动时写托管 `models.yml` 之前，以及每次 `spawnOmp` 准备目录时（随后对 `sessions/<ownerId>` 以 `2770` 调同一 `ensureOwnedDir`）；因此被外部改宽的权限位在下一次 spawn 前被校正，而不属于 app uid 的目录、符号链接或非目录条目使启动失败（既有 generic `server_start_failed` 路径）或使该次 spawn 以「Directory preparation failure」失败，绝不被跟随或沿用。服务启动时（http-service-skeleton 的 `state_layout` 阶段，`ensureOmpStateLayout` 之后、任何 spawn 之前）宿主 SHALL 删除 `<state>/session-config` 下的全部条目（上次运行遗留，其子进程已不存在；符号链接只删链接本身，不跟随），任一删除失败使启动以该阶段失败；每次 spawn 的 `ensureOmpStateLayout` SHALL NOT 清扫它（其中是存活进程的文件）。宿主 SHALL NOT chown、不改进程 umask；组归属由部署经 setgid 继承（ADR-0010）。同 uid 部署（`OMP_USER` 缺席）使用同一布局与同一权限位。
+`ensureOmpStateLayout(stateDir)` SHALL 先在 `<state>` 缺失时以递归 `mkdir` 建出它及缺失的父级（不改父级权限位），再取 `<state>` 的内核 realpath（`OMP_STATE_DIR` 自身可以是运维放置的、指向目录的符号链接——既有部署形态，会话删除按同一 realpath 校验），然后对表中除 `sessions/<ownerId>` 之外的每个目录、以解析后的根为基、按父先于子的顺序调用 sandbox-core「托管目录权限位」的 `ensureOwnedDir(path, mode)`；根以下的各级不得是符号链接。`<state>/home` 缺失时 SHALL 先以不对组开放的权限位建出，待 `home/.omp` 与 `home/.omp/agent` 建好之后才校正为 `3770`——否则冷建期间一个残留的 omp uid 进程可以抢先建出 `home/.omp`，使布局因归属不符而失败；`ensureOwnedDir` 新建目录时 SHALL 直接以目标 mode 的权限位创建（不经过一个更宽的中间状态）。argv 与环境里的路径仍用配置值（未解析）拼出，与此前一致。它 SHALL 在两处被调用：服务启动时写托管 `models.yml` 之前，以及每次 `spawnOmp` 准备目录时（随后对 `sessions/<ownerId>` 以 `2770` 调同一 `ensureOwnedDir`）；因此被外部改宽的权限位在下一次 spawn 前被校正，而不属于 app uid 的目录、符号链接或非目录条目使启动失败（既有 generic `server_start_failed` 路径）或使该次 spawn 以「Directory preparation failure」失败，绝不被跟随或沿用。服务启动时（http-service-skeleton 的 `state_layout` 阶段，`ensureOmpStateLayout` 之后、任何 spawn 之前）宿主 SHALL 调用 `sweepSessionConfig(stateDir)` 删除 `<state>/session-config` 下的全部条目（上次运行遗留，其子进程已不存在；符号链接只删链接本身，不跟随），任一删除失败使启动以该阶段失败；`sweepSessionConfig` 只由 `server.ts` 的这一启动阶段调用，SHALL NOT 是 `ensureOmpStateLayout` 的一部分——每次 spawn 都调用的 `ensureOmpStateLayout` SHALL NOT 清扫它（其中是存活进程的文件）。宿主 SHALL NOT chown、不改进程 umask；组归属由部署经 setgid 继承（ADR-0010）。同 uid 部署（`OMP_USER` 缺席）使用同一布局与同一权限位。
 
 部署前提（ADR-0010，宿主不检查）：`<state>` 的父目录不得对 omp uid 可写（否则 `<state>` 可被整体改名替换）；`skills/` 及其内容由运维以 app uid（或 root）安装且不对 omp uid 可写。
 
@@ -153,4 +155,6 @@ omp 按序深合并配置层，后者胜，只递归普通对象，数组整体�
 
 #### Scenario: 启动清扫会话配置残留
 - **WHEN** `<state>/session-config` 下预置 `a.yml`、`a.md` 与指向 `<state>` 之外某文件 `F` 的符号链接 `b.yml`，服务启动；随后两个会话各 spawn 一次且进程存活，再有第三个会话 spawn
-- **THEN** 启动完成时 `session-config/` 为空、`mode & 0o7777` 为 `0o2750`，`F` 仍在且字节不变；第三次 spawn 的目录准备之后前两个进程的会话配置文件仍在、字节不变
+- **THEN** 启动完成时 `session-config/` 为空、`mode & 0o7777` 为 `0o2710`，`F` 仍在且字节不变；第三次 spawn 的目录准备之后前两个进程的会话配置文件仍在、字节不变
+- **WHEN** 测试令启动清扫删除某个残留条目失败
+- **THEN** 启动以 `state_layout` 阶段失败（http-service-skeleton「服务启动与装配」的失败记录），不进入其后的任何阶段、不输出 success record、不 spawn 任何子进程

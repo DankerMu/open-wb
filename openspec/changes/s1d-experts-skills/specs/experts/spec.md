@@ -27,8 +27,10 @@
 - **THEN** 乙的列表不含 X；`PUT` 与 `DELETE` 均 404 `not_found`；创建会话 400 `bad_request`；X 未被修改
 
 #### Scenario: 字段边界
-- **WHEN** 分别以 `name` 33 码点、`category` `运维`、6 个 `tags`、`prompt` 全空白、`skills` 含 `a,b`、以及第 51 个专家提交 `POST /api/experts`
+- **WHEN** 分别以 `name` 33 码点、`category` `运维`、6 个 `tags`、`prompt` 全空白、`prompt` 8001 码点、`skills` 含 `a,b`、以及第 51 个专家提交 `POST /api/experts`
 - **THEN** 全部 400 `bad_request`，表不变
+- **WHEN** 以 `prompt` 恰为 8000 个 CJK 码点（每个 3 个 UTF-8 字节，body 约 24 KiB，超过 16 KiB）提交 `POST /api/experts`，随后以同一 body `PUT` 该专家
+- **THEN** 201 与 200，视图的 `prompt` 逐字等于所给文本（8000 码点）；body limit 64 KiB 不拒绝它
 
 ### Requirement: 专家管理端点
 `experts` 模块 SHALL 注册（皆受 cookie guard，响应 `Cache-Control: no-store`）：
@@ -36,7 +38,7 @@
 - `POST /api/experts`，body 为 `{name, description?, category, tags?, prompt, skills?}`（键集严格，多余键 400）→ 201 视图。
 - `PUT /api/experts?id=<id>`，body 同 POST（整体替换，省略的可选键取缺省）→ 200 视图。
 - `DELETE /api/experts?id=<id>` → 204；同一事务里把 `chat_sessions.expert_id = <id>` 的行置 NULL。
-检查次序：未认证 401 → `id` 为内置专家的 `PUT` / `DELETE` 403 `forbidden` → `id` 缺失、空或多值 400 → 不可见 404 → body 400。`POST /api/experts` 与 `PUT /api/experts` SHALL 进 http-service-skeleton 的 content-parser 归属集（body limit 16 KiB）。每次写入 SHALL 在同一事务里记审计：`expert.create` / `expert.update` / `expert.delete`，`detail = {expertId, name}`，不含提示词。
+检查次序：未认证 401 → `PUT` / `DELETE` 的 `id` 缺失、空或多值 400 → `id` 为内置专家的 `PUT` / `DELETE` 403 `forbidden` → `id` 对调用者不可见 404 → content-parser 与 body 400；401、`id` 的 400、403 与 404 都在 body 解析之前判定（preParsing，与 `/api/models` 同一做法），所以对内置专家与不可见专家的写入无论 body 是否合法都分别得到 403 与 404。`POST /api/experts` 与 `PUT /api/experts` SHALL 进 http-service-skeleton 的 content-parser 归属集，body limit 64 KiB（`prompt` 至多 8000 码点，CJK 文本约 24 KiB，16 KiB 不够）。每次写入 SHALL 在同一事务里记审计：`expert.create` / `expert.update` / `expert.delete`，`detail = {expertId, name}`，不含提示词。
 
 #### Scenario: 自建、修改与删除
 - **WHEN** 账号甲 `POST` 一个专家 X；`PUT` 改 X 的提示词；会话 S 以 X 为专家；`DELETE` X
@@ -49,9 +51,9 @@
 ### Requirement: 专家提示词注入
 会话的有效专家 SHALL 是 `chat_sessions.expert_id` 所指、且对会话属主可见的专家；指向不存在或不可见的专家时视为没有专家。有有效专家的会话，其每一次 spawn SHALL 把该专家的 `prompt` 原文写入 omp-runtime「子进程 spawn 契约」规定的提示词文件并以 `--append-system-prompt` 传入；没有有效专家时 SHALL NOT 传该参数。专家或其提示词的变化 SHALL 在该会话下一次派发时经 chat-sessions「派发前按会话设置对齐进程」的重启生效，不打断在途回合。
 
-#### Scenario: 提示词到达上游
-- **WHEN** 官方 omp（`WORKBUDDY_OMP_TEST=1`）经模型代理连假上游，会话专家的提示词含哨兵 `EXPERT-SENTINEL-1`，发一条 prompt；随后把专家换成提示词含 `EXPERT-SENTINEL-2` 的另一位，再发一条
-- **THEN** 第一条回合发往假上游的请求的系统消息含 `EXPERT-SENTINEL-1`；第二条回合前进程重启，其请求的系统消息含 `EXPERT-SENTINEL-2` 且不含 `EXPERT-SENTINEL-1`
+#### Scenario: 提示词进入系统提示词
+- **WHEN** 官方 omp（`WORKBUDDY_OMP_TEST=1`）经模型代理连假上游，会话专家的提示词含哨兵 `EXPERT-SENTINEL-1`，发一条 prompt 后经 RPC `get_state` 读 `systemPrompt`；随后把专家换成提示词含 `EXPERT-SENTINEL-2` 的另一位，再发一条并再读一次（假上游不记录消息正文，观察面是 omp 自报的系统提示词，先例 `server/test/omp-official-overlay-pins.test.ts` 的 `readState`）
+- **THEN** 第一次 `systemPrompt` 含 `EXPERT-SENTINEL-1`；第二条回合前进程重启（`stream_epoch` 加一），第二次 `systemPrompt` 含 `EXPERT-SENTINEL-2` 且不含 `EXPERT-SENTINEL-1`
 
 ### Requirement: 中心「专家」tab
 `/center?tab=experts`（`label` `专家`，对所有人可见，`CENTER_TABS` 第一项）SHALL 渲染：分类 chip `全部`、`开发`、`办公`、`设计`、`产品`（单选，缺省 `全部`）；搜索框（placeholder `搜索专家`，按名称、描述、标签子串匹配，不区分大小写）；专家卡片网格（名称、`内置` 或 `自建` 标记、描述、标签）；每张卡 `开始会话` 按钮——以 `navigate("/", {state: {expertId}})` 回到欢迎态，欢迎态读一次该 state 并选中该专家；自建卡另有 `编辑`、`删除`（拷入层 alert-dialog 确认，按钮 `取消` / `删除`）；页顶 `新建专家` 打开对话框表单（名称、分类 select、标签、描述、提示词 textarea、技能多选取自 `GET /api/skills`），提交前按「专家校验与可见性」在客户端逐字段校验并显示原因，提交恰一次 `createExpert` / `updateExpert`，在途禁用，失败在框内 `role="alert"` 显示 `ApiError.message`；对话框接 `useEscapeFallback`。每次写入成功后重取列表。没有匹配项时显示 `没有匹配的专家`。API 客户端 `web/src/lib/api-experts.ts` 提供 `listExperts` / `createExpert` / `updateExpert` / `deleteExpert`，`id` 经 `encodeURIComponent`，严格解析 `ExpertView`。
@@ -65,8 +67,10 @@
 - **THEN** 依次恰一次 `createExpert`、`updateExpert`、`deleteExpert`，每次成功后恰一次 `listExperts`；内置卡没有 `编辑` / `删除`
 
 ### Requirement: 输入框的专家选择
-会话页输入框「+」菜单 SHALL 在 `上传文件` 之后、命令段之前有一项 `选择专家…`（回答生成中与其它项同样禁用），点击打开专家对话框：搜索框、`不使用专家` 一项、按分类分组的可见专家（名称、`内置` / `自建`、描述）；选中即关闭。有专家时能力行左组「+」之后 SHALL 渲染标签 `专家 · <名称>` 与清除按钮（accessible name `移除专家`）。欢迎态的选择 SHALL 只存在页面状态里，首次发送的 `POST /api/sessions` 在用户选过专家时带 `expertId`；会话中的选择 SHALL 恰调用一次 `PUT /api/sessions/:id/capabilities`（body `{expertId}`），成功后以响应更新标签，失败以 `role="alert"` 显示 `ApiError.message` 并保持原标签。
+会话页输入框「+」菜单 SHALL 在 `上传文件` 之后、命令段之前有一项 `选择专家…`（回答生成中与其它项同样禁用），点击打开专家对话框：搜索框、`不使用专家` 一项、按分类分组的可见专家（名称、`内置` / `自建`、描述）；选中即关闭。有专家时能力行左组「+」之后 SHALL 渲染标签 `专家 · <名称>` 与清除按钮（accessible name `移除专家`）。`<名称>` 取自会话页的专家清单：会话页每个 `ApiClient` 恰取一次 `listExperts`（与输入框选项同样缓存在 client 上；失败后在下一次进入欢迎态或选中会话时重取），专家对话框每次打开时另重取一次并以结果更新该缓存；专家 id 尚不在已取得的清单里（清单读取中、读取失败或该专家已不可见）时标签只显示 `专家`，清除按钮照常。欢迎态的选择 SHALL 只存在页面状态里（与输入框的附件、档位等待发选择分开存放，不进入会使输入框选项缓存失效的那份选择），首次发送的 `POST /api/sessions` 在用户选过专家时带 `expertId`；会话中的选择 SHALL 恰调用一次 `PUT /api/sessions/:id/capabilities`（body `{expertId}`），成功后以响应更新标签，失败以 `role="alert"` 显示 `ApiError.message` 并保持原标签。
 
 #### Scenario: 欢迎态与会话中换专家
 - **WHEN** 欢迎态从「+」菜单选 `测试工程师` 并发送；会话中再选 `不使用专家`
 - **THEN** `POST /api/sessions` 的 body 含 `expertId:"builtin:test-engineer"`；会话中恰一次 `PUT …/capabilities` body `{expertId:null}`，之后能力行没有专家标签
+- **WHEN** 选中一个能力为 `{expertId:"builtin:test-engineer"}` 的会话，而本 client 的 `listExperts` 失败；随后回到欢迎态（`listExperts` 重取成功）再选中该会话；再切换到另一个会话
+- **THEN** 失败期间标签为 `专家`（带 `移除专家`），没有错误提示；重取成功后标签为 `专家 · 测试工程师`；全程恰两次 `listExperts`，此后切换会话不再发出

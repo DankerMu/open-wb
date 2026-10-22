@@ -1,6 +1,6 @@
 # chat-sessions Spec Delta
 
-> s1d-experts-skills：以 `s1d-model-registry` 的 MODIFIED 文本为底，派发前对齐的第 1 步改为「审批档位、模型集合与会话能力」——`store.runtimeState` 另报 `expert_id`、`disabled_skills`，slot 记下能力指纹，有效能力的指纹不同即退役重启，三者都相符才复用；「不触发对齐」一句加上会话能力端点与专家写入，fork 临时进程另取源会话的有效能力（design D8）。改写「修改设置本身不动进程」的步骤，加三个场景；其余逐字沿用该 MODIFIED 文本。
+> s1d-experts-skills：以 `s1d-model-registry` 的 MODIFIED 文本为底，派发前对齐的第 1 步改为「审批档位、模型集合与会话能力」——`store.runtimeState` 另报 `expert_id`、`disabled_skills`，slot 记下能力指纹，有效能力的指纹不同即退役重启，三者都相符才复用；「不触发对齐」一句加上会话能力端点与专家写入，fork 临时进程另取源会话的有效能力（design D8）。改写「修改设置本身不动进程」的步骤，加四个场景（含删除使用中的专家）；其余逐字沿用该 MODIFIED 文本。
 
 ## MODIFIED Requirements
 
@@ -52,13 +52,17 @@ fork 的临时进程 SHALL 以源会话的有效档位、有效模型与有效�
 - **THEN** 应答的 `success` 不为真（实现 PR 记录确切应答；若实测为真则本条「模型集合」判据改为可选并在 design 登记——这是本场景存在的原因）
 
 #### Scenario: 会话能力变化则在下一条重启
-- **WHEN** 一个专家为 `builtin:data-analyst` 的会话在假 omp 真子进程上完成一个回合（进程存活）；owner `PUT …/capabilities {expertId:E}`（E 是 owner 自建的专家）后发一条 prompt；随后 owner `PUT /api/experts?id=E` 只改提示词，再发一条；随后 `PUT …/capabilities {disabledSkills:["deploy"]}`，再发一条；测试经注入的 spawn 包装记下每次的 argv 并在 spawn 时读取会话配置文件
+- **WHEN** 一个专家为 `builtin:data-analyst` 的会话在假 omp 真子进程上完成一个回合（进程存活）；owner `PUT …/capabilities {expertId:E}`（E 是 owner 自建的专家，声明的技能为 `[]`）后发一条 prompt；随后 owner `PUT /api/experts?id=E` 只改提示词，再发一条；随后 `PUT …/capabilities {disabledSkills:["deploy"]}`，再发一条；测试经注入的 spawn 包装记下每次的 argv 并在 spawn 时读取会话配置文件
 - **THEN** 三条 prompt 都返回 202；每条之前前一个进程已退出、新进程才启动，`stream_epoch` 每次恰加一，argv 含 `--resume <上一回合持久化的会话文件>`；三次新 spawn 的 `<key>` 互不相同且旧 key 的文件已不存在；第一、二次的 `--append-system-prompt` 文件分别为 E 的原提示词与改后的提示词；第三次的 `disabledExtensions` 为 `["skill:deploy"]`、提示词仍为改后的 E
 
 #### Scenario: 能力未变则复用
-- **WHEN** 上一场景之后不改任何东西再发一条 prompt；随后 owner `PUT …/capabilities` 给出与当前相同的 `{expertId:E, disabledSkills:["deploy"]}`，再发一条
+- **WHEN** 上一场景之后不改任何东西再发一条 prompt；随后 owner `PUT …/capabilities` 给出与当前相同的 `{expertId:E, disabledSkills:["deploy"]}`（E 声明的技能为 `[]`，并集规则不改变停用集合），再发一条
 - **THEN** 两条都没有新的 spawn，`stream_epoch` 不变
 
 #### Scenario: 在途回合中修改能力不打断
 - **WHEN** 一个回合运行中（假 omp 正在流式输出）owner `PUT …/capabilities {expertId:"builtin:test-engineer"}`；回合结束后再发一条 prompt
 - **THEN** `PUT` 即时返回 200；在途回合照常以 `agent_end` 结束，其间进程没有退出、没有收到额外的帧；下一条 prompt 前进程被退役重启，新 spawn 的 `--append-system-prompt` 文件内容为 `测试工程师` 的提示词，`stream_epoch` 恰加一
+
+#### Scenario: 删除使用中的专家
+- **WHEN** 会话的专家为 owner 自建的 E，进程存活；一例在会话空闲时、另一例在回合运行中（假 omp 正在流式输出）owner `DELETE /api/experts?id=E`；之后（运行中的一例待回合结束后）再发一条 prompt
+- **THEN** `DELETE` 即时返回 204，会话能力读出 `expertId` 为 null；运行中的一例在途回合照常以 `agent_end` 结束，其间进程没有退出、没有收到额外的帧；下一条 prompt 前进程被退役重启，新 spawn 的 argv 不含 `--append-system-prompt`、`session-config/` 下没有新 key 的 `.md`，`stream_epoch` 恰加一

@@ -101,7 +101,7 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 - **THEN** 视图 `probe` 依次为 `{ok, <时刻>, null}`、`{failed, <时刻>, "HTTP 401：…"}`（不含哨兵）、`{failed, <时刻>, "无法连接"}`、`{failed, <时刻>, "超时"}`、`{failed, <时刻>, "未配置上游"}`；假上游记录恰一次 `GET /models` 且 bearer 为该模型密钥；最后一例假上游零请求；每次各一条 `model.probe` 审计；`models.yml` 的 mtime 不变
 
 ### Requirement: 中心页外壳
-`/center` SHALL 由 `web/src/features/center/` 渲染：页内 tab 由查询参数 `?tab=<key>` 表示，tab 表 `CENTER_TABS: readonly {key, label, adminOnly}[]` 在 `tabs.ts`，本 change 结束时只有 `{key:"models", label:"模型", adminOnly:true}`（外壳先以空表合入，模型 tab 的任务组追加这一项）；可见 tab 为 `adminOnly` 为假或当前 principal 角色为 `管理员` 的项。`tab` 缺省、未知或指向不可见 tab 时 SHALL 以 replace 导航到第一个可见 tab；没有可见 tab 时 SHALL 渲染空态文案 `中心暂无可用内容` 且不渲染 tab 条。tab 条用拷入层 tabs 组件（`role="tablist"`，当前项 `aria-selected="true"`，切换只改 `?tab=`）。页面级 heading 仍归顶栏（spa-shell）。routeManifest 的 `/center` 描述 SHALL 与可见内容一致：tab 表为空时 `中心暂无可用内容`，有模型 tab 后 `模型注册表`（随后续 tab 更新），不宣传未交付能力。
+`/center` SHALL 由 `web/src/features/center/` 渲染：页内 tab 由查询参数 `?tab=<key>` 表示，tab 表 `CENTER_TABS: readonly {key, label, adminOnly}[]` 在 `tabs.ts`，本 change 结束时只有 `{key:"models", label:"模型", adminOnly:true}`（外壳先以空表合入，模型 tab 的任务组追加这一项）；可见 tab 为 `adminOnly` 为假或当前 principal 角色为 `管理员` 的项。`tab` 缺省、未知或指向不可见 tab 时 SHALL 以 replace 导航到第一个可见 tab；没有可见 tab 时 SHALL 渲染空态文案 `中心暂无可用内容` 且不渲染 tab 条。tab 条用拷入层 tabs 组件（`role="tablist"`，当前项 `aria-selected="true"`，切换只改 `?tab=`）。页面级 heading 仍归顶栏（spa-shell）。routeManifest 的 `/center` 描述 SHALL 与可见内容一致：tab 表为空时 `中心暂无可用内容`，只有（仅管理员可见的）模型 tab 时 `模型注册表`；一旦 tab 表含对所有人可见（`adminOnly` 为假）的 tab，描述改为按 tab 表次序以 `与` 连接这些 tab 的 label（仅管理员可见的 tab 不进描述），不宣传未交付能力。
 
 #### Scenario: 管理员与普通用户
 - **WHEN** 管理员打开 `/center`；再打开 `/center?tab=nope`；普通用户打开 `/center?tab=models`
