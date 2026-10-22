@@ -71,7 +71,7 @@ fork 的临时进程 SHALL 以源会话的有效档位、有效模型与有效�
 - **WHEN** 一个会话在假 omp 真子进程上完成一个回合（进程存活，启动时没有登记任何连接器）；管理员 `POST /api/connectors` 登记 stdio `gitlab`；该会话再发一条 prompt；测试经注入的 spawn 包装记下每次的 argv 并在 spawn 时读取 `mcp.json`
 - **THEN** 第二条 prompt 返回 202；第一个进程退出后第二个进程才启动，argv 含 `--resume <第一回合持久化的会话文件>`，`stream_epoch` 恰加一；第二次 spawn 时读到的 `mcp.json` 含 `gitlab`
 - **WHEN** 之后管理员把 `gitlab` 的 `enabled` 改为 false，该会话再发一条 prompt
-- **THEN** 再一次退役重启，`stream_epoch` 恰加一，该次 spawn 时读到的 `mcp.json` 为 `{"mcpServers": {}}`
+- **THEN** 再一次退役重启，`stream_epoch` 恰加一，该次 spawn 时读到的 `mcp.json` 恰为字节 `{\n  "mcpServers": {}\n}\n`
 
 #### Scenario: 连接器未变则复用
 - **WHEN** 上一场景之后不改任何东西再发一条 prompt；随后管理员 `POST /api/connectors/probe?name=gitlab`，该账号 `PUT /api/connectors/defaults {disabledConnectors:["gitlab"]}`，再发一条

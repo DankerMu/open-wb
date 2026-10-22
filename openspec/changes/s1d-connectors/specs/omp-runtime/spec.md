@@ -63,4 +63,4 @@
 
 #### Scenario: 托管 mcp.json 的模式与属主
 - **WHEN** 编译入口在空库上冷启动（没有登记任何连接器）；随后管理员登记一个 stdio 连接器
-- **THEN** 启动完成时 `<state>/home/.omp/agent/mcp.json` 是普通文件（不是符号链接）、由本进程 uid 持有、`mode & 0o7777` 为 `0o640`，内容为 `{"mcpServers": {}}` 加换行；登记应答之后它仍是本进程 uid 持有、`0o640` 的普通文件且含该连接器，agent 目录仍为 `2750`、没有残留临时文件
+- **THEN** 启动完成时 `<state>/home/.omp/agent/mcp.json` 是普通文件（不是符号链接）、由本进程 uid 持有、`mode & 0o7777` 为 `0o640`，内容恰为字节 `{\n  "mcpServers": {}\n}\n`；登记应答之后它仍是本进程 uid 持有、`0o640` 的普通文件且含该连接器，agent 目录仍为 `2750`、没有残留临时文件
