@@ -62,7 +62,7 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 
 - `GET /api/models` → 200 `{models: ModelView[]}`，按快照次序。
 - `POST /api/models`：body 键集 SHALL 为 `{id, name, reasoning, vision, maxTokens, efforts, upstream}` 的子集且含 `id`，`upstream` 为 `{baseUrl, apiKey}`（两键都必填）；缺省与 `MODEL_CATALOG` 条目相同（`name = id`、布尔 `false`、`maxTokens` 32768；非推理模型不得带 `efforts`；推理模型可不带——存 NULL，表示不声明强度集合，model-selection「推理强度集合」）；`baseUrl` SHALL 整体匹配 `^https?://[^\s#@]+$`（允许路径与查询串，不允许 userinfo 与 fragment）；`apiKey` SHALL 通过 `http.validateHeaderValue("authorization", "Bearer " + 取值)`。表为空时该行成为缺省。`id` 已存在 409 `conflict`；已有 32 行 400 `bad_request`；其它非法 400 `bad_request`。→ 201 `ModelView`。
-- `PUT /api/models?id=<id>`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列；`apiKey` 省略且 `baseUrl` 逐字等于已存地址去掉 userinfo 后的视图形式时 SHALL 沿用已存地址（含 userinfo，不再套地址规则），使编辑 env 种子行只改名不丢凭证。→ 200 `ModelView`。
+- `PUT /api/models?id=<id>`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列；`baseUrl` 逐字等于已存地址去掉 userinfo 后的视图形式时 SHALL 沿用已存地址（含 userinfo，不再套地址规则）——`apiKey` 省略则密钥也沿用，给了 `apiKey` 则只换密钥（仍经 header 值校验）——使编辑 env 种子行只改名或只换密钥都不丢地址里的凭证。→ 200 `ModelView`。
 - `DELETE /api/models?id=<id>`：`is_default = 1` 的行 409 `model_in_use`；否则删除 → 204。
 - `POST /api/models/default?id=<id>`（无 body）：一个事务里把旧缺省清零、该行置 1 → 200 `ModelView`；该行已是缺省时 200、不记审计、不发布。
 - `POST /api/models/probe?id=<id>`（无 body）：见「探活」→ 200 `ModelView`。
@@ -84,6 +84,8 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 #### Scenario: 种子行带 userinfo 只改名
 - **WHEN** env 种子行的上游地址为 `https://u:<哨兵>@host/v1`；管理员 `PUT /api/models?id=<该行>` 只改 `name`，`upstream` 为 `{baseUrl: "https://host/v1"}`（视图里的地址，不带 `apiKey`）
 - **THEN** 200；存储地址与密钥逐字不变（仍含 userinfo）；审计 `model.update` 的 `upstreamChanged` 为 false；视图 `upstream.baseUrl` 仍为 `https://host/v1`、响应不含哨兵
+- **WHEN** 随后同一行 `PUT` 的 `upstream` 为 `{baseUrl: "https://host/v1", apiKey: <新密钥>}`
+- **THEN** 200；存储地址仍逐字含 userinfo、密钥换为新值；审计 `upstreamChanged` 为 true（给出了 `apiKey`）
 
 #### Scenario: 修改保留密钥与清空上游
 - **WHEN** 管理员 `PUT /api/models?id=m2` body `{name:"深度", reasoning:true, vision:false, maxTokens:8192, efforts:["low","high"], upstream:{baseUrl:"https://gw2.example/v1"}}`；再 `PUT` 同 body 但 `upstream: null`；再对一个从未有密钥的模型 `PUT` 省略 `apiKey` 的 `upstream`

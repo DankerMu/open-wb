@@ -145,7 +145,14 @@ export function ModelFormDialog({
         <DialogHeader className="pr-8">
           <DialogTitle className="leading-5">{opened ? "编辑模型" : "新增模型"}</DialogTitle>
         </DialogHeader>
-        <form className="flex flex-col gap-3" noValidate onSubmit={submit} ref={formRef}>
+        {/* 不是登录表单：常见密码管理器据 data-form-type 与各自的忽略属性跳过它（design Risks「浏览器密码管理器」）。 */}
+        <form
+          className="flex flex-col gap-3"
+          data-form-type="other"
+          noValidate
+          onSubmit={submit}
+          ref={formRef}
+        >
           <TextField error={errors.id} label="ID">
             {(field) => (
               <Input
@@ -219,7 +226,10 @@ export function ModelFormDialog({
             {(field) => (
               <Input
                 {...field}
-                autoComplete="new-password"
+                autoComplete="off"
+                data-1p-ignore
+                data-bwignore
+                data-lpignore="true"
                 onChange={(event) => set({ apiKey: event.target.value })}
                 {...(opened ? { placeholder: KEEP_KEY_PLACEHOLDER } : {})}
                 type="password"

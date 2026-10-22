@@ -69,7 +69,7 @@
 - **D10 REST 形状**：
   - `GET /api/models` → 200 `{models: ModelView[]}`，`ModelView = {id, name, reasoning, vision, maxTokens, efforts (数组或 null), upstream: {baseUrl, hasApiKey: true} | null, isDefault, probe: {status, at, message}, updatedAt}`；按列表次序。
   - `POST /api/models` body `{id, name?, reasoning?, vision?, maxTokens?, efforts?, upstream?: {baseUrl, apiKey}}`（键集严格；缺省同 `MODEL_CATALOG`；推理模型可不带 `efforts`；首个登记的模型自动成缺省——只在表为空时发生）→ 201；`id` 已存在 409 `conflict`；第 33 个 400。
-  - `PUT /api/models?id=<id>` body `{name, reasoning, vision, maxTokens, efforts?, upstream: {baseUrl, apiKey?} | null}`（整体替换 `id` 以外的字段；推理模型省略 `efforts` 即 NULL；`apiKey` 省略 = 保留既有密钥，此时必须已有密钥否则 400；`apiKey` 省略且 `baseUrl` 等于已存地址去掉 userinfo 的视图形式 = 沿用已存地址（种子行 userinfo 不丢，组 10 落地于 `store.update`）；`upstream: null` 清空）→ 200。
+  - `PUT /api/models?id=<id>` body `{name, reasoning, vision, maxTokens, efforts?, upstream: {baseUrl, apiKey?} | null}`（整体替换 `id` 以外的字段；推理模型省略 `efforts` 即 NULL；`apiKey` 省略 = 保留既有密钥，此时必须已有密钥否则 400；`baseUrl` 等于已存地址去掉 userinfo 的视图形式 = 沿用已存地址（`apiKey` 省略则密钥也沿用，给了则只换密钥；种子行 userinfo 不丢，组 10 落地于 `store.update`）；`upstream: null` 清空）→ 200。
   - `DELETE /api/models?id=<id>` → 204；缺省行 409 `model_in_use`。
   - `POST /api/models/default?id=<id>`、`POST /api/models/probe?id=<id>`（无 body）→ 200 `ModelView`。
   - 全部：未认证 401 先于一切；非管理员 403 `forbidden` 先于 body 解析与 id 查找；`id` 缺失 / 空 / 多值 400；未知 `id` 404；no-store。id 走查询参数而不进路径：`http/path-classifier.ts:19-23` 把 `/api/*` 下任何百分号编码的路径分量改写为 404（主规格钉住的守卫，不开口子），vLLM 风格的 `Qwen/Qwen2.5-72B-Instruct` 只能经 `?id=` 传。两个带 body 的路由进 content-parser 归属集（exact 400），两个无 body 的按 stop / regenerate 先例。模块 `models` 作为第八个 `STARTUP_MODULES` 在 accounts 之后注册。
@@ -105,6 +105,7 @@
 - **D19 多一次重启**：登记新模型后，每个存活会话切到它的第一条消息多一次 spawn（与换档位同一代价）。
 - **表非空时 env 被忽略**：`model_env_ignored` 一行 + 文档。
 - **探活发出带密钥的请求**：只对管理员登记的 base URL、只在管理员点下时发。**接受的风险（owner 2026-10-22 确认接受）**：`PUT` 只改地址时保留已存密钥（spec「修改保留密钥与清空上游」），探活（组 10 改地址后自动探活）随即把该密钥发往新地址——任一管理员（或被劫持的管理员会话）可借此取出 API 从不回显的密钥；管理员也可让服务端向任意（含内网）地址发 GET 并读回 ≤200 码点摘要。管理员是受信角色，接受；重开条件：要求改地址必须重给密钥 / 限制出站目标。
+- **浏览器密码管理器**：密钥框按规格是 `type="password"`，保存后浏览器可能提示把它存成本站密码；组 10 以 `autoComplete="off"` 与常见密码管理器的忽略属性（`data-1p-ignore`、`data-lpignore`、`data-bwignore`、表单 `data-form-type="other"`）缓解，Chrome / Safari 原生提示无法保证压住——接受，管理员不要点保存。
 - **探活跨 `PUT`**：探活开始后、完成前该行的上游被 `PUT` 改掉，结果按旧上游写在新配置上；下一次探活覆盖，接受。
 - **`/center` 对普通用户是空态**：直到专家 / 技能 change 加入人人可见的 tab。
 - **真实 omp 行为（已实测）**：D19 的前提（未加载模型的 `set_model` 被拒）由官方用例 `omp-official-model-set.test.ts` 钉住，v18.12.3 实测被拒（`Model not found: workbuddy/<id>`，确切应答见 D19）；omp 升级若改为热读 `models.yml`，该用例变红，判据仍保留（不依赖 omp 是否热读文件，代价是首次切到新登记模型时一次重启）。

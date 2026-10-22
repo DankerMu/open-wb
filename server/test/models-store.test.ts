@@ -348,6 +348,27 @@ describe("update", () => {
     expect(store.routeOf(id)).toEqual({ baseUrl: "https://moved.example/v1", apiKey: KEY });
   });
 
+  it("a seed row with userinfo: the view form of its address plus a new apiKey rotates only the key; the key still passes the header rule", () => {
+    const { db, store } = fresh();
+    store.seedIfEmpty(resolveModelCatalog({}), { baseUrl: USERINFO_URL, apiKey: KEY });
+    const id = "deepseek-v4.1-flash";
+    const viewForm = "https://gw.example/tenant-0123456789/v1?org=acme-0001";
+    const body = { name: "深度求索", reasoning: true, vision: true, maxTokens: 32768 };
+    const rotated = "wb-issue1708-rotated-key";
+
+    store.update(id, { ...body, upstream: { baseUrl: viewForm, apiKey: rotated } });
+    expect(store.routeOf(id)).toEqual({ baseUrl: USERINFO_URL, apiKey: rotated });
+
+    // A key that is not a valid header value is still refused, and nothing changes.
+    expectRefused(db, "bad_request", () =>
+      store.update(id, { ...body, upstream: { baseUrl: viewForm, apiKey: "bad\nkey" } }),
+    );
+    expectRefused(db, "bad_request", () =>
+      store.update(id, { ...body, upstream: { baseUrl: viewForm, apiKey: "" } }),
+    );
+    expect(store.routeOf(id)).toEqual({ baseUrl: USERINFO_URL, apiKey: rotated });
+  });
+
   it("upstream null clears both columns; a reasoning model without efforts stores NULL", () => {
     const { db, store } = fresh();
     seedOne(store);

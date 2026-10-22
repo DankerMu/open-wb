@@ -142,20 +142,25 @@ export function useModels(client: ApiClient) {
     cancelRemove() {
       setRemove((current) => (current?.pending ? current : null));
     },
-    async confirmRemove() {
+    /**
+     * 恰调用一次 `deleteModel`。行已删除（成功，或发布失败的 500）时先调 `onGone`——调用方据此不再把焦点还给
+     * 那一行的按钮（重取可能晚于确认框关闭才结算）；409 等其它错误时行还在，`onGone` 不调。
+     */
+    async confirmRemove(onGone?: () => void) {
       if (!remove || remove.pending) return;
       const { model } = remove;
       setRemove({ model, pending: true });
       try {
         await client.deleteModel(model.id);
       } catch (error) {
-        setRemove(null);
         if (!isPublishFailure(error)) {
+          setRemove(null);
           setRowErrors({ [model.id]: messageOf(error) });
           return;
         }
         setNotice(REQUEST_FAILED_MESSAGE);
       }
+      onGone?.();
       setRemove(null);
       await reload();
     },

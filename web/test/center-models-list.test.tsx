@@ -4,7 +4,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { ModelsPanel } from "../src/features/center/models/panel.js";
-import { ApiError, REQUEST_FAILED_MESSAGE } from "../src/lib/api.js";
+import { ApiError, type ModelView, REQUEST_FAILED_MESSAGE } from "../src/lib/api.js";
 import {
   callNames,
   fakeModels,
@@ -210,6 +210,59 @@ describe("删除", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(fake.deleteModel).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(rowButton("m2", "删除"));
+  });
+});
+
+describe("删除后的焦点（#1708 修复轮）", () => {
+  /** 让下一次 listModels 在一个 10 ms 的宏任务之后才结算（应答取调用那一刻的表）。 */
+  function slowNextList(fake: ReturnType<typeof fakeModels>, models: () => ModelView[]) {
+    fake.listModels.mockImplementationOnce(async () => {
+      const snapshot = models();
+      await new Promise((done) => setTimeout(done, 10));
+      return snapshot;
+    });
+  }
+
+  it("删除成功、重取在宏任务后才结算：行消失后焦点在「新增模型」", async () => {
+    const fake = fakeModels([SEED, M2]);
+    await renderPanel(fake);
+    slowNextList(fake, () => [SEED]);
+
+    fireEvent.click(rowButton("m2", "删除"));
+    const confirm = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(screen.queryByText("千问")).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "新增模型" }));
+  });
+
+  it("删除收到非信封 500、重取在宏任务后才结算：焦点在「新增模型」", async () => {
+    const fake = fakeModels([SEED, M2]);
+    fake.deleteModel.mockRejectedValueOnce(publishFailed());
+    await renderPanel(fake);
+    slowNextList(fake, () => [SEED]);
+
+    fireEvent.click(rowButton("m2", "删除"));
+    const confirm = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(pageAlerts()).toEqual([REQUEST_FAILED_MESSAGE]));
+    await waitFor(() => expect(screen.queryByText("千问")).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "新增模型" }));
+  });
+
+  it("缺省行的 409：焦点回到该行的「删除」", async () => {
+    const fake = fakeModels([SEED, M2]);
+    fake.deleteModel.mockRejectedValueOnce(new ApiError(409, "model_in_use", IN_USE));
+    await renderPanel(fake);
+
+    fireEvent.click(rowButton(SEED.id, "删除"));
+    const confirm = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(document.activeElement).toBe(rowButton(SEED.id, "删除"));
   });
 });
 

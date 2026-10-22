@@ -316,6 +316,76 @@ describe("在途与 Escape", () => {
   });
 });
 
+describe("保存之后的次序（#1708 修复轮）", () => {
+  it("新增带上游：探活挂起期间对话框已关、列表仍只取过一次；放行后再取一次", async () => {
+    const fake = fakeModels([SEED]);
+    let release!: () => void;
+    fake.probeModel.mockImplementationOnce(
+      (id: string) =>
+        new Promise((resolve) => {
+          release = () => resolve({ ...SEED, id });
+        }),
+    );
+    await renderPanel(fake);
+
+    const dialog = await openForm();
+    type(dialog, "ID", "m2");
+    type(dialog, "上游地址", GW);
+    type(dialog, "密钥", KEY);
+    save(dialog);
+
+    await waitFor(() => expect(fake.probeModel).toHaveBeenCalledWith("m2"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fake.listModels).toHaveBeenCalledTimes(1);
+
+    release();
+    await waitFor(() => expect(fake.listModels).toHaveBeenCalledTimes(2));
+  });
+
+  it("非信封 500：重取挂起期间对话框已关，页顶已提示；放行后列表结算", async () => {
+    const fake = fakeModels([SEED]);
+    fake.createModel.mockRejectedValueOnce(publishFailed());
+    await renderPanel(fake);
+    let release!: () => void;
+    fake.listModels.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve([SEED]);
+        }),
+    );
+
+    const dialog = await openForm();
+    type(dialog, "ID", "m2");
+    save(dialog);
+
+    await waitFor(() => expect(fake.listModels).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(pageAlerts()).toEqual([REQUEST_FAILED_MESSAGE]);
+    release();
+    await waitFor(() => expect(screen.getByRole("table")).toBeTruthy());
+  });
+});
+
+describe("密钥框不交给密码管理器（#1708 修复轮）", () => {
+  it("密钥框仍是 password，带 autoComplete=off 与三种忽略属性；表单带 data-form-type=other", async () => {
+    const fake = fakeModels([SEED, M2]);
+    await renderPanel(fake);
+
+    for (const id of [undefined, "m2"]) {
+      const dialog = await openForm(id);
+      const key = within(dialog).getByLabelText("密钥");
+      expect(key.getAttribute("type")).toBe("password");
+      expect(key.getAttribute("autocomplete")).toBe("off");
+      expect(key.hasAttribute("data-1p-ignore")).toBe(true);
+      expect(key.getAttribute("data-lpignore")).toBe("true");
+      expect(key.hasAttribute("data-bwignore")).toBe(true);
+      expect(key.closest("form")?.getAttribute("data-form-type")).toBe("other");
+      fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    }
+  });
+});
+
 describe("错误分流", () => {
   it.each([
     ["400", new ApiError(400, "bad_request", "请求格式不正确")],

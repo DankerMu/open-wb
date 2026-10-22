@@ -25,7 +25,7 @@ function Models({ client }: { client: ApiClient }) {
   const { list, notice, form, remove } = models;
   const addRef = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  /** 对话框关闭后把焦点还给打开它的按钮；按钮已不在（行被删除）时落到 `新增模型`。 */
+  /** 对话框关闭后把焦点还给打开它的按钮；行已删除（opener 被清掉或已不在页面上）时落到 `新增模型`。 */
   const restoreFocus = () => {
     const target = opener.current?.isConnected ? opener.current : addRef.current;
     target?.focus();
@@ -90,7 +90,11 @@ function Models({ client }: { client: ApiClient }) {
         <RemoveModelDialog
           model={remove.model}
           onCancel={models.cancelRemove}
-          onConfirm={() => void models.confirmRemove()}
+          onConfirm={() =>
+            void models.confirmRemove(() => {
+              opener.current = null;
+            })
+          }
           pending={remove.pending}
           restoreFocus={restoreFocus}
         />
