@@ -142,9 +142,15 @@ Minimal mergeable slice: atomic - 列表、表单、删除确认与 API 客户�
 
 ## 11. 模型菜单打开时重取（model-selection「模型与推理强度控件」+ chat-web「输入框与能力栏」）
 
-- [ ] 11.1 核对 Context：`model-picker.tsx` 的 `DropdownMenu` 用法、`use-chat-session.ts:756-793` 的返回对象（没有 `invalidate`）、`page.tsx:108` / `conversation-view.tsx:92,96` 的 props 链、`web/test/chat-composer-options.test.tsx:561-570,588-609`。
-- [ ] 11.2 测试先行：`model-picker` 用例加「打开模型菜单恰一次 `invalidate()`、强度菜单不调」与「打开菜单看到新登记的模型」（重取落地菜单不关闭、`getComposerOptions` 共两次）；`chat-composer-options.test.tsx:561-570`（带 `modelId` 的 patch 失败）与 :588-609（deferred 队列）按「除模型菜单打开引发的之外」调整计数与队列，其余计数用例核对不打开模型菜单。
-- [ ] 11.3 `model-picker.tsx` 加 `onModelMenuOpen` prop → `invalidate()`；`use-chat-session.ts` 返回对象加一行 `invalidateComposerOptions: composer.invalidate`（唯一改动，→796 行），经 `page.tsx` / `conversation-view.tsx` 的 props 链接入；`composer-options.ts` 注释同步。
+- [ ] 11.1 核对 Context：`model-picker.tsx` 的 `DropdownMenu` 用法（拷入层 `dropdown-menu.tsx:8-10` 透传 `onOpenChange`；指针与键盘打开都触发 `onOpenChange(true)`；提交在途时 Trigger 禁用）、`composer-options.ts:66-68` `invalidate`（立即 `start()`、只采用最后发出的一次、失败保留上一份）与 :14 注释、`use-chat-session.ts:756-794` 的返回对象（没有 `invalidate`）与 :229 `settingsSaved` / :550 创建后的 invalidate、props 链插入点（`conversation-view.tsx:121` 附近 `ConversationViewProps` 与解构、:81-89 `modelSlot` 的 `Pick`、:92 / :96 两处 `ModelPicker`（key 与 `options` 无关，重取不重挂）、`page.tsx:108`）、`web/test/chat-model-picker.test.tsx:484-494`（`before` / `toEqual(before)` 之间三次打开模型菜单）、`web/test/chat-composer-options.test.tsx:484-493` 共用 helper `refetchOnWelcome`（:493 写死 `asked === 2`，被 :572 / :588 / :611 共用）、:561-570、:588-609。
+- [ ] 11.2 测试先行（整页用例以 `paths(fetchMock)` 中 `GET /api/composer/options` 的次数观测 `invalidate`）：
+  - 新用例「打开模型菜单恰一次重取、强度菜单不重取」：用 `open` / `close`（不用 `pick`——已选会话里 patch 成功后 `settingsSaved` 还会再重取一次）；打开模型菜单 → options 请求 +1，关闭再打开 → 再 +1；打开强度菜单 → +0。
+  - 新用例「打开菜单看到新登记的模型」：第二次应答以 `deferredResponse` 挂起（经 `mountSelected` 的 `extra` 覆盖 `composerOptionsRoute`），打开瞬间菜单一项；放行后仍是同一个 `menu` 元素、其中两个 `menuitemradio`；options 请求共两次。
+  - `chat-model-picker.test.tsx:484-494`：期望改为「去掉 options 路径后的请求序列等于 `before`，options 路径恰多 3 次」（在 :496 `sendFirst` 之前计）。
+  - `chat-composer-options.test.tsx:484-493` helper `refetchOnWelcome` 加「期望 options 请求数」参数（:572 / :611 仍为 2）；:588-609 应答队列改为 `[FIRST, FIRST, refetch, FIRST]`（挂起的那次排第三位）、等待 3 次。
+  - `chat-composer-options.test.tsx:561-570`：应答改为 `[FIRST, FIRST]`、:569 的 `asked` 改为 2、标题改为「除菜单打开外没有新的选项请求」。
+  - 其余计数用例（`chat-composer-options` :503 / :537 / :551 / :572 / :611 / :627 / :649、`chat-capability-bar` :181 / :213、`e2e/ui-walk-composer.ts`、`chat-permission-tier`）已核对不打开模型菜单，不改。
+- [ ] 11.3 `model-picker.tsx` 加 `onModelMenuOpen` prop → `invalidate()`（`Choice` 加可选 open 回调，只给模型那个 `Choice` 传；`onOpenChange(true)` 时调用）；`use-chat-session.ts` 返回对象加一行 `invalidateComposerOptions: composer.invalidate`（唯一改动，→796 行），经 `page.tsx` / `conversation-view.tsx` 的 props 链接入；`composer-options.ts:14` 注释在「设置保存成功后调用」旁补「模型菜单打开时调用」。
 
 Suggested fixture level: compact - 单个控件多一次既有的重取调用，无新数据面。
-Minimal mergeable slice: atomic - 一个 prop、返回对象一行与两个计数用例的调整是同一次行为变化。
+Minimal mergeable slice: atomic - 一个 prop、返回对象一行与三处计数用例的调整（`chat-model-picker:484-494`、helper + :588、:561-570）是同一次行为变化。
