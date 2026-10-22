@@ -154,14 +154,14 @@
   - demo 的提示 `仅允许内网主机，公网地址将被拒绝` 不沿用：主机规则只拒环回、按许可名单放行，不判定公网地址，沿用即是假承诺。
   - `挂载目录` 只在文件页的 `新建` 菜单（与 `新建工作空间` 同为文件页专用的可选项）且 `enabled` 为 true 时出现；侧边栏有挂载根行与卸载，没有挂载入口（workspace-sidebar 不提供空间级入口）。
   - 状态在进入空间、`刷新`、挂载与卸载之后重取，不轮询、不推送。
-  - 预览：选中的文件第一段是挂载名、而预览器要从隔离预览来源加载（网页渲染视图、PDF、办公文档）时，`WorkspaceBrowser` 告诉预览区「在挂载内」，预览区显示 `挂载目录内的文件暂不支持预览，请下载查看`、不签发令牌、不建 iframe（预览来源对挂载内路径 404，D21）；`查看源码` 与经 `file` 端点的预览器照常。不改 file-previewers：这是 files-web 交给 `PreviewPane` 的一个输入。
+  - 预览：选中的文件第一段是挂载名、而预览器要从隔离预览来源加载（网页渲染视图、PDF、办公文档）时，`WorkspaceBrowser` 告诉预览区「在挂载内」，预览区显示 `挂载目录内的文件暂不支持预览，请下载查看`、不签发令牌、不建 iframe（预览来源对挂载内路径 404，D21）；`查看源码` 与经 `file` 端点的预览器照常。规则在 file-previewers「隔离来源的嵌入与令牌」「PDF 与办公文档」（MODIFIED：先于既有三项判定，被挡下的预览不触发续期，场景「挂载内文件不签发」）；files-web「工作空间页」只规定宿主交出「在挂载内」这一输入。
   - 对话框本地校验把 `uploads`、`screenshots` 都判为 `该名称已保留`（D1）。
 - **D19 白名单推导销项**：`system.md:29` 删去 `deriveWhitelist` 与「多根挂载点合并、白名单推导……为 S1b 未来项」；:35、:109 的「rclone/sshfs」改为 rclone；:173「sandbox 白名单更新」改为「挂载点在空间根下，沙箱 resolve 按包含关系覆盖」。
 - **D20 文档**：ADR-0003「2026-10 补充」的产品化一节（rclone 三后端、凭证文件、惰性卸载、主机规则、功能开关；证据引 #1665 的 P1–P8 节）；ADR-0010 补充（`<state>/mounts`、挂载选项 `--allow-other --default-permissions --uid <omp> --gid <共享组> --umask 007`、`fuse.conf`）；`system.md` §9.9「远程挂载」（依赖包 `fuse3` 与 rclone、`user_allow_other`、容器需 `/dev/fuse` 与 `SYS_ADMIN`、`rclone.log` 位置、回滚即撤 `RCLONE_BIN`）；`IMPLEMENTATION_PLAN.md:199` 的「rclone/sshfs」改为 rclone 并指向本 change；`IMPLEMENTATION_PLAN.md:509` 的回滚句改为「`RCLONE_BIN` 未配置即关闭；配置了而预检不过即启动失败（owner 裁定 fail-closed）」；`system.md` §9.9 写 `fusermount3` 的部署要求（只对 app 所在、omp 不在的组可执行，例如 `dpkg-statoverride --update --add root <app 组> 4750 /usr/bin/fusermount3`；该组不得是 `workbuddy`，omp 是它的成员，ADR-0010）与同一条进 ADR-0010 补充；`system.md:31` 的错误码计数改为二十五。
 
 - **D21 宿主不同步进入挂载**（2026-10-22 Stage 4 新增；替换 D11 原先「请求可阻塞约 35 s」的上界与 D16 原先「preview-origin 不加判定」）：服务进程 SHALL NOT 对已登记挂载的挂载点或其下任何路径做同步文件系统调用——远端断网而 rclone 存活时，主线程上的一次 `lstatSync` 会一直挂在 FUSE 请求上，探测与超时定时器都在同一个事件循环里，无从自救，整个服务对所有人停摆。
   - 成员判定只有一条词法规则：规范化路径（按 `/` 分割、去掉空段与 `.` 段、`..` 已被拒）的第一段等于该空间某个登记挂载的 `name`。`core/sandbox` 导出这个函数，`resolve` 与 D16 的判定都用它。
-  - 保留名使其余按根相对路径的同步调用方安全：挂载点只在空间根下一层，名字取自 D1 的字母表（不含 `.`）且不是 `uploads` / `screenshots`——只碰空间根自身、第一段含 `.` 的路径或这两个保留名、并且不跟随符号链接的同步调用（`lstat` 末段、`O_NOFOLLOW`）永远碰不到挂载。会跟随 omp 所放符号链接的同步调用（`realpath`）不受这条保护，在 omp uid 可写的位置改为 `fs/promises` 加同一 10 s 期限（下表的文件变更归属与项目技能）；超期只丢弃结果、不判哪个挂载离线（它不知道链接通向哪个挂载），卡住的线程等探测判离线、惰性卸载后放回。
+  - 保留名使其余按根相对路径的同步调用方安全：挂载点只在空间根下一层，名字取自 D1 的字母表（不含 `.`）且不是 `uploads` / `screenshots`——只碰空间根自身、第一段含 `.` 的路径或这两个保留名、并且不跟随符号链接的同步调用（`lstat` 末段、`O_NOFOLLOW`）永远碰不到挂载。会跟随 omp 所放符号链接的同步调用（`realpath`）不受这条保护，在 omp uid 可写的位置改为 `fs/promises` 加同一 10 s 期限（下表的文件变更归属与项目技能）；超期只丢弃结果、不判哪个挂载离线（它不知道链接通向哪个挂载），卡住的线程等探测判离线、惰性卸载后放回。若干按根相对路径的调用方是先查后用——先不跟随地 `lstat`，之后的调用再跟随（会话 cwd 的 `statSync`，`session-cwd.ts:38`，依赖建空间时 `store.ts:355` 的 `lstat`；`rest-project-config.ts:162` 的 `lstat` 与 `slash-commands.ts:190` 的 `opendirSync`；截图目录比对）：两步之间 omp 把条目换成指向挂载的符号链接，后一步就会跟随进挂载，与 D8 同为已接受的 TOCTOU 残余。
   - `core/sandbox` 的 `resolve` 增一个可选输入：该根的已登记挂载名集合。规范化后第一段是挂载名时，不 `lstat` 该段及其下任何分量，其余规则（NUL、绝对路径、`..`、末段、边界）照旧，返回 `{ok:true, absPath, mount:<name>}`。rclone 挂载内不出现符号链接：`local` 不加 `--links` 时跳过源里的链接、`sftp` 由服务端跟随（#1665 P13），不 `lstat` 不会放过一个链接。facade 增可选端口 `mountNamesOf(workspaceId)`（缺省空集），返回值仍是绝对路径；改 sandbox-core 两条 requirement。
   - 只有 `online` 的挂载会走到文件系统：`online` 期间挂载点就是 FUSE 挂载（被挂载的目录不能被改名或删除）；离线由 D16 的 409 挡在文件系统之前；离线之后的下一次尝试由 D8 的检查把关。
   - 异步适配器 `server/src/workspaces/mounts/fs.ts`：只用 `fs/promises`；每挂载一个 FIFO 闸门、并发 1；每次调用从拿到闸门起 10 s 期限；文件系统实现与期限都是 manager 的构造选项（D12），测试注入挂起或记录调用的实现与短期限。超期 → 该请求以 409 `mount_offline` 结束，manager 立即判该挂载离线：SIGKILL 其 rclone、按 D9 惰性卸载（中止卡住的 FUSE 请求、放回 libuv 线程，#1665 P9），排队中的调用都以 409 `mount_offline` 结束，然后照常退避重挂。不用 worker 线程。
@@ -181,7 +181,7 @@
     | 快照 `take`（`snapshots.ts`） | 根一层的已登记挂载名按名字跳过、不 `lstat`，记入 `skipped`（`reason: "mount"`）；未登记的外部挂载仍按 `dev` 规则（workspace-snapshots「快照内容规则」MODIFIED） |
     | 还原（`snapshots-restore.ts`） | 根一层的已登记挂载名不读取、不进入、不删除、不建出，记入返回的 `skipped`（`reason: "mount"`）（workspace-snapshots「还原」MODIFIED） |
     | 挂载内的 `dirs`（`ensureSharedDir`，`dirs.ts:43,48`） | 不调用；适配器 `mkdir`，不 `chmod`（D16） |
-    | 会话截图目录比对（`screenshot-diff.ts:28,54`，`supervisor.ts:610`） | `screenshots` 是保留名，`<空间根>/screenshots` 永不是挂载点；残余：omp 把它换成指向挂载内的符号链接时 `opendirSync` 跟随（Risks） |
+    | 会话截图目录比对（`screenshot-diff.ts:28,54`，`supervisor.ts:610`） | `screenshots` 是保留名，`<空间根>/screenshots` 永不是挂载点；`opendirSync` 之前先 `lstatSync`（不跟随）：符号链接或不是目录按缺失、不打开（同 D8 的先查后用，turn-artifacts MODIFIED）；残余：`lstat` 与 `opendirSync` 之间被换成指向挂载内的符号链接（Risks） |
     | 仓库根标记（`repo-root-marker.ts:16-34`） | `<cwd>/.git`：`.` 开头，不是挂载名；`lstat` 不跟随末段，`mkdir` / `open(O_NOFOLLOW)` 不跟随 |
     | 项目配置文件列表（`rest-project-config.ts:162`） | 只 `lstat` 第一段含 `.` 的路径（`.omp/…`、`.claude/…`、`AGENTS.md`），逐级确认真实目录，不跟随链接 |
     | 会话 cwd（`session-cwd.ts:38`） | 只 `stat` 空间根或属主根本身，不在挂载内 |
@@ -220,7 +220,7 @@
 - **[`user_allow_other` 让 omp uid 自己挂 `allow_other` 的 FUSE、令 app 挂住]** → 部署要求 `fusermount3` / `fusermount` 只对 app 所在、omp 不在的组可执行，`OMP_USER` 模式预检把关（D4、D20）；PATH 之外的 setuid 副本预检看不到，部署说明要求删除；#1665 P10。
 - **[挂载点在检查与 `fusermount3` 之间被换成符号链接]** → 每次尝试前 `lstat` 挂载点（D8），失败清理按来源扫描 mountinfo（D9）；`fusermount3` 自己对最后一个分量的处理与剩余窗口待 #1665 P15。omp 删掉离线挂载点、自建同名目录（属 omp uid）会让该挂载一直离线——只伤它自己会话所在空间的挂载，登记为残余。
 - **[app 被 SIGKILL 后 rclone 成为孤儿，挂载留在原处]** → 启动恢复时先惰性卸载残留挂载（D12）；孤儿 rclone 随卸载退出。
-- **[FUSE 上的阻塞]** → 宿主不对挂载做同步调用、挂载内调用经 10 s 期限的异步适配器（D21）；残余：挂载内的一个请求至多等 10 s，每个挂起的挂载至多占一个 libuv 线程 10 s；文件变更归属与项目技能的 `realpath` 经 omp 放的符号链接进入挂起的挂载时同样至多等 10 s、占一个线程，该线程要等探测判离线并惰性卸载之后才放回（≤ 35 s）。会话截图目录比对的 `opendirSync` 读的是保留名 `screenshots`、永不是挂载点，但 omp 把它换成指向挂载内的符号链接时仍会跟随——挂载挂起时卡住主线程，登记为已知残余（omp 只能经它自己用户的挂载、且要远端挂起才触发；改成异步要动 supervisor 的回合泵，不在本 change）。
+- **[FUSE 上的阻塞]** → 宿主不对挂载做同步调用、挂载内调用经 10 s 期限的异步适配器（D21）；残余：挂载内的一个请求至多等 10 s，每个挂起的挂载至多占一个 libuv 线程 10 s；文件变更归属与项目技能的 `realpath` 经 omp 放的符号链接进入挂起的挂载时同样至多等 10 s、占一个线程，该线程要等探测判离线并惰性卸载之后才放回（≤ 35 s）。会话截图目录比对读的是保留名 `screenshots`、永不是挂载点，`opendirSync` 之前先不跟随地 `lstat`，符号链接或不是目录按缺失、不打开（与 D8 同一先查后用写法）；残余是 `lstat` 与 `opendirSync` 之间的窗口——omp 恰在其间把它换成指向挂起挂载的符号链接时仍会卡住主线程，与 D8 同为已接受的 TOCTOU 残余（omp 只能经它自己用户的挂载、要远端挂起且赢下竞态才触发；彻底消除要改成异步、动 supervisor 的回合泵，不在本 change）。
 - **[离线期间 omp 写进挂载点的本地文件]** → `--allow-non-empty` 使重挂不被它挡住，残留被遮住；卸载后挂载点以普通目录保留，不删除（D7、D10）。
 - **[DNS 重绑定、解析器分歧]** → 每次尝试由 app 解析并判定，把判定过的 IP 字面交给 rclone（D3 第 5 步，#1665 P1′）。
 - **[rclone 拉平权限位]** `local` 挂载里一切显示为 omp 持有的 `0660` / `0770`，app uid 能读写的东西 omp 经挂载都能读写 → 挂载源拒绝清单五项与每次尝试复核（D2）；管理员登记的就是要交给用户的目录。
@@ -261,12 +261,12 @@
 
 ## Sketch seams under test
 
-- 组 1：迁移 049 的约束（两条形状 CHECK、`uploads` 保留、两个 `RESTRICT`）与 store / 取值规则——`:memory:` + 真实迁移，seam 是 store 与 `validate` 的导出函数。理由：表约束只能对真实迁移验证，取值规则是 store 写入的唯一入口。
+- 组 1：迁移 049 的约束（两条形状 CHECK、`uploads` 与 `screenshots` 保留、两个 `RESTRICT`）与 store / 取值规则——`:memory:` + 真实迁移，seam 是 store 与 `validate` 的导出函数。理由：表约束只能对真实迁移验证，取值规则是 store 写入的唯一入口。
 - 组 2：`resolveServerConfig` 纯 seam（三键的缺省、覆盖与非法值；预检以注入的 PATH、`/dev/fuse`、`fuse.conf` 路径与 `id` 可执行文件判定）+ 编译入口一例 `reason: "config"`。理由：配置层已有同形用例，最高 seam 即入口。
 - 组 3：`ensureOmpStateLayout` 的精确布局 + CI `uid-isolation` 的托管布局用例（`<state>/mounts` 对 omp uid 不可进入）。理由：只有真实两 uid 能证明不可读。
 - 组 4：typed error map 与计数守卫。
 - 组 5–6：`createMountManager({rcloneBin, fusermountBin, stateDir, mountinfoPath, ompUid, now…})` 模块边界——假 rclone `server/test/fixtures/fake-rclone.mjs` 与假 `fusermount3` 是被真实 spawn 的可执行文件，挂载 / 卸载经它们改写一个假 mountinfo 文件，并把收到的 argv、环境与标准输入落成记录文件。理由：唯一能在 CI 上观测「已挂载」「凭证不上命令行」「环境恰两键」的 seam；退避与探测用注入时钟。
-- 组 7、组 9：`createApp` + `app.inject` 整体挂载，经 `AssemblyDependencies.mounts` 注入以假 rclone / 假 `fusermount3` 装配的真实 manager（D12）。理由：端点次序、归属身份、审计与文件端点的挂载判定都在 HTTP 边界上可观测，不需要第二层 mock。组 9 的「挂起的挂载」经 manager 构造选项把适配器的文件系统 seam 换成永不返回、记录调用的实现（假 FUSE），期限注入为短值，并把挂载点目录置为 `0000`——任何绕过适配器的同步调用以 `EACCES` 失败、使 409 断言不成立。
+- 组 7、组 9：`createApp` + `app.inject` 整体挂载，经 `AssemblyDependencies.mounts` 注入以假 rclone / 假 `fusermount3` 装配的真实 manager（D12）。理由：端点次序、归属身份、审计与文件端点的挂载判定都在 HTTP 边界上可观测，不需要第二层 mock。组 9 的「挂起的挂载」经 manager 构造选项把适配器的文件系统 seam 换成永不返回、记录调用的实现（假 FUSE），期限注入为短值，并把挂载点目录置为 `0000`——任何绕过适配器的同步调用以 `EACCES` 失败、使 409 断言不成立（root 下模式位不拦，该用例 `skipIf` root）。
 - 组 8：纯 `resolve` 与 facade 的模块用例（真实临时目录）+ 快照、还原（`workspace-snapshots-helpers.ts` 的调用记录）、根层 `tree`、附件、撤回与文件变更归属各自既有的模块 seam，挂载名经端口注入；文件变更归属与项目技能的异步 `realpath` 经模块级可注入对象换成挂起的实现（先例 `screenshotFs`、`markerFs`），期限注入为短值。理由：「不 `lstat`」只能在 seam 上以「若被 `lstat` 即被拒的条目」观测。
 - 组 10–11：`WorkspaceBrowser` 与文件页的组件用例（假 `ApiClient`）+ CI `make ui-walk` 文件页一步（挂载关闭：没有 `挂载目录`）；挂载开启的走查是测试主机上的手工步骤，记验收行。
 - 组 12：真实 manager + 真实 rclone + 真实 FUSE（Linux、`WORKBUDDY_FUSE_TEST=1`，测试主机一次性容器）：`local` 后端读写、只读、杀 rclone 后离线与重挂、惰性卸载后挂载点消失；签收运行必带 `sftp` 读写与远端停机后离线、恢复后在线。
@@ -291,6 +291,6 @@
 - 需求：`IMPLEMENTATION_PLAN.md` F-FILE-3（:108）、S1b（:198-205）、:501、:509、:545-546；前置实测 #1665。
 - grill 凭证：本 design「owner 的裁定」（2026-10-21）。
 - 相关 ADR：0003（补充）、0010（补充）、0011（绝对 root 不是浏览器秘密）、0013（拷入层）。
-- 相关规格：sandbox-core（「resolve 契约与逃逸向量」「沙箱 facade 与拒绝审计」，D21 改）、workspace-snapshots（「快照内容规则」「还原」MODIFIED：已登记挂载名按名字跳过；`dev` 规则不改）、turn-artifacts（「文件变更推导与归属」MODIFIED）、chat-sessions（「Slash 命令白名单与命令目录」MODIFIED）、temporary-workspaces（#1237，不改）、preview-origin（不改；挂载内路径的 404 由 workspace-mounts「宿主不同步进入挂载」规定）、file-previewers（不改；挂载内的隔离来源预览由 files-web「工作空间页」规定，D18）。
-- 审查与修订：Stage 4 第一轮（2026-10-22）新增 D21 与「#1665 补充探针」，改 D2、D3、D4、D5、D6、D7、D8、D9、D10、D11、D12、D13、D14、D16、D18、D20。第二轮（2026-10-22）：`screenshots` 保留名；workspace-snapshots、turn-artifacts、chat-sessions 三个 MODIFIED；文件变更归属与项目技能的异步 `realpath`；改 D1、D2、D8、D10、D12、D14、D16、D18、D21、Risks。
+- 相关规格：sandbox-core（「resolve 契约与逃逸向量」「沙箱 facade 与拒绝审计」，D21 改）、workspace-snapshots（「快照内容规则」「还原」MODIFIED：已登记挂载名按名字跳过；`dev` 规则不改）、turn-artifacts（「文件变更推导与归属」MODIFIED）、chat-sessions（「Slash 命令白名单与命令目录」MODIFIED）、temporary-workspaces（#1237，不改）、preview-origin（不改；挂载内路径的 404 由 workspace-mounts「宿主不同步进入挂载」规定）、file-previewers（「隔离来源的嵌入与令牌」「PDF 与办公文档」MODIFIED：宿主标明在挂载内时不签发、不建 iframe，D18；files-web「工作空间页」只规定宿主交出该标记）。
+- 审查与修订：Stage 4 第一轮（2026-10-22）新增 D21 与「#1665 补充探针」，改 D2、D3、D4、D5、D6、D7、D8、D9、D10、D11、D12、D13、D14、D16、D18、D20。第二轮（2026-10-22）：`screenshots` 保留名；workspace-snapshots、turn-artifacts、chat-sessions 三个 MODIFIED；文件变更归属与项目技能的异步 `realpath`；改 D1、D2、D8、D10、D12、D14、D16、D18、D21、Risks。门后修订（2026-10-22）：file-previewers 两条 MODIFIED（挂载内不签发，规则从 files-web 移入）；`screenshots` 符号链接按缺失；先查后用的 TOCTOU 残余；改 D18、D21、Risks。
 - 兄弟 change：`s1d-model-registry`（Epic #1640）、`s1d-experts-skills`（Epic #1654）、`s1d-connectors`。

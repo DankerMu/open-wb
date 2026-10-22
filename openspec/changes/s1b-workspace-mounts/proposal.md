@@ -38,7 +38,8 @@ grill（2026-10-21，owner 逐分支拍板，见 design「owner 的裁定」）�
 - `omp-uid-isolation`: 「Linux 隔离证明」（托管布局用例另证 omp uid 不能进入 `<state>/mounts`、读不到 `rclone.conf`；以 `s1d-connectors` 的 MODIFIED 文本为底）。
 - `file-operations`: 「删除到回收目录」「重命名与移动」（挂载判定插在沙箱判定之后、存在性检查之前）。
 - `workspaces`: 「目录树、新建目录与隔离」（离线挂载与只读挂载）。
-- `files-web`: 「工作空间页」（不再禁止宣传挂载；`新建` 菜单的 `挂载目录`；挂载内文件的隔离来源预览换成固定文案）。
+- `files-web`: 「工作空间页」（不再禁止宣传挂载；`新建` 菜单的 `挂载目录`；选中挂载内的文件时向预览区交出「在挂载内」）。
+- `file-previewers`: 「隔离来源的嵌入与令牌」「PDF 与办公文档」（宿主标明在挂载内时不签发、不建 iframe、显示固定文案，`查看源码` 照常；先于 PDF 与办公文档既有的三项判定；被挡下的预览不触发续期）。以主规格为底。
 - `workspace-snapshots`: 「快照内容规则」「还原」（根一层的已登记挂载名按名字跳过：不读元数据、不遍历、还原时不删除不建出，记 `skipped` `reason: "mount"`；`dev` 规则对未登记挂载不变）。以主规格为底。
 - `turn-artifacts`: 「文件变更推导与归属」（词法上在已登记挂载内的候选在任何文件系统访问之前丢弃；`realpath` / `lstat` 经 `fs/promises` 并带 10 s 期限）。以主规格为底。
 - `chat-sessions`: 「Slash 命令白名单与命令目录」（项目技能目录的两个内核 real path 改经 `fs/promises` 的 `realpath`、10 s 期限，`listProjectSkills` / `sessionSkills` 返回 promise）。以主规格为底。
