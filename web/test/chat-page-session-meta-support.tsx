@@ -113,10 +113,10 @@ export async function mountTwoAccounts(patch: FetchRoutes[string]) {
   return { fetchMock, nav, renew };
 }
 
-/** 经路由离开会话页（去 `/center`）并等占位页出现：此时 ChatPage 已卸载。 */
+/** 经路由离开会话页（去 `/center`）并等中心页空态出现：此时 ChatPage 已卸载。 */
 export async function leaveChatPage(router: ReturnType<typeof renderChatPage>["router"]) {
   await act(() => router.navigate("/center"));
-  expect(await screen.findByText("中心暂不可用")).toBeTruthy();
+  expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
 }
 
 /** 只让外壳断点查询匹配：侧栏改由 `打开导航` 覆盖层承载。 */

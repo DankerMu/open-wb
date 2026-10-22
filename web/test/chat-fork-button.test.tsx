@@ -589,7 +589,7 @@ describe("fork button: ownership fences", () => {
       await act(async () => {
         await router.navigate("/center");
       });
-      expect(await screen.findByText("中心暂不可用")).toBeTruthy();
+      expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
       const lists = listGets(fetchMock);
       const consoleError = vi.spyOn(console, "error");
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createBrowserRouter, Navigate, useLocation, useMatches } from "react-router";
 import { AuthGuard, AuthProvider } from "../features/auth/index.js";
+import { CenterPage } from "../features/center/index.js";
 import { ChatPage } from "../features/chat/index.js";
 import { FilesPage } from "../features/files/index.js";
 import { SettingsPage } from "../features/settings/index.js";
@@ -68,19 +69,11 @@ function ProtectedAppShell() {
   );
 }
 
-function PlaceholderPage({ description }: Pick<RouteDefinition, "description">) {
-  return (
-    <section className="ui-empty">
-      <p>{description}</p>
-    </section>
-  );
-}
-
 export function createAppRouter() {
   return createBrowserRouter([
     {
       Component: ProtectedAppShell,
-      children: routeManifest.map(({ description, path }) => ({
+      children: routeManifest.map(({ path }) => ({
         path,
         handle: { canonicalPath: path },
         element:
@@ -91,7 +84,7 @@ export function createAppRouter() {
           ) : path === "/" ? (
             <ChatPage />
           ) : (
-            <PlaceholderPage description={description} />
+            <CenterPage />
           ),
       })),
     },

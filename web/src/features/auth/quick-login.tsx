@@ -2,9 +2,8 @@ import { Fragment, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CardContent, CardFooter } from "@/components/ui/card";
 import { createApiClient } from "@/lib/api";
+import { isAdmin } from "@/lib/roles";
 import { DEV_ACCOUNTS, DEV_PASSWORD, DEV_STUB_PROVIDER } from "./dev-accounts";
-
-const ADMIN_ROLE = "管理员";
 
 type QuickLoginProps = {
   disabled: boolean;
@@ -44,7 +43,7 @@ export function QuickLogin({ disabled, onPick }: QuickLoginProps) {
             <Fragment key={account}>
               {index > 0 ? " / " : null}
               <b>{account}</b>
-              {role === ADMIN_ROLE ? `（${role}）` : null}
+              {isAdmin({ role }) ? `（${role}）` : null}
             </Fragment>
           ))}
           ，密码均为 <b>{DEV_PASSWORD}</b>
