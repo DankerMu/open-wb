@@ -46,8 +46,8 @@ const SEVENTEEN_OWNER_IDENTITIES = [
   ["POST", "/api/workspaces/:id/move"],
 ] as const;
 
-/** spec 码表的十六码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
-const SIXTEEN_CODES = [
+/** spec 码表的十八码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
+const EIGHTEEN_CODES = [
   "bad_request",
   "invalid_credentials",
   "account_disabled",
@@ -64,6 +64,8 @@ const SIXTEEN_CODES = [
   "session_archived",
   "undo_conflict",
   "upload_too_large",
+  "forbidden",
+  "model_in_use",
 ] as const;
 
 interface ReplyCapture {
@@ -133,7 +135,7 @@ function expectGeneric500(captured: ReplyCapture, error: Error): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expectNoRawDetail(captured, error);
-  for (const code of SIXTEEN_CODES) {
+  for (const code of EIGHTEEN_CODES) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -266,8 +268,8 @@ describe("证据 5（回归）：catch-all 与 unmatched 分流不变", () => {
   });
 });
 
-describe("证据 6（守卫）：错误码表仍恰十六码", () => {
+describe("证据 6（守卫）：错误码表仍恰十八码", () => {
   it("HTTP_ERROR_MESSAGES 键集与 spec 码表相等", () => {
-    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...SIXTEEN_CODES].sort());
+    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...EIGHTEEN_CODES].sort());
   });
 });

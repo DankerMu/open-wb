@@ -19,6 +19,8 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   session_archived: 409,
   undo_conflict: 409,
   upload_too_large: 413,
+  forbidden: 403,
+  model_in_use: 409,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {

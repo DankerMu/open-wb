@@ -7,7 +7,7 @@ import { HTTP_ERROR_MESSAGES, HttpError, type HttpErrorCode } from "../src/core/
 import { handleHttpError } from "../src/http/index.js";
 
 /** spec「统一错误信封」码表逐字抄录：独立于 core/errors 的期望来源。 */
-const SIXTEEN_TYPED_ERRORS = [
+const EIGHTEEN_TYPED_ERRORS = [
   ["bad_request", 400, "请求格式不正确"],
   ["invalid_credentials", 401, "账号或密码不正确"],
   ["account_disabled", 403, "该账号已停用，请联系管理员"],
@@ -24,9 +24,11 @@ const SIXTEEN_TYPED_ERRORS = [
   ["session_archived", 409, "会话已归档，恢复后才能继续对话"],
   ["undo_conflict", 409, "其它会话在这之后改动过工作空间"],
   ["upload_too_large", 413, "文件超过大小上限"],
+  ["forbidden", 403, "没有权限执行此操作"],
+  ["model_in_use", 409, "该模型是缺省模型，先把缺省换成别的模型"],
 ] as const;
 
-const NEW_TYPED_ERRORS = SIXTEEN_TYPED_ERRORS.filter(
+const NEW_TYPED_ERRORS = EIGHTEEN_TYPED_ERRORS.filter(
   ([code]) =>
     code === "agent_capacity" ||
     code === "approval_settled" ||
@@ -102,7 +104,7 @@ function expectGenericNoDetail(captured: ReplyCapture): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expect(captured.body).not.toContain("FST_ERR");
-  for (const [code] of SIXTEEN_TYPED_ERRORS) {
+  for (const [code] of EIGHTEEN_TYPED_ERRORS) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -120,14 +122,14 @@ async function withTestErrorApp<T>(action: (app: FastifyInstance) => Promise<T>)
   }
 }
 
-describe("typed definition map 恰十六码", () => {
+describe("typed definition map 恰十八码", () => {
   it("core/errors 的码集合与 spec 码表逐一相等", () => {
     expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual(
-      SIXTEEN_TYPED_ERRORS.map(([code]) => code).sort(),
+      EIGHTEEN_TYPED_ERRORS.map(([code]) => code).sort(),
     );
   });
 
-  it.each(SIXTEEN_TYPED_ERRORS)(
+  it.each(EIGHTEEN_TYPED_ERRORS)(
     "测试路由抛 HttpError(%s) -> exact %i 信封，无 Fastify 默认字段",
     async (code, statusCode, message) => {
       await withTestErrorApp(async (app) => {
@@ -141,16 +143,17 @@ describe("typed definition map 恰十六码", () => {
     },
   );
 
-  it("五种 409 以 code 区分，各自保留独立文案", () => {
-    const conflicts = SIXTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
+  it("六种 409 以 code 区分，各自保留独立文案", () => {
+    const conflicts = EIGHTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
     expect(conflicts.map(([code]) => code)).toEqual([
       "session_busy",
       "conflict",
       "approval_settled",
       "session_archived",
       "undo_conflict",
+      "model_in_use",
     ]);
-    expect(new Set(conflicts.map(([, , message]) => message)).size).toBe(5);
+    expect(new Set(conflicts.map(([, , message]) => message)).size).toBe(6);
     for (const [code, , message] of conflicts) {
       const captured = mapError(new HttpError(code), "/api/no-such-route", "POST");
       expect(captured.statusCode).toBe(409);
@@ -159,7 +162,7 @@ describe("typed definition map 恰十六码", () => {
   });
 
   it("两种 413 以 code 区分，各自保留独立文案", () => {
-    const tooLarge = SIXTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 413);
+    const tooLarge = EIGHTEEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 413);
     expect(tooLarge).toEqual([
       ["preview_too_large", 413, "文件过大，无法预览"],
       ["upload_too_large", 413, "文件超过大小上限"],
