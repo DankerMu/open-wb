@@ -105,7 +105,7 @@
 - **D19 多一次重启**：登记新模型后，每个存活会话切到它的第一条消息多一次 spawn（与换档位同一代价）。
 - **表非空时 env 被忽略**：`model_env_ignored` 一行 + 文档。
 - **探活发出带密钥的请求**：只对管理员登记的 base URL、只在管理员点下时发。**接受的风险（owner 2026-10-22 确认接受）**：`PUT` 只改地址时保留已存密钥（spec「修改保留密钥与清空上游」），探活（组 10 改地址后自动探活）随即把该密钥发往新地址——任一管理员（或被劫持的管理员会话）可借此取出 API 从不回显的密钥；管理员也可让服务端向任意（含内网）地址发 GET 并读回 ≤200 码点摘要。管理员是受信角色，接受；重开条件：要求改地址必须重给密钥 / 限制出站目标。
-- **浏览器密码管理器**：密钥框按规格是 `type="password"`，保存后浏览器可能提示把它存成本站密码；组 10 以 `autoComplete="off"` 与常见密码管理器的忽略属性（`data-1p-ignore`、`data-lpignore`、`data-bwignore`、表单 `data-form-type="other"`）缓解，Chrome / Safari 原生提示无法保证压住——接受，管理员不要点保存。
+- **浏览器密码管理器**：密钥框按规格是 `type="password"`，保存后浏览器可能提示把它存成本站密码；组 10 以 `autoComplete="new-password"`（防把已存登录密码自动填入）与常见密码管理器的忽略属性（`data-1p-ignore`、`data-lpignore`、`data-bwignore`、表单 `data-form-type="other"`）缓解，Chrome / Safari 原生提示无法保证压住——接受，管理员不要点保存。
 - **探活跨 `PUT`**：探活开始后、完成前该行的上游被 `PUT` 改掉，结果按旧上游写在新配置上；下一次探活覆盖，接受。
 - **`/center` 对普通用户是空态**：直到专家 / 技能 change 加入人人可见的 tab。
 - **真实 omp 行为（已实测）**：D19 的前提（未加载模型的 `set_model` 被拒）由官方用例 `omp-official-model-set.test.ts` 钉住，v18.12.3 实测被拒（`Model not found: workbuddy/<id>`，确切应答见 D19）；omp 升级若改为热读 `models.yml`，该用例变红，判据仍保留（不依赖 omp 是否热读文件，代价是首次切到新登记模型时一次重启）。

@@ -226,7 +226,7 @@ export function ModelFormDialog({
             {(field) => (
               <Input
                 {...field}
-                autoComplete="off"
+                autoComplete="new-password"
                 data-1p-ignore
                 data-bwignore
                 data-lpignore="true"

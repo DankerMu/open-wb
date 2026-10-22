@@ -367,7 +367,7 @@ describe("保存之后的次序（#1708 修复轮）", () => {
 });
 
 describe("密钥框不交给密码管理器（#1708 修复轮）", () => {
-  it("密钥框仍是 password，带 autoComplete=off 与三种忽略属性；表单带 data-form-type=other", async () => {
+  it("密钥框仍是 password，带 autoComplete=new-password（原生密码管理器不会把已存登录密码填进来）与三种忽略属性；表单带 data-form-type=other", async () => {
     const fake = fakeModels([SEED, M2]);
     await renderPanel(fake);
 
@@ -375,7 +375,7 @@ describe("密钥框不交给密码管理器（#1708 修复轮）", () => {
       const dialog = await openForm(id);
       const key = within(dialog).getByLabelText("密钥");
       expect(key.getAttribute("type")).toBe("password");
-      expect(key.getAttribute("autocomplete")).toBe("off");
+      expect(key.getAttribute("autocomplete")).toBe("new-password");
       expect(key.hasAttribute("data-1p-ignore")).toBe(true);
       expect(key.getAttribute("data-lpignore")).toBe("true");
       expect(key.hasAttribute("data-bwignore")).toBe(true);
