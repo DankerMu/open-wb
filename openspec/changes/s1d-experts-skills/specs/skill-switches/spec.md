@@ -40,11 +40,15 @@ sessions 模块 SHALL 注册 `GET /api/sessions/:id/capabilities` 与 `PUT /api/
 - **THEN** 恰一次 `putSkillDefaults({disabledSkills:["deploy","ghost"]})`，`ghost` 没有因为不在列表里而丢失
 
 ### Requirement: 输入框「能力」弹层
-会话页能力行 SHALL 在权限档位控件之后渲染 `能力` 按钮（拷入层 popover），弹层列出本会话可用技能（`GET /api/commands` 的 `skill:` 条目，带 `项目` 标记的保持标记，`overrides` 为真时同样显示 `项目 · 覆盖平台技能`）每项一个开关（开 = 未停用），底部注明 `改动从下一条消息起生效`。每个列出的技能——平台或项目技能同一规则——的开关初值为其名称不在当前停用集合里。欢迎态：停用集合初值为账号缺省停用列表（`GET /api/skills` 的 `disabledSkills`，含列表外的名称；欢迎态第一次打开弹层时恰取一次，之后在本页复用），选择存在页面状态里（与输入框其它待发选择分开存放），首次发送的 `POST /api/sessions` 在用户动过开关时带 `disabledSkills`（账号缺省停用列表加上或去掉被切换的名称，即完整集合）；`GET /api/skills` 未取得（读取中或失败）时开关不可切换。会话中：停用集合为该会话的能力（chat-web「输入框与能力栏」：选中的会话 id 每变化一次恰一次 `GET …/capabilities`，不按消息重取），切换开关恰一次 `PUT …/capabilities`（body `{disabledSkills}`，为切换后的完整集合，含不在弹层列表里的停用名称），失败回滚并显示 `ApiError.message`。没有技能时弹层显示 `暂无可用技能`。
+会话页能力行 SHALL 在权限档位控件之后渲染 `能力` 按钮（拷入层 popover），弹层列出本会话可用技能（`GET /api/commands` 的 `skill:` 条目，带 `项目` 标记的保持标记，`overrides` 为真时同样显示 `项目 · 覆盖平台技能`）每项一个开关（开 = 未停用），底部注明 `改动从下一条消息起生效`。每个列出的技能——平台或项目技能同一规则——的开关初值为其名称不在当前停用集合里。欢迎态：停用集合初值为账号缺省停用列表（`GET /api/skills` 的 `disabledSkills`，含列表外的名称；欢迎态第一次打开弹层时恰取一次，之后在本页复用），选择存在页面状态里（与输入框其它待发选择分开存放），首次发送的 `POST /api/sessions` 在用户动过开关时带 `disabledSkills`（账号缺省停用列表加上或去掉被切换的名称，即完整集合）；`GET /api/skills` 未取得（读取中或失败）时开关不可切换：读取中弹层显示 `正在读取技能…`，失败显示 `技能读取失败，关闭后重新打开可重试`（`role="alert"`），下一次打开弹层重取一次。会话中：停用集合为该会话的能力（chat-web「输入框与能力栏」：选中的会话 id 每变化一次恰一次 `GET …/capabilities`，不按消息重取），切换开关恰一次 `PUT …/capabilities`（body `{disabledSkills}`，为切换后的完整集合，含不在弹层列表里的停用名称），失败回滚并显示 `ApiError.message`。没有技能时弹层显示 `暂无可用技能`。
 
 #### Scenario: 会话中停用技能
 - **WHEN** 会话可用技能 `deploy`、`weekly-report`；在 `能力` 里关掉 `deploy`；随后输入 `/`
 - **THEN** 恰一次 `PUT …/capabilities {disabledSkills:["deploy"]}`；斜杠候选与「+」菜单不再有 `skill:deploy`，`skill:weekly-report` 仍在
+
+#### Scenario: 欢迎态读取账号缺省之前不可切换
+- **WHEN** 欢迎态第一次打开 `能力`，`GET /api/skills` 挂起；随后它以 500 失败；关闭弹层再打开，这次成功
+- **THEN** 挂起期间各开关禁用并显示 `正在读取技能…`；失败后开关仍禁用并显示 `技能读取失败，关闭后重新打开可重试`；再次打开恰再发一次 `GET /api/skills`，成功后开关可切换且初值按 `disabledSkills`
 
 #### Scenario: 欢迎态带初值
 - **WHEN** 账号缺省停用 `weekly-report`；欢迎态打开 `能力` 不改动即发送；另一次在欢迎态打开 `deploy` 的开关关掉后发送
