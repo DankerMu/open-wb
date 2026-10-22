@@ -510,6 +510,9 @@ export async function expectAuthenticatedRoute(
       workspacePage.getByRole("heading", { level: 2, name: "工作空间目录", exact: true }),
     ).toBeVisible();
   }
+  if (path === "/center") {
+    await expect(page.locator("main").getByText("中心暂无可用内容", { exact: true })).toBeVisible();
+  }
   await expectRouteLayout(page, project);
   await inspectSidebar(page, project, async (sidebar) => {
     const navigation = sidebar.getByRole("navigation", { name: "主导航" });

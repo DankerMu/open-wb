@@ -622,7 +622,7 @@ describe("regenerate button: ownership fences", () => {
     await act(async () => {
       await router.navigate("/center");
     });
-    expect(await screen.findByText("中心暂不可用")).toBeTruthy();
+    expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
     const reads = calls(fetchMock, MESSAGES).length;
     const consoleError = vi.spyOn(console, "error");
 

@@ -214,3 +214,8 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
   应用层交给基元的 part 状态恒为「已完成」，所以不出这个点。拷入层零改动，第六类修改（`markdown-text` 透传 `smooth`）保留。
 - **依赖 0.x 内部分支**：挂载显示全文、从空串开始的第一段直接提交、传 `false` 立即全文、reduce 停用、文本增长时 `aui.part` 引用不变——在已装的 0.15.23 上实测，由 `web/test/chat-smooth-text.test.tsx` 的两条
   「依赖 @assistant-ui/react useSmooth 分支」用例与同文件的页面用例钉住，升级改了分支时先在那里判红。展开时长随积压增长（200 字约 0.6s，design D8），不是 250ms 上限。
+
+## 增补（2026-10-22，change `s1d-model-registry`）
+
+- **新拷入 `tabs`**（change `s1d-model-registry` 任务 9.3）：`web/src/components/ui/tabs.tsx`，来自 shadcn/ui registry 的 `radix-nova` 版式（`web/components.json`），按拷入层六类修改的规则拷入（与 registry 原文相比只改了 `cn` 导入与格式化），用合包 `radix-ui` 的 `Tabs`，未新增依赖，登记在 `ATTRIBUTION.md`。用途是中心页 `/center` 的 tab 条，调用方只有 `web/src/features/center/page.tsx`。
+  原文的布局与选中态写成 `data-horizontal:` / `data-active:` 变体，本入口没有绑定它们（`theme.css` 只绑了 `data-open` / `data-closed`），调用方按 `data-state` 用 className 补上，拷入文件不改。

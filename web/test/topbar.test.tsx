@@ -198,7 +198,7 @@ describe("其它路由顶栏标题 (T4)", () => {
     expect(heading.closest("main")).toBeNull();
     expect(mainLevelOneHeadings()).toHaveLength(0);
     if (path === "/center") {
-      expect(within(screen.getByRole("main")).getByText("中心暂不可用")).toBeTruthy();
+      expect(within(screen.getByRole("main")).getByText("中心暂无可用内容")).toBeTruthy();
     }
   });
 });
