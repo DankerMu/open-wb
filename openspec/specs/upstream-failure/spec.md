@@ -52,7 +52,7 @@
 
 控制字符在去密钥之前删除，使被控制字符劈开的密钥不能躲过替换后被拼回；去密钥在截断之前，使密钥不会因被截成半截而漏网。
 
-**密钥集**由同一模块的一个纯函数从配置导出，SHALL 包含：配置的 `MODEL_UPSTREAM_API_KEY`；配置的上游 base URL 原串；其 userinfo 原串与其中的密码段（存在时）；其 pathname 整串（不为空、不为 `/` 时）以及其中长度不小于 8 的每个路径段；其查询串（去掉 `?`，非空时）；OMP 状态目录与沙箱根各四种写法——配置原值、`normalize()` 后的形式、去掉尾部 `/` 的形式（根目录 `/` 除外）、净化时现取的 `realpathSync.native`（取不到时略去）——去重后列入（#909 PR 4 / PR 5 实施补入）。未配置上游时只有两组路径。模型代理对 ≥500 正文节选 SHALL 使用由它自己的 `upstream` 导出的部分（apiKey 与 base URL 各部分）；sessions 对每个 `detail`——含 `agent_failed` 的运行时文本（prompt 失败应答、进程异常退出等）——SHALL 使用完整的密钥集。sessions 模块 SHALL NOT 持有密钥值本身：装配方把绑定了密钥集的净化闭包交给它。展示 `detail` 的界面 SHALL 把它当纯文本。
+**密钥集**由同一模块的一个纯函数导出，输入是注册表此刻全部已登记上游的 `{apiKey, baseUrl}` 列表（model-registry「注册表快照是白名单的唯一来源」的 `secrets()` 所据；change s1d-model-registry 起不再从环境变量读）与两组路径，SHALL 对每个已登记上游包含：其 apiKey；其 base URL 原串；其 userinfo 原串与其中的密码段（存在时）；其 pathname 整串（不为空、不为 `/` 时）以及其中长度不小于 8 的每个路径段；其查询串（去掉 `?`，非空时）；此外OMP 状态目录与沙箱根各四种写法——配置原值、`normalize()` 后的形式、去掉尾部 `/` 的形式（根目录 `/` 除外）、净化时现取的 `realpathSync.native`（取不到时略去）——去重后列入（#909 PR 4 / PR 5 实施补入）。没有任何已登记上游时只有两组路径。密钥集 SHALL 在每次净化时现取（注册表写入后的下一次净化即用新集合；sessions 的净化闭包不缓存上游）。模型代理对 ≥500 正文节选 SHALL 使用 `models.secrets()` 加本请求所用 route 自己的 apiKey 与 base URL 各部分（在途期间该模型被删或换密钥时旧值仍在集合里）；sessions 对每个 `detail`——含 `agent_failed` 的运行时文本（prompt 失败应答、进程异常退出等）——SHALL 使用完整的密钥集。sessions 模块 SHALL NOT 持有密钥值本身：装配方把绑定了密钥集的净化闭包交给它。展示 `detail` 的界面 SHALL 把它当纯文本。
 
 #### Scenario: 去密钥与去路径
 - **WHEN** 配置的密钥为 `k-123`，净化 `401 bad key k-123\nAuthorization: Bearer abc.def\nuse sk-AAAAAAAAAAAAAAAAAAAA\nraw-http-request=/srv/state/xdg/state/omp/logs/http-400-requests/1.json\r\nend\u0007`
@@ -71,6 +71,10 @@
 #### Scenario: 截断上限
 - **WHEN** 净化一个 2000 码点的文本、一个 2001 码点的文本，以及一个第 1994、1995 个码点为同一个星位字符两半的文本
 - **THEN** 第一个原样返回；第二个为前 1994 个码点加 `…（已截断）`、共 2000 个码点；第三个不出现孤立代理项
+
+#### Scenario: 注册表登记的密钥不进会话
+- **WHEN** 管理员经 `POST /api/models` 登记模型 `m2`，上游为一个期望密钥为哨兵（不以 `sk-` 开头）的假上游实例，环境里没有 `MODEL_UPSTREAM_*`；一个成员账号的会话以 `m2` 发含 `WORKBUDDY_FAKE_STATUS=401 WORKBUDDY_FAKE_BODY=secret` 标记的 prompt（夹具正文回显其期望密钥）；另一例管理员 `PUT` 把 `m2` 换到第二个假上游实例（期望密钥为第二个哨兵）后再发一次
+- **THEN** 两例的回合都以 `failed` 结束，`chat_messages` 行、会话视图、SSE 帧与应用 stdout/stderr 都不含任一哨兵，`detail` 里对应位置是 `[已移除]`
 
 ### Requirement: 迁移 043 消息错误列
 迁移 `043_chat_message_error.sql` SHALL 在既有 runner 持有的事务内执行，回执紧随 `042` 之后追加；它 SHALL 只用 `ALTER TABLE … ADD COLUMN` 给 `chat_messages` 依次增加三个可空、无缺省、不带 CHECK 的列 `error_reason TEXT NULL`、`error_status INTEGER NULL`、`error_detail TEXT NULL`，不重建表、不回填、不建索引；既有列顺序、约束、索引与 `sqlite_sequence` 不变。受信迁移的计数断言随之加一。三列要么全为 NULL，要么 `error_reason` 为「回合失败分类」的一个 `reason`、`error_detail` 为净化后的文本、`error_status` 为整数或 NULL——由应用层保证。
