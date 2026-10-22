@@ -217,6 +217,21 @@ describe("single flight", () => {
       ],
       ["overlay", { browserEnabled: false, visionModelId: "b" }],
     ]);
+
+    // The coalesced round is over: the next publish starts a third round on the newest snapshot.
+    write("d");
+    await publisher.publish();
+    expect([count("models"), count("overlay")]).toEqual([3, 3]);
+    expect(calls.slice(4).map((call) => [call.writer, call.options])).toStrictEqual([
+      [
+        "models",
+        {
+          proxyBaseUrl: BASE,
+          models: [plain("m1"), plain("a"), seeing("b"), seeing("c"), plain("d")],
+        },
+      ],
+      ["overlay", { browserEnabled: false, visionModelId: "b" }],
+    ]);
   });
 
   it("a publish from a caller resuming on the finished round joins the queued round instead of starting a third", async () => {
@@ -290,6 +305,15 @@ describe("failure", () => {
       dir: AGENT_DIR,
       options: { proxyBaseUrl: BASE, models: [plain("m1"), plain("a")] },
     });
+
+    // The queued round is over too: one more publish runs both writers again.
+    write("b");
+    await publisher.publish();
+    expect([count("models"), count("overlay")]).toEqual([3, 2]);
+    expect(calls.slice(3).map((call) => [call.writer, call.options])).toStrictEqual([
+      ["models", { proxyBaseUrl: BASE, models: [plain("m1"), plain("a"), plain("b")] }],
+      ["overlay", { browserEnabled: false, visionModelId: null }],
+    ]);
   });
 
   it("after a rejection the single flight is reset: the next publish() calls both writers again", async () => {
