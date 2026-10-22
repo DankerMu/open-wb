@@ -1,5 +1,6 @@
 /**
- * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档 sidecar 预检 → 转换器 →
+ * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档 sidecar 预检 → 模型注册表
+ * 种子与快照（`model_registry`，`startup-registry.ts`；s1d-model-registry）→ 转换器 →
  * createApp → listen → 托管布局 → 沙箱根 → 预览监听器 listen → 两个托管文件 → 预览缓存目录（含清空
  * spool 的 `jobs/`）→ 转换器开始受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局
  * 紧随其后，#1337；沙箱根紧随托管布局，change sandbox-boundary-closure；预检，change office-convert-sandbox）。
@@ -62,18 +63,23 @@ import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { type AssemblyDependencies, createApp, type SessionRuntime } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { ensureOwnedDir, ensureSandboxRoot } from "./core/sandbox/dirs.js";
-import { deriveProxyBaseUrl, writeManagedModelsYml } from "./model-proxy/models-yml.js";
+import type { ModelRegistry } from "./model-proxy/lookup.js";
+import { deriveProxyBaseUrl } from "./model-proxy/models-yml.js";
 import { createPreviewApp } from "./preview/app.js";
 import { createOfficeConverter, type OfficeConverter } from "./preview/office.js";
 import { createOfficeCache, createOfficeCleanup } from "./preview/office-cache.js";
 import { preflightOfficeSidecar } from "./preview/office-sidecar-health.js";
 import { createPreviewTokens, type PreviewTokens } from "./preview/tokens.js";
 import { type PreviewSettings, resolvePreviewSettings } from "./preview-config.js";
-import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
-import { ensureOmpStateLayout, ompAgentDir } from "./sessions/omp/state-layout.js";
+import { ensureOmpStateLayout } from "./sessions/omp/state-layout.js";
 import type { TodoRejection } from "./sessions/store-todo.js";
 import type { UpstreamFailedRecord } from "./sessions/upstream-failure-log.js";
+import {
+  createStartupPublisher,
+  type ModelEnvIgnoredRecord,
+  seedModelRegistry,
+} from "./startup-registry.js";
 import { writeManagedLine } from "./startup-writer.js";
 import { createTrash } from "./workspaces/trash.js";
 
@@ -128,13 +134,19 @@ export function resolveServerConfig(
   };
 }
 
-/** 纯 seam：sessions 模块的 runtime settings；idle 期限、两个上限与四个快照设置同一对象、唯一来源为已解析 config。 */
-export function sessionRuntimeOf(config: ServerConfig): SessionRuntime {
+/**
+ * 纯 seam：sessions 模块的 runtime settings；idle 期限、两个上限与四个快照设置同一对象、唯一来源为已解析 config。
+ * `modelId` 缺省取配置白名单的缺省模型；生产入口传注册表快照的缺省（s1d-model-registry D13）。
+ */
+export function sessionRuntimeOf(
+  config: ServerConfig,
+  modelId = config.modelCatalog.defaultModelId,
+): SessionRuntime {
   return {
     bin: config.ompBin,
     sandboxRoot: config.sandboxRoot,
     stateDir: config.ompStateDir,
-    modelId: config.modelCatalog.defaultModelId,
+    modelId,
     idleMs: config.ompIdleMs,
     maxProcesses: config.ompMaxProcesses,
     spawnConcurrency: config.ompSpawnConcurrency,
@@ -155,13 +167,16 @@ export function sessionRuntimeOf(config: ServerConfig): SessionRuntime {
  * 恒带按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统）：删除路由与入口的周期清理用同一个。
  * 给了 `preview`（令牌登记表、返回预览监听器已绑定端口的函数、转换是否可用）才带预览依赖，签发
  * 端点由此注册；`officeAvailable` 原样透传，入口给的是转换器的 `available`。
+ * 给了 `registry`（生产入口恒给，s1d-model-registry D5）：带 `models`，`runtime.modelId` 取快照的缺省，
+ * 不再带 `modelCatalog` 与 `upstream`——白名单与上游只有注册表一个来源。不给时是静态测试接缝，行为不变。
  */
 export function appAssemblyOf(
   config: ServerConfig,
   preview?: { tokens: PreviewTokens; port: () => number; officeAvailable: boolean },
+  registry?: ModelRegistry,
 ): AssemblyDependencies & { trash: ReturnType<typeof createTrash> } {
   return {
-    runtime: sessionRuntimeOf(config),
+    runtime: sessionRuntimeOf(config, registry?.current().defaultModelId),
     trash: createTrash({
       sandboxRoot: config.sandboxRoot,
       retentionDays: config.trashRetentionDays,
@@ -177,7 +192,7 @@ export function appAssemblyOf(
             officeAvailable: preview.officeAvailable,
           },
         }),
-    modelCatalog: config.modelCatalog,
+    ...(registry === undefined ? { modelCatalog: config.modelCatalog } : { models: registry }),
     approvalMaxMode: config.approvalMaxMode,
     uploadMaxBytes: config.uploadMaxBytes,
     uploadMaxFiles: config.uploadMaxFiles,
@@ -187,7 +202,9 @@ export function appAssemblyOf(
       notebook: config.previewNotebookMaxBytes,
       archiveEntries: config.previewArchiveMaxEntries,
     },
-    ...(config.modelUpstreamBaseUrl !== undefined && config.modelUpstreamApiKey !== undefined
+    ...(registry === undefined &&
+    config.modelUpstreamBaseUrl !== undefined &&
+    config.modelUpstreamApiKey !== undefined
       ? { upstream: { baseUrl: config.modelUpstreamBaseUrl, apiKey: config.modelUpstreamApiKey } }
       : {}),
     log: writeRecord,
@@ -201,6 +218,7 @@ function writeRecord(
     | HandshakeTimeoutRecord
     | UpstreamFailedRecord
     | TodoRejection
+    | ModelEnvIgnoredRecord
     | { event: "office_convert_sidecar_unavailable" },
 ): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
@@ -302,6 +320,7 @@ function resolveSettingPath(raw: string, repoRoot: string): string {
 type StartupStage =
   | "config"
   | "db"
+  | "model_registry"
   | "app"
   | "listen"
   | "state_layout"
@@ -435,6 +454,24 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     if (spoolDir !== undefined && !sidecarOk) {
       void emitStderrRecord({ event: "office_convert_sidecar_unavailable" });
     }
+    // 注册表种子与首次快照（同步）：createApp 拿到的注册表已填好，主监听器的第一个请求就读到快照。
+    owned.stage = "model_registry";
+    const { registry } = seedModelRegistry({
+      db: owned.db,
+      config,
+      env: process.env,
+      warn: writeRecord,
+    });
+    // `models_yml` 阶段之前为 null：此前的发布只刷新过快照，启动阶段随后整体发布一次。
+    let proxyBaseUrl: string | null = null;
+    const publisher = createStartupPublisher({
+      registry,
+      stateDir: config.ompStateDir,
+      browserEnabled: config.browserBin !== undefined,
+      proxyBaseUrl: () => proxyBaseUrl,
+      stage: owned,
+    });
+    owned.stage = "app";
     // 启动失败一经判定，失败路径只留 generic 失败记录：强制回收不再发布。两个实例共用这一个回调。
     const onListenerForceClose = (): void => {
       if (!owned.failed && !owned.forceCloseEmitted) {
@@ -449,11 +486,11 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     // 先登记到 owned 再做别的：此后任何一步失败或收到信号，releaseOwned 都会关掉转换器。
     const office = officeOf(config, sidecarOk);
     owned.converter = office.converter;
-    const assembly = appAssemblyOf(config, {
-      tokens,
-      port: () => previewPort,
-      officeAvailable: office.converter.available,
-    });
+    const assembly = appAssemblyOf(
+      config,
+      { tokens, port: () => previewPort, officeAvailable: office.converter.available },
+      registry,
+    );
     owned.app = createApp({
       db: owned.db,
       staticRoot: config.staticRoot,
@@ -505,7 +542,10 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       return;
     }
     previewPort = boundAddressOf(owned.preview, "preview").port;
-    await publishStarted(owned, config, assembly.trash, office);
+    await publishStarted(owned, config, assembly.trash, office, (address) => {
+      proxyBaseUrl = deriveProxyBaseUrl(address);
+      return publisher.publish();
+    });
   } catch {
     // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
     // generic 发布，也不得把退出码降为 0（sticky failure）。
@@ -519,13 +559,16 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
 /**
  * 成功记录：两次 listen 之后（托管布局已在两次绑定之间建好）写托管 models 与宿主 overlay、建预览
  * 缓存目录并清空 spool 的 `jobs/`，然后才让 `/o/` 受理转换、扫一轮转换缓存并起它的周期清理，再发
- * 主监听器实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。
+ * 主监听器实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。两个托管文件由注册表的
+ * 发布器按快照写出（`publishModels` 交出代理地址后调同一个 `publish()`；写 overlay 前它把 stage 切到
+ * `host_overlay`，见 `startup-registry.ts`）。
  */
 async function publishStarted(
   owned: OwnedResources,
   config: ServerConfig,
   trash: ReturnType<typeof createTrash>,
   office: Office,
+  publishModels: (address: AddressInfo) => Promise<void>,
 ): Promise<void> {
   const { cleanup } = office;
   // publish 涵盖发布步骤里具名子步骤之外的一切，包括开头这两项核对。
@@ -539,15 +582,7 @@ async function publishStarted(
     return;
   }
   owned.stage = "models_yml";
-  await writeManagedModelsYml(ompAgentDir(config.ompStateDir), {
-    proxyBaseUrl: deriveProxyBaseUrl(address),
-    models: config.modelCatalog.models,
-  });
-  owned.stage = "host_overlay";
-  await writeHostOverlay(config.ompStateDir, {
-    browserEnabled: config.browserBin !== undefined,
-    visionModelId: config.modelCatalog.models.find((model) => model.vision)?.id ?? null,
-  });
+  await publishModels(address);
   // 上面两步等待期间收到的信号：`releaseOwned` 已经开始。不建目录、不清空，同样直接返回。
   if (owned.signalReceived) {
     return;

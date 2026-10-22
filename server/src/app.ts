@@ -214,9 +214,14 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     modelId: DEFAULT_MODEL_ID,
     idleMs: DEFAULT_OMP_IDLE_MS,
   };
-  // 没有 `assembly.models` 时，代理白名单与会话视图的有效值用同一份目录。
-  const modelCatalog = assembly?.modelCatalog ?? resolveModelCatalog({ MODEL_ID: runtime.modelId });
-  const registry = assembly?.models ?? staticRegistry(modelCatalog, assembly?.upstream);
+  // 一个注册表对象，三处读它（D5）：代理的放行与路由、composer 的白名单、会话侧净化的密钥集。没有
+  // `assembly.models` 时由静态白名单与单一上游适配（测试接缝）。
+  const registry =
+    assembly?.models ??
+    staticRegistry(
+      assembly?.modelCatalog ?? resolveModelCatalog({ MODEL_ID: runtime.modelId }),
+      assembly?.upstream,
+    );
   registerModelProxy(app, { tokens, models: registry });
   const store = createWorkspaceStore(db, {
     sandboxRoot: runtime.sandboxRoot,
@@ -241,7 +246,13 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       return store.createTemporary({ id: ownerId });
     },
     agentDir: ompAgentDir(runtime.stateDir),
-    composer: { approvalMaxMode: assembly?.approvalMaxMode ?? "yolo", modelCatalog },
+    // 每次读当时的快照（getter，不缓存）：注册表写入 + refresh 之后不重启即变化。
+    composer: {
+      approvalMaxMode: assembly?.approvalMaxMode ?? "yolo",
+      get modelCatalog() {
+        return registry.current();
+      },
+    },
     upload,
     sandbox,
     snapshots: assembly?.snapshots ?? snapshotService(runtime),
@@ -249,7 +260,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
-    redactUpstream: upstreamRedactor(assembly?.upstream, runtime),
+    redactUpstream: upstreamRedactor(registry, runtime),
   });
   app.decorate("sessions", registered);
   app.decorate("workspaces", { store, sandbox });
@@ -329,8 +340,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
 }
 
 /**
- * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：每次净化时构造密钥集——上游的 apiKey
- * 与 base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根各四种写法：配置原值、`normalize` 后的
+ * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：每次净化时构造密钥集——注册表此刻全部
+ * 已登记上游的 apiKey 与 base URL 各部分（`registry.secrets()` 现取，s1d-model-registry D18；没有已登记
+ * 上游时没有；静态接缝下即单一上游的那一份），OMP 状态目录与沙箱根各四种写法：配置原值、`normalize` 后的
  * 原值（去掉 `//`、`/./` 而不解析符号链接）、再去掉末尾 `/` 的写法（根目录除外）与此刻的 realpath
  * （`realpathSync.native`，macOS 上连大小写也取盘上的，APFS 上实测；目录不在、取不到时没有这一项），
  * 相同的只列一次。realpath 在净化时才取：生产入口在建托管布局与 `sandbox_root` 阶段（都在 listen
@@ -338,7 +350,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
  * 与每次 spawn 重建状态目录布局时的同步 fs 调用（`sessions/omp/process.ts:87`）是同一个暴露面（读代码推出）。
  */
 function upstreamRedactor(
-  upstream: AssemblyDependencies["upstream"],
+  registry: Pick<ModelRegistry, "secrets">,
   runtime: SessionRuntime,
 ): (text: string) => string {
   return (text) => {
@@ -352,12 +364,8 @@ function upstreamRedactor(
         // Not there: the other three forms are still listed.
       }
     }
-    const secrets = upstreamSecretList({
-      apiKey: upstream?.apiKey,
-      baseUrl: upstream?.baseUrl,
-      paths,
-    });
-    return sanitizeUpstreamText(text, secrets);
+    const secrets = new Set([...registry.secrets(), ...upstreamSecretList({ paths })]);
+    return sanitizeUpstreamText(text, [...secrets]);
   };
 }
 

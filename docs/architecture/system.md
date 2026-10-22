@@ -82,7 +82,7 @@ flowchart TD
 ```
 
 1. 方向单向：`http → feature → core`。http 可直接依赖 core（共享错误身份）；core 不 import feature/http，feature 不 import http。
-2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）。其余一律经 core。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
+2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
 3. **一切文件路径操作必须经 `core/sandbox.resolve`**；feature 模块直接 `fs` 访问用户路径是缺陷。
 4. omp 与 kb-service 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发。
 5. 跨服务契约（app-server↔kb-service）语言中立 REST，不共享代码。
@@ -284,23 +284,27 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 MODEL_CATALOG='[{"id": "model-a", "name": "通用", "reasoning": true, "efforts": ["low", "medium", "high"]}, {"id": "model-b", "name": "快速", "maxTokens": 8192}]'
 ```
 
-与 `MODEL_ID` / `MODEL_REASONING` / `MODEL_VISION` 的关系：
+**六个模型键只作首次种子**（change `s1d-model-registry`，model-registry「环境种子」）：`MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 的解析与校验照旧（非法值仍是 `config` 启动失败），但解析结果只在数据库的 `models` 表为空时写进模型注册表：白名单逐项插入（次序即列表次序），缺省模型那一项标为缺省，每一项的上游取 `MODEL_UPSTREAM_*`（两键未同时配置时该项没有上游）。此后白名单、缺省模型与每个模型的上游都只读注册表（composer options、会话设置的有效值、托管 `models.yml`、overlay 的看图角色、模型代理的放行与路由、会话侧净化的密钥集读同一份快照）——每个模型自带上游。表非空时这六个键被忽略：任一键被设置（空串也算）就在标准错误写一行 `{"event":"model_env_ignored"}`（只有 `event` 一个键，位于 `server_started` 之前），六个键都没设置时不写。所以已经启动过一次的部署，改这六个键再重启不会改变模型清单或上游；改动要经模型注册表的管理端点（model-registry「模型管理端点」，随本 change 的后续组提供）。
+
+启动次序（http-service-skeleton「服务启动与装配」）：迁移 → 办公文档 sidecar 预检 → `model_registry`（表空时种子，然后读出首个快照；同步的 SQLite 操作，失败为 `{"event":"server_start_failed","reason":"model_registry"}`）→ createApp → 主监听器 listen → 托管布局 → 沙箱根 → 预览监听器 listen → `models_yml` → `host_overlay`（两步是注册表发布器的同一次发布：先写 `models.yml`，再按快照里第一个看图模型写 overlay）→ 预览缓存目录 → `server_started`。主监听器受理的第一个请求读到的已是填好的快照；`models_yml` 之前到达的注册表写入只刷新快照、不写文件，随后的启动发布用当时的快照。
+
+与 `MODEL_ID` / `MODEL_REASONING` / `MODEL_VISION` 的关系（种子时的取值）：
 
 - 未设置 `MODEL_CATALOG`：白名单只有 `MODEL_ID` 一项（缺省 `deepseek-v4.1-flash`），是否支持推理取 `MODEL_REASONING`（恰为 `on` 或 `off`，缺省 `on`）。这一项的输出上限（`maxTokens`）为 32768（此前 8192），不带 `efforts`，`MODEL_REASONING` 为 `on` 时界面列出 `off` 加全部六档（为 `off` 时不列强度），而 omp 按模型 id 自定强度集合并静默夹取——界面显示的强度可能与实际使用的不同。要两者一致，就配置 `MODEL_CATALOG` 并写明 `efforts`。这一项是否接受图片输入（`vision`）取 `MODEL_VISION`（恰为 `on` 或 `off`，缺省 `on`）：`on` 时托管 `models.yml` 的这一项写 `input`（`text`、`image`），模型选择器给它标「看图」，host overlay 把它定为 omp 的看图模型（`modelRoles.vision`，见 9.8）；`off` 时这一项的 `input` 只有 `text`，选择器不标「看图」、overlay 不设看图模型（#1563 起托管 `models.yml` 每一项都显式写 `input` 与 `reasoning`：omp 对省略的字段按模型 id 从内置目录补值；`MODEL_REASONING=off` 时写 `reasoning: false`）。
 - 升级提示（#1530）：`MODEL_VISION` 缺省 `on` 会改变未设置 `MODEL_CATALOG` 的既有部署——此前这一项固定不看图，升级后托管 `models.yml` 这一项的 `input` 带上 `image`、模型选择器出现「看图」标签、助手读取用户上传的图片附件（附件以路径交给 omp）或截图时图片直接进入模型。上游模型不能看图的部署要写 `MODEL_VISION=off`（否则带图片的请求可能被上游拒绝）。另外，当前模型能看图时 omp 不注册 `inspect_image` 工具，`read` 读图片直接把图片交给模型（omp `utils/inspect-image-mode.ts:37-40`），所以缺省部署里助手少了这一个工具。 另一条升级提示（#1563）：`MODEL_CATALOG` 里省略 `reasoning` / `vision` 的条目，此前若模型 id 在 omp 内置目录里，omp 会从目录补成能推理 / 能看图；现在托管 `models.yml` 显式写 `reasoning: false` / `input: [text]`，omp 以宿主声明为准（不再请求思考、`get_state` 无思考强度、注册 `inspect_image`）。要保留原行为，在条目里显式写 `reasoning: true` + `efforts` / `vision: true`。
 - `MODEL_ID` 的取值规则（有没有 `MODEL_CATALOG` 都一样）：未设置取缺省；设置了就必须是 1 到 128 个 UTF-8 字节、不含控制字符（U+0000–U+001F 与 U+007F）的字符串，与白名单条目的 `id` 同一条规则。空串、含换行等控制字符、超过 128 字节都是启动失败（失败记录的阶段是 `config`，错误只点名键、不回显取值）。取值逐字节原样使用，不去首尾空格——首尾空格算模型名的一部分，只含空格的值也不拒。
 - 设置了 `MODEL_CATALOG`：同时设置 `MODEL_REASONING` 或 `MODEL_VISION`（空串也算设置）则启动失败，各自点名该键；`MODEL_ID` 未设置时数组第一项是缺省模型，设置了就必须等于某一项的 `id`，否则启动失败。
-- 所有模型共用同一个上游（`MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`）。
+- 种子时每个模型都取同一对 `MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`（base URL 原样入表，不套管理端点的地址规则）；入表之后上游按模型保存，每个模型可以有自己的上游。
 - `MODEL_UPSTREAM_API_KEY` 设置了就必须是合法的 HTTP 头取值：模型代理把它作为 `authorization: Bearer <密钥>` 发给上游，由 Node 自己的头校验（`http.validateHeaderValue`）判定，不另列字符集——含换行、NUL 等控制字符（制表符除外）或 U+00FF 以上的字符（如中文）都会被拒，空格、制表符与 Latin-1 字符（如 `é`）可以。不合法时服务拒绝启动（失败记录的阶段是 `config`，抛出的错误只点名键、不回显取值；标准错误仍只有那一行）。以前这样的密钥能启动，但每次模型请求都在代理里发不出去；升级前先核对密钥（#909）。
 - 从清单里拿掉一个模型后，存着它的会话与账号的最近选择在读取时回落到缺省模型，不需要改库。
 - 创建与修改会话时，强度只校验是七个名字之一且所得模型支持推理，不校验是否在该模型的 `efforts` 之内；集合外的值原样交给 omp 夹取。
 
 **模型代理白名单**：
 
-- 白名单就是 `MODEL_CATALOG` 各项的 `id`（未设置时恰为 `MODEL_ID` 一项）。会话设置的校验与界面的模型清单、托管的 `models.yml`、模型代理三处用同一份。
+- 白名单就是模型注册表快照里各模型的 `id`（首次启动由 `MODEL_CATALOG` 种子，未设置时恰为 `MODEL_ID` 一项）。会话设置的校验与界面的模型清单、托管的 `models.yml`、模型代理三处用同一份。
 - `POST /v1/chat/completions` 的请求体顶层必须恰有一个 `model` 成员，其值是白名单里某个 `id` 的字符串；缺少、重复、不是字符串或不在白名单内，一律 400 `bad_request`，不到达上游，响应不回显模型名。
-- 这项校验排在认证与上游是否配置之后：没有有效令牌的请求先得到 401，没配上游的先得到 502。
-- 要让某个模型可用：把它写进 `MODEL_CATALOG` 并重启。白名单是接入了哪些模型的清单，不是费用边界（[ADR-0008](../adr/0008-model-proxy-credentials.md)）。
+- 这项校验排在认证之后、按模型查上游之前：没有有效令牌的请求先得到 401；模型已登记而没有上游的得到 502（次序见 9.5「按模型路由」）。
+- 要让某个模型可用：首次启动前把它写进 `MODEL_CATALOG`；表里已有模型之后改 `MODEL_CATALOG` 不再生效（见上文「六个模型键只作首次种子」）。白名单是接入了哪些模型的清单，不是费用边界（[ADR-0008](../adr/0008-model-proxy-credentials.md)）。
 
 **全部自动（`yolo`）**：
 
@@ -376,10 +380,10 @@ location ~ ^/api/workspaces/[^/]+/uploads$ {
 - ≥500 节选会进入 omp 的文本分类器（额度、上下文溢出、内容过滤等），502 不保证照常重试一轮，但重试轮数的上界不变；节选里的等待提示还能拉长那一次退避（见下条）。
 - 两种 502 由 omp 会话层再试**一轮**：宿主 overlay 的 `retry:` 段把会话级重试封顶为 1 次，并关掉 omp 的模型兜底（`modelFallback: false`），会话目录里的项目层配置改不动它（[ADR-0012](../adr/0012-omp-project-config-host-overlay.md) 的 #909 补充）。一轮之内 omp 自己还有传输层 6 次、provider 层整轮重放 1 次的硬编码重试，所以一轮是 12 次上游请求。**实测**（2026-10-14，官方 omp v18.0.10）：上游一直答 503 → 恰一个 `auto_retry_start`、24 次上游请求，回合 66–68 s 以 failed 结束（六次运行 65.8–67.9 s），项目层写了 `maxRetries: 10`、一小时的 `baseDelayMs` 与换模型的兜底链也一样；上游端口无人监听（连接被拒）→ 编译后的服务上回合 67.9 s 以 failed 结束（含约 4 s 的 omp 冷启动）。以上实测里上游正文不带等待提示；正文若带（如 `retry-after: 120`），≥500 的节选进了 `errorMessage`，omp 会从文本里解析出这个等待（`retry-after-ms` / `retry-after` / `extractRetryHint` / `x-ratelimit-reset-ms`，`resource/oh-my-pi/packages/coding-agent/src/session/turn-recovery.ts:1921-1951`），用它拉长那一次退避，至多到 `retry.maxDelayMs` 的 300 s；超过 300 s 则不等、直接失败（同文件 `:2137-2138`、`:2220-2221`）。所以 5xx 回合还可能比上面的 66–68 s 多等至多 300 s（读代码推出，未实测）。
 - 小于 500 的上游应答（401、404、429、400 等）照旧原样流式透传，状态码、`content-type` 与正文字节都不变。登记了而没有上游的模型是 502 `agent_unavailable`（统一错误信封，见下条）。
-- **按模型路由**（change `s1d-model-registry`，design D5、D6）：代理不再持有单一上游，而是每个请求按请求体顶层 `model` 查一次注册表（`registerModelProxy(app, {tokens, models})`，`models` 是 `server/src/model-proxy/lookup.ts` 的 `ModelRegistry` 的 `lookup` / `secrets` 两项），用查到的那个模型的 base URL 与密钥转发。检查次序：bearer（401）→ 媒体、4 MiB、JSON 语法与顶层 `model` 扫描（规则不变，400）→ 查找：未登记 400（不回显模型名），登记了没有上游 502 `agent_unavailable`。与此前的差别：没配上游的部署里，body 不合法或模型不在白名单的请求以前先得 502，现在先得 400。查找在转发前一刻做、代理不缓存：转发出去的请求（含其流式响应）用的是当时查到的上游，之后改登记、删模型不影响它，同一回合的下一次上游请求才按新登记答 400 / 502。≥500 节选的密钥集是此刻全部已登记上游的密钥与 base URL 各部分，再加本请求所用上游自己的（在途期间换密钥或删模型时旧值仍被替换）。没有传注册表的装配（`createApp` 的 `assembly.models` 省略时：测试接缝，以及注册表接入启动装配之前的生产入口）由 `staticRegistry(白名单目录, MODEL_UPSTREAM_*)` 适配：白名单内的模型都转发到那一个上游，没配上游时都是 502。
+- **按模型路由**（change `s1d-model-registry`，design D5、D6）：代理不再持有单一上游，而是每个请求按请求体顶层 `model` 查一次注册表（`registerModelProxy(app, {tokens, models})`，`models` 是 `server/src/model-proxy/lookup.ts` 的 `ModelRegistry` 的 `lookup` / `secrets` 两项），用查到的那个模型的 base URL 与密钥转发。检查次序：bearer（401）→ 媒体、4 MiB、JSON 语法与顶层 `model` 扫描（规则不变，400）→ 查找：未登记 400（不回显模型名），登记了没有上游 502 `agent_unavailable`。与此前的差别：没配上游的部署里，body 不合法或模型不在白名单的请求以前先得 502，现在先得 400。查找在转发前一刻做、代理不缓存：转发出去的请求（含其流式响应）用的是当时查到的上游，之后改登记、删模型不影响它，同一回合的下一次上游请求才按新登记答 400 / 502。≥500 节选的密钥集是此刻全部已登记上游的密钥与 base URL 各部分，再加本请求所用上游自己的（在途期间换密钥或删模型时旧值仍被替换）。生产入口恒传注册表（`appAssemblyOf(config, preview, registry)`，组 5 起），同一个对象也供 composer 与会话侧净化读取；没有传注册表的装配（`createApp` 的 `assembly.models` 省略时）只剩测试接缝，由 `staticRegistry(白名单目录, 单一上游)` 适配：白名单内的模型都转发到那一个上游，没配上游时都是 502。
 - **回合失败的分类与日志**（#909）：回合以 `error` 事件结束时，sessions 把它归为十个原因之一（`server/src/sessions/upstream-classify.ts`，规则与句子见 upstream-failure「回合失败分类」，术语见 `CONTEXT.md`「回合失败原因」）。SSE 的 `error` 事件是五键 `{messageId, message, reason, status, detail}`：`message` 是该原因的固定句子（不带状态码），`status` 是从 omp 文本里取到的 HTTP 状态码或 `null`，`detail` 是净化后的上游原文（见下一条）。界面显示句子，`status` 非空时后接 `（HTTP <s>）`（如 `鉴权失败：模型服务拒绝了配置的 API 密钥（HTTP 401）`），原文非空时可点「查看原文」按纯文本展开。原因不是 `agent_failed` 的每个失败回合写一行 application stderr：`{"event":"upstream_failed","sessionId":"<id>","reason":"<reason>","status":<整数或 null>}`，恰这四个键，不含上游原文、路径或密钥；写失败不影响回合。重试后成功的回合、被停止的回合与 omp 进程异常退出（`agent_failed`）不写。
 - **失败的落库**（#909，迁移 043）：`chat_messages` 增三列，都可为空、没有缺省值，存量行读作没有失败：`error_reason`（`TEXT`，十个原因名之一）、`error_status`（`INTEGER`，HTTP 状态码或 NULL）、`error_detail`（`TEXT`，净化后的原文，可为空串）。只有以 `error` 结束的助手行写这三列，写入发生在 `error` 事件发布之前（刷新页面后看到的与实时收到的是同一个对象）；`done` / `stopped` 的回合、用户行与崩溃后对账成 `failed` 的行都不写。分叉拷贝这三列，重新生成删掉旧助手行时一并删除。消息快照的每条消息带 `error`：失败的助手消息为 `{reason, message, status, detail}`（`message` 由 `reason` 在读取时查表得出，不落库），其余为 `null`；`error_reason` 不是十个原因名之一的行同样读作 `null`。
-- **原文净化**：写库之前，`detail` 里的上游密钥、上游 base URL 原串及其 userinfo、密码、路径与查询串、`OMP_STATE_DIR` 与 `SANDBOX_ROOT`（各按四种写法：配置原值、规范化后的原值——去掉 `//` 与 `/./`、不解析符号链接——、再去掉末尾 `/` 的写法（根目录除外）与 realpath，macOS 上 realpath 连大小写也取盘上的，APFS 上实测）都替换为 `[已移除]`，`Bearer …` 与 `sk-…` 同样替换，omp 的 `raw-http-request=` 行删去。两个 realpath 在每次净化时现取（目录不在时只按前三种写法替换），所以首次启动后才建出的目录同样带上 realpath。这两次 realpath 是同步调用，挂载点挂起时会阻塞服务进程——每次 spawn 重建状态目录布局时的同步文件调用（`server/src/sessions/omp/process.ts:87`）早已有同样的暴露（读代码推出）。
+- **原文净化**：写库之前，`detail` 里的上游密钥、上游 base URL 原串及其 userinfo、密码、路径与查询串（此刻注册表里全部已登记上游的，每次净化时现取——注册表改了密钥，下一次净化即用新集合）、`OMP_STATE_DIR` 与 `SANDBOX_ROOT`（各按四种写法：配置原值、规范化后的原值——去掉 `//` 与 `/./`、不解析符号链接——、再去掉末尾 `/` 的写法（根目录除外）与 realpath，macOS 上 realpath 连大小写也取盘上的，APFS 上实测）都替换为 `[已移除]`，`Bearer …` 与 `sk-…` 同样替换，omp 的 `raw-http-request=` 行删去。两个 realpath 在每次净化时现取（目录不在时只按前三种写法替换），所以首次启动后才建出的目录同样带上 realpath。这两次 realpath 是同步调用，挂载点挂起时会阻塞服务进程——每次 spawn 重建状态目录布局时的同步文件调用（`server/src/sessions/omp/process.ts:87`）早已有同样的暴露（读代码推出）。
 
 ### 9.6 沙箱根与带挂载的临时空间残骸（#1286、#1237，change `sandbox-boundary-closure`）
 

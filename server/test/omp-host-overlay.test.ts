@@ -11,7 +11,12 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { openDb } from "../src/core/db/index.js";
 import { APPROVAL_MODES } from "../src/model-catalog.js";
+import { writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
+import { createPublisher } from "../src/models/publish.js";
+import { createRegistry } from "../src/models/registry.js";
+import { createModelStore } from "../src/models/store.js";
 import { writeHostOverlay } from "../src/sessions/omp/host-overlay.js";
 import { type SpawnImpl, spawnOmp } from "../src/sessions/omp/process.js";
 import {
@@ -245,6 +250,42 @@ describe("writeHostOverlay", () => {
       expect(readdirSync(ompAgentDir(state))).toEqual(["host-overlay.yml"]);
     }
     expect(configs).toEqual(Array<string>(6).fill(ompHostOverlayPath(state)));
+  });
+
+  it("the vision block is rewritten from the registry snapshot on every publish (s1d-model-registry D13)", async () => {
+    const state = stateDir();
+    ensureOmpStateLayout(state);
+    const db = openDb(":memory:");
+    try {
+      const store = createModelStore(db);
+      store.create({ id: "m1" });
+      const registry = createRegistry(store);
+      registry.refresh();
+      const { publish } = createPublisher({
+        agentDir: ompAgentDir(state),
+        stateDir: state,
+        proxyBaseUrl: () => "http://127.0.0.1:18016/v1",
+        browserEnabled: false,
+        registry,
+        writeModelsYml: writeManagedModelsYml,
+        writeOverlay: writeHostOverlay,
+      });
+
+      await publish();
+      expectHostOverlay(state, HOST_OVERLAY_YAML);
+
+      store.create({ id: "m2", vision: true });
+      registry.refresh();
+      await publish();
+      expectHostOverlay(state, HOST_OVERLAY_YAML + hostOverlayVisionBlock("m2"));
+
+      store.remove("m2");
+      registry.refresh();
+      await publish();
+      expectHostOverlay(state, HOST_OVERLAY_YAML);
+    } finally {
+      db.close();
+    }
   });
 
   it("rejects when the managed agent dir is missing and creates nothing", async () => {

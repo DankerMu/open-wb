@@ -1,9 +1,10 @@
 /**
- * Issue #909 task 5.4: http-service-skeleton「上游失败记录」at the production seam — the
- * `appAssemblyOf(config)` the main path hands to createApp (its `log` is the entry's managed stderr
- * writer), over scripted controlled children. Oracles: process.stderr/stdout write spies. The
- * scripted 401 text carries the configured key verbatim, so a record that leaked the failure text
- * would show it.
+ * Issue #909 task 5.4: http-service-skeleton「上游失败记录」at the production seam — what the main path
+ * hands to createApp (its `log` is the entry's managed stderr writer), over scripted controlled
+ * children. Since s1d-model-registry group 5 that is `appAssemblyOf(config, undefined, registry)` with
+ * the registry seeded from the same config, never the static adapter. Oracles: process.stderr/stdout
+ * write spies. The scripted 401 text carries the configured key verbatim, so a record that leaked the
+ * failure text would show it.
  */
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,6 +13,7 @@ import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import { appAssemblyOf, resolveServerConfig } from "../src/server.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
+import { seedModelRegistry } from "../src/startup-registry.js";
 import { settle } from "./session-approval-helpers.js";
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
 import { cookieFor, postPrompt } from "./session-rest-helpers.js";
@@ -72,8 +74,13 @@ describe("http-service-skeleton「上游失败记录」", () => {
       { MODEL_UPSTREAM_BASE_URL: "http://127.0.0.1:9/v1", MODEL_UPSTREAM_API_KEY: UPSTREAM_KEY },
       ENTRY,
     );
-    const production = appAssemblyOf(config);
     const db = openDb(":memory:");
+    // As the entry's `model_registry` stage: the registry is seeded from the same config.
+    const { registry } = seedModelRegistry({ db, config, env: {}, warn: () => {} });
+    const production = appAssemblyOf(config, undefined, registry);
+    expect(production.models).toBe(registry);
+    expect(Object.hasOwn(production, "upstream")).toBe(false);
+    expect(Object.hasOwn(production, "modelCatalog")).toBe(false);
     const app = createApp({
       db,
       authRuntime: fixedRuntime(() => FIXED_NOW),
@@ -105,6 +112,10 @@ describe("http-service-skeleton「上游失败记录」", () => {
         `{"event":"upstream_failed","sessionId":"${rejected}","reason":"auth_failed","status":401}\n`,
       ]);
       expect(lines.join("")).not.toContain(UPSTREAM_KEY);
+      // The sessions-side sanitiser reads the same registry's secret list.
+      const details = db.prepare("SELECT error_detail FROM chat_messages").all();
+      expect(JSON.stringify(details)).toContain("[已移除]");
+      expect(JSON.stringify(details)).not.toContain(UPSTREAM_KEY);
       expect(stdout).not.toHaveBeenCalled();
     } finally {
       stderr.mockRestore();

@@ -18,6 +18,7 @@ import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { openDb } from "../src/core/db/index.js";
 import {
   type CompiledServerEntry,
   captureSpawnHook,
@@ -155,6 +156,21 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     const failure = await failStartup(root);
     expectReason(failure.stderr, "db");
     expect(existsSync(join(root, "state"))).toBe(false);
+  }, 60_000);
+
+  it("model_registry: the seed insert throws (models is an empty view of the same name)", async () => {
+    // Migrated first, so the entry's openDb has nothing left to do; the empty view reads as an
+    // empty table and the seed's first INSERT is refused (s1d-model-registry D2).
+    const root = scratchRoot();
+    mkdirSync(join(root, "db"));
+    const db = openDb(join(root, "db", "dev.db"));
+    db.exec("DROP TABLE models; CREATE VIEW models AS SELECT 'x' AS id WHERE 0");
+    db.close();
+    const failure = await failStartup(root);
+    expectReason(failure.stderr, "model_registry");
+    expect(existsSync(join(root, "state"))).toBe(false);
+    expectDbReopens(join(root, "db", "dev.db"));
+    await expectBindable("127.0.0.1", failure.port);
   }, 60_000);
 
   it("app: assembling the application throws (injected: createApp's static-root resolve)", async () => {
