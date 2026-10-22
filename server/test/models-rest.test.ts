@@ -310,6 +310,8 @@ describe("非规范种子地址不回显密码（#1712）", () => {
     [`http:u:${password}@gw.example/v1`, "http://gw.example/v1"],
     [`https:\\u:${password}@gw.example/v1`, "https://gw.example/v1"],
     [` https://u:${password}@gw.example/v1`, "https://gw.example/v1"],
+    // Parses with the `\` as a path separator (no userinfo): the fallback regex strips it (#1713).
+    [`http://DOMAIN\\u:${password}@gw.example/v1`, "http://gw.example/v1"],
   ])(
     "seed %j: the view is %j, and a PUT with it renaming only keeps the stored address",
     async (stored, view) => {

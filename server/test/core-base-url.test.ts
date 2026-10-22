@@ -29,6 +29,17 @@ const REGEX_ONLY: readonly (readonly [string, string, boolean])[] = [
   [`foo:/u:${PW}@h`, "foo:/h", false],
 ];
 
+/**
+ * A `\` inside the userinfo (#1713 round 2): master's `[^/?#]*` userinfo class allows it and so must
+ * the fallback. An unencoded `\` in the password makes WHATWG throw; `DOMAIN\u:…@` parses with the
+ * `\` as a path separator (host `domain`, no userinfo). Expected parts are the regex's raw userinfo
+ * and its password segment.
+ */
+const BACKSLASH_USERINFO: readonly (readonly [string, string, boolean, readonly string[]])[] = [
+  [`https://u:${PW}\\x@h/v1`, "https://h/v1", true, [`u:${PW}\\x`, `${PW}\\x`]],
+  [`http://DOMAIN\\u:${PW}@h/v1`, "http://h/v1", false, [`DOMAIN\\u:${PW}`, PW]],
+];
+
 function expectParse(input: string, throws: boolean) {
   if (throws) {
     expect(() => new URL(input)).toThrow();
@@ -122,4 +133,17 @@ describe("userinfoParts", () => {
     expect(list).toContain(`u:${PW}`);
     expect(list).not.toContain("u");
   });
+});
+
+describe("a backslash inside the userinfo (#1713 round 2)", () => {
+  it.each(BACKSLASH_USERINFO)(
+    "%j: the view is %j and the parts carry the password",
+    (input, view, throws, parts) => {
+      expectParse(input, throws);
+      expect(withoutUserinfo(input)).toBe(view);
+      expect(withoutUserinfo(input)).not.toContain(PW);
+      expect(userinfoParts(input)).toEqual(parts);
+      expect(userinfoParts(input).some((part) => part.includes(PW))).toBe(true);
+    },
+  );
 });

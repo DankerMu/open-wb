@@ -9,10 +9,11 @@
 
 /**
  * The fallback for what WHATWG gives no userinfo: optional leading whitespace, `scheme:` and any run
- * of `/` or `\`, then the userinfo up to the last `@` before the authority ends (`/`, `\`, `?`, `#`).
- * Group 1 is what the view keeps (the leading whitespace goes), group 2 the raw userinfo.
+ * of `/` or `\`, then the userinfo up to the last `@` before the authority ends (`/`, `?`, `#`). The
+ * userinfo class `[^/?#]*` allows `\` (`DOMAIN\user:p@h`, an unencoded `\` in the
+ * password). Group 1 is what the view keeps (the leading whitespace goes), group 2 the raw userinfo.
  */
-const USERINFO = /^\s*([A-Za-z][A-Za-z0-9+.-]*:[/\\]*)([^/\\?#]*)@/u;
+const USERINFO = /^\s*([A-Za-z][A-Za-z0-9+.-]*:[/\\]*)([^/?#]*)@/u;
 
 function parsed(baseUrl: string): URL | undefined {
   try {

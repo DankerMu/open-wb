@@ -2,8 +2,8 @@
 
 ### Requirement: 上游地址的视图形式与拼接
 `server/src/core/base-url.ts` SHALL 是上游 base URL 的视图形式、净化部件与子路径拼接的唯一实现（`models/` 与 `model-proxy/` 都经它，不各自写正则）：
-- `withoutUserinfo(baseUrl)`：WHATWG `new URL` 解析成功且 `username` 或 `password` 非空时，清空两者后返回 `href`；解析成功但无 userinfo、或解析失败时，返回「`scheme://` 之后到 authority 内最后一个 `@`」的正则替换结果（authority 内无 `@` 即原样）。`ModelView.upstream.baseUrl` 与 `store.update` 的沿用判据都用它。
-- `userinfoParts(baseUrl)`：正则取到的 userinfo 原文与其密码段，并上 `new URL` 一侧的 userinfo 整串（无密码时即用户名）与 `password` 及二者的百分号解码形式，去空去重（不单列用户名）；upstream-failure「上游原文净化」的 base URL 部件用它。
+- `withoutUserinfo(baseUrl)`：WHATWG `new URL` 解析成功且 `username` 或 `password` 非空时，清空两者后返回 `href`；解析成功但无 userinfo、或解析失败时，返回兜底正则 `^\s*([A-Za-z][A-Za-z0-9+.-]*:[/\\]*)([^/?#]*)@` 替换为第 1 组的结果（容忍前导空白与 `:` 后任意个 `/` 或 `\`；userinfo 段可含 `\`；未命中即原样）。`ModelView.upstream.baseUrl` 与 `store.update` 的沿用判据都用它。
+- `userinfoParts(baseUrl)`：正则取到的 userinfo 原文与其密码段，并上 `new URL` 一侧的 `password` 与 userinfo 整串（整串只在 `password` 非空、或正则未取到 userinfo 时加入；无密码时即用户名）及二者的百分号解码形式，去空去重（不单列用户名）；upstream-failure「上游原文净化」的 base URL 部件用它。
 - `upstreamEndpoint(baseUrl, sub)`：解析后把路径去掉结尾斜杠接 `/<sub>`，清空 fragment，查询串与 userinfo 原样保留。
 
 #### Scenario: 非规范种子地址不回显密码
