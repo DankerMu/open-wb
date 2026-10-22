@@ -6,11 +6,11 @@
 import type { DatabaseSync, SQLInputValue, SQLOutputValue } from "node:sqlite";
 import { createSqliteTextDecoder } from "../db/index.js";
 import { HttpError } from "../errors/index.js";
+import { isAdmin } from "../roles.js";
 
 const DEFAULT_LIMIT = 50;
 const MIN_LIMIT = 1;
 const MAX_LIMIT = 200;
-const ADMIN_ROLE = "管理员";
 const SQLITE_INT64_MAX = 9_223_372_036_854_775_807n;
 
 interface AuditEventInput {
@@ -78,7 +78,7 @@ export function query(
   const clauses: string[] = [];
   const params: SQLInputValue[] = [];
 
-  if (principal.role !== ADMIN_ROLE) {
+  if (!isAdmin(principal)) {
     clauses.push("actor_id = ?");
     params.push(principal.id);
   }

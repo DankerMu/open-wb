@@ -28,7 +28,8 @@ API 端点清单（属 spec 阶段）。
 |---|---|---|---|
 | `core/sandbox` | `createSandbox({rootOf, audit}) → { resolve(principal, workspaceId, relPath, op: "read"\|"list"\|"mkdir") → 绝对路径 \| 拒绝, ensureSharedDir }`（`rootOf` 由 workspaces 实现：返回 null → `not_found` 且不审计；越界先经 `core/audit` 记 `sandbox.reject` 再抛 `sandbox_denied`）；`deriveWhitelist(workspace) → omp 沙箱配置`（S1b 未来项，未实现） | 路径规范化、symlink 逃逸防御；多根挂载点合并、白名单推导（排除 app-server 配置）为 S1b 未来项 | 删掉它，越界防御在 workspaces/sessions/kb 每个调用点重现——AGENTS.md 白盒关键路径 |
 | `core/audit` | `emit(db, event)`；`query(db, principal, {limit?, before?})` | 只追加表、账号隔离、canonical id 游标分页 | 所有模块的合规出口收敛于一处 |
-| `core/errors` | `HttpError`、十六码与中文消息（含 `sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`） | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
+| `core/errors` | `HttpError`、十八码与中文消息（含 `sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`，s1d 增 `forbidden`（403）/`model_in_use`（409）） | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
+| `core/roles` | `ADMIN_ROLE`、`isAdmin(principal)`（`role === "管理员"` 严格相等，不修剪、不归一） | 结构化入参，不导入 auth | 管理员判定一处出处（现由 `core/audit` 可见性过滤使用） |
 | `core/db` | SQLite 句柄 + 迁移执行 | WAL 配置、schema 迁移（ADR-0004） | |
 | `auth` | `authenticate(req) → Principal`；login/callback/logout 路由 | OIDC 流程、会话 cookie、首登 provisioning；适配器×2：oidc、dev-stub（ADR-0007） | 两个适配器 = 真接缝 |
 | `accounts` | 账号属性/角色/配额/项目组管理；`scopeOf(principal)` → 可见范围解析输入 | IdP 字段与应用侧字段的分界 | |
@@ -99,6 +100,7 @@ server/src/
 │   ├── db/              # SQLite 打开 + 迁移
 │   ├── audit/           # emit/query，只追加
 │   ├── errors/          # 共享 HttpError、codes、messages
+│   ├── roles.ts         # ADMIN_ROLE、isAdmin（严格相等）
 │   └── sandbox/         # resolve、白名单推导
 ├── auth/                #   providers/oidc.ts、providers/dev-stub.ts
 ├── accounts/

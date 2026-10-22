@@ -17,11 +17,11 @@
 
 ## 1. 错误码与管理员判定（http-service-skeleton「统一错误信封」）
 
-- [ ] 1.1 核对 design Context：`core/errors/index.ts:5-22`、`http/errors.ts` 状态表、`core/audit/index.ts:13,81`、三处计数守卫 `http-typed-errors.test.ts:123`、`auth-lifecycle.test.ts:705`、`http-parser-owners.test.ts:50,271`。
-- [ ] 1.2 测试先行：三处「恰十六码」改十八（`auth-lifecycle.test.ts:705-724` 的 `codes` 表补两条条目——`satisfies` 穷尽守卫要求——与标题，+2 行）；`http-typed-errors.test.ts:144-158` 的 409 精确列表加 `model_in_use`、message 集合 size 5 → 6；新文件 `server/test/http-typed-errors-s1d.test.ts`：两码的状态 / message / 与同状态码兄弟的互异，经一条自设 `Cache-Control: no-store` 的测试路由断言响应带 no-store（skeleton 场景「两个 s1d 新码」；`sendHttpError` 本身不设该头）；新 `server/test/core-roles.test.ts`（`isAdmin`：`管理员` 真；`管理员 `、`admin`、空串假）。
-- [ ] 1.3 `core/errors/index.ts` 加 `forbidden`、`model_in_use`；`http/errors.ts` 加 403 / 409 映射（归属集清单不动，归组 7）。
-- [ ] 1.4 新 `server/src/core/roles.ts`（`ADMIN_ROLE`、`isAdmin`）；`core/audit/index.ts` 改导入、删私有常量。
-- [ ] 1.5 `docs/architecture/system.md`：:31「十六码」改十八码并列两码；:29-31 core 模块表与 :100 目录树补 `core/roles`。
+- [x] 1.1 核对 design Context：`core/errors/index.ts:5-22`、`http/errors.ts` 状态表、`core/audit/index.ts:13,81`、三处计数守卫 `http-typed-errors.test.ts:123`、`auth-lifecycle.test.ts:705`、`http-parser-owners.test.ts:50,271`。
+- [x] 1.2 测试先行：三处「恰十六码」改十八（`auth-lifecycle.test.ts:705-724` 的 `codes` 表补两条条目——`satisfies` 穷尽守卫要求——与标题，+2 行）；`http-typed-errors.test.ts:144-158` 的 409 精确列表加 `model_in_use`、message 集合 size 5 → 6；新文件 `server/test/http-typed-errors-s1d.test.ts`：两码的状态 / message / 与同状态码兄弟的互异，经一条自设 `Cache-Control: no-store` 的测试路由断言响应带 no-store（skeleton 场景「两个 s1d 新码」；`sendHttpError` 本身不设该头）；新 `server/test/core-roles.test.ts`（`isAdmin`：`管理员` 真；`管理员 `、`admin`、空串假）。
+- [x] 1.3 `core/errors/index.ts` 加 `forbidden`、`model_in_use`；`http/errors.ts` 加 403 / 409 映射（归属集清单不动，归组 7）。
+- [x] 1.4 新 `server/src/core/roles.ts`（`ADMIN_ROLE`、`isAdmin`）；`core/audit/index.ts` 改导入、删私有常量。
+- [x] 1.5 `docs/architecture/system.md`：:31「十六码」改十八码并列两码；:29-31 core 模块表与 :100 目录树补 `core/roles`。
 
 Suggested fixture level: compact - 纯枚举与纯函数扩展，三处计数守卫直接钉住，无 IO、无权限面变化（403 的消费者在组 7）。
 Minimal mergeable slice: atomic - 两码与 `isAdmin` 都是组 7 的前置且各自只有一条计数 / 纯函数验证路径，拆开没有独立可验收行为。

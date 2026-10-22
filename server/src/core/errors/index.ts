@@ -19,6 +19,8 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   session_archived: "会话已归档，恢复后才能继续对话",
   undo_conflict: "其它会话在这之后改动过工作空间",
   upload_too_large: "文件超过大小上限",
+  forbidden: "没有权限执行此操作",
+  model_in_use: "该模型是缺省模型，先把缺省换成别的模型",
 });
 
 export type HttpErrorCode = keyof typeof HTTP_ERROR_MESSAGES;
