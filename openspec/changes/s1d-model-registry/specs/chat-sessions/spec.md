@@ -49,4 +49,6 @@ fork 的临时进程 SHALL 以源会话的有效档位与有效模型作为 spaw
 
 #### Scenario: 真实 omp 对未加载模型的 set_model（真实 omp）
 - **WHEN** 官方钉住的 omp v18.12.3 以只含 `m1` 的托管 `models.yml` 启动，宿主在启动后把 `m2` 加进 `models.yml` 并发 `set_model{provider:"workbuddy", modelId:"m2"}`
-- **THEN** 实现 PR 记录确切应答（`get_available_models` 是否含 `m2`、`set_model` 应答的 `success` 与错误文本、之后 `get_state` 报的模型）；预期 `success` 不为真。若实测为被接受（`success` 为真且 `get_state` 报 `workbuddy/m2`），「模型集合」判据仍保留（不依赖 omp 是否热读文件，代价是会话首次切到新登记模型时一次重启），本 THEN 改写为实测结果并在 design D19 登记
+- **THEN** `get_available_models` 的 `workbuddy` 条目仍只有 `m1`；`set_model` 的应答为 `success: false`、错误文本 `Model not found: workbuddy/m2`；之后 `get_state` 仍报 `workbuddy/m1`，进程存活，下一回合的上游请求只点名 `m1`
+- **WHEN** 同一会话由新 spawn 在含 `m1`、`m2` 的 `models.yml` 上 `--resume`，再发同一 `set_model`
+- **THEN** 应答 `success: true`，`get_state` 报 `workbuddy/m2`
