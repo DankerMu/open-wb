@@ -24,8 +24,8 @@
 - **THEN** 假 omp 在 `prompt` 之前收到 `set_model{modelId:"m1"}`，没有新的 spawn；会话行的 `model_id` 列不变（仍为 `m2`，有效值解析回落）
 
 #### Scenario: 注册表写入不打断服务端任何东西、但该模型的下一次上游请求失败
-- **WHEN** 一个以缺省模型 `m1` 进行中的回合的上游请求正挂起（假 omp 真子进程 + 假上游 `WORKBUDDY_FAKE_HANG` 标记，代理以注入的 3 s 首字节期限装配），管理员此时 `PUT /api/models?id=m1` 以 `upstream: null` 清空其上游；该回合结束后同一会话再发一条不带标记的 prompt
-- **THEN** `PUT` 应答 200，期间没有进程被退役或终止、没有审批被取消，挂起的请求仍在原上游上直到首字节期限到期（`lookup` 在转发前已完成），回合按既有 424 `no_response` 规则以 `failed` 结束；第二条 prompt 的第一次上游请求被代理答 502 `agent_unavailable`（登记但无上游），回合以 `failed` 结束且 `detail` 不含任何上游内容；删除非缺省模型对该模型后续请求的效果相同，只是应答为 400（model-proxy「Lookup change does not touch an in-flight stream」）
+- **WHEN** 一个以缺省模型 `m1` 进行中的回合的上游请求正挂起（假 omp 真子进程；假上游 `WORKBUDDY_FAKE_HANG` 标记；代理是与 createApp 共享同一注册表对象、以注入的 3 s 首字节期限独立注册的 `/v1`，发布器的 `proxyBaseUrl` 指向它——createApp 自带的 `/v1` 不接受注入期限），管理员此时 `PUT /api/models?id=m1` 以 `upstream: null` 清空其上游；该回合结束后同一会话再发一条不带标记的 prompt
+- **THEN** `PUT` 应答 200，期间没有进程被退役或终止、没有审批被取消；假上游的请求记录在 `PUT` 之后没有新增（挂起的请求仍在原上游上，`lookup` 在转发前已完成），第一个回合在不早于期限的时刻以 `failed` 结束；第二条 prompt 的回合以 `failed` 结束，而假上游的请求记录全程仍只有第一条（代理按「登记但无上游」拒绝，没有上游被联系），`detail` 不含任何上游内容。代理对两个请求各自的应答（424 `no_response`、502 `agent_unavailable`）由 model-proxy 的用例在代理层单独钉住，本场景不经假 omp 断言它们。删除一个非缺省模型后，仍以它为有效模型的请求被代理答 400，而该会话的下一条 prompt 经有效值解析回落缺省模型（本条「删除模型后的回落」）
 
 ### Requirement: 环境种子
 启动阶段 `model_registry`（http-service-skeleton「服务启动与装配」）SHALL 在 `models` 表为空时把启动配置解析出的白名单逐项插入：次序即 `created_at` 次序，`defaultModelId` 那项 `is_default = 1`，每项的 `upstream_base_url` / `upstream_api_key` 取 `MODEL_UPSTREAM_BASE_URL` / `MODEL_UPSTREAM_API_KEY`（两者**未同时配置**时两列都为 NULL，与此前「未同时配置即无上游」相同；环境给出的 base URL 原样写入、不套 REST 的地址规则），单模型配置那一项的 `efforts` 列为 NULL。种子插入与首次快照读取 SHALL 是同步的 node:sqlite 操作，发生在 `db` 之后、createApp 之前。表非空时 SHALL NOT 写入任何行；此时 `MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 中任一键被设置，SHALL 经受管 stderr writer 恰写一行 LF-terminated exact JSON `{"event":"model_env_ignored"}`（只有 `event` 一个键，无键名、无取值；写失败吞掉），位于 `server_started` 之前；六个键都未设置时不写这一行。六个键的解析与校验 SHALL 原样保留（非法值仍为 `reason: "config"` 的启动失败）。
