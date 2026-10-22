@@ -14,6 +14,7 @@ import { afterEach, expect } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import { ensureSharedDir } from "../src/core/sandbox/dirs.js";
+import type { ModelRegistry } from "../src/model-proxy/lookup.js";
 import type { ComposerConfig } from "../src/sessions/store-composer.js";
 import { BAD_REQUEST_ENVELOPE, FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
 import { SESSION_VIEW_KEYS, THREE_MODEL_CATALOG } from "./session-meta-fixtures.js";
@@ -62,12 +63,14 @@ afterEach(async () => {
 /**
  * `cap` undefined is `APPROVAL_MAX_MODE` unset: the assembly's `yolo`. `catalog` "default" hands the
  * assembly no whitelist either: the single default model of an unset `MODEL_CATALOG`. `upload`
- * undefined is both upload limits unset: the assembly's defaults.
+ * undefined is both upload limits unset: the assembly's defaults. `models` builds the assembly's model
+ * registry on the world's own database (s1d-model-registry); it takes precedence over `catalog`.
  */
 export async function openWorld(
   cap?: Cap,
   catalog: "three" | "default" = "three",
   upload?: { maxBytes: number; maxFiles: number },
+  models?: (db: DatabaseSync) => ModelRegistry,
 ): Promise<World> {
   const db = openDb(":memory:");
   cleanups.push(() => {
@@ -82,6 +85,7 @@ export async function openWorld(
     assembly: {
       runtime,
       ...(catalog === "three" ? { modelCatalog: THREE_MODEL_CATALOG } : {}),
+      ...(models === undefined ? {} : { models: models(db) }),
       ...(cap === undefined ? {} : { approvalMaxMode: cap }),
       ...(upload === undefined
         ? {}

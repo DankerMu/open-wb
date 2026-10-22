@@ -12,6 +12,8 @@
 import { request } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
+import { createRegistry } from "../src/models/registry.js";
+import { createModelStore } from "../src/models/store.js";
 import {
   expectBadRequest,
   getOptions,
@@ -93,6 +95,60 @@ describe("输入框选项端点", () => {
     expect(anonymous.headers["cache-control"]).toBe("no-store");
     // A read: the last choice keeps its raw `yolo`, and no row appears for the other account.
     expect(prefs(world)).toEqual(planted);
+  });
+
+  it("注册表写入后立即变化：store 写入 + refresh 后不重启，乙读到新缺省，甲的最近选择不动", async () => {
+    let store: ReturnType<typeof createModelStore> | undefined;
+    let registry: ReturnType<typeof createRegistry> | undefined;
+    const world = await openWorld(undefined, "default", undefined, (db) => {
+      store = createModelStore(db);
+      store.create({ id: "seed", name: "种子" });
+      registry = createRegistry(store);
+      registry.refresh();
+      return registry;
+    });
+    plantPrefs(world, "zhangsan", [null, "seed", null]);
+    const seed = {
+      id: "seed",
+      name: "种子",
+      reasoning: false,
+      vision: false,
+      efforts: [],
+      defaultEffort: null,
+    };
+    const m2 = {
+      id: "m2",
+      name: "M Two",
+      reasoning: true,
+      vision: true,
+      efforts: ["off", "low", "high"],
+      defaultEffort: "high",
+    };
+
+    const before = (await getOptions(world, "zhaoliu")).json() as Record<string, unknown>;
+    expect(before.models).toEqual([seed]);
+    expect(before.defaults).toEqual({
+      approvalMode: "write",
+      modelId: "seed",
+      reasoningEffort: null,
+    });
+
+    store?.create({
+      id: "m2",
+      name: "M Two",
+      reasoning: true,
+      vision: true,
+      efforts: ["low", "high"],
+    });
+    store?.setDefault("m2");
+    registry?.refresh();
+
+    const yi = (await getOptions(world, "zhaoliu")).json() as Record<string, unknown>;
+    const jia = (await getOptions(world, "zhangsan")).json() as Record<string, unknown>;
+    expect(yi.models).toEqual([seed, m2]);
+    expect(yi.defaults).toEqual({ approvalMode: "write", modelId: "m2", reasoningEffort: "high" });
+    expect(jia.models).toEqual([seed, m2]);
+    expect(jia.defaults).toEqual({ approvalMode: "write", modelId: "seed", reasoningEffort: null });
   });
 
   it.each([
