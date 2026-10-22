@@ -17,7 +17,8 @@ import {
   upstreamSecretList,
 } from "../core/upstream-failure.js";
 import { readErrorBody } from "./error-body.js";
-import { isAllowedModel } from "./model-guard.js";
+import type { ModelRegistry, ModelUpstream } from "./lookup.js";
+import { scannedModelId } from "./model-guard.js";
 
 const BODY_LIMIT = 4 * 1024 * 1024;
 /** The two deadlines when the caller passes none, which is what production assembly does (#909). */
@@ -30,29 +31,40 @@ export interface TokenLookup {
   lookup(token: string): string | null;
 }
 
-interface ModelProxyUpstream {
-  baseUrl: string;
-  apiKey: string;
-}
-
 export interface ModelProxyOptions {
   tokens: TokenLookup;
-  upstream?: ModelProxyUpstream | undefined;
-  /** 白名单模型 id 的非空集合，由装配方给出；本模块不读环境。 */
-  allowedModels: ReadonlySet<string>;
+  /**
+   * 按模型查找（design D5）：白名单 = `lookup` 给出 route 的 id，route 的 `upstream` 是转发目标；
+   * `secrets()` 是此刻全部已登记上游的密钥集。每个请求在转发前查一次，本模块不缓存；不读环境。
+   */
+  models: Pick<ModelRegistry, "lookup" | "secrets">;
   /** 自发起连接到传输（DNS/TCP/TLS）建立的期限，到期回 424 `no_connect`；生产装配不传。 */
   connectDeadlineMs?: number | undefined;
   /** 自发出上游请求到收到响应头的期限，到期回 424 `no_response`；生产装配不传。 */
   firstByteDeadlineMs?: number | undefined;
 }
 
-/** The configured upstream with what the proxy derives from it once, at registration. */
-interface UpstreamLink {
-  upstream: ModelProxyUpstream;
-  /** The excerpt's secret list: the API key and the base URL's parts (design D9). */
-  secrets: readonly string[];
+interface Deadlines {
   connectMs: number;
   firstByteMs: number;
+}
+
+/** One request's forwarding target: the route its `lookup` returned, fixed for the whole exchange (D6). */
+interface UpstreamLink extends Deadlines {
+  upstream: ModelUpstream;
+  /** The excerpt's secret list at failure time: `models.secrets()` then, plus this route's own (D5). */
+  secrets: () => readonly string[];
+}
+
+/** What the JSON parser hands the route: the original bytes and the upstream their model resolved to. */
+class CheckedBody {
+  readonly raw: Buffer;
+  readonly upstream: ModelUpstream;
+
+  constructor(raw: Buffer, upstream: ModelUpstream) {
+    this.raw = raw;
+    this.upstream = upstream;
+  }
 }
 
 /** A failure the proxy answers itself, with a `wb_upstream` envelope instead of the upstream's. */
@@ -77,7 +89,7 @@ interface Exchange {
 
 interface IncomingUpload {
   payload: Readable | undefined;
-  finish: ((error: Error | null, value?: Buffer) => void) | undefined;
+  finish: ((error: Error | null, value?: CheckedBody) => void) | undefined;
   released: boolean;
   cancel(): void;
   release(): void;
@@ -89,11 +101,11 @@ const noStore: onRequestHookHandler = (_request, reply, done) => {
 };
 
 export function registerModelProxy(app: FastifyInstance, options: ModelProxyOptions): void {
-  const { allowedModels } = options;
-  if (allowedModels.size === 0) {
-    throw new Error("model proxy needs at least one allowed model");
-  }
-  const link = upstreamLink(options);
+  const { models } = options;
+  const deadlines: Deadlines = {
+    connectMs: options.connectDeadlineMs ?? DEFAULT_CONNECT_DEADLINE_MS,
+    firstByteMs: options.firstByteDeadlineMs ?? DEFAULT_FIRST_BYTE_DEADLINE_MS,
+  };
   const secureSockets = new WeakSet<Socket>();
   const exchanges = new Set<Exchange>();
   const uploads = new Set<IncomingUpload>();
@@ -110,7 +122,7 @@ export function registerModelProxy(app: FastifyInstance, options: ModelProxyOpti
   app.register((instance, _opts, done) => {
     instance.removeContentTypeParser(["application/json", "text/plain"]);
     instance.addContentTypeParser("application/json", (request, payload, complete) => {
-      parseJsonBytes(request, payload, complete, uploadsByRequest.get(request), allowedModels);
+      parseJsonBytes(request, payload, complete, uploadsByRequest.get(request), models);
     });
     instance.addHook("onRequest", noStore);
     instance.addHook("onRequest", (request, reply, next) => {
@@ -129,13 +141,26 @@ export function registerModelProxy(app: FastifyInstance, options: ModelProxyOpti
       next();
     });
     instance.post("/v1/chat/completions", { bodyLimit: BODY_LIMIT }, async (request, reply) => {
-      if (link === undefined) {
-        throw new HttpError("agent_unavailable");
+      const body = request.body;
+      if (!(body instanceof CheckedBody)) {
+        throw new HttpError("bad_request");
       }
+      const { upstream } = body;
+      const own = upstreamSecretList({
+        apiKey: upstream.apiKey,
+        baseUrl: upstream.baseUrl,
+        paths: [],
+      });
+      const link: UpstreamLink = {
+        ...deadlines,
+        upstream,
+        secrets: () => [...models.secrets(), ...own],
+      };
       await proxyCompletion(
         request,
         reply,
         link,
+        body.raw,
         exchanges,
         secureSockets,
         uploadsByRequest.get(request),
@@ -145,25 +170,12 @@ export function registerModelProxy(app: FastifyInstance, options: ModelProxyOpti
   });
 }
 
-function upstreamLink(options: ModelProxyOptions): UpstreamLink | undefined {
-  const upstream = options.upstream;
-  if (upstream === undefined) {
-    return undefined;
-  }
-  return {
-    upstream,
-    secrets: upstreamSecretList({ apiKey: upstream.apiKey, baseUrl: upstream.baseUrl, paths: [] }),
-    connectMs: options.connectDeadlineMs ?? DEFAULT_CONNECT_DEADLINE_MS,
-    firstByteMs: options.firstByteDeadlineMs ?? DEFAULT_FIRST_BYTE_DEADLINE_MS,
-  };
-}
-
 function parseJsonBytes(
   request: FastifyRequest,
   payload: Readable,
-  complete: (error: Error | null, value?: Buffer) => void,
+  complete: (error: Error | null, value?: CheckedBody) => void,
   upload: IncomingUpload | undefined,
-  allowedModels: ReadonlySet<string>,
+  models: ModelProxyOptions["models"],
 ): void {
   if (upload === undefined) {
     payload.destroy();
@@ -173,7 +185,7 @@ function parseJsonBytes(
   const chunks: Buffer[] = [];
   let size = 0;
   let settled = false;
-  const finish = (error: Error | null, value?: Buffer): void => {
+  const finish = (error: Error | null, value?: CheckedBody): void => {
     if (settled) {
       return;
     }
@@ -203,21 +215,50 @@ function parseJsonBytes(
       return;
     }
     const raw = Buffer.concat(chunks);
-    // 解析与白名单扫描读同一个字符串；语法错误与白名单外走同一条拒绝；放行后转发的仍是原始字节 raw。
-    let allowed = false;
+    // 解析与顶层 `model` 扫描读同一个字符串；语法错误、扫描不通过与未登记走同一条拒绝（不回显）；
+    // 放行后转发的仍是原始字节 raw。
+    let model: string | undefined;
     try {
       const text = raw.toString("utf8");
-      allowed = isAllowedModel(JSON.parse(text), text, allowedModels);
+      model = scannedModelId(JSON.parse(text), text);
     } catch {
-      // JSON 语法错误（或扫描器抛出）：allowed 保持 false，一律拒绝。
+      // JSON 语法错误（或扫描器抛出）：model 保持 undefined，一律拒绝。
     }
-    if (!allowed) {
+    if (model === undefined) {
       finish(new HttpError("bad_request"));
       return;
     }
-    finish(null, raw);
+    const checked = routed(models, model, raw);
+    if (checked instanceof Error) {
+      finish(checked);
+      return;
+    }
+    finish(null, checked);
   });
   payload.resume();
+}
+
+/**
+ * 转发前一刻的唯一一次查找（D6）：未登记 400，登记了没有上游 502，否则这次查到的上游就是本请求的，
+ * 之后的登记变化不影响它。查找本身抛错是注册表的故障，不当作客户端错误。
+ */
+function routed(
+  models: ModelProxyOptions["models"],
+  model: string,
+  raw: Buffer,
+): Error | CheckedBody {
+  let route: ReturnType<ModelProxyOptions["models"]["lookup"]>;
+  try {
+    route = models.lookup(model);
+  } catch {
+    return new HttpError("agent_unavailable");
+  }
+  if (route === undefined) {
+    return new HttpError("bad_request");
+  }
+  return route.upstream === undefined
+    ? new HttpError("agent_unavailable")
+    : new CheckedBody(raw, route.upstream);
 }
 
 function createIncomingUpload(
@@ -262,13 +303,9 @@ function createIncomingUpload(
 
 function authenticate(request: FastifyRequest, options: ModelProxyOptions): Error | undefined {
   const token = bearerToken(request.headers.authorization);
-  if (token === null || options.tokens.lookup(token) === null) {
-    return new HttpError("unauthorized");
-  }
-  if (options.upstream === undefined) {
-    return new HttpError("agent_unavailable");
-  }
-  return undefined;
+  return token === null || options.tokens.lookup(token) === null
+    ? new HttpError("unauthorized")
+    : undefined;
 }
 
 function bearerToken(header: string | string[] | undefined): string | null {
@@ -283,20 +320,18 @@ async function proxyCompletion(
   request: FastifyRequest,
   reply: FastifyReply,
   link: UpstreamLink,
+  body: Buffer,
   exchanges: Set<Exchange>,
   secureSockets: WeakSet<Socket>,
   upload: IncomingUpload | undefined,
 ): Promise<void> {
-  if (!Buffer.isBuffer(request.body)) {
-    throw new HttpError("bad_request");
-  }
   const exchange = createExchange(reply);
   exchanges.add(exchange);
   upload?.release();
   request.raw.once("aborted", exchange.cancel);
   reply.raw.once("close", exchange.cancel);
   try {
-    const response = await requestUpstream(link, request, request.body, exchange, secureSockets);
+    const response = await requestUpstream(link, request, body, exchange, secureSockets);
     exchange.response = response;
     await sendUpstream(reply, response, exchange, link.secrets);
   } catch (error) {
@@ -356,7 +391,7 @@ async function sendUpstream(
   reply: FastifyReply,
   upstreamResponse: IncomingMessage,
   exchange: Exchange,
-  secrets: readonly string[],
+  secrets: () => readonly string[],
 ): Promise<void> {
   const status = upstreamResponse.statusCode ?? 502;
   if (status >= 500) {
@@ -380,14 +415,14 @@ async function sendUpstream(
 async function failureReply(
   status: number,
   upstreamResponse: IncomingMessage,
-  secrets: readonly string[],
+  secrets: () => readonly string[],
 ): Promise<UpstreamFailureReply> {
   if (status === 504 || status === 524) {
     upstreamResponse.destroy();
     return gatewayReply(status);
   }
   const { body, cut } = await readErrorBody(upstreamResponse);
-  return statusReply(status, upstreamExcerpt(body.toString("utf8"), secrets, cut));
+  return statusReply(status, upstreamExcerpt(body.toString("utf8"), secrets(), cut));
 }
 
 function passthroughHeaders(upstreamResponse: IncomingMessage): OutgoingHttpHeaders {
@@ -482,7 +517,7 @@ function requestUpstream(
 }
 
 function openUpstreamRequest(
-  upstream: ModelProxyUpstream,
+  upstream: ModelUpstream,
   request: FastifyRequest,
   contentLength: number,
   onResponse: (response: IncomingMessage) => void,

@@ -1,7 +1,6 @@
 import { gzipSync } from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ALLOWED_MODELS,
   API_KEY,
   expectFetchEnvelope,
   expectReplacedCredentials,
@@ -10,6 +9,7 @@ import {
   liveTokenTable,
   MODEL_BODY,
   postCompletions,
+  proxyModels,
   type RecordedRequest,
   rawPostCompletions,
   startRecordingUpstream,
@@ -40,8 +40,7 @@ function wbEnvelope(message: string, param: string): unknown {
 function configured(origin: string, basePath = "/v1") {
   return {
     tokens: tokensFrom(liveTokenTable()),
-    allowedModels: ALLOWED_MODELS,
-    upstream: { baseUrl: `${origin}${basePath}`, apiKey: API_KEY },
+    models: proxyModels({ baseUrl: `${origin}${basePath}`, apiKey: API_KEY }),
   };
 }
 

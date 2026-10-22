@@ -30,6 +30,7 @@ import { createApp } from "../../src/app.js";
 import { openDb } from "../../src/core/db/index.js";
 import { handleHttpError } from "../../src/http/errors.js";
 import { registerModelProxy } from "../../src/model-proxy/index.js";
+import { staticRegistry } from "../../src/model-proxy/lookup.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
 import type { ChatEvent } from "../../src/sessions/events.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
@@ -47,6 +48,16 @@ import { type StalledHandshake, startStalledHandshake } from "./stalled-handshak
 
 /** The two whitelisted models; the runtime runs the first. */
 export const PROXIED_MODELS = ["deepseek-v4.1-flash", "workbuddy-second"] as const;
+const PROXIED_CATALOG = {
+  models: PROXIED_MODELS.map((id) => ({
+    id,
+    name: id,
+    reasoning: false,
+    vision: false,
+    maxTokens: 32768,
+  })),
+  defaultModelId: PROXIED_MODELS[0],
+};
 const UPSTREAM_KEY = "fake";
 const OWNER_ID = "u1";
 
@@ -126,8 +137,7 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   };
   registerModelProxy(proxy, {
     tokens,
-    allowedModels: new Set(PROXIED_MODELS),
-    upstream: target,
+    models: staticRegistry(PROXIED_CATALOG, target),
     ...(options.firstByteDeadlineMs === undefined
       ? {}
       : { firstByteDeadlineMs: options.firstByteDeadlineMs }),
@@ -139,13 +149,7 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   onTeardown(() => proxy.close());
   await writeManagedModelsYml(ompAgentDir(stateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(proxy.server.address() as AddressInfo),
-    models: PROXIED_MODELS.map((id) => ({
-      id,
-      name: id,
-      reasoning: false,
-      vision: false,
-      maxTokens: 32768,
-    })),
+    models: PROXIED_CATALOG.models,
   });
   await writeHostOverlay(stateDir, { browserEnabled: false, visionModelId: null });
   return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens, target };

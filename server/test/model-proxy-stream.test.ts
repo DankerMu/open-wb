@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ALLOWED_MODELS,
   API_KEY,
   createGate,
   createProxyApp,
@@ -10,6 +9,7 @@ import {
   liveTokenTable,
   openIncompleteCompletionUpload,
   postCompletions,
+  proxyModels,
   readRest,
   readUntilError,
   readUntilPrefix,
@@ -36,8 +36,7 @@ const APP_CLOSE_TIMEOUT_MS = 20_000;
 function configured(origin: string) {
   return {
     tokens: tokensFrom(liveTokenTable()),
-    allowedModels: ALLOWED_MODELS,
-    upstream: { baseUrl: `${origin}/v1`, apiKey: API_KEY },
+    models: proxyModels({ baseUrl: `${origin}/v1`, apiKey: API_KEY }),
   };
 }
 
