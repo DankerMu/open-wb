@@ -1,0 +1,154 @@
+# Tasks: s1b-workspace-mounts
+
+> 跟踪：Stage 5 在 Epic 下建子 issue，十二个任务组各一个子 issue、各一个 PR（非 `atomic` 的组按宽度门禁再拆首刀）。依赖（真实依赖，不串成线性链）：组 1 依赖 #1669（迁移 048 先于 049）；组 2 依赖 #1647（`server.ts` 的配置与启动阶段写法）与 #1670（`server.ts` 行数与 `mcp_json` 阶段）；组 3 依赖 #1656（布局表的 `session-config` 行与 uid-isolation 的 `read:` / `list:`）与 #1670（布局表的 `mcp.json` 行与托管布局用例）；组 4 依赖 #1641（十八码与 `auth-lifecycle.test.ts` 的 790 行）；组 5 依赖组 1、组 2、组 3 与 #1665（P1–P8 与 design「#1665 补充探针」都有结论、无「需 owner 重新拍板」）；组 6 依赖组 5、#1665 与 #1670（`server.ts` 启停接线）；组 7 依赖组 4、组 5、组 6（生产装配与内存登记）、#1641（`isAdmin`、`forbidden`）与 #1674（归属身份二十九条之上再加）；组 8 的首刀（`core/sandbox` 的 `resolve` 与 facade，端口缺省为空集）不依赖任何组，后继 PR 依赖组 6（manager 的内存登记是挂载名的唯一来源）；组 9 依赖组 4、组 6 与组 8（`resolve` 不再 `lstat` 挂载内）；组 10 依赖组 7 与组 9（验收行要离线 / 恢复与挂载内删除被拒）；组 11 依赖组 10、#1651（拷入层 `select`）与「#1662 或 #1664 任一已合入」（`web/src/components/ui/switch.tsx` 在主干上即可开工）；组 12 依赖组 6、组 9 与 #1665。
+> Stage 5 切片（2026-10-22，按宽度门禁拆分后的真实依赖；子 issue 的 `Depends on` 以此为准）：组 1 拆 1A（`validate.ts` 纯函数，无依赖）/ 1B（迁移 049 与 store，依赖 1A、#1669）；组 5 拆 5A（主机规则与 conf 写出，依赖 #1665、1A、组 3）/ 5B（manager 生命周期，依赖 5A、1B、组 2、组 3、#1665）；组 6 拆 6A（探测与重挂，依赖 5B、#1665）/ 6B（启动恢复、关停与装配，依赖 6A、#1670、#1665）；组 7 拆 7A / 7B（依赖组 4、5B、6B、#1641、#1674；7B 另依赖 7A）；组 8 拆三个互不依赖的首刀 8A / 8B / 8C与后继 8D（依赖 8A、8B、8C、6B）；组 9 拆 9A（适配器，依赖组 4）/ 9B（文件端点接线，依赖 9A、组 4、6B、8D）；组 10 拆 10A（测试支撑，无依赖）/ 10B（依赖 10A、7B、9B）；组 11 依赖 10B、#1651、#1662（#1664 先合入同样满足 `switch` 拷入）；组 12 依赖 6B、9B、#1665。
+> 通用纪律见 design「通用纪律」：测试先行；每组第一个任务核对 design「Context」的行号与事实，出入先改 design 再继续（三个 s1d change 合入后测试与源码行号会顺延）；凭证（口令、私钥、obscure 串）不进任何响应、审计、日志、argv、子进程环境，夹具用哨兵并断言缺席；测试主机地址、用户名、密钥不进被跟踪文件；产品代码单文件 ≤800 行；不新增 `.css`。
+> 文档与验收行随组走（AGENTS.md:169-170）；改变用户可见行为的组在同一 PR 增改验收行并写 `待签`，并跑 `web/test/functional-checklist.test.ts`。
+
+## 风险包
+
+| 风险包 | 选中 | 落点 |
+|---|---|---|
+| 凭证泄露（DB、响应、审计、日志、argv、子进程环境、omp uid 可读） | 是 | 组 1 无凭证列、组 3 uid 证明、组 5 argv / 环境 / 文件模式、组 7 视图与审计的哨兵断言 |
+| 子进程治理（rclone 生命周期、孤儿、关停、探测阻塞、在途尝试的取消） | 是 | 组 5 卸载与按来源清理、组 6 探测 / 退避 / 启停 / 串行与取消 |
+| 主线程进入 FUSE（挂起的远端冻结整个服务） | 是 | 组 1 保留名 `screenshots`、组 8 `resolve` 与各入口按挂载名跳过及异步 `realpath`、组 9 异步适配器与期限 |
+| 数据安全（挂载内删除、跨挂载移动、离线残留、快照还原） | 是 | 组 5 `--allow-non-empty` 与残留保留、组 8 快照与还原跳过、组 9 拒绝分支 |
+| 主机规则（环回写法、解析器分歧、许可名单、重挂时复判） | 是 | 组 5 主机判定与 `--*-host`、组 7 的 403 与审计 |
+| 特权挂载的路径安全（omp 自挂 FUSE、挂载点换成符号链接、挂载源越界） | 是 | 组 2 `fusermount3` 执行权预检、组 5 挂载点检查与挂载源复核、组 7 拒绝清单 |
+| 迁移与 DB 约束 | 是 | 组 1 |
+| 权限（非管理员写挂载源、他人空间） | 是 | 组 7 的 401 / 403 / 404 矩阵 |
+| 真实 FUSE 行为与假可执行文件的落差 | 是 | #1665 前置与补充探针、组 12 opt-in 层 |
+
+## 1. 迁移 049 与挂载 store（workspace-mounts「迁移 049 挂载 schema」「挂载取值与主机规则」的键集与取值部分）
+
+- [ ] 1.1 核对 Context：迁移目录（三个 s1d change 合入后最后为 048）、`server/test/core-db-helpers.ts` 与 `TRACKED_MIGRATION_FILENAMES`、workspaces `dir` 的 CHECK 写法（`031_workspaces.sql`）、`store.ts` 的 `temporary` 列；迁移 046 的先例提交 `2864ae2a` 同时改过的精确清单测试（下条）。
+- [ ] 1.2 测试先行：新 `server/test/mounts-validate.test.ts`：`validate` 的每条取值规则正反例（键集按 `backend` 严格、`password` / `privateKey` 恰一、`uploads` 与 `screenshots` 保留、`host` 字符、`port` 边界与字符串、`remotePath` 与 `smb` 的共享名、控制字符与首尾空白、私钥上限与开头）且 message 不含取值哨兵；挂载源的 `name` / `path` 规则与第 33 个。新 `server/test/mounts-store.test.ts`（`:memory:` + 真实迁移）：「形状约束」「被引用的行不能先删」「表里没有凭证」三个场景；store 的 `create` / `list`（`created_at, id` 升序）/ `remove` / `countByWorkspace` / `listAll`（manager 构造时载入）/ 挂载源 CRUD 与 `listBySource`。同 PR 改会因新表与新迁移变红的精确清单（按 `2864ae2a` 的先例，行号为本 worktree 的）：`server/test/core-db-helpers.ts` 加 `MIGRATION_049`、进 `TRACKED_MIGRATION_FILENAMES`（:27）、`COMPLETE_CATALOG`（:91）的回执加一行且 `sequenceRows` 加一；`auth-schema.test.ts:496-508` 的表清单加 `mount_sources`、`workspace_mounts`；`core-db-session-fixture.ts:308` 的索引 `NOT IN` 名单加这两张表（新表带 `UNIQUE`，会出现 autoindex）；`core-db-chat-step-output.test.ts:80-84` 与 `migration-034.test.ts:269-273` 的 seed 过滤加 `MIGRATION_049`（含各自的 import）。验证：`npm test --workspace server -- mounts-validate mounts-store auth-schema core-db migration-034`、`make check`。
+- [ ] 1.3 新 `server/src/workspaces/mounts/validate.ts`（纯函数）；`049_workspace_mounts.sql`；新 `server/src/workspaces/mounts/store.ts`。验证：1.2 全绿、`make check`。
+
+Suggested fixture level: expanded - 新迁移（persisted schema），且取值规则是凭证进入系统的唯一闸门。
+Minimal mergeable slice: `validate.ts` 与 `mounts-validate.test.ts`（纯函数，无调用方也能以自己的单测保绿）为首刀；迁移 049、store 与上述精确清单测试为后继 PR，三者必须同 PR（迁移没有 store 就没有读者，清单测试不同改即红）。
+Width exception: 后继 PR 同时改五个既有测试文件的精确清单——它们是同一次迁移的同一组守卫，拆开任何一个都使 `make check` 红。
+
+## 2. 配置键与启动预检（workspace-mounts「挂载配置与启动预检」；http-service-skeleton「服务启动与装配」的挂载键段与「挂载键与启动预检」场景的配置部分）
+
+- [ ] 2.1 核对 Context：`server.ts` 的 `resolveServerConfig` 与配置计数注释（`server.ts:114` 只是注释，没有计数断言；#1647 与 #1670 合入后）、`agent-config.ts` 的 `resolveBrowserBin` 与 `resolveOmpUser(env.PATH)`、`server-config*.test.ts` 的写法、编译入口逐值用例的先例 `server/test/omp-max-processes-config.test.ts:249-275`。
+- [ ] 2.2 测试先行：新 `server/test/mounts-config.test.ts`：「缺省与覆盖」「非法值」「预检」三个场景（预检的 `/dev/fuse` 路径、`/etc/fuse.conf` 路径与 `id` 可执行文件经注入，`id -u` 与 `id -G` 两种输出都由注入的假 `id` 给出；PATH 上第一个可执行 `fusermount3` 的绝对路径；`#user_allow_other` 不算；`OMP_USER` 模式下 `fusermount3` 为 `4755`、为 `4750` 而属组在 omp 的组里、PATH 上另有 `4755` 的 `fusermount` 三例为错，`4750` 且属组不在 omp 的组里为过，`OMP_USER` 未配置时 `4755` 不是错误）；编译入口用例按 `omp-max-processes-config.test.ts:249-275` 的写法对「非法值」场景的每一个非法取值各跑一次（`RCLONE_BIN` 两例、`MOUNT_HOST_ALLOW` 四例、`MOUNT_MAX_PER_WORKSPACE` 四例，外加 `RCLONE_BIN` 不可执行一例，并钉住例数），每例 nonzero、stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`、无 DB / state / sandbox / listen。验证：`npm test --workspace server -- mounts-config`。
+- [ ] 2.3 新 `server/src/workspaces/mounts/config.ts`（`resolveMountSettings(env, probes)`：三键与预检）；`resolveServerConfig` 展开它（`server.ts` 只加一行，配置计数注释 37 → 40）。验证：2.2 全绿、`scripts/size-guard.sh server/src/server.ts`。
+- [ ] 2.4 `docs/architecture/system.md` 新节 §9.9「远程挂载」的部署前提段：三个配置键、`fuse3` 与 rclone（最低版本 = 测试主机实测版本）、`/etc/fuse.conf` 的 `user_allow_other`（`OMP_USER` 模式）、`fusermount3` 与 `fusermount` 只对 app 所在、omp 不在的组可执行（例如 `dpkg-statoverride --update --add root <app 组> 4750 /usr/bin/fusermount3`；该组不得是 `workbuddy`；PATH 之外的 setuid 副本删除）、容器部署需 `/dev/fuse` 与 `SYS_ADMIN`（参考镜像暂不提供，见 S4b）、macOS 不支持；ADR-0010 补充记同一条 `fusermount3` 部署要求；`IMPLEMENTATION_PLAN.md:509` 的回滚句按 design D20 改写。
+
+Suggested fixture level: expanded - 新增生产配置项并让它们能使启动失败（production config 触发项）。
+Minimal mergeable slice: atomic - 三个键与预检是同一个 resolver 的同一组配置用例；只合键不合预检，`RCLONE_BIN` 配了却在第一次挂载时才失败，违背「预检失败即启动失败」的裁定。
+
+## 3. 托管布局 `<state>/mounts` 与隔离证明（omp-runtime「OMP_STATE_DIR 托管布局」；omp-uid-isolation「Linux 隔离证明」）
+
+- [ ] 3.1 核对 Context：`state-layout.ts` 的 `LAYOUT` 与导出（#1656 与 #1670 合入后）、`server/test/linux/uid-isolation.test.ts` 的托管布局用例、omp-test-harness 的 `read:` / `list:` / `probe:`；状态根顶层与目录表的精确清单（下条），兄弟 change 的先例 `s1d-experts-skills/tasks.md` 1.2 的最后一段。
+- [ ] 3.2 测试先行：布局用例加「挂载私有目录属于布局」（冷建、被改宽校正且其下 `rclone.conf` 不动、符号链接抛错）；同 PR 给每一处状态根精确清单加 `mounts`（行号为本 worktree 的）：`server/test/omp-layout-helpers.ts:10` 的 `LAYOUT_TABLE`（加 `["mounts", 0o700]`）、`server/test/omp-state-layout.test.ts:143-149`、`server/test/server-startup-layout.test.ts:132-139`、`server/test/server-startup-order.test.ts:135-141`、`server/test/server-startup-order-helpers.ts:98`（`expectLayoutWithoutManagedFiles`，`server-startup-failure-reason.test.ts`、`server-startup-preview.test.ts` 等经它断言）；`server/test/linux/uid-isolation.test.ts` 托管布局用例加「挂载凭证对 omp uid 不可达」（父进程预置 `<state>/mounts/<id>/rclone.conf` 哨兵；`listed=EACCES`、`read=EACCES`、`wrote=EACCES`；字节、模式、属主不变）。验证：`npm test --workspace server -- omp-state-layout server-startup-layout server-startup-order server-startup-failure-reason server-startup-preview`、`make check`；PR CI `uid-isolation` 绿。
+- [ ] 3.3 `state-layout.ts` 的 `LAYOUT` 加 `["mounts", APP_PRIVATE]` 与 `ompMountsDir(stateDir)`。验证：3.2 全绿、`make check`。
+- [ ] 3.4 ADR-0010 布局表加 `<state>/mounts`（`0700`，app 私有：远程挂载的凭证、缓存与日志）。
+
+Suggested fixture level: expanded - 改托管布局的权限位（security boundary：凭证目录对 omp uid 不可达由 CI 两 uid 证明）。
+Minimal mergeable slice: atomic - 布局行、它的 uid 证明与各处精确清单同 PR；只合布局行，清单用例即红，`0700` 的不可达性也没有被真实两 uid 证明过就被组 5 用来存凭证。
+Width exception: 验证分本地 `make check` 与 PR CI `uid-isolation` 两条路径——后者是唯一的真实两 uid 证明，不能并进前者。
+
+## 4. 七个挂载错误码（http-service-skeleton「统一错误信封」的码表部分与「七个挂载码」场景）
+
+- [ ] 4.1 核对 Context：`core/errors/index.ts` 码表（#1641 合入后十八码）、`http/errors.ts` 状态表、三处计数守卫 `http-typed-errors.test.ts`、`http-parser-owners.test.ts`、`auth-lifecycle.test.ts`（790 行）的 `codes` 表。
+- [ ] 4.2 测试先行：三处「恰十八码」改二十五；`auth-lifecycle.test.ts` 的 `codes` 表补七条（`satisfies` 穷尽守卫要求，+7 行 → 797，超过 800 即把该表移进新文件 `server/test/support/http-error-codes.ts`）；新 `server/test/http-typed-errors-mounts.test.ts`：「七个挂载码」场景（状态、文案、no-store、与同状态既有码互异、伪造对象仍 5xx）。验证：`npm test --workspace server -- http-typed-errors auth-lifecycle http-parser-owners`、`scripts/size-guard.sh`。
+- [ ] 4.3 `core/errors/index.ts` 加七码与文案；`http/errors.ts` 状态表加七行。验证：4.2 全绿。
+- [ ] 4.4 `docs/architecture/system.md:31` 的 `core/errors` 一行的码数改为二十五（并列出七个 `mount_*` 码的归属）。
+
+Suggested fixture level: compact - 纯枚举扩展，三处计数守卫直接钉住，无 IO、无权限面变化（消费者在组 7、组 9）。
+Minimal mergeable slice: atomic - 码表、状态表与三处计数守卫必须同 PR，否则守卫红。
+
+## 5. mount-manager：凭证文件、主机规则、挂载与卸载（workspace-mounts「挂载凭证文件」「挂载进程与挂载点」「挂载取值与主机规则」的主机规则部分、「临时空间与删除前卸载」的按空间卸载）
+
+- [ ] 5.1 核对 Context：#1665 的 ADR-0003 补充——P1–P8 与 design「#1665 补充探针」P1′、P2′、P4′、P9–P15 都已记录结论（尤其 `local` 一栏、`--*-host` 覆盖、mountinfo 来源字段的形状）；`fake-soffice.mjs:38` 的 `@标记` 写法与真实 spawn、`ensureSharedDir`（`dirs.ts:43` 跟随符号链接）/ `ensureOwnedDir` / 托管文件权限位、`temp-dir-remove-fuse.test.ts` 的 mountinfo 解析。任一结论「需 owner 重新拍板」时停在这里。
+- [ ] 5.2 测试先行：
+  - 新 `server/test/mounts-host-policy.test.ts`：规范化（大小写、末尾的点）、字面环回（`localhost.`、`LOCALHOST.`、`a.localhost.`、`::1`、`0:0:0:0:0:0:0:1`、`::ffff:127.0.0.1`、`0.0.0.0`、`127.9.9.9`）、许可名单（`files.intra.` 命中 `files.intra`）、解析结果命中环回、解析失败与空结果、返回的连接地址为第一个解析结果（解析器注入）。新 `server/test/mounts-rclone-conf.test.ts`：段名 `m<id>`、`sftp` / `smb` / `local` 三种文件形状、`key_pem` 单行、`0600` 与临时名改名、`obscure -` 经标准输入（假 rclone）。
+  - 新假 rclone `server/test/fixtures/fake-rclone.mjs`：`obscure -`：读标准输入、输出可预测的 obscure 串；`mount`：按远端里的 `@标记`（`sftp` / `smb` 为 `remotePath`，`local` 为挂载源路径，同 `fake-soffice.mjs` 的写法）成功 / 以非 0 退出 / 挂起 / 在别处挂出（向假 mountinfo 追加一行来源为 `<段名>:…`、挂载点为标记给出的另一路径）；成功时向假 mountinfo 追加一行 `… <挂载点> … - fuse.rclone <段名>:<远端> rw`（`-` 之后依次为类型与来源，挂载点与来源按八进制转义写）并前台等待 SIGTERM。子进程环境只有 `PATH` 与 `HOME`，所以假 mountinfo 与记录文件的位置都从 `HOME`（= `<state>/mounts/<id>`）推出：`<state>/fake-mountinfo` 与 `<state>/fake-rclone-calls.jsonl`（每次调用的 argv、环境与标准输入）。假 `fusermount3`：`-uz <路径>` 从它所在目录的 `mountinfo.path` 指向的假 mountinfo 删行并记录。
+  - 新 `server/test/mounts-manager.test.ts`（manager 的 `mountinfoPath` 注入为 `<state>/fake-mountinfo`）：「文件形状与权限」「凭证不外泄」（argv / 环境 / 标准输入部分）「卸载删除私有目录」「argv 与环境」（含 `--smb-host <ip>` 与段名）「就绪失败不留痕」（三例，含在别处挂出时按来源清理）「挂载点被换掉即拒绝」（含挂载点是指向别处目录的符号链接：先 `lstat` 即失败，不调 `ensureSharedDir`、不 spawn）「惰性卸载与残留」「环回一律拒绝」「解析失败不启动子进程」「许可名单」（manager 层）、`rclone.log` 每次尝试前为 `0600`、`local` 挂载源复核失败不 spawn、功能关闭时卸载找 PATH 上的 `fusermount3`（找不到 → `mount_disabled`、行与私有目录保留）、按空间卸载、mountinfo 八进制转义（含空格的挂载点与来源）。
+  验证：`npm test --workspace server -- mounts-host-policy mounts-rclone-conf mounts-manager`。
+- [ ] 5.3 新 `server/src/workspaces/mounts/{host-policy.ts,rclone-conf.ts,mountinfo.ts,manager.ts}`（`attach`、`detach`、`detachWorkspace`、`statusOf`、`namesOf`；`mountinfo` 路径、解析器、bins、omp uid 可注入）。验证：5.2 全绿、`make check`。
+- [ ] 5.4 文档：ADR-0003「2026-10 补充」产品化一节（rclone 三后端、凭证文件与 obscure、argv 与环境、段名与按来源清理、`--*-host`、`--allow-non-empty`、惰性卸载、主机规则、挂载点检查、功能开关；证据引 #1665 的 P1–P8 与补充探针）；ADR-0010 补充（挂载选项 `--allow-other --default-permissions --uid <omp> --gid <共享组> --umask 007` 与 `fuse.conf`）；`system.md` §9.9 加「凭证与日志在哪里」，§3 按 design D19 销掉 `deriveWhitelist`「S1b 未来项」、:35 / :109 的「rclone/sshfs」改 rclone、:173 改写；`IMPLEMENTATION_PLAN.md:199` 的「rclone/sshfs」改 rclone 并指向本 change。
+
+Suggested fixture level: expanded - 凭证落盘（credentials at rest）与以 app uid 拉起长驻外部进程（process spawn），且是 Critical Path「挂载凭证存取」。
+Minimal mergeable slice: `host-policy.ts` 与 `rclone-conf.ts` 连同各自的 `mounts-host-policy.test.ts`、`mounts-rclone-conf.test.ts`（主机判定与凭证文件写出，含 obscure 子进程）——无调用方也能以自己的单测保绿；`mountinfo.ts`、`manager.ts` 与 `mounts-manager.test.ts` 在后继 PR 接上。
+Width exception: 首刀有两个模块各带一个测试文件——两者都是 manager 的叶子依赖、互不调用，分成两个 PR 只多一轮评审，不缩小任何一个的风险面。
+
+## 6. mount-manager：在线状态、串行与取消、服务启停与生产装配（workspace-mounts「在线状态与重挂」「服务启停与挂载」「挂载操作的串行与取消」的 manager 部分；http-service-skeleton「服务启动与装配」的恢复与关停部分）
+
+- [ ] 6.1 核对 Context：组 5 合入后的 `manager.ts`；`server.ts` 的 `appAssemblyOf`（:159-186）、`publishStarted` 与 `releaseOwned`（#1670 合入后的行数）、`trash.sweep` 的不等待写法；`app.ts` 的 `createApp`（:166）、`AssemblyDependencies`（:92-136）、`registerWorkspaces` 调用（:253）与 `trash` 的就地构造（:262-267）、app 关闭钩子。
+- [ ] 6.2 测试先行：`mounts-manager.test.ts` 加「崩溃即离线并退避重挂」「探测超时」「退避封顶」（注入时钟、假 `stat` 子进程可设为挂起）、重挂时主机规则与挂载点检查复判、「启动恢复与残留挂载」「关停卸载」的 manager 部分（含启动恢复对某个挂载挂起时关停：被 SIGKILL、其余不再 `mount`）、「重挂就绪期间卸载」「启动恢复期间关停」（假 rclone 设为挂起，断言卸载在就绪窗口结束之前完成、此后没有存活的假 rclone 进程、假 mountinfo 里没有本 manager 的行）、构造时载入全部行且一律 `offline`（功能关闭时同样载入）。新 `server/test/server-startup-mounts.test.ts`（编译入口 + 假 rclone + 假 `fusermount3`，`/dev/fuse` 不存在时明示跳过）：「挂载键与启动预检」的启动成功一例，与 SIGTERM 一例——编译入口读真实 `/proc/self/mountinfo`、假 rclone 不会出现在里面，所以这一例实测的是「`closeAll` 杀掉还在等就绪的挂载子进程，DB 关闭之前它已退出、挂载行与私有目录仍在、退出码 0」；恢复失败不影响 success record 与退出码。验证：`npm test --workspace server -- mounts-manager server-startup-mounts`。
+- [ ] 6.3 `manager.ts` 加探测（子进程 `stat`、每挂载至多一个在途）、退避定时器、每空间串行链覆盖全部操作、卸载与关停先取消并 SIGKILL 在途尝试、`restoreAll`、`closeAll`、构造时载入登记。
+- [ ] 6.4 生产装配：`appAssemblyOf`（`server.ts`）在返回值里加 `mountSettings`（`resolveMountSettings` 的结果），`AssemblyDependencies`（`app.ts:92-136`）加可选 `mountSettings` 与 `mounts?: MountManager`（实例注入，先例 `snapshots?` / `trash?`，`app.ts:100,105`）；`createApp` 给了实例用实例，否则以 `db`、审计与 `mountSettings` 构造 manager，都没有即功能关闭的 manager（同 `trash` 的就地构造）；manager 构造选项含适配器的文件系统实现与期限（缺省 `fs/promises` 与 10 s），`app.decorate` 交出、传给 `registerWorkspaces`，`closeAll` 挂在 app 关闭钩子；`server.ts` 在 `server_started` 之后 `void restoreAll()`（一行）。`server.ts` 超过 795 行即把这几处接线并进 `startup-registry.ts`（`s1d-model-registry` 抽出）。验证：6.2 全绿、`mounts-manager.test.ts` 加一例「`createApp` 给了 `mounts` 实例即用它、只给 `mountSettings` 即按它构造、都没有即功能关闭」、既有 `server-assembly.test.ts` 不变、`scripts/size-guard.sh server/src/server.ts server/src/app.ts`。
+- [ ] 6.5 `system.md` §9.9 加在线判据、30 s 探测、退避 5 s → 300 s、启动恢复、关停只卸载不删行、回滚（撤 `RCLONE_BIN`、旧版本下先卸载；功能关闭时卸载孤儿挂载需要 PATH 上的 `fusermount3`）。
+
+Suggested fixture level: expanded - 改服务启停（startup / shutdown）、生产装配并新增后台子进程监管（Critical Path「进程治理」）。
+Minimal mergeable slice: `manager.ts` 的探测、退避、串行与取消、`restoreAll` / `closeAll` 与构造时载入（6.3，模块用例保绿，不接入口）；6.4 的 `server.ts` / `app.ts` 接线与 `server-startup-mounts.test.ts` 在后继 PR。
+Width exception: 验证分模块用例（假可执行文件 + 注入时钟）与编译入口用例（`/dev/fuse` 缺席即跳过）两条路径；后者是关停次序唯一的入口级证据，GitHub runner 上若没有 `/dev/fuse` 它在 CI 报告 skipped，由组 12 的测试主机运行补上。
+
+## 7. 挂载与挂载源端点（workspace-mounts「挂载端点」「挂载源端点」「临时空间与删除前卸载」的拒绝部分、「挂载操作的串行与取消」的挂载源部分、「凭证不外泄」的 HTTP 部分；http-service-skeleton「统一错误信封」的归属身份与「挂载的归属路由」场景）
+
+- [ ] 7.1 核对 Context：`workspaces/rest.ts` 的 `requireOwnedBeforeParse` 与 `move` 的 preParsing 写法、`http/errors.ts` 归属集与 `http-parser-owners.test.ts` 身份清单（#1674 合入后二十九条）、`core/roles` 的 `isAdmin`（#1641）、审计 `emit` 的事务写法、组 6 交出的 manager。
+- [ ] 7.2 测试先行：新 `server/test/mounts-rest.test.ts`（整体挂载 `createApp`，经 `AssemblyDependencies.mounts` 注入以假 rclone / 假 `fusermount3` 装配的真实 manager）：「建出、列举与卸载」「次序与拒绝」「插行失败先卸载」「并发建出受上限约束」「转正之后可以挂载」「功能关闭时的已登记挂载」（含第一次删 `乙` 时服务错误通道恰一条点名缺少 `fusermount3` 的记录、不含凭证哨兵）、「重挂就绪期间卸载」的 HTTP 层一例（假 rclone 设为挂起、注入时钟推进到重挂：`DELETE …/mounts/<id>` 在就绪窗口结束之前 204，`GET …/mounts` 不再含它，没有存活的假 rclone 进程，假 mountinfo 里没有该挂载的行）、建出时环回 403 与 `mount.reject`（`workspaceId` 为该空间）、解析失败与就绪失败 502 与 `mount.reject`、全部响应与审计无凭证哨兵；新 `server/test/mount-sources-rest.test.ts`：「两种视图」「拒绝的路径」（含 `STATIC_ROOT` 的父目录与 `dirname(OMP_BIN)`、登记后换成符号链接的复核）「删除连带卸载」「删除挂载源与并发建出」、删除失败清标记（让一次连带卸载的删行失败：`DELETE` generic 500、源行还在；随后引用它的 `local` 建出 201，再 `DELETE` 该源 204）、功能关闭时三个端点照常、普通用户 403 先于 body 与 id；`http-parser-owners.test.ts` 身份清单 → 三十一条，加「挂载的归属路由」场景。验证：`npm test --workspace server -- mounts-rest mount-sources-rest http-parser-owners`。
+- [ ] 7.3 新 `server/src/workspaces/mounts/rest.ts`（两组路由，由 `registerWorkspaces` 注册；挂载源删除的「删除中」标记与插行事务里的复核）；归属集加两条身份。验证：7.2 全绿、启动记录的模块数仍为十一。
+- [ ] 7.4 `system.md` §9.9 加端点、视图、审计 kind（`mount.attach` / `mount.detach` / `mount.reject` / `mount.source.create` / `mount.source.delete`）、「挂载源删除连带卸载」与挂载源拒绝清单的五项。
+
+Suggested fixture level: expanded - 用户凭证经 HTTP 进入系统、管理员写路径（credentials + auth 触发项）。
+Minimal mergeable slice: 挂载源端点（`GET` / `POST` / `DELETE /api/mount-sources`、一条归属身份、两种视图与 403 矩阵、删除中标记）——它只依赖 store 与 manager 的 `detach`，能以自己的整体挂载用例保绿；挂载端点与「删除挂载源与并发建出」在后继 PR。
+
+## 8. 挂载感知的 resolve 与各入口按挂载名跳过（sandbox-core「resolve 契约与逃逸向量」「沙箱 facade 与拒绝审计」；workspace-mounts「宿主不同步进入挂载」的词法跳过部分；workspaces「目录树、新建目录与隔离」的根一层不列挂载点；workspace-snapshots「快照内容规则」「还原」；turn-artifacts「文件变更推导与归属」；chat-sessions「Slash 命令白名单与命令目录」的异步 `realpath`）
+
+- [ ] 8.1 核对 Context：design「Context」的同步文件系统调用清单逐条复核（`resolve.ts`、facade、`tree.ts:30`、`snapshots.ts:375,392`、`snapshots-restore.ts:305,379`、`preview/app.ts:213`、`prompt-attachments.ts:137`、`undo.ts:270`、`file-changes-ownership.ts` 与 `turn-control.ts:292`）；`server/src` 里再 grep 一次 `sandbox.resolve`、`readdir` 与全部同步文件系统调用（`Sync(`：含 `opendirSync`、`openSync`、`readFileSync`、`existsSync`、`accessSync`、`readlinkSync`、`chmodSync`、`mkdirSync`、`lstatSync`、`statSync`、`realpathSync`，不只这几个名字），逐个判定是否可能碰到工作空间路径；D21 表里按保留名规则判为安全的（`screenshot-diff.ts:28,54`（本组补上 `lstat` 之后）、`repo-root-marker.ts:16-34`、`rest-project-config.ts:162`、`session-cwd.ts:38`）复核其前提（只碰空间根自身、第一段含 `.` 的路径或保留名，且不跟随符号链接），新出现的入口先补进 design D21 的表；`slash-commands.ts:332,399` 的调用方（`sessionSkills` 的全部使用者，含兄弟 change 合入后新增的）列全。
+- [ ] 8.2 测试先行：`server/test/sandbox-resolve.test.ts` 加「挂载名分量不被检查」；`server/test/sandbox-facade.test.ts` 加「挂载名端口」；新 `server/test/mounts-skip.test.ts`：「根一层按名字跳过」（根的 `tree` 经整体挂载 `createApp`，经 `AssemblyDependencies.mounts` 注入 manager；替身目录的 `0000` 在 root 下不拦，以 `it.skipIf(process.getuid?.() === 0)` 跳过）、「其它入口」（预览源 `/w/` 经 `preview-app-helpers.ts`、会话附件、撤回交还的附件）、功能关闭时同样跳过；`server/test/workspace-snapshots-mounts.test.ts` 加 workspace-snapshots「已登记挂载按名字跳过」「已登记挂载不被还原、删除或建出」（`workspace-snapshots-helpers.ts` 的 `watchListings` / `watchOpens` 记录调用，挂载名集合经 `take` / `restore` 的选项注入）；`server/test/file-changes-ownership.test.ts` 加 turn-artifacts「挂载内的候选不触达文件系统」（异步 `realpath` 经模块级可注入对象换成挂起的实现，期限注入为 1 s）；chat-sessions「A project skill link into a hung mount」进 `server/test/slash-commands-project.test.ts`（同一写法），`server/test/screenshot-diff.test.ts` 加「`screenshots` 符号链接按缺失、不 opendir」（`<root>/screenshots` 是指向一个有文件的目录的符号链接、或是普通文件：`turnStart` 后 `evalEnd` 返回 `[]`，经 `screenshotFs` 记录的 `opendirSync` 调用为零；对照：真实目录照旧比对），既有项目技能、`GET /api/commands`、prompt 路由、regenerate 与 fork 的用例改为 `await` 后照旧全绿。验证：`npm test --workspace server -- screenshot-diff sandbox-resolve sandbox-facade mounts-skip workspace-snapshots session-prompt-attachments session-undo file-changes-ownership preview-app slash-commands commands-rest session-rest-slash turn-control-slash file-changes session-file-changes`、`make check`。
+- [ ] 8.3 `core/sandbox/resolve.ts`：导出第一段函数、`resolve` 的可选 `mountNames` 与带 `mount` 的结果；`core/sandbox/index.ts`：可选端口 `mountNamesOf`；`app.ts` 把 manager 的 `namesOf` 接给 facade；`tree.ts`（根一层）、`snapshots.ts`、`snapshots-restore.ts`（`take` / `restore` 选项加 `mountNames`）、`preview/app.ts`、`prompt-attachments.ts`、`undo.ts`、`file-changes-ownership.ts`（经 `turn-control.ts:292`，改为 `async` 并 `await`）各按 D21 的表加挂载名判定；`screenshot-diff.ts` 的 `list`（:28）在 `opendirSync` 之前经 `screenshotFs.lstatSync`（不跟随）检查：符号链接或不是目录返回 `missing`、不打开，`lstat` 的 `ENOENT` / `ENOTDIR` 同为 `missing`、其它错误为 `failed`（turn-artifacts MODIFIED，D21 表）；`file-changes-ownership.ts` 的 `realpath` / `lstat` 与 `slash-commands.ts:332,399` 的 `realpathSync.native` 改经 `fs/promises` 加 10 s 期限（`listProjectSkills`、`sessionSkills`、`sessionSkillsResolver` 返回 promise，`rest-commands.ts:46`、`sessions/rest.ts:192,304` 与 `branching.ts:45,361` 的 `skills` 端口（经 `sessions/index.ts:119`）随之 `await`）。验证：8.2 全绿、既有 sandbox / snapshot / preview / session 用例不变、`scripts/size-guard.sh`（`snapshots-restore.ts` 现 733 行）。
+- [ ] 8.4 `system.md` §9.9 加「宿主不进入挂载」一段（D21 的表与上界）；ADR-0003 补充同一节引 #1665 P9、P13。
+
+Suggested fixture level: expanded - 改沙箱 `resolve` 这一路径安全边界（security boundary）的契约。
+Minimal mergeable slice: `core/sandbox` 的 `resolve` 与 facade 两处（`sandbox-resolve.test.ts`、`sandbox-facade.test.ts`；端口缺省为空集，行为不变，无调用方也保绿）为首刀；`slash-commands.ts` 的异步 `realpath`（不依赖挂载名端口，既有用例改 `await` 即保绿）可作第二个独立首刀；`screenshot-diff.ts` 的 `lstat`（同样不依赖端口）可作第三个；`app.ts` 接线与各入口的跳过为后继 PR。
+Width exception: 后继 PR 改七个入口文件（`tree.ts`、`snapshots.ts`、`snapshots-restore.ts`、`preview/app.ts`、`prompt-attachments.ts`、`undo.ts`、`file-changes-ownership.ts`）与 `turn-control.ts` 的调用点，验证分四个用例文件（`mounts-skip`、`workspace-snapshots-mounts`、`file-changes-ownership` 与既有入口用例）——它们共享同一个挂载名端口与同一条词法规则；只接一部分会留下仍会同步进入挂载的入口，而 D21 的上界只在全部接上时成立。
+
+## 9. 挂载目录内的文件端点与异步适配器（workspace-mounts「挂载目录内的文件端点」「宿主不同步进入挂载」的适配器部分；file-operations「删除到回收目录」「重命名与移动」；workspaces「目录树、新建目录与隔离」的挂载判定）
+
+- [ ] 9.1 核对 Context：`rest.ts` 的 tree / dirs / file 与 `rest-archive.ts`、`rest-entries.ts` 的 download / delete / move（`sandbox.resolve` 之后、存在性检查之前的插入点）、`regular-file.ts` 与预览流（`openPreviewStream`、`sendFileRange`）的同步调用、组 5 / 6 的 `statusOf` 与离线判定入口。
+- [ ] 9.2 测试先行：新 `server/test/mounts-fs.test.ts`（适配器模块：每挂载 FIFO 闸门并发 1、10 s 期限从拿到闸门起算（注入为短值）、超期触发离线回调且排队调用全部以 `mount_offline` 结束、另一挂载不受影响；文件系统 seam 注入一个永不返回的实现）；新 `server/test/mounts-file-endpoints.test.ts`（整体挂载，经 `AssemblyDependencies.mounts` 注入 manager，以假 rclone 建出在线、离线、只读挂载；「挂起的挂载不阻塞别处」经 manager 构造选项注入永不返回、记录调用的适配器文件系统与 1 s 期限，并把挂载点目录置为 `0000`，使任何绕过适配器的同步调用以 `EACCES` 失败；root 下模式位不拦，该用例以 `it.skipIf(process.getuid?.() === 0)` 跳过，先例 `server/test/project-config-rest.test.ts:425`）：「删除与跨挂载移动」（含 `./`、`//` 写法与同一父目录内的改名）「离线与只读」（含未配置 `RCLONE_BIN` 时的一例）「越界先于挂载判定」「挂起的挂载不阻塞别处」「闸门排队与期限」、file-operations 的「挂载内不能删除」「跨挂载边界」、workspaces 的「离线与只读挂载」；拒绝时 `.trash` 无新批次、无 `file.delete` / `file.move` / `dir.create` 审计、文件系统未被访问（离线挂载点上放一个哨兵文件，断言不被列出或读取）；名字以挂载名开头的普通目录不受影响；在线可写挂载内 `dirs` 成功时适配器恰一次 `mkdir`、没有 `chmod`，记录下的同步调用里没有以挂载点为前缀的路径。验证：`npm test --workspace server -- mounts-fs mounts-file-endpoints`。
+- [ ] 9.3 新 `server/src/workspaces/mounts/fs.ts`（适配器：`lstat`、`readdir`、`open` / `read` / `close`、`mkdir`、`rename`，只用 `fs/promises`；文件系统实现与期限由 manager 构造选项给出；挂载内 `dirs` 只 `mkdir` 那一级、不 `chmod`，不调 `ensureSharedDir`——它的 `statSync` / `chmodSync`（`dirs.ts:43,48`）会同步进入挂载）；新 `server/src/workspaces/mounts/path-rule.ts`（第一段判定 + 七个端点的规则）；`rest.ts`、`rest-archive.ts`、`rest-entries.ts` 在插入点各调用一次判定，在线挂载内改走适配器（tree 的列举、file / download / archive 的打开与读取、dirs、move）。验证：9.2 全绿、既有 file-operations 与 workspaces 用例不变、`scripts/size-guard.sh`。
+- [ ] 9.4 `system.md` §9.9 加「挂载内的文件操作」一段（成员规则、支持的操作、删除与跨挂载移动拒绝、离线与只读的码、10 s 期限、`uploads` 与 `screenshots` 保留）。
+
+Suggested fixture level: expanded - 在用户文件读写路径上引入新的 IO 通道与超时即判离线的进程治理（不只是拒绝分支）。
+Minimal mergeable slice: `fs.ts` 与 `mounts-fs.test.ts`（无调用方也保绿）为首刀；`path-rule.ts`、三个路由文件的调用点与 `mounts-file-endpoints.test.ts` 为后继 PR——判定与七个端点必须同 PR，只接一部分端点会让挂载内删除仍走到 `EXDEV` 的 generic 500。
+Width exception: 后继 PR 改三个路由文件——一个判定函数与它在七个端点的调用点共用一个用例文件。
+
+## 10. 前端：挂载根行、卸载与挂载内预览（workspace-mounts「挂载根行」；files-web「工作空间页」的空根部分、挂载内的标记、「有挂载时的菜单与空根」场景的空根部分与「挂载内文件交给预览区的标记」场景；file-previewers「隔离来源的嵌入与令牌」「PDF 与办公文档」的挂载内部分与「挂载内文件不签发」场景）
+
+- [ ] 10.1 核对 Context：`workspace-browser.tsx`（783 行）的根行渲染与 `刷新`、`tree.tsx` 的行组件、空根与空目录的切换（:420-432）与放下目标判定、`dialogs.tsx` 的 `位置` 下拉、`web/src/lib/api-files.ts` 的解析写法、拷入层 `alert-dialog`；测试夹具 `web/test/support.ts` 的路由处理（:85-97，未登记的请求抛 `unexpected request`）与 `paths()`（:148）、`web/test/workspace-browser.test.tsx` 的本地 `requests()`（:114）；预览区 `web/src/features/files/preview-area.tsx`（:148 交给 `PreviewPane`）与 `preview.tsx`、`use-preview-token.ts` 的签发时机。逐个核对以请求记录的相对长度做标记、其后再比对的用例——`files-ops-drag.test.tsx:410`、`files-ops-delete-follow.test.tsx:307,391`、`files-ops-move-follow.test.tsx:184`、`files-ops-support.tsx:68` 的 `log()`（`mark()` :77 经它取长度）——确认标记之后不会出现 mounts 请求（mounts 只在进入空间、`刷新`、挂载与卸载之后重取，D18）；会出现的在 10.2 改成经过滤后的记录。
+- [ ] 10.2 共享测试夹具（首刀）：`web/test/support.ts` 的路由处理对未登记的 `GET /api/workspaces/<id>/mounts` 缺省回 `{enabled:false, mounts:[]}`；`paths()`（:148）、`workspace-browser.test.tsx` 的 `requests()`（:114）与 `files-ops-support.tsx:68` 的 `log()`（`mark()` 随之）滤掉 `…/mounts` 路径——既有的精确请求序列断言（`workspace-browser.test.tsx:189`–`:607` 的二十余处，以及经 `paths()` 断言的文件页与会话页侧边栏用例，如 `chat-workspace-sidebar-support.tsx`、`files-site-fixture.tsx` 的使用者）因此不改；绕过这两者、自己内联 `fetchMock.mock.calls.map(([path]) => path)` 断言精确序列的六处改用共享的 `paths(fetchMock)`：`workspace-browser-actual-selection.test.tsx:100`、`workspace-browser-path-echo.test.tsx:79`、`workspace-browser-only-paths.test.tsx:78`、`files-deep-link-component.test.tsx:52` 的 `requests`，与 `files-ops-drag.test.tsx:242,511` 的两处内联断言；10.1 判为会受影响的相对长度标记同样改成经过滤的记录；`files-page.test.tsx:181`（`新建` 菜单恰两项）与 `files-overlays.test.tsx:105`（菜单恰为 `新建文件夹`、`新建工作空间`）在缺省 `enabled:false` 下照旧成立。新用例对 mounts 请求用 `calls(fetchMock, path)` 显式断言。验证：`npm test --workspace web`（全量，产品代码未改，全绿）、`scripts/size-guard.sh web/test/workspace-browser.test.tsx`（756 → 757）。
+- [ ] 10.3 测试先行：新 `web/test/api-mounts.test.ts`（`MountView` 严格解析；`SourceView` 恰为管理员五键或普通用户三键之一、同一响应内混用即失败；`mountId` 编码）；新 `web/test/files-mount-roots.test.tsx`（假 `ApiClient`）：「在线、只读与离线」「卸载」「两处同一份实现」（侧边栏渲染）、挂载根行无 `更多操作`、不可拖、不是放下目标、`位置` 下拉排除只读与离线挂载、`GET …/mounts` 失败的 `role="alert"`、`刷新` 重取；`files-web` 的空根用例：根 `tree` 为空而有挂载时显示 `空目录` 而不是 `该工作空间暂无目录`；新 `web/test/files-mount-preview.test.tsx`：file-previewers「挂载内文件不签发」（挂载内的网页、PDF、办公文档显示 `挂载目录内的文件暂不支持预览，请下载查看`、先于过大与转换未启用的判定、无 `iframe`、停留越过 5 分钟仍零 `issuePreviewToken` 请求、有下载链接；`查看源码` 照常发 `file`；根下的网页照常建 `iframe`）与 files-web「挂载内文件交给预览区的标记」（文件页与会话页侧边栏的 `WorkspaceBrowser` 各一例；名字以挂载名开头的普通目录不标记；挂载内的 Markdown 与图片照常发 `file`）。验证：`npm test --workspace web -- api-mounts files-mount-roots files-mount-preview`。
+- [ ] 10.4 新 `web/src/lib/api-mounts.ts` + `api.ts` 导出；新 `web/src/features/files/use-mounts.ts`（取数、重取、`enabled` 与失败状态，使 `workspace-browser.tsx` 只加接线）；新 `web/src/features/files/mount-roots.tsx`（挂载根行与卸载确认）；`tree.tsx`（:420-432 的空根判定加「有挂载」、放下目标排除挂载根）与 `dialogs.tsx`（`位置` 下拉排除只读与离线挂载）；`preview-area.tsx` 与 `preview.tsx` 加「在挂载内」输入（为真且预览器走隔离预览来源时显示固定文案、不调 `use-preview-token`，file-previewers「隔离来源的嵌入与令牌」「PDF 与办公文档」）；`workspace-browser.tsx` 只加接线（≤798 行，超过即把接线再移进 `use-mounts.ts`）。验证：10.3 全绿、`npm test --workspace web`（全量：本步起产品代码开始发 mounts 请求，10.2 的过滤在此被真正检验）、`scripts/size-guard.sh`、typecheck。
+- [ ] 10.5 验收清单文件节新增 FL 行（以合入时末号续编）：SFTP 挂载在线时在树里可展开、可新建文件夹、会话里助手能读写挂载内的文件；只读挂载显示 `只读` 且新建被拒；停掉远端后点 `刷新` 显示 `离线` 且不可展开、恢复后点 `刷新` 显示 `在线`；卸载后挂载根行消失、助手再访问该目录失败；挂载内删除被拒的文案；挂载内的 PDF 显示 `挂载目录内的文件暂不支持预览，请下载查看` 且下载可用；结论 `待签`。验证：`web/test/functional-checklist.test.ts`。
+
+Suggested fixture level: compact - 列表与卸载按钮，服务端契约由组 7、组 9 钉住。
+Minimal mergeable slice: 10.2 的共享测试夹具（只改测试支持代码，产品代码未发 mounts 请求，能单独合入保绿）为首刀；API 客户端、hook、根行、卸载确认与挂载内预览为后继 PR，atomic——它们是同一可见行为的一条组件用例路径（挂载内预览要用 hook 给出的挂载名），只合客户端没有调用方。
+Width exception: 首刀改共享测试夹具与六个内联请求序列断言（及 10.1 判为受影响的相对长度标记），影响面是全部经 `support.ts`、`paths()` 与 `files-ops-support.tsx` 的 web 用例；以 `npm test --workspace web` 全量绿为证，不改既有断言的期望值。后继 PR 合并客户端、hook、根行、卸载确认与挂载内预览，验证分组件用例与 `npm test --workspace web` 全量两条路径——后者是共享夹具过滤第一次面对真实 mounts 请求的证据。
+
+## 11. 前端：挂载对话框与走查（workspace-mounts「挂载对话框」；files-web「工作空间页」的 `新建` 菜单）
+
+- [ ] 11.1 核对 Context：组 10 合入后的 `api-mounts.ts`、`use-mounts.ts` 与 `mount-roots.tsx`、`columns.tsx` 的 `新建` 菜单、拷入层 `select`（#1651）与 `switch`（#1662 或 #1664 中先合入的一组拷入；`web/src/components/ui/switch.tsx` 存在即可）、`web/e2e/ui-walk-files.ts`、`.github/workflows/ci.yml` 的 ui-walk job（:105 起，未设 `RCLONE_BIN`）。
+- [ ] 11.2 测试先行：新 `web/test/files-mount-dialog.test.tsx`（假 `ApiClient`）：「入口随开关」「提交与失败就地显示」「本地校验与服务器目录」（含管理员五键视图一例）、名称 `uploads` 与 `screenshots` 各显示 `该名称已保留` 且不发请求、`aria-modal` 与初始焦点、请求中禁用与 `取消` 中止、关闭后凭证字段清空、地址与 Web Storage 无私钥哨兵、无 Toast；files-web 的「有挂载时的菜单与空根」菜单部分。验证：`npm test --workspace web -- files-mount-dialog`。
+- [ ] 11.3 新 `web/src/features/files/mount-dialog.tsx`；`columns.tsx` 加可选 `挂载目录` 项；`api-mounts.ts` 加 `createMount` 与 `listMountSources`。验证：11.2 全绿、typecheck、size-guard。
+- [ ] 11.4 `make ui-walk` 文件页一步（`web/e2e/ui-walk-files.ts`）只覆盖挂载关闭：CI 现有 ui-walk job（不设 `RCLONE_BIN`）下 `新建` 菜单没有 `挂载目录`。挂载开启的走查不进 CI（开启要求 `/dev/fuse` 与 `fusermount3`，一个服务也不能同时处于开、关两态）：在测试主机上以挂载开启的服务手工走一遍——打开对话框、以主机 `localhost` 提交、对话框内出现 `该主机不允许挂载`、取消后没有新增挂载根行——记为验收清单文件节的一条 FL 行，结论 `待签`。验证：CI `make ui-walk` 绿；`web/test/functional-checklist.test.ts`。
+- [ ] 11.5 验收清单文件节新增 FL 行：经对话框挂载 SFTP（密码与私钥各一）、SMB、管理员登记的服务器目录；错误凭证就地显示 `挂载失败，请检查主机、路径与凭证`；结论 `待签`。验证：`web/test/functional-checklist.test.ts`。
+
+Suggested fixture level: expanded - 用户录入凭证的表单（credentials 触发项），尽管服务端契约已由组 7 钉住。
+Minimal mergeable slice: atomic - 菜单项、对话框与提交是同一条组件用例路径；菜单项没有对话框就是占位。
+Width exception: 验证分 CI（组件用例与关闭分支的 ui-walk）与测试主机手工走查（开启分支，FL 行 `待签`）两条路径——开启分支在 CI 上没有 FUSE 前提，无法自动化。
+
+## 12. 真实挂载验证层（workspace-mounts「真实挂载验证层」）
+
+- [ ] 12.1 核对 Context：`temp-dir-remove-fuse.test.ts` 的 opt-in 与 `requirePrerequisites` 写法、#1665 的容器搭法（不入库的部分只留在测试主机），测试主机上的 sshd 容器与停 / 启它的两个可执行文件（不入库）。
+- [ ] 12.2 新 `server/test/linux/mounts-fuse.test.ts`：「非 opt-in 明示跳过」「opt-in 缺前提即失败」「local 后端的生命周期」「sftp 读写与远端停机」（`WORKBUDDY_FUSE_RCLONE` 指向 rclone 可执行文件；`WORKBUDDY_FUSE_SFTP_HOST`、`_PORT`、`_USER`、`_PASS`、`_PATH`、`_DOWN`、`_UP` 只给一部分即失败）；每例先卸载、确认 mountinfo 无挂载点，再以 `fs/promises` 的 `rm` 清理。验证：本机与 CI 报告 skipped；测试主机一次性容器里 `WORKBUDDY_FUSE_TEST=1` 且 `WORKBUDDY_FUSE_SFTP_*` 全部给出时全绿三次——签收必须含 `sftp` 两例（读写、`_DOWN` 之后 35 s 内 `offline`、`_UP` 之后 360 s 内 `online`——退避封顶 300 s、就绪窗口 20 s 与余量），只跑 `local` 不算签收。
+- [ ] 12.3 ADR-0003「2026-10 补充」追加本层在测试主机的运行结果表（容器形态、rclone / fusermount3 版本、每例结果；不含主机地址与凭证）；组 6 编译入口用例若在 CI 报告 skipped，同表记它在测试主机上的结果。
+
+Suggested fixture level: compact - 只加 opt-in 测试与 ADR 记录，不改产品代码、不进 CI。
+Minimal mergeable slice: atomic - 一个测试文件与它的实测记录，没有可独立合并的更小子集。
+Width exception: 验证分 CI（报告 skipped）与测试主机签收运行两条路径；只有后者证明真实 FUSE 行为，签收以 `sftp` 两例为准。

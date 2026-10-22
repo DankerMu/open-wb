@@ -1,0 +1,240 @@
+# http-service-skeleton Spec Delta
+
+> s1b-workspace-mounts：以 `s1d-connectors` 的 MODIFIED 文本为底（逐字沿用，含其全部场景标题）。「服务启动与装配」：应用配置三十七 → 四十项（新增「挂载键」一段：`RCLONE_BIN`、`MOUNT_HOST_ALLOW`、`MOUNT_MAX_PER_WORKSPACE`，`RCLONE_BIN` 的启动预检在配置阶段、失败 `reason` 为 `config`，不新增启动阶段）；`server_started` 之后不等待地恢复挂载；关停在关闭 DB 之前卸载挂载；启动记录的模块列表不变（挂载属于 workspaces 模块）；改写「干净启动与一致命令面」的计数与期望，加一个场景。「统一错误信封」：十八 → 二十五码（七个 `mount_*` 码）、归属身份二十九 → 三十一条（`POST /api/workspaces/:id/mounts`、`POST /api/mount-sources`），写明两条新路由的判定次序与 body limit；改写带计数的场景，加两个场景（design D4、D12、D13、D14、D17）。其余逐字沿用该 MODIFIED 文本。
+
+## MODIFIED Requirements
+
+### Requirement: 服务启动与装配
+系统 SHALL 以 `server/src/app.ts` 装配 Fastify 实例，并以 `server/src/server.ts` 作为唯一 production listen/DB ownership 入口；import该module只暴露pure config seam，不得mkdir/open/listen或注册signal，只有ESM main guard命中的执行路径可启动。唯一配置源为 own environment keys `HOST`、`PORT`、`DB_PATH`、`STATIC_ROOT`、`OMP_BIN`、`OMP_STATE_DIR`、`OMP_IDLE_MS`、`OMP_MAX_PROCESSES`、`OMP_SPAWN_CONCURRENCY`、`SANDBOX_ROOT`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY`、`MODEL_ID`、`OMP_USER`、`MODEL_REASONING`、`SNAPSHOT_MAX_FILE_BYTES`、`SNAPSHOT_MAX_TOTAL_BYTES`、`SNAPSHOT_MAX_ENTRIES`、`SNAPSHOT_EXCLUDE_NAMES`、`APPROVAL_MAX_MODE`、`MODEL_CATALOG`、`UPLOAD_MAX_BYTES`、`UPLOAD_MAX_FILES`、`BROWSER_BIN`、`MODEL_VISION`，以及下一段列出的十二个预览与文件键与「挂载键」一段列出的三个挂载键（共四十项）：前二十五项的缺省值分别为 `127.0.0.1`、`3000`、repo-root `var/dev.db`、repo-root `web/dist`、repo-root `var/omp/omp`、repo-root `var/omp-state`、`600000`、`16`、`os.availableParallelism()`、repo-root `var/sandbox`、未配置、未配置、`deepseek-v4.1-flash`、未配置（同uid直接spawn）、`on`、`20971520`、`524288000`、`50000`、`node_modules,.venv,__pycache__`、`yolo`、未配置、`524288000`、`10`、未配置（部署没有浏览器）、`on`；relative DB/static/omp/state/sandbox path SHALL 相对由 entry module identity 推导的repo root，不得随shell/npm workspace cwd分裂。`PORT` SHALL只接受canonical ASCII decimal `1..65535`；HOST missing取默认、empty或whitespace-only非法且不得trim/coerce；exact `localhost` SHALL 规范为 `127.0.0.1` 以保证单一 listener binding，其它nonempty string原样交listen；DB/static/omp/state/sandbox path explicit empty非法。`OMP_IDLE_MS` SHALL只接受canonical ASCII decimal整数1..2147483647（原生计时器上限，用户明确批准超限启动失败）；`OMP_MAX_PROCESSES` SHALL 遵守与 `OMP_IDLE_MS` 相同的解析纪律（canonical ASCII decimal 正整数 1..2147483647，缺省 16，empty/`0`/非 canonical/超限均为启动失败），经 `agent-config.ts` 同一 resolver 解析为 supervisor 的全局活进程上限；`OMP_SPAWN_CONCURRENCY` SHALL 遵守同一解析纪律（缺省 `os.availableParallelism()`），经同一 resolver 解析为 supervisor 的并发 spawn 上限（见 omp-pool「并发 spawn 上限」）；`MODEL_ID` 缺省 `deepseek-v4.1-flash`；显式给出时 SHALL 为 1 到 128 个 UTF-8 字节、不含 U+0000–U+001F 与 U+007F 的字符串（与 model-selection「模型白名单配置」对白名单条目 `id` 的规则相同），取值原样使用、SHALL NOT 去首尾空格（` custom-model ` 是合法取值，首尾空格属于模型名）；empty、含上述任一控制字符、超过 128 个 UTF-8 字节均为启动失败（owner 2026-10-12，#1261）。这项校验与是否配置 `MODEL_CATALOG` 无关（配置了白名单时，违反它的取值本来也不等于任何一项的 `id`，同样点名 `MODEL_ID`）；`MODEL_REASONING` SHALL 只接受 exact `on` 或 `off`（缺省 `on`；empty、大小写不同如 `ON`、`true`/`yes` 及其它任何值均为启动失败），经同一 resolver 解析为布尔并作为托管 models.yml 的 `reasoning` 输入（`on` → true、`off` → false，写出规则归 model-proxy）；`SNAPSHOT_MAX_FILE_BYTES`、`SNAPSHOT_MAX_TOTAL_BYTES`、`SNAPSHOT_MAX_ENTRIES` SHALL 遵守与 `OMP_IDLE_MS` 相同的解析纪律（canonical ASCII decimal 正整数 1..2147483647，empty/`0`/非 canonical/超限均为启动失败），`SNAPSHOT_EXCLUDE_NAMES` SHALL 为逗号分隔的目录名列表（显式 empty 合法，表示不排除任何目录；任一名段为空、含 `/` 或 NUL、为 `.` 或 `..` 均为启动失败），四者经同一 resolver 解析为快照设置（语义归 workspace-snapshots「快照上限与配置」）；`APPROVAL_MAX_MODE` SHALL 只接受 exact `always-ask`、`write` 或 `yolo`（缺省 `yolo`；empty、大小写不同如 `YOLO`、首尾带空白及其它任何值均为启动失败），经同一 resolver 解析为全部会话可用审批档位的上界（session-permission-tier「管理员最高档」）；`MODEL_CATALOG` 缺省未配置，显式给出时 SHALL 按 model-selection「模型白名单配置」解析为模型白名单（JSON 数组；它与 `MODEL_ID`、`MODEL_REASONING` 的关系、全部非法情形及各自点名的键见该条），未配置时白名单是由 `MODEL_ID`、`MODEL_REASONING` 与 `MODEL_VISION` 构成的单模型——托管 models.yml 的输入由此从「一个模型 id 加一个布尔」变为这份白名单，单模型时写出的内容见 model-proxy「托管 models.yml」（与改前只差 `maxTokens` 一行；`MODEL_VISION` 为 `on` 时另有 `input` 三行）；`MODEL_VISION` SHALL 只接受 exact `on` 或 `off`（缺省 `on`；empty、大小写不同及其它任何值均为启动失败，与 `MODEL_CATALOG` 同设亦启动失败），经同一 resolver 解析为单模型项的 `vision`（model-selection「模型白名单配置」，#912）；`BROWSER_BIN` 缺省未配置（部署没有浏览器），显式给出时 SHALL 按 browser-runtime「浏览器可执行文件配置」校验（绝对路径、可执行普通文件），经同一 resolver 解析为 omp 浏览器的可执行文件；白名单同时是模型代理放行的 `model` 取值集合（model-proxy「透传端点与 bearer 鉴权」）；`UPLOAD_MAX_BYTES` 与 `UPLOAD_MAX_FILES` SHALL 遵守与 `OMP_IDLE_MS` 相同的解析纪律（canonical ASCII decimal 正整数 1..2147483647，缺省分别为 `524288000` 即 500 MiB 与 `10`，empty/`0`/非 canonical/超限均为启动失败），经同一 resolver 解析为单个上传文件的字节上限（workspaces「文件上传」）与每条消息可带的附件总数上限（message-attachments「prompt 携带附件」「输入框附件标签」）；非法值的配置错误SHALL命名该键而不含输入值。`MODEL_UPSTREAM_BASE_URL`/`MODEL_UPSTREAM_API_KEY`缺省合法，显式empty非法；`MODEL_UPSTREAM_API_KEY` 显式给出时还 SHALL 是代理所发 `authorization` 头的合法取值——以 Node 的 `http.validateHeaderValue("authorization", "Bearer " + 取值)` 判定，抛错即启动失败（不另写字符集；配置错误 SHALL 命名该键而不含输入值，#909）；未同时配置时种子行没有上游（两列为 NULL），代理仍先鉴权（无效 bearer 401；通过鉴权与 body 检查后，登记但无上游的模型 502——model-proxy「透传端点与 bearer 鉴权」），不得阻止服务启动。OMP_USER及仅sudo模式的安全PATH前置条件 SHALL遵守主omp-uid-isolation规范，不在本切片重定义。全部config SHALL在任何filesystem/database/listen effect前验证。
+
+**模型键为种子（change s1d-model-registry）。** `MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 六个键的解析、缺省与非法值规则一字不改，但它们的解析结果只在启动阶段 `model_registry`（`db` 之后、`app` 之前）里、且只在 `models` 表为空时写入注册表（model-registry「环境种子」）；表非空时忽略，六键任一被设置则经同一受管 stderr writer 恰写一行 `{"event":"model_env_ignored"}`（只有 `event` 一个键）于 `server_started` 之前。此后白名单、缺省模型与每模型上游的唯一来源是注册表快照（model-selection「模型白名单配置」）：托管 `models.yml`、overlay 看图角色与代理路由都读快照，`models_yml` / `host_overlay` 两阶段调 model-registry「变更即发布」的同一发布函数。
+
+change s1f-files-page 在上述键之外增加十二个预览与文件键，经同一 pure config seam 解析、同样在任何 filesystem/database/listen effect 前校验，非法值的配置错误 SHALL 命名该键而不含输入值：`PREVIEW_PORT`（canonical ASCII decimal `0..65535`，缺省 `0` 即由系统分配端口；除允许 `0` 之外与 `PORT` 同一解析纪律）；`PREVIEW_ORIGIN`（可选；给出时 SHALL 整体匹配 `^https?://[^/?#\s]+$`——只有协议与 authority，无路径、无结尾斜杠——否则启动失败；显式 empty 非法）；`PREVIEW_CACHE_DIR`（缺省 repo-root `var/preview-cache`，relative 相对 repo root，显式 empty 非法）；`OFFICE_SPOOL_DIR`（可选；给出时 SHALL 为绝对路径，否则启动失败；显式 empty 非法；未配置即办公文档转换关闭；配置解析时不检查该目录是否存在、不创建它——它是部署方建好的、与转换 sidecar 共享的 spool 卷，存在性、属主与 mode 由启动预检判定，见 office-preview「转换 sidecar 的健康与 fail-closed」。change office-convert-sandbox 以它 1:1 替换了原来的 `OFFICE_BIN`：`OFFICE_BIN` 仍被设置时 SHALL 启动失败：stderr 与其它非法配置相同，恰为上文的 generic failure record、`reason` 为 `config`，SHALL NOT 点名该键、不新增 `reason` 取值；`resolveServerConfig` 抛出的 message 为 `OFFICE_BIN is retired; configure OFFICE_SPOOL_DIR`，命名该键而不含输入值）；`OFFICE_CONVERT_TIMEOUT_MS`（缺省 `60000`）、`OFFICE_CONVERT_CONCURRENCY`（缺省 `2`）、`PREVIEW_TEXT_MAX_BYTES`（缺省 `1048576`）、`PREVIEW_IMAGE_MAX_BYTES`（缺省 `20971520`）、`PREVIEW_DOCUMENT_MAX_BYTES`（缺省 `104857600`）、`PREVIEW_NOTEBOOK_MAX_BYTES`（缺省 `10485760`）、`PREVIEW_ARCHIVE_MAX_ENTRIES`（缺省 `1000`）、`TRASH_RETENTION_DAYS`（缺省 `30`）八项 SHALL 遵守与 `OMP_IDLE_MS` 相同的解析纪律（canonical ASCII decimal 正整数 1..2147483647，empty/`0`/非 canonical/超限均为启动失败）；其中 `PREVIEW_ARCHIVE_MAX_ENTRIES` 的上界是 `10000` 而不是 `2147483647`——`10001` 及以上同为启动失败，错误同样只命名该键、不含输入值。这些键的消费方见 preview-origin、office-preview、file-operations 与 workspaces。
+
+**挂载键（change s1b-workspace-mounts）。** 在上述键之外再增加三个挂载键，经同一 pure config seam 解析、同样在任何 filesystem/database/listen effect 前校验，非法值的配置错误 SHALL 命名该键而不含输入值：`RCLONE_BIN`（缺省未配置，即挂载关闭；给出时 SHALL 为绝对路径，显式 empty 或相对路径为启动失败）、`MOUNT_HOST_ALLOW`（缺省未配置，即不限主机；给出时 SHALL 为逗号分隔的主机名单，显式 empty、任一空项或任一项含 ASCII 字母数字与 `.`、`:`、`-` 之外的字符为启动失败）、`MOUNT_MAX_PER_WORKSPACE`（缺省 `8`，与 `OMP_IDLE_MS` 相同的解析纪律）。配置了 `RCLONE_BIN` 时，配置阶段 SHALL 另做 workspace-mounts「挂载配置与启动预检」的预检（`RCLONE_BIN` 为可执行普通文件、PATH 上有可执行的 `fusermount3`、`/dev/fuse` 存在（且为字符设备）；`OMP_USER` 已配置时 `/etc/fuse.conf` 含 `user_allow_other` 一行、`/usr/bin/id -u -- <OMP_USER>` 给出数值 uid，且 PATH 上的 `fusermount3` / `fusermount` 没有 other 执行位、属组不是 omp 用户的任何一个组）：任一不过与其它非法配置相同，恰为上文的 generic failure record、`reason` 为 `config`，不新增 `reason` 取值；预检只读文件系统与运行 `id`，不建目录、不开 DB、不 listen。未配置 `RCLONE_BIN` 时 SHALL NOT 检查任何 FUSE 前提。成功记录 `server_started` 写出之后，入口 SHALL 不等待地恢复全部已登记挂载（workspace-mounts「服务启停与挂载」）——与回收目录的首轮清理同一写法：恢复中的任何失败只使该挂载离线，SHALL NOT 输出 failure record、SHALL NOT 改变退出码；未配置 `RCLONE_BIN` 时不恢复。关停时，挂载的卸载（惰性卸载并结束 rclone 子进程，不删除挂载行）SHALL 发生在关闭唯一 DB handle 之前，见下文失败清理与关停一段。
+
+对于non-`:memory:` DB path，入口SHALL recursive创建且只创建missing `dirname(DB_PATH)`，随后依主omp-uid-isolation「自有状态不对组可读」在openDb前准备exact主文件与既有sidecars为0600，再由唯一`openDb`打开exact file；不得创建`STATIC_ROOT`；监听成功后经`ensureOmpStateLayout`建立omp-runtime「OMP_STATE_DIR 托管布局」的目录、经 sandbox-core「沙箱根目录」的 `ensureSandboxRoot` 建立并校正 `SANDBOX_ROOT` 自身（change sandbox-boundary-closure，owner B2/B3/B4），并写托管models.yml、omp-runtime「宿主 overlay」的`host-overlay.yml`与connectors「托管 mcp.json」的`mcp.json`（布局建立失败、沙箱根阶段抛出——两种模式下的抛出条件见下文「沙箱根阶段」——与三个文件任一写入失败走同一partial-start failure cleanup）；账号根、工作空间根与`sessions/<ownerId>`仍由首次spawn或workspace创建按需创建，OMP_BIN目录不由启动创建。Exact `:memory:` SHALL保留SQLite特殊identity且不得mkdir。DB parent为existing non-directory、不可创建/写入或DB/migration不合法 SHALL走同一partial-start failure cleanup，不得fallback到默认路径。
+
+`npm run start --workspace server` SHALL在clean checkout先以现有TypeScript compiler构建production-only JS并把tracked `migrations/`完整递归tree逐文件逐字节带入与compiled module相同的runtime位置，再执行compiled唯一入口；`make dev` SHALL只转发到该command，不得形成第二套启动逻辑。成功顺序 SHALL为validated config → DB-parent prepare → private-file preparation → DB open/migrate → 办公文档 sidecar 预检（仅在配置了 `OFFICE_SPOOL_DIR` 时运行；它不是启动阶段、永不使启动失败：预检失败只使办公文档转换器以不可用的形态装配，并在 application stderr 经同一受管 writer 恰写一行 LF-terminated exact JSON `{"event":"office_convert_sidecar_unavailable"}`——只有 `event` 一个键，无原因 / 路径 / 配置值，写失败 SHALL 吞掉；该行位于 `server_started` 之前；预检的内容、5 s 等待与失败后果归 office-preview「转换 sidecar 的健康与 fail-closed」）→ 注册表种子与快照（`model_registry`，同步的 node:sqlite 操作：表空时按解析出的白名单与 `MODEL_UPSTREAM_*` 插入，然后读快照，使 createApp 拿到的注册表已填好；失败走同一 partial-start failure cleanup）→ createApp（auth → http guard → model-proxy → sessions → workspaces → accounts → models → experts → skills → connectors，sessions先对账后开放路由；workspace store/facade/audit绑定同一DB与runtime.sandboxRoot）→ listen → 建立托管布局（`ensureOmpStateLayout`；主监听器绑定成功到布局建完之间 SHALL NOT 有 `await` 或其它让出事件循环的步骤，使主监听器受理的第一个请求到达时布局已在——owner 2026-10-13 裁决，#1337）→ 建立并校正沙箱根（`ensureSandboxRoot`，见下文「沙箱根阶段」；同一无 `await` 约束延伸到它返回为止，使主监听器受理的第一个请求处理时沙箱根已在——change sandbox-boundary-closure，owner B4）→ 预览监听器 listen（`PREVIEW_PORT`，与主监听器同一 `HOST`，后于主监听器，见「预览监听器的装配与关停」）→ 以实际绑定地址推导可连接proxyBaseUrl并写`<OMP_STATE_DIR>/home/.omp/agent/models.yml`（随后写宿主overlay）→ 紧接宿主overlay写托管`<OMP_STATE_DIR>/home/.omp/agent/mcp.json`（`mcp_json`，内容为当时启用的连接器，connectors「托管 mcp.json」；change s1d-connectors）→ 建立预览缓存目录并启动回收目录与转换缓存的周期清理（「预览监听器的装配与关停」）→ application-owned stdout一行LF-terminated exact JSON `{"event":"server_started","host":"<actual>","port":<integer>,"modules":["core/db","auth","http","model-proxy","sessions","workspaces","accounts","models","experts","skills","connectors"]}`，不得有extra key或在listen前/应用stderr出现。Package-manager command banner不属于application record。
+
+Runtime config/DB/注册表种子/app/listen/托管布局/沙箱根/预览监听器 listen/models.yml/mcp.json/预览缓存目录/success-record任一步失败 SHALL不输出success record，以nonzero退出，并在stderr sink可写时由application-owned stderr输出一行LF-terminated exact generic JSON `{"event":"server_start_failed","reason":"<stage>"}`（恰这两个键，无其它key/原始error/路径/config；`reason` 是封闭枚举里的一个源码字面量，只取决于失败发生在哪个启动阶段、不取自error对象：`config`（解析配置）、`db`（建DB父目录、收紧DB文件权限、打开并迁移DB）、`app`（装配应用）、`listen`（监听）、`state_layout`（建托管布局）、`sandbox_root`（建沙箱根并校正其权限位，见上文「沙箱根阶段」）、`models_yml`（写托管models.yml）、`host_overlay`（写宿主overlay）、`publish`（其余：核对bound address与写success record）；change s1f-files-page 新增的两步各有自己的取值：`preview_cache`（建预览缓存目录）、`preview_listen`（预览监听器listen）；change s1d-model-registry 新增 `model_registry`（注册表种子与快照，位于 `db` 之后、`app` 之前，model-registry「环境种子」）；change s1d-connectors 新增 `mcp_json`（写托管 mcp.json，紧接 `host_overlay` 之后、`preview_cache` 之前，connectors「托管 mcp.json」）；#1203）；若stderr sink自身不可写，该行物理不可达，系统仍SHALL nonzero、释放资源且不得产生unhandled stream stack。Node `node:sqlite` ExperimentalWarning MAY作为平台warning另出stderr。任意success/failure stream均不得dump environment或包含cookie/password/session值、MODEL_UPSTREAM_API_KEY值或会话bearer。Application stdout/stderr record SHALL经受管writer处理sync throw、write callback与stream error，settle exact一次且不得泄漏raw EPIPE。受管writer SHALL 在每个 stream 上至多挂一个 `error` 监听、由该 stream 的全部在途记录共用（一次 stream `error` 事件使当时全部在途记录各自以该 error settle 一次）：在途记录数不设上限，同一 tick 内写任意多条都 SHALL NOT 使 Node 向 stderr 打印 `MaxListenersExceededWarning`（那是一行非 JSON 输出）；SHALL NOT 以 `setMaxListeners`/`defaultMaxListeners` 调高上限来达成。最后一条在途记录 settle 之后经过一轮 `setImmediate` 该监听才摘除（write callback 之后、`setImmediate` 之前到达的 EPIPE `error` 事件仍被消费，不成为未处理异常）；其间有新记录进入则继续沿用同一个监听。监听成功后，生产入口 SHALL 把 sessions 模块的 `log` 端口接到同一受管 writer：每条握手超时记录（见 omp-runtime「握手超时可观测」）在 application stderr 恰写一行 LF-terminated exact JSON `{"event":"omp_handshake_timeout","sessionId":"<id>","reason":"handshake timeout","elapsedMs":<integer>}`，无 extra key、无原始 error/路径/凭据；会话 id 是已出现在 API URL 中的公开标识，不属于上文禁止的 session 凭据值；写失败 SHALL 吞掉，不影响请求结果与进程退出码。同一 `log` 端口 SHALL 以同样的写法承接 upstream-failure「上游失败日志」的记录：每条恰写一行 LF-terminated exact JSON `{"event":"upstream_failed","sessionId":"<id>","reason":"<reason>","status":<integer|null>}`，无 extra key、无上游正文/路径/凭据（#909）。生产入口 SHALL 同样提供 sessions 模块的 `onError`：supervisor 每通知一次保留的基础设施故障，在 application stderr 经同一受管 writer 恰写一行 LF-terminated exact JSON `{"event":"session_fault"}`，无 extra key、无原始 error message/stack/路径/凭据；该 sink SHALL 同步返回 `undefined`（不返回 thenable），写失败 SHALL 吞掉——不产生未处理 rejection、不再次触发 `onError`、不影响请求结果与进程退出码。同一个 `onError` 也接收会话删除清理会话文件失败时的报告（session-metadata「会话删除」的错误通道），这类报告同样写一行 `session_fault`，但不进入 supervisor 的保留故障、不在关停时暴露——该记录的行数因此不等于关停时暴露的故障数。关停时暴露保留故障的既有行为不变。
+
+失败清理 SHALL关闭当前入口已拥有的app、预览监听器与DB；每个entry SHALL把AbortSignal传给Fastify listen（两个监听器各自的在途绑定各用一个，见「预览监听器的装配与关停」），SIGINT/SIGTERM只对pending bind执行abort；已绑定时SHALL经共享幂等shutdown先完成所有runtime原生退出及store回收，再停止主listener（应用的关闭钩子随之卸载全部挂载，workspace-mounts「服务启停与挂载」；change s1b-workspace-mounts），最后关闭唯一DB handle（预览监听器在这一串之前关闭，次序见「预览监听器的装配与关停」）。不得让同一AbortSignal的Node原生close绕过runtime先行归属；重复/混合signal不得在清理期间重新abort已绑定listener。干净取消正常退出；已确定真实失败保持nonzero，不得被signal抹去failure record或降为0。Signal落在listen invoke与实际bind之间时不得后到绑定、不得输出success/failure record，port/DB须可由successor立即复用。Signal 落在办公文档 sidecar 预检的有界等待期间（change office-convert-sandbox；此时入口只拥有 DB）时，等待不被中断，等待结束后入口 SHALL 先核对信号再做任何后续步骤：已收到 → 释放已拥有的 DB、以 0 退出，不输出 success / failure record，也不输出 `office_convert_sidecar_unavailable` 行；主 listen 之后无 `await` 的不变量不因预检改变（预检在 createApp 之前）。`.gitignore` SHALL排除default `var/` runtime output，knip SHALL把`src/server.ts`识别为entry。
+
+**沙箱根阶段（change sandbox-boundary-closure，owner B2/B3/B4）。** 在上文成功顺序里「建立并校正沙箱根」那一步，入口 SHALL 同步调用 sandbox-core「沙箱根目录」的 `ensureSandboxRoot(SANDBOX_ROOT, {strict: OMP_USER 已配置})`。它抛出时该步的 `reason` 为 `sandbox_root`，失败行同上不带路径与原始错误；`OMP_USER` 未配置且它返回 `outcome: "unchanged"`（失败原因见 sandbox-core「沙箱根目录」第 4 步）时，入口 SHALL 经同一受管 stderr writer 恰写一行 LF-terminated exact JSON `{"event":"sandbox_root_unchanged"}`（只有 `event` 一个键，无路径、无 errno、无 mode），启动继续、不改变退出码、不再纠正（已落下的权限位不回滚，见 sandbox-core「沙箱根目录」），该行写失败按 `session_fault` 的规则吞掉。配置阶段失败时 SHALL 仍不创建沙箱根；`db`、`app`、`listen`、`state_layout` 任一失败时同样不创建它。惰性创建点（Shared agent module assembly 的 `ensureSharedDir`、工作空间 store、spawn 前的账号根）不因此改变，仍只对新建的分量施加 `2770`，启动之后它们再也建不到根这一级。
+
+#### Scenario: 干净启动与一致命令面
+- **WHEN** 从repo root执行`make dev`或`npm run start --workspace server`，或build后从foreign cwd直接执行absolute `dist/server.js`，且未设置四十项应用配置
+- **THEN** 三种启动形状消费同一entry/config identity，监听`127.0.0.1:3000`，supervisor 的活进程上限为 16、并发 spawn 上限为 `os.availableParallelism()`，托管models.yml恰一个模型条目并按 `MODEL_REASONING=on` 声明 reasoning；审批档位上界为 `yolo`、上传上限为 524288000 字节与 10 个；挂载关闭（`GET /api/workspaces/:id/mounts` 的 `enabled` 为 false）；只在repo-root recursive创建`var/`并使`var/dev.db`完成tracked migrations；创建`var/omp-state/home/.omp/agent/models.yml`且baseUrl为实际端口的可连接回环地址；建出 repo-root `var/sandbox` 为 `0o3770` 且其下无条目（change sandbox-boundary-closure，owner B4）；不创建missing `web/dist`/bin；`GET /api/healthz`返回exact200；application stdout只在listen成功后出现上述exact startup record；SIGTERM后端口与DB均可立即由后继进程重用
+
+#### Scenario: override、非法配置与部分启动失败
+- **WHEN** 以可用custom host/port、absolute或relative DB/static/omp/state/sandbox路径、`OMP_MAX_PROCESSES`、`OMP_SPAWN_CONCURRENCY`、`MODEL_REASONING=off` 及模型配置启动
+- **THEN** override逐项原样生效（含两个上限值；`MODEL_REASONING=off` 时models.yml模型条目声明 `reasoning: false` 且不写 `compat`（#1563 起每个条目恒写 `reasoning` 与 `input`，见 model-proxy「托管 models.yml」）），relative path仍绑定repo root；只创建non-memory DB的exact parent、OMP_STATE_DIR托管布局与 override 的 `SANDBOX_ROOT`（建为 `0o3770`、其下无条目）、绝不创建STATIC_ROOT或误建default DB；HOST=0.0.0.0时models.yml的baseUrl为http://127.0.0.1:<实际端口>/v1，IPv6通配绑定使用http://[::1]:<实际端口>/v1；build output中的完整migration tree与tracked source inventory/bytes一致，health/info/auth/static合同保持
+- **WHEN** `PORT`为empty/whitespace/sign/fraction/exponent/zero/out-of-range，HOST为empty/whitespace-only，DB/static/omp/state/sandbox path为explicit empty，OMP_IDLE_MS为empty/0/abc/负数/小数/非canonical或大于2147483647的整数，OMP_MAX_PROCESSES为empty/0/abc/负数/小数/非canonical（如`016`、`+8`）或大于2147483647的整数，OMP_SPAWN_CONCURRENCY为同一组非法值，`SNAPSHOT_MAX_FILE_BYTES`/`SNAPSHOT_MAX_TOTAL_BYTES`/`SNAPSHOT_MAX_ENTRIES`为同一组非法值，`SNAPSHOT_EXCLUDE_NAMES`为`a/b`、`..`或含空名段（如`a,,b`），`MODEL_REASONING`为empty/`ON`/`true`/`yes`，`MODEL_ID`为empty、含换行（U+000A）、含 U+007F 或长 129 个 UTF-8 字节，上游变量为explicit empty，或import `server.ts`但不命中main guard
+- **THEN** main-path非法config在任何filesystem/database/listen副作用前nonzero，application stderr恰一行上述generic failure record且无success；import-without-main保持silent且无filesystem/database/listen/signal副作用
+- **WHEN** DB parent为file/不可创建、DB file创建/chmod失败、DB open/migration失败、HOST由listen拒绝、port已占用、models.yml不可写或post-listen stdout sink失败
+- **THEN** 进程nonzero且stderr可写时只有generic failure record；stdout EPIPE不得输出raw stack；关闭所有已拥有的app/DB，不遗留可监听server、活跃omp原生子进程或active SQLite handle，parent/static/default路径无额外副作用；stderr同时不可写时允许无record但同样nonzero/cleanup
+- **WHEN** SIGINT/SIGTERM 落在listen invoke后、实际bind前，或成功后重复/混合到达
+- **THEN** pending bind由该次在途绑定所用的AbortSignal取消且无startup record，或已绑定listener幂等关闭；两种情况下均完成已拥有runtime原生退出后释放port、最后关DB；干净取消正常退出，successor可立即复用exact port/DB
+- **WHEN** 配置了 `OFFICE_SPOOL_DIR`、spool 根合格但没有 `heartbeat`，SIGTERM 落在启动开始后约 1 s（预检等待期间）
+- **THEN** 进程在 SIGTERM 后 5 s 内以 0 退出；stdout 与 stderr 没有任何 application record（无 success、无 failure、无 `office_convert_sidecar_unavailable`）；DB 已关闭，port 与 DB 可由 successor 立即复用
+
+#### Scenario: 启动失败记录带失败阶段
+- **WHEN** 编译入口分别遇到：非法config；DB父目录位置是一个文件；空库上 `models` 表在迁移后、种子前被换成同名只读视图（种子插入失败）；监听端口已被占用；托管布局里 `home/.omp` 被一个文件占位；`SANDBOX_ROOT` 的位置是一个普通文件；`host-overlay.yml` 的位置是一个目录；`mcp.json` 的位置是一个目录；listen之后stdout sink写失败
+- **THEN** 每次进程nonzero，application stderr恰一行，依次整行等于 `{"event":"server_start_failed","reason":"config"}`、`…"reason":"db"}`、`…"reason":"model_registry"}`、`…"reason":"listen"}`、`…"reason":"state_layout"}`、`…"reason":"sandbox_root"}`、`…"reason":"host_overlay"}`、`…"reason":"mcp_json"}`、`…"reason":"publish"}`；该行的键集合恰为 `event` 与 `reason`；`sandbox_root` 一例的 stdout 与 stderr 都不含 `SANDBOX_ROOT` 的路径，占位的普通文件字节不变，托管布局已建出，主端口在进程退出后可重新绑定
+- **WHEN** 托管布局校验失败，且状态目录的路径里含一个哨兵字符串、环境里的 `MODEL_UPSTREAM_API_KEY` 是另一个哨兵值
+- **THEN** stdout与stderr的任何位置都不出现这两个哨兵（失败记录不带原始error文本、路径与配置值）
+
+#### Scenario: 同 uid 模式下沙箱根的 chmod 被拒
+- **WHEN** `OMP_USER` 未配置，`SANDBOX_ROOT` 已预先建出且为 `0o755`，对它真实路径（realpath）的 `chmodSync` 被钩子以 `EPERM` 拒绝
+- **THEN** 启动成功、success record 照常写出，application stderr 恰多一行 `{"event":"sandbox_root_unchanged"}`（整行、只有 `event` 一个键），根的 mode 仍为 `0o755`、属主不变
+- **WHEN** 同样的钩子下配置了 `OMP_USER`（setpriv 以同一钩子伪装存在）
+- **THEN** 进程nonzero，stderr 恰一行 `{"event":"server_start_failed","reason":"sandbox_root"}`，不含根路径（根属别的 uid 的一支没有非特权的编译入口造法，由 sandbox-core「沙箱根目录」的「属主不符或 chmod 被拒」在单元层覆盖）
+
+#### Scenario: Signal during managed model publication
+- **WHEN** a clean signal arrives while the post-listen model write is pending
+- **THEN** owned IO is settled without a startup/shutdown await cycle; no late success/failure record is emitted solely because of cancellation, no cleared app handle is dereferenced, and no resource is abandoned; a genuine writer failure remains a truthful nonzero generic failure
+
+#### Scenario: Full proxy turn keeps both credentials out of output
+- **WHEN** the actual production entry uses a unique64-character upstream key and fake-omp call-proxy reads the generated models.yml, authenticates with its actual runtime bearer, and completes a real local upstream streamed turn before SIGTERM
+- **THEN** the persisted assistant content equals the upstream deltas and the turn is done; complete application stdout/stderr contains neither the upstream sentinel nor that bearer; models.yml contains only the WORKBUDDY_MODEL_TOKEN variable name, never either credential value
+
+#### Scenario: 完整装配路由与惰性根
+- **WHEN** actual compiled entry starts using configured SANDBOX_ROOT before any session spawn or workspace creation
+- **THEN** startup reports the exact eleven modules in actual registration order (`models`, `experts`, `skills`, `connectors` last, change s1d-connectors); authenticated GET /api/workspaces and GET /api/audit return200 with their real shapes/no-store, anonymous requests return401; SANDBOX_ROOT exists as a directory owned by the process uid with `mode & 0o7777 === 0o3770` and holds no entry, so SANDBOX_ROOT/u1 does not exist
+- **WHEN** the same entry starts with SANDBOX_ROOT pre-created as `0o2770` (or `0o755`) and owned by the process uid
+- **THEN** after the success record SANDBOX_ROOT is `0o3770`, its group is unchanged, and the process umask is unchanged
+
+#### Scenario: HOST=localhost 单一 binding
+- **WHEN** 以 HOST=localhost 启动编译入口
+- **THEN** 服务只在 127.0.0.1:<port> 可连接、[::1]:<port> 连接失败，startup record 的 host 为 127.0.0.1，models.yml baseUrl 为 http://127.0.0.1:<port>/v1，主监听器与预览监听器都只绑定在 127.0.0.1（各自一个 binding，`[::1]` 上两个端口都连接失败），都受既有有界关停约束；大小写或写法不同的 `LOCALHOST` 等其它值仍原样交 listen
+
+#### Scenario: 保留故障在运行期留下 generic 记录
+- **WHEN** 以生产入口的 assembly（不另传 `onError`）装配，一次回合的持久化事务失败使 supervisor 保留一条基础设施故障
+- **THEN** application stderr 恰多一行 `{"event":"session_fault"}`，其中没有原始错误消息、stack、路径或凭据；sink 的返回值不是 thenable；关停时该故障照常暴露
+- **WHEN** 写该行时 stderr sink 不可用（写入被拒绝或同步抛出）
+- **THEN** 没有未处理 rejection、`onError` 不被再次调用、supervisor 不因此多保留一条 sink 契约故障
+
+#### Scenario: 同 tick 多条记录不触发监听上限警告
+- **WHEN** 在同一 tick 内对真实 `process.stderr`（子进程里运行，stderr 为管道）调用受管 writer 16 次
+- **THEN** 子进程 stderr 恰为 16 行对应的记录，不含 `MaxListenersExceededWarning`；全部 settle 并过一轮 `setImmediate` 后，该 stream 上由 writer 挂的 `error` 监听数为 0
+- **WHEN** 一个 EventEmitter sink 上有三条在途记录
+- **THEN** 该 sink 的 `error` 监听数恰为 1，`getMaxListeners()` 与写入前相同
+- **WHEN** 此时发出一次 `error` 事件
+- **THEN** 三条各自以该 error reject 恰一次；其后迟到的 write callback 不再改变结果；过一轮 `setImmediate` 后监听数为 0
+- **WHEN** 一条记录的 write callback 成功之后、`setImmediate` 之前 sink 发出 `error`
+- **THEN** 该记录保持 resolved，进程没有未处理的 `error` 事件
+
+#### Scenario: 同一 stream 上监听的复用与重挂
+- **WHEN** 记录 A settle 之后、其 `setImmediate` 触发之前写入记录 B，且该 `setImmediate` 触发时 B 仍在途
+- **THEN** 监听没有被摘除（监听数仍为 1）；随后 sink 发出 `error` 时 B 以该 error reject，没有未处理的 `error` 事件
+- **WHEN** 全部记录 settle、监听已摘除（监听数 0）之后再对同一 sink 写入记录 C，并在 C 在途时发出 `error`
+- **THEN** 写入 C 时监听数回到 1，C 以该 error reject，没有未处理的 `error` 事件
+- **WHEN** 两个不同的 sink 各有一条在途记录，其中一个发出 `error`
+- **THEN** 只有该 sink 的记录 reject，另一个 sink 的记录按自己的 write callback settle
+
+#### Scenario: 四个新配置键的取值与非法值
+- **WHEN** 以 `APPROVAL_MAX_MODE=write`、`UPLOAD_MAX_BYTES=1048576`、`UPLOAD_MAX_FILES=3` 与一个合法的三模型 `MODEL_CATALOG` 启动编译入口
+- **THEN** 启动成功；`GET /api/composer/options` 报告 `approvalModes` 为 `["always-ask","write"]`、`upload` 为 `{maxBytes:1048576, maxFiles:3}`、`models` 恰为那三项；托管 models.yml 含三个模型条目
+- **WHEN** `APPROVAL_MAX_MODE` 为 empty、`YOLO`、` write`、`ask`；`UPLOAD_MAX_BYTES` 或 `UPLOAD_MAX_FILES` 为 empty、`0`、`abc`、`-1`、`1.5`、`010`、`2147483648`；`MODEL_CATALOG` 为 empty 或 `not json`
+- **THEN** 每一种都在任何 filesystem/database/listen 副作用前 nonzero 退出，application stderr 恰一行 generic failure record 且无 success record；配置层的错误信息命名该键而不含输入值
+
+#### Scenario: 预览与文件键的缺省与覆盖
+- **WHEN** 未设置十二个预览与文件键启动编译入口；另一例以 `PREVIEW_PORT=<空闲端口>`、`PREVIEW_ORIGIN=https://preview.example.test`、relative `PREVIEW_CACHE_DIR`、绝对路径的 `OFFICE_SPOOL_DIR` 与八个数值键的非缺省值启动
+- **THEN** 前者解析出的配置为 `previewPort 0`、无 `previewOrigin`、`previewCacheDir` 为 repo-root `var/preview-cache`、无 `officeSpoolDir`、八个数值依次为 `60000`、`2`、`1048576`、`20971520`、`104857600`、`10485760`、`1000`、`30`，预览监听器绑定在一个非 0 的端口上且与主监听器不同；后者逐项原样生效，relative 缓存目录绑定 repo root，预览监听器恰绑定在给定端口；两例的 `server_started` 记录都只有 `event`、`host`、`port`、`modules` 四个键，`port` 是主监听器的端口
+
+#### Scenario: 预览与文件键的非法值
+- **WHEN** `PREVIEW_PORT` 为 empty/`abc`/`-1`/`65536`/`01`/`1.5`；`PREVIEW_ORIGIN` 为 empty、`preview.example.test`（无协议）、`https://a.test/`（结尾斜杠）、`https://a.test/x`、`ftp://a.test`；`PREVIEW_CACHE_DIR` 为 empty；`OFFICE_SPOOL_DIR` 为 empty 或相对路径 `spool`；`OFFICE_BIN` 为任意值（含绝对路径 `/usr/bin/soffice`）；八个数值键之一为 empty/`0`/`abc`/`-1`/`1.5`/`016`/`2147483648`；`PREVIEW_ARCHIVE_MAX_ENTRIES` 另为 `10001`
+- **THEN** 每一例都在任何 filesystem/database/listen 副作用之前以 nonzero 退出，application stderr 恰一行 generic failure record，无 success record；`resolveServerConfig` 抛出的错误 message 含该键名而不含输入值（message 只由键与规则决定、与输入无关；规则文本自带的数字如 `1..10000` 不算回显输入）；`OFFICE_BIN` 一例的 stderr 同样恰为 `{"event":"server_start_failed","reason":"config"}`、不含 `OFFICE_BIN` 字样，键名只在抛出的 message 里（owner 2026-10-17 B8 细节）
+
+#### Scenario: MODEL_ID 的取值规则
+- **WHEN** 未设 `MODEL_CATALOG`，分别以 `MODEL_ID` 为 ` custom-model `（首尾各一个空格）与一个恰 128 个 UTF-8 字节的值解析配置并启动
+- **THEN** 两例都启动成功；白名单唯一一项的 `id` 与 `name` 逐字节等于所给的值（首尾空格仍在），`GET /api/composer/options` 的 `models[0].id` 与 `defaults.modelId` 同为该值
+- **WHEN** `MODEL_ID` 分别为 empty、`a\nb`（含 U+000A）、含 U+007F 的值、长 129 个 UTF-8 字节的值；另一组在配置了合法 `MODEL_CATALOG` 时重复这四个取值
+- **THEN** 每一例都在任何 filesystem/database/listen 副作用之前以 nonzero 退出，application stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`，无 success record；`resolveServerConfig` 抛出的错误 message 含 `MODEL_ID` 而不含输入值
+
+#### Scenario: 非法上游密钥拒绝启动
+- **WHEN** 编译入口分别以含 U+000A、含非 Latin-1 字符（如 `密钥`）且各自带一个哨兵子串的 `MODEL_UPSTREAM_API_KEY` 启动（含 U+0000 的取值经不了进程环境——`spawn` 拒绝含 NUL 的环境变量——只在 `resolveServerConfig` 层验证；含 U+007F 的取值同样被拒，制表符照常可用）；另以 `abc def`（中间有空格）启动
+- **THEN** 前两例都在任何 filesystem/database/listen 副作用之前以 nonzero 退出，application stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`，stdout 与 stderr 都不含哨兵；`resolveServerConfig` 对同样的输入抛出的错误 message 含 `MODEL_UPSTREAM_API_KEY` 而不含哨兵；最后一例正常启动
+
+#### Scenario: 上游失败记录
+- **WHEN** 生产装配下一个会话的回合因上游 401 失败，另一个回合因 omp 进程异常退出失败
+- **THEN** application stderr 恰多一行 `{"event":"upstream_failed","sessionId":"<该会话 id>","reason":"auth_failed","status":401}`；进程异常退出的回合不产生 `upstream_failed` 行；任何一行都不含配置的上游密钥
+
+#### Scenario: 挂载键与启动预检
+- **WHEN** 在 `/dev/fuse` 存在的 Linux 上（否则明示跳过），以合法的 `RCLONE_BIN`（测试用可执行文件）、PATH 上有可执行 `fusermount3`、`MOUNT_HOST_ALLOW=files.intra`、`MOUNT_MAX_PER_WORKSPACE=2` 启动编译入口
+- **THEN** 启动成功，success record 照常写出（`modules` 不变）；`GET /api/workspaces/:id/mounts` 的 `enabled` 为 true
+- **WHEN** `RCLONE_BIN` 为 empty、相对路径、不可执行的文件；或它合法而 PATH 上没有 `fusermount3`；`MOUNT_HOST_ALLOW` 为 empty 或 `a,,b`；`MOUNT_MAX_PER_WORKSPACE` 为 `0` 或 `016`
+- **THEN** 每一例都在任何 filesystem/database/listen 副作用之前以 nonzero 退出，application stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`，无 success record；`resolveServerConfig` 抛出的 message 含该键名而不含输入值
+- **WHEN** 同样的前提下 DB 里有一个已登记挂载（假 rclone 被设定为挂起不退出），success record 写出且假 rclone 已以 `mount` 被调用之后收到 SIGTERM
+- **THEN** 进程以 0 退出；退出时该假 rclone 进程已不存在；挂载行与其私有目录仍在
+
+### Requirement: 统一错误信封
+所有本阶段可预期 `/api/*` 应用错误与 API 404 SHALL 使用统一信封 `{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；typed definition map 固定为**二十五码**：`bad_request`(400, `请求格式不正确`)、`invalid_credentials`(401, `账号或密码不正确`)、`account_disabled`(403, `该账号已停用，请联系管理员`)、`unauthorized`(401, `请先登录`)、`not_found`(404, `请求的资源不存在`)、`session_busy`(409, `会话正在生成，请稍候`)、`agent_unavailable`(502, `Agent 运行时不可用`)、`sandbox_denied`(403, `目标路径不在你的沙箱内，操作已拒绝`)、`conflict`(409, `同名资源已存在`)、`preview_too_large`(413, `文件过大，无法预览`)、`preview_unsupported`(415, `该类型不支持预览`)、`agent_capacity`(503, `Agent 容量已满，请稍后重试`)、`approval_settled`(409, `该审批已处理`)、`session_archived`(409, `会话已归档，恢复后才能继续对话`)、`undo_conflict`(409, `其它会话在这之后改动过工作空间`)、`upload_too_large`(413, `文件超过大小上限`)、`forbidden`(403, `没有权限执行此操作`)、`model_in_use`(409, `该模型是缺省模型，先把缺省换成别的模型`)、`mount_disabled`(503, `服务器未启用远程挂载`)、`mount_failed`(502, `挂载失败，请检查主机、路径与凭证`)、`mount_offline`(409, `挂载已离线，重新连接后可用`)、`mount_limit`(409, `该工作空间的挂载数已达上限`)、`mount_host_rejected`(403, `该主机不允许挂载`)、`mount_read_only`(403, `只读挂载不能写入`)、`mount_boundary`(409, `挂载目录内不能删除，也不能跨挂载移动`)；`forbidden`、`account_disabled`、`sandbox_denied`、`mount_host_rejected` 与 `mount_read_only` 共享 403 状态，`session_busy`、`conflict`、`approval_settled`、`session_archived`、`undo_conflict`、`model_in_use`、`mount_offline`、`mount_limit` 与 `mount_boundary` 共享 409 状态、`preview_too_large` 与 `upload_too_large` 共享 413 状态、`agent_unavailable` 与 `mount_failed` 共享 502 状态、`agent_capacity` 与 `mount_disabled` 共享 503 状态，但 code/message 各自独立，映射 SHALL 以 code 而非状态码区分。公共类、代码与消息 SHALL 仅定义在 `core/errors`；状态码、parser ownership与处理器 SHALL 落在 `http/` 横切层，不保留旧路径兼容导出。`bad_request` 覆盖显式 typed `HttpError("bad_request")`；仅当 request 的 method 与 matched route identity 合起来恰为精确三十一条归属身份 `POST /api/auth/login`、`POST /api/auth/logout`、`POST /api/sessions/:id/prompt`、`POST /v1/chat/completions`、`POST /api/workspaces`、`POST /api/workspaces/:id/dirs`、`POST /api/workspaces/:id/move`、`POST /api/workspaces/:id/preview-token`、`POST /api/sessions/:id/stop`、`POST /api/sessions/:id/regenerate`、`POST /api/sessions/:id/fork`、`POST /api/sessions/:id/approvals/:approvalId`、`POST /api/sessions/:id/undo`、`POST /api/workspaces/:id/promote`、`POST /api/workspaces/:id/uploads`、`POST /api/sessions`、`POST /api/models`、`POST /api/models/default`、`POST /api/models/probe`、`PUT /api/models`、`POST /api/experts`、`PUT /api/experts`、`PUT /api/skills/defaults`、`PUT /api/sessions/:id/capabilities`、`POST /api/connectors`、`PUT /api/connectors`、`POST /api/connectors/probe`、`PUT /api/connectors/defaults`、`POST /api/workspaces/:id/mounts`、`POST /api/mount-sources` 或 `PATCH /api/sessions/:id` 时（method 为归属身份的一部分：映射不再只认 POST，`PATCH /api/sessions/:id` 以 PATCH 归属，`PUT /api/models`、`PUT /api/experts`、`PUT /api/skills/defaults`、`PUT /api/sessions/:id/capabilities`、`PUT /api/connectors` 与 `PUT /api/connectors/defaults` 六条以 PUT 归属，其余二十四条以 POST 归属），才额外覆盖 exact Fastify content-parser error code allowlist：`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`。对使用框架内置 parser 的归属路由，到达 content parser 且媒体类型有内置 parser 的请求，其 `Content-Length` 超过路由 body limit 时由框架仅凭请求头拒绝：不读取请求体，发出该 400 后关闭连接；仍在写请求体的客户端可能观察到连接重置，这不改变服务端已发出的响应（`POST /v1/chat/completions` 自带流式 parser，读完请求体后才拒绝，不在此列）。bodyless 的 `POST /api/sessions/:id/stop` 与 `POST /api/sessions/:id/regenerate` 按 `POST /api/auth/logout` 先例属于归属集：任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超过其最小合法 body limit 均为 exact 400 `bad_request`，发生在任何 supervisor 调用、omp 帧或数据库写入之前。`POST /api/workspaces/:id/preview-token`（preview-origin）同为 bodyless 归属路由：任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超限均为 exact 400 `bad_request`，发生在任何令牌签发之前；`POST /api/workspaces/:id/move`（file-operations）携 JSON body，其 content-parser 错误同为 exact 400，发生在任何文件系统改动与审计写入之前。`DELETE /api/workspaces/:id/entries`、`DELETE /api/sessions/:id` 与 `DELETE /api/models` 同理不属于归属集。`POST /api/models` 与 `PUT /api/models`（model-registry「模型管理端点」；模型 id 经查询参数 `?id=` 传递，不进路径）携 JSON body：其 content-parser 错误为 exact 400 `bad_request`，发生在管理员判定（非管理员 403 `forbidden`）之后、任何表写入与审计写入之前；bodyless 的 `POST /api/models/default` 与 `POST /api/models/probe` 按 stop / regenerate 先例：任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超限均为 exact 400，同样在管理员判定之后、任何写入与上游请求之前。`POST /api/experts` 与 `PUT /api/experts`（experts「专家管理端点」；专家 id 经查询参数 `?id=` 传递，不进路径；body limit 64 KiB）携 JSON body：未认证 401、`PUT` 的 `id` 缺失 / 空 / 多值 400、`id` 为内置专家 403 `forbidden`、`id` 对调用者不可见 404 都在 body 解析之前判定（preParsing，与 `/api/models` 同一做法），其后 content-parser 错误为 exact 400 `bad_request`，发生在任何表写入与审计写入之前；`DELETE /api/experts` 不读取 body，不属于归属集。`PUT /api/skills/defaults`（skill-switches「技能清单与账号缺省」，body limit 64 KiB，理由同下）携 JSON body，其 content-parser 错误为 exact 400 `bad_request`，发生在任何偏好写入之前。`PUT /api/sessions/:id/capabilities`（skill-switches「会话能力端点」，body limit 64 KiB——停用列表至多 128 个名称、每个至多 128 字节，按 JSON 转义（`"`、`\` 各占两字节）最坏约 33 KB，三条带该列表的路由（`POST /api/sessions`、`PUT /api/skills/defaults`、`PUT /api/sessions/:id/capabilities`）统一 64 KiB）按 `PATCH /api/sessions/:id` 先例：owner 预检（未知或属他人 → 与未知 id 相同的 404，先于 body 解析）之后，其 content-parser 错误同样为 exact 400 `bad_request`，无写入。`POST /api/connectors` 与 `PUT /api/connectors`（connectors「连接器管理端点」；连接器名经查询参数 `?name=` 传递，不进路径；body limit 64 KiB）携 JSON body：未认证 401、非管理员 403 `forbidden`、`PUT` 的 `name` 缺失 / 空 / 多值 400、`name` 未登记 404 都在 body 解析之前判定（preParsing，与 `/api/models` 同一做法；403 先于 `name` 判定），其后 content-parser 错误为 exact 400 `bad_request`，发生在任何表写入、审计写入与 `mcp.json` 重写之前；bodyless 的 `POST /api/connectors/probe` 按 `POST /api/models/probe` 先例：在同样先于 body 解析的 401、非管理员 403 `forbidden`、`name` 缺失 / 空 / 多值 400 与未登记 404 之后，任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超限均为 exact 400 `bad_request`，发生在任何探活请求、文件检查与写入之前；`DELETE /api/connectors` 不读取 body，不属于归属集。`PUT /api/connectors/defaults`（connectors「连接器账号缺省」，对所有已认证账号开放，body limit 16 KiB——至多 32 个、每个至多 32 字节的名称）携 JSON body，其 content-parser 错误为 exact 400 `bad_request`，发生在任何偏好写入之前（change s1d-connectors）。`POST /api/workspaces/:id/mounts`（workspace-mounts「挂载端点」；body limit 64 KiB——私钥文本至多 16 KiB）携 JSON body：未认证 401、空间不属本人或不存在 404、未配置 `RCLONE_BIN` 503 `mount_disabled` 都在 body 解析之前判定（preParsing，与 `POST /api/workspaces/:id/move` 同一做法），其后 content-parser 错误为 exact 400 `bad_request`，发生在任何凭证文件写入、挂载点创建、子进程启动、表写入与审计写入之前；`DELETE /api/workspaces/:id/mounts/:mountId` 不读取 body，不属于归属集。`POST /api/mount-sources`（workspace-mounts「挂载源端点」，body limit 16 KiB）携 JSON body：未认证 401、非管理员 403 `forbidden` 在 body 解析之前判定，其后 content-parser 错误为 exact 400 `bad_request`，发生在任何表写入与审计写入之前；`DELETE /api/mount-sources/:id` 不读取 body，不属于归属集（change s1b-workspace-mounts）。错误码的 definition map 不因 s1f-files-page 改变：workspaces「文件预览」对范围不可满足的请求返回的 416（空体、`Content-Range: bytes */<size>`）是部分内容协议的响应，不是应用错误，不属于 definition map，也不带信封。`POST /api/sessions` 是**可选 body** 的归属路由：无 body（无 Content-Type 且无内容）为合法请求，按默认值创建；一旦携带 body，则必须为 `application/json` 且解析成功，empty-or-malformed JSON、unsupported media 或超过其 body limit 均为 exact 400 `bad_request`，发生在任何会话行、审计行写入之前——它不适用 stop/regenerate 的「任意 parsed body 即 400」规则，parsed body 交由 session-metadata 的手写 exact validator 判定。`PATCH /api/sessions/:id` 在 owner 预检（未知或属他人 → 与未知 id 相同的 404，先于 body 解析）之后，其 content-parser 错误同样为 exact 400 `bad_request`，无写入。`POST /api/workspaces/:id/uploads` 是**流式 body** 的归属路由：它只为 `application/octet-stream` 注册一个把请求流原样交给 handler 的 route-local parser，不经框架的缓冲与 body limit；媒体类型不符（`FST_ERR_CTP_INVALID_MEDIA_TYPE`）在空间归属检查（未知或属他人 → 404）之后为 exact 400 `bad_request`，不写文件、不写审计。该路由的大小上限 SHALL NOT 由框架的 body limit 执行——否则超限会被本条的 allowlist 映射成 400——而由 handler 按 workspaces「文件上传」判定并返回 typed 413 `upload_too_large`；`FST_ERR_CTP_BODY_TOO_LARGE` 不在该路由产生。`DELETE /api/sessions/:id` 不读取 body、**不**属于归属集：该路由不注册 body 语义，请求携带的格式良好的 body 被忽略，不因 body 改变其 204/404/409 行为；body 引发的 genuine allowlisted content-parser 错误（malformed JSON、空 JSON body、不支持的媒体类型、超限）按非归属已注册路由语义保持 generic 500（见 Scenario「产品路由身份在共享映射器中的归属」），不执行任何删除步骤。归属身份对应的合同不使用 route schema，因此 `FST_ERR_VALIDATION` 不在此 allowlist，避免把可伪造的普通 Error shape当作受信 request error。映射不依赖 raw `statusCode`（body-too-large 原始状态可为 413），最终均为 exact 400。其他原始API namespace的protected request在root preParsing guard前不解析body：未认证先返回401；通过guard后，相同parser/media错误若发生在matched `/api`/`/api/*` catch-all，恢复既有typed `not_found` 404，发生在归属集之外其他已注册API route保持generic5xx。原始non-API unmatched non-GET miss无论是否携cookie都绕过guard、零session query并保持既有typed404。不得回显parser/schema/password/session细节；具有相同status/statusCode或伪造code的任意programmer error不得被误标成二十五种语义错误，仍为5xx。
+
+#### Scenario: 十一码信封形状一致
+- **WHEN** 测试路由分别抛出原有十一种 typed application error
+- **THEN** 响应 status/code/message 与 definition map exact 对应，body 仅含 `{error:{code,message}}`，无 Fastify 默认 error 字段
+
+#### Scenario: 新增两码信封形状一致
+- **WHEN** 测试路由分别抛出 `HttpError("agent_capacity")` 与 `HttpError("approval_settled")`
+- **THEN** 响应分别为 503 `{error:{code:"agent_capacity",message:"Agent 容量已满，请稍后重试"}}` 与 409 `{error:{code:"approval_settled",message:"该审批已处理"}}`，无 Fastify 默认 error 字段；伪造 `{code:"agent_capacity",statusCode:503}` 的普通对象仍为 generic 5xx
+
+#### Scenario: auth POST 请求 parse/validation 错误稳定映射
+- **WHEN** `/api/auth/login` 收到 empty/malformed JSON、unsupported media type、不符合手写 exact body validator 的 JSON 或超过 16 KiB body limit，或 bodyless `/api/auth/logout` 收到任意 parsed body/empty-or-malformed JSON/unsupported media/超过其最小合法 body limit
+- **THEN** 不论 Fastify raw status 是否为 400/413/415，均按显式 typed error 或 exact matched auth-route-scoped allowlisted Fastify error code 返回 exact 400 `bad_request` 信封，不回显 validation/parser 详情或请求中的密码；错误发生在 logout cookie lookup/DELETE/clear-cookie 前
+- **WHEN** 未认证请求携相同 malformed/media/body 输入访问original API namespace的受保护matched `/api`/`/api/*` catch-all或其他protected API route
+- **THEN** guard在content parser前返回exact401 unauthorized；不得被raw parser status改写为400/404/500
+- **WHEN** 无论有无cookie，相同输入访问original non-API unmatched non-GET miss
+- **THEN** 绕过guard且零session query，保持既有exact typed `not_found` 404
+- **WHEN** 有效会话携相同输入访问matched `/api`/`/api/*` catch-all
+- **THEN** 通过guard后返回既有exact typed `not_found` 404；不得因content parser先于catch-all handler而成为400/500
+- **WHEN** 有效会话携相同错误访问三十一条归属身份之外的其他已注册protected API route，或programmer error仅携带`statusCode=400/413`/伪造allowlist code/validation-shaped fields
+- **THEN** 保持generic5xx，不得被auth POST request-error mapper或guard改写
+
+#### Scenario: 意外错误不伪装
+- **WHEN** API route 抛出未分类的 programmer error
+- **THEN** 返回 5xx，且 body 不得声称二十五个 typed semantic code 中任一个
+
+#### Scenario: 产品路由身份在共享映射器中的归属
+- **WHEN** genuine allowlisted Fastify content-parser error is mapped for the production-mounted POST matched /api/sessions/:id/prompt, /v1/chat/completions, /api/workspaces, /api/workspaces/:id/dirs, /api/workspaces/:id/move, /api/workspaces/:id/preview-token, /api/sessions/:id/stop, /api/sessions/:id/regenerate, /api/sessions/:id/fork, /api/sessions/:id/approvals/:approvalId, /api/sessions/:id/undo, /api/workspaces/:id/promote, /api/workspaces/:id/uploads or /api/sessions, or the PATCH matched /api/sessions/:id
+- **THEN** the mapper returns exact400 bad_request without rawdetails; a method other than the owner identity's own method (for example PATCH /api/sessions, POST /api/sessions/:id, DELETE /api/sessions/:id), lookalike/raw-concrete identities and registered unowned routes staygeneric500; ownership is decided solely by the shared mapper's exact thirty-one-identity (method + route) set, not by whichever module registered the route
+
+#### Scenario: Cache policy remains route-owned
+- **WHEN** each of the twenty-five typed errors passes through an existing no-store-owning route and the shared mapper
+- **THEN** the response preserves exact Cache-Control no-store and exact typed envelope, without widening that route's auth error vocabulary
+- **WHEN** an existing non-auth route emits401/204 without its own cache policy
+- **THEN** it SHALL NOT inherit auth no-store or clear-cookie side effects; this additive mapper change SHALL NOT install a global cache hook
+
+#### Scenario: 工作空间 parser owner 的真实 HTTP 边界
+- **WHEN** the production POST /api/workspaces and /api/workspaces/:id/dirs routes mounted by createApp (16 KiB body limit, route-owned no-store) receive genuine malformed/empty/unsupported/oversized content-parser errors with a real login cookie
+- **THEN** exact400 bad_request is returned before their handlers run, with the route's own no-store preserved; the thirty-one-owner policy covers these two identities alongside the twenty-nine other owners
+- **WHEN** the same parser failures hit a registered non-POST or lookalike route (proved by explicitly registered test probes), or an owner handler throws a forged parser/code/status/validation-shaped programmer error
+- **THEN** the existing generic500 boundary remains and raw internal details are not disclosed
+- **WHEN** unauthenticated requests hit those protected production workspace routes with invalid bodies
+- **THEN** the existing guard returns401 before parser or handler work
+
+#### Scenario: 回合控制 parser owner 的真实 HTTP 边界
+- **WHEN** the production POST /api/sessions/:id/fork and /api/sessions/:id/approvals/:approvalId routes mounted by createApp receive genuine malformed/empty/unsupported/oversized content-parser errors with a real owner cookie
+- **THEN** exact400 bad_request with the route's no-store is returned before any supervisor call, omp frame or database write
+- **WHEN** malformed, empty or unsupported-media inputs arrive unauthenticated on any of the four routes, or with a foreign/unknown session id
+- **THEN** 401 respectively the identical 404 is returned before parser or handler work
+
+#### Scenario: bodyless 归属路由拒绝任何 body
+- **WHEN** the bodyless production POST /api/sessions/:id/stop or /api/sessions/:id/regenerate receives, with a real owner cookie on a running or done session, any parsed body (including `{}`), an empty or malformed JSON body, an unsupported media type or a body above its minimal legal body limit
+- **THEN** like bodyless `/api/auth/logout`, exact400 bad_request with the route's no-store is returned before any supervisor call, `abort`/`branch` frame or database write, and the same request without a body keeps its normal behaviour
+
+#### Scenario: 会话元数据 parser owner 的真实 HTTP 边界
+- **WHEN** the production POST /api/sessions mounted by createApp receives, with a real owner cookie, a malformed JSON body, an empty body declared `application/json`, a `text/plain` body or a body above its limit
+- **THEN** exact400 bad_request with no-store is returned and no session row or audit row is written
+- **WHEN** the same route receives no body at all (no Content-Type, no content), or the JSON body `{}`
+- **THEN** 201 with the default session view is returned: `scene` null, `workspaceId` the id of the temporary workspace created for that session and `temporaryWorkspace` true (session-metadata「会话创建与空间绑定」); the two requests yield two different workspace ids
+- **WHEN** the production PATCH /api/sessions/:id receives the same four content-parser failures on an owned session
+- **THEN** exact400 bad_request with no-store is returned and the session row is unchanged; on a foreign or unknown id the identical404 not_found is returned before parsing; unauthenticated requests on either route receive401 before parsing
+- **WHEN** DELETE /api/sessions/:id is sent with a JSON body on an owned idle session
+- **THEN** the body is ignored and the route returns204 exactly as without a body; DELETE is not part of the parser-owner set
+- **WHEN** DELETE /api/sessions/:id is sent on an owned idle session with `Content-Type: application/json` and a malformed JSON body
+- **THEN** the content-parser error stays generic500 (the non-owner mapping of 「产品路由身份在共享映射器中的归属」, not a400 envelope), the session row, its audit trail and any live process are unchanged, and a following bodyless DELETE returns204
+
+#### Scenario: 归档与撤回冲突的错误码
+- **WHEN** 测试路由分别抛出 `HttpError("session_archived")` 与 `HttpError("undo_conflict")`
+- **THEN** 响应分别为 409 `{"error":{"code":"session_archived","message":"会话已归档，恢复后才能继续对话"}}` 与 409 `{"error":{"code":"undo_conflict","message":"其它会话在这之后改动过工作空间"}}`；二者与 `session_busy`、`conflict`、`approval_settled` 的 code 与 message 互不相同
+
+#### Scenario: 撤回与转正路由属于归属集
+- **WHEN** 已认证的所有者以 malformed JSON、空 JSON body、`text/plain` 或超过 body limit 的请求体调用 `POST /api/sessions/<自己的会话>/undo` 与 `POST /api/workspaces/<自己的临时空间>/promote`
+- **THEN** 均为 exact 400 `bad_request` 与 no-store，发生在任何行写入、文件改动与进程调用之前
+
+#### Scenario: 上传超限码的信封形状
+- **WHEN** 测试路由抛出 `HttpError("upload_too_large")`
+- **THEN** 响应为 413 `{error:{code:"upload_too_large",message:"文件超过大小上限"}}`，无 Fastify 默认 error 字段；`HttpError("preview_too_large")` 仍为 413 与其自己的 code/message；伪造 `{code:"upload_too_large",statusCode:413}` 的普通对象仍为 generic 5xx
+
+#### Scenario: 上传路由的 parser 归属
+- **WHEN** 已认证 owner 以 `Content-Type: application/json`、`text/plain` 或 `multipart/form-data` 请求 `POST /api/workspaces/:id/uploads`（自有空间）；以同样的媒体类型请求他人的空间；匿名以任意媒体类型请求
+- **THEN** 依次为 exact 400 `bad_request`、404 `not_found`、401，均为统一信封与 no-store，没有文件与审计写入
+- **WHEN** 已认证 owner 以 `application/octet-stream` 发送超过 `UPLOAD_MAX_BYTES` 的请求体
+- **THEN** 响应为 413 `upload_too_large`，不是 400 `bad_request`
+
+#### Scenario: 工作空间新增两条归属路由
+- **WHEN** 有效会话对自己的工作空间 `POST /api/workspaces/:id/move` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 16 KiB 的 body；`POST /api/workspaces/:id/preview-token` 携 `{}`、malformed JSON 或 `text/plain` body；`DELETE /api/workspaces/:id/entries?path=a` 携 malformed JSON body
+- **THEN** 前两条路由的每一例都是 exact 400 `bad_request` 信封，没有文件被移动、没有令牌被签发、没有审计行；`DELETE` 一例保持 generic 500 且目标未被移动（非归属已注册路由的既有语义）
+
+
+#### Scenario: 两个 s1d 新码
+- **WHEN** 测试路由分别抛出 `HttpError("forbidden")` 与 `HttpError("model_in_use")`
+- **THEN** 响应分别为 403 `{"error":{"code":"forbidden","message":"没有权限执行此操作"}}` 与 409 `{"error":{"code":"model_in_use","message":"该模型是缺省模型，先把缺省换成别的模型"}}`，均带 no-store；码表恰二十五码，`forbidden` 与 `account_disabled`、`sandbox_denied` 的 code / message 互不相同，`model_in_use` 与其余八个 409 码互不相同
+
+#### Scenario: 专家、技能与会话能力的归属路由
+- **WHEN** 有效会话对 `POST /api/experts` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 64 KiB 的 body；对自己的专家 `PUT /api/experts?id=<id>` 携同四种输入；对 `PUT /api/experts?id=builtin:data-analyst`、不带 `id` 的 `PUT /api/experts`、`id` 为他人专家的 `PUT /api/experts` 各携 malformed JSON；对 `PUT /api/skills/defaults` 与自己会话的 `PUT /api/sessions/<id>/capabilities` 携同四种输入（后两者超过 64 KiB）；对他人会话的 `PUT /api/sessions/<id>/capabilities` 携 malformed JSON；匿名对这四条路由携 malformed JSON
+- **THEN** 自己的专家、`POST /api/experts`、`PUT /api/skills/defaults` 与自己会话的每一例都是 exact 400 `bad_request` 信封与 no-store，没有表写入、偏好写入或审计行；内置专家一例 403 `forbidden`、缺 `id` 一例 400 `bad_request`、他人专家一例 404 `not_found`、他人会话一例 404 `not_found`，均在 body 解析之前；匿名各例 401；`DELETE /api/experts?id=<自己的专家>` 携 malformed JSON body 保持 generic 500 且专家未被删除（非归属已注册路由的既有语义）
+
+#### Scenario: 连接器的归属路由
+- **WHEN** 管理员对 `POST /api/connectors` 与 `PUT /api/connectors?name=<已登记>` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 64 KiB 的 body；对 `POST /api/connectors/probe?name=<已登记>` 携 `{}`、malformed JSON 或 `text/plain` body；对不带 `name` 的 `PUT /api/connectors` 与 `name` 未登记的 `PUT /api/connectors` 各携 malformed JSON；普通用户对 `POST /api/connectors`、`PUT /api/connectors?name=<已登记>`、`POST /api/connectors/probe?name=<已登记>` 各携 malformed JSON；任一账号对 `PUT /api/connectors/defaults` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 16 KiB 的 body；匿名对这四条路由携 malformed JSON；管理员对 `DELETE /api/connectors?name=<已登记>` 携 malformed JSON body
+- **THEN** 管理员的前三组与 `PUT /api/connectors/defaults` 的每一例都是 exact 400 `bad_request` 信封与 no-store，没有表写入、偏好写入、审计行、探活请求，`mcp.json` 字节与 mtime 不变；缺 `name` 一例 400 `bad_request`、未登记一例 404 `not_found`、普通用户各例 403 `forbidden`，均在 body 解析之前；匿名各例 401；`DELETE` 一例保持 generic 500 且连接器未被删除（非归属已注册路由的既有语义）
+
+#### Scenario: 七个挂载码
+- **WHEN** 测试路由分别抛出 `HttpError("mount_disabled")`、`HttpError("mount_failed")`、`HttpError("mount_offline")`、`HttpError("mount_limit")`、`HttpError("mount_host_rejected")`、`HttpError("mount_read_only")` 与 `HttpError("mount_boundary")`
+- **THEN** 响应依次为 503、502、409、409、403、403、409，body 恰为 `{"error":{"code":<该码>,"message":<该码的文案>}}`，文案依次为 `服务器未启用远程挂载`、`挂载失败，请检查主机、路径与凭证`、`挂载已离线，重新连接后可用`、`该工作空间的挂载数已达上限`、`该主机不允许挂载`、`只读挂载不能写入`、`挂载目录内不能删除，也不能跨挂载移动`，均带 no-store；码表恰二十五码，七个新码的 code 与 message 与同状态的既有码互不相同；伪造 `{code:"mount_failed",statusCode:502}` 的普通对象仍为 generic 5xx
+
+#### Scenario: 挂载的归属路由
+- **WHEN** 有效会话对自己的正式空间 `POST /api/workspaces/:id/mounts` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 64 KiB 的 body；对他人的空间携 malformed JSON；未配置 `RCLONE_BIN` 时对自己的空间携 malformed JSON；管理员对 `POST /api/mount-sources` 携同四种输入（超过 16 KiB）；普通用户对 `POST /api/mount-sources` 携 malformed JSON；匿名对这两条路由携 malformed JSON；`DELETE /api/workspaces/:id/mounts/<自己的挂载>` 与管理员 `DELETE /api/mount-sources/<id>` 各携 malformed JSON body
+- **THEN** 自己空间与管理员的每一例都是 exact 400 `bad_request` 信封与 no-store，没有私有目录、挂载点、子进程、表写入与审计行；他人空间一例 404 `not_found`、未配置一例 503 `mount_disabled`、普通用户一例 403 `forbidden`，均在 body 解析之前；匿名各例 401；两个 `DELETE` 各保持 generic 500 且挂载 / 挂载源未被删除（非归属已注册路由的既有语义）
