@@ -49,6 +49,7 @@ const STARTUP_MODULES = [
   "sessions",
   "workspaces",
   "accounts",
+  "models",
 ];
 /** #88 fake-upstream 契约的固定回复文本。 */
 const FIXTURE_TEXT = "你好，这是 WorkBuddy 的第一条流式回复。";

@@ -44,15 +44,17 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact 十七条 `<METHOD> <route template>` 身份：POST login（#9）、
+/** 受信 content-parser owner 的 exact 二十一条 `<METHOD> <route template>` 身份：POST login（#9）、
  * POST logout（#10）、prompt、chat completions、两条工作空间、回合控制四条（#450）、会话
  * 元数据（#512）POST /api/sessions 与 PATCH /api/sessions/:id、临时空间转正（#927）
  * POST /api/workspaces/:id/promote、撤回（#948）POST /api/sessions/:id/undo、上传（#1013）
  * POST /api/workspaces/:id/uploads（模板不含查询串）、预览令牌签发（#1067）
  * POST /api/workspaces/:id/preview-token，以及重命名 / 移动（#1062）
- * POST /api/workspaces/:id/move。method 是身份的一部分：
- * DELETE /api/sessions/:id 与 PATCH 同模板但不在集合内。模板须与 Fastify 路由注册逐字一致，
- * method 按 Fastify 原样（大写）比较、不做大小写归一。 */
+ * POST /api/workspaces/:id/move，以及模型注册表（s1d-model-registry）的 POST /api/models、
+ * PUT /api/models、POST /api/models/default 与 POST /api/models/probe（模型 id 走查询参数，模板不含它；
+ * probe 的路由由组 8 注册，身份先于它存在）。method 是身份的一部分：
+ * DELETE /api/sessions/:id 与 PATCH、DELETE /api/models 与 POST / PUT 同模板但不在集合内。
+ * 模板须与 Fastify 路由注册逐字一致，method 按 Fastify 原样（大写）比较、不做大小写归一。 */
 const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "POST /api/auth/login",
   "POST /api/auth/logout",
@@ -71,11 +73,15 @@ const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "POST /api/workspaces/:id/uploads",
   "POST /api/workspaces/:id/preview-token",
   "POST /api/workspaces/:id/move",
+  "POST /api/models",
+  "PUT /api/models",
+  "POST /api/models/default",
+  "POST /api/models/probe",
 ]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 `${method} ${route template}` 恰为
- * CONTENT_PARSER_OWNED_ROUTES 十七条之一时归一 exact 400（无单独的 POST 门；同模板的
+ * CONTENT_PARSER_OWNED_ROUTES 二十一条之一时归一 exact 400（无单独的 POST 门；同模板的
  * 其他方法不被覆盖）；matched /api 或 /api/* catch-all 与 unmatched non-GET
  * （routeOptions.url undefined 且 method != GET）恢复 typed not_found 404；其他已注册
  * route 保持 generic 5xx。显式 typed HttpError 保持 route-independent。方法/URL 边界

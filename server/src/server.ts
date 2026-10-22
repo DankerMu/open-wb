@@ -65,6 +65,7 @@ import { openDb } from "./core/db/index.js";
 import { ensureOwnedDir, ensureSandboxRoot } from "./core/sandbox/dirs.js";
 import type { ModelRegistry } from "./model-proxy/lookup.js";
 import { deriveProxyBaseUrl } from "./model-proxy/models-yml.js";
+import type { ModelPublishFailedRecord } from "./models/publish.js";
 import { createPreviewApp } from "./preview/app.js";
 import { createOfficeConverter, type OfficeConverter } from "./preview/office.js";
 import { createOfficeCache, createOfficeCleanup } from "./preview/office-cache.js";
@@ -107,6 +108,7 @@ const STARTUP_MODULES = [
   "sessions",
   "workspaces",
   "accounts",
+  "models",
 ];
 
 export interface ServerConfig extends AgentSettings, PreviewSettings {
@@ -219,6 +221,7 @@ function writeRecord(
     | UpstreamFailedRecord
     | TodoRejection
     | ModelEnvIgnoredRecord
+    | ModelPublishFailedRecord
     | { event: "office_convert_sidecar_unavailable" },
 ): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
@@ -486,11 +489,15 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     // 先登记到 owned 再做别的：此后任何一步失败或收到信号，releaseOwned 都会关掉转换器。
     const office = officeOf(config, sidecarOk);
     owned.converter = office.converter;
-    const assembly = appAssemblyOf(
-      config,
-      { tokens, port: () => previewPort, officeAvailable: office.converter.available },
-      registry,
-    );
+    const assembly = {
+      ...appAssemblyOf(
+        config,
+        { tokens, port: () => previewPort, officeAvailable: office.converter.available },
+        registry,
+      ),
+      publish: publisher.publish,
+      onPublishFailed: writeRecord,
+    };
     owned.app = createApp({
       db: owned.db,
       staticRoot: config.staticRoot,
@@ -547,12 +554,14 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       return publisher.publish();
     });
   } catch {
+    // reason 在入口、任何 await 之前取定：releaseOwned 等待期间排队的 REST 发布会经 overlay 包装翻 stage。
+    const stage = owned.stage;
     // 真实失败判定必须先于本失败路径的第一次 yield：一旦决定失败，signal 不得压制其
     // generic 发布，也不得把退出码降为 0（sticky failure）。
     owned.failed = true;
     process.exitCode = 1;
     await releaseOwned(owned);
-    await emitStartupFailed(owned.stage);
+    await emitStartupFailed(stage);
   }
 }
 

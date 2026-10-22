@@ -101,12 +101,14 @@ export interface OpenSessionOptions {
    * port (#909 upstream_failed records); omitted → discarded. And the upstream whose key and base
    * URL the sessions-side sanitiser removes (#909); omitted → none configured. And the model
    * registry (s1d-model-registry); omitted → the static one built from the catalog and upstream.
+   * And the registry publisher the admin endpoints call (group 7); omitted → a no-op.
    */
   assembly?: Partial<ComposerConfig> & {
     uploadMaxFiles?: number;
     log?: SpawnLog;
     upstream?: AssemblyDependencies["upstream"];
     models?: NonNullable<AssemblyDependencies["models"]>;
+    publish?: NonNullable<AssemblyDependencies["publish"]>;
   };
 }
 

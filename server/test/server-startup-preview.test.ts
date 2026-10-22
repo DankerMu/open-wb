@@ -63,6 +63,7 @@ const STARTUP_MODULES = [
   "sessions",
   "workspaces",
   "accounts",
+  "models",
 ];
 const FORCE_CLOSE_RECORD = `${JSON.stringify({ event: "listener_force_close" })}\n`;
 const BIG_FILE_BYTES = 64 * 1024 * 1024;

@@ -284,7 +284,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 MODEL_CATALOG='[{"id": "model-a", "name": "通用", "reasoning": true, "efforts": ["low", "medium", "high"]}, {"id": "model-b", "name": "快速", "maxTokens": 8192}]'
 ```
 
-**六个模型键只作首次种子**（change `s1d-model-registry`，model-registry「环境种子」）：`MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 的解析与校验照旧（非法值仍是 `config` 启动失败），但解析结果只在数据库的 `models` 表为空时写进模型注册表：白名单逐项插入（次序即列表次序），缺省模型那一项标为缺省，每一项的上游取 `MODEL_UPSTREAM_*`（两键未同时配置时该项没有上游）。此后白名单、缺省模型与每个模型的上游都只读注册表（composer options、会话设置的有效值、托管 `models.yml`、overlay 的看图角色、模型代理的放行与路由、会话侧净化的密钥集读同一份快照）——每个模型自带上游。表非空时这六个键被忽略：任一键被设置（空串也算）就在标准错误写一行 `{"event":"model_env_ignored"}`（只有 `event` 一个键，位于 `server_started` 之前），六个键都没设置时不写。所以已经启动过一次的部署，改这六个键再重启不会改变模型清单或上游；改动要经模型注册表的管理端点（model-registry「模型管理端点」，随本 change 的后续组提供）。
+**六个模型键只作首次种子**（change `s1d-model-registry`，model-registry「环境种子」）：`MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 的解析与校验照旧（非法值仍是 `config` 启动失败），但解析结果只在数据库的 `models` 表为空时写进模型注册表：白名单逐项插入（次序即列表次序），缺省模型那一项标为缺省，每一项的上游取 `MODEL_UPSTREAM_*`（两键未同时配置时该项没有上游）。此后白名单、缺省模型与每个模型的上游都只读注册表（composer options、会话设置的有效值、托管 `models.yml`、overlay 的看图角色、模型代理的放行与路由、会话侧净化的密钥集读同一份快照）——每个模型自带上游。表非空时这六个键被忽略：任一键被设置（空串也算）就在标准错误写一行 `{"event":"model_env_ignored"}`（只有 `event` 一个键，位于 `server_started` 之前），六个键都没设置时不写。所以已经启动过一次的部署，改这六个键再重启不会改变模型清单或上游；改动要经模型注册表的管理端点（model-registry「模型管理端点」，见 9.9）。
 
 启动次序（http-service-skeleton「服务启动与装配」）：迁移 → 办公文档 sidecar 预检 → `model_registry`（表空时种子，然后读出首个快照；同步的 SQLite 操作，失败为 `{"event":"server_start_failed","reason":"model_registry"}`）→ createApp → 主监听器 listen → 托管布局 → 沙箱根 → 预览监听器 listen → `models_yml` → `host_overlay`（两步是注册表发布器的同一次发布：先写 `models.yml`，再按快照里第一个看图模型写 overlay）→ 预览缓存目录 → `server_started`。主监听器受理的第一个请求读到的已是填好的快照；`models_yml` 之前到达的注册表写入只刷新快照、不写文件，随后的启动发布用当时的快照。
 
@@ -304,7 +304,7 @@ MODEL_CATALOG='[{"id": "model-a", "name": "通用", "reasoning": true, "efforts"
 - 白名单就是模型注册表快照里各模型的 `id`（首次启动由 `MODEL_CATALOG` 种子，未设置时恰为 `MODEL_ID` 一项）。会话设置的校验与界面的模型清单、托管的 `models.yml`、模型代理三处用同一份。
 - `POST /v1/chat/completions` 的请求体顶层必须恰有一个 `model` 成员，其值是白名单里某个 `id` 的字符串；缺少、重复、不是字符串或不在白名单内，一律 400 `bad_request`，不到达上游，响应不回显模型名。
 - 这项校验排在认证之后、按模型查上游之前：没有有效令牌的请求先得到 401；模型已登记而没有上游的得到 502（次序见 9.5「按模型路由」）。
-- 要让某个模型可用：首次启动前把它写进 `MODEL_CATALOG`；表里已有模型之后改 `MODEL_CATALOG` 不再生效（见上文「六个模型键只作首次种子」）。白名单是接入了哪些模型的清单，不是费用边界（[ADR-0008](../adr/0008-model-proxy-credentials.md)）。
+- 要让某个模型可用：首次启动前把它写进 `MODEL_CATALOG`，或由管理员经注册表端点登记（见 9.9）；表里已有模型之后改 `MODEL_CATALOG` 不再生效（见上文「六个模型键只作首次种子」）。白名单是接入了哪些模型的清单，不是费用边界（[ADR-0008](../adr/0008-model-proxy-credentials.md)）。
 
 **全部自动（`yolo`）**：
 
@@ -745,3 +745,20 @@ modelRoles:
   - 不设 `no-new-privileges`：它与 sudo 不能共存，设了 sudo 的 setuid 位不生效，omp 起不来。
   - 不分配 tty（不设 `tty: true`，不用 `docker run -t`）：镜像的 `/etc/sudoers` 带 `Defaults use_pty`，有 tty 时 sudo 会插入 monitor 进程，pdeathsig 的保证失效（ADR-0010）。
 - **健康检查**：compose 用内联的 `node -e`，对 `http://127.0.0.1:3000/api/healthz` 发请求，非 200 即退出 1。slim 基底没有 curl/wget。
+
+### 9.9 模型注册表端点、审计与发布（S1d，change `s1d-model-registry`）
+
+模型注册表（`server/src/models/`：`store` 表读写、`registry` 进程内快照、`publish` 托管文件发布、`rest` 管理端点）是模型白名单、缺省模型与每个模型上游的唯一来源（规格 model-registry）。本节写管理端点、审计与发布；种子见 9.3。
+
+**端点**（`models/rest.ts`，createApp 的第八个模块 `models`，启动记录的 `modules` 末项）：
+
+- `GET /api/models` → 200 `{models: ModelView[]}`，按登记次序；`ModelView` 恒为 `{id, name, reasoning, vision, maxTokens, efforts, upstream, isDefault, probe, updatedAt}`，`upstream` 为 `{baseUrl, hasApiKey: true}` 或 `null`。响应不含密钥；`baseUrl` 去掉 userinfo（环境种子的地址原样入表，可能带 `user:pass@`）。
+- `POST /api/models`（body 键集为 `{id, name, reasoning, vision, maxTokens, efforts, upstream}` 的子集且含 `id`，`upstream` 为 `{baseUrl, apiKey}`）→ 201；`PUT /api/models?id=`（整体替换 `id` 以外的字段，`upstream.apiKey` 省略即保留原密钥，`upstream: null` 清空）→ 200；`DELETE /api/models?id=` → 204（缺省模型 409 `model_in_use`）；`POST /api/models/default?id=`（无 body）→ 200，已是缺省时不审计、不发布。探活 `POST /api/models/probe` 由后续组提供。
+- 模型 id 走查询参数 `?id=<encodeURIComponent(id)>`，不进路径（`/api/*` 下百分号编码的路径分量一律 404，`Qwen/Qwen2.5-72B-Instruct` 这类 id 只能这样传）；`id` 缺失、为空或出现多次 400。
+- 次序：未登录 401 → 非管理员（角色不是 `管理员`）403 `forbidden`，先于 body 解析与 id 查找 → body 解析（`POST /api/models`、`PUT /api/models` 与 bodyless 的 `default` 属 content-parser 归属集，坏 JSON / 媒体类型 / 超限均 exact 400）→ 字段校验 400、未知 id 404、重复 id 409 `conflict`、第 33 个 400。全部应答 `Cache-Control: no-store`。
+
+**审计**：每次写入与表写入同一事务记一条，kind 为 `model.create` / `model.update` / `model.delete` / `model.default`（探活的 `model.probe` 随探活提供），actor 为管理员，`workspaceId` 为 null，title 为中文（如 `登记模型 <name>`）；detail 只含 `{modelId, name, upstreamChanged?}`，不含 base URL 与密钥。`upstreamChanged`：创建时为「带了上游」，修改时为「上游有无互换，或地址不同，或给出了新密钥」。
+
+**发布**：每次写入提交后同一请求内刷新快照，再由发布器依次重写 `<agent dir>/models.yml` 与宿主 overlay（看图角色取快照里第一个看图模型），然后才应答；同一时刻只有一轮重写，期间到达的写入合并为紧随其后的一轮。启动阶段 `models_yml` / `host_overlay` 调的是同一个发布函数，所以登记后的文件与重启后写出的字节相同。`models_yml` 阶段之前到达的写入只刷新快照、不写文件。重写失败时应答 generic 500（不是典型信封），标准错误恰一行 `{"event":"model_publish_failed"}`（只有 `event` 一个键），数据库与审计保留、不回滚；下一次成功的写入或重启再发布。运行中的 omp 进程不因发布重启：新 spawn 读新文件，存活进程在下一次派发时按 chat-sessions「派发前按会话设置对齐进程」对齐（有效模型不在它启动时的集合里则退役重启）。在途的上游请求不受写入影响；清空某模型的上游或删除它之后，该模型的下一次上游请求才失败。
+
+**已知验证缺口**：启动那一轮 `models_yml` 失败、而 `releaseOwned` 等待期间排队的 REST 发布经 overlay 包装把 stage 翻成 `host_overlay` 的竞态，外部进程无法确定性命中；修复是启动失败的 catch 在入口、任何 await 之前取定 reason（`server.ts`），回归证据是 `server/test/server-startup-failure-reason.test.ts`。
