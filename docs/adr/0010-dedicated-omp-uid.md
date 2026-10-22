@@ -442,3 +442,27 @@ change `office-convert-sandbox`（owner 裁定 B1–B10、B12、B13，2026-10-13
 证据等级：表中每格为实测（测试主机，2026-10-18，各列一次；c1–c5 ×3 列、c6 ×3 列、探针 ×8）。(e) 没有「热 profile」一栏：sidecar 每作业独立 `UserInstallation`，经 `/o/` 的每次都是冷 profile（设计如此），对照同为冷容器。终止路径的区分见上文 D-25 一条；sidecar stderr 对这 26 次终止每次恰一行（实测核对；`done` 行数未逐一与命中 / 未命中缓存的请求数对账）。
 
 定案：**全绿**——(b) 无命中无图、三种格式中文可辨认，(d) 五步每项符合，两种 uid 模式四项核对相同，两种部署形态相同。其余观察：形态 B 的 app 镜像是实测用的临时拼装（复用 sidecar 镜像），不是部署配方，app 容器里虽然带着 LibreOffice，进程树里没有 `soffice` / `sudo`（b′3）；首次 6000 段文档直接 `soffice` 运行超过 10 分钟未完成（被终止；未复现，之后同一文档 3.6 s），登记为观察。未测：并发作业；归档 D17 的 25 s / 133 s 真实文档；B1 数据类向量（owner B1：不造）；`setfacl`（测试主机没有 acl 包，以给家目录加其它用户的执行位代替，不影响转换链）。
+
+## 2026-10-21 补充：#1636 omp 退出后 bash 后台作业存活（维持已接受残余）
+
+- **出处**：2026-10-21 验收走查 CH-123。模型经 bash 起了一个本地 http 服务，回合结束后仍在运行（父进程是 omp 的 daemon broker）。owner 当日拍板：维持 #351「只覆盖 omp 进程本身」一条的残余，不做 OS 层隔离，本节补上实测形态与机制。
+- **实测（开发机 macOS，同 uid 直连，官方 v18.12.3，产品 overlay）**：
+  - 假上游让模型发一个 bash 调用，标记进程为 `/bin/sleep <N>`；回合结束后经 `SessionRuntime.shutdown()`（宿主退役流程）停掉 omp。
+  - 结果：
+
+    | 起法 | 回合结束后 | omp 退出后 1 s | omp 退出后 8 s |
+    |---|---|---|---|
+    | bash 带 `name`（launch broker 托管的服务） | 在 | 在 | 已回收 |
+    | `… &` | 在 | 在 | 在（自成进程组，父进程变为 1） |
+    | `nohup … &` | 在 | 在 | 在 |
+    | `async: true` | 在 | 在 | 在 |
+
+  - overlay 加 `launch.enabled: false` 只让带 `name` 的调用报错，其余三行不变；spawn 环境加 `PI_DISABLE_NOHUP_BUILTIN=1` 时四行都不变。两者都不钉。
+  - CH-123 的进程属于第一行：omp 还活着时它在，omp 退役约 3 s 后由 broker 的空闲关停回收。
+- **机制（读代码推出，`can1357/oh-my-pi` tag `v18.12.3`）**：
+  - 嵌入式 shell 让每个后台作业单开进程组（`crates/pi-shell/src/shell.rs:1385,1550`），按进程组杀只在 cancel 路径（`shell.rs:1746-1773`）。
+  - stdin EOF 走 `session.dispose()` → `releaseShellSessions`，刻意保留仍有存活后台作业的 Shell（`packages/coding-agent/src/exec/bash-executor.ts:217-258,307-316`），随后 `process.exit(0)`，Rust 侧 kill-on-drop 不运行；SIGTERM 处理器不清理 Shell（`packages/utils/src/postmortem.ts:642-645`）。
+  - 设置与环境变量里没有关掉这一行为的开关（关键词检索，未逐项审阅设置表）。
+- **宿主为何够不到**：这些进程不在 omp 的进程组里，`nohup` 起的进程一开始父进程就是 1；`OMP_USER` 模式下 app uid 对 omp uid 进程 `kill` 得 `EPERM`（上文 #351）；sudoers 只放行 `setpriv --pdeathsig KILL -- <OMP_BIN> *`，前缀里插不进 PID namespace / cgroup 包装。
+- **残余（已接受）**：助手经 bash 起的后台进程可在会话 omp 退出后继续以 omp 身份运行，占用端口与资源，直到自行结束、部署重启或运维清理；与直连模式相同。Linux 的 `OMP_USER` 形态未实测，按上述机制同样存活（读代码推出）。根治需 OS 层隔离（Linux 上为每个 omp 套 PID namespace 或 cgroup，需 root 级 sudoers 授权、默认容器形态不给 `CAP_SYS_ADMIN`），未立项。
+- **CI**：`uid-isolation` job 每个阶段后的 `reap_owned`（`pgrep -u omp`）会把 `OMP_USER` 阶段里残留的 omp uid 进程判失败并清掉；现有用例不起 bash 后台作业，这条残余不在 CI 里出现。
