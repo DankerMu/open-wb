@@ -5,7 +5,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: 删除到回收目录
-`DELETE /api/workspaces/:id/entries?path=<rel>` SHALL 把工作空间内的一个普通文件或目录移到服务端回收目录并返回 204（空体、`no-store`）；请求体被忽略（不属于归属 content-parser 集）。检查次序：属他人或不存在的 `:id`、或空间根不存在 → 404（先于路径检查，无审计）；`path` 缺失或重复 → 400；`sandbox.resolve(principal, id, path, "delete")`——越界、符号链接、空串（空间根本身）与不合法的末段 → 403 `sandbox_denied` + `sandbox.reject` 审计；目标在该空间的已登记挂载内（`path` 的第一段等于某个挂载名，含挂载根本身；判定见 workspace-mounts「挂载目录内的文件端点」，只读挂载登记、不访问文件系统）→ 409 `mount_boundary`，不建批次目录、不改名、不写审计（change s1b-workspace-mounts）；目标不存在 → 404；目标既不是普通文件也不是目录 → 404。
+`DELETE /api/workspaces/:id/entries?path=<rel>` SHALL 把工作空间内的一个普通文件或目录移到服务端回收目录并返回 204（空体、`no-store`）；请求体被忽略（不属于归属 content-parser 集）。检查次序：属他人或不存在的 `:id`、或空间根不存在 → 404（先于路径检查，无审计）；`path` 缺失或重复 → 400；`sandbox.resolve(principal, id, path, "delete")`——越界、符号链接、空串（空间根本身）与不合法的末段 → 403 `sandbox_denied` + `sandbox.reject` 审计；目标在该空间的已登记挂载内（`path` 去掉空段与 `.` 段之后的第一段等于某个挂载名，含挂载根本身；判定见 workspace-mounts「挂载目录内的文件端点」，只读挂载登记、不访问文件系统）→ 409 `mount_boundary`，不建批次目录、不改名、不写审计（change s1b-workspace-mounts）；目标不存在 → 404；目标既不是普通文件也不是目录 → 404。
 
 通过检查后 SHALL：建立批次目录 `<SANDBOX_ROOT>/.trash/<ownerId>/<workspaceId>/<batch>`，其中 `<batch>` 为 `<当前毫秒时间戳的十进制>-<16 位小写十六进制随机数>`，`.trash`、`<ownerId>`、`<workspaceId>` 与批次目录四级 SHALL 逐级以 `ensureOwnedDir(path, 0o700)` 的语义建立并在每次删除时重新校验（core/sandbox「托管目录权限位」：非递归创建、必须是目录而不是符号链接、属本进程的 effective uid、mode 精确为 `0700`）——`SANDBOX_ROOT` 对 omp uid 组可写，它可以抢先放一个名为 `.trash` 的符号链接或自己的目录，任何一级校验不通过 SHALL 为 generic 500：目标留在原处、不改名、不写 `file.delete` 审计；以一次 `rename` 把目标改名为 `<批次目录>/<目标的末段名>`（目录连同全部内容一起，不逐个复制）；随后 `emit` 审计 `{kind:"file.delete", actorId, workspaceId, title:"删除 <path>", detail:{path, type:"file"|"dir", trashId:"<batch>"}}`，审计写入成功之后才返回 204。`rename` 失败（含跨文件系统的 `EXDEV`、权限不足；挂载内的目标已在上一步被 409 拒绝，不会走到这里）SHALL 为 generic 500：目标留在原处、刚建的空批次目录被删除、不写 `file.delete` 审计。`rename` 成功而审计写入失败 SHALL 为 500，条目已在回收目录里（不回滚，与 workspaces「新建目录」的既有取舍一致）。回收目录 SHALL NOT 出现在任何工作空间的 `tree` 结果里，也没有任何端点能列出、读取或恢复其中的内容。
 
@@ -34,13 +34,13 @@
 - **THEN** 没有任何 `tree` 结果含 `.trash` 或其中的条目；后两类请求为 404 或 403，读不到回收目录里的内容
 
 #### Scenario: 挂载内不能删除
-- **WHEN** 空间有在线可写挂载 `远端`（其中有 `a.md`）与离线挂载 `备份`；依次 `DELETE …/entries?path=远端/a.md`、`DELETE …/entries?path=远端`、`DELETE …/entries?path=备份/x.md`；另有根下的普通目录 `远端旧`（名字以挂载名开头）上 `DELETE …/entries?path=远端旧`
-- **THEN** 前三个都是 409 `mount_boundary`（离线不改变结果），`远端/a.md` 仍在、`.trash` 下没有新批次、没有 `file.delete` 审计；最后一个 204 并按既有规则进入回收目录
+- **WHEN** 空间有在线可写挂载 `远端`（其中有 `a.md`）与离线挂载 `备份`；依次 `DELETE …/entries?path=远端/a.md`、`DELETE …/entries?path=远端`、`DELETE …/entries?path=./远端/a.md`、`DELETE …/entries?path=备份/x.md`；另有根下的普通目录 `远端旧`（名字以挂载名开头）上 `DELETE …/entries?path=远端旧`
+- **THEN** 前四个都是 409 `mount_boundary`（离线不改变结果），`远端/a.md` 仍在、`.trash` 下没有新批次、没有 `file.delete` 审计；最后一个 204 并按既有规则进入回收目录
 
 ### Requirement: 重命名与移动
-`POST /api/workspaces/:id/move` SHALL 只接受 `application/json` body `{from:string, to:string}`（恰这两个键，≤16 KiB，归属 content-parser 集），把同一工作空间内的一个普通文件或目录从 `from` 改到 `to`，成功返回 200 `{path:<to>}`、`no-store`。重命名即父目录不变的移动。检查次序：属他人或不存在的 `:id` → 404；body 形状不符 → 400 `bad_request`；`sandbox.resolve(…, from, "move")` 与 `sandbox.resolve(…, to, "move")`（先 `from` 后 `to`，任一被拒 → 403 `sandbox_denied` + 审计，另一个不再检查）；`to` 解析后的绝对路径位于 `from` 解析后的绝对路径之内（即以 `<from 的绝对路径>/` 为前缀——把条目移进它自己的子树；这是对两个已解析路径的纯词法比较，不访问文件系统，因此排在一切存在性检查之前）→ 400 `bad_request`；挂载判定（workspace-mounts「挂载目录内的文件端点」，只读挂载登记与内存状态、不访问文件系统）：`from` 与 `to` 恰一方在已登记挂载内、两方在不同挂载内、或 `from` 恰为挂载根 → 409 `mount_boundary`，两方在同一挂载内而该挂载离线 → 409 `mount_offline`、只读 → 403 `mount_read_only`，均不改名、不写审计（change s1b-workspace-mounts）；`from` 不存在、或既不是普通文件也不是目录 → 404；`to` 的直接父目录不存在或不是普通目录 → 404（不自动创建）；`to` 已存在（任何类型的条目，含 `to` 与 `from` 是同一路径）→ 409 `conflict`，不覆盖、不合并。
+`POST /api/workspaces/:id/move` SHALL 只接受 `application/json` body `{from:string, to:string}`（恰这两个键，≤16 KiB，归属 content-parser 集），把同一工作空间内的一个普通文件或目录从 `from` 改到 `to`，成功返回 200 `{path:<to>}`、`no-store`。重命名即父目录不变的移动。检查次序：属他人或不存在的 `:id` → 404；body 形状不符 → 400 `bad_request`；`sandbox.resolve(…, from, "move")` 与 `sandbox.resolve(…, to, "move")`（先 `from` 后 `to`，任一被拒 → 403 `sandbox_denied` + 审计，另一个不再检查）；`to` 解析后的绝对路径位于 `from` 解析后的绝对路径之内（即以 `<from 的绝对路径>/` 为前缀——把条目移进它自己的子树；这是对两个已解析路径的纯词法比较，不访问文件系统，因此排在一切存在性检查之前）→ 400 `bad_request`；挂载判定（workspace-mounts「挂载目录内的文件端点」，按去掉空段与 `.` 段之后的第一段，只读挂载登记与内存状态、不访问文件系统）：`from` 与 `to` 恰一方在已登记挂载内、两方在不同挂载内、或 `from` 恰为挂载根 → 409 `mount_boundary`，两方在同一挂载内而该挂载离线 → 409 `mount_offline`、只读 → 403 `mount_read_only`，均不改名、不写审计（change s1b-workspace-mounts）；`from` 不存在、或既不是普通文件也不是目录 → 404；`to` 的直接父目录不存在或不是普通目录 → 404（不自动创建）；`to` 已存在（任何类型的条目，含 `to` 与 `from` 是同一路径）→ 409 `conflict`，不覆盖、不合并。
 
-通过检查后 SHALL 以一次 `rename` 完成，随后 `emit` 审计 `{kind:"file.move", actorId, workspaceId, title, detail:{from, to, type:"file"|"dir"}}`，`title` 在父目录不变时为 `重命名 <from> → <to 的末段名>`，否则为 `移动 <from> → <to>`；审计写入成功之后才返回 200。`rename` 失败 SHALL 为 generic 500 且源留在原处、不写 `file.move` 审计。同一挂载内的改名与移动与普通目录相同，是一次 `rename`。路由只有一个 `:id`：`from` 与 `to` 都在这一个工作空间的根内解析，跨工作空间的移动在接口上不可表达。本路由不加锁：检查与 `rename` 之间由别的进程造成的变化以文件系统的结果为准。
+通过检查后 SHALL 以一次 `rename` 完成，随后 `emit` 审计 `{kind:"file.move", actorId, workspaceId, title, detail:{from, to, type:"file"|"dir"}}`，`title` 在父目录不变时为 `重命名 <from> → <to 的末段名>`，否则为 `移动 <from> → <to>`；审计写入成功之后才返回 200。`rename` 失败 SHALL 为 generic 500 且源留在原处、不写 `file.move` 审计。同一挂载内的改名与移动与普通目录相同，是一次 `rename`（在线挂载内经 workspace-mounts「宿主不同步进入挂载」的异步适配器）。路由只有一个 `:id`：`from` 与 `to` 都在这一个工作空间的根内解析，跨工作空间的移动在接口上不可表达。本路由不加锁：检查与 `rename` 之间由别的进程造成的变化以文件系统的结果为准。
 
 #### Scenario: 重命名与移动
 - **WHEN** 工作空间里有 `a.md`、目录 `docs`（含 `x.md`）与空目录 `out`；依次 `POST move {from:"a.md",to:"b.md"}`、`{from:"b.md",to:"out/b.md"}`、`{from:"docs",to:"out/docs"}`
@@ -67,5 +67,5 @@
 - **THEN** 响应为 500、`no-store`；源仍在原处；没有 `file.move` 审计行
 
 #### Scenario: 跨挂载边界
-- **WHEN** 空间有在线可写挂载 `远端`（含 `a.md` 与目录 `d`）、在线可写挂载 `共享`、在线只读挂载 `参考`（含 `r.md`）、离线挂载 `备份`（登记中、挂载点为空目录）与根下文件 `local.md`；依次请求 `{from:"local.md",to:"远端/local.md"}`、`{from:"远端/a.md",to:"a.md"}`、`{from:"远端/a.md",to:"共享/a.md"}`、`{from:"远端",to:"远端2"}`、`{from:"参考/r.md",to:"参考/s.md"}`、`{from:"备份/x",to:"备份/y"}`、`{from:"远端/a.md",to:"远端/d/a.md"}`
-- **THEN** 依次为 409 `mount_boundary`、409 `mount_boundary`、409 `mount_boundary`、409 `mount_boundary`、403 `mount_read_only`、409 `mount_offline`、200；前六个没有文件被移动、没有 `file.move` 审计；最后一个 `远端/d/a.md` 存在且审计一行 `file.move`（`title` `移动 远端/a.md → 远端/d/a.md`）
+- **WHEN** 空间有在线可写挂载 `远端`（含 `a.md` 与目录 `d`）、在线可写挂载 `共享`、在线只读挂载 `参考`（含 `r.md`）、离线挂载 `备份`（登记中、挂载点为空目录）与根下文件 `local.md`；依次请求 `{from:"local.md",to:"远端/local.md"}`、`{from:"远端/a.md",to:"a.md"}`、`{from:"远端/a.md",to:"共享/a.md"}`、`{from:"远端",to:"远端2"}`、`{from:"./远端/a.md",to:"共享//a.md"}`、`{from:"参考/r.md",to:"参考/s.md"}`、`{from:"备份/x",to:"备份/y"}`、`{from:"远端/a.md",to:"远端/d/a.md"}`
+- **THEN** 依次为 409 `mount_boundary`、409 `mount_boundary`、409 `mount_boundary`、409 `mount_boundary`、409 `mount_boundary`、403 `mount_read_only`、409 `mount_offline`、200；前七个没有文件被移动、没有 `file.move` 审计；最后一个 `远端/d/a.md` 存在且审计一行 `file.move`（`title` `移动 远端/a.md → 远端/d/a.md`）
