@@ -1,0 +1,56 @@
+# omp-uid-isolation Spec Delta
+
+> s1b-workspace-mounts：以 `s1d-connectors` 的 MODIFIED 文本为底（逐字沿用，含其全部场景标题），「Linux 隔离证明」的托管布局用例另覆盖远程挂载的私有目录 `<state>/mounts`——omp uid 不能列举、读取其中的 `rclone.conf`、不能在其下新建，加一个场景（design D5、D6）。其余逐字沿用该 MODIFIED 文本。
+
+## MODIFIED Requirements
+
+### Requirement: Linux 隔离证明
+`server/test/linux/uid-isolation.test.ts` SHALL 仅在 `process.platform === "linux"` 且 `WORKBUDDY_UID_TEST=1` 时执行，否则使用 `describe.skipIf` 明示跳过。已 opt-in 的测试 SHALL 以环境 OMP_USER 经真实 SessionRuntime 与既有 `omp-test-harness`「假 omp probe 回报」合同执行 `probe:<本进程 pid>:<沙箱内 writePath>`；缺少运行前提 SHALL 失败而非追加 skip。
+测试 SHALL 预置 MODEL_UPSTREAM_API_KEY、OPENAI_API_KEY、ANTHROPIC_API_KEY、WORKBUDDY_CANARY_SECRET，断言实际child uid不同于父uid，白名单 ⊆ child键集且四预置键全部缺席。sudo/PAM额外键 SHALL 允许，不以闭集断言；HOME 与三个 XDG 目录的回报 SHALL 等于传入值，不断言PATH值。字段按标签解析，空格和冒号路径 SHALL 原样保留。
+测试 SHALL 断言实际 `environ=EACCES` 与 `wrote=ok`，随后父进程经 workspaces tree 列举该文件。运行 SHALL 使用测试自有2770沙箱目录、由宿主按「OMP_STATE_DIR 托管布局」建立的状态目录、真实进程与procfs，不以mock/fake errno代替；所有自有进程、临时文件及env修改 SHALL 在完成或失败后清理/恢复，不吞清理失败。测试 SHALL 另含一个 SIGKILL 回收用例：以 ompUser 经真实 SessionRuntime 启动忽略 SIGTERM 与 stdin EOF 的假 omp（经注入 spawnImpl 在 argv 末尾追加 scenario 选择），shutdown 前先正向观测该 ompUser 进程恰为一个，retire 升级到对 sudo 的 SIGKILL 后，在有界时间内观测该 omp 进程消失；进程观测工具的非“无匹配”失败 SHALL 使测试失败而非视为空。该用例无法由测试自身清理 ompUser 残留，SHALL 由 CI job 的 owned-process reap 兜底并使 job 失败。正式 CI job 的装配由独立 CI uid-isolation job 要求负责。 测试 SHALL 另断言 omp uid 经 `sudo → setpriv` 路径写出的文件与目录不带任何 other 权限位且保留组写位：隔离探针写出的文件 `(mode & 0o007) === 0` 且 `(mode & 0o060) === 0o060`；删除用例里 omp 写的分支 `.jsonl`、其同名目录及嵌套子目录同样 other 位为 0、组写位为 1。假 omp 与真 omp 走同一条 sudo 路径、继承同一 umask，因此是 sudo/PAM 继承的充分 oracle。 测试 SHALL 另含一个托管布局用例：经真实 SessionRuntime 以 ompUser spawn 之后（托管 `models.yml` 已由测试经 `writeManagedModelsYml` 写入；托管 `mcp.json` 已由测试经 `server/src/connectors/mcp-json.ts` 的写出函数以一个带哨兵 `env` 值的 stdio 连接器写入，change s1d-connectors），用 omp-test-harness 的 `probe:` 与 `rename:` prompt 让 omp uid 逐一尝试——在 `<state>`、`<state>/sessions`、`<state>/xdg`、`<state>/xdg/data`、`<state>/home/.omp`、`<state>/home/.omp/agent` 下新建文件、覆写 `<state>/home/.omp/agent/models.yml` 与同目录的 `host-overlay.yml`、`mcp.json`（均 SHALL 回报 `wrote=EACCES`）；改名 `<state>/home`、`<state>/sessions`、`<state>/home/.omp/agent`（SHALL `renamed=EACCES`）与改名 `<state>/home/.omp` 与 `<state>/home/.env`（粘滞位，SHALL `renamed=EPERM`）、覆写 `<state>/home/.env`（SHALL `wrote=EACCES`）；在 `<state>/home` 与三个 `<state>/xdg/*/omp` 下新建文件（SHALL `wrote=ok`）；经 omp-test-harness 的 `read:` 读 `<state>/home/.omp/agent/mcp.json`（SHALL `read=ok`——omp 每次 spawn 要读它，connectors「托管 mcp.json」）。同一用例 SHALL 另覆盖会话配置目录 `<state>/session-config`（`2710`，omp-runtime「OMP_STATE_DIR 托管布局」，change s1d-experts-skills）：父进程列举该目录得到本次 spawn 写出的 `<key>.yml`，并在同目录以 `0640` 另写一个 `<key>.md`；omp uid 经 omp-test-harness 的 `read:` 读这两个文件（SHALL `read=ok`）、经 `list:` 列举 `<state>/session-config`（SHALL `listed=EACCES`）、经 `probe:` 在其下新建文件（SHALL `wrote=EACCES`）、经 `rename:` 改名该 `<key>.yml`（SHALL `renamed=EACCES`）。同一用例 SHALL 另覆盖远程挂载的私有目录 `<state>/mounts`（`0700`，omp-runtime「OMP_STATE_DIR 托管布局」，change s1b-workspace-mounts）：父进程在 spawn 之前预置 `<state>/mounts/<id>/`（`0700`）与其中含哨兵口令的 `rclone.conf`（`0600`），omp uid 经 omp-test-harness 的 `list:` 列举 `<state>/mounts`（SHALL `listed=EACCES`）、经 `read:` 读该 `rclone.conf`（SHALL `read=EACCES`）、经 `probe:` 在 `<state>/mounts` 下新建文件（SHALL `wrote=EACCES`），任何帧都不含该哨兵。随后父进程 SHALL 断言 `models.yml`、`mcp.json`、两个会话配置文件与该 `rclone.conf` 字节未变、被拒路径下没有新条目、五个改名目标与该 `<key>.yml` 仍在原名。
+
+#### Scenario: 隔离成立
+- WHEN CI uid-isolation job 在预置共享组及sudoers的Linux环境中以WORKBUDDY_UID_TEST=1 OMP_USER=omp运行该测试
+- THEN uid、白名单subset、四键缺席、home/XDG值、EACCES、wrote和父tree列举全部断言通过；该场景不是普通CI的skipped记录
+
+#### Scenario: 会话配置目录只可按路径读取
+- **WHEN** CI uid-isolation job 中，opt-in 的托管布局用例在 omp uid 的会话进程存活时对 `<state>/session-config` 执行上述 `read:`、`list:`、`probe:` 与 `rename:`
+- **THEN** 两个会话配置文件 `read=ok`，列举 `listed=EACCES`，新建 `wrote=EACCES`，改名 `renamed=EACCES`；父进程观测到两个文件字节未变、目录内没有新条目
+- **WHEN** 布局里 `<state>/session-config` 被改为 `2750`（负向对照，经变异 `ensureOmpStateLayout` 的表值）
+- **THEN** `listed=EACCES` 的断言失败
+
+#### Scenario: 托管 mcp.json 对 omp uid 可读不可写
+- **WHEN** CI uid-isolation job 中，opt-in 的托管布局用例在 omp uid 的会话进程存活时对 `<state>/home/.omp/agent/mcp.json` 执行 `read:` 与 `probe:`（覆写）
+- **THEN** `read=ok`，覆写 `wrote=EACCES`；父进程观测到 `mcp.json` 字节未变、仍为 `0640`、属主仍为 app uid，任何帧都不含其中的哨兵 `env` 值
+- **WHEN** 托管 `mcp.json` 被以 `0600` 写出（负向对照，经变异写出函数的 mode）
+- **THEN** `read=ok` 的断言失败
+
+#### Scenario: 非 opt-in 明示跳过
+- WHEN 平台不是Linux或WORKBUDDY_UID_TEST不是1
+- THEN suite报告skipped而非隔离通过，测试体不创建目录、不改env、不启动子进程，既有server套件保持可运行
+
+#### Scenario: 真实安全边界失败
+- WHEN opt-in下实际运行同uid、传入父sentinel、HOME/XDG值被替换、proc可读或子写入/父列举失败
+- THEN 测试非零，不更改期望为成功、不重试同uid、不追加skip；资源清理仍执行
+
+#### Scenario: SIGKILL of sudo reaps omp
+- WHEN opt-in 下 retire 一个忽略 SIGTERM 与 stdin EOF 的 sudo 启动 omp，使 retire 升级为对 sudo 进程的 SIGKILL
+- THEN retire 在预算内结束，sudo 以 SIGKILL 退出，此前观测到的 ompUser omp 进程在有界时间内消失；不以 stdio close 作为回收证据
+
+#### Scenario: omp 侧 umask 由 sudoers 强制
+- **WHEN** CI uid-isolation job 的 sudoers 含 `Defaults>omp umask=0007`，调用方以 umask `007` 启动编译服务并运行隔离测试
+- **THEN** omp uid 写出的探针文件、分支 `.jsonl` 与目录的 other 位全为 0 且组写位保留
+- **WHEN** 该 `Defaults` 行被去掉（部署机 PAM `pam_umask` 给出 `0002`）
+- **THEN** 上述 other 位断言失败
+
+#### Scenario: 托管配置对 omp uid 只读
+- **WHEN** opt-in 下 omp uid 经 `probe:`/`rename:` 对托管布局逐一尝试写入与改名
+- **THEN** 托管目录下的新建、`models.yml` 与 `home/.env` 的覆写、五个改名全部以 `EACCES`（`.omp` 与 `.env` 的改名为 `EPERM`）回报，`home` 与 `xdg/*/omp` 下的新建回报 ok；父进程观测到托管目录内容与 `models.yml` 字节未变
+- **WHEN** 布局里 `<state>/home/.omp/agent` 被改回 `2770`（负向对照，经变异 `ensureOmpStateLayout` 的表值）
+- **THEN** 该目录下新建文件的断言失败
+
+#### Scenario: 挂载凭证对 omp uid 不可达
+- **WHEN** CI uid-isolation job 中，opt-in 的托管布局用例在 omp uid 的会话进程存活时对 `<state>/mounts` 与其下预置的 `<id>/rclone.conf` 执行 `list:`、`read:` 与 `probe:`
+- **THEN** `listed=EACCES`、`read=EACCES`、`wrote=EACCES`；父进程观测到 `rclone.conf` 字节未变、仍为 `0600`、属主仍为 app uid，任何帧都不含其中的哨兵口令
+- **WHEN** 布局里 `<state>/mounts` 被改为 `2750`（负向对照，经变异 `ensureOmpStateLayout` 的表值）
+- **THEN** `listed=EACCES` 的断言失败

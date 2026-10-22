@@ -1,0 +1,46 @@
+# Proposal: s1b-workspace-mounts
+
+> Issue type: feature（S1b：F-FILE-3 远程目录按工作空间挂载）
+> Fixture level: expanded（整个 change；各任务组的级别见 tasks.md 组尾声明）
+> Blast radius: 工作空间根下多出 FUSE 挂载点（omp 与文件页都按普通目录访问）；app 以自己的 uid 拉起长驻 `rclone mount` 子进程；`OMP_STATE_DIR` 多一个 app 私有目录 `mounts/`（凭证、VFS 缓存、日志）；三个配置键与启动预检；迁移 049；错误码 +7、归属身份 +2；工作空间的删除 / 移动 / 新建目录 / 读取在挂载目录内多出明确的 4xx；文件页与会话页侧边栏的目录树多出挂载根行，文件页 `新建` 菜单多一项 `挂载目录`
+> Evidence floor: `npm test --workspace server`、`npm test --workspace web`、typecheck、size-guard、`make check`、`make test-guardrails`、`make ui-walk`、PR CI `uid-isolation`；真实挂载层在测试主机以 `WORKBUDDY_FUSE_TEST=1` 手工运行（不进 CI）
+> 依赖：前置实测 #1665（rclone 三后端跨 uid 挂载、凭证隔离、断连与占用卸载；结论写入 ADR-0003 补充）。建在 `s1d-model-registry`（Epic #1640：`forbidden` 码、`isAdmin`、启动阶段写法）、`s1d-experts-skills`（托管布局的 `session-config` 行、拷入层 `switch`）与 `s1d-connectors`（启动阶段 `mcp_json`、归属身份二十九条、布局表的 `mcp.json`）之上。归档顺序：三个 s1d change → 本 change。迁移编号 049（046–048 归三个 s1d change）。
+
+## Why
+
+`IMPLEMENTATION_PLAN.md` S1b（:198-205）要求 mount-manager：rclone 挂载的生命周期、凭证经受权限保护的配置文件注入、崩溃重挂与在线状态，覆盖 F-FILE-3「挂载/卸载 SFTP/NFS/SMB（只读标记、在线状态）」。今天工作空间只有本地目录：omp 与文件页都碰不到内网文件服务器上的资料，demo 的「挂载目录」对话框与挂载根行没有任何后端支撑。
+
+grill（2026-10-21，owner 逐分支拍板，见 design「owner 的裁定」）定了形态：SFTP、SMB 由用户自填凭证自助挂载；NFS 与本机目录由管理员在 OS 层挂好并登记为「挂载源」，用户再经 rclone `local` 后端接入；统一用 rclone 的 `sftp`、`smb`、`local` 三个后端，不带 sshfs；凭证只在 app 私有的 `rclone.conf`（`0600`）里；挂载内删除与跨挂载移动一律拒绝；卸载用惰性卸载；`RCLONE_BIN` 未配置即整个功能关闭。
+
+## What Changes
+
+- **迁移 049**（`049_workspace_mounts.sql`）：`mount_sources`（管理员登记的服务器目录：名称、绝对路径、只读）与 `workspace_mounts`（空间、属主、名称即挂载点目录名、后端 `sftp` / `smb` / `local`、主机、端口、远端路径、挂载源、只读、创建时间）；表里没有任何凭证列。
+- **配置与预检**：`RCLONE_BIN`（缺省未配置 = 挂载关闭）、`MOUNT_HOST_ALLOW`（主机许可名单，缺省不限）、`MOUNT_MAX_PER_WORKSPACE`（缺省 `8`），应用配置由三十七项变四十项。配置了 `RCLONE_BIN` 时启动预检：可执行普通文件、PATH 上有 `fusermount3`、`/dev/fuse` 存在；`OMP_USER` 模式另查 `/etc/fuse.conf` 的 `user_allow_other` 并取得 omp uid；任一不过即启动失败（`reason: "config"`）。
+- **mount-manager**（`server/src/workspaces/mounts/`）：每个挂载一个 app 私有目录 `<OMP_STATE_DIR>/mounts/<id>/`（`0700`；`rclone.conf` `0600`，口令经 `rclone obscure` 处理）；挂载点 `<空间根>/<挂载名>` 经 `ensureSharedDir`（`2770`）建出；以 app uid 前台拉起 `rclone mount`（可写挂载 `--vfs-cache-mode writes`，`OMP_USER` 模式 `--allow-other --default-permissions --uid <omp> --gid <共享组> --umask 007`），凭证不上命令行、子进程环境只有 `PATH` 与 `HOME`；在线 = 进程存活 ∧ 挂载点在 `/proc/self/mountinfo` ∧ 5 s 内 `stat` 成功，30 s 一轮；掉线即惰性卸载并按指数退避（封顶 5 分钟）重挂；启动成功后不等待地恢复全部挂载，关停时全部卸载。
+- **主机规则**：环回主机（字面或解析结果）一律拒绝；`MOUNT_HOST_ALLOW` 配置时只放行名单内的主机；每次挂载尝试（含重挂）都判定。
+- **挂载端点**：`GET /api/workspaces/:id/mounts`（`{enabled, mounts}`，永不回传凭证）、`POST /api/workspaces/:id/mounts`（建出即首次挂载 = 连通测试，失败不留行）、`DELETE /api/workspaces/:id/mounts/:mountId`（惰性卸载后删除凭证目录）；临时空间不能挂载。审计 `mount.attach`、`mount.detach`、`mount.reject`。
+- **挂载源端点**：`GET /api/mount-sources`（所有人；普通用户不见路径）、`POST /api/mount-sources` 与 `DELETE /api/mount-sources/:id`（仅管理员；删除连带卸载引用它的挂载）。审计 `mount.source.create`、`mount.source.delete`。
+- **错误码 +7**（十八 → 二十五）：`mount_disabled`、`mount_failed`、`mount_offline`、`mount_limit`、`mount_host_rejected`、`mount_read_only`、`mount_boundary`；归属身份 +2（二十九 → 三十一）：`POST /api/workspaces/:id/mounts`、`POST /api/mount-sources`。
+- **挂载目录内的文件端点**：挂载内删除、跨挂载移动、移动挂载根 → 409 `mount_boundary`（不再是 `EXDEV` 的 generic 500）；只读挂载内新建目录与移动 → 403 `mount_read_only`；离线挂载内的列举、读取、下载、压缩包列表、新建目录与移动 → 409 `mount_offline`。挂载名 `uploads` 保留，上传因此永不落进挂载。
+- **前端**：文件页与会话页侧边栏（同一个 `WorkspaceBrowser`）在空间根之后列出挂载根行（`只读` 标签、在线点、`卸载 <名>`、离线不可展开）；文件页 `新建` 菜单在挂载启用时多 `挂载目录`，对话框含名称、协议、主机、端口、路径、凭证与 `只读挂载` 开关，按钮 `测试连通并挂载`，失败就地显示。不新增 `.css`。
+- **文档**：ADR-0003「2026-10 补充」的产品化一节（以 #1665 的 P1–P8 为证据）、ADR-0010 补充（挂载的 uid/gid 选项与 `<state>/mounts`）、`system.md` 新节（`fuse.conf`、依赖包、部署前提）与 §3 `deriveWhitelist`「S1b 未来项」的销项、验收清单文件节新增挂载行。
+
+## Capabilities
+
+### New Capabilities
+- `workspace-mounts`: 迁移 049、配置与预检、取值与主机规则、凭证文件、挂载进程与挂载点、在线状态与重挂、服务启停、挂载与挂载源端点、临时空间与删除前卸载、挂载目录内的文件端点、挂载根行与挂载对话框、真实挂载验证层。
+
+### Modified Capabilities
+- `http-service-skeleton`: 「服务启动与装配」（三个挂载键、启动预检、启动后恢复挂载、关停卸载）、「统一错误信封」（二十五码、归属身份三十一条）。两者都以 `s1d-connectors` 的 MODIFIED 文本为底。
+- `omp-runtime`: 「OMP_STATE_DIR 托管布局」（布局表加 `<state>/mounts`，`0700`；以 `s1d-connectors` 的 MODIFIED 文本为底）。
+- `omp-uid-isolation`: 「Linux 隔离证明」（托管布局用例另证 omp uid 不能进入 `<state>/mounts`、读不到 `rclone.conf`；以 `s1d-connectors` 的 MODIFIED 文本为底）。
+- `file-operations`: 「删除到回收目录」「重命名与移动」（挂载判定插在沙箱判定之后、存在性检查之前）。
+- `workspaces`: 「目录树、新建目录与隔离」（离线挂载与只读挂载）。
+- `files-web`: 「工作空间页」（不再禁止宣传挂载；`新建` 菜单的 `挂载目录`）。
+
+## Impact
+
+- 服务端：新 `server/src/workspaces/mounts/`（config、validate、store、host-policy、rclone-conf、manager、rest）、迁移 049、`core/errors` 七码、`http/errors.ts` 归属集、`state-layout.ts` 一行、`server.ts` 的配置展开与启停接线、`workspaces/rest.ts` / `rest-entries.ts` 的挂载判定。
+- 前端：新 `web/src/lib/api-mounts.ts`、`web/src/features/files/mount-roots.tsx` 与 `mount-dialog.tsx`；`workspace-browser.tsx`（783 行）只加接线。
+- 测试夹具：假 rclone `server/test/fixtures/fake-rclone.mjs` 与假 `fusermount3`（同 `fake-soffice.mjs` 的真实 spawn 写法）；Linux opt-in 真实挂载用例 `server/test/linux/mounts-fuse.test.ts`。
+- 部署：主机需 `fuse3`、`rclone`（≥ 测试主机实测版本）与 `/etc/fuse.conf` 的 `user_allow_other`；参考镜像 `deploy/app/` 的 FUSE 能力留给 S4b（见 design Non-Goals）。
