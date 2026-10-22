@@ -474,7 +474,15 @@ export class SessionSupervisor {
   ): Promise<T> {
     // First, before any claim or admission: an unusable root spawns nothing and holds nothing.
     const cwd = this.#cwdOf(resume.ownerId, resume.workspaceId);
-    const slot = emptySlot(sessionId, resume.workspaceId === null ? null : cwd, approvalMode);
+    // The registry snapshot this process's `models.yml` holds (D19); a refresh between here and the
+    // spawn is design Risks' narrow window, accepted.
+    const modelIds = new Set(this.#composer.modelCatalog.models.map((model) => model.id));
+    const slot = emptySlot(
+      sessionId,
+      resume.workspaceId === null ? null : cwd,
+      approvalMode,
+      modelIds,
+    );
     const unclaim = () => {
       if (claim !== undefined) {
         releaseClaim(this.#claims, slot, claim);

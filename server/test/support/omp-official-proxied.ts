@@ -18,6 +18,11 @@
  * teed into `frames` (the runtime still reads every byte), so the omp-level assertions still hold.
  * Group 6 hands createApp the proxy's own upstream (key and base URL), as production does, so the
  * sessions-side sanitiser works with the same secret list, and exposes the app's database.
+ *
+ * s1d-model-registry group 5 adds the `registry` option: the proxy and createApp share one real model
+ * registry (`models/store.ts` + `models/registry.ts`) on the app's database, its rows written once the
+ * fake upstream's port is known (the fake expects the given key, so its `secret` body echoes it), and
+ * createApp gets `assembly.models` and no `assembly.upstream` — as the production entry assembles it.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -30,7 +35,10 @@ import { createApp } from "../../src/app.js";
 import { openDb } from "../../src/core/db/index.js";
 import { handleHttpError } from "../../src/http/errors.js";
 import { registerModelProxy } from "../../src/model-proxy/index.js";
+import { staticRegistry } from "../../src/model-proxy/lookup.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
+import { createRegistry } from "../../src/models/registry.js";
+import { createModelStore } from "../../src/models/store.js";
 import type { ChatEvent } from "../../src/sessions/events.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import { writeHostOverlay } from "../../src/sessions/omp/host-overlay.js";
@@ -47,6 +55,16 @@ import { type StalledHandshake, startStalledHandshake } from "./stalled-handshak
 
 /** The two whitelisted models; the runtime runs the first. */
 export const PROXIED_MODELS = ["deepseek-v4.1-flash", "workbuddy-second"] as const;
+const PROXIED_CATALOG = {
+  models: PROXIED_MODELS.map((id) => ({
+    id,
+    name: id,
+    reasoning: false,
+    vision: false,
+    maxTokens: 32768,
+  })),
+  defaultModelId: PROXIED_MODELS[0],
+};
 const UPSTREAM_KEY = "fake";
 const OWNER_ID = "u1";
 
@@ -55,6 +73,15 @@ interface ProxiedWorldOptions {
   target?: "fake-upstream" | "stalled-handshake";
   firstByteDeadlineMs?: number;
   connectDeadlineMs?: number;
+  /** A shared real registry whose rows route to the fake upstream expecting `apiKey`; absent → static. */
+  registry?: { apiKey: string };
+}
+
+/** The shared registry of the `registry` option: its database is the app's. */
+interface SharedRegistry {
+  db: DatabaseSync;
+  store: ReturnType<typeof createModelStore>;
+  registry: ReturnType<typeof createRegistry>;
 }
 
 export interface ProxiedWorld {
@@ -84,6 +111,8 @@ export interface ProxiedApp {
   denied: number[];
   /** Faults the supervisor retained; a passing case leaves it empty. */
   faults: Error[];
+  /** The shared registry when the `registry` option was given. */
+  models: SharedRegistry | undefined;
 }
 
 interface Proxied {
@@ -96,6 +125,20 @@ interface Proxied {
   tokens: TokenRegistry;
   /** What the proxy forwards to; createApp gets the same (production's one `upstream`). */
   target: { baseUrl: string; apiKey: string };
+  shared: SharedRegistry | undefined;
+}
+
+/** The `registry` option: the proxied catalog registered in a fresh database, each row routed to `target`. */
+function sharedRegistry(target: { baseUrl: string; apiKey: string }): SharedRegistry {
+  const db = openDb(":memory:");
+  onTeardown(() => db.close());
+  const store = createModelStore(db);
+  for (const model of PROXIED_CATALOG.models) {
+    store.create({ ...model, upstream: target });
+  }
+  const registry = createRegistry(store);
+  registry.refresh();
+  return { db, store, registry };
 }
 
 /** The layout, upstream, stalled listener and proxy shared by both worlds; torn down per case. */
@@ -110,7 +153,7 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   // Ends omp's upward walk at the sandbox root, as in the direct world.
   mkdirSync(join(sandboxRoot, ".git"));
   ensureOmpStateLayout(stateDir);
-  const upstream = await start({ apiKey: UPSTREAM_KEY });
+  const upstream = await start({ apiKey: options.registry?.apiKey ?? UPSTREAM_KEY });
   onTeardown(() => upstream.close());
   const stalled = await startStalledHandshake();
   onTeardown(() => stalled.close());
@@ -122,12 +165,13 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
       options.target === "stalled-handshake"
         ? `https://127.0.0.1:${String(stalled.port)}`
         : `http://127.0.0.1:${String(upstream.port)}/v1`,
-    apiKey: UPSTREAM_KEY,
+    apiKey: options.registry?.apiKey ?? UPSTREAM_KEY,
   };
+  // Written only now: the rows carry the fake upstream's port.
+  const shared = options.registry === undefined ? undefined : sharedRegistry(target);
   registerModelProxy(proxy, {
     tokens,
-    allowedModels: new Set(PROXIED_MODELS),
-    upstream: target,
+    models: shared?.registry ?? staticRegistry(PROXIED_CATALOG, target),
     ...(options.firstByteDeadlineMs === undefined
       ? {}
       : { firstByteDeadlineMs: options.firstByteDeadlineMs }),
@@ -139,16 +183,10 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   onTeardown(() => proxy.close());
   await writeManagedModelsYml(ompAgentDir(stateDir), {
     proxyBaseUrl: deriveProxyBaseUrl(proxy.server.address() as AddressInfo),
-    models: PROXIED_MODELS.map((id) => ({
-      id,
-      name: id,
-      reasoning: false,
-      vision: false,
-      maxTokens: 32768,
-    })),
+    models: PROXIED_CATALOG.models,
   });
   await writeHostOverlay(stateDir, { browserEnabled: false, visionModelId: null });
-  return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens, target };
+  return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens, target, shared };
 }
 
 export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promise<ProxiedWorld> {
@@ -191,13 +229,14 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
     teeFrames(child, frames);
     return child;
   };
-  const db = openDb(":memory:");
+  const { shared } = proxied;
+  const db = shared?.db ?? openDb(":memory:");
   const app: FastifyInstance = createApp({
     db,
     authRuntime: fixedRuntime(() => FIXED_NOW),
     assembly: {
       tokens: proxied.tokens,
-      upstream: proxied.target,
+      ...(shared === undefined ? { upstream: proxied.target } : { models: shared.registry }),
       runtime: {
         bin: proxied.bin,
         sandboxRoot: proxied.sandboxRoot,
@@ -229,12 +268,27 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
     try {
       await app.close();
     } finally {
-      db.close();
+      // A shared database is closed by its own (earlier registered, so later run) teardown step.
+      if (shared === undefined) {
+        db.close();
+      }
     }
   });
   const cookie = await cookieFor(app, "zhangsan");
   const { upstream, stalled } = proxied;
-  return { app, db, upstream, stalled, cookie, events, frames, log, denied, faults };
+  return {
+    app,
+    db,
+    upstream,
+    stalled,
+    cookie,
+    events,
+    frames,
+    log,
+    denied,
+    faults,
+    models: shared,
+  };
 }
 
 /** One prompt of `openProxiedApp`, as the browser and omp saw it. */

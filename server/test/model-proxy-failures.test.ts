@@ -16,7 +16,6 @@ import {
   type ModelProxyOptions,
 } from "../src/model-proxy/index.js";
 import {
-  ALLOWED_MODELS,
   API_KEY,
   CONNECTION_DEADLINE_MS,
   createGate,
@@ -24,6 +23,7 @@ import {
   expectFetchEnvelope,
   liveTokenTable,
   postCompletions,
+  proxyModels,
   rawPostCompletions,
   startRecordingUpstream,
   tokensFrom,
@@ -53,8 +53,7 @@ const LEAKS = [
 function configured(baseUrl: string, extra: Partial<ModelProxyOptions> = {}): ModelProxyOptions {
   return {
     tokens: tokensFrom(liveTokenTable()),
-    allowedModels: ALLOWED_MODELS,
-    upstream: { baseUrl, apiKey: API_KEY },
+    models: proxyModels({ baseUrl, apiKey: API_KEY }),
     ...extra,
   };
 }
@@ -270,7 +269,7 @@ describe("a request that cannot be built", () => {
     );
     const options = configured(upstream.origin);
     await withListeningProxy(
-      { ...options, upstream: { baseUrl: upstream.origin, apiKey: "bad\nkey" } },
+      { ...options, models: proxyModels({ baseUrl: upstream.origin, apiKey: "bad\nkey" }) },
       async (origin) => {
         await expectFetchEnvelope(
           await postCompletions(origin),
@@ -439,8 +438,14 @@ describe("deadline defaults and the production assembly", () => {
     expect(DEFAULT_FIRST_BYTE_DEADLINE_MS).toBe(FIRST_BYTE_DEADLINE_MS);
     expect(DEFAULT_CONNECT_DEADLINE_MS).toBe(CONNECTION_DEADLINE_MS);
     const app = readFileSync(new URL("../src/app.ts", import.meta.url), "utf8");
-    const call = /registerModelProxy\(app, \{[\s\S]*?\n {2}\}\);/u.exec(app)?.[0];
+    // One statement, no `;` inside: a call that wraps or grows a nested statement leaves `call`
+    // undefined instead of silently stretching into the next registration.
+    expect(app.match(/registerModelProxy\(/gu)).toHaveLength(1);
+    const call = /registerModelProxy\(app, \{[^;]*\}\);/u.exec(app)?.[0];
     expect(call).toBeDefined();
+    expect(call).toContain("tokens");
+    expect(call).toContain("models: registry");
+    expect(call).not.toMatch(/registerSessions|createWorkspaceStore|const /u);
     expect(call).not.toMatch(/DeadlineMs/u);
     const dir = new URL("../src/model-proxy/", import.meta.url);
     for (const file of readdirSync(dir)) {

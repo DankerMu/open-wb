@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ALLOWED_MODELS,
   API_KEY,
   createGate,
   expectHeldSseCompletion,
   expectPendingDuring,
   liveTokenTable,
   postCompletions,
+  proxyModels,
   readRest,
   readUntilPrefix,
   startHeldSse,
@@ -37,8 +37,7 @@ const NO_CONNECT =
 function configured(baseUrl: string, firstByteDeadlineMs?: number) {
   return {
     tokens: tokensFrom(liveTokenTable()),
-    allowedModels: ALLOWED_MODELS,
-    upstream: { baseUrl, apiKey: API_KEY },
+    models: proxyModels({ baseUrl, apiKey: API_KEY }),
     connectDeadlineMs: INJECTED_DEADLINE_MS,
     ...(firstByteDeadlineMs === undefined ? {} : { firstByteDeadlineMs }),
   };

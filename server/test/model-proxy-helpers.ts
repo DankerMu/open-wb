@@ -18,6 +18,11 @@ import {
   registerModelProxy,
   type TokenLookup,
 } from "../src/model-proxy/index.js";
+import {
+  type ModelRegistry,
+  type ModelUpstream,
+  staticRegistry,
+} from "../src/model-proxy/lookup.js";
 import { withListeningApp } from "./raw-http-helpers.js";
 
 export type { ModelProxyOptions, TokenLookup };
@@ -32,7 +37,22 @@ export const FOUR_MIB = 4 * 1024 * 1024;
 export const CONNECTION_DEADLINE_MS = 10_000;
 export const PROXY_PATH = "/v1/chat/completions";
 /** 代理测试共用的白名单（model-proxy「Model outside the whitelist is refused」的 `{"m1","m3"}`）。 */
-export const ALLOWED_MODELS: ReadonlySet<string> = new Set(["m1", "m3"]);
+const ALLOWED_MODELS = ["m1", "m3"] as const;
+
+/** 白名单 `{"m1","m3"}` 经 `staticRegistry` 适配成代理的 `models`；有上游时两个模型都转发到它。 */
+export function proxyModels(upstream?: ModelUpstream | undefined): ModelRegistry {
+  const catalog = {
+    models: ALLOWED_MODELS.map((id) => ({
+      id,
+      name: id,
+      reasoning: false,
+      vision: false,
+      maxTokens: 32768,
+    })),
+    defaultModelId: ALLOWED_MODELS[0],
+  };
+  return staticRegistry(catalog, upstream);
+}
 /** 白名单内的最小请求体：不关心 body 内容的用例发它。 */
 export const MODEL_BODY = '{"model":"m1"}';
 

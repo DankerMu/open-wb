@@ -49,7 +49,9 @@ fork 的临时进程 SHALL 以源会话的有效档位、有效模型与有效�
 
 #### Scenario: 真实 omp 对未加载模型的 set_model（真实 omp）
 - **WHEN** 官方钉住的 omp v18.12.3 以只含 `m1` 的托管 `models.yml` 启动，宿主在启动后把 `m2` 加进 `models.yml` 并发 `set_model{provider:"workbuddy", modelId:"m2"}`
-- **THEN** 应答的 `success` 不为真（实现 PR 记录确切应答；若实测为真则本条「模型集合」判据改为可选并在 design 登记——这是本场景存在的原因）
+- **THEN** `get_available_models` 的 `workbuddy` 条目仍只有 `m1`；`set_model` 的应答为 `success: false`、错误文本 `Model not found: workbuddy/m2`；之后 `get_state` 仍报 `workbuddy/m1`，进程存活，下一回合的上游请求只点名 `m1`
+- **WHEN** 同一会话由新 spawn 在含 `m1`、`m2` 的 `models.yml` 上 `--resume`，再发同一 `set_model`
+- **THEN** 应答 `success: true`，`get_state` 报 `workbuddy/m2`
 
 #### Scenario: 会话能力变化则在下一条重启
 - **WHEN** 一个专家为 `builtin:data-analyst` 的会话在假 omp 真子进程上完成一个回合（进程存活）；owner `PUT …/capabilities {expertId:E}`（E 是 owner 自建的专家，声明的技能为 `[]`）后发一条 prompt；随后 owner `PUT /api/experts?id=E` 只改提示词，再发一条；随后 `PUT …/capabilities {disabledSkills:["deploy"]}`，再发一条；测试经注入的 spawn 包装记下每次的 argv 并在 spawn 时读取会话配置文件

@@ -26,6 +26,7 @@ import {
 } from "./auth/index.js";
 import { emit } from "./core/audit/index.js";
 import { HttpError } from "./core/errors/index.js";
+import { isAdmin } from "./core/roles.js";
 import { ensureSharedDir } from "./core/sandbox/dirs.js";
 import { createSandbox } from "./core/sandbox/index.js";
 import { sanitizeUpstreamText, upstreamSecretList } from "./core/upstream-failure.js";
@@ -43,6 +44,10 @@ import {
 import { classifyRequestPath } from "./http/path-classifier.js";
 import { type ApprovalMode, type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
 import { registerModelProxy } from "./model-proxy/index.js";
+import { type ModelRegistry, staticRegistry } from "./model-proxy/lookup.js";
+import type { ModelPublishFailedRecord } from "./models/publish.js";
+import { registerModels } from "./models/rest.js";
+import { createModelStore } from "./models/store.js";
 import { DEFAULT_TRASH_RETENTION_DAYS } from "./preview-config.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
@@ -103,6 +108,18 @@ export interface AssemblyDependencies {
    * that make the rename fail). Omitted in production.
    */
   trash?: ReturnType<typeof createTrash>;
+  /**
+   * 代理按模型查找所用的注册表（s1d-model-registry D5）；省略时由 `modelCatalog` 与 `upstream`
+   * 经 `staticRegistry` 适配。
+   */
+  models?: ModelRegistry;
+  /**
+   * 注册表写入提交并 `refresh()` 之后的托管文件发布（单飞，D7）；省略时为空操作（静态接缝：管理端点照写
+   * 表、快照不变、不写文件）。生产入口传注册表发布器的 `publish`。
+   */
+  publish?: () => Promise<void>;
+  /** 发布失败的一行记录 sink（与 `log` / `warn` 同一写法）；省略时不写。 */
+  onPublishFailed?: (record: ModelPublishFailedRecord) => void;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -208,13 +225,15 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     modelId: DEFAULT_MODEL_ID,
     idleMs: DEFAULT_OMP_IDLE_MS,
   };
-  // 代理白名单与会话视图的有效值用同一份目录。
-  const modelCatalog = assembly?.modelCatalog ?? resolveModelCatalog({ MODEL_ID: runtime.modelId });
-  registerModelProxy(app, {
-    tokens,
-    allowedModels: new Set(modelCatalog.models.map((model) => model.id)),
-    ...(assembly?.upstream === undefined ? {} : { upstream: assembly.upstream }),
-  });
+  // 一个注册表对象，三处读它（D5）：代理的放行与路由、composer 的白名单、会话侧净化的密钥集。没有
+  // `assembly.models` 时由静态白名单与单一上游适配（测试接缝）。
+  const registry =
+    assembly?.models ??
+    staticRegistry(
+      assembly?.modelCatalog ?? resolveModelCatalog({ MODEL_ID: runtime.modelId }),
+      assembly?.upstream,
+    );
+  registerModelProxy(app, { tokens, models: registry });
   const store = createWorkspaceStore(db, {
     sandboxRoot: runtime.sandboxRoot,
     ensureSharedDir,
@@ -238,7 +257,13 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
       return store.createTemporary({ id: ownerId });
     },
     agentDir: ompAgentDir(runtime.stateDir),
-    composer: { approvalMaxMode: assembly?.approvalMaxMode ?? "yolo", modelCatalog },
+    // 每次读当时的快照（getter，不缓存）：注册表写入 + refresh 之后不重启即变化。
+    composer: {
+      approvalMaxMode: assembly?.approvalMaxMode ?? "yolo",
+      get modelCatalog() {
+        return registry.current();
+      },
+    },
     upload,
     sandbox,
     snapshots: assembly?.snapshots ?? snapshotService(runtime),
@@ -246,7 +271,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
-    redactUpstream: upstreamRedactor(assembly?.upstream, runtime),
+    redactUpstream: upstreamRedactor(registry, runtime),
   });
   app.decorate("sessions", registered);
   app.decorate("workspaces", { store, sandbox });
@@ -270,6 +295,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     assembly?.preview,
   );
   registerAccounts(app, { db });
+  registerModelAdmin(app, db, registry, assembly);
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
@@ -326,8 +352,9 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
 }
 
 /**
- * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：每次净化时构造密钥集——上游的 apiKey
- * 与 base URL 各部分（未配置上游时没有），OMP 状态目录与沙箱根各四种写法：配置原值、`normalize` 后的
+ * sessions 的净化闭包（#909，upstream-failure「上游原文净化」）：每次净化时构造密钥集——注册表此刻全部
+ * 已登记上游的 apiKey 与 base URL 各部分（`registry.secrets()` 现取，s1d-model-registry D18；没有已登记
+ * 上游时没有；静态接缝下即单一上游的那一份），OMP 状态目录与沙箱根各四种写法：配置原值、`normalize` 后的
  * 原值（去掉 `//`、`/./` 而不解析符号链接）、再去掉末尾 `/` 的写法（根目录除外）与此刻的 realpath
  * （`realpathSync.native`，macOS 上连大小写也取盘上的，APFS 上实测；目录不在、取不到时没有这一项），
  * 相同的只列一次。realpath 在净化时才取：生产入口在建托管布局与 `sandbox_root` 阶段（都在 listen
@@ -335,7 +362,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
  * 与每次 spawn 重建状态目录布局时的同步 fs 调用（`sessions/omp/process.ts:87`）是同一个暴露面（读代码推出）。
  */
 function upstreamRedactor(
-  upstream: AssemblyDependencies["upstream"],
+  registry: Pick<ModelRegistry, "secrets">,
   runtime: SessionRuntime,
 ): (text: string) => string {
   return (text) => {
@@ -349,13 +376,32 @@ function upstreamRedactor(
         // Not there: the other three forms are still listed.
       }
     }
-    const secrets = upstreamSecretList({
-      apiKey: upstream?.apiKey,
-      baseUrl: upstream?.baseUrl,
-      paths,
-    });
-    return sanitizeUpstreamText(text, secrets);
+    const secrets = new Set([...registry.secrets(), ...upstreamSecretList({ paths })]);
+    return sanitizeUpstreamText(text, [...secrets]);
   };
+}
+
+/**
+ * 第八个模块 `models`（s1d-model-registry D7、D10）：管理端点写 app 自己的库（store 由这里自建），写后刷新与
+ * 代理、composer 同一个注册表对象；发布未注入时为空操作。
+ */
+function registerModelAdmin(
+  app: FastifyInstance,
+  db: DatabaseSync,
+  registry: Pick<ModelRegistry, "refresh">,
+  assembly: AssemblyDependencies | undefined,
+): void {
+  registerModels(app, {
+    db,
+    store: createModelStore(db),
+    registry,
+    publish: assembly?.publish ?? (() => Promise.resolve()),
+    emit,
+    isAdmin,
+    ...(assembly?.onPublishFailed === undefined
+      ? {}
+      : { onPublishFailed: assembly.onPublishFailed }),
+  });
 }
 
 /** 去掉末尾的分隔符（`normalize` 后至多一个）；根目录 `/` 原样。 */

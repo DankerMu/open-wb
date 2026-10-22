@@ -43,6 +43,11 @@ export interface Slot {
    * construction, so every generation of the slot runs under it. Never rewritten.
    */
   approvalMode: ApprovalMode;
+  /**
+   * The model ids of the registry snapshot when this slot was built, i.e. what its process's
+   * `models.yml` holds (omp reads it at spawn only, s1d design D19). Never rewritten.
+   */
+  modelIds: ReadonlySet<string>;
 }
 
 /** A slot before its admission: no runtime, no pool entry, no generation, no turn. */
@@ -50,6 +55,7 @@ export function emptySlot(
   sessionId: string,
   workspaceRoot: string | null,
   approvalMode: ApprovalMode,
+  modelIds: ReadonlySet<string>,
 ): Slot {
   return {
     sessionId,
@@ -64,6 +70,7 @@ export function emptySlot(
     entry: undefined,
     workspaceRoot,
     approvalMode,
+    modelIds,
   };
 }
 

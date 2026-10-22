@@ -23,14 +23,17 @@ export function effectiveOf(
 }
 
 /**
- * Whether a live slot can serve a dispatch whose effective values are `effective`: only the mode
- * decides, because omp takes it from argv alone. A model or effort change needs no restart.
+ * Whether a live slot can serve a dispatch whose effective values are `effective` (step 1, s1d
+ * design D19): its process was started under the effective mode (omp takes it from argv alone) and
+ * knows the effective model (omp reads `models.yml` at spawn only and refuses `set_model` for a model
+ * registered later, `Model not found`). A model of the spawn-time set or an effort change needs no
+ * restart: step 2 switches it.
  */
 export function reusable(
-  slot: { approvalMode: ApprovalMode },
-  effective: { approvalMode: ApprovalMode },
+  slot: { approvalMode: ApprovalMode; modelIds: ReadonlySet<string> },
+  effective: { approvalMode: ApprovalMode; modelId: string },
 ): boolean {
-  return slot.approvalMode === effective.approvalMode;
+  return slot.approvalMode === effective.approvalMode && slot.modelIds.has(effective.modelId);
 }
 
 /**

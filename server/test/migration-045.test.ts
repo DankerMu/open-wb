@@ -276,10 +276,13 @@ describe("migration 045 interleaved segments: 新库与存量库", () => {
     if (file !== ":memory:") expectRepeatedOpenStable(file, expect045Applied);
   });
 
-  it("the trusted migration count grows by one, to 045", () => {
-    expect(TRACKED_MIGRATION_FILENAMES).toHaveLength(19);
-    expect(TRACKED_MIGRATION_FILENAMES.at(-1)).toBe(MIGRATION_045);
-    expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 19, "integer"]]);
+  it("the trusted catalog holds 045 once, right after 044, with its receipt at the 045 position", () => {
+    expect(TRACKED_MIGRATION_FILENAMES.filter((name) => name === MIGRATION_045)).toHaveLength(1);
+    expect(TRACKED_MIGRATION_FILENAMES[POS - 1]).toBe(MIGRATION_044);
+    expect(COMPLETE_CATALOG.receipts[POS]).toEqual([POS + 1, MIGRATION_045]);
+    expect(COMPLETE_CATALOG.sequenceRows).toEqual([
+      ["schema_migrations", TRACKED_MIGRATION_FILENAMES.length, "integer"],
+    ]);
   });
 
   it("populated database ending at 044 gains 045 once, reads NULL, keeps every prior value, key, index and sequence", () => {

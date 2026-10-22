@@ -702,7 +702,7 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
-describe("HTTP typed error map 恰十六码（auth 域只复用既有 unauthorized）", () => {
+describe("HTTP typed error map 恰十八码（auth 域只复用既有 unauthorized）", () => {
   const codes = {
     bad_request: { statusCode: 400, message: "请求格式不正确" },
     invalid_credentials: { statusCode: 401, message: "账号或密码不正确" },
@@ -720,6 +720,8 @@ describe("HTTP typed error map 恰十六码（auth 域只复用既有 unauthoriz
     session_archived: { statusCode: 409, message: "会话已归档，恢复后才能继续对话" },
     undo_conflict: { statusCode: 409, message: "其它会话在这之后改动过工作空间" },
     upload_too_large: { statusCode: 413, message: "文件超过大小上限" },
+    forbidden: { statusCode: 403, message: "没有权限执行此操作" },
+    model_in_use: { statusCode: 409, message: "该模型是缺省模型，先把缺省换成别的模型" },
   } as const satisfies Record<HttpErrorCode, { statusCode: number; message: string }>;
 
   /**
