@@ -1,14 +1,14 @@
-// 模型与推理强度控件（model-selection「模型与推理强度控件」五条场景；chat-web「能力行的次序」「锁定时三个
+// 模型与推理强度控件（model-selection「模型与推理强度控件」六条场景；chat-web「能力行的次序」「锁定时三个
 // 控件仍可用」的模型与强度部分）：右组的两个按钮与单选菜单、已选会话的提交（body 恰一个键，以响应为准，
-// 失败回退）、欢迎态的选择与换模型时强度的重算进入创建请求、长名字与选项缺失；以及能力行三个控件共用的
-// 提交次序——同一会话只采用最后发出的那次设置提交的结果。
+// 失败回退）、欢迎态的选择与换模型时强度的重算进入创建请求、长名字与选项缺失、模型菜单打开时重取；以及
+// 能力行三个控件共用的提交次序——同一会话只采用最后发出的那次设置提交的结果。
 // seam：整页挂载 + 假 API。假 API 像服务端那样在收到 PATCH 时写入会话表（只写所给的键，原始强度保留；
 // 视图的强度在模型不支持推理时为 null，原始强度为空时取模型缺省），响应可按序号挂起。期望文案取自规格条文。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ComposerOptions } from "../src/lib/composer-contract.js";
 import { quiesce } from "./chat-page-file-changes-support.js";
-import { clickSend, typeDraft } from "./chat-page-lifecycle-support.js";
+import { clickSend, settleDeferredResponse, typeDraft } from "./chat-page-lifecycle-support.js";
 import {
   A,
   B,
@@ -39,6 +39,7 @@ import { DEFAULT_COMPOSER_OPTIONS } from "./session-meta-fixtures.js";
 import {
   composerOptionsRoute,
   currentLocation,
+  deferredResponse,
   type FetchMock,
   jsonResponse,
   paths,
@@ -248,6 +249,11 @@ async function pick(kind: "模型" | "推理强度" | "权限", label: string) {
   await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
 }
 
+/** 至此发出的 `GET /api/composer/options` 次数。 */
+function asked(fetchMock: FetchMock) {
+  return paths(fetchMock).filter((path) => path === OPTIONS_PATH).length;
+}
+
 function alerts() {
   return screen.queryAllByRole("alert", { hidden: true }).map((alert) => alert.textContent);
 }
@@ -400,6 +406,20 @@ describe("模型与推理强度控件：切换模型与强度", () => {
     await focusOn(button("推理强度"));
   });
 
+  it("打开模型菜单恰一次重取、强度菜单不重取", async () => {
+    const { fetchMock } = await mountSelected([chosen(A, "甲", "m1", "high")]);
+    await quiesce();
+    const start = asked(fetchMock);
+
+    await close(await open("模型"));
+    await waitFor(() => expect(asked(fetchMock)).toBe(start + 1));
+    await close(await open("模型"));
+    await waitFor(() => expect(asked(fetchMock)).toBe(start + 2));
+    await close(await open("推理强度"));
+    await quiesce();
+    expect(asked(fetchMock)).toBe(start + 2);
+  });
+
   it("推理模型而视图的强度为 null：没有强度控件", async () => {
     await mountSelected([chosen(A, "甲", "m1", null)]);
     await quiesce();
@@ -491,7 +511,9 @@ describe("模型与推理强度控件：欢迎态的选择", () => {
     await pick("模型", "通用");
     expect(shown()).toEqual(both("通用", "高"));
     await quiesce();
-    expect(paths(fetchMock)).toEqual(before);
+    const others = (all: string[]) => all.filter((path) => path !== OPTIONS_PATH);
+    expect(others(paths(fetchMock))).toEqual(others(before));
+    expect(asked(fetchMock)).toBe(before.length - others(before).length + 3);
 
     expect(await sendFirst(fetchMock)).toEqual([
       createOf('{"scene":"office","modelId":"m1","reasoningEffort":"high"}'),
@@ -634,6 +656,23 @@ describe("模型与推理强度控件：长名字与选项缺失", () => {
     await quiesce();
 
     expect(names()).toEqual([null, null, null]);
+  });
+});
+
+describe("模型与推理强度控件：打开菜单看到新登记的模型", () => {
+  it("重取落地后同一个菜单变为两项、不关闭；选项共取两次", async () => {
+    const upTo = (count: number) => ({ ...OPTIONS, models: OPTIONS.models.slice(0, count) });
+    const refetch = deferredResponse();
+    const extra = { [OPTIONS_PATH]: [jsonResponse(upTo(1)), refetch.promise] };
+    const session = [chosen(A, "甲", "m1", "high")];
+    const { fetchMock } = await mountSelected(session, undefined, undefined, extra);
+
+    const menu = await open("模型");
+    expect(radios(menu)).toHaveLength(1);
+    await settleDeferredResponse(refetch, jsonResponse(upTo(2)));
+    await waitFor(() => expect(radios(menu)).toHaveLength(2));
+    expect(screen.getByRole("menu")).toBe(menu);
+    expect(asked(fetchMock)).toBe(2);
   });
 });
 

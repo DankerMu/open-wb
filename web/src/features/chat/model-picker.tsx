@@ -1,5 +1,6 @@
 // 模型与推理强度控件（model-selection「模型与推理强度控件」）：能力行右组的前两项。这里只管显示名、
-// 能力标签、欢迎态换模型时强度的重算与提交在途的禁用；已选会话的显示值恒为传入的会话视图。
+// 能力标签、欢迎态换模型时强度的重算、提交在途的禁用与模型菜单打开时的重取回调；已选会话的显示值恒为
+// 传入的会话视图。
 import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,6 +54,8 @@ function carried(model: Model, effort: Effort | null) {
 }
 
 type ModelPickerProps = {
+  /** 模型菜单每次打开时调用（输入框选项重取，model-selection「模型与推理强度控件」）；强度菜单不调用。 */
+  onModelMenuOpen(): void;
   /** 输入框选项：模型白名单与缺省值。 */
   options: ComposerOptions;
   /**
@@ -73,7 +76,7 @@ type ModelPickerProps = {
  * 所发）。两个按钮都不随输入框锁定禁用（生成中可改）。强度按钮只在当前模型支持推理且有强度时渲染；模型
  * 不在白名单里时按钮退为 id 原文、没有强度按钮。在途是组件内状态：调用方以会话 id 为 `key`，换会话即复位。
  */
-export function ModelPicker({ options, session, welcome }: ModelPickerProps) {
+export function ModelPicker({ onModelMenuOpen, options, session, welcome }: ModelPickerProps) {
   const [pending, setPending] = useState(false);
   const modelRef = useRef<HTMLButtonElement>(null);
   const effortRef = useRef<HTMLButtonElement>(null);
@@ -122,6 +125,7 @@ export function ModelPicker({ options, session, welcome }: ModelPickerProps) {
         disabled={pending}
         label={`模型：${name}`}
         onChange={chooseModel}
+        onOpen={onModelMenuOpen}
         text={name}
         value={shown.modelId}
       >
@@ -169,6 +173,8 @@ type ChoiceProps = {
   /** 按钮的可访问名。 */
   label: string;
   onChange(value: string): void;
+  /** 菜单打开时调用（指针与键盘打开都算）。 */
+  onOpen?: () => void;
   text: string;
   /** 当前值；没有与它相同的单选项时菜单里没有选中项。 */
   value: string;
@@ -177,7 +183,11 @@ type ChoiceProps = {
 /** 一个按钮加它的单选菜单；选中任何一项（含当前值）都回调，由调用方判定是否提交。 */
 function Choice(props: ChoiceProps) {
   return (
-    <DropdownMenu>
+    <DropdownMenu
+      onOpenChange={(open) => {
+        if (open) props.onOpen?.();
+      }}
+    >
       {/* 禁用写在 Trigger 上（它转给按钮）：菜单在 pointerdown 就打开，只禁用按钮挡不住。 */}
       <DropdownMenuTrigger asChild disabled={props.disabled}>
         <Button

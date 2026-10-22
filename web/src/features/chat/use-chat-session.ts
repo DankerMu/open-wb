@@ -765,6 +765,7 @@ export function useChatSession() {
     generating,
     historyError: ownedHistory && historyState.status === "error" ? historyState.message : null,
     historyView,
+    invalidateComposerOptions: composer.invalidate,
     listError:
       listState.client === client && listState.status === "error" ? listState.message : null,
     listLoading: listState.client === client && listState.status === "loading",

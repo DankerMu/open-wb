@@ -478,19 +478,20 @@ async function send({ fetchMock }: { fetchMock: FetchMock }) {
 }
 
 /**
- * 欢迎态选好之后让一次重取在欢迎态落地：选中甲，把它的强度改为 `中`（带键的 PATCH，成功后发出第二次
- * 选项请求并挂起），回到欢迎态，再以 `defaults` 放行那次重取。
+ * 欢迎态选好之后让一次重取在欢迎态落地：选中甲，把它的强度改为 `中`（带键的 PATCH，成功后发出第
+ * `expected` 次选项请求并挂起——此前每打开一次模型菜单多一次），回到欢迎态，再以 `defaults` 放行那次重取。
  */
 async function refetchOnWelcome(
   mounted: Awaited<ReturnType<typeof mountPage>>,
   refetch: DeferredResponse,
   defaults: ComposerOptions["defaults"],
+  expected: number,
 ) {
   const picked = controls();
   await openSession("甲", A);
   await waitFor(() => expect(controls()).toEqual(IN_SESSION));
   await choose("推理强度", "中");
-  await waitFor(() => expect(asked(mounted)).toBe(2));
+  await waitFor(() => expect(asked(mounted)).toBe(expected));
   await backToWelcome(mounted);
   expect(controls()).toEqual(picked);
   await settleDeferredResponse(refetch, jsonResponse(withDefaults(defaults)));
@@ -558,15 +559,17 @@ describe("保存设置后重取缺省值", () => {
     expect(asked(mounted)).toBe(1);
   });
 
-  it("带 modelId 的 patchSession 失败：没有新的选项请求", async () => {
-    const mounted = await mountPage(`/?session=${A}`, [FIRST], () => envelope(400, REJECTED));
+  it("带 modelId 的 patchSession 失败：除菜单打开外没有新的选项请求", async () => {
+    const mounted = await mountPage(`/?session=${A}`, [FIRST, FIRST], () =>
+      envelope(400, REJECTED),
+    );
     await choose("模型", "深度");
     await screen.findByText(REJECTED);
     await quiesce();
 
     expect(patchRequests(mounted.fetchMock, A)).toEqual([patchOf('{"modelId":"m3"}')]);
     expect(controls()).toEqual(IN_SESSION);
-    expect(asked(mounted)).toBe(1);
+    expect(asked(mounted)).toBe(2);
   });
 
   it("只选过强度 低，重取到的缺省模型换成不支持推理的 快速：强度控件消失、模型按钮是 快速，创建体不带 reasoningEffort 也不带 modelId", async () => {
@@ -575,11 +578,12 @@ describe("保存设置后重取缺省值", () => {
     await choose("推理强度", "低");
     expect(controls()).toEqual(["权限：只问命令", "模型：通用", "推理强度：低"]);
 
-    await refetchOnWelcome(mounted, refetch, {
-      approvalMode: "write",
-      modelId: "m2",
-      reasoningEffort: null,
-    });
+    await refetchOnWelcome(
+      mounted,
+      refetch,
+      { approvalMode: "write", modelId: "m2", reasoningEffort: null },
+      2,
+    );
 
     expect(controls()).toEqual(["权限：只问命令", "模型：快速", null]);
     expect(await send(mounted)).toEqual([createOf('{"scene":"office"}')]);
@@ -587,18 +591,19 @@ describe("保存设置后重取缺省值", () => {
 
   it("选过 每次都问、深度 与 低，重取到的三项缺省都变了：三个控件不变，创建体带这三项", async () => {
     const refetch = deferredResponse();
-    const mounted = await mountPage("/", [FIRST, refetch, FIRST]);
+    const mounted = await mountPage("/", [FIRST, FIRST, refetch, FIRST]);
     await choose("权限", "每次都问");
     await choose("模型", "深度");
     await choose("推理强度", "低");
     const picked = ["权限：每次都问", "模型：深度", "推理强度：低"];
     expect(controls()).toEqual(picked);
 
-    await refetchOnWelcome(mounted, refetch, {
-      approvalMode: "yolo",
-      modelId: "m2",
-      reasoningEffort: null,
-    });
+    await refetchOnWelcome(
+      mounted,
+      refetch,
+      { approvalMode: "yolo", modelId: "m2", reasoningEffort: null },
+      3,
+    );
 
     expect(controls()).toEqual(picked);
     expect(await send(mounted)).toEqual([
@@ -616,7 +621,7 @@ describe("保存设置后重取缺省值", () => {
     const picked = ["权限：每次都问", "模型：通用", "推理强度：低"];
     expect(controls()).toEqual(picked);
 
-    await refetchOnWelcome(mounted, refetch, { ...FIRST.defaults, approvalMode: "yolo" });
+    await refetchOnWelcome(mounted, refetch, { ...FIRST.defaults, approvalMode: "yolo" }, 2);
 
     expect(controls()).toEqual(picked);
     expect(await send(mounted)).toEqual([
