@@ -236,7 +236,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 
 #### Scenario: 按空间卸载全部
 - **WHEN** 一个正式空间有两个在线挂载，调用 manager 的按空间卸载
-- **THEN** 两个挂载都已卸载、行与私有目录都不存在，各写一条 `mount.detach`；随后删除该空间行成功
+- **THEN** 两个挂载都已卸载、行与私有目录都不存在，各写一条 `mount.detach`（`reason` `workspace_deleted`）；随后删除该空间行成功
 
 ### Requirement: 挂载目录内的文件端点
 对 workspaces 与 file-operations 的文件端点，路径（`path`，或 move 的 `from` / `to`，URL 解码后的字符串）的第一段——按 `/` 分割、去掉空段与 `.` 段之后的第一个分量，与 sandbox-core「resolve 契约与逃逸向量」同一个函数——逐字节等于该空间某个已登记挂载的 `name` 时，该路径「在该挂载内」；其后没有分量即挂载根本身。`./远端/a.md`、`远端//a.md` 与 `远端/a.md` 同属 `远端`。判定 SHALL 只读内存里的挂载登记与状态、不访问文件系统，位置在 `sandbox.resolve` 之后（越界仍为 403 `sandbox_denied` 并审计）、一切存在性检查与文件系统读写之前，规则：
