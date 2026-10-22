@@ -1,11 +1,74 @@
 # model-proxy Spec Delta
 
-> s1d-model-registry：`registerModelProxy` 改收按模型查找的 `models` 契约（design D5 / D6），取代 `allowedModels` 与单一 `upstream`；检查次序与净化密钥集随之改。只改「透传端点与 bearer 鉴权」；「托管 models.yml」的写出器契约不变（调用时机见 model-registry「变更即发布」）。
+> s1d-model-registry：`registerModelProxy` 改收按模型查找的 `models` 契约（design D5 / D6），取代 `allowedModels` 与单一 `upstream`；检查次序与净化密钥集随之改。改「透传端点与 bearer 鉴权」与「假上游夹具契约」（GET /models，供探活用例）；「托管 models.yml」的写出器契约不变（调用时机见 model-registry「变更即发布」）。
 
 ## MODIFIED Requirements
 
+### Requirement: 假上游夹具契约
+`server/test/support/fake-upstream.mjs` SHALL be a zero-dependency local OpenAI-compatible streaming fixture, importable through `start({port?,apiKey?})` and runnable directly by Node. It SHALL expose the actual bound port and asynchronous close, default to loopback/random port and expected bearer key `fake`, and permit an in-process expected-key override. One handler SHALL serve POST /chat/completions and POST /v1/chat/completions to satisfy the literal fixture path and the parent CI base URL, and (change s1d-model-registry, for model-registry「探活」) GET /models and GET /v1/models: with the expected bearer it answers 200 `application/json` `{"object":"list","data":[{"id":"fake-model","object":"model"}]}` unless the in-process option `start({modelsStatus})` names a status 400–599, in which case it answers that status with `{"error":{"message":"scripted models <status>","type":"scripted_error"}}`; every GET /models request (accepted or 401) is appended to the handle's `modelsRequests()` record as `{authorization: <header or null>}`. Missing/wrong Authorization SHALL return401 JSON whose `error.message` is `bad key <offered bearer or none>` (echoing the offered value, so probe-sanitising tests have a sentinel to look for). For authenticated requests, the last user message containing WORKBUDDY_FAKE_ERROR SHALL return500 OpenAI-shaped JSON before any streaming branch. Otherwise, unless one of the failure markers below applies, messages without role:tool SHALL receive one streamed bash tool call with arguments {"command":"echo workbuddy-smoke"} and finish_reason:tool_calls; messages with role:tool SHALL receive at least three content deltas concatenating exactly to `你好，这是 WorkBuddy 的第一条流式回复。`, with finish_reason:stop. Successful streams SHALL use OpenAI chat.completion.chunk records and end with data: [DONE]. CLI SHALL honor FAKE_UPSTREAM_PORT, report actual readiness without credentials, and release resources on termination.
+
+**失败标记**（#909）。鉴权通过、且最后一条 user 消息不含 WORKBUDDY_FAKE_ERROR 时，夹具 SHALL 按该消息文本里的下列标记应答，先于任何流式分支；`WORKBUDDY_FAKE_STATUS`、`WORKBUDDY_FAKE_HANG`、`WORKBUDDY_FAKE_CUT` 同现时按此顺序只取第一个，`WORKBUDDY_FAKE_BODY`、`WORKBUDDY_FAKE_FAIL_TIMES` 与 `WORKBUDDY_FAKE_DELAY` 只修饰 `WORKBUDDY_FAKE_STATUS`；不含标记时行为与上文完全相同：
+- `WORKBUDDY_FAKE_STATUS=<三位数>`（`400`–`599`）：以该状态码应答，不发 SSE。正文由 `WORKBUDDY_FAKE_BODY=<名>` 选择，缺省 `json`：`json` 为 `application/json` 的 `{"error":{"message":"scripted upstream <状态码>","type":"scripted_error"}}`；`text` 为 `text/plain` 的 `<状态码> <原因短语>`（原因短语取 Node 的 `http.STATUS_CODES`，取不到时——如 524——为 `Unknown`）；`empty` 为 `content-length: 0` 的空正文；`quota` 为 `application/json` 的 `{"error":{"message":"You exceeded your current quota","type":"insufficient_quota","code":"insufficient_quota"}}`；`model` 为 `application/json` 的 `{"error":{"message":"The model `x` does not exist","type":"model_not_found"}}`；`secret` 为 `application/json`，其 `message` 依次含该实例的期望密钥、`Bearer leak-token-0123456789`、`sk-leakleakleakleakleak` 与一行 `raw-http-request=/tmp/leak.json`（在 JSON 字符串里是转义的 `\n`，经 omp 解析 `error.message` 后才成为真换行）；`big` 为 `text/plain`、恰 20000 个码点、含换行的正文。
+- `WORKBUDDY_FAKE_FAIL_TIMES=<n>`（与 `WORKBUDDY_FAKE_STATUS` 同用）：每个实例对每个不同的最后一条 user 消息文本计数，只有前 `n` 次请求得到该状态，其后的请求按无标记处理。
+- `WORKBUDDY_FAKE_DELAY=<ms>`（与 `WORKBUDDY_FAKE_STATUS` 同用，`0`–`600000`）：读完请求后先等这么久，再写该状态的响应头与正文（用于「慢 504」）；等待期间客户端断开或 `close` 时 SHALL 放弃写入并释放连接。
+- `WORKBUDDY_FAKE_HANG`：读完请求后既不写响应头也不写正文，直到客户端断开；`close` SHALL 释放这些挂起的连接。
+- `WORKBUDDY_FAKE_CUT`：以 200 SSE 头开始，发两个 content delta `你好，` 与 `半句`，随后销毁套接字，不发 finish 与 `[DONE]`。
+夹具记录的请求清单（既有）对带标记的请求同样逐条记录，使测试能数上游请求次数。
+
+#### Scenario: Two-round model script
+- WHEN valid bearer requests first omit role:tool and then include the resulting tool message
+- THEN the first response reconstructs exactly one bash function call and tool_calls finish, and the second has at least three content events with the exact required text and stop finish; both have canonical chunk metadata and final DONE
+
+#### Scenario: Authentication and expected key override
+- WHEN requests omit bearer, use a wrong bearer or use the default key against an instance configured with a different key
+- THEN401 JSON is returned without a successful stream; the correct configured bearer permits the expected branch, and no credentials appear in emitted diagnostics
+
+#### Scenario: Last-user error selection
+- WHEN the last user message's string or text-part content contains WORKBUDDY_FAKE_ERROR, regardless of a tool message later in the array
+- THEN500 OpenAI-shaped error JSON is returned without SSE; a marker only in an older user message does not override a later ordinary user message
+
+#### Scenario: Both declared mount points
+- WHEN the fixture is addressed through /chat/completions or the parent's /v1 base plus /chat/completions
+- THEN identical authentication/branch/framing behavior is supplied by the same implementation; unrelated routes do not produce a successful completion
+
+#### Scenario: Invalid request and recovery
+- WHEN an authenticated request contains malformed JSON or messages is not an array
+- THEN400 JSON is returned, and a subsequent valid request still completes normally
+
+#### Scenario: Imported instance ownership
+- WHEN the module is imported and two instances are explicitly started with independent expected keys
+- THEN import alone does not listen; each start returns its actual usable port, instances do not share credentials, and close releases listener/sockets including after an aborted client and repeated cleanup
+
+#### Scenario: Standalone startup and shutdown
+- WHEN Node runs the script with an explicit FAKE_UPSTREAM_PORT or with the variable unset
+- THEN it listens on that port or an OS-selected port, emits a parseable actual-port readiness line only after binding, serves the same contract over real HTTP, and exits/reclaims the port on SIGTERM
+
+#### Scenario: Failed CLI binding
+- WHEN the configured port is invalid or already occupied
+- THEN startup fails nonzero without false readiness, leaked server ownership or credential-bearing diagnostics
+
+#### Scenario: Scripted failure markers
+- **WHEN** authenticated requests' last user message carries `WORKBUDDY_FAKE_STATUS=401`, `WORKBUDDY_FAKE_STATUS=404 WORKBUDDY_FAKE_BODY=model`, `WORKBUDDY_FAKE_STATUS=429 WORKBUDDY_FAKE_BODY=quota`, `WORKBUDDY_FAKE_STATUS=503 WORKBUDDY_FAKE_BODY=text`, `WORKBUDDY_FAKE_STATUS=400 WORKBUDDY_FAKE_BODY=empty` and `WORKBUDDY_FAKE_STATUS=500 WORKBUDDY_FAKE_BODY=secret` in turn
+- **THEN** each response has exactly that status with the named body and content-type and no SSE; the `secret` body contains the instance's expected key verbatim; every request is recorded
+
+#### Scenario: Fail first n then succeed
+- **WHEN** the same last user text carrying `WORKBUDDY_FAKE_STATUS=503 WORKBUDDY_FAKE_FAIL_TIMES=2` is sent four times to one instance, and once to a second instance
+- **THEN** the first instance answers 503, 503, then the ordinary tool-call stream twice; the second instance answers 503 (counts are per instance and per text)
+
+#### Scenario: Delayed scripted status
+- **WHEN** a request carries `WORKBUDDY_FAKE_STATUS=504 WORKBUDDY_FAKE_DELAY=2000`, and another identical request's client aborts after 500ms
+- **THEN** the first receives no response headers before about 2000ms and then status 504 with the default `json` body; the second's connection is released without a late write, and `close` resolves without leaked sockets or timers
+
+#### Scenario: Hang and cut
+- **WHEN** one request carries `WORKBUDDY_FAKE_HANG` and another `WORKBUDDY_FAKE_CUT`
+- **THEN** the first receives no response headers until the client aborts, after which `close` resolves without leaked sockets; the second receives status 200, an SSE header and exactly the two deltas `你好，` and `半句`, then the socket closes without a finish reason or `[DONE]`
+
+#### Scenario: Models listing for probes
+- **WHEN** a fixture instance receives GET /models with the expected bearer, then GET /v1/models with bearer `leak-0001`, then (an instance started with `modelsStatus: 503`) GET /models with the expected bearer
+- **THEN** the answers are 200 with the fixed one-model list, 401 whose `error.message` is `bad key leak-0001`, and 503 with the scripted error body; `modelsRequests()` of the first instance deep-equals `[{authorization:"Bearer fake"},{authorization:"Bearer leak-0001"}]`; chat-completions behaviour and `requests()` are unchanged
+
 ### Requirement: 透传端点与 bearer 鉴权
-app-server SHALL expose POST /v1/chat/completions through registerModelProxy(app,{tokens,models}), where `models` is the caller-supplied lookup `{lookup(id:string): {upstream:{baseUrl,apiKey}|undefined}|undefined, secrets(): readonly string[]}` over the model whitelist (model-registry「注册表快照是白名单的唯一来源」: the registry snapshot in production; `app.ts` without an assembly adapts the static catalog and the optional single upstream through `lookupFromCatalog`). `lookup` SHALL be called per request at forwarding time and never cached by the proxy; `secrets()` SHALL return every registered upstream's apiKey and base URL parts at that moment (the sanitising key set). model-proxy SHALL NOT read the environment, import the whitelist resolver or the registry store, and SHALL NOT hold a per-registration upstream. model-proxy SHALL own TokenLookup={lookup(token:string):string|null}; it SHALL NOT import sessions or implement TokenRegistry. Canonical typed errors SHALL come from core/errors, with the existing HTTP mapper supplied by the caller.
+app-server SHALL expose POST /v1/chat/completions through registerModelProxy(app,{tokens,models}), where `models` is the caller-supplied lookup `{lookup(id:string): {upstream:{baseUrl,apiKey}|undefined}|undefined, secrets(): readonly string[]}` over the model whitelist (model-registry「注册表快照是白名单的唯一来源」: the registry snapshot in production; an assembly without `models` — and `app.ts` without any assembly — is adapted through `lookupFromCatalog(assembly?.modelCatalog ?? <static single-model catalog>, assembly?.upstream)`, which keeps `modelCatalog` / `upstream` as the static test seam). `lookup` SHALL be called per request at forwarding time and never cached by the proxy; `secrets()` SHALL return every registered upstream's apiKey and base URL parts at that moment (the sanitising key set). model-proxy SHALL NOT read the environment, import the whitelist resolver or the registry store, and SHALL NOT hold a per-registration upstream. model-proxy SHALL own TokenLookup={lookup(token:string):string|null}; it SHALL NOT import sessions or implement TokenRegistry. Canonical typed errors SHALL come from core/errors, with the existing HTTP mapper supplied by the caller.
 Authorization SHALL carry a64hex bearer whose exact lookup hits a live runtime. Missing, malformed, unknown or revoked bearer SHALL return401 unauthorized with no upstream request. Authentication SHALL precede body parsing. There is no registration-time upstream check any more: after the body checks and the whitelist check below, a looked-up model whose `upstream` is undefined yields 502 agent_unavailable with zero upstream requests (the pre-s1d answer for an installation without `MODEL_UPSTREAM_*`, now per model). Every proxy response, including errors, SHALL carry Cache-Control:no-store without changing sibling cache/guard policy.
 Authenticated requests SHALL accept JSON media/syntax with a4MiB raw-byte limit and forward the original body bytes and content-type to the looked-up model's baseURL plus /chat/completions. InvalidJSON/unsupportedmedia/overlimit SHALL produce400 bad_request before upstream contact.
 **Model whitelist.** As part of that same body validation — which applies to authenticated requests: after authentication and after the media, size and JSON-syntax checks, before the per-model upstream check and before any upstream contact — the proxy SHALL require the body's top-level JSON value to be an object holding exactly one member whose key, after JSON string unescaping, equals `model`, and that member's value to be a JSON string equal, code unit for code unit (no trimming, no case folding, no Unicode normalization), to a model id for which `models.lookup` returns a route. A top-level value that is not an object, a missing `model`, two or more members whose decoded keys equal `model` (whatever their values: JSON parsers disagree on which duplicate wins and the body is forwarded verbatim, so a duplicate would let the upstream read a different model than the one checked), a `model` that is not a string, and a string for which `lookup` returns undefined SHALL each produce the same 400 bad_request envelope with no-store and zero upstream requests; the response and any diagnostic SHALL NOT echo the offered model name. Order (changed by s1d-model-registry): a valid token with a malformed body or an unregistered model answers 400 whether or not any upstream exists; only a registered model without an upstream answers 502 agent_unavailable. The route returned by the `lookup` that passed is the one forwarded to: a registry change after that call SHALL NOT affect the in-flight request or its streamed response. Only the top-level member keys and the `model` value are read: nested `model` members are ignored, the request's `stream` member is not read, and the rule is the same for streaming and non-streaming requests (the response path is unchanged). A body that passes SHALL still be forwarded as its original bytes. Apart from this check, no message-semantic parsing, body reserialization or message logging is permitted. Upstream Authorization SHALL be replaced with `Bearer <that model's apiKey>`; client bearer/cookie SHALL NOT be forwarded as headers.
@@ -83,11 +146,11 @@ Before downstream commitment, upstream transport failure SHALL map to the 502 `c
 - THEN this connection timer SHALL NOT produce502 or424 or cancel the request; headers arriving before the first-byte deadline and the body after them pass normally, while clientdisconnect/appclose still cancel owned pending work
 
 #### Scenario: Model outside the whitelist is refused
-- **WHEN** `allowedModels` is `{"m1","m3"}` and a valid token posts, each once with `"stream":true` and once without it, the bodies `{"model":"m2","messages":[]}`, `{"model":"M1","messages":[]}`, `{"model":" m1","messages":[]}`, `{"messages":[]}`, `{"model":1}`, `{"model":null}`, `{"model":["m1"]}`, `["m1"]`, `"m1"`, `{"model":"m1","model":"other"}`, `{"model":"other","model":"m1"}` and `{"model":"other","mod\u0065l":"m1"}` to a proxy whose recording real upstream is configured
+- **WHEN** the lookup registers exactly `m1` and `m3`, each with an upstream and a valid token posts, each once with `"stream":true` and once without it, the bodies `{"model":"m2","messages":[]}`, `{"model":"M1","messages":[]}`, `{"model":" m1","messages":[]}`, `{"messages":[]}`, `{"model":1}`, `{"model":null}`, `{"model":["m1"]}`, `["m1"]`, `"m1"`, `{"model":"m1","model":"other"}`, `{"model":"other","model":"m1"}` and `{"model":"other","mod\u0065l":"m1"}` to a proxy whose recording real upstream is configured
 - **THEN** every response is 400 `{"error":{"code":"bad_request","message":"请求格式不正确"}}` with no-store; the recording upstream has received zero requests; no response body contains `m2`, `M1` or `other`
 
 #### Scenario: Whitelisted model is forwarded untouched
-- **WHEN** with the same whitelist a valid token posts `{ "stream" : true, "metadata":{"model":"other"}, "mod\u0065l" : "m3", "messages":[{"role":"user","content":"你好"}] }` (unusual whitespace, an escaped spelling of the single top-level `model` key, a nested `model` member) and, separately, the same body without `stream`
+- **WHEN** with the same lookup a valid token posts `{ "stream" : true, "metadata":{"model":"other"}, "mod\u0065l" : "m3", "messages":[{"role":"user","content":"你好"}] }` (unusual whitespace, an escaped spelling of the single top-level `model` key, a nested `model` member) and, separately, the same body without `stream`
 - **THEN** the recording upstream receives each body byte-identically with the configured API-key bearer, and the upstream's streamed and non-streamed responses reach the client unchanged
 
 #### Scenario: Default single-model whitelist
