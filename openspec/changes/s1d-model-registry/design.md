@@ -146,7 +146,7 @@
 
 | 文件 | 现状 | 预计 | 说明 |
 |---|---|---|---|
-| `server/src/server.ts` | 743 | 组 5 后 778；组 7 约 783 | 组 5 已抽 `startup-registry.ts`；组 7 的 `STARTUP_MODULES`、union、`publish` / `onPublishFailed` 注入与 catch 入口 stage 捕获留在 `server.ts`（≤800 硬上限，不再抽取） |
+| `server/src/server.ts` | 743 | 组 5 后 778；组 7 后 787 | 组 5 已抽 `startup-registry.ts`；组 7 的 `STARTUP_MODULES`、union、`publish` / `onPublishFailed` 注入与 catch 入口 stage 捕获留在 `server.ts`（≤800 硬上限，不再抽取） |
 | `server/src/model-proxy/index.ts` | 539 | ~560 | lookup 替换 allowedModels / upstream |
 | `server/src/app.ts` | 491 | ~530 | `staticRegistry` 装配、净化闭包、`registerModels`、`onPublishFailed` |
 | `server/src/models/*.ts` | 新 | 各 ≤400 | store / registry / publish / probe / rest 分文件 |

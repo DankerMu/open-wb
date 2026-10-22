@@ -26,6 +26,7 @@ import {
 } from "./auth/index.js";
 import { emit } from "./core/audit/index.js";
 import { HttpError } from "./core/errors/index.js";
+import { isAdmin } from "./core/roles.js";
 import { ensureSharedDir } from "./core/sandbox/dirs.js";
 import { createSandbox } from "./core/sandbox/index.js";
 import { sanitizeUpstreamText, upstreamSecretList } from "./core/upstream-failure.js";
@@ -44,6 +45,9 @@ import { classifyRequestPath } from "./http/path-classifier.js";
 import { type ApprovalMode, type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
 import { registerModelProxy } from "./model-proxy/index.js";
 import { type ModelRegistry, staticRegistry } from "./model-proxy/lookup.js";
+import type { ModelPublishFailedRecord } from "./models/publish.js";
+import { registerModels } from "./models/rest.js";
+import { createModelStore } from "./models/store.js";
 import { DEFAULT_TRASH_RETENTION_DAYS } from "./preview-config.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
@@ -109,6 +113,13 @@ export interface AssemblyDependencies {
    * 经 `staticRegistry` 适配。
    */
   models?: ModelRegistry;
+  /**
+   * 注册表写入提交并 `refresh()` 之后的托管文件发布（单飞，D7）；省略时为空操作（静态接缝：管理端点照写
+   * 表、快照不变、不写文件）。生产入口传注册表发布器的 `publish`。
+   */
+  publish?: () => Promise<void>;
+  /** 发布失败的一行记录 sink（与 `log` / `warn` 同一写法）；省略时不写。 */
+  onPublishFailed?: (record: ModelPublishFailedRecord) => void;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -284,6 +295,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     assembly?.preview,
   );
   registerAccounts(app, { db });
+  registerModelAdmin(app, db, registry, assembly);
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
@@ -367,6 +379,29 @@ function upstreamRedactor(
     const secrets = new Set([...registry.secrets(), ...upstreamSecretList({ paths })]);
     return sanitizeUpstreamText(text, [...secrets]);
   };
+}
+
+/**
+ * 第八个模块 `models`（s1d-model-registry D7、D10）：管理端点写 app 自己的库（store 由这里自建），写后刷新与
+ * 代理、composer 同一个注册表对象；发布未注入时为空操作。
+ */
+function registerModelAdmin(
+  app: FastifyInstance,
+  db: DatabaseSync,
+  registry: Pick<ModelRegistry, "refresh">,
+  assembly: AssemblyDependencies | undefined,
+): void {
+  registerModels(app, {
+    db,
+    store: createModelStore(db),
+    registry,
+    publish: assembly?.publish ?? (() => Promise.resolve()),
+    emit,
+    isAdmin,
+    ...(assembly?.onPublishFailed === undefined
+      ? {}
+      : { onPublishFailed: assembly.onPublishFailed }),
+  });
 }
 
 /** 去掉末尾的分隔符（`normalize` 后至多一个）；根目录 `/` 原样。 */

@@ -25,8 +25,8 @@ const CTP_CODES = [
 
 type CtpCode = (typeof CTP_CODES)[number];
 
-/** spec 的十七条 method + matched route 归属身份（十六条 POST + 一条 PATCH）。 */
-const SEVENTEEN_OWNER_IDENTITIES = [
+/** spec 的二十一条 method + matched route 归属身份（十九条 POST + 一条 PATCH + 一条 PUT）。 */
+const TWENTY_ONE_OWNER_IDENTITIES = [
   ["POST", "/api/auth/login"],
   ["POST", "/api/auth/logout"],
   ["POST", "/api/sessions/:id/prompt"],
@@ -44,6 +44,10 @@ const SEVENTEEN_OWNER_IDENTITIES = [
   ["POST", "/api/workspaces/:id/uploads"],
   ["POST", "/api/workspaces/:id/preview-token"],
   ["POST", "/api/workspaces/:id/move"],
+  ["POST", "/api/models"],
+  ["PUT", "/api/models"],
+  ["POST", "/api/models/default"],
+  ["POST", "/api/models/probe"],
 ] as const;
 
 /** spec 码表的十八码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
@@ -150,13 +154,13 @@ function crossWithCodes<T extends readonly unknown[]>(rows: readonly T[]) {
   return rows.flatMap((row) => CTP_CODES.map((code) => [...row, code] as const));
 }
 
-describe("证据 1：十七条身份 × 四个真实 CTP 错误 -> 400", () => {
-  it("身份集恰十七条且互不重复", () => {
-    const keys = SEVENTEEN_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
-    expect(new Set(keys).size).toBe(17);
+describe("证据 1：二十一条身份 × 四个真实 CTP 错误 -> 400", () => {
+  it("身份集恰二十一条且互不重复", () => {
+    const keys = TWENTY_ONE_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
+    expect(new Set(keys).size).toBe(21);
   });
 
-  it.each(crossWithCodes(SEVENTEEN_OWNER_IDENTITIES))(
+  it.each(crossWithCodes(TWENTY_ONE_OWNER_IDENTITIES))(
     "%s %s 上真实 %s -> 400 bad_request 且无 raw 细节",
     (method, url, code) => {
       const error = genuineCtpError(code);
@@ -165,11 +169,14 @@ describe("证据 1：十七条身份 × 四个真实 CTP 错误 -> 400", () => {
   );
 });
 
-describe("证据 2（守卫）：DELETE /api/sessions/:id 不被覆盖", () => {
-  it.each(CTP_CODES)("DELETE /api/sessions/:id 上真实 %s -> generic 500", (code) => {
-    const error = genuineCtpError(code);
-    expectGeneric500(mapThrough(error, requestShaped("DELETE", "/api/sessions/:id")), error);
-  });
+describe("证据 2（守卫）：DELETE /api/sessions/:id 与 DELETE /api/models 不被覆盖", () => {
+  it.each(crossWithCodes([["/api/sessions/:id"], ["/api/models"]] as const))(
+    "DELETE %s 上真实 %s -> generic 500",
+    (url, code) => {
+      const error = genuineCtpError(code);
+      expectGeneric500(mapThrough(error, requestShaped("DELETE", url)), error);
+    },
+  );
 });
 
 describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
@@ -185,6 +192,10 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["PUT", "/api/workspaces/:id/uploads"],
     ["PUT", "/api/workspaces/:id/preview-token"],
     ["PUT", "/api/workspaces/:id/move"],
+    ["GET", "/api/models"],
+    ["PATCH", "/api/models"],
+    ["PUT", "/api/models/default"],
+    ["GET", "/api/models/probe"],
   ] as const;
 
   const LOOKALIKES = [

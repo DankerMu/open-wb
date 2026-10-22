@@ -11,6 +11,7 @@ import { openDb } from "../src/core/db/index.js";
 import * as http from "../src/http/index.js";
 import type { ModelCatalog } from "../src/model-catalog.js";
 import * as modelProxy from "../src/model-proxy/index.js";
+import * as models from "../src/models/rest.js";
 import * as sessions from "../src/sessions/index.js";
 import type { SessionSupervisorRuntime } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
@@ -153,7 +154,15 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
     apps.push(app);
     await app.ready();
 
-    expect(order).toEqual(["auth", "http", "model-proxy", "sessions", "workspaces", "accounts"]);
+    expect(order).toEqual([
+      "auth",
+      "http",
+      "model-proxy",
+      "sessions",
+      "workspaces",
+      "accounts",
+      "models",
+    ]);
     expect(rowStatus(db, "chat_sessions", STALE_SESSION_ID)).toBe("failed");
     expect(runningCount(db, "chat_messages")).toBe(0);
     expect(runningCount(db, "chat_steps")).toBe(0);
@@ -466,6 +475,7 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
         "sessions",
         "workspaces",
         "accounts",
+        "models",
       ]);
       expect(started.modules).toEqual(["core/db", ...order]);
       expect(existsSync(join(scratchRoot, "sandbox", "u1"))).toBe(false);
@@ -567,6 +577,10 @@ function spyRegistrationOrder(): string[] {
   vi.spyOn(accounts, "registerAccounts").mockImplementationOnce((app, options) => {
     order.push("accounts");
     return accounts.registerAccounts(app, options);
+  });
+  vi.spyOn(models, "registerModels").mockImplementationOnce((app, options) => {
+    order.push("models");
+    return models.registerModels(app, options);
   });
   return order;
 }

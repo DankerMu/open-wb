@@ -4,7 +4,8 @@
  * option, so the proxy and createApp share one real registry on the app's database and createApp has no
  * `assembly.upstream` (the production assembly since group 5). The fake upstream expects the registered
  * sentinel key and its `secret` body echoes it on the scripted 401. The CI-runnable proof of the same
- * scenario is `session-registry-redaction.test.ts`; this file is the real-binary proof on this machine.
+ * scenario is `session-registry-redaction.test.ts`; this file is the real-binary proof, run both locally and
+ * in CI's `uid-isolation` job.
  *
  * Run locally: `make omp-fetch`, then in `server/`
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \

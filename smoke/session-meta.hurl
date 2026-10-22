@@ -15,6 +15,7 @@
 # → (8) lisi 绑定他人空间 / PATCH / DELETE 均 404 且 lisi 的会话数不变 → zhangsan 复核该会话
 #     → 归档 200（archivedAt 非 null）→ prompt 409 session_archived → 恢复 200（archivedAt null）
 #     → 删除该会话 → 其临时空间 tree 404 → 登出。
+# → (9) 管理员 lisi 登记一个不带上游的模型 → options 含它 → 删除 → options 不再含它 → 登出。
 # 只由 make smoke 运行（smoke-live 不跑本文件），不使用 skip_turn_control。
 # 可重跑：工作空间保留供下次采用，自建会话在文件内删除，不留下 live authentication session 与 running 回合。
 # 三项输入框设置的逐键断言只在缺省单模型配置的服务上成立（未设 MODEL_CATALOG / MODEL_ID / MODEL_REASONING /
@@ -22,6 +23,8 @@
 # (3c) 只动 zhangsan 的最近选择里的档位一列，并在本遍内改回 write（不动模型与推理强度，lisi 的不碰）。
 # 在 (3c) 的改档位与恢复之间失败的一遍，会把 zhangsan 的最近选择留在 yolo：库若保留，下一遍 (1) 的 approvalMode 断言即判红。
 # 恢复办法：以 zhangsan 对自己的任一会话 PATCH {"approvalMode":"write"}，或换一个新库（连同 SANDBOX_ROOT）。
+# (9) 在登记与删除之间失败的一遍，会把模型 smoke-meta-model 留在注册表里：库若保留，下一遍 (3c) 的 options 逐字断言
+# 与 (9) 的登记（409）即判红。恢复办法：以 lisi DELETE /api/models?id=smoke-meta-model，或换一个新库（连同 SANDBOX_ROOT）。
 # 库与 SANDBOX_ROOT 必须同生命周期：库在而空间目录被清掉时，创建仍成功，但 (4) 的回合会因空间根不存在而失败。
 
 # 成功登录：exact 200 Principal + 合规 session cookie。
@@ -606,6 +609,57 @@ HTTP 404
 {"error":{"code":"not_found","message":"请求的资源不存在"}}
 
 # (8) 属主登出：exact 204 + clear cookie。
+POST {{base_url}}/api/auth/logout
+HTTP 204
+[Asserts]
+header "Set-Cookie" == "workbuddy_session=; Max-Age=0; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT; HttpOnly; SameSite=Lax"
+body == ""
+
+# (9) 管理员登录：模型注册表的管理端点只对角色为管理员的账号开放。
+POST {{base_url}}/api/auth/login
+Content-Type: application/json
+{"account":"lisi","password":"demo"}
+HTTP 200
+[Asserts]
+cookie "workbuddy_session" matches "^[0-9a-f]{64}$"
+{"id":"u3","account":"lisi","role":"管理员"}
+
+# (9) 登记一个不带上游的模型：exact 201，视图不含密钥、upstream 为 null、不是缺省。不重试。
+POST {{base_url}}/api/models
+Content-Type: application/json
+{"id":"smoke-meta-model","name":"冒烟模型"}
+HTTP 201
+[Asserts]
+header "Cache-Control" == "no-store"
+jsonpath "$.id" == "smoke-meta-model"
+jsonpath "$.name" == "冒烟模型"
+jsonpath "$.upstream" == null
+jsonpath "$.isDefault" == false
+
+# (9) 不重启即可见：composer options 的模型清单恰两项，第二项是刚登记的模型（登记次序），缺省不变。
+GET {{base_url}}/api/composer/options
+HTTP 200
+[Asserts]
+jsonpath "$.models" count == 2
+jsonpath "$.models[0].id" == "deepseek-v4.1-flash"
+jsonpath "$.models[1].id" == "smoke-meta-model"
+jsonpath "$.models[1].name" == "冒烟模型"
+jsonpath "$.defaults.modelId" == "deepseek-v4.1-flash"
+
+# (9) 删除该模型：exact 204、空 body。不重试。
+DELETE {{base_url}}/api/models?id=smoke-meta-model
+HTTP 204
+[Asserts]
+body == ""
+
+# (9) 删除之后 options 不再含它（(3c) 的逐字断言在下一遍仍成立）。
+GET {{base_url}}/api/composer/options
+HTTP 200
+[Asserts]
+jsonpath "$.models" count == 1
+jsonpath "$.models[0].id" == "deepseek-v4.1-flash"
+
+# (9) 管理员登出。
 POST {{base_url}}/api/auth/logout
 HTTP 204
 [Asserts]
