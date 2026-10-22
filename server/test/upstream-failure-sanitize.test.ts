@@ -147,6 +147,12 @@ describe("upstreamSecretList", () => {
     );
   });
 
+  it("removes both the raw and the WHATWG form of a password with a tab in it (#1713)", () => {
+    // WHATWG strips the tab (`password` = `pass`); the raw userinfo keeps it.
+    const secrets = upstreamSecretList({ baseUrl: "https://u:pa\tss@h/v1", paths: [] });
+    expect(sanitizeUpstreamText("a pass b pa\tss c", secrets)).toBe("a [已移除] b [已移除] c");
+  });
+
   it("lists a path given twice (a realpath equal to its original) once", () => {
     expect(upstreamSecretList({ paths: ["/srv/wb/state", "/srv/wb/state"] })).toEqual([
       "/srv/wb/state",
