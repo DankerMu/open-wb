@@ -640,7 +640,7 @@ Migration `036_chat_session_todo.sql` SHALL run inside the existing runner-owned
 ### Requirement: 派发前按会话设置对齐进程
 `store.runtimeState` SHALL 在既有内容之外报告会话行的 `approval_mode`、`model_id`、`reasoning_effort` 三个原始列；supervisor SHALL 在每一次派发——prompt 与 regenerate——时由它们经 session-composer-settings「有效值解析」的同一个纯函数算出有效值，并在写出该回合的 `prompt` 帧之前按下列次序使进程与之一致。有效值在一次派发内只算一次；派发之间不缓存。
 
-1. **审批档位**。每个 slot SHALL 记下其进程启动时所用的档位。存活且可复用的 slot 的启动档位与有效档位不同时，supervisor SHALL 先退役该 slot（与空闲回收、驱逐相同的退役路径，等待其完成），再走一次普通的新准入：新进程以有效档位与最后已知的会话文件 `--resume` 启动，是一个正常的新 generation（`stream_epoch` 恰加一、新的 ring、经进程上限准入，`agent_capacity` 照常为 503）。启动档位与有效档位相同时 SHALL 复用存活进程，不因本条多一次重启。
+1. **审批档位与模型集合**。每个 slot SHALL 记下其进程启动时所用的档位，以及启动时注册表快照的模型 id 集合（model-registry「变更即发布」：托管 `models.yml` 只在 spawn 时被 omp 读取，运行中的进程不认之后登记的模型）。存活且可复用的 slot 的启动档位与有效档位不同、**或有效模型不在其启动时的模型集合里**时，supervisor SHALL 先退役该 slot（与空闲回收、驱逐相同的退役路径，等待其完成），再走一次普通的新准入：新进程以有效档位与最后已知的会话文件 `--resume` 启动，是一个正常的新 generation（`stream_epoch` 恰加一、新的 ring、经进程上限准入，`agent_capacity` 照常为 503）。启动档位与有效档位相同且有效模型在启动时的集合里时 SHALL 复用存活进程，不因本条多一次重启（删除模型不改变存活进程的集合：有效值解析已把它回落为缺省模型，缺省模型在集合里则照常复用）。
 2. **模型与推理强度**。每个 generation SHALL 记下在它上面最近一次成功应用的模型与强度（新 generation 为「尚未应用」）。取得进程之后：尚未应用、或有效模型与已应用的不同 → 经 `runtime.command` 发 `set_model{provider:"workbuddy", modelId:<有效模型>}`；随后若有效模型支持推理，且（本次刚发过 `set_model`，或有效强度与已应用的不同）→ 发 `set_thinking_level{level:<有效强度>}`。两者都未变时不发命令帧；有效模型不支持推理时不发 `set_thinking_level`。命令成功后才更新所记的已应用值。prompt 路径上这一步紧接在取得进程之后；regenerate 路径上它同样紧接在取得进程之后、`get_branch_messages` 之前（turn-control「重新生成 REST」的执行序），即先于 `branch` 与该路径的 SQLite 事务。
 3. 写出 `prompt` 帧（既有的派发回执规则不变）。
 
@@ -673,6 +673,18 @@ fork 的临时进程 SHALL 以源会话的有效档位与有效模型作为 spaw
 #### Scenario: 对齐期间的并发请求
 - **WHEN** 换档后的 prompt 正在等待旧进程退役时，同一会话又到达一条 prompt 与一条 regenerate
 - **THEN** 后两者都得到 409 `session_busy`，没有新增行；第一条 prompt 照常完成对齐并返回 202
+
+#### Scenario: 新登记的模型使存活进程重启
+- **WHEN** 一个会话在假 omp 真子进程上完成一个回合（进程存活，启动时注册表只有 `m1`）；管理员登记 `m2` 并设为全局缺省；该会话（`model_id` 列为 null）再发一条 prompt；之后不改任何东西再发第三条
+- **THEN** 第二条 prompt 返回 202；第一个进程退出后第二个进程才启动，第二次 spawn 的 argv 含 `--model workbuddy/m2`，`stream_epoch` 恰加一；新进程在 `prompt` 之前收到 `set_model{modelId:"m2"}`；第三条没有新的 spawn
+- **WHEN** 另一例会话的 `model_id` 为 `m2`，管理员删除 `m2`（缺省为 `m1`，进程启动时集合含 `m1`），该会话再发一条 prompt
+- **THEN** 没有新的 spawn；进程在 `prompt` 之前收到 `set_model{modelId:"m1"}`；会话行的 `model_id` 列仍为 `m2`
+
+#### Scenario: 真实 omp 对未加载模型的 set_model（真实 omp）
+- **WHEN** 官方钉住的 omp v18.12.3 以只含 `m1` 的托管 `models.yml` 启动，宿主在启动后把 `m2` 加进 `models.yml` 并发 `set_model{provider:"workbuddy", modelId:"m2"}`
+- **THEN** `get_available_models` 的 `workbuddy` 条目仍只有 `m1`；`set_model` 的应答为 `success: false`、错误文本 `Model not found: workbuddy/m2`；之后 `get_state` 仍报 `workbuddy/m1`，进程存活，下一回合的上游请求只点名 `m1`
+- **WHEN** 同一会话由新 spawn 在含 `m1`、`m2` 的 `models.yml` 上 `--resume`，再发同一 `set_model`
+- **THEN** 应答 `success: true`，`get_state` 报 `workbuddy/m2`
 
 ### Requirement: 迁移 045 分段位置与确认关联
 迁移 `045_chat_interleaved_segments.sql` SHALL 在既有 runner 持有的事务内执行，回执紧随 `044` 之后追加，只做以下三件事，不重建既有表、不回填：
