@@ -53,6 +53,16 @@ const UPDATE =
   "UPDATE models SET name = ?, reasoning = ?, vision = ?, max_tokens = ?, efforts = ?, upstream_base_url = ?, upstream_api_key = ?, updated_at = ? WHERE id = ?";
 /** PUT 整体替换 `id` 以外的字段：这些键必须给出（`efforts` 可省略 = NULL）。 */
 const UPDATE_REQUIRED_KEYS = ["name", "reasoning", "vision", "maxTokens", "upstream"] as const;
+/** scheme 之后、authority 结束之前到最后一个 `@` 为止的 userinfo。 */
+const USERINFO = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/u;
+
+/**
+ * 地址的视图形式：去掉 userinfo（env 种子行原样入表，可能带 `user:pass@`）。视图只给这个形式；`PUT` 省略
+ * `apiKey` 且送回的正是它时沿用已存地址（`update`）。
+ */
+export function viewBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(USERINFO, "$1");
+}
 
 export function createModelStore(db: DatabaseSync) {
   const select = (id: string): ModelRow | undefined => {
@@ -117,7 +127,11 @@ export function createModelStore(db: DatabaseSync) {
       });
     },
 
-    /** PUT 语义：整体替换；`upstream.apiKey` 省略即保留既有密钥（没有既有密钥则 400）；`null` 清空上游。 */
+    /**
+     * PUT 语义：整体替换；`upstream.apiKey` 省略即保留既有密钥（没有既有密钥则 400）；`null` 清空上游。
+     * `apiKey` 省略且 `baseUrl` 逐字等于已存地址的视图形式：沿用已存地址与密钥、不再套地址规则（地址规则拒
+     * `@`），编辑 env 种子行只改名不丢 userinfo 里的凭证。
+     */
     update(id: string, body: unknown, within?: Within): ModelRow {
       const { model, upstream } = parseUpdate(id, body);
       return inTransaction(db, () => {
@@ -125,10 +139,17 @@ export function createModelStore(db: DatabaseSync) {
         if (current === undefined) {
           fail("not_found");
         }
+        const keeps =
+          upstream !== null &&
+          upstream.apiKey === undefined &&
+          current !== null &&
+          upstream.baseUrl === viewBaseUrl(current.baseUrl);
         const next =
           upstream === null
             ? null
-            : checkedUpstream(upstream.baseUrl, upstream.apiKey ?? current?.apiKey);
+            : keeps
+              ? current
+              : checkedUpstream(upstream.baseUrl, upstream.apiKey ?? current?.apiKey);
         db.prepare(UPDATE).run(
           model.name,
           flag(model.reasoning),

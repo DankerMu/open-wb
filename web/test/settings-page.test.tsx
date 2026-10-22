@@ -82,6 +82,13 @@ describe("settings route", () => {
     expect(within(group).getByRole("radio", { name: "深色" }).getAttribute("aria-checked")).toBe(
       "true",
     );
+    // #1706：拷入层的 data-checked: 绑定到的正是 Radix 输出的 data-state="checked"。
+    expect(within(group).getByRole("radio", { name: "深色" }).getAttribute("data-state")).toBe(
+      "checked",
+    );
+    expect(within(group).getByRole("radio", { name: "浅色" }).getAttribute("data-state")).toBe(
+      "unchecked",
+    );
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(screen.getByText("当前生效：深色", { exact: true })).toBeTruthy();
     expect(window.localStorage.getItem("workbuddy-theme")).toBe("dark");

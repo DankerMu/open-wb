@@ -218,4 +218,15 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
 ## 增补（2026-10-22，change `s1d-model-registry`）
 
 - **新拷入 `tabs`**（change `s1d-model-registry` 任务 9.3）：`web/src/components/ui/tabs.tsx`，来自 shadcn/ui registry 的 `radix-nova` 版式（`web/components.json`），按拷入层六类修改的规则拷入（与 registry 原文相比只改了 `cn` 导入与格式化），用合包 `radix-ui` 的 `Tabs`，未新增依赖，登记在 `ATTRIBUTION.md`。用途是中心页 `/center` 的 tab 条，调用方只有 `web/src/features/center/page.tsx`。
-  原文的布局与选中态写成 `data-horizontal:` / `data-active:` 变体，本入口没有绑定它们（`theme.css` 只绑了 `data-open` / `data-closed`），调用方按 `data-state` 用 className 补上，拷入文件不改。
+- **拷入层的裸 `data-*` 变体在 `theme.css` 一次绑定**（#1706，owner 2026-10-22 裁定；change `s1d-model-registry` 任务 10.0）：radix-nova 的组件按 shadcn 自带样式表（`shadcn/tailwind.css`）的语义写 `data-active:`、`data-checked:`、`data-horizontal:` 这类变体，
+  本入口不导入那份样式表；未绑定时 Tailwind 把它们编成属性存在选择器（`[data-active]`），而 Radix 输出的是 `data-state` / `data-orientation`，样式永远匹配不上。规则：
+  - 按上游语义在 `web/src/styles/theme.css` 绑定，每个变体一行无花括号的 `@custom-variant`（不新增顶层规则块，`ui-foundation-entry.test.ts` 的块清单不变）；扩展不替换：Radix 的 `data-state` / `data-orientation` 一支之外，
+    保留组件自设同名属性的一支（`[data-active]:not([data-active="false"])` 这种）。已绑七个：`data-open`、`data-closed`（#834 起）与 `data-active`、`data-checked`、`data-unchecked`、`data-horizontal`、`data-vertical`。
+    `data-unchecked` 目前没有使用者，因 #1706 的验收标准列了它而绑。逐字文本由 `ui-foundation-entry.test.ts` 钉住，编译结果由 `web/test/ui-variant-bindings.test.ts` 用 Tailwind 的 `compile` 证明。
+  - 不绑：`data-selected`（没有调用方；`table` 用的是方括号写法 `data-[state=selected]:`）；`data-disabled`、`data-inset`、`data-placeholder`（Radix 或组件自己输出裸属性，按存在匹配本来就对）。
+  - 调用方不得再按 `data-[state=…]:` / `data-[orientation=…]:` 补写这些状态（守卫：`web/src/features` 的 `.tsx` 不含 `data-[state=active]:`、`data-[state=checked]:`、`data-[state=unchecked]:`、`data-[orientation=`）。
+    此前的两处绕过已删除：设置页主题单选（#836 起）与中心页 tab 条（任务 9.3）。
+  - 以后拷入新组件出现新的裸变体，先在 `theme.css` 补绑定（连同钉住表），再用。
+- **新拷入 `table`、`checkbox`**（change `s1d-model-registry` 任务 10.3）：`web/src/components/ui/table.tsx`、`checkbox.tsx`，来自 shadcn/ui registry 的 `radix-nova` 版式，按拷入层六类修改的规则拷入（与 registry 原文相比改了 `cn` 导入与格式化；
+  `checkbox` 原文的图标占位 `IconPlaceholder` 按 `dropdown-menu.tsx` 的先例换成 `lucide-react` 的 `CheckIcon`），`checkbox` 用合包 `radix-ui` 的 `Checkbox`，未新增依赖，登记在 `ATTRIBUTION.md`。
+  用途是中心页「模型」tab 的模型表与表单复选框，调用方只在 `web/src/features/center/models/`。表单没有下拉字段，`select` 不拷。

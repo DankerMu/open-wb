@@ -44,7 +44,8 @@ const ROW_DESC = "mt-0.5 text-xs wrap-anywhere text-muted-foreground";
 
 /**
  * 主题单选组，排成分段样式。选项文字是 RadioGroupItem 的 children，可访问名即来自内容；
- * 拷入层自带的圆形外观与圆点指示器在这里用 className 覆盖/隐藏，不改拷入文件。
+ * 拷入层自带的圆形外观与圆点指示器在这里用 className 覆盖/隐藏，不改拷入文件；选中段的底色与文字色
+ * 就是拷入层自己的 `data-checked:` 类（`theme.css` 的变体绑定，issue 1706）。
  */
 function ThemeControl() {
   const { selectedTheme, setTheme } = useTheme();
@@ -61,7 +62,7 @@ function ThemeControl() {
     >
       {THEME_OPTIONS.map((option) => (
         <RadioGroupItem
-          className="aspect-auto size-auto cursor-pointer items-center border-0 bg-transparent px-[15px] py-1.5 text-[12.5px] whitespace-nowrap text-muted-foreground after:hidden not-data-[state=checked]:hover:text-foreground data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:bg-transparent dark:data-[state=checked]:bg-primary [&>[data-slot=radio-group-indicator]]:hidden"
+          className="aspect-auto size-auto cursor-pointer items-center border-0 bg-transparent px-[15px] py-1.5 text-[12.5px] whitespace-nowrap text-muted-foreground after:hidden not-data-checked:hover:text-foreground dark:bg-transparent [&>[data-slot=radio-group-indicator]]:hidden"
           key={option.value}
           value={option.value}
         >

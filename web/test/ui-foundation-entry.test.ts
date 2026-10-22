@@ -203,6 +203,41 @@ const PINNED_DARK: [string, string][] = [
   ["--primary-foreground", "var(--wb-palette-black-90)"],
 ];
 const COLOR_LITERALS = [/#[0-9a-fA-F]{3,8}(?![\w-])/, /rgba?\(/, /oklch\(/, /hsla?\(/];
+/**
+ * 拷入层的裸 `data-*` 变体绑定（#1706，ADR-0013 2026-10-22 增补）：radix-nova 的组件按 shadcn 自带样式表的
+ * 语义写这些变体，本入口不导入那份样式表，所以在 `theme.css` 逐条绑定——单行、无花括号，同名属性那一支保留
+ *（扩展不替换）。逐字钉住；`data-selected`、`data-disabled`、`data-inset`、`data-placeholder` 不绑（理由在 ADR）。
+ */
+const VARIANT_PINS: [string, string][] = [
+  ["data-open", '(&:where([data-state="open"]))'],
+  ["data-closed", '(&:where([data-state="closed"]))'],
+  ["data-active", '(&:where([data-state="active"], [data-active]:not([data-active="false"])))'],
+  ["data-checked", '(&:where([data-state="checked"], [data-checked]:not([data-checked="false"])))'],
+  [
+    "data-unchecked",
+    '(&:where([data-state="unchecked"], [data-unchecked]:not([data-unchecked="false"])))',
+  ],
+  [
+    "data-horizontal",
+    '(&:where([data-orientation="horizontal"], [data-horizontal]:not([data-horizontal="false"])))',
+  ],
+  [
+    "data-vertical",
+    '(&:where([data-orientation="vertical"], [data-vertical]:not([data-vertical="false"])))',
+  ],
+];
+
+/** 每个钉住的变体恰有一行 `@custom-variant <名> <参数>;`，参数逐字相同；一个变体只报一条。 */
+function variantPinViolations(css: string): string[] {
+  return VARIANT_PINS.flatMap(([name, params]) => {
+    const rules = [...css.matchAll(new RegExp(`^@custom-variant ${name} ([^;\n]*);$`, "gm"))];
+    return rules.length === 1 && rules[0]?.[1] === params
+      ? []
+      : [
+          `@custom-variant ${name} 应恰为一行 ${params}，实为 ${JSON.stringify(rules.map((r) => r[1]))}`,
+        ];
+  });
+}
 
 function declarationMap(css: string, opener: RegExp): Map<string, string> {
   const entries = blockBody(css, opener)
@@ -247,6 +282,7 @@ function themeViolations(source: string): string[] {
     violations.push('缺少把 dark 变体绑定到 [data-theme="dark"] 的 @custom-variant');
   }
   if (/\.dark\b/.test(css)) violations.push("出现 .dark 类");
+  violations.push(...variantPinViolations(css));
   violations.push(...baseLayerViolations(css));
   return violations;
 }
@@ -379,6 +415,18 @@ describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
         "(&:where(.night *))",
         "@custom-variant",
       ],
+      [
+        "删掉 data-checked 绑定",
+        /^@custom-variant data-checked [^\n]*\n/m,
+        "",
+        "@custom-variant data-checked 应恰为一行",
+      ],
+      [
+        "data-active 只剩 data-state 一支",
+        '(&:where([data-state="active"], [data-active]:not([data-active="false"])))',
+        '(&:where([data-state="active"]))',
+        "@custom-variant data-active 应恰为一行",
+      ],
       // 两条以块外的 `body` 为锚点的变异都用行首匹配：`base` 块里那条 `body` 是缩进的，不会被命中。
       // `.dark` 写成嵌套在 `body` 里的规则：顶层 prelude 不变，所以只触发 `.dark` 一条判定。
       [".dark 类", /^body \{/m, "body {\n  .dark & {\n    top: 0;\n  }", ".dark 类"],
@@ -463,6 +511,24 @@ describe("theme.css 结构（ui-foundation「映射文件结构」）", () => {
     expect(blockPreludes(theme).filter((prelude) => prelude === REDUCE_PRELUDE)).toHaveLength(1);
     expect(blockBody(theme, BASE_OPENER)).not.toContain("prefers-reduced-motion");
     expect(baseLayerViolations(theme)).toEqual([]);
+  });
+
+  it("应用层不按 data-state / data-orientation 补写拷入层已绑定的变体：web/src/features 的 .tsx 不含四种写法", () => {
+    const files = listRepoFiles("web/src/features", (path) => path.endsWith(".tsx"));
+    expect(files).toContain("web/src/features/settings/page.tsx");
+    const bypasses = [
+      "data-[state=active]:",
+      "data-[state=checked]:",
+      "data-[state=unchecked]:",
+      "data-[orientation=",
+    ];
+    const stale = files.flatMap((path) => {
+      const source = readRepoFile(path);
+      return bypasses
+        .filter((bypass) => source.includes(bypass))
+        .map((bypass) => `${path}: ${bypass}`);
+    });
+    expect(stale).toEqual([]);
   });
 
   it("应用层只用外壳的 narrow: 断点变体：web/src 的 .tsx 不含 max-[760px]:（它编译为小于 760）", () => {

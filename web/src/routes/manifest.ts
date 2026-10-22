@@ -31,7 +31,7 @@ export const routeManifest: readonly RouteDefinition[] = [
     icon: "layout-grid",
     label: "中心",
     title: "中心",
-    description: "中心暂无可用内容",
+    description: "模型注册表",
   },
   {
     path: "/settings",

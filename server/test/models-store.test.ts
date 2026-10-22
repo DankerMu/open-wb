@@ -322,6 +322,32 @@ describe("update", () => {
     );
   });
 
+  it("a seed row with userinfo: a rename that sends the view form of its address keeps the stored address and key byte for byte", () => {
+    const { db, store } = fresh();
+    store.seedIfEmpty(resolveModelCatalog({}), { baseUrl: USERINFO_URL, apiKey: KEY });
+    const id = "deepseek-v4.1-flash";
+    // The address as the view shows it: userinfo removed (independent literal, not recomputed).
+    const viewForm = "https://gw.example/tenant-0123456789/v1?org=acme-0001";
+    const renamed = store.update(id, {
+      name: "深度求索",
+      reasoning: true,
+      vision: true,
+      maxTokens: 32768,
+      upstream: { baseUrl: viewForm },
+    });
+    expect(renamed).toMatchObject({ name: "深度求索", upstream: { baseUrl: USERINFO_URL } });
+    expect(store.routeOf(id)).toEqual({ baseUrl: USERINFO_URL, apiKey: KEY });
+
+    // Any other address still goes through the address rule: the raw userinfo form is refused,
+    // a plain new address is taken with the kept key.
+    const body = { name: "深度求索", reasoning: true, vision: true, maxTokens: 32768 };
+    expectRefused(db, "bad_request", () =>
+      store.update(id, { ...body, upstream: { baseUrl: USERINFO_URL } }),
+    );
+    store.update(id, { ...body, upstream: { baseUrl: "https://moved.example/v1" } });
+    expect(store.routeOf(id)).toEqual({ baseUrl: "https://moved.example/v1", apiKey: KEY });
+  });
+
   it("upstream null clears both columns; a reasoning model without efforts stores NULL", () => {
     const { db, store } = fresh();
     seedOne(store);

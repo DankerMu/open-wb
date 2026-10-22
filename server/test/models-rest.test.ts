@@ -244,6 +244,41 @@ describe("编辑种子行", () => {
   });
 });
 
+describe("种子行带 userinfo 只改名", () => {
+  it("PUT with the view's address and no apiKey keeps the stored userinfo address and key; upstreamChanged false; no sentinel echoed", async () => {
+    const password = "wb-issue1651-userinfo-password";
+    const seedKey = "wb-issue1651-seed-api-key";
+    const stored = `https://u:${password}@host.example/v1`;
+    const world = await openModelsWorld({ seedUpstream: { baseUrl: stored, apiKey: seedKey } });
+
+    const renamed = await call(
+      world,
+      "admin",
+      "PUT",
+      "/api/models?id=m1",
+      putBody("改名", { baseUrl: "https://host.example/v1" }),
+    );
+    expectAnswer(renamed, 200);
+    expect(renamed.json()).toMatchObject({
+      name: "改名",
+      upstream: { baseUrl: "https://host.example/v1", hasApiKey: true },
+    });
+    for (const leak of [password, seedKey, "u:"]) {
+      expect(renamed.payload).not.toContain(leak);
+    }
+    expect(world.store.routeOf("m1")).toEqual({ baseUrl: stored, apiKey: seedKey });
+    expect(modelAudits(world.db)).toEqual([
+      {
+        actorId: "u3",
+        kind: "model.update",
+        title: "修改模型 改名",
+        detail: { modelId: "m1", name: "改名", upstreamChanged: false },
+        workspaceId: null,
+      },
+    ]);
+  });
+});
+
 describe("修改保留密钥与清空上游", () => {
   it("omitted apiKey keeps the key, null clears both columns, a keyless model cannot omit it", async () => {
     const world = await openModelsWorld();
