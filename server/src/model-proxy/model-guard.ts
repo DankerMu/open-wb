@@ -131,22 +131,28 @@ export function topLevelModel(raw: string): TopLevelModel {
 }
 
 /**
- * 请求体是否放行：`parsed` 是 `JSON.parse(raw)` 的结果。
- * 仅当顶层是对象、恰有一个顶层 `model` 成员、其值是字符串且逐码元等于 `allowed` 的某个元素时为 true。
- * 判定以原文扫描为准，不读 `parsed.model`。
+ * 请求体点名的模型 id：`parsed` 是 `JSON.parse(raw)` 的结果。
+ * 仅当顶层是对象、恰有一个顶层 `model` 成员且其值是字符串时返回该字符串（逐码元原样），否则 undefined。
+ * 判定以原文扫描为准，不读 `parsed.model`。顶层 `model` 的判定只此一份：`isAllowedModel` 与代理的按模型查找都经由它。
  */
+export function scannedModelId(parsed: unknown, raw: string): string | undefined {
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return undefined;
+  }
+  const found = topLevelModel(raw);
+  if (found.kind !== "unique") {
+    return undefined;
+  }
+  const model: unknown = JSON.parse(found.valueText);
+  return typeof model === "string" ? model : undefined;
+}
+
+/** 请求体是否放行：`scannedModelId` 给出的 id 是否逐码元等于 `allowed` 的某个元素。 */
 export function isAllowedModel(
   parsed: unknown,
   raw: string,
   allowed: ReadonlySet<string>,
 ): boolean {
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return false;
-  }
-  const found = topLevelModel(raw);
-  if (found.kind !== "unique") {
-    return false;
-  }
-  const model: unknown = JSON.parse(found.valueText);
-  return typeof model === "string" && allowed.has(model);
+  const id = scannedModelId(parsed, raw);
+  return id !== undefined && allowed.has(id);
 }

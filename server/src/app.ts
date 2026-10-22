@@ -43,6 +43,7 @@ import {
 import { classifyRequestPath } from "./http/path-classifier.js";
 import { type ApprovalMode, type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
 import { registerModelProxy } from "./model-proxy/index.js";
+import { type ModelRegistry, staticRegistry } from "./model-proxy/lookup.js";
 import { DEFAULT_TRASH_RETENTION_DAYS } from "./preview-config.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
@@ -103,6 +104,11 @@ export interface AssemblyDependencies {
    * that make the rename fail). Omitted in production.
    */
   trash?: ReturnType<typeof createTrash>;
+  /**
+   * 代理按模型查找所用的注册表（s1d-model-registry D5）；省略时由 `modelCatalog` 与 `upstream`
+   * 经 `staticRegistry` 适配。
+   */
+  models?: ModelRegistry;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -208,13 +214,10 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     modelId: DEFAULT_MODEL_ID,
     idleMs: DEFAULT_OMP_IDLE_MS,
   };
-  // 代理白名单与会话视图的有效值用同一份目录。
+  // 没有 `assembly.models` 时，代理白名单与会话视图的有效值用同一份目录。
   const modelCatalog = assembly?.modelCatalog ?? resolveModelCatalog({ MODEL_ID: runtime.modelId });
-  registerModelProxy(app, {
-    tokens,
-    allowedModels: new Set(modelCatalog.models.map((model) => model.id)),
-    ...(assembly?.upstream === undefined ? {} : { upstream: assembly.upstream }),
-  });
+  const registry = assembly?.models ?? staticRegistry(modelCatalog, assembly?.upstream);
+  registerModelProxy(app, { tokens, models: registry });
   const store = createWorkspaceStore(db, {
     sandboxRoot: runtime.sandboxRoot,
     ensureSharedDir,

@@ -182,7 +182,8 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
       method: "POST",
       url: "/v1/chat/completions",
       headers: { authorization: `Bearer ${issued}`, cookie, "content-type": "application/json" },
-      payload: "{}",
+      // A registered model: without upstream only that is 502 (s1d-model-registry check order).
+      payload: JSON.stringify({ model: controlled.runtime.modelId }),
     });
     expect(live.statusCode).toBe(502);
     expect(live.json()).toEqual(AGENT_UNAVAILABLE_ENVELOPE);
@@ -222,7 +223,7 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
       method: "POST",
       url: "/v1/chat/completions",
       headers: { authorization: `Bearer ${issued}`, "content-type": "application/json" },
-      payload: "{}",
+      payload: JSON.stringify({ model: controlled.runtime.modelId }),
     });
     expect(live.statusCode).toBe(502);
     expect(live.json()).toEqual(AGENT_UNAVAILABLE_ENVELOPE);
