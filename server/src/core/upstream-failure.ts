@@ -5,6 +5,7 @@
  * ≥500 body and the five failure envelopes the proxy answers omp with (model-proxy「透传端点与
  * bearer 鉴权」, design D6–D9).
  */
+import { userinfoParts } from "./base-url.js";
 
 /** The truncation mark of every capped text: step detail/output, thinking and upstream text. */
 export const TRUNCATED_MARK = "…（已截断）";
@@ -180,12 +181,7 @@ function baseUrlParts(baseUrl: string): string[] {
   if (baseUrl === "") {
     return [];
   }
-  const parts = [baseUrl];
-  const userinfo = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)@/u.exec(baseUrl)?.[1];
-  if (userinfo !== undefined) {
-    const colon = userinfo.indexOf(":");
-    parts.push(userinfo, colon === -1 ? "" : userinfo.slice(colon + 1));
-  }
+  const parts = [baseUrl, ...userinfoParts(baseUrl)];
   let url: URL;
   try {
     url = new URL(baseUrl);

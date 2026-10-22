@@ -9,6 +9,7 @@
  */
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { validateUpstream, validateUpstreamKey } from "../agent-config.js";
+import { withoutUserinfo } from "../core/base-url.js";
 import { HttpError, type HttpErrorCode } from "../core/errors/index.js";
 import { upstreamSecretList } from "../core/upstream-failure.js";
 import {
@@ -53,17 +54,6 @@ const UPDATE =
   "UPDATE models SET name = ?, reasoning = ?, vision = ?, max_tokens = ?, efforts = ?, upstream_base_url = ?, upstream_api_key = ?, updated_at = ? WHERE id = ?";
 /** PUT 整体替换 `id` 以外的字段：这些键必须给出（`efforts` 可省略 = NULL）。 */
 const UPDATE_REQUIRED_KEYS = ["name", "reasoning", "vision", "maxTokens", "upstream"] as const;
-/** scheme 之后、authority 结束之前到最后一个 `@` 为止的 userinfo。 */
-const USERINFO = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)[^/?#]*@/u;
-
-/**
- * 地址的视图形式：去掉 userinfo（env 种子行原样入表，可能带 `user:pass@`）。视图只给这个形式；`PUT` 省略
- * `apiKey` 且送回的正是它时沿用已存地址（`update`）。
- */
-export function viewBaseUrl(baseUrl: string): string {
-  return baseUrl.replace(USERINFO, "$1");
-}
-
 export function createModelStore(db: DatabaseSync) {
   const select = (id: string): ModelRow | undefined => {
     const raw = db.prepare(SELECT_ONE).get(id);
@@ -143,7 +133,7 @@ export function createModelStore(db: DatabaseSync) {
         const next =
           upstream === null
             ? null
-            : current !== null && upstream.baseUrl === viewBaseUrl(current.baseUrl)
+            : current !== null && upstream.baseUrl === withoutUserinfo(current.baseUrl)
               ? { baseUrl: current.baseUrl, apiKey: checkedKey(upstream.apiKey ?? current.apiKey) }
               : checkedUpstream(upstream.baseUrl, upstream.apiKey ?? current?.apiKey);
         db.prepare(UPDATE).run(

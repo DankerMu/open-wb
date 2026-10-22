@@ -12,9 +12,9 @@
 
 ## 1. 视图形式与净化部件（#1712）
 
-- [ ] 1.1 核对 Context：`models/store.ts:57,63-65,143-148`、`core/upstream-failure.ts:179-201`（userinfo 正则在 :184；`userinfoParts` 结果须排在 base URL 原串之后、路径之前——`upstream-failure-sanitize.test.ts:134` 以 `toEqual` 比较整个列表）、`startup-registry.ts:53-54`、`agent-config.ts` 种子取值。
-- [ ] 1.2 测试先行：新 `server/test/core-base-url.test.ts`（`withoutUserinfo` / `userinfoParts` 表驱动：四种非规范写法（TS 字面值里反斜杠写 `"https:\\u:…"`）的视图分别为独立字面值 `http://gw.example/v1` / `https://gw.example/v1`、规范 `https://u:p@h/v1`、无 userinfo 原样返回、`https://@host/v1 → https://host/v1`、不可解析串走正则、百分号编码的密码段；`upstreamSecretList` 对 `http:/u:<哨兵>@…` 含哨兵且**不含单独的 `"u"`**）；`models-rest.test.ts` 加四种非规范种子地址：视图等于上述字面值、不含哨兵与 `u:`，以该字面值 `PUT` 只改名 → `routeOf` 读回逐字不变（不拿 GET 结果回送，避免同义反复）；`upstream-failure` 既有净化用例加一例（`http:/u:<哨兵>@…` 作 base URL，回显正文中哨兵被去掉）。
-- [ ] 1.3 新 `server/src/core/base-url.ts`（`withoutUserinfo`、`userinfoParts`；`upstreamEndpoint` 在组 3 加）；`store.ts` 的 `viewBaseUrl` 改为 `withoutUserinfo` 的再导出或直接替换调用处（删 `USERINFO`）；`upstream-failure.ts` 的 `baseUrlParts` 用 `userinfoParts` 替换内联正则。
+- [x] 1.1 核对 Context：`models/store.ts:57,63-65,143-148`、`core/upstream-failure.ts:179-201`（userinfo 正则在 :184；`userinfoParts` 结果须排在 base URL 原串之后、路径之前——`upstream-failure-sanitize.test.ts:134` 以 `toEqual` 比较整个列表）、`startup-registry.ts:53-54`、`agent-config.ts` 种子取值。
+- [x] 1.2 测试先行：新 `server/test/core-base-url.test.ts`（`withoutUserinfo` / `userinfoParts` 表驱动：四种非规范写法（TS 字面值里反斜杠写 `"https:\\u:…"`）的视图分别为独立字面值 `http://gw.example/v1` / `https://gw.example/v1`、规范 `https://u:p@h/v1`、无 userinfo 原样返回、`https://@host/v1 → https://host/v1`、不可解析串走正则、百分号编码的密码段；`upstreamSecretList` 对 `http:/u:<哨兵>@…` 含哨兵且**不含单独的 `"u"`**）；`models-rest.test.ts` 加四种非规范种子地址：视图等于上述字面值、不含哨兵与 `u:`，以该字面值 `PUT` 只改名 → `routeOf` 读回逐字不变（不拿 GET 结果回送，避免同义反复）；`upstream-failure` 既有净化用例加一例（`http:/u:<哨兵>@…` 作 base URL，回显正文中哨兵被去掉）。
+- [x] 1.3 新 `server/src/core/base-url.ts`（`withoutUserinfo`、`userinfoParts`；`upstreamEndpoint` 在组 3 加）；`store.ts` 的 `viewBaseUrl` 改为 `withoutUserinfo` 的再导出或直接替换调用处（删 `USERINFO`）；`upstream-failure.ts` 的 `baseUrlParts` 用 `userinfoParts` 替换内联正则。
 
 Suggested fixture level: expanded - 凭证泄露（credentials）。
 

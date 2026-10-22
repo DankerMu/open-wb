@@ -302,6 +302,49 @@ describe("种子行带 userinfo 只改名", () => {
   });
 });
 
+describe("非规范种子地址不回显密码（#1712）", () => {
+  const password = "wb-issue1712-pw";
+  const seedKey = "wb-issue1712-seed-api-key";
+  it.each([
+    [`http:/u:${password}@gw.example/v1`, "http://gw.example/v1"],
+    [`http:u:${password}@gw.example/v1`, "http://gw.example/v1"],
+    [`https:\\u:${password}@gw.example/v1`, "https://gw.example/v1"],
+    [` https://u:${password}@gw.example/v1`, "https://gw.example/v1"],
+  ])(
+    "seed %j: the view is %j, and a PUT with it renaming only keeps the stored address",
+    async (stored, view) => {
+      const world = await openModelsWorld({ seedUpstream: { baseUrl: stored, apiKey: seedKey } });
+      const listed = await call(world, "admin", "GET", "/api/models");
+      expectAnswer(listed, 200);
+      expect(listed.json()).toMatchObject({
+        models: [{ id: "m1", upstream: { baseUrl: view, hasApiKey: true } }],
+      });
+      for (const leak of [password, seedKey, "u:"]) {
+        expect(listed.payload).not.toContain(leak);
+      }
+
+      const renamed = await call(
+        world,
+        "admin",
+        "PUT",
+        "/api/models?id=m1",
+        putBody("改名", { baseUrl: view }),
+      );
+      expectAnswer(renamed, 200);
+      expect(renamed.json()).toMatchObject({ name: "改名", upstream: { baseUrl: view } });
+      for (const leak of [password, seedKey, "u:"]) {
+        expect(renamed.payload).not.toContain(leak);
+      }
+      expect(world.store.routeOf("m1")).toEqual({ baseUrl: stored, apiKey: seedKey });
+      expect(modelAudits(world.db).at(-1)?.detail).toEqual({
+        modelId: "m1",
+        name: "改名",
+        upstreamChanged: false,
+      });
+    },
+  );
+});
+
 describe("修改保留密钥与清空上游", () => {
   it("omitted apiKey keeps the key, null clears both columns, a keyless model cannot omit it", async () => {
     const world = await openModelsWorld();

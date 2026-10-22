@@ -14,7 +14,7 @@
  * 写入流水线：store 写方法自持事务，审计经它的 `within` 在 COMMIT 之前同事务写入 → `registry.refresh()` →
  * `await publish()` → 应答。发布失败：经 `onPublishFailed` 恰交出一条 `{"event":"model_publish_failed"}`，
  * 原错误交给共享 handler（generic 500，不是典型信封）；行与审计已提交、不回滚。`default` 对已是缺省的行
- * 不审计、不发布。视图不含密钥；`upstream.baseUrl` 是 `store.viewBaseUrl` 去掉 userinfo 的形式（env 种子行原样入表，
+ * 不审计、不发布。视图不含密钥；`upstream.baseUrl` 是 `core/base-url` `withoutUserinfo` 去掉 userinfo 的形式（env 种子行原样入表，
  * 可能带 `user:pass@`）；`PUT` 送回这个形式且不带 `apiKey` 时 store 沿用已存地址，`upstreamChanged` 随之为 false。
  * 审计 detail 只含 `modelId`、`name` 与 `upstreamChanged`——没有 base URL 与密钥。
  */
@@ -25,10 +25,11 @@ import type {
   onRequestHookHandler,
   preParsingHookHandler,
 } from "fastify";
+import { withoutUserinfo } from "../core/base-url.js";
 import { HttpError } from "../core/errors/index.js";
 import { type ProbeResult, probeUpstream } from "./probe.js";
 import type { ModelPublishFailedRecord } from "./publish.js";
-import { type createModelStore, type ModelRow, viewBaseUrl } from "./store.js";
+import type { createModelStore, ModelRow } from "./store.js";
 
 type ModelStore = Pick<
   ReturnType<typeof createModelStore>,
@@ -91,7 +92,7 @@ function toView(row: ModelRow) {
     upstream:
       upstream === null
         ? null
-        : { baseUrl: viewBaseUrl(upstream.baseUrl), hasApiKey: true as const },
+        : { baseUrl: withoutUserinfo(upstream.baseUrl), hasApiKey: true as const },
     isDefault,
     probe,
     updatedAt: row.updatedAt,
