@@ -74,6 +74,7 @@ function permissionSlot({
 function modelSlot({
   composerOptions,
   modelId,
+  onModelMenuOpen,
   onPatchComposer,
   reasoningEffort,
   requestedSessionId,
@@ -82,6 +83,7 @@ function modelSlot({
   ConversationViewProps,
   | "composerOptions"
   | "modelId"
+  | "onModelMenuOpen"
   | "onPatchComposer"
   | "reasoningEffort"
   | "requestedSessionId"
@@ -89,12 +91,21 @@ function modelSlot({
 >): ReactNode {
   if (composerOptions === null) return null;
   if (!requestedSessionId) {
-    return <ModelPicker key="" options={composerOptions} session={null} welcome={welcome} />;
+    return (
+      <ModelPicker
+        key=""
+        onModelMenuOpen={onModelMenuOpen}
+        options={composerOptions}
+        session={null}
+        welcome={welcome}
+      />
+    );
   }
   if (modelId === undefined || reasoningEffort === undefined) return null;
   return (
     <ModelPicker
       key={requestedSessionId}
+      onModelMenuOpen={onModelMenuOpen}
       options={composerOptions}
       session={{
         modelId,
@@ -132,6 +143,8 @@ type ConversationViewProps = {
   onAnswerApproval: AnswerApproval;
   onChangeDraft(value: string): void;
   onFork(messageId: number): Promise<void>;
+  /** 模型菜单打开时调用：输入框选项失效并重取（model-selection「模型与推理强度控件」）。 */
+  onModelMenuOpen(): void;
   /** 已选会话的设置提交（恰一次 PATCH）；返回的 promise 在任何结果下都落定。 */
   onPatchComposer(
     sessionId: string,
@@ -189,6 +202,7 @@ export function ConversationView({
   onAnswerApproval,
   onChangeDraft,
   onFork,
+  onModelMenuOpen,
   onPatchComposer,
   onRegenerate,
   onReveal,
@@ -236,6 +250,7 @@ export function ConversationView({
   const actions = modelSlot({
     composerOptions,
     modelId,
+    onModelMenuOpen,
     onPatchComposer,
     reasoningEffort,
     requestedSessionId,

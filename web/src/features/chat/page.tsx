@@ -116,6 +116,7 @@ export function ChatPage() {
           onAnswerApproval={session.answerApproval}
           onChangeDraft={session.setDraft}
           onFork={session.forkTurn}
+          onModelMenuOpen={session.invalidateComposerOptions}
           onPatchComposer={sessionActions.patchComposer}
           onRegenerate={session.regenerateTurn}
           onReveal={sidebar.reveal}
