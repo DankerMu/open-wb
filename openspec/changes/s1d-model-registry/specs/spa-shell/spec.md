@@ -19,7 +19,7 @@ SPA SHALL 以 history 路由提供 `/`、`/files`、`/center`、`/settings` 四�
 
 #### Scenario: 四路由可达
 - WHEN 已登录用户依次访问四个路由
-- THEN `/` 显示会话页（欢迎态 hero `WorkBuddy，我帮你`）与输入框、侧栏列表区含会话列表与 `新建会话`，`/files` 显示工作空间页、空间切换器与目录树区，`/center` 显示中心页（管理员见 tab 条与 `模型`，普通用户见 `中心暂无可用内容`），`/settings` 保持设置页；侧栏高亮当前 tab，无浏览器控制台报错
+- THEN `/` 显示会话页（欢迎态 hero `WorkBuddy，我帮你`）与输入框、侧栏列表区含会话列表与 `新建会话`，`/files` 显示工作空间页、空间切换器与目录树区，`/center` 显示中心页（按 model-registry「中心页外壳」：管理员见含 `模型` 的 tab 条；普通用户只见对其可见的 tab，没有可见 tab 时为 `中心暂无可用内容`），`/settings` 保持设置页；侧栏高亮当前 tab，无浏览器控制台报错
 
 #### Scenario: 侧栏折叠与用户菜单
 - WHEN 点击折叠按钮、reload、再展开；随后打开用户菜单

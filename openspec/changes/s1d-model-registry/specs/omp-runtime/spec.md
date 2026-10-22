@@ -183,7 +183,7 @@ overlay 缺失、不可读或不是 YAML mapping 时 omp 以非零退出且不�
 
 #### Scenario: overlay 不随档位变化
 - **WHEN** 编译入口冷启动后，先后有 `always-ask`、`write`、`yolo` 三个档位的会话各 spawn 一次
-- **THEN** `host-overlay.yml` 的字节在三次 spawn 前后都等于固定块、浏览器块与看图块依次相接的同一内容（固定块仍含 `approvalMode: write`），托管 agent 目录里没有按档位另写的 overlay 文件；三次 spawn 的 `--config` 与 `PI_CONFIG_FILES` 都指向这同一个路径
+- **THEN** `host-overlay.yml` 的字节在三次 spawn 前后都等于固定块、浏览器块与看图块依次相接的同一内容（固定块仍含 `approvalMode: write`），托管 agent 目录里没有按档位另写的 overlay 文件；三次 spawn 的宿主 overlay `--config`（argv 里的第一个 `--config`）与 `PI_CONFIG_FILES` 都指向这同一个路径
 
 #### Scenario: 会话级重试封顶一轮（真实 omp）
 - **WHEN** 官方 omp v18.12.3 经模型代理连接一个对每次请求都答 503 的假上游，会话发一个 prompt
