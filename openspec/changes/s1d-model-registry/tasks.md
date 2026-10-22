@@ -14,6 +14,7 @@
 | 两份真相（快照 vs 表 vs 托管文件 vs 存活进程） | 是 | 组 3 单飞与字节用例、组 6 |
 | 权限（非管理员写注册表；既有审计可见性过滤） | 是 | 组 1（`isAdmin` 严格相等 + `core/audit` 改导入后 `core-audit.test.ts:198` 照旧绿）、组 7 先于 body 的 403 矩阵 |
 | 迁移与 DB 约束 | 是 | 组 2（约束 + 045 → 046 升级 + 计数钉） |
+| 外发边界（带密钥的出站请求：目标由管理员定、不跟随重定向、读取上限、所探上游自身的净化） | 是 | 组 8（302 不跟随、16 KiB 读取上限 + `cut`、所探路由密钥并入净化集；接受的风险记 design Risks 与 ADR-0008 探活段） |
 
 ## 1. 错误码与管理员判定（http-service-skeleton「统一错误信封」）
 
@@ -98,11 +99,23 @@ Minimal mergeable slice: atomic - 五个端点共用同一套 403 / 404 / 键集
 
 ## 8. 探活（model-registry「探活」+ model-proxy「假上游夹具契约」的 `GET /models`）
 
-- [ ] 8.1 核对 Context：`fake-upstream.mjs:123` 的路由分发、`upstream-failure.ts` 的 `upstreamExcerpt` 签名、`http/errors.ts` 归属集。
-- [ ] 8.2 测试先行：假上游夹具自测加「Models listing for probes」三例（200 / `GET /models` 的 401 回显 bearer / `modelsStatus: 503`；`modelsRequests()`；chat-completions 的 401 正文与 `requests()` 不变）；新 `server/test/models-probe.test.ts`：每类应答的 no-store + 四种结果 + 无上游零请求 + 并发串行 + 在途删除 404 且结果丢弃 + 应用 stdout/stderr 无密钥哨兵 + `models.yml` mtime 不变 + 摘要 200 码点截断 + `model.probe` 审计 + 普通账号 403（含缺失 id）+ bodyless 带 `{}` 的 content-parser 400。
-- [ ] 8.3 `fake-upstream.mjs` 加 `GET /models` / `GET /v1/models` 与 `start({modelsStatus})`、`modelsRequests()`。
-- [ ] 8.4 新 `server/src/models/probe.ts`（`probeUpstream({baseUrl, apiKey}, {connectDeadlineMs: 10000, totalDeadlineMs: 15000, secrets})` → `{status, message}`；期限常量本模块自有）；`rest.ts` 加 `POST /api/models/probe?id=`（串行、在途删除 404；归属身份已由组 7 加齐）。
-- [ ] 8.5 ADR-0008 补充节的探活段（向外发带密钥的请求的边界）。
+- [x] 8.1 核对 Context：`fake-upstream.mjs:123` 的路由分发（`fake-upstream.mjs` 现 699 行、`fake-upstream.test.ts` 现 711 行——夹具自测进新文件）、`upstream-failure.ts:69` `upstreamExcerpt(text, secrets, cut = false)` 与 :169 `upstreamSecretList({apiKey, baseUrl, paths})`、`model-proxy/error-body.ts:21-26` `readErrorBody(response, limits)`（16 KiB / 5 s，返回 `cut`）、`model-proxy/index.ts:536` 的 `http(s).request` 先例（不跟随重定向）、`http/errors.ts:58-80` 归属集（`POST /api/models/probe` 已由组 7 加入）、`models/store.ts:199-215` `recordProbe(id, {status, message, at}, within)`（`changes === 0` → 404）、`models-store.test.ts:439-444` 的 `within` 抛出回滚表（无 `recordProbe` 行）、`models/rest.ts:28-31` 的 `ModelStore` Pick（无 `recordProbe`）与 :40-51 `ModelRestDependencies`、`app.ts:388-404` `registerModelAdmin`（registry 类型 `Pick<ModelRegistry, "refresh">`）与 :97-130 `AssemblyDependencies`、`models-rest-helpers.ts:104-113` 的 `writes` 记录器。
+- [x] 8.2 测试先行：
+  - 新 `server/test/fake-upstream-models.test.ts`（夹具自测「Models listing for probes」三例：200 / `GET /v1/models` 的 401 回显 bearer / `modelsStatus: 503`；`modelsRequests()` 深等；chat-completions 的 401 正文与 `requests()` 不变）；不往 `fake-upstream.test.ts` 加行。
+  - `models-store.test.ts:439-444` 的 `within` 抛出回滚表加 `recordProbe` 一行（抛出后探活三列与审计行都不变）。
+  - 新 `server/test/models-probe.test.ts`（整体挂载，照组 7 `models-rest-helpers.ts`）：
+    - 次序与 no-store：匿名 401；普通账号 403（含缺失 id）；管理员 `id` 缺失 / 空 / 多值 400；未知 id 404；bodyless 带 `{}` 的 content-parser 400——每例 `Cache-Control: no-store`、假上游 `modelsRequests()` 零新增、零 `model.probe` 审计、表不变。
+    - 四种结果 + 无上游（spec「四种结果」，「超时」经 `assembly.probeDeadlines` 注入整体 1 s）：每例恰一条 `model.probe` 审计（detail 恰 `{modelId, status}`）、`writes` 记录器零新增且 `models.yml` mtime 不变；成功例 `modelsRequests()` 恰一条且 bearer 为该模型密钥。
+    - base URL 带结尾 `/`（`…/v1/`）→ `ok`（夹具对 `//models` 404，证去斜杠拼接）。
+    - 不跟随重定向：测试内 `node:http` 服务答 `302`、`Location` 指向第二个监听 → `failed`、`message` 以 `HTTP 302：` 开头，第二个监听零连接。
+    - 摘要 200 码点截断：测试内服务答 `500` + 长正文 → `message` 为 `HTTP 500：` 接摘要，摘要码点数恰 200、以 `…（已截断）` 结尾、不拆代理对。
+    - 所探上游自身入净化集：探活路由密钥不在 `registry.secrets()` 时（`probe.ts` 单元：`probeUpstream({baseUrl: 假上游, apiKey: 哨兵}, {secrets: []})`，假上游 401 回显所给 bearer）→ `message` 不含哨兵（哨兵不得以 `sk-` / `Bearer` 开头——那两种模式 `redact` 本来就去，用例证明不了并集）。
+    - 并发串行：测试内 `net.createServer` 只接受连接不应答，整体期限注入 1 s；同一 id 两个并发探活 → 都 `超时`；服务端见到第二个连接时第一个 socket 已关闭；第二个 `probe.at` ≥ 第一个 + 900 ms；不同 id 两个并发探活两个连接同时存在。
+    - 在途删除：同一挂起服务，探活在途时 `DELETE` 该非缺省行 → 204；探活应答 404 `not_found`、行不存在、零 `model.probe` 审计。
+    - 无哨兵：用例期间以 `vi.spyOn(process.stdout, "write")` / `process.stderr` 收集，全部输出不含密钥哨兵与哨兵 base URL；响应体与审计 detail 同样不含。
+- [x] 8.3 `fake-upstream.mjs` 加 `GET /models` / `GET /v1/models` 与 `start({modelsStatus})`、`modelsRequests()`。
+- [x] 8.4 新 `server/src/models/probe.ts`：`probeUpstream({baseUrl, apiKey}, {connectDeadlineMs?, totalDeadlineMs?, secrets})` → `{status, message}`；缺省 10000 / 15000 常量本模块自有；用 `node:http` / `node:https` `request`（不跟随重定向、不重试）；`server/src/model-proxy/error-body.ts` 先 `git mv` 到 `server/src/core/error-body.ts`（内容不变；`model-proxy/index.ts:19` 与 `server/test/model-proxy-failures.test.ts` 的导入路径同步、`upstream-failure.ts:67` 注释同步），非 2xx 正文经它的 `readErrorBody`（16 KiB / 5 s）读取并把 `cut` 传给 `upstreamExcerpt`；2xx 正文 `response.resume()` 丢弃、不等正文；整体期限在读非 2xx 正文期间到期 → `超时`；`models/` 不导入 `model-proxy/`（D1）；净化集 = `options.secrets` ∪ `upstreamSecretList({apiKey, baseUrl, paths: []})`（所探上游自身）。`rest.ts` 加 `POST /api/models/probe?id=`：次序同组 7（路由级 `preParsing` 403 → bodyless 校验 → `idOf`）→ `store.get(id)` 不存在即 404（不发请求）→ `registry.lookup(id)?.upstream`（无则 `未配置上游`、不发请求）→ 按 id 串行（`rest.ts` 内 `Map<id, Promise>` 链，结算后若仍是自己则删除条目）→ `store.recordProbe(id, {…, at: Date.now()}, within)`，`within` 里 `emit` `model.probe`（detail `{modelId, status}`）；`recordProbe` 404（在途被删）即结果丢弃、无审计；不调 `refresh()` 与 `publish()`。接缝：`AssemblyDependencies.probeDeadlines?: {connectDeadlineMs?, totalDeadlineMs?}` → `app.ts` `registerModelAdmin` → `ModelRestDependencies.probeDeadlines?` → `probeUpstream` 选项；生产装配不传。`registerModelAdmin` 的 registry 类型放宽到 `Pick<ModelRegistry, "refresh" | "lookup" | "secrets">`，`ModelStore` Pick 加 `recordProbe`。
+- [x] 8.5 ADR-0008 补充节的探活段（向外发带密钥的请求的边界）：只在管理员点下时、只对登记的 base URL、不跟随重定向、读取上限 16 KiB、摘要净化（含所探上游自身）且 ≤200 码点；**接受的风险**（同 design Risks，owner 2026-10-22 确认接受，ADR 段同样标「owner 2026-10-22 确认接受」）：`PUT` 只改地址时保留已存密钥（spec「修改保留密钥与清空上游」），探活随即把该密钥发往新地址——管理员可借此取出 API 从不回显的密钥；管理员可让服务端向任意（含内网）地址发 GET 并读回 ≤200 码点摘要。重开条件：要求改地址必须重给密钥 / 限制出站目标。
 
 Suggested fixture level: expanded - 向外发带密钥的请求（outbound with credentials）。
 Minimal mergeable slice: atomic - 夹具的 `GET /models` 没有探活就没有消费者；探活没有夹具无法按规格验证；两者共一条验证路径（`models-probe.test.ts`）。

@@ -10,6 +10,9 @@ import {
 } from "./fake-upstream-pace.mjs";
 
 const PATHS = new Set(["/chat/completions", "/v1/chat/completions"]);
+/** s1d-model-registry D20: the listing a model probe reads. */
+const MODELS_PATHS = new Set(["/models", "/v1/models"]);
+const MODELS_LISTING = { object: "list", data: [{ id: "fake-model", object: "model" }] };
 const DEFAULT_KEY = "fake";
 const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
@@ -64,6 +67,13 @@ export async function start(options = {}) {
   if (!TOOL_ROUND_SCOPES.has(scope)) {
     throw new Error('fake-upstream toolRoundScope must be "history" or "turn"');
   }
+  const modelsStatus = options.modelsStatus;
+  if (
+    modelsStatus !== undefined &&
+    !(Number.isInteger(modelsStatus) && modelsStatus >= 400 && modelsStatus <= 599)
+  ) {
+    throw new Error("fake-upstream modelsStatus must be an integer 400-599");
+  }
   const expectedKey = options.apiKey ?? DEFAULT_KEY;
   const requested = options.port ?? 0;
   const ttlMs =
@@ -76,10 +86,14 @@ export async function start(options = {}) {
   /** Chat-completions requests in arrival order: `{model, messages, maxTokens}`, latest 1000. */
   const requests = [];
   const failures = createFailureScript(expectedKey);
+  /** GET /models requests in arrival order: `{authorization}`, latest 1000. */
+  const modelsRequests = [];
+  const models = { status: modelsStatus, record: modelsRequests };
   const server = createServer((request, response) => {
     void handleRequest(request, response, expectedKey, gates, ttlMs, requests, {
       scope,
       failures,
+      models,
     });
   });
   await listen(server, requested);
@@ -92,6 +106,9 @@ export async function start(options = {}) {
     port: address.port,
     requests() {
       return requests.map((entry) => ({ ...entry }));
+    },
+    modelsRequests() {
+      return modelsRequests.map((entry) => ({ ...entry }));
     },
     async close() {
       if (closed) {
@@ -120,6 +137,10 @@ async function handleRequest(request, response, expectedKey, gates, ttlMs, reque
     handleControl(request, response, path, expectedKey, gates, ttlMs);
     return;
   }
+  if (request.method === "GET" && MODELS_PATHS.has(path)) {
+    serveModels(request, response, expectedKey, script.models);
+    return;
+  }
   if (request.method !== "POST" || !PATHS.has(path)) {
     notFound(response);
     return;
@@ -133,6 +154,27 @@ async function handleRequest(request, response, expectedKey, gates, ttlMs, reque
     return;
   }
   serveChat(response, gates, parsed, script);
+}
+
+/** The 401 echoes the offered bearer (a sentinel for probe-sanitising tests); chat's 401 never does. */
+function serveModels(request, response, expectedKey, { status, record }) {
+  const header = request.headers.authorization;
+  record.push({ authorization: typeof header === "string" ? header : null });
+  if (record.length > REQUESTS_CAP) {
+    record.shift();
+  }
+  if (!bearerMatches(header, expectedKey)) {
+    const offered =
+      typeof header === "string" && header.startsWith("Bearer ") ? header.slice(7) : "none";
+    writeJson(response, 401, { error: { message: `bad key ${offered}` } });
+    return;
+  }
+  if (status !== undefined) {
+    const message = `scripted models ${String(status)}`;
+    writeJson(response, status, { error: { message, type: "scripted_error" } });
+    return;
+  }
+  writeJson(response, 200, MODELS_LISTING);
 }
 
 function readRequests(request, response, expectedKey, requests) {

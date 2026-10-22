@@ -73,7 +73,7 @@
   - `DELETE /api/models?id=<id>` → 204；缺省行 409 `model_in_use`。
   - `POST /api/models/default?id=<id>`、`POST /api/models/probe?id=<id>`（无 body）→ 200 `ModelView`。
   - 全部：未认证 401 先于一切；非管理员 403 `forbidden` 先于 body 解析与 id 查找；`id` 缺失 / 空 / 多值 400；未知 `id` 404；no-store。id 走查询参数而不进路径：`http/path-classifier.ts:19-23` 把 `/api/*` 下任何百分号编码的路径分量改写为 404（主规格钉住的守卫，不开口子），vLLM 风格的 `Qwen/Qwen2.5-72B-Instruct` 只能经 `?id=` 传。两个带 body 的路由进 content-parser 归属集（exact 400），两个无 body 的按 stop / regenerate 先例。模块 `models` 作为第八个 `STARTUP_MODULES` 在 accounts 之后注册。
-- **D11 探活**：上游取自 `registry.lookup(id).upstream`；`GET <baseUrl 去掉结尾斜杠>/models`，`authorization: Bearer <apiKey>`，`accept: application/json`；建连期限 10 s、整体 15 s（常量在 `models/probe.ts` 自己定义，不导入 model-proxy）；不跟随重定向、不重试。2xx → `ok`、`message = null`；非 2xx → `failed`、`"HTTP <status>：<摘要>"`（`upstreamExcerpt` 的结果再截到 200 码点：超出保留前 194 个码点接 `…（已截断）`）；连接被拒 / 重置 / DNS → `"无法连接"`；两个期限到期 → `"超时"`；没有上游 → 不发请求、`"未配置上游"`。不触发 `publish()`，记审计 `model.probe`（detail `{modelId, status}`）。同一模型并发探活串行；在途期间该行被删 → 结果丢弃、404。2xx 不核对 `data[].id`（Not yet specified）。
+- **D11 探活**：上游取自 `registry.lookup(id).upstream`；`GET <baseUrl 去掉结尾斜杠>/models`，`authorization: Bearer <apiKey>`，`accept: application/json`；建连期限 10 s、整体 15 s（常量在 `models/probe.ts` 自己定义，不导入 model-proxy（共用的错误正文读取器先从 `model-proxy/error-body.ts` 移到 `core/error-body.ts`））；不跟随重定向、不重试。2xx → `ok`、`message = null`；非 2xx → `failed`、`"HTTP <status>：<摘要>"`（`upstreamExcerpt` 的结果再截到 200 码点：超出保留前 194 个码点接 `…（已截断）`）；连接被拒 / 重置 / DNS → `"无法连接"`；两个期限到期 → `"超时"`；没有上游 → 不发请求、`"未配置上游"`。不触发 `publish()`，记审计 `model.probe`（detail `{modelId, status}`）。同一模型并发探活串行（`rest.ts` 内按 id 的 Promise 链，结算即删条目）；在途期间该行被删 → 结果丢弃、404（`store.recordProbe` 的 `changes === 0`；探活前 `store.get(id)` 不存在即 404、不发请求）。2xx 不核对 `data[].id`（Not yet specified）。HTTP 客户端为 `node:http(s).request`（不跟随重定向）；非 2xx 正文经 `core/error-body.ts` `readErrorBody`（本组从 `model-proxy/` 原样移入 `core/`，与 `upstream-failure.ts` 同层；16 KiB / 5 s，`cut` 传给 `upstreamExcerpt`）；2xx 正文不读（`response.resume()` 后即结算）；整体期限在读非 2xx 正文期间到期 → `超时`；摘要净化集 = `registry.secrets()` ∪ 所探上游自身的 `upstreamSecretList`（在途期间被 `PUT` 换掉的旧密钥仍被去掉，同 D5）。期限经 `AssemblyDependencies.probeDeadlines?` 注入（生产不传）。
 - **D12 审计**：kind `model.create` / `model.update` / `model.delete` / `model.default` / `model.probe`；title 中文；detail 只含 `{modelId, name?, upstreamChanged?: boolean, status?}`——没有 base URL、密钥、探活摘要。`upstreamChanged`：create 为「带了上游」；`PUT` 为「`upstream` null 与非 null 互换，或 base URL 不同，或给出了 `apiKey`」。
 - **D13 overlay 与 `SessionRuntime.modelId`**：`publish()` 每次按快照算 `visionModelId`，`writeHostOverlay` 的内容规则不变，但写入时机多了「随发布重写」、看图块来源改为快照——omp-runtime「宿主 overlay」出 delta（「启动期确定、此后不变」改为「快照的纯函数」）。`SessionRuntime.modelId` 保留，生产装配取快照缺省。
 - **D14 `/center` 外壳**：`web/src/features/center/page.tsx` + `tabs.ts`（`CENTER_TABS: readonly {key, label, adminOnly}[]`）；`?tab=<key>` 不在可见 tab 里 → replace 为第一个可见 tab；没有可见 tab → 空态「中心暂无可用内容」且不改 URL。外壳组以**空表**合入（人人看到空态；SH-01 改写为空态文案并回到 `待签`），模型 tab 组追加 `{models, 模型, adminOnly}`。tab 条用拷入层 `tabs`（需按 ADR-0013 拷入 `tabs`、`table`、`checkbox`、`select` 四个组件——外壳组拷 `tabs`，模型 tab 组拷其余三个）。页内 heading 归顶栏。
@@ -104,7 +104,8 @@
 - **`publish()` 失败后的半状态**：DB 已改、文件没改到，直到下次成功的写入发布或重启。可观察（500 + `model_publish_failed`），接受。其间每次派发到未发布的模型都是新 spawn → `set_model` 被拒（`Model not found`）→ 退役 → 502，直到下一次成功发布为止——不是「一次 502 后自愈」（那只对下面的窄窗口成立）。另：同一 id 的 `PUT` 改了 `reasoning` / `vision` / `maxTokens` 时，存活进程仍用 spawn 时 `models.yml` 的旧条目（模型集合只记 id），直到进程被回收或因档位 / 新模型重启；规格允许（omp 只在 spawn 时读文件）。
 - **D19 多一次重启**：登记新模型后，每个存活会话切到它的第一条消息多一次 spawn（与换档位同一代价）。
 - **表非空时 env 被忽略**：`model_env_ignored` 一行 + 文档。
-- **探活发出带密钥的请求**：只对管理员登记的 base URL、只在管理员点下时发。
+- **探活发出带密钥的请求**：只对管理员登记的 base URL、只在管理员点下时发。**接受的风险（owner 2026-10-22 确认接受）**：`PUT` 只改地址时保留已存密钥（spec「修改保留密钥与清空上游」），探活（组 10 改地址后自动探活）随即把该密钥发往新地址——任一管理员（或被劫持的管理员会话）可借此取出 API 从不回显的密钥；管理员也可让服务端向任意（含内网）地址发 GET 并读回 ≤200 码点摘要。管理员是受信角色，接受；重开条件：要求改地址必须重给密钥 / 限制出站目标。
+- **探活跨 `PUT`**：探活开始后、完成前该行的上游被 `PUT` 改掉，结果按旧上游写在新配置上；下一次探活覆盖，接受。
 - **`/center` 对普通用户是空态**：直到专家 / 技能 change 加入人人可见的 tab。
 - **真实 omp 行为（已实测）**：D19 的前提（未加载模型的 `set_model` 被拒）由官方用例 `omp-official-model-set.test.ts` 钉住，v18.12.3 实测被拒（`Model not found: workbuddy/<id>`，确切应答见 D19）；omp 升级若改为热读 `models.yml`，该用例变红，判据仍保留（不依赖 omp 是否热读文件，代价是首次切到新登记模型时一次重启）。
 - **refresh 与 publish 之间的窄窗口**：在这之间 spawn 的进程记下的集合含尚未写进 `models.yml` 的模型，可能触发一次派发前失败（502）后自愈；窗口是一次文件重写的时长，接受。
@@ -148,7 +149,8 @@
 |---|---|---|---|
 | `server/src/server.ts` | 743 | 组 5 后 778；组 7 后 787 | 组 5 已抽 `startup-registry.ts`；组 7 的 `STARTUP_MODULES`、union、`publish` / `onPublishFailed` 注入与 catch 入口 stage 捕获留在 `server.ts`（≤800 硬上限，不再抽取） |
 | `server/src/model-proxy/index.ts` | 539 | ~560 | lookup 替换 allowedModels / upstream |
-| `server/src/app.ts` | 491 | ~530 | `staticRegistry` 装配、净化闭包、`registerModels`、`onPublishFailed` |
+| `server/src/app.ts` | 491 | 组 7 后 537；组 8 ~545 | `staticRegistry` 装配、净化闭包、`registerModels`、`onPublishFailed`、`probeDeadlines` |
+| `server/test/support/fake-upstream.mjs` | 699 | ~740 | `GET /models` 两条路由、`modelsStatus`、`modelsRequests()`；夹具自测进新文件 `fake-upstream-models.test.ts`（`fake-upstream.test.ts` 711 不加行） |
 | `server/src/models/*.ts` | 新 | 各 ≤400 | store / registry / publish / probe / rest 分文件 |
 | `web/src/features/center/*` | 新 | 各 ≤400 | page / tabs / models 分文件 |
 | `web/src/features/chat/use-chat-session.ts` | 795 | 796 | 返回对象加一行（D16） |

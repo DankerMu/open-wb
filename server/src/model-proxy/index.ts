@@ -5,6 +5,7 @@ import type { Socket } from "node:net";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { FastifyInstance, FastifyReply, FastifyRequest, onRequestHookHandler } from "fastify";
+import { readErrorBody } from "../core/error-body.js";
 import { HttpError } from "../core/errors/index.js";
 import {
   connectReply,
@@ -16,7 +17,6 @@ import {
   upstreamExcerpt,
   upstreamSecretList,
 } from "../core/upstream-failure.js";
-import { readErrorBody } from "./error-body.js";
 import type { ModelRegistry, ModelUpstream } from "./lookup.js";
 import { scannedModelId } from "./model-guard.js";
 

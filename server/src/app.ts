@@ -120,6 +120,8 @@ export interface AssemblyDependencies {
   publish?: () => Promise<void>;
   /** 发布失败的一行记录 sink（与 `log` / `warn` 同一写法）；省略时不写。 */
   onPublishFailed?: (record: ModelPublishFailedRecord) => void;
+  /** 模型探活的建连 / 整体期限（测试注入短期限）；省略时取 `models/probe.ts` 的 10 s / 15 s。 */
+  probeDeadlines?: { connectDeadlineMs?: number; totalDeadlineMs?: number };
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -388,7 +390,7 @@ function upstreamRedactor(
 function registerModelAdmin(
   app: FastifyInstance,
   db: DatabaseSync,
-  registry: Pick<ModelRegistry, "refresh">,
+  registry: Pick<ModelRegistry, "refresh" | "lookup" | "secrets">,
   assembly: AssemblyDependencies | undefined,
 ): void {
   registerModels(app, {
@@ -401,6 +403,7 @@ function registerModelAdmin(
     ...(assembly?.onPublishFailed === undefined
       ? {}
       : { onPublishFailed: assembly.onPublishFailed }),
+    ...(assembly?.probeDeadlines === undefined ? {} : { probeDeadlines: assembly.probeDeadlines }),
   });
 }
 
