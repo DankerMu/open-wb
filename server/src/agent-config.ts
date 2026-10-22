@@ -235,11 +235,35 @@ function optionalSetting(raw: string | undefined, key: string): string | undefin
  * Node's own check decides; its error is not passed on and the message never carries the value.
  */
 function assertHeaderSafeKey(key: string): void {
-  try {
-    validateHeaderValue("authorization", `Bearer ${key}`);
-  } catch {
+  if (!isHeaderSafeKey(key)) {
     throw new Error("MODEL_UPSTREAM_API_KEY must be a valid HTTP header value");
   }
+}
+
+/** The one header check shared by the env key above and registry upstreams (s1d D4). */
+function isHeaderSafeKey(key: string): boolean {
+  try {
+    validateHeaderValue("authorization", `Bearer ${key}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** http(s) only; path and query allowed; no whitespace, no fragment, no userinfo (s1d D4). */
+const UPSTREAM_BASE_URL = /^https?:\/\/[^\s#@]+$/u;
+
+/**
+ * Registry upstream rule (s1d-model-registry D4): the base URL matches `UPSTREAM_BASE_URL` (userinfo
+ * would be echoed to every admin by the model list) and the key is a non-empty valid header value.
+ * The env path reuses only the key half: `MODEL_UPSTREAM_BASE_URL` is never held to the URL rule.
+ */
+export function validateUpstream(upstream: { baseUrl: string; apiKey: string }): boolean {
+  return (
+    UPSTREAM_BASE_URL.test(upstream.baseUrl) &&
+    upstream.apiKey !== "" &&
+    isHeaderSafeKey(upstream.apiKey)
+  );
 }
 
 /**

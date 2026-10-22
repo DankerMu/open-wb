@@ -305,7 +305,7 @@ export function preservedState(
     indexes: perTable((table) => tableIndexKeys(db, table)),
     indexSql: db
       .prepare(
-        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs','chat_thinking_segments') ORDER BY name",
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs','chat_thinking_segments','models') ORDER BY name",
       )
       .all(),
     sequences: chatSequences(db),

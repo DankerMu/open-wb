@@ -34,6 +34,7 @@ import {
   MIGRATION_043,
   MIGRATION_044,
   MIGRATION_045,
+  MIGRATION_046,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -271,6 +272,7 @@ function seed033Database(path: string, seed: (db: DatabaseSync) => void): void {
         MIGRATION_043,
         MIGRATION_044,
         MIGRATION_045,
+        MIGRATION_046,
       ].includes(asset.filename),
   );
   const filenames = assets.map((asset) => asset.filename);

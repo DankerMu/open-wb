@@ -157,7 +157,7 @@ function parseCatalog(raw: string): readonly CatalogModel[] {
   }
   const seen = new Set<string>();
   return parsed.map((entry: unknown) => {
-    const model = parseCatalogEntry(entry);
+    const model = validateCatalogModel(entry, { requireEfforts: true });
     if (seen.has(model.id)) {
       throw catalogError("entry ids must be unique");
     }
@@ -166,7 +166,14 @@ function parseCatalog(raw: string): readonly CatalogModel[] {
   });
 }
 
-function parseCatalogEntry(entry: unknown): CatalogModel {
+/**
+ * 白名单单项的字段规则（只此一份）：环境 `MODEL_CATALOG` 传 `requireEfforts: true`，注册表写入传 `false`
+ *（推理模型可不带 `efforts`）。非推理模型带 `efforts` 两种模式下都非法；错误只点名规则、不回显取值。
+ */
+export function validateCatalogModel(
+  entry: unknown,
+  options: { requireEfforts: boolean },
+): CatalogModel {
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
     throw catalogError("entries must be objects");
   }
@@ -204,13 +211,24 @@ function parseCatalogEntry(entry: unknown): CatalogModel {
   ) {
     throw catalogError("entry maxTokens must be an integer from 1 to 128000");
   }
-  if (reasoning !== (efforts !== undefined)) {
-    throw catalogError("entries must declare efforts exactly when reasoning is true");
-  }
-  if (efforts === undefined) {
+  const declared = declaredEfforts(reasoning, efforts, options.requireEfforts);
+  if (declared === undefined) {
     return { id, name, reasoning, vision, maxTokens };
   }
-  return { id, name, reasoning, vision, maxTokens, efforts: parseEfforts(efforts) };
+  return { id, name, reasoning, vision, maxTokens, efforts: declared };
+}
+
+/** 非推理模型不得带 `efforts`；推理模型在 `requireEfforts` 时必带。带了就按强度规则解析。 */
+function declaredEfforts(
+  reasoning: boolean,
+  efforts: unknown,
+  requireEfforts: boolean,
+): readonly Effort[] | undefined {
+  const declared = efforts !== undefined;
+  if (reasoning ? requireEfforts && !declared : declared) {
+    throw catalogError("entries must declare efforts exactly when reasoning is true");
+  }
+  return declared ? parseEfforts(efforts) : undefined;
 }
 
 /** 六个强度档的非空子集，严格按强度升序（因此也不重复）。 */

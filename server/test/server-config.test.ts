@@ -443,6 +443,11 @@ describe("resolveServerConfig — 新路径与上游显式空值", () => {
     },
   );
 
+  it("env 上游地址含 userinfo 与 fragment 仍原样解析（不套注册表的地址规则）", () => {
+    const raw = "https://u:p4ss@gw.example/v1#x";
+    const config = resolveServerConfig({ MODEL_UPSTREAM_BASE_URL: raw }, SOURCE_ENTRY);
+    expect(config.modelUpstreamBaseUrl).toBe(raw);
+  });
   it.each(["abc def", "é", "a\tb"])("上游密钥 %j 是合法 HTTP 头取值，原样保留", (raw) => {
     expect(resolveServerConfig({ MODEL_UPSTREAM_API_KEY: raw }, SOURCE_ENTRY)).toMatchObject({
       modelUpstreamApiKey: raw,

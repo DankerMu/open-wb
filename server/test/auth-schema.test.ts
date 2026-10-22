@@ -504,6 +504,7 @@ function expectAuthSchema(db: DatabaseSync): void {
     "chat_steps",
     "chat_thinking_segments",
     "chat_turn_snapshots",
+    "models",
     "workspaces",
   ]);
   expect(businessObjectNames(db, "view")).toEqual([]);
