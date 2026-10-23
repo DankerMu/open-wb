@@ -22,6 +22,7 @@ type SkillTransport = {
     onUnauthorized: ApiClientOptions["onUnauthorized"],
     expectedStatus?: number,
   ): Promise<unknown>;
+  requestOptions(signal?: AbortSignal): RequestInit;
   getRequestOptions(signal?: AbortSignal): RequestInit;
   requestFailed(status: number): ApiError;
 };
@@ -53,21 +54,30 @@ function parseSkillList(value: unknown): SkillList | null {
 
 export function createSkillMethods(
   onUnauthorized: ApiClientOptions["onUnauthorized"],
-  { request, getRequestOptions, requestFailed }: SkillTransport,
-): Pick<ApiClient, "listSkills"> {
+  { request, requestOptions, getRequestOptions, requestFailed }: SkillTransport,
+): Pick<ApiClient, "listSkills" | "putSkillDefaults"> {
+  /** 一次 200 请求加 `{skills, disabledSkills}` 严格解析（两个端点的应答同形）。 */
+  async function list(path: string, init: RequestInit): Promise<SkillList> {
+    const parsed = parseSkillList(await request(path, init, onUnauthorized, 200));
+    if (!parsed) {
+      throw requestFailed(200);
+    }
+    return parsed;
+  }
+
   return {
-    async listSkills(options) {
-      const response = await request(
-        "/api/skills",
-        getRequestOptions(options?.signal),
-        onUnauthorized,
-        200,
-      );
-      const list = parseSkillList(response);
-      if (!list) {
-        throw requestFailed(200);
-      }
-      return list;
+    listSkills(options) {
+      return list("/api/skills", getRequestOptions(options?.signal));
+    },
+
+    /** 整表替换账号缺省停用列表；应答与随后的 `GET /api/skills` 相同。 */
+    putSkillDefaults(disabledSkills, options) {
+      return list("/api/skills/defaults", {
+        ...requestOptions(options?.signal),
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disabledSkills }),
+      });
     },
   };
 }

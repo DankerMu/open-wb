@@ -137,8 +137,8 @@ Minimal mergeable slice: atomic - 列表、表单（含读技能清单的多选�
 
 ## 8. 中心「技能」tab（skill-switches「中心「技能」tab」+ 验收 CS 节）
 
-- [ ] 8.1 核对 Context（有出入先改 design 再动手）：组 7 合入后的 `tabs.ts`（`CenterTab` 带 `Panel`，表项与面板同一处登记；`page.tsx` 只渲染当前 tab 的 `<current.Panel />`，所以落到 `/center` 缺省 `专家` tab 的既有套件不会挂载技能面板、请求清单不变）、`api-skills.ts`（`listSkills` 与其严格解析器）、`web/test/support.ts` `centerRoutes()`（已含 `/api/skills` 缺省应答）、`center-page.test.tsx` 的 tab 条精确断言（`:143`、`:160`、`:175`）、`e2e/ui-walk-layout.ts` `/center` 分支（注释「tab 条只有它」）、`web/test/api-files-archive.test.ts` 的 `ApiClient` 方法归类清单（`:279` 起）、验收清单 CM-04（tab 条措辞）；拷入层没有 `switch`（`radix-ui` 合包含 `Switch`；`theme.css` 已绑 `data-checked` / `data-unchecked`）。
-- [ ] 8.2 测试先行：
+- [x] 8.1 核对 Context（有出入先改 design 再动手）：组 7 合入后的 `tabs.ts`（`CenterTab` 带 `Panel`，表项与面板同一处登记；`page.tsx` 只渲染当前 tab 的 `<current.Panel />`，所以落到 `/center` 缺省 `专家` tab 的既有套件不会挂载技能面板、请求清单不变）、`api-skills.ts`（`listSkills` 与其严格解析器）、`web/test/support.ts` `centerRoutes()`（已含 `/api/skills` 缺省应答）、`center-page.test.tsx` 的 tab 条精确断言（`:143`、`:160`、`:175`）、`e2e/ui-walk-layout.ts` `/center` 分支（注释「tab 条只有它」）、`web/test/api-files-archive.test.ts` 的 `ApiClient` 方法归类清单（`:279` 起）、验收清单 CM-04（tab 条措辞）；拷入层没有 `switch`（`radix-ui` 合包含 `Switch`；`theme.css` 已绑 `data-checked` / `data-unchecked`）。
+- [x] 8.2 测试先行：
   - 请求时机：技能面板挂载时恰一次 `listSkills`；此后只有每次切换恰一次 `putSkillDefaults`，不重取 `listSkills`。
   - 新 `web/test/center-skills.test.tsx`（假 `ApiClient`，直接挂面板；≤ 800 行）：
     - 列表：每项名称、描述（空串时不渲染描述行）与 switch，accessible name `默认启用 <名称>`；初值为名称不在 `disabledSkills` 里即开（与 `enabledByDefault` 一致）；页顶说明 `只影响新建的会话；已有会话在输入框的「能力」里修改`；`skills` 为空时显示 `尚未安装平台技能`（说明仍在）；`listSkills` 失败 → 面板内 `role="alert"` 显示 `ApiError.message`、无列表与开关。
@@ -150,13 +150,13 @@ Minimal mergeable slice: atomic - 列表、表单（含读技能清单的多选�
   - `web/test/api-files-archive.test.ts`：方法归类清单登记 `putSkillDefaults`。
   - `center-page.test.tsx`：普通用户 tab 条恰为 `[["专家","true"],["技能","false"]]`；管理员为 `专家`、`技能`、`模型` 三项（各既有用例按此改：`:143`、`:160`、`:175`）；文件头 `:1-4` 与用例标题 `:129`、`:134`、`:167`、`:259` 的两项 / 「恰为专家」/ 「描述为专家」说明同步改写；manifest 用例断言 `/center` 描述 `专家与技能`；新增普通用户打开 `?tab=skills`：地址不变、`技能` 选中，且面板已稳定（缺省应答下 `main` 内显示 `尚未安装平台技能`、`main` 内无 `role="alert"`、`/api/skills` 恰一次、没有 `/api/experts` 请求——最后一条证明 8.1 的「只挂载当前 tab 的面板」前提）。
   - `e2e/ui-walk-layout.ts`：`/center` 分支只改注释（成员 tab 条为 `专家`、`技能`），断言不变。
-- [ ] 8.3 实现：
+- [x] 8.3 实现：
   - 按 ADR-0013 拷入 `web/src/components/ui/switch.tsx`（shadcn/ui registry `radix-nova` 版式，合包 `radix-ui` 的 `Switch`，不新增依赖，只做拷入层六类修改）；登记 `ATTRIBUTION.md` 拷入清单与 ADR-0013 增补一条（用途：中心「技能」tab 的 `默认启用` 开关；组 10 的能力弹层复用）。拷入件若用到 `theme.css` 尚未绑定的裸 `data-*` 状态变体，先在 `theme.css` 绑定并同步 `ui-foundation-entry.test.ts` 与 `ui-variant-bindings.test.ts` 的钉住表；否则不动这三处。
   - `api-skills.ts` 加 `putSkillDefaults(disabledSkills)`（`listSkills` 已由组 7 建）；`api.ts` 的 `ApiClient` 加签名并导出。
   - `web/src/features/center/skills/{list.tsx,use-skills.ts}`（另需文件时同目录，例 `panel.tsx`；每文件 ≤ 800 行）。
   - `tabs.ts` 在 `experts` 之后插入 `{key: "skills", label: "技能", adminOnly: false, Panel: <技能面板>}`；`page.tsx` 不改；`routes/manifest.ts` `/center` 描述改 `专家与技能`。
 - 组 8 风险包：用户可见回归——选中（见上表）；错误处理与回滚——选中，落到 8.2「失败」用例（开关与停用列表回滚、alert、下次切换清提示）；在途并发与整表写入——选中，落到 8.2「在途」与「切换」用例（在途禁用全部开关、应答前再点不发请求、body 保留列表外的 `ghost`、以应答为基）；拷入依赖——不选中，`switch` 用已装合包 `radix-ui`、不新增依赖，由 `ui-guardrails.test.ts` 的 ATTRIBUTION 检查与 `make check` 覆盖；越权 / 迁移 / 子进程——不选中，本组不碰服务端。
-- [ ] 8.4 验收清单（`docs/acceptance/functional-checklist.md`）：CM-04 的 tab 条措辞改为成员「专家」「技能」两项、管理员「专家」「技能」「模型」三项（其余不变）；新增「中心·技能（CS）」节：CS-01 先看空态再准备平台技能——默认部署没有平台技能，打开「技能」tab 显示 `尚未安装平台技能`；再按 CH-49 的写法在服务器 `OMP_STATE_DIR` 状态目录下 home、名为 omp 的点开头目录、agent 里建 skills 目录，放两个带 name 与 description 的 SKILL.md（如 `deploy`、`weekly-report`，保证运行服务的账号读得到，不用重启），刷新后列出两项（名称、描述、说明文案、开关均开）；CS-02 先以一条与技能无关的首条消息（例如「你好」）建出会话 X（会话只在欢迎态首次发送时创建；此时不问技能），再关闭 `weekly-report` 的默认启用，之后新建会话 Y 并让模型列出它可用的技能（omp 的系统提示词列出技能描述，组 1 官方用例已证可观察；斜杠候选按会话能力过滤归组 10，本行不依赖它），回答里没有 `weekly-report`；CS-03 回到 X，此时才第一次让模型列出可用技能（避免照对话历史复述），回答里仍有 `weekly-report`；新行结论 `待签`；`IMPLEMENTATION_PLAN.md` F-CTR-SKL 行指向本 change；`web/test/functional-checklist.test.ts` 通过。
+- [x] 8.4 验收清单（`docs/acceptance/functional-checklist.md`）：CM-04 的 tab 条措辞改为成员「专家」「技能」两项、管理员「专家」「技能」「模型」三项（其余不变）；新增「中心·技能（CS）」节：CS-01 先看空态再准备平台技能——默认部署没有平台技能，打开「技能」tab 显示 `尚未安装平台技能`；再按 CH-49 的写法在服务器 `OMP_STATE_DIR` 状态目录下 home、名为 omp 的点开头目录、agent 里建 skills 目录，放两个带 name 与 description 的 SKILL.md（如 `deploy`、`weekly-report`，保证运行服务的账号读得到，不用重启），刷新后列出两项（名称、描述、说明文案、开关均开）；CS-02 先以一条与技能无关的首条消息（例如「你好」）建出会话 X（会话只在欢迎态首次发送时创建；此时不问技能），再关闭 `weekly-report` 的默认启用，之后新建会话 Y 并让模型列出它可用的技能（omp 的系统提示词列出技能描述，组 1 官方用例已证可观察；斜杠候选按会话能力过滤归组 10，本行不依赖它），回答里没有 `weekly-report`；CS-03 回到 X，此时才第一次让模型列出可用技能（避免照对话历史复述），回答里仍有 `weekly-report`；新行结论 `待签`；`IMPLEMENTATION_PLAN.md` F-CTR-SKL 行指向本 change；`web/test/functional-checklist.test.ts` 通过。
 Suggested fixture level: compact - 账号偏好开关页，无凭证、无权限面差异。
 Minimal mergeable slice: atomic - 列表、开关与写方法是同一 tab 的一条用例路径；tab 项、routeManifest 描述与普通用户 tab 条断言同 PR 改。
 

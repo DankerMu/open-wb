@@ -511,7 +511,7 @@ export async function expectAuthenticatedRoute(
     ).toBeVisible();
   }
   if (path === "/center") {
-    // 成员账号：落到「专家」tab（tab 条只有它），内置专家卡可见，不再是空态。
+    // 成员账号：落到「专家」tab（tab 条为「专家」「技能」），内置专家卡可见，不再是空态。
     await expect.poll(() => new URL(page.url()).search).toBe("?tab=experts");
     const main = page.locator("main");
     await expect(main.getByRole("tab", { name: "专家", exact: true })).toHaveAttribute(
