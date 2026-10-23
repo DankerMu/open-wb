@@ -5,6 +5,7 @@ import type { Socket } from "node:net";
 import type { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import type { FastifyInstance, FastifyReply, FastifyRequest, onRequestHookHandler } from "fastify";
+import { upstreamEndpoint } from "../core/base-url.js";
 import { readErrorBody } from "../core/error-body.js";
 import { HttpError } from "../core/errors/index.js";
 import {
@@ -522,7 +523,7 @@ function openUpstreamRequest(
   contentLength: number,
   onResponse: (response: IncomingMessage) => void,
 ): { req: ClientRequest; tls: boolean } {
-  const endpoint = joinChatCompletions(upstream.baseUrl);
+  const endpoint = upstreamEndpoint(upstream.baseUrl, "chat/completions");
   const tls = endpoint.protocol === "https:";
   const headers: OutgoingHttpHeaders = {
     authorization: `Bearer ${upstream.apiKey}`,
@@ -566,9 +567,4 @@ function clearAfterConnection(
   };
   socket.once("secureConnect", onSecureConnect);
   return () => socket.off("secureConnect", onSecureConnect);
-}
-
-function joinChatCompletions(baseUrl: string): URL {
-  const root = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  return new URL("chat/completions", root);
 }

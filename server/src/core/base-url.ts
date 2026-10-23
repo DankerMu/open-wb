@@ -1,6 +1,6 @@
 /**
- * core/base-url — the one implementation of an upstream base URL's view form and sanitiser parts
- * (model-registry「上游地址的视图形式与拼接」, s1d-registry-followups D1–D3). Pure, no imports: `models/`
+ * core/base-url — the one implementation of an upstream base URL's view form, sanitiser parts and
+ * sub-path join (model-registry「上游地址的视图形式与拼接」, s1d-registry-followups D1–D4). Pure, no imports: `models/`
  * and `model-proxy/` both reach it through core. An env seed row is stored as given (it never meets
  * the REST address rule), so a stored address may carry userinfo in any form WHATWG `new URL` accepts
  * (`http:/u:p@h`, `https:\u:p@h`, leading spaces), not only `scheme://u:p@h`, and some it rejects
@@ -73,4 +73,21 @@ export function userinfoParts(baseUrl: string): string[] {
     }
   }
   return [...new Set(parts.filter((part) => part !== ""))];
+}
+
+/**
+ * The upstream endpoint for `sub` (D4): the parsed path with its trailing slashes dropped, then
+ * `/<sub>`; the fragment goes, the query and userinfo stay. The probe joins `models`, the proxy
+ * `chat/completions`, so both hit the same prefix. Throws `TypeError` on what WHATWG cannot parse.
+ * The trim scans back by hand: `/\/+$/u` retries every start of a slash run that stops short of the
+ * end (`/` × n then `x`), O(n²).
+ */
+export function upstreamEndpoint(baseUrl: string, sub: string): URL {
+  const url = new URL(baseUrl);
+  const path = url.pathname;
+  let end = path.length;
+  while (end > 0 && path[end - 1] === "/") end -= 1;
+  url.pathname = `${path.slice(0, end)}/${sub}`;
+  url.hash = "";
+  return url;
 }
