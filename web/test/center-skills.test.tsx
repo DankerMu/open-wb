@@ -4,9 +4,19 @@
 //（`ghost`）不丢；在途禁用全部开关；成功以应答为准；失败回滚并提示。假 `ApiClient` 经 `SkillsPanel({client})`
 // 注入，其余方法全部换成会抛错的 spy。
 
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SkillsPanel } from "../src/features/center/skills/list.js";
+import { useSkills } from "../src/features/center/skills/use-skills.js";
 import { type ApiClient, ApiError, createApiClient, type SkillList } from "../src/lib/api.js";
 import "./radix-platform.js";
 
@@ -234,6 +244,42 @@ describe("在途", () => {
       ["默认启用 weekly-report", true, false],
     ]);
     expect(fake.putSkillDefaults).toHaveBeenCalledTimes(1);
+  });
+
+  // 上例的第二次点击落在已禁用的开关上，React 不派发，`toggle` 的在途拦截根本没被走到；这里绕开 DOM，
+  // 用同一个 `result.current` 同步连调两次——第二次与第一次共享闭包（看到的仍是 `pending: false`），
+  // 只能靠 `inFlight` 拦下。
+  it("同一帧内连调两次 toggle（同一闭包）只发一次请求，应答后以应答为准", async () => {
+    const fake = fakeSkills(GHOST_ONLY);
+    const pending = deferred<SkillList>();
+    fake.putSkillDefaults.mockReturnValueOnce(pending.promise);
+    const { result } = renderHook(() => useSkills(fake.client));
+    await waitFor(() => expect(result.current.state.status).toBe("ready"));
+
+    const { toggle } = result.current;
+    let first!: Promise<void>;
+    let second!: Promise<void>;
+    act(() => {
+      first = toggle("deploy", false);
+      second = toggle("deploy", false);
+    });
+    expect(fake.putSkillDefaults).toHaveBeenCalledTimes(1);
+    expect(fake.putSkillDefaults).toHaveBeenCalledWith(["deploy", "ghost"]);
+    expect(result.current.state).toMatchObject({ status: "ready", pending: true });
+
+    const answer = viewOf([DEPLOY, WEEKLY], ["deploy", "ghost"]);
+    await act(async () => {
+      pending.resolve(answer);
+      await Promise.all([first, second]);
+    });
+    expect(result.current.state).toEqual({
+      status: "ready",
+      list: answer,
+      pending: false,
+      error: null,
+    });
+    expect(fake.putSkillDefaults).toHaveBeenCalledTimes(1);
+    expect(fake.otherCalls()).toEqual([]);
   });
 });
 
