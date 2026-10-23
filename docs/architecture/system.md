@@ -765,7 +765,7 @@ modelRoles:
 
 ### 9.10 专家与技能（S1d，change `s1d-experts-skills`）
 
-本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计。
+本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计；组 4：技能端点。
 
 **会话配置文件**（`server/src/sessions/omp/session-config.ts`，规格 omp-runtime「子进程 spawn 契约」「会话配置文件」）：每一次 spawn（会话进程与 fork / branch 的临时进程同样）在 `spawnImpl` 之前写出本进程专属的两个文件，`<key>` 是每次新生成的随机十六进制串，与会话 id 无关、不复用：
 
@@ -794,3 +794,9 @@ modelRoles:
 - 专家 id 走查询参数，与 `/api/models` 一致。次序：未登录 401 → `PUT` / `DELETE` 的 `id` 缺失、为空或出现多次 400 → `id` 是四位内置专家之一 403 `forbidden`（只认这四个 id；带 `builtin:` 前缀的其它 id 按不存在处理）→ 他人的专家与不存在的 id 同为 404 `not_found` → body 解析与键集 / 字段 400。前四步都在 body 解析之前（路由级 `preParsing`，与会话元数据修改的属主预检同一做法；`/api/models` 的 `id` 在 handler 里判，不同），所以无论 body 合法、残缺还是超限，这几类请求的结果不变。`POST /api/experts` 与 `PUT /api/experts` 属 content-parser 归属集，body limit 64 KiB（8000 码点的 CJK 提示词约 24 KiB），坏 JSON / 空 body / 媒体类型 / 超限均 exact 400；`DELETE /api/experts` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。全部应答 `Cache-Control: no-store`。
 
 **审计**：每次写入与表写入同一事务记一条（审计写入失败则整次写入回滚、应答 generic 500），kind 为 `expert.create` / `expert.update` / `expert.delete`，actor 为写入者，`workspaceId` 为 null，title 为 `新建专家 <name>` / `修改专家 <name>` / `删除专家 <name>`；detail 恰为 `{expertId, name}`。提示词不进审计行的任何一列。内置专家的 403 与 400 / 404 都不审计。
+
+**技能端点**（`server/src/skills/rest.ts`，createApp 的第十个模块 `skills`，注册与启动记录的 `modules` 都紧随 `experts`；规格 skill-switches「技能清单与账号缺省」）：
+
+- `GET /api/skills` → 200 `{skills: [{name, description, enabledByDefault}], disabledSkills: string[]}`。`skills` 是托管 `<OMP_STATE_DIR>/home/.omp/agent/skills` 的平台技能，与 `GET /api/commands` 的平台技能同一读取函数与次序，但名称不合技能名规则（含 `,`、超过 128 UTF-8 字节、含 U+0000–U+001F 或 U+007F；规则只在 `skills/store.ts` 实现一处）的不列出——它们无法被停用，照常由 omp 加载；`enabledByDefault` 为该名称不在本账号缺省停用列表里。`disabledSkills` 是账号缺省停用列表原样（字典序，没有偏好行时 `[]`），含不在 `skills` 里的名称（未安装的、只作为项目技能存在的），客户端据它整表 `PUT` 而不丢列表外的名称。
+- `PUT /api/skills/defaults`，body 键集严格为 `{disabledSkills: string[]}`：至多 128 项（按去重前的原始项数），名称规则同上，去重后字典序存进 `account_skill_prefs`（每账号一行），不要求名称当前已安装，整体替换 → 200，body 与随后的 `GET /api/skills` 相同。违反即 400，不回显取值。属 content-parser 归属集，body limit 64 KiB（128 个名称按 JSON 转义最坏约 33 KB），坏 JSON / 空 body / 媒体类型 / 超限均 exact 400，无偏好写入。不审计。
+- 账号缺省只决定之后新建会话的停用初值，不改动已有会话（会话创建读它由组 5 接入）；已有会话的停用集合经会话能力端点修改。两个端点受 cookie guard，全部应答 `Cache-Control: no-store`。

@@ -53,6 +53,7 @@ const NINE_MODULES = [
   "accounts",
   "models",
   "experts",
+  "skills",
 ];
 /** The zero-config seed row (model-registry「环境种子」second WHEN), column by column. */
 const ZERO_CONFIG_ROW = {
@@ -154,7 +155,7 @@ async function composerModels(port: number): Promise<unknown> {
 }
 
 describe("model-registry「环境种子」on the compiled entry", () => {
-  it("zero config: one seed row, the pre-registry models.yml and overlay bytes, nine modules, no ignored line", async () => {
+  it("zero config: one seed row, the pre-registry models.yml and overlay bytes, ten modules, no ignored line", async () => {
     const root = scratchRoot();
     const { server, port, record } = await started(root, {});
     try {
