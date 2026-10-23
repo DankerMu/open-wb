@@ -17,6 +17,7 @@ import {
   useExpertHandOff,
   useExpertList,
   useSessionCapabilities,
+  useSkillDefaults,
 } from "./use-session-capabilities.js";
 import { useSessionListView } from "./use-session-list-view.js";
 import { useWorkspaceSidebar } from "./use-workspace-sidebar.js";
@@ -57,12 +58,20 @@ export function ChatPage() {
   const experts = useExpertList(client, requestedSessionId);
   const capabilities = useSessionCapabilities(client, selected?.id);
   useExpertHandOff(session.welcome.selectExpert);
+  // 欢迎态 `能力` 弹层的账号缺省停用列表：每个 client 在第一次打开弹层时取一次。
+  const skillDefaults = useSkillDefaults(client);
+  // 「+」菜单与斜杠候选不列的技能（chat-web「停用技能过滤」）：会话中为已取得的会话能力（未取得或失败时不过滤），
+  // 欢迎态为弹层的页面选择 ?? 已取得的账号缺省 ?? 不过滤。
+  const disabledSkills = requestedSessionId
+    ? (capabilities.capabilities?.disabledSkills ?? null)
+    : (session.welcome.disabledSkills ?? skillDefaults.disabledSkills);
   const slash = useSlashMenu(
     client,
     session.slashWorkspaceId,
     draft,
     !session.composerDisabled,
     session.setDraft,
+    disabledSkills,
   );
   const files = useAttachmentArea({
     attachments: session.attachments,
@@ -142,6 +151,7 @@ export function ChatPage() {
           search={search}
           sendDisabled={session.sendDisabled}
           sending={session.sending}
+          skillDefaults={skillDefaults}
           slash={slash}
           space={session.space}
           streamError={session.streamError}

@@ -1,7 +1,7 @@
 // 能力行（chat-web「输入框与能力栏」、session-sidebar「composer footer 工作空间选择」）：已选会话的工作空间位
 // 是只读标签的四种文案（临时空间的判定在最前，不看工作空间列表），回到欢迎态后是可操作的选择器；左组次序
-// 是「+」、（有专家时的）专家标签、工作空间、权限档位，右组是模型、推理强度、`发送`（三个控件在输入框选项取得
-// 后才有）；没有专家时没有专家标签，任何时候都没有麦克风控件。临时空间会话以其 workspaceId 取命令目录与项目配置。窄屏的换行与截断只断言类名与结构
+// 是「+」、（有专家时的）专家标签、工作空间、权限档位、`能力`（恒在），右组是模型、推理强度、`发送`（权限、
+// 模型、强度三个控件在输入框选项取得后才有）；没有专家时没有专家标签，任何时候都没有麦克风控件。临时空间会话以其 workspaceId 取命令目录与项目配置。窄屏的换行与截断只断言类名与结构
 // （jsdom 不排版）。选项读取失败后没有这三个控件，重取成功后出现。
 // seam：整页挂载 + 假 API。期望文案取自规格条文。
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -53,6 +53,7 @@ const TEMP = "7".repeat(32);
 const CONFIG = "/api/project-config";
 const OPTIONS = "/api/composer/options";
 const PLUS = "添加文件或命令";
+const SKILLS = "能力";
 const TIER = "权限：只问命令";
 /** 缺省选项的那个模型与它的缺省强度：欢迎态的右组，以及用它建的会话。 */
 const MODEL = "模型：deepseek-v4.1-flash";
@@ -112,7 +113,7 @@ function toolbarGroups() {
 }
 
 /**
- * 左组恰为「+」按钮、工作空间位与可访问名为 `tier` 的权限按钮（`tier` 为 null 即没有权限控件，左组恰两项），
+ * 左组恰为「+」按钮、工作空间位、可访问名为 `tier` 的权限按钮（`tier` 为 null 即没有权限控件）与 `能力` 按钮，
  * 右组恰为可访问名依次为 `picker` 的模型与强度按钮（空数组即没有这两个控件）再加 `发送`；工具行里没有错误提示。
  */
 function expectOrder(tier: string | null, picker: readonly string[]) {
@@ -121,6 +122,7 @@ function expectOrder(tier: string | null, picker: readonly string[]) {
     within(toolbar).getByRole("button", { name: PLUS }),
     workspaceSlot(),
     ...(tier === null ? [] : [within(toolbar).getByRole("button", { name: tier })]),
+    within(toolbar).getByRole("button", { name: SKILLS }),
   ]);
   expect(within(toolbar).queryAllByRole("button", { name: /^权限：/ })).toHaveLength(
     tier === null ? 0 : 1,
@@ -266,7 +268,7 @@ describe("能力栏：临时空间会话", () => {
 });
 
 describe("能力栏：欢迎态", () => {
-  it("「+」按钮在左组最前、工作空间选择器其后、权限按钮第三，模型、强度与发送键在右组；没有选过专家时没有专家标签，没有麦克风控件，未选入文件时没有附件标签区", async () => {
+  it("「+」按钮在左组最前、工作空间选择器其后、权限按钮第三、能力 第四，模型、强度与发送键在右组；没有选过专家时没有专家标签，没有麦克风控件，未选入文件时没有附件标签区", async () => {
     mountSessions("/", []);
     await screen.findByRole("heading", { level: 1, name: HERO });
     const { left, right, toolbar } = toolbarGroups();
@@ -275,14 +277,16 @@ describe("能力栏：欢迎态", () => {
     const buttons = within(toolbar).getAllByRole("button");
     expect(
       buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent),
-    ).toEqual([PLUS, "任务启动于 未选择", TIER, MODEL, EFFORT, "发送"]);
+    ).toEqual([PLUS, "任务启动于 未选择", TIER, SKILLS, MODEL, EFFORT, "发送"]);
     expect(toolbar.firstElementChild).toBe(left);
     expect(left.children[0]).toBe(buttons[0]);
     expect(left.children[1]).toBe(workspaceSlot());
     expect(left.children[2]).toBe(buttons[2]);
-    expect(Array.from(right.children)).toEqual(buttons.slice(3));
-    expect(right.contains(buttons[5] as HTMLElement)).toBe(true);
-    expect(left.contains(buttons[5] as HTMLElement)).toBe(false);
+    expect(left.children[3]).toBe(buttons[3]);
+    expect(left.children).toHaveLength(4);
+    expect(Array.from(right.children)).toEqual(buttons.slice(4));
+    expect(right.contains(buttons[6] as HTMLElement)).toBe(true);
+    expect(left.contains(buttons[6] as HTMLElement)).toBe(false);
     // 没有专家：没有标签（有专家时的次序见下一例）。
     for (const text of ["专家", "麦克风", "完全访问", "默认权限"]) {
       expect(toolbar.textContent).not.toContain(text);
@@ -293,7 +297,7 @@ describe("能力栏：欢迎态", () => {
 });
 
 describe("能力栏：有专家", () => {
-  it("已选会话的能力带专家：左组依次为「+」、专家 · 测试工程师（内含 移除专家）、只读工作空间、权限；输入卡的子元素不变；恰一次 listExperts 与一次 GET …/capabilities", async () => {
+  it("已选会话的能力带专家：左组依次为「+」、专家 · 测试工程师（内含 移除专家）、只读工作空间、权限、能力；输入卡的子元素不变；恰一次 listExperts 与一次 GET …/capabilities", async () => {
     const { fetchMock } = mountSessions(`/?session=${A}`, sessions(), {
       "/api/workspaces": () => workspaceList(PROJECT_A),
       "/api/experts": () =>
@@ -328,6 +332,7 @@ describe("能力栏：有专家", () => {
       expert,
       workspaceSlot(),
       tier,
+      within(toolbar).getByRole("button", { name: SKILLS }),
     ]);
     expect(within(expert).getByRole("button", { name: "移除专家" })).toBeTruthy();
     expect(within(toolbar).queryAllByRole("alert")).toEqual([]);
@@ -341,7 +346,7 @@ describe("能力栏：有专家", () => {
 });
 
 describe("能力行的次序", () => {
-  it("已选绑定会话：`添加文件或命令`、只读 任务启动于 项目A、权限：只问命令，右组是模型、推理强度、发送；回欢迎态次序相同且第二项是可点的选择器；全程恰一次选项请求", async () => {
+  it("已选绑定会话：`添加文件或命令`、只读 任务启动于 项目A、权限：只问命令、能力，右组是模型、推理强度、发送；回欢迎态次序相同且第二项是可点的选择器；全程恰一次选项请求", async () => {
     const [first, ...others] = sessions();
     const picked = {
       ...first,
@@ -365,7 +370,7 @@ describe("能力行的次序", () => {
     expect(optionsRequests(mounted.fetchMock)).toBe(1);
   });
 
-  it("选项读取失败：能力行同样只有 `添加文件或命令`、工作空间项与发送，没有占位元素与错误提示", async () => {
+  it("选项读取失败：能力行同样只有 `添加文件或命令`、工作空间项、能力 与发送，没有占位元素与错误提示", async () => {
     const mounted = mountSessions("/", sessions(), {
       "/api/workspaces": () => workspaceList(PROJECT_A),
       [OPTIONS]: () => envelope(503, "服务暂不可用"),

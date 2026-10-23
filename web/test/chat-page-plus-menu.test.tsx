@@ -114,7 +114,7 @@ function Bar({ enabled }: { enabled: boolean }) {
   const [client] = useState(() => createApiClient());
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const { plus } = useSlashMenu(client, null, draft, enabled, setDraft);
+  const { plus, skills } = useSlashMenu(client, null, draft, enabled, setDraft);
   seam = { draft, plus, setDraft };
   return (
     <CapabilityBar
@@ -130,6 +130,13 @@ function Bar({ enabled }: { enabled: boolean }) {
         selected: null,
       }}
       session={{ id: null, workspace: undefined, temporary: false }}
+      skills={{
+        ...skills,
+        disabled: [],
+        notice: null,
+        onToggle: () => undefined,
+        toggleable: false,
+      }}
     />
   );
 }

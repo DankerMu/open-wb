@@ -2,12 +2,20 @@
    workspace id (issue 814), fetched lazily and kept for the client, the panel above the textarea
    and the keys it takes from the composer. The focus never leaves the textarea: the panel and its
    options are no tab stops and a press on the panel is prevented from taking the focus. The 「+」
-   menu of the capability bar lists the same catalogues: its open state is kept here so that it
-   asks for them by the very rule of the panel. */
+   menu and the 能力 popover of the capability bar list the same catalogues: their open states are
+   kept here so that they ask for them by the very rule of the panel. */
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { ApiClient } from "../../lib/api.js";
 import type { Command } from "../../lib/api-commands.js";
-import { filter, initialState, isOpen, pickText, reduce } from "./slash-menu-state.js";
+import {
+  filter,
+  initialState,
+  isOpen,
+  pickText,
+  reduce,
+  skillEntries,
+  withoutDisabled,
+} from "./slash-menu-state.js";
 
 type ComposerKeyEvent = KeyboardEvent<HTMLTextAreaElement>;
 type KeyAction = "down" | "up" | "pick" | "dismiss";
@@ -163,6 +171,13 @@ function usePlusState(enabled: boolean, draft: string) {
  * id unknown) and the same whether the menu is open or not, so a closing menu keeps its items;
  * `onPick` closes the menu and leaves the draft the panel's pick leaves, and does nothing while
  * the menu is `disabled` or the draft is not blank.
+ *
+ * `skills` is the 能力 popover of the capability bar (s1d-experts-skills D9). While it is open the
+ * catalogue is wanted as for the panel, whether the composer is `enabled` or not (the popover is
+ * usable during a turn); `commands` are the `skill:` entries of the current catalogue, disabled ones
+ * included, undefined while it is not held. `disabledSkills` names the skills the 「+」 menu and the
+ * panel leave out (skill-switches「停用技能对 omp 生效」); null leaves out none. A change of it is
+ * applied on the held catalogue and asks for nothing.
  */
 export function useSlashMenu(
   client: ApiClient,
@@ -170,6 +185,7 @@ export function useSlashMenu(
   draft: string,
   enabled: boolean,
   setDraft: (text: string) => void,
+  disabledSkills: readonly string[] | null = null,
 ): {
   menu: ReactNode;
   interceptKeyDown(event: ComposerKeyEvent): boolean;
@@ -180,6 +196,11 @@ export function useSlashMenu(
     open: boolean;
     onOpenChange(open: boolean): void;
     onPick(command: Command): void;
+  };
+  skills: {
+    commands: readonly Command[] | undefined;
+    open: boolean;
+    onOpenChange(open: boolean): void;
   };
 } {
   const id = useId();
@@ -199,11 +220,13 @@ export function useSlashMenu(
     byWorkspace: Map<WorkspaceKey, AbortController>;
   } | null>(null);
   const plusState = usePlusState(enabled, draft);
+  const [skillsOpen, setSkillsOpen] = useState(false);
   /**
-   * The workspace id whose catalogue the panel or the open 「+」 menu wants; undefined while
-   * neither is wanted.
+   * The workspace id whose catalogue the panel, the open 「+」 menu or the open 能力 popover wants;
+   * undefined while none is wanted.
    */
-  const wanted = enabled && (isOpen(draft) || plusState.open) ? workspaceId : undefined;
+  const wanted =
+    (enabled && (isOpen(draft) || plusState.open)) || skillsOpen ? workspaceId : undefined;
 
   useEffect(() => {
     if (wanted === undefined) return;
@@ -246,15 +269,15 @@ export function useSlashMenu(
   if (state !== stored) setState(state);
 
   // Held for the current workspace id whether or not anything wants it: the closing 「+」 menu
-  // still lists it while it fades out. The panel alone needs it to be wanted.
-  const commands =
+  // still lists it while it fades out. The panel alone needs the composer `enabled` (`filter` also
+  // needs the draft to be a slash).
+  const held =
     workspaceId !== undefined && catalogues?.client === client
       ? catalogues.byWorkspace.get(workspaceId)
       : undefined;
+  const commands = held && withoutDisabled(held, disabledSkills);
   const matches =
-    wanted !== undefined && commands !== undefined && !state.dismissed
-      ? filter(commands, draft)
-      : [];
+    enabled && commands !== undefined && !state.dismissed ? filter(commands, draft) : [];
   // The index outlives a catalogue that got shorter under the same draft and workspace id (another
   // client): 0 then.
   const active = state.index < matches.length ? state.index : 0;
@@ -269,7 +292,12 @@ export function useSlashMenu(
     pick(command);
   };
   const plus = { ...plusState, commands, onPick };
-  if (current === undefined) return { menu: null, interceptKeyDown: () => false, plus };
+  const skills = {
+    commands: held && skillEntries(held),
+    open: skillsOpen,
+    onOpenChange: setSkillsOpen,
+  };
+  if (current === undefined) return { menu: null, interceptKeyDown: () => false, plus, skills };
 
   const interceptKeyDown = (event: ComposerKeyEvent) => {
     const action = keyAction(event);
@@ -294,5 +322,6 @@ export function useSlashMenu(
     menu: <SlashMenu active={active} id={id} matches={matches} onPick={pick} />,
     interceptKeyDown,
     plus,
+    skills,
   };
 }

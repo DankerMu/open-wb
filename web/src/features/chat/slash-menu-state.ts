@@ -1,6 +1,7 @@
 /* The pure state of the composer's slash candidates (issue 556): when the panel is wanted, which
    commands it lists, the text a pick leaves in the draft, and the highlight and dismissal of one
-   draft, the highlight also of one catalogue. No React: `slash-menu.tsx` owns the catalogues and
+   draft, the highlight also of one catalogue; the skills of a catalogue and the catalogue without
+   the disabled ones (s1d-experts-skills D9). No React: `slash-menu.tsx` owns the catalogues and
    the keys. */
 import type { Command } from "../../lib/api-commands.js";
 
@@ -35,6 +36,31 @@ export function filter(commands: readonly Command[], draft: string): Command[] {
   if (!isOpen(draft)) return [];
   const prefix = draft.slice(1);
   return commands.filter(({ name, label }) => name.startsWith(prefix) || label.startsWith(prefix));
+}
+
+/** The prefix of a skill's command name: `skill:<name>`, `<name>` being what a session disables. */
+const SKILL_PREFIX = "skill:";
+
+/** The skill a command runs (`deploy` for `skill:deploy`), null for every other command. */
+export function skillName({ name }: Command): string | null {
+  return name.startsWith(SKILL_PREFIX) ? name.slice(SKILL_PREFIX.length) : null;
+}
+
+/** The skills of a catalogue, in catalogue order: what the capability popover lists. */
+export function skillEntries(commands: readonly Command[]): Command[] {
+  return commands.filter((command) => skillName(command) !== null);
+}
+
+/**
+ * The catalogue without the skills named in `disabled` (skill-switches「停用技能对 omp 生效」): what the
+ * 「+」 menu and the panel list. `null` filters nothing (the set is not known).
+ */
+export function withoutDisabled(
+  commands: readonly Command[],
+  disabled: readonly string[] | null,
+): readonly Command[] {
+  if (disabled === null || disabled.length === 0) return commands;
+  return commands.filter((command) => !disabled.includes(skillName(command) ?? ""));
 }
 
 /** The draft a pick leaves: the trailing space ends the command, so the panel closes. */
