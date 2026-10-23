@@ -11,7 +11,7 @@
 | omp 前提（第二个 `--config` 叠加、`--append-system-prompt` 读文件、`skill:<名>` 停用、`get_state.systemPrompt` 可观察） | 是 | 组 1 官方用例 |
 | 两份真相（会话能力 vs 存活进程） | 是 | 组 6 指纹判据 |
 | 越权（他人专家、内置专家写入、他人会话能力） | 是 | 组 3、组 5 的 401 / 400 / 403 / 404 矩阵 |
-| 迁移与 DB 约束 | 是 | 组 2 |
+| 迁移与 DB 约束 | 是 | 组 2：`experts-store.test.ts` 迁移段 + 2.3 所列迁移目录 / 表 / 列快照常量 |
 | 文件泄漏与可读性（会话配置残留、提示词进日志 / 审计、omp uid 读不到会话配置文件） | 是 | 组 1 退出删除、启动清扫与 CI `uid-isolation`、组 3 审计 detail |
 | 用户可见回归（`/center` 普通用户、能力行次序、斜杠候选、请求计数） | 是 | 组 7、组 9、组 10 |
 
@@ -34,10 +34,10 @@ Minimal mergeable slice: atomic - 写出器、argv 追加与退出删除是同�
 
 ## 2. 迁移 047 与专家 / 技能 store（experts「迁移 047」「内置专家」「专家校验与可见性」的 store 部分；skill-switches 的账号缺省与会话两列的 store 部分）
 
-- [ ] 2.1 核对 Context：`server/src/core/db/migrations/` 最后一个迁移（`s1d-model-registry` 合入后为 046）、`server/test/core-db-helpers.ts` 的迁移常量、`chat_sessions` 列（040）、`account_composer_prefs`（041）的写法。
-- [ ] 2.2 测试先行：新 `server/test/experts-store.test.ts`（`:memory:` + 真实迁移）：迁移 047 的表、CHECK、级联删除、两列缺省（既有会话读出 NULL / `[]`）；内置四位的 id、次序、`prompt` 码点 300..1500、`skills` 为 `[]`；`create` / `update` / `remove` 与「字段边界」场景的每一类 400 及 8000 码点 `prompt` 的正例；第 51 个 400；可见性（他人专家与不存在同为 `undefined`）；`remove` 同事务清空会话引用；`tags` 去重保序、`skills` 去重排序；`account_skill_prefs` 读写与缺省；会话两列的读写函数（`disabledSkills` 去重排序）。`MIGRATION_047` 进 `TRACKED_MIGRATION_FILENAMES`。
-- [ ] 2.3 `047_experts_skills.sql` 按 design D2；`core-db-helpers.ts` 加常量。
-- [ ] 2.4 新 `server/src/experts/builtin.ts`（四位内置专家，提示词按 design D3 真实撰写）、`server/src/experts/store.ts`（校验、可见性、CRUD、清空会话引用）、`server/src/skills/store.ts`（账号缺省读写、技能名校验）；会话两列的读写放进既有 sessions store（新文件 `store-capabilities.ts`）。
+- [ ] 2.1 核对 Context：`server/src/core/db/migrations/` 最后一个迁移（`s1d-model-registry` 合入后为 046）、`server/test/core-db-helpers.ts` 的迁移常量、`chat_sessions` 列（040）、`account_composer_prefs`（041）的写法；枚举迁移 / 表 / 列的既有测试辅助与守卫（见 2.3 的同 PR 改动清单）。
+- [ ] 2.2 测试先行：新 `server/test/experts-store.test.ts`（`:memory:` + 真实迁移）：迁移 047 的表、CHECK、级联删除、两列缺省（既有会话读出 NULL / `[]`）；内置四位的 id、次序、`prompt` 码点 300..1500、`skills` 为 `[]`；`create` / `update` / `remove` 与「字段边界」场景的每一类 400 及 8000 码点 `prompt` 的正例；第 51 个 400；可见性（他人专家与不存在同为 `undefined`）；`remove` 同事务清空会话引用；`tags` 去重保序、`skills` 去重排序；`account_skill_prefs` 读写与缺省；会话两列的读写函数（`disabledSkills` 去重排序）；两个 TEXT 主键 `PRAGMA table_info` 的 notnull=1；码点计数用星形字符区分 UTF-16 长度（`name` 32 个 emoji 通过、33 个 400；`tags` / `prompt` 正例含星形字符）；技能名边界：42 个 CJK（126 字节）通过、43 个（129 字节）400、空串 400、含 `\t` 与 `\u0000` 各 400、含 `,` 400；400 的 message 不含取值。全部经 `openDb(":memory:")`（`PRAGMA foreign_keys = ON`，级联依赖它）。四个新模块导出的每个符号都被本测试引用（knip 以测试为读者；不为组 3 预先导出）。`MIGRATION_047` 进 `TRACKED_MIGRATION_FILENAMES`。
+- [ ] 2.3 `047_experts_skills.sql` 按 design D2（两个 TEXT 主键声明 `NOT NULL`）；同 PR 改枚举迁移 / 表 / 列的既有测试（先例 046 的提交 `2864ae2a`）：`server/test/core-db-helpers.ts`（`MIGRATION_047` 常量、`TRACKED_MIGRATION_FILENAMES`、`COMPLETE_CATALOG.receipts` 加 `[21, MIGRATION_047]`、`sequenceRows` 21——`migration-045.test.ts:283-285` 把两者绑定）；`server/test/core-db-session-fixture.ts`（`CHAT_TABLE_INFO.chat_sessions` 加 `["expert_id","TEXT",0,null,0]` 与 `["disabled_skills","TEXT",1,"'[]'",0]`、:114 `namesBefore035(…, 8)` 改 10、:308 `preservedState` 的 `indexSql` `NOT IN` 加 `'experts','account_skill_prefs'`）；`server/test/auth-schema.test.ts:497-509` 的表名精确列表加 `account_skill_prefs`、`experts`；`server/test/core-db-chat-step-output.test.ts:82-86` 与 `server/test/migration-034.test.ts:265-275` 的排除列表加 `MIGRATION_047`；`server/test/models-store.test.ts:138-172`「a populated database ending at 045 gains exactly the table…」按 046 当时改写 `migration-045.test.ts` 的做法改写（047 合入后全量迁移多出两表、一索引、两列与回执）。
+- [ ] 2.4 新 `server/src/experts/builtin.ts`（四位内置专家，提示词按 design D3 真实撰写）、`server/src/experts/store.ts`（校验、可见性、CRUD、清空会话引用）、`server/src/skills/store.ts`（账号缺省读写、技能名校验——唯一实现，控制字符为 U+0000–U+001F 与 U+007F，字节数用 `Buffer.byteLength`）；会话两列的读写放进既有 sessions store（新文件 `store-capabilities.ts`）。
 
 Suggested fixture level: expanded - 新迁移（persisted schema）与 `chat_sessions` 加列。
 Minimal mergeable slice: atomic - 迁移没有 store 就没有读者；三处 store 共用同一份技能名校验与同一迁移，拆开只剩无行为的表。
