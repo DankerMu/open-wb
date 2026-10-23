@@ -120,16 +120,18 @@ function modelSlot({
 
 /**
  * 能力栏的专家位：欢迎态读写页面状态里的选择（不发请求）；已选会话取其能力的 `expertId`（读取中或失败时
- * 没有标签），选择即恰一次 `PUT`。
+ * 没有标签），选择即恰一次 `PUT`。会话还没解析出来（`workspaceId` 为 undefined）时没有可写的会话，专家控件
+ * 同 `PUT` 在途一样禁用。
  */
 function expertChoice({
   capabilities,
   experts,
   requestedSessionId,
   welcome,
+  workspaceId,
 }: Pick<
   ConversationViewProps,
-  "capabilities" | "experts" | "requestedSessionId" | "welcome"
+  "capabilities" | "experts" | "requestedSessionId" | "welcome" | "workspaceId"
 >): ExpertChoice {
   const list = { experts: experts.experts, refresh: experts.refresh };
   if (!requestedSessionId) {
@@ -138,7 +140,7 @@ function expertChoice({
   return {
     ...list,
     onChoose: capabilities.chooseExpert,
-    pending: capabilities.pending,
+    pending: capabilities.pending || workspaceId === undefined,
     selected: capabilities.capabilities?.expertId ?? null,
   };
 }
@@ -363,7 +365,13 @@ export function ConversationView({
                   workspacesError: welcome.workspacesError,
                 }}
                 disabled={composerDisabled}
-                expert={expertChoice({ capabilities, experts, requestedSessionId, welcome })}
+                expert={expertChoice({
+                  capabilities,
+                  experts,
+                  requestedSessionId,
+                  welcome,
+                  workspaceId,
+                })}
                 inputRef={composerRef}
                 plus={slash.plus}
                 upload={files.upload}

@@ -33,7 +33,8 @@ type PlusMenu = ReturnType<typeof useSlashMenu>["plus"];
 
 /**
  * 专家（experts「输入框的专家选择」）：`selected` 为当前专家 id，null 即没有专家、不渲染标签；`onChoose` 在欢迎态
- * 只改页面状态，会话中恰一次 `PUT …/capabilities`；`pending` 即该 `PUT` 在途（`选择专家…` 与 `移除专家` 禁用）。
+ * 只改页面状态，会话中恰一次 `PUT …/capabilities`；`pending` 即该 `PUT` 在途或会话还没解析出来（`选择专家…` 与
+ * `移除专家` 禁用）。
  * `experts` 是会话页的专家清单（标签名称与对话框列表的来源），`refresh` 在对话框每次打开时重取它。
  */
 export type ExpertChoice = {
@@ -164,7 +165,7 @@ const MENU_NOTE = "m-0 px-1.5 py-1 text-sm text-muted-foreground";
  * 回到按钮；Esc 等其它关闭方式仍按菜单默认把焦点还给按钮。草稿非空白时菜单照常打开，命令条目不可选，
  * 列表前有一行 `清空输入后可选择命令`（菜单的直接子元素）。给出 `upload` 时第一项是 `上传文件`：它不看草稿、
  * 不看目录（拉取中、失败、为空时都在），点选只打开文件选择框，不动草稿。其后是 `选择专家…`：同样不看草稿与
- * 目录，`PUT …/capabilities` 在途时禁用；点选打开专家对话框，菜单关闭时焦点留给对话框。
+ * 目录，`PUT …/capabilities` 在途或会话还没解析出来时禁用；点选打开专家对话框，菜单关闭时焦点留给对话框。
  */
 function CommandMenu({
   expertDisabled,

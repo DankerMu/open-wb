@@ -78,9 +78,10 @@ export type SessionCapabilityState = {
 /**
  * 已选会话的能力（chat-web「能力读取时机」；tasks.md 9.2 的定案）：`sessionId` 是会话页解析出的选中会话 id
  * （欢迎态与无法解析的 id 为 undefined）。每次非 undefined 的 id 变化恰一次 `GET`（A→B→A 共三次），同一会话里
- * 不重取；换 client 也重取。迟到的 `GET` 与在途的 `PUT` 靠记录比对丢弃：切换会话、回到欢迎态或开始一次 `PUT`
- * 之后，此前发出的 `GET` 的结果不再落地；切换会话或回到欢迎态之后，此前在途的 `PUT` 的成功与失败都不落地、
- * 也不再使新会话禁用。`PUT` 的失败文案在下一次 `PUT` 开始、切换会话或回到欢迎态时清除。
+ * 不重取；换 client 也重取。迟到的 `GET` 与在途的 `PUT` 靠记录比对丢弃：切换会话、回到欢迎态或一次 `PUT`
+ * 成功之后，此前发出的 `GET` 的结果不再落地（`PUT` 失败不丢它：仍在途的首次 `GET` 照常落地，标签即服务端
+ * 保留的原专家）；切换会话或回到欢迎态之后，此前在途的 `PUT` 的成功与失败都不落地、也不再使新会话禁用。
+ * `PUT` 的失败文案在下一次 `PUT` 开始、切换会话或回到欢迎态时清除。
  *
  * 同一会话的 `GET` 记录在：StrictMode 的模拟重挂再跑一次 effect，记录仍是这个会话就不再发（不写 cleanup，理由
  * 同 `useComposerOptions`）。在途守卫是 ref：同一帧里连点两次只发一次（按钮的禁用要到下一次渲染才生效）。
@@ -118,14 +119,14 @@ export function useSessionCapabilities(
       if (sessionId === undefined || writeRef.current !== null) return;
       const write: Flight = { client, sessionId };
       writeRef.current = write;
-      // 此前发出的 GET（若仍在途）比这次写入旧：换一条同会话的记录，它的结果不再落地。
-      readRef.current = { client, sessionId };
       setWriting(write);
       setError(null);
       client.putSessionCapabilities(sessionId, { expertId }).then(
         (capabilities) => {
           if (writeRef.current !== write) return;
           writeRef.current = null;
+          // 此前发出的 GET（若仍在途）比这次写入旧：换一条同会话的记录，它的结果不再落地。
+          readRef.current = { client, sessionId };
           setWriting(null);
           setHeld({ client, sessionId, capabilities });
         },

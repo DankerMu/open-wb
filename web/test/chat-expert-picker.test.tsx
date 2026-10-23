@@ -1,25 +1,47 @@
-// 输入框的专家选择（experts「输入框的专家选择」、chat-web「输入框与能力栏」的专家部分与「能力读取时机」；
-// s1d-experts-skills 任务 9.2）：「+」菜单的 `选择专家…`、专家对话框（搜索、`不使用专家`、分组、打开时重取）、
-// 能力行 `专家 · <名称>` 标签与 `移除专家`、名称来源与 `专家` 回退、每个 client 一次 `listExperts`、欢迎态的选择与
-// 首次发送、中心 `开始会话` 带入的 state、会话中的 `PUT …/capabilities`、按选中会话 id 变化一次 `GET`，以及迟到 /
-// 在途的丢弃。seam：整页挂载 + 假 API（`fetch`）；在途守卫另以 `renderHook` 同闭包连调（禁用的按钮不分派
-// React 事件，整页够不到 ref 守卫）。期望文案取自规格条文与 tasks.md 9.2 的定案。
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  renderHook,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+// 输入框的专家选择（experts「输入框的专家选择」、chat-web「输入框与能力栏」的专家部分；s1d-experts-skills
+// 任务 9.2）：「+」菜单的 `选择专家…`、专家对话框（搜索、`不使用专家`、分组、打开时重取）、能力行
+// `专家 · <名称>` 标签与 `移除专家`、名称来源与 `专家` 回退、每个 client 一次 `listExperts`、欢迎态的选择与
+// 首次发送、中心 `开始会话` 带入的 state、会话中的 `PUT …/capabilities`。读取时机与迟到 / 在途的丢弃在
+// `chat-expert-picker-timing.test.tsx`。seam：整页挂载 + 假 API（`fetch`）。期望文案取自规格条文与
+// tasks.md 9.2 的定案。
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { RouterProvider } from "react-router/dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useSessionCapabilities } from "../src/features/chat/use-session-capabilities.js";
-import type { ApiClient, ExpertView } from "../src/lib/api.js";
 import { createAppRouter } from "../src/routes/index.js";
 import { ANALYST, DESIGNER, FRONTEND, OWN, TESTER } from "./center-experts-support.js";
+import {
+  alerts,
+  COMMAND_TEXTS,
+  caps,
+  capsPath,
+  capsReads,
+  capsWrites,
+  choices,
+  choose,
+  dialogGone,
+  EXPERTS,
+  expertCalls,
+  experts,
+  FAILED,
+  groups,
+  item,
+  LOADING,
+  label,
+  labelText,
+  mountSelected,
+  mountWelcome,
+  NO_MATCH,
+  NONE,
+  openExperts,
+  openMenu,
+  optionCalls,
+  PICK,
+  pickItem,
+  plusButton,
+  removeButton,
+  search,
+  select,
+} from "./chat-expert-picker-support.js";
 import { quiesce } from "./chat-page-file-changes-support.js";
 import { clickSend, settleDeferredResponse, typeDraft } from "./chat-page-lifecycle-support.js";
 import { composer } from "./chat-page-ownership-support.js";
@@ -30,196 +52,23 @@ import {
   envelope,
   findList,
   messagesPath,
-  mountSessions,
-  view,
 } from "./chat-page-session-meta-support.js";
 import { COMMANDS, catalogue } from "./chat-page-slash-support.js";
-import { type FetchRoutes, renderChatPage } from "./chat-page-support.js";
+import { renderChatPage } from "./chat-page-support.js";
 import {
   CREATED_IDS,
   createOf,
   createRequests,
   HERO,
   leaveForWelcome,
-  openExistingSession,
-  welcomeRoutes,
 } from "./chat-page-welcome-scene-support.js";
-import { chatSnapshot } from "./chat-stream-support.js";
-import { calls, deferredResponse, type FetchMock, jsonResponse } from "./support.js";
+import { CLOSED, chatSnapshot, FakeEventSource, latestSource } from "./chat-stream-support.js";
+import { deferredResponse, type FetchMock, jsonResponse } from "./support.js";
 
-const EXPERTS = "/api/experts";
-const OPTIONS = "/api/composer/options";
-const PICK = "选择专家…";
-const NONE = "不使用专家";
-const REMOVE = "移除专家";
-const LOADING = "正在读取专家…";
-const FAILED = "专家读取失败，关闭后重新打开可重试";
-const NO_MATCH = "没有匹配的专家";
-const COMMAND_TEXTS = [
-  "整理上下文压缩较长对话的上下文，保留要点",
-  "任务清单查看或修改助手的任务清单",
-  "weekly-report写周报",
-];
-/** 服务端次序：内置在前（固定次序），自建在后。 */
-const LIST = [FRONTEND, ANALYST, DESIGNER, TESTER, OWN];
-const SA = view(A, "会话甲");
-const SB = view(B, "会话乙");
+/** 事件流终止失败时 `streamError` 的引导语（chat-web 的终止失败文案）。 */
+const STREAM_GUIDANCE = "请刷新页面后重试";
 
 afterEach(cleanupSessionMeta);
-
-function capsPath(id: string) {
-  return `/api/sessions/${id}/capabilities`;
-}
-
-function caps(expertId: string | null) {
-  return jsonResponse({ expertId, disabledSkills: [] });
-}
-
-function experts(list: readonly ExpertView[] = LIST) {
-  return jsonResponse({ experts: list });
-}
-
-/** 一项的完整文本：名称、`内置` / `自建`、描述。 */
-function item(expert: ExpertView) {
-  return `${expert.name}${expert.builtin ? "内置" : "自建"}${expert.description}`;
-}
-
-function expertCalls(fetchMock: FetchMock) {
-  return calls(fetchMock, EXPERTS).length;
-}
-
-function optionCalls(fetchMock: FetchMock) {
-  return calls(fetchMock, OPTIONS).length;
-}
-
-/** 发往 `…/capabilities` 的 GET 路径，按调用顺序（PUT 不算）。 */
-function capsReads(fetchMock: FetchMock) {
-  return fetchMock.mock.calls
-    .filter(([path, init]) => path.endsWith("/capabilities") && (init?.method ?? "GET") === "GET")
-    .map(([path]) => path);
-}
-
-/** 发往 `…/capabilities` 的 PUT：`[路径, body]`，按调用顺序。 */
-function capsWrites(fetchMock: FetchMock) {
-  return fetchMock.mock.calls
-    .filter(([path, init]) => path.endsWith("/capabilities") && init?.method === "PUT")
-    .map(([path, init]) => [path, init?.body]);
-}
-
-function plusButton() {
-  return screen.getByRole<HTMLButtonElement>("button", { hidden: true, name: "添加文件或命令" });
-}
-
-async function openMenu() {
-  fireEvent.pointerDown(plusButton(), { button: 0, ctrlKey: false, pointerType: "mouse" });
-  const menu = await screen.findByRole("menu");
-  await quiesce();
-  return menu;
-}
-
-function pickItem(menu: HTMLElement) {
-  return within(menu).getByRole("menuitem", { name: PICK });
-}
-
-/** 「+」菜单 → `选择专家…`，返回打开的专家对话框。 */
-async function openExperts() {
-  fireEvent.click(pickItem(await openMenu()));
-  return screen.findByRole("dialog", { name: "选择专家" });
-}
-
-function dialogGone() {
-  return waitFor(() => expect(screen.queryByRole("dialog", { name: "选择专家" })).toBeNull());
-}
-
-/** 对话框里的分组：`[分类, 各项完整文本]`，按文档顺序。 */
-function groups(dialog: HTMLElement) {
-  return within(dialog)
-    .queryAllByRole("group")
-    .map((group) => [
-      group.querySelector("legend")?.textContent,
-      within(group)
-        .getAllByRole("button")
-        .map((button) => button.textContent),
-    ]);
-}
-
-/** 对话框里的全部选项（含 `不使用专家`）的完整文本，按文档顺序。 */
-function choices(dialog: HTMLElement) {
-  return within(dialog)
-    .getAllByRole("button")
-    .filter((button) => button.textContent !== "关闭")
-    .map((button) => button.textContent);
-}
-
-/** 点对话框里完整文本以 `text` 开头的一项，等对话框关闭。 */
-async function choose(dialog: HTMLElement, text: string) {
-  const target = within(dialog)
-    .getAllByRole("button")
-    .find((button) => button.textContent?.startsWith(text));
-  if (!target) throw new Error(`对话框里没有 ${text}`);
-  fireEvent.click(target);
-  await dialogGone();
-}
-
-function search(dialog: HTMLElement, query: string) {
-  fireEvent.change(within(dialog).getByRole("textbox", { name: "搜索专家" }), {
-    target: { value: query },
-  });
-}
-
-/** 能力行的专家标签（没有时为 null）。 */
-function label() {
-  return document.querySelector<HTMLElement>('form [data-slot="composer-expert"]');
-}
-
-/** 标签的可见文字（没有标签时为 null）。 */
-function labelText() {
-  const found = label();
-  return found === null ? null : found.textContent;
-}
-
-function removeButton() {
-  const found = label();
-  if (!found) throw new Error("能力行没有专家标签");
-  return within(found).getByRole<HTMLButtonElement>("button", { name: REMOVE });
-}
-
-function alerts() {
-  return screen.queryAllByRole("alert").map((alert) => alert.textContent);
-}
-
-/** 欢迎态挂载（没有会话），专家清单缺省为 `LIST`；等输入框就绪与首轮读取完成。 */
-async function mountWelcome(extra: FetchRoutes = {}) {
-  const mounted = renderChatPage("/", {
-    ...welcomeRoutes({ existing: [SA] }),
-    [EXPERTS]: () => experts(),
-    [COMMANDS]: catalogue(),
-    ...extra,
-  });
-  await screen.findByRole("heading", { level: 1, name: HERO });
-  await waitFor(() => expect(composer().disabled).toBe(false));
-  await quiesce();
-  return mounted;
-}
-
-/** 选中会话 `id`（`SA`、`SB` 都在列表里），专家清单缺省为 `LIST`。 */
-async function mountSelected(id: string, extra: FetchRoutes = {}) {
-  const mounted = mountSessions(`/?session=${id}`, [SA, SB], {
-    [EXPERTS]: () => experts(),
-    [COMMANDS]: catalogue(),
-    ...extra,
-  });
-  const nav = await findList("会话甲");
-  await waitFor(() => expect(composer().disabled).toBe(false));
-  await quiesce();
-  return { ...mounted, nav };
-}
-
-async function select(nav: HTMLElement, title: string, id: string) {
-  await openExistingSession(nav, title, id);
-  await waitFor(() => expect(composer().disabled).toBe(false));
-  await quiesce();
-}
 
 describe("「+」菜单的 选择专家…", () => {
   it("欢迎态与会话中都在 上传文件 之后、命令段之前", async () => {
@@ -475,6 +324,25 @@ describe("欢迎态的专家选择", () => {
     expect(labelText()).toBe("专家 · 数据分析师");
     expect(capsWrites(fetchMock)).toEqual([]);
   });
+
+  it("首次发送后不清：回到欢迎态标签仍在，第二次首次发送的创建体仍带 expertId", async () => {
+    const mounted = await mountWelcome();
+    const { fetchMock } = mounted;
+    await choose(await openExperts(), "测试工程师");
+
+    typeDraft("你好");
+    clickSend();
+    await waitFor(() => expect(composer().placeholder).toBe("继续追问，或派一个新任务…"));
+    await leaveForWelcome(mounted);
+    await screen.findByRole("heading", { level: 1, name: HERO });
+    expect(labelText()).toBe("专家 · 测试工程师");
+
+    typeDraft("再来一个");
+    clickSend();
+    await waitFor(() => expect(createRequests(fetchMock)).toHaveLength(2));
+    const withExpert = createOf('{"scene":"office","expertId":"builtin:test-engineer"}');
+    expect(createRequests(fetchMock)).toEqual([withExpert, withExpert]);
+  });
 });
 
 describe("中心 开始会话 带入的专家", () => {
@@ -588,6 +456,27 @@ describe("会话中换专家", () => {
     expect(alerts()).toEqual([]);
   });
 
+  it("PUT 失败的 alert 在 chat column 里排在 streamError 之后", async () => {
+    await mountSelected(A, {
+      [capsPath(A)]: (_path, init) =>
+        init?.method === "PUT" ? envelope(409, "会话已归档") : caps(TESTER.id),
+    });
+    await waitFor(() => expect(labelText()).toBe("专家 · 测试工程师"));
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1));
+    act(() => latestSource().emitTransport(CLOSED));
+    await waitFor(() => expect(alerts()).toEqual([expect.stringContaining(STREAM_GUIDANCE)]));
+
+    fireEvent.click(removeButton());
+    await waitFor(() => expect(alerts()).toHaveLength(2));
+    const [stream, failed] = screen.getAllByRole("alert");
+    expect([stream?.textContent, failed?.textContent]).toEqual([
+      expect.stringContaining(STREAM_GUIDANCE),
+      "会话已归档",
+    ]);
+    expect(stream?.parentElement).toBe(failed?.parentElement);
+    expect(stream?.parentElement?.getAttribute("data-slot")).toBe("chat-column");
+  });
+
   it("PUT 401：交给既有的登录失效处理，进入登录页，不显示该失败", async () => {
     const { fetchMock } = await mountSelected(A, {
       [capsPath(A)]: (_path, init) =>
@@ -604,125 +493,5 @@ describe("会话中换专家", () => {
     expect(screen.queryByText("登录已失效")).toBeNull();
     expect(alerts()).toEqual([]);
     expect(capsWrites(fetchMock)).toEqual([[capsPath(A), '{"expertId":null}']]);
-  });
-});
-
-describe("会话能力的读取时机", () => {
-  it("选中的会话 id 每变化一次恰一次 GET（A→B→A 共三次）；同一会话发消息、回合结束不重取", async () => {
-    let snapshot = chatSnapshot({ assistantStatus: "done", content: "回答" });
-    const { fetchMock, nav } = await mountSelected(A, {
-      [messagesPath(A)]: () => jsonResponse({ ...snapshot, session: SA }),
-      [`/api/sessions/${A}/prompt`]: () => {
-        snapshot = chatSnapshot({ assistantStatus: "done", content: "第二个回答" });
-        return jsonResponse({ userMessageId: 5, assistantMessageId: 6, undo: "none" }, 202);
-      },
-    });
-    expect(capsReads(fetchMock)).toEqual([capsPath(A)]);
-
-    typeDraft("再问一句");
-    clickSend();
-    await waitFor(() => expect(calls(fetchMock, `/api/sessions/${A}/prompt`)).toHaveLength(1));
-    await quiesce();
-    expect(capsReads(fetchMock)).toEqual([capsPath(A)]);
-
-    await select(nav, "会话乙", B);
-    await select(nav, "会话甲", A);
-    expect(capsReads(fetchMock)).toEqual([capsPath(A), capsPath(B), capsPath(A)]);
-  });
-
-  it("GET 失败：没有标签、没有提示；下次选中该会话再取", async () => {
-    let asked = 0;
-    const { fetchMock, nav } = await mountSelected(A, {
-      [capsPath(A)]: () => {
-        asked += 1;
-        return asked === 1 ? envelope(500, "内部错误") : caps(TESTER.id);
-      },
-    });
-    expect(label()).toBeNull();
-    expect(alerts()).toEqual([]);
-
-    await select(nav, "会话乙", B);
-    await select(nav, "会话甲", A);
-    await waitFor(() => expect(labelText()).toBe("专家 · 测试工程师"));
-    expect(capsReads(fetchMock)).toEqual([capsPath(A), capsPath(B), capsPath(A)]);
-  });
-
-  it("A 的 GET 在切到 B 之后才到：丢弃，B 的标签不受影响", async () => {
-    const late = deferredResponse();
-    let reads = 0;
-    const { nav } = await mountSelected(B, {
-      [capsPath(A)]: () => {
-        reads += 1;
-        return reads === 1 ? late.promise : caps(DESIGNER.id);
-      },
-      [capsPath(B)]: () => caps(TESTER.id),
-    });
-    await select(nav, "会话甲", A);
-    expect(label()).toBeNull();
-
-    await select(nav, "会话乙", B);
-    await waitFor(() => expect(labelText()).toBe("专家 · 测试工程师"));
-    await settleDeferredResponse(late, caps(ANALYST.id));
-    expect(labelText()).toBe("专家 · 测试工程师");
-
-    await select(nav, "会话甲", A);
-    await waitFor(() => expect(labelText()).toBe("专家 · 品牌视觉设计师"));
-  });
-
-  it("PUT 在途：选择专家… 与 移除专家 禁用；切到 B 后 B 照常可用，A 的应答与失败都丢弃", async () => {
-    const first = deferredResponse();
-    const second = deferredResponse();
-    const puts = [first, second];
-    const { fetchMock, nav } = await mountSelected(A, {
-      [capsPath(A)]: (_path, init) =>
-        init?.method === "PUT" ? (puts.shift()?.promise ?? caps(null)) : caps(TESTER.id),
-      [capsPath(B)]: () => caps(FRONTEND.id),
-    });
-    await waitFor(() => expect(labelText()).toBe("专家 · 测试工程师"));
-
-    fireEvent.click(removeButton());
-    await quiesce();
-    expect(removeButton().disabled).toBe(true);
-    fireEvent.click(removeButton());
-    const menu = await openMenu();
-    expect(pickItem(menu).getAttribute("aria-disabled")).toBe("true");
-    fireEvent.keyDown(menu, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
-    expect(capsWrites(fetchMock)).toHaveLength(1);
-
-    await select(nav, "会话乙", B);
-    await waitFor(() => expect(labelText()).toBe("专家 · 前端架构师"));
-    expect(removeButton().disabled).toBe(false);
-    await settleDeferredResponse(first, caps(null));
-    expect(labelText()).toBe("专家 · 前端架构师");
-
-    await select(nav, "会话甲", A);
-    await waitFor(() => expect(labelText()).toBe("专家 · 测试工程师"));
-    fireEvent.click(removeButton());
-    await quiesce();
-    await select(nav, "会话乙", B);
-    await settleDeferredResponse(second, envelope(409, "会话已归档"));
-    expect(alerts()).toEqual([]);
-    expect(labelText()).toBe("专家 · 前端架构师");
-  });
-
-  it("同一闭包连调两次 chooseExpert：恰一次 PUT（hook 内的 ref 守卫）", async () => {
-    const put = vi.fn(() => new Promise<never>(() => {}));
-    const client = {
-      getSessionCapabilities: vi.fn(async () => ({ expertId: TESTER.id, disabledSkills: [] })),
-      putSessionCapabilities: put,
-    } as unknown as Pick<ApiClient, "getSessionCapabilities" | "putSessionCapabilities">;
-    const { result } = renderHook(() => useSessionCapabilities(client, A));
-    await waitFor(() => expect(result.current.capabilities?.expertId).toBe(TESTER.id));
-
-    act(() => {
-      const { chooseExpert } = result.current;
-      chooseExpert(null);
-      chooseExpert(FRONTEND.id);
-    });
-
-    expect(put).toHaveBeenCalledTimes(1);
-    expect(put).toHaveBeenCalledWith(A, { expertId: null });
-    expect(result.current.pending).toBe(true);
   });
 });
