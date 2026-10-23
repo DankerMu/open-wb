@@ -2,7 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { expect, vi } from "vitest";
 import "./radix-platform.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
-import { createFetchMock, jsonResponse } from "./support.js";
+import { centerRoutes, createFetchMock, jsonResponse } from "./support.js";
 import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const principal = { id: "user-1", account: "zhangsan", role: "member" };
@@ -52,6 +52,7 @@ export function authenticatedFilesRoutes(
   return {
     "/api/auth/me": () => jsonResponse(principal),
     "/api/workspaces": workspaceRoute(workspaces),
+    ...centerRoutes(),
     ...routes,
   };
 }

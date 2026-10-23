@@ -35,7 +35,7 @@ import {
   workspace,
   workspaceRoute,
 } from "./files-fixture.js";
-import { jsonResponse } from "./support.js";
+import { expectExpertsTabSettled, jsonResponse } from "./support.js";
 
 /** 源码预览的正文：着色后一行拆成多个元素，所以比容器的 `textContent`。 */
 async function codePreview(text: string) {
@@ -147,14 +147,15 @@ describe("深链打开", () => {
 describe("选中写入地址", () => {
   it("依次选中 readme.md 与 out/a.md：地址依次写入，没有新增历史记录，后退离开文件页", async () => {
     // 先落在一个不发文件请求的路由，再进文件页：后退有处可去。
-    const { router } = open("/center");
+    const { fetchMock, router } = open("/center");
     await screen.findByRole("heading", { level: 1, name: "中心" });
+    await expectExpertsTabSettled(fetchMock);
     await act(async () => {
       await router.navigate("/files?ws=workspace-1");
     });
     fireEvent.click(await findRow("展开 out"));
     await findRow("a.md");
-    // jsdom 的历史记录跨用例累积：比的是相对起点的变化。此刻至少有 `/center` 与文件页两项。
+    // jsdom 的历史记录跨用例累积：比的是相对起点的变化。此刻至少有 `/center?tab=experts` 与文件页两项。
     const before = window.history.length;
     expect(before).toBeGreaterThanOrEqual(2);
 
@@ -171,7 +172,7 @@ describe("选中写入地址", () => {
     await act(async () => {
       await router.navigate(-1);
     });
-    await expectLocation("/center");
+    await expectLocation("/center?tab=experts");
   });
 
   it("写 path 时其它参数与页内锚点原样保留", async () => {

@@ -1,4 +1,5 @@
 import { type Command, createCommandMethods, type ProjectConfigFile } from "./api-commands.js";
+import { createExpertMethods, type ExpertInput, type ExpertView } from "./api-experts.js";
 import {
   type ArchiveListing,
   type CreateDirResult,
@@ -24,6 +25,7 @@ import {
   type UpdateModelInput,
 } from "./api-models.js";
 import { createSessionMethods } from "./api-sessions.js";
+import { createSkillMethods, type SkillList } from "./api-skills.js";
 import { createUploadMethods, type UploadedFile } from "./api-upload.js";
 import type { ComposerOptions } from "./composer-contract.js";
 import type {
@@ -183,6 +185,11 @@ export type ApiClient = {
   deleteModel(id: string, options?: ApiRequestOptions): Promise<void>;
   setDefaultModel(id: string, options?: ApiRequestOptions): Promise<ModelView>;
   probeModel(id: string, options?: ApiRequestOptions): Promise<ModelView>;
+  listExperts(options?: ApiRequestOptions): Promise<ExpertView[]>;
+  createExpert(input: ExpertInput, options?: ApiRequestOptions): Promise<ExpertView>;
+  updateExpert(id: string, input: ExpertInput, options?: ApiRequestOptions): Promise<ExpertView>;
+  deleteExpert(id: string, options?: ApiRequestOptions): Promise<void>;
+  listSkills(options?: ApiRequestOptions): Promise<SkillList>;
 };
 
 export type ApiClientOptions = {
@@ -431,6 +438,8 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
       requestFailed,
     }),
     ...createModelMethods(onUnauthorized, transport),
+    ...createExpertMethods(onUnauthorized, transport),
+    ...createSkillMethods(onUnauthorized, transport),
     async listAudit(filter, options) {
       const search = new URLSearchParams();
       if (filter?.limit !== undefined) {
@@ -513,6 +522,12 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
   };
 }
 
+export {
+  EXPERT_CATEGORIES,
+  type ExpertCategory,
+  type ExpertInput,
+  type ExpertView,
+} from "./api-experts.js";
 export { downloadUrl, fileUrl } from "./api-files.js";
 export {
   type CreateModelInput,
@@ -520,3 +535,4 @@ export {
   type ModelView,
   type UpdateModelInput,
 } from "./api-models.js";
+export type { SkillList } from "./api-skills.js";

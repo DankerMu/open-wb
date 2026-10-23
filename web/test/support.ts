@@ -1,4 +1,4 @@
-import { waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
 import { ApiError } from "../src/lib/api.js";
 import type { ComposerOptions } from "../src/lib/composer-contract.js";
@@ -115,6 +115,38 @@ export function composerOptionsRoute(
   return { "/api/composer/options": () => jsonResponse(body) };
 }
 
+/**
+ * 路由表里中心「专家」tab 的两个缺省应答：`GET /api/experts` → `{experts: []}`，`GET /api/skills` →
+ * `{skills: [], disabledSkills: []}`。凡会落到 `/center` 的整页路由表都展开它（写法同 `composerOptionsRoute`），
+ * 用例写同一个键即覆盖。漏登记不会以 `unexpected request` 出现：`api.ts` 的 `fetchResponse` 把它吞成
+ * `requestFailed(0)`，只表现为面板错误态——所以落到 `/center` 的用例另用 `expectExpertsTabSettled` 正向断言。
+ */
+export function centerRoutes(): FetchRoutes {
+  return {
+    "/api/experts": () => jsonResponse({ experts: [] }),
+    "/api/skills": () => jsonResponse({ skills: [], disabledSkills: [] }),
+  };
+}
+
+/** 缺省应答（没有专家）下「专家」面板稳定后显示的文案。 */
+const NO_MATCHING_EXPERTS = "没有匹配的专家";
+
+/**
+ * 落到 `/center` 的正向判据：`专家` tab 选中，面板已按缺省 `{experts: []}` 稳定（显示 `没有匹配的专家`），
+ * 请求里有 `/api/experts`，且 `main` 内没有 `role="alert"`。路由表漏登记时面板显示错误、本断言变红。
+ */
+export async function expectExpertsTabSettled(fetchMock: {
+  mock: { calls: ReadonlyArray<ReadonlyArray<unknown>> };
+}) {
+  const main = await screen.findByRole("main");
+  expect(await within(main).findByText(NO_MATCHING_EXPERTS)).toBeTruthy();
+  expect(within(main).getByRole("tab", { name: "专家" }).getAttribute("aria-selected")).toBe(
+    "true",
+  );
+  expect(fetchMock.mock.calls.map(([path]) => path)).toContain("/api/experts");
+  expect(within(main).queryByRole("alert")).toBeNull();
+}
+
 export function allowWorkspaceListFetch() {
   const fetchMock = vi.mocked(fetch);
   const defaultHandler = fetchMock.getMockImplementation();
@@ -127,6 +159,12 @@ export function allowWorkspaceListFetch() {
     }
     if (path === "/api/composer/options") {
       return Promise.resolve(jsonResponse(DEFAULT_COMPOSER_OPTIONS));
+    }
+    if (path === "/api/experts") {
+      return Promise.resolve(jsonResponse({ experts: [] }));
+    }
+    if (path === "/api/skills") {
+      return Promise.resolve(jsonResponse({ skills: [], disabledSkills: [] }));
     }
     if (!defaultHandler) {
       throw new Error(`unexpected request ${String(path)}`);

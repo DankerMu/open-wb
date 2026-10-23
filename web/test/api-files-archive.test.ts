@@ -271,6 +271,12 @@ const OTHER_CLIENT_METHODS = [
   "deleteModel",
   "setDefaultModel",
   "probeModel",
+  // 专家与技能清单（experts「中心「专家」tab」）
+  "listExperts",
+  "createExpert",
+  "updateExpert",
+  "deleteExpert",
+  "listSkills",
   // 登录态与服务信息
   "getMe",
   "getInfo",

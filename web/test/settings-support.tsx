@@ -4,6 +4,7 @@ import { RouterProvider } from "react-router/dom";
 import { expect, vi } from "vitest";
 import { createAppRouter } from "../src/routes/index.js";
 import {
+  centerRoutes,
   composerOptionsRoute,
   createFetchMock,
   currentLocation,
@@ -19,6 +20,7 @@ export function authenticatedRoutes(routes: Parameters<typeof createFetchMock>[0
     "/api/workspaces": jsonResponse({ workspaces: [] }),
     "/api/sessions": jsonResponse({ sessions: [] }),
     ...composerOptionsRoute(),
+    ...centerRoutes(),
     ...routes,
   };
 }

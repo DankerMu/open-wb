@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { RouterProvider } from "react-router/dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createAppRouter, routeManifest } from "../src/routes/index.js";
+import { expectExpertsTabSettled } from "./support.js";
 
 const expectedPages = [
   {
@@ -160,6 +161,22 @@ function authenticateRouter() {
         );
       }
 
+      if (path === "/api/experts") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ experts: [] }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
+      if (path === "/api/skills") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ skills: [], disabledSkills: [] }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
       if (path === "/api/info") {
         return Promise.resolve(
           new Response(
@@ -266,6 +283,9 @@ describe("SPA shell routes", () => {
     render(<RouterProvider router={router} />);
 
     const { navigation, links } = await expectRouteShell({ title, currentLabel });
+    if (path === "/center") {
+      await expectExpertsTabSettled(vi.mocked(fetch));
+    }
 
     expect(links).toHaveLength(4);
     expect(links.map((link) => link.getAttribute("href"))).toEqual(
@@ -290,6 +310,9 @@ describe("SPA shell routes", () => {
         expect(window.location.pathname).toBe(canonicalPath);
       });
       await expectRouteShell({ title, currentLabel });
+      if (canonicalPath === "/center") {
+        await expectExpertsTabSettled(vi.mocked(fetch));
+      }
     },
   );
 });

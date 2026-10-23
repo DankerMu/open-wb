@@ -1,6 +1,7 @@
 // model-registry「中心页外壳」：`/center` 的 `?tab=` 规则、仅管理员可见的 tab 与空态；`isAdmin`；
-// routeManifest 的 `/center` 描述。真表（`CENTER_TABS`，只有仅管理员可见的「模型」）经真实路由（createAppRouter）
-// 打开；注入的表（空表、一项、两项）经只含 `/center` 一条的浏览器路由。
+// routeManifest 的 `/center` 描述。真表（`CENTER_TABS`：人人可见的「专家」在前、仅管理员可见的「模型」在后，
+// s1d-experts-skills 任务 7.2）经真实路由（createAppRouter）打开；「无可见 tab → 空态」与注入的表（空表、一项、
+// 两项）经只含 `/center` 一条的浏览器路由。
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createBrowserRouter } from "react-router";
@@ -15,10 +16,14 @@ import { expectLocation } from "./files-fixture.js";
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
+  centerRoutes,
   composerOptionsRoute,
   createFetchMock,
   currentLocation,
+  expectExpertsTabSettled,
+  type FetchMock,
   jsonResponse,
+  paths,
   setBrowserPath,
 } from "./support.js";
 import "./radix-platform.js";
@@ -66,13 +71,21 @@ function fetchFor(principal: typeof MEMBER) {
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/models": () => jsonResponse({ models: [SEED_VIEW] }),
     ...composerOptionsRoute(),
+    ...centerRoutes(),
   });
 }
 
 /** 整个应用（真实路由，缺省 `CENTER_TABS`）。 */
-function openApp(path: string, principal: typeof MEMBER) {
+function openApp(path: string, principal: typeof MEMBER): FetchMock {
   const mounted = mountAuthenticatedApp(path, fetchFor(principal));
   dispose = () => mounted.router.dispose();
+  return mounted.fetchMock;
+}
+
+/** tab 条各项的 `[label, aria-selected]`，按显示次序。 */
+function tabStates() {
+  const tabs = within(screen.getByRole("tablist")).getAllByRole("tab");
+  return tabs.map((tab) => [tab.textContent, tab.getAttribute("aria-selected")]);
 }
 
 /** 只含 `/center` 的浏览器路由：真实 `window.history`，注入 tab 表。 */
@@ -113,42 +126,57 @@ describe("注入空表", () => {
   );
 });
 
-describe("真表（CENTER_TABS：仅管理员可见的「模型」）", () => {
+describe("真表（CENTER_TABS：人人可见的「专家」、仅管理员可见的「模型」）", () => {
   it.each([
-    ["/center", "/center?tab=models"],
-    ["/center?tab=nope", "/center?tab=models"],
+    ["/center", "/center?tab=experts"],
+    ["/center?tab=nope", "/center?tab=experts"],
   ])(
-    "管理员打开 %s：以 replace 变为 %s，tab 条恰一项「模型」且选中，渲染模型表",
+    "管理员打开 %s：以 replace 变为 %s，tab 条为「专家」「模型」且「专家」选中，渲染专家面板",
     async (path, target) => {
       const before = window.history.length;
-      openApp(path, ADMIN);
+      const fetchMock = openApp(path, ADMIN);
 
-      const main = await screen.findByRole("main");
-      expect(await within(main).findByRole("table")).toBeTruthy();
+      await expectExpertsTabSettled(fetchMock);
       await expectLocation(target);
       expect(window.history.length).toBe(before);
-      const tabs = within(screen.getByRole("tablist")).getAllByRole("tab");
-      expect(tabs.map((tab) => [tab.textContent, tab.getAttribute("aria-selected")])).toEqual([
-        ["模型", "true"],
+      expect(tabStates()).toEqual([
+        ["专家", "true"],
+        ["模型", "false"],
       ]);
-      expect(within(main).getByRole("cell", { name: SEED_VIEW.name })).toBeTruthy();
+      expect(paths(fetchMock)).not.toContain("/api/models");
       expect(screen.queryByText(EMPTY)).toBeNull();
     },
   );
 
-  it("普通用户打开 /center?tab=models：空态，没有 tab 条，URL 保持不变，不请求模型列表", async () => {
+  it("管理员打开 /center?tab=models：留在原地，「模型」选中，渲染模型表", async () => {
     const before = window.history.length;
-    const fetchMock = fetchFor(MEMBER);
-    const mounted = mountAuthenticatedApp("/center?tab=models", fetchMock);
-    dispose = () => mounted.router.dispose();
+    openApp("/center?tab=models", ADMIN);
 
     const main = await screen.findByRole("main");
-    expect(await within(main).findByText(EMPTY)).toBeTruthy();
-    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(await within(main).findByRole("table")).toBeTruthy();
     expect(currentLocation()).toBe("/center?tab=models");
     expect(window.history.length).toBe(before);
-    expect(fetchMock.mock.calls.map(([path]) => path)).not.toContain("/api/models");
+    expect(tabStates()).toEqual([
+      ["专家", "false"],
+      ["模型", "true"],
+    ]);
+    expect(within(main).getByRole("cell", { name: SEED_VIEW.name })).toBeTruthy();
   });
+
+  it.each(["/center?tab=models", "/center"])(
+    "普通用户打开 %s：以 replace 变为 /center?tab=experts，tab 条恰为「专家」，不请求模型列表",
+    async (path) => {
+      const before = window.history.length;
+      const fetchMock = openApp(path, MEMBER);
+
+      await expectExpertsTabSettled(fetchMock);
+      await expectLocation("/center?tab=experts");
+      expect(window.history.length).toBe(before);
+      expect(tabStates()).toEqual([["专家", "true"]]);
+      expect(within(screen.getByRole("main")).queryByText(EMPTY)).toBeNull();
+      expect(paths(fetchMock)).not.toContain("/api/models");
+    },
+  );
 });
 
 describe("注入一张仅管理员可见的表", () => {
@@ -228,9 +256,9 @@ describe("isAdmin", () => {
 });
 
 describe("routeManifest", () => {
-  it("/center 的描述与可见内容一致：只有仅管理员可见的模型 tab 时为「模型注册表」", () => {
+  it("/center 的描述以「与」连接人人可见的 tab：tab 表为「专家」与仅管理员可见的「模型」时为「专家」", () => {
     expect(routeManifest.find(({ path }) => path === "/center")).toMatchObject({
-      description: "模型注册表",
+      description: "专家",
     });
   });
 });

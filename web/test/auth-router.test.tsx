@@ -21,6 +21,7 @@ import {
   createFetchMock,
   currentLocation,
   deferredResponse,
+  expectExpertsTabSettled,
   expectPaths,
   type FetchMock,
   jsonResponse,
@@ -35,7 +36,13 @@ const protectedPaths = ["/", "/files", "/center", "/settings"] as const;
 
 const canonicalLoginPaths = [
   ["/files/?from=deep-link#target", "/files?from=deep-link#target", "工作空间", "工作空间"],
-  ["/center/?from=deep-link#target", "/center?from=deep-link#target", "中心", "中心"],
+  [
+    "/center/?from=deep-link#target",
+    "/center?from=deep-link#target",
+    "中心",
+    "中心",
+    "/center?from=deep-link&tab=experts#target",
+  ],
   ["/settings/?from=deep-link#target", "/settings?from=deep-link#target", "设置", "设置"],
   [
     "/files//?from=repeated-files#target",
@@ -43,7 +50,13 @@ const canonicalLoginPaths = [
     "工作空间",
     "工作空间",
   ],
-  ["/center///?from=repeated-center#target", "/center?from=repeated-center#target", "中心", "中心"],
+  [
+    "/center///?from=repeated-center#target",
+    "/center?from=repeated-center#target",
+    "中心",
+    "中心",
+    "/center?from=repeated-center&tab=experts#target",
+  ],
   [
     "/settings////?from=repeated-settings#target",
     "/settings?from=repeated-settings#target",
@@ -64,7 +77,13 @@ const canonicalLoginPaths = [
     "工作空间",
     "工作空间",
   ],
-  ["/CeNtEr///?from=mixed-center#target", "/center?from=mixed-center#target", "中心", "中心"],
+  [
+    "/CeNtEr///?from=mixed-center#target",
+    "/center?from=mixed-center#target",
+    "中心",
+    "中心",
+    "/center?from=mixed-center&tab=experts#target",
+  ],
   [
     "/SeTTings////?from=mixed-settings#target",
     "/settings?from=mixed-settings#target",
@@ -77,7 +96,13 @@ const canonicalLoginPaths = [
     "工作空间",
     "工作空间",
   ],
-  ["/C%45NTER//?from=encoded-center#target", "/center?from=encoded-center#target", "中心", "中心"],
+  [
+    "/C%45NTER//?from=encoded-center#target",
+    "/center?from=encoded-center#target",
+    "中心",
+    "中心",
+    "/center?from=encoded-center&tab=experts#target",
+  ],
   [
     "/se%74tings///?from=encoded-settings#target",
     "/settings?from=encoded-settings#target",
@@ -298,9 +323,11 @@ describe("route guard initial authentication", () => {
     expect(currentLocation()).toBe("/files");
   });
 
+  // 中心行的第五列是登录后的地址：中心页在已有参数之后追加 `tab=experts`，hash 保留。
   it.each(canonicalLoginPaths)(
     "canonicalizes %s before auth and preserves search/hash through login",
-    async (initialPath, canonicalPath, currentLabel, title) => {
+    async (initialPath, canonicalPath, currentLabel, title, landed?: string) => {
+      const landedPath = landed ?? canonicalPath;
       const meLocations: string[] = [];
       const fetchMock = createFetchMock({
         "/api/auth/me": () => {
@@ -324,8 +351,11 @@ describe("route guard initial authentication", () => {
       submitLogin("zhangsan", "demo");
 
       await expectAuthenticatedShell(title, currentLabel);
-      expect(currentLocation()).toBe(canonicalPath);
       const loginPaths = ["/api/auth/me", "/api/info", "/api/auth/login"];
+      if (title === "中心") {
+        await expectExpertsTabSettled(fetchMock);
+      }
+      await waitFor(() => expect(currentLocation()).toBe(landedPath));
       if (title === "设置") {
         await waitFor(() => expectPaths(fetchMock, [...loginPaths, "/api/info"]));
         expect(calls(fetchMock, "/api/info")).toHaveLength(2);
@@ -333,7 +363,9 @@ describe("route guard initial authentication", () => {
       } else {
         expectPaths(
           fetchMock,
-          title === "工作空间" ? [...loginPaths, "/api/workspaces"] : loginPaths,
+          title === "工作空间"
+            ? [...loginPaths, "/api/workspaces"]
+            : [...loginPaths, "/api/experts"],
         );
       }
       expectProviderLoginRequest(fetchMock);
@@ -347,8 +379,9 @@ describe("route guard initial authentication", () => {
     renderApp("/center/?keep=1#target");
 
     await expectAuthenticatedShell("中心", "中心");
-    expect(currentLocation()).toBe("/center?keep=1#target");
-    expectPaths(fetchMock, ["/api/auth/me"]);
+    await expectExpertsTabSettled(fetchMock);
+    expect(currentLocation()).toBe("/center?keep=1&tab=experts#target");
+    expectPaths(fetchMock, ["/api/auth/me", "/api/experts"]);
     expectMeRequest(fetchMock);
   });
 
@@ -365,9 +398,10 @@ describe("route guard initial authentication", () => {
     window.dispatchEvent(new PopStateEvent("popstate"));
 
     await expectAuthenticatedShell("中心", "中心");
-    expect(currentLocation()).toBe("/center?from=later#target");
+    await expectExpertsTabSettled(fetchMock);
+    expect(currentLocation()).toBe("/center?from=later&tab=experts#target");
     expect(initialMeSignal.aborted).toBe(false);
-    expectPaths(fetchMock, ["/api/auth/me", "/api/workspaces"]);
+    expectPaths(fetchMock, ["/api/auth/me", "/api/workspaces", "/api/experts"]);
   });
 });
 

@@ -13,9 +13,11 @@ import {
   resetSettingsTestState,
 } from "./settings-support.js";
 import {
+  centerRoutes,
   createFetchMock,
   currentLocation,
   deferredResponse,
+  expectExpertsTabSettled,
   expectPaths,
   jsonResponse,
   authenticatedPrincipal as principal,
@@ -318,6 +320,9 @@ describe("authenticated sidebar footer", () => {
       renderApp(path);
 
       await expectAuthenticatedShell(path);
+      if (path === "/center") {
+        await expectExpertsTabSettled(fetchMock);
+      }
     },
   );
 
@@ -447,15 +452,17 @@ describe("authenticated sidebar footer", () => {
       const fetchMock = createFetchMock({
         "/api/auth/me": jsonResponse(principal),
         "/api/auth/logout": logoutResponse,
+        ...centerRoutes(),
       });
       vi.stubGlobal("fetch", fetchMock);
-      const requestedPath = "/center?from=logout-401#target";
 
-      renderApp(requestedPath);
+      renderApp("/center?from=logout-401#target");
       await expectAuthenticatedShell("/center");
+      await expectExpertsTabSettled(fetchMock);
       fireEvent.click(within(await openLogoutDialog()).getByRole("button", { name: "退出" }));
 
-      await expectLoginAt(requestedPath);
+      // 中心页已在已有参数之后追加 `tab=experts`（hash 保留）；退出后登录页停在同一地址。
+      await expectLoginAt("/center?from=logout-401&tab=experts#target");
     },
   );
 

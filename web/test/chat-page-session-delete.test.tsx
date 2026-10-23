@@ -578,7 +578,8 @@ describe("fence：账号切换与卸载 (R10)", () => {
       const signal = calls(fetchMock, patchPath(A)).at(0)?.[1]?.signal;
       expect(signal?.aborted).toBe(false);
 
-      await leaveChatPage(router);
+      // 中心「专家」面板稳定（恰一次 listExperts）之后再取请求计数。
+      await leaveChatPage(router, fetchMock);
       expect(confirmBox()).toBeNull();
       expect(signal?.aborted).toBe(true);
       const consoleError = vi.spyOn(console, "error");
@@ -588,7 +589,7 @@ describe("fence：账号切换与卸载 (R10)", () => {
       await yieldMacrotask();
       expectNoListToast();
       expect(screen.queryByRole("alert")).toBeNull();
-      expect(currentLocation()).toBe("/center");
+      expect(currentLocation()).toBe("/center?tab=experts");
       expect(fetchMock.mock.calls).toHaveLength(requests);
       expect(consoleError).not.toHaveBeenCalled();
     },

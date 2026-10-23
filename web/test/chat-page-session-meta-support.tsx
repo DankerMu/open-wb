@@ -11,7 +11,7 @@ import { chatSnapshot } from "./chat-stream-support.js";
 import { createMediaQuery, installMatchMedia, uninstallMatchMedia } from "./media-query-support.js";
 import { pagePrompts } from "./page-notices.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
-import { calls, type FetchMock, jsonResponse } from "./support.js";
+import { calls, expectExpertsTabSettled, type FetchMock, jsonResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 // 条目菜单、重命名与置顶（#531）两个测试文件共用的夹具与查询。
@@ -113,10 +113,16 @@ export async function mountTwoAccounts(patch: FetchRoutes[string]) {
   return { fetchMock, nav, renew };
 }
 
-/** 经路由离开会话页（去 `/center`）并等中心页空态出现：此时 ChatPage 已卸载。 */
-export async function leaveChatPage(router: ReturnType<typeof renderChatPage>["router"]) {
+/**
+ * 经路由离开会话页（去 `/center`）并等中心页「专家」tab 按缺省应答稳定（`expectExpertsTabSettled`）后再返回：
+ * 此时 ChatPage 已卸载，调用方之后的请求计数不再被面板的 `listExperts` 改变。
+ */
+export async function leaveChatPage(
+  router: ReturnType<typeof renderChatPage>["router"],
+  fetchMock: FetchMock = vi.mocked(fetch),
+) {
   await act(() => router.navigate("/center"));
-  expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
+  await expectExpertsTabSettled(fetchMock);
 }
 
 /** 只让外壳断点查询匹配：侧栏改由 `打开导航` 覆盖层承载。 */

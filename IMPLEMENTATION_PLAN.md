@@ -112,7 +112,7 @@
 ### 中心 `/center`
 | ID | 行为 |
 |---|---|
-| F-CTR-EXP | 专家卡片（分类/标签）、加入会话 |
+| F-CTR-EXP | 专家卡片（分类/标签）、加入会话——change `s1d-experts-skills`（中心「专家」tab；加入会话的欢迎态预选随该 change 任务组 9） |
 | F-CTR-SKL | 技能清单与启停 |
 | F-CTR-CON | MCP 连接器（仅显式配置） |
 | F-CTR-KB1 | 12 种切片模板 + RAPTOR/知识图谱开关 |
