@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import type { ApiClient, ExpertView, SessionCapabilities } from "../../lib/api.js";
+import type { SessionCapabilitiesPatch } from "../../lib/api-session-capabilities.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 
 type ExpertsClient = Pick<ApiClient, "listExperts">;
@@ -61,40 +62,78 @@ type CapabilitiesClient = Pick<ApiClient, "getSessionCapabilities" | "putSession
 /** 一次读取或写入的记录：它属于哪个 client 与会话；只有仍是「当前那次」的记录才落地。 */
 type Flight = { client: CapabilitiesClient; sessionId: string };
 type HeldCapabilities = Flight & { capabilities: SessionCapabilities | null };
+/** 在途的 `PUT`；切技能时带切换后的停用集合（在途期间开关显示它）。 */
+type Write = Flight & { disabledSkills: string[] | null };
 type ShownError = Flight & { message: string };
 
-/** 已选会话的能力与换专家。 */
+/**
+ * 切换后的完整停用集合：`disabled` 加上（关闭，`enabled` 为 false）或去掉（打开）`name`，去重后按 JS 缺省
+ * `.sort()` 排序（与服务端存储同一比较）；不在弹层列表里的名称原样保留。同 `center/skills/use-skills.ts`
+ * 的 `toggled`（那份不导出）。
+ */
+export function toggledSkills(
+  disabled: readonly string[],
+  name: string,
+  enabled: boolean,
+): string[] {
+  const rest = disabled.filter((item) => item !== name);
+  return [...new Set(enabled ? rest : [...rest, name])].sort();
+}
+
+/** 已选会话的能力、换专家与切技能。 */
 export type SessionCapabilityState = {
   /** 当前会话的能力；未选会话、读取中或读取失败时为 null（读取失败视为没有专家，不提示）。 */
   capabilities: SessionCapabilities | null;
-  /** 本会话的 `PUT` 在途：`选择专家…` 与 `移除专家` 禁用。 */
+  /**
+   * 当前会话能力的 `GET`：`loading` 在途（含尚未发出），`failed` 失败，`done` 已取得（或一次 `PUT` 成功）；
+   * 未选会话时为 `done`。在途与失败时技能开关不可操作。
+   */
+  read: "loading" | "failed" | "done";
+  /** 弹层显示的停用集合：切技能的 `PUT` 在途时是切换后的集合，否则同 `capabilities`；未取得时为 null。 */
+  disabledSkills: readonly string[] | null;
+  /** 本会话的 `PUT` 在途（换专家或切技能共用一个）：`选择专家…`、`移除专家` 与技能开关都不可操作。 */
   pending: boolean;
   /** 上一次 `PUT` 的失败文案（`ApiError.message`；401 不显示）；没有时为 null。 */
   error: string | null;
   /** 换专家：恰一次 `PUT …/capabilities` body `{expertId}`；`PUT` 在途时什么也不做。 */
   chooseExpert(expertId: string | null): void;
+  /**
+   * 切技能（`enabled` 为开关的新值）：恰一次 `PUT …/capabilities` body `{disabledSkills}`，为切换后的完整集合；
+   * `PUT` 在途或能力尚未取得（在途、失败）时什么也不做。
+   */
+  toggleSkill(name: string, enabled: boolean): void;
 };
 
 /**
- * 已选会话的能力（chat-web「能力读取时机」；tasks.md 9.2 的定案）：`sessionId` 是会话页解析出的选中会话 id
- * （欢迎态与无法解析的 id 为 undefined）。每次非 undefined 的 id 变化恰一次 `GET`（A→B→A 共三次），同一会话里
- * 不重取；换 client 也重取。迟到的 `GET` 与在途的 `PUT` 靠记录比对丢弃：切换会话、回到欢迎态或一次 `PUT`
+ * 已选会话的能力（chat-web「能力读取时机」；tasks.md 9.2、10.2 的定案）：`sessionId` 是会话页解析出的选中会话
+ * id（欢迎态与无法解析的 id 为 undefined）。每次非 undefined 的 id 变化恰一次 `GET`（A→B→A 共三次），同一会话
+ * 里不重取；换 client 也重取。迟到的 `GET` 与在途的 `PUT` 靠记录比对丢弃：切换会话、回到欢迎态或一次 `PUT`
  * 成功之后，此前发出的 `GET` 的结果不再落地（`PUT` 失败不丢它：仍在途的首次 `GET` 照常落地，标签即服务端
  * 保留的原专家）；切换会话或回到欢迎态之后，此前在途的 `PUT` 的成功与失败都不落地、也不再使新会话禁用。
- * `PUT` 的失败文案在下一次 `PUT` 开始、切换会话或回到欢迎态时清除。
+ * `PUT` 成功以应答整体替换能力（与本地预期不同时以应答为准），失败不动已取得的能力（切技能的开关随之回滚）；
+ * 失败文案在下一次 `PUT` 开始、切换会话或回到欢迎态时清除。每次发出 `GET` 即丢掉已取得的能力：A→欢迎态→A
+ * 的重读在途时是「读取中」（不是上一次的能力、也不是上一次的失败），切技能不以上一次取得的集合为底。
  *
  * 同一会话的 `GET` 记录在：StrictMode 的模拟重挂再跑一次 effect，记录仍是这个会话就不再发（不写 cleanup，理由
- * 同 `useComposerOptions`）。在途守卫是 ref：同一帧里连点两次只发一次（按钮的禁用要到下一次渲染才生效）。
+ * 同 `useComposerOptions`）。换专家与切技能共用一个在途写，守卫是 ref：同一帧里连点两次只发一次（不可操作的
+ * 状态要到下一次渲染才生效，技能开关用 `aria-disabled` 也照样分派点击）。切技能的底同样取自 ref（与 `held`
+ * 同步写入）：`PUT` 应答落地到重渲染之间的一次点击以应答的集合为底，不是渲染时闭包里的旧集合。
  */
 export function useSessionCapabilities(
   client: CapabilitiesClient,
   sessionId: string | undefined,
 ): SessionCapabilityState {
   const [held, setHeld] = useState<HeldCapabilities | null>(null);
-  const [writing, setWriting] = useState<Flight | null>(null);
+  const [writing, setWriting] = useState<Write | null>(null);
   const [error, setError] = useState<ShownError | null>(null);
+  const heldRef = useRef<HeldCapabilities | null>(null);
   const readRef = useRef<Flight | null>(null);
   const writeRef = useRef<Flight | null>(null);
+  /** 写 `held` 一律经它：`heldRef` 与之同步，切技能从 ref 读最新的集合。 */
+  const hold = useCallback((next: HeldCapabilities | null) => {
+    heldRef.current = next;
+    setHeld(next);
+  }, []);
 
   useEffect(() => {
     writeRef.current = null;
@@ -108,49 +147,116 @@ export function useSessionCapabilities(
     if (last?.client === client && last.sessionId === sessionId) return;
     const read: Flight = { client, sessionId };
     readRef.current = read;
+    hold(null);
     const land = (capabilities: SessionCapabilities | null) => {
-      if (readRef.current === read) setHeld({ client, sessionId, capabilities });
+      if (readRef.current === read) hold({ client, sessionId, capabilities });
     };
     client.getSessionCapabilities(sessionId).then(land, () => land(null));
-  }, [client, sessionId]);
+  }, [client, hold, sessionId]);
 
-  const chooseExpert = useCallback(
-    (expertId: string | null) => {
-      if (sessionId === undefined || writeRef.current !== null) return;
-      const write: Flight = { client, sessionId };
-      writeRef.current = write;
-      setWriting(write);
-      setError(null);
-      client.putSessionCapabilities(sessionId, { expertId }).then(
-        (capabilities) => {
-          if (writeRef.current !== write) return;
-          writeRef.current = null;
-          // 此前发出的 GET（若仍在途）比这次写入旧：换一条同会话的记录，它的结果不再落地。
-          readRef.current = { client, sessionId };
-          setWriting(null);
-          setHeld({ client, sessionId, capabilities });
-        },
-        (failure: unknown) => {
-          if (writeRef.current !== write) return;
-          writeRef.current = null;
-          setWriting(null);
-          if (!isUnauthorized(failure)) {
-            setError({ client, sessionId, message: errorMessage(failure) });
-          }
-        },
-      );
-    },
-    [client, sessionId],
-  );
-
-  const current = (flight: Flight | null) =>
+  const current = (flight: Flight | null): flight is Flight =>
     flight !== null && flight.client === client && flight.sessionId === sessionId;
-  return {
-    capabilities: current(held) ? (held?.capabilities ?? null) : null,
-    pending: current(writing),
-    error: current(error) ? (error?.message ?? null) : null,
-    chooseExpert,
+  const capabilities = current(held) ? held.capabilities : null;
+
+  /** 恰一次 `PUT`；`disabledSkills` 是切技能时在途期间显示的集合。调用方已查过守卫。 */
+  const put = (id: string, patch: SessionCapabilitiesPatch, disabledSkills: string[] | null) => {
+    const write: Write = { client, sessionId: id, disabledSkills };
+    writeRef.current = write;
+    setWriting(write);
+    setError(null);
+    client.putSessionCapabilities(id, patch).then(
+      (answer) => {
+        if (writeRef.current !== write) return;
+        writeRef.current = null;
+        // 此前发出的 GET（若仍在途）比这次写入旧：换一条同会话的记录，它的结果不再落地。
+        readRef.current = { client, sessionId: id };
+        setWriting(null);
+        hold({ client, sessionId: id, capabilities: answer });
+      },
+      (failure: unknown) => {
+        if (writeRef.current !== write) return;
+        writeRef.current = null;
+        setWriting(null);
+        if (!isUnauthorized(failure)) {
+          setError({ client, sessionId: id, message: errorMessage(failure) });
+        }
+      },
+    );
   };
+
+  const chooseExpert = (expertId: string | null) => {
+    if (sessionId === undefined || writeRef.current !== null) return;
+    put(sessionId, { expertId }, null);
+  };
+
+  const toggleSkill = (name: string, enabled: boolean) => {
+    const latest = heldRef.current;
+    if (sessionId === undefined || writeRef.current !== null || capabilities === null) return;
+    if (!current(latest) || latest.capabilities === null) return;
+    const disabledSkills = toggledSkills(latest.capabilities.disabledSkills, name, enabled);
+    put(sessionId, { disabledSkills }, disabledSkills);
+  };
+
+  const shownWrite = current(writing) ? writing : null;
+  let read: SessionCapabilityState["read"] = "done";
+  if (sessionId !== undefined && capabilities === null) read = current(held) ? "failed" : "loading";
+  return {
+    capabilities,
+    read,
+    disabledSkills: shownWrite?.disabledSkills ?? capabilities?.disabledSkills ?? null,
+    pending: shownWrite !== null,
+    error: current(error) ? error.message : null,
+    chooseExpert,
+    toggleSkill,
+  };
+}
+
+type SkillsClient = Pick<ApiClient, "listSkills">;
+/** 一次账号缺省的读取：在途、失败或已取得（`disabledSkills`）。 */
+type DefaultsRead = {
+  client: SkillsClient;
+  status: "pending" | "failed" | "done";
+  disabledSkills: string[] | null;
+};
+
+/** 欢迎态的账号缺省停用列表（skill-switches「输入框「能力」弹层」）。 */
+export type SkillDefaults = {
+  /** `GET /api/skills` 的 `disabledSkills`（含列表外的名称）；未取得时为 null。 */
+  disabledSkills: readonly string[] | null;
+  /** 本 client 的读取：从未发出为 `idle`。 */
+  status: "idle" | "pending" | "failed" | "done";
+  /** 欢迎态打开 `能力` 弹层时调用：从未取得且没有在途的读取时恰发一次 `GET /api/skills`。 */
+  load(): void;
+};
+
+/**
+ * 账号缺省停用列表，按 client 缓存（`ChatPage` 存活期间复用；换 client 回到未取得）。只在 `load()` 时读取：
+ * 第一次打开弹层恰一次，在途时重开不重发，失败后下一次打开恰重取一次，成功后不再取。读取在事件里发出，不在
+ * effect 里（StrictMode 的 effect 重跑会多发一次）。不计入、也不使输入框选项缓存失效。
+ */
+export function useSkillDefaults(client: SkillsClient): SkillDefaults {
+  const [read, setRead] = useState<DefaultsRead | null>(null);
+  const readRef = useRef<DefaultsRead | null>(null);
+
+  const load = useCallback(() => {
+    const last = readRef.current;
+    if (last?.client === client && last.status !== "failed") return;
+    const flight: DefaultsRead = { client, status: "pending", disabledSkills: null };
+    const settle = (next: DefaultsRead) => {
+      if (readRef.current !== flight) return;
+      readRef.current = next;
+      setRead(next);
+    };
+    readRef.current = flight;
+    setRead(flight);
+    client.listSkills().then(
+      (list) => settle({ client, status: "done", disabledSkills: list.disabledSkills }),
+      () => settle({ client, status: "failed", disabledSkills: null }),
+    );
+  }, [client]);
+
+  const own = read?.client === client ? read : null;
+  return { disabledSkills: own?.disabledSkills ?? null, status: own?.status ?? "idle", load };
 }
 
 /**

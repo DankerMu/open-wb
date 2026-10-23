@@ -13,6 +13,7 @@ import type { ChatSession } from "../../lib/session-contract.js";
 import { ArchivedNotice } from "./archived-notice.js";
 import type { useAttachmentArea } from "./attachment-chips.js";
 import { CapabilityBar, type ExpertChoice } from "./capability-bar.js";
+import { skillSwitches } from "./capability-popover.js";
 import { Composer } from "./composer.js";
 import { ComposerDock } from "./composer-dock.js";
 import { Thread } from "./message-thread.js";
@@ -21,7 +22,11 @@ import type { useSlashMenu } from "./slash-menu.js";
 import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";
 import { UndoNotice } from "./undo-notice.js";
-import type { ExpertList, SessionCapabilityState } from "./use-session-capabilities.js";
+import type {
+  ExpertList,
+  SessionCapabilityState,
+  SkillDefaults,
+} from "./use-session-capabilities.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 import type { SessionSpace, Workspace } from "./workspace-list.js";
@@ -162,10 +167,12 @@ type ConversationViewProps = {
    * 只读：不渲染输入框（含能力栏）与停靠区的内容，线程不出 `撤回`、`从此处分叉` 与 `重新生成`。
    */
   archived: ComponentProps<typeof ArchivedNotice> | null;
-  /** 已选会话的能力与换专家（欢迎态不用）；`error` 是上一次换专家失败的文案。 */
+  /** 已选会话的能力、换专家与切技能（欢迎态不用）；`error` 是上一次 `PUT` 失败的文案。 */
   capabilities: SessionCapabilityState;
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
+  /** 欢迎态 `能力` 弹层的账号缺省停用列表（按 client 缓存，打开弹层时读取）。 */
+  skillDefaults: SkillDefaults;
   composerDisabled: boolean;
   /** 输入框选项（可用档位、模型白名单与缺省值）；拉取中或失败时为 null，权限、模型与强度控件都不渲染。 */
   composerOptions: ComposerOptions | null;
@@ -259,6 +266,7 @@ export function ConversationView({
   search,
   sendDisabled,
   sending,
+  skillDefaults,
   slash,
   space,
   streamError,
@@ -309,7 +317,7 @@ export function ConversationView({
         <ColumnAlert message={historyError} />
         <ColumnAlert message={promptError} />
         <ColumnAlert message={streamError} />
-        {/* 换专家失败（`PUT …/capabilities`）：与 `promptError` 并列的独立元素，不进输入卡。 */}
+        {/* 换专家或切技能失败（`PUT …/capabilities`）：与 `promptError` 并列的独立元素，不进输入卡。 */}
         <ColumnAlert message={capabilities.error} />
         {files.notice}
         {requestedSessionId ? (
@@ -374,6 +382,13 @@ export function ConversationView({
                 })}
                 inputRef={composerRef}
                 plus={slash.plus}
+                skills={skillSwitches({
+                  capabilities,
+                  defaults: skillDefaults,
+                  requestedSessionId,
+                  skills: slash.skills,
+                  welcome,
+                })}
                 upload={files.upload}
                 {...permission}
                 {...(requestedSessionId

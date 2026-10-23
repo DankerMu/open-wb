@@ -765,7 +765,7 @@ modelRoles:
 
 ### 9.10 专家与技能（S1d，change `s1d-experts-skills`）
 
-本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计；组 4：技能端点；组 5：会话能力；组 6：能力指纹与派发对齐。
+本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计；组 4：技能端点；组 5：会话能力；组 6：能力指纹与派发对齐；组 10：输入框的「能力」弹层。
 
 **会话配置文件**（`server/src/sessions/omp/session-config.ts`，规格 omp-runtime「子进程 spawn 契约」「会话配置文件」）：每一次 spawn（会话进程与 fork / branch 的临时进程同样）在 `spawnImpl` 之前写出本进程专属的两个文件，`<key>` 是每次新生成的随机十六进制串，与会话 id 无关、不复用：
 
@@ -818,3 +818,10 @@ modelRoles:
 - **修改设置本身不动进程**：`PATCH` 会话设置、能力 `PUT`、专家的改与删都只写库，supervisor 不被通知：存活进程不收帧、不退出，空闲计时器不重置，在途回合不被打断——一切在下一次派发时对齐。
 - **临时进程**：fork 的临时进程以源会话的有效能力 spawn，撤回的临时进程以该会话自己的有效能力 spawn，与会话进程经同一个能力函数（supervisor 经 `ForkPorts` / `BranchTempPorts` 的 `capabilities` 端口交给它们）与同一个 `SessionRuntime` 组装（`pool.ts` 的 `buildSessionRuntime`）；它们不派发 prompt，不比较指纹。
 - 实测见 `server/test/omp-official-session-capabilities.test.ts`（官方 v18.12.3，经模型代理：专家提示词含 `EXPERT-SENTINEL-1` 的会话回合后 `get_state.systemPrompt` 含它；换成含 `EXPERT-SENTINEL-2` 的专家后下一条前进程重启、`stream_epoch` 加一，`systemPrompt` 只含新哨兵），该用例在 CI `uid-isolation` 的官方用例清单里。
+
+**输入框的「能力」弹层**（`web/src/features/chat/capability-popover.tsx`，数据在 `use-session-capabilities.ts` 与 `slash-menu.tsx`；规格 skill-switches「输入框「能力」弹层」「停用技能对 omp 生效」、chat-web「输入框与能力栏」）：能力行左组在权限档位之后恒有 `能力` 按钮，不随输入框锁定禁用（回合进行中也可改，从下一条消息起生效）。
+
+- **列表**：与「+」菜单、斜杠候选同一份按 client 与工作空间缓存的命令目录（`GET /api/commands`）的 `skill:` 条目，按目录次序，平台与项目技能同列（项目技能带 `项目` / `项目 · 覆盖平台技能`），每项一个开关（开 = 名称不在停用集合里）；目录读取中、失败或没有技能时为 `暂无可用技能`。打开弹层与打开「+」菜单、输入 `/` 同属「需要目录」，但不受输入框锁定限制；每个 client 与工作空间仍只取一次。
+- **会话中**：停用集合即会话能力（`GET …/capabilities` 按选中的会话 id 取一次）；切一个开关恰一次 `PUT …/capabilities {disabledSkills}`，body 为切换后的完整集合（含不在列表里的名称），成功以应答整体替换，失败回滚并在 chat column 显示错误。换专家与切技能共用一个在途写：任一 `PUT` 在途时专家控件与全部开关不可操作（开关用 `aria-disabled` 保焦点，处理函数另有守卫）。能力读取中 / 失败时开关不可操作，分别显示 `正在读取技能…` / `技能读取失败，重新选中该会话可重试`。
+- **欢迎态**：停用集合初值是账号缺省（`GET /api/skills` 的 `disabledSkills`），按 client 缓存，只在第一次打开弹层时读取（在途不重发，失败后下次打开重取一次）；未取得时开关不可操作。选择存于页面状态（不进输入框设置的 `picked`），只有动过开关时首次发送的 `POST /api/sessions` 才带完整的 `disabledSkills`，所以只动技能的首次发送不会让输入框选项重取。
+- **停用过滤**：「+」菜单的命令段与斜杠候选在客户端去掉 `skill:<停用名>`——会话中按已取得的会话能力（未取得 / 失败不过滤），欢迎态按页面选择 ?? 已取得的账号缺省；`GET /api/commands` 不知道会话，不变，停用集合变化不引发新的目录请求。omp 侧的停用由上文的会话配置文件保证。

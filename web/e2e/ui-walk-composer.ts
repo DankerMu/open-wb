@@ -66,12 +66,14 @@ function tierButton(page: Page, label: string): Locator {
   return page.getByRole("button", { name: `权限：${label}`, exact: true });
 }
 
-// 能力行的六个控件，按界面次序。工作空间位在欢迎态是选择器的外层、会话态是只读的 `<p>`，同一个 slot。
+// 能力行的七个控件，按界面次序。工作空间位在欢迎态是选择器的外层、会话态是只读的 `<p>`，同一个 slot。
+// 走查不选专家，所以没有专家标签（有专家时它排在「+」之后）。
 function rowControls(page: Page): [string, Locator][] {
   return [
     ["添加文件或命令", page.getByRole("button", { name: "添加文件或命令", exact: true })],
     ["工作空间位", page.locator('[data-slot="composer-workspace"]')],
     ["权限", page.getByRole("button", { name: /^权限：/u })],
+    ["能力", page.getByRole("button", { name: "能力", exact: true })],
     ["模型", page.getByRole("button", { name: /^模型：/u })],
     ["推理强度", page.getByRole("button", { name: /^推理强度：/u })],
     ["发送", page.getByRole("button", { name: "发送", exact: true })],
@@ -93,13 +95,13 @@ function sharedRowHeight(boxes: Box[]): number {
   return Math.min(...boxes.map((box) => box.bottom)) - Math.max(...boxes.map((box) => box.top));
 }
 
-// 行关系：desktop 六者同一行；mobile 模型所在行在权限所在行之下或同一行（允许换行），右组三者同一行。
+// 行关系：desktop 七者同一行；mobile 模型所在行在权限所在行之下或同一行（允许换行），右组三者同一行。
 function expectRows(project: WalkProject, boxes: Box[], measured: string): void {
   if (project === "desktop-light") {
-    expect(sharedRowHeight(boxes), `six controls share one row — ${measured}`).toBeGreaterThan(0);
+    expect(sharedRowHeight(boxes), `seven controls share one row — ${measured}`).toBeGreaterThan(0);
     return;
   }
-  const [, , permission, model, effort, send] = boxes;
+  const [, , permission, , model, effort, send] = boxes;
   if (!permission || !model || !effort || !send) throw new Error("capability row: missing box");
   expect(
     (model.top + model.bottom) / 2,
@@ -112,7 +114,7 @@ function expectRows(project: WalkProject, boxes: Box[], measured: string): void 
 }
 
 /**
- * chat-web「真实浏览器下能力行不挤出发送键」：`发送` 与五个能力行控件各自完整位于输入卡之内、两两不重叠，
+ * chat-web「真实浏览器下能力行不挤出发送键」：`发送` 与六个能力行控件各自完整位于输入卡之内、两两不重叠，
  * 文档没有横向滚动，行关系见 `expectRows`。只断言关系——不断言任何宽度、截断、`title`，也不断言右组一定换行。
  */
 async function expectCapabilityRow(page: Page, project: WalkProject, state: string): Promise<void> {

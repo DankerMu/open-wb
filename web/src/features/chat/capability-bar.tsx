@@ -1,6 +1,7 @@
 // 输入框底部的能力栏（design D6、D13、D14；s1d-experts-skills D9），即工具行的左组，自左向右：「+」菜单（添加
 // 文件或命令）、专家标签（有专家时）、工作空间位（欢迎态是选择器，会话开始后是只读标签）；权限档位控件排在
-// 工作空间之后。麦克风不渲染，也不摆禁用占位。窄屏下工作空间位与专家标签有最大宽度，完整文字在 `title` 里。
+// 工作空间之后，`能力` 按钮在最后。麦克风不渲染，也不摆禁用占位。窄屏下工作空间位与专家标签有最大宽度，
+// 完整文字在 `title` 里。
 import { type ComponentProps, type RefObject, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +16,7 @@ import { Icon } from "../../components/icon.js";
 import type { ExpertView } from "../../lib/api.js";
 import { useAuth } from "../auth/index.js";
 import { logicalPath } from "../files/index.js";
+import { CapabilityPopover, type SkillSwitches } from "./capability-popover.js";
 import { ExpertPicker, useExpertDialog } from "./expert-picker.js";
 import { PermissionTier } from "./permission-tier.js";
 import { sourceTag, type useSlashMenu } from "./slash-menu.js";
@@ -66,6 +68,8 @@ type CapabilityBarProps = {
    * `temporaryWorkspace`（临时空间不在列表里，标签不靠列表判定）。欢迎态不传。
    */
   session?: { id: string | null | undefined; workspace: Workspace | undefined; temporary: boolean };
+  /** `能力` 弹层（技能开关）；按钮恒在，不随 `disabled` 禁用。 */
+  skills: SkillSwitches;
   /**
    * 「+」菜单的 `上传文件` 项：`open` 打开文件选择框；`disabled` 时不可选，`reason` 非 null 则跟在后面。
    * 不传（欢迎态）就没有这一项。
@@ -81,6 +85,7 @@ export function CapabilityBar({
   permission,
   plus,
   session,
+  skills,
   upload,
 }: CapabilityBarProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -112,6 +117,7 @@ export function CapabilityBar({
           onChange={permission.onChange}
         />
       )}
+      <CapabilityPopover {...skills} />
       <ExpertPicker
         experts={expert.experts}
         onChoose={expert.onChoose}
