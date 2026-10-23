@@ -29,6 +29,7 @@ import {
   removeTempDirs,
   TRACKED_MIGRATION_FILENAMES,
   tempDir,
+  withDatabase,
   withOpenDb,
 } from "./core-db-helpers.js";
 import { S_A, S_B, S_C, S_D, seedPopulated034, seedThrough } from "./core-db-session-fixture.js";
@@ -74,6 +75,17 @@ const foreignKeys = (db: DatabaseSync, table: string) =>
     .prepare(`PRAGMA foreign_key_list('${table}')`)
     .all()
     .map((k) => [k.from, k.table, k.to, k.on_delete]);
+
+/** `[name, unique, origin, partial]` of every index on `table`, by name. */
+const indexList = (db: DatabaseSync, table: string) =>
+  db
+    .prepare(`PRAGMA index_list('${table}')`)
+    .all()
+    .map((i) => [i.name, i.unique, i.origin, i.partial])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+/** Every sqlite_master object, internal autoindexes included. */
+const catalog = (db: DatabaseSync) =>
+  db.prepare("SELECT type, name, tbl_name FROM sqlite_master ORDER BY type, name").all();
 
 function insertSession(db: DatabaseSync, id: string, ownerId: string): void {
   db.prepare(
@@ -144,17 +156,45 @@ describe("migration 047 schema", () => {
         .all()
         .map((c) => c.name),
     ).toEqual(["owner_id", "created_at"]);
+    expect(indexList(db, "experts")).toEqual([
+      ["experts_owner", 0, "c", 0],
+      ["sqlite_autoindex_experts_1", 1, "pk", 0],
+    ]);
+    expect(indexList(db, "account_skill_prefs")).toEqual([
+      ["sqlite_autoindex_account_skill_prefs_1", 1, "pk", 0],
+    ]);
     // expert_id has no foreign key: built-in experts are not rows.
     expect(foreignKeys(db, "chat_sessions").map(([from]) => from)).not.toContain("expert_id");
   });
 
-  it("a populated database ending at 046 reads every existing session as no expert and nothing disabled", () => {
-    const file = join(tempDir(), "populated-046.db");
+  it("a populated database ending at 046 gains exactly 047's objects and reads every existing session as no expert and nothing disabled", () => {
+    const dir = tempDir();
+    const file = join(dir, "populated-046.db");
     const through046 = TRACKED_MIGRATION_FILENAMES.slice(
       0,
       TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_047),
     );
     seedThrough(file, through046, seedPopulated034);
+    // Stops at exactly 047 so objects of later migrations never enter the diff.
+    const file047 = join(dir, "populated-047.db");
+    seedThrough(file047, [...through046, MIGRATION_047], seedPopulated034);
+    const before = withDatabase(file, catalog);
+    const after = withDatabase(file047, catalog);
+    const key = (o: Record<string, unknown>) => `${o.type}/${o.name}`;
+    const has = (list: Record<string, unknown>[], o: Record<string, unknown>) =>
+      list.some((x) => key(x) === key(o));
+    expect(after.filter((o) => !has(before, o))).toEqual([
+      { type: "index", name: "experts_owner", tbl_name: "experts" },
+      {
+        type: "index",
+        name: "sqlite_autoindex_account_skill_prefs_1",
+        tbl_name: "account_skill_prefs",
+      },
+      { type: "index", name: "sqlite_autoindex_experts_1", tbl_name: "experts" },
+      { type: "table", name: "account_skill_prefs", tbl_name: "account_skill_prefs" },
+      { type: "table", name: "experts", tbl_name: "experts" },
+    ]);
+    expect(before.filter((o) => !has(after, o))).toEqual([]);
     withOpenDb(file, (db) => {
       expect(rawCapabilities(db)).toEqual(
         [S_A, S_B, S_C, S_D].map((id) => ({ id, expert_id: null, disabled_skills: "[]" })),

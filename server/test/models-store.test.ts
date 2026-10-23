@@ -113,8 +113,12 @@ describe("migration 046 models table", () => {
       db
         .prepare("PRAGMA index_list('models')")
         .all()
-        .map((i) => [i.name, i.unique, i.partial]),
-    ).toContainEqual(["models_default", 1, 1]);
+        .map((i) => [i.name, i.unique, i.origin, i.partial])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual([
+      ["models_default", 1, "c", 1],
+      ["sqlite_autoindex_models_1", 1, "pk", 0],
+    ]);
   });
 
   const INSERT =
@@ -167,6 +171,20 @@ describe("migration 046 models table", () => {
         { type: "table", name: "models" },
       ]),
     );
+    // Every object on models, autoindex included: an extra or dropped index fails here.
+    expect(
+      withDatabase(file, (db) =>
+        db
+          .prepare(
+            "SELECT type, name FROM sqlite_master WHERE tbl_name = 'models' ORDER BY type, name",
+          )
+          .all(),
+      ),
+    ).toEqual([
+      { type: "index", name: "models_default" },
+      { type: "index", name: "sqlite_autoindex_models_1" },
+      { type: "table", name: "models" },
+    ]);
     const { schema_migrations: receiptsBefore, ...keptBefore } = before.rows;
     const keptAfter = Object.fromEntries(
       Object.keys(keptBefore).map((table) => [table, after.rows[table]]),
