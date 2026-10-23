@@ -21,7 +21,7 @@ import {
   withDatabase,
   withOpenDb,
 } from "./core-db-helpers.js";
-import { seedPopulated034, seedThrough } from "./core-db-session-fixture.js";
+import { columnNames, seedPopulated034, seedThrough } from "./core-db-session-fixture.js";
 
 const T0 = 1_760_000_000_000;
 const KEY = "sk-store-SENTINEL-4242";
@@ -135,40 +135,50 @@ describe("migration 046 models table", () => {
     expect(rawRows(db)).toEqual(before);
   });
 
-  it("a populated database ending at 045 gains exactly the table, the index and one receipt", () => {
+  it("a populated database ending at 045 gains the table and the index, keeps every prior row, and records 046 right after 045", () => {
     const file = join(tempDir(), "populated-045.db");
     const through045 = TRACKED_MIGRATION_FILENAMES.slice(
       0,
       TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_046),
     );
     seedThrough(file, through045, seedPopulated034);
-    const snapshot = (db: DatabaseSync) => {
+    // Later migrations may append columns: each prior table is read through the columns it had at 045.
+    const snapshot = (db: DatabaseSync, columnsAt045?: Record<string, string[]>) => {
       const objects = db
         .prepare(
           "SELECT type, name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
         )
         .all();
       const tables = objects.filter((o) => o.type === "table").map((o) => String(o.name));
-      const rows = Object.fromEntries(
-        tables.map((t) => [t, db.prepare(`SELECT * FROM ${t}`).all()]),
+      const columns = Object.fromEntries(
+        tables.map((t) => [t, columnsAt045?.[t] ?? columnNames(db, t)]),
       );
-      return { objects, rows };
+      const rows = Object.fromEntries(
+        tables.map((t) => [t, db.prepare(`SELECT ${columns[t]?.join(", ")} FROM ${t}`).all()]),
+      );
+      return { objects, columns, rows };
     };
-    const before = withDatabase(file, snapshot);
-    const after = withOpenDb(file, snapshot);
+    const before = withDatabase(file, (db) => snapshot(db));
+    const after = withOpenDb(file, (db) => snapshot(db, before.columns));
     const added = after.objects.filter((o) => !before.objects.some((b) => b.name === o.name));
-    expect(added).toEqual([
-      { type: "index", name: "models_default" },
-      { type: "table", name: "models" },
-    ]);
-    const { schema_migrations: receiptsAfter, models, ...keptAfter } = after.rows;
+    expect(added).toEqual(
+      expect.arrayContaining([
+        { type: "index", name: "models_default" },
+        { type: "table", name: "models" },
+      ]),
+    );
     const { schema_migrations: receiptsBefore, ...keptBefore } = before.rows;
+    const keptAfter = Object.fromEntries(
+      Object.keys(keptBefore).map((table) => [table, after.rows[table]]),
+    );
     expect(keptAfter).toEqual(keptBefore);
-    expect(models).toEqual([]);
-    expect(receiptsAfter?.slice(0, receiptsBefore?.length)).toEqual(receiptsBefore);
-    expect(receiptsAfter?.slice(receiptsBefore?.length ?? 0).map((r) => r.filename)).toEqual([
-      MIGRATION_046,
-    ]);
+    expect(after.rows.models).toEqual([]);
+    const receiptsAfter = after.rows.schema_migrations ?? [];
+    expect(receiptsAfter.slice(0, receiptsBefore?.length)).toEqual(receiptsBefore);
+    expect(receiptsAfter.slice(receiptsBefore?.length ?? 0).map((r) => r.filename)).toEqual(
+      TRACKED_MIGRATION_FILENAMES.slice(TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_046)),
+    );
+    expect(receiptsAfter[through045.length]?.filename).toBe(MIGRATION_046);
   });
 });
 
