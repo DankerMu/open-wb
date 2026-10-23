@@ -8,6 +8,7 @@ import {
   authenticatedPrincipal,
   centerRoutes,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   deferredResponse,
   type FetchMock,
@@ -120,6 +121,7 @@ function mountChat(path = "/", strict = false) {
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/sessions": () => jsonResponse({ sessions: [LIST_SESSION] }),
     ...composerOptionsRoute(),
+    ...composerReadRoutes(),
     ...centerRoutes(),
     "/api/info": () =>
       jsonResponse({
@@ -212,6 +214,7 @@ describe("侧栏会话列表区 (S11)", () => {
       "/api/workspaces": () => jsonResponse({ workspaces: [] }),
       "/api/sessions": sessions,
       ...composerOptionsRoute(),
+      ...composerReadRoutes(),
       ...centerRoutes(),
       "/api/info": () =>
         jsonResponse({

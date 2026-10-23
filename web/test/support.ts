@@ -82,9 +82,16 @@ export function expectRequestFailure(error: ApiError, status: number) {
   });
 }
 
+/** 会话能力端点的哨兵键：精确键未命中时，`/api/sessions/<id>/capabilities` 回落到它（只有登记了它的表才回落）。 */
+export const CAPABILITIES_ROUTE = "/api/sessions/:id/capabilities";
+const CAPABILITIES_PATH = /^\/api\/sessions\/[^/]+\/capabilities$/;
+
 function fetchRouteHandler(routes: FetchRoutes) {
   return (path: string, options?: RequestInit) => {
-    const route = routes[path];
+    const route =
+      Object.hasOwn(routes, path) || !CAPABILITIES_PATH.test(path)
+        ? routes[path]
+        : routes[CAPABILITIES_ROUTE];
     const result =
       typeof route === "function"
         ? route(path, options)
@@ -113,6 +120,19 @@ export function composerOptionsRoute(
   body: ComposerOptions = DEFAULT_COMPOSER_OPTIONS,
 ): FetchRoutes {
   return { "/api/composer/options": () => jsonResponse(body) };
+}
+
+/**
+ * 路由表里输入框的两类读取的缺省应答（chat-web「能力读取时机」）：`GET /api/experts` → `{experts: []}`，
+ * 任一会话的 `GET /api/sessions/<id>/capabilities`（哨兵键）→ `{expertId: null, disabledSkills: []}`。凡挂载会话页
+ * 输入框的整页路由表都与 `composerOptionsRoute()` 并列展开它，用例写同一个键（精确路径或哨兵键）即覆盖。漏登记
+ * 同样被 `fetchResponse` 吞掉，所以计数类用例以精确请求清单写出这两类读取。
+ */
+export function composerReadRoutes(): FetchRoutes {
+  return {
+    "/api/experts": () => jsonResponse({ experts: [] }),
+    [CAPABILITIES_ROUTE]: () => jsonResponse({ expertId: null, disabledSkills: [] }),
+  };
 }
 
 /**
@@ -165,6 +185,9 @@ export function allowWorkspaceListFetch() {
     }
     if (path === "/api/skills") {
       return Promise.resolve(jsonResponse({ skills: [], disabledSkills: [] }));
+    }
+    if (CAPABILITIES_PATH.test(String(path))) {
+      return Promise.resolve(jsonResponse({ expertId: null, disabledSkills: [] }));
     }
     if (!defaultHandler) {
       throw new Error(`unexpected request ${String(path)}`);

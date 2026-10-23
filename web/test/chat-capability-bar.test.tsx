@@ -1,7 +1,7 @@
 // 能力行（chat-web「输入框与能力栏」、session-sidebar「composer footer 工作空间选择」）：已选会话的工作空间位
 // 是只读标签的四种文案（临时空间的判定在最前，不看工作空间列表），回到欢迎态后是可操作的选择器；左组次序
-// 是「+」、工作空间、权限档位，右组是模型、推理强度、`发送`（三个控件在输入框选项取得后才有）；能力行没有
-// 专家与麦克风控件。临时空间会话以其 workspaceId 取命令目录与项目配置。窄屏的换行与截断只断言类名与结构
+// 是「+」、（有专家时的）专家标签、工作空间、权限档位，右组是模型、推理强度、`发送`（三个控件在输入框选项取得
+// 后才有）；没有专家时没有专家标签，任何时候都没有麦克风控件。临时空间会话以其 workspaceId 取命令目录与项目配置。窄屏的换行与截断只断言类名与结构
 // （jsdom 不排版）。选项读取失败后没有这三个控件，重取成功后出现。
 // seam：整页挂载 + 假 API。期望文案取自规格条文。
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -266,7 +266,7 @@ describe("能力栏：临时空间会话", () => {
 });
 
 describe("能力栏：欢迎态", () => {
-  it("「+」按钮在左组最前、工作空间选择器其后、权限按钮第三，模型、强度与发送键在右组；没有专家与麦克风控件，未选入文件时没有附件标签区", async () => {
+  it("「+」按钮在左组最前、工作空间选择器其后、权限按钮第三，模型、强度与发送键在右组；没有选过专家时没有专家标签，没有麦克风控件，未选入文件时没有附件标签区", async () => {
     mountSessions("/", []);
     await screen.findByRole("heading", { level: 1, name: HERO });
     const { left, right, toolbar } = toolbarGroups();
@@ -283,10 +283,60 @@ describe("能力栏：欢迎态", () => {
     expect(Array.from(right.children)).toEqual(buttons.slice(3));
     expect(right.contains(buttons[5] as HTMLElement)).toBe(true);
     expect(left.contains(buttons[5] as HTMLElement)).toBe(false);
+    // 没有专家：没有标签（有专家时的次序见下一例）。
     for (const text of ["专家", "麦克风", "完全访问", "默认权限"]) {
       expect(toolbar.textContent).not.toContain(text);
     }
+    expect(toolbar.querySelector('[data-slot="composer-expert"]')).toBeNull();
     expect(cardChildren()).toEqual(["label", "textarea", "composer-toolbar"]);
+  });
+});
+
+describe("能力栏：有专家", () => {
+  it("已选会话的能力带专家：左组依次为「+」、专家 · 测试工程师（内含 移除专家）、只读工作空间、权限；输入卡的子元素不变；恰一次 listExperts 与一次 GET …/capabilities", async () => {
+    const { fetchMock } = mountSessions(`/?session=${A}`, sessions(), {
+      "/api/workspaces": () => workspaceList(PROJECT_A),
+      "/api/experts": () =>
+        jsonResponse({
+          experts: [
+            {
+              id: "builtin:test-engineer",
+              name: "测试工程师",
+              description: "",
+              category: "开发",
+              tags: [],
+              prompt: "你是一位测试工程师。",
+              skills: [],
+              builtin: true,
+            },
+          ],
+        }),
+      [`/api/sessions/${A}/capabilities`]: () =>
+        jsonResponse({ expertId: "builtin:test-engineer", disabledSkills: [] }),
+    });
+    await expectReadOnly("任务启动于 项目A");
+    const { left, toolbar } = toolbarGroups();
+    const tier = await within(toolbar).findByRole("button", { name: TIER });
+    const expert = await waitFor(() => {
+      const found = left.querySelector<HTMLElement>('[data-slot="composer-expert"]');
+      expect(found?.textContent).toBe("专家 · 测试工程师");
+      return found as HTMLElement;
+    });
+
+    expect(Array.from(left.children)).toEqual([
+      within(toolbar).getByRole("button", { name: PLUS }),
+      expert,
+      workspaceSlot(),
+      tier,
+    ]);
+    expect(within(expert).getByRole("button", { name: "移除专家" })).toBeTruthy();
+    expect(within(toolbar).queryAllByRole("alert")).toEqual([]);
+    expect(cardChildren()).toEqual(["label", "textarea", "composer-toolbar"]);
+    await quiesce();
+    expect(paths(fetchMock).filter((path) => path === "/api/experts")).toHaveLength(1);
+    expect(paths(fetchMock).filter((path) => path.endsWith("/capabilities"))).toEqual([
+      `/api/sessions/${A}/capabilities`,
+    ]);
   });
 });
 

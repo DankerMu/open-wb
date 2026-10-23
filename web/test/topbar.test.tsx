@@ -17,6 +17,7 @@ import {
   authenticatedPrincipal,
   centerRoutes,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   deferredResponse,
   expectExpertsTabSettled,
@@ -79,6 +80,7 @@ function mountApp(path: string, routes: FetchRoutes = {}) {
         auth: { provider: "dev-stub" },
       }),
     ...composerOptionsRoute(),
+    ...composerReadRoutes(),
     ...centerRoutes(),
     ...routes,
   });

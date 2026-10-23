@@ -6,6 +6,7 @@ import { createAppRouter } from "../src/routes/index.js";
 import {
   centerRoutes,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   currentLocation,
   jsonResponse,
@@ -20,6 +21,7 @@ export function authenticatedRoutes(routes: Parameters<typeof createFetchMock>[0
     "/api/workspaces": jsonResponse({ workspaces: [] }),
     "/api/sessions": jsonResponse({ sessions: [] }),
     ...composerOptionsRoute(),
+    ...composerReadRoutes(),
     ...centerRoutes(),
     ...routes,
   };

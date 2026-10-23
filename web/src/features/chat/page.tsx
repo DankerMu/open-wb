@@ -13,6 +13,11 @@ import { useSlashMenu } from "./slash-menu.js";
 import { chatTopbar } from "./topbar-actions.js";
 import { UndoConflictDialog } from "./undo-conflict-dialog.js";
 import { useChatSession } from "./use-chat-session.js";
+import {
+  useExpertHandOff,
+  useExpertList,
+  useSessionCapabilities,
+} from "./use-session-capabilities.js";
 import { useSessionListView } from "./use-session-list-view.js";
 import { useWorkspaceSidebar } from "./use-workspace-sidebar.js";
 import { WorkspaceSplit } from "./workspace-sidebar.js";
@@ -47,6 +52,11 @@ export function ChatPage() {
     selected !== undefined && selected.archivedAt !== null
       ? sessionActions.restoreNotice(selected.id)
       : null;
+  // 专家清单每个 client 取一次（与输入框选项同一时机）；会话能力按解析出的选中会话 id 每变化取一次（归档会话
+  // 同样取；欢迎态与无法解析的 id 不取）。
+  const experts = useExpertList(client, requestedSessionId);
+  const capabilities = useSessionCapabilities(client, selected?.id);
+  useExpertHandOff(session.welcome.selectExpert);
   const slash = useSlashMenu(
     client,
     session.slashWorkspaceId,
@@ -103,11 +113,13 @@ export function ChatPage() {
         <ConversationView
           approvalMode={selected?.approvalMode}
           archived={archived}
+          capabilities={capabilities}
           client={client}
           composerDisabled={session.composerDisabled}
           composerOptions={session.composerOptions}
           composerRef={session.composerRef}
           draft={draft}
+          experts={experts}
           files={files}
           generating={session.generating}
           historyError={session.historyError}

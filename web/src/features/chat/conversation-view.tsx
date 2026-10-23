@@ -12,7 +12,7 @@ import type { ComposerOptions } from "../../lib/composer-contract.js";
 import type { ChatSession } from "../../lib/session-contract.js";
 import { ArchivedNotice } from "./archived-notice.js";
 import type { useAttachmentArea } from "./attachment-chips.js";
-import { CapabilityBar } from "./capability-bar.js";
+import { CapabilityBar, type ExpertChoice } from "./capability-bar.js";
 import { Composer } from "./composer.js";
 import { ComposerDock } from "./composer-dock.js";
 import { Thread } from "./message-thread.js";
@@ -21,6 +21,7 @@ import type { useSlashMenu } from "./slash-menu.js";
 import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";
 import { UndoNotice } from "./undo-notice.js";
+import type { ExpertList, SessionCapabilityState } from "./use-session-capabilities.js";
 import { WelcomeIntro, WelcomePlaybooks } from "./welcome.js";
 import type { WelcomeOptions } from "./welcome-options.js";
 import type { SessionSpace, Workspace } from "./workspace-list.js";
@@ -117,6 +118,42 @@ function modelSlot({
   );
 }
 
+/**
+ * 能力栏的专家位：欢迎态读写页面状态里的选择（不发请求）；已选会话取其能力的 `expertId`（读取中或失败时
+ * 没有标签），选择即恰一次 `PUT`。会话还没解析出来（`workspaceId` 为 undefined）时没有可写的会话，专家控件
+ * 同 `PUT` 在途一样禁用。
+ */
+function expertChoice({
+  capabilities,
+  experts,
+  requestedSessionId,
+  welcome,
+  workspaceId,
+}: Pick<
+  ConversationViewProps,
+  "capabilities" | "experts" | "requestedSessionId" | "welcome" | "workspaceId"
+>): ExpertChoice {
+  const list = { experts: experts.experts, refresh: experts.refresh };
+  if (!requestedSessionId) {
+    return { ...list, onChoose: welcome.selectExpert, pending: false, selected: welcome.expertId };
+  }
+  return {
+    ...list,
+    onChoose: capabilities.chooseExpert,
+    pending: capabilities.pending || workspaceId === undefined,
+    selected: capabilities.capabilities?.expertId ?? null,
+  };
+}
+
+/** chat column 里的一条错误提示；没有文案时不渲染。 */
+function ColumnAlert({ message }: { message: string | null }) {
+  return message ? (
+    <p className="ui-alert flex-none" role="alert">
+      {message}
+    </p>
+  ) : null;
+}
+
 type ConversationViewProps = {
   /** 当前会话视图的权限档位；欢迎态与会话还没解析出来时为 undefined。 */
   approvalMode: ChatSession["approvalMode"] | undefined;
@@ -125,6 +162,8 @@ type ConversationViewProps = {
    * 只读：不渲染输入框（含能力栏）与停靠区的内容，线程不出 `撤回`、`从此处分叉` 与 `重新生成`。
    */
   archived: ComponentProps<typeof ArchivedNotice> | null;
+  /** 已选会话的能力与换专家（欢迎态不用）；`error` 是上一次换专家失败的文案。 */
+  capabilities: SessionCapabilityState;
   /** 当前账号的 API client；产物卡经它按需拉取预览。 */
   client: ApiClient;
   composerDisabled: boolean;
@@ -133,6 +172,8 @@ type ConversationViewProps = {
   /** 输入框元素：回到欢迎态后由会话页聚焦它，「+」菜单点选后也聚焦它。 */
   composerRef: RefObject<HTMLTextAreaElement | null>;
   draft: string;
+  /** 会话页的专家清单（标签名称与专家对话框的来源）。 */
+  experts: ExpertList;
   /** 附件区的四块：输入卡里的标签、提示、隐藏的文件输入框与「+」菜单的 `上传文件` 项。 */
   files: ReturnType<typeof useAttachmentArea>;
   generating: boolean;
@@ -189,11 +230,13 @@ type ConversationViewProps = {
 export function ConversationView({
   approvalMode,
   archived,
+  capabilities,
   client,
   composerDisabled,
   composerOptions,
   composerRef,
   draft,
+  experts,
   files,
   generating,
   historyError,
@@ -263,21 +306,11 @@ export function ConversationView({
         data-slot="chat-column"
       >
         {search.box}
-        {historyError ? (
-          <p className="ui-alert flex-none" role="alert">
-            {historyError}
-          </p>
-        ) : null}
-        {promptError ? (
-          <p className="ui-alert flex-none" role="alert">
-            {promptError}
-          </p>
-        ) : null}
-        {streamError ? (
-          <p className="ui-alert flex-none" role="alert">
-            {streamError}
-          </p>
-        ) : null}
+        <ColumnAlert message={historyError} />
+        <ColumnAlert message={promptError} />
+        <ColumnAlert message={streamError} />
+        {/* 换专家失败（`PUT …/capabilities`）：与 `promptError` 并列的独立元素，不进输入卡。 */}
+        <ColumnAlert message={capabilities.error} />
         {files.notice}
         {requestedSessionId ? (
           <Thread
@@ -332,6 +365,13 @@ export function ConversationView({
                   workspacesError: welcome.workspacesError,
                 }}
                 disabled={composerDisabled}
+                expert={expertChoice({
+                  capabilities,
+                  experts,
+                  requestedSessionId,
+                  welcome,
+                  workspaceId,
+                })}
                 inputRef={composerRef}
                 plus={slash.plus}
                 upload={files.upload}

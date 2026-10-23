@@ -11,6 +11,7 @@ import {
   authenticatedPrincipal,
   centerRoutes,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   currentLocation,
   jsonResponse,
@@ -27,6 +28,7 @@ function authenticatedChatRoutes(routes: FetchRoutes = {}): FetchRoutes {
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     ...composerOptionsRoute(),
+    ...composerReadRoutes(),
     ...centerRoutes(),
     ...routes,
   };

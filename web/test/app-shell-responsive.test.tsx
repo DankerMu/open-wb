@@ -13,6 +13,7 @@ import {
   authenticatedPrincipal,
   centerRoutes,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   deferredResponse,
   type FetchMock,
@@ -67,6 +68,7 @@ function mountShell(path: string, routes: Routes = {}) {
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/auth/logout": () => new Response(null, { status: 204 }),
     ...composerOptionsRoute(),
+    ...composerReadRoutes(),
     ...centerRoutes(),
     ...routes,
   });

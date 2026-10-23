@@ -538,13 +538,18 @@ async function step10PlusMenu(page: Page): Promise<void> {
   await expect(composer).toHaveValue("");
   page.on("request", record);
   await trigger.click();
-  // 数组形式逐项对应且项数相等：`上传文件` 之后恰两项，按目录顺序。
-  await expect(menu.getByRole("menuitem")).toContainText(["上传文件", ...SLASH_LABELS]);
+  // 数组形式逐项对应且项数相等：`上传文件`、`选择专家…` 之后是命令段，按目录顺序。
+  await expect(menu.getByRole("menuitem")).toContainText([
+    "上传文件",
+    "选择专家…",
+    ...SLASH_LABELS,
+  ]);
   await page.evaluate(() => {
     const gap = () => document.querySelector("[role=menu]>p") && document.body.classList.add("gap");
     new MutationObserver(gap).observe(document.body, { childList: true, subtree: true });
   });
-  await menu.getByRole("menuitem").nth(1).click();
+  // 按名称点第一条命令（不按下标：命令段之前的条目数不是它的契约）。
+  await menu.getByRole("menuitem", { name: "整理上下文" }).click();
   await expect(menu).toHaveCount(0);
   await expect(page.locator("body.gap"), "退场中的菜单出现 暂无可用项").toHaveCount(0);
   await expect(composer).toHaveValue("/compact ");

@@ -1,6 +1,6 @@
-// 输入框底部的能力栏（design D6、D13、D14），即工具行的左组，自左向右：「+」菜单（添加文件或命令）、
-// 工作空间位（欢迎态是选择器，会话开始后是只读标签）；权限档位控件排在其后。专家、麦克风等控件不渲染，
-// 也不摆禁用占位。窄屏下工作空间位有最大宽度，完整文字在 `title` 里。
+// 输入框底部的能力栏（design D6、D13、D14；s1d-experts-skills D9），即工具行的左组，自左向右：「+」菜单（添加
+// 文件或命令）、专家标签（有专家时）、工作空间位（欢迎态是选择器，会话开始后是只读标签）；权限档位控件排在
+// 工作空间之后。麦克风不渲染，也不摆禁用占位。窄屏下工作空间位与专家标签有最大宽度，完整文字在 `title` 里。
 import { type ComponentProps, type RefObject, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,8 +12,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Icon } from "../../components/icon.js";
+import type { ExpertView } from "../../lib/api.js";
 import { useAuth } from "../auth/index.js";
 import { logicalPath } from "../files/index.js";
+import { ExpertPicker, useExpertDialog } from "./expert-picker.js";
 import { PermissionTier } from "./permission-tier.js";
 import { sourceTag, type useSlashMenu } from "./slash-menu.js";
 import type { WelcomeOptions } from "./welcome-options.js";
@@ -29,11 +31,26 @@ type WorkspaceChoice = Pick<WelcomeOptions, "workspace" | "workspaces" | "worksp
 
 type PlusMenu = ReturnType<typeof useSlashMenu>["plus"];
 
+/**
+ * 专家（experts「输入框的专家选择」）：`selected` 为当前专家 id，null 即没有专家、不渲染标签；`onChoose` 在欢迎态
+ * 只改页面状态，会话中恰一次 `PUT …/capabilities`；`pending` 即该 `PUT` 在途或会话还没解析出来（`选择专家…` 与
+ * `移除专家` 禁用）。
+ * `experts` 是会话页的专家清单（标签名称与对话框列表的来源），`refresh` 在对话框每次打开时重取它。
+ */
+export type ExpertChoice = {
+  experts: readonly ExpertView[] | null;
+  onChoose(expertId: string | null): void;
+  pending: boolean;
+  refresh(): Promise<boolean>;
+  selected: string | null;
+};
+
 type CapabilityBarProps = {
   /** 欢迎态的空间选择；`onSelect` 只改会话页的内存状态。 */
   choice: WorkspaceChoice;
   /** 输入框锁定：选择器按钮随之禁用。 */
   disabled: boolean;
+  expert: ExpertChoice;
   /** 输入框元素：「+」菜单点选后把焦点交给它。 */
   inputRef: RefObject<HTMLTextAreaElement | null>;
   /**
@@ -59,18 +76,29 @@ type CapabilityBarProps = {
 export function CapabilityBar({
   choice,
   disabled,
+  expert,
   inputRef,
   permission,
   plus,
   session,
   upload,
 }: CapabilityBarProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialog = useExpertDialog(expert.refresh);
   return (
     <div
       className="flex min-w-0 flex-1 items-center gap-1 narrow:basis-auto"
       data-slot="composer-capabilities"
     >
-      <CommandMenu inputRef={inputRef} plus={plus} upload={upload} />
+      <CommandMenu
+        expertDisabled={expert.pending}
+        inputRef={inputRef}
+        onPickExpert={dialog.show}
+        plus={plus}
+        triggerRef={triggerRef}
+        upload={upload}
+      />
+      {expert.selected === null ? null : <ExpertLabel {...expert} selected={expert.selected} />}
       {session === undefined ? (
         <WorkspacePicker {...choice} disabled={disabled} />
       ) : (
@@ -84,7 +112,48 @@ export function CapabilityBar({
           onChange={permission.onChange}
         />
       )}
+      <ExpertPicker
+        experts={expert.experts}
+        onChoose={expert.onChoose}
+        onClose={dialog.close}
+        restoreFocus={() => triggerRef.current?.focus()}
+        status={dialog.status}
+      />
     </div>
+  );
+}
+
+/**
+ * `专家 · <名称>` 标签与清除按钮 `移除专家`：名称取自专家清单，id 尚不在清单里（读取中、失败或已不可见）时只
+ * 显示 `专家`，清除照常。
+ */
+function ExpertLabel({
+  experts,
+  onChoose,
+  pending,
+  selected,
+}: ExpertChoice & { selected: string }) {
+  const name = experts?.find((item) => item.id === selected)?.name;
+  const text = name === undefined ? "专家" : `专家 · ${name}`;
+  return (
+    <span
+      className="flex min-w-0 flex-none items-center gap-0.5 rounded-md bg-(--wb-brand-primary-subtle) pl-2 text-[0.8rem] text-(--wb-brand-primary-deep) narrow:max-w-40 narrow:flex-initial"
+      data-slot="composer-expert"
+      title={text}
+    >
+      <span className="min-w-0 truncate">{text}</span>
+      <Button
+        aria-label="移除专家"
+        className="flex-none text-(--wb-brand-primary-deep)"
+        disabled={pending}
+        onClick={() => onChoose(null)}
+        size="icon-xs"
+        type="button"
+        variant="ghost"
+      >
+        <Icon name="x" size={12} />
+      </Button>
+    </span>
   );
 }
 
@@ -95,14 +164,23 @@ const MENU_NOTE = "m-0 px-1.5 py-1 text-sm text-muted-foreground";
  * 只有 `暂无可用项`，目录到达后列表就地替换它。点选把草稿写成 `/<name> `，菜单关闭后焦点交给输入框而不是
  * 回到按钮；Esc 等其它关闭方式仍按菜单默认把焦点还给按钮。草稿非空白时菜单照常打开，命令条目不可选，
  * 列表前有一行 `清空输入后可选择命令`（菜单的直接子元素）。给出 `upload` 时第一项是 `上传文件`：它不看草稿、
- * 不看目录（拉取中、失败、为空时都在），点选只打开文件选择框，不动草稿。
+ * 不看目录（拉取中、失败、为空时都在），点选只打开文件选择框，不动草稿。其后是 `选择专家…`：同样不看草稿与
+ * 目录，`PUT …/capabilities` 在途或会话还没解析出来时禁用；点选打开专家对话框，菜单关闭时焦点留给对话框。
  */
 function CommandMenu({
+  expertDisabled,
   inputRef,
+  onPickExpert,
   plus,
+  triggerRef,
   upload,
-}: Pick<CapabilityBarProps, "inputRef" | "plus" | "upload">) {
-  const picked = useRef(false);
+}: Pick<CapabilityBarProps, "inputRef" | "plus" | "upload"> & {
+  expertDisabled: boolean;
+  onPickExpert(): void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
+  /** 关闭菜单的那次点选要把焦点交给谁：命令交给输入框，`选择专家…` 交给对话框；其余按菜单默认还给按钮。 */
+  const picked = useRef<"input" | "dialog" | null>(null);
   return (
     <DropdownMenu onOpenChange={plus.onOpenChange} open={plus.open}>
       <DropdownMenuTrigger asChild>
@@ -110,6 +188,7 @@ function CommandMenu({
           aria-label="添加文件或命令"
           className="flex-none text-muted-foreground"
           disabled={plus.disabled}
+          ref={triggerRef}
           size="icon-sm"
           type="button"
           variant="ghost"
@@ -121,10 +200,11 @@ function CommandMenu({
         className="w-80 max-w-(--radix-dropdown-menu-content-available-width)"
         collisionPadding={8}
         onCloseAutoFocus={(event) => {
-          if (!picked.current) return;
-          picked.current = false;
+          const target = picked.current;
+          if (target === null) return;
+          picked.current = null;
           event.preventDefault();
-          inputRef.current?.focus();
+          if (target === "input") inputRef.current?.focus();
         }}
         side="top"
       >
@@ -140,6 +220,16 @@ function CommandMenu({
             )}
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem
+          className="text-[13px] leading-5 font-medium"
+          disabled={expertDisabled}
+          onSelect={() => {
+            picked.current = "dialog";
+            onPickExpert();
+          }}
+        >
+          选择专家…
+        </DropdownMenuItem>
         {plus.commands === undefined || plus.commands.length === 0 ? (
           <p className={MENU_NOTE}>暂无可用项</p>
         ) : (
@@ -153,7 +243,7 @@ function CommandMenu({
                   disabled={plus.locked}
                   key={command.name}
                   onSelect={() => {
-                    picked.current = true;
+                    picked.current = "input";
                     plus.onPick(command);
                   }}
                 >

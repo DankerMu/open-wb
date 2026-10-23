@@ -8,6 +8,7 @@ import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   jsonResponse,
   serviceInfo,
@@ -48,6 +49,7 @@ async function mountNarrow(path: string, heading: string, sessions: unknown[] = 
       "/api/sessions": () => jsonResponse({ sessions }),
       "/api/workspaces": () => jsonResponse({ workspaces: [] }),
       ...composerOptionsRoute(),
+      ...composerReadRoutes(),
     }),
   );
   disposeRouter = () => mounted.router.dispose();

@@ -14,6 +14,10 @@ type Picked = Pick<
  * 所以选中会话后回到欢迎态仍在。选中的空间只存 id，每次渲染按当前已读取的列表解析：列表里找不到
  * （重读后已不存在、读取失败或换了账号）即 `workspace` 为 null，按钮文本与 `createBody()` 随之一致；
  * 它重新出现在列表里时选择恢复。`picked` 与 `scene` 同生命周期：首次发送后不清，换账号不清。
+ *
+ * 专家（experts「输入框的专家选择」）另存一份、不进 `picked`：`picked` 非空的创建成功后输入框选项缓存失效
+ * （`use-chat-session.ts`），只选专家的首次发送不应多一次 `getComposerOptions`。null 即没有专家（含选了
+ * `不使用专家`），此时创建请求不带 `expertId` 键（`POST /api/sessions` 不接受 null）。同样与 `scene` 同生命周期。
  */
 export function useWelcomeOptions(
   workspaces: readonly Workspace[] | null,
@@ -24,6 +28,7 @@ export function useWelcomeOptions(
   const workspace = workspaces?.find((item) => item.id === workspaceId) ?? null;
   const effectiveId = workspace?.id;
   const [picked, setPicked] = useState<Picked>({});
+  const [expertId, selectExpert] = useState<string | null>(null);
   /** 合并进 `picked`；值为 `undefined` 的键删除（换到不支持推理的模型时清掉强度）。 */
   const pick = useCallback((patch: { [K in keyof Picked]?: Picked[K] | undefined }) => {
     setPicked(
@@ -43,21 +48,27 @@ export function useWelcomeOptions(
       return current.approvalMode === undefined ? {} : { approvalMode: current.approvalMode };
     });
   }, []);
-  /** `POST /api/sessions` 的 body：没有生效空间时不带 `workspaceId` 键，`picked` 只带选过的键。 */
+  /**
+   * `POST /api/sessions` 的 body：没有生效空间时不带 `workspaceId` 键，`picked` 只带选过的键，没有专家时不带
+   * `expertId` 键。
+   */
   const createBody = useCallback(
     () => ({
       scene,
       ...(effectiveId === undefined ? {} : { workspaceId: effectiveId }),
       ...picked,
+      ...(expertId === null ? {} : { expertId }),
     }),
-    [effectiveId, picked, scene],
+    [effectiveId, expertId, picked, scene],
   );
   return {
     createBody,
     defaultModelChanged,
+    expertId,
     pick,
     picked,
     scene,
+    selectExpert,
     selectScene,
     selectWorkspace,
     workspace,

@@ -278,6 +278,9 @@ const OTHER_CLIENT_METHODS = [
   "deleteExpert",
   "listSkills",
   "putSkillDefaults",
+  // 会话能力（design D7；experts「输入框的专家选择」）
+  "getSessionCapabilities",
+  "putSessionCapabilities",
   // 登录态与服务信息
   "getMe",
   "getInfo",
