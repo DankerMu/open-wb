@@ -11,7 +11,13 @@ import type { LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { probeUpstream } from "../src/models/probe.js";
 import { ompAgentDir } from "../src/sessions/omp/state-layout.js";
-import { closedPort, countingServer, holdServer, scriptedServer } from "./models-probe-helpers.js";
+import {
+  closedPort,
+  countingServer,
+  holdServer,
+  recordingServer,
+  scriptedServer,
+} from "./models-probe-helpers.js";
 import {
   BAD_REQUEST,
   call,
@@ -177,6 +183,18 @@ describe("四种结果与无上游", () => {
     const { value, from, to } = await timed(() => probe(world, "slash"));
     expectProbed(world, "slash", value, { from, to }, { status: "ok", message: null });
     expect(world.upstream.modelsRequests()).toEqual([{ authorization: `Bearer ${FAKE_KEY}` }]);
+  });
+
+  it("a base URL with a query is probed at …/v1/models?org=a (#1710)", async () => {
+    const world = await openModelsWorld();
+    const server = await recordingServer((response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end('{"data":[]}');
+    });
+    await addModel(world, "query", { baseUrl: local(server.port, "/v1?org=a"), apiKey: OTHER_KEY });
+    const { value, from, to } = await timed(() => probe(world, "query"));
+    expectProbed(world, "query", value, { from, to }, { status: "ok", message: null });
+    expect(server.urls).toEqual(["/v1/models?org=a"]);
   });
 
   it("a 302 is not followed: failed with HTTP 302 and no connection to its Location", async () => {

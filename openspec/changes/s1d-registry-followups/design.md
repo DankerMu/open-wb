@@ -14,10 +14,13 @@
 - **D1 单一 helper**：`core/base-url.ts` 是唯一实现，`models/` 与 `model-proxy/` 都经 core 引用（不互相导入，system.md 依赖规则）。
 - **D2 视图形式**：`withoutUserinfo(s)`：`new URL(s)` 成功且 `username` 或 `password` 非空 → 清空两者后返回 `href`；成功但无 userinfo → 返回既有正则替换的结果（authority 内没有 `@` 时即原样，不做规范化；`https://@host/v1` 这类空 userinfo 仍去掉 `@`）；解析抛错 → 退回正则替换。兜底正则容忍前导空白与 `:` 后任意个 `/` 或 `\`（`^\s*([A-Za-z][A-Za-z0-9+.-]*:[\/\\]*)((?:[^\/\\?#][^\/?#]*)?)@`；userinfo 段沿用 master 的 `[^/?#]*`，**允许 `\`**，但首字符不得是 `/` 或 `\`，使前缀的 `[/\\]*` 与它边界确定、匹配保持线性（两段都能吃 `\` 时一长串 `\` 会二次方回溯）——`DOMAIN\user:p@h`、密码里未编码的 `\` 在 master 上也被去掉，不得回退），使 WHATWG 解析不了的非规范种子地址（如 ` https://u:p@h:abc/v1`、`https:\u:p@ho st/v1`）也去掉 userinfo；`userinfoParts` 用同一正则。纯函数。
 - **D3 净化部件**：`userinfoParts(s)` 返回正则取到的原文 userinfo 与其密码段，并上 `new URL` 一侧的「userinfo 整串」（`password === "" ? username : `${username}:${password}``）与 `password`，以及二者的 `decodeURIComponent` 形式（解码失败则略），去重去空；URL 一侧的整串只在 `password` 非空、或正则未取到 userinfo 时加入（`https://admin:@h` 的空密码不把 `admin` 单列，正则原文 `admin:` 已在列表里）。**不单列 `username`**：短用户名（`u`、`admin`）会把正常报错文本削碎（与 `upstream-failure.ts:15` 不单列短路径段同理；`model-proxy-failures.test.ts:110,118` 的 `Authorization` 会被打成 `A[已移除]thorization`）。集合语义与 upstream-failure 规格「userinfo 原串与其中的密码段」一致，只是取法补上 WHATWG 解析，所以该规格不改。`baseUrlParts` 用它替换内联正则。
-- **D4 拼接**：`upstreamEndpoint(s, sub)`：`u = new URL(s)`；`u.pathname = u.pathname.replace(/\/+$/u, "") + "/" + sub`；`u.hash = ""`；返回 `u`。查询串保留；userinfo 原样保留在 URL 上（与现状一致：Node `http(s).request` 在显式 `authorization` 头存在时不另发 Basic）。探活 `sub = "models"`，代理 `sub = "chat/completions"`。
+- **D4 拼接**：`upstreamEndpoint(s, sub)`：`u = new URL(s)`；`u.pathname` 去掉结尾的 `/` 后接 `"/" + sub`（从尾部回扫，不用 `/\/+$/u`：一长串 `/` 后跟非 `/` 时该正则逐起点重试，O(n²)；master `probe.ts:87` 即此写法，一并消除）；`u.hash = ""`；返回 `u`。查询串保留；userinfo 原样保留在 URL 上（与现状一致：Node `http(s).request` 在显式 `authorization` 头存在时不另发 Basic）。探活 `sub = "models"`，代理 `sub = "chat/completions"`。
 - **D5 不禁止 `?`**：REST 地址规则不变。
 
 ## Risks / Trade-offs
+
+- 拼接改走 WHATWG 路径：http(s) 下 `…/v1\` 与 `…/v1//` 同类，结尾分隔符一并去掉。非 http(s) 的种子地址（如 `foo:bar`，只能由 env 写入）路径不可设，`sub` 被忽略，失败从构造 URL 挪到 `http.request`：代理仍是被捕获的 502（`ERR_INVALID_URL` → `ERR_INVALID_PROTOCOL`），探活仍是「无法连接」——不处理。
+- 拼接先解析再接路径：WHATWG 去掉首尾空白，env 种子 `http://h/v1 ` 由旧的 `/v1%20/…` 变为 `/v1/…`，`http://h ` 由构造即抛变为可达（REST 地址规则 `[^\s#@]` 本就拒空白）；与视图形式、净化部件对同一字符串的解析一致。查询串整体在净化密钥集里（upstream-failure 规格），单个参数值不单列——代理此前不转发查询串、现在转发，回显单个参数值的上游正文不被替换；规格取舍，不在本 change 改。
 
 - 代理拼接改为 URL 语义：对 `…/v1`、`…/v1/`、`http://h`（无路径）三类与改动前逐字相同（用例逐条钉住）；带查询串的 base URL、路径以多个斜杠结尾（`…/v1//` 由 `/v1//chat/completions` 变为 `/v1/chat/completions`，与探活一致）、空查询（`…/v1?` 由丢掉 `v1` 变为保留）行为改变，都是从错变对。
 - `withoutUserinfo` 对带 userinfo 的地址返回 WHATWG 规范化后的 `href`（如前导空格去掉、`http:/` 补成 `http://`）。沿用分支的往返判据以同一函数计算，客户端送回视图形式即命中。

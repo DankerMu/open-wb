@@ -1,8 +1,9 @@
 /**
  * s1d-model-registry group 8 (task 8.2): the test-local upstreams of `models-probe.test.ts` — a
  * listener that accepts connections and never answers (the `超时` and serialisation cases), a
- * plain HTTP server with a scripted answer (302, a long 500, a 500 body that never ends), and a
- * port nothing listens on. All on loopback; every one is closed after its test.
+ * plain HTTP server with a scripted answer (302, a long 500, a 500 body that never ends), the same
+ * that records each request line's target (a base URL with a query), and a port nothing listens on.
+ * All on loopback; every one is closed after its test.
  */
 import { createServer as createHttpServer, type ServerResponse } from "node:http";
 import { createServer as createNetServer, type Server, type Socket } from "node:net";
@@ -78,6 +79,21 @@ export async function scriptedServer(answer: (response: ServerResponse) => void)
   return listen(server, () => {
     server.closeAllConnections();
   });
+}
+
+/** Like `scriptedServer`, and records each request line's target (`req.url`) in arrival order. */
+export async function recordingServer(
+  answer: (response: ServerResponse) => void,
+): Promise<{ port: number; urls: string[] }> {
+  const urls: string[] = [];
+  const server = createHttpServer((request, response) => {
+    urls.push(request.url ?? "");
+    answer(response);
+  });
+  const port = await listen(server, () => {
+    server.closeAllConnections();
+  });
+  return { port, urls };
 }
 
 /** A loopback port that was just bound and released: connecting to it is refused. */

@@ -30,8 +30,8 @@ Suggested fixture level: compact - 只加用例。
 
 ## 3. 上游端点拼接（#1710）
 
-- [ ] 3.1 核对 Context：`models/probe.ts:87`、`model-proxy/index.ts:571-574`、`fake-upstream.mjs` 的路径匹配（是否忽略查询串）。
-- [ ] 3.2 测试先行（记录请求行用 `model-proxy-helpers.ts` 的 `startRecordingUpstream`，它记 `url`；`models-probe-helpers.ts` 的 `scriptedServer` 不记）：`core-base-url.test.ts` 加 spec「拼接保留查询串且既有形状不变」五例；`models-probe.test.ts` 加带查询串一例（测试内服务记录 `req.url` = `/v1/models?org=a`）；代理用例加带查询串一例（记录 `req.url` = `/v1/chat/completions?org=a`）并钉住 `…/v1`、`…/v1/`、无路径三类的转发路径与 `…/v1//` → `/v1/chat/completions`。
-- [ ] 3.3 `core/base-url.ts` 加 `upstreamEndpoint`；`probe.ts` 与 `model-proxy/index.ts` 改用它（删 `joinChatCompletions`）。
+- [x] 3.1 核对 Context：`models/probe.ts:87`、`model-proxy/index.ts:571-574`、`fake-upstream.mjs` 的路径匹配（是否忽略查询串）。
+- [x] 3.2 测试先行（记录请求行用 `model-proxy-helpers.ts` 的 `startRecordingUpstream`，它记 `url`；`models-probe-helpers.ts` 的 `scriptedServer` 不记）：`core-base-url.test.ts` 加 spec「拼接保留查询串且既有形状不变」五例；`models-probe.test.ts` 加带查询串一例（测试内服务记录 `req.url` = `/v1/models?org=a`）；代理用例加带查询串一例（记录 `req.url` = `/v1/chat/completions?org=a`）并钉住 `…/v1`、`…/v1/`、无路径三类的转发路径与 `…/v1//` → `/v1/chat/completions`。
+- [x] 3.3 `core/base-url.ts` 加 `upstreamEndpoint`；`probe.ts` 与 `model-proxy/index.ts` 改用它（删 `joinChatCompletions`）。
 
 Suggested fixture level: expanded - 代理转发目标。

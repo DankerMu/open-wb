@@ -1,10 +1,11 @@
 /**
- * s1d-registry-followups group 1 (#1712): core/base-url.ts, model-registry「上游地址的视图形式与拼接」
- * (`withoutUserinfo` / `userinfoParts`; design D2, D3). Expected views and part lists are literals
- * written from the spec text and the WHATWG URL rules, not computed by the code under test.
+ * s1d-registry-followups groups 1 and 3 (#1712, #1710): core/base-url.ts, model-registry「上游地址的
+ * 视图形式与拼接」(`withoutUserinfo` / `userinfoParts` / `upstreamEndpoint`; design D2–D4). Expected
+ * views, part lists and endpoints are literals written from the spec text and the WHATWG URL rules,
+ * not computed by the code under test.
  */
 import { describe, expect, it } from "vitest";
-import { userinfoParts, withoutUserinfo } from "../src/core/base-url.js";
+import { upstreamEndpoint, userinfoParts, withoutUserinfo } from "../src/core/base-url.js";
 import { upstreamSecretList } from "../src/core/upstream-failure.js";
 
 /** Low-entropy sentinel (gitleaks): the password of every userinfo form below. */
@@ -156,6 +157,46 @@ describe("a long run of slashes and backslashes without `@` (#1713 round 3)", ()
     const started = performance.now();
     expect(withoutUserinfo(input)).toBe(input);
     expect(userinfoParts(input)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});
+
+/** spec「拼接保留查询串且既有形状不变」, `sub = "chat/completions"`, in the spec's order. */
+const ENDPOINTS: readonly (readonly [string, string])[] = [
+  ["http://h/v1", "http://h/v1/chat/completions"],
+  ["http://h/v1/", "http://h/v1/chat/completions"],
+  ["http://h", "http://h/chat/completions"],
+  ["http://h/tenant/v1?org=a", "http://h/tenant/v1/chat/completions?org=a"],
+  ["http://h/v1#frag", "http://h/v1/chat/completions"],
+];
+
+describe("upstreamEndpoint (#1710)", () => {
+  it.each(ENDPOINTS)("%j + chat/completions is %j", (baseUrl, endpoint) => {
+    expect(upstreamEndpoint(baseUrl, "chat/completions").href).toBe(endpoint);
+  });
+
+  it("a path ending in several slashes loses them all; the probe's sub joins the same prefix", () => {
+    expect(upstreamEndpoint("http://h/v1//", "chat/completions").href).toBe(
+      "http://h/v1/chat/completions",
+    );
+    expect(upstreamEndpoint("http://h/tenant/v1/?org=a", "models").href).toBe(
+      "http://h/tenant/v1/models?org=a",
+    );
+  });
+
+  it("keeps the userinfo on the URL", () => {
+    expect(upstreamEndpoint("http://u:p@h/v1", "models").href).toBe("http://u:p@h/v1/models");
+  });
+
+  it("throws on what WHATWG cannot parse (both call sites catch it)", () => {
+    expect(() => upstreamEndpoint("http://h:abc/v1", "models")).toThrow(TypeError);
+  });
+
+  // `/\/+$/u` retries every start of a long slash run that does not reach the end: O(n²).
+  it("trims a long run of slashes not at the end in linear time", { timeout: 1000 }, () => {
+    const run = "/".repeat(100_000);
+    const started = performance.now();
+    expect(upstreamEndpoint(`http://h/${run}x`, "models").href).toBe(`http://h/${run}x/models`);
     expect(performance.now() - started).toBeLessThan(1000);
   });
 });

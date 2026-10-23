@@ -180,6 +180,31 @@ describe("byte-preserving credential substitution", () => {
     });
   });
 
+  // model-proxy「上游端点拼接」(#1710): the three shapes without a query forward as before; a
+  // trailing slash run goes like the probe's; the query stays after the joined path.
+  it.each([
+    ["/v1", "/v1/chat/completions"],
+    ["/v1/", "/v1/chat/completions"],
+    ["", "/chat/completions"],
+    ["/v1//", "/v1/chat/completions"],
+    ["/v1?org=a", "/v1/chat/completions?org=a"],
+  ])("base path %j forwards to %j", async (basePath, forwarded) => {
+    const upstream = resources.track(
+      await startRecordingUpstream(({ response }) => {
+        response.writeHead(204);
+        response.end();
+      }),
+    );
+    await withListeningProxy(configured(upstream.origin, basePath), async (origin) => {
+      const response = await postCompletions(origin, { body: MODEL_BODY });
+      expect(response.status).toBe(204);
+      expect(upstream.requests).toHaveLength(1);
+      const recorded = lastRecord(upstream.requests);
+      expect(recorded.url).toBe(forwarded);
+      expect(recorded.headers.authorization).toBe(`Bearer ${API_KEY}`);
+    });
+  });
+
   it("accepts exactly 4MiB valid JSON and rejects one extra byte before upstream", async () => {
     const exact = jsonBodyOfSize(FOUR_MIB);
     const over = jsonBodyOfSize(FOUR_MIB + 1);

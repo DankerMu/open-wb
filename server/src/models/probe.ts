@@ -1,6 +1,7 @@
 /**
  * models/probe — one probe of a model's upstream (s1d-model-registry D11; model-registry「探活」).
- * `GET <baseUrl without its trailing slashes>/models` with `authorization: Bearer <apiKey>` and
+ * `GET upstreamEndpoint(baseUrl, "models")` (core/base-url: path without its trailing slashes,
+ * then `/models`, query kept) with `authorization: Bearer <apiKey>` and
  * `accept: application/json` over a fresh connection (`agent: false`): no redirect is followed,
  * nothing is retried. 2xx → `ok` (the body is drained, not awaited); any other status → `failed`
  * with `HTTP <status>：<excerpt>` — at most 16 KiB of the body (`core/error-body.ts`), sanitised by
@@ -13,6 +14,7 @@ import type { ClientRequest, IncomingMessage } from "node:http";
 import http from "node:http";
 import https from "node:https";
 import type { Socket } from "node:net";
+import { upstreamEndpoint } from "../core/base-url.js";
 import { readErrorBody } from "../core/error-body.js";
 import { capPoints, upstreamExcerpt, upstreamSecretList } from "../core/upstream-failure.js";
 
@@ -84,7 +86,7 @@ function openProbe(
   upstream: { baseUrl: string; apiKey: string },
   onResponse: (response: IncomingMessage) => void,
 ): { req: ClientRequest; tls: boolean } {
-  const endpoint = new URL(`${upstream.baseUrl.replace(/\/+$/u, "")}/models`);
+  const endpoint = upstreamEndpoint(upstream.baseUrl, "models");
   const tls = endpoint.protocol === "https:";
   const req = (tls ? https : http).request(
     endpoint,
