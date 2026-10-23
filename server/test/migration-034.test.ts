@@ -35,6 +35,7 @@ import {
   MIGRATION_044,
   MIGRATION_045,
   MIGRATION_046,
+  MIGRATION_047,
   MIGRATION_0010,
   migrationReceiptExists,
   removeTempDirs,
@@ -99,7 +100,7 @@ const STEP_COLUMNS = [
   "output",
 ] as const;
 
-// [name, type, notnull, dflt_value, pk] in declaration order (032 + 033 + 034, then the 035, 036, 037, 040 and 042–045 tails).
+// [name, type, notnull, dflt_value, pk] in declaration order (032 + 033 + 034, then the 035, 036, 037, 040, 042–045 and 047 tails).
 const TABLE_INFO: Record<string, Array<[string, string, number, string | null, number]>> = {
   chat_sessions: [
     ["id", "TEXT", 1, null, 1],
@@ -119,6 +120,8 @@ const TABLE_INFO: Record<string, Array<[string, string, number, string | null, n
     ["approval_mode", "TEXT", 0, null, 0],
     ["model_id", "TEXT", 0, null, 0],
     ["reasoning_effort", "TEXT", 0, null, 0],
+    ["expert_id", "TEXT", 0, null, 0],
+    ["disabled_skills", "TEXT", 1, "'[]'", 0],
   ],
   chat_messages: [
     ["id", "INTEGER", 0, null, 1],
@@ -273,6 +276,7 @@ function seed033Database(path: string, seed: (db: DatabaseSync) => void): void {
         MIGRATION_044,
         MIGRATION_045,
         MIGRATION_046,
+        MIGRATION_047,
       ].includes(asset.filename),
   );
   const filenames = assets.map((asset) => asset.filename);

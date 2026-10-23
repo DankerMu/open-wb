@@ -6,7 +6,7 @@
 ## ADDED Requirements
 
 ### Requirement: 迁移 047 专家与能力 schema
-迁移 `047_experts_skills.sql` SHALL 在既有 runner 持有的事务内原子执行，回执紧随 `046_models.sql`：建表 `experts(id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL CHECK (category IN ('开发','办公','设计','产品')), tags TEXT NOT NULL, prompt TEXT NOT NULL, skills TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)` 与索引 `experts_owner(owner_id, created_at)`；建表 `account_skill_prefs(account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE, disabled_skills TEXT NOT NULL, updated_at INTEGER NOT NULL)`；给 `chat_sessions` 加列 `expert_id TEXT NULL` 与 `disabled_skills TEXT NOT NULL DEFAULT '[]'`。`tags`、`skills`、`disabled_skills` 为 JSON 字符串数组文本。`expert_id` 不设外键（内置专家不在表里）。迁移前已有的会话 SHALL 读出无专家、无停用技能，行为与迁移前相同。
+迁移 `047_experts_skills.sql` SHALL 在既有 runner 持有的事务内原子执行，回执紧随 `046_models.sql`：建表 `experts(id TEXT NOT NULL PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL CHECK (category IN ('开发','办公','设计','产品')), tags TEXT NOT NULL, prompt TEXT NOT NULL, skills TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)` 与索引 `experts_owner(owner_id, created_at)`；建表 `account_skill_prefs(account_id TEXT NOT NULL PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE, disabled_skills TEXT NOT NULL, updated_at INTEGER NOT NULL)`；给 `chat_sessions` 加列 `expert_id TEXT NULL` 与 `disabled_skills TEXT NOT NULL DEFAULT '[]'`。`tags`、`skills`、`disabled_skills` 为 JSON 字符串数组文本。`expert_id` 不设外键（内置专家不在表里）。迁移前已有的会话 SHALL 读出无专家、无停用技能，行为与迁移前相同。
 
 #### Scenario: 建表与缺省
 - **WHEN** 在已有一个会话与一个账号的库上运行迁移，随后删除该账号
@@ -20,7 +20,7 @@
 - **THEN** 列表前四项依次为上述四个 id，`builtin` 为 true，各自 `prompt` 码点数在 300..1500、`skills` 为 `[]`
 
 ### Requirement: 专家校验与可见性
-自建专家的字段 SHALL 满足：`name` trim 后 1..32 码点；`description` 0..200 码点（缺省空串）；`category` 为 `开发` / `办公` / `设计` / `产品` 之一；`tags` 至多 5 项，每项 trim 后 1..12 码点，去重保序；`prompt` trim 后 1..8000 码点，存 trim 后文本；`skills` 至多 32 项，每项为技能名（1..128 UTF-8 字节、无控制字符、不含 `,`），去重后按字典序存储；每账号自建至多 50 个。违反任一条 SHALL 400 `bad_request`，message 不回显取值。对某账号可见的专家 = 全部内置专家 ∪ `owner_id` 为该账号的自建专家；对不可见专家的任何操作 SHALL 与不存在的 id 相同。自建专家 id 由服务端生成（32 位小写 hex）。
+自建专家的字段 SHALL 满足：`name` trim 后 1..32 码点；`description` 0..200 码点（缺省空串）；`category` 为 `开发` / `办公` / `设计` / `产品` 之一；`tags` 至多 5 项，每项 trim 后 1..12 码点，去重保序；`prompt` trim 后 1..8000 码点，存 trim 后文本；`skills` 至多 32 项，每项为技能名（1..128 UTF-8 字节、不含控制字符 U+0000–U+001F 与 U+007F、不含 `,`），去重后按字典序存储；每账号自建至多 50 个。违反任一条 SHALL 400 `bad_request`，message 不回显取值。对某账号可见的专家 = 全部内置专家 ∪ `owner_id` 为该账号的自建专家；对不可见专家的任何操作 SHALL 与不存在的 id 相同。自建专家 id 由服务端生成（32 位小写 hex）。
 
 #### Scenario: 他人专家不可见
 - **WHEN** 账号甲建专家 X；账号乙 `GET /api/experts`、`PUT /api/experts?id=X`、`DELETE /api/experts?id=X`，并以 `expertId: X` 创建会话
