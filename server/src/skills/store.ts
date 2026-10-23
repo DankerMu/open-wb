@@ -3,13 +3,18 @@
  * design D4, D6; skill-switches「技能清单与账号缺省」storage part). The rule here is the only one:
  * expert `skills`, the account defaults and a session's disabled list all go through
  * `normalizeSkillNames`, and `GET /api/skills` filters the platform skills by `isSkillName`. A
- * refused name throws the fixed-message `bad_request` (no value echoed). List-size caps are the callers' (experts: 32; the endpoints of groups 4 and 5: 128).
+ * refused name throws the fixed-message `bad_request` (no value echoed). `MAX_DISABLED_SKILLS` (128,
+ * counted before deduplication) is the one cap of a disabled list — account defaults, session creation
+ * and session capabilities; the callers apply it. An expert's own cap (32) stays in the experts store.
  * Pure DB, `node:sqlite` sync; the writes run in the caller's transaction, if any.
  */
 import type { DatabaseSync } from "node:sqlite";
 import { HttpError } from "../core/errors/index.js";
 
 const MAX_SKILL_NAME_BYTES = 128;
+
+/** The most items a disabled-skill list may carry, counted before deduplication. */
+export const MAX_DISABLED_SKILLS = 128;
 
 const SELECT_PREFS = "SELECT disabled_skills FROM account_skill_prefs WHERE account_id = ?";
 const UPSERT_PREFS =

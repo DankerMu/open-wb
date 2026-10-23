@@ -15,7 +15,12 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, FastifyRequest, onRequestHookHandler } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import { listSkills } from "../sessions/slash-commands.js";
-import { isSkillName, readAccountDisabledSkills, saveAccountDisabledSkills } from "./store.js";
+import {
+  isSkillName,
+  MAX_DISABLED_SKILLS,
+  readAccountDisabledSkills,
+  saveAccountDisabledSkills,
+} from "./store.js";
 
 export interface SkillRestDependencies {
   db: DatabaseSync;
@@ -24,7 +29,6 @@ export interface SkillRestDependencies {
 }
 
 const SKILLS_BODY_LIMIT = 64 * 1024;
-const MAX_DISABLED_SKILLS = 128;
 const BODY_KEY = "disabledSkills";
 
 const noStore: onRequestHookHandler = (_request, reply, done) => {
