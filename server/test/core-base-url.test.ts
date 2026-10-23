@@ -147,3 +147,15 @@ describe("a backslash inside the userinfo (#1713 round 2)", () => {
     },
   );
 });
+
+describe("a long run of slashes and backslashes without `@` (#1713 round 3)", () => {
+  // The prefix `[/\\]*` and the userinfo must not both take a `\`: that tries every split, O(n²).
+  // A synchronous call cannot be cut off by the `it` timeout, so the elapsed time is asserted too.
+  it("returns the input unchanged and no parts in linear time", { timeout: 1000 }, () => {
+    const input = `https:${"\\".repeat(100_000)}`;
+    const started = performance.now();
+    expect(withoutUserinfo(input)).toBe(input);
+    expect(userinfoParts(input)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+});

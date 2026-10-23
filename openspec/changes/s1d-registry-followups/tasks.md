@@ -17,6 +17,7 @@
 - [x] 1.3 新 `server/src/core/base-url.ts`（`withoutUserinfo`、`userinfoParts`；`upstreamEndpoint` 在组 3 加）；`store.ts` 的 `viewBaseUrl` 改为 `withoutUserinfo` 的再导出或直接替换调用处（删 `USERINFO`）；`upstream-failure.ts` 的 `baseUrlParts` 用 `userinfoParts` 替换内联正则。
 - [x] 1.4 修复轮（#1713 安全审查）：兜底正则按 design D2 放宽并由两函数共用；`userinfoParts` 的 URL 侧整串只在密码非空或正则未命中时加入；用例：` https://u:<哨兵>@h:abc/v1`、`https:\\u:<哨兵>@ho st/v1`、`foo:/u:<哨兵>@h` 的视图不含哨兵且 `userinfoParts` 含哨兵；`https://admin:@h/v1` 的 `userinfoParts` 不含单独的 `admin`；含制表符的密码（`https://u:pa\tss@h/v1`）净化后正文中的 `pass` 被去掉；`upstream-failure.ts:166` 注释更新为现取法。
 - [x] 1.5 修复轮 2（#1713 第 2 轮审查 P1）：兜底正则第 2 组恢复为 `[^/?#]*`（允许 `\`），保留 `^\s*` 与 `:[/\\]*`；`core-base-url.test.ts` 加 `https://u:<哨兵>\\x@h/v1`（解析失败）与 `http://DOMAIN\\u:<哨兵>@h/v1`（解析成功但无 userinfo）两例：视图分别为 `https://h/v1` / `http://h/v1`、不含哨兵、`userinfoParts` 含哨兵；先在当前 head 上跑红。
+- [x] 1.6 修复轮 3（#1713 第 3 轮安全 P2，owner「继续」批准）：兜底正则第 2 组改为 `((?:[^/\\?#][^/?#]*)?)`，语义同 1.5、匹配线性；`core-base-url.test.ts` 加钉住用例：`"https:" + "\\".repeat(100_000)` 的 `withoutUserinfo` 与 `userinfoParts` 在设定上限的超时内完成（先在 01dca286 上跑红）；NON_CANONICAL / REGEX_ONLY / BACKSLASH_USERINFO 与 models-rest 非规范种子表照旧通过。
 
 Suggested fixture level: expanded - 凭证泄露（credentials）。
 
