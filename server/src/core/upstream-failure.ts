@@ -5,6 +5,7 @@
  * ≥500 body and the five failure envelopes the proxy answers omp with (model-proxy「透传端点与
  * bearer 鉴权」, design D6–D9).
  */
+import { userinfoParts } from "./base-url.js";
 
 /** The truncation mark of every capped text: step detail/output, thinking and upstream text. */
 export const TRUNCATED_MARK = "…（已截断）";
@@ -163,9 +164,10 @@ export function capPoints(text: string, max: number): string {
 
 /**
  * The secret list of upstream-failure「上游原文净化」: the API key; the base URL as configured; its
- * userinfo (between `//` and `@`) and the password in it; its pathname (not empty, not `/`) and each
- * segment of it at least 8 long; its query without `?`; and every absolute path given. The host is
- * not a secret (it names the provider). Empty and repeated entries are dropped.
+ * userinfo and the password in it, raw and as WHATWG parses them (`core/base-url` `userinfoParts`,
+ * never the user name alone); its pathname (not empty, not `/`) and each segment of it at least 8
+ * long; its query without `?`; and every absolute path given. The host is not a secret (it names the
+ * provider). Empty and repeated entries are dropped.
  */
 export function upstreamSecretList(input: {
   apiKey?: string | undefined;
@@ -180,12 +182,7 @@ function baseUrlParts(baseUrl: string): string[] {
   if (baseUrl === "") {
     return [];
   }
-  const parts = [baseUrl];
-  const userinfo = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)@/u.exec(baseUrl)?.[1];
-  if (userinfo !== undefined) {
-    const colon = userinfo.indexOf(":");
-    parts.push(userinfo, colon === -1 ? "" : userinfo.slice(colon + 1));
-  }
+  const parts = [baseUrl, ...userinfoParts(baseUrl)];
   let url: URL;
   try {
     url = new URL(baseUrl);

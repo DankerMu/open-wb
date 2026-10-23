@@ -135,6 +135,24 @@ describe("upstreamSecretList", () => {
     ).toEqual(["k", "https://tok-0123@gw.example/", "tok-0123"]);
   });
 
+  it("removes the password of a non-canonical `http:/u:…@` base URL from an echoed body, not the bare user name (#1712)", () => {
+    const password = "wb-issue1712-pw";
+    const secrets = upstreamSecretList({
+      apiKey: "k",
+      baseUrl: `http:/u:${password}@gw.example/v1`,
+      paths: [],
+    });
+    expect(sanitizeUpstreamText(`user u rejected: bad password ${password}`, secrets)).toBe(
+      "user u rejected: bad password [已移除]",
+    );
+  });
+
+  it("removes both the raw and the WHATWG form of a password with a tab in it (#1713)", () => {
+    // WHATWG strips the tab (`password` = `pass`); the raw userinfo keeps it.
+    const secrets = upstreamSecretList({ baseUrl: "https://u:pa\tss@h/v1", paths: [] });
+    expect(sanitizeUpstreamText("a pass b pa\tss c", secrets)).toBe("a [已移除] b [已移除] c");
+  });
+
   it("lists a path given twice (a realpath equal to its original) once", () => {
     expect(upstreamSecretList({ paths: ["/srv/wb/state", "/srv/wb/state"] })).toEqual([
       "/srv/wb/state",
