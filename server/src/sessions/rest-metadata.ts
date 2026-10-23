@@ -14,6 +14,11 @@
  * before parsing, no body read (not a parser owner), the deletion itself is `session-delete.ts`;
  * 204 with no body. Each of the three tells the list notifier once after its commit, before the
  * reply (#932); a refused or rolled-back write throws before that line.
+ * s1d-experts-skills (D7): the create body also takes `expertId` (an expert visible to the caller,
+ * checked through the injected `experts` reader) and `disabledSkills` (at most 128 raw items of
+ * valid skill names); both are judged before the workspace's 404. POST's body limit is 64 KiB
+ * (128 names), PATCH keeps 16 KiB. The owner pre-check, the capability-body parsers and the expert
+ * check are exported for `rest-capabilities.ts`.
  * Imports only the supervisor port type from `rest.ts` (it imports this).
  */
 import type {
@@ -26,11 +31,14 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import type { createExpertStore } from "../experts/store.js";
+import { MAX_DISABLED_SKILLS, normalizeSkillNames } from "../skills/store.js";
 import type { SessionListNotifier } from "./list-events.js";
 import type { SessionSupervisorPort } from "./rest.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
 import type { SessionStore } from "./store.js";
+import type { SessionExpert } from "./store-capabilities.js";
 import type {
   SessionCreateInput,
   SessionMetadataStore,
@@ -38,8 +46,14 @@ import type {
   SessionScene,
 } from "./store-metadata.js";
 
+/** The experts store's plain read: built-in experts and the caller's own, else undefined. */
+export type ExpertReader = Pick<ReturnType<typeof createExpertStore>, "get">;
+
+type OwnedParams = { Params: SessionIdParams };
+
 interface SessionMetadataRouteDependencies {
   metadata: SessionMetadataStore;
+  experts: ExpertReader;
   workspaceRootOf: WorkspaceRootOf;
   store: Pick<SessionStore, "getMessages" | "noteTitleWrite">;
   deleter: Pick<SessionDeleter, "deleteSession">;
@@ -51,9 +65,17 @@ interface SessionIdParams {
   id: string;
 }
 
-const SESSION_METADATA_BODY_LIMIT = 16 * 1024;
+/** 128 skill names of up to 128 bytes, JSON-escaped, need ~33 KB (as `PUT /api/skills/defaults`). */
+const SESSION_CREATE_BODY_LIMIT = 64 * 1024;
+const SESSION_PATCH_BODY_LIMIT = 16 * 1024;
 const COMPOSER_KEYS = ["approvalMode", "modelId", "reasoningEffort"] as const;
-const CREATE_KEYS: ReadonlySet<string> = new Set(["workspaceId", "scene", ...COMPOSER_KEYS]);
+const CREATE_KEYS: ReadonlySet<string> = new Set([
+  "workspaceId",
+  "scene",
+  ...COMPOSER_KEYS,
+  "expertId",
+  "disabledSkills",
+]);
 const PATCH_KEYS: ReadonlySet<string> = new Set([
   "title",
   "scene",
@@ -65,36 +87,49 @@ const SCENES: ReadonlySet<string> = new Set<SessionScene>(["office", "code", "de
 const TITLE_MAX_CODE_POINTS = 80;
 
 /** Same header as `rest.ts` `noStoreSessionHeaders`, declared before the guard and the parser. */
-const noStoreMetadataResponse: onRequestHookHandler = (_request, reply, done) => {
+export const noStoreMetadataResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
   done();
 };
+
+/**
+ * Same semantics as `rest.ts` requireOwnedSession: unknown and foreign ids share one 404, before
+ * the body is parsed; nothing is cached and no stream cursor is taken.
+ */
+export function authorizeOwnedBeforeParse(
+  store: Pick<SessionStore, "getMessages">,
+): preParsingHookHandler<
+  RawServerDefault,
+  RawRequestDefaultExpression<RawServerDefault>,
+  RawReplyDefaultExpression<RawServerDefault>,
+  OwnedParams
+> {
+  return (request, _reply, payload, done) => {
+    const principal = createPrincipal(request);
+    if (store.getMessages(request.params.id, principal.id) === null) {
+      throw new HttpError("not_found");
+    }
+    done(null, payload);
+  };
+}
 
 export function registerSessionMetadataRoutes(
   app: FastifyInstance,
   dependencies: SessionMetadataRouteDependencies,
 ): void {
-  // Same semantics as `rest.ts` requireOwnedSession: unknown and foreign ids share one 404, before
-  // the body is parsed; nothing is cached and no stream cursor is taken.
-  const authorizeOwnedBeforeParse: preParsingHookHandler<
-    RawServerDefault,
-    RawRequestDefaultExpression<RawServerDefault>,
-    RawReplyDefaultExpression<RawServerDefault>,
-    { Params: SessionIdParams }
-  > = (request, _reply, payload, done) => {
-    const principal = createPrincipal(request);
-    if (dependencies.store.getMessages(request.params.id, principal.id) === null) {
-      throw new HttpError("not_found");
-    }
-    done(null, payload);
-  };
+  const ownedBeforeParse = authorizeOwnedBeforeParse(dependencies.store);
 
   app.post(
     "/api/sessions",
-    { bodyLimit: SESSION_METADATA_BODY_LIMIT, onRequest: noStoreMetadataResponse },
+    { bodyLimit: SESSION_CREATE_BODY_LIMIT, onRequest: noStoreMetadataResponse },
     async (request, reply) => {
       const principal = createPrincipal(request);
-      const input = request.body === undefined ? {} : parseCreateBody(request.body);
+      const { expertId, ...body } = request.body === undefined ? {} : parseCreateBody(request.body);
+      // Judged before the workspace's 404: an invisible expert is a 400 whatever the workspace.
+      const input: SessionCreateInput =
+        expertId === undefined
+          ? body
+          : { ...body, expert: requireVisibleExpert(dependencies.experts, principal.id, expertId) };
       // rootOf throwing (root exists but is not a plain directory) propagates as a generic 5xx.
       if (
         input.workspaceId !== undefined &&
@@ -107,12 +142,12 @@ export function registerSessionMetadataRoutes(
       return reply.code(201).send(created);
     },
   );
-  app.patch<{ Params: SessionIdParams }>(
+  app.patch<OwnedParams>(
     "/api/sessions/:id",
     {
-      bodyLimit: SESSION_METADATA_BODY_LIMIT,
+      bodyLimit: SESSION_PATCH_BODY_LIMIT,
       onRequest: noStoreMetadataResponse,
-      preParsing: authorizeOwnedBeforeParse,
+      preParsing: ownedBeforeParse,
     },
     async (request, reply) => {
       const principal = createPrincipal(request);
@@ -140,9 +175,9 @@ export function registerSessionMetadataRoutes(
   );
   // No bodyLimit and no body read: a well-formed body is ignored; a parser failure stays the
   // generic non-owner 500 before this handler runs.
-  app.delete<{ Params: SessionIdParams }>(
+  app.delete<OwnedParams>(
     "/api/sessions/:id",
-    { onRequest: noStoreMetadataResponse, preParsing: authorizeOwnedBeforeParse },
+    { onRequest: noStoreMetadataResponse, preParsing: ownedBeforeParse },
     async (request, reply) => {
       const principal = createPrincipal(request);
       // It rejects only before its commit: resolved means the row is gone.
@@ -153,7 +188,7 @@ export function registerSessionMetadataRoutes(
   );
 }
 
-function createPrincipal(request: FastifyRequest): { id: string } {
+export function createPrincipal(request: FastifyRequest): { id: string } {
   const principal = request.principal;
   if (principal === null) {
     throw new HttpError("unauthorized");
@@ -162,22 +197,50 @@ function createPrincipal(request: FastifyRequest): { id: string } {
 }
 
 /**
- * A plain JSON object whose keys ⊆ the five create keys; strings (text/plain) are never parsed.
- * `workspaceId` and the three composer keys are any string: their values are judged later.
+ * A plain JSON object whose keys ⊆ the seven create keys; strings (text/plain) are never parsed.
+ * `workspaceId`, `expertId` and the three composer keys are any string: their values are judged
+ * later; `disabledSkills` is judged here in full.
  */
-function parseCreateBody(body: unknown): SessionCreateInput {
+function parseCreateBody(body: unknown): SessionCreateInput & { expertId?: string } {
   if (!isPlainObject(body) || Object.keys(body).some((key) => !CREATE_KEYS.has(key))) {
     throw new HttpError("bad_request");
   }
-  const input: SessionCreateInput = {};
+  const input: SessionCreateInput & { expertId?: string } = {};
   if (Object.hasOwn(body, "workspaceId")) {
     input.workspaceId = requireString(body.workspaceId);
   }
   if (Object.hasOwn(body, "scene")) {
     input.scene = requireScene(body.scene);
   }
+  if (Object.hasOwn(body, "expertId")) {
+    input.expertId = requireString(body.expertId);
+  }
+  if (Object.hasOwn(body, "disabledSkills")) {
+    input.disabledSkills = requireDisabledSkills(body.disabledSkills);
+  }
   readComposerKeys(body, input);
   return input;
+}
+
+/** An array of at most 128 raw items, each a skill name; returned deduplicated and sorted. */
+export function requireDisabledSkills(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_DISABLED_SKILLS) {
+    throw new HttpError("bad_request");
+  }
+  return normalizeSkillNames(value);
+}
+
+/** The expert `id` names when the owner can see it (built-in or own); otherwise `bad_request`. */
+export function requireVisibleExpert(
+  experts: ExpertReader,
+  ownerId: string,
+  id: string,
+): SessionExpert {
+  const expert = experts.get(ownerId, id);
+  if (expert === undefined) {
+    throw new HttpError("bad_request");
+  }
+  return { id: expert.id, skills: expert.skills };
 }
 
 /** Copies the composer keys the body has into `into`; each must be a string (`null` is not). */
@@ -242,7 +305,7 @@ function requireBoolean(value: unknown): boolean {
   return value;
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return (
     typeof value === "object" && value !== null && Object.getPrototypeOf(value) === Object.prototype
   );

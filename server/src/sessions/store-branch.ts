@@ -244,8 +244,9 @@ const FORK_LAST_ASSISTANT =
   "SELECT id FROM chat_messages WHERE session_id = ? AND role = 'assistant' ORDER BY created_at DESC, id DESC LIMIT 1";
 const FORK_POINT =
   "SELECT created_at FROM chat_messages WHERE id = ? AND session_id = ? AND role = 'user'";
+// s1d-experts-skills D7: the two capability columns as stored, an invisible expert's id included.
 const FORK_SESSION =
-  "INSERT INTO chat_sessions(id, owner_id, title, status, omp_session_file, parent_session_id, created_at, updated_at, workspace_id, scene, approval_mode, model_id, reasoning_effort) SELECT ?, owner_id, title, 'idle', ?, id, ?, ?, workspace_id, scene, ?, model_id, reasoning_effort FROM chat_sessions WHERE id = ?";
+  "INSERT INTO chat_sessions(id, owner_id, title, status, omp_session_file, parent_session_id, created_at, updated_at, workspace_id, scene, approval_mode, model_id, reasoning_effort, expert_id, disabled_skills) SELECT ?, owner_id, title, 'idle', ?, id, ?, ?, workspace_id, scene, ?, model_id, reasoning_effort, expert_id, disabled_skills FROM chat_sessions WHERE id = ?";
 const FORK_HISTORY =
   "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
 const FORK_MESSAGE =

@@ -22,6 +22,8 @@ sessions 模块 SHALL 注册 `GET /api/sessions/:id/capabilities` 与 `PUT /api/
 #### Scenario: 拒绝与归档
 - **WHEN** 对他人会话 `GET`；对自己会话 `PUT {}`、`PUT {skills:[]}`、`PUT {expertId:"builtin:nope"}`；对已归档会话 `PUT {disabledSkills:[]}`
 - **THEN** 404；三个 400；409 `session_archived`；会话行不变
+- **WHEN** 对已归档会话 `GET /api/sessions/:id/capabilities`
+- **THEN** 200，body 为该会话的能力（归档会话可被选中只读呈现）
 
 ### Requirement: 停用技能对 omp 生效
 每一次 spawn SHALL 把会话停用集合的每个名称以 `skill:<名称>` 写进 omp-runtime「子进程 spawn 契约」规定的会话配置文件的 `disabledExtensions`；omp SHALL 因此不加载这些技能（平台与项目技能同样）。斜杠候选与输入框「+」菜单的命令段 SHALL 不列出名称为 `skill:<停用名>` 的条目（客户端按当前会话的能力过滤；`GET /api/commands` 不变）。

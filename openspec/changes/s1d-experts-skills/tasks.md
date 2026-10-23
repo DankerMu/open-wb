@@ -12,6 +12,7 @@
 | 两份真相（会话能力 vs 存活进程） | 是 | 组 6 指纹判据 |
 | 越权（他人专家、内置专家写入、他人会话能力） | 是 | 组 3、组 5 的 401 / 400 / 403 / 404 矩阵 |
 | 公开 API 与装配兼容（既有归属身份、DELETE 非归属路由的 generic 500、启动模块记录） | 是 | 组 3–5 的 `http-parser-owners` 正负向清单与写死模块列表的启动用例 |
+| 会话持久化状态（创建同事务读账号缺省写两列、fork 复制两列、有效专家读规则） | 是 | 组 5 `session-capabilities.test.ts` 的创建初值、fork 与有效专家用例 |
 | 迁移与 DB 约束 | 是 | 组 2：`experts-store.test.ts` 迁移段 + 2.3 所列迁移目录 / 表 / 列快照常量 |
 | 文件泄漏与可读性（会话配置残留、提示词进日志 / 审计、omp uid 读不到会话配置文件） | 是 | 组 1 退出删除、启动清扫与 CI `uid-isolation`、组 3 审计 detail |
 | 用户可见回归（`/center` 普通用户、能力行次序、斜杠候选、请求计数） | 是 | 组 7、组 9、组 10 |
@@ -65,10 +66,20 @@ Minimal mergeable slice: atomic - 一个读端点与一个写端点共用同一�
 
 ## 5. 会话能力（skill-switches「会话能力端点」+ session-metadata「会话创建与空间绑定」「fork 继承会话元数据」+ http-service-skeleton 的一条归属身份）
 
-- [ ] 5.1 核对 Context：`rest-metadata.ts` 的 `CREATE_KEYS` 与创建流程、`PATCH /api/sessions/:id` 的 owner 预检先于 body 的写法、fork 的最终事务（chat-sessions「会话 REST」fork 段）、归档判定、`session_archived` 码。
-- [ ] 5.2 测试先行：新 `server/test/session-capabilities.test.ts`：skill-switches「缺省停用」场景的会话部分（账号缺省停用后新建会话的初值、改缺省不影响已有会话）；`POST /api/sessions` 带 `expertId` / `disabledSkills` 的合法与 400（不可见专家、坏名称）；初值规则（body > 账号缺省 > `[]`；只要给了专家——不论是否同时给 `disabledSkills`——再去掉专家声明的技能：「创建时的专家与停用技能」第三例为 `[]`）；会话视图仍十四键；`GET` / `PUT …/capabilities` 的 owner 401 / 404（先于 body）、`{}` 与多余键 400、归档 409；「并集与清空」四步（第三步 `[]`、第四步只带 `disabledSkills` 才停用专家的技能）；`PUT` 与当前相同的值 200 且行不变；在途回合期间 `PUT` 200 且回合照常结束（supervisor 无动作）；fork 复制两列；`PUT /api/sessions/:id/capabilities` 的 content-parser 400（body limit 64 KiB）；归属身份二十四 → 二十五。
-- [ ] 5.3 `POST /api/sessions` 的 body limit 由 16 KiB 改为 64 KiB（`rest-metadata.ts` 的共用常量拆开：`PATCH /api/sessions/:id` 保持 16 KiB，session-metadata「会话元数据修改」）、`PUT …/capabilities` 64 KiB（session-metadata「会话创建与空间绑定」、http-service-skeleton）；`rest-metadata.ts` 创建键与初值；新 `server/src/sessions/rest-capabilities.ts` 注册两个路由；fork 事务复制两列；归属集加一条身份。
-- [ ] 5.4 `docs/architecture/system.md`「专家与技能」一节加会话能力端点与并集规则。
+- [x] 5.1 核对 Context：`rest-metadata.ts` 的 `CREATE_KEYS`、共用 body limit 常量与创建流程、`store-metadata.ts` 的 `INSERT_SESSION` / `createSession`、`PATCH /api/sessions/:id` 的 owner 预检先于 body 的写法（`authorizeOwnedBeforeParse`）、fork 的最终事务（`store-branch.ts:248` 的 INSERT…SELECT）、归档判定 `metadata.archivedAt`、`session_archived` 码。
+- [x] 5.2 测试先行：新 `server/test/session-capabilities.test.ts`：
+  - skill-switches「缺省停用」场景的会话部分（账号缺省停用后新建会话的初值、改缺省不影响已有会话）；初值规则（body > 账号缺省 > `[]`；只要给了专家——不论是否同时给 `disabledSkills`——再去掉专家声明的技能：「创建时的专家与停用技能」四例逐值）；会话视图仍十四键；创建不改 `account_skill_prefs`、不新增审计。
+  - 创建的 400（先于 `workspaceId` 判定，不写会话 / 空间行、目录与审计，带 no-store）：`expertId` 为 `null`、`builtin:nope`、另一账号的专家、非字符串；`disabledSkills` 非数组、坏名称、129 个原始项（含重复）；128 项（含重复）201 且去重排序。内置专家正例：`expertId: "builtin:test-engineer"` 201。
+  - `GET` / `PUT …/capabilities`：owner 预检 401 / 404 先于 body（各带 malformed body 一例）；`PUT` 的 400 各一例且会话行不变——`{}`、多余键、`{expertId: "builtin:nope"}`、另一账号的专家 id、`{expertId: 1}`、坏名称、129 原始项（128 项含重复 200 且去重）；`PUT` 内置专家 200、`{expertId: null}` 200（与创建时 `null` 400 对照）；`PUT` 已归档会话 409 `session_archived`，`GET` 已归档会话 200（session-sidebar 允许选中已归档会话只读呈现，组 9 每次选中都 `GET`）；每类应答 no-store；content-parser 400（body limit 64 KiB）。
+  - 有效专家读规则：行里 `expert_id` 指向不可见专家时 `GET` 报 `expertId: null`——经 `DELETE /api/experts` 删掉自建专家一例、直接写库为另一账号专家 id 一例——且行里原值不被 `GET` 改写。
+  - 「并集与清空」四步（第三步 `[]`、第四步只带 `disabledSkills` 才停用专家的技能）；`PUT` 与当前相同的值 200 且行不变。
+  - 在途回合期间 `PUT`：harness 用 `test/session-approval-helpers.ts` 的 `openApprovalWorld("approval")`、`pendingApproval`、`spawnedAt`、`REAL` 与 `test/session-supervisor-helpers.ts` 的 `waitForTurn`（先例 `session-composer-patch.test.ts:251-330`）；回合挂在审批上时 `PUT` 200，判定为 `child.stdin` 长度不变、`world.rt.calls` 长度不变、`child.child.exitCode === null`，批准后等到 `done`。禁止再发第二条 prompt 去断言进程复用（组 6 合入后能力变化在下一次派发重启）。
+  - fork：harness 用 `session-fork-helpers.ts` 的 `forkWorlds` / `forkAt`（先例 `session-fork-metadata.test.ts`）；新会话行两列与源会话逐值相同（`SELECT` 带 `typeof`）、`GET …/capabilities` 与源一致、源行 `expert_id` 为 `builtin:nope` 时原样复制且能力读出 `expertId: null`、`account_skill_prefs` 不变。argv / `--append-system-prompt` / `disabledExtensions` 的断言归组 6。
+  - experts「专家校验与可见性」中「以 `expertId: X` 创建会话 400」（他人专家）在此落地。
+  - 归属身份二十四 → 二十五。
+  - 同 PR 改会变红的既有用例：`server/test/session-metadata-rest.test.ts`——`:40` `BODY_LIMIT = 16 * 1024` 拆为 POST 64 KiB（64 KiB 时 201、64 KiB + 1 时 400，改 `:400-424`）与 PATCH 16 KiB（`:652` 不变）；`{scene, pad}` 一例仍因多余键 400，不改。
+- [x] 5.3 `POST /api/sessions` 的 body limit 由 16 KiB 改为 64 KiB（`rest-metadata.ts` 的共用常量拆开：`PATCH /api/sessions/:id` 保持 16 KiB，session-metadata「会话元数据修改」）、`PUT …/capabilities` 64 KiB（session-metadata「会话创建与空间绑定」、http-service-skeleton）；`rest-metadata.ts` 创建键：专家可见性检查在路由里、先于 `workspaceRootOf` 的 404，`SessionMetadataRouteDependencies` 加专家读取依赖（由 `rest.ts` 注册处传入；experts store 的 `get` / `list` 是不开 `BEGIN` 的纯读，可在会话事务内调用；sessions → experts 的 import 方向有先例 `store-capabilities.ts` → `skills/store.js`）；`store-metadata.ts` 的 `SessionCreateInput` / `createSession` / `INSERT_SESSION` 在同一事务读账号缺省并随同一条 INSERT 写两列；新 `server/src/sessions/rest-capabilities.ts` 注册两个路由，属主预检复用 `rest-metadata.ts` 导出的 `authorizeOwnedBeforeParse`（改为导出的工厂，避免循环值导入与重复）；128 项上限常量 `MAX_DISABLED_SKILLS` 移到 `skills/store.ts` 导出，`skills/rest.ts` 改为引用（唯一来源；`skills/store.ts` 头注释「List-size caps are the callers'」同步改）；fork 事务（`store-branch.ts:248`）复制两列；归属集加一条身份（`errors.ts` 计数注释与 `http-typed-errors.test.ts` describe 标题同步；`http-parser-owners.test.ts` 正向常量与「证据 1」改名改计数二十四 → 二十五、`:28` 注释「三条 PUT」改四条，负向 `NON_OWNER_METHODS` 加 `GET /api/sessions/:id/capabilities` 与该路径的非 `PUT` 写方法）。
+- [x] 5.4 `docs/architecture/system.md`「专家与技能」一节加会话能力端点与并集规则。
 
 Suggested fixture level: expanded - 改会话创建的 body 契约与 fork 事务（persisted state + authorization）。
 Minimal mergeable slice: atomic - 创建时的初值与端点的修改共用同一条并集规则与同一用例文件；fork 复制两列只有一行，单独成 PR 没有可验收行为。

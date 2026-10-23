@@ -82,7 +82,7 @@ flowchart TD
 ```
 
 1. 方向单向：`http → feature → core`。http 可直接依赖 core（共享错误身份）；core 不 import feature/http，feature 不 import http。
-2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
+2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
 3. **一切文件路径操作必须经 `core/sandbox.resolve`**；feature 模块直接 `fs` 访问用户路径是缺陷。
 4. omp 与 kb-service 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发。
 5. 跨服务契约（app-server↔kb-service）语言中立 REST，不共享代码。
@@ -765,7 +765,7 @@ modelRoles:
 
 ### 9.10 专家与技能（S1d，change `s1d-experts-skills`）
 
-本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计；组 4：技能端点。
+本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计；组 4：技能端点；组 5：会话能力。
 
 **会话配置文件**（`server/src/sessions/omp/session-config.ts`，规格 omp-runtime「子进程 spawn 契约」「会话配置文件」）：每一次 spawn（会话进程与 fork / branch 的临时进程同样）在 `spawnImpl` 之前写出本进程专属的两个文件，`<key>` 是每次新生成的随机十六进制串，与会话 id 无关、不复用：
 
@@ -799,4 +799,13 @@ modelRoles:
 
 - `GET /api/skills` → 200 `{skills: [{name, description, enabledByDefault}], disabledSkills: string[]}`。`skills` 是托管 `<OMP_STATE_DIR>/home/.omp/agent/skills` 的平台技能，与 `GET /api/commands` 的平台技能同一读取函数与次序，但名称不合技能名规则（含 `,`、超过 128 UTF-8 字节、含 U+0000–U+001F 或 U+007F；规则只在 `skills/store.ts` 实现一处）的不列出——它们无法被停用，照常由 omp 加载；`enabledByDefault` 为该名称不在本账号缺省停用列表里。`disabledSkills` 是账号缺省停用列表原样（字典序，没有偏好行时 `[]`），含不在 `skills` 里的名称（未安装的、只作为项目技能存在的），客户端据它整表 `PUT` 而不丢列表外的名称。
 - `PUT /api/skills/defaults`，body 键集严格为 `{disabledSkills: string[]}`：至多 128 项（按去重前的原始项数），名称规则同上，去重后字典序存进 `account_skill_prefs`（每账号一行），不要求名称当前已安装，整体替换 → 200，body 与随后的 `GET /api/skills` 相同。违反即 400，不回显取值。属 content-parser 归属集，body limit 64 KiB（128 个名称按 JSON 转义最坏约 33 KB），坏 JSON / 空 body / 媒体类型 / 超限均 exact 400，无偏好写入。不审计。
-- 账号缺省只决定之后新建会话的停用初值，不改动已有会话（会话创建读它由组 5 接入）；已有会话的停用集合经会话能力端点修改。两个端点受 cookie guard，全部应答 `Cache-Control: no-store`。
+- 账号缺省只决定之后新建会话的停用初值，不改动已有会话（会话创建在同一事务里读它，见下）；已有会话的停用集合经会话能力端点修改。两个端点受 cookie guard，全部应答 `Cache-Control: no-store`。
+
+**会话能力**（`server/src/sessions/rest-capabilities.ts`，库层 `store-capabilities.ts`；规格 skill-switches「会话能力端点」、session-metadata「会话创建与空间绑定」「fork 继承会话元数据」）：每个会话存一个专家 id（`chat_sessions.expert_id`，可为 NULL）与一个停用技能集合（`disabled_skills`，去重字典序）。两者不进会话视图（十四键不变），只经下面的入口读写；改动只写库，不通知 supervisor——在途回合不受影响，下一次派发按组 6 对齐。
+
+- **创建**：`POST /api/sessions` 的 body 另收 `expertId`（字符串，须对调用者可见：内置专家或本账号自建；`null`、他人的、不存在的 id 一律 400）与 `disabledSkills`（字符串数组，至多 128 项按去重前计，名称规则同技能端点；违反 400）。这两项先于 `workspaceId` 判定，它们的 400 不写会话行、空间行、目录与审计。初值：停用集合 = body 的 `disabledSkills`，没给时为同一事务里读到的账号缺省停用列表，账号没有偏好行时为 `[]`；给了 `expertId` 时再按下面的并集规则去掉该专家声明的技能。创建不改账号缺省与账号最近选择，不新增审计；之后改账号缺省不影响已有会话。body limit 由 16 KiB 改为 64 KiB（`PATCH /api/sessions/:id` 仍 16 KiB）。
+- **`GET /api/sessions/:id/capabilities`** → 200 `{expertId: string | null, disabledSkills: string[]}`。`expertId` 是有效专家：行里存的 id 对属主已不可见（被删除、属另一账号、已下架的内置 id）时报 `null`，读取不改写行里的原值（删除专家本身会在同一事务把引用它的会话清空）。已归档会话照常 200（会话侧栏可选中已归档会话只读呈现）。
+- **`PUT /api/sessions/:id/capabilities`**，body 为 `{expertId?: string | null, disabledSkills?: string[]}` 的非空子集 → 200，形状同 `GET`。`{}`、多余键、不可见专家、非字符串的 `expertId`、坏列表 400，已归档会话 409 `session_archived`，这些都不写行；与当前相同的值 200 且行不变。属 content-parser 归属集，body limit 64 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400。
+- **并集规则**（创建与 `PUT` 同一实现 `withoutExpertSkills`）：body 只要把 `expertId` 设为非 null 的专家，新停用集合 =（body 给出的 `disabledSkills`，没给时为会话当前的集合，创建时为上面的初值）减去该专家声明的技能——专家需要的技能一定开着；body 只含 `disabledSkills` 时原样存，这是加入专家之后停用其某个技能的唯一途径（随后再 `PUT` 一次只带 `disabledSkills`）；`expertId: null` 只清专家，不恢复任何停用。例：停用 `["deploy","lint"]`、专家 E 声明 `["deploy"]` 时，依次 `PUT {expertId:E}`、`{expertId:null}`、`{expertId:E, disabledSkills:["deploy"]}`、`{disabledSkills:["deploy"]}` 的停用集合为 `["lint"]`、`["lint"]`、`[]`、`["deploy"]`。
+- 两个端点都先做属主预检（未登录 401；不存在或属他人的会话同为 404），在 body 解析与 body limit 之前；全部应答 `Cache-Control: no-store`。
+- **fork** 的最终事务原样复制源会话的两列（指向已不可见专家的 id 同样复制，读出为 `null`），不读账号缺省。

@@ -37,6 +37,8 @@ import {
 import { temporaryWorkspacePort } from "./support/temporary-workspace.js";
 
 const JSON_TYPE = "application/json";
+/** `POST /api/sessions` (s1d-experts-skills: room for 128 skill names); `PATCH` keeps 16 KiB. */
+const CREATE_BODY_LIMIT = 64 * 1024;
 const BODY_LIMIT = 16 * 1024;
 const FOURTEEN_KEYS = [
   "id",
@@ -397,11 +399,11 @@ describe("POST /api/sessions body validation", () => {
     expect(rowCounts(world.db)).toEqual(before);
   });
 
-  it("E5 over 16 KiB and text/plain bodies are 400s; exactly 16 KiB is accepted", async () => {
+  it("E5 over 64 KiB and text/plain bodies are 400s; exactly 64 KiB is accepted", async () => {
     const world = await openWorld();
     const before = rowCounts(world.db);
     const rejected: CreateRequest[] = [
-      { payload: paddedSceneBody(BODY_LIMIT + 1), contentType: JSON_TYPE },
+      { payload: paddedSceneBody(CREATE_BODY_LIMIT + 1), contentType: JSON_TYPE },
       {
         payload: JSON.stringify({ scene: "code", pad: "x".repeat(BODY_LIMIT) }),
         contentType: JSON_TYPE,
@@ -415,7 +417,7 @@ describe("POST /api/sessions body validation", () => {
     }
     expect(rowCounts(world.db)).toEqual(before);
 
-    const boundary = paddedSceneBody(BODY_LIMIT);
+    const boundary = paddedSceneBody(CREATE_BODY_LIMIT);
     expectCreated(await postCreate(world, { payload: boundary, contentType: JSON_TYPE }), {
       scene: "code",
       workspaceId: TEMPORARY,

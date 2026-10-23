@@ -9,12 +9,14 @@ import type {
   RawServerDefault,
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import { createExpertStore } from "../experts/store.js";
 import type { SessionListNotifier } from "./list-events.js";
 import {
   admitAttachments,
   parsePromptBody,
   type SessionSandboxPort,
 } from "./prompt-attachments.js";
+import { registerSessionCapabilityRoutes } from "./rest-capabilities.js";
 import { registerSessionMetadataRoutes } from "./rest-metadata.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
@@ -59,7 +61,10 @@ export interface SessionOwnerStore {
 }
 
 interface SessionRestDependencies {
-  /** The undo route's two database steps: the undo state read and the undo transaction. */
+  /**
+   * The undo route's two database steps (the undo state read and the undo transaction), and the
+   * session capability columns with the experts the caller can see (s1d-experts-skills D7).
+   */
   db: DatabaseSync;
   store: SessionStore;
   supervisor: SessionSupervisorPort;
@@ -256,13 +261,22 @@ export function registerSessionRoutes(
       sessions: dependencies.store.list(principal.id).map(toPublicSession),
     };
   });
+  // Plain reads only (`get`): which experts the caller can see, for the two capability keys.
+  const experts = createExpertStore(dependencies.db);
   registerSessionMetadataRoutes(app, {
     metadata: dependencies.metadata,
+    experts,
     workspaceRootOf: dependencies.workspaceRootOf,
     store: dependencies.store,
     deleter: dependencies.deleter,
     supervisor: dependencies.supervisor,
     listEvents: dependencies.listEvents,
+  });
+  registerSessionCapabilityRoutes(app, {
+    db: dependencies.db,
+    store: dependencies.store,
+    metadata: dependencies.metadata,
+    experts,
   });
   app.get<{ Params: SessionIdParams }>(
     "/api/sessions/:id/messages",
