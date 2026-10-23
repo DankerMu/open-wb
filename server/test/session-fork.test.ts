@@ -76,6 +76,7 @@ import {
   switchSpawns,
 } from "./session-supervisor-pool-helpers.js";
 import { observePromise } from "./support/omp-rpc.js";
+import { keyless } from "./support/session-config.js";
 
 const worlds = forkWorlds();
 
@@ -182,7 +183,7 @@ describe("fork over real fake-omp branch children (#466)", () => {
     expect(world.liveAtSpawn[1]).toEqual([]);
     const [c0, c1] = [requiredCall(world.rt.calls, 0), requiredCall(world.rt.calls, 1)];
     expect(world.fixture.tokens.lookup(requiredToken(c1.token))).toBeNull();
-    expect(argvBesidesResume(c1.args)).toEqual(argvBesidesResume(c0.args));
+    expect(keyless(argvBesidesResume(c1.args))).toEqual(keyless(argvBesidesResume(c0.args)));
     expect(Object.keys(c1.env).sort()).toEqual(Object.keys(c0.env).sort());
     expect(resumePath(c1.args)).toBe(real.file);
     expect(supervisor.controlHeld(source)).toBe(false);

@@ -132,6 +132,7 @@ describe("production entry managed omp state layout", () => {
       expect(readdirSync(state).toSorted()).toEqual([
         "agent",
         "home",
+        "session-config",
         "sessions",
         "snapshots",
         "trash",
@@ -144,6 +145,29 @@ describe("production entry managed omp state layout", () => {
       // Startup makes SANDBOX_ROOT at exactly 3770 with nothing below it (owner B4, 编排方默认 3770).
       expect(lstatSync(join(root, "sandbox")).mode & 0o7777).toBe(0o3770);
       expect(readdirSync(join(root, "sandbox"))).toEqual([]);
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
+  // s1d-experts-skills group 1: omp-runtime「OMP_STATE_DIR 托管布局」scenario「启动清扫会话配置残留」.
+  it("startup sweeps session-config leftovers, unlinks a symlink without following it, and keeps 2710", async () => {
+    const root = scratchRoot("open-wb-layout-sweep-");
+    const dir = join(root, "state", "session-config");
+    const outside = join(root, "outside.yml");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "a.yml"), "disabledExtensions: []\n");
+    writeFileSync(join(dir, "a.md"), "leftover prompt");
+    writeFileSync(outside, "outside bytes");
+    symlinkSync(outside, join(dir, "b.yml"));
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
+    }));
+    try {
+      await server.waitForStarted();
+      expect(readdirSync(dir)).toEqual([]);
+      expect(lstatSync(dir).mode & 0o7777).toBe(0o2710);
+      expect(readFileSync(outside, "utf8")).toBe("outside bytes");
     } finally {
       await server.dispose();
     }

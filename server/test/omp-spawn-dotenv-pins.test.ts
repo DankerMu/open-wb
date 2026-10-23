@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type SpawnImpl, spawnOmp } from "../src/sessions/omp/process.js";
 import { ompHostOverlayPath } from "../src/sessions/omp/state-layout.js";
 import { FakeChild } from "./support/omp-rpc.js";
+import { EMPTY_CAPABILITIES, sessionConfigYml } from "./support/session-config.js";
 import { useSetprivStub } from "./support/setpriv.js";
 
 const OWNER = "u1";
@@ -97,6 +98,7 @@ async function capture(
       approvalMode: "write",
       token: TOKEN,
       resumePath: null,
+      capabilities: EMPTY_CAPABILITIES,
       ...(ompUser === undefined ? {} : { ompUser }),
       ...(browserBin === undefined ? {} : { browserBin }),
     },
@@ -227,14 +229,16 @@ describe("spawnOmp dotenv pins", () => {
     ]);
   });
 
-  it("leaves argv untouched: --config stays the last option of a cold spawn", async () => {
+  it("leaves argv untouched: the session --config is the last option of a cold spawn", async () => {
     const { command, args, stateDir, bin } = await capture();
 
     expect(command).toBe(bin);
-    expect(args.slice(-3)).toEqual([
+    expect(args.slice(-5)).toEqual([
       "--no-title",
       "--config",
       `${stateDir}/home/.omp/agent/host-overlay.yml`,
+      "--config",
+      sessionConfigYml(stateDir),
     ]);
     expect(args.some((arg) => arg.startsWith("PI_") || arg.startsWith("OMP_"))).toBe(false);
   });

@@ -9,7 +9,7 @@
  * creates all three. `home/.env`, which omp loads at startup, is pre-created and owned by the app
  * uid (issue #802).
  */
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, realpathSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { ensureOwnedDir, ensureOwnedFile } from "../../core/sandbox/dirs.js";
 
@@ -56,7 +56,18 @@ export function ompSnapshotsDir(stateDir: string): string {
   return join(stateDir, "snapshots");
 }
 
+/**
+ * Each spawn's session config files (`session-config.ts`), removed when its child is gone. Managed,
+ * but the group has only the search bit: the omp uid opens a file by its exact path and can neither
+ * list, create, rename nor remove anything here.
+ */
+export function ompSessionConfigDir(stateDir: string): string {
+  return join(stateDir, "session-config");
+}
+
 const MANAGED = 0o2750;
+/** `session-config`: group search only (design D1, ADR-0010). */
+const MANAGED_BY_PATH = 0o2710;
 const OMP_WRITABLE = 0o2770;
 const OMP_HOME = 0o3770;
 /** A `home` being cold-built: no group or other bits yet; setgid stays so `.omp` inherits the group. */
@@ -82,6 +93,7 @@ const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
   ["sessions", MANAGED],
   ["trash", APP_PRIVATE],
   ["snapshots", APP_PRIVATE],
+  ["session-config", MANAGED_BY_PATH],
 ];
 
 /**
@@ -114,6 +126,21 @@ export function ensureOmpStateLayout(stateDir: string): string {
     ensureOwnedDir(home, OMP_HOME);
   }
   return root;
+}
+
+/**
+ * Startup only (the `state_layout` stage, after `ensureOmpStateLayout`): removes what the previous
+ * run left in `session-config/` — its children are gone. Synchronous on purpose: that stage runs
+ * after the main listen with no `await`, and a sweep that yielded could delete the files of the
+ * first request's spawn. A symlink is unlinked, never followed; a directory is not recursed into
+ * and fails the sweep. Never part of `ensureOmpStateLayout`: every spawn calls that one, while live
+ * children still need their files.
+ */
+export function sweepSessionConfig(stateDir: string): void {
+  const dir = ompSessionConfigDir(stateDir);
+  for (const name of readdirSync(dir)) {
+    unlinkSync(join(dir, name));
+  }
 }
 
 /** `sessions/<ownerId>` under an already ensured layout root: the one per-owner directory. */

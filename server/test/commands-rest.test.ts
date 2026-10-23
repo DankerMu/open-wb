@@ -38,6 +38,7 @@ import {
 } from "./session-db-helpers.js";
 import { recordedSpawn, type SpawnCall } from "./session-supervisor-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const ROUTE = "/api/commands";
 const SIX_KEYS = ["name", "label", "description", "hint", "source", "overrides"];
@@ -258,6 +259,7 @@ describe("GET /api/commands", () => {
         cwd: join(root, "sandbox", "u1"),
         modelId: MODEL,
         approvalMode: "write",
+        capabilities: EMPTY_CAPABILITIES,
         token: "a".repeat(64),
         resumePath: null,
       },

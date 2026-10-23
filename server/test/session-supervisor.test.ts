@@ -28,6 +28,7 @@ import {
   waitFor,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
+import { keyless } from "./support/session-config.js";
 import { useSetprivStub } from "./support/setpriv.js";
 
 interface AssistantStep {
@@ -209,7 +210,9 @@ describe("SessionSupervisor real child persistence and lifecycle", () => {
         } else {
           expect(firstCall.args[0]).toBe("--mode");
           expect(firstCall.args[1]).toBe("rpc-ui");
-          expect(resumedCall.args.slice(0, firstCall.args.length)).toEqual(firstCall.args);
+          expect(keyless(resumedCall.args.slice(0, firstCall.args.length))).toEqual(
+            keyless(firstCall.args),
+          );
         }
         expect(resumePath(resumedCall.args)).toBe("/tmp/open-wb-fake-session.jsonl");
         expect(resumedToken).not.toBe(firstToken);

@@ -43,6 +43,7 @@ import {
   teeStdoutFrames,
 } from "./support/omp-official.js";
 import { collectPrompt } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const CASE = { timeout: 180_000 };
 const PROVIDER = "workbuddy";
@@ -98,6 +99,7 @@ describe.skipIf(OMP_TEST_OFF)(
             cwd: world.workspaceRoot,
             modelId: M1,
             approvalMode: "write",
+            capabilities: EMPTY_CAPABILITIES,
             tokens: { issue: () => "fake", revoke: () => {} },
             resumePath,
             spawnImpl,

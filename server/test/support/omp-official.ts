@@ -39,6 +39,7 @@ import {
 } from "../../src/sessions/omp/state-layout.js";
 import type { ApprovalDecision, ApprovalRequest } from "../../src/sessions/omp/ui-requests.js";
 import { type FakeUpstreamServer, type FakeUpstreamStartOptions, start } from "./fake-upstream.mjs";
+import { EMPTY_CAPABILITIES } from "./session-config.js";
 
 export const OMP_VERSION = "18.12.3";
 export const OMP_TEST_OFF = process.env.WORKBUDDY_OMP_TEST !== "1";
@@ -329,6 +330,7 @@ export async function openOfficialWorld(
       cwd: workspaceRoot,
       modelId: MODEL_ID,
       approvalMode: runtimeOptions.spawnArgs?.approvalMode ?? "write",
+      capabilities: EMPTY_CAPABILITIES,
       tokens: { issue: () => UPSTREAM_KEY, revoke: () => {} },
       resumePath,
       ...(options.browserBin === undefined ? {} : { browserBin: options.browserBin }),
@@ -426,6 +428,7 @@ export function launchWriteTier(
     cwd: world.workspaceRoot,
     modelId: MODEL_ID,
     approvalMode: "write",
+    capabilities: EMPTY_CAPABILITIES,
     tokens: { issue: () => UPSTREAM_KEY, revoke: () => {} },
     resumePath: null,
     spawnImpl,

@@ -36,6 +36,7 @@ import {
   sudoPrefix,
 } from "./session-supervisor-helpers.js";
 import type { FakeChild } from "./support/omp-rpc.js";
+import { sessionConfigYml } from "./support/session-config.js";
 import { useSetprivStub } from "./support/setpriv.js";
 
 /**
@@ -774,6 +775,8 @@ function ompArgs(
     "--no-title",
     "--config",
     join(roots.stateDir, "home", ".omp", "agent", "host-overlay.yml"),
+    "--config",
+    sessionConfigYml(roots.stateDir),
   ];
 }
 

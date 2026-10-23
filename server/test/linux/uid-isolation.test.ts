@@ -7,6 +7,8 @@
  * Issue #706: the managed state layout is read-only for the omp uid except HOME and the
  * three XDG `omp` directories; the trash a DELETE moves artifacts through is closed to it.
  * Issue #708: the host overlay in the managed agent dir cannot be overwritten by the omp uid.
+ * Issue #1656: the omp uid reads session config files by exact path (2710) but cannot list,
+ * create or rename in `session-config/`.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 
@@ -41,6 +43,7 @@ import { listOneLevel } from "../../src/workspaces/tree.js";
 import { FIXED_NOW, fixedRuntime } from "../session-db-helpers.js";
 import { cookieFor } from "../session-rest-helpers.js";
 import { collectPrompt } from "../support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "../support/session-config.js";
 
 const FAKE = fileURLToPath(new URL("../support/fake-omp.mjs", import.meta.url));
 const SESSION_ID = "sess-uid-isolation-131";
@@ -289,6 +292,24 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         // The spawn re-asserted the layout; listings are taken after it and before any attempt.
         await collectPrompt(session.prompt("spawn"));
         const before = managed.map((dir) => readdirSync(dir).toSorted());
+        // The spawn's own `<key>.yml`, and a `<key>.md` written here at 0640 as an expert's would be.
+        const configDir = join(state, "session-config");
+        const [ymlName] = readdirSync(configDir);
+        expect(readdirSync(configDir)).toEqual([ymlName]);
+        const yml = join(configDir, String(ymlName));
+        const md = yml.replace(/\.yml$/u, ".md");
+        writeFileSync(md, "expert prompt");
+        chmodSync(md, 0o640);
+        const configBefore = [readFileSync(yml), readFileSync(md)];
+        expect(await ask(`read:${yml}`)).toBe("read=ok");
+        expect(await ask(`read:${md}`)).toBe("read=ok");
+        expect(await ask(`list:${configDir}`)).toBe("listed=EACCES");
+        expect(await write(join(configDir, "planted by omp"))).toBe("EACCES");
+        expect(await ask(`rename:${yml}`)).toBe("renamed=EACCES");
+        expect([readFileSync(yml), readFileSync(md)]).toEqual(configBefore);
+        expect(readdirSync(configDir).toSorted()).toEqual(
+          [String(ymlName), md.slice(configDir.length + 1)].toSorted(),
+        );
 
         for (const dir of managed) {
           expect(await write(join(dir, "planted by omp")), dir).toBe("EACCES");
@@ -366,6 +387,7 @@ function runtimeOpts(layout: OwnedLayout, ompUser: string, sessionId: string): S
     modelId: MODEL_ID,
     approvalMode: "write",
     tokens: new TokenRegistry(),
+    capabilities: EMPTY_CAPABILITIES,
     ompUser,
   };
 }

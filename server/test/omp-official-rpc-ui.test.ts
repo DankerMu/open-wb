@@ -52,6 +52,7 @@ import {
   teeStdoutFrames,
 } from "./support/omp-official.js";
 import { collectPrompt } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const TURN = { timeout: 90_000 };
 /** The world's model and upstream key (support/omp-official.ts). */
@@ -134,6 +135,7 @@ function launch(world: OfficialWorld, mode: Mode, rewrite?: Rewrite): Launch {
     cwd: world.workspaceRoot,
     modelId: MODEL_ID,
     approvalMode: mode,
+    capabilities: EMPTY_CAPABILITIES,
     tokens: { issue: () => UPSTREAM_KEY, revoke: () => {} },
     resumePath: null,
     spawnImpl,

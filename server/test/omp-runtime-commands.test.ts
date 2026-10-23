@@ -42,6 +42,7 @@ import {
   type TestClock,
   type TokenBook,
 } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const SESSION_ID = "sess-runtime-commands-488";
 const TOKEN = "wb-issue488-secret-token";
@@ -109,6 +110,7 @@ function openReal(scenario: string, options: RealOptions = {}): RealWorld {
   world.runtime = new SessionRuntime({
     ...real.runtime,
     approvalMode: "write",
+    capabilities: EMPTY_CAPABILITIES,
     sessionId: SESSION_ID,
     ownerId: "u1",
     cwd: join(real.runtime.sandboxRoot, "u1"),

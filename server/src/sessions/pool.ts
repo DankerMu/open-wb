@@ -11,6 +11,9 @@ import { RingBuffer } from "./stream/ring-buffer.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 
+// The spawn paths take their session capabilities from here (design D1: the caller decides).
+export { NO_SESSION_CAPABILITIES } from "./omp/session-config.js";
+
 export interface Generation {
   epoch: number;
   ring: RingBuffer;
@@ -216,7 +219,14 @@ export class ReadmissionRequired extends Error {
 
 type PerRuntime = Pick<
   SessionRuntimeOpts,
-  "sessionId" | "ownerId" | "cwd" | "modelId" | "approvalMode" | "tokens" | "onApproval"
+  | "sessionId"
+  | "ownerId"
+  | "cwd"
+  | "modelId"
+  | "approvalMode"
+  | "capabilities"
+  | "tokens"
+  | "onApproval"
 > & {
   resumePath: string | null;
   onExit: () => void;
@@ -240,6 +250,7 @@ export function sessionRuntimeOpts(
     cwd: per.cwd,
     modelId: per.modelId,
     approvalMode: per.approvalMode,
+    capabilities: per.capabilities,
     tokens: per.tokens,
     resumePath: per.resumePath,
     onExit: per.onExit,

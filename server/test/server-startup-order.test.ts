@@ -135,6 +135,7 @@ describe("production entry lifecycle", () => {
       expect(modelsText).toContain("apiKey: WORKBUDDY_MODEL_TOKEN");
       expect(readdirSync(state).toSorted()).toEqual([
         "home",
+        "session-config",
         "sessions",
         "snapshots",
         "trash",

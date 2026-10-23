@@ -33,6 +33,7 @@ import {
   observeChild,
   settlesWithin,
 } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const TOKEN = "wb-issue460-secret-token";
 const T = "Allow tool: bash\nCommand: echo workbuddy-smoke";
@@ -126,6 +127,7 @@ async function startReal(scenario: string): Promise<RealRun> {
       cwd: join(runtime.sandboxRoot, "u1"),
       modelId: runtime.modelId,
       approvalMode: "write",
+      capabilities: EMPTY_CAPABILITIES,
       token: TOKEN,
       resumePath: null,
       spawnImpl: launched.spawnImpl,
@@ -423,6 +425,7 @@ describe("SessionRuntime never answers an outstanding approval", () => {
       cwd: join(runtime.sandboxRoot, "u1"),
       modelId: runtime.modelId,
       approvalMode: "write",
+      capabilities: EMPTY_CAPABILITIES,
       tokens: createTokens(TOKEN),
       idleMs,
       clock: launched.real.clock,

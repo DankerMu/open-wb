@@ -3,6 +3,7 @@
  * require an executable /usr/bin/setpriv when ompUser is present, before side effects.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { constants, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { assertSetprivExecutable } from "../src/core/process-path.js";
 import { resolveServerConfig } from "../src/server.js";
 import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 import { type SetprivOutcome, type SetprivStub, stubSetpriv } from "./support/setpriv.js";
 
 const SAFE_PATH = "/usr/bin:/bin";
@@ -48,6 +50,7 @@ function spawnRoots(): { opts: SpawnOmpOpts; cwd: string; home: string } {
       cwd: join(sandboxRoot, "u1"),
       modelId: "deepseek-v4.1-flash",
       approvalMode: "write",
+      capabilities: EMPTY_CAPABILITIES,
       token: "t".repeat(64),
       resumePath: null,
     },
@@ -59,7 +62,8 @@ function spawnRoots(): { opts: SpawnOmpOpts; cwd: string; home: string } {
 function recordingSpawn(commands: string[]): SpawnImpl {
   return (command) => {
     commands.push(command);
-    return {} as ChildProcessWithoutNullStreams;
+    // spawnOmp listens for the child's end (its session config file is removed then).
+    return new EventEmitter() as unknown as ChildProcessWithoutNullStreams;
   };
 }
 

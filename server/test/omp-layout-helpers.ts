@@ -22,6 +22,7 @@ export const LAYOUT_TABLE: ReadonlyArray<readonly [string, number]> = [
   ["sessions", 0o2750],
   ["trash", 0o700],
   ["snapshots", 0o700],
+  ["session-config", 0o2710],
 ];
 
 /**

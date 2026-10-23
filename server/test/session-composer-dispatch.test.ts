@@ -54,6 +54,7 @@ import {
 } from "./session-supervisor-helpers.js";
 import { isLive, sampleSpawns } from "./session-supervisor-pool-helpers.js";
 import { postUndo, seedUndoable, undone } from "./session-undo-helpers.js";
+import { keyless } from "./support/session-config.js";
 
 const MODES = ["always-ask", "write", "yolo"] as const;
 
@@ -128,7 +129,8 @@ describe("档位进入 argv (session-permission-tier)", () => {
     const at = requiredCall(world.rt.calls, 0).args.indexOf("--approval-mode");
     expect(at).toBeGreaterThan(0);
     expect(argvs.map((args) => args[at + 1])).toEqual([...MODES]);
-    const rest = argvs.map((args) => args.filter((_, index) => index !== at + 1));
+    // The session config key is new on every spawn (omp-runtime「会话配置文件」).
+    const rest = argvs.map((args) => keyless(args.filter((_, index) => index !== at + 1)));
     expect(rest[1]).toEqual(rest[0]);
     expect(rest[2]).toEqual(rest[0]);
     expect(rest[0]?.filter((arg) => arg === "--approval-mode")).toHaveLength(1);
