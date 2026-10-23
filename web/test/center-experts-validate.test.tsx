@@ -9,10 +9,11 @@ import type { SkillList } from "../src/lib/api.js";
 import {
   BUILTINS,
   fakeExperts,
+  OWN,
   openForm,
   renderPanel,
   save,
-  tick,
+  skillStates,
   type,
 } from "./center-experts-support.js";
 
@@ -34,17 +35,12 @@ afterEach(() => {
 type Fields = Partial<Record<"名称" | "描述" | "标签" | "提示词", string>>;
 
 /** 打开 `新建专家`，先填合法的名称与提示词，再按 `fields` 覆盖，提交；返回对话框与假客户端。 */
-async function submit(fields: Fields, skills?: SkillList, ticks: readonly string[] = []) {
-  const fake = fakeExperts(BUILTINS, skills);
+async function submit(fields: Fields) {
+  const fake = fakeExperts(BUILTINS);
   await renderPanel(fake);
   const dialog = await openForm();
   const values: Fields = { 名称: "专家", 提示词: "提示", ...fields };
   for (const [label, value] of Object.entries(values)) type(dialog, label, value);
-  const [first] = ticks;
-  if (first !== undefined) {
-    await within(dialog).findByRole("checkbox", { name: first });
-    for (const name of ticks) tick(dialog, name);
-  }
   save(dialog);
   return { dialog, fake };
 }
@@ -158,17 +154,34 @@ describe("技能：至多勾选 32 项", () => {
   };
   const names = many.skills.map((skill) => skill.name);
 
+  /**
+   * 打开一位已持有 `skills` 的自建专家的 `编辑`（勾选来自预填，不逐项点击：33 次点击在 CI 覆盖率下会超时），
+   * 等多选列出全部 33 项且已持有的那些已勾，再提交。「点一下即加入 skills」由 center-experts-form 覆盖。
+   */
+  async function submitEdit(skills: string[]) {
+    const fake = fakeExperts([...BUILTINS, { ...OWN, skills }], many);
+    await renderPanel(fake);
+    const dialog = await openForm(OWN.name);
+    await waitFor(() =>
+      expect(skillStates(dialog)).toEqual(names.map((name) => [name, skills.includes(name)])),
+    );
+    save(dialog);
+    return { dialog, fake };
+  }
+
   it("32 项通过", async () => {
-    const { fake } = await submit({}, many, names.slice(0, 32));
-    await waitFor(() => expect(fake.createExpert).toHaveBeenCalledTimes(1));
-    expect(fake.createExpert.mock.calls[0]?.[0]).toMatchObject({ skills: names.slice(0, 32) });
+    const { dialog, fake } = await submitEdit(names.slice(0, 32));
+    await waitFor(() => expect(fake.updateExpert).toHaveBeenCalledTimes(1));
+    expect(shownMessages(dialog)).toEqual([]);
+    expect(fake.updateExpert.mock.calls[0]?.[1]).toMatchObject({ skills: names.slice(0, 32) });
   });
 
   it("33 项被拒", async () => {
-    const { dialog, fake } = await submit({}, many, names);
+    const { dialog, fake } = await submitEdit(names);
     await within(dialog).findByText(SKILLS);
     expect(shownMessages(dialog)).toEqual([SKILLS]);
-    expect(fake.createExpert).not.toHaveBeenCalled();
+    expect(fake.updateExpert).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "编辑专家" })).toBe(dialog);
   });
 });
 
