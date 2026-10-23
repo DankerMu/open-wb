@@ -5,8 +5,13 @@
  * writes the same bytes. Also the eighth startup module (`models`) and that the registered key and base
  * URL reach neither the files nor the entry's stdout / stderr. The restart reuses the main port: the
  * proxy URL in `models.yml` is derived from it.
+ *
+ * #1711: model-registry「发布失败不回滚」on the same compiled entry — with the agent dir replaced by a
+ * regular file, an admin create answers the generic 500, the row stays, and the entry's stderr is exactly
+ * the one record `writeRecord` writes for `onPublishFailed`. Audit retention is left to
+ * `models-rest.test.ts` (the entry does not touch that path).
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -35,6 +40,8 @@ const EIGHT_MODULES = [
 /** Low-entropy sentinels (gitleaks); the base URL host is never contacted. */
 const KEY = "wb-issue1649-restart-api-key";
 const BASE = "http://127.0.0.1:9/wb-issue1649-restart-tenant/v1";
+const FAILED_KEY = "wb-issue1711-api-key";
+const FAILED_BASE = "http://127.0.0.1:9/wb-issue1711-tenant/v1";
 const SQLITE_WARNING = /^\(node:\d+\) ExperimentalWarning: SQLite[^\n]*\n\(Use `node[^\n]*\n/u;
 
 let compiled: CompiledServerEntry;
@@ -49,8 +56,12 @@ afterAll(async () => {
   for (const root of scratch.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
+function agentDir(root: string): string {
+  return join(root, "state", "home", ".omp", "agent");
+}
+
 function files(root: string): { models: string; overlay: string } {
-  const agent = join(root, "state", "home", ".omp", "agent");
+  const agent = agentDir(root);
   return {
     models: readFileSync(join(agent, "models.yml"), "utf8"),
     overlay: readFileSync(join(agent, "host-overlay.yml"), "utf8"),
@@ -130,6 +141,46 @@ describe("model-registry「发布字节等于启动写出」on the compiled entr
     ]) {
       expect(output).not.toContain(KEY);
       expect(output).not.toContain("wb-issue1649-restart-tenant");
+    }
+  }, 120_000);
+});
+
+describe("model-registry「发布失败不回滚」on the compiled entry", () => {
+  it("with the agent dir replaced by a file, a create is a generic 500, the row stays, and stderr is exactly one model_publish_failed record", async () => {
+    const root = mkdtempSync(join(tmpdir(), "open-wb-models-publish-failed-"));
+    scratch.push(root);
+    const bin = join(root, "bin", "omp");
+    const seed = { MODEL_CATALOG: JSON.stringify([{ id: "m1" }]), MODEL_ID: "m1" };
+    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (free) => ({
+      env: compiledFixtureEnv(root, free, bin, seed),
+    }));
+    let stderr: string;
+    try {
+      expect(await server.waitForStarted()).toMatchObject({ modules: EIGHT_MODULES });
+      const agent = agentDir(root);
+      rmSync(agent, { recursive: true, force: true });
+      writeFileSync(agent, "");
+      const cookie = await adminCookie(port);
+      const failed = await fetch(`http://127.0.0.1:${String(port)}/api/models`, {
+        method: "POST",
+        headers: { "content-type": "application/json", cookie },
+        body: JSON.stringify({ id: "c", upstream: { baseUrl: FAILED_BASE, apiKey: FAILED_KEY } }),
+      });
+      expect(failed.status).toBe(500);
+      expect(await failed.text()).toBe('{"error":{"message":"服务器内部错误"}}');
+      const listed = await fetch(`http://127.0.0.1:${String(port)}/api/models`, {
+        headers: { cookie },
+      });
+      expect(listed.status).toBe(200);
+      const { models } = (await listed.json()) as { models: Array<{ id: string }> };
+      expect(models.map((model) => model.id)).toEqual(["m1", "c"]);
+    } finally {
+      stderr = await stopped(server);
+    }
+    expect(stderr).toBe('{"event":"model_publish_failed"}\n');
+    for (const output of [server.stdout(), server.stderr()]) {
+      expect(output).not.toContain(FAILED_KEY);
+      expect(output).not.toContain("wb-issue1711-tenant");
     }
   }, 120_000);
 });
