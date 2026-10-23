@@ -511,7 +511,17 @@ export async function expectAuthenticatedRoute(
     ).toBeVisible();
   }
   if (path === "/center") {
-    await expect(page.locator("main").getByText("中心暂无可用内容", { exact: true })).toBeVisible();
+    // 成员账号：落到「专家」tab（tab 条只有它），内置专家卡可见，不再是空态。
+    await expect.poll(() => new URL(page.url()).search).toBe("?tab=experts");
+    const main = page.locator("main");
+    await expect(main.getByRole("tab", { name: "专家", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const card = main.getByRole("listitem", { name: "前端架构师", exact: true });
+    await expect(card).toBeVisible();
+    await expect(card.getByText("内置", { exact: true })).toBeVisible();
+    await expect(main.getByText("中心暂无可用内容", { exact: true })).toHaveCount(0);
   }
   await expectRouteLayout(page, project);
   await inspectSidebar(page, project, async (sidebar) => {

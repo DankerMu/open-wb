@@ -11,6 +11,7 @@ import {
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
+  centerRoutes,
   composerOptionsRoute,
   createFetchMock,
   deferredResponse,
@@ -66,6 +67,7 @@ function mountShell(path: string, routes: Routes = {}) {
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/auth/logout": () => new Response(null, { status: 204 }),
     ...composerOptionsRoute(),
+    ...centerRoutes(),
     ...routes,
   });
   const mounted = mountAuthenticatedApp(path, fetchMock);

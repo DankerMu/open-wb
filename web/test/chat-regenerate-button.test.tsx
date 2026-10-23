@@ -17,7 +17,7 @@ import {
   SESSION_ID,
   settle,
 } from "./chat-stream-support.js";
-import { calls, deferredResponse, jsonResponse } from "./support.js";
+import { calls, deferredResponse, expectExpertsTabSettled, jsonResponse } from "./support.js";
 
 const MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
 const REGEN = `/api/sessions/${SESSION_ID}/regenerate`;
@@ -622,7 +622,7 @@ describe("regenerate button: ownership fences", () => {
     await act(async () => {
       await router.navigate("/center");
     });
-    expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
+    await expectExpertsTabSettled(fetchMock);
     const reads = calls(fetchMock, MESSAGES).length;
     const consoleError = vi.spyOn(console, "error");
 

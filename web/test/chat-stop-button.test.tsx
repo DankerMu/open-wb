@@ -22,7 +22,7 @@ import {
   SESSION_ID,
   settle,
 } from "./chat-stream-support.js";
-import { calls, deferredResponse, jsonResponse } from "./support.js";
+import { calls, deferredResponse, expectExpertsTabSettled, jsonResponse } from "./support.js";
 import { listRepoFiles, readRepoFile } from "./ui-support.js";
 
 const MESSAGES = `/api/sessions/${SESSION_ID}/messages`;
@@ -445,7 +445,7 @@ describe("stop button: ownership and fences", () => {
     await act(async () => {
       await router.navigate("/center");
     });
-    expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
+    await expectExpertsTabSettled(vi.mocked(fetch));
     expect(document.querySelector('form[data-slot="composer"]')).toBeNull();
     const consoleError = vi.spyOn(console, "error");
 

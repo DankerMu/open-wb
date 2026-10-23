@@ -58,7 +58,14 @@ import {
   user,
   userArticles,
 } from "./chat-undo-support.js";
-import { calls, currentLocation, deferredResponse, jsonResponse, paths } from "./support.js";
+import {
+  calls,
+  currentLocation,
+  deferredResponse,
+  expectExpertsTabSettled,
+  jsonResponse,
+  paths,
+} from "./support.js";
 import { FakeXhr, installFakeXhr } from "./upload-support.js";
 
 afterEach(cleanupUndoPage);
@@ -723,7 +730,7 @@ describe("撤回的所有权 fence", () => {
       await act(async () => {
         await router.navigate("/center");
       });
-      expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
+      await expectExpertsTabSettled(fetchMock);
       const reads = calls(fetchMock, MESSAGES).length;
       const consoleError = vi.spyOn(console, "error");
 

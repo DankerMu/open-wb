@@ -6,6 +6,7 @@ import { mountAuthenticatedApp } from "./render-app-router.js";
 import { NULL_SESSION_META } from "./session-meta-fixtures.js";
 import {
   authenticatedPrincipal,
+  centerRoutes,
   composerOptionsRoute,
   createFetchMock,
   deferredResponse,
@@ -29,6 +30,7 @@ function mountFiles(
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/sessions": () => jsonResponse({ sessions: [] }),
     "/api/auth/logout": logout,
+    ...centerRoutes(),
   });
   const mounted = mountAuthenticatedApp("/files", fetchMock);
   disposeRouter = () => mounted.router.dispose();
@@ -118,6 +120,7 @@ function mountChat(path = "/", strict = false) {
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/sessions": () => jsonResponse({ sessions: [LIST_SESSION] }),
     ...composerOptionsRoute(),
+    ...centerRoutes(),
     "/api/info": () =>
       jsonResponse({
         name: "workbuddy-app-server",
@@ -209,6 +212,7 @@ describe("侧栏会话列表区 (S11)", () => {
       "/api/workspaces": () => jsonResponse({ workspaces: [] }),
       "/api/sessions": sessions,
       ...composerOptionsRoute(),
+      ...centerRoutes(),
       "/api/info": () =>
         jsonResponse({
           name: "workbuddy-app-server",

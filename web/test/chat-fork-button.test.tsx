@@ -22,6 +22,7 @@ import {
   calls,
   currentLocation,
   deferredResponse,
+  expectExpertsTabSettled,
   type FetchMock,
   jsonResponse,
   paths,
@@ -589,7 +590,7 @@ describe("fork button: ownership fences", () => {
       await act(async () => {
         await router.navigate("/center");
       });
-      expect(await screen.findByText("中心暂无可用内容")).toBeTruthy();
+      await expectExpertsTabSettled(fetchMock);
       const lists = listGets(fetchMock);
       const consoleError = vi.spyOn(console, "error");
 

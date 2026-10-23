@@ -9,6 +9,7 @@ import {
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
+  centerRoutes,
   composerOptionsRoute,
   createFetchMock,
   currentLocation,
@@ -26,6 +27,7 @@ function authenticatedChatRoutes(routes: FetchRoutes = {}): FetchRoutes {
     "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     ...composerOptionsRoute(),
+    ...centerRoutes(),
     ...routes,
   };
 }

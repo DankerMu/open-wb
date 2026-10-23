@@ -15,9 +15,11 @@ import { chatSnapshot, FakeEventSource, resetFakeEventSources } from "./chat-str
 import { mountAuthenticatedApp } from "./render-app-router.js";
 import {
   authenticatedPrincipal,
+  centerRoutes,
   composerOptionsRoute,
   createFetchMock,
   deferredResponse,
+  expectExpertsTabSettled,
   jsonResponse,
 } from "./support.js";
 import { listRepoFiles, readRepoFile } from "./ui-support.js";
@@ -77,6 +79,7 @@ function mountApp(path: string, routes: FetchRoutes = {}) {
         auth: { provider: "dev-stub" },
       }),
     ...composerOptionsRoute(),
+    ...centerRoutes(),
     ...routes,
   });
   const mounted = mountAuthenticatedApp(path, fetchMock);
@@ -190,7 +193,7 @@ describe("其它路由顶栏标题 (T4)", () => {
     ["/settings", "设置"],
     ["/center", "中心"],
   ])("T4 %s → banner h1 %s，页面级 h1 恰 1 个且不在 main 内", async (path, title) => {
-    mountApp(path);
+    const { fetchMock } = mountApp(path);
 
     const banner = await screen.findByRole("banner");
     const heading = await within(banner).findByRole("heading", { level: 1, name: title });
@@ -198,7 +201,7 @@ describe("其它路由顶栏标题 (T4)", () => {
     expect(heading.closest("main")).toBeNull();
     expect(mainLevelOneHeadings()).toHaveLength(0);
     if (path === "/center") {
-      expect(within(screen.getByRole("main")).getByText("中心暂无可用内容")).toBeTruthy();
+      await expectExpertsTabSettled(fetchMock);
     }
   });
 });

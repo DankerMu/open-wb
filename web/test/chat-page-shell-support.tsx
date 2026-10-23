@@ -14,6 +14,7 @@ import { SESSION_MESSAGES } from "./chat-page-ownership-support.js";
 import { FakeEventSource, resetFakeEventSources, SESSION_ID } from "./chat-stream-support.js";
 import {
   authenticatedPrincipal,
+  centerRoutes,
   composerOptionsRoute,
   createFetchMock,
   jsonResponse,
@@ -61,6 +62,7 @@ export async function openProbedSession(snapshot: Snapshot) {
     "fetch",
     createFetchMock({
       ...composerOptionsRoute(),
+      ...centerRoutes(),
       "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
       "/api/auth/login": () => jsonResponse({ id: "user-2", account: "lisi", role: "member" }),
       "/api/sessions": () => jsonResponse({ sessions: [snapshot.session] }),
