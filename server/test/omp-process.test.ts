@@ -27,6 +27,7 @@ import { assertSafeSudoPath } from "../src/core/process-path.js";
 import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp/process.js";
 import { observeChild } from "./child-stdio-helpers.js";
 import { recordedSpawn, sudoPrefix } from "./session-supervisor-helpers.js";
+import { EMPTY_CAPABILITIES, keyless, sessionConfigYml } from "./support/session-config.js";
 import { useSetprivStub } from "./support/setpriv.js";
 
 const CALLER_TOKEN = randomBytes(32).toString("hex");
@@ -341,7 +342,7 @@ describe("spawnOmp spawn contract", () => {
       const absent = await capture(roots, resumePath, optional);
       const explicit = await capture(roots, resumePath, optional, undefined);
       expect({ ...process.env }).toEqual(parentBefore);
-      expect(explicit).toEqual(absent);
+      expect(keyless(explicit)).toEqual(keyless(absent));
       expect(absent.command).toBe(roots.bin);
       expect(absent.args).toEqual([...coldArgs(roots), "--resume", resumePath]);
       expect(absent.env).toEqual(allowlist(roots, optional));
@@ -502,6 +503,7 @@ function optsOf(roots: SpawnRoots, resumePath: string | null, user?: string): Sp
     approvalMode: "write",
     token: CALLER_TOKEN,
     resumePath,
+    capabilities: EMPTY_CAPABILITIES,
     ...(user === undefined ? {} : { ompUser: user }),
   };
 }
@@ -524,6 +526,8 @@ function coldArgs(roots: SpawnRoots): string[] {
     "--no-title",
     "--config",
     join(roots.stateDir, "home", ".omp", "agent", "host-overlay.yml"),
+    "--config",
+    sessionConfigYml(roots.stateDir),
   ];
 }
 

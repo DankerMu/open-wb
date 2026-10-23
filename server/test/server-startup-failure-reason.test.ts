@@ -10,6 +10,7 @@ import {
   mkdirSync,
   mkdtempSync,
   openSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -267,6 +268,21 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     writeFileSync(join(root, "state", "home", ".omp"), "not-a-directory");
     const failure = await failStartup(root);
     expectReason(failure.stderr, "state_layout");
+    await expectBindable("127.0.0.1", failure.port);
+  }, 60_000);
+
+  // s1d-experts-skills group 1: the session-config sweep runs in this stage and does not recurse.
+  it("state_layout: the session-config sweep meets a non-empty subdirectory", async () => {
+    const root = scratchRoot();
+    const sub = join(root, "state", "session-config", "sub");
+    mkdirSync(sub, { recursive: true });
+    writeFileSync(join(sub, "x"), "x");
+    const failure = await failStartup(root);
+    expectReason(failure.stderr, "state_layout");
+    expect(readFileSync(join(sub, "x"), "utf8")).toBe("x");
+    // Nothing after this stage ran: no managed file, no preview cache.
+    expect(readdirSync(join(root, "state", "home", ".omp", "agent"))).toEqual([]);
+    expect(existsSync(join(root, "preview-cache"))).toBe(false);
     await expectBindable("127.0.0.1", failure.port);
   }, 60_000);
 

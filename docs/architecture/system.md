@@ -762,3 +762,27 @@ modelRoles:
 **发布**：每次写入提交后同一请求内刷新快照，再由发布器依次重写 `<agent dir>/models.yml` 与宿主 overlay（看图角色取快照里第一个看图模型），然后才应答；同一时刻只有一轮重写，期间到达的写入合并为紧随其后的一轮。启动阶段 `models_yml` / `host_overlay` 调的是同一个发布函数，所以登记后的文件与重启后写出的字节相同。`models_yml` 阶段之前到达的写入只刷新快照、不写文件。重写失败时应答 generic 500（不是典型信封），标准错误恰一行 `{"event":"model_publish_failed"}`（只有 `event` 一个键），数据库与审计保留、不回滚；下一次成功的写入或重启再发布。运行中的 omp 进程不因发布重启：新 spawn 读新文件，存活进程在下一次派发时按 chat-sessions「派发前按会话设置对齐进程」对齐（有效模型不在它启动时的集合里则退役重启）。在途的上游请求不受写入影响；清空某模型的上游或删除它之后，该模型的下一次上游请求才失败。
 
 **已知验证缺口**：启动那一轮 `models_yml` 失败、而 `releaseOwned` 等待期间排队的 REST 发布经 overlay 包装把 stage 翻成 `host_overlay` 的竞态，外部进程无法确定性命中；修复是启动失败的 catch 在入口、任何 await 之前取定 reason（`server.ts`），回归证据是 `server/test/server-startup-failure-reason.test.ts`。
+
+### 9.10 专家与技能（S1d，change `s1d-experts-skills`）
+
+本节随任务组落地。组 1：每次 spawn 的会话配置文件。
+
+**会话配置文件**（`server/src/sessions/omp/session-config.ts`，规格 omp-runtime「子进程 spawn 契约」「会话配置文件」）：每一次 spawn（会话进程与 fork / branch 的临时进程同样）在 `spawnImpl` 之前写出本进程专属的两个文件，`<key>` 是每次新生成的随机十六进制串，与会话 id 无关、不复用：
+
+- `<OMP_STATE_DIR>/session-config/<key>.yml`：恰一行 `disabledExtensions: [<e1>, …]`（元素去重、字典序，每个写作 JSON 字符串；空时 `disabledExtensions: []`），不含其它键；
+- `<OMP_STATE_DIR>/session-config/<key>.md`：只在会话有专家时写，内容是专家提示词原文。
+
+两者与托管 `models.yml` 同一原子替换写出，`0640`。spawn 参数在宿主 overlay 的 `--config` 之后多 `--config <…/session-config/<key>.yml>`，有专家时其后再加 `--append-system-prompt <…/session-config/<key>.md>`，`--resume` 仍在最后；`PI_CONFIG_FILES` 仍只指向宿主 overlay。写出失败按目录准备失败处理（不 spawn、已写的删掉）。子进程一结束（正常退出、崩溃、握手失败、回收、关停，以及 spawn 本身失败：同步抛出或只有 `error` / `close`）两个文件即删；删除失败只记一条 Node 进程告警（不带路径），不改变退出处理，残留由下次启动清扫。文件内容由调用方给出：组 1 起所有 spawn 路径都传「无专家、无停用」，真实能力由组 6 接入。
+
+**两个行为变化（接受）**：
+
+- 会话 yml 的 `disabledExtensions` 位于 `--config` 层，高于项目层；omp 合并配置时数组整体替换，所以项目层 `.omp/config.yml` 与全局 `config.yml` 里的 `disabledExtensions` 在任何会话里都不再生效（能力为空时同样被 `[]` 覆盖），项目层也不能重新启用被会话停用的技能。
+- 有专家时 omp 不再自行发现项目层与用户层的 `APPEND_SYSTEM.md`（omp 只在没给 `--append-system-prompt` 时发现它）；无专家的会话不受影响。
+
+**托管布局多一个目录**（接 ADR-0010 的表）：
+
+| 路径 | mode | omp uid |
+| --- | --- | --- |
+| `<OMP_STATE_DIR>/session-config` | `2710` | 组只有执行位：能按确切路径读其中 `0640` 的文件，不能列举、新建、改名或删除 |
+
+它与布局里其它目录一样在启动与每次 spawn 时建出并校正。omp 读 `--append-system-prompt` 的文件出任何错（缺失、`EACCES`）都会把路径本身当提示词文本静默注入，所以文件在 spawn 前写成、子进程结束后才删，omp uid 的可读性由 CI `uid-isolation` 证明。**启动清扫**：`state_layout` 阶段在建好布局之后同步清空 `session-config/` 下上次运行的残留（符号链接只删链接本身；条目是目录时不递归、启动以 `{"event":"server_start_failed","reason":"state_layout"}` 失败——运维删掉该目录后重启）。每次 spawn 的布局校正不清扫（其中是存活进程的文件）。实测见 `server/test/omp-official-session-config.test.ts`（官方 v18.12.3：第二个 `--config` 停用 `skill:alpha`、`--append-system-prompt` 按文件读入，`get_state.systemPrompt` 观察；会话 yml 的 `[]` 覆盖项目层的 `disabledExtensions`）。

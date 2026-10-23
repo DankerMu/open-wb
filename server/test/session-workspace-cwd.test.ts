@@ -49,6 +49,7 @@ import {
   type SpawnCall,
   waitForTurn,
 } from "./session-supervisor-helpers.js";
+import { keyless } from "./support/session-config.js";
 import { seedUnboundSession, workspaceOf } from "./support/temporary-workspace.js";
 
 const UNBOUND = "7".repeat(32);
@@ -156,7 +157,8 @@ function argvShape(args: readonly string[]): string[] {
   const cwdAt = args.indexOf("--cwd") + 1;
   const masked = args.map((arg, index) => (index === cwdAt ? "<cwd>" : arg));
   const resumeAt = masked.indexOf("--resume");
-  return resumeAt === -1 ? masked : masked.slice(0, resumeAt);
+  // The session config key is new on every spawn (omp-runtime「会话配置文件」).
+  return keyless(resumeAt === -1 ? masked : masked.slice(0, resumeAt));
 }
 
 /** `--cwd` and the spawn cwd option are the one expected value. */

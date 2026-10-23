@@ -32,6 +32,7 @@ import {
   hostOverlayVisionBlock,
 } from "./omp-layout-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 /** No `BROWSER_BIN`, no vision model in the whitelist (since #1530 not the default deployment). */
 const DEFAULT = { browserEnabled: false, visionModelId: null } as const;
@@ -241,6 +242,7 @@ describe("writeHostOverlay", () => {
           cwd: join(root, "sandbox", "u1"),
           modelId: "m1",
           approvalMode,
+          capabilities: EMPTY_CAPABILITIES,
           token: "t".repeat(64),
           resumePath: null,
         },

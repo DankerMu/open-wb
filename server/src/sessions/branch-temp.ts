@@ -9,6 +9,7 @@ import { HttpError } from "../core/errors/index.js";
 import type { ApprovalMode } from "../model-catalog.js";
 import { SessionRuntime } from "./omp/runtime.js";
 import {
+  NO_SESSION_CAPABILITIES,
   type PoolEntry,
   type ProcessPool,
   type SpawnShared,
@@ -102,6 +103,7 @@ export class BranchTemps {
         cwd: plan.cwd,
         approvalMode: plan.approvalMode,
         modelId: plan.modelId,
+        capabilities: NO_SESSION_CAPABILITIES,
         resumePath: plan.resumePath,
         tokens: temporaryTokens(pool, entry, tokens),
         onExit: () => {

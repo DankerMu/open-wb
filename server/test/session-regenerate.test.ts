@@ -47,6 +47,7 @@ import {
   waitForTurn,
 } from "./session-supervisor-helpers.js";
 import { observePromise } from "./support/omp-rpc.js";
+import { keyless } from "./support/session-config.js";
 
 const worlds = regenWorlds();
 
@@ -152,7 +153,7 @@ describe("regenerate over real fake-omp branch children (#465)", () => {
     expect((await sendPrompt(world, "plain prompt")).statusCode).toBe(202);
     const regenerated = requiredCall(world.rt.calls, 0);
     const prompted = requiredCall(world.rt.calls, 1);
-    expect(withoutResume(prompted.args)).toEqual(withoutResume(regenerated.args));
+    expect(keyless(withoutResume(prompted.args))).toEqual(keyless(withoutResume(regenerated.args)));
     expect(Object.keys(prompted.env).sort()).toEqual(Object.keys(regenerated.env).sort());
     await waitForTurn(world.fixture, world.session, "done");
   });

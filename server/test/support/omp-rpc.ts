@@ -17,6 +17,7 @@ import {
   OmpProtocolError,
   type SpawnImpl,
 } from "../../src/sessions/omp/process.js";
+import { EMPTY_CAPABILITIES } from "./session-config.js";
 
 export const DEFAULT_SESSION = "/tmp/open-wb-fake-session.jsonl";
 export const RPC_PHYSICAL_LIMIT = 1_048_576;
@@ -73,6 +74,7 @@ export class RpcHarness {
       cwd: join(root, "sandbox", "u1"),
       modelId: "deepseek-v4.1-flash",
       approvalMode: "write",
+      capabilities: EMPTY_CAPABILITIES,
       token,
       resumePath: null,
     };

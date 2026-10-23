@@ -23,6 +23,10 @@
  * registry (`models/store.ts` + `models/registry.ts`) on the app's database, its rows written once the
  * fake upstream's port is known (the fake expects the given key, so its `secret` body echoes it), and
  * createApp gets `assembly.models` and no `assembly.upstream` — as the production entry assembles it.
+ *
+ * s1d-experts-skills group 1 adds the `capabilities` option of `openProxiedWorld` (the session config
+ * file of its spawns; empty when absent, as every app path passes in group 1) and exposes the agent
+ * dir, where a case installs platform skills before the first prompt spawns the child.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -43,7 +47,7 @@ import type { ChatEvent } from "../../src/sessions/events.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import { writeHostOverlay } from "../../src/sessions/omp/host-overlay.js";
 import type { SpawnImpl } from "../../src/sessions/omp/process.js";
-import { SessionRuntime } from "../../src/sessions/omp/runtime.js";
+import { SessionRuntime, type SessionRuntimeOpts } from "../../src/sessions/omp/runtime.js";
 import { ensureOmpStateLayout, ompAgentDir } from "../../src/sessions/omp/state-layout.js";
 import type { ApprovalRequest } from "../../src/sessions/omp/ui-requests.js";
 import { TokenRegistry } from "../../src/sessions/tokens.js";
@@ -51,6 +55,7 @@ import { FIXED_NOW, fixedRuntime } from "../session-db-helpers.js";
 import { cookieFor } from "../session-rest-helpers.js";
 import { type FakeUpstreamServer, start } from "./fake-upstream.mjs";
 import { officialBin, onTeardown, teeStdoutFrames } from "./omp-official.js";
+import { EMPTY_CAPABILITIES } from "./session-config.js";
 import { type StalledHandshake, startStalledHandshake } from "./stalled-handshake.js";
 
 /** The two whitelisted models; the runtime runs the first. */
@@ -75,6 +80,8 @@ interface ProxiedWorldOptions {
   connectDeadlineMs?: number;
   /** A shared real registry whose rows route to the fake upstream expecting `apiKey`; absent → static. */
   registry?: { apiKey: string };
+  /** `openProxiedWorld` only: the runtime's session capabilities; absent → none. */
+  capabilities?: SessionRuntimeOpts["capabilities"];
 }
 
 /** The shared registry of the `registry` option: its database is the app's. */
@@ -89,6 +96,8 @@ export interface ProxiedWorld {
   upstream: FakeUpstreamServer;
   stalled: StalledHandshake;
   workspaceRoot: string;
+  /** The managed agent dir (`<agentDir>/skills` holds the platform skills). */
+  agentDir: string;
   approvals: ApprovalRequest[];
 }
 
@@ -202,6 +211,7 @@ export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promi
     modelId: PROXIED_MODELS[0],
     approvalMode: "write",
     tokens: proxied.tokens,
+    capabilities: options.capabilities ?? EMPTY_CAPABILITIES,
     onApproval: (request) => {
       approvals.push(request);
       runtime.respondApproval(request.id, "deny");
@@ -209,7 +219,8 @@ export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promi
   });
   onTeardown(() => runtime.shutdown());
   const { upstream, stalled, workspaceRoot } = proxied;
-  return { runtime, upstream, stalled, workspaceRoot, approvals };
+  const agentDir = ompAgentDir(proxied.stateDir);
+  return { runtime, upstream, stalled, workspaceRoot, agentDir, approvals };
 }
 
 /** Appends every stdout frame of `child` to `frames` (`teeStdoutFrames`); omp's own reader is untouched. */

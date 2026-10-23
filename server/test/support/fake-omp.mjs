@@ -5,7 +5,7 @@
  * Local oracle: resource/oh-my-pi/docs/rpc.md (docs/architecture/rpc.md tracked by #141).
  */
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs, parseDelay } from "./fake-omp-argv.mjs";
@@ -23,6 +23,7 @@ import {
   WRITE_CALL,
   WRITE_SELECT_ID,
 } from "./fake-omp-composer.mjs";
+import { probeReport } from "./fake-omp-probe.mjs";
 import { loadBaseUrl, parseToolCall, postChat } from "./fake-omp-proxy.mjs";
 import {
   ANSWER_DELTAS,
@@ -413,53 +414,12 @@ async function handlePrompt(frame) {
     await turn();
     return;
   }
-  const report = probeReport(frame.message);
+  const report = probeReport(frame.message, inbound);
   if (report !== undefined) {
     await completeTurn([report], false);
     return;
   }
   await completeTurn(DELTAS, true);
-}
-
-function probeReport(message) {
-  const text = String(message ?? "");
-  if (text.startsWith("rename:")) {
-    const path = text.slice(7);
-    try {
-      renameSync(path, `${path}.moved`);
-      return "renamed=ok";
-    } catch (error) {
-      return `renamed=${error.code}`;
-    }
-  }
-  if (!text.startsWith("probe:")) {
-    return undefined;
-  }
-  const rest = text.slice(6);
-  const colon = rest.indexOf(":");
-  if (colon === -1) {
-    return undefined;
-  }
-  const pid = rest.slice(0, colon);
-  const writePath = rest.slice(colon + 1);
-  if (!/^[0-9]+$/u.test(pid) || writePath.length === 0) {
-    return undefined;
-  }
-  let wrote = "ok";
-  try {
-    writeFileSync(writePath, "probe", "utf8");
-  } catch (error) {
-    wrote = error.code;
-  }
-  let environ = "readable";
-  try {
-    readFileSync(`/proc/${pid}/environ`);
-  } catch (error) {
-    environ = error.code;
-  }
-  const env = Object.keys(process.env).sort().join(",");
-  const xdg = (kind) => process.env[`XDG_${kind}_HOME`] ?? "";
-  return `uid=${process.getuid()} gid=${process.getgid()} env=${env} home=${process.env.HOME ?? ""} xdgdata=${xdg("DATA")} xdgstate=${xdg("STATE")} xdgcache=${xdg("CACHE")} environ=${environ} wrote=${wrote} frames=${inbound.join(",")} cwd=${process.cwd()}`;
 }
 
 async function requestConfirm() {

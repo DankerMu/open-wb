@@ -34,10 +34,12 @@ import {
   ensureOmpStateLayout,
   ompAgentDir,
   ompHome,
+  ompSessionConfigDir,
   ompSessionDir,
   ompSnapshotsDir,
   ompTrashDir,
   ompXdgHome,
+  sweepSessionConfig,
 } from "../src/sessions/omp/state-layout.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
 import {
@@ -50,6 +52,7 @@ import {
 import { recordedSpawn, type SpawnCall } from "./session-supervisor-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
 import { collectPrompt } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 const OWNER = "u1";
@@ -108,6 +111,7 @@ async function spawnRecorded(
       approvalMode: "write",
       token: "a".repeat(64),
       resumePath: null,
+      capabilities: EMPTY_CAPABILITIES,
     },
     recording,
   );
@@ -124,6 +128,7 @@ describe("managed omp state layout paths", () => {
     expect(ompSessionDir("/s", OWNER)).toBe("/s/sessions/u1");
     expect(ompTrashDir("/s")).toBe("/s/trash");
     expect(ompSnapshotsDir("/s")).toBe("/s/snapshots");
+    expect(ompSessionConfigDir("/s")).toBe("/s/session-config");
     // chat-sessions names process.ts as the exporter of these two.
     expect(processAgentDir).toBe(ompAgentDir);
     expect(processSessionDir).toBe(ompSessionDir);
@@ -142,6 +147,7 @@ describe("ensureOmpStateLayout", () => {
     expect(modeOf(join(root, "missing", "parents"))).toBe(parentMode);
     expect(readdirSync(state).toSorted()).toEqual([
       "home",
+      "session-config",
       "sessions",
       "snapshots",
       "trash",
@@ -149,6 +155,7 @@ describe("ensureOmpStateLayout", () => {
     ]);
     expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
     expectHomeDotenv(state);
+    expect(readdirSync(join(state, "session-config"))).toEqual([]);
     expect(readdirSync(join(state, "sessions"))).toEqual([]);
     expect(readdirSync(join(state, "trash"))).toEqual([]);
     expect(readdirSync(join(state, "snapshots"))).toEqual([]);
@@ -482,6 +489,62 @@ describe("ensureOmpStateLayout", () => {
   });
 });
 
+// s1d-experts-skills group 1: omp-runtime「OMP_STATE_DIR 托管布局」scenario「启动清扫会话配置残留」.
+describe("session-config sweep", () => {
+  it("is synchronous: it returns undefined and the leftovers are gone when it returns; a symlink is unlinked, not followed", () => {
+    const root = tempRoot();
+    const state = join(root, "state");
+    const outside = join(root, "outside.yml");
+    writeFileSync(outside, "outside bytes");
+    ensureOmpStateLayout(state);
+    const dir = join(state, "session-config");
+    writeFileSync(join(dir, "a.yml"), "disabledExtensions: []\n");
+    writeFileSync(join(dir, "a.md"), "prompt");
+    symlinkSync(outside, join(dir, "b.yml"));
+
+    const returned: unknown = sweepSessionConfig(state);
+
+    expect(returned).toBeUndefined();
+    expect(readdirSync(dir)).toEqual([]);
+    expect(readFileSync(outside, "utf8")).toBe("outside bytes");
+    expect(modeOf(dir)).toBe(0o2710);
+  });
+
+  it("does not recurse: a non-empty subdirectory fails the sweep and stays", () => {
+    const state = join(tempRoot(), "state");
+    ensureOmpStateLayout(state);
+    const sub = join(state, "session-config", "sub");
+    mkdirSync(sub);
+    writeFileSync(join(sub, "x"), "x");
+
+    expect(() => sweepSessionConfig(state)).toThrow();
+
+    expect(readFileSync(join(sub, "x"), "utf8")).toBe("x");
+  });
+
+  it("is not part of a spawn's layout pass: live processes' files survive a later spawn", async () => {
+    const root = tempRoot();
+    const state = join(root, "state");
+    const dir = join(state, "session-config");
+    const first = await spawnRecorded(root, state);
+    await spawnRecorded(root, state);
+    const before = readdirSync(dir).toSorted();
+    expect(before).toHaveLength(2);
+    const bytes = before.map((name) => readFileSync(join(dir, name), "utf8"));
+
+    const calls = await spawnRecorded(root, state);
+
+    const firstArgs = first[0]?.args ?? [];
+    const firstConfig = firstArgs[firstArgs.lastIndexOf("--config") + 1];
+    expect(before.map((name) => join(dir, name))).toContain(firstConfig);
+    expect(calls).toHaveLength(1);
+    const after = readdirSync(dir).toSorted();
+    expect(after).toHaveLength(3);
+    expect(after.filter((name) => before.includes(name))).toEqual(before);
+    expect(before.map((name) => readFileSync(join(dir, name), "utf8"))).toEqual(bytes);
+  });
+});
+
 describe("spawned child environment under the managed layout", () => {
   it("gives the real child exactly the allowlist with HOME and the three XDG homes", async () => {
     const root = tempRoot();
@@ -513,6 +576,7 @@ describe("spawned child environment under the managed layout", () => {
         modelId: MODEL,
         approvalMode: "write",
         tokens: new TokenRegistry(),
+        capabilities: EMPTY_CAPABILITIES,
       });
       runtimes.push(runtime);
       const frames = await collectPrompt(

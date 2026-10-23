@@ -45,6 +45,7 @@ import {
   type SpawnImpl,
 } from "./process.js";
 import { FrameStream } from "./prompt-stream.js";
+import type { SessionCapabilities } from "./session-config.js";
 import { reportHandshakeTimeout, type SpawnGate, type SpawnLog } from "./spawn-gate.js";
 import type { ApprovalDecision, ApprovalRequest } from "./ui-requests.js";
 
@@ -73,6 +74,8 @@ export interface SessionRuntimeOpts {
   ompUser?: string | undefined;
   browserBin?: string | undefined;
   cwd: string;
+  /** This runtime's spawns' session config file; the caller decides (`session-config.ts`). */
+  capabilities: SessionCapabilities;
   idleMs?: number;
   resumePath?: string | null;
   spawnImpl?: SpawnImpl;
@@ -111,6 +114,7 @@ export class SessionRuntime {
   readonly #ownerId: string;
   readonly #modelId: string;
   readonly #approvalMode: ApprovalMode;
+  readonly #capabilities: SessionCapabilities;
   readonly #spawnIdentity: { ompUser: string | undefined; browserBin: string | undefined };
   readonly #cwd: string;
   readonly #tokens: SessionTokens;
@@ -145,6 +149,7 @@ export class SessionRuntime {
     this.#ownerId = opts.ownerId;
     this.#modelId = opts.modelId;
     this.#approvalMode = opts.approvalMode;
+    this.#capabilities = opts.capabilities;
     this.#spawnIdentity = { ompUser: opts.ompUser, browserBin: opts.browserBin };
     this.#cwd = opts.cwd;
     this.#tokens = opts.tokens;
@@ -431,6 +436,7 @@ export class SessionRuntime {
       ownerId: this.#ownerId,
       modelId: this.#modelId,
       approvalMode: this.#approvalMode,
+      capabilities: this.#capabilities,
       token,
       resumePath: this.#resumePath,
       ...this.#spawnIdentity,

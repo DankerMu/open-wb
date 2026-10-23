@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type SpawnImpl, spawnOmp } from "../src/sessions/omp/process.js";
 import { FakeChild } from "./support/omp-rpc.js";
+import { EMPTY_CAPABILITIES, keyless } from "./support/session-config.js";
 import { useSetprivStub } from "./support/setpriv.js";
 
 const OWNER = "u1";
@@ -101,6 +102,7 @@ async function capture(options: { ompUser?: string; browserBin?: string }): Prom
       cwd: join(root, "sandbox", OWNER),
       modelId: "deepseek-v4.1-flash",
       approvalMode: "write",
+      capabilities: EMPTY_CAPABILITIES,
       token: TOKEN,
       resumePath: null,
       ...options,
@@ -187,7 +189,7 @@ describe("spawnOmp browser environment", () => {
     expect(set.command).toBe(set.bin);
     const relative = (call: Captured) =>
       call.args.map((arg) => arg.replaceAll(join(call.bin, "..", ".."), "<root>"));
-    expect(relative(set)).toEqual(relative(unset));
+    expect(keyless(relative(set))).toEqual(keyless(relative(unset)));
   });
 
   it("sudo: one fixed --preserve-env element ending in the five browser keys, the OTLP pin and the proxy exemptions, set or unset", async () => {

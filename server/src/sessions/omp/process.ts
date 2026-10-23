@@ -5,13 +5,10 @@
 import { type ChildProcessWithoutNullStreams, type SpawnOptions, spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { join, resolve } from "node:path";
-import {
-  assertSafeSudoPath,
-  assertSetprivExecutable,
-  SETPRIV_PATH,
-} from "../../core/process-path.js";
+import { assertSafeSudoPath, assertSetprivExecutable } from "../../core/process-path.js";
 import { ensureSharedDir } from "../../core/sandbox/dirs.js";
 import { APPROVAL_MODES, type ApprovalMode } from "../../model-catalog.js";
+import { ompArgs, ompCommand } from "./argv.js";
 import {
   MAX_RPC_FRAME_BYTES,
   MAX_RPC_REASSEMBLED_BYTES,
@@ -19,13 +16,9 @@ import {
   RpcChunkDecoder,
 } from "./frame.js";
 import { ensureRepoRootMarker } from "./repo-root-marker.js";
-import { ompSpawnEnv, SUDO_PRESERVE_ENV } from "./spawn-env.js";
-import {
-  ensureOmpSessionDir,
-  ensureOmpStateLayout,
-  ompHostOverlayPath,
-  ompSessionDir,
-} from "./state-layout.js";
+import { type SessionCapabilities, writeSessionConfig } from "./session-config.js";
+import { ompSpawnEnv } from "./spawn-env.js";
+import { ensureOmpSessionDir, ensureOmpStateLayout, ompSessionDir } from "./state-layout.js";
 import {
   type ApprovalDecision,
   type ApprovalRequest,
@@ -53,6 +46,8 @@ export interface SpawnOmpOpts {
   browserBin?: string | undefined;
   /** Caller-resolved working directory; only the owner root is created, any other must exist. */
   cwd: string;
+  /** The session config file's content (`session-config.ts`); the caller decides, never defaulted. */
+  capabilities: SessionCapabilities;
 }
 
 export type SpawnImpl = (
@@ -87,60 +82,27 @@ export async function spawnOmp(
   // The whole managed layout is re-asserted on every spawn; argv and env keep the configured path.
   ensureOmpSessionDir(ensureOmpStateLayout(opts.stateDir), opts.ownerId);
   ensureRepoRootMarker(cwd);
-  // Preserve the prior async spawn boundary; native lifecycle regression covers it.
-  await Promise.resolve();
-
-  const args = [
-    // rpc-ui: tool UI (the browser prelude's approval) reaches the protocol; plain rpc fails it.
-    "--mode",
-    "rpc-ui",
-    "--cwd",
-    cwd,
-    "--session-dir",
-    sessionDir,
-    "--model",
-    `workbuddy/${opts.modelId}`,
-    "--approval-mode",
-    opts.approvalMode,
-    "--no-extensions",
-    "--no-lsp",
-    "--no-pty",
-    "--no-title",
-    // Written at startup; omp exits before `ready` when it is missing, and there is no fallback.
-    "--config",
-    ompHostOverlayPath(opts.stateDir),
-  ];
-  if (opts.resumePath !== null) {
-    args.push("--resume", opts.resumePath);
-  }
-
+  // Written before the child exists and removed once it is gone: `exit`, or only `close` when the
+  // spawn itself failed. The awaited write also keeps the prior async spawn boundary.
+  const config = await writeSessionConfig(opts.stateDir, opts.capabilities);
+  const args = ompArgs({ ...opts, cwd, sessionDir, sessionConfigArgs: config.args });
   const env = ompSpawnEnv(opts);
-
-  const command = opts.ompUser === undefined ? opts.bin : "sudo";
-  const commandArgs =
-    opts.ompUser === undefined
-      ? args
-      : [
-          "-n",
-          "-u",
-          opts.ompUser,
-          SUDO_PRESERVE_ENV,
-          ...(env.TMPDIR === undefined ? [] : [`TMPDIR=${env.TMPDIR}`]),
-          "--",
-          // setpriv execs omp in place; the kernel SIGKILLs omp when sudo dies.
-          SETPRIV_PATH,
-          "--pdeathsig",
-          "KILL",
-          "--",
-          opts.bin,
-          ...args,
-        ];
-  return spawnImpl(command, commandArgs, {
-    cwd,
-    env,
-    stdio: ["pipe", "pipe", "pipe"],
-    shell: false,
-  });
+  const { command, commandArgs } = ompCommand(opts.bin, opts.ompUser, args, env.TMPDIR);
+  let child: ChildProcessWithoutNullStreams;
+  try {
+    child = spawnImpl(command, commandArgs, {
+      cwd,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: false,
+    });
+  } catch (error) {
+    config.remove();
+    throw error;
+  }
+  child.once("exit", config.remove);
+  child.once("close", config.remove);
+  return child;
 }
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;

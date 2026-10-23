@@ -73,7 +73,7 @@ import { preflightOfficeSidecar } from "./preview/office-sidecar-health.js";
 import { createPreviewTokens, type PreviewTokens } from "./preview/tokens.js";
 import { type PreviewSettings, resolvePreviewSettings } from "./preview-config.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
-import { ensureOmpStateLayout } from "./sessions/omp/state-layout.js";
+import { ensureOmpStateLayout, sweepSessionConfig } from "./sessions/omp/state-layout.js";
 import type { TodoRejection } from "./sessions/store-todo.js";
 import type { UpstreamFailedRecord } from "./sessions/upstream-failure-log.js";
 import {
@@ -532,6 +532,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
     // 主 listen resolve 之后到沙箱根返回没有 await：主监听器受理的第一个请求到达时两者都已在。
     owned.stage = "state_layout";
     ensureOmpStateLayout(config.ompStateDir);
+    sweepSessionConfig(config.ompStateDir);
     owned.stage = "sandbox_root";
     const strict = config.ompUser !== undefined;
     if (ensureSandboxRoot(config.sandboxRoot, { strict }).outcome === "unchanged") {

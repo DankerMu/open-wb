@@ -20,6 +20,7 @@ import {
   emptySlot,
   type Generation,
   generationTokens,
+  NO_SESSION_CAPABILITIES,
   type PoolEntry,
   ProcessPool,
   ReadmissionRequired,
@@ -514,6 +515,7 @@ export class SessionSupervisor {
         cwd,
         approvalMode,
         modelId,
+        capabilities: NO_SESSION_CAPABILITIES,
         resumePath: resume.ompSessionFile,
         tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
         onExit: () => {

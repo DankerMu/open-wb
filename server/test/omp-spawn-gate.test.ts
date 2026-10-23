@@ -26,6 +26,7 @@ import {
   createTokens,
   type TestClock,
 } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 const REAL = { timeout: 20_000 };
@@ -118,6 +119,7 @@ function gatedRuntime(
     cwd: temp.cwd,
     modelId: temp.modelId,
     approvalMode: "write",
+    capabilities: EMPTY_CAPABILITIES,
     tokens: createTokens(`wb-652-${sessionId}`),
     clock,
     spawnGate: gate,

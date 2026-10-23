@@ -21,6 +21,7 @@ import { sessionRuntimeOpts } from "../src/sessions/pool.js";
 import { sudoPrefix } from "./session-supervisor-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
 import { createTokens } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES, keyless, sessionConfigYml } from "./support/session-config.js";
 import { useSetprivStub } from "./support/setpriv.js";
 
 const OWNER = "u1";
@@ -105,6 +106,7 @@ function spawnOpts(
     approvalMode: mode,
     token: TOKEN,
     resumePath: null,
+    capabilities: EMPTY_CAPABILITIES,
     cwd,
     ...(ompUser === undefined ? {} : { ompUser }),
   };
@@ -145,6 +147,8 @@ function contractArgs(
     "--no-title",
     "--config",
     join(roots.agent, "host-overlay.yml"),
+    "--config",
+    sessionConfigYml(roots.stateDir),
   ];
 }
 
@@ -181,7 +185,10 @@ describe("spawnOmp cwd (direct)", () => {
     expect(call.options.cwd).toBe(proj);
     expect(call.args).toEqual(contractArgs(roots, proj));
     const at = base.args.indexOf("--cwd") + 1;
-    expect(call.args.filter((_, i) => i !== at)).toEqual(base.args.filter((_, i) => i !== at));
+    // Apart from the cwd, only the session config key differs (omp-runtime「绑定会话的工作目录」).
+    expect(keyless(call.args.filter((_, i) => i !== at))).toEqual(
+      keyless(base.args.filter((_, i) => i !== at)),
+    );
     expect(call.options.env).toEqual(base.options.env);
     expect(call.options.stdio).toEqual(base.options.stdio);
     expect(call.options.shell).toBe(false);
@@ -295,6 +302,7 @@ describe("sessionRuntimeOpts", () => {
         resumePath: null,
         onExit: () => {},
         approvalMode: "yolo",
+        capabilities: EMPTY_CAPABILITIES,
         modelId: "m3",
       },
     );
@@ -368,6 +376,7 @@ describe("SessionRuntime cwd wiring", () => {
       ownerId: OWNER,
       modelId: model,
       approvalMode: mode,
+      capabilities: EMPTY_CAPABILITIES,
       tokens: createTokens("cwd"),
       spawnImpl,
       handshakeTimeoutMs: 60_000,
@@ -408,6 +417,7 @@ describe("SessionRuntime cwd wiring", () => {
       ownerId: OWNER,
       modelId: MODEL,
       approvalMode: "auto" as never,
+      capabilities: EMPTY_CAPABILITIES,
       tokens,
       spawnImpl,
       handshakeTimeoutMs: 60_000,

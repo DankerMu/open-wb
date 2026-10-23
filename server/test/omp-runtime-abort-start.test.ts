@@ -27,6 +27,7 @@ import {
   settlesWithin,
   type TokenBook,
 } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const REAL = { timeout: 20_000 };
 const SETTLE_MS = 3_000;
@@ -79,6 +80,7 @@ function open(scenario: string, extraArgs: string[], idleMs = 600_000): World {
   world.runtime = new SessionRuntime({
     ...real.runtime,
     approvalMode: "write",
+    capabilities: EMPTY_CAPABILITIES,
     sessionId: "sess-abort-start-650",
     ownerId: "u1",
     cwd: `${real.runtime.sandboxRoot}/u1`,

@@ -46,6 +46,7 @@ import {
 import { IDLE_MS, OWNER_ID, requiredCall, waitForTurn } from "./session-supervisor-helpers.js";
 import { FakeChild } from "./support/omp-rpc.js";
 import { createTokens } from "./support/omp-runtime.js";
+import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
 const MARKER_MODE = 0o2770;
 const IS_ROOT = process.getuid?.() === 0;
@@ -93,6 +94,7 @@ function opts(roots: Roots, cwd: string, resumePath: string | null = null): Spaw
     ownerId: OWNER_ID,
     modelId: "m1",
     approvalMode: "write",
+    capabilities: EMPTY_CAPABILITIES,
     token: "t".repeat(64),
     resumePath,
     cwd,
@@ -222,6 +224,7 @@ describe("a marker that cannot be made fails the acquisition: no spawn, the issu
       ownerId: OWNER_ID,
       modelId: "m1",
       approvalMode: "write",
+      capabilities: EMPTY_CAPABILITIES,
       tokens,
       spawnImpl,
       handshakeTimeoutMs: 60_000,
