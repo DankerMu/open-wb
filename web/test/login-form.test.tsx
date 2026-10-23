@@ -16,6 +16,7 @@ import {
   authenticatedPrincipal,
   calls,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   currentLocation,
   type DeferredResponse,
@@ -47,6 +48,7 @@ function loginFetchMock(routes: LoginRoutes = {}): FetchMock {
   return createFetchMock({
     "/api/auth/me": () => unauthenticatedResponse(),
     ...composerOptionsRoute(),
+    ...composerReadRoutes(),
     ...routes,
   });
 }

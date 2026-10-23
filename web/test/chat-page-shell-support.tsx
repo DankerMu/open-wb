@@ -16,6 +16,7 @@ import {
   authenticatedPrincipal,
   centerRoutes,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   jsonResponse,
   setBrowserPath,
@@ -62,6 +63,7 @@ export async function openProbedSession(snapshot: Snapshot) {
     "fetch",
     createFetchMock({
       ...composerOptionsRoute(),
+      ...composerReadRoutes(),
       ...centerRoutes(),
       "/api/auth/me": () => jsonResponse(authenticatedPrincipal),
       "/api/auth/login": () => jsonResponse({ id: "user-2", account: "lisi", role: "member" }),

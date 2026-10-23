@@ -18,6 +18,7 @@ import {
   authenticatedPrincipal,
   centerRoutes,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   currentLocation,
   expectExpertsTabSettled,
@@ -71,6 +72,7 @@ function fetchFor(principal: typeof MEMBER) {
     "/api/workspaces": () => jsonResponse({ workspaces: [] }),
     "/api/models": () => jsonResponse({ models: [SEED_VIEW] }),
     ...composerOptionsRoute(),
+    ...composerReadRoutes(),
     ...centerRoutes(),
   });
 }

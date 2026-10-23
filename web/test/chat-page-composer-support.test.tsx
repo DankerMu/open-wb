@@ -16,7 +16,9 @@ import { cleanupChatPage, renderChatPage } from "./chat-page-support.js";
 import { DEFAULT_COMPOSER_OPTIONS } from "./session-meta-fixtures.js";
 import {
   allowWorkspaceListFetch,
+  CAPABILITIES_ROUTE,
   composerOptionsRoute,
+  composerReadRoutes,
   createFetchMock,
   jsonResponse,
 } from "./support.js";
@@ -78,6 +80,56 @@ describe("整页测试支撑：输入框选项的缺省应答", () => {
     allowWorkspaceListFetch();
 
     expect(await options()).toEqual(DEFAULT_COMPOSER_OPTIONS);
+  });
+});
+
+describe("整页测试支撑：专家清单与会话能力的缺省应答", () => {
+  const NONE = { expertId: null, disabledSkills: [] };
+
+  it("composerReadRoutes answers no experts and, for any session id, no capabilities", async () => {
+    vi.stubGlobal("fetch", createFetchMock(composerReadRoutes()));
+    const client = createApiClient();
+
+    expect(await client.listExperts()).toEqual([]);
+    expect(await client.getSessionCapabilities("a".repeat(32))).toEqual(NONE);
+    expect(await client.getSessionCapabilities("b".repeat(32))).toEqual(NONE);
+  });
+
+  it("an exact capabilities key wins over the sentinel; other sessions still fall back", async () => {
+    const mine = { expertId: "builtin:test-engineer", disabledSkills: ["deploy"] };
+    vi.stubGlobal(
+      "fetch",
+      createFetchMock({
+        ...composerReadRoutes(),
+        [`/api/sessions/${"a".repeat(32)}/capabilities`]: () => jsonResponse(mine),
+      }),
+    );
+    const client = createApiClient();
+
+    expect(await client.getSessionCapabilities("a".repeat(32))).toEqual(mine);
+    expect(await client.getSessionCapabilities("b".repeat(32))).toEqual(NONE);
+  });
+
+  it("a table without the sentinel still rejects an unregistered capabilities path", () => {
+    const fetchMock = createFetchMock({ "/api/experts": () => jsonResponse({ experts: [] }) });
+
+    expect(CAPABILITIES_ROUTE).toBe("/api/sessions/:id/capabilities");
+    expect(() => fetchMock(`/api/sessions/${"a".repeat(32)}/capabilities`)).toThrow(
+      `unexpected request /api/sessions/${"a".repeat(32)}/capabilities`,
+    );
+    expect(() => fetchMock(`/api/sessions/${"a".repeat(32)}/capabilities/x`)).toThrow();
+  });
+
+  it("renderChatPage and allowWorkspaceListFetch both answer the two defaults", async () => {
+    renderChatPage("/", NO_SESSIONS);
+    await pageReady();
+    expect(await createApiClient().getSessionCapabilities("c".repeat(32))).toEqual(NONE);
+    expect(await createApiClient().listExperts()).toEqual([]);
+
+    vi.stubGlobal("fetch", createFetchMock({}));
+    allowWorkspaceListFetch();
+    expect(await createApiClient().getSessionCapabilities("c".repeat(32))).toEqual(NONE);
+    expect(await createApiClient().listExperts()).toEqual([]);
   });
 });
 

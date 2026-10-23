@@ -24,6 +24,11 @@ import {
   type ModelView,
   type UpdateModelInput,
 } from "./api-models.js";
+import {
+  createSessionCapabilityMethods,
+  type SessionCapabilities,
+  type SessionCapabilitiesPatch,
+} from "./api-session-capabilities.js";
 import { createSessionMethods } from "./api-sessions.js";
 import { createSkillMethods, type SkillList } from "./api-skills.js";
 import { createUploadMethods, type UploadedFile } from "./api-upload.js";
@@ -88,9 +93,15 @@ type ChatSessionComposerInput = {
   reasoningEffort?: NonNullable<ChatSession["reasoningEffort"]>;
 };
 
+/**
+ * 创建 input：只发送所给的键。`expertId` / `disabledSkills`（change s1d-experts-skills）是新会话的初始能力，
+ * 不在会话视图的十四键里。
+ */
 type ChatSessionCreateInput = ChatSessionComposerInput & {
   workspaceId?: string;
   scene?: ChatSessionScene;
+  expertId?: string;
+  disabledSkills?: string[];
 };
 
 type ChatSessionPatch = ChatSessionComposerInput & {
@@ -194,6 +205,15 @@ export type ApiClient = {
     disabledSkills: readonly string[],
     options?: ApiRequestOptions,
   ): Promise<SkillList>;
+  getSessionCapabilities(
+    sessionId: string,
+    options?: ApiRequestOptions,
+  ): Promise<SessionCapabilities>;
+  putSessionCapabilities(
+    sessionId: string,
+    patch: SessionCapabilitiesPatch,
+    options?: ApiRequestOptions,
+  ): Promise<SessionCapabilities>;
 };
 
 export type ApiClientOptions = {
@@ -444,6 +464,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     ...createModelMethods(onUnauthorized, transport),
     ...createExpertMethods(onUnauthorized, transport),
     ...createSkillMethods(onUnauthorized, transport),
+    ...createSessionCapabilityMethods(onUnauthorized, transport),
     async listAudit(filter, options) {
       const search = new URLSearchParams();
       if (filter?.limit !== undefined) {
@@ -539,4 +560,5 @@ export {
   type ModelView,
   type UpdateModelInput,
 } from "./api-models.js";
+export type { SessionCapabilities } from "./api-session-capabilities.js";
 export type { SkillList } from "./api-skills.js";
