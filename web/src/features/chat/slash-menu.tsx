@@ -142,6 +142,21 @@ function usePlusState(enabled: boolean, draft: string) {
 }
 
 /**
+ * Whether the 能力 popover is open. `scope` names the context of the composer that shows it (see
+ * `useSlashMenu`): a change of it closes an open popover (reset during render), so a popover left
+ * open does not follow a navigation that no pointer or focus outside the popover went with.
+ */
+function useSkillsState(scope: string | null | undefined) {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(scope);
+  if (shown !== scope) {
+    setShown(scope);
+    setOpen(false);
+  }
+  return { open: open && shown === scope, onOpenChange: setOpen };
+}
+
+/**
  * The slash candidates of the composer holding `draft`. `menu` is the panel (null while hidden)
  * and `interceptKeyDown` takes the panel's keys before the composer's Enter rule; it returns true
  * for a key it handled and never while the panel is hidden.
@@ -177,7 +192,10 @@ function usePlusState(enabled: boolean, draft: string) {
  * usable during a turn); `commands` are the `skill:` entries of the current catalogue, disabled ones
  * included, undefined while it is not held. `disabledSkills` names the skills the 「+」 menu and the
  * panel leave out (skill-switches「停用技能对 omp 生效」); null leaves out none. A change of it is
- * applied on the held catalogue and asks for nothing.
+ * applied on the held catalogue and asks for nothing. `skillsScope` names the context of the
+ * composer: the requested session id, null in the welcome state and undefined while no composer is
+ * shown (an archived session). The popover closes whenever it changes, so it is closed when a
+ * composer comes back and never open over a context it was not opened in.
  */
 export function useSlashMenu(
   client: ApiClient,
@@ -186,6 +204,7 @@ export function useSlashMenu(
   enabled: boolean,
   setDraft: (text: string) => void,
   disabledSkills: readonly string[] | null = null,
+  skillsScope: string | null | undefined = null,
 ): {
   menu: ReactNode;
   interceptKeyDown(event: ComposerKeyEvent): boolean;
@@ -220,7 +239,8 @@ export function useSlashMenu(
     byWorkspace: Map<WorkspaceKey, AbortController>;
   } | null>(null);
   const plusState = usePlusState(enabled, draft);
-  const [skillsOpen, setSkillsOpen] = useState(false);
+  const skillsState = useSkillsState(skillsScope);
+  const skillsOpen = skillsState.open;
   /**
    * The workspace id whose catalogue the panel, the open 「+」 menu or the open 能力 popover wants;
    * undefined while none is wanted.
@@ -294,8 +314,7 @@ export function useSlashMenu(
   const plus = { ...plusState, commands, onPick };
   const skills = {
     commands: held && skillEntries(held),
-    open: skillsOpen,
-    onOpenChange: setSkillsOpen,
+    ...skillsState,
   };
   if (current === undefined) return { menu: null, interceptKeyDown: () => false, plus, skills };
 

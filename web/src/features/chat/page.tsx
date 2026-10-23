@@ -72,6 +72,8 @@ export function ChatPage() {
     !session.composerDisabled,
     session.setDraft,
     disabledSkills,
+    // 能力弹层随输入框所在的上下文关闭：换会话、进出欢迎态、归档会话卸下输入框。
+    archived ? undefined : requestedSessionId,
   );
   const files = useAttachmentArea({
     attachments: session.attachments,

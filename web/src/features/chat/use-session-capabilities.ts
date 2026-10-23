@@ -111,11 +111,13 @@ export type SessionCapabilityState = {
  * 成功之后，此前发出的 `GET` 的结果不再落地（`PUT` 失败不丢它：仍在途的首次 `GET` 照常落地，标签即服务端
  * 保留的原专家）；切换会话或回到欢迎态之后，此前在途的 `PUT` 的成功与失败都不落地、也不再使新会话禁用。
  * `PUT` 成功以应答整体替换能力（与本地预期不同时以应答为准），失败不动已取得的能力（切技能的开关随之回滚）；
- * 失败文案在下一次 `PUT` 开始、切换会话或回到欢迎态时清除。
+ * 失败文案在下一次 `PUT` 开始、切换会话或回到欢迎态时清除。每次发出 `GET` 即丢掉已取得的能力：A→欢迎态→A
+ * 的重读在途时是「读取中」（不是上一次的能力、也不是上一次的失败），切技能不以上一次取得的集合为底。
  *
  * 同一会话的 `GET` 记录在：StrictMode 的模拟重挂再跑一次 effect，记录仍是这个会话就不再发（不写 cleanup，理由
  * 同 `useComposerOptions`）。换专家与切技能共用一个在途写，守卫是 ref：同一帧里连点两次只发一次（不可操作的
- * 状态要到下一次渲染才生效，技能开关用 `aria-disabled` 也照样分派点击）。
+ * 状态要到下一次渲染才生效，技能开关用 `aria-disabled` 也照样分派点击）。切技能的底同样取自 ref（与 `held`
+ * 同步写入）：`PUT` 应答落地到重渲染之间的一次点击以应答的集合为底，不是渲染时闭包里的旧集合。
  */
 export function useSessionCapabilities(
   client: CapabilitiesClient,
@@ -124,8 +126,14 @@ export function useSessionCapabilities(
   const [held, setHeld] = useState<HeldCapabilities | null>(null);
   const [writing, setWriting] = useState<Write | null>(null);
   const [error, setError] = useState<ShownError | null>(null);
+  const heldRef = useRef<HeldCapabilities | null>(null);
   const readRef = useRef<Flight | null>(null);
   const writeRef = useRef<Flight | null>(null);
+  /** 写 `held` 一律经它：`heldRef` 与之同步，切技能从 ref 读最新的集合。 */
+  const hold = useCallback((next: HeldCapabilities | null) => {
+    heldRef.current = next;
+    setHeld(next);
+  }, []);
 
   useEffect(() => {
     writeRef.current = null;
@@ -139,11 +147,12 @@ export function useSessionCapabilities(
     if (last?.client === client && last.sessionId === sessionId) return;
     const read: Flight = { client, sessionId };
     readRef.current = read;
+    hold(null);
     const land = (capabilities: SessionCapabilities | null) => {
-      if (readRef.current === read) setHeld({ client, sessionId, capabilities });
+      if (readRef.current === read) hold({ client, sessionId, capabilities });
     };
     client.getSessionCapabilities(sessionId).then(land, () => land(null));
-  }, [client, sessionId]);
+  }, [client, hold, sessionId]);
 
   const current = (flight: Flight | null): flight is Flight =>
     flight !== null && flight.client === client && flight.sessionId === sessionId;
@@ -162,7 +171,7 @@ export function useSessionCapabilities(
         // 此前发出的 GET（若仍在途）比这次写入旧：换一条同会话的记录，它的结果不再落地。
         readRef.current = { client, sessionId: id };
         setWriting(null);
-        setHeld({ client, sessionId: id, capabilities: answer });
+        hold({ client, sessionId: id, capabilities: answer });
       },
       (failure: unknown) => {
         if (writeRef.current !== write) return;
@@ -181,8 +190,10 @@ export function useSessionCapabilities(
   };
 
   const toggleSkill = (name: string, enabled: boolean) => {
+    const latest = heldRef.current;
     if (sessionId === undefined || writeRef.current !== null || capabilities === null) return;
-    const disabledSkills = toggledSkills(capabilities.disabledSkills, name, enabled);
+    if (!current(latest) || latest.capabilities === null) return;
+    const disabledSkills = toggledSkills(latest.capabilities.disabledSkills, name, enabled);
     put(sessionId, { disabledSkills }, disabledSkills);
   };
 
