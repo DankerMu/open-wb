@@ -20,6 +20,7 @@
 ## Risks / Trade-offs
 
 - 拼接改走 WHATWG 路径：http(s) 下 `…/v1\` 与 `…/v1//` 同类，结尾分隔符一并去掉。非 http(s) 的种子地址（如 `foo:bar`，只能由 env 写入）路径不可设，`sub` 被忽略，失败从构造 URL 挪到 `http.request`：代理仍是被捕获的 502（`ERR_INVALID_URL` → `ERR_INVALID_PROTOCOL`），探活仍是「无法连接」——不处理。
+- 拼接先解析再接路径：WHATWG 去掉首尾空白，env 种子 `http://h/v1 ` 由旧的 `/v1%20/…` 变为 `/v1/…`，`http://h ` 由构造即抛变为可达（REST 地址规则 `[^\s#@]` 本就拒空白）；与视图形式、净化部件对同一字符串的解析一致。查询串整体在净化密钥集里（upstream-failure 规格），单个参数值不单列——代理此前不转发查询串、现在转发，回显单个参数值的上游正文不被替换；规格取舍，不在本 change 改。
 
 - 代理拼接改为 URL 语义：对 `…/v1`、`…/v1/`、`http://h`（无路径）三类与改动前逐字相同（用例逐条钉住）；带查询串的 base URL、路径以多个斜杠结尾（`…/v1//` 由 `/v1//chat/completions` 变为 `/v1/chat/completions`，与探活一致）、空查询（`…/v1?` 由丢掉 `v1` 变为保留）行为改变，都是从错变对。
 - `withoutUserinfo` 对带 userinfo 的地址返回 WHATWG 规范化后的 `href`（如前导空格去掉、`http:/` 补成 `http://`）。沿用分支的往返判据以同一函数计算，客户端送回视图形式即命中。

@@ -10,7 +10,7 @@ s1d-model-registry（Epic #1640）合并后，审查留下三条范围外问题�
 
 ## What Changes
 
-- 新 `server/src/core/base-url.ts`：`withoutUserinfo(baseUrl)`（视图形式）、`userinfoParts(baseUrl)`（净化用）、`upstreamEndpoint(baseUrl, path)`（拼接）。三者先按 WHATWG `new URL` 解析，解析失败退回兜底正则（容忍前导空白与 `:` 后的 `/`、`\`）；只在确有 userinfo 时改写视图形式，其余原样返回（保持 `store.update` 视图往返相等的判据）。
+- 新 `server/src/core/base-url.ts`：`withoutUserinfo(baseUrl)`（视图形式）、`userinfoParts(baseUrl)`（净化用）、`upstreamEndpoint(baseUrl, sub)`（拼接）。前两者先按 WHATWG `new URL` 解析，解析失败退回兜底正则（容忍前导空白与 `:` 后的 `/`、`\`）；`upstreamEndpoint` 解析失败即抛 `TypeError`，由探活与代理的调用点捕获；只在确有 userinfo 时改写视图形式，其余原样返回（保持 `store.update` 视图往返相等的判据）。
 - `models/store.ts` 的 `viewBaseUrl`、`core/upstream-failure.ts` 的 `baseUrlParts` 改用它们。
 - 探活与代理都用 `upstreamEndpoint`：路径去掉结尾斜杠后接子路径，查询串保留（owner 2026-10-22 选「按 URL 语义拼接」，不禁止 `?`——规格已允许查询串，禁止会破坏既有配置）。
 - 编译入口用例补「发布失败 → 非信封 500 + stderr 恰一行」。
