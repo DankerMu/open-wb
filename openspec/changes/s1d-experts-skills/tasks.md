@@ -11,6 +11,7 @@
 | omp 前提（第二个 `--config` 叠加、`--append-system-prompt` 读文件、`skill:<名>` 停用、`get_state.systemPrompt` 可观察） | 是 | 组 1 官方用例 |
 | 两份真相（会话能力 vs 存活进程） | 是 | 组 6 指纹判据 |
 | 越权（他人专家、内置专家写入、他人会话能力） | 是 | 组 3、组 5 的 401 / 400 / 403 / 404 矩阵 |
+| 公开 API 与装配兼容（既有归属身份、DELETE 非归属路由的 generic 500、启动模块记录） | 是 | 组 3–5 的 `http-parser-owners` 正负向清单与写死模块列表的启动用例 |
 | 迁移与 DB 约束 | 是 | 组 2：`experts-store.test.ts` 迁移段 + 2.3 所列迁移目录 / 表 / 列快照常量 |
 | 文件泄漏与可读性（会话配置残留、提示词进日志 / 审计、omp uid 读不到会话配置文件） | 是 | 组 1 退出删除、启动清扫与 CI `uid-isolation`、组 3 审计 detail |
 | 用户可见回归（`/center` 普通用户、能力行次序、斜杠候选、请求计数） | 是 | 组 7、组 9、组 10 |
@@ -44,10 +45,10 @@ Minimal mergeable slice: atomic - 迁移没有 store 就没有读者；三处 st
 
 ## 3. 专家端点与审计（experts「专家管理端点」+ http-service-skeleton 的 `experts` 模块与两条归属身份）
 
-- [ ] 3.1 核对 Context：`http/errors.ts` 归属集、`http-parser-owners.test.ts` 身份清单（#1649 合入后二十一条）、`server-assembly.test.ts` 与启动用例的模块列表（#1649 合入后八个）、`/api/models` 在 preParsing 里先判管理员与 `id` 的做法、`core/roles` 与 `forbidden` 码（#1641）、`core/audit` 的 `emit`。
-- [ ] 3.2 测试先行：新 `server/test/experts-rest.test.ts`（整体挂载）：判定次序 401 → `PUT` / `DELETE` 的 `id` 缺失 / 空 / 多值 400 → 内置 id 的 `PUT` / `DELETE` 403 且无审计 → 他人与不存在 404 → content-parser / 键集 / 「字段边界」400，其中 401、`id` 的 400、403、404 各带 malformed body 一例仍得到同一结果（先于 body 解析）；8000 个 CJK 码点的 `prompt`（body 约 24 KiB）`POST` 201、`PUT` 200，超过 64 KiB 的 body 400；201 / 200 / 204；`GET` 次序（内置在前）；删除清空引用它的会话（能力 `expertId` 为 null）；三种审计 kind 与 detail 不含提示词；每类应答 no-store；http-service-skeleton「专家、技能与会话能力的归属路由」的专家部分；启动记录模块数加一（`experts`）、归属身份二十一 → 二十三。
-- [ ] 3.3 新 `server/src/experts/rest.ts`（两个带 body 的路由 body limit 64 KiB；401 / `id` / 403 / 404 在 preParsing 判定）；`app.ts` 注册模块 `experts`；`http/errors.ts` 归属集加两条身份；`server.ts` `STARTUP_MODULES` 加 `experts`；三处模块列表断言与身份清单同步。
-- [ ] 3.4 `docs/architecture/system.md` 加「专家与技能」一节的专家端点、判定次序与审计 kind。
+- [x] 3.1 核对 Context：`http/errors.ts` 归属集、`http-parser-owners.test.ts` 身份清单（#1649 合入后二十一条）、`server-assembly.test.ts` 与启动用例的模块列表（#1649 合入后八个）、body 解析前判属主的先例 `sessions/rest-metadata.ts` `authorizeOwnedBeforeParse`（`/api/models` 只在 preParsing 判管理员、`id` 在 handler 判，不是同一做法）、`core/roles` 与 `forbidden` 码（#1641）、`core/audit` 的 `emit`。
+- [x] 3.2 测试先行：新 `server/test/experts-rest.test.ts`（整体挂载）：判定次序 401 → `PUT` / `DELETE` 的 `id` 缺失 / 空 / 多值 400 → 内置 id 的 `PUT` / `DELETE` 403 且无审计 → 他人与不存在 404 → content-parser / 键集 / 「字段边界」400，其中 401、`id` 的 400、403、404 各带 malformed body 一例仍得到同一结果（先于 body 解析）；相邻条件同时成立的用例：匿名且无 `id` 的 `PUT` 携 malformed body → 401、`?id=builtin:data-analyst&id=x` → 400、`?id=builtin:nope` → 404（不是 403）；8000 个 CJK 码点的 `prompt`（body 约 24 KiB）`POST` 201、`PUT` 200，超过 64 KiB 的 body 400；201 / 200 / 204；`GET` 次序（内置在前）；`PUT` 整体替换（原 `tags: ["a"]`、`description: "d"`、`skills: ["s"]`，`PUT` 只带 `{name, category, prompt}` → 视图三项为 `[]`、`""`、`[]`）；视图键集恰为 `builtin, category, description, id, name, prompt, skills, tags`；删除清空引用（`POST /api/sessions` 建会话 S，经组 2 的 `writeSessionCapabilities(db, S, {expertId: X, disabledSkills: []})` 写引用，另一会话引用别的专家；`DELETE ?id=X` 204 后 `readSessionCapabilities(db, S).expertId` 为 `null`、另一会话不变；「他人专家不可见」场景的「以 `expertId: X` 创建会话 400」归组 5）；三种审计：`audit_events` 三行依次 `toEqual` 钉住 `{kind, actorId, detail}`、`detail` 恰为 `{expertId, name}`，并以只出现在提示词里的哨兵断言整行 `JSON.stringify`（含 `title`）不含它；同事务：`audit_events` 上建 `BEFORE INSERT` 触发器 `RAISE(ABORT)`（先例 `auth-session.test.ts:496`）后 `POST` 与 `DELETE` 均为 generic 500，`POST` 后无专家行、`DELETE` 后专家仍在且会话引用未清空；每类应答 no-store；http-service-skeleton「专家、技能与会话能力的归属路由」的专家部分；启动记录模块数加一（`experts`）、归属身份二十一 → 二十三。
+- [x] 3.3 新 `server/src/experts/rest.ts`（两个带 body 的路由 body limit 64 KiB；401 / `id` / 403 / 404 在 preParsing 判定）；`app.ts` 注册模块 `experts`；`http/errors.ts` 归属集加两条身份；`server.ts` `STARTUP_MODULES` 加 `experts`；写死模块列表的五个文件同步——`server-assembly.test.ts`（:164、:478 字面列表与 :560-590 `spyRegistrationOrder` 为 experts 注册函数加 spy）、`server-startup-order.test.ts`、`server-startup-preview.test.ts`、`server-startup-model-seed.test.ts`、`models-rest-restart.test.ts`（`toMatchObject({modules})` 要求数组等长）；身份清单同步含负向：`http-parser-owners.test.ts` 正向清单二十一 → 二十三，证据 2（:172）与 `NON_OWNER_METHODS`（:182）加 `DELETE /api/experts` 与 `GET /api/experts`；`errors.ts` :47、:84 注释与 `http-typed-errors.test.ts:193` 标题的「二十一」同步。
+- [x] 3.4 `docs/architecture/system.md` 既有 §9.10「专家与技能」一节（组 1 建）加专家端点、判定次序与审计 kind。
 
 Suggested fixture level: expanded - 新的按属主授权的写端点（authorization 触发项）。
 Minimal mergeable slice: atomic - 四个方法共用同一套 401 / 400 / 403 / 404 / 键集 / 审计骨架与一个整体挂载用例文件；归属集与模块记录的改动必须与路由同 PR，否则守卫红。

@@ -8,6 +8,7 @@ import * as accounts from "../src/accounts/index.js";
 import { type CreateAppOptions, createApp } from "../src/app.js";
 import * as auth from "../src/auth/index.js";
 import { openDb } from "../src/core/db/index.js";
+import * as experts from "../src/experts/rest.js";
 import * as http from "../src/http/index.js";
 import type { ModelCatalog } from "../src/model-catalog.js";
 import * as modelProxy from "../src/model-proxy/index.js";
@@ -163,6 +164,7 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
       "workspaces",
       "accounts",
       "models",
+      "experts",
     ]);
     expect(rowStatus(db, "chat_sessions", STALE_SESSION_ID)).toBe("failed");
     expect(runningCount(db, "chat_messages")).toBe(0);
@@ -477,6 +479,7 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
         "workspaces",
         "accounts",
         "models",
+        "experts",
       ]);
       expect(started.modules).toEqual(["core/db", ...order]);
       expect(existsSync(join(scratchRoot, "sandbox", "u1"))).toBe(false);
@@ -553,36 +556,25 @@ async function proxyStatuses(
   }
 }
 
+/** Records each module's registration call (then runs the real one) in the order createApp makes it. */
 function spyRegistrationOrder(): string[] {
   const order: string[] = [];
-  vi.spyOn(auth, "registerAuth").mockImplementationOnce((app, options) => {
-    order.push("auth");
-    return auth.registerAuth(app, options);
-  });
-  vi.spyOn(http, "registerAuthGuard").mockImplementationOnce((app) => {
-    order.push("http");
-    return http.registerAuthGuard(app);
-  });
-  vi.spyOn(modelProxy, "registerModelProxy").mockImplementationOnce((app, options) => {
-    order.push("model-proxy");
-    return modelProxy.registerModelProxy(app, options);
-  });
-  vi.spyOn(sessions, "registerSessions").mockImplementationOnce((app, options) => {
-    order.push("sessions");
-    return sessions.registerSessions(app, options);
-  });
-  vi.spyOn(workspaces, "registerWorkspaces").mockImplementationOnce((app, options) => {
-    order.push("workspaces");
-    return workspaces.registerWorkspaces(app, options);
-  });
-  vi.spyOn(accounts, "registerAccounts").mockImplementationOnce((app, options) => {
-    order.push("accounts");
-    return accounts.registerAccounts(app, options);
-  });
-  vi.spyOn(models, "registerModels").mockImplementationOnce((app, options) => {
-    order.push("models");
-    return models.registerModels(app, options);
-  });
+  const once = <M extends object>(label: string, module: M, name: keyof M & string): void => {
+    const registrations = module as Record<string, (...args: unknown[]) => unknown>;
+    const register = registrations[name] as (...args: unknown[]) => unknown;
+    vi.spyOn(registrations, name).mockImplementationOnce((...args) => {
+      order.push(label);
+      return register(...args);
+    });
+  };
+  once("auth", auth, "registerAuth");
+  once("http", http, "registerAuthGuard");
+  once("model-proxy", modelProxy, "registerModelProxy");
+  once("sessions", sessions, "registerSessions");
+  once("workspaces", workspaces, "registerWorkspaces");
+  once("accounts", accounts, "registerAccounts");
+  once("models", models, "registerModels");
+  once("experts", experts, "registerExperts");
   return order;
 }
 

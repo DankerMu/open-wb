@@ -750,7 +750,7 @@ modelRoles:
 
 模型注册表（`server/src/models/`：`store` 表读写、`registry` 进程内快照、`publish` 托管文件发布、`rest` 管理端点）是模型白名单、缺省模型与每个模型上游的唯一来源（规格 model-registry）。本节写管理端点、审计与发布；种子见 9.3。
 
-**端点**（`models/rest.ts`，createApp 的第八个模块 `models`，启动记录的 `modules` 末项）：
+**端点**（`models/rest.ts`，createApp 的第八个模块 `models`，启动记录的 `modules` 里紧随 `accounts`）：
 
 - `GET /api/models` → 200 `{models: ModelView[]}`，按登记次序；`ModelView` 恒为 `{id, name, reasoning, vision, maxTokens, efforts, upstream, isDefault, probe, updatedAt}`，`upstream` 为 `{baseUrl, hasApiKey: true}` 或 `null`。响应不含密钥；`baseUrl` 去掉 userinfo（环境种子的地址原样入表，可能带 `user:pass@`）。
 - `POST /api/models`（body 键集为 `{id, name, reasoning, vision, maxTokens, efforts, upstream}` 的子集且含 `id`，`upstream` 为 `{baseUrl, apiKey}`）→ 201；`PUT /api/models?id=`（整体替换 `id` 以外的字段，`upstream.apiKey` 省略即保留原密钥，`upstream: null` 清空）→ 200；`DELETE /api/models?id=` → 204（缺省模型 409 `model_in_use`）；`POST /api/models/default?id=`（无 body）→ 200，已是缺省时不审计、不发布。探活 `POST /api/models/probe` 由后续组提供。
@@ -765,7 +765,7 @@ modelRoles:
 
 ### 9.10 专家与技能（S1d，change `s1d-experts-skills`）
 
-本节随任务组落地。组 1：每次 spawn 的会话配置文件。
+本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计。
 
 **会话配置文件**（`server/src/sessions/omp/session-config.ts`，规格 omp-runtime「子进程 spawn 契约」「会话配置文件」）：每一次 spawn（会话进程与 fork / branch 的临时进程同样）在 `spawnImpl` 之前写出本进程专属的两个文件，`<key>` 是每次新生成的随机十六进制串，与会话 id 无关、不复用：
 
@@ -786,3 +786,11 @@ modelRoles:
 | `<OMP_STATE_DIR>/session-config` | `2710` | 组只有执行位：能按确切路径读其中 `0640` 的文件，不能列举、新建、改名或删除 |
 
 它与布局里其它目录一样在启动与每次 spawn 时建出并校正。omp 读 `--append-system-prompt` 的文件出任何错（缺失、`EACCES`）都会把路径本身当提示词文本静默注入，所以文件在 spawn 前写成、子进程结束后才删，omp uid 的可读性由 CI `uid-isolation` 证明。**启动清扫**：`state_layout` 阶段在建好布局之后同步清空 `session-config/` 下上次运行的残留（符号链接只删链接本身；条目是目录时不递归、启动以 `{"event":"server_start_failed","reason":"state_layout"}` 失败——运维删掉该目录后重启）。每次 spawn 的布局校正不清扫（其中是存活进程的文件）。实测见 `server/test/omp-official-session-config.test.ts`（官方 v18.12.3：第二个 `--config` 停用 `skill:alpha`、`--append-system-prompt` 按文件读入，`get_state.systemPrompt` 观察；会话 yml 的 `[]` 覆盖项目层的 `disabledExtensions`）。
+
+**专家端点**（`server/src/experts/rest.ts`，createApp 的第九个模块 `experts`，注册与启动记录的 `modules` 都紧随 `models`；规格 experts「专家管理端点」）：
+
+- `GET /api/experts` → 200 `{experts: ExpertView[]}`，`ExpertView` 恒为 `{id, name, description, category, tags, prompt, skills, builtin}`：四位内置专家在前（固定次序），其后本账号自建的按创建次序；他人的专家不出现。
+- `POST /api/experts`（body 键集严格为 `{name, description?, category, tags?, prompt, skills?}`，多余键 400）→ 201 视图；`PUT /api/experts?id=`（body 同 POST，整体替换：省略的 `description` / `tags` / `skills` 回到 `""` / `[]` / `[]`）→ 200 视图；`DELETE /api/experts?id=` → 204，同一事务把引用它的会话的专家清空（`chat_sessions.expert_id` 置 NULL，停用技能不动）。字段规则与每账号 50 个的上限见 experts「专家校验与可见性」，违反即 400，不回显取值。
+- 专家 id 走查询参数，与 `/api/models` 一致。次序：未登录 401 → `PUT` / `DELETE` 的 `id` 缺失、为空或出现多次 400 → `id` 是四位内置专家之一 403 `forbidden`（只认这四个 id；带 `builtin:` 前缀的其它 id 按不存在处理）→ 他人的专家与不存在的 id 同为 404 `not_found` → body 解析与键集 / 字段 400。前四步都在 body 解析之前（路由级 `preParsing`，与会话元数据修改的属主预检同一做法；`/api/models` 的 `id` 在 handler 里判，不同），所以无论 body 合法、残缺还是超限，这几类请求的结果不变。`POST /api/experts` 与 `PUT /api/experts` 属 content-parser 归属集，body limit 64 KiB（8000 码点的 CJK 提示词约 24 KiB），坏 JSON / 空 body / 媒体类型 / 超限均 exact 400；`DELETE /api/experts` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。全部应答 `Cache-Control: no-store`。
+
+**审计**：每次写入与表写入同一事务记一条（审计写入失败则整次写入回滚、应答 generic 500），kind 为 `expert.create` / `expert.update` / `expert.delete`，actor 为写入者，`workspaceId` 为 null，title 为 `新建专家 <name>` / `修改专家 <name>` / `删除专家 <name>`；detail 恰为 `{expertId, name}`。提示词不进审计行的任何一列。内置专家的 403 与 400 / 404 都不审计。
