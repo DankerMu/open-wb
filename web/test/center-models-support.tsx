@@ -1,7 +1,7 @@
 // 中心页「模型」tab 各测试文件共用的夹具（model-registry「模型 tab」，s1d-model-registry 任务 10.2）：一个按规格
 // 行为应答的假 `ApiClient`（经 `ModelsPanel({client})` 注入，不经 fetch），调用记录，以及按 role + name 定位的助手。
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
 import { ModelsPanel } from "../src/features/center/models/panel.js";
 import {
@@ -170,9 +170,13 @@ export function save(dialog: HTMLElement): void {
   fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
 }
 
-/** 对话框关闭且之后的请求（探活、重取）都已结算：以 `listModels` 的调用次数为准。 */
+/**
+ * 对话框关闭且之后的请求（探活、重取）都已结算：以 `listModels` 的调用次数为准。用 RTL `waitFor`，经
+ * `asyncWrapper` 与 #1541 Scheduler 屏障（`scheduler-drain-setup.ts`）。不等焦点归还等 timer 副作用，
+ * 要断言它们的用例须自己等结果本身（#1718）。
+ */
 export async function settled(fake: FakeModels, lists: number): Promise<void> {
-  await vi.waitFor(() => {
+  await waitFor(() => {
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(fake.listModels).toHaveBeenCalledTimes(lists);
   });

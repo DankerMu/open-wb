@@ -176,7 +176,7 @@ describe("编辑：PUT 映射与自动探活", () => {
       ],
     ]);
     expect(callNames(fake)).toEqual(["listModels", "updateModel", "listModels"]);
-    expect(document.activeElement).toBe(rowButton("m2", "编辑"));
+    await waitFor(() => expect(document.activeElement).toBe(rowButton("m2", "编辑")));
   });
 
   it("改地址不填密钥 → upstream {baseUrl}，探活一次", async () => {

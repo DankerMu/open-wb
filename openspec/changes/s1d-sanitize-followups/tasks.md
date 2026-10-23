@@ -22,7 +22,7 @@ Suggested fixture level: expanded - 事件循环阻塞 + 凭证泄露。
 
 ## 2. center-models 焦点等待（#1718）
 
-- [ ] 2.1 测试先行：用扰动 setup（全部 `setTimeout(fn, 0)` 推迟到 60 ms）跑 `center-models-form.test.tsx` 与 `center-models-list.test.tsx`，修复前恰红 `:179`（记录命令与输出）。
-- [ ] 2.2 `:179` 改为 `await waitFor(...)` 等焦点；`settled()` 改用 RTL `waitFor`；不调大超时、不加 retry、不删断言。扰动下全部 center-models 用例文件全绿；CPU 满载下连跑 N 次全绿（N 写进 PR）；不加扰动的 `npm test --workspace web`（含 coverage）通过；`make check` 通过。扰动 setup 只在 scratch，不入库。
+- [x] 2.1 测试先行：用扰动 setup（全部 `setTimeout(fn, 0)` 推迟到 60 ms）跑 `center-models-form.test.tsx` 与 `center-models-list.test.tsx`，修复前恰红 `:179`（记录命令与输出）。
+- [x] 2.2 `:179` 改为 `await waitFor(...)` 等焦点；`settled()` 改用 RTL `waitFor`；不调大超时、不加 retry、不删断言。扰动下全部 center-models 用例文件全绿；CPU 满载下连跑 N 次全绿（N 写进 PR）；不加扰动的 `npm test --workspace web`（含 coverage）通过；`make check` 通过。扰动 setup 只在 scratch，不入库。
 
 Suggested fixture level: compact - 只改测试。
