@@ -67,7 +67,7 @@ export function ompSessionConfigDir(stateDir: string): string {
 
 const MANAGED = 0o2750;
 /** `session-config`: group search only (design D1, ADR-0010). */
-const MANAGED_BY_PATH = 0o2710;
+const MANAGED_BY_PATH = 0o2750; // NEGATIVE CONTROL MUTANT (#1656), do not merge
 const OMP_WRITABLE = 0o2770;
 const OMP_HOME = 0o3770;
 /** A `home` being cold-built: no group or other bits yet; setgid stays so `.omp` inherits the group. */
