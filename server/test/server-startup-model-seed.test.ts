@@ -43,7 +43,7 @@ const THREE = [
   { id: "m2" },
   { id: "m3", reasoning: true, vision: true, efforts: ["low", "high"] },
 ];
-const EIGHT_MODULES = [
+const NINE_MODULES = [
   "core/db",
   "auth",
   "http",
@@ -52,6 +52,7 @@ const EIGHT_MODULES = [
   "workspaces",
   "accounts",
   "models",
+  "experts",
 ];
 /** The zero-config seed row (model-registry「环境种子」second WHEN), column by column. */
 const ZERO_CONFIG_ROW = {
@@ -153,11 +154,11 @@ async function composerModels(port: number): Promise<unknown> {
 }
 
 describe("model-registry「环境种子」on the compiled entry", () => {
-  it("zero config: one seed row, the pre-registry models.yml and overlay bytes, eight modules, no ignored line", async () => {
+  it("zero config: one seed row, the pre-registry models.yml and overlay bytes, nine modules, no ignored line", async () => {
     const root = scratchRoot();
     const { server, port, record } = await started(root, {});
     try {
-      expect(record).toMatchObject({ event: "server_started", modules: EIGHT_MODULES });
+      expect(record).toMatchObject({ event: "server_started", modules: NINE_MODULES });
       expect(await composerModels(port)).toEqual([ZERO_CONFIG_MODEL]);
       const url = `http://127.0.0.1:${String(port)}/v1`;
       expect(readFileSync(join(agentDir(root), "models.yml"), "utf8")).toBe(

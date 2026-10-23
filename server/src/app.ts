@@ -30,6 +30,8 @@ import { isAdmin } from "./core/roles.js";
 import { ensureSharedDir } from "./core/sandbox/dirs.js";
 import { createSandbox } from "./core/sandbox/index.js";
 import { sanitizeUpstreamText, upstreamSecretList } from "./core/upstream-failure.js";
+import { registerExperts } from "./experts/rest.js";
+import { createExpertStore } from "./experts/store.js";
 import {
   handleHttpError,
   registerAuthGuard,
@@ -298,6 +300,8 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   );
   registerAccounts(app, { db });
   registerModelAdmin(app, db, registry, assembly);
+  // 第九个模块 `experts`（s1d-experts-skills D5）：store 由这里在 app 自己的库上自建。
+  registerExperts(app, { db, store: createExpertStore(db), emit });
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));

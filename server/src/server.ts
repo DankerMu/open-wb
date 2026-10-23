@@ -109,6 +109,7 @@ const STARTUP_MODULES = [
   "workspaces",
   "accounts",
   "models",
+  "experts",
 ];
 
 export interface ServerConfig extends AgentSettings, PreviewSettings {

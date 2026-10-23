@@ -27,7 +27,7 @@ import {
 } from "./server-startup-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
-const EIGHT_MODULES = [
+const NINE_MODULES = [
   "core/db",
   "auth",
   "http",
@@ -36,6 +36,7 @@ const EIGHT_MODULES = [
   "workspaces",
   "accounts",
   "models",
+  "experts",
 ];
 /** Low-entropy sentinels (gitleaks); the base URL host is never contacted. */
 const KEY = "wb-issue1649-restart-api-key";
@@ -100,7 +101,7 @@ describe("model-registry「发布字节等于启动写出」on the compiled entr
     let registered: { models: string; overlay: string };
     let firstStderr: string;
     try {
-      expect(await server.waitForStarted()).toMatchObject({ modules: EIGHT_MODULES });
+      expect(await server.waitForStarted()).toMatchObject({ modules: NINE_MODULES });
       expect(files(root).overlay).not.toContain("modelRoles");
       const response = await fetch(`http://127.0.0.1:${String(port)}/api/models`, {
         method: "POST",
@@ -123,7 +124,7 @@ describe("model-registry「发布字节等于启动写出」on the compiled entr
     const restarted = startCompiledServer(compiled.entry, compiledFixtureEnv(root, port, bin, {}));
     let secondStderr: string;
     try {
-      expect(await restarted.waitForStarted()).toMatchObject({ modules: EIGHT_MODULES });
+      expect(await restarted.waitForStarted()).toMatchObject({ modules: NINE_MODULES });
       expect(files(root)).toEqual(registered);
     } finally {
       secondStderr = await stopped(restarted);
@@ -156,7 +157,7 @@ describe("model-registry「发布失败不回滚」on the compiled entry", () =>
     }));
     let stderr: string;
     try {
-      expect(await server.waitForStarted()).toMatchObject({ modules: EIGHT_MODULES });
+      expect(await server.waitForStarted()).toMatchObject({ modules: NINE_MODULES });
       const agent = agentDir(root);
       rmSync(agent, { recursive: true, force: true });
       writeFileSync(agent, "");
