@@ -23,8 +23,8 @@ Suggested fixture level: expanded - 凭证泄露（credentials）。
 
 ## 2. 发布失败的编译入口证明（#1711）
 
-- [ ] 2.1 核对 Context：`server.ts:492-500`、`models-rest-restart.test.ts`（编译入口、同端口重启的写法与 stderr 采集）。
-- [ ] 2.2 `models-rest-restart.test.ts`（或同目录新文件）加一例：编译入口启动后把 agent 目录（`OMP_STATE_DIR=<root>/state` → `home/.omp/agent`）换成普通文件（之后不再调 `files(root)`），管理员 `POST /api/models` → 500 非信封；`stderr` 以 `toBe('{"event":"model_publish_failed"}\n')` 断言（不用「含」）；`GET /api/models` 含该行（行保留；审计保留由停服后开库查表或省略，二选一写明）。变异：删掉 `server.ts` 的 `onPublishFailed: writeRecord` 后该例变红（跑过后还原）。
+- [x] 2.1 核对 Context：`server.ts:492-500`、`models-rest-restart.test.ts`（编译入口、同端口重启的写法与 stderr 采集）。
+- [x] 2.2 `models-rest-restart.test.ts`（或同目录新文件）加一例：编译入口启动后把 agent 目录（`OMP_STATE_DIR=<root>/state` → `home/.omp/agent`）换成普通文件（之后不再调 `files(root)`），管理员 `POST /api/models` → 500 非信封；`stderr` 以 `toBe('{"event":"model_publish_failed"}\n')` 断言（不用「含」）；`GET /api/models` 含该行（行保留；审计保留由停服后开库查表或省略，二选一写明）。变异：删掉 `server.ts` 的 `onPublishFailed: writeRecord` 后该例变红（跑过后还原）。
 
 Suggested fixture level: compact - 只加用例。
 
