@@ -1,9 +1,9 @@
 /**
- * Issue #1716 task 1.2: the cost bound of the cut-tail drop in `upstreamExcerpt(…, true)`
+ * Issue #1716 tasks 1.2 and 1.4: the cost bound of the cut-tail drop in `upstreamExcerpt(…, true)`
  * (upstream-failure「截断尾部丢弃的计算上界」, design D2–D5).
  *
- * The reference below is the pre-fix private chain of `core/upstream-failure.ts` (master
- * `167f8521`), copied verbatim: `redact`, `replaceSecrets`, `orderedSecrets`, `dropSecretHead`,
+ * The reference below is the pre-fix private chain of `core/upstream-failure.ts` (origin/master
+ * `8178fbd6`), copied verbatim: `redact`, `replaceSecrets`, `orderedSecrets`, `dropSecretHead`,
  * `normalize`, `dropControls`, `capPoints` and the constants they read. Within the budget the fixed
  * `upstreamExcerpt` must be byte-identical to `referenceExcerpt`; over it, the excerpt is `""`.
  * Synchronous calls cannot be cut off by the `it` timeout, so elapsed times are asserted too (the
@@ -160,17 +160,22 @@ const KIB16 = 16 * 1024;
 const OVER_BUDGET_503 =
   '{"error":{"message":"模型服务返回 HTTP 503","type":"wb_upstream","param":"status.503"}}';
 
-/** 50 upstreams × (key, base URL, pathname, three ≥ 8 segments) = 300 secrets (spec 常规规模). */
-const NORMAL_SCALE = union(
-  Array.from({ length: 50 }, (_, index) => {
-    const n = String(index).padStart(2, "0");
-    return pathUpstream(
-      `wb-issue1716-${n}.test`,
-      [`seg-${n}-alpha`, `seg-${n}-bravo`, `seg-${n}-charlie`, "v1"],
-      `wb-issue1716-key-${n}`.padEnd(32, "k"),
-    );
-  }),
-);
+/**
+ * 50 upstreams × (key, base URL, pathname, three ≥ 8 segments) = 300 secrets (spec 常规规模), with
+ * keys `keyLength` long: 32, and 164 (the length of an OpenAI `sk-proj-` key).
+ */
+function normalScale(keyLength: number): string[] {
+  return union(
+    Array.from({ length: 50 }, (_, index) => {
+      const n = String(index).padStart(2, "0");
+      return pathUpstream(
+        `wb-issue1716-${n}.test`,
+        [`seg-${n}-alpha`, `seg-${n}-bravo`, `seg-${n}-charlie`, "v1"],
+        `wb-issue1716-key-${n}`.padEnd(keyLength, "k"),
+      );
+    }),
+  );
+}
 
 function timed<T>(run: () => T): { value: T; ms: number } {
   const started = performance.now();
@@ -266,47 +271,100 @@ describe("cut-tail drop: equivalence with the full per-prefix comparison (#1716)
   });
 });
 
-describe("cut-tail drop: normal scale is unchanged (spec 常规规模行为不变)", () => {
-  it("50 upstreams / 300 secrets, body ending in a secret's head with a straddling segment", () => {
-    expect(NORMAL_SCALE).toHaveLength(300);
-    const baseUrl = "https://wb-issue1716-37.test/seg-37-alpha/seg-37-bravo/seg-37-charlie/v1";
-    expect(NORMAL_SCALE).toContain(baseUrl);
-    // Cut inside `seg-37-bravo`: `seg-37-alpha` was replaced inside the head, bravo straddles.
-    const text = cutBody(KIB16, ` busy ${baseUrl.slice(0, baseUrl.indexOf("bravo") + 2)}`);
-    const excerpt = expectSameAsReference(
-      text,
-      NORMAL_SCALE,
-      `${"x".repeat(994)}${TRUNCATED_MARK}`,
-    );
-    expectNoSecretHead(excerpt, NORMAL_SCALE);
-    // The same tail on a short body shows what was dropped.
-    const short = `busy ${baseUrl.slice(0, baseUrl.indexOf("bravo") + 2)}`;
-    expectNoSecretHead(expectSameAsReference(short, NORMAL_SCALE, "busy"), NORMAL_SCALE);
-    const key = `wb-issue1716-key-12`.padEnd(32, "k");
-    expectSameAsReference(`busy ${key.slice(0, 25)}`, NORMAL_SCALE, "busy");
+describe.each([32, 164])(
+  "cut-tail drop: normal scale with %i-long keys is unchanged (spec 常规规模行为不变)",
+  (keyLength) => {
+    const secrets = normalScale(keyLength);
+    const key = `wb-issue1716-key-12`.padEnd(keyLength, "k");
+
+    it("50 upstreams / 300 secrets, body ending in a secret's head with a straddling segment", {
+      timeout: 30_000,
+    }, () => {
+      expect(secrets).toHaveLength(300);
+      expect(secrets).toContain(key);
+      const baseUrl = "https://wb-issue1716-37.test/seg-37-alpha/seg-37-bravo/seg-37-charlie/v1";
+      expect(secrets).toContain(baseUrl);
+      // Cut inside `seg-37-bravo`: `seg-37-alpha` was replaced inside the head, bravo straddles.
+      const text = cutBody(KIB16, ` busy ${baseUrl.slice(0, baseUrl.indexOf("bravo") + 2)}`);
+      const excerpt = expectSameAsReference(text, secrets, `${"x".repeat(994)}${TRUNCATED_MARK}`);
+      expectNoSecretHead(excerpt, secrets);
+      // The same tail on a short body shows what was dropped.
+      const short = `busy ${baseUrl.slice(0, baseUrl.indexOf("bravo") + 2)}`;
+      expectNoSecretHead(expectSameAsReference(short, secrets, "busy"), secrets);
+      expectSameAsReference(`busy ${key.slice(0, 25)}`, secrets, "busy");
+    });
+
+    it("50 upstreams / 300 secrets, bodies ending in `[已移除]` are not failed closed", {
+      timeout: 30_000,
+    }, () => {
+      // A whole base URL echoed last: replaced, and no head shape ends ` [已移除]`, so it stays.
+      const whole = "https://wb-issue1716-05.test/seg-05-alpha/seg-05-bravo/seg-05-charlie/v1";
+      const kept = expectSameAsReference(`busy ${whole}`, secrets, "busy [已移除]");
+      expectNoSecretHead(kept, secrets);
+      // A pathname cut after two whole segments reads `/[已移除]/[已移除]`: that head goes.
+      const dropped = expectSameAsReference("busy /seg-05-alpha/seg-05-bravo", secrets, "busy");
+      expectNoSecretHead(dropped, secrets);
+      // At 16 KiB, ending in the mark; and a whole key echoed last.
+      expectSameAsReference(
+        cutBody(KIB16, ` ${whole}`),
+        secrets,
+        `${"x".repeat(994)}${TRUNCATED_MARK}`,
+      );
+      expectSameAsReference(`busy ${key}`, secrets, "busy [已移除]");
+    });
+  },
+);
+
+describe("cut-tail drop: the charge follows the pattern's structure (design D5 计费覆盖模式结构)", () => {
+  // Each body echoes its longest secret whole (replaced by the mark) and ends in `]`, so every
+  // prefix of every secret is a candidate. Results are fixed by the charge; under the budget they
+  // equal the reference (checked once offline: the reference takes seconds here, design D5).
+  const run = (text: string, secrets: readonly string[]): string => {
+    const { value, ms } = timed(() => upstreamExcerpt(text, secrets, true));
+    expect(ms).toBeLessThan(1000);
+    return value;
+  };
+
+  it("a base URL whose path is `a`×16000 and an upstream whose key is `ab`", () => {
+    const baseUrl = `https://h.example/${"a".repeat(16_000)}`;
+    const secrets = union([
+      upstreamSecretList({ apiKey: "wb-issue1716-key-a", baseUrl, paths: [] }),
+      upstreamSecretList({ apiKey: "ab", baseUrl: "https://api.openai.com/v1", paths: [] }),
+    ]);
+    expect(secrets).toContain("a".repeat(16_000));
+    expect(run(`${baseUrl} busy ]`, secrets)).toBe("[已移除] busy ]");
   });
 
-  it("50 upstreams / 300 secrets, bodies ending in `[已移除]` are not failed closed", () => {
-    // A whole base URL echoed last: replaced, and no head shape ends ` [已移除]`, so it stays.
-    const whole = "https://wb-issue1716-05.test/seg-05-alpha/seg-05-bravo/seg-05-charlie/v1";
-    const kept = expectSameAsReference(`busy ${whole}`, NORMAL_SCALE, "busy [已移除]");
-    expectNoSecretHead(kept, NORMAL_SCALE);
-    // A pathname cut after two whole segments reads `/[已移除]/[已移除]`: that head goes.
-    const dropped = expectSameAsReference("busy /seg-05-alpha/seg-05-bravo", NORMAL_SCALE, "busy");
-    expectNoSecretHead(dropped, NORMAL_SCALE);
-    // At 16 KiB, ending in the mark.
-    expectSameAsReference(
-      cutBody(KIB16, ` ${whole}`),
-      NORMAL_SCALE,
-      `${"x".repeat(994)}${TRUNCATED_MARK}`,
-    );
+  it("a base URL whose path is `/`×16000 next to `https://api.openai.com/v1`", () => {
+    const baseUrl = `https://h.example${"/".repeat(16_000)}`;
+    const secrets = union([
+      upstreamSecretList({ apiKey: "wb-issue1716-key-a", baseUrl, paths: [] }),
+      upstreamSecretList({
+        apiKey: "wb-issue1716-key-b",
+        baseUrl: "https://api.openai.com/v1",
+        paths: [],
+      }),
+    ]);
+    expect(secrets).toContain("/".repeat(16_000));
+    expect(run(`${baseUrl} busy ]`, secrets)).toBe("[已移除] busy ]");
+  });
+
+  it("`a`×16000 next to a long pattern whose middle unit differs", () => {
+    // The middle `]` keeps it in every chain (design D2b); each search costs about (n − m + 1)·m.
+    const secrets = ["a".repeat(16_000), `${"a".repeat(4000)}]${"a".repeat(3999)}`];
+    expect(run(`${"a".repeat(16_000)} busy ]`, secrets)).toBe("");
+  });
+
+  it("`a`×16000 next to short patterns dense in their first unit", () => {
+    const secrets = ["a".repeat(16_000), "aaaaa]", "aaaa]", "aaa]", "aa]", "a]"];
+    expect(run(`${"a".repeat(16_000)} busy ]`, secrets)).toBe("");
   });
 });
 
 describe("cut-tail drop: pathological secret sets do not block (spec 病态密钥集不阻塞)", () => {
   // Red before the fix: every prefix of each of the 602 secrets re-ran the replacement over all of
   // them, 3.8 s here (#1716 measured 4.4 s). After it the tail `0` leaves thousands of candidates,
-  // about 17 times the budget: the excerpt fails closed.
+  // over 20 times the budget: the excerpt fails closed.
   it("a 600-segment base URL with a body ending in a segment head", { timeout: 60_000 }, () => {
     const segs = segments(600);
     const secrets = pathUpstream("wb-issue1716.test", segs);

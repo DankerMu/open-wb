@@ -9,7 +9,7 @@ s1d 后续审查又立了两条 issue，owner 2026-10-23 要求「只解决立 i
 
 ## What Changes
 
-- `dropSecretHead` 保持现有比较语义与次序，加精确的必要条件剪枝（替换形状的末码元只能是前缀末码元或 `]`，文本末码元二者都不是时跳过），并给整次计算一个固定预算（按 `split` 扫描量计）；超出预算即 fail closed：整段节选为空（代理回 `模型服务返回 HTTP <status>`，探活为 `HTTP <status>：`），绝不留下半截尾巴。
+- `dropSecretHead` 保持现有比较语义与次序，加精确的必要条件剪枝（替换形状的末码元只能是前缀末码元或 `]`，文本末码元二者都不是时跳过），只在替换链里保留可能命中的密钥，并给整次计算一个固定预算（按朴素搜索比较次数的上界计费，与模式结构无关）；超出预算即 fail closed：整段节选为空（代理回 `模型服务返回 HTTP <status>`，探活为 `HTTP <status>：`），绝不留下半截尾巴。
 - center-models 用例：`:179` 改为等焦点本身（RTL `waitFor`），`settled()` 内部改用 RTL `waitFor`。
 
 ## Impact
