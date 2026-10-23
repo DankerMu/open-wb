@@ -1,7 +1,7 @@
 ## ADDED Requirements
 
 ### Requirement: 截断尾部丢弃的计算上界
-`upstreamExcerpt(text, secrets, cut)` 在 `cut` 为真时「丢掉末尾恰为某个密钥开头一段」（model-proxy「透传端点与 bearer 鉴权」≥500 一节）的比较 SHALL 只对可能命中的前缀计算替换形状。替换形状的末码元只能是该前缀的末码元或 `[已移除]` 的末码元 `]`，据此文本末码元既不是前缀末码元也不是 `]` 时跳过。替换形状的计算量 SHALL 有固定上界：每次 `split` 按被扫描串的实际长度加每次调用的固定折算量计入，累计超过常量预算时 SHALL fail closed——整段节选为空串（代理 `message` 为 `模型服务返回 HTTP <status>`，探活摘要为空），SHALL NOT 返回部分丢弃的结果或保留任何尾部。预算内的结果 SHALL 与逐前缀全量比较逐字节相同；预算 SHALL 足以让 50 个上游、合计 300 条密钥、截断正文以 `[已移除]` 结尾的常规部署不触发 fail closed。会话侧「上游原文净化」（不带 `cut`）不受此约束、行为不变；model-registry「探活」摘要经 `upstreamExcerpt` 同样受此约束。
+`upstreamExcerpt(text, secrets, cut)` 在 `cut` 为真时「丢掉末尾恰为某个密钥开头一段」（model-proxy「透传端点与 bearer 鉴权」≥500 一节）的比较 SHALL 只对可能命中的前缀计算替换形状。替换形状的末码元只能是该前缀的末码元或 `[已移除]` 的末码元 `]`，据此文本末码元既不是前缀末码元也不是 `]` 时跳过。替换形状的计算量 SHALL 有固定上界：每次 `split` 按被扫描串的实际长度、每次调用的固定折算量与命中次数的折算量计入，每次与文本末尾的比较按 head 长度加固定折算量计入，累计超过常量预算时 SHALL fail closed——整段节选为空串（代理 `message` 为 `模型服务返回 HTTP <status>`，探活摘要为空），SHALL NOT 返回部分丢弃的结果或保留任何尾部。预算内的结果 SHALL 与逐前缀全量比较逐字节相同；预算 SHALL 足以让 50 个上游、合计 300 条密钥、截断正文以 `[已移除]` 结尾的常规部署不触发 fail closed。会话侧「上游原文净化」（不带 `cut`）不受此约束、行为不变；model-registry「探活」摘要经 `upstreamExcerpt` 同样受此约束。
 
 #### Scenario: 病态密钥集不阻塞
 - **WHEN** 密钥集来自一条约 16 KB、约 1780 个长度 ≥ 8 的路径段的 base URL，正文 16 KiB、`cut` 为真且以 `[已移除]` 结尾；另一例为十个上游合计 ≥ 1000 条密钥、同样以 `[已移除]` 结尾的正文

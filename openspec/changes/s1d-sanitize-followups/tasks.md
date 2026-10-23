@@ -12,9 +12,9 @@
 
 ## 1. 截断尾部比较的预算（#1716）
 
-- [ ] 1.1 核对 Context：`upstream-failure.ts:71-76,99-137,192-196`、`error-body.ts:21,40-59`、`model-proxy/index.ts:426`、`probe.ts:111`、`upstream-failure-sanitize.test.ts` 的 cut 用例。
-- [ ] 1.2 测试先行（design D5）：参照整条私有链拷入测试；等价性（既有 cut 夹具 + 跨边界夹具 + 含 `[`/`]`/`[已移除]` 片段与 `]` 结尾的小规模随机）；红（约 600 段病态实例在修复前超 1000 ms，记录耗时）；绿钉三例：16 KB / 约 1780 段 + `[已移除]` 结尾 → `""`、十上游 ≥ 1000 条 + `[已移除]` 结尾 → `""`、同一 16 KB 集合 + `}` 结尾 → 字面期望（`performance.now()` 差值 < 1000 ms）；超预算确切输出（`""`、`statusReply(503, "")` body）；预算内夹具尾部不是任何密钥真前缀的替换形状；常规规模（50 上游 300 条，段长 ≥ 8，含 `[已移除]` 结尾）与参照相同、不触发。
-- [ ] 1.3 实现 design D2–D3：剪枝 + 按实际扫描长度计费的 `HEAD_SCAN_BUDGET` / `CALL_COST`（常量注释写明两端实测）+ `null` → `""`；`dropSecretHead` 注释同步。server 现有测试全绿，`make check` 通过。
+- [x] 1.1 核对 Context：`upstream-failure.ts:71-76,99-137,192-196`、`error-body.ts:21,40-59`、`model-proxy/index.ts:426`、`probe.ts:111`、`upstream-failure-sanitize.test.ts` 的 cut 用例。
+- [x] 1.2 测试先行（design D5）：参照整条私有链拷入测试；等价性（既有 cut 夹具 + 跨边界夹具 + 含 `[`/`]`/`[已移除]` 片段与 `]` 结尾的小规模随机）；红（约 600 段病态实例在修复前超 1000 ms，记录耗时）；绿钉三例：16 KB / 约 1780 段 + `[已移除]` 结尾 → `""`、十上游 ≥ 1000 条 + `[已移除]` 结尾 → `""`、同一 16 KB 集合 + `}` 结尾 → 字面期望（`performance.now()` 差值 < 1000 ms）；超预算确切输出（`""`、`statusReply(503, "")` body）；预算内夹具尾部不是任何密钥真前缀的替换形状；常规规模（50 上游 300 条，段长 ≥ 8，含 `[已移除]` 结尾）与参照相同、不触发。
+- [x] 1.3 实现 design D2–D3：剪枝 + 按实际扫描长度计费的 `HEAD_SCAN_BUDGET` / `CALL_COST`（常量注释写明两端实测）+ `null` → `""`；`dropSecretHead` 注释同步。server 现有测试全绿，`make check` 通过。
 
 Suggested fixture level: expanded - 事件循环阻塞 + 凭证泄露。
 
