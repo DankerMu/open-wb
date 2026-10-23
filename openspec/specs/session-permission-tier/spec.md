@@ -92,7 +92,7 @@ tool-approval「超时自动允许」的规则 SHALL 在三个档位下完全相
 - **THEN** 响应为 generic 5xx；会话行的 `approval_mode` 与账号最近选择均未改变
 
 ### Requirement: 权限档位控件
-输入框能力行左组的第三项（chat-web「输入框与能力栏」）SHALL 是权限档位控件，位于 `web/src/features/chat/` 的应用层文件内，由拷入层的 dropdown-menu 与 alert-dialog 组合而成，不修改拷入文件。
+输入框能力行左组中紧随工作空间之后的一项（chat-web「输入框与能力栏」；其前另有「+」菜单与有专家时的专家标签，其后是 `能力` 按钮，位置以工作空间为参照、不以序号计）SHALL 是权限档位控件，位于 `web/src/features/chat/` 的应用层文件内，由拷入层的 dropdown-menu 与 alert-dialog 组合而成，不修改拷入文件。
 
 **触发按钮**：文字为当前档位的界面名（`每次都问` / `只问命令` / `全部自动`），可访问名为 `权限：<界面名>`。当前档位为 `yolo` 时按钮 SHALL 以警示色呈现（使用 `--wb-status-warning` 一组 token）并带 `data-tier="yolo"`；其它档位不带警示色。
 **菜单**：一个单选组，按 `options.approvalModes` 的次序只列出可用档位，每项为 `menuitemradio`，当前档位 `aria-checked="true"`；每项显示界面名与一行说明——`每次都问`：`写文件与执行命令前都要你确认`；`只问命令`：`执行命令前要你确认，写文件不用`；`全部自动`：`不经确认执行命令与修改文件`。菜单底部 SHALL 有一行文字 `更改从下一条消息起生效`。只有一个可用档位时控件仍渲染，菜单只含该项。
