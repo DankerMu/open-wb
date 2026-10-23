@@ -38,7 +38,7 @@
 - `POST /api/experts`，body 为 `{name, description?, category, tags?, prompt, skills?}`（键集严格，多余键 400）→ 201 视图。
 - `PUT /api/experts?id=<id>`，body 同 POST（整体替换，省略的可选键取缺省）→ 200 视图。
 - `DELETE /api/experts?id=<id>` → 204；同一事务里把 `chat_sessions.expert_id = <id>` 的行置 NULL。
-检查次序：未认证 401 → `PUT` / `DELETE` 的 `id` 缺失、空或多值 400 → `id` 为内置专家的 `PUT` / `DELETE` 403 `forbidden` → `id` 对调用者不可见 404 → content-parser 与 body 400；401、`id` 的 400、403 与 404 都在 body 解析之前判定（preParsing，与 `/api/models` 同一做法），所以对内置专家与不可见专家的写入无论 body 是否合法都分别得到 403 与 404。`POST /api/experts` 与 `PUT /api/experts` SHALL 进 http-service-skeleton 的 content-parser 归属集，body limit 64 KiB（`prompt` 至多 8000 码点，CJK 文本约 24 KiB，16 KiB 不够）。每次写入 SHALL 在同一事务里记审计：`expert.create` / `expert.update` / `expert.delete`，`detail = {expertId, name}`，不含提示词。
+检查次序：未认证 401 → `PUT` / `DELETE` 的 `id` 缺失、空或多值 400 → `id` 为内置专家的 `PUT` / `DELETE` 403 `forbidden` → `id` 对调用者不可见 404 → content-parser 与 body 400；401、`id` 的 400、403 与 404 都在 body 解析之前判定（preParsing，与会话元数据修改的属主预检同一做法），所以对内置专家与不可见专家的写入无论 body 是否合法都分别得到 403 与 404。`POST /api/experts` 与 `PUT /api/experts` SHALL 进 http-service-skeleton 的 content-parser 归属集，body limit 64 KiB（`prompt` 至多 8000 码点，CJK 文本约 24 KiB，16 KiB 不够）。每次写入 SHALL 在同一事务里记审计：`expert.create` / `expert.update` / `expert.delete`，`detail = {expertId, name}`，不含提示词。
 
 #### Scenario: 自建、修改与删除
 - **WHEN** 账号甲 `POST` 一个专家 X；`PUT` 改 X 的提示词；会话 S 以 X 为专家；`DELETE` X
