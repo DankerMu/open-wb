@@ -6,7 +6,7 @@
 ## ADDED Requirements
 
 ### Requirement: 技能清单与账号缺省
-`skills` 模块 SHALL 注册（受 cookie guard，no-store）：`GET /api/skills` → 200 `{skills: [{name, description, enabledByDefault}], disabledSkills: string[]}`：`skills` 列出平台技能——与 `GET /api/commands` 的平台技能同一读取规则与次序（托管 `<agentDir>/skills`），`enabledByDefault` 为该名称不在本账号 `account_skill_prefs.disabled_skills` 里；`disabledSkills` 为本账号的账号缺省停用列表原样（字典序，含当前不在 `skills` 里的名称——未安装的、或只作为项目技能存在的；没有偏好行时为 `[]`），客户端据它保留列表外的停用名称；`PUT /api/skills/defaults`，body `{disabledSkills: string[]}`（键集严格；至多 128 项；技能名规则同 experts「专家校验与可见性」；去重后字典序存储；不要求名称当前已安装；整体替换）→ 200，body 与随后的 `GET /api/skills` 相同。`PUT /api/skills/defaults` SHALL 进 content-parser 归属集。账号缺省只决定之后新建会话的初值，SHALL NOT 改动已有会话。不记审计。
+`skills` 模块 SHALL 注册（受 cookie guard，no-store）：`GET /api/skills` → 200 `{skills: [{name, description, enabledByDefault}], disabledSkills: string[]}`：`skills` 列出平台技能——与 `GET /api/commands` 的平台技能同一读取规则与次序（托管 `<agentDir>/skills`），但名称不合技能名规则（experts「专家校验与可见性」：1..128 UTF-8 字节、不含 U+0000–U+001F 与 U+007F、不含 `,`）的平台技能不列出——它们无法被停用，照常由 omp 加载，`enabledByDefault` 为该名称不在本账号 `account_skill_prefs.disabled_skills` 里；`disabledSkills` 为本账号的账号缺省停用列表原样（字典序，含当前不在 `skills` 里的名称——未安装的、或只作为项目技能存在的；没有偏好行时为 `[]`），客户端据它保留列表外的停用名称；`PUT /api/skills/defaults`，body `{disabledSkills: string[]}`（键集严格；至多 128 项；技能名规则同 experts「专家校验与可见性」；去重后字典序存储；不要求名称当前已安装；整体替换）→ 200，body 与随后的 `GET /api/skills` 相同。`PUT /api/skills/defaults` SHALL 进 content-parser 归属集。账号缺省只决定之后新建会话的初值，SHALL NOT 改动已有会话。不记审计。
 
 #### Scenario: 缺省停用
 - **WHEN** 平台技能目录有 `deploy` 与 `weekly-report`；账号 `PUT /api/skills/defaults {disabledSkills:["weekly-report","ghost"]}`；随后创建会话 A（body 不带 `disabledSkills`）；再 `PUT` 为 `[]`

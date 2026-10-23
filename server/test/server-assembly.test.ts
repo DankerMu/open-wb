@@ -16,6 +16,7 @@ import * as models from "../src/models/rest.js";
 import * as sessions from "../src/sessions/index.js";
 import type { SessionSupervisorRuntime } from "../src/sessions/supervisor.js";
 import { TokenRegistry } from "../src/sessions/tokens.js";
+import * as skills from "../src/skills/rest.js";
 import * as workspaces from "../src/workspaces/index.js";
 import { startRecordingUpstream } from "./model-proxy-helpers.js";
 import { compileServerEntry, releaseStartupFixtures } from "./server-startup-helpers.js";
@@ -165,6 +166,7 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
       "accounts",
       "models",
       "experts",
+      "skills",
     ]);
     expect(rowStatus(db, "chat_sessions", STALE_SESSION_ID)).toBe("failed");
     expect(runningCount(db, "chat_messages")).toBe(0);
@@ -480,6 +482,7 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
         "accounts",
         "models",
         "experts",
+        "skills",
       ]);
       expect(started.modules).toEqual(["core/db", ...order]);
       expect(existsSync(join(scratchRoot, "sandbox", "u1"))).toBe(false);
@@ -575,6 +578,7 @@ function spyRegistrationOrder(): string[] {
   once("accounts", accounts, "registerAccounts");
   once("models", models, "registerModels");
   once("experts", experts, "registerExperts");
+  once("skills", skills, "registerSkills");
   return order;
 }
 

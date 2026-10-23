@@ -2,8 +2,8 @@
  * skills/store — the skill-name rule and the account's default disabled skills (s1d-experts-skills
  * design D4, D6; skill-switches「技能清单与账号缺省」storage part). The rule here is the only one:
  * expert `skills`, the account defaults and a session's disabled list all go through
- * `normalizeSkillNames`. A refused name throws the fixed-message `bad_request` (no value echoed).
- * List-size caps are the callers' (experts: 32; the endpoints of groups 4 and 5: 128).
+ * `normalizeSkillNames`, and `GET /api/skills` filters the platform skills by `isSkillName`. A
+ * refused name throws the fixed-message `bad_request` (no value echoed). List-size caps are the callers' (experts: 32; the endpoints of groups 4 and 5: 128).
  * Pure DB, `node:sqlite` sync; the writes run in the caller's transaction, if any.
  */
 import type { DatabaseSync } from "node:sqlite";
@@ -18,7 +18,7 @@ const UPSERT_PREFS =
 /**
  * 1..128 UTF-8 bytes, no U+0000–U+001F or U+007F (the `MODEL_ID` set of `model-catalog.ts`), no `,`.
  */
-function isSkillName(value: unknown): value is string {
+export function isSkillName(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0) {
     return false;
   }

@@ -64,6 +64,7 @@ import type { TodoWarn } from "./sessions/store-todo.js";
 import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
 import { TokenRegistry } from "./sessions/tokens.js";
 import type { TurnSnapshotService } from "./sessions/turn-snapshot.js";
+import { registerSkills } from "./skills/rest.js";
 import { registerWorkspaces } from "./workspaces/index.js";
 import type { PreviewLimits } from "./workspaces/preview.js";
 import type { WorkspacePreviewDependencies } from "./workspaces/rest-preview-token.js";
@@ -302,6 +303,8 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   registerModelAdmin(app, db, registry, assembly);
   // 第九个模块 `experts`（s1d-experts-skills D5）：store 由这里在 app 自己的库上自建。
   registerExperts(app, { db, store: createExpertStore(db), emit });
+  // 第十个模块 `skills`（s1d-experts-skills D6）：平台技能读同一个 agent 目录，账号缺省写 app 自己的库。
+  registerSkills(app, { db, agentDir: ompAgentDir(runtime.stateDir) });
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));

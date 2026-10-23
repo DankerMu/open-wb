@@ -37,6 +37,7 @@ const NINE_MODULES = [
   "accounts",
   "models",
   "experts",
+  "skills",
 ];
 /** Low-entropy sentinels (gitleaks); the base URL host is never contacted. */
 const KEY = "wb-issue1649-restart-api-key";
