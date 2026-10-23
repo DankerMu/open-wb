@@ -1,7 +1,7 @@
 // model-registry「中心页外壳」：`/center` 的 `?tab=` 规则、仅管理员可见的 tab 与空态；`isAdmin`；
-// routeManifest 的 `/center` 描述。真表（`CENTER_TABS`：人人可见的「专家」在前、仅管理员可见的「模型」在后，
-// s1d-experts-skills 任务 7.2）经真实路由（createAppRouter）打开；「无可见 tab → 空态」与注入的表（空表、一项、
-// 两项）经只含 `/center` 一条的浏览器路由。
+// routeManifest 的 `/center` 描述。真表（`CENTER_TABS`：人人可见的「专家」「技能」在前、仅管理员可见的「模型」
+// 在后，s1d-experts-skills 任务 7.2、8.2）经真实路由（createAppRouter）打开；「无可见 tab → 空态」与注入的表
+//（空表、一项、两项）经只含 `/center` 一条的浏览器路由。
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createBrowserRouter } from "react-router";
@@ -126,12 +126,12 @@ describe("注入空表", () => {
   );
 });
 
-describe("真表（CENTER_TABS：人人可见的「专家」、仅管理员可见的「模型」）", () => {
+describe("真表（CENTER_TABS：人人可见的「专家」「技能」、仅管理员可见的「模型」）", () => {
   it.each([
     ["/center", "/center?tab=experts"],
     ["/center?tab=nope", "/center?tab=experts"],
   ])(
-    "管理员打开 %s：以 replace 变为 %s，tab 条为「专家」「模型」且「专家」选中，渲染专家面板",
+    "管理员打开 %s：以 replace 变为 %s，tab 条为「专家」「技能」「模型」且「专家」选中，渲染专家面板",
     async (path, target) => {
       const before = window.history.length;
       const fetchMock = openApp(path, ADMIN);
@@ -141,6 +141,7 @@ describe("真表（CENTER_TABS：人人可见的「专家」、仅管理员可�
       expect(window.history.length).toBe(before);
       expect(tabStates()).toEqual([
         ["专家", "true"],
+        ["技能", "false"],
         ["模型", "false"],
       ]);
       expect(paths(fetchMock)).not.toContain("/api/models");
@@ -158,13 +159,14 @@ describe("真表（CENTER_TABS：人人可见的「专家」、仅管理员可�
     expect(window.history.length).toBe(before);
     expect(tabStates()).toEqual([
       ["专家", "false"],
+      ["技能", "false"],
       ["模型", "true"],
     ]);
     expect(within(main).getByRole("cell", { name: SEED_VIEW.name })).toBeTruthy();
   });
 
   it.each(["/center?tab=models", "/center"])(
-    "普通用户打开 %s：以 replace 变为 /center?tab=experts，tab 条恰为「专家」，不请求模型列表",
+    "普通用户打开 %s：以 replace 变为 /center?tab=experts，tab 条恰为「专家」「技能」，不请求模型列表",
     async (path) => {
       const before = window.history.length;
       const fetchMock = openApp(path, MEMBER);
@@ -172,11 +174,32 @@ describe("真表（CENTER_TABS：人人可见的「专家」、仅管理员可�
       await expectExpertsTabSettled(fetchMock);
       await expectLocation("/center?tab=experts");
       expect(window.history.length).toBe(before);
-      expect(tabStates()).toEqual([["专家", "true"]]);
+      expect(tabStates()).toEqual([
+        ["专家", "true"],
+        ["技能", "false"],
+      ]);
       expect(within(screen.getByRole("main")).queryByText(EMPTY)).toBeNull();
       expect(paths(fetchMock)).not.toContain("/api/models");
     },
   );
+
+  it("普通用户打开 /center?tab=skills：留在原地，「技能」选中，技能面板按缺省应答稳定，只挂载当前 tab 的面板", async () => {
+    const before = window.history.length;
+    const fetchMock = openApp("/center?tab=skills", MEMBER);
+
+    const main = await screen.findByRole("main");
+    expect(await within(main).findByText("尚未安装平台技能")).toBeTruthy();
+    expect(currentLocation()).toBe("/center?tab=skills");
+    expect(window.history.length).toBe(before);
+    expect(tabStates()).toEqual([
+      ["专家", "false"],
+      ["技能", "true"],
+    ]);
+    expect(within(main).queryByRole("alert")).toBeNull();
+    expect(paths(fetchMock).filter((path) => path === "/api/skills")).toHaveLength(1);
+    expect(paths(fetchMock)).not.toContain("/api/experts");
+    expect(paths(fetchMock)).not.toContain("/api/models");
+  });
 });
 
 describe("注入一张仅管理员可见的表", () => {
@@ -256,9 +279,9 @@ describe("isAdmin", () => {
 });
 
 describe("routeManifest", () => {
-  it("/center 的描述以「与」连接人人可见的 tab：tab 表为「专家」与仅管理员可见的「模型」时为「专家」", () => {
+  it("/center 的描述以「与」连接人人可见的 tab：tab 表为「专家」「技能」与仅管理员可见的「模型」时为「专家与技能」", () => {
     expect(routeManifest.find(({ path }) => path === "/center")).toMatchObject({
-      description: "专家",
+      description: "专家与技能",
     });
   });
 });

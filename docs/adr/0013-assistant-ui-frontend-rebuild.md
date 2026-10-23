@@ -238,3 +238,6 @@ S1c 交付后的实测（2026-10-04，真实模型端点）暴露出：会话页
   用途是中心页「专家」tab 新建 / 编辑对话框的分类字段，调用方只在 `web/src/features/center/experts/`。
   - 原文 `SelectContent` 带的 `cn-menu-target`、`cn-menu-translucent` 两个类名照原文保留：它们是 shadcn 自带样式表的钩子，本入口不导入那份样式表，在这里不匹配任何规则，删掉不在六类修改之内。
   - 用到的裸 `data-*` 变体是 `data-open`、`data-closed`（已绑定）与 `data-placeholder`、`data-disabled`（按 2026-10-22 增补不绑：Radix 自己输出裸属性），其余是方括号写法；所以 `theme.css`、`ui-foundation-entry.test.ts` 与 `ui-variant-bindings.test.ts` 的钉住表都不动。
+- **新拷入 `switch`**（change `s1d-experts-skills` 任务 8.3）：`web/src/components/ui/switch.tsx`，来自 shadcn/ui registry 的 `radix-nova` 版式（`web/components.json`），按拷入层六类修改的规则拷入（与 registry 原文相比只改了 `cn` 导入与格式化），用合包 `radix-ui` 的 `Switch`，未新增依赖，登记在 `ATTRIBUTION.md`。
+  用途是中心页「技能」tab 的 `默认启用` 开关，调用方目前只在 `web/src/features/center/skills/`；输入框「能力」弹层（同一 change 任务组 10）复用它。
+  - 用到的裸 `data-*` 变体是 `data-checked`、`data-unchecked`（已绑定；`switch` 是 `data-unchecked` 的第一个使用者，2026-10-22 增补记它「目前没有使用者」到此为止）与 `data-disabled`（按 2026-10-22 增补不绑：Radix 自己输出裸属性），其余是方括号写法；所以 `theme.css`、`ui-foundation-entry.test.ts` 与 `ui-variant-bindings.test.ts` 的钉住表都不动。

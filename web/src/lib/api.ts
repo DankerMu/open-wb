@@ -190,6 +190,10 @@ export type ApiClient = {
   updateExpert(id: string, input: ExpertInput, options?: ApiRequestOptions): Promise<ExpertView>;
   deleteExpert(id: string, options?: ApiRequestOptions): Promise<void>;
   listSkills(options?: ApiRequestOptions): Promise<SkillList>;
+  putSkillDefaults(
+    disabledSkills: readonly string[],
+    options?: ApiRequestOptions,
+  ): Promise<SkillList>;
 };
 
 export type ApiClientOptions = {
