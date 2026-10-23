@@ -277,7 +277,7 @@ describe("派发前按会话设置对齐进程：档位 (chat-sessions)", () => 
   );
 
   it(
-    "修改设置本身不动进程：PATCH yolo、m3 之后进程在、零帧、epoch 不变，空闲计时器未被重置并照常回收",
+    "修改设置本身不动进程：PATCH yolo、m3 与能力 PUT 之后进程在、零帧、epoch 不变，空闲计时器未被重置并照常回收",
     REAL,
     async () => {
       const world = worlds.track(
@@ -293,6 +293,16 @@ describe("派发前按会话设置对齐进程：档位 (chat-sessions)", () => 
 
       await setMode(world, "yolo");
       expect((await patch(world, { modelId: "m3" })).statusCode).toBe(200);
+      const put = await world.fixture.app.inject({
+        method: "PUT",
+        url: `/api/sessions/${world.session}/capabilities`,
+        headers: { cookie: world.cookie, "content-type": "application/json" },
+        payload: JSON.stringify({ expertId: "builtin:test-engineer", disabledSkills: ["deploy"] }),
+      });
+      expect([put.statusCode, put.json()]).toEqual([
+        200,
+        { expertId: "builtin:test-engineer", disabledSkills: ["deploy"] },
+      ]);
       await settle();
 
       expect({ process: processOf(world), frames: child.stdin.length }).toEqual(before);

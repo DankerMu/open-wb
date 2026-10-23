@@ -27,6 +27,11 @@
  * s1d-experts-skills group 1 adds the `capabilities` option of `openProxiedWorld` (the session config
  * file of its spawns; empty when absent, as every app path passes in group 1) and exposes the agent
  * dir, where a case installs platform skills before the first prompt spawns the child.
+ *
+ * Group 6 adds `probeState` to `openProxiedApp`: RPC `get_state` written straight to the latest
+ * spawned child's stdin (frame id `probe-<n>`, never the runtime's `rt-<n>`; omp's reader drops a
+ * response whose id it did not send) and its answer read from the stdout tee. A case calls it only
+ * between turns and awaits it before the next prompt.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -122,6 +127,8 @@ export interface ProxiedApp {
   faults: Error[];
   /** The shared registry when the `registry` option was given. */
   models: SharedRegistry | undefined;
+  /** RPC `get_state` on the latest spawned child, between turns: its `data`. */
+  probeState(): Promise<Record<string, unknown>>;
 }
 
 interface Proxied {
@@ -235,10 +242,30 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
   const log: LogRecord[] = [];
   const denied: number[] = [];
   const faults: Error[] = [];
+  let latest: ChildProcessWithoutNullStreams | undefined;
   const teeing: SpawnImpl = (command, args, spawnOptions) => {
     const child = (spawn as SpawnImpl)(command, args, spawnOptions);
     teeFrames(child, frames);
+    latest = child;
     return child;
+  };
+  let probes = 0;
+  const probeState = async (): Promise<Record<string, unknown>> => {
+    if (latest === undefined) {
+      throw new Error("no child spawned yet");
+    }
+    probes += 1;
+    const id = `probe-${String(probes)}`;
+    const from = frames.length;
+    const answer = () =>
+      frames.slice(from).find((frame) => frame.type === "response" && frame.id === id);
+    latest.stdin.write(`${JSON.stringify({ type: "get_state", id })}\n`);
+    await until(() => answer() !== undefined, `get_state ${id}`, PROBE_BOUND_MS);
+    const reply = answer() as OmpFrame;
+    if (reply.success !== true) {
+      throw new Error(`get_state ${id} failed: ${JSON.stringify(reply)}`);
+    }
+    return reply.data as Record<string, unknown>;
   };
   const { shared } = proxied;
   const db = shared?.db ?? openDb(":memory:");
@@ -299,6 +326,7 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
     denied,
     faults,
     models: shared,
+    probeState,
   };
 }
 
@@ -315,6 +343,7 @@ export interface AppTurn {
 
 const POLL_MS = 20;
 const TURN_BOUND_MS = 170_000;
+const PROBE_BOUND_MS = 30_000;
 
 /** A fresh session of `world`'s account; resolves to its id. */
 export async function openAppSession(world: ProxiedApp): Promise<string> {

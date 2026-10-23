@@ -4,6 +4,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
+import { createExpertStore } from "../experts/store.js";
 import type { ChatEvent } from "./events.js";
 import { registerSessionListEvents, type SessionListNotifier } from "./list-events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
@@ -108,11 +109,14 @@ export function registerSessions(
     warn: options.warn,
     composer: options.composer,
   });
+  // Plain reads only (`get`): the expert a session names, if its owner can see it, per spawn.
+  const experts = createExpertStore(options.db);
   supervisor = new SessionSupervisor({
     store,
     tokens: options.tokens,
     runtime: options.runtime,
     composer: options.composer,
+    expertPrompt: (ownerId, expertId) => experts.get(ownerId, expertId)?.prompt ?? null,
     workspaceRootOf: options.workspaceRootOf,
     redactUpstream: options.redactUpstream,
     onError: options.onError,

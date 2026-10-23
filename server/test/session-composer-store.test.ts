@@ -354,7 +354,7 @@ describe("会话视图发出三键：原始列经夹取与回落后进入视图"
   });
 });
 
-describe("runtimeState 报出三个原始列", () => {
+describe("runtimeState 报出三个原始列与两项能力列", () => {
   it("(d) NULL 行报三个 null；写库后原样报出，不夹取、不回落", () => {
     const db = openDatabase();
     const { store } = openStores(db, { approvalMaxMode: "always-ask", modelCatalog: CATALOG });
@@ -367,6 +367,7 @@ describe("runtimeState 报出三个原始列", () => {
       activeTurn: null,
       workspaceId: null,
       composer: { approvalMode: null, modelId: null, reasoningEffort: null },
+      capabilities: { expertId: null, disabledSkills: [] },
     });
 
     plant(db, session, "yolo", "gone", "xhigh");
@@ -377,6 +378,23 @@ describe("runtimeState 报出三个原始列", () => {
       reasoningEffort: "xhigh",
     });
     expect(store.runtimeState("f".repeat(32))).toBeNull();
+  });
+
+  it("另报 expert_id 与 disabled_skills 两列原值：不可见的专家 id 也原样报出", () => {
+    const db = openDatabase();
+    const { store } = openStores(db, { approvalMaxMode: "always-ask", modelCatalog: CATALOG });
+    const session = store.create("u1").id;
+
+    db.prepare("UPDATE chat_sessions SET expert_id = ?, disabled_skills = ? WHERE id = ?").run(
+      "builtin:nope",
+      '["deploy","lint"]',
+      session,
+    );
+
+    expect(store.runtimeState(session)?.capabilities).toEqual({
+      expertId: "builtin:nope",
+      disabledSkills: ["deploy", "lint"],
+    });
   });
 });
 

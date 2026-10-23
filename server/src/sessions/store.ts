@@ -138,6 +138,8 @@ interface SessionRuntimeState {
   workspaceId: string | null;
   /** The three raw composer columns, each null when never chosen (`effectiveComposer`'s `raw`). */
   composer: ReturnType<typeof rawComposer>;
+  /** The two capability columns as stored (`expert_id` may name an expert no longer visible). */
+  capabilities: { expertId: string | null; disabledSkills: string[] };
 }
 
 interface FlushError {
@@ -258,6 +260,8 @@ type RuntimeDbRow = ComposerDbRow & {
   omp_session_file: Uint8Array | null;
   stream_epoch: number;
   workspace_id: string | null;
+  expert_id: string | null;
+  disabled_skills: string;
 };
 
 type AdmissionDbRow = Pick<SessionDbRow, "id" | "owner_id" | "title" | "status" | "updated_at">;
@@ -644,7 +648,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       const decoder = createSqliteTextDecoder(db);
       const row = db
         .prepare(
-          `SELECT owner_id, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, workspace_id, ${COMPOSER_COLUMNS} FROM chat_sessions WHERE id = ? LIMIT 1`,
+          `SELECT owner_id, CAST(omp_session_file AS BLOB) AS omp_session_file, stream_epoch, workspace_id, ${COMPOSER_COLUMNS}, expert_id, disabled_skills FROM chat_sessions WHERE id = ? LIMIT 1`,
         )
         .get(sessionId) as unknown as RuntimeDbRow | undefined;
       if (row === undefined) {
@@ -663,6 +667,10 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
             : { userMessageId: turn.userMessageId, assistantMessageId: turn.assistantMessageId },
         workspaceId: row.workspace_id,
         composer: rawComposer(row),
+        capabilities: {
+          expertId: row.expert_id,
+          disabledSkills: JSON.parse(row.disabled_skills) as string[],
+        },
       };
     },
 

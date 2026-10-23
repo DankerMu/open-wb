@@ -3,8 +3,11 @@
  * values of the session, computed once per dispatch from the raw columns `store.runtimeState`
  * reports and the configuration the assembly hands down. Only effective values reach a spawn's argv
  * — the mode clamped by `approvalMaxMode`, the model inside the whitelist — never a raw column.
+ * Likewise the session's effective capabilities (s1d-experts-skills design D8): the visible expert's
+ * prompt and the disabled skills as `skill:<name>`, from the two capability columns, never cached.
  */
 import { type ApprovalMode, type Effort, effectiveComposer } from "../model-catalog.js";
+import { type SessionCapabilities, sessionConfigFingerprint } from "./omp/session-config.js";
 import { commandOn, type Slot } from "./pool.js";
 import type { ComposerConfig } from "./store-composer.js";
 
@@ -22,18 +25,68 @@ export function effectiveOf(
   return effectiveComposer(raw, config);
 }
 
+/** The two capability columns of a session, as `store.runtimeState` reports them. */
+export type RawCapabilities = { expertId: string | null; disabledSkills: readonly string[] };
+
+/**
+ * experts「专家提示词注入」: the prompt of expert `expertId` when `ownerId` can see it (built-in or
+ * their own), else null — a deleted, foreign or withdrawn expert is no expert.
+ */
+export type ExpertPrompt = (ownerId: string, expertId: string) => string | null;
+
+/** A session's effective capabilities, bound to the assembly's expert port (the supervisor's). */
+export type CapabilitiesOf = (session: {
+  ownerId: string;
+  capabilities: RawCapabilities;
+}) => SessionCapabilities;
+
+/**
+ * The effective capabilities of a session for one spawn (chat-sessions「派发前按会话设置对齐进程」, design
+ * D8), bound to `expertPrompt`: the effective expert's prompt (null without one) and every disabled
+ * skill prefixed `skill:`. Each call looks the expert up anew: nothing is cached between dispatches.
+ */
+export function effectiveCapabilities(expertPrompt: ExpertPrompt): CapabilitiesOf {
+  return ({ ownerId, capabilities: { expertId, disabledSkills } }) => ({
+    appendSystemPrompt: expertId === null ? null : expertPrompt(ownerId, expertId),
+    disabledExtensions: disabledSkills.map((name) => `skill:${name}`),
+  });
+}
+
+/**
+ * Everything one dispatch aligns a process with, computed once per dispatch (never cached) from its
+ * one `store.runtimeState` read: the effective composer values, the effective capabilities and
+ * their fingerprint.
+ */
+export function alignmentOf(
+  session: { ownerId: string; composer: RawComposer; capabilities: RawCapabilities },
+  config: ComposerConfig,
+  capabilitiesOf: CapabilitiesOf,
+) {
+  const capabilities = capabilitiesOf(session);
+  return {
+    ...effectiveOf(session.composer, config),
+    capabilities,
+    fingerprint: sessionConfigFingerprint(capabilities),
+  };
+}
+
 /**
  * Whether a live slot can serve a dispatch whose effective values are `effective` (step 1, s1d
- * design D19): its process was started under the effective mode (omp takes it from argv alone) and
- * knows the effective model (omp reads `models.yml` at spawn only and refuses `set_model` for a model
- * registered later, `Model not found`). A model of the spawn-time set or an effort change needs no
- * restart: step 2 switches it.
+ * design D19 and s1d-experts-skills D8): its process was started under the effective mode (omp takes
+ * it from argv alone), knows the effective model (omp reads `models.yml` at spawn only and refuses
+ * `set_model` for a model registered later, `Model not found`) and was spawned with session config
+ * files of the effective capabilities' fingerprint (omp reads them at spawn only). A model of the
+ * spawn-time set or an effort change needs no restart: step 2 switches it.
  */
 export function reusable(
-  slot: { approvalMode: ApprovalMode; modelIds: ReadonlySet<string> },
-  effective: { approvalMode: ApprovalMode; modelId: string },
+  slot: { approvalMode: ApprovalMode; modelIds: ReadonlySet<string>; fingerprint: string },
+  effective: { approvalMode: ApprovalMode; modelId: string; fingerprint: string },
 ): boolean {
-  return slot.approvalMode === effective.approvalMode && slot.modelIds.has(effective.modelId);
+  return (
+    slot.approvalMode === effective.approvalMode &&
+    slot.modelIds.has(effective.modelId) &&
+    slot.fingerprint === effective.fingerprint
+  );
 }
 
 /**

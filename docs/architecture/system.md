@@ -765,14 +765,14 @@ modelRoles:
 
 ### 9.10 专家与技能（S1d，change `s1d-experts-skills`）
 
-本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计；组 4：技能端点；组 5：会话能力。
+本节随任务组落地。组 1：每次 spawn 的会话配置文件；组 3：专家端点与审计；组 4：技能端点；组 5：会话能力；组 6：能力指纹与派发对齐。
 
 **会话配置文件**（`server/src/sessions/omp/session-config.ts`，规格 omp-runtime「子进程 spawn 契约」「会话配置文件」）：每一次 spawn（会话进程与 fork / branch 的临时进程同样）在 `spawnImpl` 之前写出本进程专属的两个文件，`<key>` 是每次新生成的随机十六进制串，与会话 id 无关、不复用：
 
 - `<OMP_STATE_DIR>/session-config/<key>.yml`：恰一行 `disabledExtensions: [<e1>, …]`（元素去重、字典序，每个写作 JSON 字符串；空时 `disabledExtensions: []`），不含其它键；
 - `<OMP_STATE_DIR>/session-config/<key>.md`：只在会话有专家时写，内容是专家提示词原文。
 
-两者与托管 `models.yml` 同一原子替换写出，`0640`。spawn 参数在宿主 overlay 的 `--config` 之后多 `--config <…/session-config/<key>.yml>`，有专家时其后再加 `--append-system-prompt <…/session-config/<key>.md>`，`--resume` 仍在最后；`PI_CONFIG_FILES` 仍只指向宿主 overlay。写出失败按目录准备失败处理（不 spawn、已写的删掉）。子进程一结束（正常退出、崩溃、握手失败、回收、关停，以及 spawn 本身失败：同步抛出或只有 `error` / `close`）两个文件即删；删除失败只记一条 Node 进程告警（不带路径），不改变退出处理，残留由下次启动清扫。文件内容由调用方给出：组 1 起所有 spawn 路径都传「无专家、无停用」，真实能力由组 6 接入。
+两者与托管 `models.yml` 同一原子替换写出，`0640`。spawn 参数在宿主 overlay 的 `--config` 之后多 `--config <…/session-config/<key>.yml>`，有专家时其后再加 `--append-system-prompt <…/session-config/<key>.md>`，`--resume` 仍在最后；`PI_CONFIG_FILES` 仍只指向宿主 overlay。写出失败按目录准备失败处理（不 spawn、已写的删掉）。子进程一结束（正常退出、崩溃、握手失败、回收、关停，以及 spawn 本身失败：同步抛出或只有 `error` / `close`）两个文件即删；删除失败只记一条 Node 进程告警（不带路径），不改变退出处理，残留由下次启动清扫。文件内容由调用方给出：会话进程取该会话的有效能力，fork 与撤回的临时进程取其所服务会话的有效能力（见下文「能力指纹与派发对齐」）。
 
 **两个行为变化（接受）**：
 
@@ -809,3 +809,12 @@ modelRoles:
 - **并集规则**（创建与 `PUT` 同一实现 `withoutExpertSkills`）：body 只要把 `expertId` 设为非 null 的专家，新停用集合 =（body 给出的 `disabledSkills`，没给时为会话当前的集合，创建时为上面的初值）减去该专家声明的技能——专家需要的技能一定开着；body 只含 `disabledSkills` 时原样存，这是加入专家之后停用其某个技能的唯一途径（随后再 `PUT` 一次只带 `disabledSkills`）；`expertId: null` 只清专家，不恢复任何停用。例：停用 `["deploy","lint"]`、专家 E 声明 `["deploy"]` 时，依次 `PUT {expertId:E}`、`{expertId:null}`、`{expertId:E, disabledSkills:["deploy"]}`、`{disabledSkills:["deploy"]}` 的停用集合为 `["lint"]`、`["lint"]`、`[]`、`["deploy"]`。
 - 两个端点都先做属主预检（未登录 401；不存在或属他人的会话同为 404），在 body 解析与 body limit 之前；全部应答 `Cache-Control: no-store`。
 - **fork** 的最终事务原样复制源会话的两列（指向已不可见专家的 id 同样复制，读出为 `null`），不读账号缺省。
+
+**能力指纹与派发对齐**（`server/src/sessions/composer-align.ts`、`supervisor.ts`；规格 chat-sessions「派发前按会话设置对齐进程」、experts「专家提示词注入」）：
+
+- **有效能力**：每次派发（prompt 与 regenerate）由 `store.runtimeState` 那一次读到的 `expert_id`、`disabled_skills` 算出 `{appendSystemPrompt, disabledExtensions}`——有效专家是 `expert_id` 所指且对会话属主可见的专家（经 experts store 的 `get`；被删除、属他人、已下架的 id 即没有专家），取其 `prompt`；停用集合各加前缀 `skill:`。一次派发只算一次，派发之间不缓存（改专家提示词不需要任何通知）。
+- **能力指纹**：两份会话配置文件内容（`sessionConfigContent`，写文件与比较用同一个函数）的 SHA-256——依次 `.yml` 的文本与 `.md` 的文本，没有 `.md` 时以 `null` 代替；`<key>` 不进指纹，所以有无专家的指纹必然不同，相同能力在每次 spawn 都得到同一个指纹。会话 slot 记下其进程 spawn 时的指纹，与启动档位、启动时的模型集合同样「不改写」。
+- **判据**：派发前第 1 步，存活 slot 的启动档位与有效档位不同、有效模型不在其启动时的模型集合里、**或有效能力的指纹与 slot 的不同**，即退役该 slot 再走普通新准入（`--resume` 最后已知会话文件、`stream_epoch` 恰加一、新 key 的会话配置文件，旧 key 的文件随旧进程退出删除）；三者都相符才复用，不多一次重启。所以**改专家、改专家的提示词、删除使用中的专家（有效专家变为无，重启后不带 `--append-system-prompt`）、改停用列表，都在该会话下一条消息时重启生效**；什么都没改或 `PUT` 了与当前相同的值则复用。
+- **修改设置本身不动进程**：`PATCH` 会话设置、能力 `PUT`、专家的改与删都只写库，supervisor 不被通知：存活进程不收帧、不退出，空闲计时器不重置，在途回合不被打断——一切在下一次派发时对齐。
+- **临时进程**：fork 的临时进程以源会话的有效能力 spawn，撤回的临时进程以该会话自己的有效能力 spawn，与会话进程经同一个能力函数（supervisor 经 `ForkPorts` / `BranchTempPorts` 的 `capabilities` 端口交给它们）与同一个 `SessionRuntime` 组装（`pool.ts` 的 `buildSessionRuntime`）；它们不派发 prompt，不比较指纹。
+- 实测见 `server/test/omp-official-session-capabilities.test.ts`（官方 v18.12.3，经模型代理：专家提示词含 `EXPERT-SENTINEL-1` 的会话回合后 `get_state.systemPrompt` 含它；换成含 `EXPERT-SENTINEL-2` 的专家后下一条前进程重启、`stream_epoch` 加一，`systemPrompt` 只含新哨兵），该用例在 CI `uid-isolation` 的官方用例清单里。
