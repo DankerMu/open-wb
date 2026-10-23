@@ -5,8 +5,10 @@
  * is the file `--append-system-prompt` reads. Both are written like the managed `models.yml`
  * (`replaceFile`, 0640) into `session-config/` (2710: the omp uid opens them by exact path only) and
  * removed when the child is gone. The caller decides the content; nothing here defaults it.
+ * The content is one pure function of the capabilities (`sessionConfigContent`), shared by the write
+ * and by the capability fingerprint a dispatch compares (design D8, group 6).
  */
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { replaceFile } from "../../core/replace-file.js";
@@ -18,12 +20,6 @@ export interface SessionCapabilities {
   /** The effective expert's prompt; null without an expert. */
   readonly appendSystemPrompt: string | null;
 }
-
-/** No expert and nothing disabled: what every spawn path passes until capabilities are wired. */
-export const NO_SESSION_CAPABILITIES: SessionCapabilities = Object.freeze({
-  disabledExtensions: Object.freeze([]),
-  appendSystemPrompt: null,
-});
 
 export interface SessionConfig {
   /** `--config <yml>` and, with an expert, `--append-system-prompt <md>`: absolute paths. */
@@ -41,6 +37,30 @@ export interface SessionConfig {
 function sessionConfigYaml(disabled: readonly string[]): string {
   const elements = [...new Set(disabled)].sort().map((element) => JSON.stringify(element));
   return `disabledExtensions: [${elements.join(", ")}]\n`;
+}
+
+/** The two files' text: `<key>.yml`, and `<key>.md` (null: no file, no flag). */
+export function sessionConfigContent(capabilities: SessionCapabilities): {
+  yml: string;
+  md: string | null;
+} {
+  return {
+    yml: sessionConfigYaml(capabilities.disabledExtensions),
+    md: capabilities.appendSystemPrompt,
+  };
+}
+
+/**
+ * The capability fingerprint (chat-sessions「派发前按会话设置对齐进程」step 1): SHA-256 hex over the
+ * JSON array `[yml, md]` of `sessionConfigContent` — the `.yml` text, then the `.md` text or `null`
+ * as the fixed no-file mark, so with and without an expert never collide whatever the prompt says.
+ * The key is not in it: equal capabilities give one fingerprint on every spawn.
+ */
+export function sessionConfigFingerprint(capabilities: SessionCapabilities): string {
+  const { yml, md } = sessionConfigContent(capabilities);
+  return createHash("sha256")
+    .update(JSON.stringify([yml, md]))
+    .digest("hex");
 }
 
 /** Writes this spawn's files; on any write failure the ones already written are removed. */
@@ -62,16 +82,16 @@ export async function writeSessionConfig(
       }
     }
   };
-  const prompt = capabilities.appendSystemPrompt;
+  const content = sessionConfigContent(capabilities);
   try {
-    await replaceFile(dir, `${key}.yml`, sessionConfigYaml(capabilities.disabledExtensions));
-    if (prompt !== null) {
-      await replaceFile(dir, `${key}.md`, prompt);
+    await replaceFile(dir, `${key}.yml`, content.yml);
+    if (content.md !== null) {
+      await replaceFile(dir, `${key}.md`, content.md);
     }
   } catch (error) {
     remove();
     throw error;
   }
-  const args = ["--config", yml, ...(prompt === null ? [] : ["--append-system-prompt", md])];
+  const args = ["--config", yml, ...(content.md === null ? [] : ["--append-system-prompt", md])];
   return { args, key, remove };
 }

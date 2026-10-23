@@ -5,14 +5,11 @@
 import { HttpError } from "../core/errors/index.js";
 import type { ApprovalMode, Effort } from "../model-catalog.js";
 import type { RuntimeCommandFrame } from "./omp/commands.js";
-import type { SessionRuntime, SessionRuntimeOpts } from "./omp/runtime.js";
+import { SessionRuntime, type SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionStore } from "./store.js";
 import { RingBuffer } from "./stream/ring-buffer.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
-
-// The spawn paths take their session capabilities from here (design D1: the caller decides).
-export { NO_SESSION_CAPABILITIES } from "./omp/session-config.js";
 
 export interface Generation {
   epoch: number;
@@ -51,6 +48,11 @@ export interface Slot {
    * `models.yml` holds (omp reads it at spawn only, s1d design D19). Never rewritten.
    */
   modelIds: ReadonlySet<string>;
+  /**
+   * The capability fingerprint (`sessionConfigFingerprint`) of the session config files this slot's
+   * process was spawned with: the runtime's capabilities are fixed at construction. Never rewritten.
+   */
+  fingerprint: string;
 }
 
 /** A slot before its admission: no runtime, no pool entry, no generation, no turn. */
@@ -59,6 +61,7 @@ export function emptySlot(
   workspaceRoot: string | null,
   approvalMode: ApprovalMode,
   modelIds: ReadonlySet<string>,
+  fingerprint: string,
 ): Slot {
   return {
     sessionId,
@@ -74,6 +77,7 @@ export function emptySlot(
     workspaceRoot,
     approvalMode,
     modelIds,
+    fingerprint,
   };
 }
 
@@ -266,6 +270,18 @@ export function sessionRuntimeOpts(
     spawnGate: shared.spawnGate,
     log: shared.log,
   };
+}
+
+/**
+ * The one SessionRuntime construction of every spawn path — a session slot's process and a fork or
+ * undo temporary process (omp-runtime: no second argv/env assembly).
+ */
+export function buildSessionRuntime(
+  base: SessionSupervisorRuntime,
+  shared: SpawnShared,
+  per: PerRuntime,
+): SessionRuntime {
+  return new SessionRuntime(sessionRuntimeOpts(base, shared, per));
 }
 
 export function generationTokens(

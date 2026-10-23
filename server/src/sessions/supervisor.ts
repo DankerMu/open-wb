@@ -9,18 +9,18 @@ import { HttpError } from "../core/errors/index.js";
 import { PumpSteps } from "./approval-pairing.js";
 import { ApprovalRegistry } from "./approvals.js";
 import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.js";
-import { alignModel, effectiveOf, reusable } from "./composer-align.js";
+import { alignModel, alignmentOf, effectiveCapabilities, reusable } from "./composer-align.js";
 import { DeltaCoalescer } from "./delta-coalescer.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SpawnImpl } from "./omp/process.js";
-import { type PromptDispatchReceipt, type SessionClock, SessionRuntime } from "./omp/runtime.js";
+import type { PromptDispatchReceipt, SessionClock } from "./omp/runtime.js";
 import { SpawnGate, type SpawnLog } from "./omp/spawn-gate.js";
 import {
+  buildSessionRuntime,
   emptySlot,
   type Generation,
   generationTokens,
-  NO_SESSION_CAPABILITIES,
   type PoolEntry,
   ProcessPool,
   ReadmissionRequired,
@@ -31,7 +31,6 @@ import {
   type Slot,
   type SpawnShared,
   sealGeneration,
-  sessionRuntimeOpts,
   turnFree,
 } from "./pool.js";
 import { ScreenshotDiff } from "./screenshot-diff.js";
@@ -117,6 +116,8 @@ export interface SessionSupervisorOptions {
   skills: (ownerId: string, workspaceId: string | null) => readonly { name: string }[];
   /** What turns a session's raw composer columns into the mode and model of its spawns. */
   composer: ComposerConfig;
+  /** The prompt of an expert its owner can see, else null (experts「专家提示词注入」); never cached. */
+  expertPrompt: Parameters<typeof effectiveCapabilities>[0];
 }
 
 interface FlushFailure {
@@ -150,6 +151,7 @@ export class SessionSupervisor {
   readonly #undos: Undos;
   readonly #cwdOf: ReturnType<typeof sessionCwdResolver>;
   readonly #composer: ComposerConfig;
+  readonly #capabilitiesOf: ReturnType<typeof effectiveCapabilities>;
   readonly #redactUpstream: (text: string) => string;
   #closed = false;
 
@@ -160,6 +162,7 @@ export class SessionSupervisor {
     this.#onError = options.onError;
     this.#onEvent = options.onEvent;
     this.#composer = options.composer;
+    this.#capabilitiesOf = effectiveCapabilities(options.expertPrompt);
     this.#redactUpstream = options.redactUpstream;
     this.#cwdOf = sessionCwdResolver(options.runtime.sandboxRoot, options.workspaceRootOf);
     const clock = options.runtime.clock;
@@ -224,6 +227,7 @@ export class SessionSupervisor {
       tokens: this.#tokens,
       config: this.#runtime,
       composer: this.#composer,
+      capabilities: this.#capabilitiesOf,
       spawn: this.#spawn,
       closed: () => this.#closed,
       cwdOf: this.#cwdOf,
@@ -440,7 +444,7 @@ export class SessionSupervisor {
     use: (slot: Slot) => Promise<T>,
   ): Promise<T> {
     const live = this.#slots.get(sessionId);
-    const effective = effectiveOf(resume.composer, this.#composer);
+    const effective = alignmentOf(resume, this.#composer, this.#capabilitiesOf);
     const aligned = (slot: Slot) => alignModel(slot, effective).then(() => use(slot));
     const fresh = () => this.#onNewSlot(sessionId, resume, effective, claim, aligned);
     if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
@@ -469,7 +473,7 @@ export class SessionSupervisor {
   async #onNewSlot<T>(
     sessionId: string,
     resume: Resume,
-    { approvalMode, modelId }: ReturnType<typeof effectiveOf>,
+    { approvalMode, modelId, capabilities, fingerprint }: ReturnType<typeof alignmentOf>,
     claim: number | undefined,
     use: (slot: Slot) => Promise<T>,
   ): Promise<T> {
@@ -483,6 +487,7 @@ export class SessionSupervisor {
       resume.workspaceId === null ? null : cwd,
       approvalMode,
       modelIds,
+      fingerprint,
     );
     const unclaim = () => {
       if (claim !== undefined) {
@@ -508,24 +513,22 @@ export class SessionSupervisor {
       throw new HttpError("agent_unavailable");
     }
     slot.entry = entry;
-    slot.runtime = new SessionRuntime(
-      sessionRuntimeOpts(this.#runtime, this.#spawn, {
-        sessionId,
-        ownerId: resume.ownerId,
-        cwd,
-        approvalMode,
-        modelId,
-        capabilities: NO_SESSION_CAPABILITIES,
-        resumePath: resume.ompSessionFile,
-        tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
-        onExit: () => {
-          this.#onProcessExit(slot);
-        },
-        onApproval: (request) => {
-          this.#approvals.register(slot, request);
-        },
-      }),
-    );
+    slot.runtime = buildSessionRuntime(this.#runtime, this.#spawn, {
+      sessionId,
+      ownerId: resume.ownerId,
+      cwd,
+      approvalMode,
+      modelId,
+      capabilities,
+      resumePath: resume.ompSessionFile,
+      tokens: generationTokens(slot, this.#pool, this.#store, this.#tokens),
+      onExit: () => {
+        this.#onProcessExit(slot);
+      },
+      onApproval: (request) => {
+        this.#approvals.register(slot, request);
+      },
+    });
     this.#slots.set(sessionId, slot);
     try {
       return await use(slot);

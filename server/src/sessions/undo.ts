@@ -29,7 +29,7 @@ import { emit } from "../core/audit/index.js";
 import { HttpError } from "../core/errors/index.js";
 import { resolve } from "../core/sandbox/resolve.js";
 import { type Branched, BranchTemps, type StoredUser } from "./branch-temp.js";
-import { effectiveOf, type RawComposer } from "./composer-align.js";
+import { effectiveOf, type RawCapabilities, type RawComposer } from "./composer-align.js";
 import type { SessionListNotifier } from "./list-events.js";
 import {
   currentPrincipal,
@@ -115,8 +115,9 @@ interface UndoPlan {
   expectedLastAssistantId: number | null;
   file: string;
   workspaceId: string | null;
-  /** The session's raw composer columns, read with `file`. */
+  /** The session's raw composer columns and its two capability columns, read with `file`. */
   composer: RawComposer;
+  capabilities: RawCapabilities;
 }
 
 /**
@@ -189,6 +190,7 @@ export class Undos {
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
       composer: resume.composer,
+      capabilities: resume.capabilities,
     };
   }
 
@@ -207,6 +209,8 @@ export class Undos {
       cwd,
       approvalMode,
       modelId,
+      // The session's own effective capabilities, as its next dispatch would spawn with.
+      capabilities: this.#ports.capabilities({ ownerId, capabilities: plan.capabilities }),
       resumePath: plan.file,
       messageId,
       users: plan.users,

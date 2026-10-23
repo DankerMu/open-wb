@@ -236,7 +236,7 @@ describe("ApprovalRegistry.publishesRequest: publishRequest's own predicate, rea
         throw error;
       },
     });
-    const slot = emptySlot("s1", null, "write", new Set(["m1"]));
+    const slot = emptySlot("s1", null, "write", new Set(["m1"]), "fingerprint");
     slot.runtime = {
       markPending: () => undefined,
       clearPending: () => undefined,

@@ -7,13 +7,14 @@
  */
 import { HttpError } from "../core/errors/index.js";
 import type { ApprovalMode } from "../model-catalog.js";
-import { SessionRuntime } from "./omp/runtime.js";
+import type { CapabilitiesOf } from "./composer-align.js";
+import type { SessionRuntime } from "./omp/runtime.js";
+import type { SessionCapabilities } from "./omp/session-config.js";
 import {
-  NO_SESSION_CAPABILITIES,
+  buildSessionRuntime,
   type PoolEntry,
   type ProcessPool,
   type SpawnShared,
-  sessionRuntimeOpts,
   temporaryTokens,
 } from "./pool.js";
 import { attachmentSuffix } from "./slash-commands.js";
@@ -33,6 +34,11 @@ interface BranchTempPorts {
   config: SessionSupervisorRuntime;
   /** What the callers turn their session's raw composer columns into effective values with. */
   composer: ComposerConfig;
+  /**
+   * What the callers turn their session's two capability columns into its effective capabilities
+   * with: the supervisor's own dispatch function (`effectiveCapabilities` on its expert port).
+   */
+  capabilities: CapabilitiesOf;
   /** The supervisor's spawn gate and log: the temporary process queues on the same permits. */
   spawn: SpawnShared;
   closed(): boolean;
@@ -55,6 +61,8 @@ interface BranchTempPlan {
    */
   approvalMode: ApprovalMode;
   modelId: string;
+  /** The effective capabilities of that same session: its session config files' content. */
+  capabilities: SessionCapabilities;
   /** The omp session file the temporary process resumes. */
   resumePath: string;
   /** The branch point's message id, and the session's user messages in order to align it. */
@@ -96,21 +104,19 @@ export class BranchTemps {
       pool.release(entry);
       throw new HttpError("agent_unavailable");
     }
-    const runtime = new SessionRuntime(
-      sessionRuntimeOpts(this.#ports.config, this.#ports.spawn, {
-        sessionId: plan.tokenKey,
-        ownerId: plan.ownerId,
-        cwd: plan.cwd,
-        approvalMode: plan.approvalMode,
-        modelId: plan.modelId,
-        capabilities: NO_SESSION_CAPABILITIES,
-        resumePath: plan.resumePath,
-        tokens: temporaryTokens(pool, entry, tokens),
-        onExit: () => {
-          pool.release(entry);
-        },
-      }),
-    );
+    const runtime = buildSessionRuntime(this.#ports.config, this.#ports.spawn, {
+      sessionId: plan.tokenKey,
+      ownerId: plan.ownerId,
+      cwd: plan.cwd,
+      approvalMode: plan.approvalMode,
+      modelId: plan.modelId,
+      capabilities: plan.capabilities,
+      resumePath: plan.resumePath,
+      tokens: temporaryTokens(pool, entry, tokens),
+      onExit: () => {
+        pool.release(entry);
+      },
+    });
     temp = runtime;
     this.#temps.add(runtime);
     try {

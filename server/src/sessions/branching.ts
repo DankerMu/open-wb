@@ -19,7 +19,12 @@ import {
   entryFor,
   type StoredUser,
 } from "./branch-temp.js";
-import { effectiveOf, type RawComposer } from "./composer-align.js";
+import {
+  type CapabilitiesOf,
+  effectiveOf,
+  type RawCapabilities,
+  type RawComposer,
+} from "./composer-align.js";
 import { commandOn, type ProcessPool, type Slot, type SpawnShared } from "./pool.js";
 import { classifyPrompt } from "./slash-commands.js";
 import type { SessionStore, SettledApproval } from "./store.js";
@@ -35,6 +40,8 @@ export type Resume = {
   workspaceId: string | null;
   /** The raw composer columns, from the one `store.runtimeState` read of the dispatch. */
   composer: RawComposer;
+  /** The two capability columns, from the same read. */
+  capabilities: RawCapabilities;
 };
 
 interface SkillsPort {
@@ -196,6 +203,8 @@ interface ForkPorts extends SkillsPort {
   config: SessionSupervisorRuntime;
   /** What turns the source's raw composer columns into the temporary process's mode and model. */
   composer: ComposerConfig;
+  /** The supervisor's effective capabilities of a session (the temporary process's config files). */
+  capabilities: CapabilitiesOf;
   /** The supervisor's spawn gate and log: the temporary process queues on the same permits. */
   spawn: SpawnShared;
   closed(): boolean;
@@ -221,8 +230,9 @@ interface ForkPlan {
   expectedAssistantId: number | null;
   file: string;
   workspaceId: string | null;
-  /** The source's raw composer columns, read with `file`. */
+  /** The source's raw composer columns and its two capability columns, read with `file`. */
   composer: RawComposer;
+  capabilities: RawCapabilities;
 }
 
 export type ForkResult = {
@@ -301,6 +311,7 @@ export class Forks {
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
       composer: resume.composer,
+      capabilities: resume.capabilities,
     };
   }
 
@@ -317,6 +328,7 @@ export class Forks {
       cwd,
       approvalMode,
       modelId,
+      capabilities: this.#ports.capabilities(plan),
       resumePath: plan.file,
       messageId: plan.messageId,
       users: plan.users,

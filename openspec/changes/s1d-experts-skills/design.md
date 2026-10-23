@@ -139,7 +139,7 @@
 | 文件 | 现状 | 预计 | 说明 |
 |---|---|---|---|
 | `server/src/sessions/omp/process.ts` | 787 | ≤795 | argv 追加 + 写出 / 退出删除必然超线：组 1 把 argv 组装抽到 `omp/argv.ts` |
-| `server/src/sessions/supervisor.ts` | 795 | ≤800 | 组 6 必然超线：`new SessionRuntime(sessionRuntimeOpts(...))` 的组装（:510-527）移进 `pool.ts` 具名 helper，有效能力计算放 `composer-align.ts` |
+| `server/src/sessions/supervisor.ts` | 795 | ≤800 | 组 6 必然超线：`new SessionRuntime(sessionRuntimeOpts(...))` 的组装（:511-528）移进 `pool.ts` 具名 helper，有效能力计算放 `composer-align.ts` |
 | `server/src/sessions/pool.ts` | 401 | ~440 | `sessionRuntimeOpts` 带能力、slot 指纹 |
 | `server/src/server.ts` | 787 | ≤800 | `state_layout` 阶段调 `sweepSessionConfig` |
 | `server/src/sessions/omp/state-layout.ts` | 122 | ~150 | `session-config/` 表项、`ompSessionConfigDir`、`sweepSessionConfig` |
