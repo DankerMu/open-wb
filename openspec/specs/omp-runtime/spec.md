@@ -34,7 +34,7 @@ omp 在 `--resume <file>` 时以该会话文件头记录的 cwd 为准（该目�
 - `<key>.yml` SHALL 恰有一个顶层键 `disabledExtensions`，其值为字符串数组，元素去重后按字典序排列；元素集合由 skill-switches「停用技能对 omp 生效」规定（本 change 为会话停用技能的 `skill:<名称>`）。文件内容 SHALL 恰为一行 `disabledExtensions: [<e1>, <e2>, …]` 加换行：每个元素写作 JSON 字符串（双引号包围、按 JSON 规则转义，JSON 字符串同时是合法的 YAML 双引号标量），元素之间以 `, ` 分隔，为空时写作 `disabledExtensions: []`；宿主 SHALL NOT 以未加引号的 YAML 标量写元素（技能名可以含 `:`、`#`、`"` 等 YAML 记号）。该文件 SHALL NOT 含其它键，不进 `PI_CONFIG_FILES`（它仍只指向宿主 overlay）。数组在 omp 的配置合并里整体替换，所以项目层 `.omp/config.yml` 与全局 `config.yml` 里的 `disabledExtensions` 在任何会话里都不生效（空能力时同样；接受）。
 - `<key>.md` 只在会话有有效专家时写出，内容为该专家 `prompt` 的原文（UTF-8）；没有有效专家时不写该文件，argv 也不含 `--append-system-prompt`。路径是不含换行的绝对路径，omp 按文件读取它；omp 读该文件的**任何**错误（不只是缺失）都会使它把路径字面当作提示词文本，所以该文件 SHALL 在 spawn 前写成、对 omp uid 可读（目录见「OMP_STATE_DIR 托管布局」，文件 `0640`），且在该子进程结束之前不被删除。有专家时 omp 不再自行发现项目或用户层的 `APPEND_SYSTEM.md`（omp 只在没给该参数时发现它；接受）。
 - 两个文件 SHALL 经与托管 `models.yml` 相同的替换实现原子写入（独占创建的临时文件、mode 精确 `0640`、rename）；任一写入失败视同目录准备失败：已写出的本次文件被删除，SHALL 不 spawn 任何子进程。
-- 该子进程以任何原因结束时（正常关停、空闲回收、退役、驱逐、崩溃、启动或握手失败，以及 spawn 本身失败——`spawnImpl` 同步抛出，或子进程只报告 `error` / `close` 而没有 `exit`），宿主 SHALL 删除它的 `<key>.yml` 与 `<key>.md`；删除失败只记日志，不改变退出处理。其它存活进程的文件 SHALL NOT 被删除。
+- 该子进程以任何原因结束时（正常关停、空闲回收、退役、驱逐、崩溃、启动或握手失败，以及 spawn 本身失败——`spawnImpl` 同步抛出，或子进程只报告 `error` / `close` 而没有 `exit`），宿主 SHALL 删除它的 `<key>.yml` 与 `<key>.md`，且每个子进程只删除一次——`exit` 与 `close` 都到达时，第二次 SHALL 什么也不做。删除失败 SHALL NOT 改变退出处理，SHALL NOT 经 `process.emitWarning` 或其它平台 warning 输出（那是 application stderr 上的非 JSON 行）；每个删除失败的文件 SHALL 恰以一个 `Error` 交给 sessions 模块的 `onError`，与 http-service-skeleton「服务启动与装配」里会话删除清理失败的报告同一处理：生产入口写一行 `{"event":"session_fault"}`，不进入 supervisor 的保留故障、不在关停时暴露。一次子进程结束因此至多两行（`.yml` 与 `.md` 各一）。其它存活进程的文件 SHALL NOT 被删除。
 
 omp 按序深合并配置层，后者胜，只递归普通对象，数组整体替换；会话配置文件位于宿主 overlay 之后的 `--config` 层，高于项目层，所以项目层设置（`.omp/config.yml` 等）里的 `disabledExtensions` 总被它整体覆盖——项目层不能重新启用被会话停用的技能。宿主 overlay 不设 `disabledExtensions`，会话配置文件也不含 overlay 钉住的任何键，二者互不覆盖。
 
@@ -125,6 +125,10 @@ omp 按序深合并配置层，后者胜，只递归普通对象，数组整体�
 - **THEN** 前一例调用失败时本次两个文件都不留在 `session-config/` 下；后一例在 `onExit` 之后两个文件都不存在
 - **WHEN** 测试令 `<key>.md` 的写入失败
 - **THEN** 没有子进程被 spawn，本次的 `<key>.yml` 不留在 `session-config/` 下，调用以目录准备失败结束
+
+#### Scenario: 会话配置文件删除失败只报告一次
+- **WHEN** 带专家的会话的子进程结束，`exit` 与 `close` 都到达，而 `<key>.yml` 与 `<key>.md` 的删除都抛错（如 EACCES）；另一例只有 `.yml` 删除失败
+- **THEN** `onError` 恰收到两次（每个文件一次）、另一例恰一次；退出处理照常完成，`OmpProcess` 的 `exit` 照常发布；生产入口的 application stderr 除 `node:sqlite` ExperimentalWarning 外只有受管 JSON 行，其中 `{"event":"session_fault"}` 的条数与 `onError` 次数相同，没有 `WorkbuddySessionConfig` 文本；`server/src` 中没有 `process.emitWarning` 调用
 
 ### Requirement: RPC 握手与帧层
 OmpProcess SHALL reuse spawnOmp, wait for ready, negotiate protocol v2, then request get_state with distinct correlated ids. start SHALL resolve with nonempty data.sessionFile only after both matching successful responses, and SHALL otherwise reject with agent_unavailable and terminate the child within the configured startup failure path. One overall handshake deadline SHALL default to 10000ms. It SHALL start only after the child has been spawned; when the owning SessionRuntime is given a spawn gate (see omp-pool「并发 spawn 上限」), spawning happens only after a permit has been granted, so time spent queued for a permit SHALL NOT count against the deadline. This transport SHALL return sessionFile; persistence belongs to the supervisor.
