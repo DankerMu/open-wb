@@ -36,17 +36,17 @@ Suggested fixture level: expanded - 共享 spawn 入口的接线、进程生命�
 
 ## 2. 中心「专家」tab 删除后的焦点（#1731）
 
-- [ ] 2.1 核对 Context：`web/src/features/center/experts/{use-experts.ts:118-136,panel.tsx:25-100,list.tsx:170-185,form-dialog.tsx:130-140}`；先例 `web/src/features/center/models/{use-models.ts:146-165,panel.tsx:25-35,93-96}`、`web/test/center-models-list.test.tsx:216-238`；`web/test/center-experts-{list,form}.test.tsx`、`center-experts-support.tsx:111,259-261`；`docs/acceptance/functional-checklist.md` CE-03（约 :278）。
-- [ ] 2.2 测试先行（场景「删除后的焦点」）：`center-experts-list.test.tsx` 新增两个用例。
+- [x] 2.1 核对 Context：`web/src/features/center/experts/{use-experts.ts:118-136,panel.tsx:25-100,list.tsx:170-185,form-dialog.tsx:130-140}`；先例 `web/src/features/center/models/{use-models.ts:146-165,panel.tsx:25-35,93-96}`、`web/test/center-models-list.test.tsx:216-238`；`web/test/center-experts-{list,form}.test.tsx`、`center-experts-support.tsx:111,259-261`；`docs/acceptance/functional-checklist.md` CE-03（约 :278）。
+- [x] 2.2 测试先行（场景「删除后的焦点」）：`center-experts-list.test.tsx` 新增两个用例。
   - 慢重取：下一次 `listExperts` 在 10 ms 宏任务之后才结算。删除自建专家成功后，卡片消失、确认框关闭，`document.activeElement` 为 `新建专家`。修复前必须为红（记录输出）。
   - 删除失败：`deleteExpert` 以 `ApiError` 失败，焦点在该卡的 `删除` 上，页顶显示 message，不调 `onGone`。
-- [ ] 2.3 实现 design D2；`panel.tsx:31` 注释同步。CE-03 预期改为「列表末尾多出一张带「自建」标记、标签为需求与 PRD 的卡；点分类「产品」后能看到该卡」，结论仍为 `待签`。
-- [ ] 2.4 在途提交用例（`center-experts-form.test.tsx:95-122`）：
+- [x] 2.3 实现 design D2；`panel.tsx:31` 注释同步。CE-03 预期改为「列表末尾多出一张带「自建」标记、标签为需求与 PRD 的卡；点分类「产品」后能看到该卡」，结论仍为 `待签`。
+- [x] 2.4 在途提交用例（`center-experts-form.test.tsx:95-122`）：
   - 把「再点保存」改为对 `<form>` 直接 `fireEvent.submit`，断言 `createExpert` 恰一次（面板级用例只证明整体不重发；两层守卫各自的突变红证据见下面两条）。
   - 两层守卫串联，从面板入口删掉其中一层，另一层会把它盖住，所以每层单独观测：
     - 对话框层：直接渲染 `ExpertFormDialog`，`pending` 为 true，传入 `onSubmit` spy；对 `<form>` `fireEvent.submit` 后 spy 未被调用。临时删掉 `form-dialog.tsx:135` 的守卫，该用例必须变红（记录输出）。
     - hook 层：`renderHook(useExperts)`，打开表单后调一次 `submit`（`createExpert` 挂起），`await act(...)` 刷一次重渲染，再调新的 `result.current.submit`，`createExpert` 仍恰一次。临时删掉 `use-experts.ts:98` 的守卫，该用例必须变红（记录输出）。`:98` 读的是渲染闭包，同一闭包同步连调两次本来就会两次都过守卫，这不是本组的验收目标，不写这种用例。
-- [ ] 2.5 `npm test --workspace web`（含 coverage）与 `make check` 通过。
+- [x] 2.5 `npm test --workspace web`（含 coverage）与 `make check` 通过。
 
 Suggested fixture level: compact - 单个面板的焦点接线，照搬已合入的先例。
 

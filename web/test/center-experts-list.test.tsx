@@ -4,7 +4,7 @@
 
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ApiError } from "../src/lib/api.js";
+import { ApiError, type ExpertView } from "../src/lib/api.js";
 import {
   ANALYST,
   BUILTINS,
@@ -14,6 +14,7 @@ import {
   cardOf,
   chip,
   DESIGNER,
+  type FakeExperts,
   FRONTEND,
   fakeExperts,
   OWN,
@@ -213,5 +214,46 @@ describe("删除", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(callNames(fake)).toEqual(["listExperts", "deleteExpert"]);
     expect(cardNames()).toEqual(ALL_NAMES);
+  });
+});
+
+describe("删除后的焦点（#1731）", () => {
+  /** 让下一次 listExperts 在一个 10 ms 的宏任务之后才结算（应答取调用那一刻的表）。 */
+  function slowNextList(fake: FakeExperts, experts: () => ExpertView[]) {
+    fake.listExperts.mockImplementationOnce(async () => {
+      const snapshot = experts();
+      await new Promise((done) => setTimeout(done, 10));
+      return snapshot;
+    });
+  }
+
+  it("删除成功、重取在宏任务后才结算：卡片消失后焦点在「新建专家」", async () => {
+    const fake = fakeExperts([...BUILTINS, OWN]);
+    await renderPanel(fake);
+    slowNextList(fake, () => BUILTINS.map((expert) => ({ ...expert })));
+
+    fireEvent.click(cardButton("需求梳理官", "删除"));
+    const confirm = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(cardNames()).toEqual(ALL_NAMES.slice(0, 4)));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "新建专家" }));
+  });
+
+  it("删除失败：卡片仍在，焦点回到该卡的「删除」，页顶显示 ApiError.message", async () => {
+    const fake = fakeExperts([...BUILTINS, OWN]);
+    fake.deleteExpert.mockRejectedValueOnce(new ApiError(404, "not_found", "请求的资源不存在"));
+    await renderPanel(fake);
+
+    fireEvent.click(cardButton("需求梳理官", "删除"));
+    const confirm = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
+
+    await waitFor(() => expect(pageAlerts()).toEqual(["请求的资源不存在"]));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(cardNames()).toEqual(ALL_NAMES);
+    // onGone 若被调用，opener 会被清掉、焦点落到「新建专家」：焦点在该卡的「删除」即证明失败分支没有调它。
+    expect(document.activeElement).toBe(cardButton("需求梳理官", "删除"));
   });
 });
