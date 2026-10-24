@@ -6,6 +6,7 @@ import { HttpError } from "../core/errors/index.js";
 import type { ApprovalMode, Effort } from "../model-catalog.js";
 import type { RuntimeCommandFrame } from "./omp/commands.js";
 import { SessionRuntime, type SessionRuntimeOpts } from "./omp/runtime.js";
+import type { SessionConfigReport } from "./omp/session-config.js";
 import type { SessionStore } from "./store.js";
 import { RingBuffer } from "./stream/ring-buffer.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
@@ -236,8 +237,13 @@ type PerRuntime = Pick<
   onExit: () => void;
 };
 
-/** Supervisor-owned, shared by every session and fork runtime: one gate instance, one log port. */
-export type SpawnShared = Required<Pick<SessionRuntimeOpts, "spawnGate" | "log">>;
+/**
+ * Supervisor-owned, shared by every session and fork or undo runtime: one gate instance, one log
+ * port, and the sessions `onError` as the session config removal-failure report.
+ */
+export type SpawnShared = Required<Pick<SessionRuntimeOpts, "spawnGate" | "log">> & {
+  onSessionConfigError: SessionConfigReport;
+};
 
 /** The one SessionRuntime option assembly (spawn contract inputs) from the supervisor runtime. */
 export function sessionRuntimeOpts(
@@ -269,6 +275,7 @@ export function sessionRuntimeOpts(
       : { handshakeTimeoutMs: base.handshakeTimeoutMs }),
     spawnGate: shared.spawnGate,
     log: shared.log,
+    onSessionConfigError: shared.onSessionConfigError,
   };
 }
 

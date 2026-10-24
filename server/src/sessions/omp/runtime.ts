@@ -45,7 +45,7 @@ import {
   type SpawnImpl,
 } from "./process.js";
 import { FrameStream } from "./prompt-stream.js";
-import type { SessionCapabilities } from "./session-config.js";
+import type { SessionCapabilities, SessionConfigReport } from "./session-config.js";
 import { reportHandshakeTimeout, type SpawnGate, type SpawnLog } from "./spawn-gate.js";
 import type { ApprovalDecision, ApprovalRequest } from "./ui-requests.js";
 
@@ -85,6 +85,8 @@ export interface SessionRuntimeOpts {
   handshakeTimeoutMs?: number;
   spawnGate?: SpawnGate;
   log?: SpawnLog;
+  /** Each of this runtime's session config files that cannot be removed, once; omitted → discarded. */
+  onSessionConfigError?: SessionConfigReport | undefined;
 }
 
 export type PromptDispatchReceipt = { requestId: string; sessionFile: string };
@@ -126,6 +128,7 @@ export class SessionRuntime {
   readonly #handshakeTimeoutMs: number | undefined;
   readonly #spawnGate: SpawnGate | undefined;
   readonly #log: SpawnLog | undefined;
+  readonly #onSessionConfigError: SessionConfigReport | undefined;
   #cancelQueued: (() => void) | undefined;
   #resumePath: string | null;
   #sessionFile: string | undefined;
@@ -166,6 +169,7 @@ export class SessionRuntime {
     this.#handshakeTimeoutMs = opts.handshakeTimeoutMs;
     this.#spawnGate = opts.spawnGate;
     this.#log = opts.log;
+    this.#onSessionConfigError = opts.onSessionConfigError;
     this.#resumePath = opts.resumePath ?? null;
     this.#sessionFile = nonempty(this.#resumePath);
   }
@@ -437,6 +441,7 @@ export class SessionRuntime {
       modelId: this.#modelId,
       approvalMode: this.#approvalMode,
       capabilities: this.#capabilities,
+      onSessionConfigError: this.#onSessionConfigError,
       token,
       resumePath: this.#resumePath,
       ...this.#spawnIdentity,

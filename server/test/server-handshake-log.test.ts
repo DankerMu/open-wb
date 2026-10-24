@@ -7,7 +7,14 @@
  * per retained supervisor fault, first at the seam, then through a real createApp whose fault is a
  * terminal transaction rejected by a TEMP TRIGGER (session-supervisor-faults.test.ts); that
  * trigger notifies the sink exactly once per turn.
+ *
+ * Issue #1722 (s1d-experts-skills-followups group 1): a session config file that cannot be removed
+ * when its child is gone reaches the same `onError` raw — one `session_fault` line per failing file
+ * though both `exit` and `close` arrive, no warning text, nothing retained for shutdown. The failure
+ * is injected at `node:fs` `rmSync`, not by chmod (the layout is re-asserted on every spawn).
  */
+import { readdirSync, readFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -26,8 +33,10 @@ import {
   createSession,
   createStartEofRuntime,
   emitAssistantDelta,
+  IDLE_MS,
   waitFor,
 } from "./session-supervisor-helpers.js";
+import { failSessionConfigRemovals } from "./support/session-config.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
@@ -125,6 +134,7 @@ function openFaultingApp(assembly: AssemblyDependencies) {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  syncBuiltinESMExports();
 });
 
 describe("appAssemblyOf (L2)", () => {
@@ -371,5 +381,92 @@ describe("retained supervisor fault through createApp (#664)", () => {
     } finally {
       await world.dispose();
     }
+  });
+});
+
+describe("session config removal failure through createApp (#1722)", () => {
+  it("writes one session_fault line per failing file, nothing else, and retains nothing", {
+    timeout: 20_000,
+  }, async () => {
+    const production = appAssemblyOf(resolveServerConfig({}, ENTRY));
+    const notified = vi.spyOn(production, "onError");
+    const warned = vi.spyOn(process, "emitWarning");
+    const runtime = createStartEofRuntime((child) => {
+      emitAssistantDelta(child, "done");
+      child.emitLine({ type: "agent_end", messages: [], isTerminal: true });
+    });
+    const db = openDb(":memory:");
+    const app = createApp({
+      db,
+      authRuntime: fixedRuntime(() => FIXED_NOW),
+      assembly: { ...production, runtime: runtime.runtime, tokens: new TokenRegistry() },
+    });
+    let closed = false;
+    try {
+      const cookie = await cookieFor(app, "zhangsan");
+      const session = await createSession(app, cookie);
+      const caps = await app.inject({
+        method: "PUT",
+        url: `/api/sessions/${session}/capabilities`,
+        headers: { cookie, "content-type": "application/json" },
+        payload: JSON.stringify({ expertId: "builtin:data-analyst" }),
+      });
+      expect(caps.statusCode).toBe(200);
+      const stdout = spyWrites(process.stdout);
+      const stderr = spyWrites(process.stderr);
+      failSessionConfigRemovals(["yml", "md"]);
+
+      const response = await postPrompt(app, session, cookie, JSON.stringify({ message: "go" }));
+      expect(response.statusCode).toBe(202);
+      await waitFor(() => {
+        const row = db.prepare("SELECT status FROM chat_sessions WHERE id = ?").get(session) as
+          | { status: string }
+          | undefined;
+        return row?.status === "done" ? true : undefined;
+      }, "the turn to finish");
+      // With an expert the spawn names both files: `.yml` and `.md`.
+      expect(runtime.calls[0]?.args).toContain("--append-system-prompt");
+      // Idle reap: stdin EOF, then the child emits `exit` and `close`.
+      runtime.clock.advance(IDLE_MS);
+      const child = await waitFor(() => {
+        const first = runtime.children[0];
+        return first?.exitCode === null ? undefined : first;
+      }, "the reaped child to exit");
+      expect(child.exitCode).toBe(0);
+      await settle(2);
+
+      const lines = linesOf(stderr).filter((line) => !line.includes("ExperimentalWarning"));
+      expect(lines).toEqual([FAULT_LINE, FAULT_LINE]);
+      expect(lines.join("")).not.toContain("WorkbuddySessionConfig");
+      expect(notified).toHaveBeenCalledTimes(2);
+      expect(notified.mock.calls.map((call) => (call[0] as { code?: string }).code)).toEqual([
+        "EACCES",
+        "EACCES",
+      ]);
+      expect(notified.mock.results.map((result) => result.value)).toEqual([undefined, undefined]);
+      expect(warned).not.toHaveBeenCalled();
+      expect(stdout).not.toHaveBeenCalled();
+
+      closed = true;
+      // Reported, not retained: shutdown surfaces no fault and writes nothing more.
+      await expect(app.close()).resolves.toBeUndefined();
+      expect(linesOf(stderr).filter((line) => !line.includes("ExperimentalWarning"))).toEqual([
+        FAULT_LINE,
+        FAULT_LINE,
+      ]);
+    } finally {
+      if (!closed) {
+        await app.close().catch(() => undefined);
+      }
+      db.close();
+    }
+  });
+
+  it("server/src calls no process.emitWarning", () => {
+    const src = join(REPO_ROOT, "server", "src");
+    const offenders = readdirSync(src, { recursive: true, encoding: "utf8" })
+      .filter((name) => name.endsWith(".ts"))
+      .filter((name) => readFileSync(join(src, name), "utf8").includes("emitWarning"));
+    expect(offenders).toEqual([]);
   });
 });
