@@ -1,6 +1,6 @@
 # skill-switches Spec Delta
 
-> s1d-connectors：以 `s1d-experts-skills` 新建的规格为底（该 change 先归档），「会话能力端点」的 body / 应答加 `disabledConnectors`（规则同 connectors「连接器账号缺省」，并集规则只管技能），改写一个场景、加一个场景；「停用技能对 omp 生效」的 `disabledExtensions` 改为 `skill:<停用技能>` 与 `mcp:<停用连接器>` 的并集；「输入框「能力」弹层」在技能段之后加 `连接器` 段，改写一个场景、加一个场景（design D7、D10）。其余逐字沿用该规格。
+> s1d-connectors：以 `s1d-experts-skills` 新建的规格为底（该 change 先归档），「会话能力端点」的 body / 应答加 `disabledConnectors`（规则同 connectors「连接器账号缺省」，并集规则只管技能），改写一个场景、加一个场景；「停用技能对 omp 生效」的 `disabledExtensions` 改为 `skill:<停用技能>` 与 `mcp:<停用连接器>` 的并集；「输入框「能力」弹层」在技能段之后加 `连接器` 段，改写一个场景、加一个场景（design D7、D10）。其余逐字沿用该规格（「欢迎态读取账号缺省之前不可切换」场景已按 `skills-switch-focus` 归档后的文字改写）。
 
 ## MODIFIED Requirements
 
@@ -14,6 +14,8 @@ sessions 模块 SHALL 注册 `GET /api/sessions/:id/capabilities` 与 `PUT /api/
 #### Scenario: 拒绝与归档
 - **WHEN** 对他人会话 `GET`；对自己会话 `PUT {}`、`PUT {skills:[]}`、`PUT {expertId:"builtin:nope"}`；对已归档会话 `PUT {disabledSkills:[]}`
 - **THEN** 404；三个 400；409 `session_archived`；会话行不变
+- **WHEN** 对已归档会话 `GET /api/sessions/:id/capabilities`
+- **THEN** 200，body 为该会话的能力（归档会话可被选中只读呈现）
 
 #### Scenario: 停用连接器
 - **WHEN** 会话停用技能 `["lint"]`、停用连接器为 `[]`；`PUT {disabledConnectors:["wiki","gitlab","wiki"]}`；再 `PUT {expertId:E}`（E 声明 `["deploy"]`）；再 `PUT {disabledConnectors:["Git"]}`、`PUT {disabledConnectors:"gitlab"}`、`PUT {disabledConnectors:<33 个合规名称>}`
@@ -37,7 +39,7 @@ sessions 模块 SHALL 注册 `GET /api/sessions/:id/capabilities` 与 `PUT /api/
 
 #### Scenario: 欢迎态读取账号缺省之前不可切换
 - **WHEN** 欢迎态第一次打开 `能力`，`GET /api/skills` 挂起；随后它以 500 失败；关闭弹层再打开，这次成功
-- **THEN** 挂起期间各开关禁用并显示 `正在读取技能…`；失败后开关仍禁用并显示 `技能读取失败，关闭后重新打开可重试`；再次打开恰再发一次 `GET /api/skills`，成功后开关可切换且初值按 `disabledSkills`
+- **THEN** 挂起期间各开关不可切换（`aria-disabled="true"`，见「中心「技能」tab」的「不可切换的开关」）并显示 `正在读取技能…`；失败后开关仍不可切换并显示 `技能读取失败，关闭后重新打开可重试`；再次打开恰再发一次 `GET /api/skills`，成功后开关可切换且初值按 `disabledSkills`
 
 #### Scenario: 欢迎态带初值
 - **WHEN** 账号缺省停用 `weekly-report`；欢迎态打开 `能力` 不改动即发送；另一次在欢迎态打开 `deploy` 的开关关掉后发送
