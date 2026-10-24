@@ -1,11 +1,15 @@
 // 欢迎态的输入框「能力」弹层（skill-switches「输入框「能力」弹层」与「欢迎态带初值」、chat-web「能力读取时机」；
 // s1d-experts-skills 任务 10.2 的定案）：账号缺省的读取时机（打开时取、按 client 缓存、失败重取）、页面选择与
 // 首次发送的 `disabledSkills`（首次发送后不清）、弹层随会话上下文关闭。seam：整页挂载 + 假 API（`fetch`）；
-// 按 client 缓存另以 `renderHook` 换 client。期望值取自规格条文与 tasks.md 10.2。
+// 按 client 缓存另以 `renderHook` 换 client。期望值取自规格条文与 tasks.md 10.2。当前会话原地归档再恢复与
+// A → 欢迎态 → A 的逐帧持有集合取自 s1d-experts-skills-followups design D3（#1735）。
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { useSkillDefaults } from "../src/features/chat/use-session-capabilities.js";
-import type { ApiClient } from "../src/lib/api.js";
+import {
+  useSessionCapabilities,
+  useSkillDefaults,
+} from "../src/features/chat/use-session-capabilities.js";
+import type { ApiClient, SessionCapabilities } from "../src/lib/api.js";
 import {
   CATALOG,
   capsBody,
@@ -45,6 +49,10 @@ import {
   envelope,
   findList,
   mountSessions,
+  patchOf,
+  patchPath,
+  patchRequests,
+  type SessionView,
   view,
 } from "./chat-page-session-meta-support.js";
 import { COMMANDS, COMPACT, catalogue, TODO } from "./chat-page-slash-support.js";
@@ -54,11 +62,26 @@ import {
   HERO,
   leaveForWelcome,
 } from "./chat-page-welcome-scene-support.js";
-import { calls, deferredResponse } from "./support.js";
+import { type FakeEventSource, latestListSource, settle } from "./chat-stream-support.js";
+import { calls, currentLocation, deferredResponse, jsonResponse } from "./support.js";
 
 afterEach(cleanupSessionMeta);
 
 const ARCHIVED = '[data-slot="archived-notice"]';
+
+/** 列表读取的当前响应：路由每次请求时读它，用例中途改写（同 chat-list-events.test.tsx 的 `replies`）。 */
+function listReplies(sessions: readonly SessionView[]) {
+  const state = { sessions };
+  return { route: () => jsonResponse({ sessions: state.sessions }), state };
+}
+
+/** 在列表连接上派发 `sessions.changed`，并让由此发起的列表重取与渲染落定。 */
+async function dispatchChanged(source: FakeEventSource = latestListSource()) {
+  await act(async () => {
+    source.emitNamed("sessions.changed", "{}");
+    await settle();
+  });
+}
 
 describe("欢迎态的 能力 弹层", () => {
   it("挂载不取 /api/skills、不过滤；第一次打开恰一次 GET，挂起时 正在读取技能… 且不可切换、重开不重发；失败显示 alert；重开恰重取一次，成功后按 disabledSkills 可切换", async () => {
@@ -262,5 +285,69 @@ describe("能力 弹层随会话上下文关闭", () => {
     await waitFor(() => expect(composer().disabled).toBe(false));
     await quiesce();
     expect(skillsDialog()).toBeNull();
+  });
+
+  it("当前会话原地被归档再恢复，弹层保持关闭", async () => {
+    const session = `/?session=${A}`;
+    const list = listReplies([SA]);
+    const { fetchMock } = mountSessions(session, [SA], {
+      "/api/sessions": list.route,
+      [EXPERTS]: () => experts(),
+      [COMMANDS]: catalogue(CATALOG),
+      [capsPath(A)]: () => capsBody([]),
+      [patchPath(A)]: () => jsonResponse({ ...SA, archivedAt: null }),
+    });
+    await findList("会话甲");
+    await waitFor(() => expect(composer().disabled).toBe(false));
+    await quiesce();
+    await openSkills();
+
+    list.state.sessions = [{ ...SA, archivedAt: 1 }];
+    await dispatchChanged();
+    await waitFor(() => expect(document.querySelector(ARCHIVED)).not.toBeNull());
+    expect(screen.queryByRole("button", { name: "能力" })).toBeNull();
+    expect(currentLocation()).toBe(session);
+
+    list.state.sessions = [SA];
+    const notice = document.querySelector<HTMLElement>(ARCHIVED);
+    if (!notice) throw new Error("没有 archived-notice");
+    fireEvent.click(within(notice).getByRole("button", { name: "恢复" }));
+    await waitFor(() => expect(document.querySelector(ARCHIVED)).toBeNull());
+    await waitFor(() => expect(composer().disabled).toBe(false));
+    await quiesce();
+
+    expect(skillsDialog()).toBeNull();
+    expect(patchRequests(fetchMock, A)).toEqual([patchOf('{"archived":false}')]);
+    expect(currentLocation()).toBe(session);
+  });
+});
+
+describe("回到会话的第一帧不带欢迎态之前持有的能力", () => {
+  it("A → 欢迎态 → A：回到 A 的那次渲染（effect 发起新读取之前）capabilities 为 null，不是上一次取得的集合", async () => {
+    const held: SessionCapabilities = { expertId: "e1", disabledSkills: ["deploy"] };
+    const client = {
+      getSessionCapabilities: vi
+        .fn()
+        .mockResolvedValueOnce(held)
+        .mockImplementation(() => new Promise<never>(() => {})),
+      putSessionCapabilities: vi.fn(),
+    } as unknown as Pick<ApiClient, "getSessionCapabilities" | "putSessionCapabilities">;
+    const frames: (SessionCapabilities | null)[] = [];
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | undefined }) => {
+        const state = useSessionCapabilities(client, sessionId);
+        frames.push(state.capabilities);
+        return state;
+      },
+      { initialProps: { sessionId: A as string | undefined } },
+    );
+    await waitFor(() => expect(result.current.capabilities).toEqual(held));
+    rerender({ sessionId: undefined });
+
+    const back = frames.length;
+    rerender({ sessionId: A });
+
+    expect(frames[back]).toBeNull();
+    expect(client.getSessionCapabilities).toHaveBeenCalledTimes(2);
   });
 });
