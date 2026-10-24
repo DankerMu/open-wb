@@ -52,13 +52,13 @@ Suggested fixture level: compact - 单个面板的焦点接线，照搬已合入
 
 ## 3. 「能力」弹层归档半条与欢迎态持有集合（#1735）
 
-- [ ] 3.1 核对 Context：`web/src/features/chat/{page.tsx:60-80,slash-menu.tsx:140-160,240-245,310-320,use-session-capabilities.ts:135-165,capability-popover.tsx:60-100}`；用例 `web/test/chat-capability-popover-welcome.test.tsx:245-265`、`chat-list-events.test.tsx:42-141`（`dispatch` / `changed` / `replies` / `listOf` 写法）、`chat-stream-support.ts`（`FakeEventSource`、`latestListSource`）、`chat-page-session-meta-support.tsx`（`view`、`A`）、`chat-archive.test.tsx`（恢复的 PATCH 写法）。
-- [ ] 3.2 测试先行（design D3）：
+- [x] 3.1 核对 Context：`web/src/features/chat/{page.tsx:60-80,slash-menu.tsx:140-160,240-245,310-320,use-session-capabilities.ts:135-165,capability-popover.tsx:60-100}`；用例 `web/test/chat-capability-popover-welcome.test.tsx:245-265`、`chat-list-events.test.tsx:42-141`（`dispatch` / `changed` / `replies` / `listOf` 写法）、`chat-stream-support.ts`（`FakeEventSource`、`latestListSource`）、`chat-page-session-meta-support.tsx`（`view`、`A`）、`chat-archive.test.tsx`（恢复的 PATCH 写法）。
+- [x] 3.2 测试先行（design D3）：
   - 新增「当前会话原地被归档再恢复，弹层保持关闭」用例：列表重取让 A 带 `archivedAt`；出现 `[data-slot="archived-notice"]`、「能力」按钮消失之后，点「恢复」（PATCH 200）；输入框重新可用后，`skillsDialog()` 为 null。`requestedSessionId` 全程不变。
   - 突变红证据：临时去掉 `page.tsx:76` 的 `archived ?`，新用例必须变红（记录输出），然后恢复。
   - 新增 A → 欢迎态 → A 用例：用一个消费组件在每次渲染时把 `capabilities`（或页面上的专家标签 / 过滤结果）推进数组，逐帧记录，断言回到 A 的那一帧（effect 发起新读取之前的那次渲染）为 null。不能读 `rerender` / settle 之后的 `result.current`：`act` 已经冲掉 effect，修复前读到的也是 null。修复前为红（记录输出）。
   - 需要搬用的 helper，放进现有 support 文件或就地定义。新文件或改动的文件都要守住 800 行上限。
-- [ ] 3.3 实现：`use-session-capabilities.ts` 的 `sessionId === undefined` 分支加 `hold(null)`，并同步注释。
-- [ ] 3.4 `npm test --workspace web`（含 coverage）与 `make check` 通过。
+- [x] 3.3 实现：`use-session-capabilities.ts` 的 `sessionId === undefined` 分支加 `hold(null)`，并同步注释。
+- [x] 3.4 `npm test --workspace web`（含 coverage）与 `make check` 通过。
 
 Suggested fixture level: compact - 测试补缺加 hook 内一行状态清理。
