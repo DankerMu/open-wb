@@ -6,7 +6,8 @@ import { type ApiClient, ApiError, REQUEST_FAILED_MESSAGE, type SkillList } from
  * `listSkills`；此后每次切换恰一次 `putSkillDefaults`，不重取。
  *
  * 开关状态只看 `list.disabledSkills`（开 = 名称不在其中）：切换时先把它改成切换后的列表（在途期间开关显示切换后
- * 的状态、全部禁用），成功以应答整个替换 `list`，失败把停用列表还原并给出提示。
+ * 的状态、全部不可切换：`aria-disabled`，开关照样分派点击，由 `toggle` 的在途守卫拦下），成功以应答整个替换
+ * `list`，失败把停用列表还原并给出提示。
  */
 type State =
   | { status: "loading" }

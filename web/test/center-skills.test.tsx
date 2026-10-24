@@ -1,8 +1,9 @@
 // skill-switches「中心「技能」tab」（s1d-experts-skills 任务 8.2）：平台技能列表（名称、描述、`默认启用` 开关与
 // 其初值）、页顶说明与空态、首次读取失败；切换恰一次 `putSkillDefaults`，body 为最近一次取得的 `disabledSkills`
 // 加上 / 去掉该名称后去重、按 JS 缺省 `.sort()` 排序（服务端 `normalizeSkillNames` 同一比较），列表外的名称
-//（`ghost`）不丢；在途禁用全部开关；成功以应答为准；失败回滚并提示。假 `ApiClient` 经 `SkillsPanel({client})`
-// 注入，其余方法全部换成会抛错的 spy。
+//（`ghost`）不丢；在途期间全部开关不可切换（`aria-disabled`，不用 `disabled`：焦点留在按下的开关上，再点不发
+// 请求）；成功以应答为准；失败回滚并提示。假 `ApiClient` 经 `SkillsPanel({client})` 注入，其余方法全部换成会抛错
+// 的 spy。
 
 import {
   act,
@@ -111,22 +112,34 @@ function itemNames(): string[] {
     .map((item) => item.querySelector("h3")?.textContent ?? "");
 }
 
-/** 各开关的 `[accessible name, 是否开, 是否禁用]`，按显示次序。 */
+/** 各开关的 `[accessible name, 是否开, 是否不可切换（aria-disabled）]`，按显示次序。 */
 function switchStates(): [string, boolean, boolean][] {
   return screen
     .queryAllByRole("switch")
     .map((element) => [
       element.getAttribute("aria-label") ?? "",
       element.getAttribute("aria-checked") === "true",
-      (element as HTMLButtonElement).disabled,
+      element.getAttribute("aria-disabled") === "true",
     ]);
 }
 
-/** 等到不再在途（所有开关可用）。 */
+/** 等到不再在途（所有开关都不带 `aria-disabled`）。 */
 async function settled(): Promise<void> {
   await waitFor(() => {
-    expect(switchStates().every(([, , disabled]) => !disabled)).toBe(true);
+    expect(switchStates().every(([, , ariaDisabled]) => !ariaDisabled)).toBe(true);
   });
+}
+
+/** 有开关带 `aria-disabled` 属性（任意取值）。 */
+function anyAriaDisabled(): boolean {
+  return screen.queryAllByRole("switch").some((element) => element.hasAttribute("aria-disabled"));
+}
+
+/** 没有任何开关带 `disabled` 属性（不可切换只用 `aria-disabled`）。 */
+function noneDisabled(): boolean {
+  return screen
+    .queryAllByRole("switch")
+    .every((element) => !(element as HTMLButtonElement).disabled);
 }
 
 function alerts(): string[] {
@@ -220,22 +233,34 @@ describe("切换", () => {
 });
 
 describe("在途", () => {
-  it("全部开关禁用，被切换的开关显示切换后的状态；应答前再点任何开关不发请求；应答后恢复可用", async () => {
+  it("在途期间焦点留在开关上：全部开关 aria-disabled（不是 disabled），被切换的开关显示切换后的状态；再点任何开关不发请求、不改状态；应答后恢复且焦点不动", async () => {
     const fake = fakeSkills(GHOST_ONLY);
     const pending = deferred<SkillList>();
     fake.putSkillDefaults.mockReturnValueOnce(pending.promise);
     await renderReady(fake);
 
-    click("deploy");
+    const deploy = toggle("deploy");
+    deploy.focus();
+    fireEvent.click(deploy);
     await waitFor(() =>
       expect(switchStates()).toEqual([
         ["默认启用 deploy", false, true],
         ["默认启用 weekly-report", true, true],
       ]),
     );
+    expect(noneDisabled()).toBe(true);
+    expect(document.activeElement).toBe(deploy);
+
+    // aria-disabled 的开关照样派发点击，两次都走到 `toggle`，由 `state.pending` 守卫拦下。
     click("weekly-report");
     click("deploy");
+    await act(async () => {});
     expect(fake.putSkillDefaults).toHaveBeenCalledTimes(1);
+    expect(switchStates()).toEqual([
+      ["默认启用 deploy", false, true],
+      ["默认启用 weekly-report", true, true],
+    ]);
+    expect(document.activeElement).toBe(deploy);
 
     pending.resolve(viewOf([DEPLOY, WEEKLY], ["deploy", "ghost"]));
     await settled();
@@ -243,12 +268,14 @@ describe("在途", () => {
       ["默认启用 deploy", false, false],
       ["默认启用 weekly-report", true, false],
     ]);
+    expect(anyAriaDisabled()).toBe(false);
+    expect(document.activeElement).toBe(deploy);
     expect(fake.putSkillDefaults).toHaveBeenCalledTimes(1);
   });
 
-  // 上例的第二次点击落在已禁用的开关上，React 不派发，`toggle` 的在途拦截根本没被走到；这里绕开 DOM，
-  // 用同一个 `result.current` 同步连调两次——第二次与第一次共享闭包（看到的仍是 `pending: false`），
-  // 只能靠 `inFlight` 拦下。
+  // 上例挂起期间的点击发生在 `pending` 重渲染之后，由 `state.pending` 拦下；这里绕开 DOM，用同一个
+  // `result.current` 同步连调两次——第二次与第一次共享闭包（看到的仍是 `pending: false`），只能靠
+  // `inFlight` 拦下。
   it("同一帧内连调两次 toggle（同一闭包）只发一次请求，应答后以应答为准", async () => {
     const fake = fakeSkills(GHOST_ONLY);
     const pending = deferred<SkillList>();
@@ -335,13 +362,18 @@ describe("失败", () => {
       fake.putSkillDefaults.mockRejectedValueOnce(error);
       await renderReady(fake);
 
-      click("deploy");
+      const deploy = toggle("deploy");
+      deploy.focus();
+      fireEvent.click(deploy);
       expect((await screen.findByRole("alert")).textContent).toBe(error.message);
       await settled();
       expect(switchStates()).toEqual([
         ["默认启用 deploy", true, false],
         ["默认启用 weekly-report", true, false],
       ]);
+      // 失败路径同样：应答后不带 aria-disabled，焦点仍在被切换的开关上。
+      expect(anyAriaDisabled()).toBe(false);
+      expect(document.activeElement).toBe(deploy);
 
       const pending = deferred<SkillList>();
       fake.putSkillDefaults.mockReturnValueOnce(pending.promise);

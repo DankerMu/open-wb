@@ -250,7 +250,9 @@ describe("会话中的 能力 弹层", () => {
       ["deploy", "false", "true"],
       ["weekly-report", "false", "true"],
     ]);
-    fireEvent.click(switchOf(dialog, "deploy"));
+    const reopened = switchOf(dialog, "deploy");
+    reopened.focus();
+    fireEvent.click(reopened);
     await quiesce();
     expect(capsWrites(fetchMock)).toEqual([
       [capsPath(A), '{"disabledSkills":["deploy","weekly-report"]}'],
@@ -258,6 +260,8 @@ describe("会话中的 能力 弹层", () => {
     ]);
     await settleDeferredResponse(expertPut, capsBody(["deploy", "weekly-report"]));
     expect(switches(dialog)[0]).toEqual(["deploy", "false", null]);
+    // 应答后开关恢复可切换，焦点仍在按下的开关上。
+    expect(document.activeElement).toBe(reopened);
   });
 
   it("技能 PUT 在途时切到 B：A 的应答与失败都丢弃，B 的开关照常可切换", async () => {
