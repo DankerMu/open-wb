@@ -281,33 +281,38 @@ describe("欢迎态的专家选择", () => {
     await waitFor(() => expect(capsReads(fetchMock)).toEqual([capsPath(CREATED_IDS[0] ?? "")]));
   });
 
-  it("没选过、选后改 不使用专家、选后 移除专家：创建体都不带 expertId 键", async () => {
-    const mounted = await mountWelcome();
-    const { fetchMock } = mounted;
-    const sendAndReturn = async () => {
+  describe("创建体不带 expertId 键", () => {
+    /** 发送一次首次消息，等创建请求落地后断言创建体恰为 `{"scene":"office"}`、没有 `PUT …/capabilities`。 */
+    async function sendExpectingNoExpert(fetchMock: FetchMock) {
       typeDraft("你好");
       clickSend();
-      await waitFor(() => expect(composer().placeholder).toBe("继续追问，或派一个新任务…"));
-      await leaveForWelcome(mounted);
-      await screen.findByRole("heading", { level: 1, name: HERO });
-    };
+      await waitFor(() => expect(createRequests(fetchMock)).toHaveLength(1));
+      await quiesce();
 
-    await sendAndReturn();
-    await choose(await openExperts(), "测试工程师");
-    await choose(await openExperts(), NONE);
-    expect(label()).toBeNull();
-    await sendAndReturn();
-    await choose(await openExperts(), "前端架构师");
-    fireEvent.click(removeButton());
-    expect(label()).toBeNull();
-    await sendAndReturn();
+      expect(createRequests(fetchMock)).toEqual([createOf('{"scene":"office"}')]);
+      expect(capsWrites(fetchMock)).toEqual([]);
+    }
 
-    expect(createRequests(fetchMock)).toEqual([
-      createOf('{"scene":"office"}'),
-      createOf('{"scene":"office"}'),
-      createOf('{"scene":"office"}'),
-    ]);
-    expect(capsWrites(fetchMock)).toEqual([]);
+    it("没选过", async () => {
+      const { fetchMock } = await mountWelcome();
+      await sendExpectingNoExpert(fetchMock);
+    });
+
+    it("选 测试工程师 后改 不使用专家", async () => {
+      const { fetchMock } = await mountWelcome();
+      await choose(await openExperts(), "测试工程师");
+      await choose(await openExperts(), NONE);
+      expect(label()).toBeNull();
+      await sendExpectingNoExpert(fetchMock);
+    });
+
+    it("选 前端架构师 后点 移除专家", async () => {
+      const { fetchMock } = await mountWelcome();
+      await choose(await openExperts(), "前端架构师");
+      fireEvent.click(removeButton());
+      expect(label()).toBeNull();
+      await sendExpectingNoExpert(fetchMock);
+    });
   });
 
   it("欢迎态的选择是页面状态：选中会话后回到欢迎态仍在", async () => {
