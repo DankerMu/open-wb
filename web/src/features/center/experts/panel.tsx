@@ -28,7 +28,7 @@ function Experts({ client }: { client: ApiClient }) {
   const navigate = useNavigate();
   const createRef = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
-  /** 对话框关闭后把焦点还给打开它的按钮；卡片已不在页面上时落到 `新建专家`。 */
+  /** 对话框关闭后把焦点还给打开它的按钮；卡片已删除（opener 被清掉或已不在页面上）时落到 `新建专家`。 */
   const restoreFocus = () => {
     const target = opener.current?.isConnected ? opener.current : createRef.current;
     target?.focus();
@@ -90,7 +90,11 @@ function Experts({ client }: { client: ApiClient }) {
         <RemoveExpertDialog
           expert={remove.expert}
           onCancel={experts.cancelRemove}
-          onConfirm={() => void experts.confirmRemove()}
+          onConfirm={() =>
+            void experts.confirmRemove(() => {
+              opener.current = null;
+            })
+          }
           pending={remove.pending}
           restoreFocus={restoreFocus}
         />

@@ -118,8 +118,11 @@ export function useExperts(client: ApiClient) {
     cancelRemove() {
       setRemove((current) => (current?.pending ? current : null));
     },
-    /** 恰调用一次 `deleteExpert`；成功后重取，失败在页顶提示（卡片仍在）。 */
-    async confirmRemove() {
+    /**
+     * 恰调用一次 `deleteExpert`。成功时先调 `onGone`——调用方据此不再把焦点还给那张卡的按钮（重取可能晚于确认框
+     * 关闭才结算），再重取；失败在页顶提示（卡片仍在），`onGone` 不调。
+     */
+    async confirmRemove(onGone?: () => void) {
       if (!remove || remove.pending) return;
       const { expert } = remove;
       setRemove({ expert, pending: true });
@@ -130,6 +133,7 @@ export function useExperts(client: ApiClient) {
         setNotice(messageOf(error));
         return;
       }
+      onGone?.();
       setRemove(null);
       await reload();
     },

@@ -2,8 +2,19 @@
 // 勾选次序、列表外的已有名称、`listSkills` 失败仍可提交）、每次打开恰一次 `listSkills`、在途禁用、失败留在框内、
 // Escape 回退（s1d-experts-skills 任务 7.2）。逐字段的客户端校验在 `center-experts-validate.test.tsx`。
 
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ExpertFormDialog } from "../src/features/center/experts/form-dialog.js";
+import { useExperts } from "../src/features/center/experts/use-experts.js";
 import { ApiError, type ExpertView, REQUEST_FAILED_MESSAGE } from "../src/lib/api.js";
 import {
   BUILTINS,
@@ -92,7 +103,7 @@ describe("新建", () => {
     });
   });
 
-  it("提交在途：保存与取消禁用，再点保存不重发；结算后关闭", async () => {
+  it("提交在途：保存与取消禁用，再次提交表单不重发；结算后关闭", async () => {
     const fake = fakeExperts(BUILTINS);
     let release!: () => void;
     fake.createExpert.mockImplementationOnce(
@@ -113,11 +124,58 @@ describe("新建", () => {
     expect(within(dialog).getByRole("button", { name: "取消" }).hasAttribute("disabled")).toBe(
       true,
     );
-    save(dialog);
+    // 禁用的按钮点不出提交事件：直接对 <form> 派发，才真正走到在途守卫。
+    fireEvent.submit(dialog.querySelector("form") as HTMLFormElement);
     expect(fake.createExpert).toHaveBeenCalledTimes(1);
 
     release();
     await settled(fake, 2);
+    expect(fake.createExpert).toHaveBeenCalledTimes(1);
+  });
+
+  // 对话框与 hook 两层守卫串联，面板级用例删掉其中一层也仍为绿：下面两条各自单独观测一层。
+  it("对话框层：pending 为 true 时提交表单不调用 onSubmit", () => {
+    const onSubmit = vi.fn();
+    render(
+      <ExpertFormDialog
+        error={null}
+        onCancel={() => {}}
+        onSubmit={onSubmit}
+        opened={OWN}
+        pending
+        restoreFocus={() => {}}
+        skillNames={[]}
+      />,
+    );
+
+    // 以 OWN 预填：各字段都合法，去掉守卫后会越过校验调用 onSubmit。
+    const dialog = screen.getByRole("dialog", { name: "编辑专家" });
+    fireEvent.submit(dialog.querySelector("form") as HTMLFormElement);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("hook 层：createExpert 挂起时，重渲染后的新 submit 不重发", async () => {
+    const fake = fakeExperts(BUILTINS);
+    fake.createExpert.mockImplementationOnce(() => new Promise<ExpertView>(() => {}));
+    const { result } = renderHook(() => useExperts(fake.client));
+    await waitFor(() => expect(result.current.list.status).toBe("ready"));
+    act(() => result.current.openCreate());
+    const values = {
+      name: "甲",
+      description: "",
+      category: "开发",
+      tags: "",
+      prompt: "乙",
+      skills: [],
+    } as const;
+
+    await act(async () => {
+      void result.current.submit(values);
+    });
+    expect(result.current.form?.pending).toBe(true);
+    await act(async () => {
+      void result.current.submit(values);
+    });
     expect(fake.createExpert).toHaveBeenCalledTimes(1);
   });
 
