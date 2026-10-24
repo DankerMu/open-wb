@@ -71,6 +71,10 @@ function Skills({ client }: { client: ApiClient }) {
 type RowProps = {
   skill: Skill;
   enabled: boolean;
+  /**
+   * 在途：开关一律 `aria-disabled="true"`（不用 `disabled`：按下的开关立刻进入在途，`disabled` 会让焦点落到
+   * `body`）。`aria-disabled` 的开关照样分派点击与空格，拦截靠 `useSkills.toggle` 的在途守卫。
+   */
   pending: boolean;
   onToggle(enabled: boolean): void;
 };
@@ -91,9 +95,10 @@ function SkillRow({ skill, enabled, pending, onToggle }: RowProps) {
         默认启用
       </span>
       <Switch
+        aria-disabled={pending ? true : undefined}
         aria-label={`默认启用 ${skill.name}`}
         checked={enabled}
-        disabled={pending}
+        className="aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
         onCheckedChange={onToggle}
       />
     </li>
