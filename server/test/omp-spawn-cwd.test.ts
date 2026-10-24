@@ -293,7 +293,7 @@ describe("sessionRuntimeOpts", () => {
         stateDir: roots.stateDir,
         modelId: "base-model",
       },
-      { spawnGate: new SpawnGate(1), log: () => {} },
+      { spawnGate: new SpawnGate(1), log: () => {}, onSessionConfigError: () => {} },
       {
         sessionId: "s-pool",
         ownerId: OWNER,

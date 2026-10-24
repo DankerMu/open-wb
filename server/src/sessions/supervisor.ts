@@ -99,7 +99,8 @@ export interface SessionSupervisorOptions {
   /**
    * Must return synchronously. A returned thenable is an owned programming error;
    * its rejection is consumed and is not a second fault. A thrown then getter uses
-   * the existing synchronous fault path.
+   * the existing synchronous fault path. Every spawn path also hands it, raw and never retained,
+   * each session config file it could not remove (omp-runtime「子进程 spawn 契约」).
    */
   onError: (error: Error) => void;
   /**
@@ -173,6 +174,7 @@ export class SessionSupervisor {
     this.#spawn = {
       spawnGate: new SpawnGate(options.runtime.spawnConcurrency ?? availableParallelism()),
       log: options.log ?? (() => {}),
+      onSessionConfigError: options.onError, // raw, not retainFault (see `onError`)
     };
     this.#approvals = new ApprovalRegistry({
       store: this.#store,

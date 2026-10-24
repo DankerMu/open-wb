@@ -16,7 +16,11 @@ import {
   RpcChunkDecoder,
 } from "./frame.js";
 import { ensureRepoRootMarker } from "./repo-root-marker.js";
-import { type SessionCapabilities, writeSessionConfig } from "./session-config.js";
+import {
+  type SessionCapabilities,
+  type SessionConfigReport,
+  writeSessionConfig,
+} from "./session-config.js";
 import { ompSpawnEnv } from "./spawn-env.js";
 import { ensureOmpSessionDir, ensureOmpStateLayout, ompSessionDir } from "./state-layout.js";
 import {
@@ -48,6 +52,8 @@ export interface SpawnOmpOpts {
   cwd: string;
   /** The session config file's content (`session-config.ts`); the caller decides, never defaulted. */
   capabilities: SessionCapabilities;
+  /** Each session config file that cannot be removed, once; omitted → discarded. */
+  onSessionConfigError?: SessionConfigReport | undefined;
 }
 
 export type SpawnImpl = (
@@ -83,8 +89,13 @@ export async function spawnOmp(
   ensureOmpSessionDir(ensureOmpStateLayout(opts.stateDir), opts.ownerId);
   ensureRepoRootMarker(cwd);
   // Written before the child exists and removed once it is gone: `exit`, or only `close` when the
-  // spawn itself failed. The awaited write also keeps the prior async spawn boundary.
-  const config = await writeSessionConfig(opts.stateDir, opts.capabilities);
+  // spawn itself failed. `remove` acts on its first call only, so both arriving still removes and
+  // reports each file once. The awaited write also keeps the prior async spawn boundary.
+  const config = await writeSessionConfig(
+    opts.stateDir,
+    opts.capabilities,
+    opts.onSessionConfigError,
+  );
   const args = ompArgs({ ...opts, cwd, sessionDir, sessionConfigArgs: config.args });
   const env = ompSpawnEnv(opts);
   const { command, commandArgs } = ompCommand(opts.bin, opts.ompUser, args, env.TMPDIR);

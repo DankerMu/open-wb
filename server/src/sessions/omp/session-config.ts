@@ -4,7 +4,8 @@
  * layer holding exactly the session's `disabledExtensions`, and `<key>.md` — only with an expert —
  * is the file `--append-system-prompt` reads. Both are written like the managed `models.yml`
  * (`replaceFile`, 0640) into `session-config/` (2710: the omp uid opens them by exact path only) and
- * removed when the child is gone. The caller decides the content; nothing here defaults it.
+ * removed when the child is gone; a file that cannot be removed is reported once to the caller's
+ * callback (issue #1722). The caller decides the content; nothing here defaults it.
  * The content is one pure function of the capabilities (`sessionConfigContent`), shared by the write
  * and by the capability fingerprint a dispatch compares (design D8, group 6).
  */
@@ -25,9 +26,15 @@ export interface SessionConfig {
   /** `--config <yml>` and, with an expert, `--append-system-prompt <md>`: absolute paths. */
   readonly args: readonly string[];
   readonly key: string;
-  /** Deletes both files; idempotent, never throws. */
+  /** Deletes both files on its first call, later calls do nothing; never throws. */
   readonly remove: () => void;
 }
+
+/**
+ * A session config file's removal failure, once per file (omp-runtime「子进程 spawn 契约」).
+ * Synchronous; whatever it throws is swallowed so exit handling goes on.
+ */
+export type SessionConfigReport = (error: Error) => void;
 
 /**
  * One line: every element a JSON string, which is also a YAML double-quoted scalar, so `:`, `#` or
@@ -63,22 +70,36 @@ export function sessionConfigFingerprint(capabilities: SessionCapabilities): str
     .digest("hex");
 }
 
-/** Writes this spawn's files; on any write failure the ones already written are removed. */
+/**
+ * Writes this spawn's files; on any write failure the ones already written are removed. `report`
+ * receives each removal failure — of that rollback or of the returned `remove` — exactly once;
+ * omitted, failures are discarded.
+ */
 export async function writeSessionConfig(
   stateDir: string,
   capabilities: SessionCapabilities,
+  report?: SessionConfigReport,
 ): Promise<SessionConfig> {
   const dir = ompSessionConfigDir(stateDir);
   const key = randomBytes(16).toString("hex");
   const yml = join(dir, `${key}.yml`);
   const md = join(dir, `${key}.md`);
+  let done = false;
   const remove = (): void => {
+    if (done) {
+      return;
+    }
+    done = true;
     for (const path of [yml, md]) {
       try {
         rmSync(path, { force: true });
-      } catch {
-        // Only logged: the exit handling goes on; the next startup's sweep clears what is left.
-        process.emitWarning("session config file not removed", "WorkbuddySessionConfig");
+      } catch (error) {
+        // Not retried: reported to the caller's channel (in production one `session_fault` line).
+        try {
+          report?.(error instanceof Error ? error : new Error(String(error)));
+        } catch {
+          // A failing report channel must not interrupt the exit handling that called remove.
+        }
       }
     }
   };

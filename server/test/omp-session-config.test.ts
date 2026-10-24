@@ -4,6 +4,10 @@
  * write-failure and spawn-failure parts of「子进程结束后会话配置文件被删除」. Expected bytes, paths and
  * modes are the spec's, written out here. The `.md` write failure is injected at the file-system
  * boundary (`node:fs/promises` `open` of the `.md` temporary file).
+ *
+ * s1d-experts-skills-followups group 1 (issue #1722): a removal failure (`node:fs` `rmSync` of a
+ * session config path throws) reaches the caller's report callback once per file — also from the
+ * write-failure rollback — and never `process.emitWarning`.
  */
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -17,7 +21,7 @@ import { type SpawnImpl, type SpawnOmpOpts, spawnOmp } from "../src/sessions/omp
 import { writeSessionConfig } from "../src/sessions/omp/session-config.js";
 import { ensureOmpStateLayout } from "../src/sessions/omp/state-layout.js";
 import { FakeChild } from "./support/omp-rpc.js";
-import { EMPTY_CAPABILITIES } from "./support/session-config.js";
+import { EMPTY_CAPABILITIES, eacces, failSessionConfigRemovals } from "./support/session-config.js";
 
 const OWNER = "u1";
 /** An expert prompt with a newline and CJK text. */
@@ -159,6 +163,87 @@ describe("writeSessionConfig", () => {
     ).rejects.toMatchObject({ code: "EACCES" });
 
     expect(readdirSync(dir)).toEqual([]);
+  });
+});
+
+describe("writeSessionConfig removal failures (#1722)", () => {
+  const EXPERT = { disabledExtensions: ["skill:deploy"], appendSystemPrompt: PROMPT };
+
+  it("reports each failing file once with the thrown error, however often remove() is called", async () => {
+    const { state, dir } = laidOut();
+    const reports: Error[] = [];
+    const warned = vi.spyOn(process, "emitWarning");
+    const thrown = [eacces(), eacces()];
+    const config = await writeSessionConfig(state, EXPERT, (error) => {
+      reports.push(error);
+    });
+    failSessionConfigRemovals(["yml", "md"], () => thrown[reports.length]);
+
+    config.remove();
+    config.remove();
+    config.remove();
+
+    expect(reports).toHaveLength(2);
+    expect(reports[0]).toBe(thrown[0]);
+    expect(reports[1]).toBe(thrown[1]);
+    expect(warned).not.toHaveBeenCalled();
+    expect(readdirSync(dir).toSorted()).toEqual([`${config.key}.md`, `${config.key}.yml`]);
+  });
+
+  it("reports a non-Error throw as an Error and still removes the other file", async () => {
+    const { state, dir } = laidOut();
+    const reports: unknown[] = [];
+    const config = await writeSessionConfig(state, EXPERT, (error) => {
+      reports.push(error);
+    });
+    failSessionConfigRemovals(["md"], () => "EBUSY");
+
+    config.remove();
+
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toBeInstanceOf(Error);
+    expect((reports[0] as Error).message).toBe("EBUSY");
+    expect(readdirSync(dir)).toEqual([`${config.key}.md`]);
+  });
+
+  it("swallows a throwing callback and still tries the second file", async () => {
+    const { state } = laidOut();
+    let calls = 0;
+    const config = await writeSessionConfig(state, EXPERT, () => {
+      calls += 1;
+      throw new Error("report sink down");
+    });
+    failSessionConfigRemovals(["yml", "md"]);
+
+    expect(() => config.remove()).not.toThrow();
+    expect(calls).toBe(2);
+  });
+
+  it("without a callback discards the failure: no throw, no warning", async () => {
+    const { state } = laidOut();
+    const warned = vi.spyOn(process, "emitWarning");
+    const config = await writeSessionConfig(state, EXPERT);
+    failSessionConfigRemovals(["yml", "md"]);
+
+    expect(() => config.remove()).not.toThrow();
+    expect(warned).not.toHaveBeenCalled();
+  });
+
+  it("reports the rollback's failing .yml removal once and still rejects with the write error", async () => {
+    const { state, dir } = laidOut();
+    const reports: Error[] = [];
+    const removal = Object.assign(new Error("EPERM"), { code: "EPERM" });
+    failMarkdownWrites();
+    failSessionConfigRemovals(["yml"], () => removal);
+
+    await expect(
+      writeSessionConfig(state, EXPERT, (error) => {
+        reports.push(error);
+      }),
+    ).rejects.toMatchObject({ code: "EACCES" });
+
+    expect(reports).toEqual([removal]);
+    expect(readdirSync(dir).filter((name) => name.endsWith(".yml"))).toHaveLength(1);
   });
 });
 
