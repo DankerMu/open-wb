@@ -2,8 +2,9 @@
 // 的「能力读取时机」五种读取与「设置保存」豁免；session-sidebar「欢迎页场景胶囊与场景化快捷任务」的首次发送 body；
 // s1d-connectors 任务 7.2 与编排方的两处裁定）：只列启用的连接器、开关初值（欢迎态取账号缺省、会话中取能力）、
 // 会话中切换恰一次 `PUT {disabledConnectors}`、失败回滚、欢迎态动过才带 `disabledConnectors`、读取中与失败态、
-// 重开只重取失败的那一个、读取时机与 `getComposerOptions` 计数。seam：整页挂载 + 假 API（`fetch`）；共用在途守卫
-// 另以 `renderHook` 同闭包连调。期望值取自规格条文与 tasks.md 7.2 / 7.3。
+// 重开只重取失败的那一个、读取时机与 `getComposerOptions` 计数、`PUT` 在途时技能段与连接器段的双向锁、在途时
+// 切换会话后旧会话的应答（成功与 500）不落到新会话。seam：整页挂载 + 假 API（`fetch`）；共用在途守卫另以
+// `renderHook` 同闭包连调。期望值取自规格条文与 tasks.md 7.2 / 7.3。
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSessionCapabilities } from "../src/features/chat/use-session-capabilities.js";
@@ -372,6 +373,172 @@ describe("会话中的 连接器 段", () => {
     expect(result.current.pending).toBe(true);
     expect(result.current.disabledConnectors).toEqual(["ghost", "gitlab"]);
     expect(result.current.disabledSkills).toEqual([]);
+  });
+
+  it("PUT 在途的双向锁：切连接器在途时被切的开关显示新值，技能段与连接器段全部开关 aria-disabled（不是 disabled）、再点连接器或技能都不发；切技能在途时连接器开关同样不可操作；应答后恢复可切换", async () => {
+    const connectorPut = deferredResponse();
+    const skillPut = deferredResponse();
+    const puts = [connectorPut, skillPut];
+    const { fetchMock } = await mountSelected(A, {
+      [COMMANDS]: catalogue(CATALOG),
+      [CONNECTORS]: () => connectorsBody(["gitlab", "wiki"]),
+      [capsPath(A)]: (_path, init) =>
+        init?.method === "PUT"
+          ? (puts.shift()?.promise ?? capsBody(["deploy"], null, ["gitlab", "wiki"]))
+          : capsBody([]),
+    });
+    const dialog = await openSkills();
+    const section = connectorSection(dialog);
+    const gitlab = switchOf(section, "gitlab");
+    gitlab.focus();
+    fireEvent.click(gitlab);
+    await quiesce();
+
+    expect(switches(dialog)).toEqual([
+      ["deploy", "true", "true"],
+      ["weekly-report", "true", "true"],
+      ["gitlab", "false", "true"],
+      ["wiki", "true", "true"],
+    ]);
+    expect(
+      within(dialog)
+        .getAllByRole<HTMLButtonElement>("switch")
+        .map((item) => item.disabled),
+    ).toEqual([false, false, false, false]);
+    expect(document.activeElement).toBe(gitlab);
+    fireEvent.click(switchOf(section, "wiki"));
+    fireEvent.click(skillSwitchOf(dialog, "deploy"));
+    fireEvent.click(gitlab);
+    await quiesce();
+    expect(capsWrites(fetchMock)).toEqual([[capsPath(A), '{"disabledConnectors":["gitlab"]}']]);
+
+    await settleDeferredResponse(connectorPut, capsBody([], null, ["gitlab"]));
+    expect(switches(dialog)).toEqual([
+      ["deploy", "true", null],
+      ["weekly-report", "true", null],
+      ["gitlab", "false", null],
+      ["wiki", "true", null],
+    ]);
+
+    // 反向：切技能在途时连接器开关同样锁住。
+    fireEvent.click(skillSwitchOf(dialog, "deploy"));
+    await quiesce();
+    expect(switches(section)).toEqual([
+      ["gitlab", "false", "true"],
+      ["wiki", "true", "true"],
+    ]);
+    expect(skillSwitches(dialog)[0]).toEqual(["deploy", "false", "true"]);
+    fireEvent.click(switchOf(section, "wiki"));
+    fireEvent.click(gitlab);
+    await quiesce();
+    expect(capsWrites(fetchMock)).toHaveLength(2);
+    expect(capsWrites(fetchMock)[1]).toEqual([capsPath(A), '{"disabledSkills":["deploy"]}']);
+
+    await settleDeferredResponse(skillPut, capsBody(["deploy"], null, ["gitlab"]));
+    expect(switches(section)).toEqual([
+      ["gitlab", "false", null],
+      ["wiki", "true", null],
+    ]);
+    fireEvent.click(switchOf(section, "wiki"));
+    await waitFor(() => expect(switches(section)[1]).toEqual(["wiki", "false", null]));
+    expect(capsWrites(fetchMock)).toEqual([
+      [capsPath(A), '{"disabledConnectors":["gitlab"]}'],
+      [capsPath(A), '{"disabledSkills":["deploy"]}'],
+      [capsPath(A), '{"disabledConnectors":["gitlab","wiki"]}'],
+    ]);
+  });
+
+  it("切连接器在途时切到 B，A 的应答成功落地：B 段按 B 的能力、没有 alert、开关可切换，切 B 以 B 的集合为底 PUT 到 B", async () => {
+    const aPut = deferredResponse();
+    const { fetchMock, nav } = await mountSelected(A, {
+      [CONNECTORS]: () => connectorsBody(["gitlab", "wiki"]),
+      [capsPath(A)]: (_path, init) =>
+        init?.method === "PUT" ? aPut.promise : capsBody([], null, ["wiki"]),
+      [capsPath(B)]: (_path, init) =>
+        init?.method === "PUT"
+          ? capsBody([], null, ["ghost", "gitlab", "wiki"])
+          : capsBody([], null, ["ghost", "gitlab"]),
+    });
+    let dialog = await openSkills();
+    fireEvent.click(switchOf(connectorSection(dialog), "gitlab"));
+    await quiesce();
+    expect(switches(connectorSection(dialog))[0]).toEqual(["gitlab", "false", "true"]);
+    await closeSkills(dialog);
+
+    await select(nav, "会话乙", B);
+    dialog = await openSkills();
+    let section = connectorSection(dialog);
+    // 在途的锁不跟到 B。
+    expect(switches(section)).toEqual([
+      ["gitlab", "false", null],
+      ["wiki", "true", null],
+    ]);
+    await closeSkills(dialog);
+    // A 的应答若落地会是 `[]`（两项都开），与 B 的集合可分辨。
+    await settleDeferredResponse(aPut, capsBody([], null, []));
+    expect(alerts()).toEqual([]);
+
+    dialog = await openSkills();
+    section = connectorSection(dialog);
+    expect(switches(section)).toEqual([
+      ["gitlab", "false", null],
+      ["wiki", "true", null],
+    ]);
+    fireEvent.click(switchOf(section, "wiki"));
+    await waitFor(() => expect(switches(section)[1]).toEqual(["wiki", "false", null]));
+    expect(capsWrites(fetchMock)).toEqual([
+      [capsPath(A), '{"disabledConnectors":["gitlab","wiki"]}'],
+      [capsPath(B), '{"disabledConnectors":["ghost","gitlab","wiki"]}'],
+    ]);
+    expect(alerts()).toEqual([]);
+  });
+
+  it("切连接器在途时切到 B，B 也有一次在途的 PUT，A 的应答以 500 落地：没有 alert，B 的锁与新值不受影响；B 的应答照常落地", async () => {
+    const aPut = deferredResponse();
+    const bPut = deferredResponse();
+    const { fetchMock, nav } = await mountSelected(A, {
+      [CONNECTORS]: () => connectorsBody(["gitlab", "wiki"]),
+      [capsPath(A)]: (_path, init) =>
+        init?.method === "PUT" ? aPut.promise : capsBody([], null, ["wiki"]),
+      [capsPath(B)]: (_path, init) =>
+        init?.method === "PUT" ? bPut.promise : capsBody([], null, ["gitlab"]),
+    });
+    let dialog = await openSkills();
+    fireEvent.click(switchOf(connectorSection(dialog), "gitlab"));
+    await quiesce();
+    await closeSkills(dialog);
+
+    await select(nav, "会话乙", B);
+    dialog = await openSkills();
+    const section = connectorSection(dialog);
+    expect(switches(section)).toEqual([
+      ["gitlab", "false", null],
+      ["wiki", "true", null],
+    ]);
+    fireEvent.click(switchOf(section, "wiki"));
+    await quiesce();
+    const held = [
+      ["gitlab", "false", "true"],
+      ["wiki", "false", "true"],
+    ];
+    expect(switches(section)).toEqual(held);
+
+    await settleDeferredResponse(aPut, envelope(500, "内部错误"));
+    expect(alerts()).toEqual([]);
+    expect(switches(section)).toEqual(held);
+    fireEvent.click(switchOf(section, "gitlab"));
+    await quiesce();
+    expect(capsWrites(fetchMock)).toEqual([
+      [capsPath(A), '{"disabledConnectors":["gitlab","wiki"]}'],
+      [capsPath(B), '{"disabledConnectors":["gitlab","wiki"]}'],
+    ]);
+
+    await settleDeferredResponse(bPut, capsBody([], null, ["gitlab", "wiki"]));
+    expect(switches(section)).toEqual([
+      ["gitlab", "false", null],
+      ["wiki", "false", null],
+    ]);
+    expect(alerts()).toEqual([]);
   });
 });
 
