@@ -1,7 +1,9 @@
-// 输入框「能力」弹层各测试文件共用的夹具与查询（s1d-experts-skills 任务 10.2）：`chat-capability-popover.test.tsx`
-// 与 `chat-capability-popover-welcome.test.tsx`。seam 同两者：整页挂载 + 假 API（`fetch`）。
+// 输入框「能力」弹层各测试文件共用的夹具与查询（s1d-experts-skills 任务 10.2；连接器段为 s1d-connectors 任务 7.2）：
+// `chat-capability-popover.test.tsx`、`chat-capability-popover-welcome.test.tsx` 与
+// `chat-capability-popover-connectors.test.tsx`。seam 同三者：整页挂载 + 假 API（`fetch`）。
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { expect } from "vitest";
+import type { ConnectorView } from "../src/lib/api.js";
 import { openMenu } from "./chat-expert-picker-support.js";
 import { quiesce } from "./chat-page-file-changes-support.js";
 import { COMPACT, labels, panel, project, skill, TODO, type } from "./chat-page-slash-support.js";
@@ -22,8 +24,35 @@ export const LINT = project("lint", "检查");
 /** 两条内建、平台技能 `deploy`、覆盖平台技能的项目技能 `weekly-report`。 */
 export const CATALOG = [COMPACT, TODO, DEPLOY, WEEKLY_OVER];
 
-export function capsBody(disabledSkills: readonly string[], expertId: string | null = null) {
-  return jsonResponse({ expertId, disabledSkills, disabledConnectors: [] });
+export const CONNECTORS = "/api/connectors";
+export const CONNECTOR_DEFAULTS = "/api/connectors/defaults";
+const CONNECTOR_SECTION = "连接器";
+export const CONNECTOR_EMPTY = "暂无可用连接器";
+export const CONNECTOR_LOADING = "正在读取连接器…";
+export const CONNECTOR_FAILED = "连接器读取失败，关闭后重新打开可重试";
+
+export function capsBody(
+  disabledSkills: readonly string[],
+  expertId: string | null = null,
+  disabledConnectors: readonly string[] = [],
+) {
+  return jsonResponse({ expertId, disabledSkills, disabledConnectors });
+}
+
+/** 普通用户视图的 `GET /api/connectors`：只有启用的行，恰三键。 */
+export function connectorsBody(names: readonly string[]) {
+  return jsonResponse({
+    connectors: names.map((name) => ({ name, type: "stdio", description: "" })),
+  });
+}
+
+/** 管理员视图的 `GET /api/connectors`：恰十一键，含停用的行。 */
+export function adminConnectorsBody(views: readonly ConnectorView[]) {
+  return jsonResponse({ connectors: views });
+}
+
+export function connectorDefaultsBody(disabledConnectors: readonly string[]) {
+  return jsonResponse({ disabledConnectors });
 }
 
 export function skillsBody(disabledSkills: readonly string[]) {
@@ -74,6 +103,41 @@ export function rows(dialog: HTMLElement) {
 
 export function skillReads(fetchMock: FetchMock) {
   return calls(fetchMock, SKILLS).length;
+}
+
+/** `[GET /api/connectors 次数, GET /api/connectors/defaults 次数]`。 */
+export function connectorReads(fetchMock: FetchMock) {
+  return [calls(fetchMock, CONNECTORS).length, calls(fetchMock, CONNECTOR_DEFAULTS).length];
+}
+
+/** 弹层的 `连接器` 段（`role="group"`）：连接器段的行、开关与提示都在它里面取。 */
+export function connectorSection(dialog: HTMLElement) {
+  return within(dialog).getByRole("group", { name: CONNECTOR_SECTION });
+}
+
+/** 技能段的开关（连接器段之外）：技能与连接器可能同名，按名称取开关先限定到所在段。 */
+function skillSwitchElements(dialog: HTMLElement) {
+  const section = within(dialog).queryByRole("group", { name: CONNECTOR_SECTION });
+  return within(dialog)
+    .queryAllByRole<HTMLButtonElement>("switch")
+    .filter((item) => !section?.contains(item));
+}
+
+/** 技能段的开关：`[accessible name, aria-checked, aria-disabled]`，按文档顺序。 */
+export function skillSwitches(dialog: HTMLElement) {
+  return skillSwitchElements(dialog).map((item) => [
+    item.getAttribute("aria-label"),
+    item.getAttribute("aria-checked"),
+    item.getAttribute("aria-disabled"),
+  ]);
+}
+
+export function skillSwitchOf(dialog: HTMLElement, name: string) {
+  const found = skillSwitchElements(dialog).filter(
+    (item) => item.getAttribute("aria-label") === name,
+  );
+  expect(found).toHaveLength(1);
+  return found[0] as HTMLButtonElement;
 }
 
 /** 「+」菜单命令段各项的名称（`上传文件`、`选择专家…` 之后），按文档顺序；关菜单后返回。 */

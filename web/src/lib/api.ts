@@ -101,14 +101,15 @@ type ChatSessionComposerInput = {
 };
 
 /**
- * 创建 input：只发送所给的键。`expertId` / `disabledSkills`（change s1d-experts-skills）是新会话的初始能力，
- * 不在会话视图的十四键里。
+ * 创建 input：只发送所给的键。`expertId` / `disabledSkills`（change s1d-experts-skills）与 `disabledConnectors`
+ *（change s1d-connectors）是新会话的初始能力，不在会话视图的十四键里。
  */
 type ChatSessionCreateInput = ChatSessionComposerInput & {
   workspaceId?: string;
   scene?: ChatSessionScene;
   expertId?: string;
   disabledSkills?: string[];
+  disabledConnectors?: string[];
 };
 
 type ChatSessionPatch = ChatSessionComposerInput & {

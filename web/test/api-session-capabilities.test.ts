@@ -2,7 +2,7 @@
  * s1d-experts-skills 任务 9.2：`web/src/lib/api-session-capabilities.ts` 的 `getSessionCapabilities` /
  * `putSessionCapabilities`（design D7：`GET` / `PUT /api/sessions/:id/capabilities`，应答恰为
  * `{expertId: string | null, disabledSkills: string[], disabledConnectors: string[]}`——s1d-connectors 起三键，旧的两键
- * 应答被拒），以及 `createSession` input 的两个新键（session-sidebar
+ * 应答被拒），以及 `createSession` input 的三个能力键（`disabledConnectors` 由 s1d-connectors 任务 7.2 加入；session-sidebar
  * 「会话 DTO 严格解析」场景「客户端方法」）。接缝：真实的 `createApiClient` 加替身 `fetch`。期望值取自规格与
  * 服务端 `server/src/sessions/rest-capabilities.ts` 的应答形状。
  */
@@ -122,7 +122,7 @@ describe("会话能力应答严格解析", () => {
   });
 });
 
-describe("createSession 的专家与停用技能两键", () => {
+describe("createSession 的专家、停用技能与停用连接器三键", () => {
   it("sends exactly scene, expertId and disabledSkills and still parses the fourteen-key session", async () => {
     const created = {
       id: "0123456789abcdef0123456789abcdef",
@@ -150,6 +150,34 @@ describe("createSession 的专家与停用技能两键", () => {
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
           body: '{"scene":"office","expertId":"builtin:test-engineer","disabledSkills":["deploy"]}',
+        },
+      ],
+    ]);
+  });
+
+  it("sends exactly scene and disabledConnectors (s1d-connectors) and still parses the fourteen-key session", async () => {
+    const created = {
+      id: "0123456789abcdef0123456789abcdef",
+      title: null,
+      status: "idle",
+      createdAt: 1_740_000_000_000,
+      updatedAt: 1_740_000_000_000,
+      ...NULL_SESSION_META,
+      scene: "office",
+    };
+    const fetchMock = stub({ "/api/sessions": () => jsonResponse(created, 201) });
+
+    await expect(
+      createApiClient().createSession({ scene: "office", disabledConnectors: ["gitlab"] }),
+    ).resolves.toEqual(created);
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        "/api/sessions",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: '{"scene":"office","disabledConnectors":["gitlab"]}',
         },
       ],
     ]);

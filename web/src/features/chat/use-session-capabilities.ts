@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import type { ApiClient, ExpertView, SessionCapabilities } from "../../lib/api.js";
+import type {
+  ApiClient,
+  ConnectorListing,
+  ExpertView,
+  SessionCapabilities,
+} from "../../lib/api.js";
 import type { SessionCapabilitiesPatch } from "../../lib/api-session-capabilities.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 
@@ -62,14 +67,14 @@ type CapabilitiesClient = Pick<ApiClient, "getSessionCapabilities" | "putSession
 /** 一次读取或写入的记录：它属于哪个 client 与会话；只有仍是「当前那次」的记录才落地。 */
 type Flight = { client: CapabilitiesClient; sessionId: string };
 type HeldCapabilities = Flight & { capabilities: SessionCapabilities | null };
-/** 在途的 `PUT`；切技能时带切换后的停用集合（在途期间开关显示它）。 */
-type Write = Flight & { disabledSkills: string[] | null };
+/** 在途的 `PUT`；切技能 / 连接器时带切换后的停用集合（在途期间开关显示它），没带的为 null。 */
+type Write = Flight & { disabledSkills: string[] | null; disabledConnectors: string[] | null };
 type ShownError = Flight & { message: string };
 
 /**
  * 切换后的完整停用集合：`disabled` 加上（关闭，`enabled` 为 false）或去掉（打开）`name`，去重后按 JS 缺省
  * `.sort()` 排序（与服务端存储同一比较）；不在弹层列表里的名称原样保留。同 `center/skills/use-skills.ts`
- * 的 `toggled`（那份不导出）。
+ * 的 `toggled`（那份不导出）。停用连接器集合同一规则，也用它。
  */
 export function toggledSkills(
   disabled: readonly string[],
@@ -80,7 +85,7 @@ export function toggledSkills(
   return [...new Set(enabled ? rest : [...rest, name])].sort();
 }
 
-/** 已选会话的能力、换专家与切技能。 */
+/** 已选会话的能力、换专家、切技能与切连接器。 */
 export type SessionCapabilityState = {
   /** 当前会话的能力；未选会话、读取中或读取失败时为 null（读取失败视为没有专家，不提示）。 */
   capabilities: SessionCapabilities | null;
@@ -91,7 +96,12 @@ export type SessionCapabilityState = {
   read: "loading" | "failed" | "done";
   /** 弹层显示的停用集合：切技能的 `PUT` 在途时是切换后的集合，否则同 `capabilities`；未取得时为 null。 */
   disabledSkills: readonly string[] | null;
-  /** 本会话的 `PUT` 在途（换专家或切技能共用一个）：`选择专家…`、`移除专家` 与技能开关都不可操作。 */
+  /** 弹层显示的停用连接器集合：规则同 `disabledSkills`（切连接器的 `PUT` 在途时是切换后的集合）。 */
+  disabledConnectors: readonly string[] | null;
+  /**
+   * 本会话的 `PUT` 在途（换专家、切技能与切连接器共用一个）：`选择专家…`、`移除专家`、技能与连接器开关都不可
+   * 操作。
+   */
   pending: boolean;
   /** 上一次 `PUT` 的失败文案（`ApiError.message`；401 不显示）；没有时为 null。 */
   error: string | null;
@@ -102,6 +112,11 @@ export type SessionCapabilityState = {
    * `PUT` 在途或能力尚未取得（在途、失败）时什么也不做。
    */
   toggleSkill(name: string, enabled: boolean): void;
+  /**
+   * 切连接器：恰一次 `PUT …/capabilities` body `{disabledConnectors}`，为切换后的完整集合（含不在弹层列表里的
+   * 名称）；守卫同 `toggleSkill`。
+   */
+  toggleConnector(name: string, enabled: boolean): void;
 };
 
 /**
@@ -116,9 +131,9 @@ export type SessionCapabilityState = {
  * 失败），切技能不以上一次取得的集合为底。
  *
  * 同一会话的 `GET` 记录在：StrictMode 的模拟重挂再跑一次 effect，记录仍是这个会话就不再发（不写 cleanup，理由
- * 同 `useComposerOptions`）。换专家与切技能共用一个在途写，守卫是 ref：同一帧里连点两次只发一次（不可操作的
- * 状态要到下一次渲染才生效，技能开关用 `aria-disabled` 也照样分派点击）。切技能的底同样取自 ref（与 `held`
- * 同步写入）：`PUT` 应答落地到重渲染之间的一次点击以应答的集合为底，不是渲染时闭包里的旧集合。
+ * 同 `useComposerOptions`）。换专家、切技能与切连接器共用一个在途写，守卫是 ref：同一帧里连点两次只发一次
+ *（不可操作的状态要到下一次渲染才生效，开关用 `aria-disabled` 也照样分派点击）。切技能 / 连接器的底同样取自
+ * ref（与 `held` 同步写入）：`PUT` 应答落地到重渲染之间的一次点击以应答的集合为底，不是渲染时闭包里的旧集合。
  */
 export function useSessionCapabilities(
   client: CapabilitiesClient,
@@ -162,9 +177,14 @@ export function useSessionCapabilities(
     flight !== null && flight.client === client && flight.sessionId === sessionId;
   const capabilities = current(held) ? held.capabilities : null;
 
-  /** 恰一次 `PUT`；`disabledSkills` 是切技能时在途期间显示的集合。调用方已查过守卫。 */
-  const put = (id: string, patch: SessionCapabilitiesPatch, disabledSkills: string[] | null) => {
-    const write: Write = { client, sessionId: id, disabledSkills };
+  /** 恰一次 `PUT`；patch 里的停用集合即在途期间开关显示的集合。调用方已查过守卫。 */
+  const put = (id: string, patch: SessionCapabilitiesPatch) => {
+    const write: Write = {
+      client,
+      sessionId: id,
+      disabledSkills: patch.disabledSkills ?? null,
+      disabledConnectors: patch.disabledConnectors ?? null,
+    };
     writeRef.current = write;
     setWriting(write);
     setError(null);
@@ -190,15 +210,15 @@ export function useSessionCapabilities(
 
   const chooseExpert = (expertId: string | null) => {
     if (sessionId === undefined || writeRef.current !== null) return;
-    put(sessionId, { expertId }, null);
+    put(sessionId, { expertId });
   };
 
-  const toggleSkill = (name: string, enabled: boolean) => {
+  /** 切技能与切连接器共用的守卫与底：底取自 `heldRef`（最新的应答），不是渲染时闭包里的集合。 */
+  const toggle = (key: "disabledSkills" | "disabledConnectors", name: string, enabled: boolean) => {
     const latest = heldRef.current;
     if (sessionId === undefined || writeRef.current !== null || capabilities === null) return;
     if (!current(latest) || latest.capabilities === null) return;
-    const disabledSkills = toggledSkills(latest.capabilities.disabledSkills, name, enabled);
-    put(sessionId, { disabledSkills }, disabledSkills);
+    put(sessionId, { [key]: toggledSkills(latest.capabilities[key], name, enabled) });
   };
 
   const shownWrite = current(writing) ? writing : null;
@@ -208,59 +228,109 @@ export function useSessionCapabilities(
     capabilities,
     read,
     disabledSkills: shownWrite?.disabledSkills ?? capabilities?.disabledSkills ?? null,
+    disabledConnectors: shownWrite?.disabledConnectors ?? capabilities?.disabledConnectors ?? null,
     pending: shownWrite !== null,
     error: current(error) ? error.message : null,
     chooseExpert,
-    toggleSkill,
+    toggleSkill: (name, enabled) => toggle("disabledSkills", name, enabled),
+    toggleConnector: (name, enabled) => toggle("disabledConnectors", name, enabled),
   };
 }
 
-type SkillsClient = Pick<ApiClient, "listSkills">;
-/** 一次账号缺省的读取：在途、失败或已取得（`disabledSkills`）。 */
-type DefaultsRead = {
-  client: SkillsClient;
-  status: "pending" | "failed" | "done";
-  disabledSkills: string[] | null;
-};
+/** 一次按需读取：在途、失败或已取得（`value`）。 */
+type LazyRead<C, T> = { client: C; status: "pending" | "failed" | "done"; value: T | null };
 
-/** 欢迎态的账号缺省停用列表（skill-switches「输入框「能力」弹层」）。 */
-export type SkillDefaults = {
-  /** `GET /api/skills` 的 `disabledSkills`（含列表外的名称）；未取得时为 null。 */
-  disabledSkills: readonly string[] | null;
+/** 按需读取的结果（欢迎态的账号缺省、本页的连接器清单）。 */
+type Lazy<T> = {
+  /** 已取得的值；未取得时为 null。 */
+  value: T | null;
   /** 本 client 的读取：从未发出为 `idle`。 */
   status: "idle" | "pending" | "failed" | "done";
-  /** 欢迎态打开 `能力` 弹层时调用：从未取得且没有在途的读取时恰发一次 `GET /api/skills`。 */
+  /** 打开 `能力` 弹层时调用：从未取得且没有在途的读取时恰发一次。 */
   load(): void;
 };
 
 /**
- * 账号缺省停用列表，按 client 缓存（`ChatPage` 存活期间复用；换 client 回到未取得）。只在 `load()` 时读取：
- * 第一次打开弹层恰一次，在途时重开不重发，失败后下一次打开恰重取一次，成功后不再取。读取在事件里发出，不在
- * effect 里（StrictMode 的 effect 重跑会多发一次）。不计入、也不使输入框选项缓存失效。
+ * 按 client 缓存的按需读取（`ChatPage` 存活期间复用；换 client 回到未取得）。只在 `load()` 时读取：第一次打开
+ * 弹层恰一次，在途时重开不重发，失败后下一次打开恰重取一次，成功后不再取。读取在事件里发出，不在 effect 里
+ *（StrictMode 的 effect 重跑会多发一次）。不计入、也不使输入框选项缓存失效。`fetch` 须是模块级的稳定函数。
  */
-export function useSkillDefaults(client: SkillsClient): SkillDefaults {
-  const [read, setRead] = useState<DefaultsRead | null>(null);
-  const readRef = useRef<DefaultsRead | null>(null);
+function useLazyRead<C, T>(client: C, fetch: (client: C) => Promise<T>): Lazy<T> {
+  const [read, setRead] = useState<LazyRead<C, T> | null>(null);
+  const readRef = useRef<LazyRead<C, T> | null>(null);
 
   const load = useCallback(() => {
     const last = readRef.current;
     if (last?.client === client && last.status !== "failed") return;
-    const flight: DefaultsRead = { client, status: "pending", disabledSkills: null };
-    const settle = (next: DefaultsRead) => {
+    const flight: LazyRead<C, T> = { client, status: "pending", value: null };
+    const settle = (next: LazyRead<C, T>) => {
       if (readRef.current !== flight) return;
       readRef.current = next;
       setRead(next);
     };
     readRef.current = flight;
     setRead(flight);
-    client.listSkills().then(
-      (list) => settle({ client, status: "done", disabledSkills: list.disabledSkills }),
-      () => settle({ client, status: "failed", disabledSkills: null }),
+    fetch(client).then(
+      (value) => settle({ client, status: "done", value }),
+      () => settle({ client, status: "failed", value: null }),
     );
-  }, [client]);
+  }, [client, fetch]);
 
   const own = read?.client === client ? read : null;
-  return { disabledSkills: own?.disabledSkills ?? null, status: own?.status ?? "idle", load };
+  return { value: own?.value ?? null, status: own?.status ?? "idle", load };
+}
+
+type SkillsClient = Pick<ApiClient, "listSkills">;
+
+/** 欢迎态的账号缺省停用列表（skill-switches「输入框「能力」弹层」）。 */
+export type SkillDefaults = {
+  /** `GET /api/skills` 的 `disabledSkills`（含列表外的名称）；未取得时为 null。 */
+  disabledSkills: readonly string[] | null;
+  /** 本 client 的读取：从未发出为 `idle`。 */
+  status: Lazy<string[]>["status"];
+  /** 欢迎态打开 `能力` 弹层时调用：从未取得且没有在途的读取时恰发一次 `GET /api/skills`。 */
+  load(): void;
+};
+
+const readSkillDefaults = (client: SkillsClient) =>
+  client.listSkills().then((list) => list.disabledSkills);
+
+/** 账号缺省停用列表，按 client 缓存，读取规则见 `useLazyRead`。 */
+export function useSkillDefaults(client: SkillsClient): SkillDefaults {
+  const { value, status, load } = useLazyRead(client, readSkillDefaults);
+  return { disabledSkills: value, status, load };
+}
+
+type ConnectorListClient = Pick<ApiClient, "listConnectors">;
+type ConnectorDefaultsClient = Pick<ApiClient, "getConnectorDefaults">;
+
+/**
+ * 本页的连接器清单（skill-switches「输入框「能力」弹层」的 `连接器` 段）：`value` 为启用的连接器名称，按应答
+ * 次序；普通用户视图本就只含启用的行，管理员视图取 `enabled` 为真的行。欢迎态与会话中都在打开弹层时 `load()`。
+ */
+export type ConnectorList = Lazy<string[]>;
+
+/** 欢迎态的账号缺省停用连接器（`GET /api/connectors/defaults`，含列表外的名称）。 */
+export type ConnectorDefaults = Lazy<string[]>;
+
+const enabledNames = (listing: ConnectorListing) =>
+  listing.admin
+    ? listing.connectors.filter((item) => item.enabled).map((item) => item.name)
+    : listing.connectors.map((item) => item.name);
+
+const readConnectorList = (client: ConnectorListClient) =>
+  client.listConnectors().then(enabledNames);
+
+const readConnectorDefaults = (client: ConnectorDefaultsClient) => client.getConnectorDefaults();
+
+/** 连接器清单，按 client 缓存、每页一次（chat-web「能力读取时机」），读取规则见 `useLazyRead`。 */
+export function useConnectorList(client: ConnectorListClient): ConnectorList {
+  return useLazyRead(client, readConnectorList);
+}
+
+/** 账号缺省停用连接器，按 client 缓存，只在欢迎态打开弹层时读取，规则见 `useLazyRead`。 */
+export function useConnectorDefaults(client: ConnectorDefaultsClient): ConnectorDefaults {
+  return useLazyRead(client, readConnectorDefaults);
 }
 
 /**

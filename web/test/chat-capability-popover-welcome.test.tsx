@@ -152,7 +152,7 @@ describe("欢迎态的 能力 弹层", () => {
     expect(second.listSkills).toHaveBeenCalledTimes(1);
   });
 
-  it("「欢迎态带初值」：不改动发送不带 disabledSkills；关掉 deploy 后发送带完整集合；共恰一次 GET /api/skills，且没有第二次 getComposerOptions", async () => {
+  it("「欢迎态带初值」：不改动发送不带 disabledSkills、也不带 disabledConnectors；关掉 deploy 后发送带完整集合；共恰一次 GET /api/skills，且没有第二次 getComposerOptions", async () => {
     const mounted = await mountWelcome({
       [COMMANDS]: catalogue([COMPACT, TODO, DEPLOY, WEEKLY]),
       [SKILLS]: () => skillsBody(["weekly-report"]),
