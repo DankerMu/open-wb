@@ -112,6 +112,7 @@ const STARTUP_MODULES = [
   "models",
   "experts",
   "skills",
+  "connectors",
 ];
 
 export interface ServerConfig extends AgentSettings, PreviewSettings {
@@ -225,6 +226,7 @@ function writeRecord(
     | TodoRejection
     | ModelEnvIgnoredRecord
     | ModelPublishFailedRecord
+    | { event: "mcp_publish_failed" }
     | { event: "office_convert_sidecar_unavailable" },
 ): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
@@ -501,6 +503,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
         registry,
       ),
       publish: publisher.publish,
+      mcpPublish: mcp.publisher.publish,
       onPublishFailed: writeRecord,
     };
     owned.app = createApp({

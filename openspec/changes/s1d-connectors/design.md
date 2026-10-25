@@ -16,8 +16,8 @@
 - **测试夹具**：假 omp 不读 `mcp.json`、没有 MCP；仓库没有 MCP server 夹具；官方用例经 `world.runtime.command({type:"get_state"})` 读 `systemPrompt`（`omp-official-project-config.test.ts:302-307`）。
 - **兄弟 change**：`s1d-experts-skills` 提供会话配置文件（`<state>/session-config/<key>.yml`，一行 `disabledExtensions: [<JSON 字符串>…]`，`2710` / `0640`，退出即删）、会话能力端点、能力指纹、中心 `专家` / `技能` tab 与「能力」弹层；启动模块十个、归属身份二十五条（其 http-service-skeleton delta）。`s1d-model-registry` 提供 `forbidden`、管理端点与单飞发布的写法；上游地址规则是 `server/src/agent-config.ts:254` 的模块私有 `UPSTREAM_BASE_URL`，导出的只有地址与密钥合判的 `validateUpstream` 与只判密钥的 `validateUpstreamKey`（组 1 在同文件补导出只判地址的 `validateUpstreamBaseUrl`，`validateUpstream` 改为调用它、行为不变）。
 - **demo**：`connectors:[]` 与注释「内网连接器（GitLab 等）待部署后接入」（:1611-1612）；空态 `尚未接入内网连接器` 与说明（:3218-3225）；非空布局 `已连接` / `连接` / `断开`（:3208-3235，SaaS OAuth 语义，本 change 不用）。
-- **行数**（2026-10-25 组 2a 核对，两个兄弟 change 均已合入）：`app.ts` 547、`server.ts` 790（已超 780）、`server/src/sessions/supervisor.ts` 800（已到上限）、`server/src/sessions/composer-align.ts` 117、`host-overlay.ts` 241、`state-layout.ts` 149。
-- **既有用例**：agent 目录精确清单 `["host-overlay.yml","models.yml"]` 写死于 `server/test/server-startup-layout.test.ts:84,225`、`server-startup-overlay.test.ts:129,208,240`、`server-startup-order.test.ts:148`（`mcp.json` 不在状态根，状态根清单不变）；另有两处两项清单保持不改：`server-startup-layout.test.ts:329-332`（`host_overlay` 失败、`mcp_json` 未跑）与 `startup-registry.test.ts:250`（只测模型发布器——所以 mcp 写出不并进 `createStartupPublisher`）；启动模块列表写死于 `server-assembly.test.ts:156`（注册次序）与 `:457-468`、`server-startup-order.test.ts:44-52`、`server-startup-preview.test.ts:58-66`，注册次序的 spy 在 `server-assembly.test.ts:544-571` 的 `spyRegistrationOrder`；web 的 `web/test/support.ts:95,132` 对未登记路径抛 `unexpected request`。
+- **行数**（2026-10-25 组 2a 核对，两个兄弟 change 均已合入）：`app.ts` 547、`server.ts` 790（已超 780；组 2a 后 794）、`server/src/sessions/supervisor.ts` 800（已到上限）、`server/src/sessions/composer-align.ts` 117、`host-overlay.ts` 241、`state-layout.ts` 149。
+- **既有用例**：agent 目录精确清单 `["host-overlay.yml","models.yml"]` 写死于 `server/test/server-startup-layout.test.ts:84,225`、`server-startup-overlay.test.ts:129,208,240`、`server-startup-order.test.ts:148`（`mcp.json` 不在状态根，状态根清单不变）；另有两处两项清单保持不改：`server-startup-layout.test.ts:329-332`（`host_overlay` 失败、`mcp_json` 未跑）与 `startup-registry.test.ts:250`（只测模型发布器——所以 mcp 写出不并进 `createStartupPublisher`）；启动模块列表写死于六处（2026-10-25 组 3 核对）：`server-assembly.test.ts:160-170`（注册次序）与 `:475-487`、`server-startup-order.test.ts:44-55`、`server-startup-preview.test.ts:58-69`、`models-rest-restart.test.ts:30-41`（`NINE_MODULES`，断言 :105、:128、:161）、`server-startup-model-seed.test.ts:46-57`（断言 :162，标题 :158「ten modules」），注册次序的 spy 在 `server-assembly.test.ts:563-583` 的 `spyRegistrationOrder`；web 的 `web/test/support.ts:95,132` 对未登记路径抛 `unexpected request`。
 
 ## Goals / Non-Goals
 
@@ -87,7 +87,7 @@
 
 - 测试先行；每组第一个任务核对本节「Context」的行号与事实，出入先改 design 再继续。
 - 连接器的 `env` / `headers` 值不进响应、审计、日志、stderr、错误 message；夹具里的值用哨兵。
-- 产品代码单文件 ≤800 行；`server.ts` 已 790 行（超过 780），所以 `mcp_json` 阶段的发布器构造、`agentDir` 的 null 门控与阶段切换一律落在 `s1d-model-registry` 抽出的 `startup-registry.ts`（以独立函数，不并进 `createStartupPublisher`）。该函数返回 `{publisher, runStage}`：`publisher` 是 D4 的**唯一**发布器实例，与模型发布器一样在 `createApp` 之前构造（`server.ts:472` 旁）、此时 `agentDir()` 为 null，组 3 的写端点经 `createApp` 拿到的就是它（单飞因此覆盖启动与写端点）；`runStage()` 把 stage 切到 `mcp_json`、打开 `agentDir` 门控、再 `await publisher.publish()`。`server.ts` 只加这次构造、`StartupStage` 联合的一个成员与一次 `runStage()` 调用，净增 ≤6 行（≤796，给组 3 留余量）——唯一的规则，行数预算表同此。`supervisor.ts` 不放指纹代码：`mcp.json` 字节读取与并入指纹放进既有 `composer-align.ts`，`supervisor.ts` 只多传一个参数。
+- 产品代码单文件 ≤800 行；`server.ts` 已 790 行（超过 780），所以 `mcp_json` 阶段的发布器构造、`agentDir` 的 null 门控与阶段切换一律落在 `s1d-model-registry` 抽出的 `startup-registry.ts`（以独立函数，不并进 `createStartupPublisher`）。该函数返回 `{publisher, runStage}`：`publisher` 是 D4 的**唯一**发布器实例，与模型发布器一样在 `createApp` 之前构造（`server.ts:472` 旁）、此时 `agentDir()` 为 null，组 3 的写端点经 `createApp` 拿到的就是它（单飞因此覆盖启动与写端点）；`runStage()` 把 stage 切到 `mcp_json`、打开 `agentDir` 门控、再 `await publisher.publish()`。`server.ts` 只加这次构造、`StartupStage` 联合的一个成员与一次 `runStage()` 调用，净增 ≤6 行（≤796，给组 3 留余量；组 3 再加 `STARTUP_MODULES` 一项、assembly 的 `mcpPublish` 一行与 `writeRecord` 联合一项，≤798）——唯一的规则，行数预算表同此。`supervisor.ts` 不放指纹代码：`mcp.json` 字节读取与并入指纹放进既有 `composer-align.ts`，`supervisor.ts` 只多传一个参数。
 - 不新增 `.css`；规格 delta 只改列出的 requirement；以兄弟 change 的 delta 为底的块在其 MODIFIED 文本上再改。
 
 ## Risks / Trade-offs
@@ -100,6 +100,7 @@
 - **[连接器任一变化重启全部存活会话的下一条]** 与模型注册表的「新模型先重启」同代价；登记操作稀少。
 - **[`mcp:<名>` 被 omp 称为 legacy]** 18.12.3 仍支持 → 官方用例钉住，升级时复核。
 - **[值恰为只在项目 `.env` 里定义的变量名]** `resolveConfigValue` 会替换 → 只拦 `OMP_CHILD_ENV_NAMES`；要利用它得知道管理员登记的字面值，`.env` 由会话属主控制、只影响其本人会话，接受为残余；`OMP_USER` 模式下 PAM 从主机配置补进来的名称（开放集合）同理不拦，替换出来的是部署者自己的主机配置、只有管理员能登记取值，接受为残余。
+- **[`env` 上限与 body limit]** D3 允许 32 键 × 4096 码点，上限附近的合法 body 超过 `POST` / `PUT /api/connectors` 的 64 KiB body limit，得 content-parser 400 而非写入——已知限制，不改上限（登记稀少、凭证远小于此）。
 - **[MCP 发现是后台的]** 官方用例轮询 `get_state.systemPrompt`，不在 `ready` 后立即断言。
 
 ## Migration Plan
@@ -149,7 +150,7 @@
 
 | 文件 | 现状 | 预计 | 说明 |
 |---|---|---|---|
-| `server/src/server.ts` | 790 | ≤796 | 阶段 `mcp_json` 的实体在 `startup-registry.ts`，`server.ts` 只加联合成员与调用（「通用纪律」同一规则） |
+| `server/src/server.ts` | 794（组 2a 后） | ≤798 | 阶段 `mcp_json` 的实体在 `startup-registry.ts`，`server.ts` 只加联合成员与调用（「通用纪律」同一规则） |
 | `server/src/sessions/supervisor.ts` | 800（2026-10-25；组 5 第一个任务重定预算） | 不超过兄弟之后 +3 | 只多传 `mcp.json` 字节一个参数；指纹代码进 `composer-align.ts`，保住 ≤800 |
 | `server/src/sessions/composer-align.ts` | 117 | ~150 | `mcp.json` 字节读取与并入指纹 |
 | `server/src/app.ts` | 547 | ~575 | 注册 `connectors` |

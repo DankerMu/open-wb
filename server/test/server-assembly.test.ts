@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as accounts from "../src/accounts/index.js";
 import { type CreateAppOptions, createApp } from "../src/app.js";
 import * as auth from "../src/auth/index.js";
+import * as connectors from "../src/connectors/rest.js";
 import { openDb } from "../src/core/db/index.js";
 import * as experts from "../src/experts/rest.js";
 import * as http from "../src/http/index.js";
@@ -167,6 +168,7 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
       "models",
       "experts",
       "skills",
+      "connectors",
     ]);
     expect(rowStatus(db, "chat_sessions", STALE_SESSION_ID)).toBe("failed");
     expect(runningCount(db, "chat_messages")).toBe(0);
@@ -483,6 +485,7 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
         "models",
         "experts",
         "skills",
+        "connectors",
       ]);
       expect(started.modules).toEqual(["core/db", ...order]);
       expect(existsSync(join(scratchRoot, "sandbox", "u1"))).toBe(false);
@@ -579,6 +582,7 @@ function spyRegistrationOrder(): string[] {
   once("models", models, "registerModels");
   once("experts", experts, "registerExperts");
   once("skills", skills, "registerSkills");
+  once("connectors", connectors, "registerConnectors");
   return order;
 }
 

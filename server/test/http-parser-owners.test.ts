@@ -25,8 +25,8 @@ const CTP_CODES = [
 
 type CtpCode = (typeof CTP_CODES)[number];
 
-/** spec 的二十五条 method + matched route 归属身份（二十条 POST + 一条 PATCH + 四条 PUT）。 */
-const TWENTY_FIVE_OWNER_IDENTITIES = [
+/** spec 的二十七条 method + matched route 归属身份（二十一条 POST + 一条 PATCH + 五条 PUT）。 */
+const TWENTY_SEVEN_OWNER_IDENTITIES = [
   ["POST", "/api/auth/login"],
   ["POST", "/api/auth/logout"],
   ["POST", "/api/sessions/:id/prompt"],
@@ -52,6 +52,8 @@ const TWENTY_FIVE_OWNER_IDENTITIES = [
   ["PUT", "/api/experts"],
   ["PUT", "/api/skills/defaults"],
   ["PUT", "/api/sessions/:id/capabilities"],
+  ["POST", "/api/connectors"],
+  ["PUT", "/api/connectors"],
 ] as const;
 
 /** spec 码表的十八码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
@@ -158,14 +160,14 @@ function crossWithCodes<T extends readonly unknown[]>(rows: readonly T[]) {
   return rows.flatMap((row) => CTP_CODES.map((code) => [...row, code] as const));
 }
 
-describe("证据 1：二十五条身份 × 四个真实 CTP 错误 -> 400", () => {
-  it("身份集恰二十五条且互不重复", () => {
-    const keys = TWENTY_FIVE_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
-    expect(keys).toHaveLength(25);
-    expect(new Set(keys).size).toBe(25);
+describe("证据 1：二十七条身份 × 四个真实 CTP 错误 -> 400", () => {
+  it("身份集恰二十七条且互不重复", () => {
+    const keys = TWENTY_SEVEN_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
+    expect(keys).toHaveLength(27);
+    expect(new Set(keys).size).toBe(27);
   });
 
-  it.each(crossWithCodes(TWENTY_FIVE_OWNER_IDENTITIES))(
+  it.each(crossWithCodes(TWENTY_SEVEN_OWNER_IDENTITIES))(
     "%s %s 上真实 %s -> 400 bad_request 且无 raw 细节",
     (method, url, code) => {
       const error = genuineCtpError(code);
@@ -174,14 +176,18 @@ describe("证据 1：二十五条身份 × 四个真实 CTP 错误 -> 400", () =
   );
 });
 
-describe("证据 2（守卫）：DELETE /api/sessions/:id、DELETE /api/models 与 DELETE /api/experts 不被覆盖", () => {
-  it.each(crossWithCodes([["/api/sessions/:id"], ["/api/models"], ["/api/experts"]] as const))(
-    "DELETE %s 上真实 %s -> generic 500",
-    (url, code) => {
-      const error = genuineCtpError(code);
-      expectGeneric500(mapThrough(error, requestShaped("DELETE", url)), error);
-    },
-  );
+describe("证据 2（守卫）：DELETE /api/sessions/:id、/api/models、/api/experts 与 /api/connectors 不被覆盖", () => {
+  it.each(
+    crossWithCodes([
+      ["/api/sessions/:id"],
+      ["/api/models"],
+      ["/api/experts"],
+      ["/api/connectors"],
+    ] as const),
+  )("DELETE %s 上真实 %s -> generic 500", (url, code) => {
+    const error = genuineCtpError(code);
+    expectGeneric500(mapThrough(error, requestShaped("DELETE", url)), error);
+  });
 });
 
 describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
@@ -210,6 +216,8 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["POST", "/api/sessions/:id/capabilities"],
     ["PATCH", "/api/sessions/:id/capabilities"],
     ["DELETE", "/api/sessions/:id/capabilities"],
+    ["GET", "/api/connectors"],
+    ["PATCH", "/api/connectors"],
   ] as const;
 
   const LOOKALIKES = [
