@@ -58,24 +58,30 @@ const settle = () => new Promise<void>((resolve) => setImmediate(resolve));
 interface Deferred {
   promise: Promise<void>;
   resolve: () => void;
+  reject: (error: Error) => void;
 }
 
 function deferred(): Deferred {
   let resolve!: () => void;
-  const promise = new Promise<void>((res) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<void>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function track(promise: Promise<void>) {
-  const state: { status: "pending" | "resolved" | "rejected" } = { status: "pending" };
+  const state: { status: "pending" | "resolved" | "rejected"; error?: unknown } = {
+    status: "pending",
+  };
   promise.then(
     () => {
       state.status = "resolved";
     },
-    () => {
+    (error: unknown) => {
       state.status = "rejected";
+      state.error = error;
     },
   );
   return state;
@@ -335,7 +341,7 @@ describe("createMcpPublisher", () => {
     expect(calls).toHaveLength(3);
   });
 
-  it("a failed write rejects its callers only; the next publish writes again", async () => {
+  it("a failed write rejects; the single flight is reset and the next publish writes again", async () => {
     const connectors = store();
     const agentDir = tempAgentDir();
     mkdirSync(join(agentDir, "mcp.json"));
@@ -345,5 +351,39 @@ describe("createMcpPublisher", () => {
     rmSync(join(agentDir, "mcp.json"), { recursive: true });
     await publisher.publish();
     expect(readFileSync(join(agentDir, "mcp.json"), "utf8")).toBe(EMPTY);
+  });
+
+  it("only callers coalesced on the failed round are rejected; the queued round still runs with the latest table", async () => {
+    const connectors = store();
+    const calls: string[][] = [];
+    const round1 = deferred();
+    const publisher = createMcpPublisher({
+      agentDir: () => "/srv/wb/omp/home/.omp/agent",
+      store: connectors,
+      write: async (_dir, entries) => {
+        calls.push(entries.map((entry) => entry.name));
+        if (calls.length === 1) {
+          await round1.promise;
+        }
+      },
+    });
+
+    connectors.create({ name: "a", type: "stdio", command: "/bin/a" });
+    const first = track(publisher.publish());
+    await settle();
+    connectors.create({ name: "b", type: "stdio", command: "/bin/b" });
+    const second = track(publisher.publish());
+    const boom = new Error("mcp.json write failed");
+    round1.reject(boom);
+    await settle();
+
+    expect(first).toStrictEqual({ status: "rejected", error: boom });
+    expect(second.status).toBe("resolved");
+    expect(calls).toStrictEqual([["a"], ["a", "b"]]);
+
+    // The queued round is over too: one more publish writes again.
+    connectors.create({ name: "c", type: "stdio", command: "/bin/c" });
+    await publisher.publish();
+    expect(calls).toStrictEqual([["a"], ["a", "b"], ["a", "b", "c"]]);
   });
 });
