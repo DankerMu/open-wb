@@ -12,6 +12,8 @@
  *
  * 凭证：`env` / `headers` 的值只进这个文件（omp uid 可读，ADR-0015），不进本模块抛出的任何 message。
  */
+import { chmod } from "node:fs/promises";
+import { join } from "node:path";
 import { replaceFile } from "../core/replace-file.js";
 
 type Entries = Readonly<Record<string, string>>;
@@ -42,6 +44,8 @@ export async function writeManagedMcpJson(
   entries: readonly McpEntry[],
 ): Promise<void> {
   await replaceFile(agentDir, "mcp.json", mcpJsonText(entries));
+  // 负对照（#1670，不合入）：以 0600 写出，omp uid 读不到。
+  await chmod(join(agentDir, "mcp.json"), 0o600);
 }
 
 interface PublisherOptions {
