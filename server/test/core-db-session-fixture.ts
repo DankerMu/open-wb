@@ -44,8 +44,8 @@ export const W_U2 = "22222222222222222222222222222222";
 export const W_MISSING = "99999999999999999999999999999999";
 
 // [name, type, notnull, dflt_value, pk] of the current schema: 032/033/034 columns, the 035 tail,
-// then the 036 `todo`, 037 `archived_at`, 040 composer-setting and 047 capability tails on chat_sessions
-// and the 042 `attachments`, 043 error and 044 `thinking_ms` tails on chat_messages and the 045
+// then the 036 `todo`, 037 `archived_at`, 040 composer-setting, 047 capability and 048 connector tails on
+// chat_sessions and the 042 `attachments`, 043 error and 044 `thinking_ms` tails on chat_messages and the 045
 // `body_offset` tail on chat_steps.
 type ColumnInfo = [string, string, number, string | null, number];
 const CHAT_TABLE_INFO = {
@@ -69,6 +69,7 @@ const CHAT_TABLE_INFO = {
     ["reasoning_effort", "TEXT", 0, null, 0],
     ["expert_id", "TEXT", 0, null, 0],
     ["disabled_skills", "TEXT", 1, "'[]'", 0],
+    ["disabled_connectors", "TEXT", 1, "'[]'", 0],
   ],
   chat_messages: [
     ["id", "INTEGER", 0, null, 1],
@@ -104,7 +105,7 @@ const SESSION_FOREIGN_KEYS = [
   { from: "workspace_id", table: "workspaces", to: "id", on_delete: "SET NULL" },
 ];
 
-/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three, 047 two; on messages 042 one more, 043 three, 044 one; on steps 045 one more). */
+/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three, 047 two, 048 one; on messages 042 one more, 043 three, 044 one; on steps 045 one more). */
 function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
   return info.slice(0, info.length - newColumns).map(([name]) => name);
 }
@@ -113,7 +114,7 @@ function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
 export const PRIOR_COLUMNS = {
   accounts: ["id", "account", "role", "disabled", "password_hash"],
   workspaces: ["id", "owner_id", "name", "dir", "created_at"],
-  chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 10),
+  chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 11),
   chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 6),
   chat_steps: namesBefore035(CHAT_TABLE_INFO.chat_steps, 2),
   chat_approvals: [
@@ -307,7 +308,7 @@ export function preservedState(
     indexes: perTable((table) => tableIndexKeys(db, table)),
     indexSql: db
       .prepare(
-        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs','chat_thinking_segments','models','experts','account_skill_prefs') ORDER BY name",
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs','chat_thinking_segments','models','experts','account_skill_prefs','connectors','account_connector_prefs') ORDER BY name",
       )
       .all(),
     sequences: chatSequences(db),

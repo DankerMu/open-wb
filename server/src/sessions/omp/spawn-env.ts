@@ -13,6 +13,35 @@ import { ompAgentDir, ompHome, ompHostOverlayPath, ompXdgHome } from "./state-la
 export const SUDO_PRESERVE_ENV =
   "--preserve-env=PATH,LANG,TMPDIR,HOME,XDG_DATA_HOME,XDG_STATE_HOME,XDG_CACHE_HOME,PI_CODING_AGENT_DIR,PI_CONFIG_FILES,PI_CONFIG_DIR,OMP_PROFILE,PI_PROFILE,WORKBUDDY_MODEL_TOKEN,PI_BROWSER_RELAY,PI_BROWSER_CMUX,PUPPETEER_PROXY,PUPPETEER_PROXY_IGNORE_CERT_ERRORS,OTEL_SDK_DISABLED,no_proxy,NO_PROXY,PUPPETEER_EXECUTABLE_PATH";
 
+/**
+ * Every environment name the host knows the omp process has (s1d-connectors D3): omp replaces a
+ * connector `env` / `headers` value that is exactly one of these with that variable's value, so the
+ * connector rules refuse them. Declared, never derived from `ompSpawnEnv`: its every key (with or
+ * without `browserBin`, `LANG`, `TMPDIR`) is in `SUDO_PRESERVE_ENV`, and a test holds both to this set.
+ * Plus the eleven names sudo injects under `OMP_USER`, and the six omp sets itself (`BUN_BE_BUN` only
+ * for its own children). Case-sensitive. Names PAM or a `.env` adds are an open set, not here.
+ */
+export const OMP_CHILD_ENV_NAMES: ReadonlySet<string> = new Set([
+  ...SUDO_PRESERVE_ENV.slice("--preserve-env=".length).split(","),
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "MAIL",
+  "TERM",
+  "SUDO_USER",
+  "SUDO_UID",
+  "SUDO_GID",
+  "SUDO_COMMAND",
+  "SUDO_HOME",
+  "SUDO_TTY",
+  "PI_NO_PTY",
+  "PI_NO_TITLE",
+  "PI_NOTIFICATIONS",
+  "__PI_NATIVE_VARIANT_CACHE",
+  "EXA_API_KEY",
+  "BUN_BE_BUN",
+]);
+
 export function ompSpawnEnv(opts: {
   stateDir: string;
   token: string;
