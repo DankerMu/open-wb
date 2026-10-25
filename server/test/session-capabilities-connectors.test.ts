@@ -5,13 +5,14 @@
  * account default, else `[]`; 400s before any write), the third key of `GET` / `PUT
  * /api/sessions/:id/capabilities` (skill-switches「停用连接器」), connectors「缺省决定新会话」, the spawn's
  * session config `disabledExtensions` as `skill:` ∪ `mcp:` (skill-switches「停用技能对 omp 生效」), and the
- * fork copy of `disabled_connectors` (session-metadata「继承专家与停用技能」). Members: zhangsan (the owner)
+ * fork copy of the three capability columns with the temporary process's expert prompt file and
+ * `disabledExtensions` (session-metadata「继承专家与停用技能」). Members: zhangsan (the owner)
  * and zhaoliu. Expected values are spec literals and the database rows themselves.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import type { LightMyRequestResponse } from "fastify";
 import { describe, expect, it } from "vitest";
-import { REAL, settle } from "./session-approval-helpers.js";
+import { flagValue, REAL, settle } from "./session-approval-helpers.js";
 import { expectEnvelope } from "./session-bodyless-rest-helpers.js";
 import { BAD_REQUEST_ENVELOPE } from "./session-db-helpers.js";
 import { forkAt, forkWorlds, openForkWorld, seedTwoTurns } from "./session-fork-helpers.js";
@@ -130,16 +131,22 @@ function connectorsColumn(world: World, session: string): unknown {
     .get(session)?.disabled_connectors;
 }
 
-/** Wraps spawnImpl to read each spawn's session yml (the second `--config`) at spawn time. */
-function recordYml(world: World): string[] {
+/**
+ * Wraps spawnImpl to read, at spawn time, each spawn's session yml (the second `--config`) into
+ * `ymls` and its `--append-system-prompt` file's text (null without the flag) into `mds`.
+ */
+function recordSpawns(world: World): { ymls: string[]; mds: Array<string | null> } {
   const ymls: string[] = [];
+  const mds: Array<string | null> = [];
   const inner = world.rt.runtime.spawnImpl;
   world.rt.runtime.spawnImpl = (command, args, options) => {
     const configs = args.flatMap((arg, index) => (arg === "--config" ? [args[index + 1]] : []));
     ymls.push(readFileSync(String(configs[1]), "utf8"));
+    const md = flagValue(args, "--append-system-prompt");
+    mds.push(md === undefined ? null : readFileSync(md, "utf8"));
     return inner(command, args, options);
   };
-  return ymls;
+  return { ymls, mds };
 }
 
 async function promptOn(world: World, session: string): Promise<void> {
@@ -253,7 +260,7 @@ describe("spawn 的 disabledExtensions：skill: 与 mcp: 的并集 (skill-switch
     REAL,
     async () => {
       const world = worlds.track(await openForkWorld());
-      const ymls = recordYml(world);
+      const { ymls } = recordSpawns(world);
       await putConnectorDefaults(world, ["gitlab"]);
       const fresh = await created(world, { disabledSkills: ["deploy"] });
       expect(await capsOf(world, fresh)).toEqual({
@@ -270,29 +277,51 @@ describe("spawn 的 disabledExtensions：skill: 与 mcp: 的并集 (skill-switch
   );
 });
 
+/** The three capability columns of a session row, as stored. */
+function capabilityColumns(world: World, session: string): unknown {
+  return {
+    ...world.fixture.db
+      .prepare(
+        "SELECT expert_id, disabled_skills, disabled_connectors FROM chat_sessions WHERE id = ?",
+      )
+      .get(session),
+  };
+}
+
 describe("fork 复制 disabled_connectors (session-metadata「继承专家与停用技能」)", () => {
   it(
-    "源会话停用 deploy 与 gitlab：新会话列与能力相同，临时进程 disabledExtensions 为 [mcp:gitlab, skill:deploy]；账号缺省不变",
+    "源会话为自建专家 E、停用 deploy 与 gitlab：新会话三列与能力相同，临时进程带 E 的提示词文件、disabledExtensions 为 [mcp:gitlab, skill:deploy]；账号缺省不变",
     REAL,
     async () => {
       const world = worlds.track(await openForkWorld());
-      const ymls = recordYml(world);
+      const spawns = recordSpawns(world);
+      // E declares no skill: the union rule would otherwise drop `deploy` from the disabled set.
+      const e = await createExpert(world, []);
+      capsAnswer(await putCaps(world, { expertId: e }));
       capsAnswer(
         await putCaps(world, { disabledSkills: ["deploy"], disabledConnectors: ["gitlab"] }),
       );
+      expect(capabilityColumns(world, world.session)).toEqual({
+        expert_id: e,
+        disabled_skills: '["deploy"]',
+        disabled_connectors: '["gitlab"]',
+      });
       const seeded = seedTwoTurns(world);
       const before = accountState(world);
 
       const forked = await forkAt(world, seeded.u2);
 
       const fresh = forked.session.id;
-      expect(connectorsColumn(world, fresh)).toBe('["gitlab"]');
+      expect(capabilityColumns(world, fresh)).toEqual(capabilityColumns(world, world.session));
       expect(await capsOf(world, fresh)).toEqual({
-        expertId: null,
+        expertId: e,
         disabledSkills: ["deploy"],
         disabledConnectors: ["gitlab"],
       });
-      expect(ymls).toEqual(['disabledExtensions: ["mcp:gitlab", "skill:deploy"]\n']);
+      expect(spawns).toEqual({
+        ymls: ['disabledExtensions: ["mcp:gitlab", "skill:deploy"]\n'],
+        mds: ["你是部署专家。"],
+      });
       expect(accountState(world)).toEqual(before);
       expect(world.errors).toEqual([]);
     },

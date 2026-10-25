@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { type ApprovalMode, type Effort, effectiveComposer } from "../model-catalog.js";
+import { AgentUnavailableError } from "./omp/process.js";
 import { type SessionCapabilities, sessionConfigFingerprint } from "./omp/session-config.js";
 import { ompAgentDir } from "./omp/state-layout.js";
 import { commandOn, type Slot } from "./pool.js";
@@ -68,16 +69,21 @@ export function effectiveCapabilities(expertPrompt: ExpertPrompt): CapabilitiesO
 
 /**
  * The managed `<agentDir>/mcp.json` as it is now (s1d-connectors D8): a missing file is `""`; any
- * other read failure is thrown, so the dispatch fails rather than compare against a guess.
+ * other read failure (EACCES, EISDIR, EIO…) is a step-1 failure, thrown as `AgentUnavailableError`
+ * with the read error as its cause, so the dispatch answers `agent_unavailable` rather than compare
+ * against a guess.
  */
 function managedMcpJson(stateDir: string): string {
   try {
     return readFileSync(join(ompAgentDir(stateDir), "mcp.json"), "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
       return "";
     }
-    throw error;
+    const unavailable = new AgentUnavailableError(`mcp.json unreadable: ${String(code)}`);
+    unavailable.cause = error;
+    throw unavailable;
   }
 }
 
@@ -85,7 +91,9 @@ function managedMcpJson(stateDir: string): string {
  * Everything one dispatch aligns a process with, computed once per dispatch (never cached) from its
  * one `store.runtimeState` read: the effective composer values, the effective capabilities and
  * their fingerprint over the managed `mcp.json` read now, under `runtime.stateDir`. A change of
- * that file between this read and the spawn's costs at most one more restart later.
+ * that file between this read and the spawn's usually costs one more restart later; an A→B→A pair
+ * of writes within one admission wait leaves the process (spawned under B, fingerprinted A) one
+ * restart short until the next `mcp.json` change — an accepted residual (s1d-connectors D8).
  */
 export function alignmentOf(
   session: { ownerId: string; composer: RawComposer; capabilities: RawCapabilities },

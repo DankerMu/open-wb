@@ -8,9 +8,9 @@
  * The capability side: a session's effective capabilities (experts「专家提示词注入」: the expert's
  * prompt only while its owner can see it; every disabled skill prefixed `skill:`) and their
  * fingerprint, the SHA-256 of the two session config files' content (`<key>` not in it) and, since
- * s1d-connectors D8, of the managed `mcp.json` bytes `alignmentOf` reads (missing → `""`; disabled
- * connectors prefixed `mcp:`). Expected values are spec literals and the bytes `writeSessionConfig`
- * puts on disk, read back.
+ * s1d-connectors D8, of the managed `mcp.json` bytes `alignmentOf` reads (missing → `""`, another
+ * read failure `AgentUnavailableError`; disabled connectors prefixed `mcp:`). Expected values are
+ * spec literals and the bytes `writeSessionConfig` puts on disk, read back.
  */
 import { createHash } from "node:crypto";
 import {
@@ -26,6 +26,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { alignmentOf, effectiveCapabilities, reusable } from "../src/sessions/composer-align.js";
+import { AgentUnavailableError } from "../src/sessions/omp/process.js";
 import {
   type SessionCapabilities,
   sessionConfigContent,
@@ -248,11 +249,18 @@ describe("alignmentOf reads the managed mcp.json at dispatch (s1d-connectors D8)
     expect(present.fingerprint).not.toBe(missing.fingerprint);
   });
 
-  it("a read failure other than ENOENT is thrown, not taken as empty", () => {
+  it("a read failure other than ENOENT is an AgentUnavailableError (step 1 fails), not taken as empty", () => {
     const state = stateDir();
     mkdirSync(join(ompAgentDir(state), "mcp.json"));
-    expect(() => alignmentOf(session, TEST_COMPOSER, capabilitiesOf, { stateDir: state })).toThrow(
-      /EISDIR/u,
-    );
+    let thrown: unknown;
+    try {
+      alignmentOf(session, TEST_COMPOSER, capabilitiesOf, { stateDir: state });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AgentUnavailableError);
+    expect((thrown as AgentUnavailableError).code).toBe("agent_unavailable");
+    expect((thrown as AgentUnavailableError).message).toMatch(/EISDIR/u);
+    expect(((thrown as Error).cause as NodeJS.ErrnoException).code).toBe("EISDIR");
   });
 });

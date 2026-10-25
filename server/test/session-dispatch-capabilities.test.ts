@@ -6,11 +6,13 @@
  * 「会话能力变化则在下一条重启」「能力未变则复用」「在途回合中修改能力不打断」「删除使用中的专家」, the
  * regenerate alignment, experts「专家提示词注入」, and the temporary processes of fork
  * (session-metadata「继承专家与停用技能」) and undo (omp-runtime: a temporary process takes its
- * session's effective capabilities). And s1d-connectors group 5 (D8): the fingerprint takes in the
- * managed `mcp.json` bytes — a connector registered, edited or disabled restarts the live process
- * before the next prompt, a probe or an account-default write does not, and a change during an
- * in-flight turn leaves it alone (「登记连接器使存活会话在下一条前重启」「连接器未变则复用」
- * 「在途回合中修改连接器不打断」), over the real `mcp.json` publisher wired as `assembly.mcpPublish`.
+ * session's effective capabilities). And s1d-connectors group 5 (D8): a session's disabled
+ * connectors (`mcp:<name>`) restart its live process at the next prompt; the fingerprint takes in the
+ * managed `mcp.json` bytes — a connector registered, edited, disabled or deleted restarts the live
+ * process before the next prompt, a probe or an account-default write does not, and a change during
+ * an in-flight turn leaves it alone (「登记连接器使存活会话在下一条前重启」「连接器未变则复用」
+ * 「在途回合中修改连接器不打断」), over the real `mcp.json` publisher wired as `assembly.mcpPublish`;
+ * an unreadable `mcp.json` (not missing) is a step-1 failure, 502 `agent_unavailable`.
  *
  * Every world is the production createApp → registerSessions assembly over real fake-omp children
  * and a real in-memory SQLite, driven over REST (`/api/experts`, `/api/sessions/:id/capabilities`,
@@ -20,7 +22,7 @@
  * `stream_epoch` and SQLite rows; never supervisor internals. Expected prompts are the experts'
  * own, read over `GET /api/experts`; the yml lines are the spec's literals.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { LightMyRequestResponse } from "fastify";
@@ -40,8 +42,8 @@ import {
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { processOf } from "./session-composer-helpers.js";
 import { forkAt, forkWorlds, openForkWorld, seedTwoTurns } from "./session-fork-helpers.js";
-import { answered, sendPrompt } from "./session-regenerate-helpers.js";
-import { cookieFor } from "./session-rest-helpers.js";
+import { answered, sendPrompt, snapshot } from "./session-regenerate-helpers.js";
+import { AGENT_UNAVAILABLE_ENVELOPE, cookieFor } from "./session-rest-helpers.js";
 import { requiredCall, resumePath, waitForTurn } from "./session-supervisor-helpers.js";
 import { isLive } from "./session-supervisor-pool-helpers.js";
 import { postUndo, seedUndoable, undone } from "./session-undo-helpers.js";
@@ -315,6 +317,39 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
       expect(fresh.args).not.toContain("--append-system-prompt");
       expect(fresh.listing).not.toContain(`${fresh.key}.md`);
       expect([fresh.yml, fresh.md]).toEqual([NO_SKILLS, null]);
+      expect(world.errors).toEqual([]);
+    },
+  );
+
+  it(
+    "停用连接器在下一条重启：PUT disabledConnectors [gitlab] 不动进程；下一条重启且 disabledExtensions 含 mcp:gitlab，再一条复用",
+    REAL,
+    async () => {
+      const world = worlds.track(await openForkWorld());
+      const records = recordConfigs(world);
+      await answered(world);
+      const child = spawnedAt(world, 0);
+      const frames = child.stdin.length;
+      const before = processOf(world);
+
+      await putCaps(
+        world,
+        { disabledConnectors: ["gitlab"] },
+        { expertId: null, disabledSkills: [], disabledConnectors: ["gitlab"] },
+      );
+      await settle();
+      expect(processOf(world)).toEqual(before);
+      expect([child.stdin.length, isLive(child.child)]).toEqual([frames, true]);
+
+      await answered(world);
+      const fresh = expectRestart(world, records, before);
+      expect([fresh.yml, fresh.md]).toEqual(['disabledExtensions: ["mcp:gitlab"]\n', null]);
+
+      const settled = processOf(world);
+      await answered(world);
+      expect(processOf(world)).toEqual(settled);
+      expect(isLive(spawnedAt(world, settled.spawns - 1).child)).toBe(true);
+      expect(records).toHaveLength(settled.spawns);
       expect(world.errors).toEqual([]);
     },
   );
@@ -607,6 +642,81 @@ describe("派发前按会话设置对齐进程：连接器 (chat-sessions, s1d-c
       } finally {
         await world.fixture.close();
       }
+    },
+  );
+
+  it(
+    "删除启用的连接器使存活会话在下一条前重启，spawn 时 mcp.json 为空表；再一条复用",
+    REAL,
+    async () => {
+      const { world, admin } = await openConnectorWorld();
+      try {
+        world.rt.setScenario("branch");
+        const records = recordConfigs(world);
+        await connectorWrite(world, admin, "POST", {
+          name: "gitlab",
+          type: "stdio",
+          command: COMMAND,
+        });
+        await answered(world);
+        expect(configAt(records, 0).mcp).toBe(gitlabMcp(COMMAND));
+        const child = spawnedAt(world, 0);
+        const frames = child.stdin.length;
+        const before = processOf(world);
+
+        const deleted = await call(
+          world,
+          "DELETE",
+          "/api/connectors?name=gitlab",
+          undefined,
+          admin,
+        );
+        expect(deleted.statusCode).toBe(204);
+        expect(mcpNow(world)).toBe(EMPTY_MCP);
+        await settle();
+        expect(processOf(world)).toEqual(before);
+        expect([child.stdin.length, isLive(child.child)]).toEqual([frames, true]);
+
+        await answered(world);
+        expect(expectRestart(world, records, before).mcp).toBe(EMPTY_MCP);
+
+        const settled = processOf(world);
+        await answered(world);
+        expect(processOf(world)).toEqual(settled);
+        expect(records).toHaveLength(settled.spawns);
+        expect(world.errors).toEqual([]);
+      } finally {
+        await world.fixture.close();
+      }
+    },
+  );
+
+  it(
+    "mcp.json 读取失败（目录，EISDIR）属第 1 步失败：502 agent_unavailable，受理对被补偿，存活进程不收帧不退出；复原后 202 且复用",
+    REAL,
+    async () => {
+      const world = worlds.track(await openForkWorld());
+      const mcpPath = join(ompAgentDir(world.rt.runtime.stateDir), "mcp.json");
+      await answered(world);
+      const child = spawnedAt(world, 0);
+      const frames = child.stdin.length;
+      const rows = snapshot(world.fixture.db, world.session, true);
+      const before = processOf(world);
+      mkdirSync(mcpPath);
+
+      const response = await sendPrompt(world, "while mcp.json is unreadable");
+
+      expect([response.statusCode, response.json()]).toEqual([502, AGENT_UNAVAILABLE_ENVELOPE]);
+      await settle();
+      expect(snapshot(world.fixture.db, world.session, true)).toEqual(rows);
+      expect(processOf(world)).toEqual(before);
+      expect([child.stdin.length, isLive(child.child)]).toEqual([frames, true]);
+
+      rmdirSync(mcpPath);
+      await answered(world);
+      expect(processOf(world)).toEqual(before);
+      expect(child.stdin.slice(frames).map((frame) => frame.type)).toContain("prompt");
+      expect(world.errors).toEqual([]);
     },
   );
 });
