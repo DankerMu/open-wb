@@ -232,13 +232,17 @@ function jsonReader(): Reader {
  */
 function sseReader(): Reader {
   let pending = "";
+  let afterCr = false;
   const data: string[] = [];
-  const feed = (text: string, final: boolean): unknown => {
-    pending += text;
-    // Before the end a trailing CR may be the first half of a CRLF: it waits for the next chunk.
-    const held = !final && pending.endsWith("\r") ? "\r" : "";
-    const lines = pending.slice(0, pending.length - held.length).split(/\r\n|\r|\n/u);
-    pending = (lines.pop() ?? "") + held;
+  const push = (text: string): unknown => {
+    // A CR ends its line at once; an LF opening the next chunk is that CRLF's second half (WHATWG).
+    const more = afterCr && text.startsWith("\n") ? text.slice(1) : text;
+    if (text !== "") {
+      afterCr = text.endsWith("\r");
+    }
+    pending += more;
+    const lines = pending.split(/\r\n|\r|\n/u);
+    pending = lines.pop() ?? "";
     for (const line of lines) {
       if (line === "" && data.length > 0) {
         return parsed(data.join("\n"));
@@ -250,13 +254,8 @@ function sseReader(): Reader {
     }
     return UNDECIDED;
   };
-  return {
-    push: (text) => feed(text, false),
-    end: () => {
-      const document = feed("", true);
-      return document === UNDECIDED ? null : document;
-    },
-  };
+  // What is still pending at the end is an unterminated line: no event is dispatched from it.
+  return { push, end: () => null };
 }
 
 /** A `data` field line's value minus one leading space; `undefined` for any other line. */

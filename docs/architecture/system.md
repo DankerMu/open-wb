@@ -848,7 +848,7 @@ modelRoles:
 
 - http：向登记的 `url` 原样发一次 `POST`，body 为 MCP `initialize` 请求（`protocolVersion` `2025-03-26`、`clientInfo.name` `workbuddy-probe`），请求头为登记的 `headers`（名称忽略大小写为 `content-type` / `accept` 的项去掉）加 `content-type: application/json` 与 `accept: application/json, text/event-stream`。每次新建连接，不跟随重定向（3xx 按非 2xx 计）、不重试；建连 10 s、整体 15 s。判定：2xx 且应答体是 MCP 初始化结果（普通对象、`jsonrpc` 为 `"2.0"`、自有 `result` 为非 null 对象）→ `正常`。应答媒体类型为 `text/event-stream` 时按 SSE 读，取第一个分派的 `data:` 事件判定、不等流结束；其它媒体类型整个应答体当 JSON。2xx 应答体至多读 64 KiB。失败的 message：非 2xx 为 `HTTP <状态码>：<摘要>`（摘要与模型探活同一净化，覆盖该连接器全部请求头值，≤200 码点）；2xx 但不是初始化结果、SSE 流在任何事件之前结束或应答体超过 64 KiB 为 `响应不是 MCP 初始化结果`；连接被拒、被重置（含读应答体期间）、DNS 失败为 `无法连接`；期限到为 `超时`。
 - stdio：不拉起进程，只看 `command`：跟随符号链接后是 app 进程可执行的常规文件 → `正常`，否则（不存在、目录、没有执行权限）`命令不存在或不可执行`。所以 stdio 的「正常」只说明命令在、能执行，不说明它是一个能用的 MCP server。
-- 同一连接器的并发探活排队逐个执行；探活在途期间该连接器被删，结果丢弃、应答 404，不写审计。
+- 同一连接器的并发探活排队逐个执行。结果只写回探活开始时的那一行、且连接参数未变：在途期间该连接器被删（含删后重建同名）→ 结果丢弃、应答 404，不写审计；在途期间 `PUT` 改了连接参数 → 结果丢弃、不写审计，应答当前管理员视图（探活状态是 `PUT` 复位后的 `never`）；只改描述或启停不影响结果写入。
 
 **审计**：每次写入与探活与表写入同一事务记一条，kind 为 `connector.create` / `connector.update` / `connector.delete` / `connector.probe`，actor 为管理员，`workspaceId` 为 null，title 为 `登记连接器 <name>` / `修改连接器 <name>` / `删除连接器 <name>` / `探活连接器 <name>`；detail 恰为 `{name, type}`，探活另带 `status`（`ok` / `failed`），不含 `env` / `headers` 值、命令参数、地址与探活 message。
 

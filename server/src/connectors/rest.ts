@@ -17,7 +17,9 @@
  *
  * 探活：同一名称按 Promise 链串行；轮到时再从 store 读该行（含凭证、不论启停；已被删即 404），经 `probe.ts`
  * 探一次，结果经 `recordProbe` 写三列，审计 `connector.probe`（detail 恰 `{name, type, status}`）在它的 `within`
- * 里同事务写入；在途期间行被删 → `recordProbe` 404，结果丢弃、无审计。不发布、不改 `enabled`。
+ * 里同事务写入；只在该行仍是探活开始时那一行（`created_at` 与五列连接参数不变）时才写：在途期间行被删或删后
+ * 重建 → 404，结果丢弃、无审计；只是连接参数被 `PUT` 改了 → 结果丢弃、无审计、应答当前视图。不发布、不改
+ * `enabled`。
  *
  * 凭证：`env` / `headers` 的值不进任何应答（视图只有键名）、审计与记录。
  */
@@ -202,9 +204,11 @@ export function registerConnectors(
         if (target === undefined) {
           throw new HttpError("not_found");
         }
-        const result = await probeConnector(target, probeDeadlines);
-        // Deleted while in flight: `changes === 0` throws 404 before `within`, no audit.
-        return store.recordProbe(name, { ...result, at: Date.now() }, (view) => {
+        const result = await probeConnector(target.fields, probeDeadlines);
+        // Deleted or recreated while in flight: 404 before `within`; connection changed by a PUT
+        // meanwhile: the result is dropped, no audit, the current view answered.
+        const probed = { ...result, at: Date.now() };
+        return store.recordProbe(name, target.identity, probed, (view) => {
           emit(db, {
             kind: "connector.probe",
             actorId: principalOf(request).id,

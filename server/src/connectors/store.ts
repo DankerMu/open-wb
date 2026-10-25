@@ -13,7 +13,7 @@
  * Results: a refusal throws the fixed-message `bad_request`; a taken name `conflict` (checked before the
  * 32-row cap). `update` and `remove` return `undefined` for an unknown name, before the body is looked
  * at (the route answers 404 ahead of body errors); `recordProbe` throws `not_found` for a row deleted
- * meanwhile, before `within`. Each write opens its own transaction (the caller must not be in one); the
+ * or recreated meanwhile, before `within`, and drops a result whose connection was changed meanwhile. Each write opens its own transaction (the caller must not be in one); the
  * optional `within(view)` runs after the write, before COMMIT (the audit hook) — a throw rolls all of it
  * back.
  */
@@ -53,6 +53,16 @@ type Connection = readonly [
   string | null,
 ];
 
+/**
+ * Which row a probe started on (design D6): its `created_at` (a delete-and-recreate changes it) and its
+ * stored connection columns (an in-flight PUT of the connection changes them). `updated_at` is not part of
+ * it: a PUT of `description` / `enabled` alone leaves the probe's result standing.
+ */
+export interface ProbeIdentity {
+  createdAt: number;
+  connection: Connection;
+}
+
 const SELECT_ONE = "SELECT * FROM connectors WHERE name = ?";
 const SELECT_ALL = "SELECT * FROM connectors ORDER BY name";
 const SELECT_ENABLED = "SELECT * FROM connectors WHERE enabled = 1 ORDER BY name";
@@ -65,7 +75,7 @@ const RESET_PROBE =
   "UPDATE connectors SET probe_status = 'never', probe_at = NULL, probe_message = NULL WHERE name = ?";
 const DELETE = "DELETE FROM connectors WHERE name = ?";
 const RECORD_PROBE =
-  "UPDATE connectors SET probe_status = ?, probe_message = ?, probe_at = ? WHERE name = ?";
+  "UPDATE connectors SET probe_status = ?, probe_message = ?, probe_at = ? WHERE name = ? AND created_at = ? AND command IS ? AND args IS ? AND env IS ? AND url IS ? AND headers IS ?";
 const SELECT_PREFS = "SELECT disabled_connectors FROM account_connector_prefs WHERE account_id = ?";
 const UPSERT_PREFS =
   "INSERT INTO account_connector_prefs(account_id, disabled_connectors, updated_at) VALUES (?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET disabled_connectors = excluded.disabled_connectors, updated_at = excluded.updated_at";
@@ -89,29 +99,47 @@ export function createConnectorStore(db: DatabaseSync) {
         .all()
         .map((row) => ({ name: String(row.name), fields: fieldsOf(row) })),
 
-    /** One row with its credentials, enabled or not: only the probe reads this. */
-    probeTarget(name: string): ConnectorFields | undefined {
+    /** One row with its credentials, enabled or not, and its identity: only the probe reads this. */
+    probeTarget(name: string): { fields: ConnectorFields; identity: ProbeIdentity } | undefined {
       const row = raw(name);
-      return row === undefined ? undefined : fieldsOf(row);
+      return row === undefined
+        ? undefined
+        : {
+            fields: fieldsOf(row),
+            identity: { createdAt: Number(row.created_at), connection: storedConnection(row) },
+          };
     },
 
     /**
-     * Writes a probe result (the three probe columns only). A row deleted while the probe was in
-     * flight is `not_found`, thrown before `within`: nothing is written, no audit.
+     * Writes a probe result (the three probe columns only) if the row is still `identity`. Gone or
+     * recreated meanwhile → `not_found`, thrown before `within`; same row with another connection (a
+     * PUT in flight) → the result is dropped and `within` not run, the current view returned.
      */
     recordProbe(
       name: string,
+      identity: ProbeIdentity,
       result: { status: "ok" | "failed"; message: string | null; at: number },
       within?: Within,
     ): ConnectorView {
       return inTransaction(db, () => {
         const { changes } = db
           .prepare(RECORD_PROBE)
-          .run(result.status, result.message, result.at, name);
-        if (changes === 0 || changes === 0n) {
+          .run(
+            result.status,
+            result.message,
+            result.at,
+            name,
+            identity.createdAt,
+            ...identity.connection,
+          );
+        if (changes !== 0 && changes !== 0n) {
+          return finish(name, within);
+        }
+        const row = raw(name);
+        if (row === undefined || Number(row.created_at) !== identity.createdAt) {
           throw new HttpError("not_found");
         }
-        return finish(name, within);
+        return toView(row);
       });
     },
 

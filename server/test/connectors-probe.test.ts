@@ -281,6 +281,8 @@ describe("次序：401 / 403 / 400 / 404 先于 body 与探活", () => {
       [probeUrl("wiki"), {}, 400, BAD_REQUEST],
       [probeUrl("wiki"), MALFORMED, 400, BAD_REQUEST],
       [probeUrl("wiki"), TEXT, 400, BAD_REQUEST],
+      // A body within the 1-byte limit still parses (to `1`): the handler's no-body check refuses it.
+      [probeUrl("wiki"), { raw: "1", type: "application/json" }, 400, BAD_REQUEST],
     ];
     for (const [url, body, status, envelope] of cases) {
       expectAnswer(await call(world, "admin", "POST", url, body), status, envelope);
@@ -457,6 +459,46 @@ describe("判定：JSON 与 SSE 的应答体", () => {
 });
 
 describe("SSE 应答、超时与在途删除", () => {
+  /** An SSE answer written as `chunks` (20 ms apart), the stream then left open. */
+  async function sseChunks(chunks: string[]): Promise<number> {
+    return scriptedServer((response) => {
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      for (const [i, chunk] of chunks.entries()) {
+        setTimeout(() => response.write(chunk), 20 * i);
+      }
+    });
+  }
+  const FIRST_HALF = 'data: {"jsonrpc":"2.0","id":1,';
+  const SECOND_HALF = 'data: "result":{}}';
+  const SSE_STREAMS: Array<[string, string[]]> = [
+    ["CR-only event sent alone", [`data: ${RESULT_JSON}\r\r`]],
+    ["CRLF split across chunks", [`${FIRST_HALF}\r`, `\n${SECOND_HALF}\r`, "\n\r\n"]],
+  ];
+
+  it.each(SSE_STREAMS)(
+    "SSE stream left open, %s → ok inside a 1 s deadline",
+    async (_label, chunks) => {
+      const world = await openWorld(SECOND);
+      await addHttp(world, "stream", local(await sseChunks(chunks)));
+      const result = await probe(world, "stream");
+      expectProbed(world, "stream", result, { status: "ok", message: null });
+      expect(result.to - result.from).toBeLessThan(1000);
+    },
+  );
+
+  it("a 2xx whose body stops halfway: 超时 under the injected 1 s deadline", async () => {
+    const world = await openWorld(SECOND);
+    const port = await scriptedServer((response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.write('{"jsonrpc":"2.0",');
+    });
+    await addHttp(world, "slow", local(port));
+    expectProbed(world, "slow", await probe(world, "slow"), {
+      status: "failed",
+      message: TIMED_OUT,
+    });
+  });
+
   it("SSE: comment, multi-line data, stream left open → ok well inside a 1 s deadline", async () => {
     const world = await openWorld(SECOND);
     const server = await mcpServer({ reply: "sse" });
@@ -511,5 +553,64 @@ describe("SSE 应答、超时与在途删除", () => {
     expect(probeColumns(world.db, "hang")).toBeUndefined();
     expect(probeColumns(world.db, "other")).toEqual(other);
     expect(probeAudits(world.db)).toEqual([audit("other", "http", "ok")]);
+  });
+
+  /**
+   * Starts a probe of `hang` (held) and hands it back once the listener has its connection — boxed:
+   * an async function returning the inject chain itself would wait for the whole probe.
+   */
+  async function inFlight(world: World, hold: { accepted(n: number): Promise<void> }) {
+    const pending = call(world, "admin", "POST", probeUrl("hang"));
+    await hold.accepted(1);
+    return { pending };
+  }
+  const NEVER = { probe_status: "never", probe_message: null, probe_at: null };
+  const keptHeaders = Object.fromEntries(Object.keys(HEADERS).map((key) => [key, null]));
+
+  it("DELETE then POST the same name while in flight: 404, the new row stays never, no audit", async () => {
+    const world = await openWorld(SECOND);
+    const hold = await holdServer();
+    await addHttp(world, "hang", local(hold.port));
+    const { pending } = await inFlight(world, hold);
+    expectAnswer(await call(world, "admin", "DELETE", "/api/connectors?name=hang"), 204);
+    // `created_at` is in ms: keep the recreated row's apart from the deleted one's.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await addHttp(world, "hang", local(hold.port, "/other"));
+    expectAnswer(await pending, 404, NOT_FOUND);
+    expect(probeColumns(world.db, "hang")).toEqual(NEVER);
+    expect(probeAudits(world.db)).toEqual([]);
+  });
+
+  it("a PUT changing the url while in flight: 200 with the current view, still never, no audit", async () => {
+    const world = await openWorld(SECOND);
+    const hold = await holdServer();
+    await addHttp(world, "hang", local(hold.port));
+    const { pending } = await inFlight(world, hold);
+    const moved = local(hold.port, "/moved");
+    const body = { url: moved, headers: keptHeaders };
+    expectAnswer(await call(world, "admin", "PUT", "/api/connectors?name=hang", body), 200);
+    const response = await pending;
+    expectAnswer(response, 200);
+    expect(response.json()).toMatchObject({
+      url: moved,
+      probe: { status: "never", at: null, message: null },
+    });
+    expect(probeColumns(world.db, "hang")).toEqual(NEVER);
+    expect(probeAudits(world.db)).toEqual([]);
+  });
+
+  it("a PUT changing only the description while in flight: the result is written and audited", async () => {
+    const world = await openWorld(SECOND);
+    const hold = await holdServer();
+    await addHttp(world, "hang", local(hold.port));
+    // The PUT republishes `mcp.json`, so not `probe()` (which pins its mtime).
+    const from = Date.now();
+    const { pending } = await inFlight(world, hold);
+    const body = { description: "改了描述", url: local(hold.port), headers: keptHeaders };
+    expectAnswer(await call(world, "admin", "PUT", "/api/connectors?name=hang", body), 200);
+    const response = await pending;
+    const window = { response, from, to: Date.now() };
+    expectProbed(world, "hang", window, { status: "failed", message: TIMED_OUT });
+    expect(probeAudits(world.db)).toEqual([audit("hang", "http", "failed")]);
   });
 });
