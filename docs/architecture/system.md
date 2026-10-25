@@ -828,7 +828,7 @@ modelRoles:
 
 ### 9.11 连接器（S1d，change `s1d-connectors`）
 
-本节随任务组落地。组 2a：托管 `mcp.json`；组 3：管理端点与审计；组 4：探活；组 5：账号缺省、会话停用与派发指纹。凭证的暴露面见 ADR-0015。
+本节随任务组落地。组 2a：托管 `mcp.json`；组 3：管理端点与审计；组 4：探活；组 5：账号缺省、会话停用与派发指纹；组 6：中心「连接器」tab 与审批行为。凭证的暴露面见 ADR-0015。
 
 **托管 `mcp.json`**（`server/src/connectors/mcp-json.ts`，规格 connectors「托管 mcp.json」）：数据库的 `connectors` 表是事实源，宿主把 `enabled = 1` 的连接器写成 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`，omp 每次 spawn 把它当作用户级 MCP 配置读取（`--no-extensions` 不挡它）。内容恰为 `JSON.stringify({mcpServers: {<名称>: <条目>}}, null, 2)` 加一个换行，名称按字典序；stdio 条目恰为 `{type, command, args, env}`，http 条目恰为 `{type, url, headers}`，停用的行不写；没有启用的连接器时文件恰为 `{\n  "mcpServers": {}\n}\n`（覆盖上次运行的残留）。与托管 `models.yml` 同一原子替换写出，终态 `0640`、app uid 持有，omp uid 只读（CI `uid-isolation` 证明能读、覆写 `EACCES`）。`env` / `headers` 的值只在这个文件里，不进任何响应、审计、日志与错误信息。
 
@@ -866,5 +866,15 @@ modelRoles:
 - **spawn**：会话配置文件的 `disabledExtensions` = 停用技能的 `skill:<名>` 与停用连接器的 `mcp:<名>` 的并集（去重、字典序，例 `["mcp:gitlab", "skill:deploy"]`）；omp 因此不拉起这些连接器。fork 与撤回的临时进程同一规则。
 
 **派发指纹**（`sessions/omp/session-config.ts` 的 `sessionConfigFingerprint(capabilities, mcpJson)`、`composer-align.ts`；规格 chat-sessions「派发前按会话设置对齐进程」）：能力指纹 = `sha256(JSON.stringify([yml, md, mcpJson]))`，`mcpJson` 是每次派发前（`#onSlot`）读到的 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json` 当前字节；文件不存在按空串；其它读取失败（`EACCES`、`EISDIR`、`EIO` 等）包成 `AgentUnavailableError`，属第 1 步失败：prompt 路径 502 `agent_unavailable` 并补偿受理对（存活进程不收帧、不退出），regenerate 在事务之前失败。omp 只在 spawn 时读 `mcp.json`，所以任何改变其字节的连接器写入（登记、修改连接参数、启停、删除启用的连接器）都使存活会话在**下一条消息**前退役重启（`--resume`，`stream_epoch` 加一）；写入本身不通知 supervisor，在途回合不受影响。探活与账号缺省的修改不改 `mcp.json` 的字节，也不改会话的停用集合，因此不重启；什么都没变时复用存活进程。派发前读到与 spawn 时 omp 读到之间文件若再变化，通常只多一次重启；两次净效果为零的写入（A→B→A）恰好落在一次准入等待里时，进程按 B 启动而指纹记为 A，直到下一次 `mcp.json` 变化或进程退出前少一次重启——与 `models.yml` 的既有窗口同类，接受为残余风险。
+
+**中心「连接器」tab**（`web/src/features/center/connectors/`，规格 connectors「中心「连接器」tab」）：对所有登录账号可见。每行的 `默认启用` 开关整表写账号缺省（`PUT /api/connectors/defaults`）；管理员另有 `启用` 开关、`新增连接器` / `编辑` / `删除` / `探活`。`启用` 开关与编辑对话框都按当前管理员视图构造整体替换的 `PUT` body，`envKeys` / `headerKeys` 的每个键带 `null`（保留现有值），所以启停与只改描述不丢凭证。提交前在浏览器里按「连接器取值规则」逐字段校验（名称、长度与个数上限、`!` 开头、含 `${`）；值恰为宿主子进程环境变量名、请求头名 / 值的合法性与第 33 个连接器只由服务端判定，400 的固定文案在对话框内显示。http 连接器保存后地址或请求头有改动时自动探活一次。
+
+**审批行为**（design D12；规格 chat-web「工具段摘要与折叠」、chat-stream 的 `xd://` 先例）：宿主 overlay 不钉 `tools.xdev`，工具集含 `read` 与 `write`、没有 code mode 时，MCP 工具不进 omp 的直接工具面，而挂在 `xd://mcp__<server>_<tool>` 下，模型以 `write`、`path: "xd://mcp__…"`、JSON 参数作 `content` 调用它。所以审批与观察面都是 `write` 的：
+
+- `每次都问` 下每次 MCP 调用都弹确认卡，标题首行为 `Allow tool: write`，卡上带 `Path: xd://mcp__<server>_<tool>`；
+- `只问命令` 下 MCP 调用不弹确认（`write` 在该档位不问），`全部自动` 同样不问；
+- 会话里的步骤名为 `write`，工具段摘要按既有的工具名表把它计为 `新建`。
+
+这与 #1570 起「写 `xd://browser` 就是一次 write」的先例一致。需要逐次确认连接器调用的会话用 `每次都问`。本组只写明现状，不改工具段摘要的计法。
 
 **回滚**：回退到没有连接器的版本时，连同删除 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`——旧版本不写也不删这个文件，留着它 omp 仍会读取并拉起其中的连接器。
