@@ -260,6 +260,28 @@ describe("两种视图严格解析", () => {
     expectRequestFailure(await captureApiError(client.putConnectorDefaults([])), 200);
   });
 
+  it('an admin view whose args hold an empty string ("" is a legal arg on the server) parses on every method that returns one', async () => {
+    // 服务端 `connectors/validate.ts` 的 argsOf：每项 0–1024 码点；参数 textarea 以换行结尾时表单就会发出一个 ""。
+    const view: ConnectorView = { ...GITLAB, args: ["--stdio", ""] };
+    stub({
+      "/api/connectors": [jsonResponse({ connectors: [DOCS, view] }), jsonResponse(view, 201)],
+      "/api/connectors?name=gitlab": () => jsonResponse(view),
+      "/api/connectors/probe?name=gitlab": () => jsonResponse(view),
+    });
+    const client = createApiClient();
+
+    await expect(client.listConnectors()).resolves.toEqual({
+      admin: true,
+      connectors: [DOCS, view],
+    });
+    const create = { name: "gitlab", type: "stdio" as const, command: "/a", args: ["--stdio", ""] };
+    await expect(client.createConnector(create)).resolves.toEqual(view);
+    await expect(
+      client.updateConnector("gitlab", { ...UPDATE, args: ["--stdio", ""] }),
+    ).resolves.toEqual(view);
+    await expect(client.probeConnector("gitlab")).resolves.toEqual(view);
+  });
+
   it("accepts an empty list, a zero probe time and a failed probe message", async () => {
     const view: ConnectorView = {
       ...GITLAB,

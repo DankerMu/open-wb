@@ -115,8 +115,11 @@ function isName(value: unknown): value is string {
   return typeof value === "string" && NAME.test(value);
 }
 
+/** 字符串数组；空串是合法项（服务端 `argsOf` 收 0–1024 码点的参数），故不走会拒掉假值的 `parseJsonArray`。 */
 function strings(value: unknown): string[] | null {
-  return parseJsonArray(value, (item) => (typeof item === "string" ? item : null));
+  return Array.isArray(value) && value.every((item) => typeof item === "string")
+    ? [...value]
+    : null;
 }
 
 function parseProbe(value: unknown): ConnectorView["probe"] | null {

@@ -3,9 +3,10 @@
 // 的输入照常提交而服务端 400 的 message 就地显示、编辑时的整体替换 body（与 `启用` 开关同一构造：留空的凭证键为
 // `null`、填了新值取新值）、保存后自动探活规则、发布失败、在途与 Escape 回退。
 
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import type { ConnectorView } from "../src/lib/api.js";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ConnectorsPanel } from "../src/features/center/connectors/panel.js";
+import { type ConnectorListing, type ConnectorView, createApiClient } from "../src/lib/api.js";
 import {
   addEntry,
   badRequest,
@@ -14,15 +15,19 @@ import {
   DOCS,
   DOCS_URL,
   deferred,
+  enabledSwitch,
   fakeConnectors,
   flush,
   GITLAB,
   GITLAB_COMMAND,
+  httpView,
+  LINT,
   openForm,
   pageAlerts,
   publishFailed,
   renderPanel,
   rowButton,
+  rowOf,
   save,
   settled,
   stdioView,
@@ -30,6 +35,7 @@ import {
   type,
   WIKI_URL,
 } from "./center-connectors-support.js";
+import { createFetchMock, jsonResponse } from "./support.js";
 
 const KEEP = "留空保留现有值";
 /** omp 的插值起始符；拼出 `${NAME}` 形式的取值（字面写在字符串里会被当成漏写的模板）。 */
@@ -38,6 +44,7 @@ const MOUNT = ["listConnectors", "getConnectorDefaults"];
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 function input(dialog: HTMLElement, label: string): HTMLInputElement {
@@ -388,6 +395,162 @@ describe("编辑：与「启用」开关同一构造的整体替换 body", () =>
       ]);
     },
   );
+});
+
+describe("保存成功后先以应答替换该行，再自动探活", () => {
+  it("编辑 http wiki（新地址 + 新请求头）后探活挂起，期间切换「启用」：body 取保存后的视图——新地址、新键为 null（已是既有键）、enabled 取反", async () => {
+    const NEW_URL = "https://wiki2.example/mcp";
+    const fake = fakeConnectors([httpView("wiki", { headerKeys: ["authorization"] })]);
+    const gate = deferred<void>();
+    const original = fake.probeConnector.getMockImplementation() as (
+      name: string,
+    ) => Promise<ConnectorView>;
+    fake.probeConnector.mockImplementationOnce(async (name: string) => {
+      await gate.promise;
+      return original(name);
+    });
+    await renderPanel(fake);
+
+    const dialog = await openForm("wiki");
+    type(dialog, "地址", NEW_URL);
+    addEntry(dialog, "请求头", "x-team", "core");
+    save(dialog);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(fake.probeConnector).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(enabledSwitch("wiki"));
+    await waitFor(() => expect(fake.listConnectors).toHaveBeenCalledTimes(2));
+    expect(fake.updateConnector.mock.calls).toEqual([
+      [
+        "wiki",
+        {
+          description: "",
+          url: NEW_URL,
+          headers: { authorization: null, "x-team": "core" },
+          enabled: true,
+        },
+      ],
+      [
+        "wiki",
+        {
+          description: "",
+          url: NEW_URL,
+          headers: { authorization: null, "x-team": null },
+          enabled: false,
+        },
+      ],
+    ]);
+
+    await act(async () => gate.resolve());
+    await settled(fake, 3);
+    expect(callNames(fake)).toEqual([
+      ...MOUNT,
+      "updateConnector",
+      "updateConnector",
+      "listConnectors",
+      "probeConnector",
+      "listConnectors",
+    ]);
+    expect(enabledSwitch("wiki").getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("保存前已在途的重取（带旧 wiki 视图）在自动探活期间才返回：被丢弃，行仍显示保存后的地址；随后「启用」的 body 取保存后的视图", async () => {
+    const NEW_URL = "https://wiki2.example/mcp";
+    const fake = fakeConnectors([LINT, httpView("wiki", { headerKeys: ["authorization"] })]);
+    await renderPanel(fake);
+    // 切换 lint 的「启用」触发的那次重取：发出时即取下当时（保存前）的表，挂起到 `stale` 放行。
+    const stale = deferred<void>();
+    const list = fake.listConnectors.getMockImplementation() as () => Promise<ConnectorListing>;
+    fake.listConnectors.mockImplementationOnce(async () => {
+      const old = await list();
+      await stale.promise;
+      return old;
+    });
+    const probe = deferred<void>();
+    const probeImpl = fake.probeConnector.getMockImplementation() as (
+      name: string,
+    ) => Promise<ConnectorView>;
+    fake.probeConnector.mockImplementationOnce(async (name: string) => {
+      await probe.promise;
+      return probeImpl(name);
+    });
+
+    fireEvent.click(enabledSwitch("lint"));
+    await waitFor(() => expect(fake.listConnectors).toHaveBeenCalledTimes(2));
+    const dialog = await openForm("wiki");
+    type(dialog, "地址", NEW_URL);
+    addEntry(dialog, "请求头", "x-team", "core");
+    save(dialog);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(fake.probeConnector).toHaveBeenCalledTimes(1);
+    });
+    const urlCell = () => within(rowOf("wiki")).getAllByRole("cell")[3]?.textContent;
+    expect(urlCell()).toBe(NEW_URL);
+
+    await act(async () => stale.resolve());
+    await flush();
+    expect(urlCell()).toBe(NEW_URL);
+
+    fireEvent.click(enabledSwitch("wiki"));
+    await waitFor(() => expect(fake.updateConnector).toHaveBeenCalledTimes(3));
+    expect(fake.updateConnector.mock.calls[2]).toEqual([
+      "wiki",
+      {
+        description: "",
+        url: NEW_URL,
+        headers: { authorization: null, "x-team": null },
+        enabled: false,
+      },
+    ]);
+
+    await act(async () => probe.resolve());
+    await settled(fake, 4);
+    expect(urlCell()).toBe(NEW_URL);
+  });
+});
+
+describe("真实传输层（createApiClient + 替身 fetch，不经假 ApiClient）", () => {
+  it('新增 stdio：参数 textarea 以换行结尾 → args 末项为 ""；201 应答照常解析——对话框关闭、列表出现该行、页顶无提示', async () => {
+    const view = stdioView("gitlab", { command: GITLAB_COMMAND, args: ["--stdio", ""] });
+    const lists = [{ connectors: [] }, { connectors: [view] }];
+    const fetchMock = createFetchMock({
+      "/api/connectors/defaults": () => jsonResponse({ disabledConnectors: [] }),
+      "/api/connectors": (_path, options) =>
+        options?.method === "POST" ? jsonResponse(view, 201) : jsonResponse(lists.shift()),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ConnectorsPanel admin client={createApiClient()} />);
+    await waitFor(() => expect(screen.queryByText("正在读取连接器")).toBeNull());
+
+    const dialog = await openForm();
+    type(dialog, "名称", "gitlab");
+    type(dialog, "命令", GITLAB_COMMAND);
+    type(dialog, "参数（每行一个）", "--stdio\n");
+    save(dialog);
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(screen.getByRole("cell", { name: "gitlab" })).toBeTruthy());
+    expect(pageAlerts()).toEqual([]);
+    const requests = fetchMock.mock.calls.map(([path, init]) => [init?.method, path, init?.body]);
+    expect(requests).toEqual([
+      ["GET", "/api/connectors", undefined],
+      ["GET", "/api/connectors/defaults", undefined],
+      [
+        "POST",
+        "/api/connectors",
+        JSON.stringify({
+          name: "gitlab",
+          type: "stdio",
+          command: GITLAB_COMMAND,
+          args: ["--stdio", ""],
+        }),
+      ],
+      ["GET", "/api/connectors", undefined],
+    ]);
+  });
 });
 
 describe("发布失败与自动探活失败", () => {

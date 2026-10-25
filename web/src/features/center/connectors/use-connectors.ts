@@ -22,8 +22,8 @@ import {
  * - `默认启用`（所有人）：照 `skills/use-skills.ts`——切换时先改成切换后的完整停用列表（含列表外的名称），恰一次
  *   `putConnectorDefaults`；在途期间全部 `默认启用` 开关不可切换（`aria-disabled`，由在途守卫拦下点击）；成功以应答
  *   替换，失败还原并在页顶提示。不重取列表。
- * - 管理员的写操作（`启用` 开关、新增 / 编辑、删除）与探活结算后（满足条件时先探活）再取一次列表——页面只按
- *   `listConnectors` 的结果显示。收到非信封的 500（发布失败，行已写入）：关闭对话框、不自动探活、重取列表，页顶提示
+ * - 管理员的写操作（`启用` 开关、新增 / 编辑、删除）与探活结算后（满足条件时先探活）再取一次列表——页面按
+ *   `listConnectors` 的结果显示（唯一例外：新增 / 编辑成功后先以应答替换该行，再探活、重取）。收到非信封的 500（发布失败，行已写入）：关闭对话框、不自动探活、重取列表，页顶提示
  *   `REQUEST_FAILED_MESSAGE`；新增 / 编辑的其它 `ApiError` 留在对话框内，其余显示在页顶。
  */
 
@@ -126,6 +126,23 @@ export function useConnectors(client: ApiClient, admin: boolean) {
     }
   };
 
+  /**
+   * 保存成功即以应答替换该行（新增则追加），不等探活后的重取：探活可能要十几秒，期间 `启用` / `编辑` 以行上的视图
+   * 构造整体替换 body，留着保存前的视图会把刚保存的改动写回去。同 `reload` 递增 `sequence`：保存前已在途的重取
+   * 带的是旧视图，晚到时一律丢弃。
+   */
+  const showSaved = (saved: ConnectorView) => {
+    sequence.current += 1;
+    setList((current) => {
+      if (current.status !== "ready" || !current.listing.admin) return current;
+      const rows = current.listing.connectors;
+      const connectors = rows.some((row) => row.name === saved.name)
+        ? rows.map((row) => (row.name === saved.name ? saved : row))
+        : [...rows, saved];
+      return { ...current, listing: { admin: true, connectors } };
+    });
+  };
+
   /** 写入失败的分流：发布失败（行已写入）在页顶提示并返回 true，调用方照样重取；其它错误交给 `other`、返回 false。 */
   const settleFailure = (error: unknown, other: (message: string) => void): boolean => {
     if (!isPublishFailure(error)) {
@@ -218,6 +235,7 @@ export function useConnectors(client: ApiClient, admin: boolean) {
         return;
       }
       setForm(null);
+      showSaved(saved);
       if (probesAfterSave(saved, opened, values)) await probeOnce(saved.name);
       await reload();
     },

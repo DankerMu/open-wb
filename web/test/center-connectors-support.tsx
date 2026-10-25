@@ -43,7 +43,7 @@ export function stdioView(name: string, patch: Partial<ConnectorView> = {}): Con
   };
 }
 
-function httpView(name: string, patch: Partial<ConnectorView> = {}): ConnectorView {
+export function httpView(name: string, patch: Partial<ConnectorView> = {}): ConnectorView {
   return {
     name,
     type: "http",

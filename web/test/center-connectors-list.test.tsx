@@ -5,7 +5,7 @@
 
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ApiError, type ConnectorView } from "../src/lib/api.js";
+import { ApiError, type ConnectorListing, type ConnectorView } from "../src/lib/api.js";
 import {
   badRequest,
   callNames,
@@ -375,6 +375,59 @@ describe("删除", () => {
       "deleteConnector",
       "listConnectors",
     ]);
+  });
+
+  async function confirmDelete(name: string): Promise<void> {
+    fireEvent.click(rowButton(name, "删除"));
+    const confirm = await screen.findByRole("alertdialog");
+    fireEvent.click(within(confirm).getByRole("button", { name: "删除" }));
+  }
+
+  it("删除成功：重取尚未返回、该行还在页上时确认框已关，焦点即落到页顶「新增连接器」（onGone 清掉 opener），重取后仍在", async () => {
+    const fake = fakeConnectors([GITLAB, LINT]);
+    await renderPanel(fake);
+    const gate = deferred<void>();
+    const original = fake.listConnectors.getMockImplementation() as () => Promise<ConnectorListing>;
+    fake.listConnectors.mockImplementationOnce(async () => {
+      await gate.promise;
+      return original();
+    });
+    const add = screen.getByRole("button", { name: "新增连接器" });
+
+    await confirmDelete("gitlab");
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(rowOf("gitlab")).toBeTruthy();
+    expect(document.activeElement).toBe(add);
+
+    await act(async () => gate.resolve());
+    await waitFor(() => expect(screen.queryByText("gitlab")).toBeNull());
+    expect(document.activeElement).toBe(add);
+  });
+
+  it("deleteConnector 收到普通 ApiError（400）：确认框关闭，页顶显示 message，不重取、行仍在，焦点回到该行的「删除」", async () => {
+    const fake = fakeConnectors([GITLAB, LINT]);
+    fake.deleteConnector.mockRejectedValueOnce(badRequest());
+    await renderPanel(fake);
+
+    await confirmDelete("gitlab");
+    await waitFor(() => expect(pageAlerts()).toEqual(["请求格式不正确"]));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    await flush();
+    expect(fake.listConnectors).toHaveBeenCalledTimes(1);
+    expect(rowOf("gitlab")).toBeTruthy();
+    expect(document.activeElement).toBe(rowButton("gitlab", "删除"));
+  });
+
+  it("deleteConnector 收到非信封 500（发布失败，行已删除）：确认框关闭，重取列表，页顶显示 REQUEST_FAILED_MESSAGE，焦点落到「新增连接器」", async () => {
+    const fake = fakeConnectors([GITLAB, LINT]);
+    fake.deleteConnector.mockRejectedValueOnce(publishFailed());
+    await renderPanel(fake);
+
+    await confirmDelete("gitlab");
+    await waitFor(() => expect(fake.listConnectors).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(pageAlerts()).toEqual(["请求失败，请稍后重试"]);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "新增连接器" }));
   });
 
   it("Escape 关闭确认框：不调用 deleteConnector，焦点回到该行的「删除」", async () => {
