@@ -673,7 +673,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 
 专家标签（`专家 · <名称>`，清除按钮的可访问名 `移除专家`）与「+」菜单的 `选择专家…` 见 experts「输入框的专家选择」；`能力` 按钮与其弹层见 skill-switches「输入框「能力」弹层」。麦克风 SHALL NOT 渲染，既不出现在能力行，也不出现在「+」菜单里，不摆禁用占位。
 
-**能力读取时机**（change s1d-experts-skills）：专家清单 `listExperts` 每个 `ApiClient` 取一次并缓存（专家对话框打开时另重取，experts「输入框的专家选择」），专家标签的名称取自它；已选会话的能力 `GET /api/sessions/:id/capabilities` 在选中的会话 id 每次变化时恰取一次（同一会话里发消息、回合结束、重取历史都不重取；切走再切回算一次变化），此后以本页 `PUT …/capabilities` 的成功响应更新；欢迎态的账号缺省停用列表 `GET /api/skills` 在第一次打开 `能力` 弹层时恰取一次（skill-switches「输入框「能力」弹层」）。这三种读取 SHALL NOT 计入上文 `getComposerOptions` 的调用计数，也 SHALL NOT 使其缓存失效；欢迎态的专家与技能选择不属于「设置保存」，带 `expertId` / `disabledSkills` 而不带三项设置的 `createSession` 成功后不重取输入框选项。
+**能力读取时机**（change s1d-experts-skills；change s1d-connectors 加两种读取）：专家清单 `listExperts` 每个 `ApiClient` 取一次并缓存（专家对话框打开时另重取，experts「输入框的专家选择」），专家标签的名称取自它；已选会话的能力 `GET /api/sessions/:id/capabilities` 在选中的会话 id 每次变化时恰取一次（同一会话里发消息、回合结束、重取历史都不重取；切走再切回算一次变化），此后以本页 `PUT …/capabilities` 的成功响应更新；欢迎态的账号缺省停用列表 `GET /api/skills` 在第一次打开 `能力` 弹层时恰取一次（skill-switches「输入框「能力」弹层」）；连接器清单 `GET /api/connectors` 在本页第一次打开 `能力` 弹层时（欢迎态或会话中）恰取一次、之后在本页复用，欢迎态的账号缺省停用连接器 `GET /api/connectors/defaults` 在欢迎态第一次打开 `能力` 弹层时恰取一次（skill-switches「输入框「能力」弹层」）。这五种读取 SHALL NOT 计入上文 `getComposerOptions` 的调用计数，也 SHALL NOT 使其缓存失效；欢迎态的专家、技能与连接器选择不属于「设置保存」，带 `expertId` / `disabledSkills` / `disabledConnectors` 而不带三项设置的 `createSession` 成功后不重取输入框选项。
 
 **窄屏**（`≤760px`）：能力行 SHALL 允许换行——左组留在第一行，右组（模型、推理强度、`生成中`、`停止` / `发送`）在一行放不下时整体落到下一行并靠右对齐；工作空间按钮 / 标签与模型按钮各有最大宽度，超出时在按钮内截断（完整文字在 `title` 属性里）。任何视口下 `发送` / `停止` SHALL 完整位于输入框容器之内，文档 SHALL NOT 出现横向滚动；三个档位名与七个强度名都按文字显示，不退化为只有图标。
 
@@ -754,7 +754,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 - **THEN** 失败期间三个控件按上一份数据照常显示；选中另一个会话时再发出一次 `getComposerOptions`
 
 #### Scenario: 专家标签、`能力` 按钮与停用技能过滤
-- **WHEN** 整页挂载（假 API）选中一个绑定工作空间 `项目A` 的会话，`GET …/capabilities` 返回 `{expertId:"builtin:test-engineer", disabledSkills:["deploy"]}`，`listCommands("A")` 返回两条内建、`skill:weekly-report` 与 `skill:deploy`；打开「+」菜单；关闭菜单后输入 `/`；随后在 `能力` 弹层里重新打开 `deploy`（`PUT` 成功返回 `disabledSkills:[]`）再输入 `/`
+- **WHEN** 整页挂载（假 API）选中一个绑定工作空间 `项目A` 的会话，`GET …/capabilities` 返回 `{expertId:"builtin:test-engineer", disabledSkills:["deploy"], disabledConnectors:[]}`，`listCommands("A")` 返回两条内建、`skill:weekly-report` 与 `skill:deploy`；打开「+」菜单；关闭菜单后输入 `/`；随后在 `能力` 弹层里重新打开 `deploy`（`PUT` 成功返回 `disabledSkills:[]`）再输入 `/`
 - **THEN** 左组内依次为 `添加文件或命令`、`专家 · 测试工程师`（带可访问名 `移除专家` 的按钮）、只读的 `任务启动于 项目A`、`权限：…`、`能力`；菜单依次为 `上传文件`、`选择专家…`，命令段恰三项、没有 `deploy`；第一次斜杠候选恰三项、没有 `skill:deploy`；重新打开后斜杠候选恰四项、含 `skill:deploy`；全程恰一次 `listCommands("A")`、恰一次 `GET …/capabilities` 与恰一次 `listExperts`
 - **WHEN** 欢迎态只选了专家 `测试工程师`（没动档位、模型、强度）后发送，`createSession` 成功
 - **THEN** `createSession` 的 input 含 `expertId`、不含三项设置；其后没有新的 `getComposerOptions`；选中新会话时恰一次 `GET …/capabilities`
