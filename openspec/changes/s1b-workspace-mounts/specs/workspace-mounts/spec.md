@@ -32,7 +32,7 @@
 - `MOUNT_HOST_ALLOW`：缺省未配置，即不限主机；给出时 SHALL 为逗号分隔的主机名单，每项 1..253 字节、只含 ASCII 字母数字、`.`、`:`、`-`；显式 empty、任一空项、任一项含其它字符为配置错误。
 - `MOUNT_MAX_PER_WORKSPACE`：缺省 `8`；与 `OMP_IDLE_MS` 同一解析纪律（canonical ASCII decimal 正整数 1..2147483647，empty / `0` / 非 canonical / 超限为配置错误）。
 
-配置了 `RCLONE_BIN` 时，配置阶段 SHALL 另做启动预检，任一不过即配置错误（点名 `RCLONE_BIN`，启动以 `reason: "config"` 失败，不新增启动阶段）：`RCLONE_BIN` 是本进程可执行（`X_OK`）的普通文件；进程 `PATH` 的某一项下有可执行的 `fusermount3`（取第一个，记下其绝对路径，此后的卸载只用该路径）；`/dev/fuse` 存在（且为字符设备）；`OMP_USER` 已配置时 `/etc/fuse.conf` 存在且有一行去掉首尾空白后恰为 `user_allow_other`，并且以固定绝对路径 `/usr/bin/id -u -- <OMP_USER>` 得到一个十进制数值 uid（退出码非 0 或输出不是十进制整数即不过）；`OMP_USER` 已配置时，进程 `PATH` 各项下的每一个 `fusermount3` 与 `fusermount` SHALL 没有 other 执行位，且其属组不是 `/usr/bin/id -G -- <OMP_USER>` 输出的任何一个组（message 另写明 fusermount3 只能对 app 所在、omp 不在的组可执行）。未配置 `RCLONE_BIN` 时 SHALL NOT 检查任何 FUSE 前提，也 SHALL NOT 恢复或建立任何挂载；已登记的挂载照样载入内存登记，在 API 上一律 `offline`，新建为 503 `mount_disabled`，挂载内路径的文件端点为 409 `mount_offline`（「挂载目录内的文件端点」），卸载照常可用（需要惰性卸载时见「挂载进程与挂载点」），挂载源的三个端点照常可用。
+配置了 `RCLONE_BIN` 时，配置阶段 SHALL 另做启动预检，任一不过即配置错误（点名 `RCLONE_BIN`，启动以 `reason: "config"` 失败，不新增启动阶段）：`RCLONE_BIN` 是本进程可执行（`X_OK`）的普通文件；进程 `PATH` 的某一项下有可执行的 `fusermount3`（取第一个，记下其绝对路径，此后的卸载只用该路径）；进程 `PATH` 的某一项下有可执行的 `fusermount`（rclone 1.60.1 挂载时按 PATH 查找的是这个名字，#1665 P10；Ubuntu 的 fuse3 包把它装成指向 `fusermount3` 的符号链接）；`/dev/fuse` 存在（且为字符设备）；`OMP_USER` 已配置时 `/etc/fuse.conf` 存在且有一行去掉首尾空白后恰为 `user_allow_other`，并且以固定绝对路径 `/usr/bin/id -u -- <OMP_USER>` 得到一个十进制数值 uid（退出码非 0 或输出不是十进制整数即不过）；`OMP_USER` 已配置时，进程 `PATH` 各项下的每一个 `fusermount3` 与 `fusermount` SHALL 没有 other 执行位，且其属组不是 `/usr/bin/id -G -- <OMP_USER>` 输出的任何一个组（message 另写明 fusermount3 只能对 app 所在、omp 不在的组可执行）。未配置 `RCLONE_BIN` 时 SHALL NOT 检查任何 FUSE 前提，也 SHALL NOT 恢复或建立任何挂载；已登记的挂载照样载入内存登记，在 API 上一律 `offline`，新建为 503 `mount_disabled`，挂载内路径的文件端点为 409 `mount_offline`（「挂载目录内的文件端点」），卸载照常可用（需要惰性卸载时见「挂载进程与挂载点」），挂载源的三个端点照常可用。
 
 #### Scenario: 缺省与覆盖
 - **WHEN** 三键都未设置解析配置；另一例以 `MOUNT_HOST_ALLOW=files.intra,10.0.0.5`、`MOUNT_MAX_PER_WORKSPACE=3` 解析
@@ -43,7 +43,7 @@
 - **THEN** 每一例都在任何 filesystem / database / listen 副作用之前以 nonzero 退出，stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`；`resolveServerConfig` 抛出的 message 含该键名而不含输入值
 
 #### Scenario: 预检
-- **WHEN** 配置了 `RCLONE_BIN`，分别遇到：它不可执行；它是目录；PATH 上没有 `fusermount3`；`/dev/fuse` 不存在（经注入的路径）；`OMP_USER` 模式下 `fuse.conf` 没有 `user_allow_other`（含被注释的 `#user_allow_other`）；`OMP_USER` 模式下 `id` 以非 0 退出；`OMP_USER` 模式下 `fusermount3` 的模式为 `4755`；`OMP_USER` 模式下它为 `4750` 而属组是 omp 用户的一个组（经注入的 `id -G` 输出）；`OMP_USER` 模式下 PATH 上另有一个 `4755` 的 `fusermount`
+- **WHEN** 配置了 `RCLONE_BIN`，分别遇到：它不可执行；它是目录；PATH 上没有 `fusermount3`；PATH 上有 `fusermount3` 而没有 `fusermount`；`/dev/fuse` 不存在（经注入的路径）；`OMP_USER` 模式下 `fuse.conf` 没有 `user_allow_other`（含被注释的 `#user_allow_other`）；`OMP_USER` 模式下 `id` 以非 0 退出；`OMP_USER` 模式下 `fusermount3` 的模式为 `4755`；`OMP_USER` 模式下它为 `4750` 而属组是 omp 用户的一个组（经注入的 `id -G` 输出）；`OMP_USER` 模式下 PATH 上另有一个 `4755` 的 `fusermount`
 - **THEN** 每一例都是配置错误、message 含 `RCLONE_BIN`；前提齐全时（`OMP_USER` 模式下 `fusermount3` 为 `4750` 且属组不在 omp 的组里）配置解析成功，记下的 `fusermount3` 是 PATH 上第一个可执行的那一个的绝对路径，`OMP_USER` 模式下记下 `id` 输出的数值 uid；`OMP_USER` 未配置时 `4755` 的 `fusermount3` 不是错误
 
 ### Requirement: 挂载取值与主机规则
@@ -62,7 +62,7 @@
 3. `MOUNT_HOST_ALLOW` 已配置且规范化后的 `host` 不等于名单中的任何一项。名单只按字符串比较，不比较解析结果。
 4. 系统解析器对 `host` 的全部解析结果中任一属于第 2 步的地址。解析失败或结果为空 SHALL 使该次尝试失败（建出时 502 `mount_failed` 并写 `mount.reject`，`reason` 为 `mount_failed`；重挂时保持 `offline`），不启动子进程。
 
-全部通过时，第一个解析结果（IP 字面）SHALL 经 argv 交给 rclone（「挂载进程与挂载点」的 `--sftp-host` / `--smb-host`），rclone 不再自行解析主机。`local` 挂载不经主机规则。建出时被拒 SHALL 为 403 `mount_host_rejected`；重挂时被拒 SHALL 使该挂载保持 `offline`。
+全部通过时，第一个解析结果（IP 字面）SHALL 写进该次尝试的 `rclone.conf` 的 `host`（「挂载凭证文件」），rclone 不再自行解析主机；argv SHALL NOT 带 `--sftp-host`、`--smb-host` 或任何其它后端覆盖参数。该地址 SHALL 记在内存里，供「在线状态与重挂」的连通检查。`local` 挂载不经主机规则。建出时被拒 SHALL 为 403 `mount_host_rejected`；重挂时被拒 SHALL 使该挂载保持 `offline`。
 
 #### Scenario: 键集与取值
 - **WHEN** 分别提交：`sftp` 同时带 `password` 与 `privateKey`；`sftp` 两者都不带；`smb` 带 `privateKey`；`local` 带 `host`；`name` 为 `uploads`、`screenshots`、`a.b`、65 个字符；`remotePath` 为 `srv/data`；`smb` 的 `remotePath` 为 `/`；`port` 为 `0` 与 `"22"`；`password` 含换行且带一个哨兵子串
@@ -85,7 +85,7 @@
 ### Requirement: 挂载凭证文件
 每个挂载 SHALL 有一个 app 私有目录 `<OMP_STATE_DIR 的 realpath>/mounts/<挂载 id>/`（`0700`，以 sandbox-core「托管目录权限位」的 `ensureOwnedDir` 语义建立：属本进程、不是符号链接），其中：
 
-- `rclone.conf`（`0600`）：一个段，段名为 `m` 加挂载 id（下称 `<段名>`）。`sftp` 为 `type = sftp`、`host`、`port`（给了才写）、`user` 与 `pass`（口令的 obscure 串）或 `key_pem`（私钥的换行转写为字面 `\n` 的单行）；`smb` 为 `type = smb`、`host`、`port`（给了才写）、`user`、`pass`（obscure 串）、`domain`（给了才写）；`local` 只有 `type = local`。
+- `rclone.conf`（`0600`）：一个段，段名为 `m` 加挂载 id（下称 `<段名>`）。`sftp` 为 `type = sftp`、`host`（该次尝试经主机规则判定过的 IP 字面）、`port`（给了才写）、`user` 与 `pass`（口令的 obscure 串）或 `key_pem`（私钥的换行转写为字面 `\n` 的单行）；`smb` 为 `type = smb`、`host`（同上）、`port`（给了才写）、`user`、`pass`（obscure 串）、`domain`（给了才写）；`local` 只有 `type = local`。`sftp` / `smb` 的每次挂载尝试（建出、重挂、启动恢复）SHALL 在主机规则判定之后、启动子进程之前改写 `host` 一行：读回现有文件、只替换 `host` 的值、写同目录临时名再改名到位（`0600`），其余字节不变；用户填的主机只在数据库的 `host` 列里，每次尝试都从它重新判定。
 - `cache/`（`0700`）：rclone 的 VFS 缓存目录。
 - `rclone.log`（`0600`）：rclone 的日志文件；每次挂载尝试之前由本进程以 sandbox-core「托管文件权限位」的语义确保它存在且为 `0600`。
 
@@ -99,14 +99,18 @@
 - **WHEN** 上例之后读取 `GET …/mounts`、`GET /api/audit`、application stdout / stderr，以及假 rclone 记录下的每次调用的 argv 与环境
 - **THEN** 都不含用户名哨兵、口令哨兵、私钥哨兵与 obscure 串；假 rclone 记录的 `obscure` 调用从标准输入收到口令哨兵，`mount` 调用的 argv 只经 `--config` 指向 `rclone.conf`
 
+#### Scenario: 重挂改写主机
+- **WHEN** 一个 `sftp` 挂载（主机 `files.intra`）建出时测试解析器返回 `10.0.0.7`；它的假 rclone 随后被 SIGKILL，到期重挂时解析器返回 `10.0.0.8`
+- **THEN** 建出后 `rclone.conf` 的 `host` 为 `10.0.0.7`；重挂的 `mount` 调用之前它变为 `10.0.0.8`，其余行逐字节不变、文件仍为 `0600`；两次 `mount` 的 argv 都不含 `--sftp-host`；数据库与 `GET …/mounts` 的 `host` 仍为 `files.intra`
+
 #### Scenario: 卸载删除私有目录
 - **WHEN** 卸载上例的挂载
 - **THEN** 该挂载的私有目录及其中的 `rclone.conf`、`cache/`、`rclone.log` 都不存在；`<OMP_STATE_DIR>/mounts` 仍在
 
 ### Requirement: 挂载进程与挂载点
-挂载点 SHALL 是 `<空间根>/<挂载名>`，只在空间根下一层；每次挂载尝试之前 SHALL 先不跟随符号链接地 `lstat` 它：不存在时才以 `ensureSharedDir` 建出（新建为 `0o2770`）并再 `lstat` 一次；存在时（或建出之后）它 SHALL 是目录、不是符号链接、属本进程 uid——否则该次尝试 SHALL 失败（建出时 502 `mount_failed` 并写 `mount.reject`，重挂时保持 `offline`），不启动子进程；其中有残留条目不算失败。`local` 挂载在每次尝试之前另按「挂载源端点」复核挂载源的 realpath 与包含关系，不过同样失败。挂载 SHALL 以 app 自己的 uid 前台运行一个子进程，argv 恰为 `<RCLONE_BIN> mount <段名>:<远端> <挂载点> --config <rclone.conf> --cache-dir <cache> --log-file <rclone.log> --log-level NOTICE --allow-non-empty`，再加：`sftp` 为 `--sftp-host <ip>`、`smb` 为 `--smb-host <ip>`（主机规则判定过的地址）；可写挂载 `--vfs-cache-mode writes`，只读挂载 `--read-only`；`OMP_USER` 已配置时 `--allow-other --default-permissions --uid <omp 数值 uid> --gid <空间根目录的 gid> --umask 007`。`<远端>` 对 `sftp` 为 `remotePath`、对 `smb` 为去掉开头 `/` 的 `remotePath`、对 `local` 为挂载源的 `path`。子进程环境 SHALL 恰为 `PATH`（本进程的值）与 `HOME`（该挂载的私有目录）两个键。
+挂载点 SHALL 是 `<空间根>/<挂载名>`，只在空间根下一层；每次挂载尝试之前 SHALL 先不跟随符号链接地 `lstat` 它：不存在时才以 `ensureSharedDir` 建出（新建为 `0o2770`）并再 `lstat` 一次；存在时（或建出之后）它 SHALL 是目录、不是符号链接、属本进程 uid——否则该次尝试 SHALL 失败（建出时 502 `mount_failed` 并写 `mount.reject`，重挂时保持 `offline`），不启动子进程；其中有残留条目不算失败。`local` 挂载在每次尝试之前另按「挂载源端点」复核挂载源的 realpath 与包含关系，不过同样失败。挂载 SHALL 以 app 自己的 uid 前台运行一个子进程，argv 恰为 `<RCLONE_BIN> mount <段名>:<远端> <挂载点> --config <rclone.conf> --cache-dir <cache> --log-file <rclone.log> --log-level NOTICE --allow-non-empty`，再加：可写挂载 `--vfs-cache-mode writes --vfs-write-back 0s`，只读挂载 `--read-only`；`OMP_USER` 已配置时 `--allow-other --default-permissions --uid <omp 数值 uid> --gid <空间根目录的 gid> --umask 007`。`<远端>` 对 `sftp` 为 `remotePath`、对 `smb` 为去掉开头 `/` 的 `remotePath`、对 `local` 为挂载源的 `path`。子进程环境 SHALL 恰为 `PATH`（本进程的值）与 `HOME`（该挂载的私有目录）两个键。
 
-「已挂载」SHALL 以 `/proc/self/mountinfo` 里有一行的挂载点字段（第 5 字段，八进制转义还原后）逐字节等于挂载点的绝对路径为准，不看文件系统类型名，与 temporary-workspaces「临时空间目录的删除」的 mountinfo 判据一致。建出时 SHALL 在启动子进程之后至多等待 20 s：先出现挂载即成功；子进程先退出或超时即失败——失败时杀掉子进程、惰性卸载该挂载、删除挂载点（为空时）与私有目录。「惰性卸载该挂载」SHALL 对挂载点（在 mountinfo 里时）以及 mountinfo 中文件系统类型为 `fuse.rclone`、来源字段（八进制转义还原后）以 `<段名>:` 开头的每一行的挂载点各执行一次 `<fusermount3> -uz`。
+「已挂载」SHALL 以 `/proc/self/mountinfo` 里有一行的挂载点字段（第 5 字段，八进制转义还原后）逐字节等于挂载点的绝对路径为准，不看文件系统类型名，与 temporary-workspaces「临时空间目录的删除」的 mountinfo 判据一致。每次挂载尝试 SHALL 在启动子进程之后的 20 s 就绪窗口内每 100 ms 读一次 mountinfo：出现挂载之后 SHALL 再以一个子进程对挂载点 `readdir` 一次（期限为窗口的剩余时间，超时即以 SIGKILL 结束它），成功才算就绪；mountinfo 里出现一行文件系统类型为 `fuse.rclone`、来源字段以 `<段名>:` 或 `<段名>{` 开头而挂载点字段不是该挂载点的，SHALL 立即判该次尝试失败；子进程先退出、`readdir` 失败或超时、窗口用尽，同样失败。失败时杀掉子进程、惰性卸载该挂载、删除挂载点（为空时）与私有目录（重挂与启动恢复只保持 `offline`，不删私有目录）。「惰性卸载该挂载」SHALL 对挂载点（在 mountinfo 里时）以及 mountinfo 中文件系统类型为 `fuse.rclone`、来源字段（八进制转义还原后）以 `<段名>:` 或 `<段名>{` 开头的每一行的挂载点各执行一次 `<fusermount3> -uz`。
 
 卸载 SHALL 依次：惰性卸载该挂载（挂载内有进程的 cwd 或打开的描述符时同样立即从命名空间脱离）；对子进程发 SIGTERM，5 s 内未退出再发 SIGKILL；`rmdir` 挂载点——非空（离线期间写进挂载点的本地条目）时保留为普通目录、经服务错误通道报告一次；递归删除私有目录。这些文件系统步骤的失败只经错误通道报告，不阻止删除挂载行。卸载期间（含按空间卸载、挂载源删除的连带卸载）子进程的退出 SHALL NOT 触发「在线状态与重挂」的离线判定与重挂。未配置 `RCLONE_BIN` 时，卸载需要惰性卸载（上述扫描找到该挂载）就以进程 `PATH` 上第一个可执行的 `fusermount3` 执行；找不到 SHALL 为 503 `mount_disabled`，挂载行与私有目录保留，并 SHALL 向服务错误通道写一条记录，点名原因（该挂载仍在 mountinfo 里、进程 `PATH` 上没有可执行的 `fusermount3`），不含凭证；扫描没找到时不需要它。
 
@@ -114,13 +118,13 @@
 
 #### Scenario: argv 与环境
 - **WHEN** 以假 rclone、`OMP_USER` 已配置（omp uid 经注入为 `10002`）建出一个只读 `smb` 挂载（`remotePath` `/share/product`）与一个可写 `local` 挂载
-- **THEN** 前者（主机经测试解析器解析为 `10.0.0.7`）argv 恰为 `mount m<该挂载 id>:share/product <空间根>/<名> --config … --cache-dir … --log-file … --log-level NOTICE --allow-non-empty --smb-host 10.0.0.7 --read-only --allow-other --default-permissions --uid 10002 --gid <空间根的 gid> --umask 007`，`rclone.conf` 的段名为 `m<该挂载 id>`；后者以挂载源路径为远端、不带 `--*-host` 并带 `--vfs-cache-mode writes`；两次的环境键集恰为 `PATH` 与 `HOME`，`HOME` 是各自的私有目录；本进程环境里的 `MODEL_UPSTREAM_API_KEY` 哨兵不在其中
+- **THEN** 前者（主机经测试解析器解析为 `10.0.0.7`）argv 恰为 `mount m<该挂载 id>:share/product <空间根>/<名> --config … --cache-dir … --log-file … --log-level NOTICE --allow-non-empty --read-only --allow-other --default-permissions --uid 10002 --gid <空间根的 gid> --umask 007`，`rclone.conf` 的段名为 `m<该挂载 id>`、`host` 为 `10.0.0.7`；后者以挂载源路径为远端并带 `--vfs-cache-mode writes --vfs-write-back 0s`；两者都不含 `--smb-host`、`--sftp-host`；两次的环境键集恰为 `PATH` 与 `HOME`，`HOME` 是各自的私有目录；本进程环境里的 `MODEL_UPSTREAM_API_KEY` 哨兵不在其中
 - **WHEN** 同样的挂载在 `OMP_USER` 未配置时建出
 - **THEN** argv 不含 `--allow-other`、`--default-permissions`、`--uid`、`--gid`、`--umask`
 
 #### Scenario: 就绪失败不留痕
-- **WHEN** 假 rclone 被设定为不写 mountinfo 就以非 0 退出；另一例为既不写也不退出（超时注入为 1 s）；再一例为在另一个路径上追加一行来源为 `m<该挂载 id>:…`、类型为 `fuse.rclone` 的 mountinfo 后以非 0 退出
-- **THEN** 三例都是 502 `mount_failed` 与一条 `mount.reject`（`reason` 为 `mount_failed`）；没有挂载行；挂载点与私有目录都不存在；第二例的假 rclone 进程已不存在；第三例假 `fusermount3` 对那个另外的路径收到一次 `-uz`
+- **WHEN** 假 rclone 被设定为不写 mountinfo 就以非 0 退出；另一例为既不写也不退出（超时注入为 1 s）；再一例为在另一个路径上追加一行来源为 `m<该挂载 id>{abcde}:…`、类型为 `fuse.rclone` 的 mountinfo 后挂起不退出（超时仍为 20 s）；再一例为照常写出挂载、但就绪 `readdir` 子进程被设定为失败
+- **THEN** 四例都是 502 `mount_failed` 与一条 `mount.reject`（`reason` 为 `mount_failed`）；没有挂载行；挂载点与私有目录都不存在；第二、三例的假 rclone 进程已不存在；第三例在 1 s 之内失败（不等满就绪窗口），假 `fusermount3` 对那个另外的路径收到一次 `-uz`；第四例假 `fusermount3` 对该挂载点收到一次 `-uz`
 
 #### Scenario: 挂载点被换掉即拒绝
 - **WHEN** 一个离线挂载的挂载点被换成指向空间外目录的符号链接，到期的重挂执行；另一例挂载点被换成一个普通文件
@@ -131,7 +135,7 @@
 - **THEN** 假 `fusermount3` 收到恰一次 `-uz <挂载点>`，假 rclone 进程已退出；挂载点作为含 `stray.txt` 的普通目录保留、错误通道恰报告一次；私有目录不存在；挂载行已删；此后（推进注入时钟超过 300 s）没有任何重挂尝试
 
 ### Requirement: 在线状态与重挂
-每个已登记挂载的状态 SHALL 只在内存里，取 `online` 或 `offline`。`online` 的挂载每 30 s 探测一次，每个挂载至多一个在途探测：子进程存活、「已挂载」判据成立、并且在一个子进程里对挂载点做的 `stat` 在 5 s 内成功（超时即以 SIGKILL 结束该子进程）——三者都成立才保持 `online`。子进程退出 SHALL 立即判定 `offline`，不等下一轮；「宿主不同步进入挂载」的适配器调用超期同样 SHALL 立即判定 `offline`（与探测相互独立的第二个触发）。判定 `offline` 时 SHALL 惰性卸载该挂载、确保子进程已退出（超期触发时以 SIGKILL 结束它），然后安排重挂：第一次在 5 s 后，此后每次失败间隔翻倍，封顶 300 s；重挂成功即回 `online`、间隔复位为 5 s。每次重挂都经「挂载取值与主机规则」的主机规则与「挂载进程与挂载点」的挂载点重建与检查。卸载对在途探测、待定重挂与在途尝试的处置见「挂载操作的串行与取消」。
+每个已登记挂载的状态 SHALL 只在内存里，取 `online` 或 `offline`。`online` 的挂载每 30 s 探测一次，每个挂载至多一个在途探测：子进程存活、「已挂载」判据成立、在一个子进程里对挂载点做的 `stat` 在 5 s 内成功（超时即以 SIGKILL 结束该子进程）、并且 `sftp` / `smb` 挂载对该次挂载所用的 IP 与端口（给了用给的，否则 `sftp` 为 22、`smb` 为 445）的 TCP 连接在 5 s 内建立（建立即关闭；不碰挂载）——都成立才保持 `online`。连通检查的连接实现 SHALL 可由 manager 的构造选项注入。子进程退出 SHALL 立即判定 `offline`，不等下一轮；「宿主不同步进入挂载」的适配器调用超期同样 SHALL 立即判定 `offline`（与探测相互独立的第二个触发）。判定 `offline` 时 SHALL 惰性卸载该挂载、确保子进程已退出（超期触发时以 SIGKILL 结束它），然后安排重挂：第一次在 5 s 后，此后每次失败间隔翻倍，封顶 300 s；重挂成功即回 `online`、间隔复位为 5 s。每次重挂都经「挂载取值与主机规则」的主机规则与「挂载进程与挂载点」的挂载点重建与检查。卸载对在途探测、待定重挂与在途尝试的处置见「挂载操作的串行与取消」。
 
 #### Scenario: 崩溃即离线并退避重挂
 - **WHEN** 一个在线挂载的假 rclone 进程被 SIGKILL，随后假 rclone 被设定为接下来两次挂载失败、第三次成功（注入时钟）
@@ -140,6 +144,10 @@
 #### Scenario: 探测超时
 - **WHEN** 一个在线挂载的 `stat` 探测被设定为不返回
 - **THEN** 5 s 后探测子进程被 SIGKILL，状态为 `offline` 并进入重挂；服务进程的事件循环在此期间照常应答其它请求
+
+#### Scenario: 远端不可达即离线
+- **WHEN** 一个在线 `sftp` 挂载（挂载时的 IP `10.0.0.7`、未给端口）的探测轮到时，注入的连接实现对 `10.0.0.7:22` 既不连上也不报错；`stat` 子进程照常成功
+- **THEN** 5 s 后状态为 `offline`，假 `fusermount3` 收到一次 `-uz` 并进入重挂；一个在线 `local` 挂载的探测不调用连接实现
 
 #### Scenario: 退避封顶
 - **WHEN** 一个挂载持续重挂失败十次
@@ -246,7 +254,11 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - `GET …/tree`、`GET …/file`、`GET …/download`、`GET …/archive` 的路径在 `offline` 挂载内 → 409 `mount_offline`。
 - `POST …/dirs` 的路径在 `offline` 挂载内 → 409 `mount_offline`；在只读挂载内 → 403 `mount_read_only`。
 
-边界判定先于离线与只读判定。这些拒绝都 SHALL NOT 写 `file.delete` / `file.move` / `dir.create` 审计、SHALL NOT 触碰文件系统。通过判定的挂载内操作恰为 `tree`、`file`（含 Range）、`download`、`archive`、`dirs` 与同一挂载内的 `move`，它们在 `online` 挂载上的每一次文件系统调用 SHALL 经「宿主不同步进入挂载」的异步适配器。上传固定写入 `uploads/<名>`，而挂载名不能是 `uploads`，上传因此永不落进挂载。挂载内的 `dirs` 由异步适配器 `mkdir`，SHALL NOT 经 `ensureSharedDir`（它对已存在的分量同步 `stat`、对新建的分量同步 `chmod`）、也不 `chmod`：挂载内新目录的模式由 rclone 的 `--umask` 决定（「挂载进程与挂载点」），workspaces 的 `0o2770` 只对挂载之外成立。其它入口见「宿主不同步进入挂载」。
+边界判定先于离线与只读判定。这些拒绝都 SHALL NOT 写 `file.delete` / `file.move` / `dir.create` 审计、SHALL NOT 触碰文件系统。通过判定的挂载内操作恰为 `tree`、`file`（含 Range）、`download`、`archive`、`dirs` 与同一挂载内的 `move`，它们在 `online` 挂载上的每一次文件系统调用 SHALL 经「宿主不同步进入挂载」的异步适配器。上传固定写入 `uploads/<名>`，而挂载名不能是 `uploads`，上传因此永不落进挂载。挂载内的 `dirs` 由异步适配器 `mkdir`，SHALL NOT 经 `ensureSharedDir`（它对已存在的分量同步 `stat`、对新建的分量同步 `chmod`）、也不 `chmod`：挂载内新目录的模式由 rclone 的 `--umask` 决定（「挂载进程与挂载点」），workspaces 的 `0o2770` 只对挂载之外成立。其它入口见「宿主不同步进入挂载」。挂载内的 `file`（含 Range）与 `download` 的 `Content-Length` 按打开后对描述符 `fstat` 的大小（区间按它截取）发出；此后经适配器读到 EOF 而已写出的字节少于该长度时，SHALL 销毁连接，不补齐、不以正常结束收尾；已写出的审计行不撤回。
+
+#### Scenario: 挂载内短读即中断
+- **WHEN** 在线挂载 `远端` 里的 `a.bin`，适配器的 `fstat` 报 1000 字节，而读在第 400 字节处返回 EOF；分别请求 `download?path=远端/a.bin` 与 `file?path=远端/a.bin`（`Range: bytes=0-999`）
+- **THEN** 两者的响应头都已按 1000 字节发出，连接在读到 400 字节之后被销毁、客户端收到的正文恰为 400 字节且以连接中断结束（不是一个完整的 200 / 206）；`download` 的 `file.download` 审计恰一行
 
 #### Scenario: 删除与跨挂载移动
 - **WHEN** 空间有在线可写挂载 `远端`（其中有 `a.md`、`c.md`、目录 `d`）与根下文件 `local.md`；依次 `DELETE entries?path=远端/a.md`、`DELETE entries?path=远端`、`DELETE entries?path=./远端`、`DELETE entries?path=./远端/a.md`、`DELETE entries?path=远端//a.md`、`move {from:"local.md",to:"远端/local.md"}`、`move {from:"远端/a.md",to:"a.md"}`、`move {from:"./远端/a.md",to:"a.md"}`、`move {from:"远端",to:"别名"}`、`move {from:"远端/a.md",to:"远端/d/a.md"}`、`move {from:"远端/c.md",to:"./远端/e.md"}`
@@ -341,7 +353,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - **THEN** 前两例分别显示 `请填写挂载名称` 与 `名称只能包含字母、数字、下划线、连字符与汉字`，没有请求；第三例显示 `管理员尚未登记服务器目录`、`测试连通并挂载` 禁用；第四例 `只读挂载` 为打开且禁用，提交的 body 为 `{name, backend:"local", sourceId, readOnly:true}`；第五例下拉照常列出各项、界面不显示 `path`
 
 ### Requirement: 真实挂载验证层
-`server/test/linux/mounts-fuse.test.ts` SHALL 只在 `process.platform === "linux"` 且 `WORKBUDDY_FUSE_TEST=1` 时执行，否则以 `describe.skipIf` 明示跳过；已 opt-in 而缺少运行前提（`WORKBUDDY_FUSE_RCLONE` 指向可执行的 rclone、PATH 上的 `fusermount3`、`/dev/fuse`）SHALL 失败而非追加 skip。它经真实 mount-manager、真实 rclone 与真实 FUSE 验证 `local` 后端：可写挂载内的建、读、写、改名；只读挂载写入失败；SIGKILL rclone 后状态在一轮探测之内变为 `offline`、挂载点不再在 mountinfo 里、随后重挂回 `online`；卸载后挂载点从 mountinfo 消失、目录被删除。环境另给了 `WORKBUDDY_FUSE_SFTP_HOST`、`_PORT`、`_USER`、`_PASS`、`_PATH`、`_DOWN`、`_UP`（后两者是测试主机上停止与启动该远端的可执行文件的绝对路径）时 SHALL 另跑 `sftp` 的两例：挂载读写；远端停机后在一轮探测之内（30 s + 5 s）报告 `offline`、远端恢复后 360 s 之内（退避封顶 300 s、就绪窗口 20 s 与余量）回到 `online`（这组变量只给了一部分即失败）。测试主机上的签收运行 SHALL 给出这组变量，`sftp` 两例必须通过；本机开发运行可只跑 `local`。「已挂载」以 mountinfo 路径为准。每例结束先卸载、确认 mountinfo 里不再有挂载点，再以 `fs/promises` 的 `rm` 删除测试自有目录。它不进任何 CI job，在测试主机的一次性容器里手工运行，结果记入 PR 与 ADR-0003。
+`server/test/linux/mounts-fuse.test.ts` SHALL 只在 `process.platform === "linux"` 且 `WORKBUDDY_FUSE_TEST=1` 时执行，否则以 `describe.skipIf` 明示跳过；已 opt-in 而缺少运行前提（`WORKBUDDY_FUSE_RCLONE` 指向可执行的 rclone、PATH 上的 `fusermount3`、`/dev/fuse`）SHALL 失败而非追加 skip。它经真实 mount-manager、真实 rclone 与真实 FUSE 验证 `local` 后端：可写挂载内的建、读、写、改名；只读挂载写入失败；SIGKILL rclone 后状态在一轮探测之内变为 `offline`、挂载点不再在 mountinfo 里、随后重挂回 `online`；卸载后挂载点从 mountinfo 消失、目录被删除；可写挂载内「新建目录、在其中建文件、目录改名、删文件、删目录」之后源目录里没有残留（#1665 P8 的回归，argv 带 `--vfs-write-back 0s`）。环境另给了 `WORKBUDDY_FUSE_SFTP_HOST`、`_PORT`、`_USER`、`_PASS`、`_PATH`、`_DOWN`、`_UP`（后两者是测试主机上停止与启动该远端的可执行文件的绝对路径）时 SHALL 另跑 `sftp` 的两例：挂载读写；远端停机后在一轮探测之内（30 s + 5 s）报告 `offline`、远端恢复后 360 s 之内（退避封顶 300 s、就绪窗口 20 s 与余量）回到 `online`（这组变量只给了一部分即失败）。测试主机上的签收运行 SHALL 给出这组变量，`sftp` 两例必须通过；本机开发运行可只跑 `local`。「已挂载」以 mountinfo 路径为准。每例结束先卸载、确认 mountinfo 里不再有挂载点，再以 `fs/promises` 的 `rm` 删除测试自有目录。它不进任何 CI job，在测试主机的一次性容器里手工运行，结果记入 PR 与 ADR-0003。
 
 #### Scenario: 非 opt-in 明示跳过
 - **WHEN** 平台不是 Linux 或 `WORKBUDDY_FUSE_TEST` 不是 `1`
@@ -357,6 +369,23 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - **WHEN** 只给出其中一部分变量
 - **THEN** 套件失败，错误点名缺少的变量
 
+#### Scenario: 删除不复活
+- **WHEN** opt-in 且前提齐全，可写 `local` 挂载内依次 `mkdir d`、建 `d/f`、把 `d` 改名为 `d2`、删 `d2/f`、删 `d2`，随后等待 7 s
+- **THEN** 挂载视图与源目录里都没有 `d`、`d2` 与 `f`
+
 #### Scenario: local 后端的生命周期
 - **WHEN** opt-in 且前提齐全，对一个测试自有源目录建出可写 `local` 挂载，写入、改名、读回；SIGKILL 其 rclone；等待重挂；卸载
 - **THEN** 读写结果与源目录一致；SIGKILL 之后一轮探测之内报告 `offline` 且 mountinfo 里没有该挂载点；随后报告 `online`；卸载后挂载点不在 mountinfo 里、目录不存在、源目录内容不变
+
+### Requirement: 中心「挂载源」tab
+`/center?tab=mount-sources`（`label` `挂载源`，只对管理员可见，`CENTER_TABS` 中位于 `models` 之后，见 model-registry「中心页外壳」）SHALL 渲染 `GET /api/mount-sources` 的管理员视图：每行名称、服务器路径与 `只读` 或 `可写`，行操作 `删除`——确认框说明恰为 `删除后，所有引用它的挂载都会被卸载`，确认后恰一次 `DELETE /api/mount-sources/<id>`，成功后列表重取，失败在确认框内显示 `ApiError.message`。页顶 `登记挂载源` 打开对话框，字段为名称、服务器路径与开关 `只读`，提交恰一次 `POST /api/mount-sources`（body `{name, path, readOnly}`），成功后关闭对话框并重取列表，400 / 409 的 `ApiError.message` 在对话框内就地显示；提交前在客户端按「挂载源端点」的名称与路径规则校验并显示原因（路径的存在与包含关系只由服务端判定）。对话框接 `useEscapeFallback`。没有挂载源时显示空态：标题 `尚未登记挂载源`，说明恰为 `在服务器上挂好 NFS 或本机目录后，在此登记；用户即可在工作空间里挂载它。`，页顶 `登记挂载源` 仍在。没有编辑操作。API 客户端 `web/src/lib/api-mounts.ts` SHALL 提供 `listMountSources` / `createMountSource` / `deleteMountSource`，按管理员视图严格解析。
+
+#### Scenario: 登记与删除
+- **WHEN** 管理员打开 `/center?tab=mount-sources`（`GET` 返回一个挂载源 `NAS`，路径 `/mnt/nas`，只读），登记 `{name:"共享盘", path:"/srv/share", readOnly:false}`，再删除 `NAS` 并确认
+- **THEN** 列表先显示 `NAS`、`/mnt/nas`、`只读`；恰一次 `createMountSource` 后列表重取；删除的确认框显示 `删除后，所有引用它的挂载都会被卸载`，确认后恰一次 `DELETE /api/mount-sources/<NAS 的 id>`，随后列表重取
+
+#### Scenario: 就地失败与空态
+- **WHEN** 登记时服务端返回 409 `conflict`；另一例 `GET /api/mount-sources` 返回 `{sources:[]}`
+- **THEN** 对话框保持打开并显示该 `ApiError.message`；空态一例显示 `尚未登记挂载源` 与上述说明，页顶仍有 `登记挂载源`
+- **WHEN** 普通用户打开 `/center?tab=mount-sources`
+- **THEN** 以 replace 导航到第一个可见 tab，tab 条没有 `挂载源`，没有发出 `GET /api/mount-sources`

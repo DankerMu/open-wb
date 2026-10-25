@@ -26,6 +26,8 @@ grill（2026-10-21，owner 逐分支拍板，见 design「owner 的裁定」）�
 - **前端**：文件页与会话页侧边栏（同一个 `WorkspaceBrowser`）在空间根之后列出挂载根行（服务端的根一层 `tree` 不再列出挂载点）（`只读` 标签、在线点、`卸载 <名>`、离线不可展开）；挂载内的网页、PDF 与办公文档在预览区显示 `挂载目录内的文件暂不支持预览，请下载查看`（预览来源对挂载内路径 404）；文件页 `新建` 菜单在挂载启用时多 `挂载目录`，对话框含名称、协议、主机、端口、路径、凭证与 `只读挂载` 开关，按钮 `测试连通并挂载`，失败就地显示。不新增 `.css`。
 - **文档**：ADR-0003「2026-10 补充」的产品化一节（以 #1665 的 P1–P8 为证据）、ADR-0010 补充（挂载的 uid/gid 选项与 `<state>/mounts`）、`system.md` 新节（`fuse.conf`、依赖包、部署前提）与 §3 `deriveWhitelist`「S1b 未来项」的销项、验收清单文件节新增挂载行。
 
+> 2026-10-25：#1665 实测之后 owner 裁定了六项实测偏差与 Epic #1679 的 (a)–(m)，见 design「owner 的裁定（2026-10-25）」；挂载源登记加中心「挂载源」tab（workspace-mounts「中心「挂载源」tab」、组 13）。
+
 ## Capabilities
 
 ### New Capabilities
@@ -44,6 +46,7 @@ grill（2026-10-21，owner 逐分支拍板，见 design「owner 的裁定」）�
 - `turn-artifacts`: 「文件变更推导与归属」（词法上在已登记挂载内的候选在任何文件系统访问之前丢弃；`realpath` / `lstat` 经 `fs/promises` 并带 10 s 期限）。以主规格为底。
 - `chat-sessions`: 「Slash 命令白名单与命令目录」（项目技能目录的两个内核 real path 改经 `fs/promises` 的 `realpath`、10 s 期限，`listProjectSkills` / `sessionSkills` 返回 promise）。以主规格为底。
 
+- `model-registry`: 「中心页外壳」（`CENTER_TABS` 在 `models` 之后加只对管理员可见的 `挂载源`；以 `s1d-connectors` 的 MODIFIED 文本为底；owner 2026-10-25 裁定 Epic #1679 (a)，组 13）。
 ## Impact
 
 - 服务端：新 `server/src/workspaces/mounts/`（config、validate、store、host-policy、rclone-conf、mountinfo、manager、rest、path-rule、fs）、迁移 049、`core/errors` 七码、`http/errors.ts` 归属集、`state-layout.ts` 一行、`core/sandbox` 的 `resolve` 与 facade、`server.ts` 的配置展开与启停接线、`app.ts` 的 manager 构造、`workspaces/rest.ts` / `rest-entries.ts` / `rest-archive.ts` 的挂载判定与适配器、`workspaces/tree.ts`、`snapshots.ts`、`snapshots-restore.ts`、`preview/app.ts`、`sessions/prompt-attachments.ts`、`undo.ts`、`file-changes-ownership.ts`（经 `turn-control.ts`）的挂载名跳过；`file-changes-ownership.ts` 与 `sessions/slash-commands.ts` 的 `realpath` 改为有期限的异步调用（调用方 `turn-control.ts`、`rest-commands.ts`、`sessions/rest.ts`、`branching.ts` 随之 `await`）。

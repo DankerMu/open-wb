@@ -31,7 +31,7 @@
 
 - sshfs；由 app 发起的 NFS / CIFS 内核挂载（需要 root）。
 - demo 里用户手填路径的「本服务器目录」（任意服务器路径对 omp 可见）——本机与 NFS 目录只经管理员登记的挂载源接入。
-- 挂载源的管理界面：管理员只经端点登记与删除（普通用户的对话框读 `GET /api/mount-sources`）——起草者的范围裁剪，不在 owner 裁定表里，待 owner 裁定（Open Questions）。
+- 挂载源的管理界面：中心「挂载源」tab（只对管理员可见：列表、登记、删除；owner 2026-10-25 裁定 (a)，组 13）；普通用户的对话框读 `GET /api/mount-sources`。
 - 预览源 `/w/`、`/o/` 与会话附件读取挂载内的文件（D21：宿主不同步进入挂载；它们按拒绝处理）。预览区对挂载内的网页渲染视图、PDF 与办公文档显示 `挂载目录内的文件暂不支持预览，请下载查看`（D18）。
 - omp 在挂载内的文件变更进文件变更卡：turn-artifacts 的归属判定词法上丢弃它们（D21）。
 - 修改既有挂载（改名、换凭证、改只读）：卸载后重新挂载。
@@ -61,6 +61,21 @@
 | 其它限制 | 只有正式（非临时）空间能挂载；每空间上限为配置项，缺省 8；健康探测间隔 30s；重挂指数退避、封顶 5 分钟；挂载点判据沿用 #1237（`EBUSY` + `/proc/self/mountinfo` 路径）；快照的 `dev` 规则不变 | owner |
 | 开放项 | rclone `local` 后端在 uid 分离下的读写与 `EBUSY` 待前置实测 #1665；#1665 的 P1–P8 任一不成立需 owner 重新拍板——落 Open Questions，不进 specs | owner |
 
+### owner 的裁定（2026-10-25，#1665 实测之后，已定）
+
+#1665 的结论见 ADR-0003「2026-10 补充（#1665）」。下表是 owner 对其中「需 owner 重新拍板」六项与 Epic #1679 待裁定项 (a)–(m) 的裁定；D3、D6、D7、D9、D11、D16、Risks、Open Questions 已据此改写。
+
+| 事项 | 裁定 | 落点 |
+|---|---|---|
+| P4′ 断网判不出离线（挂载根 `stat` / `readdir` 由目录缓存应答） | 探测加 TCP 连通检查：`sftp` / `smb` 对该次挂载用的 IP 与端口在 5 s 内 `connect` | D11 |
+| 续传依赖 IP 不变（argv 覆盖 host 使缓存路径带后缀） | 每次挂载尝试把判定过的 IP 写进 `rclone.conf` 的 `host`，argv 不再带 `--sftp-host` / `--smb-host` | D3、D6、D7、D9 |
+| P8 已删文件在远端复活 | 可写挂载的 argv 加 `--vfs-write-back 0s`；组 12 加该序列的真实挂载回归，仍复现则写为已知限制 | D7、组 12 |
+| P7 挂载内读不固定内容 | 短读即中断：挂载内 `file` / `download` 读到的字节少于已发出的 `Content-Length` 时销毁连接；同长原地改写的混合内容是已知限制 | D16 |
+| P15 挂载点竞态 | 接受为残余；就绪轮询中看到本段名的挂载出现在别的挂载点即判失败并按来源惰性卸载 | D9、Risks |
+| smb 在共享根建出 `．` 目录 | 接受，写进运维文档与组 12 的签收记录 | D20、Risks |
+| (a) 挂载源登记入口 | 中心最小 tab，追加组 13 | D18、组 13 |
+| (b)–(m) | 照现稿接受 | —— |
+
 ### 起草者的技术决定
 
 - **D1 迁移 049**（`server/src/core/db/migrations/049_workspace_mounts.sql`）：
@@ -81,7 +96,7 @@
   2. 字面环回：等于 `localhost` 或以 `.localhost` 结尾；或是 IP 字面（IPv4 点分十进制，或任一 IPv6 写法）且地址值属于 `127.0.0.0/8`、`0.0.0.0`、`::1`、`::`，或是 IPv4 映射地址（`::ffff:a.b.c.d`）而其 IPv4 属于前两者——拒绝。`0:0:0:0:0:0:0:1`、`::ffff:127.0.0.1`、`localhost.`、`LOCALHOST.` 都在这一步命中。
   3. `MOUNT_HOST_ALLOW` 配置时，规范化后的 `host` 不等于名单中任一项——拒绝。只比字符串，不比解析结果。
   4. 解析：`dns.lookup(host, {all: true})`；解析失败或结果为空 → 该次尝试失败（建出 502 `mount_failed` + `mount.reject` `reason: "mount_failed"`；重挂保持离线），不 spawn——不再「解析失败不算环回」地放行。任一结果属于第 2 步的地址——拒绝（堵住 `2130706433`、`0x7f.1` 一类数字写法与指向环回的内网域名）。
-  5. 把第一个解析结果（IP 字面）经 `--sftp-host <ip>` / `--smb-host <ip>` 交给 rclone（主机不是凭证，可以上命令行），rclone 不再自己解析；`rclone.conf` 的 `host` 仍写用户填的主机，以 argv 为准（#1665 P1′ 证明覆盖生效）。判定的地址就是连接的地址：DNS 重绑定与 app（glibc）/ rclone（Go 解析器）对同一名字的分歧都不再成立。
+  5. 把第一个解析结果（IP 字面）写进该次尝试的 `rclone.conf` 的 `host`（D6），rclone 不再自己解析；argv 不带 `--sftp-host` / `--smb-host`——#1665 P1′ / P5：argv 覆盖配置项时 rclone 给远端名加一个由覆盖值决定的后缀（mountinfo 来源字段变成 `<段名>{xxxxx}:…`，VFS 缓存路径也带它），IP 一变，未回写的数据就不再续传（owner 2026-10-25）。DB 的 `host` 仍是用户填的主机，每次尝试都从它重新判定。判定的地址就是连接的地址：DNS 重绑定与 app（glibc）/ rclone（Go 解析器）对同一名字的分歧都不再成立。该地址同时记在内存里，供 D11 的连通检查。
   - 建出时被拒 → 403 `mount_host_rejected` + `mount.reject`（`reason: "host_rejected"`）；重挂时被拒 → 该挂载保持离线（管理员收紧名单后，已有挂载在下一次重挂时失效）。
 - **D4 配置键与启动预检**（`server/src/workspaces/mounts/config.ts` 的 `resolveMountSettings(env)`，由 `resolveServerConfig` 展开；应用配置 37 → 40 项）：
   - `RCLONE_BIN`：缺省未配置 = 挂载关闭；给出时为绝对路径，显式 empty 或相对路径为配置错误。
@@ -89,28 +104,34 @@
   - `MOUNT_MAX_PER_WORKSPACE`：与 `OMP_IDLE_MS` 同一解析纪律（canonical ASCII decimal 1..2147483647），缺省 `8`。
   - 预检在配置阶段、只在配置了 `RCLONE_BIN` 时运行（先例 `BROWSER_BIN`、`OMP_USER`，失败同为 `reason: "config"`，不新增启动阶段）：`RCLONE_BIN` 是可执行普通文件（`X_OK`）；在进程 `PATH` 上找到可执行的 `fusermount3` 并记下其绝对路径（此后只用该路径）；`/dev/fuse` 存在（且为字符设备）；`OMP_USER` 配置时 `/etc/fuse.conf` 有一行去掉首尾空白后恰为 `user_allow_other`，并经固定绝对路径 `/usr/bin/id -u -- <OMP_USER>` 取得 omp 的数值 uid（Node 没有 getpwnam；与 `/usr/bin/setpriv` 同样不走 PATH）。任一不过 → 抛出点名该键的配置错误。
   - `OMP_USER` 配置时另查 FUSE 挂载程序的执行权（D20 的部署要求）：进程 `PATH` 各项下找到的每一个 `fusermount3` 与 `fusermount`，其 mode 没有 other 执行位，且其属组不是 omp 用户的任何一个组（`/usr/bin/id -G -- <OMP_USER>` 的输出）；不过 → 点名 `RCLONE_BIN` 的配置错误，message 写明「fusermount3 只能对 app 所在、omp 不在的组可执行」。理由：`user_allow_other` 全机生效，omp uid 若能执行 setuid 的 `fusermount3`，就能在自己可写的空间根下挂一个 `allow_other` 的 FUSE、再让它不应答——app 的任何一次进入都会挂住，omp 还能向 app 伪造文件内容（#1665 P10）。同 uid 部署（`OMP_USER` 缺席）不查：那时 omp 就是 app uid。
+  - PATH 上另须有可执行的 `fusermount`：rclone 1.60.1 挂载时按 PATH 查找的是 `fusermount` 而不是 `fusermount3`（#1665 P10：omp uid 无权执行时报 `exec: "fusermount": executable file not found in $PATH`）；Ubuntu 的 fuse3 包把它装成指向 `fusermount3` 的符号链接。
   - 不检查 rclone 版本（部署说明写最低版本 = 测试主机实测版本）。
 - **D5 app 私有目录布局**：托管布局加 `<state>/mounts`（`0700`，`ompMountsDir(stateDir)`，由 `ensureOmpStateLayout` 建出与校正）。每个挂载 `<state>/mounts/<id>/`（`0700`，`ensureOwnedDir`）内：`rclone.conf`（`0600`）、`cache/`（`0700`，`--cache-dir`，VFS 写缓存里是用户数据，不能落到 app uid 的 `~/.cache/rclone`）、`rclone.log`（`0600`，`--log-file`，`--log-level NOTICE`，供管理员排障；每次挂载尝试之前由 app 以 sandbox-core「托管文件权限位」的语义确保它存在且为 `0600`，rclone 只追加、不改模式——#1665 P14）。整个目录在卸载时递归删除（`fs/promises` 的 `rm`）。
 - **D6 凭证文件**（`server/src/workspaces/mounts/rclone-conf.ts`）：一个 INI 段，段名为 `m<挂载 id>`（下称 `<段名>`；它也是 mountinfo 来源字段的开头，用来认出这个挂载出现在哪里，D9）：
-  - `sftp`：`type = sftp`、`host`、`port`（给了才写）、`user`、`pass = <obscure 串>` 或 `key_pem = <单行 PEM>`。
-  - `smb`：`type = smb`、`host`、`port`（给了才写）、`user`、`pass = <obscure 串>`、`domain`（给了才写）。
+  - `sftp`：`type = sftp`、`host = <该次尝试判定过的 IP 字面>`、`port`（给了才写）、`user`、`pass = <obscure 串>` 或 `key_pem = <单行 PEM>`。
+  - `smb`：`type = smb`、`host = <该次尝试判定过的 IP 字面>`、`port`（给了才写）、`user`、`pass = <obscure 串>`、`domain`（给了才写）。
+  - 每次挂载尝试（建出、重挂、启动恢复）在 D3 判定之后、spawn 之前改写 `host` 一行：读回现有 `rclone.conf`、只替换 `host` 的值、写同目录临时名再 `rename`（`0600`）；其余字节不变，凭证不需要重新经手。`local` 没有 `host`，不改写。
   - `local`：`type = local`（路径走 remote 参数）。
   - 口令经 `RCLONE_BIN obscure -` 处理：口令从标准输入写入，obscure 串从标准输出读回，10 s 期限；子进程环境同 D7。先写同目录临时名再 `rename`，最终 mode `0600`。
   - 凭证只在 `POST` 的这一个请求里经手：写完即丢，不进日志、审计、错误 message、响应。
 - **D7 rclone 子进程**（`server/src/workspaces/mounts/manager.ts`）：
-  - argv：`<RCLONE_BIN> mount <段名>:<远端> <挂载点> --config <conf> --cache-dir <cache> --log-file <log> --log-level NOTICE --allow-non-empty`；`sftp` 再加 `--sftp-host <ip>`、`smb` 再加 `--smb-host <ip>`（D3 第 5 步）；可写加 `--vfs-cache-mode writes`，只读加 `--read-only`；`OMP_USER` 模式加 `--allow-other --default-permissions --uid <omp uid> --gid <空间根目录的 gid> --umask 007`。整串由 #1665 P1′ 实测；spec 钉 argv 是因为假 rclone 要据它断言。
+  - argv：`<RCLONE_BIN> mount <段名>:<远端> <挂载点> --config <conf> --cache-dir <cache> --log-file <log> --log-level NOTICE --allow-non-empty`；不带任何后端覆盖参数（主机经 `rclone.conf`，D3 第 5 步）；可写加 `--vfs-cache-mode writes --vfs-write-back 0s`（`0s`：关闭回写延迟，缩小 #1665 P8「目录改名后删除的新文件在远端复活」的窗口，owner 2026-10-25；组 12 回归），只读加 `--read-only`；`OMP_USER` 模式加 `--allow-other --default-permissions --uid <omp uid> --gid <空间根目录的 gid> --umask 007`。整串除 `--vfs-write-back 0s` 与去掉 `--*-host` 外由 #1665 P1′ 实测（这两处由组 12 的真实挂载复核）；spec 钉 argv 是因为假 rclone 要据它断言。
   - `<远端>`：`sftp` 为 `remotePath`；`smb` 为 `remotePath` 去掉开头的 `/`（`share/dir`）；`local` 为挂载源的 `path`。
   - 环境恰为 `{PATH: <进程 PATH>, HOME: <state>/mounts/<id>}`：不继承 app 环境（`MODEL_UPSTREAM_API_KEY` 等不进 rclone），也挡住 `RCLONE_*` 环境变量改写配置；`HOME` 指向私有目录，rclone 不会去碰 app uid 的家目录。
   - `--default-permissions`：`--allow-other` 下不加它，内核不按 mode 检查访问，机器上任何用户都能进挂载；加了之后 `--umask 007` 与共享组才是边界。`--uid <omp>`：omp 是属主，`chmod` 一类属主操作不被内核拒绝（rclone 自己忽略它）；app uid 经共享组的 `rw` 访问。`--gid` 取空间根目录的 gid（setgid 继承来的共享组），不另配置。
   - `--allow-non-empty`：离线期间挂载点是空目录，omp 可能往里写；不加它 rclone 拒绝挂到非空目录，挂载就永远回不来、而挂载内删除又被拒绝。加了之后残留被挂载遮住，卸载后显形为普通目录（D10），数据不丢。
   - 前台运行、app 持有子进程；它的意外退出即崩溃（D11）；卸载自己结束它时不算，不触发重挂。
 - **D8 挂载点**：`<空间根>/<name>`，只在空间根下一层。每次挂载尝试之前（此时该挂载离线、已惰性卸载，挂载点不是 FUSE），先 `lstat`（不跟随）挂载点：不存在（离线期间可能被 omp 删掉；快照还原不碰已登记的挂载名，D21）才以 `ensureSharedDir` 建出并再 `lstat` 一次；存在时（或建出之后）必须是目录、不是符号链接、属 app uid——先 `lstat` 再建，是因为 `ensureSharedDir` 对已存在的分量用跟随符号链接的 `statSync`，挂载点已被换成指向别处的符号链接时不能让它跟随进去。不过 → 该次尝试失败（建出 502 `mount_failed` + `mount.reject`；重挂保持离线），不 spawn。挂载点里有离线期间的残留条目不算不过（`--allow-non-empty`，D7）。检查与 `fusermount3` 之间仍有窗口（空间根 `2770` 无粘滞位，omp 可改名其下条目）：残余见 Risks，#1665 P15。建出时 `<空间根>/<name>` 已有任何条目 → 409 `conflict`。
-- **D9 挂载就绪与判据**：「已挂载」= `/proc/self/mountinfo` 里有一行的挂载点字段（第 5 字段，按 `\040` 等八进制转义还原）逐字节等于挂载点的绝对路径——与 #1237 的 mountinfo 判据同一实现（读 mountinfo 的函数可注入路径，测试指向假文件）。建出时 spawn 之后每 100 ms 查一次，至多 20 s：先看到挂载 → 成功；子进程先退出或超时 → 杀掉子进程、惰性卸载该挂载、删除挂载点（空时）与私有目录 → 502 `mount_failed` + `mount.reject`（`reason: "mount_failed"`），不留行。
-  - 「惰性卸载该挂载」（这里、D10、D11、D12 同一函数）：对挂载点（在 mountinfo 里时）与 mountinfo 中文件系统类型为 `fuse.rclone`、来源字段（`-` 分隔符之后的第二个字段——分隔符之前的可选字段个数不定——八进制转义还原后）以 `<段名>:` 开头的每一行的挂载点，各执行 `fusermount3 -uz`——挂载点在检查之后被换掉时，挂载可能落在别处，按来源扫描才收得回来。来源字段的确切形状由 #1665 P1′ 记录。
+- **D9 挂载就绪与判据**：「已挂载」= `/proc/self/mountinfo` 里有一行的挂载点字段（第 5 字段，按 `\040` 等八进制转义还原）逐字节等于挂载点的绝对路径——与 #1237 的 mountinfo 判据同一实现（读 mountinfo 的函数可注入路径，测试指向假文件）。建出时 spawn 之后每 100 ms 查一次，整个就绪窗口至多 20 s：
+  - 看到挂载 → 再以子进程（`process.execPath` 跑一行 `fs.readdirSync(<挂载点>)`）对挂载根 `readdir` 一次，期限为窗口的剩余时间，超时即 SIGKILL 它；成功才算就绪。理由：#1665 P11——smb 口令错误时挂载照样出现，挂载根的 `stat` 也成功，只有 `readdir` 以 `EIO` 判出（实测 11–20 s）；这是 Epic #1679 (n) 预定的退路。
+  - 看到一行 `fuse.rclone`、来源以本挂载的段名开头、挂载点却不是预期路径 → 立即失败（不等满 20 s），按下面的来源扫描惰性卸载。理由：#1665 P15——检查与 `fusermount3` 之间挂载点被换成符号链接或被改名时，挂载会落到别处（300 次里 79 次），owner 2026-10-25 接受该窗口、要求落点不符即判失败。
+  - 子进程先退出、`readdir` 失败或超时、整个窗口超时 → 失败。
+  - 失败时杀掉子进程、惰性卸载该挂载、删除挂载点（空时）与私有目录 → 502 `mount_failed` + `mount.reject`（`reason: "mount_failed"`），不留行。重挂与启动恢复走同一判据，失败只使该挂载保持离线。
+  - 「惰性卸载该挂载」（这里、D10、D11、D12 同一函数）：对挂载点（在 mountinfo 里时）与 mountinfo 中文件系统类型为 `fuse.rclone`、来源字段（`-` 分隔符之后的第二个字段——分隔符之前的可选字段个数不定——八进制转义还原后）以 `<段名>:` 或 `<段名>{` 开头的每一行的挂载点，各执行 `fusermount3 -uz`——挂载点在检查之后被换掉时，挂载可能落在别处，按来源扫描才收得回来（#1665 P15 复测：54 次落点全部收回）。来源字段的形状：不带后端覆盖参数时为 `<段名>:<远端>`（#1665 P1′ 的 local 一栏）；`<段名>{` 只防 rclone 因任何覆盖而加后缀（P1′ 的 sftp / smb 一栏），不是预期形态。
 - **D10 卸载**（`detach`）：依次 `fusermount3 -uz <挂载点>`（不在 mountinfo 里则跳过）；对子进程 SIGTERM，5 s 未退出 SIGKILL；`rmdir` 挂载点（非空 = 离线期间的本地残留，留作普通目录，经错误通道报告一次）；`rm` 私有目录。卸载步骤的文件系统失败只报告、不阻止删行——行一删，manager 不再管它。惰性卸载使占用中的进程（omp 的 cwd 或打开的 fd 在挂载内）不阻塞卸载。
   - 功能关闭（`RCLONE_BIN` 未配置）时没有预检记下的 `fusermount3`：卸载需要惰性卸载（上一行的扫描找到该挂载——上次运行被 SIGKILL 之后撤了 `RCLONE_BIN`，孤儿 rclone 还挂着）时，在进程 `PATH` 上找第一个可执行的 `fusermount3`；找不到 → 503 `mount_disabled`，行与私有目录保留（删行会让一个活挂载失去一切路径规则），并向服务错误通道写一条记录点名原因（活挂载仍在 mountinfo 里、PATH 上没有可执行的 `fusermount3`）——503 的信封文案对管理员说不出真因，错误通道是唯一能看到它的地方；码仍是 `mount_disabled`。扫描没找到则不需要它，照常删行。
 - **D11 在线状态**：每个已登记挂载在内存里是 `online` 或 `offline`。
-  - 探测每 30 s 一轮，只对 `online` 的挂载：子进程存活 ∧ D9 判据成立 ∧ 以子进程（`process.execPath` 跑一行 `fs.statSync(<挂载点>)`）在 5 s 内成功——FUSE 上的阻塞会占住 libuv 线程池，所以 `stat` 不在服务进程里做；超时即 SIGKILL 该子进程（FUSE 等待可被 SIGKILL 打断）。每个挂载至多一个在途探测。
+  - 探测每 30 s 一轮，只对 `online` 的挂载：子进程存活 ∧ D9 判据成立 ∧ 以子进程（`process.execPath` 跑一行 `fs.statSync(<挂载点>)`）在 5 s 内成功 ∧ `sftp` / `smb` 对该次挂载用的 IP（D3 第 5 步记下的）与端口（给了用给的，否则 `sftp` 22、`smb` 445）在 5 s 内 TCP `connect` 成功（服务进程内 `net.connect`，不碰 FUSE；连上即关闭；实现可注入，测试换成不应答的 connect）。理由：#1665 P4′——远端断网而 rclone 存活时，挂载根的 `stat` 与 `readdir` 都在 0 ms 内由目录缓存应答，判不出离线；owner 2026-10-25 选 TCP 连通检查。它只判网络可达，凭证失效、共享被删仍由挂载内请求的适配器超期（D21）与 `EIO` 发现——FUSE 上的阻塞会占住 libuv 线程池，所以 `stat` 不在服务进程里做；超时即 SIGKILL 该子进程（FUSE 等待可被 SIGKILL 打断）。每个挂载至多一个在途探测。
   - 子进程 `exit` 事件立即判定离线，不等下一轮。
   - 判定离线 → 惰性卸载（使卡住的系统调用以 `ENOTCONN` 返回）、确保子进程退出 → 安排重挂：首次 5 s，此后每次翻倍，封顶 300 s；重挂成功即回 `online` 并把退避复位到 5 s。重挂经 D3 与 D8。
   - 请求路径上的最坏情况（D21，替换原先「≤ 30 s + 5 s」）：服务进程不对挂载做同步文件系统调用，挂载内的调用经异步适配器，每次至多 10 s；远端断网而 rclone 未退出时，挂载内的一个请求至多等 10 s 得 409 `mount_offline`。适配器超期是与探测相互独立的第二个离线触发，不取代探测。其它空间与本空间根不受影响，代价只是 libuv 线程池：每个挂起的挂载至多占一个线程、至多 10 s（SIGKILL rclone 与 `-uz` 使卡住的 FUSE 请求返回，#1665 P9）。这与 `IMPLEMENTATION_PLAN.md:509`「故障不阻塞空间根目录使用」的关系待 owner 确认（Open Questions）。
@@ -134,6 +155,7 @@
   - 边界：entries DELETE 的目标在任一挂载内（含挂载根）→ 409 `mount_boundary`；move 恰一侧在挂载内、两侧在不同挂载内、或 `from` 是挂载根 → 409 `mount_boundary`。同一挂载内的改名与移动照常一次 `rename`。
   - 判定次序：边界先于离线与只读（删除与跨界无论状态都不可能成功）。
   - 支持的挂载内操作恰为：tree、file（含 Range）、download、archive、dirs、同一挂载内的 move（改名与移动）；在线挂载上它们的每一次文件系统调用（`lstat`、`readdir`、`open`、`read`、`close`、`mkdir`、`rename`）经异步适配器（D21）。挂载内的 `dirs` 不调 `ensureSharedDir`（它对已存在的分量 `statSync`、对新建的分量 `chmodSync`，`dirs.ts:43,48`）：适配器以 `fs/promises` 的 `mkdir` 建出父目录已存在的那一级、不 `chmod`——rclone 忽略 `chmod`，新目录的模式来自 `--umask 007`（D7），workspaces 的 `0o2770` 只对挂载之外成立。删除与跨界移动按上面拒绝；上传固定写 `uploads/<名>`，永不在挂载内；其它入口见 D21 的表。
+  - 挂载内的 `file`（含 Range）与 `download` 仍按 ADR-0010 的描述符读法：打开后对描述符 `fstat` 取大小、`Content-Length` 按它发出；此后经适配器读到 EOF 而累计字节少于已发出的长度时，SHALL 销毁连接（不补齐、不以正常结束收尾），客户端得到的是中断而不是一个短了的 200 / 206。理由：#1665 P7——rclone 的描述符不固定 inode 与内容，远端改写会让同一 fd 读到提前 EOF，而 `fstat` 与重开后的 `stat` 仍报旧大小（目录缓存）。同长原地改写时读到的新旧混合字节检测不出来，是已知限制（owner 2026-10-25）。审计按既有规则（`download` 先打开、后写审计），中断不撤回审计行。
 - **D17 错误码**（十八 → 二十五）：
 
   | code | 状态 | message |
@@ -156,8 +178,9 @@
   - 状态在进入空间、`刷新`、挂载与卸载之后重取，不轮询、不推送。
   - 预览：选中的文件第一段是挂载名、而预览器要从隔离预览来源加载（网页渲染视图、PDF、办公文档）时，`WorkspaceBrowser` 告诉预览区「在挂载内」，预览区显示 `挂载目录内的文件暂不支持预览，请下载查看`、不签发令牌、不建 iframe（预览来源对挂载内路径 404，D21）；`查看源码` 与经 `file` 端点的预览器照常。规则在 file-previewers「隔离来源的嵌入与令牌」「PDF 与办公文档」（MODIFIED：先于既有三项判定，被挡下的预览不触发续期，场景「挂载内文件不签发」）；files-web「工作空间页」只规定宿主交出「在挂载内」这一输入。
   - 对话框本地校验把 `uploads`、`screenshots` 都判为 `该名称已保留`（D1）。
+  - 中心「挂载源」tab（组 13，owner 2026-10-25 裁定 (a)）：`CENTER_TABS` 末尾加 `{key:"mount-sources", label:"挂载源", adminOnly:true}`（`/center` 的描述不变——只对管理员可见的 tab 不进描述）。列表读 `GET /api/mount-sources` 的管理员视图：每行名称、路径、`只读` / `可写`，行操作 `删除`（确认框写明 `删除后，所有引用它的挂载都会被卸载`，D14 的连带卸载）；页顶 `登记挂载源` 打开对话框，字段名称、服务器路径、`只读` 开关，提交恰一次 `POST`，400 / 409 的 `ApiError.message` 就地显示；空态标题 `尚未登记挂载源`，说明 `在服务器上挂好 NFS 或本机目录后，在此登记；用户即可在工作空间里挂载它。`。API 客户端加进 `web/src/lib/api-mounts.ts`（`listMountSources` / `createMountSource` / `deleteMountSource`）。没有编辑：挂载源只有登记与删除两种写（D14）。仿 `s1d-connectors` 的中心「连接器」tab（#1675），在它之后合入。
 - **D19 白名单推导销项**：`system.md:29` 删去 `deriveWhitelist` 与「多根挂载点合并、白名单推导……为 S1b 未来项」；:35、:109 的「rclone/sshfs」改为 rclone；:173「sandbox 白名单更新」改为「挂载点在空间根下，沙箱 resolve 按包含关系覆盖」。
-- **D20 文档**：ADR-0003「2026-10 补充」的产品化一节（rclone 三后端、凭证文件、惰性卸载、主机规则、功能开关；证据引 #1665 的 P1–P8 节）；ADR-0010 补充（`<state>/mounts`、挂载选项 `--allow-other --default-permissions --uid <omp> --gid <共享组> --umask 007`、`fuse.conf`）；`system.md` §9.9「远程挂载」（依赖包 `fuse3` 与 rclone、`user_allow_other`、容器需 `/dev/fuse` 与 `SYS_ADMIN`、`rclone.log` 位置、回滚即撤 `RCLONE_BIN`）；`IMPLEMENTATION_PLAN.md:199` 的「rclone/sshfs」改为 rclone 并指向本 change；`IMPLEMENTATION_PLAN.md:509` 的回滚句改为「`RCLONE_BIN` 未配置即关闭；配置了而预检不过即启动失败（owner 裁定 fail-closed）」；`system.md` §9.9 写 `fusermount3` 的部署要求（只对 app 所在、omp 不在的组可执行，例如 `dpkg-statoverride --update --add root <app 组> 4750 /usr/bin/fusermount3`；该组不得是 `workbuddy`，omp 是它的成员，ADR-0010）与同一条进 ADR-0010 补充；`system.md:31` 的错误码计数改为二十五。
+- **D20 文档**：运维文档另记 #1665 的已知限制：smb 往共享根写文件时远端出现 `．`（U+FF0E）目录；`--vfs-write-back 0s` 之下 P8 的复活序列若在组 12 回归中仍复现，记为已知限制；挂载内同长原地改写可能读到新旧混合内容。ADR-0003「2026-10 补充」的产品化一节（rclone 三后端、凭证文件、惰性卸载、主机规则、功能开关；证据引 #1665 的 P1–P8 节）；ADR-0010 补充（`<state>/mounts`、挂载选项 `--allow-other --default-permissions --uid <omp> --gid <共享组> --umask 007`、`fuse.conf`）；`system.md` §9.9「远程挂载」（依赖包 `fuse3` 与 rclone、`user_allow_other`、容器需 `/dev/fuse` 与 `SYS_ADMIN`、`rclone.log` 位置、回滚即撤 `RCLONE_BIN`）；`IMPLEMENTATION_PLAN.md:199` 的「rclone/sshfs」改为 rclone 并指向本 change；`IMPLEMENTATION_PLAN.md:509` 的回滚句改为「`RCLONE_BIN` 未配置即关闭；配置了而预检不过即启动失败（owner 裁定 fail-closed）」；`system.md` §9.9 写 `fusermount3` 的部署要求（只对 app 所在、omp 不在的组可执行，例如 `dpkg-statoverride --update --add root <app 组> 4750 /usr/bin/fusermount3`；该组不得是 `workbuddy`，omp 是它的成员，ADR-0010）与同一条进 ADR-0010 补充；`system.md:31` 的错误码计数改为二十五。
 
 - **D21 宿主不同步进入挂载**（2026-10-22 Stage 4 新增；替换 D11 原先「请求可阻塞约 35 s」的上界与 D16 原先「preview-origin 不加判定」）：服务进程 SHALL NOT 对已登记挂载的挂载点或其下任何路径做同步文件系统调用——远端断网而 rclone 存活时，主线程上的一次 `lstatSync` 会一直挂在 FUSE 请求上，探测与超时定时器都在同一个事件循环里，无从自救，整个服务对所有人停摆。
   - 成员判定只有一条词法规则：规范化路径（按 `/` 分割、去掉空段与 `.` 段、`..` 已被拒）的第一段等于该空间某个登记挂载的 `name`。`core/sandbox` 导出这个函数，`resolve` 与 D16 的判定都用它。
@@ -218,7 +241,7 @@
 
 - **[`--allow-other` 让别的本机用户也能进挂载]** → `--default-permissions` + `--umask 007` + 共享组；#1665 P1′。
 - **[`user_allow_other` 让 omp uid 自己挂 `allow_other` 的 FUSE、令 app 挂住]** → 部署要求 `fusermount3` / `fusermount` 只对 app 所在、omp 不在的组可执行，`OMP_USER` 模式预检把关（D4、D20）；PATH 之外的 setuid 副本预检看不到，部署说明要求删除；#1665 P10。
-- **[挂载点在检查与 `fusermount3` 之间被换成符号链接]** → 每次尝试前 `lstat` 挂载点（D8），失败清理按来源扫描 mountinfo（D9）；`fusermount3` 自己对最后一个分量的处理与剩余窗口待 #1665 P15。omp 删掉离线挂载点、自建同名目录（属 omp uid）会让该挂载一直离线——只伤它自己会话所在空间的挂载，登记为残余。
+- **[挂载点在检查与 `fusermount3` 之间被换成符号链接]** → #1665 P15：`fusermount3` 拒绝最后一段是符号链接的挂载点，但检查与挂载之间的窗口实测可利用（omp 用 `RENAME_EXCHANGE` 交换时 300 次里 35 次落到链接目标、44 次落到被改名的目录）；owner 2026-10-25 接受为残余，就绪轮询中落点不符即判失败并按来源惰性卸载（D9）。原文：每次尝试前 `lstat` 挂载点（D8），失败清理按来源扫描 mountinfo（D9）；`fusermount3` 自己对最后一个分量的处理与剩余窗口待 #1665 P15。omp 删掉离线挂载点、自建同名目录（属 omp uid）会让该挂载一直离线——只伤它自己会话所在空间的挂载，登记为残余。
 - **[app 被 SIGKILL 后 rclone 成为孤儿，挂载留在原处]** → 启动恢复时先惰性卸载残留挂载（D12）；孤儿 rclone 随卸载退出。
 - **[FUSE 上的阻塞]** → 宿主不对挂载做同步调用、挂载内调用经 10 s 期限的异步适配器（D21）；残余：挂载内的一个请求至多等 10 s，每个挂起的挂载至多占一个 libuv 线程 10 s；文件变更归属与项目技能的 `realpath` 经 omp 放的符号链接进入挂起的挂载时同样至多等 10 s、占一个线程，该线程要等探测判离线并惰性卸载之后才放回（≤ 35 s）。会话截图目录比对读的是保留名 `screenshots`、永不是挂载点，`opendirSync` 之前先不跟随地 `lstat`，符号链接或不是目录按缺失、不打开（与 D8 同一先查后用写法）；残余是 `lstat` 与 `opendirSync` 之间的窗口——omp 恰在其间把它换成指向挂起挂载的符号链接时仍会卡住主线程，与 D8 同为已接受的 TOCTOU 残余（omp 只能经它自己用户的挂载、要远端挂起且赢下竞态才触发；彻底消除要改成异步、动 supervisor 的回合泵，不在本 change）。
 - **[离线期间 omp 写进挂载点的本地文件]** → `--allow-non-empty` 使重挂不被它挡住，残留被遮住；卸载后挂载点以普通目录保留，不删除（D7、D10）。
@@ -226,7 +249,7 @@
 - **[rclone 拉平权限位]** `local` 挂载里一切显示为 omp 持有的 `0660` / `0770`，app uid 能读写的东西 omp 经挂载都能读写 → 挂载源拒绝清单五项与每次尝试复核（D2）；管理员登记的就是要交给用户的目录。
 - **[SFTP 不校验主机密钥]** 内网中间人 → 已接受，Non-Goal。
 - **[`rclone obscure` 不是加密]** → 保护来自 `0600` / `0700` 与 uid 分离；obscure 只防眼看与误贴。同 uid 部署（`OMP_USER` 缺席）下 omp 能读 `<state>/mounts`，与该模式下其它 app 私有状态一样。
-- **[VFS 写缓存未上传时 rclone 崩溃]** → 缓存目录按挂载 id 固定（`<state>/mounts/<id>/cache`），重挂时 rclone 续传；卸载会删除缓存，尚未上传的写入随之丢失——卸载确认框写明「只断开挂载」不代表已同步完成，登记为残余。
+- **[VFS 写缓存未上传时 rclone 崩溃]** → 缓存目录按挂载 id 固定（`<state>/mounts/<id>/cache`），重挂时 rclone 续传（#1665 P5：同一缓存目录、同一远端名重挂即补传；远端名不随 IP 变化是因为主机写进 conf 而不是 argv 覆盖，D3）；可写挂载 `--vfs-write-back 0s` 使关闭的文件立即排队上传，窗口只剩上传本身；卸载会删除缓存，尚未上传的写入随之丢失——卸载确认框写明「只断开挂载」不代表已同步完成，登记为残余。
 - **[挂载内文件的快照与撤回]** → 已登记挂载名在快照与还原中按名字跳过（D21），外部挂载仍按 `dev` 规则；挂载内的改动不可撤回。
 - **[行数]** `server.ts`、`auth-lifecycle.test.ts`、`workspace-browser.tsx` 都贴着 800 → 见「通用纪律」与「行数预算」。
 
@@ -243,21 +266,23 @@
 - 挂载在线状态的实时推送（会话页侧边栏与文件页都要靠 `刷新` 才看到状态变化；是否并进列表事件连接、事件形状，尚说不清）。
 - 管理员视角的全局挂载视图与代为卸载。
 
+- **[`--vfs-cache-mode writes` 下已删除的新文件在远端复活]**（#1665 P8：回写窗口内把含新文件的目录改名、再删除该文件与目录，回写到期后远端出现改名后的目录与该文件）→ 可写挂载加 `--vfs-write-back 0s`（实测一次未复现）；组 12 的真实挂载回归覆盖该序列，仍复现则在运维文档写为已知限制（owner 2026-10-25）。
+- **[挂载内读不固定内容]**（#1665 P7）→ 短读即中断连接（D16）；同长原地改写的新旧混合字节检测不出，登记为已知限制。
+- **[smb 在共享根建出 `．` 目录]**（#1665 P1：往共享根写文件时，rclone 1.60.1 的 smb 后端在根下建一个名为 U+FF0E 的目录，删掉后下次写根又会出现）→ 接受，写进运维文档与组 12 的签收记录（owner 2026-10-25）。
+- **[断网判定只看网络可达]**（D11 的 TCP 连通检查）→ 凭证失效、共享被删、远端目录被移走时连通检查仍通过，由挂载内请求的适配器超期与 `EIO` 发现；没人访问的挂载会一直显示在线。
+
 ## Open Questions
 
-- **#1665 前置实测**（S1b 实现组 5、6、12 的开工条件）：rclone `local` 后端在 uid 分离下的读写与占用卸载（`EBUSY` / `-uz`）表现待 P1、P5、P6 的 `local` 一栏；P1–P8 与下节补充探针任一不成立，按 owner 裁定需 owner 重新拍板，本 change 相应组暂停。
-- **完整 argv 跨 uid 读写**（P1′）：`--default-permissions`、`--allow-non-empty`、`--gid <空间根 gid>`、`--cache-dir`、`--log-file`、`--sftp-host` / `--smb-host` 覆盖配置里的 `host`、段名 `m<id>` 在 mountinfo 来源字段里的形状；不成立则改 D7 / D9 与 workspace-mounts「挂载进程与挂载点」的 argv 一句，不改其它 requirement 与任务切分。
-- **`rclone obscure -` 从标准输入读口令**（P2′）。
-- **断网而 rclone 存活时的离线判定**（P4′）：对挂载根的 `stat` 可能由 VFS 内存直接应答、永远判不出离线；若如此，D11 的探测改为子进程里对挂载根 `readdir`（改「在线状态与重挂」一句），适配器的 10 s 期限仍是请求路径的兜底。
-- **SIGKILL rclone 加 `fusermount3 -uz` 中止在途的 `stat` / `readdir`**（P9）：D21 释放 libuv 线程的前提。
-- **omp uid 执行 `fusermount3` 得 `EACCES`**（P10）：D4 / D20 部署限制生效的证据。
-- **错误凭证时 rclone 在挂载出现在 mountinfo 之前以非 0 退出**（P11）：「首次挂载即连通测试」的前提；不成立则 D9 的就绪判据加一次对挂载根的子进程 `readdir`。
-- **`key_pem` 单行 `\n` 写法被 sftp 后端接受**（P12）。
-- **`local` 后端不经符号链接读到源外**（P13）：D21「挂载内没有符号链接」的前提。
-- **rclone 追加已存在的 `rclone.log` 时不改其 `0600`**（P14）。
-- **`fusermount3` 拒绝最后一个分量是符号链接的挂载点、竞态窗口有多大**（P15）。
-- **待 owner 确认：D21 的上界与 `IMPLEMENTATION_PLAN.md:509`**：挂载内请求至多 10 s、其它空间与空间根不受影响、每个挂起的挂载至多占一个 libuv 线程 10 s——是否满足「故障不阻塞空间根目录使用」。
-- **待 owner 裁定：挂载源登记 API-only 还是中心最小 tab**。(a) API-only（现稿）：零前端成本，管理员用带 cookie 的 `curl` 登记 / 删除，NFS 与本机目录在有人登记之前对用户不可用；(b) 中心最小 tab（列表、登记、删除，仿 `s1d-connectors` 组 6 #1675 的中心 tab）：多一个前端任务组（约一个中等 PR：tab、表单、确认框、组件用例与验收行），服务端不变。选 (b) 时作为组 13 追加，不改既有组号。
+全部关闭（2026-10-25）。#1665 的结论见 ADR-0003「2026-10 补充（#1665）」，owner 裁定见上文「owner 的裁定（2026-10-25）」：
+
+- P1–P8、P2′、P9、P10、P12–P14：成立，D4–D10、D13、D21 的前提不变。
+- P1′（来源字段带后缀）与 P5 续传：主机改写进 `rclone.conf`、argv 不再覆盖（D3、D6、D7），来源前缀按 `<段名>:` 或 `<段名>{` 匹配（D9）。
+- P4′：D11 加 TCP 连通检查。
+- P11：就绪判据加一次子进程 `readdir`（D9，Epic (n) 预定的退路）。
+- P15：落点不符即判失败（D9），窗口登记为残余（Risks）。
+- P7：短读即中断（D16）。P8：`--vfs-write-back 0s` 加组 12 回归（D7）。
+- D21 的上界与 `IMPLEMENTATION_PLAN.md:509`：owner 确认满足「故障不阻塞空间根目录使用」（Epic (b)）。
+- 挂载源登记：中心最小 tab（Epic (a)，组 13）。
 
 ## Sketch seams under test
 
@@ -292,5 +317,5 @@
 - grill 凭证：本 design「owner 的裁定」（2026-10-21）。
 - 相关 ADR：0003（补充）、0010（补充）、0011（绝对 root 不是浏览器秘密）、0013（拷入层）。
 - 相关规格：sandbox-core（「resolve 契约与逃逸向量」「沙箱 facade 与拒绝审计」，D21 改）、workspace-snapshots（「快照内容规则」「还原」MODIFIED：已登记挂载名按名字跳过；`dev` 规则不改）、turn-artifacts（「文件变更推导与归属」MODIFIED）、chat-sessions（「Slash 命令白名单与命令目录」MODIFIED）、temporary-workspaces（#1237，不改）、preview-origin（不改；挂载内路径的 404 由 workspace-mounts「宿主不同步进入挂载」规定）、file-previewers（「隔离来源的嵌入与令牌」「PDF 与办公文档」MODIFIED：宿主标明在挂载内时不签发、不建 iframe，D18；files-web「工作空间页」只规定宿主交出该标记）。
-- 审查与修订：Stage 4 第一轮（2026-10-22）新增 D21 与「#1665 补充探针」，改 D2、D3、D4、D5、D6、D7、D8、D9、D10、D11、D12、D13、D14、D16、D18、D20。第二轮（2026-10-22）：`screenshots` 保留名；workspace-snapshots、turn-artifacts、chat-sessions 三个 MODIFIED；文件变更归属与项目技能的异步 `realpath`；改 D1、D2、D8、D10、D12、D14、D16、D18、D21、Risks。门后修订（2026-10-22）：file-previewers 两条 MODIFIED（挂载内不签发，规则从 files-web 移入）；`screenshots` 符号链接按缺失；先查后用的 TOCTOU 残余；改 D18、D21、Risks。
+- 审查与修订：#1665 之后（2026-10-25）按 owner 裁定改 D3、D6、D7、D9、D11、D16、D18（组 13）、Risks、Open Questions。Stage 4 第一轮（2026-10-22）新增 D21 与「#1665 补充探针」，改 D2、D3、D4、D5、D6、D7、D8、D9、D10、D11、D12、D13、D14、D16、D18、D20。第二轮（2026-10-22）：`screenshots` 保留名；workspace-snapshots、turn-artifacts、chat-sessions 三个 MODIFIED；文件变更归属与项目技能的异步 `realpath`；改 D1、D2、D8、D10、D12、D14、D16、D18、D21、Risks。门后修订（2026-10-22）：file-previewers 两条 MODIFIED（挂载内不签发，规则从 files-web 移入）；`screenshots` 符号链接按缺失；先查后用的 TOCTOU 残余；改 D18、D21、Risks。
 - 兄弟 change：`s1d-model-registry`（Epic #1640）、`s1d-experts-skills`（Epic #1654）、`s1d-connectors`。
