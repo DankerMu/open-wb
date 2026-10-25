@@ -120,7 +120,9 @@ describe("migration 047 schema", () => {
     expect(TRACKED_MIGRATION_FILENAMES.filter((name) => name === MIGRATION_047)).toHaveLength(1);
     expect(TRACKED_MIGRATION_FILENAMES[pos - 1]).toBe(MIGRATION_046);
     expect(COMPLETE_CATALOG.receipts[pos]).toEqual([21, MIGRATION_047]);
-    expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 21, "integer"]]);
+    expect(COMPLETE_CATALOG.sequenceRows).toEqual([
+      ["schema_migrations", TRACKED_MIGRATION_FILENAMES.length, "integer"],
+    ]);
   });
 
   it("creates the two D2 tables (TEXT primary keys NOT NULL), the owner index and the two session columns", () => {
@@ -142,7 +144,10 @@ describe("migration 047 schema", () => {
       ["disabled_skills", "TEXT", 1, null, 0],
       ["updated_at", "INTEGER", 1, null, 0],
     ]);
-    expect(tableInfo(db, "chat_sessions").slice(-2)).toEqual([
+    // 047's two columns, wherever later migrations append theirs after them.
+    const sessionColumns = tableInfo(db, "chat_sessions");
+    const from = sessionColumns.findIndex(([name]) => name === "expert_id");
+    expect(sessionColumns.slice(from, from + 2)).toEqual([
       ["expert_id", "TEXT", 0, null, 0],
       ["disabled_skills", "TEXT", 1, "'[]'", 0],
     ]);
@@ -202,7 +207,7 @@ describe("migration 047 schema", () => {
       expect(readSessionCapabilities(db, S_A)).toEqual({ expertId: null, disabledSkills: [] });
       expect(rawExperts(db)).toEqual([]);
       expect(rawPrefs(db)).toEqual([]);
-      expect(ledgerFilenames(db)).toEqual([...through046, MIGRATION_047]);
+      expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     });
   });
 

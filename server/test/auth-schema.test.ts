@@ -495,6 +495,7 @@ function expectAuthSchema(db: DatabaseSync): void {
   expect(foreignKeysOf(db, "accounts")).toEqual([]);
   expect(businessObjectNames(db, "table")).toEqual([
     "account_composer_prefs",
+    "account_connector_prefs",
     "account_skill_prefs",
     "accounts",
     "audit_events",
@@ -505,6 +506,7 @@ function expectAuthSchema(db: DatabaseSync): void {
     "chat_steps",
     "chat_thinking_segments",
     "chat_turn_snapshots",
+    "connectors",
     "experts",
     "models",
     "workspaces",
