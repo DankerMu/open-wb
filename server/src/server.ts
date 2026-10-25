@@ -1,7 +1,7 @@
 /**
  * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档 sidecar 预检 → 模型注册表
  * 种子与快照（`model_registry`，`startup-registry.ts`；s1d-model-registry）→ 转换器 →
- * createApp → listen → 托管布局 → 沙箱根 → 预览监听器 listen → 两个托管文件 → 预览缓存目录（含清空
+ * createApp → listen → 托管布局 → 沙箱根 → 预览监听器 listen → 三个托管文件 → 预览缓存目录（含清空
  * spool 的 `jobs/`）→ 转换器开始受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局
  * 紧随其后，#1337；沙箱根紧随托管布局，change sandbox-boundary-closure；预检，change office-convert-sandbox）。
  *
@@ -77,6 +77,7 @@ import { ensureOmpStateLayout, sweepSessionConfig } from "./sessions/omp/state-l
 import type { TodoRejection } from "./sessions/store-todo.js";
 import type { UpstreamFailedRecord } from "./sessions/upstream-failure-log.js";
 import {
+  createMcpJsonStage,
   createStartupPublisher,
   type ModelEnvIgnoredRecord,
   seedModelRegistry,
@@ -333,6 +334,7 @@ type StartupStage =
   | "preview_listen"
   | "models_yml"
   | "host_overlay"
+  | "mcp_json"
   | "preview_cache"
   | "publish";
 
@@ -476,6 +478,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       proxyBaseUrl: () => proxyBaseUrl,
       stage: owned,
     });
+    const mcp = createMcpJsonStage({ db: owned.db, stateDir: config.ompStateDir, stage: owned });
     owned.stage = "app";
     // 启动失败一经判定，失败路径只留 generic 失败记录：强制回收不再发布。两个实例共用这一个回调。
     const onListenerForceClose = (): void => {
@@ -552,9 +555,10 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       return;
     }
     previewPort = boundAddressOf(owned.preview, "preview").port;
-    await publishStarted(owned, config, assembly.trash, office, (address) => {
+    await publishStarted(owned, config, assembly.trash, office, async (address) => {
       proxyBaseUrl = deriveProxyBaseUrl(address);
-      return publisher.publish();
+      await publisher.publish();
+      return owned.signalReceived ? undefined : mcp.runStage();
     });
   } catch {
     // reason 在入口、任何 await 之前取定：releaseOwned 等待期间排队的 REST 发布会经 overlay 包装翻 stage。
@@ -569,11 +573,11 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
 }
 
 /**
- * 成功记录：两次 listen 之后（托管布局已在两次绑定之间建好）写托管 models 与宿主 overlay、建预览
- * 缓存目录并清空 spool 的 `jobs/`，然后才让 `/o/` 受理转换、扫一轮转换缓存并起它的周期清理，再发
- * 主监听器实际的 bound address/port；记录写出之后回收目录扫第一轮，入口不等它。两个托管文件由注册表的
- * 发布器按快照写出（`publishModels` 交出代理地址后调同一个 `publish()`；写 overlay 前它把 stage 切到
- * `host_overlay`，见 `startup-registry.ts`）。
+ * 成功记录：两次 listen 之后写三个托管文件、建预览缓存目录并清空 spool 的 `jobs/`，然后才让 `/o/`
+ * 受理转换、扫一轮转换缓存并起周期清理，再发主监听器实际的 bound address/port；记录之后回收目录扫第一轮，
+ * 入口不等它。`publishModels`：交出代理地址后注册表发布器写 models 与 overlay（写 overlay 前把 stage 切到
+ * `host_overlay`），随后 `mcp_json` 阶段读库写 `mcp.json`——其间已收到信号则不读（库可能正在关闭）；
+ * 见 `startup-registry.ts`。
  */
 async function publishStarted(
   owned: OwnedResources,

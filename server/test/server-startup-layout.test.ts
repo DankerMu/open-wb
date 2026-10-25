@@ -81,7 +81,7 @@ function expectManagedModels(agentDir: string, port: number): void {
   expect(modelEntries(text)).toHaveLength(1);
   const before = baselineYaml(true, `http://127.0.0.1:${port}/v1`, MODEL_ID);
   expect(text).toBe(withVisionInput(before));
-  expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
+  expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "mcp.json", "models.yml"]);
 }
 
 function modelEntries(text: string): unknown[] {
@@ -173,6 +173,35 @@ describe("production entry managed omp state layout", () => {
     }
   }, 60_000);
 
+  // s1d-connectors group 2a: omp-runtime「OMP_STATE_DIR 托管布局」scenario「托管 mcp.json 的模式与属主」
+  // (first half) — no connector registered, a residual file from an earlier run is overwritten.
+  it("a start with no connectors overwrites a residual mcp.json with the empty table, a 0640 regular file of this uid", async () => {
+    const root = scratchRoot("open-wb-layout-mcp-");
+    const agentDir = join(root, "state", "home", ".omp", "agent");
+    const file = join(agentDir, "mcp.json");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(file, '{"mcpServers":{"old":{"type":"stdio","command":"/bin/old"}}}\n');
+    const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
+    }));
+    try {
+      await server.waitForStarted();
+      expect(readFileSync(file, "utf8")).toBe('{\n  "mcpServers": {}\n}\n');
+      const stat = lstatSync(file);
+      expect(stat.isFile()).toBe(true);
+      expect(stat.uid).toBe(process.getuid?.());
+      expect(stat.mode & 0o7777).toBe(0o640);
+      expect(lstatSync(agentDir).mode & 0o7777).toBe(0o2750);
+      expect(readdirSync(agentDir).toSorted()).toEqual([
+        "host-overlay.yml",
+        "mcp.json",
+        "models.yml",
+      ]);
+    } finally {
+      await server.dispose();
+    }
+  }, 60_000);
+
   // http-service-skeleton「四个新配置键的取值与非法值」: both halves of the valid four-key start — the
   // managed models.yml, and what `GET /api/composer/options` reports (#1008).
   it("a three-model MODEL_CATALOG writes three model entries in whitelist order, and the four keys reach GET /api/composer/options", async () => {
@@ -222,7 +251,11 @@ describe("production entry managed omp state layout", () => {
           input: ["text", "image"],
         },
       ]);
-      expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
+      expect(readdirSync(agentDir).toSorted()).toEqual([
+        "host-overlay.yml",
+        "mcp.json",
+        "models.yml",
+      ]);
 
       const options = await getJson(port, "/api/composer/options", await login(port));
 

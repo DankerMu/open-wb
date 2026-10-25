@@ -8,18 +8,35 @@
  * snapshot」case below is the evidence for model-registry「变更即发布」's startup exception.
  * Expected values are spec literals (model-registry「环境种子」, the overlay blocks of
  * `omp-layout-helpers.ts`), never the store's own mapping.
+ *
+ * s1d-connectors group 2a: the `mcp_json` stage function — the「两份真相」case (DB vs `mcp.json`): a
+ * residual file is replaced with exactly the enabled rows of the table, and a publish before the stage
+ * leaves the file alone (connectors「托管 mcp.json」).
  */
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import {
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import { createConnectorStore } from "../src/connectors/store.js";
 import { openDb } from "../src/core/db/index.js";
 import { resolveModelCatalog } from "../src/model-catalog.js";
 import { createModelStore } from "../src/models/store.js";
 import { ensureOmpStateLayout, ompAgentDir } from "../src/sessions/omp/state-layout.js";
-import { createStartupPublisher, seedModelRegistry } from "../src/startup-registry.js";
+import {
+  createMcpJsonStage,
+  createStartupPublisher,
+  seedModelRegistry,
+} from "../src/startup-registry.js";
 import { HOST_OVERLAY_YAML, hostOverlayVisionBlock } from "./omp-layout-helpers.js";
 
 const SIX_KEYS = [
@@ -302,5 +319,80 @@ describe("startup publisher", () => {
 
     expect(published(state).ids).toEqual(["m-env"]);
     expect(stage.stage).toBe("publish");
+  });
+});
+
+describe("mcp_json stage", () => {
+  const STALE = '{"mcpServers":{"old":{"type":"stdio","command":"/bin/old","args":[],"env":{}}}}\n';
+  const SENTINEL = "SENTINEL-MCP-STAGE-6610";
+
+  it("replaces a residual mcp.json with exactly the enabled connector; a publish before the stage writes nothing", async () => {
+    const database = db();
+    const connectors = createConnectorStore(database);
+    connectors.create({
+      name: "gitlab",
+      type: "stdio",
+      command: "/usr/bin/gitlab-mcp",
+      args: ["--stdio"],
+      env: { TOKEN: SENTINEL },
+    });
+    connectors.create({
+      name: "wiki",
+      type: "http",
+      url: "https://wiki.example/mcp",
+      enabled: false,
+    });
+    const state = stateDir();
+    const file = join(ompAgentDir(state), "mcp.json");
+    writeFileSync(file, STALE);
+    const stage = { stage: "host_overlay" };
+    const { publisher, runStage } = createMcpJsonStage({ db: database, stateDir: state, stage });
+
+    await publisher.publish();
+    expect(readFileSync(file, "utf8")).toBe(STALE);
+    expect(stage.stage).toBe("host_overlay");
+
+    await runStage();
+
+    expect(readFileSync(file, "utf8")).toBe(
+      [
+        "{",
+        '  "mcpServers": {',
+        '    "gitlab": {',
+        '      "type": "stdio",',
+        '      "command": "/usr/bin/gitlab-mcp",',
+        '      "args": [',
+        '        "--stdio"',
+        "      ],",
+        '      "env": {',
+        `        "TOKEN": "${SENTINEL}"`,
+        "      }",
+        "    }",
+        "  }",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    expect(lstatSync(file).mode & 0o7777).toBe(0o640);
+    expect(readdirSync(ompAgentDir(state))).toEqual(["mcp.json"]);
+    expect(stage.stage).toBe("mcp_json");
+
+    // After the stage the same publisher writes on every call (the write endpoints share it).
+    connectors.create({ name: "jira", type: "http", url: "https://jira.example/mcp" });
+    await publisher.publish();
+    expect(Object.keys(JSON.parse(readFileSync(file, "utf8")).mcpServers)).toEqual([
+      "gitlab",
+      "jira",
+    ]);
+  });
+
+  it("switches the stage to mcp_json before writing: a failed write rejects with the stage there", async () => {
+    const state = stateDir();
+    mkdirSync(join(ompAgentDir(state), "mcp.json"));
+    const stage = { stage: "host_overlay" };
+    const { runStage } = createMcpJsonStage({ db: db(), stateDir: state, stage });
+
+    await expect(runStage()).rejects.toThrow();
+    expect(stage.stage).toBe("mcp_json");
   });
 });

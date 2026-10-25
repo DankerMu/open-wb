@@ -145,7 +145,11 @@ describe("production entry lifecycle", () => {
       ]);
       expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
       expect(readdirSync(join(state, "sessions"))).toEqual([]);
-      expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
+      expect(readdirSync(agentDir).toSorted()).toEqual([
+        "host-overlay.yml",
+        "mcp.json",
+        "models.yml",
+      ]);
       // Startup makes SANDBOX_ROOT at exactly 3770 (owner B4, 编排方默认 3770).
       expect(lstatSync(sandbox).mode & 0o7777).toBe(0o3770);
       expect(existsSync(join(scratchRoot, "bin"))).toBe(false);
@@ -299,6 +303,10 @@ describe("production entry lifecycle", () => {
       expect(parse(readFileSync(written, "utf8"))).toMatchObject({
         providers: { workbuddy: { baseUrl: `http://127.0.0.1:${port}/v1` } },
       });
+      // The signal arrived before `mcp_json`: that stage never reads the DB nor writes the file.
+      expect(existsSync(join(scratchRoot, "state", "home", ".omp", "agent", "mcp.json"))).toBe(
+        false,
+      );
       expect(readFileSync(tracePath, "utf8")).toBe(
         `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
