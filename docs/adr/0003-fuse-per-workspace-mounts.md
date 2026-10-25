@@ -180,4 +180,4 @@ S1b 的前置条件（`IMPLEMENTATION_PLAN.md:545-546`）：app uid 挂载、omp
 
 Epic #1679 的 (a) 挂载源登记做成中心最小 tab（组 13），(b)–(m) 照现稿接受。change `s1b-workspace-mounts` 的 design「owner 的裁定（2026-10-25）」、D3 / D6 / D7 / D9 / D11 / D16 与 workspace-mounts spec 已据此改写，组 5A、5B、6A、6B、12 的开工条件满足。
 
-**对 S1b grill 裁定的影响**：「rclone 统一三后端」「`--vfs-cache-mode writes`」「凭证经 0600 conf、`obscure`、不上命令行」「惰性卸载」「挂载点判据沿用 #1237」五条的前提都实测成立（P1、P2、P2′、P5、P6）。上面第 3 条是 `writes` 模式的回写语义带来的代价，第 1、4 条是 VFS 缓存带来的代价，第 2 条来自 host 覆盖与缓存路径的耦合。它们都不推翻「只用 rclone」，但接受方式要 owner 决定。
+**对 S1b grill 裁定的影响**：「rclone 统一三后端」「`--vfs-cache-mode writes`」「凭证经 0600 conf、`obscure`、不上命令行」「惰性卸载」「挂载点判据沿用 #1237」五条的前提都实测成立（P1、P2、P2′、P5、P6）。上面第 3 条是 `writes` 模式的回写语义带来的代价，第 1、4 条是 VFS 缓存带来的代价，第 2 条来自 host 覆盖与缓存路径的耦合。它们都不推翻「只用 rclone」；接受方式已由上方「owner 裁定（2026-10-25）」裁定。

@@ -123,8 +123,8 @@
 - **THEN** argv 不含 `--allow-other`、`--default-permissions`、`--uid`、`--gid`、`--umask`
 
 #### Scenario: 就绪失败不留痕
-- **WHEN** 假 rclone 被设定为不写 mountinfo 就以非 0 退出；另一例为既不写也不退出（超时注入为 1 s）；再一例为在另一个路径上追加一行来源为 `m<该挂载 id>{abcde}:…`、类型为 `fuse.rclone` 的 mountinfo 后挂起不退出（超时仍为 20 s）；再一例为照常写出挂载、但就绪 `readdir` 子进程被设定为失败
-- **THEN** 四例都是 502 `mount_failed` 与一条 `mount.reject`（`reason` 为 `mount_failed`）；没有挂载行；挂载点与私有目录都不存在；第二、三例的假 rclone 进程已不存在；第三例在 1 s 之内失败（不等满就绪窗口），假 `fusermount3` 对那个另外的路径收到一次 `-uz`；第四例假 `fusermount3` 对该挂载点收到一次 `-uz`
+- **WHEN** 假 rclone 被设定为不写 mountinfo 就以非 0 退出；另一例为既不写也不退出（超时注入为 1 s）；再两例为在另一个路径上追加一行类型为 `fuse.rclone` 的 mountinfo 后挂起不退出（超时仍为 20 s），来源分别为 `m<该挂载 id>:…` 与 `m<该挂载 id>{abcde}:…`；再一例为照常写出挂载、但就绪 `readdir` 子进程被设定为失败
+- **THEN** 五例都是 502 `mount_failed` 与一条 `mount.reject`（`reason` 为 `mount_failed`）；没有挂载行；挂载点与私有目录都不存在；第二至四例的假 rclone 进程已不存在；第三、四例都在 1 s 之内失败（不等满就绪窗口），假 `fusermount3` 对那个另外的路径收到一次 `-uz`；第五例假 `fusermount3` 对该挂载点收到一次 `-uz`
 
 #### Scenario: 挂载点被换掉即拒绝
 - **WHEN** 一个离线挂载的挂载点被换成指向空间外目录的符号链接，到期的重挂执行；另一例挂载点被换成一个普通文件
@@ -353,7 +353,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - **THEN** 前两例分别显示 `请填写挂载名称` 与 `名称只能包含字母、数字、下划线、连字符与汉字`，没有请求；第三例显示 `管理员尚未登记服务器目录`、`测试连通并挂载` 禁用；第四例 `只读挂载` 为打开且禁用，提交的 body 为 `{name, backend:"local", sourceId, readOnly:true}`；第五例下拉照常列出各项、界面不显示 `path`
 
 ### Requirement: 真实挂载验证层
-`server/test/linux/mounts-fuse.test.ts` SHALL 只在 `process.platform === "linux"` 且 `WORKBUDDY_FUSE_TEST=1` 时执行，否则以 `describe.skipIf` 明示跳过；已 opt-in 而缺少运行前提（`WORKBUDDY_FUSE_RCLONE` 指向可执行的 rclone、PATH 上的 `fusermount3`、`/dev/fuse`）SHALL 失败而非追加 skip。它经真实 mount-manager、真实 rclone 与真实 FUSE 验证 `local` 后端：可写挂载内的建、读、写、改名；只读挂载写入失败；SIGKILL rclone 后状态在一轮探测之内变为 `offline`、挂载点不再在 mountinfo 里、随后重挂回 `online`；卸载后挂载点从 mountinfo 消失、目录被删除；可写挂载内「新建目录、在其中建文件、目录改名、删文件、删目录」之后源目录里没有残留（#1665 P8 的回归，argv 带 `--vfs-write-back 0s`）。环境另给了 `WORKBUDDY_FUSE_SFTP_HOST`、`_PORT`、`_USER`、`_PASS`、`_PATH`、`_DOWN`、`_UP`（后两者是测试主机上停止与启动该远端的可执行文件的绝对路径）时 SHALL 另跑 `sftp` 的两例：挂载读写；远端停机后在一轮探测之内（30 s + 5 s）报告 `offline`、远端恢复后 360 s 之内（退避封顶 300 s、就绪窗口 20 s 与余量）回到 `online`（这组变量只给了一部分即失败）。测试主机上的签收运行 SHALL 给出这组变量，`sftp` 两例必须通过；本机开发运行可只跑 `local`。「已挂载」以 mountinfo 路径为准。每例结束先卸载、确认 mountinfo 里不再有挂载点，再以 `fs/promises` 的 `rm` 删除测试自有目录。它不进任何 CI job，在测试主机的一次性容器里手工运行，结果记入 PR 与 ADR-0003。
+`server/test/linux/mounts-fuse.test.ts` SHALL 只在 `process.platform === "linux"` 且 `WORKBUDDY_FUSE_TEST=1` 时执行，否则以 `describe.skipIf` 明示跳过；已 opt-in 而缺少运行前提（`WORKBUDDY_FUSE_RCLONE` 指向可执行的 rclone、PATH 上的 `fusermount3` 与 `fusermount`、`/dev/fuse`）SHALL 失败而非追加 skip。它经真实 mount-manager、真实 rclone 与真实 FUSE 验证 `local` 后端：可写挂载内的建、读、写、改名；只读挂载写入失败；SIGKILL rclone 后状态在一轮探测之内变为 `offline`、挂载点不再在 mountinfo 里、随后重挂回 `online`；卸载后挂载点从 mountinfo 消失、目录被删除；可写挂载内「新建目录、在其中建文件、目录改名、删文件、删目录」之后源目录里没有残留（#1665 P8 的回归，argv 带 `--vfs-write-back 0s`；测试主机的签收运行中该例仍复现时，签收 PR 把它改为 vitest 的 `it.fails` 并在 ADR-0003 与 `system.md` §9.9 记为已知限制，签收以其余各例全绿为准——owner 2026-10-25）。环境另给了 `WORKBUDDY_FUSE_SFTP_HOST`、`_PORT`、`_USER`、`_PASS`、`_PATH`、`_DOWN`、`_UP`（后两者是测试主机上停止与启动该远端的可执行文件的绝对路径）时 SHALL 另跑 `sftp` 的两例：挂载读写；远端停机后在一轮探测之内（30 s + 5 s）报告 `offline`、远端恢复后 360 s 之内（退避封顶 300 s、就绪窗口 20 s 与余量）回到 `online`（这组变量只给了一部分即失败）。测试主机上的签收运行 SHALL 给出这组变量，`sftp` 两例必须通过；本机开发运行可只跑 `local`。「已挂载」以 mountinfo 路径为准。每例结束先卸载、确认 mountinfo 里不再有挂载点，再以 `fs/promises` 的 `rm` 删除测试自有目录。它不进任何 CI job，在测试主机的一次性容器里手工运行，结果记入 PR 与 ADR-0003。
 
 #### Scenario: 非 opt-in 明示跳过
 - **WHEN** 平台不是 Linux 或 `WORKBUDDY_FUSE_TEST` 不是 `1`
