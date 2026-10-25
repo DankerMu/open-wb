@@ -394,7 +394,7 @@ SessionRuntime SHALL 接受可选同步 `log` 端口（supervisor 经 `sessionRu
 | `<state>` | `2750` | 根；omp uid 只能进入，不能在其下创建/改名/删除条目 |
 | `<state>/home` | `3770` | omp 的 `HOME`；omp uid 可创建自己的条目（工具链缓存等），粘滞位使它不能改名或删除 app 持有的 `.omp` |
 | `<state>/home/.env` | `0640`（普通文件） | omp 启动时加载 `$HOME/.env`；由宿主预建（空文件）并持有，粘滞位使 omp uid 不能替换它，见「工作目录 dotenv 钉住」 |
-| `<state>/home/.omp`、`<state>/home/.omp/agent` | `2750` | 托管配置：`models.yml`（`0640`）与运维安装的 `skills/` 位于 agent 目录 |
+| `<state>/home/.omp`、`<state>/home/.omp/agent` | `2750` | 托管配置：`models.yml`（`0640`）、宿主写出的 `mcp.json`（`0640`，connectors「托管 mcp.json」：启用的 MCP 连接器，omp 每次 spawn 读取）与运维安装的 `skills/` 位于 agent 目录 |
 | `<state>/session-config` | `2710` | 托管配置：每次 spawn 的会话配置文件 `<key>.yml` / `<key>.md`（`0640`，「子进程 spawn 契约」），子进程结束即删；组只有执行位——omp uid 能按确切路径打开其中的文件，不能列举、新建、改名或删除；服务启动的 `state_layout` 阶段由 `sweepSessionConfig` 清空其中的残留 |
 | `<state>/xdg`、`<state>/xdg/data`、`<state>/xdg/state`、`<state>/xdg/cache` | `2750` | XDG 根 |
 | `<state>/xdg/data/omp`、`<state>/xdg/state/omp`、`<state>/xdg/cache/omp` | `2770` | omp 运行期状态（`agent.db`、日志、原生模块缓存等）；omp 只在该目录已存在时才启用对应的 XDG 重定向，因此三者 SHALL 由宿主预先建出 |
@@ -444,6 +444,10 @@ SessionRuntime SHALL 接受可选同步 `log` 端口（supervisor 经 `sessionRu
 - **THEN** 返回值为 `undefined`（不是 thenable），且调用一返回、不经任何 `await`，残留条目已全部不在
 - **WHEN** 测试令启动清扫删除某个残留条目失败（如 `session-config/` 下预置一个非空子目录）
 - **THEN** 启动以 `state_layout` 阶段失败（http-service-skeleton「服务启动与装配」的失败记录），不进入其后的任何阶段、不输出 success record、不 spawn 任何子进程
+
+#### Scenario: 托管 mcp.json 的模式与属主
+- **WHEN** 编译入口在空库上冷启动（没有登记任何连接器）；随后管理员登记一个 stdio 连接器
+- **THEN** 启动完成时 `<state>/home/.omp/agent/mcp.json` 是普通文件（不是符号链接）、由本进程 uid 持有、`mode & 0o7777` 为 `0o640`，内容恰为字节 `{\n  "mcpServers": {}\n}\n`；登记应答之后它仍是本进程 uid 持有、`0o640` 的普通文件且含该连接器，agent 目录仍为 `2750`、没有残留临时文件
 
 ### Requirement: 宿主 overlay
 omp 把会话 cwd 下的项目层设置（`.omp/config.yml`、`.claude/settings.json` 等）与全局层深合并，而 cwd 是 agent 在 `write` 与 `yolo` 档下无需审批即可写的目录；argv 的 `--approval-mode` 只决定档位一个键。宿主 SHALL 用 omp 的 `--config` overlay 层（优先级：全局 < 项目 < overlay < CLI runtime override）钉住会绕过审批或在审批之外执行命令的设置键。overlay 文件 SHALL 位于托管 agent 目录、名为 `host-overlay.yml`，路径只有一个来源（与「OMP_STATE_DIR 托管布局」的路径函数同模块导出 `ompHostOverlayPath(stateDir)`）；它 SHALL 在服务启动时、托管布局建立之后与托管 `models.yml` 一起写入，并在每次注册表写入后随 model-registry「变更即发布」与 `models.yml` 一起重写（同一发布函数，启动与运行期字节相同），使用与 `models.yml` 相同的替换方式（独占创建的临时文件、mode 精确 `0640`、rename；宿主内只有一份该实现），内容 SHALL 逐字节等于下面的固定块，其后紧接本要求后文规定的浏览器块与（条件出现的）看图块。翻转之前（钉住版本仍为 v18.0.10 期间；#1570 已翻转、四行已删）固定块在 `python:` 块之后曾另含四行 `ruby:\n  interpreter: ""\njulia:\n  interpreter: ""`（owner 2026-10-20 B：18.0.10 的 spawn 预检会不经审批执行项目层指定的 `ruby.interpreter` / `julia.interpreter`，实测，删键即开口子；翻转时随 `OMP_VERSION` 一起删，字节钉点与本要求同步）；翻转前固定块以 `ask:` 两行结尾，翻转时在其后加上 `advisor:` 与 `ida:` 各两行（`ida` 为 Epic #1563 (f) 缺省方案；`advisor` 为 fixture review r2 的裁定，见下）。
