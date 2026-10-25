@@ -85,7 +85,7 @@
 ### Requirement: 挂载凭证文件
 每个挂载 SHALL 有一个 app 私有目录 `<OMP_STATE_DIR 的 realpath>/mounts/<挂载 id>/`（`0700`，以 sandbox-core「托管目录权限位」的 `ensureOwnedDir` 语义建立：属本进程、不是符号链接），其中：
 
-- `rclone.conf`（`0600`）：一个段，段名为 `m` 加挂载 id（下称 `<段名>`）。`sftp` 为 `type = sftp`、`host`（该次尝试经主机规则判定过的 IP 字面）、`port`（给了才写）、`user` 与 `pass`（口令的 obscure 串）或 `key_pem`（私钥的换行转写为字面 `\n` 的单行）；`smb` 为 `type = smb`、`host`（同上）、`port`（给了才写）、`user`、`pass`（obscure 串）、`domain`（给了才写）；`local` 只有 `type = local`。`sftp` / `smb` 的每次挂载尝试（建出、重挂、启动恢复）SHALL 在主机规则判定之后、启动子进程之前改写 `host` 一行：读回现有文件、只替换 `host` 的值、写同目录临时名再改名到位（`0600`），其余字节不变；用户填的主机只在数据库的 `host` 列里，每次尝试都从它重新判定。
+- `rclone.conf`（`0600`）：一个段，段名为 `m` 加挂载 id（下称 `<段名>`）。`sftp` 为 `type = sftp`、`host`（该次尝试经主机规则判定过的 IP 字面）、`port`（给了才写）、`user` 与 `pass`（口令的 obscure 串）或 `key_pem`（私钥的换行转写为字面 `\n` 的单行）；`smb` 为 `type = smb`、`host`（同上）、`port`（给了才写）、`user`、`pass`（obscure 串）、`domain`（给了才写）；`local` 只有 `type = local`。`sftp` / `smb` 建出时随整份文件写出 `host`；重挂与启动恢复 SHALL 在主机规则判定之后、启动子进程之前改写 `host` 一行：读回现有文件、只替换 `host` 的值、写同目录临时名再改名到位（`0600`），其余字节不变；用户填的主机只在数据库的 `host` 列里，每次尝试都从它重新判定。
 - `cache/`（`0700`）：rclone 的 VFS 缓存目录。
 - `rclone.log`（`0600`）：rclone 的日志文件；每次挂载尝试之前由本进程以 sandbox-core「托管文件权限位」的语义确保它存在且为 `0600`。
 
@@ -279,7 +279,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 ### Requirement: 宿主不同步进入挂载
 服务进程 SHALL NOT 对已登记挂载的挂载点或其下任何路径做同步文件系统调用。挂载点只在空间根下一层，挂载名不含 `.`、也不是保留名 `uploads` 或 `screenshots`（「迁移 049 挂载 schema」）：只经空间根自身、第一段含 `.` 的路径或这两个保留名、且不跟随符号链接的同步调用因此不会进入挂载；会跟随符号链接的调用（`realpath`）对 omp uid 可写的位置改为有期限的异步调用（下文）。成员按「挂载目录内的文件端点」的第一段规则词法判定；沙箱 facade 经端口 `mountNamesOf` 得到该空间的已登记挂载名（sandbox-core「沙箱 facade 与拒绝审计」），`resolve` 对挂载内路径不做文件系统调用。
 
-`online` 挂载内的文件系统调用 SHALL 只经一个异步适配器：只用 `fs/promises`；每个挂载一个先进先出的闸门、同一时刻至多一个调用在执行；每次调用自拿到闸门起有 10 s 期限（测试可注入）。超期时该请求 SHALL 以 409 `mount_offline` 结束，该挂载 SHALL 立即判定 `offline`（「在线状态与重挂」：以 SIGKILL 结束其 rclone、惰性卸载），排队中的调用 SHALL 都以 409 `mount_offline` 结束。
+`online` 挂载内的文件系统调用（`lstat`、`readdir`、`open`、对已打开文件的 `fstat`、`read`、`close`、`mkdir`、`rename`）SHALL 只经一个异步适配器：只用 `fs/promises`；每个挂载一个先进先出的闸门、同一时刻至多一个调用在执行；每次调用自拿到闸门起有 10 s 期限（测试可注入）。超期时该请求 SHALL 以 409 `mount_offline` 结束，该挂载 SHALL 立即判定 `offline`（「在线状态与重挂」：以 SIGKILL 结束其 rclone、惰性卸载），排队中的调用 SHALL 都以 409 `mount_offline` 结束。
 
 其它对工作空间路径做文件系统调用的入口，对挂载内路径 SHALL 词法处置、不碰文件系统：
 
