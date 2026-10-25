@@ -1,4 +1,11 @@
 import { type Command, createCommandMethods, type ProjectConfigFile } from "./api-commands.js";
+import {
+  type ConnectorListing,
+  type ConnectorView,
+  type CreateConnectorInput,
+  createConnectorMethods,
+  type UpdateConnectorInput,
+} from "./api-connectors.js";
 import { createExpertMethods, type ExpertInput, type ExpertView } from "./api-experts.js";
 import {
   type ArchiveListing,
@@ -205,6 +212,20 @@ export type ApiClient = {
     disabledSkills: readonly string[],
     options?: ApiRequestOptions,
   ): Promise<SkillList>;
+  listConnectors(options?: ApiRequestOptions): Promise<ConnectorListing>;
+  createConnector(input: CreateConnectorInput, options?: ApiRequestOptions): Promise<ConnectorView>;
+  updateConnector(
+    name: string,
+    input: UpdateConnectorInput,
+    options?: ApiRequestOptions,
+  ): Promise<ConnectorView>;
+  deleteConnector(name: string, options?: ApiRequestOptions): Promise<void>;
+  probeConnector(name: string, options?: ApiRequestOptions): Promise<ConnectorView>;
+  getConnectorDefaults(options?: ApiRequestOptions): Promise<string[]>;
+  putConnectorDefaults(
+    disabledConnectors: readonly string[],
+    options?: ApiRequestOptions,
+  ): Promise<string[]>;
   getSessionCapabilities(
     sessionId: string,
     options?: ApiRequestOptions,
@@ -464,6 +485,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     ...createModelMethods(onUnauthorized, transport),
     ...createExpertMethods(onUnauthorized, transport),
     ...createSkillMethods(onUnauthorized, transport),
+    ...createConnectorMethods(onUnauthorized, transport),
     ...createSessionCapabilityMethods(onUnauthorized, transport),
     async listAudit(filter, options) {
       const search = new URLSearchParams();
@@ -547,6 +569,13 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
   };
 }
 
+export type {
+  ConnectorListing,
+  ConnectorSummary,
+  ConnectorView,
+  CreateConnectorInput,
+  UpdateConnectorInput,
+} from "./api-connectors.js";
 export {
   EXPERT_CATEGORIES,
   type ExpertCategory,

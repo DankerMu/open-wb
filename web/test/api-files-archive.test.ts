@@ -278,6 +278,14 @@ const OTHER_CLIENT_METHODS = [
   "deleteExpert",
   "listSkills",
   "putSkillDefaults",
+  // 连接器（connectors「中心「连接器」tab」；账号缺省停用列表：connectors「连接器账号缺省」）
+  "listConnectors",
+  "createConnector",
+  "updateConnector",
+  "deleteConnector",
+  "probeConnector",
+  "getConnectorDefaults",
+  "putConnectorDefaults",
   // 会话能力（design D7；experts「输入框的专家选择」）
   "getSessionCapabilities",
   "putSessionCapabilities",

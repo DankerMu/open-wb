@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { ConnectorsPanel } from "./connectors/panel.js";
 import { ExpertsPanel } from "./experts/panel.js";
 import { ModelsPanel } from "./models/panel.js";
 import { SkillsPanel } from "./skills/list.js";
@@ -15,5 +16,6 @@ export type CenterTab = {
 export const CENTER_TABS: readonly CenterTab[] = [
   { key: "experts", label: "专家", adminOnly: false, Panel: ExpertsPanel },
   { key: "skills", label: "技能", adminOnly: false, Panel: SkillsPanel },
+  { key: "connectors", label: "连接器", adminOnly: false, Panel: ConnectorsPanel },
   { key: "models", label: "模型", adminOnly: true, Panel: ModelsPanel },
 ];

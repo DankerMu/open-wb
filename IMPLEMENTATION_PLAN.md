@@ -114,7 +114,7 @@
 |---|---|
 | F-CTR-EXP | 专家卡片（分类/标签）、加入会话——change `s1d-experts-skills`（中心「专家」tab；加入会话的欢迎态预选随该 change 任务组 9） |
 | F-CTR-SKL | 技能清单与启停——change `s1d-experts-skills`（中心「技能」tab 的账号缺省「默认启用」；会话级「能力」弹层随该 change 任务组 10） |
-| F-CTR-CON | MCP 连接器（仅显式配置） |
+| F-CTR-CON | MCP 连接器（仅显式配置）——change `s1d-connectors`（中心「连接器」tab：管理员登记 stdio / http、探活与账号缺省「默认启用」；会话级「能力」弹层的连接器段随该 change 任务组 7） |
 | F-CTR-KB1 | 12 种切片模板 + RAPTOR/知识图谱开关 |
 | F-CTR-KB2 | 文档摄取与状态 |
 | F-CTR-KB3 | 检索测试 |

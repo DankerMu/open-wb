@@ -31,8 +31,9 @@ export const routeManifest: readonly RouteDefinition[] = [
     icon: "layout-grid",
     label: "中心",
     title: "中心",
-    // 以「与」连接人人可见的 tab 的 label；仅管理员可见的「模型」不进描述（model-registry「中心页外壳」）。
-    description: "专家与技能",
+    // 按 tab 表次序连接人人可见的 tab 的 label：相邻两项用顿号，只有末两项之间用「与」；仅管理员可见的「模型」
+    // 不进描述（model-registry「中心页外壳」）。
+    description: "专家、技能与连接器",
   },
   {
     path: "/settings",
