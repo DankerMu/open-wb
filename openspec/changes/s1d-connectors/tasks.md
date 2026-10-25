@@ -37,9 +37,9 @@ Minimal mergeable slice: atomic - 写出器、发布器与启动阶段是同一�
 
 ## 2b. 官方 omp 前提用例（connectors「托管 mcp.json」的「官方 omp 读取并按会话停用」）
 
-- [ ] 2b.1 核对 Context：omp 源码 `discovery/builtin.ts` 与 `capability/mcp.ts` 的读取与停用规则、`session/session-tools.ts:909-924` 的 `xd://` 挂载条件、`sdk.ts:3050-3076` 的两个系统提示词段、`server/test/support/omp-official*.ts` 的 `get_state` 写法、`omp-official-project-config.test.ts` 的标记文件写法、`.github/scripts/ci-uid-isolation.sh` 的官方用例清单与 `scripts/test-ci-harness.sh` 的期望。
-- [ ] 2b.2 测试先行：新 stdio MCP 夹具 `server/test/support/fake-mcp-server.mjs`（JSON-RPC over stdio：`initialize` 返回 argv 给出的哨兵 `instructions`、`tools/list` 返回 `echo`、`tools/call`；启动时写出 argv 给出路径的标记文件）与其自测；新官方 omp 用例 `server/test/omp-official-connectors.test.ts`（`WORKBUDDY_OMP_TEST=1`）：经 2a 的内容生成函数写出登记了 `echo` 与 `other`（同一夹具、各自的哨兵与标记文件）的 `mcp.json`，一次 spawn 的会话配置文件 `disabledExtensions` 为 `["mcp:other"]`；轮询 `get_state.systemPrompt`（≤30 s）直到 `## MCP Server Instructions` 段出现 `echo` 的哨兵（正对照），再断言 `other` 的哨兵不在、`other` 的标记文件不存在而 `echo` 的存在、`## MCP Tool Routes` 段含 `xd://mcp__echo_echo`。
-- [ ] 2b.3 `.github/scripts/ci-uid-isolation.sh` 官方用例清单加 `test/omp-official-connectors.test.ts`、`scripts/test-ci-harness.sh` 期望同步。
+- [x] 2b.1 核对 Context：omp 源码 `discovery/builtin.ts` 与 `capability/mcp.ts` 的读取与停用规则、`session/session-tools.ts:909-924` 的 `xd://` 挂载条件、`sdk.ts:3050-3076` 的两个系统提示词段、`server/test/support/omp-official*.ts` 的 `get_state` 写法、`omp-official-project-config.test.ts` 的标记文件写法、`.github/scripts/ci-uid-isolation.sh` 的官方用例清单与 `scripts/test-ci-harness.sh` 的期望。
+- [x] 2b.2 测试先行：新 stdio MCP 夹具 `server/test/support/fake-mcp-server.mjs`（JSON-RPC over stdio：`initialize` 返回 argv 给出的哨兵 `instructions`、`tools/list` 返回 `echo`、`tools/call`；启动时写出 argv 给出路径的标记文件）与其自测；新官方 omp 用例 `server/test/omp-official-connectors.test.ts`（`WORKBUDDY_OMP_TEST=1`）：经 2a 的内容生成函数写出登记了 `echo` 与 `other`（同一夹具、各自的哨兵与标记文件）的 `mcp.json`，一次 spawn 的会话配置文件 `disabledExtensions` 为 `["mcp:other"]`；轮询 `get_state.systemPrompt`（≤30 s）直到 `## MCP Server Instructions` 段出现 `echo` 的哨兵（正对照），再断言 `other` 的哨兵不在、`other` 的标记文件不存在而 `echo` 的存在、`## MCP Tool Routes` 段含 `xd://mcp__echo_echo`。
+- [x] 2b.3 `.github/scripts/ci-uid-isolation.sh` 官方用例清单加 `test/omp-official-connectors.test.ts`、`scripts/test-ci-harness.sh` 期望同步。
 
 Suggested fixture level: expanded - 三个 omp 前提（`--no-extensions` 下仍读用户级 `mcp.json`、`mcp:<名>` 停用、`xd://` 挂载的可观察面）由钉住的官方二进制钉住。
 Minimal mergeable slice: atomic - 夹具、官方用例与 CI 清单是同一条验证路径：夹具没有官方用例就没有消费者，官方用例不进 CI 清单就不在 PR CI 里跑。
