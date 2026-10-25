@@ -828,7 +828,7 @@ modelRoles:
 
 ### 9.11 连接器（S1d，change `s1d-connectors`）
 
-本节随任务组落地。组 2a：托管 `mcp.json`；组 3：管理端点与审计；组 4 起：探活、账号缺省与会话停用。凭证的暴露面见 ADR-0015。
+本节随任务组落地。组 2a：托管 `mcp.json`；组 3：管理端点与审计；组 4：探活；组 5 起：账号缺省与会话停用。凭证的暴露面见 ADR-0015。
 
 **托管 `mcp.json`**（`server/src/connectors/mcp-json.ts`，规格 connectors「托管 mcp.json」）：数据库的 `connectors` 表是事实源，宿主把 `enabled = 1` 的连接器写成 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`，omp 每次 spawn 把它当作用户级 MCP 配置读取（`--no-extensions` 不挡它）。内容恰为 `JSON.stringify({mcpServers: {<名称>: <条目>}}, null, 2)` 加一个换行，名称按字典序；stdio 条目恰为 `{type, command, args, env}`，http 条目恰为 `{type, url, headers}`，停用的行不写；没有启用的连接器时文件恰为 `{\n  "mcpServers": {}\n}\n`（覆盖上次运行的残留）。与托管 `models.yml` 同一原子替换写出，终态 `0640`、app uid 持有，omp uid 只读（CI `uid-isolation` 证明能读、覆写 `EACCES`）。`env` / `headers` 的值只在这个文件里，不进任何响应、审计、日志与错误信息。
 
@@ -840,9 +840,16 @@ modelRoles:
 - `POST /api/connectors`（body `{name, type, description?, command?, args?, env?, url?, headers?, enabled?}`，键集严格，含另一类型的键即 400；省略的可选键取缺省：`description` `""`、`args` `[]`、`env` / `headers` 空对象、`enabled` `true`）→ 201 管理员视图；重名 409 `conflict`，第 33 个 400。
 - `PUT /api/connectors?name=`（body 为 POST 去掉 `name` 与 `type`）→ 200 管理员视图。整体替换：省略的键取 POST 的缺省（省略 `env` / `headers` 即为空、省略 `enabled` 即为 `true`）；`env` / `headers` 里值为 `null` 的键保留既有值，既有值里没有该键则 400。解析 `null` 之后 `command`、`args`、`env`、`url`、`headers` 任一变化即在同一事务里把探活结果复位为 `never`；只改 `description` / `enabled` 不复位。所以客户端总按管理员视图构造完整 body、凭证键一律带 `null`，否则凭证被清掉。
 - `DELETE /api/connectors?name=` → 204（账号与会话停用列表里的同名项留着，无害）。
-- 连接器名称走查询参数，与 `/api/models`、`/api/experts` 一致。次序：未登录 401 → 非管理员对三个写路由 403 `forbidden` → `PUT` / `DELETE` 的 `name` 缺失、为空或出现多次 400 → 未知名称 404 → body 解析与字段 400。前三步都在 body 解析之前（路由级 `preParsing`，与专家端点同一做法），无论 body 合法、残缺还是超限结果不变。`POST /api/connectors` 与 `PUT /api/connectors` 属 content-parser 归属集，body limit 64 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400、不写表；D3 的上限允许 32 个 4096 码点的 `env` 值，上限附近的合法 body 会超过 64 KiB、得这个 400（已知限制，实际凭证远小于此）。`DELETE /api/connectors` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。全部应答 `Cache-Control: no-store`。违反取值规则的 400 message 恒为 `请求格式不正确`，不回显取值。
+- `POST /api/connectors/probe?name=`（无 body）→ 200 管理员视图，`probe` 为这次的结果（见下文「探活」）。
+- 连接器名称走查询参数，与 `/api/models`、`/api/experts` 一致。次序：未登录 401 → 非管理员对三个写路由与探活 403 `forbidden` → `PUT` / `DELETE` / 探活的 `name` 缺失、为空或出现多次 400 → 未知名称 404 → body 解析与字段 400。前三步都在 body 解析之前（路由级 `preParsing`，与专家端点同一做法），无论 body 合法、残缺还是超限结果不变。`POST /api/connectors` 与 `PUT /api/connectors` 属 content-parser 归属集，body limit 64 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400、不写表；D3 的上限允许 32 个 4096 码点的 `env` 值，上限附近的合法 body 会超过 64 KiB、得这个 400（已知限制，实际凭证远小于此）。`POST /api/connectors/probe` 也在归属集，按 `POST /api/models/probe` 先例 bodyless：任意 body（含 `{}`）、坏 JSON、媒体类型或超限都是 exact 400，不发探活请求、不查文件、不写表。`DELETE /api/connectors` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。全部应答 `Cache-Control: no-store`。违反取值规则的 400 message 恒为 `请求格式不正确`，不回显取值。
 - 写入流水线：校验 → 事务（写表 + 审计）→ 经唯一发布器重写 `mcp.json` → 应答。发布失败应答 generic 500（不是典型信封），标准错误恰一行 `{"event":"mcp_publish_failed"}`（只有 `event` 一个键），行与审计保留、不回滚；下一次成功的写入或重启再写。
 
-**审计**：每次写入与表写入同一事务记一条，kind 为 `connector.create` / `connector.update` / `connector.delete`（探活的 `connector.probe` 随组 4），actor 为管理员，`workspaceId` 为 null，title 为 `登记连接器 <name>` / `修改连接器 <name>` / `删除连接器 <name>`；detail 恰为 `{name, type}`，不含 `env` / `headers` 值、命令参数与地址。
+**探活**（`server/src/connectors/probe.ts`，规格 connectors「连接器探活」）：不论连接器启用与否都可探活；探活不重写 `mcp.json`、不改 `enabled`，结果写进该行的探活三列。
+
+- http：向登记的 `url` 原样发一次 `POST`，body 为 MCP `initialize` 请求（`protocolVersion` `2025-03-26`、`clientInfo.name` `workbuddy-probe`），请求头为登记的 `headers`（名称忽略大小写为 `content-type` / `accept` 的项去掉）加 `content-type: application/json` 与 `accept: application/json, text/event-stream`。每次新建连接，不跟随重定向（3xx 按非 2xx 计）、不重试；建连 10 s、整体 15 s。判定：2xx 且应答体是 MCP 初始化结果（普通对象、`jsonrpc` 为 `"2.0"`、自有 `result` 为非 null 对象）→ `正常`。应答媒体类型为 `text/event-stream` 时按 SSE 读，取第一个分派的 `data:` 事件判定、不等流结束；其它媒体类型整个应答体当 JSON。2xx 应答体至多读 64 KiB。失败的 message：非 2xx 为 `HTTP <状态码>：<摘要>`（摘要与模型探活同一净化，覆盖该连接器全部请求头值，≤200 码点）；2xx 但不是初始化结果、SSE 流在任何事件之前结束或应答体超过 64 KiB 为 `响应不是 MCP 初始化结果`；连接被拒、被重置（含读应答体期间）、DNS 失败为 `无法连接`；期限到为 `超时`。
+- stdio：不拉起进程，只看 `command`：跟随符号链接后是 app 进程可执行的常规文件 → `正常`，否则（不存在、目录、没有执行权限）`命令不存在或不可执行`。所以 stdio 的「正常」只说明命令在、能执行，不说明它是一个能用的 MCP server。
+- 同一连接器的并发探活排队逐个执行；探活在途期间该连接器被删，结果丢弃、应答 404，不写审计。
+
+**审计**：每次写入与探活与表写入同一事务记一条，kind 为 `connector.create` / `connector.update` / `connector.delete` / `connector.probe`，actor 为管理员，`workspaceId` 为 null，title 为 `登记连接器 <name>` / `修改连接器 <name>` / `删除连接器 <name>` / `探活连接器 <name>`；detail 恰为 `{name, type}`，探活另带 `status`（`ok` / `failed`），不含 `env` / `headers` 值、命令参数、地址与探活 message。
 
 **回滚**：回退到没有连接器的版本时，连同删除 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`——旧版本不写也不删这个文件，留着它 omp 仍会读取并拉起其中的连接器。

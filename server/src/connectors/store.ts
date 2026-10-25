@@ -5,15 +5,17 @@
  *
  * Credentials: `env` / `headers` values go in through `parseCreate` / `parseUpdate` (`validate.ts`, the
  * only rules) and come out only through `enabledForMcp`, for the managed `mcp.json` writer
- * (`mcp-json.ts`, design D4) — `ConnectorView` carries only the key names. Stored `env` /
+ * (`mcp-json.ts`, design D4), and `probeTarget`, for the probe (`probe.ts`, design D6) —
+ * `ConnectorView` carries only the key names. Stored `env` /
  * `headers` are JSON objects with sorted keys, so a PUT giving the same values in another key order
  * stores the same text.
  *
  * Results: a refusal throws the fixed-message `bad_request`; a taken name `conflict` (checked before the
  * 32-row cap). `update` and `remove` return `undefined` for an unknown name, before the body is looked
- * at (the route answers 404 ahead of body errors). Each write opens its own transaction (the caller must
- * not be in one); the optional `within(view)` runs after the write, before COMMIT (the audit hook) — a
- * throw rolls all of it back.
+ * at (the route answers 404 ahead of body errors); `recordProbe` throws `not_found` for a row deleted
+ * meanwhile, before `within`. Each write opens its own transaction (the caller must not be in one); the
+ * optional `within(view)` runs after the write, before COMMIT (the audit hook) — a throw rolls all of it
+ * back.
  */
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 import { HttpError } from "../core/errors/index.js";
@@ -62,6 +64,8 @@ const UPDATE =
 const RESET_PROBE =
   "UPDATE connectors SET probe_status = 'never', probe_at = NULL, probe_message = NULL WHERE name = ?";
 const DELETE = "DELETE FROM connectors WHERE name = ?";
+const RECORD_PROBE =
+  "UPDATE connectors SET probe_status = ?, probe_message = ?, probe_at = ? WHERE name = ?";
 const SELECT_PREFS = "SELECT disabled_connectors FROM account_connector_prefs WHERE account_id = ?";
 const UPSERT_PREFS =
   "INSERT INTO account_connector_prefs(account_id, disabled_connectors, updated_at) VALUES (?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET disabled_connectors = excluded.disabled_connectors, updated_at = excluded.updated_at";
@@ -84,6 +88,32 @@ export function createConnectorStore(db: DatabaseSync) {
         .prepare(SELECT_ENABLED)
         .all()
         .map((row) => ({ name: String(row.name), fields: fieldsOf(row) })),
+
+    /** One row with its credentials, enabled or not: only the probe reads this. */
+    probeTarget(name: string): ConnectorFields | undefined {
+      const row = raw(name);
+      return row === undefined ? undefined : fieldsOf(row);
+    },
+
+    /**
+     * Writes a probe result (the three probe columns only). A row deleted while the probe was in
+     * flight is `not_found`, thrown before `within`: nothing is written, no audit.
+     */
+    recordProbe(
+      name: string,
+      result: { status: "ok" | "failed"; message: string | null; at: number },
+      within?: Within,
+    ): ConnectorView {
+      return inTransaction(db, () => {
+        const { changes } = db
+          .prepare(RECORD_PROBE)
+          .run(result.status, result.message, result.at, name);
+        if (changes === 0 || changes === 0n) {
+          throw new HttpError("not_found");
+        }
+        return finish(name, within);
+      });
+    },
 
     get(name: string): ConnectorView | undefined {
       const row = raw(name);

@@ -44,7 +44,7 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact 二十七条 `<METHOD> <route template>` 身份：POST login（#9）、
+/** 受信 content-parser owner 的 exact 二十八条 `<METHOD> <route template>` 身份：POST login（#9）、
  * POST logout（#10）、prompt、chat completions、两条工作空间、回合控制四条（#450）、会话
  * 元数据（#512）POST /api/sessions 与 PATCH /api/sessions/:id、临时空间转正（#927）
  * POST /api/workspaces/:id/promote、撤回（#948）POST /api/sessions/:id/undo、上传（#1013）
@@ -55,7 +55,8 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
  * probe 的路由由组 8 注册，身份先于它存在），以及专家（s1d-experts-skills）的 POST /api/experts 与
  * PUT /api/experts（专家 id 走查询参数），以及技能账号缺省 PUT /api/skills/defaults（GET /api/skills 不读 body，
  * 不在集合内），以及会话能力 PUT /api/sessions/:id/capabilities（同模板的 GET 不读 body，不在集合内），以及
- * 连接器（s1d-connectors）的 POST /api/connectors 与 PUT /api/connectors（连接器名称走查询参数）。method 是身份的一部分：DELETE /api/sessions/:id 与 PATCH、DELETE /api/models 与
+ * 连接器（s1d-connectors）的 POST /api/connectors、PUT /api/connectors 与 bodyless 的 POST /api/connectors/probe
+ * （连接器名称走查询参数）。method 是身份的一部分：DELETE /api/sessions/:id 与 PATCH、DELETE /api/models 与
  * POST / PUT、DELETE /api/experts 与 POST / PUT、GET / DELETE /api/connectors 与 POST / PUT 同模板但不在集合内。
  * 模板须与 Fastify 路由注册逐字一致，method 按 Fastify 原样（大写）比较、不做大小写归一。 */
 const CONTENT_PARSER_OWNED_ROUTES = new Set([
@@ -86,11 +87,12 @@ const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "PUT /api/sessions/:id/capabilities",
   "POST /api/connectors",
   "PUT /api/connectors",
+  "POST /api/connectors/probe",
 ]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 `${method} ${route template}` 恰为
- * CONTENT_PARSER_OWNED_ROUTES 二十七条之一时归一 exact 400（无单独的 POST 门；同模板的
+ * CONTENT_PARSER_OWNED_ROUTES 二十八条之一时归一 exact 400（无单独的 POST 门；同模板的
  * 其他方法不被覆盖）；matched /api 或 /api/* catch-all 与 unmatched non-GET
  * （routeOptions.url undefined 且 method != GET）恢复 typed not_found 404；其他已注册
  * route 保持 generic 5xx。显式 typed HttpError 保持 route-independent。方法/URL 边界

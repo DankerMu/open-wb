@@ -130,7 +130,10 @@ export interface AssemblyDependencies {
   mcpPublish?: () => Promise<void>;
   /** 模型与连接器发布失败的一行记录 sink（与 `log` / `warn` 同一写法）；省略时不写。 */
   onPublishFailed?: (record: ModelPublishFailedRecord | McpPublishFailedRecord) => void;
-  /** 模型探活的建连 / 整体期限（测试注入短期限）；省略时取 `models/probe.ts` 的 10 s / 15 s。 */
+  /**
+   * 模型探活与连接器探活共用的建连 / 整体期限（测试注入短期限）；省略时各取 `models/probe.ts` 与
+   * `connectors/probe.ts` 的 10 s / 15 s。
+   */
   probeDeadlines?: { connectDeadlineMs?: number; totalDeadlineMs?: number };
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
@@ -423,8 +426,8 @@ function registerModelAdmin(
 }
 
 /**
- * 第十一个模块 `connectors`（s1d-connectors D5）：store 在 app 自己的库上自建；发布器是入口注入的唯一实例，
- * 未注入时为空操作。
+ * 第十一个模块 `connectors`（s1d-connectors D5、D6）：store 在 app 自己的库上自建；发布器是入口注入的唯一实例，
+ * 未注入时为空操作；探活期限与模型探活共用 `assembly.probeDeadlines`。
  */
 function registerConnectorAdmin(
   app: FastifyInstance,
@@ -440,6 +443,7 @@ function registerConnectorAdmin(
     ...(assembly?.onPublishFailed === undefined
       ? {}
       : { onPublishFailed: assembly.onPublishFailed }),
+    ...(assembly?.probeDeadlines === undefined ? {} : { probeDeadlines: assembly.probeDeadlines }),
   });
 }
 
