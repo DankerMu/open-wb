@@ -316,7 +316,11 @@ describe("能力栏：有专家", () => {
           ],
         }),
       [`/api/sessions/${A}/capabilities`]: () =>
-        jsonResponse({ expertId: "builtin:test-engineer", disabledSkills: [] }),
+        jsonResponse({
+          expertId: "builtin:test-engineer",
+          disabledSkills: [],
+          disabledConnectors: [],
+        }),
     });
     await expectReadOnly("任务启动于 项目A");
     const { left, toolbar } = toolbarGroups();

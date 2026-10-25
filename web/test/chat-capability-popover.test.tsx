@@ -8,7 +8,7 @@
 import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSessionCapabilities } from "../src/features/chat/use-session-capabilities.js";
-import type { ApiClient } from "../src/lib/api.js";
+import type { ApiClient, SessionCapabilities } from "../src/lib/api.js";
 import { TESTER } from "./center-experts-support.js";
 import {
   CATALOG,
@@ -385,7 +385,7 @@ describe("会话中的 能力 弹层", () => {
 
   it("同一闭包连调两次 toggleSkill：恰一次 PUT；能力尚未取得时 toggleSkill 不发", async () => {
     const put = vi.fn(() => new Promise<never>(() => {}));
-    let answer: (value: { expertId: null; disabledSkills: string[] }) => void = () => undefined;
+    let answer: (value: SessionCapabilities) => void = () => undefined;
     const client = {
       getSessionCapabilities: vi.fn(
         () =>
@@ -398,7 +398,9 @@ describe("会话中的 能力 弹层", () => {
     const { result } = renderHook(() => useSessionCapabilities(client, A));
     act(() => result.current.toggleSkill("deploy", false));
     expect(put).not.toHaveBeenCalled();
-    await act(async () => answer({ expertId: null, disabledSkills: ["ghost"] }));
+    await act(async () =>
+      answer({ expertId: null, disabledSkills: ["ghost"], disabledConnectors: [] }),
+    );
 
     act(() => {
       const { toggleSkill } = result.current;
@@ -413,7 +415,7 @@ describe("会话中的 能力 弹层", () => {
   });
 
   it("PUT 应答落地的同一帧里（重渲染之前）用旧闭包再切：以应答的集合为底", async () => {
-    let settle: (value: { expertId: null; disabledSkills: string[] }) => void = () => undefined;
+    let settle: (value: SessionCapabilities) => void = () => undefined;
     const put = vi
       .fn()
       .mockImplementationOnce(
@@ -424,7 +426,11 @@ describe("会话中的 能力 弹层", () => {
       )
       .mockImplementation(() => new Promise<never>(() => {}));
     const client = {
-      getSessionCapabilities: vi.fn(async () => ({ expertId: null, disabledSkills: [] })),
+      getSessionCapabilities: vi.fn(async () => ({
+        expertId: null,
+        disabledSkills: [],
+        disabledConnectors: [],
+      })),
       putSessionCapabilities: put,
     } as unknown as Pick<ApiClient, "getSessionCapabilities" | "putSessionCapabilities">;
     const { result } = renderHook(() => useSessionCapabilities(client, A));
@@ -433,7 +439,11 @@ describe("会话中的 能力 弹层", () => {
     const stale = result.current;
 
     await act(async () => {
-      settle({ expertId: null, disabledSkills: ["deploy", "weekly-report"] });
+      settle({
+        expertId: null,
+        disabledSkills: ["deploy", "weekly-report"],
+        disabledConnectors: [],
+      });
       await Promise.resolve();
       stale.toggleSkill("lint", false);
     });

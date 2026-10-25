@@ -25,8 +25,8 @@ const CTP_CODES = [
 
 type CtpCode = (typeof CTP_CODES)[number];
 
-/** spec 的二十八条 method + matched route 归属身份（二十二条 POST + 一条 PATCH + 五条 PUT）。 */
-const TWENTY_EIGHT_OWNER_IDENTITIES = [
+/** spec 的二十九条 method + matched route 归属身份（二十二条 POST + 一条 PATCH + 六条 PUT）。 */
+const TWENTY_NINE_OWNER_IDENTITIES = [
   ["POST", "/api/auth/login"],
   ["POST", "/api/auth/logout"],
   ["POST", "/api/sessions/:id/prompt"],
@@ -55,6 +55,7 @@ const TWENTY_EIGHT_OWNER_IDENTITIES = [
   ["POST", "/api/connectors"],
   ["PUT", "/api/connectors"],
   ["POST", "/api/connectors/probe"],
+  ["PUT", "/api/connectors/defaults"],
 ] as const;
 
 /** spec 码表的十八码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
@@ -161,14 +162,14 @@ function crossWithCodes<T extends readonly unknown[]>(rows: readonly T[]) {
   return rows.flatMap((row) => CTP_CODES.map((code) => [...row, code] as const));
 }
 
-describe("证据 1：二十八条身份 × 四个真实 CTP 错误 -> 400", () => {
-  it("身份集恰二十八条且互不重复", () => {
-    const keys = TWENTY_EIGHT_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
-    expect(keys).toHaveLength(28);
-    expect(new Set(keys).size).toBe(28);
+describe("证据 1：二十九条身份 × 四个真实 CTP 错误 -> 400", () => {
+  it("身份集恰二十九条且互不重复", () => {
+    const keys = TWENTY_NINE_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
+    expect(keys).toHaveLength(29);
+    expect(new Set(keys).size).toBe(29);
   });
 
-  it.each(crossWithCodes(TWENTY_EIGHT_OWNER_IDENTITIES))(
+  it.each(crossWithCodes(TWENTY_NINE_OWNER_IDENTITIES))(
     "%s %s 上真实 %s -> 400 bad_request 且无 raw 细节",
     (method, url, code) => {
       const error = genuineCtpError(code);
@@ -220,6 +221,8 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["GET", "/api/connectors"],
     ["PATCH", "/api/connectors"],
     ["GET", "/api/connectors/probe"],
+    ["GET", "/api/connectors/defaults"],
+    ["POST", "/api/connectors/defaults"],
   ] as const;
 
   const LOOKALIKES = [

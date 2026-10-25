@@ -1,7 +1,8 @@
 /**
  * s1d-experts-skills 任务 9.2：`web/src/lib/api-session-capabilities.ts` 的 `getSessionCapabilities` /
  * `putSessionCapabilities`（design D7：`GET` / `PUT /api/sessions/:id/capabilities`，应答恰为
- * `{expertId: string | null, disabledSkills: string[]}`），以及 `createSession` input 的两个新键（session-sidebar
+ * `{expertId: string | null, disabledSkills: string[], disabledConnectors: string[]}`——s1d-connectors 起三键，旧的两键
+ * 应答被拒），以及 `createSession` input 的两个新键（session-sidebar
  * 「会话 DTO 严格解析」场景「客户端方法」）。接缝：真实的 `createApiClient` 加替身 `fetch`。期望值取自规格与
  * 服务端 `server/src/sessions/rest-capabilities.ts` 的应答形状。
  */
@@ -18,7 +19,11 @@ import {
 
 const ODD_ID = "sess/%#?+ 中";
 const ODD_PATH = "/api/sessions/sess%2F%25%23%3F%2B%20%E4%B8%AD/capabilities";
-const ANSWER = { expertId: "builtin:test-engineer", disabledSkills: ["deploy"] };
+const ANSWER = {
+  expertId: "builtin:test-engineer",
+  disabledSkills: ["deploy"],
+  disabledConnectors: ["gitlab"],
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -40,8 +45,8 @@ describe("getSessionCapabilities", () => {
     ]);
   });
 
-  it("accepts no expert and an empty disabled list", async () => {
-    const none = { expertId: null, disabledSkills: [] };
+  it("accepts no expert and empty disabled lists", async () => {
+    const none = { expertId: null, disabledSkills: [], disabledConnectors: [] };
     stub({ [ODD_PATH]: () => jsonResponse(none) });
 
     await expect(createApiClient().getSessionCapabilities(ODD_ID)).resolves.toEqual(none);
@@ -93,8 +98,12 @@ describe("putSessionCapabilities", () => {
 
 describe("会话能力应答严格解析", () => {
   it.each([
-    ["no expertId", { disabledSkills: [] }],
-    ["no disabledSkills", { expertId: null }],
+    ["no expertId", { disabledSkills: [], disabledConnectors: [] }],
+    ["no disabledSkills", { expertId: null, disabledConnectors: [] }],
+    ["the old two-key shape (no disabledConnectors)", { expertId: null, disabledSkills: [] }],
+    ["a non-array disabledConnectors", { ...ANSWER, disabledConnectors: "gitlab" }],
+    ["a null disabledConnectors", { ...ANSWER, disabledConnectors: null }],
+    ["a numeric connector name", { ...ANSWER, disabledConnectors: ["gitlab", 1] }],
     ["an extra key", { ...ANSWER, sessionId: "a" }],
     ["a numeric expertId", { ...ANSWER, expertId: 1 }],
     ["an undefined-like expertId", { ...ANSWER, expertId: false }],

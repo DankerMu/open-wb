@@ -410,8 +410,16 @@ describe("自建、修改与删除", () => {
     const kept = await create(world, "zhangsan", { ...VALID, name: "留下的" });
     const sessionS = await createSession(world, "zhangsan");
     const sessionT = await createSession(world, "zhangsan");
-    writeSessionCapabilities(world.db, sessionS, { expertId: doomed, disabledSkills: ["k"] });
-    writeSessionCapabilities(world.db, sessionT, { expertId: kept, disabledSkills: [] });
+    writeSessionCapabilities(world.db, sessionS, {
+      expertId: doomed,
+      disabledSkills: ["k"],
+      disabledConnectors: [],
+    });
+    writeSessionCapabilities(world.db, sessionT, {
+      expertId: kept,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
 
     const response = await call(world, "zhangsan", "DELETE", at(doomed));
     expectAnswer(response, 204);
@@ -419,10 +427,12 @@ describe("自建、修改与删除", () => {
     expect(readSessionCapabilities(world.db, sessionS)).toEqual({
       expertId: null,
       disabledSkills: ["k"],
+      disabledConnectors: [],
     });
     expect(readSessionCapabilities(world.db, sessionT)).toEqual({
       expertId: kept,
       disabledSkills: [],
+      disabledConnectors: [],
     });
     expect(await listIds(world, "zhangsan")).toEqual([...BUILTIN_IDS, kept]);
     expectAnswer(await call(world, "zhangsan", "DELETE", at(doomed)), 404, NOT_FOUND);
@@ -497,7 +507,11 @@ describe("审计", () => {
     const world = await openWorld();
     const id = await create(world, "zhangsan");
     const sessionId = await createSession(world, "zhangsan");
-    writeSessionCapabilities(world.db, sessionId, { expertId: id, disabledSkills: [] });
+    writeSessionCapabilities(world.db, sessionId, {
+      expertId: id,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
     const before = footprint(world);
     world.db.exec(
       `CREATE TRIGGER audit_abort BEFORE INSERT ON audit_events

@@ -145,7 +145,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           activeTurn: accepted,
           workspaceId: null,
           composer: { approvalMode: null, modelId: null, reasoningEffort: null },
-          capabilities: { expertId: null, disabledSkills: [] },
+          capabilities: { expertId: null, disabledSkills: [], disabledConnectors: [] },
         });
         expect(sessionRow(db, session.id)).toMatchObject({
           title: "😀".repeat(18),
@@ -176,7 +176,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           activeTurn: null,
           workspaceId: null,
           composer: { approvalMode: null, modelId: null, reasoningEffort: null },
-          capabilities: { expertId: null, disabledSkills: [] },
+          capabilities: { expertId: null, disabledSkills: [], disabledConnectors: [] },
         });
         expect(store.rollbackPrompt(accepted.assistantMessageId)).toBe(false);
       });
@@ -357,7 +357,7 @@ describe("SessionStore admission, metadata, and compensation", () => {
           activeTurn: accepted,
           workspaceId: null,
           composer: { approvalMode: null, modelId: null, reasoningEffort: null },
-          capabilities: { expertId: null, disabledSkills: [] },
+          capabilities: { expertId: null, disabledSkills: [], disabledConnectors: [] },
         });
         expect(store.finishTurn(accepted.assistantMessageId, "done")).toBe(true);
       });

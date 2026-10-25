@@ -23,7 +23,7 @@ export const LINT = project("lint", "检查");
 export const CATALOG = [COMPACT, TODO, DEPLOY, WEEKLY_OVER];
 
 export function capsBody(disabledSkills: readonly string[], expertId: string | null = null) {
-  return jsonResponse({ expertId, disabledSkills });
+  return jsonResponse({ expertId, disabledSkills, disabledConnectors: [] });
 }
 
 export function skillsBody(disabledSkills: readonly string[]) {

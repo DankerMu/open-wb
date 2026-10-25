@@ -82,7 +82,7 @@ flowchart TD
 ```
 
 1. 方向单向：`http → feature → core`。http 可直接依赖 core（共享错误身份）；core 不 import feature/http，feature 不 import http。
-2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
+2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）、`sessions → connectors`（`rest-metadata.ts` / `rest-capabilities.ts` / `store-capabilities.ts` 用 `connectors/validate.ts` 的连接器名单规则，`store-metadata.ts` 用 `connectors/store.ts` 的账号缺省读取，change `s1d-connectors` D7）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
 3. **一切文件路径操作必须经 `core/sandbox.resolve`**；feature 模块直接 `fs` 访问用户路径是缺陷。
 4. omp 与 kb-service 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发。
 5. 跨服务契约（app-server↔kb-service）语言中立 REST，不共享代码。
@@ -804,7 +804,7 @@ modelRoles:
 **会话能力**（`server/src/sessions/rest-capabilities.ts`，库层 `store-capabilities.ts`；规格 skill-switches「会话能力端点」、session-metadata「会话创建与空间绑定」「fork 继承会话元数据」）：每个会话存一个专家 id（`chat_sessions.expert_id`，可为 NULL）与一个停用技能集合（`disabled_skills`，去重字典序）。两者不进会话视图（十四键不变），只经下面的入口读写；改动只写库，不通知 supervisor——在途回合不受影响，下一次派发按组 6 对齐。
 
 - **创建**：`POST /api/sessions` 的 body 另收 `expertId`（字符串，须对调用者可见：内置专家或本账号自建；`null`、他人的、不存在的 id 一律 400）与 `disabledSkills`（字符串数组，至多 128 项按去重前计，名称规则同技能端点；违反 400）。这两项先于 `workspaceId` 判定，它们的 400 不写会话行、空间行、目录与审计。初值：停用集合 = body 的 `disabledSkills`，没给时为同一事务里读到的账号缺省停用列表，账号没有偏好行时为 `[]`；给了 `expertId` 时再按下面的并集规则去掉该专家声明的技能。创建不改账号缺省与账号最近选择，不新增审计；之后改账号缺省不影响已有会话。body limit 由 16 KiB 改为 64 KiB（`PATCH /api/sessions/:id` 仍 16 KiB）。
-- **`GET /api/sessions/:id/capabilities`** → 200 `{expertId: string | null, disabledSkills: string[]}`。`expertId` 是有效专家：行里存的 id 对属主已不可见（被删除、属另一账号、已下架的内置 id）时报 `null`，读取不改写行里的原值（删除专家本身会在同一事务把引用它的会话清空）。已归档会话照常 200（会话侧栏可选中已归档会话只读呈现）。
+- **`GET /api/sessions/:id/capabilities`** → 200 `{expertId: string | null, disabledSkills: string[]}`（`s1d-connectors` 起恰为三键，另有 `disabledConnectors`，见 9.11）。`expertId` 是有效专家：行里存的 id 对属主已不可见（被删除、属另一账号、已下架的内置 id）时报 `null`，读取不改写行里的原值（删除专家本身会在同一事务把引用它的会话清空）。已归档会话照常 200（会话侧栏可选中已归档会话只读呈现）。
 - **`PUT /api/sessions/:id/capabilities`**，body 为 `{expertId?: string | null, disabledSkills?: string[]}` 的非空子集 → 200，形状同 `GET`。`{}`、多余键、不可见专家、非字符串的 `expertId`、坏列表 400，已归档会话 409 `session_archived`，这些都不写行；与当前相同的值 200 且行不变。属 content-parser 归属集，body limit 64 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400。
 - **并集规则**（创建与 `PUT` 同一实现 `withoutExpertSkills`）：body 只要把 `expertId` 设为非 null 的专家，新停用集合 =（body 给出的 `disabledSkills`，没给时为会话当前的集合，创建时为上面的初值）减去该专家声明的技能——专家需要的技能一定开着；body 只含 `disabledSkills` 时原样存，这是加入专家之后停用其某个技能的唯一途径（随后再 `PUT` 一次只带 `disabledSkills`）；`expertId: null` 只清专家，不恢复任何停用。例：停用 `["deploy","lint"]`、专家 E 声明 `["deploy"]` 时，依次 `PUT {expertId:E}`、`{expertId:null}`、`{expertId:E, disabledSkills:["deploy"]}`、`{disabledSkills:["deploy"]}` 的停用集合为 `["lint"]`、`["lint"]`、`[]`、`["deploy"]`。
 - 两个端点都先做属主预检（未登录 401；不存在或属他人的会话同为 404），在 body 解析与 body limit 之前；全部应答 `Cache-Control: no-store`。
@@ -813,7 +813,7 @@ modelRoles:
 **能力指纹与派发对齐**（`server/src/sessions/composer-align.ts`、`supervisor.ts`；规格 chat-sessions「派发前按会话设置对齐进程」、experts「专家提示词注入」）：
 
 - **有效能力**：每次派发（prompt 与 regenerate）由 `store.runtimeState` 那一次读到的 `expert_id`、`disabled_skills` 算出 `{appendSystemPrompt, disabledExtensions}`——有效专家是 `expert_id` 所指且对会话属主可见的专家（经 experts store 的 `get`；被删除、属他人、已下架的 id 即没有专家），取其 `prompt`；停用集合各加前缀 `skill:`。一次派发只算一次，派发之间不缓存（改专家提示词不需要任何通知）。
-- **能力指纹**：两份会话配置文件内容（`sessionConfigContent`，写文件与比较用同一个函数）的 SHA-256——依次 `.yml` 的文本与 `.md` 的文本，没有 `.md` 时以 `null` 代替；`<key>` 不进指纹，所以有无专家的指纹必然不同，相同能力在每次 spawn 都得到同一个指纹。会话 slot 记下其进程 spawn 时的指纹，与启动档位、启动时的模型集合同样「不改写」。
+- **能力指纹**：两份会话配置文件内容（`sessionConfigContent`，写文件与比较用同一个函数）的 SHA-256——依次 `.yml` 的文本与 `.md` 的文本，没有 `.md` 时以 `null` 代替（`s1d-connectors` 起再并上托管 `mcp.json` 的当前字节，见 9.11）；`<key>` 不进指纹，所以有无专家的指纹必然不同，相同能力在每次 spawn 都得到同一个指纹。会话 slot 记下其进程 spawn 时的指纹，与启动档位、启动时的模型集合同样「不改写」。
 - **判据**：派发前第 1 步，存活 slot 的启动档位与有效档位不同、有效模型不在其启动时的模型集合里、**或有效能力的指纹与 slot 的不同**，即退役该 slot 再走普通新准入（`--resume` 最后已知会话文件、`stream_epoch` 恰加一、新 key 的会话配置文件，旧 key 的文件随旧进程退出删除）；三者都相符才复用，不多一次重启。所以**改专家、改专家的提示词、删除使用中的专家（有效专家变为无，重启后不带 `--append-system-prompt`）、改停用列表，都在该会话下一条消息时重启生效**；什么都没改或 `PUT` 了与当前相同的值则复用。
 - **修改设置本身不动进程**：`PATCH` 会话设置、能力 `PUT`、专家的改与删都只写库，supervisor 不被通知：存活进程不收帧、不退出，空闲计时器不重置，在途回合不被打断——一切在下一次派发时对齐。
 - **临时进程**：fork 的临时进程以源会话的有效能力 spawn，撤回的临时进程以该会话自己的有效能力 spawn，与会话进程经同一个能力函数（supervisor 经 `ForkPorts` / `BranchTempPorts` 的 `capabilities` 端口交给它们）与同一个 `SessionRuntime` 组装（`pool.ts` 的 `buildSessionRuntime`）；它们不派发 prompt，不比较指纹。
@@ -828,7 +828,7 @@ modelRoles:
 
 ### 9.11 连接器（S1d，change `s1d-connectors`）
 
-本节随任务组落地。组 2a：托管 `mcp.json`；组 3：管理端点与审计；组 4：探活；组 5 起：账号缺省与会话停用。凭证的暴露面见 ADR-0015。
+本节随任务组落地。组 2a：托管 `mcp.json`；组 3：管理端点与审计；组 4：探活；组 5：账号缺省、会话停用与派发指纹。凭证的暴露面见 ADR-0015。
 
 **托管 `mcp.json`**（`server/src/connectors/mcp-json.ts`，规格 connectors「托管 mcp.json」）：数据库的 `connectors` 表是事实源，宿主把 `enabled = 1` 的连接器写成 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`，omp 每次 spawn 把它当作用户级 MCP 配置读取（`--no-extensions` 不挡它）。内容恰为 `JSON.stringify({mcpServers: {<名称>: <条目>}}, null, 2)` 加一个换行，名称按字典序；stdio 条目恰为 `{type, command, args, env}`，http 条目恰为 `{type, url, headers}`，停用的行不写；没有启用的连接器时文件恰为 `{\n  "mcpServers": {}\n}\n`（覆盖上次运行的残留）。与托管 `models.yml` 同一原子替换写出，终态 `0640`、app uid 持有，omp uid 只读（CI `uid-isolation` 证明能读、覆写 `EACCES`）。`env` / `headers` 的值只在这个文件里，不进任何响应、审计、日志与错误信息。
 
@@ -851,5 +851,20 @@ modelRoles:
 - 同一连接器的并发探活排队逐个执行。结果只写回探活开始时的那一行、且连接参数未变：在途期间该连接器被删（含删后重建同名）→ 结果丢弃、应答 404，不写审计；在途期间 `PUT` 改了连接参数 → 结果丢弃、不写审计，应答当前管理员视图（探活状态是 `PUT` 复位后的 `never`）；只改描述或启停不影响结果写入。
 
 **审计**：每次写入与探活与表写入同一事务记一条，kind 为 `connector.create` / `connector.update` / `connector.delete` / `connector.probe`，actor 为管理员，`workspaceId` 为 null，title 为 `登记连接器 <name>` / `修改连接器 <name>` / `删除连接器 <name>` / `探活连接器 <name>`；detail 恰为 `{name, type}`，探活另带 `status`（`ok` / `failed`），不含 `env` / `headers` 值、命令参数、地址与探活 message。
+
+**账号缺省**（`connectors/rest.ts`，库层 `connectors/store.ts`；规格 connectors「连接器账号缺省」）：每个登录账号（不分角色）读写自己的一行 `account_connector_prefs`。
+
+- `GET /api/connectors/defaults` → 200 `{disabledConnectors: string[]}`，字典序，没有行时 `[]`。
+- `PUT /api/connectors/defaults`，body 键集恰为 `{disabledConnectors}`：至多 32 项（按去重前的原始项数），每项符合名称规则 `^[a-z]{1,32}$`，不要求已登记，去重后字典序整体替换 → 200，形状同 `GET`；`{}`、多余键、`null`、非数组、坏名称 400，不写行。属 content-parser 归属集（二十九条之一），body limit 16 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400。两者 `Cache-Control: no-store`，不审计、不重写 `mcp.json`。
+- 账号缺省只决定之后新建会话的初值，不改动已有会话。
+
+**会话停用**（`sessions/rest-metadata.ts`、`store-metadata.ts`、`rest-capabilities.ts`、`store-capabilities.ts`、`store-branch.ts`；规格 session-metadata「会话创建与空间绑定」「fork 继承会话元数据」、skill-switches「会话能力端点」）：每个会话另存一个停用连接器集合 `chat_sessions.disabled_connectors`（迁移 048，缺省 `'[]'`，去重字典序），同样不进会话视图。
+
+- **创建**：`POST /api/sessions` 的 body 另收 `disabledConnectors`（规则同账号缺省；`null`、非数组、超过 32 项、坏名称 400，先于 `workspaceId` 判定，不写任何行）。初值 = body 的 `disabledConnectors`，没给时为同一事务里读到的账号缺省，没有行时为 `[]`；专家不影响它。创建不改账号缺省、不审计。
+- **能力端点**：`GET` / `PUT /api/sessions/:id/capabilities` 的应答恰为 `{expertId, disabledSkills, disabledConnectors}`；`PUT` 的 body 为三键的非空子集，`disabledConnectors` 整体替换，不给时保持当前集合；并集规则只管技能。
+- **fork** 原样复制 `disabled_connectors`（与 `expert_id`、`disabled_skills` 一同）。
+- **spawn**：会话配置文件的 `disabledExtensions` = 停用技能的 `skill:<名>` 与停用连接器的 `mcp:<名>` 的并集（去重、字典序，例 `["mcp:gitlab", "skill:deploy"]`）；omp 因此不拉起这些连接器。fork 与撤回的临时进程同一规则。
+
+**派发指纹**（`sessions/omp/session-config.ts` 的 `sessionConfigFingerprint(capabilities, mcpJson)`、`composer-align.ts`；规格 chat-sessions「派发前按会话设置对齐进程」）：能力指纹 = `sha256(JSON.stringify([yml, md, mcpJson]))`，`mcpJson` 是每次派发前（`#onSlot`）读到的 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json` 当前字节；文件不存在按空串，其它读取错误照常抛出（该次派发失败）。omp 只在 spawn 时读 `mcp.json`，所以任何改变其字节的连接器写入（登记、修改连接参数、启停、删除启用的连接器）都使存活会话在**下一条消息**前退役重启（`--resume`，`stream_epoch` 加一）；写入本身不通知 supervisor，在途回合不受影响。探活与账号缺省的修改不改 `mcp.json` 的字节，也不改会话的停用集合，因此不重启；什么都没变时复用存活进程。派发前读到与 spawn 时读到之间文件若再变化，最多多一次重启（与 `models.yml` 的既有窗口同类）。
 
 **回滚**：回退到没有连接器的版本时，连同删除 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`——旧版本不写也不删这个文件，留着它 omp 仍会读取并拉起其中的连接器。

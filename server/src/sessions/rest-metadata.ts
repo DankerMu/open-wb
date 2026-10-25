@@ -16,7 +16,9 @@
  * reply (#932); a refused or rolled-back write throws before that line.
  * s1d-experts-skills (D7): the create body also takes `expertId` (an expert visible to the caller,
  * checked through the injected `experts` reader) and `disabledSkills` (at most 128 raw items of
- * valid skill names); both are judged before the workspace's 404. POST's body limit is 64 KiB
+ * valid skill names); both are judged before the workspace's 404. So is `disabledConnectors`
+ * (s1d-connectors D7: at most 32 connector names, need not be registered; `null` and non-arrays are
+ * 400), stored deduplicated in dictionary order. POST's body limit is 64 KiB
  * (128 names), PATCH keeps 16 KiB. The owner pre-check, the capability-body parsers and the expert
  * check are exported for `rest-capabilities.ts`.
  * Imports only the supervisor port type from `rest.ts` (it imports this).
@@ -30,6 +32,7 @@ import type {
   RawRequestDefaultExpression,
   RawServerDefault,
 } from "fastify";
+import { normalizeConnectorNames } from "../connectors/validate.js";
 import { HttpError } from "../core/errors/index.js";
 import type { createExpertStore } from "../experts/store.js";
 import { MAX_DISABLED_SKILLS, normalizeSkillNames } from "../skills/store.js";
@@ -75,6 +78,7 @@ const CREATE_KEYS: ReadonlySet<string> = new Set([
   ...COMPOSER_KEYS,
   "expertId",
   "disabledSkills",
+  "disabledConnectors",
 ]);
 const PATCH_KEYS: ReadonlySet<string> = new Set([
   "title",
@@ -197,9 +201,9 @@ export function createPrincipal(request: FastifyRequest): { id: string } {
 }
 
 /**
- * A plain JSON object whose keys ⊆ the seven create keys; strings (text/plain) are never parsed.
+ * A plain JSON object whose keys ⊆ the eight create keys; strings (text/plain) are never parsed.
  * `workspaceId`, `expertId` and the three composer keys are any string: their values are judged
- * later; `disabledSkills` is judged here in full.
+ * later; `disabledSkills` and `disabledConnectors` are judged here in full.
  */
 function parseCreateBody(body: unknown): SessionCreateInput & { expertId?: string } {
   if (!isPlainObject(body) || Object.keys(body).some((key) => !CREATE_KEYS.has(key))) {
@@ -217,6 +221,9 @@ function parseCreateBody(body: unknown): SessionCreateInput & { expertId?: strin
   }
   if (Object.hasOwn(body, "disabledSkills")) {
     input.disabledSkills = requireDisabledSkills(body.disabledSkills);
+  }
+  if (Object.hasOwn(body, "disabledConnectors")) {
+    input.disabledConnectors = normalizeConnectorNames(body.disabledConnectors);
   }
   readComposerKeys(body, input);
   return input;

@@ -1,20 +1,23 @@
 /**
- * Session capabilities (s1d-experts-skills D7; skill-switches「会话能力端点」). `GET` and `PUT
- * /api/sessions/:id/capabilities` answer exactly `{expertId, disabledSkills}`: `expertId` is the
- * effective expert — a stored id the owner can no longer see (deleted, another account's, a
- * withdrawn built-in) reads as null and is not rewritten — and `disabledSkills` the stored list in
- * dictionary order. Both pre-check the owner before the body (401 by the root guard; unknown and
- * foreign ids one 404) and answer no-store. `GET` serves an archived session too (it can be
- * selected read-only); only `PUT` refuses one with 409 `session_archived`.
+ * Session capabilities (s1d-experts-skills D7, s1d-connectors D7; skill-switches「会话能力端点」). `GET`
+ * and `PUT /api/sessions/:id/capabilities` answer exactly `{expertId, disabledSkills,
+ * disabledConnectors}`: `expertId` is the effective expert — a stored id the owner can no longer see
+ * (deleted, another account's, a withdrawn built-in) reads as null and is not rewritten — and the two
+ * lists the stored ones in dictionary order. Both pre-check the owner before the body (401 by the
+ * root guard; unknown and foreign ids one 404) and answer no-store. `GET` serves an archived session
+ * too (it can be selected read-only); only `PUT` refuses one with 409 `session_archived`.
  * `PUT` (a content-parser owner, 64 KiB) takes a non-empty subset of `{expertId: string | null,
- * disabledSkills: string[]}`: `{}`, an extra key, an expert the owner cannot see, a bad list are
- * 400 and nothing is written. The union rule is `store-capabilities.ts`'s: a non-null expert in the
- * body takes its declared skills out of (the body's list, else the stored one); a body of only
- * `disabledSkills` is stored as given; clearing the expert restores nothing. The supervisor is not
- * told: a running turn is untouched, the next dispatch aligns (group 6).
+ * disabledSkills: string[], disabledConnectors: string[]}`: `{}`, an extra key, an expert the owner
+ * cannot see, a bad list are 400 and nothing is written. The union rule is `store-capabilities.ts`'s:
+ * a non-null expert in the body takes its declared skills out of (the body's list, else the stored
+ * one); a body of only `disabledSkills` is stored as given; clearing the expert restores nothing.
+ * `disabledConnectors` (connector names, ≤32, need not be registered) replaces the stored list whole
+ * and is untouched by the expert. The supervisor is not told: a running turn is untouched, the next
+ * dispatch aligns (group 6).
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
+import { normalizeConnectorNames } from "../connectors/validate.js";
 import { HttpError } from "../core/errors/index.js";
 import {
   authorizeOwnedBeforeParse,
@@ -43,7 +46,7 @@ interface SessionCapabilityRouteDependencies {
 
 /** Same reasoning as `PUT /api/skills/defaults`: 128 names of up to 128 bytes, JSON-escaped. */
 const CAPABILITIES_BODY_LIMIT = 64 * 1024;
-const PUT_KEYS: ReadonlySet<string> = new Set(["expertId", "disabledSkills"]);
+const PUT_KEYS: ReadonlySet<string> = new Set(["expertId", "disabledSkills", "disabledConnectors"]);
 
 export function registerSessionCapabilityRoutes(
   app: FastifyInstance,
@@ -61,6 +64,7 @@ export function registerSessionCapabilityRoutes(
         ? stored.expertId
         : null,
     disabledSkills: stored.disabledSkills,
+    disabledConnectors: stored.disabledConnectors,
   });
 
   app.get<{ Params: { id: string } }>("/api/sessions/:id/capabilities", owned, async (request) => {
@@ -87,7 +91,10 @@ export function registerSessionCapabilityRoutes(
   );
 }
 
-/** A non-empty plain object whose keys ⊆ `{expertId, disabledSkills}`, every value judged here. */
+/**
+ * A non-empty plain object whose keys ⊆ `{expertId, disabledSkills, disabledConnectors}`, every value
+ * judged here.
+ */
 function parsePutBody(body: unknown, experts: ExpertReader, ownerId: string): CapabilitiesPatch {
   if (!isPlainObject(body)) {
     throw new HttpError("bad_request");
@@ -99,6 +106,9 @@ function parsePutBody(body: unknown, experts: ExpertReader, ownerId: string): Ca
   const patch: CapabilitiesPatch = {};
   if (Object.hasOwn(body, "disabledSkills")) {
     patch.disabledSkills = requireDisabledSkills(body.disabledSkills);
+  }
+  if (Object.hasOwn(body, "disabledConnectors")) {
+    patch.disabledConnectors = normalizeConnectorNames(body.disabledConnectors);
   }
   if (Object.hasOwn(body, "expertId")) {
     const id = body.expertId;

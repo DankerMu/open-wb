@@ -6,7 +6,11 @@
  * 「会话能力变化则在下一条重启」「能力未变则复用」「在途回合中修改能力不打断」「删除使用中的专家」, the
  * regenerate alignment, experts「专家提示词注入」, and the temporary processes of fork
  * (session-metadata「继承专家与停用技能」) and undo (omp-runtime: a temporary process takes its
- * session's effective capabilities).
+ * session's effective capabilities). And s1d-connectors group 5 (D8): the fingerprint takes in the
+ * managed `mcp.json` bytes — a connector registered, edited or disabled restarts the live process
+ * before the next prompt, a probe or an account-default write does not, and a change during an
+ * in-flight turn leaves it alone (「登记连接器使存活会话在下一条前重启」「连接器未变则复用」
+ * 「在途回合中修改连接器不打断」), over the real `mcp.json` publisher wired as `assembly.mcpPublish`.
  *
  * Every world is the production createApp → registerSessions assembly over real fake-omp children
  * and a real in-memory SQLite, driven over REST (`/api/experts`, `/api/sessions/:id/capabilities`,
@@ -21,6 +25,9 @@ import { basename, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { LightMyRequestResponse } from "fastify";
 import { describe, expect, it } from "vitest";
+import { createMcpPublisher } from "../src/connectors/mcp-json.js";
+import { createConnectorStore } from "../src/connectors/store.js";
+import { ompAgentDir } from "../src/sessions/omp/state-layout.js";
 import {
   type ApprovalWorld,
   flagValue,
@@ -34,6 +41,7 @@ import { postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { processOf } from "./session-composer-helpers.js";
 import { forkAt, forkWorlds, openForkWorld, seedTwoTurns } from "./session-fork-helpers.js";
 import { answered, sendPrompt } from "./session-regenerate-helpers.js";
+import { cookieFor } from "./session-rest-helpers.js";
 import { requiredCall, resumePath, waitForTurn } from "./session-supervisor-helpers.js";
 import { isLive } from "./session-supervisor-pool-helpers.js";
 import { postUndo, seedUndoable, undone } from "./session-undo-helpers.js";
@@ -56,6 +64,8 @@ interface SpawnedConfig {
   listing: string[];
   ymlPath: string;
   mdPath: string | null;
+  /** The managed `mcp.json` bytes at that moment; null when there is none (no publisher wired). */
+  mcp: string | null;
 }
 
 type World = ApprovalWorld;
@@ -64,6 +74,7 @@ type World = ApprovalWorld;
 function recordConfigs(world: World): SpawnedConfig[] {
   const records: SpawnedConfig[] = [];
   const dir = join(world.rt.runtime.stateDir, "session-config");
+  const mcpPath = join(ompAgentDir(world.rt.runtime.stateDir), "mcp.json");
   const inner = world.rt.runtime.spawnImpl;
   world.rt.runtime.spawnImpl = (command, args, options) => {
     const configs = args.flatMap((arg, index) => (arg === "--config" ? [args[index + 1]] : []));
@@ -77,6 +88,7 @@ function recordConfigs(world: World): SpawnedConfig[] {
       listing: readdirSync(dir).sort(),
       ymlPath,
       mdPath,
+      mcp: existsSync(mcpPath) ? readFileSync(mcpPath, "utf8") : null,
     });
     return inner(command, args, options);
   };
@@ -96,12 +108,13 @@ function call(
   method: "GET" | "POST" | "PUT" | "DELETE",
   url: string,
   body?: unknown,
+  cookie = world.cookie,
 ): Promise<LightMyRequestResponse> {
   return world.fixture.app.inject({
     method,
     url,
     headers: {
-      cookie: world.cookie,
+      cookie,
       ...(body === undefined ? {} : { "content-type": "application/json" }),
     },
     ...(body === undefined ? {} : { payload: JSON.stringify(body) }),
@@ -179,7 +192,7 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
       await putCaps(
         world,
         { expertId: DATA_ANALYST },
-        { expertId: DATA_ANALYST, disabledSkills: [] },
+        { expertId: DATA_ANALYST, disabledSkills: [], disabledConnectors: [] },
       );
       await answered(world);
       expect(configAt(records, 0)).toMatchObject({
@@ -188,7 +201,11 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
       });
 
       const e = await createExpert(world, "你是自建专家 E。\n原提示词。");
-      await putCaps(world, { expertId: e }, { expertId: e, disabledSkills: [] });
+      await putCaps(
+        world,
+        { expertId: e },
+        { expertId: e, disabledSkills: [], disabledConnectors: [] },
+      );
       let before = processOf(world);
       await answered(world);
       let fresh = expectRestart(world, records, before);
@@ -210,7 +227,7 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
       await putCaps(
         world,
         { disabledSkills: ["deploy"] },
-        { expertId: e, disabledSkills: ["deploy"] },
+        { expertId: e, disabledSkills: ["deploy"], disabledConnectors: [] },
       );
       before = processOf(world);
       await answered(world);
@@ -226,7 +243,7 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
       await putCaps(
         world,
         { expertId: e, disabledSkills: ["deploy"] },
-        { expertId: e, disabledSkills: ["deploy"] },
+        { expertId: e, disabledSkills: ["deploy"], disabledConnectors: [] },
       );
       await answered(world);
       expect(processOf(world)).toEqual(settled);
@@ -247,7 +264,7 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
       await putCaps(
         world,
         { expertId: TEST_ENGINEER },
-        { expertId: TEST_ENGINEER, disabledSkills: [] },
+        { expertId: TEST_ENGINEER, disabledSkills: [], disabledConnectors: [] },
       );
       const before = processOf(world);
 
@@ -275,7 +292,11 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
       const world = worlds.track(await openForkWorld());
       const records = recordConfigs(world);
       const e = await createExpert(world, "将被删除的专家 E");
-      await putCaps(world, { expertId: e }, { expertId: e, disabledSkills: [] });
+      await putCaps(
+        world,
+        { expertId: e },
+        { expertId: e, disabledSkills: [], disabledConnectors: [] },
+      );
       await answered(world);
       expect(configAt(records, 0).md).toBe("将被删除的专家 E");
       const child = spawnedAt(world, 0);
@@ -284,7 +305,7 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
 
       expect((await call(world, "DELETE", `/api/experts?id=${e}`)).statusCode).toBe(204);
       const caps = await call(world, "GET", `/api/sessions/${world.session}/capabilities`);
-      expect(caps.json()).toEqual({ expertId: null, disabledSkills: [] });
+      expect(caps.json()).toEqual({ expertId: null, disabledSkills: [], disabledConnectors: [] });
       await settle();
       expect(processOf(world)).toEqual(before);
       expect([child.stdin.length, isLive(child.child)]).toEqual([frames, true]);
@@ -299,46 +320,46 @@ describe("派发前按会话设置对齐进程：会话能力 (chat-sessions, de
   );
 });
 
+/**
+ * A turn held on its approval with `change` applied meanwhile: the PUT / DELETE answers at once,
+ * the child gets no frame and keeps running, the approval ends the turn done; the next prompt
+ * (on a `branch` child) restarts. Returns that next spawn's record.
+ */
+async function duringTurn(
+  world: World,
+  records: readonly SpawnedConfig[],
+  change: () => Promise<void>,
+): Promise<SpawnedConfig> {
+  const pending = await pendingApproval(world);
+  const child = spawnedAt(world, 0);
+  const frames = child.stdin.length;
+
+  await change();
+
+  expect(child.stdin).toHaveLength(frames);
+  expect(world.rt.calls).toHaveLength(1);
+  expect(child.child.exitCode).toBeNull();
+  const allowed = await call(
+    world,
+    "POST",
+    `/api/sessions/${world.session}/approvals/${String(pending.id)}`,
+    { decision: "allow" },
+  );
+  expect(allowed.statusCode).toBe(200);
+  await waitForTurn(world.fixture, world.session, "done");
+  await settle();
+  expect(child.stdin.slice(frames).map((frame) => frame.type)).toEqual(["extension_ui_response"]);
+  expect(world.rt.calls).toHaveLength(1);
+
+  const before = processOf(world);
+  world.rt.setScenario("branch");
+  expect((await sendPrompt(world, "after the change")).statusCode).toBe(202);
+  await waitForTurn(world.fixture, world.session, "done");
+  await settle();
+  return expectRestart(world, records, before);
+}
+
 describe("在途回合期间改能力 (chat-sessions「在途回合中修改能力不打断」「删除使用中的专家」)", () => {
-  /**
-   * A turn held on its approval with `change` applied meanwhile: the PUT / DELETE answers at once,
-   * the child gets no frame and keeps running, the approval ends the turn done; the next prompt
-   * (on a `branch` child) restarts. Returns that next spawn's record.
-   */
-  async function duringTurn(
-    world: World,
-    records: readonly SpawnedConfig[],
-    change: () => Promise<void>,
-  ): Promise<SpawnedConfig> {
-    const pending = await pendingApproval(world);
-    const child = spawnedAt(world, 0);
-    const frames = child.stdin.length;
-
-    await change();
-
-    expect(child.stdin).toHaveLength(frames);
-    expect(world.rt.calls).toHaveLength(1);
-    expect(child.child.exitCode).toBeNull();
-    const allowed = await call(
-      world,
-      "POST",
-      `/api/sessions/${world.session}/approvals/${String(pending.id)}`,
-      { decision: "allow" },
-    );
-    expect(allowed.statusCode).toBe(200);
-    await waitForTurn(world.fixture, world.session, "done");
-    await settle();
-    expect(child.stdin.slice(frames).map((frame) => frame.type)).toEqual(["extension_ui_response"]);
-    expect(world.rt.calls).toHaveLength(1);
-
-    const before = processOf(world);
-    world.rt.setScenario("branch");
-    expect((await sendPrompt(world, "after the change")).statusCode).toBe(202);
-    await waitForTurn(world.fixture, world.session, "done");
-    await settle();
-    return expectRestart(world, records, before);
-  }
-
   it(
     "回合挂在审批上时 PUT 测试工程师：即时 200、不发帧不退进程；回合照常结束，下一条重启并带其提示词",
     REAL,
@@ -350,7 +371,7 @@ describe("在途回合期间改能力 (chat-sessions「在途回合中修改能�
           await putCaps(
             world,
             { expertId: TEST_ENGINEER },
-            { expertId: TEST_ENGINEER, disabledSkills: [] },
+            { expertId: TEST_ENGINEER, disabledSkills: [], disabledConnectors: [] },
           );
         });
         expect(configAt(records, 0).md).toBeNull();
@@ -370,7 +391,11 @@ describe("在途回合期间改能力 (chat-sessions「在途回合中修改能�
       try {
         const records = recordConfigs(world);
         const e = await createExpert(world, "回合中被删除的专家 E");
-        await putCaps(world, { expertId: e }, { expertId: e, disabledSkills: [] });
+        await putCaps(
+          world,
+          { expertId: e },
+          { expertId: e, disabledSkills: [], disabledConnectors: [] },
+        );
         const fresh = await duringTurn(world, records, async () => {
           expect((await call(world, "DELETE", `/api/experts?id=${e}`)).statusCode).toBe(204);
         });
@@ -394,11 +419,15 @@ describe("临时进程用其会话的有效能力 (session-metadata「继承专�
       const world = worlds.track(await openForkWorld());
       const records = recordConfigs(world);
       const e = await createExpert(world, "fork 源会话的专家 E");
-      await putCaps(world, { expertId: e }, { expertId: e, disabledSkills: [] });
+      await putCaps(
+        world,
+        { expertId: e },
+        { expertId: e, disabledSkills: [], disabledConnectors: [] },
+      );
       await putCaps(
         world,
         { disabledSkills: ["deploy"] },
-        { expertId: e, disabledSkills: ["deploy"] },
+        { expertId: e, disabledSkills: ["deploy"], disabledConnectors: [] },
       );
       const seeded = seedTwoTurns(world);
 
@@ -429,7 +458,7 @@ describe("临时进程用其会话的有效能力 (session-metadata「继承专�
       await putCaps(
         world,
         { expertId: TEST_ENGINEER, disabledSkills: ["deploy"] },
-        { expertId: TEST_ENGINEER, disabledSkills: ["deploy"] },
+        { expertId: TEST_ENGINEER, disabledSkills: ["deploy"], disabledConnectors: [] },
       );
       const { u2, file } = seedUndoable(world);
 
@@ -440,6 +469,144 @@ describe("临时进程用其会话的有效能力 (session-metadata「继承专�
       expect(resumePath(requiredCall(world.rt.calls, 0).args)).toBe(file);
       expect([temp.yml, temp.md]).toEqual([DEPLOY, await promptOf(world, TEST_ENGINEER)]);
       expect(world.errors).toEqual([]);
+    },
+  );
+});
+
+const COMMAND = "/nonexistent/gitlab-mcp";
+const EMPTY_MCP = '{\n  "mcpServers": {}\n}\n';
+
+/** The spec's `mcp.json` text rule for one stdio `gitlab` with no args and no env. */
+function gitlabMcp(command: string): string {
+  const gitlab = { type: "stdio", command, args: [], env: {} };
+  return `${JSON.stringify({ mcpServers: { gitlab } }, null, 2)}\n`;
+}
+
+/**
+ * An approval world whose `assembly.mcpPublish` is the real publisher over its own state layout (the
+ * entry's single publisher; the default is a no-op, so REST writes would not touch `mcp.json`), with
+ * the entry's startup publication done: the empty-table bytes are on disk before the first spawn.
+ * Returns it with lisi's (admin) cookie.
+ */
+async function openConnectorWorld(): Promise<{ world: World; admin: string }> {
+  let stateDir: string | null = null;
+  let publish: () => Promise<void> = () => Promise.reject(new Error("publisher not built"));
+  const world = await openApprovalWorld("approval", {
+    prepare(db) {
+      publish = createMcpPublisher({
+        agentDir: () => (stateDir === null ? null : ompAgentDir(stateDir)),
+        store: createConnectorStore(db),
+      }).publish;
+    },
+    assembly: { mcpPublish: () => publish() },
+  });
+  stateDir = world.rt.runtime.stateDir;
+  await publish();
+  return { world, admin: await cookieFor(world.fixture.app, "lisi") };
+}
+
+function mcpNow(world: World): string {
+  return readFileSync(join(ompAgentDir(world.rt.runtime.stateDir), "mcp.json"), "utf8");
+}
+
+async function connectorWrite(
+  world: World,
+  admin: string,
+  method: "POST" | "PUT",
+  body: object,
+): Promise<void> {
+  const url = method === "POST" ? "/api/connectors" : "/api/connectors?name=gitlab";
+  const response = await call(world, method, url, body, admin);
+  expect(response.statusCode).toBe(method === "POST" ? 201 : 200);
+}
+
+describe("派发前按会话设置对齐进程：连接器 (chat-sessions, s1d-connectors D8)", () => {
+  it(
+    "登记 / 修改 / 停用连接器各使存活会话在下一条前重启，spawn 时读到新的 mcp.json；不变、探活与账号缺省则复用",
+    REAL,
+    async () => {
+      const { world, admin } = await openConnectorWorld();
+      try {
+        world.rt.setScenario("branch");
+        const records = recordConfigs(world);
+        await answered(world);
+        expect(configAt(records, 0)).toMatchObject({ yml: NO_SKILLS, mcp: EMPTY_MCP });
+
+        await connectorWrite(world, admin, "POST", {
+          name: "gitlab",
+          type: "stdio",
+          command: COMMAND,
+        });
+        let before = processOf(world);
+        await answered(world);
+        expect(expectRestart(world, records, before).mcp).toBe(gitlabMcp(COMMAND));
+
+        await connectorWrite(world, admin, "PUT", { command: `${COMMAND}2` });
+        before = processOf(world);
+        await answered(world);
+        expect(expectRestart(world, records, before).mcp).toBe(gitlabMcp(`${COMMAND}2`));
+
+        await connectorWrite(world, admin, "PUT", { command: `${COMMAND}2`, enabled: false });
+        before = processOf(world);
+        await answered(world);
+        const fresh = expectRestart(world, records, before);
+        expect([fresh.mcp, fresh.yml]).toEqual([EMPTY_MCP, NO_SKILLS]);
+
+        // 连接器未变则复用: nothing changed; then a probe and the account default, neither of
+        // which rewrites `mcp.json` or the session's own list.
+        const settled = processOf(world);
+        const live = spawnedAt(world, settled.spawns - 1);
+        await answered(world);
+        expect(processOf(world)).toEqual(settled);
+        const probed = await call(
+          world,
+          "POST",
+          "/api/connectors/probe?name=gitlab",
+          undefined,
+          admin,
+        );
+        expect([
+          probed.statusCode,
+          (probed.json() as { probe: { status: string } }).probe.status,
+        ]).toEqual([200, "failed"]);
+        const defaults = await call(world, "PUT", "/api/connectors/defaults", {
+          disabledConnectors: ["gitlab"],
+        });
+        expect(defaults.statusCode).toBe(200);
+        expect(mcpNow(world)).toBe(EMPTY_MCP);
+        await answered(world);
+        expect(processOf(world)).toEqual(settled);
+        expect(isLive(live.child)).toBe(true);
+        expect(records).toHaveLength(settled.spawns);
+        expect(world.errors).toEqual([]);
+      } finally {
+        await world.fixture.close();
+      }
+    },
+  );
+
+  it(
+    "在途回合中修改连接器不打断：PUT 即时 200 且 mcp.json 已重写；回合照常结束，下一条重启并读到改后的参数",
+    REAL,
+    async () => {
+      const { world, admin } = await openConnectorWorld();
+      try {
+        await connectorWrite(world, admin, "POST", {
+          name: "gitlab",
+          type: "stdio",
+          command: COMMAND,
+        });
+        const records = recordConfigs(world);
+        const fresh = await duringTurn(world, records, async () => {
+          await connectorWrite(world, admin, "PUT", { command: `${COMMAND}2` });
+          expect(mcpNow(world)).toBe(gitlabMcp(`${COMMAND}2`));
+        });
+        expect(configAt(records, 0).mcp).toBe(gitlabMcp(COMMAND));
+        expect([fresh.mcp, fresh.yml]).toEqual([gitlabMcp(`${COMMAND}2`), NO_SKILLS]);
+        expect(world.errors).toEqual([]);
+      } finally {
+        await world.fixture.close();
+      }
     },
   );
 });
