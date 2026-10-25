@@ -24,6 +24,8 @@ import {
   SESSION_TTL,
   validateSessionTtl,
 } from "./auth/index.js";
+import { type McpPublishFailedRecord, registerConnectors } from "./connectors/rest.js";
+import { createConnectorStore } from "./connectors/store.js";
 import { emit } from "./core/audit/index.js";
 import { HttpError } from "./core/errors/index.js";
 import { isAdmin } from "./core/roles.js";
@@ -121,8 +123,13 @@ export interface AssemblyDependencies {
    * 表、快照不变、不写文件）。生产入口传注册表发布器的 `publish`。
    */
   publish?: () => Promise<void>;
-  /** 发布失败的一行记录 sink（与 `log` / `warn` 同一写法）；省略时不写。 */
-  onPublishFailed?: (record: ModelPublishFailedRecord) => void;
+  /**
+   * 连接器写入提交之后的托管 `mcp.json` 发布（单飞，s1d-connectors D4）；省略时为空操作（静态接缝：端点照写
+   * 表、不写文件）。生产入口传它在 createApp 之前构造的唯一发布器的 `publish`，这里不另建实例。
+   */
+  mcpPublish?: () => Promise<void>;
+  /** 模型与连接器发布失败的一行记录 sink（与 `log` / `warn` 同一写法）；省略时不写。 */
+  onPublishFailed?: (record: ModelPublishFailedRecord | McpPublishFailedRecord) => void;
   /** 模型探活的建连 / 整体期限（测试注入短期限）；省略时取 `models/probe.ts` 的 10 s / 15 s。 */
   probeDeadlines?: { connectDeadlineMs?: number; totalDeadlineMs?: number };
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
@@ -305,6 +312,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   registerExperts(app, { db, store: createExpertStore(db), emit });
   // 第十个模块 `skills`（s1d-experts-skills D6）：平台技能读同一个 agent 目录，账号缺省写 app 自己的库。
   registerSkills(app, { db, agentDir: ompAgentDir(runtime.stateDir) });
+  registerConnectorAdmin(app, db, assembly);
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
@@ -411,6 +419,27 @@ function registerModelAdmin(
       ? {}
       : { onPublishFailed: assembly.onPublishFailed }),
     ...(assembly?.probeDeadlines === undefined ? {} : { probeDeadlines: assembly.probeDeadlines }),
+  });
+}
+
+/**
+ * 第十一个模块 `connectors`（s1d-connectors D5）：store 在 app 自己的库上自建；发布器是入口注入的唯一实例，
+ * 未注入时为空操作。
+ */
+function registerConnectorAdmin(
+  app: FastifyInstance,
+  db: DatabaseSync,
+  assembly: AssemblyDependencies | undefined,
+): void {
+  registerConnectors(app, {
+    db,
+    store: createConnectorStore(db),
+    publish: assembly?.mcpPublish ?? (() => Promise.resolve()),
+    emit,
+    isAdmin,
+    ...(assembly?.onPublishFailed === undefined
+      ? {}
+      : { onPublishFailed: assembly.onPublishFailed }),
   });
 }
 

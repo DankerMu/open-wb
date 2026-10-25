@@ -13,12 +13,12 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterEach, expect } from "vitest";
 import { parse } from "yaml";
-import { createApp } from "../src/app.js";
+import { type AssemblyDependencies, createApp } from "../src/app.js";
 import { query } from "../src/core/audit/index.js";
 import { openDb } from "../src/core/db/index.js";
 import type { ModelCatalog } from "../src/model-catalog.js";
 import { writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
-import { createPublisher, type ModelPublishFailedRecord } from "../src/models/publish.js";
+import { createPublisher } from "../src/models/publish.js";
 import { createRegistry } from "../src/models/registry.js";
 import { createModelStore } from "../src/models/store.js";
 import { writeHostOverlay } from "../src/sessions/omp/host-overlay.js";
@@ -60,6 +60,8 @@ const SEED_M1: ModelCatalog = {
   defaultModelId: "m1",
 };
 
+type PublishFailedRecord = Parameters<NonNullable<AssemblyDependencies["onPublishFailed"]>>[0];
+
 export interface ModelsWorld {
   app: FastifyInstance;
   db: DatabaseSync;
@@ -68,7 +70,8 @@ export interface ModelsWorld {
   upstream: FakeUpstreamServer;
   /** The model ids of every `models.yml` rewrite since the world opened (the startup one excluded). */
   writes: string[][];
-  failed: ModelPublishFailedRecord[];
+  /** Whatever reached `assembly.onPublishFailed` (no `mcpPublish` here, so only model records). */
+  failed: PublishFailedRecord[];
   cookies: { admin: string; member: string };
 }
 
@@ -118,7 +121,7 @@ export async function openModelsWorld(options: WorldOptions = {}): Promise<Model
   // The entry's startup publication (`models_yml` / `host_overlay`).
   await publisher.publish();
   recording = true;
-  const failed: ModelPublishFailedRecord[] = [];
+  const failed: PublishFailedRecord[] = [];
   const app = createApp({
     db,
     authRuntime: fixedRuntime(() => FIXED_NOW),
