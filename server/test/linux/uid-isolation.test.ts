@@ -9,6 +9,8 @@
  * Issue #708: the host overlay in the managed agent dir cannot be overwritten by the omp uid.
  * Issue #1656: the omp uid reads session config files by exact path (2710) but cannot list,
  * create or rename in `session-config/`.
+ * Issue #1670: the omp uid reads the managed `mcp.json` (0640) but cannot overwrite it, and no
+ * frame carries its credential values.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 
@@ -31,6 +33,7 @@ import { fileURLToPath } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { createApp } from "../../src/app.js";
+import { writeManagedMcpJson } from "../../src/connectors/mcp-json.js";
 import { openDb } from "../../src/core/db/index.js";
 import { writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
@@ -51,6 +54,8 @@ const OWNER_ID = "u1";
 const MODEL_ID = "deepseek-v4.1-flash";
 const PROBE_CONTENT = "probe";
 const PROBE_FILE = "probe file:report.txt";
+/** A connector credential in the managed `mcp.json`: no frame may carry it (s1d-connectors D11). */
+const MCP_ENV_SENTINEL = "mcp-env-sentinel-1670";
 const SHARED_MODE = 0o2770;
 const PARENT_SENTINELS = {
   MODEL_UPSTREAM_API_KEY: "upstream-api-key-sentinel",
@@ -254,6 +259,7 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         const agent = join(state, "home", ".omp", "agent");
         const models = join(agent, "models.yml");
         const overlay = join(agent, "host-overlay.yml");
+        const mcp = join(agent, "mcp.json");
         const dotenv = join(state, "home", ".env");
         ensureOmpStateLayout(state);
         await writeManagedModelsYml(agent, {
@@ -263,8 +269,20 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
           ],
         });
         await writeHostOverlay(state, { browserEnabled: false, visionModelId: null });
+        await writeManagedMcpJson(agent, [
+          {
+            name: "gitlab",
+            fields: {
+              type: "stdio",
+              command: "/usr/bin/gitlab-mcp",
+              args: [],
+              env: { GITLAB_TOKEN: MCP_ENV_SENTINEL },
+            },
+          },
+        ]);
         const modelsBefore = readFileSync(models);
         const overlayBefore = readFileSync(overlay);
+        const mcpBefore = readFileSync(mcp);
         // An operator's line: the omp uid can read the file but not change or replace it (#802).
         writeFileSync(dotenv, "OPERATOR_VAR=1\n");
         const dotenvBefore = readFileSync(dotenv);
@@ -285,12 +303,18 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         const session = own(
           new SessionRuntime(runtimeOpts(layout, ompUser, `${SESSION_ID}-layout`)),
         );
-        const ask = async (text: string): Promise<string> =>
-          probeReport(await collectPrompt(session.prompt(text)));
+        // Every frame of the runtime, kept: none may carry the `mcp.json` credential.
+        const frames: OmpFrame[] = [];
+        const collect = async (text: string): Promise<OmpFrame[]> => {
+          const collected = await collectPrompt(session.prompt(text));
+          frames.push(...collected);
+          return collected;
+        };
+        const ask = async (text: string): Promise<string> => probeReport(await collect(text));
         const write = async (path: string): Promise<string> =>
           parseLabeledReport(await ask(`probe:${String(process.pid)}:${path}`)).wrote;
         // The spawn re-asserted the layout; listings are taken after it and before any attempt.
-        await collectPrompt(session.prompt("spawn"));
+        await collect("spawn");
         const before = managed.map((dir) => readdirSync(dir).toSorted());
         // The spawn's own `<key>.yml`, and a `<key>.md` written here at 0640 as an expert's would be.
         const configDir = join(state, "session-config");
@@ -316,6 +340,8 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         }
         expect(await write(models), models).toBe("EACCES");
         expect(await write(overlay), overlay).toBe("EACCES");
+        expect(await ask(`read:${mcp}`)).toBe("read=ok");
+        expect(await write(mcp), mcp).toBe("EACCES");
         expect(await write(dotenv), dotenv).toBe("EACCES");
         expect(await write(join(state, "trash", "x"))).toBe("EACCES");
         expect(readdirSync(join(state, "trash"))).toEqual([]);
@@ -334,6 +360,12 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         expect(readFileSync(overlay).equals(overlayBefore)).toBe(true);
         expect(lstatSync(overlay).uid).toBe(process.getuid?.());
         expect(lstatSync(overlay).mode & 0o7777).toBe(0o640);
+        expect(readFileSync(mcp).equals(mcpBefore)).toBe(true);
+        expect(lstatSync(mcp).isFile()).toBe(true);
+        expect(lstatSync(mcp).uid).toBe(process.getuid?.());
+        expect(lstatSync(mcp).mode & 0o7777).toBe(0o640);
+        expect(frames.length).toBeGreaterThan(0);
+        expect(JSON.stringify(frames)).not.toContain(MCP_ENV_SENTINEL);
         expect(readFileSync(dotenv).equals(dotenvBefore)).toBe(true);
         expect(lstatSync(dotenv).isFile()).toBe(true);
         expect(lstatSync(dotenv).uid).toBe(process.getuid?.());

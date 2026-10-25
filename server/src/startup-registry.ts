@@ -10,8 +10,15 @@
  *   sessions，system.md §4）。`writeOverlay` 的包装在 `stage.stage === "models_yml"` 时先把它切到
  *   `host_overlay`，启动的两个失败 reason 由此区分；其它阶段（启动之后的发布）不动 stage。`proxyBaseUrl`
  *   是 getter：入口在 `models_yml` 阶段之前给 null，此前的发布只刷新过快照、不写文件。
+ * - `createMcpJsonStage`（s1d-connectors D4，启动阶段 `mcp_json`，紧接 `host_overlay`）：返回唯一的托管
+ *   `mcp.json` 发布器与 `runStage`。发布器在 createApp 之前构造（写端点共用它，单飞因此覆盖启动与写端点），
+ *   此时 agent 目录门控关着，发布只读不写；`runStage()` 把 stage 切到 `mcp_json`、打开门控、再发布一次，
+ *   写失败原样抛给入口（`reason: "mcp_json"`）。不并进 `createStartupPublisher`：模型发布不写 `mcp.json`，
+ *   连接器写入也不重写模型的两个文件。
  */
 import type { DatabaseSync } from "node:sqlite";
+import { createMcpPublisher } from "./connectors/mcp-json.js";
+import { createConnectorStore } from "./connectors/store.js";
 import type { ModelCatalog } from "./model-catalog.js";
 import { writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { createPublisher } from "./models/publish.js";
@@ -87,4 +94,28 @@ export function createStartupPublisher(options: StartupPublisherOptions) {
       return writeHostOverlay(dir, overlay);
     },
   });
+}
+
+interface McpJsonStageOptions {
+  db: DatabaseSync;
+  stateDir: string;
+  /** 入口的当前启动阶段（入口传 `owned` 本身）；`runStage()` 把它切到 `mcp_json`。 */
+  stage: { stage: string };
+}
+
+export function createMcpJsonStage(options: McpJsonStageOptions) {
+  const { db, stateDir, stage } = options;
+  let agentDir: string | null = null;
+  const publisher = createMcpPublisher({
+    agentDir: () => agentDir,
+    store: createConnectorStore(db),
+  });
+  return {
+    publisher,
+    runStage(): Promise<void> {
+      stage.stage = "mcp_json";
+      agentDir = ompAgentDir(stateDir);
+      return publisher.publish();
+    },
+  };
 }

@@ -4,7 +4,8 @@
  * probe reset). Pure DB, `node:sqlite` sync.
  *
  * Credentials: `env` / `headers` values go in through `parseCreate` / `parseUpdate` (`validate.ts`, the
- * only rules) and never come out of here — `ConnectorView` carries only the key names. Stored `env` /
+ * only rules) and come out only through `enabledForMcp`, for the managed `mcp.json` writer
+ * (`mcp-json.ts`, design D4) — `ConnectorView` carries only the key names. Stored `env` /
  * `headers` are JSON objects with sorted keys, so a PUT giving the same values in another key order
  * stores the same text.
  *
@@ -52,6 +53,7 @@ type Connection = readonly [
 
 const SELECT_ONE = "SELECT * FROM connectors WHERE name = ?";
 const SELECT_ALL = "SELECT * FROM connectors ORDER BY name";
+const SELECT_ENABLED = "SELECT * FROM connectors WHERE enabled = 1 ORDER BY name";
 const COUNT = "SELECT COUNT(*) AS count FROM connectors";
 const INSERT =
   "INSERT INTO connectors(name, type, description, enabled, command, args, env, url, headers, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
@@ -75,6 +77,13 @@ export function createConnectorStore(db: DatabaseSync) {
   return {
     /** Every connector by name (the admin list). */
     list: (): ConnectorView[] => db.prepare(SELECT_ALL).all().map(toView),
+
+    /** The enabled rows with their credentials, by name: only the `mcp.json` writer reads this. */
+    enabledForMcp: (): Array<{ name: string; fields: ConnectorFields }> =>
+      db
+        .prepare(SELECT_ENABLED)
+        .all()
+        .map((row) => ({ name: String(row.name), fields: fieldsOf(row) })),
 
     get(name: string): ConnectorView | undefined {
       const row = raw(name);

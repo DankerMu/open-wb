@@ -329,6 +329,22 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     const failure = await failStartup(root);
     expectReason(failure.stderr, "host_overlay");
     expect(existsSync(join(agentDir, "models.yml"))).toBe(true);
+    // `mcp_json` comes after `host_overlay` (s1d-connectors D4): it never ran.
+    expect(existsSync(join(agentDir, "mcp.json"))).toBe(false);
+  }, 60_000);
+
+  // s1d-connectors group 2a: the stage right after `host_overlay`, before `preview_cache`.
+  it("mcp_json: mcp.json is occupied by a directory", async () => {
+    const root = scratchRoot();
+    const agentDir = join(root, "state", "home", ".omp", "agent");
+    mkdirSync(join(agentDir, "mcp.json"), { recursive: true });
+    const failure = await failStartup(root);
+    expectReason(failure.stderr, "mcp_json");
+    expect(existsSync(join(agentDir, "models.yml"))).toBe(true);
+    expect(existsSync(join(agentDir, "host-overlay.yml"))).toBe(true);
+    expect(lstatSync(join(agentDir, "mcp.json")).isDirectory()).toBe(true);
+    expect(existsSync(join(root, "preview-cache"))).toBe(false);
+    await expectBindable("127.0.0.1", failure.port);
   }, 60_000);
 
   it("preview_cache: the preview cache location is a file", async () => {
@@ -343,6 +359,7 @@ describe("startup failure record carries the failed stage (#1203)", () => {
     expectReason(failure.stderr, "preview_cache");
     const agentDir = join(root, "state", "home", ".omp", "agent");
     expect(existsSync(join(agentDir, "host-overlay.yml"))).toBe(true);
+    expect(existsSync(join(agentDir, "mcp.json"))).toBe(true);
     await expectBindable("127.0.0.1", failure.port);
     await expectBindable("127.0.0.1", previewPort);
   }, 60_000);

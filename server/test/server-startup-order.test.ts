@@ -145,7 +145,11 @@ describe("production entry lifecycle", () => {
       ]);
       expect(readdirSync(join(state, "home")).toSorted()).toEqual([".env", ".omp"]);
       expect(readdirSync(join(state, "sessions"))).toEqual([]);
-      expect(readdirSync(agentDir).toSorted()).toEqual(["host-overlay.yml", "models.yml"]);
+      expect(readdirSync(agentDir).toSorted()).toEqual([
+        "host-overlay.yml",
+        "mcp.json",
+        "models.yml",
+      ]);
       // Startup makes SANDBOX_ROOT at exactly 3770 (owner B4, 编排方默认 3770).
       expect(lstatSync(sandbox).mode & 0o7777).toBe(0o3770);
       expect(existsSync(join(scratchRoot, "bin"))).toBe(false);

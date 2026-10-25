@@ -286,7 +286,7 @@ MODEL_CATALOG='[{"id": "model-a", "name": "通用", "reasoning": true, "efforts"
 
 **六个模型键只作首次种子**（change `s1d-model-registry`，model-registry「环境种子」）：`MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 的解析与校验照旧（非法值仍是 `config` 启动失败），但解析结果只在数据库的 `models` 表为空时写进模型注册表：白名单逐项插入（次序即列表次序），缺省模型那一项标为缺省，每一项的上游取 `MODEL_UPSTREAM_*`（两键未同时配置时该项没有上游）。此后白名单、缺省模型与每个模型的上游都只读注册表（composer options、会话设置的有效值、托管 `models.yml`、overlay 的看图角色、模型代理的放行与路由、会话侧净化的密钥集读同一份快照）——每个模型自带上游。表非空时这六个键被忽略：任一键被设置（空串也算）就在标准错误写一行 `{"event":"model_env_ignored"}`（只有 `event` 一个键，位于 `server_started` 之前），六个键都没设置时不写。所以已经启动过一次的部署，改这六个键再重启不会改变模型清单或上游；改动要经模型注册表的管理端点（model-registry「模型管理端点」，见 9.9）。
 
-启动次序（http-service-skeleton「服务启动与装配」）：迁移 → 办公文档 sidecar 预检 → `model_registry`（表空时种子，然后读出首个快照；同步的 SQLite 操作，失败为 `{"event":"server_start_failed","reason":"model_registry"}`）→ createApp → 主监听器 listen → 托管布局 → 沙箱根 → 预览监听器 listen → `models_yml` → `host_overlay`（两步是注册表发布器的同一次发布：先写 `models.yml`，再按快照里第一个看图模型写 overlay）→ 预览缓存目录 → `server_started`。主监听器受理的第一个请求读到的已是填好的快照；`models_yml` 之前到达的注册表写入只刷新快照、不写文件，随后的启动发布用当时的快照。
+启动次序（http-service-skeleton「服务启动与装配」）：迁移 → 办公文档 sidecar 预检 → `model_registry`（表空时种子，然后读出首个快照；同步的 SQLite 操作，失败为 `{"event":"server_start_failed","reason":"model_registry"}`）→ createApp → 主监听器 listen → 托管布局 → 沙箱根 → 预览监听器 listen → `models_yml` → `host_overlay`（两步是注册表发布器的同一次发布：先写 `models.yml`，再按快照里第一个看图模型写 overlay）→ `mcp_json`（按连接器表写托管 `mcp.json`，失败为 `{"event":"server_start_failed","reason":"mcp_json"}`，见 9.11）→ 预览缓存目录 → `server_started`。主监听器受理的第一个请求读到的已是填好的快照；`models_yml` 之前到达的注册表写入只刷新快照、不写文件，随后的启动发布用当时的快照。
 
 与 `MODEL_ID` / `MODEL_REASONING` / `MODEL_VISION` 的关系（种子时的取值）：
 
@@ -825,3 +825,13 @@ modelRoles:
 - **会话中**：停用集合即会话能力（`GET …/capabilities` 按选中的会话 id 取一次）；切一个开关恰一次 `PUT …/capabilities {disabledSkills}`，body 为切换后的完整集合（含不在列表里的名称），成功以应答整体替换，失败回滚并在 chat column 显示错误。换专家与切技能共用一个在途写：任一 `PUT` 在途时专家控件与全部开关不可操作（开关用 `aria-disabled` 保焦点，处理函数另有守卫）。能力读取中 / 失败时开关不可操作，分别显示 `正在读取技能…` / `技能读取失败，重新选中该会话可重试`。
 - **欢迎态**：停用集合初值是账号缺省（`GET /api/skills` 的 `disabledSkills`），按 client 缓存，只在第一次打开弹层时读取（在途不重发，失败后下次打开重取一次）；未取得时开关不可操作。选择存于页面状态（不进输入框设置的 `picked`），只有动过开关时首次发送的 `POST /api/sessions` 才带完整的 `disabledSkills`，所以只动技能的首次发送不会让输入框选项重取。
 - **停用过滤**：「+」菜单的命令段与斜杠候选在客户端去掉 `skill:<停用名>`——会话中按已取得的会话能力（未取得 / 失败不过滤），欢迎态按页面选择 ?? 已取得的账号缺省；`GET /api/commands` 不知道会话，不变，停用集合变化不引发新的目录请求。omp 侧的停用由上文的会话配置文件保证。
+
+### 9.11 连接器（S1d，change `s1d-connectors`）
+
+本节随任务组落地。组 2a：托管 `mcp.json`；组 3 起：管理端点、审计、探活、账号缺省与会话停用。凭证的暴露面见 ADR-0015。
+
+**托管 `mcp.json`**（`server/src/connectors/mcp-json.ts`，规格 connectors「托管 mcp.json」）：数据库的 `connectors` 表是事实源，宿主把 `enabled = 1` 的连接器写成 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`，omp 每次 spawn 把它当作用户级 MCP 配置读取（`--no-extensions` 不挡它）。内容恰为 `JSON.stringify({mcpServers: {<名称>: <条目>}}, null, 2)` 加一个换行，名称按字典序；stdio 条目恰为 `{type, command, args, env}`，http 条目恰为 `{type, url, headers}`，停用的行不写；没有启用的连接器时文件恰为 `{\n  "mcpServers": {}\n}\n`（覆盖上次运行的残留）。与托管 `models.yml` 同一原子替换写出，终态 `0640`、app uid 持有，omp uid 只读（CI `uid-isolation` 证明能读、覆写 `EACCES`）。`env` / `headers` 的值只在这个文件里，不进任何响应、审计、日志与错误信息。
+
+**发布时机**：启动阶段 `mcp_json` 紧接 `host_overlay`、先于预览缓存目录写一次（见 9.3 的启动次序）；写不成（如该位置是一个目录）启动以 `{"event":"server_start_failed","reason":"mcp_json"}` 失败。发布器在 createApp 之前构造、只有一个实例，此后每次连接器写入在同一请求里于事务提交后经它重写（单飞：同一时刻只有一次重写，期间到达的写入合并为紧随其后的一次，以最新的表写出）；`mcp_json` 阶段之前到达的写入只改数据库、不写文件，随后的启动阶段按当时的表写出。
+
+**回滚**：回退到没有连接器的版本时，连同删除 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`——旧版本不写也不删这个文件，留着它 omp 仍会读取并拉起其中的连接器。

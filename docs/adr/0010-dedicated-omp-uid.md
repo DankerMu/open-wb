@@ -95,7 +95,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   | --- | --- | --- |
   | `<state>`、`<state>/sessions`、`<state>/xdg`、`<state>/xdg/{data,state,cache}` | `2750` | 只能进入 |
   | `<state>/home` | `3770` | 可写自己的条目；粘滞位使它不能改名/删除 `.omp` |
-  | `<state>/home/.omp`、`<state>/home/.omp/agent`（`models.yml` `0640`、`skills/`） | `2750` | 只读 |
+  | `<state>/home/.omp`、`<state>/home/.omp/agent`（`models.yml` `0640`、`mcp.json` `0640`、`skills/`） | `2750` | 只读 |
   | `<state>/xdg/{data,state,cache}/omp` | `2770` | 运行期状态（`agent.db`、日志、原生模块缓存） |
   | `<state>/sessions/<ownerId>` | `2770` | 会话文件 |
   | `<state>/session-config`（2026-10-23 补，change `s1d-experts-skills`） | `2710` | 组只有执行位：按确切路径读每次 spawn 的会话配置文件（`0640`），不能列举、新建、改名或删除；启动清扫残留 |

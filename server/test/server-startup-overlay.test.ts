@@ -128,6 +128,7 @@ describe("production entry host overlay (#1527)", () => {
         ).toBe(true);
         expect(readdirSync(agentDirOf(root)).toSorted()).toEqual([
           "host-overlay.yml",
+          "mcp.json",
           "models.yml",
         ]);
       } finally {
@@ -207,6 +208,7 @@ describe("production entry host overlay (#1527)", () => {
         expectHostOverlay(join(root, "state"), expected);
         expect(readdirSync(agentDirOf(root)).toSorted()).toEqual([
           "host-overlay.yml",
+          "mcp.json",
           "models.yml",
         ]);
       } finally {
@@ -239,6 +241,7 @@ describe("production entry host overlay (#1527)", () => {
         expectHostOverlay(state, DEFAULT_OVERLAY);
         expect(readdirSync(agentDirOf(root)).toSorted()).toEqual([
           "host-overlay.yml",
+          "mcp.json",
           "models.yml",
         ]);
       }
