@@ -51,7 +51,8 @@ export interface Slot {
   modelIds: ReadonlySet<string>;
   /**
    * The capability fingerprint (`sessionConfigFingerprint`) of the session config files this slot's
-   * process was spawned with: the runtime's capabilities are fixed at construction. Never rewritten.
+   * process was spawned with and of the managed `mcp.json` bytes read before that spawn: the
+   * runtime's capabilities and connectors are fixed at construction. Never rewritten.
    */
   fingerprint: string;
 }

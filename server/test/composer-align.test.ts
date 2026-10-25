@@ -7,22 +7,34 @@
  *
  * The capability side: a session's effective capabilities (experts「专家提示词注入」: the expert's
  * prompt only while its owner can see it; every disabled skill prefixed `skill:`) and their
- * fingerprint, the SHA-256 of the two session config files' content (`<key>` not in it). Expected
- * values are spec literals and the bytes `writeSessionConfig` puts on disk, read back.
+ * fingerprint, the SHA-256 of the two session config files' content (`<key>` not in it) and, since
+ * s1d-connectors D8, of the managed `mcp.json` bytes `alignmentOf` reads (missing → `""`, another
+ * read failure `AgentUnavailableError`; disabled connectors prefixed `mcp:`). Expected values are
+ * spec literals and the bytes `writeSessionConfig` puts on disk, read back.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { effectiveCapabilities, reusable } from "../src/sessions/composer-align.js";
+import { alignmentOf, effectiveCapabilities, reusable } from "../src/sessions/composer-align.js";
+import { AgentUnavailableError } from "../src/sessions/omp/process.js";
 import {
   type SessionCapabilities,
   sessionConfigContent,
   sessionConfigFingerprint,
   writeSessionConfig,
 } from "../src/sessions/omp/session-config.js";
-import { ensureOmpStateLayout } from "../src/sessions/omp/state-layout.js";
+import { ensureOmpStateLayout, ompAgentDir } from "../src/sessions/omp/state-layout.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -33,7 +45,7 @@ afterEach(() => {
 
 const NONE: SessionCapabilities = { disabledExtensions: [], appendSystemPrompt: null };
 const EXPERT: SessionCapabilities = { disabledExtensions: [], appendSystemPrompt: "P" };
-const FP = sessionConfigFingerprint(NONE);
+const FP = sessionConfigFingerprint(NONE, "");
 const live = { approvalMode: "write", modelIds: new Set(["m1", "m2"]), fingerprint: FP } as const;
 
 describe("reusable (chat-sessions「派发前按会话设置对齐进程」step 1)", () => {
@@ -56,7 +68,7 @@ describe("reusable (chat-sessions「派发前按会话设置对齐进程」step 
   });
 
   it("another capability fingerprint → not reusable, even with the same mode and model", () => {
-    const other = sessionConfigFingerprint(EXPERT);
+    const other = sessionConfigFingerprint(EXPERT, "");
     expect(reusable(live, { approvalMode: "write", modelId: "m1", fingerprint: other })).toBe(
       false,
     );
@@ -66,9 +78,9 @@ describe("reusable (chat-sessions「派发前按会话设置对齐进程」step 
 describe("sessionConfigFingerprint (omp-runtime「会话配置文件」, design D1/D8)", () => {
   it("is a SHA-256 hex digest, the same for the same capabilities however the list is given", () => {
     expect(FP).toMatch(/^[0-9a-f]{64}$/u);
-    expect(sessionConfigFingerprint(NONE)).toBe(FP);
+    expect(sessionConfigFingerprint(NONE, "")).toBe(FP);
     const listed = (disabledExtensions: string[]) =>
-      sessionConfigFingerprint({ disabledExtensions, appendSystemPrompt: "P" });
+      sessionConfigFingerprint({ disabledExtensions, appendSystemPrompt: "P" }, "");
     // The file holds the list deduplicated and sorted: these are one file, one fingerprint.
     expect(listed(["skill:b", "skill:a", "skill:a"])).toBe(listed(["skill:a", "skill:b"]));
   });
@@ -83,8 +95,25 @@ describe("sessionConfigFingerprint (omp-runtime「会话配置文件」, design 
       // A prompt that spells what the no-expert case could be mistaken for.
       { disabledExtensions: [], appendSystemPrompt: "null" },
       { disabledExtensions: [], appendSystemPrompt: "" },
-    ].map(sessionConfigFingerprint);
+    ].map((c) => sessionConfigFingerprint(c, ""));
     expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("folds in the managed mcp.json bytes (s1d-connectors D8): other bytes → another fingerprint, not reusable", () => {
+    const empty = '{\n  "mcpServers": {}\n}\n';
+    expect(sessionConfigFingerprint(NONE, "")).not.toBe(sessionConfigFingerprint(NONE, empty));
+    expect(sessionConfigFingerprint(NONE, empty)).toBe(sessionConfigFingerprint(NONE, empty));
+    expect(sessionConfigFingerprint(NONE, empty)).toBe(
+      createHash("sha256")
+        .update(JSON.stringify(["disabledExtensions: []\n", null, empty]))
+        .digest("hex"),
+    );
+    const fresh = {
+      approvalMode: "write",
+      modelId: "m1",
+      fingerprint: sessionConfigFingerprint(NONE, empty),
+    } as const;
+    expect(reusable(live, fresh)).toBe(false);
   });
 
   it("is the digest of the two files the spawn writes, in order .yml then .md; the key is not in it", async () => {
@@ -102,9 +131,9 @@ describe("sessionConfigFingerprint (omp-runtime「会话配置文件」, design 
       const md = existsSync(mdPath) ? readFileSync(mdPath, "utf8") : null;
       // Write and compare share one content function.
       expect(sessionConfigContent(capabilities)).toEqual({ yml, md });
-      expect(sessionConfigFingerprint(capabilities)).toBe(
+      expect(sessionConfigFingerprint(capabilities, "")).toBe(
         createHash("sha256")
-          .update(JSON.stringify([yml, md]))
+          .update(JSON.stringify([yml, md, ""]))
           .digest("hex"),
       );
       first.remove();
@@ -117,6 +146,15 @@ describe("sessionConfigFingerprint (omp-runtime「会话配置文件」, design 
       sessionConfigContent({ disabledExtensions: ["skill:deploy"], appendSystemPrompt: "你好\n" }),
     ).toEqual({ yml: 'disabledExtensions: ["skill:deploy"]\n', md: "你好\n" });
     expect(sessionConfigContent(NONE)).toEqual({ yml: "disabledExtensions: []\n", md: null });
+  });
+
+  it("one list for skills and connectors: skill: and mcp: entries deduplicated in dictionary order", () => {
+    expect(
+      sessionConfigContent({
+        disabledExtensions: ["skill:deploy", "mcp:gitlab", "skill:deploy", "mcp:gitlab"],
+        appendSystemPrompt: null,
+      }),
+    ).toEqual({ yml: 'disabledExtensions: ["mcp:gitlab", "skill:deploy"]\n', md: null });
   });
 });
 
@@ -133,7 +171,11 @@ describe("effectiveCapabilities (experts「专家提示词注入」, chat-sessio
     expect(
       effectiveCapabilities(expertPrompt)({
         ownerId: "u1",
-        capabilities: { expertId: "e1", disabledSkills: ["deploy", "lint"] },
+        capabilities: {
+          expertId: "e1",
+          disabledSkills: ["deploy", "lint"],
+          disabledConnectors: [],
+        },
       }),
     ).toEqual({
       appendSystemPrompt: "E1 的提示词",
@@ -144,15 +186,81 @@ describe("effectiveCapabilities (experts「专家提示词注入」, chat-sessio
 
   it("no expert, or one the owner cannot see → no prompt; no expert asks nothing", () => {
     lookups.length = 0;
-    const none = { expertId: null, disabledSkills: [] };
+    const none = { expertId: null, disabledSkills: [], disabledConnectors: [] };
     expect(effectiveCapabilities(expertPrompt)({ ownerId: "u1", capabilities: none })).toEqual(
       NONE,
     );
     expect(lookups).toEqual([]);
-    const foreign = { expertId: "e1", disabledSkills: [] };
+    const foreign = { expertId: "e1", disabledSkills: [], disabledConnectors: [] };
     expect(effectiveCapabilities(expertPrompt)({ ownerId: "u2", capabilities: foreign })).toEqual(
       NONE,
     );
     expect(lookups).toEqual(["u2/e1"]);
+  });
+
+  it("every disabled connector prefixed mcp:, after the skills; the expert does not touch them", () => {
+    lookups.length = 0;
+    expect(
+      effectiveCapabilities(expertPrompt)({
+        ownerId: "u1",
+        capabilities: {
+          expertId: "e1",
+          disabledSkills: ["deploy"],
+          disabledConnectors: ["gitlab", "wiki"],
+        },
+      }),
+    ).toEqual({
+      appendSystemPrompt: "E1 的提示词",
+      disabledExtensions: ["skill:deploy", "mcp:gitlab", "mcp:wiki"],
+    });
+  });
+});
+
+describe("alignmentOf reads the managed mcp.json at dispatch (s1d-connectors D8)", () => {
+  const session = {
+    ownerId: "u1",
+    composer: { approvalMode: null, modelId: null, reasoningEffort: null },
+    capabilities: { expertId: null, disabledSkills: [], disabledConnectors: ["gitlab"] },
+  };
+  const capabilitiesOf = effectiveCapabilities(() => null);
+  const GITLAB: SessionCapabilities = {
+    disabledExtensions: ["mcp:gitlab"],
+    appendSystemPrompt: null,
+  };
+
+  function stateDir(): string {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "composer-align-mcp-")));
+    roots.push(root);
+    const state = join(root, "state");
+    ensureOmpStateLayout(state);
+    return state;
+  }
+
+  it("no mcp.json counts as the empty string; a file's bytes are taken as read", () => {
+    const state = stateDir();
+    const missing = alignmentOf(session, TEST_COMPOSER, capabilitiesOf, { stateDir: state });
+    expect(missing.capabilities).toEqual(GITLAB);
+    expect(missing.fingerprint).toBe(sessionConfigFingerprint(GITLAB, ""));
+
+    const bytes = '{\n  "mcpServers": {\n    "wiki": {}\n  }\n}\n';
+    writeFileSync(join(ompAgentDir(state), "mcp.json"), bytes);
+    const present = alignmentOf(session, TEST_COMPOSER, capabilitiesOf, { stateDir: state });
+    expect(present.fingerprint).toBe(sessionConfigFingerprint(GITLAB, bytes));
+    expect(present.fingerprint).not.toBe(missing.fingerprint);
+  });
+
+  it("a read failure other than ENOENT is an AgentUnavailableError (step 1 fails), not taken as empty", () => {
+    const state = stateDir();
+    mkdirSync(join(ompAgentDir(state), "mcp.json"));
+    let thrown: unknown;
+    try {
+      alignmentOf(session, TEST_COMPOSER, capabilitiesOf, { stateDir: state });
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(AgentUnavailableError);
+    expect((thrown as AgentUnavailableError).code).toBe("agent_unavailable");
+    expect((thrown as AgentUnavailableError).message).toMatch(/EISDIR/u);
+    expect(((thrown as Error).cause as NodeJS.ErrnoException).code).toBe("EISDIR");
   });
 });

@@ -204,7 +204,11 @@ describe("migration 047 schema", () => {
       expect(rawCapabilities(db)).toEqual(
         [S_A, S_B, S_C, S_D].map((id) => ({ id, expert_id: null, disabled_skills: "[]" })),
       );
-      expect(readSessionCapabilities(db, S_A)).toEqual({ expertId: null, disabledSkills: [] });
+      expect(readSessionCapabilities(db, S_A)).toEqual({
+        expertId: null,
+        disabledSkills: [],
+        disabledConnectors: [],
+      });
       expect(rawExperts(db)).toEqual([]);
       expect(rawPrefs(db)).toEqual([]);
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
@@ -466,7 +470,12 @@ describe("skill-name rule (one rule for expert skills, account defaults and sess
     ["account defaults", (db, names) => saveAccountDisabledSkills(db, "u1", names)],
     [
       "session disabled list",
-      (db, names) => writeSessionCapabilities(db, S_A, { expertId: null, disabledSkills: names }),
+      (db, names) =>
+        writeSessionCapabilities(db, S_A, {
+          expertId: null,
+          disabledSkills: names,
+          disabledConnectors: [],
+        }),
     ],
   ];
   const BAD: Array<[string, string]> = [
@@ -583,9 +592,21 @@ describe("remove", () => {
     insertSession(db, S_A, "u1");
     insertSession(db, S_B, "u1");
     insertSession(db, S_C, "u1");
-    writeSessionCapabilities(db, S_A, { expertId: x.id, disabledSkills: ["lint"] });
-    writeSessionCapabilities(db, S_B, { expertId: x.id, disabledSkills: [] });
-    writeSessionCapabilities(db, S_C, { expertId: y.id, disabledSkills: [] });
+    writeSessionCapabilities(db, S_A, {
+      expertId: x.id,
+      disabledSkills: ["lint"],
+      disabledConnectors: [],
+    });
+    writeSessionCapabilities(db, S_B, {
+      expertId: x.id,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
+    writeSessionCapabilities(db, S_C, {
+      expertId: y.id,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
     let seen: Expert | undefined;
     expect(store.remove("u1", x.id, (removed) => (seen = removed))).toEqual(x);
     expect(seen).toEqual(x);
@@ -604,7 +625,11 @@ describe("remove", () => {
     const { db, store } = fresh();
     const x = store.create("u1", VALID);
     insertSession(db, S_A, "u1");
-    writeSessionCapabilities(db, S_A, { expertId: x.id, disabledSkills: [] });
+    writeSessionCapabilities(db, S_A, {
+      expertId: x.id,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
     const before = [rawExperts(db), rawCapabilities(db)];
     expect(() =>
       store.remove("u1", x.id, () => {
@@ -639,30 +664,54 @@ describe("session capability columns", () => {
     const { db } = fresh();
     insertSession(db, S_A, "u1");
     insertSession(db, S_B, "u1");
-    expect(readSessionCapabilities(db, S_A)).toEqual({ expertId: null, disabledSkills: [] });
+    expect(readSessionCapabilities(db, S_A)).toEqual({
+      expertId: null,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
     expect(
       writeSessionCapabilities(db, S_A, {
         expertId: "builtin:data-analyst",
         disabledSkills: ["lint", "deploy", "lint"],
+        disabledConnectors: [],
       }),
-    ).toEqual({ expertId: "builtin:data-analyst", disabledSkills: ["deploy", "lint"] });
+    ).toEqual({
+      expertId: "builtin:data-analyst",
+      disabledSkills: ["deploy", "lint"],
+      disabledConnectors: [],
+    });
     expect(readSessionCapabilities(db, S_A)).toEqual({
       expertId: "builtin:data-analyst",
       disabledSkills: ["deploy", "lint"],
+      disabledConnectors: [],
     });
     expect(rawCapabilities(db)).toEqual([
       { id: S_A, expert_id: "builtin:data-analyst", disabled_skills: '["deploy","lint"]' },
       { id: S_B, expert_id: null, disabled_skills: "[]" },
     ]);
-    writeSessionCapabilities(db, S_A, { expertId: null, disabledSkills: [] });
-    expect(readSessionCapabilities(db, S_A)).toEqual({ expertId: null, disabledSkills: [] });
+    writeSessionCapabilities(db, S_A, {
+      expertId: null,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
+    expect(readSessionCapabilities(db, S_A)).toEqual({
+      expertId: null,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
   });
 
   it("a missing session reads undefined and refuses a write", () => {
     const { db } = fresh();
     expect(readSessionCapabilities(db, S_D)).toBeUndefined();
     expect(
-      codeOf(() => writeSessionCapabilities(db, S_D, { expertId: null, disabledSkills: [] })),
+      codeOf(() =>
+        writeSessionCapabilities(db, S_D, {
+          expertId: null,
+          disabledSkills: [],
+          disabledConnectors: [],
+        }),
+      ),
     ).toBe("not_found");
     expect(rawCapabilities(db)).toEqual([]);
   });

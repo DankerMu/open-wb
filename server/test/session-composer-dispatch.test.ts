@@ -301,7 +301,7 @@ describe("派发前按会话设置对齐进程：档位 (chat-sessions)", () => 
       });
       expect([put.statusCode, put.json()]).toEqual([
         200,
-        { expertId: "builtin:test-engineer", disabledSkills: ["deploy"] },
+        { expertId: "builtin:test-engineer", disabledSkills: ["deploy"], disabledConnectors: [] },
       ]);
       await settle();
 

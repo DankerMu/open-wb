@@ -53,7 +53,10 @@ async function setExpert(world: ProxiedApp, session: string, expertId: string): 
   const response = await inject(world, "PUT", `/api/sessions/${session}/capabilities`, {
     expertId,
   });
-  expect([response.statusCode, response.json()]).toEqual([200, { expertId, disabledSkills: [] }]);
+  expect([response.statusCode, response.json()]).toEqual([
+    200,
+    { expertId, disabledSkills: [], disabledConnectors: [] },
+  ]);
 }
 
 /** One prompt to its published `turn.end`. */

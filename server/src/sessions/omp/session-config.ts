@@ -16,7 +16,7 @@ import { replaceFile } from "../../core/replace-file.js";
 import { ompSessionConfigDir } from "./state-layout.js";
 
 export interface SessionCapabilities {
-  /** Already prefixed (`skill:<name>`); deduplicated and sorted when written. */
+  /** Already prefixed (`skill:<name>`, `mcp:<name>`); deduplicated and sorted when written. */
   readonly disabledExtensions: readonly string[];
   /** The effective expert's prompt; null without an expert. */
   readonly appendSystemPrompt: string | null;
@@ -59,14 +59,19 @@ export function sessionConfigContent(capabilities: SessionCapabilities): {
 
 /**
  * The capability fingerprint (chat-sessions「派发前按会话设置对齐进程」step 1): SHA-256 hex over the
- * JSON array `[yml, md]` of `sessionConfigContent` — the `.yml` text, then the `.md` text or `null`
- * as the fixed no-file mark, so with and without an expert never collide whatever the prompt says.
- * The key is not in it: equal capabilities give one fingerprint on every spawn.
+ * JSON array `[yml, md, mcpJson]` — the `.yml` text and the `.md` text or `null` (the fixed no-file
+ * mark, so with and without an expert never collide whatever the prompt says) of
+ * `sessionConfigContent`, then the managed `mcp.json` bytes as the caller read them (`""` when there
+ * is none; s1d-connectors D8). The key is not in it: equal capabilities over the same `mcp.json`
+ * give one fingerprint on every spawn.
  */
-export function sessionConfigFingerprint(capabilities: SessionCapabilities): string {
+export function sessionConfigFingerprint(
+  capabilities: SessionCapabilities,
+  mcpJson: string,
+): string {
   const { yml, md } = sessionConfigContent(capabilities);
   return createHash("sha256")
-    .update(JSON.stringify([yml, md]))
+    .update(JSON.stringify([yml, md, mcpJson]))
     .digest("hex");
 }
 

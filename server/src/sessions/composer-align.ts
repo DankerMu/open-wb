@@ -4,10 +4,16 @@
  * reports and the configuration the assembly hands down. Only effective values reach a spawn's argv
  * — the mode clamped by `approvalMaxMode`, the model inside the whitelist — never a raw column.
  * Likewise the session's effective capabilities (s1d-experts-skills design D8): the visible expert's
- * prompt and the disabled skills as `skill:<name>`, from the two capability columns, never cached.
+ * prompt, the disabled skills as `skill:<name>` and the disabled connectors as `mcp:<name>`
+ * (s1d-connectors D7), from the three capability columns, never cached; their fingerprint takes in
+ * the managed `mcp.json` bytes read at that dispatch (s1d-connectors D8).
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { type ApprovalMode, type Effort, effectiveComposer } from "../model-catalog.js";
+import { AgentUnavailableError } from "./omp/process.js";
 import { type SessionCapabilities, sessionConfigFingerprint } from "./omp/session-config.js";
+import { ompAgentDir } from "./omp/state-layout.js";
 import { commandOn, type Slot } from "./pool.js";
 import type { ComposerConfig } from "./store-composer.js";
 
@@ -25,8 +31,12 @@ export function effectiveOf(
   return effectiveComposer(raw, config);
 }
 
-/** The two capability columns of a session, as `store.runtimeState` reports them. */
-export type RawCapabilities = { expertId: string | null; disabledSkills: readonly string[] };
+/** The three capability columns of a session, as `store.runtimeState` reports them. */
+export type RawCapabilities = {
+  expertId: string | null;
+  disabledSkills: readonly string[];
+  disabledConnectors: readonly string[];
+};
 
 /**
  * experts「专家提示词注入」: the prompt of expert `expertId` when `ownerId` can see it (built-in or
@@ -43,30 +53,59 @@ export type CapabilitiesOf = (session: {
 /**
  * The effective capabilities of a session for one spawn (chat-sessions「派发前按会话设置对齐进程」, design
  * D8), bound to `expertPrompt`: the effective expert's prompt (null without one) and every disabled
- * skill prefixed `skill:`. Each call looks the expert up anew: nothing is cached between dispatches.
+ * skill prefixed `skill:` with every disabled connector prefixed `mcp:` (the session config writer
+ * dedupes and sorts the one list). Each call looks the expert up anew: nothing is cached between
+ * dispatches.
  */
 export function effectiveCapabilities(expertPrompt: ExpertPrompt): CapabilitiesOf {
-  return ({ ownerId, capabilities: { expertId, disabledSkills } }) => ({
+  return ({ ownerId, capabilities: { expertId, disabledSkills, disabledConnectors } }) => ({
     appendSystemPrompt: expertId === null ? null : expertPrompt(ownerId, expertId),
-    disabledExtensions: disabledSkills.map((name) => `skill:${name}`),
+    disabledExtensions: [
+      ...disabledSkills.map((name) => `skill:${name}`),
+      ...disabledConnectors.map((name) => `mcp:${name}`),
+    ],
   });
+}
+
+/**
+ * The managed `<agentDir>/mcp.json` as it is now (s1d-connectors D8): a missing file is `""`; any
+ * other read failure (EACCES, EISDIR, EIO…) is a step-1 failure, thrown as `AgentUnavailableError`
+ * with the read error as its cause, so the dispatch answers `agent_unavailable` rather than compare
+ * against a guess.
+ */
+function managedMcpJson(stateDir: string): string {
+  try {
+    return readFileSync(join(ompAgentDir(stateDir), "mcp.json"), "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") {
+      return "";
+    }
+    const unavailable = new AgentUnavailableError(`mcp.json unreadable: ${String(code)}`);
+    unavailable.cause = error;
+    throw unavailable;
+  }
 }
 
 /**
  * Everything one dispatch aligns a process with, computed once per dispatch (never cached) from its
  * one `store.runtimeState` read: the effective composer values, the effective capabilities and
- * their fingerprint.
+ * their fingerprint over the managed `mcp.json` read now, under `runtime.stateDir`. A change of
+ * that file between this read and the spawn's usually costs one more restart later; an A→B→A pair
+ * of writes within one admission wait leaves the process (spawned under B, fingerprinted A) one
+ * restart short until the next `mcp.json` change — an accepted residual (s1d-connectors D8).
  */
 export function alignmentOf(
   session: { ownerId: string; composer: RawComposer; capabilities: RawCapabilities },
   config: ComposerConfig,
   capabilitiesOf: CapabilitiesOf,
+  runtime: { stateDir: string },
 ) {
   const capabilities = capabilitiesOf(session);
   return {
     ...effectiveOf(session.composer, config),
     capabilities,
-    fingerprint: sessionConfigFingerprint(capabilities),
+    fingerprint: sessionConfigFingerprint(capabilities, managedMcpJson(runtime.stateDir)),
   };
 }
 
@@ -75,7 +114,8 @@ export function alignmentOf(
  * design D19 and s1d-experts-skills D8): its process was started under the effective mode (omp takes
  * it from argv alone), knows the effective model (omp reads `models.yml` at spawn only and refuses
  * `set_model` for a model registered later, `Model not found`) and was spawned with session config
- * files of the effective capabilities' fingerprint (omp reads them at spawn only). A model of the
+ * files of the effective capabilities' fingerprint, `mcp.json` included (omp reads them all at
+ * spawn only). A model of the
  * spawn-time set or an effort change needs no restart: step 2 switches it.
  */
 export function reusable(

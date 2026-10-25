@@ -124,14 +124,15 @@ export function composerOptionsRoute(
 
 /**
  * 路由表里输入框的两类读取的缺省应答（chat-web「能力读取时机」）：`GET /api/experts` → `{experts: []}`，
- * 任一会话的 `GET /api/sessions/<id>/capabilities`（哨兵键）→ `{expertId: null, disabledSkills: []}`。凡挂载会话页
+ * 任一会话的 `GET /api/sessions/<id>/capabilities`（哨兵键）→ `{expertId: null, disabledSkills: [], disabledConnectors: []}`。凡挂载会话页
  * 输入框的整页路由表都与 `composerOptionsRoute()` 并列展开它，用例写同一个键（精确路径或哨兵键）即覆盖。漏登记
  * 同样被 `fetchResponse` 吞掉，所以计数类用例以精确请求清单写出这两类读取。
  */
 export function composerReadRoutes(): FetchRoutes {
   return {
     "/api/experts": () => jsonResponse({ experts: [] }),
-    [CAPABILITIES_ROUTE]: () => jsonResponse({ expertId: null, disabledSkills: [] }),
+    [CAPABILITIES_ROUTE]: () =>
+      jsonResponse({ expertId: null, disabledSkills: [], disabledConnectors: [] }),
   };
 }
 
@@ -187,7 +188,9 @@ export function allowWorkspaceListFetch() {
       return Promise.resolve(jsonResponse({ skills: [], disabledSkills: [] }));
     }
     if (CAPABILITIES_PATH.test(String(path))) {
-      return Promise.resolve(jsonResponse({ expertId: null, disabledSkills: [] }));
+      return Promise.resolve(
+        jsonResponse({ expertId: null, disabledSkills: [], disabledConnectors: [] }),
+      );
     }
     if (!defaultHandler) {
       throw new Error(`unexpected request ${String(path)}`);

@@ -4,17 +4,20 @@ import { hasExactlyKeys } from "./api-json.js";
 
 /**
  * `GET` / `PUT /api/sessions/:id/capabilities` 的应答（design D7）：会话的有效专家（引用的专家已不可见时为
- * null）与停用技能名单。会话视图的十四键不含这两项，只经本端点读写。
+ * null）、停用技能名单与停用连接器名单（s1d-connectors D7）。恰为这三键：少一键或多一键都按无效应答处理。
+ * 会话视图的十四键不含这三项，只经本端点读写。
  */
 export type SessionCapabilities = {
   expertId: string | null;
   disabledSkills: string[];
+  disabledConnectors: string[];
 };
 
-/** `PUT …/capabilities` 的 body：两键的非空子集（`expertId: null` 即清除专家）。 */
+/** `PUT …/capabilities` 的 body：三键的非空子集（`expertId: null` 即清除专家）。 */
 export type SessionCapabilitiesPatch = {
   expertId?: string | null;
   disabledSkills?: string[];
+  disabledConnectors?: string[];
 };
 
 type CapabilityTransport = {
@@ -30,14 +33,18 @@ type CapabilityTransport = {
 };
 
 function parseCapabilities(value: unknown): SessionCapabilities | null {
-  if (!hasExactlyKeys(value, ["expertId", "disabledSkills"])) {
+  if (!hasExactlyKeys(value, ["expertId", "disabledSkills", "disabledConnectors"])) {
     return null;
   }
-  const { expertId, disabledSkills } = value;
-  if ((expertId !== null && typeof expertId !== "string") || !isStringArray(disabledSkills)) {
+  const { expertId, disabledSkills, disabledConnectors } = value;
+  if (
+    (expertId !== null && typeof expertId !== "string") ||
+    !isStringArray(disabledSkills) ||
+    !isStringArray(disabledConnectors)
+  ) {
     return null;
   }
-  return { expertId, disabledSkills };
+  return { expertId, disabledSkills, disabledConnectors };
 }
 
 function capabilitiesPath(sessionId: string): string {

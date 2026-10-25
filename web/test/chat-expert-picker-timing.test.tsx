@@ -239,7 +239,11 @@ describe("会话能力的读取时机", () => {
   it("同一闭包连调两次 chooseExpert：恰一次 PUT（hook 内的 ref 守卫）", async () => {
     const put = vi.fn(() => new Promise<never>(() => {}));
     const client = {
-      getSessionCapabilities: vi.fn(async () => ({ expertId: TESTER.id, disabledSkills: [] })),
+      getSessionCapabilities: vi.fn(async () => ({
+        expertId: TESTER.id,
+        disabledSkills: [],
+        disabledConnectors: [],
+      })),
       putSessionCapabilities: put,
     } as unknown as Pick<ApiClient, "getSessionCapabilities" | "putSessionCapabilities">;
     const { result } = renderHook(() => useSessionCapabilities(client, A));

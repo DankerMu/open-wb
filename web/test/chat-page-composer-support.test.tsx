@@ -84,7 +84,7 @@ describe("整页测试支撑：输入框选项的缺省应答", () => {
 });
 
 describe("整页测试支撑：专家清单与会话能力的缺省应答", () => {
-  const NONE = { expertId: null, disabledSkills: [] };
+  const NONE = { expertId: null, disabledSkills: [], disabledConnectors: [] };
 
   it("composerReadRoutes answers no experts and, for any session id, no capabilities", async () => {
     vi.stubGlobal("fetch", createFetchMock(composerReadRoutes()));
@@ -96,7 +96,11 @@ describe("整页测试支撑：专家清单与会话能力的缺省应答", () =
   });
 
   it("an exact capabilities key wins over the sentinel; other sessions still fall back", async () => {
-    const mine = { expertId: "builtin:test-engineer", disabledSkills: ["deploy"] };
+    const mine = {
+      expertId: "builtin:test-engineer",
+      disabledSkills: ["deploy"],
+      disabledConnectors: [],
+    };
     vi.stubGlobal(
       "fetch",
       createFetchMock({

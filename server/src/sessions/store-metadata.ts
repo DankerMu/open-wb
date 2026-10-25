@@ -10,10 +10,12 @@
  * (`resolveCreateComposer`: a refused value throws before any write or directory), and close it
  * with the account's last choice and the creation's `session.permission` audit, so a failure of
  * either leaves no session row, no workspace row and no last choice.
- * The same INSERT writes the two capability columns (s1d-experts-skills D7): `expert_id` is the
+ * The same INSERT writes the three capability columns (s1d-experts-skills D7): `expert_id` is the
  * expert the route found visible (or NULL), `disabled_skills` the body's list, else the account's
  * default read in that transaction, else `[]`, minus that expert's declared skills (the union rule
- * of `store-capabilities.ts`). Neither touches the account default, the last choice or the audit.
+ * of `store-capabilities.ts`); `disabled_connectors` (s1d-connectors D7) the body's list, else the
+ * account's default connectors read in that transaction, else `[]`, untouched by the expert. None of
+ * them touches the account defaults, the last choice or the audit.
  * A PATCH is one owner-scoped UPDATE of only the given columns: it
  * never touches `updated_at`, `status`, `workspace_id`, the generation columns or message rows.
  * `archived: true` (#922) puts `status != 'running'` on that whole UPDATE, so a running session
@@ -34,6 +36,7 @@ import { randomBytes } from "node:crypto";
 import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
+import { readAccountDisabledConnectors } from "../connectors/store.js";
 import type { emit as canonicalEmit } from "../core/audit/index.js";
 import { createSqliteTextDecoder } from "../core/db/index.js";
 import { HttpError } from "../core/errors/index.js";
@@ -63,13 +66,15 @@ export type SessionScene = "office" | "code" | "design";
 
 /**
  * The three composer keys arrive as unchecked strings: `createSession` validates their values.
- * `expert` is already visible to the owner and `disabledSkills` already a valid list (the route's).
+ * `expert` is already visible to the owner, `disabledSkills` and `disabledConnectors` already valid
+ * lists (the route's).
  */
 export interface SessionCreateInput extends ComposerInput {
   workspaceId?: string;
   scene?: SessionScene;
   expert?: SessionExpert;
   disabledSkills?: string[];
+  disabledConnectors?: string[];
 }
 
 /**
@@ -147,7 +152,7 @@ interface DeletedRow {
   workspace_id: string | null;
 }
 
-const INSERT_SESSION = `INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at, workspace_id, scene, ${COMPOSER_COLUMNS}, expert_id, disabled_skills) VALUES (?, ?, NULL, 'idle', ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const INSERT_SESSION = `INSERT INTO chat_sessions(id, owner_id, title, status, created_at, updated_at, workspace_id, scene, ${COMPOSER_COLUMNS}, expert_id, disabled_skills, disabled_connectors) VALUES (?, ?, NULL, 'idle', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 const SELECT_TEMPORARY = "SELECT temporary FROM workspaces WHERE id = ?";
 
@@ -195,6 +200,8 @@ export function createSessionMetadataStore(
       const insert = (workspaceId: string, { row }: Composer): void => {
         const disabled = input.disabledSkills ?? readAccountDisabledSkills(db, ownerId);
         const disabledSkills = withoutExpertSkills(disabled, input.expert);
+        const disabledConnectors =
+          input.disabledConnectors ?? readAccountDisabledConnectors(db, ownerId);
         requireChanges(
           db
             .prepare(INSERT_SESSION)
@@ -210,6 +217,7 @@ export function createSessionMetadataStore(
               row.reasoning_effort,
               input.expert?.id ?? null,
               JSON.stringify(disabledSkills),
+              JSON.stringify(disabledConnectors),
             ).changes,
           1,
           "session create",

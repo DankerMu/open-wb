@@ -1,7 +1,8 @@
 /**
  * connectors/rest — 连接器管理端点（s1d-connectors D4 写入流水线、D5、D6；connectors「连接器管理端点」「连接器探活」）。
- * 五个端点：`GET /api/connectors`、`POST /api/connectors`、`PUT /api/connectors?name=`、
- * `DELETE /api/connectors?name=`、`POST /api/connectors/probe?name=`。
+ * 七个端点：`GET /api/connectors`、`POST /api/connectors`、`PUT /api/connectors?name=`、
+ * `DELETE /api/connectors?name=`、`POST /api/connectors/probe?name=`，以及账号缺省（D7；connectors「连接器账号缺省」）
+ * `GET` / `PUT /api/connectors/defaults`。
  *
  * 次序：未认证 401（root guard）→ 非管理员的写与探活 403 `forbidden` → `PUT` / `DELETE` / 探活的 `name` 缺失 / 空 /
  * 多值 400 → 未知 404——这三步在路由级 `preParsing`，先于 body 解析与 body limit（专家端点 `ownedBeforeParse`
@@ -21,6 +22,10 @@
  * 重建 → 404，结果丢弃、无审计；只是连接参数被 `PUT` 改了 → 结果丢弃、无审计、应答当前视图。不发布、不改
  * `enabled`。
  *
+ * 账号缺省：每个登录账号读写自己的一行（不分角色、不挂管理员 preParsing）；`PUT` body 键集恰为
+ * `{disabledConnectors}`（否则 400），列表规则是 `normalizeConnectorNames`（≤32、名称规则、去重排序、不要求已登记），
+ * 整体替换后应答同 `GET`。`PUT` 在归属集、body limit 16 KiB。不审计、不发布：它只决定之后新建会话的初值。
+ *
  * 凭证：`env` / `headers` 的值不进任何应答（视图只有键名）、审计与记录。
  */
 import type { DatabaseSync } from "node:sqlite";
@@ -36,7 +41,12 @@ import {
   type ConnectorProbeResult,
   probeConnector,
 } from "./probe.js";
-import type { ConnectorView, createConnectorStore } from "./store.js";
+import {
+  type ConnectorView,
+  type createConnectorStore,
+  readAccountDisabledConnectors,
+  saveAccountDisabledConnectors,
+} from "./store.js";
 
 type ConnectorStore = Pick<
   ReturnType<typeof createConnectorStore>,
@@ -70,6 +80,8 @@ export interface ConnectorRestDependencies {
 
 /** D3 的合法 body 通常只有几 KiB；上限附近（32 个 4096 码点的 `env` 值）会超过它，得 content-parser 400。 */
 const CONNECTOR_BODY_LIMIT = 64 * 1024;
+/** 32 个至多 32 字节的名称 JSON 转义后不到 2 KiB（D7）。 */
+const DEFAULTS_BODY_LIMIT = 16 * 1024;
 /** Fastify 不接受 0：取最小合法值，显式的 no-body 校验负责「任意 body 即 400」。 */
 const BODYLESS_BODY_LIMIT = 1;
 
@@ -192,6 +204,22 @@ export function registerConnectors(
     return reply.code(204).send();
   });
 
+  app.get("/api/connectors/defaults", route, async (request) => ({
+    disabledConnectors: readAccountDisabledConnectors(db, principalOf(request).id),
+  }));
+
+  app.put(
+    "/api/connectors/defaults",
+    { ...route, bodyLimit: DEFAULTS_BODY_LIMIT },
+    async (request) => ({
+      disabledConnectors: saveAccountDisabledConnectors(
+        db,
+        principalOf(request).id,
+        defaultsOf(request.body),
+      ),
+    }),
+  );
+
   app.post(
     "/api/connectors/probe",
     { ...named, bodyLimit: BODYLESS_BODY_LIMIT },
@@ -219,6 +247,18 @@ export function registerConnectors(
       });
     },
   );
+}
+
+/** 账号缺省 `PUT` 的 body：键集恰为 `{disabledConnectors}` 的对象，否则 400；列表本身由 store 判定。 */
+function defaultsOf(body: unknown): unknown {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    throw new HttpError("bad_request");
+  }
+  const keys = Object.keys(body);
+  if (keys.length !== 1 || keys[0] !== "disabledConnectors") {
+    throw new HttpError("bad_request");
+  }
+  return (body as { disabledConnectors: unknown }).disabledConnectors;
 }
 
 /** 按名称串行（`models/rest.ts` 的 `perIdChain` 写法）：每个名称一条 Promise 链，前一个无论成败都轮到下一个。 */

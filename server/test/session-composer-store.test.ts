@@ -367,7 +367,7 @@ describe("runtimeState 报出三个原始列与两项能力列", () => {
       activeTurn: null,
       workspaceId: null,
       composer: { approvalMode: null, modelId: null, reasoningEffort: null },
-      capabilities: { expertId: null, disabledSkills: [] },
+      capabilities: { expertId: null, disabledSkills: [], disabledConnectors: [] },
     });
 
     plant(db, session, "yolo", "gone", "xhigh");
@@ -380,20 +380,19 @@ describe("runtimeState 报出三个原始列与两项能力列", () => {
     expect(store.runtimeState("f".repeat(32))).toBeNull();
   });
 
-  it("另报 expert_id 与 disabled_skills 两列原值：不可见的专家 id 也原样报出", () => {
+  it("另报 expert_id、disabled_skills 与 disabled_connectors 三列原值：不可见的专家 id 也原样报出", () => {
     const db = openDatabase();
     const { store } = openStores(db, { approvalMaxMode: "always-ask", modelCatalog: CATALOG });
     const session = store.create("u1").id;
 
-    db.prepare("UPDATE chat_sessions SET expert_id = ?, disabled_skills = ? WHERE id = ?").run(
-      "builtin:nope",
-      '["deploy","lint"]',
-      session,
-    );
+    db.prepare(
+      "UPDATE chat_sessions SET expert_id = ?, disabled_skills = ?, disabled_connectors = ? WHERE id = ?",
+    ).run("builtin:nope", '["deploy","lint"]', '["gitlab","wiki"]', session);
 
     expect(store.runtimeState(session)?.capabilities).toEqual({
       expertId: "builtin:nope",
       disabledSkills: ["deploy", "lint"],
+      disabledConnectors: ["gitlab", "wiki"],
     });
   });
 });

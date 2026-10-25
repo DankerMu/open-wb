@@ -324,7 +324,11 @@ describe("能力 弹层随会话上下文关闭", () => {
 
 describe("回到会话的第一帧不带欢迎态之前持有的能力", () => {
   it("A → 欢迎态 → A：回到 A 的那次渲染（effect 发起新读取之前）capabilities 为 null，不是上一次取得的集合", async () => {
-    const held: SessionCapabilities = { expertId: "e1", disabledSkills: ["deploy"] };
+    const held: SessionCapabilities = {
+      expertId: "e1",
+      disabledSkills: ["deploy"],
+      disabledConnectors: [],
+    };
     const client = {
       getSessionCapabilities: vi
         .fn()

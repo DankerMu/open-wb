@@ -35,7 +35,7 @@ export function capsPath(id: string) {
 }
 
 export function caps(expertId: string | null) {
-  return jsonResponse({ expertId, disabledSkills: [] });
+  return jsonResponse({ expertId, disabledSkills: [], disabledConnectors: [] });
 }
 
 export function experts(list: readonly ExpertView[] = LIST) {

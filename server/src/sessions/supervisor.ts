@@ -446,7 +446,7 @@ export class SessionSupervisor {
     use: (slot: Slot) => Promise<T>,
   ): Promise<T> {
     const live = this.#slots.get(sessionId);
-    const effective = alignmentOf(resume, this.#composer, this.#capabilitiesOf);
+    const effective = alignmentOf(resume, this.#composer, this.#capabilitiesOf, this.#runtime);
     const aligned = (slot: Slot) => alignModel(slot, effective).then(() => use(slot));
     const fresh = () => this.#onNewSlot(sessionId, resume, effective, claim, aligned);
     if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {

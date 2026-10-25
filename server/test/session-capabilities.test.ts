@@ -64,6 +64,7 @@ interface World {
 interface Capabilities {
   expertId: string | null;
   disabledSkills: string[];
+  disabledConnectors: string[];
 }
 
 interface Raw {
@@ -116,7 +117,7 @@ function putCaps(world: World, session: string, body: unknown, cookie = world.co
 function expectCaps(response: LightMyRequestResponse, expected: Capabilities): void {
   expect([response.statusCode, response.headers["cache-control"]]).toEqual([200, "no-store"]);
   const body = response.json() as Capabilities;
-  expect(Object.keys(body)).toEqual(["expertId", "disabledSkills"]);
+  expect(Object.keys(body)).toEqual(["expertId", "disabledSkills", "disabledConnectors"]);
   expect(body).toEqual(expected);
 }
 
@@ -224,19 +225,29 @@ describe("POST /api/sessions: expertId and disabledSkills initial values", () =>
     expect(await capsOf(world, a)).toEqual({
       expertId: null,
       disabledSkills: ["ghost", "weekly-report"],
+      disabledConnectors: [],
     });
 
     await putDefaults(world, []);
     expect(await capsOf(world, a)).toEqual({
       expertId: null,
       disabledSkills: ["ghost", "weekly-report"],
+      disabledConnectors: [],
     });
     const b = expectCreated(await createSession(world, {}));
-    expect(await capsOf(world, b)).toEqual({ expertId: null, disabledSkills: [] });
+    expect(await capsOf(world, b)).toEqual({
+      expertId: null,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
     // A bodyless create reads the default too.
     await putDefaults(world, ["lint"]);
     const bodyless = expectCreated(await send(world.app, "POST", "/api/sessions", world.cookie));
-    expect(await capsOf(world, bodyless)).toEqual({ expertId: null, disabledSkills: ["lint"] });
+    expect(await capsOf(world, bodyless)).toEqual({
+      expertId: null,
+      disabledSkills: ["lint"],
+      disabledConnectors: [],
+    });
   });
 
   it("创建时的专家与停用技能：四例逐值；视图十四键；账号缺省、最近选择与审计不变", async () => {
@@ -246,13 +257,13 @@ describe("POST /api/sessions: expertId and disabledSkills initial values", () =>
     const before = accountState(world.db);
 
     const cases: Array<[unknown, Capabilities]> = [
-      [{}, { expertId: null, disabledSkills: ["deploy", "lint"] }],
-      [{ expertId: e }, { expertId: e, disabledSkills: ["lint"] }],
+      [{}, { expertId: null, disabledSkills: ["deploy", "lint"], disabledConnectors: [] }],
+      [{ expertId: e }, { expertId: e, disabledSkills: ["lint"], disabledConnectors: [] }],
       [
         { expertId: e, disabledSkills: ["deploy"] },
-        { expertId: e, disabledSkills: [] },
+        { expertId: e, disabledSkills: [], disabledConnectors: [] },
       ],
-      [{ disabledSkills: [] }, { expertId: null, disabledSkills: [] }],
+      [{ disabledSkills: [] }, { expertId: null, disabledSkills: [], disabledConnectors: [] }],
     ];
     const ids: string[] = [];
     for (const [body] of cases) {
@@ -276,10 +287,18 @@ describe("POST /api/sessions: expertId and disabledSkills initial values", () =>
     await putDefaults(world, ["lint"]);
 
     const builtin = expectCreated(await createSession(world, { expertId: BUILTIN }));
-    expect(await capsOf(world, builtin)).toEqual({ expertId: BUILTIN, disabledSkills: ["lint"] });
+    expect(await capsOf(world, builtin)).toEqual({
+      expertId: BUILTIN,
+      disabledSkills: ["lint"],
+      disabledConnectors: [],
+    });
 
     const many = expectCreated(await createSession(world, { disabledSkills: RAW_128 }));
-    expect(await capsOf(world, many)).toEqual({ expertId: null, disabledSkills: NAMES_64 });
+    expect(await capsOf(world, many)).toEqual({
+      expertId: null,
+      disabledSkills: NAMES_64,
+      disabledConnectors: [],
+    });
   });
 
   it("400 先于 workspaceId 判定：不写会话 / 空间行、目录与审计，带 no-store", async () => {
@@ -356,6 +375,7 @@ describe("GET / PUT /api/sessions/:id/capabilities: owner, refusals and archive"
     expectCaps(await putCaps(world, world.session, { disabledSkills: ["lint"] }), {
       expertId: null,
       disabledSkills: ["lint"],
+      disabledConnectors: [],
     });
     const before = { row: rowOf(world.db, world.session), account: accountState(world.db) };
 
@@ -385,14 +405,17 @@ describe("GET / PUT /api/sessions/:id/capabilities: owner, refusals and archive"
     expectCaps(await putCaps(world, world.session, { expertId: BUILTIN }), {
       expertId: BUILTIN,
       disabledSkills: ["lint"],
+      disabledConnectors: [],
     });
     expectCaps(await putCaps(world, world.session, { expertId: null }), {
       expertId: null,
       disabledSkills: ["lint"],
+      disabledConnectors: [],
     });
     expectCaps(await putCaps(world, world.session, { disabledSkills: RAW_128 }), {
       expertId: null,
       disabledSkills: NAMES_64,
+      disabledConnectors: [],
     });
     expect(accountState(world.db)).toEqual(before.account);
   });
@@ -419,7 +442,7 @@ describe("GET / PUT /api/sessions/:id/capabilities: owner, refusals and archive"
     const boundary = padded({ disabledSkills: ["deploy"] }, KIB64);
     expectCaps(
       await send(world.app, "PUT", capsUrl(world.session), world.cookie, undefined, boundary),
-      { expertId: null, disabledSkills: ["deploy"] },
+      { expertId: null, disabledSkills: ["deploy"], disabledConnectors: [] },
     );
   });
 
@@ -428,6 +451,7 @@ describe("GET / PUT /api/sessions/:id/capabilities: owner, refusals and archive"
     expectCaps(await putCaps(world, world.session, { disabledSkills: ["deploy"] }), {
       expertId: null,
       disabledSkills: ["deploy"],
+      disabledConnectors: [],
     });
     const archived = await send(
       world.app,
@@ -448,6 +472,7 @@ describe("GET / PUT /api/sessions/:id/capabilities: owner, refusals and archive"
     expectCaps(await getCaps(world, world.session), {
       expertId: null,
       disabledSkills: ["deploy"],
+      disabledConnectors: [],
     });
   });
 });
@@ -459,16 +484,20 @@ describe("capabilities: union rule and the effective expert", () => {
     expectCaps(await putCaps(world, world.session, { disabledSkills: ["lint", "deploy"] }), {
       expertId: null,
       disabledSkills: ["deploy", "lint"],
+      disabledConnectors: [],
     });
 
     const steps: Array<[unknown, Capabilities]> = [
-      [{ expertId: e }, { expertId: e, disabledSkills: ["lint"] }],
-      [{ expertId: null }, { expertId: null, disabledSkills: ["lint"] }],
+      [{ expertId: e }, { expertId: e, disabledSkills: ["lint"], disabledConnectors: [] }],
+      [{ expertId: null }, { expertId: null, disabledSkills: ["lint"], disabledConnectors: [] }],
       [
         { expertId: e, disabledSkills: ["deploy"] },
-        { expertId: e, disabledSkills: [] },
+        { expertId: e, disabledSkills: [], disabledConnectors: [] },
       ],
-      [{ disabledSkills: ["deploy"] }, { expertId: e, disabledSkills: ["deploy"] }],
+      [
+        { disabledSkills: ["deploy"] },
+        { expertId: e, disabledSkills: ["deploy"], disabledConnectors: [] },
+      ],
     ];
     for (const [body, expected] of steps) {
       expectCaps(await putCaps(world, world.session, body), expected);
@@ -479,6 +508,7 @@ describe("capabilities: union rule and the effective expert", () => {
     expectCaps(await putCaps(world, world.session, { disabledSkills: ["deploy"] }), {
       expertId: e,
       disabledSkills: ["deploy"],
+      disabledConnectors: [],
     });
     expect(rowOf(world.db, world.session)).toEqual(before);
   });
@@ -489,11 +519,16 @@ describe("capabilities: union rule and the effective expert", () => {
     expectCaps(await putCaps(world, world.session, { expertId: own }), {
       expertId: own,
       disabledSkills: [],
+      disabledConnectors: [],
     });
     const deleted = await send(world.app, "DELETE", `/api/experts?id=${own}`, world.cookie);
     expect(deleted.statusCode).toBe(204);
     // The expert delete itself clears the reference (group 3); the read reports no expert.
-    expectCaps(await getCaps(world, world.session), { expertId: null, disabledSkills: [] });
+    expectCaps(await getCaps(world, world.session), {
+      expertId: null,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
 
     const foreign = await createExpert(world, ["deploy"], world.other);
     for (const raw of [foreign, NOPE]) {
@@ -502,6 +537,7 @@ describe("capabilities: union rule and the effective expert", () => {
       expectCaps(await getCaps(world, world.session), {
         expertId: null,
         disabledSkills: ["deploy"],
+        disabledConnectors: [],
       });
       expect(rowOf(world.db, world.session)).toEqual(before);
     }
@@ -510,6 +546,7 @@ describe("capabilities: union rule and the effective expert", () => {
     expectCaps(await putCaps(world, world.session, { disabledSkills: ["lint"] }), {
       expertId: null,
       disabledSkills: ["lint"],
+      disabledConnectors: [],
     });
     expect(columnsOf(world.db, world.session)).toEqual({
       expert_id: NOPE,
@@ -536,7 +573,7 @@ describe("capabilities: a PUT during an in-flight turn", () => {
         expertId: BUILTIN,
         disabledSkills: ["deploy"],
       });
-      expectCaps(put, { expertId: BUILTIN, disabledSkills: ["deploy"] });
+      expectCaps(put, { expertId: BUILTIN, disabledSkills: ["deploy"], disabledConnectors: [] });
       expect(rowOf(db, world.session)).toEqual({
         ...before,
         expert_id: BUILTIN,
@@ -596,10 +633,12 @@ describe("fork copies the two capability columns", () => {
       expectCaps(await putCaps(w, w.session, { expertId: e }), {
         expertId: e,
         disabledSkills: [],
+        disabledConnectors: [],
       });
       expectCaps(await putCaps(w, w.session, { disabledSkills: ["deploy"] }), {
         expertId: e,
         disabledSkills: ["deploy"],
+        disabledConnectors: [],
       });
     });
 
@@ -610,7 +649,11 @@ describe("fork copies the two capability columns", () => {
       disabled_skills: '["deploy"]',
       skills_type: "text",
     });
-    expectCaps(await getCaps(world, fresh), { expertId: e, disabledSkills: ["deploy"] });
+    expectCaps(await getCaps(world, fresh), {
+      expertId: e,
+      disabledSkills: ["deploy"],
+      disabledConnectors: [],
+    });
     expect(await capsOf(world, fresh)).toEqual(await capsOf(world, source));
     expect(accountState(world.db)).toEqual(prefs);
   });
@@ -627,7 +670,11 @@ describe("fork copies the two capability columns", () => {
       disabled_skills: "[]",
       skills_type: "text",
     });
-    expectCaps(await getCaps(world, fresh), { expertId: null, disabledSkills: [] });
+    expectCaps(await getCaps(world, fresh), {
+      expertId: null,
+      disabledSkills: [],
+      disabledConnectors: [],
+    });
   });
 
   it("源会话无专家：NULL 原样复制", REAL, async () => {
