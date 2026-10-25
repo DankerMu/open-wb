@@ -14,6 +14,8 @@ import { chatTopbar } from "./topbar-actions.js";
 import { UndoConflictDialog } from "./undo-conflict-dialog.js";
 import { useChatSession } from "./use-chat-session.js";
 import {
+  useConnectorDefaults,
+  useConnectorList,
   useExpertHandOff,
   useExpertList,
   useSessionCapabilities,
@@ -60,6 +62,10 @@ export function ChatPage() {
   useExpertHandOff(session.welcome.selectExpert);
   // 欢迎态 `能力` 弹层的账号缺省停用列表：每个 client 在第一次打开弹层时取一次。
   const skillDefaults = useSkillDefaults(client);
+  // `能力` 弹层的连接器段：清单每个 client 在本页第一次打开弹层时取一次（欢迎态或会话中），账号缺省停用连接器
+  // 在欢迎态第一次打开时取一次。
+  const connectorList = useConnectorList(client);
+  const connectorDefaults = useConnectorDefaults(client);
   // 「+」菜单与斜杠候选不列的技能（chat-web「停用技能过滤」）：会话中为已取得的会话能力（未取得或失败时不过滤），
   // 欢迎态为弹层的页面选择 ?? 已取得的账号缺省 ?? 不过滤。
   const disabledSkills = requestedSessionId
@@ -129,6 +135,8 @@ export function ChatPage() {
           composerDisabled={session.composerDisabled}
           composerOptions={session.composerOptions}
           composerRef={session.composerRef}
+          connectorDefaults={connectorDefaults}
+          connectorList={connectorList}
           draft={draft}
           experts={experts}
           files={files}

@@ -22,7 +22,8 @@ type Picked = Pick<
  *
  * 技能（skill-switches「输入框「能力」弹层」）同样另存、不进 `picked`：`disabledSkills` 为 null（没动过开关）或
  * 完整停用集合——第一次切换以账号缺省为底加上或去掉该名称，之后在此基础上累积。非 null 时创建请求才带
- * `disabledSkills` 键。与 `scene` 同生命周期（首次发送后不清）。
+ * `disabledSkills` 键。与 `scene` 同生命周期（首次发送后不清）。连接器（同一弹层的 `连接器` 段）照此另存一份
+ * `disabledConnectors`：以账号缺省停用连接器为底，非 null 时创建请求才带该键。
  */
 export function useWelcomeOptions(
   workspaces: readonly Workspace[] | null,
@@ -35,10 +36,18 @@ export function useWelcomeOptions(
   const [picked, setPicked] = useState<Picked>({});
   const [expertId, selectExpert] = useState<string | null>(null);
   const [disabledSkills, setDisabledSkills] = useState<string[] | null>(null);
+  const [disabledConnectors, setDisabledConnectors] = useState<string[] | null>(null);
   /** 切一个技能的开关（`enabled` 为新值）；`defaults` 是已取得的账号缺省停用列表，没动过开关时以它为底。 */
   const toggleSkill = useCallback((name: string, enabled: boolean, defaults: readonly string[]) => {
     setDisabledSkills((current) => toggledSkills(current ?? defaults, name, enabled));
   }, []);
+  /** 切一个连接器的开关；`defaults` 是已取得的账号缺省停用连接器，没动过开关时以它为底。 */
+  const toggleConnector = useCallback(
+    (name: string, enabled: boolean, defaults: readonly string[]) => {
+      setDisabledConnectors((current) => toggledSkills(current ?? defaults, name, enabled));
+    },
+    [],
+  );
   /** 合并进 `picked`；值为 `undefined` 的键删除（换到不支持推理的模型时清掉强度）。 */
   const pick = useCallback((patch: { [K in keyof Picked]?: Picked[K] | undefined }) => {
     setPicked(
@@ -60,7 +69,7 @@ export function useWelcomeOptions(
   }, []);
   /**
    * `POST /api/sessions` 的 body：没有生效空间时不带 `workspaceId` 键，`picked` 只带选过的键，没有专家时不带
-   * `expertId` 键，没动过技能开关时不带 `disabledSkills` 键。
+   * `expertId` 键，没动过技能开关时不带 `disabledSkills` 键，没动过连接器开关时不带 `disabledConnectors` 键。
    */
   const createBody = useCallback(
     () => ({
@@ -69,12 +78,14 @@ export function useWelcomeOptions(
       ...picked,
       ...(expertId === null ? {} : { expertId }),
       ...(disabledSkills === null ? {} : { disabledSkills }),
+      ...(disabledConnectors === null ? {} : { disabledConnectors }),
     }),
-    [disabledSkills, effectiveId, expertId, picked, scene],
+    [disabledConnectors, disabledSkills, effectiveId, expertId, picked, scene],
   );
   return {
     createBody,
     defaultModelChanged,
+    disabledConnectors,
     disabledSkills,
     expertId,
     pick,
@@ -83,6 +94,7 @@ export function useWelcomeOptions(
     selectExpert,
     selectScene,
     selectWorkspace,
+    toggleConnector,
     toggleSkill,
     workspace,
     workspaces,

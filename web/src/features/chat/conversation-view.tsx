@@ -23,6 +23,8 @@ import type { ChatState } from "./stream.js";
 import type { TranscriptHandle } from "./thread-viewport.js";
 import { UndoNotice } from "./undo-notice.js";
 import type {
+  ConnectorDefaults,
+  ConnectorList,
   ExpertList,
   SessionCapabilityState,
   SkillDefaults,
@@ -173,6 +175,10 @@ type ConversationViewProps = {
   client: ApiClient;
   /** 欢迎态 `能力` 弹层的账号缺省停用列表（按 client 缓存，打开弹层时读取）。 */
   skillDefaults: SkillDefaults;
+  /** `能力` 弹层连接器段的清单（按 client 缓存，本页第一次打开弹层时读取）。 */
+  connectorList: ConnectorList;
+  /** 欢迎态连接器段的账号缺省停用连接器（按 client 缓存，欢迎态打开弹层时读取）。 */
+  connectorDefaults: ConnectorDefaults;
   composerDisabled: boolean;
   /** 输入框选项（可用档位、模型白名单与缺省值）；拉取中或失败时为 null，权限、模型与强度控件都不渲染。 */
   composerOptions: ComposerOptions | null;
@@ -242,6 +248,8 @@ export function ConversationView({
   composerDisabled,
   composerOptions,
   composerRef,
+  connectorDefaults,
+  connectorList,
   draft,
   experts,
   files,
@@ -384,6 +392,8 @@ export function ConversationView({
                 plus={slash.plus}
                 skills={skillSwitches({
                   capabilities,
+                  connectorDefaults,
+                  connectorList,
                   defaults: skillDefaults,
                   requestedSessionId,
                   skills: slash.skills,

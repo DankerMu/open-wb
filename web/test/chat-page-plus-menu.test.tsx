@@ -136,6 +136,13 @@ function Bar({ enabled }: { enabled: boolean }) {
         notice: null,
         onToggle: () => undefined,
         toggleable: false,
+        connectors: {
+          names: null,
+          disabled: [],
+          notice: null,
+          onToggle: () => undefined,
+          toggleable: false,
+        },
       }}
     />
   );
