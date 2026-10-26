@@ -315,12 +315,16 @@ describe("Scenario: A project skill link into a hung mount", () => {
     writeSkill(skills, "near", "close");
     writeSkill(join(mount, "shared"), "remote", "behind the mount");
     symlinkSync(join(mount, "shared", "remote"), join(skills, "remote"), "dir");
+    // Sorts after `remote`: a remaining entry of the directory whose real path expired.
+    writeSkill(skills, "zz-late", "after the hung entry");
+    const late = join(skills, "zz-late");
     // Positive control: without a hang the walk reaches the owner root.
     expect(commandNames(await getDirectory(app, "/api/commands", cookie, workspace.id))).toEqual([
       ...BUILTINS,
       "skill:code-review",
       "skill:near",
       "skill:owner-wide",
+      "skill:zz-late",
     ]);
     const hung = hangRealpath("/remote/SKILL.md");
     fsCalls.length = 0;
@@ -359,6 +363,10 @@ describe("Scenario: A project skill link into a hung mount", () => {
     );
     expect(fsCalls.slice(answeredAt)).toEqual([]);
     expect(syncCallsBelow([mount, join(skills, "remote")])).toEqual([]);
+    // The remaining entry is never touched, neither synchronously nor through the async real path.
+    expect(
+      fsCalls.filter((call) => call.path === late || call.path.startsWith(`${late}/`)),
+    ).toEqual([]);
   });
 
   it("yields nothing for the workspace root nor the owner root when <root>/.omp is a link into the mount", async () => {

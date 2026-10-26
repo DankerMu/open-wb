@@ -18,7 +18,7 @@ import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ompAgentDir } from "../src/sessions/omp/process.js";
-import { postPrompt } from "./session-rest-helpers.js";
+import { postPrompt, SESSION_BUSY_ENVELOPE } from "./session-rest-helpers.js";
 import { sessionRow } from "./session-store-helpers.js";
 import {
   createControlledRuntime,
@@ -274,6 +274,26 @@ describe("prompt route classifies with the session's own skills (#813)", () => {
     // Positive control: the same spy sees the scan a `/`-prefixed prompt needs.
     expect(await promptOn(world, DEPLOY, await bound.session())).toBe(DEPLOY);
     expect(spy.mock.calls.length).toBeGreaterThan(0);
+  });
+
+  it("admits one of two `/` prompts racing over the awaited skills read and 409s the other; a running session 409s a later one", async () => {
+    const world = await openWorld();
+    const bound = await openBound(world, "proj");
+    installSkill(world, "deploy", projectSkills(bound.root));
+    const session = await bound.session();
+    const post = (message: string) =>
+      postPrompt(world.fixture.app, session, world.cookie, JSON.stringify({ message }));
+
+    const raced = await Promise.all([post(DEPLOY), post(DEPLOY)]);
+    const later = await post("/todo");
+
+    expect(raced.map((response) => response.statusCode).sort()).toEqual([202, 409]);
+    for (const response of [raced.find((r) => r.statusCode === 409), later]) {
+      expect([response?.statusCode, response?.json()]).toEqual([409, SESSION_BUSY_ENVELOPE]);
+    }
+    expect(world.wire.mock.calls.map(([id, text]) => [id, text])).toEqual([[session, DEPLOY]]);
+    expect(userContents(world, session)).toEqual([DEPLOY]);
+    expect(world.spawns).toHaveLength(0);
   });
 });
 
