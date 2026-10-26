@@ -337,6 +337,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
           retentionDays: DEFAULT_TRASH_RETENTION_DAYS,
         }),
       ...(assembly?.previewLimits === undefined ? {} : { limits: assembly.previewLimits }),
+      mountFiles: mounts,
       mounts: {
         store: mountStore,
         manager: mounts,

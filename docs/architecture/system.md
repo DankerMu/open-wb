@@ -881,7 +881,7 @@ modelRoles:
 
 ### 9.12 远程挂载（S1b，change `s1b-workspace-mounts`）
 
-本节随任务组落地。组 2：配置键与部署前提；组 5：凭证与日志的位置；组 6：在线判据、启停与回滚；组 7：挂载源端点与挂载端点；组 8：宿主不进入挂载。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
+本节随任务组落地。组 2：配置键与部署前提；组 5：凭证与日志的位置；组 6：在线判据、启停与回滚；组 7：挂载源端点与挂载端点；组 8：宿主不进入挂载；组 9：挂载内的文件操作。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
 
 **部署前提**（`server/src/workspaces/mounts/config.ts`）：
 
@@ -942,7 +942,7 @@ modelRoles:
 
 | 入口 | 挂载内路径 |
 |---|---|
-| tree / file / download / archive / dirs / move（`workspaces/rest.ts`、`rest-entries.ts`、`rest-archive.ts`） | 词法判定（`workspaces/mounts/path-rule.ts`，在沙箱判定之后、任何存在性检查之前）：跨挂载移动、移动挂载根 409 `mount_boundary`；其余挂载内操作现一律 409 `mount_offline`，不碰文件系统（#1694）。组 9 起在线挂载经异步适配器、只读挂载 403 `mount_read_only` |
+| tree / file / download / archive / dirs / move（`workspaces/rest.ts`、`rest-entries.ts`、`rest-archive.ts`） | 判定（`workspaces/mounts/path-rule.ts`，在沙箱判定之后、任何存在性检查之前，只读内存登记）：跨挂载移动、移动挂载根 409 `mount_boundary`；离线挂载 409 `mount_offline`、只读挂载的写 403 `mount_read_only`，均不碰文件系统；在线挂载内经异步适配器（见下文「挂载内的文件操作」） |
 | 空间根一层的 `tree`（`workspaces/tree.ts`） | 按名字跳过已登记挂载，不 `lstat`、不列出；挂载根行只来自 `GET …/mounts` |
 | `DELETE …/entries` 与回收目录（`trash.ts`） | 409 `mount_boundary`（含挂载根，同上的词法判定）；挂载只在根下一层、根不能删，回收目录遇不到挂载 |
 | 上传 | 永不在挂载内（`uploads` 是保留名） |
@@ -953,14 +953,23 @@ modelRoles:
 | 项目技能（`sessions/slash-commands.ts`） | `<D>/.omp/skills` 与各条目 `SKILL.md` 的 real path 经 `fs/promises`，每次 10 s 期限，超期该条目（或该 `D`）无结果、本次列举停止 |
 | 快照 `take`（`workspaces/snapshots.ts`） | 根一层的已登记挂载名不读元数据、不遍历，记入 `skipped`（`reason: "mount"`，名字在排除名单里也是 `mount`）；未登记的外部挂载仍按 `dev` 规则 |
 | 还原（`workspaces/snapshots-restore.ts`） | 根一层的已登记挂载名不读取、不进入、不删除、不建出，记入返回的 `skipped`（`reason: "mount"`），不计入 `removed` |
-| 挂载内的 `dirs`（`ensureSharedDir`） | 不调用；适配器 `mkdir`，不 `chmod`（组 9） |
+| 挂载内的 `dirs`（`ensureSharedDir`） | 不调用；适配器 `mkdir`，不 `chmod` |
 | 会话截图目录比对（`sessions/screenshot-diff.ts`） | `screenshots` 是保留名，永不是挂载点；打开之前先不跟随地 `lstat`，符号链接或不是目录按缺失、不打开 |
 | 仓库根标记（`sessions/omp/repo-root-marker.ts`） | 只碰 `<cwd>/.git`：`.` 开头、不是挂载名，`lstat` 与 `open(O_NOFOLLOW)` 不跟随 |
 | 项目配置文件列表（`sessions/rest-project-config.ts`） | 只 `lstat` 第一段含 `.` 的路径（`.omp/…`、`.claude/…`、`AGENTS.md`），逐级确认真实目录 |
 | 会话 cwd（`sessions/session-cwd.ts`） | 只 `stat` 空间根或属主根本身 |
 
 上界与残余：
-- 挂载内的一个请求至多等 10 s（组 9 的适配器期限）；其它空间与本空间根不受影响，代价只是 libuv 线程池：每个挂起的挂载至多占一个线程、至多 10 s（超期即 SIGKILL rclone 并惰性卸载，卡住的 FUSE 请求随之返回，ADR-0003「2026-10 补充」P9）。
+- 挂载内的一个请求每次文件系统调用至多等 10 s（适配器期限，见下文）；其它空间与本空间根不受影响，代价只是 libuv 线程池：每个挂起的挂载至多占一个线程、至多 10 s（超期即 SIGKILL rclone 并惰性卸载，卡住的 FUSE 请求随之返回，ADR-0003「2026-10 补充」P9）。
 - 文件变更归属与项目技能的 `realpath` 经 omp 放在空间里的符号链接进入挂起的挂载时，同样至多等 10 s、占一个线程；超期只丢弃结果、不判哪个挂载离线（它不知道链接通向哪个挂载），该线程要等探测判离线并惰性卸载之后才放回（≤ 35 s）。它们按每次列举 / 每个事件各占一个，不按挂载合并：同一挂起链接上的并发或重试请求各占一个，libuv 线程池缺省 4 个，几次即可让全服务的 `fs/promises` 与 DNS 排队到惰性卸载为止（仍远好于主线程停摆）。进入挂起的挂载时，一条文件变更事件至多让该会话的回合泵等一个期限（10 s，第一次超期即停止判定该事件），事件次序不变。
 - 先查后用的入口（会话 cwd、项目配置文件列表、截图目录比对）先不跟随地 `lstat`、之后的调用再跟随：两步之间 omp 把条目换成指向挂载内的符号链接，后一步仍会跟随进挂载、卡住主线程。与挂载点检查（D8）同为已接受的 TOCTOU 残余：omp 只能经它自己用户的挂载、要远端挂起且赢下竞态才触发。
 - 挂载内的文件不进回合快照、不可撤回；预览源与会话附件拒绝挂载内路径（浏览器对挂载内的网页、PDF 与办公文档显示 `挂载目录内的文件暂不支持预览，请下载查看`）；omp 在挂载内的文件变更不进文件变更卡。rclone 挂载里不出现符号链接（`local` 不加 `--links` 时跳过源里的链接，`sftp` 由服务端跟随，P13），所以挂载内路径不做 `lstat` 不会放过一个链接。
+
+**挂载内的文件操作**（`server/src/workspaces/mounts/path-rule.ts`、`files.ts`、`fs.ts`，组 9；规格 workspace-mounts「挂载目录内的文件端点」、file-operations「删除到回收目录」「重命名与移动」、workspaces「目录树、新建目录与隔离」）：
+
+- **成员规则**：同上文的词法规则——路径（`path`，或 move 的 `from` / `to`）去掉空段与 `.` 段之后的第一段逐字节等于该空间某个已登记挂载的名字，即在该挂载内，其后没有段即挂载根；`./远端/a.md`、`远端//a.md` 与 `远端/a.md` 同属 `远端`，`远端备份`、`远端旧` 这类只是以挂载名开头的普通目录不受影响。判定只读 manager 的内存登记（名字、在线状态、只读），位置在沙箱判定之后（越界仍是 403 `sandbox_denied` 并审计）、一切存在性检查之前。
+- **判定次序与码**：边界先于离线与只读。`DELETE …/entries` 的目标在任一挂载内（含挂载根）→ 409 `mount_boundary`；`move` 恰一侧在挂载内、两侧在不同挂载、或 `from` 是挂载根 → 409 `mount_boundary`——没有进回收目录，也没有复制回退。然后：挂载不是 `online`（含未配置 `RCLONE_BIN` 时的全部已登记挂载）→ 409 `mount_offline`；`dirs` 与同一挂载内的 `move` 落在只读挂载 → 403 `mount_read_only`。这些拒绝不写 `file.delete` / `file.move` / `dir.create` 审计、不碰文件系统。
+- **支持的操作**恰为 `tree`、`file`（含 Range）、`download`、`archive`、`dirs` 与同一挂载内的 `move`（改名与移动，一次 `rename`，审计同挂载之外）。在线挂载上它们的每一次文件系统调用（`lstat`、`readdir`、`open`、`fstat`、`read`、`close`、`mkdir`、`rename`）只经 manager 持有的异步适配器（`fs/promises`，不用 worker 线程）：每个挂载一个先进先出的闸门、同一时刻至多一个调用，每次调用自拿到闸门起 10 s 期限。超期即该请求 409 `mount_offline`，排队的调用一并 409，manager 立即判该挂载离线（SIGKILL rclone、`fusermount3 -uz`、按退避重挂，与探测失败同一处理）。挂载内的 `dirs` 只 `mkdir` 父目录已在的那一级（父目录缺失 404、已存在 409），不 `chmod`、不经 `ensureSharedDir`：新目录的模式由 rclone 的 `--umask 007` 决定，`0o2770` 只对挂载之外成立。
+- **读与短读**：挂载内的 `file` 与 `download` 打开后对描述符 `fstat` 取大小，`Content-Length`（Range 时为区间长度，文本预览为截断后的长度）按它发出，此后经适配器逐块读、每块一个新缓冲区。读到 EOF 而已发出的字节少于该长度时销毁连接——不补齐、不以完整的 200 / 206 收尾，客户端看到的是中断；`download` 的审计行在打开之后、发送之前写出，中断不撤回。理由：rclone 的描述符不固定 inode 与内容，远端改写会让同一描述符提前 EOF，而 `fstat` 仍报旧大小（ADR-0003「2026-10 补充」P7）。已知限制：同长原地改写时读到的新旧混合内容检测不出来。
+- **保留名**：挂载名不能是 `uploads` 或 `screenshots`，上传（固定写 `uploads/<名>`）与会话截图目录比对因此永不落进挂载。
+- **残余**：在线期间挂载点就是 FUSE 挂载，不能被改名、删除或换成符号链接，挂载内的路径因此不先 `lstat` 挂载点。一个已通过在线判定、在闸门上排队的请求，若其间挂载因探测失败转为离线（适配器超期则排队的调用全部 409，不在此列），它之后的调用发生在惰性卸载之后，挂载点此时是普通目录、omp 可以换掉——与挂载之外各路由的中间分量残余（owner B1）同类。超期之后适配器不再受理该挂载的调用，被拒的 `close` 改为直接关闭句柄（此时 manager 已在 SIGKILL 与惰性卸载，卡住的请求会返回）。

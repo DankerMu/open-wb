@@ -26,6 +26,10 @@
  *
  * One attempt's mechanics (target judgement, credential file, mount point check, spawn, readiness,
  * discarding) are in `attempt.ts`; the probe and the clock in `probe.ts`.
+ *
+ * The manager holds the one asynchronous adapter (`fs.ts`, D21) every file endpoint call inside an online
+ * mount goes through, on the manager's clock. A call past its deadline is the second offline trigger
+ * (D11): the mount goes `offline` at once, exactly as on a failed probe (SIGKILL, lazy unmount, backoff).
  */
 import { join } from "node:path";
 import type { emit } from "../../core/audit/index.js";
@@ -40,6 +44,7 @@ import {
   untilAborted,
 } from "./attempt.js";
 import type { MountSettings } from "./config.js";
+import { createMountFs, type MountFsImpl } from "./fs.js";
 import { type HostResolver, systemResolver } from "./host-policy.js";
 import { SYSTEM_MOUNTINFO } from "./mountinfo.js";
 import {
@@ -99,6 +104,10 @@ export interface MountManagerOptions
   ensureSharedDir?: (absPath: string) => void;
   readyTimeoutMs?: number;
   stopTimeoutMs?: number;
+  /** The file system under the file endpoints' adapter (D21); default `fs/promises`. */
+  mountFs?: MountFsImpl;
+  /** Each adapter call's deadline from taking its mount's gate; default 10 s. */
+  mountFsDeadlineMs?: number;
 }
 
 export interface AttachInput {
@@ -124,6 +133,13 @@ export interface DetachCause {
 }
 
 export type MountStatus = "online" | "offline";
+
+/** What the file endpoints judge a mount by (D16): its id for the adapter, its status, read-only. */
+export interface MountRef {
+  id: string;
+  status: MountStatus;
+  readOnly: boolean;
+}
 
 interface Entry {
   record: MountRecord;
@@ -432,6 +448,20 @@ export function createMountManager(options: MountManagerOptions) {
     }
   };
 
+  /** The adapter's deadline passed on a call in `mountId` (D11 second trigger). Never throws. */
+  const markOffline = (mountId: string): void => {
+    const entry = registry.get(mountId);
+    if (entry !== undefined) {
+      goOffline(entry);
+    }
+  };
+  const mountFs = createMountFs({
+    ...(options.mountFs === undefined ? {} : { fs: options.mountFs }),
+    ...(options.mountFsDeadlineMs === undefined ? {} : { deadlineMs: options.mountFsDeadlineMs }),
+    clock,
+    onOffline: markOffline,
+  });
+
   // ---- attach and detach ----
 
   const attachNow = async (
@@ -679,6 +709,22 @@ export function createMountManager(options: MountManagerOptions) {
 
     statusOf(mountId: string): MountStatus {
       return registry.get(mountId)?.status ?? "offline";
+    },
+
+    /** The file endpoints' adapter (D21): every call inside an online mount goes through it. */
+    fs: mountFs,
+
+    /**
+     * The registered mount `name` of the workspace, or undefined (D16). With the feature off every
+     * registered mount is `offline`: nothing ever brings one up.
+     */
+    mountOf(workspaceId: string, name: string): MountRef | undefined {
+      for (const { record, status } of registry.values()) {
+        if (record.workspaceId === workspaceId && record.name === name) {
+          return { id: record.id, status, readOnly: record.readOnly };
+        }
+      }
+      return undefined;
     },
 
     namesOf(workspaceId: string): ReadonlySet<string> {

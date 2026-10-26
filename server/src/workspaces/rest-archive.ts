@@ -33,19 +33,24 @@
  *   outside the workspace would be listed. Derived from the code; not tested and not prevented.
  * - After the open everything goes through the descriptor: a file cut short meanwhile reads
  *   short, which the listing treats as damage (derived from the code, not tested).
+ *
+ * Inside an online mount the same steps — lstat, the name, open, fstat, the reads, close — go
+ * through the mount's adapter (D16, D21; `mounts/files.ts`).
  */
 import { closeSync, read } from "node:fs";
 import { basename } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import { archiveFormat, listArchive } from "./archive.js";
-import { refuseInMount } from "./mounts/path-rule.js";
+import { closeMountFile, openMountFile, readMountAt, requireMountFile } from "./mounts/files.js";
+import { mountToRead } from "./mounts/path-rule.js";
 import { DEFAULT_PREVIEW_LIMITS } from "./preview.js";
 import { openRegularFile } from "./regular-file.js";
 import {
   currentPrincipal,
   ensureOwnedRoot,
   lstatExisting,
+  mountLookupOf,
   noStoreWorkspaceResponse,
   parsePathQuery,
   type WorkspaceRestDependencies,
@@ -101,9 +106,12 @@ export function registerWorkspaceArchive(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, true);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "read");
-      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
+      const mount = mountToRead(mountLookupOf(dependencies, workspaceId), path);
+      const { fs } = dependencies.mountFiles;
       // Before the name is judged, and so that a directory or a pipe is never opened.
-      if (lstatExisting(absPath)?.isFile() !== true) {
+      if (mount !== undefined) {
+        await requireMountFile(fs, mount.id, absPath);
+      } else if (lstatExisting(absPath)?.isFile() !== true) {
         throw new HttpError("not_found");
       }
       // The resolved entry's name, not the last segment of the request: the resolver skips `.`.
@@ -112,12 +120,25 @@ export function registerWorkspaceArchive(
       if (format === null) {
         throw new HttpError("preview_unsupported");
       }
+      const limits = { maxEntries, now: () => performance.now() };
+      if (mount !== undefined) {
+        const file = await openMountFile(fs, mount.id, absPath);
+        try {
+          return await listArchive(
+            format,
+            name,
+            (position, length) => readMountAt(fs, file, position, length),
+            { ...limits, size: file.size },
+          );
+        } finally {
+          void closeMountFile(fs, file);
+        }
+      }
       const { fd, size } = openRegularFile(absPath);
       try {
         // The size of what was opened, not of what the lstat saw; a bare gz reads nothing.
         return await listArchive(format, name, (position, length) => readAt(fd, position, length), {
-          maxEntries,
-          now: () => performance.now(),
+          ...limits,
           size,
         });
       } finally {

@@ -37,19 +37,27 @@ export function isStructuralAbsence(error: unknown): boolean {
   );
 }
 
+/** The flags of every read route's open: no final symlink followed, no wait on a pipe. */
+export const READ_OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+/** An open with `READ_OPEN_FLAGS` refused because nothing, a symlink or a socket is there. */
+export function isRefusedOpen(error: unknown): boolean {
+  const { code, errno } = error instanceof Error ? (error as NodeJS.ErrnoException) : {};
+  return (
+    isStructuralAbsence(error) ||
+    code === "ELOOP" ||
+    code === "ENXIO" ||
+    // By number: Node has no name for macOS's EOPNOTSUPP and reports "Unknown system error".
+    errno === -osConstants.errno.EOPNOTSUPP
+  );
+}
+
 export function openRegularFile(absPath: string): RegularFile {
   let fd: number;
   try {
-    fd = openSync(absPath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    fd = openSync(absPath, READ_OPEN_FLAGS);
   } catch (error) {
-    const { code, errno } = error instanceof Error ? (error as NodeJS.ErrnoException) : {};
-    if (
-      isStructuralAbsence(error) ||
-      code === "ELOOP" ||
-      code === "ENXIO" ||
-      // By number: Node has no name for macOS's EOPNOTSUPP and reports "Unknown system error".
-      errno === -osConstants.errno.EOPNOTSUPP
-    ) {
+    if (isRefusedOpen(error)) {
       throw new HttpError("not_found");
     }
     throw error;
