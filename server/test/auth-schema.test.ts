@@ -509,6 +509,8 @@ function expectAuthSchema(db: DatabaseSync): void {
     "connectors",
     "experts",
     "models",
+    "mount_sources",
+    "workspace_mounts",
     "workspaces",
   ]);
   expect(businessObjectNames(db, "view")).toEqual([]);

@@ -27,6 +27,7 @@ export const MIGRATION_045 = "045_chat_interleaved_segments.sql";
 export const MIGRATION_046 = "046_models.sql";
 export const MIGRATION_047 = "047_experts_skills.sql";
 export const MIGRATION_048 = "048_connectors.sql";
+export const MIGRATION_049 = "049_workspace_mounts.sql";
 export const TRACKED_MIGRATION_FILENAMES = [
   MIGRATION_0010,
   MIGRATION_002,
@@ -50,6 +51,7 @@ export const TRACKED_MIGRATION_FILENAMES = [
   MIGRATION_046,
   MIGRATION_047,
   MIGRATION_048,
+  MIGRATION_049,
 ] as const;
 export const HISTORY_VIEW = "schema_migration_history";
 export type SqlLineEnding = "\n" | "\r\n" | "\r";
@@ -118,8 +120,9 @@ export const COMPLETE_CATALOG: CatalogSnapshot = {
     [20, MIGRATION_046],
     [21, MIGRATION_047],
     [22, MIGRATION_048],
+    [23, MIGRATION_049],
   ],
-  sequenceRows: [["schema_migrations", 22, "integer"]],
+  sequenceRows: [["schema_migrations", 23, "integer"]],
   triggerNames: [
     "audit_events_no_delete",
     "audit_events_no_update",
