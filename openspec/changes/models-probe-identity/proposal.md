@@ -24,5 +24,5 @@ design.md omitted (compact)：照搬已合入的连接器写法（`server/src/co
 ## Impact
 
 - 规格：model-registry 一条 requirement 修改，不增删 requirement。
-- 代码：`server/src/models/store.ts`、`server/src/models/rest.ts`；用例 `server/test/models-probe.test.ts`、`server/test/models-store.test.ts`（`recordProbe` 直接调用方）。
+- 代码：`server/src/models/store.ts`、`server/src/models/rest.ts`、`server/src/app.ts`（`Registry` 的 `Pick` 去掉 `lookup`）；用例 `server/test/models-probe.test.ts`、`server/test/models-store.test.ts`（`recordProbe` 直接调用方）。
 - 不动：探活判定与摘要规则、审计 detail 形状、PUT 是否复位探活状态（另一裁定，out of scope）、web、连接器侧。

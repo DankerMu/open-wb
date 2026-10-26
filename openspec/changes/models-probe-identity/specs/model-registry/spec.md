@@ -26,3 +26,7 @@
 #### Scenario: 在途期间只改名称
 - **WHEN** 对 `m1` 的探活挂起，其间管理员 `PUT m1` 只改 `name`，随后放行
 - **THEN** 探活应答 200，视图 `probe` 为本次结果；`model.probe` 审计恰 1 条
+
+#### Scenario: 排队的探活读到新上游
+- **WHEN** 对 `m1` 的探活 A 挂起，同一 `m1` 再排一个探活 B，其间管理员 `PUT m1` 把上游换成另一个（新密钥），随后放行 A
+- **THEN** A 应答 200、结果丢弃、无审计；B 向新上游发出恰一次 `GET /models`（bearer 为新密钥），视图 `probe` 为 B 的结果，`model.probe` 审计恰 1 条
