@@ -82,6 +82,13 @@ const seedOne = (store: ReturnType<typeof createModelStore>) => {
   store.create({ id: "m2" });
 };
 
+/** The probe target of a row the test knows exists. */
+function targetOf(store: ReturnType<typeof createModelStore>, id: string) {
+  const target = store.probeTarget(id);
+  if (target === undefined) throw new Error(`no row ${id}`);
+  return target;
+}
+
 describe("migration 046 models table", () => {
   it("is tracked right after 045 and creates the D3 columns and the partial unique index", () => {
     expect(
@@ -471,8 +478,9 @@ describe("remove, setDefault and recordProbe", () => {
   it("recordProbe writes the three probe columns, keeps updatedAt and returns the new row", () => {
     const { store } = fresh();
     seedOne(store);
+    const { identity } = targetOf(store, "m1");
     vi.setSystemTime(T0 + 50);
-    const row = store.recordProbe("m1", {
+    const row = store.recordProbe("m1", identity, {
       status: "failed",
       message: "HTTP 401：bad key",
       at: T0 + 40,
@@ -482,11 +490,8 @@ describe("remove, setDefault and recordProbe", () => {
       probe: { status: "failed", at: T0 + 40, message: "HTTP 401：bad key" },
     });
     expect(row.updatedAt).toBe(T0);
-    expect(store.recordProbe("m1", { status: "ok", message: null, at: T0 + 60 }).probe).toEqual({
-      status: "ok",
-      at: T0 + 60,
-      message: null,
-    });
+    const again = store.recordProbe("m1", identity, { status: "ok", message: null, at: T0 + 60 });
+    expect(again.probe).toEqual({ status: "ok", at: T0 + 60, message: null });
   });
 
   it("unknown ids: get and routeOf undefined, every write 404 with nothing changed", () => {
@@ -498,8 +503,9 @@ describe("remove, setDefault and recordProbe", () => {
     expectRefused(db, "not_found", () => store.update("nope", { ...BODY, upstream: null }));
     expectRefused(db, "not_found", () => store.remove("nope"));
     expectRefused(db, "not_found", () => store.setDefault("nope"));
+    const identity = { createdAt: T0, upstreamBaseUrl: null, upstreamApiKey: null };
     expectRefused(db, "not_found", () =>
-      store.recordProbe("nope", { status: "ok", message: null, at: 1 }),
+      store.recordProbe("nope", identity, { status: "ok", message: null, at: 1 }),
     );
   });
 });
@@ -516,7 +522,12 @@ describe("within: the caller's step inside the write transaction", () => {
     ["update", (s, w) => s.update("m2", { ...BODY, upstream: null }, w), "m2"],
     ["remove", (s, w) => s.remove("m2", w), "m2"],
     ["setDefault", (s, w) => s.setDefault("m2", w), "m2"],
-    ["recordProbe", (s, w) => s.recordProbe("m2", { status: "ok", message: null, at: 7 }, w), "m2"],
+    [
+      "recordProbe",
+      (s, w) =>
+        s.recordProbe("m2", targetOf(s, "m2").identity, { status: "ok", message: null, at: 7 }, w),
+      "m2",
+    ],
   ];
   it.each(writes)(
     "%s calls it once inside the transaction and rolls back when it throws",
@@ -680,7 +691,8 @@ describe("list, toCatalog and secrets", () => {
     expect(store.secrets().filter((entry) => entry === KEY)).toEqual([KEY]);
   });
 
-  it("the key is readable only through routeOf and secrets", () => {
+  // `probeTarget` is the third exit (the probe route only): its return value is not pushed below.
+  it("the key is readable only through routeOf, secrets and probeTarget", () => {
     const { db, store } = fresh();
     store.seedIfEmpty(resolveModelCatalog({}), UP);
     const outputs: unknown[] = [];
@@ -689,7 +701,11 @@ describe("list, toCatalog and secrets", () => {
     outputs.push(store.update("m2", { ...BODY, upstream: { baseUrl: UP.baseUrl } }, within));
     outputs.push(
       store.setDefault("m2", within),
-      store.recordProbe("m2", { status: "ok", message: null, at: 1 }),
+      store.recordProbe("m2", targetOf(store, "m2").identity, {
+        status: "ok",
+        message: null,
+        at: 1,
+      }),
     );
     outputs.push(store.list(), store.get("m2"), store.toCatalog(store.list()));
     const failures = [
@@ -710,6 +726,7 @@ describe("list, toCatalog and secrets", () => {
     expect(text).not.toContain(KEY);
     expect(text).not.toContain("apiKey");
     expect(store.routeOf("m2")?.apiKey).toBe(KEY);
+    expect(store.probeTarget("m2")?.upstream?.apiKey).toBe(KEY);
     expect(store.secrets()).toContain(KEY);
     expect(rawRows(db)).toHaveLength(2);
   });

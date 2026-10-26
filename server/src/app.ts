@@ -408,7 +408,7 @@ function upstreamRedactor(
 function registerModelAdmin(
   app: FastifyInstance,
   db: DatabaseSync,
-  registry: Pick<ModelRegistry, "refresh" | "lookup" | "secrets">,
+  registry: Pick<ModelRegistry, "refresh" | "secrets">,
   assembly: AssemblyDependencies | undefined,
 ): void {
   registerModels(app, {
