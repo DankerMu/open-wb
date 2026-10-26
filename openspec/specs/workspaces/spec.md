@@ -127,7 +127,7 @@
 - **THEN** 第一次列表恰含 `项目A`，每个对象恰五键；第二次列表依次含 `项目A` 与 `调研资料`（其 `dir` 为 `tmp-<T>`）
 
 ### Requirement: 目录树、新建目录与隔离
-`GET /api/workspaces/:id/tree?path=<rel>` SHALL 经 `resolve(op=list)` 后只列举**该一层**：`{path, entries:[{name, type:'dir'|'file', size, mtime}]}`，目录在前、同类按 UTF-8 字节序，跳过 symlink 与非普通文件；`path` 缺省空串，服务端按 URL 解码后的字符串交给 `resolve`（不做额外规范化）；目标不存在或非目录 → 404。`POST /api/workspaces/:id/dirs` body `{path:string}`（≤16 KiB，归属集）经 `resolve(op=mkdir)`：父目录不存在或非目录 → 404，目标已存在 → 409 `conflict`，成功创建（`0o2770`）+ `emit(dir.create, title "新建目录 <path>")` → 201 `{path}`。属他人或不存在的 `:id` SHALL 对全部端点一律 404 `not_found`。越界路径 → 403 `sandbox_denied` + 审计（sandbox-core）。全部响应 `no-store`。
+`GET /api/workspaces/:id/tree?path=<rel>` SHALL 经 `resolve(op=list)` 后只列举**该一层**：`{path, entries:[{name, type:'dir'|'file', size, mtime}]}`，目录在前、同类按 UTF-8 字节序，跳过 symlink 与非普通文件；`path` 缺省空串，服务端按 URL 解码后的字符串交给 `resolve`（不做额外规范化）；目标不存在或非目录 → 404。`POST /api/workspaces/:id/dirs` body `{path:string}`（≤16 KiB，归属集）经 `resolve(op=mkdir)`：父目录不存在或非目录 → 404，目标已存在 → 409 `conflict`，成功创建（`0o2770`）+ `emit(dir.create, title "新建目录 <path>")` → 201 `{path}`。属他人或不存在的 `:id` SHALL 对全部端点一律 404 `not_found`。越界路径 → 403 `sandbox_denied` + 审计（sandbox-core）。路径在该空间的已登记挂载内（第一段规则见 workspace-mounts「挂载目录内的文件端点」）时，`tree` 与 `dirs` SHALL 在 `resolve` 之后、存在性检查之前先判定：挂载离线 → 409 `mount_offline`；`dirs` 的路径在只读挂载内 → 403 `mount_read_only`；均不访问文件系统、不写 `dir.create` 审计；通过时在线挂载内的文件系统调用经 workspace-mounts「宿主不同步进入挂载」的异步适配器；挂载内的 `dirs` 只由适配器 `mkdir`、不 `chmod`，新目录的模式由挂载决定，上文的 `0o2770` 只对挂载之外成立。空间根一层的 `tree` SHALL NOT 列出该空间已登记挂载的挂载点（按名字跳过、不对其 `lstat`）（change s1b-workspace-mounts）。全部响应 `no-store`。
 
 #### Scenario: 懒加载列举
 - WHEN 空间根下有 `out/`（含 `a.md`）、`b.txt`、一个 symlink 与一个 FIFO，请求 `tree`
@@ -136,6 +136,10 @@
 #### Scenario: 新建目录
 - WHEN `POST dirs {path:"out/新目录"}` 两次，再 `POST dirs {path:"missing/x"}`、`POST dirs {path:"../x"}`
 - THEN 依次 201、409 `conflict`、404 `not_found`、403 `sandbox_denied`（后者写审计）；`out/新目录` mode `0o2770`
+
+#### Scenario: 离线与只读挂载
+- **WHEN** 空间有离线挂载 `远端` 与在线只读挂载 `参考`；请求 `tree`、`tree?path=远端`、`tree?path=远端/sub`、`POST dirs {path:"远端/新"}`、`tree?path=参考`、`POST dirs {path:"参考/新"}`
+- **THEN** 根一层的 `entries` 不含 `远端` 与 `参考`；`tree?path=远端` 与 `tree?path=远端/sub` 都是 409 `mount_offline`；`POST dirs` 到 `远端/新` 为 409 `mount_offline`；`tree?path=参考` 为 200 并列出挂载内容；`POST dirs` 到 `参考/新` 为 403 `mount_read_only`；两次被拒的 `dirs` 都没有目录被建出、没有 `dir.create` 审计
 
 ### Requirement: 文件预览
 `GET /api/workspaces/:id/file?path=<rel>` SHALL 经 `resolve(op=read)` 后：目标不存在或不是普通文件（`lstat`，不跟随符号链接）→ 404，不打开任何东西。随后 SHALL 以「预览分类元数据与有界字节流」的 `openRegularFile` 打开目标：`lstat` 之后被换成符号链接、命名管道、目录、套接字或已被删除的目标同样 → 404 `not_found`（不是 `sandbox_denied`、不写审计），描述符已关闭、零字节读出；此后分类、文本上限、截断头、`X-Workbuddy-Size`、`Content-Length` 与 `Range` 区间用的大小 SHALL 全部是打开那一刻 `fstat` 的 `size`，正文从该描述符读出——`lstat` 之后被截短或追加的文件按打开的 inode 应答，声明的长度与发出的字节一致。分类抛出（415 / 413）时 SHALL 关闭该描述符、不发送任何正文：已知扩展名的 415 / 413 零字节读出；嗅探后得到 415 时读出只限那至多 8192 字节。已知扩展名的文件因此每次请求恰被打开一次（为流），未知扩展名的嗅探 SHALL 从同一个描述符读前至多 8192 字节、不再按路径二次打开。打开之后路径被删除或替换，不影响本次响应：正文、`Content-Length` 与 `X-Workbuddy-Size` 仍来自已打开的 inode（change sandbox-boundary-closure）。随后按「预览分类元数据与有界字节流」判定；仅当文件名不在该条文表格的任何一行、也不在「由别处提供」的集合里时，路由 SHALL 先读取文件的前至多 8192 字节交给 `sniffText`，把结果作为 `sniffedText` 传给分类器——这是本路由在分类之前唯一的正文读取，已知扩展名的文件不发生。分类抛出的 `preview_unsupported` → 415，`preview_too_large` → 413，二者都不发送任何正文。

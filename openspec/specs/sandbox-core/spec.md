@@ -6,7 +6,7 @@ Define the app-server sandbox boundary: metadata-only relative-path resolution r
 ## Requirements
 
 ### Requirement: resolve 契约与逃逸向量
-`core/sandbox` SHALL 提供纯函数 `resolve(root, relPath, op)`：`relPath` 为 `/` 分隔的相对路径（空串表示根），`op ∈ {read, list, mkdir, write, delete, move}`（`delete` 与 `move` 由 change s1f-files-page 加入）。它 SHALL 在以下任一条件下返回 `{ok:false, reason}`：`relPath` 含 NUL 字节；以 `/` 开头；任一分量为 `..`；规范化后的目标不满足边界匹配 `target === realpath(root) || target.startsWith(realpath(root) + "/")`；从 root 起任一**已存在**分量经 `lstat` 为 symbolic link（不跟随任何 symlink）。否则返回 `{ok:true, absPath}`；`op` 为 `mkdir`、`write`、`delete` 或 `move` 时 SHALL 额外要求最后一段非 `.`/`..`、不含反斜杠、非空——空串（空间根本身）因此对这四种 `op` 被拒绝，根不能被删除、移动或作为移动的目标。`op=write` 表示调用方将在目标位置创建一个文件（本 change 的文件上传）；它的词法与边界规则与 `mkdir` 完全相同，同样不判定目标或其父目录是否存在、是否为目录——那由调用方在授权之后判定。其它 change 需要写文件的解析时 SHALL 复用 `op=write`，不另立同义的 op。`op=delete` 与 `op=move` 表示调用方将把目标条目移走或改名（file-operations；移动的源与目标各解析一次，都用 `move`），它们的词法与边界规则同样与 `mkdir` 完全相同，目标是否存在、是什么类型由调用方在授权之后判定；s1f-files-page 不使用 `op=write`。函数 SHALL 不创建、不读取目标内容。
+`core/sandbox` SHALL 提供纯函数 `resolve(root, relPath, op)`：`relPath` 为 `/` 分隔的相对路径（空串表示根），`op ∈ {read, list, mkdir, write, delete, move}`（`delete` 与 `move` 由 change s1f-files-page 加入）。它 SHALL 在以下任一条件下返回 `{ok:false, reason}`：`relPath` 含 NUL 字节；以 `/` 开头；任一分量为 `..`；规范化后的目标不满足边界匹配 `target === realpath(root) || target.startsWith(realpath(root) + "/")`；从 root 起任一**已存在**分量经 `lstat` 为 symbolic link（不跟随任何 symlink）。否则返回 `{ok:true, absPath}`；`op` 为 `mkdir`、`write`、`delete` 或 `move` 时 SHALL 额外要求最后一段非 `.`/`..`、不含反斜杠、非空——空串（空间根本身）因此对这四种 `op` 被拒绝，根不能被删除、移动或作为移动的目标。`op=write` 表示调用方将在目标位置创建一个文件（本 change 的文件上传）；它的词法与边界规则与 `mkdir` 完全相同，同样不判定目标或其父目录是否存在、是否为目录——那由调用方在授权之后判定。其它 change 需要写文件的解析时 SHALL 复用 `op=write`，不另立同义的 op。`op=delete` 与 `op=move` 表示调用方将把目标条目移走或改名（file-operations；移动的源与目标各解析一次，都用 `move`），它们的词法与边界规则同样与 `mkdir` 完全相同，目标是否存在、是什么类型由调用方在授权之后判定；s1f-files-page 不使用 `op=write`。函数 SHALL 不创建、不读取目标内容。（change s1b-workspace-mounts）`resolve` 另接受可选的第四个参数 `mountNames`（该 root 下已登记挂载的名字集合，缺省为空集）。路径的**第一段**定义为把 `relPath` 按 `/` 分割、去掉空段与 `.` 段之后的第一个分量（`core/sandbox` 导出这个函数，workspace-mounts 的挂载判定用同一个）。第一段属于 `mountNames` 时，`resolve` SHALL NOT 对该段及其下的任何分量做 `lstat` 或其它文件系统调用，NUL、绝对路径、`..`、末段与边界规则照旧，通过时返回 `{ok:true, absPath, mount:<该名字>}`，`absPath` 是 `realpath(root)` 与各分量的词法拼接；其余路径的行为与返回值不变（不带 `mount` 键）。调用方 SHALL 在以这样的 `absPath` 访问文件系统之前经 workspace-mounts「挂载目录内的文件端点」「宿主不同步进入挂载」判定。
 
 #### Scenario: 逃逸向量全拒
 - WHEN 对临时 root 分别 resolve `../x`、`a/../../x`、`/etc/passwd`、含 NUL 字节的 `a<NUL>b`、指向 root 外的 symlink 文件、symlink 目录下的子路径、悬空 symlink、以及 root 为 `<tmp>/a` 时的 `../ab/x`
@@ -32,6 +32,10 @@ Define the app-server sandbox boundary: metadata-only relative-path resolution r
 - **WHEN** 以 `op=delete` 与 `op=move` 分别 resolve `../x`、`a/../../x`、`/etc/passwd`、含 NUL 字节的路径、指向 root 外的 symlink 文件、symlink 目录下的子路径、悬空 symlink，以及空串
 - **THEN** 每一个都返回 `ok:false` 且 `reason` 非空；文件系统没有任何条目被新增、改名或删除
 
+#### Scenario: 挂载名分量不被检查
+- **WHEN** 临时 root 下 `远端` 是一个指向 root 外目录的符号链接（若被 `lstat` 即被拒），以 `mountNames = {远端}` 分别 resolve `远端`、`远端/a/b.md`、`./远端/a`、`远端//a`（`op=read`）与 `远端/a`（`op=move`），再 resolve `远端/../x`、`远端/a/`（`op=mkdir`）与 `远端备份/a`（`远端备份` 是另一个指向 root 外的符号链接）；另以空的 `mountNames` resolve `远端/a`
+- **THEN** 前五个返回 `ok:true`、`mount` 为 `远端`、`absPath` 为 `<realpath(root)>/远端` 之下的词法拼接；`远端/../x`、`远端/a/` 与 `远端备份/a` 返回 `ok:false`；以空集 resolve 的 `远端/a` 照旧因符号链接返回 `ok:false`；文件系统无任何新增条目
+
 ### Requirement: 共享目录权限位
 `ensureSharedDir(absPath)` SHALL 递归创建目录，并对本次**新建**的每一级目录 `chmod 0o2770`（setgid + 属主/组 rwx，其他人无权限）；已存在目录的权限 SHALL 不改动；不调用 chown、不改进程 umask。`SANDBOX_ROOT/<ownerId>` 与每个工作空间根 SHALL 经它创建；`SANDBOX_ROOT` 自身不由它建立——它在服务启动时经「沙箱根目录」的 `ensureSandboxRoot` 建出并校正为 `0o3770`，惰性路径再经本函数时它已存在、不被改动（只有不经启动入口的直接调用方——测试装配与直接调用 `spawnOmp`——仍可能由本函数以 `0o2770` 建出根）；`OMP_STATE_DIR` 下的目录不经它，而经「托管目录权限位」的 `ensureOwnedDir`（omp-runtime「OMP_STATE_DIR 托管布局」）。
 
@@ -44,7 +48,7 @@ Define the app-server sandbox boundary: metadata-only relative-path resolution r
 - THEN `u1` 与 `u1/ws` 为 `0o2770`，根仍为 `0o3770`
 
 ### Requirement: 沙箱 facade 与拒绝审计
-`createSandbox({rootOf,audit})` SHALL expose synchronous `resolve(principal,workspaceId,relPath,op)` returning the permitted absolute path and the existing `ensureSharedDir(absPath)`. The rootOf port SHALL be core-owned and receive the supplied principal unchanged; its synchronous result SHALL be absolute root or null. core/sandbox SHALL NOT import feature modules. A null root SHALL throw canonical HttpError(not_found) before path inspection and SHALL NOT emit audit. A rejected underlying resolve SHALL synchronously complete `audit.emit({kind:"sandbox.reject",actorId:principal.id,workspaceId,title:"越界访问被沙箱拦截",detail:{relPath,op,reason}})` before throwing canonical HttpError(sandbox_denied). The audit port SHALL use the existing synchronous numeric-returning core/audit event contract. Audit/lookup errors SHALL propagate unchanged with no successful path or filesystem mutation; generic HTTP failure mapping belongs to the later route integration.
+`createSandbox({rootOf,audit})` SHALL expose synchronous `resolve(principal,workspaceId,relPath,op)` returning the permitted absolute path and the existing `ensureSharedDir(absPath)`. The rootOf port SHALL be core-owned and receive the supplied principal unchanged; its synchronous result SHALL be absolute root or null. core/sandbox SHALL NOT import feature modules. A null root SHALL throw canonical HttpError(not_found) before path inspection and SHALL NOT emit audit. A rejected underlying resolve SHALL synchronously complete `audit.emit({kind:"sandbox.reject",actorId:principal.id,workspaceId,title:"越界访问被沙箱拦截",detail:{relPath,op,reason}})` before throwing canonical HttpError(sandbox_denied). The audit port SHALL use the existing synchronous numeric-returning core/audit event contract. Audit/lookup errors SHALL propagate unchanged with no successful path or filesystem mutation; generic HTTP failure mapping belongs to the later route integration.（change s1b-workspace-mounts）`createSandbox` 另接受可选端口 `mountNamesOf(workspaceId)`：同步返回该空间已登记挂载的名字集合，缺省视为空集；facade 在 rootOf 返回非 null 之后调用它，并把结果作为 `mountNames` 交给 `resolve`；返回值仍只是绝对路径（调用方经同一个第一段函数判定挂载成员）。该端口抛出的错误 SHALL 原样传播，不放行、不写审计。facade 另暴露只读的 `mountNamesOf(workspaceId)`，原样转交该端口的结果（未给端口时为空集），供经 facade 取路径的各入口（根层 `tree`、预览源、会话附件、撤回、文件变更归属）取同一来源的挂载名。
 
 #### Scenario: 不可见根先于路径检查
 - WHEN rootOf returns null and the requested relPath is an escape attempt
@@ -65,6 +69,10 @@ Define the app-server sandbox boundary: metadata-only relative-path resolution r
 - THEN the caller receives that same error rather than sandbox_denied or a successful path, and filesystem state remains unchanged
 - WHEN rootOf throws a sentinel error
 - THEN that same error propagates and no audit event or path side effect occurs
+
+#### Scenario: 挂载名端口
+- **WHEN** `mountNamesOf` 对该空间返回 `{远端}`、`远端` 是若被 `lstat` 即被拒的符号链接，facade resolve `远端/a.md`；另一例 `mountNamesOf` 抛出哨兵错误；再一例不传该端口而 resolve 同一路径
+- **THEN** 第一例返回 `<realpath(root)>/远端/a.md`、不写 `sandbox.reject`；第二例调用方收到同一个哨兵错误，没有审计、没有路径放行；第三例照旧写一条 `sandbox.reject` 并抛 `sandbox_denied`
 
 ### Requirement: 托管目录权限位
 `core/sandbox/dirs.ts` SHALL 导出同步的 `ensureOwnedDir(absPath, mode)`：以非递归 `mkdir` 创建 `absPath`（`EEXIST` 不是错误，父目录缺失是错误），随后 `lstat` 它并要求它是目录（符号链接与其它类型一律拒绝）且 `uid` 等于本进程 effective uid；`mode & 0o7777` 不等于 `mode` 参数时 `chmod` 到该值，再次 `lstat` 并要求精确相等（setgid 被内核静默丢弃——例如本进程不在该目录的组里——同样是失败）。任何一步不满足 SHALL 抛出 `Error`，其 message 含该路径与期望的八进制 mode，不含环境变量值。它 SHALL NOT chown、不改进程 umask、不跟随符号链接、不触碰 `absPath` 以外的路径。与 `ensureSharedDir` 的区别是「每次校正到精确值并校验归属」而不是「只给新建分量设位」。
