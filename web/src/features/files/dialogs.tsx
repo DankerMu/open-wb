@@ -113,6 +113,8 @@ type DirectoryFieldProps = {
 
 type CreationDialogProps = PropsWithChildren<{
   title: string;
+  /** 加在对话框内容上的类（`挂载目录` 的表单较高：限高并滚动）。 */
+  className?: string;
   /** 提交按钮的字样，缺省 `创建`。 */
   submitLabel?: string;
   /** 为真时提交按钮禁用（没有可提交的内容）；请求挂起期间它本来就禁用。 */
@@ -146,12 +148,13 @@ const SELECT =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30";
 
 /**
- * 创建、重命名与移动对话框共用的外框：标题、表单、挂起说明、错误与 `取消` / 提交按钮（`创建`、`重命名`、`移动`）。
+ * 创建、重命名、移动与挂载（`mount-dialog.tsx`）对话框共用的外框：标题、表单、挂起说明、错误与 `取消` / 提交按钮（`创建`、`重命名`、`移动`）。
  * Escape、右上 `关闭`、遮罩点击都等同 `取消`（挂起期即取消等待，不锁关闭）；取消类关闭后焦点还给
  * `returnFocus`。Enter 走表单的原生提交，本文件不写键盘处理。
  */
-function CreationDialog({
+export function CreationDialog({
   children,
+  className,
   error,
   initialFocus,
   onCancel,
@@ -189,6 +192,7 @@ function CreationDialog({
       <DialogContent
         aria-describedby={undefined}
         aria-modal="true"
+        className={className}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           returnFocus.current?.focus({ preventScroll: true });

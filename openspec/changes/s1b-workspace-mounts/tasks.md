@@ -153,11 +153,12 @@ Width exception: 首刀改共享测试夹具与六个内联请求序列断言（
 
 ## 11. 前端：挂载对话框与走查（workspace-mounts「挂载对话框」；files-web「工作空间页」的 `新建` 菜单）
 
-- [ ] 11.1 核对 Context：组 10 合入后的 `api-mounts.ts`、`use-mounts.ts` 与 `mount-roots.tsx`、`columns.tsx` 的 `新建` 菜单、拷入层 `select`（#1651）与 `switch`（#1662 或 #1664 中先合入的一组拷入；`web/src/components/ui/switch.tsx` 存在即可）、`web/e2e/ui-walk-files.ts`、`.github/workflows/ci.yml` 的 ui-walk job（:105 起，未设 `RCLONE_BIN`）。
-- [ ] 11.2 测试先行：新 `web/test/files-mount-dialog.test.tsx`（假 `ApiClient`）：「入口随开关」「提交与失败就地显示」「本地校验与服务器目录」（含管理员五键视图一例）、名称 `uploads` 与 `screenshots` 各显示 `该名称已保留` 且不发请求、`aria-modal` 与初始焦点、请求中禁用与 `取消` 中止、关闭后凭证字段清空、地址与 Web Storage 无私钥哨兵、无 Toast；files-web 的「有挂载时的菜单与空根」菜单部分。验证：`npm test --workspace web -- files-mount-dialog`。
-- [ ] 11.3 新 `web/src/features/files/mount-dialog.tsx`；`columns.tsx` 加可选 `挂载目录` 项；`api-mounts.ts` 加 `createMount` 与 `listMountSources`。验证：11.2 全绿、typecheck、size-guard。
-- [ ] 11.4 `make ui-walk` 文件页一步（`web/e2e/ui-walk-files.ts`）只覆盖挂载关闭：CI 现有 ui-walk job（不设 `RCLONE_BIN`）下 `新建` 菜单没有 `挂载目录`。挂载开启的走查不进 CI（开启要求 `/dev/fuse` 与 `fusermount3`，一个服务也不能同时处于开、关两态）：在测试主机上以挂载开启的服务手工走一遍——打开对话框、以主机 `localhost` 提交、对话框内出现 `该主机不允许挂载`、取消后没有新增挂载根行——记为验收清单文件节的一条 FL 行，结论 `待签`。验证：CI `make ui-walk` 绿；`web/test/functional-checklist.test.ts`。
-- [ ] 11.5 验收清单文件节新增 FL 行：经对话框挂载 SFTP（密码与私钥各一）、SMB、管理员登记的服务器目录；错误凭证就地显示 `挂载失败，请检查主机、路径与凭证`；结论 `待签`。验证：`web/test/functional-checklist.test.ts`。
+- [x] 11.1 核对 Context：组 10 合入后的 `api-mounts.ts`、`use-mounts.ts` 与 `mount-roots.tsx`、`columns.tsx` 的 `新建` 菜单、拷入层 `select`（#1651）与 `switch`（#1662 或 #1664 中先合入的一组拷入；`web/src/components/ui/switch.tsx` 存在即可）、`web/e2e/ui-walk-files.ts`、`.github/workflows/ci.yml` 的 ui-walk job（:105 起，未设 `RCLONE_BIN`）。
+- [x] 11.2 测试先行：新 `web/test/files-mount-dialog.test.tsx`（假 `ApiClient`）：「入口随开关」「提交与失败就地显示」「本地校验与服务器目录」（含管理员五键视图一例）、名称 `uploads` 与 `screenshots` 各显示 `该名称已保留` 且不发请求、`aria-modal` 与初始焦点、请求中禁用与 `取消` 中止、关闭后凭证字段清空、地址与 Web Storage 无私钥哨兵、无 Toast；files-web 的「有挂载时的菜单与空根」菜单部分。验证：`npm test --workspace web -- files-mount-dialog`。
+- [x] 11.3 新 `web/src/features/files/mount-dialog.tsx`；`columns.tsx` 加可选 `挂载目录` 项；`api-mounts.ts` 加 `createMount` 与 `listMountSources`。验证：11.2 全绿、typecheck、size-guard。
+- [x] 11.4 `make ui-walk` 文件页一步（`web/e2e/ui-walk-files.ts`）只覆盖挂载关闭：CI 现有 ui-walk job（不设 `RCLONE_BIN`）下 `新建` 菜单没有 `挂载目录`。挂载开启的走查不进 CI（开启要求 `/dev/fuse` 与 `fusermount3`，一个服务也不能同时处于开、关两态）：在测试主机上以挂载开启的服务手工走一遍——打开对话框、以主机 `localhost` 提交、对话框内出现 `该主机不允许挂载`、取消后没有新增挂载根行——记为验收清单文件节的一条 FL 行，结论 `待签`。验证：CI `make ui-walk` 绿；`web/test/functional-checklist.test.ts`。
+- [x] 11.5 验收清单文件节新增 FL 行：经对话框挂载 SFTP（密码与私钥各一）、SMB、管理员登记的服务器目录；错误凭证就地显示 `挂载失败，请检查主机、路径与凭证`；结论 `待签`。验证：`web/test/functional-checklist.test.ts`。
+  - 开工核对补记（#1699）：组 11 落地，11.1–11.5 勾选（11.4 / 11.5 的测试主机手工走查为 FL-46…51 `待签`，走查结果另记）。新 `mount-dialog.tsx`、`mount-input.ts`（本地校验与请求体，纯函数）；`api-mounts.ts` 加 `createMount`（只认 201、严格解析）与 `listMountSources`；对话框状态与 `create` 在 `use-mounts.ts`，新挂载根行由 `mount-roots.tsx` 认领一次（展开 + 焦点，StrictMode 下仍一次）；`workspace-browser.tsx` 798。实现取定：入口 `onMountDirectory={onNewWorkspace && mounts.openCreate}`——与 `新建工作空间` 同为文件页专用（D18）；`正在连接…` 是对话框内 `role="status"` 行，按钮文字不变、禁用；名称、主机、端口、域去首尾空白，路径与凭证原样发送；空端口 / 域不发键；挂载源只在首次选 `服务器目录` 时请求；201 后先插入视图再重取。spec 未给文案、实现取定（#1798 评审改定并写进 spec / design D18）：名称超 64 字符 `名称不能超过 64 个字符`；SMB 路径缺共享名（`/`、`//share`）`请填写共享名与目录，如 /共享名/目录`；本次对话框发出过 `POST` 后的 `取消` 重取一次 `mounts`（新根行不展开不取焦点）；创建后重取失败或下一次重取开始即清掉待认领的新挂载；切换协议清掉旧的本地校验提示；挂载源读取中 `正在读取服务器目录…`；读取失败在对话框 alert 显示信封 message 并禁用提交。测试接缝沿用组 10（真实 `createApiClient` + `fetch` 替身）。ui-walk：`chooseNewFolderWithMountsOff` 先经接口确认 `enabled:false` 再断言菜单。残余：卸载后同名新建，新根行显示旧目录缓存（与 #1797 同类）。
 
 Suggested fixture level: expanded - 用户录入凭证的表单（credentials 触发项），尽管服务端契约已由组 7 钉住。
 Minimal mergeable slice: atomic - 菜单项、对话框与提交是同一条组件用例路径；菜单项没有对话框就是占位。
@@ -179,7 +180,7 @@ Width exception: 验证分 CI（报告 skipped）与测试主机签收运行两�
 
 - [ ] 13.1 核对 Context：#1675 合入后的 `web/src/features/center/tabs.ts`、中心「连接器」tab 的列表、对话框与删除确认写法、`useEscapeFallback`；组 10 合入后的 `web/src/lib/api-mounts.ts`（若 13 先于 10B 合入则新建该文件，只放挂载源三个函数与 `SourceView` 的管理员视图解析）；7A 的端点视图与错误码。
 - [ ] 13.2 测试先行：新 `web/test/center-mount-sources.test.tsx`（假 `ApiClient`）：「登记与删除」「就地失败与空态」（含普通用户被导航到第一个可见 tab、不发 `GET /api/mount-sources`）、客户端校验（名称与路径规则）；`web/test/center*.test.tsx` 里「管理员与普通用户」的 tab 条断言改为五项 / 三项。验证：`npm test --workspace web -- center`。
-- [ ] 13.3 `tabs.ts` 加 `mount-sources` 一项；新 `web/src/features/center/mount-sources-tab.tsx`（列表、登记对话框、删除确认、空态）；`api-mounts.ts` 加 `listMountSources` / `createMountSource` / `deleteMountSource`。验证：13.2 全绿、`make check`。
+- [ ] 13.3 `tabs.ts` 加 `mount-sources` 一项；新 `web/src/features/center/mount-sources-tab.tsx`（列表、登记对话框、删除确认、空态）；`api-mounts.ts` 加 `createMountSource` / `deleteMountSource`（`listMountSources` 已随 #1699 落地，返回两种视图都能解析的 `MountSourceList`，本组用它的 `view:"admin"` 分支，不另写解析器）。验证：13.2 全绿、`make check`。
 - [ ] 13.4 验收清单新增一行（以合入时末号续编）：管理员在中心「挂载源」登记服务器目录、普通用户在挂载对话框里看到并挂载它、管理员删除后该挂载被卸载；结论 `待签`。验证：`web/test/functional-checklist.test.ts`。
 
 Suggested fixture level: compact - 一个前端 tab，服务端不变；风险在 tab 表次序与普通用户不可见。

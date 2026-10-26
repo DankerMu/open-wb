@@ -61,8 +61,9 @@
  *   delete drops them (a deleted current file or ancestor: `onPathChange(null)`). A row dropped on a
  *   directory row moves the same way (`tree.tsx`). No row menu and no drag while `onlyPaths` is set.
  * - Mounts (`use-mounts.ts`): the mount root rows (none while `onlyPaths` is set), their directories in
- *   `位置`,「在挂载内」for the preview, and the walk into a mount (`walk`). The `刷新` button refetches
- *   the list and relists a mount that came back online; the handle's does not.
+ *   `位置`,「在挂载内」for the preview, the walk into a mount (`walk`) and, beside `新建工作空间` only,
+ *   `挂载目录` (`mount-dialog.tsx`). The `刷新` button refetches the list and relists a mount that came
+ *   back online; the handle's does not.
  */
 import {
   type ReactNode,
@@ -93,6 +94,7 @@ import { logicalPath } from "./file-meta.js";
 import { useFolderDialog } from "./folder-dialog.js";
 import { useFollowEntry } from "./follow-entry.js";
 import { usePathEcho, usePathReapply, useSelectionReport } from "./host-channel.js";
+import { MountDialog } from "./mount-dialog.js";
 import { filteredRow, listedPaths, usePathRecords } from "./path-records.js";
 import {
   failedPreview,
@@ -141,7 +143,7 @@ type WorkspaceBrowserProps = {
   /** 侧边栏用：换成新值（非 `undefined`）时，`path` 所指的网页已选中且停在源码视图就翻回渲染视图。 */
   renderedSeq?: number | undefined;
   ref?: Ref<WorkspaceBrowserHandle> | undefined;
-  /** 文件页专用：切换器与 `新建工作空间`。 */
+  /** 文件页专用：切换器与 `新建工作空间`（给了它，挂载启用时菜单另有 `挂载目录`）。 */
   switcher?: ReactNode;
   onNewWorkspace?: ((trigger: HTMLElement | null) => void) | undefined;
 };
@@ -755,6 +757,7 @@ export function WorkspaceBrowser({
         }
         folderNotice={folder.notice ?? operations.notice ?? mounts.error}
         layout={layout}
+        onMountDirectory={onNewWorkspace && mounts.openCreate}
         onNewDirectory={folder.open}
         onNewWorkspace={onNewWorkspace}
         onRefresh={() => {
@@ -787,6 +790,7 @@ export function WorkspaceBrowser({
         />
       ) : null}
       {operations.dialog}
+      <MountDialog state={mounts.creating} />
     </>
   );
 }

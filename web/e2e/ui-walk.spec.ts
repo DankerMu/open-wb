@@ -14,6 +14,7 @@ import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
 import {
+  chooseNewFolderWithMountsOff,
   expectClipSelected,
   expectFilesUnpainted,
   expectNewPreviews,
@@ -321,8 +322,7 @@ async function walkFiles(page: Page, project: WalkProject): Promise<void> {
     .toEqual([256, 256]);
   await expectFilesUnpainted(page);
 
-  await files.getByRole("button", { name: "新建", exact: true }).click();
-  await page.getByRole("menuitem", { name: "新建文件夹" }).click();
+  await chooseNewFolderWithMountsOff(page);
   await createWalkOutWhileHeld(page, walkOut);
   const walkOutRow = tree.getByRole("button", { name: `展开 ${walkOut}`, exact: true });
   await expect(walkOutRow).toBeVisible();

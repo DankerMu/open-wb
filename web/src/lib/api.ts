@@ -31,7 +31,13 @@ import {
   type ModelView,
   type UpdateModelInput,
 } from "./api-models.js";
-import { createMountMethods, type MountList } from "./api-mounts.js";
+import {
+  type CreateMountInput,
+  createMountMethods,
+  type MountList,
+  type MountSourceList,
+  type MountView,
+} from "./api-mounts.js";
 import {
   createSessionCapabilityMethods,
   type SessionCapabilities,
@@ -152,7 +158,13 @@ export type ApiClient = {
     options?: ApiRequestOptions,
   ): Promise<ArchiveListing>;
   listMounts(workspaceId: string, options?: ApiRequestOptions): Promise<MountList>;
+  createMount(
+    workspaceId: string,
+    input: CreateMountInput,
+    options?: ApiRequestOptions,
+  ): Promise<MountView>;
   deleteMount(workspaceId: string, mountId: string, options?: ApiRequestOptions): Promise<void>;
+  listMountSources(options?: ApiRequestOptions): Promise<MountSourceList>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
   createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;
@@ -594,6 +606,11 @@ export {
   type ModelView,
   type UpdateModelInput,
 } from "./api-models.js";
-export type { MountList, MountView } from "./api-mounts.js";
+export type {
+  CreateMountInput,
+  MountList,
+  MountSourceList,
+  MountView,
+} from "./api-mounts.js";
 export type { SessionCapabilities } from "./api-session-capabilities.js";
 export type { SkillList } from "./api-skills.js";

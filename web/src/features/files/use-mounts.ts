@@ -33,13 +33,21 @@
  *   `refetch(relist)` (the `刷新` button: it has just listed the online mounts' layers again) calls
  *   `relist(path, true)` once the list is read for the loaded layers of each mount that is online in
  *   it and was not online before — one click brings back a mount that came back online.
+ * - Mounting (`mount-dialog.tsx`): `openCreate` is there only while `enabled` is true. Its submit
+ *   sends one `POST …/mounts`; on 201 the dialog closes, the new mount joins the list at once and the
+ *   list is fetched again, and its row (`mount-roots.tsx`, through `takeCreated`) comes out expanded
+ *   with focus on it — the cancelling close's return of focus to `新建` is dropped. That claim lasts
+ *   until the row takes it, that refetch fails or another refetch starts. A failure keeps the dialog
+ *   open with the envelope message; `取消` aborts the wait. A `取消` (or Escape) after a `POST` was
+ *   sent from this dialog fetches the list once more: the server may have made the mount all the
+ *   same (design D18), and its row then shows up as any listed row does — not expanded, no focus.
  * - Unmount: `useRequestDialog` holds the confirmation. Confirming sends one `DELETE …/mounts/<id>`;
  *   on 204 the row goes at once, focus goes to the space root's row, `onSelectionInside` is called
  *   when the selected file is inside that mount, and the list is fetched again. A failure keeps the
  *   dialog open with the envelope message.
  */
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ApiClient, MountList, MountView } from "../../lib/api.js";
+import type { ApiClient, CreateMountInput, MountList, MountView } from "../../lib/api.js";
 import {
   type DirectoryCache,
   loadedDirectoryPaths,
@@ -130,6 +138,8 @@ export function useMounts(
   directoriesRef.current = directories;
   const relistRef = useRef<PendingRelist | null>(null);
   const rootRow = useRef<HTMLElement | null>(null);
+  // The id of the mount the dialog has just created, until its row takes it (`takeCreated`).
+  const createdRef = useRef<string | null>(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `generation` is the refetch trigger.
   useEffect(() => {
@@ -152,6 +162,7 @@ export function useMounts(
       (error: unknown) => {
         if (controller.signal.aborted || isUnauthorized(error)) return;
         relistRef.current = null;
+        createdRef.current = null;
         settle(null, errorMessage(error));
       },
     );
@@ -169,6 +180,7 @@ export function useMounts(
   const refetch = useCallback(
     (relist?: Relist) => {
       relistRef.current = relist ? { client, workspaceId, relist, was: online(mounts) } : null;
+      createdRef.current = null;
       setGeneration((value) => value + 1);
     },
     [client, mounts, workspaceId],
@@ -251,8 +263,78 @@ export function useMounts(
     );
   }, [client, dialog, refetch, returnFocus, selectedFileRef, submit, workspaceId]);
 
+  const creation = useRequestDialog<null>();
+  const {
+    close: closeCreation,
+    open: openCreation,
+    returnFocus: creationFocus,
+    submit: submitCreation,
+  } = creation;
+  // Whether the open dialog has sent a `POST` (its `取消` then refetches).
+  const sentRef = useRef(false);
+  const openCreate = useCallback(
+    (trigger: HTMLElement | null) => {
+      sentRef.current = false;
+      openCreation(null, trigger);
+    },
+    [openCreation],
+  );
+  const cancelCreate = useCallback(() => {
+    closeCreation();
+    if (sentRef.current) refetch();
+    sentRef.current = false;
+  }, [closeCreation, refetch]);
+  const create = useCallback(
+    (input: CreateMountInput) => {
+      let made: MountView | null = null;
+      submitCreation(
+        (signal) => {
+          sentRef.current = true;
+          return client.createMount(workspaceId, input, { signal }).then((view) => {
+            made = view;
+          });
+        },
+        () => {
+          const view = made;
+          creationFocus.current = null;
+          sentRef.current = false;
+          if (!view) return;
+          setFetched((previous) =>
+            previous?.list && previous.client === client && previous.workspaceId === workspaceId
+              ? {
+                  ...previous,
+                  list: { ...previous.list, mounts: [...previous.list.mounts, view] },
+                }
+              : previous,
+          );
+          refetch();
+          // After `refetch`, which drops any earlier claim.
+          createdRef.current = view.id;
+        },
+      );
+    },
+    [client, creationFocus, refetch, submitCreation, workspaceId],
+  );
+  const takeCreated = useCallback((id: string) => {
+    if (createdRef.current !== id) return false;
+    createdRef.current = null;
+    return true;
+  }, []);
+
+  const enabled = (current?.error === null && current.list?.enabled) || false;
   return {
-    enabled: (current?.error === null && current.list?.enabled) || false,
+    enabled,
+    /** The `新建` menu's `挂载目录`: only while `enabled`. */
+    openCreate: enabled ? openCreate : undefined,
+    /** What `MountDialog` takes while the dialog is open. */
+    creating: creation.dialog && {
+      error: creation.dialog.error,
+      pending: creation.dialog.pending,
+      returnFocus: creationFocus,
+      onCancel: cancelCreate,
+      onCreate: create,
+      listSources: (signal: AbortSignal) => client.listMountSources({ signal }),
+    },
     error: current?.error ?? null,
     loaded,
     preview,
@@ -263,6 +345,7 @@ export function useMounts(
     roots: {
       mounts,
       onUnmount: openUnmount,
+      takeCreated,
       unmount: dialog && {
         error: dialog.error,
         mount: dialog.subject,

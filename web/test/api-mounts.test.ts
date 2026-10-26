@@ -1,6 +1,7 @@
 /**
- * s1b-workspace-mounts 任务 10.3：`web/src/lib/api-mounts.ts`（design D18）。接缝：真实的 `createApiClient` 加替身
- * `fetch`（`listMounts`、`deleteMount`），与导出的 `parseMountSources`（列举挂载源的调用属组 11）。期望值来自
+ * s1b-workspace-mounts 任务 10.3 / 11.3：`web/src/lib/api-mounts.ts`（design D18）。接缝：真实的 `createApiClient`
+ * 加替身 `fetch`（`listMounts`、`createMount`、`deleteMount`、`listMountSources`），与导出的 `parseMountSources`。
+ * `POST …/mounts` 成功恰为 201、应答是新挂载的视图（`rest-mounts.ts`）。期望值来自
  * workspace-mounts「挂载端点」「挂载源端点」：`GET …/mounts` 为 `{enabled, mounts}`，每项恰为
  * `{id, name, backend, host, port, remotePath, sourceId, sourceName, readOnly, status, createdAt}`
  *（`server/src/workspaces/mounts/rest-mounts.ts` 的 `viewOf`）；`DELETE …/mounts/:mountId` 成功恰为 204；
@@ -183,5 +184,83 @@ describe("parseMountSources", () => {
     ["a numeric admin path", { sources: [{ ...admin, path: 1 }] }],
   ])("%s is a parse failure", (_label, body) => {
     expect(parseMountSources(body)).toBeNull();
+  });
+});
+
+describe("createMount", () => {
+  const input = {
+    name: "数据仓库导出",
+    backend: "sftp" as const,
+    host: "dw-node-02.intra",
+    port: 22,
+    remotePath: "/export/dw",
+    readOnly: true,
+    username: "reader",
+    password: "pw",
+  };
+
+  it("POSTs the input as JSON to …/mounts (workspace id encoded) and resolves with the 201 view", async () => {
+    const path = "/api/workspaces/a%2Fb/mounts";
+    const fetchMock = stub({ [path]: () => jsonResponse(SFTP, 201) });
+
+    await expect(createApiClient().createMount("a/b", input)).resolves.toEqual(SFTP);
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        path,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        },
+      ],
+    ]);
+  });
+
+  it("a 200, or a 201 whose view has a credential key, is request_failed", async () => {
+    stub({
+      [LIST_PATH]: [jsonResponse(SFTP, 200), jsonResponse({ ...SFTP, password: "pw" }, 201)],
+    });
+
+    expectRequestFailure(await captureApiError(createApiClient().createMount(WS, input)), 200);
+    expectRequestFailure(await captureApiError(createApiClient().createMount(WS, input)), 201);
+  });
+
+  it("a 403 envelope rejects with its message", async () => {
+    stub({
+      [LIST_PATH]: () =>
+        jsonResponse({ error: { code: "mount_host_rejected", message: "该主机不允许挂载" } }, 403),
+    });
+
+    expect(await captureApiError(createApiClient().createMount(WS, input))).toMatchObject({
+      status: 403,
+      code: "mount_host_rejected",
+      message: "该主机不允许挂载",
+    });
+  });
+});
+
+describe("listMountSources", () => {
+  it("GETs /api/mount-sources without a cache and returns the parsed view", async () => {
+    const user = { id: "s-1", name: "资料库", readOnly: false };
+    const fetchMock = stub({ "/api/mount-sources": () => jsonResponse({ sources: [user] }) });
+
+    await expect(createApiClient().listMountSources()).resolves.toEqual({
+      view: "user",
+      sources: [user],
+    });
+    expect(fetchMock.mock.calls).toEqual([
+      ["/api/mount-sources", { method: "GET", cache: "no-store", credentials: "same-origin" }],
+    ]);
+  });
+
+  it("an answer mixing the two key sets is request_failed", async () => {
+    const admin = { id: "s-1", name: "资料库", path: "/srv/share", readOnly: true, createdAt: 1 };
+    stub({
+      "/api/mount-sources": () =>
+        jsonResponse({ sources: [admin, { id: "s-2", name: "归档", readOnly: true }] }),
+    });
+
+    expectRequestFailure(await captureApiError(createApiClient().listMountSources()), 200);
   });
 });

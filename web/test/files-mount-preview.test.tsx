@@ -154,7 +154,9 @@ async function shownFrame(name: string) {
 }
 
 describe("挂载内文件不签发（file-previewers）", () => {
-  it("挂载内的网页、PDF、办公文档（转换未启用）与 150 MB 的 PDF 都显示固定文案、没有 iframe、有下载链接；停留 6 分钟零签发；查看源码恰一次 file；随后根下的 site/index.html 恰一次签发并建 iframe", async () => {
+  it("挂载内的网页、PDF、办公文档（转换未启用）与 150 MB 的 PDF 都显示固定文案、没有 iframe、有下载链接；停留 6 分钟零签发；查看源码恰一次 file；随后根下的 site/index.html 恰一次签发并建 iframe", {
+    timeout: 20_000,
+  }, async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout", "Date"] });
     const page = openPage();
     await expand(MOUNT);

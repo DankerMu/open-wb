@@ -175,6 +175,7 @@
   - 新 `web/src/features/files/mount-roots.tsx`（挂载根行与卸载确认）与 `mount-dialog.tsx`（对话框）；`workspace-browser.tsx` 只加接线（783 行，size-guard 800）。（#1698：卸载确认框本体是 `dialogs.tsx` 的 `ConfirmDialog`——与 `删除` 共用，`mount-roots.tsx` 只包装；`位置` 下拉的挂载部分在 `use-mounts.ts`：既有目录收集只从根列表走、根列表从不列挂载点，于是做法是把在线可写的挂载及其下已加载的目录加进去。D18 的 `刷新` 只指按钮：会话侧边栏随助手改动调用的句柄 `refresh()` 不重取 mounts，否则每回合一次即变相轮询。`onlyPaths`（只看本会话改动）时不渲染挂载根行，但照样取 mounts 以判定「在挂载内」。）
   - 根行的数据来源是 `GET …/mounts`，不是 `tree`：空间根的 `tree` 按名字跳过已登记挂载的挂载点、不列出它们（D21），浏览器不做过滤，只在空间根之后渲染挂载根行；挂载点目录缺失时挂载根行照样出现。工作空间对象不变（files-web 钉「恰五键」）。
   - demo 的提示 `仅允许内网主机，公网地址将被拒绝` 不沿用：主机规则只拒环回、按许可名单放行，不判定公网地址，沿用即是假承诺。
+  - spec 未给文案的本地校验与状态（#1699 实现取定，#1798 评审）：名称超过 64 字符 `名称不能超过 64 个字符`；SMB 路径缺共享名（`/`、`//share`）`请填写共享名与目录，如 /共享名/目录`；挂载源读取中 `正在读取服务器目录…`，读取失败在对话框 alert 显示信封 message 并禁用提交。本次对话框发出过 `POST` 之后的 `取消` 只中止等待、不撤回服务端可能已建出的挂载，因此关闭后重取一次 `mounts`（D18「挂载之后重取」），迟到建出的挂载根行随之出现、不抢焦点。
   - `挂载目录` 只在文件页的 `新建` 菜单（与 `新建工作空间` 同为文件页专用的可选项）且 `enabled` 为 true 时出现；侧边栏有挂载根行与卸载，没有挂载入口（workspace-sidebar 不提供空间级入口）。
   - 状态在进入空间、`刷新`、挂载与卸载之后重取，不轮询、不推送。
   - 预览：选中的文件第一段是挂载名、而预览器要从隔离预览来源加载（网页渲染视图、PDF、办公文档）时，`WorkspaceBrowser` 告诉预览区「在挂载内」，预览区显示 `挂载目录内的文件暂不支持预览，请下载查看`、不签发令牌、不建 iframe（预览来源对挂载内路径 404，D21）；`查看源码` 与经 `file` 端点的预览器照常。规则在 file-previewers「隔离来源的嵌入与令牌」「PDF 与办公文档」（MODIFIED：先于既有三项判定，被挡下的预览不触发续期，场景「挂载内文件不签发」）；files-web「工作空间页」只规定宿主交出「在挂载内」这一输入。
@@ -308,8 +309,9 @@
 | `server/src/workspaces/mounts/*.ts` | 新 | 各 ≤400 | config / validate / store / host-policy / rclone-conf / mountinfo / manager / rest / path-rule / fs |
 | `web/test/workspace-browser.test.tsx` | 756 | 762 | 本地 `requests()`（:114）改用共享 `paths(fetchMock)`（import 行超 100 列被 biome 拆成多行，#1697）；新用例进新文件 |
 | `server/test/auth-lifecycle.test.ts` | 788（→790） | 797 | 只补七条 `codes` 条目 |
-| `web/src/features/files/workspace-browser.tsx` | 783 | ≤798 | 只加接线；取数与状态进新 hook `use-mounts.ts`，行与对话框进新文件 |
+| `web/src/features/files/workspace-browser.tsx` | 783 | ≤798 | 只加接线；取数与状态进新 hook `use-mounts.ts`，行与对话框进新文件（#1698 后 794，#1699 后 798） |
 | `web/src/features/files/mount-roots.tsx`、`mount-dialog.tsx` | 新 | 各 ≤400 | |
+| `web/src/features/files/mount-input.ts` | 新 | ≤400 | 对话框的本地校验与请求体构造（纯函数，与 `validate.ts` 同规则；#1699 拆出，否则 `mount-dialog.tsx` 466 行） |
 
 ## Traceability
 

@@ -7,13 +7,15 @@
  * or the source's name. An online row expands like a directory (`展开|折叠 <名>`; `body` is the
  * tree's listing of that path, so the rows inside are ordinary rows). An offline row is not a button:
  * it cannot be expanded, a click on it does nothing, and it shows `离线，重新连接后可浏览` instead of
- * any listing. No row menu, no drag, not a drop target — none of those props reach these rows.
+ * any listing. No row menu, no drag, not a drop target — none of those props reach these rows. The
+ * row of a mount the dialog has just created (`takeCreated`, once) expands if it is not expanded and
+ * takes focus.
  *
  * The confirmation is `ConfirmDialog` (`dialogs.tsx`, the copy-in `alert-dialog` that 删除 uses too):
  * initial focus on `取消`, `卸载` does not close it — the request's outcome does, and a failure shows
  * its message inside.
  */
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Icon } from "../../components/icon.js";
 import type { MountView } from "../../lib/api.js";
@@ -49,14 +51,24 @@ function MountRow({
   mount,
   onToggle,
   onUnmount,
+  takeCreated,
 }: {
   body: ReactNode;
   expanded: boolean;
   mount: MountView;
   onToggle(): void;
   onUnmount(trigger: HTMLElement): void;
+  takeCreated(id: string): boolean;
 }) {
   const online = mount.status === "online";
+  const toggle = useRef<HTMLButtonElement>(null);
+  // Every render asks; only the first one after the dialog's 201 gets a yes (StrictMode included).
+  useEffect(() => {
+    if (!takeCreated(mount.id)) return;
+    if (online && !expanded) onToggle();
+    toggle.current?.focus();
+  });
+
   const glyphs = (
     <>
       <span className={GLYPH}>
@@ -78,6 +90,7 @@ function MountRow({
             aria-label={`${expanded ? "折叠" : "展开"} ${mount.name}`}
             className={`${ROW} cursor-pointer hover:bg-(--wb-brand-primary-subtle)`}
             onClick={onToggle}
+            ref={toggle}
             title={mount.name}
             type="button"
           >
@@ -146,6 +159,7 @@ export function MountRoots({
   mounts,
   onToggleDirectory,
   onUnmount,
+  takeCreated,
   unmount,
 }: MountRootsProps) {
   return (
@@ -158,6 +172,7 @@ export function MountRoots({
           mount={mount}
           onToggle={() => onToggleDirectory(mount.name)}
           onUnmount={(trigger) => onUnmount(mount, trigger)}
+          takeCreated={takeCreated}
         />
       ))}
       {unmount ? <UnmountDialog {...unmount} /> : null}

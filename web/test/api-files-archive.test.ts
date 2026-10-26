@@ -288,7 +288,9 @@ const OTHER_CLIENT_METHODS = [
   "putConnectorDefaults",
   // 挂载（workspace-mounts「挂载端点」，s1b-workspace-mounts D18）
   "listMounts",
+  "createMount",
   "deleteMount",
+  "listMountSources",
   // 会话能力（design D7；experts「输入框的专家选择」）
   "getSessionCapabilities",
   "putSessionCapabilities",

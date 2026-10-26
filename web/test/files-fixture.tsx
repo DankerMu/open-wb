@@ -92,7 +92,7 @@ export async function openWorkspaceDialog() {
  * 经 `＋` 菜单选一项：Radix DropdownMenu 在 pointerdown 打开（click 不打开）。先让出一个宏任务：
  * 上一个覆盖层卸载时的焦点归还在 setTimeout(0) 里跑，若落在已打开的菜单之外会把它关掉。
  */
-export async function chooseCreationMenuItem(item: "新建文件夹" | "新建工作空间") {
+export async function chooseCreationMenuItem(item: "新建文件夹" | "挂载目录" | "新建工作空间") {
   await yieldMacrotask();
   pressPointer(screen.getByRole("button", { name: "新建" }));
   fireEvent.click(await screen.findByRole("menuitem", { name: item }));
