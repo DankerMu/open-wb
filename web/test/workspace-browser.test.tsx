@@ -18,7 +18,13 @@ import {
   stubBlobUrls,
   workspace,
 } from "./files-fixture.js";
-import { createFetchMock, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import {
+  createFetchMock,
+  deferredResponse,
+  jsonResponse,
+  paths,
+  textPreviewResponse,
+} from "./support.js";
 import {
   listRepoFiles,
   pressPointer,
@@ -111,7 +117,7 @@ function mount(initialPath: string | null, extra: Extra = {}, table = routes(), 
       <Host {...props} />
     );
   const view = render(wrap(extra));
-  const requests = () => fetchMock.mock.calls.map(([path]) => path);
+  const requests = () => paths(fetchMock);
   return {
     browser: () => {
       if (!handle.current) throw new Error("WorkspaceBrowser 没有交出句柄");

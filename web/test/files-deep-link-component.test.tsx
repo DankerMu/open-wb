@@ -18,7 +18,7 @@ import {
   tree,
 } from "./files-deep-link-support.js";
 import { cleanupFilesFixture, type FetchRoutes } from "./files-fixture.js";
-import { createFetchMock, jsonResponse, textPreviewResponse } from "./support.js";
+import { createFetchMock, jsonResponse, paths, textPreviewResponse } from "./support.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -49,7 +49,7 @@ describe("不显示失败文案的定位失败（组件）", () => {
     return {
       handle,
       onPathChange,
-      requests: () => fetchMock.mock.calls.map(([path]) => path),
+      requests: () => paths(fetchMock),
       show: (path: string | null, onlyPaths?: ReadonlySet<string>) =>
         view.rerender(browser(path, onlyPaths)),
     };

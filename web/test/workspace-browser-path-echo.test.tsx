@@ -10,7 +10,7 @@ import { WorkspaceBrowser, type WorkspaceBrowserHandle } from "../src/features/f
 import { createApiClient } from "../src/lib/api.js";
 import { deferred } from "./chat-stream-support.js";
 import { cleanupFilesFixture, type FetchRoutes } from "./files-fixture.js";
-import { createFetchMock, jsonResponse, textPreviewResponse } from "./support.js";
+import { createFetchMock, jsonResponse, paths, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const API = "/api/workspaces/workspace-1";
@@ -76,7 +76,7 @@ function mount(table: FetchRoutes, onlyPaths?: ReadonlySet<string>) {
     },
     onPathChange,
     onSelectionChange,
-    requests: () => fetchMock.mock.calls.map(([path]) => path),
+    requests: () => paths(fetchMock),
     setPath: (path: string | null) => {
       act(() => write((now) => ({ ...now, path })));
     },

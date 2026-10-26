@@ -306,7 +306,7 @@
 | `server/src/workspaces/rest.ts` | 484 | ~500 | tree / dirs 的挂载判定调用 |
 | `server/src/workspaces/rest-entries.ts` | 241 | ~260 | delete / move 的挂载判定调用 |
 | `server/src/workspaces/mounts/*.ts` | 新 | 各 ≤400 | config / validate / store / host-policy / rclone-conf / mountinfo / manager / rest / path-rule / fs |
-| `web/test/workspace-browser.test.tsx` | 756 | 757 | 本地 `requests()`（:114）滤掉 `…/mounts` 一行；新用例进新文件 |
+| `web/test/workspace-browser.test.tsx` | 756 | 762 | 本地 `requests()`（:114）改用共享 `paths(fetchMock)`（import 行超 100 列被 biome 拆成多行，#1697）；新用例进新文件 |
 | `server/test/auth-lifecycle.test.ts` | 788（→790） | 797 | 只补七条 `codes` 条目 |
 | `web/src/features/files/workspace-browser.tsx` | 783 | ≤798 | 只加接线；取数与状态进新 hook `use-mounts.ts`，行与对话框进新文件 |
 | `web/src/features/files/mount-roots.tsx`、`mount-dialog.tsx` | 新 | 各 ≤400 | |

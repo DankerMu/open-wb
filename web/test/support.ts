@@ -86,8 +86,32 @@ export function expectRequestFailure(error: ApiError, status: number) {
 export const CAPABILITIES_ROUTE = "/api/sessions/:id/capabilities";
 const CAPABILITIES_PATH = /^\/api\/sessions\/[^/]+\/capabilities$/;
 
+/** 挂载端点（workspace-mounts「挂载端点」）：路径名是 `/api/workspaces/<id>/mounts` 或其下，只比路径名，查询串不算。 */
+const MOUNTS_PATH = /^\/api\/workspaces\/[^/?#]+\/mounts(?=[/?#]|$)/;
+const MOUNTS_LIST_PATH = /^\/api\/workspaces\/[^/?#]+\/mounts$/;
+
+/**
+ * 是否挂载端点的请求。`WorkspaceBrowser` 在进入空间、`刷新`、建出与卸载之后取挂载列表（design D18），既有用例的
+ * 精确请求序列不写它：`paths()` 与各处请求记录按它滤掉，断言挂载请求的用例改用 `calls(fetchMock, path)`。
+ */
+export function isMountsRequest(path: string): boolean {
+  return MOUNTS_PATH.test(path);
+}
+
+/** 未登记的 `GET …/mounts` 缺省回「功能关闭」；登记过的（含用完的数组）照登记值走。 */
+function isDefaultMountsList(routes: FetchRoutes, path: string, options?: RequestInit) {
+  return (
+    !Object.hasOwn(routes, path) &&
+    MOUNTS_LIST_PATH.test(path) &&
+    (options?.method ?? "GET") === "GET"
+  );
+}
+
 function fetchRouteHandler(routes: FetchRoutes) {
   return (path: string, options?: RequestInit) => {
+    if (isDefaultMountsList(routes, path, options)) {
+      return Promise.resolve(jsonResponse({ enabled: false, mounts: [] }));
+    }
     const route =
       Object.hasOwn(routes, path) || !CAPABILITIES_PATH.test(path)
         ? routes[path]
@@ -211,9 +235,9 @@ export function replaceFetchRoutes(fetchMock: FetchMock, routes: FetchRoutes) {
 
 type FetchCall = FetchMock["mock"]["calls"][number];
 
-/** 全部请求路径，按调用顺序；断言多重集合时先 sort。 */
+/** 全部请求路径（挂载端点的除外，见 `isMountsRequest`），按调用顺序；断言多重集合时先 sort。 */
 export function paths(fetchMock: FetchMock): string[] {
-  return fetchMock.mock.calls.map(([path]) => path);
+  return fetchMock.mock.calls.map(([path]) => path).filter((path) => !isMountsRequest(path));
 }
 
 /** 断言全部请求路径的多重集合（与顺序无关，但约束总量，杂散请求会使其失败）。 */
