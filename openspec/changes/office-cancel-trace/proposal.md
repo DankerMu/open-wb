@@ -18,10 +18,10 @@ design.md omitted (compact)：issue #1751 已给出通道（`startEntry({hook})`
 ## What Changes
 
 - verification-harness：第三类（跨进程）改为子进程预加载钩子在删除作业目录那一刻同步留痕到专用 trace 文件，测试轮询该文件；计时结论保留；加一个场景（含变异）。
-- 测试：`server-startup-office.test.ts` 的 `:195`（超时那次）与 `:202`（关停时在途作业）两处等待改为轮询 cancel trace；去掉 `:190-192` 的「依赖文件事件」注释，改写为新通道的说明。钩子以 `startEntry({hook})` 传入（若该用例已用 `hook`，则合并而非覆盖）。
+- 测试：`server-startup-office.test.ts` 的 `:195`（超时那次）与 `:202`（关停时在途作业）两处等待改为轮询 cancel trace；去掉 `:190-192` 的「依赖文件事件」注释，改写为新通道的说明。钩子经 `spoolEntry` 新增的 `hook` 透传给 `startEntry({hook})`；trace 写在每次尝试的根下。
 
 ## Impact
 
 - 规格：verification-harness 一条 requirement 修改。
-- 代码：仅测试——`server/test/server-startup-office.test.ts`，必要时测试辅助 `server/test/server-startup-preview-helpers.ts` / `server-startup-helpers.ts`（只在需要导出或组合钩子时）。
+- 代码：仅测试——`server/test/server-startup-office.test.ts`，必要时 `server/test/server-startup-helpers.ts`（只在需要导出钩子构造函数时）。
 - 不动：产品代码 `server/src/preview/office.ts`、假 sidecar 的进程内通道、#1574 已修好的进程内用例。
