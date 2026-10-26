@@ -43,10 +43,11 @@ Minimal mergeable slice: atomic - 三个键与预检是同一个 resolver 的同
 
 ## 3. 托管布局 `<state>/mounts` 与隔离证明（omp-runtime「OMP_STATE_DIR 托管布局」；omp-uid-isolation「Linux 隔离证明」）
 
-- [ ] 3.1 核对 Context：`state-layout.ts` 的 `LAYOUT` 与导出（#1656 与 #1670 合入后）、`server/test/linux/uid-isolation.test.ts` 的托管布局用例、omp-test-harness 的 `read:` / `list:` / `probe:`；状态根顶层与目录表的精确清单（下条），兄弟 change 的先例 `s1d-experts-skills/tasks.md` 1.2 的最后一段。
-- [ ] 3.2 测试先行：布局用例加「挂载私有目录属于布局」（冷建、被改宽校正且其下 `rclone.conf` 不动、符号链接抛错）；同 PR 给每一处状态根精确清单加 `mounts`（行号为本 worktree 的）：`server/test/omp-layout-helpers.ts:10` 的 `LAYOUT_TABLE`（加 `["mounts", 0o700]`）、`server/test/omp-state-layout.test.ts:143-149`、`server/test/server-startup-layout.test.ts:132-139`、`server/test/server-startup-order.test.ts:135-141`、`server/test/server-startup-order-helpers.ts:98`（`expectLayoutWithoutManagedFiles`，`server-startup-failure-reason.test.ts`、`server-startup-preview.test.ts` 等经它断言）；`server/test/linux/uid-isolation.test.ts` 托管布局用例加「挂载凭证对 omp uid 不可达」（父进程预置 `<state>/mounts/<id>/rclone.conf` 哨兵；`listed=EACCES`、`read=EACCES`、`wrote=EACCES`；字节、模式、属主不变）。验证：`npm test --workspace server -- omp-state-layout server-startup-layout server-startup-order server-startup-failure-reason server-startup-preview`、`make check`；PR CI `uid-isolation` 绿。
-- [ ] 3.3 `state-layout.ts` 的 `LAYOUT` 加 `["mounts", APP_PRIVATE]` 与 `ompMountsDir(stateDir)`。验证：3.2 全绿、`make check`。
-- [ ] 3.4 ADR-0010 布局表加 `<state>/mounts`（`0700`，app 私有：远程挂载的凭证、缓存与日志）。
+- [x] 3.1 核对 Context：`state-layout.ts` 的 `LAYOUT` 与导出（#1656 与 #1670 合入后）、`server/test/linux/uid-isolation.test.ts` 的托管布局用例、omp-test-harness 的 `read:` / `list:` / `probe:`；状态根顶层与目录表的精确清单（下条），兄弟 change 的先例 `s1d-experts-skills/tasks.md` 1.2 的最后一段。
+- [x] 3.2 测试先行：布局用例加「挂载私有目录属于布局」（冷建、被改宽校正且其下 `rclone.conf` 不动、符号链接抛错）；同 PR 给每一处状态根精确清单加 `mounts`（行号为本 worktree 的）：`server/test/omp-layout-helpers.ts:10` 的 `LAYOUT_TABLE`（加 `["mounts", 0o700]`）、`server/test/omp-state-layout.test.ts:143-149`、`server/test/server-startup-layout.test.ts:132-139`、`server/test/server-startup-order.test.ts:135-141`、`server/test/server-startup-order-helpers.ts:98`（`expectLayoutWithoutManagedFiles`，`server-startup-failure-reason.test.ts`、`server-startup-preview.test.ts` 等经它断言）；`server/test/linux/uid-isolation.test.ts` 托管布局用例加「挂载凭证对 omp uid 不可达」（父进程预置 `<state>/mounts/<id>/rclone.conf` 哨兵；`listed=EACCES`、`read=EACCES`、`wrote=EACCES`；字节、模式、属主不变）。验证：`npm test --workspace server -- omp-state-layout server-startup-layout server-startup-order server-startup-failure-reason server-startup-preview`、`make check`；PR CI `uid-isolation` 绿。
+- [x] 3.3 `state-layout.ts` 的 `LAYOUT` 加 `["mounts", APP_PRIVATE]` 与 `ompMountsDir(stateDir)`。验证：3.2 全绿、`make check`。
+- [x] 3.4 ADR-0010 布局表加 `<state>/mounts`（`0700`，app 私有：远程挂载的凭证、缓存与日志）。
+  - 开工核对补记（#1683）：`LAYOUT` 在 `state-layout.ts:83`、`APP_PRIVATE` 在 `:75`；精确清单实际行号 `omp-state-layout.test.ts:148`、`server-startup-order.test.ts:139`；五处之外没有别的状态根精确清单；`2750` 负对照沿用 #1721 的一次性 draft PR 做法（#1775）。
 
 Suggested fixture level: expanded - 改托管布局的权限位（security boundary：凭证目录对 omp uid 不可达由 CI 两 uid 证明）。
 Minimal mergeable slice: atomic - 布局行、它的 uid 证明与各处精确清单同 PR；只合布局行，清单用例即红，`0700` 的不可达性也没有被真实两 uid 证明过就被组 5 用来存凭证。
