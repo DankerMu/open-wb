@@ -118,7 +118,9 @@ describe("migration 048 schema", () => {
     expect(TRACKED_MIGRATION_FILENAMES.filter((name) => name === MIGRATION_048)).toHaveLength(1);
     expect(TRACKED_MIGRATION_FILENAMES[pos - 1]).toBe(MIGRATION_047);
     expect(COMPLETE_CATALOG.receipts[pos]).toEqual([22, MIGRATION_048]);
-    expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 22, "integer"]]);
+    expect(COMPLETE_CATALOG.sequenceRows).toEqual([
+      ["schema_migrations", TRACKED_MIGRATION_FILENAMES.length, "integer"],
+    ]);
   });
 
   it("creates the D1 tables and appends disabled_connectors to chat_sessions", () => {
@@ -203,7 +205,7 @@ describe("migration 048 schema", () => {
       ).toEqual([S_A, S_B, S_C, S_D].map((id) => ({ id, disabled_connectors: "[]" })));
       expect(rawConnectors(db)).toEqual([]);
       expect(rawPrefs(db)).toEqual([]);
-      expect(ledgerFilenames(db)).toEqual([...through047, MIGRATION_048]);
+      expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
     });
   });
 
