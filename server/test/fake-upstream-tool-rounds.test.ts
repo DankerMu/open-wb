@@ -428,6 +428,35 @@ describe("omp's image attachment message (#1527) is not a user turn", () => {
   });
 });
 
+// Issue #1769: omp v18.12.3's date / cwd reminder, sent with role `user`; written from the spec.
+const REMINDER = {
+  role: "user",
+  content:
+    "<system-reminder>\nToday: 2026-10-26; current working directory: '/w'. Do not repeat this information in your reply.\n</system-reminder>",
+};
+
+describe("omp's date reminder (#1769) is not a user turn", () => {
+  const toolCall = {
+    role: "assistant",
+    content: null,
+    tool_calls: [
+      { id: "call_1", type: "function", function: { name: "bash", arguments: BASH_ARGS } },
+    ],
+  };
+
+  it('under toolRoundScope "turn" a trailing reminder starts no new tool round', async () => {
+    const messages = [{ role: "user", content: "跑一下" }, toolCall, TOOL_RESULT, REMINDER];
+    const reply = await chat(await upstream(TURN), messages);
+    expect(answerOf(reply)).toEqual({ calls: [], content: REPLY, reasoning: "" });
+  });
+
+  it("in mid-history it neither hides nor clears the real user's WORKBUDDY_THINK", async () => {
+    const messages = [{ role: "user", content: `答 ${THINK}` }, REMINDER, toolCall, TOOL_RESULT];
+    const reply = await chat(await upstream(), messages);
+    expect(answerOf(reply)).toEqual({ calls: [], content: REPLY, reasoning: THINKING });
+  });
+});
+
 async function upstream(options?: FakeUpstreamStartOptions): Promise<number> {
   return (await startTrackedFakeUpstream(handles, options)).port;
 }

@@ -26,6 +26,7 @@ const BROWSER_SHOT_MARKER = "WORKBUDDY_BROWSER_SHOT";
 const ASK_MARKER = "WORKBUDDY_ASK";
 /** First text part of omp's synthetic user message carrying tool-result images (#1527). */
 const ATTACHED_IMAGES_TEXT = "Attached image(s) from tool result:";
+const REMINDER_OPEN = "<system-reminder>";
 /** Hold points of `WORKBUDDY_HOLD_AT:<point>` (issues 1440, 1445); any other value is ignored. */
 const HOLD_POINTS = new Set(["empty", "thinking"]);
 const TOOL_ARGS = '{"command":"echo workbuddy-smoke"}';
@@ -475,7 +476,7 @@ function lastUserHasMarker(messages) {
 function lastUserTextFrom(messages) {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
-    if (message?.role !== "user" || isImageAttachment(messages, index)) {
+    if (message?.role !== "user" || isImageAttachment(messages, index) || isReminderOnly(message)) {
       continue;
     }
     return userText(message.content);
@@ -558,7 +559,11 @@ function toolFollowsLastUser(messages) {
     if (message.role === "tool") {
       return true;
     }
-    if (message.role === "user" && !isImageAttachment(messages, index)) {
+    if (
+      message.role === "user" &&
+      !isImageAttachment(messages, index) &&
+      !isReminderOnly(message)
+    ) {
       return false;
     }
   }
@@ -576,6 +581,19 @@ function isImageAttachment(messages, index) {
     messages[index - 1]?.role === "tool" &&
     first?.type === "text" &&
     first.text === ATTACHED_IMAGES_TEXT
+  );
+}
+
+/**
+ * omp v18.12.3 sends its date / cwd reminder (date-cwd-reminder.ts) as a `user` message whose whole
+ * text is one `<system-reminder>` block; it carries no marker and starts no turn (#1769).
+ */
+function isReminderOnly(message) {
+  const text = userText(message.content).trim();
+  return (
+    text.startsWith(REMINDER_OPEN) &&
+    text.endsWith("</system-reminder>") &&
+    text.indexOf(REMINDER_OPEN, 1) === -1
   );
 }
 

@@ -2,6 +2,7 @@
  * Issue #909 task 1.3: the failure markers of the fake upstream — model-proxy「假上游夹具契约」
  * scenarios「Scripted failure markers」「Fail first n then succeed」「Delayed scripted status」
  * 「Hang and cut」. Expected bodies are the contract's literals, not imported from the fixture.
+ * Issue #1769: scenario「omp 的日期提醒不算最后一条 user 消息」.
  */
 import { spawn } from "node:child_process";
 import { request } from "node:http";
@@ -27,11 +28,13 @@ interface Reply {
   text: string;
 }
 
-function chatBody(text: string): string {
-  return JSON.stringify({ model: "m1", messages: [{ role: "user", content: text }], stream: true });
+/** One user message `text`, or the whole `messages` array as given. */
+function chatBody(text: string | unknown[]): string {
+  const messages = typeof text === "string" ? [{ role: "user", content: text }] : text;
+  return JSON.stringify({ model: "m1", messages, stream: true });
 }
 
-function post(port: number, text: string, signal?: AbortSignal): Promise<Response> {
+function post(port: number, text: string | unknown[], signal?: AbortSignal): Promise<Response> {
   return fetch(`http://127.0.0.1:${String(port)}/v1/chat/completions`, {
     method: "POST",
     headers: { authorization: `Bearer ${KEY}`, "content-type": "application/json" },
@@ -40,7 +43,7 @@ function post(port: number, text: string, signal?: AbortSignal): Promise<Respons
   });
 }
 
-async function reply(port: number, text: string): Promise<Reply> {
+async function reply(port: number, text: string | unknown[]): Promise<Reply> {
   const response = await post(port, text);
   return {
     status: response.status,
@@ -325,5 +328,62 @@ describe("fake-upstream failure markers", () => {
     } finally {
       child.kill("SIGTERM");
     }
+  });
+});
+
+// Issue #1769: omp v18.12.3's date / cwd reminder (prompts/system/date-cwd-reminder.md), sent with
+// role `user` when the upstream takes no developer role. Written from the spec, not the fixture.
+const REMINDER =
+  "<system-reminder>\nToday: 2026-10-26; current working directory: '/w'. Do not repeat this information in your reply.\n</system-reminder>";
+const user = (content: unknown): unknown => ({ role: "user", content });
+
+describe("omp's date reminder is not the last user message (#1769)", () => {
+  it("a trailing reminder keeps the real user's STATUS marker", async () => {
+    const handle = await startTrackedFakeUpstream(handles, { apiKey: KEY });
+    expect(
+      await reply(handle.port, [user("WORKBUDDY_FAKE_STATUS=503"), user(REMINDER)]),
+    ).toMatchObject({
+      status: 503,
+      contentType: "application/json",
+      text: '{"error":{"message":"scripted upstream 503","type":"scripted_error"}}',
+    });
+  });
+
+  it("a trailing reminder keeps the real user's WORKBUDDY_FAKE_ERROR", async () => {
+    const handle = await startTrackedFakeUpstream(handles, { apiKey: KEY });
+    expect(await reply(handle.port, [user("WORKBUDDY_FAKE_ERROR"), user(REMINDER)])).toMatchObject({
+      status: 500,
+      text: '{"error":{"message":"fake upstream error"}}',
+    });
+  });
+
+  it("a reminder as one text part is skipped too", async () => {
+    const handle = await startTrackedFakeUpstream(handles, { apiKey: KEY });
+    const parts = [{ type: "text", text: `\n${REMINDER}\n` }];
+    const answer = await reply(handle.port, [user("WORKBUDDY_FAKE_STATUS=503"), user(parts)]);
+    expect(answer.status).toBe(503);
+  });
+
+  it("FAIL_TIMES counts the real user's text whether or not a reminder trails it", async () => {
+    const handle = await startTrackedFakeUpstream(handles, { apiKey: KEY });
+    const first = user("WORKBUDDY_FAKE_STATUS=503 WORKBUDDY_FAKE_FAIL_TIMES=2");
+    const answers = [];
+    for (const messages of [[first], [first, user(REMINDER)], [first, user(REMINDER)], [first]]) {
+      answers.push(await reply(handle.port, messages));
+    }
+    expect(answers.map((answer) => answer.status)).toEqual([503, 503, 200, 200]);
+    expect(answers.slice(2).every(isToolRound)).toBe(true);
+  });
+
+  it("a user message with other text, or with two reminder blocks, still counts", async () => {
+    const handle = await startTrackedFakeUpstream(handles, { apiKey: KEY });
+    // omp prepends the reminder and a newline to the first user message.
+    const prefixed = await reply(handle.port, [user(`${REMINDER}\nWORKBUDDY_FAKE_STATUS=503`)]);
+    expect(prefixed.status).toBe(503);
+    const twice = await reply(handle.port, [
+      user("WORKBUDDY_FAKE_STATUS=503"),
+      user(`${REMINDER}\n${REMINDER}`),
+    ]);
+    expect(isToolRound(twice)).toBe(true);
   });
 });

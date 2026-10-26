@@ -6,8 +6,9 @@
  * (`no_response`, `no_connect`, `gateway_504`) may make omp retry — if one does, the envelope
  * design is reopened, not worked around here.
  *
- * Every case prints one `[upstream-failure] ` line (elapsed time, request count, frame types, the
- * final `errorMessage`; shown for passing cases with `--reporter=verbose`), quoted as 实测.
+ * Every case prints one `[upstream-failure] ` line (elapsed time, request count, per-request
+ * `messages` count, frame types, the final `errorMessage`; shown for passing cases with
+ * `--reporter=verbose`), quoted as 实测.
  *
  * Tasks 4.4 and 5.5 run the cases that assert what the browser sees (the published events, the
  * sessions `log` port, the stop route) in `openProxiedApp`, the production sessions assembly over
@@ -151,8 +152,16 @@ function expectOneCappedRetry(turn: Turn, world: { upstream: FakeUpstreamServer 
   expect(models).toEqual(Array<string>(UPSTREAM_REQUESTS).fill(PROXIED_MODELS[0]));
 }
 
-/** The case's 实测 line: elapsed time, request count, frame types and the last `errorMessage`. */
-function note(label: string, turn: Turn, requests: number): void {
+/** `messages` length of each upstream request, in arrival order (#1769: shows omp's reminder). */
+function messagesOf(upstream: FakeUpstreamServer): number[] {
+  return upstream.requests().map((request) => request.messages);
+}
+
+/**
+ * The case's 实测 line: elapsed time, request count, per-request `messages` count (when given),
+ * frame types and the last `errorMessage`.
+ */
+function note(label: string, turn: Turn, requests: number, messages?: number[]): void {
   const types = turn.frames
     .map((frame) => frame.type)
     .filter((type) => type !== "message_update" && type !== "text_delta");
@@ -162,7 +171,7 @@ function note(label: string, turn: Turn, requests: number): void {
     .filter((value) => value !== undefined)
     .at(-1);
   console.log(
-    `[upstream-failure] ${JSON.stringify({ case: label, ms: turn.ms, requests, types, errorMessage })}`,
+    `[upstream-failure] ${JSON.stringify({ case: label, ms: turn.ms, requests, messages, types, errorMessage })}`,
   );
 }
 
@@ -222,7 +231,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     const world = await openProxiedWorld();
     const turn = await runTurn(world, "你好");
     const end = lastAssistantEnd(turn.frames);
-    note("done", turn, world.upstream.requests().length);
+    note("done", turn, world.upstream.requests().length, messagesOf(world.upstream));
     expect(end.stopReason).toBe("stop");
     expect(turn.frames.at(-1)?.type).toBe("agent_end");
     expect(world.upstream.requests().length).toBeGreaterThanOrEqual(2);
@@ -232,7 +241,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     const world = await openProxiedApp();
     const turn = await runAppTurn(world, "你好 WORKBUDDY_FAKE_STATUS=401");
     const end = expectFailedTurn(turn);
-    note("a-401", turn, world.upstream.requests().length);
+    note("a-401", turn, world.upstream.requests().length, messagesOf(world.upstream));
     expect(end.errorStatus).toBe(401);
     expect(world.upstream.requests()).toHaveLength(1);
     // 5.5 (sentence and status as separate keys since group 7).
@@ -248,7 +257,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     async () => {
       const world = await openProxiedWorld({ firstByteDeadlineMs: 3_000 });
       const turn = await runTurn(world, "你好 WORKBUDDY_FAKE_HANG", AT_RETRY);
-      note("b-hang", turn, world.upstream.requests().length);
+      note("b-hang", turn, world.upstream.requests().length, messagesOf(world.upstream));
       expect(retryStarts(turn.frames)).toEqual([]);
       expect(world.upstream.requests()).toHaveLength(1);
       const end = expectFailedTurn(turn);
@@ -263,7 +272,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
     async () => {
       const world = await openProxiedApp();
       const turn = await runAppTurn(world, "你好 WORKBUDDY_FAKE_STATUS=503", BEYOND_CAP);
-      note("cap-503", turn, world.upstream.requests().length);
+      note("cap-503", turn, world.upstream.requests().length, messagesOf(world.upstream));
       expectOneCappedRetry(turn, world);
       // The proxy's summary is what omp retried on and what it failed with (1.7(c) folded in here).
       const [retry] = retryStarts(turn.frames);
@@ -305,7 +314,12 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
       mkdirSync(join(world.workspaceRoot, ".omp"));
       writeFileSync(join(world.workspaceRoot, ".omp", "config.yml"), PROJECT_RETRY);
       const turn = await runTurn(world, "你好 WORKBUDDY_FAKE_STATUS=503", BEYOND_CAP);
-      note("cap-503-project-layer", turn, world.upstream.requests().length);
+      note(
+        "cap-503-project-layer",
+        turn,
+        world.upstream.requests().length,
+        messagesOf(world.upstream),
+      );
       expectOneCappedRetry(turn, world);
     },
   );
@@ -344,7 +358,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
         "你好 WORKBUDDY_FAKE_STATUS=504 WORKBUDDY_FAKE_BODY=text WORKBUDDY_FAKE_DELAY=2000",
         AT_RETRY,
       );
-      note("e-gateway-504", turn, world.upstream.requests().length);
+      note("e-gateway-504", turn, world.upstream.requests().length, messagesOf(world.upstream));
       expect(retryStarts(turn.frames)).toEqual([]);
       expect(world.upstream.requests()).toHaveLength(1);
       const end = expectFailedTurn(turn);
@@ -369,7 +383,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
         "你好 WORKBUDDY_FAKE_STATUS=400 WORKBUDDY_FAKE_BODY=empty",
       );
       const end = expectFailedTurn(turn);
-      note("6.5-400-empty", turn, world.upstream.requests().length);
+      note("6.5-400-empty", turn, world.upstream.requests().length, messagesOf(world.upstream));
       expect(world.upstream.requests()).toHaveLength(1);
       expect(end.errorStatus).toBe(400);
       // omp appends its request dump path (design Context, case 12 实测); the column must not keep it.
@@ -398,7 +412,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
         "你好 WORKBUDDY_FAKE_STATUS=503 WORKBUDDY_FAKE_FAIL_TIMES=12",
         BEYOND_CAP,
       );
-      note("retry-then-done", turn, world.upstream.requests().length);
+      note("retry-then-done", turn, world.upstream.requests().length, messagesOf(world.upstream));
       expect(retryStarts(turn.frames)).toHaveLength(1);
       expect(publishedTypes(turn).filter((type) => type === "turn.start")).toHaveLength(1);
       expect(publishedTypes(turn).filter((type) => type === "turn.retry")).toHaveLength(1);
@@ -465,6 +479,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION} through the model pr
           ms: Date.now() - startedAt,
           closedMs,
           requests: world.upstream.requests().length,
+          messages: messagesOf(world.upstream),
           after: after.map((frame) =>
             frame.type === "auto_retry_end"
               ? `auto_retry_end:${String(frame.finalError)}`
