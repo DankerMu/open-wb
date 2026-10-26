@@ -91,12 +91,13 @@ export function expectDbReopens(path: string): void {
 }
 
 /**
- * 主监听器绑定成功之后、两个托管文件写出之前的状态目录（#1337）：托管布局的六个顶层目录都在
- * （`session-config` 由 s1d-experts-skills 加入），`models.yml` 与 `host-overlay.yml` 还没有。
+ * 主监听器绑定成功之后、两个托管文件写出之前的状态目录（#1337）：托管布局的七个顶层目录都在
+ * （`session-config` 由 s1d-experts-skills 加入，`mounts` 由 s1b-workspace-mounts 加入），`models.yml` 与 `host-overlay.yml` 还没有。
  */
 export function expectLayoutWithoutManagedFiles(state: string): void {
   expect(readdirSync(state).toSorted()).toEqual([
     "home",
+    "mounts",
     "session-config",
     "sessions",
     "snapshots",
