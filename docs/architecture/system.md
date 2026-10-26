@@ -878,3 +878,19 @@ modelRoles:
 这与 #1570 起「写 `xd://browser` 就是一次 write」的先例一致。需要逐次确认连接器调用的会话用 `每次都问`。本组只写明现状，不改工具段摘要的计法。
 
 **回滚**：回退到没有连接器的版本时，连同删除 `<OMP_STATE_DIR>/home/.omp/agent/mcp.json`——旧版本不写也不删这个文件，留着它 omp 仍会读取并拉起其中的连接器。
+
+### 9.12 远程挂载（S1b，change `s1b-workspace-mounts`）
+
+本节随任务组落地。组 2：配置键与部署前提；挂载进程、启停与端点随后续任务组补入。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
+
+**部署前提**（`server/src/workspaces/mounts/config.ts`）：
+
+- **三个配置键**：`RCLONE_BIN` 缺省未配置，即挂载关闭；给出时必须是绝对路径（空串、相对路径都是配置错误）。`MOUNT_HOST_ALLOW` 缺省未配置，即不限主机；给出时为逗号分隔的主机名单，每项 1..253 字节、只含 ASCII 字母数字与 `.`、`:`、`-`，空串、空项、其它字符都是配置错误。`MOUNT_MAX_PER_WORKSPACE` 为每个工作空间的挂载数上限，缺省 `8`，与 `OMP_IDLE_MS` 同一解析纪律（canonical ASCII decimal 1..2147483647）。非法值和其它非法配置一样只留一条 `{"event":"server_start_failed","reason":"config"}`，错误只点名键、不回显取值。
+- **依赖包**：Linux，装 `fuse3` 与 rclone。最低版本 = 测试主机实测版本：rclone v1.60.1、fuse3 / `fusermount3` 3.14.0（ADR-0003「2026-10 补充」，Ubuntu 24.04 包）。启动不检查版本。macOS 不支持（没有 `/dev/fuse` 与 `fusermount3`，配置了 `RCLONE_BIN` 即启动失败）。
+- **启动预检**：只在配置了 `RCLONE_BIN` 时运行，任一不过即以 `reason: "config"` 启动失败、错误点名 `RCLONE_BIN`（fail-closed：要关掉挂载就撤掉 `RCLONE_BIN`，不是带病启动）。要求：`RCLONE_BIN` 是服务进程可执行的普通文件；服务进程 `PATH` 上有可执行的 `fusermount3`（取第一个，记下其绝对路径，此后的卸载只用它）与 `fusermount`（rclone 1.60.1 挂载时按 PATH 查找的是 `fusermount`；Ubuntu 的 fuse3 包把它装成指向 `fusermount3` 的符号链接）；`/dev/fuse` 存在且是字符设备。未配置 `RCLONE_BIN` 时不检查任何 FUSE 前提。
+- **`OMP_USER` 部署另需**：
+  - `/etc/fuse.conf` 有一行恰为 `user_allow_other`（被注释的 `#user_allow_other` 不算）；挂载以 `--allow-other` 让 omp uid 进入。预检经固定路径 `/usr/bin/id -u -- <OMP_USER>` 取得 omp 的数值 uid（不走 PATH），取不到即不过。
+  - `fusermount3` 与 `fusermount` 只能对 app 所在、omp 不在的组可执行：`user_allow_other` 全机生效，omp uid 若能执行 setuid 的 `fusermount3`，就能在自己可写的空间根下挂一个 `allow_other` 的 FUSE、再让它不应答，app 的任何一次进入都会挂住，omp 还能向 app 伪造文件内容（ADR-0003「2026-10 补充」P10）。Ubuntu 原装为 `4755 root:root`，部署时改为例如 `dpkg-statoverride --update --add root <app 组> 4750 /usr/bin/fusermount3`（`fusermount` 是指向它的符号链接，经 usrmerge 的 `/bin/fusermount3` 是同一个文件，三者一并受限；`dpkg-statoverride` 在包升级后仍然生效）。`<app 组>` 是 app 用户所在、omp 用户不在的组，不得是 `workbuddy`（omp 是它的成员，ADR-0010）。预检检查 PATH 各项下的每一个 `fusermount3` 与 `fusermount`：没有 other 执行位，且属组不是 `/usr/bin/id -G -- <OMP_USER>` 输出的任何一个组。PATH 之外的 setuid 副本预检看不到，部署时删除（`find / -xdev -perm -4000 -name 'fusermount*'` 可列出）。
+  - 同 uid 部署（`OMP_USER` 未配置）不查 `fuse.conf` 与执行权：那时 omp 就是 app uid，原装 `4755` 的 `fusermount3` 不是错误。
+- **容器部署**：容器需 `/dev/fuse` 与 `SYS_ADMIN`；#1665 实测的容器为 `docker run --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined`（另加的 `NET_ADMIN` 只供探针的 iptables，ADR-0003「2026-10 补充」），容器内装 fuse3 与 rclone。参考镜像 `deploy/app/`（9.8）暂不提供挂载支持，见 S4b。
+- **回滚**：撤掉 `RCLONE_BIN` 即关闭挂载功能，空间根目录照常使用。

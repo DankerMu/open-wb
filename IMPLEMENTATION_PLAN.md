@@ -506,7 +506,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 ## Rollback Or Containment
 
 - 每阶段 = feature 分支 + CI 门禁 + 分支保护合入；坏了 `git revert`，master 始终可运行。
-- S1b：挂载功能独立 feature-flag，故障不阻塞空间根目录使用。
+- S1b：`RCLONE_BIN` 未配置即关闭；配置了而预检不过即启动失败（owner 裁定 fail-closed）。
 - S2x：kbservice 独立进程，故障降级为"无 KB 的会话服务"（host tool 返回明确错误）。
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
