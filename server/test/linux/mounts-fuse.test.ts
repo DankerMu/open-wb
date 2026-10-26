@@ -82,9 +82,18 @@ const RESURRECTION_ROUNDS = 50;
 const UPLOAD_MS = 15_000;
 /** While the remote is cut: one remount at 5 s and its whole 20 s readiness window, and margin. */
 const HELD_DOWN_MS = 30_000;
-/** How long after the sftp mount came online (and was read back) the remote is cut. */
-const CUT_INTO_ROUND_MS = 3_000;
+/**
+ * spec「sftp 读写与远端停机」: offline within 37 s of `_DOWN` — one probe round (35 s) and at most 2 s of
+ * timer, probe-child and polling overhead. Cut right after the read-back, at the start of the probe
+ * round armed when the mount came online, detection takes the whole round: the worst phase.
+ */
+const OUTAGE_DETECT_MS = PROBE_ROUND_MS + 2_000;
 const LOCAL_CASE_MS = 120_000;
+/**
+ * 删除不复活 gives up on its own well before LOCAL_CASE_MS: a case timeout would count as the expected
+ * failure; giving up returns normally, which `it.fails` reports red. The rest is left to the teardown.
+ */
+const RESURRECTION_DEADLINE_MS = 60_000;
 const SFTP_CASE_MS = 600_000;
 const SOURCE_FILES: ReadonlyArray<readonly [string, string]> = [
   ["notes.md", "# kept\n"],
@@ -136,7 +145,7 @@ describe.skipIf(!OPTED_IN)(
       await tearDownOwned(bins);
     });
 
-    it("凭证文件往返：rclone config dump 逐字读回 user 与 IPv6 host", {
+    it("凭证文件往返：rclone config dump 逐字读回 user 与 IPv6 host（含 IPv4 映射写法）", {
       timeout: LOCAL_CASE_MS,
     }, async () => {
       const dir = ownedTempDir();
@@ -157,7 +166,13 @@ describe.skipIf(!OPTED_IN)(
         "a # b",
         "张三",
       ];
-      for (const [index, username] of usernames.entries()) {
+      // The last pair: -6407526286「尚未覆盖」, an IPv4-mapped address is an IPv6 literal and bracketed
+      // like any other. Only the conf half; dialling it is not measured here (ADR-0003).
+      const cases = [
+        ...usernames.map((username) => [username, "fd00::1", "[fd00::1]"] as const),
+        ["alice", "::ffff:10.0.0.1", "[::ffff:10.0.0.1]"] as const,
+      ];
+      for (const [index, [username, host, hostRead]] of cases.entries()) {
         const mountId = index.toString(16).padStart(32, "0");
         const body: MountBody = {
           name: "远端",
@@ -168,7 +183,7 @@ describe.skipIf(!OPTED_IN)(
           username,
           password: "pw-1700",
         };
-        await writeRcloneConf({ rcloneBin: bins.rclone, dir, mountId }, body, "fd00::1");
+        await writeRcloneConf({ rcloneBin: bins.rclone, dir, mountId }, body, host);
         const dumped = spawnSync(
           bins.rclone,
           ["config", "dump", "--config", join(dir, "rclone.conf")],
@@ -179,8 +194,8 @@ describe.skipIf(!OPTED_IN)(
           `m${mountId}`
         ];
         expect(section?.type).toBe("sftp");
-        expect(section?.host).toBe("[fd00::1]");
-        expect(section?.user, `username #${index}`).toBe(username);
+        expect(section?.host, `case #${index}`).toBe(hostRead);
+        expect(section?.user, `case #${index}`).toBe(username);
       }
     });
 
@@ -262,32 +277,53 @@ describe.skipIf(!OPTED_IN)(
     // Known limitation (ADR-0003「2026-10 补充」, system.md §9.12): with `--vfs-write-back 0s` the
     // sequence still leaves the directory's original name behind in the source in about one sequence
     // of eight, so the case repeats it and is `it.fails` until rclone stops doing so (owner 2026-10-25).
+    // Only that residue may fail it: anything else going wrong — attach, the sequence, the mount view,
+    // detach, the teardown, a hang — is logged as `unexpected:` and the body returns normally, which
+    // `it.fails` reports red. The teardown runs in the body because `it.fails` would swallow an
+    // `afterEach` failure too.
     it.fails("删除不复活：目录改名后删掉其中的新文件与目录，7 s 后挂载视图与源目录都无残留", {
       timeout: LOCAL_CASE_MS,
     }, async () => {
-      const world = createWorld(bins);
-      const before = await treeOf(world.source);
-      const record = await world.manager.attach(localBody("本机", false));
-      const mountPoint = join(world.root, "本机");
-
-      for (let round = 0; round < RESURRECTION_ROUNDS; round += 1) {
-        await mkdir(join(mountPoint, `d${round}`));
-        await writeFile(join(mountPoint, `d${round}`, "f"), "resurrection probe\n");
-        await rename(join(mountPoint, `d${round}`), join(mountPoint, `d2-${round}`));
-        await unlink(join(mountPoint, `d2-${round}`, "f"));
-        await rmdir(join(mountPoint, `d2-${round}`));
+      let observed: { before: Record<string, string>; source: Record<string, string> } | undefined;
+      const unexpected: unknown[] = [];
+      try {
+        observed = await withDeadline(RESURRECTION_DEADLINE_MS, async () => {
+          const world = createWorld(bins);
+          const before = await treeOf(world.source);
+          const record = await world.manager.attach(localBody("本机", false));
+          const mountPoint = join(world.root, "本机");
+          for (let round = 0; round < RESURRECTION_ROUNDS; round += 1) {
+            await mkdir(join(mountPoint, `d${round}`));
+            await writeFile(join(mountPoint, `d${round}`, "f"), "resurrection probe\n");
+            await rename(join(mountPoint, `d${round}`), join(mountPoint, `d2-${round}`));
+            await unlink(join(mountPoint, `d2-${round}`, "f"));
+            await rmdir(join(mountPoint, `d2-${round}`));
+          }
+          await delay(WRITE_BACK_SETTLE_MS);
+          const view = await treeOf(mountPoint);
+          const source = await treeOf(world.source);
+          await world.manager.detach(record.id, ACTOR);
+          expect(mountPoints()).not.toContain(mountPoint);
+          expect(view, "the mount view").toEqual(before);
+          expect(world.errors).toEqual([]);
+          return { before, source };
+        });
+      } catch (error) {
+        unexpected.push(error);
       }
-      await delay(WRITE_BACK_SETTLE_MS);
-      const view = await treeOf(mountPoint);
-      const source = await treeOf(world.source);
-      await world.manager.detach(record.id, ACTOR);
-      expect(mountPoints()).not.toContain(mountPoint);
+      try {
+        await tearDownOwned(bins);
+      } catch (error) {
+        unexpected.push(error);
+      }
+      if (observed === undefined || unexpected.length > 0) {
+        console.error(`删除不复活 unexpected: ${unexpected.map(String).join("; ")}`);
+        return;
+      }
       console.info(
-        `删除不复活 residue in the source: ${residueOf(source, before).join(" ") || "none"}`,
+        `删除不复活 residue in the source: ${residueOf(observed.source, observed.before).join(" ") || "none"}`,
       );
-
-      expect(view).toEqual(before);
-      expect(source).toEqual(before);
+      expect(observed.source).toEqual(observed.before);
     });
 
     describe.skipIf(SFTP_GIVEN.length !== SFTP_KEYS.length)("sftp", () => {
@@ -316,7 +352,7 @@ describe.skipIf(!OPTED_IN)(
         expect(world.errors).toEqual([]);
       });
 
-      it("sftp 远端停机：_DOWN 之后 35 s 内离线，_UP 之后 360 s 内回到在线且读回一致", {
+      it("sftp 远端停机：读回之后立即 _DOWN，37 s 内离线，_UP 之后 360 s 内回到在线且读回一致", {
         timeout: SFTP_CASE_MS,
       }, async () => {
         const remote = sftp as Sftp;
@@ -328,15 +364,16 @@ describe.skipIf(!OPTED_IN)(
         await writeFile(join(mountPoint, file), bytes);
         expect(await readFile(join(mountPoint, file), "utf8")).toBe(bytes);
 
-        // Into the probe round armed when the mount came online: cut right at its start, detection is
-        // 30 s + the probe's own child time + 5 s — tens of ms past 35 s (#1700 sign-off, run 1).
-        await delay(CUT_INTO_ROUND_MS);
+        // At once: the probe round armed when the mount came online has just started (OUTAGE_DETECT_MS).
         owned.restoreRemote = () => runRemoteSwitch(remote.up);
         runRemoteSwitch(remote.down);
         const downAt = Date.now();
-        await waitFor(async () => world.manager.statusOf(record.id) === "offline", PROBE_ROUND_MS);
+        await waitFor(
+          async () => world.manager.statusOf(record.id) === "offline",
+          OUTAGE_DETECT_MS,
+        );
         const offlineAfter = Date.now() - downAt;
-        expect(offlineAfter).toBeLessThanOrEqual(PROBE_ROUND_MS);
+        expect(offlineAfter).toBeLessThanOrEqual(OUTAGE_DETECT_MS);
         await waitFor(async () => !mountPoints().includes(mountPoint), PROBE_ROUND_MS);
         const heldUntil = Date.now() + HELD_DOWN_MS;
         while (Date.now() < heldUntil) {
@@ -560,6 +597,24 @@ async function waitFor(condition: () => Promise<boolean>, ms: number): Promise<v
   }
 }
 
+/**
+ * `work()`, or a rejection once `ms` have passed. The abandoned work runs on: its late rejection is
+ * dropped here (the caller has already given up and tears down what it left).
+ */
+async function withDeadline<T>(ms: number, work: () => Promise<T>): Promise<T> {
+  const running = work();
+  running.catch(() => undefined);
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`not done within ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([running, expired]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Mount points (field 5 of /proc/self/mountinfo, octal escapes decoded, read as UTF-8). */
 function mountPoints(): string[] {
   return readFileSync("/proc/self/mountinfo", "latin1")
@@ -594,23 +649,72 @@ function rclonePids(mountId: string): number[] {
 /**
  * Restores a cut remote, closes every manager of the case (it unmounts what it mounted), SIGKILLs any
  * rclone of the case's mounts still alive, `fusermount3 -uz` every mount left below the case's roots
- * (deepest first) and fails if one remains; then closes the databases and removes the roots.
+ * (deepest first) and checks none remains; then closes the databases and removes the roots. A step
+ * that throws does not skip the later ones; the errors are thrown together at the end. The roots are
+ * removed only once the sweep left nothing mounted below them: `rm` must never descend into a mount.
  */
 async function tearDownOwned(bins: Prerequisites | undefined): Promise<void> {
   const { roots, worlds, restoreRemote } = owned;
   owned.roots = [];
   owned.worlds = [];
   owned.restoreRemote = undefined;
-  restoreRemote?.();
-  await Promise.all(worlds.map((world) => world.manager.closeAll()));
+  const errors: unknown[] = [];
+  const attempt = (step: () => void) => {
+    try {
+      step();
+    } catch (error) {
+      errors.push(error);
+    }
+  };
+  attempt(() => restoreRemote?.());
+  const closed = await Promise.allSettled(worlds.map(async (world) => world.manager.closeAll()));
+  for (const result of closed) {
+    if (result.status === "rejected") {
+      errors.push(result.reason);
+    }
+  }
   for (const world of worlds) {
-    const ids = world.db.prepare("SELECT id FROM workspace_mounts").all();
-    for (const { id } of ids) {
-      for (const pid of rclonePids(String(id))) {
-        process.kill(pid, "SIGKILL");
+    attempt(() => killRclones(world));
+  }
+  let unmounted = false;
+  attempt(() => {
+    sweepMounts(bins, roots);
+    unmounted = true;
+  });
+  for (const world of worlds) {
+    attempt(() => world.db.close());
+  }
+  if (unmounted) {
+    for (const result of await Promise.allSettled(
+      roots.map((root) => rm(root, { recursive: true, force: true })),
+    )) {
+      if (result.status === "rejected") {
+        errors.push(result.reason);
       }
     }
   }
+  if (errors.length > 0) {
+    throw new AggregateError(errors, `teardown: ${errors.map(String).join("; ")}`);
+  }
+}
+
+/** SIGKILLs every live rclone of `world`'s mounts; one that exited meanwhile (ESRCH) is fine. */
+function killRclones(world: World): void {
+  for (const { id } of world.db.prepare("SELECT id FROM workspace_mounts").all()) {
+    for (const pid of rclonePids(String(id))) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+          throw error;
+        }
+      }
+    }
+  }
+}
+
+/** `fusermount3 -uz` every mount below `roots`, deepest first; throws unless none is left. */
+function sweepMounts(bins: Prerequisites | undefined, roots: string[]): void {
   const below = (point: string) => roots.some((root) => point.startsWith(`${root}/`));
   const failures: string[] = [];
   for (const point of mountPoints()
@@ -628,11 +732,5 @@ async function tearDownOwned(bins: Prerequisites | undefined): Promise<void> {
     throw new Error(
       `fusermount3 -uz failed: ${failures.join("; ")}; still mounted: ${left.join(", ")}`,
     );
-  }
-  for (const world of worlds) {
-    world.db.close();
-  }
-  for (const root of roots) {
-    await rm(root, { recursive: true, force: true });
   }
 }
