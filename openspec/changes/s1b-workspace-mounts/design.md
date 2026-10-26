@@ -151,7 +151,7 @@
   - 临时空间拒绝挂载（D13 的 400）；转正是单向的，于是临时空间永远没有 app 挂载。
   - owner 裁定「删除工作空间先卸载它的全部挂载」今天没有 HTTP 路径能触发：没有删除正式空间的端点，唯一的空间删除路径（会话删除连带临时空间）遇不到 app 挂载。落成 manager 的不变量：`detachWorkspace(workspaceId)` 卸载并删除该空间的全部挂载行，`workspace_mounts.workspace_id` 的 `RESTRICT` 使任何先删空间行的未来路径在 DB 层失败。会话删除与 temporary-workspaces「临时空间目录的删除」不改（其中的 #1237 规则继续管外部挂载）。
 - **D16 挂载目录内的文件端点**：成员判定只有一条词法规则（D21），与 sandbox-core `resolve` 的规范化是同一个函数（`core/sandbox` 导出）：路径（`path`，或 move 的 `from` / `to`）按 `/` 分割、去掉空段与 `.` 段（`..` 已被 resolve 拒绝）之后的第一段逐字节等于该空间某个登记挂载的 `name`，即「在该挂载内」（其后没有段即挂载根本身）；`./远端/a.md`、`远端//a.md` 与 `远端/a.md` 同属 `远端`。判定只读内存登记，不碰文件系统；位置在 `sandbox.resolve` 之后（越界仍是 403 + 审计）、一切存在性检查与文件系统读写之前：
-  - 离线：tree、file、download、archive、dirs、move（任一侧）→ 409 `mount_offline`。
+  - 离线：tree、file、download、archive、dirs、move（任一侧）→ 409 `mount_offline`。（#1694 评审：词法、边界与离线三部分随 `mounts/path-rule.ts` 先于组 9 落地——组 8 把挂载名接进 facade 的 `resolve` 之后，挂载名下不再逐级 `lstat`，文件端点若无此判定会跟随离线挂载点上被换成的符号链接越界；适配器落地之前离线分支对在线挂载同样生效，#1696 改为在线经适配器。）
   - 只读：dirs、move（两侧在同一只读挂载内）→ 403 `mount_read_only`。
   - 边界：entries DELETE 的目标在任一挂载内（含挂载根）→ 409 `mount_boundary`；move 恰一侧在挂载内、两侧在不同挂载内、或 `from` 是挂载根 → 409 `mount_boundary`。同一挂载内的改名与移动照常一次 `rename`。
   - 判定次序：边界先于离线与只读（删除与跨界无论状态都不可能成功）。

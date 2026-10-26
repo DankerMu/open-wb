@@ -43,6 +43,7 @@ import { closeSync, renameSync } from "node:fs";
 import { basename, dirname } from "node:path";
 import type { FastifyInstance, onErrorHookHandler } from "fastify";
 import { HttpError } from "../core/errors/index.js";
+import { refuseDeleteInMount, refuseInMount, refuseMoveInMount } from "./mounts/path-rule.js";
 import { openPreviewStream } from "./preview.js";
 import { openRegularFile } from "./regular-file.js";
 import {
@@ -134,6 +135,7 @@ export function registerWorkspaceEntries(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, true);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "read");
+      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
       const status = lstatExisting(absPath);
       if (status === undefined || !status.isFile()) {
         throw new HttpError("not_found");
@@ -174,6 +176,8 @@ export function registerWorkspaceEntries(
       const path = parsePathQuery(request.query, true);
       // `delete` refuses the empty path too: the workspace root itself is not an entry.
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "delete");
+      // A mount's entries and its root are never moved to the recycle directory (D16).
+      refuseDeleteInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
       const type = entryTypeOf(absPath);
       // One rename into the recycle directory; it throws with the entry still in place.
       const trashId = dependencies.trash.moveToTrash(principal.id, workspaceId, absPath);
@@ -213,6 +217,8 @@ export function registerWorkspaceEntries(
       if (toAbs.startsWith(`${fromAbs}/`)) {
         throw new HttpError("bad_request");
       }
+      // Then the mount rule (D16), also before anything is looked up.
+      refuseMoveInMount(dependencies.sandbox.mountNamesOf(workspaceId), from, to);
       const type = entryTypeOf(fromAbs);
       // The parent is never made here.
       if (!isOrdinaryDirectory(dirname(toAbs))) {

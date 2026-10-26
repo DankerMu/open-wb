@@ -942,9 +942,9 @@ modelRoles:
 
 | 入口 | 挂载内路径 |
 |---|---|
-| tree / file / download / archive / dirs / move（`workspaces/rest.ts`、`rest-entries.ts`、`rest-archive.ts`） | 组 9：离线 409 `mount_offline`、删除与跨挂载移动拒绝，在线时经异步适配器 |
+| tree / file / download / archive / dirs / move（`workspaces/rest.ts`、`rest-entries.ts`、`rest-archive.ts`） | 词法判定（`workspaces/mounts/path-rule.ts`，在沙箱判定之后、任何存在性检查之前）：跨挂载移动、移动挂载根 409 `mount_boundary`；其余挂载内操作现一律 409 `mount_offline`，不碰文件系统（#1694）。组 9 起在线挂载经异步适配器、只读挂载 403 `mount_read_only` |
 | 空间根一层的 `tree`（`workspaces/tree.ts`） | 按名字跳过已登记挂载，不 `lstat`、不列出；挂载根行只来自 `GET …/mounts` |
-| `DELETE …/entries` 与回收目录（`trash.ts`） | 409 `mount_boundary`（组 9）；挂载只在根下一层、根不能删，回收目录遇不到挂载 |
+| `DELETE …/entries` 与回收目录（`trash.ts`） | 409 `mount_boundary`（含挂载根，同上的词法判定）；挂载只在根下一层、根不能删，回收目录遇不到挂载 |
 | 上传 | 永不在挂载内（`uploads` 是保留名） |
 | 预览源 `/w/`、`/o/`（`preview/app.ts`） | 404，与「不是普通文件」同一应答（在越界判定之后） |
 | 会话附件（`sessions/prompt-attachments.ts`） | 400 `bad_request`（在越界判定之后） |
