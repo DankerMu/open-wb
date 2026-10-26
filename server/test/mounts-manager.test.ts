@@ -5,8 +5,8 @@
  * (`mounts-manager-helpers.ts`); the readiness criterion reads the fake mountinfo the fakes write. Expected
  * argv, file shapes and modes are literals from the spec; credentials are sentinels asserted absent from
  * every argv, environment and error-channel record. Unmounting is in `mounts-manager-unmount.test.ts`.
- * Not covered: a mount point owned by another uid (needs root to build), and the remount side of the
- * host / mount-point re-checks (group 6, #1687).
+ * Not covered: a mount point owned by another uid (needs root to build). The remount side of the host /
+ * mount-point re-checks is in `mounts-manager-supervision.test.ts` (#1687).
  */
 import {
   chmodSync,
@@ -47,6 +47,8 @@ import {
   smb,
   USER_SENTINEL,
   W1,
+  W2,
+  W3,
   type World,
 } from "./mounts-manager-helpers.js";
 
@@ -510,10 +512,14 @@ function hangingResolver(): {
   return { pending, resolveHost };
 }
 
-/** An sftp mount named `name` on host `<name>.intra`. */
+/**
+ * An sftp mount named `name` on host `<name>.intra`, each name in its own workspace: attaches in one
+ * workspace run one after another on its serial chain (#1687), the lookup limit is across workspaces.
+ */
+const WORKSPACE_OF: Readonly<Record<string, string>> = { a: W1, b: W2, c: W3 };
 const attachNamed = (manager: ReturnType<World["manager"]>, name: string) =>
   manager.attach({
-    workspaceId: W1,
+    workspaceId: WORKSPACE_OF[name] ?? W1,
     ownerId: OWNER,
     body: sftp("/srv/data", { name, host: `${name}.intra` }),
   });
@@ -572,7 +578,7 @@ describe("挂载取值与主机规则 (manager layer)", () => {
     expect(world.mountCalls()).toHaveLength(2);
   });
 
-  it("at most two host lookups are in flight; the third waits for a slot", {
+  it("at most two host lookups are in flight across workspaces; the third waits for a slot", {
     timeout: CASE_MS,
   }, async () => {
     const { pending, resolveHost } = hangingResolver();
@@ -591,7 +597,7 @@ describe("挂载取值与主机规则 (manager layer)", () => {
     expect(world.calls()).toEqual([]);
   });
 
-  it("an IP literal host is not queued behind two hanging lookups", {
+  it("an IP literal host in a third workspace is not queued behind two hanging lookups", {
     timeout: CASE_MS,
   }, async () => {
     const { pending, resolveHost } = hangingResolver();
@@ -603,7 +609,7 @@ describe("挂载取值与主机规则 (manager layer)", () => {
     const stuck = new AbortController();
     const record = await Promise.race([
       manager.attach({
-        workspaceId: W1,
+        workspaceId: W3,
         ownerId: OWNER,
         body: sftp("/srv/data", { name: "literal", host: "10.0.0.7" }),
       }),

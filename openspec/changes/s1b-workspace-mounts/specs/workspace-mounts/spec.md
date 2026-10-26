@@ -163,8 +163,8 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - **THEN** 恢复不抛出、不产生未处理的 rejection；该挂载 `offline` 并在 5 s 后重挂，另一个照常 `online`
 
 #### Scenario: 关停卸载
-- **WHEN** 两个挂载在线、其中一个有待定的重挂定时器时执行关停卸载
-- **THEN** 两个假 rclone 进程都已退出，假 `fusermount3` 对两个在 mountinfo 里的挂载点各收到一次 `-uz`；此后没有探测或重挂再发生；挂载行与私有目录都还在
+- **WHEN** 两个挂载在线、第三个挂载离线且有待定的重挂定时器时执行关停卸载
+- **THEN** 两个在线挂载的假 rclone 进程都已退出，假 `fusermount3` 对两个在 mountinfo 里的挂载点各收到一次 `-uz`；此后没有探测或重挂再发生（含第三个的待定重挂）；三个挂载的行与私有目录都还在
 - **WHEN** 编译入口在合法挂载配置下启动、success record 写出之后收到 SIGTERM（http-service-skeleton「挂载键与启动预检」）
 - **THEN** 挂载的卸载发生在 DB 关闭之前，进程以 0 退出
 - **WHEN** DB 里有三个挂载，启动恢复对第一个的 `mount` 调用挂起（假 rclone 不写 mountinfo 也不退出）时执行关停卸载
