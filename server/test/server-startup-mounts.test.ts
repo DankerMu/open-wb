@@ -6,7 +6,7 @@
  * 假 rclone 不会出现在里面：启动恢复的那次尝试一直在等就绪（`@hang`）或立即失败（`@exit1`），所以这里实测的是
  * 「`closeAll` 杀掉还在等就绪的挂载子进程、DB 关闭之前它已退出、挂载行与私有目录仍在、退出码 0」与「恢复失败
  * 不影响 success record 与退出码」。预检要求 `/dev/fuse` 是字符设备：不是（macOS 开发机、没有 FUSE 的
- * runner）即整组明示跳过，由测试主机补跑（#1700）。不需要 root。`GET …/mounts` 的 `enabled` 由 #1690 补上。
+ * runner）即整组明示跳过，由测试主机补跑（#1700）。不需要 root。启动成功一例另以 HTTP 断言 `GET …/mounts` 的 `enabled` 为 true（#1690）。
  */
 import {
   chmodSync,
@@ -31,6 +31,8 @@ import {
   type CompiledServerEntry,
   compiledFixtureEnv,
   compileServerEntry,
+  getJson,
+  login,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
 import { applicationStderr } from "./server-startup-order-helpers.js";
@@ -207,7 +209,7 @@ describe.skipIf(!FUSE)(
     }, 90_000);
 
     it(
-      "starts with the fake rclone and fusermount3: the success record as usual, modules unchanged",
+      "starts with the fake rclone and fusermount3: the success record as usual, modules unchanged, GET …/mounts enabled",
       async () => {
         const fx = fixture();
         const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
@@ -216,6 +218,13 @@ describe.skipIf(!FUSE)(
         try {
           await server.waitForStarted();
           expect(server.stdout()).toBe(startedLine(port));
+          const mounts = await getJson(
+            port,
+            `/api/workspaces/${WORKSPACE}/mounts`,
+            await login(port),
+          );
+          expect(mounts.status).toBe(200);
+          expect(mounts.body).toEqual({ enabled: true, mounts: [] });
           expect(applicationStderr(server.stderr())).toBe("");
           expect(await server.stop()).toBe(0);
         } finally {

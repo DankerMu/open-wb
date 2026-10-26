@@ -51,7 +51,7 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact 三十条 `<METHOD> <route template>` 身份：POST login（#9）、
+/** 受信 content-parser owner 的 exact 三十一条 `<METHOD> <route template>` 身份：POST login（#9）、
  * POST logout（#10）、prompt、chat completions、两条工作空间、回合控制四条（#450）、会话
  * 元数据（#512）POST /api/sessions 与 PATCH /api/sessions/:id、临时空间转正（#927）
  * POST /api/workspaces/:id/promote、撤回（#948）POST /api/sessions/:id/undo、上传（#1013）
@@ -65,7 +65,8 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
  * 连接器（s1d-connectors）的 POST /api/connectors、PUT /api/connectors 与 bodyless 的 POST /api/connectors/probe
  * （连接器名称走查询参数），以及连接器账号缺省 PUT /api/connectors/defaults（GET 不读 body，不在集合内），以及
  * 挂载源（s1b-workspace-mounts）的 POST /api/mount-sources（GET 不读 body；DELETE /api/mount-sources/:id
- * 不读 body，均不在集合内）。
+ * 不读 body，均不在集合内），以及挂载 POST /api/workspaces/:id/mounts（GET 与
+ * DELETE /api/workspaces/:id/mounts/:mountId 不读 body，均不在集合内）。
  * method 是身份的一部分：DELETE /api/sessions/:id 与 PATCH、DELETE /api/models 与
  * POST / PUT、DELETE /api/experts 与 POST / PUT、GET / DELETE /api/connectors 与 POST / PUT、
  * GET /api/mount-sources 与 POST 同模板但不在集合内。
@@ -101,11 +102,12 @@ const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "POST /api/connectors/probe",
   "PUT /api/connectors/defaults",
   "POST /api/mount-sources",
+  "POST /api/workspaces/:id/mounts",
 ]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 `${method} ${route template}` 恰为
- * CONTENT_PARSER_OWNED_ROUTES 三十条之一时归一 exact 400（无单独的 POST 门；同模板的
+ * CONTENT_PARSER_OWNED_ROUTES 三十一条之一时归一 exact 400（无单独的 POST 门；同模板的
  * 其他方法不被覆盖）；matched /api 或 /api/* catch-all 与 unmatched non-GET
  * （routeOptions.url undefined 且 method != GET）恢复 typed not_found 404；其他已注册
  * route 保持 generic 5xx。显式 typed HttpError 保持 route-independent。方法/URL 边界

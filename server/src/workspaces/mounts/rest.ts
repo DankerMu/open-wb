@@ -14,7 +14,8 @@
  * feature-off unmount rule.
  *
  * `DELETE` (D14): unknown id 404; else (1) the source is marked deleting in `deletingSources` — the
- * mount routes refuse a new `local` mount on a marked source; (2) `detachSource` unmounts and deletes
+ * mount routes (`rest-mounts.ts`) refuse a new `local` mount on a marked source, before the attach and
+ * again in its insert transaction; (2) `detachSource` unmounts and deletes
  * every mount referencing it, each on its workspace's chain with its own `mount.detach`
  * (`source_deleted`, this admin); (3) one transaction deletes the source row and writes
  * `mount.source.delete` → 204. Each `DELETE` releases its hold on the mark in `finally` and the mark
@@ -37,13 +38,16 @@ import { acceptableSourcePath } from "./source-path.js";
 import type { createMountStore, MountSourceRecord } from "./store.js";
 import { validateMountSourceBody } from "./validate.js";
 
+/** The mount-source routes' and the mount routes' (`rest-mounts.ts`) dependencies. */
 export interface MountRestDependencies {
   store: ReturnType<typeof createMountStore>;
-  manager: Pick<MountManager, "detachSource">;
+  manager: Pick<MountManager, "enabled" | "attach" | "detach" | "detachSource" | "statusOf">;
   audit: { emit(event: Parameters<typeof emit>[1]): unknown };
   isAdmin: (principal: { readonly role: string }) => boolean;
   /** The five roots no source may overlap (design D2); the same array the manager is built with. */
   protectedRoots: readonly string[];
+  /** `MOUNT_MAX_PER_WORKSPACE`: the mount routes' 409 `mount_limit` (the manager never reads it). */
+  mountMaxPerWorkspace: number;
 }
 
 /** A source body is a name and a path: a few hundred bytes at most. */

@@ -424,11 +424,14 @@ describe("挂载进程与挂载点「就绪失败不留痕」", () => {
     timeout: CASE_MS,
   }, async () => {
     const failure = new Error("insert failed");
-    const attempt = world
-      .manager()
-      .attach({ workspaceId: W1, ownerId: OWNER, body: sftp() }, () => {
-        throw failure;
-      });
+    const attempt = world.manager().attach(
+      { workspaceId: W1, ownerId: OWNER, body: sftp() },
+      {
+        within: () => {
+          throw failure;
+        },
+      },
+    );
 
     await expect(attempt).rejects.toBe(failure);
     const [call] = world.mountCalls();

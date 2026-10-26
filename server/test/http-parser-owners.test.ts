@@ -25,8 +25,8 @@ const CTP_CODES = [
 
 type CtpCode = (typeof CTP_CODES)[number];
 
-/** spec 的三十条 method + matched route 归属身份（二十三条 POST + 一条 PATCH + 六条 PUT）。 */
-const THIRTY_OWNER_IDENTITIES = [
+/** spec 的三十一条 method + matched route 归属身份（二十四条 POST + 一条 PATCH + 六条 PUT）。 */
+const THIRTY_ONE_OWNER_IDENTITIES = [
   ["POST", "/api/auth/login"],
   ["POST", "/api/auth/logout"],
   ["POST", "/api/sessions/:id/prompt"],
@@ -57,6 +57,7 @@ const THIRTY_OWNER_IDENTITIES = [
   ["POST", "/api/connectors/probe"],
   ["PUT", "/api/connectors/defaults"],
   ["POST", "/api/mount-sources"],
+  ["POST", "/api/workspaces/:id/mounts"],
 ] as const;
 
 /** spec 码表的二十五码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
@@ -170,14 +171,14 @@ function crossWithCodes<T extends readonly unknown[]>(rows: readonly T[]) {
   return rows.flatMap((row) => CTP_CODES.map((code) => [...row, code] as const));
 }
 
-describe("证据 1：三十条身份 × 四个真实 CTP 错误 -> 400", () => {
-  it("身份集恰三十条且互不重复", () => {
-    const keys = THIRTY_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
-    expect(keys).toHaveLength(30);
-    expect(new Set(keys).size).toBe(30);
+describe("证据 1：三十一条身份 × 四个真实 CTP 错误 -> 400", () => {
+  it("身份集恰三十一条且互不重复", () => {
+    const keys = THIRTY_ONE_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
+    expect(keys).toHaveLength(31);
+    expect(new Set(keys).size).toBe(31);
   });
 
-  it.each(crossWithCodes(THIRTY_OWNER_IDENTITIES))(
+  it.each(crossWithCodes(THIRTY_ONE_OWNER_IDENTITIES))(
     "%s %s 上真实 %s -> 400 bad_request 且无 raw 细节",
     (method, url, code) => {
       const error = genuineCtpError(code);
@@ -186,7 +187,7 @@ describe("证据 1：三十条身份 × 四个真实 CTP 错误 -> 400", () => {
   );
 });
 
-describe("证据 2（守卫）：DELETE /api/sessions/:id、/api/models、/api/experts、/api/connectors 与 /api/mount-sources/:id 不被覆盖", () => {
+describe("证据 2（守卫）：DELETE /api/sessions/:id、/api/models、/api/experts、/api/connectors、/api/mount-sources/:id 与 /api/workspaces/:id/mounts/:mountId 不被覆盖", () => {
   it.each(
     crossWithCodes([
       ["/api/sessions/:id"],
@@ -194,6 +195,7 @@ describe("证据 2（守卫）：DELETE /api/sessions/:id、/api/models、/api/e
       ["/api/experts"],
       ["/api/connectors"],
       ["/api/mount-sources/:id"],
+      ["/api/workspaces/:id/mounts/:mountId"],
     ] as const),
   )("DELETE %s 上真实 %s -> generic 500", (url, code) => {
     const error = genuineCtpError(code);
@@ -235,6 +237,9 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["GET", "/api/mount-sources"],
     ["PUT", "/api/mount-sources"],
     ["POST", "/api/mount-sources/:id"],
+    ["GET", "/api/workspaces/:id/mounts"],
+    ["PUT", "/api/workspaces/:id/mounts"],
+    ["POST", "/api/workspaces/:id/mounts/:mountId"],
   ] as const;
 
   const LOOKALIKES = [
