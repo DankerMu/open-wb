@@ -35,7 +35,8 @@ export interface MountProbes {
   idBin: string;
 }
 
-const SYSTEM_PROBES: MountProbes = {
+/** 生产取值；`id` 走固定路径、不经 PATH（与 `/usr/bin/setpriv` 同一纪律）。 */
+export const SYSTEM_PROBES: MountProbes = {
   devFuse: "/dev/fuse",
   fuseConf: "/etc/fuse.conf",
   idBin: "/usr/bin/id",

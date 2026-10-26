@@ -22,7 +22,11 @@ import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { resolveServerConfig } from "../src/server.js";
-import { type MountProbes, resolveMountSettings } from "../src/workspaces/mounts/config.js";
+import {
+  type MountProbes,
+  resolveMountSettings,
+  SYSTEM_PROBES,
+} from "../src/workspaces/mounts/config.js";
 import {
   type CompiledServerEntry,
   compiledFixtureEnv,
@@ -147,6 +151,14 @@ describe("缺省与覆盖", () => {
       expect(Object.hasOwn(config, key)).toBe(false);
     }
     expect(config.mountMaxPerWorkspace).toBe(8);
+  });
+
+  it("生产探测位置固定：/dev/fuse、/etc/fuse.conf，id 走 /usr/bin/id 而不经 PATH", () => {
+    expect(SYSTEM_PROBES).toEqual({
+      devFuse: "/dev/fuse",
+      fuseConf: "/etc/fuse.conf",
+      idBin: "/usr/bin/id",
+    });
   });
 
   it("未配置 RCLONE_BIN 时不读 /dev/fuse 与 fuse.conf、不运行 id（OMP_USER 配置也一样）", () => {
