@@ -5,9 +5,10 @@
  * workspace W1 — once with `RCLONE_BIN` configured, once without it (feature off). The mount point is a
  * plain directory standing for an online mount: nothing here mounts anything, so whatever touches
  * `<root>/远端` is seen by the call recorder below (every `node:fs` and `node:fs/promises` function,
- * called through, recording its first argument). Two cases differ: the file endpoints (D16, lexical
- * part) make `远端` a symlink to a directory outside the workspace, and the restoring undo has the
- * mount point appear only after the snapshot it goes back to. The undo runs over scripted omp children
+ * called through, recording its first argument). Two cases differ: the file endpoints (D16; `远端` is
+ * never brought up here, so it is offline in both runs) make `远端` a symlink to a directory outside the
+ * workspace, and the restoring undo has the mount point appear only after the snapshot it goes back
+ * to. The undo runs over scripted omp children
  * (`session-regenerate-helpers.ts`); the preview listener is the real `createPreviewApp` on the app's own
  * workspace store and sandbox facade, as the production entry builds it.
  */
@@ -346,7 +347,7 @@ describe.each([
     expect(fsCalls.some((call) => call.path === join(skip.root, "uploads", "a.pdf"))).toBe(true);
   });
 
-  it("挂载目录内的文件端点 (lexical, interim): 远端 is a symlink out of the workspace — every endpoint is 409 before any fs call, the target is untouched", {
+  it("挂载目录内的文件端点 (offline mount): 远端 is a symlink out of the workspace — every endpoint is 409 before any fs call, the target is untouched", {
     timeout: CASE_MS,
   }, async () => {
     const skip = await openSkipWorld(featureOff);

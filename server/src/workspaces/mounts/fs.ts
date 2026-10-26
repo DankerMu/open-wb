@@ -14,6 +14,12 @@
  * the gate is free again. A late result is dropped (a late rejection is swallowed); a handle from an
  * `open` that returns late is closed before the gate frees. Other mounts are never affected.
  *
+ * The gate asks `isOnline(mountId)` each time it admits a call: no longer online (a failed probe,
+ * rclone gone, a detach) → that call ends `mount_offline` without reaching the file system and without
+ * `onOffline`, and the gate passes to the next. A request queued, or between two of its calls, when the
+ * mount went offline thus never lands on the lazily unmounted point (#1795 review); a `close` refused
+ * this way is the caller's to do directly (`files.ts`).
+ *
  * `mkdir` makes the one level whose parent exists (not recursive) and nothing here `chmod`s: inside a
  * mount the mode comes from rclone's `--umask` (D7 / D16). Arguments and the file system's own errors
  * pass through unchanged; the callers map them. The file system, the deadline and the clock are
@@ -52,6 +58,8 @@ export interface MountFsOptions {
   fs?: MountFsImpl;
   deadlineMs?: number;
   clock?: MountClock;
+  /** Asked as the gate admits each call: false ends that call `mount_offline` before the file system. */
+  isOnline(mountId: string): boolean;
   /** Called once each time a call on `mountId` passes its deadline; a throw from it is swallowed. */
   onOffline(mountId: string): void;
 }
@@ -127,6 +135,11 @@ export function createMountFs(options: MountFsOptions): MountFs {
         gates.delete(mountId);
       };
       const start = () => {
+        if (!options.isOnline(mountId)) {
+          reject(new HttpError("mount_offline"));
+          release();
+          return;
+        }
         let expired = false;
         const timer = clock.setTimeout(() => {
           expired = true;

@@ -95,7 +95,7 @@ export function createAttempts(context: AttemptContext) {
   };
   /** `-uz` on the mount point (when mounted) and on every mount of the section (design D9). */
   const lazyUnmount = async (mountPoint: string | undefined, section: string): Promise<void> => {
-    const targets = unmountTargets(await readMountinfo(mountinfoPath), mountPoint, section);
+    const targets = unmountTargets(readMountinfo(mountinfoPath), mountPoint, section);
     if (targets.length === 0) {
       return;
     }

@@ -135,7 +135,7 @@
 - **THEN** 假 `fusermount3` 收到恰一次 `-uz <挂载点>`，假 rclone 进程已退出；挂载点作为含 `stray.txt` 的普通目录保留、错误通道恰报告一次；私有目录不存在；挂载行已删；此后（推进注入时钟超过 300 s）没有任何重挂尝试
 
 ### Requirement: 在线状态与重挂
-每个已登记挂载的状态 SHALL 只在内存里，取 `online` 或 `offline`。`online` 的挂载每 30 s 探测一次，每个挂载至多一个在途探测：子进程存活、「已挂载」判据成立、在一个子进程里对挂载点做的 `stat` 在 5 s 内成功（超时即以 SIGKILL 结束该子进程）、并且 `sftp` / `smb` 挂载对该次挂载所用的 IP 与端口（给了用给的，否则 `sftp` 为 22、`smb` 为 445）的 TCP 连接在 5 s 内建立（建立即关闭；不碰挂载）——都成立才保持 `online`。连通检查的连接实现 SHALL 可由 manager 的构造选项注入。子进程退出 SHALL 立即判定 `offline`，不等下一轮；「宿主不同步进入挂载」的适配器调用超期同样 SHALL 立即判定 `offline`（与探测相互独立的第二个触发）。判定 `offline` 时 SHALL 惰性卸载该挂载、确保子进程已退出（超期触发时以 SIGKILL 结束它），然后安排重挂：第一次在 5 s 后，此后每次失败间隔翻倍，封顶 300 s；重挂成功即回 `online`、间隔复位为 5 s。每次重挂都经「挂载取值与主机规则」的主机规则与「挂载进程与挂载点」的挂载点重建与检查。卸载对在途探测、待定重挂与在途尝试的处置见「挂载操作的串行与取消」。
+每个已登记挂载的状态 SHALL 只在内存里，取 `online` 或 `offline`。`online` 的挂载每 30 s 探测一次，每个挂载至多一个在途探测：子进程存活、「已挂载」判据成立、在一个子进程里对挂载点做的 `stat` 在 5 s 内成功（超时即以 SIGKILL 结束该子进程）、并且 `sftp` / `smb` 挂载对该次挂载所用的 IP 与端口（给了用给的，否则 `sftp` 为 22、`smb` 为 445）的 TCP 连接在 5 s 内建立（建立即关闭；不碰挂载）——都成立才保持 `online`。连通检查的连接实现 SHALL 可由 manager 的构造选项注入。子进程退出 SHALL 立即判定 `offline`，不等下一轮；「宿主不同步进入挂载」的适配器调用超期同样 SHALL 立即判定 `offline`（与探测相互独立的第二个触发）。判定 `offline` 时 SHALL 先以 SIGKILL 结束子进程（尚未退出时；它使卡住的挂载内调用返回，#1665 P9），再惰性卸载该挂载，这一恢复过程 SHALL NOT 等待 libuv 线程池（挂起的调用可能占满它），然后安排重挂：第一次在 5 s 后，此后每次失败间隔翻倍，封顶 300 s；重挂成功即回 `online`、间隔复位为 5 s。每次重挂都经「挂载取值与主机规则」的主机规则与「挂载进程与挂载点」的挂载点重建与检查。卸载对在途探测、待定重挂与在途尝试的处置见「挂载操作的串行与取消」。
 
 #### Scenario: 崩溃即离线并退避重挂
 - **WHEN** 一个在线挂载的假 rclone 进程被 SIGKILL，随后假 rclone 被设定为接下来两次挂载失败、第三次成功（注入时钟）
@@ -256,7 +256,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - `GET …/tree`、`GET …/file`、`GET …/download`、`GET …/archive` 的路径在 `offline` 挂载内 → 409 `mount_offline`。
 - `POST …/dirs` 的路径在 `offline` 挂载内 → 409 `mount_offline`；在只读挂载内 → 403 `mount_read_only`。
 
-边界判定先于离线与只读判定。这些拒绝都 SHALL NOT 写 `file.delete` / `file.move` / `dir.create` 审计、SHALL NOT 触碰文件系统。通过判定的挂载内操作恰为 `tree`、`file`（含 Range）、`download`、`archive`、`dirs` 与同一挂载内的 `move`，它们在 `online` 挂载上的每一次文件系统调用 SHALL 经「宿主不同步进入挂载」的异步适配器。上传固定写入 `uploads/<名>`，而挂载名不能是 `uploads`，上传因此永不落进挂载。挂载内的 `dirs` 由异步适配器 `mkdir`，SHALL NOT 经 `ensureSharedDir`（它对已存在的分量同步 `stat`、对新建的分量同步 `chmod`）、也不 `chmod`：挂载内新目录的模式由 rclone 的 `--umask` 决定（「挂载进程与挂载点」），workspaces 的 `0o2770` 只对挂载之外成立。其它入口见「宿主不同步进入挂载」。挂载内的 `file`（含 Range）与 `download` 的 `Content-Length` 按打开后对描述符 `fstat` 的大小（区间按它截取）发出；此后经适配器读到 EOF 而已写出的字节少于该长度时，SHALL 销毁连接，不补齐、不以正常结束收尾；已写出的审计行不撤回。
+边界判定先于离线与只读判定。这些拒绝都 SHALL NOT 写 `file.delete` / `file.move` / `dir.create` 审计、SHALL NOT 触碰文件系统。通过判定的挂载内操作恰为 `tree`、`file`（含 Range）、`download`、`archive`、`dirs` 与同一挂载内的 `move`，它们在 `online` 挂载上的每一次文件系统调用 SHALL 经「宿主不同步进入挂载」的异步适配器。上传固定写入 `uploads/<名>`，而挂载名不能是 `uploads`，上传因此永不落进挂载。挂载内的 `dirs` 由异步适配器 `mkdir`，SHALL NOT 经 `ensureSharedDir`（它对已存在的分量同步 `stat`、对新建的分量同步 `chmod`）、也不 `chmod`：挂载内新目录的模式由 rclone 的 `--umask` 决定（「挂载进程与挂载点」），workspaces 的 `0o2770` 只对挂载之外成立。其它入口见「宿主不同步进入挂载」。挂载内的 `file`（含 Range）与 `download` 的 `Content-Length` 按打开后对描述符 `fstat` 的大小（区间按它截取）发出；此后经适配器读到 EOF 而已写出的字节少于该长度时，SHALL 销毁连接，不补齐、不以正常结束收尾；已写出的审计行不撤回。第一次读之前（响应头尚未发出）即 EOF 或失败时，以错误信封回答（读超期为 409 `mount_offline`，其余 generic 500），不发 200 / 206。
 
 #### Scenario: 挂载内短读即中断
 - **WHEN** 在线挂载 `远端` 里的 `a.bin`，适配器的 `fstat` 报 1000 字节，而读在第 400 字节处返回 EOF；分别请求 `download?path=远端/a.bin` 与 `file?path=远端/a.bin`（`Range: bytes=0-999`）
@@ -281,7 +281,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 ### Requirement: 宿主不同步进入挂载
 服务进程 SHALL NOT 对已登记挂载的挂载点或其下任何路径做同步文件系统调用。挂载点只在空间根下一层，挂载名不含 `.`、也不是保留名 `uploads` 或 `screenshots`（「迁移 049 挂载 schema」）：只经空间根自身、第一段含 `.` 的路径或这两个保留名、且不跟随符号链接的同步调用因此不会进入挂载；会跟随符号链接的调用（`realpath`）对 omp uid 可写的位置改为有期限的异步调用（下文）。成员按「挂载目录内的文件端点」的第一段规则词法判定；沙箱 facade 经端口 `mountNamesOf` 得到该空间的已登记挂载名（sandbox-core「沙箱 facade 与拒绝审计」），`resolve` 对挂载内路径不做文件系统调用。
 
-`online` 挂载内的文件系统调用（`lstat`、`readdir`、`open`、对已打开文件的 `fstat`、`read`、`close`、`mkdir`、`rename`）SHALL 只经一个异步适配器：只用 `fs/promises`；每个挂载一个先进先出的闸门、同一时刻至多一个调用在执行；每次调用自拿到闸门起有 10 s 期限（测试可注入）。超期时该请求 SHALL 以 409 `mount_offline` 结束，该挂载 SHALL 立即判定 `offline`（「在线状态与重挂」：以 SIGKILL 结束其 rclone、惰性卸载），排队中的调用 SHALL 都以 409 `mount_offline` 结束。
+`online` 挂载内的文件系统调用（`lstat`、`readdir`、`open`、对已打开文件的 `fstat`、`read`、`close`、`mkdir`、`rename`）SHALL 只经一个异步适配器：只用 `fs/promises`；每个挂载一个先进先出的闸门、同一时刻至多一个调用在执行；每次调用自拿到闸门起有 10 s 期限（测试可注入）。超期时该请求 SHALL 以 409 `mount_offline` 结束，该挂载 SHALL 立即判定 `offline`（「在线状态与重挂」：以 SIGKILL 结束其 rclone、惰性卸载），排队中的调用 SHALL 都以 409 `mount_offline` 结束。 闸门放行一个调用时该挂载已不是 `online`（探测失败、rclone 退出、卸载中）→ 该调用 SHALL 以 409 `mount_offline` 结束、不进入文件系统。
 
 其它对工作空间路径做文件系统调用的入口，对挂载内路径 SHALL 词法处置、不碰文件系统：
 

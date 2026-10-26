@@ -41,9 +41,18 @@
  */
 import { closeSync, renameSync } from "node:fs";
 import { basename, dirname } from "node:path";
+import type { Readable } from "node:stream";
 import type { FastifyInstance, onErrorHookHandler } from "fastify";
 import { HttpError } from "../core/errors/index.js";
-import { refuseDeleteInMount, refuseInMount, refuseMoveInMount } from "./mounts/path-rule.js";
+import {
+  closeMountFile,
+  mountRangeStream,
+  moveInMount,
+  openMountFile,
+  requireMountFile,
+} from "./mounts/files.js";
+import type { MountManager } from "./mounts/manager.js";
+import { mountToMoveIn, mountToRead, refuseDeleteInMount } from "./mounts/path-rule.js";
 import { openPreviewStream } from "./preview.js";
 import { openRegularFile } from "./regular-file.js";
 import {
@@ -51,6 +60,7 @@ import {
   ensureOwnedRoot,
   isOrdinaryDirectory,
   lstatExisting,
+  mountLookupOf,
   noStoreWorkspaceResponse,
   parseBodyRecord,
   parsePathQuery,
@@ -104,6 +114,60 @@ function entryTypeOf(absPath: string): "file" | "dir" {
   throw new HttpError("not_found");
 }
 
+/** A download's opened file: its size, the stream that sends all of it, and letting it go unsent. */
+interface Download {
+  size: number;
+  stream(): Readable;
+  release(): void;
+}
+
+/** Outside mounts: lstat, then the one descriptor every byte comes from. */
+function openLocalDownload(absPath: string): Download {
+  const status = lstatExisting(absPath);
+  if (status === undefined || !status.isFile()) {
+    throw new HttpError("not_found");
+  }
+  const file = openRegularFile(absPath);
+  // Any size and no Range. Bounded by the size of the open: a file that grows meanwhile sends
+  // no byte beyond the declared length.
+  return {
+    size: file.size,
+    stream: () => openPreviewStream(file, file.size),
+    release: () => closeSync(file.fd),
+  };
+}
+
+/** Inside an online mount: the same steps over the adapter; a short read cuts the connection (D16). */
+async function openMountDownload(
+  fs: MountManager["fs"],
+  mountId: string,
+  absPath: string,
+): Promise<Download> {
+  await requireMountFile(fs, mountId, absPath);
+  const file = await openMountFile(fs, mountId, absPath);
+  return {
+    size: file.size,
+    stream: () => mountRangeStream(fs, file, 0, file.size - 1),
+    release: () => void closeMountFile(fs, file),
+  };
+}
+
+/** Outside mounts, synchronously from the caller's resolves to the rename (see the header). */
+function moveLocal(fromAbs: string, toAbs: string): "file" | "dir" {
+  const type = entryTypeOf(fromAbs);
+  // The parent is never made here.
+  if (!isOrdinaryDirectory(dirname(toAbs))) {
+    throw new HttpError("not_found");
+  }
+  // Whatever is there, `from` itself included: nothing is overwritten or merged.
+  if (lstatExisting(toAbs) !== undefined) {
+    throw new HttpError("conflict");
+  }
+  // One rename; it throws (500) with the source in place, and there is no fallback.
+  renameSync(fromAbs, toAbs);
+  return type;
+}
+
 /** Exactly the two keys, both strings; what they name is the sandbox's to judge. */
 function parseMoveBody(body: unknown): { from: string; to: string } {
   const record = parseBodyRecord(body);
@@ -135,14 +199,13 @@ export function registerWorkspaceEntries(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, true);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "read");
-      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
-      const status = lstatExisting(absPath);
-      if (status === undefined || !status.isFile()) {
-        throw new HttpError("not_found");
-      }
+      const mount = mountToRead(mountLookupOf(dependencies, workspaceId), path);
       // Opened before the audit: what was swapped in after the lstat is 404 with no audit row, and
       // the row records what is sent — the opened inode, whatever happens to the path after.
-      const file = openRegularFile(absPath);
+      const file =
+        mount === undefined
+          ? openLocalDownload(absPath)
+          : await openMountDownload(dependencies.mountFiles.fs, mount.id, absPath);
       try {
         dependencies.audit.emit({
           kind: "file.download",
@@ -153,16 +216,14 @@ export function registerWorkspaceEntries(
         });
       } catch (error) {
         // A download that cannot be audited sends nothing and keeps no descriptor.
-        closeSync(file.fd);
+        file.release();
         throw error;
       }
       reply.header("Content-Type", "application/octet-stream");
       reply.header("Content-Disposition", attachmentDisposition(basename(absPath)));
       reply.header("Content-Length", String(file.size));
       reply.header("X-Content-Type-Options", "nosniff");
-      // Any size and no Range. Bounded by the size of the open: a file that grows meanwhile
-      // sends no byte beyond the declared length.
-      return reply.send(openPreviewStream(file, file.size));
+      return reply.send(file.stream());
     },
   );
   // No body semantics and not an owned-parser route: a well-formed body is ignored.
@@ -177,7 +238,7 @@ export function registerWorkspaceEntries(
       // `delete` refuses the empty path too: the workspace root itself is not an entry.
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "delete");
       // A mount's entries and its root are never moved to the recycle directory (D16).
-      refuseDeleteInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
+      refuseDeleteInMount(mountLookupOf(dependencies, workspaceId), path);
       const type = entryTypeOf(absPath);
       // One rename into the recycle directory; it throws with the entry still in place.
       const trashId = dependencies.trash.moveToTrash(principal.id, workspaceId, absPath);
@@ -204,7 +265,8 @@ export function registerWorkspaceEntries(
         done(null, payload);
       },
     },
-    // Synchronous from the first resolve to the rename: no `await` may come in between.
+    // Outside mounts, synchronous from the first resolve to the rename: no `await` may come in
+    // between. Inside one mount every call goes through its adapter, one `await` each (D16).
     async (request) => {
       const principal = currentPrincipal(request);
       const workspaceId = request.params.id;
@@ -218,18 +280,11 @@ export function registerWorkspaceEntries(
         throw new HttpError("bad_request");
       }
       // Then the mount rule (D16), also before anything is looked up.
-      refuseMoveInMount(dependencies.sandbox.mountNamesOf(workspaceId), from, to);
-      const type = entryTypeOf(fromAbs);
-      // The parent is never made here.
-      if (!isOrdinaryDirectory(dirname(toAbs))) {
-        throw new HttpError("not_found");
-      }
-      // Whatever is there, `from` itself included: nothing is overwritten or merged.
-      if (lstatExisting(toAbs) !== undefined) {
-        throw new HttpError("conflict");
-      }
-      // One rename; it throws (500) with the source in place, and there is no fallback.
-      renameSync(fromAbs, toAbs);
+      const mount = mountToMoveIn(mountLookupOf(dependencies, workspaceId), from, to);
+      const type =
+        mount === undefined
+          ? moveLocal(fromAbs, toAbs)
+          : await moveInMount(dependencies.mountFiles.fs, mount.id, fromAbs, toAbs);
       // After the rename and not rolled back: if this throws, the entry is at `to`.
       dependencies.audit.emit({
         kind: "file.move",

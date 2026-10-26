@@ -3,6 +3,7 @@ import { basename, dirname } from "node:path";
 import { Readable } from "node:stream";
 import type {
   FastifyInstance,
+  FastifyReply,
   FastifyRequest,
   onErrorHookHandler,
   onRequestHookHandler,
@@ -15,7 +16,17 @@ import { HttpError } from "../core/errors/index.js";
 import { hasRefusedCharacter } from "../core/refused-characters.js";
 import type { createSandbox } from "../core/sandbox/index.js";
 import { firstSegment } from "../core/sandbox/resolve.js";
-import { refuseInMount } from "./mounts/path-rule.js";
+import {
+  closeMountFile,
+  listMountDir,
+  makeMountDir,
+  mountRangeStream,
+  openMountFile,
+  readMountAt,
+  requireMountFile,
+} from "./mounts/files.js";
+import type { MountManager } from "./mounts/manager.js";
+import { type MountLookup, mountToRead, mountToWrite } from "./mounts/path-rule.js";
 import {
   classifyPreview,
   DEFAULT_PREVIEW_LIMITS,
@@ -24,7 +35,7 @@ import {
   type PreviewLimits,
   sniffText,
 } from "./preview.js";
-import { sendFileRange } from "./range-send.js";
+import { sendFileRange, sendRange } from "./range-send.js";
 import { isStructuralAbsence, openRegularFile, type RegularFile } from "./regular-file.js";
 import { WorkspaceRootOccupiedError, type WorkspaceStore } from "./store.js";
 import type { createTrash } from "./trash.js";
@@ -43,6 +54,8 @@ export interface WorkspaceRestDependencies {
   limits?: PreviewLimits;
   /** The recycle directory service of the assembly: where a deleted entry is moved. */
   trash: ReturnType<typeof createTrash>;
+  /** The mount-manager's registry and adapter for paths inside a mount (D16, D21). */
+  mountFiles: Pick<MountManager, "mountOf" | "fs">;
 }
 
 type OwnedPreParsing = preParsingHookHandler<
@@ -200,6 +213,54 @@ function sniffedAsText(fd: number): boolean {
   return sniffText(buffer.subarray(0, bytesRead));
 }
 
+/** The workspace's registered mounts by name, for `path-rule.ts`. */
+export function mountLookupOf(
+  dependencies: WorkspaceRestDependencies,
+  workspaceId: string,
+): MountLookup {
+  return (name) => dependencies.mountFiles.mountOf(workspaceId, name);
+}
+
+/**
+ * `file` inside an online mount: the route's steps over the adapter (D16) — lstat, open, fstat, the
+ * sniff, the classifier — then `Content-Length` from that fstat (or the text limit) and a stream that
+ * cuts the connection on a short read. A HEAD reads nothing.
+ */
+async function sendMountFile(
+  fs: MountManager["fs"],
+  request: FastifyRequest,
+  reply: FastifyReply,
+  target: { mountId: string; absPath: string; limits: PreviewLimits },
+): Promise<FastifyReply> {
+  const { mountId, absPath, limits } = target;
+  await requireMountFile(fs, mountId, absPath);
+  const name = basename(absPath);
+  const file = await openMountFile(fs, mountId, absPath);
+  let preview: ReturnType<typeof classifyPreview>;
+  try {
+    const sniffed = needsTextSniff(name)
+      ? { sniffedText: sniffText(await readMountAt(fs, file, 0, SNIFF_BYTES)) }
+      : {};
+    preview = classifyPreview(absPath, name, file.size, { limits, ...sniffed });
+  } catch (error) {
+    void closeMountFile(fs, file);
+    throw error;
+  }
+  const stream = (start: number, end: number) => mountRangeStream(fs, file, start, end);
+  if (preview.rangeable) {
+    return sendRange(request, reply, {
+      size: file.size,
+      headers: preview.headers,
+      unsatisfiableHeaders: { "X-Content-Type-Options": "nosniff" },
+      stream,
+      release: () => void closeMountFile(fs, file),
+    });
+  }
+  reply.headers(preview.headers).header("Content-Length", String(preview.limit));
+  // nosemgrep: javascript.express.security.audit.xss.direct-response-write.direct-response-write -- the route's classifier: text/plain, raster images, audio and video only; nosniff remains set.
+  return reply.send(stream(0, request.method === "HEAD" ? -1 : preview.limit - 1));
+}
+
 /** What `classify` gives, or its error once the descriptor is closed: a refused file sends nothing. */
 function classifiedOrClosed<T>(file: RegularFile, classify: () => T): T {
   try {
@@ -291,15 +352,20 @@ export function registerWorkspaceRest(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, false);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "list");
-      const mountNames = dependencies.sandbox.mountNamesOf(workspaceId);
-      // Below the root, a path in a registered mount is refused before anything is looked at (D16).
-      refuseInMount(mountNames, path);
+      // Below the root, a path in a registered mount is judged before anything is looked at (D16).
+      const mount = mountToRead(mountLookupOf(dependencies, workspaceId), path);
+      if (mount !== undefined) {
+        return { path, entries: await listMountDir(dependencies.mountFiles.fs, mount.id, absPath) };
+      }
       if (!isOrdinaryDirectory(absPath)) {
         throw new HttpError("not_found");
       }
       // The root level leaves the registered mount points out unlooked-at (D21); their rows come
       // from `GET …/mounts`.
-      const skip = firstSegment(path) === undefined ? mountNames : undefined;
+      const skip =
+        firstSegment(path) === undefined
+          ? dependencies.sandbox.mountNamesOf(workspaceId)
+          : undefined;
       return { path, entries: listOneLevel(absPath, skip) };
     },
   );
@@ -312,14 +378,19 @@ export function registerWorkspaceRest(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const { path } = parseDirectoryBody(request.body);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "mkdir");
-      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
-      if (!isOrdinaryDirectory(dirname(absPath))) {
-        throw new HttpError("not_found");
+      const mount = mountToWrite(mountLookupOf(dependencies, workspaceId), path);
+      if (mount !== undefined) {
+        // One level, no chmod and no `ensureSharedDir` inside a mount (D16).
+        await makeMountDir(dependencies.mountFiles.fs, mount.id, absPath);
+      } else {
+        if (!isOrdinaryDirectory(dirname(absPath))) {
+          throw new HttpError("not_found");
+        }
+        if (lstatExisting(absPath) !== undefined) {
+          throw new HttpError("conflict");
+        }
+        dependencies.sandbox.ensureSharedDir(absPath);
       }
-      if (lstatExisting(absPath) !== undefined) {
-        throw new HttpError("conflict");
-      }
-      dependencies.sandbox.ensureSharedDir(absPath);
       dependencies.audit.emit({
         kind: "dir.create",
         actorId: principal.id,
@@ -339,7 +410,14 @@ export function registerWorkspaceRest(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, true);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "read");
-      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
+      const mount = mountToRead(mountLookupOf(dependencies, workspaceId), path);
+      if (mount !== undefined) {
+        return sendMountFile(dependencies.mountFiles.fs, request, reply, {
+          mountId: mount.id,
+          absPath,
+          limits,
+        });
+      }
       const status = lstatExisting(absPath);
       if (status === undefined || !status.isFile()) {
         throw new HttpError("not_found");

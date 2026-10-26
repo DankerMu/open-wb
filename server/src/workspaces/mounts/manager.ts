@@ -15,8 +15,9 @@
  * had appeared, lazily unmounted (D9) — so neither waits out the 20 s readiness window.
  *
  * An online mount is probed every 30 s (`probe.ts`, at most one probe in flight); rclone exiting or a
- * failed probe makes it `offline` at once: lazy unmount and rclone killed right away (off the chain:
- * the unmount is what frees calls stuck in the mount), remount 5 s later, the delay doubling per failure
+ * failed probe makes it `offline` at once: rclone SIGKILLed, then the lazy unmount, right away (off the
+ * chain: these are what free calls stuck in the mount, #1665 P9's order) and off the libuv pool — those
+ * stuck calls may hold every pool thread — then remount 5 s later, the delay doubling per failure
  * up to 300 s and back to 5 s on success. A mount has at most one pending timer (probe round or remount)
  * and one offline transition in flight; `closeAll` waits for those. Each remount and restore judges the
  * host rule and the mount point again and rewrites `rclone.conf`'s `host` before the spawn (D3, D6, D8).
@@ -26,6 +27,12 @@
  *
  * One attempt's mechanics (target judgement, credential file, mount point check, spawn, readiness,
  * discarding) are in `attempt.ts`; the probe and the clock in `probe.ts`.
+ *
+ * The manager holds the one asynchronous adapter (`fs.ts`, D21) every file endpoint call inside an online
+ * mount goes through, on the manager's clock. A call past its deadline is the second offline trigger
+ * (D11): the mount goes `offline` at once, exactly as on a failed probe (SIGKILL, lazy unmount, backoff).
+ * The adapter admits a call only while its mount is `online` here: a request queued, or between two
+ * calls, when the mount goes offline (any trigger, or a detach) gets no further into it.
  */
 import { join } from "node:path";
 import type { emit } from "../../core/audit/index.js";
@@ -40,6 +47,7 @@ import {
   untilAborted,
 } from "./attempt.js";
 import type { MountSettings } from "./config.js";
+import { createMountFs, type MountFsImpl } from "./fs.js";
 import { type HostResolver, systemResolver } from "./host-policy.js";
 import { SYSTEM_MOUNTINFO } from "./mountinfo.js";
 import {
@@ -99,6 +107,10 @@ export interface MountManagerOptions
   ensureSharedDir?: (absPath: string) => void;
   readyTimeoutMs?: number;
   stopTimeoutMs?: number;
+  /** The file system under the file endpoints' adapter (D21); default `fs/promises`. */
+  mountFs?: MountFsImpl;
+  /** Each adapter call's deadline from taking its mount's gate; default 10 s. */
+  mountFsDeadlineMs?: number;
 }
 
 export interface AttachInput {
@@ -125,6 +137,13 @@ export interface DetachCause {
 
 export type MountStatus = "online" | "offline";
 
+/** What the file endpoints judge a mount by (D16): its id for the adapter, its status, read-only. */
+export interface MountRef {
+  id: string;
+  status: MountStatus;
+  readOnly: boolean;
+}
+
 interface Entry {
   record: MountRecord;
   status: MountStatus;
@@ -145,7 +164,7 @@ interface Entry {
   backoffMs: number;
   /** The pending probe round (online) or remount (offline); at most one. */
   timer: unknown;
-  /** The offline transition's unmount and kill in flight; at most one. */
+  /** The offline transition's SIGKILL then `-uz` in flight (never on the libuv pool); at most one. */
   settling: Promise<void> | undefined;
   probe: AbortController | undefined;
   /** The in-flight remount or restore attempt. */
@@ -307,8 +326,9 @@ export function createMountManager(options: MountManagerOptions) {
   };
 
   /**
-   * Crash or failed probe: `offline` now, then at once (not behind the chain — the lazy unmount is what
-   * frees calls stuck in the mount) unmount and stop rclone; the remount it schedules runs on the chain.
+   * Crash or failed probe: `offline` now, then at once (not behind the chain — the SIGKILL of rclone is
+   * what frees calls stuck in the mount, #1665 P9) kill rclone and `-uz`, never waiting on the libuv
+   * pool; the remount it schedules runs on the chain.
    * With a detach queued or running only the status changes: the rest is the detach's.
    */
   const goOffline = (entry: Entry): void => {
@@ -323,18 +343,22 @@ export function createMountManager(options: MountManagerOptions) {
     settleOffline(entry);
   };
 
-  /** Unmount, kill, schedule the remount; joins the one already in flight. */
+  /**
+   * SIGKILL, then unmount (#1665 P9: kill, then `-uz`), then schedule the remount; joins the one already
+   * in flight. Nothing here waits on the libuv pool (signals, a procfs read, a spawn): calls stuck in the
+   * mount may hold every pool thread, and this is what makes them return (#1795 review).
+   */
   const settleOffline = (entry: Entry): void => {
     if (!supervised(entry) || entry.settling !== undefined) {
       return; // a detach is in the way (it stops rclone itself), or this is already under way
     }
     const settle = async () => {
-      await lazyUnmount(entry.mountPoint, `m${entry.record.id}`).catch(reportUnlessRefused);
       const { child } = entry;
       entry.child = undefined;
       if (child !== undefined) {
         await killChild(child);
       }
+      await lazyUnmount(entry.mountPoint, `m${entry.record.id}`).catch(reportUnlessRefused);
       entry.settling = undefined;
       scheduleRemount(entry);
     };
@@ -431,6 +455,21 @@ export function createMountManager(options: MountManagerOptions) {
       throw error instanceof HttpError ? new AttemptFailed() : error;
     }
   };
+
+  /** The adapter's deadline passed on a call in `mountId` (D11 second trigger). Never throws. */
+  const markOffline = (mountId: string): void => {
+    const entry = registry.get(mountId);
+    if (entry !== undefined) {
+      goOffline(entry);
+    }
+  };
+  const mountFs = createMountFs({
+    ...(options.mountFs === undefined ? {} : { fs: options.mountFs }),
+    ...(options.mountFsDeadlineMs === undefined ? {} : { deadlineMs: options.mountFsDeadlineMs }),
+    clock,
+    isOnline: (mountId) => registry.get(mountId)?.status === "online",
+    onOffline: markOffline,
+  });
 
   // ---- attach and detach ----
 
@@ -679,6 +718,22 @@ export function createMountManager(options: MountManagerOptions) {
 
     statusOf(mountId: string): MountStatus {
       return registry.get(mountId)?.status ?? "offline";
+    },
+
+    /** The file endpoints' adapter (D21): every call inside an online mount goes through it. */
+    fs: mountFs,
+
+    /**
+     * The registered mount `name` of the workspace, or undefined (D16). With the feature off every
+     * registered mount is `offline`: nothing ever brings one up.
+     */
+    mountOf(workspaceId: string, name: string): MountRef | undefined {
+      for (const { record, status } of registry.values()) {
+        if (record.workspaceId === workspaceId && record.name === name) {
+          return { id: record.id, status, readOnly: record.readOnly };
+        }
+      }
+      return undefined;
     },
 
     namesOf(workspaceId: string): ReadonlySet<string> {

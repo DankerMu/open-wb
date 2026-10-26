@@ -150,15 +150,18 @@ function setup() {
   const fake = createHungFs();
   const clock = createFakeClock();
   const offline: string[] = [];
+  /** The mounts the manager reports `online`; every mount starts online. */
+  const down = new Set<string>();
   const mountFs = createMountFs({
     fs: fake.impl,
     deadlineMs: DEADLINE_MS,
     clock,
+    isOnline: (mountId) => !down.has(mountId),
     onOffline: (mountId) => {
       offline.push(mountId);
     },
   });
-  return { fake, clock, offline, mountFs };
+  return { fake, clock, offline, down, mountFs };
 }
 
 describe("闸门排队与期限", () => {
@@ -383,6 +386,7 @@ describe("闸门排队与期限", () => {
       fs: fake.impl,
       deadlineMs: DEADLINE_MS,
       clock,
+      isOnline: () => true,
       onOffline: (mountId) => {
         offline.push(mountId);
         throw new Error("manager failed");
@@ -415,6 +419,67 @@ describe("闸门排队与期限", () => {
   });
 });
 
+describe("宿主不同步进入挂载: the gate asks whether the mount is still online as it admits each call", () => {
+  it("calls queued behind one in flight when the mount goes offline end mount_offline without reaching the file system or onOffline; the call already in flight returns", async () => {
+    const { fake, clock, offline, down, mountFs } = setup();
+    const first = watch(mountFs.lstat("m1", "/ws/远端/a.md"));
+    const second = watch(mountFs.readdir("m1", "/ws/远端"));
+    const third = watch(mountFs.rename("m1", "/ws/远端/a.md", "/ws/远端/b.md"));
+    await flush();
+    expect(fake.calls.map((call) => call.op)).toEqual(["lstat"]);
+
+    down.add("m1");
+    fake.calls[0]?.resolve("a-status");
+    await flush();
+    expect(first.current()).toEqual({ settled: true, value: "a-status" });
+    expectOffline(second.current());
+    expectOffline(third.current());
+    expect(fake.calls.map((call) => call.op)).toEqual(["lstat"]);
+    expect(offline).toEqual([]);
+    expect(clock.pending()).toEqual([]);
+
+    // Offline from the start: refused at once, nothing reaches the mount, no timer.
+    const refused = watch(mountFs.mkdir("m1", "/ws/远端/新"));
+    await flush();
+    expectOffline(refused.current());
+    expect(fake.calls).toHaveLength(1);
+    expect(clock.pending()).toEqual([]);
+
+    // Back online (a remount): the gate is free and admits the next call; other mounts never noticed.
+    down.delete("m1");
+    const again = watch(mountFs.lstat("m1", "/ws/远端/b.md"));
+    const other = watch(mountFs.lstat("m2", "/ws/参考/x.md"));
+    await flush();
+    expect(fake.calls.map((call) => call.args[0])).toEqual([
+      "/ws/远端/a.md",
+      "/ws/远端/b.md",
+      "/ws/参考/x.md",
+    ]);
+    fake.calls[1]?.resolve("b-status");
+    fake.calls[2]?.resolve("x-status");
+    await flush();
+    expect([again.current(), other.current()]).toEqual([
+      { settled: true, value: "b-status" },
+      { settled: true, value: "x-status" },
+    ]);
+    expect(offline).toEqual([]);
+  });
+
+  it("a handle's close queued when the mount goes offline is refused too, so the caller closes it directly", async () => {
+    const { fake, down, mountFs } = setup();
+    const handle = fake.handle("h1");
+    const read = watch(mountFs.read("m1", handle, Buffer.alloc(4), 0, 4, 0));
+    const close = watch(mountFs.close("m1", handle));
+    await flush();
+    down.add("m1");
+    fake.calls[0]?.resolve({ bytesRead: 4 });
+    await flush();
+    expect(read.current()).toEqual({ settled: true, value: 4 });
+    expectOffline(close.current());
+    expect(fake.calls.map((call) => call.op)).toEqual(["h1.read"]);
+  });
+});
+
 describe("pass-through on fs/promises", () => {
   let dir: string;
 
@@ -429,7 +494,11 @@ describe("pass-through on fs/promises", () => {
   function realSetup() {
     const clock = createFakeClock();
     const offline: string[] = [];
-    const mountFs = createMountFs({ clock, onOffline: (mountId) => offline.push(mountId) });
+    const mountFs = createMountFs({
+      clock,
+      isOnline: () => true,
+      onOffline: (mountId) => offline.push(mountId),
+    });
     return { clock, offline, mountFs };
   }
 
