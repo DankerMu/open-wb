@@ -5,7 +5,7 @@
  *
  * 接缝：文件页的真实外壳（真实 `createApiClient`，桩掉的 `fetch`，同组 10）。挂载端点与 `/api/mount-sources` 的
  * 请求经 `calls(fetchMock, path)` 显式计数。期望值是规格里的字面量（菜单项、字段名、placeholder、校验文案、
- * `正在连接…`、` · 只读`、`管理员尚未登记服务器目录`）与服务端契约（`server/src/workspaces/mounts/validate.ts`：
+ * `正在连接…`、` · 只读`、`管理员尚未登记服务器目录`；超长名称与 SMB 缺共享名两条文案取自 design D18）与服务端契约（`server/src/workspaces/mounts/validate.ts`：
  * 键集按 `backend` 严格、`port` / `domain` 可空即不带该键；`core/errors` 的 `mount_host_rejected` 文案）。
  * 私钥是低熵的测试哨兵，不是任何真实密钥。
  */
@@ -241,6 +241,8 @@ describe("挂载对话框：外观", () => {
     expect(field(dialog, "目录路径").placeholder).toBe("/srv/data");
     expect(field(dialog, "主机")).toBeTruthy();
     expect(field(dialog, "用户名")).toBeTruthy();
+    expect(within(dialog).getByRole("radiogroup", { name: "认证方式" })).toBeTruthy();
+    expect(within(dialog).getByText("认证方式")).toBeTruthy();
     expect(radio(dialog, "密码").getAttribute("aria-checked")).toBe("true");
     expect(radio(dialog, "私钥").getAttribute("aria-checked")).toBe("false");
     const password = field(dialog, "密码");
@@ -263,7 +265,10 @@ describe("挂载对话框：外观", () => {
     expect(document.body.textContent).not.toContain(DEMO_HINT);
 
     fireEvent.click(radio(dialog, "私钥"));
-    expect(field<HTMLTextAreaElement>(dialog, "私钥").tagName).toBe("TEXTAREA");
+    const key = field<HTMLTextAreaElement>(dialog, "私钥");
+    expect(key.tagName).toBe("TEXTAREA");
+    expect(key.getAttribute("spellcheck")).toBe("false");
+    expect(key.getAttribute("autocomplete")).toBe("off");
     expect(maybeField(dialog, "密码")).toBeNull();
   });
 
@@ -288,6 +293,8 @@ describe("挂载对话框：外观", () => {
     expect(field(dialog, "域")).toBeTruthy();
     expect(field(dialog, "密码").type).toBe("password");
     expect(within(dialog).queryByRole("radio")).toBeNull();
+    expect(within(dialog).queryByRole("radiogroup")).toBeNull();
+    expect(within(dialog).queryByText("认证方式")).toBeNull();
     expect(page.sourceGets()).toHaveLength(0);
   });
 });
@@ -432,7 +439,8 @@ describe("挂载对话框：本地校验", () => {
       ["挂载名称", "", "请填写挂载名称"],
       ["挂载名称", "a.b", "名称只能包含字母、数字、下划线、连字符与汉字"],
       ["挂载名称", "a b", "名称只能包含字母、数字、下划线、连字符与汉字"],
-      ["挂载名称", "a".repeat(65), "名称只能包含字母、数字、下划线、连字符与汉字"],
+      ["挂载名称", "a".repeat(65), "名称不能超过 64 个字符"],
+      ["挂载名称", "数".repeat(65), "名称不能超过 64 个字符"],
       ["挂载名称", "uploads", "该名称已保留"],
       ["挂载名称", "screenshots", "该名称已保留"],
     ];
@@ -441,6 +449,11 @@ describe("挂载对话框：本地校验", () => {
       submit(dialog);
       await waitFor(() => expect(alertText(dialog)).toBe(message));
     }
+    type(dialog, "挂载名称", "数".repeat(64));
+    type(dialog, "主机", "");
+    submit(dialog);
+    await waitFor(() => expect(alertText(dialog)).toBe("请填写主机"));
+    type(dialog, "主机", "files.intra");
     type(dialog, "挂载名称", "数据_x-1");
     const remoteCases: [string, string, string][] = [
       ["主机", "", "请填写主机"],
@@ -475,9 +488,12 @@ describe("挂载对话框：本地校验", () => {
     for (const path of ["/", "//share"]) {
       type(dialog, "目录路径", path);
       submit(dialog);
-      await waitFor(() => expect(alertText(dialog)).toBe("请填写绝对路径，如 /srv/data"));
+      await waitFor(() => expect(alertText(dialog)).toBe("请填写共享名与目录，如 /共享名/目录"));
       type(dialog, "目录路径", "/srv/data");
     }
+    type(dialog, "目录路径", "srv/data");
+    submit(dialog);
+    await waitFor(() => expect(alertText(dialog)).toBe("请填写绝对路径，如 /srv/data"));
 
     await settle();
     expect(page.posts()).toHaveLength(0);
@@ -502,13 +518,13 @@ describe("挂载对话框：服务器目录", () => {
     expect(page.sourceGets()[0]?.[1]?.method).toBe("GET");
   });
 
-  it("只读挂载源：下拉项带 · 只读；选中它 只读挂载 强制打开并禁用（先手动关掉过也一样），body 恰为 {name, backend:local, sourceId, readOnly:true}；换回可写源恢复手动的选择", async () => {
+  it("只读挂载源（服务端按名字字节序给出，归档 在前）：下拉项带 · 只读、首项预选，只读挂载 即强制打开并禁用（先手动关掉过也一样），body 恰为 {name, backend:local, sourceId, readOnly:true}；换选可写源恢复手动的选择", async () => {
     const page = openPage({
       sources: () =>
         jsonResponse({
           sources: [
-            { id: "a".repeat(32), name: "资料库", readOnly: false },
             { id: "b".repeat(32), name: "归档", readOnly: true },
+            { id: "a".repeat(32), name: "资料库", readOnly: false },
           ],
         }),
       post: () => jsonResponse(HOST_REJECTED, 403),
@@ -521,12 +537,12 @@ describe("挂载对话框：服务器目录", () => {
     await choose(dialog, "协议", "服务器目录");
 
     const directory = await within(dialog).findByRole("combobox", { name: "目录" });
-    expect(directory.textContent).toBe("资料库");
+    expect(directory.textContent).toBe("归档 · 只读");
     fireEvent.keyDown(directory, { key: "Enter" });
     const options = await screen.findAllByRole("option");
-    expect(options.map((option) => option.textContent)).toStrictEqual(["资料库", "归档 · 只读"]);
+    expect(options.map((option) => option.textContent)).toStrictEqual(["归档 · 只读", "资料库"]);
     fireEvent.keyDown(screen.getByRole("option", { name: "归档 · 只读" }), { key: "Enter" });
-    await waitFor(() => expect(directory.textContent).toBe("归档 · 只读"));
+    await waitFor(() => expect(screen.queryByRole("option")).toBeNull());
 
     const forced = readOnlySwitch(dialog);
     expect(forced.getAttribute("aria-checked")).toBe("true");
@@ -591,10 +607,27 @@ describe("挂载对话框：服务器目录", () => {
     await waitFor(() => expect(alertText(dialog)).toBe("服务器开小差了"));
     expect(submitButton(dialog).hasAttribute("disabled")).toBe(true);
   });
+
+  it("换协议清掉上一次的本地校验文案：SFTP 下 请填写主机 之后选 服务器目录，读取失败的信封文案照常显示", async () => {
+    const page = openPage({
+      sources: () => jsonResponse({ error: { code: "internal", message: "服务器开小差了" } }, 500),
+    });
+    await ready(page);
+    const dialog = await openDialog();
+    type(dialog, "挂载名称", "数据");
+    submit(dialog);
+    await waitFor(() => expect(alertText(dialog)).toBe("请填写主机"));
+
+    await choose(dialog, "协议", "服务器目录");
+    await waitFor(() => expect(page.sourceGets()).toHaveLength(1));
+    await waitFor(() => expect(alertText(dialog)).toBe("服务器开小差了"));
+    expect(submitButton(dialog).hasAttribute("disabled")).toBe(true);
+    expect(page.posts()).toHaveLength(0);
+  });
 });
 
 describe("挂载对话框：请求中与关闭", () => {
-  it("请求中提交禁用并显示 正在连接…，再提交不发第二次；取消 中止等待、关闭对话框，迟到的 201 不添根行、不重取", async () => {
+  it("请求中提交禁用并显示 正在连接…，再提交不发第二次；取消 中止等待、关闭对话框并恰重取一次 mounts：服务端已建出的 数据 根行出现，不展开、不抢焦点；迟到的 201 不再重取", async () => {
     let release: (response: Response) => void = () => {};
     const page = openPage({
       post: () =>
@@ -615,18 +648,83 @@ describe("挂载对话框：请求中与关闭", () => {
     const signal = page.posts()[0]?.[1]?.signal;
     expect(signal?.aborted).toBe(false);
 
+    // 服务端已建出挂载、应答尚未到达时取消。
+    page.state.mounts = [created];
     fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "挂载目录" })).toBeNull());
     expect(signal?.aborted).toBe(true);
 
-    page.state.mounts = [created];
+    const mountButton = await findRow("展开 数据");
+    expect(page.mountsGets()).toHaveLength(2);
+    expect(mountButton.getAttribute("aria-expanded")).toBe("false");
+    const newButton = screen.getByRole("button", { name: "新建" });
+    await waitFor(() => expect(document.activeElement).toBe(newButton));
+
     release(jsonResponse(created, 201));
     await settle();
+    expect(page.mountsGets()).toHaveLength(2);
+    expect(row("展开 数据").getAttribute("aria-expanded")).toBe("false");
+    expect(calls(page.fetchMock, treeUrl("数据"))).toHaveLength(0);
+    expect(document.activeElement).toBe(newButton);
+  });
+
+  it("未发出 POST 就取消（含 Escape）：关闭对话框，不重取 mounts", async () => {
+    const page = openPage();
+    await ready(page);
+    let dialog = await openDialog();
+    type(dialog, "挂载名称", "数据");
+    submit(dialog);
+    await waitFor(() => expect(alertText(dialog)).toBe("请填写主机"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "挂载目录" })).toBeNull());
+
+    dialog = await openDialog();
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "挂载目录" })).toBeNull());
+    await settle();
+    expect(page.posts()).toHaveLength(0);
     expect(page.mountsGets()).toHaveLength(1);
+  });
+
+  it("挂载后的重取失败、之后 刷新 才读到新挂载：根行出现但不展开、不抢焦点", async () => {
+    const failure = () =>
+      jsonResponse({ error: { code: "internal", message: "服务器开小差了" } }, 500);
+    let hold: (response: Response) => void = () => {};
+    const answers: (() => Response | Promise<Response>)[] = [
+      () => jsonResponse({ enabled: true, mounts: [] }),
+      // `刷新` 的 GET：对话框打开之后才失败，挂载根行随之隐去。
+      () =>
+        new Promise<Response>((resolve) => {
+          hold = resolve;
+        }),
+      failure,
+      () => jsonResponse({ enabled: true, mounts: [created] }),
+    ];
+    const page = openPage({
+      list: () => (answers.shift() ?? failure)(),
+      post: () => jsonResponse(created, 201),
+    });
+    await ready(page);
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(page.mountsGets()).toHaveLength(2));
+    const dialog = await openDialog();
+    hold(failure());
+    await waitFor(() => expect(screen.getByText("服务器开小差了")).toBeTruthy());
+
+    fillSftpKey(dialog);
+    submit(dialog);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "挂载目录" })).toBeNull());
+    await waitFor(() => expect(page.mountsGets()).toHaveLength(3));
+    await settle();
     expect(within(tree()).queryByRole("button", { name: /数据/ })).toBeNull();
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole("button", { name: "新建" })),
-    );
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    const mountButton = await findRow("展开 数据");
+    await settle();
+    expect(page.mountsGets()).toHaveLength(4);
+    expect(mountButton.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).not.toBe(mountButton);
+    expect(calls(page.fetchMock, treeUrl("数据"))).toHaveLength(0);
   });
 
   it("关闭后凭证清空：失败后取消、Escape 关闭，再打开时 密码 与 私钥 都是空的；地址与 Web Storage 无私钥", async () => {

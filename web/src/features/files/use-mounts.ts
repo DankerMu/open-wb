@@ -36,8 +36,11 @@
  * - Mounting (`mount-dialog.tsx`): `openCreate` is there only while `enabled` is true. Its submit
  *   sends one `POST …/mounts`; on 201 the dialog closes, the new mount joins the list at once and the
  *   list is fetched again, and its row (`mount-roots.tsx`, through `takeCreated`) comes out expanded
- *   with focus on it — the cancelling close's return of focus to `新建` is dropped. A failure keeps
- *   the dialog open with the envelope message; `取消` aborts the wait.
+ *   with focus on it — the cancelling close's return of focus to `新建` is dropped. That claim lasts
+ *   until the row takes it, that refetch fails or another refetch starts. A failure keeps the dialog
+ *   open with the envelope message; `取消` aborts the wait. A `取消` (or Escape) after a `POST` was
+ *   sent from this dialog fetches the list once more: the server may have made the mount all the
+ *   same (design D18), and its row then shows up as any listed row does — not expanded, no focus.
  * - Unmount: `useRequestDialog` holds the confirmation. Confirming sends one `DELETE …/mounts/<id>`;
  *   on 204 the row goes at once, focus goes to the space root's row, `onSelectionInside` is called
  *   when the selected file is inside that mount, and the list is fetched again. A failure keeps the
@@ -159,6 +162,7 @@ export function useMounts(
       (error: unknown) => {
         if (controller.signal.aborted || isUnauthorized(error)) return;
         relistRef.current = null;
+        createdRef.current = null;
         settle(null, errorMessage(error));
       },
     );
@@ -176,6 +180,7 @@ export function useMounts(
   const refetch = useCallback(
     (relist?: Relist) => {
       relistRef.current = relist ? { client, workspaceId, relist, was: online(mounts) } : null;
+      createdRef.current = null;
       setGeneration((value) => value + 1);
     },
     [client, mounts, workspaceId],
@@ -259,24 +264,41 @@ export function useMounts(
   }, [client, dialog, refetch, returnFocus, selectedFileRef, submit, workspaceId]);
 
   const creation = useRequestDialog<null>();
-  const { open: openCreation, returnFocus: creationFocus, submit: submitCreation } = creation;
+  const {
+    close: closeCreation,
+    open: openCreation,
+    returnFocus: creationFocus,
+    submit: submitCreation,
+  } = creation;
+  // Whether the open dialog has sent a `POST` (its `取消` then refetches).
+  const sentRef = useRef(false);
   const openCreate = useCallback(
-    (trigger: HTMLElement | null) => openCreation(null, trigger),
+    (trigger: HTMLElement | null) => {
+      sentRef.current = false;
+      openCreation(null, trigger);
+    },
     [openCreation],
   );
+  const cancelCreate = useCallback(() => {
+    closeCreation();
+    if (sentRef.current) refetch();
+    sentRef.current = false;
+  }, [closeCreation, refetch]);
   const create = useCallback(
     (input: CreateMountInput) => {
       let made: MountView | null = null;
       submitCreation(
-        (signal) =>
-          client.createMount(workspaceId, input, { signal }).then((view) => {
+        (signal) => {
+          sentRef.current = true;
+          return client.createMount(workspaceId, input, { signal }).then((view) => {
             made = view;
-          }),
+          });
+        },
         () => {
           const view = made;
           creationFocus.current = null;
+          sentRef.current = false;
           if (!view) return;
-          createdRef.current = view.id;
           setFetched((previous) =>
             previous?.list && previous.client === client && previous.workspaceId === workspaceId
               ? {
@@ -286,6 +308,8 @@ export function useMounts(
               : previous,
           );
           refetch();
+          // After `refetch`, which drops any earlier claim.
+          createdRef.current = view.id;
         },
       );
     },
@@ -307,7 +331,7 @@ export function useMounts(
       error: creation.dialog.error,
       pending: creation.dialog.pending,
       returnFocus: creationFocus,
-      onCancel: creation.close,
+      onCancel: cancelCreate,
       onCreate: create,
       listSources: (signal: AbortSignal) => client.listMountSources({ signal }),
     },

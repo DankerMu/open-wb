@@ -126,6 +126,8 @@ function MountForm({
   function chooseBackend(next: string) {
     const chosen = BACKENDS.find((item) => item.value === next)?.value ?? "sftp";
     setBackend(chosen);
+    // The last submit's local message is about the fields just left; it would mask the sources'.
+    setValidationError(null);
     if (chosen === "local") load((list) => setSourceId(list[0]?.id ?? null));
   }
 
