@@ -39,6 +39,8 @@ export interface Slot {
   entry: PoolEntry | undefined;
   /** The workspace root a bound session's process runs in; null for an unbound session. */
   workspaceRoot: string | null;
+  /** The bound workspace's id (its registered mount names are read per event, D21); null unbound. */
+  workspaceId: string | null;
   /**
    * The `--approval-mode` this slot's process was started with: the runtime's is fixed at
    * construction, so every generation of the slot runs under it. Never rewritten.
@@ -64,6 +66,7 @@ export function emptySlot(
   approvalMode: ApprovalMode,
   modelIds: ReadonlySet<string>,
   fingerprint: string,
+  workspaceId: string | null,
 ): Slot {
   return {
     sessionId,
@@ -77,6 +80,7 @@ export function emptySlot(
     infraFaulted: false,
     entry: undefined,
     workspaceRoot,
+    workspaceId,
     approvalMode,
     modelIds,
     fingerprint,

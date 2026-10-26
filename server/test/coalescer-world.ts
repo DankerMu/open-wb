@@ -109,6 +109,10 @@ function commit(world: World, events: ChatEvent<string>[]): boolean {
         null,
         (text) => text,
       );
+      // Only a bound session's files.changed is judged asynchronously; this world binds none.
+      if (persisted instanceof Promise) {
+        throw new Error("coalescer world: no event here is judged asynchronously");
+      }
       if (persisted !== undefined) {
         world.published.push({ at: world.clock.now(), event: persisted });
       }

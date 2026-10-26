@@ -37,7 +37,9 @@
  *
  * A directory on another device than the workspace root (a mount point: its `lstat` says another
  * `dev`) is left out whole as `mount` and never listed (#1212). Only directories are judged, and
- * only by `dev`: FUSE, a bind mount and another volume are treated alike.
+ * only by `dev`: FUSE, a bind mount and another volume are treated alike. A root-level name the
+ * caller gives as a registered mount (s1b-workspace-mounts D21) is left out as `mount` by its name
+ * alone, before any call on it: not `lstat`-ed, listed or opened, whatever the exclude list says.
  *
  * Deduplication (spec「未变文件的去重」): a file whose `fstat` says what the previous snapshot's
  * manifest says of the same path (inode number, size, both times) is hard-linked from that
@@ -91,6 +93,8 @@ interface TakeOptions {
   maxTotalBytes: number;
   /** Most `entries` (directories, files, symbolic links) of one snapshot; more is `too_large`. */
   maxEntries: number;
+  /** The workspace's registered mount names (D21); a root-level entry of such a name is skipped. */
+  mountNames?: ReadonlySet<string>;
 }
 
 export type TakeResult =
@@ -122,6 +126,7 @@ interface Walk {
   /** The previous manifest's file entries by path; empty when there is no usable one. */
   previous: ReadonlyMap<string, FileState>;
   excludeNames: ReadonlySet<string>;
+  mountNames: ReadonlySet<string>;
   maxFileBytes: number;
   maxTotalBytes: number;
   maxEntries: number;
@@ -297,6 +302,7 @@ async function write(options: TakeOptions, snapshotDir: string): Promise<TakeRes
     previousTree: previousDir === undefined ? undefined : join(previousDir, "tree"),
     previous,
     excludeNames: new Set(options.excludeNames),
+    mountNames: options.mountNames ?? new Set(),
     maxFileBytes: options.maxFileBytes,
     maxTotalBytes: options.maxTotalBytes,
     maxEntries: options.maxEntries,
@@ -407,7 +413,11 @@ async function visitChildren(walk: Walk, parent: string, raw: Buffer[]): Promise
     walk.skipped.push({ path: pathOf(name), reason: "name_encoding" });
   }
   for (const name of names) {
-    await visit(walk, pathOf(name), name);
+    if (parent === "" && walk.mountNames.has(name)) {
+      walk.skipped.push({ path: name, reason: "mount" });
+    } else {
+      await visit(walk, pathOf(name), name);
+    }
   }
 }
 

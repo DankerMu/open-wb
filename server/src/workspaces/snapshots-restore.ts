@@ -24,7 +24,9 @@
  * extra entries does not go into one, whatever the manifest has under that path (`removeExtras`);
  * a directory is deleted level by level and not across a device (`removeTree`); and
  * `parentsAreReal` compares `dev` at every level, for one that shows up later. Those found by the
- * first two are in the result's `skipped`.
+ * first two are in the result's `skipped`. A root-level name the caller gives as a registered mount
+ * (s1b-workspace-mounts D21) is judged by name before all that: never looked at, entered, deleted,
+ * made or replaced, and in `skipped` when the root listing or the manifest has it.
  *
  * Errors: `EACCES` / `EPERM` on one entry puts it in `failed` and the restore goes on; anything
  * else rejects, leaving the workspace partly restored. Calling again continues: what is already
@@ -72,6 +74,8 @@ interface RestoreOptions {
   workspaceRoot: string;
   /** One snapshot's directory (`manifest.json` and `tree/`), outside the workspace. */
   snapshotDir: string;
+  /** The workspace's registered mount names (D21): those root-level paths are left alone. */
+  mountNames?: ReadonlySet<string>;
 }
 
 interface RestoreResult {
@@ -111,6 +115,8 @@ interface Run {
   skipped: Set<string>;
   /** The mount points this run found, in the order it met them. */
   mounts: Set<string>;
+  /** The registered mount names: root-level paths protected by name alone. */
+  mountNames: ReadonlySet<string>;
   restored: number;
   removed: number;
   failed: Set<string>;
@@ -141,11 +147,13 @@ export async function restore(options: RestoreOptions): Promise<RestoreResult> {
     entries: manifest.entries,
     skipped: manifest.skippedPaths,
     mounts: new Set(),
+    mountNames: options.mountNames ?? new Set(),
     restored: 0,
     removed: 0,
     failed: new Set(),
   };
 
+  protectMountNames(run, manifest.skipped);
   await removeExtras(run, "");
   // A parent's path is a prefix of its children's, so it sorts ahead of them.
   const entries = [...run.entries.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
@@ -335,6 +343,20 @@ async function removeTree(run: Run, path: string, dir: Buffer, stat: Stats): Pro
   return true;
 }
 
+/**
+ * Each registered mount name protects its root-level path from here on, whether or not anything is
+ * there; one the manifest has (an entry or a skipped item) is reported now, one only the root has
+ * when `removeExtras` lists it.
+ */
+function protectMountNames(run: Run, skipped: readonly SkippedPath[]): void {
+  for (const name of run.mountNames) {
+    run.skipped.add(name);
+    if (run.entries.has(name) || skipped.some((item) => item.path === name)) {
+      run.mounts.add(name);
+    }
+  }
+}
+
 /** Records the mount point `path`: from here on it protects like a skipped path of the manifest. */
 function foundMount(run: Run, path: string): void {
   run.skipped.add(path);
@@ -379,6 +401,10 @@ async function removeExtras(run: Run, parent: string): Promise<void> {
   const raw = await fsp.readdir(join(run.root, parent), { encoding: "buffer" });
   for (const name of splitNames(raw).names) {
     const path = parent === "" ? name : `${parent}/${name}`;
+    if (parent === "" && run.mountNames.has(name)) {
+      run.mounts.add(name);
+      continue;
+    }
     if (underSkipped(run.skipped, path)) {
       continue;
     }

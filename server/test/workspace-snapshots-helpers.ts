@@ -138,8 +138,11 @@ export async function snapshot(f: Fixture, overrides: Partial<TakeOptions> = {})
 }
 
 /** One `restore` of the fixture's workspace from the fixture's snapshot. */
-export function restoreRun(f: Fixture): ReturnType<typeof restore> {
-  return restore({ workspaceRoot: f.workspace, snapshotDir: f.snapshot });
+export function restoreRun(
+  f: Fixture,
+  overrides: Partial<Parameters<typeof restore>[0]> = {},
+): ReturnType<typeof restore> {
+  return restore({ workspaceRoot: f.workspace, snapshotDir: f.snapshot, ...overrides });
 }
 
 /** Every path under `root` with what it holds: a file's bytes, `dir`, or `-> <link target>`. */

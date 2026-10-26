@@ -14,6 +14,7 @@ import type {
 import { HttpError } from "../core/errors/index.js";
 import { hasRefusedCharacter } from "../core/refused-characters.js";
 import type { createSandbox } from "../core/sandbox/index.js";
+import { firstSegment } from "../core/sandbox/resolve.js";
 import {
   classifyPreview,
   DEFAULT_PREVIEW_LIMITS,
@@ -292,7 +293,13 @@ export function registerWorkspaceRest(
       if (!isOrdinaryDirectory(absPath)) {
         throw new HttpError("not_found");
       }
-      return { path, entries: listOneLevel(absPath) };
+      // The root level leaves the registered mount points out unlooked-at (D21); their rows come
+      // from `GET …/mounts`.
+      const skip =
+        firstSegment(path) === undefined
+          ? dependencies.sandbox.mountNamesOf(workspaceId)
+          : undefined;
+      return { path, entries: listOneLevel(absPath, skip) };
     },
   );
   app.post<{ Params: { id: string } }>(

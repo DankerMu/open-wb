@@ -99,13 +99,18 @@ function recorder(failure?: Error): Recorder {
 }
 
 /** One `persistEvent` call for a turn whose only registered tool call is CALL_ID → STEP_ID. */
-function persist(event: ChatEvent<string>, workspaceRoot: string | null, double = recorder()) {
+async function persist(
+  event: ChatEvent<string>,
+  workspaceRoot: string | null,
+  double = recorder(),
+) {
   const steps = new PumpSteps(MESSAGE_ID);
   steps.toolIds.set(CALL_ID, STEP_ID);
   const ordinals = vi.spyOn(steps, "nextOrdinal");
   const settled: SettledApproval[] = [];
   fsCalls.length = 0;
-  const published = persistEvent(
+  // A judged files.changed is asynchronous (#1694: its ownership judgment waits on the file system).
+  const published = await persistEvent(
     double.store,
     MESSAGE_ID,
     event,
@@ -122,7 +127,7 @@ function persist(event: ChatEvent<string>, workspaceRoot: string | null, double 
 }
 
 describe("persistEvent files.changed", () => {
-  it("P1 a bound, registered call stores the owned files once and returns them to publish", () => {
+  it("P1 a bound, registered call stores the owned files once and returns them to publish", async () => {
     const root = openRoot();
     const event = filesChanged([
       notesEdit(root),
@@ -131,7 +136,7 @@ describe("persistEvent files.changed", () => {
     ]);
     const input = structuredClone(event);
 
-    const result = persist(event, root);
+    const result = await persist(event, root);
 
     expect(result.calls).toEqual([["setStepChanges", STEP_ID, TWO_FILES_TEXT]]);
     expect(result.touched).toEqual(["setStepChanges"]);
@@ -153,32 +158,32 @@ describe("persistEvent files.changed", () => {
     expect(event).toEqual(input);
   });
 
-  it("P2 an unbound session returns undefined before any store or filesystem access", () => {
+  it("P2 an unbound session returns undefined before any store or filesystem access", async () => {
     const root = openRoot();
     const event = filesChanged([notesEdit(root)]);
 
-    const unbound = persist(event, null);
+    const unbound = await persist(event, null);
 
     expect(unbound.published).toBeUndefined();
     expect(unbound.touched).toEqual([]);
     expect(unbound.accessed).toEqual([]);
     // The same candidate is owned once a root is bound: the null root is what dropped it.
-    const bound = persist(event, root);
+    const bound = await persist(event, root);
     expect(bound.calls).toEqual([
       ["setStepChanges", STEP_ID, '[{"path":"notes.md","added":2,"removed":1,"kind":"edit"}]'],
     ]);
-    expect(bound.accessed).toContain("realpathSync");
+    expect(bound.accessed).toContain("realpath");
   });
 
-  it("P3 an unregistered call or a batch entirely outside the root stores nothing", () => {
+  it("P3 an unregistered call or a batch entirely outside the root stores nothing", async () => {
     const root = openRoot();
 
-    const unregistered = persist(filesChanged([notesEdit(root)], "tool-unknown"), root);
+    const unregistered = await persist(filesChanged([notesEdit(root)], "tool-unknown"), root);
     expect(unregistered.published).toBeUndefined();
     expect(unregistered.touched).toEqual([]);
     expect(unregistered.accessed).toEqual([]);
 
-    const outside = persist(
+    const outside = await persist(
       filesChanged([
         { path: "/etc/passwd", added: 1, removed: 0, kind: "edit" },
         { path: "../elsewhere.md", added: null, removed: null, kind: "write" },
@@ -190,20 +195,20 @@ describe("persistEvent files.changed", () => {
     expect(outside.touched).toEqual([]);
 
     // The registered call with the inside candidate is the control for both.
-    expect(persist(filesChanged([notesEdit(root)]), root).published).toMatchObject({
+    expect((await persist(filesChanged([notesEdit(root)]), root)).published).toMatchObject({
       type: "files.changed",
       data: { stepId: STEP_ID },
     });
   });
 
-  it("P4 a failing setStepChanges throws the same error and returns no event", () => {
+  it("P4 a failing setStepChanges throws the same error and returns no event", async () => {
     const root = openRoot();
     const sentinel = new Error("changes write sentinel");
     const double = recorder(sentinel);
     let published: unknown = "not returned";
     let thrown: unknown;
     try {
-      published = persist(filesChanged([notesEdit(root)]), root, double).published;
+      published = (await persist(filesChanged([notesEdit(root)]), root, double)).published;
     } catch (error) {
       thrown = error;
     }
@@ -214,14 +219,14 @@ describe("persistEvent files.changed", () => {
     ]);
   });
 
-  it("P6 thinking.delta still returns undefined without touching the store", () => {
+  it("P6 thinking.delta still returns undefined without touching the store", async () => {
     const root = openRoot();
     const thinking: ChatEvent<string> = {
       type: "thinking.delta",
       data: { messageId: MESSAGE_ID, delta: "先读需求，" },
     };
     for (const workspaceRoot of [root, null]) {
-      const result = persist(thinking, workspaceRoot);
+      const result = await persist(thinking, workspaceRoot);
       expect(result.published).toBeUndefined();
       expect(result.touched).toEqual([]);
       expect(result.accessed).toEqual([]);

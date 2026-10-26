@@ -31,6 +31,7 @@ import { resolve } from "../core/sandbox/resolve.js";
 import { type Branched, BranchTemps, type StoredUser } from "./branch-temp.js";
 import { effectiveOf, type RawCapabilities, type RawComposer } from "./composer-align.js";
 import type { SessionListNotifier } from "./list-events.js";
+import type { SessionSandboxPort } from "./prompt-attachments.js";
 import {
   currentPrincipal,
   noStoreSessionHeaders,
@@ -79,6 +80,11 @@ export interface UndoRequest {
    * the request's failure as it is.
    */
   commit(input: Pick<UndoCommit, "expectedLastAssistantId" | "ompSessionFile">): void;
+  /**
+   * The workspace's registered mount names (D21), read when the attachments are judged: one inside
+   * a mount is not handed back and nothing in it is looked at. Omitted means none.
+   */
+  mountNames?(workspaceId: string): ReadonlySet<string>;
 }
 
 /**
@@ -257,7 +263,8 @@ export class Undos {
     }
     try {
       const root = this.#ports.cwdOf(request.ownerId, plan.workspaceId);
-      return plan.stored.filter(({ path }) => isRegularFile(root, path));
+      const mounts = request.mountNames?.(plan.workspaceId);
+      return plan.stored.filter(({ path }) => isRegularFile(root, path, mounts));
     } catch {
       return [];
     }
@@ -267,12 +274,17 @@ export class Undos {
 /**
  * Whether `path` under `root` is a regular file reached through no link. The pure sandbox
  * resolution, not the facade: a refusal here is not a `sandbox.reject` and not a 403, the item is
- * simply not handed back. Metadata only; anything that throws reads as not there.
+ * simply not handed back. A path in a registered mount reads as not there, unlooked-at (D21).
+ * Metadata only; anything that throws reads as not there.
  */
-function isRegularFile(root: string, path: string): boolean {
+function isRegularFile(root: string, path: string, mounts?: ReadonlySet<string>): boolean {
   try {
-    const resolved = resolve(root, path, "read");
-    return resolved.ok && lstatSync(resolved.absPath, { throwIfNoEntry: false })?.isFile() === true;
+    const resolved = resolve(root, path, "read", mounts);
+    return (
+      resolved.ok &&
+      resolved.mount === undefined &&
+      lstatSync(resolved.absPath, { throwIfNoEntry: false })?.isFile() === true
+    );
   } catch {
     return false;
   }
@@ -288,6 +300,8 @@ function bound(workspaceId: string | null): string {
 
 interface UndoRouteDependencies {
   db: DatabaseSync;
+  /** The app's sandbox facade: its registered mount names judge the attachments handed back. */
+  sandbox: Pick<SessionSandboxPort, "mountNamesOf">;
   store: Pick<SessionStore, "getMessages">;
   supervisor: Pick<SessionSupervisorPort, "undo">;
   listEvents: Pick<SessionListNotifier, "notify" | "notifyRewound">;
@@ -380,6 +394,7 @@ export function registerUndoRoute(app: FastifyInstance, dependencies: UndoRouteD
         undoState: (workspaceId) =>
           undoStatesOf(listSessionTurnSnapshots(db, sessionId), workspaceId)(messageId),
         ...(files === "keep" ? {} : withFiles),
+        mountNames: (workspaceId) => dependencies.sandbox.mountNamesOf?.(workspaceId) ?? new Set(),
         commit: (branched) => {
           removed = commitUndo(db, emit, {
             ownerId,

@@ -103,6 +103,7 @@ export interface OpenSessionOptions {
    * registry (s1d-model-registry); omitted → the static one built from the catalog and upstream.
    * And the registry publisher the admin endpoints call (group 7); omitted → a no-op. And the
    * managed `mcp.json` publisher the connector endpoints call (s1d-connectors); omitted → a no-op.
+   * And the mount-manager (s1b-workspace-mounts D12); omitted → the feature-off one createApp builds.
    */
   assembly?: Partial<ComposerConfig> & {
     uploadMaxFiles?: number;
@@ -111,6 +112,7 @@ export interface OpenSessionOptions {
     models?: NonNullable<AssemblyDependencies["models"]>;
     publish?: NonNullable<AssemblyDependencies["publish"]>;
     mcpPublish?: NonNullable<AssemblyDependencies["mcpPublish"]>;
+    mounts?: NonNullable<AssemblyDependencies["mounts"]>;
   };
 }
 

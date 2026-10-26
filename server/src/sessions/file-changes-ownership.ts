@@ -4,13 +4,36 @@
  * stored relative to it. The only filesystem access of the file-change path, metadata only
  * (`realpath`/`lstat`); nothing is created, read or written. Not `core/sandbox/resolve`: that one
  * rejects absolute paths and every symlink component, this one judges where a path really is.
- * Issue #740: that access is synchronous and the event is sized by a low-trust child, so one
- * event judges at most 100 distinct paths (the first 100 raw candidates, each normalized path once),
- * none of them over 4096 bytes or 128 components.
+ * Issue #740: the event is sized by a low-trust child, so one event judges at most 100 distinct
+ * paths (the first 100 raw candidates, each normalized path once), none of them over 4096 bytes or
+ * 128 components.
+ * #1694 (s1b-workspace-mounts D21): a candidate lexically inside one of the workspace's registered
+ * mounts is dropped before any filesystem call, and the calls are asynchronous with a deadline each
+ * (`ownershipFs`): a symlink of the workspace may still lead into a hung mount. A call past its
+ * deadline drops that candidate and every later one of the event (the root's: the whole event); the
+ * call itself is left to return when it can.
  */
-import { lstatSync, realpathSync } from "node:fs";
+import { realpath } from "node:fs";
+import { lstat } from "node:fs/promises";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { promisify } from "node:util";
 import type { FileChange } from "./file-changes.js";
+
+/**
+ * The judgment's `realpath` and `lstat` and their deadline per call (that of the workspace-mounts
+ * adapter, D21); read at call time so a test can swap any of them. `realpath` is Node's JS algorithm
+ * (`fs.realpath`, each component `lstat`-ed off the main thread), as `realpathSync` was before: it
+ * folds the `..` of a link target lexically, which the stored label depends on. `fs/promises`'
+ * `realpath` is the kernel's and would move those labels.
+ */
+export const ownershipFs = {
+  realpath: promisify(realpath) as (path: string) => Promise<string>,
+  lstat: (path: string) => lstat(path),
+  deadlineMs: 10_000,
+};
+
+/** A call of `ownershipFs` outlived `ownershipFs.deadlineMs`. */
+class DeadlinePassed extends Error {}
 
 const MAX_PATH_BYTES = 1024;
 const MAX_FILES = 50;
@@ -33,18 +56,29 @@ type Verdicts = Map<string, string | undefined>;
  * relative to it: merged by path (first position and kind win, edit counts summed), then cut to
  * the first 50. Only the first 100 raw candidates are judged, by position (a dropped candidate
  * uses its place too); the rest reach no filesystem call, nor does a candidate whose normalized
- * path is over 4096 bytes or 128 components. `root` must be canonical (its own
- * realpath), else nothing is owned. Never throws for an array of `FileChange` objects (whatever
- * their `path` is) and never mutates its input.
+ * path is over 4096 bytes or 128 components, or whose first component below `root` is one of
+ * `mountNames`. `root` must be canonical (its own realpath), else nothing is owned. A call past
+ * its deadline ends the judgment with what was owned before that candidate. Never rejects for an
+ * array of `FileChange` objects (whatever their `path` is) and never mutates its input.
  */
-export function ownedChanges(root: string, files: readonly FileChange[]): FileChange[] {
-  if (!isCanonical(root)) {
+export async function ownedChanges(
+  root: string,
+  files: readonly FileChange[],
+  mountNames: ReadonlySet<string> = new Set(),
+): Promise<FileChange[]> {
+  if (!(await isCanonical(root))) {
     return [];
   }
   const merged = new Map<string, FileChange>();
   const verdicts: Verdicts = new Map();
   for (const file of files.slice(0, MAX_CANDIDATES)) {
-    const path = ownedCandidate(root, file.path, verdicts);
+    let path: string | undefined;
+    try {
+      path = await ownedCandidate(root, file.path, verdicts, mountNames);
+    } catch {
+      // Only an expired call gets here: this candidate and the later ones are dropped untouched.
+      break;
+    }
     if (path === undefined) {
       continue;
     }
@@ -69,12 +103,34 @@ export function ownedPath(realRoot: string, real: string): string | undefined {
   return Buffer.byteLength(path, "utf8") > MAX_PATH_BYTES ? undefined : path;
 }
 
-/** A root that was moved away and replaced by a symlink is not its own realpath: own nothing. */
-function isCanonical(root: string): boolean {
+/**
+ * A root that was moved away and replaced by a symlink is not its own realpath: own nothing. A root
+ * whose realpath is past its deadline owns nothing either.
+ */
+async function isCanonical(root: string): Promise<boolean> {
   try {
-    return realpathSync(root) === root;
+    return (await timed(ownershipFs.realpath(root))) === root;
   } catch {
     return false;
+  }
+}
+
+/** `call`, or a `DeadlinePassed` rejection once `ownershipFs.deadlineMs` passes first. */
+async function timed<T>(call: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new DeadlinePassed()), ownershipFs.deadlineMs);
+  });
+  try {
+    return await Promise.race([call, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function rethrowExpiry(error: unknown): void {
+  if (error instanceof DeadlinePassed) {
+    throw error;
   }
 }
 
@@ -82,26 +138,42 @@ function isCanonical(root: string): boolean {
  * One raw path → its owned relative path. `resolve` joins a relative path to the root and folds
  * `.`, `..` and repeated or trailing separators; only that normalized target reaches the
  * filesystem (an unnormalized `dangling/` would make lstat follow the dangling link). A target
- * over the lexical limits is dropped before that, unremembered. A target already in `verdicts` is
- * not judged again. `resolve` throws for a raw path that is not a string, so the key is computed
- * inside the try and such a candidate is dropped unremembered.
+ * over the lexical limits or inside a registered mount is dropped before that, unremembered. A
+ * target already in `verdicts` is not judged again. `resolve` throws for a raw path that is not a
+ * string, so the key is computed inside the try and such a candidate is dropped unremembered.
+ * Rejects only with `DeadlinePassed`.
  */
-function ownedCandidate(root: string, raw: string, verdicts: Verdicts): string | undefined {
+async function ownedCandidate(
+  root: string,
+  raw: string,
+  verdicts: Verdicts,
+  mountNames: ReadonlySet<string>,
+): Promise<string | undefined> {
   try {
     const target = resolve(root, raw);
-    if (isOversized(target)) {
+    if (isOversized(target) || isInMount(root, target, mountNames)) {
       return undefined;
     }
     if (verdicts.has(target)) {
       return verdicts.get(target);
     }
-    const real = resolveReal(target);
+    const real = await resolveReal(target);
     const owned = real === undefined ? undefined : ownedPath(root, real);
     verdicts.set(target, owned);
     return owned;
-  } catch {
+  } catch (error) {
+    rethrowExpiry(error);
     return undefined;
   }
+}
+
+/** The first component below `root + sep` equals a registered mount name, byte for byte. */
+function isInMount(root: string, target: string, mountNames: ReadonlySet<string>): boolean {
+  const prefix = root + sep;
+  if (mountNames.size === 0 || !target.startsWith(prefix)) {
+    return false;
+  }
+  return mountNames.has(target.slice(prefix.length).split(sep)[0] ?? "");
 }
 
 /** Bytes first: the split then runs on at most 4096 bytes. The empty leading component is none. */
@@ -113,25 +185,39 @@ function isOversized(target: string): boolean {
 }
 
 /**
- * The target's realpath (JS `realpathSync`, not `.native`); for a target that truly has no entry
+ * The target's realpath (JS `realpath`, not `.native`); for a target that truly has no entry
  * (an edit deleted it), its parent's realpath plus its name. An entry without a realpath (dangling
  * symlink, symlink loop) and an lstat failure (ENOTDIR, EACCES, NUL byte, over-long) are dropped.
  * The computed location is checked the same way: lstat resolves `..` in a symlink's target after
  * following the link while JS realpath folds it lexically, so the two can name different places.
+ * Each call has its deadline; one past it rejects with `DeadlinePassed`.
  */
-function resolveReal(target: string): string | undefined {
+async function resolveReal(target: string): Promise<string | undefined> {
   try {
-    return realpathSync(target);
-  } catch {
-    /* judged by lstat below */
+    return await timed(ownershipFs.realpath(target));
+  } catch (error) {
+    rethrowExpiry(error); // otherwise judged by lstat below
   }
   try {
-    if (lstatSync(target, { throwIfNoEntry: false }) !== undefined) {
+    if ((await entryAt(target)) !== undefined) {
       return undefined;
     }
-    const real = join(realpathSync(dirname(target)), basename(target));
-    return lstatSync(real, { throwIfNoEntry: false }) === undefined ? real : undefined;
-  } catch {
+    const real = join(await timed(ownershipFs.realpath(dirname(target))), basename(target));
+    return (await entryAt(real)) === undefined ? real : undefined;
+  } catch (error) {
+    rethrowExpiry(error);
     return undefined;
+  }
+}
+
+/** The `lstat` of `path`, `undefined` for no entry (`ENOENT`); any other failure rejects. */
+async function entryAt(path: string): Promise<unknown> {
+  try {
+    return await timed(ownershipFs.lstat(path));
+  } catch (error) {
+    if ((error as { code?: unknown } | null)?.code === "ENOENT") {
+      return undefined;
+    }
+    throw error;
   }
 }

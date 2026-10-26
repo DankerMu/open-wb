@@ -272,14 +272,19 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     emit,
   });
   const upload = uploadLimits(assembly);
-  // One facade for the workspaces routes and the prompt route's attachment check.
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
-  const sandbox = createSandbox({ rootOf: store.rootOf, audit });
   // One source store and one protected-root list for the manager and the mount-source routes.
   const mountStore = createMountStore(db);
   const protectedRoots = protectedRootsOf(db, runtime, staticRoot);
   const mounts = mountsOf(mountStore, store, audit, runtime, protectedRoots, assembly);
   app.decorate("mounts", mounts);
+  // One facade for the workspaces routes, the preview listener and the sessions module; its mount
+  // names are the manager's in-memory registry, feature off included (D12, D21).
+  const sandbox = createSandbox({
+    rootOf: store.rootOf,
+    audit,
+    mountNamesOf: (workspaceId) => mounts.namesOf(workspaceId),
+  });
   // After the main listener has stopped and before the entry closes the DB (design D12): unmount and
   // stop what this run mounted; rows and private directories stay for the next start's restore.
   app.addHook("onClose", async () => {
@@ -307,7 +312,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     },
     upload,
     sandbox,
-    snapshots: assembly?.snapshots ?? snapshotService(runtime),
+    snapshots: assembly?.snapshots ?? snapshotService(runtime, mounts),
     onError: assembly?.onError ?? (() => {}),
     ...(assembly?.onEvent === undefined ? {} : { onEvent: assembly.onEvent }),
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
@@ -571,9 +576,13 @@ function uploadLimits(assembly: AssemblyDependencies | undefined): {
 /**
  * The app's one workspace-snapshots service: `take`, the two removals and `restore` bound to the
  * managed snapshots directory of the state dir and to the four snapshot settings. Building it
- * touches no file; the directory belongs to the omp state layout.
+ * touches no file; the directory belongs to the omp state layout. `take` and `restore` skip the
+ * workspace's registered mount names as they are when each is called (D21).
  */
-function snapshotService(runtime: SessionRuntime): TurnSnapshotService {
+function snapshotService(
+  runtime: SessionRuntime,
+  mounts: Pick<MountManager, "namesOf">,
+): TurnSnapshotService {
   const snapshotsRoot = ompSnapshotsDir(runtime.stateDir);
   const limits = {
     excludeNames: runtime.snapshotExcludeNames ?? DEFAULT_SNAPSHOT_SETTINGS.snapshotExcludeNames,
@@ -590,11 +599,16 @@ function snapshotService(runtime: SessionRuntime): TurnSnapshotService {
         userMessageId,
         ...(previousMessageId === undefined ? {} : { previousMessageId }),
         ...limits,
+        mountNames: mounts.namesOf(workspaceId),
       }),
     remove: (workspaceId, messageId) => removeSnapshot({ snapshotsRoot, workspaceId, messageId }),
     removeWorkspace: (workspaceId) => removeWorkspaceSnapshots({ snapshotsRoot, workspaceId }),
     restore: (workspaceRoot, workspaceId, messageId) =>
-      restore({ workspaceRoot, snapshotDir: join(snapshotsRoot, workspaceId, String(messageId)) }),
+      restore({
+        workspaceRoot,
+        snapshotDir: join(snapshotsRoot, workspaceId, String(messageId)),
+        mountNames: mounts.namesOf(workspaceId),
+      }),
   };
 }
 
