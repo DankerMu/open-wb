@@ -1,9 +1,10 @@
 /**
  * s1b-workspace-mounts tasks 7.2, the mount-source part (#1689): workspace-mounts「挂载源端点」and its
- * scenarios「两种视图」「拒绝的路径」「删除连带卸载」, the delete-failure mark clearing of design D14, the
- * feature-off endpoints, the 403-before-body-and-id matrix and the `POST` / `DELETE /api/mount-sources`
- * cases of http-service-skeleton「挂载的归属路由」— on the whole mount: createApp on the world's migrated
- * `:memory:` database with `assembly.mounts` = a real manager on the fake rclone and fake `fusermount3`
+ * scenarios「两种视图」「拒绝的路径」「删除连带卸载」, the deleting mark of design D14 (held while a cascade
+ * is in flight, one hold per overlapping `DELETE`, cleared on failure), the feature-off endpoints, the
+ * 403-before-body-and-id matrix and the `POST` / `DELETE /api/mount-sources` cases of
+ * http-service-skeleton「挂载的归属路由」— on the whole mount: createApp on the world's migrated `:memory:`
+ * database with `assembly.mounts` = a real manager on the fake rclone and fake `fusermount3`
  * (`mounts-manager-helpers.ts`). The referencing `local` mounts are made through the manager (the mount
  * routes are #1690's). Oracles: spec literals (envelopes, views, audit detail), the tables, the fake
  * mountinfo, the fakes' call records and the file system.
@@ -13,7 +14,7 @@ import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
-import type { MountManagerOptions } from "../src/workspaces/mounts/manager.js";
+import type { MountManager, MountManagerOptions } from "../src/workspaces/mounts/manager.js";
 import { deletingSources } from "../src/workspaces/mounts/rest.js";
 import type { MountBody } from "../src/workspaces/mounts/validate.js";
 import {
@@ -72,9 +73,14 @@ afterEach(async () => {
  * The world plus u2's workspace W4 (`<sandbox>/u2/w4`), the app's static root and omp bin directory, and
  * an app whose `SANDBOX_ROOT` / `OMP_STATE_DIR` are the world's. The manager resolves both accounts'
  * workspaces and guards the same roots as the app; `featureOff` drops `rcloneBin` and `fusermountBin`,
- * `noFusermount` leaves the fake `fusermount3` off the manager's PATH.
+ * `noFusermount` leaves the fake `fusermount3` off the manager's PATH; `wrap` replaces the manager the
+ * app is given (`app.mounts`) by a wrapper around it.
  */
-async function openRest(featureOff = false, noFusermount = false): Promise<Rest> {
+async function openRest(
+  featureOff = false,
+  noFusermount = false,
+  wrap: (manager: MountManager) => MountManager = (manager) => manager,
+): Promise<Rest> {
   const world = createWorld({ noFusermount });
   world.db
     .prepare(
@@ -108,7 +114,7 @@ async function openRest(featureOff = false, noFusermount = false): Promise<Rest>
         modelId: "m1",
         idleMs: 600_000,
       },
-      mounts: manager,
+      mounts: wrap(manager),
     },
   });
   apps.push(app);
@@ -127,6 +133,22 @@ async function register(rest: Rest, name: string, path: string, readOnly = false
   const response = await call(rest, "admin", "POST", URL, { name, path, readOnly });
   expectAnswer(response, 201);
   return response.json() as { id: string; name: string; path: string; readOnly: boolean };
+}
+
+/**
+ * An app whose manager's `detachSource` waits, per call, until the test resolves `gates[n]`, then runs
+ * the real cascade: a `DELETE` in flight is held between marking the source and its cascade.
+ */
+async function openGated(): Promise<Rest & { gates: (() => void)[] }> {
+  const gates: (() => void)[] = [];
+  const rest = await openRest(false, false, (manager) => ({
+    ...manager,
+    async detachSource(sourceId, actorId) {
+      await new Promise<void>((resolve) => gates.push(resolve));
+      return manager.detachSource(sourceId, actorId);
+    },
+  }));
+  return { ...rest, gates };
 }
 
 function localOn(sourceId: string, name: string): MountBody {
@@ -418,6 +440,52 @@ describe("删除连带卸载", () => {
   });
 });
 
+describe("删除中标记", () => {
+  it("the source is marked before its cascade runs and unmarked once the DELETE ends", {
+    timeout: CASE_MS,
+  }, async () => {
+    const rest = await openGated();
+    const source = await register(rest, "NAS", dirOf(rest, "nas"));
+    const [mine] = await attachBoth(rest, source.id);
+
+    const pending = call(rest, "admin", "DELETE", `${URL}/${source.id}`);
+    await waitFor(() => rest.gates.length === 1);
+    expect(deletingSources.has(source.id)).toBe(true);
+    expect(rest.world.store.get(mine.id)).toMatchObject({ id: mine.id });
+    rest.gates[0]?.();
+    expectAnswer(await pending, 204);
+    expect(deletingSources.has(source.id)).toBe(false);
+    expect(sourceRows(rest)).toEqual([]);
+  });
+
+  it("two overlapping DELETEs: the first failing keeps the mark while the second still cascades; the second's 204 clears it", {
+    timeout: CASE_MS,
+  }, async () => {
+    const rest = await openGated();
+    const { world } = rest;
+    const source = await register(rest, "NAS", dirOf(rest, "nas"));
+    const [, theirs] = await attachBoth(rest, source.id);
+    world.db.exec(
+      `CREATE TRIGGER refuse_delete BEFORE DELETE ON workspace_mounts WHEN OLD.id = '${theirs.id}' BEGIN SELECT RAISE(ABORT, 'injected'); END`,
+    );
+
+    const first = call(rest, "admin", "DELETE", `${URL}/${source.id}`);
+    await waitFor(() => rest.gates.length === 1);
+    const second = call(rest, "admin", "DELETE", `${URL}/${source.id}`);
+    await waitFor(() => rest.gates.length === 2);
+    rest.gates[0]?.();
+    expectAnswer(await first, 500, GENERIC_500);
+    expect(deletingSources.has(source.id)).toBe(true);
+
+    world.db.exec("DROP TRIGGER refuse_delete");
+    rest.gates[1]?.();
+    expectAnswer(await second, 204);
+    expect(deletingSources.has(source.id)).toBe(false);
+    expect(sourceRows(rest)).toEqual([]);
+    expect(world.store.get(theirs.id)).toBeUndefined();
+  });
+});
+
 describe("功能关闭", () => {
   it("GET, POST and DELETE work without RCLONE_BIN; the cascade follows the feature-off unmount rule", async () => {
     const rest = await openRest(true);
@@ -495,12 +563,23 @@ describe("挂载的归属路由", () => {
     ["malformed JSON", MALFORMED],
     ["an empty JSON body", EMPTY_BODY],
     ["text/plain", TEXT],
-    ["a body over 16 KiB", padded(KIB16 + 1, { name: "源", path: "/x", readOnly: false })],
   ];
 
   it.each(BODIES)("admin POST with %s → exact 400, no row and no audit", async (_label, body) => {
     const rest = await openRest();
     expectAnswer(await call(rest, "admin", "POST", URL, body), 400, BAD_REQUEST);
+    expect(sourceRows(rest)).toEqual([]);
+    expect(mountAudits(rest)).toEqual([]);
+  });
+
+  it("an otherwise valid body over 16 KiB → exact 400, no row and no audit (the route's limit, not the path rule)", async () => {
+    const rest = await openRest();
+    const fields = { name: "源", path: rest.world.source, readOnly: false };
+    expectAnswer(
+      await call(rest, "admin", "POST", URL, padded(KIB16 + 1, fields)),
+      400,
+      BAD_REQUEST,
+    );
     expect(sourceRows(rest)).toEqual([]);
     expect(mountAudits(rest)).toEqual([]);
   });

@@ -17,8 +17,9 @@
  * mount routes refuse a new `local` mount on a marked source; (2) `detachSource` unmounts and deletes
  * every mount referencing it, each on its workspace's chain with its own `mount.detach`
  * (`source_deleted`, this admin); (3) one transaction deletes the source row and writes
- * `mount.source.delete` → 204. The mark is cleared in `finally`: a failed cascade or transaction ends
- * in the generic 500 with the source row kept and the source usable again.
+ * `mount.source.delete` → 204. Each `DELETE` releases its hold on the mark in `finally` and the mark
+ * drops with the last overlapping one: a failed cascade or transaction ends in the generic 500 with the
+ * source row kept and, once no other `DELETE` of it is under way, the source usable again.
  *
  * Audit: `mount.source.create` / `mount.source.delete` in the store's `within` (same transaction),
  * actor the admin, no `workspaceId`, detail exactly `{sourceId, name, path, readOnly}`.
@@ -48,9 +49,24 @@ export interface MountRestDependencies {
 /** A source body is a name and a path: a few hundred bytes at most. */
 const MOUNT_SOURCE_BODY_LIMIT = 16 * 1024;
 
-const deleting = new Set<string>();
-/** Sources whose `DELETE` is under way (design D14 step 1): in memory only, cleared in `finally`. */
-export const deletingSources: ReadonlySet<string> = deleting;
+/** Per source, how many `DELETE`s are under way: overlapping ones each hold the mark. */
+const deleting = new Map<string, number>();
+/**
+ * Sources whose `DELETE` is under way (design D14 step 1): in memory only, each `DELETE` releases its
+ * hold in `finally`, the mark drops with the last one.
+ */
+export const deletingSources: Pick<ReadonlySet<string>, "has"> = {
+  has: (id) => deleting.has(id),
+};
+
+function release(id: string): void {
+  const holds = (deleting.get(id) ?? 1) - 1;
+  if (holds === 0) {
+    deleting.delete(id);
+  } else {
+    deleting.set(id, holds);
+  }
+}
 
 const noStore: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
@@ -132,7 +148,7 @@ export function registerMountSources(app: FastifyInstance, dependencies: MountRe
       if (store.getSource(id) === undefined) {
         throw new HttpError("not_found");
       }
-      deleting.add(id);
+      deleting.set(id, (deleting.get(id) ?? 0) + 1);
       try {
         await manager.detachSource(id, principalOf(request).id);
         const removed = store.removeSource(id, audited(request, "mount.source.delete", "删除"));
@@ -141,7 +157,7 @@ export function registerMountSources(app: FastifyInstance, dependencies: MountRe
           throw new HttpError("not_found");
         }
       } finally {
-        deleting.delete(id);
+        release(id);
       }
       return reply.code(204).send();
     },
