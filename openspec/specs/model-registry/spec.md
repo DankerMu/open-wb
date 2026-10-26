@@ -100,7 +100,7 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 - **THEN** 全部 exact 400 `bad_request`，表与审计不变
 
 ### Requirement: 探活
-`POST /api/models/probe?id=<id>` SHALL 对该模型的上游发 `GET`，目标为「上游地址的视图形式与拼接」的 `upstreamEndpoint(baseUrl, "models")`（路径去掉结尾斜杠后接 `/models`，查询串保留），头 `authorization: Bearer <apiKey>`、`accept: application/json`，建连期限 10 s、整体期限 15 s，不跟随重定向，不重试。结果 SHALL 写入该行：2xx → `probe_status = 'ok'`、`probe_message = NULL`；其它状态 → `'failed'`、`probe_message = "HTTP <status>：<摘要>"`（摘要为 `upstreamExcerpt`（密钥集为全部已登记上游与本次所探上游自身的 base URL 与密钥各部分；正文至多读 16 KiB）的结果再截到 200 码点：超出时保留前 194 个码点并接 `…（已截断）`，不拆代理对）；连接被拒、重置或 DNS 失败 → `'failed'`、`"无法连接"`；建连期限或整体期限到期 → `'failed'`、`"超时"`；模型没有上游 → 不发请求、`'failed'`、`"未配置上游"`。`probe_at` 为完成时刻。探活 SHALL NOT 触发托管文件重写，SHALL 记审计 `model.probe`（detail `{modelId, status}`）。同一模型的并发探活 SHALL 串行；探活在途期间该行被删除时结果 SHALL 丢弃、响应 404 `not_found`。探活 2xx 只证明上游可达且密钥被接受，不核对 `data[].id` 含该模型（design「Not yet specified」）。密钥 SHALL NOT 出现在响应、审计、stdout/stderr。
+`POST /api/models/probe?id=<id>` SHALL 对该模型的上游发 `GET`，目标为「上游地址的视图形式与拼接」的 `upstreamEndpoint(baseUrl, "models")`（路径去掉结尾斜杠后接 `/models`，查询串保留），头 `authorization: Bearer <apiKey>`、`accept: application/json`，建连期限 10 s、整体期限 15 s，不跟随重定向，不重试。结果 SHALL 写入该行：2xx → `probe_status = 'ok'`、`probe_message = NULL`；其它状态 → `'failed'`、`probe_message = "HTTP <status>：<摘要>"`（摘要为 `upstreamExcerpt`（密钥集为全部已登记上游与本次所探上游自身的 base URL 与密钥各部分；正文至多读 16 KiB）的结果再截到 200 码点：超出时保留前 194 个码点并接 `…（已截断）`，不拆代理对）；连接被拒、重置或 DNS 失败 → `'failed'`、`"无法连接"`；建连期限或整体期限到期 → `'failed'`、`"超时"`；模型没有上游 → 不发请求、`'failed'`、`"未配置上游"`。`probe_at` 为完成时刻。探活 SHALL NOT 触发托管文件重写，SHALL 记审计 `model.probe`（detail `{modelId, status}`）。同一模型的并发探活 SHALL 串行；探活所用的上游与「这一行」的身份 SHALL 在轮到它时（串行链内）取自同一次表读，身份为该行的 `created_at` 与上游两列（`upstream_base_url`、`upstream_api_key`）；结果 SHALL 只在该行仍是这一身份时写入（change models-probe-identity）。探活在途期间该行被删除、或被删除后以同一 id 重新登记（新行的 `created_at` 与原行不同；被删的恰是最新一行且在同一毫秒内重建时两者可能相同，此时按上游两列判定——与连接器探活同一已接受残余）时，结果 SHALL 丢弃、响应 404 `not_found`、不记审计；同一行的上游地址或密钥在途期间被 `PUT` 改动时，结果 SHALL 丢弃、不记审计，应答 200 与该行当前视图（探活状态保持 `PUT` 之后的值）。只改 `name`、`reasoning`、`vision`、`maxTokens`、`efforts` 或缺省标记时结果照常写入并记审计。探活 2xx 只证明上游可达且密钥被接受，不核对 `data[].id` 含该模型（design「Not yet specified」）。密钥 SHALL NOT 出现在响应、审计、stdout/stderr。
 
 #### Scenario: 四种结果
 - **WHEN** 对上游为假上游（`GET /models` 答 200）的模型探活；对答 `401 {"error":{"message":"bad key <哨兵>"}}` 的探活；对指向未监听端口的探活；对指向只接受连接不应答的夹具（整体期限注入 1 s）探活；对没有上游的模型探活
@@ -109,6 +109,22 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 #### Scenario: 带查询串的上游地址
 - **WHEN** 模型上游地址为 `http://127.0.0.1:<port>/v1?org=a`（测试内记录请求行的服务），管理员探活
 - **THEN** 服务收到恰一个请求，请求行路径为 `/v1/models?org=a`；探活结果按应答状态判定
+
+#### Scenario: 在途期间删后重建同 id
+- **WHEN** 对 `m1` 的探活挂起在上游（测试夹具不应答），其间管理员 `DELETE m1`（204），再 `POST /api/models` 以另一个上游重新登记 `m1`，随后放行旧探活
+- **THEN** 探活应答 404 `not_found`；新 `m1` 的视图 `probe` 仍为 `{never, null, null}`；`model.probe` 审计为 0 条
+
+#### Scenario: 在途期间 PUT 换上游
+- **WHEN** 对 `m1` 的探活挂起，其间管理员 `PUT m1` 改了上游地址（或填了新密钥），随后放行旧探活
+- **THEN** 探活应答 200，视图 `probe` 等于 `PUT` 之后读到的值（不是旧上游的结果）；`model.probe` 审计为 0 条
+
+#### Scenario: 在途期间只改名称
+- **WHEN** 对 `m1` 的探活挂起，其间管理员 `PUT m1` 只改 `name`，随后放行
+- **THEN** 探活应答 200，视图 `probe` 为本次结果；`model.probe` 审计恰 1 条
+
+#### Scenario: 排队的探活读到新上游
+- **WHEN** 对 `m1` 的探活 A 挂起，同一 `m1` 再排一个探活 B，其间管理员 `PUT m1` 把上游换成另一个（新密钥），随后放行 A
+- **THEN** A 应答 200、结果丢弃、无审计；B 向新上游发出恰一次 `GET /models`（bearer 为新密钥），视图 `probe` 为 B 的结果，`model.probe` 审计恰 1 条
 
 ### Requirement: 中心页外壳
 `/center` SHALL 由 `web/src/features/center/` 渲染：页内 tab 由查询参数 `?tab=<key>` 表示，tab 表 `CENTER_TABS: readonly {key, label, adminOnly}[]` 在 `tabs.ts`，依次为 `{key:"experts", label:"专家", adminOnly:false}`、`{key:"skills", label:"技能", adminOnly:false}`、`{key:"connectors", label:"连接器", adminOnly:false}`、`{key:"models", label:"模型", adminOnly:true}`（`专家`、`技能` 与 `连接器` 三项见 experts「中心「专家」tab」、skill-switches「中心「技能」tab」与 connectors「中心「连接器」tab」）；可见 tab 为 `adminOnly` 为假或当前 principal 角色为 `管理员` 的项。`tab` 缺省、未知或指向不可见 tab 时 SHALL 以 replace 导航到第一个可见 tab；没有可见 tab 时 SHALL 渲染空态文案 `中心暂无可用内容` 且不渲染 tab 条（按上面的 tab 表不会发生：`专家`、`技能` 与 `连接器` 对所有人可见；规则保留）。tab 条用拷入层 tabs 组件（`role="tablist"`，当前项 `aria-selected="true"`，切换只改 `?tab=`）。页面级 heading 仍归顶栏（spa-shell）。routeManifest 的 `/center` 描述 SHALL 与可见内容一致：按 tab 表次序连接对所有人可见（`adminOnly` 为假）的 tab 的 label——相邻两项之间用顿号 `、`，只有最后两项之间改用 `与`（只有一项时即该 label），仅管理员可见的 tab 不进描述（`模型` tab 只对管理员可见，描述不对普通用户宣传它）——tab 表只有 `专家` 与 `模型` 时为 `专家`，只有 `专家`、`技能` 与 `模型` 时为 `专家与技能`，上面的完整 tab 表下为 `专家、技能与连接器`；不宣传未交付能力。
