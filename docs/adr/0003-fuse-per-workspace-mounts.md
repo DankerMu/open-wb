@@ -130,6 +130,7 @@ S1b 的前置条件（`IMPLEMENTATION_PLAN.md:545-546`）：app uid 挂载、omp
   - app uid（在 `fuseapp` 里）照 D7 argv 挂载成功，omp 读写正常。`fuseapp` 不是 `workbuddy`。
   - 测量方式的说明：由 root 经 `setpriv --reuid=<omp>` **直接** exec `fusermount3` 时，打印了版本号、rc=0，原因没有查明；上面的结论只依据 omp uid 进程自己发起的 exec。生产里 omp 经 `sudo -u omp` 启动、由 omp 身份的 setpriv 再 exec，这种形态本节没有测。
   - **附带观测**：rclone 1.60.1 在 PATH 上查找的是 `fusermount`，不是 `fusermount3`。D4 两个名字都查，与此相符；部署时 PATH 上必须有 `fusermount`（Ubuntu 的 fuse3 包把它装成指向 `fusermount3` 的符号链接）。
+  - **旁注（#1682、#1686）**：上面实测把 override 加在 `/usr/bin/fusermount3` 上；部署的 `dpkg-statoverride` 要作用于 dpkg 登记的 `/bin/fusermount3`（`/usr/bin` 是 usrmerge 别名，加在别名上重装包即恢复 `4755`），见 system.md §9.12 与 ADR-0010「2026-10-25 补充：#1682」。
 - **P11 错误凭证**（完整 argv，只测了口令错误；design 的探针表还列了私钥错误与共享名错误，都没测）：
   - **sftp**：挂载点从未出现在 mountinfo 里，rclone 以 rc=1 退出，日志为 `NewFs: couldn't connect SSH: ssh: handshake failed: ssh: unable to authenticate`。默认重试下从 spawn 到退出约 23.2 s，超过 D9 的 20 s 窗口（D9 会先超时、杀掉子进程，结局同样是失败）。加 `--low-level-retries 1 --retries 1 --contimeout 5s` 时 4.7 s 退出。作为对照，端口拒绝连接时 11.2 s 以 rc=1 退出。
   - **smb：不成立**。挂载在 100 ms 内出现，rclone 一直存活。挂载根的 `stat` 0 ms 成功；`readdir` 11.1 s 得 `EIO`；读文件与新建约 20 s 得 `EIO`；日志为 `couldn't connect SMB: … The attempted logon is invalid`。
@@ -181,3 +182,18 @@ S1b 的前置条件（`IMPLEMENTATION_PLAN.md:545-546`）：app uid 挂载、omp
 Epic #1679 的 (a) 挂载源登记做成中心最小 tab（组 13），(b)–(m) 照现稿接受。change `s1b-workspace-mounts` 的 design「owner 的裁定（2026-10-25）」、D3 / D6 / D7 / D9 / D11 / D16 与 workspace-mounts spec 已据此改写，组 5A、5B、6A、6B、12 的开工条件满足。
 
 **对 S1b grill 裁定的影响**：「rclone 统一三后端」「`--vfs-cache-mode writes`」「凭证经 0600 conf、`obscure`、不上命令行」「惰性卸载」「挂载点判据沿用 #1237」五条的前提都实测成立（P1、P2、P2′、P5、P6）。上面第 3 条是 `writes` 模式的回写语义带来的代价，第 1、4 条是 VFS 缓存带来的代价，第 2 条来自 host 覆盖与缓存路径的耦合。它们都不推翻「只用 rclone」；接受方式已由上方「owner 裁定（2026-10-25）」裁定。
+
+**产品化（#1686，change `s1b-workspace-mounts` 组 5）**：mount-manager 的挂载与卸载（`server/src/workspaces/mounts/manager.ts`、`rclone-process.ts`、`mountinfo.ts`）按上面的结论与 owner 裁定落地。行为规格在 workspace-mounts「挂载凭证文件」「挂载进程与挂载点」，这里只记每条做法的实测依据。
+
+- **只用 rclone，三个后端**：`sftp`、`smb` 由用户自填凭证；`local` 接管理员登记的挂载源（NFS 与本机目录先由管理员在 OS 层挂好）。不带 sshfs，没有 nfs 后端（P1：三后端跨 uid 读写成立）。
+- **凭证文件**：每个挂载一个 app 私有目录 `<OMP_STATE_DIR>/mounts/<id>/`（`0700`），其中 `rclone.conf`（`0600`，一个段，段名 `m<id>`）、`cache/`（`0700`）、`rclone.log`（`0600`）。口令只经 `rclone obscure -` 的标准输入（P2′）；conf 对 omp uid 不可读，argv 与环境里没有口令与 obscure 串（P2）。私钥写成换行转写为字面 `\n` 的单行 `key_pem`（P12）。`rclone.log` 每次尝试前由 app 确保存在且为 `0600`——rclone 只追加、不改模式，自建时却是 `0640`（P14）。
+- **argv 与环境**：`rclone mount m<id>:<远端> <挂载点> --config … --cache-dir … --log-file … --log-level NOTICE --allow-non-empty`，可写加 `--vfs-cache-mode writes --vfs-write-back 0s`，只读加 `--read-only`，`OMP_USER` 模式加 `--allow-other --default-permissions --uid <omp> --gid <空间根 gid> --umask 007`（P1′ 实测整串可用；`--vfs-write-back 0s` 与去掉 `--*-host` 两处由组 12 的真实挂载复核）。环境恰为 `{PATH, HOME=<私有目录>}`（P1′ 读到的 `environ` 恰为这两项）。
+- **主机写进 conf，不经 argv 覆盖**：每次尝试由 app 判定主机、把第一个解析结果（IP 字面，IPv6 带方括号）写进 `rclone.conf` 的 `host`，argv 不带 `--sftp-host` / `--smb-host`。argv 覆盖会给远端名加一个由覆盖值决定的后缀，缓存路径随之变化、IP 一变就不再续传（P1′、P5，owner 裁定第 2 项）。
+- **`--vfs-write-back 0s`**：缩小「目录改名之后删除的新文件在远端复活」的窗口（P8，owner 裁定第 3 项；只实测过一次未复现，组 12 回归）。
+- **`--allow-non-empty`**：离线期间挂载点是空目录、omp 可能往里写；加了它重挂不被残留挡住，残留被遮住、卸载后显形为普通目录（P1′：fuse3 接受该参数；卸载之后残留文件重新显形）。
+- **就绪判据**：spawn 之后每 100 ms 读 mountinfo，至多 20 s。挂载点（第 5 字段，八进制转义还原后）出现之后，再以子进程对挂载根 `readdir` 一次，期限为窗口的剩余时间，成功才算就绪——smb 口令错误时挂载照样出现，只有 `readdir` 以 `EIO` 判出（P11）。来源以本段名开头的 `fuse.rclone` 行出现在别的挂载点即立即失败（P15，owner 裁定第 5 项）。失败时杀掉 rclone、惰性卸载、删除挂载点（空时）与私有目录。
+- **段名与按来源清理**：「惰性卸载该挂载」对挂载点（在 mountinfo 里时）与每一行类型为 `fuse.rclone`、来源以 `<段名>:` 或 `<段名>{` 开头的挂载点各执行一次 `fusermount3 -uz`。不带覆盖参数时来源是 `<段名>:<远端>`（P1′ local 一栏）；`<段名>{` 只防 rclone 因任何覆盖而加后缀（P1′ sftp / smb 一栏）。P15 复测中挂上的 54 次（其中 30 次落到别处）按来源扫描全部收回。
+- **惰性卸载**：卸载依次 `-uz`、SIGTERM（5 s 后 SIGKILL）、`rmdir` 挂载点（非空即保留并报告一次）、递归删除私有目录、删行。`-uz` 使占用中的 cwd 与 fd 不挡卸载（P4、P5）；回写窗口里尚未上传的写入随私有目录一起删除，是已接受的残余（P5）。
+- **主机规则**：环回一律拒绝（字面与解析结果）、`MOUNT_HOST_ALLOW` 按字符串许可、解析失败该次尝试失败且不启动子进程（design D3）。同时在途的主机判定至多两个：`dns.lookup` 跑在 libuv 线程池（缺省 4 个线程）上、没有超时也不能取消，不限制的话几个指向不应答域名的挂载请求就能让全进程的 `fs/promises` 排队。
+- **挂载点检查**：每次尝试先 `lstat`（不跟随），不存在才建出再 `lstat`；必须是目录、属 app uid。最后一段是符号链接时 `fusermount3` 本身也拒绝（P15 静态情形）；检查与挂载之间的竞态窗口是已接受的残余，由就绪判据的「落点不符即失败」与按来源清理兜住（P15）。
+- **功能开关**：`RCLONE_BIN` 未配置即关闭，不检查 FUSE 前提。关闭时卸载若需要惰性卸载（孤儿 rclone 仍挂着），用 PATH 上第一个可执行的 `fusermount3`；找不到即 `mount_disabled`、行与私有目录保留，并向服务错误通道写一条点名原因的记录。
