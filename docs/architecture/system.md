@@ -26,14 +26,14 @@ API 端点清单（属 spec 阶段）。
 
 | 模块 | 接口 | 接缝背后 | 深度理由（删除测试） |
 |---|---|---|---|
-| `core/sandbox` | `createSandbox({rootOf, audit}) → { resolve(principal, workspaceId, relPath, op: "read"\|"list"\|"mkdir") → 绝对路径 \| 拒绝, ensureSharedDir }`（`rootOf` 由 workspaces 实现：返回 null → `not_found` 且不审计；越界先经 `core/audit` 记 `sandbox.reject` 再抛 `sandbox_denied`）；`deriveWhitelist(workspace) → omp 沙箱配置`（S1b 未来项，未实现） | 路径规范化、symlink 逃逸防御；多根挂载点合并、白名单推导（排除 app-server 配置）为 S1b 未来项 | 删掉它，越界防御在 workspaces/sessions/kb 每个调用点重现——AGENTS.md 白盒关键路径 |
+| `core/sandbox` | `createSandbox({rootOf, audit}) → { resolve(principal, workspaceId, relPath, op: "read"\|"list"\|"mkdir") → 绝对路径 \| 拒绝, ensureSharedDir }`（`rootOf` 由 workspaces 实现：返回 null → `not_found` 且不审计；越界先经 `core/audit` 记 `sandbox.reject` 再抛 `sandbox_denied`） | 路径规范化、symlink 逃逸防御；远程挂载的挂载点在空间根下一层，沙箱 resolve 按包含关系覆盖，不另推导白名单（change `s1b-workspace-mounts` D19） | 删掉它，越界防御在 workspaces/sessions/kb 每个调用点重现——AGENTS.md 白盒关键路径 |
 | `core/audit` | `emit(db, event)`；`query(db, principal, {limit?, before?})` | 只追加表、账号隔离、canonical id 游标分页 | 所有模块的合规出口收敛于一处 |
 | `core/errors` | `HttpError`、二十五码与中文消息（含 `sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`，s1d 增 `forbidden`（403）/`model_in_use`（409），s1b 增七个挂载码：`mount_disabled`（503）/`mount_limit`（409）/`mount_host_rejected`（403）/`mount_failed`（502）归 `workspaces/mounts` 的挂载端点与 manager，`mount_offline`（409）/`mount_read_only`（403）/`mount_boundary`（409）归 workspaces 文件端点的挂载判定（`mount_offline` 另含异步适配器超期）） | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
 | `core/roles` | `ADMIN_ROLE`、`isAdmin(principal)`（`role === "管理员"` 严格相等，不修剪、不归一） | 结构化入参，不导入 auth | 管理员判定一处出处（现由 `core/audit` 可见性过滤使用） |
 | `core/db` | SQLite 句柄 + 迁移执行 | WAL 配置、schema 迁移（ADR-0004） | |
 | `auth` | `authenticate(req) → Principal`；login/callback/logout 路由 | OIDC 流程、会话 cookie、首登 provisioning；适配器×2：oidc、dev-stub（ADR-0007） | 两个适配器 = 真接缝 |
 | `accounts` | 账号属性/角色/配额/项目组管理；`scopeOf(principal)` → 可见范围解析输入 | IdP 字段与应用侧字段的分界 | |
-| `workspaces` | 空间 CRUD、树列举、文件读/预览、挂载 attach/detach/status | `mounts/` 子模块 = mount-manager：rclone/sshfs 进程生命周期、凭证保管、健康探测、崩溃重挂（ADR-0003）；多根树合并；S1f change C（`s1f-session-list-temp-space`）：临时空间（`workspaces.temporary` 标记，目录名 `tmp-<id>`；随会话在同一事务里创建，`GET /api/workspaces` 不列出、按 id 的端点照常可达）、`POST /api/workspaces/:id/promote`（原地转正：只改名字与标记，目录不动，`workspace.promote` 审计）、`temp-dir-remove.ts`（临时空间目录经 app 私有 trash 中转删除，`EXDEV` 时原地删）、`snapshots.ts`（回合快照的落盘 `take` 与两种目录删除）与 `snapshots-restore.ts`（还原）——快照根目录由 `createApp` 注入，这两个模块不导入 `sessions/`，也没有自己的路由（部署侧见 §9.1） | 挂载协议差异（SFTP/NFS/SMB）全部藏在接缝后 |
+| `workspaces` | 空间 CRUD、树列举、文件读/预览、挂载 attach/detach/status | `mounts/` 子模块 = mount-manager：rclone 进程生命周期、凭证保管、健康探测、崩溃重挂（ADR-0003）；多根树合并；S1f change C（`s1f-session-list-temp-space`）：临时空间（`workspaces.temporary` 标记，目录名 `tmp-<id>`；随会话在同一事务里创建，`GET /api/workspaces` 不列出、按 id 的端点照常可达）、`POST /api/workspaces/:id/promote`（原地转正：只改名字与标记，目录不动，`workspace.promote` 审计）、`temp-dir-remove.ts`（临时空间目录经 app 私有 trash 中转删除，`EXDEV` 时原地删）、`snapshots.ts`（回合快照的落盘 `take` 与两种目录删除）与 `snapshots-restore.ts`（还原）——快照根目录由 `createApp` 注入，这两个模块不导入 `sessions/`，也没有自己的路由（部署侧见 §9.1） | 挂载协议差异（SFTP/NFS/SMB）全部藏在接缝后 |
 | `sessions` | `create/resume/fork/list`；`post(input)`；`interrupt()`；`subscribe(lastEventId) → 事件流` | omp-supervisor（每活跃会话 spawn、空闲回收、全局上限 `OMP_MAX_PROCESSES`（默认 16）/ 触顶驱逐最久空闲进程（无可驱逐 → `agent_capacity`）、并发 spawn 上限 `OMP_SPAWN_CONCURRENCY`（缺省 CPU 数；准入后 FIFO 排队、排队不计入握手 deadline，握手超时写一行 stderr 记录；保留的基础设施故障与会话删除清理失败各写一行 `{"event":"session_fault"}`）、审批经 host 应答（`approval.request`/`approval.resolved`，`chat_approvals` 持久化））、JSONL RPC 编解码、`host_tool_call` 分派、事件序号+环形缓冲（ADR-0006）、SQLite 会话/消息/步骤存储（持久历史事实源；实时缺口恢复使用 store 自有待刷尾部补齐的完整快照及同刻 streamCursor，读取不改变刷盘策略——#214）；omp `.jsonl` 存于 app-server 托管的 `OMP_STATE_DIR`、只供 `--resume`（S0b grill 2026-09-18）；S1c change B：会话可绑定工作空间（绑定会话的 omp cwd 为该空间根，`session.bind` 审计）、元数据 `PATCH /api/sessions/:id`（标题 / 场景 / 置顶）与 `DELETE /api/sessions/:id`（`session.delete` 审计）、`thinking.delta` 与 `files.changed` 事件（分别持久化到 `chat_messages.thinking` 与 `chat_steps.changes`）、`MODEL_REASONING`（托管 `models.yml` 的模型条目是否声明 reasoning；只影响 omp 的请求侧，不门控宿主对 thinking 的解析）、slash 白名单与 `GET /api/commands`（白名单外以 `/` 开头的文本转义后送模型）；S1f：任务清单（omp `todo` 工具结果的全量清单归一化后持久化到 `chat_sessions.todo`，经 `todo.updated` 事件与消息快照顶层 `todo` 下发；结构不合规的候选丢弃并写一行不含任务文本的 stderr warn 记录）；S1f change C（`s1f-session-list-temp-space`）：会话视图十一键（增 `archivedAt`、`pendingApproval`、`temporaryWorkspace`，`store-view.ts`）；`PATCH /api/sessions/:id` 增 `archived` 键，已归档会话的 prompt / 重新生成 / fork / 撤回以 409 `session_archived` 拒绝；不带 `workspaceId` 的 `POST /api/sessions` 同事务创建临时空间，`DELETE /api/sessions/:id` 在它是最后一个使用者时连同临时空间的行、目录与快照一起删（`workspace.delete` 审计）；列表事件连接 `GET /api/sessions/events`（`list-events.ts`：按账号的通知器与 SSE 路由，只发 `sessions.changed` 与 `session.rewound`，无序号、无回放，见 §9.2）；受理 prompt 后、派发前的回合快照步骤（`turn-snapshot.ts`，经 `supervisor.prompt` 的 `beforeDispatch`；登记表 `chat_turn_snapshots` 只由 `store-undo.ts` 读写）；撤回 `POST /api/sessions/:id/undo`（`undo.ts`：body `{messageId, files}`，`files` 为 `keep` / `restore` / `force`；临时进程上 `branch` 后原地回退对话并可还原文件，冲突为 409 `undo_conflict`，`session.undo` 审计；与 fork 共用 `branch-temp.ts` 的对位与临时进程）；消息视图与 prompt 202 增 `undo` 键 | omp 协议与进程治理全部不外泄；调用方只见会话语义 |
 | `kb` | `search(principal, query, kbRefs) → 切片+出处`；center 管理透传 | 可见范围过滤（先过滤 kb_ids 再调 kb-service）、bearer 凭证、共享库检索审计 | host tool 与 UI 检索共用同一过滤路径 |
 | `models` | 模型注册表 CRUD + 探活（对话/嵌入/重排） | 网关寻址细节 | |
@@ -108,7 +108,7 @@ server/src/
 │   ├── snapshots.ts          # 回合快照落盘（take）与快照目录删除
 │   ├── snapshots-restore.ts  # 按快照清单还原工作空间
 │   ├── temp-dir-remove.ts    # 临时空间目录经 trash 删除
-│   └── mounts/               # mount-manager（rclone/sshfs 生命周期）
+│   └── mounts/               # mount-manager（rclone 生命周期）
 ├── sessions/
 │   ├── supervisor.ts    # runtime、事件映射与持久化编排
 │   ├── index.ts         # 会话模块注册、对账与资源回收
@@ -172,7 +172,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 ### 6.2 其余流（一行一条）
 
 - **登录**：浏览器 → OIDC IdP → callback → auth 建 Principal，首登 provisioning 账号与沙箱根目录。
-- **挂载**：UI 填凭证 → mounts 起 rclone/sshfs 挂到沙箱内挂载点 → sandbox 白名单更新 → 在线状态探测。
+- **挂载**：UI 填凭证 → mounts 起 rclone 挂到空间根下的挂载点 → 挂载点在空间根下，沙箱 resolve 按包含关系覆盖 → 在线状态探测。
 - **摄取**：UI 上传（文档落所有者沙箱）→ kb-service ingest 解析/切片/嵌入（嵌入直连网关）→ Infinity。
 - **审计**：sandbox 拒绝、共享 KB 检索、账号操作、model-proxy 计量 → `core/audit` 追加表 → center 审计页查询。
 
@@ -881,7 +881,7 @@ modelRoles:
 
 ### 9.12 远程挂载（S1b，change `s1b-workspace-mounts`）
 
-本节随任务组落地。组 2：配置键与部署前提；挂载进程、启停与端点随后续任务组补入。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
+本节随任务组落地。组 2：配置键与部署前提；组 5：凭证与日志的位置；在线判据、启停与端点随后续任务组补入。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
 
 **部署前提**（`server/src/workspaces/mounts/config.ts`）：
 
@@ -894,3 +894,13 @@ modelRoles:
   - 同 uid 部署（`OMP_USER` 未配置）不查 `fuse.conf` 与执行权：那时 omp 就是 app uid，原装 `4755` 的 `fusermount3` 不是错误。
 - **容器部署**：容器需 `/dev/fuse` 与 `SYS_ADMIN`；#1665 实测的容器为 `docker run --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined`（另加的 `NET_ADMIN` 只供探针的 iptables，ADR-0003「2026-10 补充」），容器内装 fuse3 与 rclone。参考镜像 `deploy/app/`（9.8）暂不提供挂载支持，见 S4b。
 - **回滚**：撤掉 `RCLONE_BIN` 即关闭挂载功能，空间根目录照常使用。
+
+**凭证与日志在哪里**（`server/src/workspaces/mounts/manager.ts`，组 5）：
+
+- 每个挂载一个 app 私有目录 `<OMP_STATE_DIR>/mounts/<挂载 id>/`（`0700`；`<OMP_STATE_DIR>/mounts` 本身 `0700`，omp uid 进不去）：
+  - `rclone.conf`（`0600`）：一个段 `m<挂载 id>`，含该次挂载判定过的主机 IP、端口、用户名与口令的 obscure 串或单行私钥。`obscure` 只防眼看与误贴，不是加密；保护来自 `0600` / `0700` 与 uid 分离（同 uid 部署下 omp 读得到）。
+  - `cache/`（`0700`）：rclone 的 VFS 写缓存，里面是用户尚未上传的数据。
+  - `rclone.log`（`0600`，`--log-level NOTICE`）：排障看这里。它可能含主机与用户名，所以只在这个目录里，不进 API 响应与错误信封；每次挂载尝试之前由 app 确保它存在且为 `0600`。
+- 凭证不进数据库、HTTP 响应、审计、服务日志与错误通道，也不进任何子进程的 argv 与环境：rclone 只经 `--config` 读这份文件，环境恰为 `PATH` 与 `HOME=<私有目录>`；口令只经 `rclone obscure -` 的标准输入转成 obscure 串。
+- 挂载点是 `<空间根>/<挂载名>`。卸载会依次惰性卸载（`fusermount3 -uz`）、停止 rclone、删除挂载点（离线期间写进去的残留使它非空时，保留为普通目录并经服务错误通道报告一次）、递归删除整个私有目录——日志与缓存随之删除，回写窗口里尚未上传的写入也随之丢失。挂载失败同样不留私有目录。
+- 未配置 `RCLONE_BIN` 时卸载照常可用；若上次运行留下的孤儿挂载仍在 mountinfo 里，卸载要用 PATH 上第一个可执行的 `fusermount3`，找不到即 503 `mount_disabled`、挂载行与私有目录保留，服务错误通道有一条点名原因的记录——这时把 `fusermount3` 放上 PATH（或先手工 `fusermount3 -uz <挂载点>`）再卸载。

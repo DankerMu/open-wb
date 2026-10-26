@@ -476,3 +476,14 @@ change `office-convert-sandbox`（owner 裁定 B1–B10、B12、B13，2026-10-13
 - **部署要求**：`fusermount3` 与 `fusermount` 只能对 app 所在、omp 不在的组可执行，例如 `dpkg-statoverride --update --add root <app 组> 4750 /bin/fusermount3`；路径取 `dpkg -L fuse3 | grep fusermount3` 的输出，不要照抄（Ubuntu 24.04 的 fuse3 包登记 `/bin/fusermount3` 与指向它的符号链接 `/bin/fusermount`，`/usr/bin/fusermount3` 是 usrmerge 别名、同一 inode，一并受限）。测试主机上的一次性 ubuntu:24.04 容器（dpkg 1.22.6、fuse3 3.14.0-5build1）实测：override 加在 dpkg 登记的路径上，`apt-get install --reinstall fuse3` 之后仍是 `4750 root:<app 组>`；加在 `/usr/bin` 别名上当即生效，重装之后回到 `4755 root:root`，override 仍在列表里。`<app 组>` 不得是共享组 `workbuddy`——omp 是它的成员。PATH 之外的 setuid 副本删除。P10 实测：改过之后 omp uid 执行两者都得 `Permission denied`、`rclone mount` 在挂载出现之前失败，app uid 照常挂载。该结论只依据 omp uid 进程自己发起的 exec：root 经 `setpriv --reuid=<omp>` 直接 exec `fusermount3` 得 rc=0、原因未查明，生产的 `sudo -u omp` → setpriv → exec 形态未测（ADR-0003「2026-10 补充」P10「测量方式的说明」）。
 - **预检**：配置了 `RCLONE_BIN` 且配置了 `OMP_USER` 时，启动在配置阶段检查服务进程 `PATH` 各项下的每一个 `fusermount3` 与 `fusermount`：没有 other 执行位，且属组不是 `/usr/bin/id -G -- <OMP_USER>` 输出的任何一个组（`id` 走固定路径，与 `/usr/bin/setpriv` 同样不经 PATH）；不过即以 `reason: "config"` 启动失败、错误点名 `RCLONE_BIN`。同 uid 部署（`OMP_USER` 未配置）不查。运维步骤见 system.md 9.12「远程挂载」。
 - **残余**：预检只看得到 PATH 上的副本，且只看 mode 与属组；PATH 之外的 setuid 副本、POSIX ACL 授给 omp 的执行权、omp 可写的 PATH 目录与启动之后的改动不在检查范围内，由部署保证。
+
+## 2026-10-25 补充：#1686 远程挂载的挂载选项、`fuse.conf` 与 `<state>/mounts`
+
+- **出处**：change `s1b-workspace-mounts` design D5、D7、D20；实测见 ADR-0003「2026-10 补充」P1′、P2、P14 与其「产品化」一节。远程挂载由 app uid 以前台 rclone 进程挂出，omp uid 经下面的选项进入。
+- **挂载选项**（`OMP_USER` 部署）：`--allow-other --default-permissions --uid <omp 数值 uid> --gid <空间根目录的 gid> --umask 007`。
+  - `--allow-other`：FUSE 缺省只让挂载者本人进入，omp uid 要进挂载就必须加；它要求 `/etc/fuse.conf` 有一行恰为 `user_allow_other`（启动预检把关，被注释的不算）。`user_allow_other` 全机生效，由此带来的 omp 自挂 FUSE 风险见上文「2026-10-25 补充：#1682」的 `fusermount3` 执行权要求。
+  - `--default-permissions`：`--allow-other` 下不加它，内核不按 mode 检查访问，机器上任何用户都能进挂载；加了之后 `--umask 007` 与共享组才是边界（P1′：other uid 对挂载根的 `stat`、`readdir` 与读文件全部得 `EACCES`）。
+  - `--uid <omp>`：omp 是挂载内文件的属主，`chmod` 一类属主操作不被内核拒绝（rclone 自己忽略它）；`--gid` 取空间根目录的 gid，即 setgid 继承来的共享组 `workbuddy`（上文 2026-09-18 补充的权限模型），不另配置；app uid 经共享组的 `rw` 访问。上文 2026-09-18 补充否决 POSIX ACL 时说的「S1b 挂载不保证」在这里落实为不依赖 ACL（P1：挂载根对 omp 显示为 `0770`、新文件为 `0660`）。
+  - 同 uid 部署（`OMP_USER` 未配置）不加这五项，也不要求 `user_allow_other`：那时 omp 就是挂载者。
+- **`<state>/mounts`**：托管布局下的 app 私有目录（`0700`），每个挂载一个 `<id>/`（`0700`）：`rclone.conf`（`0600`，凭证）、`cache/`（`0700`，VFS 写缓存，里面是用户数据，不落到 app uid 的 `~/.cache/rclone`）、`rclone.log`（`0600`）。omp uid 进不去（P2：`readdir` 与读 conf 都得 `EACCES`）；同 uid 部署下 omp 能读它，与该模式下其它 app 私有状态一样。rclone 子进程的环境恰为 `PATH` 与 `HOME=<id>/`，不继承 app 的环境。卸载递归删除 `<id>/`（`fs/promises` 的 `rm`）。
+

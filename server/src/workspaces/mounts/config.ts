@@ -84,7 +84,7 @@ function preflight(
   if (!isAbsolute(rcloneBin) || !isExecutableFile(rcloneBin)) {
     throw new Error("RCLONE_BIN must be an absolute path to an executable regular file");
   }
-  const dirs = (path ?? "").split(delimiter).filter((dir) => isAbsolute(dir));
+  const dirs = pathDirs(path);
   const fusermountBin = firstExecutable(dirs, "fusermount3");
   if (fusermountBin === undefined) {
     throw new Error("RCLONE_BIN preflight: no executable fusermount3 on PATH");
@@ -116,6 +116,18 @@ function isExecutableFile(file: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * The first executable regular file `name` under the absolute entries of `path`; also the manager's
+ * `fusermount3` lookup when the feature is off (design D10).
+ */
+export function findExecutable(path: string | undefined, name: string): string | undefined {
+  return firstExecutable(pathDirs(path), name);
+}
+
+function pathDirs(path: string | undefined): string[] {
+  return (path ?? "").split(delimiter).filter((dir) => isAbsolute(dir));
 }
 
 function firstExecutable(dirs: readonly string[], name: string): string | undefined {
