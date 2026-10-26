@@ -10,7 +10,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import * as promises from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { LightMyRequestResponse } from "fastify";
+import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { expect } from "vitest";
 import type { MountFileHandle, MountFsImpl } from "../src/workspaces/mounts/fs.js";
 import type { MountManagerOptions } from "../src/workspaces/mounts/manager.js";
@@ -18,6 +18,7 @@ import { OWNER, seedMount, sftp, W1, type World } from "./mounts-manager-helpers
 import {
   auditRows,
   type MountsRest,
+  mountsUrl,
   openMounts,
   postMount,
   send,
@@ -37,6 +38,11 @@ export interface Seam {
   calls: SeamCall[];
   /** From now on every call (or every call of `ops`) whose path is `prefix` or below it never settles. */
   hang(prefix: string, ops?: readonly SeamCall["op"][]): void;
+  /**
+   * From now on every call (or every call of `ops`) whose path is `prefix` or below it is recorded and
+   * then waits, before it acts, until the returned `release` (a call in the kernel, held there).
+   */
+  hold(prefix: string, ops?: readonly SeamCall["op"][]): () => void;
   /** `fstat` of a handle opened at `path` reports `size` (the rest of the stats are the file's). */
   staleSize(path: string, size: number): void;
   /** The recorded calls at `prefix` or below it. */
@@ -48,14 +54,19 @@ export const isUnder = (path: string, prefix: string): boolean =>
 
 export function createSeam(): Seam {
   const calls: SeamCall[] = [];
-  const hung: Array<{ prefix: string; ops: readonly SeamCall["op"][] | undefined }> = [];
+  type Match = { prefix: string; ops: readonly SeamCall["op"][] | undefined };
+  const hung: Match[] = [];
+  const held: Array<Match & { released: Promise<void> }> = [];
   const stale = new Map<string, number>();
+  const matches = ({ prefix, ops }: Match, op: SeamCall["op"], path: string) =>
+    isUnder(path, prefix) && (ops?.includes(op) ?? true);
   const run = <T>(op: SeamCall["op"], path: string, act: () => Promise<T>): Promise<T> => {
     calls.push({ op, path });
-    if (hung.some(({ prefix, ops }) => isUnder(path, prefix) && (ops?.includes(op) ?? true))) {
+    if (hung.some((match) => matches(match, op, path))) {
       return new Promise<T>(() => undefined);
     }
-    return act();
+    const holding = held.find((match) => matches(match, op, path));
+    return holding === undefined ? act() : holding.released.then(act);
   };
   const impl: MountFsImpl = {
     lstat: (path) => run("lstat", path, () => promises.lstat(path)),
@@ -84,6 +95,18 @@ export function createSeam(): Seam {
     calls,
     hang: (prefix, ops) => {
       hung.push({ prefix, ops });
+    },
+    hold: (prefix, ops) => {
+      let release: () => void = () => undefined;
+      const released = new Promise<void>((done) => {
+        release = done;
+      });
+      const entry = { prefix, ops, released };
+      held.push(entry);
+      return () => {
+        held.splice(held.indexOf(entry), 1);
+        release();
+      };
     },
     staleSize: (path, size) => {
       stale.set(path, size);
@@ -230,4 +253,30 @@ export async function expectOutcomes(
     ]),
   );
   return bodies;
+}
+
+/** The seam's opens and closes so far under `point` (every handle a route opened is closed through it). */
+export function handles(seam: Seam, point: string): { opened: number; closed: number } {
+  const ops = seam.under(point).map((call) => call.op);
+  return {
+    opened: ops.filter((op) => op === "open").length,
+    closed: ops.filter((op) => op === "close").length,
+  };
+}
+
+/** The mount's status on W1 as `GET …/mounts` reports it. */
+export async function statusOf(fw: FileWorld, name: string): Promise<string> {
+  const response = await send(fw.rest, "member", "GET", mountsUrl(W1));
+  const views = (response.json() as { mounts: Array<{ name: string; status: string }> }).mounts;
+  return String(views.find((view) => view.name === name)?.status);
+}
+
+/** Listens on an ephemeral loopback port (a real socket, for cut connections); returns the origin. */
+export async function listen(app: FastifyInstance): Promise<string> {
+  await app.listen({ host: "127.0.0.1", port: 0 });
+  const address = app.server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("no TCP address");
+  }
+  return `http://127.0.0.1:${address.port}`;
 }

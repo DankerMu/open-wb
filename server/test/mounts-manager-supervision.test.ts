@@ -212,7 +212,7 @@ describe("在线状态与重挂: one pending timer and one offline transition pe
     expect(world.clock.pending()).toEqual([30_000]);
   });
 
-  it("closeAll during a failed probe's unmount resolves only after it; that rclone is gone", {
+  it("closeAll during a failed probe's unmount resolves only after it; rclone was SIGKILLed before that unmount", {
     timeout: CASE_MS,
   }, async () => {
     const probeExec: ProbeExec = (op, path, timeoutMs, signal) =>
@@ -223,7 +223,8 @@ describe("在线状态与重挂: one pending timer and one offline transition pe
     world.clock.advance(30_000);
     await waitFor(() => fusermountHeld(world));
     expect(manager.statusOf(ID1)).toBe("offline");
-    expect(alive(pidOf(0))).toBe(true);
+    // #1665 P9 / #1795: kill first, then -uz — the held -uz finds rclone already gone.
+    expect(alive(pidOf(0))).toBe(false);
 
     let closed = false;
     const closing = manager.closeAll().then(() => {
@@ -346,7 +347,9 @@ describe("在线状态与重挂「远端不可达即离线」", () => {
     await attach(manager, local());
 
     world.clock.advance(30_000);
+    // Both probes started (the stat calls) and the local one's next round armed: its probe is done.
     await waitFor(() => calls.length === 1 && stats.length === 2);
+    await waitFor(pendingIs([5000, 30_000]));
     expect(calls).toEqual([{ host: "10.0.0.7", port: 22 }]);
     world.clock.advance(4999);
     await quiet();

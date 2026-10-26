@@ -71,7 +71,7 @@ export async function probeOnce(
   if (target.child.hasExited()) {
     return false;
   }
-  const entries = await readMountinfo(target.mountinfoPath);
+  const entries = readMountinfo(target.mountinfoPath);
   if (
     !entries.some((entry) => entry.mountPoint === target.mountPoint) ||
     controller.signal.aborted

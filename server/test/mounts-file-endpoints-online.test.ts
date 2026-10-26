@@ -11,23 +11,23 @@
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
-import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ask,
   createSeam,
-  type FileWorld,
   fileAudits,
+  handles,
   isUnder,
+  listen,
   OFFLINE,
   openFileWorld,
   outcome,
   put,
   q,
-  type Seam,
+  statusOf,
 } from "./mounts-file-endpoints-helpers.js";
 import { alive, disposeWorlds, quiet, W1, W2, waitFor } from "./mounts-manager-helpers.js";
-import { CASE_MS, closeApps, mountsUrl, send } from "./mounts-rest-helpers.js";
+import { CASE_MS, closeApps } from "./mounts-rest-helpers.js";
 import { ZIP_THREE_RECORDS, zipArchive } from "./workspaces-archive-helpers.js";
 
 /** Every `node:fs` / `node:fs/promises` call made through the module objects, by first argument. */
@@ -89,22 +89,6 @@ afterEach(async () => {
 /** Recorded synchronous calls at `point` or below it. */
 const syncInto = (point: string) =>
   fsCalls.filter((call) => isUnder(call.path, point) && !call.name.startsWith("promises."));
-
-/** The seam's opens and closes so far (every handle a route opened is closed through it). */
-const handles = (seam: Seam, point: string) => {
-  const ops = seam.under(point).map((call) => call.op);
-  return {
-    opened: ops.filter((op) => op === "open").length,
-    closed: ops.filter((op) => op === "close").length,
-  };
-};
-
-/** The mount's status as `GET …/mounts` reports it. */
-async function statusOf(fw: FileWorld, name: string): Promise<string> {
-  const response = await send(fw.rest, "member", "GET", mountsUrl(W1));
-  const views = (response.json() as { mounts: Array<{ name: string; status: string }> }).mounts;
-  return String(views.find((view) => view.name === name)?.status);
-}
 
 describe("挂载目录内的文件端点: the supported operations on an online mount go through the adapter", () => {
   it("tree, file (sniffed text, Range, 416, HEAD), download and archive: right answers, every call on the seam, nothing synchronous in the mount", {
@@ -282,15 +266,6 @@ function fetchRaw(origin: string, path: string, headers: Record<string, string>)
     });
     request.on("error", reject);
   });
-}
-
-async function listen(app: FastifyInstance): Promise<string> {
-  await app.listen({ host: "127.0.0.1", port: 0 });
-  const address = app.server.address();
-  if (address === null || typeof address === "string") {
-    throw new Error("no TCP address");
-  }
-  return `http://127.0.0.1:${address.port}`;
 }
 
 describe("挂载目录内的文件端点「挂载内短读即中断」", () => {

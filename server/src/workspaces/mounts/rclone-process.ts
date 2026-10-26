@@ -128,7 +128,7 @@ export async function awaitReady(wait: ReadyWait): Promise<boolean> {
     if (wait.child.hasExited() || wait.signal.aborted) {
       return false;
     }
-    const entries = await readMountinfo(wait.mountinfoPath);
+    const entries = readMountinfo(wait.mountinfoPath);
     if (
       sectionMounts(entries, wait.section).some((entry) => entry.mountPoint !== wait.mountPoint)
     ) {

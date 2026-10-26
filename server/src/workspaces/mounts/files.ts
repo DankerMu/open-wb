@@ -12,15 +12,20 @@
  * The path under the mount point is followed as the kernel sees it: no `lstat` of the mount point
  * comes first. While a mount is `online` its point is the FUSE mount itself, which cannot be renamed,
  * removed or replaced by a symlink (EBUSY), and rclone mounts show no symlinks (`local` without
- * `--links` skips them, `sftp` follows them on the server; #1665 P13). The residual is the transition:
- * a request that passed the status check (`path-rule.ts`) and waits on the gate while the mount goes
- * offline (a failed probe, not an expired call: those fail every queued call) still makes its calls
- * after the lazy unmount, when the point is an ordinary directory omp could have swapped — the same
- * class as the intermediate-component residual of the routes outside mounts (owner B1).
+ * `--links` skips them, `sftp` follows them on the server; #1665 P13). A request that passed the
+ * status check (`path-rule.ts`) and then waits on the gate, or sits between two of its calls, while the
+ * mount goes offline gets `mount_offline` from its next call: the adapter asks the manager again as it
+ * admits each one (`fs.ts`), so nothing lands on the point once it is an ordinary directory after the
+ * lazy unmount. What remains is the one call already in the kernel when the mount went offline.
  *
- * The one call not through the adapter is the fallback close: past a deadline the adapter admits
- * nothing more on that mount, so a handle whose close it refuses is closed directly. By then the
- * manager has begun the SIGKILL and lazy unmount that make a stuck FUSE request return (#1665 P9).
+ * The one call not through the adapter is the fallback close: once the adapter refuses a mount (past
+ * a deadline, or no longer online) a handle whose close it refuses is closed directly, so none leaks.
+ * By then the manager has begun the SIGKILL and lazy unmount that make a stuck FUSE request return
+ * (#1665 P9), and that recovery never waits on the libuv pool those stuck calls may fill (`manager.ts`).
+ *
+ * A read that fails, or reaches EOF, before any byte is sent fails the stream before the response
+ * headers go out: the route then answers with the error envelope instead (409 `mount_offline` past the
+ * deadline, otherwise the generic 500), never a 200 / 206.
  */
 import type { Stats } from "node:fs";
 import { dirname } from "node:path";

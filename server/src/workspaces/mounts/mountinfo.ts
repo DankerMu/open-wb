@@ -11,8 +11,13 @@
  * Decoding works on bytes (latin1) and then reads them as UTF-8, so CJK names survive; paths are
  * compared as those strings, which is byte comparison wherever the line is valid UTF-8 (invalid bytes
  * decode to U+FFFD). A missing file (no `/proc`, e.g. macOS) reads as no mounts.
+ *
+ * The read is synchronous on purpose: procfs, never a FUSE path (D21 forbids synchronous calls under a
+ * mount point, not here), and off the libuv pool. Hung calls inside a mount each hold a pool thread;
+ * the recovery that frees them (SIGKILL rclone, read mountinfo, `-uz`) must not queue behind them, or
+ * it never runs (#1795 review).
  */
-import { readFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 
 export const SYSTEM_MOUNTINFO = "/proc/self/mountinfo";
 
@@ -47,9 +52,9 @@ export function parseMountinfo(text: Buffer): MountEntry[] {
   return entries;
 }
 
-export async function readMountinfo(path: string): Promise<MountEntry[]> {
+export function readMountinfo(path: string): MountEntry[] {
   try {
-    return parseMountinfo(await readFile(path));
+    return parseMountinfo(readFileSync(path));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
       return [];
