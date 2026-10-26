@@ -275,7 +275,10 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   // One facade for the workspaces routes and the prompt route's attachment check.
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
   const sandbox = createSandbox({ rootOf: store.rootOf, audit });
-  const mounts = mountsOf(db, store, audit, runtime, staticRoot, assembly);
+  // One source store and one protected-root list for the manager and the mount-source routes.
+  const mountStore = createMountStore(db);
+  const protectedRoots = protectedRootsOf(db, runtime, staticRoot);
+  const mounts = mountsOf(mountStore, store, audit, runtime, protectedRoots, assembly);
   app.decorate("mounts", mounts);
   // After the main listener has stopped and before the entry closes the DB (design D12): unmount and
   // stop what this run mounted; rows and private directories stay for the next start's restore.
@@ -329,6 +332,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
           retentionDays: DEFAULT_TRASH_RETENTION_DAYS,
         }),
       ...(assembly?.previewLimits === undefined ? {} : { limits: assembly.previewLimits }),
+      mounts: { store: mountStore, manager: mounts, audit, isAdmin, protectedRoots },
     },
     assembly?.preview,
   );
@@ -430,35 +434,48 @@ function upstreamRedactor(
  * children are the manager's defaults.
  * `workspaceRootOf` is the store's `rootOf`: the sandbox root's realpath plus components that are
  * lstat'ed and never symlinks (`core/sandbox/resolve.ts`) — the path mountinfo shows. The protected
- * roots (D2) are given as configured; the source rule takes their realpath on every check.
+ * roots (D2, `protectedRootsOf`, the same list the mount-source routes get) are given as configured; the
+ * source rule takes their realpath on every check.
  */
 function mountsOf(
-  db: DatabaseSync,
+  mountStore: ReturnType<typeof createMountStore>,
   store: WorkspaceStore,
   audit: { emit(event: Parameters<typeof emit>[1]): unknown },
   runtime: SessionRuntime,
-  staticRoot: string | undefined,
+  protectedRoots: readonly string[],
   assembly: AssemblyDependencies | undefined,
 ): MountManager {
   if (assembly?.mounts !== undefined) {
     return assembly.mounts;
   }
-  const dbFile = db.location();
   return createMountManager({
     ...mountBinsOf(assembly?.mountSettings),
-    store: createMountStore(db),
+    store: mountStore,
     audit,
     mountsDir: ompMountsDir(runtime.stateDir),
     workspaceRootOf: (ownerId, workspaceId) => store.rootOf({ id: ownerId }, workspaceId),
-    protectedRoots: [
-      runtime.sandboxRoot,
-      runtime.stateDir,
-      ...(dbFile === null ? [] : [dirname(dbFile)]),
-      ...(staticRoot === undefined ? [] : [staticRoot]),
-      dirname(runtime.bin),
-    ],
+    protectedRoots,
     onError: assembly?.onError ?? (() => {}),
   });
+}
+
+/**
+ * The five roots no mount source may overlap (design D2): `SANDBOX_ROOT`, `OMP_STATE_DIR`,
+ * `dirname(DB_PATH)` (none for an in-memory DB), `STATIC_ROOT` (when served) and `dirname(OMP_BIN)`.
+ */
+function protectedRootsOf(
+  db: DatabaseSync,
+  runtime: SessionRuntime,
+  staticRoot: string | undefined,
+): string[] {
+  const dbFile = db.location();
+  return [
+    runtime.sandboxRoot,
+    runtime.stateDir,
+    ...(dbFile === null ? [] : [dirname(dbFile)]),
+    ...(staticRoot === undefined ? [] : [staticRoot]),
+    dirname(runtime.bin),
+  ];
 }
 
 /** The four settings the manager reads; the rest of `MountSettings` is the REST layer's. */

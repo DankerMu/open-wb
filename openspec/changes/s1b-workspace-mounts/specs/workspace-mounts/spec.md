@@ -221,7 +221,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 
 `POST` body SHALL 恰为 `{name, path, readOnly}`：`name` 1..64 个字符、不含 U+0000–U+001F 与 U+007F；`path` 为绝对路径，其 realpath 是存在的目录，且与 `SANDBOX_ROOT`、`OMP_STATE_DIR`、`dirname(DB_PATH)`、`STATIC_ROOT`、`dirname(OMP_BIN)` 各自的 realpath 互不包含（相等、位于其内、包含它都拒绝）；违反 400，已有 32 个挂载源 400，同名或同 realpath 409 `conflict`。存入的 `path` 是 realpath。引用它的 `local` 挂载每次挂载尝试之前 SHALL 重新取该 `path` 的 realpath 并复核：等于存入值、是存在的目录、与上述五者互不包含，不过即该次尝试失败（「挂载进程与挂载点」）。成功 201 管理员视图与 `mount.source.create` 审计（`detail` `{sourceId, name, path, readOnly}`）。
 
-`DELETE` SHALL 先在内存里把该挂载源标为删除中（此后引用它的建出请求在 `sourceId` 判定处 404），再对此刻引用它的每个挂载做「挂载进程与挂载点」的卸载并删除挂载行，各写一条 `mount.detach`（`reason` 为 `source_deleted`，actor 为该管理员，`workspaceId` 为该挂载的空间），最后在一个事务内删除挂载源行并写 `mount.source.delete`，返回 204；未知 id 404。「删除中」标记 SHALL 在 `finally` 里清除：连带卸载或最后的事务失败时 `DELETE` 以 generic 500 结束、挂载源行保留、标记已清，此后引用它的建出照常可用（已连带卸载的挂载行已删，其余照旧）。引用挂载源的建出 SHALL 在插行的事务里复核该源仍存在且未标删除，不成立即先卸载刚挂上的挂载、不插行，404 `not_found`。全部响应 `no-store`。
+`DELETE` SHALL 先在内存里把该挂载源标为删除中（此后引用它的建出请求在 `sourceId` 判定处 404），再对此刻引用它的每个挂载做「挂载进程与挂载点」的卸载并删除挂载行，各写一条 `mount.detach`（`reason` 为 `source_deleted`，actor 为该管理员，`workspaceId` 为该挂载的空间），最后在一个事务内删除挂载源行并写 `mount.source.delete`，返回 204；未知 id 404。「删除中」标记 SHALL 在 `finally` 里清除：连带卸载或最后的事务失败时 `DELETE` 以 generic 500 结束（唯一的例外同挂载端点的 `DELETE`：需要惰性卸载而进程 `PATH` 上没有 `fusermount3` 时为 503 `mount_disabled`）、挂载源行保留、标记已清，此后引用它的建出照常可用（已连带卸载的挂载行已删，其余照旧）。引用挂载源的建出 SHALL 在插行的事务里复核该源仍存在且未标删除，不成立即先卸载刚挂上的挂载、不插行，404 `not_found`。全部响应 `no-store`。
 
 #### Scenario: 两种视图
 - **WHEN** 管理员登记挂载源 `NFS 共享`（路径为一个符号链接，指向测试目录），普通用户与管理员分别 `GET /api/mount-sources`

@@ -881,7 +881,7 @@ modelRoles:
 
 ### 9.12 远程挂载（S1b，change `s1b-workspace-mounts`）
 
-本节随任务组落地。组 2：配置键与部署前提；组 5：凭证与日志的位置；组 6：在线判据、启停与回滚；端点随后续任务组补入。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
+本节随任务组落地。组 2：配置键与部署前提；组 5：凭证与日志的位置；组 6：在线判据、启停与回滚；组 7：挂载源端点（挂载端点随后补入）。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
 
 **部署前提**（`server/src/workspaces/mounts/config.ts`）：
 
@@ -915,3 +915,18 @@ modelRoles:
   1. 关闭功能：撤掉 `RCLONE_BIN` 重启。启动不恢复挂载，已登记的挂载显示离线、仍可卸载，空间根目录照常使用。
   2. 回退到不含挂载的旧版本：先在当前版本下卸载全部挂载（或停服务后对每个挂载点 `fusermount3 -uz <挂载点>`），之后 `<OMP_STATE_DIR>/mounts` 可整体删除；迁移 049 的两张表留着无害（迁移不逆转）。
   3. 功能关闭时卸载孤儿挂载（上次运行被 SIGKILL 后撤了 `RCLONE_BIN`、孤儿 rclone 还挂着）需要服务进程 PATH 上有可执行的 `fusermount3`，否则 503 `mount_disabled`、行与私有目录保留（见上一段末条）。
+
+**挂载源端点**（`server/src/workspaces/mounts/rest.ts`，由 `registerWorkspaces` 注册，属 workspaces 模块，启动记录的模块数不变；规格 workspace-mounts「挂载源端点」）：挂载源是管理员登记的服务器目录（服务器上挂好的 NFS 或本机目录），用户经 `local` 挂载把它挂进自己的空间。登记目前只有 API：管理员用带 cookie 的请求登记与删除。
+
+- `GET /api/mount-sources` → 200 `{sources: [...]}`，按 `name` 的 UTF-8 字节序，对所有登录账号开放。两种视图：管理员每项恰为 `{id, name, path, readOnly, createdAt}`，其它账号每项恰为 `{id, name, readOnly}`（看不到服务器路径）。
+- `POST /api/mount-sources`（仅管理员，body 恰为 `{name, path, readOnly}`）→ 201 管理员视图。`name` 1..64 个字符、无控制字符；`path` 必须是绝对路径，其 realpath 必须是存在的目录（不存在、普通文件、操作系统拒收的路径如含 U+0000 都是 400），存入的是 realpath（登记一个符号链接存的是目标目录）。挂载源拒绝清单五项——realpath 与下列任一目录的 realpath 相等、位于其内或包含它（例如它的父目录）即 400、不写行与审计：
+  1. `SANDBOX_ROOT`（别人的沙箱）；
+  2. `OMP_STATE_DIR`（凭证、会话与挂载私有目录）；
+  3. `dirname(DB_PATH)`（数据库；内存库没有这一项）；
+  4. `STATIC_ROOT`（前端静态文件，可写挂载即存储型 XSS；未提供前端时没有这一项）；
+  5. `dirname(OMP_BIN)`（omp 二进制）。
+
+  同名或同 realpath 409 `conflict`（先于上限判定），已有 32 个时第 33 个 400。rclone 把 `local` 挂载里的一切显示为 omp 可读写，所以这五处永远不能交给 omp；引用该源的 `local` 挂载每次挂载与重挂之前都按同一规则复核 realpath（还须等于登记值），登记之后把目录换成指向这些目录的符号链接，挂载就停在离线、不发起 `mount`。
+- `DELETE /api/mount-sources/:id`（仅管理员）→ 204，未知 id 404。挂载源删除连带卸载：先在内存里把该源标为删除中（建出侧据此拒绝引用它的新挂载，随挂载端点落地），再对此刻引用它的每个挂载——不论属于哪个账号——在各自空间的串行链上卸载并删行，最后在一个事务内删源行。标记在结束时（成功或失败）清除：某次连带卸载或最后的事务失败时应答 generic 500（功能关闭且缺少 `fusermount3` 而卸载不了孤儿挂载时为 503 `mount_disabled`，同上文），源行保留，已连带卸载的挂载已删、其余照旧，之后可再次 `DELETE`。选连带卸载而不是 409：管理员看不到也卸不了别人的挂载。
+- 次序：未登录 401 → 非管理员对 `POST` / `DELETE` 403 `forbidden`（路由级 `preParsing`，先于 body 解析与 id 判定）→ body 解析 → 取值 400 → 路径 400 → 409 / 上限 400。`POST /api/mount-sources` 属 content-parser 归属集（三十条之一），body limit 16 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400、不写表与审计；`DELETE` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。违反取值规则的 400 message 恒为 `请求格式不正确`，不回显取值与键名。三个端点全部 `Cache-Control: no-store`，功能关闭（未配置 `RCLONE_BIN`）时照常可用：登记只是数据，连带卸载按上文功能关闭时的卸载规则。
+- 审计（与表写入同一事务，actor 为管理员）：`mount.source.create` / `mount.source.delete`，`workspaceId` 为 null，detail 恰为 `{sourceId, name, path, readOnly}`；连带卸载的每个挂载各一条 `mount.detach`，detail `{mountId, name, reason: "source_deleted"}`，`workspaceId` 为该挂载的空间。
