@@ -114,7 +114,7 @@ export interface SessionSupervisorOptions {
   /** createApp's sanitiser bound to its secret list (#909): every `error` detail goes through it. */
   redactUpstream: (text: string) => string;
   /** The skills of a session's cwd right now, for the branch-family command check (branching.ts). */
-  skills: (ownerId: string, workspaceId: string | null) => readonly { name: string }[];
+  skills: (ownerId: string, workspaceId: string | null) => Promise<readonly { name: string }[]>;
   /** What turns a session's raw composer columns into the mode and model of its spawns. */
   composer: ComposerConfig;
   /** The prompt of an expert its owner can see, else null (experts「专家提示词注入」); never cached. */

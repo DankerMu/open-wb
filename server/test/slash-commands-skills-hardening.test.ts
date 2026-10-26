@@ -38,7 +38,9 @@ import { loginSessionPair } from "./session-db-helpers.js";
 
 /**
  * Every `lstatSync`, `openSync`, `opendirSync`, `realpathSync` (Node's JS resolver) and
- * `realpathSync.native` (the kernel's) call made through a named `node:fs` import, in call order.
+ * `realpathSync.native` (the kernel's) call made through a named `node:fs` import, and every
+ * `realpath` (the kernel's, asynchronous: the two project real paths, #1692) made through a named
+ * `node:fs/promises` import, in call order.
  */
 const fsCalls = vi.hoisted(() => [] as Array<{ name: string; args: unknown[] }>);
 
@@ -64,6 +66,17 @@ vi.mock("node:fs", async (importOriginal) => {
     opendirSync: record("opendirSync", actual.opendirSync),
     realpathSync,
   };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const realpath = new Proxy(actual.realpath, {
+    apply(target, self, args) {
+      fsCalls.push({ name: "realpath", args });
+      return Reflect.apply(target as (...values: unknown[]) => unknown, self, args);
+    },
+  });
+  return { ...actual, default: { ...actual, realpath }, realpath };
 });
 
 const OUTSIDE_DIR_DESCRIPTION = "outside directory description";
@@ -377,28 +390,33 @@ function plantOutside(root: string): string {
 }
 
 /** `run` with the recorder reset first: its result, the calls it made and their paths by name. */
-function recorded<T>(run: () => T) {
+async function recorded<T>(run: () => T | Promise<T>) {
   fsCalls.length = 0;
-  const result = run();
+  const result = await run();
   const calls = fsCalls.splice(0);
   const pathsOf = (name: string) =>
     calls.filter((call) => call.name === name).map((call) => String(call.args[0]));
   return { result, calls, pathsOf };
 }
 
-/** `listProjectSkills` recorded: every path it opened, listed or resolved. */
-function recordedProject(cwd: string, sandboxRoot: string) {
-  const { result, calls, pathsOf } = recorded(() => listProjectSkills(cwd, sandboxRoot));
+/**
+ * `listProjectSkills` recorded: every path it opened, listed or resolved. A kernel resolution is
+ * either kind, `realpathSync.native` (the walk) or the asynchronous `realpath` (the two project
+ * real paths).
+ */
+async function recordedProject(cwd: string, sandboxRoot: string) {
+  const { result, calls, pathsOf } = await recorded(() => listProjectSkills(cwd, sandboxRoot));
+  const kernel = calls.filter(
+    (call) => call.name === "realpathSync.native" || call.name === "realpath",
+  );
   return {
     skills: result,
     opened: pathsOf("openSync"),
     enumerated: pathsOf("opendirSync"),
-    resolved: pathsOf("realpathSync.native"),
+    resolved: kernel.map((call) => String(call.args[0])),
     touched: calls.map((call) => String(call.args[0])),
     openFlags: calls.filter((call) => call.name === "openSync").map((call) => call.args[1]),
-    resolveOptions: calls
-      .filter((call) => call.name === "realpathSync.native")
-      .map((call) => call.args[1]),
+    resolveOptions: kernel.map((call) => call.args[1]),
     rawOpened: calls.filter((call) => call.name === "openSync").map((call) => call.args[0]),
   };
 }
@@ -406,11 +424,11 @@ function recordedProject(cwd: string, sandboxRoot: string) {
 const OWNER_WIDE = [{ name: "owner-wide", description: "上层技能" }];
 
 describe("listProjectSkills: a directory writable by the omp uid", () => {
-  it("lists nothing from a link leaving .omp/skills and follows one that stays inside", () => {
+  it("lists nothing from a link leaving .omp/skills and follows one that stays inside", async () => {
     const { root, sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
     plantLinks(root, skillsDir);
 
-    const { skills, opened } = recordedProject(workspaceRoot, sandboxRoot);
+    const { skills, opened } = await recordedProject(workspaceRoot, sandboxRoot);
 
     expect(skills).toEqual([{ name: "inside", description: "内部技能" }, ...OWNER_WIDE]);
     expect(opened).toEqual([
@@ -436,12 +454,15 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     },
   ])(
     "yields nothing for a directory whose $link is a link out of the sandbox, without enumerating it",
-    ({ plant }) => {
+    async ({ plant }) => {
       const { root, sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
       const outside = plantOutside(root);
       plant(outside, workspaceRoot);
 
-      const { skills, opened, enumerated, touched } = recordedProject(workspaceRoot, sandboxRoot);
+      const { skills, opened, enumerated, touched } = await recordedProject(
+        workspaceRoot,
+        sandboxRoot,
+      );
 
       expect(skills).toEqual(OWNER_WIDE);
       // Only the owner root's: the sandbox root has no `.omp/skills`, the linked one is refused.
@@ -452,7 +473,7 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     },
   );
 
-  it("yields nothing for a .omp/skills holding 5000 entries and opens none of them", () => {
+  it("yields nothing for a .omp/skills holding 5000 entries and opens none of them", async () => {
     const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
     // Sorted first: without the 4096 bound it would be among the first 256 and listed.
     writeSkill(skillsDir, "a-first", ["description: 条目过多的目录里的技能"]);
@@ -460,7 +481,7 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
       writeFileSync(join(skillsDir, `f${String(index).padStart(4, "0")}`), "");
     }
 
-    const { skills, opened, resolved } = recordedProject(workspaceRoot, sandboxRoot);
+    const { skills, opened, resolved } = await recordedProject(workspaceRoot, sandboxRoot);
 
     expect(skills).toEqual(OWNER_WIDE);
     expect(opened.filter((path) => path.startsWith(skillsDir))).toEqual([]);
@@ -468,34 +489,34 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     expect(resolved.filter((path) => path.startsWith(skillsDir))).toEqual([skillsDir]);
   });
 
-  it("lists a .omp/skills holding exactly 4096 entries", () => {
+  it("lists a .omp/skills holding exactly 4096 entries", async () => {
     const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
     writeSkill(skillsDir, "a-first", ["description: 恰好不超限"]);
     for (let index = 1; index < 4096; index += 1) {
       writeFileSync(join(skillsDir, `f${String(index).padStart(4, "0")}`), "");
     }
 
-    expect(listProjectSkills(workspaceRoot, sandboxRoot)).toEqual([
+    expect(await listProjectSkills(workspaceRoot, sandboxRoot)).toEqual([
       { name: "a-first", description: "恰好不超限" },
       ...OWNER_WIDE,
     ]);
   });
 
-  it("skips a SKILL.md with a second hard link and lists the same file once it has one", () => {
+  it("skips a SKILL.md with a second hard link and lists the same file once it has one", async () => {
     const { root, sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
     const secret = join(root, "secret.yml");
     writeFileSync(secret, skillFile(["name: leaked", `description: ${OUTSIDE_FILE_DESCRIPTION}`]));
     mkdirSync(join(skillsDir, "hard"), { recursive: true });
     linkSync(secret, join(skillsDir, "hard", "SKILL.md"));
 
-    const { skills, opened } = recordedProject(workspaceRoot, sandboxRoot);
+    const { skills, opened } = await recordedProject(workspaceRoot, sandboxRoot);
 
     expect(skills).toEqual(OWNER_WIDE);
     // Opened (the link count is only known from the descriptor), then refused.
     expect(opened).toContain(join(skillsDir, "hard", "SKILL.md"));
     // Positive control: with the other name gone the very same file is a listed skill.
     rmSync(secret);
-    expect(listProjectSkills(workspaceRoot, sandboxRoot)).toEqual([
+    expect(await listProjectSkills(workspaceRoot, sandboxRoot)).toEqual([
       { name: "leaked", description: OUTSIDE_FILE_DESCRIPTION },
       ...OWNER_WIDE,
     ]);
@@ -503,7 +524,7 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
 
   it.skipIf(process.platform === "win32")(
     "skips a FIFO and an oversized SKILL.md without blocking",
-    () => {
+    async () => {
       const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
       writeSkill(skillsDir, "kept", ["description: kept"]);
       mkdirSync(join(skillsDir, "pipe"));
@@ -520,7 +541,7 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
         `${atLimit}${"x".repeat(262144 - Buffer.byteLength(atLimit))}`,
       );
 
-      const { skills, openFlags } = recordedProject(workspaceRoot, sandboxRoot);
+      const { skills, openFlags } = await recordedProject(workspaceRoot, sandboxRoot);
 
       expect(skills).toEqual([
         { name: "kept", description: "kept" },
@@ -535,13 +556,13 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     },
   );
 
-  it("lists exactly the first 256 of 300 entries and neither opens nor resolves the other 44", () => {
+  it("lists exactly the first 256 of 300 entries and neither opens nor resolves the other 44", async () => {
     const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
     for (let index = 0; index < TOTAL; index += 1) {
       writeSkill(skillsDir, entryName(index), [`description: d-${index}`]);
     }
 
-    const { skills, opened, resolved } = recordedProject(workspaceRoot, sandboxRoot);
+    const { skills, opened, resolved } = await recordedProject(workspaceRoot, sandboxRoot);
 
     expect(skills).toEqual([
       ...OWNER_WIDE,
@@ -556,11 +577,11 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     }
   });
 
-  it("resolves to bytes and opens exactly the bytes the kernel returned", () => {
+  it("resolves to bytes and opens exactly the bytes the kernel returned", async () => {
     const { sandboxRoot, workspaceRoot, skillsDir } = makeSandbox();
     writeSkill(skillsDir, "kept", ["description: kept"]);
 
-    const { rawOpened, resolveOptions } = recordedProject(workspaceRoot, sandboxRoot);
+    const { rawOpened, resolveOptions } = await recordedProject(workspaceRoot, sandboxRoot);
 
     expect(resolveOptions.length).toBeGreaterThan(0);
     for (const options of resolveOptions) {
@@ -572,7 +593,7 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     ]);
   });
 
-  it("is [] for an owner root that is a link out of the sandbox, touching nothing below the target", () => {
+  it("is [] for an owner root that is a link out of the sandbox, touching nothing below the target", async () => {
     const { root, sandboxRoot, ownerRoot } = makeSandbox();
     const outside = join(root, "elsewhere");
     writeSkill(projectSkills(outside), "x", [`description: ${OUTSIDE_DIR_DESCRIPTION}`]);
@@ -580,7 +601,7 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
     symlinkSync(outside, ownerRoot, "dir");
     writeSkill(projectSkills(sandboxRoot), "root", ["description: 沙箱根技能"]);
 
-    const { skills, opened, enumerated, touched } = recordedProject(ownerRoot, sandboxRoot);
+    const { skills, opened, enumerated, touched } = await recordedProject(ownerRoot, sandboxRoot);
 
     expect(skills).toEqual([]);
     expect(opened).toEqual([]);
@@ -590,8 +611,8 @@ describe("listProjectSkills: a directory writable by the omp uid", () => {
 });
 
 /** `listProjectConfig` recorded: every path it enumerated, `lstat`ed or opened. */
-function recordedConfig(cwd: string, sandboxRoot: string) {
-  const { result, pathsOf } = recorded(() => listProjectConfig(cwd, sandboxRoot));
+async function recordedConfig(cwd: string, sandboxRoot: string) {
+  const { result, pathsOf } = await recorded(() => listProjectConfig(cwd, sandboxRoot));
   return {
     files: result,
     enumerated: pathsOf("opendirSync"),
@@ -617,12 +638,15 @@ function plantOwnerConfig(ownerRoot: string): void {
 }
 
 describe("listProjectConfig: a directory writable by the omp uid", () => {
-  it("enumerates and inspects nothing behind a linked .omp, and ends both searches there", () => {
+  it("enumerates and inspects nothing behind a linked .omp, and ends both searches there", async () => {
     const { root, sandboxRoot, ownerRoot, workspaceRoot } = makeSandbox();
     plantOwnerConfig(ownerRoot);
     symlinkSync(plantOutsideConfig(root), join(workspaceRoot, ".omp"), "dir");
 
-    const { files, enumerated, inspected, opened } = recordedConfig(workspaceRoot, sandboxRoot);
+    const { files, enumerated, inspected, opened } = await recordedConfig(
+      workspaceRoot,
+      sandboxRoot,
+    );
 
     expect(files).toEqual([]);
     expect(enumerated).toEqual([]);
@@ -632,13 +656,16 @@ describe("listProjectConfig: a directory writable by the omp uid", () => {
     expect(inspected.filter((path) => !path.startsWith(`${sandboxRoot}/`))).toEqual([]);
   });
 
-  it("enumerates only the real .omp when .omp/agents is a link, and ends the agents search there", () => {
+  it("enumerates only the real .omp when .omp/agents is a link, and ends the agents search there", async () => {
     const { root, sandboxRoot, ownerRoot, workspaceRoot } = makeSandbox();
     plantOwnerConfig(ownerRoot);
     mkdirSync(join(workspaceRoot, ".omp"));
     symlinkSync(join(plantOutsideConfig(root), "agents"), join(workspaceRoot, ".omp", "agents"));
 
-    const { files, enumerated, inspected, opened } = recordedConfig(workspaceRoot, sandboxRoot);
+    const { files, enumerated, inspected, opened } = await recordedConfig(
+      workspaceRoot,
+      sandboxRoot,
+    );
 
     expect(files).toEqual([]);
     expect(enumerated).toEqual([join(workspaceRoot, ".omp")]);
@@ -649,13 +676,13 @@ describe("listProjectConfig: a directory writable by the omp uid", () => {
     expect(inspected.filter((path) => !path.startsWith(`${sandboxRoot}/`))).toEqual([]);
   });
 
-  it("lists by lstat alone: a listed file is never opened and no directory but .omp and .omp/agents is enumerated", () => {
+  it("lists by lstat alone: a listed file is never opened and no directory but .omp and .omp/agents is enumerated", async () => {
     const { sandboxRoot, ownerRoot, workspaceRoot } = makeSandbox();
     plantOwnerConfig(ownerRoot);
     mkdirSync(join(workspaceRoot, ".agents"));
     writeFileSync(join(workspaceRoot, ".agents", "AGENTS.md"), "说明\n");
 
-    const { files, enumerated, opened } = recordedConfig(workspaceRoot, sandboxRoot);
+    const { files, enumerated, opened } = await recordedConfig(workspaceRoot, sandboxRoot);
 
     expect(files).toEqual([
       { path: ".agents/AGENTS.md", kind: "instructions", depth: 0 },
@@ -666,7 +693,7 @@ describe("listProjectConfig: a directory writable by the omp uid", () => {
     expect(opened).toEqual([]);
   });
 
-  it("is [] for an owner root that is a link out of the sandbox, inspecting nothing at all", () => {
+  it("is [] for an owner root that is a link out of the sandbox, inspecting nothing at all", async () => {
     const { root, sandboxRoot, ownerRoot } = makeSandbox();
     const outside = plantOutsideConfig(root);
     writeFileSync(join(outside, "AGENTS.md"), "外部说明\n");
@@ -674,7 +701,7 @@ describe("listProjectConfig: a directory writable by the omp uid", () => {
     symlinkSync(outside, ownerRoot, "dir");
     writeFileSync(join(sandboxRoot, "AGENTS.md"), "沙箱根说明\n");
 
-    const { files, enumerated, inspected } = recordedConfig(ownerRoot, sandboxRoot);
+    const { files, enumerated, inspected } = await recordedConfig(ownerRoot, sandboxRoot);
 
     expect(files).toEqual([]);
     expect(enumerated).toEqual([]);

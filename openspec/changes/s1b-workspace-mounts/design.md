@@ -201,7 +201,7 @@
     | 会话附件（`prompt-attachments.ts:137`） | 400 `bad_request` |
     | 撤回时附件是否仍在（`undo.ts:270`） | 视为不在 |
     | 文件变更归属（`file-changes-ownership.ts:124-133`，调用方 `turn-control.ts:292`） | 词法上在挂载内的候选在任何文件系统调用之前丢弃；其余候选的 `realpath` / `lstat`（会跟随空间内指向挂载的符号链接）改经 `fs/promises`，每次 10 s 期限，超期丢弃该候选与同一事件其后的候选（turn-artifacts MODIFIED） |
-    | 项目技能（`slash-commands.ts:332,399`；调用方 `rest-commands.ts:46`、`sessions/rest.ts:304`、`branching.ts:361`） | `<D>/.omp/skills` 与各条目 `SKILL.md` 的内核 real path 改经 `fs/promises` 的 `realpath`（同为内核调用、`{encoding:"buffer"}`），每次 10 s 期限，超期该条目（或该 `D`）无结果、本次列举停止（chat-sessions MODIFIED） |
+    | 项目技能（`slash-commands.ts:332,399`，#1692 之后 :355、:464；平台条目与项目条目共用的 `readSkill` 里平台一侧仍同步，现 :440；调用方 `rest-commands.ts:46`、`sessions/rest.ts:304`（现 :310）、`branching.ts:361`（现端口 :54、await :109 / :300，经 `supervisor.ts:117`、`index.ts:123`）） | `<D>/.omp/skills` 与各条目 `SKILL.md` 的内核 real path 改经 `fs/promises` 的 `realpath`（同为内核调用、`{encoding:"buffer"}`），每次 10 s 期限，超期该条目（或该 `D`）无结果、本次列举停止（chat-sessions MODIFIED）。prompt 路由把 `await` 前移到「archive 读 → claim → 附件 → admission」这一同步段之前（技能只依赖不可变的绑定）；regenerate / fork 的同步 precheck 遇 `/` 开头而尚无技能时先取技能、再跑一遍 precheck，最后一遍与 claim 仍在同一同步段 |
     | 快照 `take`（`snapshots.ts`） | 根一层的已登记挂载名按名字跳过、不 `lstat`，记入 `skipped`（`reason: "mount"`）；未登记的外部挂载仍按 `dev` 规则（workspace-snapshots「快照内容规则」MODIFIED） |
     | 还原（`snapshots-restore.ts`） | 根一层的已登记挂载名不读取、不进入、不删除、不建出，记入返回的 `skipped`（`reason: "mount"`）（workspace-snapshots「还原」MODIFIED） |
     | 挂载内的 `dirs`（`ensureSharedDir`，`dirs.ts:43,48`） | 不调用；适配器 `mkdir`，不 `chmod`（D16） |

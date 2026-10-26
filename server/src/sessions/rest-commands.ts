@@ -43,7 +43,7 @@ export function registerCommandRoutes(
       source: "builtin",
       overrides: false,
     }));
-    const skills = sessionSkills(dependencies.agentDir, cwd, dependencies.sandboxRoot).map(
+    const skills = (await sessionSkills(dependencies.agentDir, cwd, dependencies.sandboxRoot)).map(
       ({ name, description, source, overrides }) => ({
         name: `skill:${name}`,
         label: name,
