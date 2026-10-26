@@ -57,6 +57,16 @@ export function ompSnapshotsDir(stateDir: string): string {
 }
 
 /**
+ * App-private: one `<mount id>/` per remote mount (s1b-workspace-mounts D5) holding its credential
+ * file `rclone.conf`, VFS cache `cache/` and `rclone.log`; the omp uid cannot enter, list or read
+ * it. Neither `ensureOmpStateLayout` nor `sweepSessionConfig` removes anything here: a restart
+ * remounts from these files, and only unmounting deletes a mount's directory.
+ */
+export function ompMountsDir(stateDir: string): string {
+  return join(stateDir, "mounts");
+}
+
+/**
  * Each spawn's session config files (`session-config.ts`), removed when its child is gone. Managed,
  * but the group has only the search bit: the omp uid opens a file by its exact path and can neither
  * list, create, rename nor remove anything here.
@@ -94,6 +104,7 @@ const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
   ["trash", APP_PRIVATE],
   ["snapshots", APP_PRIVATE],
   ["session-config", MANAGED_BY_PATH],
+  ["mounts", APP_PRIVATE],
 ];
 
 /**

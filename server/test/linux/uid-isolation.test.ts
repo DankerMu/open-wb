@@ -11,6 +11,8 @@
  * create or rename in `session-config/`.
  * Issue #1670: the omp uid reads the managed `mcp.json` (0640) but cannot overwrite it, and no
  * frame carries its credential values.
+ * Issue #1683: the omp uid can neither list `mounts/` (0700) nor read a remote mount's
+ * `rclone.conf` below it nor create anything there, and no frame carries its password.
  * Non-Linux / unset WORKBUDDY_UID_TEST skip; opted-in missing OMP_USER fails.
  */
 
@@ -19,6 +21,7 @@ import {
   chmodSync,
   existsSync,
   lstatSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -56,6 +59,10 @@ const PROBE_CONTENT = "probe";
 const PROBE_FILE = "probe file:report.txt";
 /** A connector credential in the managed `mcp.json`: no frame may carry it (s1d-connectors D11). */
 const MCP_ENV_SENTINEL = "mcp-env-sentinel-1670";
+/** A remote mount's password in its `rclone.conf`: no frame may carry it (s1b-workspace-mounts D5). */
+const MOUNT_PASS_SENTINEL = "mount-pass-sentinel-1683";
+/** A mount id: 32 lowercase hex (s1b-workspace-mounts D1). */
+const MOUNT_ID = "0123456789abcdef0123456789abcdef";
 const SHARED_MODE = 0o2770;
 const PARENT_SENTINELS = {
   MODEL_UPSTREAM_API_KEY: "upstream-api-key-sentinel",
@@ -286,6 +293,16 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         // An operator's line: the omp uid can read the file but not change or replace it (#802).
         writeFileSync(dotenv, "OPERATOR_VAR=1\n");
         const dotenvBefore = readFileSync(dotenv);
+        // Seeded before the spawn, as group 5's mount manager would leave it: `<id>/` 0700 and
+        // `rclone.conf` 0600 holding the password; the spawn's layout pass must leave both alone.
+        const mounts = join(state, "mounts");
+        const mountDir = join(mounts, MOUNT_ID);
+        const rcloneConf = join(mountDir, "rclone.conf");
+        mkdirSync(mountDir);
+        chmodSync(mountDir, 0o700);
+        writeFileSync(rcloneConf, `[m${MOUNT_ID}]\ntype = sftp\npass = ${MOUNT_PASS_SENTINEL}\n`);
+        chmodSync(rcloneConf, 0o600);
+        const rcloneConfBefore = readFileSync(rcloneConf);
         const managed = [
           state,
           join(state, "sessions"),
@@ -345,6 +362,13 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         expect(await write(dotenv), dotenv).toBe("EACCES");
         expect(await write(join(state, "trash", "x"))).toBe("EACCES");
         expect(readdirSync(join(state, "trash"))).toEqual([]);
+        // App-private `mounts/` (0700): the negative control mutates its layout mode to 2750,
+        // under which the group may list it and `listed=EACCES` fails.
+        expect(await ask(`list:${mounts}`)).toBe("listed=EACCES");
+        expect(await ask(`read:${rcloneConf}`)).toBe("read=EACCES");
+        expect(await write(join(mounts, "planted by omp"))).toBe("EACCES");
+        expect(readdirSync(mounts)).toEqual([MOUNT_ID]);
+        expect(readdirSync(mountDir)).toEqual(["rclone.conf"]);
         for (const dir of [join(state, "home"), join(state, "sessions"), agent]) {
           expect(await ask(`rename:${dir}`), dir).toBe("renamed=EACCES");
         }
@@ -366,6 +390,11 @@ describe.skipIf(process.platform !== "linux" || process.env.WORKBUDDY_UID_TEST !
         expect(lstatSync(mcp).mode & 0o7777).toBe(0o640);
         expect(frames.length).toBeGreaterThan(0);
         expect(JSON.stringify(frames)).not.toContain(MCP_ENV_SENTINEL);
+        expect(readFileSync(rcloneConf).equals(rcloneConfBefore)).toBe(true);
+        expect(lstatSync(rcloneConf).isFile()).toBe(true);
+        expect(lstatSync(rcloneConf).uid).toBe(process.getuid?.());
+        expect(lstatSync(rcloneConf).mode & 0o7777).toBe(0o600);
+        expect(JSON.stringify(frames)).not.toContain(MOUNT_PASS_SENTINEL);
         expect(readFileSync(dotenv).equals(dotenvBefore)).toBe(true);
         expect(lstatSync(dotenv).isFile()).toBe(true);
         expect(lstatSync(dotenv).uid).toBe(process.getuid?.());

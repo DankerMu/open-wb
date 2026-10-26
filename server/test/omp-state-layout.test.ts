@@ -34,6 +34,7 @@ import {
   ensureOmpStateLayout,
   ompAgentDir,
   ompHome,
+  ompMountsDir,
   ompSessionConfigDir,
   ompSessionDir,
   ompSnapshotsDir,
@@ -59,6 +60,9 @@ const OWNER = "u1";
 const MODEL = "deepseek-v4.1-flash";
 const SESSION_ROW = sessionRow(OWNER);
 const TABLE = LAYOUT_TABLE;
+/** A mount id (32 lowercase hex, s1b-workspace-mounts D1) and the credential file under it. */
+const MOUNT_ID = "0123456789abcdef0123456789abcdef";
+const RCLONE_CONF = `[m${MOUNT_ID}]\ntype = sftp\nhost = 10.0.0.5\npass = obscured-pass\n`;
 
 const temps: string[] = [];
 const fakeChildren: FakeChild[] = [];
@@ -129,6 +133,7 @@ describe("managed omp state layout paths", () => {
     expect(ompTrashDir("/s")).toBe("/s/trash");
     expect(ompSnapshotsDir("/s")).toBe("/s/snapshots");
     expect(ompSessionConfigDir("/s")).toBe("/s/session-config");
+    expect(ompMountsDir("/s")).toBe("/s/mounts");
     // chat-sessions names process.ts as the exporter of these two.
     expect(processAgentDir).toBe(ompAgentDir);
     expect(processSessionDir).toBe(ompSessionDir);
@@ -147,6 +152,7 @@ describe("ensureOmpStateLayout", () => {
     expect(modeOf(join(root, "missing", "parents"))).toBe(parentMode);
     expect(readdirSync(state).toSorted()).toEqual([
       "home",
+      "mounts",
       "session-config",
       "sessions",
       "snapshots",
@@ -159,6 +165,7 @@ describe("ensureOmpStateLayout", () => {
     expect(readdirSync(join(state, "sessions"))).toEqual([]);
     expect(readdirSync(join(state, "trash"))).toEqual([]);
     expect(readdirSync(join(state, "snapshots"))).toEqual([]);
+    expect(readdirSync(join(state, "mounts"))).toEqual([]);
 
     const calls = await spawnRecorded(root, state);
     expect(calls).toHaveLength(1);
@@ -356,6 +363,67 @@ describe("ensureOmpStateLayout", () => {
     expect(() => ensureOmpStateLayout(state)).toThrow(join(realpathSync(state), "snapshots"));
 
     expect(readFileSync(join(state, "snapshots"), "utf8")).toBe("not-a-directory");
+  });
+
+  // #1683 omp-runtime「挂载私有目录属于布局」.
+  it("creates mounts app-private at the path ompMountsDir names, on a cold state dir", () => {
+    const state = join(tempRoot(), "state");
+
+    const root = ensureOmpStateLayout(state);
+
+    const stats = lstatSync(join(state, "mounts"));
+    expect(stats.isDirectory()).toBe(true);
+    expect(stats.mode & 0o7777).toBe(0o700);
+    expect(stats.uid).toBe(process.geteuid?.());
+    expect(ompMountsDir(root)).toBe(join(realpathSync(state), "mounts"));
+  });
+
+  it("corrects a widened mounts directory and leaves the rclone.conf below it untouched", () => {
+    const state = join(tempRoot(), "state");
+    ensureOmpStateLayout(state);
+    const mount = join(state, "mounts", MOUNT_ID);
+    const conf = join(mount, "rclone.conf");
+    mkdirSync(mount);
+    chmodSync(mount, 0o700);
+    writeFileSync(conf, RCLONE_CONF);
+    chmodSync(conf, 0o600);
+    const confBefore = lstatSync(conf);
+    chmodSync(join(state, "mounts"), 0o750);
+    expect(modeOf(join(state, "mounts"))).toBe(0o750);
+
+    ensureOmpStateLayout(state);
+
+    expect(modeOf(join(state, "mounts"))).toBe(0o700);
+    expectLayout(state, TABLE);
+    expect(readdirSync(join(state, "mounts"))).toEqual([MOUNT_ID]);
+    expect(readdirSync(mount)).toEqual(["rclone.conf"]);
+    expect(readFileSync(conf, "utf8")).toBe(RCLONE_CONF);
+    expect(modeOf(conf)).toBe(0o600);
+    expect(lstatSync(conf).mtimeMs).toBe(confBefore.mtimeMs);
+    expect(modeOf(mount)).toBe(0o700);
+  });
+
+  it("refuses a symlink at mounts, leaves its target alone and spawns nothing", async () => {
+    const root = tempRoot();
+    const state = join(root, "state");
+    const elsewhere = join(root, "elsewhere");
+    mkdirSync(state);
+    mkdirSync(elsewhere);
+    chmodSync(elsewhere, 0o755);
+    writeFileSync(join(elsewhere, "keep.txt"), "outside");
+    symlinkSync(elsewhere, join(state, "mounts"));
+    const calls: SpawnCall[] = [];
+
+    expect(() => ensureOmpStateLayout(state)).toThrow(join(realpathSync(state), "mounts"));
+    await expect(spawnRecorded(root, state, calls)).rejects.toThrow(
+      join(realpathSync(state), "mounts"),
+    );
+
+    expect(calls).toEqual([]);
+    expect(modeOf(elsewhere)).toBe(0o755);
+    expect(readdirSync(elsewhere)).toEqual(["keep.txt"]);
+    expect(readFileSync(join(elsewhere, "keep.txt"), "utf8")).toBe("outside");
+    expect(lstatSync(join(state, "mounts")).isSymbolicLink()).toBe(true);
   });
 
   it("applies the layout under the target of a symlinked state root and keeps the configured path in argv and env", async () => {

@@ -99,6 +99,7 @@ CONTEXT.md 不变量 4（网关/kb 凭证不进 omp 可读环境）在同 uid �
   | `<state>/xdg/{data,state,cache}/omp` | `2770` | 运行期状态（`agent.db`、日志、原生模块缓存） |
   | `<state>/sessions/<ownerId>` | `2770` | 会话文件 |
   | `<state>/session-config`（2026-10-23 补，change `s1d-experts-skills`） | `2710` | 组只有执行位：按确切路径读每次 spawn 的会话配置文件（`0640`），不能列举、新建、改名或删除；启动清扫残留 |
+  | `<state>/mounts`（2026-10-25 补，change `s1b-workspace-mounts`） | `0700` | app 私有：远程挂载的凭证、缓存与日志（每挂载 `<id>/` 内 `rclone.conf`、`cache/`、`rclone.log`）；不能进入、列举或读取；布局校正与启动清扫都不删其中条目 |
 
   spawn 环境里 agent 目录取 omp 的默认值 `$HOME/.omp/agent`（#802 起显式设置 `PI_CODING_AGENT_DIR` 为这同一路径，见文末 dotenv 一条），新增 `XDG_DATA_HOME|XDG_STATE_HOME|XDG_CACHE_HOME=<state>/xdg/*`；
   `--preserve-env` 列表同步。omp 只在 agent 目录为默认值且 `$XDG_*_HOME/omp` 已存在时才重定向运行期状态，所以三个 `omp` 目录由宿主预建。

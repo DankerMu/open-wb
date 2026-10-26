@@ -132,6 +132,7 @@ describe("production entry managed omp state layout", () => {
       expect(readdirSync(state).toSorted()).toEqual([
         "agent",
         "home",
+        "mounts",
         "session-config",
         "sessions",
         "snapshots",
