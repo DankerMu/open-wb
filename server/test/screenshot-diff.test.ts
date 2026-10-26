@@ -129,6 +129,9 @@ describe("baseline at turn start", () => {
   });
 
   it("a later turn start reads afresh: a disabled turn does not disable the next", () => {
+    // The directory is there, so the turn start's read is the one that fails (since #1693 a missing
+    // directory is judged by `lstat` and never opened, which would hand the EIO to the step end).
+    write("old.png");
     vi.mocked(screenshotFs.opendirSync).mockImplementationOnce(() => {
       throw errno("EIO");
     });
@@ -136,6 +139,8 @@ describe("baseline at turn start", () => {
     diff.turnStart();
     write("a.png");
     expect(diff.evalEnd()).toEqual([]);
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(1);
     diff.turnStart();
     write("b.png");
     expect(diff.evalEnd()).toEqual(shot("b.png"));

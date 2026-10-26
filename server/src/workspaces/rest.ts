@@ -14,6 +14,8 @@ import type {
 import { HttpError } from "../core/errors/index.js";
 import { hasRefusedCharacter } from "../core/refused-characters.js";
 import type { createSandbox } from "../core/sandbox/index.js";
+import { firstSegment } from "../core/sandbox/resolve.js";
+import { refuseInMount } from "./mounts/path-rule.js";
 import {
   classifyPreview,
   DEFAULT_PREVIEW_LIMITS,
@@ -289,10 +291,16 @@ export function registerWorkspaceRest(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, false);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "list");
+      const mountNames = dependencies.sandbox.mountNamesOf(workspaceId);
+      // Below the root, a path in a registered mount is refused before anything is looked at (D16).
+      refuseInMount(mountNames, path);
       if (!isOrdinaryDirectory(absPath)) {
         throw new HttpError("not_found");
       }
-      return { path, entries: listOneLevel(absPath) };
+      // The root level leaves the registered mount points out unlooked-at (D21); their rows come
+      // from `GET …/mounts`.
+      const skip = firstSegment(path) === undefined ? mountNames : undefined;
+      return { path, entries: listOneLevel(absPath, skip) };
     },
   );
   app.post<{ Params: { id: string } }>(
@@ -304,6 +312,7 @@ export function registerWorkspaceRest(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const { path } = parseDirectoryBody(request.body);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "mkdir");
+      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
       if (!isOrdinaryDirectory(dirname(absPath))) {
         throw new HttpError("not_found");
       }
@@ -330,6 +339,7 @@ export function registerWorkspaceRest(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, true);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "read");
+      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
       const status = lstatExisting(absPath);
       if (status === undefined || !status.isFile()) {
         throw new HttpError("not_found");

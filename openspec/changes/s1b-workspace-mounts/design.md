@@ -151,7 +151,7 @@
   - 临时空间拒绝挂载（D13 的 400）；转正是单向的，于是临时空间永远没有 app 挂载。
   - owner 裁定「删除工作空间先卸载它的全部挂载」今天没有 HTTP 路径能触发：没有删除正式空间的端点，唯一的空间删除路径（会话删除连带临时空间）遇不到 app 挂载。落成 manager 的不变量：`detachWorkspace(workspaceId)` 卸载并删除该空间的全部挂载行，`workspace_mounts.workspace_id` 的 `RESTRICT` 使任何先删空间行的未来路径在 DB 层失败。会话删除与 temporary-workspaces「临时空间目录的删除」不改（其中的 #1237 规则继续管外部挂载）。
 - **D16 挂载目录内的文件端点**：成员判定只有一条词法规则（D21），与 sandbox-core `resolve` 的规范化是同一个函数（`core/sandbox` 导出）：路径（`path`，或 move 的 `from` / `to`）按 `/` 分割、去掉空段与 `.` 段（`..` 已被 resolve 拒绝）之后的第一段逐字节等于该空间某个登记挂载的 `name`，即「在该挂载内」（其后没有段即挂载根本身）；`./远端/a.md`、`远端//a.md` 与 `远端/a.md` 同属 `远端`。判定只读内存登记，不碰文件系统；位置在 `sandbox.resolve` 之后（越界仍是 403 + 审计）、一切存在性检查与文件系统读写之前：
-  - 离线：tree、file、download、archive、dirs、move（任一侧）→ 409 `mount_offline`。
+  - 离线：tree、file、download、archive、dirs、move（任一侧）→ 409 `mount_offline`。（#1694 评审：词法、边界与离线三部分随 `mounts/path-rule.ts` 先于组 9 落地——组 8 把挂载名接进 facade 的 `resolve` 之后，挂载名下不再逐级 `lstat`，文件端点若无此判定会跟随离线挂载点上被换成的符号链接越界；适配器落地之前离线分支对在线挂载同样生效，#1696 改为在线经适配器。）
   - 只读：dirs、move（两侧在同一只读挂载内）→ 403 `mount_read_only`。
   - 边界：entries DELETE 的目标在任一挂载内（含挂载根）→ 409 `mount_boundary`；move 恰一侧在挂载内、两侧在不同挂载内、或 `from` 是挂载根 → 409 `mount_boundary`。同一挂载内的改名与移动照常一次 `rename`。
   - 判定次序：边界先于离线与只读（删除与跨界无论状态都不可能成功）。
@@ -186,7 +186,7 @@
 - **D21 宿主不同步进入挂载**（2026-10-22 Stage 4 新增；替换 D11 原先「请求可阻塞约 35 s」的上界与 D16 原先「preview-origin 不加判定」）：服务进程 SHALL NOT 对已登记挂载的挂载点或其下任何路径做同步文件系统调用——远端断网而 rclone 存活时，主线程上的一次 `lstatSync` 会一直挂在 FUSE 请求上，探测与超时定时器都在同一个事件循环里，无从自救，整个服务对所有人停摆。
   - 成员判定只有一条词法规则：规范化路径（按 `/` 分割、去掉空段与 `.` 段、`..` 已被拒）的第一段等于该空间某个登记挂载的 `name`。`core/sandbox` 导出这个函数，`resolve` 与 D16 的判定都用它。
   - 保留名使其余按根相对路径的同步调用方安全：挂载点只在空间根下一层，名字取自 D1 的字母表（不含 `.`）且不是 `uploads` / `screenshots`——只碰空间根自身、第一段含 `.` 的路径或这两个保留名、并且不跟随符号链接的同步调用（`lstat` 末段、`O_NOFOLLOW`）永远碰不到挂载。会跟随 omp 所放符号链接的同步调用（`realpath`）不受这条保护，在 omp uid 可写的位置改为 `fs/promises` 加同一 10 s 期限（下表的文件变更归属与项目技能）；超期只丢弃结果、不判哪个挂载离线（它不知道链接通向哪个挂载），卡住的线程等探测判离线、惰性卸载后放回。若干按根相对路径的调用方是先查后用——先不跟随地 `lstat`，之后的调用再跟随（会话 cwd 的 `statSync`，`session-cwd.ts:38`，依赖建空间时 `store.ts:355` 的 `lstat`；`rest-project-config.ts:162` 的 `lstat` 与 `slash-commands.ts:190` 的 `opendirSync`；截图目录比对）：两步之间 omp 把条目换成指向挂载的符号链接，后一步就会跟随进挂载，与 D8 同为已接受的 TOCTOU 残余。
-  - `core/sandbox` 的 `resolve` 增一个可选输入：该根的已登记挂载名集合。规范化后第一段是挂载名时，不 `lstat` 该段及其下任何分量，其余规则（NUL、绝对路径、`..`、末段、边界）照旧，返回 `{ok:true, absPath, mount:<name>}`。rclone 挂载内不出现符号链接：`local` 不加 `--links` 时跳过源里的链接、`sftp` 由服务端跟随（#1665 P13），不 `lstat` 不会放过一个链接。facade 增可选端口 `mountNamesOf(workspaceId)`（缺省空集），返回值仍是绝对路径；改 sandbox-core 两条 requirement。
+  - `core/sandbox` 的 `resolve` 增一个可选输入：该根的已登记挂载名集合。规范化后第一段是挂载名时，不 `lstat` 该段及其下任何分量，其余规则（NUL、绝对路径、`..`、末段、边界）照旧，返回 `{ok:true, absPath, mount:<name>}`。rclone 挂载内不出现符号链接：`local` 不加 `--links` 时跳过源里的链接、`sftp` 由服务端跟随（#1665 P13），不 `lstat` 不会放过一个链接。facade 增可选端口 `mountNamesOf(workspaceId)`（缺省空集），返回值仍是绝对路径；改 sandbox-core 两条 requirement。（#1694：facade 另暴露只读 `mountNamesOf(workspaceId)` 原样转交端口结果，根层 `tree`、预览源、会话附件、撤回与文件变更归属都从这里取同一来源；`Slot` 记 `workspaceId`，每个事件现读挂载名。）
   - 只有 `online` 的挂载会走到文件系统：`online` 期间挂载点就是 FUSE 挂载（被挂载的目录不能被改名或删除）；离线由 D16 的 409 挡在文件系统之前；离线之后的下一次尝试由 D8 的检查把关。
   - 异步适配器 `server/src/workspaces/mounts/fs.ts`：只用 `fs/promises`；操作为 `lstat`、`readdir`、`open`、`fstat`（`FileHandle.stat`）、`read`、`close`、`mkdir`、`rename`；每挂载一个 FIFO 闸门、并发 1；每次调用从拿到闸门起 10 s 期限；文件系统实现与期限都是 manager 的构造选项（D12），测试注入挂起或记录调用的实现与短期限。超期 → 该请求以 409 `mount_offline` 结束，manager 立即判该挂载离线：SIGKILL 其 rclone、按 D9 惰性卸载（中止卡住的 FUSE 请求、放回 libuv 线程，#1665 P9），排队中的调用都以 409 `mount_offline` 结束，然后照常退避重挂。不用 worker 线程。
   - 其它入口（`server/src` 里对工作空间路径做 resolve、readdir 或其它文件系统调用的全部调用方，见 Context）对挂载内路径的处置，全部词法、不碰文件系统：
@@ -200,7 +200,7 @@
     | 预览源 `/w/`、`/o/`（`preview/app.ts:213`） | 404（与「不是普通文件」同一应答） |
     | 会话附件（`prompt-attachments.ts:137`） | 400 `bad_request` |
     | 撤回时附件是否仍在（`undo.ts:270`） | 视为不在 |
-    | 文件变更归属（`file-changes-ownership.ts:124-133`，调用方 `turn-control.ts:292`） | 词法上在挂载内的候选在任何文件系统调用之前丢弃；其余候选的 `realpath` / `lstat`（会跟随空间内指向挂载的符号链接）改经 `fs/promises`，每次 10 s 期限，超期丢弃该候选与同一事件其后的候选（turn-artifacts MODIFIED） |
+    | 文件变更归属（`file-changes-ownership.ts:124-133`，调用方 `turn-control.ts:292`） | 词法上在挂载内的候选在任何文件系统调用之前丢弃；其余候选的 `realpath` / `lstat`（会跟随空间内指向挂载的符号链接）改为异步——`realpath` 用 `fs.realpath` 的回调版（与原 `realpathSync` 同为 JS 算法，`..` 折叠语义不变，既有用例钉住；内核版 `fs/promises.realpath` 会改变记录的路径），`lstat` 经 `fs/promises`——每次 10 s 期限，超期丢弃该候选与同一事件其后的候选（turn-artifacts MODIFIED） |
     | 项目技能（`slash-commands.ts:332,399`，#1692 之后 :355、:464；平台条目与项目条目共用的 `readSkill` 里平台一侧仍同步，现 :440；调用方 `rest-commands.ts:46`、`sessions/rest.ts:304`（现 :310）、`branching.ts:361`（现端口 :54、await :109 / :300，经 `supervisor.ts:117`、`index.ts:123`）） | `<D>/.omp/skills` 与各条目 `SKILL.md` 的内核 real path 改经 `fs/promises` 的 `realpath`（同为内核调用、`{encoding:"buffer"}`），每次 10 s 期限，超期该条目（或该 `D`）无结果、本次列举停止（chat-sessions MODIFIED）。prompt 路由把 `await` 前移到「archive 读 → claim → 附件 → admission」这一同步段之前（技能只依赖不可变的绑定）；regenerate / fork 的同步 precheck 遇 `/` 开头而尚无技能时先取技能、再跑一遍 precheck，最后一遍与 claim 仍在同一同步段 |
     | 快照 `take`（`snapshots.ts`） | 根一层的已登记挂载名按名字跳过、不 `lstat`，记入 `skipped`（`reason: "mount"`）；未登记的外部挂载仍按 `dev` 规则（workspace-snapshots「快照内容规则」MODIFIED） |
     | 还原（`snapshots-restore.ts`） | 根一层的已登记挂载名不读取、不进入、不删除、不建出，记入返回的 `skipped`（`reason: "mount"`）（workspace-snapshots「还原」MODIFIED） |

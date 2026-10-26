@@ -48,6 +48,15 @@ export function createSandbox({
       });
       throw new HttpError("sandbox_denied");
     },
+    /**
+     * The same names `resolve` is given (D21), for the entries that judge a path lexically after it:
+     * the root-level tree, the preview source, session attachments, undo and file-change ownership.
+     */
+    mountNamesOf(workspaceId: string): ReadonlySet<string> {
+      return mountNamesOf?.(workspaceId) ?? NO_MOUNTS;
+    },
     ensureSharedDir,
   };
 }
+
+const NO_MOUNTS: ReadonlySet<string> = new Set();

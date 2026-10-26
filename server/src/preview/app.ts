@@ -5,7 +5,8 @@
  *
  * 是否放行只看路径里的令牌：这里不注册认证插件与 cookie 解析，不拿数据库句柄，不托管静态文件，
  * 没有 `/api`。每次请求依次核对：令牌未过期 → 空间仍在、仍属该账号、根目录仍是目录 →
- * 路径过 `sandbox.resolve(op=read)` → 目标是普通文件。两条路由的这一段是同一个函数。对监听器的
+ * 路径过 `sandbox.resolve(op=read)` → 不在已登记挂载内（D21，否则同答 404）→ 目标是普通文件。两条路由
+ * 的这一段是同一个函数。对监听器的
  * 请求不续期令牌。`/o/` 其后再依次：扩展名（最后一个 `.` 之后、转小写）是 `docx` / `xlsx` / `pptx`
  * → 大小不超过文档上限 → 转换器可用 → 入口已清空 spool 的 `jobs/` → `convert`，以连接关闭为中止信号。
  * 转换以 `aborted` 落定（客户端断开，或入口关停时转换器 `close()`）时不写任何字节、直接断开连接。
@@ -50,6 +51,7 @@ import { basename } from "node:path";
 import fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import type { createSandbox } from "../core/sandbox/index.js";
+import { firstSegment } from "../core/sandbox/resolve.js";
 import {
   LISTENER_CLOSE_BUDGET_MS,
   registerListenerShutdown,
@@ -65,7 +67,12 @@ import type { PreviewTokens } from "./tokens.js";
 
 interface PreviewAppOptions {
   store: Pick<WorkspaceStore, "rootOf">;
-  sandbox: Pick<ReturnType<typeof createSandbox>, "resolve">;
+  /**
+   * 主实例的 facade；`mountNamesOf` 给出该空间的已登记挂载名（D21：挂载内路径与「不是普通文件」同答
+   * 404，不碰文件系统）。省略即没有挂载。
+   */
+  sandbox: Pick<ReturnType<typeof createSandbox>, "resolve"> &
+    Partial<Pick<ReturnType<typeof createSandbox>, "mountNamesOf">>;
   tokens: Pick<PreviewTokens, "lookup">;
   /** `/o/` 的转换器（生产入口给的是包了缓存与排队的那一个）。本模块不 `close()` 它。 */
   converter: Pick<OfficeConverter, "available" | "convert">;
@@ -182,9 +189,15 @@ export function createPreviewApp(options: PreviewAppOptions): FastifyInstance {
     return reply.code(500).headers(previewFailureHeaders()).send();
   });
 
+  /** 路径（与 `resolve` 同一规范化）的第一段是该空间的已登记挂载名。只读内存登记。 */
+  function inMount(workspaceId: string, path: string): boolean {
+    const first = firstSegment(path);
+    return first !== undefined && sandbox.mountNamesOf?.(workspaceId).has(first) === true;
+  }
+
   /**
-   * `/w/` 与 `/o/` 共用的前半段，次序固定：令牌 → 空间根 → 空路径 → `resolve(op=read)` → `lstat`
-   * 为普通文件。不成立时这里已经写了 404（`reply` 已发送）并返回 `null`；越界由 `resolve` 抛
+   * `/w/` 与 `/o/` 共用的前半段，次序固定：令牌 → 空间根 → 空路径 → `resolve(op=read)` → 不在已登记
+   * 挂载内 → `lstat` 为普通文件。不成立时这里已经写了 404（`reply` 已发送）并返回 `null`；越界由 `resolve` 抛
    * `sandbox_denied`，上面的错误处理器答 403。
    */
   function locate(params: { token: string; "*": string }, reply: FastifyReply) {
@@ -211,6 +224,11 @@ export function createPreviewApp(options: PreviewAppOptions): FastifyInstance {
     }
     // 被拒时沙箱写 sandbox.reject（actor 为令牌的账号）并抛 sandbox_denied。
     const absPath = sandbox.resolve(principal, binding.workspaceId, path, "read");
+    // 越界之后、任何文件系统调用之前：第一段是已登记挂载名的路径一律 404（D21），宿主不进入挂载。
+    if (inMount(binding.workspaceId, path)) {
+      fail(reply, 404, NOT_FOUND_TEXT);
+      return null;
+    }
     const status = lstatExisting(absPath);
     // 目录不列、不找 index.html；管道、套接字、设备同样不是可读的目标。
     if (status === undefined || !status.isFile()) {

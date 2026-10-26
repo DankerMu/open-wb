@@ -13,9 +13,8 @@ import { alignModel, alignmentOf, effectiveCapabilities, reusable } from "./comp
 import { DeltaCoalescer } from "./delta-coalescer.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import type { OmpFrame } from "./omp/frame.js";
-import type { SpawnImpl } from "./omp/process.js";
-import type { PromptDispatchReceipt, SessionClock } from "./omp/runtime.js";
-import { SpawnGate, type SpawnLog } from "./omp/spawn-gate.js";
+import type { PromptDispatchReceipt } from "./omp/runtime.js";
+import { SpawnGate } from "./omp/spawn-gate.js";
 import {
   buildSessionRuntime,
   emptySlot,
@@ -34,7 +33,7 @@ import {
   turnFree,
 } from "./pool.js";
 import { ScreenshotDiff } from "./screenshot-diff.js";
-import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
+import { sessionCwdResolver } from "./session-cwd.js";
 import type { ApprovalView, SessionStore, SettledApproval } from "./store.js";
 import type { ComposerConfig } from "./store-composer.js";
 import type { RetainedEvent } from "./stream/ring-buffer.js";
@@ -45,6 +44,7 @@ import {
   throwCollected,
   translateSupervisorError,
 } from "./supervisor-faults.js";
+import type { SessionSupervisorOptions, SessionSupervisorRuntime } from "./supervisor-options.js";
 import {
   closedSubscription,
   readReplay,
@@ -65,60 +65,13 @@ export interface StreamCursor {
   seq: number | null;
 }
 
+export type { SessionSupervisorOptions, SessionSupervisorRuntime } from "./supervisor-options.js";
 export type { SessionStreamLiveHandler } from "./supervisor-subscribers.js";
 
 export interface SessionStreamSubscription {
   mode: "replay" | "gap" | "fresh";
   replay: RetainedEvent[];
   unsubscribe(): void;
-}
-
-export interface SessionSupervisorRuntime {
-  bin: string;
-  sandboxRoot: string;
-  stateDir: string;
-  modelId: string; // The single model's id when the assembly gives no whitelist; no spawn reads it.
-  idleMs?: number;
-  /** Global live-process cap resolved by agent-config; undefined → DEFAULT_OMP_MAX_PROCESSES (16). */
-  maxProcesses?: number;
-  /** Concurrent spawn cap resolved by agent-config; undefined → os.availableParallelism(). */
-  spawnConcurrency?: number;
-  ompUser?: string;
-  browserBin?: string;
-  spawnImpl?: SpawnImpl;
-  clock?: SessionClock;
-  handshakeTimeoutMs?: number;
-}
-
-export interface SessionSupervisorOptions {
-  store: SessionStore;
-  tokens: TokenRegistry;
-  runtime: SessionSupervisorRuntime;
-  /** The workspace store's owner-scoped rootOf: a bound session's cwd (session-cwd.ts). */
-  workspaceRootOf: WorkspaceRootOf;
-  /**
-   * Must return synchronously. A returned thenable is an owned programming error;
-   * its rejection is consumed and is not a second fault. A thrown then getter uses
-   * the existing synchronous fault path. Every spawn path also hands it, raw and never retained,
-   * each session config file it could not remove (omp-runtime「子进程 spawn 契约」).
-   */
-  onError: (error: Error) => void;
-  /**
-   * Optional and synchronous. Ordinary non-thenable returns are ignored. A returned
-   * thenable stops publication for that pump and retires its runtime through the
-   * existing ownership path. Omitted means no observer.
-   */
-  onEvent?: (sessionId: string, epoch: number, event: ChatEvent<number>) => void;
-  /** Synchronous handshake-timeout record sink, never an onError fault; omitted → discarded. */
-  log?: SpawnLog;
-  /** createApp's sanitiser bound to its secret list (#909): every `error` detail goes through it. */
-  redactUpstream: (text: string) => string;
-  /** The skills of a session's cwd right now, for the branch-family command check (branching.ts). */
-  skills: (ownerId: string, workspaceId: string | null) => Promise<readonly { name: string }[]>;
-  /** What turns a session's raw composer columns into the mode and model of its spawns. */
-  composer: ComposerConfig;
-  /** The prompt of an expert its owner can see, else null (experts「专家提示词注入」); never cached. */
-  expertPrompt: Parameters<typeof effectiveCapabilities>[0];
 }
 
 interface FlushFailure {
@@ -154,6 +107,7 @@ export class SessionSupervisor {
   readonly #composer: ComposerConfig;
   readonly #capabilitiesOf: ReturnType<typeof effectiveCapabilities>;
   readonly #redactUpstream: (text: string) => string;
+  readonly #mountNamesOf: (workspaceId: string) => ReadonlySet<string>;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -165,6 +119,7 @@ export class SessionSupervisor {
     this.#composer = options.composer;
     this.#capabilitiesOf = effectiveCapabilities(options.expertPrompt);
     this.#redactUpstream = options.redactUpstream;
+    this.#mountNamesOf = options.mountNamesOf ?? (() => new Set());
     this.#cwdOf = sessionCwdResolver(options.runtime.sandboxRoot, options.workspaceRootOf);
     const clock = options.runtime.clock;
     this.#pool = new ProcessPool(
@@ -490,6 +445,7 @@ export class SessionSupervisor {
       approvalMode,
       modelIds,
       fingerprint,
+      resume.workspaceId,
     );
     const unclaim = () => {
       if (claim !== undefined) {
@@ -683,6 +639,42 @@ export class SessionSupervisor {
       : applyFailure(mapper, asError(error).message);
   }
 
+  /** `persistEvent` for the slot's turn; its bound workspace's mount names are read when judged. */
+  #persist(
+    slot: Slot,
+    assistantMessageId: number,
+    event: ChatEvent<string>,
+    steps: PumpSteps,
+    settled: SettledApproval[],
+  ) {
+    const { workspaceId } = slot;
+    const mountNames = () =>
+      workspaceId === null ? new Set<string>() : this.#mountNamesOf(workspaceId);
+    return persistEvent(
+      this.#store,
+      assistantMessageId,
+      event,
+      steps,
+      settled,
+      slot.workspaceRoot,
+      this.#redactUpstream,
+      mountNames,
+    );
+  }
+
+  /** After an event is stored: its settled approvals first, then its publication (if any). */
+  async #settleAndPublish(
+    slot: Slot,
+    settled: SettledApproval[],
+    published: ChatEvent<number> | undefined,
+    generation: Generation | undefined,
+  ): Promise<boolean> {
+    if (settled.length > 0 && !(await this.#approvals.settled(settled))) {
+      return false;
+    }
+    return published === undefined || this.#publish(slot, published, generation);
+  }
+
   async #commit(
     slot: Slot,
     assistantMessageId: number,
@@ -700,19 +692,12 @@ export class SessionSupervisor {
       }
       try {
         const settled: SettledApproval[] = [];
-        const published = persistEvent(
-          this.#store,
-          assistantMessageId,
-          event,
-          steps,
-          settled,
-          slot.workspaceRoot,
-          this.#redactUpstream,
-        );
-        if (settled.length > 0 && !(await this.#approvals.settled(settled))) {
-          return false;
-        }
-        if (published !== undefined && !(await this.#publish(slot, published, generation))) {
+        const persisted = this.#persist(slot, assistantMessageId, event, steps, settled);
+        // Only a judged files.changed is a promise (its ownership waits on the file system, D21): the
+        // next event is not taken before it settles, and every other event keeps its one synchronous
+        // stretch from store to publish.
+        const published = persisted instanceof Promise ? await persisted : persisted;
+        if (!(await this.#settleAndPublish(slot, settled, published, generation))) {
           return false;
         }
         reportUpstreamFailure(this.#spawn.log, slot.sessionId, event); // #909: errors only

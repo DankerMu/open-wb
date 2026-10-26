@@ -217,6 +217,36 @@ function skipSettled(error: unknown): void {
   }
 }
 
+type Persisted = ChatEvent<number> | undefined;
+type FilesChanged = Extract<ChatEvent<string>, { type: "files.changed" }>;
+/** `persistEvent`'s parameters after the event, the same for every overload. */
+type PersistRest = [
+  steps: PumpSteps,
+  settled: SettledApproval[],
+  workspaceRoot: string | null,
+  redactUpstream: (text: string) => string,
+  mountNames?: () => ReadonlySet<string>,
+];
+
+/**
+ * Stores one event and returns what to publish, synchronously — except a `files.changed` of a
+ * bound session's registered call: its ownership judgment waits on the file system (each call
+ * under its deadline, D21), so that one returns a promise, and nothing of it is stored before the
+ * judgment is done. `mountNames` is read for that judgment only: the bound workspace's registered
+ * mount names right then.
+ */
+export function persistEvent(
+  store: SessionStore,
+  assistantMessageId: number,
+  event: Exclude<ChatEvent<string>, FilesChanged>,
+  ...rest: PersistRest
+): Persisted;
+export function persistEvent(
+  store: SessionStore,
+  assistantMessageId: number,
+  event: ChatEvent<string>,
+  ...rest: PersistRest
+): Persisted | Promise<Persisted>;
 export function persistEvent(
   store: SessionStore,
   assistantMessageId: number,
@@ -225,7 +255,8 @@ export function persistEvent(
   settled: SettledApproval[],
   workspaceRoot: string | null,
   redactUpstream: (text: string) => string,
-): ChatEvent<number> | undefined {
+  mountNames: () => ReadonlySet<string> = () => new Set(),
+): Persisted | Promise<Persisted> {
   switch (event.type) {
     // turn.retry (#909) takes a ring sequence like turn.start and is never stored.
     case "turn.start":
@@ -289,12 +320,7 @@ export function persistEvent(
       if (stepId === undefined || workspaceRoot === null) {
         return undefined;
       }
-      const files = ownedChanges(workspaceRoot, event.data.files);
-      if (files.length === 0) {
-        return undefined;
-      }
-      store.setStepChanges(stepId, JSON.stringify(files));
-      return { type: "files.changed", data: { messageId: event.data.messageId, stepId, files } };
+      return persistOwnedChanges(store, event, stepId, workspaceRoot, mountNames());
     }
     // The raw candidate is validated, normalised, compared with the stored list and written by
     // the store (#864); an invalid or unchanged one is dropped there and takes no ring sequence.
@@ -310,6 +336,22 @@ export function persistEvent(
     case "thinking.end":
       return undefined;
   }
+}
+
+/** The owned files of a `files.changed`, stored before they are returned to publish; none: nothing. */
+async function persistOwnedChanges(
+  store: SessionStore,
+  event: FilesChanged,
+  stepId: number,
+  workspaceRoot: string,
+  mountNames: ReadonlySet<string>,
+): Promise<Persisted> {
+  const files = await ownedChanges(workspaceRoot, event.data.files, mountNames);
+  if (files.length === 0) {
+    return undefined;
+  }
+  store.setStepChanges(stepId, JSON.stringify(files));
+  return { type: "files.changed", data: { messageId: event.data.messageId, stepId, files } };
 }
 
 export async function drain(stream: AsyncIterable<unknown>): Promise<void> {

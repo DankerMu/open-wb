@@ -11,12 +11,15 @@
  * path as an escape, and that event would be false. Then every path goes through the sandbox
  * facade the assembly injects — the one instance the workspaces routes use, so a refusal is
  * audited there and nowhere else — and the file it names is only `lstat`ed: its content is never
- * read, and the absolute path never leaves this file.
+ * read, and the absolute path never leaves this file. A path whose first segment is one of the
+ * workspace's registered mount names (s1b-workspace-mounts D21) is a 400 after that resolution,
+ * judged by name: nothing in a mount is looked at.
  */
 import { Buffer } from "node:buffer";
 import { lstatSync } from "node:fs";
 import { HttpError } from "../core/errors/index.js";
 import { hasRefusedCharacter } from "../core/refused-characters.js";
+import { firstSegment } from "../core/sandbox/resolve.js";
 import { WorkspaceRootOccupiedError } from "../workspaces/store.js";
 import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { StoredAttachment } from "./store-attachments.js";
@@ -28,6 +31,8 @@ import type { StoredAttachment } from "./store-attachments.js";
  */
 export interface SessionSandboxPort {
   resolve(principal: { id: string }, workspaceId: string, relPath: string, op: "read"): string;
+  /** The workspace's registered mount names (D21); omitted means none. */
+  mountNamesOf?(workspaceId: string): ReadonlySet<string>;
 }
 
 const MESSAGE_LIMIT = 32_768;
@@ -116,8 +121,9 @@ export interface AttachmentAdmission {
  * Then the root (4, first half; `assertRootVisible`), once for the request, and two passes: every
  * path is resolved in request order as a `read` of this account in this workspace (4) — the first
  * refusal throws, so one request writes at most one audit event — and only then is any file looked
- * at: each target has to be an existing regular file (5; `lstat`, a link is not followed), else
- * 400. Returns what the admission stores: the path as given and the size that `lstat` reported.
+ * at: each target has to be outside the registered mounts (by its first segment, no file system
+ * call) and an existing regular file (5; `lstat`, a link is not followed), else 400. Returns what
+ * the admission stores: the path as given and the size that `lstat` reported.
  */
 export function admitAttachments({
   sandbox,
@@ -135,6 +141,10 @@ export function admitAttachments({
   }
   assertRootVisible(workspaceRootOf, principal.id, workspaceId);
   const targets = paths.map((path) => sandbox.resolve(principal, workspaceId, path, "read"));
+  const mounts = sandbox.mountNamesOf?.(workspaceId);
+  if (paths.some((path) => mounts?.has(firstSegment(path) ?? "") === true)) {
+    throw new HttpError("bad_request");
+  }
   return paths.map((path, index) => ({ path, size: regularFileSize(targets[index] ?? "") }));
 }
 

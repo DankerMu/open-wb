@@ -39,6 +39,7 @@ import { basename } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import { archiveFormat, listArchive } from "./archive.js";
+import { refuseInMount } from "./mounts/path-rule.js";
 import { DEFAULT_PREVIEW_LIMITS } from "./preview.js";
 import { openRegularFile } from "./regular-file.js";
 import {
@@ -100,6 +101,7 @@ export function registerWorkspaceArchive(
       ensureOwnedRoot(dependencies, principal, workspaceId);
       const path = parsePathQuery(request.query, true);
       const absPath = dependencies.sandbox.resolve(principal, workspaceId, path, "read");
+      refuseInMount(dependencies.sandbox.mountNamesOf(workspaceId), path);
       // Before the name is judged, and so that a directory or a pipe is never opened.
       if (lstatExisting(absPath)?.isFile() !== true) {
         throw new HttpError("not_found");

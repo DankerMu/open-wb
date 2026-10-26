@@ -3,8 +3,25 @@
  * another device than the workspace root takes no part in a snapshot or a restore. No real mount:
  * `mountAt` changes `dev` on what the module's `lstat` of chosen paths returns. Real temporary
  * directories otherwise; "not listed" and "not opened" are read off the recorded calls.
+ *
+ * #1694 (s1b-workspace-mounts D21)「已登记挂载按名字跳过」「已登记挂载不被还原、删除或建出」: the
+ * registered mount names come in through the `mountNames` option of `take` / `restore`; the mount
+ * stands in as a mode-0000 directory (a walk into it would be `unreadable`; root ignores the bits, so
+ * those cases skip under root), and every `fs.promises` call is recorded by its path arguments.
  */
-import {
+
+/**
+ * Issue #1212 workspace-snapshots「挂载点整目录跳过」「挂载点不被还原也不被删除」: a directory on
+ * another device than the workspace root takes no part in a snapshot or a restore. No real mount:
+ * `mountAt` changes `dev` on what the module's `lstat` of chosen paths returns. Real temporary
+ * directories otherwise; "not listed" and "not opened" are read off the recorded calls.
+ *
+ * #1694 (s1b-workspace-mounts D21)「已登记挂载按名字跳过」「已登记挂载不被还原、删除或建出」: the
+ * registered mount names come in through the `mountNames` option of `take` / `restore`; the mount
+ * stands in as a mode-0000 directory (a walk into it would be `unreadable`; root ignores the bits, so
+ * those cases skip under root), and every `fs.promises` call is recorded by its path arguments.
+ */
+import fs, {
   existsSync,
   mkdirSync,
   readdirSync,
@@ -14,7 +31,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { parentsAreReal } from "../src/workspaces/snapshots-restore.js";
 import {
   contentsOf,
@@ -24,6 +41,7 @@ import {
   type Fixture,
   fileEntry,
   fixture,
+  lock,
   manifestOf,
   mountAt,
   onCopyCreate,
@@ -360,5 +378,199 @@ describe("挂载点不被还原也不被删除", () => {
     });
     expect(contentsOf(f.workspace)).toEqual({ f: "dir", "f/r.txt": "r\n" });
     expect(existsSync(at(f, "f/r.txt"))).toBe(true);
+  });
+});
+
+/** `fs.promises` calls with a path, whatever they do; each is recorded by every path argument. */
+const TOUCHING = [
+  "lstat",
+  "stat",
+  "readdir",
+  "open",
+  "readlink",
+  "mkdir",
+  "rm",
+  "rmdir",
+  "unlink",
+  "rename",
+  "symlink",
+  "chmod",
+  "utimes",
+  "writeFile",
+  "copyFile",
+  "link",
+] as const;
+
+/** Every path the module hands `fs.promises` from here on (string and Buffer arguments alike). */
+function watchTouches(): string[] {
+  const touched: string[] = [];
+  for (const name of TOUCHING) {
+    const real = fs.promises[name] as (...args: unknown[]) => unknown;
+    vi.spyOn(fs.promises, name).mockImplementation(((...args: unknown[]) => {
+      for (const arg of args) {
+        if (typeof arg === "string" || Buffer.isBuffer(arg)) {
+          touched.push(String(arg));
+        }
+      }
+      return real(...args);
+    }) as never);
+  }
+  return touched;
+}
+
+function into(touched: readonly string[], dir: string): string[] {
+  return touched.filter((path) => path === dir || path.startsWith(`${dir}/`));
+}
+
+const asRoot = process.getuid?.() === 0;
+
+describe("已登记挂载按名字跳过", () => {
+  /** `a.txt`, `out/b.txt` and the mode-0000 stand-in `远端/` holding `c.txt`. */
+  function withStandIn(): Fixture {
+    const f = fixture();
+    put(f.workspace, "a.txt", "a\n");
+    put(f.workspace, "out/b.txt", "b\n");
+    put(f.workspace, "远端/c.txt", "c\n");
+    lock(at(f, "远端"), 0o000);
+    return f;
+  }
+
+  it.skipIf(asRoot)(
+    "a registered mount name at the root is skipped as mount, never read; an absent one is not recorded",
+    async () => {
+      const f = withStandIn();
+      const touched = watchTouches();
+
+      const result = await run(f, { mountNames: new Set(["远端", "缺席"]) });
+
+      expect(result).toEqual({ outcome: "ok", skipped: [mount("远端")] });
+      expect(manifestOf(f)).toEqual({
+        entries: [fileEntry(f, "a.txt"), dirEntry(f, "out"), fileEntry(f, "out/b.txt")],
+        skipped: [mount("远端")],
+      });
+      expect(into(touched, at(f, "远端"))).toEqual([]);
+      expect(touched).toContain(at(f, "out"));
+      expect(Object.keys(describeTree(join(f.snapshot, "tree")))).toEqual([
+        "a.txt",
+        "out",
+        "out/b.txt",
+      ]);
+    },
+  );
+
+  it.skipIf(asRoot)(
+    "with an empty set the same directory is walked into and recorded unreadable",
+    async () => {
+      const f = withStandIn();
+
+      const result = await run(f, { mountNames: new Set() });
+
+      expect(result).toEqual({ outcome: "ok", skipped: [{ path: "远端", reason: "unreadable" }] });
+    },
+  );
+
+  it("a registered name on the exclude list is recorded as mount, not excluded", async () => {
+    const f = fixture();
+    put(f.workspace, "node_modules/p/index.js", "p\n");
+    put(f.workspace, "a.txt", "a\n");
+    const touched = watchTouches();
+
+    const result = await run(f, { mountNames: new Set(["node_modules"]) });
+
+    expect(result).toEqual({ outcome: "ok", skipped: [mount("node_modules")] });
+    expect(into(touched, at(f, "node_modules"))).toEqual([]);
+  });
+
+  it("only the root level is judged by name: a deeper directory of that name is walked", async () => {
+    const f = fixture();
+    put(f.workspace, "out/远端/d.txt", "d\n");
+
+    const result = await run(f, { mountNames: new Set(["远端"]) });
+
+    expect(result).toEqual({ outcome: "ok", skipped: [] });
+    expect(manifestOf(f).entries.map((entry) => (entry as { path: string }).path)).toEqual([
+      "out",
+      "out/远端",
+      "out/远端/d.txt",
+    ]);
+  });
+});
+
+describe("已登记挂载不被还原、删除或建出", () => {
+  /** A snapshot taken while `远端/` was a plain directory (`远端`, `远端/a.txt`) beside `top.txt`. */
+  async function snapshotWithPlainDirectory(): Promise<Fixture> {
+    const f = fixture();
+    put(f.workspace, "top.txt", "top\n");
+    put(f.workspace, "远端/a.txt", "a\n");
+    await snapshot(f);
+    expect(manifestOf(f).entries.map((entry) => (entry as { path: string }).path)).toEqual([
+      "top.txt",
+      "远端",
+      "远端/a.txt",
+    ]);
+    writeFileSync(at(f, "top.txt"), "changed\n");
+    return f;
+  }
+
+  it.skipIf(asRoot)(
+    "a registered mount (mode 0000, b.txt inside) keeps mode and content; top.txt is restored",
+    async () => {
+      const f = await snapshotWithPlainDirectory();
+      rmSync(at(f, "远端/a.txt"));
+      put(f.workspace, "远端/b.txt", "b\n");
+      lock(at(f, "远端"), 0o000);
+      const touched = watchTouches();
+
+      const result = await restoreRun(f, { mountNames: new Set(["远端"]) });
+
+      expect(result).toEqual({ restored: 1, removed: 0, skipped: [mount("远端")], failed: [] });
+      expect(into(touched, at(f, "远端"))).toEqual([]);
+      expect(fs.lstatSync(at(f, "远端")).mode & 0o7777).toBe(0o000);
+      lock(at(f, "远端"), 0o700);
+      expect(contentsOf(f.workspace)).toEqual({
+        "top.txt": "top\n",
+        远端: "dir",
+        "远端/b.txt": "b\n",
+      });
+    },
+  );
+
+  it("a registered mount point gone before the restore is not made again", async () => {
+    const f = await snapshotWithPlainDirectory();
+    rmSync(at(f, "远端"), { recursive: true });
+    const touched = watchTouches();
+
+    const result = await restoreRun(f, { mountNames: new Set(["远端"]) });
+
+    expect(result).toEqual({ restored: 1, removed: 0, skipped: [mount("远端")], failed: [] });
+    expect(existsSync(at(f, "远端"))).toBe(false);
+    expect(into(touched, at(f, "远端"))).toEqual([]);
+    expect(contentsOf(f.workspace)).toEqual({ "top.txt": "top\n" });
+  });
+
+  it("a directory of that name made after the snapshot is no extra entry: kept, reported", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "a\n");
+    await snapshot(f);
+    put(f.workspace, "远端/r.txt", "r\n");
+    const touched = watchTouches();
+
+    const result = await restoreRun(f, { mountNames: new Set(["远端", "缺席"]) });
+
+    expect(result).toEqual({ restored: 0, removed: 0, skipped: [mount("远端")], failed: [] });
+    expect(readFileSync(at(f, "远端/r.txt"), "utf8")).toBe("r\n");
+    expect(into(touched, at(f, "远端"))).toEqual([]);
+  });
+
+  it("a name the manifest skipped already is reported once, as the manifest has it", async () => {
+    const f = fixture();
+    put(f.workspace, "a.txt", "a\n");
+    put(f.workspace, "远端/r.txt", "r\n");
+    await snapshot(f, { mountNames: new Set(["远端"]) });
+    expect(manifestOf(f).skipped).toEqual([mount("远端")]);
+
+    const result = await restoreRun(f, { mountNames: new Set(["远端"]) });
+
+    expect(result).toEqual({ restored: 0, removed: 0, skipped: [mount("远端")], failed: [] });
   });
 });

@@ -2,42 +2,36 @@
  * Issue #740 bound on the synchronous filesystem work of one `files.changed` event
  * (`ownedChanges`, turn-artifacts「文件变更推导与归属」supervisor steps 2 and 6): only the first 100
  * raw candidates are judged, and candidates normalizing to the same path are judged once. Real
- * temp directories; `node:fs` is passed through a call recorder (behaviour untouched) so the
- * bound is an observed call count, never a duration. A recorded first argument is the normalized
- * path `resolve(root, raw)`, not the raw spelling of the candidate. Fix pass 1: a normalized path
+ * temp directories; the judgment's `ownershipFs` (its only filesystem access since #1694) is passed
+ * through a call recorder (behaviour untouched) so the bound is an observed call count, never a
+ * duration. A recorded first argument is the normalized path `resolve(root, raw)`, not the raw
+ * spelling of the candidate. Fix pass 1: a normalized path
  * over 4096 bytes or 128 components is dropped before any filesystem call (`realpath` walks a path
  * component by component, so one deep candidate through a self-referring symlink is unbounded).
  */
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { FileChange } from "../src/sessions/file-changes.js";
-import { ownedChanges } from "../src/sessions/file-changes-ownership.js";
+import { ownedChanges, ownershipFs } from "../src/sessions/file-changes-ownership.js";
 
 interface FsCall {
   name: string;
   first: unknown;
 }
 
-/** The `node:fs` functions called through a named import with their first argument, in order. */
-const fsCalls = vi.hoisted(() => [] as FsCall[]);
-
-vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<Record<string, unknown>>();
-  const record = (name: string, value: unknown): unknown =>
-    typeof value !== "function"
-      ? value
-      : new Proxy(value, {
-          apply(target, self, args) {
-            fsCalls.push({ name, first: args[0] });
-            return Reflect.apply(target, self, args);
-          },
-        });
-  return Object.fromEntries(
-    Object.entries(actual).map(([name, value]) => [name, record(name, value)]),
-  );
-});
+/** The `ownershipFs` calls (`realpath`, `lstat`) with their first argument, in order. */
+const fsCalls: FsCall[] = [];
+const realFs = { ...ownershipFs };
+ownershipFs.realpath = (path) => {
+  fsCalls.push({ name: "realpath", first: path });
+  return realFs.realpath(path);
+};
+ownershipFs.lstat = (path) => {
+  fsCalls.push({ name: "lstat", first: path });
+  return realFs.lstat(path);
+};
 
 /** Temp directories to remove after the test. */
 const bases: string[] = [];
@@ -70,7 +64,7 @@ function edit(path: string, added: number, removed: number): FileChange {
 }
 
 /** `ownedChanges` with the recorder emptied first: the calls left are the judgment's own. */
-function judge(root: string, candidates: readonly FileChange[]): FileChange[] {
+function judge(root: string, candidates: readonly FileChange[]): Promise<FileChange[]> {
   fsCalls.length = 0;
   return ownedChanges(root, candidates);
 }
@@ -116,13 +110,13 @@ function scenario(root: string): FileChange[] {
 }
 
 describe("C1 only the first 100 raw candidates are judged", () => {
-  it("C1 (a) the 150-candidate scenario keeps exactly the 40 early paths, merged in order", () => {
+  it("C1 (a) the 150-candidate scenario keeps exactly the 40 early paths, merged in order", async () => {
     const space = openSpace([...EARLY, ...LATE]);
     const candidates = scenario(space.root);
     expect(candidates).toHaveLength(150);
     expect(candidates[40]?.path).toBe("./a.txt");
 
-    const files = judge(space.root, candidates);
+    const files = await judge(space.root, candidates);
 
     // Paths 1–20 occur three times in the first 100, paths 21–40 twice.
     expect(files).toEqual(
@@ -136,20 +130,20 @@ describe("C1 only the first 100 raw candidates are judged", () => {
     expect(files.map((file) => file.path).filter((path) => path.startsWith("late"))).toEqual([]);
   });
 
-  it("C1 (b) the same input costs one realpath per distinct path and none for 101–150", () => {
+  it("C1 (b) the same input costs one realpath per distinct path and none for 101–150", async () => {
     const space = openSpace([...EARLY, ...LATE]);
 
-    judge(space.root, scenario(space.root));
+    await judge(space.root, scenario(space.root));
 
     // `a.txt`, `./a.txt` and `<root>/a.txt` are one normalized path.
-    expect(callsOn("realpathSync", resolve(space.root, "a.txt"))).toBe(1);
+    expect(callsOn("realpath", resolve(space.root, "a.txt"))).toBe(1);
     // The root once, then each of the 40 distinct normalized paths once; every file exists.
-    expect(callsOf("realpathSync")).toBe(41);
-    expect(callsOf("lstatSync")).toBe(0);
+    expect(callsOf("realpath")).toBe(41);
+    expect(callsOf("lstat")).toBe(0);
     expect(fsCalls).toHaveLength(41);
-    expect(callsOn("realpathSync", space.root)).toBe(1);
+    expect(callsOn("realpath", space.root)).toBe(1);
     for (const name of EARLY) {
-      expect(callsOn("realpathSync", resolve(space.root, name))).toBe(1);
+      expect(callsOn("realpath", resolve(space.root, name))).toBe(1);
     }
     const seen = touched();
     for (const name of LATE) {
@@ -159,11 +153,11 @@ describe("C1 only the first 100 raw candidates are judged", () => {
 });
 
 describe("C2 a dropped path is judged once per event", () => {
-  it("C2 (c) an outside path repeated three times costs one realpath", () => {
+  it("C2 (c) an outside path repeated three times costs one realpath", async () => {
     const space = openSpace(["a.txt"]);
     const secret = join(space.outside, "secret.txt");
 
-    const files = judge(space.root, [
+    const files = await judge(space.root, [
       edit(secret, 1, 1),
       edit("a.txt", 1, 0),
       edit("../outside/secret.txt", 1, 1),
@@ -171,16 +165,16 @@ describe("C2 a dropped path is judged once per event", () => {
     ]);
 
     expect(files).toEqual([{ path: "a.txt", added: 1, removed: 0, kind: "edit" }]);
-    expect(callsOn("realpathSync", resolve(space.root, secret))).toBe(1);
-    expect(callsOn("lstatSync", resolve(space.root, secret))).toBe(0);
+    expect(callsOn("realpath", resolve(space.root, secret))).toBe(1);
+    expect(callsOn("lstat", resolve(space.root, secret))).toBe(0);
   });
 
-  it("C2 (c) a dangling symlink repeated three times costs one realpath and one lstat", () => {
+  it("C2 (c) a dangling symlink repeated three times costs one realpath and one lstat", async () => {
     const space = openSpace(["a.txt"]);
     symlinkSync(join(space.outside, "missing"), join(space.root, "dangling"));
     const dangling = resolve(space.root, "dangling");
 
-    const files = judge(space.root, [
+    const files = await judge(space.root, [
       edit("dangling", 1, 1),
       edit("a.txt", 1, 0),
       edit("./dangling", 1, 1),
@@ -188,14 +182,14 @@ describe("C2 a dropped path is judged once per event", () => {
     ]);
 
     expect(files).toEqual([{ path: "a.txt", added: 1, removed: 0, kind: "edit" }]);
-    expect(callsOn("realpathSync", dangling)).toBe(1);
-    expect(callsOn("lstatSync", dangling)).toBe(1);
-    expect(callsOf("lstatSync")).toBe(1);
+    expect(callsOn("realpath", dangling)).toBe(1);
+    expect(callsOn("lstat", dangling)).toBe(1);
+    expect(callsOf("lstat")).toBe(1);
   });
 });
 
 describe("C3 the cap counts positions, dropped candidates included", () => {
-  it("C3 (d) sixty outside candidates use sixty of the 100 places; the 101st is not judged", () => {
+  it("C3 (d) sixty outside candidates use sixty of the 100 places; the 101st is not judged", async () => {
     const space = openSpace([...EARLY, "late.txt"]);
     const hundred = [
       ...Array.from({ length: 60 }, (_unused, index) =>
@@ -206,20 +200,20 @@ describe("C3 the cap counts positions, dropped candidates included", () => {
     expect(hundred).toHaveLength(100);
     const expected = EARLY.map((path) => ({ path, added: 1, removed: 2, kind: "edit" }));
 
-    const files = judge(space.root, [...hundred, edit("late.txt", 7, 7)]);
+    const files = await judge(space.root, [...hundred, edit("late.txt", 7, 7)]);
 
     expect(files).toEqual(expected);
     expect(files).toHaveLength(40);
     expect(touched()).not.toContain(resolve(space.root, "late.txt"));
     // The last of the first 100 is judged: the boundary is at 100, not below it.
-    expect(callsOn("realpathSync", resolve(space.root, EARLY[39] ?? ""))).toBe(1);
+    expect(callsOn("realpath", resolve(space.root, EARLY[39] ?? ""))).toBe(1);
 
-    expect(judge(space.root, hundred)).toEqual(expected);
+    expect(await judge(space.root, hundred)).toEqual(expected);
   });
 });
 
 describe("C4 a candidate too long or too deep reaches no filesystem call", () => {
-  it("C4 (e) 200 hops through `l -> .` and a path over 4096 bytes are dropped untouched", () => {
+  it("C4 (e) 200 hops through `l -> .` and a path over 4096 bytes are dropped untouched", async () => {
     const space = openSpace(["a.txt"]);
     symlinkSync(".", join(space.root, "l"));
     // 201 components below the root; its realpath is the workspace's own `a.txt`.
@@ -231,7 +225,7 @@ describe("C4 a candidate too long or too deep reaches no filesystem call", () =>
     expect(components(long)).toBeLessThanOrEqual(128);
     expect(Buffer.byteLength(deep, "utf8")).toBeLessThanOrEqual(4096);
 
-    const files = judge(space.root, [
+    const files = await judge(space.root, [
       edit(`${"l/".repeat(200)}a.txt`, 5, 5),
       edit(`long/${"深".repeat(1400)}`, 7, 7),
       edit("a.txt", 1, 0),
@@ -246,12 +240,12 @@ describe("C4 a candidate too long or too deep reaches no filesystem call", () =>
     expect(seen).not.toContain(dirname(long));
     // The root once and the plain `a.txt` once, nothing else.
     expect(fsCalls).toEqual([
-      { name: "realpathSync", first: space.root },
-      { name: "realpathSync", first: resolve(space.root, "a.txt") },
+      { name: "realpath", first: space.root },
+      { name: "realpath", first: resolve(space.root, "a.txt") },
     ]);
   });
 
-  it("C4 (f) exactly 128 components is judged and kept, 129 is dropped untouched", () => {
+  it("C4 (f) exactly 128 components is judged and kept, 129 is dropped untouched", async () => {
     const space = openSpace(["a.txt"]);
     symlinkSync(".", join(space.root, "l"));
     // The temp root has a depth of its own: the hops fill up to the wanted total, `a.txt` is last.
@@ -264,16 +258,16 @@ describe("C4 a candidate too long or too deep reaches no filesystem call", () =>
     expect(components(over)).toBe(129);
     expect(Buffer.byteLength(over, "utf8")).toBeLessThanOrEqual(4096);
 
-    expect(judge(space.root, [edit(through(128), 2, 3)])).toEqual([
+    expect(await judge(space.root, [edit(through(128), 2, 3)])).toEqual([
       { path: "a.txt", added: 2, removed: 3, kind: "edit" },
     ]);
-    expect(callsOn("realpathSync", exact)).toBe(1);
+    expect(callsOn("realpath", exact)).toBe(1);
 
-    expect(judge(space.root, [edit(through(129), 2, 3)])).toEqual([]);
-    expect(fsCalls).toEqual([{ name: "realpathSync", first: space.root }]);
+    expect(await judge(space.root, [edit(through(129), 2, 3)])).toEqual([]);
+    expect(fsCalls).toEqual([{ name: "realpath", first: space.root }]);
   });
 
-  it("C4 (f) exactly 4096 bytes reaches the filesystem, 4097 bytes does not", () => {
+  it("C4 (f) exactly 4096 bytes reaches the filesystem, 4097 bytes does not", async () => {
     const space = openSpace([]);
     // One component below the root, so only the byte rule can stop it; no such file can exist.
     const fill = 4096 - Buffer.byteLength(space.root, "utf8") - 1;
@@ -283,10 +277,10 @@ describe("C4 a candidate too long or too deep reaches no filesystem call", () =>
     expect(Buffer.byteLength(exact, "utf8")).toBe(4096);
     expect(Buffer.byteLength(over, "utf8")).toBe(4097);
 
-    expect(judge(space.root, [edit("x".repeat(fill), 1, 1)])).toEqual([]);
-    expect(callsOn("realpathSync", exact)).toBe(1);
+    expect(await judge(space.root, [edit("x".repeat(fill), 1, 1)])).toEqual([]);
+    expect(callsOn("realpath", exact)).toBe(1);
 
-    expect(judge(space.root, [edit("x".repeat(fill + 1), 1, 1)])).toEqual([]);
-    expect(fsCalls).toEqual([{ name: "realpathSync", first: space.root }]);
+    expect(await judge(space.root, [edit("x".repeat(fill + 1), 1, 1)])).toEqual([]);
+    expect(fsCalls).toEqual([{ name: "realpath", first: space.root }]);
   });
 });

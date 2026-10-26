@@ -4,6 +4,9 @@
  * symlinks, no filesystem double; every root is realpath'd first (macOS tmpdir is /var →
  * /private/var). Expected values are literals from the spec scenarios. The 1024-byte boundary is
  * taken on the pure `ownedPath` (macOS PATH_MAX is 1024, so the path cannot exist on disk).
+ * #1694 (s1b-workspace-mounts D21)「挂载内的候选不触达文件系统」: `ownedChanges` is asynchronous;
+ * its `realpath` / `lstat` go through the module-level `ownershipFs`, which the last describe wraps to
+ * record every call (and, for one path, to never settle) and gives a 1 s deadline.
  */
 import {
   mkdirSync,
@@ -18,8 +21,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { openDb } from "../src/core/db/index.js";
+import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import type { FileChange } from "../src/sessions/file-changes.js";
-import { ownedChanges, ownedPath } from "../src/sessions/file-changes-ownership.js";
+import { ownedChanges, ownedPath, ownershipFs } from "../src/sessions/file-changes-ownership.js";
+import { createSessionStore } from "../src/sessions/store.js";
+import { persistEvent } from "../src/sessions/turn-control.js";
+import { TEST_COMPOSER } from "./session-meta-fixtures.js";
 
 interface Space {
   /** Canonical parent of everything below; removed after the test. */
@@ -31,8 +39,10 @@ interface Space {
 }
 
 const bases: string[] = [];
+const realFs = { ...ownershipFs };
 
 afterEach(() => {
+  Object.assign(ownershipFs, realFs);
   for (const base of bases.splice(0)) {
     rmSync(base, { recursive: true, force: true });
   }
@@ -68,19 +78,19 @@ function expectRelative(space: Space, files: readonly FileChange[]): void {
 }
 
 describe("O1 a candidate inside the workspace root", () => {
-  it("O1 an absolute edit path is stored relative, with keys path/added/removed/kind", () => {
+  it("O1 an absolute edit path is stored relative, with keys path/added/removed/kind", async () => {
     const space = openSpace();
-    const files = ownedChanges(space.root, [edit(join(space.root, "notes.md"), 2, 1)]);
+    const files = await ownedChanges(space.root, [edit(join(space.root, "notes.md"), 2, 1)]);
     expect(files).toEqual([{ path: "notes.md", added: 2, removed: 1, kind: "edit" }]);
     expect(Object.keys(files[0] ?? {})).toEqual(["path", "added", "removed", "kind"]);
     expectRelative(space, files);
   });
 
-  it("O1 a write keeps null counts and a nested file gets a slash-separated path", () => {
+  it("O1 a write keeps null counts and a nested file gets a slash-separated path", async () => {
     const space = openSpace();
     mkdirSync(join(space.root, "out", "deep"), { recursive: true });
     writeFileSync(join(space.root, "out", "deep", "report.html"), "<html></html>");
-    const files = ownedChanges(space.root, [
+    const files = await ownedChanges(space.root, [
       write(join(space.root, "out", "deep", "report.html")),
       edit(join(space.root, "sub", "new.ts"), 3, 0),
     ]);
@@ -94,55 +104,55 @@ describe("O1 a candidate inside the workspace root", () => {
 });
 
 describe("O2 relative candidates and lexical normalization", () => {
-  it("O2 a relative path is joined to the root, not to the process cwd", () => {
+  it("O2 a relative path is joined to the root, not to the process cwd", async () => {
     const space = openSpace();
-    expect(ownedChanges(space.root, [edit("notes.md", 2, 1)])).toEqual([
+    expect(await ownedChanges(space.root, [edit("notes.md", 2, 1)])).toEqual([
       { path: "notes.md", added: 2, removed: 1, kind: "edit" },
     ]);
-    expect(ownedChanges(space.root, [write("sub/made.txt")])).toEqual([
+    expect(await ownedChanges(space.root, [write("sub/made.txt")])).toEqual([
       { path: "sub/made.txt", added: null, removed: null, kind: "write" },
     ]);
   });
 
-  it("O2 dot segments fold lexically, also across a symlink leaving the workspace", () => {
+  it("O2 dot segments fold lexically, also across a symlink leaving the workspace", async () => {
     const space = openSpace();
     writeFileSync(join(space.root, "b.md"), "b");
     writeFileSync(join(space.root, "x.md"), "inside x");
     symlinkSync(space.outside, join(space.root, "link"));
-    expect(ownedChanges(space.root, [edit("./a/../b.md")])).toEqual([
+    expect(await ownedChanges(space.root, [edit("./a/../b.md")])).toEqual([
       { path: "b.md", added: 1, removed: 0, kind: "edit" },
     ]);
     // The kernel would follow `link` first and land in <base>/x.md; the lexical fold names x.md.
-    expect(ownedChanges(space.root, [edit("link/../x.md")])).toEqual([
+    expect(await ownedChanges(space.root, [edit("link/../x.md")])).toEqual([
       { path: "x.md", added: 1, removed: 0, kind: "edit" },
     ]);
     // Only the folded target is asked: y.md exists at the kernel's location (<base>/y.md) and
     // not in the root, so it is a missing file of the root, in either spelling.
     writeFileSync(join(space.base, "y.md"), "kernel-side y");
     expect(
-      ownedChanges(space.root, [edit("link/../y.md"), edit(`${space.root}/link/../y.md`)]),
+      await ownedChanges(space.root, [edit("link/../y.md"), edit(`${space.root}/link/../y.md`)]),
     ).toEqual([{ path: "y.md", added: 2, removed: 0, kind: "edit" }]);
   });
 
   it.each(["sub/", "sub//", "sub/./", "notes.md/"])(
     "O2 the trailing-separator spelling %s equals the plain one",
-    (spelling) => {
+    async (spelling) => {
       const space = openSpace();
       const plain = spelling.startsWith("sub") ? "sub" : "notes.md";
-      expect(ownedChanges(space.root, [edit(spelling)])).toEqual([
+      expect(await ownedChanges(space.root, [edit(spelling)])).toEqual([
         { path: plain, added: 1, removed: 0, kind: "edit" },
       ]);
-      expect(ownedChanges(space.root, [edit(join(space.root, spelling))])).toEqual(
-        ownedChanges(space.root, [edit(plain)]),
+      expect(await ownedChanges(space.root, [edit(join(space.root, spelling))])).toEqual(
+        await ownedChanges(space.root, [edit(plain)]),
       );
     },
   );
 });
 
 describe("O3 several files and repeated paths", () => {
-  it("O3 repeated paths merge at their first position with summed counts", () => {
+  it("O3 repeated paths merge at their first position with summed counts", async () => {
     const space = openSpace();
-    const files = ownedChanges(space.root, [
+    const files = await ownedChanges(space.root, [
       edit("a.md", 1, 0),
       edit("b.md", 0, 1),
       edit("a.md", 1, 0),
@@ -153,9 +163,9 @@ describe("O3 several files and repeated paths", () => {
     ]);
   });
 
-  it("O3 an absolute and a relative spelling of one file merge into one element", () => {
+  it("O3 an absolute and a relative spelling of one file merge into one element", async () => {
     const space = openSpace();
-    const files = ownedChanges(space.root, [
+    const files = await ownedChanges(space.root, [
       edit("sub/x.ts", 4, 2),
       edit("notes.md", 2, 1),
       edit(join(space.root, "sub", "x.ts"), 1, 3),
@@ -167,26 +177,26 @@ describe("O3 several files and repeated paths", () => {
     ]);
   });
 
-  it("O3 a null edit count adds as zero and the first kind is kept", () => {
+  it("O3 a null edit count adds as zero and the first kind is kept", async () => {
     const space = openSpace();
     expect(
-      ownedChanges(space.root, [edit("a.md", 3, 1), edit("a.md", null, null), write("a.md")]),
+      await ownedChanges(space.root, [edit("a.md", 3, 1), edit("a.md", null, null), write("a.md")]),
     ).toEqual([{ path: "a.md", added: 3, removed: 1, kind: "edit" }]);
-    expect(ownedChanges(space.root, [edit("b.md", null, null), edit("b.md", 2, 3)])).toEqual([
+    expect(await ownedChanges(space.root, [edit("b.md", null, null), edit("b.md", 2, 3)])).toEqual([
       { path: "b.md", added: 2, removed: 3, kind: "edit" },
     ]);
   });
 });
 
 describe("O4 repeated write candidates", () => {
-  it("O4 two writes of one path merge into one element whose counts stay null", () => {
+  it("O4 two writes of one path merge into one element whose counts stay null", async () => {
     const space = openSpace();
     const report = join(space.root, "sub", "report.html");
-    expect(ownedChanges(space.root, [write(report), write("sub/report.html")])).toEqual([
+    expect(await ownedChanges(space.root, [write(report), write("sub/report.html")])).toEqual([
       { path: "sub/report.html", added: null, removed: null, kind: "write" },
     ]);
     // A later edit of the same path changes neither the kind nor the null counts.
-    expect(ownedChanges(space.root, [write(report), edit("sub/report.html", 2, 2)])).toEqual([
+    expect(await ownedChanges(space.root, [write(report), edit("sub/report.html", 2, 2)])).toEqual([
       { path: "sub/report.html", added: null, removed: null, kind: "write" },
     ]);
   });
@@ -195,10 +205,10 @@ describe("O4 repeated write candidates", () => {
 describe("O5 the 50-element cap applies after the merge", () => {
   const name = (index: number) => `f${String(index).padStart(2, "0")}.md`;
 
-  it("O5 sixty distinct candidates keep the first fifty in derivation order", () => {
+  it("O5 sixty distinct candidates keep the first fifty in derivation order", async () => {
     const space = openSpace();
     const candidates = Array.from({ length: 60 }, (_unused, index) => edit(name(index), index, 0));
-    const files = ownedChanges(space.root, candidates);
+    const files = await ownedChanges(space.root, candidates);
     expect(files).toHaveLength(50);
     expect(files.map((file) => file.path)).toEqual(
       Array.from({ length: 50 }, (_unused, index) => name(index)),
@@ -206,10 +216,10 @@ describe("O5 the 50-element cap applies after the merge", () => {
     expect(files[49]).toEqual({ path: "f49.md", added: 49, removed: 0, kind: "edit" });
   });
 
-  it("O5 a 51st candidate repeating the first is merged before the cut", () => {
+  it("O5 a 51st candidate repeating the first is merged before the cut", async () => {
     const space = openSpace();
     const candidates = Array.from({ length: 50 }, (_unused, index) => edit(name(index), 1, 1));
-    const files = ownedChanges(space.root, [
+    const files = await ownedChanges(space.root, [
       ...candidates,
       edit(join(space.root, name(0)), 10, 20),
     ]);
@@ -220,7 +230,7 @@ describe("O5 the 50-element cap applies after the merge", () => {
 });
 
 describe("O6 containment and the 1024-byte limit on the pure ownedPath", () => {
-  it("O6 a relative path of exactly 1024 bytes is kept and 1025 bytes is dropped", () => {
+  it("O6 a relative path of exactly 1024 bytes is kept and 1025 bytes is dropped", async () => {
     const exact = "a".repeat(1024);
     expect(ownedPath("/ws", `/ws/${exact}`)).toBe(exact);
     expect(ownedPath("/ws", `/ws/${exact}b`)).toBeUndefined();
@@ -229,7 +239,7 @@ describe("O6 containment and the 1024-byte limit on the pure ownedPath", () => {
     expect(ownedPath("/srv/ws", `/srv/ws/${nested}`)).toBe(nested);
   });
 
-  it("O6 the limit counts UTF-8 bytes, not characters", () => {
+  it("O6 the limit counts UTF-8 bytes, not characters", async () => {
     // 342 three-byte characters: 342 UTF-16 units but 1026 bytes.
     expect(ownedPath("/ws", `/ws/${"文".repeat(342)}`)).toBeUndefined();
     // 341 of them and one ASCII letter: exactly 1024 bytes.
@@ -237,7 +247,7 @@ describe("O6 containment and the 1024-byte limit on the pure ownedPath", () => {
     expect(ownedPath("/ws", `/ws/${exact}`)).toBe(exact);
   });
 
-  it("O6 the root itself, an outside path and a sibling sharing the prefix are not owned", () => {
+  it("O6 the root itself, an outside path and a sibling sharing the prefix are not owned", async () => {
     expect(ownedPath("/ws", "/ws/notes.md")).toBe("notes.md");
     expect(ownedPath("/ws", "/ws/out/report.html")).toBe("out/report.html");
     expect(ownedPath("/ws", "/ws")).toBeUndefined();
@@ -247,23 +257,23 @@ describe("O6 containment and the 1024-byte limit on the pure ownedPath", () => {
     expect(ownedPath("/srv/ws", "/srv/ws-old/notes.md")).toBeUndefined();
   });
 
-  it("O6 a real nested path of about 600 bytes survives ownedChanges", () => {
+  it("O6 a real nested path of about 600 bytes survives ownedChanges", async () => {
     const space = openSpace();
     const segments = ["p", "q", "r", "s", "t", "u"].map((letter) => letter.repeat(99));
     const relative = [...segments, "f.md"].join("/");
     expect(Buffer.byteLength(relative, "utf8")).toBe(604);
     mkdirSync(join(space.root, ...segments), { recursive: true });
     writeFileSync(join(space.root, relative), "deep");
-    expect(ownedChanges(space.root, [write(join(space.root, relative)), edit(relative)])).toEqual([
-      { path: relative, added: null, removed: null, kind: "write" },
-    ]);
+    expect(
+      await ownedChanges(space.root, [write(join(space.root, relative)), edit(relative)]),
+    ).toEqual([{ path: relative, added: null, removed: null, kind: "write" }]);
   });
 
   // macOS PATH_MAX is 1024, so a 1024-byte relative path below a temp root cannot be given to its
   // filesystem; Linux (CI) takes 4096 bytes with names of at most 255.
   it.skipIf(process.platform === "darwin")(
     "O6 on a real tree a relative path of 1024 bytes is kept and one of 1025 bytes is dropped",
-    () => {
+    async () => {
       const space = openSpace();
       const dirs = ["p".repeat(255), "q".repeat(255), "r".repeat(255), "s".repeat(200)];
       mkdirSync(join(space.root, ...dirs), { recursive: true });
@@ -274,10 +284,14 @@ describe("O6 containment and the 1024-byte limit on the pure ownedPath", () => {
         1024, 1025,
       ]);
       expect(
-        ownedChanges(space.root, [edit(over), edit(exact, 2, 1), write(join(space.root, over))]),
+        await ownedChanges(space.root, [
+          edit(over),
+          edit(exact, 2, 1),
+          write(join(space.root, over)),
+        ]),
       ).toEqual([{ path: exact, added: 2, removed: 1, kind: "edit" }]);
       writeFileSync(join(space.root, exact), "now it exists");
-      expect(ownedChanges(space.root, [write(join(space.root, exact))])).toEqual([
+      expect(await ownedChanges(space.root, [write(join(space.root, exact))])).toEqual([
         { path: exact, added: null, removed: null, kind: "write" },
       ]);
     },
@@ -325,14 +339,14 @@ describe("O7 paths outside the workspace and symlink escapes", () => {
     ];
   }
 
-  it("O7 each escaping candidate alone yields nothing", () => {
+  it("O7 each escaping candidate alone yields nothing", async () => {
     const space = openSpace();
     const dropped: string[] = [];
     const cases = escapes(space);
     for (const [label, path] of cases) {
       const kept = [
-        ...ownedChanges(space.root, [edit(path)]),
-        ...ownedChanges(space.root, [write(path)]),
+        ...(await ownedChanges(space.root, [edit(path)])),
+        ...(await ownedChanges(space.root, [write(path)])),
       ];
       if (kept.length === 0) {
         dropped.push(label);
@@ -341,7 +355,7 @@ describe("O7 paths outside the workspace and symlink escapes", () => {
     expect(dropped).toEqual(cases.map(([label]) => label));
   });
 
-  it("O7 in one batch only the legitimate path survives", () => {
+  it("O7 in one batch only the legitimate path survives", async () => {
     const space = openSpace();
     const cases = escapes(space);
     const batch = [
@@ -349,12 +363,12 @@ describe("O7 paths outside the workspace and symlink escapes", () => {
       edit(join(space.root, "notes.md"), 2, 1),
       ...cases.slice(12).map(([, path]) => edit(path, 9, 9)),
     ];
-    const files = ownedChanges(space.root, batch);
+    const files = await ownedChanges(space.root, batch);
     expect(files).toEqual([{ path: "notes.md", added: 2, removed: 1, kind: "edit" }]);
     expectRelative(space, files);
   });
 
-  it("O7 judging creates, removes and rewrites nothing", () => {
+  it("O7 judging creates, removes and rewrites nothing", async () => {
     const space = openSpace();
     const cases = escapes(space);
     const listing = () => ({
@@ -363,7 +377,7 @@ describe("O7 paths outside the workspace and symlink escapes", () => {
       base: readdirSync(space.base).sort(),
     });
     const before = listing();
-    ownedChanges(space.root, [
+    await ownedChanges(space.root, [
       ...cases.map(([, path]) => write(path)),
       write("sub/absent/deep.md"),
     ]);
@@ -393,13 +407,13 @@ describe("O7 a symlink whose target folds `..` differently in JS realpath and in
 
   it.each(["a/name", "a/loop"])(
     "O7 %s, an entry without a realpath at the JS-resolved location, is dropped",
-    (candidate) => {
+    async (candidate) => {
       const space = openSpace();
       divergent(space);
-      expect(ownedChanges(space.root, [edit(candidate)])).toEqual([]);
-      expect(ownedChanges(space.root, [write(join(space.root, candidate))])).toEqual([]);
+      expect(await ownedChanges(space.root, [edit(candidate)])).toEqual([]);
+      expect(await ownedChanges(space.root, [write(join(space.root, candidate))])).toEqual([]);
       // Reported directly they were dropped all along.
-      expect(ownedChanges(space.root, [edit(candidate.replace("a/", "sub/"))])).toEqual([]);
+      expect(await ownedChanges(space.root, [edit(candidate.replace("a/", "sub/"))])).toEqual([]);
     },
   );
 
@@ -407,7 +421,7 @@ describe("O7 a symlink whose target folds `..` differently in JS realpath and in
     ["a/kname", "a dangling symlink at the kernel's location only"],
     ["c/x.md", "a regular file used as a directory at the kernel's location only"],
     ["b/x.md", "a regular file used as a directory at the JS-resolved location only"],
-  ])("O7 %s, %s, is dropped", (candidate) => {
+  ])("O7 %s, %s, is dropped", async (candidate) => {
     const space = openSpace();
     divergent(space);
     const { root } = space;
@@ -418,14 +432,14 @@ describe("O7 a symlink whose target folds `..` differently in JS realpath and in
     writeFileSync(join(root, "f"), "a file where the kernel sees the directory deep/f");
     mkdirSync(join(root, "deep", "f"));
     symlinkSync("d/../f", join(root, "b"));
-    expect(ownedChanges(root, [edit(candidate)])).toEqual([]);
-    expect(ownedChanges(root, [write(join(root, candidate))])).toEqual([]);
+    expect(await ownedChanges(root, [edit(candidate)])).toEqual([]);
+    expect(await ownedChanges(root, [write(join(root, candidate))])).toEqual([]);
   });
 
-  it("O7 in one batch with them only the legitimate path survives", () => {
+  it("O7 in one batch with them only the legitimate path survives", async () => {
     const space = openSpace();
     divergent(space);
-    const files = ownedChanges(space.root, [
+    const files = await ownedChanges(space.root, [
       edit("a/name", 9, 9),
       edit(join(space.root, "a", "loop"), 9, 9),
       edit("notes.md", 2, 1),
@@ -435,7 +449,7 @@ describe("O7 a symlink whose target folds `..` differently in JS realpath and in
     expect(files).toEqual([{ path: "notes.md", added: 2, removed: 1, kind: "edit" }]);
   });
 
-  it("O7 an existing and a truly missing file under the same link keep the JS-realpath label", () => {
+  it("O7 an existing and a truly missing file under the same link keep the JS-realpath label", async () => {
     const space = openSpace();
     divergent(space);
     // The label is JS realpath's <root>/sub; the kernel location is <root>/deep/sub (design
@@ -443,7 +457,7 @@ describe("O7 a symlink whose target folds `..` differently in JS realpath and in
     expect(readdirSync(join(space.root, "deep", "sub"))).toEqual([]);
     expect(readdirSync(join(space.root, "sub")).sort()).toEqual(["loop", "name", "x.md"]);
     expect(
-      ownedChanges(space.root, [
+      await ownedChanges(space.root, [
         edit("a/x.md", 2, 1),
         edit(join(space.root, "a", "gone.md"), 0, 3),
       ]),
@@ -455,32 +469,34 @@ describe("O7 a symlink whose target folds `..` differently in JS realpath and in
 });
 
 describe("O7 guards: symlinks back to the root and to its parent", () => {
-  it("O7 guard: through `self -> <root>` a file keeps its real label and the bare link is dropped", () => {
+  it("O7 guard: through `self -> <root>` a file keeps its real label and the bare link is dropped", async () => {
     const space = openSpace();
     writeFileSync(join(space.root, "x.md"), "x");
     symlinkSync(space.root, join(space.root, "self"));
     expect(
-      ownedChanges(space.root, [
+      await ownedChanges(space.root, [
         edit("self/x.md", 1, 1),
         edit("x.md", 2, 0),
         edit("self/self/x.md", 0, 1),
       ]),
     ).toEqual([{ path: "x.md", added: 3, removed: 2, kind: "edit" }]);
-    expect(ownedChanges(space.root, [edit("self"), write(join(space.root, "self"))])).toEqual([]);
+    expect(await ownedChanges(space.root, [edit("self"), write(join(space.root, "self"))])).toEqual(
+      [],
+    );
   });
 
-  it("O7 guard: through `up -> ..` only paths coming back into the root are owned", () => {
+  it("O7 guard: through `up -> ..` only paths coming back into the root are owned", async () => {
     const space = openSpace();
     writeFileSync(join(space.root, "x.md"), "x");
     symlinkSync("..", join(space.root, "up"));
     expect(
-      ownedChanges(space.root, [edit("up/ws/x.md", 2, 1), edit("up/ws/gone.md", 0, 4)]),
+      await ownedChanges(space.root, [edit("up/ws/x.md", 2, 1), edit("up/ws/gone.md", 0, 4)]),
     ).toEqual([
       { path: "x.md", added: 2, removed: 1, kind: "edit" },
       { path: "gone.md", added: 0, removed: 4, kind: "edit" },
     ]);
     expect(
-      ownedChanges(space.root, [
+      await ownedChanges(space.root, [
         edit("up/ws"),
         edit("up"),
         edit("up/outside/x.md"),
@@ -491,9 +507,9 @@ describe("O7 guards: symlinks back to the root and to its parent", () => {
 });
 
 describe("O8 a missing file is judged by its parent directory", () => {
-  it("O8 a missing file in an existing directory is kept; a missing parent drops it", () => {
+  it("O8 a missing file in an existing directory is kept; a missing parent drops it", async () => {
     const space = openSpace();
-    const files = ownedChanges(space.root, [
+    const files = await ownedChanges(space.root, [
       edit("sub/deleted.md", 0, 4),
       edit("nodir/x.md", 1, 0),
       edit(join(space.root, "gone.md"), 0, 1),
@@ -503,68 +519,70 @@ describe("O8 a missing file is judged by its parent directory", () => {
       { path: "sub/deleted.md", added: 0, removed: 4, kind: "edit" },
       { path: "gone.md", added: 0, removed: 1, kind: "edit" },
     ]);
-    expect(ownedChanges(space.root, [edit("nodir/x.md")])).toEqual([]);
+    expect(await ownedChanges(space.root, [edit("nodir/x.md")])).toEqual([]);
   });
 
-  it("O8 a missing file under an inward symlinked directory is stored at its real parent", () => {
+  it("O8 a missing file under an inward symlinked directory is stored at its real parent", async () => {
     const space = openSpace();
     symlinkSync(join(space.root, "sub"), join(space.root, "alias"));
-    expect(ownedChanges(space.root, [edit("alias/deleted.md", 0, 2)])).toEqual([
+    expect(await ownedChanges(space.root, [edit("alias/deleted.md", 0, 2)])).toEqual([
       { path: "sub/deleted.md", added: 0, removed: 2, kind: "edit" },
     ]);
   });
 });
 
 describe("O9 the workspace root must be a canonical path", () => {
-  it("O9 a root given through a symlink alias yields nothing", () => {
+  it("O9 a root given through a symlink alias yields nothing", async () => {
     const space = openSpace();
     const alias = join(space.base, "alias");
     symlinkSync(space.root, alias);
     expect(realpathSync(alias)).toBe(space.root);
-    expect(ownedChanges(alias, [edit(join(alias, "notes.md"), 2, 1)])).toEqual([]);
-    expect(ownedChanges(alias, [edit("notes.md", 2, 1)])).toEqual([]);
-    expect(ownedChanges(alias, [edit(join(space.root, "notes.md"), 2, 1)])).toEqual([]);
+    expect(await ownedChanges(alias, [edit(join(alias, "notes.md"), 2, 1)])).toEqual([]);
+    expect(await ownedChanges(alias, [edit("notes.md", 2, 1)])).toEqual([]);
+    expect(await ownedChanges(alias, [edit(join(space.root, "notes.md"), 2, 1)])).toEqual([]);
     // The same candidates are owned once the root is named canonically.
-    expect(ownedChanges(space.root, [edit(join(alias, "notes.md"), 2, 1)])).toEqual([
+    expect(await ownedChanges(space.root, [edit(join(alias, "notes.md"), 2, 1)])).toEqual([
       { path: "notes.md", added: 2, removed: 1, kind: "edit" },
     ]);
   });
 
-  it("O9 a root moved away and replaced by a symlink to an outside directory yields nothing", () => {
+  it("O9 a root moved away and replaced by a symlink to an outside directory yields nothing", async () => {
     const space = openSpace();
     renameSync(space.root, join(space.base, "moved"));
     symlinkSync(space.outside, space.root);
-    expect(ownedChanges(space.root, [edit(join(space.root, "secret.txt"))])).toEqual([]);
-    expect(ownedChanges(space.root, [write("secret.txt"), write("x.md")])).toEqual([]);
-    expect(ownedChanges(space.root, [edit(join(space.outside, "secret.txt"))])).toEqual([]);
+    expect(await ownedChanges(space.root, [edit(join(space.root, "secret.txt"))])).toEqual([]);
+    expect(await ownedChanges(space.root, [write("secret.txt"), write("x.md")])).toEqual([]);
+    expect(await ownedChanges(space.root, [edit(join(space.outside, "secret.txt"))])).toEqual([]);
   });
 
-  it("O9 a root spelled with a trailing separator or a dot segment yields nothing", () => {
+  it("O9 a root spelled with a trailing separator or a dot segment yields nothing", async () => {
     const space = openSpace();
-    expect(ownedChanges(`${space.root}/`, [edit("notes.md")])).toEqual([]);
-    expect(ownedChanges(`${space.root}/sub/..`, [edit("notes.md")])).toEqual([]);
-    expect(ownedChanges(`${space.base}/./ws`, [edit("notes.md")])).toEqual([]);
+    expect(await ownedChanges(`${space.root}/`, [edit("notes.md")])).toEqual([]);
+    expect(await ownedChanges(`${space.root}/sub/..`, [edit("notes.md")])).toEqual([]);
+    expect(await ownedChanges(`${space.base}/./ws`, [edit("notes.md")])).toEqual([]);
   });
 });
 
 describe("O10 an unresolvable root", () => {
-  it("O10 a missing root, a file as root and an empty root yield nothing without throwing", () => {
+  it("O10 a missing root, a file as root and an empty root yield nothing without throwing", async () => {
     const space = openSpace();
     const missing = join(space.base, "never-created");
-    expect(ownedChanges(missing, [edit(join(missing, "notes.md")), edit("notes.md")])).toEqual([]);
+    expect(
+      await ownedChanges(missing, [edit(join(missing, "notes.md")), edit("notes.md")]),
+    ).toEqual([]);
     const file = join(space.root, "notes.md");
-    expect(ownedChanges(file, [edit(join(file, "x.md")), edit("x.md")])).toEqual([]);
-    expect(ownedChanges("", [edit(join(space.root, "notes.md"))])).toEqual([]);
-    expect(ownedChanges("ws", [edit("notes.md")])).toEqual([]);
+    expect(await ownedChanges(file, [edit(join(file, "x.md")), edit("x.md")])).toEqual([]);
+    expect(await ownedChanges("", [edit(join(space.root, "notes.md"))])).toEqual([]);
+    expect(await ownedChanges("ws", [edit("notes.md")])).toEqual([]);
   });
 });
 
 describe("O11 paths the filesystem cannot take", () => {
-  it("O11 a NUL byte and over-long paths are dropped without throwing", () => {
+  it("O11 a NUL byte and over-long paths are dropped without throwing", async () => {
     const space = openSpace();
     const longName = `${"n".repeat(300)}.md`;
     const longPath = `${"y/".repeat(600)}f.md`;
-    const files = ownedChanges(space.root, [
+    const files = await ownedChanges(space.root, [
       edit("a\0b.md"),
       edit(join(space.root, "sub", "a\0b.md")),
       edit("\0"),
@@ -576,11 +594,11 @@ describe("O11 paths the filesystem cannot take", () => {
     ]);
     expect(files).toEqual([{ path: "notes.md", added: 2, removed: 1, kind: "edit" }]);
     for (const path of ["a\0b.md", "\0", longName, longPath]) {
-      expect(ownedChanges(space.root, [edit(path)])).toEqual([]);
+      expect(await ownedChanges(space.root, [edit(path)])).toEqual([]);
     }
   });
 
-  it("O11 a path that is not a string is dropped without throwing", () => {
+  it("O11 a path that is not a string is dropped without throwing", async () => {
     const space = openSpace();
     const broken = [
       { path: 42, added: 1, removed: 0, kind: "edit" },
@@ -588,23 +606,23 @@ describe("O11 paths the filesystem cannot take", () => {
       { added: 1, removed: 0, kind: "edit" },
       edit("notes.md", 2, 1),
     ] as unknown as FileChange[];
-    expect(ownedChanges(space.root, broken)).toEqual([
+    expect(await ownedChanges(space.root, broken)).toEqual([
       { path: "notes.md", added: 2, removed: 1, kind: "edit" },
     ]);
   });
 });
 
 describe("O12 a symlink staying inside the workspace", () => {
-  it("O12 the real location is stored and merged with the direct spelling", () => {
+  it("O12 the real location is stored and merged with the direct spelling", async () => {
     const space = openSpace();
     symlinkSync(join(space.root, "notes.md"), join(space.root, "inlink"));
     symlinkSync(join(space.root, "sub"), join(space.root, "dirlink"));
     writeFileSync(join(space.root, "sub", "f.md"), "f");
-    expect(ownedChanges(space.root, [edit("inlink", 2, 1)])).toEqual([
+    expect(await ownedChanges(space.root, [edit("inlink", 2, 1)])).toEqual([
       { path: "notes.md", added: 2, removed: 1, kind: "edit" },
     ]);
     expect(
-      ownedChanges(space.root, [
+      await ownedChanges(space.root, [
         edit(join(space.root, "inlink"), 2, 1),
         edit("dirlink/f.md", 1, 1),
         edit("notes.md", 3, 0),
@@ -618,7 +636,7 @@ describe("O12 a symlink staying inside the workspace", () => {
 });
 
 describe("O13 inputs are left alone", () => {
-  it("O13 frozen candidates are not mutated and the result holds new objects", () => {
+  it("O13 frozen candidates are not mutated and the result holds new objects", async () => {
     const space = openSpace();
     const first = edit(join(space.root, "notes.md"), 2, 1);
     const candidates = [first, edit("notes.md", 1, 1), write("sub/out.html"), edit("/etc/passwd")];
@@ -628,7 +646,7 @@ describe("O13 inputs are left alone", () => {
     }
     Object.freeze(candidates);
 
-    const files = ownedChanges(space.root, candidates);
+    const files = await ownedChanges(space.root, candidates);
 
     expect(candidates).toEqual(before);
     expect(files).toEqual([
@@ -639,9 +657,129 @@ describe("O13 inputs are left alone", () => {
       expect(candidates).not.toContain(file);
       expect(Object.isFrozen(file)).toBe(false);
     }
-    const again = ownedChanges(space.root, candidates);
+    const again = await ownedChanges(space.root, candidates);
     expect(again).toEqual(files);
     expect(again).not.toBe(files);
     expect(again[0]).not.toBe(files[0]);
+  });
+});
+
+describe("挂载内的候选不触达文件系统", () => {
+  const MOUNTS: ReadonlySet<string> = new Set(["远端"]);
+
+  /** `out/d.md`, the registered mount `远端` (a plain directory here) and the plain `远端备份`. */
+  function mountSpace() {
+    const space = openSpace();
+    for (const dir of ["out", "远端/sub", "远端备份"]) {
+      mkdirSync(join(space.root, dir), { recursive: true });
+    }
+    for (const file of [
+      "out/d.md",
+      "远端/a.md",
+      "远端/b.md",
+      "远端/c.md",
+      "远端/sub/x.md",
+      "远端备份/e.md",
+    ]) {
+      writeFileSync(join(space.root, file), file);
+    }
+    return { ...space, mount: join(space.root, "远端") };
+  }
+
+  /** Every `ownershipFs` call from here on, by its path; `hung` paths never settle. */
+  function recordCalls(hung: (path: string) => boolean = () => false): string[] {
+    const calls: string[] = [];
+    ownershipFs.realpath = (path) => {
+      calls.push(String(path));
+      return hung(String(path)) ? new Promise<never>(() => {}) : realFs.realpath(path);
+    };
+    ownershipFs.lstat = (path) => {
+      calls.push(String(path));
+      return realFs.lstat(path);
+    };
+    return calls;
+  }
+
+  const into = (calls: readonly string[], dir: string) =>
+    calls.filter((path) => path === dir || path.startsWith(`${dir}/`));
+
+  it("the three spellings inside 远端 are dropped before any call; out/d.md and 远端备份 are judged", async () => {
+    const space = mountSpace();
+    const calls = recordCalls();
+
+    const files = await ownedChanges(
+      space.root,
+      [edit(join(space.mount, "a.md")), edit("远端/b.md"), edit("./远端//c.md"), edit("out/d.md")],
+      MOUNTS,
+    );
+
+    expect(files).toEqual([{ path: "out/d.md", added: 1, removed: 0, kind: "edit" }]);
+    expect(into(calls, space.mount)).toEqual([]);
+    expect(calls).toContain(join(space.root, "out", "d.md"));
+    expect(await ownedChanges(space.root, [write("远端备份/e.md")], MOUNTS)).toEqual([
+      { path: "远端备份/e.md", added: null, removed: null, kind: "write" },
+    ]);
+    // Without the registered name the same candidates are owned: the name is what dropped them.
+    expect((await ownedChanges(space.root, [edit("远端/b.md")])).map((f) => f.path)).toEqual([
+      "远端/b.md",
+    ]);
+  });
+
+  it("a link into the hung mount: after the 1 s deadline both are dropped, no files.changed, the step.end stored", async () => {
+    expect(realFs.deadlineMs).toBe(10_000);
+    const space = mountSpace();
+    symlinkSync("远端/sub", join(space.root, "l"));
+    const linked = join(space.root, "l", "x.md");
+    const calls = recordCalls((path) => path === linked);
+    ownershipFs.deadlineMs = 1_000;
+    const db = openDb(":memory:");
+    const store = createSessionStore(db, { onFlushError: () => {}, composer: TEST_COMPOSER });
+    try {
+      const session = store.create("u1");
+      const { assistantMessageId: messageId } = store.acceptPrompt(session.id, "u1", "edit");
+      const { stepId } = store.startStep(messageId, { ordinal: 0, name: "edit", detail: "{}" });
+      const steps = new PumpSteps(messageId);
+      steps.started("call-1", stepId, "edit", null);
+      const persist = (event: Parameters<typeof persistEvent>[2]) =>
+        persistEvent(
+          store,
+          messageId,
+          event,
+          steps,
+          [],
+          space.root,
+          (t) => t,
+          () => MOUNTS,
+        );
+      const started = Date.now();
+      let answeredAt: number | undefined;
+      setTimeout(() => {
+        answeredAt = Date.now() - started;
+      }, 50);
+
+      const changed = await persist({
+        type: "files.changed",
+        data: { messageId, stepId: "call-1", files: [edit("l/x.md"), edit("out/d.md")] },
+      });
+      const ended = await persist({
+        type: "step.end",
+        data: { messageId, stepId: "call-1", status: "done", output: "edited" },
+      });
+
+      expect(changed).toBeUndefined();
+      expect(Date.now() - started).toBeGreaterThanOrEqual(950);
+      expect(answeredAt).toBeLessThan(500);
+      // out/d.md comes after the expired candidate: never judged.
+      expect(calls).toEqual([space.root, linked]);
+      expect(ended).toEqual({
+        type: "step.end",
+        data: { messageId, stepId, status: "done", output: "edited" },
+      });
+      const row = db.prepare("SELECT changes, status FROM chat_steps WHERE id = ?").get(stepId);
+      expect({ ...row }).toEqual({ changes: null, status: "done" });
+    } finally {
+      store.close();
+      db.close();
+    }
   });
 });

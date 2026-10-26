@@ -289,7 +289,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - 快照与还原：见 workspace-snapshots「快照内容规则」「还原」的「已登记挂载」一条（manager 交出该空间的挂载名集合）；
 - 预览源的 `/w/` 与 `/o/` 对挂载内路径按「不是普通文件」的 404 应答；
 - 会话附件的路径在挂载内时 400 `bad_request`（在沙箱判定之后）；撤回时挂载内的附件视为已不在；
-- omp 报告的文件变更：见 turn-artifacts「文件变更推导与归属」（词法上在挂载内的候选丢弃；其余候选的 `realpath` / `lstat` 经 `fs/promises` 并带 10 s 期限）；
+- omp 报告的文件变更：见 turn-artifacts「文件变更推导与归属」（词法上在挂载内的候选丢弃；其余候选的 `realpath` / `lstat` 改为异步并带 10 s 期限）；
 - 项目技能列表：见 chat-sessions「Slash 命令白名单与命令目录」（`<D>/.omp/skills` 与各条目 `SKILL.md` 的 `realpath` 经 `fs/promises` 并带 10 s 期限）；
 - 会话截图目录比对（turn-artifacts「文件变更推导与归属」的浏览器截图）只读 `<空间根>/screenshots`，它是保留名；打开之前先不跟随地 `lstat` 它，是符号链接或不是目录即按不存在处理、不打开。`lstat` 与打开之间的窗口与「挂载进程与挂载点」的挂载点检查同属先查后用，登记为已接受的残余。
 

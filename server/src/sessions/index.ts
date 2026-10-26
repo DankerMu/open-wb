@@ -120,6 +120,8 @@ export function registerSessions(
     workspaceRootOf: options.workspaceRootOf,
     redactUpstream: options.redactUpstream,
     onError: options.onError,
+    // The facade's mount names (createApp: the mount-manager's registry) for file-change ownership.
+    mountNamesOf: (workspaceId) => options.sandbox.mountNamesOf?.(workspaceId) ?? new Set(),
     skills: sessionSkillsResolver(
       options.agentDir,
       options.runtime.sandboxRoot,
