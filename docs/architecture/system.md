@@ -910,7 +910,7 @@ modelRoles:
 - **在线判据**：每个挂载的在线状态只在内存里（`online` / `offline`），重启后一律从 `offline` 开始。在线 = rclone 子进程存活 ∧ `/proc/self/mountinfo` 里有一行的挂载点等于该挂载点 ∧ 一个子进程对挂载点 `stat` 在 5 s 内成功 ∧ `sftp` / `smb` 对该次挂载用的 IP 与端口（缺省 `sftp` 22、`smb` 445）在 5 s 内 TCP `connect` 成功（`local` 没有这一项）。TCP 检查只判网络可达：凭证失效、共享被删由挂载内请求的报错发现。
 - **探测与退避**：探测每 30 s 一轮，只对 `online` 的挂载，每个挂载至多一个在途；rclone 退出立即判离线，不等下一轮。判离线 → 惰性卸载（`fusermount3 -uz`）、确保 rclone 退出 → 重挂：首次 5 s 后，此后每次翻倍，封顶 300 s，重挂成功即回 `online` 并把退避复位到 5 s。每次重挂都重新判定主机规则、挂载源路径与挂载点，并把判定过的 IP 改写进 `rclone.conf` 的 `host`；管理员收紧 `MOUNT_HOST_ALLOW` 后，已有挂载在下一次重挂时失效、保持离线。
 - **启动恢复**：`server_started` 写出之后，入口不等待地按 `created_at, id` 逐个恢复已登记的挂载，前一个的尝试结束才开始下一个。每个先对上次运行（被 SIGKILL）留下的残留挂载 `fusermount3 -uz`（孤儿 rclone 随之退出），再照常挂载。恢复失败只使该挂载离线并进入退避，不产生 `server_start_failed`、不改变退出码；成功之前它在列表里显示离线。`RCLONE_BIN` 未配置时不恢复，全部离线。
-- **关停**：SIGTERM / SIGINT 时，主监听器停止之后、关 DB 之前，manager 取消全部定时器与探测、SIGKILL 仍在等就绪的挂载子进程，然后对每个挂载惰性卸载并停止 rclone（SIGTERM，5 s 未退出 SIGKILL）。关停只卸载不删行：挂载行、`<OMP_STATE_DIR>/mounts/<id>/`（凭证、缓存、日志）都保留，下次启动据此恢复。
+- **关停**：SIGTERM / SIGINT 时，主监听器停止之后、关 DB 之前，manager 取消全部定时器与探测、SIGKILL 仍在等就绪的挂载子进程，然后对本次运行挂上过的每个挂载惰性卸载并停止 rclone（SIGTERM，5 s 未退出 SIGKILL）；本次没挂上过的不碰（同库另一实例的挂载、上次运行留下的孤儿——后者由下次启动恢复先 `-uz`）。关停只卸载不删行：挂载行、`<OMP_STATE_DIR>/mounts/<id>/`（凭证、缓存、日志）都保留，下次启动据此恢复。
 - **回滚**：
   1. 关闭功能：撤掉 `RCLONE_BIN` 重启。启动不恢复挂载，已登记的挂载显示离线、仍可卸载，空间根目录照常使用。
   2. 回退到不含挂载的旧版本：先在当前版本下卸载全部挂载（或停服务后对每个挂载点 `fusermount3 -uz <挂载点>`），之后 `<OMP_STATE_DIR>/mounts` 可整体删除；迁移 049 的两张表留着无害（迁移不逆转）。
