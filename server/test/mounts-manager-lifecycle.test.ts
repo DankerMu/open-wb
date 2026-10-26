@@ -491,6 +491,43 @@ describe("挂载操作的串行与取消: shutdown during an attach", () => {
     ]);
     expectAttachVoided();
   });
+
+  it("closeAll while the attach's before hook is pending (#1788): no spawn, mount_disabled, closeAll prompt", {
+    timeout: CASE_MS,
+  }, async () => {
+    const manager = world.manager();
+    let release = (): void => {};
+    let entered = false;
+    const within: string[] = [];
+    const outcome = outcomeOf(
+      manager.attach(
+        { workspaceId: W1, ownerId: OWNER, body: sftp("/srv/data@hang") },
+        {
+          before: () => {
+            entered = true;
+            return new Promise<void>((resolve) => {
+              release = resolve;
+            });
+          },
+          within: (record) => {
+            within.push(record.id);
+          },
+        },
+      ),
+    );
+    await waitFor(() => entered);
+
+    const started = Date.now();
+    const closing = manager.closeAll();
+    release();
+    await closing;
+
+    expect(Date.now() - started).toBeLessThan(CANCEL_BOUND_MS);
+    expect(await outcome).toEqual(new HttpError("mount_disabled"));
+    expect(world.mountCalls()).toEqual([]);
+    expect(within).toEqual([]);
+    expectAttachVoided();
+  });
 });
 
 describe("挂载操作的串行与取消: detach runs on the workspace chain", () => {

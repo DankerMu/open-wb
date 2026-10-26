@@ -660,6 +660,10 @@ export function createMountManager(options: MountManagerOptions) {
           throw new HttpError("mount_disabled");
         }
         await hooks.before?.();
+        // D12: a closeAll that came in during `before` could not abort this attempt yet; void it here.
+        if (shutdown) {
+          throw new HttpError("mount_disabled");
+        }
         const controller = new AbortController();
         attaching.add(controller);
         try {
