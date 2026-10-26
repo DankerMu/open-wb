@@ -7,7 +7,9 @@
  * rclone (`fixtures/fake-rclone.mjs`, marker `@hang`: never ready); feature on/off is observed through
  * `attach` (`mount_disabled` vs. the owner check / a spawn). No `/dev/fuse` needed: readiness reads the
  * system mountinfo, which never names the fake's mount point, so the attempt waits until the close hook
- * cancels it.
+ * cancels it. The settings' path from config through `workspaceAssemblyOf` and createApp into the manager
+ * is pinned for `mountHostAllow` and `ompUid`; `fusermountBin` is not observable here (no mount this
+ * run made ever shows up in the system mountinfo, so nothing is unmounted).
  */
 import {
   existsSync,
@@ -27,6 +29,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AssemblyDependencies, createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import { HttpError } from "../src/core/errors/index.js";
+import { workspaceAssemblyOf } from "../src/startup-registry.js";
 import {
   alive,
   createWorld,
@@ -35,6 +38,7 @@ import {
   local,
   OWNER,
   SOURCE_ID,
+  sftp,
   W1,
   waitFor,
 } from "./mounts-manager-helpers.js";
@@ -192,6 +196,46 @@ describe("createApp mount-manager sources (design D12)", () => {
       expect(await refused).toBe("mount_failed");
       expect(alive(call?.pid ?? 0)).toBe(false);
       expect(on.db.prepare("SELECT count(*) AS n FROM workspace_mounts").get()).toEqual({ n: 0 });
+    },
+    CASE_MS,
+  );
+});
+
+describe("config → workspaceAssemblyOf → createApp: the manager's settings arrive (#1688)", () => {
+  it(
+    "MOUNT_HOST_ALLOW refuses an off-list host with no spawn; the omp uid reaches rclone's --uid",
+    async () => {
+      const at = layout();
+      const ompUid = 4242;
+      const { mountSettings } = workspaceAssemblyOf({
+        sandboxRoot: at.sandboxLink,
+        trashRetentionDays: 30,
+        rcloneBin: FAKE_RCLONE,
+        ompUid,
+        mountHostAllow: ["files.intra"],
+        mountMaxPerWorkspace: 2,
+      });
+      const app = appOf(at.db, { runtime: at.runtime, mountSettings });
+
+      // An IP literal off the allow-list: refused before any lookup or spawn. Were the list lost on the
+      // way, the literal would be allowed and the fake's `@exit1` would make it a fast mount_failed.
+      const offList = sftp("/srv/data@exit1", { host: "10.0.0.9" });
+      expect(
+        await codeOf(app.mounts.attach({ workspaceId: W1, ownerId: OWNER, body: offList })),
+      ).toBe("mount_host_rejected");
+      expect(mountCalls(at.state)).toEqual([]);
+      expect(existsSync(join(at.state, "fake-rclone-calls.jsonl"))).toBe(false);
+
+      // OMP_USER mode: the sharing flags carry the configured uid.
+      const refused = codeOf(app.mounts.attach({ workspaceId: W1, ownerId: OWNER, body: local() }));
+      await waitFor(() => mountCalls(at.state).length === 1);
+      const argv = mountCalls(at.state)[0]?.argv ?? [];
+      expect(argv.slice(argv.indexOf("--uid"), argv.indexOf("--uid") + 2)).toEqual([
+        "--uid",
+        String(ompUid),
+      ]);
+      await closeApp(app);
+      expect(await refused).toBe("mount_failed");
     },
     CASE_MS,
   );
