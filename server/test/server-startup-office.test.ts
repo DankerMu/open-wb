@@ -15,6 +15,7 @@ import {
   lstatSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
@@ -55,6 +56,39 @@ const WAIT_MS = 5_000;
 const DELTA_MS = 1_500;
 /** 预检失败三例预置在 `jobs/` 里的遗留作业：入口不碰 spool，它应原样留着。 */
 const LEFTOVER_ID = "0123456789abcdef0123456789abcdef";
+/**
+ * 子进程预加载钩子（#1751，verification-harness「假 sidecar 的 cancel 观察不依赖文件事件送达」第三类）：
+ * 包住 `fs.rmSync`，删的是 `<OFFICE_SPOOL_DIR>/jobs/<id>` 且其下已有 `cancel` 时，先同步追加一行
+ * `cancel:<id>` 到本次尝试根下的 `cancel.log`（与次序 trace 分开），再执行真实删除——留痕失败也照删。
+ * 无 `cancel` 的删除（启动清空遗留、转换成功的作业）不留痕。`syncBuiltinESMExports` 让 `office.ts`
+ * 的 ESM 具名导入也换成包装后的版本。
+ */
+const CANCEL_TRACE_HOOK = `'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const Module = require('node:module');
+const spool = process.env.OFFICE_SPOOL_DIR;
+const jobsDir = typeof spool === 'string' ? path.join(spool, 'jobs') : undefined;
+const cancelLog = path.join(__dirname, 'cancel.log');
+const nativeRm = fs.rmSync;
+fs.rmSync = function traceCancel(...args) {
+  const target = args[0];
+  try {
+    if (
+      jobsDir !== undefined &&
+      typeof target === 'string' &&
+      path.dirname(target) === jobsDir &&
+      fs.existsSync(path.join(target, 'cancel'))
+    ) {
+      fs.appendFileSync(cancelLog, 'cancel:' + path.basename(target) + '\\n');
+    }
+  } catch {
+    // 留痕失败不得跳过真实删除。
+  }
+  return nativeRm.apply(this, args);
+};
+Module.syncBuiltinESMExports();
+`;
 
 beforeAll(compileEntry, 90_000);
 afterEach(stopFakeSidecars);
@@ -77,6 +111,8 @@ interface SpoolOptions {
   env?: Record<string, string>;
   held?: true;
   prepare?: (root: string) => void;
+  /** 预加载钩子的源码文本，原样转给 `startEntry`。 */
+  hook?: string;
 }
 
 /**
@@ -90,6 +126,7 @@ async function spoolEntry(
   let sidecar: FakeSidecar | undefined;
   const entry = await startEntry({
     ...(options.held === undefined ? {} : { held: options.held }),
+    ...(options.hook === undefined ? {} : { hook: options.hook }),
     prepare: (root) => {
       makeSandboxRoot(root);
       if (layout !== "absent") {
@@ -142,6 +179,7 @@ describe("production entry with the office converter on a spool", () => {
         PREVIEW_DOCUMENT_MAX_BYTES: "100",
         OFFICE_CONVERT_TIMEOUT_MS: String(CONVERT_TIMEOUT_MS),
       },
+      hook: CANCEL_TRACE_HOOK,
       prepare: (root) => {
         mkdirSync(join(root, "spool", leftover, "in"), { recursive: true, mode: 0o700 });
         writeFileSync(join(root, "spool", leftover, "in", "x.docx"), "stale");
@@ -151,6 +189,10 @@ describe("production entry with the office converter on a spool", () => {
     const jobs = join(entry.root, "spool", "jobs");
     // 假 sidecar 在入口清空之前已经看见那个遗留作业；这里只看本次启动之后的作业。
     const records = () => (sidecar?.jobs() ?? []).filter((job) => job.id !== leftoverId);
+    const cancelLog = join(entry.root, "cancel.log");
+    const cancelTrace = () => (existsSync(cancelLog) ? readFileSync(cancelLog, "utf8") : "");
+    const cancelled = (id: string | undefined) =>
+      id !== undefined && cancelTrace().split("\n").includes(`cancel:${id}`);
     try {
       await server.waitForStarted();
       // 入口建了 `jobs/`（`0700`）、清空了遗留（本进程删，不启动子进程），jobs 自身仍在。
@@ -187,24 +229,24 @@ describe("production entry with the office converter on a spool", () => {
       expect(late.status).toBe(504);
       expect(await late.text()).toBe(TIMEOUT_TEXT);
       // 假 sidecar 从不应答 `hang`：结束它的是配置的超时，作业写了 cancel、目录已删。
-      // 这里与下面关停时的两次 `cancelAt` 等待依赖假 sidecar 的文件事件（issue 1574）：app 是
-      // `startCompiledServer` 起的子进程，写完 cancel 随即删目录，测试进程的扫描无法与它同拍。仍保留：
+      // app 是子进程，写完 cancel 随即删目录，测试进程的扫描无法与它同拍、假 sidecar 的文件事件也可能
+      // 丢（#1574 / #1751）：这里与下面关停时的 cancel 都看预加载钩子在删除那一刻留下的 cancel.log。
       // 它们承载「超时写了 cancel」与「1.5 s 内中止在途作业、早于 2 s 关停预算」两条结论。
       expect(performance.now() - startedAt).toBeGreaterThanOrEqual(CONVERT_TIMEOUT_MS - 1);
       expect(performance.now() - startedAt).toBeLessThan(15_000);
-      await until(() => records()[1]?.cancelAt !== undefined, 2_000, "the timed-out job's cancel");
+      await until(() => cancelled(records()[1]?.id), 2_000, "the timed-out job's cancel");
+      const timedOutId = records()[1]?.id;
       expect(existsSync(records()[1]?.dir ?? "")).toBe(false);
 
       const inFlight = settleOf(officeUrl(workspace.base, "slow@hang.docx"));
       await until(() => records()[2]?.request !== undefined, 10_000, "the job in flight");
+      const inFlightId = records()[2]?.id;
       const stopping = server.stop();
       // 有界：早于监听器 2 秒的关停预算——不是等连接被强制回收之后才顺带中止的。
-      await until(
-        () => records()[2]?.cancelAt !== undefined,
-        1_500,
-        "cancel for the job in flight",
-      );
+      await until(() => cancelled(inFlightId), 1_500, "cancel for the job in flight");
       expect(await stopping).toBe(0);
+      // 恰这两次 cancel，超时那次在前：遗留作业与转换成功的作业删除时都没有 cancel，不留痕。
+      expect(cancelTrace()).toBe(`cancel:${timedOutId}\ncancel:${inFlightId}\n`);
 
       expect(await inFlight).toEqual({ failed: true });
       expect(readdirSync(jobs)).toEqual([]);
