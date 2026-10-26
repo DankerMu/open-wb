@@ -85,7 +85,7 @@
 ### Requirement: 挂载凭证文件
 每个挂载 SHALL 有一个 app 私有目录 `<OMP_STATE_DIR 的 realpath>/mounts/<挂载 id>/`（`0700`，以 sandbox-core「托管目录权限位」的 `ensureOwnedDir` 语义建立：属本进程、不是符号链接），其中：
 
-- `rclone.conf`（`0600`）：一个段，段名为 `m` 加挂载 id（下称 `<段名>`）。`sftp` 为 `type = sftp`、`host`（该次尝试经主机规则判定过的 IP 字面）、`port`（给了才写）、`user` 与 `pass`（口令的 obscure 串）或 `key_pem`（私钥的换行转写为字面 `\n` 的单行）；`smb` 为 `type = smb`、`host`（同上）、`port`（给了才写）、`user`、`pass`（obscure 串）、`domain`（给了才写）；`local` 只有 `type = local`。`sftp` / `smb` 建出时随整份文件写出 `host`；重挂与启动恢复 SHALL 在主机规则判定之后、启动子进程之前改写 `host` 一行：读回现有文件、只替换 `host` 的值、写同目录临时名再改名到位（`0600`），其余字节不变；用户填的主机只在数据库的 `host` 列里，每次尝试都从它重新判定。
+- `rclone.conf`（`0600`）：一个段，段名为 `m` 加挂载 id（下称 `<段名>`）。`sftp` 为 `type = sftp`、`host`（该次尝试经主机规则判定过的 IP 字面；IPv6 SHALL 写成 `[<地址>]`——rclone 1.60.1 拨号时不给 IPv6 加方括号）、`port`（给了才写）、`user`（值 SHALL 用反引号包起来，使 rclone 的 INI 解析原样读回）与 `pass`（口令的 obscure 串）或 `key_pem`（私钥的换行转写为字面 `\n` 的单行）；`smb` 为 `type = smb`、`host`（同上）、`port`（给了才写）、`user`、`pass`（obscure 串）、`domain`（给了才写）；`local` 只有 `type = local`。`sftp` / `smb` 建出时随整份文件写出 `host`；重挂与启动恢复 SHALL 在主机规则判定之后、启动子进程之前改写 `host` 一行：读回现有文件、只替换 `host` 的值、写同目录临时名再改名到位（`0600`），其余字节不变；用户填的主机只在数据库的 `host` 列里，每次尝试都从它重新判定。
 - `cache/`（`0700`）：rclone 的 VFS 缓存目录。
 - `rclone.log`（`0600`）：rclone 的日志文件；每次挂载尝试之前由本进程以 sandbox-core「托管文件权限位」的语义确保它存在且为 `0600`。
 
