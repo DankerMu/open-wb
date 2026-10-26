@@ -702,7 +702,7 @@ describe("POST /api/auth/logout", () => {
   });
 });
 
-describe("HTTP typed error map 恰十八码（auth 域只复用既有 unauthorized）", () => {
+describe("HTTP typed error map 恰二十五码（auth 域只复用既有 unauthorized）", () => {
   const codes = {
     bad_request: { statusCode: 400, message: "请求格式不正确" },
     invalid_credentials: { statusCode: 401, message: "账号或密码不正确" },
@@ -722,6 +722,13 @@ describe("HTTP typed error map 恰十八码（auth 域只复用既有 unauthoriz
     upload_too_large: { statusCode: 413, message: "文件超过大小上限" },
     forbidden: { statusCode: 403, message: "没有权限执行此操作" },
     model_in_use: { statusCode: 409, message: "该模型是缺省模型，先把缺省换成别的模型" },
+    mount_disabled: { statusCode: 503, message: "服务器未启用远程挂载" },
+    mount_failed: { statusCode: 502, message: "挂载失败，请检查主机、路径与凭证" },
+    mount_offline: { statusCode: 409, message: "挂载已离线，重新连接后可用" },
+    mount_limit: { statusCode: 409, message: "该工作空间的挂载数已达上限" },
+    mount_host_rejected: { statusCode: 403, message: "该主机不允许挂载" },
+    mount_read_only: { statusCode: 403, message: "只读挂载不能写入" },
+    mount_boundary: { statusCode: 409, message: "挂载目录内不能删除，也不能跨挂载移动" },
   } as const satisfies Record<HttpErrorCode, { statusCode: number; message: string }>;
 
   /**

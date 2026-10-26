@@ -55,10 +55,11 @@ Width exception: 验证分本地 `make check` 与 PR CI `uid-isolation` 两条�
 
 ## 4. 七个挂载错误码（http-service-skeleton「统一错误信封」的码表部分与「七个挂载码」场景）
 
-- [ ] 4.1 核对 Context：`core/errors/index.ts` 码表（#1641 合入后十八码）、`http/errors.ts` 状态表、三处计数守卫 `http-typed-errors.test.ts`、`http-parser-owners.test.ts`、`auth-lifecycle.test.ts`（790 行）的 `codes` 表。
-- [ ] 4.2 测试先行：三处「恰十八码」改二十五；`auth-lifecycle.test.ts` 的 `codes` 表补七条（`satisfies` 穷尽守卫要求，+7 行 → 797，超过 800 即把该表移进新文件 `server/test/support/http-error-codes.ts`）；新 `server/test/http-typed-errors-mounts.test.ts`：「七个挂载码」场景（状态、文案、no-store、与同状态既有码互异、伪造对象仍 5xx）。验证：`npm test --workspace server -- http-typed-errors auth-lifecycle http-parser-owners`、`scripts/size-guard.sh`。
-- [ ] 4.3 `core/errors/index.ts` 加七码与文案；`http/errors.ts` 状态表加七行。验证：4.2 全绿。
-- [ ] 4.4 `docs/architecture/system.md:31` 的 `core/errors` 一行的码数改为二十五（并列出七个 `mount_*` 码的归属）。
+- [x] 4.1 核对 Context：`core/errors/index.ts` 码表（#1641 合入后十八码）、`http/errors.ts` 状态表、三处计数守卫 `http-typed-errors.test.ts`、`http-parser-owners.test.ts`、`auth-lifecycle.test.ts`（790 行）的 `codes` 表。
+- [x] 4.2 测试先行：三处「恰十八码」改二十五；`auth-lifecycle.test.ts` 的 `codes` 表补七条（`satisfies` 穷尽守卫要求，+7 行 → 797，超过 800 即把该表移进新文件 `server/test/support/http-error-codes.ts`）；新 `server/test/http-typed-errors-mounts.test.ts`：「七个挂载码」场景（状态、文案、no-store、与同状态既有码互异、伪造对象仍 5xx）。验证：`npm test --workspace server -- http-typed-errors auth-lifecycle http-parser-owners`、`scripts/size-guard.sh`。
+- [x] 4.3 `core/errors/index.ts` 加七码与文案；`http/errors.ts` 状态表加七行。验证：4.2 全绿。
+- [x] 4.4 `docs/architecture/system.md:31` 的 `core/errors` 一行的码数改为二十五（并列出七个 `mount_*` 码的归属）。
+  - 开工核对补记（#1684）：开工时十八码、`auth-lifecycle.test.ts` 790 行（补七条后 797，表留在原文件）、归属身份 29 条；行号漂移：码表 `core/errors/index.ts:5-24`、`http-typed-errors.test.ts:125`、`http-parser-owners.test.ts:62,309`。
 
 Suggested fixture level: compact - 纯枚举扩展，三处计数守卫直接钉住，无 IO、无权限面变化（消费者在组 7、组 9）。
 Minimal mergeable slice: atomic - 码表、状态表与三处计数守卫必须同 PR，否则守卫红。

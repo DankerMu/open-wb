@@ -21,6 +21,13 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   upload_too_large: 413,
   forbidden: 403,
   model_in_use: 409,
+  mount_disabled: 503,
+  mount_failed: 502,
+  mount_offline: 409,
+  mount_limit: 409,
+  mount_host_rejected: 403,
+  mount_read_only: 403,
+  mount_boundary: 409,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {
