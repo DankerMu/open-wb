@@ -8,7 +8,7 @@ import { accessSync, constants, readFileSync, statSync } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import { resolvePositiveInteger } from "../../agent-config.js";
 
-const DEFAULT_MOUNT_MAX_PER_WORKSPACE = 8;
+export const DEFAULT_MOUNT_MAX_PER_WORKSPACE = 8;
 const HOST_ITEM = /^[A-Za-z0-9.:-]{1,253}$/u;
 /** 一次 `id` 调用的期限：卡住的名字服务不能让启动无限等待。 */
 const ID_TIMEOUT_MS = 10_000;

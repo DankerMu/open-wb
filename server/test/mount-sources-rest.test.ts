@@ -1,12 +1,13 @@
 /**
  * s1b-workspace-mounts tasks 7.2, the mount-source part (#1689): workspace-mounts「挂载源端点」and its
- * scenarios「两种视图」「拒绝的路径」「删除连带卸载」, the deleting mark of design D14 (held while a cascade
+ * scenarios「两种视图」「拒绝的路径」「删除连带卸载」「删除挂载源与并发建出」, the deleting mark of design D14 (held while a cascade
  * is in flight, one hold per overlapping `DELETE`, cleared on failure), the feature-off endpoints, the
  * 403-before-body-and-id matrix and the `POST` / `DELETE /api/mount-sources` cases of
  * http-service-skeleton「挂载的归属路由」— on the whole mount: createApp on the world's migrated `:memory:`
  * database with `assembly.mounts` = a real manager on the fake rclone and fake `fusermount3`
- * (`mounts-manager-helpers.ts`). The referencing `local` mounts are made through the manager (the mount
- * routes are #1690's). Oracles: spec literals (envelopes, views, audit detail), the tables, the fake
+ * (`mounts-manager-helpers.ts`). The referencing `local` mounts are made through the manager, except in
+ * 「删除挂载源与并发建出」(#1690) and the delete-failure case's re-attach, which go through
+ * `POST /api/workspaces/:id/mounts`. Oracles: spec literals (envelopes, views, audit detail), the tables, the fake
  * mountinfo, the fakes' call records and the file system.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -15,6 +16,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import type { MountManager, MountManagerOptions } from "../src/workspaces/mounts/manager.js";
+import { type ProbeExec, probeInChild } from "../src/workspaces/mounts/rclone-process.js";
 import { deletingSources } from "../src/workspaces/mounts/rest.js";
 import type { MountBody } from "../src/workspaces/mounts/validate.js";
 import {
@@ -80,6 +82,7 @@ async function openRest(
   featureOff = false,
   noFusermount = false,
   wrap: (manager: MountManager) => MountManager = (manager) => manager,
+  overrides: Partial<MountManagerOptions> = {},
 ): Promise<Rest> {
   const world = createWorld({ noFusermount });
   world.db
@@ -99,6 +102,7 @@ async function openRest(
   const options = world.options({
     workspaceRootOf: (ownerId, workspaceId) => roots.get(`${ownerId}/${workspaceId}`) ?? null,
     protectedRoots: [world.sandbox, world.state, staticRoot, ompBinDir],
+    ...overrides,
   });
   const { rcloneBin: _rclone, fusermountBin: _fusermount, ...off } = options;
   const manager = world.build(featureOff ? (off as MountManagerOptions) : options);
@@ -139,16 +143,38 @@ async function register(rest: Rest, name: string, path: string, readOnly = false
  * An app whose manager's `detachSource` waits, per call, until the test resolves `gates[n]`, then runs
  * the real cascade: a `DELETE` in flight is held between marking the source and its cascade.
  */
-async function openGated(): Promise<Rest & { gates: (() => void)[] }> {
+async function openGated(
+  overrides: Partial<MountManagerOptions> = {},
+): Promise<Rest & { gates: (() => void)[] }> {
   const gates: (() => void)[] = [];
-  const rest = await openRest(false, false, (manager) => ({
-    ...manager,
-    async detachSource(sourceId, actorId) {
-      await new Promise<void>((resolve) => gates.push(resolve));
-      return manager.detachSource(sourceId, actorId);
-    },
-  }));
+  const rest = await openRest(
+    false,
+    false,
+    (manager) => ({
+      ...manager,
+      async detachSource(sourceId, actorId) {
+        await new Promise<void>((resolve) => gates.push(resolve));
+        return manager.detachSource(sourceId, actorId);
+      },
+    }),
+    overrides,
+  );
   return { ...rest, gates };
+}
+
+/**
+ * Readiness `readdir` children wait, per call, until the test resolves `held[n]`, then run for real: a
+ * mount request is held after its rclone has mounted and before its row is inserted.
+ */
+function heldReadiness(): { held: (() => void)[]; probeExec: ProbeExec } {
+  const held: (() => void)[] = [];
+  const probeExec: ProbeExec = async (op, path, timeoutMs, signal) => {
+    if (op === "readdir") {
+      await new Promise<void>((release) => held.push(release));
+    }
+    return probeInChild(op, path, timeoutMs, signal);
+  };
+  return { held, probeExec };
 }
 
 function localOn(sourceId: string, name: string): MountBody {
@@ -427,16 +453,30 @@ describe("删除连带卸载", () => {
     ]);
 
     world.db.exec("DROP TRIGGER refuse_delete");
+    const again = await call(rest, "member", "POST", `/api/workspaces/${W1}/mounts`, {
+      ...localOn(source.id, "再挂"),
+    });
+    expectAnswer(again, 201);
+    const remounted = (again.json() as { id: string }).id;
     expectAnswer(await call(rest, "admin", "DELETE", `${URL}/${source.id}`), 204);
     expect(deletingSources.has(source.id)).toBe(false);
     expect(sourceRows(rest)).toEqual([]);
     expect(world.store.get(theirs.id)).toBeUndefined();
-    expect(mountAudits(rest).map((row) => [row.kind, row.workspaceId])).toEqual([
+    expect(world.store.get(remounted)).toBeUndefined();
+    const tail = mountAudits(rest).map((row) => [row.kind, row.workspaceId]);
+    expect(tail.slice(0, 3)).toEqual([
       ["mount.source.create", null],
       ["mount.detach", W1],
-      ["mount.detach", W4],
-      ["mount.source.delete", null],
+      ["mount.attach", W1],
     ]);
+    // The cascade's two detaches run on two chains at once: their order is not fixed.
+    expect(
+      tail
+        .slice(3, 5)
+        .map((pair) => pair.join(" "))
+        .sort(),
+    ).toEqual([`mount.detach ${W1}`, `mount.detach ${W4}`]);
+    expect(tail.slice(5)).toEqual([["mount.source.delete", null]]);
   });
 });
 
@@ -483,6 +523,68 @@ describe("删除中标记", () => {
     expect(deletingSources.has(source.id)).toBe(false);
     expect(sourceRows(rest)).toEqual([]);
     expect(world.store.get(theirs.id)).toBeUndefined();
+  });
+});
+
+describe("删除挂载源与并发建出", () => {
+  it("a local POST held at readiness, then the source's DELETE marks it: the POST is 404 (recheck in the insert transaction), DELETE 204, nothing left", {
+    timeout: CASE_MS,
+  }, async () => {
+    const { held, probeExec } = heldReadiness();
+    const rest = await openGated({ probeExec });
+    const { world } = rest;
+    const source = await register(rest, "NAS", dirOf(rest, "nas"));
+
+    const posting = call(rest, "member", "POST", `/api/workspaces/${W1}/mounts`, {
+      ...localOn(source.id, "本机"),
+    });
+    await waitFor(() => held.length === 1);
+    expect(mountinfoLines(world)).toHaveLength(1);
+    const deleting = call(rest, "admin", "DELETE", `${URL}/${source.id}`);
+    await waitFor(() => rest.gates.length === 1);
+    expect(deletingSources.has(source.id)).toBe(true);
+
+    held[0]?.();
+    expectAnswer(await posting, 404, NOT_FOUND);
+    rest.gates[0]?.();
+    expectAnswer(await deleting, 204);
+
+    expect(
+      world.db.prepare("SELECT id FROM workspace_mounts WHERE source_id = ?").all(source.id),
+    ).toEqual([]);
+    expect(world.mountCalls()).toHaveLength(1);
+    expect(
+      world
+        .mountCalls()
+        .map((entry) => entry.pid)
+        .filter(alive),
+    ).toEqual([]);
+    expect(mountinfoLines(world)).toEqual([]);
+    expect(existsSync(join(world.rootOf(W1), "本机"))).toBe(false);
+    expect(mountAudits(rest).map((row) => row.kind)).toEqual([
+      "mount.source.create",
+      "mount.source.delete",
+    ]);
+  });
+
+  it("a local POST while the source is marked deleting is 404 at the sourceId step: no child", {
+    timeout: CASE_MS,
+  }, async () => {
+    const rest = await openGated();
+    const source = await register(rest, "NAS", dirOf(rest, "nas"));
+    const deleting = call(rest, "admin", "DELETE", `${URL}/${source.id}`);
+    await waitFor(() => rest.gates.length === 1);
+    const refused = await call(rest, "member", "POST", `/api/workspaces/${W1}/mounts`, {
+      ...localOn(source.id, "本机"),
+    });
+    expectAnswer(refused, 404, NOT_FOUND);
+    expect(rest.world.calls()).toEqual([]);
+    rest.gates[0]?.();
+    expectAnswer(await deleting, 204);
+    expect(mountAudits(rest).map((row) => row.kind)).toEqual([
+      "mount.source.create",
+      "mount.source.delete",
+    ]);
   });
 });
 

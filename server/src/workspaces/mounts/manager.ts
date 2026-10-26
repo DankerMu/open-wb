@@ -107,6 +107,17 @@ export interface AttachInput {
   body: MountBody;
 }
 
+/** The caller's steps of one attach, both on the workspace's chain. */
+export interface AttachHooks {
+  /**
+   * Before the target is judged: the checks that must not race another attach or detach of the same
+   * workspace (limit, name, source). A throw rejects the attach with nothing built.
+   */
+  before?: () => void | Promise<void>;
+  /** In the row's insert transaction, before COMMIT (the audit hook); a throw unmounts, no row. */
+  within?: (record: MountRecord) => void;
+}
+
 export interface DetachCause {
   actorId: string;
   reason: "user" | "source_deleted" | "workspace_deleted";
@@ -593,7 +604,10 @@ export function createMountManager(options: MountManagerOptions) {
   };
 
   return {
-    async attach(input: AttachInput, within?: (record: MountRecord) => void): Promise<MountRecord> {
+    /** `RCLONE_BIN` is configured: attach is possible (until `closeAll`). */
+    enabled: options.rcloneBin !== undefined,
+
+    async attach(input: AttachInput, hooks: AttachHooks = {}): Promise<MountRecord> {
       const { rcloneBin } = options;
       if (rcloneBin === undefined || shutdown) {
         throw new HttpError("mount_disabled");
@@ -606,10 +620,11 @@ export function createMountManager(options: MountManagerOptions) {
         if (shutdown) {
           throw new HttpError("mount_disabled");
         }
+        await hooks.before?.();
         const controller = new AbortController();
         attaching.add(controller);
         try {
-          return await attachNow(rcloneBin, root, input, within, controller.signal);
+          return await attachNow(rcloneBin, root, input, hooks.within, controller.signal);
         } finally {
           attaching.delete(controller);
         }

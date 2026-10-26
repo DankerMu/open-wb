@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { type MountRestDependencies, registerMountSources } from "./mounts/rest.js";
+import { registerMounts } from "./mounts/rest-mounts.js";
 import { registerWorkspaceRest, type WorkspaceRestDependencies } from "./rest.js";
 import { registerWorkspaceArchive } from "./rest-archive.js";
 import { registerWorkspaceEntries } from "./rest-entries.js";
@@ -24,4 +25,5 @@ export function registerWorkspaces(
     registerWorkspacePreviewToken(app, dependencies, preview);
   }
   registerMountSources(app, dependencies.mounts);
+  registerMounts(app, dependencies.mounts, dependencies.store);
 }

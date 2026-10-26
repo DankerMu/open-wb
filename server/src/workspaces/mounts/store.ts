@@ -79,6 +79,7 @@ const COUNT_SOURCES = "SELECT COUNT(*) AS count FROM mount_sources";
 const INSERT_SOURCE =
   "INSERT INTO mount_sources(id, name, path, read_only, created_at) VALUES (?, ?, ?, ?, ?)";
 const DELETE_SOURCE = "DELETE FROM mount_sources WHERE id = ?";
+const SELECT_TEMPORARY = "SELECT temporary FROM workspaces WHERE id = ?";
 
 export function createMountStore(db: DatabaseSync, options: MountStoreOptions = {}) {
   const generateId = options.generateId ?? (() => randomBytes(16).toString("hex"));
@@ -111,6 +112,11 @@ export function createMountStore(db: DatabaseSync, options: MountStoreOptions = 
       db.prepare(SELECT_BY_SOURCE).all(sourceId).map(toMount),
 
     countByWorkspace: (workspaceId: string): number => count(COUNT_BY_WORKSPACE, workspaceId),
+
+    /** The workspace row carries `temporary = 1` (design D15: no mount); false for an unknown id. */
+    isTemporaryWorkspace: (workspaceId: string): boolean =>
+      (db.prepare(SELECT_TEMPORARY).get(workspaceId) as { temporary: number } | undefined)
+        ?.temporary === 1,
 
     /** Inserts the row; the source of a `local` mount must still exist (`not_found`). */
     create(input: CreateMountInput, within?: (record: MountRecord) => void): MountRecord {

@@ -68,7 +68,7 @@ import { TokenRegistry } from "./sessions/tokens.js";
 import type { TurnSnapshotService } from "./sessions/turn-snapshot.js";
 import { registerSkills } from "./skills/rest.js";
 import { registerWorkspaces } from "./workspaces/index.js";
-import type { MountSettings } from "./workspaces/mounts/config.js";
+import { DEFAULT_MOUNT_MAX_PER_WORKSPACE, type MountSettings } from "./workspaces/mounts/config.js";
 import { createMountManager, type MountManager } from "./workspaces/mounts/manager.js";
 import { createMountStore } from "./workspaces/mounts/store.js";
 import type { PreviewLimits } from "./workspaces/preview.js";
@@ -332,7 +332,14 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
           retentionDays: DEFAULT_TRASH_RETENTION_DAYS,
         }),
       ...(assembly?.previewLimits === undefined ? {} : { limits: assembly.previewLimits }),
-      mounts: { store: mountStore, manager: mounts, audit, isAdmin, protectedRoots },
+      mounts: {
+        store: mountStore,
+        manager: mounts,
+        audit,
+        isAdmin,
+        protectedRoots,
+        mountMaxPerWorkspace: mountMaxOf(assembly?.mountSettings),
+      },
     },
     assembly?.preview,
   );
@@ -476,6 +483,11 @@ function protectedRootsOf(
     ...(staticRoot === undefined ? [] : [staticRoot]),
     dirname(runtime.bin),
   ];
+}
+
+/** `MOUNT_MAX_PER_WORKSPACE` for the mount routes; its default without `mountSettings`. */
+function mountMaxOf(settings: MountSettings | undefined): number {
+  return settings?.mountMaxPerWorkspace ?? DEFAULT_MOUNT_MAX_PER_WORKSPACE;
 }
 
 /** The four settings the manager reads; the rest of `MountSettings` is the REST layer's. */
