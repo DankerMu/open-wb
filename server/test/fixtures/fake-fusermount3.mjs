@@ -6,9 +6,12 @@
  * 没有这样的行即同真 fusermount3 一样报 not found、以 1 退出。每次调用都向同目录的
  * `fusermount3-calls.jsonl` 追加一行 `{argv, removed}`。改写假 mountinfo 时持有 `<mountinfo>.lock`
  * （目录锁，假 rclone 追加行时同样持有）：并发的 `-uz` 不丢更新（#1687 关停时并行卸载）。
+ * 同目录有 `fusermount3-hold` 时，恰一次调用把它改名为 `fusermount3-holding` 认领、先停住，等测试删掉
+ * `fusermount3-holding`（至多 10 s）再照常行事（#1687：把一次离线处理钉在卸载这一步）。
  */
 import {
   appendFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -50,6 +53,21 @@ function withLock(work) {
   }
 }
 
+/** 认领到 `fusermount3-hold` 即停到 `fusermount3-holding` 被删。 */
+function holdIfAsked() {
+  const holding = join(here, "fusermount3-holding");
+  try {
+    renameSync(join(here, "fusermount3-hold"), holding);
+  } catch {
+    return;
+  }
+  const deadline = Date.now() + 10_000;
+  while (existsSync(holding) && Date.now() < deadline) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
+}
+
+holdIfAsked();
 let removed = 0;
 if (args.length === 2 && args[0] === "-uz") {
   removed = withLock(() => {

@@ -28,6 +28,8 @@ import {
   createWorld,
   disposeWorlds,
   entriesOf,
+  fusermountHeld,
+  holdFusermount,
   ID1,
   ID2,
   local,
@@ -35,6 +37,7 @@ import {
   OWNER,
   quiet,
   registerSource,
+  releaseFusermount,
   seedMount,
   sftp,
   smb,
@@ -162,6 +165,78 @@ describe("在线状态与重挂「崩溃即离线并退避重挂」", () => {
     world.clock.fireNext();
     await waitFor(() => world.mountCalls().length === 5);
     expect(world.clock.now() - crashedAt).toBe(5000);
+  });
+});
+
+describe("在线状态与重挂: one pending timer and one offline transition per mount", () => {
+  it("restoreAll remounting a mount whose remount is pending: online, only its probe round pending", {
+    timeout: CASE_MS,
+  }, async () => {
+    const manager = world.manager();
+    await attach(manager);
+    await crash(manager, ID1, 0);
+    expect(world.clock.pending()).toEqual([5000]);
+
+    await manager.restoreAll();
+
+    expect(manager.statusOf(ID1)).toBe("online");
+    expect(world.clock.pending()).toEqual([30_000]);
+  });
+
+  it("a detach refused while the crash's unmount is still running: one remount, 5 s later", {
+    timeout: CASE_MS,
+  }, async () => {
+    const { fusermountBin: _fusermount, ...lookedUp } = world.options();
+    const manager = world.build(lookedUp);
+    await attach(manager);
+    holdFusermount(world);
+    process.kill(pidOf(0), "SIGKILL");
+    await waitFor(() => fusermountHeld(world));
+    expect(manager.statusOf(ID1)).toBe("offline");
+    rmSync(join(world.bin, "fusermount3"));
+
+    await expect(manager.detach(ID1, { actorId: OWNER, reason: "user" })).rejects.toMatchObject({
+      code: "mount_disabled",
+    });
+    await quiet();
+    expect(world.clock.pending()).toEqual([]);
+    world.installFusermount();
+    releaseFusermount(world);
+    await waitFor(() => world.clock.pending().length > 0);
+    await quiet();
+
+    expect(world.clock.pending()).toEqual([5000]);
+    world.clock.advance(5000);
+    await waitFor(() => manager.statusOf(ID1) === "online");
+    expect(world.mountCalls()).toHaveLength(2);
+    expect(world.clock.pending()).toEqual([30_000]);
+  });
+
+  it("closeAll during a failed probe's unmount resolves only after it; that rclone is gone", {
+    timeout: CASE_MS,
+  }, async () => {
+    const probeExec: ProbeExec = (op, path, timeoutMs, signal) =>
+      op === "stat" ? Promise.resolve(false) : probeInChild(op, path, timeoutMs, signal);
+    const manager = world.manager({ probeExec });
+    await attach(manager);
+    holdFusermount(world);
+    world.clock.advance(30_000);
+    await waitFor(() => fusermountHeld(world));
+    expect(manager.statusOf(ID1)).toBe("offline");
+    expect(alive(pidOf(0))).toBe(true);
+
+    let closed = false;
+    const closing = manager.closeAll().then(() => {
+      closed = true;
+    });
+    await quiet(1000);
+    expect(closed).toBe(false);
+    releaseFusermount(world);
+    await closing;
+
+    expect(alive(pidOf(0))).toBe(false);
+    expect(readFileSync(world.mountinfo, "utf8")).toBe("");
+    expect(world.clock.pending()).toEqual([]);
   });
 });
 

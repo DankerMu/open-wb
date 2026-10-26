@@ -19,6 +19,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -434,6 +435,23 @@ export function seedMount(
 /** The behaviour markers of the next fake `mount` calls, one per call (`fake-rclone-next`). */
 export function nextMounts(world: World, markers: readonly string[]): void {
   writeFileSync(join(world.state, "fake-rclone-next"), markers.map((m) => `${m}\n`).join(""));
+}
+
+/**
+ * The next fake `fusermount3` call stops before it acts until `releaseFusermount` (at most 10 s): it pins
+ * an offline transition at its unmount step.
+ */
+export function holdFusermount(world: World): void {
+  writeFileSync(join(world.bin, "fusermount3-hold"), "");
+}
+
+/** A held fake `fusermount3` call is waiting. */
+export function fusermountHeld(world: World): boolean {
+  return existsSync(join(world.bin, "fusermount3-holding"));
+}
+
+export function releaseFusermount(world: World): void {
+  rmSync(join(world.bin, "fusermount3-holding"));
 }
 
 /** Polls `condition` every 20 ms (real time) until it holds; fails after `ms`. */

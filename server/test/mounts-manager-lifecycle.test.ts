@@ -5,7 +5,8 @@
  * 「惰性卸载与残留」for unmounting, unmounting a workspace and the mount-source cascade — #1686 hand-off).
  * Same seam and world as `mounts-manager.test.ts`: the real-spawned fake rclone and fake `fusermount3`
  * over a fake mountinfo, on the injected clock. "No remount afterwards" is asserted as no pending timer,
- * the clock pushed past 300 s and no `mount` call within a real absence window.
+ * the clock pushed past 300 s and no `mount` call within a real absence window. Every rclone an attempt's
+ * cancellation must end ignores SIGTERM (`hang`, `stubborn`): only a SIGKILL gets it gone.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -294,6 +295,7 @@ describe("挂载操作的串行与取消「启动恢复期间关停」", () => {
     timeout: CASE_MS,
   }, async () => {
     seedMount(world, { id: ID1, body: sftp(), createdAt: 1 });
+    nextMounts(world, ["stubborn"]);
     const { hanging, aborted, probeExec } = readdirHangingAfter(0);
     const manager = world.manager({ probeExec });
     const restoring = manager.restoreAll();
@@ -367,6 +369,7 @@ describe("挂载操作的串行与取消「重挂就绪期间卸载」", () => {
     const { hanging, aborted, probeExec } = readdirHangingAfter(1);
     const manager = world.manager({ probeExec });
     await attach(manager);
+    nextMounts(world, ["stubborn"]);
     process.kill(pidOf(0), "SIGKILL");
     await waitFor(pendingIs([5000]));
     world.clock.fireNext();
@@ -383,6 +386,64 @@ describe("挂载操作的串行与取消「重挂就绪期间卸载」", () => {
     expect(world.store.get(ID1)).toBeUndefined();
     expect(world.audits().map((audit) => audit.kind)).toEqual(["mount.detach"]);
     await expectNoRemount(2);
+  });
+});
+
+/** The attach's outcome, its rejection caught at once (it lands while the test awaits `closeAll`). */
+const outcomeOf = (attaching: Promise<unknown>) =>
+  attaching.then(
+    () => "attached",
+    (error: unknown) => error,
+  );
+
+/** Shutdown ended the attach: refused, no row, no audit, no private directory, nothing mounted or alive. */
+function expectAttachVoided(): void {
+  expect(world.store.list(W1)).toEqual([]);
+  expect(world.audits()).toEqual([]);
+  expect(existsSync(world.privateDir(ID1))).toBe(false);
+  expect(existsSync(world.mountPoint("remote"))).toBe(false);
+  expect(aliveMounts(world)).toEqual([]);
+  expectUnmounted([ID1], ["remote"]);
+}
+
+describe("挂载操作的串行与取消: shutdown during an attach", () => {
+  it("rclone hanging before any mountinfo line: closeAll returns well inside the window, the attach is mount_failed and leaves nothing", {
+    timeout: CASE_MS,
+  }, async () => {
+    const manager = world.manager();
+    const outcome = outcomeOf(attach(manager, sftp("/srv/data@hang")));
+    await waitFor(() => world.mountCalls().length === 1);
+    expect(alive(pidOf(0))).toBe(true);
+
+    const started = Date.now();
+    await manager.closeAll();
+
+    expect(Date.now() - started).toBeLessThan(CANCEL_BOUND_MS);
+    expect(await outcome).toEqual(new HttpError("mount_failed"));
+    expect(alive(pidOf(0))).toBe(false);
+    expectAttachVoided();
+  });
+
+  it("the mount already in mountinfo, readiness readdir hanging: closeAll SIGKILLs it, -uz removes the line, the attach leaves nothing", {
+    timeout: CASE_MS,
+  }, async () => {
+    const { hanging, aborted, probeExec } = readdirHangingAfter(0);
+    const manager = world.manager({ probeExec });
+    const outcome = outcomeOf(attach(manager, sftp("/srv/data@stubborn")));
+    await waitFor(() => hanging.length === 1);
+    expect(readFileSync(world.mountinfo, "utf8")).toContain(`m${ID1}:`);
+
+    const started = Date.now();
+    await manager.closeAll();
+
+    expect(Date.now() - started).toBeLessThan(CANCEL_BOUND_MS);
+    expect(await outcome).toEqual(new HttpError("mount_failed"));
+    expect(aborted).toEqual([world.mountPoint("remote")]);
+    expect(alive(pidOf(0))).toBe(false);
+    expect(world.fusermountCalls().map((call) => call.argv)).toEqual([
+      ["-uz", world.mountPoint("remote")],
+    ]);
+    expectAttachVoided();
   });
 });
 
@@ -413,6 +474,32 @@ describe("挂载操作的串行与取消: detach runs on the workspace chain", (
     expect(world.store.get(ID1)).toMatchObject({ id: ID1 });
     await waitFor(() => world.clock.pending().includes(10_000));
     expect(manager.statusOf(ID1)).toBe("offline");
+  });
+
+  it("rclone exiting while its detach waits on the chain: offline at once, before the detach runs; no remount", {
+    timeout: CASE_MS,
+  }, async () => {
+    const manager = world.manager({ readyTimeoutMs: 3000 });
+    await attach(manager);
+    await attach(manager, sftp("/srv/other", { name: "other" }));
+    nextMounts(world, ["hang"]);
+    process.kill(pidOf(0), "SIGKILL");
+    await waitFor(() => world.clock.pending().includes(5000));
+    world.clock.advance(5000);
+    await waitFor(() => world.mountCalls().length === 3);
+    const detaching = manager.detach(ID2, USER_ACTOR);
+
+    process.kill(pidOf(1), "SIGKILL");
+    await waitFor(() => manager.statusOf(ID2) === "offline");
+
+    // The remount of the first is still waiting for readiness: the detach has not run yet.
+    expect(alive(pidOf(2))).toBe(true);
+    expect(world.clock.pending()).toEqual([]);
+    await detaching;
+    expect(world.store.get(ID2)).toBeUndefined();
+    expectUnmounted([ID2], ["other"]);
+    await waitFor(() => world.clock.pending().includes(10_000));
+    expect(world.clock.pending()).toEqual([10_000]);
   });
 
   it("two overlapping detaches both refused (no fusermount3): still online; killing rclone then makes it offline", {

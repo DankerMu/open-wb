@@ -125,8 +125,9 @@ function mount() {
     exit1() {
       process.exit(1);
     },
-    /** 既不写也不退出：等调用方的就绪窗口用尽、杀掉它。 */
+    /** 既不写也不退出，也不理 SIGTERM：等调用方的就绪窗口用尽或取消、以 SIGKILL 杀掉它。 */
     hang() {
+      process.on("SIGTERM", () => undefined);
       sleepThenExit();
     },
     /** 落到别处（#1665 P15）：挂载点换成 `<挂载点>.alt`，来源 `<段名>:<远端>`，之后挂起。 */

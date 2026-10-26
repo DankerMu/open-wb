@@ -16,10 +16,12 @@
  * An online mount is probed every 30 s (`probe.ts`, at most one probe in flight); rclone exiting or a
  * failed probe makes it `offline` at once: lazy unmount and rclone killed right away (off the chain:
  * the unmount is what frees calls stuck in the mount), remount 5 s later, the delay doubling per failure
- * up to 300 s and back to 5 s on success. Each remount and restore judges the host rule and the mount
- * point again and rewrites `rclone.conf`'s `host` before the spawn (D3, D6, D8). While a detach is
- * queued or running, crash handling, probes and remounts stand down; a detach refused before its
- * unmount hands the mount back to supervision, one that got past it retires the mount.
+ * up to 300 s and back to 5 s on success. A mount has at most one pending timer (probe round or remount)
+ * and one offline transition in flight; `closeAll` waits for those. Each remount and restore judges the
+ * host rule and the mount point again and rewrites `rclone.conf`'s `host` before the spawn (D3, D6, D8).
+ * While a detach is queued or running, a crash still makes the mount `offline` at once, but its unmount,
+ * the kill, probes and remounts are the detach's; a detach refused before its unmount hands the mount
+ * back to supervision, one that got past it retires the mount.
  *
  * One attempt's mechanics (target judgement, credential file, mount point check, spawn, readiness,
  * discarding) are in `attempt.ts`; the probe and the clock in `probe.ts`.
@@ -126,8 +128,10 @@ interface Entry {
   retired: boolean;
   /** The delay of the next remount. */
   backoffMs: number;
-  /** The pending probe round (online) or remount (offline). */
+  /** The pending probe round (online) or remount (offline); at most one. */
   timer: unknown;
+  /** The offline transition's unmount and kill in flight; at most one. */
+  settling: Promise<void> | undefined;
   probe: AbortController | undefined;
   /** The in-flight remount or restore attempt. */
   attempt: AbortController | undefined;
@@ -210,12 +214,16 @@ export function createMountManager(options: MountManagerOptions) {
     entry.detaching === 0 &&
     !entry.retired;
 
-  /** Synchronous: the pending timer, the in-flight probe and the in-flight attempt. */
-  const cancel = (entry: Entry): void => {
+  const clearTimer = (entry: Entry): void => {
     if (entry.timer !== undefined) {
       clock.clearTimeout(entry.timer);
       entry.timer = undefined;
     }
+  };
+
+  /** Synchronous: the pending timer, the in-flight probe and the in-flight attempt. */
+  const cancel = (entry: Entry): void => {
+    clearTimer(entry);
     const { probe } = entry;
     entry.probe = undefined;
     probe?.abort();
@@ -226,6 +234,7 @@ export function createMountManager(options: MountManagerOptions) {
     if (!supervised(entry)) {
       return;
     }
+    clearTimer(entry);
     const delay = entry.backoffMs;
     entry.backoffMs = Math.min(delay * 2, MAX_REMOUNT_MS);
     entry.timer = clock.setTimeout(() => {
@@ -238,6 +247,7 @@ export function createMountManager(options: MountManagerOptions) {
     if (!supervised(entry)) {
       return;
     }
+    clearTimer(entry);
     entry.timer = clock.setTimeout(() => {
       entry.timer = undefined;
       void runProbe(entry);
@@ -282,27 +292,39 @@ export function createMountManager(options: MountManagerOptions) {
   /**
    * Crash or failed probe: `offline` now, then at once (not behind the chain — the lazy unmount is what
    * frees calls stuck in the mount) unmount and stop rclone; the remount it schedules runs on the chain.
+   * With a detach queued or running only the status changes: the rest is the detach's.
    */
   const goOffline = (entry: Entry): void => {
-    if (!supervised(entry) || entry.status !== "online") {
+    if (registry.get(entry.record.id) !== entry || entry.status !== "online") {
       return;
     }
     entry.status = "offline";
+    if (!supervised(entry)) {
+      return;
+    }
     cancel(entry);
-    void settleOffline(entry).catch(report);
+    settleOffline(entry);
   };
 
-  const settleOffline = async (entry: Entry): Promise<void> => {
-    if (!supervised(entry)) {
-      return; // a detach is in the way; it stops rclone itself
+  /** Unmount, kill, schedule the remount; joins the one already in flight. */
+  const settleOffline = (entry: Entry): void => {
+    if (!supervised(entry) || entry.settling !== undefined) {
+      return; // a detach is in the way (it stops rclone itself), or this is already under way
     }
-    await lazyUnmount(entry.mountPoint, `m${entry.record.id}`).catch(reportUnlessRefused);
-    const { child } = entry;
-    entry.child = undefined;
-    if (child !== undefined) {
-      await killChild(child);
-    }
-    scheduleRemount(entry);
+    const settle = async () => {
+      await lazyUnmount(entry.mountPoint, `m${entry.record.id}`).catch(reportUnlessRefused);
+      const { child } = entry;
+      entry.child = undefined;
+      if (child !== undefined) {
+        await killChild(child);
+      }
+      entry.settling = undefined;
+      scheduleRemount(entry);
+    };
+    entry.settling = settle().catch((error: unknown) => {
+      entry.settling = undefined;
+      report(error);
+    });
   };
 
   const goOnline = (entry: Entry, child: MountChild, attempt: Attempt): void => {
@@ -329,13 +351,21 @@ export function createMountManager(options: MountManagerOptions) {
       return;
     }
     entry.status = "offline";
-    void settleOffline(entry).catch(report);
+    settleOffline(entry);
   };
 
-  /** One remount (or startup restore) attempt; on the chain. Failure keeps it offline with backoff. */
+  /**
+   * One remount (or startup restore) attempt; on the chain. Failure keeps it offline with backoff. None
+   * while an offline transition is under way: it schedules the remount itself.
+   */
   const remount = async (entry: Entry): Promise<void> => {
     const { rcloneBin } = options;
-    if (rcloneBin === undefined || !supervised(entry) || entry.status === "online") {
+    if (
+      rcloneBin === undefined ||
+      !supervised(entry) ||
+      entry.status === "online" ||
+      entry.settling !== undefined
+    ) {
       return;
     }
     const controller = new AbortController();
@@ -543,6 +573,7 @@ export function createMountManager(options: MountManagerOptions) {
     while (chains.size > 0) {
       await Promise.all(chains.values());
     }
+    await Promise.all([...registry.values()].map((entry) => entry.settling));
     if (options.rcloneBin !== undefined) {
       await Promise.all([...registry.values()].map(stopOnShutdown));
     }
@@ -644,6 +675,7 @@ function newEntry(record: MountRecord): Entry {
     retired: false,
     backoffMs: FIRST_REMOUNT_MS,
     timer: undefined,
+    settling: undefined,
     probe: undefined,
     attempt: undefined,
   };
