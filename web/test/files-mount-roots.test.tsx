@@ -394,6 +394,30 @@ describe("挂载根行：卸载", () => {
   });
 });
 
+describe("挂载根行：卸载之后的焦点", () => {
+  it("确认卸载成功：焦点回到空间根那一行的按钮，不落在 body 上", async () => {
+    const page = openPage(
+      [dw, share],
+      {},
+      {
+        [`${MOUNTS}/m-dw`]: () => {
+          page.list.state.mounts = [share];
+          return deleted();
+        },
+      },
+    );
+    await mountRowsShown([DW, SHARE]);
+
+    fireEvent.click(row(`卸载 ${DW}`));
+    const dialog = await screen.findByRole("alertdialog", { name: `卸载「${DW}」？` });
+    fireEvent.click(within(dialog).getByRole("button", { name: "卸载" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await mountRowsShown([SHARE]);
+
+    await waitFor(() => expect(document.activeElement).toBe(row(`折叠 ${ROOT}`)));
+  });
+});
+
 describe("挂载列表的读取", () => {
   it("GET …/mounts 失败：不渲染挂载根行，树区上方 role=alert 是信封文案，空间根照常可用", async () => {
     const page = openPage(
@@ -456,6 +480,31 @@ describe("挂载列表的读取", () => {
     );
     await settle();
     expect(page.mountsGets()).toBe(2);
+  });
+
+  it("离线的挂载恢复在线：点一次 刷新 就重列它已加载的各层（恰一次），新条目出现；每次 刷新 恰一次 GET …/mounts", async () => {
+    let entries = [dirEntry("2026"), fileEntry("a.csv")];
+    const page = openPage([dw], {}, { [treeUrl(DW)]: () => jsonResponse({ path: DW, entries }) });
+    await mountRowsShown([DW]);
+    await expand(DW);
+    await expand("2026");
+    expect(page.mountsGets()).toBe(1);
+
+    page.list.state.mounts = [{ ...dw, status: "offline" }];
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(mountFacts(tree())[0]?.status).toBe("离线"));
+    await settle();
+    expect(page.mountsGets()).toBe(2);
+
+    entries = [dirEntry("2026"), fileEntry("a.csv"), fileEntry("b.csv")];
+    page.list.state.mounts = [dw];
+    const since = page.mark();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(rowsUnder(DW)).toStrictEqual(["2026", "a.csv", "b.csv"]));
+    await settle();
+    expect(page.mountsGets()).toBe(3);
+    expect(since().filter((path) => path === treeUrl(DW))).toHaveLength(1);
+    expect(since().filter((path) => path === treeUrl(`${DW}/2026`))).toHaveLength(1);
   });
 
   it("句柄的 refresh（会话页侧边栏随助手改动调用）不重取挂载列表；换一个 workspaceId 取那个空间的", async () => {

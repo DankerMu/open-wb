@@ -21,8 +21,9 @@
  *   with `文件不存在` and no request for it. The other segments go out as given: whether a level
  *   may be listed is the server's answer. A `path` equal to the selection as written is left
  *   alone before any of that, and `reveal` takes its path as given. A failed level without
- *   a row on the tree is kept out of the error rows and the expanded set, so `刷新` does not ask
- *   for it again. `reveal` reports no failure, and `刷新` does not repeat a failed walk.
+ *   a row on the tree is kept out of the error rows (and of the expanded set, but for a possible
+ *   mount row, `walk` in `use-mounts.ts`), so `刷新` does not ask for it again. `reveal` reports no
+ *   failure, and `刷新` does not repeat a failed walk.
  * - A web page (html / htm) is the exception to that one request: it opens in the rendered view,
  *   loaded by a frame from the preview origin, and `file` is requested only for its source view
  *   (`immediatePreview`). A PDF or office document (docx / xlsx / pptx) is loaded by a frame from
@@ -60,7 +61,8 @@
  *   delete drops them (a deleted current file or ancestor: `onPathChange(null)`). A row dropped on a
  *   directory row moves the same way (`tree.tsx`). No row menu and no drag while `onlyPaths` is set.
  * - Mounts (`use-mounts.ts`): the mount root rows (none while `onlyPaths` is set), their directories in
- *   `位置`, and「在挂载内」for the preview. The `刷新` button refetches the list; the handle's does not.
+ *   `位置`,「在挂载内」for the preview, and the walk into a mount (`walk`). The `刷新` button refetches
+ *   the list and relists a mount that came back online; the handle's does not.
  */
 import {
   type ReactNode,
@@ -79,7 +81,6 @@ import {
   normalizedPath,
   parentPath,
   refreshLayers,
-  revealStep,
   subtreeOf,
   type TreeRow,
 } from "./browser-paths.js";
@@ -528,8 +529,8 @@ export function WorkspaceBrowser({
   );
 
   /**
-   * 定位落在目录 `path` 上：展开并请求它。它的父目录不在 `rows`（树上有行的各级）里时——上一级的
-   * 列表没列出、却能列的目录——它自己也没有行：不展开、不请求。
+   * 定位落在目录 `path` 上：展开并请求它。它的父目录不在 `rows`（树上有行或可能是挂载根行的各级）里时
+   * ——上一级的列表没列出、却能列的目录——它自己也没有行：不展开、不请求。
    */
   const openDirectory = useCallback(
     (path: string, rows: readonly string[]) => {
@@ -584,7 +585,7 @@ export function WorkspaceBrowser({
       return;
     }
 
-    const { entry, expand, unloaded } = revealStep(target.path, cacheRef.current);
+    const { entry, expand, show, unloaded } = mounts.walk(target.path, cacheRef.current);
     if (onlyPaths?.has(target.path)) {
       revealRef.current = null;
       // 只展开已加载的层：没加载的那一层不请求，展开了它，撤掉 `onlyPaths` 后是一个没有内容的展开行。
@@ -592,7 +593,7 @@ export function WorkspaceBrowser({
       landFiltered(target);
       return;
     }
-    expandDirectories(expand);
+    expandDirectories(show);
     if (unloaded !== null) {
       if (!awaitDirectory(target, unloaded, expand.includes(unloaded))) {
         revealRef.current = null;
@@ -605,7 +606,7 @@ export function WorkspaceBrowser({
     if (entry?.type === "file") {
       land(entry, target);
     } else if (entry) {
-      openDirectory(target.path, expand);
+      openDirectory(target.path, show);
       endWithoutFile(target, null);
     } else {
       endWithoutFile(target, MISSING_FILE);
@@ -616,6 +617,7 @@ export function WorkspaceBrowser({
     expandDirectories,
     land,
     landFiltered,
+    mounts.walk,
     onlyPaths,
     openDirectory,
   ]);
@@ -757,7 +759,7 @@ export function WorkspaceBrowser({
         onNewWorkspace={onNewWorkspace}
         onRefresh={() => {
           refresh();
-          mounts.refetch();
+          mounts.refetch(loadDirectory);
         }}
         preview={
           <PreviewArea

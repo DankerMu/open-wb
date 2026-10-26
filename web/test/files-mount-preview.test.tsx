@@ -22,6 +22,7 @@ import {
 import {
   authenticatedFilesRoutes,
   cleanupFilesFixture,
+  type FetchRoutes,
   imagePreviewResponse,
   renderFiles,
   stubBlobUrls,
@@ -29,7 +30,7 @@ import {
 } from "./files-fixture.js";
 import { rowIn } from "./files-ops-support.js";
 import { BASE, issued } from "./files-site-fixture.js";
-import { calls, jsonResponse, textPreviewResponse } from "./support.js";
+import { calls, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const API = "/api/workspaces/workspace-1";
@@ -74,11 +75,11 @@ afterEach(async () => {
 /**
  * 文件页：根下目录 `site`（`index.html`）、普通目录 `远端2`（`doc.pdf`）与 `doc.pdf`；挂载 `远端` 里是 `site`
  * （`index.html`）、`doc.pdf`、`plan.docx`、150 MB 的 `huge.pdf`、`notes.md` 与 `logo.png`。签发应答的
- * `officeAvailable` 为 false。
+ * `officeAvailable` 为 false。`extra` 顶掉同名的路由，`at` 是进入的地址。
  */
-function openPage() {
+function openPage(extra: FetchRoutes = {}, at = "/files?ws=workspace-1") {
   const page = renderFiles(
-    "/files?ws=workspace-1",
+    at,
     authenticatedFilesRoutes([workspace], {
       [MOUNTS]: () => jsonResponse({ enabled: true, mounts: [remote] }),
       [TREE]: tree("", [dir("site"), dir("远端2"), file("doc.pdf")]),
@@ -101,6 +102,7 @@ function openPage() {
         textPreviewResponse("# 远端说明"),
       [`${FILE}${encodeURIComponent(`${MOUNT}/logo.png`)}`]: () => imagePreviewResponse(8),
       [ISSUE]: () => issued(),
+      ...extra,
     }),
   );
   const count = (path: string) => calls(page.fetchMock, path).length;
@@ -270,5 +272,96 @@ describe("挂载内文件交给预览区的标记（files-web）", () => {
       `${BASE}${encodeURIComponent("远端2")}/doc.pdf`,
     );
     expect(issues()).toBe(1);
+  });
+});
+
+/** `GET …/mounts` 的 500 应答。 */
+const MOUNTS_FAILED = "服务器开小差了";
+const mountsFailed = () =>
+  jsonResponse({ error: { code: "internal", message: MOUNTS_FAILED } }, 500);
+
+/** 树区上方（树之外）的 role=alert 文案。 */
+function columnAlerts() {
+  return within(screen.getByRole("complementary", { name: "工作空间文件" }))
+    .queryAllByRole("alert")
+    .filter((alert) => alert.closest("nav") === null)
+    .map((alert) => alert.textContent);
+}
+
+describe("挂载列表还不知道或读取失败时的挂载内文件（#1797 F1、F4）", () => {
+  it("选中 远端/doc.pdf 后点 刷新、GET …/mounts 答 500：挂载根行消失、树区上方是信封文案，预览仍是固定文案、零签发、没有 iframe", async () => {
+    const page = openPage({
+      [MOUNTS]: [jsonResponse({ enabled: true, mounts: [remote] }), mountsFailed()],
+    });
+    await expand(MOUNT);
+    await choose(MOUNT, "doc.pdf", `${MOUNT}/doc.pdf`);
+    await expectRefused(`${MOUNT}/doc.pdf`);
+
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    await waitFor(() => expect(columnAlerts()).toStrictEqual([MOUNTS_FAILED]));
+    expect(document.querySelector('[data-slot="mount-root"]')).toBeNull();
+    await expectRefused(`${MOUNT}/doc.pdf`);
+    await yieldMacrotask();
+    expect(calls(page.fetchMock, MOUNTS)).toHaveLength(2);
+    expect(page.issues()).toBe(0);
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+
+  it("地址 path=远端/doc.pdf，挂载列表在根与 远端 的 tree 之后才答：落地时就是固定文案、零签发；列表到了之后 远端 行展开、doc.pdf 选中，仍零签发", async () => {
+    const list = deferredResponse();
+    const page = openPage(
+      { [MOUNTS]: () => list.promise },
+      `/files?${new URLSearchParams({ ws: "workspace-1", path: `${MOUNT}/doc.pdf` })}`,
+    );
+    await waitFor(() =>
+      expect(previewRegion().getByText(`${MOUNT}/doc.pdf`, { exact: true })).toBeTruthy(),
+    );
+    expect(calls(page.fetchMock, `${TREE}${encodeURIComponent(MOUNT)}`)).toHaveLength(1);
+    await expectRefused(`${MOUNT}/doc.pdf`);
+    await yieldMacrotask();
+    expect(page.issues()).toBe(0);
+
+    list.resolve(jsonResponse({ enabled: true, mounts: [remote] }));
+    const mountButton = await screen.findByRole("button", { name: `折叠 ${MOUNT}` });
+    expect(mountButton.getAttribute("aria-expanded")).toBe("true");
+    expect(rowIn(MOUNT, "doc.pdf").getAttribute("aria-current")).toBe("true");
+    await expectRefused(`${MOUNT}/doc.pdf`);
+    await yieldMacrotask();
+    expect(page.issues()).toBe(0);
+    expect(calls(page.fetchMock, `${TREE}${encodeURIComponent(MOUNT)}`)).toHaveLength(1);
+  });
+
+  it("GET …/mounts 首次就答 500：地址里的 远端/doc.pdf（根的列表不列它）不签发、显示固定文案；随后根下的 doc.pdf 照常恰一次签发并建 iframe", async () => {
+    const page = openPage(
+      { [MOUNTS]: mountsFailed },
+      `/files?${new URLSearchParams({ ws: "workspace-1", path: `${MOUNT}/doc.pdf` })}`,
+    );
+    await waitFor(() => expect(columnAlerts()).toStrictEqual([MOUNTS_FAILED]));
+    await waitFor(() =>
+      expect(previewRegion().getByText(`${MOUNT}/doc.pdf`, { exact: true })).toBeTruthy(),
+    );
+    await expectRefused(`${MOUNT}/doc.pdf`);
+    await yieldMacrotask();
+    expect(page.issues()).toBe(0);
+
+    await choose(ROOT, "doc.pdf", "doc.pdf");
+    expect((await shownFrame("doc.pdf")).getAttribute("src")).toBe(`${BASE}doc.pdf`);
+    expect(page.issues()).toBe(1);
+    expect(previewRegion().queryByText(IN_MOUNT)).toBeNull();
+  });
+
+  it("根下 doc.pdf 已签发（一次）后选中 远端/doc.pdf 停留 6 分钟：不续期（仍是一次）、没有 iframe、固定文案盖过手里的令牌", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const page = openPage();
+    await expand(MOUNT);
+    await choose(ROOT, "doc.pdf", "doc.pdf");
+    expect((await shownFrame("doc.pdf")).getAttribute("src")).toBe(`${BASE}doc.pdf`);
+    expect(page.issues()).toBe(1);
+
+    await choose(MOUNT, "doc.pdf", `${MOUNT}/doc.pdf`);
+    await expectRefused(`${MOUNT}/doc.pdf`);
+    await act(() => vi.advanceTimersByTimeAsync(360_000));
+    expect(page.issues()).toBe(1);
+    await expectRefused(`${MOUNT}/doc.pdf`);
   });
 });
