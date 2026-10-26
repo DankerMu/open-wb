@@ -5,7 +5,8 @@
  *
  * Construction loads every row into the registry, all `offline` (also with the feature off: listing,
  * unmounting and the mount-name skips need it). `restoreAll` mounts them one by one by `created_at, id`;
- * `closeAll` stops everything this run mounted and keeps rows and private directories for the next.
+ * `closeAll` stops everything this run mounted — and nothing it did not: a mount never brought up by this
+ * run gets no unmount — and keeps rows and private directories for the next.
  *
  * Every operation on a mount — attach, remount attempt, startup restore attempt, detach, the
  * workspace / mount-source cascades — runs on its workspace's promise chain. Detach and `closeAll` first,
@@ -118,7 +119,10 @@ interface Entry {
   status: MountStatus;
   /** The rclone of the current mount; set while online and until an offline transition stops it. */
   child: MountChild | undefined;
-  /** Where the current mount is. */
+  /**
+   * Where the current mount is; set once this run brings the mount up and kept through `offline`, so
+   * unset means this run never mounted it and shutdown leaves it alone.
+   */
   mountPoint: string | undefined;
   /** The judged IP literal of the current mount (`sftp` / `smb`): the probe dials it. */
   address: string | undefined;
@@ -136,6 +140,8 @@ interface Entry {
   /** The in-flight remount or restore attempt. */
   attempt: AbortController | undefined;
 }
+
+export type MountManager = ReturnType<typeof createMountManager>;
 
 export function createMountManager(options: MountManagerOptions) {
   const { store, mountsDir } = options;
@@ -551,10 +557,17 @@ export function createMountManager(options: MountManagerOptions) {
 
   // ---- service start and stop ----
 
+  /**
+   * Only a mount this run brought up: one it never mounted (not restored yet, restore failed first)
+   * may be another live instance's on the same DB and mount namespace, and a leftover of an earlier run
+   * is `restoreAll`'s to clear.
+   */
   const stopOnShutdown = async (entry: Entry): Promise<void> => {
     entry.status = "offline";
-    const mountPoint = entry.mountPoint ?? mountPointOf(entry.record);
-    await lazyUnmount(mountPoint, `m${entry.record.id}`).catch(reportUnlessRefused);
+    const { mountPoint } = entry;
+    if (mountPoint !== undefined) {
+      await lazyUnmount(mountPoint, `m${entry.record.id}`).catch(reportUnlessRefused);
+    }
     const { child } = entry;
     entry.child = undefined;
     if (child !== undefined) {
@@ -640,8 +653,9 @@ export function createMountManager(options: MountManagerOptions) {
 
     /**
      * Design D12 stop: shutdown flag, timers and probes cancelled, in-flight attempts SIGKILLed and
-     * voided, the chains drained, then each mount lazily unmounted and its rclone stopped (SIGTERM, then
-     * SIGKILL). Rows and private directories stay. Idempotent.
+     * voided, the chains drained, then each mount this run brought up lazily unmounted and its rclone
+     * stopped (SIGTERM, then SIGKILL); a mount this run never mounted gets no unmount. Rows and private
+     * directories stay. Idempotent.
      */
     closeAll(): Promise<void> {
       closing ??= shutDown();

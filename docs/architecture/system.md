@@ -881,7 +881,7 @@ modelRoles:
 
 ### 9.12 远程挂载（S1b，change `s1b-workspace-mounts`）
 
-本节随任务组落地。组 2：配置键与部署前提；组 5：凭证与日志的位置；在线判据、启停与端点随后续任务组补入。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
+本节随任务组落地。组 2：配置键与部署前提；组 5：凭证与日志的位置；组 6：在线判据、启停与回滚；端点随后续任务组补入。规格权威是 workspace-mounts「挂载配置与启动预检」与 http-service-skeleton「服务启动与装配」的挂载键段；跨 uid 挂载的实测见 [ADR-0003](../adr/0003-fuse-per-workspace-mounts.md)「2026-10 补充」，两 uid 部署下的挂载程序执行权见 [ADR-0010](../adr/0010-dedicated-omp-uid.md)「2026-10-25 补充」。
 
 **部署前提**（`server/src/workspaces/mounts/config.ts`）：
 
@@ -893,7 +893,7 @@ modelRoles:
   - `fusermount3` 与 `fusermount` 只能对 app 所在、omp 不在的组可执行：`user_allow_other` 全机生效，omp uid 若能执行 setuid 的 `fusermount3`，就能在自己可写的空间根下挂一个 `allow_other` 的 FUSE、再让它不应答，app 的任何一次进入都会挂住，omp 还能向 app 伪造文件内容（ADR-0003「2026-10 补充」P10）。Ubuntu 原装为 `4755 root:root`，部署时对 dpkg 登记的路径改，例如 `dpkg-statoverride --update --add root <app 组> 4750 /bin/fusermount3`。路径取 `dpkg -L fuse3 | grep fusermount3` 的输出，不要照抄：Ubuntu 24.04 的 fuse3 包登记的是 `/bin/fusermount3` 与 `/bin/fusermount`（后者是指向 `fusermount3` 的符号链接），`/usr/bin/fusermount3` 只是 usrmerge 的别名、dpkg 不认它。改一个文件，`fusermount`、两个路径下的 `fusermount3` 一并受限（同一 inode）。持久性只测了重装：测试主机上的一次性 ubuntu:24.04 容器（dpkg 1.22.6、fuse3 3.14.0-5build1）里，override 加在 dpkg 登记的路径上，`apt-get install --reinstall fuse3` 之后仍是 `4750 root:<app 组>`；加在 `/usr/bin` 别名上，当即生效，重装之后却回到 `4755 root:root`，而 override 仍在 `dpkg-statoverride --list` 里。`<app 组>` 是 app 用户所在、omp 用户不在的组，不得是 `workbuddy`（omp 是它的成员，ADR-0010）。预检检查 PATH 各项下的每一个 `fusermount3` 与 `fusermount`：没有 other 执行位，且属组不是 `/usr/bin/id -G -- <OMP_USER>` 输出的任何一个组。PATH 之外的 setuid 副本预检看不到，部署时删除（`find / -xdev -perm -4000 -name 'fusermount*'` 可列出）。预检只看 mode 与属组：POSIX ACL 授给 omp 的执行权、omp 可写的 PATH 目录（启动之后 omp 可在其中放一个 `fusermount`，rclone 挂载时按 PATH 查找它；读代码推出）都不在检查之内，由部署保证 PATH 各项 omp 不可写。
   - 同 uid 部署（`OMP_USER` 未配置）不查 `fuse.conf` 与执行权：那时 omp 就是 app uid，原装 `4755` 的 `fusermount3` 不是错误。
 - **容器部署**：容器需 `/dev/fuse` 与 `SYS_ADMIN`；#1665 实测的容器为 `docker run --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined`（另加的 `NET_ADMIN` 只供探针的 iptables，ADR-0003「2026-10 补充」），容器内装 fuse3 与 rclone。参考镜像 `deploy/app/`（9.8）暂不提供挂载支持，见 S4b。
-- **回滚**：撤掉 `RCLONE_BIN` 即关闭挂载功能，空间根目录照常使用。
+- **回滚**：撤掉 `RCLONE_BIN` 即关闭挂载功能，空间根目录照常使用；完整步骤见下面「在线判据与启停」的回滚一条。
 
 **凭证与日志在哪里**（`server/src/workspaces/mounts/manager.ts`，组 5）：
 
@@ -904,3 +904,14 @@ modelRoles:
 - 凭证不进数据库、HTTP 响应、审计、服务日志与错误通道，也不进任何子进程的 argv 与环境：rclone 只经 `--config` 读这份文件，环境恰为 `PATH` 与 `HOME=<私有目录>`；口令只经 `rclone obscure -` 的标准输入转成 obscure 串。
 - 挂载点是 `<空间根>/<挂载名>`。卸载会依次惰性卸载（`fusermount3 -uz`）、停止 rclone、删除挂载点（离线期间写进去的残留使它非空时，保留为普通目录并经服务错误通道报告一次）、递归删除整个私有目录——日志与缓存随之删除，回写窗口里尚未上传的写入也随之丢失。挂载失败同样不留私有目录。
 - 未配置 `RCLONE_BIN` 时卸载照常可用；若上次运行留下的孤儿挂载仍在 mountinfo 里，卸载要用 PATH 上第一个可执行的 `fusermount3`，找不到即 503 `mount_disabled`、挂载行与私有目录保留，服务错误通道有一条点名原因的记录——这时把 `fusermount3` 放上 PATH（或先手工 `fusermount3 -uz <挂载点>`）再卸载。
+
+**在线判据与启停**（`server/src/workspaces/mounts/manager.ts`、`probe.ts`；装配在 `app.ts` 与 `startup-registry.ts`，组 6）：
+
+- **在线判据**：每个挂载的在线状态只在内存里（`online` / `offline`），重启后一律从 `offline` 开始。在线 = rclone 子进程存活 ∧ `/proc/self/mountinfo` 里有一行的挂载点等于该挂载点 ∧ 一个子进程对挂载点 `stat` 在 5 s 内成功 ∧ `sftp` / `smb` 对该次挂载用的 IP 与端口（缺省 `sftp` 22、`smb` 445）在 5 s 内 TCP `connect` 成功（`local` 没有这一项）。TCP 检查只判网络可达：凭证失效、共享被删由挂载内请求的报错发现。
+- **探测与退避**：探测每 30 s 一轮，只对 `online` 的挂载，每个挂载至多一个在途；rclone 退出立即判离线，不等下一轮。判离线 → 惰性卸载（`fusermount3 -uz`）、确保 rclone 退出 → 重挂：首次 5 s 后，此后每次翻倍，封顶 300 s，重挂成功即回 `online` 并把退避复位到 5 s。每次重挂都重新判定主机规则、挂载源路径与挂载点，并把判定过的 IP 改写进 `rclone.conf` 的 `host`；管理员收紧 `MOUNT_HOST_ALLOW` 后，已有挂载在下一次重挂时失效、保持离线。
+- **启动恢复**：`server_started` 写出之后，入口不等待地按 `created_at, id` 逐个恢复已登记的挂载，前一个的尝试结束才开始下一个。每个先对上次运行（被 SIGKILL）留下的残留挂载 `fusermount3 -uz`（孤儿 rclone 随之退出），再照常挂载。恢复失败只使该挂载离线并进入退避，不产生 `server_start_failed`、不改变退出码；成功之前它在列表里显示离线。`RCLONE_BIN` 未配置时不恢复，全部离线。
+- **关停**：SIGTERM / SIGINT 时，主监听器停止之后、关 DB 之前，manager 取消全部定时器与探测、SIGKILL 仍在等就绪的挂载子进程，然后对本次运行挂上过的每个挂载惰性卸载并停止 rclone（SIGTERM，5 s 未退出 SIGKILL）；本次没挂上过的不碰（同库另一实例的挂载、上次运行留下的孤儿——后者由下次启动恢复先 `-uz`）。关停只卸载不删行：挂载行、`<OMP_STATE_DIR>/mounts/<id>/`（凭证、缓存、日志）都保留，下次启动据此恢复。
+- **回滚**：
+  1. 关闭功能：撤掉 `RCLONE_BIN` 重启。启动不恢复挂载，已登记的挂载显示离线、仍可卸载，空间根目录照常使用。
+  2. 回退到不含挂载的旧版本：先在当前版本下卸载全部挂载（或停服务后对每个挂载点 `fusermount3 -uz <挂载点>`），之后 `<OMP_STATE_DIR>/mounts` 可整体删除；迁移 049 的两张表留着无害（迁移不逆转）。
+  3. 功能关闭时卸载孤儿挂载（上次运行被 SIGKILL 后撤了 `RCLONE_BIN`、孤儿 rclone 还挂着）需要服务进程 PATH 上有可执行的 `fusermount3`，否则 503 `mount_disabled`、行与私有目录保留（见上一段末条）。

@@ -154,7 +154,7 @@
 - **THEN** 相邻两次尝试的间隔依次为 5、10、20、40、80、160、300、300、300 s
 
 ### Requirement: 服务启停与挂载
-mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂载行装进内存登记、一律 `offline`（未配置 `RCLONE_BIN` 时同样载入）。服务启动成功记录 `server_started` 写出之后，入口 SHALL 不等待地恢复全部已登记挂载（`RCLONE_BIN` 未配置时不恢复），按 `created_at, id` 逐个依次进行（前一个的尝试结束之后才开始下一个）：对每个挂载，挂载点已在 mountinfo 里（上一次运行异常结束留下的）时先惰性卸载，再按「挂载进程与挂载点」挂载；失败按「在线状态与重挂」进入退避。恢复中的任何失败 SHALL NOT 写 `server_start_failed`、SHALL NOT 改变退出码；恢复完成之前挂载一律报告 `offline`。关停时 SHALL 在关闭 DB 之前停止全部探测与重挂定时器、按「挂载操作的串行与取消」结束在途的挂载尝试，此后 SHALL NOT 再发起任何挂载尝试（含尚未轮到的启动恢复），并对每个挂载执行惰性卸载与「SIGTERM，5 s 后 SIGKILL」；关停 SHALL NOT 删除挂载行与私有目录（下次启动恢复）。
+mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂载行装进内存登记、一律 `offline`（未配置 `RCLONE_BIN` 时同样载入）。服务启动成功记录 `server_started` 写出之后，入口 SHALL 不等待地恢复全部已登记挂载（`RCLONE_BIN` 未配置时不恢复），按 `created_at, id` 逐个依次进行（前一个的尝试结束之后才开始下一个）：对每个挂载，挂载点已在 mountinfo 里（上一次运行异常结束留下的）时先惰性卸载，再按「挂载进程与挂载点」挂载；失败按「在线状态与重挂」进入退避。恢复中的任何失败 SHALL NOT 写 `server_start_failed`、SHALL NOT 改变退出码；恢复完成之前挂载一律报告 `offline`。关停时 SHALL 在关闭 DB 之前停止全部探测与重挂定时器、按「挂载操作的串行与取消」结束在途的挂载尝试，此后 SHALL NOT 再发起任何挂载尝试（含尚未轮到的启动恢复），并对本次运行挂上过的每个挂载执行惰性卸载与「SIGTERM，5 s 后 SIGKILL」；本次运行没有挂上过的挂载（含在 mountinfo 里、属于同库另一实例的）SHALL NOT 被卸载；关停 SHALL NOT 删除挂载行与私有目录（下次启动恢复）。
 
 #### Scenario: 启动恢复与残留挂载
 - **WHEN** DB 里有两个挂载，其中一个的挂载点已在（假）mountinfo 里，以假 rclone 装配的 manager 执行启动恢复
@@ -169,6 +169,8 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - **THEN** 挂载的卸载发生在 DB 关闭之前，进程以 0 退出
 - **WHEN** DB 里有三个挂载，启动恢复对第一个的 `mount` 调用挂起（假 rclone 不写 mountinfo 也不退出）时执行关停卸载
 - **THEN** 那个假 rclone 进程被 SIGKILL、其余两个挂载没有 `mount` 调用；关停完成时没有任何假 rclone 进程存活、假 mountinfo 里没有这三个挂载的行
+- **WHEN** DB 里有一个挂载、本 manager 没有挂上它（未恢复），而假 mountinfo 里已有它的一行（另一实例挂着）时执行关停卸载
+- **THEN** 假 `fusermount3` 没有收到任何调用，那一行仍在假 mountinfo 里
 
 ### Requirement: 挂载端点
 `GET /api/workspaces/:id/mounts` SHALL 返回 200 `{enabled, mounts}`：`enabled` 为是否配置了 `RCLONE_BIN`；`mounts` 为该空间的挂载按 `created_at, id` 升序，每项恰为 `{id, name, backend, host, port, remotePath, sourceId, sourceName, readOnly, status, createdAt}`（`sftp` / `smb` 的 `sourceId` 与 `sourceName` 为 null；`local` 的 `host`、`port`、`remotePath` 为 null，`sourceName` 为挂载源的名称；`status` 为 `online` 或 `offline`），不含任何凭证。

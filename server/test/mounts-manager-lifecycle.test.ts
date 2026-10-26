@@ -290,6 +290,52 @@ describe("服务启停与挂载「关停卸载」", () => {
   });
 });
 
+describe("服务启停与挂载「关停卸载」: only what this run mounted (#1688)", () => {
+  /** A live `fuse.rclone` line of mount `id` at `name`, as another instance on the same DB left it. */
+  const foreignLine = (id: string, name: string) =>
+    `88 1 0:8 / ${world.mountPoint(name)} rw - fuse.rclone m${id}:/srv/data rw\n`;
+
+  it("a registered mount this run never mounted, live in mountinfo: closeAll runs no fusermount3, the line stays", {
+    timeout: CASE_MS,
+  }, async () => {
+    seedMount(world, { id: ID1, body: sftp(), createdAt: 1 });
+    const line = foreignLine(ID1, "remote");
+    writeFileSync(world.mountinfo, line);
+    const manager = world.manager();
+
+    await manager.closeAll();
+
+    expect(world.fusermountCalls()).toEqual([]);
+    expect(readFileSync(world.mountinfo, "utf8")).toBe(line);
+    expect(world.calls()).toEqual([]);
+    expect(manager.statusOf(ID1)).toBe("offline");
+  });
+
+  it("one restored online, one whose restore failed before mounting and is now live elsewhere: one -uz, on the first", {
+    timeout: CASE_MS,
+  }, async () => {
+    seedMount(world, { id: ID1, body: sftp("/srv/data", { name: "甲" }), createdAt: 1 });
+    seedMount(world, { id: ID2, body: sftp("/srv/data", { name: "乙" }), createdAt: 2 });
+    nextMounts(world, ["ok", "exit1"]);
+    const manager = world.manager();
+    await manager.restoreAll();
+    expect(manager.statusOf(ID1)).toBe("online");
+    expect(manager.statusOf(ID2)).toBe("offline");
+    // Another instance on the same DB mounts the second meanwhile.
+    const line = foreignLine(ID2, "乙");
+    writeFileSync(world.mountinfo, readFileSync(world.mountinfo, "utf8") + line);
+    const before = world.fusermountCalls().length;
+
+    await manager.closeAll();
+
+    expect(world.fusermountCalls().slice(before)).toEqual([
+      { argv: ["-uz", world.mountPoint("甲")], removed: 1 },
+    ]);
+    expect(readFileSync(world.mountinfo, "utf8")).toBe(line);
+    expect(alive(pidOf(0))).toBe(false);
+  });
+});
+
 describe("挂载操作的串行与取消「启动恢复期间关停」", () => {
   it("the mount already in mountinfo, readiness readdir hanging: shutdown kills it, -uz removes the line, row and dir kept", {
     timeout: CASE_MS,
