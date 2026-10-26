@@ -33,9 +33,11 @@ import {
 } from "./api-models.js";
 import {
   type CreateMountInput,
+  type CreateMountSourceInput,
   createMountMethods,
   type MountList,
   type MountSourceList,
+  type MountSourceRow,
   type MountView,
 } from "./api-mounts.js";
 import {
@@ -165,6 +167,11 @@ export type ApiClient = {
   ): Promise<MountView>;
   deleteMount(workspaceId: string, mountId: string, options?: ApiRequestOptions): Promise<void>;
   listMountSources(options?: ApiRequestOptions): Promise<MountSourceList>;
+  createMountSource(
+    input: CreateMountSourceInput,
+    options?: ApiRequestOptions,
+  ): Promise<MountSourceRow>;
+  deleteMountSource(sourceId: string, options?: ApiRequestOptions): Promise<void>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
   createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;
@@ -608,8 +615,10 @@ export {
 } from "./api-models.js";
 export type {
   CreateMountInput,
+  CreateMountSourceInput,
   MountList,
   MountSourceList,
+  MountSourceRow,
   MountView,
 } from "./api-mounts.js";
 export type { SessionCapabilities } from "./api-session-capabilities.js";

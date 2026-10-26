@@ -1,6 +1,7 @@
 /**
- * s1b-workspace-mounts 任务 10.3 / 11.3：`web/src/lib/api-mounts.ts`（design D18）。接缝：真实的 `createApiClient`
- * 加替身 `fetch`（`listMounts`、`createMount`、`deleteMount`、`listMountSources`），与导出的 `parseMountSources`。
+ * s1b-workspace-mounts 任务 10.3 / 11.3 / 13.3：`web/src/lib/api-mounts.ts`（design D18）。接缝：真实的 `createApiClient`
+ * 加替身 `fetch`（`listMounts`、`createMount`、`deleteMount`、`listMountSources`、`createMountSource`、
+ * `deleteMountSource`），与导出的 `parseMountSources`。
  * `POST …/mounts` 成功恰为 201、应答是新挂载的视图（`rest-mounts.ts`）。期望值来自
  * workspace-mounts「挂载端点」「挂载源端点」：`GET …/mounts` 为 `{enabled, mounts}`，每项恰为
  * `{id, name, backend, host, port, remotePath, sourceId, sourceName, readOnly, status, createdAt}`
@@ -262,5 +263,82 @@ describe("listMountSources", () => {
     });
 
     expectRequestFailure(await captureApiError(createApiClient().listMountSources()), 200);
+  });
+});
+
+// 任务 13.3：管理员的两种写（「挂载源端点」：`POST` 恰 201 管理员视图，`DELETE` 恰 204）。
+describe("createMountSource", () => {
+  const input = { name: "共享盘", path: "/srv/share", readOnly: false };
+  const row = { id: "s-9", ...input, createdAt: 1_760_000_000_002 };
+
+  it("POSTs exactly {name, path, readOnly} as JSON to /api/mount-sources and resolves with the 201 row", async () => {
+    const fetchMock = stub({ "/api/mount-sources": () => jsonResponse(row, 201) });
+
+    await expect(createApiClient().createMountSource(input)).resolves.toEqual(row);
+    expect(fetchMock.mock.calls).toEqual([
+      [
+        "/api/mount-sources",
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        },
+      ],
+    ]);
+  });
+
+  it("a 200, or a 201 that is not the five-key administrator row, is request_failed", async () => {
+    const { path: _path, ...userRow } = row;
+    stub({
+      "/api/mount-sources": [jsonResponse(row, 200), jsonResponse(userRow, 201)],
+    });
+
+    expectRequestFailure(await captureApiError(createApiClient().createMountSource(input)), 200);
+    expectRequestFailure(await captureApiError(createApiClient().createMountSource(input)), 201);
+  });
+
+  it("a 409 envelope rejects with its message", async () => {
+    stub({
+      "/api/mount-sources": () =>
+        jsonResponse({ error: { code: "conflict", message: "同名资源已存在" } }, 409),
+    });
+
+    expect(await captureApiError(createApiClient().createMountSource(input))).toMatchObject({
+      status: 409,
+      code: "conflict",
+      message: "同名资源已存在",
+    });
+  });
+});
+
+describe("deleteMountSource", () => {
+  it("DELETEs /api/mount-sources/<id> with no body, the id encoded as one segment, and resolves on 204", async () => {
+    const path = "/api/mount-sources/s%2F1%3F%23";
+    const fetchMock = stub({ [path]: () => new Response(null, { status: 204 }) });
+
+    await expect(createApiClient().deleteMountSource("s/1?#")).resolves.toBeUndefined();
+    expect(fetchMock.mock.calls).toEqual([
+      [path, { method: "DELETE", credentials: "same-origin" }],
+    ]);
+  });
+
+  it("a 200 is request_failed: 204 is the only success", async () => {
+    stub({ "/api/mount-sources/s-1": () => jsonResponse({}, 200) });
+
+    expectRequestFailure(await captureApiError(createApiClient().deleteMountSource("s-1")), 200);
+  });
+
+  it("a 404 envelope rejects with its message", async () => {
+    stub({
+      "/api/mount-sources/s-1": () =>
+        jsonResponse({ error: { code: "not_found", message: "请求的资源不存在" } }, 404),
+    });
+
+    expect(await captureApiError(createApiClient().deleteMountSource("s-1"))).toMatchObject({
+      status: 404,
+      code: "not_found",
+      message: "请求的资源不存在",
+    });
   });
 });

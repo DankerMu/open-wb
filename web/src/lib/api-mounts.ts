@@ -1,7 +1,8 @@
 /**
  * The mounts of a workspace (workspace-mounts「挂载端点」「挂载源端点」, design D18): the strict
  * parsers of `MountView` and `SourceView`, and the calls the files area makes — list, create and
- * unmount mounts, list the sources (the mount dialog's `服务器目录`).
+ * unmount mounts, list the sources (the mount dialog's `服务器目录`) — plus the administrator's two
+ * writes of a source (the center `挂载源` tab: register, delete).
  *
  * Parsing is key set and type only: a view with any key more or less is a parse failure, so is a
  * value of the wrong type. Which fields are null for which backend (`local` has no host, the remote
@@ -50,7 +51,7 @@ export type CreateMountInput =
   | { name: string; backend: "local"; sourceId: string; readOnly: boolean };
 
 /** A source as an administrator sees it (the row) and as anyone else does (three keys). */
-type AdminSourceView = {
+export type MountSourceRow = {
   id: string;
   name: string;
   path: string;
@@ -61,8 +62,11 @@ type UserSourceView = { id: string; name: string; readOnly: boolean };
 
 /** `GET /api/mount-sources`: every item of one answer has the same one of the two key sets. */
 export type MountSourceList =
-  | { view: "admin"; sources: AdminSourceView[] }
+  | { view: "admin"; sources: MountSourceRow[] }
   | { view: "user"; sources: UserSourceView[] };
+
+/** `POST /api/mount-sources` body: exactly these three keys (`validateMountSourceBody`). */
+export type CreateMountSourceInput = { name: string; path: string; readOnly: boolean };
 
 const MOUNT_KEYS = [
   "id",
@@ -145,7 +149,7 @@ function parseMountList(value: unknown): MountList | null {
   return mounts ? { enabled: value.enabled, mounts } : null;
 }
 
-function parseAdminSource(value: unknown): AdminSourceView | null {
+function parseAdminSource(value: unknown): MountSourceRow | null {
   if (!hasExactlyKeys(value, ["id", "name", "path", "readOnly", "createdAt"])) {
     return null;
   }
@@ -215,7 +219,15 @@ function mountsPath(workspaceId: string, mountId?: string): string {
 export function createMountMethods(
   onUnauthorized: ApiClientOptions["onUnauthorized"],
   { getRequestOptions, noContentRequest, request, requestFailed, requestOptions }: MountTransport,
-): Pick<ApiClient, "listMounts" | "createMount" | "deleteMount" | "listMountSources"> {
+): Pick<
+  ApiClient,
+  | "listMounts"
+  | "createMount"
+  | "deleteMount"
+  | "listMountSources"
+  | "createMountSource"
+  | "deleteMountSource"
+> {
   return {
     async listMounts(workspaceId, options) {
       const response = await request(
@@ -275,6 +287,36 @@ export function createMountMethods(
       }
 
       return list;
+    },
+
+    async createMountSource(input, options) {
+      // 201 is the only success; its body is the new source's administrator row.
+      const response = await request(
+        "/api/mount-sources",
+        {
+          ...requestOptions(options?.signal),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: input.name, path: input.path, readOnly: input.readOnly }),
+        },
+        onUnauthorized,
+        201,
+      );
+      const row = parseAdminSource(response);
+      if (!row) {
+        throw requestFailed(201);
+      }
+
+      return row;
+    },
+
+    async deleteMountSource(sourceId, options) {
+      // No body; 204 is the only success. The server unmounts every mount on the source first.
+      await noContentRequest(
+        `/api/mount-sources/${encodeURIComponent(sourceId)}`,
+        { ...requestOptions(options?.signal), method: "DELETE" },
+        onUnauthorized,
+      );
     },
   };
 }
