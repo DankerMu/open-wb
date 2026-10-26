@@ -351,6 +351,68 @@ describe("闸门排队与期限", () => {
     expect(fake.maxInFlight).toBe(1);
     expect(offline).toEqual(["m1"]);
   });
+
+  it("a call that succeeds after its deadline has its result dropped and frees the gate", async () => {
+    const { fake, clock, offline, mountFs } = setup();
+    const hung = watch(mountFs.lstat("m1", "/ws/远端/a.md"));
+    await flush();
+    clock.advance(DEADLINE_MS);
+    await flush();
+    expectOffline(hung.current());
+    expect(offline).toEqual(["m1"]);
+
+    fake.calls[0]?.resolve("late-status");
+    await flush();
+    expectOffline(hung.current());
+    const next = watch(mountFs.lstat("m1", "/ws/远端/b.md"));
+    await flush();
+    expect(fake.calls.map((call) => call.args[0])).toEqual(["/ws/远端/a.md", "/ws/远端/b.md"]);
+    fake.calls[1]?.resolve("b-status");
+    await flush();
+    expect(next.current()).toEqual({ settled: true, value: "b-status" });
+    expect(clock.pending()).toEqual([]);
+    expect(fake.maxInFlight).toBe(1);
+    expect(offline).toEqual(["m1"]);
+  });
+
+  it("an onOffline that throws escapes nothing and leaves the gate behaving", async () => {
+    const fake = createHungFs();
+    const clock = createFakeClock();
+    const offline: string[] = [];
+    const mountFs = createMountFs({
+      fs: fake.impl,
+      deadlineMs: DEADLINE_MS,
+      clock,
+      onOffline: (mountId) => {
+        offline.push(mountId);
+        throw new Error("manager failed");
+      },
+    });
+    const first = watch(mountFs.lstat("m1", "/ws/远端/a.md"));
+    const queued = watch(mountFs.readdir("m1", "/ws/远端"));
+    await flush();
+    expect(() => clock.advance(DEADLINE_MS)).not.toThrow();
+    await flush();
+    expectOffline(first.current());
+    expectOffline(queued.current());
+    expect(offline).toEqual(["m1"]);
+
+    const blocked = watch(mountFs.lstat("m1", "/ws/远端/b.md"));
+    await flush();
+    expectOffline(blocked.current());
+    expect(fake.calls).toHaveLength(1);
+
+    fake.calls[0]?.reject(new Error("ENOTCONN"));
+    await flush();
+    const next = watch(mountFs.readdir("m1", "/ws/远端"));
+    await flush();
+    expect(fake.calls.map((call) => call.op)).toEqual(["lstat", "readdir"]);
+    fake.calls[1]?.resolve(["a.md"]);
+    await flush();
+    expect(next.current()).toEqual({ settled: true, value: ["a.md"] });
+    expect(fake.maxInFlight).toBe(1);
+    expect(offline).toEqual(["m1"]);
+  });
 });
 
 describe("pass-through on fs/promises", () => {

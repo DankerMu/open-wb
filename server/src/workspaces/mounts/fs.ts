@@ -52,7 +52,7 @@ export interface MountFsOptions {
   fs?: MountFsImpl;
   deadlineMs?: number;
   clock?: MountClock;
-  /** Called once each time a call on `mountId` passes its deadline. */
+  /** Called once each time a call on `mountId` passes its deadline; a throw from it is swallowed. */
   onOffline(mountId: string): void;
 }
 
@@ -135,7 +135,11 @@ export function createMountFs(options: MountFsOptions): MountFs {
           for (const waiter of gate.queue.splice(0)) {
             waiter.fail(new HttpError("mount_offline"));
           }
-          options.onOffline(mountId);
+          try {
+            options.onOffline(mountId);
+          } catch {
+            // The gate is already settled; a failing callback must not escape the timer.
+          }
         }, deadlineMs);
         let pending: Promise<T>;
         try {
