@@ -27,7 +27,7 @@ Boundary：
 Must-preserve：
 - `:213` 起的次序 trace 逐字断言不变（新留痕不写进次序 trace）。
 - 两条计时结论仍有断言：超时那次写了 cancel（且作业目录已删）；`server.stop()` 后 1.5 s 内中止在途作业，早于监听器 2 s 关停预算。
-- 不加大时限、不加重试、不删 `cancelAt` 类断言（规格明文禁止）。本文件其它 `until`（等 `request` 等）不改。
+- 不加大时限、不加重试、不删 cancel 类断言（规格明文禁止；换成 cancel trace 通道、结论仍有断言不算删）。本文件其它 `until`（等 `request` 等）不改。
 
 ## 1. 跨进程 cancel 观察改为子进程内同步留痕
 
