@@ -172,7 +172,7 @@
   不给 rclone 的错误原文：rclone 日志里可能有主机与用户名，只进 app 私有的 `rclone.log`。
 - **D18 前端**：
   - 新 `web/src/lib/api-mounts.ts`（严格解析 `MountView` 与 `SourceView`；`SourceView` 的每项恰为两种键集之一——管理员五键或普通用户三键——同一响应内不混用，否则解析失败）。
-  - 新 `web/src/features/files/mount-roots.tsx`（挂载根行与卸载确认）与 `mount-dialog.tsx`（对话框）；`workspace-browser.tsx` 只加接线（783 行，size-guard 800）。
+  - 新 `web/src/features/files/mount-roots.tsx`（挂载根行与卸载确认）与 `mount-dialog.tsx`（对话框）；`workspace-browser.tsx` 只加接线（783 行，size-guard 800）。（#1698：卸载确认框本体是 `dialogs.tsx` 的 `ConfirmDialog`——与 `删除` 共用，`mount-roots.tsx` 只包装；`位置` 下拉的挂载部分在 `use-mounts.ts`：既有目录收集只从根列表走、根列表从不列挂载点，于是做法是把在线可写的挂载及其下已加载的目录加进去。D18 的 `刷新` 只指按钮：会话侧边栏随助手改动调用的句柄 `refresh()` 不重取 mounts，否则每回合一次即变相轮询。`onlyPaths`（只看本会话改动）时不渲染挂载根行，但照样取 mounts 以判定「在挂载内」。）
   - 根行的数据来源是 `GET …/mounts`，不是 `tree`：空间根的 `tree` 按名字跳过已登记挂载的挂载点、不列出它们（D21），浏览器不做过滤，只在空间根之后渲染挂载根行；挂载点目录缺失时挂载根行照样出现。工作空间对象不变（files-web 钉「恰五键」）。
   - demo 的提示 `仅允许内网主机，公网地址将被拒绝` 不沿用：主机规则只拒环回、按许可名单放行，不判定公网地址，沿用即是假承诺。
   - `挂载目录` 只在文件页的 `新建` 菜单（与 `新建工作空间` 同为文件页专用的可选项）且 `enabled` 为 true 时出现；侧边栏有挂载根行与卸载，没有挂载入口（workspace-sidebar 不提供空间级入口）。

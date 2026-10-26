@@ -234,14 +234,18 @@ export function moveTargets(
   return visible.filter((path) => canMoveInto(from, path));
 }
 
+const NO_NAMES: ReadonlySet<string> = new Set();
+
 /**
  * 定位到 `path` 的下一步，只看已加载的列表。各级父目录没加载就是下一个要请求的 `unloaded`——不看
  * 它在不在上一级的列表里：有没有、能不能列由服务端答复。`expand` 是其中在树上有行的那些（根，以及
  * 被一个有行的上级列为目录的）：只有它们会被展开；`unloaded` 不在 `expand` 里即它在树上没有行。
  * 各级都已加载（`unloaded` 为 `null`）时，`entry` 是末级在它父目录列表里的条目，没有则为 `null`。
+ * `rootRows` 是根下另有行、根的列表却不列的目录名（在线挂载的根行，D21）：它们算作根列出的目录，
+ * `path` 恰为其一时 `entry` 是这个目录。
  * 路径原样按 `/` 切开、原样比对：不去空格，不做 Unicode 规范化，不处理 `.` / `..` / 空段。
  */
-export function revealStep(path: string, cache: DirectoryCache) {
+export function revealStep(path: string, cache: DirectoryCache, rootRows = NO_NAMES) {
   const parents = parentDirectories(path);
   const expand: string[] = [];
   let listed = true;
@@ -249,6 +253,7 @@ export function revealStep(path: string, cache: DirectoryCache) {
     const above = parents[index - 1];
     listed &&=
       above === undefined ||
+      (above === "" && rootRows.has(parent)) ||
       ownValue(cache, above)?.entries.some(
         (item) => item.type === "dir" && workspacePath(above, item.name) === parent,
       ) === true;
@@ -261,11 +266,12 @@ export function revealStep(path: string, cache: DirectoryCache) {
   }
 
   const last = parents.at(-1);
-  const entry =
+  const entry: TreeRow | undefined =
     last === undefined
       ? undefined
       : ownValue(cache, last)?.entries.find((item) => workspacePath(last, item.name) === path);
-  return { entry: entry ?? null, expand, unloaded: null };
+  const rootRow = last === "" && rootRows.has(path) ? { name: path, type: "dir" as const } : null;
+  return { entry: entry ?? rootRow, expand, unloaded: null };
 }
 
 /** 带标记的行：这些路径本身与它们的各级父目录；根行不带。 */

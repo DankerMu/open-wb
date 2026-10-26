@@ -166,7 +166,7 @@ describe("导出记录（session-sidebar）", () => {
       [messagesPath(A)]: () => jsonResponse(quarterly(target)),
     });
     const nav = await findList(QUARTERLY);
-    const before = fetchMock.mock.calls.length;
+    const before = paths(fetchMock).length;
 
     await exportEntry(nav, QUARTERLY);
 
@@ -221,7 +221,7 @@ describe("导出记录（session-sidebar）", () => {
       });
     });
     await screen.findByText("流式正文", { exact: true });
-    const before = fetchMock.mock.calls.length;
+    const before = paths(fetchMock).length;
 
     await exportEntry(nav, RUNNING);
 
@@ -249,7 +249,7 @@ describe("导出记录（session-sidebar）", () => {
     });
     const nav = await findList(QUARTERLY);
     await waitFor(() => expect(reads).toBe(1));
-    const before = fetchMock.mock.calls.length;
+    const before = paths(fetchMock).length;
 
     await exportEntry(nav, QUARTERLY);
 
@@ -267,7 +267,7 @@ describe("导出记录（session-sidebar）", () => {
     });
     const nav = await findList(QUARTERLY);
     await screen.findByText("它的回答", { exact: true });
-    const before = fetchMock.mock.calls.length;
+    const before = paths(fetchMock).length;
 
     await exportEntry(nav, QUARTERLY);
 
@@ -302,7 +302,7 @@ describe("导出记录（session-sidebar）", () => {
       [messagesPath(A)]: () => envelope(502, BAD_GATEWAY),
     });
     const nav = await findList(QUARTERLY);
-    const before = fetchMock.mock.calls.length;
+    const before = paths(fetchMock).length;
 
     await exportEntry(nav, QUARTERLY);
 
@@ -454,7 +454,7 @@ describe("菜单项（session-sidebar「会话条目菜单与重命名」）", (
         (item) => item.textContent,
       ),
     ).toEqual(["删除"]);
-    const before = fetchMock.mock.calls.length;
+    const before = paths(fetchMock).length;
     fireEvent.click(within(draft.menu).getByRole("menuitem", { name: ARCHIVE }));
     await act(settle);
     expect(requestsSince(fetchMock, before)).toEqual([]);
