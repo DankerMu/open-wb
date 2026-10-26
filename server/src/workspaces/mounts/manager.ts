@@ -137,6 +137,8 @@ interface Entry {
   attempt: AbortController | undefined;
 }
 
+export type MountManager = ReturnType<typeof createMountManager>;
+
 export function createMountManager(options: MountManagerOptions) {
   const { store, mountsDir } = options;
   const path = options.path ?? process.env.PATH ?? "";

@@ -15,6 +15,9 @@
  *   此时 agent 目录门控关着，发布只读不写；`runStage()` 把 stage 切到 `mcp_json`、打开门控、再发布一次，
  *   写失败原样抛给入口（`reason: "mcp_json"`）。不并进 `createStartupPublisher`：模型发布不写 `mcp.json`，
  *   连接器写入也不重写模型的两个文件。
+ * - `workspaceAssemblyOf` / `startBackgroundWork`（s1b-workspace-mounts D12，同为 `server.ts` 行数预算抽出）：
+ *   `appAssemblyOf` 递交的工作空间两项——回收目录服务与挂载设置（mount-manager 要 DB 与审计，在 createApp 里
+ *   构造）；`server_started` 写出之后入口不等待的两件后台工作——回收目录首扫与挂载的启动恢复。
  */
 import type { DatabaseSync } from "node:sqlite";
 import { createMcpPublisher } from "./connectors/mcp-json.js";
@@ -26,6 +29,9 @@ import { createRegistry } from "./models/registry.js";
 import { createModelStore } from "./models/store.js";
 import { writeHostOverlay } from "./sessions/omp/host-overlay.js";
 import { ompAgentDir } from "./sessions/omp/state-layout.js";
+import type { MountSettings } from "./workspaces/mounts/config.js";
+import type { MountManager } from "./workspaces/mounts/manager.js";
+import { createTrash } from "./workspaces/trash.js";
 
 /** 只作首次种子的六个键（http-service-skeleton「服务启动与装配」）。 */
 const MODEL_ENV_KEYS = [
@@ -118,4 +124,45 @@ export function createMcpJsonStage(options: McpJsonStageOptions) {
       return publisher.publish();
     },
   };
+}
+
+interface WorkspaceAssemblyConfig extends MountSettings {
+  sandboxRoot: string;
+  trashRetentionDays: number;
+}
+
+/**
+ * 按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统；删除路由与入口的周期清理用同一个）与
+ * `resolveMountSettings` 的结果（未配置 `RCLONE_BIN` 时 createApp 构造的 manager 功能关闭）。挂载设置只取
+ * 它自己的五项，不把整个 config（含上游密钥）递进装配。
+ */
+export function workspaceAssemblyOf(config: WorkspaceAssemblyConfig) {
+  const { rcloneBin, fusermountBin, ompUid, mountHostAllow, mountMaxPerWorkspace } = config;
+  const mountSettings: MountSettings = {
+    ...(rcloneBin === undefined ? {} : { rcloneBin }),
+    ...(fusermountBin === undefined ? {} : { fusermountBin }),
+    ...(ompUid === undefined ? {} : { ompUid }),
+    ...(mountHostAllow === undefined ? {} : { mountHostAllow }),
+    mountMaxPerWorkspace,
+  };
+  return {
+    trash: createTrash({
+      sandboxRoot: config.sandboxRoot,
+      retentionDays: config.trashRetentionDays,
+    }),
+    mountSettings,
+  };
+}
+
+/**
+ * `server_started` 写出之后、未收到信号时入口调用一次，两者都不等待、永不 reject：回收目录首扫（关停不中止
+ * 在途的一轮，进程待它落定后退出）；挂载的启动恢复（逐个依次，失败只使该挂载离线并退避，不产生 failure
+ * record、不改变退出码；关停时 app 关闭钩子上的 `closeAll` 收住在途的那次尝试）。
+ */
+export function startBackgroundWork(work: {
+  trash: ReturnType<typeof createTrash>;
+  mounts: Pick<MountManager, "restoreAll">;
+}): void {
+  void work.trash.sweep(Date.now());
+  void work.mounts.restoreAll();
 }

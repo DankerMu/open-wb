@@ -81,10 +81,12 @@ import {
   createStartupPublisher,
   type ModelEnvIgnoredRecord,
   seedModelRegistry,
+  startBackgroundWork,
+  workspaceAssemblyOf,
 } from "./startup-registry.js";
 import { writeManagedLine } from "./startup-writer.js";
 import { type MountSettings, resolveMountSettings } from "./workspaces/mounts/config.js";
-import { createTrash } from "./workspaces/trash.js";
+import type { createTrash } from "./workspaces/trash.js";
 
 const PRIVATE_DB_FILE_MODE = 0o600;
 /** 预览缓存目录的两个 mode（design D18）与 spool 的 `jobs/`（change office-convert-sandbox）。 */
@@ -172,7 +174,8 @@ export function sessionRuntimeOf(
  * log 把每条握手超时记录、warn 把每条被丢弃的任务清单候选记录（不含任务文本）写成 application stderr 一行 JSON，
  * 写失败吞掉；
  * onError 把 supervisor 每次通知的保留故障写成一行 generic `session_fault`（#664）。
- * 恒带按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统）：删除路由与入口的周期清理用同一个。
+ * 恒带按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统）：删除路由与入口的周期清理用同一个；
+ * 恒带挂载设置 `mountSettings`（mount-manager 由 createApp 构造；两项经 `startup-registry.ts`）。
  * 给了 `preview`（令牌登记表、返回预览监听器已绑定端口的函数、转换是否可用）才带预览依赖，签发
  * 端点由此注册；`officeAvailable` 原样透传，入口给的是转换器的 `available`。
  * 给了 `registry`（生产入口恒给，s1d-model-registry D5）：带 `models`，`runtime.modelId` 取快照的缺省，
@@ -185,10 +188,7 @@ export function appAssemblyOf(
 ): AssemblyDependencies & { trash: ReturnType<typeof createTrash> } {
   return {
     runtime: sessionRuntimeOf(config, registry?.current().defaultModelId),
-    trash: createTrash({
-      sandboxRoot: config.sandboxRoot,
-      retentionDays: config.trashRetentionDays,
-    }),
+    ...workspaceAssemblyOf(config),
     ...(preview === undefined
       ? {}
       : {
@@ -579,8 +579,8 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
 
 /**
  * 成功记录：两次 listen 之后写三个托管文件、建预览缓存目录并清空 spool 的 `jobs/`，然后才让 `/o/`
- * 受理转换、扫一轮转换缓存并起周期清理，再发主监听器实际的 bound address/port；记录之后回收目录扫第一轮，
- * 入口不等它。`publishModels`：交出代理地址后注册表发布器写 models 与 overlay（写 overlay 前把 stage 切到
+ * 受理转换、扫一轮转换缓存并起周期清理，再发主监听器实际的 bound address/port；记录之后回收目录扫第一轮、
+ * 挂载启动恢复，入口不等它们。`publishModels`：交出代理地址后注册表发布器写 models 与 overlay（写 overlay 前把 stage 切到
  * `host_overlay`），随后 `mcp_json` 阶段读库写 `mcp.json`——其间已收到信号则不读（库可能正在关闭）；
  * 见 `startup-registry.ts`。
  */
@@ -638,8 +638,8 @@ async function publishStarted(
     })}\n`,
   );
   if (!owned.signalReceived) {
-    // 不等待：sweep 永不 reject，关停也不中止在途的一轮，进程待它落定后退出。
-    void trash.sweep(Date.now());
+    // 不等待：回收目录首扫与挂载的启动恢复（`startup-registry.ts`）。
+    startBackgroundWork({ trash, mounts: app.mounts });
   }
 }
 

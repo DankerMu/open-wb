@@ -1,5 +1,5 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
-import { join, normalize, resolve, sep } from "node:path";
+import { dirname, join, normalize, resolve, sep } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import fastifyStatic from "@fastify/static";
@@ -60,7 +60,7 @@ import type { SessionListNotifier } from "./sessions/list-events.js";
 import { ompAgentDir } from "./sessions/omp/process.js";
 import { ensureRepoRootMarker } from "./sessions/omp/repo-root-marker.js";
 import type { SpawnLog } from "./sessions/omp/spawn-gate.js";
-import { ompSnapshotsDir } from "./sessions/omp/state-layout.js";
+import { ompMountsDir, ompSnapshotsDir } from "./sessions/omp/state-layout.js";
 import type { SessionStore } from "./sessions/store.js";
 import type { TodoWarn } from "./sessions/store-todo.js";
 import type { SessionSupervisor, SessionSupervisorRuntime } from "./sessions/supervisor.js";
@@ -68,6 +68,9 @@ import { TokenRegistry } from "./sessions/tokens.js";
 import type { TurnSnapshotService } from "./sessions/turn-snapshot.js";
 import { registerSkills } from "./skills/rest.js";
 import { registerWorkspaces } from "./workspaces/index.js";
+import type { MountSettings } from "./workspaces/mounts/config.js";
+import { createMountManager, type MountManager } from "./workspaces/mounts/manager.js";
+import { createMountStore } from "./workspaces/mounts/store.js";
 import type { PreviewLimits } from "./workspaces/preview.js";
 import type { WorkspacePreviewDependencies } from "./workspaces/rest-preview-token.js";
 import { removeSnapshot, removeWorkspaceSnapshots, take } from "./workspaces/snapshots.js";
@@ -90,6 +93,8 @@ declare module "fastify" {
       store: WorkspaceStore;
       sandbox: ReturnType<typeof createSandbox>;
     };
+    /** The one mount-manager of this app (s1b-workspace-mounts D12); feature-off without `RCLONE_BIN`. */
+    mounts: MountManager;
   }
 }
 
@@ -113,6 +118,17 @@ export interface AssemblyDependencies {
    * that make the rename fail). Omitted in production.
    */
   trash?: ReturnType<typeof createTrash>;
+  /**
+   * `resolveMountSettings`' result (s1b-workspace-mounts D12): the mount-manager createApp builds on the
+   * app's DB and audit uses its bins, omp uid and host allow list. Omitted (or without `rcloneBin`): the
+   * built manager is feature-off.
+   */
+  mountSettings?: MountSettings;
+  /**
+   * Replaces the mount-manager createApp would build (tests: a real manager on the fake rclone and
+   * fake `fusermount3`). Omitted in production. Either way it is `app.mounts` and closed on app close.
+   */
+  mounts?: MountManager;
   /**
    * 代理按模型查找所用的注册表（s1d-model-registry D5）；省略时由 `modelCatalog` 与 `upstream`
    * 经 `staticRegistry` 适配。
@@ -259,6 +275,13 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   // One facade for the workspaces routes and the prompt route's attachment check.
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
   const sandbox = createSandbox({ rootOf: store.rootOf, audit });
+  const mounts = mountsOf(db, store, audit, runtime, staticRoot, assembly);
+  app.decorate("mounts", mounts);
+  // After the main listener has stopped and before the entry closes the DB (design D12): unmount and
+  // stop what this run mounted; rows and private directories stay for the next start's restore.
+  app.addHook("onClose", async () => {
+    await mounts.closeAll();
+  });
   const registered = registerSessions(app, {
     db,
     tokens,
@@ -398,6 +421,59 @@ function upstreamRedactor(
     }
     const secrets = new Set([...registry.secrets(), ...upstreamSecretList({ paths })]);
     return sanitizeUpstreamText(text, [...secrets]);
+  };
+}
+
+/**
+ * The app's mount-manager (s1b-workspace-mounts D12): `assembly.mounts` when given, else one built on the
+ * app's DB and audit, feature-off without `mountSettings.rcloneBin`; clock, TCP connect and probe
+ * children are the manager's defaults.
+ * `workspaceRootOf` is the store's `rootOf`: the sandbox root's realpath plus components that are
+ * lstat'ed and never symlinks (`core/sandbox/resolve.ts`) — the path mountinfo shows. The protected
+ * roots (D2) are given as configured; the source rule takes their realpath on every check.
+ */
+function mountsOf(
+  db: DatabaseSync,
+  store: WorkspaceStore,
+  audit: { emit(event: Parameters<typeof emit>[1]): unknown },
+  runtime: SessionRuntime,
+  staticRoot: string | undefined,
+  assembly: AssemblyDependencies | undefined,
+): MountManager {
+  if (assembly?.mounts !== undefined) {
+    return assembly.mounts;
+  }
+  const dbFile = db.location();
+  return createMountManager({
+    ...mountBinsOf(assembly?.mountSettings),
+    store: createMountStore(db),
+    audit,
+    mountsDir: ompMountsDir(runtime.stateDir),
+    workspaceRootOf: (ownerId, workspaceId) => store.rootOf({ id: ownerId }, workspaceId),
+    protectedRoots: [
+      runtime.sandboxRoot,
+      runtime.stateDir,
+      ...(dbFile === null ? [] : [dirname(dbFile)]),
+      ...(staticRoot === undefined ? [] : [staticRoot]),
+      dirname(runtime.bin),
+    ],
+    onError: assembly?.onError ?? (() => {}),
+  });
+}
+
+/** The four settings the manager reads; the rest of `MountSettings` is the REST layer's. */
+function mountBinsOf(
+  settings: MountSettings | undefined,
+): Pick<MountSettings, "rcloneBin" | "fusermountBin" | "ompUid" | "mountHostAllow"> {
+  if (settings === undefined) {
+    return {};
+  }
+  const { rcloneBin, fusermountBin, ompUid, mountHostAllow } = settings;
+  return {
+    ...(rcloneBin === undefined ? {} : { rcloneBin }),
+    ...(fusermountBin === undefined ? {} : { fusermountBin }),
+    ...(ompUid === undefined ? {} : { ompUid }),
+    ...(mountHostAllow === undefined ? {} : { mountHostAllow }),
   };
 }
 
