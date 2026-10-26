@@ -104,7 +104,7 @@ const LAYOUT: readonly (readonly [path: string, mode: number])[] = [
   ["trash", APP_PRIVATE],
   ["snapshots", APP_PRIVATE],
   ["session-config", MANAGED_BY_PATH],
-  ["mounts", APP_PRIVATE],
+  ["mounts", 0o2750],
 ];
 
 /**
