@@ -18,11 +18,12 @@ design.md omitted (compact)：与已有的图片附件跳过（#1527）同一处
 ## What Changes
 
 - model-proxy「假上游夹具契约」：新增「最后一条 user 消息」的取法——跳过 omp 合成的图片附件消息与整段恰为一个 `<system-reminder>` 块的 user 消息；`FAIL_TIMES` 计数键取这样得到的消息文本；加一个场景。
+- omp-test-harness「受控上游思考与写入标记」：非 user 消息的那句（原只点名图片附件）加上日期提醒，轮次规则与标记查找同此；加一个场景（turn scope 末尾提醒、历史中间提醒）。
 - `fake-upstream.mjs`：一个判定（整段恰为一个提醒块），用在 `lastUserTextFrom` 与 `toolRoundScope:"turn"` 的轮次规则两处（与 `isImageAttachment` 同位）。
 - `omp-official-upstream-failure.test.ts` 的实测行（`note()`）加上每次请求的 `messages` 数，以后再出现能从日志确认。
 
 ## Impact
 
-- 规格：model-proxy 一条 requirement 修改。
-- 代码：仅测试——`server/test/support/fake-upstream.mjs`、夹具单测（`server/test/fake-upstream-failures.test.ts` 或同族文件）、`server/test/omp-official-upstream-failure.test.ts`（只改 `note()`）。
+- 规格：两条 requirement 修改——model-proxy「假上游夹具契约」、omp-test-harness「受控上游思考与写入标记」。
+- 代码：仅测试——`server/test/support/fake-upstream.mjs`、夹具单测（`server/test/fake-upstream-failures.test.ts`、`fake-upstream-tool-rounds.test.ts`）、`server/test/omp-official-upstream-failure.test.ts`（实测行加 messages 数）。
 - 不动：产品代码、`models.yml` 的 compat（备选方案改发给真实上游的线格式，不取）、omp 本身。
