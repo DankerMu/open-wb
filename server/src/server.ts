@@ -83,6 +83,7 @@ import {
   seedModelRegistry,
 } from "./startup-registry.js";
 import { writeManagedLine } from "./startup-writer.js";
+import { type MountSettings, resolveMountSettings } from "./workspaces/mounts/config.js";
 import { createTrash } from "./workspaces/trash.js";
 
 const PRIVATE_DB_FILE_MODE = 0o600;
@@ -115,7 +116,7 @@ const STARTUP_MODULES = [
   "connectors",
 ];
 
-export interface ServerConfig extends AgentSettings, PreviewSettings {
+export interface ServerConfig extends AgentSettings, PreviewSettings, MountSettings {
   host: string;
   port: number;
   dbPath: string;
@@ -123,7 +124,7 @@ export interface ServerConfig extends AgentSettings, PreviewSettings {
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费三十七项应用 key——四项自有，agent 二十一项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费四十项应用 key——四项自有，agent 二十一项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，挂载三项经 resolveMountSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -137,6 +138,7 @@ export function resolveServerConfig(
     repoRoot,
     ...resolveAgentSettings(env, repoRoot),
     ...resolvePreviewSettings(env, repoRoot),
+    ...resolveMountSettings(env),
   };
 }
 
