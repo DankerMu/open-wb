@@ -25,6 +25,8 @@ type CreationMenuProps = {
   creationDisabled?: boolean | undefined;
   /** 回调带上菜单触发器，供对话框在取消类关闭后把焦点还给它。 */
   onNewDirectory(trigger: HTMLElement | null): void;
+  /** 给了才有 `挂载目录`（在 `新建文件夹` 之后）：文件页、挂载启用时（workspace-mounts「挂载对话框」）。 */
+  onMountDirectory?: ((trigger: HTMLElement | null) => void) | undefined;
   /** 缺省时菜单没有 `新建工作空间` 一项。 */
   onNewWorkspace?: ((trigger: HTMLElement | null) => void) | undefined;
 };
@@ -82,7 +84,12 @@ export function EmptyPreview() {
 }
 
 /** `modal={false}`：菜单不锁 body 的指针事件，随后打开的对话框自己管模态。 */
-function CreationMenu({ creationDisabled, onNewDirectory, onNewWorkspace }: CreationMenuProps) {
+function CreationMenu({
+  creationDisabled,
+  onMountDirectory,
+  onNewDirectory,
+  onNewWorkspace,
+}: CreationMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   return (
     <DropdownMenu modal={false}>
@@ -95,6 +102,11 @@ function CreationMenu({ creationDisabled, onNewDirectory, onNewWorkspace }: Crea
         <DropdownMenuItem onSelect={() => onNewDirectory(triggerRef.current)}>
           新建文件夹
         </DropdownMenuItem>
+        {onMountDirectory ? (
+          <DropdownMenuItem onSelect={() => onMountDirectory(triggerRef.current)}>
+            挂载目录
+          </DropdownMenuItem>
+        ) : null}
         {onNewWorkspace ? (
           <DropdownMenuItem onSelect={() => onNewWorkspace(triggerRef.current)}>
             新建工作空间
@@ -110,6 +122,7 @@ export function WorkspaceColumns({
   directory,
   folderNotice,
   layout = "columns",
+  onMountDirectory,
   onNewDirectory,
   onNewWorkspace,
   onRefresh,
@@ -145,6 +158,7 @@ export function WorkspaceColumns({
           </Button>
           <CreationMenu
             creationDisabled={creationDisabled}
+            onMountDirectory={onMountDirectory}
             onNewDirectory={onNewDirectory}
             onNewWorkspace={onNewWorkspace}
           />

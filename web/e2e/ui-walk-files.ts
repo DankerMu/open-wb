@@ -1,7 +1,8 @@
 // /files probes for the UI walk that need a real browser's computed styles, and the walk's
 // steps over the new previews (highlighted source, the isolated-origin html preview with its
-// relative stylesheet and source view, audio, download link, deep link) and over the row menu
-// (rename the walk directory, then delete it through the confirmation dialog).
+// relative stylesheet and source view, audio, download link, deep link), over the row menu
+// (rename the walk directory, then delete it through the confirmation dialog) and over the 新建
+// menu with mounts off (no 挂载目录).
 
 import { expect, type Locator, type Page, type Response } from "@playwright/test";
 
@@ -53,6 +54,26 @@ export async function expectOnDemandChunk(page: Page, select: () => Promise<void
   } finally {
     page.off("response", onResponse);
   }
+}
+
+// workspace-mounts「挂载对话框」的挂载关闭分支（s1b-workspace-mounts 11.4；CI 的 ui-walk 不设 `RCLONE_BIN`）：先经接口
+// 确认这个服务的 `GET …/mounts` 答 `enabled: false`——没有这一句，「没有 挂载目录」对开着挂载、列表还没到的服务同样成立；
+// 再打开 `新建` 菜单，菜单项恰为 `新建文件夹`、`新建工作空间`。最后点 `新建文件夹`，调用方接着填它的对话框。
+export async function chooseNewFolderWithMountsOff(page: Page): Promise<void> {
+  const workspaceId = () => new URL(page.url()).searchParams.get("ws") ?? "";
+  await expect.poll(workspaceId, "ws before the 新建 menu").toMatch(/^[0-9a-f]{32}$/);
+  const response = await page.request.get(`/api/workspaces/${workspaceId()}/mounts`);
+  expect(response.status(), "GET mounts status").toBe(200);
+  expect(((await response.json()) as { enabled: unknown }).enabled, "mounts are off").toBe(false);
+
+  await page.locator("main").getByRole("button", { name: "新建", exact: true }).click();
+  const menu = page.getByRole("menu");
+  await expect(menu.getByRole("menuitem"), "新建 menu items with mounts off").toHaveText([
+    "新建文件夹",
+    "新建工作空间",
+  ]);
+  await expect(menu.getByRole("menuitem", { name: "挂载目录" }), "no 挂载目录").toHaveCount(0);
+  await menu.getByRole("menuitem", { name: "新建文件夹", exact: true }).click();
 }
 
 // files-harness「走查 /files 步骤」(a)(b)，再选中 `clip.wav` 做 (c)(d)。调用时页面已选中工作空间、树已加载。

@@ -1,7 +1,7 @@
 /**
  * The mounts of a workspace (workspace-mounts「挂载端点」「挂载源端点」, design D18): the strict
- * parsers of `MountView` and `SourceView`, and the two calls the files area makes — list and unmount.
- * Creating a mount and listing the sources are group 11's.
+ * parsers of `MountView` and `SourceView`, and the calls the files area makes — list, create and
+ * unmount mounts, list the sources (the mount dialog's `服务器目录`).
  *
  * Parsing is key set and type only: a view with any key more or less is a parse failure, so is a
  * value of the wrong type. Which fields are null for which backend (`local` has no host, the remote
@@ -30,6 +30,24 @@ export type MountList = {
   enabled: boolean;
   mounts: MountView[];
 };
+
+/**
+ * `POST …/mounts` body: the keys of one backend only (`server/src/workspaces/mounts/validate.ts`).
+ * An empty optional `port` / `domain` is no key at all — the server takes no `null` for them.
+ */
+type RemoteMountInput = {
+  name: string;
+  host: string;
+  port?: number;
+  remotePath: string;
+  readOnly: boolean;
+  username: string;
+};
+export type CreateMountInput =
+  | (RemoteMountInput & { backend: "sftp"; password: string })
+  | (RemoteMountInput & { backend: "sftp"; privateKey: string })
+  | (RemoteMountInput & { backend: "smb"; password: string; domain?: string })
+  | { name: string; backend: "local"; sourceId: string; readOnly: boolean };
 
 /** A source as an administrator sees it (the row) and as anyone else does (three keys). */
 type AdminSourceView = {
@@ -197,7 +215,7 @@ function mountsPath(workspaceId: string, mountId?: string): string {
 export function createMountMethods(
   onUnauthorized: ApiClientOptions["onUnauthorized"],
   { getRequestOptions, noContentRequest, request, requestFailed, requestOptions }: MountTransport,
-): Pick<ApiClient, "listMounts" | "deleteMount"> {
+): Pick<ApiClient, "listMounts" | "createMount" | "deleteMount" | "listMountSources"> {
   return {
     async listMounts(workspaceId, options) {
       const response = await request(
@@ -214,6 +232,27 @@ export function createMountMethods(
       return list;
     },
 
+    async createMount(workspaceId, input, options) {
+      // 201 is the only success; its body is the new mount's view.
+      const response = await request(
+        mountsPath(workspaceId),
+        {
+          ...requestOptions(options?.signal),
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        },
+        onUnauthorized,
+        201,
+      );
+      const view = parseMountView(response);
+      if (!view) {
+        throw requestFailed(201);
+      }
+
+      return view;
+    },
+
     async deleteMount(workspaceId, mountId, options) {
       // No body: the route does not read one. 204 is the only success.
       await noContentRequest(
@@ -221,6 +260,21 @@ export function createMountMethods(
         { ...requestOptions(options?.signal), method: "DELETE" },
         onUnauthorized,
       );
+    },
+
+    async listMountSources(options) {
+      const response = await request(
+        "/api/mount-sources",
+        getRequestOptions(options?.signal),
+        onUnauthorized,
+        200,
+      );
+      const list = parseMountSources(response);
+      if (!list) {
+        throw requestFailed(200);
+      }
+
+      return list;
     },
   };
 }

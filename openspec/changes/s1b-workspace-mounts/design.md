@@ -308,8 +308,9 @@
 | `server/src/workspaces/mounts/*.ts` | 新 | 各 ≤400 | config / validate / store / host-policy / rclone-conf / mountinfo / manager / rest / path-rule / fs |
 | `web/test/workspace-browser.test.tsx` | 756 | 762 | 本地 `requests()`（:114）改用共享 `paths(fetchMock)`（import 行超 100 列被 biome 拆成多行，#1697）；新用例进新文件 |
 | `server/test/auth-lifecycle.test.ts` | 788（→790） | 797 | 只补七条 `codes` 条目 |
-| `web/src/features/files/workspace-browser.tsx` | 783 | ≤798 | 只加接线；取数与状态进新 hook `use-mounts.ts`，行与对话框进新文件 |
+| `web/src/features/files/workspace-browser.tsx` | 783 | ≤798 | 只加接线；取数与状态进新 hook `use-mounts.ts`，行与对话框进新文件（#1698 后 794，#1699 后 798） |
 | `web/src/features/files/mount-roots.tsx`、`mount-dialog.tsx` | 新 | 各 ≤400 | |
+| `web/src/features/files/mount-input.ts` | 新 | ≤400 | 对话框的本地校验与请求体构造（纯函数，与 `validate.ts` 同规则；#1699 拆出，否则 `mount-dialog.tsx` 466 行） |
 
 ## Traceability
 
