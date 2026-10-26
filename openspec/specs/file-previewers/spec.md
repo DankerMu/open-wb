@@ -115,7 +115,7 @@
 - **THEN** 只显示源码与截断提示，没有 `img`，没有视图切换按钮
 
 ### Requirement: 隔离来源的嵌入与令牌
-需要隔离预览来源的预览器（网页的渲染视图、PDF、办公文档）SHALL 经 `issuePreviewToken(workspaceId)` 取得 `{base, officeBase, expiresAt, documentMaxBytes, officeAvailable}`，并把文件路径按段 `encodeURIComponent` 后接在 `base`（或 `officeBase`）之后作为 iframe 的 `src`；页面 SHALL NOT 自己拼接预览来源的主机或端口。同一工作空间在一个页面里 SHALL 共用一次签发的结果；只要有这样的预览处于挂载状态，页面 SHALL 每 5 分钟再调用一次 `issuePreviewToken` 续期（返回同一个 `base` 时 iframe 不重载；返回了不同的 `base` 时以新地址重载），没有这样的预览时不续期；此后再次出现这样的预览时，距上一次签发不足 5 分钟 SHALL 复用上一次的结果、不重新签发，否则重新签发（owner 2026-10-11 认可）。网页的渲染视图、PDF 与办公文档下 `刷新` 或再点已选中的同一行时，距上一次成功签发不足 5 分钟的不发签发请求、续期时刻不变（适用面含 PDF 与办公文档、门槛取 5 分钟：owner 2026-10-12 认可）；其余情况——签发失败态、还没有成功签发过（在途的那一次被中止）、或距上一次成功签发已满 5 分钟——SHALL 立即重新签发一次，新结果到达之前不建 iframe。需要令牌的预览重新出现时距上一次成功签发已满 5 分钟的，SHALL 先重新签发：自重新出现的那一次渲染起到新结果到达为止显示 `正在加载预览…`，不以旧 `base` 建 iframe。签发失败（非 401）时预览区显示信封 message 或安全文案，网页仍可切到源码视图。令牌与 `base` SHALL NOT 被写入地址栏、`localStorage`、日志或任何持久存储，SHALL NOT 出现在界面可见文本里。
+需要隔离预览来源的预览器（网页的渲染视图、PDF、办公文档）SHALL 经 `issuePreviewToken(workspaceId)` 取得 `{base, officeBase, expiresAt, documentMaxBytes, officeAvailable}`，并把文件路径按段 `encodeURIComponent` 后接在 `base`（或 `officeBase`）之后作为 iframe 的 `src`；页面 SHALL NOT 自己拼接预览来源的主机或端口。同一工作空间在一个页面里 SHALL 共用一次签发的结果；只要有这样的预览处于挂载状态，页面 SHALL 每 5 分钟再调用一次 `issuePreviewToken` 续期（返回同一个 `base` 时 iframe 不重载；返回了不同的 `base` 时以新地址重载），没有这样的预览时不续期；此后再次出现这样的预览时，距上一次签发不足 5 分钟 SHALL 复用上一次的结果、不重新签发，否则重新签发（owner 2026-10-11 认可）。网页的渲染视图、PDF 与办公文档下 `刷新` 或再点已选中的同一行时，距上一次成功签发不足 5 分钟的不发签发请求、续期时刻不变（适用面含 PDF 与办公文档、门槛取 5 分钟：owner 2026-10-12 认可）；其余情况——签发失败态、还没有成功签发过（在途的那一次被中止）、或距上一次成功签发已满 5 分钟——SHALL 立即重新签发一次，新结果到达之前不建 iframe。需要令牌的预览重新出现时距上一次成功签发已满 5 分钟的，SHALL 先重新签发：自重新出现的那一次渲染起到新结果到达为止显示 `正在加载预览…`，不以旧 `base` 建 iframe。签发失败（非 401）时预览区显示信封 message 或安全文案，网页仍可切到源码视图。令牌与 `base` SHALL NOT 被写入地址栏、`localStorage`、日志或任何持久存储，SHALL NOT 出现在界面可见文本里。宿主标明所选文件位于该空间的已登记挂载内时（files-web「工作空间页」，change s1b-workspace-mounts），网页的渲染视图、PDF 与办公文档 SHALL 不签发预览令牌、不建 `iframe`，预览区显示 `挂载目录内的文件暂不支持预览，请下载查看`，预览头的下载链接照常；网页的 `查看源码` 照常可用（经 `fetchPreview`）。这样被挡下的预览不是「处于挂载状态」的需要隔离来源的预览：它不引起签发、不引起也不维持 5 分钟续期，`刷新` 或再点同一行也不签发（预览来源对挂载内路径一律 404，workspace-mounts「宿主不同步进入挂载」）。
 
 网页渲染视图的 iframe SHALL 带 `sandbox="allow-scripts allow-forms allow-modals"`（恰这三个令牌，没有 `allow-same-origin`）、`referrerpolicy="no-referrer"` 与 `title="<文件名>"`，SHALL NOT 使用 `srcdoc`。网页默认显示渲染视图，可在 `查看源码` 与 `渲染视图` 之间切换，切换文件时重置为渲染；源码视图经 `fetchPreview` 取文本（1 MiB 截断与截断提示照常），渲染视图不受该上限约束。
 
@@ -143,8 +143,12 @@
 - **WHEN** `issuePreviewToken` 返回 404（预览未装配）或网络失败时选中 `index.html`
 - **THEN** 渲染视图处显示失败文案，没有 `iframe`；`查看源码` 可用并能显示源码；预览头的下载链接仍在
 
+#### Scenario: 挂载内文件不签发
+- **WHEN** 宿主标明文件在挂载 `远端` 内，依次选中 `远端/site/index.html`、`远端/doc.pdf`、`远端/plan.docx`（`officeAvailable` 为 `false`）与 150 MB 的 `远端/huge.pdf`（`documentMaxBytes` 为 104857600），停留 6 分钟（使用假定时器）；再在 `远端/site/index.html` 上点 `查看源码`；随后选中不在挂载内的 `site/index.html`
+- **THEN** 四者的预览区都显示 `挂载目录内的文件暂不支持预览，请下载查看`（不显示 `服务器未启用文档转换，请下载后查看` 或 `文件过大，无法预览`），都没有 `iframe`，预览头都有下载链接；停留期间零 `issuePreviewToken` 请求；`查看源码` 后恰一次 `file` 请求并显示带行号的源码；选中 `site/index.html` 后恰一次签发并建 `iframe`
+
 ### Requirement: PDF 与办公文档
-PDF SHALL 以不带 `sandbox` 属性的 `iframe`（`title` 为文件名）从 `base` 加载，交给浏览器自带的查看器。办公文档（`docx`、`xlsx`、`pptx`）SHALL 以同样的 `iframe` 从 `officeBase` 加载（服务端转成 PDF）；在 iframe 的 `load` 事件之前预览区 SHALL 盖一层 `正在转换文档…`（`role="status"`），`load` 之后撤掉——转换失败时 iframe 里是服务端的失败说明页。建 iframe 之前 SHALL 依次判定：树条目的大小超过 `documentMaxBytes` → 显示 `文件过大，无法预览`，不建 iframe（树条目没有大小时跳过这一项，框内显示预览来源自己的应答，#1372）；办公文档且 `officeAvailable` 为 `false` → 显示 `服务器未启用文档转换，请下载后查看`，不建 iframe；`navigator.pdfViewerEnabled === false` → 显示 `此浏览器不支持内嵌 PDF 预览，请下载后查看`，不建 iframe。三种情况都保留预览头的下载链接。
+PDF SHALL 以不带 `sandbox` 属性的 `iframe`（`title` 为文件名）从 `base` 加载，交给浏览器自带的查看器。办公文档（`docx`、`xlsx`、`pptx`）SHALL 以同样的 `iframe` 从 `officeBase` 加载（服务端转成 PDF）；在 iframe 的 `load` 事件之前预览区 SHALL 盖一层 `正在转换文档…`（`role="status"`），`load` 之后撤掉——转换失败时 iframe 里是服务端的失败说明页。宿主标明文件在已登记挂载内时（「隔离来源的嵌入与令牌」），SHALL 先于下列三项判定显示 `挂载目录内的文件暂不支持预览，请下载查看`，不签发、不建 iframe（change s1b-workspace-mounts）。建 iframe 之前 SHALL 依次判定：树条目的大小超过 `documentMaxBytes` → 显示 `文件过大，无法预览`，不建 iframe（树条目没有大小时跳过这一项，框内显示预览来源自己的应答，#1372）；办公文档且 `officeAvailable` 为 `false` → 显示 `服务器未启用文档转换，请下载后查看`，不建 iframe；`navigator.pdfViewerEnabled === false` → 显示 `此浏览器不支持内嵌 PDF 预览，请下载后查看`，不建 iframe。三种情况都保留预览头的下载链接。
 
 #### Scenario: PDF 的嵌入
 - **WHEN** 选中 2 MB 的 `doc.pdf`

@@ -196,7 +196,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Review attention：decision-dense（Critical Path 白盒；uid 分离决策先关闭）。
 
 **S1b FUSE 挂载**
-- Outcome：mount-manager（rclone 生命周期、凭证经受权限保护的配置文件注入、崩溃重挂、在线状态）；挂载点入白名单推导。首任务 = 在测试 VPS 上装 rclone 并打通挂载验证路径（macOS 开发机不可信）。规格与任务见 change `openspec/changes/s1b-workspace-mounts/`。
+- Outcome：mount-manager（rclone 生命周期、凭证经受权限保护的配置文件注入、崩溃重挂、在线状态）；挂载点入白名单推导。首任务 = 在测试 VPS 上装 rclone 并打通挂载验证路径（macOS 开发机不可信）。规格见 `openspec/specs/workspace-mounts/spec.md`，任务与设计见已归档的 change `openspec/changes/archive/2026-10-26-s1b-workspace-mounts/`。
 - 覆盖：F-FILE-3。
 - 必读增量：ADR-0003（含凭证不上命令行的 Consequences）。
 - Verify：SFTP 真实挂载读写 + 断连状态呈现 + 卸载后白名单收回（测试 VPS 上跑）。
