@@ -28,6 +28,7 @@ import {
   modelAudits,
   NOT_FOUND,
   openModelsWorld,
+  putBody,
   tableRows,
   UNAUTHORIZED,
   VIEW_KEYS,
@@ -335,5 +336,160 @@ describe("在途删除", () => {
     expectClean(response);
     expect(world.store.get("hang")).toBeUndefined();
     expect(probeAudits(world)).toEqual([]);
+  });
+});
+
+/**
+ * #1760 (model-registry「探活」, change models-probe-identity): the result is written only while the
+ * row is still the one the probe read — same `created_at` and both upstream columns — read inside the
+ * per-id chain when the probe's turn comes. Each case holds the probe on `holdServer` (released by the
+ * 1 s total deadline as `超时`) and changes the row meanwhile. `hang` is not the default row.
+ */
+describe("在途改行：按行身份写回", () => {
+  const NEVER = { status: "never", at: null, message: null };
+  const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  async function holding() {
+    const world = await openModelsWorld({ probeDeadlines: TIMEOUT_DEADLINES });
+    const hold = await holdServer();
+    await addModel(world, "hang", { baseUrl: local(hold.port), apiKey: OTHER_KEY });
+    return { world, hold };
+  }
+
+  /** The three probe columns of `id` in the table. */
+  const probeColumns = (world: ModelsWorld, id: string) => ({
+    ...world.db
+      .prepare("SELECT probe_status, probe_message, probe_at FROM models WHERE id = ?")
+      .get(id),
+  });
+
+  it("delete and re-register the id with another upstream: 404, the new row stays never, no audit", async () => {
+    const { world, hold } = await holding();
+    const old = world.store.get("hang")?.createdAt ?? 0;
+    const pending = call(world, "admin", "POST", probeUrl("hang"));
+    await hold.accepted(1);
+    expectAnswer(await call(world, "admin", "DELETE", "/api/models?id=hang"), 204);
+    // The spec's premise (a re-registration gets another `created_at`): leave the old row's millisecond.
+    while (Date.now() <= old) await pause(1);
+    await addModel(world, "hang", { baseUrl: local(await closedPort()), apiKey: PROBE_KEY });
+    const response = await pending;
+    expectAnswer(response, 404, NOT_FOUND);
+    expectClean(response);
+    expect(world.store.get("hang")?.probe).toEqual(NEVER);
+    expect(probeColumns(world, "hang")).toEqual({
+      probe_status: "never",
+      probe_message: null,
+      probe_at: null,
+    });
+    expect(probeAudits(world)).toEqual([]);
+  });
+
+  it.each([
+    ["another base URL", "url"],
+    ["a new key only", "key"],
+  ] as const)(
+    "PUT to %s meanwhile: 200 with the view after the PUT, result dropped, no audit",
+    async (_l, change) => {
+      const { world, hold } = await holding();
+      const pending = call(world, "admin", "POST", probeUrl("hang"));
+      await hold.accepted(1);
+      const moved = local(await closedPort());
+      if (change === "url") baseUrls.push(moved);
+      const upstream =
+        change === "url" ? { baseUrl: moved } : { baseUrl: local(hold.port), apiKey: PROBE_KEY };
+      const put = await call(
+        world,
+        "admin",
+        "PUT",
+        "/api/models?id=hang",
+        putBody("hang", upstream),
+      );
+      expectAnswer(put, 200);
+      const after = (put.json() as { probe: unknown }).probe;
+      const response = await pending;
+      expectAnswer(response, 200);
+      expectClean(response);
+      expect(Object.keys(response.json() as object).sort()).toEqual(VIEW_KEYS);
+      expect((response.json() as { probe: unknown }).probe).toEqual(after);
+      expect(after).toEqual(NEVER);
+      expect(probeColumns(world, "hang")).toEqual({
+        probe_status: "never",
+        probe_message: null,
+        probe_at: null,
+      });
+      expect(probeAudits(world)).toEqual([]);
+    },
+  );
+
+  it("PUT changing only the name meanwhile: the result is written and audited once", async () => {
+    const { world, hold } = await holding();
+    const from = Date.now();
+    const pending = call(world, "admin", "POST", probeUrl("hang"));
+    await hold.accepted(1);
+    const put = await call(
+      world,
+      "admin",
+      "PUT",
+      "/api/models?id=hang",
+      putBody("改名", { baseUrl: local(hold.port) }),
+    );
+    expectAnswer(put, 200);
+    const response = await pending;
+    expectClean(response);
+    expectProbed(
+      world,
+      "hang",
+      response,
+      { from, to: Date.now() },
+      {
+        status: "failed",
+        message: "超时",
+      },
+    );
+    expect(probeAudits(world)).toEqual([
+      {
+        actorId: "u3",
+        kind: "model.probe",
+        title: "探活模型 改名",
+        detail: { modelId: "hang", status: "failed" },
+        workspaceId: null,
+      },
+    ]);
+  });
+
+  it("a queued probe reads the row when its turn comes: A dropped, B probes the new upstream", async () => {
+    const { world, hold } = await holding();
+    const first = call(world, "admin", "POST", probeUrl("hang"));
+    await hold.accepted(1);
+    const from = Date.now();
+    const second = call(world, "admin", "POST", probeUrl("hang"));
+    // Let B enter the route handler (bodyless inject, no real I/O) before the PUT lands.
+    await pause(50);
+    const put = await call(
+      world,
+      "admin",
+      "PUT",
+      "/api/models?id=hang",
+      putBody("hang", { baseUrl: fakeBase(world), apiKey: FAKE_KEY }),
+    );
+    expectAnswer(put, 200);
+    const a = await first;
+    expectAnswer(a, 200);
+    expectClean(a);
+    expect((a.json() as { probe: unknown }).probe).toEqual(NEVER);
+    const b = await second;
+    expectClean(b);
+    expectProbed(world, "hang", b, { from, to: Date.now() }, { status: "ok", message: null });
+    expect(world.upstream.modelsRequests()).toEqual([{ authorization: `Bearer ${FAKE_KEY}` }]);
+    expect(hold.openBefore).toEqual([0]);
+    expect(probeAudits(world)).toEqual([
+      {
+        actorId: "u3",
+        kind: "model.probe",
+        title: "探活模型 hang",
+        detail: { modelId: "hang", status: "ok" },
+        workspaceId: null,
+      },
+    ]);
   });
 });

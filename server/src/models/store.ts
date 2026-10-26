@@ -2,9 +2,9 @@
  * models/store — 模型注册表的表读写与校验（s1d-model-registry D1–D4、D8；model-registry「迁移 046 模型表」
  * 「环境种子」「注册表快照是白名单的唯一来源」的 store 部分）。纯 DB：`node:sqlite` 同步读写，不碰文件系统与网络。
  *
- * 凭证：密钥只经 `routeOf` 与 `secrets` 读出；`ModelRow` 不带密钥，校验失败一律抛固定 message 的 `HttpError`
- *（不回显取值）。事务：每个写方法自己开一个事务（SQLite 不能嵌套 BEGIN，调用方不得已在事务里），可选的
- * `within(row)` 在写入之后、COMMIT 之前于同一事务内调用（审计挂点）；它抛出即整体回滚。
+ * 凭证：密钥只经 `routeOf`、`secrets` 与 `probeTarget`（只供探活路由）读出；`ModelRow` 不带密钥，校验失败
+ * 一律抛固定 message 的 `HttpError`（不回显取值）。事务：每个写方法自己开一个事务（SQLite 不能嵌套 BEGIN，
+ * 调用方不得已在事务里），可选的 `within(row)` 在写入之后、COMMIT 之前于同一事务内调用（审计挂点）；它抛出即整体回滚。
  * 不变量：非空表恰有一行缺省——首行自动成为缺省，缺省行不能删除，换缺省在一个事务里清旧立新。
  */
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
@@ -43,6 +43,16 @@ interface Upstream {
   apiKey: string;
 }
 
+/**
+ * 探活开始时读到的那一行（change models-probe-identity）：`created_at`（删后重建另取登记时刻）与上游两列的原始值。
+ * 只在 store 内比较，不进响应、审计与日志。
+ */
+export interface ProbeIdentity {
+  createdAt: number;
+  upstreamBaseUrl: string | null;
+  upstreamApiKey: string | null;
+}
+
 type Within = (row: ModelRow) => void;
 type Raw = Record<string, SQLOutputValue>;
 
@@ -52,6 +62,9 @@ const INSERT =
   "INSERT INTO models (id, name, reasoning, vision, max_tokens, efforts, upstream_base_url, upstream_api_key, is_default, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 const UPDATE =
   "UPDATE models SET name = ?, reasoning = ?, vision = ?, max_tokens = ?, efforts = ?, upstream_base_url = ?, upstream_api_key = ?, updated_at = ? WHERE id = ?";
+/** 探活写回只在行身份（`created_at` 与上游两列，`IS` 比较以容纳 NULL）不变时生效。 */
+const RECORD_PROBE =
+  "UPDATE models SET probe_status = ?, probe_message = ?, probe_at = ? WHERE id = ? AND created_at = ? AND upstream_base_url IS ? AND upstream_api_key IS ?";
 /** PUT 整体替换 `id` 以外的字段：这些键必须给出（`efforts` 可省略 = NULL）。 */
 const UPDATE_REQUIRED_KEYS = ["name", "reasoning", "vision", "maxTokens", "upstream"] as const;
 export function createModelStore(db: DatabaseSync) {
@@ -202,22 +215,57 @@ export function createModelStore(db: DatabaseSync) {
       });
     },
 
-    /** 探活结果写三列，不动 `updated_at`。 */
+    /**
+     * 密钥读取之三（只供探活路由）：上游与行身份取自同一次表读。未知 id → undefined；没有上游 →
+     * `upstream: undefined`（同 `routeOf` 的判定）；上游是原始列值（不去 userinfo）。
+     */
+    probeTarget(
+      id: string,
+    ): { upstream: Upstream | undefined; identity: ProbeIdentity } | undefined {
+      const raw = db.prepare(SELECT_ONE).get(id);
+      if (raw === undefined) {
+        return undefined;
+      }
+      return {
+        upstream: raw.upstream_api_key === null ? undefined : upstreamOf(raw),
+        identity: {
+          createdAt: Number(raw.created_at),
+          upstreamBaseUrl: raw.upstream_base_url === null ? null : String(raw.upstream_base_url),
+          upstreamApiKey: raw.upstream_api_key === null ? null : String(raw.upstream_api_key),
+        },
+      };
+    },
+
+    /**
+     * 探活结果写三列（不动 `updated_at`），只在该行仍是 `identity` 时写。行已不在或删后重建（`created_at`
+     * 不同）→ `not_found`，先于 `within`；同一行的上游两列被改过 → 结果丢弃、不跑 `within`，返回当前行。
+     */
     recordProbe(
       id: string,
+      identity: ProbeIdentity,
       result: { status: "ok" | "failed"; message: string | null; at: number },
       within?: Within,
     ): ModelRow {
       return inTransaction(db, () => {
         const { changes } = db
-          .prepare(
-            "UPDATE models SET probe_status = ?, probe_message = ?, probe_at = ? WHERE id = ?",
-          )
-          .run(result.status, result.message, result.at, id);
-        if (changes === 0 || changes === 0n) {
+          .prepare(RECORD_PROBE)
+          .run(
+            result.status,
+            result.message,
+            result.at,
+            id,
+            identity.createdAt,
+            identity.upstreamBaseUrl,
+            identity.upstreamApiKey,
+          );
+        if (changes !== 0 && changes !== 0n) {
+          return finish(id, within);
+        }
+        const current = select(id);
+        if (current === undefined || current.createdAt !== identity.createdAt) {
           fail("not_found");
         }
-        return finish(id, within);
+        return current;
       });
     },
 

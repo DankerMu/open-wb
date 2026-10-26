@@ -7,9 +7,11 @@
  *（两个带 body 的路由与 bodyless 的 `default` / `probe` 都在 content-parser 归属集）→ `id` 缺失 / 空 / 多值 400 →
  * store 的校验与查找（400 / 404 / 409）。全部应答 `Cache-Control: no-store`。
  *
- * 探活：行不存在即 404、不发请求；上游取自注册表快照的 `lookup`（没有即 `未配置上游`、不发请求）；同一 id 的探活
- * 按 Promise 链串行；结果经 `recordProbe` 写三列，审计 `model.probe`（detail 恰 `{modelId, status}`）在它的
- * `within` 里同事务写入；在途期间行被删 → `recordProbe` 404，结果丢弃、无审计。不刷新快照、不发布。
+ * 探活：同一 id 的探活按 Promise 链串行；轮到时再经 store 的 `probeTarget` 读该行的上游与行身份（同一次表读；
+ * 行不存在即 404、不发请求；没有上游即 `未配置上游`、不发请求），净化用的密钥集取注册表快照的 `secrets`。
+ * 结果经 `recordProbe` 写三列，审计 `model.probe`（detail 恰 `{modelId, status}`）在它的 `within` 里同事务写入；
+ * 只在该行仍是探活开始时那一行（`created_at` 与上游两列不变）时才写：在途期间行被删或删后重建 → 404，结果丢弃、
+ * 无审计；只是上游地址或密钥被 `PUT` 改了 → 结果丢弃、无审计、应答当前视图。不刷新快照、不发布。
  *
  * 写入流水线：store 写方法自持事务，审计经它的 `within` 在 COMMIT 之前同事务写入 → `registry.refresh()` →
  * `await publish()` → 应答。发布失败：经 `onPublishFailed` 恰交出一条 `{"event":"model_publish_failed"}`，
@@ -33,7 +35,7 @@ import type { createModelStore, ModelRow } from "./store.js";
 
 type ModelStore = Pick<
   ReturnType<typeof createModelStore>,
-  "list" | "get" | "create" | "update" | "remove" | "setDefault" | "recordProbe"
+  "list" | "get" | "create" | "update" | "remove" | "setDefault" | "probeTarget" | "recordProbe"
 >;
 
 interface AuditEvent {
@@ -45,17 +47,16 @@ interface AuditEvent {
     | { modelId: string; status: ProbeResult["status"] };
 }
 
-/** 注册表快照的三个读写（结构与 model-proxy 的 `ModelRegistry` 一致；本模块不导入 model-proxy）。 */
+/** 注册表快照的两个读写（结构与 model-proxy 的 `ModelRegistry` 一致；本模块不导入 model-proxy）。 */
 interface Registry {
   refresh(): void;
-  lookup(id: string): { upstream?: { baseUrl: string; apiKey: string } } | undefined;
   secrets(): readonly string[];
 }
 
 export interface ModelRestDependencies {
   db: DatabaseSync;
   store: ModelStore;
-  /** 每次写入提交之后从表重读快照（静态接缝下为空操作）；探活读 `lookup` 与 `secrets`。 */
+  /** 每次写入提交之后从表重读快照（静态接缝下为空操作）；探活只读 `secrets`（净化用）。 */
   registry: Registry;
   /** 托管文件发布（单飞）；未装配时为空操作。 */
   publish: () => Promise<void>;
@@ -218,17 +219,19 @@ export function registerModels(app: FastifyInstance, dependencies: ModelRestDepe
   app.post("/api/models/probe", bodyless, async (request) => {
     noBody(request);
     const id = idOf(request);
-    if (store.get(id) === undefined) {
-      throw new HttpError("not_found");
-    }
-    const upstream = registry.lookup(id)?.upstream;
     const row = await serial(id, async () => {
+      // 轮到时才读：排队期间被删 → 404；排队期间的 PUT → 用它之后的上游。
+      const target = store.probeTarget(id);
+      if (target === undefined) {
+        throw new HttpError("not_found");
+      }
+      const { upstream, identity } = target;
       const result =
         upstream === undefined
           ? NO_UPSTREAM
           : await probeUpstream(upstream, { ...probeDeadlines, secrets: registry.secrets() });
-      // 在途期间行被删：`changes === 0` 先于 `within` 抛 404，审计不写。
-      return store.recordProbe(id, { ...result, at: Date.now() }, (probed) => {
+      // 在途期间行被删或删后重建：先于 `within` 抛 404；上游被 PUT 改了：结果丢弃、无审计、应答当前视图。
+      return store.recordProbe(id, identity, { ...result, at: Date.now() }, (probed) => {
         audit(request, "model.probe", `探活模型 ${probed.name}`, {
           modelId: probed.id,
           status: result.status,
