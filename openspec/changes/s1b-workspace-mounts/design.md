@@ -205,7 +205,7 @@
     | 快照 `take`（`snapshots.ts`） | 根一层的已登记挂载名按名字跳过、不 `lstat`，记入 `skipped`（`reason: "mount"`）；未登记的外部挂载仍按 `dev` 规则（workspace-snapshots「快照内容规则」MODIFIED） |
     | 还原（`snapshots-restore.ts`） | 根一层的已登记挂载名不读取、不进入、不删除、不建出，记入返回的 `skipped`（`reason: "mount"`）（workspace-snapshots「还原」MODIFIED） |
     | 挂载内的 `dirs`（`ensureSharedDir`，`dirs.ts:43,48`） | 不调用；适配器 `mkdir`，不 `chmod`（D16） |
-    | 会话截图目录比对（`screenshot-diff.ts:28,54`，`supervisor.ts:610`） | `screenshots` 是保留名，`<空间根>/screenshots` 永不是挂载点；`opendirSync` 之前先 `lstatSync`（不跟随）：符号链接或不是目录按缺失、不打开（同 D8 的先查后用，turn-artifacts MODIFIED）；残余：`lstat` 与 `opendirSync` 之间被换成指向挂载内的符号链接（Risks） |
+    | 会话截图目录比对（`screenshot-diff.ts:28,54`，`supervisor.ts:610`；#1693 之后 `lstatSync` :39、`opendirSync` :45、`join(…, "screenshots")` :70、`supervisor.ts:625`） | `screenshots` 是保留名，`<空间根>/screenshots` 永不是挂载点；`opendirSync` 之前先 `lstatSync`（不跟随）：符号链接或不是目录按缺失、不打开（同 D8 的先查后用，turn-artifacts MODIFIED）；残余：`lstat` 与 `opendirSync` 之间被换成指向挂载内的符号链接（Risks） |
     | 仓库根标记（`repo-root-marker.ts:16-34`） | `<cwd>/.git`：`.` 开头，不是挂载名；`lstat` 不跟随末段，`mkdir` / `open(O_NOFOLLOW)` 不跟随 |
     | 项目配置文件列表（`rest-project-config.ts:162`） | 只 `lstat` 第一段含 `.` 的路径（`.omp/…`、`.claude/…`、`AGENTS.md`），逐级确认真实目录，不跟随链接 |
     | 会话 cwd（`session-cwd.ts:38`） | 只 `stat` 空间根或属主根本身，不在挂载内 |

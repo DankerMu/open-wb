@@ -356,7 +356,8 @@ describe("turn-artifacts「浏览器截图进入文件变更」", () => {
       expect(existsSync(shots)).toBe(false);
       await run([{ call: "e1", tool: "eval", during: () => writeIn(shots, "screenshot-9.png") }]);
       expectShots(world, 0, "screenshot-9.png");
-      expect(reads()).toBe(2);
+      // ENOENT at lstat: the baseline opens nothing.
+      expect(reads()).toBe(1);
 
       rmSync(shots, { recursive: true });
       writeFileSync(shots, "a file");
@@ -371,7 +372,8 @@ describe("turn-artifacts「浏览器截图进入文件变更」", () => {
         },
       ]);
       expectShots(world, 1, "screenshot-7.png");
-      expect(reads()).toBe(4);
+      // A regular file at lstat: the baseline opens nothing.
+      expect(reads()).toBe(2);
 
       lock(shots);
       await run([
@@ -385,7 +387,7 @@ describe("turn-artifacts「浏览器截图进入文件变更」", () => {
         },
       ]);
       expectNoChange(world, 2);
-      expect(reads()).toBe(5);
+      expect(reads()).toBe(3);
 
       const names = fillers(shots, 4095);
       await run([
@@ -399,7 +401,7 @@ describe("turn-artifacts「浏览器截图进入文件变更」", () => {
         },
       ]);
       expectNoChange(world, 3);
-      expect(reads()).toBe(6);
+      expect(reads()).toBe(4);
     },
   );
 
@@ -455,7 +457,7 @@ describe("turn-artifacts「浏览器截图进入文件变更」", () => {
   );
 
   it(
-    "screenshots is a link to a directory outside the workspace: read through, dropped by ownership",
+    "screenshots is a link to a directory outside the workspace: missing, the link never opened",
     REAL,
     async () => {
       const { world, ws, run } = await drive();
@@ -463,7 +465,7 @@ describe("turn-artifacts「浏览器截图进入文件变更」", () => {
       symlinkSync(outside, join(ws, "screenshots"));
       await run([{ call: "e1", tool: "eval", during: () => writeIn(outside, "screenshot-5.png") }]);
       expectNoChange(world, 0);
-      expect(reads()).toBe(2);
+      expect(reads()).toBe(0);
     },
   );
 });
