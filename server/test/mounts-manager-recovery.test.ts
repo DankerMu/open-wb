@@ -136,7 +136,19 @@ describe("宿主不同步进入挂载: recovery with the libuv pool full", () =>
       child.stderr.on("data", (chunk: Buffer) => {
         stderr += chunk.toString();
       });
-      const code = await new Promise<number | null>((settle) => child.once("exit", settle));
+      // A child that never exits (a pool thread still parked on the FIFO) is killed before the case
+      // times out, so the failure carries its stderr instead of a bare timeout and an orphan.
+      let killed = false;
+      const deadline = setTimeout(() => {
+        killed = true;
+        child.kill("SIGKILL");
+      }, CASE_MS - 5_000);
+      const code = await new Promise<number | null>((settle) => child.once("exit", settle)).finally(
+        () => clearTimeout(deadline),
+      );
+      if (killed) {
+        throw new Error(`threadpool-recovery child did not exit; SIGKILLed. stderr:\n${stderr}`);
+      }
       expect([code, stderr]).toEqual([0, ""]);
 
       const result = JSON.parse(stdout) as Record<string, unknown>;

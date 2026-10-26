@@ -10,9 +10,18 @@
  * 3. 至多等 15 s（只是上限：两件事一成即停；满载的测试机上起一个假 `fusermount3` 要几秒）：rclone 已被结束
  *    （`rcloneDead`）且假 `fusermount3` 已记下 `-uz`（`unmounted`）即恢复完成。
  *
- * 结果以一行 JSON 写到标准输出；无论成败都先以写端打开 FIFO 放回那个线程，再退出。
+ * 结果以一行 JSON 写到标准输出；无论成败（含中途抛错：错误写到标准错误、退出码非零）都先以写端打开
+ * FIFO 放回那个线程，再退出。
  */
-import { closeSync, constants, existsSync, mkdirSync, openSync, readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  writeSync,
+} from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { join } from "node:path";
@@ -89,44 +98,60 @@ const rclonePid = lines(join(input.state, "fake-rclone-calls.jsonl")).find(
 )?.pid;
 const mountPoint = join(input.root, input.record.name);
 
-// 1. The one pool thread blocks in open(2) on a FIFO with no writer.
-const blocking = open(input.fifo, "r");
-let statDone = false;
-void stat(input.state).then(() => {
-  statDone = true;
-});
-await sleep(200);
-result.poolBlocked = !statDone;
-
-// 2. A call in the mount that never returns; its deadline makes the mount offline.
-const call = manager.fs.lstat(input.record.id, join(mountPoint, "a.md")).catch((error) => error);
-const refused = await call;
-result.refused = refused?.code;
-result.offline = manager.statusOf(input.record.id) === "offline";
-
-// 3. The recovery: rclone gone and `-uz` run, all while the pool stays blocked.
-const unmountedAt = () =>
-  lines(join(input.bin, "fusermount3-calls.jsonl")).filter((line) => line.argv[1] === mountPoint);
-const waitUntil = Date.now() + 15_000;
-while (Date.now() < waitUntil) {
-  if (rclonePid !== undefined && !alive(rclonePid) && unmountedAt().length > 0) {
-    break;
-  }
-  await sleep(20);
-}
-result.rcloneDead = rclonePid !== undefined && !alive(rclonePid);
-result.unmounted = unmountedAt();
-result.stillBlocked = !statDone;
-result.errors = errors;
-process.stdout.write(`${JSON.stringify(result)}\n`);
-
-// Release the thread: a writer for the FIFO (non-blocking; a reader is waiting in open).
-let writer;
+// From here a pool thread may be parked in open(2) on the FIFO, and the process cannot exit until it is
+// released: whatever happens, `finally` opens the write end, then exits (non-zero with the error).
+let blocking;
+let exitCode = 0;
 try {
-  writer = openSync(input.fifo, constants.O_WRONLY | constants.O_NONBLOCK);
-} catch {
-  writer = openSync(input.fifo, constants.O_WRONLY);
+  // 1. The one pool thread blocks in open(2) on a FIFO with no writer.
+  blocking = open(input.fifo, "r");
+  let statDone = false;
+  void stat(input.state).then(() => {
+    statDone = true;
+  });
+  await sleep(200);
+  result.poolBlocked = !statDone;
+
+  // 2. A call in the mount that never returns; its deadline makes the mount offline.
+  const call = manager.fs.lstat(input.record.id, join(mountPoint, "a.md")).catch((error) => error);
+  const refused = await call;
+  result.refused = refused?.code;
+  result.offline = manager.statusOf(input.record.id) === "offline";
+
+  // 3. The recovery: rclone gone and `-uz` run, all while the pool stays blocked.
+  const unmountedAt = () =>
+    lines(join(input.bin, "fusermount3-calls.jsonl")).filter((line) => line.argv[1] === mountPoint);
+  const waitUntil = Date.now() + 15_000;
+  while (Date.now() < waitUntil) {
+    if (rclonePid !== undefined && !alive(rclonePid) && unmountedAt().length > 0) {
+      break;
+    }
+    await sleep(20);
+  }
+  result.rcloneDead = rclonePid !== undefined && !alive(rclonePid);
+  result.unmounted = unmountedAt();
+  result.stillBlocked = !statDone;
+  result.errors = errors;
+  process.stdout.write(`${JSON.stringify(result)}\n`);
+} catch (error) {
+  exitCode = 1;
+  writeSync(2, `threadpool-recovery: ${error?.stack ?? error}\n`);
+} finally {
+  if (blocking !== undefined) {
+    // Release the thread: a writer for the FIFO (non-blocking; a reader is waiting in open).
+    try {
+      let writer;
+      try {
+        writer = openSync(input.fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+      } catch {
+        writer = openSync(input.fifo, constants.O_WRONLY);
+      }
+      closeSync(writer);
+    } catch (error) {
+      exitCode = 1;
+      writeSync(2, `threadpool-recovery: releasing the FIFO: ${error?.stack ?? error}\n`);
+    }
+    await blocking.then((handle) => handle.close()).catch(() => undefined);
+  }
+  process.exit(exitCode);
 }
-closeSync(writer);
-await blocking.then((handle) => handle.close()).catch(() => undefined);
-process.exit(0);

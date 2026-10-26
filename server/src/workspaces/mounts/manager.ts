@@ -164,7 +164,7 @@ interface Entry {
   backoffMs: number;
   /** The pending probe round (online) or remount (offline); at most one. */
   timer: unknown;
-  /** The offline transition's unmount and kill in flight; at most one. */
+  /** The offline transition's SIGKILL then `-uz` in flight (never on the libuv pool); at most one. */
   settling: Promise<void> | undefined;
   probe: AbortController | undefined;
   /** The in-flight remount or restore attempt. */
@@ -326,8 +326,9 @@ export function createMountManager(options: MountManagerOptions) {
   };
 
   /**
-   * Crash or failed probe: `offline` now, then at once (not behind the chain — the lazy unmount is what
-   * frees calls stuck in the mount) unmount and stop rclone; the remount it schedules runs on the chain.
+   * Crash or failed probe: `offline` now, then at once (not behind the chain — the SIGKILL of rclone is
+   * what frees calls stuck in the mount, #1665 P9) kill rclone and `-uz`, never waiting on the libuv
+   * pool; the remount it schedules runs on the chain.
    * With a detach queued or running only the status changes: the rest is the detach's.
    */
   const goOffline = (entry: Entry): void => {
