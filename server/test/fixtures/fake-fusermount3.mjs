@@ -4,9 +4,17 @@
  * manager 用的 bin 目录、真实 spawn。只认 `-uz <路径>`：从同目录 `mountinfo.path` 文件里写的那个假
  * mountinfo 中删去挂载点（第 5 字段，按 `\ooo` 八进制转义还原后）等于 `<路径>` 的行，先写临时名再改名；
  * 没有这样的行即同真 fusermount3 一样报 not found、以 1 退出。每次调用都向同目录的
- * `fusermount3-calls.jsonl` 追加一行 `{argv, removed}`。
+ * `fusermount3-calls.jsonl` 追加一行 `{argv, removed}`。改写假 mountinfo 时持有 `<mountinfo>.lock`
+ * （目录锁，假 rclone 追加行时同样持有）：并发的 `-uz` 不丢更新（#1687 关停时并行卸载）。
  */
-import { appendFileSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,15 +28,41 @@ const decode = (field) =>
     "latin1",
   ).toString("utf8");
 
+/** 目录锁：`mkdir` 成功即持有；每 5 ms 重试，2 s 内拿不到即放弃（以 2 退出）。 */
+function withLock(work) {
+  const lock = `${mountinfo}.lock`;
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch {
+      if (Date.now() > deadline) {
+        process.exit(2);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  try {
+    return work();
+  } finally {
+    rmdirSync(lock);
+  }
+}
+
 let removed = 0;
 if (args.length === 2 && args[0] === "-uz") {
-  const lines = readFileSync(mountinfo, "latin1").split("\n");
-  const kept = lines.filter((line) => line === "" || decode(line.split(" ")[4] ?? "") !== args[1]);
-  removed = lines.length - kept.length;
-  if (removed > 0) {
-    writeFileSync(`${mountinfo}.part`, kept.join("\n"), "latin1");
-    renameSync(`${mountinfo}.part`, mountinfo);
-  }
+  removed = withLock(() => {
+    const lines = readFileSync(mountinfo, "latin1").split("\n");
+    const kept = lines.filter(
+      (line) => line === "" || decode(line.split(" ")[4] ?? "") !== args[1],
+    );
+    if (lines.length > kept.length) {
+      writeFileSync(`${mountinfo}.part`, kept.join("\n"), "latin1");
+      renameSync(`${mountinfo}.part`, mountinfo);
+    }
+    return lines.length - kept.length;
+  });
 }
 appendFileSync(
   join(here, "fusermount3-calls.jsonl"),

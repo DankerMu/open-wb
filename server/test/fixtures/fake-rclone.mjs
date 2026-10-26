@@ -13,12 +13,24 @@
  * （#1665 P2′：末尾换行不计入口令）后，`obscured:<口令>` 的 base64url 编码加一个换行——与真 rclone 的
  * obscure 串同一字母表 `[A-Za-z0-9_-]`。
  *
- * `mount <段名>:<远端> <挂载点> …`：标记取自 `<远端>`（`sftp` / `smb` 的 `remotePath`、`local` 的挂载源路径）。
+ * `mount <段名>:<远端> <挂载点> …`：标记取自 `<远端>`（`sftp` / `smb` 的 `remotePath`、`local` 的挂载源路径）；
+ * `<state>/fake-rclone-next` 存在时，每次 `mount` 先取走它的第一行作为本次的标记（重挂时远端已定在 DB 里，测试经
+ * 它逐次改行为，#1687）。`mount` 的记录另有 `confHost`（spawn 时 `--config` 文件里 `host = ` 一行的值，没有为 null；
+ * 只取这一行，整份文件含凭证）与 `preMounted`（spawn 时假 mountinfo 里是否已有挂载点等于本挂载点的行）。
+ * 追加 mountinfo 行时持有 `<mountinfo>.lock`（与假 `fusermount3` 同一把目录锁）。
  * 挂出 = 向 `<state>/fake-mountinfo` 追加一行内核格式的记录：`… <挂载点> … - fuse.rclone <来源> rw…`，
  * 挂载点与来源按内核的写法把空格、制表符、换行与反斜杠写成 `\ooo` 八进制转义。挂出之后前台等待
  * SIGTERM（收到即退出；行不删——卸载由 `fusermount3 -uz` 删它，被 SIGKILL 时行也留着，同真实 FUSE）。
  */
-import { appendFileSync, readFileSync, statSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 
 const SLEEP_MS = 30_000;
@@ -88,11 +100,16 @@ function mount() {
   if (source === undefined || mountPoint === undefined || !rest.includes("--log-file")) {
     process.exit(64);
   }
-  record({ logMode: modeOf(logFile) });
+  const config = rest[rest.indexOf("--config") + 1];
+  record({
+    logMode: modeOf(logFile),
+    confHost: confHostOf(config),
+    preMounted: mountedAt(mountPoint),
+  });
   const colon = source.indexOf(":");
   const section = source.slice(0, colon);
   const remote = source.slice(colon + 1);
-  const marker = /@([a-z0-9-]+)/u.exec(remote)?.[1] ?? "ok";
+  const marker = nextMarker() ?? /@([a-z0-9-]+)/u.exec(remote)?.[1] ?? "ok";
 
   /** 挂出之后等 SIGTERM。 */
   const serve = () => {
@@ -136,6 +153,43 @@ function mount() {
   behave();
 }
 
+/** 取走 `<state>/fake-rclone-next` 的第一行；文件不存在或已空为 undefined。 */
+function nextMarker() {
+  const queue = join(state, "fake-rclone-next");
+  if (!existsSync(queue)) {
+    return undefined;
+  }
+  const [first, ...others] = readFileSync(queue, "utf8")
+    .split("\n")
+    .filter((line) => line !== "");
+  writeFileSync(queue, others.map((line) => `${line}\n`).join(""));
+  return first;
+}
+
+function confHostOf(file) {
+  try {
+    const line = readFileSync(file, "utf8")
+      .split("\n")
+      .find((text) => text.startsWith("host = "));
+    return line === undefined ? null : line.slice("host = ".length);
+  } catch {
+    return null;
+  }
+}
+
+function unmangle(field) {
+  return Buffer.from(
+    field.replace(/\\([0-7]{3})/gu, (_, octal) => String.fromCharCode(Number.parseInt(octal, 8))),
+    "latin1",
+  ).toString("utf8");
+}
+
+function mountedAt(mountPoint) {
+  return readFileSync(join(state, "fake-mountinfo"), "latin1")
+    .split("\n")
+    .some((line) => line !== "" && unmangle(line.split(" ")[4] ?? "") === mountPoint);
+}
+
 function modeOf(file) {
   try {
     return statSync(file).mode & 0o7777;
@@ -154,8 +208,26 @@ function mangle(text) {
 
 /** 一行：`<id> <父 id> <主:次> <根> <挂载点> <选项> [可选字段…] - <类型> <来源> <超级块选项>`。 */
 function appendMount(mountPoint, source, optional) {
-  appendFileSync(
-    join(state, "fake-mountinfo"),
-    `${process.pid} 1 0:${process.pid % 256} / ${mangle(mountPoint)} rw,nosuid,nodev,relatime${optional} - fuse.rclone ${mangle(source)} rw,user_id=0,group_id=0\n`,
-  );
+  const mountinfo = join(state, "fake-mountinfo");
+  const lock = `${mountinfo}.lock`;
+  const deadline = Date.now() + 2000;
+  for (;;) {
+    try {
+      mkdirSync(lock);
+      break;
+    } catch {
+      if (Date.now() > deadline) {
+        process.exit(2);
+      }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    }
+  }
+  try {
+    appendFileSync(
+      mountinfo,
+      `${process.pid} 1 0:${process.pid % 256} / ${mangle(mountPoint)} rw,nosuid,nodev,relatime${optional} - fuse.rclone ${mangle(source)} rw,user_id=0,group_id=0\n`,
+    );
+  } finally {
+    rmdirSync(lock);
+  }
 }

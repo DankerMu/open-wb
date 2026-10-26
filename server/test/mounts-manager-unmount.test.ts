@@ -3,14 +3,13 @@
  * unmount, D10, D15; workspace-mounts「挂载凭证文件」「卸载删除私有目录」,「挂载进程与挂载点」「惰性卸载与残留」
  * and the feature-off unmount rule,「临时空间与删除前卸载」「按空间卸载全部」). Same seam and world as
  * `mounts-manager.test.ts`: the real-spawned fake rclone and fake `fusermount3` over a fake mountinfo.
- * The no-remount-afterwards halves of these scenarios belong to group 6 (#1687).
+ * The no-remount-afterwards halves of these scenarios are in `mounts-manager-lifecycle.test.ts` (#1687).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { emit } from "../src/core/audit/index.js";
 import { HttpError } from "../src/core/errors/index.js";
-import { createMountManager } from "../src/workspaces/mounts/manager.js";
 import {
   alive,
   createWorld,
@@ -26,6 +25,7 @@ import {
   USER_SENTINEL,
   W1,
   type World,
+  waitFor,
 } from "./mounts-manager-helpers.js";
 
 const CASE_MS = 20_000;
@@ -212,7 +212,7 @@ describe("detach refused for want of fusermount3", () => {
   }, async () => {
     world = createWorld({ noFusermount: true });
     const { fusermountBin: _fusermount, ...lookedUp } = world.options();
-    const manager = createMountManager(lookedUp);
+    const manager = world.build(lookedUp);
     await attach(manager);
 
     await expect(manager.detach(ID1, USER_ACTOR)).rejects.toMatchObject({ code: "mount_disabled" });
@@ -260,7 +260,7 @@ describe("功能关闭时的卸载", () => {
     world = createWorld({ noFusermount: true });
     seedRegistered();
     const { rcloneBin: _rclone, fusermountBin: _fusermount, ...disabled } = world.options();
-    const manager = createMountManager(disabled);
+    const manager = world.build(disabled);
 
     await expect(
       manager.attach({ workspaceId: W1, ownerId: OWNER, body: sftp("/srv/data", { name: "丙" }) }),
@@ -339,13 +339,3 @@ describe("临时空间与删除前卸载「按空间卸载全部」", () => {
     expect(world.audits()).toEqual([]);
   });
 });
-
-async function waitFor(condition: () => boolean, ms = 5000): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (!condition()) {
-    if (Date.now() > deadline) {
-      throw new Error("condition not reached");
-    }
-    await new Promise((settle) => setTimeout(settle, 20));
-  }
-}

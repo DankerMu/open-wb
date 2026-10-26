@@ -1,8 +1,9 @@
 /**
  * workspaces/mounts/rclone-process — the child processes of the mount-manager (s1b-workspace-mounts design
- * D7, D9, D10; workspace-mounts「挂载进程与挂载点」): the `rclone mount` argv, its spawn with an environment
- * of exactly `{PATH, HOME}` and no stdio, the readiness wait, stopping it, the subprocess `readdir` probe
- * and one `fusermount3 -uz`. Nothing here touches the database, the registry or a credential: the conf
+ * D7, D9, D10, D11; workspace-mounts「挂载进程与挂载点」): the `rclone mount` argv, its spawn with an
+ * environment of exactly `{PATH, HOME}` and no stdio, the readiness wait, stopping it, the subprocess
+ * `readdir` (readiness) and `stat` (health) probes and one `fusermount3 -uz`. An abort signal ends a
+ * readiness wait and SIGKILLs a probe child at once (unmount and shutdown cancel in-flight attempts). Nothing here touches the database, the registry or a credential: the conf
  * file is only ever named by path (`--config`).
  */
 import { type ChildProcess, spawn } from "node:child_process";
@@ -11,14 +12,22 @@ import { setTimeout as delay } from "node:timers/promises";
 import { readMountinfo, sectionMounts } from "./mountinfo.js";
 
 const POLL_MS = 100;
-/** `fs.readdirSync(<mount point>)` in a child: a FUSE wait blocks that child, never this event loop. */
-const READDIR_SCRIPT = "require('node:fs').readdirSync(process.argv[1])";
+/** One sync call on the mount point in a child: a FUSE wait blocks that child, never this event loop. */
+const PROBE_SCRIPTS = {
+  readdir: "require('node:fs').readdirSync(process.argv[1])",
+  stat: "require('node:fs').statSync(process.argv[1])",
+} as const;
 
 /**
- * Runs one probe of `path` in a child process, killed with SIGKILL after `timeoutMs` (a blocked FUSE call
- * is interruptible by SIGKILL, #1665 P4′); resolves whether it succeeded. Group 6 adds `stat` (D11).
+ * Runs one probe of `path` in a child process, killed with SIGKILL after `timeoutMs` or when `signal`
+ * aborts (a blocked FUSE call is interruptible by SIGKILL, #1665 P4′); resolves whether it succeeded.
  */
-export type ProbeExec = (op: "readdir", path: string, timeoutMs: number) => Promise<boolean>;
+export type ProbeExec = (
+  op: keyof typeof PROBE_SCRIPTS,
+  path: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+) => Promise<boolean>;
 
 export interface MountChild {
   readonly pid: number | undefined;
@@ -105,16 +114,18 @@ export interface ReadyWait {
   /** `Date.now()` value at which the readiness window ends. */
   deadline: number;
   probeExec: ProbeExec;
+  /** Aborted: the wait fails at once (the caller has SIGKILLed the child). */
+  signal: AbortSignal;
 }
 
 /**
  * Every 100 ms until the deadline: a line of this section at another mount point fails at once (#1665
  * P15); the mount point appearing hands the rest of the window to one `readdir` probe, whose success is
- * readiness (#1665 P11); the child exiting first, or the window running out, fails.
+ * readiness (#1665 P11); the child exiting first, the window running out, or the signal, fails.
  */
 export async function awaitReady(wait: ReadyWait): Promise<boolean> {
   for (;;) {
-    if (wait.child.hasExited()) {
+    if (wait.child.hasExited() || wait.signal.aborted) {
       return false;
     }
     const entries = await readMountinfo(wait.mountinfoPath);
@@ -125,7 +136,11 @@ export async function awaitReady(wait: ReadyWait): Promise<boolean> {
     }
     const remaining = wait.deadline - Date.now();
     if (entries.some((entry) => entry.mountPoint === wait.mountPoint)) {
-      return remaining > 0 && (await wait.probeExec("readdir", wait.mountPoint, remaining));
+      return (
+        remaining > 0 &&
+        (await wait.probeExec("readdir", wait.mountPoint, remaining, wait.signal)) &&
+        !wait.signal.aborted
+      );
     }
     if (remaining <= 0) {
       return false;
@@ -153,15 +168,22 @@ export async function stopChild(child: MountChild, graceMs: number): Promise<voi
   }
 }
 
-export const probeInChild: ProbeExec = (_op, path, timeoutMs) =>
+export const probeInChild: ProbeExec = (op, path, timeoutMs, signal) =>
   new Promise((settle) => {
-    const child = spawn(process.execPath, ["-e", READDIR_SCRIPT, path], {
+    if (signal?.aborted) {
+      settle(false);
+      return;
+    }
+    const child = spawn(process.execPath, ["-e", PROBE_SCRIPTS[op], path], {
       env: {},
       stdio: "ignore",
     });
-    const timer = setTimeout(() => child.kill("SIGKILL"), timeoutMs);
+    const kill = () => child.kill("SIGKILL");
+    const timer = setTimeout(kill, timeoutMs);
+    signal?.addEventListener("abort", kill, { once: true });
     const finish = (ok: boolean) => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", kill);
       settle(ok);
     };
     child.once("error", () => finish(false));
