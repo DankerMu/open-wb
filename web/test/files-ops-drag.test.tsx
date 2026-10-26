@@ -49,7 +49,13 @@ import {
   rowsUnder,
   treeUrl,
 } from "./files-ops-support.js";
-import { createFetchMock, deferredResponse, jsonResponse, textPreviewResponse } from "./support.js";
+import {
+  createFetchMock,
+  deferredResponse,
+  jsonResponse,
+  paths,
+  textPreviewResponse,
+} from "./support.js";
 import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const CONFLICT = () =>
@@ -239,7 +245,7 @@ describe("拖拽", () => {
       await settle();
       expect(notices()).toStrictEqual(shown);
       expect(rowNames()).toStrictEqual(["工作空间", "out", "a.md"]);
-      expect(fetchMock.mock.calls.map(([path]) => path)).toStrictEqual([treeUrl(""), MOVE]);
+      expect(paths(fetchMock)).toStrictEqual([treeUrl(""), MOVE]);
       expect(dragOnto(source, row("展开 out")).accepted).toBe(true);
     },
   );
@@ -508,7 +514,7 @@ describe("拖拽：不是从本树拖起的拖动", () => {
     expect(highlighted()).toStrictEqual([]);
     dropOn(source, row("折叠 out"), transfer);
     await settle();
-    expect(fetchMock.mock.calls.map(([path]) => path)).toStrictEqual([treeUrl("")]);
+    expect(paths(fetchMock)).toStrictEqual([treeUrl("")]);
 
     view.rerender(browser());
     expect(draggable()).toStrictEqual([

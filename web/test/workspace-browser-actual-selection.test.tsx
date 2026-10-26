@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WorkspaceBrowser, type WorkspaceBrowserHandle } from "../src/features/files/index.js";
 import { createApiClient } from "../src/lib/api.js";
 import { cleanupFilesFixture, type FetchRoutes } from "./files-fixture.js";
-import { createFetchMock, jsonResponse, textPreviewResponse } from "./support.js";
+import { createFetchMock, jsonResponse, paths, textPreviewResponse } from "./support.js";
 import { yieldMacrotask } from "./ui-support.js";
 
 const API = "/api/workspaces/workspace-1";
@@ -97,7 +97,7 @@ function mount(extra: Extra = {}) {
     onPathChange,
     onSelectionChange,
     rerender: () => view.rerender(<Host />),
-    requests: () => fetchMock.mock.calls.map(([path]) => path),
+    requests: () => paths(fetchMock),
     setPath: (path: string | null) => act(() => write({ ...current, path })),
     /** 宿主撤掉 `pathSeq`（不传）。 */
     withdrawSeq: () => act(() => write({ ...current, seq: undefined })),

@@ -9,7 +9,7 @@ import {
   renderFiles,
   workspace,
 } from "./files-fixture.js";
-import { jsonResponse } from "./support.js";
+import { isMountsRequest, jsonResponse } from "./support.js";
 import { pressPointer, yieldMacrotask } from "./ui-support.js";
 
 const API = "/api/workspaces/workspace-1";
@@ -66,11 +66,13 @@ export function openFiles(
   }
   const mounted = renderFiles(at, authenticatedFilesRoutes([workspace], { ...trees, ...extra }));
   const log = () =>
-    mounted.fetchMock.mock.calls.map(([path, options]) => {
-      const method = options?.method ?? "GET";
-      const body = options?.body == null ? [] : [String(options.body)];
-      return method === "GET" ? path : [method, path, ...body].join(" ");
-    });
+    mounted.fetchMock.mock.calls
+      .filter(([path]) => !isMountsRequest(path))
+      .map(([path, options]) => {
+        const method = options?.method ?? "GET";
+        const body = options?.body == null ? [] : [String(options.body)];
+        return method === "GET" ? path : [method, path, ...body].join(" ");
+      });
   return {
     ...mounted,
     /** 从现在起的请求记录。 */
