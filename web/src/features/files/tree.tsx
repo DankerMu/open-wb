@@ -12,6 +12,8 @@ import { ALERT_BOX } from "./columns.js";
 import { EmptyState } from "./empty-state.js";
 import type { EntryActions, MenuFocus } from "./entry-ops.js";
 import { fileIcon, formatSize } from "./file-meta.js";
+import { MountRoots } from "./mount-roots.js";
+import type { MountRootsState } from "./use-mounts.js";
 
 /** 带标记的行（路径与其各级父目录）与标记的可访问文本。 */
 type TreeMarks = { label: string; paths: ReadonlySet<string> };
@@ -28,9 +30,13 @@ type DirectoryTreeState = {
   focusMenuPath?: MenuFocus | undefined;
   onSelectFile(entry: TreeRow, path: string): void;
   onToggleDirectory(path: string): void;
+  /** 该空间有挂载根行：空间根一层为空时显示 `空目录` 而不是空态。 */
+  hasMounts?: boolean | undefined;
 };
 
 type DirectoryTreeProps = DirectoryTreeState & {
+  /** 挂载根行（`use-mounts.ts`）；`onlyPaths` 下浏览器不给。 */
+  mounts?: MountRootsState | undefined;
   /** 根行副行：逻辑路径 `<account>/<dir>`；不可解析时不渲染。 */
   rootPath: string | undefined;
   workspaceName: string;
@@ -339,27 +345,9 @@ function FileRow({
   );
 }
 
-function DirectoryNode({
-  actions,
-  cache,
-  drag,
-  errors,
-  expandedPaths,
-  focusMenuPath,
-  icon,
-  label,
-  loadingPaths,
-  marks,
-  onSelectFile,
-  onToggleDirectory,
-  path,
-  selectedPath,
-  subline,
-}: DirectoryNodeProps) {
-  const entries = ownValue(cache, path)?.entries;
+function DirectoryNode({ drag, icon, label, path, subline, ...state }: DirectoryNodeProps) {
+  const { actions, expandedPaths, focusMenuPath, marks, onToggleDirectory } = state;
   const expanded = expandedPaths.has(path);
-  const loading = loadingPaths.has(path);
-  const error = ownValue(errors, path);
   const mark = useRowMark(marks, path);
   // 根行没有菜单。
   const menu = path === "" ? undefined : actions;
@@ -401,6 +389,40 @@ function DirectoryNode({
           {subline}
         </p>
       ) : null}
+      <DirectoryBody {...state} drag={drag} path={path} />
+    </li>
+  );
+}
+
+/**
+ * 目录行之下的部分：读取错误、读取中、展开后的条目（`空目录`）。目录行与挂载根行（`mount-roots.tsx`）共用。
+ * 空间根一层为空时：没有挂载显示空态，有挂载显示 `空目录`（服务端不列出挂载点，其后照常是挂载根行）。
+ */
+function DirectoryBody({
+  drag,
+  path,
+  ...state
+}: DirectoryTreeState & { drag: RowDrag | undefined; path: string }) {
+  const {
+    actions,
+    cache,
+    errors,
+    expandedPaths,
+    focusMenuPath,
+    hasMounts,
+    loadingPaths,
+    marks,
+    onSelectFile,
+    onToggleDirectory,
+    selectedPath,
+  } = state;
+  const entries = ownValue(cache, path)?.entries;
+  const expanded = expandedPaths.has(path);
+  const loading = loadingPaths.has(path);
+  const error = ownValue(errors, path);
+
+  return (
+    <>
       {error ? (
         <p
           className={`${ROW_NOTE} ${ALERT_BOX} mt-[0.2rem] mb-[0.35rem] text-[0.75rem]`}
@@ -421,7 +443,7 @@ function DirectoryNode({
         <ul className="pl-[0.85rem]">
           {entries.length === 0 ? (
             <li className="min-w-0">
-              {path === "" ? (
+              {path === "" && !hasMounts ? (
                 <EmptyState description="点击左上角 ＋ 新建文件夹" title="该工作空间暂无目录" />
               ) : (
                 <p
@@ -473,12 +495,13 @@ function DirectoryNode({
           )}
         </ul>
       ) : null}
-    </li>
+    </>
   );
 }
 
-export function DirectoryTree({ rootPath, workspaceName, ...state }: DirectoryTreeProps) {
-  const drag = useRowDrag(state.actions);
+export function DirectoryTree({ mounts, rootPath, workspaceName, ...rest }: DirectoryTreeProps) {
+  const drag = useRowDrag(rest.actions);
+  const state = { ...rest, hasMounts: (mounts?.mounts.length ?? 0) > 0 };
   return (
     <nav aria-label="工作空间目录树">
       <ul>
@@ -490,6 +513,14 @@ export function DirectoryTree({ rootPath, workspaceName, ...state }: DirectoryTr
           path=""
           subline={rootPath}
         />
+        {mounts ? (
+          <MountRoots
+            {...mounts}
+            body={(path) => <DirectoryBody {...state} drag={drag} path={path} />}
+            expandedPaths={state.expandedPaths}
+            onToggleDirectory={state.onToggleDirectory}
+          />
+        ) : null}
       </ul>
     </nav>
   );

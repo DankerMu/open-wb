@@ -9,6 +9,12 @@
  * through here on its way from the host's prop to that previewer.
  * A PDF or an office document has no fetched body either: its previewer gets the token, the path
  * and the entry's size, and decides there whether a frame is built.
+ * `inMount` (the host says the file is inside a registered mount, file-previewers「隔离来源的嵌入与
+ * 令牌」): the preview origin answers 404 for such paths, so a web page's rendered view, a PDF and an
+ * office document get `IN_MOUNT` in place of the token — a failed token, which their previewer shows
+ * as that line before any other check (too large, no converter) and without a frame. The host does
+ * not issue a token for them (`WorkspaceBrowser`); 查看源码 and the previewers reading `file` are as
+ * before.
  * `size` and `mtime` are the tree entry's and may be missing together (a row of the session
  * sidebar's filtered view whose parent directory was never listed, issue 1372): the header then has no
  * size / time line and the unsupported and too-large lines are the file name alone. Nothing stands
@@ -39,6 +45,12 @@ type FilePreviewSuccess = Extract<PreviewState, { status: "success" }>["data"];
 type WebPreview = Extract<PreviewState, { status: "web" }>;
 type DocumentPreview = Extract<PreviewState, { status: "document" }>;
 
+/** What stands in for the token of a file inside a mount: shown in place of the frame. */
+const IN_MOUNT = {
+  status: "error",
+  message: "挂载目录内的文件暂不支持预览，请下载查看",
+} as const satisfies ReturnType<typeof usePreviewToken>;
+
 type PreviewPaneProps = {
   workspaceId: string;
   path: string;
@@ -48,6 +60,8 @@ type PreviewPaneProps = {
   preview: PreviewState;
   /** The host's `usePreviewToken` result; a web page's rendered view, a PDF and an office document read it. */
   previewToken: ReturnType<typeof usePreviewToken>;
+  /** The file is inside a registered mount: no frame from the preview origin (see the header). */
+  inMount?: boolean | undefined;
   /** 查看源码 / 渲染视图 of a web page: the view is the host's. Without it the button does nothing. */
   onWebViewChange?: ((view: WebPreview["view"]) => void) | undefined;
 };
@@ -97,8 +111,10 @@ export function PreviewPane({
   mtime,
   preview,
   previewToken,
+  inMount = false,
   onWebViewChange = ignoreViewChange,
 }: PreviewPaneProps) {
+  const token = inMount ? IN_MOUNT : previewToken;
   // 网页的渲染视图不受预览上限约束：截断行只属于它的源码视图。
   const shown = preview.status === "web" && preview.view === "source" ? preview.source : preview;
   const truncatedSize =
@@ -154,7 +170,7 @@ export function PreviewPane({
           truncated={false}
           web={{
             path,
-            token: previewToken,
+            token,
             view: preview.view,
             reload: preview.reload,
             onViewChange: onWebViewChange,
@@ -168,7 +184,7 @@ export function PreviewPane({
           content=""
           doc={{
             path,
-            token: previewToken,
+            token,
             reload: preview.reload,
             size,
             office: previewKind(name) === "office",

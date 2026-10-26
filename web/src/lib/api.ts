@@ -31,6 +31,7 @@ import {
   type ModelView,
   type UpdateModelInput,
 } from "./api-models.js";
+import { createMountMethods, type MountList } from "./api-mounts.js";
 import {
   createSessionCapabilityMethods,
   type SessionCapabilities,
@@ -150,6 +151,8 @@ export type ApiClient = {
     path: string,
     options?: ApiRequestOptions,
   ): Promise<ArchiveListing>;
+  listMounts(workspaceId: string, options?: ApiRequestOptions): Promise<MountList>;
+  deleteMount(workspaceId: string, mountId: string, options?: ApiRequestOptions): Promise<void>;
   listAudit(filter?: AuditFilter, options?: ApiRequestOptions): Promise<AuditList>;
   listSessions(options?: ApiRequestOptions): Promise<ChatSessionList>;
   createSession(input?: ChatSessionCreateInput, options?: ApiRequestOptions): Promise<ChatSession>;
@@ -477,6 +480,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
   return {
     ...createSessionMethods(onUnauthorized, transport),
     ...createFileMethods(onUnauthorized, transport),
+    ...createMountMethods(onUnauthorized, transport),
     ...createCommandMethods(onUnauthorized, { getRequestOptions, request, requestFailed }),
     ...createUploadMethods(onUnauthorized, {
       isSuccessfulStatus,
@@ -590,5 +594,6 @@ export {
   type ModelView,
   type UpdateModelInput,
 } from "./api-models.js";
+export type { MountList, MountView } from "./api-mounts.js";
 export type { SessionCapabilities } from "./api-session-capabilities.js";
 export type { SkillList } from "./api-skills.js";

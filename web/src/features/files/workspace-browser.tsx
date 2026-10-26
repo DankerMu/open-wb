@@ -59,6 +59,8 @@
  *   listings, the expanded set and the selection to the new path without walking again, and after a
  *   delete drops them (a deleted current file or ancestor: `onPathChange(null)`). A row dropped on a
  *   directory row moves the same way (`tree.tsx`). No row menu and no drag while `onlyPaths` is set.
+ * - Mounts (`use-mounts.ts`): the mount root rows (none while `onlyPaths` is set), their directories in
+ *   `位置`, and「在挂载内」for the preview. The `刷新` button refetches the list; the handle's does not.
  */
 import {
   type ReactNode,
@@ -73,7 +75,6 @@ import {
 import { type ApiClient, fileUrl } from "../../lib/api.js";
 import {
   type DirectoryCache,
-  loadedDirectoryPaths,
   markedRows,
   normalizedPath,
   parentPath,
@@ -100,6 +101,7 @@ import {
   withFetched,
 } from "./preview-area.js";
 import { DirectoryTree } from "./tree.js";
+import { useMounts } from "./use-mounts.js";
 import { usePreviewToken } from "./use-preview-token.js";
 
 /** 进行中的定位：`asked` 是这一次已经请求过的目录，请求过仍没有列表即失败。 */
@@ -201,12 +203,11 @@ export function WorkspaceBrowser({
   const subtreeOnly = onlyPaths !== undefined;
   const pathRecords = usePathRecords();
   const { missing: recordMissing, records, ref: recordsRef } = pathRecords;
-  // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）、PDF 或办公文档时才签发与续期。第四参是
-  // 该预览的 `reload`：刷新或再点同一行使它变化（网页限渲染视图），令牌由此按需重新签发；其余情况给 0。
-  const framed =
-    selectedFile?.preview?.status === "web" || selectedFile?.preview?.status === "document"
-      ? selectedFile.preview
-      : null;
+  // 挂载根行、`位置` 与「在挂载内」（`use-mounts.ts`）；卸载掉当前文件所在的挂载时清掉选中并上报 `null`。
+  const mounts = useMounts(client, workspaceId, directories, selectedFileRef, dropSelection);
+  // 这一页唯一的一次调用：选中的是网页（渲染或源码视图）、PDF 或办公文档、且不在挂载内时才签发与续期。
+  // 第四参是该预览的 `reload`：刷新或再点同一行使它变化（网页限渲染视图），令牌由此按需重新签发；其余给 0。
+  const { framed, inMount } = mounts.preview(selectedFile);
   const previewToken = usePreviewToken(client, workspaceId, framed !== null, framed?.reload ?? 0);
 
   const releaseOwnedImage = useCallback(() => {
@@ -310,6 +311,10 @@ export function WorkspaceBrowser({
     publishSelectedFile(null);
     setPreviewLoading(false);
   }, [cancelPreviewRequest, publishSelectedFile, releaseOwnedImage]);
+  function dropSelection() {
+    clearSelection();
+    reportPath(null);
+  }
 
   /**
    * `file` / `archive` 对 `path` 的失败是不是「它已不存在」：给了 `onlyPaths` 或 `clearMissing`、应答是
@@ -656,7 +661,7 @@ export function WorkspaceBrowser({
   // 才重取。展开状态、选中与预览模式不动，失败沿用各目录的错误行、旧列表保留。
   const refresh = useCallback(
     (paths?: string[]) => {
-      const loaded = loadedDirectoryPaths(cacheRef.current);
+      const loaded = mounts.loaded(cacheRef.current);
       const layers = paths
         ? refreshLayers(cacheRef.current, paths)
         : new Set(["", ...loaded, ...Object.keys(directoryErrors)]);
@@ -668,7 +673,7 @@ export function WorkspaceBrowser({
         selectFile(selected.entry, selected.path);
       }
     },
-    [directoryErrors, loadDirectory, selectFile],
+    [directoryErrors, loadDirectory, mounts.loaded, selectFile],
   );
 
   const followEntry = useFollowEntry({
@@ -707,7 +712,6 @@ export function WorkspaceBrowser({
     [continueReveal, pathRecords.reported, refresh],
   );
 
-  const directoriesForDialog = useMemo(() => loadedDirectoryPaths(directories), [directories]);
   const marks = useMemo(
     () => markedPaths && { label: markedPaths.label, paths: markedRows(markedPaths.paths) },
     [markedPaths],
@@ -737,6 +741,7 @@ export function WorkspaceBrowser({
               focusMenuPath={focusMenuPath}
               loadingPaths={subtree ? NO_PATHS : loadingPaths}
               marks={marks}
+              mounts={subtree ? undefined : mounts.roots}
               onSelectFile={chooseFile}
               // `onlyPaths` 下各级目录恒为展开：不改真实的展开集合，也不列目录。
               onToggleDirectory={subtree ? ignoreToggle : toggleDirectory}
@@ -746,13 +751,17 @@ export function WorkspaceBrowser({
             />
           )
         }
-        folderNotice={folder.notice ?? operations.notice}
+        folderNotice={folder.notice ?? operations.notice ?? mounts.error}
         layout={layout}
         onNewDirectory={folder.open}
         onNewWorkspace={onNewWorkspace}
-        onRefresh={() => refresh()}
+        onRefresh={() => {
+          refresh();
+          mounts.refetch();
+        }}
         preview={
           <PreviewArea
+            inMount={inMount}
             loading={previewLoading}
             notice={clearMissing ? null : pathNotice}
             onWebViewChange={showWebView}
@@ -766,7 +775,7 @@ export function WorkspaceBrowser({
       />
       {folder.dialog ? (
         <DirectoryDialog
-          directories={directoriesForDialog}
+          directories={mounts.dialogDirectories}
           error={folder.dialog.error}
           onCancel={folder.close}
           onCreate={folder.create}

@@ -9,6 +9,7 @@ import {
   Circle,
   CircleCheck,
   CircleX,
+  Cloud,
   Code,
   Copy,
   Download,
@@ -104,6 +105,7 @@ const ICONS = {
   palette: Palette,
   "chevron-up": ChevronUp,
   filter: Funnel,
+  cloud: Cloud,
 } satisfies Record<string, LucideIcon>;
 
 export type IconName = keyof typeof ICONS;

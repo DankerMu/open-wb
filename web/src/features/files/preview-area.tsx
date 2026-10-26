@@ -26,6 +26,8 @@ type PreviewAreaProps = {
   workspaceId: string;
   /** 宿主那一次 `usePreviewToken` 的结果，原样交给预览面板。 */
   previewToken: ReturnType<typeof usePreviewToken>;
+  /** 选中的文件在该空间的已登记挂载内（宿主按第一段判定）：原样交给预览面板。 */
+  inMount?: boolean | undefined;
   onWebViewChange(view: WebView): void;
 };
 
@@ -125,6 +127,7 @@ export function immediatePreview(
 }
 
 export function PreviewArea({
+  inMount,
   loading,
   notice,
   onWebViewChange,
@@ -146,6 +149,7 @@ export function PreviewArea({
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {selectedFile.preview ? (
         <PreviewPane
+          inMount={inMount}
           mtime={selectedFile.entry.mtime}
           name={selectedFile.entry.name}
           onWebViewChange={onWebViewChange}

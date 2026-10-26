@@ -62,16 +62,30 @@ type RenameDialogProps = {
   onRename(name: string): void;
 };
 
-type DeleteEntryDialogProps = {
-  /** 条目的名字与类别：标题与说明用。 */
-  name: string;
-  type: "dir" | "file";
+type ConfirmDialogProps = {
+  title: string;
+  /** 说明（`aria-describedby` 指向它）。 */
+  note: string;
+  confirmLabel: string;
+  /** 请求挂起期间的说明。 */
+  pendingNote: string;
   error: string | null;
   pending: boolean;
-  /** 取消类关闭后是该行的 `更多操作 <名>`；删除成功后调用方把它换成父目录的行按钮。 */
   returnFocus: ReturnFocus;
   onCancel(): void;
   onConfirm(): void;
+};
+
+type DeleteEntryDialogProps = Omit<
+  ConfirmDialogProps,
+  "confirmLabel" | "note" | "pendingNote" | "title"
+> & {
+  /**
+   * 条目的名字与类别：标题与说明用。取消类关闭后 `returnFocus` 是该行的 `更多操作 <名>`；删除成功后
+   * 调用方把它换成父目录的行按钮。
+   */
+  name: string;
+  type: "dir" | "file";
 };
 
 type MoveDialogProps = {
@@ -489,27 +503,29 @@ export function MoveDialog({
 }
 
 /**
- * `删除` 确认框（拷入层 `alert-dialog`：没有右上 `关闭`，点遮罩不关闭）。初始焦点在 `取消`，是拷入层
- * 的缺省，这里不写 `onOpenAutoFocus`。`删除` 是普通按钮而不是 `AlertDialogAction`：点了不关框，关不关
- * 由请求的结局定——失败时文案显示在框内、框留着。`取消` 与 Escape 都是 `onCancel`（挂起期即中止等待）；
- * 关闭后焦点给 `returnFocus`。
+ * 确认框（拷入层 `alert-dialog`：没有右上 `关闭`，点遮罩不关闭）：`删除` 与挂载根行的 `卸载`
+ *（`mount-roots.tsx`）共用。初始焦点在 `取消`，是拷入层的缺省，这里不写 `onOpenAutoFocus`。确认按钮
+ * 是普通按钮而不是 `AlertDialogAction`：点了不关框，关不关由请求的结局定——失败时文案显示在框内、框
+ * 留着。`取消` 与 Escape 都是 `onCancel`（挂起期即中止等待）；关闭后焦点给 `returnFocus`。
  */
-export function DeleteEntryDialog({
+export function ConfirmDialog({
+  confirmLabel,
   error,
-  name,
+  note,
   onCancel,
   onConfirm,
   pending,
+  pendingNote,
   returnFocus,
-  type,
-}: DeleteEntryDialogProps) {
+  title,
+}: ConfirmDialogProps) {
   const cancelRef = useRef<HTMLButtonElement>(null);
   const onOpenChange = (open: boolean) => {
     if (!open) onCancel();
   };
   const fallback = useEscapeFallback({ canClose: true, onOpenChange });
 
-  // `删除` 在请求发出的那次提交里被禁用：焦点若在它上面（jsdom 不移焦点）或已被浏览器移到 body，
+  // 确认按钮在请求发出的那次提交里被禁用：焦点若在它上面（jsdom 不移焦点）或已被浏览器移到 body，
   // 移到 `取消`，不让焦点留在禁用的控件上或逃出确认框。
   useLayoutEffect(() => {
     const active = document.activeElement;
@@ -531,12 +547,12 @@ export function DeleteEntryDialog({
         ref={fallback.ref}
       >
         <AlertDialogHeader>
-          <AlertDialogTitle className="[overflow-wrap:anywhere]">{`删除「${name}」？`}</AlertDialogTitle>
-          <AlertDialogDescription>{DELETE_NOTES[type]}</AlertDialogDescription>
+          <AlertDialogTitle className="[overflow-wrap:anywhere]">{title}</AlertDialogTitle>
+          <AlertDialogDescription>{note}</AlertDialogDescription>
         </AlertDialogHeader>
         {pending ? (
           <p className="m-0 text-xs text-muted-foreground" role="status">
-            正在删除。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。
+            {pendingNote}
           </p>
         ) : null}
         {error ? (
@@ -552,10 +568,23 @@ export function DeleteEntryDialog({
             onClick={onConfirm}
             variant="destructive"
           >
-            删除
+            {confirmLabel}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+  );
+}
+
+/** `删除` 确认框：`ConfirmDialog` 加上删除的标题、说明与挂起说明。 */
+export function DeleteEntryDialog({ name, type, ...rest }: DeleteEntryDialogProps) {
+  return (
+    <ConfirmDialog
+      {...rest}
+      confirmLabel="删除"
+      note={DELETE_NOTES[type]}
+      pendingNote="正在删除。取消将停止等待；如请求已到达服务器，结果可在刷新后确认。"
+      title={`删除「${name}」？`}
+    />
   );
 }

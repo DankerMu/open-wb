@@ -81,8 +81,11 @@ export function openFiles(
       return () => log().slice(start);
     },
     moves: () => mounted.fetchMock.mock.calls.filter(([path]) => path === MOVE),
+    /** 条目的 `DELETE`（卸载挂载的 `DELETE …/mounts/<id>` 不算，见 `isMountsRequest`）。 */
     deletes: () =>
-      mounted.fetchMock.mock.calls.filter(([, options]) => options?.method === "DELETE"),
+      mounted.fetchMock.mock.calls.filter(
+        ([path, options]) => options?.method === "DELETE" && !isMountsRequest(path),
+      ),
   };
 }
 
