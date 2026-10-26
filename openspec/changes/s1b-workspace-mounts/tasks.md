@@ -179,10 +179,11 @@ Width exception: 验证分 CI（报告 skipped）与测试主机签收运行两�
 
 > owner 2026-10-25 裁定 Epic #1679 (a)：挂载源登记做成中心最小 tab（design D18）。依赖 7A（`/api/mount-sources` 端点）与 #1675（中心「连接器」tab：`CENTER_TABS` 的 `connectors` 一项与中心 tab 的写法）。
 
-- [ ] 13.1 核对 Context：#1675 合入后的 `web/src/features/center/tabs.ts`、中心「连接器」tab 的列表、对话框与删除确认写法、`useEscapeFallback`；组 10 合入后的 `web/src/lib/api-mounts.ts`（若 13 先于 10B 合入则新建该文件，只放挂载源三个函数与 `SourceView` 的管理员视图解析）；7A 的端点视图与错误码。
-- [ ] 13.2 测试先行：新 `web/test/center-mount-sources.test.tsx`（假 `ApiClient`）：「登记与删除」「就地失败与空态」（含普通用户被导航到第一个可见 tab、不发 `GET /api/mount-sources`）、客户端校验（名称与路径规则）；`web/test/center*.test.tsx` 里「管理员与普通用户」的 tab 条断言改为五项 / 三项。验证：`npm test --workspace web -- center`。
-- [ ] 13.3 `tabs.ts` 加 `mount-sources` 一项；新 `web/src/features/center/mount-sources-tab.tsx`（列表、登记对话框、删除确认、空态）；`api-mounts.ts` 加 `createMountSource` / `deleteMountSource`（`listMountSources` 已随 #1699 落地，返回两种视图都能解析的 `MountSourceList`，本组用它的 `view:"admin"` 分支，不另写解析器）。验证：13.2 全绿、`make check`。
-- [ ] 13.4 验收清单新增一行（以合入时末号续编）：管理员在中心「挂载源」登记服务器目录、普通用户在挂载对话框里看到并挂载它、管理员删除后该挂载被卸载；结论 `待签`。验证：`web/test/functional-checklist.test.ts`。
+- [x] 13.1 核对 Context：#1675 合入后的 `web/src/features/center/tabs.ts`、中心「连接器」tab 的列表、对话框与删除确认写法、`useEscapeFallback`；组 10 合入后的 `web/src/lib/api-mounts.ts`（若 13 先于 10B 合入则新建该文件，只放挂载源三个函数与 `SourceView` 的管理员视图解析）；7A 的端点视图与错误码。
+- [x] 13.2 测试先行：新 `web/test/center-mount-sources.test.tsx`（假 `ApiClient`）：「登记与删除」「就地失败与空态」（含普通用户被导航到第一个可见 tab、不发 `GET /api/mount-sources`）、客户端校验（名称与路径规则）；`web/test/center*.test.tsx` 里「管理员与普通用户」的 tab 条断言改为五项 / 三项。验证：`npm test --workspace web -- center`。
+- [x] 13.3 `tabs.ts` 加 `mount-sources` 一项；新 `web/src/features/center/mount-sources-tab.tsx`（列表、登记对话框、删除确认、空态）；`api-mounts.ts` 加 `createMountSource` / `deleteMountSource`（`listMountSources` 已随 #1699 落地，返回两种视图都能解析的 `MountSourceList`，本组用它的 `view:"admin"` 分支，不另写解析器）。验证：13.2 全绿、`make check`。
+- [x] 13.4 验收清单新增一行（以合入时末号续编）：管理员在中心「挂载源」登记服务器目录、普通用户在挂载对话框里看到并挂载它、管理员删除后该挂载被卸载；结论 `待签`。验证：`web/test/functional-checklist.test.ts`。
+  - 开工核对补记（#1757）：组 13 落地，13.1–13.4 勾选。新 `mount-sources-tab.tsx`（面板、状态 hook、表格、登记对话框接 `useEscapeFallback`、删除确认、客户端校验）；`tabs.ts` 在 `models` 后加一项；`api-mounts.ts` 加 `createMountSource`（只认 201、`parseAdminSource` 严格解析）与 `deleteMountSource`（只认 204），列表复用 `listMountSources` 的 `view:"admin"` 分支。实现取定：删除失败时确认框保持打开、框内显示 `ApiError.message`（连接器 tab 是关框后页顶提示）；空列表按空态；管理员收到非空三键视图按无效应答。spec 未给的校验原因文案：`名称不能为空`、`名称不能超过 64 个字符`、`名称不能含控制字符`、`服务器路径须为以 / 开头的绝对路径`（规则同 `validateMountSourceBody`：1..64 码点、无 U+0000–U+001F 与 U+007F、绝对路径，不修剪）。测试接缝：面板用例为假 `ApiClient`（同其它中心 tab），API 函数为真实 client + fetch 替身。验收清单 FL-52（文件节）；CM-04 改为管理员五项 / 普通用户三项；FL-50 的 curl 登记改为经该 tab。
 
 Suggested fixture level: compact - 一个前端 tab，服务端不变；风险在 tab 表次序与普通用户不可见。
 Minimal mergeable slice: atomic - tab 项、列表、登记与删除是同一条组件用例路径。

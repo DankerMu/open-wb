@@ -291,6 +291,9 @@ const OTHER_CLIENT_METHODS = [
   "createMount",
   "deleteMount",
   "listMountSources",
+  // 挂载源的管理员写（workspace-mounts「中心「挂载源」tab」）
+  "createMountSource",
+  "deleteMountSource",
   // 会话能力（design D7；experts「输入框的专家选择」）
   "getSessionCapabilities",
   "putSessionCapabilities",

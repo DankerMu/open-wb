@@ -1,6 +1,6 @@
 // model-registry「中心页外壳」：`/center` 的 `?tab=` 规则、仅管理员可见的 tab 与空态；`isAdmin`；
 // routeManifest 的 `/center` 描述。真表（`CENTER_TABS`：人人可见的「专家」「技能」「连接器」在前、仅管理员可见的
-//「模型」在后，s1d-experts-skills 任务 7.2、8.2，s1d-connectors 任务 6.2）经真实路由（createAppRouter）打开；「无可见 tab → 空态」与注入的表
+//「模型」「挂载源」在后，s1d-experts-skills 任务 7.2、8.2，s1d-connectors 任务 6.2，s1b-workspace-mounts 任务 13.2）经真实路由（createAppRouter）打开；「无可见 tab → 空态」与注入的表
 //（空表、一项、两项）经只含 `/center` 一条的浏览器路由。
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
@@ -128,12 +128,12 @@ describe("注入空表", () => {
   );
 });
 
-describe("真表（CENTER_TABS：人人可见的「专家」「技能」「连接器」、仅管理员可见的「模型」）", () => {
+describe("真表（CENTER_TABS：人人可见的「专家」「技能」「连接器」、仅管理员可见的「模型」「挂载源」）", () => {
   it.each([
     ["/center", "/center?tab=experts"],
     ["/center?tab=nope", "/center?tab=experts"],
   ])(
-    "管理员打开 %s：以 replace 变为 %s，tab 条恰为「专家」「技能」「连接器」「模型」且「专家」选中，渲染专家面板",
+    "管理员打开 %s：以 replace 变为 %s，tab 条恰为「专家」「技能」「连接器」「模型」「挂载源」且「专家」选中，渲染专家面板",
     async (path, target) => {
       const before = window.history.length;
       const fetchMock = openApp(path, ADMIN);
@@ -146,6 +146,7 @@ describe("真表（CENTER_TABS：人人可见的「专家」「技能」「连�
         ["技能", "false"],
         ["连接器", "false"],
         ["模型", "false"],
+        ["挂载源", "false"],
       ]);
       expect(paths(fetchMock)).not.toContain("/api/models");
       expect(screen.queryByText(EMPTY)).toBeNull();
@@ -165,12 +166,13 @@ describe("真表（CENTER_TABS：人人可见的「专家」「技能」「连�
       ["技能", "false"],
       ["连接器", "false"],
       ["模型", "true"],
+      ["挂载源", "false"],
     ]);
     expect(within(main).getByRole("cell", { name: SEED_VIEW.name })).toBeTruthy();
   });
 
-  it.each(["/center?tab=models", "/center"])(
-    "普通用户打开 %s：以 replace 变为 /center?tab=experts，tab 条恰为「专家」「技能」「连接器」，不请求模型列表",
+  it.each(["/center?tab=models", "/center?tab=mount-sources", "/center"])(
+    "普通用户打开 %s：以 replace 变为 /center?tab=experts，tab 条恰为「专家」「技能」「连接器」，不请求模型列表与挂载源",
     async (path) => {
       const before = window.history.length;
       const fetchMock = openApp(path, MEMBER);
@@ -185,6 +187,7 @@ describe("真表（CENTER_TABS：人人可见的「专家」「技能」「连�
       ]);
       expect(within(screen.getByRole("main")).queryByText(EMPTY)).toBeNull();
       expect(paths(fetchMock)).not.toContain("/api/models");
+      expect(paths(fetchMock)).not.toContain("/api/mount-sources");
     },
   );
 
