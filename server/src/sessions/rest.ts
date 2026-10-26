@@ -301,6 +301,13 @@ export function registerSessionRoutes(
         requirePlainRecord(request.body),
         dependencies.uploadMaxFiles,
       );
+      // The binding is immutable, so the tree cached before the body arrived still has it. It is
+      // the session's own: nothing in the body names a workspace.
+      const bound = authorizedHistory.get(request)?.tree.session.workspaceId ?? null;
+      // The stored text stays as typed; only `/` text is classified, so no other prompt scans.
+      // The skills are those of this session's cwd: its workspace root, else the owner root. Read
+      // (and awaited) ahead of the segment below, which they depend on only through `bound`.
+      const skills = text.startsWith("/") ? await skillsOf(principal.id, bound) : [];
       // Archive read, claim check, attachment checks and admission share one synchronous segment:
       // no await in between. The read is fresh: the tree cached before the body arrived may
       // predate a PATCH.
@@ -310,12 +317,6 @@ export function registerSessionRoutes(
       if (dependencies.supervisor.controlHeld(request.params.id)) {
         throw new HttpError("session_busy");
       }
-      // The binding is immutable, so the tree cached before the body arrived still has it. It is
-      // the session's own: nothing in the body names a workspace.
-      const bound = authorizedHistory.get(request)?.tree.session.workspaceId ?? null;
-      // The stored text stays as typed; only `/` text is classified, so no other prompt scans.
-      // The skills are those of this session's cwd: its workspace root, else the owner root.
-      const skills = text.startsWith("/") ? skillsOf(principal.id, bound) : [];
       // message-attachments「prompt 携带附件」conditions 2 to 5 (1 was the body's); `[]` for a
       // prompt without attachments.
       const attachments = admitAttachments({

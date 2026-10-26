@@ -201,7 +201,7 @@
     | 会话附件（`prompt-attachments.ts:137`） | 400 `bad_request` |
     | 撤回时附件是否仍在（`undo.ts:270`） | 视为不在 |
     | 文件变更归属（`file-changes-ownership.ts:124-133`，调用方 `turn-control.ts:292`） | 词法上在挂载内的候选在任何文件系统调用之前丢弃；其余候选的 `realpath` / `lstat`（会跟随空间内指向挂载的符号链接）改经 `fs/promises`，每次 10 s 期限，超期丢弃该候选与同一事件其后的候选（turn-artifacts MODIFIED） |
-    | 项目技能（`slash-commands.ts:332,399`；调用方 `rest-commands.ts:46`、`sessions/rest.ts:304`、`branching.ts:361`） | `<D>/.omp/skills` 与各条目 `SKILL.md` 的内核 real path 改经 `fs/promises` 的 `realpath`（同为内核调用、`{encoding:"buffer"}`），每次 10 s 期限，超期该条目（或该 `D`）无结果、本次列举停止（chat-sessions MODIFIED） |
+    | 项目技能（`slash-commands.ts:332,399`，#1692 之后 :355、:464；平台条目与项目条目共用的 `readSkill` 里平台一侧仍同步，现 :440；调用方 `rest-commands.ts:46`、`sessions/rest.ts:304`（现 :310）、`branching.ts:361`（现端口 :54、await :109 / :300，经 `supervisor.ts:117`、`index.ts:123`）） | `<D>/.omp/skills` 与各条目 `SKILL.md` 的内核 real path 改经 `fs/promises` 的 `realpath`（同为内核调用、`{encoding:"buffer"}`），每次 10 s 期限，超期该条目（或该 `D`）无结果、本次列举停止（chat-sessions MODIFIED）。prompt 路由把 `await` 前移到「archive 读 → claim → 附件 → admission」这一同步段之前（技能只依赖不可变的绑定）；regenerate / fork 的同步 precheck 遇 `/` 开头而尚无技能时先取技能、再跑一遍 precheck，最后一遍与 claim 仍在同一同步段 |
     | 快照 `take`（`snapshots.ts`） | 根一层的已登记挂载名按名字跳过、不 `lstat`，记入 `skipped`（`reason: "mount"`）；未登记的外部挂载仍按 `dev` 规则（workspace-snapshots「快照内容规则」MODIFIED） |
     | 还原（`snapshots-restore.ts`） | 根一层的已登记挂载名不读取、不进入、不删除、不建出，记入返回的 `skipped`（`reason: "mount"`）（workspace-snapshots「还原」MODIFIED） |
     | 挂载内的 `dirs`（`ensureSharedDir`，`dirs.ts:43,48`） | 不调用；适配器 `mkdir`，不 `chmod`（D16） |
@@ -244,7 +244,7 @@
 - **[`user_allow_other` 让 omp uid 自己挂 `allow_other` 的 FUSE、令 app 挂住]** → 部署要求 `fusermount3` / `fusermount` 只对 app 所在、omp 不在的组可执行，`OMP_USER` 模式预检把关（D4、D20）；PATH 之外的 setuid 副本预检看不到，部署说明要求删除；#1665 P10。
 - **[挂载点在检查与 `fusermount3` 之间被换成符号链接]** → #1665 P15：`fusermount3` 拒绝最后一段是符号链接的挂载点，但检查与挂载之间的窗口实测可利用（omp 用 `RENAME_EXCHANGE` 交换时 300 次里 35 次落到链接目标、44 次落到被改名的目录）；owner 2026-10-25 接受为残余，就绪轮询中落点不符即判失败并按来源惰性卸载（D9）。另：每次尝试前 `lstat` 挂载点（D8），失败清理按来源扫描 mountinfo（D9）。omp 删掉离线挂载点、自建同名目录（属 omp uid）会让该挂载一直离线——只伤它自己会话所在空间的挂载，登记为残余。
 - **[app 被 SIGKILL 后 rclone 成为孤儿，挂载留在原处]** → 启动恢复时先惰性卸载残留挂载（D12）；孤儿 rclone 随卸载退出。
-- **[FUSE 上的阻塞]** → 宿主不对挂载做同步调用、挂载内调用经 10 s 期限的异步适配器（D21）；残余：挂载内的一个请求至多等 10 s，每个挂起的挂载至多占一个 libuv 线程 10 s；文件变更归属与项目技能的 `realpath` 经 omp 放的符号链接进入挂起的挂载时同样至多等 10 s、占一个线程，该线程要等探测判离线并惰性卸载之后才放回（≤ 35 s）。会话截图目录比对读的是保留名 `screenshots`、永不是挂载点，`opendirSync` 之前先不跟随地 `lstat`，符号链接或不是目录按缺失、不打开（与 D8 同一先查后用写法）；残余是 `lstat` 与 `opendirSync` 之间的窗口——omp 恰在其间把它换成指向挂起挂载的符号链接时仍会卡住主线程，与 D8 同为已接受的 TOCTOU 残余（omp 只能经它自己用户的挂载、要远端挂起且赢下竞态才触发；彻底消除要改成异步、动 supervisor 的回合泵，不在本 change）。
+- **[FUSE 上的阻塞]** → 宿主不对挂载做同步调用、挂载内调用经 10 s 期限的异步适配器（D21）；残余：挂载内的一个请求至多等 10 s，每个挂起的挂载至多占一个 libuv 线程 10 s；文件变更归属与项目技能的 `realpath` 经 omp 放的符号链接进入挂起的挂载时同样至多等 10 s、占一个线程，该线程要等探测判离线并惰性卸载之后才放回（≤ 35 s）——这两处按每次列举 / 每个候选各占一个，不按挂载合并：同一挂起链接上的并发或重试请求各占一个（libuv 线程池缺省 4 个，几次即可让全服务的 `fs/promises` 与 DNS 排队，直到惰性卸载放回；仍远好于此前的主线程停摆，#1791 评审）。会话截图目录比对读的是保留名 `screenshots`、永不是挂载点，`opendirSync` 之前先不跟随地 `lstat`，符号链接或不是目录按缺失、不打开（与 D8 同一先查后用写法）；残余是 `lstat` 与 `opendirSync` 之间的窗口——omp 恰在其间把它换成指向挂起挂载的符号链接时仍会卡住主线程，与 D8 同为已接受的 TOCTOU 残余（omp 只能经它自己用户的挂载、要远端挂起且赢下竞态才触发；彻底消除要改成异步、动 supervisor 的回合泵，不在本 change）。
 - **[离线期间 omp 写进挂载点的本地文件]** → `--allow-non-empty` 使重挂不被它挡住，残留被遮住；卸载后挂载点以普通目录保留，不删除（D7、D10）。
 - **[DNS 重绑定、解析器分歧]** → 每次尝试由 app 解析并判定，把判定过的 IP 字面写进 `rclone.conf` 的 `host`（D3 第 5 步、D6；ADR-0003「2026-10 补充」P2：用这种 conf 挂载在 P1′、P2–P8 里都正常）。
 - **[rclone 拉平权限位]** `local` 挂载里一切显示为 omp 持有的 `0660` / `0770`，app uid 能读写的东西 omp 经挂载都能读写 → 挂载源拒绝清单五项与每次尝试复核（D2）；管理员登记的就是要交给用户的目录。

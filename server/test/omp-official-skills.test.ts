@@ -75,7 +75,10 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, ()
   }
 
   /** Every host-listed skill is in omp's list, with its description or its first 200 code points. */
-  function expectListedByOmp(omp: OmpCommand[], listed: ReturnType<typeof hostSkills>): void {
+  function expectListedByOmp(
+    omp: OmpCommand[],
+    listed: Awaited<ReturnType<typeof hostSkills>>,
+  ): void {
     for (const skill of listed) {
       const matches = omp.filter((command) => command.name === `skill:${skill.name}`);
       expect(matches, skill.name).toHaveLength(1);
@@ -97,7 +100,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, ()
       const world = await openSkillsWorld(false);
 
       const omp = await availableCommands(world.runtime);
-      const listed = hostSkills(world);
+      const listed = await hostSkills(world);
 
       expect(listed.map((skill) => [skill.name, skill.source])).toEqual([
         ["platform-only", "skill"],
@@ -116,7 +119,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, ()
       const world = await openSkillsWorld(true);
 
       const omp = await availableCommands(world.runtime);
-      const listed = hostSkills(world);
+      const listed = await hostSkills(world);
 
       expect(listed.map((skill) => [skill.name, skill.source])).toEqual([
         ["platform-only", "skill"],
@@ -148,7 +151,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, ()
 
       expect(descriptionsOf("skill:weekly-report")).toEqual(["项目的周报"]);
       expect(descriptionsOf("skill:deploy")).toEqual(["omp 目录的上线"]);
-      expect(hostSkills(world)).toEqual([
+      expect(await hostSkills(world)).toEqual([
         { name: "deploy", description: "omp 目录的上线", source: "project", overrides: false },
         { name: "weekly-report", description: "项目的周报", source: "project", overrides: true },
       ]);
@@ -168,7 +171,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, ()
         );
       });
       const text = "/skill:deploy 上线";
-      const skills = hostSkills(world);
+      const skills = await hostSkills(world);
       expect(classifyPrompt(text, skills)).toEqual({ kind: "skill", name: "deploy" });
 
       await collectPrompt(world.runtime.prompt(toWireText(text, skills)));
@@ -192,7 +195,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: project skills`, ()
       const started = await availableCommands(world.runtime);
       writeSkill(join(world.workspaceRoot, ".omp", "skills"), "late", "进程启动后才创建");
       const text = "/skill:late x";
-      const skills = hostSkills(world);
+      const skills = await hostSkills(world);
 
       expect(started.map((command) => command.name)).toContain("skill:deploy");
       expect(classifyPrompt(text, skills)).toEqual({ kind: "skill", name: "late" });

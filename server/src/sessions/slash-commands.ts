@@ -18,6 +18,10 @@
  * uid; `sessionSkills` is the one set the command directory and the whitelist both use. omp also
  * loads skills the host does not list (other provider directories, the managed `HOME`, above the
  * sandbox root, entries these rules skip): they run and are recorded as text (ADR-0012 residual).
+ * The two project real paths that can cross a link the omp uid placed (`<D>/.omp/skills` and each
+ * SKILL.md) come from the asynchronous `realpath` of `projectSkillFs` under a deadline (#1692,
+ * s1b-workspace-mounts D21): a link into a hung mount costs one wait and one thread, not the
+ * event loop. So `listProjectSkills`, `sessionSkills` and `sessionSkillsResolver` answer promises.
  */
 import {
   closeSync,
@@ -30,6 +34,7 @@ import {
   readSync,
   realpathSync,
 } from "node:fs";
+import { realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { compareMigrationFilenames as compareCodePoints } from "../core/db/migration-assets.js";
 import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
@@ -93,9 +98,23 @@ const SLASH = 0x2f;
  * (the name of `/skill:<name>` ends at the first U+0020).
  */
 const SKILL_NAME = /^[^\s/\\]+$/;
+/** One project real path took longer than `projectSkillFs.deadlineMs`. */
+const EXPIRED = Symbol("expired");
 const TOP_LEVEL_KEY = /^(name|description|enabled):(.*)$/;
 const BLOCK_SCALAR = /^[>|][+-]?$/;
 const QUOTED = /^(["'])(.*)\1$/;
+
+/**
+ * The asynchronous kernel `realpath` of the two project real paths and its deadline per call
+ * (that of the workspace-mounts adapter, D21). Read at call time so a test can swap either.
+ */
+export const projectSkillFs = { realpath, deadlineMs: 10_000 };
+
+/** A project skills listing: what it found, and whether a real path expired (the listing stops). */
+interface ProjectListing {
+  skills: Skill[];
+  expired: boolean;
+}
 
 /**
  * The platform skills omp would load from `<agentDir>/skills`, sorted by name in code-point order.
@@ -125,7 +144,7 @@ export function listSkills(agentDir: string): Skill[] {
   } catch {
     return [];
   }
-  return readSkillEntries(skillsDir, entries, inside, false).sort(byName);
+  return readSkillEntries(skillsDir, entries, inside).sort(byName);
 }
 
 /**
@@ -133,17 +152,22 @@ export function listSkills(agentDir: string): Skill[] {
  * `projectDirs`. Each directory is read by the rules of `listSkills` plus the three of
  * `readProjectDir`; a description is cut to `MAX_PROJECT_DESCRIPTION` code points. A name found
  * in a nearer `D` hides the same name farther up (omp v18.12.3: nearest project skill wins).
- * Sorted by name, recomputed on every call, never throws: a failure for one `D` yields nothing
- * for that `D`.
+ * Sorted by name, recomputed on every call, never rejects: a failure for one `D` yields nothing
+ * for that `D`. A project real path past its deadline yields nothing for its entry (or its `D`)
+ * and ends the listing: the skills found so far are kept, no further filesystem call is made.
  */
-export function listProjectSkills(cwd: string, sandboxRoot: string): Skill[] {
+export async function listProjectSkills(cwd: string, sandboxRoot: string): Promise<Skill[]> {
   const { chain, walk } = projectDirs(cwd, sandboxRoot);
   const byNearest = new Map<string, Skill>();
   for (const dir of chain.slice(0, walk)) {
-    for (const skill of readProjectDir(dir)) {
+    const { skills, expired } = await readProjectDir(dir);
+    for (const skill of skills) {
       if (!byNearest.has(skill.name)) {
         byNearest.set(skill.name, skill);
       }
+    }
+    if (expired) {
+      break;
     }
   }
   return [...byNearest.values()].sort(byName);
@@ -205,15 +229,15 @@ export function readDirBounded(dir: Buffer): string[] | null {
  * The skills a session with this cwd can invoke: the platform skills, then the project skills,
  * each group in name order. A project skill replaces the platform skill of the same name (omp runs
  * the project one) and alone carries `overrides: true`. `cwd` is null when the session cwd cannot
- * be resolved: no project skill.
+ * be resolved: no project skill. Never rejects.
  */
-export function sessionSkills(
+export async function sessionSkills(
   agentDir: string,
   cwd: string | null,
   sandboxRoot: string,
-): SessionSkill[] {
+): Promise<SessionSkill[]> {
   const platform = listSkills(agentDir);
-  const project = cwd === null ? [] : listProjectSkills(cwd, sandboxRoot);
+  const project = cwd === null ? [] : await listProjectSkills(cwd, sandboxRoot);
   const projectNames = new Set(project.map((skill) => skill.name));
   const platformNames = new Set(platform.map((skill) => skill.name));
   return [
@@ -231,13 +255,13 @@ export function sessionSkills(
 /**
  * `sessionSkills` by session identity, for the prompt route and the branch-family command check:
  * the cwd is the one the session's omp process runs in (session-cwd.ts). A cwd that cannot be
- * resolved contributes no project skill; nothing here throws.
+ * resolved contributes no project skill; nothing here throws or rejects.
  */
 export function sessionSkillsResolver(
   agentDir: string,
   sandboxRoot: string,
   workspaceRootOf: WorkspaceRootOf,
-): (ownerId: string, workspaceId: string | null) => SessionSkill[] {
+): (ownerId: string, workspaceId: string | null) => Promise<SessionSkill[]> {
   const cwdOf = sessionCwdResolver(sandboxRoot, workspaceRootOf);
   return (ownerId, workspaceId) => {
     let cwd: string | null;
@@ -323,27 +347,55 @@ function hasGitEntry(dir: Buffer): boolean {
  * `<dir>/.omp/skills` must be exactly those bytes (neither `.omp` nor `skills` is a link, so the
  * containment boundary stays inside `dir`), checked before anything is enumerated; the directory
  * is read through a handle and yields nothing once it holds more than `MAX_PROJECT_DIR_ENTRIES`;
- * and a hard-linked SKILL.md is skipped (`readBounded`). Any failure yields `[]`.
+ * and a hard-linked SKILL.md is skipped (`readBounded`). Any failure yields no skill; a real path
+ * past its deadline (`kernelRealpath`) yields no skill and `expired`.
  */
-function readProjectDir(dir: Buffer): Skill[] {
+async function readProjectDir(dir: Buffer): Promise<ProjectListing> {
   const skillsDir = Buffer.concat([dir, Buffer.from(PROJECT_SKILLS)]);
+  const resolved = await kernelRealpath(skillsDir);
+  if (resolved === EXPIRED) {
+    return { skills: [], expired: true };
+  }
   let entries: string[] | null;
   try {
-    if (!realpathSync.native(skillsDir, { encoding: "buffer" }).equals(skillsDir)) {
-      return [];
+    if (resolved === null || !resolved.equals(skillsDir)) {
+      return { skills: [], expired: false };
     }
     entries = readDirBounded(skillsDir);
   } catch {
-    return [];
+    return { skills: [], expired: false };
   }
   if (entries === null) {
-    return [];
+    return { skills: [], expired: false };
   }
   const inside = Buffer.concat([skillsDir, Buffer.from("/")]);
-  return readSkillEntries(skillsDir, entries, inside, true).map((skill) => ({
-    name: skill.name,
-    description: firstCodePoints(skill.description, MAX_PROJECT_DESCRIPTION),
-  }));
+  const { skills, expired } = await readProjectEntries(skillsDir, entries, inside);
+  return {
+    skills: skills.map((skill) => ({
+      name: skill.name,
+      description: firstCodePoints(skill.description, MAX_PROJECT_DESCRIPTION),
+    })),
+    expired,
+  };
+}
+
+/**
+ * The kernel real path of a project path as raw bytes, from `projectSkillFs.realpath` raced
+ * against `projectSkillFs.deadlineMs`: null when it fails, `EXPIRED` when the deadline passes
+ * first. Expiry only drops the result (the call itself is left to return when it can).
+ */
+async function kernelRealpath(path: Buffer): Promise<Buffer | null | typeof EXPIRED> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<typeof EXPIRED>((resolve) => {
+    timer = setTimeout(resolve, projectSkillFs.deadlineMs, EXPIRED);
+  });
+  try {
+    return await Promise.race([projectSkillFs.realpath(path, { encoding: "buffer" }), deadline]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function firstCodePoints(text: string, limit: number): string {
@@ -352,30 +404,44 @@ function firstCodePoints(text: string, limit: number): string {
 }
 
 /**
- * The skills of one `skills` directory given its entry names: hidden entries dropped, the first
- * `MAX_SKILL_ENTRIES` in SKILL.md path order read, entries sharing a name collapsed to the first.
- * `inside` is the real path of the directory with a trailing separator. A directory given as bytes
- * (a project one) has every SKILL.md path built from those bytes; its text is the sort key only.
+ * The entries of one `skills` directory that are read: hidden entries dropped, the first
+ * `MAX_SKILL_ENTRIES` in SKILL.md path order. A directory given as bytes (a project one) has every
+ * SKILL.md path built from those bytes; its text is the sort key only.
  */
-function readSkillEntries(
+function skillCandidates(
   skillsDir: string | Buffer,
   entries: readonly string[],
-  inside: Buffer,
-  project: boolean,
-): Skill[] {
+): Array<{ entry: string; target: string | Buffer }> {
   const text = skillsDir.toString();
-  const candidates = entries
+  return entries
     .filter((entry) => !entry.startsWith("."))
     .map((entry) => ({ entry, path: join(text, entry, "SKILL.md") }))
     .sort((left, right) => compareCodePoints(left.path, right.path))
-    .slice(0, MAX_SKILL_ENTRIES);
+    .slice(0, MAX_SKILL_ENTRIES)
+    .map(({ entry, path }) => ({
+      entry,
+      target:
+        typeof skillsDir === "string"
+          ? path
+          : Buffer.concat([skillsDir, Buffer.from(`/${entry}/SKILL.md`)]),
+    }));
+}
+
+/**
+ * The skills of the platform `skills` directory given its entry names (`skillCandidates`), entries
+ * sharing a name collapsed to the first. `inside` is the real path of the directory with a
+ * trailing separator; each SKILL.md real path comes from `realpathSync.native`.
+ */
+function readSkillEntries(skillsDir: string, entries: readonly string[], inside: Buffer): Skill[] {
   const byName = new Map<string, Skill>();
-  for (const { entry, path } of candidates) {
-    const target =
-      typeof skillsDir === "string"
-        ? path
-        : Buffer.concat([skillsDir, Buffer.from(`/${entry}/SKILL.md`)]);
-    const skill = readSkill(target, entry, inside, project);
+  for (const { entry, target } of skillCandidates(skillsDir, entries)) {
+    let resolved: Buffer | null;
+    try {
+      resolved = realpathSync.native(target, { encoding: "buffer" });
+    } catch {
+      resolved = null;
+    }
+    const skill = readSkill(resolved, entry, inside, false);
     if (skill !== null && !byName.has(skill.name)) {
       byName.set(skill.name, skill);
     }
@@ -384,20 +450,43 @@ function readSkillEntries(
 }
 
 /**
+ * `readSkillEntries` for a project `skills` directory: each SKILL.md real path comes from
+ * `kernelRealpath`, one after the other; the first past its deadline ends the reading with the
+ * skills found so far and `expired`.
+ */
+async function readProjectEntries(
+  skillsDir: Buffer,
+  entries: readonly string[],
+  inside: Buffer,
+): Promise<ProjectListing> {
+  const byName = new Map<string, Skill>();
+  for (const { entry, target } of skillCandidates(skillsDir, entries)) {
+    const resolved = await kernelRealpath(target as Buffer);
+    if (resolved === EXPIRED) {
+      return { skills: [...byName.values()], expired: true };
+    }
+    const skill = readSkill(resolved, entry, inside, true);
+    if (skill !== null && !byName.has(skill.name)) {
+      byName.set(skill.name, skill);
+    }
+  }
+  return { skills: [...byName.values()], expired: false };
+}
+
+/**
  * omp's drop rules for a user-level skill, plus the host rules (the name, and a SKILL.md whose
- * real path does not start with the bytes of `inside`, the real path of `skills` with a trailing
- * separator); null when it is not listed.
+ * kernel real path `resolved`, null when it could not be resolved, does not start with the bytes
+ * of `inside`, the real path of `skills` with a trailing separator); null when it is not listed.
  */
 function readSkill(
-  path: string | Buffer,
+  resolved: Buffer | null,
   entry: string,
   inside: Buffer,
   project: boolean,
 ): Skill | null {
   let content: string | null;
   try {
-    const resolved = realpathSync.native(path, { encoding: "buffer" });
-    if (!resolved.subarray(0, inside.length).equals(inside)) {
+    if (resolved === null || !resolved.subarray(0, inside.length).equals(inside)) {
       return null;
     }
     content = readBounded(resolved, project);

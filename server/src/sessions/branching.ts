@@ -44,12 +44,23 @@ export type Resume = {
   capabilities: RawCapabilities;
 };
 
+type Skills = readonly { name: string }[];
+
 interface SkillsPort {
   /**
    * The platform and project skills of that session's cwd right now (never cached); called only
-   * to judge content starting with `/`.
+   * to judge content starting with `/`. Never rejects.
    */
-  skills(ownerId: string, workspaceId: string | null): readonly { name: string }[];
+  skills(ownerId: string, workspaceId: string | null): Promise<Skills>;
+}
+
+/**
+ * A precheck that met content starting with `/` without the skills: `run` reads them for this
+ * session and runs the precheck again in a fresh synchronous segment. They depend only on the
+ * session's owner and its immutable workspace binding, so a second precheck never asks again.
+ */
+interface SkillsWanted {
+  wanted: Resume;
 }
 
 interface RegeneratePorts extends SkillsPort {
@@ -86,15 +97,29 @@ export class Regenerations {
     this.#ports = ports;
   }
 
-  /** Every failure is a rejection; the claim is taken in the precheck's synchronous segment. */
+  /**
+   * Every failure is a rejection; the claim is taken in the precheck's synchronous segment (the
+   * last precheck's, when the first one wanted the skills).
+   */
   async run(sessionId: string, ownerId: string): Promise<{ assistantMessageId: number }> {
-    const plan = this.#precheck(sessionId, ownerId);
-    return this.#ports.controls.during(sessionId, () =>
-      this.#ports.acquire(sessionId, plan.resume, (slot) => this.#regenerate(slot, plan)),
-    );
+    let skills: Skills | null = null;
+    for (;;) {
+      const plan = this.#precheck(sessionId, ownerId, skills);
+      if ("wanted" in plan) {
+        skills = await this.#ports.skills(plan.wanted.ownerId, plan.wanted.workspaceId);
+        continue;
+      }
+      return this.#ports.controls.during(sessionId, () =>
+        this.#ports.acquire(sessionId, plan.resume, (slot) => this.#regenerate(slot, plan)),
+      );
+    }
   }
 
-  #precheck(sessionId: string, ownerId: string): RegeneratePlan {
+  #precheck(
+    sessionId: string,
+    ownerId: string,
+    skills: Skills | null,
+  ): RegeneratePlan | SkillsWanted {
     const { store, controls } = this.#ports;
     const tree = store.getMessages(sessionId, ownerId);
     // Same synchronous segment as the messages: the paths are those of the rows just read.
@@ -113,9 +138,15 @@ export class Regenerations {
     if (
       !TERMINAL.has(tree.session.status) ||
       user?.role !== "user" ||
-      assistant?.role !== "assistant" ||
-      isCommand(user.content, this.#ports, resume)
+      assistant?.role !== "assistant"
     ) {
+      throw new HttpError("bad_request");
+    }
+    const command = isCommand(user.content, skills);
+    if (command === null) {
+      return { wanted: resume };
+    }
+    if (command) {
       throw new HttpError("bad_request");
     }
     return {
@@ -255,14 +286,22 @@ export class Forks {
     this.#temps = new BranchTemps(ports);
   }
 
-  /** Every failure is a rejection; claim, precheck and the source retire share one segment. */
+  /**
+   * Every failure is a rejection; claim, precheck and the source retire share one segment (the
+   * last precheck's, when the first one wanted the skills).
+   */
   async run(sourceId: string, ownerId: string, messageId: number): Promise<ForkResult> {
     const { controls, retireSource } = this.#ports;
-    const busy = controls.held(sourceId);
-    return controls.during(sourceId, () => {
-      const plan = this.#precheck(sourceId, ownerId, messageId, busy);
-      return this.#fork(plan, retireSource(sourceId));
-    });
+    let skills: Skills | null = null;
+    for (;;) {
+      const busy = controls.held(sourceId);
+      const plan = this.#precheck(sourceId, ownerId, messageId, busy, skills);
+      if ("wanted" in plan) {
+        skills = await this.#ports.skills(plan.wanted.ownerId, plan.wanted.workspaceId);
+        continue;
+      }
+      return controls.during(sourceId, () => this.#fork(plan, retireSource(sourceId)));
+    }
   }
 
   /** Shuts down every in-flight temporary process (shutdown); never rejects. */
@@ -270,7 +309,13 @@ export class Forks {
     await this.#temps.close();
   }
 
-  #precheck(sourceId: string, ownerId: string, messageId: number, busy: boolean): ForkPlan {
+  #precheck(
+    sourceId: string,
+    ownerId: string,
+    messageId: number,
+    busy: boolean,
+    skills: Skills | null,
+  ): ForkPlan | SkillsWanted {
     const { store } = this.#ports;
     const tree = store.getMessages(sourceId, ownerId);
     // Same synchronous segment as the messages: the paths are those of the rows just read.
@@ -291,7 +336,11 @@ export class Forks {
     if (busy || tree.session.status === "running") {
       throw new HttpError("session_busy");
     }
-    if (isCommand(user.content, this.#ports, resume)) {
+    const command = isCommand(user.content, skills);
+    if (command === null) {
+      return { wanted: resume };
+    }
+    if (command) {
       throw new HttpError("bad_request");
     }
     if (resume.ompSessionFile === null) {
@@ -365,11 +414,13 @@ export class Forks {
   }
 }
 
-/** A whitelisted command turn left no omp `user` entry; the skill list is read only for `/` text. */
-function isCommand(content: string, ports: SkillsPort, session: Resume): boolean {
+/**
+ * A whitelisted command turn left no omp `user` entry; the skill list is needed only for `/` text:
+ * null when `content` starts with `/` and `skills` were not read yet.
+ */
+function isCommand(content: string, skills: Skills | null): boolean | null {
   if (!content.startsWith("/")) {
     return false;
   }
-  const skills = ports.skills(session.ownerId, session.workspaceId);
-  return classifyPrompt(content, skills).kind !== "text";
+  return skills === null ? null : classifyPrompt(content, skills).kind !== "text";
 }
