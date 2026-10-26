@@ -83,7 +83,40 @@ describe("literal loopback (step 2)", () => {
       verdict: "allowed",
       address: "128.0.0.1",
     });
-    expect(asked).toEqual(["notlocalhost.intra", "localhost.intra", "128.0.0.1"]);
+    expect(asked).toEqual(["notlocalhost.intra", "localhost.intra"]);
+  });
+});
+
+describe("a non-loopback IP literal (steps 4–5)", () => {
+  it("is its own resolution: allowed with the normalised literal, the resolver never called", async () => {
+    const { resolve, asked } = resolverOf({
+      "10.0.0.7": ["127.0.0.1"],
+      "fd00::7": ["127.0.0.1"],
+      "::ffff:10.0.0.7": ["127.0.0.1"],
+    });
+    expect(await judgeHost("10.0.0.7", undefined, resolve)).toEqual({
+      verdict: "allowed",
+      address: "10.0.0.7",
+    });
+    expect(await judgeHost("10.0.0.7.", ["10.0.0.7"], resolve)).toEqual({
+      verdict: "allowed",
+      address: "10.0.0.7",
+    });
+    expect(await judgeHost("FD00::7", undefined, resolve)).toEqual({
+      verdict: "allowed",
+      address: "fd00::7",
+    });
+    expect(await judgeHost("::FFFF:10.0.0.7", undefined, resolve)).toEqual({
+      verdict: "allowed",
+      address: "::ffff:10.0.0.7",
+    });
+    expect(asked).toEqual([]);
+  });
+
+  it("is still rejected when off the allow-list", async () => {
+    const { resolve, asked } = resolverOf({});
+    expect(await judgeHost("10.0.0.7", ["files.intra"], resolve)).toEqual(REJECTED);
+    expect(asked).toEqual([]);
   });
 });
 

@@ -11,9 +11,10 @@
  * stops rclone, removes the mount point (kept when not empty) and the private directory, then deletes the
  * row with its `mount.detach` audit; file-system failures go to `onError` and do not keep the row.
  *
- * Host judgements are limited to two in flight: `dns.lookup` runs on the libuv pool (four threads by
+ * Host lookups are limited to two in flight: `dns.lookup` runs on the libuv pool (four threads by
  * default) with no timeout and no cancellation, so a burst of mounts naming silent hosts would otherwise
  * queue every `fs/promises` call in the process behind them (#1778 hand-off). The rest wait their turn.
+ * The limit wraps the resolver, not the judgement: an IP literal host never resolves, so never waits.
  */
 import { lstat, rm, rmdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,7 +22,7 @@ import type { emit } from "../../core/audit/index.js";
 import { HttpError } from "../../core/errors/index.js";
 import { ensureOwnedDir, ensureOwnedFile, ensureSharedDir } from "../../core/sandbox/dirs.js";
 import { findExecutable, type MountSettings } from "./config.js";
-import { type HostResolver, judgeHost } from "./host-policy.js";
+import { type HostResolver, judgeHost, systemResolver } from "./host-policy.js";
 import { readMountinfo, SYSTEM_MOUNTINFO, unmountTargets } from "./mountinfo.js";
 import { writeRcloneConf } from "./rclone-conf.js";
 import {
@@ -45,7 +46,7 @@ const PRIVATE_DIR_MODE = 0o700;
 const LOG_MODE = 0o600;
 const READY_WINDOW_MS = 20_000;
 const STOP_GRACE_MS = 5_000;
-const HOST_JUDGEMENTS_IN_FLIGHT = 2;
+const HOST_LOOKUPS_IN_FLIGHT = 2;
 const NO_FUSERMOUNT =
   "mount detach: the mount is still in mountinfo and no executable fusermount3 is on PATH";
 const KEPT_MOUNT_POINT =
@@ -57,7 +58,11 @@ export interface MountManagerOptions
   audit: { emit(event: Parameters<typeof emit>[1]): unknown };
   /** `<OMP_STATE_DIR realpath>/mounts` (`ompMountsDir`): existing, app-private. */
   mountsDir: string;
-  /** The workspace root's absolute path, or null for a workspace that is not the owner's. */
+  /**
+   * The workspace root's absolute path as the kernel reports it in mountinfo — its realpath, no
+   * symlinked component — or null for a workspace that is not the owner's. Any other spelling makes
+   * every mount read as landed elsewhere and fail.
+   */
   workspaceRootOf(ownerId: string, workspaceId: string): string | null;
   /** The five roots no `local` source may overlap (design D2). */
   protectedRoots: readonly string[];
@@ -120,7 +125,9 @@ export function createMountManager(options: MountManagerOptions) {
   const probeExec = options.probeExec ?? probeInChild;
   const buildMountPoint = options.ensureSharedDir ?? ensureSharedDir;
   const registry = new Map<string, Entry>();
-  const judge = limitConcurrency(HOST_JUDGEMENTS_IN_FLIGHT);
+  const lookupLimit = limitConcurrency(HOST_LOOKUPS_IN_FLIGHT);
+  const resolveHost = options.resolveHost ?? systemResolver;
+  const limitedResolve: HostResolver = (host) => lookupLimit(() => resolveHost(host));
 
   const report = (error: unknown): void => {
     try {
@@ -214,9 +221,7 @@ export function createMountManager(options: MountManagerOptions) {
       }
       return { remote: source.path };
     }
-    const verdict = await judge(() =>
-      judgeHost(body.host, options.mountHostAllow, options.resolveHost),
-    );
+    const verdict = await judgeHost(body.host, options.mountHostAllow, limitedResolve);
     if (verdict.verdict === "rejected") {
       throw new HttpError("mount_host_rejected");
     }
@@ -274,7 +279,11 @@ export function createMountManager(options: MountManagerOptions) {
     }
   };
 
-  /** Lazy unmount, then stop rclone; a refused unmount (`mount_disabled`) leaves the entry as it was. */
+  /**
+   * Lazy unmount, then stop rclone; a refused unmount (`mount_disabled`) leaves the entry as it was.
+   * Otherwise the entry is `offline` from the unmount on, so a row delete failing afterwards never
+   * leaves it reported online over a stopped rclone; `detaching` stays set (no crash handling).
+   */
   const unmountAndStop = async (
     mountId: string,
     mountPoint: string | undefined,
@@ -284,11 +293,14 @@ export function createMountManager(options: MountManagerOptions) {
       await lazyUnmount(mountPoint, `m${mountId}`);
       return;
     }
+    const { status, detaching } = entry;
     entry.detaching = true;
+    entry.status = "offline";
     try {
       await lazyUnmount(mountPoint, `m${mountId}`);
     } catch (error) {
-      entry.detaching = false;
+      entry.detaching = detaching;
+      entry.status = status;
       throw error;
     }
     await stopChild(entry.child, options.stopTimeoutMs ?? STOP_GRACE_MS);

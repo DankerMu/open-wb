@@ -21,6 +21,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
 import type { HostResolver } from "../src/workspaces/mounts/host-policy.js";
@@ -124,6 +125,7 @@ describe("mountinfo parsing", () => {
       `41 22 0:51 / /tmp/race.alt rw shared:7 master:3 - fuse.rclone ${SECTION}{abcde}:share rw`,
       `42 22 0:52 / /tmp/back\\134slash rw - fuse.rclone ${SECTION}x:other rw`,
       `43 22 0:53 / /tmp/not-rclone rw - fuse ${SECTION}:/x rw`,
+      `44 22 0:54 / /tmp/tab\\011and\\012newline rw - fuse.rclone ${SECTION}y:/x rw`,
       "garbage line without separator",
       "",
     ].join("\n"),
@@ -137,6 +139,7 @@ describe("mountinfo parsing", () => {
       { mountPoint: "/tmp/race.alt", fstype: "fuse.rclone", source: `${SECTION}{abcde}:share` },
       { mountPoint: "/tmp/back\\slash", fstype: "fuse.rclone", source: `${SECTION}x:other` },
       { mountPoint: "/tmp/not-rclone", fstype: "fuse", source: `${SECTION}:/x` },
+      { mountPoint: "/tmp/tab\tand\nnewline", fstype: "fuse.rclone", source: `${SECTION}y:/x` },
     ]);
   });
 
@@ -443,6 +446,27 @@ describe("挂载进程与挂载点「挂载点被换掉即拒绝」(attach side)
     expect(lstatSync(world.mountPoint("remote")).isDirectory()).toBe(true);
   });
 
+  it("an existing non-empty mount point is not a failure: mounted over with --allow-non-empty, the file kept", {
+    timeout: CASE_MS,
+  }, async () => {
+    mkdirSync(world.mountPoint("remote"));
+    writeFileSync(join(world.mountPoint("remote"), "residue.txt"), "offline write\n");
+    const manager = world.manager();
+
+    expect(await manager.attach({ workspaceId: W1, ownerId: OWNER, body: sftp() })).toMatchObject({
+      id: ID1,
+    });
+
+    expect(manager.statusOf(ID1)).toBe("online");
+    expect(world.sharedDirCalls).toEqual([]);
+    expect(world.mountCalls()).toHaveLength(1);
+    expect(world.mountCalls()[0]?.argv).toContain("--allow-non-empty");
+    expect(world.errors).toEqual([]);
+    expect(readFileSync(join(world.mountPoint("remote"), "residue.txt"), "utf8")).toBe(
+      "offline write\n",
+    );
+  });
+
   it("a mount point that is a symlink to a directory elsewhere: lstat refuses it, no ensureSharedDir, no spawn", {
     timeout: CASE_MS,
   }, async () => {
@@ -472,6 +496,27 @@ describe("挂载进程与挂载点「挂载点被换掉即拒绝」(attach side)
     expect(entriesOf(world.mountsDir)).toEqual([]);
   });
 });
+
+/** A resolver whose lookups never settle on their own; each is recorded with its rejecter. */
+function hangingResolver(): {
+  pending: { host: string; fail: (error: Error) => void }[];
+  resolveHost: HostResolver;
+} {
+  const pending: { host: string; fail: (error: Error) => void }[] = [];
+  const resolveHost: HostResolver = (host) =>
+    new Promise((_, fail) => {
+      pending.push({ host, fail });
+    });
+  return { pending, resolveHost };
+}
+
+/** An sftp mount named `name` on host `<name>.intra`. */
+const attachNamed = (manager: ReturnType<World["manager"]>, name: string) =>
+  manager.attach({
+    workspaceId: W1,
+    ownerId: OWNER,
+    body: sftp("/srv/data", { name, host: `${name}.intra` }),
+  });
 
 describe("挂载取值与主机规则 (manager layer)", () => {
   const LOOPBACK = [
@@ -527,23 +572,12 @@ describe("挂载取值与主机规则 (manager layer)", () => {
     expect(world.mountCalls()).toHaveLength(2);
   });
 
-  it("at most two host judgements are in flight; the third waits for a slot", {
+  it("at most two host lookups are in flight; the third waits for a slot", {
     timeout: CASE_MS,
   }, async () => {
-    const pending: { host: string; fail: (error: Error) => void }[] = [];
-    const resolveHost: HostResolver = (host) =>
-      new Promise((_, fail) => {
-        pending.push({ host, fail });
-      });
+    const { pending, resolveHost } = hangingResolver();
     const manager = world.manager({ resolveHost });
-    const attempts = ["a", "b", "c"].map((name) =>
-      manager.attach({
-        workspaceId: W1,
-        ownerId: OWNER,
-        body: sftp("/srv/data", { name, host: `${name}.intra` }),
-      }),
-    );
-    const settled = attempts.map((attempt) => codeOf(attempt));
+    const settled = ["a", "b", "c"].map((name) => codeOf(attachNamed(manager, name)));
 
     await new Promise((settle) => setTimeout(settle, 50));
     expect(pending.map((call) => call.host)).toEqual(["a.intra", "b.intra"]);
@@ -555,6 +589,40 @@ describe("挂载取值与主机规则 (manager layer)", () => {
 
     expect(await Promise.all(settled)).toEqual(["mount_failed", "mount_failed", "mount_failed"]);
     expect(world.calls()).toEqual([]);
+  });
+
+  it("an IP literal host is not queued behind two hanging lookups", {
+    timeout: CASE_MS,
+  }, async () => {
+    const { pending, resolveHost } = hangingResolver();
+    const manager = world.manager({ resolveHost });
+    const hanging = ["a", "b"].map((name) => codeOf(attachNamed(manager, name)));
+    await new Promise((settle) => setTimeout(settle, 50));
+    expect(pending.map((call) => call.host)).toEqual(["a.intra", "b.intra"]);
+
+    const stuck = new AbortController();
+    const record = await Promise.race([
+      manager.attach({
+        workspaceId: W1,
+        ownerId: OWNER,
+        body: sftp("/srv/data", { name: "literal", host: "10.0.0.7" }),
+      }),
+      delay(5000, undefined, { signal: stuck.signal }).then(() => {
+        throw new Error("the literal's attach waited behind the lookups");
+      }),
+    ]);
+    stuck.abort();
+
+    expect(record).toMatchObject({ name: "literal", host: "10.0.0.7" });
+    expect(manager.statusOf(record.id)).toBe("online");
+    expect(readFileSync(join(world.privateDir(record.id), "rclone.conf"), "utf8")).toContain(
+      "\nhost = 10.0.0.7\n",
+    );
+    expect(pending.map((call) => call.host)).toEqual(["a.intra", "b.intra"]);
+    for (const call of pending) {
+      call.fail(new Error("ENOTFOUND"));
+    }
+    expect(await Promise.all(hanging)).toEqual(["mount_failed", "mount_failed"]);
   });
 });
 
@@ -579,6 +647,35 @@ describe("local 挂载源复核", () => {
     mkdirSync(join(world.state, "inside"));
     expect(await codeOf(attach(local()))).toBe("mount_failed");
     rmSync(join(world.state, "inside"), { recursive: true });
+    expect(await codeOf(attach(local()))).toBe("mount_failed");
+
+    expect(world.calls()).toEqual([]);
+    expectNoTrace("本机");
+  });
+
+  it("a source replaced by a symlink to another acceptable directory: the realpath differs, mount_failed, no spawn", {
+    timeout: CASE_MS,
+  }, async () => {
+    registerSource(world);
+    const other = join(world.base, "other source");
+    mkdirSync(other);
+    rmSync(world.source, { recursive: true });
+    symlinkSync(other, world.source);
+
+    expect(await codeOf(attach(local()))).toBe("mount_failed");
+
+    expect(world.calls()).toEqual([]);
+    expect(entriesOf(other)).toEqual([]);
+    expectNoTrace("本机");
+  });
+
+  it("a source that became a regular file: mount_failed, no spawn", {
+    timeout: CASE_MS,
+  }, async () => {
+    registerSource(world);
+    rmSync(world.source, { recursive: true });
+    writeFileSync(world.source, "not a directory\n");
+
     expect(await codeOf(attach(local()))).toBe("mount_failed");
 
     expect(world.calls()).toEqual([]);

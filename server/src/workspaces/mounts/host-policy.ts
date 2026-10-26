@@ -8,8 +8,10 @@
  *
  * Steps in order, each on the normalised host (lower case, all trailing `.` removed; allow-list items
  * likewise): literal loopback, allow-list (string equality only), resolution (any loopback result
- * rejects). The first two never consult the resolver. No public-address judgement: the rule only
- * refuses loopback and admits by list.
+ * rejects). The first two never consult the resolver. An IP literal that reaches resolution is its own
+ * result — the system `dns.lookup` returns an `isIP` literal as given without asking getaddrinfo — so it
+ * is allowed with that literal and the resolver is not called (no libuv pool thread, no wait behind
+ * other lookups). No public-address judgement: the rule only refuses loopback and admits by list.
  */
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
@@ -22,7 +24,7 @@ export type HostVerdict =
 /** `dns.lookup(host, {all: true})`'s shape; injected by tests. */
 export type HostResolver = (host: string) => Promise<readonly { address: string }[]>;
 
-const systemResolver: HostResolver = (host) => lookup(host, { all: true });
+export const systemResolver: HostResolver = (host) => lookup(host, { all: true });
 
 /** 127.0.0.0/8, 0.0.0.0, ::1, ::; `BlockList` also matches their IPv4-mapped spellings. */
 const LOOPBACK = new BlockList();
@@ -45,6 +47,9 @@ export async function judgeHost(
   }
   if (name === "") {
     return { verdict: "unresolved" };
+  }
+  if (isIP(name) !== 0) {
+    return { verdict: "allowed", address: name };
   }
   let results: readonly { address: string }[];
   try {

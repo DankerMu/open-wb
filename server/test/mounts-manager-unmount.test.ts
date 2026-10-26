@@ -8,6 +8,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { emit } from "../src/core/audit/index.js";
 import { HttpError } from "../src/core/errors/index.js";
 import { createMountManager } from "../src/workspaces/mounts/manager.js";
 import {
@@ -165,6 +166,66 @@ describe("statusOf and namesOf", () => {
     await manager.detach(ID1, USER_ACTOR);
     expect(manager.statusOf(ID1)).toBe("offline");
     expect([...manager.namesOf(W1)]).toEqual(["本机"]);
+  });
+});
+
+describe("detach whose row delete fails", () => {
+  it("the audit emit throwing: rejects, offline with the row kept; a retried detach removes the row", {
+    timeout: CASE_MS,
+  }, async () => {
+    const failure = new Error("audit failed");
+    let failing = true;
+    const manager = world.manager({
+      audit: {
+        emit: (event) => {
+          if (failing) {
+            throw failure;
+          }
+          return emit(world.db, event);
+        },
+      },
+    });
+    await attach(manager);
+
+    await expect(manager.detach(ID1, USER_ACTOR)).rejects.toBe(failure);
+
+    expect(manager.statusOf(ID1)).toBe("offline");
+    expect(world.store.get(ID1)).toMatchObject({ id: ID1 });
+    expect(alive(pidOf())).toBe(false);
+    expect(existsSync(world.privateDir(ID1))).toBe(false);
+    expect(world.audits()).toEqual([]);
+
+    failing = false;
+    expect(await manager.detach(ID1, USER_ACTOR)).toMatchObject({ id: ID1 });
+
+    expect(world.store.get(ID1)).toBeUndefined();
+    expect(manager.statusOf(ID1)).toBe("offline");
+    expect([...manager.namesOf(W1)]).toEqual([]);
+    expect(world.audits().map((audit) => audit.kind)).toEqual(["mount.detach"]);
+    expect(world.errors).toEqual([]);
+  });
+});
+
+describe("detach refused for want of fusermount3", () => {
+  it("an online mount stays online with its row; once fusermount3 is on PATH the detach completes", {
+    timeout: CASE_MS,
+  }, async () => {
+    world = createWorld({ noFusermount: true });
+    const { fusermountBin: _fusermount, ...lookedUp } = world.options();
+    const manager = createMountManager(lookedUp);
+    await attach(manager);
+
+    await expect(manager.detach(ID1, USER_ACTOR)).rejects.toMatchObject({ code: "mount_disabled" });
+
+    expect(manager.statusOf(ID1)).toBe("online");
+    expect(alive(pidOf())).toBe(true);
+    expect(world.store.get(ID1)).toMatchObject({ id: ID1 });
+
+    world.installFusermount();
+    expect(await manager.detach(ID1, USER_ACTOR)).toMatchObject({ id: ID1 });
+    expect(manager.statusOf(ID1)).toBe("offline");
+    expect(alive(pidOf())).toBe(false);
+    expect(world.store.get(ID1)).toBeUndefined();
   });
 });
 
