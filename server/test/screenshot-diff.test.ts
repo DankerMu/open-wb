@@ -295,6 +295,93 @@ describe("comparison at an eval step end", () => {
   });
 });
 
+describe("screenshots that is a symlink or not a directory (s1b-workspace-mounts D21)", () => {
+  function outsideWith(...names: string[]): string {
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), "open-wb-1693-outside-")));
+    cleanups.push(() => rmSync(outside, { recursive: true, force: true }));
+    for (const name of names) writeFileSync(join(outside, name), "png");
+    return outside;
+  }
+
+  it("a symlink to a directory with files: missing, never opened", () => {
+    const outside = outsideWith("old.png");
+    symlinkSync(outside, shots);
+    const diff = diffOf();
+    diff.turnStart();
+    writeFileSync(join(outside, "screenshot-5.png"), "png");
+    expect(diff.evalEnd()).toEqual([]);
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(0);
+  });
+
+  it("a regular file: missing, never opened", () => {
+    writeFileSync(shots, "not a dir");
+    const diff = diffOf();
+    diff.turnStart();
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(0);
+  });
+
+  it("a real directory still compares (control)", () => {
+    write("old.png");
+    const diff = diffOf();
+    diff.turnStart();
+    write("screenshot-5.png");
+    expect(diff.evalEnd()).toEqual(shot("screenshot-5.png"));
+    expect(calls()).toBe(2);
+  });
+
+  it("a symlink at turn start, a real directory by step end: compared against an empty baseline", () => {
+    const outside = outsideWith("old.png");
+    symlinkSync(outside, shots);
+    const diff = diffOf();
+    diff.turnStart();
+    rmSync(shots);
+    write("screenshot-6.png");
+    expect(diff.evalEnd()).toEqual(shot("screenshot-6.png"));
+    expect(calls()).toBe(1);
+  });
+
+  it("a real directory at turn start, a symlink by step end: no candidates, baseline unchanged", () => {
+    write("old.png");
+    const diff = diffOf();
+    diff.turnStart();
+    rmSync(shots, { recursive: true });
+    symlinkSync(outsideWith("old.png", "screenshot-7.png"), shots);
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(1);
+    rmSync(shots);
+    write("old.png", "screenshot-8.png");
+    expect(diff.evalEnd()).toEqual(shot("screenshot-8.png"));
+  });
+
+  it("lstat fails with another error (EACCES): no comparison this turn, never opened", () => {
+    write("old.png");
+    vi.spyOn(screenshotFs, "lstatSync").mockImplementationOnce(() => {
+      throw errno("EACCES");
+    });
+    const diff = diffOf();
+    diff.turnStart();
+    write("new.png");
+    expect(diff.evalEnd()).toEqual([]);
+    expect(diff.evalEnd()).toEqual([]);
+    expect(calls()).toBe(0);
+  });
+
+  it("lstat ENOENT / ENOTDIR: missing, comparison stays on", () => {
+    for (const code of ["ENOENT", "ENOTDIR"]) {
+      vi.spyOn(screenshotFs, "lstatSync").mockImplementationOnce(() => {
+        throw errno(code);
+      });
+      const diff = diffOf();
+      diff.turnStart();
+      write(`${code}.png`);
+      expect(diff.evalEnd()).toEqual(shot(`${code}.png`));
+      rmSync(shots, { recursive: true });
+    }
+  });
+});
+
 describe("annotate (the pump's events)", () => {
   const turnStart: ChatEvent<string> = { type: "turn.start", data: { messageId: MESSAGE } };
   const text: ChatEvent<string> = { type: "text.delta", data: { messageId: MESSAGE, delta: "x" } };
@@ -308,11 +395,11 @@ describe("annotate (the pump's events)", () => {
   it("inserts files.changed right before an eval step.end; bash never reads or inserts", () => {
     const diff = diffOf(root, { e1: "eval", c2: "bash", e3: "eval" });
     expect(diff.annotate([turnStart])).toEqual([turnStart]);
-    expect(calls()).toBe(1);
+    expect(calls()).toBe(0); // ENOENT at lstat: nothing opened
     write("screenshot-3.png");
     expect(diff.annotate([stepEnd("c2")])).toEqual([stepEnd("c2")]);
     expect(diff.annotate([stepEnd("unknown")])).toEqual([stepEnd("unknown")]);
-    expect(calls()).toBe(1);
+    expect(calls()).toBe(0);
     expect(diff.annotate([text, stepEnd("e1"), text])).toEqual([
       text,
       {
@@ -322,9 +409,9 @@ describe("annotate (the pump's events)", () => {
       stepEnd("e1"),
       text,
     ]);
-    expect(calls()).toBe(2);
+    expect(calls()).toBe(1);
     expect(diff.annotate([stepEnd("e3")])).toEqual([stepEnd("e3")]);
-    expect(calls()).toBe(3);
+    expect(calls()).toBe(2);
   });
 
   it("a null root (an unbound session) never touches the filesystem", () => {

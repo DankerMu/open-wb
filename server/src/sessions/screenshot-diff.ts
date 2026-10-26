@@ -8,6 +8,10 @@
  * other baseline failure or overflow → no comparison this turn; failed or overflowing step-end read
  * → no candidates, baseline unchanged; a merge past 4096 names → no candidates and no comparison
  * for the rest of the turn. A null root never reads. persistEvent owns the files.changed.
+ * Each read first lstats `<root>/screenshots` without following (s1b-workspace-mounts D21): a
+ * symlink — possibly into a hung mount — or a non-directory reads as ENOENT and is never opened;
+ * the lstat's own errors take the same branches. A swap between lstat and opendir is the accepted
+ * TOCTOU residue.
  */
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
@@ -17,18 +21,30 @@ import type { ChatEvent } from "./events.js";
 import type { FileChange } from "./file-changes.js";
 
 /** Read at call time so a test can count or fail it. */
-export const screenshotFs = { opendirSync: nodeFs.opendirSync };
+export const screenshotFs = { lstatSync: nodeFs.lstatSync, opendirSync: nodeFs.opendirSync };
 
 const LIMIT = 4096;
 
-/** The directory's entries; "missing" for ENOENT / ENOTDIR; "failed" on any other error or overflow. */
+function errorOf(error: unknown): "missing" | "failed" {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "failed";
+}
+
+/**
+ * The directory's entries; "missing" for ENOENT / ENOTDIR or when `dir` is a symlink or not a
+ * directory (never opened); "failed" on any other error or overflow.
+ */
 function list(dir: string): nodeFs.Dirent[] | "missing" | "failed" {
+  try {
+    if (!screenshotFs.lstatSync(dir).isDirectory()) return "missing";
+  } catch (error) {
+    return errorOf(error);
+  }
   let handle: nodeFs.Dir;
   try {
     handle = screenshotFs.opendirSync(dir);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === "ENOENT" || code === "ENOTDIR" ? "missing" : "failed";
+    return errorOf(error);
   }
   const entries: nodeFs.Dirent[] = [];
   try {
