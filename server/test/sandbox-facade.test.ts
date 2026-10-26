@@ -274,4 +274,72 @@ describe("core/sandbox createSandbox", () => {
     expect(readFileSync(join(parent, "keep.txt"), "utf8")).toBe("keep-bytes");
     expect(readdirSync(parent).toSorted()).toEqual(["keep.txt", "n1"]);
   });
+
+  it("挂载名端口: mountNamesOf names skip inspection, a throwing port propagates, absence keeps rejecting", () => {
+    const { parent, sandbox, canonical } = sandboxLayout();
+    mkdirSync(join(parent, "outside-mount"));
+    symlinkSync(join(parent, "outside-mount"), join(sandbox, "远端"));
+    const beforeParent = readdirSync(parent).toSorted();
+    const beforeSandbox = readdirSync(sandbox).toSorted();
+
+    const asked: string[] = [];
+    const mounted = recordingAudit();
+    const withPort = createSandbox({
+      rootOf: (_principal, workspaceId) => (workspaceId === WORKSPACE_ID ? sandbox : null),
+      audit: mounted,
+      mountNamesOf: (workspaceId) => {
+        asked.push(workspaceId);
+        return new Set(["远端"]);
+      },
+    });
+    expect(withPort.resolve(PRINCIPAL, WORKSPACE_ID, "远端/a.md", "read")).toBe(
+      `${canonical}/远端/a.md`,
+    );
+    expectCanonicalError(
+      () => withPort.resolve(PRINCIPAL, "missing-ws", "远端/a.md", "read"),
+      "not_found",
+    );
+    expect(asked).toEqual([WORKSPACE_ID]);
+    expect(mounted.events).toEqual([]);
+
+    const sentinel = new Error("mount-names-sentinel");
+    const failing = recordingAudit();
+    const withThrowingPort = createSandbox({
+      rootOf: () => sandbox,
+      audit: failing,
+      mountNamesOf: () => {
+        throw sentinel;
+      },
+    });
+    let outcome: unknown;
+    try {
+      outcome = withThrowingPort.resolve(PRINCIPAL, WORKSPACE_ID, "远端/a.md", "read");
+      expect.fail("expected mountNamesOf sentinel to propagate");
+    } catch (error) {
+      expect(error).toBe(sentinel);
+      expect(error).not.toBeInstanceOf(HttpError);
+    }
+    expect(outcome).toBeUndefined();
+    expect(failing.events).toEqual([]);
+
+    const plain = recordingAudit();
+    const withoutPort = createSandbox({ rootOf: () => sandbox, audit: plain });
+    expectCanonicalError(
+      () => withoutPort.resolve(PRINCIPAL, WORKSPACE_ID, "远端/a.md", "read"),
+      "sandbox_denied",
+    );
+    expect(plain.events).toEqual([
+      {
+        kind: "sandbox.reject",
+        actorId: PRINCIPAL.id,
+        workspaceId: WORKSPACE_ID,
+        title: "越界访问被沙箱拦截",
+        detail: { relPath: "远端/a.md", op: "read", reason: expect.stringMatching(/\S/) },
+      },
+    ]);
+
+    expect(readdirSync(parent).toSorted()).toEqual(beforeParent);
+    expect(readdirSync(sandbox).toSorted()).toEqual(beforeSandbox);
+    expect(readdirSync(join(parent, "outside-mount"))).toEqual([]);
+  });
 });

@@ -3,16 +3,26 @@
  *
  * 同步、只读元数据：规范化受信 root，按用户分量逐个 lstat 拒绝任何
  * symlink，再按 `realpath(root)` 前缀匹配。不创建、不读取目标内容。
+ * 第一段是已登记挂载名时不碰该段及其下任何分量（D21：宿主不同步进入挂载）。
  */
 
 import { lstatSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 
+/**
+ * 路径的第一段：按 `/` 分割、去掉空段与 `.` 段之后的第一个分量（`..` 不去掉，由 resolve 拒绝）；
+ * 没有这样的分量（空间根）时为 undefined。挂载成员判定与 resolve 用同一个函数。
+ */
+export function firstSegment(relPath: string): string | undefined {
+  return relPath.split("/").find((component) => component !== "" && component !== ".");
+}
+
 export function resolve(
   root: string,
   relPath: string,
   op: "read" | "list" | "mkdir" | "write" | "delete" | "move",
-): { ok: true; absPath: string } | { ok: false; reason: string } {
+  mountNames?: ReadonlySet<string>,
+): { ok: true; absPath: string; mount?: string } | { ok: false; reason: string } {
   let canonicalRoot: string;
   try {
     canonicalRoot = realpathSync(root);
@@ -32,25 +42,49 @@ export function resolve(
     return { ok: false, reason: "mkdir name is invalid" };
   }
 
+  const mount = mountOf(relPath, mountNames);
+  const current = walkComponents(canonicalRoot, components, mount === undefined);
+  if (current === undefined) {
+    return { ok: false, reason: "path is not inside the sandbox root" };
+  }
+
+  if (current !== canonicalRoot && !current.startsWith(`${canonicalRoot}/`)) {
+    return { ok: false, reason: "path escapes the sandbox root" };
+  }
+  return mount === undefined
+    ? { ok: true, absPath: current }
+    : { ok: true, absPath: current, mount };
+}
+
+function mountOf(relPath: string, mountNames: ReadonlySet<string> | undefined): string | undefined {
+  const first = firstSegment(relPath);
+  return first !== undefined && mountNames?.has(first) === true ? first : undefined;
+}
+
+/**
+ * 从规范化 root 起词法拼接各分量；任一分量为 `..` 即拒（undefined）。`inspect` 为真时对每个
+ * 已存在分量 lstat、遇符号链接即拒；挂载内（`inspect` 为假）不做任何文件系统调用。
+ */
+function walkComponents(
+  canonicalRoot: string,
+  components: readonly string[],
+  inspect: boolean,
+): string | undefined {
   let current = canonicalRoot;
   for (const component of components) {
     if (component === "..") {
-      return { ok: false, reason: "path is not inside the sandbox root" };
+      return undefined;
     }
     if (component === "" || component === ".") {
       continue;
     }
 
     current = join(current, component);
-    if (!inspectExisting(current)) {
-      return { ok: false, reason: "path is not inside the sandbox root" };
+    if (inspect && !inspectExisting(current)) {
+      return undefined;
     }
   }
-
-  if (current !== canonicalRoot && !current.startsWith(`${canonicalRoot}/`)) {
-    return { ok: false, reason: "path escapes the sandbox root" };
-  }
-  return { ok: true, absPath: current };
+  return current;
 }
 
 /**

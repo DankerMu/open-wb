@@ -12,8 +12,32 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { resolve } from "../src/core/sandbox/resolve.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { firstSegment, resolve } from "../src/core/sandbox/resolve.js";
+
+interface FsCall {
+  name: string;
+  first: unknown;
+}
+
+/** `node:fs` 经命名导入的每次调用及其第一个参数；行为原样透传，只记录。 */
+const fsCalls = vi.hoisted(() => [] as FsCall[]);
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  const record = (name: string, value: unknown): unknown =>
+    typeof value !== "function"
+      ? value
+      : new Proxy(value, {
+          apply(target, self, args) {
+            fsCalls.push({ name, first: args[0] });
+            return Reflect.apply(target, self, args);
+          },
+        });
+  return Object.fromEntries(
+    Object.entries(actual).map(([name, value]) => [name, record(name, value)]),
+  );
+});
 
 const tmpDirs: string[] = [];
 
@@ -380,5 +404,64 @@ describe("core/sandbox resolve", () => {
     expectRejected(missingRoot, "");
 
     expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
+  it("挂载名分量不被检查: the mount segment and everything below it see no filesystem call", () => {
+    const layout = createLayout();
+    const outsideMount = join(layout.parent, "outside-mount");
+    mkdirSync(join(outsideMount, "a"), { recursive: true });
+    writeFileSync(join(outsideMount, "a", "b.md"), "remote");
+    symlinkSync(outsideMount, join(layout.sandbox, "远端"));
+    symlinkSync(outsideMount, join(layout.sandbox, "远端备份"));
+    const mountNames: ReadonlySet<string> = new Set(["远端"]);
+    const mountDir = `${layout.canonicalSandbox}/远端`;
+    const before = snapshotTree(layout.parent);
+
+    for (const [relPath, op, absPath] of [
+      ["远端", "read", mountDir],
+      ["远端/a/b.md", "read", `${mountDir}/a/b.md`],
+      ["./远端/a", "read", `${mountDir}/a`],
+      ["远端//a", "read", `${mountDir}/a`],
+      ["远端/a", "move", `${mountDir}/a`],
+    ] as const) {
+      fsCalls.length = 0;
+      const result = resolve(layout.sandbox, relPath, op, mountNames);
+      const calls = fsCalls.splice(0);
+      expect(result, `${op} ${relPath}`).toStrictEqual({ ok: true, absPath, mount: "远端" });
+      expect(calls, `${op} ${relPath} fs calls`).toEqual([
+        { name: "realpathSync", first: layout.sandbox },
+      ]);
+    }
+
+    for (const [relPath, op] of [
+      ["远端/../x", "read"],
+      ["远端/a/", "mkdir"],
+      ["远端备份/a", "read"],
+    ] as const) {
+      const result = resolve(layout.sandbox, relPath, op, mountNames);
+      expect(result.ok, `${op} ${relPath}`).toBe(false);
+      expect(result.ok ? "" : result.reason, `${op} ${relPath} reason`).toMatch(/\S/);
+    }
+
+    const unmounted = resolve(layout.sandbox, "远端/a", "read", new Set());
+    expect(unmounted.ok).toBe(false);
+    expect(unmounted).not.toHaveProperty("mount");
+    expect(resolve(layout.sandbox, "a", "read", mountNames)).toStrictEqual({
+      ok: true,
+      absPath: `${layout.canonicalSandbox}/a`,
+    });
+
+    expect(snapshotTree(layout.parent)).toEqual(before);
+  });
+
+  it("firstSegment is the first component after dropping empty and dot segments", () => {
+    expect(firstSegment("远端")).toBe("远端");
+    expect(firstSegment("远端/a/b.md")).toBe("远端");
+    expect(firstSegment("./远端/a")).toBe("远端");
+    expect(firstSegment("远端//a")).toBe("远端");
+    expect(firstSegment(".//./远端/")).toBe("远端");
+    expect(firstSegment("../远端")).toBe("..");
+    expect(firstSegment("")).toBeUndefined();
+    expect(firstSegment("./")).toBeUndefined();
   });
 });
