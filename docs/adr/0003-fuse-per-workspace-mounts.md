@@ -202,3 +202,34 @@ Epic #1679 的 (a) 挂载源登记做成中心最小 tab（组 13），(b)–(m)
 
 - **P9**：在途的 `stat` / `readdir` 卡在不应答的远端上时，SIGKILL rclone 再 `-uz`，卡住的调用在 8–13 ms 内以 `ENOTCONN` / `ECONNABORTED` 返回。所以异步调用的 10 s 期限之后，被占住的 libuv 线程能放回：挂载内请求由适配器超期判离线并惰性卸载；文件变更归属与项目技能的 `realpath` 经空间内的符号链接进入挂起的挂载时只丢弃结果、不判哪个挂载离线，线程要等探测判离线、惰性卸载之后才放回（≤ 35 s）。
 - **P13**：`local` 不带 `--links` 时，源里的符号链接（指向源外或源内）在挂载里都看不到，挂载内 `symlink()` 得 `EIO`；`sftp` 由服务端跟随链接。所以挂载内的路径不再逐级 `lstat`（沙箱 `resolve` 对挂载名分量不做文件系统调用）不会放过一个符号链接；挂载外指向挂载内的符号链接仍由沙箱的逐级 `lstat` 拒绝。
+
+**真实挂载验证层（#1700，change `s1b-workspace-mounts` 组 12）**：`server/test/linux/mounts-fuse.test.ts` 以真实 mount-manager（`createMountManager`，除 `:memory:` 数据库与测试自有目录外全用生产缺省：系统解析器、真实定时器、`node:net` 连通检查、`/proc/self/mountinfo`）、真实 rclone 与真实 FUSE 跑 workspace-mounts「真实挂载验证层」各场景，另加「凭证文件往返」（#1685 两条实测记录的回归）。只在 Linux 且 `WORKBUDDY_FUSE_TEST=1` 时运行，本机与 CI 报告 skipped。签收于 2026-10-26 在测试主机的一次性容器里手工运行，主机地址、账号、口令与 `_DOWN` / `_UP` 只经容器内的环境变量与未入库文件给出，容器与镜像用完即删。
+
+| 项 | 值 |
+|---|---|
+| 容器形态 | `ubuntu:24.04`（24.04.5 LTS）一次性容器：`docker run -d --device /dev/fuse --cap-add SYS_ADMIN --cap-add NET_ADMIN --security-opt apparmor=unconfined`，容器内 `apt-get install rclone fuse3 openssh-server iptables sudo`，Node 用官方 linux-x64 tarball（按 SHASUMS256 校验），仓库按暂存区的树 `git archive` 拷入、`npm ci --workspace server --include-workspace-root` |
+| 版本 | rclone `v1.60.1-DEV`（Ubuntu 24.04 包）、fuse3 / fusermount3 3.14.0（`fusermount` 为指向它的符号链接，`fusermount3` 原装 `4755 root:root`）、内核 6.8.0-117-generic、Node v24.13.1、vitest 4.1.11、OpenSSH 9.6p1、iptables 1.8.10（nf_tables） |
+| 身份 | 套件以容器内一个非 root 用户运行，同 uid 部署（`OMP_USER` 未配置，argv 不带 `--allow-other`），挂载经 setuid 的 `fusermount3` |
+| sftp 目标 | 同一容器内的 sshd，一次性口令账号；`WORKBUDDY_FUSE_SFTP_HOST` 取容器自身的非环回地址（主机规则拒绝环回，design D3），`_PORT` 22 |
+| `_DOWN` / `_UP` | 加 / 删一条 iptables `INPUT` 对 sshd 端口的 `DROP` 规则（丢包不是 RST，rclone 存活，同 P4′）；套件用户经 `sudo -n` 只能执行这两个脚本 |
+
+| 用例 | 签收第 1 次 | 第 2 次 | 第 3 次 |
+|---|---|---|---|
+| 凭证文件往返（13 个 `user` 取值，含反引号、`"""`、反斜杠、首尾 U+0085，`host` 为 `[fd00::1]`；另一份 `host` 为 IPv4 映射地址 `::ffff:10.0.0.1`，读回 `[::ffff:10.0.0.1]`；`rclone config dump` 逐字读回） | 通过 1.38 s | 通过 1.38 s | 通过 1.37 s |
+| local 后端的生命周期（建、读、写、改名与源目录一致；SIGKILL rclone 后离线且 mountinfo 无挂载点，再回在线；卸载后挂载点、私有目录都不在，源目录不变） | 通过 5.34 s | 通过 5.34 s | 通过 5.34 s |
+| 只读挂载写入失败（新建、改写、`mkdir`、改名都得 `EROFS`） | 通过 0.17 s | 通过 0.16 s | 通过 0.16 s |
+| 删除不复活（序列连做 50 次，等 7 s；`it.fails`，只有源目录残留能让它失败） | 按预期失败：源目录留下 5 个原名空目录，7.30 s | 按预期失败：4 个，7.30 s | 按预期失败：3 个，7.30 s |
+| sftp 读写（写入、读回；卸载后以新的私有目录再挂、无 VFS 缓存读回一致；卸载后不留挂载点） | 通过 0.60 s | 通过 0.60 s | 通过 0.60 s |
+| sftp 远端停机（挂上读回之后立即 `_DOWN`，即切断在挂上时排定的探测轮次开头——最坏相位；37 s 内离线；停机期间 30 s 内保持离线；`_UP` 之后回在线、读回一致；卸载后不留挂载点） | 通过 70.56 s：`_DOWN` 后 34 995 ms 离线，`_UP` 后 5 202 ms 在线 | 通过 70.56 s：35 005 ms / 5 182 ms | 通过 70.56 s：34 987 ms / 5 185 ms |
+| 合计 | 5 通过、1 预期失败，85.7 s，退出码 0 | 同左 | 同左 |
+
+- **「删除不复活」只认源目录残留**：用例里除最后一句源目录比较之外（建、挂上、序列、挂载视图比较、卸载、拆除，以及用例自设的 60 s 期限），任何一步出错都只记一行 `unexpected:` 并正常返回，`it.fails` 因此报红；拆除放在用例体内，因为 `it.fails` 连 `afterEach` 的失败也会翻成「按预期失败」。签收前在同一容器内对用例做了两次临时改动（只在容器里，未入库），只跑这一例：序列之后往挂载里多写一个文件（挂载视图残留）→ `unexpected: AssertionError: the mount view: …`，报红 `Expect test to fail`，7.32 s；序列之后挂起不返回 → 60 s 时 `unexpected: Error: not done within 60000 ms`，报红 `Expect test to fail`，60.07 s。两次之后容器里都没有残留的挂载、rclone 进程或临时目录；随后从同一归档重新解出该文件（SHA-256 与暂存区一致）再跑上表三次。
+- **#1685 的 IPv4 映射写法**：conf 一半已由上表「凭证文件往返」覆盖（`::ffff:10.0.0.1` 按 IPv6 加方括号，`rclone config dump` 读回 `[::ffff:10.0.0.1]`）。拨号一半（rclone 对 `[::ffff:a.b.c.d]:22` 实际怎样连接）按 #1685 的交接继续推迟，本轮没有在容器里尝试。
+- **负向运行**（前一轮签收，前提检查未改）：`WORKBUDDY_FUSE_TEST=1` 而不设 `WORKBUDDY_FUSE_RCLONE`：套件失败、退出码 1，错误为 `…the mount prerequisites are missing: WORKBUDDY_FUSE_RCLONE is not set`，6 例都未运行。只给 `WORKBUDDY_FUSE_SFTP_HOST`、`_PORT`、`_USER`：套件失败、退出码 1，错误点名 `missing: WORKBUDDY_FUSE_SFTP_PASS, WORKBUDDY_FUSE_SFTP_PATH, WORKBUDDY_FUSE_SFTP_DOWN, WORKBUDDY_FUSE_SFTP_UP`。
+- **组 6 编译入口用例**（`server/test/server-startup-mounts.test.ts`，CI 上因没有 `/dev/fuse` 报告 skipped）：同一容器内 3 例全部通过，3.10 s。
+- **被取代的运行**：
+  - 用例初稿：「删除不复活」只做一次序列即复现（源目录留下原名目录 `d`）；「sftp 远端停机」在挂上读回之后立即 `_DOWN`，测试轮询 100 ms，离线在 35 079 ms 才报告，超出当时 spec 的 35 s。挂上即排定第一轮探测，切断紧跟在轮次开头时检测时间就是 30 s 轮次 + 5 s 连通期限，再加定时器、探测子进程与测试轮询的开销；spec 因此把场景上界改为 37 s（一轮探测 35 s 加至多 2 s 开销）。
+  - 前一轮签收（三次）：`_DOWN` 放在读回之后 3 s、以 35 s 判定，避开了 37 s 上界针对的最坏相位，离线约 32.0 s（31 988 / 32 002 / 31 986 ms）；「删除不复活」的 `it.fails` 把任何异常都算作按预期失败（挂载视图回归也会被吞掉），源目录残留 10 / 5 / 6 个。其余各例同样通过（凭证往返当时只有 IPv6 一种 `host`）。上表一轮改为读回之后立即 `_DOWN`、以 37 s 判定，轮询 20 ms 时三次都在 35.0 s 上下（#1700）。
+- **已知限制**：
+  - **删除不复活不成立**（P8 的残余）：`--vfs-write-back 0s` 之下，可写 `local` 挂载内「`mkdir d`、建 `d/f`、`d` 改名为 `d2`、删 `d2/f`、删 `d2`」之后挂载视图干净，源目录却约有 11% 的序列留下原名的空目录 `d`（两轮签收共六次 300 次中 33 次；另以同一 argv 直接起 rclone 的探针 90 次中 11 次）；文件与 `d2` 都没有复活，与 P8（回写 5 s 时复活的是改名后的目录与文件）的形状不同。探针的 `rclone.log` 显示文件的上传与目录改名相撞：`d/f: Failed to copy: chtimes <源>/d/f: no such file or directory`、`vfs cache: renamed dir in cache to "d2/"`，偶见 `corrupted on transfer: md5 hash differ`。按 owner 2026-10-25 的裁定，该用例为 `it.fails`，签收以其余各例全绿为准；`system.md` §9.12「已知限制」同记。
+  - **smb 在共享根建出 `．` 目录**（P1 的 smb 偏差，owner 裁定第 6 项接受）：往共享根写文件时出现全角句点目录 `．`（U+FF0E），删后再写根又出现。本层签收不含 smb（spec 只要求 `local` 与 `sftp`），没有复测；`system.md` §9.12「已知限制」同记。
