@@ -89,7 +89,7 @@ export interface MountManagerOptions
    * every mount read as landed elsewhere and fail.
    */
   workspaceRootOf(ownerId: string, workspaceId: string): string | null;
-  /** The five roots no `local` source may overlap (design D2). */
+  /** The protected roots no `local` source may overlap (design D2; `protectedRootsOf` in `app.ts`). */
   protectedRoots: readonly string[];
   /** The service error channel; never given a credential. */
   onError(error: Error): void;

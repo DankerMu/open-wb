@@ -151,7 +151,12 @@ export async function openBuilt(settings: MountSettings): Promise<MountsRest> {
     authRuntime: fixedRuntime(() => FIXED_NOW),
     assembly: {
       runtime: runtimeOf(world),
-      ...workspaceAssemblyOf({ ...settings, sandboxRoot: world.sandbox, trashRetentionDays: 30 }),
+      ...workspaceAssemblyOf({
+        ...settings,
+        sandboxRoot: world.sandbox,
+        trashRetentionDays: 30,
+        previewCacheDir: join(world.base, "preview-cache"),
+      }),
     },
   });
   return withCookies(world, app);

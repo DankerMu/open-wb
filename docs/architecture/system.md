@@ -919,14 +919,21 @@ modelRoles:
 **挂载源端点**（`server/src/workspaces/mounts/rest.ts`，由 `registerWorkspaces` 注册，属 workspaces 模块，启动记录的模块数不变；规格 workspace-mounts「挂载源端点」）：挂载源是管理员登记的服务器目录（服务器上挂好的 NFS 或本机目录），用户经 `local` 挂载把它挂进自己的空间。登记目前只有 API：管理员用带 cookie 的请求登记与删除。
 
 - `GET /api/mount-sources` → 200 `{sources: [...]}`，按 `name` 的 UTF-8 字节序，对所有登录账号开放。两种视图：管理员每项恰为 `{id, name, path, readOnly, createdAt}`，其它账号每项恰为 `{id, name, readOnly}`（看不到服务器路径）。
-- `POST /api/mount-sources`（仅管理员，body 恰为 `{name, path, readOnly}`）→ 201 管理员视图。`name` 1..64 个字符、无控制字符；`path` 必须是绝对路径，其 realpath 必须是存在的目录（不存在、普通文件、操作系统拒收的路径如含 U+0000 都是 400），存入的是 realpath（登记一个符号链接存的是目标目录）。挂载源拒绝清单五项——realpath 与下列任一目录的 realpath 相等、位于其内或包含它（例如它的父目录）即 400、不写行与审计：
+- `POST /api/mount-sources`（仅管理员，body 恰为 `{name, path, readOnly}`）→ 201 管理员视图。`name` 1..64 个字符、无控制字符；`path` 必须是绝对路径，其 realpath 必须是存在的目录（不存在、普通文件、操作系统拒收的路径如含 U+0000 都是 400），存入的是 realpath（登记一个符号链接存的是目标目录）。挂载源拒绝清单十项（`app.ts` 的 `protectedRootsOf`；第 6–10 项见 #1786）——realpath 与下列任一目录的 realpath 相等、位于其内或包含它（例如它的父目录）即 400、不写行与审计：
   1. `SANDBOX_ROOT`（别人的沙箱）；
   2. `OMP_STATE_DIR`（凭证、会话与挂载私有目录）；
   3. `dirname(DB_PATH)`（数据库；内存库没有这一项）；
   4. `STATIC_ROOT`（前端静态文件，可写挂载即存储型 XSS；未提供前端时没有这一项）；
-  5. `dirname(OMP_BIN)`（omp 二进制）。
+  5. `dirname(OMP_BIN)`（omp 二进制）；
+  6. 仓库根（`server/dist`、`node_modules` 所在的那一级：服务代码，下次重启时以 app uid 执行；`<repo>/server` 这类 `STATIC_ROOT` 挡不住的兄弟目录由这一项挡住）；
+  7. `PREVIEW_CACHE_DIR`（所有账号共用的预览缓存，可写即能污染别人的预览）；
+  8. `OFFICE_SPOOL_DIR`（与转换 sidecar 共享的 spool，理由同上；未配置时没有这一项）；
+  9. `dirname(BROWSER_BIN)`（宿主交给 omp 执行的浏览器，可写即能替换它；未配置时没有这一项）；
+  10. `dirname(RCLONE_BIN)`（app 自己 spawn 的 rclone，可写即能替换它；未配置时没有这一项）。
 
-  同名或同 realpath 409 `conflict`（先于上限判定），已有 32 个时第 33 个 400。rclone 把 `local` 挂载里的一切显示为 omp 可读写，所以这五处永远不能交给 omp；引用该源的 `local` 挂载每次挂载与重挂之前都按同一规则复核 realpath（还须等于登记值），登记之后把目录换成指向这些目录的符号链接，挂载就停在离线、不发起 `mount`。
+  同名或同 realpath 409 `conflict`（先于上限判定），已有 32 个时第 33 个 400。rclone 把 `local` 挂载里的一切显示为 omp 可读写，可写挂载里 omp 的写入以 app uid 落盘，所以这十处永远不能交给 omp（`fusermount3` 从 PATH 解析，通常在 root 拥有的 `/usr/bin`，app uid 本来写不进去，不在清单里）；引用该源的 `local` 挂载每次挂载与重挂之前都按同一规则、同一份清单复核 realpath（还须等于登记值），登记之后把目录换成指向这些目录的符号链接，挂载就停在离线、不发起 `mount`。
+
+  升级说明（#1786）：升级前已登记、realpath 落在第 6–10 项之内的挂载源不会被自动删除，`GET /api/mount-sources` 照旧列出；引用它的 `local` 挂载下一次挂载尝试即失败、不发起 `mount`（建出 502 `mount_failed`，启动恢复与重挂保持离线）。处理办法是管理员 `DELETE` 这个挂载源（连带卸载引用它的挂载），需要的话在保护根之外另选目录重新登记。
 - `DELETE /api/mount-sources/:id`（仅管理员）→ 204，未知 id 404。挂载源删除连带卸载：先在内存里把该源标为删除中（挂载端点据此拒绝引用它的新挂载，见下文），再对此刻引用它的每个挂载——不论属于哪个账号——在各自空间的串行链上卸载并删行，最后在一个事务内删源行。标记在结束时（成功或失败）清除：某次连带卸载或最后的事务失败时应答 generic 500（功能关闭且缺少 `fusermount3` 而卸载不了孤儿挂载时为 503 `mount_disabled`，同上文），源行保留，已连带卸载的挂载已删、其余照旧，之后可再次 `DELETE`。选连带卸载而不是 409：管理员看不到也卸不了别人的挂载。
 - 次序：未登录 401 → 非管理员对 `POST` / `DELETE` 403 `forbidden`（路由级 `preParsing`，先于 body 解析与 id 判定）→ body 解析 → 取值 400 → 路径 400 → 409 / 上限 400。`POST /api/mount-sources` 属 content-parser 归属集（三十条之一），body limit 16 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400、不写表与审计；`DELETE` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。违反取值规则的 400 message 恒为 `请求格式不正确`，不回显取值与键名。三个端点全部 `Cache-Control: no-store`，功能关闭（未配置 `RCLONE_BIN`）时照常可用：登记只是数据，连带卸载按上文功能关闭时的卸载规则。
 - 审计（与表写入同一事务，actor 为管理员）：`mount.source.create` / `mount.source.delete`，`workspaceId` 为 null，detail 恰为 `{sourceId, name, path, readOnly}`；连带卸载的每个挂载各一条 `mount.detach`，detail `{mountId, name, reason: "source_deleted"}`，`workspaceId` 为该挂载的空间。
