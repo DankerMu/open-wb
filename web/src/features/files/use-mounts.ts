@@ -21,6 +21,9 @@
  *   the preview area as「在挂载内」; `framed` is the preview that needs the preview token (a web page,
  *   a PDF or an office document) when not inside a mount, `null` otherwise: no token is issued or
  *   renewed for a file inside a mount (file-previewers「挂载内文件不签发」).
+ * - `holds(path)`: that same「在挂载内」for any path. The tree's row menu reads it too: an entry inside
+ *   a mount has no `删除` (workspace-mounts「挂载内条目的行菜单」; the server answers 409
+ *   `mount_boundary` to such a delete, and stays the authority when the list is stale).
  * - `walk(path, cache)`: `revealStep` with the online mounts' names as root rows (files-web「地址定位到
  *   文件」reaches into a mount). `show` is what the walk expands: `expand`, and while no list was read
  *   the unlisted first segment too, so a mount row that arrives after the walk comes out expanded; it
@@ -336,6 +339,8 @@ export function useMounts(
       listSources: (signal: AbortSignal) => client.listMountSources({ signal }),
     },
     error: current?.error ?? null,
+    /** Whether `path` is inside a mount: what `preview` reads, and the tree's row menu (no `删除`). */
+    holds,
     loaded,
     preview,
     dialogDirectories,

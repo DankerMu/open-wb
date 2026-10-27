@@ -191,7 +191,8 @@ export function useEntryOperations(
     [client, focusMenuPath, onMoved, submit, workspaceId],
   );
 
-  // 删除路由不答 409：不给冲突文案，失败一律显示信封 message。
+  // 删除路由只对挂载内的条目答 409 `mount_boundary`，那些行的菜单没有 `删除`（`tree.tsx`），挂载列表过期时
+  // 才会撞上。不给冲突文案：409 与其余失败一样显示信封 message。
   const remove = useCallback(
     (path: string) => {
       submit(

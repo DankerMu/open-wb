@@ -28,6 +28,8 @@ type DirectoryTreeState = {
   /** 给了才有行菜单（根行始终没有）；`onlyPaths` 下浏览器不给。 */
   actions?: EntryActions | undefined;
   focusMenuPath?: MenuFocus | undefined;
+  /** 条目是否在挂载内（`use-mounts.ts` 的 `holds`，与预览的「在挂载内」同一判定）：在内的行菜单没有 `删除`。 */
+  inMount?: ((path: string) => boolean) | undefined;
   onSelectFile(entry: TreeRow, path: string): void;
   onToggleDirectory(path: string): void;
   /** 该空间有挂载根行：空间根一层为空时显示 `空目录` 而不是空态。 */
@@ -72,7 +74,7 @@ type DirectoryNodeProps = DirectoryTreeState & {
   subline?: string | undefined;
 };
 
-type RowMenuProps = Pick<DirectoryTreeState, "actions" | "focusMenuPath"> & {
+type RowMenuProps = Pick<DirectoryTreeState, "actions" | "focusMenuPath" | "inMount"> & {
   name: string;
   path: string;
   type: "dir" | "file";
@@ -80,7 +82,7 @@ type RowMenuProps = Pick<DirectoryTreeState, "actions" | "focusMenuPath"> & {
 
 type FileRowProps = Pick<
   DirectoryTreeState,
-  "actions" | "focusMenuPath" | "marks" | "onSelectFile"
+  "actions" | "focusMenuPath" | "inMount" | "marks" | "onSelectFile"
 > & {
   drag: RowDrag | undefined;
   entry: TreeRow;
@@ -233,8 +235,10 @@ function useRowDrag(actions: EntryActions | undefined): RowDrag | undefined {
  * 菜单打开时显现。`modal={false}`：不锁 body 的指针事件，随后打开的对话框自己管模态。
  * 各项送出的都是这一行自己的 `path`（父目录接上列表里的名字，`workspacePath`）与 `name`，不是选中项的。
  * `下载` 是链接：浏览器直接导航，文件名由服务端的 Content-Disposition 给。没给 `actions` 就不渲染。
+ * 挂载内的条目（`inMount`）没有 `删除`：服务端对挂载内的删除一律答 409 `mount_boundary`（workspace-mounts
+ * 「挂载内条目的行菜单」）；列表过期而判定有出入时仍由那个 409 拒绝。
  */
-function RowMenu({ actions, focusMenuPath, name, path, type }: RowMenuProps) {
+function RowMenu({ actions, focusMenuPath, inMount, name, path, type }: RowMenuProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   // 这一行是刚被重命名或移动出来的：把焦点接过来（旧行连同它的按钮已卸载）。删除不经这里：被删的行没有新行。
@@ -272,13 +276,15 @@ function RowMenu({ actions, focusMenuPath, name, path, type }: RowMenuProps) {
           <Icon name="folder" size={14} />
           移动到…
         </DropdownMenuItem>
-        <DropdownMenuItem
-          onSelect={() => actions.remove({ name, path, type }, triggerRef.current)}
-          variant="destructive"
-        >
-          <Icon name="trash" size={14} />
-          删除
-        </DropdownMenuItem>
+        {inMount?.(path) ? null : (
+          <DropdownMenuItem
+            onSelect={() => actions.remove({ name, path, type }, triggerRef.current)}
+            variant="destructive"
+          >
+            <Icon name="trash" size={14} />
+            删除
+          </DropdownMenuItem>
+        )}
         {type === "file" ? (
           <DropdownMenuItem asChild>
             <a download href={actions.downloadHref(path)}>
@@ -297,6 +303,7 @@ function FileRow({
   drag,
   entry,
   focusMenuPath,
+  inMount,
   marks,
   onSelectFile,
   path,
@@ -336,6 +343,7 @@ function FileRow({
       <RowMenu
         actions={actions}
         focusMenuPath={focusMenuPath}
+        inMount={inMount}
         name={entry.name}
         path={path}
         type="file"
@@ -346,7 +354,7 @@ function FileRow({
 }
 
 function DirectoryNode({ drag, icon, label, path, subline, ...state }: DirectoryNodeProps) {
-  const { actions, expandedPaths, focusMenuPath, marks, onToggleDirectory } = state;
+  const { actions, expandedPaths, focusMenuPath, inMount, marks, onToggleDirectory } = state;
   const expanded = expandedPaths.has(path);
   const mark = useRowMark(marks, path);
   // 根行没有菜单。
@@ -379,7 +387,14 @@ function DirectoryNode({ drag, icon, label, path, subline, ...state }: Directory
           {label}
         </span>
       </button>
-      <RowMenu actions={menu} focusMenuPath={focusMenuPath} name={label} path={path} type="dir" />
+      <RowMenu
+        actions={menu}
+        focusMenuPath={focusMenuPath}
+        inMount={inMount}
+        name={label}
+        path={path}
+        type="dir"
+      />
       {mark.mark}
       {subline ? (
         <p
@@ -410,6 +425,7 @@ function DirectoryBody({
     expandedPaths,
     focusMenuPath,
     hasMounts,
+    inMount,
     loadingPaths,
     marks,
     onSelectFile,
@@ -466,6 +482,7 @@ function DirectoryBody({
                     expandedPaths={expandedPaths}
                     focusMenuPath={focusMenuPath}
                     icon="folder"
+                    inMount={inMount}
                     key={entryPath}
                     label={entry.name}
                     loadingPaths={loadingPaths}
@@ -484,6 +501,7 @@ function DirectoryBody({
                   drag={drag}
                   entry={entry}
                   focusMenuPath={focusMenuPath}
+                  inMount={inMount}
                   key={entryPath}
                   marks={marks}
                   onSelectFile={onSelectFile}
