@@ -872,7 +872,8 @@ modelRoles:
 **审批行为**（design D12；规格 chat-web「工具段摘要与折叠」、chat-stream 的 `xd://` 先例）：宿主 overlay 不钉 `tools.xdev`，工具集含 `read` 与 `write`、没有 code mode 时，MCP 工具不进 omp 的直接工具面，而挂在 `xd://mcp__<server>_<tool>` 下，模型以 `write`、`path: "xd://mcp__…"`、JSON 参数作 `content` 调用它。所以审批与观察面都是 `write` 的：
 
 - `每次都问` 下每次 MCP 调用都弹确认卡，标题首行为 `Allow tool: write`，卡上带 `Path: xd://mcp__<server>_<tool>`；
-- `只问命令` 下 MCP 调用不弹确认（`write` 在该档位不问），`全部自动` 同样不问；
+- `只问命令` 下 MCP 调用不弹确认，`全部自动` 同样不问。是否免确认由 omp 按被调设备的工具自身的级别判定（omp v18.12.3 `internal-urls/xd-protocol.ts` 的 write 级别解析；档位上界 `每次都问`→read、`只问命令`→write、`全部自动`→exec，级别不超过上界才免确认），已挂载的 MCP 工具级别不超过 write，所以不问；
+- 残余（#1817）：写到本会话**未挂载**的 `xd://` 名字——会话停用、管理员停用或删除后重启、启动失败没挂上的连接器，模型编造的设备名，或 `content` 不是合法 JSON——omp 按 `exec` 计，`只问命令` 下照样出 `Allow tool: write` / `Path: xd://…` 的确认卡；允许（或 60 秒后自动允许）后该步以 `No such tool: xd://… Mounted devices: …` 失败，不会执行到连接器、也不绕过停用。这是 omp 内部的 fail-closed 分类，宿主不改（宿主侧自动拒绝只盖得住会话停用一种来源，且让模型失去 `No such tool` 的提示；用 overlay `tools.approval` 放行会连 `每次都问` 下的写文件一起放行）；升级 omp 时复核；
 - 会话里的步骤名为 `write`，工具段摘要按既有的工具名表把它计为 `新建`。
 
 这与 #1570 起「写 `xd://browser` 就是一次 write」的先例一致。需要逐次确认连接器调用的会话用 `每次都问`。本组只写明现状，不改工具段摘要的计法。
