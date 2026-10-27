@@ -46,6 +46,8 @@ const GROUP_RULE = "fusermount3 只能对 app 所在、omp 不在的组可执行
 /** 测试用的 omp 用户名：不出现在任何 message 里。 */
 const OMP = "wbompx";
 const OMP_UID = 4242;
+/** 会运行假 `id` 的用例的预算：高于两次 `id` 各自期限（10 s）之和 20 s，只为负载留余量（#1804）。 */
+const ID_CASE_MS = 30_000;
 
 const scratchRoots: string[] = [];
 
@@ -457,9 +459,12 @@ describe("预检", () => {
         expect(thrown).toContain(GROUP_RULE);
       }
     },
+    ID_CASE_MS,
   );
 
-  it("前提齐全（OMP_USER 模式，fusermount3 为 4750 且属组不在 omp 的组里）：记下路径与 uid", () => {
+  it("前提齐全（OMP_USER 模式，fusermount3 为 4750 且属组不在 omp 的组里）：记下路径与 uid", {
+    timeout: ID_CASE_MS,
+  }, () => {
     const h = host({ ompUser: true });
     const settings = resolveMountSettings(h.env, h.probes);
     expect(settings).toEqual({

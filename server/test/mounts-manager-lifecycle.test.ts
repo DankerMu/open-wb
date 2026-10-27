@@ -36,8 +36,13 @@ import {
 
 const CASE_MS = 30_000;
 const USER_ACTOR = { actorId: OWNER, reason: "user" } as const;
-/** Far less than the 20 s readiness window: a cancelled attempt is not waited out. */
-const CANCEL_BOUND_MS = 5000;
+/**
+ * Strictly below the 20 s readiness window: a cancelled attempt is not waited out. The cases asserting it
+ * build their manager with the SIGTERM grace injected above it, so a cancellation sent through the grace
+ * instead of a SIGKILL also overruns it. The timed span includes real process spawns, hence the slack (#1804).
+ */
+const CANCEL_BOUND_MS = 15_000;
+const STOP_GRACE_BEYOND_BOUND_MS = 20_000;
 const PAST_CAP_MS = 400_000;
 
 let world: World;
@@ -268,7 +273,7 @@ describe("服务启停与挂载「关停卸载」", () => {
     seedMount(world, { id: ID2, body: sftp("/srv/data", { name: "乙" }), createdAt: 2 });
     seedMount(world, { id: ID3, body: sftp("/srv/data", { name: "丙" }), createdAt: 3 });
     nextMounts(world, ["hang"]);
-    const manager = world.manager();
+    const manager = world.manager({ stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS });
     const restoring = manager.restoreAll();
     await waitFor(() => world.mountCalls().length === 1);
     expect(alive(pidOf(0))).toBe(true);
@@ -343,7 +348,7 @@ describe("挂载操作的串行与取消「启动恢复期间关停」", () => {
     seedMount(world, { id: ID1, body: sftp(), createdAt: 1 });
     nextMounts(world, ["stubborn"]);
     const { hanging, aborted, probeExec } = readdirHangingAfter(0);
-    const manager = world.manager({ probeExec });
+    const manager = world.manager({ probeExec, stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS });
     const restoring = manager.restoreAll();
     await waitFor(() => hanging.length === 1);
     expect(readFileSync(world.mountinfo, "utf8")).toContain(`m${ID1}:`);
@@ -387,7 +392,7 @@ describe("挂载操作的串行与取消「重挂就绪期间卸载」", () => {
   it("rclone hanging before any mountinfo line: detach returns well inside the window, nothing left, no remount", {
     timeout: CASE_MS,
   }, async () => {
-    const manager = world.manager();
+    const manager = world.manager({ stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS });
     await attach(manager);
     nextMounts(world, ["hang"]);
     process.kill(pidOf(0), "SIGKILL");
@@ -413,7 +418,7 @@ describe("挂载操作的串行与取消「重挂就绪期间卸载」", () => {
     timeout: CASE_MS,
   }, async () => {
     const { hanging, aborted, probeExec } = readdirHangingAfter(1);
-    const manager = world.manager({ probeExec });
+    const manager = world.manager({ probeExec, stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS });
     await attach(manager);
     nextMounts(world, ["stubborn"]);
     process.kill(pidOf(0), "SIGKILL");
@@ -456,7 +461,7 @@ describe("挂载操作的串行与取消: shutdown during an attach", () => {
   it("rclone hanging before any mountinfo line: closeAll returns well inside the window, the attach is mount_failed and leaves nothing", {
     timeout: CASE_MS,
   }, async () => {
-    const manager = world.manager();
+    const manager = world.manager({ stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS });
     const outcome = outcomeOf(attach(manager, sftp("/srv/data@hang")));
     await waitFor(() => world.mountCalls().length === 1);
     expect(alive(pidOf(0))).toBe(true);
@@ -474,7 +479,7 @@ describe("挂载操作的串行与取消: shutdown during an attach", () => {
     timeout: CASE_MS,
   }, async () => {
     const { hanging, aborted, probeExec } = readdirHangingAfter(0);
-    const manager = world.manager({ probeExec });
+    const manager = world.manager({ probeExec, stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS });
     const outcome = outcomeOf(attach(manager, sftp("/srv/data@stubborn")));
     await waitFor(() => hanging.length === 1);
     expect(readFileSync(world.mountinfo, "utf8")).toContain(`m${ID1}:`);
@@ -495,7 +500,7 @@ describe("挂载操作的串行与取消: shutdown during an attach", () => {
   it("closeAll while the attach's before hook is pending (#1788): no spawn, mount_disabled, closeAll prompt", {
     timeout: CASE_MS,
   }, async () => {
-    const manager = world.manager();
+    const manager = world.manager({ stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS });
     let release = (): void => {};
     let entered = false;
     const within: string[] = [];

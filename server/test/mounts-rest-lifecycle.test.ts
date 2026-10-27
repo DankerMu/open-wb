@@ -33,8 +33,13 @@ import {
   sftpBody,
 } from "./mounts-rest-helpers.js";
 
-/** How long a cancelled readiness wait may take: well inside the 20 s window. */
-const CANCEL_BOUND_MS = 5000;
+/**
+ * How long a cancelled readiness wait may take: strictly below the 20 s window. The manager gets the SIGTERM
+ * grace injected above it, so a cancellation sent through the grace instead of a SIGKILL also overruns it.
+ * The timed span includes real process spawns, hence the slack (#1804).
+ */
+const CANCEL_BOUND_MS = 15_000;
+const STOP_GRACE_BEYOND_BOUND_MS = 20_000;
 
 afterEach(async () => {
   await closeApps();
@@ -103,7 +108,7 @@ describe("挂载操作的串行与取消「重挂就绪期间卸载」(HTTP)", (
   it("the remount's rclone hangs before readiness: DELETE is 204 well inside the window, GET no longer lists it, no rclone or mountinfo line left, no remount after 300 s", {
     timeout: CASE_MS,
   }, async () => {
-    const rest = await openMounts();
+    const rest = await openMounts({ overrides: { stopTimeoutMs: STOP_GRACE_BEYOND_BOUND_MS } });
     const { world } = rest;
     const created = await postMount(rest, W1, sftpBody("远端"));
     const id = String(created.id);
