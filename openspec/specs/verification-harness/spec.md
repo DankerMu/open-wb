@@ -307,3 +307,22 @@ Web unit-test assertions on DOM that changes only after a route transition commi
 - **WHEN** 上限为 2，两路 prompt（`hang-prompt`）、一个 regenerate 与一个 fork 并发，其中 fork 临时进程做完即退出、regenerate 进程回合结束后可被驱逐
 - **THEN** 用例断言每个结果只是成功或 `agent_capacity` 拒绝、每次 spawn 时的存活进程数都不超过 2，不读取拒绝送达后的进程数
 - **AND** 把运行时上限临时改为 3 时（变异），某次 spawn 时已有 2 个存活子进程（样本只计新 spawn 之前已存活的），`expectWithinCap(…, 2)` 失败，而在它之前的被拒原因断言仍通过
+
+### Requirement: 过滤测试运行命令
+
+server 与 web 两个 workspace SHALL 各提供 `test:focus` 脚本，内容为 `vitest run`（不带 `--coverage`），过滤运行的文档化形式为 `npm run test:focus --workspace <ws> -- <pattern>`：所选测试全部通过即退出码 0，任一失败即非 0。`test` 脚本 SHALL 保持 `vitest run --coverage`，全量 `npm test --workspace <ws>` 与 `make test` 的四项 80% 全局覆盖率阈值不变。`AGENTS.md`「范围化验证」规则与 `openspec/project-profile.md` 命令面 SHALL 记录这一过滤形式（AGENTS.md 的 Verification Matrix 表只列 Makefile 目标，不收这一行），并写明覆盖率门禁只由全量运行承担。
+
+#### Scenario: 过滤运行只看所选测试的结果
+
+- **WHEN** 执行 `npm run test:focus --workspace server -- mounts-validate`，所选测试全部通过
+- **THEN** 退出码为 0，不报覆盖率阈值
+- **AND** 所选测试中有一条失败时退出码非 0
+- **AND** 执行 `npm test --workspace server -- mounts-validate` 仍因全局覆盖率阈值退出非 0
+
+### Requirement: 部分删除残留断言不依赖并行删除的完成顺序
+
+递归删除失败后，如果用例断言残留的**完整精确树**（对整棵残留树 `toEqual`），其夹具 SHALL 在被删除的目录下只留那一个注定删不掉的顶层子树，不得同时放其它兄弟项。原因是 Node 的 `fs.promises.rm` 并行删除各子项，遇到第一个错误就 reject，兄弟项是否已经删掉不确定。只断言被锁子树仍在、不涉及兄弟项是否存在的用例，不受这条约束。实例：#1490 的「删除失败不影响响应」与 #1746 的 `session-delete-sibling.test.ts` 用例 (e)。
+
+#### Scenario: 精确树断言与删除完成顺序无关
+- **WHEN** 连续多次运行 `session-delete-sibling.test.ts` 用例 (e)，夹具的产物目录只有设为 `0500` 的 `local/note.txt` 这一个顶层子树
+- **THEN** 每次都通过，残留树恰为 `local` 与 `local/note.txt`，不依赖兄弟项 unlink 的完成顺序

@@ -26,20 +26,22 @@
 - **THEN** 列名集合恰为上文所列，不含 `user`、`pass`、`password`、`key`、`domain`、`status` 一类列
 
 ### Requirement: 挂载配置与启动预检
-三个配置键 SHALL 经 http-service-skeleton「服务启动与装配」的同一 pure config seam 解析，非法值的配置错误命名该键而不含输入值：
+五个配置键 SHALL 经 http-service-skeleton「服务启动与装配」的同一 pure config seam 解析，非法值的配置错误命名该键而不含输入值：
 
 - `RCLONE_BIN`：缺省未配置，即挂载关闭；给出时 SHALL 为绝对路径（显式 empty、相对路径为配置错误）。
 - `MOUNT_HOST_ALLOW`：缺省未配置，即不限主机；给出时 SHALL 为逗号分隔的主机名单，每项 1..253 字节、只含 ASCII 字母数字、`.`、`:`、`-`；显式 empty、任一空项、任一项含其它字符为配置错误。
 - `MOUNT_MAX_PER_WORKSPACE`：缺省 `8`；与 `OMP_IDLE_MS` 同一解析纪律（canonical ASCII decimal 正整数 1..2147483647，empty / `0` / 非 canonical / 超限为配置错误）。
+- `MOUNT_MAX_PER_ACCOUNT`：一个账号全部空间的挂载数上限，缺省 `32`；同一解析纪律（#1789，owner 2026-10-26）。
+- `MOUNT_MAX_ATTACHING_PER_ACCOUNT`：一个账号同时在途的建出数上限，缺省 `2`；同一解析纪律（#1789）。
 
 配置了 `RCLONE_BIN` 时，配置阶段 SHALL 另做启动预检，任一不过即配置错误（点名 `RCLONE_BIN`，启动以 `reason: "config"` 失败，不新增启动阶段）：`RCLONE_BIN` 是本进程可执行（`X_OK`）的普通文件；进程 `PATH` 的某一项下有可执行的 `fusermount3`（取第一个，记下其绝对路径，此后的卸载只用该路径）；进程 `PATH` 的某一项下有可执行的 `fusermount`（rclone 1.60.1 挂载时按 PATH 查找的是这个名字，#1665 P10；Ubuntu 的 fuse3 包把它装成指向 `fusermount3` 的符号链接）；`/dev/fuse` 存在（且为字符设备）；`OMP_USER` 已配置时 `/etc/fuse.conf` 存在且有一行去掉首尾空白后恰为 `user_allow_other`，并且以固定绝对路径 `/usr/bin/id -u -- <OMP_USER>` 得到一个十进制数值 uid（退出码非 0 或输出不是十进制整数即不过）；`OMP_USER` 已配置时，进程 `PATH` 各项下的每一个 `fusermount3` 与 `fusermount` SHALL 没有 other 执行位，且其属组不是 `/usr/bin/id -G -- <OMP_USER>` 输出的任何一个组（message 另写明 fusermount3 只能对 app 所在、omp 不在的组可执行）。未配置 `RCLONE_BIN` 时 SHALL NOT 检查任何 FUSE 前提，也 SHALL NOT 恢复或建立任何挂载；已登记的挂载照样载入内存登记，在 API 上一律 `offline`，新建为 503 `mount_disabled`，挂载内路径的文件端点为 409 `mount_offline`（「挂载目录内的文件端点」），卸载照常可用（需要惰性卸载时见「挂载进程与挂载点」），挂载源的三个端点照常可用。
 
 #### Scenario: 缺省与覆盖
-- **WHEN** 三键都未设置解析配置；另一例以 `MOUNT_HOST_ALLOW=files.intra,10.0.0.5`、`MOUNT_MAX_PER_WORKSPACE=3` 解析
-- **THEN** 前者挂载关闭、主机不限、上限 8，且没有读取 `/dev/fuse` 与 `/etc/fuse.conf`；后者名单恰为这两项、上限 3
+- **WHEN** 五键都未设置解析配置；另一例以 `MOUNT_HOST_ALLOW=files.intra,10.0.0.5`、`MOUNT_MAX_PER_WORKSPACE=3`、`MOUNT_MAX_PER_ACCOUNT=5`、`MOUNT_MAX_ATTACHING_PER_ACCOUNT=1` 解析
+- **THEN** 前者挂载关闭、主机不限、上限依次为 8、32、2，且没有读取 `/dev/fuse` 与 `/etc/fuse.conf`；后者名单恰为这两项、上限依次为 3、5、1
 
 #### Scenario: 非法值
-- **WHEN** `RCLONE_BIN` 为 empty 或 `bin/rclone`；`MOUNT_HOST_ALLOW` 为 empty、`a,,b`、`a b`、`a/b`；`MOUNT_MAX_PER_WORKSPACE` 为 empty、`0`、`08`、`2147483648`
+- **WHEN** `RCLONE_BIN` 为 empty 或 `bin/rclone`；`MOUNT_HOST_ALLOW` 为 empty、`a,,b`、`a b`、`a/b`；`MOUNT_MAX_PER_WORKSPACE`、`MOUNT_MAX_PER_ACCOUNT`、`MOUNT_MAX_ATTACHING_PER_ACCOUNT` 各为 empty、`0`、`08`、`2147483648`
 - **THEN** 每一例都在任何 filesystem / database / listen 副作用之前以 nonzero 退出，stderr 恰一行 `{"event":"server_start_failed","reason":"config"}`；`resolveServerConfig` 抛出的 message 含该键名而不含输入值
 
 #### Scenario: 预检
@@ -175,7 +177,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 ### Requirement: 挂载端点
 `GET /api/workspaces/:id/mounts` SHALL 返回 200 `{enabled, mounts}`：`enabled` 为是否配置了 `RCLONE_BIN`；`mounts` 为该空间的挂载按 `created_at, id` 升序，每项恰为 `{id, name, backend, host, port, remotePath, sourceId, sourceName, readOnly, status, createdAt}`（`sftp` / `smb` 的 `sourceId` 与 `sourceName` 为 null；`local` 的 `host`、`port`、`remotePath` 为 null，`sourceName` 为挂载源的名称；`status` 为 `online` 或 `offline`），不含任何凭证。
 
-`POST /api/workspaces/:id/mounts` SHALL 建出并首次挂载（这一次挂载即连通测试），成功返回 201 与该挂载的视图（`status: "online"`）。判定次序：未认证 401 → 空间不属本人或不存在 404 → 未配置 `RCLONE_BIN` 503 `mount_disabled`（这三者在 body 解析之前）→ content-parser 错误 400 → 「挂载取值与主机规则」的键集与取值 400 → 临时空间 400 `bad_request` → 该空间已有 `MOUNT_MAX_PER_WORKSPACE` 个挂载 409 `mount_limit` → `local` 的 `sourceId` 未登记 404、挂载源只读而 `readOnly` 为 false 400 → 同名挂载已存在或空间根下已有同名条目 409 `conflict` → 主机规则 403 `mount_host_rejected`（主机解析失败 502 `mount_failed`）→ 写凭证文件、建挂载点并检查（挂载点或挂载源复核不过 502 `mount_failed`）、启动子进程并等待就绪（失败 502 `mount_failed`）→ 同一事务内插入挂载行与 `mount.attach` 审计；插行或审计失败 SHALL 先卸载再 generic 500。
+`POST /api/workspaces/:id/mounts` SHALL 建出并首次挂载（这一次挂载即连通测试），成功返回 201 与该挂载的视图（`status: "online"`）。判定次序：未认证 401 → 空间不属本人或不存在 404 → 未配置 `RCLONE_BIN` 503 `mount_disabled`（这三者在 body 解析之前）→ content-parser 错误 400 → 「挂载取值与主机规则」的键集与取值 400 → 临时空间 400 `bad_request` → 该账号在途的建出已有 `MOUNT_MAX_ATTACHING_PER_ACCOUNT` 个 409 `mount_limit` → 该账号的挂载行数加上它在途的建出数已达 `MOUNT_MAX_PER_ACCOUNT` 409 `mount_limit`（这两项与在途计数的加一在同一个同步段内完成，中间没有 `await`；在途从这一步起算，到该次建出以成功、失败或取消落定为止，落定即减一）→ 该空间已有 `MOUNT_MAX_PER_WORKSPACE` 个挂载 409 `mount_limit` → `local` 的 `sourceId` 未登记 404、挂载源只读而 `readOnly` 为 false 400 → 同名挂载已存在或空间根下已有同名条目 409 `conflict` → 主机规则 403 `mount_host_rejected`（主机解析失败 502 `mount_failed`）→ 写凭证文件、建挂载点并检查（挂载点或挂载源复核不过 502 `mount_failed`）、启动子进程并等待就绪（失败 502 `mount_failed`）→ 同一事务内插入挂载行与 `mount.attach` 审计；插行或审计失败 SHALL 先卸载再 generic 500。
 
 `DELETE /api/workspaces/:id/mounts/:mountId` SHALL 卸载、删除挂载行并写 `mount.detach` 审计后返回 204；`mountId` 不属于该空间、空间不属本人或不存在 → 404。未配置 `RCLONE_BIN` 时它同样可用，唯一的例外是需要惰性卸载而进程 `PATH` 上没有 `fusermount3`（503 `mount_disabled`，见「挂载进程与挂载点」）。它不读取 body。
 
@@ -201,6 +203,14 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 - **WHEN** 未配置 `RCLONE_BIN`，DB 里同一空间有挂载 `甲` 与 `乙`，`乙` 的挂载点在（假）mountinfo 里；依次 `GET …/mounts`、`POST …/mounts`、`DELETE …/mounts/<甲>`；PATH 上没有 `fusermount3` 时 `DELETE …/mounts/<乙>`；PATH 上放入假 `fusermount3` 后再 `DELETE …/mounts/<乙>`
 - **THEN** `GET` 为 200，`enabled` false、两项都是 `offline`；`POST` 503 `mount_disabled`；删 `甲` 204；第一次删 `乙` 503 `mount_disabled`、行与私有目录都还在、服务错误通道恰有一条点名缺少 `fusermount3` 的记录；第二次删 `乙` 204，假 `fusermount3` 恰收到一次 `-uz <乙的挂载点>`；全程没有假 rclone 调用
 
+#### Scenario: 账号在途上限
+- **WHEN** `MOUNT_MAX_ATTACHING_PER_ACCOUNT=1`，zhangsan 在空间 A 发出一个建出，假 rclone 被设定为就绪前挂起；此时 zhangsan 在空间 B 再发一个建出，lisi 在自己的空间发一个建出；随后让 A 的建出以就绪失败（502）落定，zhangsan 在 B 再发一次
+- **THEN** zhangsan 在 B 的第一次为 409 `mount_limit`，没有子进程被启动、没有 `mount.reject`；lisi 的为 201；A 落定为 502 之后，zhangsan 在 B 的第二次为 201
+
+#### Scenario: 账号总数上限
+- **WHEN** `MOUNT_MAX_PER_ACCOUNT=2`，zhangsan 在空间 A、B 各建出一个挂载后在空间 C 再建出；lisi 照常建出；zhangsan 卸载 A 的挂载后在 C 再建出；另一例 `MOUNT_MAX_PER_ACCOUNT=1`、`MOUNT_MAX_ATTACHING_PER_ACCOUNT=2`，zhangsan 对两个不同空间同时发出两个合法的建出
+- **THEN** C 的第一次为 409 `mount_limit`，lisi 为 201，卸载之后 C 为 201；同时发出的两个恰一个 201、另一个 409 `mount_limit`，恰一个假 rclone 进程在运行
+
 ### Requirement: 挂载操作的串行与取消
 一个挂载的每一次操作——建出、重挂尝试、启动恢复尝试、卸载、挂载源删除的连带卸载——SHALL 在该挂载所属空间的同一条串行链上执行。卸载与关停 SHALL 在排入串行链之前同步地取消该挂载待定的重挂定时器与在途探测，并以 SIGKILL 结束它在途的挂载尝试子进程；那次尝试 SHALL 以失败收场、结果作废（不回 `online`，不写行），其挂载若已出现则按「挂载进程与挂载点」惰性卸载。卸载因此不等待就绪窗口，随后在链上照常执行卸载步骤。
 
@@ -219,7 +229,7 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 ### Requirement: 挂载源端点
 `GET /api/mount-sources` SHALL 对所有已认证账号返回 200 `{sources}`，按 `name` 的 UTF-8 字节序：管理员（`isAdmin`）每项恰为 `{id, name, path, readOnly, createdAt}`，其他账号每项恰为 `{id, name, readOnly}`。`POST /api/mount-sources` 与 `DELETE /api/mount-sources/:id` 只对管理员开放，其他账号 403 `forbidden`（先于 body 解析与 id 判定）。
 
-`POST` body SHALL 恰为 `{name, path, readOnly}`：`name` 1..64 个字符、不含 U+0000–U+001F 与 U+007F；`path` 为绝对路径，其 realpath 是存在的目录，且与 `SANDBOX_ROOT`、`OMP_STATE_DIR`、`dirname(DB_PATH)`、`STATIC_ROOT`、`dirname(OMP_BIN)` 各自的 realpath 互不包含（相等、位于其内、包含它都拒绝）；违反 400，已有 32 个挂载源 400，同名或同 realpath 409 `conflict`。存入的 `path` 是 realpath。引用它的 `local` 挂载每次挂载尝试之前 SHALL 重新取该 `path` 的 realpath 并复核：等于存入值、是存在的目录、与上述五者互不包含，不过即该次尝试失败（「挂载进程与挂载点」）。成功 201 管理员视图与 `mount.source.create` 审计（`detail` `{sourceId, name, path, readOnly}`）。
+`POST` body SHALL 恰为 `{name, path, readOnly}`：`name` 1..64 个字符、不含 U+0000–U+001F 与 U+007F；`path` 为绝对路径，其 realpath 是存在的目录，且与下列保护根各自的 realpath 互不包含（相等、位于其内、包含它都拒绝）：`SANDBOX_ROOT`、`OMP_STATE_DIR`、`dirname(DB_PATH)`（内存库没有这一项）、`STATIC_ROOT`（提供前端时）、`dirname(OMP_BIN)`，以及仓库根（服务代码所在目录，即 `server/dist` 与 `node_modules` 所在的那一级）、`PREVIEW_CACHE_DIR`、`OFFICE_SPOOL_DIR`（已配置时）、`dirname(BROWSER_BIN)`（已配置时）、`dirname(RCLONE_BIN)`（已配置时）（#1786，owner 2026-10-26）；`OMP_BIN`、`BROWSER_BIN`、`RCLONE_BIN` 三个二进制根同时覆盖配置路径所在目录与其符号链接目标所在目录（目标解析不出时只有前者）；违反 400，已有 32 个挂载源 400，同名或同 realpath 409 `conflict`。存入的 `path` 是 realpath。引用它的 `local` 挂载每次挂载尝试之前 SHALL 重新取该 `path` 的 realpath 并复核：等于存入值、是存在的目录、与上述保护根互不包含，不过即该次尝试失败（「挂载进程与挂载点」）。成功 201 管理员视图与 `mount.source.create` 审计（`detail` `{sourceId, name, path, readOnly}`）。
 
 `DELETE` SHALL 先在内存里把该挂载源标为删除中（此后引用它的建出请求在 `sourceId` 判定处 404），再对此刻引用它的每个挂载做「挂载进程与挂载点」的卸载并删除挂载行，各写一条 `mount.detach`（`reason` 为 `source_deleted`，actor 为该管理员，`workspaceId` 为该挂载的空间），最后在一个事务内删除挂载源行并写 `mount.source.delete`，返回 204；未知 id 404。「删除中」标记 SHALL 在 `finally` 里清除：连带卸载或最后的事务失败时 `DELETE` 以 generic 500 结束（唯一的例外同挂载端点的 `DELETE`：需要惰性卸载而进程 `PATH` 上没有 `fusermount3` 时为 503 `mount_disabled`）、挂载源行保留、标记已清，此后引用它的建出照常可用（已连带卸载的挂载行已删，其余照旧）。引用挂载源的建出 SHALL 在插行的事务里复核该源仍存在且未标删除，不成立即先卸载刚挂上的挂载、不插行，404 `not_found`。全部响应 `no-store`。
 
@@ -230,6 +240,10 @@ mount-manager 在应用装配时构造，构造时 SHALL 同步读出全部挂�
 #### Scenario: 拒绝的路径
 - **WHEN** 管理员以相对路径、不存在的路径、一个普通文件、`SANDBOX_ROOT` 本身、`SANDBOX_ROOT` 之下的目录、`SANDBOX_ROOT` 的父目录、`OMP_STATE_DIR` 之下的目录、`STATIC_ROOT` 的父目录、`dirname(OMP_BIN)` 分别登记；普通用户以合法 body 登记
 - **THEN** 前九例 400、没有行与审计；普通用户 403 `forbidden`
+- **WHEN** 管理员分别登记仓库根之下的 `server` 目录、仓库根的父目录、配置在仓库外的 `PREVIEW_CACHE_DIR` 之下的目录、`OFFICE_SPOOL_DIR` 本身、`dirname(BROWSER_BIN)`、`dirname(RCLONE_BIN)`
+- **THEN** 六例都 400，没有行与审计；与这些目录都互不包含的测试目录照常 201
+- **WHEN** 一个挂载源在本次升级之前已登记、其 realpath 位于新的保护根之内（例如仓库外配置的 `PREVIEW_CACHE_DIR` 之下），引用它的 `local` 挂载随后发起挂载尝试
+- **THEN** 没有 `mount` 调用，该次尝试失败（建出时 502 `mount_failed`，重挂时保持 `offline`）；挂载源行照旧列出，由管理员删除
 - **WHEN** 一个已登记挂载源的路径在登记之后被换成指向 `SANDBOX_ROOT` 的符号链接，引用它的 `local` 挂载到期重挂
 - **THEN** 没有 `mount` 调用，该挂载保持 `offline`
 
