@@ -24,7 +24,7 @@ Sibling surfaces：
 - 预览、会话等其它模块不经过这个 resolver。
 - 线程池的其它占用者见 system.md 第 973–974 行，不在本次范围内。
 
-Seams under test：manager 层用 `hangingResolver()` 注入的 resolver（`server/test/mounts-manager.test.ts`），按账号控制每次调用何时挂起、何时返回。
+Seams under test：manager 层用 `hangingResolver()` 注入的 resolver（用例在 `server/test/mounts-manager-lookups.test.ts`，helper 在 `server/test/mounts-manager-helpers.ts`），按账号控制每次调用何时挂起、何时返回。
 
 Required evidence。确定性的做法：
 - 正向条件，即「某次调用已进入 resolver」，用轮询 `pending.length === K` 来等。
