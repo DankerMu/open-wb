@@ -61,9 +61,9 @@
  *   delete drops them (a deleted current file or ancestor: `onPathChange(null)`). A row dropped on a
  *   directory row moves the same way (`tree.tsx`). No row menu and no drag while `onlyPaths` is set.
  * - Mounts (`use-mounts.ts`): the mount root rows (none while `onlyPaths` is set), their directories in
- *   `位置`,「在挂载内」for the preview, the walk into a mount (`walk`) and, beside `新建工作空间` only,
- *   `挂载目录` (`mount-dialog.tsx`). The `刷新` button refetches the list and relists a mount that came
- *   back online; the handle's does not.
+ *   `位置`,「在挂载内」for the preview and the row menu (no `删除`), the walk into a mount (`walk`)
+ *   and, beside `新建工作空间` only, `挂载目录` (`mount-dialog.tsx`). The `刷新` button refetches the
+ *   list and relists a mount that came back online; the handle's does not.
  */
 import {
   type ReactNode,
@@ -743,6 +743,7 @@ export function WorkspaceBrowser({
               errors={subtree ? NO_ERRORS : directoryErrors}
               expandedPaths={subtree ? subtree.expandedPaths : expandedPaths}
               focusMenuPath={focusMenuPath}
+              inMount={mounts.holds}
               loadingPaths={subtree ? NO_PATHS : loadingPaths}
               marks={marks}
               mounts={subtree ? undefined : mounts.roots}

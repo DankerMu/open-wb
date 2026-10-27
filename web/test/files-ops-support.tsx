@@ -103,6 +103,31 @@ export async function openRowMenu(name: string) {
   return screen.findByRole("menu");
 }
 
+/** 读出打开着的行菜单 `menu` 的各项文字，再用 Escape 关掉它。 */
+export async function menuItemsOf(menu: HTMLElement) {
+  const items = within(menu)
+    .getAllByRole("menuitem")
+    .map((item) => item.textContent);
+  fireEvent.keyDown(menu, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+  return items;
+}
+
+/** `GET …/mounts` 应答里的一项：名为 `name` 的在线可写 `sftp` 挂载。 */
+export const sftpMount = (name: string) => ({
+  id: "m-1",
+  name,
+  backend: "sftp",
+  host: "files.intra",
+  port: null,
+  remotePath: "/data",
+  sourceId: null,
+  sourceName: null,
+  readOnly: false,
+  status: "online",
+  createdAt: 1_760_000_000_000,
+});
+
 export async function openRename(name: string) {
   fireEvent.click(within(await openRowMenu(name)).getByRole("menuitem", { name: "重命名" }));
   return screen.findByRole("dialog", { name: "重命名" });
