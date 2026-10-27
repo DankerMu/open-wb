@@ -35,9 +35,9 @@ Governing invariant：
 Sibling surfaces：
 - 取消：
   - 关停时 `closeAll` 让在途的 `attach` reject，`finally` 减一。
-  - 请求中止不取消建出：路由不处理 abort。客户端断开后，`manager.attach` 照常跑完，以 201 或 502 结束，计数在那时才释放，最长约一个就绪窗口（20 s）。
+  - 请求中止不取消建出：路由不处理 abort。客户端断开后，`manager.attach` 照常跑完，以 201 或 502 结束，计数在那时才释放。通常不超过一个 20 s 就绪窗口；主机解析（`dns.lookup` 没有超时）或 `local` 源的 `realpath` 卡住时，要等它们返回（PR #1807 invariant-state Note）。
 - `within` 里抛出（插行或审计失败、源被标删除）：attach 会 reject，同样走 `finally`。
-- 主机解析的 2 个全局名额（`host-policy.ts`）不改。一个账号最多同时占 2 个在途，两个账号就能把名额用满，这是已知残余。owner 选了按账号计，没有选全局。
+- 主机解析的 2 个全局名额（`attempt.ts` 的 `HOST_LOOKUPS_IN_FLIGHT`）不改。一个账号的 2 个在途建出，或它离线挂载的重挂解析，就能占满这 2 个名额，让其它账号的主机名解析排队延后（先进先出，不会被永久饿死）。这是早于本变更的已知残余；owner 选了按账号计，没有选全局（PR #1807 invariant-state Note）。
 - 进程总数上界：账号是迁移种子建出的，没有注册端点，账号数固定。常驻进程不超过 账号数 × 32，在途不超过 账号数 × 2。
 
 Seams under test：

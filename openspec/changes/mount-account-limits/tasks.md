@@ -20,7 +20,7 @@
   - 总数：跨空间计数、卸载后释放、并发时恰一个 201。
   
   `mounts-manager-helpers.ts` 只给 zhangsan 种了 W1–W3，所以要另建一个属于 lisi 的正式空间（建行和根目录）。用例先在改前的代码上跑一次，确认为红，报告里贴出输出。
-- [x] 3.4 `docs/architecture/system.md`：「三个配置键」一段改为五个，给出缺省值，并说明按账号计数的理由；「挂载端点」的判定次序同步更新；加一段残余说明：主机解析的 2 个全局名额仍可被两个账号用满，进程上界为 账号数 × (32 + 2)。
+- [x] 3.4 `docs/architecture/system.md`：「三个配置键」一段改为五个，给出缺省值，并说明按账号计数的理由；「挂载端点」的判定次序同步更新；加一段残余说明：主机解析的 2 个全局名额仍可被一个账号用满（在途建出或重挂解析），进程上界为 账号数 × (32 + 2)。
 
 验证：
 - `npm run test:focus --workspace server -- mounts- http-typed-errors auth-lifecycle server-startup-mounts` → 退出码 0。
