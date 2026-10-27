@@ -1,8 +1,8 @@
 ## 1. 过滤运行命令
 
-- [ ] 1.1 `server/package.json` 与 `web/package.json` 的 `scripts` 各加 `"test:focus": "vitest run"`；`test` 脚本逐字不变。
-- [ ] 1.2 `AGENTS.md` Agent Operating Rules 的「范围化验证」一条补写过滤形式 `npm run test:focus --workspace <ws> -- <pattern>`（所选测试通过即退出 0），并注明覆盖率门禁只由全量 `npm test --workspace <ws>` / `make test` 承担。
-- [ ] 1.3 `openspec/project-profile.md` Command entry points 加 `server-test-focus` / `web-test-focus` 两项，Verification matrix 加同一行。
+- [x] 1.1 `server/package.json` 与 `web/package.json` 的 `scripts` 各加 `"test:focus": "vitest run"`；`test` 脚本逐字不变。
+- [x] 1.2 `AGENTS.md` Agent Operating Rules 的「范围化验证」一条补写过滤形式 `npm run test:focus --workspace <ws> -- <pattern>`（所选测试通过即退出 0），并注明覆盖率门禁只由全量 `npm test --workspace <ws>` / `make test` 承担。
+- [x] 1.3 `openspec/project-profile.md` Command entry points 加 `server-test-focus` / `web-test-focus` 两项，Verification matrix 加同一行。
 
 Must preserve（下游消费者）：
 - `Makefile:29` `make test` → `npm test --workspaces`，四项 80% 全局阈值。
