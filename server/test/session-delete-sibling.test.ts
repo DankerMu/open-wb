@@ -147,6 +147,8 @@ describe("DELETE removes the session file's artifact directory (#758)", () => {
     const file = ownedFile(ownerSessionDir(stateDir));
     const artifacts = ownedArtifactDir(file);
     const trash = trashDir(stateDir);
+    // Only `local`: per Node's rimraf source, rm runs siblings in parallel and fails fast (#1746).
+    rmSync(join(artifacts, "1.bash.log"));
     // A read-only (0500) nested directory: its entry cannot be unlinked, so the removal is partial.
     chmodSync(join(artifacts, "local"), 0o500);
     let residue: string[] = [];
