@@ -1,9 +1,11 @@
 /**
  * core/sandbox dirs — 共享目录权限位（ADR-0010 / D3）。
  *
- * `ensureSharedDir`：同步受信绝对路径，逐级 mkdir，仅对本次新建的分量 chmod 0o2770，不改既有分量
- * （SANDBOX_ROOT 一侧）。`ensureOwnedDir`：单个目录，每次校正到精确 mode 并校验归属
- * （OMP_STATE_DIR 托管布局）。`ensureOwnedFile`：同一语义的单个普通文件，内容不管。
+ * `ensureSharedDir`：同步受信绝对路径，逐级 mkdir，仅对本次新建的分量设 0o2770，不改既有分量
+ * （SANDBOX_ROOT 一侧）。设权限经不跟随链接的句柄（open O_NOFOLLOW → fstat 校验目录与 euid → fchmod），
+ * 不按路径 chmod：omp uid 可在 mkdir 之后把该分量换成链接（#1782）。`ensureOwnedDir`：单个目录，
+ * 每次校正到精确 mode 并校验归属（OMP_STATE_DIR 托管布局）。`ensureOwnedFile`：同一语义的单个
+ * 普通文件，内容不管。
  * 三者都不 chown、不改进程 umask；组归属由部署 setgid 继承。
  *
  * `ensureSandboxRoot`：`SANDBOX_ROOT` 自身（change sandbox-boundary-closure，owner B2/B3/B4）。启动的
@@ -17,6 +19,8 @@ import {
   chmodSync,
   closeSync,
   constants,
+  fchmodSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -28,24 +32,49 @@ const SHARED_DIR_MODE = 0o2770;
 /** setgid + sticky: the `<state>/home` precedent (omp-runtime「OMP_STATE_DIR 托管布局」). */
 const SANDBOX_ROOT_MODE = 0o3770;
 
-export function ensureSharedDir(absPath: string): void {
+/** The calls `ensureSharedDir` makes, injectable so a test can act between two of them. */
+export const sharedDirFs = { mkdirSync, statSync, openSync, fstatSync, fchmodSync, closeSync };
+
+export function ensureSharedDir(absPath: string, fs: typeof sharedDirFs = sharedDirFs): void {
   let start = 1;
   while (start <= absPath.length) {
     const slash = absPath.indexOf("/", start);
     const current = slash === -1 ? absPath : absPath.slice(0, slash);
     start = slash === -1 ? absPath.length + 1 : slash + 1;
     try {
-      mkdirSync(current);
+      fs.mkdirSync(current, 0o770);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw error;
       }
-      if (!statSync(current).isDirectory()) {
+      if (!fs.statSync(current).isDirectory()) {
         throw error;
       }
       continue;
     }
-    chmodSync(current, SHARED_DIR_MODE);
+    setSharedMode(current, fs);
+  }
+}
+
+/** 刚建出的分量：只对经 `O_NOFOLLOW` 打开、确认为本进程 euid 所有的目录 fchmod；文本固定，errno 在 `cause`。 */
+function setSharedMode(dir: string, fs: typeof sharedDirFs): void {
+  const message = "shared dir component is not the directory just made";
+  const { O_RDONLY, O_DIRECTORY, O_NOFOLLOW } = constants;
+  let fd: number;
+  try {
+    fd = fs.openSync(dir, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+  } catch (error) {
+    throw new Error(message, { cause: error });
+  }
+  try {
+    const stats = fs.fstatSync(fd);
+    const euid = process.geteuid?.();
+    if (!stats.isDirectory() || (euid !== undefined && stats.uid !== euid)) {
+      throw new Error(message);
+    }
+    fs.fchmodSync(fd, SHARED_DIR_MODE);
+  } finally {
+    fs.closeSync(fd);
   }
 }
 

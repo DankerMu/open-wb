@@ -7,6 +7,7 @@ import fs, {
   readdirSync,
   readFileSync,
   realpathSync,
+  rmdirSync,
   rmSync,
   type Stats,
   symlinkSync,
@@ -21,6 +22,7 @@ import {
   ensureOwnedFile,
   ensureSandboxRoot,
   ensureSharedDir,
+  sharedDirFs,
 } from "../src/core/sandbox/dirs.js";
 
 const tmpDirs: string[] = [];
@@ -214,7 +216,117 @@ describe("core/sandbox ensureSharedDir", () => {
     expectUnchangedMetadata(parent, beforeParent);
     expect(() => lstatSync(leaf)).toThrow();
   });
+
+  it("refuses a new component swapped for a symlink before its mode is set; the target keeps 0700", () => {
+    const parent = createParent();
+    const target = join(parent, "target");
+    mkdirSync(target, 0o700);
+    const p = join(parent, "p");
+    mkdirSync(p);
+    const x = join(p, "x");
+    const fds = countedFds();
+    const fchmod = vi.fn(sharedDirFs.fchmodSync);
+    const injected = {
+      ...fds.fs,
+      fchmodSync: fchmod,
+      mkdirSync: ((path: string, mode?: number) => {
+        sharedDirFs.mkdirSync(path, mode);
+        if (path === x) {
+          rmdirSync(x);
+          symlinkSync(target, x);
+        }
+      }) as typeof sharedDirFs.mkdirSync,
+    };
+
+    const error = thrownBy(() => ensureSharedDir(x, injected));
+
+    expect(error.message).toBe("shared dir component is not the directory just made");
+    expect(error.message).not.toContain(parent);
+    expect(["ENOTDIR", "ELOOP"]).toContain((error.cause as NodeJS.ErrnoException).code);
+    expect(modeOf(target)).toBe(0o700);
+    expect(lstatSync(x).isSymbolicLink()).toBe(true);
+    expect(fchmod).not.toHaveBeenCalled();
+    expect(fds.closed).toEqual(fds.opened);
+  });
+
+  it("refuses a new component that fstat reports as owned by another uid, without fchmod", () => {
+    const parent = createParent();
+    const x = join(parent, "x");
+    const fds = countedFds();
+    const fchmod = vi.fn(sharedDirFs.fchmodSync);
+    const injected = {
+      ...fds.fs,
+      fchmodSync: fchmod,
+      fstatSync: ((fd: number) => {
+        const stats = sharedDirFs.fstatSync(fd);
+        stats.uid += 1;
+        return stats;
+      }) as typeof sharedDirFs.fstatSync,
+    };
+
+    const error = thrownBy(() => ensureSharedDir(x, injected));
+
+    expect(error.message).toBe("shared dir component is not the directory just made");
+    expect(fchmod).not.toHaveBeenCalled();
+    expect(fds.opened).toHaveLength(1);
+    expect(fds.closed).toEqual(fds.opened);
+  });
+
+  it("closes the fd when fchmod fails and propagates that error", () => {
+    const parent = createParent();
+    const x = join(parent, "x");
+    const fds = countedFds();
+    const refused = Object.assign(new Error("fchmod refused"), { code: "EPERM" });
+    const injected = {
+      ...fds.fs,
+      fchmodSync: (() => {
+        throw refused;
+      }) as typeof sharedDirFs.fchmodSync,
+    };
+
+    expect(thrownBy(() => ensureSharedDir(x, injected))).toBe(refused);
+    expect(fds.opened).toHaveLength(1);
+    expect(fds.closed).toEqual(fds.opened);
+  });
+
+  it("opens and closes one fd per new component, sets each through fchmod, and none for existing ones", () => {
+    const { b, c } = existing0755Abc();
+    const fds = countedFds();
+    const fchmod = vi.fn(sharedDirFs.fchmodSync);
+
+    ensureSharedDir(c, { ...fds.fs, fchmodSync: fchmod });
+
+    expect(fds.opened).toHaveLength(2);
+    expect(fds.closed).toEqual(fds.opened);
+    expect(fchmod.mock.calls.map(([, mode]) => mode)).toEqual([SHARED_MODE, SHARED_MODE]);
+    expect(modeOf(b)).toBe(SHARED_MODE);
+    expect(modeOf(c)).toBe(SHARED_MODE);
+
+    ensureSharedDir(c, { ...fds.fs, fchmodSync: fchmod });
+
+    expect(fds.opened).toHaveLength(2);
+    expect(fchmod).toHaveBeenCalledTimes(2);
+  });
 });
+
+/** `sharedDirFs` with `openSync` / `closeSync` recording the fds they open and close. */
+function countedFds(): { fs: typeof sharedDirFs; opened: number[]; closed: number[] } {
+  const opened: number[] = [];
+  const closed: number[] = [];
+  const fs = {
+    ...sharedDirFs,
+    openSync: ((path: string, flags: number) => {
+      const fd = sharedDirFs.openSync(path, flags);
+      opened.push(fd);
+      return fd;
+    }) as typeof sharedDirFs.openSync,
+    closeSync: (fd: number) => {
+      closed.push(fd);
+      sharedDirFs.closeSync(fd);
+    },
+  };
+  return { fs, opened, closed };
+}
 
 function thrownBy(run: () => void): Error {
   try {
