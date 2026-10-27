@@ -128,7 +128,7 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 - **允许**：本地跑全部验证；提交走 feature 分支 → PR → `all-checks-passed` 绿 → 合并（分支保护已启用；CI 仅在 pull_request 与 push:master 触发，纯分支推送不产生 check，故 PR 是唯一合入通路）。
 - **禁止**：`--no-verify` 跳过 hooks；force-push 共享分支；对非本地环境做破坏性操作；未标注地修改 CI 文件；主版本依赖升级不经人工评审；把仓库当草稿板（会话临时文件放系统 scratchpad）。
 - **证据要求**：成功声明须附本会话的新鲜命令输出（命令+退出码）。验证世界而非自述：重跑命令、外部重读文件、打真实端点；关键词探测自身输出不算证据。UI 声明需截图 + 零新增控制台报错。
-- **范围化验证**：选覆盖改动面的最窄检查；改单模块跑该模块测试，全量交给 CI。覆盖率范围不得用 pass-with-no-tests 或收窄 include 掩盖未覆盖文件。
+- **范围化验证**：选覆盖改动面的最窄检查；改单模块跑该模块测试，全量交给 CI。过滤运行用 `npm run test:focus --workspace <ws> -- <pattern>`（所选测试全过即退出 0，不跑覆盖率）；`npm test` 只用于全量，覆盖率门禁只由全量 `npm test --workspace <ws>` / `make test` 承担。覆盖率范围不得用 pass-with-no-tests 或收窄 include 掩盖未覆盖文件。
 - **迭代闸门**：同一失败检查最多 3 轮修复循环，然后停下报告已试与所需；绝不削弱/跳过/删除测试换绿（skip 需关联 issue + 截止期）；每个绿点 checkpoint 提交。
 - **CI 排障协议**：先分类失败层（fast-checks/unit-tests/unit-tests-web/anti-drift/secret-scan/sast）→ 读日志取第一个可行动错误 → 用同一命令本地复现 → 修根因 → 本地重跑该层再推送。环境差异记入 Important Development Notes。
 - 并行 agent 各用独立 worktree；一任务一分支。
