@@ -1,14 +1,19 @@
 /**
  * workspaces/mounts/rest-mounts — the mount endpoints (s1b-workspace-mounts design D13, D14 attach side,
- * D15 temporary reject, D17; workspace-mounts「挂载端点」; http-service-skeleton「统一错误信封」identity
- * `POST /api/workspaces/:id/mounts`). Registered by `registerWorkspaces`: `GET` / `POST
- * /api/workspaces/:id/mounts`, `DELETE /api/workspaces/:id/mounts/:mountId`. All three `no-store`.
+ * D15 temporary reject, D17; the account limits of #1789; workspace-mounts「挂载端点」;
+ * http-service-skeleton「统一错误信封」identity `POST /api/workspaces/:id/mounts`). Registered by
+ * `registerWorkspaces`: `GET` / `POST /api/workspaces/:id/mounts`, `DELETE
+ * /api/workspaces/:id/mounts/:mountId`. All three `no-store`.
  *
  * `POST` order: unauthenticated 401 (root guard) → the workspace not the caller's (or its root path
  * occupied, `ownedRootOf`) 404 → `RCLONE_BIN` not configured 503 `mount_disabled` — these three in
  * `preParsing`, ahead of the body → content-parser 400 (parser owner, body limit 64 KiB) → `validate.ts`
- * 400 → temporary workspace 400 → on the workspace's chain (`before`, so limit and name never race another
- * attach or detach): `MOUNT_MAX_PER_WORKSPACE` reached 409 `mount_limit` → a `local` source unknown or
+ * 400 → temporary workspace 400 → the account's attaches in flight at `MOUNT_MAX_ATTACHING_PER_ACCOUNT` 409
+ * `mount_limit` → its rows plus its attaches in flight at `MOUNT_MAX_PER_ACCOUNT` 409 `mount_limit` (these
+ * two and the in-flight increment in one synchronous segment, no `await` between; the hold is released in
+ * `finally` once `manager.attach` settles, however it settles — a client abort does not cancel it) → on the
+ * workspace's chain (`before`, so limit and name never race another attach or detach):
+ * `MOUNT_MAX_PER_WORKSPACE` reached 409 `mount_limit` → a `local` source unknown or
  * marked deleting 404, a read-only source with `readOnly: false` 400 → the name taken by a mount of the
  * workspace or by an entry of its root 409 `conflict` → the manager: host rule 403 `mount_host_rejected`,
  * resolution / credential file / mount point / spawn / readiness 502 `mount_failed` → the row's insert
@@ -66,6 +71,35 @@ export function registerMounts(
   workspaces: Pick<WorkspaceStore, "rootOf">,
 ): void {
   const { store, manager, audit, mountMaxPerWorkspace } = dependencies;
+  const { mountMaxPerAccount, mountMaxAttachingPerAccount } = dependencies;
+  /** Per account, its attaches in flight (this app's, as long-lived as its manager); no key at zero. */
+  const attaching = new Map<string, number>();
+
+  /**
+   * `attach` under the account's hold. Both account limits and the increment run before the first
+   * `await` — the same synchronous segment as the call of `attach` — and the decrement in `finally`,
+   * however `attach` settles; the key goes at zero.
+   */
+  const underAccountHold = async <T>(ownerId: string, attach: () => Promise<T>): Promise<T> => {
+    const inFlight = attaching.get(ownerId) ?? 0;
+    if (
+      inFlight >= mountMaxAttachingPerAccount ||
+      store.countByOwner(ownerId) + inFlight >= mountMaxPerAccount
+    ) {
+      throw new HttpError("mount_limit");
+    }
+    attaching.set(ownerId, inFlight + 1);
+    try {
+      return await attach();
+    } finally {
+      const left = (attaching.get(ownerId) ?? 1) - 1;
+      if (left === 0) {
+        attaching.delete(ownerId);
+      } else {
+        attaching.set(ownerId, left);
+      }
+    }
+  };
 
   /** The caller's workspace root (missing or not), else 404. */
   const ownedRoot = (request: FastifyRequest): string => {
@@ -149,33 +183,35 @@ export function registerMounts(
       const root = ownedRoot(request);
       let record: MountRecord;
       try {
-        record = await manager.attach(
-          { workspaceId, ownerId: actorId, body },
-          {
-            before: () => admissible(workspaceId, root, body),
-            within: (row) => {
-              // D14: the source DELETE's mark, taken after `before` passed; the store checked existence.
-              if (row.sourceId !== null && deletingSources.has(row.sourceId)) {
-                throw new HttpError("not_found");
-              }
-              audit.emit({
-                kind: "mount.attach",
-                actorId,
-                workspaceId,
-                title: `挂载目录 ${row.name}`,
-                detail: {
-                  mountId: row.id,
-                  name: row.name,
-                  backend: row.backend,
-                  host: row.host,
-                  port: row.port,
-                  remotePath: row.remotePath,
-                  sourceId: row.sourceId,
-                  readOnly: row.readOnly,
-                },
-              });
+        record = await underAccountHold(actorId, () =>
+          manager.attach(
+            { workspaceId, ownerId: actorId, body },
+            {
+              before: () => admissible(workspaceId, root, body),
+              within: (row) => {
+                // D14: the source DELETE's mark, taken after `before` passed; the store checked existence.
+                if (row.sourceId !== null && deletingSources.has(row.sourceId)) {
+                  throw new HttpError("not_found");
+                }
+                audit.emit({
+                  kind: "mount.attach",
+                  actorId,
+                  workspaceId,
+                  title: `挂载目录 ${row.name}`,
+                  detail: {
+                    mountId: row.id,
+                    name: row.name,
+                    backend: row.backend,
+                    host: row.host,
+                    port: row.port,
+                    remotePath: row.remotePath,
+                    sourceId: row.sourceId,
+                    readOnly: row.readOnly,
+                  },
+                });
+              },
             },
-          },
+          ),
         );
       } catch (error) {
         if (

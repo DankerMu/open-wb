@@ -29,7 +29,7 @@ const TWENTY_FIVE_TYPED_ERRORS = [
   ["mount_disabled", 503, "服务器未启用远程挂载"],
   ["mount_failed", 502, "挂载失败，请检查主机、路径与凭证"],
   ["mount_offline", 409, "挂载已离线，重新连接后可用"],
-  ["mount_limit", 409, "该工作空间的挂载数已达上限"],
+  ["mount_limit", 409, "挂载数已达上限"],
   ["mount_host_rejected", 403, "该主机不允许挂载"],
   ["mount_read_only", 403, "只读挂载不能写入"],
   ["mount_boundary", 409, "挂载目录内不能删除，也不能跨挂载移动"],

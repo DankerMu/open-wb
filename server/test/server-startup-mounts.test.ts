@@ -6,7 +6,7 @@
  * 假 rclone 不会出现在里面：启动恢复的那次尝试一直在等就绪（`@hang`）或立即失败（`@exit1`），所以这里实测的是
  * 「`closeAll` 杀掉还在等就绪的挂载子进程、DB 关闭之前它已退出、挂载行与私有目录仍在、退出码 0」与「恢复失败
  * 不影响 success record 与退出码」。预检要求 `/dev/fuse` 是字符设备：不是（macOS 开发机、没有 FUSE 的
- * runner）即整组明示跳过，由测试主机补跑（#1700）。不需要 root。启动成功一例另以 HTTP 断言 `GET …/mounts` 的 `enabled` 为 true（#1690）。
+ * runner）即整组明示跳过，由测试主机补跑（#1700）；文件末尾两个账号上限的非法值一组不跑预检、不跳过（#1789）。不需要 root。启动成功一例另以 HTTP 断言 `GET …/mounts` 的 `enabled` 为 true（#1690）。
  */
 import {
   chmodSync,
@@ -302,3 +302,38 @@ describe.skipIf(!FUSE)(
     );
   },
 );
+
+/**
+ * #1789 tasks 3.2: the two account limits through the compiled entry, feature off (no `RCLONE_BIN`, so no
+ * preflight can fail first) — not gated on `/dev/fuse`. Each invalid value is a config error before any
+ * DB, state or listen effect.
+ */
+describe("production entry refuses an invalid account mount limit", () => {
+  const failed = `${JSON.stringify({ event: "server_start_failed", reason: "config" })}\n`;
+  let compiled: CompiledServerEntry;
+
+  beforeAll(async () => {
+    compiled = await compileServerEntry();
+  }, 90_000);
+
+  it.each([
+    ["MOUNT_MAX_PER_ACCOUNT", "0"],
+    ["MOUNT_MAX_ATTACHING_PER_ACCOUNT", "016"],
+  ])(
+    "%s=%s: nonzero, exactly the generic config record, no DB / state / sandbox",
+    async (key, value) => {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "open-wb-startup-mount-limits-")));
+      scratch.push(root);
+      const { server } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+        env: compiledFixtureEnv(root, port, join(root, "omp-bin", "omp"), { [key]: value }),
+      }));
+      expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
+      expect(server.stdout()).toBe("");
+      expect(applicationStderr(server.stderr())).toBe(failed);
+      for (const owned of ["db", "state", "sandbox"]) {
+        expect(existsSync(join(root, owned))).toBe(false);
+      }
+    },
+    CASE_MS,
+  );
+});

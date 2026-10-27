@@ -24,7 +24,7 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   mount_disabled: "服务器未启用远程挂载",
   mount_failed: "挂载失败，请检查主机、路径与凭证",
   mount_offline: "挂载已离线，重新连接后可用",
-  mount_limit: "该工作空间的挂载数已达上限",
+  mount_limit: "挂载数已达上限",
   mount_host_rejected: "该主机不允许挂载",
   mount_read_only: "只读挂载不能写入",
   mount_boundary: "挂载目录内不能删除，也不能跨挂载移动",

@@ -68,7 +68,12 @@ import { TokenRegistry } from "./sessions/tokens.js";
 import type { TurnSnapshotService } from "./sessions/turn-snapshot.js";
 import { registerSkills } from "./skills/rest.js";
 import { registerWorkspaces } from "./workspaces/index.js";
-import { DEFAULT_MOUNT_MAX_PER_WORKSPACE, type MountSettings } from "./workspaces/mounts/config.js";
+import {
+  DEFAULT_MOUNT_MAX_ATTACHING_PER_ACCOUNT,
+  DEFAULT_MOUNT_MAX_PER_ACCOUNT,
+  DEFAULT_MOUNT_MAX_PER_WORKSPACE,
+  type MountSettings,
+} from "./workspaces/mounts/config.js";
 import { createMountManager, type MountManager } from "./workspaces/mounts/manager.js";
 import { createMountStore } from "./workspaces/mounts/store.js";
 import type { PreviewLimits } from "./workspaces/preview.js";
@@ -350,7 +355,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
         audit,
         isAdmin,
         protectedRoots,
-        mountMaxPerWorkspace: mountMaxOf(assembly?.mountSettings),
+        ...mountLimitsOf(assembly?.mountSettings),
       },
     },
     assembly?.preview,
@@ -520,9 +525,14 @@ function binRootsOf(bin: string): string[] {
   return realDir === dir ? [dir] : [dir, realDir];
 }
 
-/** `MOUNT_MAX_PER_WORKSPACE` for the mount routes; its default without `mountSettings`. */
-function mountMaxOf(settings: MountSettings | undefined): number {
-  return settings?.mountMaxPerWorkspace ?? DEFAULT_MOUNT_MAX_PER_WORKSPACE;
+/** The three mount limits for the mount routes (the manager reads none); defaults without `mountSettings`. */
+function mountLimitsOf(settings: MountSettings | undefined) {
+  return {
+    mountMaxPerWorkspace: settings?.mountMaxPerWorkspace ?? DEFAULT_MOUNT_MAX_PER_WORKSPACE,
+    mountMaxPerAccount: settings?.mountMaxPerAccount ?? DEFAULT_MOUNT_MAX_PER_ACCOUNT,
+    mountMaxAttachingPerAccount:
+      settings?.mountMaxAttachingPerAccount ?? DEFAULT_MOUNT_MAX_ATTACHING_PER_ACCOUNT,
+  };
 }
 
 /** The four settings the manager reads; the rest of `MountSettings` is the REST layer's. */

@@ -43,7 +43,7 @@ export const MOUNT_FAILED = {
   error: { code: "mount_failed", message: "挂载失败，请检查主机、路径与凭证" },
 };
 export const MOUNT_LIMIT = {
-  error: { code: "mount_limit", message: "该工作空间的挂载数已达上限" },
+  error: { code: "mount_limit", message: "挂载数已达上限" },
 };
 export const MOUNT_HOST_REJECTED = {
   error: { code: "mount_host_rejected", message: "该主机不允许挂载" },
@@ -84,7 +84,7 @@ interface OpenOptions {
   /** No fake `fusermount3` on the manager's PATH. */
   noFusermount?: boolean;
   overrides?: Partial<MountManagerOptions>;
-  /** `assembly.mountSettings` next to the injected manager (the route reads its limit). */
+  /** `assembly.mountSettings` next to the injected manager (the routes read its three limits). */
   mountSettings?: MountSettings;
   /** Runs on the world before the manager is built (rows the registry loads). */
   seed?: (world: World) => void;

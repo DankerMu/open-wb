@@ -137,11 +137,12 @@ interface WorkspaceAssemblyConfig extends MountSettings {
 /**
  * 按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统；删除路由与入口的周期清理用同一个）与
  * `resolveMountSettings` 的结果（未配置 `RCLONE_BIN` 时 createApp 构造的 manager 功能关闭）。挂载设置只取
- * 它自己的五项，不把整个 config（含上游密钥）递进装配。`extraProtectedRoots` 是 createApp 自己推不出的两个
+ * 它自己的七项，不把整个 config（含上游密钥）递进装配。`extraProtectedRoots` 是 createApp 自己推不出的两个
  * 挂载源保护根（#1786）：`PREVIEW_CACHE_DIR`，以及已配置时的 `OFFICE_SPOOL_DIR`（未配置即省略，不放 `undefined`）。
  */
 export function workspaceAssemblyOf(config: WorkspaceAssemblyConfig) {
   const { rcloneBin, fusermountBin, ompUid, mountHostAllow, mountMaxPerWorkspace } = config;
+  const { mountMaxPerAccount, mountMaxAttachingPerAccount } = config;
   const { previewCacheDir, officeSpoolDir } = config;
   const mountSettings: MountSettings = {
     ...(rcloneBin === undefined ? {} : { rcloneBin }),
@@ -149,6 +150,8 @@ export function workspaceAssemblyOf(config: WorkspaceAssemblyConfig) {
     ...(ompUid === undefined ? {} : { ompUid }),
     ...(mountHostAllow === undefined ? {} : { mountHostAllow }),
     mountMaxPerWorkspace,
+    mountMaxPerAccount,
+    mountMaxAttachingPerAccount,
   };
   return {
     trash: createTrash({

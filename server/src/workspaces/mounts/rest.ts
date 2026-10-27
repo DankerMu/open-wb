@@ -48,6 +48,10 @@ export interface MountRestDependencies {
   protectedRoots: readonly string[];
   /** `MOUNT_MAX_PER_WORKSPACE`: the mount routes' 409 `mount_limit` (the manager never reads it). */
   mountMaxPerWorkspace: number;
+  /** `MOUNT_MAX_PER_ACCOUNT`: an account's rows plus its attaches in flight, else 409 `mount_limit`. */
+  mountMaxPerAccount: number;
+  /** `MOUNT_MAX_ATTACHING_PER_ACCOUNT`: an account's attaches in flight, else 409 `mount_limit`. */
+  mountMaxAttachingPerAccount: number;
 }
 
 /** A source body is a name and a path: a few hundred bytes at most. */
