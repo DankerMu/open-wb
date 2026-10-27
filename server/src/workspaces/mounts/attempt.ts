@@ -9,8 +9,11 @@
  *
  * Host lookups are limited to two in flight: `dns.lookup` runs on the libuv pool (four threads by
  * default) with no timeout and no cancellation, so a burst of mounts naming silent hosts would otherwise
- * queue every `fs/promises` call in the process behind them (#1778 hand-off). The limit wraps the
- * resolver, not the judgement: an IP literal host never resolves, so never waits.
+ * queue every `fs/promises` call in the process behind them (#1778 hand-off). Each account holds at most
+ * one of the two (#1810): a lookup first waits in its account's own queue, then for a process slot, so
+ * an account's waiters never hold a process slot; creation and remount count against the mount's
+ * owning account. The limit wraps the resolver, not the judgement: an IP literal host never resolves,
+ * so never waits.
  *
  * An attempt carries an abort signal (unmount and shutdown cancel it): rclone is SIGKILLed at once and
  * the attempt fails; a target judgement still pending (a silent DNS server, a hung NFS source) is no
@@ -39,6 +42,7 @@ export const PRIVATE_DIR_MODE = 0o700;
 const LOG_MODE = 0o600;
 const READY_WINDOW_MS = 20_000;
 const HOST_LOOKUPS_IN_FLIGHT = 2;
+const HOST_LOOKUPS_PER_ACCOUNT = 1;
 const NO_FUSERMOUNT =
   "mount detach: the mount is still in mountinfo and no executable fusermount3 is on PATH";
 const KEPT_MOUNT_POINT =
@@ -86,7 +90,21 @@ export class AttemptFailed extends Error {}
 export function createAttempts(context: AttemptContext) {
   const { store, mountsDir, mountinfoPath, path, probeExec, report, buildMountPoint } = context;
   const lookupLimit = limitConcurrency(HOST_LOOKUPS_IN_FLIGHT);
-  const limitedResolve: HostResolver = (host) => lookupLimit(() => context.resolveHost(host));
+  /** An account's limiter while it has a lookup in flight or waiting; dropped once it has neither. */
+  const accountLimits = new Map<string, ReturnType<typeof limitConcurrency>>();
+  const accountLimitOf = (ownerId: string) => {
+    let limit = accountLimits.get(ownerId);
+    if (limit === undefined) {
+      limit = limitConcurrency(HOST_LOOKUPS_PER_ACCOUNT, () => accountLimits.delete(ownerId));
+      accountLimits.set(ownerId, limit);
+    }
+    return limit;
+  };
+  /** The account's queue outside the process one: an account's waiters hold no process slot. */
+  const resolverOf =
+    (ownerId: string): HostResolver =>
+    (host) =>
+      accountLimitOf(ownerId)(() => lookupLimit(() => context.resolveHost(host)));
   /** A refused lazy unmount has already been reported. */
   const reportUnlessRefused = (error: unknown): void => {
     if (!(error instanceof HttpError)) {
@@ -179,12 +197,15 @@ export function createAttempts(context: AttemptContext) {
     return { remote: source.path };
   };
 
-  /** Re-checked on every attempt (D2 source rule, D3 host rule); refusals throw `HttpError`. */
-  const target = async (remote: Remote): Promise<Target> => {
+  /**
+   * Re-checked on every attempt (D2 source rule, D3 host rule); refusals throw `HttpError`. `ownerId`
+   * is the mount's owning account, whose lookup slot the host lookup takes.
+   */
+  const target = async (remote: Remote, ownerId: string): Promise<Target> => {
     if (remote.backend === "local") {
       return sourceTarget(remote.sourceId);
     }
-    const verdict = await judgeHost(remote.host ?? "", context.mountHostAllow, limitedResolve);
+    const verdict = await judgeHost(remote.host ?? "", context.mountHostAllow, resolverOf(ownerId));
     if (verdict.verdict === "rejected") {
       throw new HttpError("mount_host_rejected");
     }
@@ -307,8 +328,11 @@ export function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<
   });
 }
 
-/** At most `max` tasks run at once; a finished task hands its slot straight to the next waiter. */
-function limitConcurrency(max: number) {
+/**
+ * At most `max` tasks run at once; a finished task hands its slot straight to the next waiter. `onIdle`
+ * runs whenever a task finishes leaving none running and none waiting.
+ */
+function limitConcurrency(max: number, onIdle?: () => void) {
   let active = 0;
   const waiting: (() => void)[] = [];
   return async <T>(task: () => Promise<T>): Promise<T> => {
@@ -323,6 +347,9 @@ function limitConcurrency(max: number) {
       const next = waiting.shift();
       if (next === undefined) {
         active -= 1;
+        if (active === 0) {
+          onIdle?.();
+        }
       } else {
         next();
       }

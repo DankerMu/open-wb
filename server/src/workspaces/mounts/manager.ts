@@ -441,7 +441,7 @@ export function createMountManager(options: MountManagerOptions) {
     try {
       // A mount an earlier run left behind (killed before it could unmount): out of the way first.
       await lazyUnmount(join(root, record.name), section);
-      const found = await untilAborted(target(record), signal);
+      const found = await untilAborted(target(record, record.ownerId), signal);
       const attempt = attemptOf(record.id, root, record.name, record.readOnly, found, signal);
       ensureOwnedDir(attempt.dir, PRIVATE_DIR_MODE);
       const { address } = found;
@@ -485,9 +485,11 @@ export function createMountManager(options: MountManagerOptions) {
       body.backend === "local"
         ? { backend: "local", host: null, remotePath: null, sourceId: body.sourceId }
         : { backend: body.backend, host: body.host, remotePath: body.remotePath, sourceId: null };
-    const found = await untilAborted(target(remote), signal).catch((error: unknown) => {
-      throw error instanceof AttemptFailed ? new HttpError("mount_failed") : error;
-    });
+    const found = await untilAborted(target(remote, input.ownerId), signal).catch(
+      (error: unknown) => {
+        throw error instanceof AttemptFailed ? new HttpError("mount_failed") : error;
+      },
+    );
     const id = store.newId();
     const attempt = attemptOf(id, root, body.name, body.readOnly, found, signal);
     try {

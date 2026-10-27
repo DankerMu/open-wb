@@ -7,7 +7,8 @@
  * own FUSE tools. Every recorded fake rclone pid still alive at the end is SIGKILLed.
  *
  * Group 6 (#1687): every world's manager runs on a fake clock (`world.clock`, advanced only by the test)
- * and an answering fake TCP connect that records its calls; the world has three workspaces; every
+ * and an answering fake TCP connect that records its calls; the world has three workspaces of zhangsan
+ * (`OWNER`) and one each of lisi and wangwu (#1810), each root found only for its own owner; every
  * manager built through the world is `closeAll`ed before its database closes.
  */
 import {
@@ -44,7 +45,12 @@ const FAKE_FUSERMOUNT = fileURLToPath(new URL("./fixtures/fake-fusermount3.mjs",
 export const W1 = "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a";
 export const W2 = "2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a";
 export const W3 = "3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a3a";
+/** lisi's and wangwu's one formal workspace each (#1810: lookups are limited per account). */
+export const W_LISI = "5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a5a";
+export const W_WANGWU = "6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a";
 export const OWNER = "u1";
+export const LISI = "u3";
+export const WANGWU = "u4";
 export const ID1 = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1";
 export const ID2 = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2";
 export const ID3 = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3";
@@ -244,14 +250,19 @@ export function createWorld(worldOptions: WorldOptions = {}): World {
   mkdirSync(mountsDir, { recursive: true, mode: 0o700 });
   const sandbox = join(base, "sandbox");
   const root = join(sandbox, OWNER, "w1");
-  const roots = new Map([
-    [W1, root],
-    [W2, join(sandbox, OWNER, "w2")],
-    [W3, join(sandbox, OWNER, "w3")],
-  ]);
-  for (const dir of roots.values()) {
-    mkdirSync(dir, { recursive: true });
+  const workspaces = [
+    [W1, OWNER, "w1"],
+    [W2, OWNER, "w2"],
+    [W3, OWNER, "w3"],
+    [W_LISI, LISI, "w5"],
+    [W_WANGWU, WANGWU, "w6"],
+  ] as const;
+  const roots = new Map<string, string>();
+  for (const [id, owner, dir] of workspaces) {
+    roots.set(id, join(sandbox, owner, dir));
+    mkdirSync(join(sandbox, owner, dir), { recursive: true });
   }
+  const ownerOf = new Map<string, string>(workspaces.map(([id, owner]) => [id, owner]));
   const source = join(base, "sources", "src dir");
   mkdirSync(source, { recursive: true });
   const bin = join(base, "bin");
@@ -269,14 +280,10 @@ export function createWorld(worldOptions: WorldOptions = {}): World {
   }
 
   const db = openDb(":memory:");
-  for (const [id, dir] of [
-    [W1, "w1"],
-    [W2, "w2"],
-    [W3, "w3"],
-  ] as const) {
+  for (const [id, owner, dir] of workspaces) {
     db.prepare(
       "INSERT INTO workspaces(id, owner_id, name, dir, created_at) VALUES (?, ?, ?, ?, 1)",
-    ).run(id, OWNER, dir, dir);
+    ).run(id, owner, dir, dir);
   }
   const ids = [ID1, ID2, ID3];
   const store = createMountStore(db, { generateId: () => ids.shift() ?? SOURCE_ID });
@@ -309,7 +316,7 @@ export function createWorld(worldOptions: WorldOptions = {}): World {
     audit: { emit: (event) => emit(db, event) },
     mountsDir,
     workspaceRootOf: (ownerId, workspaceId) =>
-      ownerId === OWNER ? (roots.get(workspaceId) ?? null) : null,
+      ownerOf.get(workspaceId) === ownerId ? (roots.get(workspaceId) ?? null) : null,
     protectedRoots: [sandbox, state],
     onError: (error) => errors.push(error),
     rcloneBin: FAKE_RCLONE,

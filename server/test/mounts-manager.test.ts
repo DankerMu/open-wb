@@ -6,7 +6,8 @@
  * argv, file shapes and modes are literals from the spec; credentials are sentinels asserted absent from
  * every argv, environment and error-channel record. Unmounting is in `mounts-manager-unmount.test.ts`.
  * Not covered: a mount point owned by another uid (needs root to build). The remount side of the host /
- * mount-point re-checks is in `mounts-manager-supervision.test.ts` (#1687).
+ * mount-point re-checks is in `mounts-manager-supervision.test.ts` (#1687); the lookup limit is in
+ * `mounts-manager-lookups.test.ts` (#1810).
  */
 import {
   chmodSync,
@@ -21,10 +22,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
-import type { HostResolver } from "../src/workspaces/mounts/host-policy.js";
 import { parseMountinfo, sectionMounts } from "../src/workspaces/mounts/mountinfo.js";
 import {
   alive,
@@ -47,8 +46,6 @@ import {
   smb,
   USER_SENTINEL,
   W1,
-  W2,
-  W3,
   type World,
 } from "./mounts-manager-helpers.js";
 
@@ -502,31 +499,6 @@ describe("挂载进程与挂载点「挂载点被换掉即拒绝」(attach side)
   });
 });
 
-/** A resolver whose lookups never settle on their own; each is recorded with its rejecter. */
-function hangingResolver(): {
-  pending: { host: string; fail: (error: Error) => void }[];
-  resolveHost: HostResolver;
-} {
-  const pending: { host: string; fail: (error: Error) => void }[] = [];
-  const resolveHost: HostResolver = (host) =>
-    new Promise((_, fail) => {
-      pending.push({ host, fail });
-    });
-  return { pending, resolveHost };
-}
-
-/**
- * An sftp mount named `name` on host `<name>.intra`, each name in its own workspace: attaches in one
- * workspace run one after another on its serial chain (#1687), the lookup limit is across workspaces.
- */
-const WORKSPACE_OF: Readonly<Record<string, string>> = { a: W1, b: W2, c: W3 };
-const attachNamed = (manager: ReturnType<World["manager"]>, name: string) =>
-  manager.attach({
-    workspaceId: WORKSPACE_OF[name] ?? W1,
-    ownerId: OWNER,
-    body: sftp("/srv/data", { name, host: `${name}.intra` }),
-  });
-
 describe("挂载取值与主机规则 (manager layer)", () => {
   const LOOPBACK = [
     "localhost",
@@ -579,59 +551,6 @@ describe("挂载取值与主机规则 (manager layer)", () => {
 
     expect(world.store.list(W1).map((mount) => mount.name)).toEqual(["upper", "dotted"]);
     expect(world.mountCalls()).toHaveLength(2);
-  });
-
-  it("at most two host lookups are in flight across workspaces; the third waits for a slot", {
-    timeout: CASE_MS,
-  }, async () => {
-    const { pending, resolveHost } = hangingResolver();
-    const manager = world.manager({ resolveHost });
-    const settled = ["a", "b", "c"].map((name) => codeOf(attachNamed(manager, name)));
-
-    await new Promise((settle) => setTimeout(settle, 50));
-    expect(pending.map((call) => call.host)).toEqual(["a.intra", "b.intra"]);
-    pending[0]?.fail(new Error("ENOTFOUND"));
-    await new Promise((settle) => setTimeout(settle, 50));
-    expect(pending.map((call) => call.host)).toEqual(["a.intra", "b.intra", "c.intra"]);
-    pending[1]?.fail(new Error("ENOTFOUND"));
-    pending[2]?.fail(new Error("ENOTFOUND"));
-
-    expect(await Promise.all(settled)).toEqual(["mount_failed", "mount_failed", "mount_failed"]);
-    expect(world.calls()).toEqual([]);
-  });
-
-  it("an IP literal host in a third workspace is not queued behind two hanging lookups", {
-    timeout: CASE_MS,
-  }, async () => {
-    const { pending, resolveHost } = hangingResolver();
-    const manager = world.manager({ resolveHost });
-    const hanging = ["a", "b"].map((name) => codeOf(attachNamed(manager, name)));
-    await new Promise((settle) => setTimeout(settle, 50));
-    expect(pending.map((call) => call.host)).toEqual(["a.intra", "b.intra"]);
-
-    const stuck = new AbortController();
-    const record = await Promise.race([
-      manager.attach({
-        workspaceId: W3,
-        ownerId: OWNER,
-        body: sftp("/srv/data", { name: "literal", host: "10.0.0.7" }),
-      }),
-      delay(5000, undefined, { signal: stuck.signal }).then(() => {
-        throw new Error("the literal's attach waited behind the lookups");
-      }),
-    ]);
-    stuck.abort();
-
-    expect(record).toMatchObject({ name: "literal", host: "10.0.0.7" });
-    expect(manager.statusOf(record.id)).toBe("online");
-    expect(readFileSync(join(world.privateDir(record.id), "rclone.conf"), "utf8")).toContain(
-      "\nhost = 10.0.0.7\n",
-    );
-    expect(pending.map((call) => call.host)).toEqual(["a.intra", "b.intra"]);
-    for (const call of pending) {
-      call.fail(new Error("ENOTFOUND"));
-    }
-    expect(await Promise.all(hanging)).toEqual(["mount_failed", "mount_failed"]);
   });
 });
 
