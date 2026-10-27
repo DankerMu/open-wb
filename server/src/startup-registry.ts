@@ -16,8 +16,9 @@
  *   写失败原样抛给入口（`reason: "mcp_json"`）。不并进 `createStartupPublisher`：模型发布不写 `mcp.json`，
  *   连接器写入也不重写模型的两个文件。
  * - `workspaceAssemblyOf` / `startBackgroundWork`（s1b-workspace-mounts D12，同为 `server.ts` 行数预算抽出）：
- *   `appAssemblyOf` 递交的工作空间两项——回收目录服务与挂载设置（mount-manager 要 DB 与审计，在 createApp 里
- *   构造）；`server_started` 写出之后入口不等待的两件后台工作——回收目录首扫与挂载的启动恢复。
+ *   `appAssemblyOf` 递交的工作空间三项——回收目录服务、挂载设置（mount-manager 要 DB 与审计，在 createApp
+ *   里构造）与挂载源的额外保护根；`server_started` 写出之后入口不等待的两件后台工作——回收目录首扫与挂载的
+ *   启动恢复。
  */
 import type { DatabaseSync } from "node:sqlite";
 import { createMcpPublisher } from "./connectors/mcp-json.js";
@@ -129,15 +130,19 @@ export function createMcpJsonStage(options: McpJsonStageOptions) {
 interface WorkspaceAssemblyConfig extends MountSettings {
   sandboxRoot: string;
   trashRetentionDays: number;
+  previewCacheDir: string;
+  officeSpoolDir?: string;
 }
 
 /**
  * 按 `TRASH_RETENTION_DAYS` 建的回收目录服务（构造不碰文件系统；删除路由与入口的周期清理用同一个）与
  * `resolveMountSettings` 的结果（未配置 `RCLONE_BIN` 时 createApp 构造的 manager 功能关闭）。挂载设置只取
- * 它自己的五项，不把整个 config（含上游密钥）递进装配。
+ * 它自己的五项，不把整个 config（含上游密钥）递进装配。`extraProtectedRoots` 是 createApp 自己推不出的两个
+ * 挂载源保护根（#1786）：`PREVIEW_CACHE_DIR`，以及已配置时的 `OFFICE_SPOOL_DIR`（未配置即省略，不放 `undefined`）。
  */
 export function workspaceAssemblyOf(config: WorkspaceAssemblyConfig) {
   const { rcloneBin, fusermountBin, ompUid, mountHostAllow, mountMaxPerWorkspace } = config;
+  const { previewCacheDir, officeSpoolDir } = config;
   const mountSettings: MountSettings = {
     ...(rcloneBin === undefined ? {} : { rcloneBin }),
     ...(fusermountBin === undefined ? {} : { fusermountBin }),
@@ -151,6 +156,10 @@ export function workspaceAssemblyOf(config: WorkspaceAssemblyConfig) {
       retentionDays: config.trashRetentionDays,
     }),
     mountSettings,
+    extraProtectedRoots: [
+      previewCacheDir,
+      ...(officeSpoolDir === undefined ? [] : [officeSpoolDir]),
+    ],
   };
 }
 

@@ -22,7 +22,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -210,6 +210,7 @@ describe("config → workspaceAssemblyOf → createApp: the manager's settings a
       const { mountSettings } = workspaceAssemblyOf({
         sandboxRoot: at.sandboxLink,
         trashRetentionDays: 30,
+        previewCacheDir: join(dirname(at.state), "preview-cache"),
         rcloneBin: FAKE_RCLONE,
         ompUid,
         mountHostAllow: ["files.intra"],

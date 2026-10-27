@@ -130,6 +130,12 @@ export interface AssemblyDependencies {
    */
   mounts?: MountManager;
   /**
+   * Mount-source protected roots createApp cannot derive itself (#1786): the deployment directories the
+   * entry hands over through `workspaceAssemblyOf` — `PREVIEW_CACHE_DIR` and, when configured,
+   * `OFFICE_SPOOL_DIR`. Omitted (assemblies that bypass the entry): those roots are simply not guarded.
+   */
+  extraProtectedRoots?: readonly string[];
+  /**
    * 代理按模型查找所用的注册表（s1d-model-registry D5）；省略时由 `modelCatalog` 与 `upstream`
    * 经 `staticRegistry` 适配。
    */
@@ -275,7 +281,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   const audit = { emit: (event: Parameters<typeof emit>[1]) => emit(db, event) };
   // One source store and one protected-root list for the manager and the mount-source routes.
   const mountStore = createMountStore(db);
-  const protectedRoots = protectedRootsOf(db, runtime, staticRoot);
+  const protectedRoots = protectedRootsOf(db, runtime, staticRoot, repoRoot, assembly);
   const mounts = mountsOf(mountStore, store, audit, runtime, protectedRoots, assembly);
   app.decorate("mounts", mounts);
   // One facade for the workspaces routes, the preview listener and the sessions module; its mount
@@ -473,22 +479,45 @@ function mountsOf(
 }
 
 /**
- * The five roots no mount source may overlap (design D2): `SANDBOX_ROOT`, `OMP_STATE_DIR`,
- * `dirname(DB_PATH)` (none for an in-memory DB), `STATIC_ROOT` (when served) and `dirname(OMP_BIN)`.
+ * The ten roots no mount source may overlap (design D2; #1786): `SANDBOX_ROOT`, `OMP_STATE_DIR`,
+ * `dirname(DB_PATH)` (none for an in-memory DB), `STATIC_ROOT` (when served), `dirname(OMP_BIN)`, the repo
+ * root (the service code: `server/dist`, `node_modules`), `dirname(BROWSER_BIN)` and `dirname(RCLONE_BIN)`
+ * (when configured), and the assembly's `extraProtectedRoots` (`PREVIEW_CACHE_DIR`, `OFFICE_SPOOL_DIR` when
+ * configured). Each binary root also names its symlink target's directory (what the host executes), when the
+ * binary resolves. An absent one is left out, never `undefined` or `""` (`resolve("")` is the cwd).
  */
 function protectedRootsOf(
   db: DatabaseSync,
   runtime: SessionRuntime,
   staticRoot: string | undefined,
+  repoRoot: string,
+  assembly: AssemblyDependencies | undefined,
 ): string[] {
   const dbFile = db.location();
+  const rcloneBin = assembly?.mountSettings?.rcloneBin;
   return [
     runtime.sandboxRoot,
     runtime.stateDir,
     ...(dbFile === null ? [] : [dirname(dbFile)]),
     ...(staticRoot === undefined ? [] : [staticRoot]),
-    dirname(runtime.bin),
+    ...binRootsOf(runtime.bin),
+    repoRoot,
+    ...(runtime.browserBin === undefined ? [] : binRootsOf(runtime.browserBin)),
+    ...(rcloneBin === undefined ? [] : binRootsOf(rcloneBin)),
+    ...(assembly?.extraProtectedRoots ?? []),
   ];
+}
+
+/** `dirname(bin)`, plus its realpath's directory when that differs; a binary that does not resolve adds none. */
+function binRootsOf(bin: string): string[] {
+  const dir = dirname(bin);
+  let realDir: string;
+  try {
+    realDir = dirname(realpathSync(bin));
+  } catch {
+    return [dir];
+  }
+  return realDir === dir ? [dir] : [dir, realDir];
 }
 
 /** `MOUNT_MAX_PER_WORKSPACE` for the mount routes; its default without `mountSettings`. */

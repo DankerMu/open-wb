@@ -44,7 +44,7 @@ export interface MountRestDependencies {
   manager: Pick<MountManager, "enabled" | "attach" | "detach" | "detachSource" | "statusOf">;
   audit: { emit(event: Parameters<typeof emit>[1]): unknown };
   isAdmin: (principal: { readonly role: string }) => boolean;
-  /** The five roots no source may overlap (design D2); the same array the manager is built with. */
+  /** The protected roots no source may overlap (design D2); the same array the manager is built with. */
   protectedRoots: readonly string[];
   /** `MOUNT_MAX_PER_WORKSPACE`: the mount routes' 409 `mount_limit` (the manager never reads it). */
   mountMaxPerWorkspace: number;
