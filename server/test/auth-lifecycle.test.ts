@@ -725,7 +725,7 @@ describe("HTTP typed error map 恰二十五码（auth 域只复用既有 unautho
     mount_disabled: { statusCode: 503, message: "服务器未启用远程挂载" },
     mount_failed: { statusCode: 502, message: "挂载失败，请检查主机、路径与凭证" },
     mount_offline: { statusCode: 409, message: "挂载已离线，重新连接后可用" },
-    mount_limit: { statusCode: 409, message: "该工作空间的挂载数已达上限" },
+    mount_limit: { statusCode: 409, message: "挂载数已达上限" },
     mount_host_rejected: { statusCode: 403, message: "该主机不允许挂载" },
     mount_read_only: { statusCode: 403, message: "只读挂载不能写入" },
     mount_boundary: { statusCode: 409, message: "挂载目录内不能删除，也不能跨挂载移动" },

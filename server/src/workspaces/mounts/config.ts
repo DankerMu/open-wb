@@ -1,5 +1,5 @@
 /**
- * 挂载的三个配置键与 `RCLONE_BIN` 的启动预检（workspace-mounts「挂载配置与启动预检」，design D4）。
+ * 挂载的五个配置键与 `RCLONE_BIN` 的启动预检（workspace-mounts「挂载配置与启动预检」，design D4；两个账号上限 #1789）。
  * 纯配置 seam 的一部分：由 `resolveServerConfig` 展开，只读文件系统与运行 `id`，不建目录、不开 DB、不 listen。
  * 错误只点名键，不回显任何取值、路径或用户名。
  */
@@ -9,6 +9,8 @@ import { delimiter, isAbsolute, join } from "node:path";
 import { resolvePositiveInteger } from "../../agent-config.js";
 
 export const DEFAULT_MOUNT_MAX_PER_WORKSPACE = 8;
+export const DEFAULT_MOUNT_MAX_PER_ACCOUNT = 32;
+export const DEFAULT_MOUNT_MAX_ATTACHING_PER_ACCOUNT = 2;
 const HOST_ITEM = /^[A-Za-z0-9.:-]{1,253}$/u;
 /** 一次 `id` 调用的期限：卡住的名字服务不能让启动无限等待。 */
 const ID_TIMEOUT_MS = 10_000;
@@ -26,6 +28,10 @@ export interface MountSettings {
   /** 未配置即不限主机。 */
   mountHostAllow?: readonly string[];
   mountMaxPerWorkspace: number;
+  /** 一个账号全部空间的挂载行数加上它在途的建出数的上限（#1789）。 */
+  mountMaxPerAccount: number;
+  /** 一个账号同时在途的建出数上限（#1789）。 */
+  mountMaxAttachingPerAccount: number;
 }
 
 /** 预检读取的固定位置；测试注入替身。 */
@@ -52,12 +58,24 @@ export function resolveMountSettings(
     DEFAULT_MOUNT_MAX_PER_WORKSPACE,
     "MOUNT_MAX_PER_WORKSPACE",
   );
+  const mountMaxPerAccount = resolvePositiveInteger(
+    env.MOUNT_MAX_PER_ACCOUNT,
+    DEFAULT_MOUNT_MAX_PER_ACCOUNT,
+    "MOUNT_MAX_PER_ACCOUNT",
+  );
+  const mountMaxAttachingPerAccount = resolvePositiveInteger(
+    env.MOUNT_MAX_ATTACHING_PER_ACCOUNT,
+    DEFAULT_MOUNT_MAX_ATTACHING_PER_ACCOUNT,
+    "MOUNT_MAX_ATTACHING_PER_ACCOUNT",
+  );
   return {
     ...(env.RCLONE_BIN === undefined
       ? {}
       : preflight(env.RCLONE_BIN, env.PATH, env.OMP_USER, probes)),
     ...(mountHostAllow === undefined ? {} : { mountHostAllow }),
     mountMaxPerWorkspace,
+    mountMaxPerAccount,
+    mountMaxAttachingPerAccount,
   };
 }
 

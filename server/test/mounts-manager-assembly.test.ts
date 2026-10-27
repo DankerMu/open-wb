@@ -45,7 +45,12 @@ import {
 
 const CASE_MS = 20_000;
 /** Feature on: the fake rclone (no `fusermount3` is needed — nothing this run mounted is in mountinfo). */
-const SETTINGS = { rcloneBin: FAKE_RCLONE, mountMaxPerWorkspace: 2 };
+const SETTINGS = {
+  rcloneBin: FAKE_RCLONE,
+  mountMaxPerWorkspace: 2,
+  mountMaxPerAccount: 32,
+  mountMaxAttachingPerAccount: 2,
+};
 const apps: FastifyInstance[] = [];
 const dbs: DatabaseSync[] = [];
 const scratch: string[] = [];
@@ -215,6 +220,8 @@ describe("config → workspaceAssemblyOf → createApp: the manager's settings a
         ompUid,
         mountHostAllow: ["files.intra"],
         mountMaxPerWorkspace: 2,
+        mountMaxPerAccount: 32,
+        mountMaxAttachingPerAccount: 2,
       });
       const app = appOf(at.db, { runtime: at.runtime, mountSettings });
 

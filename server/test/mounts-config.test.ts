@@ -1,9 +1,10 @@
 /**
- * Issue #1682 workspace-mounts「挂载配置与启动预检」：三个挂载键（`RCLONE_BIN`、`MOUNT_HOST_ALLOW`、
- * `MOUNT_MAX_PER_WORKSPACE`）与 `RCLONE_BIN` 的启动预检；http-service-skeleton「挂载键与启动预检」的配置部分。
+ * Issue #1682 workspace-mounts「挂载配置与启动预检」：五个挂载键（`RCLONE_BIN`、`MOUNT_HOST_ALLOW`、
+ * `MOUNT_MAX_PER_WORKSPACE`，#1789 的 `MOUNT_MAX_PER_ACCOUNT`、`MOUNT_MAX_ATTACHING_PER_ACCOUNT`）与
+ * `RCLONE_BIN` 的启动预检；http-service-skeleton「挂载键与启动预检」的配置部分。
  * 三个场景「缺省与覆盖」「非法值」「预检」；预检的 `/dev/fuse`、`/etc/fuse.conf` 与 `id` 经注入的路径，
  * `id -u` / `id -G` 的输出由注入的假 `id` 给出。编译入口按 `omp-max-processes-config.test.ts` 的写法逐值跑。
- * 期望值取自规格（缺省 8、上限 2147483647、每项 1..253 字节），不引用 `src/workspaces/mounts/config.ts` 的常量。
+ * 期望值取自规格（缺省 8、32、2，上限 2147483647、每项 1..253 字节），不引用 `src/workspaces/mounts/config.ts` 的常量。
  */
 import {
   chmodSync,
@@ -145,12 +146,14 @@ function host(options: { ompUser?: boolean; fusermount3Mode?: number; idGroups?:
 }
 
 describe("缺省与覆盖", () => {
-  it("三键全缺：挂载关闭、主机不限、上限 8", () => {
+  it("五键全缺：挂载关闭、主机不限、上限依次为 8、32、2", () => {
     const config = resolveServerConfig({}, SOURCE_ENTRY);
     for (const key of ["rcloneBin", "fusermountBin", "ompUid", "mountHostAllow"]) {
       expect(Object.hasOwn(config, key)).toBe(false);
     }
     expect(config.mountMaxPerWorkspace).toBe(8);
+    expect(config.mountMaxPerAccount).toBe(32);
+    expect(config.mountMaxAttachingPerAccount).toBe(2);
   });
 
   it("生产探测位置固定：/dev/fuse、/etc/fuse.conf，id 走 /usr/bin/id 而不经 PATH", () => {
@@ -178,19 +181,30 @@ describe("缺省与覆盖", () => {
     });
     for (const env of [{}, { OMP_USER: OMP, PATH: root }]) {
       const settings = resolveMountSettings(env, watched);
-      expect(settings).toEqual({ mountMaxPerWorkspace: 8 });
+      expect(settings).toEqual({
+        mountMaxPerWorkspace: 8,
+        mountMaxPerAccount: 32,
+        mountMaxAttachingPerAccount: 2,
+      });
     }
     expect(reads).toEqual([]);
     expect(id.calls()).toEqual([]);
   });
 
-  it("MOUNT_HOST_ALLOW=files.intra,10.0.0.5、MOUNT_MAX_PER_WORKSPACE=3：名单恰为两项、上限 3", () => {
+  it("MOUNT_HOST_ALLOW=files.intra,10.0.0.5、三个上限 3、5、1：名单恰为两项、上限依次为 3、5、1", () => {
     const config = resolveServerConfig(
-      { MOUNT_HOST_ALLOW: "files.intra,10.0.0.5", MOUNT_MAX_PER_WORKSPACE: "3" },
+      {
+        MOUNT_HOST_ALLOW: "files.intra,10.0.0.5",
+        MOUNT_MAX_PER_WORKSPACE: "3",
+        MOUNT_MAX_PER_ACCOUNT: "5",
+        MOUNT_MAX_ATTACHING_PER_ACCOUNT: "1",
+      },
       SOURCE_ENTRY,
     );
     expect(config.mountHostAllow).toEqual(["files.intra", "10.0.0.5"]);
     expect(config.mountMaxPerWorkspace).toBe(3);
+    expect(config.mountMaxPerAccount).toBe(5);
+    expect(config.mountMaxAttachingPerAccount).toBe(1);
     expect(Object.hasOwn(config, "rcloneBin")).toBe(false);
   });
 
@@ -202,12 +216,19 @@ describe("缺省与覆盖", () => {
     expect(
       resolveMountSettings({ MOUNT_MAX_PER_WORKSPACE: "2147483647" }).mountMaxPerWorkspace,
     ).toBe(2147483647);
+    for (const [key, field] of [
+      ["MOUNT_MAX_PER_ACCOUNT", "mountMaxPerAccount"],
+      ["MOUNT_MAX_ATTACHING_PER_ACCOUNT", "mountMaxAttachingPerAccount"],
+    ] as const) {
+      expect(resolveMountSettings({ [key]: "1" })[field]).toBe(1);
+      expect(resolveMountSettings({ [key]: "2147483647" })[field]).toBe(2147483647);
+    }
   });
 });
 
 type EnvBuilder = (root: string) => Record<string, string>;
 
-/** 「非法值」场景逐值（RCLONE_BIN 两例、MOUNT_HOST_ALLOW 四例、MOUNT_MAX_PER_WORKSPACE 四例）加 RCLONE_BIN 不可执行一例。 */
+/** 「非法值」场景逐值（RCLONE_BIN 两例、MOUNT_HOST_ALLOW 四例、三个上限键各四例）加 RCLONE_BIN 不可执行一例。 */
 const INVALID_VALUES: ReadonlyArray<readonly [key: string, label: string, build: EnvBuilder]> = [
   ["RCLONE_BIN", "empty", () => ({ RCLONE_BIN: "" })],
   ["RCLONE_BIN", "bin/rclone", () => ({ RCLONE_BIN: "bin/rclone" })],
@@ -219,12 +240,24 @@ const INVALID_VALUES: ReadonlyArray<readonly [key: string, label: string, build:
   ["MOUNT_MAX_PER_WORKSPACE", "0", () => ({ MOUNT_MAX_PER_WORKSPACE: "0" })],
   ["MOUNT_MAX_PER_WORKSPACE", "08", () => ({ MOUNT_MAX_PER_WORKSPACE: "08" })],
   ["MOUNT_MAX_PER_WORKSPACE", "2147483648", () => ({ MOUNT_MAX_PER_WORKSPACE: "2147483648" })],
+  ["MOUNT_MAX_PER_ACCOUNT", "empty", () => ({ MOUNT_MAX_PER_ACCOUNT: "" })],
+  ["MOUNT_MAX_PER_ACCOUNT", "0", () => ({ MOUNT_MAX_PER_ACCOUNT: "0" })],
+  ["MOUNT_MAX_PER_ACCOUNT", "08", () => ({ MOUNT_MAX_PER_ACCOUNT: "08" })],
+  ["MOUNT_MAX_PER_ACCOUNT", "2147483648", () => ({ MOUNT_MAX_PER_ACCOUNT: "2147483648" })],
+  ["MOUNT_MAX_ATTACHING_PER_ACCOUNT", "empty", () => ({ MOUNT_MAX_ATTACHING_PER_ACCOUNT: "" })],
+  ["MOUNT_MAX_ATTACHING_PER_ACCOUNT", "0", () => ({ MOUNT_MAX_ATTACHING_PER_ACCOUNT: "0" })],
+  ["MOUNT_MAX_ATTACHING_PER_ACCOUNT", "08", () => ({ MOUNT_MAX_ATTACHING_PER_ACCOUNT: "08" })],
+  [
+    "MOUNT_MAX_ATTACHING_PER_ACCOUNT",
+    "2147483648",
+    () => ({ MOUNT_MAX_ATTACHING_PER_ACCOUNT: "2147483648" }),
+  ],
   ["RCLONE_BIN", "not executable", (root) => ({ RCLONE_BIN: script(root, "rclone-0644", 0o644) })],
 ];
 
 /**
- * http-service-skeleton「挂载键与启动预检」另列的三例：`RCLONE_BIN` 合法而 PATH 上没有 `fusermount3`、
- * PATH 上有 `fusermount3` 而没有 `fusermount`、`MOUNT_MAX_PER_WORKSPACE=016`。
+ * http-service-skeleton「挂载键与启动预检」另列的五例：`RCLONE_BIN` 合法而 PATH 上没有 `fusermount3`、
+ * PATH 上有 `fusermount3` 而没有 `fusermount`、三个上限键各取 `016`。
  */
 const SKELETON_EXTRA: ReadonlyArray<readonly [key: string, label: string, build: EnvBuilder]> = [
   [
@@ -244,12 +277,14 @@ const SKELETON_EXTRA: ReadonlyArray<readonly [key: string, label: string, build:
     },
   ],
   ["MOUNT_MAX_PER_WORKSPACE", "016", () => ({ MOUNT_MAX_PER_WORKSPACE: "016" })],
+  ["MOUNT_MAX_PER_ACCOUNT", "016", () => ({ MOUNT_MAX_PER_ACCOUNT: "016" })],
+  ["MOUNT_MAX_ATTACHING_PER_ACCOUNT", "016", () => ({ MOUNT_MAX_ATTACHING_PER_ACCOUNT: "016" })],
 ];
 
 describe("非法值", () => {
-  it("例数被钉住：非法值十一例，骨架另列三例", () => {
-    expect(INVALID_VALUES).toHaveLength(11);
-    expect(SKELETON_EXTRA).toHaveLength(3);
+  it("例数被钉住：非法值十九例，骨架另列五例", () => {
+    expect(INVALID_VALUES).toHaveLength(19);
+    expect(SKELETON_EXTRA).toHaveLength(5);
   });
 
   it.each([...INVALID_VALUES, ...SKELETON_EXTRA])(
@@ -432,6 +467,8 @@ describe("预检", () => {
       fusermountBin: h.fusermount3,
       ompUid: OMP_UID,
       mountMaxPerWorkspace: 8,
+      mountMaxPerAccount: 32,
+      mountMaxAttachingPerAccount: 2,
     });
     expect(h.id.calls()).toEqual([`-u -- ${OMP}`, `-G -- ${OMP}`]);
   });

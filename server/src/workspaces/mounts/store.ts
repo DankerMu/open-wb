@@ -69,6 +69,7 @@ const SELECT_BY_SOURCE = `SELECT * FROM workspace_mounts WHERE source_id = ? ${M
 const SELECT_ALL_MOUNTS = `SELECT * FROM workspace_mounts ${MOUNT_ORDER}`;
 const SELECT_NAME_TAKEN = "SELECT 1 FROM workspace_mounts WHERE workspace_id = ? AND name = ?";
 const COUNT_BY_WORKSPACE = "SELECT COUNT(*) AS count FROM workspace_mounts WHERE workspace_id = ?";
+const COUNT_BY_OWNER = "SELECT COUNT(*) AS count FROM workspace_mounts WHERE owner_id = ?";
 const INSERT_MOUNT =
   "INSERT INTO workspace_mounts(id, workspace_id, owner_id, name, backend, host, port, remote_path, source_id, read_only, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 const DELETE_MOUNT = "DELETE FROM workspace_mounts WHERE id = ?";
@@ -112,6 +113,9 @@ export function createMountStore(db: DatabaseSync, options: MountStoreOptions = 
       db.prepare(SELECT_BY_SOURCE).all(sourceId).map(toMount),
 
     countByWorkspace: (workspaceId: string): number => count(COUNT_BY_WORKSPACE, workspaceId),
+
+    /** The account's mounts across all its workspaces (a row's `owner_id` is the account that attached it). */
+    countByOwner: (ownerId: string): number => count(COUNT_BY_OWNER, ownerId),
 
     /** The workspace row carries `temporary = 1` (design D15: no mount); false for an unknown id. */
     isTemporaryWorkspace: (workspaceId: string): boolean =>

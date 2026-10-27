@@ -297,7 +297,13 @@ describe("并发建出受上限约束", () => {
   it("MOUNT_MAX_PER_WORKSPACE=1, two valid POSTs at once: exactly one 201, one 409 mount_limit, one fake rclone", {
     timeout: CASE_MS,
   }, async () => {
-    const rest = await openMounts({ mountSettings: { mountMaxPerWorkspace: 1 } });
+    const rest = await openMounts({
+      mountSettings: {
+        mountMaxPerWorkspace: 1,
+        mountMaxPerAccount: 32,
+        mountMaxAttachingPerAccount: 2,
+      },
+    });
     const [a, b] = await Promise.all([
       send(rest, "member", "POST", mountsUrl(W1), sftpBody("甲", "files.intra", "/srv/a")),
       send(rest, "member", "POST", mountsUrl(W1), sftpBody("乙", "files.intra", "/srv/b")),

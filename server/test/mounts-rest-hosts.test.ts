@@ -166,7 +166,12 @@ describe("环回一律拒绝", () => {
   it("the twelve literal spellings, through the manager createApp builds (no MOUNT_HOST_ALLOW): 403 and one mount.reject each, no child", {
     timeout: CASE_MS,
   }, async () => {
-    const rest = await openBuilt({ rcloneBin: FAKE_RCLONE, mountMaxPerWorkspace: 8 });
+    const rest = await openBuilt({
+      rcloneBin: FAKE_RCLONE,
+      mountMaxPerWorkspace: 8,
+      mountMaxPerAccount: 32,
+      mountMaxAttachingPerAccount: 2,
+    });
     for (const host of LITERALS) {
       await expectRejected(rest, host);
     }
@@ -246,6 +251,8 @@ describe("许可名单", () => {
       rcloneBin: FAKE_RCLONE,
       mountHostAllow: ALLOW_FILES_INTRA,
       mountMaxPerWorkspace: 8,
+      mountMaxPerAccount: 32,
+      mountMaxAttachingPerAccount: 2,
     });
     const response = await send(
       rest,

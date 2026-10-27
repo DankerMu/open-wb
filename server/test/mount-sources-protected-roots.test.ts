@@ -118,6 +118,8 @@ async function open(parts: Parts, at: Layout = layout()): Promise<Rest> {
     mountSettings: {
       ...(parts.rclone ? { rcloneBin: at.rcloneBin } : {}),
       mountMaxPerWorkspace: 2,
+      mountMaxPerAccount: 32,
+      mountMaxAttachingPerAccount: 2,
     },
     ...(parts.extra ? { extraProtectedRoots: [at.previewCache, at.spool] } : {}),
   };
