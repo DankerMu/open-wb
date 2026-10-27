@@ -7,6 +7,7 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --coverage",
+    "test:focus": "vitest run",
     "ui-walk": "playwright test"
   },
   "dependencies": {
