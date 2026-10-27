@@ -7,10 +7,18 @@
  * createApp built. Every root is its own sibling directory of a tmp base outside the repo (the browser and
  * rclone executables live there, the rclone a copy of `fixtures/fake-rclone.mjs`), so each refusal is that
  * root's and no other's. An absent setting is left out of the list: the directory it would have named
- * registers. Oracles: the spec's root list, the tables, the fake rclone's call record.
+ * registers. A binary configured through a symlink also guards its target's directory (the one the host
+ * executes from). Oracles: the spec's root list, the tables, the fake rclone's call record.
  */
-import { chmodSync, copyFileSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
@@ -148,6 +156,7 @@ function insertSource(rest: Rest, id: string, name: string, path: string): void 
 
 const REFUSED: [string, (rest: Rest) => string][] = [
   ["<repo root>/server", () => join(REPO_ROOT, "server")],
+  ["<repo root>/node_modules", () => join(REPO_ROOT, "node_modules")],
   ["the repo root's parent", () => dirname(REPO_ROOT)],
   ["a directory under PREVIEW_CACHE_DIR", (rest) => dirOf(rest, "preview-cache/shared")],
   ["OFFICE_SPOOL_DIR itself", (rest) => rest.spool],
@@ -169,6 +178,54 @@ describe("the five roots createApp adds (#1786)", () => {
       expect(count(rest, "mount_sources")).toBe(0);
       expect(count(rest, "audit_events")).toBe(0);
       await expectRegistered(rest, "NAS", dirOf(rest, "sources/nas"));
+    },
+    CASE_MS,
+  );
+});
+
+/**
+ * The layout with BROWSER_BIN and RCLONE_BIN configured at `<base>/<kind>-link/<exe>`: a symlink to the
+ * layout's executable (in `browser-bin/`, `rclone-bin/`) or, for the control, a plain copy of it.
+ */
+function viaLink(at: Layout, symlink: boolean): Layout {
+  const place = (bin: string, kind: string): string => {
+    const link = join(at.world.base, `${kind}-link`, basename(bin));
+    mkdirSync(dirname(link));
+    if (symlink) {
+      symlinkSync(bin, link);
+    } else {
+      copyFileSync(bin, link);
+      chmodSync(link, 0o755);
+    }
+    return link;
+  };
+  return {
+    ...at,
+    browserBin: place(at.browserBin, "browser"),
+    rcloneBin: place(at.rcloneBin, "rclone"),
+  };
+}
+
+describe("a symlinked BROWSER_BIN / RCLONE_BIN also guards its target's directory", () => {
+  it.each([
+    ["symlinks: each target directory is 400, no row, no audit", true],
+    ["control, plain copies: the same directories register", false],
+  ] as const)(
+    "%s",
+    async (_label, symlink) => {
+      const at = layout();
+      const rest = await open(FULL, viaLink(at, symlink));
+      const targets = [dirname(at.browserBin), dirname(at.rcloneBin)];
+      for (const [i, path] of targets.entries()) {
+        const response = await call(rest, "admin", "POST", SOURCES_URL, {
+          name: `目标${i}`,
+          path,
+          readOnly: false,
+        });
+        expectAnswer(response, symlink ? 400 : 201, symlink ? BAD_REQUEST : undefined);
+      }
+      expect(count(rest, "mount_sources")).toBe(symlink ? 0 : 2);
+      expect(count(rest, "audit_events")).toBe(symlink ? 0 : 2);
     },
     CASE_MS,
   );

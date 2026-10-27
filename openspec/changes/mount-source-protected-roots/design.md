@@ -17,7 +17,7 @@ Must add/change：`protectedRootsOf` 返回下列十项（条件不满足的项�
 2. `runtime.stateDir`
 3. `dirname(DB 文件)`
 4. `staticRoot`
-5. `dirname(runtime.bin)`
+5. `dirname(runtime.bin)`。三个二进制根（omp、浏览器、rclone）都同时取 `dirname(bin)` 和 `dirname(realpath(bin))`。realpath 解析不出来时只省略后者。原因是符号链接形式的二进制，宿主实际执行的是链接目标（PR #1806 round 1 security P2）
 6. 仓库根：`app.ts:251` 已有的 `repoRoot`（`new URL("../../", import.meta.url)`），与 `server.ts` 的 `repoRootOf` 推出的是同一个目录。
 7. `dirname(runtime.browserBin)`：已配置时。
 8. `dirname(assembly.mountSettings.rcloneBin)`：已配置时。
@@ -45,10 +45,15 @@ Required evidence:
   - runtime 没有 `browserBin`；
   - `mountSettings` 没有 `rcloneBin`：功能关闭时挂载源端点照常可用；
   - 不传 `extraProtectedRoots`。
-  每例都把原本会落在那个保护根上的 tmp 目录拿去登记，期望 201。这证明列表里没有混进 `undefined`（`resolve(undefined)` 会抛错，所有登记都变成 500）或 `""`（会被解析成 cwd）。
+  每例都把原本会落在那个保护根上的 tmp 目录拿去登记，期望 201。这证明列表里没有混进 `undefined`：`resolve(undefined)` 会抛错，所有登记都变成 500。`extraProtectedRoots` 里不含 `""`，由 `appAssemblyOf` 的精确断言证明。两个 `dirname` 根退化成 `dirname("") = "."`（cwd）这种情况，测试测不出来：vitest 的 cwd 在仓库根内，本来就受保护。这一点靠代码里的 `=== undefined` 判断加展开写法保证（PR #1806 round 1 test-evidence P2，按收窄措辞处理）。
 - `workspaceAssemblyOf` 或 `appAssemblyOf(config)`：配了 `OFFICE_SPOOL_DIR` 时，`extraProtectedRoots` 恰为 `[previewCacheDir, officeSpoolDir]`；没配时恰为 `[previewCacheDir]`。
 - 升级场景：在 DB 里直接插入一行挂载源，路径位于 `extraProtectedRoots` 之内，再建出一个引用它的 `local` 挂载。结果为 502 `mount_failed`，没有 `mount` 调用（假 rclone 没有被 spawn）。
 - 先在改前的代码上跑一次，确认新增用例为红：六例返回 201。
+
+Residual：
+- 包装脚本再 exec 别处的程序时，不跟到那个程序。
+- app uid 自己的 `HOME`（如 `~/.ssh`、shell rc）和 `dirname(process.execPath)`（如 nvm 装的 node）不在清单里，这是 owner 选项 A 的范围。参考镜像里这些目录都属 root 或不可写。
+- realpath 认不出 bind-mount 的别名，所有根都有这个限制。
 
 Non-goals：
 - 不自动删除已登记、但现在被拒的挂载源。

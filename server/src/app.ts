@@ -483,7 +483,8 @@ function mountsOf(
  * `dirname(DB_PATH)` (none for an in-memory DB), `STATIC_ROOT` (when served), `dirname(OMP_BIN)`, the repo
  * root (the service code: `server/dist`, `node_modules`), `dirname(BROWSER_BIN)` and `dirname(RCLONE_BIN)`
  * (when configured), and the assembly's `extraProtectedRoots` (`PREVIEW_CACHE_DIR`, `OFFICE_SPOOL_DIR` when
- * configured). An absent one is left out, never `undefined` or `""` (`resolve("")` is the cwd).
+ * configured). Each binary root also names its symlink target's directory (what the host executes), when the
+ * binary resolves. An absent one is left out, never `undefined` or `""` (`resolve("")` is the cwd).
  */
 function protectedRootsOf(
   db: DatabaseSync,
@@ -499,12 +500,24 @@ function protectedRootsOf(
     runtime.stateDir,
     ...(dbFile === null ? [] : [dirname(dbFile)]),
     ...(staticRoot === undefined ? [] : [staticRoot]),
-    dirname(runtime.bin),
+    ...binRootsOf(runtime.bin),
     repoRoot,
-    ...(runtime.browserBin === undefined ? [] : [dirname(runtime.browserBin)]),
-    ...(rcloneBin === undefined ? [] : [dirname(rcloneBin)]),
+    ...(runtime.browserBin === undefined ? [] : binRootsOf(runtime.browserBin)),
+    ...(rcloneBin === undefined ? [] : binRootsOf(rcloneBin)),
     ...(assembly?.extraProtectedRoots ?? []),
   ];
+}
+
+/** `dirname(bin)`, plus its realpath's directory when that differs; a binary that does not resolve adds none. */
+function binRootsOf(bin: string): string[] {
+  const dir = dirname(bin);
+  let realDir: string;
+  try {
+    realDir = dirname(realpathSync(bin));
+  } catch {
+    return [dir];
+  }
+  return realDir === dir ? [dir] : [dir, realDir];
 }
 
 /** `MOUNT_MAX_PER_WORKSPACE` for the mount routes; its default without `mountSettings`. */
