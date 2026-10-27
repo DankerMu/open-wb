@@ -11,7 +11,7 @@ Must preserve:
 
 Must add/change: 新建分量 `mkdirSync(current, 0o770)` → `openSync(current, O_RDONLY|O_DIRECTORY|O_NOFOLLOW)` → `fstatSync(fd)`，要求是目录且 `uid === process.geteuid?.()`（`geteuid` 缺席即 Windows 等无 uid 平台时跳过 uid 比较，与 `ensureOwned` 同一写法） → `fchmodSync(fd, 0o2770)`；`finally` 里 `closeSync`。不满足时抛 `Error("shared dir component is not the directory just made")`，文本固定、不含路径，open 的 errno 放在 `cause`。
 
-Governing invariant: 应用 uid 只对它刚刚建出、并经不跟随链接的句柄确认属于自己的那个目录 inode 改 mode，绝不对路径解析出的任意目标改 mode。
+Governing invariant: 应用 uid 只对经不跟随链接的句柄确认为本进程 euid 所有的真实目录改 mode，绝不对路径解析出的任意目标（链接目标、omp uid 的目录）改 mode。句柄确认不了这就是 `mkdir` 刚建出的那个 inode：omp uid 可以在同一个 `2770`、无粘滞位的父目录里，用 `RENAME_EXCHANGE` 换进另一个应用 uid 所有的目录（PR #1805 安全与正确性座席）。现有布局下这种目录本来都是 `2770`：空间根、`uploads/`、`.git` 标记、未挂载的挂载点；`0o700` 和 `2750` 的应用目录都不在这类父目录下。所以没有可利用的目标，改前的按路径 chmod 也有同样问题，这次没有变坏。今后如果在这类父目录下放一个非 `2770` 的应用 uid 目录，这个缺口会重新打开。
 
 Sibling surfaces:
 - `sessions/omp/repo-root-marker.ts:20-32`：同一做法的先例，本次不改。
@@ -37,5 +37,7 @@ Required evidence:
   - 这条实测替代 issue 验收里的 `POST /api/workspaces/:id/dirs` 循环：竞态窗口完全在函数内部，HTTP 层不增加任何东西。PR 里写明这一替代，以及 harness 是本次的一次性脚本，不是 #1665 留下的现成 harness。
 
 Non-goals: 父级替换（dirfd / mkdirat）；`ensureOwned` 和 DB chmod；same-uid 模式。
+
+Residual（兼容性）：在会压掉或重映射 uid 的文件系统上，新建目录的 uid 与 euid 不一致，改后 `ensureSharedDir` 会抛出（POST dirs 返回 500，建空间回滚），改前的按路径 chmod 可能会成功。这类文件系统包括 NFS `root_squash` / `all_squash`、带 `uid=` 挂载的 CIFS。参考部署不在这类文件系统上，挂载内的目录按 D16 也不经本函数。
 
 Review focus: 句柄的 open / close 在每条路径上都配对；`O_DIRECTORY|O_NOFOLLOW` 在 macOS 与 Linux 的语义；euid 校验在 same-uid 部署下不误报；调用方的抛出路径（store 回滚、POST dirs 500）不变；不残留按路径的 chmod。

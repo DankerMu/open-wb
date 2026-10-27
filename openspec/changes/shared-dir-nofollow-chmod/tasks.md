@@ -12,7 +12,7 @@
 
 验证：
 - `npm run test:focus --workspace server -- sandbox-dirs` → 退出码 0。
-- `npm run test:focus --workspace server -- workspaces-rest workspace-store omp-process mounts-manager` → 退出码 0（调用方回归）。
+- `npm run test:focus --workspace server -- workspaces-http workspace-store omp-process mounts-manager workspace-upload-rest session-temp-workspace server-startup-private-state` → 退出码 0（调用方回归）。
 - `make check` → 退出码 0。
 
 ## Risk packs
