@@ -64,7 +64,7 @@
 3. `MOUNT_HOST_ALLOW` 已配置且规范化后的 `host` 不等于名单中的任何一项。名单只按字符串比较，不比较解析结果。
 4. 系统解析器对 `host` 的全部解析结果中任一属于第 2 步的地址。解析失败或结果为空 SHALL 使该次尝试失败（建出时 502 `mount_failed` 并写 `mount.reject`，`reason` 为 `mount_failed`；重挂时保持 `offline`），不启动子进程。
 
-全部通过时，第一个解析结果（IP 字面）SHALL 写进该次尝试的 `rclone.conf` 的 `host`（「挂载凭证文件」），rclone 不再自行解析主机；argv SHALL NOT 带 `--sftp-host`、`--smb-host` 或任何其它后端覆盖参数。该地址 SHALL 记在内存里，供「在线状态与重挂」的连通检查。`local` 挂载不经主机规则。建出时被拒 SHALL 为 403 `mount_host_rejected`；重挂时被拒 SHALL 使该挂载保持 `offline`。
+全部通过时，第一个解析结果（IP 字面）SHALL 写进该次尝试的 `rclone.conf` 的 `host`（「挂载凭证文件」），rclone 不再自行解析主机；argv SHALL NOT 带 `--sftp-host`、`--smb-host` 或任何其它后端覆盖参数。该地址 SHALL 记在内存里，供「在线状态与重挂」的连通检查。`local` 挂载不经主机规则。第 4 步的系统解析 SHALL 限流：全进程同时在途的解析至多 2 个（`dns.lookup` 占 libuv 线程池的线程，没有超时也不能取消），并且每个账号同时至多占其中 1 个——建出与重挂按挂载所属账号计入同一账号名额，一个账号多出的解析在它自己的队列里先到先得地等待、不占全局名额（#1810，owner 2026-10-27）；IP 字面量不经解析、不排队。建出时被拒 SHALL 为 403 `mount_host_rejected`；重挂时被拒 SHALL 使该挂载保持 `offline`。
 
 #### Scenario: 键集与取值
 - **WHEN** 分别提交：`sftp` 同时带 `password` 与 `privateKey`；`sftp` 两者都不带；`smb` 带 `privateKey`；`local` 带 `host`；`name` 为 `uploads`、`screenshots`、`a.b`、65 个字符；`remotePath` 为 `srv/data`；`smb` 的 `remotePath` 为 `/`；`port` 为 `0` 与 `"22"`；`password` 含换行且带一个哨兵子串
@@ -83,6 +83,12 @@
 - **THEN** 前两者进入挂载流程；后者 403 `mount_host_rejected`
 - **WHEN** 一个在线的 `sftp` 挂载的主机不在新名单里，服务以该名单重启
 - **THEN** 启动恢复时该挂载不被挂上、状态为 `offline`；启动本身成功
+
+#### Scenario: 解析名额按账号分配
+- **WHEN** 测试解析器对每次调用都挂起；zhangsan 在两个空间各建出一个主机名 `sftp` 挂载，lisi 建出一个，另一个账号再建出一个
+- **THEN** 解析器恰收到两次调用：zhangsan 的第一个与 lisi 的；zhangsan 的第二个与第三个账号的在等待；让 zhangsan 的第一次调用以失败返回后，解析器收到的下一次调用来自第三个账号（它先在全局队列里等）；zhangsan 的第二个此后在全局名额再空出时才进入；任一时刻在途调用不超过 2 个、同一账号不超过 1 个；同时以 IP 字面量建出的挂载不等待
+- **WHEN** zhangsan 一个离线挂载到期重挂时其解析挂起，zhangsan 在另一个空间再建出一个主机名挂载
+- **THEN** 新建出的解析在 zhangsan 的队列里等待，lisi 的建出照常进入解析器
 
 ### Requirement: 挂载凭证文件
 每个挂载 SHALL 有一个 app 私有目录 `<OMP_STATE_DIR 的 realpath>/mounts/<挂载 id>/`（`0700`，以 sandbox-core「托管目录权限位」的 `ensureOwnedDir` 语义建立：属本进程、不是符号链接），其中：
