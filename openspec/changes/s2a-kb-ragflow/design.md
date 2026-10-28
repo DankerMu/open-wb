@@ -37,7 +37,7 @@ ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc
 
 ## Grill 结论（2026-10-28，owner 逐分支拍板；#26–#29 为 Stage 4 补问）
 
-「结论」列摘自 grill 账本：第 4、8、26–29 行逐字照录，其余行为缩写，原文见 grill 凭证。Stage 4 的细化写在「落点」列；标「待 owner 复核」的两处由 Stage 5 写进 Epic 正文，等 owner 确认。
+「结论」列摘自 grill 账本：第 4、8、26–29 行逐字照录，其余行为缩写，原文见 grill 凭证。Stage 4 的细化写在「落点」列；标「待 owner 复核」的三处（第 4、13、27 行）由 Stage 5 写进 Epic 正文，等 owner 确认。
 
 | # | 分支 | 结论 | 落点 |
 |---|---|---|---|
@@ -64,10 +64,10 @@ ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc
 | 21 | 模板 | 建库时固定 | D9 |
 | 22 | 开发账号 | 共用栈上自建 open-workbuddy 专用账号与 API key，只在本机私有配置 | D16 |
 | 23–25 | 事实核查 | rc2 / Infinity 有 arm64 镜像；DMXAPI 有 `bge-m3`、`qwen3-rerank`；deepdoc 形态问题作废 | Context |
-| 26 | 嵌入模型存放 | 嵌入模型存 `kb_settings`，不进 `models` 表；管理入口仍在模型 tab 的「知识库模型」段 | D7 |
-| 27 | 手配退路的落地方式 | spec 只写下发主路径；退路作为 design 应急预案（含只探活）。组 1 实测「不支持」时先按预案改本 change 的 spec 并重过审核，再放行组 8/14/17；「自动」解读为预案已定、不再问 owner | D7「应急预案」。细化（agent 判断，待 owner 复核）：预案还要改状态端点的 `embeddingReady`（组 6）、建库时的 `embedding_model`（组 9）与 `api-kb.ts` 的设置视图（组 15），所以修订过审前停的是组 6 及其后全部（组 7 除外），比账本的组 8/14/17 多停组 6（组 9、15 本就经组 8 传递依赖）；修订由 agent 按预案执行并重过审核，不再询问 owner |
-| 28 | 知识库对话模型生命周期 | 引用 `models` 行并联动：被指定时不能删（409）；改其上游或密钥时同步重新下发，下发失败则该次修改失败 | D7、model-registry「模型管理端点」 |
-| 29 | 重建遇原件缺失 | 跳过并移除该文档行，记入 `kb.rebuild` 的 `skipped`；`rebuild_failed` 下也允许移出文档 | D8、D13 |
+| 26 | 嵌入模型存放 | 嵌入模型存 kb_settings，不进 models 表；管理入口仍在中心模型 tab 的「知识库模型」段 | D7 |
+| 27 | 手配退路的落地方式 | spec 只写下发主路径；退路作为 design 应急预案（含只探活）。组 1 实测「不支持」时先按预案改本 change 的 spec 并重过审核，再放行组 8/14/17；「自动」解读为预案已定、不再问 owner | D7「应急预案」。细化（agent 判断，待 owner 复核）：预案还要改状态端点的 `embeddingReady`（组 6）、建库时的 `embedding_model`（组 9）与 `api-kb.ts` 的设置视图（组 15），所以修订过审前停的是组 6 及其后全部（组 7 除外），比账本的组 8/14/17 多停组 6 与组 15 首刀（组 9 及组 15 剩余本就经组 8 传递依赖，组 15 首刀经 1.4 的 `Depends on #<R>` 显式挡住）；修订由 agent 按预案执行并重过审核，不再询问 owner |
+| 28 | 知识库对话模型生命周期 | 引用 models 行 + 联动：被指定时不能删（409）；改其上游或密钥时同步重新下发到 RAGFlow，下发失败则该次修改失败；改 models 注册表既有端点规格 | D7、model-registry「模型管理端点」 |
+| 29 | 重建遇原件缺失 | 跳过并移除该文档行，写进 kb.rebuild 审计的 skipped 列表，库照常完成；rebuild_failed 状态下也允许移出文档 | D8、D13 |
 
 开放项与落点：rc2 接口能力 → 组 1；dsh-team 升 rc2 的时间与其 `DOC_ENGINE` → Open Questions；S2b agentic 环落点 → Non-Goals；规划文档改写 → 组 2。
 
@@ -99,7 +99,7 @@ app-server 新模块 `server/src/kb/` 是第十二个启动模块，注册在 `c
 依赖规则：
 - `system.md` §4 的「`sessions → kb`、`kb → accounts`」不变（`sessions → kb` 到 S2c 才有）。
 - 本 change 新增 `kb → workspaces`（读工作空间文件，经 `workspaces` 入口导出的读取函数与 `core/sandbox`）与 `kb → models`（读知识库对话模型的上游）。
-- `models` 不依赖 `kb`。#28 的联动走反向注入：`AssemblyDependencies` 里有一个可选的 `modelWriteGuard` 钩子，`kb` 注册时把它交给 `models`；`models` 在删除与改上游之前调用它。知识库关闭时钩子为空，`models` 的行为与本 change 之前一致。
+- `models` 不依赖 `kb`。#28 的联动走反向注入：`AssemblyDependencies` 里有一个可选的 `modelWriteGuard` 钩子，`kb` 注册时把它交给 `models`。钩子接收一个执行 `models` 那次写入或删除的回调，在设置锁内依次做引用判定、需要时重新下发、再执行回调；`models` 的 `DELETE` 与 `PUT` 把各自的写入交给它包住。知识库关闭时钩子为空，`models` 的行为与本 change 之前一致。
 
 备选：保留 `kbservice/` 作薄适配层——多一个进程、一套 Python 工具链和一条跨服务契约，换来的只是把 HTTP 调用挪个地方；S2b 的 agentic 环若需要代码，届时按 S2b 的结论放。
 
@@ -201,7 +201,7 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 本段不进 spec。组 1 的实测记录若在「模型下发」一节结论为「不支持」：
 1. 组 1 照常合入记录，并在 Epic 下报告。
 2. 按本预案修订本 change 的 spec delta（不再询问 owner），重过 Stage 3–4.5。
-3. 修订过审之前，组 6 及其后全部任务组（组 7 除外）不开工：除账本点名的组 8、14、17 外，组 6 的 `embeddingReady` 也要按预案改，组 9、15 本就依赖组 8（grill #27 的细化）。
+3. 修订过审之前，组 6 及其后全部任务组（组 7 除外）不开工：除账本点名的组 8、14、17 外，组 6 的 `embeddingReady` 与组 15 首刀的设置视图也要按预案改（grill #27 的细化）。机制：组 1 建修订 issue R（`Depends on #<Epic>`），并在组 6 与组 15 首刀的 issue 正文加 `Depends on #<R>`；其余被停的组经依赖链传递挡住（tasks 1.4）。
 
 预案内容，即修订时要改的地方：
 - **嵌入模型来源**：由运维在 RAGFlow 后台给服务账号配置缺省嵌入模型与缺省对话模型；`PUT /api/kb/settings` 不再接受 `embedding`，也不再下发对话模型（`chatModelId` 只作 `compileReady` 的开关）。
@@ -323,7 +323,7 @@ RAGFlow 的失败：
 
 知识库对话模型被指定期间，不能删除，也不能清空它的上游（D7 #28）。它的上游一改，就同步重新下发，所以 RAGFlow 侧的编译始终用注册表里的当前凭证。管理员把 `chatModelId` 改为 `null` 时，RAGFlow 侧的对话模型配置被撤销：已开启开关的库照旧显示开关，此后的编译会在 RAGFlow 侧失败并显示 `failed`；同时 `compileReady` 变假，建库表单不再显示开关。
 
-停止条件：组 1 若证明 rc2 无法用 API key 开启或触发编译，组 1 照常合入记录，并在 Epic 下报告 owner。组 9 及其全部下游（组 10–18）等 owner 修订本 change 后再开工；组 2–8 不受影响。与 D7 的预案不同，这一项没有预定的替代方案。
+停止条件：组 1 若证明 rc2 无法用 API key 开启或触发编译，组 1 照常合入记录，并在 Epic 下报告 owner。组 9 及其全部下游（组 10–18）与组 15 首刀等 owner 修订本 change 后再开工（机制同 D7：修订 issue R，组 9 与组 15 首刀 `Depends on #<R>`）；组 2–8 不受影响。与 D7 的预案不同，这一项没有预定的替代方案。
 
 ### D15 审计
 

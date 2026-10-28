@@ -168,6 +168,10 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - **WHEN** 管理员 A `PUT /api/kb/settings {chatModelId:"m2"}`，假 RAGFlow 挂起这次下发；同时管理员 B `PUT /api/models?id=m2` 换成新密钥；然后假 RAGFlow 放行
 - **THEN** B 的修改在 A 的本地写入完成之后才做引用判定，判定 `m2` 已被引用，于是在写库前重新下发；假 RAGFlow 最后收到的对话模型下发带新密钥；`models` 里 `m2` 的密钥为新值
 
+#### Scenario: 删除与设置交错
+- **WHEN** 管理员 B `DELETE /api/models?id=m2` 先进入设置锁，假 RAGFlow 无关；同时管理员 A `PUT /api/kb/settings {chatModelId:"m2"}`；另一次次序相反：A 先持锁且下发被挂起，B 随后删除
+- **THEN** 第一种：B 删除 204，A 随后 400（`m2` 已不存在），假 RAGFlow 没有收到 `m2` 的下发；第二种：A 200 之后 B 的删除得 409 `kb_model_in_use`，行仍在
+
 #### Scenario: 并发设置写入
 - **WHEN** 两个管理员并发 `PUT` 不同的 `chatModelId`，假 RAGFlow 把第一个下发挂起一段时间后才应答
 - **THEN** 假 RAGFlow 收到的两次下发不重叠：第二次在第一次的本地写入完成之后才发出；最终 `GET` 的 `chatModelId` 等于最后一次下发的模型
