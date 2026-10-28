@@ -142,9 +142,9 @@ function useRowMark(marks: TreeMarks | undefined, path: string) {
 /**
  * 树的拖放（原生拖放）。被拖的行的路径记在 `dragged` 里：`dragstart` 写入，`drop` 与 `dragend` 清掉，
  * 下一次 `dragstart` 覆写；`from` 只从它取。经过一行时可放下的条件是三条同时成立：`dragged` 非空（拖动
- * 是从本树起的）、`types` 里有 `ENTRY_DRAG`、`actions.accepts`（不是自身、后代、当前父目录，且没有在途
- * 的放下）——成立才拦缺省动作，浏览器因此才会在这一行上发 `drop`。操作系统的文件、别的页面拖来的东西
- * 没有经过本树的 `dragstart`，或不带这个类型，不被接受。放下时另要求 `getData(ENTRY_DRAG)` 与 `dragged`
+ * 是从本树起的）、`types` 里有 `ENTRY_DRAG`、`actions.accepts`（不是自身、后代、当前父目录，与来源同一
+ * 挂载范围，且没有在途的放下）——成立才拦缺省动作，浏览器因此才会在这一行上发 `drop`。操作系统的文件、
+ * 别的页面拖来的东西没有经过本树的 `dragstart`，或不带这个类型，不被接受。放下时另要求 `getData(ENTRY_DRAG)` 与 `dragged`
  * 逐字相同：源行在拖动途中被重列卸掉时它的 `dragend` 到不了这里，`dragged` 会留着旧值（读代码推出），
  * 这时别处拖来的同类型数据对不上就不发请求。能不能移由 `actions.moveInto` 再判一次。
  * 高亮用进入计数：指针移到行内的子元素上也会触发 `dragleave`。`dragstart` 里不写状态：只写引用。

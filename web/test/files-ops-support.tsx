@@ -275,6 +275,21 @@ export function rowIn(directory: string, name: string) {
   return found;
 }
 
+/** 此刻带高亮（拖放可放下）的行按钮的可访问名。 */
+export const highlighted = () =>
+  [...tree().querySelectorAll("[data-drop-target]")].map((button) =>
+    button.getAttribute("aria-label"),
+  );
+
+/** 树栏里、目录树之外的 `role="alert"` 的文字：树区上方的那一条。树内各目录的读取失败不算。 */
+export function notices() {
+  const column = screen.getByRole("complementary", { name: "工作空间文件" });
+  return within(column)
+    .queryAllByRole("alert")
+    .filter((alert) => alert.closest("nav") === null)
+    .map((alert) => alert.textContent);
+}
+
 /** 拷入层 `dialog` 的遮罩。 */
 export function overlay() {
   const element = document.querySelector('[data-slot="dialog-overlay"]');

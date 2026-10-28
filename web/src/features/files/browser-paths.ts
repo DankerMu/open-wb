@@ -209,11 +209,14 @@ export function loadedDirectoryPaths(cache: DirectoryCache) {
  * 的条目下行，不看 `cache` 里还有哪些键：地址定位会把上级没列出的目录的列表留在缓存里，那样的目录在
  * 树上没有行。再去掉 `from` 自身、它的后代和它当前的父目录（`canMoveInto`）。次序同树上自上而下，根是
  * `""`。加载过但折叠着的目录不在其中，这一点与 `loadedDirectoryPaths` 不同。
+ * `start` 是起列的目录（缺省为根）：挂载内的条目从它所在挂载的根起列（挂载根行总在树上，它的列表已加载
+ * 即算可见，同根），于是没有根与挂载外的目录；根的列表不列挂载点（D21），从根起列也就没有挂载内的目录。
  */
 export function moveTargets(
   cache: DirectoryCache,
   expanded: ReadonlySet<string>,
   from: string,
+  start = "",
 ): string[] {
   const visible: string[] = [];
   const visit = (path: string) => {
@@ -230,7 +233,7 @@ export function moveTargets(
       }
     }
   };
-  visit("");
+  visit(start);
   return visible.filter((path) => canMoveInto(from, path));
 }
 

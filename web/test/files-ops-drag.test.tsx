@@ -36,11 +36,13 @@ import {
   fileEntry,
   fileUrl,
   focusedOn,
+  highlighted,
   hoverOver,
   type Listings,
   MOVE,
   menuButton,
   nested,
+  notices,
   openDelete,
   openFiles,
   openRename,
@@ -83,21 +85,6 @@ function landed(listings: Listings) {
   listings[""] = [dirEntry("out"), fileEntry("b.md")];
   listings.out = [dirEntry("sub"), fileEntry("b.md"), fileEntry("a.md")];
   return jsonResponse({ path: "out/a.md" });
-}
-
-/** 此刻带高亮的行按钮的可访问名。 */
-const highlighted = () =>
-  [...tree().querySelectorAll("[data-drop-target]")].map((button) =>
-    button.getAttribute("aria-label"),
-  );
-
-/** 树栏里、目录树之外的 `role="alert"` 的文字：树区上方的那一条。树内各目录的读取失败不算。 */
-function notices() {
-  const column = screen.getByRole("complementary", { name: "工作空间文件" });
-  return within(column)
-    .queryAllByRole("alert")
-    .filter((alert) => alert.closest("nav") === null)
-    .map((alert) => alert.textContent);
 }
 
 /** 展开 `out`，把 `out/b.md` 拖到根行上放下：根下已有 `b.md`，服务端答 409。 */

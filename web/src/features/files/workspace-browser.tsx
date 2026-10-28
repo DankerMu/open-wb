@@ -701,6 +701,7 @@ export function WorkspaceBrowser({
     expandedPathsRef,
     focusMenuPath,
     name,
+    scopeOf: mounts.scopeOf,
   });
 
   useImperativeHandle(

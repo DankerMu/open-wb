@@ -24,6 +24,9 @@
  * - `holds(path)`: that same「在挂载内」for any path. The tree's row menu reads it too: an entry inside
  *   a mount has no `删除` (workspace-mounts「挂载内条目的行菜单」; the server answers 409
  *   `mount_boundary` to such a delete, and stays the authority when the list is stale).
+ * - `scopeOf(path)`: the「挂载范围」of a path — its first segment when `holds` says it is inside a
+ *   mount, `""` otherwise (the same judgement, fallback included). `移动到…` lists targets from that
+ *   mount's root and a drop is accepted only within one scope (workspace-mounts「挂载内条目的行菜单」).
  * - `walk(path, cache)`: `revealStep` with the online mounts' names as root rows (files-web「地址定位到
  *   文件」reaches into a mount). `show` is what the walk expands: `expand`, and while no list was read
  *   the unlisted first segment too, so a mount row that arrives after the walk comes out expanded; it
@@ -193,6 +196,7 @@ export function useMounts(
       names ? names.has(firstSegment(path)) : unlistedAtRoot(directories, firstSegment(path)),
     [directories, names],
   );
+  const scopeOf = useCallback((path: string) => (holds(path) ? firstSegment(path) : ""), [holds]);
   const preview = useCallback(
     (selected: { path: string; preview: PreviewState | null } | null) => {
       const inMount = selected !== null && holds(selected.path);
@@ -343,6 +347,8 @@ export function useMounts(
     holds,
     loaded,
     preview,
+    /** The mount a path is inside (`""`: none): where `移动到…` and a drop may take an entry. */
+    scopeOf,
     dialogDirectories,
     refetch,
     walk,

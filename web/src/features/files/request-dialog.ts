@@ -8,6 +8,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError } from "../../lib/api.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
 
+/** 同名冲突：`code` 为 `conflict` 的 409。别的 409（挂载边界、挂载离线）不是。 */
+export function isConflict(error: unknown) {
+  return error instanceof ApiError && error.status === 409 && error.code === "conflict";
+}
+
 type RequestDialogState<T> = {
   id: number;
   subject: T;
@@ -53,8 +58,8 @@ export function useRequestDialog<T>() {
 
   /**
    * 为当前对话框发出 `request`；已有一次在途时什么都不做。成功：关闭对话框，再调 `onDone`。失败：
-   * 对话框留着并显示文案——409 是 `conflictText`（没给就同其余），其余是信封 message；401 不显示
-   * （登录层接手）。
+   * 对话框留着并显示文案——`code` 为 `conflict` 的 409 是 `conflictText`（没给就同其余），其余（含挂载的
+   * `mount_boundary`、`mount_offline` 等别的 409）是信封 message；401 不显示（登录层接手）。
    */
   const submit = useCallback(
     (
@@ -91,7 +96,7 @@ export function useRequestDialog<T>() {
           }
 
           mutationRef.current = null;
-          const conflict = error instanceof ApiError && error.status === 409 ? conflictText : null;
+          const conflict = isConflict(error) ? conflictText : null;
           const message = conflict ?? errorMessage(error);
           setDialog((current) =>
             current?.id === dialogId ? { ...current, error: message, pending: false } : current,
