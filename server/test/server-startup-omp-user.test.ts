@@ -17,7 +17,11 @@ import {
   login,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
-import { expectRefused, SQLITE_EXPERIMENTAL_WARNING } from "./server-startup-order-helpers.js";
+import {
+  expectNeverListened,
+  SQLITE_EXPERIMENTAL_WARNING,
+  startListenTraced,
+} from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 import { sudoPrefix } from "./session-supervisor-helpers.js";
 
@@ -99,7 +103,7 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
       const dbParent = join(scratchRoot, "db");
       const state = join(scratchRoot, "state");
       const sandbox = join(scratchRoot, "sandbox");
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, scratchRoot, (port) => ({
         env: {
           HOST: "127.0.0.1",
           PORT: String(port),
@@ -112,6 +116,7 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
         },
         ...(setpriv === undefined ? {} : { requireHook: hookPath }),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
       expect(closed.code).toBe(1);
       expect(closed.signal).toBeNull();
@@ -127,7 +132,7 @@ describe("production entry rejects invalid OMP_USER before effects", () => {
       expect(existsSync(state)).toBe(false);
       expect(existsSync(sandbox)).toBe(false);
       expect(existsSync(join(scratchRoot, "bin"))).toBe(false);
-      await expectRefused("127.0.0.1", port);
+      expectNeverListened(started);
     },
     90_000,
   );

@@ -7,7 +7,6 @@
  * Expected values are the spec's, not imported from `src/model-catalog.ts`.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -21,6 +20,7 @@ import {
   compileServerEntry,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
+import { expectNeverListened, startListenTraced } from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -113,9 +113,10 @@ describe("production entry — MODEL_VISION", () => {
 
   it("an empty MODEL_VISION: exit 1, one generic record, no DB parent/sandbox/state/models.yml, no listener", async () => {
     const root = scratch("open-wb-vision-invalid-");
-    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+    const started = await startListenTraced(compiled.entry, root, (port) => ({
       env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: "" }),
     }));
+    const { server } = started;
     const closed = await server.waitForClose();
 
     expect(closed).toEqual({ code: 1, signal: null });
@@ -125,7 +126,7 @@ describe("production entry — MODEL_VISION", () => {
       expect(existsSync(join(root, owned))).toBe(false);
     }
     expect(existsSync(join(root, "state", "home", ".omp", "agent", "models.yml"))).toBe(false);
-    await expect(refused(port)).resolves.toBe(true);
+    expectNeverListened(started);
   }, 20_000);
 
   it.each([
@@ -158,14 +159,3 @@ describe("production entry — MODEL_VISION", () => {
     30_000,
   );
 });
-
-function refused(port: number): Promise<boolean> {
-  return new Promise((settle) => {
-    const socket = connect({ host: "127.0.0.1", port });
-    socket.once("connect", () => {
-      socket.destroy();
-      settle(false);
-    });
-    socket.once("error", () => settle(true));
-  });
-}

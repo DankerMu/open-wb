@@ -3,7 +3,6 @@
  * 对象到达 sessions 模块。期望值取自 issue/spec（缺省 16、值域 1..2147483647），不引用源码常量。
  */
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
-import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -20,6 +19,7 @@ import {
   compileServerEntry,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
+import { expectNeverListened, startListenTraced } from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -49,20 +49,6 @@ function thrownMessage(env: Record<string, string>): string {
     return (error as Error).message;
   }
   throw new Error(`resolver accepted ${KEY}=${JSON.stringify(env[KEY])}`);
-}
-
-function refused(port: number): Promise<boolean> {
-  return new Promise((done) => {
-    const socket = connect({ host: "127.0.0.1", port });
-    socket.once("connect", () => {
-      socket.destroy();
-      done(false);
-    });
-    socket.once("error", () => {
-      socket.destroy();
-      done(true);
-    });
-  });
 }
 
 afterEach(async () => {
@@ -146,9 +132,10 @@ describe("production entry rejects invalid OMP_MAX_PROCESSES before effects", ()
     "%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
     async (raw) => {
       const root = scratch("open-wb-max-processes-");
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, root, (port) => ({
         env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: raw }),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -158,7 +145,7 @@ describe("production entry rejects invalid OMP_MAX_PROCESSES before effects", ()
         expect(existsSync(join(root, owned))).toBe(false);
       }
       expect(existsSync(join(compiled.root, "var"))).toBe(false);
-      await expect(refused(port)).resolves.toBe(true);
+      expectNeverListened(started);
     },
     20_000,
   );
@@ -207,9 +194,10 @@ describe("production entry rejects invalid SNAPSHOT_* settings before effects", 
     "%s=%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
     async (key, raw) => {
       const root = scratch("open-wb-snapshot-config-");
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, root, (port) => ({
         env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [key]: raw }),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -221,7 +209,7 @@ describe("production entry rejects invalid SNAPSHOT_* settings before effects", 
         expect(existsSync(join(root, owned))).toBe(false);
       }
       expect(existsSync(join(compiled.root, "var"))).toBe(false);
-      await expect(refused(port)).resolves.toBe(true);
+      expectNeverListened(started);
     },
     20_000,
   );
@@ -270,9 +258,10 @@ describe("production entry rejects invalid composer settings before effects", ()
     "%s=%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
     async (key, raw) => {
       const root = scratch("open-wb-composer-config-");
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, root, (port) => ({
         env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [key]: raw }),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -284,7 +273,7 @@ describe("production entry rejects invalid composer settings before effects", ()
         expect(existsSync(join(root, owned))).toBe(false);
       }
       expect(existsSync(join(compiled.root, "var"))).toBe(false);
-      await expect(refused(port)).resolves.toBe(true);
+      expectNeverListened(started);
     },
     20_000,
   );
@@ -329,9 +318,10 @@ describe("production entry rejects invalid preview and file settings before effe
     "%s=%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
     async (key, raw) => {
       const root = scratch("open-wb-preview-config-");
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, root, (port) => ({
         env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [key]: raw }),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -346,7 +336,7 @@ describe("production entry rejects invalid preview and file settings before effe
         expect(existsSync(join(root, owned))).toBe(false);
       }
       expect(existsSync(join(compiled.root, "var"))).toBe(false);
-      await expect(refused(port)).resolves.toBe(true);
+      expectNeverListened(started);
     },
     20_000,
   );

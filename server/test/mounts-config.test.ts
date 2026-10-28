@@ -17,7 +17,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -34,7 +33,7 @@ import {
   compileServerEntry,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
-import { startCompiledServerWithRetry } from "./server-startup-retry.js";
+import { expectNeverListened, startListenTraced } from "./server-startup-order-helpers.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const SOURCE_ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
@@ -520,17 +519,6 @@ describe("预检", () => {
   });
 });
 
-function refused(port: number): Promise<boolean> {
-  return new Promise((settle) => {
-    const socket = connect({ host: "127.0.0.1", port });
-    socket.once("connect", () => {
-      socket.destroy();
-      settle(false);
-    });
-    socket.once("error", () => settle(true));
-  });
-}
-
 describe("production entry rejects invalid mount settings before effects", () => {
   let compiled: CompiledServerEntry;
 
@@ -543,9 +531,10 @@ describe("production entry rejects invalid mount settings before effects", () =>
     async (key, _label, build) => {
       const root = scratch("open-wb-mounts-entry-");
       const extra = build(root);
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, root, (port) => ({
         env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), extra),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -557,7 +546,7 @@ describe("production entry rejects invalid mount settings before effects", () =>
         expect(existsSync(join(root, owned))).toBe(false);
       }
       expect(existsSync(join(compiled.root, "var"))).toBe(false);
-      await expect(refused(port)).resolves.toBe(true);
+      expectNeverListened(started);
     },
     20_000,
   );

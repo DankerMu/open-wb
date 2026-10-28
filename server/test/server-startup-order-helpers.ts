@@ -1,31 +1,78 @@
 /**
- * server-startup-order / -private-state / -omp-user / -preview 与 listener-shutdown 几个测试文件共用的启动夹具片段。
+ * server-startup-order / -private-state / -omp-user / -preview 与 listener-shutdown 几个测试文件共用的启动夹具片段；
+ * `startListenTraced` 另供各配置测试的入口拒绝用例。
  * 只放跨文件共用的；单文件自用的辅助留在各自文件里。
  */
 
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { connect as connectTcp, createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect } from "vitest";
+import type { StartedServer } from "./server-startup-helpers.js";
+import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 export const MODEL_ID = "issue-102-tracer-model";
 export const CONTINUE_LINE = "HTTP/1.1 100 Continue\r\n\r\n";
 export const SQLITE_EXPERIMENTAL_WARNING =
   "ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
 
-export function expectRefused(host: string, port: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const socket = connectTcp({ host, port });
-    socket.once("connect", () => {
-      socket.destroy();
-      reject(new Error(`unexpected listener on ${host}:${port}`));
-    });
-    socket.once("error", () => {
-      socket.destroy();
-      resolve();
-    });
+/** 经 `startListenTraced` 起的一次启动：返回的那次尝试与它自己的 trace。 */
+export interface ListenTracedStart {
+  server: StartedServer;
+  port: number;
+  /** 该次尝试 trace 里的监听行（`listening:` / `listener-close:`），按写入次序；没有 trace 文件即没有。 */
+  listenerLines(): string[];
+}
+
+let traceSeq = 0;
+
+/**
+ * 入口拒绝类用例（#1821）的启动：包住 `startCompiledServerWithRetry`，由这里给每次尝试注入新的
+ * `orderTrace`（`traceDir` 下、被测托管目录之外），调用方的 launch 没有这个参数，省不掉。
+ * 「从未监听」以子进程自己的 listen 留痕判定，不再事后 connect 一个早已释放、整机都能占的端口。
+ * 调用方 env 里的 `NODE_OPTIONS` 会盖掉预加载、让「没有监听行」空过，直接抛错。
+ */
+export async function startListenTraced(
+  entry: string,
+  traceDir: string,
+  launchFor: (port: number) => { env: Record<string, string>; requireHook?: string },
+): Promise<ListenTracedStart> {
+  let trace = "";
+  const { server, port } = await startCompiledServerWithRetry(entry, (port) => {
+    const launch = launchFor(port);
+    if ("NODE_OPTIONS" in launch.env) {
+      throw new Error(
+        "SETUP: caller env sets NODE_OPTIONS, which replaces the listen-trace preload",
+      );
+    }
+    traceSeq += 1;
+    trace = join(traceDir, `listen-trace-${traceSeq}.log`);
+    return { ...launch, orderTrace: trace };
   });
+  return { server, port, listenerLines: () => listenerLinesOf(trace) };
+}
+
+/** 失败在 `app.listen` 之前（config / db 等）：trace 里没有任何监听行。 */
+export function expectNeverListened(started: ListenTracedStart): void {
+  expect(started.listenerLines()).toEqual([]);
+}
+
+/** 失败在主端口绑定之后（sandbox_root）：主端口恰一次绑定与关闭，预览从未绑定。 */
+export function expectMainPortListenedOnce(started: ListenTracedStart): void {
+  expect(started.listenerLines()).toEqual([
+    `listening:127.0.0.1:${started.port}`,
+    `listener-close:${started.port}`,
+  ]);
+}
+
+function listenerLinesOf(trace: string): string[] {
+  if (!existsSync(trace)) {
+    return [];
+  }
+  return readFileSync(trace, "utf8")
+    .split("\n")
+    .filter((line) => line.startsWith("listening:") || line.startsWith("listener-close:"));
 }
 
 /** 只去掉已知的 SQLite ExperimentalWarning。 */
