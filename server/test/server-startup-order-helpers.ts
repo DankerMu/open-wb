@@ -1,6 +1,6 @@
 /**
  * server-startup-order / -private-state / -omp-user / -preview 与 listener-shutdown 几个测试文件共用的启动夹具片段；
- * `startListenTraced` 另供各配置测试的入口拒绝用例。
+ * `startListenTraced` 另供各配置测试的入口拒绝用例与 server-startup-failure-reason / -layout 的启动失败用例。
  * 只放跨文件共用的；单文件自用的辅助留在各自文件里。
  */
 
@@ -17,51 +17,100 @@ export const CONTINUE_LINE = "HTTP/1.1 100 Continue\r\n\r\n";
 export const SQLITE_EXPERIMENTAL_WARNING =
   "ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n";
 
-/** 经 `startListenTraced` 起的一次启动：返回的那次尝试与它自己的 trace。 */
-export interface ListenTracedStart {
-  server: StartedServer;
+/** 一次启动的监听留痕：用例分到的主端口，与该次 trace 里的监听行。 */
+export interface ListenerTrace {
   port: number;
-  /** 该次尝试 trace 里的监听行（`listening:` / `listener-close:`），按写入次序；没有 trace 文件即没有。 */
+  /** trace 里的监听行（`listening:` / `listener-close:`），按写入次序；没有 trace 文件即没有。 */
   listenerLines(): string[];
+}
+
+/** 经 `startListenTraced` 起的一次启动：返回的那次尝试与它自己的 trace。 */
+export interface ListenTracedStart extends ListenerTrace {
+  server: StartedServer;
+}
+
+/** `startListenTraced` 的一次尝试：没有 `orderTrace`，由助手注入。 */
+interface ListenLaunch {
+  env: Record<string, string>;
+  requireHook?: string;
+  stdout?: number;
 }
 
 let traceSeq = 0;
 
+/** `traceDir` 下一个从未用过的 trace 文件：`path` 交给 `orderTrace`，监听行事后读。 */
+export function freshListenTrace(traceDir: string): {
+  path: string;
+  listenerLines(): string[];
+} {
+  traceSeq += 1;
+  const path = join(traceDir, `listen-trace-${traceSeq}.log`);
+  return { path, listenerLines: () => listenerLinesOf(path) };
+}
+
 /**
- * 入口拒绝类用例（#1821）的启动：包住 `startCompiledServerWithRetry`，由这里给每次尝试注入新的
- * `orderTrace`（`traceDir` 下、被测托管目录之外），调用方的 launch 没有这个参数，省不掉。
- * 「从未监听」以子进程自己的 listen 留痕判定，不再事后 connect 一个早已释放、整机都能占的端口。
- * 调用方 env 里的 `NODE_OPTIONS` 会盖掉预加载、让「没有监听行」空过，直接抛错。
+ * 入口拒绝类用例（#1821）与启动失败用例（#1825）的启动：包住 `startCompiledServerWithRetry`，由这里给
+ * 每次尝试注入新的 `orderTrace`（`traceDir` 下、被测托管目录之外），调用方的 launch 没有这个参数，省不掉。
+ * 「从未监听」「端口已释放」以子进程自己的 listen / close 留痕判定，不再事后 connect 或 bind 一个早已
+ * 释放、整机都能占的端口。`launchFor` 每次尝试调用一次，可以异步（如每次新取 `PREVIEW_PORT`）；
+ * `stdout` 同 `startCompiledServer`。调用方 env 里的 `NODE_OPTIONS` 会盖掉预加载、让「没有监听行」空过，直接抛错。
  */
 export async function startListenTraced(
   entry: string,
   traceDir: string,
-  launchFor: (port: number) => { env: Record<string, string>; requireHook?: string },
+  launchFor: (port: number) => ListenLaunch | Promise<ListenLaunch>,
 ): Promise<ListenTracedStart> {
-  let trace = "";
-  const { server, port } = await startCompiledServerWithRetry(entry, (port) => {
-    const launch = launchFor(port);
+  let lines = (): string[] => [];
+  const { server, port } = await startCompiledServerWithRetry(entry, async (port) => {
+    const launch = await launchFor(port);
     if ("NODE_OPTIONS" in launch.env) {
       throw new Error(
         "SETUP: caller env sets NODE_OPTIONS, which replaces the listen-trace preload",
       );
     }
-    traceSeq += 1;
-    trace = join(traceDir, `listen-trace-${traceSeq}.log`);
-    return { ...launch, orderTrace: trace };
+    const trace = freshListenTrace(traceDir);
+    lines = trace.listenerLines;
+    return { ...launch, orderTrace: trace.path };
   });
-  return { server, port, listenerLines: () => listenerLinesOf(trace) };
+  return { server, port, listenerLines: () => lines() };
 }
 
 /** 失败在 `app.listen` 之前（config / db 等）：trace 里没有任何监听行。 */
-export function expectNeverListened(started: ListenTracedStart): void {
+export function expectNeverListened(started: ListenerTrace): void {
   expect(started.listenerLines()).toEqual([]);
 }
 
-/** 失败在主端口绑定之后（sandbox_root）：主端口恰一次绑定与关闭，预览从未绑定。 */
-export function expectMainPortListenedOnce(started: ListenTracedStart): void {
+/** 失败在主端口绑定之后、预览 listen 之前（state_layout / sandbox_root）：主端口恰一次绑定与关闭，预览从未绑定。 */
+export function expectMainPortListenedOnce(started: ListenerTrace): void {
   expect(started.listenerLines()).toEqual([
     `listening:127.0.0.1:${started.port}`,
+    `listener-close:${started.port}`,
+  ]);
+}
+
+/** 失败在预览绑定（preview_listen）：主端口绑定，预览从未绑定（`-`）并先关，主端口随后关闭。 */
+export function expectPreviewListenFailed(started: ListenerTrace): void {
+  expect(started.listenerLines()).toEqual([
+    `listening:127.0.0.1:${started.port}`,
+    "listener-close:-",
+    `listener-close:${started.port}`,
+  ]);
+}
+
+/**
+ * 失败在两次 listen 之后：两个端口各恰一次绑定与关闭，预览先关。`previewPort` 缺省（`PREVIEW_PORT`
+ * 为 0，由系统分配）时从第二行取出，只要求是另一个正端口。
+ */
+export function expectBothPortsListenedOnce(started: ListenerTrace, previewPort?: number): void {
+  const lines = started.listenerLines();
+  const preview =
+    previewPort ?? Number(/^listening:127\.0\.0\.1:(\d+)$/u.exec(lines[1] ?? "")?.[1]);
+  expect(preview).toBeGreaterThan(0);
+  expect(preview).not.toBe(started.port);
+  expect(lines).toEqual([
+    `listening:127.0.0.1:${started.port}`,
+    `listening:127.0.0.1:${preview}`,
+    `listener-close:${preview}`,
     `listener-close:${started.port}`,
   ]);
 }

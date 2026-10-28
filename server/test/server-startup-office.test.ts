@@ -24,7 +24,6 @@ import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { rawAnswer } from "./preview-app-helpers.js";
-import { expectBindable } from "./server-startup-helpers.js";
 import { applicationStderr, expectDbReopens } from "./server-startup-order-helpers.js";
 import {
   compileEntry,
@@ -458,7 +457,7 @@ describe("production entry when the sidecar preflight fails", () => {
 
   it("exits 0 within 5 s of a SIGTERM that lands in the preflight wait, with no record on either stream and the port and DB reusable", async () => {
     const { entry } = await spoolEntry({ layout: "none", held: true });
-    const { server, port, previewPort, root } = entry;
+    const { server, root } = entry;
     try {
       await delay(1_000);
       const signalledAt = performance.now();
@@ -467,8 +466,6 @@ describe("production entry when the sidecar preflight fails", () => {
       expect(server.stdout()).toBe("");
       expect(applicationStderr(server.stderr())).toBe("");
       expect(entry.readTrace()).toBe("db-close\n");
-      await expectBindable("127.0.0.1", port);
-      await expectBindable("127.0.0.1", previewPort);
       expectDbReopens(join(root, "db", "dev.db"));
     } finally {
       await server.dispose();

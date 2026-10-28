@@ -26,7 +26,6 @@ import {
   compiledFixtureEnv,
   compileServerEntry,
   createSession,
-  expectBindable,
   gatedModelsWriteHook,
   login,
   prompt,
@@ -312,8 +311,6 @@ describe("production entry lifecycle", () => {
       expect(readFileSync(tracePath, "utf8")).toBe(
         `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
-      await expectBindable("127.0.0.1", port);
-      await expectBindable("127.0.0.1", previewPort);
     } finally {
       await server.dispose();
     }
