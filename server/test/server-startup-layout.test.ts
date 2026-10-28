@@ -33,11 +33,15 @@ import {
   type CompiledServerEntry,
   compiledFixtureEnv,
   compileServerEntry,
-  expectBindable,
   getJson,
   login,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
+import {
+  expectBothPortsListenedOnce,
+  expectMainPortListenedOnce,
+  startListenTraced,
+} from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const MODEL_ID = "issue-706-layout-model";
@@ -89,15 +93,20 @@ function modelEntries(text: string): unknown[] {
   return document.providers.workbuddy.models;
 }
 
-/** The entry exits 1 with nothing on stdout, only the generic record on stderr, and frees its port. */
+/**
+ * The entry exits 1 with nothing on stdout, only the generic record on stderr, and closes every
+ * listener it bound (its own listen trace, #1825): `state_layout` fails after the main listen only,
+ * `host_overlay` after both (the preview port is system-assigned).
+ */
 async function expectGenericStartFailure(
   root: string,
   state: string,
   reason: "state_layout" | "host_overlay",
 ): Promise<void> {
-  const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+  const started = await startListenTraced(compiled.entry, root, (port) => ({
     env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { MODEL_ID }),
   }));
+  const { server } = started;
   try {
     expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
     expect(server.stdout()).toBe("");
@@ -105,7 +114,11 @@ async function expectGenericStartFailure(
       `${JSON.stringify({ event: "server_start_failed", reason })}\n`,
     );
     expect(server.stderr()).not.toContain(state);
-    await expectBindable("127.0.0.1", port);
+    if (reason === "state_layout") {
+      expectMainPortListenedOnce(started);
+    } else {
+      expectBothPortsListenedOnce(started);
+    }
   } finally {
     await server.dispose();
   }

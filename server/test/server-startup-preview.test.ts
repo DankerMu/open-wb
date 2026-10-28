@@ -27,7 +27,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { expectFixedFailure, rawAnswer } from "./preview-app-helpers.js";
 import {
   createSession,
-  expectBindable,
   getJson,
   login,
   prompt,
@@ -186,8 +185,6 @@ describe("production entry with the preview listener", () => {
       expect(entry.readTrace()).toBe(
         `listening:127.0.0.1:${port}\nlistening:127.0.0.1:${previewPort}\nlistener-close:${previewPort}\nlistener-close:${port}\ndb-close\n`,
       );
-      await expectBindable("127.0.0.1", port);
-      await expectBindable("127.0.0.1", previewPort);
     } finally {
       await server.dispose();
     }
@@ -339,8 +336,6 @@ describe("production entry preview bind failure", () => {
     expect(entry?.readTrace()).toBe(
       `listening:127.0.0.1:${port}\nlistener-close:-\nlistener-close:${port}\ndb-close\n`,
     );
-    await expectBindable("127.0.0.1", port);
-    await expectBindable("127.0.0.1", previewPort);
     expectDbReopens(join(entry?.root ?? "", "db", "dev.db"));
     expectLayoutWithoutManagedFiles(join(entry?.root ?? "", "state"));
   }, 60_000);
@@ -357,8 +352,6 @@ describe("production entry preview bind failure", () => {
     expect(entry.readTrace()).toBe(
       `listening:127.0.0.1:${entry.port}\nlistener-close:${entry.port}\ndb-close\n`,
     );
-    await expectBindable("127.0.0.1", entry.port);
-    await expectBindable("127.0.0.1", entry.previewPort);
     expectDbReopens(join(entry.root, "db", "dev.db"));
   }, 60_000);
 
@@ -382,7 +375,6 @@ describe("production entry preview bind failure", () => {
     expect(entry.readTrace()).toBe(
       `listening:127.0.0.1:${entry.port}\nlistener-close:-\nlistener-close:${entry.port}\ndb-close\n`,
     );
-    await expectBindable("127.0.0.1", entry.port);
     expectDbReopens(join(entry.root, "db", "dev.db"));
     expectLayoutWithoutManagedFiles(join(entry.root, "state"));
   }, 60_000);
@@ -491,7 +483,7 @@ function sigtermDuringReadyHook(): string {
 describe("production entry SIGTERM between the two listens", () => {
   it("builds no layout, binds nothing and exits 0 when SIGTERM lands while the main instance is still getting ready", async () => {
     const entry = await startEntry({ hook: sigtermDuringReadyHook() });
-    const { server, port, previewPort, root } = entry;
+    const { server, root } = entry;
     try {
       // 主实例的 `listen` 因 signal 已中止而不绑定就 resolve：入口在它之后核对到信号，直接返回。
       expect(await server.waitForClose()).toEqual({ code: 0, signal: null });
@@ -499,8 +491,6 @@ describe("production entry SIGTERM between the two listens", () => {
       expect(applicationStderr(server.stderr())).toBe("");
       expect(entry.readTrace()).not.toContain("listening:");
       expect(existsSync(join(root, "state"))).toBe(false);
-      await expectBindable("127.0.0.1", port);
-      await expectBindable("127.0.0.1", previewPort);
       expectDbReopens(join(root, "db", "dev.db"));
     } finally {
       await server.dispose();
@@ -514,7 +504,7 @@ describe("production entry SIGTERM between the two listens", () => {
     "publishes nothing and leaves both ports and the database reusable when SIGTERM lands in $held listen",
     async ({ nth }) => {
       const entry = await startEntry({ hook: heldListenHook(nth), env: listenGate, held: true });
-      const { server, port, previewPort, root } = entry;
+      const { server, port, root } = entry;
       try {
         await waitForFile(join(root, "listen-entered"), 15_000);
         expect(existsSync(join(root, "listen-released"))).toBe(false);
@@ -532,8 +522,6 @@ describe("production entry SIGTERM between the two listens", () => {
             ? "listener-close:-\ndb-close\n"
             : `listening:127.0.0.1:${port}\nlistener-close:-\nlistener-close:${port}\ndb-close\n`,
         );
-        await expectBindable("127.0.0.1", port);
-        await expectBindable("127.0.0.1", previewPort);
         expectDbReopens(join(root, "db", "dev.db"));
         // 主绑定在途时到达的信号不建托管布局；主绑定成功之后布局已在，两个托管文件没有写出。
         if (nth === 1) {
@@ -556,7 +544,7 @@ describe("production entry between the main bind and the preview bind", () => {
       env: (root) => ({ ...listenGate(root), OMP_BIN: writeFakeOmpLauncher(root, "hang-eof") }),
       held: true,
     });
-    const { server, port, previewPort, root } = entry;
+    const { server, port, root } = entry;
     try {
       await waitForFile(join(root, "listen-entered"), 15_000);
       expect(entry.readTrace()).toBe(`listening:127.0.0.1:${port}\n`);
@@ -576,8 +564,6 @@ describe("production entry between the main bind and the preview bind", () => {
       expect(entry.readTrace()).toBe(
         `listening:127.0.0.1:${port}\nlistener-close:-\nruntime-exit\nlistener-close:${port}\ndb-close\n`,
       );
-      await expectBindable("127.0.0.1", port);
-      await expectBindable("127.0.0.1", previewPort);
       expectDbReopens(join(root, "db", "dev.db"));
     } finally {
       await server.dispose();

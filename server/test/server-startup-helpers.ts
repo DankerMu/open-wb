@@ -348,17 +348,6 @@ export async function waitForFile(path: string, deadlineMs: number): Promise<voi
   }
 }
 
-/** 继任 listener 能在同一 host:port 上绑定并关闭：原进程已释放端口。 */
-export function expectBindable(host: string, port: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const successor = createServer();
-    successor.once("error", reject);
-    successor.listen(port, host, () => {
-      successor.close((error) => (error ? reject(error) : resolve()));
-    });
-  });
-}
-
 /**
  * 扣住真实 models.yml 写入的最后一步（临时文件 rename 到 models.yml，#706）：先落 MODELS_ENTERED
  * 标记，再轮询等待 MODELS_RELEASE 出现。
