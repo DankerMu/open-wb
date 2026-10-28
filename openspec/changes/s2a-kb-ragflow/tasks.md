@@ -471,11 +471,12 @@ Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第
   - 状态文案七种；
   - `源文件已变更` 只在 `true` 时显示；工作空间来源行都有 `重新入库`；
   - 移出；
-  - 非 `ready` 时入库、上传与重新入库按钮不渲染；`rebuild_failed` 时 `移出` 仍渲染。
+  - 非 `ready` 时 `重新入库` 不渲染；`rebuild_failed` 时 `移出` 仍渲染，`rebuilding` 时不渲染（入库与上传按钮的同一规则由 16.4 断言，它们在剩余部分才建出来）。
 - [ ] 16.3 实现（首刀）：新 `web/src/features/center/kb/{detail.tsx,documents-table.tsx}`。
 - [ ] 16.4 测试先行（剩余部分）：`center-kb-ingest.test.tsx`。
   - 入库对话框：选空间、浏览目录、勾选上限、提交恰一次、被拒条目逐条显示 `message`；
-  - 上传：超数与超大在客户端就地拒绝，逐个请求。
+  - 上传：超数与超大在客户端就地拒绝，逐个请求；
+  - 非 `ready` 时 `从工作空间入库` 与 `上传文件` 不渲染（knowledge-bases「中心「知识库」tab」）。
 - [ ] 16.5 实现（剩余部分）：新 `web/src/features/center/kb/{ingest-dialog.tsx,upload-button.tsx}`。
 - [ ] 16.6 验收清单（各随所在切片的 PR），结论 `待签`：
   - CK-05 从工作空间入库后看到解析中，并自动变为已切片；
