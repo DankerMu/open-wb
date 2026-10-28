@@ -23,7 +23,7 @@ smoke 与 ui-walk SHALL 作为两个独立 Ubuntu job 进入 CI，并纳入 `all
 
 #### Scenario: 控制面一致
 - **WHEN** 比对 AGENTS.md matrix/enforcement/directory、constraints.yaml 十一个 verification.surfaces 与 Makefile 页头/target/PHONY，并分别注入五个 target 的 spaced duplicate
-- **THEN** 四条命令与 evidence/required_at/执行级别一致；AGENTS.md 无 `READINESS GAP` 且无过期 Known blind spot，也无 `make ui-shots` 行；四种 duplicate 均被拒绝；重新加入 `ui-shots` surface、target 或 AGENTS 行的候选被拒绝，原 smoke/ui-walk block、五文件 smoke、CI jobs 与聚合不变
+- **THEN** 五条命令与 evidence/required_at/执行级别一致；AGENTS.md 无 `READINESS GAP` 且无过期 Known blind spot，也无 `make ui-shots` 行；五种 duplicate 均被拒绝；重新加入 `ui-shots` surface、target 或 AGENTS 行的候选被拒绝，原 smoke/ui-walk block、五文件 smoke、CI jobs 与聚合不变
 - **AND** 删除或篡改任一新增镜像、职责或有效 downgrade 会使 oracle 非零；comment、fence 或其他 YAML owner 中的同名文本不能代替 active 条目
 
 #### Scenario: 安装高尾不再抢占全部质量检查预算
@@ -103,7 +103,7 @@ source-derived CI oracle SHALL 从实际传入 workflow 解析全部十一个 di
 
 #### Scenario: Node 20 runtime annotation 完全消失
 - **WHEN** 查询同一 PR head SHA 上十一个 direct jobs 的全部 check-run annotations 与 action step logs
-- **THEN** `Node.js 20 is deprecated` annotation 为零，四种 action均不被列为 Node 20 target，且 workflow/job/step environment 中不存在 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
+- **THEN** `Node.js 20 is deprecated` annotation 为零，三种 action均不被列为 Node 20 target，且 workflow/job/step environment 中不存在 `ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION`
 - **AND** 项目 `.tool-versions` 的 Node 24 与 action自身的 `runs.using: node24` SHALL 作为两个独立证据记录，不得相互替代
 
 #### Scenario: action major、输入与矩阵漂移 fail closed
@@ -111,14 +111,14 @@ source-derived CI oracle SHALL 从实际传入 workflow 解析全部十一个 di
 - **THEN** source-derived oracle 非零，且每个 mutation 确实消费生成的 scratch workflow；baseline 和不使用目标 action 的 unrelated job 控制组仍通过
 
 #### Scenario: 主版本兼容边界保持
-- **WHEN** 比对四个候选 major 的 release notes、`action.yml` inputs/runtime 与本仓实际配置
+- **WHEN** 比对三个候选 major 的 release notes、`action.yml` inputs/runtime 与本仓实际配置
 - **THEN** checkout fetch/full-history、setup-node Node/npm cache 与 gitleaks token/扫描行为均有书面兼容性结论，runner 最低版本由 GitHub-hosted 环境满足
 - **AND** 不升级更高 action major，不改变 action pin 策略、workflow permissions、secret 值、应用工具链版本、产品代码、timeout、步骤或门禁阈值；依赖/lockfile 仅允许用户授权的根 YAML 解析开发依赖 `yaml@^2.9.0` 及必要锁定元数据，不升级其他依赖
 
 ## ADDED Requirements
 
 ### Requirement: 知识库真实端点冒烟
-Makefile SHALL 提供 `make smoke-kb`：对调用方已运行、已配置 `RAGFLOW_BASE_URL` / `RAGFLOW_API_KEY_FILE` 与知识库嵌入模型并接上共用 RAGFlow 栈的服务（`SMOKE_BASE_URL`，登录变量与 `make smoke-live` 相同）运行 `smoke/kb.hurl`。它 SHALL 先从调用方 shell 环境读 `RAGFLOW_BASE_URL`：未设置时在发出任何请求之前以非零退出并输出 `RAGFlow 私有配置缺失`；设置了则请求其 `/api/v1/system/version`，不可达或版本串不是 `v1.0.0-rc2` 时在发出任何知识库请求之前以非零退出并输出 `共用 RAGFlow 栈未运行或版本不符`。它 SHALL NOT 启动、停止或配置任何 RAGFlow 容器，SHALL NOT 执行任何 `docker` 命令。`smoke/kb.hurl` SHALL 覆盖：`GET /api/kb/status` 为 `available:true` 且 `embeddingReady:true`；建一个名为 `smoke-kb` 的 `naive` 知识库；从夹具工作空间 `smoke-kb`（`smoke/fixtures/sandbox/u1/smoke-kb/`，一个 Markdown 文件与一个 PDF 文件）入库两份；轮询文档列表直到两份都为 `done` 且 `chunkCount` 大于 0（总时长上限经变量配置，缺省 300 秒）；本地上传一个文本文件；移出一份文档；删除知识库；最后 `GET /api/kb/bases` 不再含该知识库。运行 hurl 之前与 hurl 失败之后，`make smoke-kb` SHALL 各执行一次 `smoke/kb-cleanup.hurl`（经 app-server 删除名为 `smoke-kb` 的知识库；不存在即什么也不做，其失败不改变退出码），hurl 失败时整体仍以非零退出。`make smoke-kb` SHALL NOT 进入 CI 必需检查，也 SHALL NOT 被 `make smoke` 调用；`AGENTS.md` 验证矩阵与 Enforcement Index（`review-only`）、`constraints.yaml` 的 verification 段（`required_at: manual`）与 Makefile 的 `.PHONY` 同步登记它。
+Makefile SHALL 提供 `make smoke-kb`：对调用方已运行、已配置 `RAGFLOW_BASE_URL` / `RAGFLOW_API_KEY_FILE` 与知识库嵌入模型并接上共用 RAGFlow 栈的服务（`SMOKE_BASE_URL`；登录方式与 `smoke/chat.hurl` 相同）运行 `smoke/kb.hurl`。它 SHALL 先从调用方 shell 环境读 `RAGFLOW_BASE_URL`：未设置时在发出任何请求之前以非零退出并输出 `RAGFlow 私有配置缺失`；设置了则请求其 `/api/v1/system/version`，不可达或版本串不是 `v1.0.0-rc2` 时在发出任何知识库请求之前以非零退出并输出 `共用 RAGFlow 栈未运行或版本不符`。它 SHALL NOT 启动、停止或配置任何 RAGFlow 容器，SHALL NOT 执行任何 `docker` 命令。`smoke/kb.hurl` SHALL 覆盖：`GET /api/kb/status` 为 `available:true` 且 `embeddingReady:true`；建一个名为 `smoke-kb` 的 `naive` 知识库；从夹具工作空间 `smoke-kb`（`smoke/fixtures/sandbox/u1/smoke-kb/`，一个 Markdown 文件与一个 PDF 文件）入库两份；轮询文档列表直到两份都为 `done` 且 `chunkCount` 大于 0（总时长上限经 `SMOKE_KB_POLL_SECONDS` 配置，缺省 300 秒）；本地上传一个文本文件；移出一份文档；删除知识库；最后 `GET /api/kb/bases` 不再含该知识库。运行 hurl 之前与 hurl 失败之后，`make smoke-kb` SHALL 各执行一次 `smoke/kb-cleanup.hurl`（经 app-server 删除名为 `smoke-kb` 的知识库；不存在即什么也不做，其失败不改变退出码），hurl 失败时整体仍以非零退出。`make smoke-kb` SHALL NOT 进入 CI 必需检查，也 SHALL NOT 被 `make smoke` 调用；`AGENTS.md` 验证矩阵与 Enforcement Index（`review-only`）、`constraints.yaml` 的 verification 段（`required_at: manual`）与 Makefile 的 `.PHONY` 同步登记它。
 
 #### Scenario: 对真实 RAGFlow 走通摄取
 - **WHEN** 共用栈运行 `v1.0.0-rc2`，服务已配置专用账号的密钥文件与知识库嵌入模型，执行 `make smoke-kb SMOKE_BASE_URL=<origin>`

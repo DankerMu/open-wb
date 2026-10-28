@@ -45,4 +45,4 @@
 - 测试夹具：`server/test/support/fake-ragflow.mjs`（协议以第一组的实测记录为准）。
 - 退役：`kbservice/`、Makefile / CI / 控制面 oracle / size-guard / jscpd / `.gitignore` / `constraints.yaml` / `AGENTS.md` / `openspec/project-profile.md` 中的 Python 工具链引用。
 - 部署：S4b 单机包改为带 RAGFlow 全栈（Docker、内存门槛与 Apache-2.0 / NOTICE 义务见 ADR-0016）。
-- 外部：开发期依赖 dsh-team 所有的共用 RAGFlow 栈（rc2）；本仓任何脚本都不拉起、不停止它。专用账号、key 文件与本机私有配置由 owner 前置 issue 备好，组 1 与组 18 依赖它。
+- 外部：开发期依赖 dsh-team 所有的共用 RAGFlow 栈（rc2）；本仓任何脚本都不拉起、不停止它。专用账号、key 文件与本机私有配置由 owner 前置 issue 备好，组 1 依赖它；`make smoke-kb` 的真实运行是 owner 执行的验收行。

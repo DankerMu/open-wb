@@ -2,7 +2,7 @@
 
 > 跟踪：Stage 5 在 Epic 下建子 issue，每个任务组（或宽度门禁拆出的切片）一个子 issue、一个 PR。
 >
-> 外部前提 P（owner 持有；Stage 5 建为独立 issue，打 `owner-action` 标签，不进 picker）：
+> 外部前提 P（owner 持有；Stage 5 建为独立 issue，正文写一行 `Depends on #<Epic>`——picker 只跳过 epic 与 `Depends on` 仍开着的 issue、不认标签，这一行让 agent 永远选不中 P；owner 做完后手动关闭）：
 > - dsh-team 的共用栈运行 `v1.0.0-rc2`；
 > - 在其 RAGFlow 界面注册 open-workbuddy 专用账号并生成 API key，key 文件 `0600` 放在仓库之外；
 > - 本机 `CLAUDE.local.md` 新建「RAGFlow 共用栈」一节，记 `RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE` 与实测用嵌入上游的变量名，并在 shell 环境 export。
@@ -10,16 +10,18 @@
 > 依赖（真实依赖）：
 > - 无前置：组 2、3、4、7。
 > - 组 1 ← P。组 5 ← 1（夹具协议以实测记录为准）。组 6 ← 4、5、7。组 8 ← 6、7。组 9 ← 1、8。
-> - 组 10 ← 9。组 11 ← 10（复用 `kb/source-file.ts` 与 `kb/documents.ts`）。组 12 ← 10（复用 `kb/multipart.ts`）。组 13 ← 10。组 14 ← 8、10、12。
-> - 组 15 ← 9。组 16 首刀 ← 11、13、15；剩余 ← 10、12、16 首刀。组 17 ← 8、14、15。
-> - 组 18 ← P、3 及 5–17 全部。
+> - 组 10 ← 9。组 11 ← 10（复用 `kb/source-file.ts` 与 `kb/documents.ts`）。组 12 ← 10（复用 `kb/multipart.ts`）。组 13 ← 10。组 14 ← 8、10、12、13（14.2 的「锁被重建器持有时立即 409」要用到组 13 剩余部分注册的重新入库路由）。
+> - 组 15 首刀（`api-kb.ts`）无服务端依赖，只按 spec 写明的应答形状；组 15 剩余 ← 9、15 首刀。组 16 首刀 ← 11、13、15；剩余 ← 10、12、16 首刀。组 17 ← 8、14、15 首刀。
+> - 组 18 ← 3 及 5–17 全部（不依赖 P：真实 RAGFlow 运行是 owner 执行的验收行 CK-11）。
+>
+> Epic 正文另列 design「Grill 结论」里标「待 owner 复核」的三处细化（第 4、13、27 行），等 owner 确认。
 >
 > 通用纪律：
 > - 测试先行；每组第一个任务核对 design「Context」的行号与事实（主干在本 change 开工后可能已移动）。
 > - 密钥、文件内容与 RAGFlow 应答原文不进任何响应、审计、日志；被跟踪文件、issue 与 PR 正文里 RAGFlow 地址一律写 `<RAGFLOW_BASE_URL>`。
 > - 产品与测试文件单文件均 ≤800 行（`size-guard.sh` 两者都扫）。`server.ts` 的行数预算见 design D18：组 4 先移出一段既有函数，组 4、6、14 再各加自己的几行。
 > - 不新增 `.css`。
-> - 需要真实 RAGFlow 的只有组 1 与组 18，执行前按 design D16 检测；`RAGFlow 私有配置缺失` 与 `共用 RAGFlow 栈未运行或版本不符` 两种停止都在 issue 评论里报告、打 `blocked` 标签、不开 PR，不拉起任何容器。
+> - 需要真实 RAGFlow 的只有组 1，执行前按 design D16 检测；`RAGFlow 私有配置缺失` 与 `共用 RAGFlow 栈未运行或版本不符` 两种停止都在 issue 评论里报告、不开 PR、不拉起任何容器，并在本 issue 正文加一行 `Depends on #<P>`、重开 P（写明要 owner 做什么），让 picker 跳过本 issue。
 > - 假 RAGFlow 夹具按组扩展（design D17）：每组只加本组用到、且实测记录里有的接口。
 > - 每个注册新知识库路由的组，在同一 PR 里：
 >   - 把这些路由加进 `server/test/kb-disabled.test.ts` 的路由表（组 8 新建；ragflow-backend「未配置即关闭」）；
@@ -46,7 +48,7 @@
   - 从 shell 环境读 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE`。未设置或 key 文件不存在 → 报告 `RAGFlow 私有配置缺失`。
   - `curl "$RAGFLOW_BASE_URL/api/v1/system/version"` 不可达或不是 `v1.0.0-rc2` → 报告 `共用 RAGFlow 栈未运行或版本不符`。
   - 另执行一次只读的 `docker compose ls`，结果写进 issue 评论（只作观察，不作放行判据）。
-  - 任一停止：issue 评论报告、打 `blocked`、本组不继续、不开 PR。全程不执行任何 `docker` 写操作。
+  - 任一停止：issue 评论报告原因、本组不继续、不开 PR；在本 issue 正文加一行 `Depends on #<P>` 并重开 P（评论写明要 owner 做什么）。全程不执行任何 `docker` 写操作。
 - [ ] 1.2 用专用账号的 API key，按 spec 列出的十项逐项实测，写 `docs/reviews/2026-10-28-ragflow-rc2-api.md`。每节写请求与应答摘录和结论「支持 / 不支持」。另记三张表：运行状态到本系统 `status` 的映射表、「不存在」组合表、RAPTOR / 知识图谱的模板支持表。
 - [ ] 1.3 脱敏：地址写 `<RAGFLOW_BASE_URL>`；id、邮箱、昵称、账号名换占位符；不出现 key、key 路径与文件内容。对文档跑 `gitleaks detect --no-git --source docs/reviews/2026-10-28-ragflow-rc2-api.md`，并 grep 本机实际地址与账号名，两者零命中的输出附 PR 说明（输出本身也脱敏）。只删除本组建的 `owb-` 前缀数据集，在记录末尾写清理结果。
 - [ ] 1.4 结论的后果写进记录末尾，并在 Epic 下评论：
@@ -81,8 +83,10 @@ Minimal mergeable slice: atomic - 一份记录、一次对同一实例的实测�
   另做：ADR-0002 头部加「已被 ADR-0016 取代」；ADR-0005 补充一段（Infinity 经 RAGFlow 的 `DOC_ENGINE`，ES 退路仍在 RAGFlow 侧）。
 - [ ] 2.3 `docs/architecture/system.md` 改写：
   - §1 组件说明与 §3.2 整节：把 kb-service 改为「外部 RAGFlow 服务 + app-server `kb` 模块」；
-  - §4 规则 4、5：kb-service 相关规则改为 `kb` 模块的依赖规则，具体规则由组 10 落；
-  - §5 目录树：删 `kbservice/src/kbservice/`，加 `server/src/kb/`；
+  - §3.1 的 `kb` 行：「先过滤 kb_ids 再调 kb-service」改为调 RAGFlow（组 6 只补端点细节）；
+  - §4 规则 4、5：kb-service 相关规则改为 `kb` 模块的依赖规则，具体规则由组 8、10 落；
+  - §5 目录树：删 `kbservice/src/kbservice/`；既有 `server/src/kb/` 一行的注释「kb-service 客户端」改为「RAGFlow 客户端与知识库端点」；
+  - §6.2 摄取一行：「→ kb-service ingest」改为「app-server `kb` → RAGFlow」；
   - §6.1 时序图：参与者 kb-service 改为 RAGFlow；
   - §7 决策索引：加 0016。
 - [ ] 2.4 `ATTRIBUTION.md` 的 RAGFlow 条目改为「以服务形态部署，不吸收源码」；义务写为：发行物含 RAGFlow 镜像时附其 LICENSE 与 NOTICE。
@@ -91,7 +95,7 @@ Minimal mergeable slice: atomic - 一份记录、一次对同一实例的实测�
   - 限界上下文「知识库」改为「app-server `kb` 模块 + RAGFlow」；
   - `:38`「kb-service 嵌入调用不经它」改为 RAGFlow 的说法；
   - 不变量 4 改为「RAGFlow API 密钥与模型网关密钥不得出现在 omp 子进程可读环境」。
-- [ ] 2.6 `PLAN.md` 的知识库三处改写，并互加对 ADR-0016 的引用。`IMPLEMENTATION_PLAN.md`：
+- [ ] 2.6 `PLAN.md` 的知识库四处（`:21,32,47,94`）改写，并互加对 ADR-0016 的引用。`IMPLEMENTATION_PLAN.md`：
   - S2a 一节改写为本 change（覆盖 F-CTR-KB1 / KB2 不变）；
   - S2b / S2c 的 kbservice 措辞改为 app-server `kb` 模块；
   - S4a 的回归对象去掉 kbservice；S4b 部署要求加 RAGFlow 全栈；
@@ -142,7 +146,7 @@ Minimal mergeable slice: atomic - 删目录与删 CI 步骤必须同 PR：只删
   - `startup-registry.ts` 的阶段函数写法；`regular-file.ts:55` 的 `openRegularFile`；
   - `OMP_CHILD_ENV_NAMES`（`spawn-env.ts`）；
   - `server.ts:756-799` 的 DB 文件准备函数。
-- [ ] 4.2 先做无行为变化的移动：把 `preparePrivateDbFiles`、`preparePrivateDbMain`、`prepareExistingSidecar`、`chmodExistingPrivateFile`（`server.ts:756-799`）移进 `startup-registry.ts` 并从那里导出，`server.ts` 改为导入。既有测试不改即全绿；PR 说明附移动前后 `wc -l`。
+- [ ] 4.2 先做无行为变化的移动：把 `preparePrivateDbFiles`、`preparePrivateDbMain`、`prepareExistingSidecar`、`chmodExistingPrivateFile`（`server.ts:756-799`）移进 `startup-registry.ts` 并从那里导出，`server.ts` 改为导入。同一刀把 `server-assembly.test.ts`（798 行）的启动记录与注册次序用例原样移到新 `server/test/server-assembly-modules.test.ts`。两处都是纯移动：既有测试不改断言即全绿；PR 说明附移动前后的 `wc -l`。`server-config.test.ts` 正好 800 行，本 change 不往里加用例。
 - [ ] 4.3 测试先行。
   - 新 `server/test/kb-config.test.ts`：四键的缺省、配对规则、正则、正整数纪律；message 只含键名。
   - 新 `server/test/kb-key-file.test.ts`（单元层）：普通文件、符号链接、`0644`、`0640`、空文件、4097 字节、恰为 `\n\n`、去掉结尾 `\n`、含 `\r`；ragflow-backend「属主不符」（注入的 `getuid` 缝）。
@@ -161,7 +165,7 @@ Minimal mergeable slice: atomic - 删目录与删 CI 步骤必须同 PR：只删
 - [ ] 4.5 `docs/architecture/system.md` §9.13「知识库」新建，本组写配置键、密钥文件要求与 `kb_key` 阶段；§9.3 启动次序文字加 `kb_key`。
 
 Suggested fixture level: expanded - 新配置键与凭证读取（credentials + production configuration）、新启动阶段。
-Minimal mergeable slice: 4.2 的函数移动——纯重构，不改行为，既有测试即验证。剩余部分（配置解析与 `kb_key` 阶段）依赖它；剩余部分本身 atomic：配置解析与 `kb_key` 阶段是同一对键的两半，只有解析没有阶段则密钥文件从不被校验，只有阶段没有解析则无从得到路径。
+Minimal mergeable slice: 4.2 的函数与用例移动——纯重构，不改行为，既有测试即验证。剩余部分（配置解析与 `kb_key` 阶段）依赖它；剩余部分本身 atomic：配置解析与 `kb_key` 阶段是同一对键的两半，只有解析没有阶段则密钥文件从不被校验，只有阶段没有解析则无从得到路径。
 
 ## 5. 假 RAGFlow 夹具与 RAGFlow 客户端（ragflow-backend「RAGFlow 出站请求」）
 
@@ -201,8 +205,7 @@ Minimal mergeable slice: atomic - 夹具没有客户端就没有消费者，客�
   - 同 PR 把 `http-typed-errors.test.ts`、`auth-lifecycle.test.ts` 的「二十五码」改为三十四。
 - [ ] 6.3 实现（首刀）：`core/errors` 加九码；`http/errors.ts` 的状态映射、归属集与计数措辞。
 - [ ] 6.4 测试先行（剩余部分）：
-  - 先把 `server-assembly.test.ts` 的启动记录与注册次序用例拆到新 `server/test/server-assembly-modules.test.ts`（纯移动，两个文件都 ≤800 行）；
-  - 再把七处模块列表断言改为十二项、最后为 `kb`，在 `spyRegistrationOrder` 加 `registerKb`；
+  - 把七处模块列表断言（含组 4 移到 `server-assembly-modules.test.ts` 的那几处）改为十二项、最后为 `kb`，在 `spyRegistrationOrder` 加 `registerKb`；
   - `server-startup-kb.test.ts` 加「知识库键与密钥文件阶段」的最后一例（模块恰为十二项且最后是 `kb`）。
   
   新 `server/test/kb-status.test.ts`（`app.inject()` + 假 RAGFlow）：
@@ -213,10 +216,10 @@ Minimal mergeable slice: atomic - 夹具没有客户端就没有消费者，客�
   - 新 `server/src/kb/index.ts` 与 `kb/rest.ts`：本组只有 `GET /api/kb/status`，以及 `/api/kb/*` 的关闭判定——preParsing 在 cookie guard 之后、管理员判定与 body 解析之前返回 503 `kb_disabled`；关闭判定由后续各组的路由用例验证。
   - `app.ts` 在 `registerConnectors` 之后注册 `kb`；`STARTUP_MODULES` 加 `kb`（`server.ts` +1 行）。
   - 组 4 的密钥句柄交给 `kb` 模块，删掉 knip 豁免注释。
-- [ ] 6.6 `system.md` §3.1 的 `kb` 行与 `core/errors` 行（三十四码）；§9.13 加状态端点、版本钉住与两条 stderr 记录。
+- [ ] 6.6 `system.md` §3.1 的 `kb` 行补状态端点，`core/errors` 行改为三十四码；§9.13 加状态端点、版本钉住与两条 stderr 记录。
 
 Suggested fixture level: expanded - 改共享错误信封与装配（Fastify assembly/routes/hooks 触发项）。
-Minimal mergeable slice: 6.2–6.3 的九码与七条归属身份登记——码表与归属集是纯数据，先合不改变任何已注册路由的行为，带「九个知识库码」与三十八条计数用例。剩余部分（测试拆分、`kb` 模块装配、关闭判定与状态端点）依赖它；剩余部分 atomic：模块一注册就必须进启动记录，启动记录与注册次序断言要同 PR 改。
+Minimal mergeable slice: 6.2–6.3 的九码与七条归属身份登记——码表与归属集是纯数据，先合不改变任何已注册路由的行为，带「九个知识库码」与三十八条计数用例。剩余部分（`kb` 模块装配、关闭判定与状态端点）依赖它；剩余部分 atomic：模块一注册就必须进启动记录，启动记录与注册次序断言要同 PR 改。
 
 ## 7. 迁移 050、store 与锁（knowledge-bases「迁移 050 知识库 schema」「同一知识库的写操作串行」的锁本身）
 
@@ -241,8 +244,7 @@ Minimal mergeable slice: 6.2–6.3 的九码与七条归属身份登记——码
 - [ ] 7.3 实现：`050_knowledge_bases.sql`；新 `server/src/kb/store.ts`（只读写本地三张表，不发出站请求）；新 `server/src/kb/locks.ts`（design D20）。
 
 Suggested fixture level: expanded - 新迁移与凭证落库（persisted schema + credentials at rest），以及全部写路径共用的并发原语。
-Minimal mergeable slice: atomic - 迁移没有 store 就没有读者，store 是三张表唯一的写入口；锁只有几十行，与 store 同为后续各组的地基，单独成 PR 没有消费者也无从集成验证。
-Width exception: merged-tasks - 锁与 store 是两个文件，但都是纯本地原语、都由后续同一批组消费；拆成两个 PR 各自都只有单元用例，没有独立交付价值。
+Minimal mergeable slice: 迁移 050 与 store（7.2 的 `kb-store.test.ts` 与 7.3 的迁移、`store.ts`）——迁移没有 store 就没有读者，store 是三张表唯一的写入口。剩余部分（`kb-locks.test.ts` 与 `locks.ts`）与首刀没有依赖，可并行；它本身 atomic，一个文件一组单元用例。组 6 只依赖首刀，组 8 依赖两刀。
 
 ## 8. 知识库模型设置、下发与 models 联动（ragflow-backend「知识库模型设置」；model-registry「模型管理端点」）
 
@@ -262,7 +264,7 @@ Width exception: merged-tasks - 锁与 store 是两个文件，但都是纯本�
   本组三条路由加进新建的 `server/test/kb-disabled.test.ts`；`PUT /api/kb/settings` 与 `POST /api/kb/settings/probe` 加进归属路由用例。假 RAGFlow 加模型提供方与账号缺省模型接口。
 - [ ] 8.3 实现（首刀）：新 `server/src/kb/settings.ts`（读视图、校验、下发与撤销、身份判定，全部写入经设置锁）；`kb/rest.ts` 加 `GET` / `PUT /api/kb/settings` 与 `POST /api/kb/settings/probe`。
 - [ ] 8.4 测试先行（剩余部分）：
-  - ragflow-backend「对话模型联动」；model-registry「知识库对话模型受保护」，写进新 `server/test/kb-models-guard.test.ts`；
+  - ragflow-backend「对话模型联动」「联动与设置交错」（夹具的挂起后放行）；model-registry「知识库对话模型受保护」，写进新 `server/test/kb-models-guard.test.ts`；
   - 知识库关闭时 `models` 的删除与修改行为与本 change 之前一致（既有 `models-*.test.ts` 不改即绿）。
 - [ ] 8.5 实现（剩余部分）：
   - `AssemblyDependencies` 加可选 `modelWriteGuard`；`models/rest.ts` 的 `DELETE` 与 `PUT` 在写入前调用它；
@@ -276,7 +278,7 @@ Minimal mergeable slice: 8.2–8.3 的设置读写、下发与探活——三条
 ## 9. 建库与删库（knowledge-bases「知识库端点」；ragflow-backend「RAGFlow 出站请求」的端点级场景、「知识库可用性」的「不可达不阻断」）
 
 - [ ] 9.1 核对 Context：
-  - 组 1 实测记录的建库、编译与模板支持表三节（与 design D9 不符见 1.4）；
+  - 组 1 实测记录的建库、编译与模板支持表三节：「编译开启或触发」不支持时本组不开工（1.4、design D14）；模板表与 design D9 不符同样先修订 change；
   - 组 8 的设置读取（嵌入就绪、对话模型就绪）与设置锁；
   - demo 的 `kbMethods`（`resource/workbuddy-live-demo.html:1473-1486`）。
 - [ ] 9.2 测试先行：新 `server/test/kb-bases.test.ts`。
@@ -305,13 +307,14 @@ Minimal mergeable slice: atomic - 建库、列表与删库共用所有权判定�
 - [ ] 10.2 测试先行：新 `server/test/kb-ingest-workspace.test.ts`。
   - knowledge-bases：「混合批次」「挂载离线」（S1b 的测试缝）「中途不可达」「逐条被拒」「读取期间文件变化」（测试缝在 `fstat` 之后追加字节）「文档数上限」「别人的工作空间」；
   - 「同一路径并发入库」「入库中删库」（夹具的挂起后放行）；
+  - 「解析触发失败」；补偿删除失败时恰一行 `kb_document_leak`、该条结果不变；
   - `paths` 为空或超过上限 400；知识库非 `ready` 时 409；
   - 上传字节与源文件一致，multipart 的 `Content-Length` 等于实际字节；
   - 每份文档一条 `kb.ingest`、每个被拒条目一条 `kb.ingest_reject`，detail 键集同审计表；注入插行失败时没有 `kb.ingest` 且假 RAGFlow 收到删除；
   - 审计哨兵（knowledge-bases「detail 不含敏感内容」的工作空间入库一腿）；
   - 实测要求显式触发编译时：开了开关的库每份文档后有一次编译触发，两开关为 0 的库没有。
   
-  新 `server/test/kb-multipart.test.ts`：长度计算、流拼接与字节计数中止，含非 ASCII 文件名。路由加进 `kb-disabled.test.ts` 与归属路由用例。
+  新 `server/test/kb-multipart.test.ts`：长度计算、流拼接与字节计数中止，含非 ASCII 文件名。假 RAGFlow 加编译触发接口（实测要求显式触发时）。路由加进 `kb-disabled.test.ts` 与归属路由用例。
 - [ ] 10.3 实现：
   - 新 `server/src/kb/source-file.ts`：按 design D10 的第 1、3 步打开文件，返回 fd、`size` 与 `mtimeMs`；另给组 11 一个只 stat 的无审计变体。
   - 新 `kb/multipart.ts`。
@@ -330,7 +333,7 @@ Minimal mergeable slice: atomic - multipart 与 `source-file.ts` 只有入库一
   - `core/sandbox` 的纯函数 `resolve` 与 facade 的 `rootOf`。
 - [ ] 11.2 测试先行：新 `server/test/kb-documents-list.test.ts`。
   - 文档行由 store 直接插入；
-  - 「状态映射」「源文件变更」「源路径变成符号链接」；
+  - 「状态映射」「源文件变更」「挂载来源的变更」（用 S1b 的挂载测试缝断言没有对挂载路径的同步调用）「源路径变成符号链接」；
   - 数据集 not-found 时全部 `missing`；
   - 挂载离线、工作空间已删除时 `sourceChanged: null`；
   - 超过一页时分页读全；RAGFlow 不可达 503；
@@ -401,10 +404,12 @@ Minimal mergeable slice: 13.2–13.3 的移出——一条不读沙箱的独立�
   - 「未确认不保存」「确认后重建」「原件缺失与分块下载」「中途失败与重试」；
   - knowledge-bases「上传与确认重建交错」；
   - 旧数据集删除失败只写 `kb_dataset_leak`；
+  - ragflow-backend「不存在视为已删」的重建一腿：第 1 步删残留数据集得到「不存在」组合时照常继续；`rebuild_failed` 删库时两份数据集之一为「不存在」仍 204；
+  - 重建器取锁后发现库已删除即跳过，不建数据集；
   - 重建中再改嵌入身份 409 `kb_rebuilding`；只改密钥不触发；
   - 锁被重建器持有时，入库、上传与重新入库立即 409；
   - `POST /api/kb/settings/rebuild` 的 403 / 401、bodyless 带 `{}` 400、无失败库时 200 且不写审计；
-  - 审计的 detail 键集，以及 actor 等于 `rebuild_actor_id`；
+  - 审计的 detail 键集；确认重建那次保存恰写 `kb.settings` 与 `kb.rebuild` 两条；actor 等于 `rebuild_actor_id`；
   - 实测要求显式触发编译时，第 4 步的触发分支。
   
   编译入口用例：新 `server/test/kb-rebuild-restart.test.ts`。
@@ -448,7 +453,7 @@ Minimal mergeable slice: atomic - 确认开关一旦开放就必须有重建器�
   - CK-04 删库。
 
 Suggested fixture level: expanded - 新 tab 与可见性规则（presentation + route guard）；按前端通用契约须有真实浏览器走查，组 18 补 ui-walk 分支。
-Minimal mergeable slice: atomic - tab 一出现就必须有列表与建库：只有状态行的面板是无功能的占位 tab；单独的 `api-kb.ts` 没有调用方，knip 会拒收。
+Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第三项与 15.3 的第一项）——客户端与严格解析按 spec 写明的应答形状独立可测，组 17 只依赖它；被测试 entry 导入，knip 不报无用。剩余部分（tab 可见性、列表、建库、删库与 CK-01–04）依赖它；剩余部分 atomic：tab 一出现就必须有列表与建库，只有状态行的面板是无功能的占位 tab。
 
 ## 16. web：知识库详情（knowledge-bases「中心「知识库」tab」的详情、入库、上传、移出、重新入库与刷新）
 
@@ -509,13 +514,13 @@ Minimal mergeable slice: atomic - 一段表单与它的确认框，一个组件�
 - [ ] 18.3 实现（首刀）：
   - 新 `smoke/kb.hurl` 与 `smoke/kb-cleanup.hurl`；
   - 新夹具工作空间 `smoke/fixtures/sandbox/u1/smoke-kb/`（一个小 Markdown 文件与一个小 PDF 文件，自制，无第三方版权），同步 `smoke/fixtures/README.md`；
-  - Makefile 加 `smoke-kb`：两步前置检测；hurl 前后的清理；
+  - Makefile 加 `smoke-kb`：两步前置检测；hurl 前后的清理；轮询上限变量 `SMOKE_KB_POLL_SECONDS`（缺省 300）；登录方式同 `smoke/chat.hurl`；
   - `AGENTS.md`、`constraints.yaml`、`.PHONY` 同步登记。
 - [ ] 18.4 剩余部分：
   - `make ui-walk` 的 `/center` 分支：知识库关闭（CI 的缺省配置）时 tab 条不含 `知识库`；
-  - `docs/architecture/system.md` §9.13 收口（部署要求、回滚、`smoke-kb`）；§6.2 摄取流改为「app-server `kb` → RAGFlow」；
+  - `docs/architecture/system.md` §9.13 收口（部署要求、回滚、`smoke-kb`）；§6.2 摄取流按最终实现补细节（逐条解析、拒绝原因）；
   - 验收清单 CK 节复核，并新增两行（结论 `待签`，由 owner 执行）：
-    - CK-11 对接上共用栈的本机服务跑 `make smoke-kb` 通过，输出脱敏后附在签字记录；再以 1 秒的轮询上限跑一次，确认非零退出且 `smoke-kb` 知识库已被清理（verification-harness「失败后清理」）；
+    - CK-11 对接上共用栈的本机服务跑 `make smoke-kb` 通过，输出脱敏后附在签字记录；再以 `SMOKE_KB_POLL_SECONDS=1` 跑一次，确认非零退出且 `smoke-kb` 知识库已被清理（verification-harness「失败后清理」）；
     - CK-12 知识库开启时的中心「知识库」tab 手动走查。
 
 Suggested fixture level: expanded - 真实外部服务冒烟与 harness 接线（smoke/UI harness + CI/production configuration）。

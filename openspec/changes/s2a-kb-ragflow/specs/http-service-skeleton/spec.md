@@ -259,7 +259,7 @@ createApp SHALL create exactly one workspace store with its caller-owned DB, run
 - **WHEN** either upstream setting is absent
 - **THEN** startup and authenticated session CRUD remain available; invalid bearer receives401 before parser/config work, a registered live bearer receives502 and the secret value is absent from startup/failure output
 #### Scenario: Pure source and compiled configuration identity
-- **WHEN** the existing pure resolver receives defaults/overrides for all thirty-five application keys at source and compiled entry URLs from unrelated cwd
+- **WHEN** the existing pure resolver receives defaults/overrides for all forty-six application keys at source and compiled entry URLs from unrelated cwd
 - **THEN** each existing default and override (including optional ompUser, the process cap defaulting to 16, the spawn concurrency defaulting to `os.availableParallelism()` and the four snapshot settings defaulting to `20971520`, `524288000`, `50000` and `node_modules,.venv,__pycache__`, and the twelve preview and file keys defaulting as 服务启动与装配 lists) is observed unchanged, path identity remains rooted at the entry's repository and unknown environment keys are ignored without filesystem/listen/signal side effects
 
 #### Scenario: 同一真实装配贯穿租户与审计

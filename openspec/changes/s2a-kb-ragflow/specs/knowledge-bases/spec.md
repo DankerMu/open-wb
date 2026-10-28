@@ -43,7 +43,7 @@
 - 工作空间入库（整批）、本地上传、重新入库、移出文档、删库，各在整个操作期间持有该库的锁。
 - 重建器在重建该库期间持有它的锁。
 
-写操作 SHALL 在取得锁之后重新判定该库是否存在、`state` 是否允许本操作。锁正被重建器持有时，写操作不等待，立即 409 `kb_rebuilding`。
+写操作 SHALL 在取得锁之后重新判定：该库是否存在、`state` 是否允许本操作、本操作涉及的文档数上限。锁正被重建器持有时，写操作不等待，立即 409 `kb_rebuilding`。
 
 结果：
 - 同一知识库上不存在并发的上传与切换。
@@ -133,6 +133,7 @@
 **RAGFlow 失败**：
 - 上传或解析触发得到 `kb_rejected`：删除已建的文档，该条记为 `rejected`，继续处理下一条。
 - 得到 `kb_unavailable`：删除已建的文档（尽力而为）；该条与其后全部条目都记为 `unavailable`，后续条目不再发请求。
+- 任何补偿删除失败只写一行 `{"event":"kb_document_leak","documentId":<id>}`，不改变该条的结果。本地上传与重新入库的补偿删除同此。
 
 **应答**：只要请求本身合法，即为 201 `{documents: DocumentView[], rejected: {path, reason, message}[]}`。`message` 按 `reason` 固定：
 
@@ -162,6 +163,10 @@
 - **WHEN** 一批三个路径，假 RAGFlow 对第二份的上传应答 HTTP 503
 - **THEN** 201；`documents` 只有第一份；第二、三份的 `reason` 都是 `unavailable`；假 RAGFlow 恰收到两次上传，没有第三次
 
+#### Scenario: 解析触发失败
+- **WHEN** 一批两个路径，第一份上传成功，假 RAGFlow 对它的解析触发依次在两次请求里应答：HTTP 503（第一次请求）；`code:101`（另一次请求）
+- **THEN** 第一次请求：第一份为 `unavailable`，假 RAGFlow 收到删除该文档的请求，没有该行，第二份不发请求；另一次请求：第一份为 `rejected` 且该文档被删除，第二份照常入库
+
 #### Scenario: 逐条被拒
 - **WHEN** 一批两个路径，假 RAGFlow 对第一份的上传应答 `code:101`
 - **THEN** 第一份以 `reason: rejected` 被拒，第二份成功入库
@@ -186,14 +191,14 @@
 - SHALL 带 `Content-Length`；缺失或分块传输：400 `bad_request`。
 - `Content-Length` 超过 `KB_UPLOAD_MAX_BYTES`：413 `upload_too_large`，并审计 `kb.ingest_reject`（`reason: too_large`），不发出站请求。
 - 知识库 `state` 不是 `ready`：409 `kb_rebuilding`。
-- 该库已有 500 份文档：409 `kb_limit`，并审计 `kb.ingest_reject`（`reason: limit`）。
 
 **处理**：在该库的写锁下进行。
-1. 请求体直接拼进出站 multipart 上传；app-server 不落盘，不保留副本。
-2. 客户端中途断开，或发送的字节少于 `Content-Length`：中止出站请求，删除 RAGFlow 上已建的文档；不插行，不写 `kb.ingest`。
-3. 上传成功后，触发该文档的解析；实测记录要求显式触发编译、且该库开了 RAPTOR 或知识图谱时，再触发一次编译。
-4. 解析触发失败：删除该文档，按「RAGFlow 出站请求」映射返回。
-5. 都成功后，在同一事务里插行并审计 `kb.ingest`。
+1. 取锁后计数：该库已有 500 份文档时 409 `kb_limit`，并审计 `kb.ingest_reject`（`reason: limit`），不发出站请求。
+2. 请求体直接拼进出站 multipart 上传；app-server 不落盘，不保留副本。
+3. 客户端中途断开，或发送的字节少于 `Content-Length`：中止出站请求，删除 RAGFlow 上已建的文档；不插行，不写 `kb.ingest`。
+4. 上传成功后，触发该文档的解析；实测记录要求显式触发编译、且该库开了 RAPTOR 或知识图谱时，再触发一次编译。
+5. 解析触发失败：删除该文档，按「RAGFlow 出站请求」映射返回。
+6. 都成功后，在同一事务里插行并审计 `kb.ingest`。
 
 **成功应答**：201 `DocumentView`，其中 `source` 为 `upload`，`workspaceId` 与 `path` 为 `null`。
 
@@ -227,7 +232,7 @@
 - `message`：只在 `failed` 时为 `解析失败`，否则为 `null`。
 - `sourceChanged`：
   - 只对工作空间来源计算，其它来源为 `null`。
-  - 计算方式：经 core 的无审计解析（工作空间根加纯函数 `resolve`），再 stat 源路径；挂载内经挂载 stat。
+  - 计算方式：经 core 的无审计解析（工作空间根加纯函数 `resolve`，第四个参数传该工作空间的挂载名集合，与 facade 注入的 `mountNamesOf` 同一来源，使挂载点及其下路径不被同步 `lstat`，遵守 workspace-mounts 对挂载路径的既有约束），再 stat 源路径；挂载内经挂载 stat。
   - 大小或修改时间与入库记录不同，或文件已不存在：`true`；相同：`false`。
   - 解析被拒、工作空间已不可见、挂载离线：`null`。
 
@@ -240,6 +245,10 @@
 #### Scenario: 源文件变更
 - **WHEN** 入库后改写工作空间里一份源文件；另一份的源文件被删除；第三份未动
 - **THEN** 三条 `sourceChanged` 依次为 `true`、`true`、`false`；这次读取不产生审计记录
+
+#### Scenario: 挂载来源的变更
+- **WHEN** 一份文档来自在线挂载内的文件，入库后远端改写了它
+- **THEN** 该条 `sourceChanged` 为 `true`；计算过程中服务进程没有对挂载点或其下路径做同步文件系统调用
 
 #### Scenario: 源路径变成符号链接
 - **WHEN** 入库后把源文件所在目录换成指向它的符号链接，然后连续两次请求列表
@@ -299,7 +308,7 @@
 规则：
 - actor 为请求的 principal；重建器写的单库记录，actor 为 `kb_settings.rebuild_actor_id`。
 - 工作空间来源的记录，`workspaceId` 列为该工作空间；其余为 null。
-- 每条成功审计与它对应的那一次本地写入在同一事务内：一次写入一条审计。本地写入失败时不留审计。
+- 每条成功审计与它对应的那一次本地写入在同一事务内；本地写入失败时不留审计。确认重建的那次保存写 `kb.settings` 与 `kb.rebuild` 两条，其余每次写入一条。
 - `kb.ingest_reject` 没有对应的本地写入，单独写入。
 
 #### Scenario: detail 不含敏感内容

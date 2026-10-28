@@ -150,7 +150,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - 嵌入模型未配置时：409 `kb_not_ready`。
 - 探活不下发，也不改嵌入身份。
 
-**写操作串行**：设置写入、探活写回、重建发起、建库与上面的联动下发 SHALL 由同一把进程级设置锁串行执行，保证本地设置与 RAGFlow 侧下发结果一致。
+**写操作串行**：设置写入、探活写回、重建发起、建库，以及上面的联动（引用判定、重新下发与 `models` 的那次写入，删除时的引用判定同样在内）SHALL 由同一把进程级设置锁串行执行，保证本地设置、`models` 行与 RAGFlow 侧下发结果一致。
 
 #### Scenario: 下发失败不改设置
 - **WHEN** 管理员首次 `PUT` 嵌入模型，假 RAGFlow 对模型下发应答 HTTP 500；随后假 RAGFlow 恢复，管理员再 `PUT` 同一 body
@@ -164,6 +164,10 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - **WHEN** 知识库对话模型为 `m2`；管理员依次执行：`DELETE /api/models?id=m2`；`PUT` `m2` 并把 `upstream` 置为 `null`；假 RAGFlow 对下发应答 HTTP 500 时 `PUT` `m2` 换新密钥；假 RAGFlow 恢复后再 `PUT` 同一新密钥；`PUT /api/kb/settings` 以一个无上游的模型作 `chatModelId`；`PUT /api/kb/settings {chatModelId:null}`；再 `DELETE /api/models?id=m2`
 - **THEN** 依次为：409 `kb_model_in_use`；409 `kb_model_in_use`；503 `kb_unavailable`（密钥未变，没有 `model.update` 审计）；200（假 RAGFlow 收到带新密钥的下发）；400；200（假 RAGFlow 收到撤销，`chatModelId` 为 `null`）；204
 
+#### Scenario: 联动与设置交错
+- **WHEN** 管理员 A `PUT /api/kb/settings {chatModelId:"m2"}`，假 RAGFlow 挂起这次下发；同时管理员 B `PUT /api/models?id=m2` 换成新密钥；然后假 RAGFlow 放行
+- **THEN** B 的修改在 A 的本地写入完成之后才做引用判定，判定 `m2` 已被引用，于是在写库前重新下发；假 RAGFlow 最后收到的对话模型下发带新密钥；`models` 里 `m2` 的密钥为新值
+
 #### Scenario: 并发设置写入
 - **WHEN** 两个管理员并发 `PUT` 不同的 `chatModelId`，假 RAGFlow 把第一个下发挂起一段时间后才应答
 - **THEN** 假 RAGFlow 收到的两次下发不重叠：第二次在第一次的本地写入完成之后才发出；最终 `GET` 的 `chatModelId` 等于最后一次下发的模型
@@ -173,10 +177,10 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 `PUT /api/kb/settings` 改变嵌入身份且存在任一知识库时：
 - body 未带 `confirmRebuild:true`：SHALL 409 `kb_rebuild_required`，不下发，不保存。
-- body 带了：下发并保存；嵌入代数加一；全部知识库置为 `rebuilding`；`kb_settings.rebuild_actor_id` 记为本次请求的 principal；审计 `kb.rebuild`（detail `{bases, documents}`）；唤醒重建器。
+- body 带了：下发并保存；嵌入代数加一；全部知识库置为 `rebuilding`；`kb_settings.rebuild_actor_id` 记为本次请求的 principal；在同一事务里审计 `kb.settings` 与 `kb.rebuild`（detail `{bases, documents}`）两条；唤醒重建器。
 - 已有知识库处于 `rebuilding` 时改嵌入身份：SHALL 409 `kb_rebuilding`。
 
-**重建器**在进程内一次处理一个知识库，处理期间持有该库的写锁（见 knowledge-bases「同一知识库的写操作串行」）。每个库的步骤：
+**重建器**在进程内一次处理一个知识库，处理期间持有该库的写锁（见 knowledge-bases「同一知识库的写操作串行」）。取得锁后先重读该库的行：库已被删除或 `state` 不再是 `rebuilding` 即跳过该库。每个库的步骤：
 1. 若 `rebuild_dataset_id` 非空，先删除该数据集；不存在视为已删除。
 2. 以原模板与开关、新嵌入模型建新数据集，名为 `owb-<id>-g<当前代数>`，写回 `rebuild_dataset_id`。
 3. 逐份文档，从旧数据集流式下载入库原件，上传到新数据集。multipart 长度按本地 `size` 计算，不依赖下载应答的 `Content-Length`。下载结果为 not-found 的文档记为跳过；下载字节数与本地 `size` 不符时该库失败。
@@ -198,7 +202,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 #### Scenario: 确认后重建
 - **WHEN** 有两个知识库共三份文档，管理员带 `confirmRebuild:true` 换嵌入模型
-- **THEN** 假 RAGFlow 依次收到：两次建数据集（名为 `owb-<id>-g1`）、三次下载与三次上传、两次解析触发、两次删除旧数据集；两个知识库最终都是 `ready`，`dataset_id` 为新数据集，文档的 RAGFlow id 为新 id；审计含一条 `{bases:2, documents:3}` 与两条 `result:"ok"`，actor 都是该管理员
+- **THEN** 假 RAGFlow 依次收到：两次建数据集（名为 `owb-<id>-g1`）、三次下载与三次上传、两次解析触发、两次删除旧数据集；两个知识库最终都是 `ready`，`dataset_id` 为新数据集，文档的 RAGFlow id 为新 id；审计含一条 `kb.settings`、一条 `{bases:2, documents:3}` 与两条 `result:"ok"`，actor 都是该管理员
 
 #### Scenario: 原件缺失与分块下载
 - **WHEN** 一个知识库有三份文档：第一份下载为 not-found；第二份的下载应答不带 `Content-Length`、以分块传输；第三份的下载字节比本地 `size` 少一个字节（在另一次重建里）
@@ -223,7 +227,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 在共用栈上的使用规则：
 - 只使用 open-workbuddy 专用账号。
-- 实测与冒烟只删除本次运行自己创建的、名称前缀为 `owb-` 的数据集。
+- 只删除本仓创建的数据集（名称前缀为 `owb-`）：实测只删本次运行建的；冒烟只经 app-server 删除名为 `smoke-kb` 的知识库（含上一次中断留下的同名库）。
 
 RAGFlow 地址、账号名与密钥文件路径 SHALL 只出现在本机未跟踪的私有配置里；被跟踪的文件、issue 与 PR 正文一律写作 `<RAGFLOW_BASE_URL>`。
 
