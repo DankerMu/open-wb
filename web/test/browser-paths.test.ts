@@ -410,6 +410,26 @@ describe("moveTargets", () => {
   it("没有可选目标时是空数组", () => {
     expect(moveTargets(cache(), new Set(["", "out", "out/sub"]), "out")).toStrictEqual([]);
   });
+
+  // #1823：挂载内的条目从挂载根起列（挂载根不在根的列表里，D21），没有根与挂载外的目录。
+  it("给了起点：从起点起列，起点自身算可见，根与起点之外的目录不在；起点仍经同一判定去掉父目录", () => {
+    const mounted: DirectoryCache = {
+      ...cache(),
+      远端: { path: "远端", entries: [dir("d"), dir("e"), file("notes.txt")] },
+      "远端/d": { path: "远端/d", entries: [file("a.md")] },
+      "远端/e": { path: "远端/e", entries: [] },
+    };
+    const expanded = new Set([...all, "远端", "远端/d"]);
+    expect(moveTargets(mounted, expanded, "远端/d/a.md", "远端")).toStrictEqual(["远端"]);
+    expect(moveTargets(mounted, expanded, "远端/notes.txt", "远端")).toStrictEqual(["远端/d"]);
+    expect(moveTargets(mounted, expanded, "远端/d", "远端")).toStrictEqual([]);
+    expect(moveTargets(mounted, expanded, "top.md")).toStrictEqual([
+      "docs",
+      "out",
+      "out/sub",
+      "output",
+    ]);
+  });
 });
 
 // files-web「目录树与预览」：目录名与对象原型成员同名时与其它目录名同样处理（#1340）。缓存是普通对象，

@@ -21,12 +21,17 @@
  * `notice` shown above the tree. `accepts` is what the tree asks while a drag is over a row;
  * `moveInto` decides again by itself before it sends.
  *
+ * Both moves stay within the entry's「挂载范围」(`scopeOf`, the browser's mounts): 移动到… lists targets
+ * from the root of the mount the entry is in (from the space root outside mounts), and a drop is
+ * accepted only on a directory of the same scope. A 409 shows the fixed same-name text only for
+ * `code: "conflict"`; other 409s (`mount_boundary`, `mount_offline`) show the envelope message.
+ *
  * 删除 sends `DELETE entries?path=` with the path of the row whose menu was used, as the menu gave
  * it: not the selection, not the address, and nothing here trims, normalises or re-encodes it
  * (`deleteEntry` encodes it once, whole). Whether that path may be deleted is the server's decision.
  */
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type ApiClient, ApiError, downloadUrl } from "../../lib/api.js";
+import { type ApiClient, downloadUrl } from "../../lib/api.js";
 import {
   canMoveInto,
   type DirectoryCache,
@@ -36,7 +41,7 @@ import {
 } from "./browser-paths.js";
 import { DeleteEntryDialog, MoveDialog, RenameDialog } from "./dialogs.js";
 import { errorMessage, isUnauthorized } from "./errors.js";
-import { useRequestDialog } from "./request-dialog.js";
+import { isConflict, useRequestDialog } from "./request-dialog.js";
 
 /** 行菜单所属的条目。 */
 type EntryTarget = { name: string; path: string; type: "dir" | "file" };
@@ -48,7 +53,7 @@ export type EntryActions = {
   rename(target: EntryTarget, trigger: HTMLElement | null): void;
   moveTo(target: EntryTarget, trigger: HTMLElement | null): void;
   remove(target: EntryTarget, trigger: HTMLElement | null): void;
-  /** 拖放经过时问：`from` 这一行此刻能不能放到目录 `directory`（`""` 是根）上。 */
+  /** 拖放经过时问：`from` 这一行此刻能不能放到目录 `directory`（`""` 是根）上；跨挂载范围不能。 */
   accepts(from: string, directory: string): boolean;
   /** 拖放放下：把 `from` 移进 `directory`；此刻不能放（`accepts` 为假）就什么都不做。 */
   moveInto(from: string, directory: string): void;
@@ -67,13 +72,14 @@ export type MenuFocus = RefObject<string | null>;
 
 /**
  * 浏览器此刻的树：`移动到…` 打开时由它取目标目录；`name` 是空间名，根项的文字用；`focusMenuPath` 由
- * 浏览器持有（它知道哪一层重列失败），这里只写。
+ * 浏览器持有（它知道哪一层重列失败），这里只写；`scopeOf` 是路径的挂载范围（`useMounts`，挂载外为 `""`）。
  */
 type BrowserTree = {
   cacheRef: RefObject<DirectoryCache>;
   expandedPathsRef: RefObject<ReadonlySet<string>>;
   focusMenuPath: MenuFocus;
   name: string;
+  scopeOf: (path: string) => string;
 };
 
 /** `trigger` 所在行的父目录的行按钮（父目录是根时即根行）：行是 `<li>`，子层在它里面的 `<ul>` 里。 */
@@ -87,8 +93,12 @@ export function useEntryOperations(
   workspaceId: string,
   /** `from` 已被移到 `to`，`to` 为 `null` 即已被删除（服务端已答成功）。 */
   onMoved: (from: string, to: string | null) => void,
-  { cacheRef, expandedPathsRef, focusMenuPath, name: workspaceName }: BrowserTree,
+  { cacheRef, expandedPathsRef, focusMenuPath, name: workspaceName, scopeOf }: BrowserTree,
 ) {
+  // 经引用读：`scopeOf` 随列表变，`accepts` 与 `actions` 不随它重建（树的拖放处理器跟着不变），
+  // 读到的总是最近一次渲染的那一个。
+  const scopeRef = useRef(scopeOf);
+  scopeRef.current = scopeOf;
   // `targets`：`移动到…` 可选的目标目录，打开那一刻取定，此后树怎么变都不改；别的操作是空数组。
   const { close, dialog, open, returnFocus, submit } = useRequestDialog<
     EntryTarget & { op: Operation; targets: readonly string[] }
@@ -109,14 +119,16 @@ export function useEntryOperations(
 
   const accepts = useCallback(
     (from: string, directory: string) =>
-      dropRequest.current === null && canMoveInto(from, directory),
+      dropRequest.current === null &&
+      canMoveInto(from, directory) &&
+      scopeRef.current(from) === scopeRef.current(directory),
     [],
   );
 
   /**
    * 放下的那一次 `POST move`，没有对话框。发出时撤掉上一次的失败文案；成功后同 `移动到…`：焦点给新
-   * 行的 `更多操作 <名>`，树由 `onMoved` 跟过去。失败只写文案（409 是固定的那一句，其余是信封
-   * message，401 不写——登录层接手），不重列。卸载时中止，中止之后到的应答不交付。
+   * 行的 `更多操作 <名>`，树由 `onMoved` 跟过去。失败只写文案（`code` 为 `conflict` 的 409 是固定的那一句，
+   * 其余是信封 message，401 不写——登录层接手），不重列。卸载时中止，中止之后到的应答不交付。
    */
   const moveInto = useCallback(
     (from: string, directory: string) => {
@@ -140,8 +152,7 @@ export function useEntryOperations(
           },
           (error: unknown) => {
             if (!controller.signal.aborted && !isUnauthorized(error)) {
-              const conflict = error instanceof ApiError && error.status === 409;
-              setNotice(conflict ? MOVE_CONFLICT : errorMessage(error));
+              setNotice(isConflict(error) ? MOVE_CONFLICT : errorMessage(error));
             }
           },
         )
@@ -158,8 +169,11 @@ export function useEntryOperations(
     const opener = (op: Operation) => (target: EntryTarget, trigger: HTMLElement | null) => {
       focusMenuPath.current = null;
       parentRow.current = parentRowOf(trigger);
+      const start = scopeRef.current(target.path);
       const targets =
-        op === "move" ? moveTargets(cacheRef.current, expandedPathsRef.current, target.path) : [];
+        op === "move"
+          ? moveTargets(cacheRef.current, expandedPathsRef.current, target.path, start)
+          : [];
       open({ ...target, op, targets }, trigger);
     };
     return {
