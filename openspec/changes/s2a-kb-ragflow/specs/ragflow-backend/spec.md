@@ -150,7 +150,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - 嵌入模型未配置时：409 `kb_not_ready`。
 - 探活不下发，也不改嵌入身份。
 
-**写操作串行**：设置写入、探活写回、重建发起、建库，以及上面的联动（引用判定、重新下发与 `models` 的那次写入，删除时的引用判定同样在内）SHALL 由同一把进程级设置锁串行执行，保证本地设置、`models` 行与 RAGFlow 侧下发结果一致。
+**写操作串行**：设置写入、探活写回、重建发起、建库，以及上面的联动（引用判定、重新下发与 `models` 的那次写入，删除时的引用判定同样在内）SHALL 由同一把进程级设置锁串行执行，保证本地设置、`models` 行与 RAGFlow 侧下发结果一致。`PUT /api/kb/settings` 对 `chatModelId` 的存在与上游校验 SHALL 在取得设置锁之后进行，读到的是锁内的 `models` 行。
 
 #### Scenario: 下发失败不改设置
 - **WHEN** 管理员首次 `PUT` 嵌入模型，假 RAGFlow 对模型下发应答 HTTP 500；随后假 RAGFlow 恢复，管理员再 `PUT` 同一 body
@@ -167,9 +167,11 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 #### Scenario: 联动与设置交错
 - **WHEN** 管理员 A `PUT /api/kb/settings {chatModelId:"m2"}`，假 RAGFlow 挂起这次下发；同时管理员 B `PUT /api/models?id=m2` 换成新密钥；然后假 RAGFlow 放行
 - **THEN** B 的修改在 A 的本地写入完成之后才做引用判定，判定 `m2` 已被引用，于是在写库前重新下发；假 RAGFlow 最后收到的对话模型下发带新密钥；`models` 里 `m2` 的密钥为新值
+- **WHEN** 次序相反：C 的嵌入设置 PUT 持锁且下发被挂起，B 的换密钥与 A 的 `chatModelId:"m2"` 依次排在锁后，然后放行
+- **THEN** B 判定 `m2` 未被引用，不下发，直接写入新密钥；A 取锁后读到新密钥并下发；假 RAGFlow 最后收到的对话模型下发带新密钥
 
 #### Scenario: 删除与设置交错
-- **WHEN** 管理员 B `DELETE /api/models?id=m2` 先进入设置锁，假 RAGFlow 无关；同时管理员 A `PUT /api/kb/settings {chatModelId:"m2"}`；另一次次序相反：A 先持锁且下发被挂起，B 随后删除
+- **WHEN** 管理员 C 的一次 `PUT /api/kb/settings`（嵌入设置）持有设置锁，假 RAGFlow 挂起它的下发；B `DELETE /api/models?id=m2` 与 A `PUT /api/kb/settings {chatModelId:"m2"}` 依次排在锁后，然后假 RAGFlow 放行；另一次次序相反：A 先持锁且下发被挂起，B 随后删除
 - **THEN** 第一种：B 删除 204，A 随后 400（`m2` 已不存在），假 RAGFlow 没有收到 `m2` 的下发；第二种：A 200 之后 B 的删除得 409 `kb_model_in_use`，行仍在
 
 #### Scenario: 并发设置写入

@@ -56,7 +56,7 @@
   - 「编译开启或触发」不支持：按 design D14，组 9 及其全部下游与组 15 首刀等 owner 修订本 change；组 2–8 不受影响。
   - 模板支持表与 design D9 不符：修订本 change 后再开组 9。
   
-  任一项触发时，本组在合入前建一个修订 issue R（标题「修订 s2a-kb-ragflow：<哪一节不支持>」，正文写一行 `Depends on #<Epic>`，picker 选不中它；由 owner 发起 stage-change-pipeline 按预案或 owner 的决定修订，过审后关闭），并在被停各组的根 issue 正文加一行 `Depends on #<R>`：模型下发为组 6 与组 15 首刀；编译或模板表为组 9 与组 15 首刀。其余被停的组本就（传递）依赖这些根，picker 不会选中。
+  任一项触发时，本组在合入前建一个修订 issue R（标题「修订 s2a-kb-ragflow：<哪一节不支持>」，正文写一行 `Depends on #<Epic>`，picker 选不中它；修订以 stage-change-pipeline 进行：「模型下发」一项按 design D7 的预案修订，不需要 owner 的决定，由主会话在组 1 合入后启动；「编译」或「模板表」一项先等 owner 的决定再修订；过审后关闭），并在被停各组的根 issue 正文加一行 `Depends on #<R>`：模型下发为组 6 与组 15 首刀；编译或模板表为组 9 与组 15 首刀。其余被停的组本就（传递）依赖这些根，picker 不会选中。
   
   本组 PR 照常合入记录，不因结论为「不支持」而不合。
 
@@ -268,7 +268,7 @@ Minimal mergeable slice: 迁移 050 与 store（7.2 的 `kb-store.test.ts` 与 7
   本组三条路由加进新建的 `server/test/kb-disabled.test.ts`；`PUT /api/kb/settings` 与 `POST /api/kb/settings/probe` 加进归属路由用例。假 RAGFlow 加模型提供方与账号缺省模型接口。
 - [ ] 8.3 实现（首刀）：新 `server/src/kb/settings.ts`（读视图、校验、下发与撤销、身份判定，全部写入经设置锁）；`kb/rest.ts` 加 `GET` / `PUT /api/kb/settings` 与 `POST /api/kb/settings/probe`。
 - [ ] 8.4 测试先行（剩余部分）：
-  - ragflow-backend「对话模型联动」「联动与设置交错」「删除与设置交错」（夹具的挂起后放行；两种进锁次序各一例：A 先持锁、B 先持锁）；model-registry「知识库对话模型受保护」，写进新 `server/test/kb-models-guard.test.ts`；
+  - ragflow-backend「对话模型联动」「联动与设置交错」「删除与设置交错」（夹具的挂起后放行；两种进锁次序各一例：A 先持锁；或先让第三个持锁者 C 的嵌入设置 PUT 挂起，再让 B、A 依次排队）；model-registry「知识库对话模型受保护」，写进新 `server/test/kb-models-guard.test.ts`；
   - 知识库关闭时 `models` 的删除与修改行为与本 change 之前一致（既有 `models-*.test.ts` 不改即绿）。
 - [ ] 8.5 实现（剩余部分）：
   - `AssemblyDependencies` 加可选 `modelWriteGuard`：它接收一个执行 `models` 那次写入或删除的回调，在设置锁内依次做引用判定、需要时重新下发、再执行回调；`models/rest.ts` 的 `DELETE` 与 `PUT` 把各自的写入交给它包住，钩子为空时直接执行；
