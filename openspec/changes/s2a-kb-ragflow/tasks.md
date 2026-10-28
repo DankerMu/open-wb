@@ -243,7 +243,8 @@ Minimal mergeable slice: 6.2–6.3 的九码与七条归属身份登记——码
   - 新 `server/test/kb-locks.test.ts`：
     - 同一知识库的两个写操作串行、不同知识库并行；
     - 锁被重建器持有时写操作立即得到「重建中」结果而不排队；
-    - 设置锁串行；锁在异常路径上释放。
+    - 设置锁串行；锁在异常路径上释放；
+    - 两把锁都按到达次序交锁（FIFO）：持锁期间依次排入三个等待者，放行后执行次序与排队次序相同；等待者计数随排队与交锁增减（design D20）。
   - 同 PR 改 7.1 列出的既有快照用例（属首刀：它们随迁移 050 变化）。
 - [ ] 7.3 实现：`050_knowledge_bases.sql`；新 `server/src/kb/store.ts`（只读写本地三张表，不发出站请求）；新 `server/src/kb/locks.ts`（design D20）。
 
@@ -268,7 +269,7 @@ Minimal mergeable slice: 迁移 050 与 store（7.2 的 `kb-store.test.ts` 与 7
   本组三条路由加进新建的 `server/test/kb-disabled.test.ts`；`PUT /api/kb/settings` 与 `POST /api/kb/settings/probe` 加进归属路由用例。假 RAGFlow 加模型提供方与账号缺省模型接口。
 - [ ] 8.3 实现（首刀）：新 `server/src/kb/settings.ts`（读视图、校验、下发与撤销、身份判定，全部写入经设置锁）；`kb/rest.ts` 加 `GET` / `PUT /api/kb/settings` 与 `POST /api/kb/settings/probe`。
 - [ ] 8.4 测试先行（剩余部分）：
-  - ragflow-backend「对话模型联动」「联动与设置交错」「删除与设置交错」（夹具的挂起后放行；两种进锁次序各一例：A 先持锁；或先让第三个持锁者 C 的嵌入设置 PUT 挂起，再让 B、A 依次排队）；model-registry「知识库对话模型受保护」，写进新 `server/test/kb-models-guard.test.ts`；
+  - ragflow-backend「对话模型联动」「联动与设置交错」「删除与设置交错」（夹具的挂起后放行；两种进锁次序各一例：A 先持锁；或先让第三个持锁者 C 的嵌入设置 PUT 挂起，再让 B、A 依次排队——用 `locks.ts` 的等待者计数确认 B 已在排队后再发出 A）；model-registry「知识库对话模型受保护」，写进新 `server/test/kb-models-guard.test.ts`；
   - 知识库关闭时 `models` 的删除与修改行为与本 change 之前一致（既有 `models-*.test.ts` 不改即绿）。
 - [ ] 8.5 实现（剩余部分）：
   - `AssemblyDependencies` 加可选 `modelWriteGuard`：它接收一个执行 `models` 那次写入或删除的回调，在设置锁内依次做引用判定、需要时重新下发、再执行回调；`models/rest.ts` 的 `DELETE` 与 `PUT` 把各自的写入交给它包住，钩子为空时直接执行；

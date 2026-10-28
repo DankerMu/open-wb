@@ -150,7 +150,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - 嵌入模型未配置时：409 `kb_not_ready`。
 - 探活不下发，也不改嵌入身份。
 
-**写操作串行**：设置写入、探活写回、重建发起、建库，以及上面的联动（引用判定、重新下发与 `models` 的那次写入，删除时的引用判定同样在内）SHALL 由同一把进程级设置锁串行执行，保证本地设置、`models` 行与 RAGFlow 侧下发结果一致。`PUT /api/kb/settings` 对 `chatModelId` 的存在与上游校验 SHALL 在取得设置锁之后进行，读到的是锁内的 `models` 行。
+**写操作串行**：设置写入、探活写回、重建发起、建库，以及上面的联动（引用判定、重新下发与 `models` 的那次写入，删除时的引用判定同样在内）SHALL 由同一把进程级设置锁串行执行，保证本地设置、`models` 行与 RAGFlow 侧下发结果一致。`PUT /api/kb/settings` 对 `chatModelId` 的存在与上游校验 SHALL 在取得设置锁之后进行，读到的是锁内的 `models` 行。设置锁 SHALL 按请求到达锁的先后次序交锁（FIFO），所以排在锁后的写者按排队次序执行。
 
 #### Scenario: 下发失败不改设置
 - **WHEN** 管理员首次 `PUT` 嵌入模型，假 RAGFlow 对模型下发应答 HTTP 500；随后假 RAGFlow 恢复，管理员再 `PUT` 同一 body
