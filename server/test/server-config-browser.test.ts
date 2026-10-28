@@ -15,7 +15,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -27,7 +26,7 @@ import {
   compileServerEntry,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
-import { startCompiledServerWithRetry } from "./server-startup-retry.js";
+import { expectNeverListened, startListenTraced } from "./server-startup-order-helpers.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
 const SOURCE_ENTRY = pathToFileURL(join(REPO_ROOT, "server", "src", "server.ts")).href;
@@ -127,9 +126,10 @@ describe("production entry rejects an invalid BROWSER_BIN before effects", () =>
     async (_name, valueIn) => {
       const root = scratch("open-wb-browser-bin-entry-");
       const value = valueIn(root);
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, root, (port) => ({
         env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: value }),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -140,19 +140,8 @@ describe("production entry rejects an invalid BROWSER_BIN before effects", () =>
         expect(existsSync(join(root, owned))).toBe(false);
       }
       expect(existsSync(join(root, "state", "home", ".omp", "agent", "models.yml"))).toBe(false);
-      await expect(refused(port)).resolves.toBe(true);
+      expectNeverListened(started);
     },
     20_000,
   );
 });
-
-function refused(port: number): Promise<boolean> {
-  return new Promise((settle) => {
-    const socket = connect({ host: "127.0.0.1", port });
-    socket.once("connect", () => {
-      socket.destroy();
-      settle(false);
-    });
-    socket.once("error", () => settle(true));
-  });
-}

@@ -30,9 +30,15 @@ import {
   denyChmodHook,
   observeOpenDbHook,
   releaseStartupFixtures,
-  type StartedServer,
 } from "./server-startup-helpers.js";
-import { applicationStderr, expectRefused, MODEL_ID } from "./server-startup-order-helpers.js";
+import {
+  applicationStderr,
+  expectMainPortListenedOnce,
+  expectNeverListened,
+  type ListenTracedStart,
+  MODEL_ID,
+  startListenTraced,
+} from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const PRIVATE_FILE_MODE = 0o600;
@@ -245,10 +251,10 @@ describe("production entry private state permissions", () => {
       mkdirSync(target, { recursive: true });
       writeFileSync(join(target, "keep.txt"), mainIsDirectory ? "main-keep" : "wal-keep");
       chmodSync(target, EXISTING_DIR_MODE);
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, scratchRoot, (port) => ({
         env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), { MODEL_ID }),
       }));
-      await expectGenericStartupFailure(server, port);
+      await expectGenericStartupFailure(started);
       expect(existsSync(join(scratchRoot, "state"))).toBe(false);
       expect(existsSync(join(scratchRoot, "sandbox"))).toBe(false);
       expect(lstatSync(target).isDirectory()).toBe(true);
@@ -369,7 +375,7 @@ describe("production entry private state permissions", () => {
     // One --require file: refuse the root's chmod and fake setpriv for OMP_USER (agent-config).
     const deny = denyChmodHook([realpathSync.native(sandbox)]);
     writeFileSync(hookPath, combinedHook(deny, captureSpawnHook("present")));
-    const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+    const started = await startListenTraced(compiled.entry, scratchRoot, (port) => ({
       env: compiledFixtureEnv(scratchRoot, port, join(scratchRoot, "bin", "omp"), {
         MODEL_ID,
         OMP_USER: "omp",
@@ -377,6 +383,7 @@ describe("production entry private state permissions", () => {
       }),
       requireHook: hookPath,
     }));
+    const { server } = started;
     try {
       expect(await server.waitForClose()).toEqual({ code: 1, signal: null });
       const output = server.stdout() + server.stderr();
@@ -387,7 +394,7 @@ describe("production entry private state permissions", () => {
         '{"event":"server_start_failed","reason":"sandbox_root"}\n',
       );
       expect(lstatSync(sandbox).mode & 0o7777).toBe(EXISTING_DIR_MODE);
-      await expectRefused("127.0.0.1", port);
+      expectMainPortListenedOnce(started);
     } finally {
       await server.dispose();
     }
@@ -478,13 +485,14 @@ function expectApplicationStderr(stderr: string): void {
   expect(applicationStderr(stderr)).toBe(`${JSON.stringify(record)}\n`);
 }
 
-async function expectGenericStartupFailure(server: StartedServer, port: number): Promise<void> {
+async function expectGenericStartupFailure(started: ListenTracedStart): Promise<void> {
+  const { server } = started;
   const closed = await server.waitForClose();
   expect(closed.code).toBe(1);
   expect(closed.signal).toBeNull();
   expect(server.stdout()).toBe("");
   expectApplicationStderr(server.stderr());
-  await expectRefused("127.0.0.1", port);
+  expectNeverListened(started);
 }
 
 function seedDeniedDb(prefix: string): { scratchRoot: string; dbPath: string } {
@@ -504,12 +512,12 @@ async function startDeniedPreparation(
 ): Promise<void> {
   const hookPath = join(seeded.scratchRoot, hookName);
   writeFileSync(hookPath, denyChmodHook(denied));
-  const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+  const started = await startListenTraced(compiled.entry, seeded.scratchRoot, (port) => ({
     env: compiledFixtureEnv(seeded.scratchRoot, port, join(seeded.scratchRoot, "bin", "omp"), {
       MODEL_ID,
     }),
     requireHook: hookPath,
   }));
-  await expectGenericStartupFailure(server, port);
+  await expectGenericStartupFailure(started);
   expect(existsSync(join(seeded.scratchRoot, "state"))).toBe(false);
 }

@@ -4,7 +4,6 @@
  * input 恒写，字节取 #1563 基线文件），不引用源码常量。
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -19,6 +18,7 @@ import {
   compileServerEntry,
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
+import { expectNeverListened, startListenTraced } from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("../../", import.meta.url)));
@@ -83,20 +83,6 @@ function thrownMessage(env: Record<string, string>): string {
     return (error as Error).message;
   }
   throw new Error(`resolver accepted ${KEY}=${JSON.stringify(env[KEY])}`);
-}
-
-function refused(port: number): Promise<boolean> {
-  return new Promise((done) => {
-    const socket = connect({ host: "127.0.0.1", port });
-    socket.once("connect", () => {
-      socket.destroy();
-      done(false);
-    });
-    socket.once("error", () => {
-      socket.destroy();
-      done(true);
-    });
-  });
 }
 
 afterAll(async () => {
@@ -206,9 +192,10 @@ describe("production entry — MODEL_REASONING", () => {
     "%j：nonzero、恰一行 generic record、无 DB/state/sandbox/listen",
     async (raw) => {
       const root = scratch("open-wb-reasoning-invalid-");
-      const { server, port } = await startCompiledServerWithRetry(compiled.entry, (port) => ({
+      const started = await startListenTraced(compiled.entry, root, (port) => ({
         env: compiledFixtureEnv(root, port, join(root, "bin", "omp"), { [KEY]: raw }),
       }));
+      const { server } = started;
       const closed = await server.waitForClose();
 
       expect(closed).toEqual({ code: 1, signal: null });
@@ -219,7 +206,7 @@ describe("production entry — MODEL_REASONING", () => {
       }
       expect(existsSync(join(root, "state", "home", ".omp", "agent", "models.yml"))).toBe(false);
       expect(existsSync(join(compiled.root, "var"))).toBe(false);
-      await expect(refused(port)).resolves.toBe(true);
+      expectNeverListened(started);
     },
     20_000,
   );
