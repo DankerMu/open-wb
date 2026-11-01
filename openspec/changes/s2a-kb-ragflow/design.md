@@ -8,7 +8,7 @@ ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc
 
 ### RAGFlow v1.0.0-rc2 的已知事实（2026-10-28 读 `v1.0.0-rc2` tag 源码与 `docs/references/http_api_reference.md`；第一组任务对运行中的实例逐条复核）
 
-- v1.0 起服务端是 Go 重写（`cmd/ragflow_server.go`、`internal/`），Python `api/` 层不复存在；消息队列换 NATS，缓存换 Kvrocks。rc2 起有 arm64 镜像（`infiniflow/ragflow:v1.0.0-rc2` 多架构；rc1 与 v0.27.x 只有 amd64）。
+- v1.0 起服务端是 Go 重写（`cmd/ragflow_server.go`、`internal/`），Python `api/` 层不复存在；消息队列换 NATS，缓存换 Kvrocks。rc2 起有 arm64 镜像（`infiniflow/ragflow:v1.0.0-rc2` 多架构；rc1 与 v0.27.x 只有 amd64）。Infinity 的 arm64 tag 存在但起不来（2026-11-01 部署实测：`v0.7.4-arm64` / `v0.7.3-arm64` / `nightly-arm64` 的二进制要 glibc 2.38，底座 Ubuntu 22.04），arm64 开发机用 `v0.7.4-x64-v2` 走 `linux/amd64` 模拟。
 - `GET /api/v1/system/version`、`/system/healthz` 在无鉴权分组（`internal/router/router.go:153-158`）；数据集、文档、模型提供方等路由在 `AuthMiddleware` 分组（`:238-239`），API key 以 `Authorization: Bearer` 传。
 - 业务结果在 body `code`：`0` 成功、`101` 参数非法、`102` 数据无效或缺失、`103` 操作错误、`105` 连接错误、`108` 权限错误、`109` 鉴权错误等；HTTP 200 加非零 `code` 是常态。dsh-team 对 rc1 的实测（检索列表里一个无效库 ID 整次失败、空 `dataset_ids` 为 `101`）与之一致。
 - 数据集：`POST /api/v1/datasets`（`name` 不区分大小写、≤128 字符，文档称重名自动加后缀——未实测，本 change 的命名不依赖它；`embedding_model` 形如 `model@factory`；`chunk_method` 取 `naive`/`book`/`email`/`laws`/`manual`/`one`/`paper`/`picture`/`presentation`/`qa`/`table`/`tag` 十二种；「Migrate to 1.0」一节另说 Go 侧改用 `parser_id`、`naive` 规范为 `general`——文档自相矛盾，须实测）；`PUT /api/v1/datasets/{id}` 改 `embedding_model` 要求 `chunk_count` 为 0；`DELETE /api/v1/datasets`。

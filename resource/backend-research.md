@@ -4,6 +4,7 @@
 > `resource/oh-my-pi`（v18.0.10, commit `33cc6b9a`, MIT, 240MB）。均为 `--depth 1` 浅克隆，
 > 保留 `.git` 以便 `git pull` 更新；已在根 `.gitignore` 排除（同 `app-reference` 的处理方式）。
 > 本文只做评估，不做吸收/裁剪动作。
+> **2026-11-01 注**：§1 的吸收方案已被 ADR-0016 取代（RAGFlow 改为外部服务，不吸收源码）；§1.3 的 kb-service 形态与 §3 的 deepdoc 捆包随之作废，正文保留为当时的记录。
 
 ## 结论先行
 

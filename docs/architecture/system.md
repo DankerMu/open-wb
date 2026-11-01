@@ -6,15 +6,15 @@
 
 ## 1. 范围与目标
 
-覆盖整个系统的顶层分解：app-server / web SPA / kb-service 三个自研组件的模块图与相互契约，
-以及 omp 子进程、模型网关、Infinity 的接入方式。不含：模块内部详细接口、数据库 schema、
+覆盖整个系统的顶层分解：app-server（含 `kb` 模块）/ web SPA 两个自研组件与外部 RAGFlow 服务的模块图与相互契约，
+以及 omp 子进程、模型网关的接入方式（Infinity 在 RAGFlow 之后，不由本系统直连）。不含：模块内部详细接口、数据库 schema、
 API 端点清单（属 spec 阶段）。
 
 ## 2. 约束
 
 - 内网单机部署包（P4），无公网依赖；部署包带 fuse3 + rclone（ADR-0003）。
 - omp 钉住官方二进制 v18.12.3（ADR-0001 2026-10-20 补充；原 fork 冻结方案作废），只经 stdio JSONL RPC 驱动。
-- omp 与 kb-service 不感知租户；多租户逻辑全在 app-server（PLAN §2 决策 3）。
+- omp 与 RAGFlow 不感知租户；多租户逻辑全在 app-server（PLAN §2 决策 3）。
 - CONTEXT.md 五条不变量，尤其：凭证不进 omp 环境（不变量 4）、沙箱越界拒绝+审计（不变量 3）。
 - `app-reference/` 只读参照，内容不进产物。
 
@@ -35,22 +35,24 @@ API 端点清单（属 spec 阶段）。
 | `accounts` | 账号属性/角色/配额/项目组管理；`scopeOf(principal)` → 可见范围解析输入 | IdP 字段与应用侧字段的分界 | |
 | `workspaces` | 空间 CRUD、树列举、文件读/预览、挂载 attach/detach/status | `mounts/` 子模块 = mount-manager：rclone 进程生命周期、凭证保管、健康探测、崩溃重挂（ADR-0003）；多根树合并；S1f change C（`s1f-session-list-temp-space`）：临时空间（`workspaces.temporary` 标记，目录名 `tmp-<id>`；随会话在同一事务里创建，`GET /api/workspaces` 不列出、按 id 的端点照常可达）、`POST /api/workspaces/:id/promote`（原地转正：只改名字与标记，目录不动，`workspace.promote` 审计）、`temp-dir-remove.ts`（临时空间目录经 app 私有 trash 中转删除，`EXDEV` 时原地删）、`snapshots.ts`（回合快照的落盘 `take` 与两种目录删除）与 `snapshots-restore.ts`（还原）——快照根目录由 `createApp` 注入，这两个模块不导入 `sessions/`，也没有自己的路由（部署侧见 §9.1） | 挂载协议差异（SFTP/NFS/SMB）全部藏在接缝后 |
 | `sessions` | `create/resume/fork/list`；`post(input)`；`interrupt()`；`subscribe(lastEventId) → 事件流` | omp-supervisor（每活跃会话 spawn、空闲回收、全局上限 `OMP_MAX_PROCESSES`（默认 16）/ 触顶驱逐最久空闲进程（无可驱逐 → `agent_capacity`）、并发 spawn 上限 `OMP_SPAWN_CONCURRENCY`（缺省 CPU 数；准入后 FIFO 排队、排队不计入握手 deadline，握手超时写一行 stderr 记录；保留的基础设施故障与会话删除清理失败各写一行 `{"event":"session_fault"}`）、审批经 host 应答（`approval.request`/`approval.resolved`，`chat_approvals` 持久化））、JSONL RPC 编解码、`host_tool_call` 分派、事件序号+环形缓冲（ADR-0006）、SQLite 会话/消息/步骤存储（持久历史事实源；实时缺口恢复使用 store 自有待刷尾部补齐的完整快照及同刻 streamCursor，读取不改变刷盘策略——#214）；omp `.jsonl` 存于 app-server 托管的 `OMP_STATE_DIR`、只供 `--resume`（S0b grill 2026-09-18）；S1c change B：会话可绑定工作空间（绑定会话的 omp cwd 为该空间根，`session.bind` 审计）、元数据 `PATCH /api/sessions/:id`（标题 / 场景 / 置顶）与 `DELETE /api/sessions/:id`（`session.delete` 审计）、`thinking.delta` 与 `files.changed` 事件（分别持久化到 `chat_messages.thinking` 与 `chat_steps.changes`）、`MODEL_REASONING`（托管 `models.yml` 的模型条目是否声明 reasoning；只影响 omp 的请求侧，不门控宿主对 thinking 的解析）、slash 白名单与 `GET /api/commands`（白名单外以 `/` 开头的文本转义后送模型）；S1f：任务清单（omp `todo` 工具结果的全量清单归一化后持久化到 `chat_sessions.todo`，经 `todo.updated` 事件与消息快照顶层 `todo` 下发；结构不合规的候选丢弃并写一行不含任务文本的 stderr warn 记录）；S1f change C（`s1f-session-list-temp-space`）：会话视图十一键（增 `archivedAt`、`pendingApproval`、`temporaryWorkspace`，`store-view.ts`）；`PATCH /api/sessions/:id` 增 `archived` 键，已归档会话的 prompt / 重新生成 / fork / 撤回以 409 `session_archived` 拒绝；不带 `workspaceId` 的 `POST /api/sessions` 同事务创建临时空间，`DELETE /api/sessions/:id` 在它是最后一个使用者时连同临时空间的行、目录与快照一起删（`workspace.delete` 审计）；列表事件连接 `GET /api/sessions/events`（`list-events.ts`：按账号的通知器与 SSE 路由，只发 `sessions.changed` 与 `session.rewound`，无序号、无回放，见 §9.2）；受理 prompt 后、派发前的回合快照步骤（`turn-snapshot.ts`，经 `supervisor.prompt` 的 `beforeDispatch`；登记表 `chat_turn_snapshots` 只由 `store-undo.ts` 读写）；撤回 `POST /api/sessions/:id/undo`（`undo.ts`：body `{messageId, files}`，`files` 为 `keep` / `restore` / `force`；临时进程上 `branch` 后原地回退对话并可还原文件，冲突为 409 `undo_conflict`，`session.undo` 审计；与 fork 共用 `branch-temp.ts` 的对位与临时进程）；消息视图与 prompt 202 增 `undo` 键 | omp 协议与进程治理全部不外泄；调用方只见会话语义 |
-| `kb` | `search(principal, query, kbRefs) → 切片+出处`；center 管理透传 | 可见范围过滤（先过滤 kb_ids 再调 kb-service）、bearer 凭证、共享库检索审计 | host tool 与 UI 检索共用同一过滤路径 |
+| `kb` | `search(principal, query, kbRefs) → 切片+出处`；center 管理透传 | 可见范围过滤（先过滤 kb_ids 再调 RAGFlow）、bearer 凭证、共享库检索审计 | host tool 与 UI 检索共用同一过滤路径 |
 | `models` | 模型注册表 CRUD + 探活（对话/嵌入/重排） | 网关寻址细节 | |
 | `model-proxy` | 对 omp：baseURL + 会话标识；OpenAI 兼容端点 | 注册表寻址、密钥注入、流式透传、计量/限额、审计（ADR-0008） | 不变量 4 的机械保障点 |
 | `http` | Fastify 路由、中间件、SSE 端点；状态码与错误信封映射 | 纯驱动适配器层，零业务 | |
 
-### 3.2 kb-service（Python，吸收 RAGFlow）
+### 3.2 外部 RAGFlow 服务 + app-server `kb` 模块（ADR-0016）
 
-| 模块 | 接口 | 接缝背后 |
+RAGFlow 是运行中的外部服务（钉住 `v1.0.0-rc2`），不是本仓代码；app-server 的 `kb` 模块（§3.1）是它唯一的调用方。
+
+| 职责 | 落点 | 接缝背后 |
 |---|---|---|
-| `api` | REST + bearer 鉴权（每请求必验，不变量 4 配套） | FastAPI 路由 |
-| `ingest` | 提交文档 → 任务状态 | deepdoc 解析（模型本地路径）、12 模板切片、任务队列 |
-| `retrieval` | `search(kb_ids, query, params) → 切片+出处` | 混合检索、重排、agentic 环（改写→召回→充分性→二轮） |
-| `store` | RAGFlow `DocStoreConnection` | Infinity 适配（ADR-0005），保留 ES 退路 |
-| `embedding` | 内部客户端 | 直连模型网关（凭证在 kb-service 配置，合规） |
+| 接入 | `kb` 模块 | 单一服务账号，HTTP API + bearer（每请求必带，不变量 4 配套）；API key 从 `0600` 文件读入，只留在模块闭包；知识库与 RAGFlow 数据集、文档的映射存 SQLite |
+| 摄取 | RAGFlow | 解析、12 模板切片、任务队列；原件存 RAGFlow，解析状态以 RAGFlow 为准 |
+| 检索 | RAGFlow（S2b） | 混合检索、重排；agentic 环（改写→召回→充分性→二轮）放 `kb` 模块还是用 RAGFlow 自带能力由 S2b 定 |
+| 存储 | RAGFlow | Infinity 经 `DOC_ENGINE` 配置（ADR-0005 2026-11-01 补充），ES 退路在 RAGFlow 侧 |
+| 嵌入 | RAGFlow | 直连模型上游；知识库嵌入模型与对话模型由 `kb` 模块下发到服务账号，RAGFlow 持有其上游密钥（与 ADR-0008 的区别见 ADR-0016） |
 
-kb-service 只认 kb_id 集合，不认用户——租户过滤是 app-server `kb` 模块的职责。
+RAGFlow 只认服务账号与数据集，不认用户——租户过滤是 app-server `kb` 模块的职责。
 
 ### 3.3 web SPA（React + Vite）
 
@@ -84,8 +86,8 @@ flowchart TD
 1. 方向单向：`http → feature → core`。http 可直接依赖 core（共享错误身份）；core 不 import feature/http，feature 不 import http。
 2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）、`sessions → connectors`（`rest-metadata.ts` / `rest-capabilities.ts` / `store-capabilities.ts` 用 `connectors/validate.ts` 的连接器名单规则，`store-metadata.ts` 用 `connectors/store.ts` 的账号缺省读取，change `s1d-connectors` D7）、`connectors → sessions`（仅一处：`connectors/validate.ts` 导入 `sessions/omp/spawn-env.ts` 的 `OMP_CHILD_ENV_NAMES`，判 `env` / `headers` 值不得恰为 omp 子进程的环境变量名；常量与它的事实来源 `SUDO_PRESERVE_ENV` / `ompSpawnEnv` 放在一起，change `s1d-connectors` D3。`spawn-env.ts` 只导入 `./state-layout.js`，不成环）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
 3. **一切文件路径操作必须经 `core/sandbox.resolve`**；feature 模块直接 `fs` 访问用户路径是缺陷。
-4. omp 与 kb-service 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发。
-5. 跨服务契约（app-server↔kb-service）语言中立 REST，不共享代码。
+4. omp 与 RAGFlow 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发；omp 不持有 RAGFlow 凭证。
+5. `kb` 模块是 RAGFlow 的唯一出站点：经其 HTTP API 通信，不共享代码与存储，其它模块不直接调用 RAGFlow。`kb` 与其它 feature 的依赖按规则 2 显式声明。
 
 （AGENTS.md 已知盲区：模块 import 边界暂无机械检查，依赖规则靠评审；引入 dependency-cruiser 时以本节为规则源。）
 
@@ -120,17 +122,10 @@ server/src/
 │   ├── branch-temp.ts   # fork 与撤回共用的对位、branch 与临时进程
 │   ├── omp/             # 子进程生命周期 + JSONL RPC 编解码
 │   └── stream/          # 事件序号、环形缓冲、SSE 回放
-├── kb/                  # 可见范围过滤 + kb-service 客户端
+├── kb/                  # 可见范围过滤 + RAGFlow 客户端与知识库端点
 ├── models/              # 注册表 + 探活
 ├── model-proxy/
 └── http/                # 路由、中间件、SSE 端点
-
-kbservice/src/kbservice/
-├── api/                 # FastAPI + bearer 中间件
-├── ingest/              # deepdoc + 模板切片 + 任务队列
-├── retrieval/           # 混合检索 + agentic 环
-├── store/               # DocStoreConnection → Infinity
-└── embedding/           # 模型网关客户端
 
 web/src/
 ├── routes/              # /、/files、/center、/settings
@@ -149,7 +144,7 @@ sequenceDiagram
     participant B as 浏览器
     participant S as app-server
     participant O as omp-rpc 子进程
-    participant K as kb-service
+    participant K as RAGFlow
     participant G as 模型网关
     B->>S: POST /sessions/:id/messages
     S->>O: JSONL RPC（无 → spawn，cwd=沙箱）
@@ -173,7 +168,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 
 - **登录**：浏览器 → OIDC IdP → callback → auth 建 Principal，首登 provisioning 账号与沙箱根目录。
 - **挂载**：UI 填凭证 → mounts 起 rclone 挂到空间根下的挂载点 → 挂载点在空间根下，沙箱 resolve 按包含关系覆盖 → 在线状态探测。
-- **摄取**：UI 上传（文档落所有者沙箱）→ kb-service ingest 解析/切片/嵌入（嵌入直连网关）→ Infinity。
+- **摄取**：UI 选工作空间文件或本地上传 → app-server `kb`（工作空间来源经沙箱 `resolve(read)` 读取）→ RAGFlow 解析/切片/嵌入（原件存 RAGFlow，嵌入直连模型上游）→ Infinity（经 `DOC_ENGINE`）。
 - **审计**：sandbox 拒绝、共享 KB 检索、账号操作、model-proxy 计量 → `core/audit` 追加表 → center 审计页查询。
 
 ## 7. 决策索引
@@ -181,21 +176,22 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 | ADR | 决策 |
 |---|---|
 | [0001](../adr/0001-omp-frozen-fork-subprocess-rpc.md) | omp 冻结 fork，每活跃会话子进程 RPC |
-| [0002](../adr/0002-absorb-ragflow-into-kb-service.md) | 吸收 RAGFlow 组装 kb-service |
+| [0002](../adr/0002-absorb-ragflow-into-kb-service.md) | 吸收 RAGFlow 组装 kb-service（已被 0016 取代） |
 | [0003](../adr/0003-fuse-per-workspace-mounts.md) | FUSE 每空间挂载 |
 | [0004](../adr/0004-sqlite-wal-metadata-store.md) | SQLite WAL 元数据存储 |
-| [0005](../adr/0005-infinity-doc-store.md) | Infinity 文档存储 |
+| [0005](../adr/0005-infinity-doc-store.md) | Infinity 文档存储（2026-11-01 补充：经 RAGFlow 的 `DOC_ENGINE`） |
 | [0006](../adr/0006-rest-sse-event-replay.md) | REST + SSE，事件序号回放 |
 | [0007](../adr/0007-oidc-provider-seam.md) | OIDC provider 接缝 |
 | [0008](../adr/0008-model-proxy-credentials.md) | app-server 模型代理，omp 零凭证 |
 | [0010](../adr/0010-dedicated-omp-uid.md) | omp 子进程单一专用 uid，与 app-server 分离 |
 | [0011](../adr/0011-sandbox-paths-not-browser-secret.md) | 绝对沙箱路径不属于对浏览器保密的信息（界面仍以逻辑路径展示） |
+| [0016](../adr/0016-ragflow-service-backend.md) | 知识库以运行中的 RAGFlow 服务为后端，取代 0002 |
 
 ## 8. 开放问题
 
 - **IdP 是否带组声明**：带则项目组改同步（ADR-0007 的开放尾巴）。解锁条件 = 身份源调研结论；P3 前必须关闭。
 - **omp 子进程池参数**（上限/内存限额/空闲回收）：P1 实测定参（PLAN §5）。
-- **deepdoc 模型内网分发清单**：方案已定捆包（backend-research §3），具体模型清单与体积 P2 落地时定。
+- ~~deepdoc 模型内网分发清单~~ 已关闭（2026-10-28，ADR-0016：解析在 RAGFlow 服务内，本仓不分发模型）。
 - ~~omp 子进程与 app-server 的 uid 分离~~ 已关闭（2026-09-18，ADR-0010：单一专用 omp uid；每账号 uid 记为 S3b/S4b 升级路径）。
 - **模块 import 边界机械化**：dependency-cruiser 接入时机（AGENTS.md 已知盲区之一）。
 

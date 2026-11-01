@@ -18,7 +18,7 @@
 flowchart LR
     B["浏览器 SPA<br/>(自研 UI，token 沿用上游)"] -- "HTTPS + SSE/WS" --> S["app-server<br/>(自研业务后端：SSO/会话/工作空间/<br/>权限/沙箱/审计/连接器配置)"]
     S -- "spawn · stdio JSONL RPC<br/>（每活跃会话一个）" --> A["omp-rpc<br/>(omp 官方二进制 v18.12.3)"]
-    S -- "本地端口" --> K["kb-service<br/>(Python，吸收 RAGFlow)"]
+    S -- "HTTP API（单一服务账号）" --> K["RAGFlow 服务<br/>(外部部署，ADR-0016)"]
     A -- "host_tool_call: KB 检索" --> S -- 转发 --> K
     A -- "OpenAI 兼容" --> P["内网模型注册表<br/>(网关/直连)"]
     K -- 嵌入/重排 --> P
@@ -29,7 +29,7 @@ flowchart LR
 | 浏览器 SPA | **自研**，demo 即形态基准（设计 token 取自上游 5.3.11，已在 demo 文件头与 `ATTRIBUTION.md` 标注）；上游 renderer 的聊天三层渲染管线（`analysis/02-renderer-ui.md`）作实现参照，源码不复用 | demo 全部页面 |
 | app-server | **自研**。服务域划分参照上游 daemon（workbuddy-server：认证/会话/项目/connector/MCP/专家，`analysis/00-overview.md` §4.1）；上游源码为腾讯版权，不复用 | demo 行为 + 上游服务域 |
 | agent 后端 | **omp**（MIT；原定 fork 定死 `33cc6b9a`/v18.0.10，2026-10-20 起钉官方 release v18.12.3，ADR-0001 补充），服务端子进程 `omp --mode rpc-ui`，每活跃会话一个，app-server 管生命周期 | `backend-research.md` §2 |
-| 知识库（解析/切片/检索/agentic 环） | **吸收 RAGFlow**（Apache-2.0）组装为 kb-service；吸收/跳过清单见研究文档 | `backend-research.md` §1 |
+| 知识库（解析/切片/检索/agentic 环） | **部署 RAGFlow 服务**（Apache-2.0，钉住 `v1.0.0-rc2`，不吸收源码），app-server `kb` 模块以单一服务账号直连其 HTTP API；agentic 环的落点由 S2b 定 | [ADR-0016](docs/adr/0016-ragflow-service-backend.md) |
 | 账号 / 权限 / 沙箱 / 审计 | **自研**。沙箱 = 服务端每账号根目录（demo 已按 `/data/workbuddy/<user>` 建模），越界拒绝入审计 | demo `/center` 权限/审计/账号页 |
 | 会话持久化 | omp `SessionManager`（`.jsonl`，resume/fork）+ app-server 侧索引与元数据 | `backend-research.md` §2.1 |
 | 许可 | 根级 `LICENSE` = Apache-2.0；归属义务见 `ATTRIBUTION.md` | 已定稿 |
@@ -44,7 +44,7 @@ flowchart LR
    每会话独立子进程天然给出崩溃隔离、每用户 cwd、资源限额。**[INFERENCE]**
    多用户服务下隔离价值大于进程内调用的延迟收益。
 3. **多租户自研**：权限/可见范围/审计全在 app-server 层（这也是当初弃 Dify 的原因
-   ——其许可禁多租户）。omp 与 kb-service 不感知租户，只拿到已过滤的输入。
+   ——其许可禁多租户）。omp 与 RAGFlow 不感知租户，只拿到已过滤的输入（ADR-0016）。
 
 ## 3. 功能清单（以 demo 行为为准）
 
@@ -91,12 +91,12 @@ flowchart LR
 |---|---|---|
 | **P0 链路骨架** | app-server 骨架（登录桩 + 静态 SPA 托管）+ spawn 官方全量 `omp --mode rpc-ui` + 内网 provider 接通 | 浏览器里一次流式对话渲染完整，会话文件落盘可 resume |
 | **P1 会话与工作空间** | 会话分组/隔离、服务端多根文件树 + 挂载（SFTP/NFS/SMB）、沙箱强制与白名单、文件预览、omp 子进程生命周期管理（每活跃会话一个，空闲回收） | demo `/files` 的全部操作在真实文件系统上等价可用，越界写被拒且入审计 |
-| **P2 知识库** | kb-service（deepdoc 解析 + 模板切片 + 混合检索 + agentic 环）、host tool 经 app-server 转发、宿主侧权限过滤 | 摄取一批真实文档后，会话内引用知识库能给出带出处的切片引用，共享库检索入审计 |
+| **P2 知识库** | app-server `kb` 模块对接 RAGFlow 服务（解析、模板切片与混合检索在 RAGFlow，ADR-0016；agentic 环的落点由 S2b 定）、host tool 经 app-server 转发、宿主侧权限过滤 | 摄取一批真实文档后，会话内引用知识库能给出带出处的切片引用，共享库检索入审计 |
 | **P3 账号权限审计** | 内网 SSO 真对接、项目组、管理员面板、审计事件流全覆盖 | 两个浏览器双账号实测：互看不见对方会话/文件/私有库，共享库只读 |
-| **P4 减肥与部署** | omp 减肥（`backend-research.md` §2.2 阶段 1→4）、onnx/嵌入模型内网分发、部署产物（内网单机部署包） | 冒烟脚本全绿 + 减肥验收指标达标，无公网服务器上全新部署跑通 |
+| **P4 减肥与部署** | omp 减肥（`backend-research.md` §2.2 阶段 1→4）、RAGFlow 全栈随包（ADR-0016）、部署产物（内网单机部署包） | 冒烟脚本全绿 + 减肥验收指标达标，无公网服务器上全新部署跑通 |
 
 顺序纪律：P0 用官方全量 omp 二进制，减肥推迟到 P4——先证明链路，再优化体积。
-P2 依赖 P1 的沙箱（文档存放在所有者沙箱内）；P3 的项目组依赖 P2 的共享范围模型。
+P2 依赖 P1 的沙箱（工作空间来源的文档经沙箱读取后入库，原件存 RAGFlow）；P3 的项目组依赖 P2 的共享范围模型。
 
 ## 5. 边界与风险
 
@@ -105,8 +105,8 @@ P2 依赖 P1 的沙箱（文档存放在所有者沙箱内）；P3 的项目组�
 - **并发资源治理**：每活跃会话一个 omp 子进程，数量上限/内存限额/空闲回收策略需在 P1
   实测定参；并发上来后可参照上游 CLI 预热池思路（`analysis/00-overview.md` §2）。
 - **omp 冻结**：无上游安全修复自动跟进，高危 CVE 时自修或例外 cherry-pick（届时定）。
-- **RAGFlow 吸收成本**：Python 3.13 依赖面大、deepdoc 模型需内网预置、`api.db` 耦合层要重写
-  ——这是 P2 的主要工作量。
+- **RAGFlow 预发行版**：钉住 `v1.0.0-rc2`，rc3 / GA 可能改接口；升级是一次代码变更，要重跑接口实测
+  （ADR-0016）。
 - **SSO 未定**：账号页假定"内网统一身份下发"；若身份源自带组概念（LDAP group 等），
   项目组应改为同步而非自建（待用户方信息）。
-- 吸收 RAGFlow 源码落地时，`ATTRIBUTION.md` §3 的条件义务（LICENSE-RAGFlow/NOTICE/文件头）生效。
+- 发行物含 RAGFlow 镜像时，`ATTRIBUTION.md` §3 的义务（附其 LICENSE 与 NOTICE）生效（ADR-0016）。
