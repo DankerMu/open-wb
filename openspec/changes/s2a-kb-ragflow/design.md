@@ -6,20 +6,22 @@
 
 ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc、`rag/app` 模板、`rag/nlp` 检索、agentic 环）进本仓 `kbservice/`，S2a 先做 spike。2026-10-28 grill 由 owner 拍板改为对接运行中的 RAGFlow 服务（见下方「Grill 结论」）。`IMPLEMENTATION_PLAN.md` S2a 一节与 ADR-0002 是本 change 之前的 oracle；本 change 经 owner 拍板改写它们，改写本身是任务组 2 的产物，不是为了让 change 过审而拧的旋钮。
 
-### RAGFlow v1.0.0-rc2 的已知事实（2026-10-28 读 `v1.0.0-rc2` tag 源码与 `docs/references/http_api_reference.md`；第一组任务对运行中的实例逐条复核）
+### RAGFlow v1.0.0-rc2 的已知事实（2026-10-28 读 `v1.0.0-rc2` tag 源码与 `docs/references/http_api_reference.md`；2026-11-01 按组 1 的实测记录 `docs/reviews/2026-10-28-ragflow-rc2-api.md` 修订，两者不符时以记录为准）
 
 - v1.0 起服务端是 Go 重写（`cmd/ragflow_server.go`、`internal/`），Python `api/` 层不复存在；消息队列换 NATS，缓存换 Kvrocks。rc2 起有 arm64 镜像（`infiniflow/ragflow:v1.0.0-rc2` 多架构；rc1 与 v0.27.x 只有 amd64）。Infinity 的 arm64 tag 存在但起不来（2026-11-01 部署实测：`v0.7.4-arm64` / `v0.7.3-arm64` / `nightly-arm64` 的二进制要 glibc 2.38，底座 Ubuntu 22.04），arm64 开发机用 `v0.7.4-x64-v2` 走 `linux/amd64` 模拟。
-- `GET /api/v1/system/version`、`/system/healthz` 在无鉴权分组（`internal/router/router.go:153-158`）；数据集、文档、模型提供方等路由在 `AuthMiddleware` 分组（`:238-239`），API key 以 `Authorization: Bearer` 传。
-- 业务结果在 body `code`：`0` 成功、`101` 参数非法、`102` 数据无效或缺失、`103` 操作错误、`105` 连接错误、`108` 权限错误、`109` 鉴权错误等；HTTP 200 加非零 `code` 是常态。dsh-team 对 rc1 的实测（检索列表里一个无效库 ID 整次失败、空 `dataset_ids` 为 `101`）与之一致。
-- 数据集：`POST /api/v1/datasets`（`name` 不区分大小写、≤128 字符，文档称重名自动加后缀——未实测，本 change 的命名不依赖它；`embedding_model` 形如 `model@factory`；`chunk_method` 取 `naive`/`book`/`email`/`laws`/`manual`/`one`/`paper`/`picture`/`presentation`/`qa`/`table`/`tag` 十二种；「Migrate to 1.0」一节另说 Go 侧改用 `parser_id`、`naive` 规范为 `general`——文档自相矛盾，须实测）；`PUT /api/v1/datasets/{id}` 改 `embedding_model` 要求 `chunk_count` 为 0；`DELETE /api/v1/datasets`。
-- 文档：上传 `POST /api/v1/datasets/{id}/documents`（multipart）、下载、列表、删除、解析 `POST …/documents/parse`、停止解析；列表带解析状态与切片数。
-- RAPTOR / 知识图谱在 rc2 归入「knowledge compilation」（`internal/entity/dataset.go:85-86` 的 `PipelineTaskTypeRAPTOR` / `GraphRAG`，`GET /:dataset_id/compilation/status`，`compilation-templates`）；HTTP 参考文档没有写数据集级的开启方式。
-- 模型提供方：`/providers/:provider/instances/:instance/models`（增删改查）、`GET` / `PATCH /me/models`（账号缺省模型）。是否接受 API key 鉴权须实测。
+- `GET /api/v1/system/version`、`/system/healthz` 在无鉴权分组（`internal/router/router.go:153-158`）；数据集、文档、模型提供方等路由在 `AuthMiddleware` 分组（`:238-239`），API key 以 `Authorization: Bearer` 传。`GET /api/v1/pipelines/<parser_id>` 也无须鉴权（记录 §15）。
+- 业务结果在 body `code`。实测观察到 `0`、`100`、`101`、`102`、`103`、`400`、`401`、`403`、`404`、`409`、`500`、`501`；文档列出的 `105`、`108`、`109` 未观察到（记录 §12、§14、§15）。HTTP 200 加非零 `code` 是常态；鉴权失败是 HTTP 401 + `code:401`；`code:0` 也不代表操作生效（`success_count:0`、`deleted:0`，记录 §8）。dsh-team 对 rc1 的实测（检索列表里一个无效库 ID 整次失败、空 `dataset_ids` 为 `101`）与之一致。
+- 数据集：`POST /api/v1/datasets` 的模板字段是 `parser_id`，必须同时带 `parse_type`（`1` 内置；`2` pipeline，改带 `pipeline_id`）；`chunk_method` 回 `101`；`naive` 是 `general` 的别名；`tag` 回 `102`，不可建；`audio` 可建。`embedding_model` 是三段式 `模型@实例@提供方`，两段式只在实例名为 `default` 时可用，不传时回落到账号缺省甚至空值。`name` 不区分大小写、≤128 字符，重名自动加后缀。`PUT /api/v1/datasets/{id}` 改 `embedding_model` 在 `chunk_count` 非 0 时也成功，但不重算向量（记录 §6）。`DELETE /api/v1/datasets` 对不存在的 id 回 `code:403`。
+- 文档：上传 `POST /api/v1/datasets/{id}/documents`（multipart，字段 `file`）、下载、列表、删除、解析 `POST …/documents/parse`、停止解析 `POST …/documents/stop`。运行状态字段是 `ingestion_status`（八种取值），切片数字段是 `chunk_count`；`status` 恒为 `"1"`，不是运行状态。后缀不归模板管时静默换解析器（记录 §7.4），不支持的后缀回 `code:500`（§7.1），同名上传改名为 `a(1).txt`（§7.1）。
+- RAPTOR / 知识图谱不是数据集字段，`parser_config` 里的开关被静默丢弃。开启方式是模板组 + 画布 + `parse_type:2` 数据集（`compilation-template-groups`、`POST /agents`），解析时自动编译，没有也不需要单独的触发接口（记录 §5.1、§5.2）。`GET /:dataset_id/compilation/status` 按类型没有终态；任务日志 `GET /:dataset_id/ingestions` 有 `task_type` 与 `operation_status`（§5.3）。Compiler 的 `llm_id` 建库时固化为账号当时的缺省对话模型；文档阶段依赖账号缺省嵌入模型；数据集级合并依赖账号缺省对话模型，没有缺省时全栈唯一的入库进程崩溃循环（§5.5、§13）。
+- 模型提供方：`/providers/:provider/instances/:instance/models`（增删改查，API key 可用，记录 §11）。账号缺省模型读写走 `GET` / `PATCH /api/v1/models/default`。`GET /api/v1/me/models` 不存在；`PATCH /api/v1/users/me/models` 不校验租户归属，不用（§11.2、§15）。`GET …/instances/<实例>` 明文回显上游密钥（§11.1）。
 
 ### 共用开发栈（dsh-team）
 
+- 共用栈已存在：运行 `v1.0.0-rc2`，`DOC_ENGINE=infinity`，arm64 开发机的 Infinity 走 x64 模拟。它由 agent 按 owner 授权部署过一次（2026-11-01，grill #33）；此后 agent 任务仍不 up / down / restart / 改配置（D16）。
 - dsh-team 的 `stage-2-dsh-ragflow-office` change 把 RAGFlow 当外部常驻测试栈：地址与密钥只在 0600 私有配置文件，用例跑完「RAGFlow 测试栈不变」，`docker info` MemTotal ≥14 GiB（`design.md` 决定 13、tasks 10.1–10.3，尚未实施）。其设计实测的是 rc1；owner 已定两边统一到 rc2，由 owner 在 dsh-team 侧推动。
-- 本机 Docker 分配 15.6 GiB（`docker info` MemTotal 16747859968），放不下两套 RAGFlow。2026-10-28 本机没有任何 RAGFlow 容器或 compose 项目。
+- 本机 Docker 分配 15.6 GiB（`docker info` MemTotal 16747859968），放不下两套 RAGFlow。
+- 入库 worker 全栈只有 1 个，解析串行；入库进程崩溃循环时，栈上所有账号的入库都受影响（记录 §8.4、§13）。
 
 ### 主干现状（c24ac7dd）
 
@@ -35,9 +37,9 @@ ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc
 - `kbservice/` 只有骨架（5 个跟踪文件，`dependencies = []`），引用遍布 Makefile、CI 两个 job、控制面 oracle、size-guard、jscpd、`AGENTS.md`、`constraints.yaml`、`project-profile.md`。
 - 迁移最后为 049。
 
-## Grill 结论（2026-10-28，owner 逐分支拍板；#26–#29 为 Stage 4 补问）
+## Grill 结论（2026-10-28，owner 逐分支拍板；#26–#29 为 Stage 4 补问；#30–#33 为 2026-11-01 实测后的 owner 决定）
 
-「结论」列摘自 grill 账本：第 4、8、26–29 行逐字照录，其余行为缩写，原文见 grill 凭证。Stage 4 的细化写在「落点」列；标「待 owner 复核」的三处（第 4、13、27 行）由 Stage 5 写进 Epic 正文，等 owner 确认。
+「结论」列摘自 grill 账本：第 4、8、26–29 行逐字照录，其余行为缩写，原文见 grill 凭证；第 30–36 行是修订 #1863 时 owner 的决定，决定人 owner。Stage 4 的细化写在「落点」列；标「待 owner 复核」的三处（第 4、13、27 行）由 Stage 5 写进 Epic 正文，等 owner 确认。
 
 | # | 分支 | 结论 | 落点 |
 |---|---|---|---|
@@ -68,13 +70,20 @@ ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc
 | 27 | 手配退路的落地方式 | spec 只写下发主路径；退路作为 design 应急预案（含只探活）。组 1 实测「不支持」时先按预案改本 change 的 spec 并重过审核，再放行组 8/14/17；「自动」解读为预案已定、不再问 owner | D7「应急预案」。细化（agent 判断，待 owner 复核）：预案还要改状态端点的 `embeddingReady`（组 6）、建库时的 `embedding_model`（组 9）与 `api-kb.ts` 的设置视图（组 15），所以修订过审前停的是组 6 及其后全部（组 7 除外），比账本的组 8/14/17 多停组 6 与组 15 首刀（组 9 及组 15 剩余本就经组 8 传递依赖，组 15 首刀经 1.4 的 `Depends on #<R>` 显式挡住）；修订由 agent 按预案执行并重过审核，不再询问 owner |
 | 28 | 知识库对话模型生命周期 | 引用 models 行 + 联动：被指定时不能删（409）；改其上游或密钥时同步重新下发到 RAGFlow，下发失败则该次修改失败；改 models 注册表既有端点规格 | D7、model-registry「模型管理端点」 |
 | 29 | 重建遇原件缺失 | 跳过并移除该文档行，写进 kb.rebuild 审计的 skipped 列表，库照常完成；rebuild_failed 状态下也允许移出文档 | D8、D13 |
+| 30 | 修订范围 | 修订覆盖实测记录 §18 全部事实，不只模板表（决定人 owner，2026-11-01） | D2、D4、D6–D14、组 5–17 |
+| 31 | 模板表 | 按实测放开：RAPTOR 与知识图谱对 11 种模板都可用；删除 `tag`；不加 `audio`。偏离 demo 的「RAPTOR 六种」（决定人 owner，2026-11-01） | D9、Goals / Non-Goals、knowledge-bases |
+| 32 | 编译开关 | RAPTOR / 知识图谱开关留在 S2a，实现为模板组 + 画布 + `parse_type:2` pipeline 数据集（决定人 owner，2026-11-01） | D9、D14 |
+| 33 | 文档存储与共用栈 | `DOC_ENGINE=infinity`；arm64 开发机 Infinity 走 x64 模拟；共用栈已由 owner 授权部署，此后 agent 任务仍不 up / down / restart / 改配置（决定人 owner，2026-11-01） | D16、Context |
+| 34 | 对话模型锁定 | 有开编译的库时 `chatModelId` 不能清空也不能改，回 409 `kb_chat_model_locked`；模型下线只能先删编译库（决定人 owner，2026-11-01） | D7 |
+| 35 | 重建与画布 | 重建时新建模板组与画布，`knowledge_bases` 加四列，不复用旧的（决定人 owner，2026-11-01） | D6、D8、D9 |
+| 36 | 后缀判定 | 入库的后缀判定对全部知识库生效，不只开编译的库（决定人 owner，2026-11-01） | D10、D11 |
 
-开放项与落点：rc2 接口能力 → 组 1；dsh-team 升 rc2 的时间与其 `DOC_ENGINE` → Open Questions；S2b agentic 环落点 → Non-Goals；规划文档改写 → 组 2。
+开放项与落点：rc2 接口能力 → 组 1（已完成，见实测记录）；共用栈版本与 `DOC_ENGINE` → #33；S2b agentic 环落点 → Non-Goals；规划文档改写 → 组 2。
 
 ## Goals / Non-Goals
 
 **Goals**
-- 所有者在中心「知识库」tab 建库（12 种模板 + RAPTOR / 知识图谱开关）、从工作空间或本地上传入库、看到解析状态与切片数、移出文档、删库。
+- 所有者在中心「知识库」tab 建库（11 种模板 + RAPTOR / 知识图谱开关）、从工作空间或本地上传入库、看到解析状态与切片数、移出文档、删库。
 - 管理员在模型 tab 配置唯一的知识库嵌入模型与知识库对话模型，并能安全地更换嵌入模型（确认 + 全量重建）。
 - RAGFlow 的 API key 只在 app-server 进程内存里；RAGFlow 不感知本系统的用户。
 - `kbservice/` 与 Python 工具链从仓库移除，CI 与控制面 oracle 同步。
@@ -85,7 +94,8 @@ ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc
 - 可见范围四档、共享只读、跨账号检索审计、`scope` 列（S2c）。
 - 部署包、RAGFlow 栈的打包与运维脚本（S4b）。
 - 拉起、停止或配置 RAGFlow 栈；本仓任何脚本与测试都不执行 `docker compose up` / `down`。
-- 标签集模板 `tag` 与其它库的关联（`tag_kb_ids`）：可以建 `tag` 模板的库并入库，不提供把它关联到其它库的入口。
+- 标签集模板 `tag`：rc2 回 `102`，不可建，随之没有 `tag_kb_ids` 关联。
+- `audio` 模板：rc2 可建，但要语音模型，编译未测成（记录表 C），不提供。
 - 源文件变更后的自动同步；知识库内文档的切片浏览与编辑；建库后修改模板或开关；对本地上传文档的重新解析入口（失败或未解析的上传文档只能移出后重传）。
 - RAGFlow 的多用户、团队与 `permission: team`。
 - 向 RAGFlow 推送重排模型（S2b）。
@@ -106,7 +116,7 @@ app-server 新模块 `server/src/kb/` 是第十二个启动模块，注册在 `c
 ### D2 单一服务账号与映射
 
 - 整个服务用一个 RAGFlow 账号的 API key。
-- RAGFlow 里的数据集名为 `owb-<知识库 id>-g<嵌入代数>`（id 为 32 位小写十六进制）。建库时代数为当时的 `embedding_generation`，重建时为新代数。所以同一知识库的新旧两份数据集名字不同，不依赖 RAGFlow 对重名的处理，也能从名字对账。
+- RAGFlow 里的数据集名为 `owb-<知识库 id>-g<嵌入代数>`（id 为 32 位小写十六进制）。建库时代数为当时的 `embedding_generation`，重建时为新代数。所以同一知识库的新旧两份数据集名字不同，不依赖 RAGFlow 对重名的处理，也能从名字对账。开了开关的库，模板组与画布用同一个名字（D9）。
 - 用户可见的知识库名只存在 SQLite；RAGFlow 的文档 id 存 `kb_documents.ragflow_document_id`。
 - 所有权与可见性（S2a 只有所有者）只在 app-server 判定；别人的知识库 id 一律 `not_found`，不可探测。
 
@@ -140,24 +150,55 @@ app-server 新模块 `server/src/kb/` 是第十二个启动模块，注册在 `c
 - 上传与下载：连接 10 s，空闲 60 s，没有总期限（体积由 `KB_UPLOAD_MAX_BYTES` 约束）。
 - 期限经 `AssemblyDependencies` 注入，便于测试。
 - 每个请求带 `Authorization: Bearer <key>`，`/system/version` 除外。
+- 客户端不提供 `GET …/instances/<实例>`：它明文回显上游密钥。实例是否存在读 `GET /api/v1/models`（D7）。
+- 客户端不提供任何删除或清空 RAGFlow 模型配置的调用（D7 的不变量）。
 
 客户端返回类型化结果，REST 层再映射为错误信封。按次序判定：
 
-| RAGFlow 结果 | 本系统 |
-|---|---|
-| 实测记录给出的「不存在」组合（HTTP 状态加 code，可能与 `102` 重叠，所以先判） | 类型化 `not_found` 结果，由调用点决定：删除视为已删；读文档视为 `missing`；读数据集视为该库数据集丢失 |
-| HTTP 2xx 且 body `code === 0` | 成功 |
-| body `code` 为 `101` 或 `102` | `kb_rejected`（400） |
-| HTTP 401 / 403，或 body `code` 为 `108` / `109` | `kb_unavailable`（503），并经受管 stderr writer 写一行 `{"event":"kb_upstream_auth_failed"}`（每进程每分钟至多一行） |
-| 其它非零 `code`、非 2xx、非 JSON、超体积、超时、连接失败、3xx | `kb_unavailable`（503） |
+| 次序 | RAGFlow 结果 | 本系统 |
+|---|---|---|
+| 1 | 下表的路由专属组合（与下面各行重叠，所以先判） | 类型化结果，由调用点决定 |
+| 2 | HTTP 2xx 且 body `code === 0` | 成功 |
+| 3 | body `code` 为 `101` 或 `102` | `kb_rejected`（400） |
+| 4 | HTTP 401，或 body `code` 为 `401` / `403` | `kb_unavailable`（503），并经受管 stderr writer 写一行 `{"event":"kb_upstream_auth_failed"}`（每进程每分钟至多一行） |
+| 5 | 其它非零 `code`、非 2xx、非 JSON、超体积、超时、连接失败、3xx、成功应答缺少调用点要读的字段 | `kb_unavailable`（503） |
 
-RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密钥或文件内容。
+路由专属组合（记录表 B、§7.1、§8、§9.1）：
+
+| 路由 | 组合 | 类型化结果 |
+|---|---|---|
+| `GET /datasets/<id>/documents` | `code:404` | `not_found` |
+| `POST /datasets/<id>/documents` | `code:102` 且 message 以 `Can't find the dataset with ID` 开头 | `not_found` |
+| `POST /datasets/<id>/documents` | `code:500` 且 message 含 `This type of file has not been supported yet!` | `unsupported_file` |
+| `POST …/documents/parse` | `code:404` | `not_found` |
+| `POST …/documents/parse` | `code:0` 且 `data.success_count` 为 0 | `parse_not_started` |
+| `POST …/documents/stop` | `code:404`；`code:100` 且 message 以 `Documents not found:` 开头 | `not_found` |
+| `DELETE …/documents` | `code:404`；`code:102` 且 message 以 `These documents do not belong to dataset` 开头 | `not_found` |
+| `DELETE …/documents` | `code:0` 且 `data.deleted` 为 0 | `not_deleted` |
+| `DELETE /datasets` | `code:403` | `not_found` |
+| `GET …/documents/<doc>`（下载） | D8 的下载判别 | 文件流或 `not_found` |
+| `DELETE /agents/<id>` | `code:103` | `not_found` |
+| `DELETE /compilation-template-groups/<id>` | `code:404` | `not_found` |
+
+调用点的处理：
+- `not_found`：删除视为已删；文档列表视为该库数据集丢失，全部 `missing`；上传与解析触发按 `kb_unavailable` 处理（数据集没了，后面的条目也不会好）。
+- `parse_not_started`：`code` 是 0，但文档没有启动解析（文档不存在、已在运行、已完成都是这个应答，§8.1）。对刚上传的文档按 `kb_rejected` 处理，单条失败，不中止整批。
+- `unsupported_file`：按 `unsupported_type` 拒绝这一条，不中止整批（D10）。
+- `not_deleted`：文档在 `RUNNING` 或 `STOPPING`，行仍在，按 D13 的删除写法处理，不算已删。
+
+几条依据：
+- `DELETE /datasets` 一次只发一个 id：混合批次回 `403` 且全部不删（§10）；`{"ids":[]}` 回 `code:0` 什么也不删（§4.6），所以客户端拒绝空 id，成功以 `data.success_count === 1` 为准。
+- `code:403` 只有 `DELETE /datasets` 上才是「不存在」，不能反过来把 `403` 当不存在（§12）。作为权限错误它只在一条路由上观察到，单账号造不出真实权限错误，别的路由上的形状未知，所以第 4 行是防御性判定：HTTP 200 + `code:403` 也写 `kb_upstream_auth_failed`。
+- `108`、`109` 未观察到，不进映射与夹具；万一出现，落入第 5 行。
+- JSON 上限 1 MiB 的实测核对见 tasks 1.5。
+
+RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密钥或文件内容；失败消息还可能带上游 request id（§5.4）。上表的前缀判定是 message 唯一的用处。
 
 ### D5 `GET /api/kb/status` 与版本钉住
 
 登录用户可调。
 - 知识库关闭时返回 `{enabled:false}`。
-- 开启时每次调用 `GET <base>/api/v1/system/version`（5 s 总期限，不带 key）。版本串恰为 `v1.0.0-rc2`（实测记录给出确切字段）才算 `available:true`。版本不符时写一行 `{"event":"kb_version_mismatch"}`（每进程每分钟至多一行），并为 `available:false`。
+- 开启时每次调用 `GET <base>/api/v1/system/version`（5 s 总期限，不带 key）。版本串（应答的 `data` 字段）恰为 `v1.0.0-rc2` 才算 `available:true`。版本不符时写一行 `{"event":"kb_version_mismatch"}`（每进程每分钟至多一行），并为 `available:false`。
 - 应答 `{enabled:true, available, embeddingReady, compileReady, uploadMaxBytes, uploadMaxFiles}`：`embeddingReady` 为已配置嵌入模型，`compileReady` 为已指定知识库对话模型。
 
 版本钉住意味着升级 RAGFlow 是一次代码变更，与 omp 钉版同一纪律。它只决定 `available`；其它端点不因版本不符而拒绝，web 在 `available:false` 时不渲染知识库控件。
@@ -165,8 +206,10 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 ### D6 迁移 050
 
 `050_knowledge_bases.sql`，头注照 049 的惯例。三张表的列见 knowledge-bases「迁移 050 知识库 schema」，要点：
-- `kb_settings` 只有一行；`rebuild_actor_id` 记最近一次发起或重试重建的管理员，供重建器续做时写审计（`audit_events.actor_id NOT NULL`）。
+- `kb_settings` 只有一行；`rebuild_actor_id` 记最近一次发起或重试重建的管理员，供重建器续做时写审计（`audit_events.actor_id NOT NULL`）。`kb_settings` 不为 RAGFlow 加列：模型实例名是常量（D7）。
 - `chat_model_id … ON DELETE SET NULL`：知识库开启时，删除被引用的模型已在端点层以 409 `kb_model_in_use` 拦住（D7）。外键置空只在知识库关闭时生效。
+- `knowledge_bases` 存两组 RAGFlow id：当前一代的 `dataset_id`、`canvas_id`、`template_group_id`，重建中新一代的 `rebuild_dataset_id`、`rebuild_canvas_id`、`rebuild_template_group_id`（D8、D9）。两个开关都为 0 的库，画布与模板组的列都是 NULL，由 CHECK 钉住。
+- `template` 的 CHECK 是十一种模板，不含 `tag` 与 `audio`（D9）。
 - `kb_documents.workspace_id` 不加外键：工作空间删除后，文档是入库快照，照常保留。
 
 上限：
@@ -179,11 +222,52 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 **存放（#26）**：嵌入模型全局唯一，存在 `kb_settings`，不进 `models` 表。`models` 是对话模型白名单的唯一来源，进 `models.yml` 与输入框的模型选择；嵌入模型混进去，要给每条既有规则加排除。知识库对话模型是对 `models` 某一行的引用，只能选带上游的行。
 
 **保存**：`PUT /api/kb/settings`（管理员）的 body 为 `{embedding?: {name, baseUrl, apiKey?}, chatModelId?: string|null, confirmRebuild?: true}`，在进程级设置锁（D20）下执行：
-1. 先把模型配置下发到 RAGFlow 服务账号，接口以实测记录为准：一个 OpenAI 兼容的 provider instance 承载嵌入模型；知识库对话模型若上游不同，则另一个 instance，并把对话模型设为账号缺省，供 knowledge compilation 使用。`chatModelId` 改为 `null` 时，撤销对话模型的下发。
-2. 下发失败：按 D4 映射，不改本地设置。
-3. 下发成功：在同一事务里写设置与 `kb.settings` 审计。
+1. 判定 `chatModelId` 的取值规则（见下）。
+2. 把模型配置下发到 RAGFlow 服务账号（见下）。`chatModelId` 改为 `null` 时没有下发。
+3. 下发失败：按 D4 映射，不改本地设置。
+4. 下发成功：在同一事务里写设置与 `kb.settings` 审计。
 
 三个设置端点的成功应答都是 200 加设置读视图（ragflow-backend「知识库模型设置」）。
+
+**下发**（记录 §11，全部用 API key）：两个实例名是常量，`owb-embed` 承载嵌入模型，`owb-chat` 承载知识库对话模型，提供方都是 `OpenAI-API-Compatible`。不按「上游是否相同」分支，也不用存任何 RAGFlow 侧的 id。每次下发一个实例，步骤固定：
+1. `PUT /api/v1/providers`，带 `provider_name`（幂等）。
+2. `GET /api/v1/models`，按 `provider_name` 与 `instance_name` 看实例是否存在。这个列表不含密钥，账号没有模型时回空列表（§11.1、§16）。本系统的实例建出来就有模型，也从不删模型，所以有实例就一定在这个列表里。
+3. 不存在：`POST …/instances`，带 `instance_name`、`api_key`、`base_url`、`model_info`。存在：先 `GET …/instances/<实例>/models` 读现有模型，再 `PUT …/instances/<实例>`，带同样四个字段，`model_info` 为现有项加本次的模型。
+4. `PATCH /api/v1/models/default`，带 `model_provider`、`model_instance`、`model_name`、`model_type`。
+
+实测带来的约束：
+- 重复 `POST` 同名实例回 `code:500`，所以先读模型列表，不盲发；`PUT` 不带 `model_info` 回 HTTP 400，所以总是带。
+- `model_info` 只增不减，同名项以本次为准：模型从 `model_info` 里消失的效果未测，本设计不依赖它。
+- `api_key` 恒为实际密钥。空串会清空实例密钥（§11.4）：`embedding.apiKey` 省略时取 `kb_settings` 已存的值，对话模型取 `models` 行的密钥，客户端拒绝发出空 `api_key`。
+- `model_info` 项为 `{model_name, model_type, max_tokens}`：嵌入模型 `model_type` 为 `["embedding"]`、`max_tokens` 固定 `8192`（实测值）；对话模型为 `["chat"]`、`max_tokens` 取该行的 `maxTokens`。
+- 第 4 步对嵌入与对话都要做：数据集的 `embedding_model` 显式传，但文档阶段的 Compiler 读账号缺省嵌入模型（§5.5）。
+- `embedding_model` 恒为 `<name>@owb-embed@OpenAI-API-Compatible`，`llm_id` 由 RAGFlow 固化成同样的三段式，所以 `embedding.name` 与 `chatModelId` 含 `@` 即 400。
+- 不用 `PATCH /api/v1/users/me/models`（§11.2）。
+- `GET …/instances/<实例>` 明文回显密钥，客户端不提供这个调用（D4）；`PUT` 的请求体含密钥，只进出站请求，不进日志。
+
+下发不是原子的：第 3 步成功、第 4 步失败时 RAGFlow 已是新值，本地仍是旧值。重试同一次保存即收敛，上面的步骤是幂等的。
+
+**账号缺省不变量（§13，最高优先）**：系统的任何路径都不得让服务账号处于「没有缺省对话模型，而可能有 pipeline 数据集或待合并任务」的状态。清空缺省后，已开编译的库下一次入库就会让全栈唯一的入库进程崩溃循环，影响栈上全部账号。落法：
+- app-server 不调用清空缺省的 `PATCH /models/default`（`{"model_type":"chat"}` 或三个名字为空串），也不调用 `/providers` 下的任何 `DELETE`。RAGFlow 里的模型配置只增、只覆盖，客户端根本没有这些调用。
+- 所以「删除被账号缺省引用的模型」这条路径不存在，缺省不会悬空。记录 §14 与 #1863 评论留下的问题（缺省悬空时数据集级合并是否同样崩溃）不再需要回答，不加补测。
+- 嵌入模型配置后没有清空入口：`PUT` 的 `embedding` 只能换，不能置空。更换时第 4 步把账号缺省切到新模型，切换是一次 `PATCH`，中间没有空窗。
+- 删除 `models` 行、取消指定都只改本地，不碰 RAGFlow（见下）。
+
+**`chatModelId` 的取值规则**：「开编译的库」指 `raptor = 1` 或 `graph = 1` 的行，含 `rebuilding` 与 `rebuild_failed`。
+
+| 本次 `chatModelId` | 当前值为 `null` | 当前值非 `null`，有开编译的库 | 当前值非 `null`，没有开编译的库 |
+|---|---|---|---|
+| 与当前值相同的 id | 不适用 | 下发（幂等）并保存 | 下发（幂等）并保存 |
+| 别的 id | 下发并保存 | 409 `kb_chat_model_locked` | 下发并保存 |
+| `null` | 无操作 | 409 `kb_chat_model_locked` | 只改本地，不发 RAGFlow 请求 |
+
+判定在设置锁内做，建库也在设置锁内，所以不会与一次建库交错。
+
+不只禁止置 `null`，也禁止换成别的模型：Compiler 的 `llm_id` 建库时固化（§5.5），而 `owb-chat` 是固定实例，换模型会把它的上游覆盖掉，旧库的 `旧模型@owb-chat` 随之打到新上游。新上游不服务旧模型名时，图谱文档 `FAILED`，RAPTOR 完全无信号（§5.4）。要让旧库用上新模型只能重建数据集，S2a 不做（Not yet specified）。同一行轮换密钥或改地址不受影响，走下面的联动。
+
+**撤销只是本地取消指定**：`chatModelId` 改为 `null` 后，`compileReady` 变假，建库表单不再显示开关。RAGFlow 里已下发的配置不动，账号缺省仍指向它，下一次下发时覆盖。
+
+这改变了 ADR-0016 的「删除与轮换经联动同步」：轮换仍同步；取消指定之后，上游密钥留在 `owb-chat` 里，直到被覆盖或运维清理，这期间删除那一行 `models` 也不同步。ADR-0016 的这一条由组 8 同 PR 改写（tasks 8.6）。运维清理要按记录 §16 的次序：先删数据集、画布、模板组，静默到没有编译活动，才清缺省、删实例。
 
 **嵌入身份**为 `(name, baseUrl)`，只改密钥不算身份变化。身份变化且存在任一知识库时：
 - 未带 `confirmRebuild:true`：409 `kb_rebuild_required`，不下发，不保存。
@@ -192,39 +276,42 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 
 **与 models 的联动（#28）**：知识库开启且某行是知识库对话模型时，`models` 经 D1 的钩子请 `kb` 判定：
 - `DELETE` 该行，或 `PUT` 把它的 `upstream` 置为 `null`：409 `kb_model_in_use`（新码；`model_in_use` 的文案专指缺省模型，不改它）。
-- `PUT` 且 `upstreamChanged` 为真：先把新上游重新下发到 RAGFlow，成功后 `models` 才写库；失败则该次 `PUT` 按 D4 映射失败，行、审计与 `models.yml` 都不变。
+- `PUT` 且 `upstreamChanged` 为真：先把新上游重新下发到 `owb-chat`，成功后 `models` 才写库；失败则该次 `PUT` 按 D4 映射失败，行、审计与 `models.yml` 都不变。
 
-引用判定、重新下发与 `models` 的那次写入都在设置锁内完成（删除时的引用判定同样在锁内），所以不会与一次并发的 `PUT /api/kb/settings {chatModelId}` 交错。这样，在知识库开启期间，删除或轮换上游后 RAGFlow 侧不会残留已作废的凭证。知识库关闭期间删除或轮换不联动，之前下发到 RAGFlow 的副本不会被撤销；重新开启后，管理员保存一次知识库模型设置即覆盖它。
+引用判定、重新下发与 `models` 的那次写入都在设置锁内完成（删除时的引用判定同样在锁内），所以不会与一次并发的 `PUT /api/kb/settings {chatModelId}` 交错。这样，在知识库开启期间，被指定模型的上游一改就同步到 RAGFlow。知识库关闭期间删除或轮换不联动，之前下发到 RAGFlow 的副本不会被撤销；重新开启后，管理员保存一次知识库模型设置即覆盖它。
 
-**应急预案：rc2 不能用 API key 下发模型（#27）**
+知识库关闭期间删除被引用的模型，外键把 `chat_model_id` 置空，开编译的库可能还在。这时账号缺省仍在 RAGFlow 里，入库不会崩；`compileReady` 为假，管理员指定一个新模型即恢复（上表第一列）。旧库的 `llm_id` 还是旧名字，这是关闭期间绕过联动的已知后果。
 
-本段不进 spec。组 1 的实测记录若在「模型下发」一节结论为「不支持」：
-1. 组 1 照常合入记录，并在 Epic 下报告。
-2. 按本预案修订本 change 的 spec delta（不再询问 owner），重过 Stage 3–4.5。
-3. 修订过审之前，组 6 及其后全部任务组（组 7 除外）不开工：除账本点名的组 8、14、17 外，组 6 的 `embeddingReady` 与组 15 首刀的设置视图也要按预案改（grill #27 的细化）。机制：组 1 建修订 issue R（`Depends on #<Epic>`），并在组 6 与组 15 首刀的 issue 正文加 `Depends on #<R>`；其余被停的组经依赖链传递挡住（tasks 1.4）。
-
-预案内容，即修订时要改的地方：
-- **嵌入模型来源**：由运维在 RAGFlow 后台给服务账号配置缺省嵌入模型与缺省对话模型；`PUT /api/kb/settings` 不再接受 `embedding`，也不再下发对话模型（`chatModelId` 只作 `compileReady` 的开关）。
-- **读视图**：`embedding` 变为 `{name, baseUrl:null, probe}`，`name` 从 RAGFlow 账号的缺省嵌入模型读出；视图加 `rebuildNeeded`。
-- **探活（「只探活与显示」）**：`POST /api/kb/settings/probe` 改为经 RAGFlow 读账号缺省模型并确认其存在，结果写回 `probe`。
-- **状态端点**：`embeddingReady` 改为「RAGFlow 账号有缺省嵌入模型」。
-- **嵌入身份**：迁移 051 给 `knowledge_bases` 加 `embedding_name`，建库时记下当时的缺省名。任一库的记录与当前缺省不同，即 `rebuildNeeded:true`。
-- **重建入口**：管理员在模型 tab 点 `重建全部知识库` 并确认后，走 D8 的流程。重建路由不再 bodyless，要么改为带 `{confirm:true}`，要么另开路由；http-service-skeleton 的归属集同步。
-- **web**：model-registry「模型 tab」加上述只读显示与重建按钮的变体。
-- **models 联动**：退路下不再下发对话模型，model-registry「模型管理端点」里 #28 的重新下发条款随之删去；删除保护（`chatModelId` 仍是 `compileReady` 的开关）是否保留由修订时一并决定。
+组 1 结论为「支持」（记录 §11），#27 的应急预案未触发，已从本节删去。
 
 ### D8 嵌入模型更换与全量重建
 
 重建在进程内单线程串行执行，一次一个知识库，处理期间持有该库的写锁（D20）。重建器由 `kb` 模块在 `server_started` 之后不等待地启动；启动时，对仍是 `rebuilding` 的库从第一步续做。每个库的步骤：
-1. 若 `rebuild_dataset_id` 非空，先删它；不存在视为已删。
-2. 按原模板与开关、新嵌入模型建新数据集 `owb-<id>-g<新代数>`，写回 `rebuild_dataset_id`。
-3. 逐份文档，从旧数据集流式下载入库原件，上传到新数据集，记下新文档 id：
-   - multipart 长度按本地 `kb_documents.size` 计算。rc2 的下载 handler 以 gin `c.Data` 应答（`internal/handler/document.go:1179-1222`），大于 2 KiB 的文件很可能走分块传输，所以不依赖 `Content-Length`。
+1. `rebuild_dataset_id` 非空时，按 D9 的删除次序删掉残留的一代，不存在视为已删，再把三个 `rebuild_*` 列置空。
+2. 按原模板与开关、新嵌入模型，经 `createPipeline` 建新一代（D9），名为 `owb-<id>-g<新代数>`，写回三个 `rebuild_*` 列。
+3. 逐份文档，从旧数据集流式下载入库原件，上传到新数据集，再触发这份文档的解析（`parse_not_started` 即该库失败），记下新文档 id：
+   - multipart 长度按本地 `kb_documents.size` 计算。
    - 下载为 not-found：该文档记为跳过（#29）。
    - 实际字节数与 `size` 不符：该库失败。
-4. 对新数据集的全部文档触发解析；按 D14 需要时再触发编译。
-5. 单事务切换：删除被跳过的行；其余行换成新 id；`dataset_id = rebuild_dataset_id`；`rebuild_dataset_id = NULL`；`embedding_generation` 设为当前代数；`state = ready`；审计 `kb.rebuild {id, result:"ok", skipped}`。
-6. 删旧数据集。删除失败只写一行 `{"event":"kb_dataset_leak","datasetId":<id>}`，不带名称与内容，不影响状态。
+4. 单事务切换：删除被跳过的行；其余行换成新 id；`dataset_id`、`canvas_id`、`template_group_id` 换成 `rebuild_*` 的值，三个 `rebuild_*` 列置空；`embedding_generation` 设为当前代数；`state = ready`；审计 `kb.rebuild {id, result:"ok", skipped}`。
+5. 按 D9 的删除次序删旧一代。数据集删除失败写一行 `{"event":"kb_dataset_leak","datasetId":<id>}`，并且不再删它的画布与模板组；画布或模板组删除失败写一行 `{"event":"kb_pipeline_leak","canvasId":<id|null>,"groupId":<id|null>}`。都不带名称与内容，不影响状态。
+
+逐份触发解析而不是一次传全部 id：批量上限只验证到 40 份（§8.5），逐份还能和 D10 共用同一段上传加解析。
+
+**模板组与画布重建时新建，不复用。** 重建开始时旧数据集里的文档可能还在排队或解析：解析是 RAGFlow 异步跑的，写锁管不到它。而两个数据集在同一画布上解析从未验证过（§5.1 (5)、§14）。建与删走同一对函数，重建器不多一条分支，代价是 `knowledge_bases` 多两列。
+
+**下载判别**（§9.1）：not-found 也是 HTTP 200，文件内容可以恰好等于 not-found 正文，所以不能解析正文判成败。
+- HTTP 200 且带 `Content-Disposition`：是文件字节，正文一律不解析，也不看 `Content-Type`、`Content-Length` 与后缀。这个头的值不解析：非 ASCII 名是原始 UTF-8，`"` 不转义（§9.2）。
+- HTTP 200 且不带：按 JSON 解析（受 1 MiB 上限），body `code` 为 `404` 是 not-found，其余按 D4 的通用行判定。
+- 非 200：按 D4 的通用行判定。
+
+这个判据只在直连实例上验证过。中间若有代理剥掉这个头，下载判为失败，该库 `rebuild_failed`，不会把错误应答当文件上传。
+
+实测下载始终带 `Content-Length`，未观察到分块（§9）。本系统不依赖这一点：multipart 长度只看本地 `size`，读到的字节数在流上核对。
+
+0 字节文件的下载是 `code:500`，重试也不会好（§9）。这种文件在入库时就被拒绝（D10、D11），所以 `kb_documents` 里没有 `size = 0` 的行，重建不会碰到它。
+
+`PUT /datasets/<id>` 改 `embedding_model` 不重算向量（§6），不用它代替重建。
 
 任一步失败：`state = rebuild_failed`，`state_message` 为 `重建失败，可在模型设置里重试`（不含 RAGFlow 原文），审计 `kb.rebuild {id, result:"failed"}`。重建器写的审计，actor 一律取 `kb_settings.rebuild_actor_id`。
 
@@ -233,23 +320,52 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 处于 `rebuilding` 或 `rebuild_failed` 的库，各操作的处理：
 - 入库、重新入库、上传：409 `kb_rebuilding`。
 - 移出：`rebuilding` 时 409；`rebuild_failed` 时允许（#29），它删的是 `dataset_id` 里的文档；`rebuild_dataset_id` 里的副本由重试的第 1 步整体删掉。
-- 删库：`rebuilding` 时 409 `kb_rebuilding`；`rebuild_failed` 时可以删，两份数据集都删。
+- 删库：`rebuilding` 时 409 `kb_rebuilding`；`rebuild_failed` 时可以删，两代都删。
 
 不等新数据集解析完成就切换：S2a 没有检索，文档列表从新数据集读状态。
 
-### D9 建库与删库
+### D9 建库、删库与编译资源
 
-`POST /api/kb/bases` 的校验次序与应答见 knowledge-bases「知识库端点」。
-- 建库在设置锁下进行，以免与嵌入更换交错，建出代数过期的库。
-- 先在 RAGFlow 建数据集，模板字段与开关字段以实测记录为准；成功后插行，并在同一事务里审计 `kb.create`。插行失败则删掉刚建的数据集。
-- 建库超时但 RAGFlow 侧实际已建成，或数据集建好后进程崩溃：会留下无法自动对账的孤儿，归「Not yet specified」的长期对账。
-- 模板与开关之后不可改（无更新端点）。
+`POST /api/kb/bases` 的校验次序与应答见 knowledge-bases「知识库端点」。建库在设置锁下进行，以免与嵌入更换交错，建出代数过期的库。模板与开关之后不可改（无更新端点）。
 
-`DELETE /api/kb/bases/:id`：在该库的写锁下，先删 RAGFlow 数据集（不存在视为已删；不可达 503，行不动），再删行（文档行级联），并审计 `kb.delete`。
+**模板（#31）**：十一种，`naive`、`book`、`email`、`laws`、`manual`、`one`、`paper`、`picture`、`presentation`、`qa`、`table`。本地存 `naive`，发给 RAGFlow 的 `parser_id` 是 `general`，其余同名。RAPTOR 与知识图谱对全部十一种可用，都实际跑通（记录表 C），不再有按模板的开关表。这偏离 demo 的「RAPTOR 六种」，owner 拍板。各模板管的后缀抄自表 C 末列，放在 `kb/templates.ts`（D10）。
 
-模板支持表：RAPTOR 只对 `qa`、`manual`、`paper`、`book`、`laws`、`presentation` 可用，取自 demo 的 `kbMethods`（`resource/workbuddy-live-demo.html:1473-1486`，demo 只有 `raptor` 标志）。知识图谱对 `tag` 之外的十一种可用，这一条没有 demo 出处，由组 1 实测逐模板核对。两张表与实测不符时，先修订本 change。
+**两种数据集**：
+- 两个开关都关：`POST /datasets {name, parser_id, parse_type:1, embedding_model}`，不建模板组与画布。
+- 任一开关开（#32）：建模板组 → 建画布 → `POST /datasets {name, parse_type:2, pipeline_id:<画布 id>, embedding_model}`。
 
-列表只读本地行；开了开关的库，编译状态读取并发发出，共用一个 5 s 总期限，读不到为 `null`（grill #13 的细化）。
+`embedding_model` 恒显式传三段式（D7）：不传时回落到账号缺省甚至空值，缺省悬空时建库成功、到解析才 `FAILED`（§4.4）。`parser_config` 里的 `raptor`、`graphrag` 被静默丢弃（§5.1），不发。
+
+**每库一套，一代一套**：每个开了开关的知识库有自己的模板组和画布，不共用（理由见 D8）。
+
+**建库**，`kb/pipeline.ts` 的 `createPipeline`，建库与重建共用：
+1. `GET /compilation-templates/builtins` 取内置 `config`。RAPTOR 用 `tree`，删掉 `entity`、`relation`、`llm_id`（内置 `entity.fields` 带一条空 `type`，原样提交回 `102`）；知识图谱用 `knowledge_graph`，删掉 `llm_id`。
+2. `POST /compilation-template-groups`，名为 `owb-<id>-g<代数>`，`templates` 按开关含一项或两项，body 形状见记录 §5.1 (2)。
+3. `GET /pipelines/<parser_id>` 取内置 DSL，按下面的写法插入 Compiler 节点，`POST /agents`，`title` 同名，`canvas_category` 为 `dataflow_canvas`。
+4. 建数据集。
+
+任一步失败，逆序删除这一次已建的资源（走下面的删除次序），按 D4 返回；回滚的删除失败只写 leak 行，不改变应答。全部成功后插行，并在同一事务里审计 `kb.create`。插行失败同样删除这一代。
+
+建库超时但 RAGFlow 侧实际已建成，或资源建好后进程崩溃：会留下无法自动对账的孤儿，归「Not yet specified」的长期对账。
+
+**DSL**（§5.1 (3)、(6)）：改内置 DSL，插一个 `Compiler:Owb` 节点。
+- 按 `obj.component_name` 含 `Chunker` 查 chunker 节点，各模板节点名不同。查到的不是恰一个即失败（`kb_unavailable`），不提交。
+- `components` 加 `Compiler:Owb`：`upstream` 为 chunker，`downstream` 为 chunker 原来的下游，`obj` 为 `{component_name:"Compiler", params:{compilation_template_group_id, llm_id:"", plan:false, outputs:{chunks:{type:"Array<Object>", value:[]}}}}`。
+- chunker 的 `downstream` 改为 `Compiler:Owb`；原下游的 `upstream` 里 chunker 换成 `Compiler:Owb`。
+- `graph.nodes` 加 `{id:"Compiler:Owb", type:"compilationNode", data:{label:"Compiler", name:"Compiler", form:<同 params>}, position, sourcePosition:"right", targetPosition:"left"}`。
+- `graph.edges`：chunker 原来的出边把 `source` 改为 `Compiler:Owb`，原边不保留；再加一条 chunker → `Compiler:Owb`，`sourceHandle:"start"`、`targetHandle:"end"`。净增一条。
+- `graph` 不能省（§18 #25）：省掉时建画布、建库都回 `code:0`，`.txt` 文档静默换到 `general`，编译不运行，没有任何提示。内置 DSL 不带 `graph` 即失败，不提交。
+
+`llm_id` 留空：建数据集时 RAGFlow 把它固化成账号当时的缺省对话模型（D7）。
+
+**删除**，`kb/pipeline.ts` 的 `deletePipeline`，次序固定为数据集 → 画布 → 模板组。这两个删除接口没有引用保护：删了在用的画布或模板组，RAGFlow 回 `code:0`，之后解析 `FAILED`（§5.1 (7)）。次序由 `pipeline.ts` 保证：
+- `ragflow-client` 的删画布与删模板组只有它调用。
+- 上一步确认已删（成功或 `not_found`）之前不发下一步；任一步失败即停。
+- 调用方持有该库写锁（建库回滚时这一代还没有行，别的请求碰不到）。
+
+`DELETE /api/kb/bases/:id`：在该库的写锁下调用 `deletePipeline`；`rebuild_failed` 时先删新一代，再删当前一代。任一步不可达即 503，行不动；重试从头走一遍，已删的按 `not_found` 跳过，所以不留孤儿。都删完后删行（文档行级联），并审计 `kb.delete`。
+
+列表只读本地行；开了开关的库，编译状态读取并发发出，共用一个 5 s 总期限，读不到为 `null`（grill #13 的细化，判定见 D14）。
 
 ### D10 工作空间来源入库
 
@@ -258,18 +374,27 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 在该库的写锁下逐条顺序处理，每条依次：
 1. `sandbox.resolve(principal, workspaceId, path, "read")`。被拒为 `outside`，facade 照常写 `sandbox.reject`。路径上任一分量是符号链接时 `resolve` 也拒绝，所以同样归 `outside`。
 2. 查重（`duplicate`）与 500 上限（`limit`）。
-3. 打开：挂载内用 `mountToRead` + `openMountFile`，离线即 `offline`；挂载外用 `lstatExisting` + `openRegularFile`，非普通文件即 `not_file`。之后对同一 fd 做 `fstat`，取 `size` 与 `mtimeMs`。
-4. 大小不超过 `KB_UPLOAD_MAX_BYTES`，超出为 `too_large`。
-5. 以 multipart 流式上传。`Content-Length` 由前后缀长度加 `fstat` 大小算出，不落临时文件。流里加计数 `Transform`，读出字节与 `size` 不等时立即中止该条的出站请求，删除 RAGFlow 上的半成品，记为 `changed`。这不当作 RAGFlow 不可达处理。
-6. 触发该文档的解析，按 D14 需要时再触发编译。
-7. 在同一事务里插行与 `kb.ingest`。
+3. 后缀判定：路径 basename 最后一个 `.` 之后的部分转小写，不在该模板的后缀表里即 `unsupported_type`；没有后缀同样。
+4. 打开：挂载内用 `mountToRead` + `openMountFile`，离线即 `offline`；挂载外用 `lstatExisting` + `openRegularFile`，非普通文件即 `not_file`。之后对同一 fd 做 `fstat`，取 `size` 与 `mtimeMs`。
+5. 大小为 0 即 `empty`；超过 `KB_UPLOAD_MAX_BYTES` 即 `too_large`。
+6. 以 multipart 流式上传，字段名 `file`。文件名用原始 UTF-8 或 `filename*`，不放百分号编码（§7.3）。`Content-Length` 由前后缀长度加 `fstat` 大小算出，不落临时文件。流里加计数 `Transform`，读出字节与 `size` 不等时立即中止该条的出站请求，记为 `changed`，这不当作 RAGFlow 不可达处理。中断的上传不留文档（§7.2），不发补偿删除。
+7. 触发该文档的解析，`document_ids` 只有这一个 id。
+8. 在同一事务里插行与 `kb.ingest`。
 
 逐条触发解析而不是整批一次：这样「上传成功、解析未触发」只会出现在单条上，可以按条回滚，不会留下永远不解析的文档。
 
+**后缀判定**：后缀不归模板管时，RAGFlow 不报错，把这份文档改走别的内置解析器并脱离数据集的 pipeline，编译不运行，没有任何提示（§7.4）。入库之后用户没有办法发现，所以在上传之前拒绝。规则对全部知识库一样，不分开没开编译：一张表、一次判定。开了编译的库这是必需；没开的库，也不该让用户以为文档走了所选模板。后缀表来自 Parser 节点，不是逐个上传验证的（表 C 注），实际不一致时由下面的 `unsupported_file` 兜底。
+
+**0 字节**：空文件上传成功、解析后 `COMPLETED`，但下载回 `code:500`，重建时该库必败且重试不会好（§7.1、§9）。所以入库时拒绝。
+
 RAGFlow 的失败：
-- 某条得到 `kb_rejected`：删除已建的文档，该条记为 `rejected`，继续下一条。
-- 得到 `kb_unavailable`：删除已建的文档（尽力而为），该条与其后全部记为 `unavailable`，不再发请求。
-- 补偿删除失败只写一行 `{"event":"kb_document_leak","documentId":<id>}`，本地上传与重新入库同此。
+- 上传或解析触发得到 `kb_rejected`：删除已建的文档，该条记为 `rejected`，继续下一条。
+- 解析触发得到 `parse_not_started`：同上，不中止整批。
+- 上传得到 `unsupported_file`：该条记为 `unsupported_type`，继续下一条。按通用映射它是 `kb_unavailable`，会中止整批，所以 D4 先判。
+- 得到 `kb_unavailable` 或 `not_found`：删除已建的文档（尽力而为），该条与其后全部记为 `unavailable`，不再发请求。
+- 补偿删除按 D13 的写法；失败只写一行 `{"event":"kb_document_leak","documentId":<id>}`，本地上传与重新入库同此。
+
+同一文件名再次上传时 RAGFlow 改名为 `a(1).txt`（§7.1）。本系统不读 RAGFlow 的 `name`，文档名只来自本地 `kb_documents.name`，所以同名、重新入库与重建都不受影响。
 
 应答 201 `{documents, rejected: {path, reason, message}[]}`，`message` 按 `reason` 固定（knowledge-bases「工作空间来源入库」的表）。审计为每份成功文档一条 `kb.ingest`、每个被拒条目一条 `kb.ingest_reject`；detail 形状以 knowledge-bases「知识库审计」为准。
 
@@ -281,9 +406,10 @@ RAGFlow 的失败：
 
 规则：
 - 必须带 `Content-Length`，缺失或分块传输即 400。在 Content-Length 分帧下，「流中多于声明」到不了 handler，所以只在入口判一次：`Content-Length > KB_UPLOAD_MAX_BYTES` 即 413 `upload_too_large`。
-- 请求体直接拼进出站 multipart，不落盘，不留副本。
-- 客户端中途断开或短体：中止出站，删除 RAGFlow 上的半成品，不插行，不审计 `kb.ingest`。
-- 上传成功后触发该文档的解析（按 D14 需要时再触发编译）。解析触发失败则删除文档并按 D4 返回。
+- 文件名后缀按 D10 判定；`Content-Length` 为 0 同样拒绝。两者都是 400 `kb_file_unsupported`，不发出站请求，审计 `kb.ingest_reject`（`reason` 分别为 `unsupported_type`、`empty`）。
+- 请求体直接拼进出站 multipart，不落盘，不留副本。文件名写法同 D10。
+- 客户端中途断开或短体：中止出站，不插行，不审计 `kb.ingest`。中断的上传不留文档（§7.2）。
+- 上传成功后触发该文档的解析。`kb_rejected`、`parse_not_started` 或 `kb_unavailable`：按 D13 的写法删除文档，分别返回 400 `kb_rejected`、400 `kb_rejected`、503 `kb_unavailable`。上传本身得到 `unsupported_file`：400 `kb_file_unsupported`。
 - 都成功后，单事务插行并审计 `kb.ingest`，应答 201 `DocumentView`。
 - 被拒（超限、上限）时审计 `kb.ingest_reject`。
 
@@ -291,11 +417,24 @@ RAGFlow 的失败：
 
 ### D12 文档列表、状态与源文件变更
 
-`GET /api/kb/bases/:id/documents` 应答 200 `{documents}`。一次分页读取该数据集在 RAGFlow 的全部文档（每页至多 100，最多 5 页，与硬上限 500 对应），按 `ragflow_document_id` 关联。数据集为 not-found 时，全部为 `missing`。
+`GET /api/kb/bases/:id/documents` 应答 200 `{documents}`。一次分页读取该数据集在 RAGFlow 的全部文档（每页 100，读到 `total` 为止，最多 5 页，与硬上限 500 对应），按 `ragflow_document_id` 关联。`page_size` 超过 100 时 RAGFlow 静默回落到 10 条（§8.3），所以不传更大的值。数据集为 not-found 时，全部为 `missing`。
 
 `DocumentView = {id, name, size, source, workspaceId, path, status, chunkCount, message, sourceChanged, createdAt}`：
-- `status` 取 `queued` / `parsing` / `done` / `failed` / `cancelled` / `unparsed` / `missing`。实测记录给出 RAGFlow 运行状态到前六值的映射：未开始为 `unparsed`，不触发 web 刷新；RAGFlow 列表里没有该 id 即 `missing`。
-- `message` 只在 `failed` 时为固定句子 `解析失败`；`chunkCount` 只在 `done` 时为数字。
+- `status` 取 `queued` / `parsing` / `done` / `failed` / `cancelled` / `unparsed` / `missing`，映射见下表（记录表 A）。运行状态读 `ingestion_status`，不读 `status`（恒为 `"1"`）。
+
+| `ingestion_status` | `status` | web 刷新 |
+|---|---|---|
+| `UNSTART` | `unparsed` | 否 |
+| `CREATED`、`SCHEDULED` | `queued` | 是 |
+| `RUNNING`、`STOPPING` | `parsing` | 是 |
+| `STOPPED` | `cancelled` | 否 |
+| `COMPLETED` | `done` | 否 |
+| `FAILED` | `failed` | 否 |
+| RAGFlow 列表里没有该 id | `missing` | 否 |
+
+- 八种之外的取值是协议漂移：整个请求 503 `kb_unavailable`（版本钉住之下不该出现）。
+- `message` 只在 `failed` 时为固定句子 `解析失败`。失败原因在 `latest_ingestion_event.message`，是 RAGFlow 原文，不透出（D4）。
+- `chunkCount` 只在 `done` 时为数字，取列表的 `chunk_count`，可以是 0：有些内容切不出切片（表 C 的 `qa` `.md`）。web 照常显示 `已切片 0`。
 - `sourceChanged` 只对工作空间来源计算：
   - 用 `rootOf` 加 core 的纯函数 `resolve(root, rel, "read", mountNames)`，即**无审计**版本，再 stat；挂载内经挂载的 stat。`mountNames` 是该工作空间的挂载名集合，与 facade 注入的 `mountNamesOf` 同一来源；不传它，纯函数会对挂载点与其下路径逐级同步 `lstat`，违反 workspace-mounts 对挂载路径的约束。
   - 解析被拒、工作空间不可见、离线时为 `null`，即「不知道」；大小或 `mtimeMs` 与入库记录不同、或文件已不存在为 `true`。
@@ -305,25 +444,56 @@ RAGFlow 的失败：
 
 ### D13 重新入库、移出与删除
 
+**RAGFlow 文档的删除**：`code:0` 不代表删成了，`RUNNING`、`STOPPING` 时回 `deleted:0`，行仍在（§8.5）。按原来的流程本地行被删，RAGFlow 留下孤儿。`kb/documents.ts` 有一个共用写法，D10、D11、D13 都走它：
+1. `DELETE …/documents`，`ids` 只有这一个 id。`deleted:1` 或 `not_found`：完成。
+2. `not_deleted`：发一次 `POST …/documents/stop`。`code:0` 不论 `success_count`、以及 `not_found`，都继续；`kb_unavailable` 即失败。
+3. 每 500 ms 重发一次 `DELETE`，至多 5 s（期限经装配注入；`STOPPING` 实测约 0.5 秒，§8.4）。`deleted:1` 或 `not_found`：完成。
+4. 到期仍是 `not_deleted`：返回 `busy`。
+
+调用方的处理：移出得 409 `kb_document_busy`，行不变，用户稍后再试；补偿删除与重新入库删旧文档写 `kb_document_leak`。
+
 **重新入库**：`POST /api/kb/bases/:id/documents/reingest?doc=<文档 id>`，只对工作空间来源，在该库的写锁下进行。
-1. 按 D10 的读取规则重读源文件。读取被拒（含工作空间已不可见）即 409 `kb_source_unreadable`（新码，`conflict` 的文案是「同名资源已存在」，不适用），行不变。
-2. 上传为新文档，触发解析（按 D14 需要时再触发编译）。失败则删除新文档并按 D4 返回。
+1. 按 D10 的读取规则重读源文件。读取被拒（含工作空间已不可见、文件变成 0 字节）即 409 `kb_source_unreadable`（新码，`conflict` 的文案是「同名资源已存在」，不适用），行不变。
+2. 上传为新文档，触发解析。失败则删除新文档并按 D4 返回。
 3. 成功后，单事务换行内的 RAGFlow id、大小与 `mtimeMs`，并审计 `kb.ingest`。
-4. 再删旧的 RAGFlow 文档；失败只写 `{"event":"kb_document_leak","documentId":<id>}`。
+4. 再删旧的 RAGFlow 文档；旧文档可能还在解析，走上面的写法，失败只写 `{"event":"kb_document_leak","documentId":<id>}`。
 
 应答 200 `DocumentView`。
 
-**移出**：`DELETE /api/kb/bases/:id/documents?doc=<文档 id>`，在该库的写锁下进行，`ready` 与 `rebuild_failed` 时允许。先删 RAGFlow 文档（不存在视为已删），再删行，并审计 `kb.document_delete`，应答 204；源文件不动。
+**移出**：`DELETE /api/kb/bases/:id/documents?doc=<文档 id>`，在该库的写锁下进行，`ready` 与 `rebuild_failed` 时允许。先删 RAGFlow 文档（不存在视为已删），再删行，并审计 `kb.document_delete`，应答 204；源文件不动。不可达 503、`busy` 409，行都不变。
 
 ### D14 RAPTOR 与知识图谱
 
-开关在建库时随数据集配置一起写入；rc2 的确切形状（数据集级字段或 knowledge compilation 模板）由组 1 实测给出。若实测证明需要显式触发，则在**每一个**触发解析的地方，即工作空间入库、本地上传、重新入库与重建第 4 步，对开了 RAPTOR 或知识图谱的库再触发一次编译。
+**开启**：见 D9。解析时 Compiler 节点在 pipeline 内自动运行，解析完成后 RAGFlow 自动建数据集级合并任务，没有也不需要单独的编译触发（§5.2）。所以入库、上传、重新入库与重建都只触发解析。
 
-知识库视图带 `compile: {raptor, graph}`，各取 `off` / `pending` / `running` / `done` / `failed`，从实测记录给出的编译状态接口按需读取，读取失败为 `null`。
+**模型依赖**（§5.5、§13）：
+- 文档阶段的 Compiler 用建库时固化的 `llm_id`，之后账号缺省变了也不影响它。
+- 文档阶段另依赖账号缺省嵌入模型，不是数据集的 `embedding_model`。
+- 数据集级合并用账号缺省对话模型，没有缺省时入库进程退出。
 
-知识库对话模型被指定期间，不能删除，也不能清空它的上游（D7 #28）。它的上游一改，就同步重新下发，所以 RAGFlow 侧的编译始终用注册表里的当前凭证。管理员把 `chatModelId` 改为 `null` 时，RAGFlow 侧的对话模型配置被撤销：已开启开关的库照旧显示开关，此后的编译会在 RAGFlow 侧失败并显示 `failed`；同时 `compileReady` 变假，建库表单不再显示开关。
+这几条都靠 D7 的不变量保住：账号缺省下发之后不会被清空。知识库对话模型被指定期间，不能删除，也不能清空它的上游（D7 #28）；有开编译的库时，`chatModelId` 不能取消也不能更换（D7）。
 
-停止条件：组 1 若证明 rc2 无法用 API key 开启或触发编译，组 1 照常合入记录，并在 Epic 下报告 owner。组 9 及其全部下游（组 10–18）与组 15 首刀等 owner 修订本 change 后再开工（机制同 D7：修订 issue R，组 9 与组 15 首刀 `Depends on #<R>`）；组 2–8 不受影响。与 D7 的预案不同，这一项没有预定的替代方案。
+**状态**：知识库视图带 `compile: {raptor, graph}`，各取 `off` / `pending` / `running` / `done` / `failed`。按需读取，读取失败或超时 `compile` 为 `null`。
+
+不用 `GET compilation/status`：按类型读取没有终态，跑完之后与「从未编译」同为 `idle`，`last_completed_at` 不分类型；不带 `kind` 的 `state` 在多文档时往返，文档还在排队时也可能是 `completed`（§5.3）。它能给的 `running` 下面两份数据也能给，少两个请求，5 s 总期限更够用。状态由两份数据推出，都是每次现读：
+- 文档列表（D12）：该库本地文档的 `ingestion_status` 与 `chunk_count`。
+- 任务日志 `GET /datasets/<id>/ingestions`：逐页读到 `total`，`page_size=10`（记录里验证过的取值）。类型只看 `task_type`，RAPTOR 是 `Tree`，知识图谱是 `Graph`；`dsl.entries[].variants` 不能用，`Graph` 的也含 `tree`。
+
+对开着的每种类型，按次序判定：
+1. 有文档处于 `CREATED` / `SCHEDULED` / `RUNNING` / `STOPPING`，或该类型有 `operation_status` 为 `RUNNING` 的日志：`running`。
+2. 有文档 `FAILED`：`failed`。
+3. 除 `COMPLETED` 且 0 切片的文档外（这种文档编译不运行，表 C），其余文档非空，且每份都出现在该类型 `DONE` 日志的 `dsl.entries[].doc_id` 里：`done`。
+4. 其它：`pending`。
+
+`failed` 只来自文档 `FAILED`。图谱失败、模板组缺失、缺省嵌入模型缺失都表现为文档 `FAILED`（§5.4）。失败文档分不出类型，所以两个开着的类型都 `failed`；解析器失败也算，这份文档确实没有编译。`operation_status` 的失败值未观察到（§14），不判定；未知取值落入 `pending`。
+
+**已知限制：RAPTOR 可能完全无信号。** 对话模型失败（密钥无效、实例已删除）时，文档照常 `COMPLETED`、有切片，编译状态 `idle`，任务日志没有记录（§5.4）。这时 `raptor` 停在 `pending`：没有信号所以不声称 `failed`，也不声称 `done`。第 3 步要求逐份文档被覆盖，所以中途才坏掉的情形同样不会显示 `done`。web 显示 `尚未产出`，并如实写明可能的原因（D19）。文档阶段的这个失败在 RAGFlow 里只有容器日志，本系统读不到。
+
+**代价**：每个开编译的库读一次文档列表；有文档在排队或解析时第 1 步已定，不读任务日志；否则逐页读完。一份文档一种类型一条日志，500 份两种类型约 100 页。判定 `done` 要看到每份文档，所以不能提前停。这些读取共用列表的 5 s 总期限，读不完时 `compile` 为 `null`，web 显示 `状态未知`，不影响列表本身。1.5 若确认 `page_size` 能取更大的值，就改用那个值。
+
+**退路**：第 3 步依赖任务日志能分页读全、批次的 `entries` 列全文档，这两点由 tasks 1.5 补测。结论不利时不重议：第 3 步退回库级判定，该类型有 `DONE` 日志即 `done`，web 文案由 `已完成` 改为 `已有产出`，其余判定不变。
+
+组 1 结论为「支持」（记录 §5），D14 原有的停止条件未触发，已删去。
 
 ### D15 审计
 
@@ -334,22 +504,30 @@ RAGFlow 的失败：
 
 ### D16 共用开发栈的使用纪律
 
-- 本仓不提交任何 RAGFlow 栈定义，不执行 `docker compose up` / `down` / `restart`，不改栈的配置文件与环境。
-- **owner 前置**：Stage 5 建一个由 owner 持有的前置 issue P（tasks「外部前提 P」），内容是：共用栈运行 `v1.0.0-rc2`；在 RAGFlow 界面注册 open-workbuddy 专用账号并生成 API key；key 文件以 `0600` 放在仓库之外；在本机 `CLAUDE.local.md` 新建一节，记下 `RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE` 与实测用的嵌入上游变量名，并在 shell 环境里 export 它们。picker 只跳过 epic 与 `Depends on` 仍开着的 issue，不认标签，所以 P 的正文写一行 `Depends on #<Epic>`：agent 永远选不中 P，由 owner 做完后手动关闭。组 1 `Depends on` P。
-- **执行时检测**：需要真实 RAGFlow 的任务只有组 1（组 18 的 `smoke-kb` 接线只需 harness 验证，真实运行是 owner 执行的验收行 CK-11）。组 1 从 shell 环境读这两个变量，区分两种停止：
+- 共用栈已存在：运行 `v1.0.0-rc2`，`DOC_ENGINE=infinity`，arm64 开发机的 Infinity 走 x64 模拟。它由 agent 按 owner 授权部署过一次（2026-11-01，#33），授权只覆盖那一次。
+- 本仓不提交任何 RAGFlow 栈定义，agent 任务与本仓脚本不执行 `docker compose up` / `down` / `restart`，不改栈的配置文件与环境。
+- **owner 前置**：Stage 5 建了一个由 owner 持有的前置 issue P（tasks「外部前提 P」，已完成），内容是：共用栈运行 `v1.0.0-rc2`；在 RAGFlow 界面注册 open-workbuddy 专用账号并生成 API key；key 文件以 `0600` 放在仓库之外；在本机 `CLAUDE.local.md` 新建一节，记下 `RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE` 与实测用的嵌入上游变量名，并在 shell 环境里 export 它们。picker 只跳过 epic 与 `Depends on` 仍开着的 issue，不认标签，所以 P 的正文写一行 `Depends on #<Epic>`：agent 永远选不中 P，由 owner 做完后手动关闭。组 1 `Depends on` P。
+- **执行时检测**：需要真实 RAGFlow 的任务只有组 1，含 1.5（组 18 的 `smoke-kb` 接线只需 harness 验证，真实运行是 owner 执行的验收行 CK-11）。组 1 从 shell 环境读这两个变量，区分两种停止：
   - 变量未设置或 key 文件不存在：报告 `RAGFlow 私有配置缺失`。
   - 版本接口不可达或不是 `v1.0.0-rc2`：报告 `共用 RAGFlow 栈未运行或版本不符`。
   
   两种都在 issue 评论里报告原因，不开 PR，不自己拉起任何容器；同时在本 issue 正文加一行 `Depends on #<P>` 并重开 P（评论写明要 owner 做什么），picker 随即跳过本 issue，直到 owner 再次关闭 P。检测时另执行一次只读的 `docker compose ls`，结果记进评论（grill #4，只作观察）。
-- **账号隔离**：在共用栈上只用专用账号，所以 dsh-team 的库与模型配置天然隔离。实测只清理本次运行自己建的数据集（名称前缀 `owb-`）；smoke 只经 app-server 删除名为 `smoke-kb` 的知识库，含上一次中断留下的同名库。
+- **账号隔离**：在共用栈上只用专用账号，所以 dsh-team 的库与模型配置天然隔离。实测只清理本次运行自己建的数据集、画布与模板组（名称前缀 `owb-`）；smoke 只经 app-server 删除它自己建的知识库，含上一次中断留下的同名库。
+- **清理次序**（§13、§16）：先删数据集、画布、模板组，静默到没有编译活动，才清账号缺省、删实例与提供方。实测里曾在账号缺省已清空时解析文档，使全栈唯一的入库进程崩溃循环。此后任何实测都不得在有 pipeline 数据集或待合并任务时清空缺省。
 - **脱敏**：仓库是 public。实测记录、PR 与 issue 正文中，地址一律写 `<RAGFLOW_BASE_URL>`；id、邮箱、昵称、账号名与 key 路径全部替换。组 1 的 PR 附 gitleaks 与 grep（本机地址、账号名）零命中的输出。
 
 ### D17 测试与夹具
 
-`server/test/support/fake-ragflow.mjs`（+ `.d.mts`）是进程内可起的假 RAGFlow，协议以组 1 的实测记录为准：路径、字段、状态值与错误 code（含「不存在」组合）。
-- 可脚本化：版本串；某路由返回指定 code 或 HTTP 状态；挂起与「挂起后放行」（并发用例用）；超时；3xx；非 JSON；超体积；下载用分块传输或带 `Content-Length`。
+`server/test/support/fake-ragflow.mjs`（+ `.d.mts`）是进程内可起的假 RAGFlow，协议以组 1 的实测记录为准：路径、字段、状态值与错误 code（含表 B 的「不存在」组合）。
+- 可脚本化：版本串；某路由返回记录里出现过的 code 或 HTTP 状态；挂起与「挂起后放行」（并发用例用）；超时；3xx；非 JSON；超体积；下载的文件内容可设为恰等于 not-found 正文。
 - 记录请求：方法、路径、是否带 key、JSON body、multipart 字段与字节数。
-- 能力按组逐步加：组 5 建骨架与数据集 / 文档 / 版本接口；组 8 加模型提供方接口；组 9 加编译状态；组 11 加分页与运行状态全集；组 14 加下载与分块传输。每组的任务写明它加什么，加的东西都要在实测记录里有对应条目。
+- 能力按组逐步加：
+  - 组 5：骨架，版本、数据集的建与删、文档的上传 / 删除 / 解析 / 停止 / 下载，含 `code:500`、`success_count:0`、`deleted:0`、表 B 组合与 §9.1 的响应头。
+  - 组 8：模型提供方接口与账号缺省模型。
+  - 组 11：文档列表的分页与八种运行状态。
+  - 组 9 剩余：内置模板、模板组、内置 pipeline、画布、`parse_type:2` 数据集与任务日志。
+
+每组的任务写明它加什么，加的东西都要在实测记录里有对应条目。下载始终带 `Content-Length`，夹具不做分块传输：记录里没有，且本系统不依赖它（D8）。夹具不实现清空缺省与删除模型配置的路由；这些路径的请求会落到夹具的未知路由并使用例失败，这正是 D7 不变量的断言方式之一。
 
 单元与集成用例全部打假 RAGFlow。真实 RAGFlow 只进 `make smoke-kb`（`smoke/kb.hurl`，变量照 `smoke-live` 的写法：调用方自带已接上真实 RAGFlow 的运行中服务）与验收清单。
 
@@ -369,9 +547,11 @@ RAGFlow 的失败：
 | `rebuild.ts` | 重建器 |
 | `bases.ts` | 建库与删库 |
 | `source-file.ts` | 工作空间来源的打开与 stat，组 10 建 |
-| `documents.ts` | 组 10 建；组 11、13 扩展 |
+| `documents.ts` | 组 10 建（含 D13 的文档删除写法）；组 11、13 扩展 |
 | `uploads.ts` | 本地上传 |
-| `templates.ts` | 模板与编译支持表 |
+| `templates.ts` | 十一种模板、`parser_id` 映射与后缀表 |
+| `pipeline.ts` | 模板组与画布的建与删、DSL 生成，组 9 剩余建 |
+| `compile-status.ts` | 编译状态判定，组 9 剩余建 |
 | `rest.ts` | 路由与归属身份 |
 | `index.ts` | 模块入口 |
 
@@ -392,12 +572,15 @@ RAGFlow 的失败：
 
 - `web/src/lib/api-kb.ts`：状态、设置、知识库、文档、上传的客户端，全部严格解析（`hasExactlyKeys`），形状以两份 spec 写明的应答为准。
 - 中心「知识库」tab：`key: "knowledge-bases"`，`adminOnly: false`，排在 `连接器` 之后、`模型` 之前。只在 `GET /api/kb/status` 为 `enabled:true` 时进入可见 tab 表；描述不变，只连接无条件对所有人可见的 tab。
+- 新建对话框：模板十一种；`RAPTOR` 与 `知识图谱` 复选只看 `compileReady`，不再按模板区分。
+- 编译状态文案：`pending` 为 `尚未产出`，`running` 为 `编译中`，`done` 为 `已完成`，`failed` 为 `有文档失败`，`null` 为 `状态未知`。`尚未产出` 旁注 `解析完成后长时间没有变化，可能是知识库对话模型不可用，请联系管理员`（D14 的已知限制）。不写「编译失败」：这个状态没有失败信号。
 - 模型 tab 加「知识库模型」段：
   - 嵌入模型：名称、上游地址、密钥、探活。
-  - 知识库对话模型：从带上游的对话模型里选，或选 `不使用`。
+  - 知识库对话模型：从带上游的对话模型里选，或选 `不使用`。有开编译的库且已指定时，下拉禁用，旁注写明原因（D7）。
   - 重建状态与 `重试失败的重建`。
   - 更换嵌入模型时先弹确认，写明受影响的知识库数与文档数；确认后带 `confirmRebuild:true` 再保存。
 - 删除被引用的对话模型时，409 `kb_model_in_use` 的信封文案沿用模型表既有的行内 409 显示。
+- 移出得到 409 `kb_document_busy` 时，行内显示信封文案，行仍在。
 
 ### D20 写锁与设置锁
 
@@ -427,35 +610,45 @@ app-server 是单进程，也是 SQLite 的唯一写者，所以进程内锁足�
 |---|---|
 | app-server HTTP 应用（`buildApp` + `app.inject()`，真实 SQLite，接假 RAGFlow） | 知识库端点、权限、审计、错误信封与 RAGFlow 结果映射都在这一层可观察，是 S1d / S1b 已用的最高 seam |
 | 编译入口（`server.ts` 子进程） | `kb_key` 阶段、配置错误的启动失败、`server_started.modules` 与重建续做只在真实入口可证 |
-| 假 RAGFlow HTTP 服务（`fake-ragflow.mjs`） | 出站请求的形状（multipart、key、期限、重定向、分块下载）与并发交错（挂起后放行）由它记录与驱动；协议以组 1 的实测为准 |
+| 假 RAGFlow HTTP 服务（`fake-ragflow.mjs`） | 出站请求的形状（multipart、key、期限、重定向、下载判别、三段式 `embedding_model`、模型下发的请求序列）与并发交错（挂起后放行）由它记录与驱动；协议以组 1 的实测为准 |
+| DSL 生成函数（`kb/pipeline.ts`，输入内置 DSL 与模板组 id，输出画布 DSL） | 省掉 `graph` 或改错边时 RAGFlow 回 `code:0`、编译静默不运行（§18 #25），假 RAGFlow 也不会替你报错；期望值取自记录 §5.1 (6) 手写 DSL 的 `components` 与 `graph` |
 | web 组件（jsdom + 假 `ApiClient`） | 中心「知识库」tab 与模型 tab 的知识库模型段 |
-| `make smoke-kb`（真实 RAGFlow） | 唯一证明对 rc2 的映射成立的 seam；只在本机与验收 |
+| `make smoke-kb`（真实 RAGFlow） | 唯一证明对 rc2 的映射成立的 seam，含一个开编译的库，是 DSL 对真实 RAGFlow 的唯一验证；只在本机与验收 |
 
 ## Not yet specified
 
 - 大批量入库（一次几十上百个文件、目录整体入库）的交互与限流。S2a 只给逐个选文件、每次至多 `KB_UPLOAD_MAX_FILES` 个。
-- RAGFlow 数据集与本地映射长期漂移的对账手段，包括 RAGFlow 侧被人手工删改，以及建数据集或上传后、插行前进程崩溃留下的孤儿。S2a 只在列表时把找不到的文档标 `missing`，并在重建时跳过缺失的原件。
+- RAGFlow 数据集与本地映射长期漂移的对账手段，包括 RAGFlow 侧被人手工删改，以及建数据集、画布、模板组或上传后、插行前进程崩溃留下的孤儿。S2a 只在列表时把找不到的文档标 `missing`，并在重建时跳过缺失的原件。
+- 保留开编译的库而更换知识库对话模型：要重新固化 `llm_id`，需要一次针对这些库的重建。S2a 里 `chatModelId` 被锁定，要换只能先删掉这些库（D7）。
+- 对话模型失败时 RAPTOR 的显式信号：rc2 没有，S2a 只保持 `pending`（D14）。
+- 取消指定之后，RAGFlow 里残留上游密钥的清理入口。S2a 留给下一次下发或运维（D7）。
+- 账号缺省在 RAGFlow 侧被人手工清空的检测。S2a 不做前置读取；D16 的清理次序是唯一防线。
+- 真实权限错误的形状：单账号造不出（§14），D4 的 `code:403` 是防御性判定。
 
 ## Risks / Trade-offs
 
 - [rc2 是预发行版，rc3 / GA 可能改接口] → 版本钉住（D5），升级是代码变更，重跑组 1 的实测与 `make smoke-kb`。
-- [HTTP 参考文档自相矛盾（`chunk_method` vs `parser_id`；编译开关未写）] → 组 1 以运行实例为准，假 RAGFlow 协议只按实测记录写。
-- [共用栈由 dsh-team 所有，可能不在跑、版本不同或被重置] → 只有组 1 依赖它，它 `Depends on` owner 前置 issue P；检测不满足就停下，并以 `Depends on #<P>` 加重开 P 让 picker 跳过；`make smoke-kb` 的真实运行是 owner 的验收行；CI 不依赖它。
+- [HTTP 参考文档与运行实例不符（`chunk_method`、`chunk_count`、`/me/models`、编译开关）] → 以实测记录为准，假 RAGFlow 协议只按记录写。
+- [清空账号缺省对话模型使全栈唯一的入库进程崩溃循环，外部看不出异常] → D7 的不变量：客户端没有清空与删除调用，用例断言请求序列；D16 的清理次序约束实测与运维。
+- [`code:0` 掩盖失败（`success_count:0`、`deleted:0`、DSL 省 `graph`、`parser_config` 开关被丢弃、静默换解析器）] → D4 的路由专属组合、D9 的 DSL 校验、D10 的后缀判定；`make smoke-kb` 对真实 RAGFlow 走一遍编译。
+- [对话模型失败时 RAPTOR 完全无信号] → `pending` 加如实的文案（D14、D19），已知限制，不声称失败或完成。
+- [`chatModelId` 被开编译的库锁定，模型下线时只能删库重建] → 明确的 409 与界面旁注；更换路径列入 Not yet specified。
+- [共用栈可能不在跑、版本不同或被重置] → 只有组 1 依赖它，检测不满足就停下，并以 `Depends on #<P>` 加重开 P 让 picker 跳过；`make smoke-kb` 的真实运行是 owner 的验收行；CI 不依赖它。
 - [RAGFlow key 权限覆盖全部知识库] → key 只在 0600 文件与进程内存。RAGFlow 只在内网，部署要求它不对用户网络暴露（ADR-0016）。omp 的 bash 能直连本机端口，但没有 key 就调不动 RAGFlow 的鉴权接口；`/system/version` 无鉴权，暴露的只有版本串。
-- [嵌入模型更换的全量重建耗时长，期间不能入库] → 确认对话写明影响面；失败可重试；可以删失败的库，也可以先移出出问题的文档。
-- [重建中途进程崩溃] → 启动时从头续做该库，先删残留的新数据集；actor 取持久化的 `rebuild_actor_id`。
-- [模型上游密钥下发后存在 RAGFlow 的库里] → 与 ADR-0008「omp 环境零凭证」不冲突（RAGFlow 不是 omp）；删除与轮换经 #28 的联动同步到 RAGFlow；ADR-0016 写明。
+- [嵌入模型更换的全量重建耗时长，期间不能入库] → 确认对话写明影响面；失败可重试；可以删失败的库，也可以先移出出问题的文档。开编译的库重建时重跑编译，入库 worker 只有 1 个，耗时更长。
+- [重建中途进程崩溃] → 启动时从头续做该库，先删残留的新一代；actor 取持久化的 `rebuild_actor_id`。
+- [模型上游密钥下发后存在 RAGFlow 的库里] → 与 ADR-0008「omp 环境零凭证」不冲突（RAGFlow 不是 omp）；轮换经 #28 的联动同步；取消指定后密钥留在 RAGFlow，直到被覆盖或运维清理（D7）；ADR-0016 随组 8 改写。
 - [重建持有每库写锁，期间该库的写请求一律 409] → 这正是 grill #19 的「重建中暂停入库」。
-- [rc2 不能用 API key 下发模型] → D7 的应急预案，由组 1 结论触发。
-- [rc2 不能用 API key 开启编译] → 组 1 报告，组 9 及下游等修订（D14）。
+- [下载判据只在直连实例上验证过] → 中间代理剥掉 `Content-Disposition` 时下载判为失败，不会把错误应答当文件上传（D8）。
+- [后缀表来自 Parser 节点，不是逐个上传验证的] → RAGFlow 回 `code:500` 时单条拒绝，不中止整批；升级版本时重核表 C。
 
 ## Migration Plan
 
 - 迁移 050 只建三张表并插入 `kb_settings` 的唯一一行；不改既有表。回退代码时保留迁移文件（账本拒收多出的回执，规则同 049）。
 - 部署：未配 `RAGFLOW_BASE_URL` 时，行为与本 change 之前一致：知识库 tab 不出现，端点 503 `kb_disabled`，`models` 的删除与修改不受联动影响。
-- 回滚：去掉两个 RAGFlow 键即关闭知识库；RAGFlow 里的 `owb-` 数据集由运维按需清理。
+- 回滚：去掉两个 RAGFlow 键即关闭知识库；RAGFlow 里的 `owb-` 数据集、画布与模板组由运维按需清理，账号缺省模型要等它们删完、编译静默之后才能清（D16）。
 - `kbservice/` 删除不可由配置回退；需要时从 git 历史恢复。
 
 ## Open Questions
 
-- dsh-team 的共用栈何时升到 rc2、用哪个 `DOC_ENGINE`：由 owner 在 dsh-team 侧推动。组 1 在它就绪前不能开工（owner 前置 issue）；开发期引擎与生产（Infinity）不同只影响检索（S2b），不影响 S2a 的摄取。
+无。dsh-team 共用栈的版本与 `DOC_ENGINE` 已由 #33 定：`v1.0.0-rc2`、`infinity`。
