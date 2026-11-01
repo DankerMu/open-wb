@@ -27,7 +27,7 @@
 > - 需要真实 RAGFlow 的只有组 1（含 1.5），执行前按 design D16 检测；`RAGFlow 私有配置缺失` 与 `共用 RAGFlow 栈未运行或版本不符` 两种停止都在 issue 评论里报告、不开 PR、不拉起任何容器，并在本 issue 正文加一行 `Depends on #<P>`、重开 P（写明要 owner 做什么），让 picker 跳过本 issue。
 > - 假 RAGFlow 夹具按组扩展（design D17），每组只加本组用到的接口，行为分两类：
 >   - 协议应答：路径、字段、状态值与 code 必须在实测记录里有对应条目。
->   - 故障注入：用例显式脚本化，只限四种：传输层失败（挂起、挂起后放行、超时、连接失败、中途断开）；HTTP 层（3xx、5xx、非 JSON、超体积）；漂移值（不符的版本串、八种之外的 `ingestion_status`）；防御性组合（未观察到的路由上的 `code:403`；同一路由上别的 `100`、`101`、`102`；`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`；不带 `graph` 或不是恰一个 chunker 的内置 pipeline；`GET /models/default` 的 `data.models` 只有一种缺省）。
+>   - 故障注入：用例显式脚本化，只限四种：传输层失败（挂起、挂起后放行、超时、连接失败、中途断开）；HTTP 层（3xx、5xx、非 JSON、超体积）；漂移值（不符的版本串、八种之外的 `ingestion_status`）；防御性组合（未观察到的路由上的 `code:403`；同一路由上别的 `100`、`101`、`102`；`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`；不带 `graph` 或不是恰一个 chunker 的内置 pipeline；`GET /models/default` 的 `data.models` 只有一种缺省；成功应答缺字段；HTTP 200 的 `code:401`）。
 >   - `108`、`109` 与分块下载不进夹具。
 > - 每个注册新知识库路由的组，在同一 PR 里：
 >   - 把这些路由加进 `server/test/kb-disabled.test.ts` 的路由表（组 8 新建；ragflow-backend「未配置即关闭」）；
@@ -186,12 +186,12 @@ Minimal mergeable slice: 4.2 的函数与用例移动——纯重构，不改行
 
 ## 5. 假 RAGFlow 夹具与 RAGFlow 客户端（ragflow-backend「RAGFlow 出站请求」）
 
-- [ ] 5.1 核对 Context：
+- [x] 5.1 核对 Context：
   - 组 1 的实测记录（全部路由、字段、状态值、code，表 A、表 B、§7.1、§8、§9.1）；
   - `models/probe.ts` 与 `connectors/probe.ts` 的传输骨架；`core/error-body.ts`、`core/upstream-failure.ts`；
   - `server/test/support/fake-upstream.mjs` 与 `fake-mcp-http.mjs` 的写法，及其 `.d.mts`；
   - `models-probe-helpers.ts` 的 `holdServer()` / `closedPort()`。
-- [ ] 5.2 测试先行：新 `server/test/support/fake-ragflow.mjs` 加 `.d.mts`。
+- [x] 5.2 测试先行：新 `server/test/support/fake-ragflow.mjs` 加 `.d.mts`。
   - 本组只实现：版本接口（`data` 为版本串）；数据集的建（校验 `parser_id` + `parse_type`，`chunk_method` 回 `101`，`tag` 回 `102`，`embedding_model` 传了但非三段式回 `102`，不传时成功）与删（`success_count`，不存在回 `code:403`）；文档的上传（字段 `file`，不支持的后缀回 `code:500`，同名改名 `a(1).txt`）、删除（`RUNNING`、`STOPPING` 回 `deleted:0`）、解析触发（`success_count`）、停止；下载（§9.1 的响应头：成功带 `Content-Disposition`，not-found 与 0 字节不带）。
   - 协议应答可脚本化：记录里出现过的 code；表 B 的全部「不存在」组合；下载内容设为恰等于 not-found 正文；中断的上传不留文档。
   - 故障注入按头部的四种：版本串；按路由挂起、挂起后放行、3xx、5xx、非 JSON、超体积；防御性组合。
@@ -206,8 +206,8 @@ Minimal mergeable slice: 4.2 的函数与用例移动——纯重构，不改行
   - 3xx 不跟随；响应体 1 MiB + 1 字节失败；
   - 版本请求不带 key、其余都带；空 id 的 `DELETE /datasets` 不发出；空 `api_key` 的请求不发出；
   - 结果对象与 stderr 不含假 RAGFlow 返回的 message 哨兵。
-- [ ] 5.3 新 `server/src/kb/ragflow-client.ts`：按 design D4 提供 JSON 请求、流式上传、流式下载三种调用，返回类型化结果（`not_found`、`unsupported_file`、`parse_not_started`、`not_deleted`），期限可注入。客户端不提供 `GET …/instances/<实例>`，也不提供清空缺省与 `/providers` 下的删除。本组只交付客户端，不挂路由。
-- [ ] 5.4 `RAGFLOW_BASE_URL` 拒绝 userinfo（http-service-skeleton「RAGFLOW_BASE_URL 不接受 userinfo」）。#1839 合入的写法与 `PREVIEW_ORIGIN` 共用 `SCHEME_AND_AUTHORITY`，接受 `https://u:p@h`。
+- [x] 5.3 新 `server/src/kb/ragflow-client.ts`：按 design D4 提供 JSON 请求、流式上传、流式下载三种调用，返回类型化结果（`not_found`、`unsupported_file`、`parse_not_started`、`not_deleted`），期限可注入。客户端不提供 `GET …/instances/<实例>`，也不提供清空缺省与 `/providers` 下的删除。本组只交付客户端，不挂路由。
+- [x] 5.4 `RAGFLOW_BASE_URL` 拒绝 userinfo（http-service-skeleton「RAGFLOW_BASE_URL 不接受 userinfo」）。#1839 合入的写法与 `PREVIEW_ORIGIN` 共用 `SCHEME_AND_AUTHORITY`，接受 `https://u:p@h`。
   - 测试先行：`server/test/kb-config.test.ts` 加 `https://u:p@h`、`https://h@i:9380` 两例，message 含键名、不含输入值，先看到红。
   - 实现：`server/src/kb/config.ts` 在 `SCHEME_AND_AUTHORITY` 之外另判 `@`。共用常量与 `PREVIEW_ORIGIN` 的规则不动。
   - `docs/architecture/system.md` §9.13 的键表同步：现写「写法同 `PREVIEW_ORIGIN`」，改为另写明不接受 userinfo。

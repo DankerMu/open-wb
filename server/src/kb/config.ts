@@ -24,7 +24,11 @@ export interface KbSettings {
 
 export function resolveKbSettings(env: Record<string, string | undefined>): KbSettings {
   const { RAGFLOW_BASE_URL: ragflowBaseUrl, RAGFLOW_API_KEY_FILE: ragflowApiKeyFile } = env;
-  if (ragflowBaseUrl !== undefined && !SCHEME_AND_AUTHORITY.test(ragflowBaseUrl)) {
+  // 共用常量也接受 userinfo（`PREVIEW_ORIGIN` 的规则不动）：这里另判 `@`，密钥只走请求头。
+  if (
+    ragflowBaseUrl !== undefined &&
+    (!SCHEME_AND_AUTHORITY.test(ragflowBaseUrl) || ragflowBaseUrl.includes("@"))
+  ) {
     throw new Error("RAGFLOW_BASE_URL must be a scheme and authority only");
   }
   if (ragflowApiKeyFile !== undefined && !isAbsolute(ragflowApiKeyFile)) {

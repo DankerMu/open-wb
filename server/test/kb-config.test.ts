@@ -97,6 +97,20 @@ describe("RAGFLOW_BASE_URL", () => {
     const message = failureOf({ RAGFLOW_BASE_URL: "", RAGFLOW_API_KEY_FILE: KEY_FILE });
     expect(message).toContain("RAGFLOW_BASE_URL");
   });
+
+  it.each(["https://u:p@h", "https://h@i:9380"])(
+    "refuses the userinfo in %s, naming only the key (http-service-skeleton)",
+    (url) => {
+      const message = failureOf({ RAGFLOW_BASE_URL: url, RAGFLOW_API_KEY_FILE: KEY_FILE });
+      expect(message).toContain("RAGFLOW_BASE_URL");
+      expect(message).not.toContain(url);
+      expect(message).not.toContain("@");
+    },
+  );
+
+  it("PREVIEW_ORIGIN keeps its own rule: the same address stays legal there", () => {
+    expect(configOf({ PREVIEW_ORIGIN: "https://u:p@h" }).previewOrigin).toBe("https://u:p@h");
+  });
 });
 
 describe("RAGFLOW_API_KEY_FILE", () => {
