@@ -81,10 +81,10 @@ HTTP 200
  "parser_config":{"Extractor:AutoExtractDefault":{...},"File":{},"GeneralChunker:SixApplesFall":{...},
                   "Parser:HipSignsRhyme":{...},"Tokenizer:LegalReadersDecide":{...}},
  "parser_id":"general","permission":"me","similarity_threshold":0.2,"tenant_id":"<tenant_id>",
- "token_num":0,"update_time":...}}
+ "token_num":0,"update_time":...},"message":null}
 ```
 
-注意应答没有 `message` 键。`parse_type` 不出现在任何读接口里。
+成功应答的 `message` 为 `null`（`GET /datasets` 列表没有这个键）。`parse_type` 不出现在任何读接口里。
 
 ### 4.3 模板字段
 
@@ -249,7 +249,7 @@ POST /api/v1/compilation-template-groups
 }
 ```
 
-同步改 chunker 的 `downstream`、下游的 `upstream`，并在 `graph.nodes` 加 `type:"compilationNode"` 的节点、在 `graph.edges` 加两条边。各模板的 chunker 节点名不同（`GeneralChunker:SixApplesFall`、`ManualChunker:NineInsectsFind`、`QAChunker:TidyCloudsThink` 等），要按 `component_name` 含 `Chunker` 查找。
+同步改 chunker 的 `downstream`、下游的 `upstream`，并在 `graph.nodes` 加 `type:"compilationNode"` 的节点、在 `graph.edges` 把 chunker 原来的出边改接到 Compiler 节点（`source` 改为 Compiler），再加 chunker → Compiler 一条；原边不保留，净增一条。各模板的 chunker 节点名不同（`GeneralChunker:SixApplesFall`、`ManualChunker:NineInsectsFind`、`QAChunker:TidyCloudsThink` 等），要按 `component_name` 含 `Chunker` 查找。
 
 **(4) 建画布**
 
@@ -270,7 +270,7 @@ POST /api/v1/datasets
 {"name":"owb-c-both","parse_type":2,"pipeline_id":"<canvas_id>","embedding_model":"bge-m3@owb-embed@OpenAI-API-Compatible"}
 ```
 
-同一画布可被两个数据集引用（建库成功；解析只在其中一个上跑过，见 §14）。
+应答比 §4.2 多 `pipeline_id`。同一画布可被两个数据集引用（建库成功；解析只在其中一个上跑过，见 §14）。
 
 **(6) 手写的最小 DSL**
 
@@ -432,7 +432,7 @@ GET /api/v1/datasets/<dataset_id>/ingestions?page=1&page_size=10
  "tenant_id":"<tenant_id>","update_date":...,"update_time":...}],"total":1}}
 ```
 
-`task_type` 观察到 `Tree`、`Graph`；`operation_status` 观察到 `RUNNING`、`DONE`。一份文档一个批次一条，开两种时每批次两条。
+`Graph` 一条的 `document_name` 为 `Graph`，`dsl.entries[].variants` 为 `["structure","tree"]`，其中也含 `tree`，所以类型只能按 `task_type` 判定。`task_type` 观察到 `Tree`、`Graph`；`operation_status` 观察到 `RUNNING`、`DONE`。一份文档一个批次一条，开两种时每批次两条。
 
 产物可读：`GET /datasets/<id>/artifacts/structure?kind=graph`（`total_entities`、`total_relations`）、`GET /datasets/<id>/navigation`（RAPTOR 的 `items`）、`GET /datasets/<id>/documents/<id>/structure/graph`（`templates[].kind` 为 `tree` / `knowledge_graph`）。`artifacts/structure?kind=tree` 回 `101`，`invalid structure kind: "tree"`。
 
@@ -453,10 +453,10 @@ GET /api/v1/datasets/<dataset_id>/ingestions?page=1&page_size=10
 
 ### 5.5 Compiler 用哪个模型
 
-- `llm_id` 留空的 Compiler 节点，建数据集时 `parser_config` 里被填成**账号当时的缺省对话模型**（实测 `Compiler:*.llm_id` 读回为三段式）。之后清空账号缺省，文档阶段的编译仍用这个固化值，照常产出。
-- 所以清空账号缺省不影响已建数据集的文档阶段编译；要删除模型本身，编译才失效（§5.4）。
+- `llm_id` 留空的 Compiler 节点，建数据集时 `parser_config` 里被填成**账号当时的缺省对话模型**（实测 `Compiler:*.llm_id` 读回为三段式）。之后清空账号缺省对话模型，文档阶段的编译仍用这个固化值，照常产出。
+- 所以清空账号缺省对话模型不影响已建数据集的文档阶段编译；要删除模型本身，编译才失效（§5.4）。
 - 数据集级合并另用账号缺省对话模型，没有缺省时入库进程退出（§13）。
-- 文档阶段的 Compiler 依赖账号缺省嵌入模型，不是数据集的 `embedding_model`（上表最后一行）。
+- 文档阶段的 Compiler 依赖账号缺省嵌入模型，不是数据集的 `embedding_model`（§5.4「账号缺省嵌入模型已清空」一行）。
 
 结论：**支持**，形状是 pipeline 而不是数据集字段，无须显式触发。各模板的支持情况见表 C。
 
@@ -488,7 +488,7 @@ Content-Disposition: form-data; name="file"; filename="a.txt"
 → HTTP 200，Transfer-Encoding: chunked
 {"code":0,"data":[{"chunk_count":0,"content_hash":"...","created_by":"<user_id>","dataset_id":"<dataset_id>",
  "id":"<document_id>","ingestion_status":"UNSTART","location":"a.txt","name":"a.txt","parser_config":{...},
- "parser_id":"general","size":16,"source_type":"local","suffix":"txt","token_count":0,"type":"doc"}]}
+ "parser_id":"general","size":16,"source_type":"local","suffix":"txt","token_count":0,"type":"doc"}],"message":null}
 ```
 
 pipeline 数据集另有 `pipeline_id`，`parser_id` 为空串。
@@ -1092,7 +1092,7 @@ D4 的第 4 条按 HTTP 401 / 403 或 body `108` / `109` 判定，HTTP 200 + `co
 | 「编译开启或触发」不支持 | **未触发** | §5：API key 能建模板组、画布与 pipeline 数据集，解析时自动编译，十一种模板实际产出。D14 的停止条件不成立 |
 | 模板支持表与 D9 不符 | **触发** | 表 C：`tag` 不可建；`audio` 为 D9 之外的模板；RAPTOR 在 D9 标为不可用的五种模板上都可用 |
 
-按 tasks 1.4：本 PR 照常合入。合入前建修订 issue R，标题「修订 s2a-kb-ragflow：模板支持表」，组 9 与组 15 首刀 `Depends on #<R>`。
+按 tasks 1.4：本 PR 照常合入。合入前建修订 issue R，标题「修订 s2a-kb-ragflow：模板支持表」，R 为修订 issue，闸门加在 #1836、#1840、#1841、#1846 上。
 
 **owner 决定（2026-11-01）**：修订 R 覆盖全部 23 条事实（下表 #1–#23）；RAPTOR 按实测对 11 种模板放开，删 `tag`，不加 `audio`；编译开关留在 S2a。
 
@@ -1111,9 +1111,9 @@ D4 的第 4 条按 HTTP 401 / 403 或 body `108` / `109` 判定，HTTP 200 + `co
 | 7 | 不支持的后缀回 `code:500`，按 D4 映射为 `kb_unavailable`，会中止工作空间入库的整批 | §7.1 | D4、D10、D11、组 10、组 12 |
 | 8 | `RUNNING`、`STOPPING` 时删文档回 `code:0`、`deleted:0`，按现有流程本地行被删、RAGFlow 留孤儿 | §8.5 | D13、D10、组 13、组 5 夹具 |
 | 9 | `success_count:0` 与 `code:0` 同时出现，「解析触发失败」不会被 D4 识别 | §8.1 | D4、D8、D10、D11、D13、组 10、组 12、组 13、组 14 |
-| 10 | 不存在组合依路由而异，三条要 message 前缀；`DELETE /datasets` 为 `code:403` | 表 B | D4、spec「RAGFlow 出站请求」、组 5、组 9、组 13、组 14 |
+| 10 | 不存在组合依路由而异，三条要 message 前缀；`DELETE /datasets` 为 `code:403` | 表 B | D4、D10、D11、spec「RAGFlow 出站请求」、组 5、组 9、组 10、组 12、组 13、组 14 |
 | 11 | 鉴权错误是 HTTP 401 + `code:401`。权限错误的 `code:403` 只在一条路由上观察到，单账号未造出真实权限错误；D4 第 4 条对 HTTP 200 + `code:403` 不生效。spec「结果映射」的 Scenario 要假 RAGFlow 回 HTTP 200 `code:109`，而实例未观察到 `109`，与「记录里没有的不出现在夹具里」（`ragflow-backend/spec.md:25`）冲突 | §12 | D4（`design.md:151`）、spec「结果映射」第 4 条（`ragflow-backend/spec.md:85`）与 Scenario（`:90-92`）、组 5 |
-| 12 | 0 字节文件下载回 `code:500`，重建会判该库失败且重试不会好 | §9 | D8、D10、组 14 |
+| 12 | 0 字节文件下载回 `code:500`，重建会判该库失败且重试不会好 | §9 | D8、D10、D11、组 12、组 14 |
 | 13 | 下载始终带 `Content-Length`，未观察到分块；spec「原件缺失与分块下载」的分块分支在实例上没有对应行为，与「记录里没有的不出现在夹具里」冲突 | §9 | D8、D17、spec、组 14 |
 | 14 | `PUT` 实例不带 `model_info` 回 400，`api_key` 空串清空密钥，重复 `POST` 回 `500` | §11.4 | D7、组 8 |
 | 15 | `GET` 实例明文回显密钥 | §11.1 | D4、组 5、组 8 |
