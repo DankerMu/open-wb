@@ -514,9 +514,9 @@ Minimal mergeable slice: atomic - 确认开关一旦开放就必须有重建器�
     - 建库恰一次请求与失败 alert；空态；
     - 列表行的 `删除知识库`：先弹确认，确认后恰一次 `deleteKnowledgeBase`；`rebuilding` 时不渲染，`rebuild_failed` 时渲染；
     - 「编译状态文案」：含 `pending` 的 `尚未产出` 与旁注、`compile:null` 显示 `状态未知`，页面不出现 `编译失败`。
-  - 新 `web/test/api-kb.test.ts`：两份 spec 写明的每个应答形状的严格解析（多键、少键、类型不符即 `requestFailed`）。
+  - 新 `web/test/api-kb.test.ts`：两份 spec 写明的每个应答形状的严格解析（多键、少键、类型不符即 `requestFailed`）。（已随 #1841 落地）
 - [ ] 15.3 实现：
-  - 新 `web/src/lib/api-kb.ts`（全部知识库方法，含组 16、17 用到的）；`api.ts` 接线，同一刀更新 `web/test/api-files-archive.test.ts` 的 `OTHER_CLIENT_METHODS` 精确键集；
+  - 新 `web/src/lib/api-kb.ts`（全部知识库方法，含组 16、17 用到的）；`api.ts` 接线，同一刀更新 `web/test/api-files-archive.test.ts` 的 `OTHER_CLIENT_METHODS` 精确键集（已随 #1841 落地）；
   - `tabs.ts` 加 `{key:"knowledge-bases", label:"知识库", adminOnly:false, requiresKb:true}` 与可见性计算；
   - 新 `web/src/features/center/kb/{panel.tsx,list.tsx,create-dialog.tsx,use-kb.ts,templates.ts}`；`templates.ts` 只有十一种模板的中文名与 demo 说明文案，没有编译支持表。
 - [ ] 15.4 验收清单新节「中心·知识库（CK）」，结论 `待签`，`web/test/functional-checklist.test.ts` 通过：

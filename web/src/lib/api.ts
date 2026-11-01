@@ -26,6 +26,17 @@ import {
   parseJsonArray,
 } from "./api-json.js";
 import {
+  type BaseView,
+  type CreateKnowledgeBaseInput,
+  createKbMethods,
+  type DocumentView,
+  type IngestFromWorkspaceInput,
+  type KbIngestResult,
+  type KbSettingsView,
+  type KbStatus,
+  type UpdateKbSettingsInput,
+} from "./api-kb.js";
+import {
   type CreateModelInput,
   createModelMethods,
   type ModelView,
@@ -249,6 +260,37 @@ export type ApiClient = {
     disabledConnectors: readonly string[],
     options?: ApiRequestOptions,
   ): Promise<string[]>;
+  getKbStatus(options?: ApiRequestOptions): Promise<KbStatus>;
+  getKbSettings(options?: ApiRequestOptions): Promise<KbSettingsView>;
+  updateKbSettings(
+    input: UpdateKbSettingsInput,
+    options?: ApiRequestOptions,
+  ): Promise<KbSettingsView>;
+  probeKbEmbedding(options?: ApiRequestOptions): Promise<KbSettingsView>;
+  retryKbRebuild(options?: ApiRequestOptions): Promise<KbSettingsView>;
+  listKnowledgeBases(options?: ApiRequestOptions): Promise<BaseView[]>;
+  createKnowledgeBase(
+    input: CreateKnowledgeBaseInput,
+    options?: ApiRequestOptions,
+  ): Promise<BaseView>;
+  deleteKnowledgeBase(id: string, options?: ApiRequestOptions): Promise<void>;
+  listKbDocuments(baseId: string, options?: ApiRequestOptions): Promise<DocumentView[]>;
+  ingestFromWorkspace(
+    baseId: string,
+    input: IngestFromWorkspaceInput,
+    options?: ApiRequestOptions,
+  ): Promise<KbIngestResult>;
+  uploadToKnowledgeBase(
+    baseId: string,
+    file: File,
+    options?: ApiRequestOptions,
+  ): Promise<DocumentView>;
+  reingestKbDocument(
+    baseId: string,
+    documentId: string,
+    options?: ApiRequestOptions,
+  ): Promise<DocumentView>;
+  removeKbDocument(baseId: string, documentId: string, options?: ApiRequestOptions): Promise<void>;
   getSessionCapabilities(
     sessionId: string,
     options?: ApiRequestOptions,
@@ -510,6 +552,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     ...createExpertMethods(onUnauthorized, transport),
     ...createSkillMethods(onUnauthorized, transport),
     ...createConnectorMethods(onUnauthorized, transport),
+    ...createKbMethods(onUnauthorized, transport),
     ...createSessionCapabilityMethods(onUnauthorized, transport),
     async listAudit(filter, options) {
       const search = new URLSearchParams();
@@ -607,6 +650,16 @@ export {
   type ExpertView,
 } from "./api-experts.js";
 export { downloadUrl, fileUrl } from "./api-files.js";
+export type {
+  BaseView,
+  CreateKnowledgeBaseInput,
+  DocumentView,
+  IngestFromWorkspaceInput,
+  KbIngestResult,
+  KbSettingsView,
+  KbStatus,
+  UpdateKbSettingsInput,
+} from "./api-kb.js";
 export {
   type CreateModelInput,
   MODEL_EFFORTS,
