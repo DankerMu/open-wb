@@ -30,7 +30,7 @@ const TOTAL_MS = 30_000;
 const VERSION_TOTAL_MS = 5_000;
 const IDLE_MS = 60_000;
 const MAX_JSON_BYTES = 1_048_576;
-const AUTH_LOG_INTERVAL_MS = 60_000;
+const RECORD_INTERVAL_MS = 60_000;
 const PAGE_SIZE = 100;
 const API = "/api/v1";
 const PROVIDER = "OpenAI-API-Compatible";
@@ -104,7 +104,7 @@ interface ListedDocument {
   chunkCount: number;
 }
 
-interface Deadlines {
+export interface Deadlines {
   connectMs: number;
   totalMs: number;
   versionTotalMs: number;
@@ -419,6 +419,18 @@ function interpret<T, Typed>(
   return UNAVAILABLE;
 }
 
+/** 一条 stderr 记录的限频：同一进程 60 秒内至多一行。状态在返回的闭包里，所以每条记录只建一次。 */
+export function perMinute(now: () => number, write: () => void): () => void {
+  let last: number | undefined;
+  return () => {
+    const at = now();
+    if (last === undefined || at - last >= RECORD_INTERVAL_MS) {
+      last = at;
+      write();
+    }
+  };
+}
+
 export function createRagflowClient(options: {
   /** 只有协议与 authority（`kb/config.ts`）。 */
   baseUrl: string;
@@ -436,15 +448,7 @@ export function createRagflowClient(options: {
     idleMs: IDLE_MS,
     ...options.deadlines,
   };
-  let lastAuthLog: number | undefined;
-
-  function logAuthFailure(): void {
-    const at = now();
-    if (lastAuthLog === undefined || at - lastAuthLog >= AUTH_LOG_INTERVAL_MS) {
-      lastAuthLog = at;
-      log({ event: "kb_upstream_auth_failed" });
-    }
-  }
+  const logAuthFailure = perMinute(now, () => log({ event: "kb_upstream_auth_failed" }));
 
   async function send<T, Typed>(
     outbound: Outbound,

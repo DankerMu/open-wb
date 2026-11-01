@@ -1,7 +1,7 @@
 /**
  * s1d-connectors group 3 (task 3.2): omp-runtime「托管 mcp.json 的模式与属主」second half and connectors
  * 「发布失败」on the compiled production entry — the proof that `server.ts` hands the one `mcp.json`
- * publisher and `writeRecord` to the `connectors` module. Cold start reports the eleven modules
+ * publisher and `writeRecord` to the `connectors` module. Cold start reports the twelve modules
  * (`connectors` last) and writes the empty-table bytes; an admin `POST` of a stdio connector rewrites
  * `mcp.json` (a 0640 regular file of this uid, agent dir still 2750, no temp file left); with the agent
  * dir replaced by a regular file the next `POST` is the generic 500, the row stays, and the entry's stderr
@@ -28,7 +28,7 @@ import {
 } from "./server-startup-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 
-const ELEVEN_MODULES = [
+const TWELVE_MODULES = [
   "core/db",
   "auth",
   "http",
@@ -40,6 +40,7 @@ const ELEVEN_MODULES = [
   "experts",
   "skills",
   "connectors",
+  "kb",
 ];
 /** Low-entropy sentinel (gitleaks): an `env` value that must stay inside `mcp.json`. */
 const SECRET = "wb-issue1672-restart-env-token";
@@ -88,7 +89,7 @@ async function stopped(server: StartedServer): Promise<string> {
 }
 
 describe("connectors on the compiled entry", () => {
-  it("eleven modules; a POST rewrites a 0640 mcp.json; with the agent dir gone the next POST is a 500 with one mcp_publish_failed record", async () => {
+  it("twelve modules; a POST rewrites a 0640 mcp.json; with the agent dir gone the next POST is a 500 with one mcp_publish_failed record", async () => {
     const root = mkdtempSync(join(tmpdir(), "open-wb-connectors-restart-"));
     scratch.push(root);
     const agent = join(root, "state", "home", ".omp", "agent");
@@ -98,7 +99,7 @@ describe("connectors on the compiled entry", () => {
     }));
     let stderr: string;
     try {
-      expect(await server.waitForStarted()).toMatchObject({ modules: ELEVEN_MODULES });
+      expect(await server.waitForStarted()).toMatchObject({ modules: TWELVE_MODULES });
       expect(readFileSync(mcpPath, "utf8")).toBe(EMPTY_MCP);
       const cookie = await adminCookie(port);
 

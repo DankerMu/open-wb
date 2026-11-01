@@ -46,6 +46,7 @@ import {
   validateListenerCloseBudget,
 } from "./http/listener-shutdown.js";
 import { classifyRequestPath } from "./http/path-classifier.js";
+import { type KbDependencies, registerKb } from "./kb/index.js";
 import { type ApprovalMode, type ModelCatalog, resolveModelCatalog } from "./model-catalog.js";
 import { registerModelProxy } from "./model-proxy/index.js";
 import { type ModelRegistry, staticRegistry } from "./model-proxy/lookup.js";
@@ -162,6 +163,10 @@ export interface AssemblyDependencies {
    * `connectors/probe.ts` 的 10 s / 15 s。
    */
   probeDeadlines?: { connectDeadlineMs?: number; totalDeadlineMs?: number };
+  /**
+   * 知识库（s2a-kb-ragflow D3、D5）：配置了 `RAGFLOW_BASE_URL` 时入口给出；省略即知识库关闭，`kb` 模块照常注册。
+   */
+  kb?: KbDependencies | undefined;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -367,6 +372,8 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   // 第十个模块 `skills`（s1d-experts-skills D6）：平台技能读同一个 agent 目录，账号缺省写 app 自己的库。
   registerSkills(app, { db, agentDir: ompAgentDir(runtime.stateDir) });
   registerConnectorAdmin(app, db, assembly);
+  // 第十二个模块 `kb`（s2a-kb-ragflow D5、D18）：只收这一个依赖，store 与客户端都在模块里建。
+  registerKb(app, assembly?.kb);
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));

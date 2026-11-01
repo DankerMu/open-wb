@@ -17,11 +17,7 @@ const INVALID_KEY_FILE = `${KEY_FILE_SETTING} must be a private regular file hol
 const MAX_KEY_FILE_BYTES = 4096;
 const OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
-/**
- * 读出的密钥只在这个闭包里：序列化与 inspect 看不到它，对象本身冻结。
- *
- * @public s2a-kb-ragflow 组 4 暂无生产消费者（入口只持有它）；组 6 把句柄交给 `kb` 模块时删掉这条 knip 豁免。
- */
+/** 读出的密钥只在这个闭包里：序列化与 inspect 看不到它，对象本身冻结。 */
 export interface KbKeyHandle {
   read(): string;
 }

@@ -52,6 +52,7 @@ const STARTUP_MODULES = [
   "experts",
   "skills",
   "connectors",
+  "kb",
 ];
 const OWNER = "u1";
 const WORKSPACE = "1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a";

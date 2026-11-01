@@ -230,7 +230,7 @@ Minimal mergeable slice: atomic - 夹具没有客户端就没有消费者，客�
   - `http-parser-owners.test.ts`：三十八条，七条 PUT、三十条 POST、一条 PATCH。七条新身份在本组先登记，路由由组 8–14 注册；先例见 `http/errors.ts` 注释里的 `POST /api/models/probe`。
   - 同 PR 把 `http-typed-errors.test.ts`、`http-error-codes.test.ts` 的「二十五码」改为三十七，`codes` 表加 12 码。
 - [x] 6.3 实现（首刀）：`core/errors` 加十二码；`http/errors.ts` 的状态映射、归属集与计数措辞。
-- [ ] 6.4 测试先行（剩余部分）：
+- [x] 6.4 测试先行（剩余部分）：
   - 把 6.1 清单里的模块列表断言改为十二项、最后为 `kb`，在 `spyRegistrationOrder` 加 `registerKb`；
   - `server-startup-kb.test.ts` 的「知识库键与密钥文件阶段」最后一例改为模块恰为十二项且最后是 `kb`，删掉 `ELEVEN_MODULES`。
   
@@ -238,12 +238,12 @@ Minimal mergeable slice: atomic - 夹具没有客户端就没有消费者，客�
   - 「版本钉住」；未配置时 `{enabled:false}`；
   - `embeddingReady` 与 `compileReady` 随 `kb_settings` 变化（store 直接写入）；
   - 未登录 401；no-store。
-- [ ] 6.5 实现（剩余部分）：
+- [x] 6.5 实现（剩余部分）：
   - 新 `server/src/kb/index.ts` 与 `kb/rest.ts`：本组只有 `GET /api/kb/status`，以及 `/api/kb/*` 的关闭判定——preParsing 在 cookie guard 之后、管理员判定与 body 解析之前返回 503 `kb_disabled`；关闭判定由后续各组的路由用例验证。
   - `app.ts` 在 `registerConnectors` 之后注册 `kb`；`STARTUP_MODULES` 加 `kb`（`server.ts` +1 行）。
   - 组 4 的密钥句柄经 `createApp` 交给 `kb` 模块（`server.ts` +1 行），删掉 knip 豁免注释。
   - `AssemblyDependencies` 加一个 `kb` 字段，类型 `KbDependencies` 由 `kb/index.ts` 导出：密钥句柄、地址、两个上传上限，期限与测试缝可选（测试注入）；后续各组只扩这个类型；`app.ts` 除组 8 剩余的 `modelWriteGuard` 接线外不再改。
-- [ ] 6.6 `system.md` §3.1 的 `kb` 行补状态端点，`core/errors` 行改为三十七码；§9.13 加状态端点、版本钉住与两条 stderr 记录。
+- [x] 6.6 `system.md` §3.1 的 `kb` 行补状态端点，`core/errors` 行改为三十七码；§9.13 加状态端点、版本钉住与两条 stderr 记录；去掉 §3 与 §9 里「content-parser 归属集」后的序数（二十九条之一、三十条之一、三十一条之一），只写属归属集。
 
 Suggested fixture level: expanded - 改共享错误信封与装配（Fastify assembly/routes/hooks 触发项）。
 Minimal mergeable slice: 6.2–6.3 的码表用例移动、十二码与七条归属身份登记——码表与归属集是纯数据，先合不改变任何已注册路由的行为，带「十二个知识库码」与三十八条计数用例。剩余部分（`kb` 模块装配、关闭判定与状态端点）依赖它；剩余部分 atomic：模块一注册就必须进启动记录，启动记录与注册次序断言要同 PR 改。
