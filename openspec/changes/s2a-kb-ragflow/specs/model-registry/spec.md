@@ -12,7 +12,7 @@
 - **THEN** 管理员 tab 条依次为 `专家`、`技能`、`连接器`、`知识库`、`模型`、`挂载源`，普通用户为 `专家`、`技能`、`连接器`、`知识库`，两者的 routeManifest 描述都仍为 `专家、技能与连接器`；`enabled:false` 时 URL 以 replace 变为 `/center?tab=experts` 且没有 `知识库`；挂起期间 URL 不变、不渲染 `中心暂无可用内容`，应答后 `知识库` 选中
 
 ### Requirement: 模型 tab
-`/center?tab=models` SHALL 渲染模型表（拷入层 table）：每行 `id`、`name`、标签 `推理` / `看图`（按布尔）、`maxTokens`、上游（`已配置` / `未配置`）、探活（`从未` / `正常` / `失败：<message>` 与 `at` 的本地时间）、`缺省` 标记，以及行操作 `编辑`、`删除`、`设为缺省`（缺省行不渲染）、`探活`；表上方 `新增模型` 按钮。新增 / 编辑为对话框表单：`id`（编辑时只读）、`name`、`reasoning` / `vision` 复选、`maxTokens` 数字、`efforts` 六个复选（仅 `reasoning` 勾选时启用；视图 `efforts` 为 null 的推理模型预填为一个都不勾，旁注 `不勾选即不声明强度集合，界面列全部档位`；一个都不勾则提交不带 `efforts`）、`上游地址`、`密钥`（编辑时 placeholder `留空保留现有密钥`，空即省略 `apiKey`）；提交前 SHALL 在客户端按与服务端相同的规则逐字段校验并在字段旁显示具体原因（`id` 字节数与控制字符、`name` 码点数与控制字符、`maxTokens` 范围、地址格式、带地址且无已存密钥时必填密钥、填了密钥必填地址），服务端 400 的统一文案只作兜底；提交恰调用一次 `createModel` / `updateModel`，在途禁用提交，失败在对话框内 `role="alert"` 显示 `ApiError.message`。两个对话框 SHALL 接入 ui-primitives 规定的 Escape 关闭回退（`useEscapeFallback`），与既有覆盖层同一行为。保存成功且上游有改动（新建带上游；编辑改了地址或填了密钥）时 SHALL 紧接着恰调用一次 `probeModel`。`删除` 先弹确认（拷入层 alert-dialog，按钮 `取消` / `删除`）；`设为缺省` 与 `探活` 直接调用，在途禁用该行对应按钮。每次操作成功后 SHALL 重取 `listModels` 渲染；收到非信封的 500（发布失败）时同样重取（行已写入）并在页顶 `role="alert"` 显示 `REQUEST_FAILED_MESSAGE`。模型表下方 SHALL 在 `GET /api/kb/status` 为 `enabled:true` 时渲染「知识库模型」段（knowledge-bases 与 ragflow-backend 的设置端点）：嵌入模型的名称、上游地址（`已配置` / `未配置` 密钥）与探活状态，`编辑` 打开对话框（`名称`、`上游地址`、`密钥`——首次必填、之后 placeholder `留空保留现有密钥`），保存后若上游有改动恰调用一次 `probeKbEmbedding`；`知识库对话模型` 下拉（对话模型表里带上游的 `id` 加 `不使用`），改动即恰一次 `updateKbSettings({chatModelId})`；知识库数、文档数与重建状态（`重建中 N 个` / `重建失败 N 个`），有失败时显示 `重试失败的重建`（恰一次 `retryKbRebuild`）。更换嵌入模型名称或上游地址且知识库数大于 0 时，保存 SHALL 先弹确认（拷入层 alert-dialog，正文 `更换嵌入模型会重建全部 <知识库数> 个知识库（共 <文档数> 份文档），重建期间不能入库。`，按钮 `取消` / `重建并保存`），确认后带 `confirmRebuild:true` 恰调用一次 `updateKbSettings`；取消则不发请求。设置读取失败时该段显示 `知识库服务暂不可用` 与 `重试`。API 客户端 `web/src/lib/api-models.ts` SHALL 提供 `listModels` / `createModel(input)` / `updateModel(id, input)` / `deleteModel(id)` / `setDefaultModel(id)` / `probeModel(id)`，查询参数 `id` 经 `encodeURIComponent`，响应按 `ModelView` 严格解析（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型。
+`/center?tab=models` SHALL 渲染模型表（拷入层 table）：每行 `id`、`name`、标签 `推理` / `看图`（按布尔）、`maxTokens`、上游（`已配置` / `未配置`）、探活（`从未` / `正常` / `失败：<message>` 与 `at` 的本地时间）、`缺省` 标记，以及行操作 `编辑`、`删除`、`设为缺省`（缺省行不渲染）、`探活`；表上方 `新增模型` 按钮。新增 / 编辑为对话框表单：`id`（编辑时只读）、`name`、`reasoning` / `vision` 复选、`maxTokens` 数字、`efforts` 六个复选（仅 `reasoning` 勾选时启用；视图 `efforts` 为 null 的推理模型预填为一个都不勾，旁注 `不勾选即不声明强度集合，界面列全部档位`；一个都不勾则提交不带 `efforts`）、`上游地址`、`密钥`（编辑时 placeholder `留空保留现有密钥`，空即省略 `apiKey`）；提交前 SHALL 在客户端按与服务端相同的规则逐字段校验并在字段旁显示具体原因（`id` 字节数与控制字符、`name` 码点数与控制字符、`maxTokens` 范围、地址格式、带地址且无已存密钥时必填密钥、填了密钥必填地址），服务端 400 的统一文案只作兜底；提交恰调用一次 `createModel` / `updateModel`，在途禁用提交，失败在对话框内 `role="alert"` 显示 `ApiError.message`。两个对话框 SHALL 接入 ui-primitives 规定的 Escape 关闭回退（`useEscapeFallback`），与既有覆盖层同一行为。保存成功且上游有改动（新建带上游；编辑改了地址或填了密钥）时 SHALL 紧接着恰调用一次 `probeModel`。`删除` 先弹确认（拷入层 alert-dialog，按钮 `取消` / `删除`）；`设为缺省` 与 `探活` 直接调用，在途禁用该行对应按钮。每次操作成功后 SHALL 重取 `listModels` 渲染；收到非信封的 500（发布失败）时同样重取（行已写入）并在页顶 `role="alert"` 显示 `REQUEST_FAILED_MESSAGE`。模型表下方 SHALL 在 `GET /api/kb/status` 为 `enabled:true` 时渲染「知识库模型」段（knowledge-bases 与 ragflow-backend 的设置端点；不看 `available`，见 ragflow-backend「知识库可用性」）：嵌入模型的名称、上游地址（`已配置` / `未配置` 密钥）与探活状态，`编辑` 打开对话框（`名称`、`上游地址`、`密钥`——首次必填、之后 placeholder `留空保留现有密钥`），保存后若上游有改动恰调用一次 `probeKbEmbedding`；`知识库对话模型` 下拉（对话模型表里带上游的 `id` 加 `不使用`），改动即恰一次 `updateKbSettings({chatModelId})`；已指定且 `compileBases` 大于 0 时下拉禁用，旁注 `已有 <compileBases> 个开启 RAPTOR 或知识图谱的知识库，不能更换或取消`；知识库数、文档数与重建状态（`重建中 N 个` / `重建失败 N 个`），有失败时显示 `重试失败的重建`（恰一次 `retryKbRebuild`）。更换嵌入模型名称或上游地址且知识库数大于 0 时，保存 SHALL 先弹确认（拷入层 alert-dialog，正文 `更换嵌入模型会重建全部 <知识库数> 个知识库（共 <文档数> 份文档），重建期间不能入库。`，按钮 `取消` / `重建并保存`），确认后带 `confirmRebuild:true` 恰调用一次 `updateKbSettings`；取消则不发请求。设置读取失败时该段显示 `知识库服务暂不可用` 与 `重试`。API 客户端 `web/src/lib/api-models.ts` SHALL 提供 `listModels` / `createModel(input)` / `updateModel(id, input)` / `deleteModel(id)` / `setDefaultModel(id)` / `probeModel(id)`，查询参数 `id` 经 `encodeURIComponent`，响应按 `ModelView` 严格解析（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型。
 
 #### Scenario: 登记、编辑与探活
 - **WHEN** 管理员点 `新增模型`，填 `id` `m2`、勾 `推理`、勾 `low` `high`、填地址与密钥，提交（假客户端返回视图）；随后编辑 `m2` 只改 `name`；再编辑改地址不填密钥
@@ -21,6 +21,10 @@
 #### Scenario: 删除与缺省
 - **WHEN** 管理员对非缺省行点 `删除` 并确认；对另一行点 `设为缺省`；`deleteModel` 返回 409 信封
 - **THEN** 确认后恰一次 `deleteModel`；`设为缺省` 恰一次 `setDefaultModel`，刷新后该行有 `缺省` 标记且不再有 `设为缺省` 按钮；409 时行内显示信封文案、行仍在
+
+#### Scenario: 开编译的库锁定对话模型下拉
+- **WHEN** 知识库设置为 `{chatModelId:"m2", compileBases:1, …}`；另一次为 `{chatModelId:"m2", compileBases:0, …}`；再一次为 `{chatModelId:null, compileBases:1, …}`
+- **THEN** 第一次下拉禁用，旁注含 `1 个开启 RAPTOR 或知识图谱的知识库`；后两次下拉可用，没有该旁注
 
 #### Scenario: 更换嵌入模型需确认
 - **WHEN** 知识库设置为 `{embedding:{name:"bge-m3", …}, bases:2, documents:5, …}` 时管理员把名称改为 `text-embedding-3-small` 并保存，在确认框点 `取消`；再保存并点 `重建并保存`
@@ -31,7 +35,7 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 
 - `GET /api/models` → 200 `{models: ModelView[]}`，按快照次序。
 - `POST /api/models`：body 键集 SHALL 为 `{id, name, reasoning, vision, maxTokens, efforts, upstream}` 的子集且含 `id`，`upstream` 为 `{baseUrl, apiKey}`（两键都必填）；缺省与 `MODEL_CATALOG` 条目相同（`name = id`、布尔 `false`、`maxTokens` 32768；非推理模型不得带 `efforts`；推理模型可不带——存 NULL，表示不声明强度集合，model-selection「推理强度集合」）；`baseUrl` SHALL 整体匹配 `^https?://[^\s#@]+$`（允许路径与查询串，不允许 userinfo 与 fragment）；`apiKey` SHALL 通过 `http.validateHeaderValue("authorization", "Bearer " + 取值)`。表为空时该行成为缺省。`id` 已存在 409 `conflict`；已有 32 行 400 `bad_request`；其它非法 400 `bad_request`。→ 201 `ModelView`。
-- `PUT /api/models?id=<id>`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列；`baseUrl` 逐字等于已存地址去掉 userinfo 后的视图形式时 SHALL 沿用已存地址（含 userinfo，不再套地址规则）——`apiKey` 省略则密钥也沿用，给了 `apiKey` 则只换密钥（仍经 header 值校验）——使编辑 env 种子行只改名或只换密钥都不丢地址里的凭证。知识库开启且该行是知识库对话模型时（change s2a-kb-ragflow）：`upstream: null` → 409 `kb_model_in_use`，行不变；`upstreamChanged` 为真 → 经装配注入的知识库钩子在进程级设置锁内包住这次写入：先做引用判定并把新上游重新下发到 RAGFlow，再写本地；下发失败按 ragflow-backend「RAGFlow 出站请求」映射（503 `kb_unavailable` / 400 `kb_rejected`），行、审计与 `models.yml` 都不变。→ 200 `ModelView`。
+- `PUT /api/models?id=<id>`：body 键集恰为 `{name, reasoning, vision, maxTokens, efforts?, upstream}`，整体替换 `id` 以外的字段（推理模型省略 `efforts` 即存 NULL）；`upstream` 为 `{baseUrl, apiKey?}` 或 `null`：`apiKey` 省略 SHALL 保留既有密钥（既无密钥则 400），`null` 清空两列；`baseUrl` 逐字等于已存地址去掉 userinfo 后的视图形式时 SHALL 沿用已存地址（含 userinfo，不再套地址规则）——`apiKey` 省略则密钥也沿用，给了 `apiKey` 则只换密钥（仍经 header 值校验）——使编辑 env 种子行只改名或只换密钥都不丢地址里的凭证。知识库开启且该行是知识库对话模型时（change s2a-kb-ragflow）：body 校验 SHALL 先于引用判定与下发，非法 body 400 `bad_request`，不发 RAGFlow 请求；`upstream: null` → 409 `kb_model_in_use`，行不变；`upstreamChanged` 为真 → 经装配注入的知识库钩子在进程级设置锁内包住这次写入：按校验算出的候选上游做引用判定并重新下发到 RAGFlow 的 `owb-chat` 实例，再写本地；下发失败按 ragflow-backend「RAGFlow 出站请求」映射（503 `kb_unavailable` / 400 `kb_rejected`），行、审计与 `models.yml` 都不变。→ 200 `ModelView`。
 - `DELETE /api/models?id=<id>`：`is_default = 1` 的行 409 `model_in_use`；知识库开启且该行是知识库对话模型时 409 `kb_model_in_use`（change s2a-kb-ragflow，ragflow-backend「知识库模型设置」；引用判定与删除在同一次设置锁内完成）；否则删除 → 204。
 - `POST /api/models/default?id=<id>`（无 body）：一个事务里把旧缺省清零、该行置 1 → 200 `ModelView`；该行已是缺省时 200、不记审计、不发布。
 - `POST /api/models/probe?id=<id>`（无 body）：见「探活」→ 200 `ModelView`。
@@ -70,4 +74,12 @@ sessions 之外的 `models` 模块 SHALL 注册六个端点（路由身份 `GET 
 
 #### Scenario: 知识库对话模型受保护
 - **WHEN** 知识库开启且 `m2` 被指定为知识库对话模型；管理员 `DELETE /api/models?id=m2`；`PUT` `m2` 只改 `name`；`PUT` `m2` 换密钥（假 RAGFlow 应答成功）；知识库关闭的另一个实例里对同样被引用的 `m3` `DELETE`
-- **THEN** 删除 409 `kb_model_in_use`、行不变；只改 `name` 200 且假 RAGFlow 没有收到下发；换密钥 200 且假 RAGFlow 在本地写入之前恰收到一次带新密钥的下发；知识库关闭时删除 204，`kb_settings.chat_model_id` 变为 NULL
+- **THEN** 删除 409 `kb_model_in_use`、行不变；只改 `name` 200 且假 RAGFlow 没有收到下发；换密钥 200 且假 RAGFlow 在本地写入之前恰收到一轮 `owb-chat` 的下发，`PUT` 实例的 `api_key` 为新密钥；知识库关闭时删除 204，`kb_settings.chat_model_id` 变为 NULL
+
+#### Scenario: 校验先于下发
+- **WHEN** 知识库开启且 `m2` 被指定为知识库对话模型；管理员 `PUT` `m2` 的 body 依次为：`maxTokens` 非法；`upstream.baseUrl` 为 `ftp://x`；`upstream.apiKey` 含换行
+- **THEN** 三次都是 400 `bad_request`；假 RAGFlow 收到零个请求；行不变，没有 `model.update` 审计
+
+#### Scenario: 删除不碰 RAGFlow
+- **WHEN** 知识库开启，`chatModelId` 已取消指定，RAGFlow 账号缺省仍指向 `m2`；管理员 `DELETE /api/models?id=m2`
+- **THEN** 204；假 RAGFlow 没有收到任何请求（ragflow-backend「知识库模型设置」的账号缺省不变量）

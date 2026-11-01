@@ -3,7 +3,7 @@
 > 实测日期：2026-11-01（文件名日期由 spec 钉死，不代表实测日期）。
 > 对象：共用开发栈上运行中的 RAGFlow 实例，全程只用专用账号的 API key 鉴权，未用账号密码。
 > 结论全部来自对运行实例的观察：绝大部分是 API 应答；§5.4、§8.4、§13 的部分结论来自容器日志（只读），§13 的账号事实来自元数据库只读查询。读源码只用来找接口；个别地方引用源码解释现象时写明「源码」。
-> 同日评审后补测过一轮，§5、§8、§9、§11 的新增内容来自这一轮，经过见 §17。
+> 同日评审后补测过一轮，§5、§8、§9、§11 的新增内容来自这一轮，经过见 §17。之后按 tasks 1.5 又补测一轮，§5.1、§5.3、§7.4、§8 的相应内容来自这一轮。
 > 本文件是假 RAGFlow 夹具（`server/test/support/fake-ragflow.mjs`）协议的唯一来源。
 
 ## 0. 脱敏约定
@@ -34,7 +34,7 @@
 |---|---|---|---|
 | 1 | 版本接口 | 支持 | 无 |
 | 2 | 建数据集 | 支持 | 字段是 `parser_id` 且必须带 `parse_type`；`chunk_method` 被拒；`tag` 不可建；`embedding_model` 为三段式 |
-| 3 | RAPTOR 与知识图谱 | 支持（经 pipeline，不是数据集字段） | 开启要建模板组与画布，画布 DSL 必须带 `graph`；解析时自动执行，无须显式触发；没有按类型的终态；对话模型失败时 RAPTOR 完全无信号 |
+| 3 | RAPTOR 与知识图谱 | 支持（经 pipeline，不是数据集字段） | 开启要建模板组与画布，画布 DSL 必须带 `graph`；解析时自动执行，无须显式触发；没有按类型的终态；对话模型失败时 RAPTOR 完全无信号；任务日志按缺省次序翻页会丢行，要带 `orderby=id`（§5.3） |
 | 4 | 改嵌入模型 | 支持（`chunk_count` 非 0 也成功） | 与文档及 design Context 相反 |
 | 5 | multipart 上传 | 支持 | 不支持的后缀回 `code:500` |
 | 6 | 解析与文档列表 | 支持 | 状态字段是 `ingestion_status`，八种取值；`success_count:0` 与 `code:0` 同时出现 |
@@ -191,6 +191,18 @@ POST /api/v1/compilation-template-groups
    "create_time":...,"update_time":...},"message":"success"}
 ```
 
+同名与模板名：
+
+| 请求 | 应答 |
+|---|---|
+| 第二次建 `owb-dupg` | `code:0`，`name` 变为 `owb-dupg(1)` |
+| 建 `owb-DUPG`（已有 `owb-dupg`、`owb-dupg(1)` 与 `owb-dupg2`） | `code:0`，`name` 变为 `owb-DUPG(2)`，即不区分大小写 |
+| 再建 `owb-dupg` | `code:0`，`name` 变为 `owb-dupg(3)` |
+| 两个组里的模板同名 | `code:0`，不冲突 |
+| 同一组里两个模板同名 | `102`，`template name 'same' is duplicated in this group.` |
+
+不报错，只改名，与数据集（§4.5）相同，所以调用方要以应答里的 `id` 为准，不能靠名字找回。**只有一个模板的组，模板 `name` 被改写成组名**（提交 `xx`，`POST` 应答与 `GET` 读回都是 `owb-DUPG(2)`）；两个模板的组保留提交的模板名。
+
 内置 `tree` 的 `config.entity.fields` 带一条空 `type`，原样提交回 `102`，`Entity type is required`，所以要删掉 `entity` 与 `relation`。
 
 内置 `config` 的形状（`...` 是长文本，只列字符数）：
@@ -249,7 +261,28 @@ POST /api/v1/compilation-template-groups
 }
 ```
 
-同步改 chunker 的 `downstream`、下游的 `upstream`，并在 `graph.nodes` 加 `type:"compilationNode"` 的节点、在 `graph.edges` 把 chunker 原来的出边改接到 Compiler 节点（`source` 改为 Compiler），再加 chunker → Compiler 一条；原边不保留，净增一条。各模板的 chunker 节点名不同（`GeneralChunker:SixApplesFall`、`ManualChunker:NineInsectsFind`、`QAChunker:TidyCloudsThink` 等），要按 `component_name` 含 `Chunker` 查找。
+同步改 chunker 的 `downstream`、下游的 `upstream`，并在 `graph.nodes` 加 `type:"compilationNode"` 的节点、在 `graph.edges` 把 chunker 原来的出边改接到 Compiler 节点（`source` 改为 Compiler），再加 chunker → Compiler 一条；原边不保留，净增一条。各模板的 chunker 节点名不同，要按 `component_name` 含 `Chunker` 查找。
+
+十二种模板逐个读 `GET /pipelines/<parser_id>`（无须鉴权，只读）：
+
+| 模板 | 节点数 | Parser 节点 | chunker 节点（`component_name` 为冒号前部分） | chunker 个数 | chunker 的下游 | Tokenizer 节点 | `graph` 节点 / 边 |
+|---|---|---|---|---|---|---|---|
+| general | 5 | `Parser:HipSignsRhyme` | `GeneralChunker:SixApplesFall` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:LegalReadersDecide` | 5 / 4 |
+| book | 5 | `Parser:HipSignsRhyme` | `TitleChunker:GrumpyGarlicsBake` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:HotDonutsRing` | 5 / 4 |
+| email | 5 | `Parser:BirdsFlutterHigh` | `TokenChunker:WarmBreadSmells` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:NiceWordsSpoken` | 5 / 4 |
+| laws | 5 | `Parser:HipSignsRhyme` | `TitleChunker:SpicyKeysKick` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:PublicJobsTake` | 5 / 4 |
+| manual | 5 | `Parser:HipSignsRhyme` | `ManualChunker:NineInsectsFind` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:FunnyBalloonsGrin` | 5 / 4 |
+| one | 5 | `Parser:HipSignsRhyme` | `OneChunker:DryDrinksVisit` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:FrankWeeksListen` | 5 / 4 |
+| paper | 5 | `Parser:HipSignsRhyme` | `TitleChunker:SparklySchoolsTravel` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:GreatCarsWash` | 5 / 4 |
+| picture | 5 | `Parser:ViewsCaptureLight` | `OneChunker:BrightColorsGlow` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:SharpLensFocus` | 5 / 4 |
+| presentation | 5 | `Parser:HipSignsRhyme` | `PageChunker:HappyHillsGlow` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:TallTreesDance` | 5 / 4 |
+| qa | 4 | `Parser:HipSignsRhyme` | `QAChunker:TidyCloudsThink` | 1 | `Tokenizer:ColdCloudsDream` | `Tokenizer:ColdCloudsDream` | 4 / 3 |
+| table | 4 | `Parser:HipSignsRhyme` | `TableChunker:FastFoxesJump` | 1 | `Tokenizer:DeepLakesShine` | `Tokenizer:DeepLakesShine` | 4 / 3 |
+| audio | 5 | `Parser:SongsFillAir` | `OneChunker:BlueSkiesLaugh` | 1 | `Extractor:AutoExtractDefault` | `Tokenizer:KindEyesWatch` | 5 / 4 |
+
+- 十二种都是 `File → Parser → chunker → [Extractor] → Tokenizer` 的单链，没有分支，chunker 恰一个，都有 `graph`。按 `component_name` 含 `Chunker` 查找在这十二种上都恰中一个。
+- `audio` 不在十一种里，顺带读了。`naive` 回的 DSL 与 `general` 相同。`tag` 回 `102`，`pipeline not found`。
+- 上表的节点 id 是这个版本的内置值，不要硬编码，按 `component_name` 查。
 
 **(4) 建画布**
 
@@ -397,7 +430,7 @@ Tokenizer Done
 Task completed.
 ```
 
-722 字节的文件，两种编译都开时，从触发解析到文档终态约 1–3 分钟（含排队；入库 worker 串行，且与其它探测并行）。
+722 字节的文件，两种编译都开时，从触发解析到文档终态约 1–3 分钟（含排队；入库 worker 串行，且与其它探测并行）。一次触发 100 份一两百字节的小文档、两种编译都开、没有其它负载时，全部跑完用 3352 秒，平均每份约 33 秒。
 
 ### 5.3 状态接口
 
@@ -432,7 +465,75 @@ GET /api/v1/datasets/<dataset_id>/ingestions?page=1&page_size=10
  "tenant_id":"<tenant_id>","update_date":...,"update_time":...}],"total":1}}
 ```
 
-`Graph` 一条的 `document_name` 为 `Graph`，`dsl.entries[].variants` 为 `["structure","tree"]`，其中也含 `tree`，所以类型只能按 `task_type` 判定。`task_type` 观察到 `Tree`、`Graph`；`operation_status` 观察到 `RUNNING`、`DONE`。一份文档一个批次一条，开两种时每批次两条。
+`Graph` 一条的 `document_name` 为 `Graph`。`task_type` 观察到 `Tree`、`Graph`；`operation_status` 观察到 `RUNNING`、`DONE`。
+
+#### 任务日志：类型与 `entries`
+
+| 编译配置 | 每份文档的日志 | `task_type` | `dsl.entries[].variants` |
+|---|---|---|---|
+| 只开 RAPTOR | 1 条 | `Tree` | `["tree"]` |
+| 只开知识图谱 | 1 条 | `Graph` | `["structure"]` |
+| 两种都开 | 2 条 | `Tree`、`Graph` | 两条都是 `["structure","tree"]` |
+
+`variants` 随配置变，两种都开时分不出类型，所以类型只能按 `task_type` 判定。
+
+**没有观察到「一批多份」。** 一次 `parse` 触发 8 份，得到 16 条日志；一次触发 100 份，得到 200 条。这 216 条里，每条的 `dsl.entries` 都恰好 1 项，键为 `doc_id`、`event_type`、`task_type`、`variants`，`event_type` 只见 `doc_completed`。worker 串行，每份文档跑完自成一个批次。把同一类型所有日志的 `entries[].doc_id` 取并集，`Tree`、`Graph` 各覆盖 8 / 8 与 100 / 100，无重复。`entries` 多于 1 项的情形未观察到（§14），按并集读两种情形都成立。
+
+#### 任务日志：分页
+
+以下在 `total` 为 200 的库上测（100 份文档，两种编译都开），`page=999`、`page=0`、非数字等几行在 `total` 为 16 的库上测。
+
+| 查询 | `total` | 返回行数 | 说明 |
+|---|---|---|---|
+| 不传 `page_size` | 200 | **30** | 缺省 30；文档列表的缺省是 10（§8.3） |
+| `page_size=0` / 负数 | 16 | 16 | 与缺省 30 相容，未在更大的库上测 |
+| `page_size=50` / `100` / `101` / `150` / `200` | 200 | 同左 | |
+| `page_size=201` / `500` / `1000` / `100000` | 200 | 200 | 没有回落，也不报错 |
+| `page=2&page_size=100` | 200 | 100 | |
+| `page=3&page_size=100`、`page=21&page_size=10`、`page=999&page_size=10` | 不变 | 0 | `code:0`，`logs:[]` |
+| `page=0` / `page=-1` | 不变 | 同第 1 页 | |
+| `page=abc`、`page_size=abc` | — | — | `101`，`page must be an integer`、`page_size must be an integer` |
+
+- **`total` 是过滤后的日志行数**，不是文档数，也不是页数。两种都开时是文档数的 2 倍。翻页时不变。
+- **`page_size` 没有测到上限**：`total` 为 200 时，`page_size=100000` 也回全部 200 行。这与文档列表不同，文档列表超过 100 静默回落到 10（§8.3）。比 200 行更大的库未测（§14）。
+- 每行约 870 字节，`page_size=100` 为 87 096 字节，耗时约 0.01 秒。
+
+排序：缺省 `create_time` 倒序；`desc=false` 升序；`orderby=update_time`、`process_duration`、`task_type`、`id` 生效；未知的 `orderby` 不报错，静默按 `create_time`。`sort=id`、`sort=id:desc` 也生效。
+
+**缺省次序翻页会丢行。** 两种都开时 `Tree`、`Graph` 两条常在同一毫秒建出：200 行只有 170 个不同的 `create_time`，30 组并列。翻页是 `LIMIT` / `OFFSET`，没有次序键，页边界落在并列组上时，同一行出现两次，另一行读不到。逐页读到 `total` 后：
+
+| 次序 | `page_size` 取 3–40 共 38 种，读不全的种数 | 明细 |
+|---|---|---|
+| 缺省（`create_time` 倒序） | **6** | `5`、`7`、`19`、`31`、`35` 少 1 行，`17` 少 2 行 |
+| `desc=false` | **8** | `3`、`7`、`9`、`11`、`17`、`21`、`33`、`39`，少 1–2 行 |
+| `orderby=process_begin_at` | **15** | 例如 `3` 少 8 行、`5` 少 3 行 |
+| `orderby=id` | 0 | |
+| `orderby=update_time` | 0 | |
+| `orderby=process_duration` | 0 | |
+
+- 少一行就是某份文档在该类型下读不到，例如 `page_size=7` 时 `Graph` 只覆盖 99 / 100。
+- 结果是确定的，同一 `page_size` 重读相同，所以重试读不回来。
+- `page_size=10`、`20` 在这份数据上碰巧读全了，这不是保证，换一份数据并列的落点就变了。
+- `orderby=id` 最可靠：`id` 唯一且不变，`update_time` 与 `process_duration` 只是这份数据上没有并列。
+
+**可靠读法**：`orderby=id` 加 `page_size=100`，逐页读到 `total`。1000 行是 10 页。翻页期间有新日志写入时的行为未测（§14）。
+
+过滤：
+
+| 参数 | 行为 |
+|---|---|
+| `task_type=Tree`、`type=Tree`、`kind=tree` | **没有这些参数**，静默忽略，回全部行，`total` 不变 |
+| `keywords=Tree`、`keywords=Graph` | 生效，各回 100 行，`total` 为 100；它是关键字匹配，不是类型过滤；`keywords=nope` 回 0 行 |
+| `operation_status=DONE` | 生效 |
+| `operation_status=RUNNING`、`operation_status=NOPE` | 0 行，非法值不报错 |
+| `document_id=<id>` | 数据集日志回 0 行，这些行的 `document_id` 恒为 `graph_raptor_x` |
+| `log_type=file` | 换成文档级日志，每份文档 1 条，`task_type` 为 `Parse`，`operation_status` 是数字串（`3`），`dsl` 含整份 pipeline；配 `document_id=<id>` 回该文档 1 行 |
+| `log_type=datasource` | `code:0`，0 行 |
+| `log_type=nope` | `102`，`Invalid "log_type", expected "dataset" or "file"` |
+
+**不要用 `log_type=file` 的大页**：`page_size=100` 为 1 244 342 字节，超过 D4 的 1 MiB（§8.3）。
+
+相关路由：`GET .../ingestions/<log_id>` 回单行，`GET .../ingestions/summary` 回 `{chunk_num,doc_num,token_num,status:{...},download_status:{...}}`。不存在的数据集回 `404`。
 
 产物可读：`GET /datasets/<id>/artifacts/structure?kind=graph`（`total_entities`、`total_relations`）、`GET /datasets/<id>/navigation`（RAPTOR 的 `items`）、`GET /datasets/<id>/documents/<id>/structure/graph`（`templates[].kind` 为 `tree` / `knowledge_graph`）。`artifacts/structure?kind=tree` 回 `101`，`invalid structure kind: "tree"`。
 
@@ -540,6 +641,18 @@ pipeline 数据集另有 `pipeline_id`，`parser_id` 为空串。
 | `qa`（内置） | `.pdf` | `parser_id:"qa"`，未换 |
 | `manual` + Compiler 的 pipeline | `.txt`、`.md` | `parser_id:"general"`，`pipeline_id` 为空，**编译不运行**，无任何提示 |
 
+**大写后缀走 pipeline，编译照常运行。** 三种 pipeline 数据集（都带 Compiler，开两种编译），与同库小写文件对照：
+
+| 数据集 | 上传 | 读回 `parser_id` | 读回 `pipeline_id` | 读回 `suffix` | 结果 |
+|---|---|---|---|---|---|
+| `general` | `a.pdf`（对照） | 空串 | 画布 id | `pdf` | `COMPLETED`，Compiler 运行 |
+| `general` | `B.PDF`、`C.TXT`、`D.Md` | 空串 | 画布 id | `PDF`、`TXT`、`Md` | 同上 |
+| `manual` | `e.pdf`（对照） | 空串 | 画布 id | `pdf` | `COMPLETED`，2 切片，Compiler 运行 |
+| `manual` | `F.PDF` | 空串 | 画布 id | `PDF` | 同上 |
+| `paper` | `G.PDF`、`h.Pdf` | 空串 | 画布 id | `PDF`、`Pdf` | 同上 |
+
+三个库的任务日志里，每份文档都有 `Tree DONE` 与 `Graph DONE`。`suffix` 保留上传时的大小写，`type` 是小写的（`pdf`、`doc`），比对后缀表时要自己转小写。
+
 各模板管的后缀见表 C 末列。
 
 结论：**支持**。
@@ -578,6 +691,7 @@ POST /api/v1/datasets/<dataset_id>/documents/stop
 | 文档状态 | 应答 |
 |---|---|
 | `RUNNING`、`SCHEDULED`、`STOPPED` | `code:0`，`success_count:1` |
+| `STOPPING` | `code:0`，`success_count:1`；是空操作，读回仍 `STOPPING`，随后 `STOPPED`、`progress:-1`（4 轮 4 次相同） |
 | `UNSTART`、`COMPLETED` | `code:0`，`{"errors":["Can't stop parsing document that has not started or already completed"],"success_count":0}` |
 | 不存在 | `code:100`，`Documents not found: ['<document_id>']` |
 
@@ -611,6 +725,27 @@ GET /api/v1/datasets/<dataset_id>/documents?page=1&page_size=100
 | `page=0` / `page=-1`，`page_size=5` | 16 | 5，当作第 1 页 |
 
 缺省按创建时间倒序。`orderby` 只接受 `create_time`、`update_time`、`name`，其它值回 `101`，`invalid orderby field: size`；`desc=false` 生效。
+
+文档列表翻页没有观察到丢行：100 份文档，`page_size` 取 3–40 都读全。这个库的 `create_time` 没有并列（逐份上传），并列时是否丢行未测。
+
+应答体积，核对 D4 的 JSON 上限 1 MiB（1 048 576 字节）：
+
+| 请求 | 条件 | 字节 | 占上限 |
+|---|---|---|---|
+| `GET .../documents?page=1&page_size=100` | 最坏情形，见下 | **858 470** | **81.9%** |
+| `GET /compilation-templates/builtins` | 8 种模板 | 32 202 | 3.1% |
+| `GET .../ingestions?page_size=100` | 数据集日志 | 87 096 | 8.3% |
+| `GET .../ingestions?log_type=file&page_size=100` | 文档级日志，同一个库 | **1 244 342** | **118.7%，超限** |
+
+最坏情形的条件：`laws` 模板（`parser_config` 最大的一种），带 Compiler，两种编译都开，100 份文档全部 `COMPLETED`，文件名都是 255 字节且几乎全是 `&`。Go 把 `&`、`<`、`>` 转义成 6 字节的 `\u0026` 一类，`name` 与 `location` 各膨胀约 6 倍，这是能造出的最大文件名。每行 8 584 字节。
+
+一行的体积主要是 `parser_config`，随模板变。下表是带 Compiler 的 pipeline 数据集、文件名 5 字节、`UNSTART` 时的单行字节数；`COMPLETED` 比 `UNSTART` 多约 140 字节：
+
+| laws | book | manual | paper | general | one | email | qa | picture | presentation | table |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 5458 | 5322 | 5136 | 4965 | 2527 | 2183 | 1803 | 1751 | 1683 | 1642 | 1412 |
+
+结论：**1 MiB 够用**，文档列表与 `builtins` 都不超。普通文件名下 `laws` 100 行约 56 万字节（按上表推算）。这里没有覆盖：`pipeline_name` 用的是短标题；`FAILED` 行的消息更长，本次观察到的最长为 335 字符，100 行全失败约多 3 万字节，仍低于上限。`thumbnail` 在 `.pdf` 上是空串，`meta_fields` 是 `{}`。
 
 过滤：`id=<id>`、`name=<精确名>` 查不到时回 `102`（`you don't own the document ...`），`data` 为 `{"docs":[],"total":0}`。`ingestion_status=`（也接受 `run=`）按状态过滤；非法值回 `102`。
 
@@ -646,6 +781,8 @@ DELETE /api/v1/datasets/<dataset_id>/documents
 | **`RUNNING`、`STOPPING`** | **`code:0`，`deleted:0`** | **行仍在** |
 
 运行结束后再删回 `deleted:1`。调用方必须检查 `deleted`，`code:0` 不代表删成了。
+
+`STOPPING` 这一行实测 4 轮 4 次相同：读到 `STOPPING` 后立刻 `DELETE`，回 `code:0`、`deleted:0`，紧接着读回仍是 `STOPPING`，随后 `STOPPED`，行还在。
 
 `CREATED` 是瞬时状态，上表的做法是：一次触发 40 份文档，用 `ingestion_status=CREATED` 紧密轮询，读到后立刻发 `DELETE`，两步之间约几十毫秒。有竞态：不能排除文档在 `DELETE` 到达前已进入 `SCHEDULED`，而后者的应答相同，所以这条的强度低于其它行。
 
@@ -1048,6 +1185,10 @@ D4 的第 4 条按 HTTP 401 / 403 或 body `108` / `109` 判定，HTTP 200 + `co
 | `code:105` | 未观察到 | design Context 列出，实测没有碰到 |
 | `?kind=` 的其余别名 | 未测 | 已测的见 §5.3；源码另列 `artifact`、`mind_map`、`timeline`、`pageindex`、`page_index`、`skill` |
 | `DELETE /datasets` 的批量上限 | 未测 | 实测 10 个一批成功，未再往上试 |
+| 任务日志 `entries` 多于 1 项 | 未观察到 | 216 条都是 1 项；worker 串行，每份文档自成批次 |
+| 任务日志 `page_size` 在 200 行以上的上限 | 未测 | `page_size=100000` 回全部 200 行，没有更大的库；源码未设上限 |
+| 翻页期间有新日志写入 | 未测 | 只在静止的库上测过翻页 |
+| 文档列表 `create_time` 并列时的翻页 | 未测 | 逐份上传造不出并列 |
 
 ## 15. 与 design Context 的逐条复核
 
@@ -1072,7 +1213,8 @@ D4 的第 4 条按 HTTP 401 / 403 或 body `108` / `109` 判定，HTTP 200 + `co
 - 首轮：数据集 54 个、画布 24 个、模板组 7 个，全部删除。
 - 补测轮：开始时账号同样全空。数据集 15 个，全部删除；画布 8 个、模板组 6 个，部分在测删除时已删，其余 6 个画布、2 个模板组在清理时删除。结束时 `total_datasets` 为 0，画布 0，模板组 0。
 - 补测轮的顺序：账号缺省保持不动，先删数据集、画布、模板组；静默 180 秒，无 `fatal`、无 `ingestor exited`、无编译活动；才清空缺省、删实例与提供方；再观察 210 秒，同样无 `fatal`、无 `ingestor exited`，`healthz` 全 `ok`。
-- 模型配置：账号缺省已清空（`llm_id`、`embd_id` 为空），实例 `default`、`owb-bad`、`owb-alt`、`owb-embed` 已删除（`owb-embed` 在补测轮重建过一次，已再次删除），提供方已删除；`GET /providers`、`GET /models`、`GET /models/default` 都为空。「能删除」的证据见 §11.4。
+- 1.5 补测轮：开始时账号全空，先下发 `owb-embed`、`owb-chat` 两个实例并配好两种缺省，`GET /models/default` 确认两项非空后才建 pipeline 数据集。数据集 19 个、画布 18 个、模板组 11 个，全部删除。顺序同上：缺省不动，先删这三类，静默 180 秒，无 `fatal`、无 `ingestor exited`、无编译活动；才清空缺省、删两个实例与提供方；再观察 210 秒，同样干净，`healthz` 全 `ok`。全程没有清空过缺省，也没有出现 `fatal`。
+- 模型配置：账号缺省已清空（`llm_id`、`embd_id` 为空），实例 `default`、`owb-bad`、`owb-alt`、`owb-embed` 已删除（`owb-embed` 在补测轮重建过，`owb-chat` 是 1.5 补测轮新建的，都已删除），提供方已删除；`GET /providers`、`GET /models`、`GET /models/default` 都为空。「能删除」的证据见 §11.4。
 - 未触碰任何非本账号的对象，未执行任何 `docker` 写操作。
 - 原始应答只保存在会话 scratchpad，不入库。
 
@@ -1083,6 +1225,8 @@ D4 的第 4 条按 HTTP 401 / 403 或 body `108` / `109` 判定，HTTP 200 + `co
 - §13 的事故。
 - 补测中途，2026-11-01 21:14:48（UTC+8）容器引擎收到外部的重启请求，**不是本次探测引起**。引擎日志记录的是一次显式的重启请求，虚拟机正常关机再启动，控制台日志无 OOM 或 panic；同机所有容器都重启了，包括与 RAGFlow 无关的容器；发起者未查明。RAGFlow 约 1.5 分钟后恢复。一个探测脚本因此中断，重跑后完成。本次未执行任何 `docker` 写操作。
 - 上一条的附带观察：数据、账号缺省模型都保留；重启前已触发、未完成的文档在恢复后都跑到 `COMPLETED`，无须重新触发（只观察过这一次）。
+- 1.5 补测超出清单的部分：除十一种模板外顺带读了 `audio`、`naive`、`tag` 的 `GET /pipelines`；为找出最坏模板，额外建了 11 个 pipeline 数据集量单行体积；发现任务日志丢行之后，加测了文档列表的翻页。模板组 `owb-DUPG` 前缀小写、其余大写，用来测大小写。
+- 1.5 补测用到的查询参数（`keywords`、`operation_status`、`log_type`、`document_id`、`sort`）是读源码找到的，行为都在实例上测过。
 
 ## 18. 结论的后果（tasks 1.4）
 
@@ -1098,7 +1242,7 @@ D4 的第 4 条按 HTTP 401 / 403 或 body `108` / `109` 判定，HTTP 200 + `co
 
 下列事实不构成 1.4 的分流条件，但实现按现有 design 写会出错。owner 已定 R 覆盖全部，组 5–17 除 #1837（组 7 剩余）外都等 R。
 
-#24、#25 是评审后补测新增的，不在 owner 决定时的 23 条之内，也应进入 R。
+#24、#25 是评审后补测新增的，不在 owner 决定时的 23 条之内，也应进入 R。#26–#32 是 tasks 1.5 补测新增的。
 
 | # | 事实 | 章节 | 涉及 |
 |---|---|---|---|
@@ -1127,3 +1271,19 @@ D4 的第 4 条按 HTTP 401 / 403 或 body `108` / `109` 判定，HTTP 200 + `co
 | 23 | 同名上传改名为 `a(1).txt`，重新入库期间 RAGFlow 里的 `name` 与本地不同 | §7.1 | D13，影响小 |
 | 24 | not-found 下载也是 HTTP 200，文件内容可与 not-found 正文逐字节相同；只能靠响应头 `Content-Disposition`、`Content-Type` 区分，不能解析正文判 `code` | §9.1 | D4、D8、组 5、组 14 |
 | 25 | 画布 DSL 省掉 `graph` 时建画布、建库都成功，但编译静默不运行 | §5.1 (6) | D9、D14、组 5 夹具、组 9 |
+| 26 | 任务日志按缺省次序翻页会丢行：`create_time` 有并列，`page_size` 取 3–40 有 6 种读不全，重试也读不回；带 `orderby=id` 才读全。D14 的 `page_size=10` 不带次序，这个取值只是碰巧没丢 | §5.3 | D14、D17、组 9 剩余与夹具 |
+| 27 | 任务日志 `page_size` 缺省 30，到 200 行没有测到上限，与文档列表不同；`task_type=` 静默忽略，没有这个过滤；`keywords`、`operation_status` 可过滤 | §5.3 | D14、D17、组 9 夹具 |
+| 28 | 一份文档一种类型一条日志，`entries` 恒为 1 项，「同批」未观察到；`variants` 随配置变，两种都开时分不出类型 | §5.3 | D14、D17、组 9 夹具 |
+| 29 | `log_type=file` 的 `page_size=100` 为 1 244 342 字节，超过 1 MiB，不能用；数据集日志同页 87 096 字节 | §5.3、§8.3 | D4、D14 |
+| 30 | 模板组同名不报错，改名加 `(1)`，不区分大小写；只有一个模板的组，模板名被改写成组名 | §5.1 | D9、组 9 夹具 |
+| 31 | 大写后缀走 pipeline，编译运行；`suffix` 保留上传时的大小写 | §7.4 | D10、D11、组 10、组 12 |
+| 32 | `STOPPING` 时重复 `stop` 回 `success_count:1`，是空操作；`DELETE` 回 `deleted:0`，行还在 | §8.2、§8.5 | D13、组 13 |
+
+tasks 1.5 核对后与 design 一致、不用改的：
+
+- D4 的 JSON 上限 1 MiB 够用，文档列表 100 行最坏 858 470 字节，`builtins` 32 202 字节（§8.3）。
+- D9 的「chunker 恰一个」在十二种模板上成立（§5.1 (3)）。
+- D14 按 `task_type` 判类型，`Tree`、`Graph`（§5.3）。
+- D14 第 3 步按 `entries[].doc_id` 取并集，覆盖全部文档（§5.3）。
+
+D14 的「退路」依赖两点：任务日志能分页读全，`entries` 能列全文档。后者成立。前者要带 `orderby=id` 才成立，按现稿的 `page_size=10` 不带次序不成立，见 #26。改 D14 的读法还是走退路，由修订决定。
