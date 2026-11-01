@@ -20,7 +20,7 @@
 |------|--------|
 | 禁用后缀 / 草稿目录 / .bak | `scripts/naming-guard.sh`（pre-commit + CI） |
 | 重复代码 ≤3% | jscpd（`.jscpd.json`，`make anti-drift` + CI） |
-| 死代码 | knip（TS）+ ruff F401/F841（Py），`make anti-drift` + CI |
+| 死代码 | knip，`make anti-drift` + CI |
 | Conventional commits | `.githooks/commit-msg` |
 
 ## Project Identity
@@ -33,9 +33,8 @@
 |---|---|---|
 | server（app-server） | TypeScript + Node LTS | `.tool-versions`（nodejs 24.13.1） |
 | web（浏览器 SPA） | TypeScript，P0 引入 React + Vite | 同上 |
-| kbservice（知识库） | Python + uv | `kbservice/.python-version`（3.13） |
 | agent 后端 | omp fork（另仓，冻结 v18.12.3） | `resource/backend-research.md` §2 |
-| 工具 | Biome、Ruff、vitest、pytest、knip、jscpd | 根 `package.json` / `kbservice/pyproject.toml` |
+| 工具 | Biome、vitest、knip、jscpd | 根 `package.json` |
 
 依赖政策：新增依赖须在 PR 说明为什么现有工具做不到；主版本升级须人工评审。
 
@@ -44,7 +43,6 @@
 ```
 server/     app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计/对话/预览监听器/文档转换）
 web/        浏览器 SPA（Playwright UI 走查在 web/e2e）
-kbservice/  知识库服务（P2 起吸收 RAGFlow，Apache-2.0，义务见 ATTRIBUTION.md §3）
 resource/   行为基准原型 + 后端选型研究 +（gitignore 的）上游参考克隆
 app-reference/  上游应用只读副本（gitignore；仅 analysis/ 可写）
 smoke/      Hurl HTTP 冒烟用例、对话链路、沙箱夹具（含隔离预览来源的网页与范围请求的音频样本）与深链 exact-byte fixture
@@ -54,7 +52,7 @@ scripts/    守卫脚本    .githooks/  git hooks    .github/    CI
 ### Module Boundaries
 
 - **`app-reference/` 全树只读**（上游腾讯版权原始副本）：任何情况下不修改、不重打包、不"顺手修复"；唯一可写子树是 `app-reference/analysis/`。守卫机械拦截。
-- server/web/kbservice 互不 import 源码；跨服务只走网络契约（HTTP/RPC）。
+- server/web 互不 import 源码；跨服务只走网络契约（HTTP/RPC）。
 - 上游源码不复用，仅作架构与行为参照；唯一例外是设计 token（已标注来源）。
 
 ## Development Workflow
@@ -62,7 +60,7 @@ scripts/    守卫脚本    .githooks/  git hooks    .github/    CI
 ### 本地起步
 
 ```
-make setup    # npm install + uv sync + 挂 git hooks
+make setup    # npm install + 挂 git hooks
 ```
 
 ### 日常命令
@@ -82,9 +80,9 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 
 | Surface | Verify with | Command | Evidence required |
 |---------|-------------|---------|-------------------|
-| 静态面（lint/格式/复杂度） | Biome + Ruff | `make lint` | 退出码 0 |
+| 静态面（lint/格式/复杂度） | Biome | `make lint` | 退出码 0 |
 | 类型面 | tsc --noEmit ×2 | `make typecheck` | 退出码 0 |
-| 单元测试 + 覆盖率 | vitest + pytest | `make test` | 退出码 0 且覆盖率 ≥80% |
+| 单元测试 + 覆盖率 | vitest | `make test` | 退出码 0 且覆盖率 ≥80% |
 | 反漂移 | knip + jscpd + 守卫 | `make anti-drift` | 退出码 0 |
 | 全链 | 以上全部 | `make check` | 退出码 0 |
 | 守卫自身 | 注入违例自证 | `make test-guardrails` | 全 PASS |
@@ -98,14 +96,14 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 ## Important Development Notes
 
 - **分析文档纪律**：路径基准写 `app-reference/app_asar/`；引用给真实行号；推断结论标 `[INFERENCE]`，不与直接证据混写。
-- **归属义务**：根 LICENSE 为 Apache-2.0（只覆盖本仓自有内容）；上游版权 © 2026 Tencent；派生内容按 `ATTRIBUTION.md` 保留归属；吸收 RAGFlow 源码时其 §3 条件义务（LICENSE-RAGFlow/NOTICE/文件头）生效。
+- **归属义务**：根 LICENSE 为 Apache-2.0（只覆盖本仓自有内容）；上游版权 © 2026 Tencent；派生内容按 `ATTRIBUTION.md` 保留归属；发行物含 RAGFlow 镜像时须附其 `LICENSE` 与 `NOTICE`（`ATTRIBUTION.md` §3）。
 - demo 文件头的来源注释在编辑时必须保留。
 - 文档路由：项目定位 `README.md`；建设方案与阶段账本 `PLAN.md`；**顶层架构基准 `docs/architecture/system.md`**（模块图/依赖规则/目录结构/数据流）；后端选型 `resource/backend-research.md`；上游结构分析 `app-reference/analysis/00-overview.md`（入口）；许可归属 `ATTRIBUTION.md`；长期架构决策 `docs/adr/`（难回退+无背景会困惑+真实权衡三者同立才写）。
 
 ## Conventions
 
 - **TDD required（L3）**：新增生产文件先写失败测试再实现；配对测试文件缺失需在 PR 说明理由。mock 依赖，绝不 mock 被测系统。
-- 命名遵循各语言惯例（TS camelCase / Py snake_case）；文件 ≤800 行、复杂度 ≤15、重复 ≤3%——阈值一律以 `constraints.yaml` 为准，改阈值先改那里。
+- 命名遵循语言惯例（TS camelCase）；文件 ≤800 行、复杂度 ≤15、重复 ≤3%——阈值一律以 `constraints.yaml` 为准，改阈值先改那里。
 - 提交格式 Conventional Commits（类型表见 `constraints.yaml`），agent 提交带 `Co-Authored-By`。
 - 债务标记用 `TODO(#issue)`：无 issue 号的 TODO 不得进提交（评审拦截）。
 - 偏离本文件任何约定时，PR 描述必须给出理由——无理由的偏离按缺陷处理。
@@ -140,12 +138,11 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 | 规则 | 所在 | 检查点 | 级别 |
 |------|------|--------|------|
 | Lint/格式/复杂度（TS） | `biome.json` | `make lint` + CI | block |
-| Lint/格式/复杂度（Py） | `kbservice/pyproject.toml` | `make lint` + CI | block |
 | 类型严格 | `server/tsconfig.json`、`web/tsconfig.json` | `make typecheck` + CI | block |
-| 覆盖率 ≥80% | `server/vitest.config.ts`、`web/vitest.config.ts`、`kbservice/pyproject.toml` | `make test` + CI | block |
+| 覆盖率 ≥80% | `server/vitest.config.ts`、`web/vitest.config.ts` | `make test` + CI | block |
 | 文件 ≤800 行 | `constraints.yaml` → `scripts/size-guard.sh` | pre-commit + CI | block |
 | 重复代码 ≤3% | `.jscpd.json` | `make anti-drift` + CI | block |
-| 死代码 | `knip.json` + ruff | `make anti-drift` + CI | block |
+| 死代码 | `knip.json` | `make anti-drift` + CI | block |
 | 禁用命名/草稿目录/.bak | `constraints.yaml` → `scripts/naming-guard.sh` | pre-commit + CI | block |
 | app-reference 只读 | `constraints.yaml`（boundaries） → `scripts/naming-guard.sh` | pre-commit + CI | block |
 | 密钥扫描 | gitleaks | CI（本机装有 gitleaks 时 pre-commit 亦 block） | block |
@@ -172,4 +169,4 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 ### Known blind spots（交给评审）
 
 - 密钥扫描本地依赖 gitleaks 安装与否（CI 恒定兜底）。
-- server/web/kbservice 互不 import 暂无 import-linter 类机械检查（当前无跨目录代码，出现即补）。
+- server/web 互不 import 暂无 import-linter 类机械检查（当前无跨目录代码，出现即补）。

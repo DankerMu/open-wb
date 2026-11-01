@@ -40,7 +40,7 @@ const SENTINELS: Record<string, string> = {
   MODEL_UPSTREAM_BASE_URL: "https://upstream.example/sentinel",
   OPENAI_API_KEY: "openai-sentinel",
   ANTHROPIC_API_KEY: "anthropic-sentinel",
-  KB_SERVICE_API_KEY: "kb-credential-sentinel",
+  RAGFLOW_API_KEY_FILE: "kb-credential-sentinel",
   DB_PATH: "/tmp/should-not-inherit.db",
   UNRELATED_SENTINEL: "unrelated-parent-value",
   HOME: "/tmp/parent-home-sentinel",
@@ -53,7 +53,7 @@ const FORBIDDEN_KEYS = [
   "MODEL_UPSTREAM_BASE_URL",
   "OPENAI_API_KEY",
   "ANTHROPIC_API_KEY",
-  "KB_SERVICE_API_KEY",
+  "RAGFLOW_API_KEY_FILE",
   "DB_PATH",
   "UNRELATED_SENTINEL",
 ] as const;

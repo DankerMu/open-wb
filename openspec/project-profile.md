@@ -2,12 +2,11 @@
 
 > Living artifact；项目新增风险面或验证命令时在 Phase 0.5 更新。
 
-**Project profile:** Generic（TypeScript Web 服务 + Python 知识库，多子系统）
+**Project profile:** Generic（TypeScript Web 服务 + 外部 RAGFlow 知识库，多子系统）
 
 **Entry surfaces**
 - app-server：Fastify plugin 装配、REST、唯一 listen 入口、SQLite、模型代理与 omp 子进程边界。
 - web：Vite 浏览器入口、history 路由、API 客户端与登录态/主题持久化。
-- kbservice：HTTP 检索/摄取入口；跨服务只走网络契约。
 - operator：Make 目标、GitHub Actions、hurl smoke 与 Playwright UI 走查。
 
 **Contracts**
@@ -19,7 +18,7 @@
 - 账号隔离、共享 KB 只读、沙箱越界审计、omp 环境零服务凭证。
 - SQLite schema/迁移/hidden catalog state、文件路径、进程生命周期与共享状态顺序。
 - SPA 深链/fallback、登录态回跳、浏览器持久化与 server/web 契约漂移。
-- Node/Python workspace 工具链、覆盖率/死代码/重复代码门禁兼容。
+- Node workspace 工具链、覆盖率/死代码/重复代码门禁兼容。
 
 **Typical evidence**
 - Fastify `app.inject()`；公共 seam Vitest + 真实内存/临时 SQLite；失败、回滚、重开与未改消费者回归。
@@ -30,16 +29,15 @@
 - setup=`make setup`; lint=`make lint`; typecheck=`make typecheck`; test=`make test`。
 - drift=`make anti-drift`; full=`make check`; guardrails=`make test-guardrails`。
 - server-test=`npm test --workspace server`; server-test-focus=`npm run test:focus --workspace server -- <pattern>`; server-build=`npm run build --workspace server`; server-start=`npm run start --workspace server`; dev=`make dev`；http-smoke=`make smoke`（只消费已运行服务）。
-- web-test=`npm test --workspace web`; web-test-focus=`npm run test:focus --workspace web -- <pattern>`; web-build=`npm run build --workspace web`；kb-test=`cd kbservice && uv run pytest`。
+- web-test=`npm test --workspace web`; web-test-focus=`npm run test:focus --workspace web -- <pattern>`; web-build=`npm run build --workspace web`。
 
 **Verification matrix**
 - Web 构建/入口 -> `npm run build --workspace web` -> 退出码 0，`web/dist/index.html` 与静态资源存在。
-- TS/Python 静态与类型 -> `make lint && make typecheck` -> 退出码 0。
+- TS 静态与类型 -> `make lint && make typecheck` -> 退出码 0。
 - Server/SQLite/HTTP seam -> `npm test --workspace server` -> 退出码 0，coverage ≥80%。
 - Server build/production entry -> `npm run build --workspace server` + controlled compiled-process probe -> dist JS/migration assets完整；health 200；startup JSON/env/default identity正确；SIGTERM释放DB/port。正式常驻HTTP回归由#16 `make smoke`接管。
 - Web 行为 -> `npm test --workspace web` -> 退出码 0，coverage ≥80%。
 - 单模块过滤运行 -> `npm run test:focus --workspace <ws> -- <pattern>` -> 所选测试全过即退出码 0，不执行覆盖率阈值；覆盖率门禁只由全量 `npm test --workspace <ws>` / `make test` 承担。
-- Python 行为 -> `cd kbservice && uv run pytest` -> 退出码 0，coverage ≥80%。
 - 死代码/重复/命名/行数 -> `make anti-drift` -> 退出码 0。
 - 默认全链 -> `make check` -> 退出码 0。
 - 守卫机制 -> `make test-guardrails` -> 每条注入违例均 PASS。
