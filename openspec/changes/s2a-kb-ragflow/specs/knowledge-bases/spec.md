@@ -67,6 +67,8 @@
 知识库开启后，已登录用户 SHALL 能管理自己的知识库。别人的或不存在的 id 一律 404 `not_found`，不可探测：这条对本 Requirement 与下面的入库、上传、文档列表、重新入库、移出路由都成立，判定先于 body 解析、`doc` 参数与 `state` 判定，SHALL NOT 发出站请求，SHALL NOT 写审计。全部应答带 no-store。
 
 **视图** `BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：
+- `raptor`、`graph`：布尔，与建库 body 同型，库列的 0 / 1 在视图层转换。
+- `createdAt`：`created_at` 的 epoch 毫秒，非负整数。
 - `documents`：本地文档行数。
 - `compile`：
   - 两个开关都为 0 的库：恒为 `{raptor:"off", graph:"off"}`，不发出站请求。
@@ -363,6 +365,8 @@
 - RAGFlow 不可达：503 `kb_unavailable`。
 
 **视图** `DocumentView` 恰为 `{id, name, size, source, workspaceId, path, status, chunkCount, message, sourceChanged, createdAt}`：
+- `size`：字节数，非负整数。
+- `createdAt`：`created_at` 的 epoch 毫秒，非负整数。
 - `name` SHALL 取本地记录，不读 RAGFlow 的 `name`：RAGFlow 对同名文件改名（`a(1).txt`）。
 - `status` 取 `queued` / `parsing` / `done` / `failed` / `cancelled` / `unparsed` / `missing`，由 RAGFlow 的 `ingestion_status` 映射（SHALL NOT 读恒为 `"1"` 的 `status` 字段）：
   - `UNSTART`：`unparsed`。

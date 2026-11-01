@@ -163,7 +163,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 三者的成功应答都是 200 加设置读视图，带 no-store。
 
 **读视图**恰为 `{embedding, chatModelId, bases, compileBases, documents, rebuilding, rebuildFailed}`，永不包含任何密钥：
-- `embedding` 为 `{name, baseUrl, probe: {status, message, at}}` 或 `null`。
+- `embedding` 为 `{name, baseUrl, probe: {status, message, at}}` 或 `null`。`status` 取 `never` / `ok` / `failed`，`message` 为字符串或 `null`，`at` 为 epoch 毫秒或 `null`，同 `ModelView.probe`。
 - `chatModelId` 为字符串或 `null`。
 - `bases`、`documents`：知识库总数与文档总数。
 - `compileBases`：开编译的知识库数，即 `raptor` 或 `graph` 为 1 的行，含重建中与重建失败的库。
