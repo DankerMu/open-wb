@@ -282,7 +282,7 @@ MODEL_CATALOG='[{"id": "model-a", "name": "通用", "reasoning": true, "efforts"
 
 **六个模型键只作首次种子**（change `s1d-model-registry`，model-registry「环境种子」）：`MODEL_CATALOG`、`MODEL_ID`、`MODEL_REASONING`、`MODEL_VISION`、`MODEL_UPSTREAM_BASE_URL`、`MODEL_UPSTREAM_API_KEY` 的解析与校验照旧（非法值仍是 `config` 启动失败），但解析结果只在数据库的 `models` 表为空时写进模型注册表：白名单逐项插入（次序即列表次序），缺省模型那一项标为缺省，每一项的上游取 `MODEL_UPSTREAM_*`（两键未同时配置时该项没有上游）。此后白名单、缺省模型与每个模型的上游都只读注册表（composer options、会话设置的有效值、托管 `models.yml`、overlay 的看图角色、模型代理的放行与路由、会话侧净化的密钥集读同一份快照）——每个模型自带上游。表非空时这六个键被忽略：任一键被设置（空串也算）就在标准错误写一行 `{"event":"model_env_ignored"}`（只有 `event` 一个键，位于 `server_started` 之前），六个键都没设置时不写。所以已经启动过一次的部署，改这六个键再重启不会改变模型清单或上游；改动要经模型注册表的管理端点（model-registry「模型管理端点」，见 9.9）。
 
-启动次序（http-service-skeleton「服务启动与装配」）：迁移 → 办公文档 sidecar 预检 → `model_registry`（表空时种子，然后读出首个快照；同步的 SQLite 操作，失败为 `{"event":"server_start_failed","reason":"model_registry"}`）→ createApp → 主监听器 listen → 托管布局 → 沙箱根 → 预览监听器 listen → `models_yml` → `host_overlay`（两步是注册表发布器的同一次发布：先写 `models.yml`，再按快照里第一个看图模型写 overlay）→ `mcp_json`（按连接器表写托管 `mcp.json`，失败为 `{"event":"server_start_failed","reason":"mcp_json"}`，见 9.11）→ 预览缓存目录 → `server_started`。主监听器受理的第一个请求读到的已是填好的快照；`models_yml` 之前到达的注册表写入只刷新快照、不写文件，随后的启动发布用当时的快照。
+启动次序（http-service-skeleton「服务启动与装配」）：`kb_key`（配置了 `RAGFLOW_BASE_URL` 时读并校验知识库密钥文件，失败为 `{"event":"server_start_failed","reason":"kb_key"}`，此时不建目录、不开 DB，见 9.13）→ 迁移 → 办公文档 sidecar 预检 → `model_registry`（表空时种子，然后读出首个快照；同步的 SQLite 操作，失败为 `{"event":"server_start_failed","reason":"model_registry"}`）→ createApp → 主监听器 listen → 托管布局 → 沙箱根 → 预览监听器 listen → `models_yml` → `host_overlay`（两步是注册表发布器的同一次发布：先写 `models.yml`，再按快照里第一个看图模型写 overlay）→ `mcp_json`（按连接器表写托管 `mcp.json`，失败为 `{"event":"server_start_failed","reason":"mcp_json"}`，见 9.11）→ 预览缓存目录 → `server_started`。主监听器受理的第一个请求读到的已是填好的快照；`models_yml` 之前到达的注册表写入只刷新快照、不写文件，随后的启动发布用当时的快照。
 
 与 `MODEL_ID` / `MODEL_REASONING` / `MODEL_VISION` 的关系（种子时的取值）：
 
@@ -985,3 +985,38 @@ modelRoles:
 
 - **smb 在共享根建出 `．` 目录**：往 smb 共享的根写文件时，rclone 的 smb 后端在共享根下建一个名为 `．`（U+FF0E，全角句点）的目录，挂载视图与其它 SMB 客户端都看得到；删掉之后下一次往根写文件又会建出来，在根下 `mkdir`、往子目录写文件不会（#1665 P1，owner 2026-10-25 裁定接受）。组 12 的签收只跑了 `local` 与 `sftp`，没有复测 smb。
 - **删除不复活不成立**：可写挂载内「新建目录、在其中建文件、把目录改名、删掉其中的文件、删掉改名后的目录」连续做完，挂载视图干净，但远端（`local` 实测为源目录）约有 11% 的序列留下一个**原名**的空目录（两轮签收共六次 300 次中 33 次）——文件与改名后的目录不复活。`--vfs-write-back 0s` 只缩小、没有关上 #1665 P8 的竞态：`rclone.log` 里是该文件的上传与目录改名相撞（`chtimes …: no such file or directory`，偶见 `corrupted on transfer: md5 hash differ`）。用户看到的是挂载里删掉的目录在远端以原名出现、需要再删一次；该用例在验证层里以 `it.fails` 记着，rclone 修好时它会转红。
+
+### 9.13 知识库（S2a，change `s2a-kb-ragflow`）
+
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。
+
+**配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
+
+| 键 | 缺省 | 规则 |
+|---|---|---|
+| `RAGFLOW_BASE_URL` | 未配置，即知识库关闭 | 只有协议与 authority（`http` 或 `https`），无路径、无结尾斜杠、无查询与片段，写法同 `PREVIEW_ORIGIN`；空串非法 |
+| `RAGFLOW_API_KEY_FILE` | 未配置 | 绝对路径；空串非法。配置解析时不读这个文件 |
+| `KB_UPLOAD_MAX_BYTES` | `104857600` | 单个文件的字节上限，与 `UPLOAD_MAX_BYTES` 同一解析纪律（canonical 十进制正整数） |
+| `KB_UPLOAD_MAX_FILES` | `10` | 一次上传的文件数上限，同上 |
+
+`RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE` 必须成对：只配一个是配置错误。任一项非法，服务启动失败：退出码 1，标准错误只有一行 `{"event":"server_start_failed","reason":"config"}`，不指出是哪一项、也不回显取值。
+
+**密钥文件**（`server/src/kb/key-file.ts`）。RAGFlow 的 API key 放文件、不放环境变量：key 一旦泄露，就能读写全部账号的知识库；放在 `0600` 文件里，它不进 `/proc/<pid>/environ`，也不被 app-server 派生的进程继承。要求：
+
+- 是普通文件本身：符号链接、目录、FIFO 都不行（以 `O_NOFOLLOW` 打开，判定与读取都走同一个描述符）。
+- 属主是服务进程的 uid，组与其它用户没有任何权限位（`mode & 0o077` 为 0，`0600`、`0400` 都合规）。
+- 大小 1–4096 字节。
+- 内容去掉恰一个结尾 `\n` 后非空，且能作 HTTP 头值：不含 `\r`、NUL、第二个 `\n`，没有 U+00FF 之上的字符。
+
+部署时这样写出：
+
+```sh
+install -m 600 -o <服务用户> /dev/null <密钥文件路径>
+printf '%s\n' "$KEY" > <密钥文件路径>
+```
+
+**`kb_key` 阶段**：紧接配置解析、先于建 DB 父目录。配置了 `RAGFLOW_BASE_URL` 才读文件，未配置时不读任何文件。任一条要求不满足，服务启动失败：退出码 1，标准错误只有一行 `{"event":"server_start_failed","reason":"kb_key"}`，不带路径、文件内容与原始错误，此时没有建目录、没有开 DB、没有 listen。补救：逐条核对上面四项要求。
+
+启动不连接 RAGFlow：地址写错或 RAGFlow 没起来都不影响启动。
+
+**密钥的去向**：读出的 key 只留在一个只读句柄的闭包里，由入口持有（`OwnedResources.kbKey`），不进日志、审计、响应与任何子进程环境。omp 的 spawn 环境是白名单（`server/src/sessions/omp/spawn-env.ts`），`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE` 都不在其中。文件**路径**仍在 app-server 的环境里：同 uid 部署（未配置 `OMP_USER`）时 omp 能以同 uid 读这个文件，与 S0b 已登记的同 uid 风险是同一项，按 ADR-0010 的专用 uid 部署关闭。
