@@ -50,7 +50,7 @@ export type FakeRagflowFault =
   | { kind: "cut"; headers?: Record<string, string>; body: string }
   /** 传输层：发出应答头与 `body` 后不再有字节，连接保持。`content-length` 同上。 */
   | { kind: "stall"; headers?: Record<string, string>; body: string }
-  /** HTTP 层：3xx，`body` 可带任意正文。 */
+  /** HTTP 层：3xx，`status` 缺省 302，给了只收 300–399，别的直接抛；`body` 可带任意正文。 */
   | { kind: "redirect"; status?: number; location: string; body?: string }
   /** HTTP 层：5xx，`headers` 可带任意响应头。 */
   | { kind: "status"; status: number; body?: string; headers?: Record<string, string> }

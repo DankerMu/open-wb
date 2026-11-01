@@ -97,6 +97,11 @@ function isJson(text) {
   }
 }
 
+/** 缺省时 `FAULTS.redirect` 回 302。 */
+function isRedirectStatus(status) {
+  return status === undefined || (status >= 300 && status < 400);
+}
+
 function assertBodyCodes(fault) {
   const text = `${fault.body ?? ""}${JSON.stringify(fault.envelope) ?? ""}`;
   for (const [, code] of text.matchAll(BODY_CODE)) {
@@ -114,6 +119,9 @@ function assertFault(fault) {
     throw new Error(
       `fake-ragflow combo takes 0, 100, 101, 102, 401 or 403, not ${String(fault.code)}`,
     );
+  }
+  if (fault.kind === "redirect" && !isRedirectStatus(fault.status)) {
+    throw new Error(`fake-ragflow redirect fault takes 3xx, not ${String(fault.status)}`);
   }
   if (fault.kind === "status" && !(fault.status >= 500 && fault.status < 600)) {
     throw new Error(`fake-ragflow status fault takes 5xx, not ${String(fault.status)}`);

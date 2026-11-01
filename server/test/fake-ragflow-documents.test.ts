@@ -191,6 +191,34 @@ describe("上传（§7）", () => {
     expect(fake.documents(id)).toEqual([]);
   });
 
+  // 右列抄自 §7.3。记录把百分号串略写成 `%E4%B8%AD...txt`，这里写全，是 `中文文件名.txt` 的 UTF-8 编码。
+  const PERCENT = "%E4%B8%AD%E6%96%87%E6%96%87%E4%BB%B6%E5%90%8D.txt";
+
+  it.each([
+    ["原始 UTF-8 字节", 'filename="中文文件名.txt"', "中文文件名.txt"],
+    ["百分号串原样保留，不解码", `filename="${PERCENT}"`, PERCENT],
+    [
+      "filename 与 filename* 同在时取后者",
+      `filename="ascii.txt"; filename*=UTF-8''${PERCENT}`,
+      "中文文件名.txt",
+    ],
+    ["只有 filename* 时解码", `filename*=UTF-8''${PERCENT}`, "中文文件名.txt"],
+    ["反斜杠转义的引号", 'filename="a\\"b.txt"', 'a"b.txt'],
+    ["路径被去掉", 'filename="dir/sub/c.txt"', "c.txt"],
+  ])("存下的文件名（§7.3）：%s", async (_label, disposition, name) => {
+    const id = fake.addDataset();
+    const response = await fetch(`${fake.baseUrl}/api/v1/datasets/${id}/documents`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${KEY}`,
+        "content-type": "multipart/form-data; boundary=b",
+      },
+      body: `--b\r\nContent-Disposition: form-data; name="file"; ${disposition}\r\n\r\nx\r\n--b--\r\n`,
+    });
+    expect(response.status).toBe(200);
+    expect(fake.documents(id)[0]?.name).toBe(name);
+  });
+
   it("裸的 octet-stream 请求体：同样 101 No file part!", async () => {
     const id = fake.addDataset();
     const response = await fetch(`${fake.baseUrl}/api/v1/datasets/${id}/documents`, {
@@ -403,6 +431,24 @@ describe("下载（§9、§9.1）", () => {
     expect(answer.headers.get("content-type")).toBe("application/octet-stream");
     expect(answer.headers.get("content-length")).toBe("16");
     expect(answer.headers.get("transfer-encoding")).toBeNull();
+  });
+
+  it("文件名：非 ASCII 是未编码的原始 UTF-8 字节，引号不转义（§9.2）", async () => {
+    const id = fake.addDataset();
+    const doc = fake.addDocument(id, { name: '中文"名.txt', content: "x" });
+    const socket = connect(fake.port, "127.0.0.1");
+    socket.write(
+      `GET /api/v1/datasets/${id}/documents/${doc} HTTP/1.1\r\nHost: h\r\n` +
+        `Authorization: Bearer ${KEY}\r\nConnection: close\r\n\r\n`,
+    );
+    const chunks: Buffer[] = [];
+    for await (const chunk of socket) {
+      chunks.push(chunk as Buffer);
+    }
+    // 走裸 socket 看线上的字节：`fetch` 按 latin1 解响应头，读到的不是这串字节。
+    expect(Buffer.concat(chunks).toString("utf8")).toContain(
+      'attachment; filename="中文"名.txt"\r\n',
+    );
   });
 
   it("内容恰为 not-found 正文的文件：43 字节，仍带头", async () => {

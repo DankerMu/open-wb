@@ -342,11 +342,11 @@ describe("JSON 调用的总期限", () => {
   });
 
   it("连接建好后不再按连接期限计时", async () => {
-    const slow = clientOf(fake.baseUrl, { connectMs: 20, totalMs: 2_000 });
+    const slow = clientOf(fake.baseUrl, { connectMs: 200, totalMs: 2_000 });
     const gate = fake.fault("POST /api/v1/datasets", { kind: "hold" });
     const pending = slow.createDataset(DATASET);
     await gate.reached;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 250));
     gate.release();
     await expect(pending).resolves.toMatchObject({ kind: "ok" });
   });

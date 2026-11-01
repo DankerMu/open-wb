@@ -243,6 +243,26 @@ describe("故障注入", () => {
     }).toThrow(/5xx/u);
   });
 
+  it.each([
+    [200, false],
+    [299, false],
+    [300, true],
+    [302, true],
+    [399, true],
+    [400, false],
+    [403, false],
+  ])("redirect 故障的 status 只收 300–399：%i 接受与否 %s", async (status, accepted) => {
+    const inject = () => {
+      fake.fault(VERSION, { kind: "redirect", status, location: "/" });
+    };
+    if (!accepted) {
+      expect(inject).toThrow(/3xx/u);
+      return;
+    }
+    inject();
+    expect((await version()).status).toBe(status);
+  });
+
   it("oversize：恰为给定字节数，仍是合法 JSON", async () => {
     fake.fault(VERSION, { kind: "oversize", bytes: 1_048_577, envelope: { code: 0, data: "v" } });
     const answer = await version();
