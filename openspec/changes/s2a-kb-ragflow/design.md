@@ -297,7 +297,7 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 
 重建在进程内单线程串行执行，一次一个知识库，处理期间持有该库的写锁（D20）。重建器由 `kb` 模块在 `server_started` 之后不等待地启动；启动时，对仍是 `rebuilding` 的库从第一步续做。每个库的步骤：
 1. `rebuild_dataset_id` 非空时，按 D9 的删除次序删掉残留的一代，不存在视为已删，再把三个 `rebuild_*` 列置空。
-2. 按原模板与开关、新嵌入模型，经 `createPipeline` 建新一代（D9），名为 `owb-<id>-g<新代数>`，写回三个 `rebuild_*` 列。账号缺省缺失时开了开关的库在这里失败，不发后续请求（D7）。
+2. 按原模板与开关、新嵌入模型建新一代：开了开关的库经 `createPipeline`（D9），普通库走 `parse_type:1` 建库，不读账号缺省；名为 `owb-<id>-g<新代数>`，写回三个 `rebuild_*` 列。账号缺省缺失时开了开关的库在这里失败，不发后续请求（D7）。
 3. 逐份文档，从旧数据集流式下载入库原件，上传到新数据集，再触发这份文档的解析（`parse_not_started` 即该库失败），记下新文档 id：
    - multipart 长度按本地 `kb_documents.size` 计算。
    - 下载为 not-found：该文档记为跳过（#29）。
@@ -307,7 +307,7 @@ RAGFlow 的 message 与响应体不进响应、审计与日志，防止回显密
 
 逐份触发解析而不是一次传全部 id：批量上限只验证到 40 份（§8.5），逐份还能和 D10 共用同一段上传加解析。
 
-**模板组与画布重建时新建，不复用。** 重建开始时旧数据集里的文档可能还在排队或解析：解析是 RAGFlow 异步跑的，写锁管不到它。而两个数据集在同一画布上解析从未验证过（§5.1 (5)、§14）。建与删走同一对函数，重建器不多一条分支。代价是比复用旧资源多 `rebuild_canvas_id`、`rebuild_template_group_id` 两列（#35 的四列里，另两列是当前一代的 `canvas_id`、`template_group_id`，不管复用与否都要有）。
+**模板组与画布重建时新建，不复用。** 重建开始时旧数据集里的文档可能还在排队或解析：解析是 RAGFlow 异步跑的，写锁管不到它。而两个数据集在同一画布上解析从未验证过（§5.1 (5)、§14）。删除走同一个 `deletePipeline`，重建器不多一条分支。代价是比复用旧资源多 `rebuild_canvas_id`、`rebuild_template_group_id` 两列（#35 的四列里，另两列是当前一代的 `canvas_id`、`template_group_id`，不管复用与否都要有）。
 
 **下载判别**（§9.1）：not-found 也是 HTTP 200，文件内容可以恰好等于 not-found 正文，所以不能解析正文判成败。
 - HTTP 200 且带 `Content-Disposition`：是文件字节，正文一律不解析，也不看 `Content-Type`、`Content-Length` 与后缀。这个头的值不解析：非 ASCII 名是原始 UTF-8，`"` 不转义（§9.2）。
@@ -615,7 +615,7 @@ RAGFlow 的失败：
 800 行上限同样适用于测试文件（`size-guard.sh` 扫描 `server/test`）。
 
 `server.ts` 现为 755 行：#1835 已把 DB 文件准备函数移进 `startup-registry.ts`，#1839 已加四键配置与 `kb_key`。本 change 还要往里加：
-- `STARTUP_MODULES` 加 `kb`，`createApp` 加一个 `kb` 字段（密钥句柄、地址、两个上传上限；组 6）。`app.ts` 的 `AssemblyDependencies` 同样只加这一个字段，类型 `KbDependencies` 由 `kb/index.ts` 导出。
+- `STARTUP_MODULES` 加 `kb`，`createApp` 加一个 `kb` 字段（密钥句柄、地址、两个上传上限；组 6）。组 6 在 `app.ts` 的 `AssemblyDependencies` 同样只加这一个字段，类型 `KbDependencies` 由 `kb/index.ts` 导出。
 - 重建器的启动与关停各一次调用（组 14）。
 
 合计约 6 行，余量足够。`server-config.test.ts` 正好 800 行，本 change 不往里加用例，四键的解析用例在 `kb-config.test.ts`。

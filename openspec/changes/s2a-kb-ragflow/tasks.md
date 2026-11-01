@@ -242,7 +242,7 @@ Minimal mergeable slice: atomic - 夹具没有客户端就没有消费者，客�
   - 新 `server/src/kb/index.ts` 与 `kb/rest.ts`：本组只有 `GET /api/kb/status`，以及 `/api/kb/*` 的关闭判定——preParsing 在 cookie guard 之后、管理员判定与 body 解析之前返回 503 `kb_disabled`；关闭判定由后续各组的路由用例验证。
   - `app.ts` 在 `registerConnectors` 之后注册 `kb`；`STARTUP_MODULES` 加 `kb`（`server.ts` +1 行）。
   - 组 4 的密钥句柄经 `createApp` 交给 `kb` 模块（`server.ts` +1 行），删掉 knip 豁免注释。
-  - `AssemblyDependencies` 加一个 `kb` 字段，类型 `KbDependencies` 由 `kb/index.ts` 导出：密钥句柄、地址、两个上传上限，期限与测试缝可选（测试注入）；后续各组只扩这个类型，不再改 `app.ts`。
+  - `AssemblyDependencies` 加一个 `kb` 字段，类型 `KbDependencies` 由 `kb/index.ts` 导出：密钥句柄、地址、两个上传上限，期限与测试缝可选（测试注入）；后续各组只扩这个类型；`app.ts` 除组 8 剩余的 `modelWriteGuard` 接线外不再改。
 - [ ] 6.6 `system.md` §3.1 的 `kb` 行补状态端点，`core/errors` 行改为三十七码；§9.13 加状态端点、版本钉住与两条 stderr 记录。
 
 Suggested fixture level: expanded - 改共享错误信封与装配（Fastify assembly/routes/hooks 触发项）。
@@ -304,7 +304,7 @@ Minimal mergeable slice: 迁移 050 与 store（7.2、7.3）——迁移没有 s
   - 知识库关闭时 `models` 的删除与修改行为与本 change 之前一致（既有 `models-*.test.ts` 不改即绿）。
 - [ ] 8.5 实现（剩余部分）：
   - `models/store.ts`：从 `update` 拆出纯函数 `planUpdate(id, body)`，做 `parseUpdate`、未知 id 判定与候选上游的计算（含 userinfo 沿用），返回候选上游 `next` 与 `changed`，不写库；`update` 在事务里复用它，行为不变。`upstreamChanged` 的判定式不变，从 `rest.ts` 挪到这里；
-  - `AssemblyDependencies` 加可选 `modelWriteGuard`：`DELETE` 交写入回调；`PUT` 交写入回调与 `plan`（绑定了 id 与 body 的 `planUpdate`）。钩子在设置锁内依次调用 `plan`（校验先于下发，候选上游与是否变化由它给出，放在锁内是为了读到锁内的行）、做引用判定、需要时按 `next` 重新下发、再执行回调。钩子为空时直接执行；
+  - `AssemblyDependencies` 加可选 `modelWriteGuard`（`kb` 注册晚于 `models`，由 `app.ts` 把钩子绑给 `models`）：`DELETE` 交写入回调；`PUT` 交写入回调与 `plan`（绑定了 id 与 body 的 `planUpdate`）。钩子在设置锁内依次调用 `plan`（校验先于下发，候选上游与是否变化由它给出，放在锁内是为了读到锁内的行）、做引用判定、需要时按 `next` 重新下发、再执行回调。钩子为空时直接执行；
   - `kb` 注册时提供该钩子；`models/rest.ts:185` 注释里「判定与写入之间没有 await」的前提随之改为「判定与写入在设置锁内」，同 PR 改注释；
   - `core/errors` 的 `kb_model_in_use`、`kb_chat_model_locked` 由组 6 登记。
 - [ ] 8.6 文档，各随所在切片的 PR：
@@ -526,7 +526,7 @@ Minimal mergeable slice: atomic - 确认开关一旦开放就必须有重建器�
   - CK-04 删库。
 
 Suggested fixture level: expanded - 新 tab 与可见性规则（presentation + route guard）；按前端通用契约须有真实浏览器走查，组 18 补 ui-walk 分支。
-Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第三项与 15.3 的第一项）——客户端与严格解析按 spec 写明的应答形状独立可测，组 17 只依赖它；被测试 entry 导入，knip 不报无用。剩余部分（tab 可见性、列表、建库、删库与 CK-01–04）依赖它与组 9 全部三刀；剩余部分 atomic：tab 一出现就必须有列表与建库，只有状态行的面板是无功能的占位 tab。
+Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第三项与 15.3 的第一项）——客户端与严格解析按 spec 写明的应答形状独立可测，组 17 依赖它与组 15 剩余（CK 节）；被测试 entry 导入，knip 不报无用。剩余部分（tab 可见性、列表、建库、删库与 CK-01–04）依赖它与组 9 全部三刀；剩余部分 atomic：tab 一出现就必须有列表与建库，只有状态行的面板是无功能的占位 tab。
 
 ## 16. web：知识库详情（knowledge-bases「中心「知识库」tab」的详情、入库、上传、移出、重新入库与刷新）
 
