@@ -31,7 +31,7 @@ ADR-0002（2026-08-29）定的是吸收 RAGFlow v0.27.1 的 Python 线（deepdoc
 - 上传是裸 `application/octet-stream`、文件名走查询参数、`Transform` 计数超限即拒（`workspaces/rest.ts:455-520`、`upload.ts`）；没有 multipart 依赖。
 - 读工作空间文件：`sandbox.resolve(principal, workspaceId, path, "read")` → 挂载内走 `mountToRead` / `openMountFile` / `mountRangeStream`（离线 `mount_offline`），挂载外走 `lstatExisting` / `openRegularFile`（`O_NOFOLLOW`）（`workspaces/rest.ts:412`、`rest-archive.ts:108-146`、`mounts/files.ts`、`regular-file.ts:55`）。
 - 出站 HTTP 一律 node `http(s).request`、`agent:false`、不跟随重定向，连接 10 s / 总 15 s，错误体经 `readErrorBody` + `upstreamExcerpt`（`models/probe.ts`、`connectors/probe.ts`）。
-- `assertHeaderSafeKey` 已由 #1839 导出（`agent-config.ts:239`）。`parseUploadName`（`workspaces/rest.ts:160`）仍是模块内私有函数，复用要先经模块入口导出。
+- `assertHeaderSafeKey` 已由 #1839 导出（`agent-config.ts:239`）。`parseUploadName`（`workspaces/rest.ts:160`）是模块内私有函数，只判存在、非空、单值；其余规则在 `assertUploadName`（`:175`）与路由内联的 255 字节判定里。既有路由要在沙箱之后才判部分规则，不改；组 12 在 `workspaces` 加合并三者的 `parseUploadFileName`，经模块入口导出。
 - `audit_events.actor_id` 为 `NOT NULL` 且外键指向 `accounts`（`030_audit_events.sql:8,13,15`）。
 - 中心 tab 五项（`web/src/features/center/tabs.ts:16-22`），描述 `专家、技能与连接器`（`web/src/routes/manifest.ts:29-37`）。
 - `kbservice/` 与 Python 工具链已由 #1834 退役。
@@ -426,7 +426,7 @@ RAGFlow 的失败：
 
 ### D11 本地上传
 
-`POST /api/kb/bases/:id/uploads?name=<文件名>` 与 `POST /api/workspaces/:id/uploads` 同一写法：独立 scope，只注册 `application/octet-stream`，文件名规则与 255 字节上限复用 `parseUploadName`（由 `workspaces` 入口导出）。
+`POST /api/kb/bases/:id/uploads?name=<文件名>` 与 `POST /api/workspaces/:id/uploads` 同一写法：独立 scope，只注册 `application/octet-stream`，文件名规则与 255 字节上限复用 `parseUploadFileName`（`workspaces` 新增并由入口导出：恰一个、非空、不含 `/`、无拒绝字符、无临时前缀、不超过 255 字节）。这条路由不经 `sandbox.resolve`，这是文件名的唯一防线。
 
 规则：
 - 必须带 `Content-Length`，缺失或分块传输即 400。在 Content-Length 分帧下，「流中多于声明」到不了 handler，所以只在入口判一次：`Content-Length > KB_UPLOAD_MAX_BYTES` 即 413 `upload_too_large`。
@@ -615,10 +615,10 @@ RAGFlow 的失败：
 800 行上限同样适用于测试文件（`size-guard.sh` 扫描 `server/test`）。
 
 `server.ts` 现为 755 行：#1835 已把 DB 文件准备函数移进 `startup-registry.ts`，#1839 已加四键配置与 `kb_key`。本 change 还要往里加：
-- `STARTUP_MODULES` 加 `kb`，密钥句柄经 `createApp` 传给 `kb`（组 6）。
+- `STARTUP_MODULES` 加 `kb`，`createApp` 加一个 `kb` 字段（密钥句柄、地址、两个上传上限；组 6）。`app.ts` 的 `AssemblyDependencies` 同样只加这一个字段，类型 `KbDependencies` 由 `kb/index.ts` 导出。
 - 重建器的启动与关停各一次调用（组 14）。
 
-合计约 4 行，余量足够。`server-config.test.ts` 正好 800 行，本 change 不往里加用例，四键的解析用例在 `kb-config.test.ts`。
+合计约 6 行，余量足够。`server-config.test.ts` 正好 800 行，本 change 不往里加用例，四键的解析用例在 `kb-config.test.ts`。
 
 `server-assembly.test.ts` 已由 #1835 拆出 `server-assembly-modules.test.ts`（529 与 322 行），组 6 改后者。
 

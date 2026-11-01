@@ -14,7 +14,7 @@
 > - 组 10 ← 9 首刀（`kb/templates.ts` 的后缀表）。组 11 ← 10（复用 `kb/source-file.ts` 与 `kb/documents.ts`）。组 12 ← 10（复用 `kb/multipart.ts`）。组 13 ← 10。
 > - 组 9 第二刀（pipeline：DSL、模板组、画布、开关开放）← 9 首刀，不依赖组 11。组 9 第三刀（`compile-status`）← 9 第二刀、11（编译状态复用文档列表的读取）。
 > - 组 14 ← 8、9 第二刀、10、11、12、13（重建要建编译资源；组 11 的路由合入后才能断言路由表恰十二条；14.2 的「锁被重建器持有时立即 409」要用到组 13 剩余部分注册的重新入库路由）。
-> - 组 15 剩余 ← 9 全部三刀、15 首刀。组 16 首刀 ← 11、13、15；剩余 ← 10、12、16 首刀。组 17 ← 8、14、15 首刀。
+> - 组 15 剩余 ← 9 全部三刀、15 首刀。组 16 首刀 ← 11、13、15；剩余 ← 10、12、16 首刀。组 17 ← 8、14、15 全部（CK 节由组 15 剩余的 15.4 新建）。
 > - 组 18 首刀 ← 5–17 全部；18.4（ui-walk 分支）← 组 15 剩余；18.5（收口）← 组 18 首刀。组 18 不依赖 P：真实 RAGFlow 运行是 owner 执行的验收行 CK-11。
 >
 > Epic 正文另列 design「Grill 结论」里标「待 owner 复核」的两处细化（第 4、13 行），等 owner 确认。
@@ -195,7 +195,7 @@ Minimal mergeable slice: 4.2 的函数与用例移动——纯重构，不改行
   - 本组只实现：版本接口（`data` 为版本串）；数据集的建（校验 `parser_id` + `parse_type`，`chunk_method` 回 `101`，`tag` 回 `102`，`embedding_model` 传了但非三段式回 `102`，不传时成功）与删（`success_count`，不存在回 `code:403`）；文档的上传（字段 `file`，不支持的后缀回 `code:500`，同名改名 `a(1).txt`）、删除（`RUNNING`、`STOPPING` 回 `deleted:0`）、解析触发（`success_count`）、停止；下载（§9.1 的响应头：成功带 `Content-Disposition`，not-found 与 0 字节不带）。
   - 协议应答可脚本化：记录里出现过的 code；表 B 的全部「不存在」组合；下载内容设为恰等于 not-found 正文；中断的上传不留文档。
   - 故障注入按头部的四种：版本串；按路由挂起、挂起后放行、3xx、5xx、非 JSON、超体积；防御性组合。
-  - 记录请求：方法、路径、查询串、是否带 key、JSON body、multipart 字段名与文件字节数。未知路由回 404 并记录，用例可断言没有发生。
+  - 记录请求：方法、路径、查询串、是否带 key、JSON body、multipart 字段名、文件字节数与请求头 `Content-Length`。未知路由回 404 并记录，用例可断言没有发生。
   - 附夹具自测。
 
   新 `server/test/kb-ragflow-client.test.ts`（期望值取自实测记录）：
@@ -242,6 +242,7 @@ Minimal mergeable slice: atomic - 夹具没有客户端就没有消费者，客�
   - 新 `server/src/kb/index.ts` 与 `kb/rest.ts`：本组只有 `GET /api/kb/status`，以及 `/api/kb/*` 的关闭判定——preParsing 在 cookie guard 之后、管理员判定与 body 解析之前返回 503 `kb_disabled`；关闭判定由后续各组的路由用例验证。
   - `app.ts` 在 `registerConnectors` 之后注册 `kb`；`STARTUP_MODULES` 加 `kb`（`server.ts` +1 行）。
   - 组 4 的密钥句柄经 `createApp` 交给 `kb` 模块（`server.ts` +1 行），删掉 knip 豁免注释。
+  - `AssemblyDependencies` 加一个 `kb` 字段，类型 `KbDependencies` 由 `kb/index.ts` 导出：密钥句柄、地址、两个上传上限，期限与测试缝可选（测试注入）；后续各组只扩这个类型，不再改 `app.ts`。
 - [ ] 6.6 `system.md` §3.1 的 `kb` 行补状态端点，`core/errors` 行改为三十七码；§9.13 加状态端点、版本钉住与两条 stderr 记录。
 
 Suggested fixture level: expanded - 改共享错误信封与装配（Fastify assembly/routes/hooks 触发项）。
@@ -409,7 +410,7 @@ Minimal mergeable slice: atomic - 一条路由、一个视图，状态映射与�
 ## 12. 本地上传入库（knowledge-bases「本地上传入库」）
 
 - [ ] 12.1 核对 Context：
-  - `workspaces/rest.ts:455-520`：独立 scope、octet-stream parser、`parseUploadName`（`:160`，未导出）、提前拒；
+  - `workspaces/rest.ts:455-520`：独立 scope、octet-stream parser、`parseUploadName`（`:160`）、`assertUploadName`（`:175`）与路由内联的 255 字节判定（都未导出）、提前拒；
   - `upload.ts` 的计数 `Transform`；
   - 组 10 的 `multipart.ts`。
 - [ ] 12.2 测试先行：新 `server/test/kb-upload.test.ts`。
@@ -420,11 +421,11 @@ Minimal mergeable slice: atomic - 一条路由、一个视图，状态映射与�
   - 「上传的文档数上限」：第 501 份 409 `kb_limit` 并有 `kb.ingest_reject`；499 份时两个上传并发（夹具的挂起后放行）：恰一个 201、一个 409 `kb_limit`，最终恰 500 行；
   - 「文档路由的所有权」的 `POST …/uploads` 一腿：请求体不被读取，404，零出站，无审计；
   - 201 的视图：`queued`、`chunkCount:null`、`message:null`、`sourceChanged:null`，没有文档列表请求；
-  - 文件名规则 400；`text/plain` 400；知识库非 `ready` 时 409；
+  - 文件名规则 400：缺失、重复、空串、含 `/`、拒绝字符、临时前缀、超 255 字节各一例，都没有出站请求；`text/plain` 400；知识库非 `ready` 时 409；
   - 审计 detail 键集与哨兵（knowledge-bases「detail 不含敏感内容」的上传一腿）。
 
   路由加进 `kb-disabled.test.ts` 与归属路由用例。
-- [ ] 12.3 实现：`workspaces` 入口导出 `parseUploadName`；新 `server/src/kb/uploads.ts`（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/uploads`。
+- [ ] 12.3 实现：`workspaces` 加合并上述规则的 `parseUploadFileName` 并从入口导出，既有上传路由不改；新 `server/src/kb/uploads.ts`（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/uploads`。
 
 Suggested fixture level: expanded - 流式转发用户上传到外部服务，且有不落盘的硬约束。
 Minimal mergeable slice: atomic - 一条路由，与工作空间上传同一写法。
@@ -469,6 +470,7 @@ Minimal mergeable slice: 13.2–13.3 的移出——一条不读沙箱的独立�
   - `workspaces/mounts` 的恢复测试写法。
 - [ ] 14.2 测试先行：新 `server/test/kb-rebuild.test.ts`（假 RAGFlow；重建器经注入的调度缝同步驱动）。
   - 「未确认不保存」「确认后重建」「开编译的库重建」「账号缺省缺失时重建失败」「旧一代删除失败」「原件缺失与下载判别」「不带头的错误应答」「中途失败与重试」「重建中改嵌入身份」「没有失败库时重试」；
+  - 普通库重建不读账号缺省；
   - knowledge-bases「上传与确认重建交错」；
   - ragflow-backend「不存在视为已删」的重建一腿：第 1 步删残留的一代得到「不存在」组合时照常继续；`rebuild_failed` 删库时两代之一为「不存在」仍 204；
   - 重建器取锁后发现库已删除即跳过，不建数据集；
@@ -488,7 +490,7 @@ Minimal mergeable slice: 13.2–13.3 的移出——一条不读沙箱的独立�
 
   路由加进 `kb-disabled.test.ts` 与归属路由用例。
 - [ ] 14.3 实现：
-  - 新 `server/src/kb/rebuild.ts`（处理每库期间持有该库写锁；建与删走组 9 的 `createPipeline` / `deletePipeline`）；
+  - 新 `server/src/kb/rebuild.ts`（处理每库期间持有该库写锁；建新一代：开了开关的库走 `createPipeline`，普通库走组 9 首刀的 `parse_type:1` 建库，不读账号缺省；删走 `deletePipeline`）；
   - 组 8 的 PUT 开放 `confirmRebuild` 并写 `rebuild_actor_id`；`kb/rest.ts` 加 `POST /api/kb/settings/rebuild`；
   - 重建器的启动与关停接进 `startup-registry.ts`，`server.ts` 只加两次调用。
 - [ ] 14.4 `system.md` §9.13 加重建流程、下载判别、跳过规则、续做与 `kb_dataset_leak`、`kb_pipeline_leak`。
@@ -533,17 +535,19 @@ Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第
   - S1g 上传的客户端 `web/src/lib/api-upload.ts`；
   - 组 15 的面板结构与 `api-kb.ts`。
 - [ ] 16.2 测试先行（首刀）：新 `web/test/center-kb-detail.test.tsx`。
+  - 点行进入详情：渲染 `panel.tsx`，从列表行走到详情；
   - 「解析中自动刷新」：假时钟；页面隐藏时停；`unparsed` 不触发刷新；
   - 状态文案七种；`已切片 0`；
   - `源文件已变更` 只在 `true` 时显示；工作空间来源行都有 `重新入库`；
   - 移出；409 `kb_document_busy` 时行内显示信封文案、行仍在；
   - 非 `ready` 时 `重新入库` 不渲染；`rebuild_failed` 时 `移出` 仍渲染，`rebuilding` 时不渲染（入库与上传按钮的同一规则由 16.4 断言，它们在剩余部分才建出来）。
-- [ ] 16.3 实现（首刀）：新 `web/src/features/center/kb/{detail.tsx,documents-table.tsx}`。
+- [ ] 16.3 实现（首刀）：新 `web/src/features/center/kb/{detail.tsx,documents-table.tsx}`；改 `list.tsx`、`panel.tsx`，点行进入详情。
 - [ ] 16.4 测试先行（剩余部分）：`center-kb-ingest.test.tsx`。
+  - 两个入口挂在详情里，从 `detail.tsx` 渲染；
   - 入库对话框：选空间、浏览目录、勾选上限、提交恰一次、被拒条目逐条显示 `message`（含 `unsupported_type` 与 `empty` 的文案）；成功后重取一次文档列表，`queued` 进入 3 秒刷新；
   - 上传：超数与超大在客户端就地拒绝，逐个请求；400 `kb_file_unsupported` 逐个显示信封文案，其余文件继续；
   - 非 `ready` 时 `从工作空间入库` 与 `上传文件` 不渲染（knowledge-bases「中心「知识库」tab」）。
-- [ ] 16.5 实现（剩余部分）：新 `web/src/features/center/kb/{ingest-dialog.tsx,upload-button.tsx}`。
+- [ ] 16.5 实现（剩余部分）：新 `web/src/features/center/kb/{ingest-dialog.tsx,upload-button.tsx}`；改 `detail.tsx`，两个入口挂在详情里。
 - [ ] 16.6 验收清单（各随所在切片的 PR），结论 `待签`：
   - CK-05 从工作空间入库后看到解析中，并自动变为已切片；
   - CK-06 本地上传入库；
