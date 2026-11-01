@@ -615,10 +615,10 @@ RAGFlow 的失败：
 800 行上限同样适用于测试文件（`size-guard.sh` 扫描 `server/test`）。
 
 `server.ts` 现为 755 行：#1835 已把 DB 文件准备函数移进 `startup-registry.ts`，#1839 已加四键配置与 `kb_key`。本 change 还要往里加：
-- `STARTUP_MODULES` 加 `kb`（组 6）。
+- `STARTUP_MODULES` 加 `kb`，密钥句柄经 `createApp` 传给 `kb`（组 6）。
 - 重建器的启动与关停各一次调用（组 14）。
 
-合计约 3 行，余量足够。`server-config.test.ts` 正好 800 行，本 change 不往里加用例，四键的解析用例在 `kb-config.test.ts`。
+合计约 4 行，余量足够。`server-config.test.ts` 正好 800 行，本 change 不往里加用例，四键的解析用例在 `kb-config.test.ts`。
 
 `server-assembly.test.ts` 已由 #1835 拆出 `server-assembly-modules.test.ts`（529 与 322 行），组 6 改后者。
 
