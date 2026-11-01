@@ -65,13 +65,13 @@ Minimal mergeable slice: atomic - 一份记录、一次对同一实例的实测�
 
 ## 2. 方向变更文档（Grill 结论 1、10、11；design Context「方向变更」）
 
-- [ ] 2.1 核对 Context：
+- [x] 2.1 核对 Context：
   - ADR-0002、ADR-0005；`ATTRIBUTION.md:24-26`；
   - `CONTEXT.md:9,38,45,53`；`PLAN.md:21,32,47,94`；
   - `IMPLEMENTATION_PLAN.md`：S2a / S2b / S2c / S4a / S4b 各节、覆盖表、Open Decisions、Next Step、What Already Exists；
   - `resource/backend-research.md:63,155-165`；`README.md:4,22`；
   - `docs/architecture/system.md`：`:9`（§1）、`:17`（§2 约束）、`:43-53`（§3.2）、`:87-88`（§4 规则 4、5）、`:123`、`:128`（§5 目录树）、`:152`（§6.1 时序图）、§7。
-- [ ] 2.2 新 `docs/adr/0016-ragflow-service-backend.md`：
+- [x] 2.2 新 `docs/adr/0016-ragflow-service-backend.md`：
   - 决策：知识库以运行中的 RAGFlow 服务为后端，取代 ADR-0002。
   - 理由：v1.0 的 Go 重写与资源占用；rc2 的 arm64 镜像；多租户留在 app-server。
   - 后果：
@@ -83,7 +83,7 @@ Minimal mergeable slice: atomic - 一份记录、一次对同一实例的实测�
   - 被否决的备选：吸收源码；保留 kbservice 薄层。
   
   另做：ADR-0002 头部加「已被 ADR-0016 取代」；ADR-0005 补充一段（Infinity 经 RAGFlow 的 `DOC_ENGINE`，ES 退路仍在 RAGFlow 侧）。
-- [ ] 2.3 `docs/architecture/system.md` 改写：
+- [x] 2.3 `docs/architecture/system.md` 改写：
   - §1 组件说明与 §3.2 整节：把 kb-service 改为「外部 RAGFlow 服务 + app-server `kb` 模块」；
   - §2 约束：「omp 与 kb-service 不感知租户」改为「omp 与 RAGFlow 不感知租户」；
   - §3.1 的 `kb` 行：「先过滤 kb_ids 再调 kb-service」改为调 RAGFlow（组 6 只补端点细节）；
@@ -92,20 +92,20 @@ Minimal mergeable slice: atomic - 一份记录、一次对同一实例的实测�
   - §6.2 摄取一行：「→ kb-service ingest」改为「app-server `kb` → RAGFlow」；
   - §6.1 时序图：参与者 kb-service 改为 RAGFlow；
   - §7 决策索引：加 0016。
-- [ ] 2.4 `ATTRIBUTION.md` 的 RAGFlow 条目改为「以服务形态部署，不吸收源码」；义务写为：发行物含 RAGFlow 镜像时附其 LICENSE 与 NOTICE。
-- [ ] 2.5 `CONTEXT.md`：
+- [x] 2.4 `ATTRIBUTION.md` 的 RAGFlow 条目改为「以服务形态部署，不吸收源码」；义务写为：发行物含 RAGFlow 镜像时附其 LICENSE 与 NOTICE。
+- [x] 2.5 `CONTEXT.md`：
   - 项目本质里三个组件改为 app-server、web SPA 与外部 RAGFlow 服务；
   - 限界上下文「知识库」改为「app-server `kb` 模块 + RAGFlow」；
   - `:38`「kb-service 嵌入调用不经它」改为 RAGFlow 的说法；
   - 不变量 4 改为「RAGFlow API 密钥与模型网关密钥不得出现在 omp 子进程可读环境」。
-- [ ] 2.6 `PLAN.md` 的知识库四处（`:21,32,47,94`）改写，并互加对 ADR-0016 的引用。`IMPLEMENTATION_PLAN.md`：
+- [x] 2.6 `PLAN.md` 的知识库四处（`:21,32,47,94`）改写，并互加对 ADR-0016 的引用。`IMPLEMENTATION_PLAN.md`：
   - S2a 一节改写为本 change（覆盖 F-CTR-KB1 / KB2 不变）；
   - S2b / S2c 的 kbservice 措辞改为 app-server `kb` 模块；
   - S4a 的回归对象去掉 kbservice；S4b 部署要求加 RAGFlow 全栈；
   - Open Decisions 的 deepdoc 一行关闭（随 ADR-0016 作废）；
   - What Already Exists 的 kbservice 一行改为「已退役（change s2a-kb-ragflow）」；
   - Next Step 更新到当天：P0 + P1 已交付，S2a 进行中。
-- [ ] 2.7 `resource/backend-research.md` 头部加一行「§1 的吸收方案已被 ADR-0016 取代」；`README.md` 两处同步。合入前 `grep -rn "kb-service\|kbservice" docs/architecture/system.md CONTEXT.md PLAN.md README.md` 只剩指向 ADR-0002 的历史引用，结果附 PR 说明。
+- [x] 2.7 `resource/backend-research.md` 头部加一行「§1 的吸收方案已被 ADR-0016 取代」；`README.md` 两处同步。合入前 `grep -rn "kb-service\|kbservice" docs/architecture/system.md CONTEXT.md PLAN.md README.md` 只剩指向 ADR-0002 的历史引用，结果附 PR 说明。
 
 Suggested fixture level: none - 只改文档与 ADR。
 Width exception: merged-tasks - 七个任务写的是同一个方向变更；分开合入会让主干在一段时间里同时有两套互相矛盾的知识库架构说明。

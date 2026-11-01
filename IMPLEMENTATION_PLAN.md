@@ -40,7 +40,7 @@
   （当时含按钮/输入/开关/标签/chip/Dialog/ConfirmDialog/Drawer/Menu/Popover/Tooltip/Toast/空态/分段控件/图标/品牌 mark）已随 #1393 删除（ADR-0013），现为拷入层 `web/src/components/{ui,assistant-ui}/` 加直接放在 `web/src/components/` 下的自写共享组件（`icon.tsx`、`brand-mark.tsx`、`escape-fallback.ts`），token 全集（亮/暗）一直在 `web/src/styles/tokens.css`；
   外壳（侧栏折叠 + 用户菜单、顶栏三态、900/760 两档响应式）；会话页（欢迎态、Markdown 消息 + 流式光标、步骤卡、回到最新、复制）；
   文件页（逻辑路径、条目元数据、空态、创建对话框）；登录页与设置页对齐 demo。demo 一致性清单 81/81 签收（`docs/acceptance/`）。
-- kbservice：仍为包骨架（`dependencies = []`），S2a 起填。
+- kbservice：已退役（change s2a-kb-ragflow）；`kbservice/` 目录与 Python 工具链由该 change 组 3 删除。
 - 决策资产：`docs/adr/0001`–`0011`（0010 专用 omp uid、0011 沙箱路径非浏览器秘密）、`docs/architecture/system.md`、
   `resource/backend-research.md`；`docs/stage-pipeline-log.jsonl` 四阶段账本。
 - 环境：测试 VPS（Ubuntu 24.04，fuse3/docker 就绪，rclone/sshfs 未装；连接信息在本地 `CLAUDE.local.md`）；
@@ -66,7 +66,7 @@
 
 - 内网模型注册表提供 OpenAI 兼容端点（P0 即需）。
 - OIDC IdP 在 S3a 前可拿到测试租户；此前 auth 走 dev-stub 适配器（ADR-0007）。
-- RAGFlow `DocStoreConnection` 接缝足以承载 Infinity 适配（S2a spike 首周验证）。
+- RAGFlow `v1.0.0-rc2` 的 HTTP API 足以承载建库、摄取与模型下发（change `s2a-kb-ragflow` 组 1 实测；不能下发模型时走其 design D7 的应急预案）。
 
 ## Open Decisions
 
@@ -76,7 +76,7 @@
 | ~~S0b omp 二进制供给~~ 已关闭 2026-09-18：官方 release v18.0.10（ADR-0001 补充；2026-10-20 起钉 v18.12.3，#1570） | S0b 启动前 | S0b |
 | ~~S0b 开发期模型上游~~ 已关闭 2026-09-18：公网 OpenAI 兼容替身，单测打假上游（ADR-0008 补充） | S0b 启动前 | S0b |
 | omp 池参数（上限/内存/空闲回收） | S1c 实测定参 | S1c |
-| deepdoc 模型内网分发清单与体积 | S2a spike 输出 | S2a |
+| ~~deepdoc 模型内网分发清单与体积~~ 已关闭 2026-10-28：随 ADR-0016 作废（解析在 RAGFlow 服务内，本仓不分发模型） | S2a spike 输出 | S2a |
 | IdP 是否带组声明（项目组自建 vs 同步） | S3a 启动前 | S3a |
 | dependency-cruiser 接入时机（import 边界机械化） | 出现跨模块违规即接 | 任意 |
 
@@ -119,7 +119,7 @@
 | F-CTR-KB2 | 文档摄取与状态 |
 | F-CTR-KB3 | 检索测试 |
 | F-CTR-KB4 | 可见范围四档、共享只读、跨账号检索审计 |
-| F-CTR-MOD | 模型注册表（登记 + 探活）——change `s1d-model-registry`（对话模型；嵌入 / 重排随 kb-service） |
+| F-CTR-MOD | 模型注册表（登记 + 探活）——change `s1d-model-registry`（对话模型；知识库嵌入模型随 S2a 存 `kb_settings`，不进注册表；重排随 S2b） |
 | F-CTR-PERM | 沙箱根目录、白名单派生、越界拦截记录 |
 | F-CTR-AUD | 审计页（权限/共享检索/账号操作，按账号隔离） |
 | F-CTR-ACC | 账号管理（管理员）+ 跨部门项目组 |
@@ -132,7 +132,7 @@
 | F-OPS-1 | omp 子进程池治理（每活跃会话一个、空闲回收、上限） |
 | F-OPS-2 | 模型代理（omp 环境零凭证，ADR-0008） |
 | F-OPS-3 | omp 减肥（backend-research §2.2 阶段 1→4） |
-| F-OPS-4 | 单机部署包（fuse3+rclone+模型捆包） |
+| F-OPS-4 | 单机部署包（fuse3+rclone+RAGFlow 全栈，ADR-0016） |
 
 ### 前端基准对齐（demo 呈现层，跨页面）
 
@@ -411,24 +411,24 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 ### 里程碑 P2 — 知识库
 
-**S2a kb-service 骨架与摄取线（含 RAGFlow 吸收 spike）**
-- Outcome：spike 先行（≤1 周）：api.db 解耦可行性、Infinity 经 DocStoreConnection 的 PoC、deepdoc 模型本地化清单——输出决策与清单。随后：kbservice `api`（bearer 每请求鉴权）、`ingest`（deepdoc+12 模板）、`store`（Infinity）；摄取状态 UI。文档存所有者沙箱。
+**S2a 知识库建库与摄取（对接 RAGFlow 服务，change `s2a-kb-ragflow`）**
+- Outcome：app-server 新模块 `kb` 以单一服务账号直连运行中的 RAGFlow（钉住 `v1.0.0-rc2`，ADR-0016），`kbservice/` 与 Python 工具链退役。先对 rc2 接口实测，结论钉住假 RAGFlow 夹具。所有者在中心「知识库」tab 建库（12 种模板 + RAPTOR / 知识图谱开关，建库时固定）、从工作空间或本地上传入库（原件只存 RAGFlow，工作空间来源经沙箱 `resolve(read)` 读后上传）、看解析状态与切片数、移出文档、删库；状态以 RAGFlow 为准、按需读取。管理员在模型 tab 配置全局唯一的知识库嵌入模型与知识库对话模型，由 app-server 下发到 RAGFlow；更换嵌入模型经确认后全量重建。未配 `RAGFLOW_BASE_URL` 即知识库关闭，RAGFlow 不可达不阻断启动。S2a 的知识库只对所有者可见（四档在 S2c）。
 - 覆盖：F-CTR-KB1、F-CTR-KB2。
-- 必读增量：`resource/backend-research.md` §1（吸收/跳过清单）；ADR-0002、0005；ATTRIBUTION.md §3（义务在此生效：LICENSE-RAGFlow/NOTICE/文件头）。
-- Verify：一批真实混合格式文档摄取成功、状态流转正确；kbservice 覆盖率门禁绿。
-- Depends on：S1a。
-- Review attention：decision-dense（spike 结论决定后两阶段形态）。
+- 必读增量：change `s2a-kb-ragflow` 的 proposal / design / specs / tasks；ADR-0016、0005（2026-11-01 补充）、0008；ATTRIBUTION.md §3。
+- Verify：CI 打假 RAGFlow（server / web 单测、`make ui-walk`）；真实 RAGFlow 只在本机 `make smoke-kb` 与功能验收「中心·知识库（CK）」：一批真实混合格式文档摄取成功、状态流转正确。
+- Depends on：S1a、S1b（读挂载内文件）、S1d（`models` 表与探活写法）、S1g（流式上传写法）；外部前提：共用 RAGFlow 栈运行 `v1.0.0-rc2`、专用账号与 key（owner，#1832）。
+- Review attention：decision-dense（凭证、本地映射与 RAGFlow 两份真相、同库写操作与重建的并发）。
 
 **S2b 检索线**
-- Outcome：混合检索+重排+agentic 环（改写→召回→充分性→二轮）；`/center` 检索测试 tab。
+- Outcome：app-server `kb` 模块经 RAGFlow 做混合检索+重排；agentic 环（改写→召回→充分性→二轮）放 `kb` 模块还是用 RAGFlow 自带能力由本阶段定；`/center` 检索测试 tab。
 - 覆盖：F-CTR-KB3。
-- 必读增量：backend-research §1 agentic_rag 环行号引用。
+- 必读增量：ADR-0016；backend-research §1 agentic_rag 环行号引用（v0.27.1 的历史参照，吸收方案已被 ADR-0016 取代）。
 - Verify：检索测试返回带出处切片；agentic 二轮在构造的不充分场景下真实触发。
 - Depends on：S2a。
 - Review attention：decision-dense（检索质量参数与环终止条件）。
 
 **S2c 会话接入与可见范围**
-- Outcome：`host_tool_call`→app-server `kb` 模块转发（先过滤 kb_ids 再调 kbservice）；附件双语义；可见范围四档模型落库（部门/项目组字段就位，真实组数据 S3a 接入）；共享只读+跨账号检索审计。**P2 里程碑验收：会话内 KB 引用给出带出处切片，共享检索入审计。**
+- Outcome：`host_tool_call`→app-server `kb` 模块转发（先过滤 kb_ids 再调 RAGFlow）；附件双语义；可见范围四档模型落库（部门/项目组字段就位，真实组数据 S3a 接入）；共享只读+跨账号检索审计。**P2 里程碑验收：会话内 KB 引用给出带出处切片，共享检索入审计。**
 - 覆盖：F-CHAT-4、F-CHAT-5b、F-CTR-KB4。
 - 必读增量：system.md §6.1 时序图；CONTEXT.md 不变量 1、2、4。
 - Verify：整篇文档绝不入上下文（不变量 2 用例）；无权 kb_id 检索被过滤且不可探测。
@@ -464,10 +464,11 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Review attention：mechanical 为主（策略已定稿，执行照单）。
 
 **S4b 单机部署包**
-- Outcome：部署产物（app-server+SPA+kbservice+减肥 omp+fuse3/rclone+onnx 与嵌入模型捆包）；冒烟脚本全绿。**P4 里程碑验收：无公网服务器全新部署跑通。**
+- Outcome：部署产物（app-server+SPA+RAGFlow 全栈+减肥 omp+fuse3/rclone）；冒烟脚本全绿。**P4 里程碑验收：无公网服务器全新部署跑通。**
 - 部署要求（S1f 的 D 留下，压测第 5 条，#1122；办公文档一项 2026-10-17 由 #1350 改写）：部署主机装 Docker（含 compose 插件）并按 `converter/compose.yml` 起转换 sidecar（镜像由部署方自建），app 设 `OFFICE_SPOOL_DIR`（绝对路径，与 sidecar 同一 spool；不设即办公文档预览关闭；步骤见 `docs/architecture/system.md` 9.7），发布 `PREVIEW_PORT`（缺省 0 由系统分配，部署须设为固定端口；经反向代理时另设 `PREVIEW_ORIGIN`）。
+- RAGFlow 全栈（ADR-0016）：部署主机的 Docker 同时承载 RAGFlow 栈（`v1.0.0-rc2`，镜像离线随包，`DOC_ENGINE` 选 Infinity），内存门槛以官方要求为准；app 设 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE`；RAGFlow 不对用户网络暴露；发行物含 RAGFlow 镜像时附其 LICENSE 与 NOTICE。
 - 覆盖：F-OPS-4。
-- 必读增量：已定决策"模型分发=捆进部署包"（backend-research §3）。
+- 必读增量：ADR-0016 后果中的部署条目（backend-research §3「模型分发=捆进部署包」随之作废）。
 - Verify：干净 Linux 环境（测试 VPS 的全新 docker 容器）一键部署 + 全量 smoke + 双账号走查。
 - Depends on：S4a、S3b。
 - Review attention：mechanical 为主。
@@ -497,20 +498,26 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 ## Risks
 
-- **RAGFlow 吸收成本失控**（PLAN §5 已列）→ S2a spike 先行，spike 结论可缩 S2b/S2c 范围。
+- **RAGFlow 预发行版接口漂移**（PLAN §5 已列；rc2 文档自相矛盾，rc3 / GA 可能改接口）→ 版本钉住（ADR-0016）；change `s2a-kb-ragflow` 组 1 对运行实例实测，假 RAGFlow 夹具只按实测记录写；升级是代码变更。
 - **FUSE 开发环境断层**（macOS 本地无法可信验证）→ S1b 首任务建 Linux 验证路径；失败则回退 ADR-0003 备选（管理员 OS 级挂载，需重新拍板）。
 - **omp 冻结 CVE**→ 季度 osv-scanner；例外 cherry-pick 已授权（backend-research §3）。
-- **Infinity 成熟度**→ DocStoreConnection 接缝保留 ES 退路（ADR-0005）。
+- **Infinity 成熟度**→ ES 退路在 RAGFlow 侧，改 `DOC_ENGINE` 即可（ADR-0005 2026-11-01 补充）。
 - **切片过宽反噬**→ 流水线 Stage 5 宽度门禁 + sizing-retro 回流会暴露；连续出现即回本文重切阶段。
 
 ## Rollback Or Containment
 
 - 每阶段 = feature 分支 + CI 门禁 + 分支保护合入；坏了 `git revert`，master 始终可运行。
 - S1b：`RCLONE_BIN` 未配置即关闭；配置了而预检不过即启动失败（owner 裁定 fail-closed）。
-- S2x：kbservice 独立进程，故障降级为"无 KB 的会话服务"（host tool 返回明确错误）。
+- S2x：未配 `RAGFLOW_BASE_URL` 即知识库关闭；配了而 RAGFlow 不可达时照常启动，故障降级为"无 KB 的会话服务"（host tool 返回明确错误）。
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
 ## Next Step
+
+> 2026-11-01 更新。**P0 + P1 已交付，S2a 进行中**：S1b、S1d 的 change 均已归档（`s1d-model-registry`、`s1d-experts-skills`、`s1d-connectors`、`s1b-workspace-mounts`），验收清单无 `待签` 行。
+> S2a 走 Epic #1831（change `s2a-kb-ragflow`）：知识库方向已改为对接运行中的 RAGFlow 服务（ADR-0016，取代 ADR-0002），下文记录里的「S2a spike」随之作废。真实 RAGFlow 实测（组 1）等 owner 的外部前提 #1832。
+> P2→P3→P4 仍链在 S2a 之后：S2b → S2c → S3a → S3b，S2c → S4a，S4a + S3b → S4b。
+>
+> 以下为更早的记录。
 
 > 2026-10-21 更新。**P0 与 P1 中除 S1b、S1d 外的子阶段已全部完成**：S0a、S0b、S1a、S1e、S1c（A、B）、S1f（A–D 与旧样式层移除）、S1g
 > 的 change 均已归档，Epic #845、#917、#982、#1048 已关闭；验收清单 `docs/acceptance/functional-checklist.md` 已无 `待签` 行，仓库无开着的 issue。

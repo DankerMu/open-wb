@@ -22,8 +22,8 @@
 ## 3. 参照/派生的开源项目
 
 - **RAGFlow** —— `Apache License 2.0`,版权归 InfiniFlow 及其贡献者（https://github.com/infiniflow/ragflow）
-  - 用途：`resource/workbuddy-live-demo.html` 的知识库功能,其**切片模板划分**（`naive`/`qa`/`manual`/`paper`/`book`/`laws`/`presentation`/`table`/`one`/`picture`/`email`/`tag`,即 RAGFlow 的 `chunk_method`）与**深度版面解析 + 模板化切片 + 召回/重排**的管线设计参照 RAGFlow 实现。
-  - 义务：Apache-2.0 要求保留版权声明、许可证副本与变更说明。**若后续实际吸收 RAGFlow 源码**（而非仅参照设计）,须在仓库内附 `LICENSE-RAGFlow`（Apache-2.0 全文）与 `NOTICE`,并在被派生的文件头标注来源与修改点。当前仅为原型层面的概念参照,尚未纳入其源码。
+  - 用途：知识库后端,以服务形态部署,不吸收源码（ADR-0016,钉住 `v1.0.0-rc2`）;app-server 的 `kb` 模块经其 HTTP API 对接。`resource/workbuddy-live-demo.html` 的知识库功能,其**切片模板划分**（`naive`/`qa`/`manual`/`paper`/`book`/`laws`/`presentation`/`table`/`one`/`picture`/`email`/`tag`,即 RAGFlow 的 `chunk_method`）与**深度版面解析 + 模板化切片 + 召回/重排**的管线设计参照 RAGFlow 实现。
+  - 义务：Apache-2.0 要求保留版权声明、许可证副本与变更说明。**发行物含 RAGFlow 镜像时**,须附其 `LICENSE` 与 `NOTICE`。本仓库不含其源码,当前也未分发其镜像（S4b 部署包起生效）。
 
 - **oh-my-pi (omp)** —— `MIT License`,版权链：Mario Zechner (2025) → Can Bölük (2025-2026) → Stencil Labs, Inc. (2026)（https://github.com/can1357/oh-my-pi）
   - 用途：规划中的 agent 后端。决策（2026-08-29）：**fork 并定死在 v18.0.10 / commit `33cc6b9a`**,后续不跟进上游;原定 v18.0.10 / `33cc6b9a`，2026-10-20 起改钉官方 release v18.12.3（ADR-0001 补充，#1570）;减肥与集成方案见 `resource/backend-research.md` §2。
@@ -102,4 +102,4 @@
 - `app-reference/analysis/*.md` —— 结构分析文档（仓库作者）
 - `resource/workbuddy-live-demo.html` —— 功能演示原型（仓库作者）；知识库部分的参照实现见第 3 节；其中设计 token 取自 WorkBuddy 5.3.11 的设计 token 文件（`wb-design-tokens-master.css` / `design-tokens.json`）,文件头注释已标注来源。
 - `resource/backend-research.md` —— 后端选型研究（仓库作者）。
-- **许可**：本仓库自有内容以根级 `LICENSE`（**Apache License 2.0**）发布——选型依据是未来将吸收的 RAGFlow 源码即为 Apache-2.0,MIT 的 omp 内容与之兼容（保留其声明即可）。该许可**不**延及第 1、2 节的上游应用与捆绑第三方内容,也不延及 `resource/` 下 gitignore 的上游参考副本。
+- **许可**：本仓库自有内容以根级 `LICENSE`（**Apache License 2.0**）发布——选型时依据的是当时计划吸收的 RAGFlow 源码为 Apache-2.0（吸收方案已被 ADR-0016 取代,许可不变）,MIT 的 omp 内容与之兼容（保留其声明即可）。该许可**不**延及第 1、2 节的上游应用与捆绑第三方内容,也不延及 `resource/` 下 gitignore 的上游参考副本。

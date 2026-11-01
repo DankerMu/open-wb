@@ -1,7 +1,7 @@
 # open-workbuddy
 
-内网多用户 AI Agent Web 服务。三个自研/组装组件：**app-server**（业务后端，TS/Fastify）、
-**web SPA**（React + Vite）、**kbservice**（知识库，Python）；agent 执行由 **omp**（钉住官方二进制 v18.12.3）
+内网多用户 AI Agent Web 服务。三个组件：**app-server**（业务后端，TS/Fastify）、
+**web SPA**（React + Vite）与外部 **RAGFlow 服务**（知识库后端，ADR-0016）；agent 执行由 **omp**（钉住官方二进制 v18.12.3）
 以每会话子进程 `--mode rpc-ui` 承担。行为基准是 `resource/workbuddy-live-demo.html`（demo 能点出来的行为就是需求）。
 
 ## 从哪里读起
@@ -19,7 +19,6 @@
 ```
 server/         app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计）
 web/            浏览器 SPA（Playwright UI 走查在 web/e2e）
-kbservice/      知识库服务（P2 起吸收 RAGFlow，Apache-2.0，义务见 ATTRIBUTION.md §3）
 smoke/          Hurl HTTP 冒烟用例
 openspec/       OpenSpec 规格与变更（含归档）
 docs/           架构基准、ADR、流水线问责日志
