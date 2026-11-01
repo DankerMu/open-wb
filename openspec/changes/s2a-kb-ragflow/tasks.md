@@ -142,14 +142,14 @@ Minimal mergeable slice: atomic - 删目录与删 CI 步骤必须同 PR：只删
 
 ## 4. 配置键与密钥文件阶段（http-service-skeleton「服务启动与装配」的知识库键与 `kb_key`；ragflow-backend「知识库配置与密钥文件」）
 
-- [ ] 4.1 核对 Context：
+- [x] 4.1 核对 Context：
   - `resolveServerConfig` 与四十二项（`server.ts:129-146`）；`preview-config.ts` 中 `PREVIEW_ORIGIN` 的正则；
   - `agent-config.ts` 中 `resolvePositiveInteger` / `assertHeaderSafeKey`（`:237`，未导出）/ `resolveOwnedPath`；
   - `StartupStage`（`server.ts:330-344`）与 `server-startup-failure-reason.test.ts`；
   - `startup-registry.ts` 的阶段函数写法；`regular-file.ts:55` 的 `openRegularFile`；
   - `OMP_CHILD_ENV_NAMES`（`spawn-env.ts`）；
   - `server.ts:756-799` 的 DB 文件准备函数。
-- [ ] 4.2 先做无行为变化的移动：把 `preparePrivateDbFiles`、`preparePrivateDbMain`、`prepareExistingSidecar`、`chmodExistingPrivateFile`（`server.ts:756-799`）移进 `startup-registry.ts` 并从那里导出，`server.ts` 改为导入。同一刀把 `server-assembly.test.ts`（798 行）的启动记录与注册次序用例原样移到新 `server/test/server-assembly-modules.test.ts`。两处都是纯移动：既有测试不改断言即全绿；PR 说明附移动前后的 `wc -l`。`server-config.test.ts` 正好 800 行，本 change 不往里加用例。
+- [x] 4.2 先做无行为变化的移动：把 `preparePrivateDbFiles`、`preparePrivateDbMain`、`prepareExistingSidecar`、`chmodExistingPrivateFile`（`server.ts:756-799`）移进 `startup-registry.ts` 并从那里导出，`server.ts` 改为导入。同一刀把 `server-assembly.test.ts`（798 行）的启动记录与注册次序用例原样移到新 `server/test/server-assembly-modules.test.ts`。两处都是纯移动：既有测试不改断言即全绿；PR 说明附移动前后的 `wc -l`。`server-config.test.ts` 正好 800 行，本 change 不往里加用例。
 - [ ] 4.3 测试先行。
   - 新 `server/test/kb-config.test.ts`：四键的缺省、配对规则、正则、正整数纪律；message 只含键名。
   - 新 `server/test/kb-key-file.test.ts`（单元层）：普通文件、符号链接、`0644`、`0640`、空文件、4097 字节、恰为 `\n\n`、去掉结尾 `\n`、含 `\r`；ragflow-backend「属主不符」（注入的 `getuid` 缝）。

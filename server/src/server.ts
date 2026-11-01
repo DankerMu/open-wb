@@ -45,15 +45,7 @@
  *   stream error 三路只 settle 一次，error 事件被消费后才移除监听，绝不抛原始 stack。
  */
 
-import {
-  chmodSync,
-  closeSync,
-  constants,
-  fchmodSync,
-  mkdirSync,
-  openSync,
-  statSync,
-} from "node:fs";
+import { mkdirSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -80,6 +72,7 @@ import {
   createMcpJsonStage,
   createStartupPublisher,
   type ModelEnvIgnoredRecord,
+  preparePrivateDbFiles,
   seedModelRegistry,
   startBackgroundWork,
   workspaceAssemblyOf,
@@ -88,7 +81,6 @@ import { writeManagedLine } from "./startup-writer.js";
 import { type MountSettings, resolveMountSettings } from "./workspaces/mounts/config.js";
 import type { createTrash } from "./workspaces/trash.js";
 
-const PRIVATE_DB_FILE_MODE = 0o600;
 /** 预览缓存目录的两个 mode（design D18）与 spool 的 `jobs/`（change office-convert-sandbox）。 */
 const PREVIEW_CACHE_DIR_MODE = 0o2750;
 const PREVIEW_PDF_DIR_MODE = 0o700;
@@ -751,49 +743,4 @@ function closeOwnedDb(owned: OwnedResources): void {
   } catch {
     owned.releaseFailed = true;
   }
-}
-
-function preparePrivateDbFiles(dbPath: string): void {
-  preparePrivateDbMain(dbPath);
-  prepareExistingSidecar(`${dbPath}-wal`);
-  prepareExistingSidecar(`${dbPath}-shm`);
-}
-
-function preparePrivateDbMain(dbPath: string): void {
-  let fd: number;
-  try {
-    fd = openSync(
-      dbPath,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
-      PRIVATE_DB_FILE_MODE,
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-      throw error;
-    }
-    chmodExistingPrivateFile(dbPath);
-    return;
-  }
-  try {
-    fchmodSync(fd, PRIVATE_DB_FILE_MODE);
-  } finally {
-    closeSync(fd);
-  }
-}
-
-function prepareExistingSidecar(path: string): void {
-  try {
-    chmodExistingPrivateFile(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
-}
-
-function chmodExistingPrivateFile(path: string): void {
-  if (!statSync(path).isFile()) {
-    throw new Error("private db path is not a regular file");
-  }
-  chmodSync(path, PRIVATE_DB_FILE_MODE);
 }
