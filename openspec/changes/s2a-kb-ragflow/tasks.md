@@ -44,14 +44,14 @@
 
 ## 1. rc2 接口实测（ragflow-backend「RAGFlow 接口实测记录」「共用开发栈的使用纪律」）
 
-- [ ] 1.1 按 design D16 检测：
+- [x] 1.1 按 design D16 检测：
   - 从 shell 环境读 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE`。未设置或 key 文件不存在 → 报告 `RAGFlow 私有配置缺失`。
   - `curl "$RAGFLOW_BASE_URL/api/v1/system/version"` 不可达或不是 `v1.0.0-rc2` → 报告 `共用 RAGFlow 栈未运行或版本不符`。
   - 另执行一次只读的 `docker compose ls`，结果写进 issue 评论（只作观察，不作放行判据）。
   - 任一停止：issue 评论报告原因、本组不继续、不开 PR；在本 issue 正文加一行 `Depends on #<P>` 并重开 P（评论写明要 owner 做什么）。全程不执行任何 `docker` 写操作。
-- [ ] 1.2 用专用账号的 API key，按 spec 列出的十项逐项实测，写 `docs/reviews/2026-10-28-ragflow-rc2-api.md`。每节写请求与应答摘录和结论「支持 / 不支持」。另记三张表：运行状态到本系统 `status` 的映射表、「不存在」组合表、RAPTOR / 知识图谱的模板支持表。
-- [ ] 1.3 脱敏：地址写 `<RAGFLOW_BASE_URL>`；id、邮箱、昵称、账号名换占位符；不出现 key、key 路径与文件内容。对文档跑 `gitleaks detect --no-git --source docs/reviews/2026-10-28-ragflow-rc2-api.md`，并 grep 本机实际地址与账号名，两者零命中的输出附 PR 说明（输出本身也脱敏）。只删除本组建的 `owb-` 前缀数据集，在记录末尾写清理结果。
-- [ ] 1.4 结论的后果写进记录末尾，并在 Epic 下评论：
+- [x] 1.2 用专用账号的 API key，按 spec 列出的十项逐项实测，写 `docs/reviews/2026-10-28-ragflow-rc2-api.md`。每节写请求与应答摘录和结论「支持 / 不支持」。另记三张表：运行状态到本系统 `status` 的映射表、「不存在」组合表、RAPTOR / 知识图谱的模板支持表。
+- [x] 1.3 脱敏：地址写 `<RAGFLOW_BASE_URL>`；id、邮箱、昵称、账号名换占位符；不出现 key、key 路径与文件内容。对文档跑 `gitleaks detect --no-git --source docs/reviews/2026-10-28-ragflow-rc2-api.md`，并 grep 本机实际地址与账号名，两者零命中的输出附 PR 说明（输出本身也脱敏）。只删除本组建的 `owb-` 前缀数据集，在记录末尾写清理结果。
+- [x] 1.4 结论的后果写进记录末尾，并在 Epic 下评论：
   - 「模型下发」不支持：按 design D7 的应急预案修订本 change（不再询问 owner），重过 Stage 3–4.5。修订过审前，组 6 及其后全部（组 7 除外）不开工。
   - 「编译开启或触发」不支持：按 design D14，组 9 及其全部下游与组 15 首刀等 owner 修订本 change；组 2–8 不受影响。
   - 模板支持表与 design D9 不符：修订本 change 后再开组 9。
