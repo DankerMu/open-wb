@@ -25,8 +25,19 @@ const CTP_CODES = [
 
 type CtpCode = (typeof CTP_CODES)[number];
 
-/** spec 的三十一条 method + matched route 归属身份（二十四条 POST + 一条 PATCH + 六条 PUT）。 */
-const THIRTY_ONE_OWNER_IDENTITIES = [
+/** 知识库（s2a-kb-ragflow）的七条身份，spec 次序；模板不含查询串。路由由组 8–14 注册，身份先登记。 */
+const KB_OWNER_IDENTITIES = [
+  ["POST", "/api/kb/bases"],
+  ["POST", "/api/kb/bases/:id/documents"],
+  ["POST", "/api/kb/bases/:id/uploads"],
+  ["POST", "/api/kb/bases/:id/documents/reingest"],
+  ["PUT", "/api/kb/settings"],
+  ["POST", "/api/kb/settings/probe"],
+  ["POST", "/api/kb/settings/rebuild"],
+] as const;
+
+/** spec 的三十八条 method + matched route 归属身份（三十条 POST + 一条 PATCH + 七条 PUT）。 */
+const THIRTY_EIGHT_OWNER_IDENTITIES = [
   ["POST", "/api/auth/login"],
   ["POST", "/api/auth/logout"],
   ["POST", "/api/sessions/:id/prompt"],
@@ -58,10 +69,11 @@ const THIRTY_ONE_OWNER_IDENTITIES = [
   ["PUT", "/api/connectors/defaults"],
   ["POST", "/api/mount-sources"],
   ["POST", "/api/workspaces/:id/mounts"],
+  ...KB_OWNER_IDENTITIES,
 ] as const;
 
-/** spec 码表的二十五码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
-const TWENTY_FIVE_CODES = [
+/** spec 码表的三十七码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
+const THIRTY_SEVEN_CODES = [
   "bad_request",
   "invalid_credentials",
   "account_disabled",
@@ -87,6 +99,18 @@ const TWENTY_FIVE_CODES = [
   "mount_host_rejected",
   "mount_read_only",
   "mount_boundary",
+  "kb_disabled",
+  "kb_unavailable",
+  "kb_rejected",
+  "kb_not_ready",
+  "kb_rebuilding",
+  "kb_rebuild_required",
+  "kb_limit",
+  "kb_source_unreadable",
+  "kb_model_in_use",
+  "kb_chat_model_locked",
+  "kb_document_busy",
+  "kb_file_unsupported",
 ] as const;
 
 interface ReplyCapture {
@@ -156,7 +180,7 @@ function expectGeneric500(captured: ReplyCapture, error: Error): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expectNoRawDetail(captured, error);
-  for (const code of TWENTY_FIVE_CODES) {
+  for (const code of THIRTY_SEVEN_CODES) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -171,14 +195,21 @@ function crossWithCodes<T extends readonly unknown[]>(rows: readonly T[]) {
   return rows.flatMap((row) => CTP_CODES.map((code) => [...row, code] as const));
 }
 
-describe("证据 1：三十一条身份 × 四个真实 CTP 错误 -> 400", () => {
-  it("身份集恰三十一条且互不重复", () => {
-    const keys = THIRTY_ONE_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
-    expect(keys).toHaveLength(31);
-    expect(new Set(keys).size).toBe(31);
+describe("证据 1：三十八条身份 × 四个真实 CTP 错误 -> 400", () => {
+  it("身份集恰三十八条且互不重复", () => {
+    const keys = THIRTY_EIGHT_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
+    expect(keys).toHaveLength(38);
+    expect(new Set(keys).size).toBe(38);
   });
 
-  it.each(crossWithCodes(THIRTY_ONE_OWNER_IDENTITIES))(
+  it("三十八条里七条 PUT、三十条 POST、一条 PATCH", () => {
+    const methods = THIRTY_EIGHT_OWNER_IDENTITIES.map(([method]) => method as string);
+    expect(methods.filter((method) => method === "PUT")).toHaveLength(7);
+    expect(methods.filter((method) => method === "POST")).toHaveLength(30);
+    expect(methods.filter((method) => method === "PATCH")).toHaveLength(1);
+  });
+
+  it.each(crossWithCodes(THIRTY_EIGHT_OWNER_IDENTITIES))(
     "%s %s 上真实 %s -> 400 bad_request 且无 raw 细节",
     (method, url, code) => {
       const error = genuineCtpError(code);
@@ -187,7 +218,7 @@ describe("证据 1：三十一条身份 × 四个真实 CTP 错误 -> 400", () =
   );
 });
 
-describe("证据 2（守卫）：DELETE /api/sessions/:id、/api/models、/api/experts、/api/connectors、/api/mount-sources/:id 与 /api/workspaces/:id/mounts/:mountId 不被覆盖", () => {
+describe("证据 2（守卫）：DELETE /api/sessions/:id、/api/models、/api/experts、/api/connectors、/api/mount-sources/:id、/api/workspaces/:id/mounts/:mountId、/api/kb/bases/:id 与 /api/kb/bases/:id/documents 不被覆盖", () => {
   it.each(
     crossWithCodes([
       ["/api/sessions/:id"],
@@ -196,6 +227,8 @@ describe("证据 2（守卫）：DELETE /api/sessions/:id、/api/models、/api/e
       ["/api/connectors"],
       ["/api/mount-sources/:id"],
       ["/api/workspaces/:id/mounts/:mountId"],
+      ["/api/kb/bases/:id"],
+      ["/api/kb/bases/:id/documents"],
     ] as const),
   )("DELETE %s 上真实 %s -> generic 500", (url, code) => {
     const error = genuineCtpError(code);
@@ -240,6 +273,21 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["GET", "/api/workspaces/:id/mounts"],
     ["PUT", "/api/workspaces/:id/mounts"],
     ["POST", "/api/workspaces/:id/mounts/:mountId"],
+    ["GET", "/api/kb/status"],
+    ["POST", "/api/kb/status"],
+    ["GET", "/api/kb/bases"],
+    ["PUT", "/api/kb/bases"],
+    ["GET", "/api/kb/bases/:id/documents"],
+    ["PUT", "/api/kb/bases/:id/documents"],
+    ["PUT", "/api/kb/bases/:id/uploads"],
+    ["PUT", "/api/kb/bases/:id/documents/reingest"],
+    ["GET", "/api/kb/settings"],
+    ["POST", "/api/kb/settings"],
+    ["PATCH", "/api/kb/settings"],
+    ["GET", "/api/kb/settings/probe"],
+    ["PUT", "/api/kb/settings/probe"],
+    ["GET", "/api/kb/settings/rebuild"],
+    ["PUT", "/api/kb/settings/rebuild"],
   ] as const;
 
   const LOOKALIKES = [
@@ -247,6 +295,10 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["PATCH", "/api/sessions/:id/"],
     ["PATCH", "/api/sessions/abc"],
     ["patch", "/api/sessions/:id"],
+    ["POST", "/api/kb/bases/"],
+    ["POST", "/api/kb/bases/abc/uploads"],
+    ["PUT", "/api/kb/settings/"],
+    ["put", "/api/kb/settings"],
   ] as const;
 
   it.each(crossWithCodes(NON_OWNER_METHODS))(
@@ -270,6 +322,7 @@ describe("证据 4（守卫）：伪造错误打到新身份不映射", () => {
   const NEW_IDENTITIES = [
     ["POST", "/api/sessions"],
     ["PATCH", "/api/sessions/:id"],
+    ...KB_OWNER_IDENTITIES,
   ] as const;
 
   it.each(crossWithCodes(NEW_IDENTITIES))(
@@ -323,8 +376,8 @@ describe("证据 5（回归）：catch-all 与 unmatched 分流不变", () => {
   });
 });
 
-describe("证据 6（守卫）：错误码表仍恰二十五码", () => {
+describe("证据 6（守卫）：错误码表恰三十七码", () => {
   it("HTTP_ERROR_MESSAGES 键集与 spec 码表相等", () => {
-    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...TWENTY_FIVE_CODES].sort());
+    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...THIRTY_SEVEN_CODES].sort());
   });
 });
