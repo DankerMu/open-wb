@@ -23,8 +23,6 @@ coverage/
 *.tsbuildinfo
 __pycache__/
 .venv/
-.pytest_cache/
-.ruff_cache/
 htmlcov/
 .coverage
 CLAUDE.local.md

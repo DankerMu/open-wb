@@ -8,13 +8,11 @@ const FALLBACK = "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION";
 const ALLOWED = {
   "actions/checkout": "v5",
   "actions/setup-node": "v5",
-  "astral-sh/setup-uv": "v7",
   "gitleaks/gitleaks-action": "v3",
 };
 const WANT = {
   "actions/checkout@v5": 11,
   "actions/setup-node@v5": 9,
-  "astral-sh/setup-uv@v7": 2,
   "gitleaks/gitleaks-action@v3": 1,
 };
 const CORE_TAGS = new Set([
