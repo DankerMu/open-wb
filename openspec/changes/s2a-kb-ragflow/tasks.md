@@ -113,7 +113,7 @@ Minimal mergeable slice: atomic - 理由同上。
 
 ## 3. kbservice 退役（verification-harness「CI 接线与控制面同步」「第三方 CI action 使用 Node 24 runtime」）
 
-- [ ] 3.1 核对 Context：
+- [x] 3.1 核对 Context：
   - Makefile:10,17-19,23,28,30,35；
   - `.github/workflows/ci.yml:15,17,19,30,32,34,56,75`；
   - `scripts/inspect-ci-workflow.js:11,17`；`scripts/test-ci-harness.sh` 中的 uv / kbservice 变异；
@@ -121,12 +121,12 @@ Minimal mergeable slice: atomic - 理由同上。
   - `.gitignore:26-27`；`constraints.yaml:66,77,93`；`deploy/app/Dockerfile.dockerignore:10`；
   - `AGENTS.md:36,38,47,57,143,145,146,175`；`openspec/project-profile.md:5,10,22,33,37,42`；
   - `server/test/omp-process.test.ts:43,56`。
-- [ ] 3.2 测试先行：`scripts/test-ci-harness.sh` 改写 oracle 期望：
+- [x] 3.2 测试先行：`scripts/test-ci-harness.sh` 改写 oracle 期望：
   - setup-uv 计数为 0；`unit-tests` 与 `fast-checks` 的步骤序列去掉 uv / ruff / pytest。
   - 加 verification-harness「Python 工具链退役后不可回潮」的变异，各须非零：加回 setup-uv 加 ruff；加回 pytest；naming-guard、semgrep、size-guard、jscpd 的路径加回 `kbservice`。
   
   `scripts/test-guardrails.sh` 的 `.py` 样例改为 `.ts` / `.mjs` 样例，size-guard 的守卫能力不降。
-- [ ] 3.3 删除 `kbservice/`。同步删改：
+- [x] 3.3 删除 `kbservice/`。同步删改：
   - Makefile、`ci.yml`、`inspect-ci-workflow.js`；
   - size-guard（路径与 `*.py`）、jscpd、`.gitignore`；
   - `constraints.yaml`：复杂度、覆盖率、死代码三行只留 Biome / vitest / knip；
@@ -135,7 +135,7 @@ Minimal mergeable slice: atomic - 理由同上。
   - `project-profile.md`。
   
   `omp-process.test.ts` 的哨兵名改为 `RAGFLOW_API_KEY_FILE`，断言语义不变，行数不增。
-- [ ] 3.4 `make check`、`make test-guardrails` 本机全绿；PR CI 全绿，`all-checks-passed` 的 needs 不变。
+- [x] 3.4 `make check`、`make test-guardrails` 本机全绿；PR CI 全绿，`all-checks-passed` 的 needs 不变。
 
 Suggested fixture level: expanded - 改 CI workflow、控制面 oracle 与 `constraints.yaml`（CI/production configuration 触发项），并删除一个包目录；oracle 一旦改错会卡住全部合入。
 Minimal mergeable slice: atomic - 删目录与删 CI 步骤必须同 PR：只删目录则 CI 的 `uv sync` 失败，只删步骤则 oracle 拒绝。

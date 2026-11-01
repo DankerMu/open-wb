@@ -39,23 +39,25 @@ expect_reject "命名守卫拒绝归档内 _old"       bash scripts/naming-guard
 expect_reject "命名守卫拒绝归档内 .bak"       bash scripts/naming-guard.sh "openspec/changes/archive/2026-09-06-s0a-service-skeleton/design.bak"
 expect_accept "命名守卫放行 analysis 文档"    bash scripts/naming-guard.sh "app-reference/analysis/00-overview.md"
 expect_accept "命名守卫放行正常文件"          bash scripts/naming-guard.sh "server/src/service-info.ts"
-seq 800 | sed 's/^/# line /' > "$tmp/ok.py"
-seq 801 | sed 's/^/# line /' > "$tmp/over_a.py"
-seq 802 | sed 's/^/# line /' > "$tmp/over_b.py"
-expect_accept "行数守卫放行 800 行文件"        bash scripts/size-guard.sh "$tmp/ok.py"
+seq 800 | sed 's/^/\/\/ line /' > "$tmp/ok.ts"
+seq 801 | sed 's/^/\/\/ line /' > "$tmp/over_a.ts"
+seq 802 | sed 's/^/\/\/ line /' > "$tmp/over_b.ts"
+seq 801 | sed 's/^/# line /' > "$tmp/over.py"
+expect_accept "行数守卫放行 800 行文件"        bash scripts/size-guard.sh "$tmp/ok.ts"
+expect_accept "行数守卫不计入 .py（工具链已退役）" bash scripts/size-guard.sh "$tmp/over.py"
 seq 800 | sed 's/^/\/\/ line /' > "$tmp/ok.mjs"
 seq 801 | sed 's/^/\/\/ line /' > "$tmp/over.mjs"
 expect_accept "行数守卫放行 800 行 .mjs"        bash scripts/size-guard.sh "$tmp/ok.mjs"
 expect_reject "行数守卫拒绝 801 行 .mjs"        bash scripts/size-guard.sh "$tmp/over.mjs"
-out=$(bash scripts/size-guard.sh "$tmp/over_a.py" "$tmp/over_b.py" 2>&1)
+out=$(bash scripts/size-guard.sh "$tmp/over_a.ts" "$tmp/over_b.ts" 2>&1)
 rc=$?
 desc="行数守卫拒绝超限文件并报告每文件 BLOCK 计数与路径"
 if [ "$rc" -eq 0 ]; then
   echo "FAIL(应拒绝却放行) $desc"; fail=$((fail+1))
 elif printf '%s\n' "$out" | grep -F "unbound variable" >/dev/null; then
   echo "FAIL(解释器错误) $desc"; fail=$((fail+1))
-elif printf '%s\n' "$out" | grep -F "BLOCK" | grep -F "801" | grep -F "$tmp/over_a.py" >/dev/null \
-  && printf '%s\n' "$out" | grep -F "BLOCK" | grep -F "802" | grep -F "$tmp/over_b.py" >/dev/null; then
+elif printf '%s\n' "$out" | grep -F "BLOCK" | grep -F "801" | grep -F "$tmp/over_a.ts" >/dev/null \
+  && printf '%s\n' "$out" | grep -F "BLOCK" | grep -F "802" | grep -F "$tmp/over_b.ts" >/dev/null; then
   echo "PASS $desc"; pass=$((pass+1))
 else
   echo "FAIL(缺少 BLOCK 计数/路径) $desc"; fail=$((fail+1))

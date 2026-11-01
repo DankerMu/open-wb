@@ -7,32 +7,28 @@ SHELL := /bin/bash
 
 setup: ## 安装依赖 + 挂 git hooks
 	npm install
-	cd kbservice && uv sync
 	$(MAKE) hooks
 	@command -v gitleaks >/dev/null || echo "提示: brew install gitleaks 可启用本地密钥扫描（CI 恒定扫描）"
 
 hooks:
 	git config core.hooksPath .githooks
 
-lint: ## Biome(TS) + Ruff(Py)，格式与复杂度≤15 皆在此
+lint: ## Biome，格式与复杂度≤15 皆在此
 	npx biome check server web scripts converter vitest.shared.mjs
-	cd kbservice && uv run ruff check . && uv run ruff format --check .
 
 fmt:
 	npx biome check --write server web scripts converter vitest.shared.mjs
-	cd kbservice && uv run ruff check --fix . && uv run ruff format .
 
 typecheck:
 	npm run typecheck --workspaces
 
-test: ## 单元测试 + 覆盖率≥80% 门禁（vitest/pytest 各自 fail-under）
+test: ## 单元测试 + 覆盖率≥80% 门禁（vitest fail-under）
 	npm test --workspaces
-	cd kbservice && uv run pytest
 
 anti-drift: ## 死代码(knip) + 重复代码(jscpd≤3%) + 命名/行数守卫全量扫描
 	npx knip
 	npx jscpd --config .jscpd.json
-	bash scripts/naming-guard.sh $$(git ls-files 'server/**' 'web/**' 'kbservice/**' 'scripts/**')
+	bash scripts/naming-guard.sh $$(git ls-files 'server/**' 'web/**' 'scripts/**')
 	bash scripts/size-guard.sh
 
 guard: ## 仅自研守卫（pre-commit 用）
