@@ -130,12 +130,15 @@ function resolvePreviewPort(raw: string | undefined): number {
   return port;
 }
 
-/** 只有协议与 authority：无路径、无结尾斜杠、无查询与片段；不 trim、不改大小写，空串同样非法。 */
+/** 只有协议与 authority：无路径、无结尾斜杠、无查询与片段（`RAGFLOW_BASE_URL` 同一写法）。 */
+export const SCHEME_AND_AUTHORITY = /^https?:\/\/[^/?#\s]+$/u;
+
+/** 见 `SCHEME_AND_AUTHORITY`；不 trim、不改大小写，空串同样非法。 */
 function resolvePreviewOrigin(raw: string | undefined): string | undefined {
   if (raw === undefined) {
     return undefined;
   }
-  if (!/^https?:\/\/[^/?#\s]+$/u.test(raw)) {
+  if (!SCHEME_AND_AUTHORITY.test(raw)) {
     throw new Error("PREVIEW_ORIGIN must be a scheme and authority only");
   }
   return raw;

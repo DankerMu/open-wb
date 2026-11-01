@@ -84,7 +84,7 @@ export function resolveAgentSettings(
   );
   const modelUpstreamApiKey = optionalSetting(env.MODEL_UPSTREAM_API_KEY, "MODEL_UPSTREAM_API_KEY");
   if (modelUpstreamApiKey !== undefined) {
-    assertHeaderSafeKey(modelUpstreamApiKey);
+    assertHeaderSafeKey(modelUpstreamApiKey, "MODEL_UPSTREAM_API_KEY");
   }
   const modelCatalog = resolveModelCatalog(env);
   return {
@@ -232,11 +232,13 @@ function optionalSetting(raw: string | undefined, key: string): string | undefin
 /**
  * #909: the proxy sends the key as `authorization: Bearer <key>`; a value Node refuses there (a line
  * break, a NUL, a character above U+00FF) would fail every request, so it fails startup instead.
- * Node's own check decides; its error is not passed on and the message never carries the value.
+ * Node's own check decides; its error is not passed on and the message names only `setting`, the
+ * configuration key the value came from, never the value (s2a-kb-ragflow D3 reuses it for the
+ * knowledge base key file).
  */
-function assertHeaderSafeKey(key: string): void {
+export function assertHeaderSafeKey(key: string, setting: string): void {
   if (!isHeaderSafeKey(key)) {
-    throw new Error("MODEL_UPSTREAM_API_KEY must be a valid HTTP header value");
+    throw new Error(`${setting} must be a valid HTTP header value`);
   }
 }
 

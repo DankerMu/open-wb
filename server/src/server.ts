@@ -1,5 +1,5 @@
 /**
- * 生产唯一入口（Issue #7）：validate → DB-parent prepare → openDb → 办公文档 sidecar 预检 → 模型注册表
+ * 生产唯一入口（Issue #7）：validate → `kb_key` → DB-parent prepare → openDb → 办公文档 sidecar 预检 → 模型注册表
  * 种子与快照（`model_registry`，`startup-registry.ts`；s1d-model-registry）→ 转换器 →
  * createApp → listen → 托管布局 → 沙箱根 → 预览监听器 listen → 三个托管文件 → 预览缓存目录（含清空
  * spool 的 `jobs/`）→ 转换器开始受理 → 成功记录 → 回收目录首扫（#1070、#1074；主监听器先绑定、托管布局
@@ -55,6 +55,7 @@ import { type AgentSettings, resolveAgentSettings } from "./agent-config.js";
 import { type AssemblyDependencies, createApp, type SessionRuntime } from "./app.js";
 import { openDb } from "./core/db/index.js";
 import { ensureOwnedDir, ensureSandboxRoot } from "./core/sandbox/dirs.js";
+import { type KbSettings, resolveKbSettings } from "./kb/config.js";
 import type { ModelRegistry } from "./model-proxy/lookup.js";
 import { deriveProxyBaseUrl } from "./model-proxy/models-yml.js";
 import type { ModelPublishFailedRecord } from "./models/publish.js";
@@ -72,6 +73,7 @@ import {
   createMcpJsonStage,
   createStartupPublisher,
   type ModelEnvIgnoredRecord,
+  prepareKbKey,
   preparePrivateDbFiles,
   seedModelRegistry,
   startBackgroundWork,
@@ -110,7 +112,7 @@ const STARTUP_MODULES = [
   "connectors",
 ];
 
-export interface ServerConfig extends AgentSettings, PreviewSettings, MountSettings {
+export interface ServerConfig extends AgentSettings, PreviewSettings, MountSettings, KbSettings {
   host: string;
   port: number;
   dbPath: string;
@@ -118,7 +120,7 @@ export interface ServerConfig extends AgentSettings, PreviewSettings, MountSetti
   repoRoot: string;
 }
 
-/** 纯配置 seam：消费四十二项应用 key——四项自有，agent 二十一项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，挂载五项经 resolveMountSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
+/** 纯配置 seam：消费四十六项应用 key——四项自有，agent 二十一项经 resolveAgentSettings，预览与文件十二项经 resolvePreviewSettings，挂载五项经 resolveMountSettings，知识库四项经 resolveKbSettings，未知 key 忽略；repo root 由 entry identity 推导。 */
 export function resolveServerConfig(
   env: Record<string, string | undefined>,
   entryUrl: string,
@@ -133,6 +135,7 @@ export function resolveServerConfig(
     ...resolveAgentSettings(env, repoRoot),
     ...resolvePreviewSettings(env, repoRoot),
     ...resolveMountSettings(env),
+    ...resolveKbSettings(env),
   };
 }
 
@@ -321,6 +324,7 @@ function resolveSettingPath(raw: string, repoRoot: string): string {
  */
 type StartupStage =
   | "config"
+  | "kb_key"
   | "db"
   | "model_registry"
   | "app"
@@ -392,6 +396,8 @@ interface OwnedResources {
   pdfTimer: NodeJS.Timeout | undefined;
   /** 一次关停无论几个监听器被强制回收，`listener_force_close` 至多一行。 */
   forceCloseEmitted: boolean;
+  /** `kb_key` 阶段读出的只读句柄，未配置知识库时没有；s2a-kb-ragflow 组 6 经装配交给 `kb` 模块。 */
+  kbKey: ReturnType<typeof prepareKbKey>;
   db: DatabaseSync | undefined;
   releasing: Promise<void> | undefined;
   releaseFailed: boolean;
@@ -423,12 +429,13 @@ function runEntrypoint(): void {
     trashTimer: undefined,
     pdfTimer: undefined,
     forceCloseEmitted: false,
+    kbKey: undefined,
     db: undefined,
     releasing: undefined,
     releaseFailed: false,
     failed: false,
     signalReceived: false,
-    stage: "db",
+    stage: "kb_key",
   };
 
   process.on("SIGINT", () => requestShutdown(owned));
@@ -439,6 +446,8 @@ function runEntrypoint(): void {
 
 async function start(owned: OwnedResources, config: ServerConfig): Promise<void> {
   try {
+    owned.kbKey = prepareKbKey(config);
+    owned.stage = "db";
     if (config.dbPath !== ":memory:") {
       mkdirSync(dirname(config.dbPath), { recursive: true });
       preparePrivateDbFiles(config.dbPath);
