@@ -10,7 +10,7 @@
 - `embedding_probe_status TEXT NOT NULL DEFAULT 'never' CHECK (… IN ('never','ok','failed'))`、`embedding_probe_at INTEGER NULL`、`embedding_probe_message TEXT NULL`。
 - `chat_model_id TEXT NULL REFERENCES models(id) ON DELETE SET NULL`。
 - `rebuild_actor_id TEXT NULL REFERENCES accounts(id)`：最近一次发起或重试重建的管理员。
-- `updated_at INTEGER NOT NULL`。
+- `updated_at INTEGER NOT NULL`，迁移种子值为 `0`，表示还没保存过。
 
 **`knowledge_bases`**：
 - `id`：32 位小写十六进制。
@@ -30,7 +30,7 @@
 - `id`、`kb_id REFERENCES knowledge_bases(id) ON DELETE CASCADE`。
 - `ragflow_document_id TEXT NOT NULL`、`name`、`size INTEGER NOT NULL`。
 - `source`：`workspace` / `upload`。
-- `workspace_id TEXT NULL`、`source_path TEXT NULL`、`source_mtime_ms INTEGER NULL`；`(source = 'workspace')` 与这三列均非 NULL 等价。
+- `workspace_id TEXT NULL`、`source_path TEXT NULL`、`source_mtime_ms INTEGER NULL`（INTEGER 亲和性保留小数毫秒，不加 `typeof`）；`workspace` 时三列均非 NULL，`upload` 时三列均 NULL。
 - `created_at`。
 - `UNIQUE (kb_id, workspace_id, source_path)`。
 

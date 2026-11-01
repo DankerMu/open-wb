@@ -250,13 +250,13 @@ Minimal mergeable slice: 6.2–6.3 的码表用例移动、十二码与七条归
 
 ## 7. 迁移 050、store 与锁（knowledge-bases「迁移 050 知识库 schema」「同一知识库的写操作串行」的锁本身）
 
-- [ ] 7.1 核对 Context：
+- [x] 7.1 核对 Context：
   - 迁移目录最后为 049；049 头注的写法；
   - `server/test/core-db-helpers.ts` 的 `TRACKED_MIGRATION_FILENAMES`、`COMPLETE_CATALOG`（回执与 `sequenceRows`）；
   - `auth-schema.test.ts:496-515` 业务表清单；`core-db-session-fixture.ts:311` 的索引排除清单；
   - `core-db-chat-step-output.test.ts:75-93` 与 `migration-034.test.ts` 的 seed 过滤清单。
-- [ ] 7.2 测试先行。
-  - 新 `server/test/kb-store.test.ts`（`:memory:` + 真实迁移）：
+- [x] 7.2 测试先行。
+  - 新 `server/test/kb-store.test.ts`（`:memory:` + 真实迁移；表形状与逐列约束在 `kb-schema.test.ts`，设置读写在 `kb-store-settings.test.ts`，夹具在 `kb-store-helpers.ts`）：
     - 「约束」场景的九例（含 `tag`、`audio` 被拒与画布、模板组两组列的 CHECK）；`kb_settings` 唯一行；
     - store 的设置读写（含 `rebuild_actor_id`）；
     - 知识库增删查（按 owner；计数供 50 上限用；开编译的库数供 `compileBases` 与 `kb_chat_model_locked` 用）；
@@ -264,7 +264,7 @@ Minimal mergeable slice: 6.2–6.3 的码表用例移动、十二码与七条归
     - `(kb_id, workspace_id, source_path)` 唯一；
     - 重建状态与 `rebuild_dataset_id`、`rebuild_canvas_id`、`rebuild_template_group_id` 的读写，切换时三列整体换入并置空；级联。
   - 同 PR 改 7.1 列出的既有快照用例（属首刀：它们随迁移 050 变化）。
-- [ ] 7.3 实现：`050_knowledge_bases.sql`；新 `server/src/kb/store.ts`（只读写本地三张表，不发出站请求）。
+- [x] 7.3 实现：`050_knowledge_bases.sql`；新 `server/src/kb/store.ts`（只读写本地三张表，不发出站请求）。
 - [x] 7.4 锁（design D20）已由 #1837 落地：`server/src/kb/locks.ts` 与 `server/test/kb-locks.test.ts`。覆盖：
   - 同一知识库的两个写操作串行、不同知识库并行；
   - 锁被重建器持有时写操作立即得到「重建中」结果而不排队；
@@ -457,7 +457,7 @@ Minimal mergeable slice: atomic - 一条路由，与工作空间上传同一写�
   - 审计哨兵（重新入库一腿）。
 
   路由加进 `kb-disabled.test.ts` 与归属路由用例。
-- [ ] 13.5 实现（剩余部分）：`kb/documents.ts` 加 reingest（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/documents/reingest`。
+- [ ] 13.5 实现（剩余部分）：`kb/store.ts` 加单事务替换同一行的 RAGFlow id、大小与 `mtimeMs`；`kb/documents.ts` 加 reingest（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/documents/reingest`。
 
 Suggested fixture level: expanded - 两份真相的替换顺序（新文档先建、旧文档后删）与沙箱读取。
 Minimal mergeable slice: 13.2–13.3 的移出——一条不读沙箱的独立路由，组 16 的首刀与 `make smoke-kb` 都要用它，能独立保绿。剩余部分（重新入库，13.4–13.5）依赖它；剩余部分 atomic：一条路由。
