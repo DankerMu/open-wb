@@ -7,4 +7,3 @@ resource/
 CLAUDE*.md
 .env*
 app-reference/
-kbservice/

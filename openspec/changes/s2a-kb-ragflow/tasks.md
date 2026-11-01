@@ -121,7 +121,7 @@ Minimal mergeable slice: atomic - 理由同上。
 
 ## 3. kbservice 退役（verification-harness「CI 接线与控制面同步」「第三方 CI action 使用 Node 24 runtime」）
 
-- [ ] 3.1 核对 Context：
+- [x] 3.1 核对 Context：
   - Makefile:10,17-19,23,28,30,35；
   - `.github/workflows/ci.yml:15,17,19,30,32,34,56,75`；
   - `scripts/inspect-ci-workflow.js:11,17`；`scripts/test-ci-harness.sh` 中的 uv / kbservice 变异；
@@ -129,12 +129,12 @@ Minimal mergeable slice: atomic - 理由同上。
   - `.gitignore:26-27`；`constraints.yaml:66,77,93`；`deploy/app/Dockerfile.dockerignore:10`；
   - `AGENTS.md:36,38,47,57,143,145,146,175`；`openspec/project-profile.md:5,10,22,33,37,42`；
   - `server/test/omp-process.test.ts:43,56`。
-- [ ] 3.2 测试先行：`scripts/test-ci-harness.sh` 改写 oracle 期望：
+- [x] 3.2 测试先行：`scripts/test-ci-harness.sh` 改写 oracle 期望：
   - setup-uv 计数为 0；`unit-tests` 与 `fast-checks` 的步骤序列去掉 uv / ruff / pytest。
   - 加 verification-harness「Python 工具链退役后不可回潮」的变异，各须非零：加回 setup-uv 加 ruff；加回 pytest；naming-guard、semgrep、size-guard、jscpd 的路径加回 `kbservice`。
   
   `scripts/test-guardrails.sh` 的 `.py` 样例改为 `.ts` / `.mjs` 样例，size-guard 的守卫能力不降。
-- [ ] 3.3 删除 `kbservice/`。同步删改：
+- [x] 3.3 删除 `kbservice/`。同步删改：
   - Makefile、`ci.yml`、`inspect-ci-workflow.js`；
   - size-guard（路径与 `*.py`）、jscpd、`.gitignore`；
   - `constraints.yaml`：复杂度、覆盖率、死代码三行只留 Biome / vitest / knip；
@@ -143,21 +143,21 @@ Minimal mergeable slice: atomic - 理由同上。
   - `project-profile.md`。
   
   `omp-process.test.ts` 的哨兵名改为 `RAGFLOW_API_KEY_FILE`，断言语义不变，行数不增。
-- [ ] 3.4 `make check`、`make test-guardrails` 本机全绿；PR CI 全绿，`all-checks-passed` 的 needs 不变。
+- [x] 3.4 `make check`、`make test-guardrails` 本机全绿；PR CI 全绿，`all-checks-passed` 的 needs 不变。
 
 Suggested fixture level: expanded - 改 CI workflow、控制面 oracle 与 `constraints.yaml`（CI/production configuration 触发项），并删除一个包目录；oracle 一旦改错会卡住全部合入。
 Minimal mergeable slice: atomic - 删目录与删 CI 步骤必须同 PR：只删目录则 CI 的 `uv sync` 失败，只删步骤则 oracle 拒绝。
 
 ## 4. 配置键与密钥文件阶段（http-service-skeleton「服务启动与装配」的知识库键与 `kb_key`；ragflow-backend「知识库配置与密钥文件」）
 
-- [ ] 4.1 核对 Context：
+- [x] 4.1 核对 Context：
   - `resolveServerConfig` 与四十二项（`server.ts:129-146`）；`preview-config.ts` 中 `PREVIEW_ORIGIN` 的正则；
   - `agent-config.ts` 中 `resolvePositiveInteger` / `assertHeaderSafeKey`（`:237`，未导出）/ `resolveOwnedPath`；
   - `StartupStage`（`server.ts:330-344`）与 `server-startup-failure-reason.test.ts`；
   - `startup-registry.ts` 的阶段函数写法；`regular-file.ts:55` 的 `openRegularFile`；
   - `OMP_CHILD_ENV_NAMES`（`spawn-env.ts`）；
   - `server.ts:756-799` 的 DB 文件准备函数。
-- [ ] 4.2 先做无行为变化的移动：把 `preparePrivateDbFiles`、`preparePrivateDbMain`、`prepareExistingSidecar`、`chmodExistingPrivateFile`（`server.ts:756-799`）移进 `startup-registry.ts` 并从那里导出，`server.ts` 改为导入。同一刀把 `server-assembly.test.ts`（798 行）的启动记录与注册次序用例原样移到新 `server/test/server-assembly-modules.test.ts`。两处都是纯移动：既有测试不改断言即全绿；PR 说明附移动前后的 `wc -l`。`server-config.test.ts` 正好 800 行，本 change 不往里加用例。
+- [x] 4.2 先做无行为变化的移动：把 `preparePrivateDbFiles`、`preparePrivateDbMain`、`prepareExistingSidecar`、`chmodExistingPrivateFile`（`server.ts:756-799`）移进 `startup-registry.ts` 并从那里导出，`server.ts` 改为导入。同一刀把 `server-assembly.test.ts`（798 行）的启动记录与注册次序用例原样移到新 `server/test/server-assembly-modules.test.ts`。两处都是纯移动：既有测试不改断言即全绿；PR 说明附移动前后的 `wc -l`。`server-config.test.ts` 正好 800 行，本 change 不往里加用例。
 - [ ] 4.3 测试先行。
   - 新 `server/test/kb-config.test.ts`：四键的缺省、配对规则、正则、正整数纪律；message 只含键名。
   - 新 `server/test/kb-key-file.test.ts`（单元层）：普通文件、符号链接、`0644`、`0640`、空文件、4097 字节、恰为 `\n\n`、去掉结尾 `\n`、含 `\r`；ragflow-backend「属主不符」（注入的 `getuid` 缝）。

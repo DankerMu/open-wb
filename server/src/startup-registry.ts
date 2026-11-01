@@ -19,7 +19,10 @@
  *   `appAssemblyOf` 递交的工作空间三项——回收目录服务、挂载设置（mount-manager 要 DB 与审计，在 createApp
  *   里构造）与挂载源的额外保护根；`server_started` 写出之后入口不等待的两件后台工作——回收目录首扫与挂载的
  *   启动恢复。
+ * - `preparePrivateDbFiles`（s2a-kb-ragflow D18，同为 `server.ts` 行数预算抽出）：`db` 阶段 `openDb` 之前的
+ *   DB 文件准备，建出或校正主库，校正已存在的 `-wal` / `-shm`，mode 均为 `0600`。
  */
+import { chmodSync, closeSync, constants, fchmodSync, openSync, statSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { createMcpPublisher } from "./connectors/mcp-json.js";
 import { createConnectorStore } from "./connectors/store.js";
@@ -33,6 +36,8 @@ import { ompAgentDir } from "./sessions/omp/state-layout.js";
 import type { MountSettings } from "./workspaces/mounts/config.js";
 import type { MountManager } from "./workspaces/mounts/manager.js";
 import { createTrash } from "./workspaces/trash.js";
+
+const PRIVATE_DB_FILE_MODE = 0o600;
 
 /** 只作首次种子的六个键（http-service-skeleton「服务启动与装配」）。 */
 const MODEL_ENV_KEYS = [
@@ -177,4 +182,49 @@ export function startBackgroundWork(work: {
 }): void {
   void work.trash.sweep(Date.now());
   void work.mounts.restoreAll();
+}
+
+export function preparePrivateDbFiles(dbPath: string): void {
+  preparePrivateDbMain(dbPath);
+  prepareExistingSidecar(`${dbPath}-wal`);
+  prepareExistingSidecar(`${dbPath}-shm`);
+}
+
+function preparePrivateDbMain(dbPath: string): void {
+  let fd: number;
+  try {
+    fd = openSync(
+      dbPath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL,
+      PRIVATE_DB_FILE_MODE,
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      throw error;
+    }
+    chmodExistingPrivateFile(dbPath);
+    return;
+  }
+  try {
+    fchmodSync(fd, PRIVATE_DB_FILE_MODE);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function prepareExistingSidecar(path: string): void {
+  try {
+    chmodExistingPrivateFile(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
+}
+
+function chmodExistingPrivateFile(path: string): void {
+  if (!statSync(path).isFile()) {
+    throw new Error("private db path is not a regular file");
+  }
+  chmodSync(path, PRIVATE_DB_FILE_MODE);
 }
