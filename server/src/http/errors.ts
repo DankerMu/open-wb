@@ -28,6 +28,18 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   mount_host_rejected: 403,
   mount_read_only: 403,
   mount_boundary: 409,
+  kb_disabled: 503,
+  kb_unavailable: 503,
+  kb_rejected: 400,
+  kb_not_ready: 409,
+  kb_rebuilding: 409,
+  kb_rebuild_required: 409,
+  kb_limit: 409,
+  kb_source_unreadable: 409,
+  kb_model_in_use: 409,
+  kb_chat_model_locked: 409,
+  kb_document_busy: 409,
+  kb_file_unsupported: 400,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {
@@ -51,7 +63,7 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
   "FST_ERR_CTP_BODY_TOO_LARGE",
 ]);
 
-/** 受信 content-parser owner 的 exact 三十一条 `<METHOD> <route template>` 身份：POST login（#9）、
+/** 受信 content-parser owner 的 exact 三十八条 `<METHOD> <route template>` 身份：POST login（#9）、
  * POST logout（#10）、prompt、chat completions、两条工作空间、回合控制四条（#450）、会话
  * 元数据（#512）POST /api/sessions 与 PATCH /api/sessions/:id、临时空间转正（#927）
  * POST /api/workspaces/:id/promote、撤回（#948）POST /api/sessions/:id/undo、上传（#1013）
@@ -66,7 +78,13 @@ const ALLOWED_FASTIFY_REQUEST_ERROR_CODES = new Set([
  * （连接器名称走查询参数），以及连接器账号缺省 PUT /api/connectors/defaults（GET 不读 body，不在集合内），以及
  * 挂载源（s1b-workspace-mounts）的 POST /api/mount-sources（GET 不读 body；DELETE /api/mount-sources/:id
  * 不读 body，均不在集合内），以及挂载 POST /api/workspaces/:id/mounts（GET 与
- * DELETE /api/workspaces/:id/mounts/:mountId 不读 body，均不在集合内）。
+ * DELETE /api/workspaces/:id/mounts/:mountId 不读 body，均不在集合内），以及知识库（s2a-kb-ragflow）的
+ * POST /api/kb/bases、POST /api/kb/bases/:id/documents、POST /api/kb/bases/:id/uploads、
+ * POST /api/kb/bases/:id/documents/reingest、PUT /api/kb/settings、POST /api/kb/settings/probe 与
+ * POST /api/kb/settings/rebuild（文档 id 与文件名走查询参数，模板不含它们；这七条的路由由组 8–14 注册，
+ * 身份先于它们存在；GET /api/kb/status、GET /api/kb/settings、GET /api/kb/bases、
+ * GET /api/kb/bases/:id/documents 与 DELETE /api/kb/bases/:id、DELETE /api/kb/bases/:id/documents 不读 body，
+ * 均不在集合内）。
  * method 是身份的一部分：DELETE /api/sessions/:id 与 PATCH、DELETE /api/models 与
  * POST / PUT、DELETE /api/experts 与 POST / PUT、GET / DELETE /api/connectors 与 POST / PUT、
  * GET /api/mount-sources 与 POST 同模板但不在集合内。
@@ -103,11 +121,18 @@ const CONTENT_PARSER_OWNED_ROUTES = new Set([
   "PUT /api/connectors/defaults",
   "POST /api/mount-sources",
   "POST /api/workspaces/:id/mounts",
+  "POST /api/kb/bases",
+  "POST /api/kb/bases/:id/documents",
+  "POST /api/kb/bases/:id/uploads",
+  "POST /api/kb/bases/:id/documents/reingest",
+  "PUT /api/kb/settings",
+  "POST /api/kb/settings/probe",
+  "POST /api/kb/settings/rebuild",
 ]);
 
 /**
  * 构造函数-backed CTP 错误的 route-owner 结果：仅 `${method} ${route template}` 恰为
- * CONTENT_PARSER_OWNED_ROUTES 三十一条之一时归一 exact 400（无单独的 POST 门；同模板的
+ * CONTENT_PARSER_OWNED_ROUTES 三十八条之一时归一 exact 400（无单独的 POST 门；同模板的
  * 其他方法不被覆盖）；matched /api 或 /api/* catch-all 与 unmatched non-GET
  * （routeOptions.url undefined 且 method != GET）恢复 typed not_found 404；其他已注册
  * route 保持 generic 5xx。显式 typed HttpError 保持 route-independent。方法/URL 边界

@@ -7,7 +7,7 @@ import { HTTP_ERROR_MESSAGES, HttpError, type HttpErrorCode } from "../src/core/
 import { handleHttpError } from "../src/http/index.js";
 
 /** spec「统一错误信封」码表逐字抄录：独立于 core/errors 的期望来源。 */
-const TWENTY_FIVE_TYPED_ERRORS = [
+const THIRTY_SEVEN_TYPED_ERRORS = [
   ["bad_request", 400, "请求格式不正确"],
   ["invalid_credentials", 401, "账号或密码不正确"],
   ["account_disabled", 403, "该账号已停用，请联系管理员"],
@@ -33,9 +33,21 @@ const TWENTY_FIVE_TYPED_ERRORS = [
   ["mount_host_rejected", 403, "该主机不允许挂载"],
   ["mount_read_only", 403, "只读挂载不能写入"],
   ["mount_boundary", 409, "挂载目录内不能删除，也不能跨挂载移动"],
+  ["kb_disabled", 503, "知识库未启用"],
+  ["kb_unavailable", 503, "知识库服务暂不可用"],
+  ["kb_rejected", 400, "知识库服务拒绝了这个请求"],
+  ["kb_not_ready", 409, "知识库模型未就绪，请管理员在模型设置里保存知识库嵌入模型"],
+  ["kb_rebuilding", 409, "知识库正在重建，请稍后再试"],
+  ["kb_rebuild_required", 409, "更换嵌入模型需要重建全部知识库，请确认后再保存"],
+  ["kb_limit", 409, "知识库或文档数已达上限"],
+  ["kb_source_unreadable", 409, "源文件无法读取或已变动，未重新入库"],
+  ["kb_model_in_use", 409, "该模型是知识库对话模型，先在知识库模型设置里换掉它"],
+  ["kb_chat_model_locked", 409, "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型"],
+  ["kb_document_busy", 409, "文档正在停止解析，请稍后再试"],
+  ["kb_file_unsupported", 400, "这个文件不能入库：模板不支持这种类型，或文件是空的"],
 ] as const;
 
-const NEW_TYPED_ERRORS = TWENTY_FIVE_TYPED_ERRORS.filter(
+const NEW_TYPED_ERRORS = THIRTY_SEVEN_TYPED_ERRORS.filter(
   ([code]) =>
     code === "agent_capacity" ||
     code === "approval_settled" ||
@@ -111,7 +123,7 @@ function expectGenericNoDetail(captured: ReplyCapture): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expect(captured.body).not.toContain("FST_ERR");
-  for (const [code] of TWENTY_FIVE_TYPED_ERRORS) {
+  for (const [code] of THIRTY_SEVEN_TYPED_ERRORS) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -129,14 +141,14 @@ async function withTestErrorApp<T>(action: (app: FastifyInstance) => Promise<T>)
   }
 }
 
-describe("typed definition map 恰二十五码", () => {
+describe("typed definition map 恰三十七码", () => {
   it("core/errors 的码集合与 spec 码表逐一相等", () => {
     expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual(
-      TWENTY_FIVE_TYPED_ERRORS.map(([code]) => code).sort(),
+      THIRTY_SEVEN_TYPED_ERRORS.map(([code]) => code).sort(),
     );
   });
 
-  it.each(TWENTY_FIVE_TYPED_ERRORS)(
+  it.each(THIRTY_SEVEN_TYPED_ERRORS)(
     "测试路由抛 HttpError(%s) -> exact %i 信封，无 Fastify 默认字段",
     async (code, statusCode, message) => {
       await withTestErrorApp(async (app) => {
@@ -150,8 +162,8 @@ describe("typed definition map 恰二十五码", () => {
     },
   );
 
-  it("九种 409 以 code 区分，各自保留独立文案", () => {
-    const conflicts = TWENTY_FIVE_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
+  it("十七种 409 以 code 区分，各自保留独立文案", () => {
+    const conflicts = THIRTY_SEVEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 409);
     expect(conflicts.map(([code]) => code)).toEqual([
       "session_busy",
       "conflict",
@@ -162,8 +174,16 @@ describe("typed definition map 恰二十五码", () => {
       "mount_offline",
       "mount_limit",
       "mount_boundary",
+      "kb_not_ready",
+      "kb_rebuilding",
+      "kb_rebuild_required",
+      "kb_limit",
+      "kb_source_unreadable",
+      "kb_model_in_use",
+      "kb_chat_model_locked",
+      "kb_document_busy",
     ]);
-    expect(new Set(conflicts.map(([, , message]) => message)).size).toBe(9);
+    expect(new Set(conflicts.map(([, , message]) => message)).size).toBe(17);
     for (const [code, , message] of conflicts) {
       const captured = mapError(new HttpError(code), "/api/no-such-route", "POST");
       expect(captured.statusCode).toBe(409);
@@ -172,7 +192,7 @@ describe("typed definition map 恰二十五码", () => {
   });
 
   it("两种 413 以 code 区分，各自保留独立文案", () => {
-    const tooLarge = TWENTY_FIVE_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 413);
+    const tooLarge = THIRTY_SEVEN_TYPED_ERRORS.filter(([, statusCode]) => statusCode === 413);
     expect(tooLarge).toEqual([
       ["preview_too_large", 413, "文件过大，无法预览"],
       ["upload_too_large", 413, "文件超过大小上限"],

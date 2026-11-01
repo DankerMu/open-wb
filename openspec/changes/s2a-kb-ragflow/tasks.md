@@ -217,19 +217,19 @@ Minimal mergeable slice: atomic - 夹具没有客户端就没有消费者，客�
 
 ## 6. 错误码、`kb` 模块装配与状态端点（http-service-skeleton「统一错误信封」「Shared agent module assembly」；ragflow-backend「知识库状态端点」「知识库可用性」的状态部分）
 
-- [ ] 6.1 核对 Context：
+- [x] 6.1 核对 Context：
   - 组 1 实测记录版本接口一节（`data` 字段）；
   - `core/errors/index.ts` 的二十五码；`http/errors.ts` 的状态映射与三十一条归属身份；
   - `http-parser-owners.test.ts:28,174-178`、`http-typed-errors.test.ts:132-134`、`auth-lifecycle.test.ts:705` 的计数；
   - `STARTUP_MODULES` 与模块列表断言的实际清单：`server-assembly-modules.test.ts`（两处）、`connectors-rest-restart`、`models-rest-restart`、`server-startup-model-seed`、`server-startup-mounts`、`server-startup-order`、`server-startup-preview`，另有 #1839 加的 `server-startup-kb` 的 `ELEVEN_MODULES`；
   - `server-assembly-modules.test.ts` 的 `spyRegistrationOrder`；
   - `app.ts` 的 `registerConnectors` 位置与 `AssemblyDependencies`。
-- [ ] 6.2 测试先行（首刀）：
+- [x] 6.2 测试先行（首刀）：
   - 先做纯移动：`auth-lifecycle.test.ts` 797 行，加 12 码必超 800。把它的码表 `describe`（`:705-770`，含 `codes` 表、两个穷尽守卫与信封用例）连同所需导入移到新 `server/test/http-error-codes.test.ts`，断言不改，移动后全绿；PR 说明附移动前后的 `wc -l`。
   - 新 `server/test/http-typed-errors-kb.test.ts`：「十二个知识库码」。
   - `http-parser-owners.test.ts`：三十八条，七条 PUT、三十条 POST、一条 PATCH。七条新身份在本组先登记，路由由组 8–14 注册；先例见 `http/errors.ts` 注释里的 `POST /api/models/probe`。
   - 同 PR 把 `http-typed-errors.test.ts`、`http-error-codes.test.ts` 的「二十五码」改为三十七，`codes` 表加 12 码。
-- [ ] 6.3 实现（首刀）：`core/errors` 加十二码；`http/errors.ts` 的状态映射、归属集与计数措辞。
+- [x] 6.3 实现（首刀）：`core/errors` 加十二码；`http/errors.ts` 的状态映射、归属集与计数措辞。
 - [ ] 6.4 测试先行（剩余部分）：
   - 把 6.1 清单里的模块列表断言改为十二项、最后为 `kb`，在 `spyRegistrationOrder` 加 `registerKb`；
   - `server-startup-kb.test.ts` 的「知识库键与密钥文件阶段」最后一例改为模块恰为十二项且最后是 `kb`，删掉 `ELEVEN_MODULES`。
