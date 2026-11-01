@@ -19,7 +19,7 @@
   - 传输层失败：挂起、挂起后放行、超时、连接失败、中途断开。
   - HTTP 层：3xx、5xx、非 JSON、超出体积。
   - 漂移值：不符的版本串、八种之外的 `ingestion_status`。
-  - 防御性组合：未观察到的路由上的 `code:403`；同一路由上别的 `100`、`101`、`102`；`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`；不带 `graph` 或不是恰一个 chunker 的内置 pipeline。
+  - 防御性组合：未观察到的路由上的 `code:403`；同一路由上别的 `100`、`101`、`102`；`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`；不带 `graph` 或不是恰一个 chunker 的内置 pipeline；`GET /models/default` 的 `data.models` 只有一种缺省。
 
 仓库是 public，记录 SHALL 脱敏：
 - RAGFlow 的地址一律写作 `<RAGFLOW_BASE_URL>`。

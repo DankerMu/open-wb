@@ -431,10 +431,10 @@
 2. `deleted:0`：发一次停止解析，整个写法里只发这一次（`STOPPING` 时重复停止是空操作）。结果：
    - `code:0`，不论 `success_count`，或不存在：继续第 3 步。
    - 其余（不可达、被拒）：结果为 `failed`，SHALL NOT 重试。
-3. 每 500 ms 重发删除，至多 5 s（期限经装配注入）。`deleted:1` 或不存在：完成。`deleted:0`：继续。不可达：结果立即为 `failed`。
+3. 每 500 ms 重发删除，至多 5 s（期限经装配注入）。`deleted:1` 或不存在：完成。`deleted:0`：继续。不可达或被拒：结果立即为 `failed`。
 4. 到期仍为 `deleted:0`：结果为 `busy`。
 
-第 1 步的删除不可达，结果同样为 `failed`。
+第 1 步的删除不可达或被拒，结果同样为 `failed`。
 
 SHALL NOT 在 `deleted:0` 时删除本地行。
 
@@ -508,7 +508,7 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - 工作空间来源的记录，`workspaceId` 列为该工作空间；其余为 null。
 - 每条成功审计与它对应的那一次本地写入在同一事务内；本地写入失败时不留审计。确认重建的那次保存写 `kb.settings` 与 `kb.rebuild` 两条，其余每次写入一条。
 - `kb.ingest_reject` 没有对应的本地写入，单独写入。
-- 设置保存没有实际写入时（`chatModelId` 由 `null` 到 `null`）不写审计；`kb.settings` 的 detail 只含实际变化的键。
+- 设置保存没有实际写入时（`chatModelId` 由 `null` 到 `null`）不写审计。同身份重存嵌入模型也是一次写入，写一条；`kb.settings` 的 detail 只含实际变化的键，可以为空。
 
 #### Scenario: detail 不含敏感内容
 - **WHEN** 以内容含哨兵串的文件完成一次工作空间入库、一次本地上传、一次重新入库与一次移出，并以带密钥哨兵的 body 保存一次知识库模型设置
