@@ -13,7 +13,13 @@
 - **模型下发**：能否用 API key 配置模型提供方 instance 与账号缺省模型；配置后能否以 `embedding_model` 引用；能否删除已下发的配置；删除有无保护。
 - **错误组合**：鉴权失败、参数非法、权限不足各自的 HTTP 状态与 body `code`。
 
-本记录 SHALL 是假 RAGFlow 夹具协议的唯一来源。
+本记录 SHALL 是假 RAGFlow 夹具协议的唯一来源。夹具的行为分两类：
+- **协议应答**：路径、字段、状态值与错误 code，SHALL 在本记录里有对应条目。
+- **故障注入**：用例显式脚本化的异常，可以不在记录里，SHALL 只限四种：
+  - 传输层失败：挂起、挂起后放行、超时、连接失败、中途断开。
+  - HTTP 层：3xx、5xx、非 JSON、超出体积。
+  - 漂移值：不符的版本串、八种之外的 `ingestion_status`。
+  - 防御性组合：未观察到的路由上的 `code:403`；同一路由上别的 `100`、`101`、`102`；`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`；不带 `graph` 或不是恰一个 chunker 的内置 pipeline。
 
 仓库是 public，记录 SHALL 脱敏：
 - RAGFlow 的地址一律写作 `<RAGFLOW_BASE_URL>`。
@@ -22,7 +28,7 @@
 
 #### Scenario: 夹具与记录一致
 - **WHEN** 评审 `server/test/support/fake-ragflow.mjs` 的任一路由、字段名或状态值
-- **THEN** 它在实测记录里有对应条目；记录里没有的接口不出现在夹具里
+- **THEN** 协议应答在实测记录里有对应条目；记录里没有的接口、字段与状态值，只以上面列出的故障注入出现，并由用例显式脚本化
 
 #### Scenario: 记录已脱敏
 - **WHEN** 对实测记录运行 gitleaks，并用 grep 搜实测时所用的 RAGFlow 主机名或 IP、端口与专用账号名
@@ -61,7 +67,8 @@ app-server SHALL 解析四个键：`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE`�
 配置了 `RAGFLOW_BASE_URL` 时：
 - 服务 SHALL 照常启动，启动时不连接 RAGFlow。
 - 之后任何一次 RAGFlow 请求失败只影响当次请求，按「RAGFlow 出站请求」映射；会话、文件等其它功能不受影响。
-- 版本钉住只决定 `GET /api/kb/status` 的 `available`，其它知识库端点不因版本不符而拒绝请求；web 在 `available:false` 时不渲染知识库控件。
+- 版本钉住只决定 `GET /api/kb/status` 的 `available`，其它知识库端点不因版本不符而拒绝请求。
+- `available:false` 时，中心「知识库」tab 只显示不可用提示与 `重试`（knowledge-bases「中心「知识库」tab」）；模型 tab 的「知识库模型」段不看 `available`，只看 `enabled`：它读本地设置，RAGFlow 不可达时保存失败，显示信封文案。
 
 #### Scenario: 未配置即关闭
 - **WHEN** 未配置 `RAGFLOW_BASE_URL` 时，管理员逐个请求 `GET /api/kb/status` 之外的十二条知识库路由，`POST` / `PUT` 路由带 malformed JSON body；再以匿名身份请求其中一条
@@ -117,7 +124,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - **THEN** 文档列表为 503 `kb_unavailable`，并恰一行 `kb_upstream_auth_failed`；删数据集视为已删除，不写这一行
 
 #### Scenario: 成功码下的失败
-- **WHEN** 客户端收到 `POST …/documents/parse` 的 `{code:0, data:{success_count:0}}`；`DELETE …/documents` 的 `{code:0, data:{deleted:0}}`；`DELETE /datasets` 的 `{code:0, data:{success_count:0, errors:[…]}}`
+- **WHEN** 客户端收到 `POST …/documents/parse` 的 `{code:0, data:{success_count:0}}`；`DELETE …/documents` 的 `{code:0, data:{deleted:0}}`；经故障注入，`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`（实测记录 §4.6 里空 `ids` 的形状，没有 `success_count`；本系统不发空 id，这条是防御性判定）
 - **THEN** 三者都不是成功：依次为解析未启动、未删除与 `kb_unavailable`
 
 #### Scenario: 路由各异的不存在组合
@@ -163,13 +170,15 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - `rebuilding`、`rebuildFailed`：处于这两种重建状态的知识库数。
 
 **PUT 的 body** 键集 SHALL 是 `embedding`、`chatModelId`、`confirmRebuild` 的非空子集，且至少含 `embedding` 与 `chatModelId` 之一：
-- `embedding` 为 `{name, baseUrl, apiKey?}`：`name` 为 1–128 字节、无控制字符、不含 `@`；`baseUrl` 与模型上游地址同一规则；首次配置必须带 `apiKey`，之后省略即保留。
+- `embedding` 为 `{name, baseUrl, apiKey?}`：`name` 为 1–128 字节、无控制字符、不含 `@`；`baseUrl` 与模型上游地址同一规则；首次配置必须带 `apiKey`，之后省略即保留。`apiKey` 与模型上游密钥同一规则：非空，且可作 HTTP 头值；`apiKey:""` SHALL 是 400，不是保留。
 - `chatModelId` 为 `models` 中**带上游**的 id（不含 `@`），或 `null`。
 - 其它键、类型不符、id 不存在或该模型没有上游：400。
 
 **保存流程**：
 1. 判定 `chatModelId` 的取值规则。
-2. 把配置下发到 RAGFlow 服务账号：嵌入模型；以及知识库对话模型（取该 `models` 行的上游地址与密钥）。`chatModelId` 改为 `null` 时没有下发。
+2. 把配置下发到 RAGFlow 服务账号（对话模型取该 `models` 行的上游地址与密钥）：
+   - body 含 `embedding`：先下发嵌入模型，再重发当时指定的对话模型（本次的 `chatModelId`，否则已存的值）；没有指定、或该行没有上游时跳过这一步。
+   - body 只含 `chatModelId`：只下发对话模型；取值为 `null` 时没有下发。
 3. 下发失败：按「RAGFlow 出站请求」映射，本地设置不变。
 4. 成功后：在同一事务里写设置，并审计 `kb.settings`。
 
@@ -177,7 +186,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - 改为 `null` 或别的 id：SHALL 409 `kb_chat_model_locked`，不下发，不保存。
 - 与当前值相同的 id：照常下发并保存。
 
-其余情形：改为 `null` 时只改本地，SHALL NOT 发任何 RAGFlow 请求；改为某个 id 时下发并保存。
+其余情形：改为 `null` 时只改本地，SHALL NOT 发任何 RAGFlow 请求；改为某个 id 时下发并保存。当前值已是 `null` 时再设 `null` 是无操作：200，不写库，不审计。
 
 **下发**：两个实例名是常量，`owb-embed` 承载嵌入模型，`owb-chat` 承载知识库对话模型，提供方都是 `OpenAI-API-Compatible`。下发一个实例的请求序列 SHALL 为：
 1. `PUT /api/v1/providers`，body `{provider_name}`。
@@ -193,9 +202,11 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 **账号缺省不变量**：系统的任何路径 SHALL NOT 让服务账号处于「没有缺省对话模型，而可能有 pipeline 数据集或待合并任务」的状态。`kb` 模块 SHALL NOT 发送清空缺省的 `PATCH /api/v1/models/default`（只带 `model_type`，或名字为空串），SHALL NOT 调用 `/api/v1/providers` 下的任何 `DELETE`。RAGFlow 里的模型配置只增、只覆盖；取消指定与删除 `models` 行都只改本地，已下发的配置（含上游密钥）留到下一次下发时覆盖。嵌入模型配置后没有清空入口。
 
+建 pipeline 数据集之前 SHALL 先只读 `GET /api/v1/models/default`，`chat` 与 `embedding` 两种都在才继续：缺失时建库 409 `kb_not_ready`，重建该库 `rebuild_failed`，都 SHALL NOT 发后续请求（knowledge-bases「知识库端点」）。
+
 **与 models 的联动**：知识库对话模型引用 `models` 的一行。知识库开启时：
 - 该行不能删除，也不能把上游清空：409 `kb_model_in_use`。
-- 修改该行的上游地址或密钥（model-registry 的 `upstreamChanged` 为真），SHALL 在本地写入之前把新上游重新下发到 `owb-chat`；下发失败则这次修改失败（按映射），行不变，不审计，不发布。
+- 修改该行的上游地址或密钥（model-registry 的 `upstreamChanged` 为真），SHALL 在本地写入之前把新上游重新下发到 `owb-chat`；下发失败则这次修改失败（按映射），行不变，不审计，不发布。body 校验 SHALL 先于下发：非法 body 400，不发 RAGFlow 请求。
 
 知识库关闭时联动不生效：删除照常进行，经外键把 `chat_model_id` 置空。`models` 模块经装配注入的钩子调用这些检查，不反向依赖 `kb`。
 
@@ -219,6 +230,10 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - **WHEN** 管理员首次 `PUT` 嵌入模型；再 `PUT` 只改 `baseUrl` 而省略 `apiKey`（没有知识库）；再 `PUT {chatModelId:"m2"}`
 - **THEN** 第一次假 RAGFlow 依次收到 `PUT /providers`、`GET /models`、`POST` 实例（`model_type:["embedding"]`）、`PATCH /models/default`（`model_type:"embedding"`）；第二次依次收到 `PUT /providers`、`GET /models`、读实例的模型列表、`PUT` 实例（`api_key` 等于首次的密钥，`model_info` 非空）、`PATCH /models/default`；第三次的实例名为 `owb-chat`，`PATCH /models/default` 的 `model_type` 为 `chat`；三次都没有 `GET …/instances/<实例>`，也没有 `PATCH /users/me/models`
 
+#### Scenario: 只含嵌入模型的保存重发对话模型
+- **WHEN** 知识库对话模型为 `m2`，管理员 `PUT {embedding:{name, baseUrl}}`（同名同址，省略 `apiKey`）；另一次 `m2` 的上游在知识库关闭期间已被清空（store 直接写入）后同样 `PUT`；再一次假 RAGFlow 对 `owb-chat` 的下发应答 HTTP 503
+- **THEN** 第一次 200，假 RAGFlow 依次收到 `owb-embed` 一轮与 `owb-chat` 一轮，两次 `PATCH /models/default` 的 `model_type` 依次为 `embedding`、`chat`；第二次 200，只有 `owb-embed` 一轮；第三次 503 `kb_unavailable`，本地设置不变，没有 `kb.settings` 审计
+
 #### Scenario: 换模型时 model_info 只增不减
 - **WHEN** `owb-embed` 里已有 `bge-m3`，管理员带 `confirmRebuild:true` 把名称换成 `text-embedding-3-small`
 - **THEN** `PUT` 实例的 `model_info` 同时含两个模型；`PATCH /models/default` 的 `model_name` 为新模型；请求序列里没有任何 `DELETE`
@@ -226,6 +241,22 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 #### Scenario: 名称不能含 @
 - **WHEN** 管理员 `PUT` 的 `embedding.name` 为 `a@b`；`chatModelId` 为一个 id 含 `@` 的带上游模型
 - **THEN** 两次都是 400，假 RAGFlow 收到零个请求
+
+#### Scenario: 嵌入模型密钥的取值
+- **WHEN** 已配置嵌入模型时 `PUT` 的 `embedding.apiKey` 为 `""`；为含换行的值；首次配置时省略 `apiKey`
+- **THEN** 三次都是 400，假 RAGFlow 收到零个请求，设置不变
+
+#### Scenario: 取消指定的无操作
+- **WHEN** `chatModelId` 已是 `null`，管理员 `PUT {chatModelId:null}`
+- **THEN** 200；假 RAGFlow 收到零个请求；没有 `kb.settings` 审计，`kb_settings.updated_at` 不变
+
+#### Scenario: 探活
+- **WHEN** 已配置嵌入模型，假上游对 `POST <baseUrl>/embeddings` 依次应答：2xx 且 `data[0].embedding` 为非空数字数组；HTTP 500；2xx 且 `data[0].embedding` 为空数组；另一个实例未配置嵌入模型时探活
+- **THEN** 前三次 200，`embedding.probe.status` 依次为 `ok`、`failed`、`failed`，各一条 `kb.settings`（detail `{probe}`），假 RAGFlow 收到零个请求，嵌入身份不变；最后一次 409 `kb_not_ready`，没有审计
+
+#### Scenario: compileBases 的口径
+- **WHEN** 有四个知识库：开 RAPTOR 的 `ready`、开知识图谱的 `rebuilding`、两个开关都开的 `rebuild_failed`、两个开关都关的 `ready`
+- **THEN** 读视图的 `bases` 为 4，`compileBases` 为 3，`rebuilding` 为 1，`rebuildFailed` 为 1
 
 #### Scenario: 对话模型联动
 - **WHEN** 没有开编译的知识库，知识库对话模型为 `m2`；管理员依次执行：`DELETE /api/models?id=m2`；`PUT` `m2` 并把 `upstream` 置为 `null`；假 RAGFlow 对下发应答 HTTP 500 时 `PUT` `m2` 换新密钥；假 RAGFlow 恢复后再 `PUT` 同一新密钥；`PUT /api/kb/settings` 以一个无上游的模型作 `chatModelId`；`PUT /api/kb/settings {chatModelId:null}`；再 `DELETE /api/models?id=m2`
@@ -256,17 +287,17 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 ### Requirement: 嵌入模型更换与全量重建
 嵌入身份 SHALL 为 `(name, baseUrl)`；只改密钥不是身份变化。
 
-`PUT /api/kb/settings` 改变嵌入身份且存在任一知识库时：
-- body 未带 `confirmRebuild:true`：SHALL 409 `kb_rebuild_required`，不下发，不保存。
-- body 带了：下发并保存；嵌入代数加一；全部知识库置为 `rebuilding`；`kb_settings.rebuild_actor_id` 记为本次请求的 principal；在同一事务里审计 `kb.settings` 与 `kb.rebuild`（detail `{bases, documents}`）两条；唤醒重建器。
-- 已有知识库处于 `rebuilding` 时改嵌入身份：SHALL 409 `kb_rebuilding`。
+`PUT /api/kb/settings` 改变嵌入身份且存在任一知识库时，按次序判定：
+1. 已有知识库处于 `rebuilding`：SHALL 409 `kb_rebuilding`，带不带 `confirmRebuild` 都一样，先于 `kb_rebuild_required`。
+2. body 未带 `confirmRebuild:true`：SHALL 409 `kb_rebuild_required`，不下发，不保存。
+3. body 带了：下发并保存；嵌入代数加一；全部知识库置为 `rebuilding`；`kb_settings.rebuild_actor_id` 记为本次请求的 principal；在同一事务里审计 `kb.settings` 与 `kb.rebuild`（detail `{bases, documents}`）两条；唤醒重建器。
 
 **重建器**在进程内一次处理一个知识库，处理期间持有该库的写锁（见 knowledge-bases「同一知识库的写操作串行」）。取得锁后先重读该库的行：库已被删除或 `state` 不再是 `rebuilding` 即跳过该库。每个库的步骤：
 1. 若 `rebuild_dataset_id` 非空，先按 knowledge-bases「知识库端点」的删除次序删掉残留的一代；不存在视为已删除；再把三个 `rebuild_*` 列置空。
-2. 以原模板与开关、新嵌入模型，按 knowledge-bases「知识库端点」的建库流程建新一代，名为 `owb-<id>-g<当前代数>`，写回 `rebuild_dataset_id`；开了开关的库另写回 `rebuild_canvas_id`、`rebuild_template_group_id`。模板组与画布 SHALL 新建，不复用旧的。
+2. 以原模板与开关、新嵌入模型，按 knowledge-bases「知识库端点」的建库流程建新一代，名为 `owb-<id>-g<当前代数>`，写回 `rebuild_dataset_id`；开了开关的库另写回 `rebuild_canvas_id`、`rebuild_template_group_id`。模板组与画布 SHALL 新建，不复用旧的。账号缺省缺失时开了开关的库在这一步失败，不发后续请求。
 3. 逐份文档，从旧数据集流式下载入库原件，上传到新数据集，再触发这份文档的解析。multipart 长度按本地 `size` 计算。下载结果为 not-found 的文档记为跳过；下载字节数与本地 `size` 不符、或解析未启动时该库失败。
 4. 在单事务里完成切换：删除被跳过的文档行；其余行换成新的 RAGFlow 文档 id；`dataset_id`、`canvas_id`、`template_group_id` 设为对应的 `rebuild_*` 值，三个 `rebuild_*` 列置空；`embedding_generation` 设为当前代数；`state` 置为 `ready`；审计 `kb.rebuild`（detail `{id, result:"ok", skipped}`）。
-5. 按同一删除次序删除旧一代。数据集删除失败写一行 `{"event":"kb_dataset_leak","datasetId":<id>}`，SHALL NOT 再删它的画布与模板组；画布或模板组删除失败写一行 `{"event":"kb_pipeline_leak","canvasId":<id|null>,"groupId":<id|null>}`。都不影响状态。
+5. 按同一删除次序删除旧一代。数据集删除失败写一行 `{"event":"kb_dataset_leak","datasetId":<id>}`，SHALL NOT 再删它的画布与模板组；画布或模板组删除失败写一行 `{"event":"kb_pipeline_leak","canvasId":<id|null>,"groupId":<id|null>}`，模板组删除失败时画布已删，`canvasId` 为 `null`。都不影响状态。
 
 **下载判别**：not-found 也是 HTTP 200，文件内容可以恰好等于 not-found 正文。下载应答 SHALL 按响应头判定，不解析正文判成败：
 - HTTP 200 且带 `Content-Disposition`：文件字节，正文一律不解析，不看 `Content-Type`、`Content-Length` 与文件后缀。
@@ -277,7 +308,8 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 **续做与关停**：
 - 服务在 `server_started` 之后，不等待地对仍为 `rebuilding` 的库从第一步续做；续做中的失败只改变知识库状态，不输出 failure record，不改变退出码。
-- 关停时重建器在关闭 DB 之前停止：在途请求被中止，该库保持 `rebuilding`。
+- 关停时重建器在关闭 DB 之前停止，在途请求被中止。第 4 步提交之前，该库保持 `rebuilding`，下次启动续做。第 4 步提交之后，库已是 `ready`，第 5 步没删完的旧一代 SHALL NOT 续删，成为孤儿。
+- 未配置 `RAGFLOW_BASE_URL` 时重建器不启动，`rebuilding` 的库保持原状，SHALL NOT 改成 `rebuild_failed`；重新配置后，下次启动续做。
 
 **重试**：`POST /api/kb/settings/rebuild`（管理员，bodyless）SHALL 把全部 `rebuild_failed` 置回 `rebuilding`，把 `rebuild_actor_id` 记为本次请求的 principal，审计 `kb.rebuild`（detail `{bases, documents, retry:true}`），唤醒重建器，返回 200 加设置读视图。没有 `rebuild_failed` 的库时返回 200，不写审计。
 
@@ -291,11 +323,15 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 #### Scenario: 开编译的库重建
 - **WHEN** 一个开了两种编译的知识库，管理员带 `confirmRebuild:true` 换嵌入模型
-- **THEN** 假 RAGFlow 为新一代依次收到读内置模板、建模板组、读内置 pipeline、建画布与建数据集（`pipeline_id` 为新画布），都名为 `owb-<id>-g1`；切换之后依次收到删旧数据集、删旧画布、删旧模板组；库行的三个 id 都是新一代，三个 `rebuild_*` 列为 NULL
+- **THEN** 假 RAGFlow 为新一代依次收到读账号缺省、读内置模板、建模板组、读内置 pipeline、建画布与建数据集（`pipeline_id` 为新画布），都名为 `owb-<id>-g1`；切换之后依次收到删旧数据集、删旧画布、删旧模板组；库行的三个 id 都是新一代，三个 `rebuild_*` 列为 NULL
+
+#### Scenario: 账号缺省缺失时重建失败
+- **WHEN** 一个开了 RAPTOR 的知识库重建，假 RAGFlow 的 `GET /api/v1/models/default` 应答 `models` 为空
+- **THEN** 该库 `rebuild_failed`，审计 `kb.rebuild {id, result:"failed"}`；假 RAGFlow 没有收到建模板组、建画布与建数据集
 
 #### Scenario: 旧一代删除失败
-- **WHEN** 重建切换之后，假 RAGFlow 对删旧数据集应答 HTTP 503；另一次对删旧画布应答 HTTP 503
-- **THEN** 第一次 stderr 恰一行 `kb_dataset_leak`，没有发出删画布与删模板组；第二次恰一行 `kb_pipeline_leak`，`canvasId` 与 `groupId` 都非空，没有发出删模板组；两次该库都是 `ready`
+- **WHEN** 重建切换之后，假 RAGFlow 对删旧数据集应答 HTTP 503；另一次对删旧画布应答 HTTP 503；再一次对删旧模板组应答 HTTP 503
+- **THEN** 第一次 stderr 恰一行 `kb_dataset_leak`，没有发出删画布与删模板组；第二次恰一行 `kb_pipeline_leak`，`canvasId` 与 `groupId` 都非空，没有发出删模板组；第三次恰一行 `kb_pipeline_leak`，`canvasId` 为 `null`、`groupId` 非空；三次该库都是 `ready`
 
 #### Scenario: 原件缺失与下载判别
 - **WHEN** 一个知识库有三份文档：第一份下载应答 HTTP 200、不带 `Content-Disposition`、`Content-Type` 为 JSON、正文 `{"code":404,"message":"Resource not found"}`；第二份下载应答 HTTP 200、带 `Content-Disposition`，文件内容恰为同一段正文；第三份的下载字节比本地 `size` 少一个字节（在另一次重建里）
@@ -309,9 +345,33 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - **WHEN** 重建第二个知识库时假 RAGFlow 的上传返回 HTTP 500；随后假 RAGFlow 恢复，管理员 `POST /api/kb/settings/rebuild`
 - **THEN** 第一个库 `ready`；第二个库 `rebuild_failed`，对它入库得 409 `kb_rebuilding`，移出文档仍可成功；重试返回 200 读视图，第二个库先删残留的新数据集再重建，最终 `ready`
 
+#### Scenario: 重建中改嵌入身份
+- **WHEN** 一个知识库处于 `rebuilding`，管理员 `PUT` 新的嵌入名称，不带 `confirmRebuild`；再带 `confirmRebuild:true`；再只换 `apiKey`
+- **THEN** 前两次都是 409 `kb_rebuilding`，假 RAGFlow 没有收到下发，设置不变；第三次 200，照常下发
+
+#### Scenario: 没有失败库时重试
+- **WHEN** 没有 `rebuild_failed` 的知识库，管理员 `POST /api/kb/settings/rebuild`
+- **THEN** 200 读视图；没有 `kb.rebuild` 审计，`rebuild_actor_id` 不变，假 RAGFlow 收到零个请求
+
 #### Scenario: 崩溃后续做
 - **WHEN** 一个知识库处于 `rebuilding`、`rebuild_dataset_id` 非空时进程退出，随后重启
 - **THEN** 重启后重建器先删除该残留数据集，再从建新数据集开始，最终 `ready`；这一条 `kb.rebuild` 的 actor 为原发起人
+
+#### Scenario: 编译库的残留清理
+- **WHEN** 一个开了 RAPTOR 的知识库处于 `rebuilding`，三个 `rebuild_*` 列都非空时进程退出，随后重启
+- **THEN** 重启后假 RAGFlow 先依次收到残留一代的删数据集、删画布、删模板组，再收到新一代的建库序列；最终 `ready`
+
+#### Scenario: 关停时在途重建
+- **WHEN** 重建器在下载或上传时被挂起，服务收到 SIGTERM；另一次重建器已完成切换，在删旧一代时被挂起，服务收到 SIGTERM
+- **THEN** 两次进程都以 0 退出，在途请求被中止，DB 已关闭；第一次该库仍为 `rebuilding`，重启后续做；第二次该库为 `ready`，重启后假 RAGFlow 没有收到旧一代的删除
+
+#### Scenario: 续做失败不影响进程
+- **WHEN** 一个知识库处于 `rebuilding`，重启时 RAGFlow 不可达
+- **THEN** 启动成功，success record 照常写出，没有 failure record，退出码不变；该库 `rebuild_failed`
+
+#### Scenario: 知识库关闭时不动重建状态
+- **WHEN** 一个知识库处于 `rebuilding`，服务以未配置 `RAGFLOW_BASE_URL` 启动，随后以配置了的状态重启
+- **THEN** 第一次启动后该库仍为 `rebuilding`，没有 `kb.rebuild` 审计；第二次启动后续做，最终 `ready`
 
 ### Requirement: 共用开发栈的使用纪律
 仓库 SHALL NOT 提交任何 RAGFlow 栈定义（compose 文件、镜像构建或启动脚本）。本仓的 Makefile 目标、脚本与测试 SHALL NOT 执行 `docker compose up` / `down` / `restart`，也不修改 RAGFlow 栈的配置。
@@ -325,10 +385,11 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 在共用栈上的使用规则：
 - 只使用 open-workbuddy 专用账号。
 - 只删除本仓创建的对象（数据集、画布与模板组，名称前缀为 `owb-`）：实测只删本次运行建的；冒烟只经 app-server 删除它自己建的知识库（含上一次中断留下的同名库）。
-- 清理次序：先删数据集、画布、模板组，静默到没有编译活动，才清账号缺省、删模型实例与提供方。有 pipeline 数据集或待合并任务时 SHALL NOT 清空账号缺省对话模型。
+- 建 pipeline 数据集之前 SHALL 确认 `GET /api/v1/models/default` 的 `chat` 与 `embedding` 两种都在。
+- 清理次序照实测记录 §16：账号缺省保持不动，先删数据集、画布、模板组，静默到没有编译活动，才清账号缺省、删模型实例与提供方。有 pipeline 数据集或待合并任务时 SHALL NOT 清空账号缺省对话模型。
 
 RAGFlow 地址、账号名与密钥文件路径 SHALL 只出现在本机未跟踪的私有配置里；被跟踪的文件、issue 与 PR 正文一律写作 `<RAGFLOW_BASE_URL>`。
 
 #### Scenario: 栈未运行
 - **WHEN** `RAGFLOW_BASE_URL` 指向一个已关闭的端口时执行 `make smoke-kb`
-- **THEN** 命令在发出任何知识库请求之前以非零退出，输出含 `共用 RAGFlow 栈未运行或版本不符`；执行前后 `docker ps -a` 的容器清单相同
+- **THEN** 命令在发出任何知识库请求之前以非零退出，输出含 `共用 RAGFlow 栈未运行或版本不符`；Makefile 的 `smoke-kb` 目标文本不含 `docker`

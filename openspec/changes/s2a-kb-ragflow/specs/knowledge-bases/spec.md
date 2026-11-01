@@ -64,7 +64,7 @@
 - **THEN** 删除在入库结束之后才执行，得 204；结束后库与文档行都不在，假 RAGFlow 收到的删数据集请求在上传之后
 
 ### Requirement: 知识库端点
-知识库开启后，已登录用户 SHALL 能管理自己的知识库。别人的或不存在的 id 一律 404 `not_found`，不可探测。全部应答带 no-store。
+知识库开启后，已登录用户 SHALL 能管理自己的知识库。别人的或不存在的 id 一律 404 `not_found`，不可探测：这条对本 Requirement 与下面的入库、上传、文档列表、重新入库、移出路由都成立，判定先于 body 解析、`doc` 参数与 `state` 判定，SHALL NOT 发出站请求，SHALL NOT 写审计。全部应答带 no-store。
 
 **视图** `BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：
 - `documents`：本地文档行数。
@@ -72,13 +72,13 @@
   - 两个开关都为 0 的库：恒为 `{raptor:"off", graph:"off"}`，不发出站请求。
   - 其余的库：为 `{raptor, graph}`，关着的类型为 `off`，开着的类型按下面的规则从 RAGFlow 现读，各取 `pending` / `running` / `done` / `failed`。
 
-**编译状态的判定**：SHALL NOT 读 `GET …/compilation/status`。每次读该库的文档列表，以及任务日志 `GET /api/v1/datasets/<id>/ingestions`（逐页读到 `total`）；文档列表已判定为下面第 1 步的 `running` 时不读任务日志。类型只按日志的 `task_type` 判定：RAPTOR 为 `Tree`，知识图谱为 `Graph`。对开着的每种类型，按次序：
+**编译状态的判定**：SHALL NOT 读 `GET …/compilation/status`。每次读该库的文档列表，以及任务日志 `GET /api/v1/datasets/<id>/ingestions`（`orderby=id`、`page_size=100`，逐页读到 `total`）；文档列表已判定为下面第 1 步的 `running` 时不读任务日志。读全后在客户端按日志的 `task_type` 判定类型：RAPTOR 为 `Tree`，知识图谱为 `Graph`；SHALL NOT 用 `dsl.entries[].variants` 判类型，SHALL NOT 用 `keywords` 或 `log_type=file`。对开着的每种类型，按次序：
 1. 有本地文档在 RAGFlow 处于 `CREATED` / `SCHEDULED` / `RUNNING` / `STOPPING`，或该类型有 `operation_status` 为 `RUNNING` 的日志：`running`。
 2. 有本地文档为 `FAILED`：`failed`。
-3. 除 `COMPLETED` 且 `chunk_count` 为 0 的文档外，其余本地文档非空，且每份的 id 都出现在该类型 `operation_status` 为 `DONE` 的日志的 `dsl.entries[].doc_id` 里：`done`。
+3. 除 `COMPLETED` 且 `chunk_count` 为 0 的文档外，其余本地文档非空，且每份的 id 都出现在该类型 `operation_status` 为 `DONE` 的全部日志的 `dsl.entries[].doc_id` 并集里：`done`。
 4. 其它：`pending`。
 
-`failed` SHALL 只来自文档 `FAILED`。文档已 `COMPLETED` 而该类型没有日志时（RAPTOR 在对话模型失败时没有任何信号）SHALL 保持 `pending`，不得显示 `failed` 或 `done`。
+`failed` SHALL 只来自文档 `FAILED`。文档已 `COMPLETED` 而该类型没有日志时（RAPTOR 在对话模型失败时没有任何信号）SHALL 保持 `pending`，不得显示 `failed` 或 `done`。文档列表判定该库的数据集为 not-found 时，按读取失败处理。
 
 **`GET /api/kb/bases`**：200 `{bases: BaseView[]}`，按 `created_at` 升序。
 - 列表只依赖本地行。
@@ -86,27 +86,30 @@
 - RAGFlow 不可达时列表照常 200。
 
 **`POST /api/kb/bases`**：body 键集为 `name`、`template`、`raptor?`、`graph?`。依次判定：
-1. 键集、类型、名称或模板不合规：400 `bad_request`。
+1. 键集、类型、名称或模板不合规：400 `bad_request`。这一步不读库。
 2. 嵌入模型未就绪：409 `kb_not_ready`。
 3. 开关为真而知识库对话模型未指定：400 `bad_request`。RAPTOR 与知识图谱对十一种模板都可用，没有按模板的限制。
 4. 同账号重名：409 `conflict`。已有 50 个知识库：409 `kb_limit`。
 
-建库在进程级设置锁下进行。下文的「代数」为当前嵌入代数，`<名字>` 为 `owb-<id>-g<代数>`。
+判定 2–4 SHALL 在取得进程级设置锁之后进行，读到的是锁内的设置行与知识库行；建库全程持有这把锁。
+
+下文的「代数」为当前嵌入代数，`<名字>` 为 `owb-<id>-g<代数>`。
 
 两个开关都为 0：
 1. `POST /api/v1/datasets`，body `{name:<名字>, parser_id, parse_type:1, embedding_model}`。`parser_id` 在 `naive` 时为 `general`，其余等于模板名。
 
 任一开关为真：
-1. `GET /api/v1/compilation-templates/builtins` 取内置 `config`。RAPTOR 用 `id:"tree"`，SHALL 删掉 `entity`、`relation` 与 `llm_id`；知识图谱用 `id:"knowledge_graph"`，SHALL 删掉 `llm_id`。
-2. `POST /api/v1/compilation-template-groups`，名为 `<名字>`，`templates` 含开着的类型（`kind` 为 `tree` / `knowledge_graph`）。
-3. `GET /api/v1/pipelines/<parser_id>` 取内置 DSL，插入 Compiler 节点（见下），`POST /api/v1/agents`，`title` 为 `<名字>`，`canvas_category` 为 `dataflow_canvas`。
-4. `POST /api/v1/datasets`，body `{name:<名字>, parse_type:2, pipeline_id:<画布 id>, embedding_model}`。
+1. `GET /api/v1/models/default` 读账号缺省：`data.models` SHALL 同时有 `model_type` 为 `chat` 与 `embedding`、`model_name` 非空的项。缺任一项：409 `kb_not_ready`，SHALL NOT 发后续请求。
+2. `GET /api/v1/compilation-templates/builtins` 取内置 `config`。RAPTOR 用 `id:"tree"`，SHALL 删掉 `entity`、`relation` 与 `llm_id`；知识图谱用 `id:"knowledge_graph"`，SHALL 删掉 `llm_id`。
+3. `POST /api/v1/compilation-template-groups`，名为 `<名字>`，`templates` 含开着的类型（`kind` 为 `tree` / `knowledge_graph`）。RAGFlow 对同名组自动加后缀（实测记录 §5.1）；本系统只按 id 引用，SHALL NOT 依赖组名。
+4. `GET /api/v1/pipelines/<parser_id>` 取内置 DSL，插入 Compiler 节点（见下），`POST /api/v1/agents`，`title` 为 `<名字>`，`canvas_category` 为 `dataflow_canvas`。
+5. `POST /api/v1/datasets`，body `{name:<名字>, parse_type:2, pipeline_id:<画布 id>, embedding_model}`。
 
 两种情形：
 - `embedding_model` SHALL 恒显式传三段式 `<名称>@owb-embed@OpenAI-API-Compatible`。
 - SHALL NOT 发送 `chunk_method`，也不在 `parser_config` 里发送 RAPTOR 或知识图谱字段。
-- 全部成功后插行，并在同一事务里审计 `kb.create`；成功应答为 201 `BaseView`。
-- 任一步失败或插行失败：SHALL 逆序删除这一次已建的资源（数据集 → 画布 → 模板组），按「RAGFlow 出站请求」映射返回；这次回滚里的删除失败只写一行 stderr 记录（`kb_dataset_leak` 或 `kb_pipeline_leak`，见 ragflow-backend「嵌入模型更换与全量重建」），不改变应答。
+- 全部成功后插行，并在同一事务里审计 `kb.create`；成功应答为 201 `BaseView`，SHALL NOT 为这个应答读 RAGFlow：`state` 为 `ready`，`stateMessage` 为 `null`，`documents` 为 0，`compile` 里开着的类型为 `pending`，关着的为 `off`。
+- 任一步失败或插行失败：SHALL 逆序删除这一次已建的资源（数据集 → 画布 → 模板组），按「RAGFlow 出站请求」映射返回。回滚里某一步删除失败即停，SHALL NOT 再删后面的资源，并写一行 stderr 记录（`kb_dataset_leak` 或 `kb_pipeline_leak`，形状见 ragflow-backend「嵌入模型更换与全量重建」），不改变应答。
 
 **DSL**：画布 DSL SHALL 由内置 DSL 改写，并同时含 `components` 与 `graph`：
 - 按 `obj.component_name` 含 `Chunker` 查 chunker 节点；查到的不是恰一个，或内置 DSL 没有 `graph`：SHALL 失败（`kb_unavailable`），不提交画布。
@@ -124,14 +127,36 @@
 
 #### Scenario: 建库与列表隔离
 - **WHEN** 用户 A 建 `规范库`（`manual`，`raptor:true`，知识库对话模型已指定）；用户 B 请求列表，并 `DELETE` A 的库 id
-- **THEN** A 得 201 `BaseView`，假 RAGFlow 依次收到读内置模板、建模板组、读内置 pipeline、建画布与建数据集，名字都是 `owb-<id>-g0`，数据集 body 为 `parse_type:2`、`pipeline_id` 为该画布；B 的列表为 `{bases:[]}`，`DELETE` 为 404 `not_found`，假 RAGFlow 没有收到删除请求
+- **THEN** A 得 201 `BaseView`，假 RAGFlow 依次收到读账号缺省、读内置模板、建模板组、读内置 pipeline、建画布与建数据集，名字都是 `owb-<id>-g0`，数据集 body 为 `parse_type:2`、`pipeline_id` 为该画布；B 的列表为 `{bases:[]}`，`DELETE` 为 404 `not_found`，假 RAGFlow 没有收到删除请求
+
+#### Scenario: 普通模板的隔离
+- **WHEN** 用户 A 建一个两开关都为 0 的知识库；用户 B 请求列表，并 `DELETE` A 的库 id
+- **THEN** B 的列表为 `{bases:[]}`，`DELETE` 为 404 `not_found`；建库之后假 RAGFlow 没有收到任何请求
+
+#### Scenario: 文档路由的所有权
+- **WHEN** 用户 B 以 A 的知识库 id，再以一个不存在的 id，分别请求 `POST …/documents`（合法 body）、`GET …/documents`、`DELETE …/documents?doc=<A 的文档 id>`、`POST …/documents/reingest?doc=<A 的文档 id>` 与 `POST …/uploads?name=a.md`（`application/octet-stream`）
+- **THEN** 十次都是 404 `not_found`；假 RAGFlow 收到零个请求；没有新增审计；A 的文档行不变
+
+#### Scenario: 建库应答不读 RAGFlow
+- **WHEN** 知识库对话模型已指定，建一个 `raptor:true` 的库；再建一个两开关都为 0 的库
+- **THEN** 两次 201；第一个的应答含 `state:"ready"`、`stateMessage:null`、`documents:0`、`compile:{raptor:"pending", graph:"off"}`，第二个的 `compile` 为 `{raptor:"off", graph:"off"}`；假 RAGFlow 没有收到文档列表与任务日志请求
+
+#### Scenario: 账号缺省缺失时不建编译资源
+- **WHEN** 知识库对话模型已指定，假 RAGFlow 的 `GET /api/v1/models/default` 依次应答：`models` 为空（实测记录 §11.4，悬空时也是这个应答）；只有 `embedding`；只有 `chat`；两种都在；各建一个 `raptor:true` 的库；另一次该读取应答 HTTP 503
+- **THEN** 前三次 409 `kb_not_ready`，第四次 201，HTTP 503 那次 503 `kb_unavailable`；除第四次外，假 RAGFlow 都只收到这一次读取，没有建模板组、建画布与建数据集，也没有知识库行
+
+#### Scenario: 建库与设置交错
+- **WHEN** 没有开编译的库，知识库对话模型为 `m2`；管理员 C 的嵌入设置 `PUT` 持有设置锁，假 RAGFlow 挂起它的下发；B `PUT /api/kb/settings {chatModelId:null}` 与 A 建 `raptor:true` 的库依次排在锁后，然后放行
+- **THEN** B 200；A 400 `bad_request`，它在锁内读到未指定，假 RAGFlow 没有收到 A 的任何请求
+- **WHEN** 次序相反：A 与 B 依次排在锁后，然后放行
+- **THEN** A 201；B 409 `kb_chat_model_locked`，`chatModelId` 仍为 `m2`
 
 #### Scenario: 普通模板的建库请求
 - **WHEN** 两个开关都为 0 时，分别建 `naive` 与 `manual` 模板的库
 - **THEN** 假 RAGFlow 只收到两次建数据集，`parser_id` 依次为 `general`、`manual`，都带 `parse_type:1` 与三段式 `embedding_model`；没有模板组、画布请求，body 不含 `chunk_method`
 
 #### Scenario: 十一种模板都能开两个开关
-- **WHEN** 知识库对话模型已指定，对十一种模板各建一个 `raptor:true`、`graph:true` 的库，假 RAGFlow 的内置 pipeline 按记录的节点名给出不同的 chunker
+- **WHEN** 知识库对话模型已指定，对十一种模板各建一个 `raptor:true`、`graph:true` 的库，假 RAGFlow 的内置 pipeline 按实测记录 §5.1 (3) 的节点名与下游给出（`qa`、`table` 的 chunker 下游是 Tokenizer，其余九种是 Extractor）
 - **THEN** 十一次都是 201；每次的画布 DSL 都含 `graph`，Compiler 节点插在该模板的 chunker 与其下游之间，`graph.edges` 比内置 DSL 恰多一条且不含 chunker 到原下游的边；模板组含 `tree`、`knowledge_graph` 两项，`tree` 的 `config` 不含 `entity`、`relation`、`llm_id`，`knowledge_graph` 的不含 `llm_id`
 
 #### Scenario: 只开一种编译
@@ -146,13 +171,21 @@
 - **WHEN** 开了开关的建库，假 RAGFlow 依次在建画布、建数据集时应答 HTTP 503；另一次在全部建成后经注入让插行失败
 - **THEN** 第一次删除模板组；第二次先删画布、再删模板组；第三次依次删数据集、画布、模板组；三次都是失败应答，没有知识库行，没有 `kb.create`
 
+#### Scenario: 回滚里的删除失败
+- **WHEN** 开了开关的建库，假 RAGFlow 在建数据集时应答 HTTP 503，删画布也应答 HTTP 503；另一次建画布时应答 HTTP 503，删模板组也应答 HTTP 503；再一次全部建成后经注入让插行失败，删数据集应答 HTTP 503
+- **THEN** 第一次 stderr 恰一行 `kb_pipeline_leak`，`canvasId`、`groupId` 都非空，没有发出删模板组；第二次恰一行 `kb_pipeline_leak`，`canvasId` 为 `null`、`groupId` 非空；第三次恰一行 `kb_dataset_leak`，没有发出删画布与删模板组；三次的应答都与回滚成功时相同，没有知识库行，没有 `kb.create`
+
 #### Scenario: DSL 无法改写
-- **WHEN** 假 RAGFlow 的内置 pipeline 不带 `graph`；另一次带两个 chunker 节点
+- **WHEN** 经故障注入，假 RAGFlow 的内置 pipeline 不带 `graph`；另一次带两个 chunker 节点（实测记录里全部内置模板都带 `graph`、都恰一个 chunker，这条校验是防御性的）
 - **THEN** 两次都是 503 `kb_unavailable`；假 RAGFlow 没有收到建画布与建数据集，建好的模板组已删除
 
 #### Scenario: 删库
 - **WHEN** 删除一个两开关都为 0、有两份文档的知识库；另一次删除时假 RAGFlow 不可达
 - **THEN** 第一次 204，假 RAGFlow 收到一次删数据集请求，库与文档行都不在，恰一条 `kb.delete`；第二次 503 `kb_unavailable`，行仍在
+
+#### Scenario: 重建失败时删库
+- **WHEN** 一个开了 RAPTOR 的知识库处于 `rebuild_failed`，三个 `rebuild_*` 列非空，所有者删除它；另一个同样的库，假 RAGFlow 对新一代的删数据集应答 `code:403`
+- **THEN** 第一次假 RAGFlow 依次收到新一代的删数据集、删画布、删模板组，再收到当前一代的同样三步，204；第二次同样 204，两代都发过删除，恰一条 `kb.delete`
 
 #### Scenario: 删除次序
 - **WHEN** 删除一个开了开关的知识库；另一次假 RAGFlow 在删画布时不可达，随后恢复，用户重试；再一次假 RAGFlow 对删数据集、删画布、删模板组分别应答 `code:403`、`code:103`、`code:404`
@@ -195,8 +228,8 @@
 **逐条处理**：在该库的写锁下，每条路径依次经过以下步骤；被拒的条目以括号里的 `reason` 记录：
 1. 经 `sandbox.resolve(principal, workspaceId, path, "read")` 解析。被拒为 `outside`；越界照常由 facade 写 `sandbox.reject`。路径上任一分量是符号链接时，`resolve` 拒绝，同样记为 `outside`。
 2. 查重与计数：该库已有同一 `(workspaceId, path)`（`duplicate`）；该库已有 500 份文档（`limit`）。
-3. 后缀判定：路径 basename 最后一个 `.` 之后的部分转小写，不在该模板的后缀表（实测记录表 C 末列）里，或没有后缀（`unsupported_type`）。这条对全部知识库生效，不分是否开了编译。
-4. 打开文件：挂载内经挂载读取，离线即被拒（`offline`）；挂载外以 `O_NOFOLLOW` 打开，不是普通文件即被拒（`not_file`）。之后对同一 fd 做 `fstat`，得到 `size` 与 `mtimeMs`。
+3. 后缀判定：路径 basename 最后一个 `.` 之后的部分转小写，不在该模板的后缀表（实测记录表 C 末列）里，或没有后缀（`unsupported_type`）。这条对全部知识库生效，不分是否开了编译。转小写只用于判定，上传的文件名不改。
+4. 打开文件：挂载内经挂载读取，离线即被拒（`offline`）；挂载外以 `O_NOFOLLOW` 打开。不是普通文件或路径不存在即被拒（`not_file`），挂载内外一样。之后对同一 fd 做 `fstat`，得到 `size` 与 `mtimeMs`。
 5. 大小为 0（`empty`）；大小超过 `KB_UPLOAD_MAX_BYTES`（`too_large`）。
 6. 以 multipart 流式上传到该库的数据集，字段名 `file`，文件名用原始 UTF-8 或 `filename*`，不落临时文件；`Content-Length` 按 `fstat` 的大小计算。实际读出的字节数与之不符时：中止出站请求，该条记为 `changed`。
 7. 触发该文档的解析，`document_ids` 只含这一个 id。
@@ -211,12 +244,12 @@
 - 得到 `kb_unavailable`，或上传、解析触发得知数据集不存在：删除已建的文档（尽力而为）；该条与其后全部条目都记为 `unavailable`，后续条目不再发请求。
 - 任何补偿删除按「重新入库与移出」的删除写法进行，失败只写一行 `{"event":"kb_document_leak","documentId":<id>}`，不改变该条的结果。本地上传与重新入库的补偿删除同此。
 
-**应答**：只要请求本身合法，即为 201 `{documents: DocumentView[], rejected: {path, reason, message}[]}`。`message` 按 `reason` 固定：
+**应答**：只要请求本身合法，即为 201 `{documents: DocumentView[], rejected: {path, reason, message}[]}`。`documents` 的每一条 SHALL 不经读取 RAGFlow 得出：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false`。`message` 按 `reason` 固定：
 
 | `reason` | `message` |
 |---|---|
 | `outside` | `目标路径不在你的沙箱内` |
-| `not_file` | `不是普通文件` |
+| `not_file` | `不是普通文件，或文件不存在` |
 | `too_large` | `文件超过大小上限` |
 | `unsupported_type` | `这个模板不支持这种文件` |
 | `empty` | `文件是空的，不能入库` |
@@ -230,8 +263,12 @@
 每个被拒的条目审计一条 `kb.ingest_reject`。只读挂载里的文件可以入库。
 
 #### Scenario: 混合批次
-- **WHEN** 一批路径依次为：普通文件 `a.md`、只读挂载 `docs/` 下的 `b.pdf`、`../x`、一个目录、一个超过上限的文件、已入库过的 `a.md`、一个以符号链接为分量的路径
-- **THEN** 201；`documents` 为 `a.md` 与 `docs/b.pdf` 两条；`rejected` 五条，`reason` 依次为 `outside`、`not_file`、`too_large`、`duplicate`、`outside`；审计有五条 `kb.ingest_reject`、两条 `kb.ingest`、两条 `sandbox.reject`；假 RAGFlow 收到两次上传（字节与源文件一致）与两次解析触发
+- **WHEN** 一个 `naive` 模板的知识库，一批路径依次为：普通文件 `a.md`、只读挂载 `docs/` 下的 `b.pdf`、`../x`、目录 `dir.md`、超过上限的 `big.pdf`、已入库过的 `a.md`、以符号链接为分量的 `link/c.md`
+- **THEN** 201；`documents` 为 `a.md` 与 `docs/b.pdf` 两条，每条都是 `status:"queued"`、`chunkCount:null`、`message:null`、`sourceChanged:false`；`rejected` 五条，`reason` 依次为 `outside`、`not_file`、`too_large`、`duplicate`、`outside`；审计有五条 `kb.ingest_reject`、两条 `kb.ingest`、两条 `sandbox.reject`；假 RAGFlow 收到两次上传（字节与源文件一致）与两次解析触发，没有收到文档列表请求
+
+#### Scenario: 路径不存在
+- **WHEN** 一个 `naive` 模板的知识库，一批路径依次为：不存在的 `missing.md`、普通文件 `a.md`、在线挂载 `docs/` 下不存在的 `gone.pdf`、不存在且没有后缀的 `missing`
+- **THEN** 201；`documents` 只有 `a.md`；`rejected` 依次为 `missing.md`（`not_file`）、`docs/gone.pdf`（`not_file`）、`missing`（`unsupported_type`，后缀判定在打开之前）；没有 `sandbox.reject`；假 RAGFlow 恰收到一次上传
 
 #### Scenario: 后缀与空文件
 - **WHEN** 一个 `manual` 模板的库，一批路径依次为：`a.txt`、`b.PDF`、`noext`、一个 0 字节的 `c.pdf`、`d.docx`
@@ -289,11 +326,11 @@
 6. 解析触发失败：删除该文档，按「RAGFlow 出站请求」映射返回；回 `code:0` 而 `success_count` 为 0 时同样删除该文档，返回 400 `kb_rejected`。
 7. 都成功后，在同一事务里插行并审计 `kb.ingest`。
 
-**成功应答**：201 `DocumentView`，其中 `source` 为 `upload`，`workspaceId` 与 `path` 为 `null`。
+**成功应答**：201 `DocumentView`，SHALL 不经读取 RAGFlow 得出：`source` 为 `upload`，`workspaceId`、`path` 与 `sourceChanged` 为 `null`，`status` 为 `queued`，`chunkCount`、`message` 为 `null`。
 
 #### Scenario: 上传不落盘
 - **WHEN** 上传一个 1 MiB 的文件
-- **THEN** 201；假 RAGFlow 收到的文件字节与请求体一致，multipart 的 `Content-Length` 与实际字节数相等；上传期间与之后，`SANDBOX_ROOT`、`OMP_STATE_DIR` 与系统临时目录里都没有新增文件
+- **THEN** 201，应答 `status:"queued"`、`chunkCount:null`、`message:null`、`sourceChanged:null`；假 RAGFlow 收到的文件字节与请求体一致，multipart 的 `Content-Length` 与实际字节数相等，没有收到文档列表请求；上传期间与之后，`SANDBOX_ROOT`、`OMP_STATE_DIR` 与系统临时目录里都没有新增文件
 
 #### Scenario: 超限与缺少长度
 - **WHEN** 以 `KB_UPLOAD_MAX_BYTES + 1` 的 `Content-Length` 上传；另一次以分块传输、不带 `Content-Length` 上传
@@ -302,6 +339,14 @@
 #### Scenario: 上传的后缀与空文件
 - **WHEN** 向 `paper` 模板的库上传 `a.txt`；再上传一个 `Content-Length: 0` 的 `b.pdf`
 - **THEN** 两次都是 400 `kb_file_unsupported`，没有出站请求；两条 `kb.ingest_reject`，`reason` 依次为 `unsupported_type`、`empty`
+
+#### Scenario: 上传回不支持的文件
+- **WHEN** 上传后缀在模板表里的 `a.pdf`，假 RAGFlow 应答 HTTP 200 `code:500` 与实测记录里不支持文件的 message
+- **THEN** 400 `kb_file_unsupported`；一条 `kb.ingest_reject`（`reason: unsupported_type`）；没有文档行，没有 `kb.ingest`；假 RAGFlow 没有收到解析触发与删除
+
+#### Scenario: 上传的文档数上限
+- **WHEN** 知识库已有 500 份文档时上传；另一次已有 499 份时两个上传并发
+- **THEN** 第一次 409 `kb_limit`，一条 `kb.ingest_reject`（`reason: limit`），没有出站请求；第二次恰一个 201、一个 409 `kb_limit`，最终恰 500 行
 
 #### Scenario: 客户端中断
 - **WHEN** 请求声明 1 MiB，发送 512 KiB 后断开连接
@@ -313,7 +358,7 @@
 
 ### Requirement: 文档列表与状态
 所有者 SHALL 能经 `GET /api/kb/bases/:id/documents` 读文档列表，应答 200 `{documents: DocumentView[]}`，按 `created_at` 升序，带 no-store。
-- 状态以 RAGFlow 为准，每次请求时读取：分页读取该数据集的全部文档（`page_size` 为 100，读到 `total` 为止），按 RAGFlow 文档 id 关联；不起后台轮询。
+- 状态以 RAGFlow 为准，每次请求时读取：先读本地行，再分页读取该数据集的全部文档（`page_size` 为 100，`orderby=create_time`，`desc=false`，读到 `total` 为止，不设页数上限），按 RAGFlow 文档 id 关联；不起后台轮询。翻页期间的写入可能让这次读漏掉一行，该条显示 `missing`，下一次读取修正。
 - 数据集本身为 not-found 时，全部文档为 `missing`。
 - RAGFlow 不可达：503 `kb_unavailable`。
 
@@ -342,12 +387,16 @@
 - **WHEN** 假 RAGFlow 对八份文档依次报告 `UNSTART`、`CREATED`、`SCHEDULED`、`RUNNING`、`STOPPING`、`STOPPED`、`COMPLETED`（12 个切片）、`FAILED`，且 `status` 字段都是 `"1"`；第九份本地记录在 RAGFlow 列表里不存在
 - **THEN** 九条 `status` 依次为 `unparsed`、`queued`、`queued`、`parsing`、`parsing`、`cancelled`、`done`（`chunkCount: 12`）、`failed`（`message: "解析失败"`）、`missing`
 
+#### Scenario: 数据集丢失
+- **WHEN** 一个有两份文档的知识库，假 RAGFlow 对文档列表应答 `code:404`
+- **THEN** 200；两条的 `status` 都是 `missing`，`chunkCount`、`message` 为 `null`
+
 #### Scenario: 0 切片
 - **WHEN** 假 RAGFlow 报告一份文档 `COMPLETED` 且 `chunk_count` 为 0
 - **THEN** 该条 `status` 为 `done`，`chunkCount` 为 0
 
 #### Scenario: 未知运行状态
-- **WHEN** 假 RAGFlow 的列表里有一份文档的 `ingestion_status` 不在记录的八种之内
+- **WHEN** 经故障注入，假 RAGFlow 的列表里有一份文档的 `ingestion_status` 不在记录的八种之内
 - **THEN** 503 `kb_unavailable`
 
 #### Scenario: 源文件变更
@@ -368,18 +417,24 @@
 - 本地上传的文档：400 `bad_request`。
 - 按「工作空间来源入库」的规则重读源文件。读取被拒（含工作空间已不可见、`outside`、`not_file`、`offline`、`empty`、`too_large`、`changed`、源文件不存在）：409 `kb_source_unreadable`，行不变。`outside` 仍由 facade 写 `sandbox.reject`。
 - 读取成功：上传为新文档并触发解析。
-- 上传或解析触发失败：删除新文档，按映射返回，行不变。
-- 成功：在单事务里更新该行的 RAGFlow 文档 id、`size` 与 `source_mtime_ms`，并审计 `kb.ingest`；再按下面的删除写法删除旧的 RAGFlow 文档，失败只写一行 `{"event":"kb_document_leak","documentId":<id>}`。应答 200 `DocumentView`。
+- 上传失败：`kb_rejected` 时 400 `kb_rejected`；不支持的文件时 400 `kb_file_unsupported`；不可达或数据集不存在时 503 `kb_unavailable`。行不变，没有新文档要删。
+- 解析触发失败：删除新文档，行不变。`kb_rejected` 或 `code:0` 而 `success_count` 为 0 时 400 `kb_rejected`；不可达或数据集不存在时 503 `kb_unavailable`。
+- 成功：在单事务里更新该行的 RAGFlow 文档 id、`size` 与 `source_mtime_ms`，并审计 `kb.ingest`；再按下面的删除写法删除旧的 RAGFlow 文档，失败只写一行 `{"event":"kb_document_leak","documentId":<id>}`。应答 200 `DocumentView`，SHALL 不经读取 RAGFlow 得出：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false`。
 
 **移出**：所有者 SHALL 能经 `DELETE /api/kb/bases/:id/documents?doc=<文档 id>` 移出文档，在该库的写锁下进行。
 - 允许的 `state`：`ready` 与 `rebuild_failed`；`rebuilding` 时 409 `kb_rebuilding`。
-- 先按下面的删除写法删 RAGFlow 文档：不存在视为已删；不可达时 503，行不变；结果为 `busy` 时 409 `kb_document_busy`，行不变。
+- 先按下面的删除写法删 RAGFlow 文档：不存在视为已删；结果为 `failed` 时按「RAGFlow 出站请求」映射（不可达 503），行不变；结果为 `busy` 时 409 `kb_document_busy`，行不变。
 - 再删行，并审计 `kb.document_delete`，应答 204。源文件不动。
 
 **RAGFlow 文档的删除写法**：`code:0` 不代表删成了，RAGFlow 对 `RUNNING`、`STOPPING` 的文档回 `deleted:0` 且行仍在。SHALL 检查 `deleted`：
 1. 发删除。`deleted:1` 或不存在：完成。
-2. `deleted:0`：发一次停止解析，再每 500 ms 重发删除，至多 5 s（期限经装配注入）。`deleted:1` 或不存在：完成。
-3. 到期仍为 `deleted:0`：结果为 `busy`。
+2. `deleted:0`：发一次停止解析，整个写法里只发这一次（`STOPPING` 时重复停止是空操作）。结果：
+   - `code:0`，不论 `success_count`，或不存在：继续第 3 步。
+   - 其余（不可达、被拒）：结果为 `failed`，SHALL NOT 重试。
+3. 每 500 ms 重发删除，至多 5 s（期限经装配注入）。`deleted:1` 或不存在：完成。`deleted:0`：继续。不可达：结果立即为 `failed`。
+4. 到期仍为 `deleted:0`：结果为 `busy`。
+
+第 1 步的删除不可达，结果同样为 `failed`。
 
 SHALL NOT 在 `deleted:0` 时删除本地行。
 
@@ -393,6 +448,10 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **WHEN** 源文件已被删除后对该文档重新入库
 - **THEN** 409 `kb_source_unreadable`；该行不变；假 RAGFlow 没有收到上传
 
+#### Scenario: 重新入库的失败不动行
+- **WHEN** 对同一份文档依次重新入库五次，假 RAGFlow 分别应答：上传 `code:101`；上传 `code:500` 与不支持文件的 message；上传 HTTP 503；上传成功、解析触发 HTTP 503；上传成功、解析触发 `code:0` 且 `success_count:0`
+- **THEN** 依次 400 `kb_rejected`、400 `kb_file_unsupported`、503 `kb_unavailable`、503 `kb_unavailable`、400 `kb_rejected`；后两次假 RAGFlow 收到删除新文档的请求，前三次没有；五次该行都不变，旧文档都没有被删，没有 `kb.ingest`
+
 #### Scenario: 移出不动源文件
 - **WHEN** 移出一份工作空间来源的文档
 - **THEN** 204；工作空间里的源文件字节不变；恰一条 `kb.document_delete`
@@ -400,6 +459,18 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 #### Scenario: 移出解析中的文档
 - **WHEN** 假 RAGFlow 对一份文档的删除先应答 `code:0`、`deleted:0`，收到停止解析之后应答 `deleted:1`
 - **THEN** 204；假 RAGFlow 依次收到删除、停止、删除；行已删除，恰一条 `kb.document_delete`
+
+#### Scenario: 停止已在 STOPPING 的文档
+- **WHEN** 一份文档处于 `STOPPING`：假 RAGFlow 对删除应答 `deleted:0`，对停止应答 `code:0`、`success_count:1` 且状态不变；再两次删除仍是 `deleted:0`，随后文档变为 `STOPPED`，删除应答 `deleted:1`
+- **THEN** 204；假 RAGFlow 恰收到一次停止解析与四次删除
+
+#### Scenario: 停止解析的其余结果
+- **WHEN** 删除应答 `deleted:0` 之后，假 RAGFlow 对停止解析依次在三次移出里应答：`code:0`、`success_count:0`；`code:100` 与 `Documents not found: ['<id>']`；HTTP 503
+- **THEN** 前两次继续重发删除，得到 `deleted:1` 或不存在，204；第三次 503 `kb_unavailable`，行不变，没有再发删除
+
+#### Scenario: 重试期间不可达
+- **WHEN** 删除应答 `deleted:0`，停止解析成功，重发的删除应答 HTTP 503
+- **THEN** 立即 503 `kb_unavailable`，不等到期；行不变，没有 `kb.document_delete`
 
 #### Scenario: 停不下来的文档
 - **WHEN** 假 RAGFlow 对删除一直应答 `code:0`、`deleted:0`（重试期限经装配注入缩短）
@@ -437,6 +508,7 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - 工作空间来源的记录，`workspaceId` 列为该工作空间；其余为 null。
 - 每条成功审计与它对应的那一次本地写入在同一事务内；本地写入失败时不留审计。确认重建的那次保存写 `kb.settings` 与 `kb.rebuild` 两条，其余每次写入一条。
 - `kb.ingest_reject` 没有对应的本地写入，单独写入。
+- 设置保存没有实际写入时（`chatModelId` 由 `null` 到 `null`）不写审计；`kb.settings` 的 detail 只含实际变化的键。
 
 #### Scenario: detail 不含敏感内容
 - **WHEN** 以内容含哨兵串的文件完成一次工作空间入库、一次本地上传、一次重新入库与一次移出，并以带密钥哨兵的 body 保存一次知识库模型设置
@@ -450,13 +522,14 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 `/center?tab=knowledge-bases` SHALL 在 `GET /api/kb/status` 为 `enabled:true` 时对所有用户可见（见 model-registry「中心页外壳」），渲染当前用户的知识库。
 
 **状态行**：
-- `available:false`：页顶以 `role="alert"` 显示 `知识库服务暂不可用` 与 `重试` 按钮（重取状态与列表），其余控件不渲染。
+- `available:false`：页顶以 `role="alert"` 显示 `知识库服务暂不可用` 与 `重试` 按钮（重取状态与列表），本 tab 其余控件不渲染。模型 tab 的「知识库模型」段不受影响（ragflow-backend「知识库可用性」）。
 - `embeddingReady:false`：显示 `管理员尚未配置知识库嵌入模型`，不渲染 `新建知识库`。
 
 **列表**：
 - 每个知识库一行：名称、模板中文名、`RAPTOR` / `知识图谱` 标签与其编译状态、文档数、`重建中` / `重建失败` 标记。
 - 编译状态文案：`pending` 为 `尚未产出`，旁注 `解析完成后长时间没有变化，可能是知识库对话模型不可用，请联系管理员`；`running` 为 `编译中`；`done` 为 `已完成`；`failed` 为 `有文档失败`；`compile` 为 `null` 时为 `状态未知`。这些文案 SHALL NOT 含 `编译失败`：`pending` 没有失败信号，`failed` 来自文档。
 - 点行进入详情。
+- 每行有 `删除知识库`，先弹确认对话框，确认后恰调用一次 `deleteKnowledgeBase`；`state` 为 `rebuilding` 时不渲染，`rebuild_failed` 时渲染。
 - 没有知识库时显示空态 `还没有知识库`。
 
 **`新建知识库` 对话框**：
@@ -474,10 +547,9 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
   - `移出`。409 `kb_document_busy` 时行内显示信封文案，行仍在。
 - **`从工作空间入库` 对话框**：选工作空间，逐级浏览目录树并勾选文件，至多 `uploadMaxFiles` 个；提交恰调用一次 `ingestFromWorkspace`；结果里被拒的条目逐条显示 `message`。
 - **`上传文件`**：文件选择，一次至多 `uploadMaxFiles` 个；单个超过 `uploadMaxBytes` 在客户端就地拒绝；逐个调用 `uploadToKnowledgeBase`，失败逐个显示信封文案（含 `kb_file_unsupported`）。
-- **`删除知识库`**：先弹确认对话框。
 - 知识库 `state` 不是 `ready` 时，入库、上传与重新入库按钮不渲染；`rebuild_failed` 时 `移出` 仍渲染，`rebuilding` 时不渲染。
 
-**刷新**：详情里存在 `queued` / `parsing` 文档且页面可见时，每 3 秒重取文档列表；页面隐藏时停止。`unparsed` 不触发刷新。
+**刷新**：详情里存在 `queued` / `parsing` 文档且页面可见时，每 3 秒重取文档列表；页面隐藏时停止。`unparsed` 不触发刷新。入库、上传与重新入库成功后重取一次文档列表，写端点返回的 `queued` 由此进入 3 秒刷新。
 
 **API 客户端** `web/src/lib/api-kb.ts` SHALL 按上面各端点的应答形状严格解析全部应答（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型与方法。
 

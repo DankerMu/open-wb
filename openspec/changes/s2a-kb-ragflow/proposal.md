@@ -15,7 +15,7 @@
 ## What Changes
 
 - **方向变更文档**：新 ADR-0016「知识库以 RAGFlow 服务为后端」取代 ADR-0002；ADR-0005 补充（Infinity 经 RAGFlow 的 `DOC_ENGINE` 配置）；`ATTRIBUTION.md` 的 RAGFlow 条目改为「部署而非吸收」；`CONTEXT.md`（kbservice 术语、不变量 4 的措辞）、`PLAN.md`、`IMPLEMENTATION_PLAN.md`（S2a 改写、S2b / S2c / S4b 的连带调整、Next Step 更新）、`docs/architecture/system.md`。
-- **rc2 接口实测**（已完成，`docs/reviews/2026-10-28-ragflow-rc2-api.md`）：对共用 RAGFlow 栈（只复用，绝不 up / down / 改配置）核实建库、模板、上传、解析、状态、原件下载、删除、嵌入模型约束、模型下发、RAPTOR / 知识图谱与错误码；结论钉住假 RAGFlow 协议。本 change 已按记录 §18 全部事实修订（issue #1863）；tasks 1.5 另补测任务日志的分页与批次形状。
+- **rc2 接口实测**（已完成，`docs/reviews/2026-10-28-ragflow-rc2-api.md`）：对共用 RAGFlow 栈（只复用，绝不 up / down / 改配置）核实建库、模板、上传、解析、状态、原件下载、删除、嵌入模型约束、模型下发、RAPTOR / 知识图谱与错误码；结论钉住假 RAGFlow 协议。本 change 已按记录 §18 全部事实修订（issue #1863）；tasks 1.5 的补测（任务日志的分页与批次形状）已完成，结果在同一份记录里。
 - **kbservice 退役**：删 `kbservice/` 与全部 Python 工具链引用（`verification-harness` 的 CI 接线与 action 清单随之改）。
 - **配置**（四键）：`RAGFLOW_BASE_URL`（缺省未配置，即知识库关闭）、`RAGFLOW_API_KEY_FILE`（配了地址必填；属主为本进程 uid、mode `0600` 的普通文件）、`KB_UPLOAD_MAX_BYTES`（缺省 104857600）、`KB_UPLOAD_MAX_FILES`（缺省 10）。新启动阶段 `kb_key` 读密钥文件；配置错误启动失败，RAGFlow 不可达不阻断启动。
 - **迁移 050**：`kb_settings`（单行：知识库嵌入模型的名称、上游地址与密钥、嵌入代数、知识库对话模型 → `models(id)`、重建发起人）、`knowledge_bases`（含当前一代与重建中一代的 RAGFlow 数据集、画布、模板组 id）、`kb_documents`。
