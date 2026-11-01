@@ -572,6 +572,7 @@ RAGFlow 的失败：
     - 未观察到的路由上的 `code:403`（D4）；
     - 同一路由上别的 `100`、`101`、`102`；
     - `DELETE /datasets` 回 `{code:0, data:{deleted:[]}}`：这是 §4.6 里空 `ids` 的应答形状，本系统不发空 id，到不了这里，缺 `success_count` 走 `kb_unavailable`；
+    - 成功应答缺字段；HTTP 200 的 `code:401`：记录里没有，D4 的映射按防御写法处理。
     - `GET /models/default` 的 `data.models` 只有一种缺省：记录里只观察到两种都在或全空（§11.4），D7 的核对对缺一种按缺失处理，是防御性的。
     - 内置 pipeline 不带 `graph`，或不是恰一个 chunker：记录里全部内置模板都带 `graph`、都恰一个 chunker（§5.1 (3)），D9 的校验是防御性的。
 

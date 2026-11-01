@@ -1,9 +1,11 @@
 /**
  * 假 RAGFlow 的脚本层（`fake-ragflow.mjs` 的兄弟文件，design D17）：用例按路由接管应答。
  *
- * - `answer()`：协议应答，`code` 只收实测记录里出现过的值。
+ * - `answer()`：协议应答，HTTP 状态与 `code` 只收实测记录里出现过的配对。版本接口以外的路由先过鉴权（§12），
+ *   被挡下的请求不消耗脚本。
  * - `fault()`：故障注入，种类是闭集，只限 tasks.md 头部的四种：传输层（`hang`、`hold`、`reset`、`cut`、`stall`）、
- *   HTTP 层（`redirect`、`status`、`not_json`、`oversize`）、漂移值（`version`）、防御性组合（`combo`）。
+ *   HTTP 层（`redirect`、`status`、`not_json`、`oversize`）、漂移值（`version`）、防御性组合（`combo`）。正文里的
+ *   `code` 同样只收记录里的值，所以 `108`、`109` 进不来；`not_json` 的正文必须真不是 JSON。故障不过鉴权。
  *
  * 一条脚本缺省生效一次，先登记的先生效，用完恢复正常。`hold` 放行后请求走正常路由。
  */
@@ -11,8 +13,11 @@ export const JSON_TYPE = "application/json; charset=utf-8";
 
 /** 记录里出现过的 body code（§3–§12）。 */
 const RECORDED_CODES = new Set([0, 100, 101, 102, 103, 400, 401, 403, 404, 409, 500, 501]);
-/** tasks.md 头部的防御性组合。 */
-const COMBO_CODES = new Set([100, 101, 102, 403]);
+/** §12：HTTP 200 之外的配对，状态与 `code` 相同。 */
+const NON_200_PAIRS = new Set([400, 401, 404]);
+/** tasks.md 头部的防御性组合：`0` 是成功应答缺字段，`401` 是 HTTP 200 的 `code:401`。 */
+const COMBO_CODES = new Set([0, 100, 101, 102, 401, 403]);
+const BODY_CODE = /"code"\s*:\s*"?(\d+)/gu;
 
 export function send(response, reply) {
   if (reply.bytes !== undefined) {
@@ -28,8 +33,14 @@ export function send(response, reply) {
   send(response, { status: reply.status, bytes, headers: { "content-type": JSON_TYPE } });
 }
 
+/** 调用方没给长度时，长度大于正文：不走 chunked，§9 的下载始终带 `Content-Length`。 */
 function partial(response, fault) {
-  response.writeHead(200, { "content-type": JSON_TYPE, ...fault.headers });
+  const length = Buffer.byteLength(fault.body) + 1;
+  response.writeHead(200, {
+    "content-type": JSON_TYPE,
+    "content-length": length,
+    ...fault.headers,
+  });
   response.write(fault.body);
 }
 
@@ -77,12 +88,46 @@ const FAULTS = {
   },
 };
 
+function isJson(text) {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function assertBodyCodes(fault) {
+  const text = `${fault.body ?? ""}${JSON.stringify(fault.envelope) ?? ""}`;
+  for (const [, code] of text.matchAll(BODY_CODE)) {
+    if (!RECORDED_CODES.has(Number(code))) {
+      throw new Error(`${fault.kind} body code ${code} is not in the rc2 record`);
+    }
+  }
+}
+
 function assertFault(fault) {
   if (fault.kind !== "hold" && !Object.hasOwn(FAULTS, fault.kind)) {
     throw new Error(`fake-ragflow has no fault kind ${String(fault.kind)}`);
   }
   if (fault.kind === "combo" && fault.deletedList !== true && !COMBO_CODES.has(fault.code)) {
-    throw new Error(`fake-ragflow combo takes 100, 101, 102 or 403, not ${String(fault.code)}`);
+    throw new Error(
+      `fake-ragflow combo takes 0, 100, 101, 102, 401 or 403, not ${String(fault.code)}`,
+    );
+  }
+  if (fault.kind === "status" && !(fault.status >= 500 && fault.status < 600)) {
+    throw new Error(`fake-ragflow status fault takes 5xx, not ${String(fault.status)}`);
+  }
+  if (fault.kind === "not_json" && fault.body !== undefined && isJson(fault.body)) {
+    throw new Error("fake-ragflow not_json body must not be JSON");
+  }
+  assertBodyCodes(fault);
+}
+
+function assertRecordedPair(status = 200, code) {
+  const paired = status === 200 ? code !== 401 : status === code && NON_200_PAIRS.has(status);
+  if (!RECORDED_CODES.has(code) || !paired) {
+    throw new Error(`HTTP ${String(status)} + code ${String(code)} is not in the rc2 record`);
   }
 }
 
@@ -106,22 +151,16 @@ export function createScript() {
     entries.push({ ...routePattern(route), ...reply, times: options?.times ?? 1 });
   }
 
-  function take(method, path) {
-    const entry = entries.find(
+  function find(method, path) {
+    return entries.find(
       (candidate) =>
         candidate.method === method && candidate.pattern.test(path) && candidate.times > 0,
     );
-    if (entry !== undefined) {
-      entry.times -= 1;
-    }
-    return entry;
   }
 
   return {
     answer(route, reply, options) {
-      if (!RECORDED_CODES.has(reply.code)) {
-        throw new Error(`code ${String(reply.code)} is not in the rc2 record`);
-      }
+      assertRecordedPair(reply.status, reply.code);
       const { status, ...body } = reply;
       add(route, { status, body }, options);
     },
@@ -135,12 +174,20 @@ export function createScript() {
       add(route, { gate }, options);
       return { reached: gate.reached, release: gate.release };
     },
-    /** 接管了应答返回 true；没有脚本或 `hold` 放行之后返回 false，请求走正常路由。 */
-    async serve(method, path, response) {
-      const entry = take(method, path);
+    /**
+     * 接管了应答返回 true；没有脚本或 `hold` 放行之后返回 false，请求走正常路由。`denied` 是这个请求的鉴权失败
+     * 应答，版本接口与鉴权通过时为 `undefined`。
+     */
+    async serve(method, path, response, denied) {
+      const entry = find(method, path);
       if (entry === undefined) {
         return false;
       }
+      if (entry.body !== undefined && denied !== undefined) {
+        send(response, denied);
+        return true;
+      }
+      entry.times -= 1;
       if (entry.gate !== undefined) {
         gates.add(entry.gate);
         entry.gate.arrived();

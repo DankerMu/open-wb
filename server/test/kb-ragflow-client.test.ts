@@ -6,7 +6,7 @@
 import { Readable } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import { createRagflowClient } from "../src/kb/ragflow-client.js";
-import { closedPort, holdServer } from "./models-probe-helpers.js";
+import { closedPort, holdServer, scriptedServer } from "./models-probe-helpers.js";
 import { type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
 
 const KEY = "wb-issue1840-ragflow-key";
@@ -71,7 +71,11 @@ beforeEach(async () => {
 
 afterEach(async () => {
   stderr.mockRestore();
-  await fake.close();
+  try {
+    expect(fake.unknownRoutes()).toEqual([]);
+  } finally {
+    await fake.close();
+  }
 });
 
 describe("结果映射的五条", () => {
@@ -100,7 +104,8 @@ describe("结果映射的五条", () => {
   });
 
   it("第 3 条看 body code，不看 HTTP 状态", async () => {
-    fake.answer("POST /api/v1/datasets", { status: 400, code: 102, message: SENTINEL });
+    const body = JSON.stringify({ code: 102, message: SENTINEL });
+    fake.fault("POST /api/v1/datasets", { kind: "status", status: 500, body });
     await expect(client.createDataset(DATASET)).resolves.toEqual(REJECTED);
   });
 
@@ -116,14 +121,26 @@ describe("结果映射的五条", () => {
     ["HTTP 500", () => fake.fault("POST /api/v1/datasets", { kind: "status", status: 500 })],
     [
       "HTTP 500 的 code:0",
-      () => fake.answer("POST /api/v1/datasets", { status: 500, code: 0, data: { id: "x" } }),
+      () =>
+        fake.fault("POST /api/v1/datasets", {
+          kind: "status",
+          status: 500,
+          body: '{"code":0,"data":{"id":"x"}}',
+        }),
+    ],
+    [
+      "HTTP 400 + code:400（§12）",
+      () => fake.answer("POST /api/v1/datasets", { status: 400, code: 400 }),
     ],
     ["3xx", () => fake.fault("POST /api/v1/datasets", { kind: "redirect", location: "/" })],
     ["非 JSON", () => fake.fault("POST /api/v1/datasets", { kind: "not_json" })],
     ["连接重置", () => fake.fault("POST /api/v1/datasets", { kind: "reset" })],
     ["中途断开", () => fake.fault("POST /api/v1/datasets", { kind: "cut", body: '{"code":0' })],
-    ["缺少调用点要读的字段", () => fake.answer("POST /api/v1/datasets", { code: 0, data: {} })],
-    ["data 为 null", () => fake.answer("POST /api/v1/datasets", { code: 0, data: null })],
+    [
+      "缺少调用点要读的字段",
+      () => fake.fault("POST /api/v1/datasets", { kind: "combo", code: 0, data: {} }),
+    ],
+    ["data 为 null", () => fake.fault("POST /api/v1/datasets", { kind: "combo", code: 0 })],
   ])("第 5 条：%s 是 kb_unavailable，不写认证行，不重试", async (_label, arrange) => {
     arrange();
     await expect(client.createDataset(DATASET)).resolves.toEqual(UNAVAILABLE);
@@ -160,14 +177,29 @@ describe("结果映射的五条", () => {
     await expect(client.version()).resolves.toEqual({ kind: "ok", value: "v1.0.0-rc2" });
   });
 
-  it("body code 不是数字、顶层不是对象，都不算成功", async () => {
-    fake.answer("POST /api/v1/datasets", { code: 0, data: { id: "" } });
+  it("id 为空串：缺字段，kb_unavailable", async () => {
+    fake.fault("POST /api/v1/datasets", { kind: "combo", code: 0, data: { id: "" } });
     await expect(client.createDataset(DATASET)).resolves.toEqual(UNAVAILABLE);
-    const route = "POST /api/v1/datasets";
-    fake.fault(route, { kind: "not_json", body: '{"code":"0","data":{"id":"x"}}' });
-    await expect(client.createDataset(DATASET)).resolves.toEqual(UNAVAILABLE);
-    fake.fault(route, { kind: "not_json", body: "[0]" });
-    await expect(client.createDataset(DATASET)).resolves.toEqual(UNAVAILABLE);
+  });
+
+  it.each([['{"code":0,"data":{"id":"x"}'], ["code:0"]])(
+    "正文不是 JSON（%s）：不算成功",
+    async (body) => {
+      fake.fault("POST /api/v1/datasets", { kind: "not_json", body });
+      await expect(client.createDataset(DATASET)).resolves.toEqual(UNAVAILABLE);
+    },
+  );
+
+  // 这两种形状记录里没有，也不在 tasks.md 头部的四种故障里，所以不经夹具。
+  it.each([
+    ["body code 不是数字", '{"code":"0","data":{"id":"x"}}'],
+    ["顶层不是对象", "[0]"],
+  ])("%s：不算成功", async (_label, body) => {
+    const port = await scriptedServer((response) => {
+      response.end(body);
+    });
+    const other = clientOf(`http://127.0.0.1:${String(port)}`);
+    await expect(other.createDataset(DATASET)).resolves.toEqual(UNAVAILABLE);
   });
 });
 
@@ -305,7 +337,7 @@ describe("成功路径", () => {
     ["行缺 chunk_count", { docs: [{ ...LISTED, chunk_count: undefined }], total: 1 }],
     ["行缺 id", { docs: [{ ...LISTED, id: undefined }], total: 1 }],
   ])("文档列表%s：kb_unavailable", async (_label, data) => {
-    fake.answer("GET /api/v1/datasets/*/documents", { code: 0, data });
+    fake.fault("GET /api/v1/datasets/*/documents", { kind: "combo", code: 0, data });
     await expect(client.listDocuments(ABSENT, 1)).resolves.toEqual(UNAVAILABLE);
   });
 
@@ -424,7 +456,8 @@ describe("成功码下的失败", () => {
   });
 
   it("DELETE /datasets 的 success_count 不是 1：kb_unavailable", async () => {
-    fake.answer("DELETE /api/v1/datasets", {
+    fake.fault("DELETE /api/v1/datasets", {
+      kind: "combo",
       code: 0,
       data: { errors: [], success_count: 0 },
     });
@@ -441,7 +474,7 @@ describe("成功码下的失败", () => {
       (c: Client) => c.uploadDocument("a", multipart("a.txt", "x")),
     ],
   ])("%s 的 code:0 缺字段：kb_unavailable", async (_label, route, invoke) => {
-    fake.answer(route, { code: 0, data: {} });
+    fake.fault(route, { kind: "combo", code: 0, data: {} });
     await expect(invoke(client)).resolves.toEqual(UNAVAILABLE);
   });
 
@@ -463,7 +496,7 @@ describe("权限错误的防御性映射", () => {
   });
 
   it("body code:401 同样写一行；HTTP 401 不看 body", async () => {
-    fake.answer("POST /api/v1/datasets", { code: 401 });
+    fake.fault("POST /api/v1/datasets", { kind: "combo", code: 401 });
     await expect(client.createDataset(DATASET)).resolves.toEqual(UNAVAILABLE);
     expect(logged).toEqual([AUTH_FAILED]);
     clock += 60_000;
@@ -551,7 +584,10 @@ describe("key 只走请求头", () => {
   });
 
   it("结果对象不含 key 与上游密钥", async () => {
-    fake.answer("POST /api/v1/providers/*/instances", { code: 500, message: UPSTREAM_KEY });
+    fake.answer("POST /api/v1/providers/*/instances", {
+      code: 500,
+      message: `${UPSTREAM_KEY} ${KEY}`,
+    });
     const result = await client.createModelInstance(INSTANCE);
     expect(JSON.stringify(result)).not.toContain(UPSTREAM_KEY);
     expect(JSON.stringify(result)).not.toContain(KEY);
@@ -703,13 +739,15 @@ describe("RAGFlow 的 message 不外泄", () => {
     ],
   ];
 
-  it.each(rows)("%s：结果对象、日志与 stderr 都没有哨兵", async (_label, arrange, invoke) => {
+  it.each(rows)("%s：结果对象、日志与 stderr 都没有哨兵与 key", async (_label, arrange, invoke) => {
     arrange();
     const result = await invoke();
     expect(JSON.stringify(result)).not.toContain(SENTINEL);
     expect(JSON.stringify(logged)).not.toContain(SENTINEL);
+    expect(JSON.stringify(logged)).not.toContain(KEY);
     const written = stderr.mock.calls.map(([chunk]) => String(chunk)).join("");
     expect(written).not.toContain(SENTINEL);
+    expect(written).not.toContain(KEY);
   });
 
   it("结果只有 kind，失败不带原始 code 与 message", async () => {

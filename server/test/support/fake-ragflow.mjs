@@ -3,8 +3,24 @@
  *
  * - 协议应答：路径、字段、状态值与 code 全部抄自 `docs/reviews/2026-10-28-ragflow-rc2-api.md`，注释写小节号。
  *   处理函数名带 `Absent` 的路由只有「不存在」一支：本组没有实现存在分支，存在时落到未知路由。`answer()` 是
- *   用例脚本化的协议应答，`code` 只收记录里出现过的值，所以 `108`、`109` 进不来。
- * - 故障注入：`fault()`，只限 tasks.md 头部的四种，种类是闭集，在 `fake-ragflow-script.mjs`。夹具不做分块下载。
+ *   用例脚本化的协议应答，HTTP 状态与 `code` 只收记录里的配对，所以 `108`、`109` 进不来。
+ * - 故障注入：`fault()`，只限 tasks.md 头部的四种，种类是闭集，在 `fake-ragflow-script.mjs`。
+ *
+ * 记录里没有的行为落到未知路由，不猜。处理函数返回 `undefined` 的情形：解析与停止遇到 §8.1、§8.2 表外的状态；
+ * 批量停止与空 `document_ids` 的停止；§10 混合批次之外的批量删文档；`DELETE /datasets` 的 `ids` 不是数组、含
+ * 重复；上传带 `?type=` 的合法取值；multipart 缺结束边界；一次多个文件里有被拒的。
+ *
+ * 外推，记录里没有原文，用例不要钉死：
+ * - 缺 `name` 的 `102` 来自 §12 的「缺字段」，message 借用全空白名字的那句；`name`、`parser_id`、`embedding_model`
+ *   的校验次序里，只有 `parser_id` 先于 `name` 有依据（§4.3 不带 `name` 的行）。
+ * - `ids` 含重复的 `101` 只有 code（§8.5），message 是这里写的。
+ * - 上传行的 `type`：记录只见过 `pdf` 与 `doc`（§7.4），`pdf` 之外一律 `doc`。
+ *
+ * 与实例的差异：
+ * - 上传应答带 `Content-Length`，实例走 chunked（§7.1）。tasks.md 头部「分块下载不进夹具」只限下载，上传应答
+ *   用哪种分帧不影响客户端；下载与实例一样始终带 `Content-Length`（§9）。
+ * - `embedding_model` 只校验三段式，不校验模型与提供方存在（§4.4 的两行 `102`）：tasks 5.2 只要求三段式，模型路由
+ *   在组 8，归组 8。
  *
  * 文档状态是静态的：解析与停止按当前状态应答，不自动迁移，状态由用例经 `setDocumentStatus` 设置（实测里迁移
  * 是异步的，用例要的是确定的状态）。
@@ -52,20 +68,40 @@ const PARSER_IDS = new Set([
 const PARSER_ERROR =
   "input should be 'general', 'qa', 'manual', 'table', 'paper', 'book', 'laws', 'presentation', 'picture', 'one', 'audio' or 'email'";
 const EMBEDDING_FORMAT = "embedding model identifier must follow <model_name>@<provider> format";
-/** 表 C 末列的并集：不在其中即 §7.1 的不支持。 */
+/**
+ * 表 C 末列的并集，加 §9 上传成功的 `json`。只有 §7.1 的 `bin.exe`、`thing.zzz`、`noext` 是实测的拒绝，其余不在
+ * 这里的后缀被拒都是由表 C 推断的。
+ */
 const SUFFIXES = new Set(
   (
     "doc docx htm html md markdown mdx pdf xls xlsx csv txt py js java c cpp h php go ts sh cs kt sql " +
     "eml ppt pptx bmp gif jpeg jpg png svg tif tiff webp 3gp 3gpp avi flv mkv mov mp4 mpeg mpg webm wmv " +
-    "aac aiff ape au da flac midi mp3 ogg oggvorbis realaudio vqf wav wave wma"
+    "aac aiff ape au da flac midi mp3 ogg oggvorbis realaudio vqf wav wave wma json"
   ).split(" "),
 );
+const MAX_DATASET_NAME = 128;
+const MAX_FILE_NAME_BYTES = 255;
+/** §7.1 的 message 列出的取值。 */
+const UPLOAD_TYPES = new Set(["local", "web", "empty"]);
 /** §8.5：这两种状态下删除回 `deleted:0`。 */
 const UNDELETABLE = new Set(["RUNNING", "STOPPING"]);
-/** §8.1：这三种状态才会新启动任务。 */
-const PARSEABLE = new Set(["UNSTART", "FAILED", "STOPPED"]);
-/** §8.2：这两种状态不能停止。 */
-const UNSTOPPABLE = new Set(["UNSTART", "COMPLETED"]);
+/** §8.1 的表：状态到 `success_count`。 */
+const PARSE_STARTED = new Map([
+  ["UNSTART", 1],
+  ["FAILED", 1],
+  ["STOPPED", 1],
+  ["RUNNING", 0],
+  ["COMPLETED", 0],
+]);
+/** §8.2 的表：状态到能不能停止。 */
+const STOPPABLE = new Map([
+  ["RUNNING", true],
+  ["SCHEDULED", true],
+  ["STOPPED", true],
+  ["STOPPING", true],
+  ["UNSTART", false],
+  ["COMPLETED", false],
+]);
 const CANT_STOP = "Can't stop parsing document that has not started or already completed";
 const CRLF = Buffer.from("\r\n");
 const HEADER_END = Buffer.from("\r\n\r\n");
@@ -136,11 +172,22 @@ function embeddingRejection(model) {
     : failure(102, EMBEDDING_FORMAT);
 }
 
+/** §4.5。缺 `name` 的 message 是外推，见文件头。 */
+function nameRejection(name) {
+  if (typeof name !== "string" || name.trim() === "") {
+    return failure(102, "dataset name can't be empty");
+  }
+  return name.length > MAX_DATASET_NAME
+    ? failure(102, `Dataset name length is ${name.length} which is large than 128`)
+    : undefined;
+}
+
 function createDataset(state, request) {
   const body = request.body;
   const rejection =
     extraField(body, DATASET_FIELDS) ??
     templateRejection(body) ??
+    nameRejection(body.name) ??
     embeddingRejection(body.embedding_model);
   if (rejection !== undefined) {
     return rejection;
@@ -173,12 +220,18 @@ function deleteDatasets(state, request) {
   if (extra !== undefined) {
     return extra;
   }
-  const ids = Array.isArray(body.ids) ? body.ids : [];
+  const ids = body.ids ?? [];
+  if (!Array.isArray(ids)) {
+    return undefined; // §4.6 只有空数组、缺失与 `null`。
+  }
   if (ids.length === 0) {
     return { json: { code: 0, data: { deleted: [] }, message: null } };
   }
   if (!ids.every(isUuid)) {
     return failure(101, INVALID_UUID);
+  }
+  if (new Set(ids).size !== ids.length) {
+    return undefined; // 重复的 id 只在删文档上测过（§8.5）。
   }
   if (!ids.every((id) => state.datasets.has(id))) {
     return failure(403, "Permission denied");
@@ -203,6 +256,7 @@ function partOf(bytes) {
   };
 }
 
+/** 部件列表；没有 `boundary` 或缺结束边界时是 `null`：这样的请求体记录里没有。 */
 function parseMultipart(contentType, bytes) {
   const boundary = /boundary="?([^";]+)"?/u.exec(contentType)?.[1];
   if (boundary === undefined) {
@@ -212,19 +266,20 @@ function parseMultipart(contentType, bytes) {
   const closing = Buffer.concat([CRLF, delimiter]);
   const parts = [];
   let at = bytes.indexOf(delimiter);
-  while (
-    at !== -1 &&
-    bytes.subarray(at + delimiter.length, at + delimiter.length + 2).toString() !== "--"
-  ) {
-    const start = at + delimiter.length + CRLF.length;
+  while (at !== -1) {
+    const after = at + delimiter.length;
+    if (bytes.subarray(after, after + 2).toString() === "--") {
+      return parts;
+    }
+    const start = after + CRLF.length;
     const end = bytes.indexOf(closing, start);
     if (end === -1) {
-      break;
+      return null;
     }
     parts.push(partOf(bytes.subarray(start, end)));
     at = end + CRLF.length;
   }
-  return parts;
+  return null;
 }
 
 function suffixOf(name) {
@@ -232,22 +287,32 @@ function suffixOf(name) {
   return dot === -1 ? "" : name.slice(dot + 1);
 }
 
+/** 重名时加序号，取第一个没被占的；`fold` 决定比较时算不算大小写。 */
+function numberedName(names, stem, tail, fold) {
+  const taken = new Set(names.map(fold));
+  let name = `${stem}${tail}`;
+  for (let round = 1; taken.has(fold(name)); round += 1) {
+    name = `${stem}(${round})${tail}`;
+  }
+  return name;
+}
+
+/** §4.5：`OWB-DUP` 撞上 `owb-dup`、`owb-dup(1)` 得 `OWB-DUP(2)`。 */
+function freeDatasetName(datasets, name) {
+  const names = [...datasets.values()].map((dataset) => dataset.name);
+  return numberedName(names, name, "", (text) => text.toLowerCase());
+}
+
 /** §7.1：同名改名，内容相同与否都一样。 */
 function freeName(dataset, name) {
-  const names = new Set([...dataset.documents.values()].map((document) => document.name));
-  if (!names.has(name)) {
-    return name;
-  }
+  const names = [...dataset.documents.values()].map((document) => document.name);
   const dot = name.lastIndexOf(".");
   const [stem, tail] = dot === -1 ? [name, ""] : [name.slice(0, dot), name.slice(dot)];
-  let round = 1;
-  while (names.has(`${stem}(${round})${tail}`)) {
-    round += 1;
-  }
-  return `${stem}(${round})${tail}`;
+  return numberedName(names, stem, tail, (text) => text);
 }
 
 function uploadedRow(dataset, document) {
+  const suffix = suffixOf(document.name);
   return {
     chunk_count: 0,
     dataset_id: dataset.id,
@@ -258,10 +323,19 @@ function uploadedRow(dataset, document) {
     parser_id: dataset.parserId,
     size: document.content.length,
     source_type: "local",
-    suffix: suffixOf(document.name),
+    suffix,
     token_count: 0,
-    type: "doc",
+    type: suffix.toLowerCase() === "pdf" ? "pdf" : "doc", // §7.4，其余取值是外推，见文件头。
   };
+}
+
+function fileRejection({ filename }) {
+  if (Buffer.byteLength(filename) > MAX_FILE_NAME_BYTES) {
+    return failure(101, "File name must be 255 bytes or less.");
+  }
+  return SUFFIXES.has(suffixOf(filename).toLowerCase())
+    ? undefined
+    : failure(500, `${filename}: This type of file has not been supported yet!`);
 }
 
 function upload(state, request, [datasetId]) {
@@ -269,13 +343,24 @@ function upload(state, request, [datasetId]) {
   if (dataset === undefined) {
     return failure(102, `Can't find the dataset with ID ${datasetId}!`);
   }
-  const files = (request.parts ?? []).filter((part) => part.field === "file");
+  const type = request.params.get("type");
+  if (type !== null) {
+    // 合法取值的行为没有测过，所以落到未知路由。
+    return UPLOAD_TYPES.has(type)
+      ? undefined
+      : failure(101, '"type" must be one of "local", "web", or "empty".');
+  }
+  if (request.parts === null) {
+    return undefined;
+  }
+  const files = request.parts.filter((part) => part.field === "file");
   if (files.length === 0) {
     return failure(101, "No file part!");
   }
-  const refused = files.find((file) => !SUFFIXES.has(suffixOf(file.filename).toLowerCase()));
-  if (refused !== undefined) {
-    return failure(500, `${refused.filename}: This type of file has not been supported yet!`);
+  const rejections = files.flatMap((file) => fileRejection(file) ?? []);
+  if (rejections.length > 0) {
+    // 一次多个文件只测过全部成功（§7.1）。
+    return files.length === 1 ? rejections[0] : undefined;
   }
   const rows = files.map((file) => {
     const name = freeName(dataset, file.filename);
@@ -293,6 +378,9 @@ function deleteDocuments(state, request, [datasetId]) {
   if (!Array.isArray(ids) || ids.length === 0) {
     return failure(102, "should either provide doc ids or set delete_all(true)");
   }
+  if (new Set(ids).size !== ids.length) {
+    return failure(101, "Duplicate ids"); // 记录只有 code（§8.5）。
+  }
   const absent = ids.find((id) => !dataset.documents.has(id));
   if (absent !== undefined) {
     return failure(
@@ -300,11 +388,15 @@ function deleteDocuments(state, request, [datasetId]) {
       `These documents do not belong to dataset ${datasetId} or Document not found: ${absent}`,
     );
   }
-  const removable = ids.filter((id) => !UNDELETABLE.has(dataset.documents.get(id).ingestionStatus));
-  for (const id of removable) {
-    dataset.documents.delete(id);
+  if (ids.length > 1) {
+    return undefined; // 批量只有上面的混合批次有记录（§10），`deleted` 的部分成功没有。
   }
-  return success({ deleted: removable.length });
+  const [id] = ids;
+  if (UNDELETABLE.has(dataset.documents.get(id).ingestionStatus)) {
+    return success({ deleted: 0 });
+  }
+  dataset.documents.delete(id);
+  return success({ deleted: 1 });
 }
 
 function documentIds(request) {
@@ -321,8 +413,11 @@ function parseDocuments(state, request, [datasetId]) {
   if (ids === undefined) {
     return failure(102, "`document_ids` is required");
   }
-  const started = ids.filter((id) => PARSEABLE.has(dataset.documents.get(id)?.ingestionStatus));
-  return success({ success_count: started.length });
+  const present = ids.flatMap((id) => dataset.documents.get(id) ?? []); // 不存在的算 0（§8.1）。
+  const started = present.map((document) => PARSE_STARTED.get(document.ingestionStatus));
+  return started.includes(undefined)
+    ? undefined
+    : success({ success_count: started.reduce((sum, count) => sum + count, 0) });
 }
 
 function stopDocuments(state, request, [datasetId]) {
@@ -331,17 +426,21 @@ function stopDocuments(state, request, [datasetId]) {
     return notFound();
   }
   const ids = documentIds(request);
-  if (ids === undefined) {
-    return undefined; // 空 `document_ids` 的停止，记录里没有。
+  if (ids?.length !== 1) {
+    return undefined; // 空 `document_ids` 与批量的停止，记录里没有。
   }
-  const absent = ids.filter((id) => !dataset.documents.has(id));
-  if (absent.length > 0) {
-    return failure(100, `Documents not found: [${absent.map((id) => `'${id}'`).join(", ")}]`);
+  const [id] = ids;
+  const document = dataset.documents.get(id);
+  if (document === undefined) {
+    return failure(100, `Documents not found: ['${id}']`);
   }
-  const blocked = ids.some((id) => UNSTOPPABLE.has(dataset.documents.get(id).ingestionStatus));
-  return blocked
-    ? success({ errors: [CANT_STOP], success_count: 0 })
-    : success({ success_count: ids.length });
+  const stoppable = STOPPABLE.get(document.ingestionStatus);
+  if (stoppable === undefined) {
+    return undefined;
+  }
+  return stoppable
+    ? success({ success_count: 1 })
+    : success({ errors: [CANT_STOP], success_count: 0 });
 }
 
 function rawJson(text) {
@@ -435,12 +534,12 @@ const ROUTES = [
   multipart: options?.multipart === true,
 }));
 
-/** §12：`Bearer` 大小写与裸密钥都被接受，错了一律 `Invalid access token`。 */
+/** §12：`Bearer`、`bearer` 与裸密钥被接受，别的写法没有测过，错了一律 `Invalid access token`。 */
 function authFailure(header, key) {
   if (header === undefined) {
     return { status: 401, ...failure(401, "Missing Authorization header") };
   }
-  return header.replace(/^bearer /iu, "") === key
+  return header.replace(/^[Bb]earer /u, "") === key
     ? undefined
     : { status: 401, ...failure(401, "Invalid access token") };
 }
@@ -511,7 +610,7 @@ function createState() {
       const canonical = parserId === "naive" ? "general" : parserId;
       const dataset = {
         id: newId(),
-        name,
+        name: freeDatasetName(datasets, name),
         parserId: canonical,
         embeddingModel: embeddingModel ?? "",
         documents: new Map(),
@@ -546,7 +645,7 @@ export async function start(options = {}) {
       entry.json = readJsonBody(bytes, contentType).parsed ?? null;
     }
     if (!contentType.startsWith("multipart/form-data")) {
-      return null;
+      return []; // 不是 multipart 就没有文件字段（§7.1 的 `No file part!`）。
     }
     const parts = parseMultipart(contentType, bytes);
     entry.multipart =
@@ -556,12 +655,10 @@ export async function start(options = {}) {
   }
 
   /** 路由与鉴权：脚本没有接管的请求走这里。 */
-  function routed(entry, request, bytes, parts, url) {
-    const found = routeOf(entry.method, entry.path);
+  function routed(found, denied, request, bytes, parts, url) {
     if (found === undefined) {
       return undefined;
     }
-    const denied = found.route.open ? undefined : authFailure(request.headers.authorization, key);
     if (denied !== undefined) {
       return denied;
     }
@@ -585,10 +682,12 @@ export async function start(options = {}) {
       return;
     }
     const parts = fillRecord(entry, bytes, request.headers["content-type"] ?? "");
-    if (await script.serve(entry.method, entry.path, response)) {
+    const found = routeOf(entry.method, entry.path);
+    const denied = found?.route.open ? undefined : authFailure(request.headers.authorization, key);
+    if (await script.serve(entry.method, entry.path, response, denied)) {
       return;
     }
-    const reply = routed(entry, request, bytes, parts, url);
+    const reply = routed(found, denied, request, bytes, parts, url);
     if (reply === undefined) {
       entry.unknown = true;
       send(response, { status: 404, ...failure(404, `Not Found: ${entry.path}`) });

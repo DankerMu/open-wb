@@ -65,6 +65,15 @@ async function fileOf(result: Awaited<ReturnType<Client["downloadDocument"]>>): 
   return text(result.value.body);
 }
 
+/** 断言失败也要关夹具。 */
+async function closeFake(): Promise<void> {
+  try {
+    expect(fake.unknownRoutes()).toEqual([]);
+  } finally {
+    await fake.close();
+  }
+}
+
 beforeEach(() => {
   logged = [];
 });
@@ -77,9 +86,7 @@ describe("流式上传（§7）", () => {
     client = clientOf(fake.baseUrl);
   });
 
-  afterEach(async () => {
-    await fake.close();
-  });
+  afterEach(closeFake);
 
   it("带 Content-Length，字节原样到达，字段名 file，回文档 id", async () => {
     const id = fake.addDataset();
@@ -196,9 +203,7 @@ describe("下载判别（§9.1，design D8）", () => {
     client = clientOf(fake.baseUrl);
   });
 
-  afterEach(async () => {
-    await fake.close();
-  });
+  afterEach(closeFake);
 
   it("带 Content-Disposition 是文件流，字节不变", async () => {
     const id = fake.addDataset();
@@ -217,17 +222,19 @@ describe("下载判别（§9.1，design D8）", () => {
     await expect(fileOf(await client.downloadDocument(id, doc))).resolves.toBe(NOT_FOUND_DOCUMENT);
   });
 
-  it("带头时不看 Content-Type 与 Content-Length，文件名含引号也不解析", async () => {
+  it("带头时不看 Content-Type：JSON 类型的 not-found 正文也是文件，文件名含引号也不解析", async () => {
     fake.fault(DOWNLOAD, {
-      kind: "cut",
+      kind: "stall",
       headers: {
         "content-disposition": 'attachment; filename="a"b.txt"',
         "content-type": "application/json; charset=utf-8",
+        "content-length": "43",
       },
-      body: "",
+      body: NOT_FOUND_DOCUMENT,
     });
-    const result = await client.downloadDocument(ABSENT, ABSENT);
-    expect(result.kind).toBe("ok");
+    await expect(fileOf(await client.downloadDocument(ABSENT, ABSENT))).resolves.toBe(
+      NOT_FOUND_DOCUMENT,
+    );
   });
 
   it("不带头：文档不存在的 code:404 是 not_found", async () => {
@@ -246,7 +253,7 @@ describe("下载判别（§9.1，design D8）", () => {
   });
 
   it("不带头的 code:0：缺文件，kb_unavailable", async () => {
-    fake.answer(DOWNLOAD, { code: 0, data: null, message: "success" });
+    fake.fault(DOWNLOAD, { kind: "combo", code: 0, message: "success" });
     await expect(client.downloadDocument(ABSENT, ABSENT)).resolves.toEqual(UNAVAILABLE);
   });
 
@@ -327,9 +334,7 @@ describe("JSON 调用的总期限", () => {
     client = clientOf(fake.baseUrl, { totalMs: 40, connectMs: 20 });
   });
 
-  afterEach(async () => {
-    await fake.close();
-  });
+  afterEach(closeFake);
 
   it("含读响应体的时间：应答头到了、正文停住也到期", async () => {
     fake.fault("POST /api/v1/datasets", { kind: "stall", body: '{"code":0' });
@@ -337,8 +342,9 @@ describe("JSON 调用的总期限", () => {
   });
 
   it("连接建好后不再按连接期限计时", async () => {
+    const slow = clientOf(fake.baseUrl, { connectMs: 20, totalMs: 2_000 });
     const gate = fake.fault("POST /api/v1/datasets", { kind: "hold" });
-    const pending = client.createDataset(DATASET);
+    const pending = slow.createDataset(DATASET);
     await gate.reached;
     await new Promise((resolve) => setTimeout(resolve, 25));
     gate.release();

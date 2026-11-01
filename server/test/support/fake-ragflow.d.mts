@@ -19,7 +19,7 @@ export interface FakeRagflowRequest {
   contentLength: number | null;
   /** 解析出的 JSON body，没有或解析失败时为 `null`。 */
   json: unknown;
-  /** multipart 请求的部件，不是 multipart 时为 `null`。 */
+  /** multipart 请求的部件；不是 multipart，或没有 `boundary`、缺结束边界时为 `null`。 */
   multipart: FakeRagflowPart[] | null;
   /** 未知路由：应答 §12 的 404。 */
   unknown: boolean;
@@ -27,7 +27,10 @@ export interface FakeRagflowRequest {
   aborted: boolean;
 }
 
-/** 协议应答：HTTP 状态缺省 200；`code` 只接受实测记录里出现过的值。 */
+/**
+ * 协议应答：只接受实测记录里出现过的配对：HTTP 200（缺省）配 `401` 之外的 `code`，或 400 / 401 / 404 配同值的
+ * `code`。版本接口以外的路由先过鉴权。
+ */
 export interface FakeRagflowAnswer {
   status?: number;
   code: number;
@@ -35,7 +38,7 @@ export interface FakeRagflowAnswer {
   data?: unknown;
 }
 
-/** 故障注入：只限 tasks.md 头部的四种。 */
+/** 故障注入：只限 tasks.md 头部的四种。正文里的 `code` 只收实测记录里的值，`108`、`109` 直接抛。 */
 export type FakeRagflowFault =
   /** 传输层：不应答，直到客户端离开或夹具关闭。 */
   | { kind: "hang" }
@@ -43,21 +46,24 @@ export type FakeRagflowFault =
   | { kind: "hold" }
   /** 传输层：不发应答头就断开连接。 */
   | { kind: "reset" }
-  /** 传输层：发出应答头与 `body` 后断开。 */
+  /** 传输层：发出应答头与 `body` 后断开。没给 `content-length` 时写一个大于正文的，不走 chunked。 */
   | { kind: "cut"; headers?: Record<string, string>; body: string }
-  /** 传输层：发出应答头与 `body` 后不再有字节，连接保持。 */
+  /** 传输层：发出应答头与 `body` 后不再有字节，连接保持。`content-length` 同上。 */
   | { kind: "stall"; headers?: Record<string, string>; body: string }
   /** HTTP 层：3xx，`body` 可带任意正文。 */
   | { kind: "redirect"; status?: number; location: string; body?: string }
   /** HTTP 层：5xx，`headers` 可带任意响应头。 */
   | { kind: "status"; status: number; body?: string; headers?: Record<string, string> }
-  /** HTTP 层：非 JSON。 */
+  /** HTTP 层：非 JSON，`body` 能解析成 JSON 时直接抛。 */
   | { kind: "not_json"; status?: number; body?: string }
   /** HTTP 层：把 `envelope` 的 JSON 用空格补到恰 `bytes` 字节。 */
   | { kind: "oversize"; bytes: number; envelope?: unknown }
   /** 漂移值：不符的版本串。 */
   | { kind: "version"; value: string }
-  /** 防御性组合：`code` 为 100、101、102、403；或 `deletedList` 即 `{code:0, data:{deleted:[]}}`。 */
+  /**
+   * 防御性组合：`code` 为 100、101、102、403；`code` 为 0 是成功应答缺字段，`data` 给缺了字段的值；`code` 为 401 是
+   * HTTP 200 的 `code:401`；或 `deletedList` 即 `{code:0, data:{deleted:[]}}`。
+   */
   | { kind: "combo"; code: number; message?: string; data?: unknown }
   | { kind: "combo"; deletedList: true };
 

@@ -27,7 +27,7 @@
 > - 需要真实 RAGFlow 的只有组 1（含 1.5），执行前按 design D16 检测；`RAGFlow 私有配置缺失` 与 `共用 RAGFlow 栈未运行或版本不符` 两种停止都在 issue 评论里报告、不开 PR、不拉起任何容器，并在本 issue 正文加一行 `Depends on #<P>`、重开 P（写明要 owner 做什么），让 picker 跳过本 issue。
 > - 假 RAGFlow 夹具按组扩展（design D17），每组只加本组用到的接口，行为分两类：
 >   - 协议应答：路径、字段、状态值与 code 必须在实测记录里有对应条目。
->   - 故障注入：用例显式脚本化，只限四种：传输层失败（挂起、挂起后放行、超时、连接失败、中途断开）；HTTP 层（3xx、5xx、非 JSON、超体积）；漂移值（不符的版本串、八种之外的 `ingestion_status`）；防御性组合（未观察到的路由上的 `code:403`；同一路由上别的 `100`、`101`、`102`；`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`；不带 `graph` 或不是恰一个 chunker 的内置 pipeline；`GET /models/default` 的 `data.models` 只有一种缺省）。
+>   - 故障注入：用例显式脚本化，只限四种：传输层失败（挂起、挂起后放行、超时、连接失败、中途断开）；HTTP 层（3xx、5xx、非 JSON、超体积）；漂移值（不符的版本串、八种之外的 `ingestion_status`）；防御性组合（未观察到的路由上的 `code:403`；同一路由上别的 `100`、`101`、`102`；`DELETE /datasets` 的 `{code:0, data:{deleted:[]}}`；不带 `graph` 或不是恰一个 chunker 的内置 pipeline；`GET /models/default` 的 `data.models` 只有一种缺省；成功应答缺字段；HTTP 200 的 `code:401`）。
 >   - `108`、`109` 与分块下载不进夹具。
 > - 每个注册新知识库路由的组，在同一 PR 里：
 >   - 把这些路由加进 `server/test/kb-disabled.test.ts` 的路由表（组 8 新建；ragflow-backend「未配置即关闭」）；
