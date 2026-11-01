@@ -1,5 +1,6 @@
 /**
- * `kb-store.test.ts` 与 `kb-schema.test.ts` 共用：`:memory:` 经真实迁移的库，与一组合法的原始行。
+ * `kb-store.test.ts`、`kb-store-settings.test.ts` 与 `kb-schema.test.ts` 共用：`:memory:` 经真实迁移的库，
+ * 一组合法的原始行，与 store 夹具。
  * 每个用例只改一个字段，所以被拒的原因只可能是这个字段。
  */
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
@@ -9,6 +10,7 @@ import { createKbStore } from "../src/kb/store.js";
 import { removeTempDirs } from "./core-db-helpers.js";
 
 export type Row = Record<string, SQLInputValue>;
+export type Store = ReturnType<typeof createKbStore>;
 
 export const T0 = 1_760_000_000_000;
 export const CHECK = /CHECK constraint failed/;
@@ -60,6 +62,44 @@ export const MODEL_ROW: Row = {
   updated_at: T0,
 };
 
+export const KEY_SENTINEL = "Snt1nelK3yQz";
+export const EMBEDDING = { name: "bge-m3", baseUrl: "http://embed/v1", apiKey: KEY_SENTINEL };
+export const REBUILD_FAILED = "重建失败，可在模型设置里重试";
+export const NEXT = { datasetId: "ds-new", canvasId: "canvas-new", templateGroupId: "group-new" };
+export const NEXT_PLAIN = { datasetId: "ds-new", canvasId: null, templateGroupId: null };
+export const PLAIN_BASE = {
+  id: hex(1),
+  ownerId: "u1",
+  name: "n",
+  template: "naive",
+  raptor: false,
+  graph: false,
+  datasetId: "d",
+  canvasId: null,
+  templateGroupId: null,
+};
+
+export const BOOM = new Error("within failed");
+export const boom = (): never => {
+  throw BOOM;
+};
+
+export function createPlainBase(store: Store, id: string, ownerId = "u1") {
+  return store.createBase({ ...PLAIN_BASE, id, ownerId, name: `库 ${id}`, datasetId: `ds-${id}` });
+}
+
+export function createCompileBase(store: Store, id: string) {
+  return store.createBase({
+    ...PLAIN_BASE,
+    id,
+    template: "paper",
+    raptor: true,
+    datasetId: "ds-old",
+    canvasId: "canvas-old",
+    templateGroupId: "group-old",
+  });
+}
+
 /** 在所在文件登记假时钟与收尾，返回开库函数：每个用例一个新库。 */
 export function useKbDatabases() {
   const opened: DatabaseSync[] = [];
@@ -87,3 +127,4 @@ export function insertRow(db: DatabaseSync, table: string, row: Row): void {
 }
 
 export const rows = (db: DatabaseSync, table: string) => db.prepare(`SELECT * FROM ${table}`).all();
+export const settingsRow = (db: DatabaseSync) => db.prepare("SELECT * FROM kb_settings").get();

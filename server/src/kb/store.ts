@@ -22,9 +22,16 @@ interface KbSettings {
   updatedAt: number;
 }
 
+/** 嵌入模型的三列：既是写入内容，也是探活写回比对的身份。 */
+interface EmbeddingConfig {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+}
+
 interface SettingsPatch {
   /** 给了就整体替换三列；`apiKey` 由调用方先定好（省略时取 `embeddingApiKey()`，D7）。 */
-  embedding?: { name: string; baseUrl: string; apiKey: string };
+  embedding?: EmbeddingConfig;
   chatModelId?: string | null;
   /** 给了即确认重建：同一事务里代数加一、全部知识库置 `rebuilding`、记下发起的管理员（D7）。 */
   rebuildActorId?: string;
@@ -110,8 +117,9 @@ const UPDATE_REBUILD_START =
   "UPDATE kb_settings SET embedding_generation = embedding_generation + 1, rebuild_actor_id = ?, updated_at = ? WHERE id = 'kb'";
 const UPDATE_REBUILD_ACTOR =
   "UPDATE kb_settings SET rebuild_actor_id = ?, updated_at = ? WHERE id = 'kb'";
+/** 探活写回只在嵌入身份不变时生效，`IS` 比较同 `models/store.ts` 的 `RECORD_PROBE`。 */
 const UPDATE_PROBE =
-  "UPDATE kb_settings SET embedding_probe_status = ?, embedding_probe_at = ?, embedding_probe_message = ? WHERE id = 'kb'";
+  "UPDATE kb_settings SET embedding_probe_status = ?, embedding_probe_at = ?, embedding_probe_message = ? WHERE id = 'kb' AND embedding_name IS ? AND embedding_base_url IS ? AND embedding_api_key IS ?";
 
 const BASE_ORDER = "ORDER BY created_at, id";
 const SELECT_BASE = "SELECT * FROM knowledge_bases WHERE id = ?";
@@ -192,13 +200,32 @@ export function createKbStore(db: DatabaseSync) {
       });
     },
 
-    /** 探活结果写三列，不动 `updated_at`（同 `models/store.ts`）。 */
-    recordEmbeddingProbe(result: ProbeResult, within?: (view: KbSettings) => void): KbSettings {
+    /**
+     * 探活结果写三列，不动 `updated_at`，只在嵌入模型仍是 `identity` 时写（同 `models/store.ts` 的
+     * `recordProbe`）。身份已变：结果丢弃、不调 `within`，`recorded` 为 `false`，`view` 是当前设置。
+     */
+    recordEmbeddingProbe(
+      identity: EmbeddingConfig,
+      result: ProbeResult,
+      within?: (view: KbSettings) => void,
+    ): { view: KbSettings; recorded: boolean } {
       return inTransaction(db, () => {
-        db.prepare(UPDATE_PROBE).run(result.status, result.at, result.message);
+        const { changes } = db
+          .prepare(UPDATE_PROBE)
+          .run(
+            result.status,
+            result.at,
+            result.message,
+            identity.name,
+            identity.baseUrl,
+            identity.apiKey,
+          );
         const view = settings();
-        within?.(view);
-        return view;
+        const recorded = Number(changes) !== 0;
+        if (recorded) {
+          within?.(view);
+        }
+        return { view, recorded };
       });
     },
 
@@ -317,6 +344,7 @@ export function createKbStore(db: DatabaseSync) {
         if (base(id)?.rebuildDatasetId == null) {
           throw new Error("knowledge base has no rebuild generation to switch to");
         }
+        assertEachListedOnce(documents);
         for (const documentId of documents.skipped) {
           assertOneRow(db.prepare(DELETE_DOCUMENT).run(id, documentId).changes);
         }
@@ -397,6 +425,14 @@ const DOCUMENT_SET_MISMATCH = "switch document set mismatch";
 
 function newId(): string {
   return randomBytes(16).toString("hex");
+}
+
+/** 一个 id 只能列一次：`replaced` 里的重复让条数虚高，最后的计数查不出，漏掉的行还指向旧数据集。 */
+function assertEachListedOnce({ replaced, skipped }: SwitchDocuments): void {
+  const ids = [...replaced.map(({ id }) => id), ...skipped];
+  if (new Set(ids).size !== ids.length) {
+    throw new Error(DOCUMENT_SET_MISMATCH);
+  }
 }
 
 function assertOneRow(changes: number | bigint): void {

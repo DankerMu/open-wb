@@ -1,70 +1,41 @@
 /**
  * Issue #1836（任务 7.2）：knowledge-bases「迁移 050 知识库 schema」的「约束」场景与 `kb/store.ts`（design D6、D8、
- * D9 的落库部分），经 `openDb(":memory:")` 的真实迁移与 `createKbStore` 这一个公开入口测。表形状的其余部分在
- * `kb-schema.test.ts`。期望值是 spec 与 design 里的字面量；密钥取值是哨兵，证明读视图带不出来。
+ * D9 的落库部分）的知识库、文档与重建，经 `openDb(":memory:")` 的真实迁移与 `createKbStore` 这一个公开入口测。
+ * 表形状的其余部分在 `kb-schema.test.ts`，设置在 `kb-store-settings.test.ts`。期望值是 spec 与 design 里的字面量。
  */
 import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import type { createKbStore } from "../src/kb/store.js";
 import {
   BASE_ROW,
+  BOOM,
+  boom,
   CHECK,
   COMPILE_ROW,
-  FOREIGN_KEY,
+  createCompileBase,
+  createPlainBase,
+  EMBEDDING,
   hex,
   insertRow,
   MODEL_ROW,
+  NEXT,
+  NEXT_PLAIN,
+  PLAIN_BASE,
+  REBUILD_FAILED,
   type Row,
   rows,
+  type Store,
+  settingsRow,
   T0,
   UPLOAD_ROW,
   useKbDatabases,
 } from "./kb-store-helpers.js";
 
-type Store = ReturnType<typeof createKbStore>;
-
-const KEY_SENTINEL = "Snt1nelK3yQz";
-const BOOM = new Error("within failed");
-const boom = (): never => {
-  throw BOOM;
-};
-const REBUILD_FAILED = "重建失败，可在模型设置里重试";
-const EMBEDDING = { name: "bge-m3", baseUrl: "http://embed/v1", apiKey: KEY_SENTINEL };
-const PLAIN_BASE = {
-  id: hex(1),
-  ownerId: "u1",
-  name: "n",
-  template: "naive",
-  raptor: false,
-  graph: false,
-  datasetId: "d",
-  canvasId: null,
-  templateGroupId: null,
-};
-
 const fresh = useKbDatabases();
 
-const settingsRow = (db: DatabaseSync) => db.prepare("SELECT * FROM kb_settings").get();
 const baseRow = (db: DatabaseSync, id: string) =>
   db.prepare("SELECT * FROM knowledge_bases WHERE id = ?").get(id);
-
-function createPlainBase(store: Store, id: string, ownerId = "u1") {
-  return store.createBase({ ...PLAIN_BASE, id, ownerId, name: `库 ${id}`, datasetId: `ds-${id}` });
-}
-
-function createCompileBase(store: Store, id: string) {
-  return store.createBase({
-    ...PLAIN_BASE,
-    id,
-    template: "paper",
-    raptor: true,
-    datasetId: "ds-old",
-    canvasId: "canvas-old",
-    templateGroupId: "group-old",
-  });
-}
 
 function addUpload(store: Store, kbId: string, name = "a.txt") {
   return store.addDocument({
@@ -142,198 +113,6 @@ describe("约束", () => {
     const { db } = fresh();
     expect(() => insertRow(db, "kb_settings", { id: "other", updated_at: 0 })).toThrow(CHECK);
     expect(rows(db, "kb_settings")).toHaveLength(1);
-  });
-});
-
-describe("kb store: 设置", () => {
-  it("迁移后的设置：没有嵌入模型，代数 0，探活 never", () => {
-    const { store } = fresh();
-    expect(store.settings()).toEqual({
-      embedding: null,
-      embeddingGeneration: 0,
-      probe: { status: "never", at: null, message: null },
-      chatModelId: null,
-      rebuildActorId: null,
-      updatedAt: 0,
-    });
-    expect(store.embeddingApiKey()).toBeNull();
-  });
-
-  it("保存嵌入模型：读视图只有名称与地址，密钥只经 embeddingApiKey 读出", () => {
-    const { db, store } = fresh();
-    const seen: unknown[] = [];
-    const saved = store.saveSettings({ embedding: EMBEDDING }, (view) => seen.push(view));
-    expect(saved).toEqual({
-      embedding: { name: "bge-m3", baseUrl: "http://embed/v1" },
-      embeddingGeneration: 0,
-      probe: { status: "never", at: null, message: null },
-      chatModelId: null,
-      rebuildActorId: null,
-      updatedAt: T0,
-    });
-    expect(seen).toEqual([saved]);
-    expect(JSON.stringify(store.settings())).not.toContain(KEY_SENTINEL);
-    expect(store.embeddingApiKey()).toBe(KEY_SENTINEL);
-    expect(settingsRow(db)).toMatchObject({
-      embedding_name: "bge-m3",
-      embedding_base_url: "http://embed/v1",
-      embedding_api_key: KEY_SENTINEL,
-    });
-  });
-
-  it("保存对话模型不动嵌入模型，保存嵌入模型不动对话模型，null 即取消指定", () => {
-    const { db, store } = fresh();
-    insertRow(db, "models", MODEL_ROW);
-    store.saveSettings({ embedding: EMBEDDING });
-    expect(store.saveSettings({ chatModelId: "m1" })).toMatchObject({
-      embedding: { name: "bge-m3" },
-      chatModelId: "m1",
-    });
-    expect(store.saveSettings({ embedding: { ...EMBEDDING, name: "bge-large" } })).toMatchObject({
-      embedding: { name: "bge-large" },
-      chatModelId: "m1",
-    });
-    expect(store.saveSettings({ chatModelId: null })).toMatchObject({
-      embedding: { name: "bge-large" },
-      chatModelId: null,
-    });
-    expect(store.embeddingApiKey()).toBe(KEY_SENTINEL);
-  });
-
-  it("不确认重建时，保存不动代数、库状态与 rebuild_actor_id", () => {
-    const { store } = fresh();
-    createPlainBase(store, hex(1));
-    expect(store.saveSettings({ embedding: EMBEDDING })).toMatchObject({
-      embeddingGeneration: 0,
-      rebuildActorId: null,
-    });
-    expect(store.getBase(hex(1))).toMatchObject({ state: "ready" });
-  });
-
-  it("未知的对话模型被外键拒绝，同一次保存的嵌入模型一起回滚", () => {
-    const { store } = fresh();
-    expect(() => store.saveSettings({ embedding: EMBEDDING, chatModelId: "nope" })).toThrow(
-      FOREIGN_KEY,
-    );
-    expect(store.settings().embedding).toBeNull();
-    expect(store.embeddingApiKey()).toBeNull();
-  });
-
-  it("within 抛出即整体回滚", () => {
-    const { store } = fresh();
-    expect(() => store.saveSettings({ embedding: EMBEDDING }, boom)).toThrow(BOOM);
-    expect(store.settings()).toMatchObject({ embedding: null, updatedAt: 0 });
-  });
-
-  it("确认重建：代数加一，全部知识库置 rebuilding，记下发起的管理员", () => {
-    const { db, store } = fresh();
-    store.saveSettings({ embedding: EMBEDDING });
-    createPlainBase(store, hex(1));
-    createPlainBase(store, hex(2));
-    createPlainBase(store, hex(3));
-    store.failRebuild(hex(2), REBUILD_FAILED);
-    vi.setSystemTime(T0 + 5);
-
-    const seen: unknown[] = [];
-    const saved = store.saveSettings(
-      { embedding: { ...EMBEDDING, name: "bge-large" }, rebuildActorId: "u3" },
-      (view) => seen.push([view.embeddingGeneration, store.countBasesInState("rebuilding")]),
-    );
-
-    expect(saved).toMatchObject({
-      embedding: { name: "bge-large" },
-      embeddingGeneration: 1,
-      rebuildActorId: "u3",
-      updatedAt: T0 + 5,
-    });
-    expect(seen).toEqual([[1, 3]]);
-    expect(rows(db, "knowledge_bases")).toMatchObject(
-      Array(3).fill({ state: "rebuilding", state_message: null, embedding_generation: 0 }),
-    );
-    expect(store.getBase(hex(1))?.updatedAt).toBe(T0 + 5);
-  });
-
-  it("确认重建的 within 抛出：设置、代数与库状态都不变", () => {
-    const { store } = fresh();
-    createPlainBase(store, hex(1));
-    expect(() => store.saveSettings({ embedding: EMBEDDING, rebuildActorId: "u3" }, boom)).toThrow(
-      BOOM,
-    );
-    expect(store.settings()).toMatchObject({
-      embedding: null,
-      embeddingGeneration: 0,
-      rebuildActorId: null,
-    });
-    expect(store.getBase(hex(1))).toMatchObject({ state: "ready" });
-  });
-
-  it("重试只把 rebuild_failed 置回 rebuilding，改写发起者，不动代数", () => {
-    const { store } = fresh();
-    store.saveSettings({ embedding: EMBEDDING, rebuildActorId: "u1" });
-    createPlainBase(store, hex(1));
-    createPlainBase(store, hex(2));
-    createPlainBase(store, hex(3));
-    store.failRebuild(hex(1), REBUILD_FAILED);
-    store.failRebuild(hex(3), REBUILD_FAILED);
-    vi.setSystemTime(T0 + 5);
-
-    const seen: string[][] = [];
-    const retried = store.retryFailedRebuilds("u3", (bases) => {
-      seen.push(bases.map((base) => base.id).sort());
-    });
-
-    expect(retried.map((base) => base.id).sort()).toEqual([hex(1), hex(3)]);
-    expect(seen).toEqual([[hex(1), hex(3)]]);
-    expect(store.settings()).toMatchObject({
-      embeddingGeneration: 1,
-      rebuildActorId: "u3",
-      updatedAt: T0 + 5,
-    });
-    expect(store.getBase(hex(1))).toMatchObject({ state: "rebuilding", stateMessage: null });
-    expect(store.getBase(hex(2))).toMatchObject({ state: "ready", updatedAt: T0 });
-    expect(store.getBase(hex(3))).toMatchObject({ state: "rebuilding", stateMessage: null });
-  });
-
-  it("没有失败库时重试不写库，不调 within", () => {
-    const { store } = fresh();
-    store.saveSettings({ embedding: EMBEDDING, rebuildActorId: "u1" });
-    createPlainBase(store, hex(1));
-    vi.setSystemTime(T0 + 5);
-    const within = vi.fn();
-    expect(store.retryFailedRebuilds("u3", within)).toEqual([]);
-    expect(within).not.toHaveBeenCalled();
-    expect(store.settings()).toMatchObject({ rebuildActorId: "u1", updatedAt: T0 });
-  });
-
-  it("重试的 within 抛出：库状态与发起者都不变", () => {
-    const { store } = fresh();
-    store.saveSettings({ embedding: EMBEDDING, rebuildActorId: "u1" });
-    createPlainBase(store, hex(1));
-    store.failRebuild(hex(1), REBUILD_FAILED);
-    expect(() => store.retryFailedRebuilds("u3", boom)).toThrow(BOOM);
-    expect(store.settings().rebuildActorId).toBe("u1");
-    expect(store.getBase(hex(1))).toMatchObject({
-      state: "rebuild_failed",
-      stateMessage: REBUILD_FAILED,
-    });
-  });
-
-  it("探活写回三列，不动 updated_at 与嵌入身份；within 抛出即回滚", () => {
-    const { store } = fresh();
-    store.saveSettings({ embedding: EMBEDDING });
-    vi.setSystemTime(T0 + 5);
-    const result = { status: "failed", at: T0 + 5, message: "上游拒绝" } as const;
-    expect(() => store.recordEmbeddingProbe(result, boom)).toThrow(BOOM);
-    expect(store.settings().probe).toEqual({ status: "never", at: null, message: null });
-
-    expect(store.recordEmbeddingProbe(result)).toMatchObject({
-      embedding: { name: "bge-m3", baseUrl: "http://embed/v1" },
-      probe: result,
-      updatedAt: T0,
-    });
-    const ok = { status: "ok", at: T0 + 6, message: null } as const;
-    expect(store.recordEmbeddingProbe(ok).probe).toEqual(ok);
-    expect(store.embeddingApiKey()).toBe(KEY_SENTINEL);
   });
 });
 
@@ -597,9 +376,6 @@ describe("kb store: 文档", () => {
 });
 
 describe("kb store: 重建", () => {
-  const NEXT = { datasetId: "ds-new", canvasId: "canvas-new", templateGroupId: "group-new" };
-  const NEXT_PLAIN = { datasetId: "ds-new", canvasId: null, templateGroupId: null };
-
   /** 一个开编译的库，代数已加一，处于 rebuilding，文档两份。 */
   function rebuilding() {
     const { db, store } = fresh();
@@ -745,12 +521,13 @@ describe("kb store: 重建", () => {
     );
   });
 
-  it("文档清单与该库的行对不上时不切换：漏掉一份或混入别的库的文档都整体回滚", () => {
+  it("文档清单与该库的行对不上时不切换：漏掉一份、混入别的库的文档、重复列出或两单交叠都整体回滚", () => {
     const { db, store, kept, gone } = rebuilding();
     createPlainBase(store, hex(2));
     const foreign = addUpload(store, hex(2));
     store.setRebuildGeneration(hex(1), NEXT);
     const before = baseRow(db, hex(1));
+    const documents = store.listDocuments(hex(1));
     const replaced = [{ id: kept.id, ragflowDocumentId: "rf-new" }];
     expect(() => store.switchGeneration(hex(1), { replaced, skipped: [] })).toThrow(
       /document set mismatch/,
@@ -764,8 +541,26 @@ describe("kb store: 重建", () => {
     expect(() =>
       store.switchGeneration(hex(1), { replaced, skipped: [gone.id, foreign.id] }),
     ).toThrow(/document set mismatch/);
+    expect(() => store.switchGeneration(hex(1), { replaced, skipped: [gone.id, gone.id] })).toThrow(
+      /document set mismatch/,
+    );
+    expect(() => store.switchGeneration(hex(1), { replaced, skipped: [kept.id, gone.id] })).toThrow(
+      /document set mismatch/,
+    );
+    expect(() =>
+      store.switchGeneration(hex(1), {
+        replaced: [...replaced, { id: gone.id, ragflowDocumentId: "rf-gone" }],
+        skipped: [gone.id],
+      }),
+    ).toThrow(/document set mismatch/);
+    expect(() =>
+      store.switchGeneration(hex(1), {
+        replaced: [...replaced, { id: kept.id, ragflowDocumentId: "rf-again" }],
+        skipped: [],
+      }),
+    ).toThrow(/document set mismatch/);
     expect(baseRow(db, hex(1))).toEqual(before);
-    expect(store.countDocuments(hex(1))).toBe(2);
+    expect(store.listDocuments(hex(1))).toEqual(documents);
     expect(store.listDocuments(hex(2))).toEqual([foreign]);
   });
 });
