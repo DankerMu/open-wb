@@ -150,7 +150,7 @@ Minimal mergeable slice: atomic - 删目录与删 CI 步骤必须同 PR：只删
   - `OMP_CHILD_ENV_NAMES`（`spawn-env.ts`）；
   - `server.ts:756-799` 的 DB 文件准备函数。
 - [x] 4.2 先做无行为变化的移动：把 `preparePrivateDbFiles`、`preparePrivateDbMain`、`prepareExistingSidecar`、`chmodExistingPrivateFile`（`server.ts:756-799`）移进 `startup-registry.ts` 并从那里导出，`server.ts` 改为导入。同一刀把 `server-assembly.test.ts`（798 行）的启动记录与注册次序用例原样移到新 `server/test/server-assembly-modules.test.ts`。两处都是纯移动：既有测试不改断言即全绿；PR 说明附移动前后的 `wc -l`。`server-config.test.ts` 正好 800 行，本 change 不往里加用例。
-- [ ] 4.3 测试先行。
+- [x] 4.3 测试先行。
   - 新 `server/test/kb-config.test.ts`：四键的缺省、配对规则、正则、正整数纪律；message 只含键名。
   - 新 `server/test/kb-key-file.test.ts`（单元层）：普通文件、符号链接、`0644`、`0640`、空文件、4097 字节、恰为 `\n\n`、去掉结尾 `\n`、含 `\r`；ragflow-backend「属主不符」（注入的 `getuid` 缝）。
   - 编译入口用例：新 `server/test/server-startup-kb.test.ts`。
@@ -159,13 +159,13 @@ Minimal mergeable slice: atomic - 删目录与删 CI 步骤必须同 PR：只删
     - 最后一例（指向关闭端口、正常启动）本组只断言启动成功，模块仍为十一项，「十二项且最后是 `kb`」由组 6 断言。
   - 新 `server/test/kb-omp-env.test.ts`：ragflow-backend「密钥不进 omp 环境」，用假 omp 记录 spawn 环境。不加到 798 行的 `omp-process.test.ts`。
   - 同 PR 改钉住配置项数与阶段表的既有用例（4.1 核对时列全）。
-- [ ] 4.4 实现：
+- [x] 4.4 实现：
   - 新 `server/src/kb/config.ts` 与 `server/src/kb/key-file.ts`；`agent-config.ts` 导出 `assertHeaderSafeKey`；
   - `resolveServerConfig` 展开四键，注释里的项数改为四十六；`StartupStage` 加 `kb_key`；
   - 阶段函数放在 `startup-registry.ts`。
   
   读出的密钥经装配传给组 6 的 `kb` 模块：本组只把它存进一个只读句柄，暂无消费者，用 `knip` 豁免注释说明，组 6 删掉该注释。
-- [ ] 4.5 `docs/architecture/system.md` §9.13「知识库」新建，本组写配置键、密钥文件要求与 `kb_key` 阶段；§9.3 启动次序文字加 `kb_key`。
+- [x] 4.5 `docs/architecture/system.md` §9.13「知识库」新建，本组写配置键、密钥文件要求与 `kb_key` 阶段；§9.3 启动次序文字加 `kb_key`。
 
 Suggested fixture level: expanded - 新配置键与凭证读取（credentials + production configuration）、新启动阶段。
 Minimal mergeable slice: 4.2 的函数与用例移动——纯重构，不改行为，既有测试即验证。剩余部分（配置解析与 `kb_key` 阶段）依赖它；剩余部分本身 atomic：配置解析与 `kb_key` 阶段是同一对键的两半，只有解析没有阶段则密钥文件从不被校验，只有阶段没有解析则无从得到路径。

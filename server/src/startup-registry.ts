@@ -21,11 +21,15 @@
  *   启动恢复。
  * - `preparePrivateDbFiles`（s2a-kb-ragflow D18，同为 `server.ts` 行数预算抽出）：`db` 阶段 `openDb` 之前的
  *   DB 文件准备，建出或校正主库，校正已存在的 `-wal` / `-shm`，mode 均为 `0600`。
+ * - `prepareKbKey`（s2a-kb-ragflow D3，启动阶段 `kb_key`，紧接 `config`、先于 `db`）：只有配置了知识库才读密钥
+ *   文件（`RAGFLOW_API_KEY_FILE` 与 `RAGFLOW_BASE_URL` 的配对由配置解析保证），返回只读句柄；校验不过原样抛给
+ *   入口（`reason: "kb_key"`）。
  */
 import { chmodSync, closeSync, constants, fchmodSync, openSync, statSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { createMcpPublisher } from "./connectors/mcp-json.js";
 import { createConnectorStore } from "./connectors/store.js";
+import { readKbKeyFile } from "./kb/key-file.js";
 import type { ModelCatalog } from "./model-catalog.js";
 import { writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { createPublisher } from "./models/publish.js";
@@ -182,6 +186,11 @@ export function startBackgroundWork(work: {
 }): void {
   void work.trash.sweep(Date.now());
   void work.mounts.restoreAll();
+}
+
+export function prepareKbKey(config: { ragflowApiKeyFile?: string | undefined }) {
+  const { ragflowApiKeyFile } = config;
+  return ragflowApiKeyFile === undefined ? undefined : readKbKeyFile(ragflowApiKeyFile);
 }
 
 export function preparePrivateDbFiles(dbPath: string): void {
