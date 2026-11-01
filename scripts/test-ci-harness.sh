@@ -3,7 +3,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"; helper="$root/.github/scripts/ci-compiled-server.sh"; launcher="$root/.github/scripts/ci-fake-upstream.sh"; installer="$root/.github/scripts/ci-install-hurl.sh"; wf="$root/.github/workflows/ci.yml"; BASH_RUN="${BASH:-bash}"; pass=0; fail=0; oracle_root="$root"
 # Shared source grammar for the two constraints consumers. No YAML dependency.
 constraints_parser='import re
-# Python toolchain retired (change s2a-kb-ragflow): these tokens stay out of every file the two oracles read.
+# Python toolchain retired (change s2a-kb-ragflow): these tokens stay out of the workflow and the control-plane files listed in the contract oracle.
 retired = re.compile(r"kbservice|\.py\b|(?<![a-z])(?:ruff|pytest)|\buvx?\b", re.IGNORECASE)
 key = r"(?:[A-Za-z_][A-Za-z0-9_-]*|'"'"'[A-Za-z_][A-Za-z0-9_-]*'"'"'|\"[A-Za-z_][A-Za-z0-9_-]*\")"
 pair_re = re.compile(r"^( *)(" + key + r"):(?: (.*))?$")

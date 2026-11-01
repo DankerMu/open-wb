@@ -96,14 +96,14 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 ## Important Development Notes
 
 - **分析文档纪律**：路径基准写 `app-reference/app_asar/`；引用给真实行号；推断结论标 `[INFERENCE]`，不与直接证据混写。
-- **归属义务**：根 LICENSE 为 Apache-2.0（只覆盖本仓自有内容）；上游版权 © 2026 Tencent；派生内容按 `ATTRIBUTION.md` 保留归属；吸收 RAGFlow 源码时其 §3 条件义务（LICENSE-RAGFlow/NOTICE/文件头）生效。
+- **归属义务**：根 LICENSE 为 Apache-2.0（只覆盖本仓自有内容）；上游版权 © 2026 Tencent；派生内容按 `ATTRIBUTION.md` 保留归属；发行物含 RAGFlow 镜像时须附其 `LICENSE` 与 `NOTICE`（`ATTRIBUTION.md` §3）。
 - demo 文件头的来源注释在编辑时必须保留。
 - 文档路由：项目定位 `README.md`；建设方案与阶段账本 `PLAN.md`；**顶层架构基准 `docs/architecture/system.md`**（模块图/依赖规则/目录结构/数据流）；后端选型 `resource/backend-research.md`；上游结构分析 `app-reference/analysis/00-overview.md`（入口）；许可归属 `ATTRIBUTION.md`；长期架构决策 `docs/adr/`（难回退+无背景会困惑+真实权衡三者同立才写）。
 
 ## Conventions
 
 - **TDD required（L3）**：新增生产文件先写失败测试再实现；配对测试文件缺失需在 PR 说明理由。mock 依赖，绝不 mock 被测系统。
-- 命名遵循各语言惯例（TS camelCase / Py snake_case）；文件 ≤800 行、复杂度 ≤15、重复 ≤3%——阈值一律以 `constraints.yaml` 为准，改阈值先改那里。
+- 命名遵循语言惯例（TS camelCase）；文件 ≤800 行、复杂度 ≤15、重复 ≤3%——阈值一律以 `constraints.yaml` 为准，改阈值先改那里。
 - 提交格式 Conventional Commits（类型表见 `constraints.yaml`），agent 提交带 `Co-Authored-By`。
 - 债务标记用 `TODO(#issue)`：无 issue 号的 TODO 不得进提交（评审拦截）。
 - 偏离本文件任何约定时，PR 描述必须给出理由——无理由的偏离按缺陷处理。
