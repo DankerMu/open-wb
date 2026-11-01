@@ -28,14 +28,14 @@ API 端点清单（属 spec 阶段）。
 |---|---|---|---|
 | `core/sandbox` | `createSandbox({rootOf, audit}) → { resolve(principal, workspaceId, relPath, op: "read"\|"list"\|"mkdir") → 绝对路径 \| 拒绝, ensureSharedDir }`（`rootOf` 由 workspaces 实现：返回 null → `not_found` 且不审计；越界先经 `core/audit` 记 `sandbox.reject` 再抛 `sandbox_denied`） | 路径规范化、symlink 逃逸防御；远程挂载的挂载点在空间根下一层，沙箱 resolve 按包含关系覆盖，不另推导白名单（change `s1b-workspace-mounts` D19） | 删掉它，越界防御在 workspaces/sessions/kb 每个调用点重现——AGENTS.md 白盒关键路径 |
 | `core/audit` | `emit(db, event)`；`query(db, principal, {limit?, before?})` | 只追加表、账号隔离、canonical id 游标分页 | 所有模块的合规出口收敛于一处 |
-| `core/errors` | `HttpError`、二十五码与中文消息（含 `sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`，s1d 增 `forbidden`（403）/`model_in_use`（409），s1b 增七个挂载码：`mount_disabled`（503）/`mount_limit`（409）/`mount_host_rejected`（403）/`mount_failed`（502）归 `workspaces/mounts` 的挂载端点与 manager，`mount_offline`（409）/`mount_read_only`（403）/`mount_boundary`（409）归 workspaces 文件端点的挂载判定（`mount_offline` 另含异步适配器超期）） | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
+| `core/errors` | `HttpError`、三十七码与中文消息（含 `sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`，s1d 增 `forbidden`（403）/`model_in_use`（409），s1b 增七个挂载码：`mount_disabled`（503）/`mount_limit`（409）/`mount_host_rejected`（403）/`mount_failed`（502）归 `workspaces/mounts` 的挂载端点与 manager，`mount_offline`（409）/`mount_read_only`（403）/`mount_boundary`（409）归 workspaces 文件端点的挂载判定（`mount_offline` 另含异步适配器超期），s2a 增十二个知识库码（`kb_disabled`（503）等，见 9.13）） | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
 | `core/roles` | `ADMIN_ROLE`、`isAdmin(principal)`（`role === "管理员"` 严格相等，不修剪、不归一） | 结构化入参，不导入 auth | 管理员判定一处出处（现由 `core/audit` 可见性过滤使用） |
 | `core/db` | SQLite 句柄 + 迁移执行 | WAL 配置、schema 迁移（ADR-0004） | |
 | `auth` | `authenticate(req) → Principal`；login/callback/logout 路由 | OIDC 流程、会话 cookie、首登 provisioning；适配器×2：oidc、dev-stub（ADR-0007） | 两个适配器 = 真接缝 |
 | `accounts` | 账号属性/角色/配额/项目组管理；`scopeOf(principal)` → 可见范围解析输入 | IdP 字段与应用侧字段的分界 | |
 | `workspaces` | 空间 CRUD、树列举、文件读/预览、挂载 attach/detach/status | `mounts/` 子模块 = mount-manager：rclone 进程生命周期、凭证保管、健康探测、崩溃重挂（ADR-0003）；多根树合并；S1f change C（`s1f-session-list-temp-space`）：临时空间（`workspaces.temporary` 标记，目录名 `tmp-<id>`；随会话在同一事务里创建，`GET /api/workspaces` 不列出、按 id 的端点照常可达）、`POST /api/workspaces/:id/promote`（原地转正：只改名字与标记，目录不动，`workspace.promote` 审计）、`temp-dir-remove.ts`（临时空间目录经 app 私有 trash 中转删除，`EXDEV` 时原地删）、`snapshots.ts`（回合快照的落盘 `take` 与两种目录删除）与 `snapshots-restore.ts`（还原）——快照根目录由 `createApp` 注入，这两个模块不导入 `sessions/`，也没有自己的路由（部署侧见 §9.1） | 挂载协议差异（SFTP/NFS/SMB）全部藏在接缝后 |
 | `sessions` | `create/resume/fork/list`；`post(input)`；`interrupt()`；`subscribe(lastEventId) → 事件流` | omp-supervisor（每活跃会话 spawn、空闲回收、全局上限 `OMP_MAX_PROCESSES`（默认 16）/ 触顶驱逐最久空闲进程（无可驱逐 → `agent_capacity`）、并发 spawn 上限 `OMP_SPAWN_CONCURRENCY`（缺省 CPU 数；准入后 FIFO 排队、排队不计入握手 deadline，握手超时写一行 stderr 记录；保留的基础设施故障与会话删除清理失败各写一行 `{"event":"session_fault"}`）、审批经 host 应答（`approval.request`/`approval.resolved`，`chat_approvals` 持久化））、JSONL RPC 编解码、`host_tool_call` 分派、事件序号+环形缓冲（ADR-0006）、SQLite 会话/消息/步骤存储（持久历史事实源；实时缺口恢复使用 store 自有待刷尾部补齐的完整快照及同刻 streamCursor，读取不改变刷盘策略——#214）；omp `.jsonl` 存于 app-server 托管的 `OMP_STATE_DIR`、只供 `--resume`（S0b grill 2026-09-18）；S1c change B：会话可绑定工作空间（绑定会话的 omp cwd 为该空间根，`session.bind` 审计）、元数据 `PATCH /api/sessions/:id`（标题 / 场景 / 置顶）与 `DELETE /api/sessions/:id`（`session.delete` 审计）、`thinking.delta` 与 `files.changed` 事件（分别持久化到 `chat_messages.thinking` 与 `chat_steps.changes`）、`MODEL_REASONING`（托管 `models.yml` 的模型条目是否声明 reasoning；只影响 omp 的请求侧，不门控宿主对 thinking 的解析）、slash 白名单与 `GET /api/commands`（白名单外以 `/` 开头的文本转义后送模型）；S1f：任务清单（omp `todo` 工具结果的全量清单归一化后持久化到 `chat_sessions.todo`，经 `todo.updated` 事件与消息快照顶层 `todo` 下发；结构不合规的候选丢弃并写一行不含任务文本的 stderr warn 记录）；S1f change C（`s1f-session-list-temp-space`）：会话视图十一键（增 `archivedAt`、`pendingApproval`、`temporaryWorkspace`，`store-view.ts`）；`PATCH /api/sessions/:id` 增 `archived` 键，已归档会话的 prompt / 重新生成 / fork / 撤回以 409 `session_archived` 拒绝；不带 `workspaceId` 的 `POST /api/sessions` 同事务创建临时空间，`DELETE /api/sessions/:id` 在它是最后一个使用者时连同临时空间的行、目录与快照一起删（`workspace.delete` 审计）；列表事件连接 `GET /api/sessions/events`（`list-events.ts`：按账号的通知器与 SSE 路由，只发 `sessions.changed` 与 `session.rewound`，无序号、无回放，见 §9.2）；受理 prompt 后、派发前的回合快照步骤（`turn-snapshot.ts`，经 `supervisor.prompt` 的 `beforeDispatch`；登记表 `chat_turn_snapshots` 只由 `store-undo.ts` 读写）；撤回 `POST /api/sessions/:id/undo`（`undo.ts`：body `{messageId, files}`，`files` 为 `keep` / `restore` / `force`；临时进程上 `branch` 后原地回退对话并可还原文件，冲突为 409 `undo_conflict`，`session.undo` 审计；与 fork 共用 `branch-temp.ts` 的对位与临时进程）；消息视图与 prompt 202 增 `undo` 键 | omp 协议与进程治理全部不外泄；调用方只见会话语义 |
-| `kb` | `search(principal, query, kbRefs) → 切片+出处`；center 管理透传 | 可见范围过滤（先过滤 kb_ids 再调 RAGFlow）、bearer 凭证、共享库检索审计 | host tool 与 UI 检索共用同一过滤路径 |
+| `kb` | `GET /api/kb/status`（登录用户可调，版本钉住与就绪位，见 9.13）；`search(principal, query, kbRefs) → 切片+出处`；center 管理透传 | 可见范围过滤（先过滤 kb_ids 再调 RAGFlow）、bearer 凭证、共享库检索审计 | host tool 与 UI 检索共用同一过滤路径 |
 | `models` | 模型注册表 CRUD + 探活（对话/嵌入/重排） | 网关寻址细节 | |
 | `model-proxy` | 对 omp：baseURL + 会话标识；OpenAI 兼容端点 | 注册表寻址、密钥注入、流式透传、计量/限额、审计（ADR-0008） | 不变量 4 的机械保障点 |
 | `http` | Fastify 路由、中间件、SSE 端点；状态码与错误信封映射 | 纯驱动适配器层，零业务 | |
@@ -851,7 +851,7 @@ modelRoles:
 **账号缺省**（`connectors/rest.ts`，库层 `connectors/store.ts`；规格 connectors「连接器账号缺省」）：每个登录账号（不分角色）读写自己的一行 `account_connector_prefs`。
 
 - `GET /api/connectors/defaults` → 200 `{disabledConnectors: string[]}`，字典序，没有行时 `[]`。
-- `PUT /api/connectors/defaults`，body 键集恰为 `{disabledConnectors}`：至多 32 项（按去重前的原始项数），每项符合名称规则 `^[a-z]{1,32}$`，不要求已登记，去重后字典序整体替换 → 200，形状同 `GET`；`{}`、多余键、`null`、非数组、坏名称 400，不写行。属 content-parser 归属集（二十九条之一），body limit 16 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400。两者 `Cache-Control: no-store`，不审计、不重写 `mcp.json`。
+- `PUT /api/connectors/defaults`，body 键集恰为 `{disabledConnectors}`：至多 32 项（按去重前的原始项数），每项符合名称规则 `^[a-z]{1,32}$`，不要求已登记，去重后字典序整体替换 → 200，形状同 `GET`；`{}`、多余键、`null`、非数组、坏名称 400，不写行。属 content-parser 归属集，body limit 16 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400。两者 `Cache-Control: no-store`，不审计、不重写 `mcp.json`。
 - 账号缺省只决定之后新建会话的初值，不改动已有会话。
 
 **会话停用**（`sessions/rest-metadata.ts`、`store-metadata.ts`、`rest-capabilities.ts`、`store-capabilities.ts`、`store-branch.ts`；规格 session-metadata「会话创建与空间绑定」「fork 继承会话元数据」、skill-switches「会话能力端点」）：每个会话另存一个停用连接器集合 `chat_sessions.disabled_connectors`（迁移 048，缺省 `'[]'`，去重字典序），同样不进会话视图。
@@ -934,13 +934,13 @@ modelRoles:
 
   升级说明（#1786）：升级前已登记、realpath 落在第 6–10 项之内的挂载源不会被自动删除，`GET /api/mount-sources` 照旧列出；引用它的 `local` 挂载下一次挂载尝试即失败、不发起 `mount`（建出 502 `mount_failed`，启动恢复与重挂保持离线）。处理办法是管理员 `DELETE` 这个挂载源（连带卸载引用它的挂载），需要的话在保护根之外另选目录重新登记。
 - `DELETE /api/mount-sources/:id`（仅管理员）→ 204，未知 id 404。挂载源删除连带卸载：先在内存里把该源标为删除中（挂载端点据此拒绝引用它的新挂载，见下文），再对此刻引用它的每个挂载——不论属于哪个账号——在各自空间的串行链上卸载并删行，最后在一个事务内删源行。标记在结束时（成功或失败）清除：某次连带卸载或最后的事务失败时应答 generic 500（功能关闭且缺少 `fusermount3` 而卸载不了孤儿挂载时为 503 `mount_disabled`，同上文），源行保留，已连带卸载的挂载已删、其余照旧，之后可再次 `DELETE`。选连带卸载而不是 409：管理员看不到也卸不了别人的挂载。
-- 次序：未登录 401 → 非管理员对 `POST` / `DELETE` 403 `forbidden`（路由级 `preParsing`，先于 body 解析与 id 判定）→ body 解析 → 取值 400 → 路径 400 → 409 / 上限 400。`POST /api/mount-sources` 属 content-parser 归属集（三十条之一），body limit 16 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400、不写表与审计；`DELETE` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。违反取值规则的 400 message 恒为 `请求格式不正确`，不回显取值与键名。三个端点全部 `Cache-Control: no-store`，功能关闭（未配置 `RCLONE_BIN`）时照常可用：登记只是数据，连带卸载按上文功能关闭时的卸载规则。
+- 次序：未登录 401 → 非管理员对 `POST` / `DELETE` 403 `forbidden`（路由级 `preParsing`，先于 body 解析与 id 判定）→ body 解析 → 取值 400 → 路径 400 → 409 / 上限 400。`POST /api/mount-sources` 属 content-parser 归属集，body limit 16 KiB，坏 JSON / 空 body / 媒体类型 / 超限均 exact 400、不写表与审计；`DELETE` 不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不删除。违反取值规则的 400 message 恒为 `请求格式不正确`，不回显取值与键名。三个端点全部 `Cache-Control: no-store`，功能关闭（未配置 `RCLONE_BIN`）时照常可用：登记只是数据，连带卸载按上文功能关闭时的卸载规则。
 - 审计（与表写入同一事务，actor 为管理员）：`mount.source.create` / `mount.source.delete`，`workspaceId` 为 null，detail 恰为 `{sourceId, name, path, readOnly}`；连带卸载的每个挂载各一条 `mount.detach`，detail `{mountId, name, reason: "source_deleted"}`，`workspaceId` 为该挂载的空间。
 
 **挂载端点**（`server/src/workspaces/mounts/rest-mounts.ts`，由 `registerWorkspaces` 注册，属 workspaces 模块；规格 workspace-mounts「挂载端点」）：用户把远程目录或管理员登记的挂载源挂到自己正式空间的根下一层，挂载点是 `<空间根>/<挂载名>`。三个端点全部 `Cache-Control: no-store`。
 
 - `GET /api/workspaces/:id/mounts` → 200 `{enabled, mounts: MountView[]}`，`enabled` 为是否配置了 `RCLONE_BIN`，`mounts` 按 `created_at, id` 升序。`MountView` 每项恰为 `{id, name, backend, host, port, remotePath, sourceId, sourceName, readOnly, status, createdAt}`：`sftp` / `smb` 的 `sourceId`、`sourceName` 为 null（`port` 未给时也为 null），`local` 的 `host`、`port`、`remotePath` 为 null、`sourceName` 为挂载源名称；`status` 为 `online` / `offline`（manager 内存里的在线判据，见上文）。没有用户名、口令、私钥、域——没有任何端点读回凭证。临时空间与功能关闭时同样可读（临时空间总是空表；功能关闭时已登记的挂载全部 `offline`）。
-- `POST /api/workspaces/:id/mounts`（body 按 `backend` 严格：`sftp` `{name, backend, host, port?, remotePath, readOnly, username, password? | privateKey?}`、`smb` `{…, username, password, domain?}`、`local` `{name, backend, sourceId, readOnly}`）→ 201 `MountView`（`status: "online"`：这一次挂载即连通测试）。判定次序：未登录 401 → 空间不属本人、不存在或空间根被非目录占用 404 → 未配置 `RCLONE_BIN` 503 `mount_disabled`（这三者在路由级 `preParsing`，先于 body 解析）→ body 解析 400（属 content-parser 归属集，三十一条之一，body limit 64 KiB——私钥至多 16 KiB）→ 键集与取值 400 → 临时空间 400（转正之后可挂）→ 该账号在途的建出已有 `MOUNT_MAX_ATTACHING_PER_ACCOUNT` 个 409 `mount_limit` → 该账号的挂载行数加上它在途的建出数已达 `MOUNT_MAX_PER_ACCOUNT` 409 `mount_limit`（这两项与在途计数的加一在路由里的同一个同步段内完成，中间没有 `await`；在途计数到这次建出落定——201、任何 4xx / 5xx、关停取消——时减一；客户端断开不取消建出，计数要等建出自己结束才释放，通常不超过一个 20 s 就绪窗口；主机解析或 `local` 源路径卡住时要等它们返回）→ 以下在该空间的串行链上，与同空间的其它建出、卸载互斥：已有 `MOUNT_MAX_PER_WORKSPACE` 个 409 `mount_limit` → `local` 的源未登记或删除中 404、源只读而 `readOnly: false` 400 → 同名挂载或空间根下已有同名条目 409 `conflict` → 主机规则 403 `mount_host_rejected` → 解析失败、凭证文件、挂载点检查、spawn 或就绪失败 502 `mount_failed` → 一个事务内插挂载行并写 `mount.attach`；`local` 在这个事务里再复核源仍在且未被标删除（挂载源 `DELETE` 恰在两次复核之间开始时），不成立即先卸载刚挂上的挂载、不插行、404。插行或审计失败先卸载（`fusermount3 -uz`、停 rclone、删挂载点与私有目录）再 generic 500。所有 400 的 message 恒为 `请求格式不正确`，不回显取值与键名；502 不带 rclone 的错误原文（它只进该挂载的 `rclone.log`）。
+- `POST /api/workspaces/:id/mounts`（body 按 `backend` 严格：`sftp` `{name, backend, host, port?, remotePath, readOnly, username, password? | privateKey?}`、`smb` `{…, username, password, domain?}`、`local` `{name, backend, sourceId, readOnly}`）→ 201 `MountView`（`status: "online"`：这一次挂载即连通测试）。判定次序：未登录 401 → 空间不属本人、不存在或空间根被非目录占用 404 → 未配置 `RCLONE_BIN` 503 `mount_disabled`（这三者在路由级 `preParsing`，先于 body 解析）→ body 解析 400（属 content-parser 归属集，body limit 64 KiB——私钥至多 16 KiB）→ 键集与取值 400 → 临时空间 400（转正之后可挂）→ 该账号在途的建出已有 `MOUNT_MAX_ATTACHING_PER_ACCOUNT` 个 409 `mount_limit` → 该账号的挂载行数加上它在途的建出数已达 `MOUNT_MAX_PER_ACCOUNT` 409 `mount_limit`（这两项与在途计数的加一在路由里的同一个同步段内完成，中间没有 `await`；在途计数到这次建出落定——201、任何 4xx / 5xx、关停取消——时减一；客户端断开不取消建出，计数要等建出自己结束才释放，通常不超过一个 20 s 就绪窗口；主机解析或 `local` 源路径卡住时要等它们返回）→ 以下在该空间的串行链上，与同空间的其它建出、卸载互斥：已有 `MOUNT_MAX_PER_WORKSPACE` 个 409 `mount_limit` → `local` 的源未登记或删除中 404、源只读而 `readOnly: false` 400 → 同名挂载或空间根下已有同名条目 409 `conflict` → 主机规则 403 `mount_host_rejected` → 解析失败、凭证文件、挂载点检查、spawn 或就绪失败 502 `mount_failed` → 一个事务内插挂载行并写 `mount.attach`；`local` 在这个事务里再复核源仍在且未被标删除（挂载源 `DELETE` 恰在两次复核之间开始时），不成立即先卸载刚挂上的挂载、不插行、404。插行或审计失败先卸载（`fusermount3 -uz`、停 rclone、删挂载点与私有目录）再 generic 500。所有 400 的 message 恒为 `请求格式不正确`，不回显取值与键名；502 不带 rclone 的错误原文（它只进该挂载的 `rclone.log`）。
 - 账号上限的残余（#1789）：卡在总数边界上的建出会被同账号在途的那一个挡下（例如已有 31 个挂载、A 在途且最终 502，此时 B 为 409，A 落定后重试即可），这和在串行链上排队判定的空间上限不同；插行到路由减一之间隔着几次 microtask，落在这个瞬时窗口里的请求会多得一次 409，方向偏保守。主机解析的名额分两级（#1810，owner 2026-10-27）：全进程至多 2 个在途（`attempt.ts` 的 `HOST_LOOKUPS_IN_FLIGHT`），每个账号至多占其中 1 个（`HOST_LOOKUPS_PER_ACCOUNT`）；建出与离线 sftp / smb 挂载在重挂退避里的解析按挂载所属账号计入同一个账号名额（重挂仍不计入上面的在途建出数），一个账号多出的解析在它自己的队列里先进先出地等待、不占全局名额。残余：两个账号同时用指向不应答 DNS 的主机名，仍能占满 2 个全局名额，其它账号的主机名建出与重挂会排队延后（先进先出，系统解析器最终超时），不会被永久饿死；有挂起解析的账号，自己后续的解析一直排队到系统解析器超时，只拖慢它自己。账号由迁移种子建出、没有注册端点，账号数固定，所以 rclone 进程数有上界：账号数 × (32 + 2)（常驻 + 在途，按缺省值）。启动恢复、重挂退避、`DELETE`、`GET` 与挂载源端点都不计入在途、不受这两个上限约束；升级前已超过上限的账号，已有挂载照常恢复，只是建不出新的。
 - `DELETE /api/workspaces/:id/mounts/:mountId` → 204（惰性卸载、停 rclone、删挂载点与私有目录、删行并写 `mount.detach`）；挂载不在该空间、空间不属本人或不存在 404。不读 body、不在归属集，携坏 JSON body 时为 generic 500 且不卸载。功能关闭时照常可用，唯一的例外是需要惰性卸载而 PATH 上没有 `fusermount3`：503 `mount_disabled`、行与私有目录保留（见上文「凭证与日志在哪里」末条）。
 - 审计（actor 为请求者，`workspaceId` 为请求的空间，detail 永不含凭证）：`mount.attach`（title `挂载目录 <name>`，detail 恰为 `{mountId, name, backend, host, port, remotePath, sourceId, readOnly}`，与插行同一事务）；`mount.detach`（title `卸载挂载点 <name>`，detail `{mountId, name, reason}`，用户卸载 `reason` 为 `user`，挂载源删除连带的为 `source_deleted`，按空间卸载全部为 `workspace_deleted`）；`mount.reject`（title `挂载被拒绝：<name>`，detail 恰为 `{name, backend, host, port, remotePath, sourceId, reason}`，未给的取 null，`reason` 为 `host_rejected` 或 `mount_failed`）。只有主机规则的 403 与其后的 502 写 `mount.reject`；其余拒绝（401、404、503、400、409，含插行事务里复核不过的 404）不写审计。
@@ -988,7 +988,7 @@ modelRoles:
 
 ### 9.13 知识库（S2a，change `s2a-kb-ragflow`）
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -996,8 +996,8 @@ modelRoles:
 |---|---|---|
 | `RAGFLOW_BASE_URL` | 未配置，即知识库关闭 | 只有协议与 authority（`http` 或 `https`），无路径、无结尾斜杠、无查询与片段；不接受 userinfo（不能含 `@`，这一点与 `PREVIEW_ORIGIN` 不同）；空串非法 |
 | `RAGFLOW_API_KEY_FILE` | 未配置 | 绝对路径；空串非法。配置解析时不读这个文件 |
-| `KB_UPLOAD_MAX_BYTES` | `104857600` | 单个文件的字节上限，与 `UPLOAD_MAX_BYTES` 同一解析纪律（canonical 十进制正整数） |
-| `KB_UPLOAD_MAX_FILES` | `10` | 一次上传的文件数上限，同上 |
+| `KB_UPLOAD_MAX_BYTES` | `104857600` | 单个文件的字节上限，与 `UPLOAD_MAX_BYTES` 同一解析纪律（canonical 十进制正整数，`1..2147483647`） |
+| `KB_UPLOAD_MAX_FILES` | `10` | 一次上传的文件数上限，解析纪律同上（`1..2147483647`） |
 
 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE` 必须成对：只配一个是配置错误。任一项非法，服务启动失败：退出码 1，标准错误只有一行 `{"event":"server_start_failed","reason":"config"}`，不指出是哪一项、也不回显取值。
 
@@ -1019,4 +1019,26 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 
 启动不连接 RAGFlow：地址写错或 RAGFlow 没起来都不影响启动。
 
-**密钥的去向**：读出的 key 只留在一个只读句柄的闭包里，由入口持有（`OwnedResources.kbKey`），不进日志、审计、响应与任何子进程环境。omp 的 spawn 环境是白名单（`server/src/sessions/omp/spawn-env.ts`），`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE` 都不在其中。文件**路径**仍在 app-server 的环境里：同 uid 部署（未配置 `OMP_USER`）时 omp 能以同 uid 读这个文件，与 S0b 已登记的同 uid 风险是同一项，按 ADR-0010 的专用 uid 部署关闭。
+**密钥的去向**：读出的 key 只留在一个只读句柄的闭包里，入口把句柄经 `createApp` 的 `kb` 字段交给 `kb` 模块，不进日志、审计、响应与任何子进程环境。omp 的 spawn 环境是白名单（`server/src/sessions/omp/spawn-env.ts`），`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE` 都不在其中。文件**路径**仍在 app-server 的环境里：同 uid 部署（未配置 `OMP_USER`）时 omp 能以同 uid 读这个文件，与 S0b 已登记的同 uid 风险是同一项，按 ADR-0010 的专用 uid 部署关闭。
+
+**`kb` 模块**（`server/src/kb/index.ts`、`kb/rest.ts`）：createApp 的第十二个模块，注册与启动记录的 `modules` 都紧随 `connectors`。未配置 `RAGFLOW_BASE_URL` 时模块照常注册，只是不建客户端。配置了时只建一个 RAGFlow 客户端实例：下面的限频状态在实例里。
+
+**知识库关闭**（未配置 `RAGFLOW_BASE_URL`）：`GET /api/kb/status` 返回 `{enabled:false}`；其余已注册的 `/api/kb/*` 路由返回 503 `kb_disabled`，带 `Cache-Control: no-store`，不发任何出站请求。这个判定是 root `preParsing` 钩子，次序：未登录 401 → 503 `kb_disabled` → 管理员 403 → body 解析。所以坏 JSON 与非管理员拿到的也是 503。没有注册的 `/api/kb/…` 路径仍是 404 `not_found`。
+
+**`GET /api/kb/status`**：任何已登录用户可调，未登录 401，应答都带 `Cache-Control: no-store`。开启时应答恰为 `{enabled:true, available, embeddingReady, compileReady, uploadMaxBytes, uploadMaxFiles}`：
+
+| 字段 | 含义 |
+|---|---|
+| `available` | 版本接口可达，且版本串恰为 `v1.0.0-rc2` |
+| `embeddingReady` | 已配置知识库嵌入模型（`kb_settings`） |
+| `compileReady` | 已指定知识库对话模型（`kb_settings`） |
+| `uploadMaxBytes`、`uploadMaxFiles` | `KB_UPLOAD_MAX_BYTES`、`KB_UPLOAD_MAX_FILES` 的配置值 |
+
+**版本钉住**：每次状态请求发一次 `GET <RAGFLOW_BASE_URL>/api/v1/system/version`，总期限 5 s，不带密钥。RAGFlow 不可达或版本不符都是 200 加 `available:false`，不是错误。版本钉住只决定 `available`，其它知识库端点不因版本不符而拒绝请求。升级 RAGFlow 是一次代码变更（`kb/rest.ts` 的常量），要重跑实测。
+
+**两条 stderr 记录**，都恰只有 `event` 一个键，经同一受管 writer 写出，同一进程 60 秒内各至多一行：
+
+| 记录 | 何时写 | 补救 |
+|---|---|---|
+| `{"event":"kb_version_mismatch"}` | 版本接口可达，版本串不是 `v1.0.0-rc2`。不可达时不写 | 把 RAGFlow 换回钉住的版本，或按升级流程改钉住的版本 |
+| `{"event":"kb_upstream_auth_failed"}` | RAGFlow 应答 HTTP 401，或 body `code` 为 401 / 403（`DELETE /datasets` 的 `code:403` 是「不存在」，不算） | 核对密钥文件里的 key 是否仍有效；换 key 要重启服务 |

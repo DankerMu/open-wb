@@ -11,6 +11,7 @@ import * as connectors from "../src/connectors/rest.js";
 import { openDb } from "../src/core/db/index.js";
 import * as experts from "../src/experts/rest.js";
 import * as http from "../src/http/index.js";
+import * as kb from "../src/kb/index.js";
 import * as modelProxy from "../src/model-proxy/index.js";
 import * as models from "../src/models/rest.js";
 import * as sessions from "../src/sessions/index.js";
@@ -98,6 +99,7 @@ describe("真实 createApp 消费共享 registry 并先挂 proxy 再挂 sessions
       "experts",
       "skills",
       "connectors",
+      "kb",
     ]);
     expect(rowStatus(db, "chat_sessions", STALE_SESSION_ID)).toBe("failed");
     expect(runningCount(db, "chat_messages")).toBe(0);
@@ -207,6 +209,7 @@ describe("真实 createApp 挂载 workspaces 与 accounts", () => {
         "experts",
         "skills",
         "connectors",
+        "kb",
       ]);
       expect(started.modules).toEqual(["core/db", ...order]);
       expect(existsSync(join(scratchRoot, "sandbox", "u1"))).toBe(false);
@@ -238,6 +241,7 @@ function spyRegistrationOrder(): string[] {
   once("experts", experts, "registerExperts");
   once("skills", skills, "registerSkills");
   once("connectors", connectors, "registerConnectors");
+  once("kb", kb, "registerKb");
   return order;
 }
 

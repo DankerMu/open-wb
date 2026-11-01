@@ -72,6 +72,7 @@ import type { UpstreamFailedRecord } from "./sessions/upstream-failure-log.js";
 import {
   createMcpJsonStage,
   createStartupPublisher,
+  kbDependenciesOf,
   type ModelEnvIgnoredRecord,
   prepareKbKey,
   preparePrivateDbFiles,
@@ -110,6 +111,7 @@ const STARTUP_MODULES = [
   "experts",
   "skills",
   "connectors",
+  "kb",
 ];
 
 export interface ServerConfig extends AgentSettings, PreviewSettings, MountSettings, KbSettings {
@@ -224,6 +226,7 @@ function writeRecord(
     | ModelEnvIgnoredRecord
     | ModelPublishFailedRecord
     | { event: "mcp_publish_failed" }
+    | { event: "kb_upstream_auth_failed" | "kb_version_mismatch" }
     | { event: "office_convert_sidecar_unavailable" },
 ): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {
@@ -396,7 +399,7 @@ interface OwnedResources {
   pdfTimer: NodeJS.Timeout | undefined;
   /** 一次关停无论几个监听器被强制回收，`listener_force_close` 至多一行。 */
   forceCloseEmitted: boolean;
-  /** `kb_key` 阶段读出的只读句柄，未配置知识库时没有；s2a-kb-ragflow 组 6 经装配交给 `kb` 模块。 */
+  /** `kb_key` 阶段读出的只读句柄，未配置知识库时没有；经装配交给 `kb` 模块（`kbDependenciesOf`）。 */
   kbKey: ReturnType<typeof prepareKbKey>;
   db: DatabaseSync | undefined;
   releasing: Promise<void> | undefined;
@@ -508,6 +511,7 @@ async function start(owned: OwnedResources, config: ServerConfig): Promise<void>
       publish: publisher.publish,
       mcpPublish: mcp.publisher.publish,
       onPublishFailed: writeRecord,
+      kb: kbDependenciesOf(config, owned.kbKey, writeRecord),
     };
     owned.app = createApp({
       db: owned.db,
