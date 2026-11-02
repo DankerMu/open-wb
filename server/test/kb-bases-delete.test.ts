@@ -1,6 +1,7 @@
 /**
  * s2a-kb-ragflow tasks 9.2（#1846）：`DELETE /api/kb/bases/:id`、所有权与「不可达不阻断」（knowledge-bases「知识库端点」
- * 「知识库审计」，ragflow-backend「不存在视为已删」「不可达不阻断」，design D9、D20）。开了开关的库的删除次序属第二刀（#1869）。
+ * 「知识库审计」，ragflow-backend「不存在视为已删」「不可达不阻断」，design D9、D20）。开了开关的库的删除次序在
+ * `kb-bases-compile.test.ts`（#1869）。
  *
  * 文档行与重建状态由 store 直接写入；第二代的数据集经 `fake.addDataset()` 种进假 RAGFlow，所以删除请求打到真的 id。
  */

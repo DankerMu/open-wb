@@ -114,7 +114,7 @@ describe("GET /api/kb/bases", () => {
     expect(world.sent()).toEqual([]);
   });
 
-  it("开了开关的行（本刀建不出，store 直接写入）：compile 为 null，不发编译读取，第三刀接上", async () => {
+  it("开了开关的行（store 直接写入）：compile 为 null，不发编译读取，第三刀接上", async () => {
     const world = await ready();
     const { id } = await createdBase(world, "普通库");
     addCompileBase(world, 2, { owner_id: world.store.getBase(id)?.ownerId ?? "" });

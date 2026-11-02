@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -103,7 +103,7 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 
 每次保存写一条 `kb.settings` 审计，detail 只含实际变化的键（`embedding` 为模型名，`chatModelId`），可以为空；探活写一条，detail 是 `{probe}`。
 
-**知识库端点**（`server/src/kb/bases.ts`，组 9 首刀）：三条路由对任何已登录用户开放，只操作自己的库，全部应答带 `Cache-Control: no-store`。别人的或不存在的 id 一律 404 `not_found`，两者不可区分，判定先于 body 解析与 `state`，不发出站请求，不写审计。管理员没有例外。
+**知识库端点**（`server/src/kb/bases.ts`，组 9 首刀与第二刀）：三条路由对任何已登录用户开放，只操作自己的库，全部应答带 `Cache-Control: no-store`。别人的或不存在的 id 一律 404 `not_found`，两者不可区分，判定先于 body 解析与 `state`，不发出站请求，不写审计。管理员没有例外。
 
 | 端点 | 作用 |
 |---|---|
@@ -111,31 +111,46 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `POST /api/kb/bases` | 建库，201 `BaseView` |
 | `DELETE /api/kb/bases/:id` | 删库，204 |
 
-`BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：`raptor`、`graph` 是布尔；`documents` 是本地文档行数；`createdAt` 是 epoch 毫秒整数；两个开关都为 0 的库 `compile` 恒为 `{raptor:"off", graph:"off"}`，不发出站请求。
+`BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：`raptor`、`graph` 是布尔；`documents` 是本地文档行数；`createdAt` 是 epoch 毫秒整数；两个开关都为 0 的库 `compile` 恒为 `{raptor:"off", graph:"off"}`，不发出站请求。开了开关的库：建库的 201 里开着的类型为 `pending`、关着的为 `off`；列表里目前恒为 `null`（读不到），不发编译读取，编译状态的读取随组 9 第三刀接上。
 
 **建库**：body 键集是 `name`、`template`、`raptor?`、`graph?`。`name` 1–64 码点，无 C0 与 DEL，不 trim。依次判定：
 
 1. 键集、类型、名称或模板不合规：400 `bad_request`。这一步不读库。
 2. 嵌入模型未配置：409 `kb_not_ready`。
-3. `raptor` 或 `graph` 为真：400 `bad_request`。目前只开放普通模板，开关随模板组与画布一起开放。
+3. `raptor` 或 `graph` 为真而知识库对话模型未指定：400 `bad_request`。RAPTOR 与知识图谱对十一种模板都可用，没有按模板的限制。
 4. 同账号重名：409 `conflict`。这个账号已有 50 个知识库：409 `kb_limit`。
 
-第 2–4 步在进程级设置锁内做，建库全程持锁，所以不会建出代数过期的库，也不会与一次设置保存交错：保存排在建库之后，读到新建的库，换嵌入身份得 409 `kb_rebuild_required`。
+第 2–4 步在进程级设置锁内做，建库全程持锁，所以不会建出代数过期的库，也不会与一次设置保存交错：保存排在建库之后，读到新建的库，换嵌入身份得 409 `kb_rebuild_required`，取消指定或更换对话模型得 409 `kb_chat_model_locked`；取消指定排在建库之前，建库读到未指定，400。
 
-通过之后 `POST /api/v1/datasets`，body `{name, parser_id, parse_type:1, embedding_model}`，然后在同一事务里插行与写 `kb.create`。201 的 `BaseView` 不读 RAGFlow。
+通过之后建 RAGFlow 资源，然后在同一事务里插行与写 `kb.create`。201 的 `BaseView` 不读 RAGFlow。两个开关都关：`POST /api/v1/datasets`，body `{name, parser_id, parse_type:1, embedding_model}`，没有模板组与画布。任一开关开：见下面的「编译资源」，数据集是 `parse_type:2`。
 
-- 数据集名 `owb-<id>-g<代数>`：`<id>` 是知识库 id（32 位小写十六进制），`<代数>` 是锁内读到的当前嵌入代数。用户可见的名称只存在本地，RAGFlow 不感知用户。
+- 数据集名 `owb-<id>-g<代数>`：`<id>` 是知识库 id（32 位小写十六进制），`<代数>` 是锁内读到的当前嵌入代数。开了开关的库，模板组与画布用同一个名字。用户可见的名称只存在本地，RAGFlow 不感知用户。
 - `embedding_model` 恒显式传三段式 `<名称>@owb-embed@OpenAI-API-Compatible`：不传时回落到账号缺省甚至空值，缺省悬空时建库成功、到解析才失败。不发 `chunk_method`，RAGFlow 回 `101`。
 - RAGFlow 的结果按客户端的映射返回（400 `kb_rejected` 或 503 `kb_unavailable`），不插行。
-- 插行或审计写入失败：删掉刚建的数据集，应答 500。这个删除失败时写一行 `{"event":"kb_dataset_leak","datasetId":<id>}`，不改变应答。
+- 插行或审计写入失败：按删除次序删掉这一次建的资源（数据集 → 画布 → 模板组），应答 500。删除失败即停，写一行 leak，不改变应答。
 
 | 记录 | 何时写 | 补救 |
 |---|---|---|
-| `{"event":"kb_dataset_leak","datasetId":<id>}` | 建库的回滚删不掉数据集：RAGFlow 里留下一个本地没有行的数据集 | 按 `datasetId` 在 RAGFlow 里手工删除。这条记录不限频 |
+| `{"event":"kb_dataset_leak","datasetId":<id>}` | 回滚删不掉数据集：RAGFlow 里留下一个本地没有行的数据集。开了开关的库，它的画布与模板组没有去删，也还在 | 按 `datasetId` 在 RAGFlow 里手工删除；开了开关的，再按数据集名（`owb-<id>-g<代数>`，画布与模板组同名）先删画布、再删模板组。这条记录不限频 |
+| `{"event":"kb_pipeline_leak","canvasId":<id\|null>,"groupId":<id\|null>}` | 回滚删不掉画布（两个 id 都在，模板组没有去删）或模板组（画布已删，`canvasId` 为 `null`） | 按 id 在 RAGFlow 里先删画布、再删模板组。这条记录不限频 |
 
-**删库**：`state` 为 `rebuilding` 时 409 `kb_rebuilding`；写锁正被重建器持有时同样 409，不排队。否则在该库的写锁下按次序删数据集：`rebuild_failed` 且新一代已建时先删新一代，再删当前一代。上一步确认已删之前不发下一步。取锁之后重判存在性与 `state`：排队期间库可能已删除（404）或转入重建（409）。
+**编译资源**（`server/src/kb/pipeline.ts`，组 9 第二刀）。RAPTOR 与知识图谱不是数据集字段：`parser_config` 里的开关被 RAGFlow 静默丢弃。开了开关的库是三样资源：一个模板组、一个引用它的画布（ingestion pipeline），以及以这个画布建的 `parse_type:2` 数据集。每个库每一代一套，不共用（重建时新建一套，`rebuild_*` 三列记新一代）。解析时 Compiler 节点在 pipeline 里自动运行，没有单独的编译触发。
 
-- `DELETE /api/v1/datasets` 的 `code:403` 是「不存在」（实测记录表 B），视为已删，不写 `kb_upstream_auth_failed`。
+建一代（`createPipeline`，建库与重建共用；调用方持锁，它自己不取锁）：
+
+1. `GET /api/v1/models/default`，只读。`data.models` 里 `chat` 与 `embedding` 两种都在、`model_name` 非空才继续；缺一种即 409 `kb_not_ready`（重建时该库 `rebuild_failed`），不发后续请求。这一步挡的是 RAGFlow 侧被人手工清空缺省：没有缺省对话模型时，pipeline 数据集的数据集级合并会让全栈唯一的入库进程崩溃循环。本系统自己从不清空缺省（见上面的「账号缺省不变量」）。补救：管理员保存一次嵌入模型，两种缺省都会重新下发。
+2. `GET /api/v1/compilation-templates/builtins` 取内置 `config`。RAPTOR 用 `tree`，删掉 `entity`、`relation`、`llm_id`（内置 `entity.fields` 带一条空 `type`，原样提交回 `102`）；知识图谱用 `knowledge_graph`，删掉 `llm_id`。
+3. `POST /api/v1/compilation-template-groups`，名为 `owb-<id>-g<代数>`，`templates` 是开着的类型各一项。RAGFlow 对同名组自动加后缀，本系统只按应答里的 id 引用。
+4. `GET /api/v1/pipelines/<parser_id>` 取内置 DSL，插一个 `Compiler:Owb` 节点：按 `obj.component_name` 含 `Chunker` 找 chunker（各模板节点名不同），插在它与原下游之间，`components` 与 `graph` 两处都改，`graph.edges` 里 chunker 的出边改从 Compiler 出发、原边不留，再加 chunker → Compiler 一条。Compiler 的 `llm_id` 留空，建数据集时 RAGFlow 把它固化成账号当时的缺省对话模型。然后 `POST /api/v1/agents`，`title` 同名，`canvas_category` 为 `dataflow_canvas`。内置 DSL 没有 `graph`，或 chunker 不是恰一个：503 `kb_unavailable`，不提交。`graph` 不能省：省掉时建画布、建库都回 `code:0`，文档静默换解析器、编译不运行。
+5. `POST /api/v1/datasets`，body `{name, parse_type:2, pipeline_id:<画布 id>, embedding_model}`。
+
+任一步失败，逆序删掉这一次已建的资源再返回这一步的结果：建画布失败删模板组，建数据集失败先删画布再删模板组。回滚同样即停，删除失败写上表的 leak。超时而 RAGFlow 实际已建成、或资源建好后进程崩溃，会留下无法自动对账的孤儿，只能按名字前缀 `owb-` 手工清理。
+
+删一代（`deletePipeline`）：次序固定为数据集 → 画布 → 模板组，上一步确认已删（成功或不存在）之前不发下一步，任一步失败即停。这两个删除接口没有引用保护：删了在用的画布或模板组，RAGFlow 回 `code:0`，之后解析 `FAILED`，所以次序只能由本系统保证。客户端的删画布与删模板组只有 `pipeline.ts` 调用。「不存在」视为已删：删数据集 `code:403`、删画布 `code:103`、删模板组 `code:404`。普通库的这一代只有数据集。
+
+**删库**：`state` 为 `rebuilding` 时 409 `kb_rebuilding`；写锁正被重建器持有时同样 409，不排队。否则在该库的写锁下逐代走上面的删一代：`rebuild_failed` 且新一代已建时先删新一代，再删当前一代。上一步确认已删之前不发下一步。取锁之后重判存在性与 `state`：排队期间库可能已删除（404）或转入重建（409）。
+
+- `DELETE /api/v1/datasets` 的 `code:403` 是「不存在」（实测记录表 B），视为已删，不写 `kb_upstream_auth_failed`；删画布的 `code:103`、删模板组的 `code:404` 同样。
 - 不可达或别的失败：503 `kb_unavailable` 或 400 `kb_rejected`，行不动。重试从头走一遍，已删的按「不存在」跳过，所以不留孤儿。
 - 都删完后删行（文档行级联），在同一事务里写 `kb.delete`。
 

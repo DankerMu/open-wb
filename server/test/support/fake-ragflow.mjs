@@ -10,7 +10,9 @@
  * 批量停止与空 `document_ids` 的停止；§10 混合批次之外的批量删文档；`DELETE /datasets` 的 `ids` 不是数组、含
  * 重复；上传带 `?type=` 的合法取值；multipart 缺结束边界；一次多个文件里有被拒的。
  *
- * 文档列表在 `fake-ragflow-list.mjs`（组 11），线上字节计数在 `fake-ragflow-wire.mjs`（组 12）。
+ * 文档列表在 `fake-ragflow-list.mjs`（组 11），线上字节计数在 `fake-ragflow-wire.mjs`（组 12），内置模板、模板组、内置 pipeline
+ * 与画布在 `fake-ragflow-pipeline.mjs`（组 9 第二刀）。`parse_type:2` 的数据集在这里：`pipeline_id` 要是夹具里的画布，读回的
+ * `parser_id` 是 `general`（§4.6）；同时带 `parser_id` 的组合没有记录，落到未知路由。
  *
  * 外推，记录里没有原文，用例不要钉死：
  * - 缺 `name` 的 `102` 来自 §12 的「缺字段」，message 借用全空白名字的那句；`name`、`parser_id`、`embedding_model`
@@ -40,6 +42,12 @@ import {
   modelViews,
   seedModel,
 } from "./fake-ragflow-models.mjs";
+import {
+  createPipelineState,
+  numberedName,
+  PIPELINE_ROUTES,
+  pipelineViews,
+} from "./fake-ragflow-pipeline.mjs";
 import {
   createScript,
   failure,
@@ -141,21 +149,18 @@ function extraField(body, allowed) {
 }
 
 /** §4.3：`parse_type` 的字符串取值回 102 与 Go 解码错误，记录没有原文，这里只保证 code。 */
-function templateRejection({
-  parse_type: parseType,
-  parser_id: parserId,
-  pipeline_id: pipelineId,
-}) {
+function templateRejection(
+  { parse_type: parseType, parser_id: parserId, pipeline_id: pipelineId },
+  canvases,
+) {
   if (parseType === undefined) {
     return failure(102, "parse_type is required");
   }
+  if (parseType === 2 && pipelineId === undefined) {
+    return failure(102, "pipeline_id is required when parse_type is Pipeline");
+  }
   if (parseType === 2) {
-    return failure(
-      102,
-      pipelineId === undefined
-        ? "pipeline_id is required when parse_type is Pipeline"
-        : "canvas is not accessible",
-    );
+    return canvases.has(pipelineId) ? undefined : failure(102, "canvas is not accessible");
   }
   if (parseType !== 1) {
     return failure(102, `invalid parse_type: ${String(parseType)} (must be 1 or 2)`);
@@ -181,15 +186,20 @@ function nameRejection(name) {
 
 function createDataset(state, request) {
   const body = request.body;
+  if (body.parse_type === 2 && body.parser_id !== undefined) {
+    return undefined;
+  }
   const rejection =
     extraField(body, DATASET_FIELDS) ??
-    templateRejection(body) ??
+    templateRejection(body, state.pipeline.canvases) ??
     nameRejection(body.name) ??
     embeddingRejection(body.embedding_model, state.models);
   if (rejection !== undefined) {
     return rejection;
   }
-  const dataset = state.add(body.name, body.parser_id, body.embedding_model);
+  const pipelineId = body.parse_type === 2 ? body.pipeline_id : undefined;
+  const parserId = pipelineId === undefined ? body.parser_id : "general";
+  const dataset = state.add(body.name, parserId, body.embedding_model, pipelineId);
   return {
     json: {
       code: 0,
@@ -202,6 +212,7 @@ function createDataset(state, request) {
         name: dataset.name,
         parser_id: dataset.parserId,
         permission: "me",
+        ...(pipelineId === undefined ? {} : { pipeline_id: pipelineId }),
         token_num: 0,
       },
       message: null,
@@ -277,16 +288,6 @@ function parseMultipart(contentType, bytes) {
     at = end + CRLF.length;
   }
   return null;
-}
-
-/** 重名时加序号，取第一个没被占的；`fold` 决定比较时算不算大小写。 */
-function numberedName(names, stem, tail, fold) {
-  const taken = new Set(names.map(fold));
-  let name = `${stem}${tail}`;
-  for (let round = 1; taken.has(fold(name)); round += 1) {
-    name = `${stem}(${round})${tail}`;
-  }
-  return name;
 }
 
 /** §4.5：`OWB-DUP` 撞上 `owb-dup`、`owb-dup(1)` 得 `OWB-DUP(2)`。 */
@@ -456,16 +457,9 @@ function putDatasetAbsent(state, request, [id]) {
   return isUuid(id) ? datasetAbsent(state, request, [id]) : failure(101, INVALID_UUID);
 }
 
-const agentAbsent = (message) => () => failure(103, message);
-
-function groupAbsent(_state, _request, [id]) {
-  return failure(404, `Cannot find compilation template group ${id}.`);
-}
-
 const segment = "([^/]+)";
 const DATASET = `${API}/datasets/${segment}`;
 const DOCUMENTS = `${DATASET}/documents`;
-const GROUP = `${API}/compilation-template-groups/${segment}`;
 /** `[方法, 路径, 处理函数]`。处理函数返回 `undefined` 即落到未知路由。 */
 const ROUTES = [
   ["GET", `${API}/system/version`, versionAnswer, { open: true }],
@@ -480,18 +474,7 @@ const ROUTES = [
   ["PUT", DATASET, putDatasetAbsent],
   ["GET", DOCUMENTS, listDocuments],
   ["GET", `${DATASET}/compilation/status`, datasetAbsent],
-  [
-    "GET",
-    `${API}/agents/${segment}`,
-    agentAbsent("Make sure you have permission to access the agent."),
-  ],
-  [
-    "DELETE",
-    `${API}/agents/${segment}`,
-    agentAbsent("Only the owner of the agent is authorized for this operation."),
-  ],
-  ["GET", GROUP, groupAbsent],
-  ["DELETE", GROUP, groupAbsent],
+  ...PIPELINE_ROUTES,
   ...MODEL_ROUTES,
 ].map(([method, path, handler, options]) => ({
   method,
@@ -576,13 +559,15 @@ function createState() {
   return {
     datasets,
     models: createModelState(),
-    add(name, parserId, embeddingModel) {
+    pipeline: createPipelineState(),
+    add(name, parserId, embeddingModel, pipelineId) {
       const canonical = parserId === "naive" ? "general" : parserId;
       const dataset = {
         id: newId(),
         name: freeDatasetName(datasets, name),
         parserId: canonical,
         embeddingModel: embeddingModel ?? "",
+        pipelineId,
         documents: new Map(),
       };
       datasets.set(dataset.id, dataset);
@@ -711,6 +696,7 @@ export async function start(options = {}) {
       documentOf(state, datasetId, documentId).ingestionStatus = status;
     },
     ...modelViews(state.models),
+    ...pipelineViews(state.pipeline),
     datasets: () =>
       [...state.datasets.values()].map(({ id, name, parserId, embeddingModel }) => ({
         id,

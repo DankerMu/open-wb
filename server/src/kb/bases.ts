@@ -1,22 +1,24 @@
 /**
  * 建库、列表与删库（s2a-kb-ragflow D2、D9、D20；knowledge-bases「知识库端点」「知识库审计」）。
  *
- * 组 9 首刀只有普通模板：`raptor` 或 `graph` 为真一律 400，数据集走 `parse_type:1`，没有模板组与画布。开关的开放、
- * `createPipeline` 与 `deletePipeline` 属第二刀（#1869），编译状态的读取属第三刀（#1870）。
+ * 两种库：两个开关都关的走 `parse_type:1`，没有模板组与画布；任一开关开的经 `kb/pipeline.ts` 的 `createPipeline` 建模板组、
+ * 画布与 `parse_type:2` 数据集（#1869）。编译状态的读取属第三刀（#1870）：在那之前，列表里开了开关的库 `compile` 为 `null`。
  *
  * 建库：body 的键集、类型、名称与模板在取锁之前判定，不读库。其余判定在设置锁内，读到的是锁内的设置行与知识库行：
- * 嵌入就绪、开关、重名、数量上限，次序不变。建库全程持锁，所以不会建出代数过期的库，也不会与一次保存交错。先建
- * 数据集、后插行：插行或审计失败时删掉刚建的数据集，这个删除失败写一行 `kb_dataset_leak`，不改变应答。
+ * 嵌入就绪、开关为真而对话模型未指定、重名、数量上限，次序不变，都不发出站请求。建库全程持锁，所以不会建出代数过期的库，
+ * 也不会与一次保存交错（取消指定排在前面，这里读到 `null`；排在后面，它读到开编译的库）。先建 RAGFlow 资源、后插行：插行
+ * 或审计失败时按删除次序删掉这一代，删除失败写一行 leak，不改变应答。
  *
  * 删库：别人的或不存在的 id 一律 404，先于 `state`，不发出站请求，不写审计。快判到取锁之间没有 `await`：`locks.ts` 的
- * 准入是同步的，到达次序就是调用次序（D20）。取锁后重判，排队期间库可能已删除或转入重建。一代的数据集删除确认之前
- * 不发下一代，任一步失败行不动，重试从头走一遍，已删的按 `not_found` 跳过。
+ * 准入是同步的，到达次序就是调用次序（D20）。取锁后重判，排队期间库可能已删除或转入重建。每一代走 `deletePipeline`，
+ * `rebuild_failed` 时先删新一代；任一步失败行不动，重试从头走一遍，已删的按 `not_found` 跳过。
  *
- * 列表与 201 的 `BaseView` 都只读本地行。
+ * 列表与 201 的 `BaseView` 都只读本地行：201 里开着的类型为 `pending`，关着的为 `off`。
  */
 import { HttpError } from "../core/errors/index.js";
 import { isLabel } from "../model-catalog.js";
 import type { createKbLocks } from "./locks.js";
+import type { createKbPipeline, PipelineResources } from "./pipeline.js";
 import { type createRagflowClient, isRecord } from "./ragflow-client.js";
 import { embeddingModelOf, unwrap } from "./settings.js";
 import type { createKbStore, KnowledgeBase } from "./store.js";
@@ -28,11 +30,7 @@ const MAX_BASES_PER_OWNER = 50;
 /** 两个开关都为 0 的库的 `compile`：恒定值，不发出站请求。 */
 const COMPILE_OFF = { raptor: "off", graph: "off" } as const;
 
-/** 数据集留在了 RAGFlow、本地却没有行：回滚删除失败时写的 stderr 记录（D9）。 */
-export interface KbBaseRecord {
-  event: "kb_dataset_leak";
-  datasetId: string;
-}
+type CompileView = Record<"raptor" | "graph", "off" | "pending"> | null;
 
 interface AuditEvent {
   kind: "kb.create" | "kb.delete";
@@ -54,12 +52,14 @@ interface KbBasesDependencies {
     | "createBase"
     | "removeBase"
   >;
-  client: Pick<ReturnType<typeof createRagflowClient>, "createDataset" | "deleteDataset">;
+  client: Pick<ReturnType<typeof createRagflowClient>, "createDataset">;
+  pipeline: Pick<
+    ReturnType<typeof createKbPipeline>,
+    "createPipeline" | "deletePipeline" | "discard"
+  >;
   locks: Pick<ReturnType<typeof createKbLocks>, "settings" | "write">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
-  /** 受管 stderr writer。 */
-  log: (record: KbBaseRecord) => void;
 }
 
 /** 通过了形状校验的 body。 */
@@ -67,8 +67,8 @@ interface CreateRequest {
   name: string;
   template: string;
   parserId: string;
-  /** 开关为真：本刀一律拒绝，判定排在嵌入就绪之后（spec 的第 3 步）。 */
-  compile: boolean;
+  raptor: boolean;
+  graph: boolean;
 }
 
 function badRequest(): never {
@@ -107,23 +107,47 @@ function parseCreate(body: unknown): CreateRequest {
   if (entry === undefined) {
     badRequest();
   }
-  return { name, template, parserId: entry.parserId, compile: raptor === true || graph === true };
+  return {
+    name,
+    template,
+    parserId: entry.parserId,
+    raptor: raptor === true,
+    graph: graph === true,
+  };
 }
 
 /** 删除的次序：`rebuild_failed` 的库先删新一代，再删当前一代；重建没走到建库那一步时没有新一代。 */
-function datasetsOf({ datasetId, rebuildDatasetId }: KnowledgeBase): string[] {
-  return rebuildDatasetId === null ? [datasetId] : [rebuildDatasetId, datasetId];
+function generationsOf(base: KnowledgeBase): PipelineResources[] {
+  const current = {
+    datasetId: base.datasetId,
+    canvasId: base.canvasId,
+    templateGroupId: base.templateGroupId,
+  };
+  const next = {
+    datasetId: base.rebuildDatasetId,
+    canvasId: base.rebuildCanvasId,
+    templateGroupId: base.rebuildTemplateGroupId,
+  };
+  return next.datasetId === null ? [current] : [next, current];
 }
 
-function viewOf(base: KnowledgeBase, documents: number) {
+function viewOf(base: KnowledgeBase, documents: number, compile: CompileView) {
   const { id, name, template, raptor, graph, state, stateMessage, createdAt } = base;
-  // 开了开关的行这一刀建不出来；读不到的编译状态是 `null`，不是 `off`（第三刀接上读取）。
-  const compile = raptor || graph ? null : COMPILE_OFF;
   return { id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt };
 }
 
+/** 列表：开了开关的库读不到编译状态，是 `null`，不是 `off`（第三刀接上读取）。 */
+const listedCompile = ({ raptor, graph }: KnowledgeBase): CompileView =>
+  raptor || graph ? null : COMPILE_OFF;
+
+/** 201：不读 RAGFlow，开着的类型还没有产出。 */
+const createdCompile = ({ raptor, graph }: KnowledgeBase): CompileView => ({
+  raptor: raptor ? "pending" : "off",
+  graph: graph ? "pending" : "off",
+});
+
 export function createKbBases(dependencies: KbBasesDependencies) {
-  const { store, client, locks, audit, log } = dependencies;
+  const { store, client, pipeline, locks, audit } = dependencies;
 
   function deletable(id: string, ownerId: string): KnowledgeBase {
     const base = ownedBase(store, id, ownerId);
@@ -133,20 +157,33 @@ export function createKbBases(dependencies: KbBasesDependencies) {
     return base;
   }
 
-  async function discardDataset(datasetId: string): Promise<void> {
-    const result = await client.deleteDataset(datasetId);
-    if (result.kind !== "ok" && result.kind !== "not_found") {
-      log({ event: "kb_dataset_leak", datasetId });
+  /** 这一代的 RAGFlow 资源：普通库只有数据集，开了开关的库经 `createPipeline`。 */
+  async function createResources(request: CreateRequest, name: string, embeddingModel: string) {
+    const { parserId, raptor, graph } = request;
+    if (!raptor && !graph) {
+      const dataset = unwrap(await client.createDataset({ name, parserId, embeddingModel }));
+      return { datasetId: dataset.id, canvasId: null, templateGroupId: null };
     }
+    const created = await pipeline.createPipeline({
+      name,
+      parserId,
+      embeddingModel,
+      raptor,
+      graph,
+    });
+    if (created.kind !== "ok") {
+      throw new HttpError(created.kind);
+    }
+    return created.value;
   }
 
   async function createLocked(request: CreateRequest, ownerId: string) {
-    const { name, template, parserId, compile } = request;
-    const { embedding, embeddingGeneration } = store.settings();
+    const { name, template, raptor, graph } = request;
+    const { embedding, embeddingGeneration, chatModelId } = store.settings();
     if (embedding === null) {
       throw new HttpError("kb_not_ready");
     }
-    if (compile) {
+    if ((raptor || graph) && chatModelId === null) {
       badRequest();
     }
     if (store.isBaseNameTaken(ownerId, name)) {
@@ -156,45 +193,32 @@ export function createKbBases(dependencies: KbBasesDependencies) {
       throw new HttpError("kb_limit");
     }
     const id = store.newId();
-    const dataset = await client.createDataset({
-      name: `owb-${id}-g${String(embeddingGeneration)}`,
-      parserId,
-      embeddingModel: embeddingModelOf(embedding.name),
-    });
-    const { id: datasetId } = unwrap(dataset);
+    const resourceName = `owb-${id}-g${String(embeddingGeneration)}`;
+    const embeddingModel = embeddingModelOf(embedding.name);
+    const resources = await createResources(request, resourceName, embeddingModel);
     try {
       const base = store.createBase(
-        {
-          id,
-          ownerId,
-          name,
-          template,
-          raptor: false,
-          graph: false,
-          datasetId,
-          canvasId: null,
-          templateGroupId: null,
-        },
+        { id, ownerId, name, template, raptor, graph, ...resources },
         () => {
           audit({
             kind: "kb.create",
             actorId: ownerId,
             title: "新建知识库",
-            detail: { id, template, raptor: false, graph: false },
+            detail: { id, template, raptor, graph },
           });
         },
       );
-      return viewOf(base, 0);
+      return viewOf(base, 0, createdCompile(base));
     } catch (error) {
-      await discardDataset(datasetId);
+      await pipeline.discard(resources);
       throw error;
     }
   }
 
   async function removeLocked(id: string, ownerId: string): Promise<void> {
-    for (const datasetId of datasetsOf(deletable(id, ownerId))) {
-      const result = await client.deleteDataset(datasetId);
-      if (result.kind !== "ok" && result.kind !== "not_found") {
+    for (const generation of generationsOf(deletable(id, ownerId))) {
+      const result = await pipeline.deletePipeline(generation);
+      if (result.kind !== "ok") {
         throw new HttpError(result.kind);
       }
     }
@@ -206,7 +230,9 @@ export function createKbBases(dependencies: KbBasesDependencies) {
   return {
     /** `GET /api/kb/bases`：按 `created_at` 升序，只读本地行。 */
     list(ownerId: string) {
-      return store.listBases(ownerId).map((base) => viewOf(base, store.countDocuments(base.id)));
+      return store
+        .listBases(ownerId)
+        .map((base) => viewOf(base, store.countDocuments(base.id), listedCompile(base)));
     },
 
     /** `POST /api/kb/bases`。 */

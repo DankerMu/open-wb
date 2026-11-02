@@ -648,18 +648,23 @@ describe("路径的 id 按段编码", () => {
 describe("客户端的调用面（design D4、D7）", () => {
   it("恰为这些调用：没有读单实例、清空缺省与 /providers 下的删除", () => {
     expect(Object.keys(client).sort()).toEqual([
+      "createCanvas",
       "createDataset",
       "createModelInstance",
+      "createTemplateGroup",
       "deleteCanvas",
       "deleteDataset",
       "deleteDocument",
       "deleteTemplateGroup",
       "downloadDocument",
       "ensureProvider",
+      "listBuiltinTemplates",
       "listDocuments",
       "listInstanceModels",
       "listModelInstances",
       "parseDocument",
+      "readBuiltinPipeline",
+      "readDefaultModels",
       "setDefaultModel",
       "stopDocument",
       "updateModelInstance",
