@@ -15,6 +15,7 @@ import {
   DELETE_DATASETS,
   datasetIdOf,
   deleteBase,
+  expectDeleted,
   NOT_FOUND,
   ownerIdOf,
   POST_DATASETS,
@@ -162,10 +163,7 @@ describe("删库", () => {
     const world = await ready();
     const view = await createdBase(world, "规范库");
     world.fake.answer(DELETE_DATASETS, { code: 403, message: "Permission denied" });
-    expect((await deleteBase(world, view.id)).statusCode).toBe(204);
-    expect(world.store.getBase(view.id)).toBeUndefined();
-    expect(auditsOf(world, "kb.delete")).toHaveLength(1);
-    expect(world.logged).toEqual([]);
+    await expectDeleted(world, view.id);
   });
 
   it.each([

@@ -134,11 +134,11 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `{"event":"kb_dataset_leak","datasetId":<id>}` | 回滚删不掉数据集：RAGFlow 里留下一个本地没有行的数据集。开了开关的库，它的画布与模板组没有去删，也还在 | 按 `datasetId` 在 RAGFlow 里手工删除；开了开关的，再按数据集名（`owb-<id>-g<代数>`，画布与模板组同名）先删画布、再删模板组。这条记录不限频 |
 | `{"event":"kb_pipeline_leak","canvasId":<id\|null>,"groupId":<id\|null>}` | 回滚删不掉画布（两个 id 都在，模板组没有去删）或模板组（画布已删，`canvasId` 为 `null`） | 按 id 在 RAGFlow 里先删画布、再删模板组。这条记录不限频 |
 
-**编译资源**（`server/src/kb/pipeline.ts`，组 9 第二刀）。RAPTOR 与知识图谱不是数据集字段：`parser_config` 里的开关被 RAGFlow 静默丢弃。开了开关的库是三样资源：一个模板组、一个引用它的画布（ingestion pipeline），以及以这个画布建的 `parse_type:2` 数据集。每个库每一代一套，不共用（重建时新建一套，`rebuild_*` 三列记新一代）。解析时 Compiler 节点在 pipeline 里自动运行，没有单独的编译触发。
+**编译资源**（`server/src/kb/pipeline.ts`，组 9 第二刀）。RAPTOR 与知识图谱不是数据集字段：`parser_config` 里的开关被 RAGFlow 静默丢弃。开了开关的库是三样资源：一个模板组、一个引用它的画布（ingestion pipeline），以及以这个画布建的 `parse_type:2` 数据集。每个库每一代一套，不共用。本刀只在建库时建第 0 代；重建时新建一代、`rebuild_*` 三列记新一代，由组 14（#1852）接上。解析时 Compiler 节点在 pipeline 里自动运行，没有单独的编译触发。
 
 建一代（`createPipeline`，建库与重建共用；调用方持锁，它自己不取锁）：
 
-1. `GET /api/v1/models/default`，只读。`data.models` 里 `chat` 与 `embedding` 两种都在、`model_name` 非空才继续；缺一种即 409 `kb_not_ready`（重建时该库 `rebuild_failed`），不发后续请求。这一步挡的是 RAGFlow 侧被人手工清空缺省：没有缺省对话模型时，pipeline 数据集的数据集级合并会让全栈唯一的入库进程崩溃循环。本系统自己从不清空缺省（见上面的「账号缺省不变量」）。补救：管理员保存一次嵌入模型，两种缺省都会重新下发。
+1. `GET /api/v1/models/default`，只读。`data.models` 里 `chat` 与 `embedding` 两种都在、`model_name` 非空才继续；缺一种即 409 `kb_not_ready`，不发后续请求（重建时怎样映射由组 14（#1852）接上）。这一步挡的是 RAGFlow 侧被人手工清空缺省：没有缺省对话模型时，pipeline 数据集的数据集级合并会让全栈唯一的入库进程崩溃循环。本系统自己从不清空缺省（见上面的「账号缺省不变量」）。补救：管理员保存一次嵌入模型，两种缺省都会重新下发。
 2. `GET /api/v1/compilation-templates/builtins` 取内置 `config`。RAPTOR 用 `tree`，删掉 `entity`、`relation`、`llm_id`（内置 `entity.fields` 带一条空 `type`，原样提交回 `102`）；知识图谱用 `knowledge_graph`，删掉 `llm_id`。
 3. `POST /api/v1/compilation-template-groups`，名为 `owb-<id>-g<代数>`，`templates` 是开着的类型各一项。RAGFlow 对同名组自动加后缀，本系统只按应答里的 id 引用。
 4. `GET /api/v1/pipelines/<parser_id>` 取内置 DSL，插一个 `Compiler:Owb` 节点：按 `obj.component_name` 含 `Chunker` 找 chunker（各模板节点名不同），插在它与原下游之间，`components` 与 `graph` 两处都改，`graph.edges` 里 chunker 的出边改从 Compiler 出发、原边不留，再加 chunker → Compiler 一条。Compiler 的 `llm_id` 留空，建数据集时 RAGFlow 把它固化成账号当时的缺省对话模型。然后 `POST /api/v1/agents`，`title` 同名，`canvas_category` 为 `dataflow_canvas`。内置 DSL 没有 `graph`，或 chunker 不是恰一个：503 `kb_unavailable`，不提交。`graph` 不能省：省掉时建画布、建库都回 `code:0`，文档静默换解析器、编译不运行。

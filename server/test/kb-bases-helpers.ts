@@ -138,6 +138,14 @@ export function deleteBase(
   return world.call("DELETE", `${BASES}/${id}`, who);
 }
 
+/** 删掉这个库：204，行不在，恰一条 kb.delete，没有写 leak 或 kb_upstream_auth_failed。 */
+export async function expectDeleted(world: World, id: string): Promise<void> {
+  expect((await deleteBase(world, id)).statusCode).toBe(204);
+  expect(world.store.getBase(id)).toBeUndefined();
+  expect(auditsOf(world, "kb.delete")).toHaveLength(1);
+  expect(world.logged).toEqual([]);
+}
+
 export function auditsOf(world: World, kind: string) {
   return world.db
     .prepare("SELECT actor_id, title, detail, workspace_id FROM audit_events WHERE kind = ?")

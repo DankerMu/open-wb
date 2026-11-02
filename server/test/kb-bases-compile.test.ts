@@ -24,6 +24,7 @@ import {
   deleteCanvasRoute,
   deleteGroupRoute,
   EMBEDDING_MODEL,
+  expectDeleted,
   GENERIC_500,
   GET_BUILTINS,
   GET_DEFAULTS,
@@ -221,13 +222,18 @@ describe("账号缺省缺失时不建编译资源", () => {
     })),
   });
 
-  it("models 为空、只有 embedding、只有 chat：409 kb_not_ready，只发这一次读取；两种都在 201；HTTP 503 为 503", async () => {
+  const [chat, embedding] = defaults("chat", "embedding").models;
+
+  it("models 为空、只有 embedding、只有 chat、chat 的 model_name 为空串：409 kb_not_ready，只发这一次读取；两种都在 201；HTTP 503 与 model_name 不是字符串为 503", async () => {
     const world = await compileReady();
-    // 空列表是记录里的应答（§11.4，悬空时也是它）；只有一种是防御性组合（故障注入）。
+    // 空列表是记录里的应答（§11.4，悬空时也是它）；只有一种、一种的名字为空串（§11.2 清空缺省的写法）、名字不是字符串
+    // 都是防御性组合（故障注入）。
     world.fake.answer(GET_DEFAULTS, { code: 0, data: { models: [] } });
     world.fake.fault(GET_DEFAULTS, { kind: "combo", code: 0, data: defaults("embedding") });
     world.fake.fault(GET_DEFAULTS, { kind: "combo", code: 0, data: defaults("chat") });
-    for (const n of [1, 2, 3]) {
+    const emptyChat = { models: [{ ...chat, model_name: "" }, embedding] };
+    world.fake.fault(GET_DEFAULTS, { kind: "combo", code: 0, data: emptyChat });
+    for (const n of [1, 2, 3, 4]) {
       world.forget();
       const refused = await createBase(world, { ...COMPILED, name: `库 ${String(n)}` });
       expect(refused.statusCode).toBe(409);
@@ -235,16 +241,20 @@ describe("账号缺省缺失时不建编译资源", () => {
       expect(routes(world.sent())).toEqual([GET_DEFAULTS]);
     }
     world.fake.fault(GET_DEFAULTS, { kind: "status", status: 503 });
-    world.forget();
-    const down = await createBase(world, { ...COMPILED, name: "库 503" });
-    expect(down.statusCode).toBe(503);
-    expect(bodyOf(down)).toEqual(KB_UNAVAILABLE);
-    expect(routes(world.sent())).toEqual([GET_DEFAULTS]);
+    const numberName = { models: [chat, { ...embedding, model_name: 3 }] };
+    world.fake.fault(GET_DEFAULTS, { kind: "combo", code: 0, data: numberName });
+    for (const n of [1, 2]) {
+      world.forget();
+      const down = await createBase(world, { ...COMPILED, name: `库 503-${String(n)}` });
+      expect(down.statusCode).toBe(503);
+      expect(bodyOf(down)).toEqual(KB_UNAVAILABLE);
+      expect(routes(world.sent())).toEqual([GET_DEFAULTS]);
+    }
     expectNoResources(world);
     expectNothingCreated(world);
 
     world.forget();
-    await createdCompileBase(world, "库 4");
+    await createdCompileBase(world, "库 5");
     expect(routes(world.sent())).toEqual(sequence());
     expect(baseCount(world)).toBe(1);
   });
@@ -533,6 +543,8 @@ describe("删除次序", () => {
   it("三步分别回 code:403、code:103、code:404：都视为已删，204，不写 kb_upstream_auth_failed", async () => {
     const world = await compileReady();
     const view = await createdCompileBase(world, "规范库");
+    const generation = generationOf(world, view.id);
+    world.forget();
     world.fake.answer(DELETE_DATASETS, { code: 403, message: "Permission denied" });
     world.fake.answer(DELETE_ANY_CANVAS, {
       code: 103,
@@ -542,10 +554,8 @@ describe("删除次序", () => {
       code: 404,
       message: "Cannot find compilation template group x.",
     });
-    expect((await deleteBase(world, view.id)).statusCode).toBe(204);
-    expect(world.store.getBase(view.id)).toBeUndefined();
-    expect(auditsOf(world, "kb.delete")).toHaveLength(1);
-    expect(world.logged).toEqual([]);
+    await expectDeleted(world, view.id);
+    expect(deletesSent(world)).toEqual(deletesOf(generation));
   });
 });
 

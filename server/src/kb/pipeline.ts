@@ -10,8 +10,8 @@
  * RAGFlow 回 `code:0`，之后解析 `FAILED`。上一步确认已删（成功或不存在）之前不发下一步，任一步失败即停。`ragflow-client`
  * 的删画布与删模板组只有这里调用。删除失败时 `discard` 写一行 leak，不带名称与内容。
  *
- * 不取锁（D20：锁不可重入）：调用方持有设置锁（建库）或该库的写锁（删库、重建）。结果是类型化的，不抛 `HttpError`：建库
- * 把它映射成应答，重建器把它映射成 `rebuild_failed`。
+ * 不取锁（D20：锁不可重入）：调用方持有设置锁（建库）或该库的写锁（删库）。结果是类型化的，不抛 `HttpError`：建库把它
+ * 映射成应答；重建的调用方由组 14（#1852）接上。
  */
 import { type createRagflowClient, isRecord } from "./ragflow-client.js";
 

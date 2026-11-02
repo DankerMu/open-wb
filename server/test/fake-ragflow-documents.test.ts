@@ -4,14 +4,9 @@
  * 这里用 `fetch` 与裸 socket 直接打夹具，不经客户端：夹具是客户端用例的判据，不能反过来靠它证明。
  */
 import { connect } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
-import {
-  callFake,
-  expectUnknownRoute,
-  type FakeCallOptions,
-  formOf,
-} from "./support/fake-ragflow-call.js";
+import { describe, expect, it } from "vitest";
+import type { FakeRagflowServer } from "./support/fake-ragflow.mjs";
+import { expectUnknownRoute, formOf, useFakeRagflow } from "./support/fake-ragflow-call.js";
 
 const KEY = "wb-issue1840-fixture-key";
 const ABSENT = "0123456789abcdef0123456789abcdef";
@@ -22,17 +17,9 @@ const EMPTY_FILE = '{"code":500,"message":"Failed to download document"}';
 const TORN = '--b\r\nContent-Disposition: form-data; name="file"; filename="a.txt"\r\n\r\npartial';
 
 let fake: FakeRagflowServer;
-
-beforeEach(async () => {
-  fake = await start({ apiKey: KEY });
+const call = useFakeRagflow(KEY, (started) => {
+  fake = started;
 });
-
-afterEach(async () => {
-  await fake.close();
-});
-
-const call = (method: string, path: string, options?: FakeCallOptions) =>
-  callFake(fake.baseUrl, KEY, method, path, options);
 
 describe("上传（§7）", () => {
   const upload = (id: string, form: FormData) =>

@@ -3,10 +3,10 @@
  * `docs/reviews/2026-10-28-ragflow-rc2-api.md` §5.1、表 B 的字面量（§5.1 (3) 的表在 `kb-bases-helpers.ts`），不从夹具导入；用
  * `fetch` 直接打夹具，不经客户端：夹具是建库用例的判据，不能反过来靠它证明。
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { BUILTIN_PIPELINES, componentOf, type DslShape } from "./kb-bases-helpers.js";
-import { type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
-import { callFake, expectUnknownRoute, type FakeCallOptions } from "./support/fake-ragflow-call.js";
+import type { FakeRagflowServer } from "./support/fake-ragflow.mjs";
+import { expectUnknownRoute, useFakeRagflow } from "./support/fake-ragflow-call.js";
 
 const KEY = "wb-issue1869-fixture-key";
 const ABSENT = "0123456789abcdef0123456789abcdef";
@@ -15,17 +15,9 @@ const AGENTS = "/api/v1/agents";
 const DELETED = '{"code":0,"data":true,"message":"success"}';
 
 let fake: FakeRagflowServer;
-
-beforeEach(async () => {
-  fake = await start({ apiKey: KEY });
+const call = useFakeRagflow(KEY, (started) => {
+  fake = started;
 });
-
-afterEach(async () => {
-  await fake.close();
-});
-
-const call = (method: string, path: string, options?: FakeCallOptions) =>
-  callFake(fake.baseUrl, KEY, method, path, options);
 
 type Config = Record<string, unknown>;
 
