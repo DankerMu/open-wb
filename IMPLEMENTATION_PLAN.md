@@ -414,7 +414,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 **S2a 知识库建库与摄取（对接 RAGFlow 服务，change `s2a-kb-ragflow`）**
 - Outcome：app-server 新模块 `kb` 以单一服务账号直连运行中的 RAGFlow（钉住 `v1.0.0-rc2`，ADR-0016），`kbservice/` 与 Python 工具链退役。先对 rc2 接口实测，结论钉住假 RAGFlow 夹具。所有者在中心「知识库」tab 建库（11 种模板 + RAPTOR / 知识图谱开关，建库时固定）、从工作空间或本地上传入库（原件只存 RAGFlow，工作空间来源经沙箱 `resolve(read)` 读后上传）、看解析状态与切片数、移出文档、删库；状态以 RAGFlow 为准、按需读取。管理员在模型 tab 配置全局唯一的知识库嵌入模型与知识库对话模型，由 app-server 下发到 RAGFlow；更换嵌入模型经确认后全量重建。未配 `RAGFLOW_BASE_URL` 即知识库关闭，RAGFlow 不可达不阻断启动。S2a 的知识库只对所有者可见（四档在 S2c）。
 - 覆盖：F-CTR-KB1、F-CTR-KB2。
-- 必读增量：change `s2a-kb-ragflow` 的 proposal / design / specs / tasks；ADR-0016、0005（2026-11-01 补充）、0008；ATTRIBUTION.md §3。
+- 必读增量：规格见 `openspec/specs/knowledge-bases/spec.md` 与 `openspec/specs/ragflow-backend/spec.md`，任务与设计见已归档的 change `openspec/changes/archive/2026-11-02-s2a-kb-ragflow/`；运维说明见 `docs/architecture/knowledge-base.md`；ADR-0016、0005（2026-11-01 补充）、0008；ATTRIBUTION.md §3。
 - Verify：CI 打假 RAGFlow（server / web 单测、`make ui-walk`）；真实 RAGFlow 只在本机 `make smoke-kb` 与功能验收「中心·知识库（CK）」：一批真实混合格式文档摄取成功、状态流转正确。
 - Depends on：S1a、S1b（读挂载内文件）、S1d（`models` 表与探活写法）、S1g（流式上传写法）；外部前提：共用 RAGFlow 栈运行 `v1.0.0-rc2`、专用账号与 key（owner，#1832）。
 - Review attention：decision-dense（凭证、本地映射与 RAGFlow 两份真相、同库写操作与重建的并发）。
@@ -513,8 +513,8 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 ## Next Step
 
-> 2026-11-01 更新。**P0 + P1 已交付，S2a 进行中**：S1b、S1d 的 change 均已归档（`s1d-model-registry`、`s1d-experts-skills`、`s1d-connectors`、`s1b-workspace-mounts`），验收清单无 `待签` 行。
-> S2a 走 Epic #1831（change `s2a-kb-ragflow`）：知识库方向已改为对接运行中的 RAGFlow 服务（ADR-0016，取代 ADR-0002），下文记录里的「S2a spike」随之作废。真实 RAGFlow 实测（组 1）等 owner 的外部前提 #1832。
+> 2026-11-02 更新。**P0 + P1 已交付，S2a 的实现全部合入**：change `s2a-kb-ragflow` 已归档（`openspec/changes/archive/2026-11-02-s2a-kb-ragflow/`），子 issue #1833–#1859、#1869、#1870 与前置重构 #1889 均已关闭。Epic #1831 待 owner 签收：验收清单「中心·知识库（CK）」的 CK-01–CK-12 均为 `待签`，其中 CK-11（真实栈 `make smoke-kb`）与 CK-12（知识库开启时的手动走查）由 owner 执行。
+> S2a 走 Epic #1831：知识库方向已改为对接运行中的 RAGFlow 服务（ADR-0016，取代 ADR-0002），下文记录里的「S2a spike」随之作废。
 > P2→P3→P4 仍链在 S2a 之后：S2b → S2c → S3a → S3b，S2c → S4a，S4a + S3b → S4b。
 >
 > 以下为更早的记录。
