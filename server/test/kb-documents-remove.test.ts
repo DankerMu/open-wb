@@ -18,6 +18,7 @@ import {
   CONTENT_SENTINEL,
   DELETE_DOCUMENT,
   type IngestWorld,
+  ingestedRow,
   MESSAGE_SENTINEL,
   NOT_FOUND,
   REBUILDING,
@@ -82,17 +83,6 @@ function seeded(world: IngestWorld, ingestionStatus = "UNSTART"): KbDocument {
   });
 }
 
-/** 经真实入库的一份工作空间来源的文档。 */
-async function ingested(world: IngestWorld, path: string, bytes: string): Promise<KbDocument> {
-  world.write(path, bytes);
-  expect((await world.ingest([path])).statusCode).toBe(201);
-  const row = world.rows().find((document) => document.sourcePath === path);
-  if (row === undefined) {
-    throw new Error(`ingest left no row for ${path}`);
-  }
-  return row;
-}
-
 const ragflowIds = (world: IngestWorld): string[] =>
   world.fake.documents(world.datasetId).map(({ id }) => id);
 
@@ -113,7 +103,7 @@ function expectRemoved(world: IngestWorld, response: LightMyRequestResponse, id:
 describe("移出", () => {
   it("移出不动源文件：204，源文件字节与修改时间不变，RAGFlow 文档已删，恰一条 kb.document_delete", async () => {
     const world = await open();
-    const document = await ingested(world, "docs/a.md", "正文");
+    const document = await ingestedRow(world, "docs/a.md", "正文");
     const before = statSync(join(world.root, "docs/a.md")).mtimeMs;
     const bytes = bytesOf(world, "docs/a.md");
     const audited = auditRows(world.fw.world).length;
@@ -136,7 +126,7 @@ describe("移出", () => {
 
   it("不读沙箱：源文件已删除也照常 204，只发一次删除", async () => {
     const world = await open();
-    const document = await ingested(world, "a.md", "a");
+    const document = await ingestedRow(world, "a.md", "a");
     rmSync(join(world.root, "a.md"));
     const sent = world.fake.requests().length;
     expectRemoved(world, await remove(world, document.id), document.id);
@@ -386,7 +376,7 @@ describe("请求判定", () => {
 describe("文档路由的所有权", () => {
   it("别人的库与不存在的 id：都 404，判定先于 body 与 doc 参数，零出站，没有审计，A 的行不变", async () => {
     const world = await open();
-    const document = await ingested(world, "a.md", "a");
+    const document = await ingestedRow(world, "a.md", "a");
     const audited = auditRows(world.fw.world).length;
     const sent = world.fake.requests().length;
     const responses = [
@@ -524,8 +514,8 @@ describe("state 与写锁（design D20）", () => {
 describe("审计", () => {
   it("detail 不含敏感内容：文件内容与 RAGFlow message 的哨兵进不了应答、审计与 stderr 记录，detail 恰为 {id, documentId}", async () => {
     const world = await open();
-    const refused = await ingested(world, "a.md", `正文 ${CONTENT_SENTINEL}`);
-    const document = await ingested(world, "b.md", `正文 ${CONTENT_SENTINEL}`);
+    const refused = await ingestedRow(world, "a.md", `正文 ${CONTENT_SENTINEL}`);
+    const document = await ingestedRow(world, "b.md", `正文 ${CONTENT_SENTINEL}`);
     world.fake.answer(DELETE_DOCUMENT, { code: 101, message: MESSAGE_SENTINEL });
     const rejected = await remove(world, refused.id);
     expect(rejected.statusCode).toBe(400);

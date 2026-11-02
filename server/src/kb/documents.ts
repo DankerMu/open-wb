@@ -1,6 +1,6 @@
 /**
  * 知识库的文档（s2a-kb-ragflow D10、D12、D13、D20；knowledge-bases「工作空间来源入库」「文档列表与状态」「重新入库与移出」）。
- * 组 10：工作空间来源入库与 RAGFlow 文档的删除写法；组 11：列表；本地上传在 `uploads.ts`（组 12）；组 13 首刀：移出，重新入库随后加进来。
+ * 组 10：工作空间来源入库与 RAGFlow 文档的删除写法；组 11：列表；本地上传在 `uploads.ts`（组 12）；组 13：移出与重新入库。
  *
  * 入库：整批在该库的写锁下顺序处理。快判到取锁之间没有 `await`：`locks.ts` 的准入是同步的（D20）。取锁后重判库、工作空间
  * 与 `state`，排队期间库可能已删除或转入重建。之后的 `state` 变化（确认重建）不再看：重建器要等这把锁，等到时才枚举文档。
@@ -34,9 +34,16 @@
  * 移出：取锁之前依次判定 `doc` 参数（400）→ `state`（`rebuilding` 409，`rebuild_failed` 允许）→ 文档归属（404），所有权已在路由
  * 判定。取锁后重判这三步里的库、`state` 与文档行，删除用锁内读到的 RAGFlow 文档 id：排在前面的写操作可能已删掉或换掉它。
  * 先按上面的写法删 RAGFlow 文档，`deleted` 才删行，同事务写 `kb.document_delete`；`busy` 与 `failed` 行都不动。不读沙箱，源文件不动。
+ *
+ * 重新入库：取锁之前依次判定 `doc` 参数（400）→ `state` 不是 `ready`（409，`rebuild_failed` 也拒）→ 文档归属（404）→ 上传来源
+ * （400），取锁后重判，旧 RAGFlow 文档 id 取锁内读到的。之后走入库的第 1 步与第 4–7 步（同一份 `transfer`）：查重、上限与后缀
+ * 不判，这一行就是它自己，模板也没变。读取被拒（含工作空间已不可见：facade 的 404 在 `resolve` 里归 `not_file`）一律 409
+ * `kb_source_unreadable`，不写 `kb.ingest_reject`：审计表没有重新入库的拒绝记录。上传与解析触发的失败按 D11 映射；任何失败都在
+ * 换行之前，行不动，上传成功后的失败删掉新文档。都成功后单事务换行内的 RAGFlow id、大小与 `mtimeMs` 并写 `kb.ingest`，再删旧
+ * 文档：旧文档可能还在解析，`busy`、`failed` 都只写 `kb_document_leak`，应答照常 200。先建后删：中途失败时行总指向一份在的文档。
  */
 import { basename } from "node:path";
-import { HttpError } from "../core/errors/index.js";
+import { HttpError, type HttpErrorCode } from "../core/errors/index.js";
 import { ownedBase } from "./bases.js";
 import type { createKbLocks } from "./locks.js";
 import { multipartUpload } from "./multipart.js";
@@ -52,6 +59,7 @@ const MAX_PATH_BYTES = 4096;
 const DEFAULT_TIMING: DocumentRemovalTiming = { retryMs: 500, deadlineMs: 5000 };
 const FAILED_MESSAGE = "解析失败";
 const REMOVE_TITLE = "知识库移出文档";
+const REINGEST_TITLE = "知识库重新入库文档";
 
 /** knowledge-bases「工作空间来源入库」的固定文案。 */
 const REASON_MESSAGES = {
@@ -69,6 +77,22 @@ const REASON_MESSAGES = {
 } as const;
 
 type RejectReason = keyof typeof REASON_MESSAGES;
+
+/** 读取与上传链路（第 1、4–7 步）自己的拒绝原因：查重、上限与后缀在 `admit`。 */
+type TransferReason = Exclude<RejectReason, "duplicate" | "limit">;
+
+/** 重新入库的应答（D13）：读取被拒都是源不可读，上传与解析触发的失败同本地上传（D11）。 */
+const REINGEST_FAILURES: Record<TransferReason, HttpErrorCode> = {
+  outside: "kb_source_unreadable",
+  not_file: "kb_source_unreadable",
+  offline: "kb_source_unreadable",
+  empty: "kb_source_unreadable",
+  too_large: "kb_source_unreadable",
+  changed: "kb_source_unreadable",
+  rejected: "kb_rejected",
+  unsupported_type: "kb_file_unsupported",
+  unavailable: "kb_unavailable",
+};
 
 const UPLOAD_REJECTIONS = {
   kb_rejected: "rejected",
@@ -161,6 +185,7 @@ interface KbDocumentsDependencies {
     | "listDocuments"
     | "countDocuments"
     | "addDocument"
+    | "replaceDocument"
     | "removeDocument"
   >;
   client: Client;
@@ -215,7 +240,7 @@ function documentIdOf(query: unknown): string {
 }
 
 /** 上传途中源的失败：这一条的事，不是 RAGFlow 的。 */
-function sourceRejection(failure: unknown): RejectReason {
+function sourceRejection(failure: unknown): TransferReason {
   return isMountOffline(failure) ? "offline" : "changed";
 }
 
@@ -356,6 +381,77 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
     return { base, document };
   }
 
+  /** 写锁下执行；锁正被重建器持有时不排队，409（D20）。 */
+  async function underWriteLock<T>(id: string, work: () => Promise<T>): Promise<T> {
+    const result = await locks.write(id, work);
+    if (result.outcome === "rebuilding") {
+      throw new HttpError("kb_rebuilding");
+    }
+    return result.value;
+  }
+
+  /** 重新入库的判定，取锁前后各一次：见文件头。返回的 `item` 是这一行的源。 */
+  function reingestable(id: string, actorId: string, documentId: string) {
+    const base = ownedBase(store, id, actorId);
+    if (base.state !== "ready") {
+      throw new HttpError("kb_rebuilding");
+    }
+    const document = store.getDocument(id, documentId);
+    if (document === undefined) {
+      throw new HttpError("not_found");
+    }
+    const { workspaceId, sourcePath } = document;
+    if (workspaceId === null || sourcePath === null) {
+      throw new HttpError("bad_request");
+    }
+    return { document, item: { base, actorId, workspaceId, path: sourcePath } };
+  }
+
+  /** 第 3 步（D13）：单事务换行并写 `kb.ingest`。`documentId` 是本地文档 id，取自这一行，不是查询参数。 */
+  function replace(
+    item: Item,
+    documentId: string,
+    opened: OpenedSource,
+    ragflowDocumentId: string,
+  ) {
+    const { base, actorId, workspaceId } = item;
+    const { size, mtimeMs: sourceMtimeMs } = opened;
+    const document = store.replaceDocument(
+      base.id,
+      documentId,
+      { ragflowDocumentId, size, sourceMtimeMs },
+      () => {
+        audit({
+          kind: "kb.ingest",
+          actorId,
+          title: REINGEST_TITLE,
+          detail: { id: base.id, source: "workspace", reingest: true, documentId },
+          workspaceId,
+        });
+      },
+    );
+    return viewOf(document, JUST_INGESTED, false);
+  }
+
+  async function reingestLocked(id: string, documentId: string, actorId: string) {
+    const { document, item } = reingestable(id, actorId, documentId);
+    const resolved = sources.resolve({ id: actorId }, item.workspaceId, item.path);
+    const outcome =
+      "reason" in resolved
+        ? resolved.reason
+        : await transfer(item, resolved.absPath, (opened, ragflowDocumentId) =>
+            replace(item, document.id, opened, ragflowDocumentId),
+          );
+    if (typeof outcome === "string") {
+      throw new HttpError(REINGEST_FAILURES[outcome]);
+    }
+    await discardRagflowDocument(dependencies, {
+      datasetId: item.base.datasetId,
+      documentId: document.ragflowDocumentId,
+    });
+    return outcome;
+  }
+
   async function removeLocked(id: string, documentId: string, actorId: string): Promise<void> {
     const { base, document } = removable(id, actorId, documentId);
     const removal = await removeRagflowDocument(
@@ -406,36 +502,49 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
     return viewOf(document, JUST_INGESTED, false);
   }
 
-  /** 第 7、8 步：文档已在 RAGFlow，这里的任何失败都要把它删掉。 */
-  async function parseAndRecord(
-    item: Item,
-    opened: OpenedSource,
+  /** 第 7、8 步：文档已在 RAGFlow，这里的任何失败都要把它删掉。`commit` 是同事务的本地写入与审计。 */
+  async function parseAndCommit(
+    datasetId: string,
     documentId: string,
-  ): Promise<DocumentView | RejectReason> {
-    const { datasetId } = item.base;
+    commit: () => DocumentView,
+  ): Promise<DocumentView | TransferReason> {
     const parsed = await client.parseDocument(datasetId, documentId);
     if (parsed.kind !== "ok") {
       await discardRagflowDocument(dependencies, { datasetId, documentId });
       return PARSE_REJECTIONS[parsed.kind];
     }
     try {
-      return record(item, opened, documentId);
+      return commit();
     } catch (error) {
       await discardRagflowDocument(dependencies, { datasetId, documentId });
       throw error;
     }
   }
 
-  /** 第 6 步，先看字节计数：见文件头。 */
-  async function transfer(item: Item, opened: OpenedSource): Promise<DocumentView | RejectReason> {
+  /** 第 4–8 步，入库与重新入库共用：打开 → 大小 → 上传（先看字节计数，见文件头）→ 解析触发 → `commit`。 */
+  async function transfer(
+    item: Item,
+    absPath: string,
+    commit: (opened: OpenedSource, ragflowDocumentId: string) => DocumentView,
+  ): Promise<DocumentView | TransferReason> {
+    const { base, workspaceId, path } = item;
+    const opened = await sources.open(workspaceId, path, absPath);
+    if ("reason" in opened) {
+      return opened.reason;
+    }
+    if (opened.size === 0 || opened.size > uploadMaxBytes) {
+      opened.close();
+      return opened.size === 0 ? "empty" : "too_large";
+    }
     const upload = multipartUpload({
-      name: basename(item.path),
+      name: basename(path),
       size: opened.size,
       source: opened.stream(),
     });
-    const uploaded = await client.uploadDocument(item.base.datasetId, upload);
+    const uploaded = await client.uploadDocument(base.datasetId, upload);
     if (uploaded.kind === "ok") {
-      return parseAndRecord(item, opened, uploaded.value.id);
+      const { id } = uploaded.value;
+      return parseAndCommit(base.datasetId, id, () => commit(opened, id));
     }
     const failure = upload.sourceFailure();
     return failure === undefined ? UPLOAD_REJECTIONS[uploaded.kind] : sourceRejection(failure);
@@ -462,15 +571,7 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
     if (typeof admitted === "string") {
       return admitted;
     }
-    const opened = await sources.open(item.workspaceId, item.path, admitted.absPath);
-    if ("reason" in opened) {
-      return opened.reason;
-    }
-    if (opened.size === 0 || opened.size > uploadMaxBytes) {
-      opened.close();
-      return opened.size === 0 ? "empty" : "too_large";
-    }
-    return transfer(item, opened);
+    return transfer(item, admitted.absPath, (opened, id) => record(item, opened, id));
   }
 
   async function ingestLocked(id: string, request: IngestRequest, actorId: string) {
@@ -540,21 +641,21 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
     async ingest(id: string, body: unknown, actorId: string) {
       const request = parseIngest(body, uploadMaxFiles);
       ingestable(id, actorId, request.workspaceId);
-      const result = await locks.write(id, () => ingestLocked(id, request, actorId));
-      if (result.outcome === "rebuilding") {
-        throw new HttpError("kb_rebuilding");
-      }
-      return result.value;
+      return underWriteLock(id, () => ingestLocked(id, request, actorId));
     },
 
     /** `DELETE /api/kb/bases/:id/documents?doc=<文档 id>`：在该库的写锁下，见文件头。 */
     async remove(id: string, query: unknown, actorId: string): Promise<void> {
       const documentId = documentIdOf(query);
       removable(id, actorId, documentId);
-      const result = await locks.write(id, () => removeLocked(id, documentId, actorId));
-      if (result.outcome === "rebuilding") {
-        throw new HttpError("kb_rebuilding");
-      }
+      await underWriteLock(id, () => removeLocked(id, documentId, actorId));
+    },
+
+    /** `POST /api/kb/bases/:id/documents/reingest?doc=<文档 id>`：在该库的写锁下，见文件头。 */
+    async reingest(id: string, query: unknown, actorId: string): Promise<DocumentView> {
+      const documentId = documentIdOf(query);
+      reingestable(id, actorId, documentId);
+      return underWriteLock(id, () => reingestLocked(id, documentId, actorId));
     },
   };
 }

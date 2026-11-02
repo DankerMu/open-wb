@@ -22,7 +22,8 @@
  *
  * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
  * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。`DELETE …/documents?doc=<文档 id>`（移出）同删库的写法：
- * 不读 body、不在归属集，成功 204，业务同在 `kb/documents.ts`。
+ * 不读 body、不在归属集，成功 204，业务同在 `kb/documents.ts`。`POST …/documents/reingest?doc=<文档 id>`（重新入库）同探活的写法：
+ * bodyless，在归属集，任意 body（含 `{}`）都是 400，所有权判定先于它；成功 200 `DocumentView`。
  *
  * `POST …/uploads` 同 `POST /api/workspaces/:id/uploads` 的写法：独立 scope，只认 `application/octet-stream`，请求流原样交出，
  * 没有框架的 body 上限，别的媒体类型是 parser 错误（归属集，400）。所有权判定先于这一切，一个字节都不读。失败的上传一律关
@@ -56,6 +57,7 @@ const SETTINGS_PROBE_ROUTE = "/api/kb/settings/probe";
 const BASES_ROUTE = "/api/kb/bases";
 const BASE_ROUTE = "/api/kb/bases/:id";
 const DOCUMENTS_ROUTE = "/api/kb/bases/:id/documents";
+const REINGEST_ROUTE = "/api/kb/bases/:id/documents/reingest";
 const UPLOADS_ROUTE = "/api/kb/bases/:id/uploads";
 const UPLOAD_MEDIA_TYPE = "application/octet-stream";
 /** 最长的合法 body 也只有几百字节，同 `models/rest.ts`。 */
@@ -229,6 +231,18 @@ export function registerKbRoutes(
       const { id } = request.params;
       await enabled().documents.remove(id, request.query, principalOf(request).id);
       return reply.code(204).send();
+    },
+  );
+
+  app.post<BaseParams>(
+    REINGEST_ROUTE,
+    { onRequest: noStore, preParsing: ownedBase, bodyLimit: BODYLESS_BODY_LIMIT },
+    (request) => {
+      if (request.body !== undefined) {
+        throw new HttpError("bad_request");
+      }
+      const { id } = request.params;
+      return enabled().documents.reingest(id, request.query, principalOf(request).id);
     },
   );
 

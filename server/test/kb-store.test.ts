@@ -373,6 +373,32 @@ describe("kb store: 文档", () => {
     expect(store.removeDocument(hex(1), doc.id)).toEqual(doc);
     expect(store.listDocuments(hex(1))).toEqual([]);
   });
+
+  it("重新入库的替换：只换 RAGFlow id、大小与 mtimeMs；上传来源、别的库与 within 抛出都不动行", () => {
+    const { store } = fresh();
+    createPlainBase(store, hex(1));
+    createPlainBase(store, hex(2));
+    const doc = addWorkspaceFile(store, hex(1), "a.txt");
+    const upload = addUpload(store, hex(1));
+    const replacement = { ragflowDocumentId: "rf-new", size: 11, sourceMtimeMs: T0 + 0.5 };
+    expect(() => store.replaceDocument(hex(1), doc.id, replacement, boom)).toThrow(BOOM);
+    expect(() => store.replaceDocument(hex(1), upload.id, replacement)).toThrow();
+    expect(() => store.replaceDocument(hex(2), doc.id, replacement)).toThrow();
+    expect(store.listDocuments(hex(1))).toEqual([doc, upload]);
+
+    const seen: unknown[] = [];
+    const replaced = store.replaceDocument(hex(1), doc.id, replacement, (record) => {
+      seen.push(record);
+    });
+    expect(replaced).toEqual({
+      ...doc,
+      ragflowDocumentId: "rf-new",
+      size: 11,
+      sourceMtimeMs: T0 + 0.5,
+    });
+    expect(seen).toEqual([replaced]);
+    expect(store.listDocuments(hex(1))).toEqual([replaced, upload]);
+  });
 });
 
 describe("kb store: 重建", () => {

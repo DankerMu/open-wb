@@ -29,6 +29,11 @@ const ROUTES = [
     url: `/api/kb/bases/${"a".repeat(32)}/documents?doc=${"b".repeat(32)}`,
     body: false,
   },
+  {
+    method: "POST",
+    url: `/api/kb/bases/${"a".repeat(32)}/documents/reingest?doc=${"b".repeat(32)}`,
+    body: true,
+  },
   { method: "POST", url: `/api/kb/bases/${"a".repeat(32)}/uploads?name=a.md`, body: true },
 ] as const;
 
