@@ -612,7 +612,7 @@ Minimal mergeable slice: atomic - 一段表单与它的确认框，一个组件�
   - Makefile 加 `smoke-kb`：两步前置检测；hurl 前后的清理；轮询上限变量 `SMOKE_KB_POLL_SECONDS`（缺省 300）；登录方式同 `smoke/chat.hurl`；
   - `AGENTS.md`、`constraints.yaml`、`.PHONY` 同步登记。
 - [x] 18.4 `make ui-walk` 的 `/center` 分支：知识库关闭（CI 的缺省配置）时 tab 条不含 `知识库`。
-- [ ] 18.5 收口：
+- [x] 18.5 收口：
   - `docs/architecture/system.md` §9.13 收口（部署要求、回滚、`smoke-kb`）；§6.2 摄取流按最终实现补细节（逐条解析、拒绝原因）；
   - 验收清单 CK 节复核，并新增两行（结论 `待签`，由 owner 执行）：
     - CK-11 对接上共用栈的本机服务（已配置知识库嵌入模型与知识库对话模型）跑 `make smoke-kb` 通过，开编译的库两种编译都 `done`，输出脱敏后附在签字记录；再以 `SMOKE_KB_POLL_SECONDS=1` 跑一次，确认非零退出且 `smoke-kb`、`smoke-kb-compile` 都已被清理（verification-harness「失败后清理」）；

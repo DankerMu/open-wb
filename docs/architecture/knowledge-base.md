@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 9 第三刀：列表里的编译状态。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 9 第三刀：列表里的编译状态。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。组 14：嵌入模型更换与全量重建。组 18：部署要求、回滚与 `make smoke-kb`（文末）。web 侧（组 15–17）的界面契约在 spec，不在本文。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -397,3 +397,41 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 **重试**：`POST /api/kb/settings/rebuild`，管理员专用（非管理员 403，未登录 401），bodyless（任意 body，含 `{}`，400）。在设置锁内把全部 `rebuild_failed` 置回 `rebuilding`，`rebuild_actor_id` 改为这次的管理员，审计 `kb.rebuild {bases, documents, retry:true}`（重试的库数与它们的文档数），唤醒重建器，应答 200 加读视图。没有失败库时 200，不写库、不审计、不发任何请求。
 
 **续做与关停**：入口在写出 `server_started` 之后、不等待地启动重建器，对仍是 `rebuilding` 的库从第 1 步做起。续做中的失败只改变知识库状态，不写 failure record，不改变退出码（RAGFlow 不可达时该库 `rebuild_failed`，重试即可）。关停时，在关闭主实例与 DB 之前停住重建器：在途的 RAGFlow 请求被中止，只等正在持锁处理的那一个库收尾，不等排在写锁队列里的（一个在途的本地上传最长约 27 分钟，等它会拖住关停）。中止不算失败：第 4 步提交之前该库保持 `rebuilding`，下次启动续做；提交之后已是 `ready`，第 5 步没删完的旧一代不续删，成为孤儿，那一步中止的删除照样写一行 leak，按 leak 表手工清理。未配置 `RAGFLOW_BASE_URL` 时重建器不启动，`rebuilding` 的库保持原状、不改成 `rebuild_failed`，重新配置之后下次启动续做。
+
+**部署要求**（组 18）：
+
+- 一个已在运行的 RAGFlow 服务，版本恰为 `v1.0.0-rc2`（`kb/rest.ts` 的常量，见上面的「版本钉住」），`DOC_ENGINE=infinity`（ADR-0005）。本系统只当客户端用它：不启动、不停止、不配置它的容器（D16）。共用栈上别的账号的数据集与模型配置不归本系统管。
+- 专用的 RAGFlow 账号和它的 API key。key 写进 `0600` 的普通文件，按上面「密钥文件」的四条要求放好，`RAGFLOW_API_KEY_FILE` 指向它；`RAGFLOW_BASE_URL` 与它成对配置。
+- 网络：app-server 能访问 `<RAGFLOW_BASE_URL>`；RAGFlow 能访问嵌入模型与知识库对话模型的上游（嵌入请求由 RAGFlow 直接发出，不经 app-server 的模型代理）。
+- 迁移 050 随启动自动执行，只建三张表、插入 `kb_settings` 的唯一一行，不改既有表。
+- 启动后，管理员在「中心」的「模型」tab 的「知识库模型」段保存嵌入模型；要开 RAPTOR / 知识图谱，还要指定知识库对话模型。保存会把两个模型下发到这个账号并设为账号缺省（见上面「下发的固定序列」）。之后 `GET /api/kb/status` 应为 `available:true`、`embeddingReady:true`，指定了对话模型时 `compileReady:true`。
+- 单次上传的大小与文件数上限按需调整 `KB_UPLOAD_MAX_BYTES`、`KB_UPLOAD_MAX_FILES`。
+
+**回滚**：
+
+- 去掉 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE` 两个键并重启，知识库即关闭：tab 不出现，`/api/kb/*` 返回 503 `kb_disabled`（`/api/kb/status` 除外），`models` 的删除与修改不再受联动约束。本地的三张表与行保留，重新配置后照常可用；仍是 `rebuilding` 的库在下次启动时续做。
+- 回退代码时迁移文件保留：迁移账本拒收多出的回执，规则同 049。
+- RAGFlow 里的 `owb-` 数据集、画布与模板组由运维按需清理。次序按实测记录 §16：账号缺省模型保持不动，先删数据集、画布与模板组，等到没有编译活动，才清缺省、删模型实例。账号上还有 pipeline 数据集时清空缺省对话模型，会让全栈唯一的入库进程崩溃循环（上面的「账号缺省不变量」）。
+- 删除的 `kbservice/` 不能靠配置恢复，需要时从 git 历史恢复。
+
+**真实端点冒烟 `make smoke-kb`**（`Makefile`、`smoke/kb.hurl`、`smoke/kb-cleanup.hurl`，组 18 首刀）。它在验证矩阵里是 `review-only` / `required_at: manual`：`make smoke` 与 CI 都不调用它，真实运行是 owner 的验收行 CK-11。前提：
+
+- 调用方的服务已在运行，已按上面的部署要求接上 RAGFlow，两个模型都已配置（状态四项都为 true）。
+- 启动服务前，调用方已把 `smoke/fixtures/sandbox/u1/` 复制到该服务的 `SANDBOX_ROOT/u1`（`smoke/fixtures/README.md`）。`make smoke-kb` 不替它复制，也不启动、停止或配置服务与 RAGFlow。
+- 本机有 hurl 8.0.1 与 Node 18 或更高版本。
+
+运行：`SMOKE_BASE_URL=<服务地址> make smoke-kb`。它先依次做三项检测，任一不过就退出，不发任何知识库请求，也不执行任何 `docker` 命令：
+
+1. 没有设置 `RAGFLOW_BASE_URL`：「RAGFlow 私有配置缺失」。
+2. 本机没有 Node 18+：「未找到 Node 18+（版本检测需要 fetch）」。
+3. `GET <RAGFLOW_BASE_URL>/api/v1/system/version` 不通，或版本不是 `v1.0.0-rc2`：「共用 RAGFlow 栈未运行或版本不符」。判据与服务端的状态端点相同：不带密钥，总期限 5 s，不跟随重定向。
+
+之后，`kb-cleanup.hurl` 先删掉上次残留的 `smoke-kb` 与 `smoke-kb-compile`。接着 `kb.hurl` 以成员账号走完整条流程：
+
+1. 状态检查。
+2. 采用工作空间 `smoke-kb`，建普通库 `smoke-kb`，入库 `notes.md` 与 `brief.pdf`，轮询到两份都 `done` 且切片数大于 0。
+3. 上传一份文本，轮询到 `done` 后移出它，然后删库。
+4. 建两个开关都开的 `smoke-kb-compile`，入库 `notes.md`，轮询到 RAPTOR 与知识图谱都是 `done`，然后删库。这是编译 DSL 对真实 RAGFlow 的唯一验证。
+5. 确认列表里两个库都不在。
+
+轮询上限是 `SMOKE_KB_POLL_SECONDS`（缺省 300），按 5 秒一次重试向上取整，不计单次请求的耗时。`kb.hurl` 失败时再跑一次清理，退出码保持 hurl 的原值；清理本身失败不改变退出码，下一次运行前的清理会再试。`brief.pdf` 是手写的极简 PDF，如果卡在它的切片数上，先换一份正常排版的小 PDF（文件名不变）再跑。
