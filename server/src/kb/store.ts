@@ -161,6 +161,8 @@ const INSERT_DOCUMENT =
 const DELETE_DOCUMENT = "DELETE FROM kb_documents WHERE kb_id = ? AND id = ?";
 const UPDATE_DOCUMENT_RAGFLOW_ID =
   "UPDATE kb_documents SET ragflow_document_id = ? WHERE kb_id = ? AND id = ?";
+const REPLACE_DOCUMENT_SOURCE =
+  "UPDATE kb_documents SET ragflow_document_id = ?, size = ?, source_mtime_ms = ? WHERE kb_id = ? AND id = ? AND source = 'workspace'";
 
 export function createKbStore(db: DatabaseSync) {
   const settings = (): KbSettings => toSettings(db.prepare(SELECT_SETTINGS).get() as Raw);
@@ -404,6 +406,29 @@ export function createKbStore(db: DatabaseSync) {
           Date.now(),
         );
         const record = document(input.kbId, id) as KbDocument;
+        within?.(record);
+        return record;
+      });
+    },
+
+    /**
+     * 重新入库的替换（D13 第 3 步）：单事务换同一行的 RAGFlow 文档 id、`size` 与 `source_mtime_ms`，其余列不动。只认工作空间
+     * 来源；不是恰好一行即抛出，整体回滚。
+     */
+    replaceDocument(
+      kbId: string,
+      id: string,
+      replacement: Pick<KbDocument, "ragflowDocumentId" | "size"> & { sourceMtimeMs: number },
+      within?: (record: KbDocument) => void,
+    ): KbDocument {
+      return inTransaction(db, () => {
+        const { ragflowDocumentId, size, sourceMtimeMs } = replacement;
+        const update = db.prepare(REPLACE_DOCUMENT_SOURCE);
+        const { changes } = update.run(ragflowDocumentId, size, sourceMtimeMs, kbId, id);
+        if (Number(changes) !== 1) {
+          throw new Error("no workspace document to replace");
+        }
+        const record = document(kbId, id) as KbDocument;
         within?.(record);
         return record;
       });

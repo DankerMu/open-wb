@@ -448,7 +448,7 @@ Minimal mergeable slice: atomic - 一条路由，与工作空间上传同一写�
 
   路由加进 `kb-disabled.test.ts`。
 - [x] 13.3 实现（首刀）：`kb/documents.ts` 加 remove（经该库写锁，复用组 10 的删除写法）；`kb/rest.ts` 加 `DELETE /api/kb/bases/:id/documents`。
-- [ ] 13.4 测试先行（剩余部分，重新入库）：新 `server/test/kb-documents-reingest.test.ts`。
+- [x] 13.4 测试先行（剩余部分，重新入库）：新 `server/test/kb-documents-reingest.test.ts`。
   - 「重新入库」（200，`status:"queued"`、`sourceChanged:false`，没有文档列表请求）「源不可读」「重新入库时旧文档在解析」；
   - 「文档路由的所有权」的 `POST …/documents/reingest` 一腿；
   - 「重建失败后移出」的重新入库一腿；
@@ -459,7 +459,7 @@ Minimal mergeable slice: atomic - 一条路由，与工作空间上传同一写�
   - 审计哨兵（重新入库一腿）。
 
   路由加进 `kb-disabled.test.ts` 与归属路由用例。
-- [ ] 13.5 实现（剩余部分）：`kb/store.ts` 加单事务替换同一行的 RAGFlow id、大小与 `mtimeMs`；`kb/documents.ts` 加 reingest（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/documents/reingest`。
+- [x] 13.5 实现（剩余部分）：`kb/store.ts` 加单事务替换同一行的 RAGFlow id、大小与 `mtimeMs`；`kb/documents.ts` 加 reingest（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/documents/reingest`。
 
 Suggested fixture level: expanded - 两份真相的替换顺序（新文档先建、旧文档后删）与沙箱读取。
 Minimal mergeable slice: 13.2–13.3 的移出——一条不读沙箱的独立路由，组 16 的首刀与 `make smoke-kb` 都要用它，能独立保绿。剩余部分（重新入库，13.4–13.5）依赖它；剩余部分 atomic：一条路由。

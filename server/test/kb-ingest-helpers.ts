@@ -249,6 +249,21 @@ export function useIngestWorlds(): OpenWorld {
   };
 }
 
+/** 经真实入库的一份工作空间来源的文档（W1），返回它的行。 */
+export async function ingestedRow(
+  world: IngestWorld,
+  path: string,
+  bytes: string,
+): Promise<ReturnType<IngestWorld["rows"]>[number]> {
+  world.write(path, bytes);
+  expect((await world.ingest([path])).statusCode).toBe(201);
+  const row = world.rows().find((document) => document.sourcePath === path);
+  if (row === undefined) {
+    throw new Error(`ingest left no row for ${path}`);
+  }
+  return row;
+}
+
 /** 文件字节读回：源文件在用例里可能已被改写，比对用写入时的值。 */
 export function bytesOf(world: IngestWorld, path: string): Buffer {
   return readFileSync(join(world.root, path));

@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13 首刀：移出文档。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -223,7 +223,7 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 3. 每 500 ms 重发删除，至多 5 s。`deleted:1` 或不存在：完成。不可达或被拒：立即 `failed`。
 4. 到期仍是 `deleted:0`：`busy`。
 
-入库的补偿删除走这个写法，`failed`、`busy` 都只写一行 `kb_document_leak`，不改变该条的结果。移出按结果映射应答（见下面的「移出文档」）。这个函数不碰本地行。
+入库的补偿删除与重新入库删旧文档走这个写法，`failed`、`busy` 都只写一行 `kb_document_leak`，不改变该条的结果。移出按结果映射应答（见下面的「移出文档」）。这个函数不碰本地行。
 
 | 记录 | 何时写 | 补救 |
 |---|---|---|
@@ -303,3 +303,28 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 | `failed` | 不可达 503 `kb_unavailable`，被拒 400 `kb_rejected` | 不动 |
 
 审计：`kb.document_delete` 的 detail 恰为 `{id, documentId}`，`documentId` 是本地文档 id；工作空间来源的文档 `workspace_id` 列是该工作空间，上传来源是 null。
+
+**重新入库**（`server/src/kb/documents.ts`，组 13）：`POST /api/kb/bases/:id/documents/reingest?doc=<文档 id>`，只对工作空间来源，带 `Cache-Control: no-store`。bodyless：任意 body（含 `{}`）400 `bad_request`，在所有权判定之后。取锁之前依次判定，都不发出站请求、不写审计：
+
+| 判定 | 应答 |
+|---|---|
+| 别人的或不存在的知识库 id（先于 body 与 `doc`） | 404 `not_found` |
+| `doc` 缺失、为空或多值 | 400 `bad_request` |
+| `state` 不是 `ready`（`rebuild_failed` 也拒），或写锁正被重建器持有（不排队） | 409 `kb_rebuilding` |
+| `doc` 不是这个库的文档 | 404 `not_found` |
+| 本地上传来源的文档 | 400 `bad_request` |
+
+之后在该库的写锁下重判，旧的 RAGFlow 文档 id 取锁内读到的。按工作空间来源入库的第 1 步与第 4–7 步重读源文件并上传（查重、上限与后缀不判），先建新文档、后删旧文档：
+
+| 结果 | 应答 | 本地行 | 新文档 |
+|---|---|---|---|
+| 读取被拒：工作空间已不可见、`outside`（facade 照常写 `sandbox.reject`）、`not_file`、`offline`、`empty`、`too_large`、`changed` | 409 `kb_source_unreadable` | 不动 | 没有 |
+| 上传 `kb_rejected` | 400 `kb_rejected` | 不动 | 没有 |
+| 上传 `code:500` 且 message 表明不支持这种文件 | 400 `kb_file_unsupported` | 不动 | 没有 |
+| 上传不可达或数据集不存在 | 503 `kb_unavailable` | 不动 | 没有 |
+| 解析触发 `kb_rejected` 或 `success_count:0` | 400 `kb_rejected` | 不动 | 删 |
+| 解析触发不可达或数据集不存在 | 503 `kb_unavailable` | 不动 | 删 |
+| 换行或审计失败 | 500 | 不动 | 删 |
+| 成功 | 200 `DocumentView`，不读 RAGFlow：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false` | 单事务换 RAGFlow 文档 id、`size` 与 `source_mtime_ms`，`id`、`name`、`createdAt` 不变 | 留下；再按上面的写法删旧文档，旧文档还在解析（`busy`）或删除失败只写一行 `kb_document_leak`，应答不变 |
+
+审计：成功时与换行同一事务写 `kb.ingest`，detail 恰为 `{id, source:"workspace", reingest:true, documentId}`，`documentId` 是本地文档 id，`workspace_id` 列是该工作空间。读取被拒不写 `kb.ingest_reject`。
