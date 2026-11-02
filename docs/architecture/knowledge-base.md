@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -141,7 +141,7 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 
 **审计**：`kb.create` 的 detail 恰为 `{id, template, raptor, graph}`，`kb.delete` 的恰为 `{id}`，标题是固定短句，不带用户文本。
 
-**模板**（`server/src/kb/templates.ts`）：十一种，建库时固定，没有修改模板的端点。本地存模板名，发给 RAGFlow 的是 `parser_id`。`tag` 与 `audio` 都不提供：RAGFlow 回 `tag` 的建库 `102`，`audio` 要语音模型、编译未测成。后缀抄自实测记录表 C 末列，取自各模板 pipeline 的 Parser 节点，不是逐个上传验证的；入库的后缀判定随入库端点落地。
+**模板**（`server/src/kb/templates.ts`）：十一种，建库时固定，没有修改模板的端点。本地存模板名，发给 RAGFlow 的是 `parser_id`。`tag` 与 `audio` 都不提供：RAGFlow 回 `tag` 的建库 `102`，`audio` 要语音模型、编译未测成。后缀抄自实测记录表 C 末列，取自各模板 pipeline 的 Parser 节点，不是逐个上传验证的；入库的后缀判定见下面的「工作空间来源入库」。
 
 | 模板 | `parser_id` | 后缀 |
 |---|---|---|
@@ -156,3 +156,77 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `presentation` | `presentation` | pdf、pptx、ppt |
 | `qa` | `qa` | docx、md、markdown、mdx、pdf、xls、xlsx、csv、txt |
 | `table` | `table` | xls、xlsx、csv、txt |
+
+**工作空间来源入库**（`server/src/kb/documents.ts`、`kb/source-file.ts`、`kb/multipart.ts`，组 10）：`POST /api/kb/bases/:id/documents`，body 恰为 `{workspaceId, paths}`，带 `Cache-Control: no-store`。
+
+请求层依次判定，任一不过都是整个请求失败，不发出站请求：
+
+1. 别人的或不存在的知识库 id：404 `not_found`，先于 body 解析。
+2. 键集或类型不对，`paths` 为空或超过 `KB_UPLOAD_MAX_FILES`，任一路径的 UTF-8 编码超过 4096 字节：400 `bad_request`。过长的路径不写 `sandbox.reject`、`kb.ingest_reject`，原文不进审计。恰 4096 字节的按逐条处理走。
+3. `workspaceId` 不是当前用户可见的工作空间：404 `not_found`，判定同工作空间文件路由（别人的、已删除的、根被占据或不在了）。
+4. 知识库 `state` 不是 `ready`，或写锁正被重建器持有：409 `kb_rebuilding`。
+
+之后在该库的写锁下顺序处理每条路径。快判到取锁之间没有 `await`，取锁后重判 1、3、4：排队期间库可能已删除或转入重建。请求合法且本地写入没有失败即 201 `{documents, rejected}`。
+
+客户端断开不中止这一批：条目逐条提交，整批跑到底。
+
+| 步 | 处理 | 被拒的 `reason` |
+|---|---|---|
+| 1 | `sandbox.resolve(principal, workspaceId, path, "read")`，越界照常写 `sandbox.reject` | `outside`（含 `..`、绝对路径、NUL、任一分量是符号链接） |
+| 2 | 查重，再数该库的文档，都在锁内逐条算，批内的上一条算数 | `duplicate`；已有 500 份时 `limit` |
+| 3 | 后缀：basename 最后一个 `.` 之后的部分转小写，查该模板的表。对全部知识库生效 | `unsupported_type`（含没有后缀） |
+| 4 | 挂载内经挂载读取，挂载外 lstat 后以 `O_NOFOLLOW` 打开，再对同一 fd 取 `fstat` | `offline`；`not_file`（目录、FIFO、不存在、打不开） |
+| 5 | 看 `fstat` 的大小 | `empty`；超过 `KB_UPLOAD_MAX_BYTES` 时 `too_large` |
+| 6 | multipart 流式上传 | 见下 |
+| 7 | 解析触发，`document_ids` 只有这一个 id | 见下 |
+| 8 | 同一事务里插文档行与 `kb.ingest` | 见下 |
+
+路径先规范化：去掉空段与 `.` 段，`./a.md`、`a.md/` 与 `a.md` 是同一条路径。文档行、`kb.ingest` 与应答的 `documents` 用规范写法，`rejected` 与 `kb.ingest_reject` 用请求里的原文。只读挂载里的文件可以入库。入库不发任何编译请求：编译随解析自动运行。
+
+**上传**：字段名 `file`，文件名只写 `filename*=UTF-8''…`，不用 `filename="…"`：文件名是用户的，`"`、CR、LF 写进带引号的值就是头注入。`Content-Length` 由 `fstat` 的大小加 multipart 的头尾算出，字节边读边发，不落临时文件。
+
+读取一路读到 EOF，不按 `fstat` 的大小截断，文件长大了才看得出来。读到的多于或少于 `fstat` 的大小时立即中止出站请求，结束边界不发，RAGFlow 不留文档，也就不发删除。这时客户端只知道请求体坏了，回 `kb_unavailable`，所以调用点先看字节计数的结果：该条记为 `changed`，继续下一条。读到一半挂载到期记为 `offline`；别的读取错误同样记为 `changed`。
+
+**RAGFlow 的失败**：
+
+| 结果 | 该条 | 其后的条目 | 删除刚上传的文档 |
+|---|---|---|---|
+| 上传 `kb_rejected` | `rejected` | 继续 | 没有文档 |
+| 上传 `code:500` 且 message 表明不支持这种文件 | `unsupported_type` | 继续 | 没有文档 |
+| 解析触发 `kb_rejected`，或 `code:0` 而 `success_count` 为 0 | `rejected` | 继续 | 删 |
+| 上传或解析触发 `kb_unavailable`，或得知数据集不存在 | `unavailable` | 全部 `unavailable`，不再解析路径、不发请求、不写 `sandbox.reject` | 上传已成功时删 |
+
+第 8 步的插行或审计失败是本地的失败：删掉这一份刚上传的文档，整个请求 500，其后的条目不再处理，这一批前面已提交的行留着，重试时它们是 `duplicate`。
+
+**拒绝原因**：`rejected` 的每条是 `{path, reason, message}`，`message` 按 `reason` 固定。
+
+| `reason` | `message` |
+|---|---|
+| `outside` | `目标路径不在你的沙箱内` |
+| `not_file` | `不是普通文件，或文件不存在` |
+| `too_large` | `文件超过大小上限` |
+| `unsupported_type` | `这个模板不支持这种文件` |
+| `empty` | `文件是空的，不能入库` |
+| `offline` | `挂载已离线` |
+| `duplicate` | `已在知识库里` |
+| `limit` | `知识库文档数已达上限` |
+| `changed` | `读取期间文件发生了变化` |
+| `rejected` | `知识库服务拒绝了这个文件` |
+| `unavailable` | `知识库服务暂不可用` |
+
+`documents` 的每条是 `DocumentView`，不读 RAGFlow：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false`。文档名取本地记录，RAGFlow 对同名文件的改名（`a(1).txt`）不影响它。
+
+**RAGFlow 文档的删除写法**（`removeRagflowDocument`）：`code:0` 不代表删成了，`RUNNING`、`STOPPING` 的文档回 `deleted:0` 且行仍在。
+
+1. 发删除。`deleted:1` 或不存在：完成。不可达或被拒：`failed`。
+2. `deleted:0`：发一次停止解析，只发这一次。`code:0`（不论 `success_count`）或不存在：继续。其余：`failed`，不再删。
+3. 每 500 ms 重发删除，至多 5 s。`deleted:1` 或不存在：完成。不可达或被拒：立即 `failed`。
+4. 到期仍是 `deleted:0`：`busy`。
+
+入库的补偿删除走这个写法，`failed`、`busy` 都只写一行 `kb_document_leak`，不改变该条的结果。这个函数不碰本地行。
+
+| 记录 | 何时写 | 补救 |
+|---|---|---|
+| `{"event":"kb_document_leak","documentId":<id>}` | 补偿删除失败：RAGFlow 里留下一份本地没有行的文档。`documentId` 是 RAGFlow 的文档 id | 按 id 在 RAGFlow 里手工删除，文档还在解析时先停止。这条记录不限频 |
+
+**审计**：每份文档一条 `kb.ingest`，detail 恰为 `{id, source:"workspace", workspaceId, path, documentId}`，`documentId` 是本地文档 id，与插行同一事务；每个被拒条目一条 `kb.ingest_reject`，detail 恰为 `{id, source:"workspace", workspaceId, path, reason}`，单独写入。两者的 `workspace_id` 列都是该工作空间，标题是固定短句，不带用户文本与文件内容。

@@ -22,6 +22,7 @@ const ROUTES = [
   { method: "GET", url: "/api/kb/bases", body: false },
   { method: "POST", url: "/api/kb/bases", body: true },
   { method: "DELETE", url: `/api/kb/bases/${"a".repeat(32)}`, body: false },
+  { method: "POST", url: `/api/kb/bases/${"a".repeat(32)}/documents`, body: true },
 ] as const;
 
 let app: FastifyInstance;

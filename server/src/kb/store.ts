@@ -89,7 +89,7 @@ interface SwitchDocuments {
 }
 
 /** `kb_documents` 的一行：`upload` 的三个来源字段为 `null`。 */
-interface KbDocument {
+export interface KbDocument {
   id: string;
   kbId: string;
   ragflowDocumentId: string;

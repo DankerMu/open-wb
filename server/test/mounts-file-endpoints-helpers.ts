@@ -12,6 +12,7 @@ import * as promises from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { expect } from "vitest";
+import type { KbDependencies } from "../src/kb/index.js";
 import type { MountFileHandle, MountFsImpl } from "../src/workspaces/mounts/fs.js";
 import type { MountManagerOptions } from "../src/workspaces/mounts/manager.js";
 import { OWNER, seedMount, sftp, W1, type World } from "./mounts-manager-helpers.js";
@@ -123,6 +124,8 @@ interface FileWorldSetup {
   /** The manager without `rcloneBin` / `fusermountBin`. */
   featureOff?: boolean;
   overrides?: Partial<MountManagerOptions>;
+  /** `assembly.kb`: the knowledge base reads workspace files through these mounts. */
+  kb?: KbDependencies;
 }
 
 export interface FileWorld {
@@ -142,6 +145,7 @@ export async function openFileWorld(setup: FileWorldSetup): Promise<FileWorld> {
   const rest = await openMounts({
     ...(setup.featureOff === undefined ? {} : { featureOff: setup.featureOff }),
     ...(setup.overrides === undefined ? {} : { overrides: setup.overrides }),
+    ...(setup.kb === undefined ? {} : { kb: setup.kb }),
     seed: (world) => {
       offline.forEach((name, index) => {
         const id = OFFLINE_IDS[index] as string;

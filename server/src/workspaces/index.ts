@@ -9,6 +9,24 @@ import {
   type WorkspacePreviewDependencies,
 } from "./rest-preview-token.js";
 
+/**
+ * The read chain of a workspace file, for the modules outside `workspaces` that read one (`kb`, s2a-kb-ragflow
+ * D10): the same functions `rest-archive.ts` runs, in the same order, with the caller's own judgement of what
+ * a refused entry means.
+ */
+export {
+  closeMountFile,
+  type MountFile,
+  openMountFile,
+  readMountAt,
+  requireMountFile,
+} from "./mounts/files.js";
+export type { MountManager } from "./mounts/manager.js";
+export { mountToRead } from "./mounts/path-rule.js";
+export { isStructuralAbsence, openRegularFile } from "./regular-file.js";
+export { isOrdinaryDirectory, lstatExisting, ownedRootOf } from "./rest.js";
+export type { WorkspaceStore } from "./store.js";
+
 /** The workspace routes' dependencies plus the mount routes' (s1b-workspace-mounts D14). */
 export type WorkspacesDependencies = WorkspaceRestDependencies & { mounts: MountRestDependencies };
 

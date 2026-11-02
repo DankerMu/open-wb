@@ -357,12 +357,12 @@ Minimal mergeable slice: 9.2–9.4 的普通模板建库、列表与删库——
 
 ## 10. 工作空间来源入库（knowledge-bases「工作空间来源入库」「同一知识库的写操作串行」的入库场景；「重新入库与移出」的删除写法）
 
-- [ ] 10.1 核对 Context：
+- [x] 10.1 核对 Context：
   - 读文件链路：`workspaces/rest.ts:412`、`rest-archive.ts:108-146`、`mounts/path-rule.ts:43`、`mounts/files.ts:80,94,135,166`、`regular-file.ts:55`；
   - `workspaces` 模块现有的导出：只从入口导入，不深入子目录；缺读取函数就在 `workspaces/index.ts` 加最小导出，同 PR 说明；
   - 组 1 的 §7（multipart 字段、文件名写法、中断的上传、后缀与模板）、§8.1、§8.5；
   - 组 7 的锁；组 9 的 `kb/templates.ts` 后缀表。
-- [ ] 10.2 测试先行：新 `server/test/kb-ingest-workspace.test.ts`。
+- [x] 10.2 测试先行：新 `server/test/kb-ingest-workspace.test.ts`。
   - knowledge-bases：「混合批次」「路径不存在」「挂载离线」（S1b 的测试缝）「中途不可达」「逐条被拒」「读取期间文件变化」（测试缝在 `fstat` 之后追加字节）「文档数上限」「别人的工作空间」；
   - 「文档路由的所有权」的 `POST …/documents` 一腿：他人与不存在的 id 404，零出站，无审计；
   - 成功条目的视图：`queued`、`chunkCount:null`、`message:null`、`sourceChanged:false`，假 RAGFlow 没有收到文档列表请求；
@@ -376,12 +376,12 @@ Minimal mergeable slice: 9.2–9.4 的普通模板建库、列表与删库——
   - 全程没有编译相关请求。
 
   新 `server/test/kb-multipart.test.ts`：长度计算、流拼接与字节计数中止，含非 ASCII 文件名（断言原始 UTF-8 或 `filename*`，不是百分号编码）。新 `server/test/kb-delete-document.test.ts`：D13 的删除写法，结果逐项：`deleted:1`、`not_found`、`deleted:0` 后停止再成功、到期 `busy`（期限经注入缩短）；停止回 `success_count:0` 继续；停止 `not_found` 继续；停止不可达 `failed` 且不再删；重试期间不可达立即 `failed`；`STOPPING` 时恰一次停止（knowledge-bases「停止已在 STOPPING 的文档」「停止解析的其余结果」「重试期间不可达」，这里在 helper 层，端点层在组 13）。路由加进 `kb-disabled.test.ts` 与归属路由用例。
-- [ ] 10.3 实现：
+- [x] 10.3 实现：
   - 新 `server/src/kb/source-file.ts`：按 design D10 的第 1、4 步打开文件，返回 fd、`size` 与 `mtimeMs`；另给组 11 一个只 stat 的无审计变体。
   - 新 `kb/multipart.ts`。
   - 新 `kb/documents.ts`（入库部分，整批经该库写锁；design D13 的文档删除写法在这里实现，组 12、13、14 复用）。
   - `kb/rest.ts` 加 `POST /api/kb/bases/:id/documents`。
-- [ ] 10.4 `system.md` §4 依赖规则加 `kb → workspaces`（经入口）与 `kb → models`；§9.13 加入库流程、逐条解析、后缀判定与拒绝原因表。
+- [x] 10.4 `system.md` §4 依赖规则加 `kb → workspaces`（经入口）与 `kb → models`；§9.13 加入库流程、逐条解析、后缀判定与拒绝原因表。
 
 Suggested fixture level: expanded - 读路径经沙箱 `resolve` 与挂载（Critical Path：沙箱越界），并向外部服务上传用户文件。
 Minimal mergeable slice: atomic - multipart 与 `source-file.ts` 只有入库一个消费者（组 11、12、13 复用在后），入库没有它们就无法上传。

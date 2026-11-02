@@ -2,8 +2,8 @@
  * 十一种切片模板（s2a-kb-ragflow D9，grill #31；knowledge-bases「迁移 050 知识库 schema」）：本地存模板名，发给 RAGFlow 的
  * 是 `parser_id`，`naive` 发 `general`（§4.3），其余同名。`tag` 回 `102` 不可建，`audio` 要语音模型、编译未测成，都不在表里。
  *
- * 后缀抄自实测记录表 C 末列，全部小写。它取自各模板 pipeline 的 Parser 节点，不是逐个上传验证的；入库的后缀判定在
- * 组 10（D10），实际不一致时由上传的 `code:500` 兜底。
+ * 后缀抄自实测记录表 C 末列，全部小写。它取自各模板 pipeline 的 Parser 节点，不是逐个上传验证的；实际不一致时由上传的
+ * `code:500` 兜底（D10）。
  */
 interface Template {
   /** 建数据集的 `parser_id`。 */
@@ -42,4 +42,14 @@ const TEMPLATES: ReadonlyMap<string, Template> = new Map(
 /** 不是这十一种之一时为 `undefined`。 */
 export function templateOf(name: string): Template | undefined {
   return TEMPLATES.get(name);
+}
+
+/**
+ * 入库的后缀判定（D10）：文件名最后一个 `.` 之后的部分转小写，在该模板的表里。没有后缀不在表里。转小写只用于判定：
+ * 大写后缀走 pipeline、编译照常运行（§7.4）。
+ */
+export function acceptsFile(template: string, fileName: string): boolean {
+  const dot = fileName.lastIndexOf(".");
+  const suffix = fileName.slice(dot + 1).toLowerCase();
+  return dot !== -1 && templateOf(template)?.suffixes.has(suffix) === true;
 }

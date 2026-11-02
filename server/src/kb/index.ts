@@ -4,7 +4,8 @@
  * 「知识库可用性」）：关闭时不建客户端，不发任何出站请求。
  *
  * 客户端只建这一个：`kb_upstream_auth_failed` 的限频状态在实例里，「同一进程 60 秒内至多一行」靠它成立。两种锁也只建
- * 这一份（D20）：设置锁是进程级的。注册不碰 RAGFlow，构造 store 也不读库。
+ * 这一份（D20）：设置锁是进程级的。注册不碰 RAGFlow，构造 store 也不读库。工作空间的 store、沙箱 facade 与挂载 manager 取
+ * `app` 上已有的那一份：`kb` 注册晚于 `workspaces`，不另建。
  *
  * 开启时注册返回 `models` 的写入钩子（D1）：`kb` 注册晚于 `models`，由 `app.ts` 绑过去；`models` 不导入 `kb`。
  */
@@ -13,16 +14,25 @@ import { emit } from "../core/audit/index.js";
 import type { ModelWriteGuard } from "../models/rest.js";
 import { createModelStore } from "../models/store.js";
 import { createKbBases, type KbBaseRecord } from "./bases.js";
+import {
+  createKbDocuments,
+  type DocumentRemovalTiming,
+  type KbDocumentRecord,
+} from "./documents.js";
 import type { EmbeddingProbeDeadlines } from "./embedding-probe.js";
 import type { KbKeyHandle } from "./key-file.js";
 import { createKbLocks } from "./locks.js";
 import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client.js";
 import { registerKbRoutes } from "./rest.js";
 import { createKbSettings } from "./settings.js";
+import { createSourceFiles } from "./source-file.js";
 import { createKbStore } from "./store.js";
 
 /** 这个模块写到受管 stderr writer 的记录。 */
-export type KbRecord = { event: "kb_upstream_auth_failed" | "kb_version_mismatch" } | KbBaseRecord;
+export type KbRecord =
+  | { event: "kb_upstream_auth_failed" | "kb_version_mismatch" }
+  | KbBaseRecord
+  | KbDocumentRecord;
 
 export interface KbDependencies {
   /** `kb_key` 阶段读出的只读句柄。 */
@@ -43,6 +53,10 @@ export interface KbDependencies {
   probeDeadlines?: EmbeddingProbeDeadlines;
   /** 两种锁（测试注入，读等待者计数）；省略时在这里建，生产装配不传。 */
   locks?: ReturnType<typeof createKbLocks>;
+  /** RAGFlow 文档删除的重发节奏（测试注入短期限）；省略时每 500 ms、至多 5 s（D13）。 */
+  documentDelete?: DocumentRemovalTiming;
+  /** 测试缝：源文件 `fstat` 之后、读取之前调用；生产不传。 */
+  onSourceStat?: (absPath: string) => void;
 }
 
 export function registerKb(
@@ -58,6 +72,8 @@ export function registerKb(
     uploadMaxFiles,
     probeDeadlines,
     locks = createKbLocks(),
+    documentDelete,
+    onSourceStat,
     ...clientOptions
   } = dependencies;
   const { log, now = Date.now } = dependencies;
@@ -82,6 +98,21 @@ export function registerKb(
     onVersionMismatch: perMinute(now, () => log({ event: "kb_version_mismatch" })),
     settings,
     bases: createKbBases({ store, client, locks, audit, log }),
+    documents: createKbDocuments({
+      store,
+      client,
+      locks,
+      audit,
+      log,
+      sources: createSourceFiles({
+        workspaces: app.workspaces,
+        mounts: app.mounts,
+        onStat: onSourceStat,
+      }),
+      uploadMaxBytes,
+      uploadMaxFiles,
+      removalTiming: documentDelete,
+    }),
   });
   return settings.guardModelWrite;
 }
