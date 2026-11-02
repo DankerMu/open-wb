@@ -365,7 +365,7 @@ describe("route guard initial authentication", () => {
           fetchMock,
           title === "工作空间"
             ? [...loginPaths, "/api/workspaces"]
-            : [...loginPaths, "/api/experts"],
+            : [...loginPaths, "/api/experts", "/api/kb/status"],
         );
       }
       expectProviderLoginRequest(fetchMock);
@@ -381,7 +381,7 @@ describe("route guard initial authentication", () => {
     await expectAuthenticatedShell("中心", "中心");
     await expectExpertsTabSettled(fetchMock);
     expect(currentLocation()).toBe("/center?keep=1&tab=experts#target");
-    expectPaths(fetchMock, ["/api/auth/me", "/api/experts"]);
+    expectPaths(fetchMock, ["/api/auth/me", "/api/experts", "/api/kb/status"]);
     expectMeRequest(fetchMock);
   });
 
@@ -401,7 +401,7 @@ describe("route guard initial authentication", () => {
     await expectExpertsTabSettled(fetchMock);
     expect(currentLocation()).toBe("/center?from=later&tab=experts#target");
     expect(initialMeSignal.aborted).toBe(false);
-    expectPaths(fetchMock, ["/api/auth/me", "/api/workspaces", "/api/experts"]);
+    expectPaths(fetchMock, ["/api/auth/me", "/api/workspaces", "/api/experts", "/api/kb/status"]);
   });
 });
 

@@ -163,7 +163,8 @@ export function composerReadRoutes(): FetchRoutes {
 /**
  * 路由表里中心各 tab 的缺省应答：`GET /api/experts` → `{experts: []}`，`GET /api/skills` →
  * `{skills: [], disabledSkills: []}`，`GET /api/connectors` → `{connectors: []}`，`GET /api/connectors/defaults` →
- * `{disabledConnectors: []}`。凡会落到 `/center` 的整页路由表都展开它（写法同 `composerOptionsRoute`），
+ * `{disabledConnectors: []}`，`GET /api/kb/status` → `{enabled: false}`（中心页每次挂载读一次，决定「知识库」tab
+ * 的显隐）。凡会落到 `/center` 的整页路由表都展开它（写法同 `composerOptionsRoute`），
  * 用例写同一个键即覆盖。漏登记不会以 `unexpected request` 出现：`api.ts` 的 `fetchResponse` 把它吞成
  * `requestFailed(0)`，只表现为面板错误态——所以落到 `/center` 的用例另用 `expectExpertsTabSettled` 正向断言。
  */
@@ -173,6 +174,7 @@ export function centerRoutes(): FetchRoutes {
     "/api/skills": () => jsonResponse({ skills: [], disabledSkills: [] }),
     "/api/connectors": () => jsonResponse({ connectors: [] }),
     "/api/connectors/defaults": () => jsonResponse({ disabledConnectors: [] }),
+    "/api/kb/status": () => jsonResponse({ enabled: false }),
   };
 }
 

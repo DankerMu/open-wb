@@ -1,9 +1,10 @@
 // model-registry「中心页外壳」：`/center` 的 `?tab=` 规则、仅管理员可见的 tab 与空态；`isAdmin`；
 // routeManifest 的 `/center` 描述。真表（`CENTER_TABS`：人人可见的「专家」「技能」「连接器」在前、仅管理员可见的
 //「模型」「挂载源」在后，s1d-experts-skills 任务 7.2、8.2，s1d-connectors 任务 6.2，s1b-workspace-mounts 任务 13.2）经真实路由（createAppRouter）打开；「无可见 tab → 空态」与注入的表
-//（空表、一项、两项）经只含 `/center` 一条的浏览器路由。
+//（空表、一项、两项）经只含 `/center` 一条的浏览器路由。「知识库」tab（`requiresKb`）随 `GET /api/kb/status` 显隐
+//（s2a-kb-ragflow 任务 15.2）：缺省假状态为 `{enabled:false}`（`centerRoutes()`）。
 
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { createBrowserRouter } from "react-router";
 import { RouterProvider } from "react-router/dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -21,6 +22,7 @@ import {
   composerReadRoutes,
   createFetchMock,
   currentLocation,
+  deferredResponse,
   expectExpertsTabSettled,
   type FetchMock,
   jsonResponse,
@@ -45,6 +47,16 @@ const SEED_VIEW = {
 };
 const ADMIN = { ...authenticatedPrincipal, account: "lisi", role: "管理员" };
 const MEMBER = authenticatedPrincipal;
+/** 知识库开启且就绪的状态应答（六键齐全，`api-kb.ts` 严格解析）。 */
+const KB_ENABLED = {
+  enabled: true,
+  available: true,
+  embeddingReady: true,
+  compileReady: false,
+  uploadMaxBytes: 104_857_600,
+  uploadMaxFiles: 10,
+};
+const KB_STATUS = "/api/kb/status";
 
 const ONE_ADMIN_TAB: readonly CenterTab[] = [
   { key: "a", label: "甲", adminOnly: true, Panel: () => <p>甲面板</p> },
@@ -65,7 +77,9 @@ afterEach(() => {
   setBrowserPath("/");
 });
 
-function fetchFor(principal: typeof MEMBER) {
+type Routes = Parameters<typeof createFetchMock>[0];
+
+function fetchFor(principal: typeof MEMBER, routes: Routes = {}) {
   return createFetchMock({
     "/api/auth/me": () => jsonResponse(principal),
     "/api/sessions": () => jsonResponse({ sessions: [] }),
@@ -74,12 +88,13 @@ function fetchFor(principal: typeof MEMBER) {
     ...composerOptionsRoute(),
     ...composerReadRoutes(),
     ...centerRoutes(),
+    ...routes,
   });
 }
 
 /** 整个应用（真实路由，缺省 `CENTER_TABS`）。 */
-function openApp(path: string, principal: typeof MEMBER): FetchMock {
-  const mounted = mountAuthenticatedApp(path, fetchFor(principal));
+function openApp(path: string, principal: typeof MEMBER, routes: Routes = {}): FetchMock {
+  const mounted = mountAuthenticatedApp(path, fetchFor(principal, routes));
   dispose = () => mounted.router.dispose();
   return mounted.fetchMock;
 }
@@ -233,6 +248,83 @@ describe("真表（CENTER_TABS：人人可见的「专家」「技能」「连�
       ]);
     },
   );
+});
+
+describe("知识库 tab 随开关显隐（真表）", () => {
+  it.each([
+    ["管理员", ADMIN, ["专家", "技能", "连接器", "知识库", "模型", "挂载源"]],
+    ["普通用户", MEMBER, ["专家", "技能", "连接器", "知识库"]],
+  ])(
+    "状态为 enabled:true 时%s打开 /center：「知识库」排在「连接器」之后，状态恰读一次，描述不变",
+    async (_who, principal, labels) => {
+      const fetchMock = openApp("/center", principal, {
+        [KB_STATUS]: () => jsonResponse(KB_ENABLED),
+      });
+
+      await expectExpertsTabSettled(fetchMock);
+      const main = screen.getByRole("main");
+      expect(await within(main).findByRole("tab", { name: "知识库" })).toBeTruthy();
+      await expectLocation("/center?tab=experts");
+      expect(tabStates()).toEqual(labels.map((label, index) => [label, String(index === 0)]));
+      expect(paths(fetchMock).filter((path) => path === KB_STATUS)).toHaveLength(1);
+      expect(paths(fetchMock)).not.toContain("/api/kb/bases");
+      expect(routeManifest.find(({ path }) => path === "/center")).toMatchObject({
+        description: "专家、技能与连接器",
+      });
+    },
+  );
+
+  it("状态为 enabled:false 时普通用户打开 /center?tab=knowledge-bases：以 replace 变为 /center?tab=experts，没有「知识库」", async () => {
+    const before = window.history.length;
+    const fetchMock = openApp("/center?tab=knowledge-bases", MEMBER);
+
+    await expectExpertsTabSettled(fetchMock);
+    await expectLocation("/center?tab=experts");
+    expect(window.history.length).toBe(before);
+    expect(tabStates()).toEqual([
+      ["专家", "true"],
+      ["技能", "false"],
+      ["连接器", "false"],
+    ]);
+    expect(paths(fetchMock)).toContain(KB_STATUS);
+  });
+
+  it("状态读取失败时视为不可见：/center?tab=knowledge-bases 以 replace 变为 /center?tab=experts", async () => {
+    const fetchMock = openApp("/center?tab=knowledge-bases", MEMBER, {
+      [KB_STATUS]: () => jsonResponse({ error: { code: "internal", message: "x" } }, 500),
+    });
+
+    await expectExpertsTabSettled(fetchMock);
+    await expectLocation("/center?tab=experts");
+    expect(within(screen.getByRole("tablist")).queryByRole("tab", { name: "知识库" })).toBeNull();
+  });
+
+  it("状态挂起时普通用户打开 /center?tab=knowledge-bases：URL 不变、不渲染空态；应答 enabled:true 后「知识库」选中", async () => {
+    const before = window.history.length;
+    const pending = deferredResponse();
+    let reads = 0;
+    const fetchMock = openApp("/center?tab=knowledge-bases", MEMBER, {
+      [KB_STATUS]: () => (++reads === 1 ? pending.promise : jsonResponse(KB_ENABLED)),
+      "/api/kb/bases": () => jsonResponse({ bases: [] }),
+    });
+
+    const main = await screen.findByRole("main");
+    expect(await within(main).findByRole("tab", { name: "专家" })).toBeTruthy();
+    await waitFor(() => expect(paths(fetchMock)).toContain(KB_STATUS));
+    expect(currentLocation()).toBe("/center?tab=knowledge-bases");
+    expect(within(main).queryByText(EMPTY)).toBeNull();
+    expect(within(main).queryByRole("tab", { name: "知识库" })).toBeNull();
+    expect(paths(fetchMock)).not.toContain("/api/experts");
+
+    pending.resolve(jsonResponse(KB_ENABLED));
+
+    const tab = await within(main).findByRole("tab", { name: "知识库" });
+    await waitFor(() => expect(tab.getAttribute("aria-selected")).toBe("true"));
+    expect(await within(main).findByText("还没有知识库")).toBeTruthy();
+    expect(currentLocation()).toBe("/center?tab=knowledge-bases");
+    expect(window.history.length).toBe(before);
+    expect(within(main).queryByText(EMPTY)).toBeNull();
+  });
 });
 
 describe("注入一张仅管理员可见的表", () => {
