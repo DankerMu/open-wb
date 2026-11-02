@@ -11,6 +11,12 @@
  */
 export const JSON_TYPE = "application/json; charset=utf-8";
 
+/** 路由处理函数的两种应答：HTTP 状态缺省 200，所以 `{status, ...failure()}` 才是非 200。 */
+export const failure = (code, message, extra = {}) => ({
+  json: { code, data: null, message, ...extra },
+});
+export const success = (data, message = "success") => ({ json: { code: 0, data, message } });
+
 /** 记录里出现过的 body code（§3–§12）。 */
 const RECORDED_CODES = new Set([0, 100, 101, 102, 103, 400, 401, 403, 404, 409, 500, 501]);
 /** §12：HTTP 200 之外的配对，状态与 `code` 相同。 */

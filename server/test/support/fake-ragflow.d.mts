@@ -98,6 +98,20 @@ export interface FakeRagflowDocumentView {
   ingestionStatus: string;
 }
 
+/** 账号里的一个模型实例。`apiKey` 是最后一次下发的值：空串表示被清空（§11.4）。 */
+export interface FakeRagflowInstanceView {
+  name: string;
+  apiKey: string;
+  baseUrl: string;
+  models: { name: string; modelType: string[]; maxTokens: number }[];
+}
+
+export interface FakeRagflowDefaultModelView {
+  modelType: string;
+  instance: string;
+  name: string;
+}
+
 export interface FakeRagflowServer {
   port: number;
   baseUrl: string;
@@ -114,8 +128,12 @@ export interface FakeRagflowServer {
   ): FakeRagflowGate;
   fault(route: string, fault: FakeRagflowFault, options?: FakeRagflowScriptOptions): void;
   addDataset(name?: string): string;
+  /** 账号里已有这个模型，不经下发：`embedding_model` 引用得到它（§4.4）。 */
+  addModel(instance: string, name: string, modelType: "embedding" | "chat"): void;
   addDocument(datasetId: string, seed: FakeRagflowDocumentSeed): string;
   setDocumentStatus(datasetId: string, documentId: string, status: string): void;
+  instances(): FakeRagflowInstanceView[];
+  defaultModels(): FakeRagflowDefaultModelView[];
   datasets(): FakeRagflowDatasetView[];
   documents(datasetId: string): FakeRagflowDocumentView[];
   close(): Promise<void>;

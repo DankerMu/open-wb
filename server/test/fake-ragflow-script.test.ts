@@ -8,6 +8,9 @@ import { callFake, type FakeCallOptions } from "./support/fake-ragflow-call.js";
 
 const KEY = "wb-issue1840-fixture-key";
 const ABSENT = "0123456789abcdef0123456789abcdef";
+/** §11.1 有这条路由，夹具没有：下发不用它。 */
+const ABSENT_ROUTE = "POST /api/v1/providers/*/instances/*/models";
+const ABSENT_PATH = "/api/v1/providers/x/instances/y/models";
 
 let fake: FakeRagflowServer;
 
@@ -57,8 +60,8 @@ describe("脚本化应答", () => {
   });
 
   it("脚本化的路由不算未知路由", async () => {
-    fake.answer("POST /api/v1/providers/*/instances", { code: 0, data: null, message: "success" });
-    await call("POST", "/api/v1/providers/x/instances", { json: {} });
+    fake.answer(ABSENT_ROUTE, { code: 0, data: null, message: "success" });
+    await call("POST", ABSENT_PATH, { json: {} });
     expect(fake.unknownRoutes()).toEqual([]);
     expect(fake.requests()[0]?.unknown).toBe(false);
   });
@@ -67,7 +70,7 @@ describe("脚本化应答", () => {
 describe("脚本化应答的边界（§12）", () => {
   const SCRIPTED: [string, string, string][] = [
     ["夹具有的路由", "POST /api/v1/datasets", "/api/v1/datasets"],
-    ["夹具没有的路由", "POST /api/v1/providers/*/instances", "/api/v1/providers/x/instances"],
+    ["夹具没有的路由", ABSENT_ROUTE, ABSENT_PATH],
   ];
 
   it.each(SCRIPTED)("%s先过鉴权：没有 key 回记录的 401", async (_label, route, path) => {
@@ -85,9 +88,9 @@ describe("脚本化应答的边界（§12）", () => {
   });
 
   it("被鉴权挡下的请求不消耗脚本", async () => {
-    fake.answer("POST /api/v1/providers/*/instances", { code: 0, data: null, message: "success" });
-    await call("POST", "/api/v1/providers/x/instances", { json: {}, key: null });
-    const answer = await call("POST", "/api/v1/providers/x/instances", { json: {} });
+    fake.answer(ABSENT_ROUTE, { code: 0, data: null, message: "success" });
+    await call("POST", ABSENT_PATH, { json: {}, key: null });
+    const answer = await call("POST", ABSENT_PATH, { json: {} });
     expect(answer.status).toBe(200);
     expect(answer.body).toMatchObject({ code: 0 });
   });

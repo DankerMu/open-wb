@@ -85,6 +85,7 @@ describe("结果映射的五条", () => {
   });
 
   it("第 2 条：HTTP 2xx 且 code 为 0 是成功，读出调用点要的字段", async () => {
+    fake.addModel("owb-embed", "bge-m3", "embedding");
     const created = await client.createDataset(DATASET);
     const [dataset] = fake.datasets();
     expect(created).toEqual({ kind: "ok", value: { id: dataset?.id } });
@@ -654,8 +655,12 @@ describe("客户端的调用面（design D4、D7）", () => {
       "deleteDocument",
       "deleteTemplateGroup",
       "downloadDocument",
+      "ensureProvider",
       "listDocuments",
+      "listInstanceModels",
+      "listModelInstances",
       "parseDocument",
+      "setDefaultModel",
       "stopDocument",
       "updateModelInstance",
       "uploadDocument",

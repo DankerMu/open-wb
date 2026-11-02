@@ -84,6 +84,7 @@ describe("建数据集（§4）", () => {
   const create = (json: unknown) => call("POST", "/api/v1/datasets", { json });
 
   it("内置模板：code:0，message 为 null，data 含 id 与三段式嵌入模型", async () => {
+    fake.addModel("owb-embed", "bge-m3", "embedding");
     const answer = await create({
       name: "owb-general",
       parser_id: "general",

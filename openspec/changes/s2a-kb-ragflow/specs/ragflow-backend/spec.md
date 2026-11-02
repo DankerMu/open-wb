@@ -212,7 +212,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 **探活**：向嵌入上游发 `POST <baseUrl>/embeddings`，body `{model, input:"ping"}`，期限与模型探活相同。
 - 结果：2xx 且应答 `data[0].embedding` 为非空数字数组为 `ok`，否则为 `failed`。
-- 结果写回设置，并审计 `kb.settings`（detail `{probe}`）。
+- 结果只写回发起时的同一身份（名称、地址、密钥），并审计 `kb.settings`（detail `{probe}`）。发起后嵌入模型已被改：丢弃这次结果，不写回、不审计，应答回当前读视图。
 - 嵌入模型未配置时：409 `kb_not_ready`。
 - 探活不下发，也不改嵌入身份。
 
@@ -249,6 +249,10 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 #### Scenario: 取消指定的无操作
 - **WHEN** `chatModelId` 已是 `null`，管理员 `PUT {chatModelId:null}`
 - **THEN** 200；假 RAGFlow 收到零个请求；没有 `kb.settings` 审计，`kb_settings.updated_at` 不变
+
+#### Scenario: 探活期间嵌入模型被改
+- **WHEN** 探活请求在途（假上游挂起），管理员保存了另一个嵌入模型，然后放行探活
+- **THEN** 探活应答 200，为当前读视图，`embedding.probe` 是新模型的状态；没有这次探活的 `kb.settings` 审计
 
 #### Scenario: 探活
 - **WHEN** 已配置嵌入模型，假上游对 `POST <baseUrl>/embeddings` 依次应答：2xx 且 `data[0].embedding` 为非空数字数组；HTTP 500；2xx 且 `data[0].embedding` 为空数组；另一个实例未配置嵌入模型时探活

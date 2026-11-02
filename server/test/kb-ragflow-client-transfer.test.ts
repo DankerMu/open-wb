@@ -342,6 +342,7 @@ describe("JSON 调用的总期限", () => {
   });
 
   it("连接建好后不再按连接期限计时", async () => {
+    fake.addModel("owb-embed", "bge-m3", "embedding");
     const slow = clientOf(fake.baseUrl, { connectMs: 200, totalMs: 2_000 });
     const gate = fake.fault("POST /api/v1/datasets", { kind: "hold" });
     const pending = slow.createDataset(DATASET);
