@@ -8,6 +8,9 @@
  * `app` 上已有的那一份：`kb` 注册晚于 `workspaces`，不另建。
  *
  * 开启时注册返回 `models` 的写入钩子（D1）：`kb` 注册晚于 `models`，由 `app.ts` 绑过去；`models` 不导入 `kb`。
+ *
+ * 重建器（`kb/rebuild.ts`，#1852）也只建这一个，挂在 `app.kbRebuild` 上：入口在 `server_started` 之后调 `start` 续做，关停时在
+ * 关闭 DB 之前调 `stop`（`startup-registry.ts`）。知识库关闭时它是空操作：不启动，`rebuilding` 的库保持原状。
  */
 import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
@@ -25,11 +28,22 @@ import type { KbKeyHandle } from "./key-file.js";
 import { createKbLocks } from "./locks.js";
 import { createKbPipeline, type KbPipelineRecord } from "./pipeline.js";
 import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client.js";
+import { createKbRebuilder, type KbRebuilder } from "./rebuild.js";
 import { registerKbRoutes } from "./rest.js";
 import { createKbSettings } from "./settings.js";
 import { createSourceFiles } from "./source-file.js";
 import { createKbStore } from "./store.js";
 import { createKbUploads, type UploadBodyDeadline } from "./uploads.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    /** 这个 app 的重建器：知识库关闭时是空操作。 */
+    kbRebuild: KbRebuilder;
+  }
+}
+
+/** 知识库关闭时没有重建器（D8）。 */
+const NO_REBUILD: KbRebuilder = { start: () => undefined, stop: () => Promise.resolve() };
 
 /** 这个模块写到受管 stderr writer 的记录。 */
 export type KbRecord =
@@ -64,6 +78,8 @@ export interface KbDependencies {
   onSourceStat?: (absPath: string) => void;
   /** 列表里编译状态读取的总期限（测试注入短期限）；省略时 5 s（D9）。 */
   compileStatusDeadlineMs?: number;
+  /** 测试缝：重建器的一轮排到哪里跑，用例同步驱动；生产不传，下一轮事件循环。 */
+  rebuildSchedule?: (pass: () => Promise<void>) => void;
 }
 
 export function registerKb(
@@ -71,6 +87,7 @@ export function registerKb(
   dependencies: KbDependencies | undefined,
 ): ModelWriteGuard | undefined {
   if (dependencies === undefined) {
+    app.decorate("kbRebuild", NO_REBUILD);
     registerKbRoutes(app, undefined);
     return undefined;
   }
@@ -83,6 +100,7 @@ export function registerKb(
     uploadBodyDeadline,
     onSourceStat,
     compileStatusDeadlineMs,
+    rebuildSchedule,
     ...clientOptions
   } = dependencies;
   const { log, now = Date.now } = dependencies;
@@ -91,6 +109,16 @@ export function registerKb(
   const audit = (event: Parameters<typeof emit>[1]): void => {
     emit(app.db, event);
   };
+  const pipeline = createKbPipeline({ client, log });
+  const rebuild = createKbRebuilder({
+    store,
+    client,
+    pipeline,
+    locks,
+    audit,
+    schedule: rebuildSchedule,
+  });
+  app.decorate("kbRebuild", rebuild);
   const settings = createKbSettings({
     store,
     client,
@@ -98,6 +126,7 @@ export function registerKb(
     locks,
     audit,
     probeDeadlines,
+    onRebuild: rebuild.wake,
   });
   registerKbRoutes(app, {
     store,
@@ -109,7 +138,7 @@ export function registerKb(
     bases: createKbBases({
       store,
       client,
-      pipeline: createKbPipeline({ client, log }),
+      pipeline,
       locks,
       compileStatus: createCompileStatus({ store, client, deadlineMs: compileStatusDeadlineMs }),
       audit,

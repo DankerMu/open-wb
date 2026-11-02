@@ -466,11 +466,11 @@ Minimal mergeable slice: 13.2–13.3 的移出——一条不读沙箱的独立�
 
 ## 14. 嵌入模型更换与全量重建（ragflow-backend「嵌入模型更换与全量重建」；knowledge-bases「同一知识库的写操作串行」的「上传与确认重建交错」）
 
-- [ ] 14.1 核对 Context：
+- [x] 14.1 核对 Context：
   - 组 8 的身份判定与设置锁；组 9 的 `createPipeline` / `deletePipeline`；组 10 的上传；组 12 的本地上传；组 1 的 §9.1 下载判据；
   - `server.ts` 里挂载恢复「`server_started` 之后不等待」的写法，以及关停次序；
   - `workspaces/mounts` 的恢复测试写法。
-- [ ] 14.2 测试先行：新 `server/test/kb-rebuild.test.ts`（假 RAGFlow；重建器经注入的调度缝同步驱动）。
+- [x] 14.2 测试先行：新 `server/test/kb-rebuild.test.ts`，失败与跳过拆到 `kb-rebuild-failures.test.ts`，与在途写操作的交错拆到 `kb-rebuild-writers.test.ts`（单文件 ≤800 行；假 RAGFlow；重建器经注入的调度缝同步驱动）。客户端的 `AbortSignal` 用例在 `kb-ragflow-client-transfer.test.ts`。
   - 「未确认不保存」「确认后重建」「开编译的库重建」「账号缺省缺失时重建失败」「旧一代删除失败」「原件缺失与下载判别」「不带头的错误应答」「中途失败与重试」「重建中改嵌入身份」「没有失败库时重试」；
   - 普通库重建不读账号缺省；
   - knowledge-bases「上传与确认重建交错」；
@@ -491,11 +491,12 @@ Minimal mergeable slice: 13.2–13.3 的移出——一条不读沙箱的独立�
   - 本组是最后一个注册路由的组：`kb-disabled.test.ts` 断言路由表恰十二条。
 
   路由加进 `kb-disabled.test.ts` 与归属路由用例。
-- [ ] 14.3 实现：
-  - 新 `server/src/kb/rebuild.ts`（处理每库期间持有该库写锁；建新一代：开了开关的库走 `createPipeline`，普通库走组 9 首刀的 `parse_type:1` 建库，不读账号缺省；删走 `deletePipeline`）；
+- [x] 14.3 实现：
+  - 新 `server/src/kb/rebuild.ts`（处理每库期间持有该库写锁；建新一代：开了开关的库走 `createPipeline`，普通库走组 9 首刀的 `parse_type:1` 建库，不读账号缺省，两者经 `bases.ts` 导出的 `createGeneration`；删走 `deletePipeline`）；
+  - `ragflow-client.ts` 与 `pipeline.ts` 的出站调用收可选的 `AbortSignal`，关停时中止在途请求；
   - 组 8 的 PUT 开放 `confirmRebuild` 并写 `rebuild_actor_id`；`kb/rest.ts` 加 `POST /api/kb/settings/rebuild`；
   - 重建器的启动与关停接进 `startup-registry.ts`，`server.ts` 只加两次调用。
-- [ ] 14.4 `system.md` §9.13 加重建流程、下载判别、跳过规则、续做与 `kb_dataset_leak`、`kb_pipeline_leak`。
+- [x] 14.4 §9.13 的正文 `docs/architecture/knowledge-base.md` 加重建流程、下载判别、跳过规则、续做与 `kb_dataset_leak`、`kb_pipeline_leak`；`system.md` 只改模块表的路由与 §9.13 的指引。
 
 Suggested fixture level: expanded - 后台进程内任务、跨重启的续做与关停次序（process lifecycle + persisted state），并与在途写操作交错。
 Minimal mergeable slice: atomic - 确认开关一旦开放就必须有重建器，否则库永远停在 `rebuilding`；重建器没有确认入口就没有触发点。

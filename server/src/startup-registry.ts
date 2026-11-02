@@ -15,10 +15,10 @@
  *   此时 agent 目录门控关着，发布只读不写；`runStage()` 把 stage 切到 `mcp_json`、打开门控、再发布一次，
  *   写失败原样抛给入口（`reason: "mcp_json"`）。不并进 `createStartupPublisher`：模型发布不写 `mcp.json`，
  *   连接器写入也不重写模型的两个文件。
- * - `workspaceAssemblyOf` / `startBackgroundWork`（s1b-workspace-mounts D12，同为 `server.ts` 行数预算抽出）：
- *   `appAssemblyOf` 递交的工作空间三项——回收目录服务、挂载设置（mount-manager 要 DB 与审计，在 createApp
- *   里构造）与挂载源的额外保护根；`server_started` 写出之后入口不等待的两件后台工作——回收目录首扫与挂载的
- *   启动恢复。
+ * - `workspaceAssemblyOf` / `startBackgroundWork` / `stopBackgroundWork`（s1b-workspace-mounts D12、s2a-kb-ragflow D8，同为
+ *   `server.ts` 行数预算抽出）：`appAssemblyOf` 递交的工作空间三项——回收目录服务、挂载设置（mount-manager 要 DB 与
+ *   审计，在 createApp 里构造）与挂载源的额外保护根；`server_started` 写出之后入口不等待的三件后台工作——回收目录
+ *   首扫、挂载的启动恢复与知识库重建的续做；关停时关闭 DB 之前停住重建器。
  * - `preparePrivateDbFiles`（s2a-kb-ragflow D18，同为 `server.ts` 行数预算抽出）：`db` 阶段 `openDb` 之前的
  *   DB 文件准备，建出或校正主库，校正已存在的 `-wal` / `-shm`，mode 均为 `0600`。
  * - `prepareKbKey`（s2a-kb-ragflow D3，启动阶段 `kb_key`，紧接 `config`、先于 `db`）：只有配置了知识库才读密钥
@@ -33,6 +33,7 @@ import { createMcpPublisher } from "./connectors/mcp-json.js";
 import { createConnectorStore } from "./connectors/store.js";
 import type { KbDependencies } from "./kb/index.js";
 import { type KbKeyHandle, readKbKeyFile } from "./kb/key-file.js";
+import type { KbRebuilder } from "./kb/rebuild.js";
 import type { ModelCatalog } from "./model-catalog.js";
 import { writeManagedModelsYml } from "./model-proxy/models-yml.js";
 import { createPublisher } from "./models/publish.js";
@@ -179,16 +180,30 @@ export function workspaceAssemblyOf(config: WorkspaceAssemblyConfig) {
 }
 
 /**
- * `server_started` 写出之后、未收到信号时入口调用一次，两者都不等待、永不 reject：回收目录首扫（关停不中止
+ * `server_started` 写出之后、未收到信号时入口调用一次，三者都不等待、永不 reject：回收目录首扫（关停不中止
  * 在途的一轮，进程待它落定后退出）；挂载的启动恢复（逐个依次，失败只使该挂载离线并退避，不产生 failure
- * record、不改变退出码；关停时 app 关闭钩子上的 `closeAll` 收住在途的那次尝试）。
+ * record、不改变退出码；关停时 app 关闭钩子上的 `closeAll` 收住在途的那次尝试）；知识库重建的续做（对仍是
+ * `rebuilding` 的库从第一步做起，失败只改变知识库状态；知识库关闭时是空操作，库保持原状）。
  */
 export function startBackgroundWork(work: {
   trash: ReturnType<typeof createTrash>;
   mounts: Pick<MountManager, "restoreAll">;
+  rebuild: Pick<KbRebuilder, "start">;
 }): void {
   void work.trash.sweep(Date.now());
   void work.mounts.restoreAll();
+  work.rebuild.start();
+}
+
+/**
+ * 关停与失败清理在关闭主实例与 DB 之前调用：中止重建器的在途请求，只等正在持锁处理的那一个库，不等排在写锁队列里的
+ * （`kb/rebuild.ts`）。所以它不会被一个在途的本地上传拖住，主监听器的关停预算照常布防。中止的库在第 4 步提交之前保持
+ * `rebuilding`，下次启动续做。还没有 app（装配之前失败）时什么也不做。
+ */
+export async function stopBackgroundWork(
+  app: { kbRebuild: Pick<KbRebuilder, "stop"> } | undefined,
+) {
+  await app?.kbRebuild.stop();
 }
 
 export function prepareKbKey(config: { ragflowApiKeyFile?: string | undefined }) {

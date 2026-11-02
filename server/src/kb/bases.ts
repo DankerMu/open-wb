@@ -2,7 +2,8 @@
  * 建库、列表与删库（s2a-kb-ragflow D2、D9、D20；knowledge-bases「知识库端点」「知识库审计」）。
  *
  * 两种库：两个开关都关的走 `parse_type:1`，没有模板组与画布；任一开关开的经 `kb/pipeline.ts` 的 `createPipeline` 建模板组、
- * 画布与 `parse_type:2` 数据集（#1869）。
+ * 画布与 `parse_type:2` 数据集（#1869）。建一代的这一步是 `createGeneration`，重建器（`kb/rebuild.ts`，#1852）共用：普通库不读
+ * 账号缺省。
  *
  * 建库：body 的键集、类型、名称与模板在取锁之前判定，不读库。其余判定在设置锁内，读到的是锁内的设置行与知识库行：
  * 嵌入就绪、开关为真而对话模型未指定、重名、数量上限，次序不变，都不发出站请求。建库全程持锁，所以不会建出代数过期的库，
@@ -22,7 +23,7 @@ import type { CompileView, createCompileStatus } from "./compile-status.js";
 import type { createKbLocks } from "./locks.js";
 import type { createKbPipeline, PipelineResources } from "./pipeline.js";
 import { type createRagflowClient, isRecord } from "./ragflow-client.js";
-import { embeddingModelOf, unwrap } from "./settings.js";
+import { embeddingModelOf } from "./settings.js";
 import type { createKbStore, KnowledgeBase } from "./store.js";
 import { templateOf } from "./templates.js";
 
@@ -60,6 +61,15 @@ interface KbBasesDependencies {
   compileStatus: Pick<ReturnType<typeof createCompileStatus>, "read">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
+}
+
+/** 一代 RAGFlow 资源的输入：`name` 是 `owb-<id>-g<代数>`，`embeddingModel` 是三段式（D2、D7）。 */
+interface GenerationInput {
+  name: string;
+  parserId: string;
+  raptor: boolean;
+  graph: boolean;
+  embeddingModel: string;
 }
 
 /** 通过了形状校验的 body。 */
@@ -131,6 +141,30 @@ function generationsOf(base: KnowledgeBase): PipelineResources[] {
   return next.datasetId === null ? [current] : [next, current];
 }
 
+/**
+ * 建一代 RAGFlow 资源（D9），建库与重建共用：普通库只建 `parse_type:1` 数据集，不读账号缺省；开了开关的库经 `createPipeline`，
+ * 它自己逆序回滚。结果是类型化的，不抛。
+ */
+export async function createGeneration(
+  dependencies: Pick<KbBasesDependencies, "client" | "pipeline">,
+  input: GenerationInput,
+  signal?: AbortSignal,
+) {
+  const { name, parserId, raptor, graph, embeddingModel } = input;
+  if (raptor || graph) {
+    return dependencies.pipeline.createPipeline(input, signal);
+  }
+  const dataset = await dependencies.client.createDataset(
+    { name, parserId, embeddingModel },
+    signal,
+  );
+  if (dataset.kind !== "ok") {
+    return dataset;
+  }
+  const value = { datasetId: dataset.value.id, canvasId: null, templateGroupId: null };
+  return { kind: "ok" as const, value };
+}
+
 function viewOf(base: KnowledgeBase, documents: number, compile: CompileView) {
   const { id, name, template, raptor, graph, state, stateMessage, createdAt } = base;
   return { id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt };
@@ -143,7 +177,7 @@ const createdCompile = ({ raptor, graph }: KnowledgeBase): CompileView => ({
 });
 
 export function createKbBases(dependencies: KbBasesDependencies) {
-  const { store, client, pipeline, locks, compileStatus, audit } = dependencies;
+  const { store, pipeline, locks, compileStatus, audit } = dependencies;
 
   function deletable(id: string, ownerId: string): KnowledgeBase {
     const base = ownedBase(store, id, ownerId);
@@ -153,20 +187,9 @@ export function createKbBases(dependencies: KbBasesDependencies) {
     return base;
   }
 
-  /** 这一代的 RAGFlow 资源：普通库只有数据集，开了开关的库经 `createPipeline`。 */
+  /** 这一代的 RAGFlow 资源：失败按 D4 映射成应答。 */
   async function createResources(request: CreateRequest, name: string, embeddingModel: string) {
-    const { parserId, raptor, graph } = request;
-    if (!raptor && !graph) {
-      const dataset = unwrap(await client.createDataset({ name, parserId, embeddingModel }));
-      return { datasetId: dataset.id, canvasId: null, templateGroupId: null };
-    }
-    const created = await pipeline.createPipeline({
-      name,
-      parserId,
-      embeddingModel,
-      raptor,
-      graph,
-    });
+    const created = await createGeneration(dependencies, { ...request, name, embeddingModel });
     if (created.kind !== "ok") {
       throw new HttpError(created.kind);
     }

@@ -110,8 +110,8 @@ const instanceBody = (instance: ModelInstance) => ({
 export function modelCalls(json: JsonCall) {
   return {
     /** 只读，不改账号缺省：建 pipeline 之前的核对（D7）。 */
-    readDefaultModels(): Promise<Result<string[]>> {
-      return json("GET", `${API}/models/default`, DEFAULT_MODELS);
+    readDefaultModels(signal?: AbortSignal): Promise<Result<string[]>> {
+      return json("GET", `${API}/models/default`, DEFAULT_MODELS, undefined, signal);
     },
 
     async createModelInstance(instance: ModelInstance): Promise<Result<null>> {

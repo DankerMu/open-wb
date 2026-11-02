@@ -10,8 +10,9 @@
  * RAGFlow 回 `code:0`，之后解析 `FAILED`。上一步确认已删（成功或不存在）之前不发下一步，任一步失败即停。`ragflow-client`
  * 的删画布与删模板组只有这里调用。删除失败时 `discard` 写一行 leak，不带名称与内容。
  *
- * 不取锁（D20：锁不可重入）：调用方持有设置锁（建库）或该库的写锁（删库）。结果是类型化的，不抛 `HttpError`：建库把它
- * 映射成应答；重建的调用方由组 14（#1852）接上。
+ * 不取锁（D20：锁不可重入）：调用方持有设置锁（建库）或该库的写锁（删库与重建）。结果是类型化的，不抛 `HttpError`：建库把它
+ * 映射成应答，重建器（`kb/rebuild.ts`）把失败记成 `rebuild_failed`。三个入口都收可选的 `signal`，每个出站请求都带它：关停时
+ * 重建器中止在途的请求，中止的那一步与期限到期一样是 `kb_unavailable`。
  */
 import { type createRagflowClient, isRecord } from "./ragflow-client.js";
 
@@ -212,7 +213,10 @@ export function createKbPipeline(dependencies: {
   const { client, log } = dependencies;
 
   /** 次序与即停见文件头；`not_found` 视为已删（表 B：数据集 `403`、画布 `103`、模板组 `404`）。 */
-  async function deletePipeline(resources: PipelineResources): Promise<Deleted> {
+  async function deletePipeline(
+    resources: PipelineResources,
+    signal?: AbortSignal,
+  ): Promise<Deleted> {
     const steps = [
       ["dataset", resources.datasetId, client.deleteDataset],
       ["canvas", resources.canvasId, client.deleteCanvas],
@@ -222,7 +226,7 @@ export function createKbPipeline(dependencies: {
       if (id === null) {
         continue;
       }
-      const result = await remove(id);
+      const result = await remove(id, signal);
       if (result.kind !== "ok" && result.kind !== "not_found") {
         return { kind: result.kind, step, id };
       }
@@ -231,8 +235,8 @@ export function createKbPipeline(dependencies: {
   }
 
   /** 删掉这一代，删不掉的写一行 leak（D8 第 5 步、D9 的回滚）：画布删除失败时模板组还在，两个 id 都写。 */
-  async function discard(resources: PipelineResources): Promise<void> {
-    const result = await deletePipeline(resources);
+  async function discard(resources: PipelineResources, signal?: AbortSignal): Promise<void> {
+    const result = await deletePipeline(resources, signal);
     if (result.kind === "ok") {
       return;
     }
@@ -246,13 +250,17 @@ export function createKbPipeline(dependencies: {
   }
 
   /** 模板组已建好之后的三步：读内置 DSL 并改写、建画布、建数据集。 */
-  async function onGroup(input: PipelineInput, templateGroupId: string): Promise<Created> {
+  async function onGroup(
+    input: PipelineInput,
+    templateGroupId: string,
+    signal: AbortSignal | undefined,
+  ): Promise<Created> {
     const built: PipelineResources = { datasetId: null, canvasId: null, templateGroupId };
     const fail = async (result: Failure): Promise<Failure> => {
-      await discard(built);
+      await discard(built, signal);
       return result;
     };
-    const builtin = await client.readBuiltinPipeline(input.parserId);
+    const builtin = await client.readBuiltinPipeline(input.parserId, signal);
     if (builtin.kind !== "ok") {
       return fail(builtin);
     }
@@ -260,16 +268,16 @@ export function createKbPipeline(dependencies: {
     if (dsl === undefined) {
       return fail(UNAVAILABLE);
     }
-    const canvas = await client.createCanvas(input.name, dsl);
+    const canvas = await client.createCanvas(input.name, dsl, signal);
     if (canvas.kind !== "ok") {
       return fail(canvas);
     }
     built.canvasId = canvas.value.id;
-    const dataset = await client.createDataset({
-      name: input.name,
-      pipelineId: canvas.value.id,
-      embeddingModel: input.embeddingModel,
-    });
+    const { name, embeddingModel } = input;
+    const dataset = await client.createDataset(
+      { name, pipelineId: canvas.value.id, embeddingModel },
+      signal,
+    );
     if (dataset.kind !== "ok") {
       return fail(dataset);
     }
@@ -279,15 +287,15 @@ export function createKbPipeline(dependencies: {
 
   return {
     /** 建一代编译资源（D9 的五步）。 */
-    async createPipeline(input: PipelineInput): Promise<Created> {
-      const defaults = await client.readDefaultModels();
+    async createPipeline(input: PipelineInput, signal?: AbortSignal): Promise<Created> {
+      const defaults = await client.readDefaultModels(signal);
       if (defaults.kind !== "ok") {
         return defaults;
       }
       if (!REQUIRED_DEFAULTS.every((type) => defaults.value.includes(type))) {
         return NOT_READY;
       }
-      const builtins = await client.listBuiltinTemplates();
+      const builtins = await client.listBuiltinTemplates(signal);
       if (builtins.kind !== "ok") {
         return builtins;
       }
@@ -295,8 +303,8 @@ export function createKbPipeline(dependencies: {
       if (templates === undefined) {
         return UNAVAILABLE;
       }
-      const group = await client.createTemplateGroup(input.name, templates);
-      return group.kind === "ok" ? onGroup(input, group.value.id) : group;
+      const group = await client.createTemplateGroup(input.name, templates, signal);
+      return group.kind === "ok" ? onGroup(input, group.value.id, signal) : group;
     },
 
     deletePipeline,

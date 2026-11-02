@@ -1,6 +1,6 @@
 /**
- * `kb-settings.test.ts`、`kb-settings-probe.test.ts`、`kb-models-guard.test.ts` 与 `kb-bases*.test.ts` 共用（s2a-kb-ragflow
- * tasks 8.2、8.4、9.2，#1844、#1845、#1846）：`createApp` + `app.inject()`，真实 SQLite，假 RAGFlow，假嵌入上游。知识库行与 `models` 行由 store / SQL 直接插入。
+ * `kb-settings.test.ts`、`kb-settings-probe.test.ts`、`kb-models-guard.test.ts`、`kb-bases*.test.ts` 与 `kb-rebuild*.test.ts` 共用
+ *（s2a-kb-ragflow tasks 8.2、8.4、9.2、14.2，#1844、#1845、#1846、#1852）：`createApp` + `app.inject()`，真实 SQLite，假 RAGFlow，假嵌入上游。知识库行与 `models` 行由 store / SQL 直接插入。
  *
  * 每个用例收尾都断言 D7 的不变量：所有请求都带着 `KbDependencies` 交下来的密钥，没有落到未知路由，没有 `/providers` 下的
  * `DELETE`，没有 `PATCH /users/me/models`、单实例 `GET`，每个 `PATCH /models/default` 都带非空的三个名字。
@@ -80,6 +80,13 @@ export interface World {
   get(who?: Who): Promise<LightMyRequestResponse>;
   put(body: unknown, who?: Who): Promise<LightMyRequestResponse>;
   probe(who?: Who): Promise<LightMyRequestResponse>;
+  /** `POST /api/kb/settings/rebuild`（bodyless）。 */
+  retry(who?: Who): Promise<LightMyRequestResponse>;
+  /**
+   * 重建器的调度缝（s2a-kb-ragflow tasks 14.2）：唤醒只把一轮排进这里，这个函数按排入次序跑完，跑到没有排着的为止。
+   * 没调用它，重建器一个请求也不发。
+   */
+  rebuild(): Promise<void>;
   /** `PUT` / `DELETE /api/models?id=<id>`，`model.update` 的 body 用 `PUT`。 */
   models(method: "PUT" | "DELETE", id: string, body?: unknown): Promise<LightMyRequestResponse>;
   /** 任意路由，`payload` 省略即不带 body。 */
@@ -172,6 +179,7 @@ export function useSettingsWorlds(): OpenWorld {
     const db = openDb(":memory:");
     const logged: unknown[] = [];
     const locks = createKbLocks();
+    const passes: Array<() => Promise<void>> = [];
     let publishes = 0;
     const kb: KbDependencies = {
       key: { read: () => key },
@@ -181,6 +189,9 @@ export function useSettingsWorlds(): OpenWorld {
       locks,
       log: (record) => {
         logged.push(record);
+      },
+      rebuildSchedule: (pass) => {
+        passes.push(pass);
       },
       ...(options.probeDeadlines === undefined ? {} : { probeDeadlines: options.probeDeadlines }),
       ...(options.deadlines === undefined ? {} : { deadlines: options.deadlines }),
@@ -247,6 +258,13 @@ export function useSettingsWorlds(): OpenWorld {
         }),
       probe: (who = "admin") =>
         app.inject({ method: "POST", url: "/api/kb/settings/probe", headers: headers(who) }),
+      retry: (who = "admin") =>
+        app.inject({ method: "POST", url: "/api/kb/settings/rebuild", headers: headers(who) }),
+      async rebuild() {
+        for (let pass = passes.shift(); pass !== undefined; pass = passes.shift()) {
+          await pass();
+        }
+      },
       models: (method, id, payload) =>
         app.inject({
           method,

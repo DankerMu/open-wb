@@ -19,6 +19,9 @@
  * RAGFlow 的 message 只用于上面的前缀判定，结果只有 `kind` 与调用点要读的字段，不带 message、正文与原始 `code`。
  * 密钥只进请求头，一个请求读一次句柄。任何错误都不外抛：不发出的请求（空 id、空 `api_key`）同样是
  * `kb_unavailable`，绝不能是 `not_found`，那会被调用点当成已删除。
+ *
+ * 重建器用到的方法收一个可选的 `signal`（#1852，关停时中止在途请求）：中止与期限到期同一写法，结果是 `kb_unavailable`；
+ * 已中止的不发出。文件流交出之后照样受它管：中止即销毁请求，流报错。上传的请求体随出站销毁。
  */
 import type { ClientRequest, IncomingMessage } from "node:http";
 import http from "node:http";
@@ -76,6 +79,7 @@ interface Outbound {
   upload?: Upload;
   /** 下载：应答可以是文件。 */
   file?: boolean;
+  signal?: AbortSignal | undefined;
 }
 
 interface Upload {
@@ -362,7 +366,7 @@ function exchange(
   key: KbKeyHandle,
   deadlines: Deadlines,
 ): Promise<Wire> {
-  const { upload, totalMs } = outbound;
+  const { upload, totalMs, signal } = outbound;
   const text = outbound.json === undefined ? undefined : JSON.stringify(outbound.json);
   return new Promise((resolve) => {
     let settled = false;
@@ -373,6 +377,9 @@ function exchange(
         settled = true;
         clearTimeout(connectTimer);
         clearTimeout(totalTimer);
+        if (!("file" in wire)) {
+          signal?.removeEventListener("abort", abandon);
+        }
         resolve(wire);
       }
     };
@@ -388,6 +395,7 @@ function exchange(
       clearTimeout(connectTimer);
       status = response.statusCode ?? 0;
       if (isFile(response, outbound)) {
+        response.once("close", () => signal?.removeEventListener("abort", abandon));
         settle({ file: response });
       } else if (isRedirect(status)) {
         abandon();
@@ -397,6 +405,11 @@ function exchange(
     };
     const connectTimer = setTimeout(abandon, deadlines.connectMs);
     const totalTimer = totalMs === undefined ? undefined : setTimeout(abandon, totalMs);
+    if (signal?.aborted === true) {
+      upload?.body.destroy();
+      abandon();
+      return;
+    }
     let tls = false;
     try {
       ({ req, tls } = openRequest(outbound, baseUrl, headersOf(outbound, key, text), onResponse));
@@ -406,6 +419,7 @@ function exchange(
       return;
     }
     req.on("error", abandon);
+    signal?.addEventListener("abort", abandon, { once: true });
     // 每个请求一条新连接：TCP（与 TLS）建好，连接期限就结束了。
     req.on("socket", (socket: Socket) => {
       socket.once(tls ? "secureConnect" : "connect", () => clearTimeout(connectTimer));
@@ -496,8 +510,9 @@ export function createRagflowClient(options: {
     path: string,
     route: Route<T, Typed>,
     body?: unknown,
+    signal?: AbortSignal,
   ): Promise<Result<T, Typed>> =>
-    send({ method, path, keyed: true, totalMs: deadlines.totalMs, json: body }, route);
+    send({ method, path, keyed: true, totalMs: deadlines.totalMs, json: body, signal }, route);
 
   return {
     ...modelCalls(json),
@@ -517,48 +532,51 @@ export function createRagflowClient(options: {
         | { parserId: string }
         | { pipelineId: string }
       ),
+      signal?: AbortSignal,
     ): Promise<Result<{ id: string }>> {
       const template =
         "pipelineId" in dataset
           ? { parse_type: 2, pipeline_id: dataset.pipelineId }
           : { parser_id: dataset.parserId, parse_type: 1 };
-      return json("POST", `${API}/datasets`, CREATED, {
-        name: dataset.name,
-        ...template,
-        embedding_model: dataset.embeddingModel,
-      });
+      const body = { name: dataset.name, ...template, embedding_model: dataset.embeddingModel };
+      return json("POST", `${API}/datasets`, CREATED, body, signal);
     },
 
-    listBuiltinTemplates(): Promise<Result<{ id: string; config: Json }[]>> {
-      return json("GET", `${API}/compilation-templates/builtins`, BUILTIN_TEMPLATES);
+    listBuiltinTemplates(signal?: AbortSignal): Promise<Result<{ id: string; config: Json }[]>> {
+      const path = `${API}/compilation-templates/builtins`;
+      return json("GET", path, BUILTIN_TEMPLATES, undefined, signal);
     },
 
     /** body 形状见 §5.1 (2)：`templates` 的项是 `{name, kind, description, config}`。 */
-    createTemplateGroup(name: string, templates: readonly Json[]): Promise<Result<{ id: string }>> {
+    createTemplateGroup(
+      name: string,
+      templates: readonly Json[],
+      signal?: AbortSignal,
+    ): Promise<Result<{ id: string }>> {
       const body = { name, description: "", templates };
-      return json("POST", `${API}/compilation-template-groups`, CREATED, body);
+      return json("POST", `${API}/compilation-template-groups`, CREATED, body, signal);
     },
 
     /** RAGFlow 不要求这条带密钥（§15），这里照带：每个请求一个写法。 */
-    async readBuiltinPipeline(parserId: string): Promise<Result<Json>> {
+    async readBuiltinPipeline(parserId: string, signal?: AbortSignal): Promise<Result<Json>> {
       if (!usable(parserId)) {
         return UNAVAILABLE;
       }
       const path = `${API}/pipelines/${encodeURIComponent(parserId)}`;
-      return json("GET", path, BUILTIN_PIPELINE);
+      return json("GET", path, BUILTIN_PIPELINE, undefined, signal);
     },
 
-    createCanvas(title: string, dsl: Json): Promise<Result<{ id: string }>> {
+    createCanvas(title: string, dsl: Json, signal?: AbortSignal): Promise<Result<{ id: string }>> {
       const body = { title, canvas_category: "dataflow_canvas", dsl };
-      return json("POST", `${API}/agents`, CREATED, body);
+      return json("POST", `${API}/agents`, CREATED, body, signal);
     },
 
     /** `ids` 恰一个非空 id：空 `ids` 回 `code:0` 什么也不删（§4.6），混合批次全部不删（§10）。 */
-    async deleteDataset(id: string): Promise<Result<null, typeof NOT_FOUND>> {
+    async deleteDataset(id: string, signal?: AbortSignal): Promise<Result<null, typeof NOT_FOUND>> {
       if (!usable(id)) {
         return UNAVAILABLE;
       }
-      return json("DELETE", `${API}/datasets`, DELETE_DATASET, { ids: [id] });
+      return json("DELETE", `${API}/datasets`, DELETE_DATASET, { ids: [id] }, signal);
     },
 
     /** 一页文档：`page_size` 超过 100 会静默回落到 10（§8.3）。 */
@@ -592,26 +610,27 @@ export function createRagflowClient(options: {
     async uploadDocument(
       datasetId: string,
       upload: Upload,
+      signal?: AbortSignal,
     ): Promise<Result<{ id: string }, typeof NOT_FOUND | typeof UNSUPPORTED_FILE>> {
       if (!usable(datasetId)) {
         upload.body.destroy();
         return UNAVAILABLE;
       }
       const path = documentsPath(datasetId);
-      return send({ method: "POST", path, keyed: true, upload }, UPLOAD_DOCUMENT);
+      return send({ method: "POST", path, keyed: true, upload, signal }, UPLOAD_DOCUMENT);
     },
 
     /** 只触发这一份：`success_count` 才能对应到文档（§8.1）。 */
     async parseDocument(
       datasetId: string,
       documentId: string,
+      signal?: AbortSignal,
     ): Promise<Result<null, typeof NOT_FOUND | typeof PARSE_NOT_STARTED>> {
       if (!usable(datasetId, documentId)) {
         return UNAVAILABLE;
       }
-      return json("POST", `${documentsPath(datasetId)}/parse`, PARSE_DOCUMENT, {
-        document_ids: [documentId],
-      });
+      const body = { document_ids: [documentId] };
+      return json("POST", `${documentsPath(datasetId)}/parse`, PARSE_DOCUMENT, body, signal);
     },
 
     /** `successCount` 为 0 是文档已不在运行（§8.2），不是失败。 */
@@ -641,12 +660,13 @@ export function createRagflowClient(options: {
     async downloadDocument(
       datasetId: string,
       documentId: string,
+      signal?: AbortSignal,
     ): Promise<Result<{ body: Readable }, typeof NOT_FOUND>> {
       if (!usable(datasetId, documentId)) {
         return UNAVAILABLE;
       }
       const path = `${documentsPath(datasetId)}/${encodeURIComponent(documentId)}`;
-      const outbound = { method: "GET", path, keyed: true, file: true };
+      const outbound = { method: "GET", path, keyed: true, file: true, signal };
       const wire = await exchange(outbound, baseUrl, key, deadlines);
       if ("file" in wire) {
         return { kind: "ok", value: { body: wire.file } };
@@ -655,19 +675,23 @@ export function createRagflowClient(options: {
     },
 
     /** 只有 `kb/pipeline.ts` 调用：删除次序由它保证（D9）。 */
-    async deleteCanvas(id: string): Promise<Result<null, typeof NOT_FOUND>> {
+    async deleteCanvas(id: string, signal?: AbortSignal): Promise<Result<null, typeof NOT_FOUND>> {
       if (!usable(id)) {
         return UNAVAILABLE;
       }
-      return json("DELETE", `${API}/agents/${encodeURIComponent(id)}`, DELETE_CANVAS);
+      const path = `${API}/agents/${encodeURIComponent(id)}`;
+      return json("DELETE", path, DELETE_CANVAS, undefined, signal);
     },
 
-    async deleteTemplateGroup(id: string): Promise<Result<null, typeof NOT_FOUND>> {
+    async deleteTemplateGroup(
+      id: string,
+      signal?: AbortSignal,
+    ): Promise<Result<null, typeof NOT_FOUND>> {
       if (!usable(id)) {
         return UNAVAILABLE;
       }
       const path = `${API}/compilation-template-groups/${encodeURIComponent(id)}`;
-      return json("DELETE", path, DELETE_TEMPLATE_GROUP);
+      return json("DELETE", path, DELETE_TEMPLATE_GROUP, undefined, signal);
     },
   };
 }
