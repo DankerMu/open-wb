@@ -15,6 +15,7 @@ import {
   type FakeKb,
   fakeKb,
   file,
+  mount,
   READY,
   renderPanel,
   rowOf,
@@ -33,6 +34,11 @@ const FILE_UNSUPPORTED = "这个文件不能入库：模板不支持这种类型
 const REBUILDING = "知识库正在重建，请稍后再试";
 const TOO_LARGE = "文件超过大小上限";
 const DENIED = "目标路径不在你的沙箱内，操作已拒绝";
+const OFFLINE_NOTE = "离线，重新连接后可浏览";
+const TWO_SPACES = [
+  { id: "ws-1", name: "项目空间", dir: "project", root: "/srv/ws/project", createdAt: 1 },
+  { id: "ws-2", name: "资料空间", dir: "notes", root: "/srv/ws/notes", createdAt: 2 },
+];
 
 afterEach(() => {
   cleanup();
@@ -122,10 +128,7 @@ describe("入口挂在详情里", () => {
 describe("从工作空间入库", () => {
   it("选空间、逐级浏览目录：展开一层才读一层，再展开不重读；换空间后从新空间的根浏览", async () => {
     const fake = withBase();
-    fake.setWorkspaces([
-      { id: "ws-1", name: "项目空间", dir: "project", root: "/srv/ws/project", createdAt: 1 },
-      { id: "ws-2", name: "资料空间", dir: "notes", root: "/srv/ws/notes", createdAt: 2 },
-    ]);
+    fake.setWorkspaces(TWO_SPACES);
     fake.setTree("ws-1", "", [dir("docs"), file("readme.md")]);
     fake.setTree("ws-1", "docs", [dir("sub"), file("a.md")]);
     fake.setTree("ws-1", "docs/sub", [file("deep.pdf")]);
@@ -421,5 +424,164 @@ describe("两个入口共用一个入库结果显示", () => {
     fireEvent.click(within(again).getByRole("button", { name: SUBMIT }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(within(detail).queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("挂载根行（只读挂载同样可入库）", () => {
+  it("在线挂载排在根的条目之后、带「只读」，展开读「<挂载名>」一层，其中文件可勾，提交路径以挂载名开头", async () => {
+    const fake = withBase();
+    fake.setTree("ws-1", "", [dir("notes"), file("a.md")]);
+    fake.setMounts("ws-1", [mount("docs")]);
+    fake.setTree("ws-1", "docs", [file("b.pdf")]);
+    renderPanel(fake);
+    const detail = await openDetail();
+    const dialog = await openIngest(detail);
+
+    const docs = await within(dialog).findByRole("button", { name: "展开 docs" });
+    const names = within(dialog)
+      .getAllByRole("listitem")
+      .map((item) =>
+        item.querySelector("label, button[aria-expanded]")?.textContent?.replace(/[▸▾]/gu, ""),
+      );
+    expect(names).toEqual(["notes", "a.md", "docs"]);
+    expect(docs.closest("li")?.textContent).toContain("只读");
+    expect(fake.listMounts.mock.calls.map(([ws]) => ws)).toEqual(["ws-1"]);
+
+    fireEvent.click(docs);
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: "b.pdf" }));
+    expect(fake.listTree.mock.calls.map(([ws, path]) => [ws, path])).toEqual([
+      ["ws-1", ""],
+      ["ws-1", "docs"],
+    ]);
+    fireEvent.click(within(dialog).getByRole("button", { name: SUBMIT }));
+
+    await waitFor(() => expect(fake.ingestFromWorkspace).toHaveBeenCalledTimes(1));
+    expect(fake.ingestFromWorkspace).toHaveBeenCalledWith("k1", {
+      workspaceId: "ws-1",
+      paths: ["docs/b.pdf"],
+    });
+  });
+
+  it("离线挂载：照样列出并标「离线」，不能展开、不读它的目录，显示离线说明", async () => {
+    const fake = withBase();
+    fake.setTree("ws-1", "", [file("a.md")]);
+    fake.setMounts("ws-1", [mount("cold", { status: "offline", readOnly: false })]);
+    renderPanel(fake);
+    const detail = await openDetail();
+    const dialog = await openIngest(detail);
+
+    expect(await within(dialog).findByText(OFFLINE_NOTE)).toBeTruthy();
+    const row = within(dialog).getByText("cold").closest("li");
+    expect(row?.textContent).toContain("离线");
+    expect(row?.textContent).not.toContain("只读");
+    expect(within(dialog).queryByRole("button", { name: "展开 cold" })).toBeNull();
+    fireEvent.click(within(dialog).getByText("cold"));
+    await act(async () => undefined);
+    expect(fake.listTree.mock.calls.map(([, path]) => path)).toEqual([""]);
+  });
+
+  it("读挂载失败：根下显示信封文案，根的条目照常可勾", async () => {
+    const fake = withBase();
+    fake.setTree("ws-1", "", [file("a.md")]);
+    fake.listMounts.mockRejectedValueOnce(new ApiError(503, "unavailable", "服务暂不可用"));
+    renderPanel(fake);
+    const detail = await openDetail();
+    const dialog = await openIngest(detail);
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("服务暂不可用");
+    fireEvent.click(box(dialog, "a.md"));
+    expect(box(dialog, "a.md").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("换空间后，前一空间晚到的根目录与挂载应答都被丢弃", async () => {
+    const fake = withBase();
+    fake.setWorkspaces(TWO_SPACES);
+    fake.setTree("ws-2", "", [file("fresh.md")]);
+    const lateTree = deferred<Awaited<ReturnType<FakeKb["listTree"]>>>();
+    const lateMounts = deferred<Awaited<ReturnType<FakeKb["listMounts"]>>>();
+    fake.listTree.mockImplementationOnce(() => lateTree.promise);
+    fake.listMounts.mockImplementationOnce(() => lateMounts.promise);
+    renderPanel(fake);
+    const detail = await openDetail();
+    fireEvent.click(within(detail).getByRole("button", { name: INGEST }));
+    const dialog = await screen.findByRole("dialog", { name: INGEST });
+
+    await chooseWorkspace(dialog, "资料空间");
+    expect(await within(dialog).findByRole("checkbox", { name: "fresh.md" })).toBeTruthy();
+    await act(async () => {
+      lateTree.resolve({ path: "", entries: [file("stale.md")] });
+      lateMounts.resolve({ enabled: true, mounts: [mount("stale")] });
+    });
+
+    expect(within(dialog).queryByRole("checkbox", { name: "stale.md" })).toBeNull();
+    expect(within(dialog).queryByText("stale")).toBeNull();
+    expect(box(dialog, "fresh.md")).toBeTruthy();
+  });
+});
+
+describe("工作空间读取失败", () => {
+  it("对话框显示信封文案与「重试」，不说「没有可用的工作空间」；重试后可选空间", async () => {
+    const fake = withBase();
+    fake.setTree("ws-1", "", [file("a.md")]);
+    fake.listWorkspaces.mockRejectedValueOnce(new ApiError(503, "unavailable", "服务暂不可用"));
+    renderPanel(fake);
+    const detail = await openDetail();
+    await waitFor(() => expect(fake.listWorkspaces).toHaveBeenCalledTimes(1));
+    await act(async () => undefined);
+    expect(within(detail).queryByRole("alert")).toBeNull();
+
+    const dialog = await openIngest(detail);
+    expect((await within(dialog).findByRole("alert")).textContent).toBe("服务暂不可用");
+    expect(within(dialog).queryByText("没有可用的工作空间")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "重试" }));
+
+    const space = await within(dialog).findByRole("combobox", { name: "工作空间" });
+    expect(space.textContent).toBe("项目空间");
+    expect(await within(dialog).findByRole("checkbox", { name: "a.md" })).toBeTruthy();
+    expect(fake.listWorkspaces).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("上传与入库不交错", () => {
+  it("一批上传在途时「从工作空间入库」禁用，结束后恢复，上传的结果留着", async () => {
+    const fake = withBase([], {}, { uploadMaxBytes: 10 });
+    const first = deferred<DocumentView>();
+    fake.uploadToKnowledgeBase.mockImplementationOnce(() => first.promise);
+    renderPanel(fake);
+    const detail = await openDetail();
+    const ingest = within(detail).getByRole("button", { name: INGEST }) as HTMLButtonElement;
+
+    chooseFiles(detail, [bytes("big.pdf", 11), bytes("a.md", 3)]);
+    await waitFor(() => expect(fake.uploadToKnowledgeBase).toHaveBeenCalledTimes(1));
+    expect(ingest.disabled).toBe(true);
+    fireEvent.click(ingest);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await act(async () => first.resolve(doc("a", { source: "upload" })));
+    await waitFor(() => expect(ingest.disabled).toBe(false));
+    expect(results(detail)).toEqual([`big.pdf：${TOO_LARGE}`]);
+  });
+
+  it("上传途中换库：中止在途的请求，不发下一个，也不重取原库的文档", async () => {
+    const fake = fakeKb([READY], [base("k1", { name: "规范库" }), base("k2", { name: "手册库" })], {
+      k1: [],
+      k2: [],
+    });
+    const first = deferred<DocumentView>();
+    fake.uploadToKnowledgeBase.mockImplementationOnce(() => first.promise);
+    renderPanel(fake);
+    const detail = await openDetail();
+
+    chooseFiles(detail, [bytes("a.md", 3), bytes("b.md", 3)]);
+    await waitFor(() => expect(fake.uploadToKnowledgeBase).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("cell", { name: "手册库" }));
+    await screen.findByRole("region", { name: "手册库 · 文档" });
+    const signal = fake.uploadToKnowledgeBase.mock.calls[0]?.[2]?.signal;
+    expect(signal?.aborted).toBe(true);
+
+    await act(async () => first.resolve(doc("a", { source: "upload" })));
+    await act(async () => undefined);
+    expect(fake.uploadToKnowledgeBase).toHaveBeenCalledTimes(1);
+    expect(fake.listKbDocuments.mock.calls.filter(([id]) => id === "k1")).toHaveLength(1);
   });
 });

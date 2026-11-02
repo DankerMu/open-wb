@@ -1,6 +1,5 @@
-import { type FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
+import { type FormEvent, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
@@ -10,12 +9,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { type ApiClient, ApiError, type KbIngestResult, REQUEST_FAILED_MESSAGE } from "@/lib/api";
+import type { ApiClient, KbIngestResult } from "@/lib/api";
 import { useEscapeFallback } from "../../../components/escape-fallback.js";
-import { formatSize } from "../../files/index.js";
-
-const ALERT = "m-0 text-xs text-(--wb-status-error-text) [overflow-wrap:anywhere]";
-const MUTED = "m-0 text-xs text-muted-foreground";
+import { ALERT, MUTED, messageOf, WorkspaceFiles } from "./ingest-tree.js";
+import type { WorkspacesView } from "./use-documents.js";
 
 /** 一次入库或上传的结果：整批拒绝的提示，与逐条未入库的文件及其文案。 */
 export type IngestOutcome = {
@@ -46,155 +43,29 @@ export function IngestResults({ outcome }: { outcome: IngestOutcome | null }) {
   );
 }
 
-function messageOf(error: unknown): string {
-  return error instanceof ApiError ? error.message : REQUEST_FAILED_MESSAGE;
-}
-
-type Listing =
-  | { status: "loading" }
-  | { status: "failed"; message: string }
-  | { status: "ready"; entries: Awaited<ReturnType<ApiClient["listTree"]>>["entries"] };
-
-type TreeProps = {
-  client: ApiClient;
-  workspaceId: string;
-  checked: readonly string[];
-  /** 已勾满 `uploadMaxFiles` 个：没勾的文件不可勾。 */
-  full: boolean;
-  onToggle(path: string, on: boolean): void;
-};
-
-const childPath = (parent: string, name: string) => (parent === "" ? name : `${parent}/${name}`);
-
-/**
- * 一个工作空间的目录树：挂载时读根，展开一个目录才读那一层（`listTree`），读到的层不重读，失败的层再展开时重读。
- * 文件行是复选框；目录不可勾（整个目录入库不在本阶段）。调用方按空间 id 设 `key`，换空间即重新挂载。
- */
-function WorkspaceFiles({ client, workspaceId, ...rows }: TreeProps) {
-  // Map 而不是对象：目录名可以是 `constructor` 之类原型上的键。
-  const [listings, setListings] = useState<ReadonlyMap<string, Listing>>(new Map());
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
-  const live = useRef<AbortSignal | null>(null);
-
-  const load = useCallback(
-    (path: string) => {
-      const signal = live.current;
-      const put = (listing: Listing) => {
-        if (signal && !signal.aborted)
-          setListings((current) => new Map(current).set(path, listing));
-      };
-      put({ status: "loading" });
-      client.listTree(workspaceId, path, signal ? { signal } : undefined).then(
-        ({ entries }) => put({ status: "ready", entries }),
-        (error: unknown) => put({ status: "failed", message: messageOf(error) }),
-      );
-    },
-    [client, workspaceId],
-  );
-
-  useEffect(() => {
-    const controller = new AbortController();
-    live.current = controller.signal;
-    load("");
-    return () => controller.abort();
-  }, [load]);
-
-  const toggle = (path: string) => {
-    const open = !expanded.has(path);
-    setExpanded((current) => {
-      const next = new Set(current);
-      if (open) next.add(path);
-      else next.delete(path);
-      return next;
-    });
-    const listing = listings.get(path);
-    if (open && (listing === undefined || listing.status === "failed")) load(path);
-  };
-
-  const level = (path: string) => {
-    const listing = listings.get(path);
-    if (listing === undefined || listing.status === "loading")
-      return <p className={MUTED}>正在读取目录</p>;
-    if (listing.status === "failed") {
-      return (
-        <p className={ALERT} role="alert">
-          {listing.message}
-        </p>
-      );
-    }
-    if (listing.entries.length === 0) return <p className={MUTED}>空目录</p>;
-    return (
-      // biome-ignore lint/a11y/noRedundantRoles: list-none 会让 Safari 丢掉列表语义，显式写回。
-      <ul className="m-0 flex list-none flex-col gap-0.5 p-0" role="list">
-        {listing.entries.map((entry) => {
-          const entryPath = childPath(path, entry.name);
-          return entry.type === "dir" ? (
-            <li key={entryPath}>
-              <button
-                aria-expanded={expanded.has(entryPath)}
-                aria-label={`${expanded.has(entryPath) ? "折叠" : "展开"} ${entry.name}`}
-                className="w-full truncate rounded px-1 py-0.5 text-left text-sm hover:bg-muted"
-                onClick={() => toggle(entryPath)}
-                type="button"
-              >
-                {`${expanded.has(entryPath) ? "▾" : "▸"} ${entry.name}`}
-              </button>
-              {expanded.has(entryPath) ? <div className="pl-4">{level(entryPath)}</div> : null}
-            </li>
-          ) : (
-            <FileRow
-              key={entryPath}
-              name={entry.name}
-              path={entryPath}
-              size={entry.size}
-              {...rows}
-            />
-          );
-        })}
-      </ul>
-    );
-  };
-
-  return level("");
-}
-
-function FileRow({
-  name,
-  path,
-  size,
-  checked,
-  full,
-  onToggle,
-}: Pick<TreeProps, "checked" | "full" | "onToggle"> & {
-  name: string;
-  path: string;
-  size: number;
-}) {
-  const id = useId();
-  const on = checked.includes(path);
+/** 没有可选的工作空间时的说明：读取中、失败（信封文案与 `重试`）或确实没有。 */
+function WorkspacesNote({ workspaces, onRetry }: { workspaces: WorkspacesView; onRetry(): void }) {
+  if (workspaces.status === "loading") return <p className={MUTED}>正在读取工作空间</p>;
+  if (workspaces.status === "ready") return <p className={MUTED}>没有可用的工作空间</p>;
   return (
-    <li className="flex items-center gap-2 px-1 py-0.5">
-      <Checkbox
-        checked={on}
-        disabled={!on && full}
-        id={id}
-        onCheckedChange={(next) => onToggle(path, next === true)}
-      />
-      <Label className="min-w-0 flex-1 truncate font-normal" htmlFor={id}>
-        {name}
-      </Label>
-      <span aria-hidden="true" className="flex-none text-xs text-muted-foreground">
-        {formatSize(size)}
-      </span>
-    </li>
+    <div className="flex flex-wrap items-center gap-2">
+      <p className={ALERT} role="alert">
+        {workspaces.message}
+      </p>
+      <Button onClick={onRetry} size="sm" type="button" variant="outline">
+        重试
+      </Button>
+    </div>
   );
 }
 
 type IngestDialogProps = {
   client: ApiClient;
   baseId: string;
-  /** 当前用户的工作空间，按列表次序；缺省选第一个。 */
-  workspaces: readonly { id: string; name: string }[];
+  /** 当前用户的工作空间（`use-documents.ts` 读的那一次），按列表次序；缺省选第一个。 */
+  workspaces: WorkspacesView;
+  /** 工作空间读取失败时的 `重试`：重读 `listWorkspaces`。 */
+  onRetryWorkspaces(): void;
   /** `GET /api/kb/status` 的 `uploadMaxFiles`。 */
   maxFiles: number;
   restoreFocus(): void;
@@ -211,7 +82,8 @@ type IngestDialogProps = {
 export function IngestDialog({
   client,
   baseId,
-  workspaces,
+  workspaces: spaces,
+  onRetryWorkspaces,
   maxFiles,
   restoreFocus,
   onDone,
@@ -224,6 +96,7 @@ export function IngestDialog({
   /** 在途标记：同一帧里的第二次提交还看不到 `pending` 的重渲染，靠它拦下。 */
   const sending = useRef(false);
   const spaceId = useId();
+  const workspaces = spaces.status === "ready" ? spaces.workspaces : [];
   const workspace = workspaces.find((item) => item.id === chosen) ?? workspaces[0];
   const onOpenChange = (open: boolean) => {
     if (!open && !pending) onCancel();
@@ -311,7 +184,7 @@ export function IngestDialog({
               <p className={MUTED}>{`已选 ${checked.length} / ${maxFiles}`}</p>
             </>
           ) : (
-            <p className={MUTED}>没有可用的工作空间</p>
+            <WorkspacesNote onRetry={onRetryWorkspaces} workspaces={spaces} />
           )}
           {error ? (
             <p className={`${ALERT} rounded-lg bg-destructive/10 px-2.5 py-2`} role="alert">

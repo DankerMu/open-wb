@@ -540,7 +540,7 @@ Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第
   - 组 15 的面板结构与 `api-kb.ts`。
 
   核对结果（#1854，主干 4cf0ff2b）：仓库没有 `api-workspaces.ts`，工作空间列表与目录列举是 `web/src/lib/api-files.ts` 的 `listWorkspaces`（`:386`）与 `listTree`（`:444`），文件页树组件是 `web/src/features/files/tree.tsx` 的 `DirectoryTree`（`:520`），16.4–16.5 按此取用；`api-upload.ts` 在（`createUploadMethods`，`:52`）；组 15 的 `kb/{panel,list,use-kb,create-dialog,templates}` 与 `api-kb.ts` 的十三个方法如 15.3 所述。16.0 已随 #1889 合入（`remove-dialog.tsx`）；本切片的 `移出` 按 spec 不弹确认框（409 时行内显示、行仍在），没有用到它。
-  复核（#1855，主干 efaedc7b）：上列位置不变（`listWorkspaces` `:386`、`listTree` `:444`、`DirectoryTree` `:520`、`createUploadMethods` `:52`）。`DirectoryTree` 的文件行是带拖放、行菜单与标记的选择按钮，目录请求由 `directory-loader.ts` 注入八个引用与写函数；改成复选要动它的行语义，16.5 因此在 `ingest-dialog.tsx` 里写了只读 `listTree` 的最小逐级树。上传上限只在 `KbStatus`（`uploadMaxBytes` / `uploadMaxFiles`）里，S1g 的上传没有可复用的上限来源（附件读的是会话合同的 `upload`）。根目录的 `tree` 不列挂载点（D21），对话框也不列挂载根行：挂载内的文件服务端可入库，但本切片的界面到不了，留待后续。
+  复核（#1855，主干 efaedc7b）：上列位置不变（`listWorkspaces` `:386`、`listTree` `:444`、`DirectoryTree` `:520`、`createUploadMethods` `:52`）。`DirectoryTree` 的文件行是带拖放、行菜单与标记的选择按钮，目录请求由 `directory-loader.ts` 注入八个引用与写函数；改成复选要动它的行语义，16.5 因此在 `ingest-dialog.tsx` 里写了只读 `listTree` 的最小逐级树。上传上限只在 `KbStatus`（`uploadMaxBytes` / `uploadMaxFiles`）里，S1g 的上传没有可复用的上限来源（附件读的是会话合同的 `upload`）。根目录的 `tree` 不列挂载点（D21），对话框因此另读 `listMounts`，按文件页「挂载根行」的写法把挂载排在根的条目之后：在线的可展开、其中文件的路径以挂载名开头，离线的列出但不能展开，读挂载失败时根下显示信封文案（design 决策 15「工作空间（含只读挂载）」）。树在 `kb/ingest-tree.tsx`。
 - [x] 16.2 测试先行（首刀）：新 `web/test/center-kb-detail.test.tsx`。
   - 点行进入详情：渲染 `panel.tsx`，从列表行走到详情；
   - 「解析中自动刷新」：假时钟；页面隐藏时停；`unparsed` 不触发刷新；
@@ -554,7 +554,7 @@ Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第
   - 入库对话框：选空间、浏览目录、勾选上限、提交恰一次、被拒条目逐条显示 `message`（含 `unsupported_type` 与 `empty` 的文案）；成功后重取一次文档列表，`queued` 进入 3 秒刷新；
   - 上传：超数与超大在客户端就地拒绝，逐个请求；400 `kb_file_unsupported` 逐个显示信封文案，其余文件继续；
   - 非 `ready` 时 `从工作空间入库` 与 `上传文件` 不渲染（knowledge-bases「中心「知识库」tab」）。
-- [x] 16.5 实现（剩余部分）：新 `web/src/features/center/kb/{ingest-dialog.tsx,upload-button.tsx}`；改 `detail.tsx`，两个入口挂在详情里。（上传上限经 `panel.tsx` 把已读到的 `KbStatus` 传给详情；成功后的重取是 `use-documents.ts` 新增的 `refetch`，#1855）
+- [x] 16.5 实现（剩余部分）：新 `web/src/features/center/kb/{ingest-dialog.tsx,upload-button.tsx}`；改 `detail.tsx`，两个入口挂在详情里。（上传上限经 `panel.tsx` 把已读到的 `KbStatus` 传给详情；成功后的重取是 `use-documents.ts` 新增的 `refetch`；一批上传在途时 `从工作空间入库` 禁用；工作空间表读取失败时对话框显示信封文案与 `重试`，#1855）
 - [x] 16.6 验收清单（各随所在切片的 PR），结论 `待签`：
   - CK-05 从工作空间入库后看到解析中，并自动变为已切片；（#1855）
   - CK-06 本地上传入库；（#1855）

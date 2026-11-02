@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ApiClient, ApiError, type DocumentView, REQUEST_FAILED_MESSAGE } from "@/lib/api";
 
 /**
@@ -13,11 +13,18 @@ import { type ApiClient, ApiError, type DocumentView, REQUEST_FAILED_MESSAGE } f
  * - 两者失败（含 409 `kb_document_busy`）都在该行内显示信封文案，行不变；行内错误跨刷新保留，该行下一次操作时清掉。
  * - 只采用最后一次读取的结果：卸载与每次读取都递增序号，丢弃在途的旧应答；移出之前发出、之后到达的应答里去掉
  *   已移出的行。
- * - 工作空间名只用于来源列；读取失败或不在列表里时来源列只显示路径。
+ * - 工作空间表：来源列取其中的名字，读取失败或不在列表里时只显示路径；`从工作空间入库` 用它选空间，读取失败时
+ *   对话框显示信封文案与 `重试`（`retryWorkspaces`），不在详情里报错。
  */
 
 const REFRESH_MS = 3_000;
 const REFRESHING: ReadonlySet<DocumentView["status"]> = new Set(["queued", "parsing"]);
+
+/** 当前用户的工作空间：读取中、读取失败（信封文案）或已读到。 */
+export type WorkspacesView =
+  | { status: "loading" }
+  | { status: "failed"; message: string }
+  | { status: "ready"; workspaces: readonly { id: string; name: string }[] };
 
 type DocumentsView =
   | { status: "loading" }
@@ -42,7 +49,8 @@ export function useKbDocuments(
   onCount: (count: number) => void,
 ) {
   const [view, setView] = useState<DocumentsView>({ status: "loading" });
-  const [spaces, setSpaces] = useState<ReadonlyMap<string, string>>(new Map());
+  const [workspaces, setWorkspaces] = useState<WorkspacesView>({ status: "loading" });
+  const spacesSequence = useRef(0);
   const [rowErrors, setRowErrors] = useState<Readonly<Record<string, string>>>({});
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const sequence = useRef(0);
@@ -75,18 +83,38 @@ export function useKbDocuments(
     };
   }, [load]);
 
-  useEffect(() => {
-    let live = true;
+  const readWorkspaces = useCallback(() => {
+    const own = ++spacesSequence.current;
+    setWorkspaces({ status: "loading" });
     client.listWorkspaces().then(
-      ({ workspaces }) => {
-        if (live) setSpaces(new Map(workspaces.map((item) => [item.id, item.name])));
+      ({ workspaces: listed }) => {
+        const ready = listed.map(({ id, name }) => ({ id, name }));
+        if (own === spacesSequence.current) setWorkspaces({ status: "ready", workspaces: ready });
       },
-      () => undefined,
+      (error: unknown) => {
+        if (own === spacesSequence.current) {
+          setWorkspaces({ status: "failed", message: messageOf(error) });
+        }
+      },
     );
-    return () => {
-      live = false;
-    };
   }, [client]);
+
+  useEffect(() => {
+    readWorkspaces();
+    return () => {
+      spacesSequence.current += 1;
+    };
+  }, [readWorkspaces]);
+
+  const spaces = useMemo<ReadonlyMap<string, string>>(
+    () =>
+      new Map(
+        workspaces.status === "ready"
+          ? workspaces.workspaces.map(({ id, name }) => [id, name])
+          : [],
+      ),
+    [workspaces],
+  );
 
   useEffect(() => {
     if (view.status === "ready") countRef.current(view.documents.length);
@@ -135,6 +163,10 @@ export function useKbDocuments(
   return {
     view,
     spaces,
+    /** `从工作空间入库` 的空间表：读取中、失败（信封文案）或已读到。 */
+    workspaces,
+    /** 空间表读取失败时的 `重试`。 */
+    retryWorkspaces: readWorkspaces,
     rowErrors,
     pending,
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { type ApiClient, ApiError, REQUEST_FAILED_MESSAGE } from "@/lib/api";
 import type { IngestOutcome } from "./ingest-dialog.js";
@@ -46,6 +46,9 @@ type UploadButtonProps = {
   onOutcome(outcome: IngestOutcome): void;
   /** 这一批至少一个文件上传成功：调用方重取一次文档列表。 */
   onUploaded(): void;
+  /** 一批上传在途：按钮禁用；调用方据此禁用 `从工作空间入库`，两个入口的结果不互相覆盖。 */
+  busy: boolean;
+  onBusy(busy: boolean): void;
 };
 
 /**
@@ -61,9 +64,10 @@ export function UploadButton({
   maxBytes,
   onOutcome,
   onUploaded,
+  busy,
+  onBusy,
 }: UploadButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
   const running = useRef(false);
   const live = useRef(new AbortController());
   useEffect(() => {
@@ -84,7 +88,7 @@ export function UploadButton({
       .map((item) => ({ name: item.name, message: TOO_LARGE }));
     onOutcome({ notice: null, failures: [...failures] });
     running.current = true;
-    setBusy(true);
+    onBusy(true);
     const accepted = files.filter((item) => item.size <= maxBytes);
     const uploaded = await uploadInTurn(client, baseId, accepted, signal, (failure) => {
       failures.push(failure);
@@ -92,7 +96,7 @@ export function UploadButton({
     });
     if (signal.aborted) return;
     running.current = false;
-    setBusy(false);
+    onBusy(false);
     if (uploaded) onUploaded();
   }
 

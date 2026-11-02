@@ -17,7 +17,8 @@ type UploadLimits = Pick<Extract<KbStatus, { enabled: true }>, "uploadMaxFiles" 
  * `<库名> · 文档` 的区域，内容是两个入库入口与文档表；读取失败显示信封文案与 `重试`。调用方按库 id 设 `key`，换库即
  * 重新挂载。移出成功后行按钮已不在，焦点落到标题。
  *
- * `从工作空间入库` 与 `上传文件` 只在知识库 `ready` 时渲染，共用一处入库结果；两者成功后重取一次文档列表，写端点返回的
+ * `从工作空间入库` 与 `上传文件` 只在知识库 `ready` 时渲染，共用一处入库结果；一批上传在途时 `从工作空间入库` 禁用
+ *（对话框是模态的，打开时也点不到 `上传文件`），两者因此不会交错改写结果。两者成功后重取一次文档列表，写端点返回的
  * `queued` 由此进入 3 秒刷新。
  */
 export function KnowledgeBaseDetail({
@@ -37,6 +38,7 @@ export function KnowledgeBaseDetail({
   const titleRef = useRef<HTMLHeadingElement>(null);
   const ingestRef = useRef<HTMLButtonElement>(null);
   const [ingesting, setIngesting] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [outcome, setOutcome] = useState<IngestOutcome | null>(null);
 
   return (
@@ -51,7 +53,7 @@ export function KnowledgeBaseDetail({
       </h3>
       {base.state === "ready" ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => setIngesting(true)} ref={ingestRef} size="sm">
+          <Button disabled={uploading} onClick={() => setIngesting(true)} ref={ingestRef} size="sm">
             从工作空间入库
           </Button>
           <UploadButton
@@ -59,6 +61,8 @@ export function KnowledgeBaseDetail({
             client={client}
             maxBytes={limits.uploadMaxBytes}
             maxFiles={limits.uploadMaxFiles}
+            busy={uploading}
+            onBusy={setUploading}
             onOutcome={setOutcome}
             onUploaded={docs.refetch}
           />
@@ -93,6 +97,7 @@ export function KnowledgeBaseDetail({
           client={client}
           maxFiles={limits.uploadMaxFiles}
           onCancel={() => setIngesting(false)}
+          onRetryWorkspaces={docs.retryWorkspaces}
           onDone={({ rejected }) => {
             setIngesting(false);
             setOutcome({
@@ -102,7 +107,7 @@ export function KnowledgeBaseDetail({
             docs.refetch();
           }}
           restoreFocus={() => ingestRef.current?.focus()}
-          workspaces={[...docs.spaces].map(([id, name]) => ({ id, name }))}
+          workspaces={docs.workspaces}
         />
       ) : null}
     </section>

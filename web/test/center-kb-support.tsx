@@ -13,6 +13,7 @@ import {
   type IngestFromWorkspaceInput,
   type KbIngestResult,
   type KbStatus,
+  type MountView,
 } from "../src/lib/api.js";
 import "./radix-platform.js";
 
@@ -73,6 +74,22 @@ export const file = (name: string, size = 12): TreeEntry => ({
   mtime: 1,
 });
 
+/** 一个挂载：缺省是在线、只读的 sftp 挂载。 */
+export const mount = (name: string, patch: Partial<MountView> = {}): MountView => ({
+  id: `m-${name}`,
+  name,
+  backend: "sftp",
+  host: "files.example",
+  port: null,
+  remotePath: "/srv",
+  sourceId: null,
+  sourceName: null,
+  readOnly: true,
+  status: "online",
+  createdAt: 1,
+  ...patch,
+});
+
 /** 缺省的工作空间表：`ws-1` 名为「项目空间」。 */
 const WORKSPACES: readonly Workspace[] = [
   { id: "ws-1", name: "项目空间", dir: "project", root: "/srv/ws/project", createdAt: 1 },
@@ -96,6 +113,8 @@ export function fakeKb(
   let workspaces = [...WORKSPACES];
   /** `<workspaceId>:<path>` → 该层的条目；没有登记的层是空目录。 */
   const trees = new Map<string, TreeEntry[]>();
+  /** 工作空间 → 它的挂载；没有登记的空间没有挂载。 */
+  const mounts = new Map<string, MountView[]>();
   let created = 0;
   /** 写端点的 201 视图不读 RAGFlow：`queued`，`chunkCount` 与 `message` 为 null。 */
   const queued = (baseId: string, patch: Partial<DocumentView>): DocumentView => {
@@ -150,6 +169,10 @@ export function fakeKb(
       calls.push(["listTree", workspaceId, path]);
       return { path, entries: (trees.get(`${workspaceId}:${path}`) ?? []).map((e) => ({ ...e })) };
     }),
+    listMounts: vi.fn(async (workspaceId: string) => {
+      calls.push(["listMounts", workspaceId]);
+      return { enabled: true, mounts: (mounts.get(workspaceId) ?? []).map((m) => ({ ...m })) };
+    }),
     /** 每条路径都入库（被拒的条目由用例以 `mockImplementationOnce` 给出）。 */
     ingestFromWorkspace: vi.fn(
       async (baseId: string, input: IngestFromWorkspaceInput): Promise<KbIngestResult> => {
@@ -161,17 +184,19 @@ export function fakeKb(
         return { documents: added, rejected: [] };
       },
     ),
-    uploadToKnowledgeBase: vi.fn(async (baseId: string, file: File) => {
-      calls.push(["uploadToKnowledgeBase", baseId, file.name]);
-      return queued(baseId, {
-        name: file.name,
-        size: file.size,
-        source: "upload",
-        workspaceId: null,
-        path: null,
-        sourceChanged: null,
-      });
-    }),
+    uploadToKnowledgeBase: vi.fn(
+      async (baseId: string, file: File, _options?: { signal?: AbortSignal }) => {
+        calls.push(["uploadToKnowledgeBase", baseId, file.name]);
+        return queued(baseId, {
+          name: file.name,
+          size: file.size,
+          source: "upload",
+          workspaceId: null,
+          path: null,
+          sourceChanged: null,
+        });
+      },
+    ),
     listKbDocuments: vi.fn(async (baseId: string) => {
       calls.push(["listKbDocuments", baseId]);
       return docsOf(baseId).map((item) => ({ ...item }));
@@ -214,7 +239,11 @@ export function fakeKb(
   const setTree = (workspaceId: string, path: string, entries: readonly TreeEntry[]) => {
     trees.set(`${workspaceId}:${path}`, [...entries]);
   };
-  return { client, calls, setDocuments, setWorkspaces, setTree, ...methods };
+  /** 登记工作空间 `workspaceId` 的挂载。 */
+  const setMounts = (workspaceId: string, list: readonly MountView[]) => {
+    mounts.set(workspaceId, [...list]);
+  };
+  return { client, calls, setDocuments, setWorkspaces, setTree, setMounts, ...methods };
 }
 
 export type FakeKb = ReturnType<typeof fakeKb>;
