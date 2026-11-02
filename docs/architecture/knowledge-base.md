@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 12：本地上传。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13 首刀：移出文档。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -223,7 +223,7 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 3. 每 500 ms 重发删除，至多 5 s。`deleted:1` 或不存在：完成。不可达或被拒：立即 `failed`。
 4. 到期仍是 `deleted:0`：`busy`。
 
-入库的补偿删除走这个写法，`failed`、`busy` 都只写一行 `kb_document_leak`，不改变该条的结果。这个函数不碰本地行。
+入库的补偿删除走这个写法，`failed`、`busy` 都只写一行 `kb_document_leak`，不改变该条的结果。移出按结果映射应答（见下面的「移出文档」）。这个函数不碰本地行。
 
 | 记录 | 何时写 | 补救 |
 |---|---|---|
@@ -284,3 +284,22 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 | 大小与修改时间都和入库记录相同 | `false` |
 | 任一不同，文件已不存在，或已不是普通文件 | `true` |
 | 解析被拒（含路径上的符号链接）、工作空间不可见、挂载离线 | `null` |
+
+**移出文档**（`server/src/kb/documents.ts`，组 13 首刀）：`DELETE /api/kb/bases/:id/documents?doc=<文档 id>`，`doc` 是本地文档 id，带 `Cache-Control: no-store`。不读 body，不读沙箱，源文件不动。取锁之前依次判定，都不发出站请求、不写审计：
+
+| 判定 | 应答 |
+|---|---|
+| 别人的或不存在的知识库 id（先于 body 与 `doc`） | 404 `not_found` |
+| `doc` 缺失、为空或多值 | 400 `bad_request` |
+| `state` 为 `rebuilding`，或写锁正被重建器持有（不排队）；`rebuild_failed` 照常移出 | 409 `kb_rebuilding` |
+| `doc` 不是这个库的文档 | 404 `not_found` |
+
+之后在该库的写锁下重判库、`state` 与文档行，按上面的删除写法删当前数据集里的 RAGFlow 文档，用锁内读到的 RAGFlow 文档 id：
+
+| 删除写法的结果 | 应答 | 本地行 |
+|---|---|---|
+| 已删，含「不存在」（`code:102` 加 `These documents do not belong to dataset` 前缀，或数据集不存在） | 204 | 删除，同一事务写 `kb.document_delete` |
+| `busy`：到期仍是 `deleted:0` | 409 `kb_document_busy`，稍后再试 | 不动 |
+| `failed` | 不可达 503 `kb_unavailable`，被拒 400 `kb_rejected` | 不动 |
+
+审计：`kb.document_delete` 的 detail 恰为 `{id, documentId}`，`documentId` 是本地文档 id；工作空间来源的文档 `workspace_id` 列是该工作空间，上传来源是 null。

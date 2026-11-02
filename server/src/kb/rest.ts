@@ -21,7 +21,8 @@
  * 带坏 body 也是 404。
  *
  * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
- * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。
+ * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。`DELETE …/documents?doc=<文档 id>`（移出）同删库的写法：
+ * 不读 body、不在归属集，成功 204，业务同在 `kb/documents.ts`。
  *
  * `POST …/uploads` 同 `POST /api/workspaces/:id/uploads` 的写法：独立 scope，只认 `application/octet-stream`，请求流原样交出，
  * 没有框架的 body 上限，别的媒体类型是 parser 错误（归属集，400）。所有权判定先于这一切，一个字节都不读。失败的上传一律关
@@ -218,6 +219,16 @@ export function registerKbRoutes(
       const { id } = request.params;
       const result = await enabled().documents.ingest(id, request.body, principalOf(request).id);
       return reply.code(201).send(result);
+    },
+  );
+
+  app.delete<BaseParams>(
+    DOCUMENTS_ROUTE,
+    { onRequest: noStore, preParsing: ownedBase },
+    async (request, reply) => {
+      const { id } = request.params;
+      await enabled().documents.remove(id, request.query, principalOf(request).id);
+      return reply.code(204).send();
     },
   );
 

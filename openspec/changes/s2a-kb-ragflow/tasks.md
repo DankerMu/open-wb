@@ -434,8 +434,8 @@ Minimal mergeable slice: atomic - 一条路由，与工作空间上传同一写�
 
 ## 13. 移出与重新入库（knowledge-bases「重新入库与移出」）
 
-- [ ] 13.1 核对 Context：组 10 的 `source-file.ts`、读取与上传链路、文档删除写法；组 1 的 §8.5 与表 B 的文档一节。
-- [ ] 13.2 测试先行（首刀，移出）：新 `server/test/kb-documents-remove.test.ts`。
+- [x] 13.1 核对 Context：组 10 的 `source-file.ts`、读取与上传链路、文档删除写法；组 1 的 §8.5 与表 B 的文档一节。
+- [x] 13.2 测试先行（首刀，移出）：新 `server/test/kb-documents-remove.test.ts`。
   - 「移出不动源文件」；
   - 「移出解析中的文档」「停不下来的文档」：`deleted:0` 时不删本地行，409 `kb_document_busy`；
   - 「停止已在 STOPPING 的文档」「停止解析的其余结果」「重试期间不可达」；
@@ -447,7 +447,7 @@ Minimal mergeable slice: atomic - 一条路由，与工作空间上传同一写�
   - 审计哨兵（knowledge-bases「detail 不含敏感内容」的移出一腿）。
 
   路由加进 `kb-disabled.test.ts`。
-- [ ] 13.3 实现（首刀）：`kb/documents.ts` 加 remove（经该库写锁，复用组 10 的删除写法）；`kb/rest.ts` 加 `DELETE /api/kb/bases/:id/documents`。
+- [x] 13.3 实现（首刀）：`kb/documents.ts` 加 remove（经该库写锁，复用组 10 的删除写法）；`kb/rest.ts` 加 `DELETE /api/kb/bases/:id/documents`。
 - [ ] 13.4 测试先行（剩余部分，重新入库）：新 `server/test/kb-documents-reingest.test.ts`。
   - 「重新入库」（200，`status:"queued"`、`sourceChanged:false`，没有文档列表请求）「源不可读」「重新入库时旧文档在解析」；
   - 「文档路由的所有权」的 `POST …/documents/reingest` 一腿；
