@@ -2,6 +2,7 @@
 // Project branches live here so the journey in ui-walk.spec.ts stays a single path.
 
 import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
+import { expectCenterRoute } from "./ui-walk-center.js";
 import { isExpectedUnauthorizedNetworkLog } from "./ui-walk-oracle.js";
 
 export const DEV_ACCOUNT = "zhangsan";
@@ -510,19 +511,7 @@ export async function expectAuthenticatedRoute(
       workspacePage.getByRole("heading", { level: 2, name: "工作空间目录", exact: true }),
     ).toBeVisible();
   }
-  if (path === "/center") {
-    // 成员账号：落到「专家」tab（tab 条为「专家」「技能」），内置专家卡可见，不再是空态。
-    await expect.poll(() => new URL(page.url()).search).toBe("?tab=experts");
-    const main = page.locator("main");
-    await expect(main.getByRole("tab", { name: "专家", exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    const card = main.getByRole("listitem", { name: "前端架构师", exact: true });
-    await expect(card).toBeVisible();
-    await expect(card.getByText("内置", { exact: true })).toBeVisible();
-    await expect(main.getByText("中心暂无可用内容", { exact: true })).toHaveCount(0);
-  }
+  if (path === "/center") await expectCenterRoute(page);
   await expectRouteLayout(page, project);
   await inspectSidebar(page, project, async (sidebar) => {
     const navigation = sidebar.getByRole("navigation", { name: "主导航" });

@@ -587,9 +587,11 @@ Minimal mergeable slice: atomic - 一段表单与它的确认框，一个组件�
 - [ ] 18.1 核对 Context：
   - Makefile 的 `smoke-live` 写法与 `.PHONY`；
   - `smoke/fixtures/README.md` 与夹具复制脚本，以及现有 hurl 与 ui-walk 对 `u1/` 下工作空间列表的断言（新增工作空间目录是否影响它们）；
-  - `web/e2e/ui-walk-layout.ts` 的 `/center` 分支；
+  - `web/e2e/ui-walk-layout.ts` 的 `/center` 分支（#1858 已核对，见下）；
   - `AGENTS.md` 验证矩阵与 Enforcement Index、`constraints.yaml` 的 verification 段；
   - `scripts/test-ci-harness.sh` 对 Makefile 目标、`.PHONY` 与 surface 数的同步检查。
+
+  ui-walk 子项核对结果（#1858，主干 7102b893）：`/center` 分支在 `ui-walk-layout.ts:513`，只由 `ui-walk.spec.ts` 的 ROUTES 循环（点主导航进入）走到；成员可见的 tab 是「专家」「技能」「连接器」三项（连接器 `adminOnly:false`），不是两项；状态在途与读到关闭时 tab 条相同，所以 18.4 以深链 `?tab=knowledge-bases` 被 replace 到 `?tab=experts` 作为状态已读到的信号。`ui-walk-layout.ts` 已 802 行，分支移到新 `web/e2e/ui-walk-center.ts`，layout 回到 ≤800。
 - [ ] 18.2 测试先行（首刀）：`scripts/test-ci-harness.sh`。
   - 期望改为十一个 surface、五个同名 target，`smoke-kb` 的 Enforcement 为 `review-only`、`required_at: manual`；
   - 加 `smoke-kb` 的 spaced duplicate 变异，以及「`smoke-kb` 缺登记即非零」一例；
@@ -599,7 +601,7 @@ Minimal mergeable slice: atomic - 一段表单与它的确认框，一个组件�
   - 新夹具工作空间 `smoke/fixtures/sandbox/u1/smoke-kb/`（一个小 Markdown 文件与一个小 PDF 文件，自制，无第三方版权），同步 `smoke/fixtures/README.md`，写明前提：调用方已把夹具复制到服务的 `SANDBOX_ROOT/u1`，`make smoke-kb` 不替它复制；
   - Makefile 加 `smoke-kb`：两步前置检测；hurl 前后的清理；轮询上限变量 `SMOKE_KB_POLL_SECONDS`（缺省 300）；登录方式同 `smoke/chat.hurl`；
   - `AGENTS.md`、`constraints.yaml`、`.PHONY` 同步登记。
-- [ ] 18.4 `make ui-walk` 的 `/center` 分支：知识库关闭（CI 的缺省配置）时 tab 条不含 `知识库`。
+- [x] 18.4 `make ui-walk` 的 `/center` 分支：知识库关闭（CI 的缺省配置）时 tab 条不含 `知识库`。
 - [ ] 18.5 收口：
   - `docs/architecture/system.md` §9.13 收口（部署要求、回滚、`smoke-kb`）；§6.2 摄取流按最终实现补细节（逐条解析、拒绝原因）；
   - 验收清单 CK 节复核，并新增两行（结论 `待签`，由 owner 执行）：
