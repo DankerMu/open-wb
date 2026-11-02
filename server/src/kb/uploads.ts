@@ -7,11 +7,14 @@
  * 上限。`state` 判定到取锁之间没有 `await`（D20）。
  *
  * 持锁依次：重判库与 `state` → 500 上限 → 上传 → 解析触发 → 同事务插行与 `kb.ingest`。上限只在锁内数：并发的上传排队，后到的
- * 数到先到的那一行。排队期间请求体留在 socket 上，轮到时连接已断就什么都不发：断开之后的请求永远不会结束，出站要等空闲期限，
- * 这段时间锁一直被占着。
+ * 数到先到的那一行。排队期间请求体留在 socket 上。已察觉连接断开的什么都不发：断开之后的请求永远不会结束，出站要等空闲期限，
+ * 这段时间锁一直被占着。socket 已停读时（请求体大过 Node 的读缓冲）看不到断开，要读到才察觉，这时走中止，不留文档。
+ *
+ * 写锁的持有时长不能由客户端决定（D11）：重建器排在在途写操作之后，一个滴发的上传能拖住重建，而滴发一直续着出站的空闲期限。
+ * 所以读请求体有总期限，从取到写锁起算，排队时间不算，到期按短体处理。请求不销毁，400 才发得出去。
  *
  * 上传的失败：
- * - 请求体没读全（客户端断开或短体）：先问 `sourceFailure()`，这时 `uploadDocument` 只知道请求体坏了，回 `kb_unavailable`。
+ * - 请求体没读全（客户端断开、短体或超过期限）：先问 `sourceFailure()`，这时 `uploadDocument` 只知道请求体坏了，回 `kb_unavailable`。
  *   中断的上传不留文档（§7.2），不发删除，不写审计，应答 400（断开时没有人收）。
  * - `unsupported_file`：400 `kb_file_unsupported`，审计 `unsupported_type`。
  * - `kb_rejected`：400。`kb_unavailable`、`not_found`（数据集没了）：503。都没有文档要删，不写审计：`kb.ingest_reject` 的
@@ -41,6 +44,9 @@ import type { createKbStore, KnowledgeBase } from "./store.js";
 import { acceptsFile } from "./templates.js";
 
 const DECIMAL = /^[0-9]+$/u;
+/** 读请求体的总期限（D11）：`max(下限, Content-Length ÷ 速度)`。 */
+const BODY_DEADLINE_FLOOR_MS = 60_000;
+const BODY_BYTES_PER_SECOND = 64 * 1024;
 
 const UPLOAD_FAILURES = {
   kb_rejected: "kb_rejected",
@@ -54,6 +60,11 @@ const PARSE_FAILURES = {
   kb_unavailable: "kb_unavailable",
   not_found: "kb_unavailable",
 } as const;
+
+export interface UploadBodyDeadline {
+  floorMs: number;
+  bytesPerSecond: number;
+}
 
 interface AuditEvent {
   kind: "kb.ingest" | "kb.ingest_reject";
@@ -75,6 +86,7 @@ interface KbUploadsDependencies {
   log: (record: KbDocumentRecord) => void;
   uploadMaxBytes: number;
   removalTiming?: DocumentRemovalTiming | undefined;
+  bodyDeadline?: UploadBodyDeadline | undefined;
 }
 
 /** 路由交下来的请求。 */
@@ -116,12 +128,31 @@ function declaredLength(headers: IncomingHttpHeaders): number {
   return Number(length);
 }
 
+export function bodyDeadlineMs(
+  size: number,
+  { floorMs, bytesPerSecond }: UploadBodyDeadline = {
+    floorMs: BODY_DEADLINE_FLOOR_MS,
+    bytesPerSecond: BODY_BYTES_PER_SECOND,
+  },
+): number {
+  return Math.max(floorMs, Math.ceil((size * 1000) / bytesPerSecond));
+}
+
 /**
  * 请求隔一层再交给 `multipartUpload`：它在出站结束时销毁源，而销毁没读完的请求会带走连接，早应答（RAGFlow 不可达、提前拒绝）
  * 就发不出去。`pipe` 不传播销毁，这一层销毁时只是解除管道。反方向要自己传：断开的请求只 `close`，不 `end`。
+ *
+ * 期限同样只销毁这一层：`multipartUpload` 记下源的失败，结束边界不发。读完、断开、早应答都以这一层 `close` 收尾，定时器在那里清。
  */
-function detachedSource(request: Readable): Readable {
+function detachedSource(request: Readable, deadlineMs: number): Readable {
   const source = new PassThrough();
+  const deadline = setTimeout(() => {
+    source.destroy(new Error("request body deadline expired"));
+  }, deadlineMs);
+  deadline.unref();
+  source.once("close", () => {
+    clearTimeout(deadline);
+  });
   request.once("close", () => {
     if (!request.readableEnded) {
       source.destroy(new Error("request closed before its end"));
@@ -132,7 +163,7 @@ function detachedSource(request: Readable): Readable {
 }
 
 export function createKbUploads(dependencies: KbUploadsDependencies) {
-  const { store, client, locks, audit, uploadMaxBytes } = dependencies;
+  const { store, client, locks, audit, uploadMaxBytes, bodyDeadline } = dependencies;
 
   /** 写一条 `kb.ingest_reject`，返回要抛的错误。 */
   function rejected(
@@ -198,7 +229,8 @@ export function createKbUploads(dependencies: KbUploadsDependencies) {
 
   async function transfer(incoming: Incoming, datasetId: string): Promise<DocumentView> {
     const { name, size, request } = incoming;
-    const upload = multipartUpload({ name, size, source: detachedSource(request) });
+    const source = detachedSource(request, bodyDeadlineMs(size, bodyDeadline));
+    const upload = multipartUpload({ name, size, source });
     const uploaded = await client.uploadDocument(datasetId, upload);
     if (uploaded.kind === "ok") {
       return parseAndRecord(incoming, datasetId, uploaded.value.id);

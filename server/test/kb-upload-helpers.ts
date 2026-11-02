@@ -1,5 +1,5 @@
 /**
- * `kb-upload.test.ts` 的请求（s2a-kb-ragflow tasks 12.2，#1849）。世界是 `kb-ingest-helpers.ts` 的世界：`createApp`、真实 SQLite、
+ * `kb-upload*.test.ts` 的请求（s2a-kb-ragflow tasks 12.2，#1849）。世界是 `kb-ingest-helpers.ts` 的世界：`createApp`、真实 SQLite、
  * 假 RAGFlow。上传经 `app.inject()`，请求体用 Buffer。注入的请求没有 socket，所以连接层的行为（客户端断开、分块传输、早应答
  * 能不能发到客户端）走回环端口上的裸 socket，写法同 `workspace-upload-helpers.ts`：请求头与已发的字节一次写出。
  */

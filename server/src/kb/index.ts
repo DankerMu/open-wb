@@ -27,7 +27,7 @@ import { registerKbRoutes } from "./rest.js";
 import { createKbSettings } from "./settings.js";
 import { createSourceFiles } from "./source-file.js";
 import { createKbStore } from "./store.js";
-import { createKbUploads } from "./uploads.js";
+import { createKbUploads, type UploadBodyDeadline } from "./uploads.js";
 
 /** 这个模块写到受管 stderr writer 的记录。 */
 export type KbRecord =
@@ -56,6 +56,8 @@ export interface KbDependencies {
   locks?: ReturnType<typeof createKbLocks>;
   /** RAGFlow 文档删除的重发节奏（测试注入短期限）；省略时每 500 ms、至多 5 s（D13）。 */
   documentDelete?: DocumentRemovalTiming;
+  /** 本地上传读请求体的总期限（测试注入短期限）；省略时每秒 64 KiB、不少于 60 s（D11）。 */
+  uploadBodyDeadline?: UploadBodyDeadline;
   /** 测试缝：源文件 `fstat` 之后、读取之前调用；生产不传。 */
   onSourceStat?: (absPath: string) => void;
 }
@@ -74,6 +76,7 @@ export function registerKb(
     probeDeadlines,
     locks = createKbLocks(),
     documentDelete,
+    uploadBodyDeadline,
     onSourceStat,
     ...clientOptions
   } = dependencies;
@@ -122,6 +125,7 @@ export function registerKb(
       log,
       uploadMaxBytes,
       removalTiming: documentDelete,
+      bodyDeadline: uploadBodyDeadline,
     }),
   });
   return settings.guardModelWrite;

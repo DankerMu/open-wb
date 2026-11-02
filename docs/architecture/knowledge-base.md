@@ -244,11 +244,11 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `Content-Length` 为 0 | 400 `kb_file_unsupported` | `empty` |
 | `state` 不是 `ready` | 409 `kb_rebuilding` | 不写 |
 
-之后在该库的写锁下：重判库与 `state`；已有 500 份时 409 `kb_limit`，审计 `limit`；排队期间连接已断的什么都不发；然后上传、触发解析、同事务插行与 `kb.ingest`，应答 201 `DocumentView`，不读 RAGFlow：`source` 为 `upload`，`workspaceId`、`path`、`sourceChanged` 为 `null`，`status` 为 `queued`，`chunkCount`、`message` 为 `null`。
+之后在该库的写锁下：重判库与 `state`；已有 500 份时 409 `kb_limit`，审计 `limit`；排队期间已察觉连接断开的什么都不发，socket 已停读时要读到才察觉，这时走中止，不留文档；然后上传、触发解析、同事务插行与 `kb.ingest`，应答 201 `DocumentView`，不读 RAGFlow：`source` 为 `upload`，`workspaceId`、`path`、`sourceChanged` 为 `null`，`status` 为 `queued`，`chunkCount`、`message` 为 `null`。
 
 | 结果 | 应答 | 删除刚上传的文档 |
 |---|---|---|
-| 客户端断开或短体 | 中止出站，400 `bad_request`，不写审计 | 没有文档（§7.2） |
+| 客户端断开、短体或超过读请求体期限 | 中止出站，400 `bad_request`，不写审计 | 没有文档（§7.2） |
 | 上传 `code:500` 且 message 表明不支持这种文件 | 400 `kb_file_unsupported`，审计 `unsupported_type` | 没有文档 |
 | 上传 `kb_rejected` | 400 `kb_rejected` | 没有文档 |
 | 上传不可达或数据集不存在 | 503 `kb_unavailable` | 没有文档 |
@@ -256,7 +256,7 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | 解析触发不可达或数据集不存在 | 503 `kb_unavailable` | 删 |
 | 插行或审计失败 | 500 | 删 |
 
-删除走上面的写法，失败只写一行 `kb_document_leak`。写锁持到请求体读完：请求体停着不发时，出站空闲 60 s 后中止，503 `kb_unavailable`。
+删除走上面的写法，失败只写一行 `kb_document_leak`。写锁持到请求体读完，时长不由客户端决定：读请求体的总期限从取到写锁起算，排队时间不算，`max(60 s, Content-Length ÷ 64 KiB/s)`，缺省上限下约 27 分钟，持续滴发也逃不过。请求体停着不发时，这条期限与出站 60 s 空闲期限谁先到算谁：总期限 400 `bad_request`，空闲 503 `kb_unavailable`。
 
 审计：`kb.ingest` 的 detail 恰为 `{id, source:"upload", name, size, documentId}`，`kb.ingest_reject` 恰为 `{id, source:"upload", name, reason}`，只写上面两张表里列出的 `reason`。`workspace_id` 列是 null。
 

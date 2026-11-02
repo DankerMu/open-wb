@@ -4,7 +4,7 @@
  * 连接层的用例走裸 socket（`kb-upload-helpers.ts`）。期望值是 spec 与实测记录的字面量。
  */
 import { randomBytes } from "node:crypto";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { PARSER_INPUTS } from "./http-guard-helpers.js";
 import {
   BAD_REQUEST,
@@ -23,7 +23,6 @@ import {
 import { KB_UNAVAILABLE } from "./kb-settings-helpers.js";
 import {
   answerOf,
-  connectionCount,
   countingBody,
   expectCompensated,
   expectNoIngestAudit,
@@ -219,6 +218,15 @@ describe("超限与缺少长度", () => {
     expect(world.lines()).toEqual([]);
   });
 
+  it("判定次序：长度先于后缀，paper 库的 a.txt 不带 Content-Length 也是 400，不写审计", async () => {
+    const world = await open({ template: "paper" });
+    const response = await uploadRaw(world, nameQuery("a.txt"), undefined);
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual(BAD_REQUEST);
+    expectNoIngestAudit(world);
+    expect(world.lines()).toEqual([]);
+  });
+
   it.each(["abc", "-1", "1.5", "0x10"])("Content-Length 为 %s：400", async (contentLength) => {
     const world = await open();
     const response = await upload(world, "a.md", "x", { contentLength });
@@ -370,70 +378,6 @@ describe("上传的文档数上限", () => {
     expect(world.rows()).toHaveLength(500);
     expect(world.countOf(UPLOAD)).toBe(1);
     expectRejects(world, [{ name: "b.md", reason: "limit" }]);
-  });
-});
-
-describe("客户端中断", () => {
-  it("声明 1 MiB，发 512 KiB 后断开：出站被中止，没有行，RAGFlow 上没有留下，锁放开了", {
-    timeout: CASE_MS,
-  }, async () => {
-    const world = await open({ kb: { uploadMaxBytes: 2 * MIB } });
-    const socket = await startUpload(world, await listen(world), {
-      query: nameQuery("a.md"),
-      headers: { "Content-Length": String(MIB) },
-      body: randomBytes(512 * 1024),
-    });
-    socket.on("error", () => undefined);
-    await waitFor(() => (world.uploads()[0]?.received ?? 0) > 0);
-    socket.destroy();
-    await waitFor(() => world.uploads()[0]?.aborted === true);
-    await waitFor(() => world.locks.writeLockCount() === 0);
-
-    expect(world.rows()).toEqual([]);
-    expectNoIngestAudit(world);
-    expect(world.fake.documents(world.datasetId)).toEqual([]);
-    expect(world.countOf(PARSE)).toBe(0);
-    expect(world.countOf(DELETE_DOCUMENT)).toBe(0);
-
-    expect((await upload(world, "later.md")).statusCode).toBe(201);
-  });
-
-  it("排队等锁时断开：轮到它时不发出站请求，锁不会被占住", { timeout: CASE_MS }, async () => {
-    const world = await open({ kb: { uploadMaxBytes: 2 * MIB } });
-    const port = await listen(world);
-    const gate = world.fake.fault(UPLOAD, { kind: "hold" });
-    const first = upload(world, "a.md");
-    await gate.reached;
-    const socket = await startUpload(world, port, {
-      query: nameQuery("b.md"),
-      headers: { "Content-Length": String(MIB) },
-      body: Buffer.alloc(1024, 0x61),
-    });
-    socket.on("error", () => undefined);
-    await waitFor(() => world.locks.writeWaiters(world.baseId) === 1);
-    socket.destroy();
-    await vi.waitUntil(async () => (await connectionCount(world)) === 0, {
-      timeout: 10_000,
-      interval: 10,
-    });
-    gate.release();
-
-    expect((await first).statusCode).toBe(201);
-    await waitFor(() => world.locks.writeLockCount() === 0);
-    expect(world.countOf(UPLOAD)).toBe(1);
-    expect(world.rows().map(({ name }) => name)).toEqual(["a.md"]);
-    expect(world.audits("kb.ingest_reject")).toEqual([]);
-  });
-
-  it("发送的字节少于 Content-Length 就结束：400，RAGFlow 上没有留下，没有行", async () => {
-    const world = await open();
-    const response = await upload(world, "a.md", "short", { contentLength: 100 });
-    expect(response.statusCode).toBe(400);
-    expect(response.json()).toEqual(BAD_REQUEST);
-    expect(world.rows()).toEqual([]);
-    expectNoIngestAudit(world);
-    expect(world.fake.documents(world.datasetId)).toEqual([]);
-    expect(world.countOf(PARSE)).toBe(0);
   });
 });
 
@@ -675,6 +619,22 @@ describe("知识库非 ready", () => {
       expectNoIngestAudit(world);
     },
   );
+
+  it("判定次序：超限与空文件都先于 state，写审计", async () => {
+    const world = await open();
+    world.setState("rebuilding");
+    const big = await upload(world, "a.md", "x", { contentLength: UPLOAD_MAX_BYTES + 1 });
+    const empty = await upload(world, "b.md", Buffer.alloc(0), { contentLength: 0 });
+    expect(big.statusCode).toBe(413);
+    expect(big.json()).toEqual(UPLOAD_TOO_LARGE_ENVELOPE);
+    expect(empty.statusCode).toBe(400);
+    expect(empty.json()).toEqual(KB_FILE_UNSUPPORTED);
+    expectRejects(world, [
+      { name: "a.md", reason: "too_large" },
+      { name: "b.md", reason: "empty" },
+    ]);
+    expect(world.lines()).toEqual([]);
+  });
 
   it("写锁被重建器持有：立即 409，不排队", async () => {
     const world = await open();
