@@ -170,7 +170,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - `rebuilding`、`rebuildFailed`：处于这两种重建状态的知识库数。
 
 **PUT 的 body** 键集 SHALL 是 `embedding`、`chatModelId`、`confirmRebuild` 的非空子集，且至少含 `embedding` 与 `chatModelId` 之一：
-- `embedding` 为 `{name, baseUrl, apiKey?}`：`name` 为 1–128 字节、无控制字符、不含 `@`；`baseUrl` 与模型上游地址同一规则；首次配置必须带 `apiKey`，之后省略即保留。`apiKey` 与模型上游密钥同一规则：非空，且可作 HTTP 头值；`apiKey:""` SHALL 是 400，不是保留。
+- `embedding` 为 `{name, baseUrl, apiKey?}`：`name` 为 1–128 字节、无控制字符、不含 `@`；`baseUrl` 与模型上游地址同一规则；首次配置必须带 `apiKey`，之后省略即保留。`apiKey` 与模型上游密钥同一规则：非空且不是纯空白，可作 HTTP 头值；`apiKey:""` SHALL 是 400，不是保留。
 - `chatModelId` 为 `models` 中**带上游**的 id（不含 `@`），或 `null`。
 - 其它键、类型不符、id 不存在或该模型没有上游：400。
 
