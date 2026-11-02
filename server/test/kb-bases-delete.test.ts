@@ -244,6 +244,24 @@ describe("重建状态", () => {
     expect(auditsOf(world, "kb.delete")).toHaveLength(1);
   });
 
+  it.each([
+    ["HTTP 503", { kind: "status", status: 503 }],
+    ["连接被重置", { kind: "reset" }],
+  ] as const)("新一代删除失败即停（%s）：不发当前一代，行不动；重试 204", async (_label, fault) => {
+    const world = await ready();
+    const { id, current, next } = await failedBase(world);
+    world.fake.fault(DELETE_DATASETS, fault);
+    const down = await deleteBase(world, id);
+    expect(down.statusCode).toBe(503);
+    expect(bodyOf(down)).toEqual(KB_UNAVAILABLE);
+    expect(deletedIds(world)).toEqual([[next]]);
+    expect(world.fake.datasets().map((dataset) => dataset.id)).toContain(current);
+    expect(world.store.getBase(id)).toMatchObject({ rebuildDatasetId: next });
+    expect(auditsOf(world, "kb.delete")).toEqual([]);
+
+    expect((await deleteBase(world, id)).statusCode).toBe(204);
+  });
+
   it("当前一代删除失败：503，行不动；重试从头走一遍，新一代已不存在，204", async () => {
     const world = await ready();
     const { id, current, next } = await failedBase(world);
