@@ -411,11 +411,11 @@ Minimal mergeable slice: atomic - 一条路由、一个视图，状态映射与�
 
 ## 12. 本地上传入库（knowledge-bases「本地上传入库」）
 
-- [ ] 12.1 核对 Context：
-  - `workspaces/rest.ts:455-520`：独立 scope、octet-stream parser、`parseUploadName`（`:160`）、`assertUploadName`（`:175`）与路由内联的 255 字节判定（都未导出）、提前拒；
+- [x] 12.1 核对 Context：
+  - `workspaces/rest.ts:469-528`：独立 scope、octet-stream parser、`parseUploadName`（`:160`）、`assertUploadName`（`:175`）与路由内联的 255 字节判定（`:495`，都未导出）、提前拒；
   - `upload.ts` 的计数 `Transform`；
   - 组 10 的 `multipart.ts`。
-- [ ] 12.2 测试先行：新 `server/test/kb-upload.test.ts`。
+- [x] 12.2 测试先行：新 `server/test/kb-upload.test.ts`。
   - 「上传不落盘」：断言 `SANDBOX_ROOT`、`OMP_STATE_DIR`、`os.tmpdir()` 前后目录清单相同；
   - 「超限与缺少长度」「客户端中断」「解析触发失败」（含 `success_count:0`）；
   - 「上传的后缀与空文件」：400 `kb_file_unsupported`，没有出站请求，`kb.ingest_reject` 的 `reason`；假 RAGFlow 回 `code:500` 时同样 400 `kb_file_unsupported`；
@@ -427,7 +427,7 @@ Minimal mergeable slice: atomic - 一条路由、一个视图，状态映射与�
   - 审计 detail 键集与哨兵（knowledge-bases「detail 不含敏感内容」的上传一腿）。
 
   路由加进 `kb-disabled.test.ts` 与归属路由用例。
-- [ ] 12.3 实现：`workspaces` 加合并上述规则的 `parseUploadFileName` 并从入口导出，既有上传路由不改；新 `server/src/kb/uploads.ts`（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/uploads`。
+- [x] 12.3 实现：`workspaces` 加合并上述规则的 `parseUploadFileName` 并从入口导出，既有上传路由不改；新 `server/src/kb/uploads.ts`（经该库写锁）；`kb/rest.ts` 加 `POST /api/kb/bases/:id/uploads`。
 
 Suggested fixture level: expanded - 流式转发用户上传到外部服务，且有不落盘的硬约束。
 Minimal mergeable slice: atomic - 一条路由，与工作空间上传同一写法。

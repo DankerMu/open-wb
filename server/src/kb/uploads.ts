@@ -1,0 +1,245 @@
+/**
+ * 本地上传（s2a-kb-ragflow D11、D13、D20；knowledge-bases「本地上传入库」）：一个请求一份文件，字节从请求直接拼进出站 multipart
+ * （`multipart.ts`），不落盘，不留副本。路由在 `rest.ts`，所有权判定先于这里。
+ *
+ * 取锁之前依次判定：请求流 → 文件名规则 → 长度 → 超限 → 后缀 → 空文件 → `state`。全程不读请求体。文件名规则排在所有写审计的
+ * 判定之前：这条路由不经 `sandbox.resolve`，`parseUploadFileName` 是文件名的唯一防线，也是 `kb.ingest_reject` 里 `name` 的长度
+ * 上限。`state` 判定到取锁之间没有 `await`（D20）。
+ *
+ * 持锁依次：重判库与 `state` → 500 上限 → 上传 → 解析触发 → 同事务插行与 `kb.ingest`。上限只在锁内数：并发的上传排队，后到的
+ * 数到先到的那一行。排队期间请求体留在 socket 上，轮到时连接已断就什么都不发：断开之后的请求永远不会结束，出站要等空闲期限，
+ * 这段时间锁一直被占着。
+ *
+ * 上传的失败：
+ * - 请求体没读全（客户端断开或短体）：先问 `sourceFailure()`，这时 `uploadDocument` 只知道请求体坏了，回 `kb_unavailable`。
+ *   中断的上传不留文档（§7.2），不发删除，不写审计，应答 400（断开时没有人收）。
+ * - `unsupported_file`：400 `kb_file_unsupported`，审计 `unsupported_type`。
+ * - `kb_rejected`：400。`kb_unavailable`、`not_found`（数据集没了）：503。都没有文档要删，不写审计：`kb.ingest_reject` 的
+ *   `reason` 只有 spec 列出的 `too_large`、`unsupported_type`、`empty`、`limit`。
+ *
+ * 解析触发失败与本地写入失败都先删掉刚上传的文档，走 D13 的写法，失败只写一行 `kb_document_leak`。
+ */
+import type { IncomingHttpHeaders } from "node:http";
+import { PassThrough, Readable } from "node:stream";
+import type { HttpErrorCode } from "../core/errors/index.js";
+import { HttpError } from "../core/errors/index.js";
+import { parseUploadFileName } from "../workspaces/index.js";
+import { ownedBase } from "./bases.js";
+import {
+  type DocumentRemovalTiming,
+  type DocumentView,
+  discardRagflowDocument,
+  JUST_INGESTED,
+  type KbDocumentRecord,
+  MAX_DOCUMENTS_PER_BASE,
+  viewOf,
+} from "./documents.js";
+import type { createKbLocks } from "./locks.js";
+import { multipartUpload } from "./multipart.js";
+import type { createRagflowClient } from "./ragflow-client.js";
+import type { createKbStore, KnowledgeBase } from "./store.js";
+import { acceptsFile } from "./templates.js";
+
+const DECIMAL = /^[0-9]+$/u;
+
+const UPLOAD_FAILURES = {
+  kb_rejected: "kb_rejected",
+  kb_unavailable: "kb_unavailable",
+  not_found: "kb_unavailable",
+} as const;
+
+const PARSE_FAILURES = {
+  kb_rejected: "kb_rejected",
+  parse_not_started: "kb_rejected",
+  kb_unavailable: "kb_unavailable",
+  not_found: "kb_unavailable",
+} as const;
+
+interface AuditEvent {
+  kind: "kb.ingest" | "kb.ingest_reject";
+  actorId: string;
+  title: string;
+  detail: object;
+}
+
+interface KbUploadsDependencies {
+  store: Pick<ReturnType<typeof createKbStore>, "getBase" | "countDocuments" | "addDocument">;
+  client: Pick<
+    ReturnType<typeof createRagflowClient>,
+    "uploadDocument" | "parseDocument" | "stopDocument" | "deleteDocument"
+  >;
+  locks: Pick<ReturnType<typeof createKbLocks>, "write">;
+  /** `core/audit` 的 `emit`，已绑定 DB。 */
+  audit: (event: AuditEvent) => void;
+  /** 受管 stderr writer。 */
+  log: (record: KbDocumentRecord) => void;
+  uploadMaxBytes: number;
+  removalTiming?: DocumentRemovalTiming | undefined;
+}
+
+/** 路由交下来的请求。 */
+interface UploadRequest {
+  query: unknown;
+  headers: IncomingHttpHeaders;
+  /** 请求流；没有媒体类型也没有请求体时没有 parser 运行，不是流。 */
+  body: unknown;
+}
+
+/** 通过了取锁之前全部判定的一份上传。 */
+interface Incoming {
+  id: string;
+  actorId: string;
+  name: string;
+  size: number;
+  request: Readable;
+}
+
+function assertReady({ state }: KnowledgeBase): void {
+  if (state !== "ready") {
+    throw new HttpError("kb_rebuilding");
+  }
+}
+
+function bodyStream(body: unknown): Readable {
+  if (!(body instanceof Readable)) {
+    throw new HttpError("bad_request");
+  }
+  return body;
+}
+
+/** 分块传输没有这个头：两者同时出现的请求，Node 的解析器到不了这里就拒绝了。 */
+function declaredLength(headers: IncomingHttpHeaders): number {
+  const length = headers["content-length"];
+  if (length === undefined || !DECIMAL.test(length)) {
+    throw new HttpError("bad_request");
+  }
+  return Number(length);
+}
+
+/**
+ * 请求隔一层再交给 `multipartUpload`：它在出站结束时销毁源，而销毁没读完的请求会带走连接，早应答（RAGFlow 不可达、提前拒绝）
+ * 就发不出去。`pipe` 不传播销毁，这一层销毁时只是解除管道。反方向要自己传：断开的请求只 `close`，不 `end`。
+ */
+function detachedSource(request: Readable): Readable {
+  const source = new PassThrough();
+  request.once("close", () => {
+    if (!request.readableEnded) {
+      source.destroy(new Error("request closed before its end"));
+    }
+  });
+  request.pipe(source);
+  return source;
+}
+
+export function createKbUploads(dependencies: KbUploadsDependencies) {
+  const { store, client, locks, audit, uploadMaxBytes } = dependencies;
+
+  /** 写一条 `kb.ingest_reject`，返回要抛的错误。 */
+  function rejected(
+    { id, actorId, name }: Pick<Incoming, "id" | "actorId" | "name">,
+    reason: "too_large" | "unsupported_type" | "empty" | "limit",
+    code: HttpErrorCode,
+  ): HttpError {
+    audit({
+      kind: "kb.ingest_reject",
+      actorId,
+      title: "知识库入库被拒",
+      detail: { id, source: "upload", name, reason },
+    });
+    return new HttpError(code);
+  }
+
+  function assertAcceptable(incoming: Incoming, template: string): void {
+    if (incoming.size > uploadMaxBytes) {
+      throw rejected(incoming, "too_large", "upload_too_large");
+    }
+    if (!acceptsFile(template, incoming.name)) {
+      throw rejected(incoming, "unsupported_type", "kb_file_unsupported");
+    }
+    if (incoming.size === 0) {
+      throw rejected(incoming, "empty", "kb_file_unsupported");
+    }
+  }
+
+  function record(incoming: Incoming, ragflowDocumentId: string): DocumentView {
+    const { id, actorId, name, size } = incoming;
+    const document = store.addDocument(
+      { kbId: id, ragflowDocumentId, name, size, source: "upload" },
+      ({ id: documentId }) => {
+        audit({
+          kind: "kb.ingest",
+          actorId,
+          title: "知识库入库文档",
+          detail: { id, source: "upload", name, size, documentId },
+        });
+      },
+    );
+    return viewOf(document, JUST_INGESTED, null);
+  }
+
+  /** 文档已在 RAGFlow，这里的任何失败都要把它删掉。 */
+  async function parseAndRecord(
+    incoming: Incoming,
+    datasetId: string,
+    documentId: string,
+  ): Promise<DocumentView> {
+    const parsed = await client.parseDocument(datasetId, documentId);
+    if (parsed.kind !== "ok") {
+      await discardRagflowDocument(dependencies, { datasetId, documentId });
+      throw new HttpError(PARSE_FAILURES[parsed.kind]);
+    }
+    try {
+      return record(incoming, documentId);
+    } catch (error) {
+      await discardRagflowDocument(dependencies, { datasetId, documentId });
+      throw error;
+    }
+  }
+
+  async function transfer(incoming: Incoming, datasetId: string): Promise<DocumentView> {
+    const { name, size, request } = incoming;
+    const upload = multipartUpload({ name, size, source: detachedSource(request) });
+    const uploaded = await client.uploadDocument(datasetId, upload);
+    if (uploaded.kind === "ok") {
+      return parseAndRecord(incoming, datasetId, uploaded.value.id);
+    }
+    if (upload.sourceFailure() !== undefined) {
+      throw new HttpError("bad_request");
+    }
+    if (uploaded.kind === "unsupported_file") {
+      throw rejected(incoming, "unsupported_type", "kb_file_unsupported");
+    }
+    throw new HttpError(UPLOAD_FAILURES[uploaded.kind]);
+  }
+
+  async function uploadLocked(incoming: Incoming): Promise<DocumentView> {
+    const { id, actorId, request } = incoming;
+    const base = ownedBase(store, id, actorId);
+    assertReady(base);
+    if (store.countDocuments(id) >= MAX_DOCUMENTS_PER_BASE) {
+      throw rejected(incoming, "limit", "kb_limit");
+    }
+    if (request.destroyed) {
+      throw new HttpError("bad_request");
+    }
+    return transfer(incoming, base.datasetId);
+  }
+
+  return {
+    /** `POST /api/kb/bases/:id/uploads`：见文件头。 */
+    async upload(id: string, request: UploadRequest, actorId: string): Promise<DocumentView> {
+      const body = bodyStream(request.body);
+      const name = parseUploadFileName(request.query);
+      const size = declaredLength(request.headers);
+      const incoming = { id, actorId, name, size, request: body };
+      const base = ownedBase(store, id, actorId);
+      assertAcceptable(incoming, base.template);
+      assertReady(base);
+      const result = await locks.write(id, () => uploadLocked(incoming));
+      if (result.outcome === "rebuilding") {
+        throw new HttpError("kb_rebuilding");
+      }
+      return result.value;
+    },
+  };
+}

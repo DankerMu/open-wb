@@ -10,7 +10,7 @@
  * 批量停止与空 `document_ids` 的停止；§10 混合批次之外的批量删文档；`DELETE /datasets` 的 `ids` 不是数组、含
  * 重复；上传带 `?type=` 的合法取值；multipart 缺结束边界；一次多个文件里有被拒的。
  *
- * 文档列表在 `fake-ragflow-list.mjs`（组 11）。
+ * 文档列表在 `fake-ragflow-list.mjs`（组 11），线上字节计数在 `fake-ragflow-wire.mjs`（组 12）。
  *
  * 外推，记录里没有原文，用例不要钉死：
  * - 缺 `name` 的 `102` 来自 §12 的「缺字段」，message 借用全空白名字的那句；`name`、`parser_id`、`embedding_model`
@@ -48,6 +48,7 @@ import {
   send,
   success,
 } from "./fake-ragflow-script.mjs";
+import { wireCounter } from "./fake-ragflow-wire.mjs";
 
 const DEFAULT_KEY = "fake-ragflow-key";
 const VERSION = "v1.0.0-rc2";
@@ -561,6 +562,7 @@ function entryOf(request, url, key) {
     query: url.search.slice(1),
     bearer: bearerOf(request.headers.authorization, key),
     contentLength: declared === undefined ? null : Number(declared),
+    received: 0,
     json: null,
     multipart: null,
     unknown: false,
@@ -657,6 +659,7 @@ export async function start(options = {}) {
     const url = new URL(request.url ?? "/", "http://fake-ragflow.invalid");
     const entry = entryOf(request, url, key);
     requests.push(entry);
+    trackWire(request, response, entry);
     const bytes = await readBody(request);
     if (bytes === null) {
       entry.aborted = true;
@@ -680,6 +683,7 @@ export async function start(options = {}) {
   const server = createServer((request, response) => {
     void handle(request, response);
   });
+  const trackWire = wireCounter(server);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   if (address === null || typeof address === "string") {

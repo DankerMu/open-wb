@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 12：本地上传。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -230,6 +230,35 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `{"event":"kb_document_leak","documentId":<id>}` | 补偿删除失败：RAGFlow 里留下一份本地没有行的文档。`documentId` 是 RAGFlow 的文档 id | 按 id 在 RAGFlow 里手工删除，文档还在解析时先停止。这条记录不限频 |
 
 **审计**：每份文档一条 `kb.ingest`，detail 恰为 `{id, source:"workspace", workspaceId, path, documentId}`，`documentId` 是本地文档 id，与插行同一事务；每个被拒条目一条 `kb.ingest_reject`，detail 恰为 `{id, source:"workspace", workspaceId, path, reason}`，单独写入。两者的 `workspace_id` 列都是该工作空间，标题是固定短句，不带用户文本与文件内容。
+
+**本地上传**（`server/src/kb/uploads.ts`，组 12）：`POST /api/kb/bases/:id/uploads?name=<文件名>`，请求体是 `application/octet-stream`，带 `Cache-Control: no-store`。请求体直接拼进出站 multipart，不落盘，不留副本。这条路由不经沙箱，文件名规则是 `workspaces` 的 `parseUploadFileName`：恰一个、非空、不含 `/`、无拒绝字符、无临时前缀、不超过 255 字节。失败的应答都带 `Connection: close`。
+
+取锁之前依次判定，都不读请求体，不发出站请求：
+
+| 判定 | 应答 | `kb.ingest_reject` 的 `reason` |
+|---|---|---|
+| 别人的或不存在的 id | 404 `not_found` | 不写 |
+| 媒体类型不是 octet-stream，文件名规则不过，没有 `Content-Length`（含分块传输） | 400 `bad_request` | 不写 |
+| `Content-Length` 超过 `KB_UPLOAD_MAX_BYTES` | 413 `upload_too_large` | `too_large` |
+| 后缀不在模板的表里，判定同工作空间来源 | 400 `kb_file_unsupported` | `unsupported_type` |
+| `Content-Length` 为 0 | 400 `kb_file_unsupported` | `empty` |
+| `state` 不是 `ready` | 409 `kb_rebuilding` | 不写 |
+
+之后在该库的写锁下：重判库与 `state`；已有 500 份时 409 `kb_limit`，审计 `limit`；排队期间连接已断的什么都不发；然后上传、触发解析、同事务插行与 `kb.ingest`，应答 201 `DocumentView`，不读 RAGFlow：`source` 为 `upload`，`workspaceId`、`path`、`sourceChanged` 为 `null`，`status` 为 `queued`，`chunkCount`、`message` 为 `null`。
+
+| 结果 | 应答 | 删除刚上传的文档 |
+|---|---|---|
+| 客户端断开或短体 | 中止出站，400 `bad_request`，不写审计 | 没有文档（§7.2） |
+| 上传 `code:500` 且 message 表明不支持这种文件 | 400 `kb_file_unsupported`，审计 `unsupported_type` | 没有文档 |
+| 上传 `kb_rejected` | 400 `kb_rejected` | 没有文档 |
+| 上传不可达或数据集不存在 | 503 `kb_unavailable` | 没有文档 |
+| 解析触发 `kb_rejected` 或 `success_count:0` | 400 `kb_rejected` | 删 |
+| 解析触发不可达或数据集不存在 | 503 `kb_unavailable` | 删 |
+| 插行或审计失败 | 500 | 删 |
+
+删除走上面的写法，失败只写一行 `kb_document_leak`。写锁持到请求体读完：请求体停着不发时，出站空闲 60 s 后中止，503 `kb_unavailable`。
+
+审计：`kb.ingest` 的 detail 恰为 `{id, source:"upload", name, size, documentId}`，`kb.ingest_reject` 恰为 `{id, source:"upload", name, reason}`，只写上面两张表里列出的 `reason`。`workspace_id` 列是 null。
 
 **文档列表**（`server/src/kb/documents.ts`，组 11）：`GET /api/kb/bases/:id/documents`，200 `{documents: DocumentView[]}`，按 `created_at` 升序，带 `Cache-Control: no-store`，不写审计。别人的或不存在的 id 404 `not_found`，不发出站请求。不取写锁，不判 `state`。
 

@@ -24,7 +24,7 @@ export {
 export type { MountManager } from "./mounts/manager.js";
 export { mountToRead } from "./mounts/path-rule.js";
 export { isStructuralAbsence, openRegularFile } from "./regular-file.js";
-export { isOrdinaryDirectory, lstatExisting, ownedRootOf } from "./rest.js";
+export { isOrdinaryDirectory, lstatExisting, ownedRootOf, parseUploadFileName } from "./rest.js";
 export type { WorkspaceStore } from "./store.js";
 
 /** The workspace routes' dependencies plus the mount routes' (s1b-workspace-mounts D14). */

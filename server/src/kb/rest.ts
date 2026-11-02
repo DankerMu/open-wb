@@ -22,10 +22,15 @@
  *
  * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
  * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。
+ *
+ * `POST …/uploads` 同 `POST /api/workspaces/:id/uploads` 的写法：独立 scope，只认 `application/octet-stream`，请求流原样交出，
+ * 没有框架的 body 上限，别的媒体类型是 parser 错误（归属集，400）。所有权判定先于这一切，一个字节都不读。失败的上传一律关
+ * 连接：Node 否则会在 keep-alive 上读完并丢弃剩下的请求体。业务都在 `kb/uploads.ts`。
  */
 import type {
   FastifyInstance,
   FastifyRequest,
+  onErrorHookHandler,
   onRequestHookHandler,
   preParsingHookHandler,
   RawReplyDefaultExpression,
@@ -39,6 +44,7 @@ import type { createKbDocuments } from "./documents.js";
 import type { createRagflowClient } from "./ragflow-client.js";
 import type { createKbSettings } from "./settings.js";
 import type { createKbStore } from "./store.js";
+import type { createKbUploads } from "./uploads.js";
 
 /** 钉住的 RAGFlow 版本（D5）：升级是一次代码变更，要重跑实测与 `make smoke-kb`。 */
 const PINNED_VERSION = "v1.0.0-rc2";
@@ -49,6 +55,8 @@ const SETTINGS_PROBE_ROUTE = "/api/kb/settings/probe";
 const BASES_ROUTE = "/api/kb/bases";
 const BASE_ROUTE = "/api/kb/bases/:id";
 const DOCUMENTS_ROUTE = "/api/kb/bases/:id/documents";
+const UPLOADS_ROUTE = "/api/kb/bases/:id/uploads";
+const UPLOAD_MEDIA_TYPE = "application/octet-stream";
 /** 最长的合法 body 也只有几百字节，同 `models/rest.ts`。 */
 const SETTINGS_BODY_LIMIT = 16 * 1024;
 const BASE_BODY_LIMIT = 16 * 1024;
@@ -63,6 +71,7 @@ interface KbRestDependencies {
   settings: ReturnType<typeof createKbSettings>;
   bases: ReturnType<typeof createKbBases>;
   documents: ReturnType<typeof createKbDocuments>;
+  uploads: ReturnType<typeof createKbUploads>;
   uploadMaxBytes: number;
   uploadMaxFiles: number;
   onVersionMismatch: () => void;
@@ -79,6 +88,11 @@ type BasePreParsing = preParsingHookHandler<
 
 const noStore: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
+  done();
+};
+
+const closeConnectionOnError: onErrorHookHandler = (_request, reply, _error, done) => {
+  reply.header("Connection", "close");
   done();
 };
 
@@ -206,4 +220,21 @@ export function registerKbRoutes(
       return reply.code(201).send(result);
     },
   );
+
+  app.register((scope, _options, done) => {
+    scope.removeAllContentTypeParsers();
+    scope.addContentTypeParser(UPLOAD_MEDIA_TYPE, (_request, payload, complete) => {
+      complete(null, payload);
+    });
+    scope.post<BaseParams>(
+      UPLOADS_ROUTE,
+      { onError: closeConnectionOnError, onRequest: noStore, preParsing: ownedBase },
+      async (request, reply) => {
+        const { id } = request.params;
+        const view = await enabled().uploads.upload(id, request, principalOf(request).id);
+        return reply.code(201).send(view);
+      },
+    );
+    done();
+  });
 }

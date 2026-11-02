@@ -27,6 +27,7 @@ import { registerKbRoutes } from "./rest.js";
 import { createKbSettings } from "./settings.js";
 import { createSourceFiles } from "./source-file.js";
 import { createKbStore } from "./store.js";
+import { createKbUploads } from "./uploads.js";
 
 /** 这个模块写到受管 stderr writer 的记录。 */
 export type KbRecord =
@@ -111,6 +112,15 @@ export function registerKb(
       }),
       uploadMaxBytes,
       uploadMaxFiles,
+      removalTiming: documentDelete,
+    }),
+    uploads: createKbUploads({
+      store,
+      client,
+      locks,
+      audit,
+      log,
+      uploadMaxBytes,
       removalTiming: documentDelete,
     }),
   });
