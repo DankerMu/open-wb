@@ -248,7 +248,7 @@
 
 **本地失败**：第 8 步的事务失败时，删除这一份已建的文档，整个请求 500，其后条目不再处理；此前已提交的条目保留。
 
-**应答**：只要请求本身合法且第 8 步的事务没有失败，即为 201 `{documents: DocumentView[], rejected: {path, reason, message}[]}`。`documents` 的每一条 SHALL 不经读取 RAGFlow 得出：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false`。`message` 按 `reason` 固定：
+**应答**：只要请求本身合法且本地写入没有失败，即为 201 `{documents: DocumentView[], rejected: {path, reason, message}[]}`。`documents` 的每一条 SHALL 不经读取 RAGFlow 得出：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false`。`message` 按 `reason` 固定：
 
 | `reason` | `message` |
 |---|---|

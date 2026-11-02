@@ -192,6 +192,37 @@ describe("写入失败不留审计", () => {
     expect(world.countOf(DELETE_DOCUMENT)).toBe(1);
     expect(world.fake.documents(world.datasetId)).toEqual([]);
   });
+
+  it.each([
+    [
+      "插行失败",
+      "CREATE TRIGGER refuse BEFORE INSERT ON kb_documents WHEN NEW.source_path = 'b.md' BEGIN SELECT RAISE(ABORT, 'injected'); END",
+    ],
+    [
+      "审计失败",
+      "CREATE TRIGGER refuse BEFORE INSERT ON audit_events WHEN NEW.kind = 'kb.ingest' AND json_extract(NEW.detail, '$.path') = 'b.md' BEGIN SELECT RAISE(ABORT, 'injected'); END",
+    ],
+  ])("批内第二份%s：500，其后不再处理，已提交的留着，重试是 duplicate", async (_name, trigger) => {
+    const world = await open();
+    for (const name of ["a.md", "b.md", "c.md"]) world.write(name, name);
+    const { db } = world.fw.world;
+    db.exec(trigger);
+    const response = await world.ingest(["a.md", "b.md", "c.md"]);
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual(GENERIC_500);
+    expect(world.rows().map(({ sourcePath }) => sourcePath)).toEqual(["a.md"]);
+    expect(world.audits("kb.ingest").map(({ detail }) => detail.path)).toEqual(["a.md"]);
+    expect(world.audits("kb.ingest_reject")).toEqual([]);
+    const uploaded = world.uploads().flatMap(({ multipart }) => multipart ?? []);
+    expect(uploaded.map(({ filename }) => filename)).toEqual(["a.md", "b.md"]);
+    expect(world.countOf(DELETE_DOCUMENT)).toBe(1);
+    expect(world.fake.documents(world.datasetId).map(({ name }) => name)).toEqual(["a.md"]);
+    db.exec("DROP TRIGGER refuse");
+    const retried = await world.ingest(["a.md"]);
+    expect(retried.statusCode).toBe(201);
+    expect(reasonsOf(retried.json<Ingested>())).toEqual([["a.md", "duplicate"]]);
+    expect(world.countOf(UPLOAD)).toBe(2);
+  });
 });
 
 describe("读取期间文件变化", () => {

@@ -20,7 +20,7 @@
  * body、不在归属集（同 `connectors/rest.ts`）。带 `:id` 的路由都在路由级 `preParsing` 判定所有权，所以别人的或不存在的 id
  * 带坏 body 也是 404。
  *
- * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法即 201，被拒的条目在应答的 `rejected` 里。
+ * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
  */
 import type {
   FastifyInstance,

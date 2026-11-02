@@ -361,7 +361,7 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
   }
 
   return {
-    /** `POST /api/kb/bases/:id/documents`：请求合法即 201，被拒的条目逐条进 `rejected`。 */
+    /** `POST /api/kb/bases/:id/documents`：请求合法且本地写入没有失败即 201，被拒的条目逐条进 `rejected`。 */
     async ingest(id: string, body: unknown, actorId: string) {
       const request = parseIngest(body, uploadMaxFiles);
       ingestable(id, actorId, request.workspaceId);

@@ -11,7 +11,7 @@
  *
  * 读取的流一路读到 EOF，不按 `size` 截断：文件长大了要读得出来，字节数由 `kb/multipart.ts` 核对。流销毁即还 fd。
  *
- * 一条路径读不了不能毁掉整批（knowledge-bases：请求合法即 201）：打开失败除离线外都归 `not_file`，含 EACCES。
+ * 一条路径读不了不能毁掉整批（knowledge-bases：请求合法且本地写入没有失败即 201）：打开失败除离线外都归 `not_file`，含 EACCES。
  */
 import { closeSync, createReadStream, fstatSync } from "node:fs";
 import { Readable } from "node:stream";
