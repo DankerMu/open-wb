@@ -37,8 +37,9 @@
  *
  * 重新入库：取锁之前依次判定 `doc` 参数（400）→ `state` 不是 `ready`（409，`rebuild_failed` 也拒）→ 文档归属（404）→ 上传来源
  * （400），取锁后重判，旧 RAGFlow 文档 id 取锁内读到的。之后走入库的第 1 步与第 4–7 步（同一份 `transfer`）：查重、上限与后缀
- * 不判，这一行就是它自己，模板也没变。读取被拒（含工作空间已不可见：facade 的 404 在 `resolve` 里归 `not_file`）一律 409
- * `kb_source_unreadable`，不写 `kb.ingest_reject`：审计表没有重新入库的拒绝记录。上传与解析触发的失败按 D11 映射；任何失败都在
+ * 不判，这一行就是它自己，模板也没变。解析之前先判工作空间可见（同入库的 `ingestable`）：已删除、根不在了都不经 facade，
+ * 不读文件，不写 `sandbox.reject`。不可见与读取被拒一律 409 `kb_source_unreadable`，只有 `outside` 由 facade 写
+ * `sandbox.reject`；不写 `kb.ingest_reject`：审计表没有重新入库的拒绝记录。上传与解析触发的失败按 D11 映射；任何失败都在
  * 换行之前，行不动，上传成功后的失败删掉新文档。都成功后单事务换行内的 RAGFlow id、大小与 `mtimeMs` 并写 `kb.ingest`，再删旧
  * 文档：旧文档可能还在解析，`busy`、`failed` 都只写 `kb_document_leak`，应答照常 200。先建后删：中途失败时行总指向一份在的文档。
  */
@@ -433,8 +434,21 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
     return viewOf(document, JUST_INGESTED, false);
   }
 
+  /** 重新入库的第 1 步之前：工作空间不可见不是越界，不进 facade，免得写 `sandbox.reject`。 */
+  function assertReadable(actorId: string, workspaceId: string): void {
+    try {
+      sources.assertVisible({ id: actorId }, workspaceId);
+    } catch (error) {
+      if (error instanceof HttpError && error.code === "not_found") {
+        throw new HttpError("kb_source_unreadable");
+      }
+      throw error;
+    }
+  }
+
   async function reingestLocked(id: string, documentId: string, actorId: string) {
     const { document, item } = reingestable(id, actorId, documentId);
+    assertReadable(actorId, item.workspaceId);
     const resolved = sources.resolve({ id: actorId }, item.workspaceId, item.path);
     const outcome =
       "reason" in resolved

@@ -66,6 +66,10 @@ function addWorkspaceFile(
   });
 }
 
+/** 同一毫秒插入的行按 `created_at, id` 排序，而 id 是随机的：比对多行时先按 id 排好。 */
+const byId = <T extends { id: string }>(rows: T[]): T[] =>
+  [...rows].sort((a, b) => (a.id < b.id ? -1 : 1));
+
 /** 确认重建：代数加一，全部知识库置 `rebuilding`。 */
 function startRebuild(store: Store) {
   return store.saveSettings({ embedding: EMBEDDING, rebuildActorId: "u3" });
@@ -384,7 +388,7 @@ describe("kb store: 文档", () => {
     expect(() => store.replaceDocument(hex(1), doc.id, replacement, boom)).toThrow(BOOM);
     expect(() => store.replaceDocument(hex(1), upload.id, replacement)).toThrow();
     expect(() => store.replaceDocument(hex(2), doc.id, replacement)).toThrow();
-    expect(store.listDocuments(hex(1))).toEqual([doc, upload]);
+    expect(byId(store.listDocuments(hex(1)))).toEqual(byId([doc, upload]));
 
     const seen: unknown[] = [];
     const replaced = store.replaceDocument(hex(1), doc.id, replacement, (record) => {
@@ -397,7 +401,7 @@ describe("kb store: 文档", () => {
       sourceMtimeMs: T0 + 0.5,
     });
     expect(seen).toEqual([replaced]);
-    expect(store.listDocuments(hex(1))).toEqual([replaced, upload]);
+    expect(byId(store.listDocuments(hex(1)))).toEqual(byId([replaced, upload]));
   });
 });
 

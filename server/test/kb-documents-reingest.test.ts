@@ -262,6 +262,15 @@ describe("源不可读", () => {
       },
     ],
     [
+      "工作空间目录已不在（行还在）",
+      async () => {
+        const world = await open();
+        const document = await ingestedRow(world, "a.md", "a");
+        rmSync(world.root, { recursive: true });
+        return [world, document, 1];
+      },
+    ],
+    [
       "outside（路径上的分量成了符号链接）",
       async () => {
         const world = await open();
@@ -282,9 +291,10 @@ describe("源不可读", () => {
       },
     ],
     [
-      "offline（挂载已离线）",
+      "offline（挂载已离线，挂载点下的宿主路径上有这个文件）",
       async () => {
         const world = await open({ offline: ["docs"] });
+        put(world.fw.point("docs"), "a.pdf", "abc");
         return [world, seededWorkspaceRow(world, W1, "docs/a.pdf"), 0];
       },
     ],
@@ -327,14 +337,20 @@ describe("源不可读", () => {
   it.each(cases)(
     "%s：409 kb_source_unreadable，行不变，没有删除，RAGFlow 里没有新文档",
     { timeout: CASE_MS },
-    async (_label, arrange) => {
+    async (label, arrange) => {
       const [world, document, ingests] = await arrange();
       const sent = world.fake.requests().length;
       expectError(await reingest(world, document.id), 409, KB_SOURCE_UNREADABLE);
       expect(ragflowIds(world)).toEqual([document.ragflowDocumentId]);
       expect(world.countOf(DELETE_DOCUMENT)).toBe(0);
       expect(world.countOf(PARSE)).toBe(ingests);
-      expect(world.fake.requests().length - sent).toBeLessThanOrEqual(1);
+      if (label.startsWith("changed")) {
+        // 读到多出来的字节时上传已经发出，被中止的那一个请求可能已到达假 RAGFlow。
+        expect(world.fake.requests().length - sent).toBeLessThanOrEqual(1);
+      } else {
+        expect(world.fake.requests()).toHaveLength(sent);
+      }
+      expect(world.audits("sandbox.reject")).toHaveLength(label.startsWith("outside") ? 1 : 0);
       expectUntouched(world, document, ingests);
       expect(world.audits("kb.ingest_reject")).toEqual([]);
       expect(world.logged).toEqual([]);
