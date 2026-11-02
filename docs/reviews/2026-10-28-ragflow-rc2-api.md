@@ -999,7 +999,7 @@ GET /api/v1/users/me/models
 |---|---|
 | `PUT /providers/<p>/instances/<i>`，带 `instance_name`、`api_key`、`base_url`、`model_info` | `code:0`；实例 `GET` 读到新值；模型 `verify` 复位为 `unknown` |
 | 同上但不带 `model_info` | **HTTP 400**，`code:400` |
-| 同上但 `api_key` 为空串 | `code:0`，**密钥被清空**，不是保留 |
+| 同上但 `api_key` 为空串 | `code:0`，**密钥被清空**，不是保留。读 rc2 源码（未实测）：写入前按 Go `strings.TrimSpace` 处理，所以纯空白同样清空 |
 | `model_info` 增一项 | 该模型被加入 |
 | `PUT` 不存在的实例 | `code:404` |
 | `POST` 同名实例 | **`code:500`**，`fail to create model instance: instance owb-alt already exists` |

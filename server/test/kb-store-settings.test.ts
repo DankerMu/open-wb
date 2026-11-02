@@ -244,25 +244,71 @@ describe("kb store: 设置", () => {
     expect(store.embeddingApiKey()).toBe(KEY_SENTINEL);
   });
 
-  it.each<[string, Partial<typeof EMBEDDING>]>([
-    ["名称", { name: "bge-large" }],
-    ["地址", { baseUrl: "http://other/v1" }],
-    ["密钥", { apiKey: "rotated-key" }],
-  ])("探活期间嵌入%s被改：写回丢弃，within 不调用，探活记录不变", (_field, change) => {
-    const { store } = fresh();
-    store.saveSettings({ embedding: EMBEDDING });
-    const earlier = { status: "ok", at: T0 + 1, message: null } as const;
-    store.recordEmbeddingProbe(EMBEDDING, earlier);
-    store.saveSettings({ embedding: { ...EMBEDDING, ...change } });
+  describe("嵌入模型换身份时探活重置", () => {
+    const NEVER = { status: "never", at: null, message: null };
+    const earlier = { status: "failed", at: T0 + 1, message: "上游拒绝" } as const;
+    const late = { status: "ok", at: T0 + 5, message: null } as const;
+    const CHANGES: [string, Partial<typeof EMBEDDING>][] = [
+      ["名称", { name: "bge-large" }],
+      ["地址", { baseUrl: "http://other/v1" }],
+      ["密钥", { apiKey: "rotated-key" }],
+    ];
 
-    const within = vi.fn();
-    const late = { status: "failed", at: T0 + 5, message: "上游拒绝" } as const;
-    expect(store.recordEmbeddingProbe(EMBEDDING, late, within)).toMatchObject({
-      view: { probe: earlier },
-      recorded: false,
+    function probed() {
+      const opened = fresh();
+      opened.store.saveSettings({ embedding: EMBEDDING });
+      opened.store.recordEmbeddingProbe(EMBEDDING, earlier);
+      return opened;
+    }
+
+    it.each(CHANGES)("%s变了：探活三列重置，within 里已是重置后的状态", (_field, change) => {
+      const { db, store } = probed();
+      const seen: unknown[] = [];
+      const embedding = { ...EMBEDDING, ...change };
+      const saved = store.saveSettings({ embedding }, (view) => seen.push(view.probe));
+      expect(saved.probe).toEqual(NEVER);
+      expect(seen).toEqual([NEVER]);
+      expect(settingsRow(db)).toMatchObject({
+        embedding_probe_status: "never",
+        embedding_probe_at: null,
+        embedding_probe_message: null,
+      });
     });
-    expect(within).not.toHaveBeenCalled();
-    expect(store.settings().probe).toEqual(earlier);
+
+    it.each(CHANGES)("%s变了之后：旧身份的探活写回丢弃，within 不调用", (_field, change) => {
+      const { store } = probed();
+      store.saveSettings({ embedding: { ...EMBEDDING, ...change } });
+
+      const within = vi.fn();
+      expect(store.recordEmbeddingProbe(EMBEDDING, late, within)).toMatchObject({
+        view: { probe: NEVER },
+        recorded: false,
+      });
+      expect(within).not.toHaveBeenCalled();
+      expect(store.settings().probe).toEqual(NEVER);
+    });
+
+    it.each(CHANGES)("%s变了而 within 抛出：身份与探活一起回滚", (_field, change) => {
+      const { store } = probed();
+      const embedding = { ...EMBEDDING, ...change };
+      expect(() => store.saveSettings({ embedding }, boom)).toThrow(BOOM);
+      expect(store.settings().probe).toEqual(earlier);
+      expect(store.settings().embedding?.name).toBe(EMBEDDING.name);
+      expect(store.settings().embedding?.baseUrl).toBe(EMBEDDING.baseUrl);
+      expect(store.embeddingApiKey()).toBe(EMBEDDING.apiKey);
+    });
+
+    it("身份没变（同名同址同密钥重存）：探活保留", () => {
+      const { store } = probed();
+      expect(store.saveSettings({ embedding: EMBEDDING }).probe).toEqual(earlier);
+      expect(store.settings().probe).toEqual(earlier);
+    });
+
+    it("只改 chatModelId 不碰嵌入模型：探活保留", () => {
+      const { db, store } = probed();
+      insertRow(db, "models", MODEL_ROW);
+      expect(store.saveSettings({ chatModelId: "m1" }).probe).toEqual(earlier);
+    });
   });
 
   it("没有配置嵌入模型时探活写回丢弃", () => {

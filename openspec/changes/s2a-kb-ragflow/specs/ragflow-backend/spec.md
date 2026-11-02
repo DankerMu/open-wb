@@ -170,7 +170,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 - `rebuilding`、`rebuildFailed`：处于这两种重建状态的知识库数。
 
 **PUT 的 body** 键集 SHALL 是 `embedding`、`chatModelId`、`confirmRebuild` 的非空子集，且至少含 `embedding` 与 `chatModelId` 之一：
-- `embedding` 为 `{name, baseUrl, apiKey?}`：`name` 为 1–128 字节、无控制字符、不含 `@`；`baseUrl` 与模型上游地址同一规则；首次配置必须带 `apiKey`，之后省略即保留。`apiKey` 与模型上游密钥同一规则：非空，且可作 HTTP 头值；`apiKey:""` SHALL 是 400，不是保留。
+- `embedding` 为 `{name, baseUrl, apiKey?}`：`name` 为 1–128 字节、无控制字符、不含 `@`；`baseUrl` 与模型上游地址同一规则；首次配置必须带 `apiKey`，之后省略即保留。`apiKey` 与模型上游密钥同一规则：非空且不是纯空白，可作 HTTP 头值；`apiKey:""` SHALL 是 400，不是保留。
 - `chatModelId` 为 `models` 中**带上游**的 id（不含 `@`），或 `null`。
 - 其它键、类型不符、id 不存在或该模型没有上游：400。
 
@@ -195,7 +195,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 4. `PATCH /api/v1/models/default`，body `{model_provider, model_instance, model_name, model_type}`，`model_type` 为 `embedding` 或 `chat`。
 
 规则：
-- `api_key` SHALL 恒为实际密钥：`embedding.apiKey` 省略时取已存的值；SHALL NOT 发出空串（空串会清空实例密钥）。
+- `api_key` SHALL 恒为实际密钥：`embedding.apiKey` 省略时取已存的值；SHALL NOT 发出空串或纯空白（RAGFlow 按 trim 后的值写入，空值会清空实例密钥）。
 - `model_info` 项为 `{model_name, model_type, max_tokens}`。嵌入模型 `model_type` 为 `["embedding"]`，`max_tokens` 为 `8192`；对话模型为 `["chat"]`，`max_tokens` 取该行的 `maxTokens`。
 - 嵌入与对话模型都 SHALL 设为账号缺省：Compiler 读账号缺省嵌入模型。
 - SHALL NOT 使用 `PATCH /api/v1/users/me/models`。
@@ -212,7 +212,9 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 **探活**：向嵌入上游发 `POST <baseUrl>/embeddings`，body `{model, input:"ping"}`，期限与模型探活相同。
 - 结果：2xx 且应答 `data[0].embedding` 为非空数字数组为 `ok`，否则为 `failed`。
-- 结果写回设置，并审计 `kb.settings`（detail `{probe}`）。
+- 结果只写回发起时的同一身份（名称、地址、密钥），并审计 `kb.settings`（detail `{probe}`）。发起后嵌入模型已被改：丢弃这次结果，不写回、不审计，应答回当前读视图。
+- 探活逐次串行，后发的排在在途的之后；身份在排到时读取。
+- 保存时名称、地址或密钥任一变化，探活重置为 `never`；三者不变时保留。
 - 嵌入模型未配置时：409 `kb_not_ready`。
 - 探活不下发，也不改嵌入身份。
 
@@ -249,6 +251,10 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 #### Scenario: 取消指定的无操作
 - **WHEN** `chatModelId` 已是 `null`，管理员 `PUT {chatModelId:null}`
 - **THEN** 200；假 RAGFlow 收到零个请求；没有 `kb.settings` 审计，`kb_settings.updated_at` 不变
+
+#### Scenario: 探活期间嵌入模型被改
+- **WHEN** 探活请求在途（假上游挂起），管理员保存了另一个嵌入模型，然后放行探活
+- **THEN** 探活应答 200，为当前读视图，`embedding.probe` 是新模型的状态；没有这次探活的 `kb.settings` 审计
 
 #### Scenario: 探活
 - **WHEN** 已配置嵌入模型，假上游对 `POST <baseUrl>/embeddings` 依次应答：2xx 且 `data[0].embedding` 为非空数字数组；HTTP 500；2xx 且 `data[0].embedding` 为空数组；另一个实例未配置嵌入模型时探活

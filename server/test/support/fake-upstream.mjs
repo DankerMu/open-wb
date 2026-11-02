@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
+import { createEmbeddingScript } from "./fake-upstream-embeddings.mjs";
 import { createFailureScript } from "./fake-upstream-failures.mjs";
 import {
   INTERLEAVE_MARKER,
@@ -13,6 +14,8 @@ const PATHS = new Set(["/chat/completions", "/v1/chat/completions"]);
 /** s1d-model-registry D20: the listing a model probe reads. */
 const MODELS_PATHS = new Set(["/models", "/v1/models"]);
 const MODELS_LISTING = { object: "list", data: [{ id: "fake-model", object: "model" }] };
+/** s2a-kb-ragflow D7: what a knowledge-base embedding probe posts to. */
+const EMBEDDINGS_PATHS = new Set(["/embeddings", "/v1/embeddings"]);
 const DEFAULT_KEY = "fake";
 const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
@@ -90,11 +93,13 @@ export async function start(options = {}) {
   /** GET /models requests in arrival order: `{authorization}`, latest 1000. */
   const modelsRequests = [];
   const models = { status: modelsStatus, record: modelsRequests };
+  const embeddings = createEmbeddingScript(expectedKey);
   const server = createServer((request, response) => {
     void handleRequest(request, response, expectedKey, gates, ttlMs, requests, {
       scope,
       failures,
       models,
+      embeddings,
     });
   });
   await listen(server, requested);
@@ -111,12 +116,14 @@ export async function start(options = {}) {
     modelsRequests() {
       return modelsRequests.map((entry) => ({ ...entry }));
     },
+    embeddings: embeddings.handle,
     async close() {
       if (closed) {
         return;
       }
       closed = true;
       failures.close();
+      embeddings.close();
       for (const id of [...gates.keys()]) {
         destroyGate(gates, id);
       }
@@ -140,6 +147,10 @@ async function handleRequest(request, response, expectedKey, gates, ttlMs, reque
   }
   if (request.method === "GET" && MODELS_PATHS.has(path)) {
     serveModels(request, response, expectedKey, script.models);
+    return;
+  }
+  if (request.method === "POST" && EMBEDDINGS_PATHS.has(path)) {
+    await script.embeddings.serve(response, request.headers.authorization, await readBody(request));
     return;
   }
   if (request.method !== "POST" || !PATHS.has(path)) {

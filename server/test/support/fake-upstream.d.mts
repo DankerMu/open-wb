@@ -26,12 +26,34 @@ export interface FakeUpstreamRequest {
   maxTokens: number | null;
 }
 
+/** One POST /embeddings (accepted or 401): its Authorization header and parsed body. */
+export interface FakeUpstreamEmbeddingRequest {
+  authorization: string | null;
+  body: unknown;
+}
+
+/** A queued answer to the next POST /embeddings; a string `body` goes out as it is. */
+export interface FakeUpstreamEmbeddingReply {
+  status?: number;
+  body?: unknown;
+  headers?: Record<string, string>;
+}
+
+export interface FakeUpstreamEmbeddings {
+  answer(reply: FakeUpstreamEmbeddingReply): void;
+  /** Parks the next request; after `release()` it is answered as usual. */
+  hold(): { reached: Promise<void>; release(): void };
+  /** A copy of the record, arrival order. */
+  requests(): FakeUpstreamEmbeddingRequest[];
+}
+
 export interface FakeUpstreamServer {
   port: number;
   /** A copy of the request record (`GET /__control/requests`): arrival order, latest 1000. */
   requests(): FakeUpstreamRequest[];
   /** A copy of the GET /models record: arrival order, latest 1000. */
   modelsRequests(): FakeUpstreamModelsRequest[];
+  embeddings: FakeUpstreamEmbeddings;
   close(): Promise<void>;
 }
 

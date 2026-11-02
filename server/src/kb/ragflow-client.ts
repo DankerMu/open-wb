@@ -8,7 +8,8 @@
  *   JSON 读。文件流交出之后空闲期限照走，到期时流报错。
  *
  * 对外是一个路由一个方法，三种调用本身不导出：调用方拼不出路径，所以 `GET …/instances/<实例>`（明文回显上游
- * 密钥）、清空账号缺省与 `/providers` 下的删除（D7）在这里根本没有写法，不靠黑名单。
+ * 密钥）、清空账号缺省与 `/providers` 下的删除（D7）在这里根本没有写法，不靠黑名单。`PATCH /models/default` 是设与
+ * 清共用的路径，`setDefaultModel` 拒绝空名字，所以这个调用面只能设。
  *
  * 结果按次序判定：路由专属组合（只认 HTTP 200，实测全部如此，§12 未知路由的 HTTP 404 + `code:404` 不能算不存
  * 在）→ 2xx 且 `code:0` → `code` 101 / 102 为 `kb_rejected` → HTTP 401 或 `code` 401 / 403 为 `kb_unavailable`
@@ -34,6 +35,7 @@ const RECORD_INTERVAL_MS = 60_000;
 const PAGE_SIZE = 100;
 const API = "/api/v1";
 const PROVIDER = "OpenAI-API-Compatible";
+const INSTANCES = `${API}/providers/${PROVIDER}/instances`;
 
 const UNAVAILABLE = { kind: "kb_unavailable" } as const;
 const REJECTED = { kind: "kb_rejected" } as const;
@@ -90,12 +92,19 @@ interface Upload {
   contentLength: number;
 }
 
+/** `model_info` 的一项（§11.1），键名就是线上的键名。 */
+export interface ModelInfo {
+  model_name: string;
+  model_type: readonly string[];
+  max_tokens: number;
+}
+
 interface ModelInstance {
   instanceName: string;
-  /** 上游密钥。空串会清空 RAGFlow 里的实例密钥（§11.4），所以这里拒绝发出。 */
+  /** 上游密钥。RAGFlow 按 trim 后的值写入，空值会清空实例密钥（§11.4），所以空串与纯空白都拒绝发出。 */
   apiKey: string;
   baseUrl: string;
-  modelInfo: readonly unknown[];
+  modelInfo: readonly ModelInfo[];
 }
 
 interface ListedDocument {
@@ -111,7 +120,12 @@ export interface Deadlines {
   idleMs: number;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+/** 语义对齐 RAGFlow 写入实例密钥时的 Go `strings.TrimSpace`：JS 的 `trim()` 不剥 U+0085，所以先去掉它。 */
+export function isBlankApiKey(key: string): boolean {
+  return key.replaceAll("\u0085", "").trim() === "";
+}
+
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -244,7 +258,49 @@ const DELETE_TEMPLATE_GROUP: Route<null, typeof NOT_FOUND> = {
   read: deleted,
 };
 
-const MODEL_INSTANCE: Route<null, never> = { read: () => null };
+/** 不读应答字段的下发路由（§11）：`PUT /providers`、实例的建与改、`PATCH /models/default`。 */
+const ACKNOWLEDGED: Route<null, never> = { read: () => null };
+
+/** 一行模型属于哪个实例；有实例就一定有行，系统从不删模型（D7）。 */
+const MODEL_INSTANCES: Route<string[], never> = {
+  read(data) {
+    if (!Array.isArray(data)) {
+      return undefined;
+    }
+    const rows = data.map((row: unknown) => ({
+      provider: fieldOf(row, "provider_name"),
+      instance: fieldOf(row, "instance_name"),
+    }));
+    const named = rows.every(
+      ({ provider, instance }) => isNonEmptyString(provider) && isNonEmptyString(instance),
+    );
+    if (!named) {
+      return undefined;
+    }
+    const ours = rows.filter(({ provider }) => provider === PROVIDER);
+    return [...new Set(ours.map(({ instance }) => instance as string))];
+  },
+};
+
+function modelInfoOf(row: unknown): ModelInfo | undefined {
+  const name = fieldOf(row, "name");
+  const type = fieldOf(row, "model_type");
+  const maxTokens = fieldOf(row, "max_tokens");
+  return isNonEmptyString(name) && Array.isArray(type) && typeof maxTokens === "number"
+    ? { model_name: name, model_type: type as string[], max_tokens: maxTokens }
+    : undefined;
+}
+
+/** 实例的模型列表，读成 `PUT` 实例要带回去的 `model_info` 项。 */
+const INSTANCE_MODELS: Route<ModelInfo[], never> = {
+  read(data) {
+    if (!Array.isArray(data)) {
+      return undefined;
+    }
+    const models = data.flatMap((row: unknown) => modelInfoOf(row) ?? []);
+    return models.length === data.length ? models : undefined;
+  },
+};
 
 /** 空 id 拼不出这条路由；`.`、`..` 编码后不变，会被 URL 解析吃掉，走到别的路由上。 */
 function usable(...ids: readonly string[]): boolean {
@@ -598,20 +654,53 @@ export function createRagflowClient(options: {
     },
 
     async createModelInstance(instance: ModelInstance): Promise<Result<null>> {
-      if (instance.apiKey === "") {
+      if (isBlankApiKey(instance.apiKey)) {
         return UNAVAILABLE;
       }
-      const path = `${API}/providers/${PROVIDER}/instances`;
-      return json("POST", path, MODEL_INSTANCE, instanceBody(instance));
+      return json("POST", INSTANCES, ACKNOWLEDGED, instanceBody(instance));
     },
 
     async updateModelInstance(instance: ModelInstance): Promise<Result<null>> {
-      if (instance.apiKey === "" || !usable(instance.instanceName)) {
+      if (isBlankApiKey(instance.apiKey) || !usable(instance.instanceName)) {
         return UNAVAILABLE;
       }
       const name = encodeURIComponent(instance.instanceName);
-      const path = `${API}/providers/${PROVIDER}/instances/${name}`;
-      return json("PUT", path, MODEL_INSTANCE, instanceBody(instance));
+      return json("PUT", `${INSTANCES}/${name}`, ACKNOWLEDGED, instanceBody(instance));
+    },
+
+    /** 幂等（§11.4）。 */
+    ensureProvider(): Promise<Result<null>> {
+      return json("PUT", `${API}/providers`, ACKNOWLEDGED, { provider_name: PROVIDER });
+    },
+
+    /** `GET /models`：账号在本系统提供方下的实例名。这个列表不含密钥，单实例 `GET` 才有（D4）。 */
+    listModelInstances(): Promise<Result<string[]>> {
+      return json("GET", `${API}/models`, MODEL_INSTANCES);
+    },
+
+    async listInstanceModels(instanceName: string): Promise<Result<ModelInfo[]>> {
+      if (!usable(instanceName)) {
+        return UNAVAILABLE;
+      }
+      const name = encodeURIComponent(instanceName);
+      return json("GET", `${INSTANCES}/${name}/models`, INSTANCE_MODELS);
+    },
+
+    /** 把账号缺省切到这个模型。名字为空就是清空缺省的写法（§11.2、§13），这里拒绝发出。 */
+    async setDefaultModel(target: {
+      instanceName: string;
+      modelName: string;
+      modelType: "embedding" | "chat";
+    }): Promise<Result<null>> {
+      if (target.instanceName === "" || target.modelName === "") {
+        return UNAVAILABLE;
+      }
+      return json("PATCH", `${API}/models/default`, ACKNOWLEDGED, {
+        model_provider: PROVIDER,
+        model_instance: target.instanceName,
+        model_name: target.modelName,
+        model_type: target.modelType,
+      });
     },
   };
 }

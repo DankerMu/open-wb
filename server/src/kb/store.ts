@@ -30,7 +30,10 @@ interface EmbeddingConfig {
 }
 
 interface SettingsPatch {
-  /** 给了就整体替换三列；`apiKey` 由调用方先定好（省略时取 `embeddingApiKey()`，D7）。 */
+  /**
+   * 给了就整体替换三列；`apiKey` 由调用方先定好（省略时取 `embeddingApiKey()`，D7）。任一列变化时同一事务里把探活
+   * 重置为 `never`，三列都不变时保留。
+   */
   embedding?: EmbeddingConfig;
   chatModelId?: string | null;
   /** 给了即确认重建：同一事务里代数加一、全部知识库置 `rebuilding`、记下发起的管理员（D7）。 */
@@ -111,6 +114,9 @@ const SELECT_SETTINGS = "SELECT * FROM kb_settings WHERE id = 'kb'";
 const SELECT_EMBEDDING_KEY = "SELECT embedding_api_key FROM kb_settings WHERE id = 'kb'";
 const UPDATE_EMBEDDING =
   "UPDATE kb_settings SET embedding_name = ?, embedding_base_url = ?, embedding_api_key = ?, updated_at = ? WHERE id = 'kb'";
+/** 探活结果属于写入它的那个身份：名称、地址、密钥任一变化即作废，比对口径同 `UPDATE_PROBE`。 */
+const RESET_PROBE =
+  "UPDATE kb_settings SET embedding_probe_status = 'never', embedding_probe_at = NULL, embedding_probe_message = NULL WHERE id = 'kb' AND (embedding_name IS NOT ? OR embedding_base_url IS NOT ? OR embedding_api_key IS NOT ?)";
 const UPDATE_CHAT_MODEL =
   "UPDATE kb_settings SET chat_model_id = ?, updated_at = ? WHERE id = 'kb'";
 const UPDATE_REBUILD_START =
@@ -185,6 +191,7 @@ export function createKbStore(db: DatabaseSync) {
         const at = Date.now();
         const { embedding, chatModelId, rebuildActorId } = patch;
         if (embedding !== undefined) {
+          db.prepare(RESET_PROBE).run(embedding.name, embedding.baseUrl, embedding.apiKey);
           db.prepare(UPDATE_EMBEDDING).run(embedding.name, embedding.baseUrl, embedding.apiKey, at);
         }
         if (chatModelId !== undefined) {

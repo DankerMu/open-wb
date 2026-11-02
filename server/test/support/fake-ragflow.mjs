@@ -19,23 +19,29 @@
  * 与实例的差异：
  * - 上传应答带 `Content-Length`，实例走 chunked（§7.1）。tasks.md 头部「分块下载不进夹具」只限下载，上传应答
  *   用哪种分帧不影响客户端；下载与实例一样始终带 `Content-Length`（§9）。
- * - `embedding_model` 只校验三段式，不校验模型与提供方存在（§4.4 的两行 `102`）：tasks 5.2 只要求三段式，模型路由
- *   在组 8，归组 8。
  *
  * 文档状态是静态的：解析与停止按当前状态应答，不自动迁移，状态由用例经 `setDocumentStatus` 设置（实测里迁移
  * 是异步的，用例要的是确定的状态）。
  *
  * 请求在请求头到达时入记录，请求体读完后补全；请求体没读完连接就断了，记录标 `aborted`，不进状态。密钥不进
  * 记录，只记 Bearer 对不对。未知路由回 §12 的 404 并标 `unknown`：夹具没有清空缺省与删除模型配置的路由，这些
- * 请求落在这里（design D17）。组 8、9、11 按需加路由。
+ * 请求落在这里（design D17）。组 9、11 按需加路由。模型路由与 `embedding_model` 的引用校验在
+ * `fake-ragflow-models.mjs`（组 8）。
  */
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
-import { createScript, JSON_TYPE, send } from "./fake-ragflow-script.mjs";
+import {
+  API,
+  createModelState,
+  embeddingRejection,
+  MODEL_ROUTES,
+  modelViews,
+  seedModel,
+} from "./fake-ragflow-models.mjs";
+import { createScript, failure, JSON_TYPE, send, success } from "./fake-ragflow-script.mjs";
 
 const DEFAULT_KEY = "fake-ragflow-key";
 const VERSION = "v1.0.0-rc2";
-const API = "/api/v1";
 const NOT_FOUND = "Resource not found";
 const INVALID_UUID = "Invalid UUID format";
 const UUID_SHAPE = /^(?:[0-9a-f]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/iu;
@@ -67,7 +73,6 @@ const PARSER_IDS = new Set([
 ]);
 const PARSER_ERROR =
   "input should be 'general', 'qa', 'manual', 'table', 'paper', 'book', 'laws', 'presentation', 'picture', 'one', 'audio' or 'email'";
-const EMBEDDING_FORMAT = "embedding model identifier must follow <model_name>@<provider> format";
 /**
  * 表 C 末列的并集，加 §9 上传成功的 `json`。只有 §7.1 的 `bin.exe`、`thing.zzz`、`noext` 是实测的拒绝，其余不在
  * 这里的后缀被拒都是由表 C 推断的。
@@ -107,9 +112,7 @@ const CRLF = Buffer.from("\r\n");
 const HEADER_END = Buffer.from("\r\n\r\n");
 
 const newId = () => randomBytes(16).toString("hex");
-const failure = (code, message, extra = {}) => ({ json: { code, data: null, message, ...extra } });
 const notFound = () => failure(404, NOT_FOUND);
-const success = (data, message = "success") => ({ json: { code: 0, data, message } });
 
 /** §9.1：文档不存在时没有 `data` 键，数据集不存在时有。 */
 const NOT_FOUND_DOCUMENT = '{"code":404,"message":"Resource not found"}';
@@ -155,23 +158,6 @@ function templateRejection({
   return parserId === "naive" || PARSER_IDS.has(parserId) ? undefined : failure(102, PARSER_ERROR);
 }
 
-/** §4.4：账号没有名为 `default` 的实例，两段式查不到。 */
-function embeddingRejection(model) {
-  if (model === undefined) {
-    return undefined;
-  }
-  const parts = String(model).split("@");
-  if (parts.length === 2 && parts.every((part) => part !== "")) {
-    return failure(
-      102,
-      'model configuration unavailable: instance "default" lookup failed: record not found',
-    );
-  }
-  return parts.length === 3 && parts.every((part) => part !== "")
-    ? undefined
-    : failure(102, EMBEDDING_FORMAT);
-}
-
 /** §4.5。缺 `name` 的 message 是外推，见文件头。 */
 function nameRejection(name) {
   if (typeof name !== "string" || name.trim() === "") {
@@ -188,7 +174,7 @@ function createDataset(state, request) {
     extraField(body, DATASET_FIELDS) ??
     templateRejection(body) ??
     nameRejection(body.name) ??
-    embeddingRejection(body.embedding_model);
+    embeddingRejection(body.embedding_model, state.models);
   if (rejection !== undefined) {
     return rejection;
   }
@@ -526,6 +512,7 @@ const ROUTES = [
   ],
   ["GET", GROUP, groupAbsent],
   ["DELETE", GROUP, groupAbsent],
+  ...MODEL_ROUTES,
 ].map(([method, path, handler, options]) => ({
   method,
   pattern: new RegExp(`^${path}$`, "u"),
@@ -606,6 +593,7 @@ function createState() {
   const datasets = new Map();
   return {
     datasets,
+    models: createModelState(),
     add(name, parserId, embeddingModel) {
       const canonical = parserId === "naive" ? "general" : parserId;
       const dataset = {
@@ -714,6 +702,7 @@ export async function start(options = {}) {
     answer: script.answer,
     fault: script.fault,
     addDataset: (name = "owb-seed") => state.add(name, "general", "").id,
+    addModel: (instance, name, modelType) => seedModel(state.models, instance, name, modelType),
     addDocument(datasetId, seed) {
       const dataset = state.datasets.get(datasetId);
       if (dataset === undefined) {
@@ -725,6 +714,7 @@ export async function start(options = {}) {
     setDocumentStatus(datasetId, documentId, status) {
       documentOf(state, datasetId, documentId).ingestionStatus = status;
     },
+    ...modelViews(state.models),
     datasets: () =>
       [...state.datasets.values()].map(({ id, name, parserId, embeddingModel }) => ({
         id,
