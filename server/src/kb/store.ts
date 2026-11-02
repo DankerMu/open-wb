@@ -41,7 +41,7 @@ interface SettingsPatch {
 }
 
 /** `knowledge_bases` 的一行。`template` 的取值由 050 的 CHECK 钉住。 */
-interface KnowledgeBase {
+export interface KnowledgeBase {
   id: string;
   ownerId: string;
   name: string;

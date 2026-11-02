@@ -1,6 +1,6 @@
 /**
- * kb/rest：知识库的路由（s2a-kb-ragflow D5、D7；ragflow-backend「知识库状态端点」「知识库可用性」「知识库模型设置」）。
- * `GET /api/kb/status`、三条设置路由，以及 `/api/kb/*` 的关闭判定。
+ * kb/rest：知识库的路由（s2a-kb-ragflow D5、D7、D9；ragflow-backend「知识库状态端点」「知识库可用性」「知识库模型设置」，
+ * knowledge-bases「知识库端点」）。`GET /api/kb/status`、三条设置路由、建库列表删库三条路由，以及 `/api/kb/*` 的关闭判定。
  *
  * 关闭判定是 root `preParsing` 钩子，只在知识库关闭时安装。root 钩子按添加次序运行，且都先于路由级钩子，所以
  * 判定次序是：cookie guard 的 401（`http/guard.ts`，在 `registerAuth` 之后添加）→ 503 `kb_disabled` → 路由级的管理员
@@ -15,6 +15,9 @@
  * 设置路由管理员专用：次序同 `models/rest.ts`，未登录 401（root guard）→ 关闭时 503 → 非管理员 403（路由级 `preParsing`）→
  * body 解析（`PUT` 与 bodyless 的 `POST` 都在 content-parser 归属集）→ 设置模块的校验。业务都在 `kb/settings.ts`。
  * 路由在知识库关闭时同样注册：不注册就是 catch-all 的 404，不是 503；处理函数在关闭时走不到。
+ *
+ * 知识库路由对任何已登录用户开放，只操作自己的库：`POST` 在 content-parser 归属集，业务都在 `kb/bases.ts`。`DELETE` 不读
+ * body、不在归属集（同 `connectors/rest.ts`），所有权在路由级 `preParsing` 判定，所以别人的或不存在的 id 带坏 body 也是 404。
  */
 import type {
   FastifyInstance,
@@ -24,6 +27,7 @@ import type {
 } from "fastify";
 import { HttpError } from "../core/errors/index.js";
 import { isAdmin } from "../core/roles.js";
+import type { createKbBases } from "./bases.js";
 import type { createRagflowClient } from "./ragflow-client.js";
 import type { createKbSettings } from "./settings.js";
 import type { createKbStore } from "./store.js";
@@ -34,8 +38,11 @@ const KB_ROUTE_PREFIX = "/api/kb/";
 const STATUS_ROUTE = "/api/kb/status";
 const SETTINGS_ROUTE = "/api/kb/settings";
 const SETTINGS_PROBE_ROUTE = "/api/kb/settings/probe";
+const BASES_ROUTE = "/api/kb/bases";
+const BASE_ROUTE = "/api/kb/bases/:id";
 /** 最长的合法 body 也只有几百字节，同 `models/rest.ts`。 */
 const SETTINGS_BODY_LIMIT = 16 * 1024;
+const BASE_BODY_LIMIT = 16 * 1024;
 /** Fastify 不接受 0：取最小合法值，显式的 no-body 校验负责「任意 body 即 400」。 */
 const BODYLESS_BODY_LIMIT = 1;
 
@@ -43,6 +50,7 @@ interface KbRestDependencies {
   store: Pick<ReturnType<typeof createKbStore>, "settings">;
   client: Pick<ReturnType<typeof createRagflowClient>, "version">;
   settings: ReturnType<typeof createKbSettings>;
+  bases: ReturnType<typeof createKbBases>;
   uploadMaxBytes: number;
   uploadMaxFiles: number;
   onVersionMismatch: () => void;
@@ -110,12 +118,14 @@ export function registerKbRoutes(
   );
 
   /** 关闭时 root 钩子已答 503，走到这里就是开启的。 */
-  const settings = (): KbRestDependencies["settings"] => {
+  const enabled = (): KbRestDependencies => {
     if (dependencies === undefined) {
       throw new HttpError("kb_disabled");
     }
-    return dependencies.settings;
+    return dependencies;
   };
+  const settings = (): KbRestDependencies["settings"] => enabled().settings;
+  const bases = (): KbRestDependencies["bases"] => enabled().bases;
   const admin = { onRequest: noStore, preParsing: adminOnly };
 
   app.get(SETTINGS_ROUTE, admin, () => settings().view());
@@ -130,4 +140,32 @@ export function registerKbRoutes(
     }
     return settings().probe(principalOf(request).id);
   });
+
+  app.get(BASES_ROUTE, { onRequest: noStore }, (request) => ({
+    bases: bases().list(principalOf(request).id),
+  }));
+
+  app.post(
+    BASES_ROUTE,
+    { onRequest: noStore, bodyLimit: BASE_BODY_LIMIT },
+    async (request, reply) => {
+      const view = await bases().create(request.body, principalOf(request).id);
+      return reply.code(201).send(view);
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    BASE_ROUTE,
+    {
+      onRequest: noStore,
+      preParsing(request, _reply, payload, done) {
+        bases().assertOwned(request.params.id, principalOf(request).id);
+        done(null, payload);
+      },
+    },
+    async (request, reply) => {
+      await bases().remove(request.params.id, principalOf(request).id);
+      return reply.code(204).send();
+    },
+  );
 }

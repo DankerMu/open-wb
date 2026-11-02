@@ -254,7 +254,7 @@ function isModelId(value: string): boolean {
 }
 
 /** 非空且不含 U+0000–U+001F 与 U+007F。 */
-function isLabel(value: string): boolean {
+export function isLabel(value: string): boolean {
   if (value.length === 0) {
     return false;
   }

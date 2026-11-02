@@ -115,7 +115,7 @@
 | F-CTR-EXP | 专家卡片（分类/标签）、加入会话——change `s1d-experts-skills`（中心「专家」tab；加入会话的欢迎态预选随该 change 任务组 9） |
 | F-CTR-SKL | 技能清单与启停——change `s1d-experts-skills`（中心「技能」tab 的账号缺省「默认启用」；会话级「能力」弹层随该 change 任务组 10） |
 | F-CTR-CON | MCP 连接器（仅显式配置）——change `s1d-connectors`（中心「连接器」tab：管理员登记 stdio / http、探活与账号缺省「默认启用」；会话级「能力」弹层的连接器段随该 change 任务组 7） |
-| F-CTR-KB1 | 12 种切片模板 + RAPTOR/知识图谱开关 |
+| F-CTR-KB1 | 11 种切片模板 + RAPTOR/知识图谱开关 |
 | F-CTR-KB2 | 文档摄取与状态 |
 | F-CTR-KB3 | 检索测试 |
 | F-CTR-KB4 | 可见范围四档、共享只读、跨账号检索审计 |
@@ -412,7 +412,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 ### 里程碑 P2 — 知识库
 
 **S2a 知识库建库与摄取（对接 RAGFlow 服务，change `s2a-kb-ragflow`）**
-- Outcome：app-server 新模块 `kb` 以单一服务账号直连运行中的 RAGFlow（钉住 `v1.0.0-rc2`，ADR-0016），`kbservice/` 与 Python 工具链退役。先对 rc2 接口实测，结论钉住假 RAGFlow 夹具。所有者在中心「知识库」tab 建库（12 种模板 + RAPTOR / 知识图谱开关，建库时固定）、从工作空间或本地上传入库（原件只存 RAGFlow，工作空间来源经沙箱 `resolve(read)` 读后上传）、看解析状态与切片数、移出文档、删库；状态以 RAGFlow 为准、按需读取。管理员在模型 tab 配置全局唯一的知识库嵌入模型与知识库对话模型，由 app-server 下发到 RAGFlow；更换嵌入模型经确认后全量重建。未配 `RAGFLOW_BASE_URL` 即知识库关闭，RAGFlow 不可达不阻断启动。S2a 的知识库只对所有者可见（四档在 S2c）。
+- Outcome：app-server 新模块 `kb` 以单一服务账号直连运行中的 RAGFlow（钉住 `v1.0.0-rc2`，ADR-0016），`kbservice/` 与 Python 工具链退役。先对 rc2 接口实测，结论钉住假 RAGFlow 夹具。所有者在中心「知识库」tab 建库（11 种模板 + RAPTOR / 知识图谱开关，建库时固定）、从工作空间或本地上传入库（原件只存 RAGFlow，工作空间来源经沙箱 `resolve(read)` 读后上传）、看解析状态与切片数、移出文档、删库；状态以 RAGFlow 为准、按需读取。管理员在模型 tab 配置全局唯一的知识库嵌入模型与知识库对话模型，由 app-server 下发到 RAGFlow；更换嵌入模型经确认后全量重建。未配 `RAGFLOW_BASE_URL` 即知识库关闭，RAGFlow 不可达不阻断启动。S2a 的知识库只对所有者可见（四档在 S2c）。
 - 覆盖：F-CTR-KB1、F-CTR-KB2。
 - 必读增量：change `s2a-kb-ragflow` 的 proposal / design / specs / tasks；ADR-0016、0005（2026-11-01 补充）、0008；ATTRIBUTION.md §3。
 - Verify：CI 打假 RAGFlow（server / web 单测、`make ui-walk`）；真实 RAGFlow 只在本机 `make smoke-kb` 与功能验收「中心·知识库（CK）」：一批真实混合格式文档摄取成功、状态流转正确。

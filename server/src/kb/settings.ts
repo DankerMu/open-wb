@@ -32,6 +32,7 @@ import {
   isBlankApiKey,
   isRecord,
   type ModelInfo,
+  PROVIDER,
 } from "./ragflow-client.js";
 import type { createKbStore } from "./store.js";
 
@@ -182,8 +183,8 @@ function parseSave(body: unknown): SaveRequest {
   };
 }
 
-/** 下发的结果：成功取值，失败抛 `kb_unavailable` / `kb_rejected`，只有 `kind`，不带 RAGFlow 的原文。 */
-function unwrap<T>(
+/** RAGFlow 调用的结果：成功取值，失败抛 `kb_unavailable` / `kb_rejected`，只有 `kind`，不带 RAGFlow 的原文。 */
+export function unwrap<T>(
   result: { kind: "ok"; value: T } | { kind: "kb_unavailable" | "kb_rejected" },
 ): T {
   if (result.kind !== "ok") {
@@ -212,6 +213,11 @@ async function provision(client: Client, target: Provision): Promise<void> {
     unwrap(await client.createModelInstance({ instanceName, apiKey, baseUrl, modelInfo }));
   }
   unwrap(await client.setDefaultModel({ instanceName, modelName, modelType }));
+}
+
+/** 数据集引用嵌入模型的三段式（§4.4）：恒显式传，不传时回落到账号缺省甚至空值。 */
+export function embeddingModelOf(name: string): string {
+  return `${name}@${EMBEDDING_INSTANCE}@${PROVIDER}`;
 }
 
 /** 身份是 `(name, baseUrl)`，只改密钥不算（D7）。 */
