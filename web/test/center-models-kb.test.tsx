@@ -37,6 +37,7 @@ const UNAVAILABLE = "知识库服务暂不可用";
 const KB_MODEL_IN_USE = "该模型是知识库对话模型，先在知识库模型设置里换掉它";
 const KB_CHAT_MODEL_LOCKED = "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型";
 const KB_REBUILDING = "知识库正在重建，请稍后再试";
+const KB_REBUILD_REQUIRED = "更换嵌入模型需要重建全部知识库，请确认后再保存";
 
 afterEach(() => {
   cleanup();
@@ -335,10 +336,12 @@ describe("嵌入模型对话框", () => {
     ]);
   });
 
-  it("确认后服务端拒绝（409 kb_rebuilding）：确认框关闭，表单内 role=alert 显示信封文案，不探活", async () => {
+  it("确认后服务端拒绝（409 kb_rebuilding）：确认框关闭，表单内 role=alert 显示信封文案，不探活；重读设置后段内显示重建状态", async () => {
     const fake = fakeSettings(settings({ bases: 2, documents: 5 }));
     fake.updateKbSettings.mockRejectedValueOnce(new ApiError(409, "kb_rebuilding", KB_REBUILDING));
-    const dialog = await openEmbedding(await renderReady(fake));
+    const section = await renderReady(fake);
+    fake.getKbSettings.mockResolvedValueOnce(settings({ bases: 2, documents: 5, rebuilding: 2 }));
+    const dialog = await openEmbedding(section);
 
     type(dialog, "上游地址", GW2);
     save(dialog);
@@ -349,6 +352,97 @@ describe("嵌入模型对话框", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
     expect(fake.probeKbEmbedding).not.toHaveBeenCalled();
+    expect(await within(section).findByText("重建中 2 个")).toBeTruthy();
+    expect(fake.getKbSettings).toHaveBeenCalledTimes(2);
+    expect(within(dialog).getByRole("alert").textContent).toBe(KB_REBUILDING);
+  });
+
+  it("快照过期（读到时没有知识库，保存得 409 kb_rebuild_required）：重读设置后按新的数目弹确认；「重建并保存」恰一次带 confirmRebuild:true 的保存", async () => {
+    const fake = fakeSettings(settings({ bases: 0 }));
+    fake.updateKbSettings.mockRejectedValueOnce(
+      new ApiError(409, "kb_rebuild_required", KB_REBUILD_REQUIRED),
+    );
+    const section = await renderReady(fake);
+    fake.getKbSettings.mockResolvedValueOnce(settings({ bases: 2, documents: 5 }));
+    const dialog = await openEmbedding(section);
+
+    type(dialog, "名称", "text-embedding-3-small");
+    save(dialog);
+    const confirm = await screen.findByRole("alertdialog", { name: CONFIRM });
+    expect(within(confirm).getByText(/个知识库/u).textContent).toBe(
+      "更换嵌入模型会重建全部 2 个知识库（共 5 份文档），重建期间不能入库。",
+    );
+    expect(fake.getKbSettings).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(confirm).getByRole("button", { name: "重建并保存" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    const embedding = { name: "text-embedding-3-small", baseUrl: GW };
+    expect(fake.updateKbSettings.mock.calls).toEqual([
+      [{ embedding }],
+      [{ embedding, confirmRebuild: true }],
+    ]);
+  });
+
+  it("快照过期但重读后仍没有知识库：不弹确认，表单内显示信封文案", async () => {
+    const fake = fakeSettings(settings({ bases: 0 }));
+    fake.updateKbSettings.mockRejectedValueOnce(
+      new ApiError(409, "kb_rebuild_required", KB_REBUILD_REQUIRED),
+    );
+    const dialog = await openEmbedding(await renderReady(fake));
+
+    type(dialog, "名称", "text-embedding-3-small");
+    save(dialog);
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(KB_REBUILD_REQUIRED);
+    await waitFor(() => expect(fake.getKbSettings).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("确认过的保存仍得 409 kb_rebuild_required：不再回到确认框，表单内显示信封文案", async () => {
+    const fake = fakeSettings(settings({ bases: 2, documents: 5 }));
+    fake.updateKbSettings.mockRejectedValueOnce(
+      new ApiError(409, "kb_rebuild_required", KB_REBUILD_REQUIRED),
+    );
+    const dialog = await openEmbedding(await renderReady(fake));
+
+    type(dialog, "名称", "text-embedding-3-small");
+    save(dialog);
+    const confirm = await screen.findByRole("alertdialog", { name: CONFIRM });
+    fireEvent.click(within(confirm).getByRole("button", { name: "重建并保存" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(KB_REBUILD_REQUIRED);
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(fake.getKbSettings).toHaveBeenCalledTimes(2);
+    expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("手动探活在途时保存了新的嵌入模型：保存后仍恰发一次自动探活（不被在途的那次吞掉）", async () => {
+    const fake = fakeSettings(settings());
+    // 服务端探活逐次串行：第一次挂起；第二次排在它之后，应答新身份的 `ok`。
+    let release!: () => void;
+    const first = new Promise<KbSettingsView>((resolve) => {
+      release = () => resolve(settings({ embedding: { ...BGE, name: "text-embedding-3-small" } }));
+    });
+    const ok = { status: "ok" as const, message: null, at: PROBED_AT };
+    const probed = settings({ embedding: { ...BGE, name: "text-embedding-3-small", probe: ok } });
+    fake.probeKbEmbedding
+      .mockImplementationOnce(() => first)
+      .mockImplementationOnce(() => first.then(() => probed));
+    const section = await renderReady(fake);
+
+    fireEvent.click(within(section).getByRole("button", { name: "探活" }));
+    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(1));
+    const dialog = await openEmbedding(section);
+    type(dialog, "名称", "text-embedding-3-small");
+    save(dialog);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+
+    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(2));
+    release();
+    expect(await within(section).findByText("正常")).toBeTruthy();
+    expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
+    expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(2);
   });
 
   it("「探活」恰一次 probeKbEmbedding，显示返回的探活状态", async () => {
@@ -394,12 +488,13 @@ describe("知识库对话模型", () => {
     expect(within(section).queryByText(note) !== null).toBe(locked);
   });
 
-  it("服务端 409 kb_chat_model_locked：段内显示信封文案，下拉仍为原值", async () => {
+  it("服务端 409 kb_chat_model_locked：段内显示信封文案，下拉仍为原值；重读设置后下拉禁用并显示旁注", async () => {
     const fake = fakeSettings(settings({ chatModelId: "m2" }));
     fake.updateKbSettings.mockRejectedValueOnce(
       new ApiError(409, "kb_chat_model_locked", KB_CHAT_MODEL_LOCKED),
     );
     const section = await renderReady(fake);
+    fake.getKbSettings.mockResolvedValueOnce(settings({ chatModelId: "m2", compileBases: 1 }));
 
     const options = await openOptions(section, CHAT);
     const none = options.find((option) => option.textContent === "不使用");
@@ -408,6 +503,12 @@ describe("知识库对话模型", () => {
     await waitFor(() => expect(sectionAlerts(section)).toEqual([KB_CHAT_MODEL_LOCKED]));
     expect(fake.updateKbSettings.mock.calls).toEqual([[{ chatModelId: null }]]);
     expect(chatTrigger(section).textContent).toBe("m2");
+    await waitFor(() => expect(chatTrigger(section).disabled).toBe(true));
+    expect(
+      within(section).getByText("已有 1 个开启 RAPTOR 或知识图谱的知识库，不能更换或取消"),
+    ).toBeTruthy();
+    expect(sectionAlerts(section)).toEqual([KB_CHAT_MODEL_LOCKED]);
+    expect(fake.getKbSettings).toHaveBeenCalledTimes(2);
   });
 });
 
