@@ -168,7 +168,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 
 - **登录**：浏览器 → OIDC IdP → callback → auth 建 Principal，首登 provisioning 账号与沙箱根目录。
 - **挂载**：UI 填凭证 → mounts 起 rclone 挂到空间根下的挂载点 → 挂载点在空间根下，沙箱 resolve 按包含关系覆盖 → 在线状态探测。
-- **摄取**：UI 选工作空间文件或本地上传 → app-server `kb`（工作空间来源经沙箱 `resolve(read)` 读取）→ RAGFlow 解析/切片/嵌入（原件存 RAGFlow，嵌入直连模型上游）→ Infinity（经 `DOC_ENGINE`）。
+- **摄取**：UI 选工作空间文件（含只读挂载）或本地上传 → app-server `kb` 在该库的写锁下逐条处理：工作空间来源依次过沙箱 `resolve(read)`、查重与 500 份上限、模板后缀、读取与大小，任一步不过就带固定的 `reason` 与 `message` 记入 `rejected`，其余条目照常处理；通过的逐份流式上传，各自触发一次解析（`document_ids` 只有这一份）→ RAGFlow 解析/切片/嵌入（原件存 RAGFlow，嵌入直连模型上游；开编译的库由 pipeline 里的 Compiler 随解析跑 RAPTOR / 知识图谱）→ Infinity（经 `DOC_ENGINE`）。拒绝原因见 [knowledge-base.md](knowledge-base.md)「拒绝原因」。
 - **审计**：sandbox 拒绝、共享 KB 检索、账号操作、model-proxy 计量 → `core/audit` 追加表 → center 审计页查询。
 
 ## 7. 决策索引
@@ -988,4 +988,4 @@ modelRoles:
 
 ### 9.13 知识库（S2a，change `s2a-kb-ragflow`）
 
-正文在 [knowledge-base.md](knowledge-base.md)：配置键、密钥文件、状态端点、模型设置与联动、知识库端点与模板表、编译资源（模板组与画布）、编译状态、工作空间来源入库，以及嵌入模型更换与全量重建（重建流程、下载判别、跳过规则、续做与关停、`kb_dataset_leak` / `kb_pipeline_leak`）。
+正文在 [knowledge-base.md](knowledge-base.md)：配置键、密钥文件、状态端点、模型设置与联动、知识库端点与模板表、编译资源（模板组与画布）、编译状态、工作空间来源入库，嵌入模型更换与全量重建（重建流程、下载判别、跳过规则、续做与关停、`kb_dataset_leak` / `kb_pipeline_leak`），以及部署要求、回滚与真实端点冒烟 `make smoke-kb`。
