@@ -2,7 +2,7 @@
  * 建库、列表与删库（s2a-kb-ragflow D2、D9、D20；knowledge-bases「知识库端点」「知识库审计」）。
  *
  * 两种库：两个开关都关的走 `parse_type:1`，没有模板组与画布；任一开关开的经 `kb/pipeline.ts` 的 `createPipeline` 建模板组、
- * 画布与 `parse_type:2` 数据集（#1869）。编译状态的读取属第三刀（#1870）：在那之前，列表里开了开关的库 `compile` 为 `null`。
+ * 画布与 `parse_type:2` 数据集（#1869）。
  *
  * 建库：body 的键集、类型、名称与模板在取锁之前判定，不读库。其余判定在设置锁内，读到的是锁内的设置行与知识库行：
  * 嵌入就绪、开关为真而对话模型未指定、重名、数量上限，次序不变，都不发出站请求。建库全程持锁，所以不会建出代数过期的库，
@@ -13,10 +13,12 @@
  * 准入是同步的，到达次序就是调用次序（D20）。取锁后重判，排队期间库可能已删除或转入重建。每一代走 `deletePipeline`，
  * `rebuild_failed` 时先删新一代；任一步失败行不动，重试从头走一遍，已删的按 `not_found` 跳过。
  *
- * 列表与 201 的 `BaseView` 都只读本地行：201 里开着的类型为 `pending`，关着的为 `off`。
+ * 列表只依赖本地行；`compile` 由 `kb/compile-status.ts` 现读（#1870），读不到为 `null`，不影响列表。201 的 `BaseView` 不读
+ * RAGFlow：开着的类型为 `pending`，关着的为 `off`。
  */
 import { HttpError } from "../core/errors/index.js";
 import { isLabel } from "../model-catalog.js";
+import type { CompileView, createCompileStatus } from "./compile-status.js";
 import type { createKbLocks } from "./locks.js";
 import type { createKbPipeline, PipelineResources } from "./pipeline.js";
 import { type createRagflowClient, isRecord } from "./ragflow-client.js";
@@ -27,10 +29,6 @@ import { templateOf } from "./templates.js";
 const BODY_KEYS = new Set(["name", "template", "raptor", "graph"]);
 const MAX_NAME_CODE_POINTS = 64;
 const MAX_BASES_PER_OWNER = 50;
-/** 两个开关都为 0 的库的 `compile`：恒定值，不发出站请求。 */
-const COMPILE_OFF = { raptor: "off", graph: "off" } as const;
-
-type CompileView = Record<"raptor" | "graph", "off" | "pending"> | null;
 
 interface AuditEvent {
   kind: "kb.create" | "kb.delete";
@@ -58,6 +56,8 @@ interface KbBasesDependencies {
     "createPipeline" | "deletePipeline" | "discard"
   >;
   locks: Pick<ReturnType<typeof createKbLocks>, "settings" | "write">;
+  /** 列表的编译状态；由装配注入，`compile-status.ts` 经 `documents.ts` 间接依赖本文件。 */
+  compileStatus: Pick<ReturnType<typeof createCompileStatus>, "read">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
 }
@@ -136,10 +136,6 @@ function viewOf(base: KnowledgeBase, documents: number, compile: CompileView) {
   return { id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt };
 }
 
-/** 列表：开了开关的库读不到编译状态，是 `null`，不是 `off`（第三刀接上读取）。 */
-const listedCompile = ({ raptor, graph }: KnowledgeBase): CompileView =>
-  raptor || graph ? null : COMPILE_OFF;
-
 /** 201：不读 RAGFlow，开着的类型还没有产出。 */
 const createdCompile = ({ raptor, graph }: KnowledgeBase): CompileView => ({
   raptor: raptor ? "pending" : "off",
@@ -147,7 +143,7 @@ const createdCompile = ({ raptor, graph }: KnowledgeBase): CompileView => ({
 });
 
 export function createKbBases(dependencies: KbBasesDependencies) {
-  const { store, client, pipeline, locks, audit } = dependencies;
+  const { store, client, pipeline, locks, compileStatus, audit } = dependencies;
 
   function deletable(id: string, ownerId: string): KnowledgeBase {
     const base = ownedBase(store, id, ownerId);
@@ -228,11 +224,13 @@ export function createKbBases(dependencies: KbBasesDependencies) {
   }
 
   return {
-    /** `GET /api/kb/bases`：按 `created_at` 升序，只读本地行。 */
-    list(ownerId: string) {
-      return store
-        .listBases(ownerId)
-        .map((base) => viewOf(base, store.countDocuments(base.id), listedCompile(base)));
+    /** `GET /api/kb/bases`：按 `created_at` 升序。库与文档数只读本地行，`compile` 各库并发现读、共用总期限。 */
+    async list(ownerId: string) {
+      const bases = store.listBases(ownerId);
+      const compiles = await compileStatus.read(bases);
+      return bases.map((base, index) =>
+        viewOf(base, store.countDocuments(base.id), compiles[index] ?? null),
+      );
     },
 
     /** `POST /api/kb/bases`。 */

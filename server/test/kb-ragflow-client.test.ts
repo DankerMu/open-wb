@@ -660,6 +660,7 @@ describe("客户端的调用面（design D4、D7）", () => {
       "ensureProvider",
       "listBuiltinTemplates",
       "listDocuments",
+      "listIngestionLogs",
       "listInstanceModels",
       "listModelInstances",
       "parseDocument",

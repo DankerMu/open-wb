@@ -14,6 +14,7 @@ import { emit } from "../core/audit/index.js";
 import type { ModelWriteGuard } from "../models/rest.js";
 import { createModelStore } from "../models/store.js";
 import { createKbBases } from "./bases.js";
+import { createCompileStatus } from "./compile-status.js";
 import {
   createKbDocuments,
   type DocumentRemovalTiming,
@@ -61,6 +62,8 @@ export interface KbDependencies {
   uploadBodyDeadline?: UploadBodyDeadline;
   /** 测试缝：源文件 `fstat` 之后、读取之前调用；生产不传。 */
   onSourceStat?: (absPath: string) => void;
+  /** 列表里编译状态读取的总期限（测试注入短期限）；省略时 5 s（D9）。 */
+  compileStatusDeadlineMs?: number;
 }
 
 export function registerKb(
@@ -79,6 +82,7 @@ export function registerKb(
     documentDelete,
     uploadBodyDeadline,
     onSourceStat,
+    compileStatusDeadlineMs,
     ...clientOptions
   } = dependencies;
   const { log, now = Date.now } = dependencies;
@@ -107,6 +111,7 @@ export function registerKb(
       client,
       pipeline: createKbPipeline({ client, log }),
       locks,
+      compileStatus: createCompileStatus({ store, client, deadlineMs: compileStatusDeadlineMs }),
       audit,
     }),
     documents: createKbDocuments({

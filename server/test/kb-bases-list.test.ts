@@ -7,6 +7,7 @@ import { BASES, COMPILE_OFF, createdBase } from "./kb-bases-helpers.js";
 import {
   addCompileBase,
   configuredWorld,
+  routes,
   useSettingsWorlds,
   type World,
 } from "./kb-settings-helpers.js";
@@ -114,14 +115,14 @@ describe("GET /api/kb/bases", () => {
     expect(world.sent()).toEqual([]);
   });
 
-  it("开了开关的行（store 直接写入）：compile 为 null，不发编译读取，第三刀接上", async () => {
+  it("开了开关的行（store 直接写入），数据集不在 RAGFlow：只读一次文档列表，code:404，compile 为 null", async () => {
     const world = await ready();
     const { id } = await createdBase(world, "普通库");
     addCompileBase(world, 2, { owner_id: world.store.getBase(id)?.ownerId ?? "" });
     world.forget();
     const compiled = (await basesOf(world)).find(({ raptor }) => raptor === true);
     expect(compiled).toMatchObject({ raptor: true, graph: false, compile: null });
-    expect(world.sent()).toEqual([]);
+    expect(routes(world.sent())).toEqual(["GET /api/v1/datasets/ds-2/documents"]);
   });
 
   it("RAGFlow 不可达时列表照常 200", async () => {

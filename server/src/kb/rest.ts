@@ -184,8 +184,8 @@ export function registerKbRoutes(
     return settings().probe(principalOf(request).id);
   });
 
-  app.get(BASES_ROUTE, { onRequest: noStore }, (request) => ({
-    bases: bases().list(principalOf(request).id),
+  app.get(BASES_ROUTE, { onRequest: noStore }, async (request) => ({
+    bases: await bases().list(principalOf(request).id),
   }));
 
   app.post(

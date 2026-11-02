@@ -988,4 +988,4 @@ modelRoles:
 
 ### 9.13 知识库（S2a，change `s2a-kb-ragflow`）
 
-正文在 [knowledge-base.md](knowledge-base.md)：配置键、密钥文件、状态端点、模型设置与联动、知识库端点与模板表、编译资源（模板组与画布）、工作空间来源入库。
+正文在 [knowledge-base.md](knowledge-base.md)：配置键、密钥文件、状态端点、模型设置与联动、知识库端点与模板表、编译资源（模板组与画布）、编译状态、工作空间来源入库。
