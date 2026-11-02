@@ -5,7 +5,7 @@
  * 打假 RAGFlow，挂载是真实 manager（`kb-ingest-helpers.ts`）。期望值是 spec 的字面量。
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, symlinkSync } from "node:fs";
+import { mkdirSync, statSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -278,13 +278,20 @@ describe("文档数上限", () => {
 });
 
 describe("请求判定", () => {
-  it("paths 为空、超过上限、类型不对或键集不对：400，零出站", async () => {
+  it("paths 为空、超过上限、类型不对、路径过长或键集不对：400，零出站，无审计", async () => {
     const world = await open({ kb: { uploadMaxFiles: 2 } });
+    world.write("a.md", "a");
     for (const body of [
       { workspaceId: W1, paths: [] },
       { workspaceId: W1, paths: ["a.md", "b.md", "c.md"] },
       { workspaceId: W1, paths: "a.md" },
       { workspaceId: W1, paths: [1] },
+      // 4097 字节。
+      { workspaceId: W1, paths: ["a".repeat(4097)] },
+      // 整个请求：前一条合规也不处理；越界的写法也不写 sandbox.reject。4097 字节。
+      { workspaceId: W1, paths: ["a.md", `../${"a".repeat(4094)}`] },
+      // 1369 个字符，4101 字节。
+      { workspaceId: W1, paths: ["a.md", `${"字".repeat(1366)}.md`] },
       { workspaceId: W1 },
       { paths: ["a.md"] },
       { workspaceId: 7, paths: ["a.md"] },
@@ -296,6 +303,17 @@ describe("请求判定", () => {
       expect(response.json()).toEqual(BAD_REQUEST);
     }
     expect(world.lines()).toEqual([]);
+    expect(world.audits("sandbox.reject")).toEqual([]);
+    expect(world.audits("kb.ingest_reject")).toEqual([]);
+  });
+
+  it("路径恰 4096 字节不是请求错误：201，按逐条处理走", async () => {
+    const world = await open();
+    const paths = ["a".repeat(4096), `${"字".repeat(1364)}a.md`];
+    const response = await world.ingest(paths);
+    expect(response.statusCode).toBe(201);
+    expect(response.json<Ingested>().rejected.map(({ path }) => path)).toEqual(paths);
+    expect(world.audits("kb.ingest_reject")).toHaveLength(2);
   });
 
   it("恰好等于上限的 paths 合法", async () => {
@@ -446,7 +464,16 @@ describe("上传与视图", () => {
       sourcePath: "a.md",
       ragflowDocumentId: remote?.id,
     });
-    expect(row?.sourceMtimeMs).toBeGreaterThan(0);
+    expect(row?.sourceMtimeMs).toBe(statSync(join(world.root, "a.md")).mtimeMs);
+  });
+
+  it("挂载内的文件同样记下 fstat 的修改时间", { timeout: CASE_MS }, async () => {
+    const world = await open({ online: [{ name: "docs" }] });
+    put(world.fw.point("docs"), "b.pdf", "%PDF-1.4 b");
+    await world.ingest(["docs/b.pdf"]);
+    const [row] = world.rows();
+    expect(row?.sourcePath).toBe("docs/b.pdf");
+    expect(row?.sourceMtimeMs).toBe(statSync(join(world.fw.point("docs"), "b.pdf")).mtimeMs);
   });
 
   it("上传字节与源文件一致，Content-Length 来自 fstat，字段名为 file，只解析这一份", async () => {

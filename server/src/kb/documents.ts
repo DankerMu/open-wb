@@ -35,6 +35,8 @@ import { acceptsFile } from "./templates.js";
 
 const BODY_KEYS = new Set(["workspaceId", "paths"]);
 const MAX_DOCUMENTS_PER_BASE = 500;
+/** 单条路径 UTF-8 编码的字节上限，同 PATH_MAX。被拒的路径原文进审计，而审计行不清理，所以过长的在这里就拦下。 */
+const MAX_PATH_BYTES = 4096;
 const DEFAULT_TIMING: DocumentRemovalTiming = { retryMs: 500, deadlineMs: 5000 };
 
 /** knowledge-bases「工作空间来源入库」的固定文案。 */
@@ -138,7 +140,7 @@ function parseIngest(body: unknown, maxFiles: number): IngestRequest {
     typeof workspaceId === "string" &&
     pathList.length >= 1 &&
     pathList.length <= maxFiles &&
-    pathList.every((path) => typeof path === "string");
+    pathList.every((path) => typeof path === "string" && Buffer.byteLength(path) <= MAX_PATH_BYTES);
   if (!valid) {
     throw new HttpError("bad_request");
   }

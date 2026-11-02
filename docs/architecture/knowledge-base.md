@@ -162,11 +162,13 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 请求层依次判定，任一不过都是整个请求失败，不发出站请求：
 
 1. 别人的或不存在的知识库 id：404 `not_found`，先于 body 解析。
-2. 键集或类型不对，`paths` 为空或超过 `KB_UPLOAD_MAX_FILES`：400 `bad_request`。
+2. 键集或类型不对，`paths` 为空或超过 `KB_UPLOAD_MAX_FILES`，任一路径的 UTF-8 编码超过 4096 字节：400 `bad_request`。过长的路径不写 `sandbox.reject`、`kb.ingest_reject`，原文不进审计。恰 4096 字节的按逐条处理走。
 3. `workspaceId` 不是当前用户可见的工作空间：404 `not_found`，判定同工作空间文件路由（别人的、已删除的、根被占据或不在了）。
 4. 知识库 `state` 不是 `ready`，或写锁正被重建器持有：409 `kb_rebuilding`。
 
 之后在该库的写锁下顺序处理每条路径。快判到取锁之间没有 `await`，取锁后重判 1、3、4：排队期间库可能已删除或转入重建。请求合法即 201 `{documents, rejected}`。
+
+客户端断开不中止这一批：条目逐条提交，整批跑到底。
 
 | 步 | 处理 | 被拒的 `reason` |
 |---|---|---|
@@ -194,7 +196,7 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | 解析触发 `kb_rejected`，或 `code:0` 而 `success_count` 为 0 | `rejected` | 继续 | 删 |
 | 上传或解析触发 `kb_unavailable`，或得知数据集不存在 | `unavailable` | 全部 `unavailable`，不再解析路径、不发请求、不写 `sandbox.reject` | 上传已成功时删 |
 
-插行或审计失败是本地的失败：删掉刚上传的文档，整个请求 500，这一批前面已提交的行留着，重试时它们是 `duplicate`。
+第 8 步的插行或审计失败是本地的失败：删掉这一份刚上传的文档，整个请求 500，其后的条目不再处理，这一批前面已提交的行留着，重试时它们是 `duplicate`。
 
 **拒绝原因**：`rejected` 的每条是 `{path, reason, message}`，`message` 按 `reason` 固定。
 

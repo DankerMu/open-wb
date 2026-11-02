@@ -17,7 +17,7 @@ import {
   UPLOAD_MAX_BYTES,
   useIngestWorlds,
 } from "./kb-ingest-helpers.js";
-import { createSeam, handles, put } from "./mounts-file-endpoints-helpers.js";
+import { createSeam, handles, put, SENTINEL } from "./mounts-file-endpoints-helpers.js";
 import { waitFor } from "./mounts-manager-helpers.js";
 import { CASE_MS, send } from "./mounts-rest-helpers.js";
 
@@ -288,13 +288,16 @@ describe("读取期间文件变化", () => {
 
 describe("挂载离线", () => {
   it("离线挂载内的路径：offline，没有上传，不碰挂载点", { timeout: CASE_MS }, async () => {
-    const world = await open({ offline: ["docs"] });
+    const seam = createSeam();
+    const world = await open({ offline: ["docs"], overrides: { mountFs: seam.impl } });
     world.write("a.md", "a");
-    const body = (await world.ingest(["docs/a.pdf", "a.md"])).json<Ingested>();
-    expect(reasonsOf(body)).toEqual([["docs/a.pdf", "offline"]]);
+    const path = `docs/${SENTINEL}`;
+    const body = (await world.ingest([path, "a.md"])).json<Ingested>();
+    expect(reasonsOf(body)).toEqual([[path, "offline"]]);
     expect(body.rejected[0]?.message).toBe("挂载已离线");
     expect(pathsOf(body)).toEqual(["a.md"]);
     expect(world.countOf(UPLOAD)).toBe(1);
+    expect(seam.under(world.fw.point("docs"))).toEqual([]);
   });
 
   it("离线挂载内不支持的后缀：后缀判定在打开之前", { timeout: CASE_MS }, async () => {

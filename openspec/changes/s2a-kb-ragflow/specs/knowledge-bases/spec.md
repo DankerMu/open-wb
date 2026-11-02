@@ -223,7 +223,7 @@
 所有者 SHALL 能经 `POST /api/kb/bases/:id/documents` 把自己工作空间里的文件入库。
 
 **请求**：body `{workspaceId, paths}`。
-- `paths` 为 1 到 `KB_UPLOAD_MAX_FILES` 个相对路径；空数组或超出个数：400。
+- `paths` 为 1 到 `KB_UPLOAD_MAX_FILES` 个相对路径；空数组或超出个数：400。任一路径的 UTF-8 编码超过 4096 字节：整个请求 400，不写 `sandbox.reject`、`kb.ingest_reject`，路径原文不进审计。
 - `workspaceId` 不是当前用户可见的工作空间（别人的或已删除）：整个请求 404 `not_found`，不发出站请求。
 - 知识库 `state` 不是 `ready`：整个请求 409 `kb_rebuilding`。
 
@@ -246,7 +246,9 @@
 - 得到 `kb_unavailable`，或上传、解析触发得知数据集不存在：删除已建的文档（尽力而为）；该条与其后全部条目都记为 `unavailable`，后续条目不再发请求。
 - 任何补偿删除按「重新入库与移出」的删除写法进行，失败只写一行 `{"event":"kb_document_leak","documentId":<id>}`，不改变该条的结果。本地上传与重新入库的补偿删除同此。
 
-**应答**：只要请求本身合法，即为 201 `{documents: DocumentView[], rejected: {path, reason, message}[]}`。`documents` 的每一条 SHALL 不经读取 RAGFlow 得出：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false`。`message` 按 `reason` 固定：
+**本地失败**：第 8 步的事务失败时，删除这一份已建的文档，整个请求 500，其后条目不再处理；此前已提交的条目保留。
+
+**应答**：只要请求本身合法且第 8 步的事务没有失败，即为 201 `{documents: DocumentView[], rejected: {path, reason, message}[]}`。`documents` 的每一条 SHALL 不经读取 RAGFlow 得出：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false`。`message` 按 `reason` 固定：
 
 | `reason` | `message` |
 |---|---|
@@ -303,6 +305,14 @@
 #### Scenario: 文档数上限
 - **WHEN** 一个知识库已有 499 份文档，一批入库两个合规文件
 - **THEN** 第一份成功；第二份以 `reason: limit` 被拒，没有为它发上传请求
+
+#### Scenario: 路径过长
+- **WHEN** 一批路径里有一条的 UTF-8 编码是 4097 字节
+- **THEN** 整个请求 400，没有上传，没有 `sandbox.reject`，没有 `kb.ingest_reject`；恰 4096 字节的路径不是请求错误，按逐条处理走
+
+#### Scenario: 插行或审计失败
+- **WHEN** 文件已上传并触发解析，第 8 步的事务失败
+- **THEN** 这一份文档被删除，整个请求 500，没有文档行，没有 `kb.ingest`；此前已提交的条目保留
 
 #### Scenario: 别人的工作空间
 - **WHEN** 用户把另一个账号的 `workspaceId` 用于入库

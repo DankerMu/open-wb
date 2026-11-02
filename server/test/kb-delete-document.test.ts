@@ -131,7 +131,7 @@ describe("第 3、4 步：重发删除", () => {
     const id = seeded("STOPPING");
     fake.answer(DELETE, DELETED_ZERO, { times: 3 });
     const gate = fake.fault(DELETE, { kind: "hold" });
-    const pending = remove(id);
+    const pending = remove(id, { retryMs: 2, deadlineMs: 60_000 });
     await gate.reached;
     fake.setDocumentStatus(datasetId, id, "STOPPED");
     gate.release();

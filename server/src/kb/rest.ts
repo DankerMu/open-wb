@@ -51,7 +51,7 @@ const DOCUMENTS_ROUTE = "/api/kb/bases/:id/documents";
 /** 最长的合法 body 也只有几百字节，同 `models/rest.ts`。 */
 const SETTINGS_BODY_LIMIT = 16 * 1024;
 const BASE_BODY_LIMIT = 16 * 1024;
-/** 条数由 `KB_UPLOAD_MAX_FILES` 判定，这里只拦明显的超长：缺省 10 条，每条至多 PATH_MAX（4096）的 JSON 转义。 */
+/** 条数（`KB_UPLOAD_MAX_FILES`）与单条的 4096 字节由 `documents.ts` 判定，这里只拦明显的超长：缺省 10 条时合法 body 经 JSON 转义也不到 256 KiB。 */
 const DOCUMENTS_BODY_LIMIT = 1024 * 1024;
 /** Fastify 不接受 0：取最小合法值，显式的 no-body 校验负责「任意 body 即 400」。 */
 const BODYLESS_BODY_LIMIT = 1;
