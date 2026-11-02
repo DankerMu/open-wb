@@ -269,14 +269,14 @@ export async function openCreate(): Promise<HTMLElement> {
 }
 
 /** 打开名为 `combobox` 的下拉（Radix Select 在 jsdom 里以键盘驱动），返回全部选项。 */
-async function openOptions(dialog: HTMLElement, combobox: string): Promise<HTMLElement[]> {
+export async function openOptions(dialog: HTMLElement, combobox: string): Promise<HTMLElement[]> {
   fireEvent.keyDown(within(dialog).getByRole("combobox", { name: combobox }), { key: "Enter" });
   await screen.findAllByRole("option");
   return screen.getAllByRole("option");
 }
 
 /** 在名为 `combobox` 的下拉里选中文案满足 `matches` 的一项，等触发器显示 `shown`。 */
-async function chooseOption(
+export async function chooseOption(
   dialog: HTMLElement,
   combobox: string,
   matches: (text: string) => boolean,

@@ -16,6 +16,8 @@ type Props = {
   title: string;
   description?: string;
   error?: string | null;
+  /** 确认按钮的文案；缺省 `删除`。 */
+  confirmLabel?: string;
   pending: boolean;
   restoreFocus(): void;
   onConfirm(): void;
@@ -23,13 +25,15 @@ type Props = {
 };
 
 /**
- * 中心页各 tab 共用的 `删除 <对象>？` 确认框（拷入层 alert-dialog）。`取消` 不发请求；`删除` 恰发一次。请求在途时
+ * 中心页各 tab 共用的破坏性确认框（拷入层 alert-dialog），缺省是 `删除 <对象>？`；模型 tab 的更换嵌入模型确认把按钮换成
+ * `重建并保存`。`取消` 不发请求；确认按钮恰发一次。请求在途时
  * 两个按钮都禁用、Escape 与遮罩也关不掉（结果总落在打开的确认框上，没有晚到结果）。给了 `error` 就显示在框内、框保持打开。
  */
 export function RemoveDialog({
   title,
   description = "删除后不可恢复。",
   error,
+  confirmLabel = "删除",
   pending,
   restoreFocus,
   onConfirm,
@@ -69,7 +73,7 @@ export function RemoveDialog({
             onClick={onConfirm}
             variant="destructive"
           >
-            删除
+            {confirmLabel}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

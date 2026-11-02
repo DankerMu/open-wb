@@ -1,5 +1,6 @@
 // 中心页「模型」tab 各测试文件共用的夹具（model-registry「模型 tab」，s1d-model-registry 任务 10.2）：一个按规格
-// 行为应答的假 `ApiClient`（经 `ModelsPanel({client})` 注入，不经 fetch），调用记录，以及按 role + name 定位的助手。
+// 行为应答的假 `ApiClient`（经 `ModelsPanel({client})` 注入，不经 fetch；知识库状态恒为关闭），调用记录，以及按
+// role + name 定位的助手。
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
@@ -9,6 +10,7 @@ import {
   ApiError,
   type CreateModelInput,
   createApiClient,
+  type KbStatus,
   type ModelView,
   REQUEST_FAILED_MESSAGE,
   type UpdateModelInput,
@@ -120,7 +122,9 @@ export function fakeModels(initial: readonly ModelView[]) {
       return replace({ ...find(id), probe: { status: "ok", at: PROBED_AT, message: null } });
     }),
   };
-  const client: ApiClient = { ...createApiClient(), ...methods };
+  // 模型 tab 挂载时读一次知识库状态（「知识库模型」段）：这里恒为关闭，不记进 `calls`；知识库段的用例自己覆盖它。
+  const getKbStatus = vi.fn(async (): Promise<KbStatus> => ({ enabled: false }));
+  const client: ApiClient = { ...createApiClient(), ...methods, getKbStatus };
   return { client, calls, ...methods };
 }
 

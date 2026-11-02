@@ -45,6 +45,12 @@ const MAX_TOKENS = 128000;
 /** 与服务端 `UPSTREAM_BASE_URL` 同一正则：允许路径与查询串，不允许空白、fragment 与 userinfo。 */
 const BASE_URL = /^https?:\/\/[^\s#@]+$/u;
 
+/** 上游地址规则与它的原因文案：知识库嵌入模型的地址与模型上游同一规则（ragflow-backend「知识库模型设置」）。 */
+export function isUpstreamBaseUrl(text: string): boolean {
+  return BASE_URL.test(text);
+}
+export const BASE_URL_MESSAGE = FIELD_MESSAGES.baseUrl;
+
 /** U+0000–U+001F 与 U+007F。 */
 function hasControl(text: string): boolean {
   return [...text].some((char) => {
@@ -90,7 +96,7 @@ function upstreamErrors(values: ModelFormValues, opened: ModelView | null): Fiel
     return values.apiKey === "" ? {} : { baseUrl: FIELD_MESSAGES.urlRequired };
   }
   const errors: FieldErrors = {};
-  if (!BASE_URL.test(values.baseUrl)) errors.baseUrl = FIELD_MESSAGES.baseUrl;
+  if (!isUpstreamBaseUrl(values.baseUrl)) errors.baseUrl = FIELD_MESSAGES.baseUrl;
   const storedKey = opened !== null && opened.upstream !== null;
   if (values.apiKey === "" && !storedKey) errors.apiKey = FIELD_MESSAGES.keyRequired;
   return errors;

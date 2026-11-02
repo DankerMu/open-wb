@@ -30,7 +30,8 @@ function probeTime(at: number): string {
   return new Date(at).toLocaleString("zh-CN", { hour12: false });
 }
 
-function ProbeCell({ probe }: { probe: ModelView["probe"] }) {
+/** 探活状态：`从未` / `正常` / `失败：<message>`，后两者带完成时刻（模型表与知识库嵌入模型共用）。 */
+export function ProbeCell({ probe }: { probe: ModelView["probe"] }) {
   if (probe.status === "never") return <>从未</>;
   return (
     <div className="flex flex-col gap-0.5 whitespace-normal">

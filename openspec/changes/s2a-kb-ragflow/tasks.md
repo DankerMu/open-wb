@@ -566,8 +566,10 @@ Minimal mergeable slice: 16.2–16.3 的文档表、状态文案、定时刷新�
 
 ## 17. web：模型 tab 的「知识库模型」段（model-registry「模型 tab」）
 
-- [ ] 17.1 核对 Context：`web/src/features/center/models/{panel.tsx,form-dialog.tsx,list.tsx}` 的对话框、确认框与探活写法；组 15 的 `api-kb.ts`。
-- [ ] 17.2 测试先行：新 `web/test/center-models-kb.test.tsx`。
+- [x] 17.1 核对 Context：`web/src/features/center/models/{panel.tsx,form-dialog.tsx,list.tsx}` 的对话框、确认框与探活写法；组 15 的 `api-kb.ts`。
+
+  核对结果（#1856，主干 dc747d26）：对话框写法在 `form-dialog.tsx`（`TextField` `:33`、`useEscapeFallback` `:105`、密钥框 `type="password"` `:235`），保存后探活由 `use-models.ts:134` 的 `probesAfterSave` 决定；删除的非发布失败错误已写进行内（`use-models.ts:158`），`kb_model_in_use` 的行内显示无须改它。确认框只有 `remove-dialog.tsx`（按钮固定为 `删除`，`:72`）。`api-kb.ts` 的四个设置方法在 `:455`–`:468`，读视图 `KbSettingsView`（`:65`）不含密钥。与 design「主干现状」的出入：中心 tab 已是六项（组 15 加了 `知识库`），`core/errors/index.ts` 的错误码已不止二十五个（`kb_*` 到 `:42`），与本组无关。17.3 为此：把对话框外壳、文本字段、地址与密钥字段抽到 `models/form-parts.tsx` 由两个对话框共用；`remove-dialog.tsx` 加 `confirmLabel`（缺省 `删除`）供 `重建并保存` 复用；`validate.ts` 导出地址规则；`list.tsx` 导出 `ProbeCell`；数据与操作在 `models/use-kb-settings.ts`。
+- [x] 17.2 测试先行：新 `web/test/center-models-kb.test.tsx`。
   - 「更换嵌入模型需确认」；
   - 首次配置密钥必填；
   - 对话模型下拉只列带上游的模型加 `不使用`，改动恰一次请求；
@@ -575,8 +577,8 @@ Minimal mergeable slice: 16.2–16.3 的文档表、状态文案、定时刷新�
   - 重建状态与 `重试失败的重建`；设置读取失败时的 `重试`；
   - 知识库关闭时整段不渲染；
   - 删除被引用的对话模型得到 409 `kb_model_in_use` 时，模型表行内显示信封文案、行仍在。
-- [ ] 17.3 实现：新 `web/src/features/center/models/kb-section.tsx` 与 `kb-embedding-dialog.tsx`；`panel.tsx` 挂载该段。
-- [ ] 17.4 验收清单，结论 `待签`：
+- [x] 17.3 实现：新 `web/src/features/center/models/kb-section.tsx` 与 `kb-embedding-dialog.tsx`；`panel.tsx` 挂载该段。
+- [x] 17.4 验收清单，结论 `待签`：
   - CK-09 管理员配置嵌入模型与知识库对话模型；有开编译的库时对话模型下拉禁用；
   - CK-10 更换嵌入模型时弹确认，确认后各知识库重建完成。
 
