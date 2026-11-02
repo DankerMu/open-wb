@@ -13,8 +13,8 @@ const NOT_READY = "管理员尚未配置知识库嵌入模型";
 
 /**
  * 中心页「知识库」tab（knowledge-bases「中心「知识库」tab」）：状态行、当前用户的知识库表、`新建知识库` 对话框、
- * 删库确认，以及点行在表下方打开的详情（文档表）。`client` 供用例注入；缺省取会话客户端（模型 tab 的先例）。
- * 入库与上传归 s2a-kb-ragflow 组 16 剩余部分。
+ * 删库确认，以及点行在表下方打开的详情（入库入口与文档表；上传上限取本 tab 读到的状态）。`client` 供用例注入；缺省
+ * 取会话客户端（模型 tab 的先例）。
  */
 export function KnowledgeBasesPanel({ client }: { client?: ApiClient }) {
   return client ? <KnowledgeBases client={client} /> : <SessionKnowledgeBases />;
@@ -89,6 +89,7 @@ function KnowledgeBases({ client }: { client: ApiClient }) {
               base={detailBase}
               client={client}
               key={detailBase.id}
+              limits={view.kb}
               onCount={(count) => kb.setDocumentCount(detailBase.id, count)}
             />
           ) : null}

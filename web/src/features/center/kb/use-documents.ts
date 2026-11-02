@@ -8,6 +8,7 @@ import { type ApiClient, ApiError, type DocumentView, REQUEST_FAILED_MESSAGE } f
  * - **刷新**：最近一次列表里有 `queued` / `parsing` 且页面可见时，3 秒后重取一次，每次应答后重新计时；页面隐藏时
  *   停，恢复可见后重新计时 3 秒。`unparsed` 不触发。重取失败即 `failed`，刷新随之停止。
  * - **重新入库**：恰调用一次 `reingestKbDocument`，成功后重取一次列表（写端点返回的 `queued` 由此进入刷新）。
+ *   入库与上传（16.5）成功后由详情调 `refetch`，同样重取一次。
  * - **移出**：恰调用一次 `removeKbDocument`，成功即从表里去掉该行，不重取。
  * - 两者失败（含 409 `kb_document_busy`）都在该行内显示信封文案，行不变；行内错误跨刷新保留，该行下一次操作时清掉。
  * - 只采用最后一次读取的结果：卸载与每次读取都递增序号，丢弃在途的旧应答；移出之前发出、之后到达的应答里去掉
@@ -140,6 +141,11 @@ export function useKbDocuments(
     /** `重试`：重取文档列表。 */
     reload() {
       void load(false);
+    },
+
+    /** 入库与上传成功后重取一次，表保留到应答到达；返回的 `queued` 由此进入刷新。 */
+    refetch() {
+      void load(true);
     },
 
     async reingest(id: string) {

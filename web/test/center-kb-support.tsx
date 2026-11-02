@@ -10,6 +10,8 @@ import {
   type CreateKnowledgeBaseInput,
   createApiClient,
   type DocumentView,
+  type IngestFromWorkspaceInput,
+  type KbIngestResult,
   type KbStatus,
 } from "../src/lib/api.js";
 import "./radix-platform.js";
@@ -60,6 +62,16 @@ export function doc(id: string, patch: Partial<DocumentView> = {}): DocumentView
 }
 
 type Workspace = Awaited<ReturnType<ApiClient["listWorkspaces"]>>["workspaces"][number];
+type TreeEntry = Awaited<ReturnType<ApiClient["listTree"]>>["entries"][number];
+
+/** 目录树的一条：`dir("docs")` 与 `file("a.md", 12)`。 */
+export const dir = (name: string): TreeEntry => ({ name, type: "dir", size: 0, mtime: 1 });
+export const file = (name: string, size = 12): TreeEntry => ({
+  name,
+  type: "file",
+  size,
+  mtime: 1,
+});
 
 /** 缺省的工作空间表：`ws-1` 名为「项目空间」。 */
 const WORKSPACES: readonly Workspace[] = [
@@ -81,6 +93,22 @@ export function fakeKb(
   let bases = [...initial];
   const docs = new Map(Object.entries(documents).map(([id, list]) => [id, [...list]]));
   const docsOf = (baseId: string) => docs.get(baseId) ?? [];
+  let workspaces = [...WORKSPACES];
+  /** `<workspaceId>:<path>` → 该层的条目；没有登记的层是空目录。 */
+  const trees = new Map<string, TreeEntry[]>();
+  let created = 0;
+  /** 写端点的 201 视图不读 RAGFlow：`queued`，`chunkCount` 与 `message` 为 null。 */
+  const queued = (baseId: string, patch: Partial<DocumentView>): DocumentView => {
+    created += 1;
+    const item = doc(`new-${created}`, {
+      status: "queued",
+      chunkCount: null,
+      createdAt: 1_760_000_000_000 + created,
+      ...patch,
+    });
+    docs.set(baseId, [...docsOf(baseId), item]);
+    return { ...item };
+  };
   let reads = 0;
   const calls: Call[] = [];
   const methods = {
@@ -116,7 +144,33 @@ export function fakeKb(
     }),
     listWorkspaces: vi.fn(async () => {
       calls.push(["listWorkspaces"]);
-      return { workspaces: WORKSPACES.map((item) => ({ ...item })) };
+      return { workspaces: workspaces.map((item) => ({ ...item })) };
+    }),
+    listTree: vi.fn(async (workspaceId: string, path: string) => {
+      calls.push(["listTree", workspaceId, path]);
+      return { path, entries: (trees.get(`${workspaceId}:${path}`) ?? []).map((e) => ({ ...e })) };
+    }),
+    /** 每条路径都入库（被拒的条目由用例以 `mockImplementationOnce` 给出）。 */
+    ingestFromWorkspace: vi.fn(
+      async (baseId: string, input: IngestFromWorkspaceInput): Promise<KbIngestResult> => {
+        calls.push(["ingestFromWorkspace", baseId, input]);
+        const { workspaceId } = input;
+        const added = input.paths.map((path) =>
+          queued(baseId, { name: path.slice(path.lastIndexOf("/") + 1), path, workspaceId }),
+        );
+        return { documents: added, rejected: [] };
+      },
+    ),
+    uploadToKnowledgeBase: vi.fn(async (baseId: string, file: File) => {
+      calls.push(["uploadToKnowledgeBase", baseId, file.name]);
+      return queued(baseId, {
+        name: file.name,
+        size: file.size,
+        source: "upload",
+        workspaceId: null,
+        path: null,
+        sourceChanged: null,
+      });
     }),
     listKbDocuments: vi.fn(async (baseId: string) => {
       calls.push(["listKbDocuments", baseId]);
@@ -152,7 +206,15 @@ export function fakeKb(
   const setDocuments = (baseId: string, list: readonly DocumentView[]) => {
     docs.set(baseId, [...list]);
   };
-  return { client, calls, setDocuments, ...methods };
+  /** 换掉此后 `listWorkspaces` 的应答。 */
+  const setWorkspaces = (list: readonly Workspace[]) => {
+    workspaces = [...list];
+  };
+  /** 登记工作空间 `workspaceId` 里目录 `path`（根为 `""`）的条目。 */
+  const setTree = (workspaceId: string, path: string, entries: readonly TreeEntry[]) => {
+    trees.set(`${workspaceId}:${path}`, [...entries]);
+  };
+  return { client, calls, setDocuments, setWorkspaces, setTree, ...methods };
 }
 
 export type FakeKb = ReturnType<typeof fakeKb>;
@@ -177,21 +239,41 @@ export async function openCreate(): Promise<HTMLElement> {
   return screen.findByRole("dialog", { name: "新建知识库" });
 }
 
-/** 打开模板下拉（Radix Select 在 jsdom 里以键盘驱动），返回全部选项。 */
-export async function openTemplates(dialog: HTMLElement): Promise<HTMLElement[]> {
-  fireEvent.keyDown(within(dialog).getByRole("combobox", { name: "模板" }), { key: "Enter" });
+/** 打开名为 `combobox` 的下拉（Radix Select 在 jsdom 里以键盘驱动），返回全部选项。 */
+async function openOptions(dialog: HTMLElement, combobox: string): Promise<HTMLElement[]> {
+  fireEvent.keyDown(within(dialog).getByRole("combobox", { name: combobox }), { key: "Enter" });
   await screen.findAllByRole("option");
   return screen.getAllByRole("option");
 }
 
-/** 选中中文名为 `label` 的模板（选项文案为「中文名 — 说明」）。 */
-export async function chooseTemplate(dialog: HTMLElement, label: string): Promise<void> {
-  const options = await openTemplates(dialog);
-  const option = options.find((item) => item.textContent?.startsWith(`${label} — `));
-  if (!option) throw new Error(`no template option ${label}`);
+/** 在名为 `combobox` 的下拉里选中文案满足 `matches` 的一项，等触发器显示 `shown`。 */
+async function chooseOption(
+  dialog: HTMLElement,
+  combobox: string,
+  matches: (text: string) => boolean,
+  shown: string,
+): Promise<void> {
+  const options = await openOptions(dialog, combobox);
+  const option = options.find((item) => matches(item.textContent ?? ""));
+  if (!option) throw new Error(`no ${combobox} option ${shown}`);
   fireEvent.keyDown(option, { key: "Enter" });
-  const trigger = within(dialog).getByRole("combobox", { name: "模板" });
-  await waitFor(() => expect(trigger.textContent).toBe(label));
+  const trigger = within(dialog).getByRole("combobox", { name: combobox });
+  await waitFor(() => expect(trigger.textContent).toBe(shown));
+}
+
+/** 打开模板下拉，返回全部选项。 */
+export function openTemplates(dialog: HTMLElement): Promise<HTMLElement[]> {
+  return openOptions(dialog, "模板");
+}
+
+/** 选中中文名为 `label` 的模板（选项文案为「中文名 — 说明」）。 */
+export function chooseTemplate(dialog: HTMLElement, label: string): Promise<void> {
+  return chooseOption(dialog, "模板", (text) => text.startsWith(`${label} — `), label);
+}
+
+/** 在 `从工作空间入库` 对话框里选中名为 `name` 的工作空间。 */
+export function chooseWorkspace(dialog: HTMLElement, name: string): Promise<void> {
+  return chooseOption(dialog, "工作空间", (text) => text === name, name);
 }
 
 /** 对话框里的复选框名称，按显示次序。 */

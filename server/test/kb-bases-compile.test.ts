@@ -203,10 +203,12 @@ describe("建库应答不读 RAGFlow", () => {
     world.forget();
     const listed = await world.call("GET", BASES, "member");
     expect(listed.statusCode).toBe(200);
-    expect((listed.json() as { bases: Json[] }).bases.map(({ compile }) => compile)).toEqual([
-      { raptor: "pending", graph: "pending" },
-      COMPILE_OFF,
-    ]);
+    // 两个库同一毫秒建出时次序落到随机 id 上：按名字对，次序由 kb-bases-list 的「按 created_at 升序」钉住。
+    const { bases } = listed.json() as { bases: Json[] };
+    expect(Object.fromEntries(bases.map(({ name, compile }) => [name, compile]))).toEqual({
+      编译库: { raptor: "pending", graph: "pending" },
+      普通库: COMPILE_OFF,
+    });
     const dataset = `/api/v1/datasets/${datasetIdOf(world, view.id)}`;
     expect(routes(world.sent())).toEqual([`GET ${dataset}/documents`, `GET ${dataset}/ingestions`]);
   });
