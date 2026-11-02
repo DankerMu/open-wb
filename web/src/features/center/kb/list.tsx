@@ -11,7 +11,7 @@ import type { BaseView } from "@/lib/api";
 import { templateLabel } from "./templates.js";
 
 const HEADERS = ["名称", "模板", "编译", "文档", "状态", "操作"];
-const TAG = "rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground";
+export const TAG = "rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground";
 const EMPTY_TEXT = "还没有知识库";
 
 type CompileState = NonNullable<BaseView["compile"]>["raptor"];
@@ -38,6 +38,33 @@ const STATE_MARK: Readonly<Record<BaseView["state"], string | null>> = {
   rebuilding: "重建中",
   rebuild_failed: "重建失败",
 };
+
+/** 表头行（列表与文档表共用）。 */
+export function HeaderRow({ headers }: { headers: readonly string[] }) {
+  return (
+    <TableHeader>
+      <TableRow>
+        {headers.map((header) => (
+          <TableHead key={header}>{header}</TableHead>
+        ))}
+      </TableRow>
+    </TableHeader>
+  );
+}
+
+/** 页内错误与 `重试`（面板与详情共用）。 */
+export function RetryAlert({ message, onRetry }: { message: string; onRetry(): void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <p className="ui-alert" role="alert">
+        {message}
+      </p>
+      <Button onClick={onRetry} size="sm" type="button" variant="secondary">
+        重试
+      </Button>
+    </div>
+  );
+}
 
 /** 没有知识库时的空态。 */
 export function KnowledgeBasesEmpty() {
@@ -72,29 +99,39 @@ function CompileCell({ base }: { base: BaseView }) {
   );
 }
 
-/** 知识库表（拷入层 table）：每行一个知识库，按 `listKnowledgeBases` 的次序；`重建中` 的行不渲染 `删除知识库`。 */
+/**
+ * 知识库表（拷入层 table）：每行一个知识库，按 `listKnowledgeBases` 的次序；点行进入详情，当前打开的行带
+ * `data-state="selected"`；行可聚焦，按 Enter 同样进入。`重建中` 的行不渲染 `删除知识库`，它的点击不进入详情。
+ */
 export function KnowledgeBaseList({
   bases,
+  selected,
+  onOpen,
   onRemove,
 }: {
   bases: readonly BaseView[];
+  selected: string | null;
+  onOpen(base: BaseView): void;
   /** 行按钮的点击把按钮本身交出去，供对话框关闭后归还焦点。 */
   onRemove(base: BaseView, trigger: HTMLElement): void;
 }) {
   return (
     <Table>
-      <TableHeader>
-        <TableRow>
-          {HEADERS.map((header) => (
-            <TableHead key={header}>{header}</TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
+      <HeaderRow headers={HEADERS} />
       <TableBody>
         {bases.map((base) => {
           const mark = STATE_MARK[base.state];
           return (
-            <TableRow key={base.id}>
+            <TableRow
+              className="cursor-pointer"
+              data-state={base.id === selected ? "selected" : undefined}
+              key={base.id}
+              onClick={() => onOpen(base)}
+              onKeyDown={(event) => {
+                if (event.target === event.currentTarget && event.key === "Enter") onOpen(base);
+              }}
+              tabIndex={0}
+            >
               <TableCell className="whitespace-normal [overflow-wrap:anywhere]">
                 {base.name}
               </TableCell>
@@ -107,7 +144,10 @@ export function KnowledgeBaseList({
               <TableCell>
                 {base.state === "rebuilding" ? null : (
                   <Button
-                    onClick={(event) => onRemove(base, event.currentTarget)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRemove(base, event.currentTarget);
+                    }}
                     size="sm"
                     variant="outline"
                   >

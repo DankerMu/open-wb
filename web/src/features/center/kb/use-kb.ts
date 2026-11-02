@@ -117,6 +117,19 @@ export function useKnowledgeBases(client: ApiClient) {
       }
     },
 
+    /** 详情读到或改动文档表后，列表该行的文档数跟上；相同时不改状态。 */
+    setDocumentCount(id: string, documents: number) {
+      setView((current) =>
+        current.status === "ready" &&
+        current.bases.some((item) => item.id === id && item.documents !== documents)
+          ? {
+              ...current,
+              bases: current.bases.map((item) => (item.id === id ? { ...item, documents } : item)),
+            }
+          : current,
+      );
+    },
+
     askRemove(base: BaseView) {
       setNotice(null);
       setRemove({ base, pending: false });

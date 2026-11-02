@@ -533,19 +533,21 @@ Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第
 
 ## 16. web：知识库详情（knowledge-bases「中心「知识库」tab」的详情、入库、上传、移出、重新入库与刷新）
 
-- [ ] 16.0 前置（#1889，组 15 合入后补）：中心页五处删除确认框合并为 `web/src/features/center/remove-dialog.tsx` 的 `RemoveDialog`。行为不变，既有用例不改；目的是组 16 新增确认框时 jscpd 不越 3%。
-- [ ] 16.1 核对 Context：
+- [x] 16.0 前置（#1889，组 15 合入后补）：中心页五处删除确认框合并为 `web/src/features/center/remove-dialog.tsx` 的 `RemoveDialog`。行为不变，既有用例不改；目的是组 16 新增确认框时 jscpd 不越 3%。
+- [x] 16.1 核对 Context：
   - 文件页树组件与 `api-workspaces` 的目录列举；
   - S1g 上传的客户端 `web/src/lib/api-upload.ts`；
   - 组 15 的面板结构与 `api-kb.ts`。
-- [ ] 16.2 测试先行（首刀）：新 `web/test/center-kb-detail.test.tsx`。
+
+  核对结果（#1854，主干 4cf0ff2b）：仓库没有 `api-workspaces.ts`，工作空间列表与目录列举是 `web/src/lib/api-files.ts` 的 `listWorkspaces`（`:386`）与 `listTree`（`:444`），文件页树组件是 `web/src/features/files/tree.tsx` 的 `DirectoryTree`（`:520`），16.4–16.5 按此取用；`api-upload.ts` 在（`createUploadMethods`，`:52`）；组 15 的 `kb/{panel,list,use-kb,create-dialog,templates}` 与 `api-kb.ts` 的十三个方法如 15.3 所述。16.0 已随 #1889 合入（`remove-dialog.tsx`）；本切片的 `移出` 按 spec 不弹确认框（409 时行内显示、行仍在），没有用到它。
+- [x] 16.2 测试先行（首刀）：新 `web/test/center-kb-detail.test.tsx`。
   - 点行进入详情：渲染 `panel.tsx`，从列表行走到详情；
   - 「解析中自动刷新」：假时钟；页面隐藏时停；`unparsed` 不触发刷新；
   - 状态文案七种；`已切片 0`；
   - `源文件已变更` 只在 `true` 时显示；工作空间来源行都有 `重新入库`；
   - 移出；409 `kb_document_busy` 时行内显示信封文案、行仍在；
   - 非 `ready` 时 `重新入库` 不渲染；`rebuild_failed` 时 `移出` 仍渲染，`rebuilding` 时不渲染（入库与上传按钮的同一规则由 16.4 断言，它们在剩余部分才建出来）。
-- [ ] 16.3 实现（首刀）：新 `web/src/features/center/kb/{detail.tsx,documents-table.tsx}`；改 `list.tsx`、`panel.tsx`，点行进入详情。
+- [x] 16.3 实现（首刀）：新 `web/src/features/center/kb/{detail.tsx,documents-table.tsx}`；改 `list.tsx`、`panel.tsx`，点行进入详情。（数据与刷新另在 `use-documents.ts`，#1854）
 - [ ] 16.4 测试先行（剩余部分）：`center-kb-ingest.test.tsx`。
   - 两个入口挂在详情里，从 `detail.tsx` 渲染；
   - 入库对话框：选空间、浏览目录、勾选上限、提交恰一次、被拒条目逐条显示 `message`（含 `unsupported_type` 与 `empty` 的文案）；成功后重取一次文档列表，`queued` 进入 3 秒刷新；
@@ -555,8 +557,8 @@ Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第
 - [ ] 16.6 验收清单（各随所在切片的 PR），结论 `待签`：
   - CK-05 从工作空间入库后看到解析中，并自动变为已切片；
   - CK-06 本地上传入库；
-  - CK-07 改写源文件后出现「源文件已变更」，重新入库后消失；
-  - CK-08 移出文档后源文件仍在。
+  - CK-07 改写源文件后出现「源文件已变更」，重新入库后消失；（已随 #1854 落地）
+  - CK-08 移出文档后源文件仍在。（已随 #1854 落地）
 
 Suggested fixture level: expanded - 用户可见的入库流程与定时刷新（presentation + timers），组 18 的 ui-walk 走一遍。
 Minimal mergeable slice: 16.2–16.3 的文档表、状态文案、定时刷新与行内操作（`移出`、`重新入库`）——只读写已有文档，能独立保绿，依赖组 11、13、15。剩余部分（`从工作空间入库` 对话框与 `上传文件`，16.4–16.5）依赖它与组 10、12；剩余部分 atomic：两个入口共用同一个入库结果显示。
