@@ -18,6 +18,7 @@ import { join } from "node:path";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { expect } from "vitest";
 import { createApp } from "../src/app.js";
+import type { KbDependencies } from "../src/kb/index.js";
 import { workspaceAssemblyOf } from "../src/startup-registry.js";
 import type { MountSettings } from "../src/workspaces/mounts/config.js";
 import type { MountManagerOptions } from "../src/workspaces/mounts/manager.js";
@@ -88,6 +89,8 @@ interface OpenOptions {
   mountSettings?: MountSettings;
   /** Runs on the world before the manager is built (rows the registry loads). */
   seed?: (world: World) => void;
+  /** `assembly.kb` (s2a-kb-ragflow tasks 10.2): the knowledge base reads workspace files through these mounts. */
+  kb?: KbDependencies;
 }
 
 const apps: FastifyInstance[] = [];
@@ -138,6 +141,7 @@ export async function openMounts(options: OpenOptions = {}): Promise<MountsRest>
       runtime: runtimeOf(world),
       mounts: manager,
       ...(options.mountSettings === undefined ? {} : { mountSettings: options.mountSettings }),
+      ...(options.kb === undefined ? {} : { kb: options.kb }),
     },
   });
   return withCookies(world, app);

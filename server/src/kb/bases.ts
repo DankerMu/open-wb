@@ -75,6 +75,19 @@ function badRequest(): never {
   throw new HttpError("bad_request");
 }
 
+/** 别人的与不存在的不可区分。 */
+export function ownedBase(
+  store: Pick<ReturnType<typeof createKbStore>, "getBase">,
+  id: string,
+  ownerId: string,
+): KnowledgeBase {
+  const base = store.getBase(id);
+  if (base === undefined || base.ownerId !== ownerId) {
+    throw new HttpError("not_found");
+  }
+  return base;
+}
+
 const isSwitch = (value: unknown): value is boolean | undefined =>
   value === undefined || typeof value === "boolean";
 
@@ -112,17 +125,8 @@ function viewOf(base: KnowledgeBase, documents: number) {
 export function createKbBases(dependencies: KbBasesDependencies) {
   const { store, client, locks, audit, log } = dependencies;
 
-  /** 别人的与不存在的不可区分。 */
-  function owned(id: string, ownerId: string): KnowledgeBase {
-    const base = store.getBase(id);
-    if (base === undefined || base.ownerId !== ownerId) {
-      throw new HttpError("not_found");
-    }
-    return base;
-  }
-
   function deletable(id: string, ownerId: string): KnowledgeBase {
-    const base = owned(id, ownerId);
+    const base = ownedBase(store, id, ownerId);
     if (base.state === "rebuilding") {
       throw new HttpError("kb_rebuilding");
     }
@@ -213,7 +217,7 @@ export function createKbBases(dependencies: KbBasesDependencies) {
 
     /** 所有权判定先于 body 解析（knowledge-bases「知识库端点」）。 */
     assertOwned(id: string, ownerId: string): void {
-      owned(id, ownerId);
+      ownedBase(store, id, ownerId);
     },
 
     /** `DELETE /api/kb/bases/:id`：在该库的写锁下。 */
