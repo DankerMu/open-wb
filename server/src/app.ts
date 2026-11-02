@@ -51,7 +51,7 @@ import { type ApprovalMode, type ModelCatalog, resolveModelCatalog } from "./mod
 import { registerModelProxy } from "./model-proxy/index.js";
 import { type ModelRegistry, staticRegistry } from "./model-proxy/lookup.js";
 import type { ModelPublishFailedRecord } from "./models/publish.js";
-import { registerModels } from "./models/rest.js";
+import { type ModelWriteGuard, registerModels } from "./models/rest.js";
 import { createModelStore } from "./models/store.js";
 import { DEFAULT_TRASH_RETENTION_DAYS } from "./preview-config.js";
 import { SERVICE_INFO } from "./service-info.js";
@@ -167,6 +167,11 @@ export interface AssemblyDependencies {
    * 知识库（s2a-kb-ragflow D3、D5）：配置了 `RAGFLOW_BASE_URL` 时入口给出；省略即知识库关闭，`kb` 模块照常注册。
    */
   kb?: KbDependencies | undefined;
+  /**
+   * 替换 `kb` 注册时给出的 `models` 写入钩子（s2a-kb-ragflow D1；测试接缝，生产省略）。省略且知识库关闭时没有钩子，
+   * `models` 直接写。
+   */
+  modelWriteGuard?: ModelWriteGuard;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -366,14 +371,17 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     assembly?.preview,
   );
   registerAccounts(app, { db });
-  registerModelAdmin(app, db, registry, assembly);
+  // `kb` 注册晚于 `models`（design D1）：钩子在写入时才读，那时 `kb` 已经注册。
+  let modelWriteGuard = assembly?.modelWriteGuard;
+  registerModelAdmin(app, db, registry, assembly, () => modelWriteGuard);
   // 第九个模块 `experts`（s1d-experts-skills D5）：store 由这里在 app 自己的库上自建。
   registerExperts(app, { db, store: createExpertStore(db), emit });
   // 第十个模块 `skills`（s1d-experts-skills D6）：平台技能读同一个 agent 目录，账号缺省写 app 自己的库。
   registerSkills(app, { db, agentDir: ompAgentDir(runtime.stateDir) });
   registerConnectorAdmin(app, db, assembly);
   // 第十二个模块 `kb`（s2a-kb-ragflow D5、D18）：只收这一个依赖，store 与客户端都在模块里建。
-  registerKb(app, assembly?.kb);
+  const kbModelWriteGuard = registerKb(app, assembly?.kb);
+  modelWriteGuard ??= kbModelWriteGuard;
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
@@ -567,6 +575,7 @@ function registerModelAdmin(
   db: DatabaseSync,
   registry: Pick<ModelRegistry, "refresh" | "secrets">,
   assembly: AssemblyDependencies | undefined,
+  modelWriteGuard: () => ModelWriteGuard | undefined,
 ): void {
   registerModels(app, {
     db,
@@ -575,6 +584,7 @@ function registerModelAdmin(
     publish: assembly?.publish ?? (() => Promise.resolve()),
     emit,
     isAdmin,
+    modelWriteGuard,
     ...(assembly?.onPublishFailed === undefined
       ? {}
       : { onPublishFailed: assembly.onPublishFailed }),

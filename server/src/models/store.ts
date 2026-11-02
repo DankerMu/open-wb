@@ -2,8 +2,8 @@
  * models/store — 模型注册表的表读写与校验（s1d-model-registry D1–D4、D8；model-registry「迁移 046 模型表」
  * 「环境种子」「注册表快照是白名单的唯一来源」的 store 部分）。纯 DB：`node:sqlite` 同步读写，不碰文件系统与网络。
  *
- * 凭证：密钥只经 `routeOf`、`secrets` 与 `probeTarget`（只供探活路由）读出；`ModelRow` 不带密钥，校验失败
- * 一律抛固定 message 的 `HttpError`（不回显取值）。事务：每个写方法自己开一个事务（SQLite 不能嵌套 BEGIN，
+ * 凭证：密钥只经 `routeOf`、`secrets`、`probeTarget`（只供探活路由）与 `planUpdate`（只供写入钩子）读出；`ModelRow` 不带
+ * 密钥，校验失败一律抛固定 message 的 `HttpError`（不回显取值）。事务：每个写方法自己开一个事务（SQLite 不能嵌套 BEGIN，
  * 调用方不得已在事务里），可选的 `within(row)` 在写入之后、COMMIT 之前于同一事务内调用（审计挂点）；它抛出即整体回滚。
  * 不变量：非空表恰有一行缺省——首行自动成为缺省，缺省行不能删除，换缺省在一个事务里清旧立新。
  */
@@ -51,6 +51,13 @@ export interface ProbeIdentity {
   createdAt: number;
   upstreamBaseUrl: string | null;
   upstreamApiKey: string | null;
+}
+
+/** 一次 `PUT` 将要写什么（change s2a-kb-ragflow D1）：`next` 是候选上游，`changed` 即审计的 `upstreamChanged`。 */
+export interface ModelUpdatePlan {
+  model: CatalogModel;
+  next: Upstream | null;
+  changed: boolean;
 }
 
 type Within = (row: ModelRow) => void;
@@ -105,10 +112,32 @@ export function createModelStore(db: DatabaseSync) {
     return raw.upstream_api_key === null ? null : upstreamOf(raw);
   };
 
+  /**
+   * PUT 语义：整体替换；`upstream.apiKey` 省略即保留既有密钥（没有既有密钥则 400）；`null` 清空上游。
+   * `baseUrl` 逐字等于已存地址的视图形式（去掉 userinfo）：沿用已存地址、不再套地址规则（地址规则拒 `@`）——
+   * `apiKey` 省略则密钥也沿用，给了则只换密钥（仍经 header 值校验）。编辑 env 种子行只改名或只换密钥都不丢
+   * 地址里 userinfo 的凭证。只读不写；body 非法 400 先于未知 id 404。
+   */
+  const planUpdate = (id: string, body: unknown): ModelUpdatePlan => {
+    const { model, upstream } = parseUpdate(id, body);
+    const current = routeOf(id);
+    if (current === undefined) {
+      fail("not_found");
+    }
+    const next =
+      upstream === null
+        ? null
+        : current !== null && upstream.baseUrl === withoutUserinfo(current.baseUrl)
+          ? { baseUrl: current.baseUrl, apiKey: checkedKey(upstream.apiKey ?? current.apiKey) }
+          : checkedUpstream(upstream.baseUrl, upstream.apiKey ?? current?.apiKey);
+    return { model, next, changed: upstreamChanged(current, next, upstream?.apiKey) };
+  };
+
   return {
     list: (): ModelRow[] => db.prepare(SELECT_ALL).all().map(toRow),
     get: select,
     routeOf,
+    planUpdate,
 
     /** POST 语义：缺省同 `MODEL_CATALOG`、推理模型可不带 `efforts`；表空时这一行成为缺省。 */
     create(body: unknown, within?: Within): ModelRow {
@@ -130,25 +159,14 @@ export function createModelStore(db: DatabaseSync) {
       });
     },
 
-    /**
-     * PUT 语义：整体替换；`upstream.apiKey` 省略即保留既有密钥（没有既有密钥则 400）；`null` 清空上游。
-     * `baseUrl` 逐字等于已存地址的视图形式（去掉 userinfo）：沿用已存地址、不再套地址规则（地址规则拒 `@`）——
-     * `apiKey` 省略则密钥也沿用，给了则只换密钥（仍经 header 值校验）。编辑 env 种子行只改名或只换密钥都不丢
-     * 地址里 userinfo 的凭证。
-     */
-    update(id: string, body: unknown, within?: Within): ModelRow {
-      const { model, upstream } = parseUpdate(id, body);
+    /** `planUpdate` 的计划落库；`within` 另收 `upstreamChanged`。 */
+    update(
+      id: string,
+      body: unknown,
+      within?: (row: ModelRow, upstreamChanged: boolean) => void,
+    ): ModelRow {
       return inTransaction(db, () => {
-        const current = routeOf(id);
-        if (current === undefined) {
-          fail("not_found");
-        }
-        const next =
-          upstream === null
-            ? null
-            : current !== null && upstream.baseUrl === withoutUserinfo(current.baseUrl)
-              ? { baseUrl: current.baseUrl, apiKey: checkedKey(upstream.apiKey ?? current.apiKey) }
-              : checkedUpstream(upstream.baseUrl, upstream.apiKey ?? current?.apiKey);
+        const { model, next, changed } = planUpdate(id, body);
         db.prepare(UPDATE).run(
           model.name,
           flag(model.reasoning),
@@ -160,7 +178,7 @@ export function createModelStore(db: DatabaseSync) {
           Date.now(),
           id,
         );
-        return finish(id, within);
+        return finish(id, within && ((row) => within(row, changed)));
       });
     },
 
@@ -375,6 +393,15 @@ function checkedUpstream(baseUrl: string, apiKey: string | undefined): Upstream 
     fail("bad_request");
   }
   return { baseUrl, apiKey };
+}
+
+/** D12：`upstream` null 与非 null 互换，或 base URL 不同，或给出了 `apiKey`。 */
+function upstreamChanged(
+  before: Upstream | null,
+  after: Upstream | null,
+  givenApiKey: string | undefined,
+): boolean {
+  return before?.baseUrl !== after?.baseUrl || givenApiKey !== undefined;
 }
 
 /** 字段规则与 `MODEL_CATALOG` 共用一份（`requireEfforts: false`）；规则的原文 message 不外传。 */

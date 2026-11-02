@@ -5,9 +5,12 @@
  *
  * 客户端只建这一个：`kb_upstream_auth_failed` 的限频状态在实例里，「同一进程 60 秒内至多一行」靠它成立。两种锁也只建
  * 这一份（D20）：设置锁是进程级的。注册不碰 RAGFlow，构造 store 也不读库。
+ *
+ * 开启时注册返回 `models` 的写入钩子（D1）：`kb` 注册晚于 `models`，由 `app.ts` 绑过去；`models` 不导入 `kb`。
  */
 import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
+import type { ModelWriteGuard } from "../models/rest.js";
 import { createModelStore } from "../models/store.js";
 import type { EmbeddingProbeDeadlines } from "./embedding-probe.js";
 import type { KbKeyHandle } from "./key-file.js";
@@ -34,31 +37,43 @@ export interface KbDependencies {
   deadlines?: Partial<Deadlines>;
   /** 嵌入探活的期限（测试注入短期限）；省略时取 `embedding-probe.ts` 的缺省。 */
   probeDeadlines?: EmbeddingProbeDeadlines;
+  /** 两种锁（测试注入，读等待者计数）；省略时在这里建，生产装配不传。 */
+  locks?: ReturnType<typeof createKbLocks>;
 }
 
-export function registerKb(app: FastifyInstance, dependencies: KbDependencies | undefined): void {
+export function registerKb(
+  app: FastifyInstance,
+  dependencies: KbDependencies | undefined,
+): ModelWriteGuard | undefined {
   if (dependencies === undefined) {
     registerKbRoutes(app, undefined);
-    return;
+    return undefined;
   }
-  const { uploadMaxBytes, uploadMaxFiles, probeDeadlines, ...clientOptions } = dependencies;
+  const {
+    uploadMaxBytes,
+    uploadMaxFiles,
+    probeDeadlines,
+    locks = createKbLocks(),
+    ...clientOptions
+  } = dependencies;
   const { log, now = Date.now } = dependencies;
   const store = createKbStore(app.db);
   const client = createRagflowClient(clientOptions);
-  const locks = createKbLocks();
+  const settings = createKbSettings({
+    store,
+    client,
+    models: createModelStore(app.db),
+    locks,
+    audit: (event) => emit(app.db, event),
+    probeDeadlines,
+  });
   registerKbRoutes(app, {
     store,
     client,
     uploadMaxBytes,
     uploadMaxFiles,
     onVersionMismatch: perMinute(now, () => log({ event: "kb_version_mismatch" })),
-    settings: createKbSettings({
-      store,
-      client,
-      models: createModelStore(app.db),
-      locks,
-      audit: (event) => emit(app.db, event),
-      probeDeadlines,
-    }),
+    settings,
   });
+  return settings.guardModelWrite;
 }

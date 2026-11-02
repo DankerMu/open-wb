@@ -19,6 +19,9 @@
  * 不审计、不发布。视图不含密钥；`upstream.baseUrl` 是 `core/base-url` `withoutUserinfo` 去掉 userinfo 的形式（env 种子行原样入表，
  * 可能带 `user:pass@`）；`PUT` 送回这个形式且不带 `apiKey` 时 store 沿用已存地址，`upstreamChanged` 随之为 false。
  * 审计 detail 只含 `modelId`、`name` 与 `upstreamChanged`——没有 base URL 与密钥。
+ *
+ * 写入钩子（change s2a-kb-ragflow D1）：`DELETE` 与 `PUT` 的写入交给 `modelWriteGuard` 包住，`PUT` 另交 `plan`。本模块不导入
+ * `kb`，钩子由 `app.ts` 注入；没有钩子时直接写。刷新快照与发布在钩子之外。
  */
 import type { DatabaseSync } from "node:sqlite";
 import type {
@@ -31,12 +34,29 @@ import { withoutUserinfo } from "../core/base-url.js";
 import { HttpError } from "../core/errors/index.js";
 import { type ProbeResult, probeUpstream } from "./probe.js";
 import type { ModelPublishFailedRecord } from "./publish.js";
-import type { createModelStore, ModelRow } from "./store.js";
+import type { createModelStore, ModelRow, ModelUpdatePlan } from "./store.js";
 
 type ModelStore = Pick<
   ReturnType<typeof createModelStore>,
-  "list" | "get" | "create" | "update" | "remove" | "setDefault" | "probeTarget" | "recordProbe"
+  | "list"
+  | "planUpdate"
+  | "create"
+  | "update"
+  | "remove"
+  | "setDefault"
+  | "probeTarget"
+  | "recordProbe"
 >;
+
+/**
+ * 包住一次 `models` 写入：`write` 是写入回调，`plan` 校验 `PUT` 的 body 并给出候选上游（`DELETE` 没有 `plan`）。钩子抛出即
+ * 这次写入失败，错误原样交给共享 handler，不刷新快照、不发布。
+ */
+export type ModelWriteGuard = <T>(
+  id: string,
+  write: () => T,
+  plan?: () => ModelUpdatePlan,
+) => Promise<T>;
 
 interface AuditEvent {
   kind: string;
@@ -66,6 +86,8 @@ export interface ModelRestDependencies {
   onPublishFailed?: (record: ModelPublishFailedRecord) => void;
   /** 探活的两个期限；省略时取 `probe.ts` 的缺省（生产装配不传）。 */
   probeDeadlines?: { connectDeadlineMs?: number; totalDeadlineMs?: number };
+  /** 写入时才读：`kb` 注册晚于 `models`。读到 `undefined` 就直接写。 */
+  modelWriteGuard?: () => ModelWriteGuard | undefined;
 }
 
 const NO_UPSTREAM: ProbeResult = { status: "failed", message: "未配置上游" };
@@ -118,20 +140,18 @@ function principalOf(request: FastifyRequest): { readonly id: string; readonly r
   return principal;
 }
 
-/** `PUT` body 是否给出了 `upstream.apiKey`（只在 store 校验通过之后的 `within` 里调用：body 已是对象）。 */
-function givesApiKey(body: unknown): boolean {
-  const upstream = (body as { upstream?: unknown }).upstream;
-  return typeof upstream === "object" && upstream !== null && "apiKey" in upstream;
-}
-
-/** D12：`upstream` null 与非 null 互换，或 base URL 不同，或给出了 `apiKey`。 */
-function upstreamChanged(before: ModelRow | null, after: ModelRow, body: unknown): boolean {
-  return before?.upstream?.baseUrl !== after.upstream?.baseUrl || givesApiKey(body);
-}
-
 export function registerModels(app: FastifyInstance, dependencies: ModelRestDependencies): void {
-  const { db, store, registry, publish, emit, isAdmin, onPublishFailed, probeDeadlines } =
-    dependencies;
+  const {
+    db,
+    store,
+    registry,
+    publish,
+    emit,
+    isAdmin,
+    onPublishFailed,
+    probeDeadlines,
+    modelWriteGuard,
+  } = dependencies;
   const serial = perIdChain();
 
   /** 路由级：root guard 已认证，这里只判角色——先于 body 解析与 id 查找。 */
@@ -158,6 +178,10 @@ export function registerModels(app: FastifyInstance, dependencies: ModelRestDepe
     }
     return value;
   };
+  const guarded = <T>(id: string, write: () => T, plan?: () => ModelUpdatePlan) => {
+    const guard = modelWriteGuard?.();
+    return guard === undefined ? write() : guard(id, write, plan);
+  };
   const route = { onRequest: noStore, preParsing: adminOnly };
   const withBody = { ...route, bodyLimit: MODEL_BODY_LIMIT };
   const bodyless = { ...route, bodyLimit: BODYLESS_BODY_LIMIT };
@@ -182,25 +206,31 @@ export function registerModels(app: FastifyInstance, dependencies: ModelRestDepe
 
   app.put("/api/models", withBody, async (request) => {
     const id = idOf(request);
-    // 与写入同一段同步代码（其间没有 await）；未知 id 由 store 在校验 body 之后答 404。
-    const before = store.get(id);
-    const row = store.update(id, request.body, (updated) => {
-      audit(request, "model.update", `修改模型 ${updated.name}`, {
-        modelId: updated.id,
-        name: updated.name,
-        upstreamChanged: upstreamChanged(before ?? null, updated, request.body),
+    // 判定与写入在设置锁内（钩子包住写入，下发在两者之间）；`update` 在写入事务里重新判定，读的是同一行。
+    // 没有钩子时同一段同步代码。未知 id 由 store 在校验 body 之后答 404。
+    const write = () =>
+      store.update(id, request.body, (updated, upstreamChanged) => {
+        audit(request, "model.update", `修改模型 ${updated.name}`, {
+          modelId: updated.id,
+          name: updated.name,
+          upstreamChanged,
+        });
       });
-    });
+    const row = await guarded(id, write, () => store.planUpdate(id, request.body));
     return toView(await published(row));
   });
 
   app.delete("/api/models", route, async (request, reply) => {
-    store.remove(idOf(request), (removed) => {
-      audit(request, "model.delete", `删除模型 ${removed.name}`, {
-        modelId: removed.id,
-        name: removed.name,
+    const id = idOf(request);
+    const write = () => {
+      store.remove(id, (removed) => {
+        audit(request, "model.delete", `删除模型 ${removed.name}`, {
+          modelId: removed.id,
+          name: removed.name,
+        });
       });
-    });
+    };
+    await guarded(id, write);
     await published(undefined);
     return reply.code(204).send();
   });

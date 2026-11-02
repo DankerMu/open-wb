@@ -17,10 +17,14 @@
  * `confirmRebuild` 本组只校验类型：确认重建由组 14 开放，这之前身份变化且已有知识库一律 409 `kb_rebuild_required`。
  *
  * 探活逐次串行：一条进程级 Promise 链，「读身份 → 发请求 → 取锁写回」整段排队。它不并进设置锁，探活不能占锁 15 s。
+ *
+ * `models` 写入钩子（`guardModelWrite`，D1、D7）：`plan`、引用判定、重新下发与 `models` 的那次写入整段在设置锁内，所以不会
+ * 与一次保存交错：判定读到的是别的写者落库之后的 `chat_model_id`，保存读到的是写入之后的行。没有被引用的行不碰 RAGFlow；
+ * 钩子不写 `kb_settings`，也不审计 `kb.settings`，审计是 `models` 的 `model.update`。
  */
 import { validateUpstreamBaseUrl, validateUpstreamKey } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
-import type { createModelStore } from "../models/store.js";
+import type { createModelStore, ModelUpdatePlan } from "../models/store.js";
 import { type EmbeddingProbeDeadlines, probeEmbedding } from "./embedding-probe.js";
 import type { createKbLocks } from "./locks.js";
 import {
@@ -226,6 +230,21 @@ function embeddingProvision({ name, baseUrl, apiKey }: EmbeddingConfig): Provisi
   };
 }
 
+function chatTarget(
+  id: string,
+  upstream: { apiKey: string; baseUrl: string },
+  maxTokens: number,
+): Provision {
+  return {
+    instanceName: CHAT_INSTANCE,
+    apiKey: upstream.apiKey,
+    baseUrl: upstream.baseUrl,
+    modelName: id,
+    modelType: "chat",
+    maxTokens,
+  };
+}
+
 /** 写什么与审计什么：写入按 body，detail 只含实际变化的键。 */
 function writesOf(
   next: EmbeddingPlan | undefined,
@@ -283,14 +302,7 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     if (id === null || upstream == null || row === undefined) {
       return undefined;
     }
-    return {
-      instanceName: CHAT_INSTANCE,
-      apiKey: upstream.apiKey,
-      baseUrl: upstream.baseUrl,
-      modelName: id,
-      modelType: "chat",
-      maxTokens: row.maxTokens,
-    };
+    return chatTarget(id, upstream, row.maxTokens);
   }
 
   /** `chatModelId` 的取值规则（D7 的表）：没有 `null` 到 `null` 的特判，那是下面的无操作。 */
@@ -389,8 +401,35 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     return view();
   }
 
+  /**
+   * 被引用的那一行落库之前：删除与清空上游 409，上游变化时按候选上游重新下发。纯空白密钥在这里拦，不在 `models` 的校验里：
+   * 知识库关闭与没有被引用的行不下发，不受这条约束。
+   */
+  async function syncChatModel(id: string, planned: ModelUpdatePlan | undefined): Promise<void> {
+    if (planned === undefined || planned.next === null) {
+      throw new HttpError("kb_model_in_use");
+    }
+    if (planned.changed) {
+      if (isBlankApiKey(planned.next.apiKey)) {
+        badRequest();
+      }
+      await provision(client, chatTarget(id, planned.next, planned.model.maxTokens));
+    }
+  }
+
   return {
     view,
+
+    /** `models` 的 `DELETE` / `PUT` 经这里写入：`plan` 排第一，所以非法 body 400，不发 RAGFlow 请求。 */
+    guardModelWrite<T>(id: string, write: () => T, plan?: () => ModelUpdatePlan): Promise<T> {
+      return locks.settings(async (): Promise<T> => {
+        const planned = plan?.();
+        if (store.settings().chatModelId === id) {
+          await syncChatModel(id, planned);
+        }
+        return write();
+      });
+    },
 
     /** `PUT /api/kb/settings`。 */
     save(body: unknown, actorId: string) {
