@@ -178,6 +178,20 @@ function assertUploadName(name: string): void {
   }
 }
 
+/**
+ * Every name rule of an upload at once, for the knowledge base's upload route (s2a-kb-ragflow D11),
+ * which has no sandbox in front of them: `name` once and not empty, then `assertUploadName`, then
+ * `UPLOAD_NAME_MAX_BYTES`. The workspace route takes these steps apart around its sandbox call.
+ */
+export function parseUploadFileName(query: unknown): string {
+  const name = parseUploadName(query);
+  assertUploadName(name);
+  if (Buffer.byteLength(name) > UPLOAD_NAME_MAX_BYTES) {
+    throw new HttpError("bad_request");
+  }
+  return name;
+}
+
 /** Makes `dir` when nothing is there (no `dir.create` audit); anything but a directory is 409. */
 function ensureUploadsDir(dependencies: WorkspaceRestDependencies, dir: string): void {
   const existing = lstatExisting(dir);

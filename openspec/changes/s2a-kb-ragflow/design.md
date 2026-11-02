@@ -433,6 +433,7 @@ RAGFlow 的失败：
 - 文件名后缀按 D10 判定；`Content-Length` 为 0 同样拒绝。两者都是 400 `kb_file_unsupported`，不发出站请求，审计 `kb.ingest_reject`（`reason` 分别为 `unsupported_type`、`empty`）。
 - 请求体直接拼进出站 multipart，不落盘，不留副本。文件名写法同 D10。
 - 客户端中途断开或短体：中止出站，不插行，不审计 `kb.ingest`。中断的上传不留文档（§7.2）。
+- 读请求体有总期限：从取到写锁起算，按 `Content-Length` 以 64 KiB/s 折算，不少于 60 s；到期按短体处理，回 400。写锁的持有时长不能由客户端决定：重建器排在在途写操作之后（D20），重建一次只处理一个库（D8），一个滴发的上传没有这条期限就能拖住所有库的重建。完全停发的客户端两条期限谁先到算谁：下限内的请求体是这条，回 400；更大的是出站 60 s 空闲期限，回 503。RAGFlow 读得慢造成的背压同样算进这条，回 400：期限只看请求体读完没有，分不出慢在哪一端，64 KiB/s 以下的上游本来也不可用。缺省 `KB_UPLOAD_MAX_BYTES` 下最长约 27 分钟。全局 `requestTimeout` 不用：它不随大小缩放，排队等锁的请求也会被算进去。
 - 上传成功后触发该文档的解析。`kb_rejected`、`parse_not_started` 或 `kb_unavailable`：按 D13 的写法删除文档，分别返回 400 `kb_rejected`、400 `kb_rejected`、503 `kb_unavailable`。上传本身得到 `unsupported_file`：400 `kb_file_unsupported`。
 - 都成功后，单事务插行并审计 `kb.ingest`，应答 201 `DocumentView`（字段规则见 D10，`sourceChanged` 为 `null`）。
 - 被拒（超限、上限）时审计 `kb.ingest_reject`。

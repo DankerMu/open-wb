@@ -17,6 +17,8 @@ export interface FakeRagflowRequest {
   bearer: FakeRagflowBearer;
   /** 请求头 `Content-Length`，没有时为 `null`。 */
   contentLength: number | null;
+  /** 请求头之后线上实际到达的字节数，含声明长度之外的：解析器只把声明的字节交给请求。 */
+  received: number;
   /** 解析出的 JSON body，没有或解析失败时为 `null`。 */
   json: unknown;
   /** multipart 请求的部件；不是 multipart，或没有 `boundary`、缺结束边界时为 `null`。 */

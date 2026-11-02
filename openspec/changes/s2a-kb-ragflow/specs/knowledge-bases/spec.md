@@ -332,7 +332,7 @@
 **处理**：在该库的写锁下进行。
 1. 取锁后计数：该库已有 500 份文档时 409 `kb_limit`，并审计 `kb.ingest_reject`（`reason: limit`），不发出站请求。
 2. 请求体直接拼进出站 multipart 上传；app-server 不落盘，不保留副本。
-3. 客户端中途断开，或发送的字节少于 `Content-Length`：中止出站请求；不插行，不写 `kb.ingest`。
+3. 客户端中途断开，发送的字节少于 `Content-Length`，或读请求体超过期限：中止出站请求；不插行，不写 `kb.ingest`。期限从取到写锁起算，按 `Content-Length` 以每秒 64 KiB 折算，不少于 60 秒；到期回 400 `bad_request`。排队时间不算。
 4. 上传回 `code:500` 且 message 表明不支持这种文件：400 `kb_file_unsupported`，并审计 `kb.ingest_reject`（`reason: unsupported_type`）。
 5. 上传成功后，触发该文档的解析。
 6. 解析触发失败：删除该文档，按「RAGFlow 出站请求」映射返回；回 `code:0` 而 `success_count` 为 0 时同样删除该文档，返回 400 `kb_rejected`。
@@ -363,6 +363,10 @@
 #### Scenario: 客户端中断
 - **WHEN** 请求声明 1 MiB，发送 512 KiB 后断开连接
 - **THEN** 出站上传被中止；没有文档行，没有 `kb.ingest`；假 RAGFlow 上没有留下这份文档
+
+#### Scenario: 请求体太慢
+- **WHEN** 请求声明 1 MiB，以低于期限折算的速度持续发送，每次间隔都短于出站空闲期限
+- **THEN** 期限到时 400 `bad_request`，出站上传被中止，写锁放开，排队的写操作继续；没有文档行，没有 `kb.ingest`；假 RAGFlow 上没有留下这份文档
 
 #### Scenario: 解析触发失败
 - **WHEN** 上传成功，但假 RAGFlow 对解析触发应答 HTTP 503；另一次应答 `code:0` 且 `success_count:0`

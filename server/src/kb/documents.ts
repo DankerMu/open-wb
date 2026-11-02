@@ -1,6 +1,6 @@
 /**
  * 知识库的文档（s2a-kb-ragflow D10、D12、D13、D20；knowledge-bases「工作空间来源入库」「文档列表与状态」「重新入库与移出」）。
- * 组 10：工作空间来源入库与 RAGFlow 文档的删除写法；组 11：列表；重新入库与移出在组 13 加进来。
+ * 组 10：工作空间来源入库与 RAGFlow 文档的删除写法；组 11：列表；本地上传在 `uploads.ts`（组 12），重新入库与移出在组 13 加进来。
  *
  * 入库：整批在该库的写锁下顺序处理。快判到取锁之间没有 `await`：`locks.ts` 的准入是同步的（D20）。取锁后重判库、工作空间
  * 与 `state`，排队期间库可能已删除或转入重建。之后的 `state` 变化（确认重建）不再看：重建器要等这把锁，等到时才枚举文档。
@@ -42,7 +42,7 @@ import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
 import { acceptsFile } from "./templates.js";
 
 const BODY_KEYS = new Set(["workspaceId", "paths"]);
-const MAX_DOCUMENTS_PER_BASE = 500;
+export const MAX_DOCUMENTS_PER_BASE = 500;
 /** 单条路径 UTF-8 编码的字节上限，同 PATH_MAX。被拒的路径原文进审计，而审计行不清理，所以过长的在这里就拦下。 */
 const MAX_PATH_BYTES = 4096;
 const DEFAULT_TIMING: DocumentRemovalTiming = { retryMs: 500, deadlineMs: 5000 };
@@ -108,7 +108,7 @@ interface RunState {
 }
 
 /** 解析刚触发成功，写端点不读 RAGFlow（D10）。 */
-const JUST_INGESTED: RunState = { status: "queued", chunkCount: null, message: null };
+export const JUST_INGESTED: RunState = { status: "queued", chunkCount: null, message: null };
 const MISSING: RunState = { status: "missing", chunkCount: null, message: null };
 
 /** 重发删除的节奏：期限经装配注入（D13）。 */
@@ -206,7 +206,7 @@ function canonicalPath(path: string): string {
     .join("/");
 }
 
-function viewOf(document: KbDocument, run: RunState, sourceChanged: boolean | null) {
+export function viewOf(document: KbDocument, run: RunState, sourceChanged: boolean | null) {
   const { id, name, size, source, workspaceId, sourcePath, createdAt } = document;
   return {
     id,
@@ -221,7 +221,7 @@ function viewOf(document: KbDocument, run: RunState, sourceChanged: boolean | nu
   };
 }
 
-type DocumentView = ReturnType<typeof viewOf>;
+export type DocumentView = ReturnType<typeof viewOf>;
 
 function runStateOf({ ingestionStatus, chunkCount }: ListedDocument): RunState {
   const status = RUN_STATUSES.get(ingestionStatus);
@@ -273,6 +273,22 @@ export async function removeRagflowDocument(
   }
 }
 
+/** 补偿删除：尽力而为，不改变调用方的结果。失败只写一行 `kb_document_leak`（D10、D11）。 */
+export async function discardRagflowDocument(
+  dependencies: {
+    client: Pick<Client, "stopDocument" | "deleteDocument">;
+    log: (record: KbDocumentRecord) => void;
+    removalTiming?: DocumentRemovalTiming | undefined;
+  },
+  target: { datasetId: string; documentId: string },
+): Promise<void> {
+  const { client, log, removalTiming } = dependencies;
+  const removal = await removeRagflowDocument(client, target, removalTiming);
+  if (removal.outcome !== "deleted") {
+    log({ event: "kb_document_leak", documentId: target.documentId });
+  }
+}
+
 /** 读全一个数据集在 RAGFlow 的文档（D12）：组 9 第三刀复用。结果给调用方映射，不抛错。 */
 export async function readRagflowDocuments(
   client: Pick<Client, "listDocuments">,
@@ -293,8 +309,8 @@ export async function readRagflowDocuments(
 }
 
 export function createKbDocuments(dependencies: KbDocumentsDependencies) {
-  const { store, client, locks, sources, audit, log } = dependencies;
-  const { uploadMaxBytes, uploadMaxFiles, removalTiming } = dependencies;
+  const { store, client, locks, sources, audit } = dependencies;
+  const { uploadMaxBytes, uploadMaxFiles } = dependencies;
 
   /** 取锁前后各判一次；次序同 spec：工作空间先于 `state`。 */
   function ingestable(id: string, actorId: string, workspaceId: string): KnowledgeBase {
@@ -304,14 +320,6 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
       throw new HttpError("kb_rebuilding");
     }
     return base;
-  }
-
-  /** 尽力而为：不改变调用方的结果。 */
-  async function discard(datasetId: string, documentId: string): Promise<void> {
-    const removal = await removeRagflowDocument(client, { datasetId, documentId }, removalTiming);
-    if (removal.outcome !== "deleted") {
-      log({ event: "kb_document_leak", documentId });
-    }
   }
 
   function record(item: Item, opened: OpenedSource, ragflowDocumentId: string): DocumentView {
@@ -349,13 +357,13 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
     const { datasetId } = item.base;
     const parsed = await client.parseDocument(datasetId, documentId);
     if (parsed.kind !== "ok") {
-      await discard(datasetId, documentId);
+      await discardRagflowDocument(dependencies, { datasetId, documentId });
       return PARSE_REJECTIONS[parsed.kind];
     }
     try {
       return record(item, opened, documentId);
     } catch (error) {
-      await discard(datasetId, documentId);
+      await discardRagflowDocument(dependencies, { datasetId, documentId });
       throw error;
     }
   }

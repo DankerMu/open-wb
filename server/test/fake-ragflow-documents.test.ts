@@ -18,6 +18,8 @@ const ABSENT = "0123456789abcdef0123456789abcdef";
 const NOT_FOUND_DOCUMENT = '{"code":404,"message":"Resource not found"}';
 const NOT_FOUND_DATASET = '{"code":404,"data":null,"message":"Resource not found"}';
 const EMPTY_FILE = '{"code":500,"message":"Failed to download document"}';
+/** 中断的上传发到这里为止。 */
+const TORN = '--b\r\nContent-Disposition: form-data; name="file"; filename="a.txt"\r\n\r\npartial';
 
 let fake: FakeRagflowServer;
 
@@ -243,14 +245,53 @@ describe("上传（§7）", () => {
     socket.write(
       `POST /api/v1/datasets/${id}/documents HTTP/1.1\r\nHost: h\r\n` +
         `Authorization: Bearer ${KEY}\r\nContent-Type: multipart/form-data; boundary=b\r\n` +
-        `Content-Length: 1000\r\n\r\n--b\r\nContent-Disposition: form-data; name="file"; ` +
-        `filename="a.txt"\r\n\r\npartial`,
+        `Content-Length: 1000\r\n\r\n${TORN}`,
     );
-    await expect.poll(() => fake.requests().length).toBe(1);
+    await expect.poll(() => fake.requests()[0]?.received).toBe(TORN.length);
     socket.destroy();
     await expect.poll(() => fake.requests()[0]?.aborted).toBe(true);
     expect(fake.documents(id)).toEqual([]);
     expect(fake.requests()[0]?.contentLength).toBe(1000);
+    expect(fake.requests()[0]?.received).toBe(TORN.length);
+  });
+
+  describe("实际到达的字节数", () => {
+    const multipart = (id: string, declared: number, body: string) =>
+      `POST /api/v1/datasets/${id}/documents HTTP/1.1\r\nHost: h\r\n` +
+      `Authorization: Bearer ${KEY}\r\nContent-Type: multipart/form-data; boundary=b\r\n` +
+      `Content-Length: ${String(declared)}\r\n\r\n${body}`;
+    const BODY =
+      '--b\r\nContent-Disposition: form-data; name="file"; filename="a.txt"\r\n\r\nhello\r\n--b--\r\n';
+
+    it("声明与实际相等：等于 Content-Length", async () => {
+      const id = fake.addDataset();
+      const socket = connect(fake.port, "127.0.0.1");
+      socket.write(multipart(id, BODY.length, BODY));
+      await expect.poll(() => fake.documents(id).length).toBe(1);
+      socket.destroy();
+      expect(fake.requests()[0]).toMatchObject({ contentLength: 84, received: 84 });
+    });
+
+    it("声明偏小：解析器只读到声明的字节，文档照样建成，received 仍是实际字节", async () => {
+      const id = fake.addDataset();
+      const socket = connect(fake.port, "127.0.0.1");
+      socket.write(multipart(id, BODY.length - 2, BODY));
+      await expect.poll(() => fake.documents(id).length).toBe(1);
+      socket.destroy();
+      expect(fake.requests()[0]).toMatchObject({ contentLength: 82, received: 84 });
+    });
+
+    it("keep-alive：同一条连接上的下一个请求重新数", async () => {
+      const id = fake.addDataset();
+      const socket = connect(fake.port, "127.0.0.1");
+      socket.on("data", () => undefined);
+      socket.write(multipart(id, BODY.length, BODY));
+      await expect.poll(() => fake.documents(id).length).toBe(1);
+      socket.write(multipart(id, BODY.length, BODY));
+      await expect.poll(() => fake.documents(id).length).toBe(2);
+      socket.destroy();
+      expect(fake.requests().map(({ received }) => received)).toEqual([84, 84]);
+    });
   });
 });
 
