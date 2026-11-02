@@ -379,11 +379,11 @@ describe("未知路由（§12）", () => {
     expect(fake.unknownRoutes()).toMatchObject([{ method, path, unknown: true }]);
   });
 
-  it("本组没有实现的路由也是未知路由：已存在数据集的文档列表归组 11", async () => {
+  it("本组没有实现的路由也是未知路由：已存在数据集的详情", async () => {
     const id = fake.addDataset();
-    await call("GET", `/api/v1/datasets/${id}/documents?page=1&page_size=100`);
+    await call("GET", `/api/v1/datasets/${id}?page=1`);
     expect(fake.unknownRoutes()).toMatchObject([
-      { path: `/api/v1/datasets/${id}/documents`, query: "page=1&page_size=100" },
+      { path: `/api/v1/datasets/${id}`, query: "page=1" },
     ]);
   });
 });

@@ -107,7 +107,7 @@ interface ModelInstance {
   modelInfo: readonly ModelInfo[];
 }
 
-interface ListedDocument {
+export interface ListedDocument {
   id: string;
   ingestionStatus: string;
   chunkCount: number;

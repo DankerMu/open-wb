@@ -1,6 +1,6 @@
 /**
- * 知识库的文档（s2a-kb-ragflow D10、D13、D20；knowledge-bases「工作空间来源入库」「重新入库与移出」）。组 10：工作空间来源
- * 入库与 RAGFlow 文档的删除写法；列表、重新入库与移出在组 11、13 加进来。
+ * 知识库的文档（s2a-kb-ragflow D10、D12、D13、D20；knowledge-bases「工作空间来源入库」「文档列表与状态」「重新入库与移出」）。
+ * 组 10：工作空间来源入库与 RAGFlow 文档的删除写法；组 11：列表；重新入库与移出在组 13 加进来。
  *
  * 入库：整批在该库的写锁下顺序处理。快判到取锁之间没有 `await`：`locks.ts` 的准入是同步的（D20）。取锁后重判库、工作空间
  * 与 `state`，排队期间库可能已删除或转入重建。之后的 `state` 变化（确认重建）不再看：重建器要等这把锁，等到时才枚举文档。
@@ -22,13 +22,21 @@
  *
  * RAGFlow 文档的删除写法：`code:0` 不代表删成了，`RUNNING`、`STOPPING` 回 `deleted:0` 且行仍在（§8.5）。停止只发一次：
  * `STOPPING` 时重复是空操作（§8.2）。它不碰本地行，也不取锁：调用方在写锁内调用。
+ *
+ * 列表：先读本地行，再读全 RAGFlow 的文档，按 RAGFlow 文档 id 关联，不取锁、不判 `state`（D12）。次序不能反：反过来，翻页
+ * 之后才提交的文档会显示 `missing`。`readRagflowDocuments` 读到 `total` 为止，不设页数上限，所以 `kb_document_leak` 留下的文档
+ * 不会把真实文档挤成 `missing`；读到空页也停：`total` 是这一页说的，翻页期间可能变。结果不抛错：数据集 not-found 在这里
+ * 是全部 `missing`，在编译状态（组 9 第三刀）是读取失败，由调用方映射。
+ *
+ * 运行状态只看 `ingestion_status`。八种之外是协议漂移，不看这一行有没有本地行，整个请求 503。`sourceChanged` 排在 RAGFlow
+ * 之后：RAGFlow 失败时不碰文件系统。`sources.stat` 不写审计，所以这个读取整体没有审计。
  */
 import { basename } from "node:path";
 import { HttpError } from "../core/errors/index.js";
 import { ownedBase } from "./bases.js";
 import type { createKbLocks } from "./locks.js";
 import { multipartUpload } from "./multipart.js";
-import { type createRagflowClient, isRecord } from "./ragflow-client.js";
+import { type createRagflowClient, isRecord, type ListedDocument } from "./ragflow-client.js";
 import { type createSourceFiles, isMountOffline, type OpenedSource } from "./source-file.js";
 import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
 import { acceptsFile } from "./templates.js";
@@ -38,6 +46,7 @@ const MAX_DOCUMENTS_PER_BASE = 500;
 /** 单条路径 UTF-8 编码的字节上限，同 PATH_MAX。被拒的路径原文进审计，而审计行不清理，所以过长的在这里就拦下。 */
 const MAX_PATH_BYTES = 4096;
 const DEFAULT_TIMING: DocumentRemovalTiming = { retryMs: 500, deadlineMs: 5000 };
+const FAILED_MESSAGE = "解析失败";
 
 /** knowledge-bases「工作空间来源入库」的固定文案。 */
 const REASON_MESSAGES = {
@@ -70,6 +79,38 @@ const PARSE_REJECTIONS = {
   not_found: "unavailable",
 } as const;
 
+/** 实测记录表 A。是 `Map`：运行状态是 RAGFlow 的字符串，`constructor` 这样的值不能命中对象原型。 */
+const RUN_STATUSES = new Map<string, DocumentStatus>([
+  ["UNSTART", "unparsed"],
+  ["CREATED", "queued"],
+  ["SCHEDULED", "queued"],
+  ["RUNNING", "parsing"],
+  ["STOPPING", "parsing"],
+  ["STOPPED", "cancelled"],
+  ["COMPLETED", "done"],
+  ["FAILED", "failed"],
+]);
+
+type DocumentStatus =
+  | "queued"
+  | "parsing"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "unparsed"
+  | "missing";
+
+/** 视图里来自 RAGFlow 的三个字段。 */
+interface RunState {
+  status: DocumentStatus;
+  chunkCount: number | null;
+  message: string | null;
+}
+
+/** 解析刚触发成功，写端点不读 RAGFlow（D10）。 */
+const JUST_INGESTED: RunState = { status: "queued", chunkCount: null, message: null };
+const MISSING: RunState = { status: "missing", chunkCount: null, message: null };
+
 /** 重发删除的节奏：期限经装配注入（D13）。 */
 export interface DocumentRemovalTiming {
   retryMs: number;
@@ -89,8 +130,13 @@ export interface KbDocumentRecord {
 
 type Client = Pick<
   ReturnType<typeof createRagflowClient>,
-  "uploadDocument" | "parseDocument" | "stopDocument" | "deleteDocument"
+  "listDocuments" | "uploadDocument" | "parseDocument" | "stopDocument" | "deleteDocument"
 >;
+
+/** `readRagflowDocuments` 的结果：`not_found` 与失败原样带出来。 */
+type ReadDocuments =
+  | { kind: "ok"; value: ListedDocument[] }
+  | Exclude<Awaited<ReturnType<Client["listDocuments"]>>, { kind: "ok" }>;
 
 interface AuditEvent {
   kind: "kb.ingest" | "kb.ingest_reject";
@@ -103,7 +149,7 @@ interface AuditEvent {
 interface KbDocumentsDependencies {
   store: Pick<
     ReturnType<typeof createKbStore>,
-    "getBase" | "findDocumentBySource" | "countDocuments" | "addDocument"
+    "getBase" | "findDocumentBySource" | "listDocuments" | "countDocuments" | "addDocument"
   >;
   client: Client;
   locks: Pick<ReturnType<typeof createKbLocks>, "write">;
@@ -160,7 +206,7 @@ function canonicalPath(path: string): string {
     .join("/");
 }
 
-function viewOf(document: KbDocument) {
+function viewOf(document: KbDocument, run: RunState, sourceChanged: boolean | null) {
   const { id, name, size, source, workspaceId, sourcePath, createdAt } = document;
   return {
     id,
@@ -169,15 +215,25 @@ function viewOf(document: KbDocument) {
     source,
     workspaceId,
     path: sourcePath,
-    status: "queued",
-    chunkCount: null,
-    message: null,
-    sourceChanged: false,
+    ...run,
+    sourceChanged,
     createdAt,
   };
 }
 
 type DocumentView = ReturnType<typeof viewOf>;
+
+function runStateOf({ ingestionStatus, chunkCount }: ListedDocument): RunState {
+  const status = RUN_STATUSES.get(ingestionStatus);
+  if (status === undefined) {
+    throw new HttpError("kb_unavailable");
+  }
+  return {
+    status,
+    chunkCount: status === "done" ? chunkCount : null,
+    message: status === "failed" ? FAILED_MESSAGE : null,
+  };
+}
 
 const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => {
@@ -213,6 +269,25 @@ export async function removeRagflowDocument(
     }
     if (Date.now() >= deadline) {
       return { outcome: "busy" };
+    }
+  }
+}
+
+/** 读全一个数据集在 RAGFlow 的文档（D12）：组 9 第三刀复用。结果给调用方映射，不抛错。 */
+export async function readRagflowDocuments(
+  client: Pick<Client, "listDocuments">,
+  datasetId: string,
+): Promise<ReadDocuments> {
+  const value: ListedDocument[] = [];
+  for (let page = 1; ; page += 1) {
+    const result = await client.listDocuments(datasetId, page);
+    if (result.kind !== "ok") {
+      return result;
+    }
+    const { documents, total } = result.value;
+    value.push(...documents);
+    if (documents.length === 0 || value.length >= total) {
+      return { kind: "ok", value };
     }
   }
 }
@@ -262,7 +337,7 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
         });
       },
     );
-    return viewOf(document);
+    return viewOf(document, JUST_INGESTED, false);
   }
 
   /** 第 7、8 步：文档已在 RAGFlow，这里的任何失败都要把它删掉。 */
@@ -360,7 +435,41 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
     return { documents, rejected };
   }
 
+  /** 工作空间来源比对入库记录；上传来源没有源文件，`null`。 */
+  async function sourceChangedOf(document: KbDocument, actorId: string): Promise<boolean | null> {
+    const { workspaceId, sourcePath, size, sourceMtimeMs } = document;
+    if (workspaceId === null || sourcePath === null) {
+      return null;
+    }
+    const stats = await sources.stat({ id: actorId }, workspaceId, sourcePath);
+    if (stats === null) {
+      return null;
+    }
+    return stats === "absent" || stats.size !== size || stats.mtimeMs !== sourceMtimeMs;
+  }
+
   return {
+    /** `GET /api/kb/bases/:id/documents`：见文件头。 */
+    async list(id: string, actorId: string): Promise<DocumentView[]> {
+      const base = ownedBase(store, id, actorId);
+      const documents = store.listDocuments(id);
+      const listed = await readRagflowDocuments(client, base.datasetId);
+      if (listed.kind === "kb_unavailable" || listed.kind === "kb_rejected") {
+        throw new HttpError(listed.kind);
+      }
+      const rows = listed.kind === "ok" ? listed.value : [];
+      const states = new Map(rows.map((row) => [row.id, runStateOf(row)]));
+      return Promise.all(
+        documents.map(async (document) =>
+          viewOf(
+            document,
+            states.get(document.ragflowDocumentId) ?? MISSING,
+            await sourceChangedOf(document, actorId),
+          ),
+        ),
+      );
+    },
+
     /** `POST /api/kb/bases/:id/documents`：请求合法且本地写入没有失败即 201，被拒的条目逐条进 `rejected`。 */
     async ingest(id: string, body: unknown, actorId: string) {
       const request = parseIngest(body, uploadMaxFiles);

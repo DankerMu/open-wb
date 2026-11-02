@@ -388,11 +388,11 @@ Minimal mergeable slice: atomic - multipart 与 `source-file.ts` 只有入库一
 
 ## 11. 文档列表与状态（knowledge-bases「文档列表与状态」）
 
-- [ ] 11.1 核对 Context：
+- [x] 11.1 核对 Context：
   - 组 1 的 §8.3、§8.4 与表 A（`ingestion_status`、`chunk_count`、`page_size` 超限回落）、表 B 的文档列表一行；
   - 组 10 的 `source-file.ts` 与 `documents.ts`；
-  - `core/sandbox` 的纯函数 `resolve`、facade 的 `mountNamesOf` 与 `store.rootOf`（`app.ts:295-297`）。
-- [ ] 11.2 测试先行：新 `server/test/kb-documents-list.test.ts`。
+  - `core/sandbox` 的纯函数 `resolve`、facade 的 `mountNamesOf` 与 `store.rootOf`（`app.ts:305-307`）。
+- [x] 11.2 测试先行：新 `server/test/kb-documents-list.test.ts`。
   - 文档行由 store 直接插入；
   - 「状态映射」（八种取值加 `missing`）「0 切片」「未知运行状态」「源文件变更」「挂载来源的变更」（用 S1b 的挂载测试缝断言没有对挂载路径的同步调用）「源路径变成符号链接」；
   - 「数据集丢失」（`code:404`）；
@@ -404,7 +404,7 @@ Minimal mergeable slice: atomic - multipart 与 `source-file.ts` 只有入库一
   - ragflow-backend「每个请求带密钥」：本组时建库、上传、列表、删除与版本请求都已可经端点触发，在这里做端点级断言。
 
   路由加进 `kb-disabled.test.ts`；假 RAGFlow 加分页与八种运行状态。
-- [ ] 11.3 实现：`kb/documents.ts` 加列表（读全 RAGFlow 文档的函数，组 9 第三刀复用）与 `sourceChanged`（用 `source-file.ts` 的无审计 stat 变体）；`kb/rest.ts` 加 `GET /api/kb/bases/:id/documents`。
+- [x] 11.3 实现：`kb/documents.ts` 加列表（读全 RAGFlow 文档的函数，组 9 第三刀复用）与 `sourceChanged`（用 `source-file.ts` 的无审计 stat 变体）；`kb/rest.ts` 加 `GET /api/kb/bases/:id/documents`。
 
 Suggested fixture level: expanded - 读路径经沙箱解析与挂载（stat），且是本地映射与 RAGFlow 状态的关联点。
 Minimal mergeable slice: atomic - 一条路由、一个视图，状态映射与源文件变更都是同一个 `DocumentView` 的字段。

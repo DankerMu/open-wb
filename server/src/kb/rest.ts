@@ -21,6 +21,7 @@
  * 带坏 body 也是 404。
  *
  * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
+ * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。
  */
 import type {
   FastifyInstance,
@@ -186,6 +187,14 @@ export function registerKbRoutes(
       await bases().remove(request.params.id, principalOf(request).id);
       return reply.code(204).send();
     },
+  );
+
+  app.get<BaseParams>(
+    DOCUMENTS_ROUTE,
+    { onRequest: noStore, preParsing: ownedBase },
+    async (request) => ({
+      documents: await enabled().documents.list(request.params.id, principalOf(request).id),
+    }),
   );
 
   app.post<BaseParams>(
