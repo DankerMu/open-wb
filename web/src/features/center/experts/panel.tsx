@@ -3,8 +3,9 @@ import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/index";
 import type { ApiClient } from "@/lib/api";
+import { RemoveDialog } from "../remove-dialog.js";
 import { ExpertFormDialog } from "./form-dialog.js";
-import { ExpertBrowser, RemoveExpertDialog } from "./list.js";
+import { ExpertBrowser } from "./list.js";
 import { useExperts } from "./use-experts.js";
 
 /**
@@ -87,8 +88,7 @@ function Experts({ client }: { client: ApiClient }) {
         />
       ) : null}
       {remove ? (
-        <RemoveExpertDialog
-          expert={remove.expert}
+        <RemoveDialog
           onCancel={experts.cancelRemove}
           onConfirm={() =>
             void experts.confirmRemove(() => {
@@ -97,6 +97,7 @@ function Experts({ client }: { client: ApiClient }) {
           }
           pending={remove.pending}
           restoreFocus={restoreFocus}
+          title={`删除专家 ${remove.expert.name}？`}
         />
       ) : null}
     </section>

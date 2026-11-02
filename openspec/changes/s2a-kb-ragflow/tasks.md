@@ -533,6 +533,7 @@ Minimal mergeable slice: `api-kb.ts` 与 `web/test/api-kb.test.ts`（15.2 的第
 
 ## 16. web：知识库详情（knowledge-bases「中心「知识库」tab」的详情、入库、上传、移出、重新入库与刷新）
 
+- [ ] 16.0 前置（#1889，组 15 合入后补）：中心页五处删除确认框合并为 `web/src/features/center/remove-dialog.tsx` 的 `RemoveDialog`。行为不变，既有用例不改；目的是组 16 新增确认框时 jscpd 不越 3%。
 - [ ] 16.1 核对 Context：
   - 文件页树组件与 `api-workspaces` 的目录列举；
   - S1g 上传的客户端 `web/src/lib/api-upload.ts`；

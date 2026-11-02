@@ -1,12 +1,3 @@
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -17,7 +8,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { BaseView } from "@/lib/api";
-import { useEscapeFallback } from "../../../components/escape-fallback.js";
 import { templateLabel } from "./templates.js";
 
 const HEADERS = ["名称", "模板", "编译", "文档", "状态", "操作"];
@@ -130,61 +120,5 @@ export function KnowledgeBaseList({
         })}
       </TableBody>
     </Table>
-  );
-}
-
-type RemoveProps = {
-  base: BaseView;
-  pending: boolean;
-  restoreFocus(): void;
-  onConfirm(): void;
-  onCancel(): void;
-};
-
-/**
- * `删除知识库 <name>？` 确认框（照模型 tab 的 `RemoveModelDialog`）。`取消` 不发请求；`删除` 恰发一次。请求在途时两个
- * 按钮都禁用、Escape 与遮罩也关不掉。
- */
-export function RemoveKnowledgeBaseDialog({
-  base,
-  pending,
-  restoreFocus,
-  onConfirm,
-  onCancel,
-}: RemoveProps) {
-  const onOpenChange = (open: boolean) => {
-    if (!open && !pending) onCancel();
-  };
-  const fallback = useEscapeFallback({ canClose: !pending, onOpenChange });
-
-  return (
-    <AlertDialog onOpenChange={onOpenChange} open>
-      <AlertDialogContent
-        aria-modal="true"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocus();
-        }}
-        onEscapeKeyDown={fallback.onEscapeKeyDown}
-        onKeyDown={fallback.onKeyDown}
-        ref={fallback.ref}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{`删除知识库 ${base.name}？`}</AlertDialogTitle>
-          <AlertDialogDescription>删除后不可恢复。</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
-          <Button
-            aria-busy={pending ? true : undefined}
-            disabled={pending}
-            onClick={onConfirm}
-            variant="destructive"
-          >
-            删除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }

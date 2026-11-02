@@ -1,13 +1,4 @@
 import type { MouseEvent } from "react";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -18,7 +9,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ModelView } from "@/lib/api";
-import { useEscapeFallback } from "../../../components/escape-fallback.js";
 
 const HEADERS = ["ID", "名称", "能力", "最大 tokens", "上游", "探活", "缺省", "操作"];
 const TAG = "rounded-md bg-muted px-1.5 py-0.5 text-xs text-muted-foreground";
@@ -126,61 +116,5 @@ export function ModelList({ models, ...actions }: RowActions & { models: readonl
         ))}
       </TableBody>
     </Table>
-  );
-}
-
-type RemoveProps = {
-  model: ModelView;
-  pending: boolean;
-  restoreFocus(): void;
-  onConfirm(): void;
-  onCancel(): void;
-};
-
-/**
- * `删除模型 <name>？` 确认框（拷入层 alert-dialog）。`取消` 不发请求；`删除` 恰发一次。请求在途时两个按钮都
- * 禁用、Escape 与遮罩也关不掉（结果总落在打开的确认框上，没有晚到结果）。
- */
-export function RemoveModelDialog({
-  model,
-  pending,
-  restoreFocus,
-  onConfirm,
-  onCancel,
-}: RemoveProps) {
-  const onOpenChange = (open: boolean) => {
-    if (!open && !pending) onCancel();
-  };
-  const fallback = useEscapeFallback({ canClose: !pending, onOpenChange });
-
-  return (
-    <AlertDialog onOpenChange={onOpenChange} open>
-      <AlertDialogContent
-        aria-modal="true"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocus();
-        }}
-        onEscapeKeyDown={fallback.onEscapeKeyDown}
-        onKeyDown={fallback.onKeyDown}
-        ref={fallback.ref}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{`删除模型 ${model.name}？`}</AlertDialogTitle>
-          <AlertDialogDescription>删除后不可恢复。</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
-          <Button
-            aria-busy={pending ? true : undefined}
-            disabled={pending}
-            onClick={onConfirm}
-            variant="destructive"
-          >
-            删除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }

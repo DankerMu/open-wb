@@ -2,8 +2,9 @@ import { useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/index";
 import type { ApiClient } from "@/lib/api";
+import { RemoveDialog } from "../remove-dialog.js";
 import { CreateKnowledgeBaseDialog } from "./create-dialog.js";
-import { KnowledgeBaseList, KnowledgeBasesEmpty, RemoveKnowledgeBaseDialog } from "./list.js";
+import { KnowledgeBaseList, KnowledgeBasesEmpty } from "./list.js";
 import { useKnowledgeBases } from "./use-kb.js";
 
 const UNAVAILABLE = "知识库服务暂不可用";
@@ -102,8 +103,7 @@ function KnowledgeBases({ client }: { client: ApiClient }) {
         </>
       ) : null}
       {remove ? (
-        <RemoveKnowledgeBaseDialog
-          base={remove.base}
+        <RemoveDialog
           onCancel={kb.cancelRemove}
           onConfirm={() =>
             void kb.confirmRemove(() => {
@@ -112,6 +112,7 @@ function KnowledgeBases({ client }: { client: ApiClient }) {
           }
           pending={remove.pending}
           restoreFocus={restoreFocus}
+          title={`删除知识库 ${remove.base.name}？`}
         />
       ) : null}
     </section>

@@ -3,13 +3,9 @@ import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/index";
 import type { ApiClient } from "@/lib/api";
 import { isAdmin } from "@/lib/roles";
+import { RemoveDialog } from "../remove-dialog.js";
 import { ConnectorFormDialog } from "./form-dialog.js";
-import {
-  AdminConnectorList,
-  ConnectorsEmpty,
-  MemberConnectorList,
-  RemoveConnectorDialog,
-} from "./list.js";
+import { AdminConnectorList, ConnectorsEmpty, MemberConnectorList } from "./list.js";
 import { useConnectors } from "./use-connectors.js";
 
 /**
@@ -80,8 +76,7 @@ function Connectors({ client, admin }: { client: ApiClient; admin: boolean }) {
         />
       ) : null}
       {remove ? (
-        <RemoveConnectorDialog
-          connector={remove.connector}
+        <RemoveDialog
           onCancel={connectors.cancelRemove}
           onConfirm={() =>
             void connectors.confirmRemove(() => {
@@ -90,6 +85,7 @@ function Connectors({ client, admin }: { client: ApiClient; admin: boolean }) {
           }
           pending={remove.pending}
           restoreFocus={restoreFocus}
+          title={`删除连接器 ${remove.connector.name}？`}
         />
       ) : null}
     </section>
