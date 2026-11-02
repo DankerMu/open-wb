@@ -4,11 +4,13 @@ import { useAuth } from "@/features/auth/index";
 import type { ApiClient } from "@/lib/api";
 import { RemoveDialog } from "../remove-dialog.js";
 import { ModelFormDialog } from "./form-dialog.js";
+import { KbSection } from "./kb-section.js";
 import { ModelList } from "./list.js";
 import { useModels } from "./use-models.js";
 
 /**
- * 中心页「模型」tab（model-registry「模型 tab」）：模型表、`新增模型` / `编辑模型` 对话框与删除确认。
+ * 中心页「模型」tab（model-registry「模型 tab」）：模型表、`新增模型` / `编辑模型` 对话框与删除确认；知识库开启时表下方
+ * 是「知识库模型」段。
  * `client` 供用例注入；缺省取会话客户端（`useAuth().createSessionClient()`，同文件页的先例）。
  */
 export function ModelsPanel({ client }: { client?: ApiClient }) {
@@ -75,6 +77,7 @@ function Models({ client }: { client: ApiClient }) {
             probing={models.probing}
             rowErrors={models.rowErrors}
           />
+          <KbSection client={client} models={list.models} />
         </>
       ) : null}
       {form ? (
