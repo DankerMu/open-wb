@@ -26,12 +26,13 @@ export interface Route<T, Typed> {
   read: (data: unknown) => T | undefined;
 }
 
-/** `createRagflowClient` 里的 JSON 调用：只经闭包参数交给兄弟文件，不在模块级导出。 */
+/** `createRagflowClient` 里的 JSON 调用：只经闭包参数交给兄弟文件，不在模块级导出。`signal` 中止即 `kb_unavailable`。 */
 export type JsonCall = <T, Typed>(
   method: string,
   path: string,
   route: Route<T, Typed>,
   body?: unknown,
+  signal?: AbortSignal,
 ) => Promise<Result<T, Typed>>;
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

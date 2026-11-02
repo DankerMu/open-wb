@@ -359,6 +359,83 @@ describe("JSON 调用的总期限", () => {
   });
 });
 
+/**
+ * 关停中止（#1852 的开工注记，ragflow-backend「嵌入模型更换与全量重建」的「在途请求被中止」）：期限都是缺省值，能在用例时限里
+ * 结束的只有中止本身。
+ */
+describe("AbortSignal 中止在途请求", () => {
+  let client: Client;
+
+  beforeEach(async () => {
+    fake = await start({ apiKey: KEY });
+    client = clientOf(fake.baseUrl);
+  });
+
+  afterEach(closeFake);
+
+  it("JSON 调用挂起时中止：kb_unavailable，不等总期限", async () => {
+    const gate = fake.fault("POST /api/v1/datasets", { kind: "hold" });
+    const controller = new AbortController();
+    const pending = client.createDataset(DATASET, controller.signal);
+    await gate.reached;
+    controller.abort();
+    await expect(pending).resolves.toEqual(UNAVAILABLE);
+    gate.release();
+  });
+
+  it("下载的应答头到达之前中止：kb_unavailable", async () => {
+    fake.fault(DOWNLOAD, { kind: "hang" });
+    const controller = new AbortController();
+    const pending = client.downloadDocument(ABSENT, ABSENT, controller.signal);
+    await vi.waitFor(() => {
+      expect(fake.requests()).toHaveLength(1);
+    });
+    controller.abort();
+    await expect(pending).resolves.toEqual(UNAVAILABLE);
+  });
+
+  it("文件流读到一半中止：流报错，不是干净结束", async () => {
+    fake.fault(DOWNLOAD, {
+      kind: "stall",
+      headers: { "content-disposition": 'attachment; filename="a.txt"', "content-length": "100" },
+      body: "partial",
+    });
+    const controller = new AbortController();
+    const result = await client.downloadDocument(ABSENT, ABSENT, controller.signal);
+    const reading = fileOf(result);
+    controller.abort();
+    await expect(reading).rejects.toThrow();
+  });
+
+  it("上传途中中止：kb_unavailable，请求体被销毁，不留文档", async () => {
+    const id = fake.addDataset();
+    const { head, contentType } = framing("a.txt");
+    const body = new PassThrough();
+    body.write(head);
+    const controller = new AbortController();
+    const upload = { body, contentType, contentLength: head.length + 100 };
+    const pending = client.uploadDocument(id, upload, controller.signal);
+    await vi.waitFor(() => {
+      expect(fake.requests()[0]?.received).toBeGreaterThan(0);
+    });
+    controller.abort();
+    await expect(pending).resolves.toEqual(UNAVAILABLE);
+    await vi.waitFor(() => {
+      expect(body.destroyed).toBe(true);
+      expect(fake.requests()[0]?.aborted).toBe(true);
+    });
+    expect(fake.documents(id)).toEqual([]);
+  });
+
+  it("已中止的 signal：不发请求，kb_unavailable", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(client.deleteDataset(ABSENT, controller.signal)).resolves.toEqual(UNAVAILABLE);
+    await expect(client.readDefaultModels(controller.signal)).resolves.toEqual(UNAVAILABLE);
+    expect(fake.requests()).toEqual([]);
+  });
+});
+
 /** `http.request` 的替身：一个永远不应答的请求。`socket` 事件由用例在需要时发出。 */
 class StubRequest extends Writable {
   readonly connection = new EventEmitter();

@@ -613,13 +613,10 @@ describe("账号缺省不被清空（§13）", () => {
 describe("嵌入身份（name、baseUrl）的变化", () => {
   const STORED = { name: "bge-m3" };
 
-  it.each([
-    ["不带 confirmRebuild", {}],
-    ["带 confirmRebuild：组 14 才开放，本组一律 409", { confirmRebuild: true }],
-  ])("已有知识库时改名称，%s：409 kb_rebuild_required，不下发，不保存", async (_label, extra) => {
+  it("已有知识库时改名称，不带 confirmRebuild：409 kb_rebuild_required，不下发，不保存", async () => {
     const world = await configured();
     createPlainBase(world.store, hex(1));
-    const body = { embedding: { ...world.embedding, name: "bge-large" }, ...extra };
+    const body = { embedding: { ...world.embedding, name: "bge-large" } };
     const response = await world.put(body);
     expect(response.statusCode).toBe(409);
     expect(bodyOf(response)).toEqual(REBUILD_REQUIRED);

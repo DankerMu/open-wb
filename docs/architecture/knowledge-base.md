@@ -57,13 +57,14 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 | `{"event":"kb_version_mismatch"}` | 版本接口可达，版本串不是 `v1.0.0-rc2`。不可达时不写 | 把 RAGFlow 换回钉住的版本，或按升级流程改钉住的版本 |
 | `{"event":"kb_upstream_auth_failed"}` | RAGFlow 应答 HTTP 401，或 body `code` 为 401 / 403（`DELETE /datasets` 的 `code:403` 是「不存在」，不算） | 核对密钥文件里的 key 是否仍有效；换 key 要重启服务 |
 
-**知识库模型设置**（`server/src/kb/settings.ts`）：三个端点都只给管理员，次序是未登录 401 → 关闭时 503 `kb_disabled` → 非管理员 403 → body 解析；成功应答都是 200 加读视图，带 `Cache-Control: no-store`。
+**知识库模型设置**（`server/src/kb/settings.ts`）：四个端点都只给管理员，次序是未登录 401 → 关闭时 503 `kb_disabled` → 非管理员 403 → body 解析；成功应答都是 200 加读视图，带 `Cache-Control: no-store`。
 
 | 端点 | 作用 |
 |---|---|
 | `GET /api/kb/settings` | 读 |
 | `PUT /api/kb/settings` | 保存：先下发到 RAGFlow，成功后在同一事务里写 `kb_settings` 与审计；下发失败本地不变 |
 | `POST /api/kb/settings/probe` | 探活嵌入模型（bodyless），不下发，不改嵌入身份 |
+| `POST /api/kb/settings/rebuild` | 重试失败的重建（bodyless），见下面的「嵌入模型更换与全量重建」 |
 
 读视图恰为 `{embedding, chatModelId, bases, compileBases, documents, rebuilding, rebuildFailed}`，不含任何密钥。`embedding` 是 `{name, baseUrl, probe}` 或 `null`；`compileBases` 是 `raptor` 或 `graph` 为 1 的库数，含重建中与重建失败的库。
 
@@ -71,7 +72,7 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 
 当前值非 `null` 且有开编译的知识库时，`chatModelId` 改为 `null` 或别的 id 都是 409 `kb_chat_model_locked`，同 id 照常下发：Compiler 的 `llm_id` 建库时固化，换模型会让旧库打到新上游。没有开编译的库时，改为 `null` 只改本地；已是 `null` 再设 `null` 是无操作，不写库、不审计。
 
-嵌入身份是 `(name, baseUrl)`，只换密钥不算身份变化。身份变化且已有知识库时：有库处于 `rebuilding` 即 409 `kb_rebuilding`，否则 409 `kb_rebuild_required`。确认重建（`confirmRebuild`）目前不开放，带了同样 409。
+嵌入身份是 `(name, baseUrl)`，只换密钥不算身份变化。身份变化且已有知识库时：有库处于 `rebuilding` 即 409 `kb_rebuilding`（带不带 `confirmRebuild` 都一样）；没带 `confirmRebuild:true` 即 409 `kb_rebuild_required`，不下发、不保存；带了就照常下发并保存，同时发起全量重建（见下面的「嵌入模型更换与全量重建」）。
 
 **下发的固定序列**：两个实例名是常量，`owb-embed` 承载嵌入模型，`owb-chat` 承载知识库对话模型，提供方都是 `OpenAI-API-Compatible`。一个实例的一轮下发：
 
@@ -134,11 +135,11 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `{"event":"kb_dataset_leak","datasetId":<id>}` | 回滚删不掉数据集：RAGFlow 里留下一个本地没有行的数据集。开了开关的库，它的画布与模板组没有去删，也还在 | 按 `datasetId` 在 RAGFlow 里手工删除；开了开关的，再按数据集名（`owb-<id>-g<代数>`，画布与模板组同名）先删画布、再删模板组。这条记录不限频 |
 | `{"event":"kb_pipeline_leak","canvasId":<id\|null>,"groupId":<id\|null>}` | 回滚删不掉画布（两个 id 都在，模板组没有去删）或模板组（画布已删，`canvasId` 为 `null`） | 按 id 在 RAGFlow 里先删画布、再删模板组。这条记录不限频 |
 
-**编译资源**（`server/src/kb/pipeline.ts`，组 9 第二刀）。RAPTOR 与知识图谱不是数据集字段：`parser_config` 里的开关被 RAGFlow 静默丢弃。开了开关的库是三样资源：一个模板组、一个引用它的画布（ingestion pipeline），以及以这个画布建的 `parse_type:2` 数据集。每个库每一代一套，不共用。本刀只在建库时建第 0 代；重建时新建一代、`rebuild_*` 三列记新一代，由组 14（#1852）接上。解析时 Compiler 节点在 pipeline 里自动运行，没有单独的编译触发。
+**编译资源**（`server/src/kb/pipeline.ts`，组 9 第二刀）。RAPTOR 与知识图谱不是数据集字段：`parser_config` 里的开关被 RAGFlow 静默丢弃。开了开关的库是三样资源：一个模板组、一个引用它的画布（ingestion pipeline），以及以这个画布建的 `parse_type:2` 数据集。每个库每一代一套，不共用。建库时建第 0 代；重建时新建一代，`rebuild_*` 三列记新一代（见下面的「嵌入模型更换与全量重建」）。解析时 Compiler 节点在 pipeline 里自动运行，没有单独的编译触发。
 
 建一代（`createPipeline`，建库与重建共用；调用方持锁，它自己不取锁）：
 
-1. `GET /api/v1/models/default`，只读。`data.models` 里 `chat` 与 `embedding` 两种都在、`model_name` 非空才继续；缺一种即 409 `kb_not_ready`，不发后续请求（重建时怎样映射由组 14（#1852）接上）。这一步挡的是 RAGFlow 侧被人手工清空缺省：没有缺省对话模型时，pipeline 数据集的数据集级合并会让全栈唯一的入库进程崩溃循环。本系统自己从不清空缺省（见上面的「账号缺省不变量」）。补救：管理员保存一次嵌入模型，两种缺省都会重新下发。
+1. `GET /api/v1/models/default`，只读。`data.models` 里 `chat` 与 `embedding` 两种都在、`model_name` 非空才继续；缺一种即 409 `kb_not_ready`，不发后续请求；重建时是该库 `rebuild_failed`。这一步挡的是 RAGFlow 侧被人手工清空缺省：没有缺省对话模型时，pipeline 数据集的数据集级合并会让全栈唯一的入库进程崩溃循环。本系统自己从不清空缺省（见上面的「账号缺省不变量」）。补救：管理员保存一次嵌入模型，两种缺省都会重新下发。
 2. `GET /api/v1/compilation-templates/builtins` 取内置 `config`。RAPTOR 用 `tree`，删掉 `entity`、`relation`、`llm_id`（内置 `entity.fields` 带一条空 `type`，原样提交回 `102`）；知识图谱用 `knowledge_graph`，删掉 `llm_id`。
 3. `POST /api/v1/compilation-template-groups`，名为 `owb-<id>-g<代数>`，`templates` 是开着的类型各一项。RAGFlow 对同名组自动加后缀，本系统只按应答里的 id 引用。
 4. `GET /api/v1/pipelines/<parser_id>` 取内置 DSL，插一个 `Compiler:Owb` 节点：按 `obj.component_name` 含 `Chunker` 找 chunker（各模板节点名不同），插在它与原下游之间，`components` 与 `graph` 两处都改，`graph.edges` 里 chunker 的出边改从 Compiler 出发、原边不留，再加 chunker → Compiler 一条。Compiler 的 `llm_id` 留空，建数据集时 RAGFlow 把它固化成账号当时的缺省对话模型。然后 `POST /api/v1/agents`，`title` 同名，`canvas_category` 为 `dataflow_canvas`。内置 DSL 没有 `graph`，或 chunker 不是恰一个：503 `kb_unavailable`，不提交。`graph` 不能省：省掉时建画布、建库都回 `code:0`，文档静默换解析器、编译不运行。
@@ -376,3 +377,23 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 | 成功 | 200 `DocumentView`，不读 RAGFlow：`status` 为 `queued`，`chunkCount`、`message` 为 `null`，`sourceChanged` 为 `false` | 单事务换 RAGFlow 文档 id、`size` 与 `source_mtime_ms`，`id`、`name`、`createdAt` 不变 | 留下；再按上面的写法删旧文档，旧文档还在解析（`busy`）或删除失败只写一行 `kb_document_leak`，应答不变 |
 
 审计：成功时与换行同一事务写 `kb.ingest`，detail 恰为 `{id, source:"workspace", reingest:true, documentId}`，`documentId` 是本地文档 id，`workspace_id` 列是该工作空间。读取被拒不写 `kb.ingest_reject`。
+
+**嵌入模型更换与全量重建**（`server/src/kb/rebuild.ts`、`kb/settings.ts`，组 14）。换嵌入模型的数据集不能就地改：`PUT /datasets/<id>` 改 `embedding_model` 不重算向量（实测记录 §6），所以每个库建一代新数据集，把入库原件从旧数据集搬过去。
+
+确认：`PUT /api/kb/settings` 带 `confirmRebuild:true` 换嵌入身份，下发成功后在同一事务里写设置、嵌入代数加一、全部知识库置 `rebuilding`、`kb_settings.rebuild_actor_id` 记为这次的管理员，并审计两条：`kb.settings` 与 `kb.rebuild`（detail 恰为 `{bases, documents}`，受影响的库数与文档数）。提交之后唤醒重建器。重建期间：入库、上传、重新入库与删库都 409 `kb_rebuilding`，移出也 409；再换嵌入身份 409 `kb_rebuilding`，只换密钥照常；有开编译的库时 `chatModelId` 照旧锁定。
+
+重建器在进程内一次处理一个库，按 `created_at`、`id` 的次序，处理期间持有该库的写锁：锁正被它持有时写操作立即 409，不排队；它自己排在在途写操作之后，拿到锁才读文档清单，所以排在前面的上传进入新数据集。拿到锁先重读库行，库已删除或不再是 `rebuilding` 即跳过，什么都不建。每个库：
+
+1. 有残留的一代（`rebuild_dataset_id` 非空：上次失败或崩溃留下的）就按删除次序删掉它，「不存在」视为已删，再置空三个 `rebuild_*` 列。
+2. 以原模板与开关、新嵌入模型建新一代，名为 `owb-<id>-g<新代数>`，写回 `rebuild_*`。两个开关都关的库只建 `parse_type:1` 数据集，不读账号缺省；开了开关的库新建模板组与画布，不复用旧的，账号缺省缺失即失败、不发后续请求。
+3. 逐份文档：从旧数据集下载入库原件，原样拼进 multipart 上传到新数据集（不落盘），再触发这一份的解析。multipart 长度按本地记录的 `size` 算，字节在流上数：多出一个字节当场中止上传并销毁下载流，少了不发结束边界，RAGFlow 都不留文档。下载判为 not-found 的文档跳过；字节不符、上传失败、解析触发失败（含 `success_count:0`）都让这个库失败。
+4. 单事务切换：删掉被跳过的文档行，其余行换成新的 RAGFlow 文档 id；当前一代的三个 id 换成新一代，`rebuild_*` 置空，代数换成新代数，`state` 为 `ready`；同事务审计 `kb.rebuild`，detail 恰为 `{id, result:"ok", skipped}`，`skipped` 是被跳过的本地文档 id。
+5. 按删除次序删旧一代。删不掉不影响状态，只写一行（同上面的 leak 表）：数据集删不掉写 `kb_dataset_leak`，它的画布与模板组不再去删；画布删不掉写 `kb_pipeline_leak`（两个 id 都在）；模板组删不掉同样写 `kb_pipeline_leak`（`canvasId` 为 `null`）。补救同 leak 表。
+
+任一步失败：该库 `rebuild_failed`，`stateMessage` 为 `重建失败，可在模型设置里重试`，不带 RAGFlow 原文；同事务审计 `kb.rebuild {id, result:"failed"}`。`rebuild_*` 留着，重试的第 1 步删掉它们。`rebuild_failed` 的库可以移出文档（删的是当前一代里的文档），可以删库（先删新一代再删当前一代），不能入库、上传与重新入库。重建器写的审计，actor 一律是 `rebuild_actor_id`。
+
+**下载判别**（实测记录 §9.1）：not-found 也是 HTTP 200，文件内容又可以恰好等于 not-found 的正文，所以只看响应头：HTTP 200 且带 `Content-Disposition` 是文件字节，正文一律不解析，不看 `Content-Type`、`Content-Length` 与后缀；HTTP 200 不带这个头才按 JSON 读，`code:404` 是 not-found（跳过），别的按 RAGFlow 出站请求的通用映射（这个库失败）；非 200 同样走通用映射。0 字节文件的下载是不带头的 `code:500`，入库时就拒绝了空文件，重建碰不到它。这个判据只在直连实例上验证过：中间若有代理剥掉这个头，下载判为失败，该库 `rebuild_failed`，不会把错误应答当文件上传。
+
+**重试**：`POST /api/kb/settings/rebuild`，管理员专用（非管理员 403，未登录 401），bodyless（任意 body，含 `{}`，400）。在设置锁内把全部 `rebuild_failed` 置回 `rebuilding`，`rebuild_actor_id` 改为这次的管理员，审计 `kb.rebuild {bases, documents, retry:true}`（重试的库数与它们的文档数），唤醒重建器，应答 200 加读视图。没有失败库时 200，不写库、不审计、不发任何请求。
+
+**续做与关停**：入口在写出 `server_started` 之后、不等待地启动重建器，对仍是 `rebuilding` 的库从第 1 步做起。续做中的失败只改变知识库状态，不写 failure record，不改变退出码（RAGFlow 不可达时该库 `rebuild_failed`，重试即可）。关停时，在关闭主实例与 DB 之前停住重建器：在途的 RAGFlow 请求被中止，只等正在持锁处理的那一个库收尾，不等排在写锁队列里的（一个在途的本地上传最长约 27 分钟，等它会拖住关停）。中止不算失败：第 4 步提交之前该库保持 `rebuilding`，下次启动续做；提交之后已是 `ready`，第 5 步没删完的旧一代不续删，成为孤儿，那一步中止的删除照样写一行 leak，按 leak 表手工清理。未配置 `RAGFLOW_BASE_URL` 时重建器不启动，`rebuilding` 的库保持原状、不改成 `rebuild_failed`，重新配置之后下次启动续做。

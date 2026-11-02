@@ -1,6 +1,6 @@
 /**
  * s2a-kb-ragflow tasks 8.2（#1844）：ragflow-backend「未配置即关闭」的路由表。每个注册知识库路由的组把路由加进这张表
- *（tasks 头部），十二条到齐是组 14 的事。每条都经真实 `createApp`，不靠探针路由；判定次序的探针用例在 `kb-status.test.ts`。
+ *（tasks 头部），组 14（#1852）注册最后一条，表恰十二条。每条都经真实 `createApp`，不靠探针路由；判定次序的探针用例在 `kb-status.test.ts`。
  * 期望值是 spec 的字面量。没有配置 RAGFlow 地址，所以这里不用假 RAGFlow：判定放行了，请求也无处可发，断言的是信封。
  */
 import type { DatabaseSync } from "node:sqlite";
@@ -19,6 +19,7 @@ const ROUTES = [
   { method: "GET", url: "/api/kb/settings", body: false },
   { method: "PUT", url: "/api/kb/settings", body: true },
   { method: "POST", url: "/api/kb/settings/probe", body: true },
+  { method: "POST", url: "/api/kb/settings/rebuild", body: true },
   { method: "GET", url: "/api/kb/bases", body: false },
   { method: "POST", url: "/api/kb/bases", body: true },
   { method: "DELETE", url: `/api/kb/bases/${"a".repeat(32)}`, body: false },
@@ -64,6 +65,14 @@ function request(route: (typeof ROUTES)[number], cookie?: string) {
 }
 
 describe("未配置即关闭", () => {
+  it("路由表恰十二条：GET /api/kb/status 之外的全部知识库路由", async () => {
+    await openDisabled();
+    expect(ROUTES).toHaveLength(12);
+    expect(new Set(ROUTES.map(({ method, url }) => `${method} ${url.split("?")[0]}`)).size).toBe(
+      12,
+    );
+  });
+
   it.each(ROUTES)("$method $url：管理员 503 kb_disabled，匿名 401 在它之前", async (route) => {
     await openDisabled();
     const response = await request(route, await cookieFor(app, "lisi"));

@@ -30,7 +30,7 @@
  *   `ready`（实测范围：macOS arm64、无 `OMP_USER`、手工按 `spawnOmp` 的 argv/env 运行官方二进制；
  *   Linux、sudo/setpriv 形状与入口对这次退出的处置未测，见 ADR-0014 的 #1337 行）；
  * - 关停与失败清理同一条路：转换器 `close()`（对在途作业写 `cancel` 并等它们落定）→ 两个周期清理的
- *   定时器 → 预览监听器 → 主实例（其 preClose 里 runtime 退出，再关主监听器）→ DB。预览监听器先于
+ *   定时器 → 预览监听器 → 知识库重建器 → 主实例（其 preClose 里 runtime 退出，再关主监听器）→ DB。预览监听器先于
  *   runtime 关：omp 只连主监听器上的模型代理，预览实例没有 `/api` 与 `/v1`。转换器先于预览监听器关：
  *   在途的 `/o/` 请求因此立即以断开结束，不占监听器的关停预算；
  * - sidecar 预检（`app` 阶段，至多 `await` 5 秒，永不使启动失败）之后、写失败行之前核对信号，与主
@@ -79,6 +79,7 @@ import {
   preparePrivateDbFiles,
   seedModelRegistry,
   startBackgroundWork,
+  stopBackgroundWork,
   workspaceAssemblyOf,
 } from "./startup-registry.js";
 import { writeManagedLine } from "./startup-writer.js";
@@ -645,7 +646,7 @@ async function publishStarted(
   );
   if (!owned.signalReceived) {
     // 不等待：回收目录首扫与挂载的启动恢复（`startup-registry.ts`）。
-    startBackgroundWork({ trash, mounts: app.mounts });
+    startBackgroundWork({ trash, mounts: app.mounts, rebuild: app.kbRebuild });
   }
 }
 
@@ -712,6 +713,7 @@ async function releaseOwned(owned: OwnedResources): Promise<void> {
       clearInterval(owned.trashTimer);
       clearInterval(owned.pdfTimer);
       await closeOwnedInstance(owned, "preview");
+      await stopBackgroundWork(owned.app);
       await closeOwnedInstance(owned, "app");
       closeOwnedDb(owned);
     })();

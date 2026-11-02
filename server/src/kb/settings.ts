@@ -14,7 +14,10 @@
  *
  * 密钥只走两条路：出站请求与 `store.saveSettings`。读视图、审计 detail 与错误都不带它。
  *
- * `confirmRebuild` 本组只校验类型：确认重建由组 14 开放，这之前身份变化且已有知识库一律 409 `kb_rebuild_required`。
+ * 确认重建（组 14，#1852）：身份变化且已有知识库时，带 `confirmRebuild:true` 照常下发并保存，同一事务里代数加一、全部知识库置
+ * `rebuilding`、`rebuild_actor_id` 记为本次的 principal，并审计 `kb.settings` 与 `kb.rebuild {bases, documents}` 两条；提交之后唤醒
+ * 重建器（`kb/rebuild.ts`）。重试（`POST /api/kb/settings/rebuild`）同在设置锁内：全部 `rebuild_failed` 置回 `rebuilding`、改写
+ * 发起者、审计 `{bases, documents, retry:true}`、唤醒；没有失败库时不写库、不审计、不唤醒。
  *
  * 探活逐次串行：一条进程级 Promise 链，「读身份 → 发请求 → 取锁写回」整段排队。它不并进设置锁，探活不能占锁 15 s。
  *
@@ -63,10 +66,17 @@ interface SaveDetail {
 }
 
 interface AuditEvent {
-  kind: "kb.settings";
+  kind: "kb.settings" | "kb.rebuild";
   actorId: string;
   title: string;
-  detail: SaveDetail | { probe: "ok" | "failed" };
+  detail: SaveDetail | { probe: "ok" | "failed" } | RebuildDetail;
+}
+
+/** `kb.rebuild` 的确认与重试两支（knowledge-bases「知识库审计」）。 */
+interface RebuildDetail {
+  bases: number;
+  documents: number;
+  retry?: true;
 }
 
 type KbSettingsRead = ReturnType<ReturnType<typeof createKbStore>["settings"]>;
@@ -82,6 +92,8 @@ interface KbSettingsDependencies {
     | "countCompileBases"
     | "countBasesInState"
     | "countAllDocuments"
+    | "countDocuments"
+    | "retryFailedRebuilds"
   >;
   models: Pick<ReturnType<typeof createModelStore>, "get" | "routeOf">;
   client: Client;
@@ -89,6 +101,8 @@ interface KbSettingsDependencies {
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
   probeDeadlines?: EmbeddingProbeDeadlines | undefined;
+  /** 唤醒重建器：确认重建与重试的事务提交之后调用。 */
+  onRebuild: () => void;
 }
 
 interface EmbeddingInput {
@@ -102,6 +116,7 @@ interface EmbeddingInput {
 interface SaveRequest {
   embedding: EmbeddingInput | undefined;
   chatModelId: string | null | undefined;
+  confirmRebuild: boolean;
 }
 
 /** 一个实例的一轮下发。 */
@@ -131,6 +146,8 @@ interface SavePlan {
   provisions: Provision[];
   patch: { embedding?: EmbeddingConfig; chatModelId?: string | null };
   detail: SaveDetail;
+  /** 确认了的身份变化：这次保存同时发起重建。 */
+  rebuild: boolean;
 }
 
 function badRequest(): never {
@@ -180,11 +197,12 @@ function parseSave(body: unknown): SaveRequest {
   return {
     embedding: embedding === undefined ? undefined : parseEmbedding(embedding),
     chatModelId,
+    confirmRebuild: confirmRebuild === true,
   };
 }
 
 /** RAGFlow 调用的结果：成功取值，失败抛 `kb_unavailable` / `kb_rejected`，只有 `kind`，不带 RAGFlow 的原文。 */
-export function unwrap<T>(
+function unwrap<T>(
   result: { kind: "ok"; value: T } | { kind: "kb_unavailable" | "kb_rejected" },
 ): T {
   if (result.kind !== "ok") {
@@ -275,7 +293,7 @@ function writesOf(
 }
 
 export function createKbSettings(dependencies: KbSettingsDependencies) {
-  const { store, models, client, locks, audit, probeDeadlines } = dependencies;
+  const { store, models, client, locks, audit, probeDeadlines, onRebuild } = dependencies;
   /** 探活链的尾：`models/rest.ts` 的 `perIdChain` 写法，只有一个 key。前一个无论成败都轮到下一个。 */
   let probeTail: Promise<unknown> = Promise.resolve();
 
@@ -324,14 +342,22 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     }
   }
 
-  function checkIdentity(input: EmbeddingInput, current: KbSettingsRead["embedding"]): void {
+  /** 身份变化且已有知识库：重建中 409，未确认 409，确认了即这次保存发起重建（`true`）。 */
+  function checkIdentity(
+    input: EmbeddingInput,
+    current: KbSettingsRead["embedding"],
+    confirmed: boolean,
+  ): boolean {
     if (!isNewIdentity(input, current) || store.countBases() === 0) {
-      return;
+      return false;
     }
     if (store.countBasesInState("rebuilding") > 0) {
       throw new HttpError("kb_rebuilding");
     }
-    throw new HttpError("kb_rebuild_required");
+    if (!confirmed) {
+      throw new HttpError("kb_rebuild_required");
+    }
+    return true;
   }
 
   /** 省略 `apiKey` 取已存的值，首次配置没有可取即 400。 */
@@ -350,13 +376,12 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
   }
 
   /** 锁内定下这次保存：要下发什么、写什么、审计什么。没有实际写入时为 `undefined`。 */
-  function planSave({ embedding, chatModelId }: SaveRequest): SavePlan | undefined {
+  function planSave({ embedding, chatModelId, confirmRebuild }: SaveRequest): SavePlan | undefined {
     const current = store.settings();
     const next = embedding && embeddingPlan(embedding, current.embedding);
     checkChatModel(chatModelId, current.chatModelId);
-    if (embedding !== undefined) {
-      checkIdentity(embedding, current.embedding);
-    }
+    const rebuild =
+      embedding !== undefined && checkIdentity(embedding, current.embedding, confirmRebuild);
     if (next === undefined && chatModelId === null && current.chatModelId === null) {
       return undefined;
     }
@@ -365,6 +390,7 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     return {
       provisions: provisions.flatMap((target) => target ?? []),
       ...writesOf(next, chatModelId, current.chatModelId),
+      rebuild,
     };
   }
 
@@ -389,20 +415,54 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     });
   }
 
+  /** 确认重建的那条：在 `saveSettings` 的事务里，已全部置 `rebuilding`，两个数就是受影响的库与文档。 */
+  function auditConfirmedRebuild(actorId: string): void {
+    audit({
+      kind: "kb.rebuild",
+      actorId,
+      title: "确认重建知识库",
+      detail: { bases: store.countBases(), documents: store.countAllDocuments() },
+    });
+  }
+
   async function saveLocked(request: SaveRequest, actorId: string) {
     const plan = planSave(request);
     if (plan !== undefined) {
       for (const target of plan.provisions) {
         await provision(client, target);
       }
-      store.saveSettings(plan.patch, () => {
+      const patch = plan.rebuild ? { ...plan.patch, rebuildActorId: actorId } : plan.patch;
+      store.saveSettings(patch, () => {
         audit({
           kind: "kb.settings",
           actorId,
           title: "保存知识库模型设置",
           detail: plan.detail,
         });
+        if (plan.rebuild) {
+          auditConfirmedRebuild(actorId);
+        }
       });
+      if (plan.rebuild) {
+        onRebuild();
+      }
+    }
+    return view();
+  }
+
+  /** 重试：在设置锁内，见文件头。 */
+  async function retryLocked(actorId: string) {
+    const retried = store.retryFailedRebuilds(actorId, (bases) => {
+      const documents = bases.reduce((sum, { id }) => sum + store.countDocuments(id), 0);
+      audit({
+        kind: "kb.rebuild",
+        actorId,
+        title: "重试重建知识库",
+        detail: { bases: bases.length, documents, retry: true },
+      });
+    });
+    if (retried.length > 0) {
+      onRebuild();
     }
     return view();
   }
@@ -441,6 +501,11 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     save(body: unknown, actorId: string) {
       const request = parseSave(body);
       return locks.settings(() => saveLocked(request, actorId));
+    },
+
+    /** `POST /api/kb/settings/rebuild`：在设置锁内重试全部失败的重建（D8、D20）。 */
+    retry(actorId: string) {
+      return locks.settings(() => retryLocked(actorId));
     },
 
     /** `POST /api/kb/settings/probe`：逐次串行，身份在排到时读取；请求在锁外，写回在锁内，身份已变时丢弃，不审计（D20）。 */

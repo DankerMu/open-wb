@@ -1,6 +1,7 @@
 /**
- * kb/rest：知识库的路由（s2a-kb-ragflow D5、D7、D9；ragflow-backend「知识库状态端点」「知识库可用性」「知识库模型设置」，
- * knowledge-bases「知识库端点」）。`GET /api/kb/status`、三条设置路由、建库列表删库三条路由，以及 `/api/kb/*` 的关闭判定。
+ * kb/rest：知识库的路由（s2a-kb-ragflow D5、D7、D8、D9；ragflow-backend「知识库状态端点」「知识库可用性」「知识库模型设置」
+ * 「嵌入模型更换与全量重建」，knowledge-bases「知识库端点」）。`GET /api/kb/status`、四条设置路由、建库列表删库三条路由，以及
+ * `/api/kb/*` 的关闭判定。
  *
  * 关闭判定是 root `preParsing` 钩子，只在知识库关闭时安装。root 钩子按添加次序运行，且都先于路由级钩子，所以
  * 判定次序是：cookie guard 的 401（`http/guard.ts`，在 `registerAuth` 之后添加）→ 503 `kb_disabled` → 路由级的管理员
@@ -13,7 +14,8 @@
  * 版本请求至多等 5 s，其间 app 可能开始关闭。
  *
  * 设置路由管理员专用：次序同 `models/rest.ts`，未登录 401（root guard）→ 关闭时 503 → 非管理员 403（路由级 `preParsing`）→
- * body 解析（`PUT` 与 bodyless 的 `POST` 都在 content-parser 归属集）→ 设置模块的校验。业务都在 `kb/settings.ts`。
+ * body 解析（`PUT` 与 bodyless 的两条 `POST` 都在 content-parser 归属集）→ 设置模块的校验。业务都在 `kb/settings.ts`。探活与
+ * 重试重建（`POST /api/kb/settings/rebuild`）都是 bodyless：任意 body（含 `{}`）400。
  * 路由在知识库关闭时同样注册：不注册就是 catch-all 的 404，不是 503；处理函数在关闭时走不到。
  *
  * 知识库路由对任何已登录用户开放，只操作自己的库：`POST` 在 content-parser 归属集，业务都在 `kb/bases.ts`。`DELETE` 不读
@@ -54,6 +56,7 @@ const KB_ROUTE_PREFIX = "/api/kb/";
 const STATUS_ROUTE = "/api/kb/status";
 const SETTINGS_ROUTE = "/api/kb/settings";
 const SETTINGS_PROBE_ROUTE = "/api/kb/settings/probe";
+const SETTINGS_REBUILD_ROUTE = "/api/kb/settings/rebuild";
 const BASES_ROUTE = "/api/kb/bases";
 const BASE_ROUTE = "/api/kb/bases/:id";
 const DOCUMENTS_ROUTE = "/api/kb/bases/:id/documents";
@@ -177,12 +180,17 @@ export function registerKbRoutes(
     settings().save(request.body, principalOf(request).id),
   );
 
-  app.post(SETTINGS_PROBE_ROUTE, { ...admin, bodyLimit: BODYLESS_BODY_LIMIT }, (request) => {
-    if (request.body !== undefined) {
-      throw new HttpError("bad_request");
-    }
-    return settings().probe(principalOf(request).id);
-  });
+  for (const [url, run] of [
+    [SETTINGS_PROBE_ROUTE, (actorId: string) => settings().probe(actorId)],
+    [SETTINGS_REBUILD_ROUTE, (actorId: string) => settings().retry(actorId)],
+  ] as const) {
+    app.post(url, { ...admin, bodyLimit: BODYLESS_BODY_LIMIT }, (request) => {
+      if (request.body !== undefined) {
+        throw new HttpError("bad_request");
+      }
+      return run(principalOf(request).id);
+    });
+  }
 
   app.get(BASES_ROUTE, { onRequest: noStore }, async (request) => ({
     bases: await bases().list(principalOf(request).id),
