@@ -123,9 +123,14 @@ describe("字节计数中止", () => {
   });
 
   it("一块里同时越过声明：这一块整个不发", async () => {
-    const upload = multipartUpload({ name: "a.txt", size: 3, source: sourceOf("abcdef") });
-    const { bytes } = await collectUntilError(upload.body);
-    expect(bytes.toString("utf8")).not.toContain("abc");
+    // 负载取十六进制边界与头里都不会出现的字节，免得随机边界碰巧含有它。按 `data` 事件收：出错时 `for await`
+    // 丢掉尚未读出的缓冲，看不到「先发出、再出错」的字节；下游管道看得到。
+    const upload = multipartUpload({ name: "a.txt", size: 3, source: sourceOf("xyzuvw") });
+    const sent: Buffer[] = [];
+    upload.body.on("data", (chunk: Buffer) => sent.push(chunk));
+    upload.body.on("error", () => undefined);
+    await new Promise((resolve) => upload.body.once("close", resolve));
+    expect(Buffer.concat(sent).toString("utf8")).not.toContain("xyz");
     expect(upload.sourceFailure()).toBeInstanceOf(Error);
   });
 
