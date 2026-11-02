@@ -4,13 +4,14 @@
  *
  * 「进程退出时库处于 rebuilding」由种子 DB 给出：上一次运行留下的就是这几列，入口只看得到它们。假 RAGFlow 在用例进程里，旧一代与
  * 残留的一代都是它自己建的资源；账号缺省经它自己的 `PATCH /models/default` 写入，种子请求在断言之前切掉。等的是终态（库行的
- * `state`），请求序列与审计在终态之后断言，不依赖时长。期望值是 spec 的字面量。
+ * `state`），审计在终态之后断言。库行在第 4 步切换时就已是 `ready`，第 5 步删旧一代在其后，所以完整的请求序列要等它收齐
+ * （`expectRoutes`），仍按全等判，不依赖时长。期望值是 spec 的字面量。
  */
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openDb } from "../src/core/db/index.js";
 import { routes } from "./kb-settings-helpers.js";
 import { COMPILE_ROW, hex, insertRow, UPLOAD_ROW } from "./kb-store-helpers.js";
@@ -180,6 +181,16 @@ async function waitForState(fx: Fixture, state: string): Promise<void> {
 
 const sentSince = (fx: Fixture, mark = fx.mark) => fx.fake.requests().slice(mark);
 
+/**
+ * 等 `mark` 之后的路由恰为 `expected`：`ready` 在第 4 步切换时落库，第 5 步删旧一代的请求可能还没到。仍是全等，多出的请求不放过。
+ */
+async function expectRoutes(fx: Fixture, expected: string[], mark = fx.mark): Promise<void> {
+  await vi.waitFor(() => expect(routes(sentSince(fx, mark))).toEqual(expected), {
+    timeout: STATE_MS,
+    interval: 50,
+  });
+}
+
 /** 普通库新一代的建库、转移与删旧数据集。 */
 function plainTail(fx: Fixture, next: string): string[] {
   return [
@@ -208,7 +219,7 @@ describe("续做", () => {
       try {
         await waitForState(fx, "ready");
         const next = String(baseRow(fx)?.dataset_id);
-        expect(routes(sentSince(fx))).toEqual([DELETE_DATASETS, ...plainTail(fx, next)]);
+        await expectRoutes(fx, [DELETE_DATASETS, ...plainTail(fx, next)]);
         expect(
           sentSince(fx)
             .map(({ json }) => json)
@@ -237,7 +248,7 @@ describe("续做", () => {
         await waitForState(fx, "ready");
         const row = baseRow(fx);
         const [residual, current] = [fx.residual, fx.current];
-        expect(routes(sentSince(fx))).toEqual([
+        await expectRoutes(fx, [
           DELETE_DATASETS,
           `DELETE /api/v1/agents/${String(residual?.canvasId)}`,
           `DELETE /api/v1/compilation-template-groups/${String(residual?.templateGroupId)}`,
@@ -342,10 +353,11 @@ describe("关停时在途重建", () => {
       const second = await launch(fx);
       try {
         await waitForState(fx, "ready");
-        expect(routes(sentSince(fx, mark))).toEqual([
-          DELETE_DATASETS,
-          ...plainTail(fx, String(baseRow(fx)?.dataset_id)),
-        ]);
+        await expectRoutes(
+          fx,
+          [DELETE_DATASETS, ...plainTail(fx, String(baseRow(fx)?.dataset_id))],
+          mark,
+        );
         expect(sentSince(fx, mark)[0]?.json).toEqual({ ids: [row?.rebuild_dataset_id] });
       } finally {
         await stopped(second.server);

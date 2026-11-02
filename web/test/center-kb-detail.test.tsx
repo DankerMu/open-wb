@@ -28,7 +28,11 @@ function setVisibility(next: DocumentVisibilityState) {
   document.dispatchEvent(new Event("visibilitychange"));
 }
 
-/** `files-mount-preview.test.tsx` 的写法：只假 `setTimeout`，并随真实时间推进，`findBy*` 照常可用。 */
+/**
+ * `files-mount-preview.test.tsx` 的写法：只假 `setTimeout`，并随真实时间推进，`findBy*` 照常可用（RTL 的 act 包装靠
+ * `setTimeout(0)` 收尾，不推进会挂住）。代价是真实耗时也会推进假时钟，所以「尚未重取」只在计时后 1.5 秒处判
+ *（或像隐藏用例那样打开后立刻停掉计时），给负载下的真实耗时留足余量；「已重取」在 3 秒及之后判，不受影响。
+ */
 function fakeClock() {
   vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout"] });
 }
@@ -225,9 +229,9 @@ describe("解析中自动刷新", () => {
     expect(statusOf(detail, "p.md")).toBe("解析中");
     fake.setDocuments("k1", [doc("p", { status: "done", chunkCount: 7 })]);
 
-    await advance(2_900);
+    await advance(1_500);
     expect(listReads(fake)).toBe(1);
-    await advance(100);
+    await advance(1_500);
     expect(listReads(fake)).toBe(2);
     await waitFor(() => expect(statusOf(detail, "p.md")).toBe("已切片 7"));
 
@@ -247,9 +251,9 @@ describe("解析中自动刷新", () => {
     expect(listReads(fake)).toBe(1);
 
     setVisibility("visible");
-    await advance(2_900);
+    await advance(1_500);
     expect(listReads(fake)).toBe(1);
-    await advance(100);
+    await advance(1_500);
     expect(listReads(fake)).toBe(2);
   });
 
