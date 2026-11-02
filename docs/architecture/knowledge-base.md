@@ -230,3 +230,28 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `{"event":"kb_document_leak","documentId":<id>}` | 补偿删除失败：RAGFlow 里留下一份本地没有行的文档。`documentId` 是 RAGFlow 的文档 id | 按 id 在 RAGFlow 里手工删除，文档还在解析时先停止。这条记录不限频 |
 
 **审计**：每份文档一条 `kb.ingest`，detail 恰为 `{id, source:"workspace", workspaceId, path, documentId}`，`documentId` 是本地文档 id，与插行同一事务；每个被拒条目一条 `kb.ingest_reject`，detail 恰为 `{id, source:"workspace", workspaceId, path, reason}`，单独写入。两者的 `workspace_id` 列都是该工作空间，标题是固定短句，不带用户文本与文件内容。
+
+**文档列表**（`server/src/kb/documents.ts`，组 11）：`GET /api/kb/bases/:id/documents`，200 `{documents: DocumentView[]}`，按 `created_at` 升序，带 `Cache-Control: no-store`，不写审计。别人的或不存在的 id 404 `not_found`，不发出站请求。不取写锁，不判 `state`。
+
+状态以 RAGFlow 为准，每次请求现读，不起后台轮询：先读本地行，再读全该数据集的文档（`page_size=100`、`orderby=create_time`、`desc=false`，读到 `total` 或空页为止，不设页数上限），按 RAGFlow 文档 id 关联。`name` 取本地记录。
+
+| `ingestion_status` | `status` | `chunkCount` | `message` |
+|---|---|---|---|
+| `UNSTART` | `unparsed` | `null` | `null` |
+| `CREATED`、`SCHEDULED` | `queued` | `null` | `null` |
+| `RUNNING`、`STOPPING` | `parsing` | `null` | `null` |
+| `STOPPED` | `cancelled` | `null` | `null` |
+| `COMPLETED` | `done` | `chunk_count`，可以是 0 | `null` |
+| `FAILED` | `failed` | `null` | `解析失败` |
+| 列表里没有该 id，或数据集 not-found | `missing` | `null` | `null` |
+| 其它取值，这一行有没有本地行都一样 | 整个请求 503 `kb_unavailable` | | |
+
+RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表。`code:101`、`102` 走通用映射 400 `kb_rejected`。
+
+`sourceChanged` 只对工作空间来源计算，上传来源为 `null`。用工作空间根加纯函数 `resolve`，不经 facade，所以读不到不写 `sandbox.reject`，再 stat，挂载内经挂载的适配器：
+
+| 情形 | `sourceChanged` |
+|---|---|
+| 大小与修改时间都和入库记录相同 | `false` |
+| 任一不同，文件已不存在，或已不是普通文件 | `true` |
+| 解析被拒（含路径上的符号链接）、工作空间不可见、挂载离线 | `null` |

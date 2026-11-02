@@ -3,8 +3,8 @@
  * 的世界（`createApp` + 真实挂载 manager，假 rclone，挂载点是普通目录）加假 RAGFlow。账号：zhangsan 是 `member`，拥有 W1–W3；
  * lisi 是 `admin`，拥有 `W_LISI`，在这里就是「别的账号」。知识库行由 store 直接插入，不走建库：这里不关心建库的请求序列。
  *
- * 每个用例收尾沿用 `kb-settings-helpers.ts` 的不变量：所有请求都带交下来的密钥，没有落到未知路由，账号缺省没被清空；
- * stdout、stderr 全程不得出现文件内容与 RAGFlow message 的哨兵。期望值是 spec 与实测记录的字面量。
+ * 每个用例收尾沿用 `kb-settings-helpers.ts` 的不变量：版本请求之外都带交下来的密钥，版本请求不带，没有落到未知路由，账号缺省
+ * 没被清空；stdout、stderr 全程不得出现文件内容与 RAGFlow message 的哨兵。期望值是 spec 与实测记录的字面量。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,8 +19,10 @@ import { disposeWorlds, OWNER, W1 } from "./mounts-manager-helpers.js";
 import { closeApps, send } from "./mounts-rest-helpers.js";
 import { type FakeRagflowRequest, type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
 
-const RAGFLOW_KEY = "wb-issue1847-ragflow-key";
+export const RAGFLOW_KEY = "wb-issue1847-ragflow-key";
+const VERSION_PATH = "/api/v1/system/version";
 export const UPLOAD_MAX_BYTES = 1024;
+export const LIST = "GET /api/v1/datasets/*/documents";
 export const UPLOAD = "POST /api/v1/datasets/*/documents";
 export const PARSE = "POST /api/v1/datasets/*/documents/parse";
 export const STOP = "POST /api/v1/datasets/*/documents/stop";
@@ -96,19 +98,26 @@ function routeMatcher(route: string): RegExp {
   return new RegExp(`^${pattern}$`, "u");
 }
 
-/** 第一份上传照常走，`script` 接管第二份：上传请求按到达次序消耗脚本，第一份占住之后才登记。 */
-export async function scriptSecondUpload(
+/** 第一个请求照常走，`script` 接管第二个：同一路由的请求按到达次序消耗脚本，第一个占住之后才登记。 */
+export async function scriptSecond(
   world: IngestWorld,
+  route: string,
   script: () => void,
   run: () => Promise<LightMyRequestResponse>,
 ): Promise<LightMyRequestResponse> {
-  const gate = world.fake.fault(UPLOAD, { kind: "hold" });
+  const gate = world.fake.fault(route, { kind: "hold" });
   const pending = run();
   await gate.reached;
   script();
   gate.release();
   return pending;
 }
+
+export const scriptSecondUpload = (
+  world: IngestWorld,
+  script: () => void,
+  run: () => Promise<LightMyRequestResponse>,
+): Promise<LightMyRequestResponse> => scriptSecond(world, UPLOAD, script, run);
 
 type OpenWorld = (setup?: IngestSetup) => Promise<IngestWorld>;
 
@@ -124,7 +133,11 @@ export function useIngestWorlds(): OpenWorld {
       for (const fake of fakes) {
         const requests = fake.requests();
         expect(fake.unknownRoutes()).toEqual([]);
-        expect(requests.filter(({ bearer }) => bearer !== "ok")).toEqual([]);
+        expect(
+          requests.filter(({ bearer, path }) =>
+            path === VERSION_PATH ? bearer !== "missing" : bearer !== "ok",
+          ),
+        ).toEqual([]);
         expectDefaultNeverCleared(requests);
       }
     } finally {

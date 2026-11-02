@@ -10,11 +10,12 @@
  * 批量停止与空 `document_ids` 的停止；§10 混合批次之外的批量删文档；`DELETE /datasets` 的 `ids` 不是数组、含
  * 重复；上传带 `?type=` 的合法取值；multipart 缺结束边界；一次多个文件里有被拒的。
  *
+ * 文档列表在 `fake-ragflow-list.mjs`（组 11）。
+ *
  * 外推，记录里没有原文，用例不要钉死：
  * - 缺 `name` 的 `102` 来自 §12 的「缺字段」，message 借用全空白名字的那句；`name`、`parser_id`、`embedding_model`
  *   的校验次序里，只有 `parser_id` 先于 `name` 有依据（§4.3 不带 `name` 的行）。
  * - `ids` 含重复的 `101` 只有 code（§8.5），message 是这里写的。
- * - 上传行的 `type`：记录只见过 `pdf` 与 `doc`（§7.4），`pdf` 之外一律 `doc`。
  *
  * 与实例的差异：
  * - 上传应答带 `Content-Length`，实例走 chunked（§7.1）。tasks.md 头部「分块下载不进夹具」只限下载，上传应答
@@ -30,6 +31,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
+import { documentRow, listDocuments, suffixOf } from "./fake-ragflow-list.mjs";
 import {
   API,
   createModelState,
@@ -38,11 +40,17 @@ import {
   modelViews,
   seedModel,
 } from "./fake-ragflow-models.mjs";
-import { createScript, failure, JSON_TYPE, send, success } from "./fake-ragflow-script.mjs";
+import {
+  createScript,
+  failure,
+  JSON_TYPE,
+  notFound,
+  send,
+  success,
+} from "./fake-ragflow-script.mjs";
 
 const DEFAULT_KEY = "fake-ragflow-key";
 const VERSION = "v1.0.0-rc2";
-const NOT_FOUND = "Resource not found";
 const INVALID_UUID = "Invalid UUID format";
 const UUID_SHAPE = /^(?:[0-9a-f]{32}|[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12})$/iu;
 const ALL_ZERO = /^[0-]+$/u;
@@ -111,8 +119,10 @@ const CANT_STOP = "Can't stop parsing document that has not started or already c
 const CRLF = Buffer.from("\r\n");
 const HEADER_END = Buffer.from("\r\n\r\n");
 
+/** §8.3：`create_time` 是毫秒，逐份上传没有并列。 */
+const FIRST_CREATE_TIME = 1_793_000_000_000;
+
 const newId = () => randomBytes(16).toString("hex");
-const notFound = () => failure(404, NOT_FOUND);
 
 /** §9.1：文档不存在时没有 `data` 键，数据集不存在时有。 */
 const NOT_FOUND_DOCUMENT = '{"code":404,"message":"Resource not found"}';
@@ -268,11 +278,6 @@ function parseMultipart(contentType, bytes) {
   return null;
 }
 
-function suffixOf(name) {
-  const dot = name.lastIndexOf(".");
-  return dot === -1 ? "" : name.slice(dot + 1);
-}
-
 /** 重名时加序号，取第一个没被占的；`fold` 决定比较时算不算大小写。 */
 function numberedName(names, stem, tail, fold) {
   const taken = new Set(names.map(fold));
@@ -295,24 +300,6 @@ function freeName(dataset, name) {
   const dot = name.lastIndexOf(".");
   const [stem, tail] = dot === -1 ? [name, ""] : [name.slice(0, dot), name.slice(dot)];
   return numberedName(names, stem, tail, (text) => text);
-}
-
-function uploadedRow(dataset, document) {
-  const suffix = suffixOf(document.name);
-  return {
-    chunk_count: 0,
-    dataset_id: dataset.id,
-    id: document.id,
-    ingestion_status: document.ingestionStatus,
-    location: document.name,
-    name: document.name,
-    parser_id: dataset.parserId,
-    size: document.content.length,
-    source_type: "local",
-    suffix,
-    token_count: 0,
-    type: suffix.toLowerCase() === "pdf" ? "pdf" : "doc", // §7.4，其余取值是外推，见文件头。
-  };
 }
 
 function fileRejection({ filename }) {
@@ -350,7 +337,10 @@ function upload(state, request, [datasetId]) {
   }
   const rows = files.map((file) => {
     const name = freeName(dataset, file.filename);
-    return uploadedRow(dataset, state.addDocument(dataset, name, file.content));
+    return {
+      ...documentRow(dataset, state.addDocument(dataset, name, file.content)),
+      source_type: "local",
+    };
   });
   return { json: { code: 0, data: rows, message: null } };
 }
@@ -465,17 +455,6 @@ function putDatasetAbsent(state, request, [id]) {
   return isUuid(id) ? datasetAbsent(state, request, [id]) : failure(101, INVALID_UUID);
 }
 
-function listDocumentsAbsent(state, request, [id]) {
-  const dataset = state.datasets.get(id);
-  if (dataset === undefined) {
-    return notFound();
-  }
-  const documentId = request.params.get("id");
-  return documentId === null || dataset.documents.has(documentId)
-    ? undefined
-    : failure(102, `you don't own the document ${documentId}`, { data: { docs: [], total: 0 } });
-}
-
 const agentAbsent = (message) => () => failure(103, message);
 
 function groupAbsent(_state, _request, [id]) {
@@ -498,7 +477,7 @@ const ROUTES = [
   ["GET", `${DOCUMENTS}/${segment}`, download],
   ["GET", DATASET, datasetAbsent],
   ["PUT", DATASET, putDatasetAbsent],
-  ["GET", DOCUMENTS, listDocumentsAbsent],
+  ["GET", DOCUMENTS, listDocuments],
   ["GET", `${DATASET}/compilation/status`, datasetAbsent],
   [
     "GET",
@@ -591,6 +570,7 @@ function entryOf(request, url, key) {
 
 function createState() {
   const datasets = new Map();
+  let createTime = FIRST_CREATE_TIME;
   return {
     datasets,
     models: createModelState(),
@@ -606,8 +586,21 @@ function createState() {
       datasets.set(dataset.id, dataset);
       return dataset;
     },
-    addDocument(dataset, name, content, ingestionStatus = "UNSTART") {
-      const document = { id: newId(), name, content, ingestionStatus };
+    addDocument(dataset, name, content, seed = {}) {
+      const { ingestionStatus = "UNSTART", chunkCount = 0, eventMessage } = seed;
+      if (chunkCount !== 0 && ingestionStatus !== "COMPLETED") {
+        throw new Error(`fake-ragflow chunkCount needs COMPLETED, not ${ingestionStatus}`);
+      }
+      createTime += 1;
+      const document = {
+        id: newId(),
+        name,
+        content,
+        ingestionStatus,
+        chunkCount,
+        eventMessage,
+        createTime,
+      };
       dataset.documents.set(document.id, document);
       return document;
     },
@@ -708,8 +701,7 @@ export async function start(options = {}) {
       if (dataset === undefined) {
         throw new Error("fake-ragflow has no such dataset");
       }
-      const content = Buffer.from(seed.content);
-      return state.addDocument(dataset, seed.name, content, seed.ingestionStatus).id;
+      return state.addDocument(dataset, seed.name, Buffer.from(seed.content), seed).id;
     },
     setDocumentStatus(datasetId, documentId, status) {
       documentOf(state, datasetId, documentId).ingestionStatus = status;

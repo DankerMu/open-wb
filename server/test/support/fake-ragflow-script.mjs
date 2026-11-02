@@ -4,8 +4,9 @@
  * - `answer()`：协议应答，HTTP 状态与 `code` 只收实测记录里出现过的配对。版本接口以外的路由先过鉴权（§12），
  *   被挡下的请求不消耗脚本。
  * - `fault()`：故障注入，种类是闭集，只限 tasks.md 头部的四种：传输层（`hang`、`hold`、`reset`、`cut`、`stall`）、
- *   HTTP 层（`redirect`、`status`、`not_json`、`oversize`）、漂移值（`version`）、防御性组合（`combo`）。正文里的
- *   `code` 同样只收记录里的值，所以 `108`、`109` 进不来；`not_json` 的正文必须真不是 JSON。故障不过鉴权。
+ *   HTTP 层（`redirect`、`status`、`not_json`、`oversize`）、漂移值（`version`、`ingestion_status`）、防御性组合
+ *   （`combo`）。正文里的 `code` 同样只收记录里的值，所以 `108`、`109` 进不来；`not_json` 的正文必须真不是 JSON。
+ *   故障不过鉴权。
  *
  * 一条脚本缺省生效一次，先登记的先生效，用完恢复正常。`hold` 放行后请求走正常路由。
  */
@@ -16,6 +17,19 @@ export const failure = (code, message, extra = {}) => ({
   json: { code, data: null, message, ...extra },
 });
 export const success = (data, message = "success") => ({ json: { code: 0, data, message } });
+export const notFound = () => failure(404, "Resource not found");
+
+/** §8.4 观察到的全部运行状态：之外的值只能经 `ingestion_status` 故障进列表。 */
+export const RUN_STATES = new Set([
+  "UNSTART",
+  "CREATED",
+  "SCHEDULED",
+  "RUNNING",
+  "STOPPING",
+  "STOPPED",
+  "COMPLETED",
+  "FAILED",
+]);
 
 /** 记录里出现过的 body code（§3–§12）。 */
 const RECORDED_CODES = new Set([0, 100, 101, 102, 103, 400, 401, 403, 404, 409, 500, 501]);
@@ -86,6 +100,15 @@ const FAULTS = {
   version(response, fault) {
     send(response, { json: { code: 0, data: fault.value, message: "success" } });
   },
+  ingestion_status(response, fault) {
+    const row = {
+      id: fault.documentId,
+      ingestion_status: fault.value,
+      chunk_count: 0,
+      status: "1",
+    };
+    send(response, { json: { code: 0, data: { docs: [row], total: 1 }, message: "success" } });
+  },
   combo(response, fault) {
     const json = fault.deletedList
       ? { code: 0, data: { deleted: [] }, message: null }
@@ -134,6 +157,9 @@ function assertFault(fault) {
   }
   if (fault.kind === "not_json" && fault.body !== undefined && isJson(fault.body)) {
     throw new Error("fake-ragflow not_json body must not be JSON");
+  }
+  if (fault.kind === "ingestion_status" && RUN_STATES.has(fault.value)) {
+    throw new Error(`ingestion_status fault takes a value outside the rc2 record: ${fault.value}`);
   }
   assertBodyCodes(fault);
 }

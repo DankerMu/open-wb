@@ -60,6 +60,8 @@ export type FakeRagflowFault =
   | { kind: "oversize"; bytes: number; envelope?: unknown }
   /** 漂移值：不符的版本串。 */
   | { kind: "version"; value: string }
+  /** 漂移值：文档列表回一行八种之外的 `ingestion_status`，§8.4 里的值直接抛。 */
+  | { kind: "ingestion_status"; documentId: string; value: string }
   /**
    * 防御性组合：`code` 为 100、101、102、403；`code` 为 0 是成功应答缺字段，`data` 给缺了字段的值；`code` 为 401 是
    * HTTP 200 的 `code:401`；或 `deletedList` 即 `{code:0, data:{deleted:[]}}`。
@@ -82,6 +84,10 @@ export interface FakeRagflowDocumentSeed {
   name: string;
   content: Buffer | string;
   ingestionStatus?: string;
+  /** 列表行的 `chunk_count`，缺省 0；非 0 只有 `COMPLETED` 能给，别的直接抛。 */
+  chunkCount?: number;
+  /** 列表行的 `latest_ingestion_event.message`；不给就没有这个键。 */
+  eventMessage?: string;
 }
 
 export interface FakeRagflowDatasetView {
