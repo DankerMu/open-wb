@@ -1,6 +1,6 @@
 /** 夹具自测的请求：用 `fetch` 直接打假 RAGFlow，不经客户端。 */
-import { expect } from "vitest";
-import type { FakeRagflowServer } from "./fake-ragflow.mjs";
+import { afterEach, beforeEach, expect } from "vitest";
+import { type FakeRagflowServer, start } from "./fake-ragflow.mjs";
 
 export interface FakeCallOptions {
   json?: unknown;
@@ -45,6 +45,20 @@ export async function callFake(
     // 非 JSON 应答：`text` 才是判据。
   }
   return { status: response.status, headers: response.headers, text, body };
+}
+
+/** 每个用例起一个以 `key` 鉴权的假 RAGFlow，用完关掉；`started` 把它交给测试文件，返回打它的 `call`。 */
+export function useFakeRagflow(key: string, started: (fake: FakeRagflowServer) => void) {
+  let fake: FakeRagflowServer;
+  beforeEach(async () => {
+    fake = await start({ apiKey: key });
+    started(fake);
+  });
+  afterEach(async () => {
+    await fake.close();
+  });
+  return (method: string, path: string, options?: FakeCallOptions) =>
+    callFake(fake.baseUrl, key, method, path, options);
 }
 
 export function formOf(name: string, content: string, field = "file"): FormData {

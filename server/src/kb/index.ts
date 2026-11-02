@@ -13,7 +13,7 @@ import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
 import type { ModelWriteGuard } from "../models/rest.js";
 import { createModelStore } from "../models/store.js";
-import { createKbBases, type KbBaseRecord } from "./bases.js";
+import { createKbBases } from "./bases.js";
 import {
   createKbDocuments,
   type DocumentRemovalTiming,
@@ -22,6 +22,7 @@ import {
 import type { EmbeddingProbeDeadlines } from "./embedding-probe.js";
 import type { KbKeyHandle } from "./key-file.js";
 import { createKbLocks } from "./locks.js";
+import { createKbPipeline, type KbPipelineRecord } from "./pipeline.js";
 import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client.js";
 import { registerKbRoutes } from "./rest.js";
 import { createKbSettings } from "./settings.js";
@@ -32,7 +33,7 @@ import { createKbUploads, type UploadBodyDeadline } from "./uploads.js";
 /** 这个模块写到受管 stderr writer 的记录。 */
 export type KbRecord =
   | { event: "kb_upstream_auth_failed" | "kb_version_mismatch" }
-  | KbBaseRecord
+  | KbPipelineRecord
   | KbDocumentRecord;
 
 export interface KbDependencies {
@@ -101,7 +102,13 @@ export function registerKb(
     uploadMaxFiles,
     onVersionMismatch: perMinute(now, () => log({ event: "kb_version_mismatch" })),
     settings,
-    bases: createKbBases({ store, client, locks, audit, log }),
+    bases: createKbBases({
+      store,
+      client,
+      pipeline: createKbPipeline({ client, log }),
+      locks,
+      audit,
+    }),
     documents: createKbDocuments({
       store,
       client,

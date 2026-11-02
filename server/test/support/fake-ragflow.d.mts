@@ -120,6 +120,20 @@ export interface FakeRagflowDefaultModelView {
   name: string;
 }
 
+/** 一个模板组：`templates` 是建组时提交的项，单模板组的模板名已改写成组名（§5.1 (2)）。 */
+export interface FakeRagflowTemplateGroupView {
+  id: string;
+  name: string;
+  templates: { name: string; kind: string; description: string; config: Record<string, unknown> }[];
+}
+
+/** 一个画布：`dsl` 原样存下，夹具的 Compiler 不校验它。 */
+export interface FakeRagflowCanvasView {
+  id: string;
+  title: string;
+  dsl: Record<string, unknown>;
+}
+
 export interface FakeRagflowServer {
   port: number;
   baseUrl: string;
@@ -139,10 +153,16 @@ export interface FakeRagflowServer {
   /** 账号里已有这个模型，不经下发：`embedding_model` 引用得到它（§4.4）。 */
   addModel(instance: string, name: string, modelType: "embedding" | "chat"): void;
   addDocument(datasetId: string, seed: FakeRagflowDocumentSeed): string;
+  /** 账号里已有这个模板组（没有模板），不经建组：重建一代的种子。 */
+  addTemplateGroup(name?: string): string;
+  /** 账号里已有这个画布（空 DSL），不经建画布：同上。 */
+  addCanvas(title?: string): string;
   setDocumentStatus(datasetId: string, documentId: string, status: string): void;
   instances(): FakeRagflowInstanceView[];
   defaultModels(): FakeRagflowDefaultModelView[];
   datasets(): FakeRagflowDatasetView[];
+  templateGroups(): FakeRagflowTemplateGroupView[];
+  canvases(): FakeRagflowCanvasView[];
   documents(datasetId: string): FakeRagflowDocumentView[];
   close(): Promise<void>;
 }

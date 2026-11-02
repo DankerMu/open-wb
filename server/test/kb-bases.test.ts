@@ -3,7 +3,7 @@
  * ragflow-backend「RAGFlow 出站请求」的「结果映射」、design D9）。全部经 `createApp` + `app.inject()` 打假 RAGFlow，
  * 期望值是 spec 与实测记录的字面量。列表在 `kb-bases-list.test.ts`，删库在 `kb-bases-delete.test.ts`。
  *
- * 本刀里 `raptor` 或 `graph` 为真一律 400 `bad_request`，第二刀（#1869）开放，届时改这里的用例。
+ * `raptor` 或 `graph` 为真的建库由第二刀（#1869）开放：这里只留开关的取值，序列、回滚与删库在 `kb-bases-compile.test.ts`。
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
@@ -180,15 +180,17 @@ describe("开关校验", () => {
   });
 
   it.each([
-    ["raptor", { raptor: true }],
-    ["graph", { graph: true }],
-    ["两个开关", { raptor: true, graph: true }],
-    ["一开一关", { raptor: true, graph: false }],
-  ])("本刀里 %s 为真一律 400：对话模型已指定也一样，第二刀开放", async (_label, switches) => {
+    ["raptor", { raptor: true }, { raptor: "pending", graph: "off" }],
+    ["graph", { graph: true }, { raptor: "off", graph: "pending" }],
+    ["两个开关", { raptor: true, graph: true }, { raptor: "pending", graph: "pending" }],
+    ["一开一关", { raptor: true, graph: false }, { raptor: "pending", graph: "off" }],
+  ])("%s 为真、对话模型已指定：201，开着的类型为 pending", async (_label, switches, compile) => {
     const world = await chatWorld(open);
-    await expectRefused(world, { ...VALID, ...switches }, BAD_REQUEST, 400);
-    expect(world.sent()).toEqual([]);
-    expect(baseCount(world)).toBe(0);
+    const response = await createBase(world, { ...VALID, ...switches });
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({ compile });
+    expect(routes(world.sent())).toContain(POST_DATASETS);
+    expect(baseCount(world)).toBe(1);
   });
 });
 

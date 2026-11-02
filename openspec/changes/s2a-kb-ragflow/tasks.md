@@ -337,12 +337,12 @@ Minimal mergeable slice: 8.2–8.3 的设置读写、下发与探活，连同 8.
   本组三条路由加进 `kb-disabled.test.ts`，`POST /api/kb/bases` 加进归属路由用例。
 - [x] 9.3 实现（首刀）：新 `server/src/kb/bases.ts`（建库经设置锁，删库经该库写锁）与 `kb/templates.ts`（十一种模板、`parser_id` 映射、抄自表 C 末列的后缀表；web 只用模板与说明文案，见组 15）；`kb/rest.ts` 加 `GET` / `POST /api/kb/bases` 与 `DELETE /api/kb/bases/:id`。
 - [x] 9.4 `system.md` §9.13 加知识库端点、数据集命名 `owb-<id>-g<代数>` 与模板表。已合入的规划文档同 PR 改口径：`PLAN.md:68`、`CONTEXT.md:29`、`IMPLEMENTATION_PLAN.md:118,415` 的「12 种」改为 11 种，`chunk_method` 改为 `parser_id`（行号先核对）。
-- [ ] 9.5 测试先行（第二刀，pipeline）：
+- [x] 9.5 测试先行（第二刀，pipeline）：
   - 新 `server/test/kb-pipeline.test.ts`（纯函数，design「Sketch seams」）：DSL 生成的输入是内置 DSL，期望值取自实测记录 §5.1 (6) 手写 DSL 的 `components` 与 `graph`：节点、`upstream` / `downstream` 改写、`graph.nodes` 的 `compilationNode`、边净增一条且原边不保留、`graph` 必在。按 `component_name` 查 chunker，十一种模板的节点名与下游全部取自 §5.1 (3)（`qa`、`table` 的下游是 Tokenizer，其余九种是 Extractor）。没有 `graph`、零个或两个 chunker 即失败（故障注入）。`tree` 的 `config` 去掉 `entity`、`relation`、`llm_id`，`knowledge_graph` 的去掉 `llm_id`。
   - 新 `server/test/kb-bases-compile.test.ts`（`app.inject()` + 假 RAGFlow）：knowledge-bases「建库与列表隔离」「建库应答不读 RAGFlow」「账号缺省缺失时不建编译资源」「建库与设置交错」「十一种模板都能开两个开关」「只开一种编译」「建库中途失败逐步回滚」「回滚里的删除失败」「DSL 无法改写」「删除次序」「重建失败时删库」。列表里开了开关的库，本刀 `compile` 为 `null`，不发编译读取，用例写明这一点，第三刀接上。
-  - 假 RAGFlow 加内置模板、模板组的建与删、`GET /pipelines/<parser_id>`（十一种模板的节点名与下游取自 §5.1 (3)；`tag` 回 `102`）、画布的建与删、`parse_type:2` 数据集。夹具的 Compiler 不校验 DSL：DSL 的正确性由纯函数用例与 `make smoke-kb` 负责。
-- [ ] 9.6 实现（第二刀）：新 `server/src/kb/pipeline.ts`（`createPipeline`，第一步读账号缺省；`deletePipeline`；DSL 生成；删画布与删模板组只有它调用）；`POST /api/kb/bases` 开放两个开关；删库改走 `deletePipeline`。
-- [ ] 9.7 `system.md` §9.13 加模板组与画布的生命周期、账号缺省的前置读取与删除次序。
+  - 假 RAGFlow 加内置模板、模板组的建与删、`GET /pipelines/<parser_id>`（十一种模板的节点名与下游取自 §5.1 (3)；`tag` 回 `102`）、画布的建与删、`parse_type:2` 数据集。夹具的 Compiler 不校验 DSL：DSL 的正确性由纯函数用例与 `make smoke-kb` 负责。夹具的这部分在 `server/test/support/fake-ragflow-pipeline.mjs`，自测在 `server/test/fake-ragflow-pipeline.test.ts`。
+- [x] 9.6 实现（第二刀）：新 `server/src/kb/pipeline.ts`（`createPipeline`，第一步读账号缺省；`deletePipeline`；DSL 生成；删画布与删模板组只有它调用）；`POST /api/kb/bases` 开放两个开关；删库改走 `deletePipeline`。
+- [x] 9.7 `system.md` §9.13（正文在 `docs/architecture/knowledge-base.md`）加模板组与画布的生命周期、账号缺省的前置读取与删除次序。
 - [ ] 9.8 测试先行（第三刀，`compile-status`）：新 `server/test/kb-compile-status.test.ts`（`app.inject()` + 假 RAGFlow）。
   - knowledge-bases「编译状态读取有界」「编译状态按任务日志判定」「只有 0 切片的文档」「类型只看 task_type」；
   - 读法：任务日志请求都带 `orderby=id` 与 `page_size=100`，不带 `task_type=`、`keywords=`、`log_type=`；日志超过一页时读全，`done` 依赖后面的页；`dsl.entries[].doc_id` 取同一类型的并集；

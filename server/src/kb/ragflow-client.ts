@@ -107,6 +107,8 @@ interface ModelInstance {
   modelInfo: readonly ModelInfo[];
 }
 
+type Json = Record<string, unknown>;
+
 export interface ListedDocument {
   id: string;
   ingestionStatus: string;
@@ -150,7 +152,8 @@ const VERSION: Route<string, never> = {
   read: (data) => (isNonEmptyString(data) ? data : undefined),
 };
 
-const CREATE_DATASET: Route<{ id: string }, never> = {
+/** 建数据集、模板组与画布的应答：都只读 `data.id`。 */
+const CREATED: Route<{ id: string }, never> = {
   read(data) {
     const id = fieldOf(data, "id");
     return isNonEmptyString(id) ? { id } : undefined;
@@ -256,6 +259,45 @@ const DELETE_CANVAS: Route<null, typeof NOT_FOUND> = {
 const DELETE_TEMPLATE_GROUP: Route<null, typeof NOT_FOUND> = {
   typed: (envelope) => (envelope.code === 404 ? NOT_FOUND : undefined),
   read: deleted,
+};
+
+/** 账号缺省（§11.2）：`model_name` 非空的那些 `model_type`。 */
+const DEFAULT_MODELS: Route<string[], never> = {
+  read(data) {
+    const models = fieldOf(data, "models");
+    if (!Array.isArray(models)) {
+      return undefined;
+    }
+    const rows = models.map((row: unknown) => [
+      fieldOf(row, "model_type"),
+      fieldOf(row, "model_name"),
+    ]);
+    const typed = rows.every((cells) => cells.every((cell) => typeof cell === "string"));
+    return typed
+      ? rows.flatMap(([type, name]) => (name === "" ? [] : [type as string]))
+      : undefined;
+  },
+};
+
+/** 内置编译模板（§5.1 (1)）：`id` 与 `config`。 */
+const BUILTIN_TEMPLATES: Route<{ id: string; config: Json }[], never> = {
+  read(data) {
+    const rows = Array.isArray(data) ? (data as unknown[]) : [];
+    const templates = rows.flatMap((row) => {
+      const id = fieldOf(row, "id");
+      const config = fieldOf(row, "config");
+      return isNonEmptyString(id) && isRecord(config) ? [{ id, config }] : [];
+    });
+    return Array.isArray(data) && templates.length === data.length ? templates : undefined;
+  },
+};
+
+/** 内置 pipeline 的 DSL（§5.1 (3)）：只要求是对象，改写由 `kb/pipeline.ts` 校验。 */
+const BUILTIN_PIPELINE: Route<Json, never> = {
+  read(data) {
+    const dsl = fieldOf(data, "dsl");
+    return isRecord(dsl) ? dsl : undefined;
+  },
 };
 
 /** 不读应答字段的下发路由（§11）：`PUT /providers`、实例的建与改、`PATCH /models/default`。 */
@@ -539,18 +581,51 @@ export function createRagflowClient(options: {
       );
     },
 
-    /** 内置模板建数据集；`embeddingModel` 为三段式（§4.4）。 */
-    createDataset(dataset: {
-      name: string;
-      parserId: string;
-      embeddingModel: string;
-    }): Promise<Result<{ id: string }>> {
-      return json("POST", `${API}/datasets`, CREATE_DATASET, {
+    /** `parserId` 是内置模板（`parse_type:1`），`pipelineId` 是画布（`parse_type:2`，§5.1 (5)）；`embeddingModel` 为三段式。 */
+    createDataset(
+      dataset: { name: string; embeddingModel: string } & (
+        | { parserId: string }
+        | { pipelineId: string }
+      ),
+    ): Promise<Result<{ id: string }>> {
+      const template =
+        "pipelineId" in dataset
+          ? { parse_type: 2, pipeline_id: dataset.pipelineId }
+          : { parser_id: dataset.parserId, parse_type: 1 };
+      return json("POST", `${API}/datasets`, CREATED, {
         name: dataset.name,
-        parser_id: dataset.parserId,
-        parse_type: 1,
+        ...template,
         embedding_model: dataset.embeddingModel,
       });
+    },
+
+    /** 只读，不改账号缺省：建 pipeline 之前的核对（D7）。 */
+    readDefaultModels(): Promise<Result<string[]>> {
+      return json("GET", `${API}/models/default`, DEFAULT_MODELS);
+    },
+
+    listBuiltinTemplates(): Promise<Result<{ id: string; config: Json }[]>> {
+      return json("GET", `${API}/compilation-templates/builtins`, BUILTIN_TEMPLATES);
+    },
+
+    /** body 形状见 §5.1 (2)：`templates` 的项是 `{name, kind, description, config}`。 */
+    createTemplateGroup(name: string, templates: readonly Json[]): Promise<Result<{ id: string }>> {
+      const body = { name, description: "", templates };
+      return json("POST", `${API}/compilation-template-groups`, CREATED, body);
+    },
+
+    /** RAGFlow 不要求这条带密钥（§15），这里照带：每个请求一个写法。 */
+    async readBuiltinPipeline(parserId: string): Promise<Result<Json>> {
+      if (!usable(parserId)) {
+        return UNAVAILABLE;
+      }
+      const path = `${API}/pipelines/${encodeURIComponent(parserId)}`;
+      return json("GET", path, BUILTIN_PIPELINE);
+    },
+
+    createCanvas(title: string, dsl: Json): Promise<Result<{ id: string }>> {
+      const body = { title, canvas_category: "dataflow_canvas", dsl };
+      return json("POST", `${API}/agents`, CREATED, body);
     },
 
     /** `ids` 恰一个非空 id：空 `ids` 回 `code:0` 什么也不删（§4.6），混合批次全部不删（§10）。 */
@@ -638,6 +713,7 @@ export function createRagflowClient(options: {
       return interpret(wire, DOWNLOAD_DOCUMENT, logAuthFailure);
     },
 
+    /** 只有 `kb/pipeline.ts` 调用：删除次序由它保证（D9）。 */
     async deleteCanvas(id: string): Promise<Result<null, typeof NOT_FOUND>> {
       if (!usable(id)) {
         return UNAVAILABLE;
