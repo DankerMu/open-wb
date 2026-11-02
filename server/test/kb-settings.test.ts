@@ -6,9 +6,13 @@
 import { describe, expect, it } from "vitest";
 import { PARSER_INPUTS } from "./http-guard-helpers.js";
 import {
+  addCompileBase,
   BAD_REQUEST,
+  bodyOf,
   CHAT_BASE_URL,
   CHAT_KEY,
+  chatWorld,
+  configuredWorld,
   EMBED_KEY,
   expectDefaultNeverCleared,
   FORBIDDEN,
@@ -17,6 +21,7 @@ import {
   KB_UNAVAILABLE,
   LEAK,
   LIST_MODELS,
+  LOCKED,
   nextRound,
   PATCH_DEFAULT,
   POST_INSTANCE,
@@ -24,9 +29,8 @@ import {
   PUT_PROVIDER,
   routes,
   useSettingsWorlds,
-  type World,
 } from "./kb-settings-helpers.js";
-import { COMPILE_ROW, createPlainBase, hex, insertRow, MODEL_ROW } from "./kb-store-helpers.js";
+import { createPlainBase, hex, insertRow, MODEL_ROW } from "./kb-store-helpers.js";
 import { UNAUTHORIZED_ENVELOPE } from "./session-db-helpers.js";
 
 const open = useSettingsWorlds();
@@ -41,12 +45,6 @@ const EMPTY_VIEW = {
   rebuilding: 0,
   rebuildFailed: 0,
 };
-const LOCKED = {
-  error: {
-    code: "kb_chat_model_locked",
-    message: "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型",
-  },
-};
 const REBUILD_REQUIRED = {
   error: {
     code: "kb_rebuild_required",
@@ -56,32 +54,8 @@ const REBUILD_REQUIRED = {
 const REBUILDING = { error: { code: "kb_rebuilding", message: "知识库正在重建，请稍后再试" } };
 const INFO = { model_name: "bge-m3", model_type: ["embedding"], max_tokens: 8192 };
 
-const bodyOf = (response: { body: string }) => JSON.parse(response.body) as unknown;
-
-async function configured(): Promise<World> {
-  const world = await open();
-  expect((await world.put({ embedding: world.embedding })).statusCode).toBe(200);
-  world.forget();
-  return world;
-}
-
-async function withChat(id = "m2"): Promise<World> {
-  const world = await configured();
-  world.addChatModel(id);
-  expect((await world.put({ chatModelId: id })).statusCode).toBe(200);
-  world.forget();
-  return world;
-}
-
-function addCompileBase(world: World, n: number, fields: Record<string, string | number> = {}) {
-  insertRow(world.db, "knowledge_bases", {
-    ...COMPILE_ROW,
-    id: hex(n),
-    name: `库 ${String(n)}`,
-    dataset_id: `ds-${String(n)}`,
-    ...fields,
-  });
-}
+const configured = () => configuredWorld(open);
+const withChat = () => chatWorld(open);
 
 describe("读视图", () => {
   it("未配置：恰为七个键，全是空值，带 no-store", async () => {
@@ -100,6 +74,22 @@ describe("读视图", () => {
       embedding: { name: "bge-m3", baseUrl: world.embedding.baseUrl, probe: NEVER },
     });
     expect(response.body).not.toContain(EMBED_KEY);
+  });
+
+  it("带对话模型的保存应答恰为七键读视图，与 GET 相同，两个密钥哨兵都不出现", async () => {
+    const world = await withChat();
+    const saved = await world.put({ chatModelId: "m2" });
+    const read = await world.get();
+    expect(bodyOf(saved)).toEqual({
+      ...EMPTY_VIEW,
+      embedding: { name: "bge-m3", baseUrl: world.embedding.baseUrl, probe: NEVER },
+      chatModelId: "m2",
+    });
+    expect(bodyOf(read)).toEqual(bodyOf(saved));
+    for (const response of [saved, read]) {
+      expect(response.body).not.toContain(EMBED_KEY);
+      expect(response.body).not.toContain(CHAT_KEY);
+    }
   });
 
   it("compileBases 的口径：含重建中与重建失败的库", async () => {
@@ -166,6 +156,9 @@ describe("body 校验", () => {
     ["地址不是 http(s)", { embedding: { ...EMBEDDING, baseUrl: "ftp://embed.test" } }],
     ["地址带 userinfo", { embedding: { ...EMBEDDING, baseUrl: "http://u:p@embed.test" } }],
     ["密钥为空串", { embedding: { ...EMBEDDING, apiKey: "" } }],
+    ["密钥纯空白", { embedding: { ...EMBEDDING, apiKey: "   " } }],
+    ["密钥只有 U+0085", { embedding: { ...EMBEDDING, apiKey: "\u0085" } }],
+    ["密钥是空白夹 U+0085", { embedding: { ...EMBEDDING, apiKey: " \u0085\t" } }],
     ["密钥含换行", { embedding: { ...EMBEDDING, apiKey: "a\nb" } }],
     ["密钥不是字符串", { embedding: { ...EMBEDDING, apiKey: 1 } }],
     ["chatModelId 不是字符串", { chatModelId: 1 }],
@@ -197,9 +190,9 @@ describe("body 校验", () => {
     expect(world.fake.requests()).toEqual([]);
   });
 
-  it("已配置时 apiKey 为空串或含换行：400，设置不变", async () => {
+  it("已配置时 apiKey 为空串、纯空白或含换行：400，设置不变", async () => {
     const world = await configured();
-    for (const apiKey of ["", "a\nb"]) {
+    for (const apiKey of ["", "   ", "a\nb"]) {
       const response = await world.put({ embedding: { ...world.embedding, apiKey } });
       expect(response.statusCode).toBe(400);
     }
@@ -391,6 +384,24 @@ describe("下发失败不改设置", () => {
     },
   );
 
+  it("部分下发后重试收敛：缺省那步失败时实例已建，同一 body 重存走已有实例的 PUT", async () => {
+    const world = await open();
+    world.fake.fault(PATCH_DEFAULT, { kind: "status", status: 503 });
+    expect((await world.put({ embedding: world.embedding })).statusCode).toBe(503);
+    expect(world.store.settings().embedding).toBeNull();
+    expect(world.fake.instances().map(({ name }) => name)).toEqual(["owb-embed"]);
+    expect(world.fake.defaultModels()).toEqual([]);
+
+    world.forget();
+    expect((await world.put({ embedding: world.embedding })).statusCode).toBe(200);
+    expect(routes(world.sent())).toEqual(nextRound("owb-embed"));
+    expect(world.store.settings().embedding).toMatchObject({ name: "bge-m3" });
+    expect(world.fake.defaultModels()).toEqual([
+      { modelType: "embedding", instance: "owb-embed", name: "bge-m3" },
+    ]);
+    expect(world.audits()).toEqual([{ actorId: "u3", detail: { embedding: "bge-m3" } }]);
+  });
+
   it("改实例时读模型列表或 PUT 失败：503，已存设置不变", async () => {
     for (const route of [`GET ${INSTANCES}/owb-embed/models`, `PUT ${INSTANCES}/owb-embed`]) {
       const world = await configured();
@@ -412,6 +423,7 @@ describe("下发失败不改设置", () => {
     });
     expect(response.body).not.toContain(LEAK);
     expect(world.logged).toEqual([]);
+    expect(world.audits()).toEqual([]);
   });
 
   it("没有 model_info 项被读出时（成功应答缺字段）：503，不发 PUT", async () => {
@@ -419,6 +431,17 @@ describe("下发失败不改设置", () => {
     world.fake.fault(`GET ${INSTANCES}/owb-embed/models`, { kind: "combo", code: 0, data: {} });
     expect((await world.put({ embedding: world.embedding })).statusCode).toBe(503);
     expect(routes(world.sent())).toEqual(nextRound("owb-embed").slice(0, 3));
+  });
+
+  it("models 行的密钥纯空白（store 直接写入）：503 kb_unavailable，没有实例请求", async () => {
+    const world = await configured();
+    world.addChatModel("m2");
+    world.db.prepare("UPDATE models SET upstream_api_key = '   ' WHERE id = 'm2'").run();
+    const response = await world.put({ chatModelId: "m2" });
+    expect(response.statusCode).toBe(503);
+    expect(bodyOf(response)).toEqual(KB_UNAVAILABLE);
+    expect(routes(world.sent())).toEqual([PUT_PROVIDER, LIST_MODELS]);
+    expect(world.store.settings().chatModelId).toBeNull();
   });
 
   it("RAGFlow 不可达：503，本地不变", async () => {

@@ -84,7 +84,7 @@ flowchart TD
 ```
 
 1. 方向单向：`http → feature → core`。http 可直接依赖 core（共享错误身份）；core 不 import feature/http，feature 不 import http。
-2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`kb → models`（`kb/settings.ts` 经 `models/store.ts` 读知识库对话模型的上游，change `s2a-kb-ragflow` D1）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）、`sessions → connectors`（`rest-metadata.ts` / `rest-capabilities.ts` / `store-capabilities.ts` 用 `connectors/validate.ts` 的连接器名单规则，`store-metadata.ts` 用 `connectors/store.ts` 的账号缺省读取，change `s1d-connectors` D7）、`connectors → sessions`（仅一处：`connectors/validate.ts` 导入 `sessions/omp/spawn-env.ts` 的 `OMP_CHILD_ENV_NAMES`，判 `env` / `headers` 值不得恰为 omp 子进程的环境变量名；常量与它的事实来源 `SUDO_PRESERVE_ENV` / `ompSpawnEnv` 放在一起，change `s1d-connectors` D3。`spawn-env.ts` 只导入 `./state-layout.js`，不成环）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
+2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`kb → models`（`kb/index.ts` 导入 `models/store.ts` 的 `createModelStore`，交给 `kb/settings.ts` 读知识库对话模型的上游，change `s2a-kb-ragflow` D1）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）、`sessions → connectors`（`rest-metadata.ts` / `rest-capabilities.ts` / `store-capabilities.ts` 用 `connectors/validate.ts` 的连接器名单规则，`store-metadata.ts` 用 `connectors/store.ts` 的账号缺省读取，change `s1d-connectors` D7）、`connectors → sessions`（仅一处：`connectors/validate.ts` 导入 `sessions/omp/spawn-env.ts` 的 `OMP_CHILD_ENV_NAMES`，判 `env` / `headers` 值不得恰为 omp 子进程的环境变量名；常量与它的事实来源 `SUDO_PRESERVE_ENV` / `ompSpawnEnv` 放在一起，change `s1d-connectors` D3。`spawn-env.ts` 只导入 `./state-layout.js`，不成环）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
 3. **一切文件路径操作必须经 `core/sandbox.resolve`**；feature 模块直接 `fs` 访问用户路径是缺陷。
 4. omp 与 RAGFlow 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发；omp 不持有 RAGFlow 凭证。
 5. `kb` 模块是 RAGFlow 的唯一出站点：经其 HTTP API 通信，不共享代码与存储，其它模块不直接调用 RAGFlow。`kb` 与其它 feature 的依赖按规则 2 显式声明。
@@ -1053,9 +1053,9 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 
 读视图恰为 `{embedding, chatModelId, bases, compileBases, documents, rebuilding, rebuildFailed}`，不含任何密钥。`embedding` 是 `{name, baseUrl, probe}` 或 `null`；`compileBases` 是 `raptor` 或 `graph` 为 1 的库数，含重建中与重建失败的库。
 
-`PUT` 的 body 键集是 `embedding`、`chatModelId`、`confirmRebuild` 的子集，且至少含前两者之一。`embedding` 是 `{name, baseUrl, apiKey?}`：`name` 1–128 字节、无控制字符、不含 `@`；首次配置必须带 `apiKey`，之后省略即保留已存的值，`apiKey:""` 是 400。`chatModelId` 是 `models` 里带上游的 id（不含 `@`）或 `null`。`embedding.name` 与 `chatModelId` 不含 `@`，是因为 RAGFlow 用三段式 `<名称>@<实例>@<提供方>` 引用它们。
+`PUT` 的 body 键集是 `embedding`、`chatModelId`、`confirmRebuild` 的子集，且至少含前两者之一。`embedding` 是 `{name, baseUrl, apiKey?}`：`name` 1–128 字节、无控制字符、不含 `@`；首次配置必须带 `apiKey`，之后省略即保留已存的值，空串或纯空白是 400。`chatModelId` 是 `models` 里带上游的 id（不含 `@`）或 `null`。`embedding.name` 与 `chatModelId` 不含 `@`，是因为 RAGFlow 用三段式 `<名称>@<实例>@<提供方>` 引用它们。
 
-有开编译的知识库时，`chatModelId` 改为 `null` 或别的 id 都是 409 `kb_chat_model_locked`，同 id 照常下发：Compiler 的 `llm_id` 建库时固化，换模型会让旧库打到新上游。没有开编译的库时，改为 `null` 只改本地；已是 `null` 再设 `null` 是无操作，不写库、不审计。
+当前值非 `null` 且有开编译的知识库时，`chatModelId` 改为 `null` 或别的 id 都是 409 `kb_chat_model_locked`，同 id 照常下发：Compiler 的 `llm_id` 建库时固化，换模型会让旧库打到新上游。没有开编译的库时，改为 `null` 只改本地；已是 `null` 再设 `null` 是无操作，不写库、不审计。
 
 嵌入身份是 `(name, baseUrl)`，只换密钥不算身份变化。身份变化且已有知识库时：有库处于 `rebuilding` 即 409 `kb_rebuilding`，否则 409 `kb_rebuild_required`。确认重建（`confirmRebuild`）目前不开放，带了同样 409。
 
@@ -1066,7 +1066,7 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 3. 不存在：`POST …/instances`，body `{instance_name, api_key, base_url, model_info}`。存在：`GET …/instances/<实例>/models`，再 `PUT …/instances/<实例>`，body 同样四个键，`model_info` 为现有模型加本次的模型，同名项以本次为准。
 4. `PATCH /api/v1/models/default`，body `{model_provider, model_instance, model_name, model_type}`。
 
-body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话模型（该行没有上游时跳过），所以管理员保存一次嵌入模型就能把两种缺省都补回来。只含 `chatModelId` 时只下发对话模型。`api_key` 恒为实际密钥：空串会清空实例密钥。不用 `PATCH /api/v1/users/me/models`，也不用 `GET …/instances/<实例>`：它明文回显上游密钥。下发不是原子的，第 3 步成功、第 4 步失败时 RAGFlow 已是新值、本地仍是旧值；重试同一次保存即收敛。
+body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话模型（该行没有上游时跳过），所以管理员保存一次嵌入模型就能把两种缺省都补回来。只含 `chatModelId` 时只下发对话模型。`api_key` 恒为实际密钥：RAGFlow 按 trim 后的值写入，空串或纯空白会清空实例密钥，所以都不发出。不用 `PATCH /api/v1/users/me/models`，也不用 `GET …/instances/<实例>`：它明文回显上游密钥。下发不是原子的，第 3 步成功、第 4 步失败时 RAGFlow 已是新值、本地仍是旧值；重试同一次保存即收敛。
 
 **账号缺省不变量**：`kb` 模块不发清空缺省的 `PATCH /api/v1/models/default`（只带 `model_type`，或名字为空串），也不调用 `/api/v1/providers` 下的任何 `DELETE`。RAGFlow 里的模型配置只增、只覆盖。账号没有缺省对话模型而有 pipeline 数据集时，数据集级合并任务会让全栈唯一的入库进程崩溃循环，影响栈上全部账号（实测记录 §13）。客户端没有这些调用的写法，`setDefaultModel` 拒绝发出空名字。
 
@@ -1074,6 +1074,6 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 
 **探活**：向嵌入上游发 `POST <baseUrl>/embeddings`，body `{model, input:"ping"}`，期限同模型探活（连接 10 s、总 15 s），不跟随重定向。2xx 且 `data[0].embedding` 为非空数字数组是 `ok`，否则是 `failed`。未配置嵌入模型时 409 `kb_not_ready`。保存时名称、地址或密钥任一变化，探活状态在同一事务里重置为 `never`；三者都不变时保留。
 
-**写操作串行**：保存全程持进程级设置锁，取值规则与身份判定在锁内做，读到的是锁内的行。探活的请求在锁外，只有写回在锁内：结果只写回发起时的同一身份（名称、地址、密钥），身份已变时丢弃、不审计，应答回当前读视图。
+**写操作串行**：保存全程持进程级设置锁，取值规则与身份判定在锁内做，读到的是锁内的行。探活的请求在锁外，只有写回在锁内：结果只写回发起时的同一身份（名称、地址、密钥），身份已变时丢弃、不审计，应答回当前读视图。探活逐次串行：一条进程级链把「读身份 → 发请求 → 取锁写回」整段排队，后发的排在在途的之后，身份在排到时读取，前一个失败不影响后一个。这条链不并进设置锁，探活不能占锁 15 s。
 
 每次保存写一条 `kb.settings` 审计，detail 只含实际变化的键（`embedding` 为模型名，`chatModelId`），可以为空；探活写一条，detail 是 `{probe}`。

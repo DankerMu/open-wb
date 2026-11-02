@@ -4,16 +4,16 @@
  *
  * 每个用例收尾都断言 D7 的不变量：所有请求都带着 `KbDependencies` 交下来的密钥，没有落到未知路由，没有 `/providers` 下的
  * `DELETE`，没有 `PATCH /users/me/models`、单实例 `GET`，每个 `PATCH /models/default` 都带非空的三个名字。
- * 夹具把记录里没有的请求判为未知路由，所以序列错了不能悄悄通过。
+ * 夹具把记录里没有的请求判为未知路由，所以序列错了不能悄悄通过。stdout、stderr 全程不得出现密钥与 RAGFlow message 的哨兵。
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { afterEach, expect } from "vitest";
+import { afterEach, beforeEach, expect, type MockInstance, vi } from "vitest";
 import { createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import type { KbDependencies } from "../src/kb/index.js";
 import { createKbStore } from "../src/kb/store.js";
-import { insertRow, MODEL_ROW } from "./kb-store-helpers.js";
+import { COMPILE_ROW, hex, insertRow, MODEL_ROW } from "./kb-store-helpers.js";
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
 import { type FakeRagflowRequest, type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
@@ -35,6 +35,15 @@ export const POST_INSTANCE = `POST ${INSTANCES}`;
 export const BAD_REQUEST = { error: { code: "bad_request", message: "请求格式不正确" } };
 export const FORBIDDEN = { error: { code: "forbidden", message: "没有权限执行此操作" } };
 export const KB_UNAVAILABLE = { error: { code: "kb_unavailable", message: "知识库服务暂不可用" } };
+export const LOCKED = {
+  error: {
+    code: "kb_chat_model_locked",
+    message: "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型",
+  },
+};
+const SENTINELS = [EMBED_KEY, CHAT_KEY, LEAK];
+
+export const bodyOf = (response: { body: string }) => JSON.parse(response.body) as unknown;
 
 /** 实例不存在时的一轮下发（D7）。 */
 export const firstRound = (): string[] => [PUT_PROVIDER, LIST_MODELS, POST_INSTANCE, PATCH_DEFAULT];
@@ -66,12 +75,13 @@ export interface World {
   get(who?: Who): Promise<LightMyRequestResponse>;
   put(body: unknown, who?: Who): Promise<LightMyRequestResponse>;
   probe(who?: Who): Promise<LightMyRequestResponse>;
-  /** 管理员发一个原样的 body：解析错误的用例用。 */
+  /** 发一个原样的 body：解析错误的用例用。 */
   raw(
     method: "PUT" | "POST",
     url: string,
     payload: string,
     contentType: string,
+    who?: Who,
   ): Promise<LightMyRequestResponse>;
   /** 带上游的 `models` 行。 */
   addChatModel(id: string, maxTokens?: number): void;
@@ -108,11 +118,24 @@ interface Options {
   probeDeadlines?: KbDependencies["probeDeadlines"];
 }
 
+type OpenWorld = (options?: Options) => Promise<World>;
+
 /** 在所在文件登记收尾，返回开世界函数。 */
-export function useSettingsWorlds(): (options?: Options) => Promise<World> {
+export function useSettingsWorlds(): OpenWorld {
   const opened: Array<() => Promise<void>> = [];
+  let outputs: Array<MockInstance<typeof process.stdout.write>> = [];
+  beforeEach(() => {
+    outputs = [vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
+  });
   afterEach(async () => {
-    for (const close of opened.splice(0).reverse()) await close();
+    try {
+      for (const close of opened.splice(0).reverse()) await close();
+    } finally {
+      const written = outputs.flatMap((spy) => spy.mock.calls.map((args) => String(args[0])));
+      for (const spy of outputs) spy.mockRestore();
+      const text = written.join("");
+      for (const secret of SENTINELS) expect(text).not.toContain(secret);
+    }
   });
 
   return async (options = {}) => {
@@ -182,11 +205,11 @@ export function useSettingsWorlds(): (options?: Options) => Promise<World> {
         }),
       probe: (who = "admin") =>
         app.inject({ method: "POST", url: "/api/kb/settings/probe", headers: headers(who) }),
-      raw: (method, url, payload, contentType) =>
+      raw: (method, url, payload, contentType, who = "admin") =>
         app.inject({
           method,
           url,
-          headers: { ...headers("admin"), "content-type": contentType },
+          headers: { ...headers(who), "content-type": contentType },
           payload,
         }),
       addChatModel(id, maxTokens = 4096) {
@@ -215,4 +238,35 @@ export function useSettingsWorlds(): (options?: Options) => Promise<World> {
       },
     };
   };
+}
+
+/** 嵌入模型已保存、请求记录已清零的世界。 */
+export async function configuredWorld(open: OpenWorld, options?: Options): Promise<World> {
+  const world = await open(options);
+  expect((await world.put({ embedding: world.embedding })).statusCode).toBe(200);
+  world.forget();
+  return world;
+}
+
+/** 再指定了对话模型 `m2` 的世界。 */
+export async function chatWorld(open: OpenWorld): Promise<World> {
+  const world = await configuredWorld(open);
+  world.addChatModel("m2");
+  expect((await world.put({ chatModelId: "m2" })).statusCode).toBe(200);
+  world.forget();
+  return world;
+}
+
+export function addCompileBase(
+  world: World,
+  n: number,
+  fields: Record<string, string | number> = {},
+): void {
+  insertRow(world.db, "knowledge_bases", {
+    ...COMPILE_ROW,
+    id: hex(n),
+    name: `库 ${String(n)}`,
+    dataset_id: `ds-${String(n)}`,
+    ...fields,
+  });
 }

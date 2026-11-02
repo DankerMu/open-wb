@@ -195,7 +195,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 4. `PATCH /api/v1/models/default`，body `{model_provider, model_instance, model_name, model_type}`，`model_type` 为 `embedding` 或 `chat`。
 
 规则：
-- `api_key` SHALL 恒为实际密钥：`embedding.apiKey` 省略时取已存的值；SHALL NOT 发出空串（空串会清空实例密钥）。
+- `api_key` SHALL 恒为实际密钥：`embedding.apiKey` 省略时取已存的值；SHALL NOT 发出空串或纯空白（RAGFlow 按 trim 后的值写入，空值会清空实例密钥）。
 - `model_info` 项为 `{model_name, model_type, max_tokens}`。嵌入模型 `model_type` 为 `["embedding"]`，`max_tokens` 为 `8192`；对话模型为 `["chat"]`，`max_tokens` 取该行的 `maxTokens`。
 - 嵌入与对话模型都 SHALL 设为账号缺省：Compiler 读账号缺省嵌入模型。
 - SHALL NOT 使用 `PATCH /api/v1/users/me/models`。
@@ -213,6 +213,8 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 **探活**：向嵌入上游发 `POST <baseUrl>/embeddings`，body `{model, input:"ping"}`，期限与模型探活相同。
 - 结果：2xx 且应答 `data[0].embedding` 为非空数字数组为 `ok`，否则为 `failed`。
 - 结果只写回发起时的同一身份（名称、地址、密钥），并审计 `kb.settings`（detail `{probe}`）。发起后嵌入模型已被改：丢弃这次结果，不写回、不审计，应答回当前读视图。
+- 探活逐次串行，后发的排在在途的之后；身份在排到时读取。
+- 保存时名称、地址或密钥任一变化，探活重置为 `never`；三者不变时保留。
 - 嵌入模型未配置时：409 `kb_not_ready`。
 - 探活不下发，也不改嵌入身份。
 

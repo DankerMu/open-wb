@@ -101,7 +101,7 @@ export interface ModelInfo {
 
 interface ModelInstance {
   instanceName: string;
-  /** 上游密钥。空串会清空 RAGFlow 里的实例密钥（§11.4），所以这里拒绝发出。 */
+  /** 上游密钥。RAGFlow 按 trim 后的值写入，空值会清空实例密钥（§11.4），所以空串与纯空白都拒绝发出。 */
   apiKey: string;
   baseUrl: string;
   modelInfo: readonly ModelInfo[];
@@ -118,6 +118,11 @@ export interface Deadlines {
   totalMs: number;
   versionTotalMs: number;
   idleMs: number;
+}
+
+/** 语义对齐 RAGFlow 写入实例密钥时的 Go `strings.TrimSpace`：JS 的 `trim()` 不剥 U+0085，所以先去掉它。 */
+export function isBlankApiKey(key: string): boolean {
+  return key.replaceAll("\u0085", "").trim() === "";
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -649,14 +654,14 @@ export function createRagflowClient(options: {
     },
 
     async createModelInstance(instance: ModelInstance): Promise<Result<null>> {
-      if (instance.apiKey === "") {
+      if (isBlankApiKey(instance.apiKey)) {
         return UNAVAILABLE;
       }
       return json("POST", INSTANCES, ACKNOWLEDGED, instanceBody(instance));
     },
 
     async updateModelInstance(instance: ModelInstance): Promise<Result<null>> {
-      if (instance.apiKey === "" || !usable(instance.instanceName)) {
+      if (isBlankApiKey(instance.apiKey) || !usable(instance.instanceName)) {
         return UNAVAILABLE;
       }
       const name = encodeURIComponent(instance.instanceName);

@@ -10,18 +10,25 @@
  * `PATCH /models/default`。先下发、后写库：下发失败本地不变，重试同一次保存即收敛（序列幂等）。
  *
  * 账号缺省不变量（D7，实测记录 §13）：这里只有设，没有清。取消指定与 `model_info` 里消失的模型都不存在于这条路径上：
- * 取消指定只改本地，`model_info` 只增不减，`api_key` 恒为实际密钥（空串会清空实例密钥，§11.4）。
+ * 取消指定只改本地，`model_info` 只增不减，`api_key` 恒为实际密钥（RAGFlow 按 trim 后的值写入，空值会清空实例密钥，§11.4）。
  *
  * 密钥只走两条路：出站请求与 `store.saveSettings`。读视图、审计 detail 与错误都不带它。
  *
  * `confirmRebuild` 本组只校验类型：确认重建由组 14 开放，这之前身份变化且已有知识库一律 409 `kb_rebuild_required`。
+ *
+ * 探活逐次串行：一条进程级 Promise 链，「读身份 → 发请求 → 取锁写回」整段排队。它不并进设置锁，探活不能占锁 15 s。
  */
 import { validateUpstreamBaseUrl, validateUpstreamKey } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import type { createModelStore } from "../models/store.js";
 import { type EmbeddingProbeDeadlines, probeEmbedding } from "./embedding-probe.js";
 import type { createKbLocks } from "./locks.js";
-import { type createRagflowClient, isRecord, type ModelInfo } from "./ragflow-client.js";
+import {
+  type createRagflowClient,
+  isBlankApiKey,
+  isRecord,
+  type ModelInfo,
+} from "./ragflow-client.js";
 import type { createKbStore } from "./store.js";
 
 const EMBEDDING_INSTANCE = "owb-embed";
@@ -142,7 +149,10 @@ function parseEmbedding(value: unknown): EmbeddingInput {
   ) {
     badRequest();
   }
-  if (apiKey !== undefined && (typeof apiKey !== "string" || !validateUpstreamKey(apiKey))) {
+  if (
+    apiKey !== undefined &&
+    (typeof apiKey !== "string" || !validateUpstreamKey(apiKey) || isBlankApiKey(apiKey))
+  ) {
     badRequest();
   }
   return { name, baseUrl, apiKey };
@@ -241,6 +251,17 @@ function writesOf(
 
 export function createKbSettings(dependencies: KbSettingsDependencies) {
   const { store, models, client, locks, audit, probeDeadlines } = dependencies;
+  /** 探活链的尾：`models/rest.ts` 的 `perIdChain` 写法，只有一个 key。前一个无论成败都轮到下一个。 */
+  let probeTail: Promise<unknown> = Promise.resolve();
+
+  function inProbeOrder<T>(work: () => Promise<T>): Promise<T> {
+    const run = probeTail.then(work, work);
+    probeTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
 
   function view() {
     const { embedding, probe, chatModelId } = store.settings();
@@ -329,6 +350,27 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     };
   }
 
+  async function probeOnce(actorId: string) {
+    const { embedding } = store.settings();
+    const apiKey = store.embeddingApiKey();
+    if (embedding === null || apiKey === null) {
+      throw new HttpError("kb_not_ready");
+    }
+    const identity = { ...embedding, apiKey };
+    const result = await probeEmbedding(identity, probeDeadlines);
+    return locks.settings(async () => {
+      store.recordEmbeddingProbe(identity, { ...result, at: Date.now() }, () => {
+        audit({
+          kind: "kb.settings",
+          actorId,
+          title: "探活知识库嵌入模型",
+          detail: { probe: result.status },
+        });
+      });
+      return view();
+    });
+  }
+
   async function saveLocked(request: SaveRequest, actorId: string) {
     const plan = planSave(request);
     if (plan !== undefined) {
@@ -356,26 +398,9 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
       return locks.settings(() => saveLocked(request, actorId));
     },
 
-    /** `POST /api/kb/settings/probe`：请求在锁外，写回在锁内，身份已变时丢弃，不审计（D20）。 */
-    async probe(actorId: string) {
-      const { embedding } = store.settings();
-      const apiKey = store.embeddingApiKey();
-      if (embedding === null || apiKey === null) {
-        throw new HttpError("kb_not_ready");
-      }
-      const identity = { ...embedding, apiKey };
-      const result = await probeEmbedding(identity, probeDeadlines);
-      return locks.settings(async () => {
-        store.recordEmbeddingProbe(identity, { ...result, at: Date.now() }, () => {
-          audit({
-            kind: "kb.settings",
-            actorId,
-            title: "探活知识库嵌入模型",
-            detail: { probe: result.status },
-          });
-        });
-        return view();
-      });
+    /** `POST /api/kb/settings/probe`：逐次串行，身份在排到时读取；请求在锁外，写回在锁内，身份已变时丢弃，不审计（D20）。 */
+    probe(actorId: string) {
+      return inProbeOrder(() => probeOnce(actorId));
     },
   };
 }

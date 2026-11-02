@@ -178,6 +178,25 @@ describe("下发路由走同一套结果映射", () => {
     await expect(client.createModelInstance(instance)).resolves.toEqual(UNAVAILABLE);
   });
 
+  it.each([
+    ["空格", "   "],
+    ["只有 U+0085", "\u0085"],
+    ["空白夹 U+0085", " \u0085\t"],
+  ])(
+    "api_key 为%s：建实例与改实例不发出，RAGFlow 按 TrimSpace 后的值写入，等于清空实例密钥",
+    async (_label, apiKey) => {
+      const blank = {
+        instanceName: "owb-chat",
+        apiKey,
+        baseUrl: "http://upstream.test/v1",
+        modelInfo: [{ model_name: "m2", model_type: ["chat"], max_tokens: 8192 }],
+      };
+      await expect(client.createModelInstance(blank)).resolves.toEqual(UNAVAILABLE);
+      await expect(client.updateModelInstance(blank)).resolves.toEqual(UNAVAILABLE);
+      expect(fake.requests()).toEqual([]);
+    },
+  );
+
   it("HTTP 401：kb_unavailable", async () => {
     const wrong = createRagflowClient({
       baseUrl: fake.baseUrl,

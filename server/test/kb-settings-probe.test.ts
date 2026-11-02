@@ -7,6 +7,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   BAD_REQUEST,
+  bodyOf,
+  configuredWorld,
   EMBED_KEY,
   FORBIDDEN,
   PATCH_DEFAULT,
@@ -26,8 +28,6 @@ const NOT_READY = {
 };
 const PROBE_ROUTE = "/api/kb/settings/probe";
 
-const bodyOf = (response: { body: string }) => JSON.parse(response.body) as unknown;
-
 const probeOf = (response: { body: string }) =>
   (bodyOf(response) as { embedding: { probe: { status: string; message: string | null } } })
     .embedding.probe;
@@ -35,12 +35,7 @@ const probeOf = (response: { body: string }) =>
 const probeAudits = (world: World) =>
   world.audits().filter(({ detail }) => Object.hasOwn(detail as object, "probe"));
 
-async function configured(options?: Parameters<typeof open>[0]): Promise<World> {
-  const world = await open(options);
-  expect((await world.put({ embedding: world.embedding })).statusCode).toBe(200);
-  world.forget();
-  return world;
-}
+const configured = (options?: Parameters<typeof open>[0]) => configuredWorld(open, options);
 
 describe("探活", () => {
   it("依次 ok、HTTP 500、空数组：200，写回，各一条审计；不发 RAGFlow，不改嵌入身份", async () => {
@@ -110,10 +105,13 @@ describe("探活", () => {
     ["embedding 含非数字", { body: { data: [{ embedding: [0.1, "0.2"] }] } }],
     ["不是 JSON", { body: "<html>not json</html>" }],
     ["JSON 不是对象", { body: "null" }],
-  ])("2xx 但 %s：failed", async (_label, reply) => {
+  ])("2xx 但 %s：failed，响应不含嵌入向量", async (_label, reply) => {
     const world = await configured();
     world.upstream.embeddings.answer(reply);
-    expect(probeOf(await world.probe()).status).toBe("failed");
+    expect(probeOf(await world.probe())).toMatchObject({
+      status: "failed",
+      message: "响应不含嵌入向量",
+    });
   });
 
   it("3xx 不跟随：failed，message 写状态码", async () => {
@@ -157,6 +155,20 @@ describe("探活", () => {
     expect(JSON.stringify(world.audits())).not.toContain(leaked);
     expect(JSON.stringify(world.store.settings())).not.toContain(leaked);
     expect(JSON.stringify(world.logged)).not.toContain(leaked);
+  });
+
+  it("非 2xx 的 message：HTTP 状态码开头，地址已净化，摘要不超过 200 码点", async () => {
+    const world = await configured();
+    const { baseUrl } = world.embedding;
+    world.upstream.embeddings.answer({
+      status: 500,
+      body: `upstream ${baseUrl} broke ${"详情".repeat(500)}`,
+    });
+    const { status, message } = probeOf(await world.probe());
+    expect(status).toBe("failed");
+    expect(message).toMatch(/^HTTP 500：upstream /u);
+    expect(message).not.toContain(baseUrl);
+    expect(Array.from(message ?? "").length).toBeLessThanOrEqual("HTTP 500：".length + 200);
   });
 
   it("探活的 message 不进审计：detail 恰为 {probe}", async () => {
@@ -230,10 +242,69 @@ describe("探活期间嵌入模型被改（design D20）", () => {
     const gate = world.upstream.embeddings.hold();
     const pending = world.probe();
     await gate.reached;
-    expect((await world.put({ chatModelId: null })).statusCode).toBe(200);
+    expect((await world.put({ embedding: world.embedding })).statusCode).toBe(200);
     gate.release();
     expect(probeOf(await pending).status).toBe("ok");
     expect(probeAudits(world)).toEqual([{ actorId: "u3", detail: { probe: "ok" } }]);
+  });
+});
+
+describe("探活串行（ragflow-backend「探活」）", () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
+
+  it("后发的排在在途的之后：上游请求不重叠，终态是第二个的结果", async () => {
+    const world = await configured();
+    const { embeddings } = world.upstream;
+    const gate = embeddings.hold();
+    embeddings.answer({ body: { data: [{ embedding: [0.25] }] } });
+    embeddings.answer({ status: 500, body: "second" });
+    const first = world.probe();
+    await gate.reached;
+    const second = world.probe();
+    await settle();
+    expect(embeddings.requests()).toHaveLength(1);
+
+    gate.release();
+    expect(probeOf(await first).status).toBe("ok");
+    expect(probeOf(await second)).toMatchObject({ status: "failed", message: "HTTP 500：second" });
+    expect(embeddings.requests()).toHaveLength(2);
+    expect(world.store.settings().probe).toMatchObject({
+      status: "failed",
+      message: "HTTP 500：second",
+    });
+    expect(probeAudits(world)).toEqual([
+      { actorId: "u3", detail: { probe: "ok" } },
+      { actorId: "u3", detail: { probe: "failed" } },
+    ]);
+  });
+
+  it("身份在排到时读取：排队期间保存了新模型，后发的探新模型并写回", async () => {
+    const world = await configured();
+    const { embeddings } = world.upstream;
+    const gate = embeddings.hold();
+    const first = world.probe();
+    await gate.reached;
+    const second = world.probe();
+    await settle();
+    const saved = { embedding: { ...world.embedding, name: "bge-large" } };
+    expect((await world.put(saved)).statusCode).toBe(200);
+
+    gate.release();
+    expect(probeOf(await first)).toEqual(NEVER);
+    expect(probeOf(await second).status).toBe("ok");
+    expect(embeddings.requests().map(({ body }) => body)).toEqual([
+      { model: "bge-m3", input: "ping" },
+      { model: "bge-large", input: "ping" },
+    ]);
+    expect(probeAudits(world)).toEqual([{ actorId: "u3", detail: { probe: "ok" } }]);
+  });
+
+  it("前一个失败不影响后一个：同时到达的两次 409 之后，配置好的探活照常执行", async () => {
+    const world = await open();
+    const failed = await Promise.all([world.probe(), world.probe()]);
+    expect(failed.map(({ statusCode }) => statusCode)).toEqual([409, 409]);
+    expect((await world.put({ embedding: world.embedding })).statusCode).toBe(200);
+    expect(probeOf(await world.probe()).status).toBe("ok");
   });
 });
 

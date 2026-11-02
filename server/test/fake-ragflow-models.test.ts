@@ -107,7 +107,7 @@ describe("提供方与实例（§11.1）", () => {
     });
   });
 
-  it("账号没有模型时 GET /models 回空列表（§16）", async () => {
+  it("账号没有模型时 GET /models 回空列表（§16 只记了为空，信封外推自 §11.1）", async () => {
     expect((await call("GET", "/api/v1/models")).text).toBe(
       '{"code":0,"data":[],"message":"success"}',
     );

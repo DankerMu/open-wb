@@ -17,6 +17,7 @@
  * - 三处只记了 code 的 message：`code:400` 的两行（§11.4）、`PUT` 不存在的实例的 `code:404`。
  * - 引用实例不存在的 `embedding_model`：§4.4 只测过两段式查 `default` 实例，这里沿用它的 message。
  * - `model_id` 等 id 字段的取值。
+ * - `model_info` 的同名项 upsert：§11.4 只记了「增一项」，同名项更新 `model_type`、`max_tokens` 没有记录。
  */
 import { randomBytes } from "node:crypto";
 import { failure, success } from "./fake-ragflow-script.mjs";
