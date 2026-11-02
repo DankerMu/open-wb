@@ -1,18 +1,8 @@
 import { useId, useState } from "react";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { EXPERT_CATEGORIES, type ExpertCategory, type ExpertView } from "@/lib/api";
-import { useEscapeFallback } from "../../../components/escape-fallback.js";
 
 const ALL = "全部";
 const CHIPS = [ALL, ...EXPERT_CATEGORIES] as const;
@@ -144,61 +134,5 @@ export function ExpertBrowser({ experts, ...actions }: CardActions & { experts: 
         </ul>
       )}
     </div>
-  );
-}
-
-type RemoveProps = {
-  expert: ExpertView;
-  pending: boolean;
-  restoreFocus(): void;
-  onConfirm(): void;
-  onCancel(): void;
-};
-
-/**
- * `删除专家 <名称>？` 确认框（拷入层 alert-dialog）。`取消` 不发请求；`删除` 恰发一次。请求在途时两个按钮都
- * 禁用、Escape 与遮罩也关不掉。
- */
-export function RemoveExpertDialog({
-  expert,
-  pending,
-  restoreFocus,
-  onConfirm,
-  onCancel,
-}: RemoveProps) {
-  const onOpenChange = (open: boolean) => {
-    if (!open && !pending) onCancel();
-  };
-  const fallback = useEscapeFallback({ canClose: !pending, onOpenChange });
-
-  return (
-    <AlertDialog onOpenChange={onOpenChange} open>
-      <AlertDialogContent
-        aria-modal="true"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocus();
-        }}
-        onEscapeKeyDown={fallback.onEscapeKeyDown}
-        onKeyDown={fallback.onKeyDown}
-        ref={fallback.ref}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{`删除专家 ${expert.name}？`}</AlertDialogTitle>
-          <AlertDialogDescription>删除后不可恢复。</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
-          <Button
-            aria-busy={pending ? true : undefined}
-            disabled={pending}
-            onClick={onConfirm}
-            variant="destructive"
-          >
-            删除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }

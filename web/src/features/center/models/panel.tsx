@@ -2,8 +2,9 @@ import { useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/index";
 import type { ApiClient } from "@/lib/api";
+import { RemoveDialog } from "../remove-dialog.js";
 import { ModelFormDialog } from "./form-dialog.js";
-import { ModelList, RemoveModelDialog } from "./list.js";
+import { ModelList } from "./list.js";
 import { useModels } from "./use-models.js";
 
 /**
@@ -87,8 +88,7 @@ function Models({ client }: { client: ApiClient }) {
         />
       ) : null}
       {remove ? (
-        <RemoveModelDialog
-          model={remove.model}
+        <RemoveDialog
           onCancel={models.cancelRemove}
           onConfirm={() =>
             void models.confirmRemove(() => {
@@ -97,6 +97,7 @@ function Models({ client }: { client: ApiClient }) {
           }
           pending={remove.pending}
           restoreFocus={restoreFocus}
+          title={`删除模型 ${remove.model.name}？`}
         />
       ) : null}
     </section>

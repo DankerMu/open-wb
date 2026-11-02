@@ -1,13 +1,4 @@
 import type { MouseEvent } from "react";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -19,7 +10,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ConnectorSummary, ConnectorView } from "@/lib/api";
-import { useEscapeFallback } from "../../../components/escape-fallback.js";
 
 const MEMBER_HEADERS = ["名称", "类型", "描述", "默认启用"];
 const ADMIN_HEADERS = ["名称", "类型", "描述", "命令或地址", "探活", "启用", "默认启用", "操作"];
@@ -211,61 +201,5 @@ export function AdminConnectorList({
         })}
       </TableBody>
     </Table>
-  );
-}
-
-type RemoveProps = {
-  connector: ConnectorView;
-  pending: boolean;
-  restoreFocus(): void;
-  onConfirm(): void;
-  onCancel(): void;
-};
-
-/**
- * `删除连接器 <name>？` 确认框（照模型 tab 的 `RemoveModelDialog`）。`取消` 不发请求；`删除` 恰发一次。请求在途时两个
- * 按钮都禁用、Escape 与遮罩也关不掉。
- */
-export function RemoveConnectorDialog({
-  connector,
-  pending,
-  restoreFocus,
-  onConfirm,
-  onCancel,
-}: RemoveProps) {
-  const onOpenChange = (open: boolean) => {
-    if (!open && !pending) onCancel();
-  };
-  const fallback = useEscapeFallback({ canClose: !pending, onOpenChange });
-
-  return (
-    <AlertDialog onOpenChange={onOpenChange} open>
-      <AlertDialogContent
-        aria-modal="true"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocus();
-        }}
-        onEscapeKeyDown={fallback.onEscapeKeyDown}
-        onKeyDown={fallback.onKeyDown}
-        ref={fallback.ref}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{`删除连接器 ${connector.name}？`}</AlertDialogTitle>
-          <AlertDialogDescription>删除后不可恢复。</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
-          <Button
-            aria-busy={pending ? true : undefined}
-            disabled={pending}
-            onClick={onConfirm}
-            variant="destructive"
-          >
-            删除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }

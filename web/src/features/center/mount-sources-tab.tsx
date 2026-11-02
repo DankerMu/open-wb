@@ -9,15 +9,6 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -41,6 +32,7 @@ import {
   REQUEST_FAILED_MESSAGE,
 } from "@/lib/api";
 import { useEscapeFallback } from "../../components/escape-fallback.js";
+import { RemoveDialog } from "./remove-dialog.js";
 
 /**
  * 中心页「挂载源」tab（workspace-mounts「中心「挂载源」tab」，design D18；只对管理员可见，`tabs.ts`）：挂载源表
@@ -56,6 +48,7 @@ export function MountSourcesPanel({ client }: { client?: ApiClient }) {
 const HEADERS = ["名称", "服务器路径", "读写", "操作"];
 const EMPTY_TITLE = "尚未登记挂载源";
 const EMPTY_TEXT = "在服务器上挂好 NFS 或本机目录后，在此登记；用户即可在工作空间里挂载它。";
+/** 删除确认框的说明：写明连带卸载（D14）。 */
 const DELETE_NOTE = "删除后，所有引用它的挂载都会被卸载";
 const ERROR_TEXT = "m-0 text-xs text-(--wb-status-error-text) [overflow-wrap:anywhere]";
 /** `validateMountSourceBody` 的名称上限，按码点计。 */
@@ -285,15 +278,18 @@ function MountSources({ client }: { client: ApiClient }) {
         />
       ) : null}
       {remove ? (
-        <RemoveSourceDialog
-          {...remove}
+        <RemoveDialog
+          description={DELETE_NOTE}
+          error={remove.error}
           onCancel={sources.cancelRemove}
           onConfirm={() =>
             void sources.confirmRemove(() => {
               opener.current = null;
             })
           }
+          pending={remove.pending}
           restoreFocus={restoreFocus}
+          title={`删除挂载源 ${remove.row.name}？`}
         />
       ) : null}
     </section>
@@ -482,59 +478,5 @@ function SourceFormDialog({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * `删除挂载源 <name>？` 确认框：说明写明连带卸载（D14）。`取消` 不发请求；`删除` 恰发一次，失败的 message 显示在
- * 框内、框保持打开。请求在途时两个按钮都禁用、Escape 也关不掉。
- */
-function RemoveSourceDialog({
-  row,
-  pending,
-  error,
-  restoreFocus,
-  onConfirm,
-  onCancel,
-}: RemoveState & { restoreFocus(): void; onConfirm(): void; onCancel(): void }) {
-  const onOpenChange = (open: boolean) => {
-    if (!open && !pending) onCancel();
-  };
-  const fallback = useEscapeFallback({ canClose: !pending, onOpenChange });
-
-  return (
-    <AlertDialog onOpenChange={onOpenChange} open>
-      <AlertDialogContent
-        aria-modal="true"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocus();
-        }}
-        onEscapeKeyDown={fallback.onEscapeKeyDown}
-        onKeyDown={fallback.onKeyDown}
-        ref={fallback.ref}
-      >
-        <AlertDialogHeader>
-          <AlertDialogTitle>{`删除挂载源 ${row.name}？`}</AlertDialogTitle>
-          <AlertDialogDescription>{DELETE_NOTE}</AlertDialogDescription>
-        </AlertDialogHeader>
-        {error ? (
-          <p className={`${ERROR_TEXT} rounded-lg bg-destructive/10 px-2.5 py-2`} role="alert">
-            {error}
-          </p>
-        ) : null}
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>取消</AlertDialogCancel>
-          <Button
-            aria-busy={pending ? true : undefined}
-            disabled={pending}
-            onClick={onConfirm}
-            variant="destructive"
-          >
-            删除
-          </Button>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   );
 }
