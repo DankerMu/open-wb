@@ -90,6 +90,7 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 | UI 走查 | Playwright Chromium（调用方拥有已运行服务） | `make ui-walk` | 退出码 0；真实浏览器走查与 error oracle 全绿 |
 | omp-fetch | 官方 omp v18.12.3 二进制供给（SHA 校验） | `make omp-fetch` | 退出码 0；官方 v18.12.3 版本输出与 SHA256 校验 |
 | 手动真实上游冒烟 | Hurl（调用方拥有已运行服务与真实上游） | `make smoke-live` | 退出码 0；非空 done 回复 |
+| 手动真实 RAGFlow 冒烟 | Hurl（调用方拥有已运行服务与共用 RAGFlow 栈） | `make smoke-kb` | 退出码 0；知识库入库、编译与清理断言全绿 |
 
 每行命令必须解析到真实 Makefile 目标；无验证命令的 surface 的改动是 review-only，PR 必须写明。
 
@@ -153,6 +154,7 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 | UI 走查 | `.github/workflows/ci.yml`（job `ui-walk`） | `make ui-walk` + CI `ui-walk`/`all-checks-passed` | block |
 | omp-fetch | `scripts/omp-fetch.sh` | `make omp-fetch` | prerequisite |
 | 手动真实上游冒烟 | 本文件 Verification Matrix | `make smoke-live` | review-only |
+| 手动真实 RAGFlow 冒烟 | 本文件 Verification Matrix | `make smoke-kb` | review-only |
 | uid 隔离 | `.github/workflows/ci.yml`（job `uid-isolation`） | CI `uid-isolation`/`all-checks-passed` | block |
 | Conventional commits | `.githooks/commit-msg` | pre-commit（commit-msg） | block |
 | CI 聚合门禁 | `.github/workflows/ci.yml`（all-checks-passed） | CI | block |

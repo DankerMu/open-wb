@@ -587,7 +587,7 @@ Minimal mergeable slice: atomic - 一段表单与它的确认框，一个组件�
 
 ## 18. 真实端点冒烟、走查与收口（verification-harness「知识库真实端点冒烟」「CI 接线与控制面同步」的 `smoke-kb` 登记；ragflow-backend「共用开发栈的使用纪律」）
 
-- [ ] 18.1 核对 Context：
+- [x] 18.1 核对 Context：
   - Makefile 的 `smoke-live` 写法与 `.PHONY`；
   - `smoke/fixtures/README.md` 与夹具复制脚本，以及现有 hurl 与 ui-walk 对 `u1/` 下工作空间列表的断言（新增工作空间目录是否影响它们）；
   - `web/e2e/ui-walk-layout.ts` 的 `/center` 分支（#1858 已核对，见下）；
@@ -595,11 +595,18 @@ Minimal mergeable slice: atomic - 一段表单与它的确认框，一个组件�
   - `scripts/test-ci-harness.sh` 对 Makefile 目标、`.PHONY` 与 surface 数的同步检查。
 
   ui-walk 子项核对结果（#1858，主干 7102b893）：`/center` 分支在 `ui-walk-layout.ts:513`，只由 `ui-walk.spec.ts` 的 ROUTES 循环（点主导航进入）走到；成员可见的 tab 是「专家」「技能」「连接器」三项（连接器 `adminOnly:false`），不是两项；状态在途与读到关闭时 tab 条相同，所以 18.4 以深链 `?tab=knowledge-bases` 被 replace 到 `?tab=experts` 作为状态已读到的信号。`ui-walk-layout.ts` 已 802 行，分支移到新 `web/e2e/ui-walk-center.ts`，layout 回到 ≤800。
-- [ ] 18.2 测试先行（首刀）：`scripts/test-ci-harness.sh`。
+
+  首刀其余子项核对结果（#1857，主干 f3d8af95）：
+  - Makefile：`smoke-live` 在 `Makefile:80-84`（`env -i PATH` 调 hurl、先判 hurl 在不在、`SMOKE_BASE_URL` 经 `$(value)` 冻结后 export），`.PHONY` 在第 6 行。`smoke-kb` 不新增 Make 变量：`RAGFLOW_BASE_URL` 与 `SMOKE_KB_POLL_SECONDS` 都只在 recipe 的 shell 侧读，因为 oracle 拒绝 `safe_overrides` 之外的任何赋值，也不接受新的 `ifneq ($(origin …))` 块。`server/test/server-command-surface.test.ts:35` 禁止 `dev:` 到 `precommit:` 之间出现 `node `，版本检测用 `node -e`，所以目标放在 `precommit:` 之后。
+  - 夹具：CI 把整个 `smoke/fixtures/sandbox/u1/` 复制进沙箱（`.github/scripts/ci-compiled-server.sh:16`、`ci-uid-isolation.sh:95`），新目录随之进入 CI 沙箱。工作空间列表只读库行（`server/src/workspaces/store.ts:117-118`），不扫目录，所以只有 `POST /api/workspaces` 采用过的目录才进列表。`smoke/files.hurl`、`web/e2e` 都按名字取工作空间，没有断言 `u1/` 下工作空间的完整列表或数目，新增目录不影响它们。只有 `smoke/fixtures/README.md` 的「`git ls-files smoke/fixtures/sandbox` 恰好九个文件」随之改为十一个。
+  - 控制面：验证矩阵在 `AGENTS.md:79-92`，Enforcement Index 在 `:134-162`，`constraints.yaml` verification 在 `:108-150`，十个 surface。
+  - harness：`scripts/test-ci-harness.sh` 的 `contract()` 逐字钉住 Makefile 页头、四个同名 target 与各自 recipe、`.PHONY` 计数、surface 元组与矩阵、Enforcement 行。另有二十三个既有变异用例直接引用整行 `.PHONY`、页头、矩阵与 Enforcement 的相邻行和 smoke-live 的 surface 块作锚点，加入 `smoke-kb` 后这些用例只改了锚点与替换串里的期望值。
+  - 版本判据取自服务端：`GET <RAGFLOW_BASE_URL>/api/v1/system/version` 不带密钥（`server/src/kb/ragflow-client.ts:521-526`，总期限 5 s，`:51`），2xx 且 `code` 为 0 才读 `data`（`:443-467`），等于 `PINNED_VERSION` 即可用（`server/src/kb/rest.ts:54`、`:135`）。所以 `make smoke-kb` 只要求 `RAGFLOW_BASE_URL`，不读 `RAGFLOW_API_KEY_FILE`（ragflow-backend「共用开发栈的使用纪律」：任务另读密钥文件）。
+- [x] 18.2 测试先行（首刀）：`scripts/test-ci-harness.sh`。
   - 期望改为十一个 surface、五个同名 target，`smoke-kb` 的 Enforcement 为 `review-only`、`required_at: manual`；
   - 加 `smoke-kb` 的 spaced duplicate 变异，以及「`smoke-kb` 缺登记即非零」一例；
   - 加三个可复跑用例：以未设置的 `RAGFLOW_BASE_URL` 跑 `make smoke-kb`，非零且输出含 `RAGFlow 私有配置缺失`；以指向关闭端口的 `RAGFLOW_BASE_URL` 跑，非零且输出含 `共用 RAGFlow 栈未运行或版本不符`。以指向本地桩（版本接口回 `v1.0.0-rc1`）的 `RAGFLOW_BASE_URL` 跑，非零且输出含 `共用 RAGFlow 栈未运行或版本不符`，桩只收到版本请求（verification-harness「版本不符」）。三例都在发出任何知识库请求之前退出，且 Makefile 目标的文本不含 `docker`，这是文本断言，不跑 `docker` 命令。
-- [ ] 18.3 实现（首刀）：
+- [x] 18.3 实现（首刀）：
   - 新 `smoke/kb.hurl` 与 `smoke/kb-cleanup.hurl`：含一个 `raptor` 与 `graph` 都为真的 `smoke-kb-compile` 库，轮询到两种编译都 `done`，这是 DSL 对真实 RAGFlow 的唯一验证；清理覆盖 `smoke-kb` 与 `smoke-kb-compile`；
   - 新夹具工作空间 `smoke/fixtures/sandbox/u1/smoke-kb/`（一个小 Markdown 文件与一个小 PDF 文件，自制，无第三方版权），同步 `smoke/fixtures/README.md`，写明前提：调用方已把夹具复制到服务的 `SANDBOX_ROOT/u1`，`make smoke-kb` 不替它复制；
   - Makefile 加 `smoke-kb`：两步前置检测；hurl 前后的清理；轮询上限变量 `SMOKE_KB_POLL_SECONDS`（缺省 300）；登录方式同 `smoke/chat.hurl`；

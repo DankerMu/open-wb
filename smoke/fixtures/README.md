@@ -1,12 +1,13 @@
 # smoke/fixtures
 
-本目录存放 HTTP 冒烟（`make smoke`）与 UI 走查（`make ui-walk`）使用的固定夹具。本 README 放在 `sandbox/` 之外，不会随夹具被复制进沙箱。
+本目录存放 HTTP 冒烟（`make smoke`）、UI 走查（`make ui-walk`）与知识库真实端点冒烟（`make smoke-kb`）使用的固定夹具。本 README 放在 `sandbox/` 之外，不会随夹具被复制进沙箱。
 
 ## 目录
 
 - `sandbox/u1/smoke-fixture/`：工作空间夹具，恰好七个文件（根下五个，`site/` 下两个）。CI 脚本（`.github/scripts/ci-compiled-server.sh`、`.github/scripts/ci-uid-isolation.sh`）在启动服务前执行 `cp -R smoke/fixtures/sandbox/u1/. "$SANDBOX_ROOT/u1/"`；本地运行时由调用方自行复制（见 `Makefile` 的 `smoke` 头注释）。
 - `sandbox/u1/ui-walk-skills/.omp/skills/walk-brief/SKILL.md`：带一个项目 skill 的工作空间夹具（#814），与上一项同一条 `cp -R` 复制进沙箱。根 `.gitignore` 忽略 `.omp/`，本目录靠其后的例外规则 `!smoke/fixtures/sandbox/**/.omp/` 入库。
 - `sandbox/u1/ui-walk-skills/AGENTS.md`：同一工作空间里的一个项目配置文件（#816），随同一条 `cp -R` 复制进沙箱。
+- `sandbox/u1/smoke-kb/`：知识库冒烟的工作空间夹具（change s2a-kb-ragflow 组 18），一个 Markdown 文件 `notes.md` 与一个 PDF 文件 `brief.pdf`，都是本仓自制、无第三方内容。CI 的同一条 `cp -R` 也会把它复制进沙箱，但 CI 不建这个工作空间、也不运行 `make smoke-kb`。**前提**：运行 `make smoke-kb` 之前，调用方已在启动服务前把 `smoke/fixtures/sandbox/u1/` 复制到该服务的 `SANDBOX_ROOT/u1`（`cp -R smoke/fixtures/sandbox/u1/. <SANDBOX_ROOT>/u1/`）；`make smoke-kb` 不替它复制，也不启动、停止或配置服务与 RAGFlow。
 - `static/`：smoke job 的 `STATIC_ROOT`（`public.hurl` 深链字节比对用），与工作空间夹具无关。
 
 ## 夹具文件
@@ -30,6 +31,7 @@
   - 文件操作各步（建目录、改名、删除、同名移动、越界删除）：只在空间根下建、改名、删除 `hurl-a` / `hurl-b` 两个空目录，完整跑完后两者都不在（末尾有一步 `tree` 断言），夹具文件一个都不动。同名移动一步把 `readme.md` 移到 `notes.csv` 并断言 409，所以要求根下这两个文件同时存在；断言成立时两者都不被改动。删除的目录进 `<SANDBOX_ROOT>/.trash/`，回收批次不清理。
 - `web/e2e/ui-walk.spec.ts` 的 `walkFiles`：断言 readme 渲染出一级标题 `smoke-fixture`、源码视图第一行为 `# smoke-fixture`；CSV 预览恰好 5 行（表头加 4 行数据），含 `alpha 1`、`beta 2` 与说明 `共 4 行 · 大文件仅预览前若干行`；`logo.png` 预览图的 `naturalWidth` 与 `naturalHeight` 均为 256。
 - `scripts/test-ci-harness.sh`：用 `cmp -s` 比对源夹具与复制目标，与内容无关。
+- `smoke/kb.hurl`（只由 `make smoke-kb` 运行）：采用工作空间 `smoke-kb`（201 或 409）后按名字取 id，把 `notes.md` 与 `brief.pdf` 入库到 `smoke-kb` 库并轮询到两份都 `done` 且切片数大于 0，再把 `notes.md` 入库到开编译的 `smoke-kb-compile` 库。只按这两个文件名与后缀引用它们，不比对字节与内容；RAGFlow 要从两份里都切出至少一个切片，所以两份都要有可抽取的正文。
 - `web/e2e/ui-walk-project-config.ts` 的 `walkProjectConfig`：绑定 `ui-walk-skills` 的会话顶栏在 `重命名` 之前有 `项目配置 1`，弹层 `当前目录` 组恰一条 `AGENTS.md`、类型 `说明`；`expectNoProjectConfig`：绑定 `ui-walk-sessions` 的会话顶栏恰为三个按钮。
 - `web/e2e/ui-walk-sessions.spec.ts` 的 `step2ProjectSkill`：欢迎态在 composer 页脚选中工作空间 `ui-walk-skills` 后输入 `/`，候选面板恰三项，第三项的 label 为 `walk-brief`、标注 `项目`、描述为 `SKILL.md` 的 `description`。
 
@@ -46,7 +48,8 @@
 - `web/e2e/ui-walk.spec.ts` 的 `walkFiles`：readme 标题与源码首行、CSV 行数与说明文案、图片尺寸。
 - `smoke/files.hurl`：没有长度或大小字面量，但有一处内容字面量——`clip.wav` 的头四个字节 `hex,52494646;`（`RIFF`），替换 `clip.wav` 时须保持（或一起更新）；它还按扩展名断言 `clip.wav` 为 `audio/wav`、`site/index.html` 在预览来源为 `text/html`、`site/style.css` 为 `text/css`，这三个文件的路径与扩展名不要改。同名移动 409 一步按名字用 `readme.md`（源）与 `notes.csv`（已存在的目标），末尾的 `tree` 步骤也按这两个名字断言存在，所以这两个文件名不可改，也不可从空间根下移走；根下不要放名为 `hurl-a` / `hurl-b` 的夹具。以后若增加长度或大小断言，替换夹具时要一起更新。
 - `site/index.html` 的标题 `smoke-site`、相对地址 `./style.css`、`site/style.css` 的颜色 `rgb(0, 128, 0)` 与 `clip.wav` 不超过 1 KiB 由 files-harness 规格条文钉死，替换时保持不变。
-- `git ls-files smoke/fixtures/sandbox` 必须恰好列出九个文件：`smoke-fixture/` 的 `readme.md`、`notes.csv`、`logo.png`、`sample.py`、`clip.wav`、`site/index.html`、`site/style.css`，以及 `ui-walk-skills/.omp/skills/walk-brief/SKILL.md` 与 `ui-walk-skills/AGENTS.md`；CI 不检查多余文件，新增文件不要放进 `sandbox/`。
+- `git ls-files smoke/fixtures/sandbox` 必须恰好列出十一个文件：`smoke-fixture/` 的 `readme.md`、`notes.csv`、`logo.png`、`sample.py`、`clip.wav`、`site/index.html`、`site/style.css`，`ui-walk-skills/.omp/skills/walk-brief/SKILL.md` 与 `ui-walk-skills/AGENTS.md`，以及 `smoke-kb/notes.md` 与 `smoke-kb/brief.pdf`；CI 不检查多余文件，新增文件不要放进 `sandbox/`。
+- `smoke-kb/` 的两个文件名由 `smoke/kb.hurl` 按名字引用，改名时一起更新；后缀须在 `naive` 模板的后缀表里（`server/src/kb/templates.ts`）。不要在 `smoke-kb/` 下放 `AGENTS.md` 等项目配置文件或 `.omp/`。
 - 给 `ui-walk-skills` 增删项目配置文件时同步 `web/e2e/ui-walk-project-config.ts` 的 `FIXTURE_FILES` 与按钮上的数目。
 - 改 `walk-brief` 的名字或描述时同步 `web/e2e/ui-walk-sessions.spec.ts` 的 `SKILL_LABEL` 与 `SKILL_DESCRIPTION`。
 
@@ -62,6 +65,21 @@
 - 生成后用 `file` 核对，应输出 `PNG image data, 256 x 256, 8-bit/color RGB, non-interlaced`。
 
 颜色取自演示原型 `resource/workbuddy-live-demo.html` 中设计 token `--wb-palette-brand-8` 的浅色值。图形是本仓库自绘的几何图形，不是上游品牌资产（见 `ATTRIBUTION.md` §4）。
+
+## `make smoke-kb` 的运行要求
+
+- **hurl**：`kb.hurl` 与 `kb-cleanup.hurl` 用到了 `skip`、`replaceRegex`、`not exists` 与 jsonpath 过滤，只在 8.0.1（与 `.github/scripts/ci-install-hurl.sh` 钉的版本相同）上验证过；更早的版本可能不支持这些写法。8.0.1 上，过滤结果恰好一条时会被折叠成标量，所以两个文件判断「有没有」时一律用 `exists` / `not exists`，不用 `count`。
+- **node**：版本检测用 `node -e` 调 `fetch` 与 `AbortSignal.timeout`，要求 `PATH` 里有 Node 18 或更高版本。
+- **`brief.pdf` 切不出切片时**：这个 PDF 是手写的极简文件，`pdftotext` 能抽出正文，但 RAGFlow 的解析器没有对它实测过。如果 CK-11 卡在 `brief.pdf` 的 `chunkCount > 0` 上，先换一份正常排版、几页文字的小 PDF（文件名不变）再跑，不要先去改 hurl。
+
+## `smoke-kb/brief.pdf` 的生成方式
+
+用 Python 3 标准库逐字节写出（只用 `bytes` 拼接，不依赖第三方库），生成脚本是一次性的，不入库。参数：
+
+- PDF 1.4，一页，`MediaBox [0 0 612 792]`；五个对象：Catalog、Pages、Page、内容流、字体。字体是标准 14 字体之一 `Helvetica`（`/Subtype /Type1`、`/Encoding /WinAnsiEncoding`），不嵌入字体文件。
+- 内容流：`BT /F1 14 Tf 72 760 Td 18 TL`，之后六行 ASCII 文本，第一行 `smoke-kb brief`，其余五行是本仓自拟的英文句子（描述 `notes.md` 里同一座虚构的观测站），行间以 `T*` 换行，`ET` 结束。
+- xref 表按各对象的实际字节偏移写出，`trailer` 的 `/Size` 为 6。
+- 生成后用 `file` 核对，应输出 `PDF document, version 1.4, 1 pages`；`pdftotext` 能抽出全部六行文本，`pdfinfo` 不报语法错误。
 
 ## `clip.wav` 的生成方式
 

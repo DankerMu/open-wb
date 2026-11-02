@@ -1,9 +1,10 @@
 # open-workbuddy 唯一命令面。所有工作流经此路由；AGENTS.md 验证矩阵与 constraints.yaml
 # verification 段是它的镜像，增删目标须三处同步。omp-fetch 是官方 v18.12.3 二进制供给前置，
 # smoke-live 是调用方拥有的真实上游手动验证；
+# smoke-kb 是调用方拥有服务与共用 RAGFlow 栈的真实知识库手动验证；
 # 控制面文档行与 Makefile 目标同步。
 SHELL := /bin/bash
-.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke smoke-live ui-walk omp-fetch
+.PHONY: setup hooks lint fmt typecheck test anti-drift guard check test-guardrails precommit dev smoke smoke-live smoke-kb ui-walk omp-fetch
 
 setup: ## 安装依赖 + 挂 git hooks
 	npm install
@@ -84,3 +85,21 @@ smoke-live: ## 手动真实上游冒烟（只消费已运行服务；缺配置�
 	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" --variable "content_pattern=(?s)^.+$$" --variable "min_bash_steps=0" --variable "skip_turn_control=true" smoke/chat.hurl
 
 precommit: guard
+
+# smoke-kb 只消费调用方已运行、已接上共用 RAGFlow 栈的服务（SMOKE_BASE_URL 同 smoke；登录同 smoke/chat.hurl）。
+# 前提：调用方已按 smoke/fixtures/README.md 把 smoke/fixtures/sandbox/u1 复制到该服务的 SANDBOX_ROOT/u1，本目标不替它复制。
+# 前置检测都在任何知识库请求之前：RAGFLOW_BASE_URL 只从调用方 shell 环境读，未设置即停；再确认 node 带 fetch（Node 18+），
+# 免得缺 node 被误报成栈未运行；最后请求它的版本接口，
+# 判据同服务端（server/src/kb/ragflow-client.ts 的 version() 与 server/src/kb/rest.ts 的 PINNED_VERSION）：
+# GET /api/v1/system/version，不带密钥（所以不读 RAGFLOW_API_KEY_FILE），总期限 5 s，不跟随重定向，
+# 2xx 且 code 为 0、data 为 v1.0.0-rc2 才放行。本目标不启动、不停止、不配置任何 RAGFlow 容器。
+# 轮询上限 SMOKE_KB_POLL_SECONDS（缺省 300）只在 shell 侧读，按 5 s 一次折成 hurl 的重试次数，每段轮询各自计时。
+# smoke/kb-cleanup.hurl 在 kb.hurl 之前与它失败之后各跑一次；清理的失败不改变退出码。
+smoke-kb: ## 手动真实 RAGFlow 冒烟（只消费已接上共用 RAGFlow 栈的已运行服务；缺 RAGFLOW_BASE_URL 或栈不对先失败；缺 hurl 显式失败并打印安装指引 https://hurl.dev/docs/installation.html）
+	@[ -n "$${RAGFLOW_BASE_URL}" ] || { echo "错误：RAGFlow 私有配置缺失（未设置 RAGFLOW_BASE_URL）" >&2; exit 1; }
+	@/usr/bin/env -i PATH="$$PATH" node -e 'process.exit(typeof fetch==="function"&&typeof AbortSignal.timeout==="function"?0:1)' >/dev/null 2>&1 || { echo "错误：未找到 Node 18+（版本检测需要 fetch）" >&2; exit 1; }
+	@/usr/bin/env -i PATH="$$PATH" node -e '(async()=>{const r=await fetch(new URL("/api/v1/system/version",process.argv[1]),{redirect:"manual",signal:AbortSignal.timeout(5000)});if(r.status<200||r.status>299)return false;const b=await r.json();return b!==null&&typeof b==="object"&&b.code===0&&b.data==="v1.0.0-rc2"})().then((ok)=>process.exit(ok?0:1),()=>process.exit(1))' "$${RAGFLOW_BASE_URL}" || { echo "错误：共用 RAGFlow 栈未运行或版本不符" >&2; exit 1; }
+	@case "$${SMOKE_KB_POLL_SECONDS:-300}" in ""|0*|*[!0-9]*) echo "错误：SMOKE_KB_POLL_SECONDS 须为正整数" >&2; exit 1 ;; esac
+	@/usr/bin/env -i PATH="$$PATH" /bin/sh -c 'command -v hurl >/dev/null 2>&1' || { echo "错误：未找到 hurl；安装说明：https://hurl.dev/docs/installation.html" >&2; exit 1; }
+	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" smoke/kb-cleanup.hurl || echo "提示：冒烟前的清理没有完成，继续" >&2
+	/usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" --variable "poll_retries=$$(( ($${SMOKE_KB_POLL_SECONDS:-300} + 4) / 5 ))" smoke/kb.hurl || { rc=$$?; /usr/bin/env -i PATH="$$PATH" hurl --test --jobs 1 --retry 0 --variable "base_url=$${SMOKE_BASE_URL}" smoke/kb-cleanup.hurl || echo "提示：失败后的清理没有完成" >&2; exit $$rc; }
