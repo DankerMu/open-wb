@@ -401,12 +401,18 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     return view();
   }
 
-  /** 被引用的那一行落库之前：删除与清空上游 409，上游变化时按候选上游重新下发。 */
+  /**
+   * 被引用的那一行落库之前：删除与清空上游 409，上游变化时按候选上游重新下发。纯空白密钥在这里拦，不在 `models` 的校验里：
+   * 知识库关闭与没有被引用的行不下发，不受这条约束。
+   */
   async function syncChatModel(id: string, planned: ModelUpdatePlan | undefined): Promise<void> {
     if (planned === undefined || planned.next === null) {
       throw new HttpError("kb_model_in_use");
     }
     if (planned.changed) {
+      if (isBlankApiKey(planned.next.apiKey)) {
+        badRequest();
+      }
       await provision(client, chatTarget(id, planned.next, planned.model.maxTokens));
     }
   }

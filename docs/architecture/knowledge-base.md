@@ -1,6 +1,6 @@
 # 知识库运维说明
 
-`system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。这部分拆出来是因为 `system.md` 超过了 1000 行的文件上限。
+`system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
 本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。
 
@@ -91,8 +91,8 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | 写入 | 结果 |
 |---|---|
 | `DELETE` | 409 `kb_model_in_use`，行不变；这一行同时是缺省模型时也是这个码，取消指定之后才是 `model_in_use` |
-| `PUT` 且 `upstream: null` | 409 `kb_model_in_use`，行不变 |
-| `PUT` 且 `upstreamChanged` 为真 | 按候选上游把 `owb-chat` 重新下发一轮（序列同上，`max_tokens` 取这次修改之后的值），成功后才写库；下发失败按映射回 503 `kb_unavailable` / 400 `kb_rejected`，行、审计与 `models.yml` 都不变 |
+| `PUT` 且 `upstream: null` | 409 `kb_model_in_use`，行不变；这一行的上游已经是空的也是 409（知识库关闭期间清空过），要先配上上游或取消指定 |
+| `PUT` 且 `upstreamChanged` 为真 | 候选密钥纯空白时 400 `bad_request`，不发 RAGFlow 请求，行不变。否则按候选上游把 `owb-chat` 重新下发一轮（序列同上，`max_tokens` 取这次修改之后的值），成功后才写库；下发失败按映射回 503 `kb_unavailable` / 400 `kb_rejected`，行、审计与 `models.yml` 都不变，但 `owb-chat` 可能已是候选上游（第 3 步成功、第 4 步失败）。重试同一次修改即收敛；放弃修改时保存一次知识库模型设置，用本地的行覆盖 |
 | `PUT` 且 `upstreamChanged` 为假 | 不下发，直接写：只改名或只改 `maxTokens` 不碰 RAGFlow，`model_info` 里的 `max_tokens` 留到下一次下发更新 |
 
 开编译的库不影响这张表：同一行轮换密钥或改地址照常下发。没有被引用的行不碰 RAGFlow，删除也一样，账号缺省仍指向已下发的配置。引用判定与写入在同一次设置锁内，所以与一次并发的保存只有两种次序：保存在前，修改判定为已引用并重新下发，删除得 409；修改或删除在前，保存读到写入之后的行。发布（`registry.refresh()` 与 `models.yml`）在钩子之外，不占设置锁。

@@ -40,7 +40,6 @@ const IN_USE = {
   error: { code: "kb_model_in_use", message: "该模型是知识库对话模型，先在知识库模型设置里换掉它" },
 };
 const MODEL_IN_USE = { error: { code: "model_in_use", message: expect.any(String) as string } };
-const CHAT_MODELS = `GET ${INSTANCES}/owb-chat/models`;
 const PUT_CHAT = `PUT ${INSTANCES}/owb-chat`;
 const NEW_BASE_URL = "http://chat-next.upstream.test/v1";
 
@@ -142,6 +141,35 @@ describe("对话模型联动（ragflow-backend）", () => {
     expect(routeOf(world)?.apiKey).toBe(ROTATED_KEY);
   });
 
+  it("下发在第 4 步失败后放弃修改：实例已是新密钥，保存一次设置用本地行覆盖", async () => {
+    const world = await withChat();
+    world.fake.fault(PATCH_DEFAULT, { kind: "status", status: 500 });
+    expect((await world.models("PUT", "m2", rotation())).statusCode).toBe(503);
+    expect(routeOf(world)?.apiKey).toBe(CHAT_KEY);
+    expect(chatInstance(world)?.apiKey).toBe(ROTATED_KEY);
+    expect(world.modelUpdates()).toEqual([]);
+
+    world.forget();
+    expect((await world.put({ chatModelId: "m2" })).statusCode).toBe(200);
+    expect(routes(world.sent())).toEqual(nextRound("owb-chat"));
+    expect(chatInstance(world)?.apiKey).toBe(CHAT_KEY);
+    expect(routeOf(world)?.apiKey).toBe(CHAT_KEY);
+  });
+
+  it("上游已空的被引用行：upstream:null 仍 409，行不变，不发请求", async () => {
+    const world = await withChat();
+    world.db
+      .prepare(
+        "UPDATE models SET upstream_base_url = NULL, upstream_api_key = NULL WHERE id = 'm2'",
+      )
+      .run();
+    const response = await world.models("PUT", "m2", edit(null));
+    expect(response.statusCode).toBe(409);
+    expect(bodyOf(response)).toEqual(IN_USE);
+    expect(world.sent()).toEqual([]);
+    expect(world.modelUpdates()).toEqual([]);
+  });
+
   it("RAGFlow 拒绝：400 kb_rejected，message 不进响应，行不变", async () => {
     const world = await withChat();
     world.fake.fault(PUT_CHAT, { kind: "combo", code: 102, message: LEAK });
@@ -181,15 +209,30 @@ describe("对话模型联动（ragflow-backend）", () => {
     ]);
   });
 
-  it("纯空白密钥不发出：503，没有实例写入，RAGFlow 里的密钥与行都不变", async () => {
+  it.each([
+    ["空格", "   "],
+    ["U+0085", "\u0085"],
+  ])("被引用的行带纯空白密钥（%s）：400，零个请求，行不变", async (_name, apiKey) => {
     const world = await withChat();
-    const body = edit({ baseUrl: CHAT_BASE_URL, apiKey: "   " });
-    const response = await world.models("PUT", "m2", body);
-    expect(response.statusCode).toBe(503);
-    expect(bodyOf(response)).toEqual(KB_UNAVAILABLE);
-    expect(routes(world.sent())).toEqual([PUT_PROVIDER, LIST_MODELS, CHAT_MODELS]);
+    const before = createModelStore(world.db).get("m2");
+    const response = await world.models("PUT", "m2", edit({ baseUrl: CHAT_BASE_URL, apiKey }));
+    expect(response.statusCode).toBe(400);
+    expect(bodyOf(response)).toEqual(BAD_REQUEST);
+    expect(world.sent()).toEqual([]);
     expect(chatInstance(world)?.apiKey).toBe(CHAT_KEY);
     expect(routeOf(world)?.apiKey).toBe(CHAT_KEY);
+    expect(createModelStore(world.db).get("m2")).toEqual(before);
+    expect(world.modelUpdates()).toEqual([]);
+    expect(world.publishes()).toBe(0);
+  });
+
+  it("没有被引用的行带纯空白密钥：照旧写入，不碰 RAGFlow", async () => {
+    const world = await withChat();
+    world.addChatModel("m3");
+    const body = edit({ baseUrl: CHAT_BASE_URL, apiKey: "   " }, { name: "m3" });
+    expect((await world.models("PUT", "m3", body)).statusCode).toBe(200);
+    expect(routeOf(world, "m3")?.apiKey).toBe("   ");
+    expect(world.sent()).toEqual([]);
   });
 
   it("带 userinfo 的行：视图地址只改名不下发；换密钥时下发已存地址", async () => {
@@ -386,6 +429,24 @@ describe("联动与设置交错（ragflow-backend，design D20）", () => {
     expect(routeOf(world)?.apiKey).toBe(ROTATED_KEY);
   });
 
+  it("第二次修改不带密钥：锁内读到第一次写入的密钥，下发与落库是同一个上游", async () => {
+    const world = await withChat();
+    const gate = world.fake.fault(PATCH_DEFAULT, { kind: "hold" });
+    const first = world.models("PUT", "m2", rotation());
+    await gate.reached;
+    const second = world.models("PUT", "m2", edit({ baseUrl: NEW_BASE_URL }));
+    await queued(world, 1);
+
+    gate.release();
+    expect((await first).statusCode).toBe(200);
+    expect((await second).statusCode).toBe(200);
+    expect(chatInstanceWrites(world).at(-1)).toMatchObject({
+      api_key: ROTATED_KEY,
+      base_url: NEW_BASE_URL,
+    });
+    expect(routeOf(world)).toEqual({ baseUrl: NEW_BASE_URL, apiKey: ROTATED_KEY });
+  });
+
   it("修改的下发失败之后锁放行：排队的写者照常执行", async () => {
     const world = await withChat();
     const gate = world.fake.fault(PUT_PROVIDER, { kind: "hold" });
@@ -452,6 +513,17 @@ describe("知识库关闭时联动不生效", () => {
     expect((await world.models("PUT", "m3", edit(null, { name: "m3" }))).statusCode).toBe(200);
     expect((await world.models("DELETE", "m3")).statusCode).toBe(204);
     expect(world.store.settings().chatModelId).toBeNull();
+    expect(world.fake.requests()).toEqual([]);
+  });
+
+  it("被引用的行带纯空白密钥：照旧写入，不发 RAGFlow 请求", async () => {
+    const world = await open({ kbDisabled: true });
+    world.addChatModel("m3");
+    world.store.saveSettings({ chatModelId: "m3" });
+
+    const body = edit({ baseUrl: CHAT_BASE_URL, apiKey: "   " }, { name: "m3" });
+    expect((await world.models("PUT", "m3", body)).statusCode).toBe(200);
+    expect(routeOf(world, "m3")?.apiKey).toBe("   ");
     expect(world.fake.requests()).toEqual([]);
   });
 });
