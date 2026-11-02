@@ -503,13 +503,13 @@ Minimal mergeable slice: atomic - 确认开关一旦开放就必须有重建器�
 
 ## 15. web：API 客户端与中心「知识库」tab 的列表、建库、删库（model-registry「中心页外壳」；knowledge-bases「中心「知识库」tab」的状态行、列表、列表行的 `删除知识库` 与新建对话框）
 
-- [ ] 15.1 核对 Context：
+- [x] 15.1 核对 Context：
   - `web/src/features/center/tabs.ts:16-22` 与 `CenterPage` 的可见 tab 计算；
   - `web/test/center-page.test.tsx` 中钉住 tab 条与描述的行号；
   - `web/src/lib/api-connectors.ts` 的严格解析写法；`api.ts` 的 `ApiClient` 类型与再导出；
   - `web/test/api-files-archive.test.ts` 的 `OTHER_CLIENT_METHODS` 与精确键集；
   - `web/test/support.ts` 的 `centerRoutes()`。
-- [ ] 15.2 测试先行。
+- [x] 15.2 测试先行。
   - `center-page.test.tsx`：「知识库 tab 随开关显隐」，以及既有场景的假状态 `{enabled:false}`；`support.ts` 的 `centerRoutes()` 加 `GET /api/kb/status` 缺省应答 `{enabled:false}`。
   - 新 `web/test/center-kb-list.test.tsx`（假 `ApiClient`）：
     - 「不可用与未就绪」「编译开关按对话模型显示」；
@@ -518,11 +518,11 @@ Minimal mergeable slice: atomic - 确认开关一旦开放就必须有重建器�
     - 列表行的 `删除知识库`：先弹确认，确认后恰一次 `deleteKnowledgeBase`；`rebuilding` 时不渲染，`rebuild_failed` 时渲染；
     - 「编译状态文案」：含 `pending` 的 `尚未产出` 与旁注、`compile:null` 显示 `状态未知`，页面不出现 `编译失败`。
   - 新 `web/test/api-kb.test.ts`：两份 spec 写明的每个应答形状的严格解析（多键、少键、类型不符即 `requestFailed`）。（已随 #1841 落地）
-- [ ] 15.3 实现：
+- [x] 15.3 实现：
   - 新 `web/src/lib/api-kb.ts`（全部知识库方法，含组 16、17 用到的）；`api.ts` 接线，同一刀更新 `web/test/api-files-archive.test.ts` 的 `OTHER_CLIENT_METHODS` 精确键集（已随 #1841 落地）；
   - `tabs.ts` 加 `{key:"knowledge-bases", label:"知识库", adminOnly:false, requiresKb:true}` 与可见性计算；
   - 新 `web/src/features/center/kb/{panel.tsx,list.tsx,create-dialog.tsx,use-kb.ts,templates.ts}`；`templates.ts` 只有十一种模板的中文名与 demo 说明文案，没有编译支持表。
-- [ ] 15.4 验收清单新节「中心·知识库（CK）」，结论 `待签`，`web/test/functional-checklist.test.ts` 通过：
+- [x] 15.4 验收清单新节「中心·知识库（CK）」，结论 `待签`，`web/test/functional-checklist.test.ts` 通过：
   - CK-01 未配置知识库时没有知识库 tab；
   - CK-02 建库并选模板；
   - CK-03 RAPTOR / 知识图谱开关随知识库对话模型显示，十一种模板都一样；

@@ -1,15 +1,20 @@
 import type { ComponentType } from "react";
 import { ConnectorsPanel } from "./connectors/panel.js";
 import { ExpertsPanel } from "./experts/panel.js";
+import { KnowledgeBasesPanel } from "./kb/panel.js";
 import { ModelsPanel } from "./models/panel.js";
 import { MountSourcesPanel } from "./mount-sources-tab.js";
 import { SkillsPanel } from "./skills/list.js";
 
-/** 中心页的一个 tab：`key` 即 `?tab=` 的值；`adminOnly` 为真时只对管理员可见；`Panel` 是该 tab 的面板。 */
+/**
+ * 中心页的一个 tab：`key` 即 `?tab=` 的值；`adminOnly` 为真时只对管理员可见；`requiresKb` 为真时另须
+ * `GET /api/kb/status` 为 `enabled:true`；`Panel` 是该 tab 的面板。
+ */
 export type CenterTab = {
   key: string;
   label: string;
   adminOnly: boolean;
+  requiresKb?: boolean;
   Panel: ComponentType;
 };
 
@@ -18,6 +23,13 @@ export const CENTER_TABS: readonly CenterTab[] = [
   { key: "experts", label: "专家", adminOnly: false, Panel: ExpertsPanel },
   { key: "skills", label: "技能", adminOnly: false, Panel: SkillsPanel },
   { key: "connectors", label: "连接器", adminOnly: false, Panel: ConnectorsPanel },
+  {
+    key: "knowledge-bases",
+    label: "知识库",
+    adminOnly: false,
+    requiresKb: true,
+    Panel: KnowledgeBasesPanel,
+  },
   { key: "models", label: "模型", adminOnly: true, Panel: ModelsPanel },
   { key: "mount-sources", label: "挂载源", adminOnly: true, Panel: MountSourcesPanel },
 ];
