@@ -343,14 +343,14 @@ Minimal mergeable slice: 8.2–8.3 的设置读写、下发与探活，连同 8.
   - 假 RAGFlow 加内置模板、模板组的建与删、`GET /pipelines/<parser_id>`（十一种模板的节点名与下游取自 §5.1 (3)；`tag` 回 `102`）、画布的建与删、`parse_type:2` 数据集。夹具的 Compiler 不校验 DSL：DSL 的正确性由纯函数用例与 `make smoke-kb` 负责。夹具的这部分在 `server/test/support/fake-ragflow-pipeline.mjs`，自测在 `server/test/fake-ragflow-pipeline.test.ts`。
 - [x] 9.6 实现（第二刀）：新 `server/src/kb/pipeline.ts`（`createPipeline`，第一步读账号缺省；`deletePipeline`；DSL 生成；删画布与删模板组只有它调用）；`POST /api/kb/bases` 开放两个开关；删库改走 `deletePipeline`。
 - [x] 9.7 `system.md` §9.13（正文在 `docs/architecture/knowledge-base.md`）加模板组与画布的生命周期、账号缺省的前置读取与删除次序。
-- [ ] 9.8 测试先行（第三刀，`compile-status`）：新 `server/test/kb-compile-status.test.ts`（`app.inject()` + 假 RAGFlow）。
+- [x] 9.8 测试先行（第三刀，`compile-status`）：新 `server/test/kb-compile-status.test.ts`（`app.inject()` + 假 RAGFlow）。
   - knowledge-bases「编译状态读取有界」「编译状态按任务日志判定」「只有 0 切片的文档」「类型只看 task_type」；
   - 读法：任务日志请求都带 `orderby=id` 与 `page_size=100`，不带 `task_type=`、`keywords=`、`log_type=`；日志超过一页时读全，`done` 依赖后面的页；`dsl.entries[].doc_id` 取同一类型的并集；
   - 有文档在解析时假 RAGFlow 没有收到任务日志请求；文档列表 `code:404` 时该库 `compile` 为 `null`。
 
-  假 RAGFlow 加任务日志，按 §5.3：`orderby=id`、`page_size`、`total` 是日志行数、越界页回空 `logs`，`task_type=` 不过滤。
-- [ ] 9.9 实现（第三刀）：新 `server/src/kb/compile-status.ts`（design D14 的判定，复用组 11 的文档列表读取）；列表接上编译状态。
-- [ ] 9.10 `system.md` §9.13 加编译状态的判定，含 RAPTOR 无信号的已知限制。
+  假 RAGFlow 加任务日志，按 §5.3：`orderby=id`、`page_size`、`total` 是日志行数、越界页回空 `logs`，`task_type=` 不过滤。夹具的这部分在 `server/test/support/fake-ragflow-ingestions.mjs`，自测在 `server/test/fake-ragflow-ingestions.test.ts`。
+- [x] 9.9 实现（第三刀）：新 `server/src/kb/compile-status.ts`（design D14 的判定，复用组 11 的文档列表读取）；列表接上编译状态。`ragflow-client.ts` 先拆出模型下发一块（`ragflow-models.ts`）与判定原语（`ragflow-route.ts`），再加任务日志路由。
+- [x] 9.10 `system.md` §9.13（正文在 `docs/architecture/knowledge-base.md`）加编译状态的判定，含 RAPTOR 无信号的已知限制。
 
 Suggested fixture level: expanded - 两份真相（本地行与 RAGFlow 数据集、画布、模板组）的创建与删除顺序，以及所有权判定。
 Minimal mergeable slice: 9.2–9.4 的普通模板建库、列表与删库——走 `parse_type:1`，组 10–13 都能在它上面开工，能独立保绿。剩余部分拆成两刀，各一条验证路径：第二刀（9.5–9.7）是 pipeline，依赖首刀，不依赖组 11，atomic：DSL、模板组、画布与开关开放是同一条静默失败路径；合入后开了开关的库在列表里 `compile` 为 `null`，web 在组 15 剩余才渲染，用户看不到。第三刀（9.8–9.10）是 `compile-status`，依赖第二刀与组 11，atomic：一个判定函数接到列表上。

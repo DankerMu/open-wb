@@ -92,6 +92,16 @@ export interface FakeRagflowDocumentSeed {
   eventMessage?: string;
 }
 
+/** 一条数据集任务日志（§5.3）：`dsl.entries` 恰 1 项。 */
+export interface FakeRagflowIngestionSeed {
+  taskType: "Tree" | "Graph";
+  operationStatus: "RUNNING" | "DONE";
+  /** `dsl.entries[0].doc_id`：数据集里一份 `COMPLETED`、切片非 0 的文档，每种类型至多一条，别的直接抛。 */
+  documentId: string;
+  /** `dsl.entries[0].variants`；缺省为只开这一种时的值（`Tree` 为 `["tree"]`，`Graph` 为 `["structure"]`）。 */
+  variants?: string[];
+}
+
 export interface FakeRagflowDatasetView {
   id: string;
   name: string;
@@ -158,6 +168,8 @@ export interface FakeRagflowServer {
   /** 账号里已有这个画布（空 DSL），不经建画布：同上。 */
   addCanvas(title?: string): string;
   setDocumentStatus(datasetId: string, documentId: string, status: string): void;
+  /** 加一条任务日志，返回它的 id：按种子次序递增，`orderby=id` 按它倒序。 */
+  addIngestionLog(datasetId: string, seed: FakeRagflowIngestionSeed): string;
   instances(): FakeRagflowInstanceView[];
   defaultModels(): FakeRagflowDefaultModelView[];
   datasets(): FakeRagflowDatasetView[];

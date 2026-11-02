@@ -11,8 +11,9 @@
  * 重复；上传带 `?type=` 的合法取值；multipart 缺结束边界；一次多个文件里有被拒的。
  *
  * 文档列表在 `fake-ragflow-list.mjs`（组 11），线上字节计数在 `fake-ragflow-wire.mjs`（组 12），内置模板、模板组、内置 pipeline
- * 与画布在 `fake-ragflow-pipeline.mjs`（组 9 第二刀）。`parse_type:2` 的数据集在这里：`pipeline_id` 要是夹具里的画布，读回的
- * `parser_id` 是 `general`（§4.6）；同时带 `parser_id` 的组合没有记录，落到未知路由。
+ * 与画布在 `fake-ragflow-pipeline.mjs`（组 9 第二刀），数据集任务日志在 `fake-ragflow-ingestions.mjs`（组 9 第三刀）。
+ * `parse_type:2` 的数据集在这里：`pipeline_id` 要是夹具里的画布，读回的 `parser_id` 是 `general`（§4.6）；同时带 `parser_id`
+ * 的组合没有记录，落到未知路由。
  *
  * 外推，记录里没有原文，用例不要钉死：
  * - 缺 `name` 的 `102` 来自 §12 的「缺字段」，message 借用全空白名字的那句；`name`、`parser_id`、`embedding_model`
@@ -33,6 +34,7 @@
  */
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:http";
+import { ingestionViews, listIngestions } from "./fake-ragflow-ingestions.mjs";
 import { documentRow, listDocuments, suffixOf } from "./fake-ragflow-list.mjs";
 import {
   API,
@@ -474,6 +476,7 @@ const ROUTES = [
   ["PUT", DATASET, putDatasetAbsent],
   ["GET", DOCUMENTS, listDocuments],
   ["GET", `${DATASET}/compilation/status`, datasetAbsent],
+  ["GET", `${DATASET}/ingestions`, listIngestions],
   ...PIPELINE_ROUTES,
   ...MODEL_ROUTES,
 ].map(([method, path, handler, options]) => ({
@@ -569,6 +572,7 @@ function createState() {
         embeddingModel: embeddingModel ?? "",
         pipelineId,
         documents: new Map(),
+        logs: [],
       };
       datasets.set(dataset.id, dataset);
       return dataset;
@@ -697,6 +701,7 @@ export async function start(options = {}) {
     },
     ...modelViews(state.models),
     ...pipelineViews(state.pipeline),
+    ...ingestionViews(state),
     datasets: () =>
       [...state.datasets.values()].map(({ id, name, parserId, embeddingModel }) => ({
         id,

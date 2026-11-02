@@ -3,7 +3,7 @@
  * 「知识库模型设置」的账号缺省不变量，design D7、D9、D14）。全部经 `createApp` + `app.inject()` 打假 RAGFlow，期望值是 spec 与
  * 实测记录的字面量；DSL 的逐键期望在 `kb-pipeline.test.ts`，夹具的 Compiler 不校验 DSL。
  *
- * 列表里开了开关的库，本刀 `compile` 为 `null`，不发编译读取：编译状态的读取属第三刀（#1870）。
+ * 列表里开了开关的库读一次文档列表与任务日志（第三刀 #1870 接上）；判定的逐项用例在 `kb-compile-status.test.ts`。
  */
 import type { LightMyRequestResponse as Reply } from "fastify";
 import { describe, expect, it, vi } from "vitest";
@@ -20,6 +20,7 @@ import {
   createdCompileBase,
   DELETE_DATASETS,
   type DslShape,
+  datasetIdOf,
   deleteBase,
   deleteCanvasRoute,
   deleteGroupRoute,
@@ -195,18 +196,19 @@ describe("建库应答不读 RAGFlow", () => {
     expect(reads).toEqual([]);
   });
 
-  it("列表里开了开关的库 compile 为 null，不发编译读取：本刀没有编译状态的读取，第三刀（#1870）接上", async () => {
+  it("列表里开了开关、还没有文档的库：读一次文档列表与任务日志，compile 为 {pending, pending}；普通库不发请求", async () => {
     const world = await compileReady();
-    await createdCompileBase(world, "编译库", { raptor: true, graph: true });
+    const view = await createdCompileBase(world, "编译库", { raptor: true, graph: true });
     await createdBase(world, "普通库");
     world.forget();
     const listed = await world.call("GET", BASES, "member");
     expect(listed.statusCode).toBe(200);
     expect((listed.json() as { bases: Json[] }).bases.map(({ compile }) => compile)).toEqual([
-      null,
+      { raptor: "pending", graph: "pending" },
       COMPILE_OFF,
     ]);
-    expect(world.sent()).toEqual([]);
+    const dataset = `/api/v1/datasets/${datasetIdOf(world, view.id)}`;
+    expect(routes(world.sent())).toEqual([`GET ${dataset}/documents`, `GET ${dataset}/ingestions`]);
   });
 });
 

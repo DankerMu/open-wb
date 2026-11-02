@@ -9,7 +9,8 @@
  *
  * 对外是一个路由一个方法，三种调用本身不导出：调用方拼不出路径，所以 `GET …/instances/<实例>`（明文回显上游
  * 密钥）、清空账号缺省与 `/providers` 下的删除（D7）在这里根本没有写法，不靠黑名单。`PATCH /models/default` 是设与
- * 清共用的路径，`setDefaultModel` 拒绝空名字，所以这个调用面只能设。
+ * 清共用的路径，`setDefaultModel` 拒绝空名字，所以这个调用面只能设。模型下发一块在 `ragflow-models.ts`，判定原语在
+ * `ragflow-route.ts`：兄弟文件只在 `createRagflowClient` 里经闭包参数拿到 `json`，模块级没有发请求的写法。
  *
  * 结果按次序判定：路由专属组合（只认 HTTP 200，实测全部如此，§12 未知路由的 HTTP 404 + `code:404` 不能算不存
  * 在）→ 2xx 且 `code:0` → `code` 101 / 102 为 `kb_rejected` → HTTP 401 或 `code` 401 / 403 为 `kb_unavailable`
@@ -25,6 +26,22 @@ import https from "node:https";
 import type { Socket } from "node:net";
 import { pipeline, type Readable } from "node:stream";
 import type { KbKeyHandle } from "./key-file.js";
+import { modelCalls } from "./ragflow-models.js";
+import {
+  API,
+  type Envelope,
+  fieldOf,
+  isNonEmptyString,
+  isRecord,
+  REJECTED,
+  type Result,
+  type Route,
+  UNAVAILABLE,
+  usable,
+} from "./ragflow-route.js";
+
+export { isBlankApiKey, type ModelInfo, PROVIDER } from "./ragflow-models.js";
+export { isRecord } from "./ragflow-route.js";
 
 const CONNECT_MS = 10_000;
 const TOTAL_MS = 30_000;
@@ -33,35 +50,10 @@ const IDLE_MS = 60_000;
 const MAX_JSON_BYTES = 1_048_576;
 const RECORD_INTERVAL_MS = 60_000;
 const PAGE_SIZE = 100;
-const API = "/api/v1";
-export const PROVIDER = "OpenAI-API-Compatible";
-const INSTANCES = `${API}/providers/${PROVIDER}/instances`;
-
-const UNAVAILABLE = { kind: "kb_unavailable" } as const;
-const REJECTED = { kind: "kb_rejected" } as const;
 const NOT_FOUND = { kind: "not_found" } as const;
 const UNSUPPORTED_FILE = { kind: "unsupported_file" } as const;
 const PARSE_NOT_STARTED = { kind: "parse_not_started" } as const;
 const NOT_DELETED = { kind: "not_deleted" } as const;
-
-type Failure = typeof UNAVAILABLE | typeof REJECTED;
-type Ok<T> = { kind: "ok"; value: T };
-type Result<T, Typed = never> = Ok<T> | Failure | Typed;
-
-interface Envelope {
-  code: unknown;
-  message: unknown;
-  data: unknown;
-}
-
-/**
- * 一条路由的判定。`typed` 是路由专属组合；`read` 在 `code:0` 时取调用点要读的字段，
- * 读不到返回 `undefined`（即「成功应答缺少调用点要读的字段」），没有要读的字段时返回 `null`。
- */
-interface Route<T, Typed> {
-  typed?: (envelope: Envelope) => Typed | undefined;
-  read: (data: unknown) => T | undefined;
-}
 
 /** `status: null`：没有等到应答头。`body` 为 `undefined`：正文读不全、超限或不是 JSON。 */
 interface Answer {
@@ -92,21 +84,6 @@ interface Upload {
   contentLength: number;
 }
 
-/** `model_info` 的一项（§11.1），键名就是线上的键名。 */
-export interface ModelInfo {
-  model_name: string;
-  model_type: readonly string[];
-  max_tokens: number;
-}
-
-interface ModelInstance {
-  instanceName: string;
-  /** 上游密钥。RAGFlow 按 trim 后的值写入，空值会清空实例密钥（§11.4），所以空串与纯空白都拒绝发出。 */
-  apiKey: string;
-  baseUrl: string;
-  modelInfo: readonly ModelInfo[];
-}
-
 type Json = Record<string, unknown>;
 
 export interface ListedDocument {
@@ -122,26 +99,12 @@ export interface Deadlines {
   idleMs: number;
 }
 
-/** 语义对齐 RAGFlow 写入实例密钥时的 Go `strings.TrimSpace`：JS 的 `trim()` 不剥 U+0085，所以先去掉它。 */
-export function isBlankApiKey(key: string): boolean {
-  return key.replaceAll("\u0085", "").trim() === "";
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function envelopeOf(body: unknown): Envelope | undefined {
   return isRecord(body) ? { code: body.code, message: body.message, data: body.data } : undefined;
 }
 
 const messageStarts = (envelope: Envelope, prefix: string): boolean =>
   typeof envelope.message === "string" && envelope.message.startsWith(prefix);
-
-const fieldOf = (data: unknown, name: string): unknown => (isRecord(data) ? data[name] : undefined);
-
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === "string" && value !== "";
 
 const unitWhen = (holds: boolean): null | undefined => (holds ? null : undefined);
 
@@ -185,6 +148,45 @@ function listedRow(row: unknown): ListedDocument | undefined {
   const chunkCount = fieldOf(row, "chunk_count");
   return isNonEmptyString(id) && isNonEmptyString(ingestionStatus) && typeof chunkCount === "number"
     ? { id, ingestionStatus, chunkCount }
+    : undefined;
+}
+
+export interface IngestionLog {
+  taskType: string;
+  operationStatus: string;
+  /** `DONE` 日志的 `dsl.entries[].doc_id`；别的状态不读 `dsl`，为空。 */
+  documentIds: string[];
+}
+
+/** 数据集任务日志（§5.3）：类型取行上的 `task_type`，不看 `variants`。 */
+const LIST_INGESTIONS: Route<{ logs: IngestionLog[]; total: number }, never> = {
+  read(data) {
+    const logs = fieldOf(data, "logs");
+    const total = fieldOf(data, "total");
+    if (!Array.isArray(logs) || typeof total !== "number") {
+      return undefined;
+    }
+    const rows = logs.flatMap((row: unknown) => ingestionRow(row) ?? []);
+    return rows.length === logs.length ? { logs: rows, total } : undefined;
+  },
+};
+
+/** `dsl` 只在 `DONE` 时读：`done` 靠它，读不出即失败；`RUNNING` 行的 `dsl` 记录里没有原文。 */
+function ingestionRow(row: unknown): IngestionLog | undefined {
+  const taskType = fieldOf(row, "task_type");
+  const operationStatus = fieldOf(row, "operation_status");
+  if (!isNonEmptyString(taskType) || !isNonEmptyString(operationStatus)) {
+    return undefined;
+  }
+  if (operationStatus !== "DONE") {
+    return { taskType, operationStatus, documentIds: [] };
+  }
+  const entries = fieldOf(fieldOf(row, "dsl"), "entries");
+  const ids = Array.isArray(entries)
+    ? entries.map((entry: unknown) => fieldOf(entry, "doc_id"))
+    : [];
+  return Array.isArray(entries) && ids.every(isNonEmptyString)
+    ? { taskType, operationStatus, documentIds: ids }
     : undefined;
 }
 
@@ -261,24 +263,6 @@ const DELETE_TEMPLATE_GROUP: Route<null, typeof NOT_FOUND> = {
   read: deleted,
 };
 
-/** 账号缺省（§11.2）：`model_name` 非空的那些 `model_type`。 */
-const DEFAULT_MODELS: Route<string[], never> = {
-  read(data) {
-    const models = fieldOf(data, "models");
-    if (!Array.isArray(models)) {
-      return undefined;
-    }
-    const rows = models.map((row: unknown) => [
-      fieldOf(row, "model_type"),
-      fieldOf(row, "model_name"),
-    ]);
-    const typed = rows.every((cells) => cells.every((cell) => typeof cell === "string"));
-    return typed
-      ? rows.flatMap(([type, name]) => (name === "" ? [] : [type as string]))
-      : undefined;
-  },
-};
-
 /** 内置编译模板（§5.1 (1)）：`id` 与 `config`。 */
 const BUILTIN_TEMPLATES: Route<{ id: string; config: Json }[], never> = {
   read(data) {
@@ -299,55 +283,6 @@ const BUILTIN_PIPELINE: Route<Json, never> = {
     return isRecord(dsl) ? dsl : undefined;
   },
 };
-
-/** 不读应答字段的下发路由（§11）：`PUT /providers`、实例的建与改、`PATCH /models/default`。 */
-const ACKNOWLEDGED: Route<null, never> = { read: () => null };
-
-/** 一行模型属于哪个实例；有实例就一定有行，系统从不删模型（D7）。 */
-const MODEL_INSTANCES: Route<string[], never> = {
-  read(data) {
-    if (!Array.isArray(data)) {
-      return undefined;
-    }
-    const rows = data.map((row: unknown) => ({
-      provider: fieldOf(row, "provider_name"),
-      instance: fieldOf(row, "instance_name"),
-    }));
-    const named = rows.every(
-      ({ provider, instance }) => isNonEmptyString(provider) && isNonEmptyString(instance),
-    );
-    if (!named) {
-      return undefined;
-    }
-    const ours = rows.filter(({ provider }) => provider === PROVIDER);
-    return [...new Set(ours.map(({ instance }) => instance as string))];
-  },
-};
-
-function modelInfoOf(row: unknown): ModelInfo | undefined {
-  const name = fieldOf(row, "name");
-  const type = fieldOf(row, "model_type");
-  const maxTokens = fieldOf(row, "max_tokens");
-  return isNonEmptyString(name) && Array.isArray(type) && typeof maxTokens === "number"
-    ? { model_name: name, model_type: type as string[], max_tokens: maxTokens }
-    : undefined;
-}
-
-/** 实例的模型列表，读成 `PUT` 实例要带回去的 `model_info` 项。 */
-const INSTANCE_MODELS: Route<ModelInfo[], never> = {
-  read(data) {
-    if (!Array.isArray(data)) {
-      return undefined;
-    }
-    const models = data.flatMap((row: unknown) => modelInfoOf(row) ?? []);
-    return models.length === data.length ? models : undefined;
-  },
-};
-
-/** 空 id 拼不出这条路由；`.`、`..` 编码后不变，会被 URL 解析吃掉，走到别的路由上。 */
-function usable(...ids: readonly string[]): boolean {
-  return ids.every((id) => id !== "" && id !== "." && id !== "..");
-}
 
 const documentsPath = (datasetId: string): string =>
   `${API}/datasets/${encodeURIComponent(datasetId)}/documents`;
@@ -564,14 +499,9 @@ export function createRagflowClient(options: {
   ): Promise<Result<T, Typed>> =>
     send({ method, path, keyed: true, totalMs: deadlines.totalMs, json: body }, route);
 
-  const instanceBody = (instance: ModelInstance) => ({
-    instance_name: instance.instanceName,
-    api_key: instance.apiKey,
-    base_url: instance.baseUrl,
-    model_info: instance.modelInfo,
-  });
-
   return {
+    ...modelCalls(json),
+
     /** 版本串，不带密钥。 */
     version(): Promise<Result<string>> {
       const path = `${API}/system/version`;
@@ -597,11 +527,6 @@ export function createRagflowClient(options: {
         ...template,
         embedding_model: dataset.embeddingModel,
       });
-    },
-
-    /** 只读，不改账号缺省：建 pipeline 之前的核对（D7）。 */
-    readDefaultModels(): Promise<Result<string[]>> {
-      return json("GET", `${API}/models/default`, DEFAULT_MODELS);
     },
 
     listBuiltinTemplates(): Promise<Result<{ id: string; config: Json }[]>> {
@@ -646,6 +571,22 @@ export function createRagflowClient(options: {
       }
       const query = `page=${String(page)}&page_size=${String(PAGE_SIZE)}&orderby=create_time&desc=false`;
       return json("GET", `${documentsPath(datasetId)}?${query}`, LIST_DOCUMENTS);
+    },
+
+    /**
+     * 一页数据集任务日志（§5.3）：`orderby=id` 不能省，缺省次序在并列时翻页丢行（§18 #26）。`task_type` 是静默忽略的参数，
+     * `keywords` 是关键字匹配，`log_type=file` 超过 1 MiB，都不发。
+     */
+    async listIngestionLogs(
+      datasetId: string,
+      page: number,
+    ): Promise<Result<{ logs: IngestionLog[]; total: number }>> {
+      if (!usable(datasetId)) {
+        return UNAVAILABLE;
+      }
+      const path = `${API}/datasets/${encodeURIComponent(datasetId)}/ingestions`;
+      const query = `page=${String(page)}&page_size=${String(PAGE_SIZE)}&orderby=id`;
+      return json("GET", `${path}?${query}`, LIST_INGESTIONS);
     },
 
     async uploadDocument(
@@ -727,56 +668,6 @@ export function createRagflowClient(options: {
       }
       const path = `${API}/compilation-template-groups/${encodeURIComponent(id)}`;
       return json("DELETE", path, DELETE_TEMPLATE_GROUP);
-    },
-
-    async createModelInstance(instance: ModelInstance): Promise<Result<null>> {
-      if (isBlankApiKey(instance.apiKey)) {
-        return UNAVAILABLE;
-      }
-      return json("POST", INSTANCES, ACKNOWLEDGED, instanceBody(instance));
-    },
-
-    async updateModelInstance(instance: ModelInstance): Promise<Result<null>> {
-      if (isBlankApiKey(instance.apiKey) || !usable(instance.instanceName)) {
-        return UNAVAILABLE;
-      }
-      const name = encodeURIComponent(instance.instanceName);
-      return json("PUT", `${INSTANCES}/${name}`, ACKNOWLEDGED, instanceBody(instance));
-    },
-
-    /** 幂等（§11.4）。 */
-    ensureProvider(): Promise<Result<null>> {
-      return json("PUT", `${API}/providers`, ACKNOWLEDGED, { provider_name: PROVIDER });
-    },
-
-    /** `GET /models`：账号在本系统提供方下的实例名。这个列表不含密钥，单实例 `GET` 才有（D4）。 */
-    listModelInstances(): Promise<Result<string[]>> {
-      return json("GET", `${API}/models`, MODEL_INSTANCES);
-    },
-
-    async listInstanceModels(instanceName: string): Promise<Result<ModelInfo[]>> {
-      if (!usable(instanceName)) {
-        return UNAVAILABLE;
-      }
-      const name = encodeURIComponent(instanceName);
-      return json("GET", `${INSTANCES}/${name}/models`, INSTANCE_MODELS);
-    },
-
-    /** 把账号缺省切到这个模型。名字为空就是清空缺省的写法（§11.2、§13），这里拒绝发出。 */
-    async setDefaultModel(target: {
-      instanceName: string;
-      modelName: string;
-      modelType: "embedding" | "chat";
-    }): Promise<Result<null>> {
-      if (target.instanceName === "" || target.modelName === "") {
-        return UNAVAILABLE;
-      }
-      return json("PATCH", `${API}/models/default`, ACKNOWLEDGED, {
-        model_provider: PROVIDER,
-        model_instance: target.instanceName,
-        model_name: target.modelName,
-        model_type: target.modelType,
-      });
     },
   };
 }

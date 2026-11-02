@@ -136,6 +136,8 @@ interface Options {
   probeDeadlines?: KbDependencies["probeDeadlines"];
   /** 客户端的期限：挂起类用例缩短。 */
   deadlines?: KbDependencies["deadlines"];
+  /** 列表里编译状态读取的总期限：挂起类用例缩短。 */
+  compileStatusDeadlineMs?: number;
   /** 省略时指向假 RAGFlow；不可达的用例给一个已关闭的端口。 */
   baseUrl?: string;
   /** 不给 `assembly.kb`：知识库关闭，假 RAGFlow 仍在，用来断言它收不到请求。 */
@@ -182,6 +184,9 @@ export function useSettingsWorlds(): OpenWorld {
       },
       ...(options.probeDeadlines === undefined ? {} : { probeDeadlines: options.probeDeadlines }),
       ...(options.deadlines === undefined ? {} : { deadlines: options.deadlines }),
+      ...(options.compileStatusDeadlineMs === undefined
+        ? {}
+        : { compileStatusDeadlineMs: options.compileStatusDeadlineMs }),
     };
     const app = createApp({
       db,

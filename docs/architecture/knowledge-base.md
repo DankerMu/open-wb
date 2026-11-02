@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 9 第三刀：列表里的编译状态。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -103,15 +103,15 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 
 每次保存写一条 `kb.settings` 审计，detail 只含实际变化的键（`embedding` 为模型名，`chatModelId`），可以为空；探活写一条，detail 是 `{probe}`。
 
-**知识库端点**（`server/src/kb/bases.ts`，组 9 首刀与第二刀）：三条路由对任何已登录用户开放，只操作自己的库，全部应答带 `Cache-Control: no-store`。别人的或不存在的 id 一律 404 `not_found`，两者不可区分，判定先于 body 解析与 `state`，不发出站请求，不写审计。管理员没有例外。
+**知识库端点**（`server/src/kb/bases.ts`，组 9 首刀与第二刀；编译状态在 `server/src/kb/compile-status.ts`，第三刀）：三条路由对任何已登录用户开放，只操作自己的库，全部应答带 `Cache-Control: no-store`。别人的或不存在的 id 一律 404 `not_found`，两者不可区分，判定先于 body 解析与 `state`，不发出站请求，不写审计。管理员没有例外。
 
 | 端点 | 作用 |
 |---|---|
-| `GET /api/kb/bases` | 200 `{bases: BaseView[]}`，按 `created_at` 升序。只读本地行，RAGFlow 不可达时照常 200 |
+| `GET /api/kb/bases` | 200 `{bases: BaseView[]}`，按 `created_at` 升序。库与文档数只读本地行；开了开关的库另现读编译状态，读不到为 `null`，RAGFlow 不可达时照常 200 |
 | `POST /api/kb/bases` | 建库，201 `BaseView` |
 | `DELETE /api/kb/bases/:id` | 删库，204 |
 
-`BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：`raptor`、`graph` 是布尔；`documents` 是本地文档行数；`createdAt` 是 epoch 毫秒整数；两个开关都为 0 的库 `compile` 恒为 `{raptor:"off", graph:"off"}`，不发出站请求。开了开关的库：建库的 201 里开着的类型为 `pending`、关着的为 `off`；列表里目前恒为 `null`（读不到），不发编译读取，编译状态的读取随组 9 第三刀接上。
+`BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：`raptor`、`graph` 是布尔；`documents` 是本地文档行数；`createdAt` 是 epoch 毫秒整数；两个开关都为 0 的库 `compile` 恒为 `{raptor:"off", graph:"off"}`，不发出站请求。开了开关的库：建库的 201 不读 RAGFlow，开着的类型为 `pending`、关着的为 `off`；列表里关着的类型为 `off`，开着的按下面的「编译状态」现读，取 `pending` / `running` / `done` / `failed`，整库读不到时 `compile` 为 `null`。
 
 **建库**：body 键集是 `name`、`template`、`raptor?`、`graph?`。`name` 1–64 码点，无 C0 与 DEL，不 trim。依次判定：
 
@@ -147,6 +147,39 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 任一步失败，逆序删掉这一次已建的资源再返回这一步的结果：建画布失败删模板组，建数据集失败先删画布再删模板组。回滚同样即停，删除失败写上表的 leak。超时而 RAGFlow 实际已建成、或资源建好后进程崩溃，会留下无法自动对账的孤儿，只能按名字前缀 `owb-` 手工清理。
 
 删一代（`deletePipeline`）：次序固定为数据集 → 画布 → 模板组，上一步确认已删（成功或不存在）之前不发下一步，任一步失败即停。这两个删除接口没有引用保护：删了在用的画布或模板组，RAGFlow 回 `code:0`，之后解析 `FAILED`，所以次序只能由本系统保证。客户端的删画布与删模板组只有 `pipeline.ts` 调用。「不存在」视为已删：删数据集 `code:403`、删画布 `code:103`、删模板组 `code:404`。普通库的这一代只有数据集。
+
+**编译状态**（`server/src/kb/compile-status.ts`，组 9 第三刀）。`GET /api/kb/bases` 对每个开了开关的库现读两份数据，不缓存，没有后台轮询：
+
+- 该库在 RAGFlow 的全部文档：与文档列表同一个读法（`GET …/documents?page=<n>&page_size=100&orderby=create_time&desc=false`，读到 `total` 或空页），按 RAGFlow 文档 id 关联本地文档行。RAGFlow 里没有本地行的文档（`kb_document_leak` 留下的）不参与判定。
+- 数据集任务日志 `GET /api/v1/datasets/<id>/ingestions?page=<n>&page_size=100&orderby=id`，逐页读到 `total`，读到空页也停（`total` 是那一页说的，翻页期间可能变）。读全之后按每行的 `task_type` 分类型：RAPTOR 为 `Tree`，知识图谱为 `Graph`。`total` 是日志行数（一份文档一种类型一条），不是文档数。
+
+读法的依据（实测记录 §5.3、§18 #26–#29）：
+
+- 不读 `GET …/compilation/status`：按类型读没有终态，跑完之后与「从未编译」同为 `idle`；不带类型的 `state` 在多文档时往返，文档还在排队时也可能是 `completed`。
+- `orderby=id` 不能省：缺省的 `create_time` 次序里 `Tree`、`Graph` 两条常在同一毫秒建出，翻页会重复一行、丢一行，重读结果相同，读不回来。
+- 不发 `task_type=`（静默忽略，回全部行）、`keywords=`（关键字匹配，不是类型过滤）、`log_type=file`（文档级日志，一页约 1.2 MB，超过客户端 1 MiB 的上限）。
+- 不用 `dsl.entries[].variants` 判类型：两种都开时两条日志都是 `["structure","tree"]`。
+
+对开着的每种类型按次序判定，关着的为 `off`：
+
+1. 有本地文档在 RAGFlow 处于 `CREATED` / `SCHEDULED` / `RUNNING` / `STOPPING`，或该类型有 `operation_status` 为 `RUNNING` 的日志：`running`。文档这一半由文档列表就能定，这时两种都是 `running`，不读任务日志。
+2. 有本地文档 `FAILED`：`failed`。图谱失败、模板组缺失、缺省嵌入模型缺失都表现为文档 `FAILED`；失败分不出类型，两种都算，解析器失败也算。`failed` 只有这一个来源。
+3. 除 `COMPLETED` 且 0 切片的文档外（这种文档编译不运行），其余本地文档非空，且每份都出现在该类型 `DONE` 日志的 `dsl.entries[].doc_id` 并集里：`done`。要看到每份文档，所以日志读全才判定，不提前停。
+4. 其它：`pending`。`operation_status` 的未知取值落在这里。
+
+读不到时该库的 `compile` 整体为 `null`（spec 给 web 的文案是「状态未知」，组 15 剩余渲染），不影响列表本身，也不影响别的库：
+
+- 文档列表回数据集不存在（`code:404`）；文档列表或任务日志的任何一页失败、超时或缺字段；`DONE` 日志读不出 `dsl.entries[].doc_id`。
+- 本地文档的 `ingestion_status` 在八种之外：协议漂移，不知道它是不是还在跑，不能判 `done`。文档列表端点对同一情形回 503，这里只让这个库读不到。
+- 总期限：一次列表里各库的读取并发发出，共用一个 5 s 的总期限；到期没读完的库为 `null`，之后不再发任何一页。在途的那个请求照走客户端自己的期限，结果丢弃。
+
+代价：每个开了开关的库一次列表读一次文档列表；没有文档在排队或解析时，再逐页读任务日志。一份文档一种类型一条日志，500 份文档两种都开是 1000 行、10 页，一页约 87 KB。
+
+已知限制：
+
+- **RAPTOR 可能完全没有信号。** 对话模型失败（密钥无效、实例已删除）时，文档照常 `COMPLETED`、有切片，任务日志没有 `Tree` 记录（实测记录 §5.4）。这时 `raptor` 停在 `pending`：没有失败信号，所以不显示 `failed`；也没有完成记录，所以不显示 `done`。第 3 步要逐份覆盖，中途才坏掉的情形同样不会显示 `done`。文档阶段的这个失败在 RAGFlow 里只有容器日志，本系统读不到。spec 给 web 的 `pending` 文案是「尚未产出」，旁注写明可能是知识库对话模型不可用（组 15 剩余渲染）。
+- 翻页期间有新日志写入：`id` 不随时间递增，新日志可能插到已读的页之前，这次可能漏读一行。结果是第 3 步少覆盖一份、显示 `pending`，不会错报 `done`，下一次读取修正。
+- `page_size` 在 200 行以上的上限未测，取 100 不依赖它；`dsl.entries` 观察到恒为 1 项，按并集读，多项时同样成立。
 
 **删库**：`state` 为 `rebuilding` 时 409 `kb_rebuilding`；写锁正被重建器持有时同样 409，不排队。否则在该库的写锁下逐代走上面的删一代：`rebuild_failed` 且新一代已建时先删新一代，再删当前一代。上一步确认已删之前不发下一步。取锁之后重判存在性与 `state`：排队期间库可能已删除（404）或转入重建（409）。
 
