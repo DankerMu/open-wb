@@ -1,6 +1,6 @@
 /**
- * `kb-settings.test.ts`、`kb-settings-probe.test.ts` 与 `kb-models-guard.test.ts` 共用（s2a-kb-ragflow tasks 8.2、8.4，
- * #1844、#1845）：`createApp` + `app.inject()`，真实 SQLite，假 RAGFlow，假嵌入上游。知识库行与 `models` 行由 store / SQL 直接插入。
+ * `kb-settings.test.ts`、`kb-settings-probe.test.ts`、`kb-models-guard.test.ts` 与 `kb-bases*.test.ts` 共用（s2a-kb-ragflow
+ * tasks 8.2、8.4、9.2，#1844、#1845、#1846）：`createApp` + `app.inject()`，真实 SQLite，假 RAGFlow，假嵌入上游。知识库行与 `models` 行由 store / SQL 直接插入。
  *
  * 每个用例收尾都断言 D7 的不变量：所有请求都带着 `KbDependencies` 交下来的密钥，没有落到未知路由，没有 `/providers` 下的
  * `DELETE`，没有 `PATCH /users/me/models`、单实例 `GET`，每个 `PATCH /models/default` 都带非空的三个名字。
@@ -59,7 +59,7 @@ export const nextRound = (instance: string): string[] => [
   PATCH_DEFAULT,
 ];
 
-type Who = "admin" | "member" | "anonymous";
+type Who = "admin" | "member" | "peer" | "anonymous";
 
 interface AuditRow {
   actorId: string;
@@ -82,9 +82,16 @@ export interface World {
   probe(who?: Who): Promise<LightMyRequestResponse>;
   /** `PUT` / `DELETE /api/models?id=<id>`，`model.update` 的 body 用 `PUT`。 */
   models(method: "PUT" | "DELETE", id: string, body?: unknown): Promise<LightMyRequestResponse>;
+  /** 任意路由，`payload` 省略即不带 body。 */
+  call(
+    method: "GET" | "POST" | "DELETE",
+    url: string,
+    who: Who,
+    payload?: unknown,
+  ): Promise<LightMyRequestResponse>;
   /** 发一个原样的 body：解析错误的用例用。 */
   raw(
-    method: "PUT" | "POST",
+    method: "PUT" | "POST" | "DELETE",
     url: string,
     payload: string,
     contentType: string,
@@ -127,6 +134,10 @@ interface Options {
   /** 省略时是 `RAGFLOW_KEY`，与假 RAGFlow 一致。 */
   key?: string;
   probeDeadlines?: KbDependencies["probeDeadlines"];
+  /** 客户端的期限：挂起类用例缩短。 */
+  deadlines?: KbDependencies["deadlines"];
+  /** 省略时指向假 RAGFlow；不可达的用例给一个已关闭的端口。 */
+  baseUrl?: string;
   /** 不给 `assembly.kb`：知识库关闭，假 RAGFlow 仍在，用来断言它收不到请求。 */
   kbDisabled?: boolean;
   modelWriteGuard?: AssemblyDependencies["modelWriteGuard"];
@@ -162,7 +173,7 @@ export function useSettingsWorlds(): OpenWorld {
     let publishes = 0;
     const kb: KbDependencies = {
       key: { read: () => key },
-      baseUrl: fake.baseUrl,
+      baseUrl: options.baseUrl ?? fake.baseUrl,
       uploadMaxBytes: 1024,
       uploadMaxFiles: 2,
       locks,
@@ -170,6 +181,7 @@ export function useSettingsWorlds(): OpenWorld {
         logged.push(record);
       },
       ...(options.probeDeadlines === undefined ? {} : { probeDeadlines: options.probeDeadlines }),
+      ...(options.deadlines === undefined ? {} : { deadlines: options.deadlines }),
     };
     const app = createApp({
       db,
@@ -202,6 +214,7 @@ export function useSettingsWorlds(): OpenWorld {
     const cookies = {
       admin: await cookieFor(app, "lisi"),
       member: await cookieFor(app, "zhangsan"),
+      peer: await cookieFor(app, "zhaoliu"),
     };
     const headers = (who: Who) => (who === "anonymous" ? {} : { cookie: cookies[who] });
     let mark = 0;
@@ -234,6 +247,13 @@ export function useSettingsWorlds(): OpenWorld {
           method,
           url: `/api/models?id=${encodeURIComponent(id)}`,
           headers: headers("admin"),
+          ...(payload === undefined ? {} : { payload: payload as object }),
+        }),
+      call: (method, url, who, payload) =>
+        app.inject({
+          method,
+          url,
+          headers: headers(who),
           ...(payload === undefined ? {} : { payload: payload as object }),
         }),
       raw: (method, url, payload, contentType, who = "admin") =>

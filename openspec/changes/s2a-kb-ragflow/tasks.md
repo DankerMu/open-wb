@@ -318,11 +318,11 @@ Minimal mergeable slice: 8.2–8.3 的设置读写、下发与探活，连同 8.
 
 ## 9. 建库、删库与编译资源（knowledge-bases「知识库端点」；ragflow-backend「RAGFlow 出站请求」的端点级场景、「知识库可用性」的「不可达不阻断」）
 
-- [ ] 9.1 核对 Context：
+- [x] 9.1 核对 Context：
   - 组 1 实测记录的 §4、§5（含 §5.1 (3) 的节点表、§5.3 的任务日志读法）、§11.2、表 B、表 C；
   - 组 8 的设置读取（嵌入就绪、对话模型就绪）与设置锁；
   - demo 的 `kbMethods`（`resource/workbuddy-live-demo.html:1473-1486`）：说明文案沿用，`raptor` 标志与 `tag` 项不用。
-- [ ] 9.2 测试先行（首刀）：新 `server/test/kb-bases.test.ts`。
+- [x] 9.2 测试先行（首刀）：新 `server/test/kb-bases.test.ts`。
   - knowledge-bases：「普通模板的建库请求」「普通模板的隔离」「开关校验」「删库」「知识库数上限」；
   - 两开关都为 0 时 201 的 `BaseView`：`state`、`stateMessage`、`documents`、`compile` 的取值（「建库应答不读 RAGFlow」的这一腿）；
   - 判定 2–4 在设置锁内：设置锁被占用时建库排队，放行后读到锁内的设置行；
@@ -335,8 +335,8 @@ Minimal mergeable slice: 8.2–8.3 的设置读写、下发与探活，连同 8.
   - 本刀里 `raptor` 或 `graph` 为真一律 400 `bad_request`，用例写明这一点，第二刀开放。
 
   本组三条路由加进 `kb-disabled.test.ts`，`POST /api/kb/bases` 加进归属路由用例。
-- [ ] 9.3 实现（首刀）：新 `server/src/kb/bases.ts`（建库经设置锁，删库经该库写锁）与 `kb/templates.ts`（十一种模板、`parser_id` 映射、抄自表 C 末列的后缀表；web 只用模板与说明文案，见组 15）；`kb/rest.ts` 加 `GET` / `POST /api/kb/bases` 与 `DELETE /api/kb/bases/:id`。
-- [ ] 9.4 `system.md` §9.13 加知识库端点、数据集命名 `owb-<id>-g<代数>` 与模板表。已合入的规划文档同 PR 改口径：`PLAN.md:68`、`CONTEXT.md:29`、`IMPLEMENTATION_PLAN.md:118,415` 的「12 种」改为 11 种，`chunk_method` 改为 `parser_id`（行号先核对）。
+- [x] 9.3 实现（首刀）：新 `server/src/kb/bases.ts`（建库经设置锁，删库经该库写锁）与 `kb/templates.ts`（十一种模板、`parser_id` 映射、抄自表 C 末列的后缀表；web 只用模板与说明文案，见组 15）；`kb/rest.ts` 加 `GET` / `POST /api/kb/bases` 与 `DELETE /api/kb/bases/:id`。
+- [x] 9.4 `system.md` §9.13 加知识库端点、数据集命名 `owb-<id>-g<代数>` 与模板表。已合入的规划文档同 PR 改口径：`PLAN.md:68`、`CONTEXT.md:29`、`IMPLEMENTATION_PLAN.md:118,415` 的「12 种」改为 11 种，`chunk_method` 改为 `parser_id`（行号先核对）。
 - [ ] 9.5 测试先行（第二刀，pipeline）：
   - 新 `server/test/kb-pipeline.test.ts`（纯函数，design「Sketch seams」）：DSL 生成的输入是内置 DSL，期望值取自实测记录 §5.1 (6) 手写 DSL 的 `components` 与 `graph`：节点、`upstream` / `downstream` 改写、`graph.nodes` 的 `compilationNode`、边净增一条且原边不保留、`graph` 必在。按 `component_name` 查 chunker，十一种模板的节点名与下游全部取自 §5.1 (3)（`qa`、`table` 的下游是 Tokenizer，其余九种是 Extractor）。没有 `graph`、零个或两个 chunker 即失败（故障注入）。`tree` 的 `config` 去掉 `entity`、`relation`、`llm_id`，`knowledge_graph` 的去掉 `llm_id`。
   - 新 `server/test/kb-bases-compile.test.ts`（`app.inject()` + 假 RAGFlow）：knowledge-bases「建库与列表隔离」「建库应答不读 RAGFlow」「账号缺省缺失时不建编译资源」「建库与设置交错」「十一种模板都能开两个开关」「只开一种编译」「建库中途失败逐步回滚」「回滚里的删除失败」「DSL 无法改写」「删除次序」「重建失败时删库」。列表里开了开关的库，本刀 `compile` 为 `null`，不发编译读取，用例写明这一点，第三刀接上。

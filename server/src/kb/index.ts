@@ -12,6 +12,7 @@ import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
 import type { ModelWriteGuard } from "../models/rest.js";
 import { createModelStore } from "../models/store.js";
+import { createKbBases, type KbBaseRecord } from "./bases.js";
 import type { EmbeddingProbeDeadlines } from "./embedding-probe.js";
 import type { KbKeyHandle } from "./key-file.js";
 import { createKbLocks } from "./locks.js";
@@ -19,6 +20,9 @@ import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client
 import { registerKbRoutes } from "./rest.js";
 import { createKbSettings } from "./settings.js";
 import { createKbStore } from "./store.js";
+
+/** 这个模块写到受管 stderr writer 的记录。 */
+export type KbRecord = { event: "kb_upstream_auth_failed" | "kb_version_mismatch" } | KbBaseRecord;
 
 export interface KbDependencies {
   /** `kb_key` 阶段读出的只读句柄。 */
@@ -30,7 +34,7 @@ export interface KbDependencies {
   /** KB_UPLOAD_MAX_FILES。 */
   uploadMaxFiles: number;
   /** 受管 stderr writer。 */
-  log: (record: { event: "kb_upstream_auth_failed" | "kb_version_mismatch" }) => void;
+  log: (record: KbRecord) => void;
   /** 两条限频记录的时钟（测试注入）；省略时 `Date.now`。 */
   now?: () => number;
   /** 客户端的期限（测试注入短期限）；省略的项取缺省。 */
@@ -59,12 +63,15 @@ export function registerKb(
   const { log, now = Date.now } = dependencies;
   const store = createKbStore(app.db);
   const client = createRagflowClient(clientOptions);
+  const audit = (event: Parameters<typeof emit>[1]): void => {
+    emit(app.db, event);
+  };
   const settings = createKbSettings({
     store,
     client,
     models: createModelStore(app.db),
     locks,
-    audit: (event) => emit(app.db, event),
+    audit,
     probeDeadlines,
   });
   registerKbRoutes(app, {
@@ -74,6 +81,7 @@ export function registerKb(
     uploadMaxFiles,
     onVersionMismatch: perMinute(now, () => log({ event: "kb_version_mismatch" })),
     settings,
+    bases: createKbBases({ store, client, locks, audit, log }),
   });
   return settings.guardModelWrite;
 }

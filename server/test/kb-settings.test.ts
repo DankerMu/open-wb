@@ -220,21 +220,21 @@ describe("body 校验", () => {
   });
 });
 
-describe("归属路由（http-service-skeleton「知识库的归属路由」）", () => {
-  it.each(PARSER_INPUTS)(
-    "PUT /api/kb/settings 上的 $name：exact 400，发生在出站之前",
-    async ({ payload, contentType }) => {
-      const world = await open();
-      const response = await world.raw("PUT", "/api/kb/settings", payload, contentType);
-      expect(response.statusCode).toBe(400);
-      expect(bodyOf(response)).toEqual(BAD_REQUEST);
-      expect(world.fake.requests()).toEqual([]);
-    },
-  );
-
-  it("PUT /api/kb/settings 上的 text/plain body：exact 400", async () => {
+describe.each([
+  ["PUT", "/api/kb/settings"],
+  ["POST", "/api/kb/bases"],
+] as const)("归属路由 %s %s（http-service-skeleton「知识库的归属路由」）", (method, url) => {
+  it.each(PARSER_INPUTS)("$name：exact 400，发生在出站之前", async ({ payload, contentType }) => {
     const world = await open();
-    const response = await world.raw("PUT", "/api/kb/settings", "{}", "text/plain");
+    const response = await world.raw(method, url, payload, contentType);
+    expect(response.statusCode).toBe(400);
+    expect(bodyOf(response)).toEqual(BAD_REQUEST);
+    expect(world.fake.requests()).toEqual([]);
+  });
+
+  it("text/plain body：exact 400", async () => {
+    const world = await open();
+    const response = await world.raw(method, url, "{}", "text/plain");
     expect(response.statusCode).toBe(400);
     expect(bodyOf(response)).toEqual(BAD_REQUEST);
   });

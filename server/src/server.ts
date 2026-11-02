@@ -56,6 +56,7 @@ import { type AssemblyDependencies, createApp, type SessionRuntime } from "./app
 import { openDb } from "./core/db/index.js";
 import { ensureOwnedDir, ensureSandboxRoot } from "./core/sandbox/dirs.js";
 import { type KbSettings, resolveKbSettings } from "./kb/config.js";
+import type { KbRecord } from "./kb/index.js";
 import type { ModelRegistry } from "./model-proxy/lookup.js";
 import { deriveProxyBaseUrl } from "./model-proxy/models-yml.js";
 import type { ModelPublishFailedRecord } from "./models/publish.js";
@@ -226,7 +227,7 @@ function writeRecord(
     | ModelEnvIgnoredRecord
     | ModelPublishFailedRecord
     | { event: "mcp_publish_failed" }
-    | { event: "kb_upstream_auth_failed" | "kb_version_mismatch" }
+    | KbRecord
     | { event: "office_convert_sidecar_unavailable" },
 ): void {
   void writeManagedLine(process.stderr, `${JSON.stringify(record)}\n`).catch(() => {

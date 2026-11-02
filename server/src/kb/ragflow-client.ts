@@ -34,7 +34,7 @@ const MAX_JSON_BYTES = 1_048_576;
 const RECORD_INTERVAL_MS = 60_000;
 const PAGE_SIZE = 100;
 const API = "/api/v1";
-const PROVIDER = "OpenAI-API-Compatible";
+export const PROVIDER = "OpenAI-API-Compatible";
 const INSTANCES = `${API}/providers/${PROVIDER}/instances`;
 
 const UNAVAILABLE = { kind: "kb_unavailable" } as const;

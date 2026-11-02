@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -50,7 +50,7 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 
 **版本钉住**：每次状态请求发一次 `GET <RAGFLOW_BASE_URL>/api/v1/system/version`，总期限 5 s，不带密钥。RAGFlow 不可达或版本不符都是 200 加 `available:false`，不是错误。版本钉住只决定 `available`，其它知识库端点不因版本不符而拒绝请求。升级 RAGFlow 是一次代码变更（`kb/rest.ts` 的常量），要重跑实测。
 
-**两条 stderr 记录**，都恰只有 `event` 一个键，经同一受管 writer 写出，同一进程 60 秒内各至多一行：
+**两条限频的 stderr 记录**，都恰只有 `event` 一个键，经同一受管 writer 写出，同一进程 60 秒内各至多一行：
 
 | 记录 | 何时写 | 补救 |
 |---|---|---|
@@ -102,3 +102,57 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 **写操作串行**：保存全程持进程级设置锁，取值规则与身份判定在锁内做，读到的是锁内的行。探活的请求在锁外，只有写回在锁内：结果只写回发起时的同一身份（名称、地址、密钥），身份已变时丢弃、不审计，应答回当前读视图。探活逐次串行：一条进程级链把「读身份 → 发请求 → 取锁写回」整段排队，后发的排在在途的之后，身份在排到时读取，前一个失败不影响后一个。这条链不并进设置锁，探活不能占锁 15 s。
 
 每次保存写一条 `kb.settings` 审计，detail 只含实际变化的键（`embedding` 为模型名，`chatModelId`），可以为空；探活写一条，detail 是 `{probe}`。
+
+**知识库端点**（`server/src/kb/bases.ts`，组 9 首刀）：三条路由对任何已登录用户开放，只操作自己的库，全部应答带 `Cache-Control: no-store`。别人的或不存在的 id 一律 404 `not_found`，两者不可区分，判定先于 body 解析与 `state`，不发出站请求，不写审计。管理员没有例外。
+
+| 端点 | 作用 |
+|---|---|
+| `GET /api/kb/bases` | 200 `{bases: BaseView[]}`，按 `created_at` 升序。只读本地行，RAGFlow 不可达时照常 200 |
+| `POST /api/kb/bases` | 建库，201 `BaseView` |
+| `DELETE /api/kb/bases/:id` | 删库，204 |
+
+`BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：`raptor`、`graph` 是布尔；`documents` 是本地文档行数；`createdAt` 是 epoch 毫秒整数；两个开关都为 0 的库 `compile` 恒为 `{raptor:"off", graph:"off"}`，不发出站请求。
+
+**建库**：body 键集是 `name`、`template`、`raptor?`、`graph?`。`name` 1–64 码点，无 C0 与 DEL，不 trim。依次判定：
+
+1. 键集、类型、名称或模板不合规：400 `bad_request`。这一步不读库。
+2. 嵌入模型未配置：409 `kb_not_ready`。
+3. `raptor` 或 `graph` 为真：400 `bad_request`。目前只开放普通模板，开关随模板组与画布一起开放。
+4. 同账号重名：409 `conflict`。这个账号已有 50 个知识库：409 `kb_limit`。
+
+第 2–4 步在进程级设置锁内做，建库全程持锁，所以不会建出代数过期的库，也不会与一次设置保存交错：保存排在建库之后，读到新建的库，换嵌入身份得 409 `kb_rebuild_required`。
+
+通过之后 `POST /api/v1/datasets`，body `{name, parser_id, parse_type:1, embedding_model}`，然后在同一事务里插行与写 `kb.create`。201 的 `BaseView` 不读 RAGFlow。
+
+- 数据集名 `owb-<id>-g<代数>`：`<id>` 是知识库 id（32 位小写十六进制），`<代数>` 是锁内读到的当前嵌入代数。用户可见的名称只存在本地，RAGFlow 不感知用户。
+- `embedding_model` 恒显式传三段式 `<名称>@owb-embed@OpenAI-API-Compatible`：不传时回落到账号缺省甚至空值，缺省悬空时建库成功、到解析才失败。不发 `chunk_method`，RAGFlow 回 `101`。
+- RAGFlow 的结果按客户端的映射返回（400 `kb_rejected` 或 503 `kb_unavailable`），不插行。
+- 插行或审计写入失败：删掉刚建的数据集，应答 500。这个删除失败时写一行 `{"event":"kb_dataset_leak","datasetId":<id>}`，不改变应答。
+
+| 记录 | 何时写 | 补救 |
+|---|---|---|
+| `{"event":"kb_dataset_leak","datasetId":<id>}` | 建库的回滚删不掉数据集：RAGFlow 里留下一个本地没有行的数据集 | 按 `datasetId` 在 RAGFlow 里手工删除。这条记录不限频 |
+
+**删库**：`state` 为 `rebuilding` 时 409 `kb_rebuilding`；写锁正被重建器持有时同样 409，不排队。否则在该库的写锁下按次序删数据集：`rebuild_failed` 且新一代已建时先删新一代，再删当前一代。上一步确认已删之前不发下一步。取锁之后重判存在性与 `state`：排队期间库可能已删除（404）或转入重建（409）。
+
+- `DELETE /api/v1/datasets` 的 `code:403` 是「不存在」（实测记录表 B），视为已删，不写 `kb_upstream_auth_failed`。
+- 不可达或别的失败：503 `kb_unavailable` 或 400 `kb_rejected`，行不动。重试从头走一遍，已删的按「不存在」跳过，所以不留孤儿。
+- 都删完后删行（文档行级联），在同一事务里写 `kb.delete`。
+
+**审计**：`kb.create` 的 detail 恰为 `{id, template, raptor, graph}`，`kb.delete` 的恰为 `{id}`，标题是固定短句，不带用户文本。
+
+**模板**（`server/src/kb/templates.ts`）：十一种，建库时固定，没有修改模板的端点。本地存模板名，发给 RAGFlow 的是 `parser_id`。`tag` 与 `audio` 都不提供：RAGFlow 回 `tag` 的建库 `102`，`audio` 要语音模型、编译未测成。后缀抄自实测记录表 C 末列，取自各模板 pipeline 的 Parser 节点，不是逐个上传验证的；入库的后缀判定随入库端点落地。
+
+| 模板 | `parser_id` | 后缀 |
+|---|---|---|
+| `naive` | `general` | doc、docx、htm、html、md、markdown、mdx、pdf、xls、xlsx、csv、txt、py、js、java、c、cpp、h、php、go、ts、sh、cs、kt、sql |
+| `book` | `book` | doc、docx、htm、html、pdf、txt |
+| `email` | `email` | eml |
+| `laws` | `laws` | doc、docx、htm、html、md、markdown、mdx、pdf、txt |
+| `manual` | `manual` | doc、docx、pdf |
+| `one` | `one` | doc、docx、htm、html、md、markdown、mdx、pdf、xls、xlsx、txt |
+| `paper` | `paper` | pdf |
+| `picture` | `picture` | bmp、gif、jpeg、jpg、png、svg、tif、tiff、webp、3gp、3gpp、avi、flv、mkv、mov、mp4、mpeg、mpg、webm、wmv |
+| `presentation` | `presentation` | pdf、pptx、ppt |
+| `qa` | `qa` | docx、md、markdown、mdx、pdf、xls、xlsx、csv、txt |
+| `table` | `table` | xls、xlsx、csv、txt |
