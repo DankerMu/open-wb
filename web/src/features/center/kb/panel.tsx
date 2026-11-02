@@ -1,18 +1,20 @@
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/index";
 import type { ApiClient } from "@/lib/api";
 import { RemoveDialog } from "../remove-dialog.js";
 import { CreateKnowledgeBaseDialog } from "./create-dialog.js";
-import { KnowledgeBaseList, KnowledgeBasesEmpty } from "./list.js";
+import { KnowledgeBaseDetail } from "./detail.js";
+import { KnowledgeBaseList, KnowledgeBasesEmpty, RetryAlert } from "./list.js";
 import { useKnowledgeBases } from "./use-kb.js";
 
 const UNAVAILABLE = "知识库服务暂不可用";
 const NOT_READY = "管理员尚未配置知识库嵌入模型";
 
 /**
- * 中心页「知识库」tab（knowledge-bases「中心「知识库」tab」）：状态行、当前用户的知识库表、`新建知识库` 对话框与
- * 删库确认。`client` 供用例注入；缺省取会话客户端（模型 tab 的先例）。详情、入库与上传归 s2a-kb-ragflow 组 16。
+ * 中心页「知识库」tab（knowledge-bases「中心「知识库」tab」）：状态行、当前用户的知识库表、`新建知识库` 对话框、
+ * 删库确认，以及点行在表下方打开的详情（文档表）。`client` 供用例注入；缺省取会话客户端（模型 tab 的先例）。
+ * 入库与上传归 s2a-kb-ragflow 组 16 剩余部分。
  */
 export function KnowledgeBasesPanel({ client }: { client?: ApiClient }) {
   return client ? <KnowledgeBases client={client} /> : <SessionKnowledgeBases />;
@@ -24,25 +26,15 @@ function SessionKnowledgeBases() {
   return <KnowledgeBases client={client} />;
 }
 
-/** 页内错误与 `重试`（重取状态与列表）。 */
-function RetryAlert({ message, onRetry }: { message: string; onRetry(): void }) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <p className="ui-alert" role="alert">
-        {message}
-      </p>
-      <Button onClick={onRetry} size="sm" type="button" variant="secondary">
-        重试
-      </Button>
-    </div>
-  );
-}
-
 function KnowledgeBases({ client }: { client: ApiClient }) {
   const kb = useKnowledgeBases(client);
   const { view, notice, form, remove } = kb;
   const addRef = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
+  /** 打开详情的库 id；库已不在列表里（删除、重取后消失）时详情不渲染。 */
+  const [selected, setSelected] = useState<string | null>(null);
+  const detailBase =
+    view.status === "ready" ? view.bases.find((item) => item.id === selected) : undefined;
   /** 对话框关闭后把焦点还给打开它的按钮；行已删除（opener 被清掉或已不在页面上）时落到 `新建知识库`。 */
   const restoreFocus = () => {
     const target = opener.current?.isConnected ? opener.current : addRef.current;
@@ -84,12 +76,22 @@ function KnowledgeBases({ client }: { client: ApiClient }) {
           ) : (
             <KnowledgeBaseList
               bases={view.bases}
+              onOpen={(base) => setSelected(base.id)}
               onRemove={(base, trigger) => {
                 opener.current = trigger;
                 kb.askRemove(base);
               }}
+              selected={selected}
             />
           )}
+          {detailBase ? (
+            <KnowledgeBaseDetail
+              base={detailBase}
+              client={client}
+              key={detailBase.id}
+              onCount={(count) => kb.setDocumentCount(detailBase.id, count)}
+            />
+          ) : null}
           {form ? (
             <CreateKnowledgeBaseDialog
               compileReady={view.kb.compileReady}
