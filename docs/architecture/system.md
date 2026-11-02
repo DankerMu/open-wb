@@ -84,7 +84,7 @@ flowchart TD
 ```
 
 1. 方向单向：`http → feature → core`。http 可直接依赖 core（共享错误身份）；core 不 import feature/http，feature 不 import http。
-2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`kb → models`（`kb/index.ts` 导入 `models/store.ts` 的 `createModelStore`，交给 `kb/settings.ts` 读知识库对话模型的上游，change `s2a-kb-ragflow` D1）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）、`sessions → connectors`（`rest-metadata.ts` / `rest-capabilities.ts` / `store-capabilities.ts` 用 `connectors/validate.ts` 的连接器名单规则，`store-metadata.ts` 用 `connectors/store.ts` 的账号缺省读取，change `s1d-connectors` D7）、`connectors → sessions`（仅一处：`connectors/validate.ts` 导入 `sessions/omp/spawn-env.ts` 的 `OMP_CHILD_ENV_NAMES`，判 `env` / `headers` 值不得恰为 omp 子进程的环境变量名；常量与它的事实来源 `SUDO_PRESERVE_ENV` / `ompSpawnEnv` 放在一起，change `s1d-connectors` D3。`spawn-env.ts` 只导入 `./state-layout.js`，不成环）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
+2. feature 之间只允许显式声明的依赖：`sessions → kb`（host tool 分派）、`sessions → workspaces`（仅两处：`sessions/session-delete.ts` 导入 `workspaces/temp-dir-remove.ts` 的目录删除；`sessions/prompt-attachments.ts` 导入 `workspaces/store.ts` 的错误类 `WorkspaceRootOccupiedError`，只用来辨认注入的 `workspaceRootOf` 抛出的「根被非目录占据」（#1257）。取根本身与快照服务仍经 `app.ts` 注入，不直接导入）、`workspaces/sessions/kb → core/sandbox`、`kb → accounts`（可见范围）、`kb → models`（`kb/index.ts` 导入 `models/store.ts` 的 `createModelStore`，交给 `kb/settings.ts` 读知识库对话模型的上游；`kb` 另只导入 `models` 的 `ModelWriteGuard`、`ModelUpdatePlan` 两个类型，change `s2a-kb-ragflow` D1。`models` 不导入 `kb`：`DELETE` / `PUT` 经注入的 `modelWriteGuard` 钩子回调 `kb`，钩子由 `app.ts` 绑定，不形成反向依赖）、`sessions → skills`（`store-capabilities.ts` / `store-metadata.ts` / `rest-metadata.ts` 用 `skills/store.ts` 的技能名规则、128 项上限与账号缺省读取）、`sessions → experts`（`sessions/rest.ts` 以 `createExpertStore` 的纯读 `get` 判专家对调用者是否可见，change `s1d-experts-skills` D7）、`sessions → connectors`（`rest-metadata.ts` / `rest-capabilities.ts` / `store-capabilities.ts` 用 `connectors/validate.ts` 的连接器名单规则，`store-metadata.ts` 用 `connectors/store.ts` 的账号缺省读取，change `s1d-connectors` D7）、`connectors → sessions`（仅一处：`connectors/validate.ts` 导入 `sessions/omp/spawn-env.ts` 的 `OMP_CHILD_ENV_NAMES`，判 `env` / `headers` 值不得恰为 omp 子进程的环境变量名；常量与它的事实来源 `SUDO_PRESERVE_ENV` / `ompSpawnEnv` 放在一起，change `s1d-connectors` D3。`spawn-env.ts` 只导入 `./state-layout.js`，不成环）。其余一律经 core。`models`（模型注册表）不导入 `model-proxy` 与 `sessions`：发布器的两个写出器（`model-proxy/models-yml.ts` 的 `writeManagedModelsYml`、`sessions/omp/host-overlay.ts` 的 `writeHostOverlay`）由装配根 `server/src/startup-registry.ts` 以函数注入 `createPublisher`，不新增 feature 依赖（change `s1d-model-registry` D1、D7）。`server/src/preview/app.ts`（预览监听器）是与 `server/src/app.ts` 同层的第二个装配根，与后者一样可直接导入 `workspaces`、`http` 与 core；`preview/` 下的其余文件不在此列。
 3. **一切文件路径操作必须经 `core/sandbox.resolve`**；feature 模块直接 `fs` 访问用户路径是缺陷。
 4. omp 与 RAGFlow 之间无直连——KB 检索必走 `host_tool_call → app-server kb 模块` 转发；omp 不持有 RAGFlow 凭证。
 5. `kb` 模块是 RAGFlow 的唯一出站点：经其 HTTP API 通信，不共享代码与存储，其它模块不直接调用 RAGFlow。`kb` 与其它 feature 的依赖按规则 2 显式声明。
@@ -988,92 +988,4 @@ modelRoles:
 
 ### 9.13 知识库（S2a，change `s2a-kb-ragflow`）
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow 与探活。
-
-**配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
-
-| 键 | 缺省 | 规则 |
-|---|---|---|
-| `RAGFLOW_BASE_URL` | 未配置，即知识库关闭 | 只有协议与 authority（`http` 或 `https`），无路径、无结尾斜杠、无查询与片段；不接受 userinfo（不能含 `@`，这一点与 `PREVIEW_ORIGIN` 不同）；空串非法 |
-| `RAGFLOW_API_KEY_FILE` | 未配置 | 绝对路径；空串非法。配置解析时不读这个文件 |
-| `KB_UPLOAD_MAX_BYTES` | `104857600` | 单个文件的字节上限，与 `UPLOAD_MAX_BYTES` 同一解析纪律（canonical 十进制正整数，`1..2147483647`） |
-| `KB_UPLOAD_MAX_FILES` | `10` | 一次上传的文件数上限，解析纪律同上（`1..2147483647`） |
-
-`RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE` 必须成对：只配一个是配置错误。任一项非法，服务启动失败：退出码 1，标准错误只有一行 `{"event":"server_start_failed","reason":"config"}`，不指出是哪一项、也不回显取值。
-
-**密钥文件**（`server/src/kb/key-file.ts`）。RAGFlow 的 API key 放文件、不放环境变量：key 一旦泄露，就能读写全部账号的知识库；放在 `0600` 文件里，它不进 `/proc/<pid>/environ`，也不被 app-server 派生的进程继承。要求：
-
-- 是普通文件本身：符号链接、目录、FIFO 都不行（以 `O_NOFOLLOW` 打开，判定与读取都走同一个描述符）。
-- 属主是服务进程的 uid，组与其它用户没有任何权限位（`mode & 0o077` 为 0，`0600`、`0400` 都合规）。
-- 大小 1–4096 字节。
-- 内容去掉恰一个结尾 `\n` 后非空，且能作 HTTP 头值：不含 `\r`、NUL、第二个 `\n`，没有 U+00FF 之上的字符。
-
-部署时这样写出：
-
-```sh
-install -m 600 -o <服务用户> /dev/null <密钥文件路径>
-printf '%s\n' "$KEY" > <密钥文件路径>
-```
-
-**`kb_key` 阶段**：紧接配置解析、先于建 DB 父目录。配置了 `RAGFLOW_BASE_URL` 才读文件，未配置时不读任何文件。任一条要求不满足，服务启动失败：退出码 1，标准错误只有一行 `{"event":"server_start_failed","reason":"kb_key"}`，不带路径、文件内容与原始错误，此时没有建目录、没有开 DB、没有 listen。补救：逐条核对上面四项要求。
-
-启动不连接 RAGFlow：地址写错或 RAGFlow 没起来都不影响启动。
-
-**密钥的去向**：读出的 key 只留在一个只读句柄的闭包里，入口把句柄经 `createApp` 的 `kb` 字段交给 `kb` 模块，不进日志、审计、响应与任何子进程环境。omp 的 spawn 环境是白名单（`server/src/sessions/omp/spawn-env.ts`），`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE` 都不在其中。文件**路径**仍在 app-server 的环境里：同 uid 部署（未配置 `OMP_USER`）时 omp 能以同 uid 读这个文件，与 S0b 已登记的同 uid 风险是同一项，按 ADR-0010 的专用 uid 部署关闭。
-
-**`kb` 模块**（`server/src/kb/index.ts`、`kb/rest.ts`）：createApp 的第十二个模块，注册与启动记录的 `modules` 都紧随 `connectors`。未配置 `RAGFLOW_BASE_URL` 时模块照常注册，只是不建客户端。配置了时只建一个 RAGFlow 客户端实例：下面的限频状态在实例里。
-
-**知识库关闭**（未配置 `RAGFLOW_BASE_URL`）：`GET /api/kb/status` 返回 `{enabled:false}`；其余已注册的 `/api/kb/*` 路由返回 503 `kb_disabled`，带 `Cache-Control: no-store`，不发任何出站请求。这个判定是 root `preParsing` 钩子，次序：未登录 401 → 503 `kb_disabled` → 管理员 403 → body 解析。所以坏 JSON 与非管理员拿到的也是 503。没有注册的 `/api/kb/…` 路径仍是 404 `not_found`。
-
-**`GET /api/kb/status`**：任何已登录用户可调，未登录 401，应答都带 `Cache-Control: no-store`。开启时应答恰为 `{enabled:true, available, embeddingReady, compileReady, uploadMaxBytes, uploadMaxFiles}`：
-
-| 字段 | 含义 |
-|---|---|
-| `available` | 版本接口可达，且版本串恰为 `v1.0.0-rc2` |
-| `embeddingReady` | 已配置知识库嵌入模型（`kb_settings`） |
-| `compileReady` | 已指定知识库对话模型（`kb_settings`） |
-| `uploadMaxBytes`、`uploadMaxFiles` | `KB_UPLOAD_MAX_BYTES`、`KB_UPLOAD_MAX_FILES` 的配置值 |
-
-**版本钉住**：每次状态请求发一次 `GET <RAGFLOW_BASE_URL>/api/v1/system/version`，总期限 5 s，不带密钥。RAGFlow 不可达或版本不符都是 200 加 `available:false`，不是错误。版本钉住只决定 `available`，其它知识库端点不因版本不符而拒绝请求。升级 RAGFlow 是一次代码变更（`kb/rest.ts` 的常量），要重跑实测。
-
-**两条 stderr 记录**，都恰只有 `event` 一个键，经同一受管 writer 写出，同一进程 60 秒内各至多一行：
-
-| 记录 | 何时写 | 补救 |
-|---|---|---|
-| `{"event":"kb_version_mismatch"}` | 版本接口可达，版本串不是 `v1.0.0-rc2`。不可达时不写 | 把 RAGFlow 换回钉住的版本，或按升级流程改钉住的版本 |
-| `{"event":"kb_upstream_auth_failed"}` | RAGFlow 应答 HTTP 401，或 body `code` 为 401 / 403（`DELETE /datasets` 的 `code:403` 是「不存在」，不算） | 核对密钥文件里的 key 是否仍有效；换 key 要重启服务 |
-
-**知识库模型设置**（`server/src/kb/settings.ts`）：三个端点都只给管理员，次序是未登录 401 → 关闭时 503 `kb_disabled` → 非管理员 403 → body 解析；成功应答都是 200 加读视图，带 `Cache-Control: no-store`。
-
-| 端点 | 作用 |
-|---|---|
-| `GET /api/kb/settings` | 读 |
-| `PUT /api/kb/settings` | 保存：先下发到 RAGFlow，成功后在同一事务里写 `kb_settings` 与审计；下发失败本地不变 |
-| `POST /api/kb/settings/probe` | 探活嵌入模型（bodyless），不下发，不改嵌入身份 |
-
-读视图恰为 `{embedding, chatModelId, bases, compileBases, documents, rebuilding, rebuildFailed}`，不含任何密钥。`embedding` 是 `{name, baseUrl, probe}` 或 `null`；`compileBases` 是 `raptor` 或 `graph` 为 1 的库数，含重建中与重建失败的库。
-
-`PUT` 的 body 键集是 `embedding`、`chatModelId`、`confirmRebuild` 的子集，且至少含前两者之一。`embedding` 是 `{name, baseUrl, apiKey?}`：`name` 1–128 字节、无控制字符、不含 `@`；首次配置必须带 `apiKey`，之后省略即保留已存的值，空串或纯空白是 400。`chatModelId` 是 `models` 里带上游的 id（不含 `@`）或 `null`。`embedding.name` 与 `chatModelId` 不含 `@`，是因为 RAGFlow 用三段式 `<名称>@<实例>@<提供方>` 引用它们。
-
-当前值非 `null` 且有开编译的知识库时，`chatModelId` 改为 `null` 或别的 id 都是 409 `kb_chat_model_locked`，同 id 照常下发：Compiler 的 `llm_id` 建库时固化，换模型会让旧库打到新上游。没有开编译的库时，改为 `null` 只改本地；已是 `null` 再设 `null` 是无操作，不写库、不审计。
-
-嵌入身份是 `(name, baseUrl)`，只换密钥不算身份变化。身份变化且已有知识库时：有库处于 `rebuilding` 即 409 `kb_rebuilding`，否则 409 `kb_rebuild_required`。确认重建（`confirmRebuild`）目前不开放，带了同样 409。
-
-**下发的固定序列**：两个实例名是常量，`owb-embed` 承载嵌入模型，`owb-chat` 承载知识库对话模型，提供方都是 `OpenAI-API-Compatible`。一个实例的一轮下发：
-
-1. `PUT /api/v1/providers`，body `{provider_name}`（幂等）。
-2. `GET /api/v1/models`，按 `provider_name` 与 `instance_name` 判断实例是否存在。
-3. 不存在：`POST …/instances`，body `{instance_name, api_key, base_url, model_info}`。存在：`GET …/instances/<实例>/models`，再 `PUT …/instances/<实例>`，body 同样四个键，`model_info` 为现有模型加本次的模型，同名项以本次为准。
-4. `PATCH /api/v1/models/default`，body `{model_provider, model_instance, model_name, model_type}`。
-
-body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话模型（该行没有上游时跳过），所以管理员保存一次嵌入模型就能把两种缺省都补回来。只含 `chatModelId` 时只下发对话模型。`api_key` 恒为实际密钥：RAGFlow 按 trim 后的值写入，空串或纯空白会清空实例密钥，所以都不发出。不用 `PATCH /api/v1/users/me/models`，也不用 `GET …/instances/<实例>`：它明文回显上游密钥。下发不是原子的，第 3 步成功、第 4 步失败时 RAGFlow 已是新值、本地仍是旧值；重试同一次保存即收敛。
-
-**账号缺省不变量**：`kb` 模块不发清空缺省的 `PATCH /api/v1/models/default`（只带 `model_type`，或名字为空串），也不调用 `/api/v1/providers` 下的任何 `DELETE`。RAGFlow 里的模型配置只增、只覆盖。账号没有缺省对话模型而有 pipeline 数据集时，数据集级合并任务会让全栈唯一的入库进程崩溃循环，影响栈上全部账号（实测记录 §13）。客户端没有这些调用的写法，`setDefaultModel` 拒绝发出空名字。
-
-**取消指定不撤销**：`chatModelId` 改为 `null` 只改本地，账号缺省仍指向 `owb-chat`。上游密钥留在 RAGFlow 里，直到下一次下发覆盖或运维清理。运维清理要按实测记录 §16 的次序：账号缺省保持不动，先删数据集、画布、模板组，静默到没有编译活动，才清缺省、删实例。
-
-**探活**：向嵌入上游发 `POST <baseUrl>/embeddings`，body `{model, input:"ping"}`，期限同模型探活（连接 10 s、总 15 s），不跟随重定向。2xx 且 `data[0].embedding` 为非空数字数组是 `ok`，否则是 `failed`。未配置嵌入模型时 409 `kb_not_ready`。保存时名称、地址或密钥任一变化，探活状态在同一事务里重置为 `never`；三者都不变时保留。
-
-**写操作串行**：保存全程持进程级设置锁，取值规则与身份判定在锁内做，读到的是锁内的行。探活的请求在锁外，只有写回在锁内：结果只写回发起时的同一身份（名称、地址、密钥），身份已变时丢弃、不审计，应答回当前读视图。探活逐次串行：一条进程级链把「读身份 → 发请求 → 取锁写回」整段排队，后发的排在在途的之后，身份在排到时读取，前一个失败不影响后一个。这条链不并进设置锁，探活不能占锁 15 s。
-
-每次保存写一条 `kb.settings` 审计，detail 只含实际变化的键（`embedding` 为模型名，`chatModelId`），可以为空；探活写一条，detail 是 `{probe}`。
+正文在 [knowledge-base.md](knowledge-base.md)：配置键、密钥文件、状态端点、模型设置与联动。

@@ -24,6 +24,7 @@
 > - 密钥、文件内容与 RAGFlow 应答原文不进任何响应、审计、日志；被跟踪文件、issue 与 PR 正文里 RAGFlow 地址一律写 `<RAGFLOW_BASE_URL>`。
 > - 产品与测试文件单文件均 ≤800 行（`size-guard.sh` 两者都扫）。行数预算见 design D18：`server.ts` 现 755 行，组 6、14 各加自己的几行；`auth-lifecycle.test.ts` 797 行，组 6 先移出码表用例（6.2）。
 > - 不新增 `.css`。
+> - `system.md` §9.13 的正文在 `docs/architecture/knowledge-base.md`：本 change 里写 §9.13 的地方都改这个文件。
 > - 需要真实 RAGFlow 的只有组 1（含 1.5），执行前按 design D16 检测；`RAGFlow 私有配置缺失` 与 `共用 RAGFlow 栈未运行或版本不符` 两种停止都在 issue 评论里报告、不开 PR、不拉起任何容器，并在本 issue 正文加一行 `Depends on #<P>`、重开 P（写明要 owner 做什么），让 picker 跳过本 issue。
 > - 假 RAGFlow 夹具按组扩展（design D17），每组只加本组用到的接口，行为分两类：
 >   - 协议应答：路径、字段、状态值与 code 必须在实测记录里有对应条目。
@@ -299,16 +300,16 @@ Minimal mergeable slice: 迁移 050 与 store（7.2、7.3）——迁移没有 s
 
   本组三条路由加进新建的 `server/test/kb-disabled.test.ts`；`PUT /api/kb/settings` 与 `POST /api/kb/settings/probe` 加进归属路由用例。假 RAGFlow 加 `PUT /providers`、`GET /models`、实例的建与改、实例的模型列表与账号缺省模型的 `PATCH` / `GET`（§11.1、§11.2、§11.4，`GET` 的 `data.models` 可脚本化为空或缺一种，组 9、14 用），重复 `POST` 实例回 `code:500`，`PUT` 不带 `model_info` 回 HTTP 400，`api_key` 空串清空密钥；不加单实例 `GET`。
 - [x] 8.3 实现（首刀）：新 `server/src/kb/settings.ts`（读视图、校验、`chatModelId` 取值规则、下发的固定序列、身份判定，全部写入经设置锁）；`kb/rest.ts` 加 `GET` / `PUT /api/kb/settings` 与 `POST /api/kb/settings/probe`。
-- [ ] 8.4 测试先行（剩余部分）：
+- [x] 8.4 测试先行（剩余部分）：
   - ragflow-backend「对话模型联动」「开编译的库锁定对话模型」的轮换一腿「联动与设置交错」「删除与设置交错」（夹具的挂起后放行；两种进锁次序各一例：A 先持锁；或先让第三个持锁者 C 的嵌入设置 PUT 挂起，再让 B、A 依次排队——用 `locks.ts` 的等待者计数确认 B 已在排队后再发出 A）；
   - model-registry「知识库对话模型受保护」「校验先于下发」「删除不碰 RAGFlow」，写进新 `server/test/kb-models-guard.test.ts`；
   - 知识库关闭时 `models` 的删除与修改行为与本 change 之前一致（既有 `models-*.test.ts` 不改即绿）。
-- [ ] 8.5 实现（剩余部分）：
+- [x] 8.5 实现（剩余部分）：
   - `models/store.ts`：从 `update` 拆出纯函数 `planUpdate(id, body)`，做 `parseUpdate`、未知 id 判定与候选上游的计算（含 userinfo 沿用），返回候选上游 `next` 与 `changed`，不写库；`update` 在事务里复用它，行为不变。`upstreamChanged` 的判定式不变，从 `rest.ts` 挪到这里；
   - `AssemblyDependencies` 加可选 `modelWriteGuard`（`kb` 注册晚于 `models`，由 `app.ts` 把钩子绑给 `models`）：`DELETE` 交写入回调；`PUT` 交写入回调与 `plan`（绑定了 id 与 body 的 `planUpdate`）。钩子在设置锁内依次调用 `plan`（校验先于下发，候选上游与是否变化由它给出，放在锁内是为了读到锁内的行）、做引用判定、需要时按 `next` 重新下发、再执行回调。钩子为空时直接执行；
   - `kb` 注册时提供该钩子；`models/rest.ts:185` 注释里「判定与写入之间没有 await」的前提随之改为「判定与写入在设置锁内」，同 PR 改注释；
   - `core/errors` 的 `kb_model_in_use`、`kb_chat_model_locked` 由组 6 登记。
-- [ ] 8.6 文档，各随所在切片的 PR：
+- [x] 8.6 文档，各随所在切片的 PR：
   - 首刀（已由 #1844 落地）：`system.md` §9.13 加设置端点、下发的固定序列、账号缺省不变量与「取消指定不撤销：上游密钥留到下一次下发覆盖或运维清理」。`docs/adr/0016-ragflow-service-backend.md` Consequences「RAGFlow 持有嵌入与知识库对话模型的上游密钥」一条写明取消指定不撤销，并删去「组 1 实测 rc2 不能用 API key 下发模型时」那句（组 1 结论为支持）。
   - 剩余：`system.md` §4 依赖规则加 `models` 经注入钩子回调 `kb`、不形成反向依赖；§9.13 加对话模型的轮换联动。ADR-0016 同一条的「删除与轮换经联动同步」改写为轮换联动（design D7）。
 

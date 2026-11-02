@@ -1,6 +1,6 @@
 /**
- * `kb-settings.test.ts` 与 `kb-settings-probe.test.ts` 共用（s2a-kb-ragflow tasks 8.2，#1844）：`createApp` + `app.inject()`，
- * 真实 SQLite，假 RAGFlow，假嵌入上游。知识库行与 `models` 行由 store / SQL 直接插入。
+ * `kb-settings.test.ts`、`kb-settings-probe.test.ts` 与 `kb-models-guard.test.ts` 共用（s2a-kb-ragflow tasks 8.2、8.4，
+ * #1844、#1845）：`createApp` + `app.inject()`，真实 SQLite，假 RAGFlow，假嵌入上游。知识库行与 `models` 行由 store / SQL 直接插入。
  *
  * 每个用例收尾都断言 D7 的不变量：所有请求都带着 `KbDependencies` 交下来的密钥，没有落到未知路由，没有 `/providers` 下的
  * `DELETE`，没有 `PATCH /users/me/models`、单实例 `GET`，每个 `PATCH /models/default` 都带非空的三个名字。
@@ -9,9 +9,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, expect, type MockInstance, vi } from "vitest";
-import { createApp } from "../src/app.js";
+import { type AssemblyDependencies, createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import type { KbDependencies } from "../src/kb/index.js";
+import { createKbLocks } from "../src/kb/locks.js";
 import { createKbStore } from "../src/kb/store.js";
 import { COMPILE_ROW, hex, insertRow, MODEL_ROW } from "./kb-store-helpers.js";
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
@@ -23,6 +24,8 @@ const RAGFLOW_KEY = "wb-issue1844-ragflow-key";
 /** 哨兵：嵌入与对话模型的上游密钥，以及假 RAGFlow 的 message。 */
 export const EMBED_KEY = "Snt1nelEmbed1844Key";
 export const CHAT_KEY = "Snt1nelChat1844Key";
+/** 换密钥之后的上游密钥。 */
+export const ROTATED_KEY = "wb-issue1845-rotated-key";
 export const LEAK = "Snt1nelRagflowMessage1844";
 export const CHAT_BASE_URL = "http://chat.upstream.test/v1";
 export const PROVIDER = "OpenAI-API-Compatible";
@@ -41,7 +44,7 @@ export const LOCKED = {
     message: "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型",
   },
 };
-const SENTINELS = [EMBED_KEY, CHAT_KEY, LEAK];
+const SENTINELS = [EMBED_KEY, CHAT_KEY, ROTATED_KEY, LEAK];
 
 export const bodyOf = (response: { body: string }) => JSON.parse(response.body) as unknown;
 
@@ -70,11 +73,15 @@ export interface World {
   fake: FakeRagflowServer;
   upstream: FakeUpstreamServer;
   logged: unknown[];
+  /** 这个世界的两种锁：用例读等待者计数，确认某个写者已在排队（design D20）。 */
+  locks: ReturnType<typeof createKbLocks>;
   /** 首次配置的 `embedding`：指向假嵌入上游。 */
   embedding: { name: string; baseUrl: string; apiKey: string };
   get(who?: Who): Promise<LightMyRequestResponse>;
   put(body: unknown, who?: Who): Promise<LightMyRequestResponse>;
   probe(who?: Who): Promise<LightMyRequestResponse>;
+  /** `PUT` / `DELETE /api/models?id=<id>`，`model.update` 的 body 用 `PUT`。 */
+  models(method: "PUT" | "DELETE", id: string, body?: unknown): Promise<LightMyRequestResponse>;
   /** 发一个原样的 body：解析错误的用例用。 */
   raw(
     method: "PUT" | "POST",
@@ -87,6 +94,10 @@ export interface World {
   addChatModel(id: string, maxTokens?: number): void;
   /** 全部 `kb.settings` 审计，旧的在前。 */
   audits(): AuditRow[];
+  /** 全部 `model.update` 审计的 detail，旧的在前。 */
+  modelUpdates(): unknown[];
+  /** `models` 写入之后的托管文件发布次数。 */
+  publishes(): number;
   /** 上次 `forget()` 以来假 RAGFlow 收到的请求。 */
   sent(): FakeRagflowRequest[];
   forget(): void;
@@ -116,6 +127,9 @@ interface Options {
   /** 省略时是 `RAGFLOW_KEY`，与假 RAGFlow 一致。 */
   key?: string;
   probeDeadlines?: KbDependencies["probeDeadlines"];
+  /** 不给 `assembly.kb`：知识库关闭，假 RAGFlow 仍在，用来断言它收不到请求。 */
+  kbDisabled?: boolean;
+  modelWriteGuard?: AssemblyDependencies["modelWriteGuard"];
 }
 
 type OpenWorld = (options?: Options) => Promise<World>;
@@ -144,22 +158,31 @@ export function useSettingsWorlds(): OpenWorld {
     const upstream = await startUpstream({ apiKey: EMBED_KEY });
     const db = openDb(":memory:");
     const logged: unknown[] = [];
+    const locks = createKbLocks();
+    let publishes = 0;
+    const kb: KbDependencies = {
+      key: { read: () => key },
+      baseUrl: fake.baseUrl,
+      uploadMaxBytes: 1024,
+      uploadMaxFiles: 2,
+      locks,
+      log: (record) => {
+        logged.push(record);
+      },
+      ...(options.probeDeadlines === undefined ? {} : { probeDeadlines: options.probeDeadlines }),
+    };
     const app = createApp({
       db,
       authRuntime: fixedRuntime(() => FIXED_NOW),
       assembly: {
-        kb: {
-          key: { read: () => key },
-          baseUrl: fake.baseUrl,
-          uploadMaxBytes: 1024,
-          uploadMaxFiles: 2,
-          log: (record) => {
-            logged.push(record);
-          },
-          ...(options.probeDeadlines === undefined
-            ? {}
-            : { probeDeadlines: options.probeDeadlines }),
+        publish: () => {
+          publishes += 1;
+          return Promise.resolve();
         },
+        ...(options.kbDisabled === true ? {} : { kb }),
+        ...(options.modelWriteGuard === undefined
+          ? {}
+          : { modelWriteGuard: options.modelWriteGuard }),
       },
     });
     opened.push(async () => {
@@ -189,6 +212,7 @@ export function useSettingsWorlds(): OpenWorld {
       fake,
       upstream,
       logged,
+      locks,
       embedding: {
         name: "bge-m3",
         baseUrl: `http://127.0.0.1:${String(upstream.port)}/v1`,
@@ -205,6 +229,13 @@ export function useSettingsWorlds(): OpenWorld {
         }),
       probe: (who = "admin") =>
         app.inject({ method: "POST", url: "/api/kb/settings/probe", headers: headers(who) }),
+      models: (method, id, payload) =>
+        app.inject({
+          method,
+          url: `/api/models?id=${encodeURIComponent(id)}`,
+          headers: headers("admin"),
+          ...(payload === undefined ? {} : { payload: payload as object }),
+        }),
       raw: (method, url, payload, contentType, who = "admin") =>
         app.inject({
           method,
@@ -232,6 +263,12 @@ export function useSettingsWorlds(): OpenWorld {
             actorId: String(row.actor_id),
             detail: JSON.parse(String(row.detail)) as unknown,
           })),
+      modelUpdates: () =>
+        db
+          .prepare("SELECT detail FROM audit_events WHERE kind = 'model.update' ORDER BY id")
+          .all()
+          .map((row) => JSON.parse(String(row.detail)) as unknown),
+      publishes: () => publishes,
       sent: () => fake.requests().slice(mark),
       forget() {
         mark = fake.requests().length;
