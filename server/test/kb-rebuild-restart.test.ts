@@ -332,6 +332,7 @@ describe("关停时在途重建", () => {
       await gate.reached;
       await stopped(first.server);
       expect(first.trace()).toContain("db-close");
+      expect(applicationStderr(first.server.stderr())).toBe("");
       const row = baseRow(fx);
       expect(row).toMatchObject({ state: "rebuilding", dataset_id: fx.current.datasetId });
       expect(row?.rebuild_dataset_id).not.toBeNull();

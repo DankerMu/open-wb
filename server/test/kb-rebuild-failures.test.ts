@@ -21,6 +21,7 @@ import {
   confirm,
   DATASETS,
   DOWNLOAD,
+  EMPTY_FILE_BODY,
   expectRebuildFailed,
   expectRebuilt,
   PARSE,
@@ -68,7 +69,8 @@ describe("一个库的失败", () => {
   it("不带头的错误应答：HTTP 200、无 Content-Disposition、code 500 的下载即 rebuild_failed，没有上传", async () => {
     const world = await configuredWorld(open);
     const base = await createdBase(world, "甲");
-    seedDocument(world, base.id, "empty.md", "", 7);
+    // 本地 size 恰是错误正文的字节数：错当成文件也对得上字节数，只剩「有没有 Content-Disposition」能判它失败。
+    seedDocument(world, base.id, "empty.md", "", Buffer.byteLength(EMPTY_FILE_BODY));
     expect((await confirm(world)).statusCode).toBe(200);
     world.forget();
     await world.rebuild();

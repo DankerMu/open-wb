@@ -18,6 +18,8 @@ export const DATASETS = "DELETE /api/v1/datasets";
 export const REBUILD_FAILED = "重建失败，可在模型设置里重试";
 /** §9.1：文档不存在时的下载正文；文件内容也可以恰好是它。 */
 export const NOT_FOUND_BODY = '{"code":404,"message":"Resource not found"}';
+/** §9：0 字节文件的下载正文（HTTP 200，没有 Content-Disposition）。 */
+export const EMPTY_FILE_BODY = '{"code":500,"message":"Failed to download document"}';
 /** 假 RAGFlow 里没有的、形状合法的 id。 */
 export const ABSENT = "0123456789abcdef0123456789abcdef";
 /** 种子账号：lisi 是管理员（`u3`），zhangsan 是建库的普通用户。 */

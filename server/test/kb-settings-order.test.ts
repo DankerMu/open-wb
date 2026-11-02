@@ -32,15 +32,20 @@ describe("判定次序", () => {
     expect(world.fake.requests()).toEqual([]);
   });
 
-  it("非管理员带 {} 的探活：403 先于 bodyless 的 400，假 RAGFlow 与嵌入上游都是零请求", async () => {
-    const world = await configuredWorld(open);
-    const url = "/api/kb/settings/probe";
-    const response = await world.raw("POST", url, "{}", "application/json", "member");
-    expect(response.statusCode).toBe(403);
-    expect(bodyOf(response)).toEqual(FORBIDDEN);
-    expect(world.sent()).toEqual([]);
-    expect(world.upstream.embeddings.requests()).toEqual([]);
-  });
+  it.each([
+    ["探活", "/api/kb/settings/probe"],
+    ["重试重建", "/api/kb/settings/rebuild"],
+  ])(
+    "非管理员带 {} 的%s：403 先于 bodyless 的 400，假 RAGFlow 与嵌入上游都是零请求",
+    async (_label, url) => {
+      const world = await configuredWorld(open);
+      const response = await world.raw("POST", url, "{}", "application/json", "member");
+      expect(response.statusCode).toBe(403);
+      expect(bodyOf(response)).toEqual(FORBIDDEN);
+      expect(world.sent()).toEqual([]);
+      expect(world.upstream.embeddings.requests()).toEqual([]);
+    },
+  );
 
   it("锁定时 chatModelId 不存在：400 先于 kb_chat_model_locked", async () => {
     const world = await chatWorld(open);
