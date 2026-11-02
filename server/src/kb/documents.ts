@@ -1,6 +1,6 @@
 /**
  * 知识库的文档（s2a-kb-ragflow D10、D12、D13、D20；knowledge-bases「工作空间来源入库」「文档列表与状态」「重新入库与移出」）。
- * 组 10：工作空间来源入库与 RAGFlow 文档的删除写法；组 11：列表；本地上传在 `uploads.ts`（组 12），重新入库与移出在组 13 加进来。
+ * 组 10：工作空间来源入库与 RAGFlow 文档的删除写法；组 11：列表；本地上传在 `uploads.ts`（组 12）；组 13 首刀：移出，重新入库随后加进来。
  *
  * 入库：整批在该库的写锁下顺序处理。快判到取锁之间没有 `await`：`locks.ts` 的准入是同步的（D20）。取锁后重判库、工作空间
  * 与 `state`，排队期间库可能已删除或转入重建。之后的 `state` 变化（确认重建）不再看：重建器要等这把锁，等到时才枚举文档。
@@ -30,6 +30,10 @@
  *
  * 运行状态只看 `ingestion_status`。八种之外是协议漂移，不看这一行有没有本地行，整个请求 503。`sourceChanged` 排在 RAGFlow
  * 之后：RAGFlow 失败时不碰文件系统。`sources.stat` 不写审计，所以这个读取整体没有审计。
+ *
+ * 移出：取锁之前依次判定 `doc` 参数（400）→ `state`（`rebuilding` 409，`rebuild_failed` 允许）→ 文档归属（404），所有权已在路由
+ * 判定。取锁后重判这三步里的库、`state` 与文档行，删除用锁内读到的 RAGFlow 文档 id：排在前面的写操作可能已删掉或换掉它。
+ * 先按上面的写法删 RAGFlow 文档，`deleted` 才删行，同事务写 `kb.document_delete`；`busy` 与 `failed` 行都不动。不读沙箱，源文件不动。
  */
 import { basename } from "node:path";
 import { HttpError } from "../core/errors/index.js";
@@ -47,6 +51,7 @@ export const MAX_DOCUMENTS_PER_BASE = 500;
 const MAX_PATH_BYTES = 4096;
 const DEFAULT_TIMING: DocumentRemovalTiming = { retryMs: 500, deadlineMs: 5000 };
 const FAILED_MESSAGE = "解析失败";
+const REMOVE_TITLE = "知识库移出文档";
 
 /** knowledge-bases「工作空间来源入库」的固定文案。 */
 const REASON_MESSAGES = {
@@ -139,17 +144,24 @@ type ReadDocuments =
   | Exclude<Awaited<ReturnType<Client["listDocuments"]>>, { kind: "ok" }>;
 
 interface AuditEvent {
-  kind: "kb.ingest" | "kb.ingest_reject";
+  kind: "kb.ingest" | "kb.ingest_reject" | "kb.document_delete";
   actorId: string;
   title: string;
   detail: object;
-  workspaceId: string;
+  /** 工作空间来源的记录才有（knowledge-bases「知识库审计」）。 */
+  workspaceId?: string;
 }
 
 interface KbDocumentsDependencies {
   store: Pick<
     ReturnType<typeof createKbStore>,
-    "getBase" | "findDocumentBySource" | "listDocuments" | "countDocuments" | "addDocument"
+    | "getBase"
+    | "getDocument"
+    | "findDocumentBySource"
+    | "listDocuments"
+    | "countDocuments"
+    | "addDocument"
+    | "removeDocument"
   >;
   client: Client;
   locks: Pick<ReturnType<typeof createKbLocks>, "write">;
@@ -191,6 +203,15 @@ function parseIngest(body: unknown, maxFiles: number): IngestRequest {
     throw new HttpError("bad_request");
   }
   return { workspaceId, paths: pathList as string[] };
+}
+
+/** 查询参数 `doc`：Fastify 已解码；缺失、空串与多值（数组）一律 400。移出与重新入库共用。 */
+function documentIdOf(query: unknown): string {
+  const doc = isRecord(query) ? query.doc : undefined;
+  if (typeof doc !== "string" || doc === "") {
+    throw new HttpError("bad_request");
+  }
+  return doc;
 }
 
 /** 上传途中源的失败：这一条的事，不是 RAGFlow 的。 */
@@ -320,6 +341,43 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
       throw new HttpError("kb_rebuilding");
     }
     return base;
+  }
+
+  /** 移出的判定，取锁前后各一次：见文件头。 */
+  function removable(id: string, actorId: string, documentId: string) {
+    const base = ownedBase(store, id, actorId);
+    if (base.state === "rebuilding") {
+      throw new HttpError("kb_rebuilding");
+    }
+    const document = store.getDocument(id, documentId);
+    if (document === undefined) {
+      throw new HttpError("not_found");
+    }
+    return { base, document };
+  }
+
+  async function removeLocked(id: string, documentId: string, actorId: string): Promise<void> {
+    const { base, document } = removable(id, actorId, documentId);
+    const removal = await removeRagflowDocument(
+      client,
+      { datasetId: base.datasetId, documentId: document.ragflowDocumentId },
+      dependencies.removalTiming,
+    );
+    if (removal.outcome === "busy") {
+      throw new HttpError("kb_document_busy");
+    }
+    if (removal.outcome === "failed") {
+      throw new HttpError(removal.kind);
+    }
+    store.removeDocument(id, documentId, ({ workspaceId }) => {
+      audit({
+        kind: "kb.document_delete",
+        actorId,
+        title: REMOVE_TITLE,
+        detail: { id, documentId },
+        ...(workspaceId === null ? {} : { workspaceId }),
+      });
+    });
   }
 
   function record(item: Item, opened: OpenedSource, ragflowDocumentId: string): DocumentView {
@@ -487,6 +545,16 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
         throw new HttpError("kb_rebuilding");
       }
       return result.value;
+    },
+
+    /** `DELETE /api/kb/bases/:id/documents?doc=<文档 id>`：在该库的写锁下，见文件头。 */
+    async remove(id: string, query: unknown, actorId: string): Promise<void> {
+      const documentId = documentIdOf(query);
+      removable(id, actorId, documentId);
+      const result = await locks.write(id, () => removeLocked(id, documentId, actorId));
+      if (result.outcome === "rebuilding") {
+        throw new HttpError("kb_rebuilding");
+      }
     },
   };
 }
