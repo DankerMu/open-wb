@@ -40,6 +40,7 @@ import {
   startListenTraced,
 } from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
+import { readCompleteJsonl } from "./support/jsonl.mjs";
 
 const PRIVATE_FILE_MODE = 0o600;
 /** 托管布局（#706）：托管配置目录与状态根都是 app 持有、组只读。 */
@@ -429,22 +430,7 @@ function readModeObservations(path: string): Array<{
   wal: number | null;
   shm: number | null;
 }> {
-  if (!existsSync(path)) {
-    return [];
-  }
-  return readFileSync(path, "utf8")
-    .trim()
-    .split("\n")
-    .filter((line) => line.length > 0)
-    .map(
-      (line) =>
-        JSON.parse(line) as {
-          path: string;
-          main: number | null;
-          wal: number | null;
-          shm: number | null;
-        },
-    );
+  return readCompleteJsonl(path);
 }
 
 function expectLivePrivateFiles(dbPath: string): void {
