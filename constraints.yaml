@@ -5,7 +5,7 @@
 # PATH: keep system dirs first so bash is /bin/bash; Node (npx) must follow those dirs for make anti-drift / test-guardrails / check.
 
 strictness_profile:
-  schema_version: "3.5.8"
+  schema_version: "1"
   level: "L3"
   chosen_by_user: true
   downgrades:
@@ -24,18 +24,42 @@ strictness_profile:
 
 generated_sections:
   agents_md:
-    - { title: "Code Canonicality", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Project Identity", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Stack & Versions", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Directory Map", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Development Workflow", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Verification Matrix", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Important Development Notes", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Conventions", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Code Review Self-Check", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Critical Paths", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Agent Operating Rules", owner: "eng-init", template_version: "3.5.8" }
-    - { title: "Enforcement Index", owner: "eng-init", template_version: "3.5.8" }
+    - title: "Code Canonicality"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Project Identity"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Stack & Versions"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Directory Map"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Development Workflow"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Verification Matrix"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Important Development Notes"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Conventions"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Code Review Self-Check"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Critical Paths"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Agent Operating Rules"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Enforcement Index"
+      owner: "eng-init"
+      template_version: "3.8.0"
   preserve_unknown_sections: true
   backup_policy: "无备份——git 即回滚路径"
 

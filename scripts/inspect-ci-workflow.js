@@ -11,8 +11,8 @@ const ALLOWED = {
   "gitleaks/gitleaks-action": "v3",
 };
 const WANT = {
-  "actions/checkout@v5": 11,
-  "actions/setup-node@v5": 9,
+  "actions/checkout@v5": 12,
+  "actions/setup-node@v5": 10,
   "gitleaks/gitleaks-action@v3": 1,
 };
 const CORE_TAGS = new Set([

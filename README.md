@@ -9,7 +9,8 @@
 | 文档 | 内容 |
 |---|---|
 | [AGENTS.md](AGENTS.md) | 工程契约：命令面、验证矩阵、边界、执行索引 |
-| [CONTEXT.md](CONTEXT.md) | 领域术语、限界上下文、不变量 |
+| [CONTEXT.md](CONTEXT.md) | 限界上下文、不变量 |
+| [openspec/glossary.md](openspec/glossary.md) | 领域术语（唯一定义处） |
 | [docs/architecture/system.md](docs/architecture/system.md) | 顶层架构基准；决策账本在 [docs/adr/](docs/adr/) |
 | [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) | 功能清单（稳定 F-ID）与 13 个子阶段 |
 | [PLAN.md](PLAN.md) | 建设方案与阶段账本 |

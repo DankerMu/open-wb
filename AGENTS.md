@@ -1,6 +1,7 @@
 # open-workbuddy — 工程操作契约
 
-> eng-init 生成维护（L3 strict，见 `constraints.yaml`）。Claude 专属注记在 `CLAUDE.md`，领域术语在 `CONTEXT.md`。
+> eng-init 生成维护（L3 strict，见 `constraints.yaml`）。Claude 专属注记在 `CLAUDE.md`，
+> 领域术语在 `openspec/glossary.md`，限界上下文与不变量在 `CONTEXT.md`。
 
 ## Code Canonicality
 
@@ -25,7 +26,10 @@
 
 ## Project Identity
 
-内网部署的多用户 AI Agent Web 服务：对话 + 工作空间文件 + 专家/技能/连接器 + 内建知识库，账号级隔离（沙箱/权限/审计），全链路无公网依赖。多年期生产项目，代码几乎全由 AI agent 编写，约束档位 **L3 strict**（用户拍板，低于 agent 加成推荐的 L4，台账见 `constraints.yaml` downgrades）。行为基准 = `resource/workbuddy-live-demo.html`：demo 里能点出来的行为就是需求。
+内网部署的多用户 AI Agent Web 服务：对话 + 工作空间文件 + 专家/技能/连接器 + 内建知识库，
+账号级隔离（沙箱/权限/审计），全链路无公网依赖。多年期生产项目，代码几乎全由 AI agent 编写，
+约束档位 **L3 strict**（用户拍板，低于 agent 加成推荐的 L4，台账见 `constraints.yaml` downgrades）。
+行为基准 = `resource/workbuddy-live-demo.html`：demo 里能点出来的行为就是需求。
 
 ## Stack & Versions
 
@@ -99,7 +103,12 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 - **分析文档纪律**：路径基准写 `app-reference/app_asar/`；引用给真实行号；推断结论标 `[INFERENCE]`，不与直接证据混写。
 - **归属义务**：根 LICENSE 为 Apache-2.0（只覆盖本仓自有内容）；上游版权 © 2026 Tencent；派生内容按 `ATTRIBUTION.md` 保留归属；发行物含 RAGFlow 镜像时须附其 `LICENSE` 与 `NOTICE`（`ATTRIBUTION.md` §3）。
 - demo 文件头的来源注释在编辑时必须保留。
-- 文档路由：项目定位 `README.md`；建设方案与阶段账本 `PLAN.md`；**顶层架构基准 `docs/architecture/system.md`**（模块图/依赖规则/目录结构/数据流）；后端选型 `resource/backend-research.md`；上游结构分析 `app-reference/analysis/00-overview.md`（入口）；许可归属 `ATTRIBUTION.md`；长期架构决策 `docs/adr/`（难回退+无背景会困惑+真实权衡三者同立才写）。
+- 文档路由：
+  - 项目定位 `README.md`；建设方案与阶段账本 `PLAN.md`。
+  - **顶层架构基准 `docs/architecture/system.md`**（模块图/依赖规则/目录结构/数据流）。
+  - 后端选型 `resource/backend-research.md`；上游结构分析 `app-reference/analysis/00-overview.md`（入口）。
+  - 许可归属 `ATTRIBUTION.md`；领域术语 `openspec/glossary.md`；限界上下文与不变量 `CONTEXT.md`。
+  - 长期架构决策 `docs/adr/`（难回退+无背景会困惑+真实权衡三者同立才写）。
 
 ## Conventions
 
@@ -111,7 +120,14 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 
 ## Code Review Self-Check
 
-提交 PR 前自查：① `make check` 绿；② 新行为有配对测试；③ 无临时调试残留（console/print/skip）；④ 改动是否触碰 Critical Paths——是则在 PR 标注请求白盒审查；⑤ 文档随代码同步（PLAN/analysis/术语表）；⑥ 阈值/规则改动走 `constraints.yaml` 且说明理由。
+提交 PR 前自查：
+
+1. `make check` 绿。
+2. 新行为有配对测试。
+3. 无临时调试残留（console/print/skip）。
+4. 改动是否触碰 Critical Paths——是则在 PR 标注请求白盒审查。
+5. 文档随代码同步（PLAN/analysis/术语表）。
+6. 阈值/规则改动走 `constraints.yaml` 且说明理由。
 
 ## Critical Paths
 
@@ -127,14 +143,17 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 - **允许**：本地跑全部验证；提交走 feature 分支 → PR → `all-checks-passed` 绿 → 合并（分支保护已启用；CI 仅在 pull_request 与 push:master 触发，纯分支推送不产生 check，故 PR 是唯一合入通路）。
 - **禁止**：`--no-verify` 跳过 hooks；force-push 共享分支；对非本地环境做破坏性操作；未标注地修改 CI 文件；主版本依赖升级不经人工评审；把仓库当草稿板（会话临时文件放系统 scratchpad）。
 - **证据要求**：成功声明须附本会话的新鲜命令输出（命令+退出码）。验证世界而非自述：重跑命令、外部重读文件、打真实端点；关键词探测自身输出不算证据。UI 声明需截图 + 零新增控制台报错。
-- **范围化验证**：选覆盖改动面的最窄检查；改单模块跑该模块测试，全量交给 CI。过滤运行用 `npm run test:focus --workspace <ws> -- <pattern>`（所选测试全过即退出 0，不跑覆盖率）；`npm test` 只用于全量，覆盖率门禁只由全量 `npm test --workspace <ws>` / `make test` 承担。覆盖率范围不得用 pass-with-no-tests 或收窄 include 掩盖未覆盖文件。
+- **范围化验证**：选覆盖改动面的最窄检查；改单模块跑该模块测试，全量交给 CI。
+  - 过滤运行用 `npm run test:focus --workspace <ws> -- <pattern>`（所选测试全过即退出 0，不跑覆盖率）。
+  - `npm test` 只用于全量，覆盖率门禁只由全量 `npm test --workspace <ws>` / `make test` 承担。
+  - 覆盖率范围不得用 pass-with-no-tests 或收窄 include 掩盖未覆盖文件。
 - **迭代闸门**：同一失败检查最多 3 轮修复循环，然后停下报告已试与所需；绝不削弱/跳过/删除测试换绿（skip 需关联 issue + 截止期）；每个绿点 checkpoint 提交。
 - **CI 排障协议**：先分类失败层（fast-checks/unit-tests/unit-tests-web/anti-drift/secret-scan/sast）→ 读日志取第一个可行动错误 → 用同一命令本地复现 → 修根因 → 本地重跑该层再推送。环境差异记入 Important Development Notes。
 - 并行 agent 各用独立 worktree；一任务一分支。
 
 ## Enforcement Index
 
-严格度：**L3**（`constraints.yaml`）。级别：`advice` < `review-only` < `warn` < `block` < `gate`；低于 `warn` 的是人的承诺，不是机器检查。`prerequisite` 是二进制供给角色，不进入该级别序。
+严格度：**L3**（`constraints.yaml`）。级别：`advice` < `review-only` < `warn` < `block` < `gate`；低于 `warn` 的是人的承诺，不是机器检查。
 
 | 规则 | 所在 | 检查点 | 级别 |
 |------|------|--------|------|
@@ -152,21 +171,25 @@ openspec 一律经 `npx openspec` 调用（例：`npx openspec validate --all --
 | 浏览器参考镜像 | `.github/workflows/ci.yml`（job `browser-image`） | CI `browser-image`/`all-checks-passed` | block |
 | HTTP smoke | `.github/workflows/ci.yml`（job `smoke`） | `make smoke` + CI `smoke`/`all-checks-passed` | block |
 | UI 走查 | `.github/workflows/ci.yml`（job `ui-walk`） | `make ui-walk` + CI `ui-walk`/`all-checks-passed` | block |
-| omp-fetch | `scripts/omp-fetch.sh` | `make omp-fetch` | prerequisite |
 | 手动真实上游冒烟 | 本文件 Verification Matrix | `make smoke-live` | review-only |
 | 手动真实 RAGFlow 冒烟 | 本文件 Verification Matrix | `make smoke-kb` | review-only |
 | uid 隔离 | `.github/workflows/ci.yml`（job `uid-isolation`） | CI `uid-isolation`/`all-checks-passed` | block |
 | Conventional commits | `.githooks/commit-msg` | pre-commit（commit-msg） | block |
+| 守卫自证 | `scripts/test-guardrails.sh` | `make test-guardrails` + CI `guardrails`/`all-checks-passed` | block |
 | CI 聚合门禁 | `.github/workflows/ci.yml`（all-checks-passed） | CI | block |
 | PR diff ≤400 行 | `constraints.yaml`（size_limits） | 评审检查项 | review-only |
 | TDD 配对测试 | 本文件 Conventions | 评审 + 覆盖率代理 | review-only |
-| 分支保护 | GitHub Ruleset `master-protection`（required status check = `all-checks-passed`；禁删除/禁 force-push） | GitHub 服务端 | gate |
+| 分支保护 | GitHub Ruleset `master-protection`（required status check = `all-checks-passed`；禁删除/禁 force-push） | GitHub rulesets（server-side） | gate |
 
 阈值与正则的机器可读权威是 `constraints.yaml`；变更先改那里，再同步守卫脚本内的镜像正则。没有执行点的规则是愿望不是规则——要么接上，要么删掉。
 
-拷入层豁免：`web/src/components/ui/` 与 `web/src/components/assistant-ui/`（registry 原样拷入的组件，ADR-0013）不计覆盖率、重复代码、文件行数、Biome linter 与 knip 未使用导出，格式化照常；条目登记在 `constraints.yaml` `exemptions.entries`，应用层门槛不变。
+拷入层豁免：`web/src/components/ui/` 与 `web/src/components/assistant-ui/`（registry 原样拷入的组件，ADR-0013）
+不计覆盖率、重复代码、文件行数、Biome linter 与 knip 未使用导出，格式化照常；
+条目登记在 `constraints.yaml` `exemptions.entries`，应用层门槛不变。
 
-界面功能验收：签收对象是 `docs/acceptance/functional-checklist.md`（格式由 `web/test/functional-checklist.test.ts` 守卫）；交付或改变用户可见功能的 PR 在同一 PR 里增改对应行并写 `待签`，只有仓库所有者本人可改为 `通过` 或 `不通过`，agent 不得代签（review-only，规则全文见该文件头）。
+界面功能验收：签收对象是 `docs/acceptance/functional-checklist.md`（格式由 `web/test/functional-checklist.test.ts` 守卫）；
+交付或改变用户可见功能的 PR 在同一 PR 里增改对应行并写 `待签`，
+只有仓库所有者本人可改为 `通过` 或 `不通过`，agent 不得代签（review-only，规则全文见该文件头）。
 
 ### Known blind spots（交给评审）
 

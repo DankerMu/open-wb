@@ -1,0 +1,199 @@
+name: ci
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  fast-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npx biome check server web scripts converter vitest.shared.mjs
+      - run: npm run typecheck --workspaces
+      - run: npx openspec validate --all --strict --no-interactive
+
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm test --workspace server
+
+  unit-tests-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm test --workspace web
+
+  anti-drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npx knip
+      - run: npx jscpd --config .jscpd.json
+      - run: bash scripts/naming-guard.sh $(git ls-files 'server/**' 'web/**' 'scripts/**')
+      - run: bash scripts/size-guard.sh
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@v5
+      - run: semgrep scan --config p/default --error server web scripts
+
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace web
+      - run: npm run build --workspace server
+      - name: install hurl 8.0.1
+        run: bash .github/scripts/ci-install-hurl.sh
+      - run: make omp-fetch
+      - name: smoke compiled server
+        env:
+          HOST: "127.0.0.1"
+          PORT: "18016"
+          SMOKE_BASE_URL: "http://127.0.0.1:18016"
+          DB_PATH: "${{ runner.temp }}/workbuddy-smoke/app.db"
+          STATIC_ROOT: "${{ github.workspace }}/smoke/fixtures/static"
+          OMP_BIN: "${{ github.workspace }}/var/omp/omp"
+          OMP_STATE_DIR: "${{ runner.temp }}/workbuddy-smoke/omp-state"
+          SANDBOX_ROOT: "${{ runner.temp }}/workbuddy-smoke/sandbox"
+          MODEL_UPSTREAM_BASE_URL: "http://127.0.0.1:19016/v1"
+          MODEL_UPSTREAM_API_KEY: "fake"
+          FAKE_UPSTREAM_PORT: "19016"
+        run: bash .github/scripts/ci-compiled-server.sh smoke
+
+  ui-walk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace web
+      - run: npm run build --workspace server
+      - run: npx playwright install --with-deps chromium
+      - run: make omp-fetch
+      - name: ui-walk compiled server
+        env:
+          HOST: "127.0.0.1"
+          PORT: "18017"
+          UI_WALK_BASE_URL: "http://127.0.0.1:18017"
+          DB_PATH: "${{ runner.temp }}/workbuddy-ui-walk/app.db"
+          STATIC_ROOT: "${{ github.workspace }}/web/dist"
+          OMP_BIN: "${{ github.workspace }}/var/omp/omp"
+          OMP_STATE_DIR: "${{ runner.temp }}/workbuddy-ui-walk/omp-state"
+          SANDBOX_ROOT: "${{ runner.temp }}/workbuddy-ui-walk/sandbox"
+          MODEL_UPSTREAM_BASE_URL: "http://127.0.0.1:19017/v1"
+          MODEL_UPSTREAM_API_KEY: "fake"
+          FAKE_UPSTREAM_PORT: "19017"
+        run: bash .github/scripts/ci-compiled-server.sh ui-walk
+
+  uid-isolation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace web
+      - run: npm run build --workspace server
+      - run: make omp-fetch
+      - run: bash .github/scripts/ci-install-hurl.sh
+      - name: uid-isolation
+        env:
+          HOST: "127.0.0.1"
+          PORT: "18018"
+          SMOKE_BASE_URL: "http://127.0.0.1:18018"
+          DB_PATH: "${{ runner.temp }}/workbuddy-uid-isolation/private/app.db"
+          STATIC_ROOT: "${{ github.workspace }}/smoke/fixtures/static"
+          OMP_BIN: "${{ github.workspace }}/var/omp/omp"
+          OMP_STATE_DIR: "${{ runner.temp }}/workbuddy-uid-isolation/omp-state"
+          SANDBOX_ROOT: "${{ runner.temp }}/workbuddy-uid-isolation/sandbox"
+          MODEL_UPSTREAM_BASE_URL: "http://127.0.0.1:19018/v1"
+          MODEL_UPSTREAM_API_KEY: "fake"
+          FAKE_UPSTREAM_PORT: "19018"
+        run: bash .github/scripts/ci-uid-isolation.sh
+
+  office-sidecar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run build --workspace server
+      - run: docker build -t workbuddy-converter:ci converter/
+      - run: bash .github/scripts/ci-office-sidecar.sh
+
+  browser-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: docker build -t workbuddy-app:ci -f deploy/app/Dockerfile .
+      - run: bash .github/scripts/ci-browser-image.sh
+
+  guardrails:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: make test-guardrails
+
+  all-checks-passed:
+    # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
+    # required check 当通过，这个洞必须在这里堵死。
+    if: always()
+    needs: [fast-checks, unit-tests, unit-tests-web, anti-drift, guardrails, secret-scan, sast, smoke, ui-walk, uid-isolation, office-sidecar, browser-image]
+    runs-on: ubuntu-latest
+    steps:
+      - name: verify all required jobs succeeded
+        run: |
+          results='${{ toJSON(needs) }}'
+          echo "$results"
+          if echo "$results" | grep -Eq '"result": *"(failure|cancelled|skipped)"'; then
+            echo "some required job did not succeed (failure/cancelled/skipped)"; exit 1
+          fi

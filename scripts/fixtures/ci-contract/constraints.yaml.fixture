@@ -1,0 +1,238 @@
+# constraints.yaml — 机器可读工程约束（规范来源）
+# 数值阈值与正则的唯一权威。守卫脚本/CI/lint 配置引用此处；改阈值先改这里。
+# 由 eng-init 生成维护。
+# Interpreter: first-party guards and .githooks support macOS system Bash 3.2 and Bash 5.x.
+# PATH: keep system dirs first so bash is /bin/bash; Node (npx) must follow those dirs for make anti-drift / test-guardrails / check.
+
+strictness_profile:
+  schema_version: "1"
+  level: "L3"
+  chosen_by_user: true
+  downgrades:
+    - control: strictness_level
+      profile_default: "L4（agent 主笔仓按规则上调一档的推荐值）"
+      chosen: "L3"
+      reason: "用户拍板：取多年期生产服务的基础推荐档"
+    - control: whitebox_critical_paths
+      profile_default: "认证/权限/沙箱/子进程治理全部白盒"
+      chosen: "仅沙箱与文件边界、omp 子进程治理白盒；认证与权限过滤灰盒"
+      reason: "用户在关键路径问题中明确选择"
+    - control: secret_scan_precommit
+      profile_default: "pre-commit block"
+      chosen: "本机有 gitleaks 时 block，缺席时提示放行；CI 恒为 block"
+      reason: "开发机未装 gitleaks；make setup 提示安装，CI 兜底"
+
+generated_sections:
+  agents_md:
+    - title: "Code Canonicality"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Project Identity"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Stack & Versions"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Directory Map"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Development Workflow"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Verification Matrix"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Important Development Notes"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Conventions"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Code Review Self-Check"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Critical Paths"
+      owner: "eng-init"
+      template_version: "3.5.8"
+    - title: "Agent Operating Rules"
+      owner: "eng-init"
+      template_version: "3.8.0"
+    - title: "Enforcement Index"
+      owner: "eng-init"
+      template_version: "3.8.0"
+  preserve_unknown_sections: true
+  backup_policy: "无备份——git 即回滚路径"
+
+code_canonicality:
+  forbidden_suffixes:
+    description: "文件名/标识符命中即拒绝提交（版本演进属于 git 历史）"
+    patterns:
+      - "(_v[0-9]+|_new|_old|_backup|_temp|_copy|_final|_real|_improved|_refactored|_fixed|_legacy|_deprecated)$"
+    enforced_by: "scripts/naming-guard.sh（正则镜像在脚本内，双向同步）"
+  scratchpad_directories:
+    description: "禁止出现在提交中的目录"
+    paths: ["tmp/", "scratch/", "backup/", "_old/", "deprecated/", "archive/", "wip/"]
+    enforced_by: "scripts/naming-guard.sh + .gitignore"
+
+boundaries:
+  app_reference_readonly:
+    description: "app-reference/ 全树只读（上游腾讯版权原始副本），仅 analysis/ 子目录可写"
+    enforced_by: "scripts/naming-guard.sh（pre-commit + CI anti-drift）"
+
+size_limits:
+  max_file_lines:
+    value: 800
+    severity: "block"
+    enforced_by: "scripts/size-guard.sh（pre-commit + CI）"
+  max_complexity:
+    value: 15
+    severity: "block"
+    enforced_by: "biome.json noExcessiveCognitiveComplexity"
+  max_pr_diff_lines:
+    value: 400
+    severity: "review-only"
+    enforced_by: "PR 模板检查项（CI diff 守卫为 readiness gap，多人协作时补）"
+
+testing:
+  min_line_coverage:
+    value: 80
+    scope: "global"
+    severity: "block"
+    enforced_by: "vitest coverage thresholds"
+  tdd_mode:
+    value: "required"
+    description: "新增生产文件须有配对测试文件；覆盖率门禁作机械代理，配对纪律走评审"
+  forbid_mock_of_system_under_test:
+    value: true
+    description: "mock 依赖，绝不 mock 被测系统"
+
+anti_drift:
+  duplicate_code_threshold_percent:
+    value: 3
+    severity: "block"
+    enforced_by: ".jscpd.json（make anti-drift + CI）"
+  dead_code_min_confidence:
+    value: 80
+    severity: "block"
+    enforced_by: "knip.json"
+
+commits:
+  conventional_commits_required:
+    value: true
+    allowed_types: ["feat", "fix", "refactor", "chore", "docs", "test", "ci", "build", "perf"]
+    enforced_by: ".githooks/commit-msg"
+    agent_co_author_required: true
+
+ci:
+  risk_layers: 5
+  fast_checks_timeout_minutes: 10
+  anti_drift_timeout_minutes: 10
+  matrix: ["ubuntu-latest", "ubuntu-24.04"]
+
+verification:
+  surfaces:
+    static:
+      command: "make lint"
+      evidence: "exit-code"
+      required_at: "L2+"
+    types:
+      command: "make typecheck"
+      evidence: "exit-code"
+      required_at: "L2+"
+    unit:
+      command: "make test"
+      evidence: "exit-code+coverage>=80"
+      required_at: "L2+"
+    drift:
+      command: "make anti-drift"
+      evidence: "exit-code"
+      required_at: "L2+"
+    full:
+      command: "make check"
+      evidence: "exit-code"
+      required_at: "L2+"
+    guardrails:
+      command: "make test-guardrails"
+      evidence: "per-guard PASS/FAIL 全 PASS"
+      required_at: "L2+"
+    smoke:
+      command: "make smoke"
+      evidence: "exit-code; real HTTP assertions on caller-owned service"
+      required_at: "L2+"
+    ui-walk:
+      command: "make ui-walk"
+      evidence: "exit-code; Chromium journey on caller-owned service"
+      required_at: "L2+"
+    omp-fetch:
+      command: "make omp-fetch"
+      evidence: "exit-code; verified official omp v18.12.3 version output and SHA256 match"
+      required_at: "prerequisite"
+    smoke-live:
+      command: "make smoke-live"
+      evidence: "exit-code; manual real-upstream nonempty done reply"
+      required_at: "manual"
+    smoke-kb:
+      command: "make smoke-kb"
+      evidence: "exit-code; manual real-RAGFlow ingest, compile and cleanup assertions"
+      required_at: "manual"
+  enforced_by: "AGENTS.md 验证矩阵 ↔ 本段双向镜像 + Makefile 目标存在性检查"
+
+exemptions:
+  entries:
+    - path: "resource/workbuddy-live-demo.html"
+      rules: [size_limits, anti_drift]
+      reason: "单文件功能原型（1.17MB），是行为基准资产而非产品代码"
+      expires: never
+      exit_condition: "none（原型资产，结构性豁免）"
+    - path: "app-reference/**"
+      rules: [all]
+      reason: "上游只读参考副本，gitignore 且不属本仓产出"
+      expires: never
+      exit_condition: "none（结构性豁免）"
+    - path: "openspec/changes/archive/*/**"
+      rules: [code_canonicality.scratchpad_directories]
+      reason: "OpenSpec CLI 的规范归档根；仅 archive 目录规则需要结构性例外"
+      expires: never
+      exit_condition: "none（OpenSpec 规范归档路径；仍受后缀、.bak、大小与边界规则约束）"
+    - path: "web/src/components/ui/**"
+      rules: [size_limits.max_file_lines, size_limits.max_complexity, testing.min_line_coverage, anti_drift]
+      reason: "shadcn/ui registry 原样拷入的组件（ADR-0013）；只做颜色变量、中文文案、格式化、cn 导入归一、严格 TS 选项下的纯类型适配与渲染被原文丢弃的 children 六类修改，不按自写代码的门槛度量"
+      expires: never
+      exit_condition: "none（结构性豁免；只限该目录，应用层门槛不变）"
+    - path: "web/src/components/assistant-ui/**"
+      rules: [size_limits.max_file_lines, size_limits.max_complexity, testing.min_line_coverage, anti_drift]
+      reason: "assistant-ui registry 原样拷入的组件（ADR-0013）；只做颜色变量、中文文案、格式化、cn 导入归一、严格 TS 选项下的纯类型适配与渲染被原文丢弃的 children 六类修改，不按自写代码的门槛度量"
+      expires: never
+      exit_condition: "none（结构性豁免；只限该目录，应用层门槛不变）"
+  enforced_by: "各路径仅按 entries.rules 豁免；OpenSpec 归档例外由 scripts/naming-guard.sh 执行；拷入层豁免由 web/vitest.config.ts、.jscpd.json、scripts/size-guard.sh、biome.json、knip.json 执行"
+
+baseline:
+  mode: "none"
+  rev: ""
+  counts: {}
+
+rehabilitation:
+  active: false
+  phase: "none"
+  baseline_frozen: false
+  command_entrypoint: "make check"
+  runtime_verifier: ""
+  broad_refactor_allowed: true
+  work_unit_protocol: "none"
+  readiness_gaps: []
+
+refactor_contract:
+  active: false
+  kind: "none"
+
+iteration_gates:
+  max_fix_cycles: 3
+  checkpoint_commit_at_green: true
+  test_weakening_forbidden: true
+  one_task_one_branch: true
+  enforced_by: "AGENTS.md Agent Operating Rules（review-only）"
+
+environments:
+  local: "full"
+  staging: "尚无——P4 部署产物落地时补"
+  prod: "none"
