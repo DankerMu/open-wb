@@ -21,7 +21,7 @@ import { HttpError } from "../core/errors/index.js";
 import { isLabel } from "../model-catalog.js";
 import type { CompileView, createCompileStatus } from "./compile-status.js";
 import type { createKbLocks } from "./locks.js";
-import type { createKbPipeline, PipelineResources } from "./pipeline.js";
+import { type createKbPipeline, type PipelineResources, resourceName } from "./pipeline.js";
 import { type createRagflowClient, isRecord } from "./ragflow-client.js";
 import { embeddingModelOf } from "./settings.js";
 import type { createKbStore, KnowledgeBase } from "./store.js";
@@ -63,7 +63,7 @@ interface KbBasesDependencies {
   audit: (event: AuditEvent) => void;
 }
 
-/** 一代 RAGFlow 资源的输入：`name` 是 `owb-<id>-g<代数>`，`embeddingModel` 是三段式（D2、D7）。 */
+/** 一代 RAGFlow 资源的输入：`name` 是 `resourceName(id, 代数)`，`embeddingModel` 是三段式（D2、D7）。 */
 interface GenerationInput {
   name: string;
   parserId: string;
@@ -212,9 +212,9 @@ export function createKbBases(dependencies: KbBasesDependencies) {
       throw new HttpError("kb_limit");
     }
     const id = store.newId();
-    const resourceName = `owb-${id}-g${String(embeddingGeneration)}`;
+    const generationName = resourceName(id, embeddingGeneration);
     const embeddingModel = embeddingModelOf(embedding.name);
-    const resources = await createResources(request, resourceName, embeddingModel);
+    const resources = await createResources(request, generationName, embeddingModel);
     try {
       const base = store.createBase(
         { id, ownerId, name, template, raptor, graph, ...resources },

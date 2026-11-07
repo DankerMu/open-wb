@@ -6,6 +6,7 @@
  * 文档行与重建状态由 store 直接写入；第二代的数据集经 `fake.addDataset()` 种进假 RAGFlow，所以删除请求打到真的 id。
  */
 import { describe, expect, it, vi } from "vitest";
+import { resourceName } from "../src/kb/pipeline.js";
 import {
   auditsOf,
   BASES,
@@ -55,7 +56,7 @@ function latch(): { held: Promise<void>; release: () => void } {
 /** 一个 `rebuild_failed` 的普通库，新一代的数据集已建好。 */
 async function failedBase(world: World) {
   const view = await createdBase(world, "重建失败的库");
-  const next = world.fake.addDataset(`owb-${view.id}-g1`);
+  const next = world.fake.addDataset(resourceName(view.id, 1));
   world.store.setRebuildGeneration(view.id, {
     datasetId: next,
     canvasId: null,

@@ -5,6 +5,7 @@
  * 写操作的交错在 `kb-rebuild-writers.test.ts`。期望值是 spec 与实测记录的字面量。
  */
 import { describe, expect, it } from "vitest";
+import { resourceName } from "../src/kb/pipeline.js";
 import {
   auditsOf,
   createdBase,
@@ -145,7 +146,7 @@ describe("重建器", () => {
       .filter((entry) => `${entry.method} ${entry.path}` === POST_DATASETS);
     expect(created.map(({ json }) => json)).toEqual(
       order.map((id) => ({
-        name: `owb-${id}-g1`,
+        name: resourceName(id, 1),
         parser_id: "general",
         parse_type: 1,
         embedding_model: NEW_MODEL,
@@ -222,7 +223,7 @@ describe("重建器", () => {
       deleteCanvasRoute(old.canvasId ?? ""),
       deleteGroupRoute(old.templateGroupId ?? ""),
     ]);
-    const name = `owb-${base.id}-g1`;
+    const name = resourceName(base.id, 1);
     const [group, agent, dataset] = [2, 4, 5].map((index) => world.sent()[index]?.json);
     expect(group).toMatchObject({ name });
     expect(agent).toMatchObject({ title: name, canvas_category: "dataflow_canvas" });

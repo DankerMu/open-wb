@@ -9,7 +9,7 @@
 - 资源名改为 `owb-<id 前 16 位>-g<代数>`：长度 4 + 16 + 2 + 代数位数，代数不超过 10 位时不超过 32。数据集、模板组与画布仍同名（D2 不变），由 `server/src/kb/pipeline.ts` 导出的一个函数生成，`server/src/kb/bases.ts:215` 与 `server/src/kb/rebuild.ts:136` 改为调用它。模板项名 `<名字>-t` / `<名字>-g`（`pipeline.ts` 的 `groupTemplates`）随之变短，不单独改。
 - 假 RAGFlow 照真实行为：建画布仍接受长标题（真实列宽 255）；对绑定画布标题超过 32 个字符的文档触发解析时回 `code:0`、`success_count:0`，不建任务、文档状态不变。由此得到修复前为红的回归用例。
 - 规格：knowledge-bases「知识库端点」写明命名规则与 32 字符上限及其原因，新增场景「开编译的库能入库」；ragflow-backend「嵌入模型更换与全量重建」的名字随之改写。
-- 文档：`docs/architecture/knowledge-base.md` 的命名行；`docs/reviews/2026-10-28-ragflow-rc2-api.md` §8.1 表补一行「建任务失败（如 `pipeline_title` 超长）→ `success_count:0`，`code:0`，无日志」。
+- 文档：`docs/architecture/knowledge-base.md` 的命名行；入库失败表之后补一句「建任务失败（如 `pipeline_title` 超长）→ `success_count:0`，`code:0`，无日志」，补的是 rc2 实测记录 §8.1 表漏的情形（实测记录文件超出单文件行数上限，不在原处补）。
 - 兼容：修复前建的开编译库保留 39 字符的画布，仍入不了库，直到下一次换嵌入模型重建、以新名字建新一代。S2a 尚未发布，只有开发栈上有这类库，不做迁移。
 
 ## Triage

@@ -7,6 +7,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { resourceName } from "../src/kb/pipeline.js";
 import { templateOf } from "../src/kb/templates.js";
 import {
   auditsOf,
@@ -88,13 +89,13 @@ describe("普通模板的建库请求", () => {
     expect(routes(world.sent())).toEqual([POST_DATASETS, POST_DATASETS]);
     expect(world.sent().map(({ json }) => json)).toEqual([
       {
-        name: `owb-${first.id}-g0`,
+        name: resourceName(first.id, 0),
         parser_id: "general",
         parse_type: 1,
         embedding_model: EMBEDDING_MODEL,
       },
       {
-        name: `owb-${second.id}-g0`,
+        name: resourceName(second.id, 0),
         parser_id: "manual",
         parse_type: 1,
         embedding_model: EMBEDDING_MODEL,
@@ -119,7 +120,10 @@ describe("普通模板的建库请求", () => {
     world.db.prepare("UPDATE kb_settings SET embedding_generation = 7").run();
     const view = await createdBase(world, "第七代");
     const [dataset] = world.fake.datasets();
-    expect(dataset).toMatchObject({ name: `owb-${view.id}-g7`, embeddingModel: EMBEDDING_MODEL });
+    expect(dataset).toMatchObject({
+      name: resourceName(view.id, 7),
+      embeddingModel: EMBEDDING_MODEL,
+    });
     expect(world.store.getBase(view.id)).toMatchObject({
       datasetId: dataset?.id,
       canvasId: null,

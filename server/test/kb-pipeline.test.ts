@@ -5,7 +5,7 @@
  * 的 `config` 删键。输入是内置 DSL：手写 DSL 去掉 Compiler、chunker 直连 Tokenizer，以及夹具按 §5.1 (3) 给出的十一种。
  */
 import { describe, expect, it } from "vitest";
-import { groupTemplates, insertCompiler } from "../src/kb/pipeline.js";
+import { groupTemplates, insertCompiler, resourceName } from "../src/kb/pipeline.js";
 import { BUILTIN_PIPELINES, COMPILER, componentOf, type DslShape } from "./kb-bases-helpers.js";
 import { builtinPipeline } from "./support/fake-ragflow-pipeline.mjs";
 
@@ -312,5 +312,15 @@ describe("模板组的模板项（§5.1 (2)）", () => {
     ).toBeUndefined();
     groupTemplates(BUILTINS, "n", { raptor: true, graph: true });
     expect(BUILTINS).toEqual(before);
+  });
+});
+
+describe("资源名（knowledge-bases「知识库端点」，#1900）", () => {
+  it("取 id 的前 16 位：owb-<id 前 16 位>-g<代数>", () => {
+    expect(resourceName("0123456789abcdef0123456789abcdef", 0)).toBe("owb-0123456789abcdef-g0");
+  });
+
+  it("32 位 id、10 位代数：长度恰为 32（pipeline_operation_log.pipeline_title varchar(32)）", () => {
+    expect(resourceName("f".repeat(32), 9_999_999_999)).toHaveLength(32);
   });
 });

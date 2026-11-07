@@ -13,7 +13,7 @@
  * 文档列表在 `fake-ragflow-list.mjs`（组 11），线上字节计数在 `fake-ragflow-wire.mjs`（组 12），内置模板、模板组、内置 pipeline
  * 与画布在 `fake-ragflow-pipeline.mjs`（组 9 第二刀），数据集任务日志在 `fake-ragflow-ingestions.mjs`（组 9 第三刀）。
  * `parse_type:2` 的数据集在这里：`pipeline_id` 要是夹具里的画布，读回的 `parser_id` 是 `general`（§4.6）；同时带 `parser_id`
- * 的组合没有记录，落到未知路由。
+ * 的组合没有记录，落到未知路由。解析触发对绑定画布标题超过 32 个字符的这类数据集照实例计 0（`MAX_PIPELINE_TITLE`），不看数据集名。
  *
  * 外推，记录里没有原文，用例不要钉死：
  * - 缺 `name` 的 `102` 来自 §12 的「缺字段」，message 借用全空白名字的那句；`name`、`parser_id`、`embedding_model`
@@ -104,6 +104,11 @@ const SUFFIXES = new Set(
   ).split(" "),
 );
 const MAX_DATASET_NAME = 128;
+/**
+ * 建入库任务时画布标题拷进 `pipeline_operation_log.pipeline_title`（`varchar(32)`，MySQL 严格模式）：超长时插入失败、任务回滚，
+ * 解析触发照样 `code:0`，这份计 0，RAGFlow 日志无记录（2026-11-07 S2a 验收 CK-11 实测，#1900）。建画布本身接受长标题（列宽 255）。
+ */
+const MAX_PIPELINE_TITLE = 32;
 const MAX_FILE_NAME_BYTES = 255;
 /** §7.1 的 message 列出的取值。 */
 const UPLOAD_TYPES = new Set(["local", "web", "empty"]);
@@ -394,7 +399,13 @@ function parseDocuments(state, request, [datasetId]) {
     return failure(102, "`document_ids` is required");
   }
   const present = ids.flatMap((id) => dataset.documents.get(id) ?? []); // 不存在的算 0（§8.1）。
-  const started = present.map((document) => PARSE_STARTED.get(document.ingestionStatus));
+  const canvas =
+    dataset.pipelineId === undefined ? undefined : state.pipeline.canvases.get(dataset.pipelineId);
+  const taskless = canvas !== undefined && canvas.title.length > MAX_PIPELINE_TITLE;
+  const started = present.map((document) => {
+    const count = PARSE_STARTED.get(document.ingestionStatus);
+    return taskless && count === 1 ? 0 : count;
+  });
   return started.includes(undefined)
     ? undefined
     : success({ success_count: started.reduce((sum, count) => sum + count, 0) });
