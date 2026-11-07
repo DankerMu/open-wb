@@ -5,6 +5,7 @@
  * 夹具播种。期望值是 spec 与实测记录 §5.3 的字面量。
  */
 import { describe, expect, it, vi } from "vitest";
+import { resourceName } from "../src/kb/pipeline.js";
 import { BASES, COMPILE_OFF } from "./kb-bases-helpers.js";
 import {
   addCompileBase,
@@ -57,7 +58,7 @@ function seedBase(
   documents: DocumentSeed[],
 ): Seeded {
   const id = hex(n);
-  const datasetId = world.fake.addDataset(`owb-${id}-g0`);
+  const datasetId = world.fake.addDataset(resourceName(id, 0));
   const compiled = switches.raptor === 1 || switches.graph === 1;
   insertRow(world.db, "knowledge_bases", {
     ...(compiled ? COMPILE_ROW : BASE_ROW),

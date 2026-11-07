@@ -397,6 +397,46 @@ describe("解析触发（§8.1）", () => {
       message: "`document_ids` is required",
     });
   });
+
+  /** 经夹具自己的建数据集路由（§5.1 (5)）建一个 `parse_type:2` 数据集，绑定标题为 `title` 的画布，放一份 UNSTART 文档。 */
+  async function pipelineDocument(title: string) {
+    const pipelineId = fake.addCanvas(title);
+    const created = await call("POST", "/api/v1/datasets", {
+      json: { name: "owb-c", parse_type: 2, pipeline_id: pipelineId },
+    });
+    const { id } = created.body.data as { id: string };
+    return { id, doc: fake.addDocument(id, { name: "a.txt", content: "x" }) };
+  }
+
+  it("绑定画布标题超过 32 个字符：建任务失败，success_count:0，code:0，状态不变（#1900）", async () => {
+    const { id, doc } = await pipelineDocument(`owb-${ABSENT}-g0`);
+    const answer = await parse(id, [doc]);
+    expect(answer.text).toBe('{"code":0,"data":{"success_count":0},"message":"success"}');
+    expect(fake.documents(id)[0]?.ingestionStatus).toBe("UNSTART");
+  });
+
+  it.each([
+    [32, 1],
+    [33, 0],
+  ])("画布标题 %i 个字符：success_count %i", async (length, count) => {
+    const { id, doc } = await pipelineDocument("t".repeat(length));
+    expect((await parse(id, [doc])).body).toMatchObject({
+      code: 0,
+      data: { success_count: count },
+    });
+  });
+
+  it("parse_type:1 的数据集名超过 32 个字符：照常 success_count:1", async () => {
+    const created = await call("POST", "/api/v1/datasets", {
+      json: { name: `owb-${ABSENT}-g0`, parser_id: "general", parse_type: 1 },
+    });
+    const { id } = created.body.data as { id: string };
+    const doc = fake.addDocument(id, { name: "a.txt", content: "x" });
+    expect((await parse(id, [doc])).body).toMatchObject({
+      code: 0,
+      data: { success_count: 1 },
+    });
+  });
 });
 
 describe("停止解析（§8.2）", () => {

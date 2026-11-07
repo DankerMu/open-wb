@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openDb } from "../src/core/db/index.js";
+import { resourceName } from "../src/kb/pipeline.js";
 import { routes } from "./kb-settings-helpers.js";
 import { COMPILE_ROW, hex, insertRow, UPLOAD_ROW } from "./kb-store-helpers.js";
 import {
@@ -95,9 +96,9 @@ async function fixture(seed: Seed): Promise<Fixture> {
     await seedDefaults(fake);
   }
   const generation = (n: number) => ({
-    datasetId: fake.addDataset(`owb-${ID}-g${String(n)}`),
-    canvasId: seed.compile ? fake.addCanvas(`owb-${ID}-g${String(n)}`) : null,
-    templateGroupId: seed.compile ? fake.addTemplateGroup(`owb-${ID}-g${String(n)}`) : null,
+    datasetId: fake.addDataset(resourceName(ID, n)),
+    canvasId: seed.compile ? fake.addCanvas(resourceName(ID, n)) : null,
+    templateGroupId: seed.compile ? fake.addTemplateGroup(resourceName(ID, n)) : null,
   });
   const current = generation(0);
   const residual = seed.residual ? generation(1) : null;

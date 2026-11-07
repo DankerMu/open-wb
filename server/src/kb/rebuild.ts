@@ -5,8 +5,9 @@
  *
  * 取锁之后先重读库行：已删除或不再是 `rebuilding` 即跳过，什么都不建。每个库：
  * 1. `rebuild_dataset_id` 非空时按删除次序删掉残留的一代（不存在视为已删），再置空三个 `rebuild_*` 列。
- * 2. 以原模板与开关、新嵌入模型建新一代，名为 `owb-<id>-g<当前代数>`，写回三个 `rebuild_*` 列。普通库走 `parse_type:1`，不读账号
- *    缺省；开了开关的库经 `createPipeline`，账号缺省缺失即失败，不发后续请求（`bases.ts` 的 `createGeneration`）。
+ * 2. 以原模板与开关、新嵌入模型建新一代，名为 `resourceName(id, 当前代数)`（`owb-<id 前 16 位>-g<代数>`，`pipeline.ts`），
+ *    写回三个 `rebuild_*` 列。普通库走 `parse_type:1`，不读账号缺省；开了开关的库经 `createPipeline`，账号缺省缺失即失败，
+ *    不发后续请求（`bases.ts` 的 `createGeneration`）。
  * 3. 逐份文档：从旧数据集下载入库原件，原样拼进 multipart 上传到新数据集，再触发这一份的解析。multipart 长度按本地 `size` 算；
  *    字节在流上数（`multipart.ts`）：多出一个字节当场销毁请求体，请求体关闭即销毁下载流，不等读完；少了不发结束边界。下载为
  *    not-found 的文档记为跳过；字节不符、上传或解析触发失败（含 `parse_not_started`）即该库失败。
@@ -27,7 +28,7 @@
 import { createGeneration } from "./bases.js";
 import type { createKbLocks } from "./locks.js";
 import { multipartUpload } from "./multipart.js";
-import type { createKbPipeline, PipelineResources } from "./pipeline.js";
+import { type createKbPipeline, type PipelineResources, resourceName } from "./pipeline.js";
 import type { createRagflowClient } from "./ragflow-client.js";
 import { embeddingModelOf } from "./settings.js";
 import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
@@ -133,7 +134,7 @@ export function createKbRebuilder(dependencies: KbRebuilderDependencies) {
       return undefined;
     }
     const input = {
-      name: `owb-${base.id}-g${String(embeddingGeneration)}`,
+      name: resourceName(base.id, embeddingGeneration),
       parserId: template.parserId,
       raptor: base.raptor,
       graph: base.graph,

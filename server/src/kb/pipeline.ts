@@ -67,7 +67,16 @@ interface Switches {
   graph: boolean;
 }
 
-/** 建一代编译资源的输入：`name` 是 `owb-<id>-g<代数>`，模板组、画布与数据集同名（D2）。 */
+/**
+ * 一代 RAGFlow 资源的名字 `owb-<id 前 16 位>-g<代数>`：数据集、模板组与画布同名（D2），建库与重建都经这里。长度不超过 32（代数
+ * 不超过 10 位时）：RAGFlow 建入库任务时把画布标题拷进 `pipeline_operation_log.pipeline_title`（`varchar(32)`），超长时任务建
+ * 不出来，解析触发回 `code:0`、`success_count:0`，日志里没有记录（#1900）。
+ */
+export function resourceName(id: string, generation: number): string {
+  return `owb-${id.slice(0, 16)}-g${String(generation)}`;
+}
+
+/** 建一代编译资源的输入：`name` 是 `resourceName` 的结果，模板组、画布与数据集同名（D2）。 */
 interface PipelineInput extends Switches {
   name: string;
   parserId: string;

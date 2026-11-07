@@ -7,6 +7,7 @@
  */
 import type { LightMyRequestResponse as Reply } from "fastify";
 import { describe, expect, it, vi } from "vitest";
+import { resourceName } from "../src/kb/pipeline.js";
 import {
   auditsOf,
   BASES,
@@ -124,10 +125,10 @@ function expectNothingCreated(world: World): void {
 }
 
 describe("建库与列表隔离", () => {
-  it("A 建 manual 的 raptor 库：六步请求依次发出，名字都是 owb-<id>-g0，数据集 parse_type:2 指向该画布", async () => {
+  it("A 建 manual 的 raptor 库：六步请求依次发出，名字都是 owb-<id 前 16 位>-g0，数据集 parse_type:2 指向该画布", async () => {
     const world = await compileReady();
     const view = await createdCompileBase(world, "规范库");
-    const name = `owb-${view.id}-g0`;
+    const name = resourceName(view.id, 0);
     const sent = world.sent();
     expect(routes(sent)).toEqual(sequence());
     const [group] = world.fake.templateGroups();
@@ -567,7 +568,7 @@ describe("重建失败时删库", () => {
   /** 开了 RAPTOR、处于 `rebuild_failed` 的库，三个 `rebuild_*` 列指向假 RAGFlow 里的新一代。 */
   async function failedCompileBase(world: World) {
     const view = await createdCompileBase(world, "重建失败的库");
-    const name = `owb-${view.id}-g1`;
+    const name = resourceName(view.id, 1);
     const next = {
       datasetId: world.fake.addDataset(name),
       canvasId: world.fake.addCanvas(name),

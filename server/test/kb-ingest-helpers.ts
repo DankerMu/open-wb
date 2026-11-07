@@ -12,6 +12,7 @@ import type { LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, expect, type MockInstance, vi } from "vitest";
 import type { KbDependencies } from "../src/kb/index.js";
 import { createKbLocks } from "../src/kb/locks.js";
+import { resourceName } from "../src/kb/pipeline.js";
 import { createKbStore } from "../src/kb/store.js";
 import { expectDefaultNeverCleared, routes } from "./kb-settings-helpers.js";
 import { type FileWorld, openFileWorld, put } from "./mounts-file-endpoints-helpers.js";
@@ -179,7 +180,7 @@ export function useIngestWorlds(): OpenWorld {
     const store = createKbStore(db);
     const addBase = (template: string) => {
       const baseId = store.newId();
-      const datasetId = fake.addDataset(`owb-${baseId}-g0`);
+      const datasetId = fake.addDataset(resourceName(baseId, 0));
       store.createBase({
         id: baseId,
         ownerId: OWNER,
