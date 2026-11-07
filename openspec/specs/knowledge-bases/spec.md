@@ -100,7 +100,7 @@
 
 判定 2–4 SHALL 在取得进程级设置锁之后进行，读到的是锁内的设置行与知识库行；建库全程持有这把锁。
 
-下文的「代数」为当前嵌入代数，`<名字>` 为 `owb-<id>-g<代数>`。
+下文的「代数」为当前嵌入代数，`<名字>` 为 `owb-<id 前 16 位>-g<代数>`：`<id>` 是知识库 id（32 位小写十六进制），取其前 16 个字符。数据集、模板组与画布 SHALL 同名，由同一处函数生成（建库与重建共用）。`<名字>` 的长度 SHALL 不超过 32 个字符（代数不超过 10 位时成立）：RAGFlow 建入库任务时把画布标题拷进 `pipeline_operation_log.pipeline_title`（`varchar(32)`），超长时任务建不出来，解析触发回 `code:0`、`success_count:0`，日志里没有记录。
 
 两个开关都为 0：
 1. `POST /api/v1/datasets`，body `{name:<名字>, parser_id, parse_type:1, embedding_model}`。`parser_id` 在 `naive` 时为 `general`，其余等于模板名。
@@ -134,7 +134,7 @@
 
 #### Scenario: 建库与列表隔离
 - **WHEN** 用户 A 建 `规范库`（`manual`，`raptor:true`，知识库对话模型已指定）；用户 B 请求列表，并 `DELETE` A 的库 id
-- **THEN** A 得 201 `BaseView`，假 RAGFlow 依次收到读账号缺省、读内置模板、建模板组、读内置 pipeline、建画布与建数据集，名字都是 `owb-<id>-g0`，数据集 body 为 `parse_type:2`、`pipeline_id` 为该画布；B 的列表为 `{bases:[]}`，`DELETE` 为 404 `not_found`，假 RAGFlow 没有收到删除请求
+- **THEN** A 得 201 `BaseView`，假 RAGFlow 依次收到读账号缺省、读内置模板、建模板组、读内置 pipeline、建画布与建数据集，名字都是 `owb-<id 前 16 位>-g0`，数据集 body 为 `parse_type:2`、`pipeline_id` 为该画布；B 的列表为 `{bases:[]}`，`DELETE` 为 404 `not_found`，假 RAGFlow 没有收到删除请求
 
 #### Scenario: 普通模板的隔离
 - **WHEN** 用户 A 建一个两开关都为 0 的知识库；用户 B 请求列表，并 `DELETE` A 的库 id
@@ -223,6 +223,10 @@
 #### Scenario: 知识库数上限
 - **WHEN** 一个账号已有 50 个知识库，再建第 51 个
 - **THEN** 409 `kb_limit`，没有出站请求
+
+#### Scenario: 开编译的库能入库（画布名不超过 32 字符）
+- **WHEN** 知识库对话模型已指定；用户建 `{"template":"naive","raptor":true}` 与 `{"template":"naive","graph":true}` 各一个库，并各自从工作空间入库一份 `notes.md`；假 RAGFlow 照真实行为，对绑定画布标题超过 32 个字符的文档触发解析时回 `code:0`、`success_count:0`、不建任务
+- **THEN** 两次建库都是 201，假 RAGFlow 收到的数据集名、模板组名与画布标题都等于 `owb-<id 前 16 位>-g0`，长度不超过 32；两次入库都是 201，`documents` 各 1 份、`rejected` 为空；对 32 位 id 与 10 位代数生成的名字长度仍不超过 32
 
 ### Requirement: 工作空间来源入库
 所有者 SHALL 能经 `POST /api/kb/bases/:id/documents` 把自己工作空间里的文件入库。

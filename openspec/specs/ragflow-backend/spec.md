@@ -305,7 +305,7 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 **重建器**在进程内一次处理一个知识库，处理期间持有该库的写锁（见 knowledge-bases「同一知识库的写操作串行」）。取得锁后先重读该库的行：库已被删除或 `state` 不再是 `rebuilding` 即跳过该库。每个库的步骤：
 1. 若 `rebuild_dataset_id` 非空，先按 knowledge-bases「知识库端点」的删除次序删掉残留的一代；不存在视为已删除；再把三个 `rebuild_*` 列置空。
-2. 以原模板与开关、新嵌入模型，按 knowledge-bases「知识库端点」的建库流程建新一代，名为 `owb-<id>-g<当前代数>`，写回 `rebuild_dataset_id`；开了开关的库另写回 `rebuild_canvas_id`、`rebuild_template_group_id`。模板组与画布 SHALL 新建，不复用旧的。账号缺省缺失时开了开关的库在这一步失败，不发后续请求。
+2. 以原模板与开关、新嵌入模型，按 knowledge-bases「知识库端点」的建库流程建新一代，名为 `owb-<id 前 16 位>-g<当前代数>`（命名规则见 knowledge-bases「知识库端点」），写回 `rebuild_dataset_id`；开了开关的库另写回 `rebuild_canvas_id`、`rebuild_template_group_id`。模板组与画布 SHALL 新建，不复用旧的。账号缺省缺失时开了开关的库在这一步失败，不发后续请求。
 3. 逐份文档，从旧数据集流式下载入库原件，上传到新数据集，再触发这份文档的解析。multipart 长度按本地 `size` 计算。下载结果为 not-found 的文档记为跳过；下载字节数与本地 `size` 不符、或解析未启动时该库失败。
 4. 在单事务里完成切换：删除被跳过的文档行；其余行换成新的 RAGFlow 文档 id；`dataset_id`、`canvas_id`、`template_group_id` 设为对应的 `rebuild_*` 值，三个 `rebuild_*` 列置空；`embedding_generation` 设为当前代数；`state` 置为 `ready`；审计 `kb.rebuild`（detail `{id, result:"ok", skipped}`）。
 5. 按同一删除次序删除旧一代。数据集删除失败写一行 `{"event":"kb_dataset_leak","datasetId":<id>}`，SHALL NOT 再删它的画布与模板组；画布或模板组删除失败写一行 `{"event":"kb_pipeline_leak","canvasId":<id|null>,"groupId":<id|null>}`，模板组删除失败时画布已删，`canvasId` 为 `null`。都不影响状态。
@@ -330,11 +330,11 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 
 #### Scenario: 确认后重建
 - **WHEN** 有两个知识库共三份文档，管理员带 `confirmRebuild:true` 换嵌入模型
-- **THEN** 假 RAGFlow 依次收到：两次建数据集（名为 `owb-<id>-g1`）、三次下载、三次上传与三次解析触发、两次删除旧数据集；两个知识库最终都是 `ready`，`dataset_id` 为新数据集，文档的 RAGFlow id 为新 id；审计含一条 `kb.settings`、一条 `{bases:2, documents:3}` 与两条 `result:"ok"`，actor 都是该管理员
+- **THEN** 假 RAGFlow 依次收到：两次建数据集（名为 `owb-<id 前 16 位>-g1`）、三次下载、三次上传与三次解析触发、两次删除旧数据集；两个知识库最终都是 `ready`，`dataset_id` 为新数据集，文档的 RAGFlow id 为新 id；审计含一条 `kb.settings`、一条 `{bases:2, documents:3}` 与两条 `result:"ok"`，actor 都是该管理员
 
 #### Scenario: 开编译的库重建
 - **WHEN** 一个开了两种编译的知识库，管理员带 `confirmRebuild:true` 换嵌入模型
-- **THEN** 假 RAGFlow 为新一代依次收到读账号缺省、读内置模板、建模板组、读内置 pipeline、建画布与建数据集（`pipeline_id` 为新画布），都名为 `owb-<id>-g1`；切换之后依次收到删旧数据集、删旧画布、删旧模板组；库行的三个 id 都是新一代，三个 `rebuild_*` 列为 NULL
+- **THEN** 假 RAGFlow 为新一代依次收到读账号缺省、读内置模板、建模板组、读内置 pipeline、建画布与建数据集（`pipeline_id` 为新画布），都名为 `owb-<id 前 16 位>-g1`；切换之后依次收到删旧数据集、删旧画布、删旧模板组；库行的三个 id 都是新一代，三个 `rebuild_*` 列为 NULL
 
 #### Scenario: 账号缺省缺失时重建失败
 - **WHEN** 一个开了 RAPTOR 的知识库重建，假 RAGFlow 的 `GET /api/v1/models/default` 应答 `models` 为空
