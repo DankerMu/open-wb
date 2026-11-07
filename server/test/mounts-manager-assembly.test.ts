@@ -15,7 +15,6 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -42,6 +41,7 @@ import {
   W1,
   waitFor,
 } from "./mounts-manager-helpers.js";
+import { readCompleteJsonl } from "./support/jsonl.mjs";
 
 const CASE_MS = 20_000;
 /** Feature on: the fake rclone (no `fusermount3` is needed — nothing this run mounted is in mountinfo). */
@@ -140,14 +140,9 @@ function appOf(db: DatabaseSync, assembly: AssemblyDependencies): FastifyInstanc
 
 /** The fake rclone's `mount` calls, recorded under `<state>` (its `HOME` is `<state>/mounts/<id>`). */
 function mountCalls(state: string): { argv: string[]; pid: number }[] {
-  const file = join(state, "fake-rclone-calls.jsonl");
-  return existsSync(file)
-    ? readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => JSON.parse(line) as { argv: string[]; pid: number })
-        .filter((call) => call.argv[1] === "mount")
-    : [];
+  return readCompleteJsonl<{ argv: string[]; pid: number }>(
+    join(state, "fake-rclone-calls.jsonl"),
+  ).filter((call) => call.argv[1] === "mount");
 }
 
 describe("createApp mount-manager sources (design D12)", () => {

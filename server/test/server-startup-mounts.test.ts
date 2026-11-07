@@ -37,6 +37,7 @@ import {
 } from "./server-startup-helpers.js";
 import { applicationStderr } from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
+import { readCompleteJsonl } from "./support/jsonl.mjs";
 
 const FAKE_RCLONE = fileURLToPath(new URL("./fixtures/fake-rclone.mjs", import.meta.url));
 const FAKE_FUSERMOUNT = fileURLToPath(new URL("./fixtures/fake-fusermount3.mjs", import.meta.url));
@@ -156,13 +157,9 @@ function fixture(): Fixture {
         MOUNT_MAX_PER_WORKSPACE: "2",
       }),
     mountCalls: () =>
-      existsSync(calls)
-        ? readFileSync(calls, "utf8")
-            .split("\n")
-            .filter((line) => line !== "")
-            .map((line) => JSON.parse(line) as { pid: number; argv: string[] })
-            .filter((call) => call.argv[1] === "mount")
-        : [],
+      readCompleteJsonl<{ pid: number; argv: string[] }>(calls).filter(
+        (call) => call.argv[1] === "mount",
+      ),
   };
 }
 

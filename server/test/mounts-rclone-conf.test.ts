@@ -7,7 +7,6 @@
  * manager's (D5) and is pre-created here at 0700; this module only writes inside it.
  */
 import {
-  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -24,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { rewriteHost, writeRcloneConf } from "../src/workspaces/mounts/rclone-conf.js";
 import type { MountBody } from "../src/workspaces/mounts/validate.js";
+import { readCompleteJsonl } from "./support/jsonl.mjs";
 
 const FAKE_RCLONE = fileURLToPath(new URL("./fixtures/fake-rclone.mjs", import.meta.url));
 const MOUNT_ID = "0123456789abcdef0123456789abcdef";
@@ -60,14 +60,7 @@ interface Call {
 }
 
 function calls(): Call[] {
-  const file = join(state, "fake-rclone-calls.jsonl");
-  if (!existsSync(file)) {
-    return [];
-  }
-  return readFileSync(file, "utf8")
-    .split("\n")
-    .filter((line) => line !== "")
-    .map((line) => JSON.parse(line) as Call);
+  return readCompleteJsonl<Call>(join(state, "fake-rclone-calls.jsonl"));
 }
 
 function target(overrides: { rcloneBin?: string; obscureTimeoutMs?: number } = {}) {

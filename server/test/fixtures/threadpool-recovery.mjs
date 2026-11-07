@@ -13,18 +13,12 @@
  * 结果以一行 JSON 写到标准输出；无论成败（含中途抛错：错误写到标准错误、退出码非零）都先以写端打开
  * FIFO 放回那个线程，再退出。
  */
-import {
-  closeSync,
-  constants,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  writeSync,
-} from "node:fs";
+import { closeSync, constants, mkdirSync, openSync, writeSync } from "node:fs";
 import { open, stat } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { join } from "node:path";
+// 记录文件只用同步读（`readCompleteJsonl`）：线程池被占着，这里的轮询不能排到它后面。
+import { readCompleteJsonl } from "../support/jsonl.mjs";
 
 registerHooks({
   resolve(specifier, context, next) {
@@ -55,15 +49,6 @@ const alive = (pid) => {
     return false;
   }
 };
-/** 只用同步读：线程池被占着，这里的轮询不能排到它后面。 */
-const lines = (file) =>
-  existsSync(file)
-    ? readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line !== "")
-        .map((line) => JSON.parse(line))
-    : [];
-
 const errors = [];
 const manager = createMountManager({
   store: { listAll: () => [input.record], getSource: () => undefined },
@@ -93,7 +78,7 @@ const manager = createMountManager({
 const result = { online: false, poolBlocked: false, offline: false, rcloneDead: false };
 await manager.restoreAll();
 result.online = manager.statusOf(input.record.id) === "online";
-const rclonePid = lines(join(input.state, "fake-rclone-calls.jsonl")).find(
+const rclonePid = readCompleteJsonl(join(input.state, "fake-rclone-calls.jsonl")).find(
   (call) => call.argv[1] === "mount",
 )?.pid;
 const mountPoint = join(input.root, input.record.name);
@@ -120,7 +105,9 @@ try {
 
   // 3. The recovery: rclone gone and `-uz` run, all while the pool stays blocked.
   const unmountedAt = () =>
-    lines(join(input.bin, "fusermount3-calls.jsonl")).filter((line) => line.argv[1] === mountPoint);
+    readCompleteJsonl(join(input.bin, "fusermount3-calls.jsonl")).filter(
+      (line) => line.argv[1] === mountPoint,
+    );
   const waitUntil = Date.now() + 15_000;
   while (Date.now() < waitUntil) {
     if (rclonePid !== undefined && !alive(rclonePid) && unmountedAt().length > 0) {

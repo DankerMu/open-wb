@@ -18,7 +18,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
-  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -38,6 +37,7 @@ import { createMountManager, type MountManagerOptions } from "../src/workspaces/
 import type { MountClock, TcpConnect } from "../src/workspaces/mounts/probe.js";
 import { createMountStore } from "../src/workspaces/mounts/store.js";
 import type { MountBody } from "../src/workspaces/mounts/validate.js";
+import { readCompleteJsonl } from "./support/jsonl.mjs";
 
 export const FAKE_RCLONE = fileURLToPath(new URL("./fixtures/fake-rclone.mjs", import.meta.url));
 const FAKE_FUSERMOUNT = fileURLToPath(new URL("./fixtures/fake-fusermount3.mjs", import.meta.url));
@@ -302,14 +302,7 @@ export function createWorld(worldOptions: WorldOptions = {}): World {
     return manager;
   };
 
-  const readJsonl = <T>(file: string): T[] =>
-    existsSync(file)
-      ? readFileSync(file, "utf8")
-          .split("\n")
-          .filter((line) => line !== "")
-          .map((line) => JSON.parse(line) as T)
-      : [];
-  const calls = () => readJsonl<Call>(join(state, "fake-rclone-calls.jsonl"));
+  const calls = () => readCompleteJsonl<Call>(join(state, "fake-rclone-calls.jsonl"));
 
   const options = (overrides: Partial<MountManagerOptions> = {}): MountManagerOptions => ({
     store,
@@ -362,7 +355,7 @@ export function createWorld(worldOptions: WorldOptions = {}): World {
     mountPoint: (name) => join(root, name),
     calls,
     mountCalls: () => calls().filter((call) => call.argv[1] === "mount"),
-    fusermountCalls: () => readJsonl(join(bin, "fusermount3-calls.jsonl")),
+    fusermountCalls: () => readCompleteJsonl(join(bin, "fusermount3-calls.jsonl")),
     installFusermount,
     audits: () =>
       db

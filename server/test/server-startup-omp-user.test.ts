@@ -4,7 +4,7 @@
  * 自 server-startup-order.test.ts 原样拆出。
  */
 
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -24,6 +24,7 @@ import {
 } from "./server-startup-order-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
 import { sudoPrefix } from "./session-supervisor-helpers.js";
+import { readCompleteJsonl } from "./support/jsonl.mjs";
 
 const scratch: string[] = [];
 
@@ -60,11 +61,7 @@ describe("production entry forwards OMP_USER to the captured spawn", () => {
         const cookie = await login(port);
         const session = await createSession(port, cookie);
         await expectPromptStatus(port, cookie, session, "forward", 502);
-        const calls = readFileSync(tracePath, "utf8")
-          .trim()
-          .split("\n")
-          .filter((line) => line.length > 0)
-          .map((line) => JSON.parse(line) as { command: string; args: string[] });
+        const calls = readCompleteJsonl<{ command: string; args: string[] }>(tracePath);
         expect(calls).toHaveLength(1);
         const call = calls[0];
         if (call === undefined) {

@@ -29,6 +29,7 @@ import {
   releaseStartupFixtures,
 } from "./server-startup-helpers.js";
 import { startCompiledServerWithRetry } from "./server-startup-retry.js";
+import { readCompleteJsonl } from "./support/jsonl.mjs";
 
 const MODEL_ID = "issue-1527-overlay-model";
 /** This file's default deployment (`MODEL_ID` set, `MODEL_VISION` unset): `MODEL_ID` is the vision role. */
@@ -245,10 +246,7 @@ describe("production entry host overlay (#1527)", () => {
           "models.yml",
         ]);
       }
-      const spawns = readFileSync(trace, "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as unknown);
+      const spawns = readCompleteJsonl(trace);
       expect(spawns).toEqual(
         ["always-ask", "write", "yolo"].map((mode) => ({ mode, config: overlay, files: overlay })),
       );
