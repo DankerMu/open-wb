@@ -62,7 +62,7 @@ reap() {
       wait_until "$kill_wait" alive "$pid"
     fi
   fi
-  if galive "$pid" || alive "$pid"; then echo "cleanup failed: PGID ${pid} still present" >&2; cleanup_rc=1; return; fi
+  if galive "$pid" || alive "$pid"; then echo "cleanup failed: PGID ${pid} still present" >&2; cleanup_rc=1; return 0; fi
   if wait "$pid" 2>/dev/null; then wait_rc=0; else wait_rc=$?; fi; pid=""
   if [ "$killed" -eq 1 ]; then cleanup_rc=1
   elif [ "$wrapper_term" -eq 1 ]; then [ "$wait_rc" -eq 0 ] || { echo "cleanup failed: server exited with status ${wait_rc}" >&2; cleanup_rc=1; }
