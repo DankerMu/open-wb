@@ -16,6 +16,7 @@
   - `server-startup-mounts.test.ts` 的 `mountCalls`；
   - `mounts-rclone-conf.test.ts` 的 `calls`；
   - `fixtures/threadpool-recovery.mjs` 的 `lines`：helper 写成 `.mjs`，这个子进程脚本直接导入同一份。
+  - 实现时 grep 另找到三处同样写法的副本，一并改用 helper：`server-startup-overlay.test.ts`、`server-startup-omp-user.test.ts`（都读 `spawn.jsonl`）和 `server-startup-private-state.test.ts`（读 `modes.jsonl`）。这三处只读一次、不轮询，改是为了全仓只留一种读法。
 - 产品代码、假 rclone 与假 `fusermount3` 的写法、`waitFor`、超时都不改，也不加 retry。
 - 在 verification-harness 增加一条要求：「轮询读取并发追加的 JSONL 时只解析已结束的行」。
 
