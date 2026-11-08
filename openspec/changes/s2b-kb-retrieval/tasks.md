@@ -513,7 +513,18 @@ Minimal mergeable slice: atomic - 冒烟断言与 CK-11 的期望必须同 PR（
 
 ## 11. 收口
 
-- [ ] 11.1 `IMPLEMENTATION_PLAN.md` 的 S2b 状态与 Next Step 更新；核对 design「Grill 结论」每一行都有落点；`npx openspec validate s2b-kb-retrieval --strict --no-interactive` 通过。验证：命令退出 0；`make check` 退出 0。
+- [x] 11.1 `IMPLEMENTATION_PLAN.md` 的 S2b 状态与 Next Step 更新；核对 design「Grill 结论」每一行都有落点；`npx openspec validate s2b-kb-retrieval --strict --no-interactive` 通过。验证：命令退出 0；`make check` 退出 0。
+  - 组 11 约定（#1926 fixture 审查补；11.1 照此实现）：
+    - 档位与边界：`none`，PR 只改 `IMPLEMENTATION_PLAN.md` 与本文件（勾选与本约定）。不改代码、规格、ADR、验收清单与 `docs/`。
+    - 先例：S2a 没有单独的计划收口，Next Step 的「实现全部合入」一条与「必读增量」改指归档路径都写在归档提交 `79070e30` 里。S2b 按 #1926 的范围把 Next Step 提前到本刀；S2b 一节的 Outcome、覆盖、必读增量、Verify、Depends on、Review attention 一字不改，留给随后的归档 PR，由它同时做三件事：「必读增量」改指 `openspec/specs/knowledge-bases/spec.md`、`openspec/specs/ragflow-backend/spec.md` 与归档目录并补 ADR-0017；本条的「尚未归档，归档另走一个 PR」改写为归档路径。S2b 一节也不加「状态」条目（S2a 先例；S1g 的状态条不效仿），交付状态只写在 Next Step 新条里。
+    - Next Step 在最上方新插一条 `> 2026-11-08 更新。`，其后原有各条（从 `> 2026-11-07 更新。` 起）原样下移，不改字，中间照旧用 `>` 空行与 `> 以下为更早的记录。` 分隔。新条写明：
+      - **S2b 的实现全部合入**：Epic #1910 的子 issue 中 #1911–#1925、#1927 均已关闭，#1926 即本收口、随本 PR 关闭；change `s2b-kb-retrieval` 尚未归档，归档另走一个 PR。
+      - Epic #1910 待 owner 签收：验收清单「中心·知识库（CK）」的 CK-11（真实栈 `make smoke-kb`，含检索断言）、CK-13（检索测试面板）、CK-14（重排模型）为 `待签`，agent 不代签；三行签完 Epic 才关。
+      - 签收后可启动的是 **S2c 会话接入与可见范围**（依赖 S2b、S1c）：`kb_search` 的分派与注册、agentic 环的真实触发验收（ADR-0017）、可见范围四档、共享检索审计、附件双语义（范围以上文 S2c 一节为准）。
+      - 开着的计划外 issue：#1932（CI 的 omp 二进制缓存，待 owner 决定）、#1935（`omp-fetch.sh` 中断后仍走回退下载）。计划外已交付：omp-fetch 主地址失败时经 API 资产地址回退（#1934，change `ci-omp-fetch-resilience` 已归档）。
+      - 不写 RAGFlow 地址、账号、密钥路径或测试主机信息。
+    - Grill 结论落点表只放在 PR 正文，不进仓库文件：12 行，每行写「结论要点 → 落点文件（`路径:行` 或 符号）→ 合入 PR」。落点 PR 不限于实现 PR：ADR-0017 与计划文字以 #1908 为准，change 规格（如「`kb_search` 工具契约」）以 #1909 为准；规格行与代码行都有的，两者都写。落点以 origin/master 的实际内容为准，查不到的一行就停下报告，不补代码。
+    - 验证：`npx openspec validate s2b-kb-retrieval --strict --no-interactive` 退出 0；`make check` 退出 0；`git diff --name-only origin/master` 只含 `IMPLEMENTATION_PLAN.md` 与 `openspec/changes/s2b-kb-retrieval/tasks.md`；`git grep -nE '([0-9]{1,3}\.){3}[0-9]{1,3}|ragflow-rc2/|owb\.local' -- IMPLEMENTATION_PLAN.md` 无命中（模式写 `ragflow-rc2/` 带斜杠，免得误中实测记录的文件名 `2026-11-08-ragflow-rc2-retrieval.md`）。PR 正文（含落点表）同样不写 RAGFlow 地址、账号、密钥路径或测试主机信息。
 
 Suggested fixture level: none - 只改计划文档，没有运行时行为。
 Minimal mergeable slice: atomic - 收口只有一条验证路径（全部组合入后的状态核对），依赖组 1–10 全部。
