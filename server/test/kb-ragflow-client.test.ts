@@ -666,6 +666,7 @@ describe("客户端的调用面（design D4、D7）", () => {
       "parseDocument",
       "readBuiltinPipeline",
       "readDefaultModels",
+      "retrieve",
       "setDefaultModel",
       "stopDocument",
       "updateModelInstance",

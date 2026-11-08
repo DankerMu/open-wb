@@ -1,3 +1,5 @@
+import type { FakeRagflowRetrievalHit } from "./fake-ragflow-retrieval.mjs";
+
 /** 请求头是否恰为 `Authorization: Bearer <密钥>`：密钥本身不进记录。 */
 export type FakeRagflowBearer = "ok" | "missing" | "other";
 
@@ -161,7 +163,7 @@ export interface FakeRagflowServer {
   fault(route: string, fault: FakeRagflowFault, options?: FakeRagflowScriptOptions): void;
   addDataset(name?: string): string;
   /** 账号里已有这个模型，不经下发：`embedding_model` 引用得到它（§4.4）。 */
-  addModel(instance: string, name: string, modelType: "embedding" | "chat"): void;
+  addModel(instance: string, name: string, modelType: "embedding" | "chat" | "rerank"): void;
   addDocument(datasetId: string, seed: FakeRagflowDocumentSeed): string;
   /** 账号里已有这个模板组（没有模板），不经建组：重建一代的种子。 */
   addTemplateGroup(name?: string): string;
@@ -170,6 +172,13 @@ export interface FakeRagflowServer {
   setDocumentStatus(datasetId: string, documentId: string, status: string): void;
   /** 加一条任务日志，返回它的 id：按种子次序递增，`orderby=id` 按它倒序。 */
   addIngestionLog(datasetId: string, seed: FakeRagflowIngestionSeed): string;
+  /** 这个数据集此后的检索命中，次序即应答次序；夹具不实现检索算法。没有这个数据集直接抛。 */
+  setRetrievalHits(datasetId: string, hits: FakeRagflowRetrievalHit[]): void;
+  /**
+   * 此后每个带 `rerank_id` 的检索都回 HTTP 200 `code:102`，直到夹具关闭；不带的照常。`message` 缺省为 §19.4「模型名不存在」
+   * 那行按请求的 `rerank_id` 拼出的原文。
+   */
+  failRerank(message?: string): void;
   instances(): FakeRagflowInstanceView[];
   defaultModels(): FakeRagflowDefaultModelView[];
   datasets(): FakeRagflowDatasetView[];
