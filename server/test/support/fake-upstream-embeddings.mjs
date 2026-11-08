@@ -5,6 +5,7 @@
  * `release()`. Without a script the reply is a one-item list with a three-number vector.
  *
  * Like `GET /models`, the 401 echoes the offered bearer: a sentinel for the sanitising cases.
+ * `createProbeScript` is the scaffold shared with `POST /rerank` (`fake-upstream-rerank.mjs`).
  */
 const VECTORS = { object: "list", data: [{ index: 0, embedding: [0.1, 0.2, 0.3] }] };
 
@@ -24,6 +25,11 @@ function parsed(text) {
 }
 
 export function createEmbeddingScript(expectedKey) {
+  return createProbeScript(expectedKey, { body: VECTORS });
+}
+
+/** A scripted probe endpoint: `fallback` answers when no reply is queued. */
+export function createProbeScript(expectedKey, fallback) {
   const replies = [];
   const holds = [];
   const live = new Set();
@@ -43,7 +49,7 @@ export function createEmbeddingScript(expectedKey) {
         write(response, { status: 401, body: { error: { message: `bad key ${offered}` } } });
         return;
       }
-      write(response, replies.shift() ?? { body: VECTORS });
+      write(response, replies.shift() ?? fallback);
     },
     handle: {
       answer(reply) {

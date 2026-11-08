@@ -28,8 +28,8 @@
 import { validateUpstreamBaseUrl, validateUpstreamKey } from "../agent-config.js";
 import { HttpError } from "../core/errors/index.js";
 import type { createModelStore, ModelUpdatePlan } from "../models/store.js";
-import { type EmbeddingProbeDeadlines, probeEmbedding } from "./embedding-probe.js";
 import type { createKbLocks } from "./locks.js";
+import { type ModelProbeDeadlines, probeModel } from "./model-probe.js";
 import {
   type createRagflowClient,
   isBlankApiKey,
@@ -100,7 +100,7 @@ interface KbSettingsDependencies {
   locks: Pick<ReturnType<typeof createKbLocks>, "settings">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
-  probeDeadlines?: EmbeddingProbeDeadlines | undefined;
+  probeDeadlines?: ModelProbeDeadlines | undefined;
   /** 唤醒重建器：确认重建与重试的事务提交之后调用。 */
   onRebuild: () => void;
 }
@@ -401,7 +401,7 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
       throw new HttpError("kb_not_ready");
     }
     const identity = { ...embedding, apiKey };
-    const result = await probeEmbedding(identity, probeDeadlines);
+    const result = await probeModel("embedding", identity, probeDeadlines);
     return locks.settings(async () => {
       store.recordEmbeddingProbe(identity, { ...result, at: Date.now() }, () => {
         audit({

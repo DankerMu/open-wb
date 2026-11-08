@@ -23,9 +23,9 @@ import {
   type DocumentRemovalTiming,
   type KbDocumentRecord,
 } from "./documents.js";
-import type { EmbeddingProbeDeadlines } from "./embedding-probe.js";
 import type { KbKeyHandle } from "./key-file.js";
 import { createKbLocks } from "./locks.js";
+import type { ModelProbeDeadlines } from "./model-probe.js";
 import { createKbPipeline, type KbPipelineRecord } from "./pipeline.js";
 import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client.js";
 import { createKbRebuilder, type KbRebuilder } from "./rebuild.js";
@@ -66,8 +66,8 @@ export interface KbDependencies {
   now?: () => number;
   /** 客户端的期限（测试注入短期限）；省略的项取缺省。 */
   deadlines?: Partial<Deadlines>;
-  /** 嵌入探活的期限（测试注入短期限）；省略时取 `embedding-probe.ts` 的缺省。 */
-  probeDeadlines?: EmbeddingProbeDeadlines;
+  /** 知识库模型探活的期限（测试注入短期限）；省略时取 `model-probe.ts` 的缺省。 */
+  probeDeadlines?: ModelProbeDeadlines;
   /** 两种锁（测试注入，读等待者计数）；省略时在这里建，生产装配不传。 */
   locks?: ReturnType<typeof createKbLocks>;
   /** RAGFlow 文档删除的重发节奏（测试注入短期限）；省略时每 500 ms、至多 5 s（D13）。 */

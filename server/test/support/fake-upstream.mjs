@@ -9,6 +9,7 @@ import {
   writeInterleavedSse,
   writePacedSse,
 } from "./fake-upstream-pace.mjs";
+import { createRerankScript } from "./fake-upstream-rerank.mjs";
 
 const PATHS = new Set(["/chat/completions", "/v1/chat/completions"]);
 /** s1d-model-registry D20: the listing a model probe reads. */
@@ -16,6 +17,8 @@ const MODELS_PATHS = new Set(["/models", "/v1/models"]);
 const MODELS_LISTING = { object: "list", data: [{ id: "fake-model", object: "model" }] };
 /** s2a-kb-ragflow D7: what a knowledge-base embedding probe posts to. */
 const EMBEDDINGS_PATHS = new Set(["/embeddings", "/v1/embeddings"]);
+/** s2b-kb-retrieval D7: what a knowledge-base rerank probe posts to. */
+const RERANK_PATHS = new Set(["/rerank", "/v1/rerank"]);
 const DEFAULT_KEY = "fake";
 const ERROR_MARKER = "WORKBUDDY_FAKE_ERROR";
 const WALK_MARKER = "WORKBUDDY_UI_WALK:";
@@ -94,12 +97,14 @@ export async function start(options = {}) {
   const modelsRequests = [];
   const models = { status: modelsStatus, record: modelsRequests };
   const embeddings = createEmbeddingScript(expectedKey);
+  const rerank = createRerankScript(expectedKey);
   const server = createServer((request, response) => {
     void handleRequest(request, response, expectedKey, gates, ttlMs, requests, {
       scope,
       failures,
       models,
       embeddings,
+      rerank,
     });
   });
   await listen(server, requested);
@@ -117,6 +122,7 @@ export async function start(options = {}) {
       return modelsRequests.map((entry) => ({ ...entry }));
     },
     embeddings: embeddings.handle,
+    rerank: rerank.handle,
     async close() {
       if (closed) {
         return;
@@ -124,6 +130,7 @@ export async function start(options = {}) {
       closed = true;
       failures.close();
       embeddings.close();
+      rerank.close();
       for (const id of [...gates.keys()]) {
         destroyGate(gates, id);
       }
@@ -151,6 +158,10 @@ async function handleRequest(request, response, expectedKey, gates, ttlMs, reque
   }
   if (request.method === "POST" && EMBEDDINGS_PATHS.has(path)) {
     await script.embeddings.serve(response, request.headers.authorization, await readBody(request));
+    return;
+  }
+  if (request.method === "POST" && RERANK_PATHS.has(path)) {
+    await script.rerank.serve(response, request.headers.authorization, await readBody(request));
     return;
   }
   if (request.method !== "POST" || !PATHS.has(path)) {

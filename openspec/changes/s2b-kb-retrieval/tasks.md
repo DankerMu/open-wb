@@ -109,8 +109,15 @@ Minimal mergeable slice: 4.1–4.3 为首刀：`retrieval.ts` 的单轮检索（
 
 ## 5. 探活泛化为两种目标（ragflow-backend「知识库模型设置」的探活；行为不变的重构）
 
-- [ ] 5.1 核对 Context：`server/src/kb/embedding-probe.ts` 全文与它现有的 HTTP 层用例（`server/test/kb-settings-probe.test.ts`）、`settings.ts` 的 `probeOnce`。验证：在 issue 里列出路径、body 与 2xx 判定三处写死的点。
-- [ ] 5.2 原地重构：`embedding-probe.ts` 改名 `model-probe.ts`，`probeEmbedding` 泛化为按目标取路径、body 与 2xx 判定（design D7），嵌入目标的行为逐字不变。新 `server/test/support/fake-upstream-rerank.mjs`（照 `fake-upstream-embeddings.mjs` 的兄弟文件写法）提供 `POST /rerank`。测试先行：模块改名后 `kb-settings-probe.test.ts` 原样全绿；新 `server/test/kb-model-probe.test.ts` 加重排目标的单元用例（`POST <base>/rerank`、body `{model, query:"ping", documents:["ping"]}`、`results[0].relevance_score` 为数字为 `ok`、401 / 503 / 空 `results` 为 `failed`、错误摘录不含密钥与地址），先红后绿。验证：`npm run test:focus --workspace server -- probe` 全过；`git grep -n embedding-probe -- server web docs/architecture` 退出 1。
+- [x] 5.1 核对 Context：`server/src/kb/embedding-probe.ts` 全文与它现有的 HTTP 层用例（`server/test/kb-settings-probe.test.ts`）、`settings.ts` 的 `probeOnce`。验证：在 issue 里列出路径、body 与 2xx 判定三处写死的点。
+- [x] 5.2 原地重构：`embedding-probe.ts` 改名 `model-probe.ts`，`probeEmbedding` 泛化为按目标取路径、body 与 2xx 判定（design D7），嵌入目标的行为逐字不变。新 `server/test/support/fake-upstream-rerank.mjs`（照 `fake-upstream-embeddings.mjs` 的兄弟文件写法）提供 `POST /rerank`。测试先行：模块改名后 `kb-settings-probe.test.ts` 原样全绿；新 `server/test/kb-model-probe.test.ts` 加重排目标的单元用例（`POST <base>/rerank`、body `{model, query:"ping", documents:["ping"]}`、`results[0].relevance_score` 为数字为 `ok`、401 / 503 / 空 `results` 为 `failed`、错误摘录不含密钥与地址），先红后绿。验证：`npm run test:focus --workspace server -- probe` 全过；`git grep -n embedding-probe -- server web docs/architecture` 退出 1。
+  - 组 5 约定（#1914 fixture 审查定，#1919 照此接线）：
+    - 形状：`probeModel(target: "embedding" | "rerank", upstream, deadlines)`，内部用按目标索引的表 `{path, body(name), judge}`；返回类型与期限类型去掉 Embedding 前缀（`ModelProbeResult`、`ModelProbeDeadlines`）。`settings.ts` 的调用点传 `"embedding"`，`index.ts` 的 `probeDeadlines` 类型与注释同步改名；`store.recordEmbeddingProbe` 不动。
+    - 必须保持（嵌入目标逐字不变）：`kb-settings-probe.test.ts` 一字不改且全绿；连接 10 s、总 15 s 的期限常量与 `probeDeadlines` 注入入口；错误体读取、上游摘录与密钥列表净化、200 点截断；`agent:false`、不跟随重定向、不重试；1 MiB 读取上限；嵌入失败文案（如「响应不含嵌入向量」）。新用例另断言嵌入目标发出的路径 `/embeddings`、body `{model, input:"ping"}` 与 `authorization: Bearer` 头（经 `fake-upstream-embeddings.mjs` 的 `requests()`）。
+    - 重排判定：2xx 且 `results` 是非空数组、`results[0].relevance_score` 是有限数字（`Number.isFinite`）为 `ok`；缺 `results` 或不是数组、空数组、`results[0]` 缺 `relevance_score`、分数为字符串或 `null`、超过 1 MiB，都是 `failed`，文案「响应不含重排分数」（不复用嵌入文案）；401 / 503 等非 2xx 照既有映射。各一条用例（缺键、空数组、缺分数、非数字分数、401、503）。
+    - 净化与期限（重排目标各一例）：错误体含 apiKey 与 baseUrl 哨兵时 `message` 不含它们；`totalDeadlineMs: 50` 加 `hold()` 得「超时」。
+    - 假上游：`fake-upstream-rerank.mjs` 照嵌入兄弟文件提供脚本化的 `answer` / `hold` / `requests`；缺省应答取 §19.4 形状 `{results:[{document:{text:"ping"},index:0,relevance_score:0.635}],usage:{}}`；401 回显所给 bearer（净化用例的哨兵）；503 用 `error.code:"model_not_found"`。`fake-upstream.mjs` 的接线同 `/embeddings`（同时接受 `/rerank` 与 `/v1/rerank`），接完 `wc -l` ≤ 800。
+    - `openspec/` 里的旧名是历史叙述，不改；改名只涉及 `server/`（`index.ts`、`settings.ts` 与模块本身）。
 
 Suggested fixture level: compact - 行为不变的重构加一个新的出站目标，没有公共 API、schema 或权限变化；嵌入探活的既有用例原样全绿即证明不变。
 Minimal mergeable slice: atomic - 改名与按目标参数化改的是同一个函数签名与同一批调用点，拆成两步只会让两个 PR 改同一批行，中间状态没有可单独验证的行为；重排目标此时只有单元用例调用，端点接线在组 6。

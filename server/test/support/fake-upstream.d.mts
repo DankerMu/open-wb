@@ -26,13 +26,13 @@ export interface FakeUpstreamRequest {
   maxTokens: number | null;
 }
 
-/** One POST /embeddings (accepted or 401): its Authorization header and parsed body. */
+/** One POST /embeddings or /rerank (accepted or 401): its Authorization header and parsed body. */
 export interface FakeUpstreamEmbeddingRequest {
   authorization: string | null;
   body: unknown;
 }
 
-/** A queued answer to the next POST /embeddings; a string `body` goes out as it is. */
+/** A queued answer to the next POST /embeddings or /rerank; a string `body` goes out as it is. */
 export interface FakeUpstreamEmbeddingReply {
   status?: number;
   body?: unknown;
@@ -54,6 +54,8 @@ export interface FakeUpstreamServer {
   /** A copy of the GET /models record: arrival order, latest 1000. */
   modelsRequests(): FakeUpstreamModelsRequest[];
   embeddings: FakeUpstreamEmbeddings;
+  /** POST /rerank: the same scripting as `embeddings`, its own queue and record. */
+  rerank: FakeUpstreamEmbeddings;
   close(): Promise<void>;
 }
 
