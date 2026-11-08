@@ -20,13 +20,14 @@ const fresh = useKbDatabases();
 
 let fake: FakeRagflowServer;
 let store: Store;
+let db: ReturnType<typeof fresh>["db"];
 let deps: Parameters<typeof retrieveForBase>[0];
 let dataset: string;
 let base: KnowledgeBase;
 
 beforeEach(async () => {
   fake = await start({ apiKey: KEY });
-  store = fresh().store;
+  ({ db, store } = fresh());
   deps = {
     store,
     client: createRagflowClient({ baseUrl: fake.baseUrl, key: { read: () => KEY }, log: () => {} }),
@@ -84,6 +85,21 @@ describe("参数显式传（design D2）", () => {
     });
     expect(rebuilding?.rebuildDatasetId).toBe(next);
     await retrieveForBase(deps, rebuilding as KnowledgeBase, "q");
+    expect(fake.requests()[0]?.json).toMatchObject({ dataset_ids: [dataset] });
+  });
+});
+
+describe("不判 state（#1938 结转：非 ready 是否参与检索由 S2c 为会话内检索定）", () => {
+  it("库为 rebuilding：仍恰发一次检索，dataset_ids 为当前 datasetId，返回命中", async () => {
+    db.prepare("UPDATE knowledge_bases SET state = 'rebuilding' WHERE id = ?").run(base.id);
+    const rebuilding = store.getBase(base.id);
+    expect(rebuilding?.state).toBe("rebuilding");
+    const doc = addLocal(base.id, "rf-a", "a.md");
+    fake.setRetrievalHits(dataset, [{ documentId: "rf-a", content: "段落", similarity: 0.5 }]);
+    await expect(retrieveForBase(deps, rebuilding as KnowledgeBase, "q")).resolves.toEqual(
+      ok([{ documentId: doc.id, name: "a.md", similarity: 0.5, content: "段落" }]),
+    );
+    expect(fake.requests()).toHaveLength(1);
     expect(fake.requests()[0]?.json).toMatchObject({ dataset_ids: [dataset] });
   });
 });

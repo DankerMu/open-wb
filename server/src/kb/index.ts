@@ -30,6 +30,7 @@ import { createKbPipeline, type KbPipelineRecord } from "./pipeline.js";
 import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client.js";
 import { createKbRebuilder, type KbRebuilder } from "./rebuild.js";
 import { registerKbRoutes } from "./rest.js";
+import { createKbRetrieval } from "./retrieval.js";
 import { createKbSettings } from "./settings.js";
 import { createSourceFiles } from "./source-file.js";
 import { createKbStore } from "./store.js";
@@ -168,6 +169,7 @@ export function registerKb(
       removalTiming: documentDelete,
       bodyDeadline: uploadBodyDeadline,
     }),
+    retrieval: createKbRetrieval({ store, client, locks, audit }),
   });
   return settings.guardModelWrite;
 }

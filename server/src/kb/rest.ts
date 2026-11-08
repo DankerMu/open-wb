@@ -30,6 +30,9 @@
  * `POST …/uploads` 同 `POST /api/workspaces/:id/uploads` 的写法：独立 scope，只认 `application/octet-stream`，请求流原样交出，
  * 没有框架的 body 上限，别的媒体类型是 parser 错误（归属集，400）。所有权判定先于这一切，一个字节都不读。失败的上传一律关
  * 连接：Node 否则会在 keep-alive 上读完并丢弃剩下的请求体。业务都在 `kb/uploads.ts`。
+ *
+ * `POST …/retrieval`（检索测试，s2b-kb-retrieval D4）：在归属集，body limit 16 KiB，所有权判定先于 body 解析；body 校验、
+ * `state`、参数写回与检索都在 `kb/retrieval.ts`，成功 200 `{hits, retrieval}`。
  */
 import type {
   FastifyInstance,
@@ -46,6 +49,7 @@ import { isAdmin } from "../core/roles.js";
 import type { createKbBases } from "./bases.js";
 import type { createKbDocuments } from "./documents.js";
 import type { createRagflowClient } from "./ragflow-client.js";
+import type { createKbRetrieval } from "./retrieval.js";
 import type { createKbSettings } from "./settings.js";
 import type { createKbStore } from "./store.js";
 import type { createKbUploads } from "./uploads.js";
@@ -62,10 +66,13 @@ const BASE_ROUTE = "/api/kb/bases/:id";
 const DOCUMENTS_ROUTE = "/api/kb/bases/:id/documents";
 const REINGEST_ROUTE = "/api/kb/bases/:id/documents/reingest";
 const UPLOADS_ROUTE = "/api/kb/bases/:id/uploads";
+const RETRIEVAL_ROUTE = "/api/kb/bases/:id/retrieval";
 const UPLOAD_MEDIA_TYPE = "application/octet-stream";
 /** 最长的合法 body 也只有几百字节，同 `models/rest.ts`。 */
 const SETTINGS_BODY_LIMIT = 16 * 1024;
 const BASE_BODY_LIMIT = 16 * 1024;
+/** 问句至多 1000 码点：每码点经 JSON 转义也不过十几字节。 */
+const RETRIEVAL_BODY_LIMIT = 16 * 1024;
 /** 条数（`KB_UPLOAD_MAX_FILES`）与单条的 4096 字节由 `documents.ts` 判定，这里只拦明显的超长：缺省 10 条时合法 body 经 JSON 转义也不到 256 KiB。 */
 const DOCUMENTS_BODY_LIMIT = 1024 * 1024;
 /** Fastify 不接受 0：取最小合法值，显式的 no-body 校验负责「任意 body 即 400」。 */
@@ -78,6 +85,7 @@ interface KbRestDependencies {
   bases: ReturnType<typeof createKbBases>;
   documents: ReturnType<typeof createKbDocuments>;
   uploads: ReturnType<typeof createKbUploads>;
+  retrieval: ReturnType<typeof createKbRetrieval>;
   uploadMaxBytes: number;
   uploadMaxFiles: number;
   onVersionMismatch: () => void;
@@ -252,6 +260,12 @@ export function registerKbRoutes(
       const { id } = request.params;
       return enabled().documents.reingest(id, request.query, principalOf(request).id);
     },
+  );
+
+  app.post<BaseParams>(
+    RETRIEVAL_ROUTE,
+    { onRequest: noStore, preParsing: ownedBase, bodyLimit: RETRIEVAL_BODY_LIMIT },
+    (request) => enabled().retrieval.test(request.params.id, request.body, principalOf(request).id),
   );
 
   app.register((scope, _options, done) => {
