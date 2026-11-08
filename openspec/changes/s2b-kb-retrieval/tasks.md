@@ -134,7 +134,7 @@ Minimal mergeable slice: 8.1–8.2 为首刀：API 方法是 `createKbMethods` �
 
 ## 9. web：模型 tab 的重排模型（model-registry「模型 tab」的重排模型与改名后的探活调用）
 
-- [ ] 9.1 原地重构：`kb-embedding-dialog.tsx` 改名 `kb-model-dialog.tsx`，加 `kind` 属性，嵌入模型的行为与文案不变（标题、重建确认只对嵌入生效）。测试先行：`web/test/center-models-kb.test.tsx` 里既有嵌入对话框与「更换嵌入模型需确认」用例原样全绿。验证：`npm run test:focus --workspace web -- center-models-kb` 全过（vitest 输出里能看到该文件）；`git grep -n kb-embedding-dialog -- server web docs/architecture` 退出 1。
+- [x] 9.1 原地重构：`kb-embedding-dialog.tsx` 改名 `kb-model-dialog.tsx`，加 `kind` 属性，嵌入模型的行为与文案不变（标题、重建确认只对嵌入生效）。测试先行：`web/test/center-models-kb.test.tsx` 里既有嵌入对话框与「更换嵌入模型需确认」用例原样全绿。验证：`npm run test:focus --workspace web -- center-models-kb` 全过（vitest 输出里能看到该文件）；`git grep -n kb-embedding-dialog -- server web docs/architecture` 退出 1。
 - [ ] 9.2 测试先行：在 `web/test/center-models-kb.test.tsx` 加「重排模型」场景（编辑、保存后探活、`探活`、`清除` 的取消与确认）；实现 `kb-section.tsx` 的重排模型一行与清除确认框（拷入层 alert-dialog）。`web/e2e/ui-walk-center-kb.ts` 加一段：`/api/kb/status`（`enabled:true`）与 `/api/kb/settings`（已配置重排模型）由 route 应答，改以管理员 `lisi` 登录（模型 tab 是 `adminOnly`，成员访问 `GET /api/models` 为 403，会让 error oracle 变红）。这一段在 `web/e2e/ui-walk.spec.ts` 里是独立的 `test()`，有自己的 page 与 oracle（oracle 每个 `test()` 只认一轮登录与登出，`ui-walk-oracle.ts:186-195`）；`web/e2e/ui-walk-composer.ts` 的 `login()` 原地加 `account` 参数（缺省 `zhangsan`，密码同为 `demo`），不另写登录函数；在桌面与 390 px 宽度下打开模型 tab 看到重排模型一行，过 error oracle。验证：`npm run test:focus --workspace web -- center-models-kb` 全过；`make ui-walk` 退出 0；PR 附两种宽度的截图。
 - [ ] 9.3 验收清单 CK 节加 CK-14（管理员配置重排模型、探活、清除；配置后成员的检索测试照常有结果；桌面与手机宽度、浅色与深色主题下布局不溢出），结论 `待签`。验证：`npm run test:focus --workspace web -- functional-checklist` 全过。
 
