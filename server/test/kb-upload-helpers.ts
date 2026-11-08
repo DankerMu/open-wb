@@ -163,16 +163,22 @@ export async function withDiskWatch(
   }
 }
 
-/** 占住该库的写锁，直到调用返回的函数；后面的上传在这期间排队。 */
-export function holdWriteLock(world: IngestWorld): () => Promise<void> {
+/**
+ * 占住该库的写锁，直到调用返回的函数；后面的上传在这期间排队。`holder` 为 `rebuild` 时以重建器的身份持锁：写操作不排队，
+ * 立即得到 `rebuilding`。
+ */
+export function holdWriteLock(
+  world: IngestWorld,
+  holder: "write" | "rebuild" = "write",
+): () => Promise<void> {
   let release = (): void => undefined;
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const holder = world.locks.write(world.baseId, () => held);
+  const holding = world.locks[holder](world.baseId, () => held);
   return async () => {
     release();
-    await holder;
+    await holding;
   };
 }
 

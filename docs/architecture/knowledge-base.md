@@ -380,6 +380,26 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 
 审计：成功时与换行同一事务写 `kb.ingest`，detail 恰为 `{id, source:"workspace", reingest:true, documentId}`，`documentId` 是本地文档 id，`workspace_id` 列是该工作空间。读取被拒不写 `kb.ingest_reject`。
 
+**单轮检索与检索测试**（`server/src/kb/retrieval.ts`、`kb/ragflow-retrieval.ts`，s2b-kb-retrieval 组 4；[ADR-0017](../adr/0017-agentic-retrieval-model-driven.md)）。`kb` 模块只有单轮检索，没有改写问句、充分性判定与第二轮：要不要再查由会话里的模型决定。检索测试端点与 S2c 的会话内检索工具都经 `retrieveForBase` 这一个函数检索，客户端的检索方法只在这里被调用（`server/test/kb-retrieval-canonical.test.ts` 扫源码守住）。
+
+- **请求**：对该库当前的 `dataset_id`（不是重建中的 `rebuild_dataset_id`）发 `POST /api/v1/retrieval`，body 恰为 `{question, dataset_ids:[<dataset_id>], similarity_threshold, vector_similarity_weight, page:1, page_size:6}`。不发 `top_k`、`keyword`、`highlight`、`use_kg` 与 `document_ids`（带 `document_ids` 时召回面不同，命中分可以是 0，实测记录续篇 §19.1）。
+- **参数恒显式传**：每个库的阈值与向量权重存在本地 `knowledge_bases` 的两列（迁移 051，`retrieval_threshold`、`retrieval_vector_weight`，0–1，CHECK 约束），新库与升级前已有的库缺省都是**阈值 0.2、向量权重 0.7**。RAGFlow 数据集上的检索字段经 API 改不了（`PUT` 回 `code:101`，续篇 §19.2），不传就落到 RAGFlow 自己的缺省（阈值 0.2、权重相当于 0.3），所以每次检索都把库里存的两个值显式传过去。
+- **结果**：`code:0` 时读 `data.chunks`，须是数组（零命中为 `[]`），每项须有字符串 `document_id`、`content` 与数字 `similarity`，否则按「成功应答缺字段」为 503 `kb_unavailable`。检索路由的 HTTP 200 `code:102` 是「检索失败」，映射为 503 `kb_unavailable`；`code:101` 为 400 `kb_rejected`；其余照通用映射。RAGFlow 的 message 不进应答与日志。
+- **命中关联**：切片的 `document_id` 只对本库的本地文档行（`ragflow_document_id`）关联，名称取本地 `name`；关联不上的切片丢弃，不报错，不暴露 RAGFlow 侧或别的库的文档名。同一文档的多条切片各成一条命中，次序同 RAGFlow 应答，本系统不重排序。命中为 `{documentId, name, similarity, content}`，`documentId` 是本地文档 id。零候选或全部丢弃时为空数组。
+- **已知行为：候选由全文匹配圈定**。阈值设为 0 时也只回与问句有词重叠的切片（续篇 §19.1，[INFERENCE] 候选由全文匹配圈定，向量分只参与排序和阈值）。不带重排时三个分数恒等，都等于「向量权重 × 向量相似度」，所以纯语义的问句在低向量权重下可能零命中；要调的是本库的向量权重，不是问句。
+
+**检索测试端点**：`POST /api/kb/bases/:id/retrieval`，只对所有者，body limit 16 KiB，在 content-parser 归属集（坏 JSON、空 body、非 JSON 媒体类型、超限都是 400 `bad_request`），应答带 `Cache-Control: no-store`。依次判定，前三步都不发出站请求、不写审计：
+
+1. 所有权：别人的或不存在的 id 404 `not_found`，先于 body 解析（坏 JSON 也是 404）。
+2. body 键集恰为 `question`、`threshold`、`vectorWeight`：`question` 去掉首尾空白后非空、至多 1000 码点、不含 C0 控制字符（`\t`、`\n` 除外）与 DEL，原样发出、不 trim；两个参数是 0–1 的有限数字（含两端）。不符 400 `bad_request`，先于 `state`。
+3. `state` 不是 `ready`（含 `rebuild_failed`）：409 `kb_rebuilding`。
+4. 两个参数与已存值逐个比较（数值相等）。相同：不取锁、不写、不审计，直接检索（重建器持锁时照样能检索）。不同：取该库的写锁，排在在途的入库、上传、重新入库、移出与删库之后；锁正被重建器持有时 409 `kb_rebuilding`。取锁后重读：库已删 404 `not_found`，`state` 不是 `ready` 409；用重读的值再比较一次，已相同（并发的相同提交）就不写、不审计；仍不同才在同一事务里写两列并审计 `kb.retrieval_settings`，然后释放锁。写入或审计失败：事务回滚，通用 500（body 不声称任何 typed code），不检索，参数不变。
+5. 在锁外检索，用的是库里存的行（写回后的值），不用请求 body。写回成功之后检索失败时，参数已经保存，应答是检索的失败（如 503 `kb_unavailable`）。
+
+成功 200 恰为 `{hits, retrieval}`：`hits` 是上面的命中数组，`retrieval` 是 `{threshold, vectorWeight}`，取这次检索实际使用的已存值，与 `BaseView.retrieval` 同形。检索本身不写审计。
+
+审计：`kb.retrieval_settings` 只在参数实际写回时写一条，与两列的写入同一事务，actor 为请求的所有者，`workspace_id` 列为 null，标题是固定短句「修改检索参数」；detail 恰为 `{id, before:{threshold, vectorWeight}, after:{threshold, vectorWeight}}`，`id` 是知识库 id，`before` 取锁内重读的值，`after` 是提交的值。问句只发给 RAGFlow，不进审计与日志。
+
 **嵌入模型更换与全量重建**（`server/src/kb/rebuild.ts`、`kb/settings.ts`，组 14）。换嵌入模型的数据集不能就地改：`PUT /datasets/<id>` 改 `embedding_model` 不重算向量（实测记录 §6），所以每个库建一代新数据集，把入库原件从旧数据集搬过去。
 
 确认：`PUT /api/kb/settings` 带 `confirmRebuild:true` 换嵌入身份，下发成功后在同一事务里写设置、嵌入代数加一、全部知识库置 `rebuilding`、`kb_settings.rebuild_actor_id` 记为这次的管理员，并审计两条：`kb.settings` 与 `kb.rebuild`（detail 恰为 `{bases, documents}`，受影响的库数与文档数）。提交之后唤醒重建器。重建期间：入库、上传、重新入库与删库都 409 `kb_rebuilding`，移出也 409；再换嵌入身份 409 `kb_rebuilding`，只换密钥照常；有开编译的库时 `chatModelId` 照旧锁定。
