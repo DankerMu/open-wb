@@ -53,15 +53,27 @@ Minimal mergeable slice: atomic - 服务端加键与 web 解析器必须同 PR�
 
 ## 3. 假 RAGFlow 检索路由与客户端（ragflow-backend「RAGFlow 接口实测记录」的检索覆盖、「RAGFlow 出站请求」的 `POST /retrieval` 一行）
 
-- [ ] 3.1 核对 Context：实测记录续篇 §19.1–§19.6；`server/test/support/fake-ragflow.mjs` 的 `ROUTES` 与兄弟文件写法；`server/src/kb/ragflow-models.ts` 的 `modelCalls(json)` 并入方式；`ragflow-route.ts` 的 `Route` 与 `API` 常量。验证：在 issue 里列出 §19 里协议应答的键与码。
-- [ ] 3.2 测试先行：新 `server/test/support/fake-ragflow-retrieval.mjs`（加 `.d.mts`），挂到 `ROUTES`：
+- [x] 3.1 核对 Context：实测记录续篇 §19.1–§19.6；`server/test/support/fake-ragflow.mjs` 的 `ROUTES` 与兄弟文件写法；`server/src/kb/ragflow-models.ts` 的 `modelCalls(json)` 并入方式；`ragflow-route.ts` 的 `Route` 与 `API` 常量。验证：在 issue 里列出 §19 里协议应答的键与码。
+- [x] 3.2 测试先行：新 `server/test/support/fake-ragflow-retrieval.mjs`（加 `.d.mts`），挂到 `ROUTES`：
   - `POST /api/v1/retrieval` 回 §19.1 形状的 `{chunks, doc_aggs, labels, total}`，切片键取 §19.1 那十六个；零命中回 §19.1 的原样 `{chunks:[], doc_aggs:[], labels:null, total:0}`。
   - 命中由用例脚本化（数据集 → 切片列表与分数），夹具不实现检索算法。
   - 协议应答：§19.1 表里六条 `code:101` 与不存在数据集的 `code:404`；`rerank_id` 指向不存在的模型时回 `code:102`（§19.4）。
   - 故障注入：「带 `rerank_id` 时回 `code:102`」开关；「任意检索请求回指定 `code`（101 / 102，不论是否带 `rerank_id`）」；切片缺字段；挂起。
   - 记录收到的 JSON body。
   附夹具自测（覆盖两种 `code` 注入与零命中）。验证：夹具自测全过。
-- [ ] 3.3 新 `server/src/kb/ragflow-retrieval.ts`：检索路由（路径以 `${API}/retrieval` 拼），`code:102` 为类型化结果「检索失败」，读 `data.chunks`（须是数组，零命中为 `[]`）的 `document_id`、`content`、`similarity`，`chunks` 不是数组或缺字段即 `kb_unavailable`。经 `retrievalCalls(json)` 并入 `createRagflowClient`，`ragflow-client.ts` 只加并入的一行。测试先行：新 `server/test/kb-ragflow-client-retrieval.test.ts`：成功读取、零命中为空数组、`102` 为检索失败、`101` 为 `kb_rejected`、`404` 为 `kb_unavailable`、缺字段、结果与 stderr 不含 message 哨兵。验证：`npm run test:focus --workspace server -- kb-ragflow-client-retrieval` 全过，`ragflow-client.ts` 行数增加不超过 5 行。
+- [x] 3.3 新 `server/src/kb/ragflow-retrieval.ts`：检索路由（路径以 `${API}/retrieval` 拼），`code:102` 为类型化结果「检索失败」，读 `data.chunks`（须是数组，零命中为 `[]`）的 `document_id`、`content`、`similarity`，`chunks` 不是数组或缺字段即 `kb_unavailable`。经 `retrievalCalls(json)` 并入 `createRagflowClient`，`ragflow-client.ts` 只加并入的一行。测试先行：新 `server/test/kb-ragflow-client-retrieval.test.ts`：成功读取、零命中为空数组、`102` 为检索失败、`101` 为 `kb_rejected`、`404` 为 `kb_unavailable`、缺字段、结果与 stderr 不含 message 哨兵。验证：`npm run test:focus --workspace server -- kb-ragflow-client-retrieval` 全过，`ragflow-client.ts` 行数增加不超过 5 行。
+  - 组 3 接口与夹具约定（#1913 fixture 审查定，组 4、组 7 照此调用）：
+    - 客户端方法 `retrieve({question, datasetId, threshold, vectorWeight, rerankId?}) → Promise<Result<RetrievalChunk[], {kind: "retrieval_failed"}>>`，`Result` 即 `ragflow-route.ts` 的既有联合（另含 `kb_rejected` / `kb_unavailable`）。整份 body 由 `ragflow-retrieval.ts` 拼，恰为 D2 形状：`{question, dataset_ids:[datasetId], similarity_threshold, vector_similarity_weight, page:1, page_size:6}`，有 `rerankId` 时多一键 `rerank_id`，没有时连键都不发（不发 `null`）；不发 `top_k`、`keyword`、`highlight`、`use_kg`、`document_ids`。组 7 的重试只是不带 `rerankId` 再调一次。
+    - `RetrievalChunk` 为 `{ragflowDocumentId, content, similarity}`：只取三键，其余十三键丢弃，次序同应答。命名与 D2 的本地 `RetrievalHit.documentId` 区分（两份真相）。
+    - 结果映射照搬 `interpret`：只有 HTTP 200 且 `code:102` 才是 `{kind:"retrieval_failed"}`，只看 code、不看 message；非 200 的 `code:101` / `code:102` 落到通用映射 `kb_rejected`（D3「其余按通用映射」，`kb-ragflow-client.test.ts` 已钉住），其它非 200 为 `kb_unavailable`；挂起超过注入的总期限是 `kb_unavailable`，不是 `retrieval_failed`（spec「超时不降级」）。
+    - 夹具复用既有能力，不另做一套：任意请求回指定 code 用 `answer()` 或 `fault(…, {kind:"combo", code, message})`；切片缺字段用 `fault` combo `code:0` 加自定义 `data`；挂起用 `fault hang` / `hold`；记录 body 即 `requests()[i].json`。新文件只加两样：
+      - `setRetrievalHits(datasetId, hits: {documentId, content, similarity}[])`：脚本化命中。其余十三个 §19.1 切片键：`dataset_id` 取该数据集，`document_keyword` 取已种文档的名称（没有则占位名），三个分数同值（§19.1 不带重排时恒等），其余取 §19.1 样例的占位值。
+      - `failRerank(message?: string)`：此后每个带 `rerank_id` 的检索都回 `code:102` 与该 message（缺省取 §19.4 的 `failed to get rerank model` 前缀原文），持续生效直到夹具关闭，供组 7 的连续三次检索与 message 哨兵。
+      - 协议应答：§19.1 表六条 `code:101` 按表的输入与原样 message；不存在的数据集为 HTTP 200 `code:404` `Resource not found`（复用 `notFound()`）；`rerank_id` 指向账号里没有的模型为 `code:102`（§19.4），所以 `addModel` 的 `modelType` 放宽到 `"rerank"`。多个参数同时非法、101 与 404 谁先：记录里没有，文件头标「外推，用例不要钉死」，同 `fake-ragflow.mjs` 头注释的写法。
+    - 夹具自测逐条：六条 `code:101` 各一例（输入与原样 message）；不存在数据集 HTTP 200 `code:404`；`rerank_id` 无此模型 `code:102`；零命中原样（含 `message:null`）；带命中时 `data` 恰四键、切片恰十六键；`failRerank` 只影响带 `rerank_id` 的请求；每例断言 `unknownRoutes()` 为空（防路由没挂上时 404 假通过）。
+    - 3.3 用例另加：带与不带 `rerankId` 时 `requests()[0].json` 各恰为 D2 形状；非 200 的 `code:102` 为 `kb_rejected`（不是 `retrieval_failed`）；挂起超期为 `kb_unavailable`。
+    - PR Boundary 补：`fake-ragflow.mjs` 的 `createState` 加检索状态、`ROUTES` 挂载、`start()` 返回加 `...retrievalViews(…)`（同 `pipelineViews`），行数上限 800；`fake-ragflow.d.mts` 的 `FakeRagflowServer` 加两个方法与 `addModel` 的 `"rerank"`；`ragflow-client.ts` 头注释「101 / 102 为 kb_rejected」改为点明检索路由的 102 例外（措辞不带路径字样，见下条），与并入行合计增加不超过 5 行。
+    - 必须保持：`/retrieval` 字样（含注释）在 `server/src` 里只出现在 `kb/ragflow-retrieval.ts`，`ragflow-client.ts` 的并入行与注释都不带（组 4 的扫描用例）；其它路径照旧回 404 并标 `unknown`；`fake-ragflow.test.ts` 不动；`kb-ragflow-client.test.ts`（768 行）只原地改客户端方法清单的计数断言（加 `"retrieve"`），不加用例。
 
 Suggested fixture level: expanded - 带凭证的出站请求（outbound with credentials）与新的类型化失败映射。
 Minimal mergeable slice: atomic - 夹具与客户端路由共一条验证路径：客户端用例只能对夹具跑（真 RAGFlow 不进 CI），夹具的协议应答只有客户端用例消费；单独合入夹具，它的自测只证明自洽，不证明协议映射（S2a 组 5 先例）。

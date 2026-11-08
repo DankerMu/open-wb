@@ -11,7 +11,8 @@
  * 重复；上传带 `?type=` 的合法取值；multipart 缺结束边界；一次多个文件里有被拒的。
  *
  * 文档列表在 `fake-ragflow-list.mjs`（组 11），线上字节计数在 `fake-ragflow-wire.mjs`（组 12），内置模板、模板组、内置 pipeline
- * 与画布在 `fake-ragflow-pipeline.mjs`（组 9 第二刀），数据集任务日志在 `fake-ragflow-ingestions.mjs`（组 9 第三刀）。
+ * 与画布在 `fake-ragflow-pipeline.mjs`（组 9 第二刀），数据集任务日志在 `fake-ragflow-ingestions.mjs`（组 9 第三刀），检索在
+ * `fake-ragflow-retrieval.mjs`（s2b-kb-retrieval 组 3，协议抄自续篇 `docs/reviews/2026-11-08-ragflow-rc2-retrieval.md`）。
  * `parse_type:2` 的数据集在这里：`pipeline_id` 要是夹具里的画布，读回的 `parser_id` 是 `general`（§4.6）；同时带 `parser_id`
  * 的组合没有记录，落到未知路由。解析触发对绑定画布标题超过 32 个字符的这类数据集照实例计 0（`MAX_PIPELINE_TITLE`），不看数据集名。
  *
@@ -50,6 +51,11 @@ import {
   PIPELINE_ROUTES,
   pipelineViews,
 } from "./fake-ragflow-pipeline.mjs";
+import {
+  createRetrievalState,
+  RETRIEVAL_ROUTES,
+  retrievalViews,
+} from "./fake-ragflow-retrieval.mjs";
 import {
   createScript,
   failure,
@@ -490,6 +496,7 @@ const ROUTES = [
   ["GET", `${DATASET}/ingestions`, listIngestions],
   ...PIPELINE_ROUTES,
   ...MODEL_ROUTES,
+  ...RETRIEVAL_ROUTES,
 ].map(([method, path, handler, options]) => ({
   method,
   pattern: new RegExp(`^${path}$`, "u"),
@@ -574,6 +581,7 @@ function createState() {
     datasets,
     models: createModelState(),
     pipeline: createPipelineState(),
+    retrieval: createRetrievalState(),
     add(name, parserId, embeddingModel, pipelineId) {
       const canonical = parserId === "naive" ? "general" : parserId;
       const dataset = {
@@ -713,6 +721,7 @@ export async function start(options = {}) {
     ...modelViews(state.models),
     ...pipelineViews(state.pipeline),
     ...ingestionViews(state),
+    ...retrievalViews(state),
     datasets: () =>
       [...state.datasets.values()].map(({ id, name, parserId, embeddingModel }) => ({
         id,

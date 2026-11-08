@@ -9,12 +9,14 @@
  *
  * 对外是一个路由一个方法，三种调用本身不导出：调用方拼不出路径，所以 `GET …/instances/<实例>`（明文回显上游
  * 密钥）、清空账号缺省与 `/providers` 下的删除（D7）在这里根本没有写法，不靠黑名单。`PATCH /models/default` 是设与
- * 清共用的路径，`setDefaultModel` 拒绝空名字，所以这个调用面只能设。模型下发一块在 `ragflow-models.ts`，判定原语在
- * `ragflow-route.ts`：兄弟文件只在 `createRagflowClient` 里经闭包参数拿到 `json`，模块级没有发请求的写法。
+ * 清共用的路径，`setDefaultModel` 拒绝空名字，所以这个调用面只能设。模型下发一块在 `ragflow-models.ts`，检索在
+ * `ragflow-retrieval.ts`，判定原语在 `ragflow-route.ts`：兄弟文件只在 `createRagflowClient` 里经闭包参数拿到 `json`，
+ * 模块级没有发请求的写法。
  *
  * 结果按次序判定：路由专属组合（只认 HTTP 200，实测全部如此，§12 未知路由的 HTTP 404 + `code:404` 不能算不存
- * 在）→ 2xx 且 `code:0` → `code` 101 / 102 为 `kb_rejected` → HTTP 401 或 `code` 401 / 403 为 `kb_unavailable`
- * 并写一行 `kb_upstream_auth_failed`（60 秒至多一行）→ 其余 `kb_unavailable`。3xx 不读正文。
+ * 在）→ 2xx 且 `code:0` → `code` 101 / 102 为 `kb_rejected`（例外：检索路由 HTTP 200 的 102 已在第一步判为检索失败）
+ * → HTTP 401 或 `code` 401 / 403 为 `kb_unavailable` 并写一行 `kb_upstream_auth_failed`（60 秒至多一行）→ 其余
+ * `kb_unavailable`。3xx 不读正文。
  *
  * RAGFlow 的 message 只用于上面的前缀判定，结果只有 `kind` 与调用点要读的字段，不带 message、正文与原始 `code`。
  * 密钥只进请求头，一个请求读一次句柄。任何错误都不外抛：不发出的请求（空 id、空 `api_key`）同样是
@@ -30,6 +32,7 @@ import type { Socket } from "node:net";
 import { pipeline, type Readable } from "node:stream";
 import type { KbKeyHandle } from "./key-file.js";
 import { modelCalls } from "./ragflow-models.js";
+import { retrievalCalls } from "./ragflow-retrieval.js";
 import {
   API,
   type Envelope,
@@ -516,6 +519,7 @@ export function createRagflowClient(options: {
 
   return {
     ...modelCalls(json),
+    ...retrievalCalls(json),
 
     /** 版本串，不带密钥。 */
     version(): Promise<Result<string>> {
