@@ -65,6 +65,7 @@ export interface BaseBody {
   stateMessage: string | null;
   documents: number;
   compile: unknown;
+  retrieval: { threshold: number; vectorWeight: number };
   createdAt: number;
 }
 

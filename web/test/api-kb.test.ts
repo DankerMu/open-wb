@@ -82,6 +82,7 @@ const BASE: BaseView = {
   stateMessage: null,
   documents: 0,
   compile: COMPILE,
+  retrieval: { threshold: 0.2, vectorWeight: 0.7 },
   createdAt: AT,
 };
 
@@ -216,6 +217,8 @@ const BASE_REJECTED: Case[] = [
     stateMessage: NULLABLE_STRING_WRONG,
     documents: COUNT_WRONG,
     compile: ["pending", 1, []],
+    // 内层形状的拒绝用例在 `api-kb-retrieval.test.ts`。
+    retrieval: [],
     createdAt: AT_WRONG,
   }),
   ...inside(

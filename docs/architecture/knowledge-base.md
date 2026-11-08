@@ -112,7 +112,7 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 | `POST /api/kb/bases` | 建库，201 `BaseView` |
 | `DELETE /api/kb/bases/:id` | 删库，204 |
 
-`BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：`raptor`、`graph` 是布尔；`documents` 是本地文档行数；`createdAt` 是 epoch 毫秒整数；两个开关都为 0 的库 `compile` 恒为 `{raptor:"off", graph:"off"}`，不发出站请求。开了开关的库：建库的 201 不读 RAGFlow，开着的类型为 `pending`、关着的为 `off`；列表里关着的类型为 `off`，开着的按下面的「编译状态」现读，取 `pending` / `running` / `done` / `failed`，整库读不到时 `compile` 为 `null`。
+`BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, retrieval, createdAt}`：`raptor`、`graph` 是布尔；`retrieval` 是该库的检索参数 `{threshold, vectorWeight}`，取迁移 051 的两列原值（都是 0–1 的数字，建库为 `{0.2, 0.7}`），只读本地行；`documents` 是本地文档行数；`createdAt` 是 epoch 毫秒整数；两个开关都为 0 的库 `compile` 恒为 `{raptor:"off", graph:"off"}`，不发出站请求。开了开关的库：建库的 201 不读 RAGFlow，开着的类型为 `pending`、关着的为 `off`；列表里关着的类型为 `off`，开着的按下面的「编译状态」现读，取 `pending` / `running` / `done` / `failed`，整库读不到时 `compile` 为 `null`。
 
 **建库**：body 键集是 `name`、`template`、`raptor?`、`graph?`。`name` 1–64 码点，无 C0 与 DEL，不 trim。依次判定：
 

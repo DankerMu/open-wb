@@ -132,7 +132,7 @@ describe("普通模板的建库请求", () => {
     });
   });
 
-  it("201 的 BaseView 恰十键，只有一次建数据集，不为应答读 RAGFlow", async () => {
+  it("201 的 BaseView 恰十一键，只有一次建数据集，不为应答读 RAGFlow", async () => {
     const world = await ready();
     const response = await createBase(world, { ...VALID, raptor: false, graph: false });
     expect(response.statusCode).toBe(201);
@@ -148,6 +148,7 @@ describe("普通模板的建库请求", () => {
       stateMessage: null,
       documents: 0,
       compile: COMPILE_OFF,
+      retrieval: { threshold: 0.2, vectorWeight: 0.7 },
       createdAt: expect.any(Number),
     });
     expect(Number.isSafeInteger(view.createdAt) && view.createdAt >= 0).toBe(true);
