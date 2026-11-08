@@ -32,6 +32,8 @@ import {
   type DocumentView,
   type IngestFromWorkspaceInput,
   type KbIngestResult,
+  type KbRetrievalInput,
+  type KbRetrievalResult,
   type KbSettingsView,
   type KbStatus,
   type UpdateKbSettingsInput,
@@ -291,6 +293,11 @@ export type ApiClient = {
     options?: ApiRequestOptions,
   ): Promise<DocumentView>;
   removeKbDocument(baseId: string, documentId: string, options?: ApiRequestOptions): Promise<void>;
+  retrieveFromKnowledgeBase(
+    id: string,
+    input: KbRetrievalInput,
+    options?: ApiRequestOptions,
+  ): Promise<KbRetrievalResult>;
   getSessionCapabilities(
     sessionId: string,
     options?: ApiRequestOptions,
@@ -656,8 +663,11 @@ export type {
   DocumentView,
   IngestFromWorkspaceInput,
   KbIngestResult,
+  KbRetrievalInput,
+  KbRetrievalResult,
   KbSettingsView,
   KbStatus,
+  RetrievalHit,
   UpdateKbSettingsInput,
 } from "./api-kb.js";
 export {

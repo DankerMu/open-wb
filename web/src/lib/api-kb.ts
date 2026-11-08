@@ -2,7 +2,7 @@ import type { ApiClient, ApiClientOptions, ApiError } from "./api.js";
 import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-json.js";
 
 /**
- * 知识库的 API 客户端（s2a-kb-ragflow design D19）：状态、设置、知识库、文档、上传，十三个方法对应十三条路由。
+ * 知识库的 API 客户端（s2a-kb-ragflow design D19）：状态、设置、知识库、文档、上传，十四个方法对应十四条路由。
  * 应答形状以 knowledge-bases 与 ragflow-backend 两份 spec 为准，严格解析：多键、少键、类型不符即无效应答。
  * 只判键集、类型与枚举，不交叉判字段之间的关系（`chunkCount` 只在 `done` 时为数字之类是服务端的契约）。
  */
@@ -142,6 +142,20 @@ export type KbIngestResult = {
   rejected: { path: string; reason: (typeof REJECT_REASONS)[number]; message: string }[];
 };
 
+/** 检索测试的一条命中：`documentId` 是本地文档 id；同一文档可有多条，次序同应答。 */
+export type RetrievalHit = {
+  documentId: string;
+  name: string;
+  similarity: number;
+  content: string;
+};
+
+/** `POST …/retrieval` 的 body：原样序列化，不 trim。 */
+export type KbRetrievalInput = { question: string; threshold: number; vectorWeight: number };
+
+/** `POST …/retrieval` 的 200 应答：`hits` 可为空数组，`retrieval` 是写回后该库存的参数。 */
+export type KbRetrievalResult = { hits: RetrievalHit[]; retrieval: BaseView["retrieval"] };
+
 type KbTransport = {
   request(
     path: string,
@@ -174,6 +188,7 @@ type KbMethods = Pick<
   | "uploadToKnowledgeBase"
   | "reingestKbDocument"
   | "removeKbDocument"
+  | "retrieveFromKnowledgeBase"
 >;
 
 const STATUS_KEYS = [
@@ -451,6 +466,29 @@ function parseIngestResult(value: unknown): KbIngestResult | null {
   return documents && rejected ? { documents, rejected } : null;
 }
 
+/** 与 `parseRetrieval` 一致，`similarity` 只认有限数字，不在 web 侧校验 0–1。 */
+function parseRetrievalHit(value: unknown): RetrievalHit | null {
+  if (!hasExactlyKeys(value, ["documentId", "name", "similarity", "content"])) {
+    return null;
+  }
+  const { documentId, name, similarity, content } = value;
+  return typeof documentId === "string" &&
+    typeof name === "string" &&
+    isFiniteNumber(similarity) &&
+    typeof content === "string"
+    ? { documentId, name, similarity, content }
+    : null;
+}
+
+function parseRetrievalResult(value: unknown): KbRetrievalResult | null {
+  if (!hasExactlyKeys(value, ["hits", "retrieval"])) {
+    return null;
+  }
+  const hits = parseJsonArray(value.hits, parseRetrievalHit);
+  const retrieval = parseRetrieval(value.retrieval);
+  return hits && retrieval ? { hits, retrieval } : null;
+}
+
 function basePath(id: string): string {
   return `/api/kb/bases/${encodeURIComponent(id)}`;
 }
@@ -557,6 +595,15 @@ export function createKbMethods(
 
     removeKbDocument(baseId, documentId, options) {
       return remove(documentPath(baseId, "", documentId), options?.signal);
+    },
+
+    retrieveFromKnowledgeBase(id, input, options) {
+      return parsed(
+        `${basePath(id)}/retrieval`,
+        jsonBody("POST", input, requestOptions(options?.signal)),
+        200,
+        parseRetrievalResult,
+      );
     },
   };
 }
