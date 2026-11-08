@@ -188,6 +188,7 @@ describe("建库应答不读 RAGFlow", () => {
       stateMessage: null,
       documents: 0,
       compile: { raptor: "pending", graph: "off" },
+      retrieval: { threshold: 0.2, vectorWeight: 0.7 },
       createdAt: expect.any(Number),
     });
     expect((await createdBase(world, "普通库")).compile).toEqual(COMPILE_OFF);

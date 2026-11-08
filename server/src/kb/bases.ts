@@ -165,9 +165,26 @@ export async function createGeneration(
   return { kind: "ok" as const, value };
 }
 
+/** `retrieval` 取库行两列的原值（迁移 051 的 CHECK 保证 0–1），不取整、不夹逼。 */
 function viewOf(base: KnowledgeBase, documents: number, compile: CompileView) {
   const { id, name, template, raptor, graph, state, stateMessage, createdAt } = base;
-  return { id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt };
+  const retrieval = {
+    threshold: base.retrievalThreshold,
+    vectorWeight: base.retrievalVectorWeight,
+  };
+  return {
+    id,
+    name,
+    template,
+    raptor,
+    graph,
+    state,
+    stateMessage,
+    documents,
+    compile,
+    retrieval,
+    createdAt,
+  };
 }
 
 /** 201：不读 RAGFlow，开着的类型还没有产出。 */

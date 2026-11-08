@@ -100,6 +100,8 @@ export type BaseView = {
   stateMessage: string | null;
   documents: number;
   compile: { raptor: CompileState; graph: CompileState } | null;
+  /** 该库的检索参数；0–1 由服务端保证。 */
+  retrieval: { threshold: number; vectorWeight: number };
   createdAt: number;
 };
 
@@ -196,6 +198,7 @@ const BASE_KEYS = [
   "stateMessage",
   "documents",
   "compile",
+  "retrieval",
   "createdAt",
 ];
 const DOCUMENT_KEYS = [
@@ -306,12 +309,27 @@ function parseCompile(value: unknown): BaseView["compile"] | undefined {
     : undefined;
 }
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value);
+
+/** 只认两键的有限数字，不在 web 侧校验 0–1（服务端 CHECK 是权威）。 */
+function parseRetrieval(value: unknown): BaseView["retrieval"] | null {
+  if (!hasExactlyKeys(value, ["threshold", "vectorWeight"])) {
+    return null;
+  }
+  const { threshold, vectorWeight } = value;
+  return isFiniteNumber(threshold) && isFiniteNumber(vectorWeight)
+    ? { threshold, vectorWeight }
+    : null;
+}
+
 function parseBaseView(value: unknown): BaseView | null {
   if (!hasExactlyKeys(value, BASE_KEYS)) {
     return null;
   }
   const { id, name, template, raptor, graph, state, stateMessage, documents, createdAt } = value;
   const compile = parseCompile(value.compile);
+  const retrieval = parseRetrieval(value.retrieval);
   if (
     typeof id !== "string" ||
     typeof name !== "string" ||
@@ -322,11 +340,24 @@ function parseBaseView(value: unknown): BaseView | null {
     !isNullableString(stateMessage) ||
     !isNonNegativeSafeInteger(documents) ||
     compile === undefined ||
+    retrieval === null ||
     !isNonNegativeSafeInteger(createdAt)
   ) {
     return null;
   }
-  return { id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt };
+  return {
+    id,
+    name,
+    template,
+    raptor,
+    graph,
+    state,
+    stateMessage,
+    documents,
+    compile,
+    retrieval,
+    createdAt,
+  };
 }
 
 function parseBaseList(value: unknown): BaseView[] | null {

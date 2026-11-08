@@ -24,6 +24,7 @@ const BASE_KEYS = [
   "id",
   "name",
   "raptor",
+  "retrieval",
   "state",
   "stateMessage",
   "template",
@@ -39,7 +40,7 @@ async function basesOf(world: World, who?: "member" | "peer" | "admin") {
 }
 
 describe("GET /api/kb/bases", () => {
-  it("应答恰为 {bases}，BaseView 恰十键，no-store", async () => {
+  it("应答恰为 {bases}，BaseView 恰十一键，no-store", async () => {
     const world = await ready();
     const view = await createdBase(world, "规范库", "manual");
     const response = await list(world);
@@ -103,6 +104,16 @@ describe("GET /api/kb/bases", () => {
         compile: COMPILE_OFF,
       }),
     ]);
+  });
+
+  it("retrieval 取库行两列的原值：store 直写 0.5 / 0.3 后列表读出同值，不读 RAGFlow", async () => {
+    const world = await ready();
+    const { id } = await createdBase(world, "规范库");
+    world.store.saveRetrieval(id, { threshold: 0.5, vectorWeight: 0.3 });
+    world.forget();
+    const [listed] = await basesOf(world);
+    expect(listed?.retrieval).toEqual({ threshold: 0.5, vectorWeight: 0.3 });
+    expect(world.sent()).toEqual([]);
   });
 
   it("两开关为 0 的库 compile 恒为 off，不发出站请求", async () => {

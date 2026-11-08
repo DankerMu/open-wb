@@ -50,11 +50,16 @@ Minimal mergeable slice: 1.1–1.2（迁移文件与 schema 用例）可独立�
 
 ## 2. `BaseView.retrieval`（knowledge-bases「知识库端点」的视图与 201 应答）
 
-- [ ] 2.1 测试先行：
-  - `server/test` 里断言 `BaseView` 恰为十一个键的既有用例原地改（列表、建库 201，含「建库应答不读 RAGFlow」的 `retrieval:{threshold:0.2, vectorWeight:0.7}`），先看到红。
+- [x] 2.1 测试先行：
+  - `server/test` 里断言 `BaseView` 恰为十个键（`viewOf` 现为十键，加 `retrieval` 后十一键）的既有用例原地改（列表、建库 201，含「建库应答不读 RAGFlow」的 `retrieval:{threshold:0.2, vectorWeight:0.7}`），先看到红。
   - 新 `web/test/api-kb-retrieval.test.ts`：带 `retrieval` 的 `BaseView` 解析通过，缺 `retrieval` 或类型不符为 `requestFailed`。
   验证：两组用例先红。
-- [ ] 2.2 实现：`server/src/kb/bases.ts` 的 `viewOf` 加 `retrieval`；`web/src/lib/api-kb.ts` 的 `BaseView` 类型与解析器加 `retrieval`。两端在同一 PR。`docs/architecture/knowledge-base.md` 列举 `BaseView` 键的那一处加 `retrieval`。验证：`npm run test:focus --workspace server -- kb-bases`、`npm run test:focus --workspace web -- api-kb` 全过，`make typecheck` 退出 0。
+- [x] 2.2 实现：`server/src/kb/bases.ts` 的 `viewOf` 加 `retrieval`；`web/src/lib/api-kb.ts` 的 `BaseView` 类型与解析器加 `retrieval`。两端在同一 PR。`docs/architecture/knowledge-base.md` 列举 `BaseView` 键的那一处加 `retrieval`。验证：`npm run test:focus --workspace server -- kb-bases`、`npm run test:focus --workspace web -- api-kb` 全过，`make typecheck` 退出 0。
+  - 组 2 约定（#1915 fixture 审查定）：
+    - 服务端：`retrieval` 恰为 `{threshold, vectorWeight}`，取 store 行的 `retrievalThreshold` / `retrievalVectorWeight` 原值，不取整、不夹逼，建库 201 不读 RAGFlow、不重算。原地改：`kb-bases-list.test.ts` 的 `BASE_KEYS`、`kb-bases.test.ts` 的 201 `toEqual`、`kb-bases-compile.test.ts` 的 `toEqual`、`kb-bases-helpers.ts` 的 `BaseBody` 类型。另加一例：store 直写非缺省值（如 0.5 / 0.3）后列表视图读出同值。
+    - web 解析：`hasExactlyKeys(retrieval, ["threshold","vectorWeight"])`，两值都是有限数字（`typeof === "number"` 且 `Number.isFinite`），不在 web 侧校验 0–1（服务端 CHECK 是权威）。新 `web/test/api-kb-retrieval.test.ts` 的拒绝用例：`retrieval` 为 `null`、字符串、数组；缺内键或多内键；值为字符串或 `NaN`。原地改：`web/test/api-kb.test.ts` 的 `BASE` 常量加 `retrieval: {threshold: 0.2, vectorWeight: 0.7}`；`web/test/center-kb-support.tsx` 的 `base()` 工厂加 `retrieval` 并改「十键」注释。
+    - 文档与冒烟：`docs/architecture/knowledge-base.md` 的 `BaseView` 键列表加 `retrieval` 与一行说明；`smoke/kb.hurl` 列 `BaseView` 键的注释同步，建库应答处可加 `$.retrieval.threshold == 0.2`、`$.retrieval.vectorWeight == 0.7` 断言。主规格 `openspec/specs/knowledge-bases/spec.md` 归档时由 delta 并入，本 issue 不改。
+    - 不受影响（已核）：`web/e2e` 的 ui-walk 没有 `/api/kb/bases` 应答桩；`center-page.test.tsx` 与 `web/test/support.ts` 只回空列表或 `enabled:false`。
 
 Suggested fixture level: expanded - 改公共 API 的应答形状（public API），web 的严格解析器要同步。
 Minimal mergeable slice: atomic - 服务端加键与 web 解析器必须同 PR，任何一半单独合入都会让知识库 tab `requestFailed`（`web/src/lib/api-kb.ts` 以 `hasExactlyKeys` 严格比对键集）。
