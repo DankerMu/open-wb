@@ -64,11 +64,22 @@ fi
 mkdir -p "$(dirname "$DEST")"
 tmp="$(mktemp "$(dirname "$DEST")/.omp-fetch.XXXXXX")"
 cleanup() { rm -f "$tmp"; }
-trap cleanup EXIT INT HUP TERM
+# Signals exit with 128+signo; the exit runs the EXIT trap, so $tmp is removed in one place.
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 129' HUP
+trap 'exit 143' TERM
 
 curl_opts=(--fail --location --retry 3 --retry-delay 2 --retry-max-time 60
   --connect-timeout 15 --max-time 120 --output "$tmp")
-if ! curl "${curl_opts[@]}" "${OMP_RELEASE_URL}/${asset}"; then
+rc=0
+curl "${curl_opts[@]}" "${OMP_RELEASE_URL}/${asset}" || rc=$?
+# curl's own error codes are < 128; >= 128 means it was killed by a signal (cancel), so do not fall back.
+if [ "$rc" -ge 128 ]; then
+  echo "omp-fetch: primary download interrupted (curl exit ${rc}); not falling back" >&2
+  exit "$rc"
+fi
+if [ "$rc" -ne 0 ]; then
   rm -f "$tmp"
   echo "omp-fetch: primary download failed; retrying via GitHub API asset" >&2
   curl "${curl_opts[@]}" -H 'Accept: application/octet-stream' "${OMP_ASSET_API_URL}/${asset_id}"
