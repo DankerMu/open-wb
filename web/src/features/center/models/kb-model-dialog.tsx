@@ -15,6 +15,10 @@ const MESSAGES = {
   keyBlank: "密钥不能只有空白",
 } as const;
 
+/** 对话框服务的模型种类；标题按它取。 */
+type Kind = "embedding";
+const TITLE: Record<Kind, string> = { embedding: "知识库嵌入模型" };
+
 type Values = { name: string; baseUrl: string; apiKey: string };
 type Errors = Partial<Record<keyof Values, string>>;
 
@@ -52,6 +56,7 @@ type Props = {
   settings: KbSettingsView;
   pending: boolean;
   error: string | null;
+  kind: Kind;
   /** 确认框是否打开（`更换嵌入模型？`）。 */
   confirming: boolean;
   restoreFocus(): void;
@@ -62,14 +67,15 @@ type Props = {
 };
 
 /**
- * 知识库嵌入模型对话框（model-registry「模型 tab」的「知识库模型」段）：`名称`、`上游地址`、`密钥`。按「有打开的对话框」
+ * 知识库模型对话框（model-registry「模型 tab」的「知识库模型」段）：`名称`、`上游地址`、`密钥`；标题按 `kind` 取。按「有打开的对话框」
  * 条件挂载，关闭即丢弃表单值（含密钥）；密钥框恒为 `type="password"`、打开时为空，已配置时 placeholder `留空保留现有密钥`。
  * 更换嵌入模型的确认框叠在它上面：取消回到表单、值还在；`重建并保存` 恰发一次带 `confirmRebuild:true` 的保存。
  */
-export function KbEmbeddingDialog({
+export function KbModelDialog({
   settings,
   pending,
   error,
+  kind,
   confirming,
   restoreFocus,
   onSave,
@@ -103,7 +109,7 @@ export function KbEmbeddingDialog({
         pending={pending && !confirming}
         restoreFocus={restoreFocus}
         saveRef={saveRef}
-        title="知识库嵌入模型"
+        title={TITLE[kind]}
       >
         <TextField error={errors.name} label="名称">
           {(field) => (

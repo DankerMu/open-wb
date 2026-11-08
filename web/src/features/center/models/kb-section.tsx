@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/select";
 import type { ApiClient, KbSettingsView, ModelView } from "@/lib/api";
 import { RetryAlert } from "../kb/list.js";
-import { KbEmbeddingDialog } from "./kb-embedding-dialog.js";
+import { KbModelDialog } from "./kb-model-dialog.js";
 import { ProbeCell } from "./list.js";
 import { useKbSettings } from "./use-kb-settings.js";
 
@@ -173,9 +173,10 @@ export function KbSection({ client, models }: { client: ApiClient; models: reado
           />
           <BaseCounts onRetry={kb.retryRebuild} retrying={busy.has("retry")} view={view} />
           {form ? (
-            <KbEmbeddingDialog
+            <KbModelDialog
               confirming={form.confirm !== null}
               error={form.error}
+              kind="embedding"
               onCancel={kb.closeForm}
               onCancelConfirm={kb.cancelConfirm}
               onConfirm={() => void kb.confirmRebuild()}
