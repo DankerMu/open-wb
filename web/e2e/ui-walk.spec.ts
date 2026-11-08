@@ -10,6 +10,7 @@ import {
 import { holdRoute } from "./route-hold.js";
 import { walkActionRow } from "./ui-walk-action-row.js";
 import { allowFirstApproval, expectNoSettledRecord, generatingStatus } from "./ui-walk-approval.js";
+import { walkKbRetrieval } from "./ui-walk-center-kb.js";
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
@@ -115,6 +116,19 @@ test("upstream failure step shows the 401 sentence and the sanitised upstream te
   const options = { watchAssets: project === "desktop-light" };
   await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
     walkUpstreamFailure(page, oracle, project, EXPECTED_REPLY),
+  );
+});
+
+// 知识库检索测试（knowledge-bases「中心「知识库」tab」，s2b-kb-retrieval 8.5）：独立 test，自带登录、退出与 oracle
+// 实例；知识库 API 由 route 桩应答，步骤在 helper。主旅程与 ui-walk-center.ts 不动（那里断言知识库关闭）。
+test("knowledge base retrieval panel shows numbered hits and the empty state against stubbed kb routes", async ({
+  baseURL,
+  page,
+}, testInfo) => {
+  const project = walkProject(testInfo.project.name);
+  const options = { watchAssets: project === "desktop-light" };
+  await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
+    walkKbRetrieval(page, oracle, project),
   );
 });
 

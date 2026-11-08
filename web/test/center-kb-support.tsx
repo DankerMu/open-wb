@@ -12,6 +12,8 @@ import {
   type DocumentView,
   type IngestFromWorkspaceInput,
   type KbIngestResult,
+  type KbRetrievalInput,
+  type KbRetrievalResult,
   type KbStatus,
   type MountView,
 } from "../src/lib/api.js";
@@ -101,6 +103,7 @@ type Call = [method: string, ...args: unknown[]];
 /**
  * 假客户端：`statuses` 依次作为每次 `getKbStatus` 的应答（用完后重复最后一个），持有一张知识库表与每库的文档表，
  * 建库 / 删库、移出 / 重新入库按「知识库端点」「重新入库与移出」的语义改它们；`setDocuments` 换掉某库此后的文档表。
+ * 检索按「检索测试端点」先写回参数再返回无命中；`setRetrievalOf` 改某库此后在列表里的检索参数。
  * 每次调用记进 `calls`。其余方法来自真实客户端、不会被调用。
  */
 export function fakeKb(
@@ -128,6 +131,9 @@ export function fakeKb(
     });
     docs.set(baseId, [...docsOf(baseId), item]);
     return { ...item };
+  };
+  const setRetrievalOf = (id: string, retrieval: BaseView["retrieval"]) => {
+    bases = bases.map((item) => (item.id === id ? { ...item, retrieval: { ...retrieval } } : item));
   };
   let reads = 0;
   const calls: Call[] = [];
@@ -227,6 +233,15 @@ export function fakeKb(
       );
       return { ...next };
     }),
+    /** 写回提交的参数（与已存值相同时写回是空操作），返回 `{hits:[], retrieval}`；命中、失败与挂起由用例以 `mockImplementationOnce` 给出。 */
+    retrieveFromKnowledgeBase: vi.fn(
+      async (baseId: string, input: KbRetrievalInput): Promise<KbRetrievalResult> => {
+        calls.push(["retrieveFromKnowledgeBase", baseId, input]);
+        const retrieval = { threshold: input.threshold, vectorWeight: input.vectorWeight };
+        setRetrievalOf(baseId, retrieval);
+        return { hits: [], retrieval };
+      },
+    ),
   };
   const client: ApiClient = { ...createApiClient(), ...methods };
   const setDocuments = (baseId: string, list: readonly DocumentView[]) => {
@@ -244,7 +259,16 @@ export function fakeKb(
   const setMounts = (workspaceId: string, list: readonly MountView[]) => {
     mounts.set(workspaceId, [...list]);
   };
-  return { client, calls, setDocuments, setWorkspaces, setTree, setMounts, ...methods };
+  return {
+    client,
+    calls,
+    setDocuments,
+    setWorkspaces,
+    setTree,
+    setMounts,
+    setRetrievalOf,
+    ...methods,
+  };
 }
 
 export type FakeKb = ReturnType<typeof fakeKb>;
