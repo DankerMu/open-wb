@@ -4,19 +4,25 @@ set -euo pipefail
 
 OMP_VERSION="18.12.3"
 OMP_RELEASE_URL="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}"
+# Fallback when the release download host fails: same v18.12.3 assets via the API (same SHA256 check).
+OMP_ASSET_API_URL="https://api.github.com/repos/can1357/oh-my-pi/releases/assets"
 DEST="var/omp/omp"
 SHA256_DARWIN_ARM64="f2a657b3320fcafa23055053940a45b26a8d3254e1412a158838013d670d6ec5"
 SHA256_LINUX_X64="065b5079d65ff6b77d961c935ba808e8f0f569ca6a2cb7b5fb6a1e8da72d7dec"
+ASSET_ID_DARWIN_ARM64="657108328"
+ASSET_ID_LINUX_X64="657108334"
 
 platform="$(uname -sm)"
 case "$platform" in
   "Darwin arm64")
     asset="omp-darwin-arm64"
     expected="$SHA256_DARWIN_ARM64"
+    asset_id="$ASSET_ID_DARWIN_ARM64"
     ;;
   "Linux x86_64")
     asset="omp-linux-x64"
     expected="$SHA256_LINUX_X64"
+    asset_id="$ASSET_ID_LINUX_X64"
     ;;
   *)
     echo "unsupported platform: ${platform}" >&2
@@ -60,9 +66,13 @@ tmp="$(mktemp "$(dirname "$DEST")/.omp-fetch.XXXXXX")"
 cleanup() { rm -f "$tmp"; }
 trap cleanup EXIT INT HUP TERM
 
-curl --fail --location --retry 3 --retry-delay 2 --retry-max-time 60 \
-  --connect-timeout 15 --max-time 120 --output "$tmp" \
-  "${OMP_RELEASE_URL}/${asset}"
+curl_opts=(--fail --location --retry 3 --retry-delay 2 --retry-max-time 60
+  --connect-timeout 15 --max-time 120 --output "$tmp")
+if ! curl "${curl_opts[@]}" "${OMP_RELEASE_URL}/${asset}"; then
+  rm -f "$tmp"
+  echo "omp-fetch: primary download failed; retrying via GitHub API asset" >&2
+  curl "${curl_opts[@]}" -H 'Accept: application/octet-stream' "${OMP_ASSET_API_URL}/${asset_id}"
+fi
 
 actual="$(sha256_of "$tmp")"
 if [ "$actual" != "$expected" ]; then
