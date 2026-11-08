@@ -232,7 +232,7 @@ function rowsWithout(db: DatabaseSync, table: string, dropped: readonly string[]
 }
 
 describe("迁移 051 检索参数与重排模型", () => {
-  it("列与约束：050 库上应用后取列缺省；越界与非数字文本被拒，1 存成 real", () => {
+  it("列与约束：050 库上应用后取列缺省；两列越界与非数字文本被拒，两端 0 与 1 存成 real", () => {
     const file = join(tempDir(), "kb-050.db");
     seed050(file, (db) => insertRow(db, "knowledge_bases", BASE_ROW));
     withOpenDb(file, (db) => {
@@ -260,19 +260,26 @@ describe("迁移 051 检索参数与重排模型", () => {
           rerank_probe_message: null,
         },
       ]);
-      for (const value of [1.5, -0.1, "abc"]) {
-        expect(() =>
-          db.prepare("UPDATE knowledge_bases SET retrieval_threshold = ?").run(value),
-        ).toThrow(CHECK);
-      }
-      db.prepare("UPDATE knowledge_bases SET retrieval_vector_weight = ?").run(1);
-      expect(
+      const stored = () =>
         db
           .prepare(
-            "SELECT retrieval_threshold, retrieval_vector_weight, typeof(retrieval_vector_weight) AS weight_type FROM knowledge_bases",
+            "SELECT retrieval_threshold, typeof(retrieval_threshold) AS threshold_type, retrieval_vector_weight, typeof(retrieval_vector_weight) AS weight_type FROM knowledge_bases",
           )
-          .all(),
-      ).toEqual([{ retrieval_threshold: 0.2, retrieval_vector_weight: 1, weight_type: "real" }]);
+          .all();
+      const current = { retrieval_threshold: 0.2, retrieval_vector_weight: 0.7 };
+      for (const column of RETRIEVAL_COLUMNS) {
+        for (const value of [1.5, -0.1, "abc"]) {
+          expect(() => db.prepare(`UPDATE knowledge_bases SET ${column} = ?`).run(value)).toThrow(
+            CHECK,
+          );
+        }
+        // 两端用 SQL 整数字面量：node:sqlite 把 JS number 绑成 double，绑参走不到 REAL 亲和性把整数转成 real 的路径。
+        for (const endpoint of [0, 1]) {
+          db.exec(`UPDATE knowledge_bases SET ${column} = ${endpoint}`);
+          Object.assign(current, { [column]: endpoint });
+          expect(stored()).toEqual([{ ...current, threshold_type: "real", weight_type: "real" }]);
+        }
+      }
     });
   });
 
