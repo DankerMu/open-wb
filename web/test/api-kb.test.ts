@@ -340,7 +340,7 @@ const CALLS = {
   getKbStatus: (client, options) => client.getKbStatus(options),
   getKbSettings: (client, options) => client.getKbSettings(options),
   updateKbSettings: (client, options) => client.updateKbSettings({ chatModelId: "m2" }, options),
-  probeKbEmbedding: (client, options) => client.probeKbEmbedding(options),
+  probeKbModel: (client, options) => client.probeKbModel("embedding", options),
   retryKbRebuild: (client, options) => client.retryKbRebuild(options),
   listKnowledgeBases: (client, options) => client.listKnowledgeBases(options),
   createKnowledgeBase: (client, options) => client.createKnowledgeBase(CREATE_INPUT, options),
@@ -379,7 +379,7 @@ const REQUESTS: [name: KbMethod, url: string, init: RequestInit, status: number,
       200,
       SETTINGS,
     ],
-    ["probeKbEmbedding", "/api/kb/settings/probe", POST, 200, SETTINGS],
+    ["probeKbModel", "/api/kb/settings/probe?target=embedding", POST, 200, SETTINGS],
     ["retryKbRebuild", "/api/kb/settings/rebuild", POST, 200, SETTINGS],
     ["listKnowledgeBases", "/api/kb/bases", GET, 200, { bases: [BASE] }],
     [
@@ -583,7 +583,7 @@ const SHAPES: Shape[] = [
   },
   {
     shape: "设置读视图",
-    methods: ["getKbSettings", "updateKbSettings", "probeKbEmbedding", "retryKbRebuild"],
+    methods: ["getKbSettings", "updateKbSettings", "probeKbModel", "retryKbRebuild"],
     status: 200,
     accepted: [
       ["已配置", SETTINGS],

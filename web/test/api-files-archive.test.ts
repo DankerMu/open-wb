@@ -290,7 +290,7 @@ const OTHER_CLIENT_METHODS = [
   "getKbStatus",
   "getKbSettings",
   "updateKbSettings",
-  "probeKbEmbedding",
+  "probeKbModel",
   "retryKbRebuild",
   "listKnowledgeBases",
   "createKnowledgeBase",

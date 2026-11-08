@@ -65,7 +65,7 @@ function settings(patch: Partial<KbSettingsView> = {}): KbSettingsView {
 
 /**
  * 模型表的假客户端加四个设置方法：`updateKbSettings` 按 body 改读视图（嵌入模型换了即探活重置为 `never`），
- * `probeKbEmbedding` 写回 `ok`，`retryKbRebuild` 把失败的库计入重建中。读视图不含密钥（规格：永不包含任何密钥）。
+ * `probeKbModel` 写回 `ok`，`retryKbRebuild` 把失败的库计入重建中。读视图不含密钥（规格：永不包含任何密钥）。
  */
 function fakeSettings(
   initial: KbSettingsView | null,
@@ -95,7 +95,7 @@ function fakeSettings(
       };
       return { ...view };
     }),
-    probeKbEmbedding: vi.fn(async () => {
+    probeKbModel: vi.fn(async (_target: "embedding" | "rerank") => {
       if (view.embedding) {
         view = {
           ...view,
@@ -217,7 +217,8 @@ describe("嵌入模型对话框", () => {
     type(dialog, "密钥", KEY);
     save(dialog);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fake.probeKbModel).toHaveBeenCalledTimes(1));
+    expect(fake.probeKbModel).toHaveBeenCalledWith("embedding");
     expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
     expect(fake.updateKbSettings.mock.calls[0]?.[0]).toEqual({
       embedding: { name: "bge-m3", baseUrl: GW, apiKey: KEY },
@@ -255,7 +256,7 @@ describe("嵌入模型对话框", () => {
     type(dialog, "上游地址", GW2);
     save(dialog);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fake.probeKbModel).toHaveBeenCalledTimes(1));
     expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
     const sent = fake.updateKbSettings.mock.calls[0]?.[0];
     expect(sent).toEqual({ embedding: { name: "bge-m3", baseUrl: GW2 } });
@@ -273,7 +274,7 @@ describe("嵌入模型对话框", () => {
     expect(fake.updateKbSettings.mock.calls[0]?.[0]).toEqual({
       embedding: { name: "bge-m3", baseUrl: GW },
     });
-    expect(fake.probeKbEmbedding).not.toHaveBeenCalled();
+    expect(fake.probeKbModel).not.toHaveBeenCalled();
   });
 
   it("只换密钥不是身份变化：有知识库也不弹确认，恰一次保存（不带 confirmRebuild），随后恰一次探活", async () => {
@@ -284,7 +285,7 @@ describe("嵌入模型对话框", () => {
     save(dialog);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fake.probeKbModel).toHaveBeenCalledTimes(1));
     expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
     expect(fake.updateKbSettings.mock.calls[0]?.[0]).toEqual({
       embedding: { name: "bge-m3", baseUrl: GW, apiKey: KEY },
@@ -316,7 +317,7 @@ describe("嵌入模型对话框", () => {
     fireEvent.click(within(again).getByRole("button", { name: "重建并保存" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(screen.queryByRole("alertdialog")).toBeNull();
-    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fake.probeKbModel).toHaveBeenCalledTimes(1));
     expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
     expect(fake.updateKbSettings.mock.calls[0]?.[0]).toEqual({
       embedding: { name: "text-embedding-3-small", baseUrl: GW },
@@ -352,7 +353,7 @@ describe("嵌入模型对话框", () => {
     expect((await within(dialog).findByRole("alert")).textContent).toBe(KB_REBUILDING);
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
-    expect(fake.probeKbEmbedding).not.toHaveBeenCalled();
+    expect(fake.probeKbModel).not.toHaveBeenCalled();
     expect(await within(section).findByText("重建中 2 个")).toBeTruthy();
     expect(fake.getKbSettings).toHaveBeenCalledTimes(2);
     expect(within(dialog).getByRole("alert").textContent).toBe(KB_REBUILDING);
@@ -427,32 +428,33 @@ describe("嵌入模型对话框", () => {
     });
     const ok = { status: "ok" as const, message: null, at: PROBED_AT };
     const probed = settings({ embedding: { ...BGE, name: "text-embedding-3-small", probe: ok } });
-    fake.probeKbEmbedding
+    fake.probeKbModel
       .mockImplementationOnce(() => first)
       .mockImplementationOnce(() => first.then(() => probed));
     const section = await renderReady(fake);
 
     fireEvent.click(within(section).getByRole("button", { name: "探活" }));
-    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fake.probeKbModel).toHaveBeenCalledTimes(1));
     const dialog = await openEmbedding(section);
     type(dialog, "名称", "text-embedding-3-small");
     save(dialog);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 
-    await waitFor(() => expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fake.probeKbModel).toHaveBeenCalledTimes(2));
     release();
     expect(await within(section).findByText("正常")).toBeTruthy();
     expect(fake.updateKbSettings).toHaveBeenCalledTimes(1);
-    expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(2);
+    expect(fake.probeKbModel).toHaveBeenCalledTimes(2);
   });
 
-  it("「探活」恰一次 probeKbEmbedding，显示返回的探活状态", async () => {
+  it("「探活」恰一次 probeKbModel，显示返回的探活状态", async () => {
     const fake = fakeSettings(settings());
     const section = await renderReady(fake);
 
     fireEvent.click(within(section).getByRole("button", { name: "探活" }));
     expect(await within(section).findByText("正常")).toBeTruthy();
-    expect(fake.probeKbEmbedding).toHaveBeenCalledTimes(1);
+    expect(fake.probeKbModel).toHaveBeenCalledTimes(1);
+    expect(fake.probeKbModel).toHaveBeenCalledWith("embedding");
     expect(fake.updateKbSettings).not.toHaveBeenCalled();
   });
 });

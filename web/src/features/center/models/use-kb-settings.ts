@@ -174,7 +174,8 @@ export function useKbSettings(client: ApiClient) {
     setForm(null);
     adopt(view);
     // 不看「探活」按钮是否在途：在途的那次探的是旧身份（服务端丢弃它的结果），新身份要另探一次。
-    if (probesAfterSave(input, previous)) await perform("probe", () => client.probeKbEmbedding());
+    if (probesAfterSave(input, previous))
+      await perform("probe", () => client.probeKbModel("embedding"));
   };
 
   return {
@@ -214,7 +215,7 @@ export function useKbSettings(client: ApiClient) {
       run("chat", () => client.updateKbSettings({ chatModelId }));
     },
     probe() {
-      run("probe", () => client.probeKbEmbedding());
+      run("probe", () => client.probeKbModel("embedding"));
     },
     retryRebuild() {
       run("retry", () => client.retryKbRebuild());

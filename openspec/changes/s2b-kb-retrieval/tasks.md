@@ -235,7 +235,32 @@ Minimal mergeable slice: atomic - 改名与按目标参数化改的是同一个�
       - `system.md` 只改两处：9.13 的指引句加「重排模型（`owb-rerank`）与 `?target=rerank` 探活」；§2 `kb` 行的探活条目加 `?target=rerank`。
       - 行号以 origin/master 为准，#1918 的 4.6 合入后会有偏移，按内容定位。
     - 6.4 的验证加：`npm run test:focus --workspace server -- probe`，覆盖 `kb-settings-probe` 与 `kb-model-probe`。
-- [ ] 6.6 web 原地改名：测试先行，`web/test/api-kb-rerank.test.ts` 加 `probeKbModel("rerank")` 发 `?target=rerank`；`web/test/api-kb.test.ts`、`web/test/api-files-archive.test.ts`、`web/test/center-models-kb.test.tsx` 里的旧名原地改。实现：`web/src/lib/api-kb.ts` 的 `probeKbEmbedding()` 改为 `probeKbModel(target)`，`web/src/lib/api.ts` 的 `ApiClient`、`web/test/api-files-archive.test.ts` 的方法清单与 `use-kb-settings.ts` 的调用点随之改。验证：`npm run test:focus --workspace web -- api-kb api-files-archive center-models-kb` 全过，`make typecheck` 退出 0，`git grep -n probeKbEmbedding -- web` 退出 1。
+- [x] 6.6 web 原地改名：测试先行，`web/test/api-kb-rerank.test.ts` 加 `probeKbModel("rerank")` 发 `?target=rerank`；`web/test/api-kb.test.ts`、`web/test/api-files-archive.test.ts`、`web/test/center-models-kb.test.tsx` 里的旧名原地改。实现：`web/src/lib/api-kb.ts` 的 `probeKbEmbedding()` 改为 `probeKbModel(target)`，`web/src/lib/api.ts` 的 `ApiClient`、`web/test/api-files-archive.test.ts` 的方法清单与 `use-kb-settings.ts` 的调用点随之改。验证：`npm run test:focus --workspace web -- api-kb api-files-archive center-models-kb` 全过，`make typecheck` 退出 0，`git grep -n probeKbEmbedding -- web` 退出 1。
+  - 组 6 第三刀约定（#1927 fixture 审查补；6.6 照此实现）：
+    - URL：`probeKbModel(target)` 一律发 `POST /api/kb/settings/probe?target=${target}`，不分支，`target` 没有缺省值；嵌入也发 `?target=embedding`。
+      - 依据：design D8「嵌入用 `"embedding"`」；ragflow-backend spec 规定 `target=embedding` 与不带 `target` 等价；`server/src/kb/rest.ts` 按原值精确匹配。
+      - 嵌入探活的请求字节与 master 不同，这是有意的：SPA 与服务端同部署，不存在版本错配。
+      - `web/e2e` 与 smoke 里没有 `api/kb` 的 route matcher。唯一断言确切 URL 的地方是 `web/test/api-kb.test.ts` 的 REQUESTS 行，原行改名并改 URL 即可。
+    - 签名：`web/src/lib/api.ts` 的 `ApiClient` 原位换成 `probeKbModel(target: "embedding" | "rerank", options?: ApiRequestOptions): Promise<KbSettingsView>`。
+      - 联合类型内联写，不新增导出类型：现在没人用，knip 会报；9.2 扩 `kb-model-dialog.tsx` 的 `Kind` 时再议。
+      - `api-kb.ts` 的 `KbMethods` Pick 键与实现原位改名，实现拼 `?target=${target}`，继续用 `bodyless(options?.signal)` 与 `parseSettings`。
+    - 调用点：`web/src/features/center/models/use-kb-settings.ts` 的两处（保存后探活、「探活」按钮）都显式传 `"embedding"`。
+    - 测试原地改名（只改名，不加用例）：
+      - `web/test/api-kb.test.ts` 改三行：CALLS 改为 `probeKbModel: (client, options) => client.probeKbModel("embedding", options)`；REQUESTS 改为 `["probeKbModel", "/api/kb/settings/probe?target=embedding", POST, 200, SETTINGS]`；SHAPES 的 methods 清单改名。
+      - `web/test/api-files-archive.test.ts` 的方法清单在同一位置改名。
+      - `web/test/center-models-kb.test.tsx` 里所有旧名都改，注释与用例标题也包括在内，否则 `git grep -n probeKbEmbedding -- web` 退不出 1。
+    - 收紧参数断言（原地改，不加用例）：`center-models-kb.test.tsx` 的假方法改为 `probeKbModel: vi.fn(async (_target: "embedding" | "rerank") => …)`；「保存后探活」与「探活按钮」两条路径在既有的 `toHaveBeenCalledTimes(1)` 之外，再断言 `toHaveBeenCalledWith("embedding")`。
+    - 新用例只放 `web/test/api-kb-rerank.test.ts`：
+      - `probeKbModel("rerank")` 的 `fetchMock.mock.calls` 用 `toStrictEqual` 断言恰为 `[["/api/kb/settings/probe?target=rerank", { method: "POST", credentials: "same-origin" }]]`，即不带 body、不带 Content-Type；另加一例断言传入的 `signal` 出现在 init 里。
+      - 在既有的 `METHODS` 数组加 `{ method: "probeKbModel(rerank)", call: (client) => client.probeKbModel("rerank") }`，让它走同一套 ACCEPTED / REJECTED /「缺 rerank 键」矩阵；同步改数组上方的「两个代表方法」注释。
+      - 一例错误透传：400 `{error:{code:"bad_request",…}}` 原样保留 status、code、message，只发一次请求。
+    - 必须保持：
+      - 知识库方法仍是十三个，对应十三条路由，或在 #1921 合入后为十四个，以合入时为准。
+      - `api-files-archive.test.ts` 的键集断言只靠改名保持绿。
+      - `git diff --exit-code origin/master -- server web/src/features/center/models/kb-section.tsx web/src/features/center/models/kb-model-dialog.tsx web/e2e` 退出 0。
+      - `openspec/` 里的旧名属于历史叙述，不改（同组 5）。
+      - 行数：所有文件不超过 800。`api-kb.ts` 本刀净增 0 行，D11 的预计值由 #1921 说明。
+    - 验证：6.6 列的三条照旧，另加 `make lint` 退出 0。
 
 Suggested fixture level: expanded - 带凭证的出站请求、管理员权限与公共 API 的视图加键（outbound with credentials、auth、public API）。
 Minimal mergeable slice: 6.1–6.2 为首刀（设置的解析、下发、清除、读视图，加上 web 设置视图解析器）：读视图加键与 web 解析器必须同 PR，不带 `target` 的探活行为不变，首刀独立保绿。第二刀 6.3–6.5（服务端探活 `target`、重排探活写回与文档）依赖首刀与组 5，atomic：探活的红用例、接线与描述它的文档是同一条验证路径。第三刀 6.6（web 探活方法改名）依赖第二刀，atomic：方法改名与它的调用点是同一批行。
