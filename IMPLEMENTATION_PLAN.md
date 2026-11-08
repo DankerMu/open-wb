@@ -423,7 +423,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Outcome：app-server `kb` 模块经 RAGFlow 做「单轮检索」（混合检索 + 可选全局重排模型，重排不可用时自动降级为不重排）；`/center` 知识库详情页的检索测试（单轮，按库保存检索参数）。agentic 环由 omp 模型驱动（ADR-0017，2026-11-07 grill），其实现与验收随 `kb_search` 在 S2c。
 - 覆盖：F-CTR-KB3。
 - 必读增量：ADR-0016；backend-research §1 agentic_rag 环行号引用（v0.27.1 的历史参照，吸收方案已被 ADR-0016 取代）。
-- Verify：检索测试返回命中切片（文档名、切片序号、综合相似度）；`make smoke-kb` 的检索断言；验收清单 CK 节新增检索测试行。
+- Verify：检索测试返回命中切片（文档名、综合相似度与切片原文；rc2 的检索应答没有切片序号，owner 2026-11-07 / 11-08 授权不显示序号与来源路径）；`make smoke-kb` 的检索断言；验收清单 CK 节新增检索测试行。
 - Depends on：S2a。
 - Review attention：decision-dense（检索参数的存放位置以组 1 实测为准、重排降级路径）。
 
