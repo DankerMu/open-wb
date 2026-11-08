@@ -1,7 +1,8 @@
 # 知识库真实端点冒烟（kb.hurl）：只由 `make smoke-kb` 运行，对象是调用方已运行、已接上共用 RAGFlow 栈的服务
-# （verification-harness「知识库真实端点冒烟」；change s2a-kb-ragflow 组 18）。从空 cookie store 独立可运行。
+# （verification-harness「知识库真实端点冒烟」；change s2a-kb-ragflow 组 18；change s2b-kb-retrieval 组 10）。从空 cookie store 独立可运行。
 # 登录 zhangsan → 状态三位全真 → 采用夹具工作空间 smoke-kb（201 或 409）→ 列表按 name 取 id
 # → 建 naive 库 smoke-kb → 从工作空间入库 notes.md 与 brief.pdf → 轮询到两份都 done 且切片数大于 0
+# → 以 notes.md 的专名检索（threshold 0、vectorWeight 0.7，与缺省不同，顺带走一次写回）
 # → 本地上传一个文本文件 → 轮询到它也 done → 移出它 → 列表只剩两份 → 删库
 # → 建 naive 库 smoke-kb-compile（raptor 与 graph 都为真）→ 入库 notes.md → 轮询库列表到两种编译都 done → 删库
 # → 库列表不含这两个库 → 登出。开编译的一段是 DSL 对真实 RAGFlow 的唯一验证。
@@ -17,6 +18,8 @@
 #   `chunkCount`；`DELETE …/documents?doc=<文档 id>` → 204。
 # - `POST /api/kb/bases/:id/uploads?name=<文件名>`：裸 `application/octet-stream`，文件名走查询参数，不是 multipart
 #   （server/src/kb/rest.ts `UPLOADS_ROUTE`、server/src/kb/uploads.ts `parseUploadFileName`），201 `DocumentView`。
+# - `POST /api/kb/bases/:id/retrieval` body 只认 `question`、`threshold`、`vectorWeight`（server/src/kb/retrieval.ts `BODY_KEYS`），
+#   返回 200 `{hits:[{documentId, name, similarity, content}], retrieval:{threshold, vectorWeight}}`。
 # - 工作空间：同 smoke/files.hurl，`POST /api/workspaces {"name":"smoke-kb"}` 采用已复制进来的目录，再按 name 取 id。
 #
 # 轮询：`poll_retries` 由 Makefile 从 SMOKE_KB_POLL_SECONDS（缺省 300）按 5 s 一次折算，每段轮询各自计时；单次请求的
@@ -96,6 +99,17 @@ HTTP 200
 [Asserts]
 jsonpath "$.documents" count == 2
 jsonpath "$.documents[?(@.status=='done' && @.chunkCount > 0)]" count == 2
+
+# 以 notes.md 的专名检索：命中非空、首条为 notes.md；threshold 0 与缺省 0.2 不同，回显证明参数已写回。
+POST {{base_url}}/api/kb/bases/{{kb_id}}/retrieval
+Content-Type: application/json
+{"question":"北礁观测站由谁值守","threshold":0,"vectorWeight":0.7}
+HTTP 200
+[Asserts]
+jsonpath "$.hits" count > 0
+jsonpath "$.hits[0].name" == "notes.md"
+jsonpath "$.retrieval.threshold" == 0
+jsonpath "$.retrieval.vectorWeight" == 0.7
 
 # 本地上传一个文本文件。
 POST {{base_url}}/api/kb/bases/{{kb_id}}/uploads?name=smoke-kb-upload.txt

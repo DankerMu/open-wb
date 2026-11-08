@@ -31,7 +31,7 @@
   - 文件操作各步（建目录、改名、删除、同名移动、越界删除）：只在空间根下建、改名、删除 `hurl-a` / `hurl-b` 两个空目录，完整跑完后两者都不在（末尾有一步 `tree` 断言），夹具文件一个都不动。同名移动一步把 `readme.md` 移到 `notes.csv` 并断言 409，所以要求根下这两个文件同时存在；断言成立时两者都不被改动。删除的目录进 `<SANDBOX_ROOT>/.trash/`，回收批次不清理。
 - `web/e2e/ui-walk.spec.ts` 的 `walkFiles`：断言 readme 渲染出一级标题 `smoke-fixture`、源码视图第一行为 `# smoke-fixture`；CSV 预览恰好 5 行（表头加 4 行数据），含 `alpha 1`、`beta 2` 与说明 `共 4 行 · 大文件仅预览前若干行`；`logo.png` 预览图的 `naturalWidth` 与 `naturalHeight` 均为 256。
 - `scripts/test-ci-harness.sh`：用 `cmp -s` 比对源夹具与复制目标，与内容无关。
-- `smoke/kb.hurl`（只由 `make smoke-kb` 运行）：采用工作空间 `smoke-kb`（201 或 409）后按名字取 id，把 `notes.md` 与 `brief.pdf` 入库到 `smoke-kb` 库并轮询到两份都 `done` 且切片数大于 0，再把 `notes.md` 入库到开编译的 `smoke-kb-compile` 库。只按这两个文件名与后缀引用它们，不比对字节与内容；RAGFlow 要从两份里都切出至少一个切片，所以两份都要有可抽取的正文。
+- `smoke/kb.hurl`（只由 `make smoke-kb` 运行）：采用工作空间 `smoke-kb`（201 或 409）后按名字取 id，把 `notes.md` 与 `brief.pdf` 入库到 `smoke-kb` 库并轮询到两份都 `done` 且切片数大于 0，随后以问句 `北礁观测站由谁值守` 检索并断言首条命中为 `notes.md`，再把 `notes.md` 入库到开编译的 `smoke-kb-compile` 库。不比对字节，但检索问句依赖 `notes.md` 里的专名 `北礁观测站`（以及 `值守`）；RAGFlow 要从两份里都切出至少一个切片，所以两份都要有可抽取的正文。
 - `web/e2e/ui-walk-project-config.ts` 的 `walkProjectConfig`：绑定 `ui-walk-skills` 的会话顶栏在 `重命名` 之前有 `项目配置 1`，弹层 `当前目录` 组恰一条 `AGENTS.md`、类型 `说明`；`expectNoProjectConfig`：绑定 `ui-walk-sessions` 的会话顶栏恰为三个按钮。
 - `web/e2e/ui-walk-sessions.spec.ts` 的 `step2ProjectSkill`：欢迎态在 composer 页脚选中工作空间 `ui-walk-skills` 后输入 `/`，候选面板恰三项，第三项的 label 为 `walk-brief`、标注 `项目`、描述为 `SKILL.md` 的 `description`。
 
@@ -49,7 +49,7 @@
 - `smoke/files.hurl`：没有长度或大小字面量，但有一处内容字面量——`clip.wav` 的头四个字节 `hex,52494646;`（`RIFF`），替换 `clip.wav` 时须保持（或一起更新）；它还按扩展名断言 `clip.wav` 为 `audio/wav`、`site/index.html` 在预览来源为 `text/html`、`site/style.css` 为 `text/css`，这三个文件的路径与扩展名不要改。同名移动 409 一步按名字用 `readme.md`（源）与 `notes.csv`（已存在的目标），末尾的 `tree` 步骤也按这两个名字断言存在，所以这两个文件名不可改，也不可从空间根下移走；根下不要放名为 `hurl-a` / `hurl-b` 的夹具。以后若增加长度或大小断言，替换夹具时要一起更新。
 - `site/index.html` 的标题 `smoke-site`、相对地址 `./style.css`、`site/style.css` 的颜色 `rgb(0, 128, 0)` 与 `clip.wav` 不超过 1 KiB 由 files-harness 规格条文钉死，替换时保持不变。
 - `git ls-files smoke/fixtures/sandbox` 必须恰好列出十一个文件：`smoke-fixture/` 的 `readme.md`、`notes.csv`、`logo.png`、`sample.py`、`clip.wav`、`site/index.html`、`site/style.css`，`ui-walk-skills/.omp/skills/walk-brief/SKILL.md` 与 `ui-walk-skills/AGENTS.md`，以及 `smoke-kb/notes.md` 与 `smoke-kb/brief.pdf`；CI 不检查多余文件，新增文件不要放进 `sandbox/`。
-- `smoke-kb/` 的两个文件名由 `smoke/kb.hurl` 按名字引用，改名时一起更新；后缀须在 `naive` 模板的后缀表里（`server/src/kb/templates.ts`）。不要在 `smoke-kb/` 下放 `AGENTS.md` 等项目配置文件或 `.omp/`。
+- `smoke-kb/` 的两个文件名由 `smoke/kb.hurl` 按名字引用，改名时一起更新；后缀须在 `naive` 模板的后缀表里（`server/src/kb/templates.ts`）。换 `notes.md` 时必须保留专名 `北礁观测站`（以及 `值守`），它是 `kb.hurl` 检索问句的依据；换 `brief.pdf` 时正文不得出现 `北礁观测站`，否则首条命中会不确定。不要在 `smoke-kb/` 下放 `AGENTS.md` 等项目配置文件或 `.omp/`。
 - 给 `ui-walk-skills` 增删项目配置文件时同步 `web/e2e/ui-walk-project-config.ts` 的 `FIXTURE_FILES` 与按钮上的数目。
 - 改 `walk-brief` 的名字或描述时同步 `web/e2e/ui-walk-sessions.spec.ts` 的 `SKILL_LABEL` 与 `SKILL_DESCRIPTION`。
 
@@ -68,7 +68,7 @@
 
 ## `make smoke-kb` 的运行要求
 
-- **hurl**：`kb.hurl` 与 `kb-cleanup.hurl` 用到了 `skip`、`replaceRegex`、`not exists` 与 jsonpath 过滤，只在 8.0.1（与 `.github/scripts/ci-install-hurl.sh` 钉的版本相同）上验证过；更早的版本可能不支持这些写法。8.0.1 上，过滤结果恰好一条时会被折叠成标量，所以两个文件判断「有没有」时一律用 `exists` / `not exists`，不用 `count`。
+- **hurl**：`kb.hurl` 与 `kb-cleanup.hurl` 用到了 `skip`、`replaceRegex`、`not exists` 与 jsonpath 过滤，只在 8.0.1（与 `.github/scripts/ci-install-hurl.sh` 钉的版本相同）上验证过；更早的版本可能不支持这些写法。8.0.1 上，过滤结果恰好一条时会被折叠成标量，所以两个文件对过滤结果判断「有没有」时一律用 `exists` / `not exists`，不用 `count`；检索一步的 `$.hits` 是直接路径、不经过滤，不会被折叠，用 `count > 0`。
 - **node**：版本检测用 `node -e` 调 `fetch` 与 `AbortSignal.timeout`，要求 `PATH` 里有 Node 18 或更高版本。
 - **`brief.pdf` 切不出切片时**：这个 PDF 是手写的极简文件，`pdftotext` 能抽出正文，但 RAGFlow 的解析器没有对它实测过。如果 CK-11 卡在 `brief.pdf` 的 `chunkCount > 0` 上，先换一份正常排版、几页文字的小 PDF（文件名不变）再跑，不要先去改 hurl。
 

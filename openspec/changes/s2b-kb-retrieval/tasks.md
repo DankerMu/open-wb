@@ -395,7 +395,41 @@ Minimal mergeable slice: 9.1（对话框的改名与泛化，嵌入行为不变�
 
 ## 10. 真实端点冒烟（verification-harness「知识库真实端点冒烟」）
 
-- [ ] 10.1 `smoke/kb.hurl`：在 `smoke-kb` 库两份文档都 `done` 之后，以夹具 `notes.md` 里的专名（如 `北礁观测站由谁值守`）、`threshold:0`、`vectorWeight:0.7` 检索，断言 200、`hits` 非空、首条 `name` 为 `notes.md`、`retrieval` 为 `{threshold:0, vectorWeight:0.7}`；文件头注释的步骤与端点说明同步。同一 PR 改写验收清单 CK-11 的期望，加上这条检索断言，结论回到 `待签`（owner 重跑 `make smoke-kb` 签收）。验证：`make test-guardrails` 退出 0；`hurlfmt --out json smoke/kb.hurl > /dev/null` 退出 0（只解析，不发请求）；`npm run test:focus --workspace web -- functional-checklist` 全过。真实运行由 CK-11 承担，PR 写明。
+- [x] 10.1 `smoke/kb.hurl`：在 `smoke-kb` 库两份文档都 `done` 之后，以夹具 `notes.md` 里的专名（如 `北礁观测站由谁值守`）、`threshold:0`、`vectorWeight:0.7` 检索，断言 200、`hits` 非空、首条 `name` 为 `notes.md`、`retrieval` 为 `{threshold:0, vectorWeight:0.7}`；文件头注释的步骤与端点说明同步。同一 PR 改写验收清单 CK-11 的期望，加上这条检索断言，结论回到 `待签`（owner 重跑 `make smoke-kb` 签收）。验证：`make test-guardrails` 退出 0；`hurlfmt --out json smoke/kb.hurl > /dev/null` 退出 0（只解析，不发请求）；`npm run test:focus --workspace web -- functional-checklist` 全过。真实运行由 CK-11 承担，PR 写明。
+  - 组 10 约定（#1925 fixture 审查补；10.1 照此实现）：
+    - PR 边界：`smoke/kb.hurl`、验收清单 CK-11 一行、`smoke/fixtures/README.md`、`docs/architecture/knowledge-base.md`，再加本 `tasks.md`。
+    - 插入位置：放在 `smoke/kb.hurl` 中「轮询到两份都 `done`」那一段之后、「本地上传」之前。这时库里只有两份文档，上传的那份还没进来。
+    - 请求：`POST {{base_url}}/api/kb/bases/{{kb_id}}/retrieval`，带 `Content-Type: application/json`，body 恰为 `{"question":"北礁观测站由谁值守","threshold":0,"vectorWeight":0.7}`（`server/src/kb/retrieval.ts` 的 `BODY_KEYS` 要求恰好这三个键）。沿用文件开头的登录 cookie，不加 `[Options] retry`，不新增变量。
+    - 断言：
+      - `HTTP 200`
+      - `jsonpath "$.hits" count > 0`
+      - `jsonpath "$.hits[0].name" == "notes.md"`
+      - `jsonpath "$.retrieval.threshold" == 0`
+      - `jsonpath "$.retrieval.vectorWeight" == 0.7`
+      - `$.hits` 是直接路径，不受 hurl 8.0.1 把单条结果折叠成标量的影响。不加「`brief.pdf` 不出现」这类断言。
+    - 必须保持：
+      - 写回不影响后续步骤：后面的上传、移出、列表、删库都不读这两列；`smoke-kb-compile` 是新建的库，取缺省值；`kb-cleanup.hurl` 只按名字删。
+      - 已有两条断言缺省值 `0.2/0.7` 的断言不动。
+    - 禁改（这些文字被 `scripts/test-ci-harness.sh` 的 `kb_last`、`kb_mrow`、`kb_erow`、`kb_surface` 逐字钉住）：`Makefile` 的 smoke-kb 配方、`AGENTS.md` 验证矩阵与 Enforcement Index 里 smoke-kb 那两行、`constraints.yaml` 的 smoke-kb `evidence`。
+    - 文件头同步：
+      - 来源加「change s2b-kb-retrieval 组 10」。
+      - 流程串在「轮询到两份都 done 且切片数大于 0」之后加「→ 以 notes.md 的专名检索（threshold 0、vectorWeight 0.7，与缺省不同，顺带走一次写回）」。
+      - 端点清单加一条：`POST /api/kb/bases/:id/retrieval`，body 只认 `question`、`threshold`、`vectorWeight`，返回 200 `{hits:[{documentId, name, similarity, content}], retrieval:{threshold, vectorWeight}}`。
+    - `smoke/fixtures/README.md`：
+      - 「只按这两个文件名与后缀引用它们，不比对字节与内容」一句改为：kb.hurl 的检索问句依赖 `notes.md` 里的专名 `北礁观测站`（以及 `值守`）。
+      - 替换规则补两条：换 `notes.md` 时必须保留这个专名；换 `brief.pdf` 时正文不得出现 `北礁观测站`，否则首条命中会不确定。
+    - `docs/architecture/knowledge-base.md`：kb.hurl 流程第 2 步末尾补一句「以 `notes.md` 的专名检索（`threshold:0`、`vectorWeight:0.7`），断言命中非空、首条为 `notes.md`、参数已写回」。
+    - CK-11 改写：
+      - 现有期望全文保留，包括：编译库以 RAPTOR 与知识图谱都为 `done` 结束；脱敏后附签字记录；第二次运行非零退出且能看到清理被执行；没有 `docker`。
+      - 在第一次运行那句后补一句纯文字：「hurl 报告里检索一条通过：命中非空、首条文档名为 `notes.md`、检索参数回显为阈值 0、向量权重 0.7」。
+      - 期望里不写 jsonpath：`web/test/functional-checklist.test.ts` 的 `CSS_SELECTOR` 会拒掉 `$.h` 和 `].n`。
+      - 结论从 `通过` 改回 `待签`。agent 不得代签。
+    - 证据：
+      - `make test-guardrails` 只证明登记没有变，不解析 hurl。
+      - `hurlfmt --out json smoke/kb.hurl > /dev/null` 是唯一的离线语法检查。它只在本地跑，CI 和 Makefile 都没有调用它。PR 附 `hurlfmt --version` 的输出和退出码。
+      - 附 `npm run test:focus --workspace web -- functional-checklist` 全过的输出。
+      - PR 写明：真实运行由 owner 的 CK-11 承担。
+    - 剩余风险：文档 `done` 之后检索索引可能还有延迟。这一步不加重试，偶发零命中会在 owner 的 CK-11 运行中暴露。
 
 Suggested fixture level: compact - 只改冒烟用例与验收行，不改产品代码；冒烟不进 CI 必需检查。
 Minimal mergeable slice: atomic - 冒烟断言与 CK-11 的期望必须同 PR（签收规则：改变验收对象的 PR 同时把对应行写为 `待签`）。

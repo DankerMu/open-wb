@@ -456,7 +456,7 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 之后，`kb-cleanup.hurl` 先删掉上次残留的 `smoke-kb` 与 `smoke-kb-compile`。接着 `kb.hurl` 以成员账号走完整条流程：
 
 1. 状态检查。
-2. 采用工作空间 `smoke-kb`，建普通库 `smoke-kb`，入库 `notes.md` 与 `brief.pdf`，轮询到两份都 `done` 且切片数大于 0。
+2. 采用工作空间 `smoke-kb`，建普通库 `smoke-kb`，入库 `notes.md` 与 `brief.pdf`，轮询到两份都 `done` 且切片数大于 0，再以 `notes.md` 的专名检索（`threshold:0`、`vectorWeight:0.7`），断言命中非空、首条为 `notes.md`、参数已写回。
 3. 上传一份文本，轮询到 `done` 后移出它，然后删库。
 4. 建两个开关都开的 `smoke-kb-compile`，入库 `notes.md`，轮询到 RAPTOR 与知识图谱都是 `done`，然后删库。这是编译 DSL 对真实 RAGFlow 的唯一验证。
 5. 确认列表里两个库都不在。
