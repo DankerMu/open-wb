@@ -320,8 +320,39 @@ Minimal mergeable slice: atomic - 带 `rerank_id` 与降级必须同时生效：
 
 首刀（8.1–8.2）：
 
-- [ ] 8.1 测试先行：在 `web/test/api-kb-retrieval.test.ts` 加 `retrieveFromKnowledgeBase` 的严格解析用例（键集 `{hits, retrieval}`，命中键集 `{documentId, name, similarity, content}`，`hits:[]` 解析通过）；`web/test/api-files-archive.test.ts` 的方法清单加它。先看到红。验证：用例先红。
-- [ ] 8.2 实现：`api-kb.ts` 加 `retrieveFromKnowledgeBase`；`web/src/lib/api.ts` 的 `ApiClient` 导出其类型与方法。验证：`npm run test:focus --workspace web -- api-kb api-files-archive` 全过，`make typecheck` 退出 0。
+- [x] 8.1 测试先行：在 `web/test/api-kb-retrieval.test.ts` 加 `retrieveFromKnowledgeBase` 的严格解析用例（键集 `{hits, retrieval}`，命中键集 `{documentId, name, similarity, content}`，`hits:[]` 解析通过）；`web/test/api-files-archive.test.ts` 的方法清单加它。先看到红。验证：用例先红。
+- [x] 8.2 实现：`api-kb.ts` 加 `retrieveFromKnowledgeBase`；`web/src/lib/api.ts` 的 `ApiClient` 导出其类型与方法。验证：`npm run test:focus --workspace web -- api-kb api-files-archive` 全过，`make typecheck` 退出 0。
+  - 组 8 首刀约定（#1921 fixture 审查补；8.1–8.2 照此实现与测试）：
+    - 档位理由：本刀是 `expanded`，因为公共 API 加了一个严格解析器；ui-walk 属于第二刀。跨服务契约：web 解析器只对照 spec「检索测试端点」的 200 形状，不依赖 #1918 合入。界面要到 8.4 才第一次调用它，先合入不会暴露用户路径。两端形状漂移由 4.4/4.5 端点用例的 `toStrictEqual` 键集和 8.5 的 ui-walk 桩兜住。
+    - 签名：`api-kb.ts` 在 `KbIngestResult` 之后导出三个类型：`RetrievalHit = {documentId: string; name: string; similarity: number; content: string}`、`KbRetrievalInput = {question: string; threshold: number; vectorWeight: number}`、`KbRetrievalResult = {hits: RetrievalHit[]; retrieval: BaseView["retrieval"]}`。`ApiClient` 在 `removeKbDocument` 之后加 `retrieveFromKnowledgeBase(id: string, input: KbRetrievalInput, options?: ApiRequestOptions): Promise<KbRetrievalResult>`。`KbMethods` 的 Pick 联合加 `"retrieveFromKnowledgeBase"`。`api.ts` 的 `export type {…} from "./api-kb.js"` 块按字母序加这三个类型名，import 块只加 `api.ts` 自己引用的 `KbRetrievalInput`、`KbRetrievalResult`（不引用的 `RetrievalHit` 进 import 块会被 Biome 判为未使用导入）。`api-kb.ts` 第 5 行的「十三个方法对应十三条路由」改为十四。
+    - 请求：作为 `createKbMethods` 返回对象的最后一个成员，写成 `parsed(\`${basePath(id)}/retrieval\`, jsonBody("POST", input, requestOptions(options?.signal)), 200, parseRetrievalResult)`。成功码只认 200。input 原样序列化，不 trim，运行时不剔多余的键（与兄弟方法一致，恰好三键由类型保证）。
+    - 请求用例：`id = "kb/1 中"`，fetch 恰调用一次，参数 `toStrictEqual([["/api/kb/bases/kb%2F1%20%E4%B8%AD/retrieval", {method:"POST", credentials:"same-origin", headers:{"Content-Type":"application/json"}, body:'{"question":"  口径\\n","threshold":0.2,"vectorWeight":0.7}'}]])`，问句首尾的空白与 `\n` 原样保留，init 里没有 `cache`。另一例传 signal，init 里多出 `signal`。
+    - 成功码与错误映射用例都写在新文件里，不往 `api-kb.test.ts` 加 `REQUESTS` 行：
+      - 应答 201 得 `requestFailed(201)`。
+      - 错误信封原样透传为 `ApiError(status, code, message)`，fetch 只调用一次。至少覆盖 400 `bad_request`、404 `not_found`、409 `kb_rebuilding`、503 `kb_unavailable`、400 `kb_rejected`。
+      - 非 JSON 的 500 得 `requestFailed(500)`。
+      - `unauthorizedResponseCases()` 三种形态各只通知一次。
+      - 只复用 `support.ts` 与本文件已有的 helper（`stub`、`rawJsonResponse`、`textResponse`），不拷贝 `api-kb.test.ts` 的 `it.each` 块（jscpd 也扫测试文件）。
+    - 通过用例：每例返回值都 `toStrictEqual` 应答原样。
+      - `{hits:[], retrieval:{threshold:0.2, vectorWeight:0.7}}`。
+      - 一条命中。
+      - 同一 `documentId` 两条命中：次序同应答，不去重。
+      - `similarity` 取 0、1，以及区间外的有限数（如 1.5）：web 不校验 0–1，与 `parseRetrieval` 一致。
+      - `content` 含 `\n`。
+    - 拒绝用例：每行都断言 `expectRequestFailure(error, 200)`。
+      - 顶层：`null`、数组、字符串、`{}`；缺 `hits`；缺 `retrieval`；多一键（如 `total:1`）。
+      - `hits`：为 `null`、`{}`、字符串。
+      - 命中整体：为 `null`；多一键（如 `ragflowDocumentId`）；四键各缺一次。
+      - 命中字段：`documentId` 为 1 或 `null`；`name` 为 1；`content` 为 `null`；`similarity` 为 `"0.9"`、`null` 或 `true`；`similarity` 为 `NaN`（用 `rawJsonResponse`）；`similarity` 为 `1e999` 溢出成的 `Infinity`（用 `textResponse`，并断言文本里含 `1e999`）。
+      - 好坏混排：一条好的命中加一条坏的，整份应答得 `requestFailed`。
+      - `retrieval` 子对象：本文件已有的 `REJECTED` 列表包进 `{hits:[], retrieval}` 后逐条断言，不另写第二份。
+    - 单一实现：
+      - `parseRetrievalResult` 先用 `hasExactlyKeys(value, ["hits","retrieval"])`；`hits` 走 `parseJsonArray(value.hits, parseRetrievalHit)`；`retrieval` 调既有的 `parseRetrieval`。
+      - `parseRetrievalHit` 用 `hasExactlyKeys` 查四键，三个字符串字段用 `typeof === "string"`，`similarity` 用既有的 `isFiniteNumber`，不新写数值判定。
+      - 两个解析器放在 `parseIngestResult` 之后。`parseRetrieval` 与 `BaseView` 一字不改。
+    - 方法清单：`web/test/api-files-archive.test.ts` 的 `OTHER_CLIENT_METHODS` 在知识库组 `"removeKbDocument"` 之后加 `"retrieveFromKnowledgeBase"`（键集比较，不比次序）。`web/test/api-kb-retrieval.test.ts` 的头注释加一行「组 8 首刀（#1921）」及规格出处。
+    - 必须保持：`web/test/api-kb.test.ts` 不动，包括 `REQUESTS`、`SHAPES` 的十三行和「十三个」字样；既有十三个方法的请求与解析行为不变；不改 `features/`。
+    - 行数：D11 对 `api-kb.ts` 的预计是 ≤600，加上 #1917 的 `rerank` 之后会超。硬上限 800 不变，超出预计照 #1912 的先例在 PR「偏离记录」里写明。
 
 第二刀（8.3–8.6）：
 

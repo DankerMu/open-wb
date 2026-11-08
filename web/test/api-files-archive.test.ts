@@ -300,6 +300,7 @@ const OTHER_CLIENT_METHODS = [
   "uploadToKnowledgeBase",
   "reingestKbDocument",
   "removeKbDocument",
+  "retrieveFromKnowledgeBase",
   // 挂载（workspace-mounts「挂载端点」，s1b-workspace-mounts D18）
   "listMounts",
   "createMount",
