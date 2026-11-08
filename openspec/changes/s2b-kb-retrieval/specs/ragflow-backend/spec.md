@@ -160,7 +160,7 @@ RAGFlow 应答的 message 与错误应答的正文 SHALL NOT 进入本系统的�
 2. 把配置下发到 RAGFlow 服务账号（对话模型取该 `models` 行的上游地址与密钥）：
    - body 含对象形式的 `rerank`：SHALL 最先下发重排模型，再按下面两条下发。重排一轮没有账号缺省这一步，它失败时 RAGFlow 侧尚未改动任何账号缺省。`rerank` 为 `null` 时没有下发，只把本地重排三列置空；已是 `null` 时再设 `null` 是无操作。
    - body 含 `embedding`：先下发嵌入模型，再重发当时指定的对话模型（本次的 `chatModelId`，否则已存的值）；没有指定、或该行没有上游时跳过这一步。
-   - body 只含 `chatModelId`（或只含它与 `rerank`）：只下发对话模型；取值为 `null` 时没有下发。
+   - 除 `rerank` 外只含 `chatModelId`：在重排那一轮（如有）之后只下发对话模型；取值为 `null` 时这一轮没有下发。
 3. 下发失败：按「RAGFlow 出站请求」映射，本地设置不变；失败那一轮之后的各轮 SHALL NOT 再发。
 4. 成功后：在同一事务里写设置，并审计 `kb.settings`。
 

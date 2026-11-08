@@ -78,10 +78,10 @@ Minimal mergeable slice: atomic - 夹具与客户端路由共一条验证路径�
 
 - [ ] 4.4 测试先行：新 `server/test/kb-retrieval-endpoint.test.ts`（`buildApp` + `app.inject()`，真实 SQLite，接假 RAGFlow），覆盖「检索测试端点」全部场景（含零命中与全部关联不上、写回排在入库之后、排队时库被删除、并发的相同提交、写回与重建交错：用 S2a 的锁注入让重建器持锁），以及「知识库审计」的「detail 不含敏感内容」里含哨兵问句的检索写回一支。计数断言原地改：
   - `server/test/kb-disabled.test.ts`：「未配置即关闭」十二条扩到十三条。
-  - `server/test/http-parser-owners.test.ts`：归属集三十八条扩到三十九条，加检索路由的 malformed / 空 / `text/plain` 三例。
-  - `server/test/kb-documents-list.test.ts` 与 `server/test/kb-documents-reingest.test.ts` 的「文档路由的所有权」describe 块：加检索路由，十二次。
+  - `server/test/http-parser-owners.test.ts`：归属集三十八条扩到三十九条（`:201`），其中 POST 三十条扩到三十一条（`:205`），加检索路由的 malformed / 空 / `text/plain` 三例。
+  - 检索路由的所有权（别人的 id、不存在的 id 各一次，合法 body 且参数与已存值不同，断言 A 库的检索参数不变）写进新文件 `server/test/kb-retrieval-endpoint.test.ts`。「文档路由的所有权」是五个既有文件各测自己那条路由（`kb-ingest-workspace`、`kb-documents-list`、`kb-documents-remove`、`kb-documents-reingest`、`kb-upload`），规格里的「十二次」是六条路由的合计，不改这五个文件（其中 `kb-documents-reingest.test.ts` 已 780 行）。
   先看到红。验证：用例先红。
-- [ ] 4.5 实现 design D4：`server/src/kb/retrieval.ts` 加 body 校验与写回编排（经 `locks.write`，锁内重读再比较，回调里写 `kb.retrieval_settings`）。`server/src/kb/rest.ts` 注册 `POST /api/kb/bases/:id/retrieval`（`ownedBase` preParsing、body limit 16 KiB、no-store）；`server/src/http/errors.ts` 的归属集加这条身份；`index.ts` 装配。验证：`npm run test:focus --workspace server -- kb-retrieval kb-disabled http-parser-owners kb-documents` 全过，`make lint`、`make typecheck` 退出 0。
+- [ ] 4.5 实现 design D4：`server/src/kb/retrieval.ts` 加 body 校验与写回编排（经 `locks.write`，锁内重读再比较，回调里写 `kb.retrieval_settings`）。`server/src/kb/rest.ts` 注册 `POST /api/kb/bases/:id/retrieval`（`ownedBase` preParsing、body limit 16 KiB、no-store）；`server/src/http/errors.ts` 的归属集加这条身份；`index.ts` 装配。验证：`npm run test:focus --workspace server -- kb-retrieval kb-disabled http-parser-owners` 全过，`make lint`、`make typecheck` 退出 0。
 - [ ] 4.6 文档：`docs/architecture/system.md` §2 的 `kb` 行把 S2a 之前的占位 `search(principal, query, kbRefs)` 换成单轮检索与检索端点，第 51 行附近「agentic 环…由 S2b 定」改为指向 ADR-0017；9.13 加「单轮检索与检索测试」一节（请求形状、参数显式传的理由、写回规则、命中关联）；`docs/architecture/knowledge-base.md` 加检索参数的缺省值与「候选由全文匹配圈定」的已知行为（引用续篇 §19.1）。验证：`make anti-drift` 退出 0；`git grep -n "由 S2b 定" -- docs/architecture` 退出 1。
 
 Suggested fixture level: expanded - 新的公共端点、权限、持久化写回与并发（public API、auth、persisted state、concurrency）。
@@ -137,7 +137,7 @@ Minimal mergeable slice: 8.1–8.2 为首刀：API 方法是 `createKbMethods` �
 ## 9. web：模型 tab 的重排模型（model-registry「模型 tab」的重排模型与改名后的探活调用）
 
 - [ ] 9.1 原地重构：`kb-embedding-dialog.tsx` 改名 `kb-model-dialog.tsx`，加 `kind` 属性，嵌入模型的行为与文案不变（标题、重建确认只对嵌入生效）。测试先行：`web/test/center-models-kb.test.tsx` 里既有嵌入对话框与「更换嵌入模型需确认」用例原样全绿。验证：`npm run test:focus --workspace web -- center-models-kb` 全过（vitest 输出里能看到该文件）；`git grep -n kb-embedding-dialog -- server web docs/architecture` 退出 1。
-- [ ] 9.2 测试先行：在 `web/test/center-models-kb.test.tsx` 加「重排模型」场景（编辑、保存后探活、`探活`、`清除` 的取消与确认）；实现 `kb-section.tsx` 的重排模型一行与清除确认框（拷入层 alert-dialog）。`web/e2e/ui-walk-center-kb.ts` 加一段：`/api/kb/settings` 由 route 应答（已配置重排模型），以管理员身份在桌面与 390 px 宽度下打开模型 tab 看到重排模型一行，过 error oracle。验证：`npm run test:focus --workspace web -- center-models-kb` 全过；`make ui-walk` 退出 0；PR 附两种宽度的截图。
+- [ ] 9.2 测试先行：在 `web/test/center-models-kb.test.tsx` 加「重排模型」场景（编辑、保存后探活、`探活`、`清除` 的取消与确认）；实现 `kb-section.tsx` 的重排模型一行与清除确认框（拷入层 alert-dialog）。`web/e2e/ui-walk-center-kb.ts` 加一段：`/api/kb/status`（`enabled:true`）与 `/api/kb/settings`（已配置重排模型）由 route 应答，改以管理员 `lisi` 登录（模型 tab 是 `adminOnly`，成员访问 `GET /api/models` 为 403，会让 error oracle 变红），在桌面与 390 px 宽度下打开模型 tab 看到重排模型一行，过 error oracle。验证：`npm run test:focus --workspace web -- center-models-kb` 全过；`make ui-walk` 退出 0；PR 附两种宽度的截图。
 - [ ] 9.3 验收清单 CK 节加 CK-14（管理员配置重排模型、探活、清除；配置后成员的检索测试照常有结果；桌面与手机宽度、浅色与深色主题下布局不溢出），结论 `待签`。验证：`npm run test:focus --workspace web -- functional-checklist` 全过。
 
 Suggested fixture level: expanded - 前端通用契约：涉及呈现的 web 任务至少 `expanded`（真实浏览器由 9.2 的 ui-walk 段承担）。

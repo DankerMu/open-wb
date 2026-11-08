@@ -278,7 +278,7 @@ knowledge-bases 新增「`kb_search` 工具契约」：
 断言 200、`hits` 非空、首条 `name` 为 `notes.md`。这条同时验证了写回：参数与缺省不同，写回之后检索。
 它是 §19 的映射对真实 rc2 成立的唯一证明，所以同一 PR 改写 CK-11 的期望（加上这条检索断言），结论回到 `待签`，由 owner 重跑 `make smoke-kb` 签收。
 
-**ui-walk**：CI 没有真实 RAGFlow，知识库开启的界面只能在浏览器层桩 API。新分支 `web/e2e/ui-walk-center-kb.ts` 用 `page.route(...).fulfill`（先例 `web/e2e/ui-walk-layout.ts:71`）应答 `/api/kb/status`、`/api/kb/bases`、`…/documents`、`…/retrieval` 与 `/api/kb/settings`，在桌面与 390 px 两种宽度下走检索测试面板与重排模型一行，过 error oracle；结束前 unroute。它证明的是真实浏览器里的呈现与交互，不证明服务端。
+**ui-walk**：CI 没有真实 RAGFlow，知识库开启的界面只能在浏览器层桩 API。新分支 `web/e2e/ui-walk-center-kb.ts` 用 `page.route(...).fulfill`（先例 `web/e2e/ui-walk-layout.ts:71`）应答 `/api/kb/status`、`/api/kb/bases`、`…/documents`、`…/retrieval` 与 `/api/kb/settings`，在桌面与 390 px 两种宽度下走检索测试面板（成员 `zhangsan`）与重排模型一行（管理员 `lisi`：模型 tab 只对管理员渲染，成员读 `GET /api/models` 为 403），过 error oracle；结束前 unroute。它证明的是真实浏览器里的呈现与交互，不证明服务端。
 
 **验收清单**：CK 节新增 CK-13（检索测试：命中、无命中、参数写回后刷新仍在）与 CK-14（管理员配置、探活、清除重排模型，配置后检索照常有结果），结论 `待签`。
 两行的期望都含「桌面与手机宽度、浅色与深色主题下布局不溢出、文字可读」，由 owner 在真实栈上走查。行文写明「不显示来源路径与切片序号」，这是 owner 授权的偏离。

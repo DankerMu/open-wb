@@ -78,7 +78,7 @@ rc2 的检索接口此前从未实测，2026-11-08 补测（记录 §19）推翻
   - 新迁移 `051_kb_retrieval.sql`；`http/errors.ts` 的归属集。
 - 前端：
   - 新文件 `web/src/features/center/kb/retrieval-panel.tsx` 与 `use-retrieval.ts`。
-  - 改动 `detail.tsx`、`api-kb.ts`、模型 tab 的 `kb-section.tsx` 与 `kb-embedding-dialog.tsx`（泛化为两种模型共用）、`use-kb-settings.ts`。
+  - 改动 `detail.tsx`、`api-kb.ts`、模型 tab 的 `kb-section.tsx` 与 `kb-embedding-dialog.tsx`（原地改名为 `kb-model-dialog.tsx`，加 `kind` 属性，两种模型共用）、`use-kb-settings.ts`。
 - 测试夹具：`server/test/support/fake-ragflow*.mjs` 加检索路由，重排实例走既有的实例路由；新 `server/test/support/fake-upstream-rerank.mjs`；新 ui-walk 分支 `web/e2e/ui-walk-center-kb.ts`（`page.route` 桩知识库 API）。
 - 外部：
   - 开发期仍用共用 RAGFlow 栈；本 change 不再需要对它做实测（已在 §19 完成）。
