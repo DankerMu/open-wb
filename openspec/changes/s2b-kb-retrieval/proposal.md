@@ -4,7 +4,7 @@
 > Fixture level: expanded（整个 change；各任务组的级别见 tasks.md 组尾声明）
 > Blast radius: RAGFlow 客户端加 `POST /api/v1/retrieval` 与重排模型下发（新兄弟文件，`ragflow-client.ts` 不加路由）；迁移 051（`knowledge_bases` 两列检索参数、`kb_settings` 六列重排模型）；`BaseView` 多一键 `retrieval`；新端点 `POST /api/kb/bases/:id/retrieval`（第三十九条 content-parser 归属身份）；`POST /api/kb/settings/probe` 加查询参数 `target`；设置读视图与 PUT body 各多一键 `rerank`；第八种知识库审计 `kb.retrieval_settings`；中心知识库详情多一块「检索测试」；模型 tab「知识库模型」段多一个重排模型
 > Evidence floor: `npm test --workspace server`、`npm test --workspace web`、typecheck、size-guard、`make check`、`make ui-walk`；真实 RAGFlow 只在本机 `make smoke-kb` 与验收走一轮
-> 依赖：建在 `s2a-kb-ragflow` 归档后的主规格之上（knowledge-bases、ragflow-backend）；事实来源是实测记录 `docs/reviews/2026-10-28-ragflow-rc2-api.md` §19（2026-11-08，S2b 检索实测）；方向决定见 ADR-0017。
+> 依赖：建在 `s2a-kb-ragflow` 归档后的主规格之上（knowledge-bases、ragflow-backend）；事实来源是实测记录续篇 `docs/reviews/2026-11-08-ragflow-rc2-retrieval.md` §19（2026-11-08，S2b 检索实测；`docs/reviews/2026-10-28-ragflow-rc2-api.md` 的接续）；方向决定见 ADR-0017。
 
 ## Why
 
@@ -55,15 +55,16 @@ rc2 的检索接口此前从未实测，2026-11-08 补测（记录 §19）推翻
 ### Modified Capabilities
 - `knowledge-bases`：
   - 「迁移 050 知识库 schema」之后加迁移 051。
+  - 「同一知识库的写操作串行」：持锁范围加检索测试的参数写回。
   - 「知识库端点」：`BaseView` 加 `retrieval`，建库应答带缺省值。
   - 「知识库审计」：八种 kind。
   - 「中心「知识库」tab」：详情加检索测试。
   - 新增「单轮检索」「检索测试端点」「`kb_search` 工具契约」。
 - `ragflow-backend`：
-  - 「RAGFlow 接口实测记录」：覆盖 §19。
+  - 「RAGFlow 接口实测记录」：事实来源为两份记录（原文件与续篇），续篇覆盖 §19。
   - 「知识库可用性」：十三条路由。
   - 「RAGFlow 出站请求」：检索路由的类型化结果与重排降级这一处重试例外。
-  - 「知识库模型设置」：重排模型的键、下发、清除与探活。
+  - 「知识库模型设置」：重排模型的键、下发（排在最前）、清除与探活。
 - `model-registry`：「模型 tab」的「知识库模型」段加重排模型。
 - `http-service-skeleton`：「统一错误信封」的归属身份加 `POST /api/kb/bases/:id/retrieval`（三十九条，三十一条以 POST 归属）。
 - `verification-harness`：「知识库真实端点冒烟」加检索断言。
@@ -78,7 +79,7 @@ rc2 的检索接口此前从未实测，2026-11-08 补测（记录 §19）推翻
 - 前端：
   - 新文件 `web/src/features/center/kb/retrieval-panel.tsx` 与 `use-retrieval.ts`。
   - 改动 `detail.tsx`、`api-kb.ts`、模型 tab 的 `kb-section.tsx` 与 `kb-embedding-dialog.tsx`（泛化为两种模型共用）、`use-kb-settings.ts`。
-- 测试夹具：`server/test/support/fake-ragflow*.mjs` 加检索路由，重排实例走既有的实例路由。
+- 测试夹具：`server/test/support/fake-ragflow*.mjs` 加检索路由，重排实例走既有的实例路由；新 `server/test/support/fake-upstream-rerank.mjs`；新 ui-walk 分支 `web/e2e/ui-walk-center-kb.ts`（`page.route` 桩知识库 API）。
 - 外部：
   - 开发期仍用共用 RAGFlow 栈；本 change 不再需要对它做实测（已在 §19 完成）。
   - 重排上游由管理员配置；`make smoke-kb` 不依赖重排。

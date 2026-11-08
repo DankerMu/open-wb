@@ -1,7 +1,7 @@
 ## MODIFIED Requirements
 
 ### Requirement: RAGFlow 接口实测记录
-仓库 SHALL 有一份 `docs/reviews/2026-10-28-ragflow-rc2-api.md`，记录用 API key 实测运行中的 RAGFlow `v1.0.0-rc2` 得到的事实。每节附请求与应答摘录，并写明结论「支持」或「不支持」。记录 SHALL 覆盖：
+仓库 SHALL 有 `docs/reviews/2026-10-28-ragflow-rc2-api.md` 及其续篇 `docs/reviews/2026-11-08-ragflow-rc2-retrieval.md`（节号从 §19 起，S2b），记录用 API key 实测运行中的 RAGFlow `v1.0.0-rc2` 得到的事实。每节附请求与应答摘录，并写明结论「支持」或「不支持」。两份记录合起来 SHALL 覆盖：
 - **版本接口**：应答字段。
 - **建数据集**：模板字段（`parser_id` 与 `parse_type`）的全部取值；`embedding_model` 的格式；同名数据集的应答。
 - **RAPTOR 与知识图谱**：开启方式（模板组、画布与 pipeline 数据集，含 DSL）；是否需要显式触发；编译状态接口及其全部状态取值；任务日志的形状与分页、批次的 `dsl.entries`、只开一种编译时的 `task_type`；两种编译对每种模板是否可用；失败时的信号；删除有无引用保护。
@@ -12,9 +12,9 @@
 - **不存在的 id**：数据集与文档 id 不存在时，各路由的 HTTP 状态与 body `code`，以及它们能否与「参数非法」区分。
 - **模型下发**：能否用 API key 配置模型提供方 instance 与账号缺省模型；配置后能否以 `embedding_model` 引用；能否删除已下发的配置；删除有无保护。
 - **错误组合**：鉴权失败、参数非法、权限不足各自的 HTTP 状态与 body `code`。
-- **检索**（§19，S2b）：`POST /api/v1/retrieval` 的请求参数是否生效、应答与切片字段、分数的构成，参数非法与数据集不存在时的组合；数据集上的检索字段能否经 `PUT` 改写；重排模型的下发、`rerank_id` 的格式、重排失败的信号与直连上游的形状；`use_kg` 是否有可观察的效果。
+- **检索**（续篇 §19，S2b）：`POST /api/v1/retrieval` 的请求参数是否生效、应答与切片字段（含零命中时的应答原样）、分数的构成，参数非法与数据集不存在时的组合；数据集上的检索字段能否经 `PUT` 改写；重排模型的下发、`rerank_id` 的格式、重排失败的信号与直连上游的形状；`use_kg` 是否有可观察的效果。
 
-本记录 SHALL 是假 RAGFlow 夹具协议的唯一来源。夹具的行为分两类：
+这两份记录 SHALL 是假 RAGFlow 夹具协议的唯一来源。夹具的行为分两类：
 - **协议应答**：路径、字段、状态值与错误 code，SHALL 在本记录里有对应条目。
 - **故障注入**：用例显式脚本化的异常，可以不在记录里，SHALL 只限四种：
   - 传输层失败：挂起、挂起后放行、超时、连接失败、中途断开。
@@ -29,10 +29,10 @@
 
 #### Scenario: 夹具与记录一致
 - **WHEN** 评审 `server/test/support/fake-ragflow.mjs` 的任一路由、字段名或状态值
-- **THEN** 协议应答在实测记录里有对应条目；记录里没有的接口、字段与状态值，只以上面列出的故障注入出现，并由用例显式脚本化
+- **THEN** 协议应答在两份实测记录之一里有对应条目；记录里没有的接口、字段与状态值，只以上面列出的故障注入出现，并由用例显式脚本化
 
 #### Scenario: 记录已脱敏
-- **WHEN** 对实测记录运行 gitleaks，并用 grep 搜实测时所用的 RAGFlow 主机名或 IP、端口与专用账号名
+- **WHEN** 对两份实测记录运行 gitleaks，并用 grep 搜实测时所用的 RAGFlow 主机名或 IP、端口与专用账号名
 - **THEN** gitleaks 无发现，grep 零命中；文中出现的地址只有 `<RAGFLOW_BASE_URL>`
 
 ### Requirement: 知识库可用性
@@ -95,7 +95,7 @@
 
 `DELETE /datasets` 的 `ids` SHALL 恰含一个非空 id，成功 SHALL 以 `success_count` 为 1 为准。客户端 SHALL NOT 提供 `GET /providers/<提供方>/instances/<实例>`：该应答明文回显上游密钥。
 
-RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计或日志。message 只用于上面的前缀判定。
+RAGFlow 应答的 message 与错误应答的正文 SHALL NOT 进入本系统的响应、审计或日志，message 只用于上面的前缀判定。唯一的例外是成功检索应答里命中切片的 `content` 与 `similarity`：它们作为数据进入检索测试的 200 应答（knowledge-bases「单轮检索」），仍 SHALL NOT 进入审计或日志。
 
 #### Scenario: 结果映射
 - **WHEN** 假 RAGFlow 对建库请求依次应答：HTTP 200 `code:0`；HTTP 200 `code:101`；HTTP 401 `code:401`；HTTP 302；HTTP 200 非 JSON；挂起超过总期限（期限经装配注入缩短）
@@ -158,10 +158,10 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 **保存流程**：
 1. 判定 `chatModelId` 的取值规则。
 2. 把配置下发到 RAGFlow 服务账号（对话模型取该 `models` 行的上游地址与密钥）：
+   - body 含对象形式的 `rerank`：SHALL 最先下发重排模型，再按下面两条下发。重排一轮没有账号缺省这一步，它失败时 RAGFlow 侧尚未改动任何账号缺省。`rerank` 为 `null` 时没有下发，只把本地重排三列置空；已是 `null` 时再设 `null` 是无操作。
    - body 含 `embedding`：先下发嵌入模型，再重发当时指定的对话模型（本次的 `chatModelId`，否则已存的值）；没有指定、或该行没有上游时跳过这一步。
-   - body 只含 `chatModelId`：只下发对话模型；取值为 `null` 时没有下发。
-   - body 含对象形式的 `rerank`：在上面两项之后下发重排模型。`rerank` 为 `null` 时没有下发，只把本地重排三列置空；已是 `null` 时再设 `null` 是无操作。
-3. 下发失败：按「RAGFlow 出站请求」映射，本地设置不变。
+   - body 只含 `chatModelId`（或只含它与 `rerank`）：只下发对话模型；取值为 `null` 时没有下发。
+3. 下发失败：按「RAGFlow 出站请求」映射，本地设置不变；失败那一轮之后的各轮 SHALL NOT 再发。
 4. 成功后：在同一事务里写设置，并审计 `kb.settings`。
 
 **`chatModelId` 的取值规则**：当前值非 `null` 且存在开编译的知识库时：
@@ -299,3 +299,15 @@ RAGFlow 应答的 message 与正文 SHALL NOT 进入本系统的响应、审计�
 #### Scenario: 重排探活
 - **WHEN** 已配置重排模型，假上游对 `POST <baseUrl>/rerank` 依次应答：2xx 且 `results[0].relevance_score` 为数字；HTTP 401；2xx 且 `results` 为空数组；另一个实例未配置重排模型时 `POST /api/kb/settings/probe?target=rerank`；再一次 `target=nope`
 - **THEN** 前三次 200，`rerank.probe.status` 依次为 `ok`、`failed`、`failed`，各一条 `kb.settings`（detail `{rerankProbe}`），假 RAGFlow 收到零个请求，`embedding.probe` 不变；未配置那次与 `target=nope` 都是 400 `bad_request`，没有审计；假上游收到的 body 恰为 `{model, query:"ping", documents:["ping"]}`
+
+#### Scenario: 探活目标的取值
+- **WHEN** 已配置两种模型，管理员请求 `POST /api/kb/settings/probe?target=`；`?target=rerank&target=embedding`；`?target=embedding`
+- **THEN** 前两次 400 `bad_request`，假上游收到零个请求，没有审计；第三次探嵌入模型，与不带 `target` 时相同
+
+#### Scenario: 重排模型下发失败
+- **WHEN** 已配置重排模型 `qwen3-rerank` 且探活为 `ok`；管理员 `PUT {rerank:{name:"bge-reranker", baseUrl, apiKey}}`，假 RAGFlow 对 `owb-rerank` 的实例 `PUT` 应答 HTTP 503
+- **THEN** 503 `kb_unavailable`；`GET` 的 `rerank.name` 仍为 `qwen3-rerank`、`rerank.probe.status` 仍为 `ok`；没有 `kb.settings` 审计
+
+#### Scenario: 组合保存时重排失败
+- **WHEN** 已配置嵌入模型 `bge-m3`，有两个知识库；管理员 `PUT {embedding:{name:"text-embedding-3-small", baseUrl}, rerank:{name:"qwen3-rerank", baseUrl, apiKey}, confirmRebuild:true}`，假 RAGFlow 对 `owb-rerank` 的建实例应答 HTTP 503
+- **THEN** 503 `kb_unavailable`；假 RAGFlow 只收到 `owb-rerank` 一轮的 `PUT /providers`、`GET /models` 与建实例，没有 `owb-embed` 的请求，也没有 `PATCH /models/default`；本地嵌入仍为 `bge-m3`，`rerank` 仍为 `null`；没有知识库进入 `rebuilding`；没有 `kb.settings` 与 `kb.rebuild` 审计

@@ -29,7 +29,7 @@
 
 #### Scenario: 产品路由身份在共享映射器中的归属
 - **WHEN** genuine allowlisted Fastify content-parser error is mapped for the production-mounted POST matched /api/sessions/:id/prompt, /v1/chat/completions, /api/workspaces, /api/workspaces/:id/dirs, /api/workspaces/:id/move, /api/workspaces/:id/preview-token, /api/sessions/:id/stop, /api/sessions/:id/regenerate, /api/sessions/:id/fork, /api/sessions/:id/approvals/:approvalId, /api/sessions/:id/undo, /api/workspaces/:id/promote, /api/workspaces/:id/uploads or /api/sessions, or the PATCH matched /api/sessions/:id
-- **THEN** the mapper returns exact400 bad_request without rawdetails; a method other than the owner identity's own method (for example PATCH /api/sessions, POST /api/sessions/:id, DELETE /api/sessions/:id), lookalike/raw-concrete identities and registered unowned routes staygeneric500; ownership is decided solely by the shared mapper's exact thirty-eight-identity (method + route) set, not by whichever module registered the route
+- **THEN** the mapper returns exact400 bad_request without rawdetails; a method other than the owner identity's own method (for example PATCH /api/sessions, POST /api/sessions/:id, DELETE /api/sessions/:id), lookalike/raw-concrete identities and registered unowned routes staygeneric500; ownership is decided solely by the shared mapper's exact thirty-nine-identity (method + route) set, not by whichever module registered the route
 
 #### Scenario: Cache policy remains route-owned
 - **WHEN** each of the thirty-seven typed errors passes through an existing no-store-owning route and the shared mapper
@@ -39,7 +39,7 @@
 
 #### Scenario: 工作空间 parser owner 的真实 HTTP 边界
 - **WHEN** the production POST /api/workspaces and /api/workspaces/:id/dirs routes mounted by createApp (16 KiB body limit, route-owned no-store) receive genuine malformed/empty/unsupported/oversized content-parser errors with a real login cookie
-- **THEN** exact400 bad_request is returned before their handlers run, with the route's own no-store preserved; the thirty-eight-owner policy covers these two identities alongside the thirty-six other owners
+- **THEN** exact400 bad_request is returned before their handlers run, with the route's own no-store preserved; the thirty-nine-owner policy covers these two identities alongside the thirty-seven other owners
 - **WHEN** the same parser failures hit a registered non-POST or lookalike route (proved by explicitly registered test probes), or an owner handler throws a forged parser/code/status/validation-shaped programmer error
 - **THEN** the existing generic500 boundary remains and raw internal details are not disclosed
 - **WHEN** unauthenticated requests hit those protected production workspace routes with invalid bodies
