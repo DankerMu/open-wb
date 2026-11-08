@@ -242,8 +242,76 @@ Minimal mergeable slice: 6.1–6.2 为首刀（设置的解析、下发、清除
 
 ## 7. 检索带重排与自动降级（ragflow-backend「RAGFlow 出站请求」的重排降级与三个场景；knowledge-bases「单轮检索」的「带重排」）
 
-- [ ] 7.1 测试先行：新 `server/test/kb-retrieval-rerank.test.ts`，加「带重排」「重排降级」「检索失败的映射」（收窄为带 `rerank_id` 重试后仍是 102 得 503；未配置重排时 102 与 101 的原语映射已由 4.1 覆盖，不重复；但要加一例未配置重排、`code:102` 时 stderr 无 `kb_rerank_degraded`）「超时不降级」四个场景；`kb_rerank_degraded` 60 秒内至多一行（注入时钟）；降级时 stderr 与应答都不含假 RAGFlow 的 message 哨兵。先看到红。验证：用例先红。
-- [ ] 7.2 `server/src/kb/retrieval.ts`：配置了重排模型时带 `rerank_id`，检索失败且带了 `rerank_id` 时去掉它重试恰一次并写降级记录（复用 `perMinute`），其余检索失败为 `kb_unavailable`（design D3）。验证：`npm run test:focus --workspace server -- kb-retrieval` 全过；`docs/architecture/system.md` 9.13 的检索一节补上降级规则与「`code:102` 不可区分」的后果。
+- [x] 7.1 测试先行：新 `server/test/kb-retrieval-rerank.test.ts`，加「带重排」「重排降级」「检索失败的映射」（收窄为带 `rerank_id` 重试后仍是 102 得 503；未配置重排时 102 与 101 的原语映射已由 4.1 覆盖，不重复；但要加一例未配置重排、`code:102` 时 stderr 无 `kb_rerank_degraded`）「超时不降级」四个场景；`kb_rerank_degraded` 60 秒内至多一行（注入时钟）；降级时 stderr 与应答都不含假 RAGFlow 的 message 哨兵。先看到红。验证：用例先红。
+- [x] 7.2 `server/src/kb/retrieval.ts`：配置了重排模型时带 `rerank_id`，检索失败且带了 `rerank_id` 时去掉它重试恰一次并写降级记录（复用 `perMinute`），其余检索失败为 `kb_unavailable`（design D3）。验证：`npm run test:focus --workspace server -- kb-retrieval` 全过；降级规则与「`code:102` 不可区分」的后果写进 `docs/architecture/knowledge-base.md`「单轮检索与检索测试」一节，`docs/architecture/system.md` 9.13 只在话题清单里加一项（见下方「组 7 约定」）。
+  - 组 7 约定（#1920 fixture 审查补；7.1–7.2 照此实现与测试）：
+    - 限流器只建一次。这条推翻「组 4 首刀约定」里「组 7 加 `log` / `now`」的写法。
+      - 照 `server/src/kb/index.ts` 中 `onVersionMismatch` 的写法建 `onRerankDegraded: perMinute(now, () => log({event:"kb_rerank_degraded"}))`，经 `createKbRetrieval` 的 deps 传进 `retrieveForBase`。
+      - 理由：`perMinute` 的状态存在闭包里，在 `retrieveForBase` 内建会每调用一次就重置一次。只在 `index.ts` 建一次，S2c 的 `kb_search` 也能共用同一个限流器。
+      - `KbRecord` 的联合加 `"kb_rerank_degraded"`。
+      - 名字里不得含词 `retrieve`（4.3 的扫描会拦）。
+    - deps 形状：
+      - `RetrievalDependencies` 改为 `{store: Pick<…, "listDocuments" | "settings">, client: Pick<…, "retrieve">, onRerankDegraded: () => void}`。
+      - `KbRetrievalDependencies` 同样加 `"settings"` 与 `onRerankDegraded`。
+      - `retrieveForBase(deps, base, question)` 的签名不变。
+    - 读取时机：
+      - 在 `retrieveForBase` 开头读一次 `deps.store.settings().rerank`，不在 `test()` 里读。这样 S2c 也一律带重排（Grill #4「配了就一律用」）。
+      - 重试复用同一个 `base` 行和问句，不重读设置。所以「请求开始到重试之间清除了重排」不单独设用例：重试本来就不带这个键。
+    - 引用串：
+      - 在 `settings.ts` 的 `embeddingModelOf` 旁加 `export function rerankModelOf(name)`，返回 `${name}@${RERANK_INSTANCE}@${PROVIDER}`，由 `retrieval.ts` 导入。
+      - `retrieval.ts` 里不得出现字面量 `@owb-rerank@` 或 `OpenAI-API-Compatible`。
+      - PR 边界因此加上 `settings.ts`，至多 +4 行。
+    - 请求的 query：
+      - 第一次为 `{...base 参数, ...(rerank === null ? {} : {rerankId: rerankModelOf(rerank.name)})}`。
+      - 重试用 `const {rerankId, ...rest} = query` 去掉这个键，不传 `rerankId: undefined`（`exactOptionalPropertyTypes`）。
+    - 只在一种情况下重试：第一次带了 `rerankId`，且结果为 `retrieval_failed`。
+      - `kb_rejected`（含 101、非 200 的 102）与 `kb_unavailable`（404、HTTP 5xx、超时）都原样返回，不重试，不写记录。
+      - 进入降级后，不论重试结果如何，`onRerankDegraded()` 都恰调用一次。
+      - 重试结果按普通检索映射：`retrieval_failed` 为 `kb_unavailable`，101 为 `kb_rejected`，命中走既有关联。
+    - 必须保持：
+      - `server/src/kb/ragflow-retrieval.ts` 不动。
+      - `kb-retrieval-endpoint.test.ts` 与 `kb-retrieval.test.ts` 的用例一条不改，全部保持绿。
+      - `kb-retrieval-canonical.test.ts` 保持绿。
+      - 未配置重排时，body 恰为 D2 的六个键，没有 `rerank_id` 键。
+      - `kb-retrieval.test.ts` 的 `deps` 字面量原地加 `onRerankDegraded: () => {}`（`store` 已有 `settings`），不改用例，并列入 PR 边界。
+    - 测试世界：
+      - 新文件 `server/test/kb-retrieval-rerank.test.ts` 用 `useIngestWorlds()`。
+      - 时钟用 `open({kb:{now: () => clock}})` 配一个可变的 `let clock`（ingest 世界没有 `advance`）。
+      - 发检索时用与已存值相同的 body `{question, threshold:0.2, vectorWeight:0.7}`，走快路径，不拿锁、不审计。
+    - 种重排：用 `world.store.saveSettings({rerank:{name:"qwen3-rerank", baseUrl, apiKey: RERANK_KEY}})`。成功路径还必须 `world.fake.addModel("owb-rerank","qwen3-rerank","rerank")`，否则夹具找不到模型会回 102，用例会因为错误的原因失败。
+    - 带重排：
+      - 期望 200，恰一次检索请求。
+      - body `toEqual` D2 六键加 `rerank_id:"qwen3-rerank@owb-rerank@OpenAI-API-Compatible"`，期望值写成字面量，不从 src 取。
+      - `world.logged` 为 `[]`。
+      - `RERANK_KEY` 不出现在请求 body 和应答里。
+    - 探活失败仍带重排：先 `world.store.recordRerankProbe({name, baseUrl, apiKey}, {status:"failed", at, message:null})` 再检索，body 仍带 `rerank_id`。
+    - 按次读设置：已配置时检索带键；`world.store.saveSettings({rerank:null})` 之后的下一次检索恰一次请求，`Object.hasOwn(body, "rerank_id")` 为 false。
+    - 重排降级：`failRerank(MESSAGE_SENTINEL)`，再用 `setRetrievalHits` 种两条本地文档的切片，连续检索三次。
+      - 每次都是 200，应答 `toEqual({hits:[两条], retrieval:{threshold:0.2, vectorWeight:0.7}})`，键集恰如此，没有降级标记，带 `cache-control: no-store`。
+      - 检索请求共六次，两两一对：每对的第二次 `toEqual` 第一次去掉 `rerank_id` 的结果，且 `Object.hasOwn(second, "rerank_id")` 为 false。
+      - `world.logged` `toEqual([{event:"kb_rerank_degraded"}])`。这是精确对象比较，由此可证记录里没有 baseId、名称、地址、密钥或 message。
+      - `MESSAGE_SENTINEL` 不出现在应答里。
+      - `audit_events` 总行数不变。
+    - 限流（注入时钟）：
+      - 降级一次后 `clock += 59_999` 再降级，仍是一行；再 `clock += 1` 降级，变为两行（`perMinute` 用的是 `>=`）。
+      - 限流是进程级的，不按库分：用 `world.addBase("naive")` 建第二个库，两个库在 60 秒内各降级一次，`world.logged` 恰一行。
+    - 检索失败的映射（收窄后）：
+      - 已配置重排时注入 `world.fake.fault(ROUTE, {kind:"combo", code:102, message:MESSAGE_SENTINEL}, {times:2})`（`answer` / `fault` 缺省只生效一次，必须写 `times:2`）。期望 503 `kb_unavailable`，恰两次请求，第二次不带键，`world.logged` 恰一行 `kb_rerank_degraded`。这一行误报是 D3 写明的已知后果。
+      - 未配置重排时同样注入 `code:102`：期望 503，恰一次请求，`world.logged` 为 `[]`。
+    - 不重试矩阵（已配置重排）：
+      - `fault(ROUTE, {kind:"combo", code:101})` 得 400 `kb_rejected`，恰一次请求，没有记录。
+      - 超时不降级：`open({kb:{deadlines:{totalMs:50}}})` 配 `fault(ROUTE, {kind:"hang"})`，得 503 `kb_unavailable`，恰一次请求（带 `rerank_id`），`world.logged` 为 `[]`。
+    - 源码注释：`retrieval.ts` 文件头的「映射：「检索失败」（本刀不带重排）为 kb_unavailable」原地改写为降级规则。
+    - 文档落点（取代 7.2 原文的「system.md 9.13 的检索一节」）：正文写在 `docs/architecture/knowledge-base.md` 的「单轮检索与检索测试」一节，两条 bullet 原地改。
+      - 「请求」：配置了重排模型时另带 `rerank_id = <名称>@owb-rerank@OpenAI-API-Compatible`；未配置时连键都不发；探活状态不影响带不带。
+      - 「结果」：把「HTTP 200 `code:102` 映射为 503」改写为降级规则。
+        - 带了 `rerank_id` 时，去掉它、其余不变，重试恰一次，并写 `{"event":"kb_rerank_degraded"}`。同一进程 60 秒至多一行，不含密钥、地址与 message。应答里没有标记。
+        - 没带 `rerank_id` 时（包括那次重试）得 503。
+        - 超时、101、404、5xx 都不重试。
+        - 写明「`code:102` 不可区分」的后果：非重排引起的 102 也会多一次请求和一行误报，最坏耗时 2×30 s = 60 s。
+      - `system.md` 9.13 只在话题清单里加「带重排与自动降级（`kb_rerank_degraded`）」。
+      - 验证：`make anti-drift` 退出 0；`git grep -n kb_rerank_degraded -- docs/architecture/knowledge-base.md` 退出 0。
+    - 证据：`npm run test:focus --workspace server -- kb-retrieval` 全过（覆盖 kb-retrieval、kb-retrieval-endpoint、kb-retrieval-canonical、kb-retrieval-rerank），7.1 先红；`make lint`、`make typecheck` 退出 0；`retrieval.ts` 不超过 260 行（design 的行数表）。
 
 Suggested fixture level: expanded - 出站请求的重试语义，是「不重试」规则的唯一例外（outbound、shared failure mapping）。
 Minimal mergeable slice: atomic - 带 `rerank_id` 与降级必须同时生效：只带不降级，重排故障就让所有检索 503；只有降级没有可降的东西。

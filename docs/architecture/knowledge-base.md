@@ -50,12 +50,13 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 
 **版本钉住**：每次状态请求发一次 `GET <RAGFLOW_BASE_URL>/api/v1/system/version`，总期限 5 s，不带密钥。RAGFlow 不可达或版本不符都是 200 加 `available:false`，不是错误。版本钉住只决定 `available`，其它知识库端点不因版本不符而拒绝请求。升级 RAGFlow 是一次代码变更（`kb/rest.ts` 的常量），要重跑实测。
 
-**两条限频的 stderr 记录**，都恰只有 `event` 一个键，经同一受管 writer 写出，同一进程 60 秒内各至多一行：
+**三条限频的 stderr 记录**，都恰只有 `event` 一个键，经同一受管 writer 写出，同一进程 60 秒内各至多一行：
 
 | 记录 | 何时写 | 补救 |
 |---|---|---|
 | `{"event":"kb_version_mismatch"}` | 版本接口可达，版本串不是 `v1.0.0-rc2`。不可达时不写 | 把 RAGFlow 换回钉住的版本，或按升级流程改钉住的版本 |
 | `{"event":"kb_upstream_auth_failed"}` | RAGFlow 应答 HTTP 401，或 body `code` 为 401 / 403（`DELETE /datasets` 的 `code:403` 是「不存在」，不算） | 核对密钥文件里的 key 是否仍有效；换 key 要重启服务 |
+| `{"event":"kb_rerank_degraded"}` | 检索带了 `rerank_id`、RAGFlow 回 HTTP 200 `code:102`，去掉 `rerank_id` 重试了一次（不论重试结果）。`code:102` 不区分来源，非重排引起的也会写 | 核对重排模型的名称、地址、密钥（模型 tab 的探活）；无法修复时清除重排模型 |
 
 **知识库模型设置**（`server/src/kb/settings.ts`）：四个端点都只给管理员，次序是未登录 401 → 关闭时 503 `kb_disabled` → 非管理员 403 → body 解析；成功应答都是 200 加读视图，带 `Cache-Control: no-store`。
 
@@ -386,9 +387,9 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 
 **单轮检索与检索测试**（`server/src/kb/retrieval.ts`、`kb/ragflow-retrieval.ts`，s2b-kb-retrieval 组 4；[ADR-0017](../adr/0017-agentic-retrieval-model-driven.md)）。`kb` 模块只有单轮检索，没有改写问句、充分性判定与第二轮：要不要再查由会话里的模型决定。检索测试端点与 S2c 的会话内检索工具都经 `retrieveForBase` 这一个函数检索，客户端的检索方法只在这里被调用（`server/test/kb-retrieval-canonical.test.ts` 扫源码守住）。
 
-- **请求**：对该库当前的 `dataset_id`（不是重建中的 `rebuild_dataset_id`）发 `POST /api/v1/retrieval`，body 恰为 `{question, dataset_ids:[<dataset_id>], similarity_threshold, vector_similarity_weight, page:1, page_size:6}`。不发 `top_k`、`keyword`、`highlight`、`use_kg` 与 `document_ids`（带 `document_ids` 时召回面不同，命中分可以是 0，实测记录续篇 §19.1）。
+- **请求**：对该库当前的 `dataset_id`（不是重建中的 `rebuild_dataset_id`）发 `POST /api/v1/retrieval`，body 恰为 `{question, dataset_ids:[<dataset_id>], similarity_threshold, vector_similarity_weight, page:1, page_size:6}`；配置了重排模型时另带 `rerank_id = <名称>@owb-rerank@OpenAI-API-Compatible`，未配置时连这个键都不发，重排模型的探活状态不影响带不带（每次检索开头读一次设置）。不发 `top_k`、`keyword`、`highlight`、`use_kg` 与 `document_ids`（带 `document_ids` 时召回面不同，命中分可以是 0，实测记录续篇 §19.1）。
 - **参数恒显式传**：每个库的阈值与向量权重存在本地 `knowledge_bases` 的两列（迁移 051，`retrieval_threshold`、`retrieval_vector_weight`，0–1，CHECK 约束），新库与升级前已有的库缺省都是**阈值 0.2、向量权重 0.7**。RAGFlow 数据集上的检索字段经 API 改不了（`PUT` 回 `code:101`，续篇 §19.2），不传就落到 RAGFlow 自己的缺省（阈值 0.2、权重相当于 0.3），所以每次检索都把库里存的两个值显式传过去。
-- **结果**：`code:0` 时读 `data.chunks`，须是数组（零命中为 `[]`），每项须有字符串 `document_id`、`content` 与数字 `similarity`，否则按「成功应答缺字段」为 503 `kb_unavailable`。检索路由的 HTTP 200 `code:102` 是「检索失败」，映射为 503 `kb_unavailable`；`code:101` 为 400 `kb_rejected`；其余照通用映射。RAGFlow 的 message 不进应答与日志。
+- **结果**：`code:0` 时读 `data.chunks`，须是数组（零命中为 `[]`），每项须有字符串 `document_id`、`content` 与数字 `similarity`，否则按「成功应答缺字段」为 503 `kb_unavailable`。检索路由的 HTTP 200 `code:102` 是「检索失败」，按这次请求带没带 `rerank_id` 处理（重排降级，「不重试」规则的唯一例外，design D3）：带了的，去掉 `rerank_id`、其余字段不变，重试恰一次，并经受管 stderr writer 写一行，恰为 `{"event":"kb_rerank_degraded"}`；同一进程 60 秒内至多一行（进程级，不按库分），不含密钥、上游地址与 message；重试的结果按普通检索处理，应答里没有降级标记。没带的（包括那次重试）为 503 `kb_unavailable`。超时、`code:101`（400 `kb_rejected`）、`code:404` 与 HTTP 5xx 都不重试，其余照通用映射。`code:102` 区分不出是不是重排引起的（续篇 §19.4）：嵌入上游故障之类的 102 也会多一次不带重排的请求和一行误报的 `kb_rerank_degraded`，再以 503 结束；两次各受 30 s 总期限，最坏耗时 2×30 s = 60 s。RAGFlow 的 message 不进应答与日志。
 - **命中关联**：切片的 `document_id` 只对本库的本地文档行（`ragflow_document_id`）关联，名称取本地 `name`；关联不上的切片丢弃，不报错，不暴露 RAGFlow 侧或别的库的文档名。同一文档的多条切片各成一条命中，次序同 RAGFlow 应答，本系统不重排序。命中为 `{documentId, name, similarity, content}`，`documentId` 是本地文档 id。零候选或全部丢弃时为空数组。
 - **已知行为：候选由全文匹配圈定**。阈值设为 0 时也只回与问句有词重叠的切片（续篇 §19.1，[INFERENCE] 候选由全文匹配圈定，向量分只参与排序和阈值）。不带重排时三个分数恒等，都等于「向量权重 × 向量相似度」，所以纯语义的问句在低向量权重下可能零命中；要调的是本库的向量权重，不是问句。
 

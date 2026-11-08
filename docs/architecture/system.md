@@ -989,4 +989,4 @@ modelRoles:
 
 ### 9.13 知识库（S2a / S2b，change `s2a-kb-ragflow`、`s2b-kb-retrieval`）
 
-正文在 [knowledge-base.md](knowledge-base.md)：配置键、密钥文件、状态端点、模型设置与联动（含重排模型 `owb-rerank` 与 `?target=rerank` 探活）、知识库端点与模板表、编译资源（模板组与画布）、编译状态、工作空间来源入库，单轮检索与检索测试端点（请求形状、参数显式传、写回规则、命中关联、`kb.retrieval_settings`），嵌入模型更换与全量重建（重建流程、下载判别、跳过规则、续做与关停、`kb_dataset_leak` / `kb_pipeline_leak`），以及部署要求、回滚与真实端点冒烟 `make smoke-kb`。
+正文在 [knowledge-base.md](knowledge-base.md)：配置键、密钥文件、状态端点、模型设置与联动（含重排模型 `owb-rerank` 与 `?target=rerank` 探活）、知识库端点与模板表、编译资源（模板组与画布）、编译状态、工作空间来源入库，单轮检索与检索测试端点（请求形状、参数显式传、写回规则、命中关联、`kb.retrieval_settings`、带重排与自动降级（`kb_rerank_degraded`）），嵌入模型更换与全量重建（重建流程、下载判别、跳过规则、续做与关停、`kb_dataset_leak` / `kb_pipeline_leak`），以及部署要求、回滚与真实端点冒烟 `make smoke-kb`。

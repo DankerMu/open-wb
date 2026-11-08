@@ -4,8 +4,10 @@
  *
  * - 请求：对该库当前的 `datasetId`（不是 `rebuildDatasetId`）调一次客户端的检索方法，阈值与向量权重取该库行上已存的值，
  *   恒显式传，调用方不逐次覆盖。不判 `state`：`state` 的判定只约束检索测试端点（D4）。
- * - 映射：「检索失败」（本刀不带重排）为 `kb_unavailable`（D3）；`kb_rejected` / `kb_unavailable` 原样。调用方照 `bases.ts`
- *   的写法 `throw new HttpError(result.kind)`。
+ * - 重排：开头读一次设置，配置了重排模型就带 `rerankId`（`rerankModelOf`），探活状态不影响带不带；重试复用同一行与问句，不重读。
+ * - 降级与映射（D3）：只有带了 `rerankId` 且结果为「检索失败」时，先调一次 `onRerankDegraded`（`index.ts` 建的进程级限频记录），
+ *   再去掉这个键、其余不变，重试恰一次；重试的结果按普通检索处理。没带 `rerankId` 的「检索失败」（含那次重试）为
+ *   `kb_unavailable`；`kb_rejected` / `kb_unavailable`（含超时）原样，不重试。调用方照 `bases.ts` 的写法 `throw new HttpError(result.kind)`。
  * - 命中关联：切片的 RAGFlow 文档 id 只对本库的本地文档行（`listDocuments(base.id)`）关联，名称取本地记录；关联不上的丢弃，
  *   不暴露 RAGFlow 侧或别的库的文档名。同一文档的多条切片各成一条命中，次序同应答。零候选或全部丢弃时为空数组。
  *
@@ -19,7 +21,9 @@ import { HttpError } from "../core/errors/index.js";
 import { ownedBase } from "./bases.js";
 import type { createKbLocks } from "./locks.js";
 import type { createRagflowClient } from "./ragflow-client.js";
+import type { RetrievalQuery } from "./ragflow-retrieval.js";
 import { isRecord, type Result, UNAVAILABLE } from "./ragflow-route.js";
+import { rerankModelOf } from "./settings.js";
 import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
 
 const BODY_KEYS = ["question", "threshold", "vectorWeight"];
@@ -37,8 +41,10 @@ export interface RetrievalHit {
 }
 
 interface RetrievalDependencies {
-  store: Pick<ReturnType<typeof createKbStore>, "listDocuments">;
+  store: Pick<ReturnType<typeof createKbStore>, "listDocuments" | "settings">;
   client: Pick<ReturnType<typeof createRagflowClient>, "retrieve">;
+  /** 降级记录，同一进程 60 秒至多一行。 */
+  onRerankDegraded: () => void;
 }
 
 interface RetrievalParameters {
@@ -59,11 +65,26 @@ interface AuditEvent {
 }
 
 interface KbRetrievalDependencies {
-  store: Pick<ReturnType<typeof createKbStore>, "getBase" | "listDocuments" | "saveRetrieval">;
+  store: Pick<
+    ReturnType<typeof createKbStore>,
+    "getBase" | "listDocuments" | "saveRetrieval" | "settings"
+  >;
   client: Pick<ReturnType<typeof createRagflowClient>, "retrieve">;
   locks: Pick<ReturnType<typeof createKbLocks>, "write">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
+  onRerankDegraded: () => void;
+}
+
+/** 一次检索；带了 `rerankId` 而「检索失败」时降级重试恰一次。 */
+async function searchWithFallback(deps: RetrievalDependencies, query: RetrievalQuery) {
+  const result = await deps.client.retrieve(query);
+  if (result.kind !== "retrieval_failed" || query.rerankId === undefined) {
+    return result;
+  }
+  deps.onRerankDegraded();
+  const { rerankId, ...rest } = query;
+  return deps.client.retrieve(rest);
 }
 
 /** 对一个知识库的一次检索。 */
@@ -72,11 +93,13 @@ export async function retrieveForBase(
   base: KnowledgeBase,
   question: string,
 ): Promise<Result<RetrievalHit[]>> {
-  const result = await deps.client.retrieve({
+  const { rerank } = deps.store.settings();
+  const result = await searchWithFallback(deps, {
     question,
     datasetId: base.datasetId,
     threshold: base.retrievalThreshold,
     vectorWeight: base.retrievalVectorWeight,
+    ...(rerank === null ? {} : { rerankId: rerankModelOf(rerank.name) }),
   });
   if (result.kind === "retrieval_failed") {
     return UNAVAILABLE;
