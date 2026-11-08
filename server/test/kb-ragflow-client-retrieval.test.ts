@@ -137,8 +137,8 @@ describe("结果映射（design D3）", () => {
     await expect(client.retrieve(query())).resolves.toEqual({ kind: "ok", value: [] });
   });
 
-  it("不带 rerankId 的 code:102 同样是检索失败：只看 code", async () => {
-    fake.answer(ROUTE, { code: 102, message: "retrieval search failed: x" });
+  it("不带 rerankId 的 code:102 同样是检索失败：只看 code，message 没有 §19.4 的前缀也一样", async () => {
+    fake.answer(ROUTE, { code: 102, message: SENTINEL });
     await expect(client.retrieve(query())).resolves.toEqual(RETRIEVAL_FAILED);
   });
 
