@@ -190,7 +190,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 ## 8. 开放问题
 
 - **IdP 是否带组声明**：带则项目组改同步（ADR-0007 的开放尾巴）。解锁条件 = 身份源调研结论；P3 前必须关闭。
-- **omp 子进程池参数**（上限/内存限额/空闲回收）：P1 实测定参（PLAN §5）。
+- ~~omp 子进程池参数~~ 已关闭（2026-09-28，#494：上限 `OMP_MAX_PROCESSES` 默认 16、空闲回收 `OMP_IDLE_MS` 默认 600s 经测试 VPS 实测保留）；内存限额（cgroup）移交 S4b 部署包。
 - ~~deepdoc 模型内网分发清单~~ 已关闭（2026-10-28，ADR-0016：解析在 RAGFlow 服务内，本仓不分发模型）。
 - ~~omp 子进程与 app-server 的 uid 分离~~ 已关闭（2026-09-18，ADR-0010：单一专用 omp uid；每账号 uid 记为 S3b/S4b 升级路径）。
 - **模块 import 边界机械化**：dependency-cruiser 接入时机（AGENTS.md 已知盲区之一）。
