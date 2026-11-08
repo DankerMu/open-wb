@@ -173,5 +173,6 @@ elif printf '%s\n' "$ec_out" | grep -F "Clone found" >/dev/null \
 else
   echo "FAIL(非克隆存在导致的拒绝) $ec_desc"; fail=$((fail+1))
 fi
+expect_accept "omp-fetch 下载回退与供给用例" bash scripts/test-omp-fetch.sh
 echo "guardrail self-test: $pass PASS / $fail FAIL"
 [ "$fail" -eq 0 ] && bash scripts/test-ci-harness.sh
