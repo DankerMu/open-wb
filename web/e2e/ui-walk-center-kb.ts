@@ -113,12 +113,14 @@ export async function walkKbRetrieval(
     await panel.getByRole("textbox", { name: "检索问句" }).press("Enter");
     await expectHits(panel);
     await expectNoHorizontalOverflow(page);
+    await expectPanelFits(panel);
     await shot(page, panel, project, "hits");
 
     await panel.getByRole("button", { name: "检索", exact: true }).click();
     await expect(panel.getByText(EMPTY, { exact: true })).toBeVisible();
     await expect(panel.getByRole("listitem")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
+    await expectPanelFits(panel);
     await shot(page, panel, project, "empty");
 
     expect(bodies, "two retrieval requests").toHaveLength(2);
@@ -146,6 +148,31 @@ async function expectHits(panel: Locator): Promise<void> {
   await expect(content).toHaveCSS("white-space", "pre-wrap");
   expect(await content.textContent(), "hit content keeps its line break").toBe(HITS[0]?.content);
   await expect(panel.getByText("切片")).toHaveCount(0);
+}
+
+/**
+ * `expectNoHorizontalOverflow` 只看文档与 `main`，看不到中心页 `overflow-auto` 滚动容器里的溢出：检索测试区域
+ * 与它最近的横向可滚动祖先（中心页的滚动容器）各自复核 `scrollWidth <= clientWidth`。
+ */
+async function expectPanelFits(panel: Locator): Promise<void> {
+  const widths = await panel.evaluate((el) => {
+    let scroller = el.parentElement;
+    while (scroller && !["auto", "scroll"].includes(getComputedStyle(scroller).overflowX)) {
+      scroller = scroller.parentElement;
+    }
+    return {
+      panel: { scroll: el.scrollWidth, client: el.clientWidth },
+      scroller: scroller ? { scroll: scroller.scrollWidth, client: scroller.clientWidth } : null,
+    };
+  });
+  expect(widths.panel.scroll, "检索测试 scrollWidth <= clientWidth").toBeLessThanOrEqual(
+    widths.panel.client,
+  );
+  expect(widths.scroller, "center scroll wrapper found").not.toBeNull();
+  expect(
+    widths.scroller?.scroll,
+    "center scroll wrapper scrollWidth <= clientWidth",
+  ).toBeLessThanOrEqual(widths.scroller?.client ?? 0);
 }
 
 async function shot(page: Page, panel: Locator, project: WalkProject, label: string) {

@@ -6,7 +6,8 @@ import { messageOf } from "./ingest-tree.js";
  * 检索测试的状态（knowledge-bases「中心「知识库」tab」的检索测试，s2b-kb-retrieval D8）。问句与两个数字都存原始字符串，
  * 挂载时从 `base.retrieval` 初始化一次；之后 `base` 变化不覆盖输入（换库由详情的 `key` 重新挂载）。
  *
- * - 「面板初值」只有成功应答的 `retrieval` 能替换；「参数有变」在提交时取发出的两个数值与它做数值比较。
+ * - 「面板初值」只有成功应答的 `retrieval` 能替换；「参数有变」在提交时取发出的两个数值，与它、以及列表里该库
+ *   当前的 `retrieval`（`base` prop，静默重取会改它）各做数值比较，任一不同即为有变。
  * - 成功：两个数字改写为应答值（问句保留），并经 `onRetrieval` 同步列表；失败：清掉命中只显示信封文案，
  *   参数有变时经 `onRefetchBases` 静默重取列表（写回可能已成功）。
  * - 请求不 abort：卸载后或有更新的提交时丢弃面板本地的状态更新，但两个回调照常调用，它们按库 id 更新父组件的列表。
@@ -15,6 +16,9 @@ import { messageOf } from "./ingest-tree.js";
 const RANGE_REASON = "填 0 到 1 之间的数字";
 
 type Retrieval = BaseView["retrieval"];
+
+const differs = (a: Retrieval, b: Retrieval) =>
+  a.threshold !== b.threshold || a.vectorWeight !== b.vectorWeight;
 
 /** `idle` 还没检索；`cleared` 上次失败后再次提交，alert 已清掉。 */
 type Outcome =
@@ -70,7 +74,8 @@ export function useRetrieval(client: ApiClient, base: BaseView, callbacks: Callb
     if (!ready || inflight.current || t === null || w === null) return;
     inflight.current = true;
     const own = ++sequence.current;
-    const changed = t !== baseline.current.threshold || w !== baseline.current.vectorWeight;
+    const sentValues = { threshold: t, vectorWeight: w };
+    const changed = differs(sentValues, baseline.current) || differs(sentValues, base.retrieval);
     const { onRetrieval, onRefetchBases } = callbacksRef.current;
     setPending(true);
     setOutcome((current) => (current.status === "failed" ? { status: "cleared" } : current));

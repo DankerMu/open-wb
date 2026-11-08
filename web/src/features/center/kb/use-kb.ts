@@ -19,7 +19,9 @@ import {
  *   对话框内；删库确认后恰调用一次 `deleteKnowledgeBase`，成功即从列表去掉该行，失败在页顶提示。都不重取列表：
  *   列表的编译状态要读 RAGFlow，201 的视图本身就是权威的（服务端不为它读 RAGFlow）。
  * - 详情的检索测试成功后经 `setRetrieval` 改该行的检索参数；失败且参数有变时经 `refetchBases` 静默重取列表
- *  （s2b-kb-retrieval D8）：只读 `listKnowledgeBases`，视图保持 `ready`，详情不卸载。
+ *  （s2b-kb-retrieval D8）：只读 `listKnowledgeBases`，视图保持 `ready`，详情不卸载。静默重取整表覆盖 `bases`，
+ *   它的应答可能读于之后的本地改动之前，所以本地改动列表（`setRetrieval` 真的改了行、建库成功、删库成功）时若有在途
+ *   重取，就再发一次，旧应答按序号丢弃。
  */
 
 type EnabledStatus = Extract<KbStatus, { enabled: true }>;
@@ -63,12 +65,18 @@ export function useKnowledgeBases(client: ApiClient) {
   const sequence = useRef(0);
   /** 静默重取的序号：只采用最后一次重取；整表读取开始与卸载时也递增，丢弃在途的重取。 */
   const refetching = useRef(0);
+  /** 最后一次静默重取还没落地。 */
+  const refetchPending = useRef(false);
+  /** 最近一次渲染的视图：本地改动据此判断是否真的改了行。 */
+  const viewRef = useRef(view);
+  viewRef.current = view;
   /** 在途标记：同一帧里的第二次提交还看不到重渲染，靠它拦下。 */
   const creating = useRef(false);
 
   const load = useCallback(async () => {
     const own = ++sequence.current;
     refetching.current += 1;
+    refetchPending.current = false;
     const latest = () => own === sequence.current;
     setView({ status: "loading" });
     const next = await readView(client, latest);
@@ -87,16 +95,38 @@ export function useKnowledgeBases(client: ApiClient) {
     setView((current) =>
       current.status === "ready" ? { ...current, bases: next(current.bases) } : current,
     );
+  const rowDiffers = (current: ViewState, id: string, differs: (item: BaseView) => boolean) =>
+    current.status === "ready" && current.bases.some((item) => item.id === id && differs(item));
   /** 列表该行有变化（`differs` 为真）时才换上 `patch`，否则不改状态。 */
   const patchBase = (id: string, differs: (item: BaseView) => boolean, patch: Partial<BaseView>) =>
     setView((current) =>
-      current.status === "ready" && current.bases.some((item) => item.id === id && differs(item))
+      current.status === "ready" && rowDiffers(current, id, differs)
         ? {
             ...current,
             bases: current.bases.map((item) => (item.id === id ? { ...item, ...patch } : item)),
           }
         : current,
     );
+
+  /** 静默重取列表：不回到读取中、不重读状态；成功只换 `bases`，失败不改视图也不写提示。 */
+  const refetchBases = () => {
+    const own = ++refetching.current;
+    refetchPending.current = true;
+    const settle = (apply: () => void) => {
+      if (own !== refetching.current) return;
+      refetchPending.current = false;
+      apply();
+    };
+    client.listKnowledgeBases().then(
+      (bases) => settle(() => updateBases(() => bases)),
+      // 失败保持现有列表：检索测试的 alert 已告知这次失败。
+      () => settle(() => undefined),
+    );
+  };
+  /** 本地改了列表：在途的静默重取可能读于这次改动之前，再发一次，旧应答按序号丢弃。 */
+  const invalidateRefetch = () => {
+    if (refetchPending.current) refetchBases();
+  };
 
   return {
     view,
@@ -126,6 +156,7 @@ export function useKnowledgeBases(client: ApiClient) {
         const created = await client.createKnowledgeBase(input);
         setForm(null);
         updateBases((bases) => [...bases, created]);
+        invalidateRefetch();
       } catch (error) {
         setForm({ pending: false, error: messageOf(error) });
       } finally {
@@ -140,27 +171,15 @@ export function useKnowledgeBases(client: ApiClient) {
 
     /** 检索测试成功后，列表该行的检索参数取应答的 `retrieval`；相同时不改状态。 */
     setRetrieval(id: string, retrieval: BaseView["retrieval"]) {
-      patchBase(
-        id,
-        (item) =>
-          item.retrieval.threshold !== retrieval.threshold ||
-          item.retrieval.vectorWeight !== retrieval.vectorWeight,
-        { retrieval },
-      );
+      const differs = (item: BaseView) =>
+        item.retrieval.threshold !== retrieval.threshold ||
+        item.retrieval.vectorWeight !== retrieval.vectorWeight;
+      const changes = rowDiffers(viewRef.current, id, differs);
+      patchBase(id, differs, { retrieval });
+      if (changes) invalidateRefetch();
     },
 
-    /** 静默重取列表：不回到读取中、不重读状态；成功只换 `bases`，失败不改视图也不写提示。 */
-    refetchBases() {
-      const own = ++refetching.current;
-      client.listKnowledgeBases().then(
-        (bases) => {
-          if (own === refetching.current) updateBases(() => bases);
-        },
-        () => {
-          // 失败保持现有列表：检索测试的 alert 已告知这次失败。
-        },
-      );
-    },
+    refetchBases,
 
     askRemove(base: BaseView) {
       setNotice(null);
@@ -184,6 +203,7 @@ export function useKnowledgeBases(client: ApiClient) {
       onGone?.();
       setRemove(null);
       updateBases((bases) => bases.filter((item) => item.id !== base.id));
+      invalidateRefetch();
     },
   };
 }

@@ -7,6 +7,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  type BaseView,
   type KbRetrievalResult,
   REQUEST_FAILED_MESSAGE,
   type RetrievalHit,
@@ -16,6 +17,7 @@ import {
   doc,
   type FakeKb,
   fakeKb,
+  openCreate,
   pageAlerts,
   READY,
   renderPanel,
@@ -29,6 +31,7 @@ const UNAVAILABLE = "知识库服务暂不可用";
 const PLACEHOLDER = "例如 销售额口径 / 弹窗 / 工单超时";
 const STORED = { threshold: 0.2, vectorWeight: 0.7 };
 const LOWERED = { threshold: 0.1, vectorWeight: 0.7 };
+const RAISED = { threshold: 0.3, vectorWeight: 0.7 };
 
 const HITS: RetrievalHit[] = [
   {
@@ -45,14 +48,40 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** 「规范库」`k1`（有一份工作空间来源的已切片文档）与「手册库」`k2`，两库都是 `ready`、检索参数为缺省。 */
-function twoBases() {
-  return fakeKb(
-    [READY],
-    [base("k1", { name: "规范库", documents: 1 }), base("k2", { name: "手册库" })],
-    { k1: [doc("d1", { name: "spec.md", path: "docs/spec.md" })] },
-  );
+/** 「规范库」`k1`（一份文档）与「手册库」`k2` 的列表行，检索参数分别为 `k1`、`k2`。 */
+function rows(k1: BaseView["retrieval"] = STORED, k2: BaseView["retrieval"] = STORED): BaseView[] {
+  return [
+    base("k1", { name: "规范库", documents: 1, retrieval: k1 }),
+    base("k2", { name: "手册库", retrieval: k2 }),
+  ];
 }
+
+/** 两库都是 `ready`、检索参数为缺省；`k1` 有一份工作空间来源的已切片文档。 */
+function twoBases() {
+  return fakeKb([READY], rows(), {
+    k1: [doc("d1", { name: "spec.md", path: "docs/spec.md" })],
+  });
+}
+
+const unavailable = () => new ApiError(503, "kb_unavailable", UNAVAILABLE);
+
+/** 下一次 `listKnowledgeBases` 挂起，直到用例以给定的行放行。 */
+function holdList(fake: FakeKb) {
+  const held = deferred<BaseView[]>();
+  fake.listKnowledgeBases.mockImplementationOnce(() => held.promise);
+  return held;
+}
+
+/** 填问句与阈值后点 `检索`；`fails` 为真时这次检索以 503 失败（不写回）。 */
+function submitWith(panel: HTMLElement, threshold: string, fails: boolean, fake: FakeKb) {
+  if (fails) fake.retrieveFromKnowledgeBase.mockRejectedValueOnce(unavailable());
+  type(questionOf(panel), "销售额");
+  type(thresholdOf(panel), threshold);
+  fireEvent.click(buttonOf(panel));
+}
+
+const listReads = (fake: FakeKb, count: number) =>
+  waitFor(() => expect(fake.listKnowledgeBases).toHaveBeenCalledTimes(count));
 
 async function openDetail(name: string): Promise<HTMLElement> {
   fireEvent.click(await screen.findByRole("cell", { name }));
@@ -398,35 +427,36 @@ describe("检索失败", () => {
 });
 
 describe("失败后列表与服务端一致", () => {
-  it("参数有变的检索失败后恰一次静默重取：详情不卸载、alert 与输入都在、不重读状态；切走再切回初值为 0.1；参数未变的失败不重取", async () => {
+  it("参数有变的检索失败后恰一次静默重取：详情不卸载、alert 与输入都在、不重读状态；重取不覆盖输入也不改基线；切走再切回取服务端的值；参数未变的失败不重取", async () => {
     const fake = twoBases();
     fake.retrieveFromKnowledgeBase.mockImplementationOnce(async () => {
-      fake.setRetrievalOf("k1", LOWERED);
-      throw new ApiError(503, "kb_unavailable", UNAVAILABLE);
+      fake.setRetrievalOf("k1", { threshold: 0.15, vectorWeight: 0.7 });
+      throw unavailable();
     });
     renderPanel(fake);
     const panel = await openRetrieval("规范库");
-    type(questionOf(panel), "销售额");
-    type(thresholdOf(panel), "0.1");
-    fireEvent.click(buttonOf(panel));
+    submitWith(panel, "0.1", false, fake);
 
-    await waitFor(() => expect(fake.listKnowledgeBases).toHaveBeenCalledTimes(2));
+    await listReads(fake, 2);
+    await act(async () => undefined);
     expect(within(panel).getByRole("alert").textContent).toBe(UNAVAILABLE);
     expect(valuesOf(panel)).toEqual(["销售额", "0.1", "0.7"]);
     expect(panel.isConnected).toBe(true);
     expect(fake.getKbStatus).toHaveBeenCalledTimes(1);
     expect(pageAlerts()).toEqual([UNAVAILABLE]);
 
-    const again = await switchAwayAndBack();
-    expect(valuesOf(again)).toEqual(["", "0.1", "0.7"]);
+    // 列表已是 0.15，基线仍是打开时的 0.2：发 0.15 与基线不同，照样重取。
+    submitWith(panel, "0.15", true, fake);
+    await listReads(fake, 3);
 
-    fake.retrieveFromKnowledgeBase.mockRejectedValueOnce(
-      new ApiError(503, "kb_unavailable", UNAVAILABLE),
-    );
+    const again = await switchAwayAndBack();
+    expect(valuesOf(again)).toEqual(["", "0.15", "0.7"]);
+
+    fake.retrieveFromKnowledgeBase.mockRejectedValueOnce(unavailable());
     type(questionOf(again), "销售额");
     fireEvent.click(buttonOf(again));
     expect((await within(again).findByRole("alert")).textContent).toBe(UNAVAILABLE);
-    expect(fake.listKnowledgeBases).toHaveBeenCalledTimes(2);
+    expect(fake.listKnowledgeBases).toHaveBeenCalledTimes(3);
   });
 
   it("静默重取失败不改视图、不写页顶提示：列表与详情都在", async () => {
@@ -475,5 +505,119 @@ describe("换库中途放行", () => {
     await waitFor(() => expect(fake.listKnowledgeBases).toHaveBeenCalledTimes(2));
     expect(within(other).queryByRole("alert")).toBeNull();
     expect(pageAlerts()).toEqual([]);
+  });
+});
+
+/** 打开「规范库」，以 0.1 检索失败，它触发的静默重取挂起；返回假客户端、面板与挂起的重取。 */
+async function failWithHeldRefetch() {
+  const fake = twoBases();
+  renderPanel(fake);
+  const panel = await openRetrieval("规范库");
+  const stale = holdList(fake);
+  submitWith(panel, "0.1", true, fake);
+  await listReads(fake, 2);
+  return { fake, panel, stale };
+}
+
+describe("静默重取与本地改动", () => {
+  it("在途重取之后同一库检索成功（0.3）：旧应答（0.1）放行后被丢弃，切走再切回初值为 0.3", async () => {
+    const { fake, panel, stale } = await failWithHeldRefetch();
+    expect(within(panel).getByRole("alert").textContent).toBe(UNAVAILABLE);
+
+    submitWith(panel, "0.3", false, fake);
+    expect(await within(panel).findByText(EMPTY)).toBeTruthy();
+    await listReads(fake, 3);
+    await act(async () => stale.resolve(rows(LOWERED)));
+
+    const again = await switchAwayAndBack();
+    expect(valuesOf(again)).toEqual(["", "0.3", "0.7"]);
+  });
+
+  it("在途重取之后换到别的库检索成功：旧应答放行后那个库仍是新值", async () => {
+    const { fake, stale } = await failWithHeldRefetch();
+
+    const other = await openRetrieval("手册库");
+    submitWith(other, "0.3", false, fake);
+    expect(await within(other).findByText(EMPTY)).toBeTruthy();
+    await listReads(fake, 3);
+    await act(async () => stale.resolve(rows(LOWERED, STORED)));
+
+    await openRetrieval("规范库");
+    expect(valuesOf(await openRetrieval("手册库"))).toEqual(["", "0.3", "0.7"]);
+  });
+
+  it("在途重取之后删库与建库：旧应答放行后删掉的行不回来、新建的行不消失", async () => {
+    const { fake, panel, stale } = await failWithHeldRefetch();
+
+    fireEvent.click(
+      within(screen.getByRole("cell", { name: "手册库" }).closest("tr") as HTMLElement).getByRole(
+        "button",
+        { name: "删除知识库" },
+      ),
+    );
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "删除" }),
+    );
+    await waitFor(() => expect(screen.queryByRole("cell", { name: "手册库" })).toBeNull());
+    await listReads(fake, 3);
+    await act(async () => stale.resolve(rows()));
+    expect(screen.queryByRole("cell", { name: "手册库" })).toBeNull();
+
+    const late = holdList(fake);
+    submitWith(panel, "0.3", true, fake);
+    await listReads(fake, 4);
+    const dialog = await openCreate();
+    fireEvent.change(within(dialog).getByLabelText("名称"), { target: { value: "新库" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "创建" }));
+    expect(await screen.findByRole("cell", { name: "新库" })).toBeTruthy();
+    await listReads(fake, 5);
+    await act(async () => late.resolve(rows()));
+    expect(screen.getByRole("cell", { name: "新库" })).toBeTruthy();
+  });
+
+  it("两次重叠的重取乱序到达：列表取后发的那次", async () => {
+    const fake = twoBases();
+    renderPanel(fake);
+    const panel = await openRetrieval("规范库");
+    const first = holdList(fake);
+    submitWith(panel, "0.1", true, fake);
+    await listReads(fake, 2);
+    const second = holdList(fake);
+    submitWith(panel, "0.3", true, fake);
+    await listReads(fake, 3);
+
+    await act(async () => second.resolve(rows(RAISED)));
+    await act(async () => first.resolve(rows(LOWERED)));
+
+    expect(valuesOf(await switchAwayAndBack())).toEqual(["", "0.3", "0.7"]);
+  });
+
+  it("「参数有变」也比列表当前值：失败写回 0.3 并重取后，未重挂载时改回 0.2 再失败，仍重取一次", async () => {
+    const fake = twoBases();
+    fake.retrieveFromKnowledgeBase.mockImplementationOnce(async () => {
+      fake.setRetrievalOf("k1", RAISED);
+      throw unavailable();
+    });
+    renderPanel(fake);
+    const panel = await openRetrieval("规范库");
+    submitWith(panel, "0.3", false, fake);
+    await listReads(fake, 2);
+    await act(async () => undefined);
+
+    submitWith(panel, "0.2", true, fake);
+    expect((await within(panel).findByRole("alert")).textContent).toBe(UNAVAILABLE);
+    await listReads(fake, 3);
+  });
+
+  it("问句原样发出，不去首尾空白", async () => {
+    const fake = twoBases();
+    renderPanel(fake);
+    const panel = await openRetrieval("规范库");
+    type(questionOf(panel), " 销售额 ");
+    fireEvent.click(buttonOf(panel));
+    expect(fake.retrieveFromKnowledgeBase.mock.calls).toEqual([
+      ["k1", { question: " 销售额 ", threshold: 0.2, vectorWeight: 0.7 }],
+    ]);
+    expect(await within(panel).findByText(EMPTY)).toBeTruthy();
   });
 });
