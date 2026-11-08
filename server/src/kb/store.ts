@@ -3,27 +3,33 @@
  * schema」）。纯 DB：`node:sqlite` 同步读写，不发出站请求，不判定上限、重名与状态：这些由调用方在锁内做
  * （D20），这里只给读与计数。050 的约束是兜底，不是规则；约束错误原样抛出。
  *
- * 凭证：嵌入模型的密钥只经 `embeddingApiKey` 读出，`KbSettings` 不带它。事务：带 `within` 的写方法自己开一个
- * 事务（调用方不得已在事务里），`within` 在写入之后、COMMIT 之前调用（审计挂点），抛出即整体回滚。
+ * 迁移 051（s2b-kb-retrieval design D4–D6）：库行的检索参数两列、设置行的重排三列与重排探活。
+ *
+ * 凭证：嵌入与重排模型的密钥只经 `embeddingApiKey` / `rerankApiKey` 读出，`KbSettings` 不带它们。
+ * 事务：带 `within` 的写方法自己开一个事务（调用方不得已在事务里），`within` 在写入之后、COMMIT 之前调用（审计挂点），
+ * 抛出即整体回滚。
  */
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite";
 
 type BaseState = "ready" | "rebuilding" | "rebuild_failed";
 type ProbeResult = { status: "ok" | "failed"; at: number; message: string | null };
+type ProbeState = { status: "never" | "ok" | "failed"; at: number | null; message: string | null };
 
-/** `kb_settings` 的读出形状：永不带密钥。 */
+/** `kb_settings` 的读出形状：永不带密钥。`probe` 是嵌入模型的探活，`rerankProbe` 是重排模型的。 */
 interface KbSettings {
   embedding: { name: string; baseUrl: string } | null;
   embeddingGeneration: number;
-  probe: { status: "never" | "ok" | "failed"; at: number | null; message: string | null };
+  probe: ProbeState;
+  rerank: { name: string; baseUrl: string } | null;
+  rerankProbe: ProbeState;
   chatModelId: string | null;
   rebuildActorId: string | null;
   updatedAt: number;
 }
 
-/** 嵌入模型的三列：既是写入内容，也是探活写回比对的身份。 */
-interface EmbeddingConfig {
+/** 嵌入或重排模型的三列：既是写入内容，也是探活写回比对的身份。 */
+interface ModelConfig {
   name: string;
   baseUrl: string;
   apiKey: string;
@@ -34,7 +40,12 @@ interface SettingsPatch {
    * 给了就整体替换三列；`apiKey` 由调用方先定好（省略时取 `embeddingApiKey()`，D7）。任一列变化时同一事务里把探活
    * 重置为 `never`，三列都不变时保留。
    */
-  embedding?: EmbeddingConfig;
+  embedding?: ModelConfig;
+  /**
+   * 同 `embedding`，`apiKey` 省略时由调用方取 `rerankApiKey()`（D6）；`null` 即清除，三列一起置 NULL、探活重置。
+   * 三项必填：同一条 UPDATE 绑三列，没有部分写入。null→null 也照常写，是否无操作由调用方判。
+   */
+  rerank?: ModelConfig | null;
   chatModelId?: string | null;
   /** 给了即确认重建：同一事务里代数加一、全部知识库置 `rebuilding`、记下发起的管理员（D7）。 */
   rebuildActorId?: string;
@@ -57,6 +68,9 @@ export interface KnowledgeBase {
   embeddingGeneration: number;
   state: BaseState;
   stateMessage: string | null;
+  /** 检索参数（051）：0–1，CHECK 兜底。 */
+  retrievalThreshold: number;
+  retrievalVectorWeight: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -111,21 +125,33 @@ type NewDocument = Pick<KbDocument, "kbId" | "ragflowDocumentId" | "name" | "siz
 type Raw = Record<string, SQLOutputValue>;
 
 const SELECT_SETTINGS = "SELECT * FROM kb_settings WHERE id = 'kb'";
-const SELECT_EMBEDDING_KEY = "SELECT embedding_api_key FROM kb_settings WHERE id = 'kb'";
-const UPDATE_EMBEDDING =
-  "UPDATE kb_settings SET embedding_name = ?, embedding_base_url = ?, embedding_api_key = ?, updated_at = ? WHERE id = 'kb'";
-/** 探活结果属于写入它的那个身份：名称、地址、密钥任一变化即作废，比对口径同 `UPDATE_PROBE`。 */
-const RESET_PROBE =
-  "UPDATE kb_settings SET embedding_probe_status = 'never', embedding_probe_at = NULL, embedding_probe_message = NULL WHERE id = 'kb' AND (embedding_name IS NOT ? OR embedding_base_url IS NOT ? OR embedding_api_key IS NOT ?)";
+
+/**
+ * 一个模型（嵌入或重排）的四条语句，两者列名同形，只差前缀。
+ * - `reset`：探活结果属于写入它的那个身份，名称、地址、密钥任一变化即作废，比对口径同 `probe`。
+ * - `probe`：探活写回只在身份不变时生效，`IS` 比较同 `models/store.ts` 的 `RECORD_PROBE`。
+ */
+function modelStatements(prefix: "embedding" | "rerank") {
+  const identity = `${prefix}_name IS ? AND ${prefix}_base_url IS ? AND ${prefix}_api_key IS ?`;
+  return {
+    key: `SELECT ${prefix}_api_key AS api_key FROM kb_settings WHERE id = 'kb'`,
+    save: `UPDATE kb_settings SET ${prefix}_name = ?, ${prefix}_base_url = ?, ${prefix}_api_key = ?, updated_at = ? WHERE id = 'kb'`,
+    reset: `UPDATE kb_settings SET ${prefix}_probe_status = 'never', ${prefix}_probe_at = NULL, ${prefix}_probe_message = NULL WHERE id = 'kb' AND NOT (${identity})`,
+    probe: `UPDATE kb_settings SET ${prefix}_probe_status = ?, ${prefix}_probe_at = ?, ${prefix}_probe_message = ? WHERE id = 'kb' AND ${identity}`,
+  };
+}
+type ModelStatements = ReturnType<typeof modelStatements>;
+
+const EMBEDDING_SQL = modelStatements("embedding");
+const RERANK_SQL = modelStatements("rerank");
+/** 清除重排：三列同为 NULL，经同一条 `save` 写入（D5 整组写入）。 */
+const NO_MODEL = { name: null, baseUrl: null, apiKey: null };
 const UPDATE_CHAT_MODEL =
   "UPDATE kb_settings SET chat_model_id = ?, updated_at = ? WHERE id = 'kb'";
 const UPDATE_REBUILD_START =
   "UPDATE kb_settings SET embedding_generation = embedding_generation + 1, rebuild_actor_id = ?, updated_at = ? WHERE id = 'kb'";
 const UPDATE_REBUILD_ACTOR =
   "UPDATE kb_settings SET rebuild_actor_id = ?, updated_at = ? WHERE id = 'kb'";
-/** 探活写回只在嵌入身份不变时生效，`IS` 比较同 `models/store.ts` 的 `RECORD_PROBE`。 */
-const UPDATE_PROBE =
-  "UPDATE kb_settings SET embedding_probe_status = ?, embedding_probe_at = ?, embedding_probe_message = ? WHERE id = 'kb' AND embedding_name IS ? AND embedding_base_url IS ? AND embedding_api_key IS ?";
 
 const BASE_ORDER = "ORDER BY created_at, id";
 const SELECT_BASE = "SELECT * FROM knowledge_bases WHERE id = ?";
@@ -146,6 +172,8 @@ const RETRY_FAILED_BASES =
   "UPDATE knowledge_bases SET state = 'rebuilding', state_message = NULL, updated_at = ? WHERE state = 'rebuild_failed' RETURNING *";
 const UPDATE_REBUILD_GENERATION =
   "UPDATE knowledge_bases SET rebuild_dataset_id = ?, rebuild_canvas_id = ?, rebuild_template_group_id = ?, updated_at = ? WHERE id = ?";
+const UPDATE_RETRIEVAL =
+  "UPDATE knowledge_bases SET retrieval_threshold = ?, retrieval_vector_weight = ?, updated_at = ? WHERE id = ?";
 const MARK_REBUILD_FAILED =
   "UPDATE knowledge_bases SET state = 'rebuild_failed', state_message = ?, updated_at = ? WHERE id = ?";
 const SWITCH_GENERATION = `UPDATE knowledge_bases SET dataset_id = rebuild_dataset_id, canvas_id = rebuild_canvas_id, template_group_id = rebuild_template_group_id, rebuild_dataset_id = NULL, rebuild_canvas_id = NULL, rebuild_template_group_id = NULL, embedding_generation = ${CURRENT_GENERATION}, state = 'ready', state_message = NULL, updated_at = ? WHERE id = ?`;
@@ -176,25 +204,71 @@ export function createKbStore(db: DatabaseSync) {
   };
   const count = (sql: string, ...params: string[]): number =>
     Number((db.prepare(sql).get(...params) as { count: number }).count);
+  const apiKey = (sql: ModelStatements): string | null =>
+    text((db.prepare(sql.key).get() as Raw).api_key);
+
+  /** 先按新身份决定是否重置探活，再整组写三列；`NO_MODEL` 即清除。 */
+  function writeModel(
+    sql: ModelStatements,
+    config: ModelConfig | typeof NO_MODEL,
+    at: number,
+  ): void {
+    const { name, baseUrl, apiKey: key } = config;
+    db.prepare(sql.reset).run(name, baseUrl, key);
+    db.prepare(sql.save).run(name, baseUrl, key, at);
+  }
+
+  /**
+   * 探活结果写三列，不动 `updated_at`，只在该模型仍是 `identity` 时写（同 `models/store.ts` 的 `recordProbe`）。
+   * 身份已变或已清除：结果丢弃、不调 `within`，`recorded` 为 `false`，`view` 是当前设置。
+   */
+  function recordProbe(
+    sql: ModelStatements,
+    identity: ModelConfig,
+    result: ProbeResult,
+    within?: (view: KbSettings) => void,
+  ): { view: KbSettings; recorded: boolean } {
+    return inTransaction(db, () => {
+      const { changes } = db
+        .prepare(sql.probe)
+        .run(
+          result.status,
+          result.at,
+          result.message,
+          identity.name,
+          identity.baseUrl,
+          identity.apiKey,
+        );
+      const view = settings();
+      const recorded = Number(changes) !== 0;
+      if (recorded) {
+        within?.(view);
+      }
+      return { view, recorded };
+    });
+  }
 
   return {
     newId,
 
     settings,
 
-    /** 密钥的唯一读出处：未配置嵌入模型时为 `null`。 */
-    embeddingApiKey: (): string | null =>
-      (db.prepare(SELECT_EMBEDDING_KEY).get() as { embedding_api_key: string | null })
-        .embedding_api_key,
+    /** 嵌入密钥的唯一读出处：未配置嵌入模型时为 `null`。 */
+    embeddingApiKey: (): string | null => apiKey(EMBEDDING_SQL),
 
-    /** 只写 `patch` 里给出的键；`chatModelId: null` 即取消指定。 */
+    /** 重排密钥的唯一读出处：未配置重排模型时为 `null`。 */
+    rerankApiKey: (): string | null => apiKey(RERANK_SQL),
+
+    /** 只写 `patch` 里给出的键；`chatModelId: null` 即取消指定，`rerank: null` 即清除重排模型。 */
     saveSettings(patch: SettingsPatch, within?: (view: KbSettings) => void): KbSettings {
       return inTransaction(db, () => {
         const at = Date.now();
-        const { embedding, chatModelId, rebuildActorId } = patch;
+        const { embedding, rerank, chatModelId, rebuildActorId } = patch;
         if (embedding !== undefined) {
-          db.prepare(RESET_PROBE).run(embedding.name, embedding.baseUrl, embedding.apiKey);
-          db.prepare(UPDATE_EMBEDDING).run(embedding.name, embedding.baseUrl, embedding.apiKey, at);
+          writeModel(EMBEDDING_SQL, embedding, at);
+        }
+        if (rerank !== undefined) {
+          writeModel(RERANK_SQL, rerank ?? NO_MODEL, at);
         }
         if (chatModelId !== undefined) {
           db.prepare(UPDATE_CHAT_MODEL).run(chatModelId, at);
@@ -209,33 +283,22 @@ export function createKbStore(db: DatabaseSync) {
       });
     },
 
-    /**
-     * 探活结果写三列，不动 `updated_at`，只在嵌入模型仍是 `identity` 时写（同 `models/store.ts` 的
-     * `recordProbe`）。身份已变：结果丢弃、不调 `within`，`recorded` 为 `false`，`view` 是当前设置。
-     */
+    /** 嵌入模型的探活写回，口径见 `recordProbe`；不动重排探活。 */
     recordEmbeddingProbe(
-      identity: EmbeddingConfig,
+      identity: ModelConfig,
       result: ProbeResult,
       within?: (view: KbSettings) => void,
     ): { view: KbSettings; recorded: boolean } {
-      return inTransaction(db, () => {
-        const { changes } = db
-          .prepare(UPDATE_PROBE)
-          .run(
-            result.status,
-            result.at,
-            result.message,
-            identity.name,
-            identity.baseUrl,
-            identity.apiKey,
-          );
-        const view = settings();
-        const recorded = Number(changes) !== 0;
-        if (recorded) {
-          within?.(view);
-        }
-        return { view, recorded };
-      });
+      return recordProbe(EMBEDDING_SQL, identity, result, within);
+    },
+
+    /** 重排模型的探活写回（D7），口径见 `recordProbe`；不动嵌入探活。 */
+    recordRerankProbe(
+      identity: ModelConfig,
+      result: ProbeResult,
+      within?: (view: KbSettings) => void,
+    ): { view: KbSettings; recorded: boolean } {
+      return recordProbe(RERANK_SQL, identity, result, within);
     },
 
     /** 全部 `rebuild_failed` 置回 `rebuilding` 并改写发起者；没有失败库时不写库、不调 `within`（D8）。 */
@@ -322,6 +385,31 @@ export function createKbStore(db: DatabaseSync) {
         id,
       );
       return base(id);
+    },
+
+    /**
+     * 同一事务写检索参数两列并更新 `updated_at`，`within` 在写入之后、COMMIT 之前调用（审计挂点）。不比较新旧值：
+     * 值没变就不写、不审计，由调用方在该库写锁内判（D4）。未知 id 为 `undefined`，不调 `within`；越界被 CHECK 拒绝时
+     * 原样抛出，行不变。
+     */
+    saveRetrieval(
+      id: string,
+      retrieval: { threshold: number; vectorWeight: number },
+      within?: (record: KnowledgeBase) => void,
+    ): KnowledgeBase | undefined {
+      return inTransaction(db, () => {
+        db.prepare(UPDATE_RETRIEVAL).run(
+          retrieval.threshold,
+          retrieval.vectorWeight,
+          Date.now(),
+          id,
+        );
+        const record = base(id);
+        if (record !== undefined) {
+          within?.(record);
+        }
+        return record;
+      });
     },
 
     /** 留着 `rebuild_*`：重试的第一步要按它们删掉残留的一代（D8）。未知 id 为 `undefined`。 */
@@ -481,18 +569,28 @@ function nullableNumber(value: SQLOutputValue | undefined): number | null {
   return value == null ? null : Number(value);
 }
 
+/** 名称为 NULL 即未配置：三列整组写入，名称一列足以判定。 */
+function modelOf(row: Raw, prefix: "embedding" | "rerank"): KbSettings["embedding"] {
+  return row[`${prefix}_name`] === null
+    ? null
+    : { name: String(row[`${prefix}_name`]), baseUrl: String(row[`${prefix}_base_url`]) };
+}
+
+function probeOf(row: Raw, prefix: "embedding" | "rerank"): ProbeState {
+  return {
+    status: row[`${prefix}_probe_status`] as ProbeState["status"],
+    at: nullableNumber(row[`${prefix}_probe_at`]),
+    message: text(row[`${prefix}_probe_message`]),
+  };
+}
+
 function toSettings(row: Raw): KbSettings {
   return {
-    embedding:
-      row.embedding_name === null
-        ? null
-        : { name: String(row.embedding_name), baseUrl: String(row.embedding_base_url) },
+    embedding: modelOf(row, "embedding"),
     embeddingGeneration: Number(row.embedding_generation),
-    probe: {
-      status: row.embedding_probe_status as KbSettings["probe"]["status"],
-      at: nullableNumber(row.embedding_probe_at),
-      message: text(row.embedding_probe_message),
-    },
+    probe: probeOf(row, "embedding"),
+    rerank: modelOf(row, "rerank"),
+    rerankProbe: probeOf(row, "rerank"),
     chatModelId: text(row.chat_model_id),
     rebuildActorId: text(row.rebuild_actor_id),
     updatedAt: Number(row.updated_at),
@@ -516,6 +614,8 @@ function toBase(row: Raw): KnowledgeBase {
     embeddingGeneration: Number(row.embedding_generation),
     state: row.state as BaseState,
     stateMessage: text(row.state_message),
+    retrievalThreshold: Number(row.retrieval_threshold),
+    retrievalVectorWeight: Number(row.retrieval_vector_weight),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
