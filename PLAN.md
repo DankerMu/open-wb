@@ -29,7 +29,7 @@ flowchart LR
 | 浏览器 SPA | **自研**，demo 即形态基准（设计 token 取自上游 5.3.11，已在 demo 文件头与 `ATTRIBUTION.md` 标注）；上游 renderer 的聊天三层渲染管线（`analysis/02-renderer-ui.md`）作实现参照，源码不复用 | demo 全部页面 |
 | app-server | **自研**。服务域划分参照上游 daemon（workbuddy-server：认证/会话/项目/connector/MCP/专家，`analysis/00-overview.md` §4.1）；上游源码为腾讯版权，不复用 | demo 行为 + 上游服务域 |
 | agent 后端 | **omp**（MIT；原定 fork 定死 `33cc6b9a`/v18.0.10，2026-10-20 起钉官方 release v18.12.3，ADR-0001 补充），服务端子进程 `omp --mode rpc-ui`，每活跃会话一个，app-server 管生命周期 | `backend-research.md` §2 |
-| 知识库（解析/切片/检索/agentic 环） | **部署 RAGFlow 服务**（Apache-2.0，钉住 `v1.0.0-rc2`，不吸收源码），app-server `kb` 模块以单一服务账号直连其 HTTP API；agentic 环的落点由 S2b 定 | [ADR-0016](docs/adr/0016-ragflow-service-backend.md) |
+| 知识库（解析/切片/检索/agentic 环） | **部署 RAGFlow 服务**（Apache-2.0，钉住 `v1.0.0-rc2`，不吸收源码），app-server `kb` 模块以单一服务账号直连其 HTTP API；agentic 环由 omp 模型驱动（ADR-0017） | [ADR-0016](docs/adr/0016-ragflow-service-backend.md) |
 | 账号 / 权限 / 沙箱 / 审计 | **自研**。沙箱 = 服务端每账号根目录（demo 已按 `/data/workbuddy/<user>` 建模），越界拒绝入审计 | demo `/center` 权限/审计/账号页 |
 | 会话持久化 | omp `SessionManager`（`.jsonl`，resume/fork）+ app-server 侧索引与元数据 | `backend-research.md` §2.1 |
 | 许可 | 根级 `LICENSE` = Apache-2.0；归属义务见 `ATTRIBUTION.md` | 已定稿 |
@@ -91,7 +91,7 @@ flowchart LR
 |---|---|---|
 | **P0 链路骨架** | app-server 骨架（登录桩 + 静态 SPA 托管）+ spawn 官方全量 `omp --mode rpc-ui` + 内网 provider 接通 | 浏览器里一次流式对话渲染完整，会话文件落盘可 resume |
 | **P1 会话与工作空间** | 会话分组/隔离、服务端多根文件树 + 挂载（SFTP/NFS/SMB）、沙箱强制与白名单、文件预览、omp 子进程生命周期管理（每活跃会话一个，空闲回收） | demo `/files` 的全部操作在真实文件系统上等价可用，越界写被拒且入审计 |
-| **P2 知识库** | app-server `kb` 模块对接 RAGFlow 服务（解析、模板切片与混合检索在 RAGFlow，ADR-0016；agentic 环的落点由 S2b 定）、host tool 经 app-server 转发、宿主侧权限过滤 | 摄取一批真实文档后，会话内引用知识库能给出带出处的切片引用，共享库检索入审计 |
+| **P2 知识库** | app-server `kb` 模块对接 RAGFlow 服务（解析、模板切片与混合检索在 RAGFlow，ADR-0016；agentic 环由 omp 模型驱动，ADR-0017）、host tool 经 app-server 转发、宿主侧权限过滤 | 摄取一批真实文档后，会话内引用知识库能给出带出处的切片引用，共享库检索入审计 |
 | **P3 账号权限审计** | 内网 SSO 真对接、项目组、管理员面板、审计事件流全覆盖 | 两个浏览器双账号实测：互看不见对方会话/文件/私有库，共享库只读 |
 | **P4 减肥与部署** | omp 减肥（`backend-research.md` §2.2 阶段 1→4）、RAGFlow 全栈随包（ADR-0016）、部署产物（内网单机部署包） | 冒烟脚本全绿 + 减肥验收指标达标，无公网服务器上全新部署跑通 |
 
