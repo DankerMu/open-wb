@@ -6,10 +6,14 @@
 // 不走失败路径：4xx/5xx 会让 Chromium 记一条 console error，oracle 只放行 /api/auth/me 的 401；失败路径由 jsdom 用例
 //（web/test/center-kb-retrieval.test.tsx）覆盖。不对 /center 调 expectAuthenticatedRoute：它会断言知识库 tab 不在，
 // 而这里知识库被桩成开启。设了 UI_WALK_SHOT_DIR 才截图（文件名带 project 名），不设时 CI 行为不变。
+// 重排模型一行（s2b-kb-retrieval 任务 9.2）：管理员 `lisi` 打开模型 tab（成员读 `GET /api/models` 为 403），
+// `/api/kb/status` 与 `GET /api/kb/settings` 由 route 应答（设置严格八键），`/api/models` 走真实服务。不点保存、探活与
+// 清除确认：真实服务的知识库是关闭的，写请求会回 503 `kb_disabled`；只点 `清除重排模型` 再 `取消`，并断言没有非 GET
+// 的设置请求。写路径由 jsdom 用例（web/test/center-models-kb-rerank.test.tsx）覆盖。
 
 import { join } from "node:path";
 import { env } from "node:process";
-import { expect, type Locator, type Page, type Route } from "@playwright/test";
+import { expect, type Locator, type Page, type Request, type Route } from "@playwright/test";
 import { login, logout } from "./ui-walk-composer.js";
 import { expectNoHorizontalOverflow, type WalkProject } from "./ui-walk-layout.js";
 import type { AuthOracle } from "./ui-walk-oracle.js";
@@ -26,6 +30,9 @@ const STATUS_ROUTE = "**/api/kb/status";
 const BASES_ROUTE = "**/api/kb/bases";
 const DOCUMENTS_ROUTE = "**/api/kb/bases/*/documents";
 const RETRIEVAL_ROUTE = "**/api/kb/bases/*/retrieval";
+const SETTINGS_ROUTE = "**/api/kb/settings";
+const RERANK_NAME = "qwen3-rerank";
+const RERANK_URL = "https://rerank-gateway.internal.example/v1/RERANK_UPSTREAM_0123456789";
 
 const STATUS = {
   enabled: true,
@@ -78,6 +85,19 @@ const HITS = [
   },
 ];
 
+const OK_PROBE = { status: "ok", message: null, at: 1_760_000_123_000 };
+// 设置读视图恰为八键（web 解析器的键集；多一个少一个界面都会 requestFailed）。
+const SETTINGS = {
+  embedding: { name: "bge-m3", baseUrl: "https://embed.example/v1", probe: OK_PROBE },
+  chatModelId: null,
+  rerank: { name: RERANK_NAME, baseUrl: RERANK_URL, probe: OK_PROBE },
+  bases: 0,
+  compileBases: 0,
+  documents: 0,
+  rebuilding: 0,
+  rebuildFailed: 0,
+};
+
 const json = (route: Route, body: unknown) =>
   route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 
@@ -114,14 +134,14 @@ export async function walkKbRetrieval(
     await expectHits(panel);
     await expectNoHorizontalOverflow(page);
     await expectPanelFits(panel);
-    await shot(page, panel, project, "hits");
+    await shot(page, panel, `kb-retrieval-${project}-hits`);
 
     await panel.getByRole("button", { name: "检索", exact: true }).click();
     await expect(panel.getByText(EMPTY, { exact: true })).toBeVisible();
     await expect(panel.getByRole("listitem")).toHaveCount(0);
     await expectNoHorizontalOverflow(page);
     await expectPanelFits(panel);
-    await shot(page, panel, project, "empty");
+    await shot(page, panel, `kb-retrieval-${project}-empty`);
 
     expect(bodies, "two retrieval requests").toHaveLength(2);
     expect(bodies[0], "first retrieval body").toStrictEqual({ question: QUESTION, ...RETRIEVAL });
@@ -130,6 +150,63 @@ export async function walkKbRetrieval(
     await page.unroute(BASES_ROUTE);
     await page.unroute(DOCUMENTS_ROUTE);
     await page.unroute(RETRIEVAL_ROUTE);
+  }
+  await logout(page, oracle, project);
+}
+
+/** 重排模型一行：管理员登录、装桩、看一行与三个按钮、打开清除确认框再取消、卸桩、退出。 */
+export async function walkKbRerankRow(
+  page: Page,
+  oracle: AuthOracle,
+  project: WalkProject,
+): Promise<void> {
+  await login(page, oracle, project, "lisi");
+  const writes: string[] = [];
+  const onRequest = (request: Request) => {
+    if (
+      new URL(request.url()).pathname.startsWith("/api/kb/settings") &&
+      request.method() !== "GET"
+    )
+      writes.push(`${request.method()} ${request.url()}`);
+  };
+  page.on("request", onRequest);
+  await page.route(STATUS_ROUTE, (route) => json(route, STATUS));
+  await page.route(SETTINGS_ROUTE, (route) =>
+    route.request().method() === "GET" ? json(route, SETTINGS) : route.fallback(),
+  );
+  try {
+    await page.goto("/center?tab=models");
+    // 确认框打开时拷入层 alert-dialog 把 `#root` 标为 aria-hidden：区域要连隐藏的一起找。
+    const region = page
+      .locator("main")
+      .getByRole("region", { name: "知识库模型", exact: true, includeHidden: true });
+    const rerank = region.locator("dl").filter({ hasText: "重排模型" });
+    await expect(rerank.getByText("重排模型", { exact: true })).toBeVisible();
+    await expect(rerank.getByText(RERANK_NAME, { exact: true })).toBeVisible();
+    await expect(rerank.getByText(RERANK_URL, { exact: true })).toBeVisible();
+    await expect(rerank.getByText("正常", { exact: true })).toBeVisible();
+    for (const action of ["编辑", "探活", "清除"]) {
+      const button = region.getByRole("button", { name: `${action}重排模型`, exact: true });
+      await expect(button).toHaveText(action);
+    }
+    await expectNoHorizontalOverflow(page);
+    await expectPanelFits(region);
+    await shot(page, region, `kb-rerank-${project}-row`);
+
+    await region.getByRole("button", { name: "清除重排模型", exact: true }).click();
+    const confirm = page.getByRole("alertdialog", { name: "清除重排模型？", exact: true });
+    await expect(confirm.getByText("清除后检索不再重排。", { exact: true })).toBeVisible();
+    await expect(confirm.getByRole("button", { name: "清除", exact: true })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await expectPanelFits(region);
+    await confirm.getByRole("button", { name: "取消", exact: true }).click();
+    await expect(confirm).toBeHidden();
+    await expect(rerank.getByText(RERANK_NAME, { exact: true })).toBeVisible();
+    expect(writes, "no non-GET kb settings request").toEqual([]);
+  } finally {
+    page.off("request", onRequest);
+    await page.unroute(STATUS_ROUTE);
+    await page.unroute(SETTINGS_ROUTE);
   }
   await logout(page, oracle, project);
 }
@@ -175,9 +252,9 @@ async function expectPanelFits(panel: Locator): Promise<void> {
   ).toBeLessThanOrEqual(widths.scroller?.client ?? 0);
 }
 
-async function shot(page: Page, panel: Locator, project: WalkProject, label: string) {
+async function shot(page: Page, panel: Locator, file: string) {
   const dir = env.UI_WALK_SHOT_DIR;
   if (!dir) return;
   await panel.scrollIntoViewIfNeeded();
-  await page.screenshot({ path: join(dir, `kb-retrieval-${project}-${label}.png`) });
+  await page.screenshot({ path: join(dir, `${file}.png`) });
 }

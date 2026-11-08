@@ -10,7 +10,7 @@ import {
 import { holdRoute } from "./route-hold.js";
 import { walkActionRow } from "./ui-walk-action-row.js";
 import { allowFirstApproval, expectNoSettledRecord, generatingStatus } from "./ui-walk-approval.js";
-import { walkKbRetrieval } from "./ui-walk-center-kb.js";
+import { walkKbRerankRow, walkKbRetrieval } from "./ui-walk-center-kb.js";
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
@@ -129,6 +129,19 @@ test("knowledge base retrieval panel shows numbered hits and the empty state aga
   const options = { watchAssets: project === "desktop-light" };
   await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
     walkKbRetrieval(page, oracle, project),
+  );
+});
+
+// 重排模型一行（model-registry「模型 tab」，s2b-kb-retrieval 9.2）：独立 test，管理员 `lisi` 登录、退出与 oracle 实例；
+// 知识库状态与设置由 route 桩应答，步骤在 helper。
+test("models tab shows the rerank model row and its clear confirmation against stubbed kb settings", async ({
+  baseURL,
+  page,
+}, testInfo) => {
+  const project = walkProject(testInfo.project.name);
+  const options = { watchAssets: project === "desktop-light" };
+  await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
+    walkKbRerankRow(page, oracle, project),
   );
 });
 

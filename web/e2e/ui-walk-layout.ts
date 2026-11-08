@@ -157,7 +157,7 @@ export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   expect(scrollWidth, "document scrollWidth <= innerWidth").toBeLessThanOrEqual(viewportWidth);
   // >760px 时 body/外壳根/main 均 overflow:hidden，文档宽度恒不溢出；路由内容须在 main 上复核。
   const [mainScroll, mainClient] = await page
-    .getByRole("main")
+    .getByRole("main", { includeHidden: true })
     .evaluate((el) => [el.scrollWidth, el.clientWidth]);
   expect(mainScroll, "main scrollWidth <= clientWidth").toBeLessThanOrEqual(mainClient ?? 0);
 }

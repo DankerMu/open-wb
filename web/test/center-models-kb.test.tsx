@@ -4,32 +4,28 @@
 // ragflow-backend「知识库模型设置」「嵌入模型更换与全量重建」与 `server/src/core/errors/index.ts` 的信封文案。
 
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ModelsPanel } from "../src/features/center/models/panel.js";
-import {
-  ApiError,
-  type KbSettingsView,
-  type KbStatus,
-  type ModelView,
-  type UpdateKbSettingsInput,
-} from "../src/lib/api.js";
+import { ApiError, type KbSettingsView } from "../src/lib/api.js";
 import { chooseOption, openOptions, READY } from "./center-kb-support.js";
 import {
-  fakeModels,
+  BGE,
+  fakeSettings,
   GW,
   GW2,
   KEY,
-  M2,
-  M3,
   PROBED_AT,
   probeTime,
+  renderReady,
+  renderSection,
   rowButton,
   rowOf,
+  SECTION,
   SEED,
+  settings,
   type,
 } from "./center-models-support.js";
 
-const SECTION = "知识库模型";
 const DIALOG = "知识库嵌入模型";
 const CONFIRM = "更换嵌入模型？";
 const CHAT = "知识库对话模型";
@@ -42,89 +38,6 @@ const KB_REBUILD_REQUIRED = "更换嵌入模型需要重建全部知识库，请
 afterEach(() => {
   cleanup();
 });
-
-const BGE: NonNullable<KbSettingsView["embedding"]> = {
-  name: "bge-m3",
-  baseUrl: GW,
-  probe: { status: "never", message: null, at: null },
-};
-
-function settings(patch: Partial<KbSettingsView> = {}): KbSettingsView {
-  return {
-    embedding: BGE,
-    chatModelId: null,
-    rerank: null,
-    bases: 0,
-    compileBases: 0,
-    documents: 0,
-    rebuilding: 0,
-    rebuildFailed: 0,
-    ...patch,
-  };
-}
-
-/**
- * 模型表的假客户端加四个设置方法：`updateKbSettings` 按 body 改读视图（嵌入模型换了即探活重置为 `never`），
- * `probeKbModel` 写回 `ok`，`retryKbRebuild` 把失败的库计入重建中。读视图不含密钥（规格：永不包含任何密钥）。
- */
-function fakeSettings(
-  initial: KbSettingsView | null,
-  status: KbStatus = READY,
-  models: readonly ModelView[] = [SEED, M2, M3],
-) {
-  const fake = fakeModels(models);
-  let view = initial ?? settings({ embedding: null });
-  const methods = {
-    getKbStatus: vi.fn(async () => status),
-    getKbSettings: vi.fn(async () => ({ ...view })),
-    updateKbSettings: vi.fn(async (input: UpdateKbSettingsInput) => {
-      const { embedding } = input;
-      view = {
-        ...view,
-        ...(embedding
-          ? {
-              embedding: {
-                name: embedding.name,
-                baseUrl: embedding.baseUrl,
-                probe: { status: "never", message: null, at: null },
-              },
-            }
-          : {}),
-        ...(input.chatModelId === undefined ? {} : { chatModelId: input.chatModelId }),
-        ...(input.confirmRebuild ? { rebuilding: view.bases } : {}),
-      };
-      return { ...view };
-    }),
-    probeKbModel: vi.fn(async (_target: "embedding" | "rerank") => {
-      if (view.embedding) {
-        view = {
-          ...view,
-          embedding: { ...view.embedding, probe: { status: "ok", message: null, at: PROBED_AT } },
-        };
-      }
-      return { ...view };
-    }),
-    retryKbRebuild: vi.fn(async () => {
-      view = { ...view, rebuilding: view.rebuilding + view.rebuildFailed, rebuildFailed: 0 };
-      return { ...view };
-    }),
-  };
-  return { ...fake, ...methods, client: { ...fake.client, ...methods } };
-}
-
-type FakeSettings = ReturnType<typeof fakeSettings>;
-
-async function renderSection(fake: FakeSettings): Promise<HTMLElement> {
-  render(<ModelsPanel client={fake.client} />);
-  return screen.findByRole("region", { name: SECTION });
-}
-
-/** 段内已读到设置（`编辑` 出现）。 */
-async function renderReady(fake: FakeSettings): Promise<HTMLElement> {
-  const section = await renderSection(fake);
-  await within(section).findByRole("button", { name: "编辑" });
-  return section;
-}
 
 async function openEmbedding(section: HTMLElement): Promise<HTMLElement> {
   fireEvent.click(within(section).getByRole("button", { name: "编辑" }));
@@ -193,7 +106,7 @@ describe("知识库开关与读取", () => {
     cleanup();
 
     const empty = await renderReady(fakeSettings(null));
-    expect(within(empty).getByText("未配置")).toBeTruthy();
+    expect(within(empty).getAllByText("未配置")).toHaveLength(2);
     expect(within(empty).queryByRole("button", { name: "探活" })).toBeNull();
   });
 });
