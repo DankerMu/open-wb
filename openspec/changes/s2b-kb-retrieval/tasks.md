@@ -95,9 +95,16 @@ Minimal mergeable slice: atomic - 夹具与客户端路由共一条验证路径�
 
 首刀（4.1–4.3）：
 
-- [ ] 4.1 测试先行：新 `server/test/kb-retrieval.test.ts`，直接调用单轮检索函数（真实 SQLite 与 store，接假 RAGFlow），覆盖「单轮检索」的「参数显式传」「命中关联本地文档」「应答缺字段」「零命中」，以及全部命中关联不上时为空数组。先看到红。验证：用例先红。
-- [ ] 4.2 新 `server/src/kb/retrieval.ts`：按 design D1、D2 实现单轮检索（本组不带 `rerank_id`，不写回）。验证：4.1 全过，`make lint`、`make typecheck` 退出 0。
-- [ ] 4.3 新 `server/test/kb-retrieval-canonical.test.ts`（「单轮检索」的「只有一处检索实现」与「`kb_search` 工具契约」的「契约与检索测试同源」）：扫描 `server/src`，断言客户端检索方法的调用（方法名以 3.3 定的为准）只出现在 `kb/retrieval.ts`，路由片段 `/retrieval` 只出现在 `kb/ragflow-retrieval.ts`，`kb_search` 不出现在任何注册或分派里。验证：用例全过；变异：在 `kb/rest.ts` 加一次对客户端检索方法的调用，用例变红（手动变异一次，记录在 PR）。
+- [x] 4.1 测试先行：新 `server/test/kb-retrieval.test.ts`，直接调用单轮检索函数（真实 SQLite 与 store，接假 RAGFlow），覆盖「单轮检索」的「参数显式传」「命中关联本地文档」「应答缺字段」「零命中」，以及全部命中关联不上时为空数组。先看到红。验证：用例先红。
+- [x] 4.2 新 `server/src/kb/retrieval.ts`：按 design D1、D2 实现单轮检索（本组不带 `rerank_id`，不写回）。验证：4.1 全过，`make lint`、`make typecheck` 退出 0。
+- [x] 4.3 新 `server/test/kb-retrieval-canonical.test.ts`（「单轮检索」的「只有一处检索实现」与「`kb_search` 工具契约」的「契约与检索测试同源」）：扫描 `server/src`，断言客户端检索方法的调用（方法名以 3.3 定的为准）只出现在 `kb/retrieval.ts`，RAGFlow 路由片段（`${API}/retrieval` 与 `/api/v1/retrieval` 两种写法）只出现在 `kb/ragflow-retrieval.ts`（本系统自己的 `/api/kb/bases/:id/retrieval` 路由串不算，4.5 要在 `kb/rest.ts`、`http/errors.ts` 写它；#1913 审查定），`kb_search` 不出现在任何注册或分派里。验证：用例全过；变异：在 `kb/rest.ts` 加一次对客户端检索方法的调用，用例变红（手动变异一次，记录在 PR）。
+- 组 4 首刀约定（#1916 fixture 审查定，4.5 与组 7 照此调用）：
+  - 签名：`retrieveForBase(deps, base, question) → Promise<Result<RetrievalHit[]>>`（`Result` 即 `ragflow-route.ts` 的联合，失败只有 `kb_unavailable` / `kb_rejected`）。`base` 是 `KnowledgeBase` 行，检索参数取该行的 `retrievalThreshold` / `retrievalVectorWeight`，不另传参（「`kb_search` 工具契约」：调用方不逐次覆盖参数；4.5 传 `saveRetrieval` 的返回值或锁内重读的行）。`deps` 为 `{store: Pick<ReturnType<typeof createKbStore>, "listDocuments">, client: Pick<ReturnType<typeof createRagflowClient>, "retrieve">}`（同 `bases.ts` 的写法，不新增类型导出），组 7 只往里加 `settings` / `log` / `now`，不改调用方。导出名不得是 `retrieve`（4.3 的词扫描）。函数里不判 `state`（D4 第 3 步只约束端点）。
+  - 请求：`datasetId` 取 `base.datasetId`（不是 `rebuildDatasetId`，D2）；本刀不带 `rerankId`。
+  - 结果映射在本刀落地：`retrieval_failed`（未带 `rerank_id`）→ `kb_unavailable`（D3）；`kb_rejected` / `kb_unavailable` 原样。调用方照 `bases.ts` 的写法 `throw new HttpError(result.kind)`。组 7 只加「带了 `rerank_id` 且失败 → 去掉重试恰一次」。
+  - 命中关联：用现成的 `store.listDocuments(base.id)`，在本库范围内建 `ragflowDocumentId → 本地行` 映射；不新增 store 方法（`store.ts` 不在本 issue 边界）。输出 `RetrievalHit = {documentId, name, similarity, content}`，`documentId` 是本地 id，次序同应答；关联不上即丢弃；同一文档的多条切片各成一条命中，不去重。
+  - 4.1 另加：HTTP 200 `code:102`（未带重排）为 `kb_unavailable`；`code:101` 为 `kb_rejected`；切片的 `document_id` 只对得上另一个库的本地行 → 丢弃（防别人的文档名泄露）；同一本地文档两条切片 → 两条命中、次序同应答；库已 `setRebuildGeneration`（`rebuildDatasetId` 非空）时 body 的 `dataset_ids` 仍是 `[datasetId]`。
+  - 4.3 匹配规则：词 `\bretrieve\b` 只许出现在 `kb/ragflow-retrieval.ts` 与 `kb/retrieval.ts`（解构、字符串键、`Pick<…, "retrieve">` 都算）；RAGFlow 路由正则 `/(?:\$\{API\}|\/api\/v1)\/retrieval\b/` 只许出现在 `kb/ragflow-retrieval.ts`；`kb_search` 在 `server/src` 里零出现（含注释；S2c 再改这条用例）。正向对照防空过：`kb/retrieval.ts` 至少命中一次 `retrieve`，`kb/ragflow-retrieval.ts` 至少命中一次路由片段，扫描到的文件集合含 `kb/rest.ts`。
 
 第二刀（4.4–4.6）：
 
@@ -141,7 +148,7 @@ Minimal mergeable slice: 6.1–6.2 为首刀（设置的解析、下发、清除
 
 ## 7. 检索带重排与自动降级（ragflow-backend「RAGFlow 出站请求」的重排降级与三个场景；knowledge-bases「单轮检索」的「带重排」）
 
-- [ ] 7.1 测试先行：新 `server/test/kb-retrieval-rerank.test.ts`，加「带重排」「重排降级」「检索失败的映射」（用 3.2 的「指定 `code`」注入造出未配置重排时的 102 与 101）「超时不降级」四个场景；`kb_rerank_degraded` 60 秒内至多一行（注入时钟）；降级时 stderr 与应答都不含假 RAGFlow 的 message 哨兵。先看到红。验证：用例先红。
+- [ ] 7.1 测试先行：新 `server/test/kb-retrieval-rerank.test.ts`，加「带重排」「重排降级」「检索失败的映射」（收窄为带 `rerank_id` 重试后仍是 102 得 503；未配置重排时的 102 与 101 已由 4.1 覆盖，不重复）「超时不降级」四个场景；`kb_rerank_degraded` 60 秒内至多一行（注入时钟）；降级时 stderr 与应答都不含假 RAGFlow 的 message 哨兵。先看到红。验证：用例先红。
 - [ ] 7.2 `server/src/kb/retrieval.ts`：配置了重排模型时带 `rerank_id`，检索失败且带了 `rerank_id` 时去掉它重试恰一次并写降级记录（复用 `perMinute`），其余检索失败为 `kb_unavailable`（design D3）。验证：`npm run test:focus --workspace server -- kb-retrieval` 全过；`docs/architecture/system.md` 9.13 的检索一节补上降级规则与「`code:102` 不可区分」的后果。
 
 Suggested fixture level: expanded - 出站请求的重试语义，是「不重试」规则的唯一例外（outbound、shared failure mapping）。
