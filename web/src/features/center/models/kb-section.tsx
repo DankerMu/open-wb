@@ -1,4 +1,4 @@
-import { useId, useRef } from "react";
+import { type Ref, useId, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import type { ApiClient, KbSettingsView, ModelView } from "@/lib/api";
 import { RetryAlert } from "../kb/list.js";
+import { RemoveDialog } from "../remove-dialog.js";
 import { KbModelDialog } from "./kb-model-dialog.js";
 import { ProbeCell } from "./list.js";
 import { useKbSettings } from "./use-kb-settings.js";
@@ -32,25 +33,87 @@ function chatChoices(models: readonly ModelView[], current: string | null): stri
   return current === null || ids.includes(current) ? ids : [...ids, current];
 }
 
-/** 嵌入模型：名称、上游地址、密钥是否已配置（读视图不含密钥，配置过即有）与探活状态。 */
-function EmbeddingSummary({ embedding }: { embedding: KbSettingsView["embedding"] }) {
+/**
+ * 一个知识库模型（嵌入或重排，`term` 是行名）：名称、上游地址、密钥是否已配置（读视图不含密钥，配置过即有）与探活
+ * 状态；未配置时只显示 `未配置`。
+ */
+function ModelSummary({ term, model }: { term: string; model: KbSettingsView["embedding"] }) {
   return (
     <dl className="m-0 grid grid-cols-[max-content_1fr] gap-x-4 gap-y-1.5 text-sm">
-      <dt className={TERM}>嵌入模型</dt>
-      <dd className="m-0 [overflow-wrap:anywhere]">{embedding?.name ?? "未配置"}</dd>
-      {embedding ? (
+      <dt className={TERM}>{term}</dt>
+      <dd className="m-0 [overflow-wrap:anywhere]">{model?.name ?? "未配置"}</dd>
+      {model ? (
         <>
           <dt className={TERM}>上游地址</dt>
-          <dd className="m-0 [overflow-wrap:anywhere]">{embedding.baseUrl}</dd>
+          <dd className="m-0 [overflow-wrap:anywhere]">{model.baseUrl}</dd>
           <dt className={TERM}>密钥</dt>
           <dd className="m-0">已配置</dd>
           <dt className={TERM}>探活</dt>
           <dd className="m-0">
-            <ProbeCell probe={embedding.probe} />
+            <ProbeCell probe={model.probe} />
           </dd>
         </>
       ) : null}
     </dl>
+  );
+}
+
+/**
+ * 重排模型一行的按钮：未配置只有 `编辑`，配置了加 `探活`、`清除`。可访问名称带上 `重排模型`，与嵌入一行的同名按钮
+ * 区分；`清除` 在途时三个都禁用。
+ */
+function RerankActions({
+  configured,
+  probing,
+  clearing,
+  editRef,
+  onEdit,
+  onProbe,
+  onClear,
+}: {
+  configured: boolean;
+  probing: boolean;
+  clearing: boolean;
+  editRef: Ref<HTMLButtonElement>;
+  onEdit(): void;
+  onProbe(): void;
+  onClear(): void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <Button
+        aria-label="编辑重排模型"
+        disabled={clearing}
+        onClick={onEdit}
+        ref={editRef}
+        size="sm"
+        variant="outline"
+      >
+        编辑
+      </Button>
+      {configured ? (
+        <>
+          <Button
+            aria-label="探活重排模型"
+            disabled={probing || clearing}
+            onClick={onProbe}
+            size="sm"
+            variant="outline"
+          >
+            探活
+          </Button>
+          <Button
+            aria-label="清除重排模型"
+            disabled={clearing}
+            onClick={onClear}
+            size="sm"
+            variant="outline"
+          >
+            清除
+          </Button>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -127,7 +190,8 @@ function BaseCounts({
 }
 
 /**
- * 模型表下方的「知识库模型」段（model-registry「模型 tab」，design D19）：嵌入模型与它的对话框、知识库对话模型下拉
+ * 模型表下方的「知识库模型」段（model-registry「模型 tab」，design D19）：嵌入模型与它的对话框、重排模型与它的对话框
+ * 和清除确认框（s2b-kb-retrieval design D8）、知识库对话模型下拉
  * （已指定且有开编译的库时禁用并旁注原因）、知识库数与文档数、重建状态与 `重试失败的重建`。知识库关闭时不渲染。
  */
 export function KbSection({ client, models }: { client: ApiClient; models: readonly ModelView[] }) {
@@ -135,6 +199,7 @@ export function KbSection({ client, models }: { client: ApiClient; models: reado
   const { state, notice, form, busy } = kb;
   const titleId = useId();
   const editRef = useRef<HTMLButtonElement>(null);
+  const rerankEditRef = useRef<HTMLButtonElement>(null);
   if (state.status === "hidden") return null;
   const view = state.status === "ready" ? state.view : null;
 
@@ -154,17 +219,37 @@ export function KbSection({ client, models }: { client: ApiClient; models: reado
       ) : null}
       {view ? (
         <>
-          <EmbeddingSummary embedding={view.embedding} />
+          <ModelSummary model={view.embedding} term="嵌入模型" />
           <div className="flex flex-wrap gap-1">
-            <Button onClick={kb.openForm} ref={editRef} size="sm" variant="outline">
+            <Button
+              onClick={() => kb.openForm("embedding")}
+              ref={editRef}
+              size="sm"
+              variant="outline"
+            >
               编辑
             </Button>
             {view.embedding ? (
-              <Button disabled={busy.has("probe")} onClick={kb.probe} size="sm" variant="outline">
+              <Button
+                disabled={busy.has("probe")}
+                onClick={() => kb.probe("embedding")}
+                size="sm"
+                variant="outline"
+              >
                 探活
               </Button>
             ) : null}
           </div>
+          <ModelSummary model={view.rerank} term="重排模型" />
+          <RerankActions
+            clearing={busy.has("clear")}
+            configured={view.rerank !== null}
+            editRef={rerankEditRef}
+            onClear={kb.openClear}
+            onEdit={() => kb.openForm("rerank")}
+            onProbe={() => kb.probe("rerank")}
+            probing={busy.has("rerankProbe")}
+          />
           <ChatModelField
             models={models}
             onChange={kb.setChatModel}
@@ -174,16 +259,30 @@ export function KbSection({ client, models }: { client: ApiClient; models: reado
           <BaseCounts onRetry={kb.retryRebuild} retrying={busy.has("retry")} view={view} />
           {form ? (
             <KbModelDialog
-              confirming={form.confirm !== null}
+              confirming={form.kind === "rerank" ? false : form.confirm !== null}
               error={form.error}
-              kind="embedding"
+              kind={form.kind}
               onCancel={kb.closeForm}
               onCancelConfirm={kb.cancelConfirm}
               onConfirm={() => void kb.confirmRebuild()}
               onSave={(input) => void kb.save(input)}
               pending={form.pending}
-              restoreFocus={() => editRef.current?.focus()}
+              restoreFocus={() =>
+                (form.kind === "rerank" ? rerankEditRef : editRef).current?.focus()
+              }
               settings={view}
+            />
+          ) : null}
+          {kb.clearing ? (
+            <RemoveDialog
+              confirmLabel="清除"
+              description="清除后检索不再重排。"
+              error={kb.clearError}
+              onCancel={kb.cancelClear}
+              onConfirm={() => void kb.confirmClear()}
+              pending={busy.has("clear")}
+              restoreFocus={() => rerankEditRef.current?.focus()}
+              title="清除重排模型？"
             />
           ) : null}
         </>

@@ -412,8 +412,60 @@ Minimal mergeable slice: 8.1–8.2 为首刀：API 方法是 `createKbMethods` �
 ## 9. web：模型 tab 的重排模型（model-registry「模型 tab」的重排模型与改名后的探活调用）
 
 - [x] 9.1 原地重构：`kb-embedding-dialog.tsx` 改名 `kb-model-dialog.tsx`，加 `kind` 属性，嵌入模型的行为与文案不变（标题、重建确认只对嵌入生效）。测试先行：`web/test/center-models-kb.test.tsx` 里既有嵌入对话框与「更换嵌入模型需确认」用例原样全绿。验证：`npm run test:focus --workspace web -- center-models-kb` 全过（vitest 输出里能看到该文件）；`git grep -n kb-embedding-dialog -- server web docs/architecture` 退出 1。
-- [ ] 9.2 测试先行：在 `web/test/center-models-kb.test.tsx` 加「重排模型」场景（编辑、保存后探活、`探活`、`清除` 的取消与确认）；实现 `kb-section.tsx` 的重排模型一行与清除确认框（拷入层 alert-dialog）。`web/e2e/ui-walk-center-kb.ts` 加一段：`/api/kb/status`（`enabled:true`）与 `/api/kb/settings`（已配置重排模型）由 route 应答，改以管理员 `lisi` 登录（模型 tab 是 `adminOnly`，成员访问 `GET /api/models` 为 403，会让 error oracle 变红）。这一段在 `web/e2e/ui-walk.spec.ts` 里是独立的 `test()`，有自己的 page 与 oracle（oracle 每个 `test()` 只认一轮登录与登出，`ui-walk-oracle.ts:186-195`）；`web/e2e/ui-walk-composer.ts` 的 `login()` 原地加 `account` 参数（缺省 `zhangsan`，密码同为 `demo`），不另写登录函数；在桌面与 390 px 宽度下打开模型 tab 看到重排模型一行，过 error oracle。验证：`npm run test:focus --workspace web -- center-models-kb` 全过；`make ui-walk` 退出 0；PR 附两种宽度的截图。
-- [ ] 9.3 验收清单 CK 节加 CK-14（管理员配置重排模型、探活、清除；配置后成员的检索测试照常有结果；桌面与手机宽度、浅色与深色主题下布局不溢出），结论 `待签`。验证：`npm run test:focus --workspace web -- functional-checklist` 全过。
+- [x] 9.2 测试先行：在 `web/test/center-models-kb.test.tsx` 加「重排模型」场景（编辑、保存后探活、`探活`、`清除` 的取消与确认）；实现 `kb-section.tsx` 的重排模型一行与清除确认框（拷入层 alert-dialog）。`web/e2e/ui-walk-center-kb.ts` 加一段：`/api/kb/status`（`enabled:true`）与 `/api/kb/settings`（已配置重排模型）由 route 应答，改以管理员 `lisi` 登录（模型 tab 是 `adminOnly`，成员访问 `GET /api/models` 为 403，会让 error oracle 变红）。这一段在 `web/e2e/ui-walk.spec.ts` 里是独立的 `test()`，有自己的 page 与 oracle（oracle 每个 `test()` 只认一轮登录与登出，`ui-walk-oracle.ts:186-195`）；`web/e2e/ui-walk-composer.ts` 的 `login()` 原地加 `account` 参数（缺省 `zhangsan`，密码同为 `demo`），不另写登录函数；在桌面与 390 px 宽度下打开模型 tab 看到重排模型一行，过 error oracle。验证：`npm run test:focus --workspace web -- center-models-kb` 全过；`make ui-walk` 退出 0；PR 附两种宽度的截图。
+- [x] 9.3 验收清单 CK 节加 CK-14（管理员配置重排模型、探活、清除；配置后成员的检索测试照常有结果；桌面与手机宽度、浅色与深色主题下布局不溢出），结论 `待签`。验证：`npm run test:focus --workspace web -- functional-checklist` 全过。
+  - 组 9 第二刀约定（#1924 fixture 审查补；9.2–9.3 照此实现与测试）：
+    - 档位与边界：`expanded`。PR 边界是 `kb-section.tsx`、`use-kb-settings.ts`、`kb-model-dialog.tsx`、`web/test/center-models-kb.test.tsx`、`web/e2e/ui-walk-center-kb.ts`、`web/e2e/ui-walk.spec.ts`、`web/e2e/ui-walk-composer.ts`、`web/e2e/ui-walk-layout.ts`（实现中补入：确认框打开时 Radix 给 `#root` 设 `aria-hidden`，`expectNoHorizontalOverflow` 的 `getByRole("main")` 原地加 `includeHidden: true`，只放宽匹配，既有调用点行为不变）、`docs/acceptance/functional-checklist.md`。`git diff --exit-code origin/master -- server web/src/lib` 须退出 0。前提是 #1927 已合入：调用一律走 `probeKbModel(target)`。
+    - 按钮重名（必须定下来）：重排一行的三个按钮写成 `aria-label="编辑重排模型"`、`"探活重排模型"`、`"清除重排模型"`，按钮上显示的文字仍是 `编辑`、`探活`、`清除`。不这样做，`center-models-kb.test.tsx:125,130` 的 `within(section).getByRole("button",{name:"编辑"})` 会因为匹配到多个按钮而抛错，Playwright 的 strict 模式也一样。嵌入一行的按钮名不变。
+    - 既有用例只改一处：`center-models-kb.test.tsx:196` 的空态里两行都显示 `未配置`，`getByText` 会抛错。原地改成 `getAllByText("未配置")` 长度为 2；其余嵌入、对话模型、重建的用例一字不改。
+    - 摘要只留一份实现：`EmbeddingSummary` 原地泛化为 `ModelSummary({term, model})`，`term` 取 `嵌入模型` 或 `重排模型`。已配置时显示名称、上游地址、`密钥 已配置`、`探活 <ProbeCell>`；未配置时只显示 `未配置`。不复制第二份，jscpd 也扫这里。
+    - 重排一行的按钮：未配置时只有 `编辑`；已配置时有 `编辑`、`探活`、`清除`。这一行放在嵌入那组按钮之后、`知识库对话模型` 下拉之前。
+    - 对话框：`kb-model-dialog.tsx` 的 `Kind = "embedding" | "rerank"` 直接内联写，不新增导出类型。`TITLE.rerank = "知识库重排模型"`。`configured` 与初值按 `kind` 取 `settings.embedding` 或 `settings.rerank`。字段、校验与文案和嵌入完全相同（`名称`、`上游地址`、`密钥`，首次必填密钥，已配置时 placeholder 为 `留空保留现有密钥`）。`kind==="rerank"` 时恒传 `confirming={false}`，不渲染 `更换嵌入模型？`。`use-kb-settings.ts` 的 `EmbeddingInput` 原地改名为 `ModelInput`，仍等于 `NonNullable<UpdateKbSettingsInput["embedding"]>`，因为 `lib/` 不导出 `KbModelInput`，而 `lib/` 不在边界内。
+    - hook 的状态：`FormState` 加 `kind`，`openForm(kind)`。`save()` 在 `kind==="rerank"` 时跳过 `identityChanged && bases>0`，永不设 `confirm`，也永不带 `confirmRebuild`。`send()` 发 `{rerank: input}`，`previous` 取 `current.rerank`。`probesAfterSave` 原地改为接受两种模型的读视图，探活调用 `probeKbModel(form.kind)`。`saveFailed` 里的 `asksConfirm` 只对嵌入生效。重排保存的错误留在对话框内，用 `role="alert"` 显示。
+    - 忙碌标记：`BusyKey = "chat" | "probe" | "rerankProbe" | "clear" | "retry"`，`BUSY_KEYS` 与 `inFlight` 同步改。重排的 `探活`（包括保存后的自动探活）用 `rerankProbe`，与嵌入的 `probe` 互不阻塞。`清除` 在途时，重排一行的三个按钮都禁用。
+    - 清除确认：hook 持有 `clearing: boolean`，提供 `openClear`、`cancelClear`、`confirmClear`。确认框复用 `../remove-dialog.js` 的 `RemoveDialog`，不另写：`title="清除重排模型？"`、`description="清除后检索不再重排。"`、`confirmLabel="清除"`、`pending={busy.has("clear")}`。`restoreFocus` 指向重排的 `编辑` 按钮，因为清除成功后 `清除` 按钮会卸载。取消时零请求；确认时恰一次 `updateKbSettings({rerank:null})`，成功后采用应答视图并关闭确认框。失败时确认框保持打开，经 `error` prop 显示信封文案，重排一行不变。
+    - 测试假客户端（原地改）：`fakeSettings.updateKbSettings` 处理 `input.rerank`：给对象就写成 `{name, baseUrl, probe:{status:"never",message:null,at:null}}`，给 `null` 就写 `null`。`probeKbModel(target)` 按 `target` 把 `ok` 写回 `view.embedding` 或 `view.rerank`。
+    - 新用例全部放在 `center-models-kb.test.tsx` 新开的 `describe("重排模型")` 里，共九条：
+      - 一是未配置时只有 `编辑重排模型`。
+      - 二是首次配置不填密钥时显示 `首次配置必须填密钥`，且零请求。
+      - 三是 `bases:2` 时保存 `{rerank:{name,baseUrl,apiKey}}`：没有任何 alertdialog，`updateKbSettings` 恰一次，`probeKbModel` 恰一次且 `toHaveBeenCalledWith("rerank")`。
+      - 四是名称、地址不变且密钥留空：恰一次保存，没有探活。
+      - 五是只换密钥：有探活，也没有确认框。
+      - 六是 `探活重排模型` 恰一次 `probeKbModel("rerank")`，显示 `正常`。
+      - 七是清除先取消再确认，断言零请求、然后恰一次 `{rerank:null}`，之后显示 `未配置`，焦点回到 `编辑重排模型`。
+      - 八是保存得 503：对话框内 `role="alert"`，没有探活；清除得 503：确认框内显示文案，框不关。
+      - 九是重排探活挂起时点嵌入 `探活` 仍恰发一次，反过来也一样。每条都断言 `KEY` 不出现在 `document.body`。
+    - 行数：`center-models-kb.test.tsx`（556 行）本刀增量不超过 200 行，硬上限 800。超了就把 `settings`、`fakeSettings`、`renderReady` 原地搬进 `web/test/center-models-support.tsx`（198 行），新用例另开 `center-models-kb-rerank.test.tsx`，不拷贝。`use-kb-settings.ts`、`kb-section.tsx`、`kb-model-dialog.tsx` 各不超过 400 行。
+    - login 参数：签名改为 `login(page, oracle, project, account = DEV_ACCOUNT)`，只换 `fill(account)`，既有调用点不改。`expectAuthenticatedRoute` 不断言账号；`expectPrincipalFooter` 断言了，但 `login()` 不调用它。`POST /api/workspaces smoke-fixture` 对 `lisi` 照发，接受这个副作用，PR 里写明。
+    - ui-walk 段：`ui-walk-center-kb.ts` 新增导出 `walkKbRerankRow(page, oracle, project)`，在 `ui-walk.spec.ts` 里注册为独立的 `test()`，有自己的 `runWithBrowserErrorOracle`。先 `login(..., "lisi")`，再直接 `page.goto("/center?tab=models")`，不调 `expectAuthenticatedRoute("/center")`。宽度由 desktop-light 与 mobile-dark 两个 project 提供，不用 `withViewport`。
+    - ui-walk 路由桩：
+      - `**/api/kb/status` 复用同文件的 `STATUS`。
+      - `**/api/kb/settings` 只应答 GET，其余方法 `route.fallback()`。应答恰为八键：`{embedding:{name,baseUrl,probe:{status:"ok",message:null,at}}, chatModelId:null, rerank:{name:"qwen3-rerank", baseUrl:<40 字符以上不断行的 URL>, probe:{status:"ok",message:null,at}}, bases:0, compileBases:0, documents:0, rebuilding:0, rebuildFailed:0}`。
+      - `/api/models` 走真实服务（对 lisi 返回 200）。
+      - e2e 不点 `保存`、`探活`、`清除确认`：真实服务会回 503 `kb_disabled`，oracle 会变红。只点 `清除重排模型` 再点 `取消`，断言确认框标题与正文，并断言没有发出任何非 GET 的设置请求。
+      - 两条桩都在 `finally` 里 unroute。
+    - ui-walk 断言：`region` 名为 `知识库模型`。区内看得到 `重排模型`、`qwen3-rerank`、那串长地址、`正常`，以及三个按钮的可访问名称。
+      - 横向溢出查两次：一次在初态，一次在确认框打开时。用 `expectNoHorizontalOverflow(page)`，再把同文件的 `expectPanelFits` 用在这个 region 上（同模块函数直接复用，不复制）。
+      - 若模型表本身已有的横向溢出让滚动容器的检查失败，停下来报告，不改模型表样式（不在本刀范围）。
+      - 截图沿用 `UI_WALK_SHOT_DIR`，文件名为 `kb-rerank-${project}-row.png`。
+    - CK-14（9.3），按 CK-10/13 的格式写全：
+      - 操作列：「由 owner 执行（agent 不得代签）。接 CK-13；以管理员账号 `lisi` 在「模型」tab 的「知识库模型」段看「重排模型」一行，点它的「编辑」，填 `<可用的重排模型名>`、上游地址与密钥后「保存」；点「探活」；再以成员账号 `zhangsan` 照 CK-13 在「规范库」检索一次；回到 `lisi` 点「清除」，先「取消」，再「清除」并确认；最后 `zhangsan` 再检索一次。在桌面宽度与宽度 390、浅色与深色主题下各看一遍」。
+      - 期望列：未配置时显示「未配置」，只有「编辑」；对话框标题「知识库重排模型」，字段与嵌入模型相同，保存时不弹重建确认；保存后不用点就显示探活结果（「正常」或「失败：…」带时间）；确认框标题「清除重排模型？」、正文「清除后检索不再重排。」、按钮「取消」「清除」；取消后一行不变，确认后回到「未配置」；配置时与清除后检索都照常有命中；布局不溢出，文字可读；页面没有其它错误提示。
+      - 结论 `待签`。行文不写 `px`，也不出现点号或井号紧跟字母或中文的写法。
+    - 风险包补一行（本刀）：
+      - 跨服务形状漂移：落点是 ui-walk 设置桩的严格八键。
+      - 并发：落点是 `rerankProbe` 与 `probe` 分开计数的那一例。
+      - 破坏性操作：落点是清除的取消零请求与失败时确认框不关两例。
+      - 嵌入回归：落点是 9.1 的既有用例原样全绿，以及「`bases:2` 下保存重排没有 alertdialog」一例。
+    - 必须保持：
+      - 嵌入一行的文案、对话框标题 `知识库嵌入模型`、`更换嵌入模型？` 确认框、409 过期重读与自动探活不变。
+      - `知识库对话模型` 下拉与锁定、重建状态不变。
+      - 知识库关闭时整段不渲染。
+      - `walkKbRetrieval`、主旅程、`ui-walk-center.ts` 原样全绿。
+    - 验证：
+      - `npm run test:focus --workspace web -- center-models-kb functional-checklist` 全过。
+      - `make lint`、`make typecheck`、`make ui-walk` 退出 0。
+      - PR 附两种宽度的截图，并写明 e2e 不走写操作的原因。
 
 Suggested fixture level: expanded - 前端通用契约：涉及呈现的 web 任务至少 `expanded`（真实浏览器由 9.2 的 ui-walk 段承担）。
 Minimal mergeable slice: 9.1（对话框的改名与泛化，嵌入行为不变）可独立合入保绿；9.2–9.3 依赖它与组 6（第三刀 6.6）、组 7、组 8。

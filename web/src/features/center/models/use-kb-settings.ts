@@ -12,13 +12,19 @@ import {
  * `GET /api/kb/status`：只看 `enabled`（不看 `available`，ragflow-backend「知识库可用性」），读取失败或在途视为关闭、
  * 整段不渲染；开启才读设置。四个写操作（保存、选对话模型、探活、重试重建）的应答都是设置读视图，直接采用，不再重读。
  *
- * 错误分流：嵌入模型保存的错误留在对话框内；其余显示在段内 `role="alert"`。服务端的 409（`kb_rebuild_required`、
+ * 重排模型（s2b-kb-retrieval 任务 9.2）用同一个对话框：没有重建确认，保存永不带 `confirmRebuild`；它的探活另计忙碌
+ * （`rerankProbe`），与嵌入的 `probe` 互不阻塞；`清除` 先经确认框，确认恰一次 `updateKbSettings({rerank:null})`。
+ *
+ * 错误分流：两种模型保存的错误留在对话框内，清除的错误留在确认框内；其余显示在段内 `role="alert"`。服务端的 409（`kb_rebuild_required`、
  * `kb_rebuilding`、`kb_chat_model_locked`）是客户端判定的兜底：照样显示信封文案，并重读一次设置，让确认框、下拉锁定
  * 与重建状态按新的设置显示（`kb_rebuild_required` 且重读后有知识库时改为弹确认框）。
  */
 
-export type EmbeddingInput = NonNullable<UpdateKbSettingsInput["embedding"]>;
-type Embedding = KbSettingsView["embedding"];
+/** 嵌入与重排共用的写入形状（`lib/` 不导出 `KbModelInput`）。 */
+export type ModelInput = NonNullable<UpdateKbSettingsInput["embedding"]>;
+/** 嵌入与重排共用的读视图。 */
+type Model = KbSettingsView["embedding"];
+type Kind = "embedding" | "rerank";
 
 type ViewState =
   | { status: "hidden" }
@@ -26,16 +32,16 @@ type ViewState =
   | { status: "failed" }
   | { status: "ready"; view: KbSettingsView };
 
-/** 打开的嵌入模型对话框；`confirm` 非 null 即确认框打开，持有待确认的那次保存。 */
-type FormState = { pending: boolean; error: string | null; confirm: EmbeddingInput | null };
+/** 打开的模型对话框；`confirm` 非 null 即重建确认框打开（只对嵌入），持有待确认的那次保存。 */
+type FormState = { kind: Kind; pending: boolean; error: string | null; confirm: ModelInput | null };
 
 /** 嵌入身份是 `(name, baseUrl)`，只改密钥不算（ragflow-backend「嵌入模型更换与全量重建」）。 */
-function identityChanged(input: EmbeddingInput, current: Embedding): boolean {
+function identityChanged(input: ModelInput, current: Model): boolean {
   return input.name !== current?.name || input.baseUrl !== current?.baseUrl;
 }
 
 /** 保存后是否紧接着探活：首次配置、身份变了或填了密钥（服务端在这三种情形把探活重置为 `never`）。 */
-function probesAfterSave(input: EmbeddingInput, previous: Embedding): boolean {
+function probesAfterSave(input: ModelInput, previous: Model): boolean {
   return previous === null || identityChanged(input, previous) || input.apiKey !== undefined;
 }
 
@@ -43,8 +49,10 @@ function messageOf(error: unknown): string {
   return error instanceof ApiError ? error.message : REQUEST_FAILED_MESSAGE;
 }
 
-type BusyKey = "chat" | "probe" | "retry";
-const BUSY_KEYS: readonly BusyKey[] = ["chat", "probe", "retry"];
+type BusyKey = "chat" | "probe" | "rerankProbe" | "clear" | "retry";
+const BUSY_KEYS: readonly BusyKey[] = ["chat", "probe", "rerankProbe", "clear", "retry"];
+/** 各模型探活的忙碌标记：分开计数，嵌入与重排的探活互不阻塞。 */
+const PROBE_KEY: Record<Kind, BusyKey> = { embedding: "probe", rerank: "rerankProbe" };
 /** 这几个 409 说明读到的设置已过期（别人建了知识库、开了编译或发起了重建）：显示信封文案之后重读一次。 */
 const STALE_CODES = new Set(["kb_rebuild_required", "kb_rebuilding", "kb_chat_model_locked"]);
 
@@ -70,8 +78,17 @@ export function useKbSettings(client: ApiClient) {
   const [notice, setNotice] = useState<string | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [busy, setBusy] = useState<ReadonlySet<BusyKey>>(new Set());
+  /** 清除确认框是否打开，与它显示的失败文案。 */
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<string | null>(null);
   /** 各操作在途的次数：判定读 ref，不读某次渲染的闭包（保存后的自动探活在别的渲染里发起）。 */
-  const inFlight = useRef<Record<BusyKey, number>>({ chat: 0, probe: 0, retry: 0 });
+  const inFlight = useRef<Record<BusyKey, number>>({
+    chat: 0,
+    probe: 0,
+    rerankProbe: 0,
+    clear: 0,
+    retry: 0,
+  });
   /** 只采用最后一次读取或写入的视图：写入的应答到达后，在途的旧读取作废。 */
   const sequence = useRef(0);
 
@@ -148,34 +165,38 @@ export function useKbSettings(client: ApiClient) {
     if (inFlight.current[key] === 0) void perform(key, work);
   };
 
-  /** 保存被拒：读到的设置已过期时先重读；按重读结果改弹确认框，否则在对话框内显示信封文案。 */
-  const saveFailed = async (error: unknown, input: EmbeddingInput, confirmed: boolean) => {
+  /** 保存被拒：读到的设置已过期时先重读；嵌入按重读结果改弹确认框，否则在对话框内显示信封文案。 */
+  const saveFailed = async (kind: Kind, error: unknown, input: ModelInput, confirmed: boolean) => {
     const fresh = isStale(error) ? await refresh() : null;
     setForm(
-      !confirmed && asksConfirm(error, fresh)
-        ? { pending: false, error: null, confirm: input }
-        : { pending: false, error: messageOf(error), confirm: null },
+      kind === "embedding" && !confirmed && asksConfirm(error, fresh)
+        ? { kind, pending: false, error: null, confirm: input }
+        : { kind, pending: false, error: messageOf(error), confirm: null },
     );
   };
 
-  /** 恰一次 `updateKbSettings`；成功即关闭对话框，满足条件时再恰一次探活。 */
-  const send = async (input: EmbeddingInput, confirmed: boolean) => {
-    const previous = current?.embedding ?? null;
-    setForm({ pending: true, error: null, confirm: confirmed ? input : null });
+  /** 恰一次 `updateKbSettings`；成功即关闭对话框，满足条件时再恰一次该模型的探活。 */
+  const send = async (kind: Kind, input: ModelInput, confirmed: boolean) => {
+    const previous = (kind === "rerank" ? current?.rerank : current?.embedding) ?? null;
+    setForm({ kind, pending: true, error: null, confirm: confirmed ? input : null });
     let view: KbSettingsView;
     try {
       view = await client.updateKbSettings(
-        confirmed ? { embedding: input, confirmRebuild: true } : { embedding: input },
+        kind === "rerank"
+          ? { rerank: input }
+          : confirmed
+            ? { embedding: input, confirmRebuild: true }
+            : { embedding: input },
       );
     } catch (error) {
-      await saveFailed(error, input, confirmed);
+      await saveFailed(kind, error, input, confirmed);
       return;
     }
     setForm(null);
     adopt(view);
     // 不看「探活」按钮是否在途：在途的那次探的是旧身份（服务端丢弃它的结果），新身份要另探一次。
     if (probesAfterSave(input, previous))
-      await perform("probe", () => client.probeKbModel("embedding"));
+      await perform(PROBE_KEY[kind], () => client.probeKbModel(kind));
   };
 
   return {
@@ -183,27 +204,30 @@ export function useKbSettings(client: ApiClient) {
     notice,
     form,
     busy,
+    clearing,
+    clearError,
     reload,
 
-    openForm() {
+    openForm(kind: Kind) {
       setNotice(null);
-      setForm({ pending: false, error: null, confirm: null });
+      setForm({ kind, pending: false, error: null, confirm: null });
     },
     closeForm() {
       setForm((open) => (open?.pending ? open : null));
     },
-    /** 改了嵌入身份且已有知识库：先弹确认（不发请求）；否则直接保存。 */
-    async save(input: EmbeddingInput) {
+    /** 改了嵌入身份且已有知识库：先弹确认（不发请求）；否则直接保存。重排模型从不确认。 */
+    async save(input: ModelInput) {
       if (!form || form.pending || !current) return;
-      if (identityChanged(input, current.embedding) && current.bases > 0) {
-        setForm({ pending: false, error: null, confirm: input });
+      const { kind } = form;
+      if (kind === "embedding" && identityChanged(input, current.embedding) && current.bases > 0) {
+        setForm({ kind, pending: false, error: null, confirm: input });
         return;
       }
-      await send(input, false);
+      await send(kind, input, false);
     },
     async confirmRebuild() {
-      if (!form?.confirm || form.pending) return;
-      await send(form.confirm, true);
+      if (form?.kind !== "embedding" || !form.confirm || form.pending) return;
+      await send("embedding", form.confirm, true);
     },
     cancelConfirm() {
       setForm((open) => (open && !open.pending ? { ...open, confirm: null } : open));
@@ -214,8 +238,33 @@ export function useKbSettings(client: ApiClient) {
       if (!current || chatModelId === current.chatModelId) return;
       run("chat", () => client.updateKbSettings({ chatModelId }));
     },
-    probe() {
-      run("probe", () => client.probeKbModel("embedding"));
+    probe(kind: Kind) {
+      run(PROBE_KEY[kind], () => client.probeKbModel(kind));
+    },
+
+    openClear() {
+      setNotice(null);
+      setClearError(null);
+      setClearing(true);
+    },
+    cancelClear() {
+      if (inFlight.current.clear > 0) return;
+      setClearing(false);
+      setClearError(null);
+    },
+    /** 恰一次 `updateKbSettings({rerank:null})`：成功采用应答并关闭确认框；失败留在确认框内显示信封文案。 */
+    async confirmClear() {
+      if (!clearing || inFlight.current.clear > 0) return;
+      setClearError(null);
+      track("clear", 1);
+      try {
+        adopt(await client.updateKbSettings({ rerank: null }));
+        setClearing(false);
+      } catch (error) {
+        setClearError(messageOf(error));
+      } finally {
+        track("clear", -1);
+      }
     },
     retryRebuild() {
       run("retry", () => client.retryKbRebuild());

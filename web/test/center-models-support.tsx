@@ -10,11 +10,14 @@ import {
   ApiError,
   type CreateModelInput,
   createApiClient,
+  type KbSettingsView,
   type KbStatus,
   type ModelView,
   REQUEST_FAILED_MESSAGE,
+  type UpdateKbSettingsInput,
   type UpdateModelInput,
 } from "../src/lib/api.js";
+import { READY } from "./center-kb-support.js";
 import "./radix-platform.js";
 
 /** 低熵哨兵（gitleaks）：表单里输入的密钥。 */
@@ -196,3 +199,89 @@ export function pageAlerts(): string[] {
 
 /** 探活时刻的显示：规格给定的本地化写法。 */
 export const probeTime = (at: number) => new Date(at).toLocaleString("zh-CN", { hour12: false });
+
+/** 模型 tab 的「知识库模型」段（region 名）。 */
+export const SECTION = "知识库模型";
+
+export const BGE: NonNullable<KbSettingsView["embedding"]> = {
+  name: "bge-m3",
+  baseUrl: GW,
+  probe: { status: "never", message: null, at: null },
+};
+
+export function settings(patch: Partial<KbSettingsView> = {}): KbSettingsView {
+  return {
+    embedding: BGE,
+    chatModelId: null,
+    rerank: null,
+    bases: 0,
+    compileBases: 0,
+    documents: 0,
+    rebuilding: 0,
+    rebuildFailed: 0,
+    ...patch,
+  };
+}
+
+/** 写入的模型：读视图只留名称与地址（永不含密钥），探活重置为 `never`。 */
+function unprobed({ name, baseUrl }: { name: string; baseUrl: string }) {
+  return { name, baseUrl, probe: { status: "never" as const, message: null, at: null } };
+}
+
+/**
+ * 模型表的假客户端加四个设置方法：`updateKbSettings` 按 body 改读视图（嵌入或重排模型写入即探活重置为 `never`，
+ * `rerank:null` 即清除），`probeKbModel(target)` 把该模型写回 `ok`，`retryKbRebuild` 把失败的库计入重建中。读视图不含
+ * 密钥（规格：永不包含任何密钥）。
+ */
+export function fakeSettings(
+  initial: KbSettingsView | null,
+  status: KbStatus = READY,
+  models: readonly ModelView[] = [SEED, M2, M3],
+) {
+  const fake = fakeModels(models);
+  let view = initial ?? settings({ embedding: null });
+  const methods = {
+    getKbStatus: vi.fn(async () => status),
+    getKbSettings: vi.fn(async () => ({ ...view })),
+    updateKbSettings: vi.fn(async (input: UpdateKbSettingsInput) => {
+      const { embedding, rerank } = input;
+      view = {
+        ...view,
+        ...(embedding ? { embedding: unprobed(embedding) } : {}),
+        ...(rerank === undefined ? {} : { rerank: rerank && unprobed(rerank) }),
+        ...(input.chatModelId === undefined ? {} : { chatModelId: input.chatModelId }),
+        ...(input.confirmRebuild ? { rebuilding: view.bases } : {}),
+      };
+      return { ...view };
+    }),
+    probeKbModel: vi.fn(async (target: "embedding" | "rerank") => {
+      const probed = view[target];
+      if (probed) {
+        view = {
+          ...view,
+          [target]: { ...probed, probe: { status: "ok", message: null, at: PROBED_AT } },
+        };
+      }
+      return { ...view };
+    }),
+    retryKbRebuild: vi.fn(async () => {
+      view = { ...view, rebuilding: view.rebuilding + view.rebuildFailed, rebuildFailed: 0 };
+      return { ...view };
+    }),
+  };
+  return { ...fake, ...methods, client: { ...fake.client, ...methods } };
+}
+
+export type FakeSettings = ReturnType<typeof fakeSettings>;
+
+export async function renderSection(fake: FakeSettings): Promise<HTMLElement> {
+  render(<ModelsPanel client={fake.client} />);
+  return screen.findByRole("region", { name: SECTION });
+}
+
+/** 段内已读到设置（`编辑` 出现）。 */
+export async function renderReady(fake: FakeSettings): Promise<HTMLElement> {
+  const section = await renderSection(fake);
+  await within(section).findByRole("button", { name: "编辑" });
+  return section;
+}

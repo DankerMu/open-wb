@@ -38,10 +38,16 @@ type Box = { name: string; left: number; top: number; right: number; bottom: num
 type CreatedSession = { id: string | null };
 type PatchCount = { count(): number; stop(): void };
 
-export async function login(page: Page, oracle: AuthOracle, project: WalkProject): Promise<void> {
+/** 以 `account` 登录（缺省成员 `zhangsan`；种子账号的密码都是 `demo`），落在 `/files`，并确保 `smoke-fixture` 存在。 */
+export async function login(
+  page: Page,
+  oracle: AuthOracle,
+  project: WalkProject,
+  account = DEV_ACCOUNT,
+): Promise<void> {
   await page.goto("/files");
   await expect(page.getByRole("heading", { level: 1, name: "登录 WorkBuddy" })).toBeVisible();
-  await page.getByLabel("账号").fill(DEV_ACCOUNT);
+  await page.getByLabel("账号").fill(account);
   await page.getByLabel("密码").fill(DEV_PASSWORD);
   await page.getByRole("button", { name: "登录" }).click();
   await expectAuthenticatedRoute(page, project, "/files", "工作空间", "工作空间");

@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import type { KbSettingsView } from "@/lib/api";
 import { RemoveDialog } from "../remove-dialog.js";
 import { BaseUrlField, FormDialogShell, KeyField, TextField } from "./form-parts.js";
-import type { EmbeddingInput } from "./use-kb-settings.js";
+import type { ModelInput } from "./use-kb-settings.js";
 import { BASE_URL_MESSAGE, isUpstreamBaseUrl } from "./validate.js";
 
 const MAX_NAME_BYTES = 128;
@@ -15,9 +15,9 @@ const MESSAGES = {
   keyBlank: "密钥不能只有空白",
 } as const;
 
-/** 对话框服务的模型种类；标题按它取。 */
-type Kind = "embedding";
-const TITLE: Record<Kind, string> = { embedding: "知识库嵌入模型" };
+/** 对话框服务的模型种类；标题与初值按它取。 */
+type Kind = "embedding" | "rerank";
+const TITLE: Record<Kind, string> = { embedding: "知识库嵌入模型", rerank: "知识库重排模型" };
 
 type Values = { name: string; baseUrl: string; apiKey: string };
 type Errors = Partial<Record<keyof Values, string>>;
@@ -48,7 +48,7 @@ function validate(values: Values, configured: boolean): Errors {
 }
 
 /** 密钥留空即省略 `apiKey`（保留已存的值），从不发空串。 */
-function toInput({ name, baseUrl, apiKey }: Values): EmbeddingInput {
+function toInput({ name, baseUrl, apiKey }: Values): ModelInput {
   return apiKey === "" ? { name, baseUrl } : { name, baseUrl, apiKey };
 }
 
@@ -57,17 +57,18 @@ type Props = {
   pending: boolean;
   error: string | null;
   kind: Kind;
-  /** 确认框是否打开（`更换嵌入模型？`）。 */
+  /** 确认框是否打开（`更换嵌入模型？`）；重排模型恒为 false。 */
   confirming: boolean;
   restoreFocus(): void;
-  onSave(input: EmbeddingInput): void;
+  onSave(input: ModelInput): void;
   onConfirm(): void;
   onCancelConfirm(): void;
   onCancel(): void;
 };
 
 /**
- * 知识库模型对话框（model-registry「模型 tab」的「知识库模型」段）：`名称`、`上游地址`、`密钥`；标题按 `kind` 取。按「有打开的对话框」
+ * 知识库模型对话框（model-registry「模型 tab」的「知识库模型」段）：`名称`、`上游地址`、`密钥`；标题与初值按 `kind` 取，
+ * 嵌入与重排的字段、校验与文案相同。按「有打开的对话框」
  * 条件挂载，关闭即丢弃表单值（含密钥）；密钥框恒为 `type="password"`、打开时为空，已配置时 placeholder `留空保留现有密钥`。
  * 更换嵌入模型的确认框叠在它上面：取消回到表单、值还在；`重建并保存` 恰发一次带 `confirmRebuild:true` 的保存。
  */
@@ -83,10 +84,11 @@ export function KbModelDialog({
   onCancelConfirm,
   onCancel,
 }: Props) {
-  const configured = settings.embedding !== null;
+  const model = kind === "rerank" ? settings.rerank : settings.embedding;
+  const configured = model !== null;
   const [values, setValues] = useState<Values>(() => ({
-    name: settings.embedding?.name ?? "",
-    baseUrl: settings.embedding?.baseUrl ?? "",
+    name: model?.name ?? "",
+    baseUrl: model?.baseUrl ?? "",
     apiKey: "",
   }));
   const [errors, setErrors] = useState<Errors>({});
