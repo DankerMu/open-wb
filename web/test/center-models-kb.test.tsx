@@ -53,6 +53,7 @@ function settings(patch: Partial<KbSettingsView> = {}): KbSettingsView {
   return {
     embedding: BGE,
     chatModelId: null,
+    rerank: null,
     bases: 0,
     compileBases: 0,
     documents: 0,

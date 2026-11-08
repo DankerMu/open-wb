@@ -24,6 +24,8 @@ const RAGFLOW_KEY = "wb-issue1844-ragflow-key";
 /** 哨兵：嵌入与对话模型的上游密钥，以及假 RAGFlow 的 message。 */
 export const EMBED_KEY = "Snt1nelEmbed1844Key";
 export const CHAT_KEY = "Snt1nelChat1844Key";
+/** 哨兵：重排模型的上游密钥（s2b-kb-retrieval 组 6）。 */
+export const RERANK_KEY = "rerank-key-sentinel-rerank";
 /** 换密钥之后的上游密钥。 */
 export const ROTATED_KEY = "wb-issue1845-rotated-key";
 export const LEAK = "Snt1nelRagflowMessage1844";
@@ -44,7 +46,7 @@ export const LOCKED = {
     message: "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型",
   },
 };
-const SENTINELS = [EMBED_KEY, CHAT_KEY, ROTATED_KEY, LEAK];
+const SENTINELS = [EMBED_KEY, CHAT_KEY, RERANK_KEY, ROTATED_KEY, LEAK];
 
 export const bodyOf = (response: { body: string }) => JSON.parse(response.body) as unknown;
 
@@ -58,6 +60,9 @@ export const nextRound = (instance: string): string[] => [
   `PUT ${INSTANCES}/${instance}`,
   PATCH_DEFAULT,
 ];
+/** `owb-rerank` 的两种一轮：没有 `PATCH /models/default`（s2b-kb-retrieval D6）。 */
+export const rerankFirstRound = firstRound().slice(0, 3);
+export const rerankNextRound = nextRound("owb-rerank").slice(0, 4);
 
 type Who = "admin" | "member" | "peer" | "anonymous";
 

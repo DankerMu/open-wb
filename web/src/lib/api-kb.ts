@@ -61,18 +61,22 @@ export type KbStatus =
       uploadMaxFiles: number;
     };
 
+/** 嵌入或重排模型的读视图一项：两者同一形状。 */
+type KbModelView = {
+  name: string;
+  baseUrl: string;
+  probe: {
+    status: (typeof PROBE_STATUSES)[number];
+    message: string | null;
+    at: number | null;
+  };
+};
+
 /** 设置读视图：`GET` / `PUT /api/kb/settings`、`…/probe`、`…/rebuild` 共用，永不带密钥。 */
 export type KbSettingsView = {
-  embedding: {
-    name: string;
-    baseUrl: string;
-    probe: {
-      status: (typeof PROBE_STATUSES)[number];
-      message: string | null;
-      at: number | null;
-    };
-  } | null;
+  embedding: KbModelView | null;
   chatModelId: string | null;
+  rerank: KbModelView | null;
   bases: number;
   compileBases: number;
   documents: number;
@@ -80,13 +84,14 @@ export type KbSettingsView = {
   rebuildFailed: number;
 };
 
-/** `apiKey` 省略即保留已存的值。 */
-type KbEmbeddingInput = { name: string; baseUrl: string; apiKey?: string };
+/** 嵌入或重排模型的 input：`apiKey` 省略即保留已存的值。 */
+type KbModelInput = { name: string; baseUrl: string; apiKey?: string };
 
-/** `PUT /api/kb/settings` 的 body：`embedding` 与 `chatModelId` 至少含其一，只发所给的键。 */
+/** `PUT /api/kb/settings` 的 body：`embedding`、`chatModelId` 与 `rerank` 至少含其一，只发所给的键；`rerank:null` 即清除。 */
 export type UpdateKbSettingsInput = { confirmRebuild?: true } & (
-  | { embedding: KbEmbeddingInput; chatModelId?: string | null }
-  | { embedding?: KbEmbeddingInput; chatModelId: string | null }
+  | { embedding: KbModelInput; chatModelId?: string | null; rerank?: KbModelInput | null }
+  | { embedding?: KbModelInput; chatModelId: string | null; rerank?: KbModelInput | null }
+  | { embedding?: KbModelInput; chatModelId?: string | null; rerank: KbModelInput | null }
 );
 
 /** `compile` 为 `null`：这一次没有读到编译状态。 */
@@ -182,6 +187,7 @@ const STATUS_KEYS = [
 const SETTINGS_KEYS = [
   "embedding",
   "chatModelId",
+  "rerank",
   "bases",
   "compileBases",
   "documents",
@@ -251,9 +257,7 @@ function parseStatus(value: unknown): KbStatus | null {
     : null;
 }
 
-type KbEmbeddingView = NonNullable<KbSettingsView["embedding"]>;
-
-function parseProbe(value: unknown): KbEmbeddingView["probe"] | null {
+function parseProbe(value: unknown): KbModelView["probe"] | null {
   if (!hasExactlyKeys(value, ["status", "message", "at"])) {
     return null;
   }
@@ -263,8 +267,8 @@ function parseProbe(value: unknown): KbEmbeddingView["probe"] | null {
     : null;
 }
 
-/** `null` 是合法值（尚未配置），所以无效应答用 `undefined` 表示。 */
-function parseEmbedding(value: unknown): KbSettingsView["embedding"] | undefined {
+/** `embedding` 与 `rerank` 共用。`null` 是合法值（尚未配置），所以无效应答用 `undefined` 表示。 */
+function parseModel(value: unknown): KbModelView | null | undefined {
   if (value === null) {
     return null;
   }
@@ -283,15 +287,26 @@ function parseSettings(value: unknown): KbSettingsView | null {
     return null;
   }
   const { chatModelId, bases, compileBases, documents, rebuilding, rebuildFailed } = value;
-  const embedding = parseEmbedding(value.embedding);
+  const embedding = parseModel(value.embedding);
+  const rerank = parseModel(value.rerank);
   return embedding !== undefined &&
+    rerank !== undefined &&
     isNullableString(chatModelId) &&
     isNonNegativeSafeInteger(bases) &&
     isNonNegativeSafeInteger(compileBases) &&
     isNonNegativeSafeInteger(documents) &&
     isNonNegativeSafeInteger(rebuilding) &&
     isNonNegativeSafeInteger(rebuildFailed)
-    ? { embedding, chatModelId, bases, compileBases, documents, rebuilding, rebuildFailed }
+    ? {
+        embedding,
+        chatModelId,
+        rerank,
+        bases,
+        compileBases,
+        documents,
+        rebuilding,
+        rebuildFailed,
+      }
     : null;
 }
 

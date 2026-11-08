@@ -54,6 +54,7 @@ const EMBEDDING: Embedding = { name: "bge-m3", baseUrl: "https://gw.example/v1",
 const SETTINGS: KbSettingsView = {
   embedding: EMBEDDING,
   chatModelId: "m2",
+  rerank: { name: "qwen3-rerank", baseUrl: "https://gw.example/v1", probe: PROBE },
   bases: 4,
   compileBases: 3,
   documents: 5,
@@ -63,6 +64,7 @@ const SETTINGS: KbSettingsView = {
 const SETTINGS_EMPTY: KbSettingsView = {
   embedding: null,
   chatModelId: null,
+  rerank: null,
   bases: 0,
   compileBases: 0,
   documents: 0,
@@ -178,6 +180,7 @@ const SETTINGS_REJECTED: Case[] = [
   ...malformed(SETTINGS, {
     embedding: ["bge-m3", 1, []],
     chatModelId: NULLABLE_STRING_WRONG,
+    rerank: ["qwen3-rerank", 1, []],
     bases: COUNT_WRONG,
     compileBases: COUNT_WRONG,
     documents: COUNT_WRONG,
