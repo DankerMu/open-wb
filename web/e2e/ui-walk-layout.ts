@@ -149,7 +149,7 @@ export function pageBackground(page: Page): Promise<string> {
   return page.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor);
 }
 
-async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
   const [scrollWidth, viewportWidth] = await page.evaluate(() => [
     document.documentElement.scrollWidth,
     innerWidth,

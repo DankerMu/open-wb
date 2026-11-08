@@ -4,6 +4,7 @@ import type { ApiClient, BaseView, KbStatus } from "@/lib/api";
 import { DocumentsTable } from "./documents-table.js";
 import { IngestDialog, type IngestOutcome, IngestResults } from "./ingest-dialog.js";
 import { RetryAlert } from "./list.js";
+import { RetrievalPanel } from "./retrieval-panel.js";
 import { UploadButton } from "./upload-button.js";
 import { useKbDocuments } from "./use-documents.js";
 
@@ -20,17 +21,24 @@ type UploadLimits = Pick<Extract<KbStatus, { enabled: true }>, "uploadMaxFiles" 
  * `从工作空间入库` 与 `上传文件` 只在知识库 `ready` 时渲染，共用一处入库结果；一批上传在途时 `从工作空间入库` 禁用
  *（对话框是模态的，打开时也点不到 `上传文件`），两者因此不会交错改写结果。两者成功后重取一次文档列表，写端点返回的
  * `queued` 由此进入 3 秒刷新。
+ *
+ * 文档表区域之后是检索测试（s2b-kb-retrieval D8），同样只在 `ready` 时渲染，与文档表在读、失败或为空无关；
+ * `onRetrieval` 把成功应答的检索参数同步到列表，`onRefetchBases` 静默重取列表。
  */
 export function KnowledgeBaseDetail({
   base,
   client,
   limits,
   onCount,
+  onRetrieval,
+  onRefetchBases,
 }: {
   base: BaseView;
   client: ApiClient;
   limits: UploadLimits;
   onCount(count: number): void;
+  onRetrieval(retrieval: BaseView["retrieval"]): void;
+  onRefetchBases(): void;
 }) {
   const docs = useKbDocuments(client, base.id, onCount);
   const { view } = docs;
@@ -89,6 +97,14 @@ export function KnowledgeBaseDetail({
           rowErrors={docs.rowErrors}
           spaces={docs.spaces}
           state={base.state}
+        />
+      ) : null}
+      {base.state === "ready" ? (
+        <RetrievalPanel
+          base={base}
+          client={client}
+          onRefetchBases={onRefetchBases}
+          onRetrieval={onRetrieval}
         />
       ) : null}
       {ingesting ? (

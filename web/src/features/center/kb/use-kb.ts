@@ -18,6 +18,8 @@ import {
  * - 建库恰调用一次 `createKnowledgeBase`，成功以 201 的视图追加到列表末尾（列表按 `created_at` 升序），失败留在
  *   对话框内；删库确认后恰调用一次 `deleteKnowledgeBase`，成功即从列表去掉该行，失败在页顶提示。都不重取列表：
  *   列表的编译状态要读 RAGFlow，201 的视图本身就是权威的（服务端不为它读 RAGFlow）。
+ * - 详情的检索测试成功后经 `setRetrieval` 改该行的检索参数；失败且参数有变时经 `refetchBases` 静默重取列表
+ *  （s2b-kb-retrieval D8）：只读 `listKnowledgeBases`，视图保持 `ready`，详情不卸载。
  */
 
 type EnabledStatus = Extract<KbStatus, { enabled: true }>;
@@ -59,11 +61,14 @@ export function useKnowledgeBases(client: ApiClient) {
   const [remove, setRemove] = useState<RemoveState | null>(null);
   /** 只采用最后一次读取的结果；卸载时递增，丢弃在途的应答。 */
   const sequence = useRef(0);
+  /** 静默重取的序号：只采用最后一次重取；整表读取开始与卸载时也递增，丢弃在途的重取。 */
+  const refetching = useRef(0);
   /** 在途标记：同一帧里的第二次提交还看不到重渲染，靠它拦下。 */
   const creating = useRef(false);
 
   const load = useCallback(async () => {
     const own = ++sequence.current;
+    refetching.current += 1;
     const latest = () => own === sequence.current;
     setView({ status: "loading" });
     const next = await readView(client, latest);
@@ -74,12 +79,23 @@ export function useKnowledgeBases(client: ApiClient) {
     void load();
     return () => {
       sequence.current += 1;
+      refetching.current += 1;
     };
   }, [load]);
 
   const updateBases = (next: (bases: BaseView[]) => BaseView[]) =>
     setView((current) =>
       current.status === "ready" ? { ...current, bases: next(current.bases) } : current,
+    );
+  /** 列表该行有变化（`differs` 为真）时才换上 `patch`，否则不改状态。 */
+  const patchBase = (id: string, differs: (item: BaseView) => boolean, patch: Partial<BaseView>) =>
+    setView((current) =>
+      current.status === "ready" && current.bases.some((item) => item.id === id && differs(item))
+        ? {
+            ...current,
+            bases: current.bases.map((item) => (item.id === id ? { ...item, ...patch } : item)),
+          }
+        : current,
     );
 
   return {
@@ -119,14 +135,30 @@ export function useKnowledgeBases(client: ApiClient) {
 
     /** 详情读到或改动文档表后，列表该行的文档数跟上；相同时不改状态。 */
     setDocumentCount(id: string, documents: number) {
-      setView((current) =>
-        current.status === "ready" &&
-        current.bases.some((item) => item.id === id && item.documents !== documents)
-          ? {
-              ...current,
-              bases: current.bases.map((item) => (item.id === id ? { ...item, documents } : item)),
-            }
-          : current,
+      patchBase(id, (item) => item.documents !== documents, { documents });
+    },
+
+    /** 检索测试成功后，列表该行的检索参数取应答的 `retrieval`；相同时不改状态。 */
+    setRetrieval(id: string, retrieval: BaseView["retrieval"]) {
+      patchBase(
+        id,
+        (item) =>
+          item.retrieval.threshold !== retrieval.threshold ||
+          item.retrieval.vectorWeight !== retrieval.vectorWeight,
+        { retrieval },
+      );
+    },
+
+    /** 静默重取列表：不回到读取中、不重读状态；成功只换 `bases`，失败不改视图也不写提示。 */
+    refetchBases() {
+      const own = ++refetching.current;
+      client.listKnowledgeBases().then(
+        (bases) => {
+          if (own === refetching.current) updateBases(() => bases);
+        },
+        () => {
+          // 失败保持现有列表：检索测试的 alert 已告知这次失败。
+        },
       );
     },
 
