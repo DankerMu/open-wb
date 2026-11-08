@@ -282,6 +282,11 @@ export function embeddingModelOf(name: string): string {
   return `${name}@${EMBEDDING_INSTANCE}@${PROVIDER}`;
 }
 
+/** 检索带重排时 `rerank_id` 的三段式（§19.3、D2）：实例 `owb-rerank`。 */
+export function rerankModelOf(name: string): string {
+  return `${name}@${RERANK_INSTANCE}@${PROVIDER}`;
+}
+
 /** 身份是 `(name, baseUrl)`，只改密钥不算（D7）。 */
 function isNewIdentity(input: ModelInput, current: KbSettingsRead["embedding"]): boolean {
   return input.name !== current?.name || input.baseUrl !== current?.baseUrl;

@@ -48,7 +48,7 @@ const NO_REBUILD: KbRebuilder = { start: () => undefined, stop: () => Promise.re
 
 /** 这个模块写到受管 stderr writer 的记录。 */
 export type KbRecord =
-  | { event: "kb_upstream_auth_failed" | "kb_version_mismatch" }
+  | { event: "kb_upstream_auth_failed" | "kb_version_mismatch" | "kb_rerank_degraded" }
   | KbPipelineRecord
   | KbDocumentRecord;
 
@@ -63,7 +63,7 @@ export interface KbDependencies {
   uploadMaxFiles: number;
   /** 受管 stderr writer。 */
   log: (record: KbRecord) => void;
-  /** 两条限频记录的时钟（测试注入）；省略时 `Date.now`。 */
+  /** 三条限频记录的时钟（测试注入）；省略时 `Date.now`。 */
   now?: () => number;
   /** 客户端的期限（测试注入短期限）；省略的项取缺省。 */
   deadlines?: Partial<Deadlines>;
@@ -169,7 +169,13 @@ export function registerKb(
       removalTiming: documentDelete,
       bodyDeadline: uploadBodyDeadline,
     }),
-    retrieval: createKbRetrieval({ store, client, locks, audit }),
+    retrieval: createKbRetrieval({
+      store,
+      client,
+      locks,
+      audit,
+      onRerankDegraded: perMinute(now, () => log({ event: "kb_rerank_degraded" })),
+    }),
   });
   return settings.guardModelWrite;
 }

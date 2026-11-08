@@ -31,6 +31,7 @@ beforeEach(async () => {
   deps = {
     store,
     client: createRagflowClient({ baseUrl: fake.baseUrl, key: { read: () => KEY }, log: () => {} }),
+    onRerankDegraded: () => {},
   };
   dataset = fake.addDataset();
   base = store.createBase({ ...PLAIN_BASE, id: hex(1), name: "产品文档", datasetId: dataset });
