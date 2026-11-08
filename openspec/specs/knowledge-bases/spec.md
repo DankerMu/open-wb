@@ -49,8 +49,9 @@
 `kb` 模块 SHALL 为每个知识库持有一把进程内写锁。持锁范围：
 - 工作空间入库（整批）、本地上传、重新入库、移出文档、删库，各在整个操作期间持有该库的锁。
 - 重建器在重建该库期间持有它的锁。
+- 检索测试的参数写回：只在提交的参数与已存值不同时取锁，持有到两列的写入提交为止（「检索测试端点」）；检索本身在锁外执行。
 
-写操作 SHALL 在取得锁之后重新判定：该库是否存在、`state` 是否允许本操作、本操作涉及的文档数上限。锁正被重建器持有时，写操作不等待，立即 409 `kb_rebuilding`。
+写操作 SHALL 在取得锁之后重新判定：该库是否存在、`state` 是否允许本操作、本操作涉及的文档数上限。检索写回另在锁内用重读的值重新比较参数，相同即不写。锁正被重建器持有时，写操作不等待，立即 409 `kb_rebuilding`。
 
 结果：
 - 同一知识库上不存在并发的上传与切换。
@@ -69,9 +70,10 @@
 - **THEN** 删除在入库结束之后才执行，得 204；结束后库与文档行都不在，假 RAGFlow 收到的删数据集请求在上传之后
 
 ### Requirement: 知识库端点
-知识库开启后，已登录用户 SHALL 能管理自己的知识库。别人的或不存在的 id 一律 404 `not_found`，不可探测：这条对本 Requirement 与下面的入库、上传、文档列表、重新入库、移出路由都成立，判定先于 body 解析、`doc` 参数与 `state` 判定，SHALL NOT 发出站请求，SHALL NOT 写审计。全部应答带 no-store。
+知识库开启后，已登录用户 SHALL 能管理自己的知识库。别人的或不存在的 id 一律 404 `not_found`，不可探测：这条对本 Requirement 与下面的入库、上传、文档列表、重新入库、移出与检索测试路由都成立，判定先于 body 解析、`doc` 参数与 `state` 判定，SHALL NOT 发出站请求，SHALL NOT 写审计。全部应答带 no-store。
 
-**视图** `BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, createdAt}`：
+**视图** `BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, retrieval, createdAt}`：
+- `retrieval`：该库的检索参数 `{threshold, vectorWeight}`，取迁移 051 的两列，两者都是 0–1 的数字；只依赖本地行。
 - `raptor`、`graph`：布尔，与建库 body 同型，库列的 0 / 1 在视图层转换。
 - `createdAt`：`created_at` 的 epoch 毫秒，非负整数。
 - `documents`：本地文档行数。
@@ -115,7 +117,7 @@
 两种情形：
 - `embedding_model` SHALL 恒显式传三段式 `<名称>@owb-embed@OpenAI-API-Compatible`。
 - SHALL NOT 发送 `chunk_method`，也不在 `parser_config` 里发送 RAPTOR 或知识图谱字段。
-- 全部成功后插行，并在同一事务里审计 `kb.create`；成功应答为 201 `BaseView`，SHALL NOT 为这个应答读 RAGFlow：`state` 为 `ready`，`stateMessage` 为 `null`，`documents` 为 0，`compile` 里开着的类型为 `pending`，关着的为 `off`。
+- 全部成功后插行，并在同一事务里审计 `kb.create`；成功应答为 201 `BaseView`，SHALL NOT 为这个应答读 RAGFlow：`state` 为 `ready`，`stateMessage` 为 `null`，`documents` 为 0，`compile` 里开着的类型为 `pending`，关着的为 `off`，`retrieval` 为 `{threshold:0.2, vectorWeight:0.7}`。
 - 任一步失败或插行失败：SHALL 逆序删除这一次已建的资源（数据集 → 画布 → 模板组），按「RAGFlow 出站请求」映射返回。回滚里某一步删除失败即停，SHALL NOT 再删后面的资源，并写一行 stderr 记录（`kb_dataset_leak` 或 `kb_pipeline_leak`，形状见 ragflow-backend「嵌入模型更换与全量重建」），不改变应答。
 
 **DSL**：画布 DSL SHALL 由内置 DSL 改写，并同时含 `components` 与 `graph`：
@@ -141,12 +143,12 @@
 - **THEN** B 的列表为 `{bases:[]}`，`DELETE` 为 404 `not_found`；建库之后假 RAGFlow 没有收到任何请求
 
 #### Scenario: 文档路由的所有权
-- **WHEN** 用户 B 以 A 的知识库 id，再以一个不存在的 id，分别请求 `POST …/documents`（合法 body）、`GET …/documents`、`DELETE …/documents?doc=<A 的文档 id>`、`POST …/documents/reingest?doc=<A 的文档 id>` 与 `POST …/uploads?name=a.md`（`application/octet-stream`）
-- **THEN** 十次都是 404 `not_found`；假 RAGFlow 收到零个请求；没有新增审计；A 的文档行不变
+- **WHEN** 用户 B 以 A 的知识库 id，再以一个不存在的 id，分别请求 `POST …/documents`（合法 body）、`GET …/documents`、`DELETE …/documents?doc=<A 的文档 id>`、`POST …/documents/reingest?doc=<A 的文档 id>`、`POST …/uploads?name=a.md`（`application/octet-stream`）与 `POST …/retrieval`（合法 body，参数与 A 的已存值不同）
+- **THEN** 十二次都是 404 `not_found`；假 RAGFlow 收到零个请求；没有新增审计；A 的文档行与检索参数不变
 
 #### Scenario: 建库应答不读 RAGFlow
 - **WHEN** 知识库对话模型已指定，建一个 `raptor:true` 的库；再建一个两开关都为 0 的库
-- **THEN** 两次 201；第一个的应答含 `state:"ready"`、`stateMessage:null`、`documents:0`、`compile:{raptor:"pending", graph:"off"}`，第二个的 `compile` 为 `{raptor:"off", graph:"off"}`；假 RAGFlow 没有收到文档列表与任务日志请求
+- **THEN** 两次 201；第一个的应答含 `state:"ready"`、`stateMessage:null`、`documents:0`、`compile:{raptor:"pending", graph:"off"}`、`retrieval:{threshold:0.2, vectorWeight:0.7}`，第二个的 `compile` 为 `{raptor:"off", graph:"off"}`；假 RAGFlow 没有收到文档列表与任务日志请求
 
 #### Scenario: 账号缺省缺失时不建编译资源
 - **WHEN** 知识库对话模型已指定，假 RAGFlow 的 `GET /api/v1/models/default` 依次应答：`models` 为空（实测记录 §11.4，悬空时也是这个应答）；只有 `embedding`；只有 `chat`；两种都在；各建一个 `raptor:true` 的库；另一次该读取应答 HTTP 503
@@ -512,7 +514,7 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **THEN** 移出 204，该行已删除；重新入库 409 `kb_rebuilding`
 
 ### Requirement: 知识库审计
-知识库相关审计 SHALL 只用下表七种 kind。标题为中文短句；detail 的键集恰如下表，SHALL NOT 含密钥、文件内容或 RAGFlow 应答原文。
+知识库相关审计 SHALL 只用下表八种 kind。标题为中文短句；detail 的键集恰如下表，SHALL NOT 含密钥、文件内容或 RAGFlow 应答原文。
 
 | kind | 时机 | detail |
 |---|---|---|
@@ -524,21 +526,23 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 | `kb.ingest_reject` | 工作空间入库，每个被拒的条目一条 | `{id, source:"workspace", workspaceId, path, reason}` |
 | `kb.ingest_reject` | 本地上传被拒 | `{id, source:"upload", name, reason}` |
 | `kb.document_delete` | 移出成功 | `{id, documentId}` |
-| `kb.settings` | 保存设置 | `{embedding?: <名称>, chatModelId?: string \| null}` |
-| `kb.settings` | 探活 | `{probe: "ok" \| "failed"}` |
+| `kb.settings` | 保存设置 | `{embedding?: <名称>, chatModelId?: string \| null, rerank?: <名称> \| null}` |
+| `kb.settings` | 探活嵌入模型 | `{probe: "ok" \| "failed"}` |
+| `kb.settings` | 探活重排模型 | `{rerankProbe: "ok" \| "failed"}` |
 | `kb.rebuild` | 确认重建 | `{bases, documents}` |
 | `kb.rebuild` | 重试 | `{bases, documents, retry:true}` |
 | `kb.rebuild` | 单库结束 | `{id, result:"ok", skipped: string[]}` 或 `{id, result:"failed"}` |
+| `kb.retrieval_settings` | 检索测试写回检索参数 | `{id, before:{threshold, vectorWeight}, after:{threshold, vectorWeight}}` |
 
 规则：
 - actor 为请求的 principal；重建器写的单库记录，actor 为 `kb_settings.rebuild_actor_id`。
 - 工作空间来源的记录，`workspaceId` 列为该工作空间；其余为 null。
 - 每条成功审计与它对应的那一次本地写入在同一事务内；本地写入失败时不留审计。确认重建的那次保存写 `kb.settings` 与 `kb.rebuild` 两条，其余每次写入一条。
 - `kb.ingest_reject` 没有对应的本地写入，单独写入。
-- 设置保存没有实际写入时（`chatModelId` 由 `null` 到 `null`）不写审计。同身份重存嵌入模型也是一次写入，写一条；`kb.settings` 的 detail 只含实际变化的键，可以为空。
+- 设置保存没有实际写入时（`chatModelId` 或 `rerank` 由 `null` 到 `null`）不写审计；检索测试的参数与已存值相同时不写回，也不写审计。检索本身不写审计。同身份重存嵌入模型也是一次写入，写一条；`kb.settings` 的 detail 只含实际变化的键，可以为空。
 
 #### Scenario: detail 不含敏感内容
-- **WHEN** 以内容含哨兵串的文件完成一次工作空间入库、一次本地上传、一次重新入库与一次移出，并以带密钥哨兵的 body 保存一次知识库模型设置
+- **WHEN** 以内容含哨兵串的文件完成一次工作空间入库、一次本地上传、一次重新入库与一次移出，以带密钥哨兵的 body 保存一次知识库模型设置（含 `embedding` 与 `rerank`），并以含哨兵串的问句完成一次带写回的检索测试
 - **THEN** 全部审计行的 `title` 与 `detail` 都不含任一哨兵；各行的 detail 键集与上表一致
 
 #### Scenario: 写入失败不留审计
@@ -575,10 +579,16 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **`从工作空间入库` 对话框**：选工作空间，逐级浏览目录树并勾选文件，至多 `uploadMaxFiles` 个；提交恰调用一次 `ingestFromWorkspace`；结果里被拒的条目逐条显示 `message`。
 - **`上传文件`**：文件选择，一次至多 `uploadMaxFiles` 个；单个超过 `uploadMaxBytes` 在客户端就地拒绝；逐个调用 `uploadToKnowledgeBase`，失败逐个显示信封文案（含 `kb_file_unsupported`）。
 - 知识库 `state` 不是 `ready` 时，入库、上传与重新入库按钮不渲染；`rebuild_failed` 时 `移出` 仍渲染，`rebuilding` 时不渲染。
+- **检索测试**：文档表下方、标题 `检索测试` 的一块，只在 `state` 为 `ready` 时渲染；SHALL NOT 渲染 demo 面板头的 `召回 → 重排 → 引用` 标签（重排是可选的）。
+  - 控件：问句输入框（placeholder `例如 销售额口径 / 弹窗 / 工单超时`）；`相似度阈值` 与 `向量权重` 两个数字输入（0–1，步长 0.01，初值取 `BaseView.retrieval`）；`检索` 按钮。问句为空白，或任一数字字段为空、不是数字、越界时 `检索` 禁用；数字字段无效时该字段旁显示原因（问句空白只禁用、不显示原因：初始态即为空白）；在途时禁用，文字为 `正在检索`。
+  - 点 `检索`，或在问句框按 Enter，恰调用一次 `retrieveFromKnowledgeBase`，body 为问句与两个数字的当前值；按钮禁用时 Enter 不发请求。成功后面板的两个数字取应答的 `retrieval`，列表里该库的 `retrieval` 同步更新，不重取列表。
+  - 还没检索时显示 `输入问题后检索，命中切片会带出所属文档`；`hits` 为空时显示 `没有命中，换个说法或先把相关文档入库`。
+  - 每条命中显示 `#<序号>`（从 1 起）、文档名、`相似度 <similarity 保留两位小数>` 与切片原文（保留换行）。SHALL NOT 显示来源路径与切片序号（owner 2026-11-07 授权偏离 demo；rc2 的应答没有切片序号）。
+  - 失败时在面板内以 `role="alert"` 显示信封文案，问句与两个数字保持用户输入。这次提交的参数与面板初值（打开详情时的 `BaseView.retrieval`，或上一次成功应答的 `retrieval`）或列表里该库当前的 `retrieval` 任一不同时，SHALL 重取一次知识库列表：写回可能已成功（「检索测试端点」第 5 步）。
 
 **刷新**：详情里存在 `queued` / `parsing` 文档且页面可见时，每 3 秒重取文档列表；页面隐藏时停止。`unparsed` 不触发刷新。入库、上传与重新入库成功后重取一次文档列表，写端点返回的 `queued` 由此进入 3 秒刷新。
 
-**API 客户端** `web/src/lib/api-kb.ts` SHALL 按上面各端点的应答形状严格解析全部应答（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型与方法。
+**API 客户端** `web/src/lib/api-kb.ts` SHALL 提供 `retrieveFromKnowledgeBase(id, {question, threshold, vectorWeight})`，并按上面各端点的应答形状严格解析全部应答（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型与方法。
 
 #### Scenario: 不可用与未就绪
 - **WHEN** 状态为 `{enabled:true, available:false, …}` 时打开 tab；点 `重试` 后状态变为可用，但 `embeddingReady:false`
@@ -599,3 +609,165 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 #### Scenario: 已切片 0
 - **WHEN** 详情里一份文档为 `{status:"done", chunkCount:0}`
 - **THEN** 显示 `已切片 0`
+
+#### Scenario: 检索测试的命中与空态
+- **WHEN** 详情的库为 `ready`、`retrieval:{threshold:0.2, vectorWeight:0.7}`；用户先不检索；再输入 `销售额怎么统计` 点 `检索`，假客户端返回两条命中；再检索一次，返回 `hits:[]`
+- **THEN** 先显示 `输入问题后检索，命中切片会带出所属文档`；第一次恰一次 `retrieveFromKnowledgeBase(id, {question:"销售额怎么统计", threshold:0.2, vectorWeight:0.7})`，显示 `#1`、`#2`、两个文档名与 `相似度 0.68` 这样两位小数的分数，检索结果里不出现来源路径与 `切片`（文档表本身显示 `已切片 N` 与来源路径，不在此列）；第二次显示 `没有命中，换个说法或先把相关文档入库`
+
+#### Scenario: 检索测试的参数与禁用
+- **WHEN** 用户把 `相似度阈值` 改为 `1.5`；改回 `0.1` 并把问句清成空白；再填问句点 `检索`，假客户端在应答前挂起；放行后应答的 `retrieval` 为 `{threshold:0.1, vectorWeight:0.7}`
+- **THEN** 前两种情况 `检索` 禁用，`1.5` 时字段旁有原因；挂起期间按钮为 `正在检索` 且禁用；放行后面板显示 `0.1`，列表里该库的 `retrieval` 为新值，没有重取列表
+
+#### Scenario: 清空数字字段
+- **WHEN** 用户清空 `相似度阈值`；再在 `向量权重` 里填 `abc`
+- **THEN** 两次 `检索` 都禁用，该字段旁有原因；`retrieveFromKnowledgeBase` 零次调用
+
+#### Scenario: Enter 检索
+- **WHEN** 问句为 `工单超时` 时在问句框按 Enter；再把问句清成空白后按 Enter
+- **THEN** 第一次恰一次 `retrieveFromKnowledgeBase`；第二次零次
+
+#### Scenario: 检索测试只在 ready 时出现
+- **WHEN** 详情的库 `state` 依次为 `ready`、`rebuilding`、`rebuild_failed`
+- **THEN** 只有第一次渲染 `检索测试`
+
+#### Scenario: 检索失败
+- **WHEN** `retrieveFromKnowledgeBase` 返回 503 `kb_unavailable` 信封
+- **THEN** 面板内 `role="alert"` 显示 `知识库服务暂不可用`，问句与两个数字保持用户输入
+
+#### Scenario: 失败后列表与服务端一致
+- **WHEN** 库的 `retrieval` 为 `{0.2, 0.7}`；用户改为 `{0.1, 0.7}` 检索，`retrieveFromKnowledgeBase` 返回 503 `kb_unavailable`，随后 `listKnowledgeBases` 返回该库 `retrieval:{0.1, 0.7}`；另一次以未改动的参数检索失败
+- **THEN** 第一次失败后恰一次 `listKnowledgeBases`，切到别的库再切回来时面板初值为 `0.1`；第二次失败后没有重取列表
+
+### Requirement: 迁移 051 检索参数与重排模型
+`server/src/core/db/migrations/051_kb_retrieval.sql` SHALL 只用 `ALTER TABLE … ADD COLUMN` 给两张既有表加列，不改其它表，不插入、不改写任何行：
+- `knowledge_bases.retrieval_threshold REAL NOT NULL DEFAULT 0.2`、`knowledge_bases.retrieval_vector_weight REAL NOT NULL DEFAULT 0.7`：各带 CHECK，`typeof` 为 `real` 且取值在 0 与 1 之间（含两端）。既有行取列缺省。
+- `kb_settings.rerank_name`、`rerank_base_url`、`rerank_api_key`：`TEXT NULL`。三列同为 NULL 或同为非 NULL，由写入路径整组写入保证（`ADD COLUMN` 加不了表级 CHECK）。
+- `kb_settings.rerank_probe_status TEXT NOT NULL DEFAULT 'never' CHECK (… IN ('never','ok','failed'))`、`rerank_probe_at INTEGER NULL`、`rerank_probe_message TEXT NULL`。
+
+`server/test/core-db-helpers.ts` 的跟踪清单 SHALL 加入 `MIGRATION_051`。
+
+#### Scenario: 列与约束
+- **WHEN** 在已有一个知识库行的 050 库上应用 051；随后把该库的 `retrieval_threshold` 改为 `1.5`、`-0.1`、`'abc'`（非数字文本；数字形态的文本如 `'0.3'` 会被 `REAL` 亲和性转成 `real`，不在此列）；把 `retrieval_vector_weight` 改为 `1`
+- **THEN** 应用后该行为 `0.2` 与 `0.7`，`kb_settings` 的重排三列为 NULL、`rerank_probe_status` 为 `never`；前三次更新被约束拒绝；最后一次成功且 `typeof` 为 `real`
+
+#### Scenario: 重排三列整组写入
+- **WHEN** 经 store 保存、更换与清除一次重排模型
+- **THEN** 每一步之后三列同为 NULL 或同为非 NULL
+
+### Requirement: 单轮检索
+`kb` 模块 SHALL 只有一处检索实现（「单轮检索」，ADR-0017）：对一个知识库的当前 `dataset_id` 发一次 `POST /api/v1/retrieval`。检索测试端点经它检索，S2c 的 `kb_search` 也只经它检索。`kb` 模块 SHALL NOT 含改写问句、判定证据是否充分或发起第二轮检索的逻辑。
+
+请求 body 恰为 `{question, dataset_ids, similarity_threshold, vector_similarity_weight, page, page_size}`，配置了重排模型时另带 `rerank_id`：
+- `dataset_ids` 恰含该库的 `dataset_id`（不是 `rebuild_dataset_id`）。
+- `similarity_threshold`、`vector_similarity_weight` SHALL 恒显式传该库的检索参数：RAGFlow 数据集上的同名字段经 API 不可写（实测记录 §19.2），不传即落到 RAGFlow 的缺省值。
+- `page` 为 1，`page_size` 为 6。
+- SHALL NOT 发送 `top_k`、`keyword`、`highlight`、`use_kg`、`document_ids`。
+- `rerank_id` 为 `<重排模型名称>@owb-rerank@OpenAI-API-Compatible`。
+
+结果：
+- `code:0` 时读 `data.chunks`：它 SHALL 是数组（零命中时为 `[]`，实测记录 §19.1），每项须有字符串 `document_id`、字符串 `content` 与数字 `similarity`；`chunks` 不是数组或某项缺字段即 `kb_unavailable`。
+- 每条按 `document_id` 关联该库本地文档行的 `ragflow_document_id`；关联不上的 SHALL 丢弃。零候选或全部丢弃时结果为空数组，不是错误。命中视图 `RetrievalHit` 恰为 `{documentId, name, similarity, content}`：
+  - `documentId` 为本地文档 id。
+  - `name` 取本地记录。
+  - `similarity` 与 `content` 原样取 RAGFlow 的值。
+- 次序同 RAGFlow 应答。
+- 失败映射与重排降级见 ragflow-backend「RAGFlow 出站请求」。
+
+#### Scenario: 参数显式传
+- **WHEN** 一个库的检索参数为 `{threshold:0.35, vectorWeight:0.5}`，未配置重排模型，检索 `工单超时`
+- **THEN** 假 RAGFlow 恰收到一次 `/api/v1/retrieval`，body 恰为 `{question:"工单超时", dataset_ids:[<该库 dataset_id>], similarity_threshold:0.35, vector_similarity_weight:0.5, page:1, page_size:6}`
+
+#### Scenario: 带重排
+- **WHEN** 管理员配置了名为 `qwen3-rerank` 的重排模型，检索任一问句
+- **THEN** 请求 body 另含 `rerank_id:"qwen3-rerank@owb-rerank@OpenAI-API-Compatible"`
+
+#### Scenario: 命中关联本地文档
+- **WHEN** 假 RAGFlow 回三条切片：第一条的 `document_id` 属于本地文档 `notes.md`（RAGFlow 侧 `document_keyword` 为 `notes(1).md`），第二条属于本地文档 `brief.pdf`，第三条的 `document_id` 没有本地行
+- **THEN** 命中恰两条，依次为 `{documentId:<notes 的本地 id>, name:"notes.md", …}` 与 `brief.pdf` 那条，`similarity` 与 `content` 等于 RAGFlow 的值
+
+#### Scenario: 应答缺字段
+- **WHEN** 假 RAGFlow 的某条切片缺 `similarity`（故障注入）
+- **THEN** 503 `kb_unavailable`
+
+#### Scenario: 零命中
+- **WHEN** 假 RAGFlow 按实测记录 §19.1 回零命中 `{code:0, data:{chunks:[], doc_aggs:[], labels:null, total:0}, message:null}`
+- **THEN** 单轮检索的结果为空数组，不是 `kb_unavailable`
+
+#### Scenario: 只有一处检索实现
+- **WHEN** 检索测试端点处理一次检索；另扫描 `server/src`
+- **THEN** 它经单轮检索那一个函数发出请求；客户端的检索方法只在 `kb/retrieval.ts` 里被调用，RAGFlow 的检索路由片段（`${API}/retrieval` 或 `/api/v1/retrieval`）只出现在 `kb/ragflow-retrieval.ts`；本系统自己的 `/api/kb/bases/:id/retrieval` 不算
+
+### Requirement: 检索测试端点
+知识库开启后，所有者 SHALL 能经 `POST /api/kb/bases/:id/retrieval` 对自己的一个知识库做单轮检索，并在检索时写回该库的检索参数。body limit 16 KiB，应答带 no-store。
+
+依次判定：
+1. 所有权（见「知识库端点」）：别人的或不存在的 id 404 `not_found`，先于 body 解析，不发出站请求，不写审计。
+2. body 键集恰为 `question`、`threshold`、`vectorWeight`：
+   - `question`：去掉首尾空白后非空、至多 1000 码点、不含 C0 控制字符（`\t`、`\n` 除外）与 DEL 的字符串；原样发出，不去空白。
+   - `threshold`、`vectorWeight`：0–1 的有限数字（含两端）。
+   - 不符：400 `bad_request`，不发出站请求。
+3. `state` 不是 `ready`（含 `rebuild_failed`）：409 `kb_rebuilding`，不发出站请求。
+4. 两个参数与已存值逐个比较：
+   - **都相同**：不写库，不审计，直接检索。
+   - **有不同**：取该库的写锁（「同一知识库的写操作串行」，FIFO）。锁被重建器持有即 409 `kb_rebuilding`。取锁后重读该库：不存在 404 `not_found`，不发检索；`state` 不是 `ready` 409 `kb_rebuilding`。
+     SHALL 用重读的值再比较一次：已相同则释放锁，不写、不审计，直接检索；仍不同则在同一事务里写两列，并审计 `kb.retrieval_settings`（detail 的 `before` 取锁内重读的值，`after` 为提交的值），然后释放锁再检索。
+     写入失败：不审计、不检索，通用 500，body SHALL NOT 声称任何 typed code。
+5. 检索（「单轮检索」）。写回成功之后检索失败时，参数已保存，应答为检索的失败。
+
+成功应答 200 恰为 `{hits: RetrievalHit[], retrieval: {threshold, vectorWeight}}`。`retrieval` 为这次检索实际使用的参数，即写回后的已存值。检索本身 SHALL NOT 写审计。
+
+#### Scenario: 参数不变只检索
+- **WHEN** 一个库的检索参数为缺省 `{0.2, 0.7}`，所有者以 `{question:"销售额", threshold:0.2, vectorWeight:0.7}` 检索
+- **THEN** 200，`retrieval` 为 `{threshold:0.2, vectorWeight:0.7}`；没有新增审计；`knowledge_bases` 的 `updated_at` 不变
+
+#### Scenario: 参数变了先写回
+- **WHEN** 同一库以 `{question:"销售额", threshold:0.1, vectorWeight:0.9}` 检索；随后 `GET /api/kb/bases`
+- **THEN** 200，`retrieval` 为 `{0.1, 0.9}`，假 RAGFlow 收到的 body 带 `similarity_threshold:0.1`、`vector_similarity_weight:0.9`；恰一条 `kb.retrieval_settings`，detail 为 `{id, before:{threshold:0.2, vectorWeight:0.7}, after:{threshold:0.1, vectorWeight:0.9}}`；列表里该库的 `retrieval` 为新值
+
+#### Scenario: 写回失败不检索
+- **WHEN** 经注入让参数写入失败，以与已存值不同的参数检索
+- **THEN** 500，body 不声称任何 typed code；假 RAGFlow 没有收到检索请求；没有 `kb.retrieval_settings`；已存参数不变
+
+#### Scenario: 零命中与全部关联不上
+- **WHEN** 以已存参数检索，假 RAGFlow 回零命中；另一次回两条切片，`document_id` 都没有本地行
+- **THEN** 两次都是 200 `{hits:[], retrieval:{threshold:0.2, vectorWeight:0.7}}`
+
+#### Scenario: 写回排在入库之后
+- **WHEN** 一批工作空间入库持有该库的写锁（假 RAGFlow 挂起上传），所有者以与已存值不同的参数检索；随后放行上传
+- **THEN** 入库结束之后写回才执行，检索 200；假 RAGFlow 收到的检索请求在上传之后，带新参数；恰一条 `kb.retrieval_settings`
+
+#### Scenario: 排队时库被删除
+- **WHEN** 删库持有该库的写锁（假 RAGFlow 挂起删数据集），所有者以与已存值不同的参数检索；随后放行
+- **THEN** 删库 204；检索 404 `not_found`；假 RAGFlow 没有收到检索请求；没有 `kb.retrieval_settings`
+
+#### Scenario: 并发的相同提交
+- **WHEN** 已存 `{0.2, 0.7}`，同一所有者并发提交两次 `{threshold:0.1, vectorWeight:0.7}`
+- **THEN** 两次都是 200；恰一条 `kb.retrieval_settings`，`before` 为 `{0.2, 0.7}`，`after` 为 `{0.1, 0.7}`
+
+#### Scenario: 写回后检索失败
+- **WHEN** 以与已存值不同的参数检索，假 RAGFlow 对检索应答 HTTP 503
+- **THEN** 503 `kb_unavailable`；参数已是新值，恰一条 `kb.retrieval_settings`
+
+#### Scenario: body 校验
+- **WHEN** 所有者依次以 `question:"   "`、1001 码点的问句、含 `\u0007` 的问句、`threshold:1.5`、`vectorWeight:-0.1`、`threshold:"0.3"`、`threshold:1e999`（解析为无穷大）、多一个 `topK` 键、缺 `vectorWeight` 键检索
+- **THEN** 九次都是 400 `bad_request`；假 RAGFlow 收到零个请求；没有审计
+
+#### Scenario: 非 ready 的库
+- **WHEN** 一个 `rebuilding` 的库与一个 `rebuild_failed` 的库，所有者以与已存值相同的参数检索
+- **THEN** 两次都是 409 `kb_rebuilding`；假 RAGFlow 收到零个请求
+
+#### Scenario: 写回与重建交错
+- **WHEN** 重建器正持有该库的写锁，所有者以与已存值不同的参数检索；另一次以相同的参数检索时，该库在检索开始前已被置为 `rebuilding`
+- **THEN** 两次都是 409 `kb_rebuilding`，参数不变，假 RAGFlow 没有收到检索请求
+
+### Requirement: `kb_search` 工具契约
+S2c 的会话内 `kb_search`（omp 经 `host_tool_call` 调用）SHALL 遵守以下契约，本 change 只定义契约，不注册工具，也不实现分派：
+- 输入为问句与一组 kb_ids。
+- 对每个调用者可见的知识库各执行一次「单轮检索」，参数取该库已存的检索参数；调用方 SHALL NOT 逐次覆盖检索参数，也 SHALL NOT 写回。
+- 每条命中与 `RetrievalHit` 同形；进入模型上下文的只有命中切片与出处，SHALL NOT 有整篇文档（CONTEXT.md 不变量 2）。
+- 一次调用只检索一轮：要不要再查、怎么改写问句，由模型以再次调用表达（ADR-0017）。
+- 多库命中如何标注所属库、合并与条数，可见范围的过滤与跨账号检索审计，由 S2c 定；非 `ready`（`rebuilding` / `rebuild_failed`）的库是否参与检索也由 S2c 定（「检索测试端点」的 `state` 判定只约束检索测试）。
+
+#### Scenario: 契约与检索测试同源
+- **WHEN** 评审本 change 合入后的 `server/src`
+- **THEN** 没有名为 `kb_search` 的工具注册或 `host_tool_call` 分派；客户端的检索方法只在单轮检索里被调用，检索测试端点经它检索
