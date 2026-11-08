@@ -7,8 +7,8 @@
 >
 > 依赖（真实依赖）：
 > - 无前置：组 1、组 3、组 5。
-> - 组 2 ← 1。组 4 ← 1、2、3（首刀只需 1、3；第二刀另需 2：「参数变了先写回」断言列表里的 `retrieval`）。组 6 ← 1、5。组 7 ← 4、6。
-> - 组 8 ← 2、4。组 9 ← 6、7、8（CK-14 要检索面板；没有组 7 时配了重排也不生效）。组 10 ← 4。组 11 ← 1–10 全部。
+> - 组 2 ← 1。组 4 ← 1、2、3（首刀只需 1、3；第二刀另需 2：「参数变了先写回」断言列表里的 `retrieval`）。组 6 首刀 ← 1；组 6 第二刀（6.3–6.5）← 首刀、5；组 6 第三刀（6.6）← 第二刀。组 7 ← 4、组 6 首刀。
+> - 组 8 ← 2、4。组 9 ← 6（第三刀 6.6，传递覆盖前两刀）、7、8（CK-14 要检索面板；没有组 7 时配了重排也不生效）。组 10 ← 4。组 11 ← 1–10 全部。
 >
 > 跨服务的严格解析：web 的 API 客户端按键集严格解析应答（knowledge-bases「中心「知识库」tab」）。所以服务端给既有视图加键时，
 > web 的解析器 SHALL 在同一个 PR 里改（组 2 的 `BaseView.retrieval`、组 6 的设置读视图 `rerank`），否则合入即让界面 `requestFailed`。
@@ -97,17 +97,15 @@ Minimal mergeable slice: atomic - 改名与按目标参数化改的是同一个�
 
 ## 6. 重排模型的设置、下发与探活端点（ragflow-backend「知识库模型设置」；knowledge-bases「知识库审计」的 `kb.settings` 行）
 
-- [ ] 6.1 测试先行：新 `server/test/kb-settings-rerank.test.ts`，覆盖 ragflow-backend「知识库模型设置」新增的场景（重排模型的下发序列、换重排模型不重建、清除重排模型、重排模型的密钥与名称、重排探活、探活目标的取值、重排模型下发失败、组合保存时重排失败），「非管理员」对 `?target=rerank` 的 403，http-service-skeleton「知识库的归属路由」对 `POST /api/kb/settings/probe?target=rerank` 携 `{}` 的 400，以及 knowledge-bases「detail 不含敏感内容」的设置一支带 `rerank.apiKey` 哨兵。新 `web/test/api-kb-rerank.test.ts`：设置读视图带 `rerank` 才解析通过，`probeKbModel("rerank")` 发 `?target=rerank`。先看到红。验证：用例先红。
-- [ ] 6.2 实现 design D6、D7：
-  - `settings.ts` 解析 `rerank`；保存时重排一轮排在嵌入、对话之前，失败即停；`Provision` 加 `modelType:"rerank"`，这时不发 `PATCH /models/default`；清除只改本地；读视图加 `rerank`；审计 detail 加 `rerank` 与 `rerankProbe`。
-  - `rest.ts` 的探活路由读 `target`。
-  - 假 RAGFlow 的实例路由接受 `model_type:["rerank"]`（若有白名单）。
-  - 同一 PR：`web/src/lib/api-kb.ts` 的设置视图解析与 `updateKbSettings` 的 input 加 `rerank`，`probeKbEmbedding()` 改为 `probeKbModel(target)`；`web/src/lib/api.ts` 的 `ApiClient` 与 `web/test/api-files-archive.test.ts` 的方法清单随之改；web 里的调用点随之改。
-  验证：`npm run test:focus --workspace server -- kb-settings`、`npm run test:focus --workspace web -- api-kb api-files-archive center-models-kb` 全过，`make typecheck`、`make lint` 退出 0，`settings.ts` 不超过 800 行。
-- [ ] 6.3 文档：`docs/architecture/system.md` 9.13 的知识库模型一节加重排模型（实例 `owb-rerank`、排在最前下发、不设账号缺省、清除只改本地、探活 `?target=rerank`）；`docs/architecture/knowledge-base.md` 的运维说明加「`owb-rerank` 不是账号缺省，删除没有 §13 的风险」。验证：`make anti-drift` 退出 0。
+- [ ] 6.1 测试先行：新 `server/test/kb-settings-rerank.test.ts`，覆盖 ragflow-backend「知识库模型设置」的「重排模型的下发序列」「换重排模型不重建」「清除重排模型」「重排模型的密钥与名称」「重排模型下发失败」「组合保存时重排失败」，以及 knowledge-bases「detail 不含敏感内容」的设置一支带 `rerank.apiKey` 哨兵。新 `web/test/api-kb-rerank.test.ts`：设置读视图带 `rerank` 才解析通过。先看到红。验证：用例先红。
+- [ ] 6.2 实现 design D6：`settings.ts` 解析 `rerank`；保存时重排一轮排在嵌入、对话之前，失败即停；`Provision` 加 `modelType:"rerank"`，这时不发 `PATCH /models/default`；清除只改本地；读视图加 `rerank`；审计 detail 加 `rerank`。假 RAGFlow 的实例路由接受 `model_type:["rerank"]`（若有白名单）。同一 PR：`web/src/lib/api-kb.ts` 的设置视图解析与 `updateKbSettings` 的 input 加 `rerank`。验证：`npm run test:focus --workspace server -- kb-settings`、`npm run test:focus --workspace web -- api-kb` 全过，`make typecheck`、`make lint` 退出 0，`settings.ts` 不超过 800 行。
+- [ ] 6.3 测试先行：在 `server/test/kb-settings-rerank.test.ts` 加「重排探活」「探活目标的取值」、「非管理员」对 `?target=rerank` 的 403、http-service-skeleton「知识库的归属路由」对 `POST /api/kb/settings/probe?target=rerank` 携 `{}` 的 400。先看到红。验证：用例先红。
+- [ ] 6.4 实现 design D7：`rest.ts` 的探活路由读 `target`（缺省、`embedding`、`rerank`；其它、重复、空值为 400；未配置重排时 400 `bad_request`）；`settings.ts` 的重排探活写回只写同一身份、排在同一条探活 Promise 链上，审计 `kb.settings` detail `{rerankProbe}`。验证：`npm run test:focus --workspace server -- kb-settings` 全过，`make typecheck`、`make lint` 退出 0。
+- [ ] 6.5 文档：`docs/architecture/system.md` 9.13 的知识库模型一节加重排模型（实例 `owb-rerank`、排在最前下发、不设账号缺省、清除只改本地、探活 `?target=rerank`）；`docs/architecture/knowledge-base.md` 的运维说明加「`owb-rerank` 不是账号缺省，删除没有 §13 的风险」。验证：`make anti-drift` 退出 0。
+- [ ] 6.6 web 原地改名：测试先行，`web/test/api-kb-rerank.test.ts` 加 `probeKbModel("rerank")` 发 `?target=rerank`；`web/test/api-kb.test.ts`、`web/test/api-files-archive.test.ts`、`web/test/center-models-kb.test.tsx` 里的旧名原地改。实现：`web/src/lib/api-kb.ts` 的 `probeKbEmbedding()` 改为 `probeKbModel(target)`，`web/src/lib/api.ts` 的 `ApiClient`、`web/test/api-files-archive.test.ts` 的方法清单与 `use-kb-settings.ts` 的调用点随之改。验证：`npm run test:focus --workspace web -- api-kb api-files-archive center-models-kb` 全过，`make typecheck` 退出 0，`git grep -n probeKbEmbedding -- web` 退出 1。
 
 Suggested fixture level: expanded - 带凭证的出站请求、管理员权限与公共 API 的视图加键（outbound with credentials、auth、public API）。
-Minimal mergeable slice: 6.1–6.2 中除 `target=rerank` 探活以外的部分（设置的解析、下发、清除、读视图，加上 web 解析器）为首刀：读视图加键与 web 解析器必须同 PR，探活接线可以后补。剩余（探活 `target`、6.3）依赖首刀。
+Minimal mergeable slice: 6.1–6.2 为首刀（设置的解析、下发、清除、读视图，加上 web 设置视图解析器）：读视图加键与 web 解析器必须同 PR，不带 `target` 的探活行为不变，首刀独立保绿。第二刀 6.3–6.5（服务端探活 `target`、重排探活写回与文档）依赖首刀与组 5，atomic：探活的红用例、接线与描述它的文档是同一条验证路径。第三刀 6.6（web 探活方法改名）依赖第二刀，atomic：方法改名与它的调用点是同一批行。
 
 ## 7. 检索带重排与自动降级（ragflow-backend「RAGFlow 出站请求」的重排降级与三个场景；knowledge-bases「单轮检索」的「带重排」）
 
@@ -141,7 +139,7 @@ Minimal mergeable slice: 8.1–8.2 为首刀：API 方法是 `createKbMethods` �
 - [ ] 9.3 验收清单 CK 节加 CK-14（管理员配置重排模型、探活、清除；配置后成员的检索测试照常有结果；桌面与手机宽度、浅色与深色主题下布局不溢出），结论 `待签`。验证：`npm run test:focus --workspace web -- functional-checklist` 全过。
 
 Suggested fixture level: expanded - 前端通用契约：涉及呈现的 web 任务至少 `expanded`（真实浏览器由 9.2 的 ui-walk 段承担）。
-Minimal mergeable slice: 9.1（对话框的改名与泛化，嵌入行为不变）可独立合入保绿；9.2–9.3 依赖它与组 6、组 7、组 8。
+Minimal mergeable slice: 9.1（对话框的改名与泛化，嵌入行为不变）可独立合入保绿；9.2–9.3 依赖它与组 6（第三刀 6.6）、组 7、组 8。
 
 ## 10. 真实端点冒烟（verification-harness「知识库真实端点冒烟」）
 
