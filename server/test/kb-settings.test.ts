@@ -39,6 +39,7 @@ const NEVER = { status: "never", at: null, message: null };
 const EMPTY_VIEW = {
   embedding: null,
   chatModelId: null,
+  rerank: null,
   bases: 0,
   compileBases: 0,
   documents: 0,
@@ -58,7 +59,7 @@ const configured = () => configuredWorld(open);
 const withChat = () => chatWorld(open);
 
 describe("读视图", () => {
-  it("未配置：恰为七个键，全是空值，带 no-store", async () => {
+  it("未配置：恰为八个键，全是空值，带 no-store", async () => {
     const world = await open();
     const response = await world.get();
     expect(response.statusCode).toBe(200);
@@ -76,7 +77,7 @@ describe("读视图", () => {
     expect(response.body).not.toContain(EMBED_KEY);
   });
 
-  it("带对话模型的保存应答恰为七键读视图，与 GET 相同，两个密钥哨兵都不出现", async () => {
+  it("带对话模型的保存应答恰为八键读视图，与 GET 相同，两个密钥哨兵都不出现", async () => {
     const world = await withChat();
     const saved = await world.put({ chatModelId: "m2" });
     const read = await world.get();
