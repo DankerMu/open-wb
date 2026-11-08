@@ -1,9 +1,10 @@
 /**
  * Issue #1836（任务 7.2）：`kb/store.ts` 的 `kb_settings` 一行（design D7、D8）：设置读写、确认重建、重试与探活写回，
  * 经 `openDb(":memory:")` 的真实迁移与 `createKbStore` 这一个公开入口测。期望值是 spec 与 design 里的字面量；
- * 密钥取值是哨兵，证明读视图带不出来。
+ * 密钥取值是哨兵，证明读视图带不出来。Issue #1912（s2b-kb-retrieval 任务 1.3）：迁移 051 的重排三列与重排探活
+ * （design D5、D6；knowledge-bases「重排三列整组写入」）。
  */
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import {
   BOOM,
   boom,
@@ -33,11 +34,14 @@ describe("kb store: 设置", () => {
       embedding: null,
       embeddingGeneration: 0,
       probe: { status: "never", at: null, message: null },
+      rerank: null,
+      rerankProbe: { status: "never", at: null, message: null },
       chatModelId: null,
       rebuildActorId: null,
       updatedAt: 0,
     });
     expect(store.embeddingApiKey()).toBeNull();
+    expect(store.rerankApiKey()).toBeNull();
   });
 
   it("保存嵌入模型：读视图只有名称与地址，密钥只经 embeddingApiKey 读出", () => {
@@ -48,6 +52,8 @@ describe("kb store: 设置", () => {
       embedding: { name: "bge-m3", baseUrl: "http://embed/v1" },
       embeddingGeneration: 0,
       probe: { status: "never", at: null, message: null },
+      rerank: null,
+      rerankProbe: { status: "never", at: null, message: null },
       chatModelId: null,
       rebuildActorId: null,
       updatedAt: T0,
@@ -318,5 +324,239 @@ describe("kb store: 设置", () => {
     expect(store.recordEmbeddingProbe(EMBEDDING, result, within).recorded).toBe(false);
     expect(within).not.toHaveBeenCalled();
     expect(store.settings().probe).toEqual({ status: "never", at: null, message: null });
+  });
+});
+
+/** 重排模型的密钥哨兵与嵌入的不同：读视图里找不到它，才说明是重排这一列没漏出来。 */
+const RERANK_KEY_SENTINEL = "rerank-sentinel-rerank";
+const RERANK = { name: "bge-reranker", baseUrl: "http://rerank/v1", apiKey: RERANK_KEY_SENTINEL };
+const NEVER = { status: "never", at: null, message: null } as const;
+const RERANK_CHANGES: [string, Partial<typeof RERANK>][] = [
+  ["名称", { name: "bge-reranker-large" }],
+  ["地址", { baseUrl: "http://rerank-other/v1" }],
+  ["密钥", { apiKey: "rotated-rerank-key" }],
+];
+
+/** 裸行里的重排三列。 */
+function rerankColumns(db: Parameters<typeof settingsRow>[0]) {
+  const row = settingsRow(db) as Record<string, unknown>;
+  return [row.rerank_name, row.rerank_base_url, row.rerank_api_key];
+}
+
+/** 三列同为 NULL 或同为非 NULL（knowledge-bases「重排三列整组写入」）。 */
+function expectWholeGroup(db: Parameters<typeof settingsRow>[0]): void {
+  const nulls = rerankColumns(db).filter((value) => value === null).length;
+  expect([0, 3]).toContain(nulls);
+}
+
+describe("kb store: 重排模型", () => {
+  const probedOk = { status: "ok", at: T0 + 1, message: null } as const;
+
+  function rerankProbed() {
+    const opened = fresh();
+    opened.store.saveSettings({ rerank: RERANK });
+    opened.store.recordRerankProbe(RERANK, probedOk);
+    return opened;
+  }
+
+  it("SettingsPatch.rerank 只能是完整三项或 null：类型层防部分写入", () => {
+    type Patch = NonNullable<Parameters<ReturnType<typeof fresh>["store"]["saveSettings"]>[0]>;
+    expectTypeOf<Patch["rerank"]>().toEqualTypeOf<
+      { name: string; baseUrl: string; apiKey: string } | null | undefined
+    >();
+  });
+
+  it("首次保存：三列写入，探活 never，updated_at 更新；读视图不带密钥，密钥只经 rerankApiKey 读出", () => {
+    const { db, store } = fresh();
+    vi.setSystemTime(T0 + 5);
+    const seen: unknown[] = [];
+    const saved = store.saveSettings({ rerank: RERANK }, (view) => seen.push(view));
+    expect(saved).toEqual({
+      embedding: null,
+      embeddingGeneration: 0,
+      probe: NEVER,
+      rerank: { name: "bge-reranker", baseUrl: "http://rerank/v1" },
+      rerankProbe: NEVER,
+      chatModelId: null,
+      rebuildActorId: null,
+      updatedAt: T0 + 5,
+    });
+    expect(seen).toEqual([saved]);
+    expect(store.settings()).toEqual(saved);
+    expect(JSON.stringify(store.settings())).not.toContain(RERANK_KEY_SENTINEL);
+    expect(store.rerankApiKey()).toBe(RERANK_KEY_SENTINEL);
+    expect(store.embeddingApiKey()).toBeNull();
+    expect(rerankColumns(db)).toEqual(["bge-reranker", "http://rerank/v1", RERANK_KEY_SENTINEL]);
+  });
+
+  it("同一身份重存：探活保留，updated_at 更新", () => {
+    const { store } = rerankProbed();
+    vi.setSystemTime(T0 + 5);
+    expect(store.saveSettings({ rerank: RERANK })).toMatchObject({
+      rerankProbe: probedOk,
+      updatedAt: T0 + 5,
+    });
+  });
+
+  it.each(RERANK_CHANGES)("%s变了：重排探活重置，within 里已是重置后的状态", (_field, change) => {
+    const { db, store } = rerankProbed();
+    const rerank = { ...RERANK, ...change };
+    const seen: unknown[] = [];
+    const saved = store.saveSettings({ rerank }, (view) => seen.push(view.rerankProbe));
+    expect(saved.rerankProbe).toEqual(NEVER);
+    expect(seen).toEqual([NEVER]);
+    expect(saved.rerank).toEqual({ name: rerank.name, baseUrl: rerank.baseUrl });
+    expect(store.rerankApiKey()).toBe(rerank.apiKey);
+    expect(settingsRow(db)).toMatchObject({
+      rerank_probe_status: "never",
+      rerank_probe_at: null,
+      rerank_probe_message: null,
+    });
+  });
+
+  it("null 即清除：三列置 NULL，探活重置，updated_at 更新，rerankApiKey 为 null", () => {
+    const { db, store } = rerankProbed();
+    vi.setSystemTime(T0 + 5);
+    const seen: unknown[] = [];
+    const saved = store.saveSettings({ rerank: null }, (view) => seen.push(view));
+    expect(saved).toMatchObject({ rerank: null, rerankProbe: NEVER, updatedAt: T0 + 5 });
+    expect(seen).toEqual([saved]);
+    expect(store.rerankApiKey()).toBeNull();
+    expect(rerankColumns(db)).toEqual([null, null, null]);
+  });
+
+  it("store 不判 null→null 无操作：未配置时再清除照常写 updated_at、调 within", () => {
+    const { store } = fresh();
+    vi.setSystemTime(T0 + 5);
+    const within = vi.fn();
+    expect(store.saveSettings({ rerank: null }, within)).toMatchObject({
+      rerank: null,
+      rerankProbe: NEVER,
+      updatedAt: T0 + 5,
+    });
+    expect(within).toHaveBeenCalledOnce();
+  });
+
+  it("保存重排不动嵌入的身份、探活与代数；保存嵌入不动重排的身份与探活", () => {
+    const { store } = fresh();
+    const embeddingProbe = { status: "failed", at: T0 + 2, message: "上游拒绝" } as const;
+    store.saveSettings({ embedding: EMBEDDING, rebuildActorId: "u1" });
+    store.recordEmbeddingProbe(EMBEDDING, embeddingProbe);
+    store.saveSettings({ rerank: RERANK });
+    store.recordRerankProbe(RERANK, probedOk);
+
+    const rerankChanged = { ...RERANK, name: "bge-reranker-large" };
+    expect(store.saveSettings({ rerank: rerankChanged })).toMatchObject({
+      embedding: { name: "bge-m3", baseUrl: "http://embed/v1" },
+      embeddingGeneration: 1,
+      probe: embeddingProbe,
+    });
+    expect(store.embeddingApiKey()).toBe(KEY_SENTINEL);
+
+    store.recordRerankProbe(rerankChanged, probedOk);
+    expect(store.saveSettings({ embedding: { ...EMBEDDING, name: "bge-large" } })).toMatchObject({
+      probe: NEVER,
+      rerank: { name: "bge-reranker-large", baseUrl: "http://rerank/v1" },
+      rerankProbe: probedOk,
+    });
+    expect(store.rerankApiKey()).toBe(RERANK_KEY_SENTINEL);
+  });
+
+  it("与嵌入、对话模型同一事务：对话模型被外键拒绝时，同一次保存的重排一起回滚", () => {
+    const { store } = fresh();
+    expect(() => store.saveSettings({ rerank: RERANK, chatModelId: "nope" })).toThrow(FOREIGN_KEY);
+    expect(store.settings()).toMatchObject({ rerank: null, updatedAt: 0 });
+    expect(store.rerankApiKey()).toBeNull();
+  });
+
+  it("重排三列整组写入：保存、更换、清除每一步之后三列同为 NULL 或同为非 NULL", () => {
+    const { db, store } = fresh();
+    expectWholeGroup(db);
+    store.saveSettings({ rerank: RERANK });
+    expectWholeGroup(db);
+    expect(rerankColumns(db)).not.toContain(null);
+    store.saveSettings({ rerank: { name: "n2", baseUrl: "http://r2/v1", apiKey: "k2" } });
+    expectWholeGroup(db);
+    expect(rerankColumns(db)).toEqual(["n2", "http://r2/v1", "k2"]);
+    store.saveSettings({ rerank: null });
+    expectWholeGroup(db);
+    expect(rerankColumns(db)).toEqual([null, null, null]);
+  });
+
+  it.each([
+    ["保存", null, RERANK],
+    ["更换", RERANK, { ...RERANK, baseUrl: "http://rerank-other/v1" }],
+    ["清除", RERANK, null],
+  ] as const)("%s时 within 抛出：三列与探活一起回滚", (_step, before, after) => {
+    const { db, store } = fresh();
+    if (before !== null) {
+      store.saveSettings({ rerank: before });
+      store.recordRerankProbe(before, probedOk);
+    }
+    const snapshot = settingsRow(db);
+    expect(() => store.saveSettings({ rerank: after }, boom)).toThrow(BOOM);
+    expect(settingsRow(db)).toEqual(snapshot);
+    expectWholeGroup(db);
+  });
+
+  describe("重排探活写回", () => {
+    const failed = { status: "failed", at: T0 + 5, message: "上游拒绝" } as const;
+
+    it("同一身份：写三列并调 within，不动 updated_at 与嵌入探活；读视图不带密钥", () => {
+      const { store } = fresh();
+      store.saveSettings({ embedding: EMBEDDING, rerank: RERANK });
+      vi.setSystemTime(T0 + 5);
+      const seen: unknown[] = [];
+      const recorded = store.recordRerankProbe(RERANK, failed, (view) => seen.push(view));
+      expect(recorded).toEqual({ view: store.settings(), recorded: true });
+      expect(recorded.view).toMatchObject({
+        rerank: { name: "bge-reranker", baseUrl: "http://rerank/v1" },
+        rerankProbe: failed,
+        probe: NEVER,
+        updatedAt: T0,
+      });
+      expect(seen).toEqual([recorded.view]);
+      expect(JSON.stringify(store.settings())).not.toContain(RERANK_KEY_SENTINEL);
+      expect(store.rerankApiKey()).toBe(RERANK_KEY_SENTINEL);
+    });
+
+    it.each(RERANK_CHANGES)(
+      "%s与当前不同：recorded 为 false，不调 within，探活不变",
+      (_field, change) => {
+        const { store } = rerankProbed();
+        const within = vi.fn();
+        expect(store.recordRerankProbe({ ...RERANK, ...change }, failed, within)).toEqual({
+          view: store.settings(),
+          recorded: false,
+        });
+        expect(within).not.toHaveBeenCalled();
+        expect(store.settings().rerankProbe).toEqual(probedOk);
+      },
+    );
+
+    it("已清空：旧身份的写回丢弃，不调 within，探活仍是 never", () => {
+      const { store } = rerankProbed();
+      store.saveSettings({ rerank: null });
+      const within = vi.fn();
+      expect(store.recordRerankProbe(RERANK, failed, within).recorded).toBe(false);
+      expect(within).not.toHaveBeenCalled();
+      expect(store.settings().rerankProbe).toEqual(NEVER);
+    });
+
+    it("within 抛出：探活回滚", () => {
+      const { store } = rerankProbed();
+      expect(() => store.recordRerankProbe(RERANK, failed, boom)).toThrow(BOOM);
+      expect(store.settings().rerankProbe).toEqual(probedOk);
+    });
+
+    it("嵌入探活写回不动重排探活", () => {
+      const { store } = rerankProbed();
+      store.saveSettings({ embedding: EMBEDDING });
+      const embeddingOk = { status: "ok", at: T0 + 7, message: null } as const;
+      expect(store.recordEmbeddingProbe(EMBEDDING, embeddingOk).view).toMatchObject({
+        probe: embeddingOk,
+        rerankProbe: probedOk,
+      });
+    });
   });
 });

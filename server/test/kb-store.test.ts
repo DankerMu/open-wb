@@ -2,6 +2,7 @@
  * Issue #1836（任务 7.2）：knowledge-bases「迁移 050 知识库 schema」的「约束」场景与 `kb/store.ts`（design D6、D8、
  * D9 的落库部分）的知识库、文档与重建，经 `openDb(":memory:")` 的真实迁移与 `createKbStore` 这一个公开入口测。
  * 表形状的其余部分在 `kb-schema.test.ts`，设置在 `kb-store-settings.test.ts`。期望值是 spec 与 design 里的字面量。
+ * Issue #1912（s2b-kb-retrieval 任务 1.3）：迁移 051 的检索参数两列的读出与 `saveRetrieval`（design D4、D5）。
  */
 import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
@@ -162,6 +163,8 @@ describe("kb store: 知识库", () => {
       embeddingGeneration: 1,
       state: "ready",
       stateMessage: null,
+      retrievalThreshold: 0.2,
+      retrievalVectorWeight: 0.7,
       createdAt: T0,
       updatedAt: T0,
     });
@@ -592,6 +595,105 @@ describe("kb store: 重建", () => {
     expect(baseRow(db, hex(1))).toEqual(before);
     expect(store.listDocuments(hex(1))).toEqual(documents);
     expect(store.listDocuments(hex(2))).toEqual([foreign]);
+  });
+});
+
+describe("kb store: 检索参数", () => {
+  const retrievalColumns = (db: DatabaseSync, id: string) =>
+    db
+      .prepare(
+        "SELECT retrieval_threshold, typeof(retrieval_threshold) AS threshold_type, retrieval_vector_weight, typeof(retrieval_vector_weight) AS weight_type, updated_at FROM knowledge_bases WHERE id = ?",
+      )
+      .get(id);
+
+  it("同一事务写两列并更新 updated_at；within 在写入之后调用，看到的是新值", () => {
+    const { store } = fresh();
+    const created = createPlainBase(store, hex(1));
+    createPlainBase(store, hex(2));
+    vi.setSystemTime(T0 + 5);
+    const seen: unknown[] = [];
+    const saved = store.saveRetrieval(hex(1), { threshold: 0.35, vectorWeight: 0.5 }, (record) =>
+      seen.push([record, store.getBase(hex(1))]),
+    );
+    const expected = {
+      ...created,
+      retrievalThreshold: 0.35,
+      retrievalVectorWeight: 0.5,
+      updatedAt: T0 + 5,
+    };
+    expect(saved).toEqual(expected);
+    expect(seen).toEqual([[expected, expected]]);
+    expect(store.getBase(hex(1))).toEqual(expected);
+    expect(store.getBase(hex(2))).toMatchObject({
+      retrievalThreshold: 0.2,
+      retrievalVectorWeight: 0.7,
+      updatedAt: T0,
+    });
+  });
+
+  it("store 不比较新旧值：与已存值相同照常写 updated_at、调 within", () => {
+    const { store } = fresh();
+    createPlainBase(store, hex(1));
+    vi.setSystemTime(T0 + 5);
+    const within = vi.fn();
+    expect(
+      store.saveRetrieval(hex(1), { threshold: 0.2, vectorWeight: 0.7 }, within),
+    ).toMatchObject({ retrievalThreshold: 0.2, retrievalVectorWeight: 0.7, updatedAt: T0 + 5 });
+    expect(within).toHaveBeenCalledOnce();
+  });
+
+  it("0 与 1 两端：读回是数字，裸行的 typeof 为 real", () => {
+    const { db, store } = fresh();
+    createPlainBase(store, hex(1));
+    const saved = store.saveRetrieval(hex(1), { threshold: 0, vectorWeight: 1 });
+    expect(saved?.retrievalThreshold).toBe(0);
+    expect(saved?.retrievalVectorWeight).toBe(1);
+    expect(retrievalColumns(db, hex(1))).toMatchObject({
+      retrieval_threshold: 0,
+      threshold_type: "real",
+      retrieval_vector_weight: 1,
+      weight_type: "real",
+    });
+  });
+
+  it("未知 id：返回 undefined，不调 within，不写别的库", () => {
+    const { store } = fresh();
+    createPlainBase(store, hex(1));
+    const within = vi.fn();
+    expect(store.saveRetrieval(hex(2), { threshold: 0.5, vectorWeight: 0.5 }, within)).toBe(
+      undefined,
+    );
+    expect(within).not.toHaveBeenCalled();
+    expect(store.getBase(hex(1))).toMatchObject({ retrievalThreshold: 0.2, updatedAt: T0 });
+  });
+
+  it.each([
+    ["threshold 1.5", { threshold: 1.5, vectorWeight: 0.5 }],
+    ["vectorWeight 1.5", { threshold: 0.5, vectorWeight: 1.5 }],
+    ["threshold -0.1", { threshold: -0.1, vectorWeight: 0.5 }],
+  ])("CHECK 越界（%s）：抛出，两列与 updated_at 不变，不调 within", (_case, retrieval) => {
+    const { db, store } = fresh();
+    createPlainBase(store, hex(1));
+    vi.setSystemTime(T0 + 5);
+    const before = retrievalColumns(db, hex(1));
+    const within = vi.fn();
+    expect(() => store.saveRetrieval(hex(1), retrieval, within)).toThrow(CHECK);
+    expect(within).not.toHaveBeenCalled();
+    expect(retrievalColumns(db, hex(1))).toEqual(before);
+  });
+
+  it("within 抛出：两列与 updated_at 一起回滚", () => {
+    const { db, store } = fresh();
+    createPlainBase(store, hex(1));
+    vi.setSystemTime(T0 + 5);
+    const before = retrievalColumns(db, hex(1));
+    expect(() => store.saveRetrieval(hex(1), { threshold: 0.2, vectorWeight: 0.4 }, boom)).toThrow(
+      BOOM,
+    );
+    expect(() => store.saveRetrieval(hex(1), { threshold: 0.9, vectorWeight: 0.7 }, boom)).toThrow(
+      BOOM,
+    );
+    expect(retrievalColumns(db, hex(1))).toEqual(before);
   });
 });
 

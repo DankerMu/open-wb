@@ -22,7 +22,7 @@
 
 | 风险包 | 选中 | 落点 |
 |---|---|---|
-| 凭证泄露（重排上游密钥进响应、审计、日志；RAGFlow 的重排报错体带出上游信息） | 是 | 组 3 结果不含 message、组 6 读视图与审计哨兵、组 7 降级记录不含 message |
+| 凭证泄露（重排上游密钥进响应、审计、日志；RAGFlow 的重排报错体带出上游信息） | 是 | 1.3 store 读出不含密钥（哨兵）、组 3 结果不含 message、组 6 读视图与审计哨兵、组 7 降级记录不含 message |
 | 两份真相（本地参数 vs RAGFlow 缺省；命中关联不上本地文档） | 是 | 组 4 参数恒显式传、命中丢弃 |
 | 并发（写回与重建、与其它写操作交错；并发的相同提交） | 是 | 组 4 第二刀的写锁用例 |
 | 外部接口漂移（rc2 预发行版；`code:102` 不可区分） | 是 | 组 3 夹具只按 §19 写、组 7 的降级后果用例、组 10 真实冒烟（CK-11） |
@@ -35,7 +35,15 @@
 
 - [x] 1.1 核对 Context：`050_knowledge_bases.sql`、`033` / `035` 的 `ADD COLUMN` 写法、`server/test/core-db-helpers.ts` 的跟踪清单、receipts 与 `sequenceRows`、`server/test/core-db-chat-step-output.test.ts` 与 `server/test/migration-034.test.ts`（`seed033Database`）的迁移排除链、`server/test/kb-schema.test.ts`、`server/src/kb/store.ts` 的 `settings()` / `saveSettings` / `recordEmbeddingProbe` 与知识库行的读写。验证：在 issue 里列出要改的函数与行号。
 - [x] 1.2 测试先行：在 `server/test/kb-schema.test.ts` 加 051 的用例，覆盖「列与约束」场景（050 库上应用后两列取缺省；三处非法更新被拒：`1.5`、`-0.1`、非数字文本 `'abc'`；`1` 存成 `real`；重排三列为 NULL；`rerank_probe_status` 为 `never`），先看到红；新 `server/src/core/db/migrations/051_kb_retrieval.sql` 按 design D5 实现。另加一条「不改其它表」用例（仿 049→050 那条）：050 库里预置一行既有列取非缺省值的 `knowledge_bases` 与一行嵌入已配置的 `kb_settings`，升级后既有列值不变、其它表的 `sqlite_master` 不变、receipt 为 `[25, MIGRATION_051]`、`sequenceRows` 为 `["schema_migrations", 25, "integer"]`。`kb-schema.test.ts` 里打开完整迁移链的 050 形状断言（`kb_settings` / `knowledge_bases` 的 `tableInfo` 全列清单、`kb_settings` 整行 `toEqual`）原地改成 051 之后的形状，不另起一份。原地改 `core-db-helpers.ts` 的跟踪清单（加 `MIGRATION_051`）、receipts 与 `sequenceRows`，以及 `core-db-chat-step-output.test.ts`、`migration-034.test.ts` 的迁移排除链。验证：`npm run test:focus --workspace server -- kb-schema core-db migration-034` 全过。
-- [ ] 1.3 store：知识库行读出 `retrievalThreshold` / `retrievalVectorWeight`；新增「在同一事务里写两列并执行回调」（审计由调用方在回调里写）；设置读出 `rerank`（名称、地址、探活，不含密钥）与单独的重排密钥读取；整组写、清空重排三列；写回重排探活结果（只写回同一身份）。测试先行：检索参数的读写用例加在 `server/test/kb-store.test.ts`，重排三列的用例与「重排三列整组写入」场景加在 `server/test/kb-store-settings.test.ts`。验证：`npm run test:focus --workspace server -- kb-store` 全过，`store.ts` 不超过 800 行。
+- [x] 1.3 store：知识库行读出 `retrievalThreshold` / `retrievalVectorWeight`；新增「在同一事务里写两列并执行回调」（审计由调用方在回调里写）；设置读出 `rerank`（名称、地址、探活，不含密钥）与单独的重排密钥读取；整组写、清空重排三列；写回重排探活结果（只写回同一身份）。测试先行：检索参数的读写用例加在 `server/test/kb-store.test.ts`，重排三列的用例与「重排三列整组写入」场景加在 `server/test/kb-store-settings.test.ts`。验证：`npm run test:focus --workspace server -- kb-store` 全过，`store.ts` 不超过 800 行。
+  - store 接口形状（#1912 fixture 审查定，组 4、组 6 照此调用）：
+    - 读出：`KnowledgeBase` 加 `retrievalThreshold` / `retrievalVectorWeight`（数字）；`createBase` 读回 0.2 / 0.7。`KbSettings` 加扁平的 `rerank: {name, baseUrl} | null`（`rerank_name IS NULL` 即 `null`）与顶层 `rerankProbe: {status, at, message}`，同既有 `embedding` 与 `probe` 分开放；顶层 `probe` 仍是嵌入的探活。D6 嵌套的 `{name, baseUrl, probe}` 是 HTTP 读视图，由组 6 在 `settings.ts` 拼，本 issue 不改 `settings.ts` 的 `view()` 与 `bases.ts` 的 `viewOf`（两处解构取值，新字段不提前漏进视图，web 严格解析在组 2 / 组 6 之前保持绿）。
+    - 重排密钥：`rerankApiKey(): string | null`，未配置为 `null`。保存与探活写回之后 `JSON.stringify(store.settings())` 不含密钥哨兵。
+    - 重排写入：`SettingsPatch` 加键 `rerank?: {name, baseUrl, apiKey} | null`，走 `saveSettings`，与嵌入、`chatModelId`、`rebuildActorId` 同一事务、同一 `within`，不另开方法。三个字段都是必填字符串，清空只能传 `null`，同一条 UPDATE 绑三列（类型层防部分写入）；`apiKey` 由调用方先定好（省略时取 `rerankApiKey()`，同嵌入）。首次保存：三列写入，重排探活 `never/null/null`，`updated_at` 更新；同一身份重存：探活保留；名称、地址、密钥任一变化：探活重置；`null`：三列置 NULL、探活重置、`updated_at` 更新。store 不判 null→null 无操作（「不写、不审计」由组 6 在调用方判，同 `chatModelId`）。保存重排不动嵌入的身份、探活与代数；保存嵌入不动重排探活。
+    - 重排探活写回：`recordRerankProbe(identity, result, within?) → {view, recorded}`，照 `recordEmbeddingProbe` 的写法；身份是名称 + 地址 + 密钥，`IS` 比较；不动 `updated_at`。同一身份：写入并调 `within`；三项任一变化（各一例）或已清空：`recorded:false`，不调 `within`，探活不变；`within` 抛出：回滚。嵌入探活写回不动重排探活。
+    - 检索参数写入：`saveRetrieval(id, {threshold, vectorWeight}, within?: (record: KnowledgeBase) => void): KnowledgeBase | undefined`，同一事务写两列并更新 `updated_at`，`within` 在写入后、COMMIT 前调用。store 不比较新旧值（D4 由调用方在锁内比）。未知 id：返回 `undefined`，不调 `within`（同 `failRebuild`）；CHECK 越界（如 `1.5`）：抛出，行不变，不调 `within`；`within` 抛出：两列一起回滚；`0` / `1` 读回是数字。
+    - 「重排三列整组写入」场景的用例以本任务的 `kb-store-settings.test.ts` 为准（D5 说的「schema 用例」即指这里）：保存、更换、清除每一步之后读裸行，三列同为 NULL 或同为非 NULL；`within` 抛出时三列一起回滚。
+    - 既有全形断言原地改，不另写一份：`kb-store-settings.test.ts` 的 settings 全形 `toEqual`、`kb-store.test.ts` 的 `createBase` 全形 `toEqual`。`recordEmbeddingProbe` / `saveSettings` 的既有签名与行为不变。行数以 800 为上限（design 表里的 ≤620 是估计）。
 
 Suggested fixture level: expanded - 迁移与持久化状态（migration、persisted state）。
 Minimal mergeable slice: 1.1–1.2（迁移文件与 schema 用例）可独立合入保绿：只加列，既有代码不读它们；1.3 的 store 读写依赖它。
