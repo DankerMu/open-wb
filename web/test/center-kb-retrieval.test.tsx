@@ -21,6 +21,7 @@ import {
   pageAlerts,
   READY,
   renderPanel,
+  rowOf,
 } from "./center-kb-support.js";
 import { deferred } from "./chat-stream-support.js";
 
@@ -520,17 +521,40 @@ async function failWithHeldRefetch() {
 }
 
 describe("静默重取与本地改动", () => {
-  it("在途重取之后同一库检索成功（0.3）：旧应答（0.1）放行后被丢弃，切走再切回初值为 0.3", async () => {
-    const { fake, panel, stale } = await failWithHeldRefetch();
-    expect(within(panel).getByRole("alert").textContent).toBe(UNAVAILABLE);
+  // 0.2 一例：行值本来就是 0.2，检索成功不改行，也必须作废读于失败写回（0.1）之后的在途重取。
+  it.each(["0.3", "0.2"])(
+    "在途重取之后同一库以 %s 检索成功：旧应答（0.1）放行后被丢弃，切走再切回初值为成功的值",
+    async (value) => {
+      const { fake, panel, stale } = await failWithHeldRefetch();
+      expect(within(panel).getByRole("alert").textContent).toBe(UNAVAILABLE);
 
-    submitWith(panel, "0.3", false, fake);
-    expect(await within(panel).findByText(EMPTY)).toBeTruthy();
+      submitWith(panel, value, false, fake);
+      expect(await within(panel).findByText(EMPTY)).toBeTruthy();
+      await listReads(fake, 3);
+      await act(async () => stale.resolve(rows(LOWERED)));
+
+      const again = await switchAwayAndBack();
+      expect(valuesOf(again)).toEqual(["", value, "0.7"]);
+    },
+  );
+
+  it("在途重取之后移出文档：文档数变了也作废它，旧应答放行后列表的文档数仍是最新的", async () => {
+    const { fake, stale } = await failWithHeldRefetch();
+    const detail = screen.getByRole("region", { name: "规范库 · 文档" });
+    const docCount = () => rowOf("规范库").querySelectorAll("td")[3]?.textContent;
+    expect(docCount()).toBe("1");
+    fake.listKnowledgeBases.mockResolvedValueOnce(
+      rows().map((item) => (item.id === "k1" ? { ...item, documents: 0 } : item)),
+    );
+
+    fireEvent.click(within(rowOf("spec.md", detail)).getByRole("button", { name: "移出" }));
+    await within(detail).findByText("该知识库暂无文档");
+    expect(docCount()).toBe("0");
     await listReads(fake, 3);
-    await act(async () => stale.resolve(rows(LOWERED)));
-
-    const again = await switchAwayAndBack();
-    expect(valuesOf(again)).toEqual(["", "0.3", "0.7"]);
+    await act(async () => stale.resolve(rows()));
+    expect(docCount()).toBe("0");
+    // 重取落地不回调文档数或检索参数，不会再触发重取。
+    expect(fake.listKnowledgeBases).toHaveBeenCalledTimes(3);
   });
 
   it("在途重取之后换到别的库检索成功：旧应答放行后那个库仍是新值", async () => {

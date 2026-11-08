@@ -20,8 +20,10 @@ import {
  *   列表的编译状态要读 RAGFlow，201 的视图本身就是权威的（服务端不为它读 RAGFlow）。
  * - 详情的检索测试成功后经 `setRetrieval` 改该行的检索参数；失败且参数有变时经 `refetchBases` 静默重取列表
  *  （s2b-kb-retrieval D8）：只读 `listKnowledgeBases`，视图保持 `ready`，详情不卸载。静默重取整表覆盖 `bases`，
- *   它的应答可能读于之后的本地改动之前，所以本地改动列表（`setRetrieval` 真的改了行、建库成功、删库成功）时若有在途
- *   重取，就再发一次，旧应答按序号丢弃。
+ *   它的应答可能读于之后的本地改动之前，所以本地改动列表（`setRetrieval`（检索成功）、`setDocumentCount`、新建成功、
+ *   删除成功）时若有在途重取，就再发一次，旧应答按序号丢弃。检索成功不论行值是否变化都作废：成功意味着服务端有一次
+ *   晚于在途读取的写入。文档数只在真的变了时作废：详情每次读文档（含 3 秒刷新）都会报一次文档数，不变也作废会让
+ *   比刷新间隔慢的重取永远落不了地。
  */
 
 type EnabledStatus = Extract<KbStatus, { enabled: true }>;
@@ -67,7 +69,7 @@ export function useKnowledgeBases(client: ApiClient) {
   const refetching = useRef(0);
   /** 最后一次静默重取还没落地。 */
   const refetchPending = useRef(false);
-  /** 最近一次渲染的视图：本地改动据此判断是否真的改了行。 */
+  /** 最近一次渲染的视图：文档数据此判断是否真的改了行。 */
   const viewRef = useRef(view);
   viewRef.current = view;
   /** 在途标记：同一帧里的第二次提交还看不到重渲染，靠它拦下。 */
@@ -164,19 +166,24 @@ export function useKnowledgeBases(client: ApiClient) {
       }
     },
 
-    /** 详情读到或改动文档表后，列表该行的文档数跟上；相同时不改状态。 */
+    /** 详情读到或改动文档表后，列表该行的文档数跟上；相同时不改状态，变了才作废在途的静默重取。 */
     setDocumentCount(id: string, documents: number) {
-      patchBase(id, (item) => item.documents !== documents, { documents });
+      const differs = (item: BaseView) => item.documents !== documents;
+      const changes = rowDiffers(viewRef.current, id, differs);
+      patchBase(id, differs, { documents });
+      if (changes) invalidateRefetch();
     },
 
-    /** 检索测试成功后，列表该行的检索参数取应答的 `retrieval`；相同时不改状态。 */
+    /** 检索测试成功后，列表该行的检索参数取应答的 `retrieval`（相同时不改状态），并作废在途的静默重取。 */
     setRetrieval(id: string, retrieval: BaseView["retrieval"]) {
-      const differs = (item: BaseView) =>
-        item.retrieval.threshold !== retrieval.threshold ||
-        item.retrieval.vectorWeight !== retrieval.vectorWeight;
-      const changes = rowDiffers(viewRef.current, id, differs);
-      patchBase(id, differs, { retrieval });
-      if (changes) invalidateRefetch();
+      patchBase(
+        id,
+        (item) =>
+          item.retrieval.threshold !== retrieval.threshold ||
+          item.retrieval.vectorWeight !== retrieval.vectorWeight,
+        { retrieval },
+      );
+      invalidateRefetch();
     },
 
     refetchBases,
