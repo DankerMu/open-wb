@@ -186,6 +186,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 | [0010](../adr/0010-dedicated-omp-uid.md) | omp 子进程单一专用 uid，与 app-server 分离 |
 | [0011](../adr/0011-sandbox-paths-not-browser-secret.md) | 绝对沙箱路径不属于对浏览器保密的信息（界面仍以逻辑路径展示） |
 | [0016](../adr/0016-ragflow-service-backend.md) | 知识库以运行中的 RAGFlow 服务为后端，取代 0002 |
+| [0017](../adr/0017-agentic-retrieval-model-driven.md) | agentic 检索的环由 omp 模型驱动，kb 模块只提供单轮检索 |
 
 ## 8. 开放问题
 

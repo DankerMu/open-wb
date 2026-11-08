@@ -9,7 +9,7 @@
 1. **知识库以运行中的 RAGFlow 服务为后端，取代 ADR-0002。** RAGFlow 作为外部服务部署，解析、切片、嵌入、检索与切片存储都在它里面；
    本仓不吸收其源码。吸收 spike 随之作废，换成该 change 组 1 对 rc2 接口的实测。
 2. **app-server 的 `kb` 模块直连 RAGFlow 的 HTTP API，`kbservice/` 退役。** 租户、可见范围与审计仍全在 app-server（`PLAN.md` §2 决策 3）；
-   知识库的阶段交付见 `PLAN.md` §4 P2。agentic 环放 app-server 还是用 RAGFlow 自带能力由 S2b 定，本 ADR 不定。
+   知识库的阶段交付见 `PLAN.md` §4 P2。agentic 环放 app-server 还是用 RAGFlow 自带能力由 S2b 定，本 ADR 不定（2026-11-07 已定：由 omp 模型驱动，见 ADR-0017）。
 
 理由：
 

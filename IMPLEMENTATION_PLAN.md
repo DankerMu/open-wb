@@ -90,7 +90,7 @@
 | F-CHAT-1 | 三场景（日常办公/代码开发/创意设计），决定默认专家与工具面。「场景决定默认专家」已作废（change s1d-experts-skills）：场景只决定新会话的 `scene` 与欢迎页快捷任务，专家只由用户在输入框选定，不提供会话内切换场景 |
 | F-CHAT-2 | 会话分组侧栏（项目/工作空间/专家团），会话按账号隔离 |
 | F-CHAT-3 | 流式对话 + 执行步骤卡片 |
-| F-CHAT-4 | agentic 检索卡（改写→召回→判定→二轮→仅切片入上下文） |
+| F-CHAT-4 | agentic 检索卡（模型驱动的多轮 `kb_search`，ADR-0017；仅切片入上下文） |
 | F-CHAT-5 | 附件双语义：知识库（切片）vs 工作空间（整文件）。2026-10-04 拆为 5a 工作空间附件（整文件上传进会话空间）与 5b 知识库附件（切片） |
 | F-CHAT-6 | 会话落盘、resume/fork |
 | F-CHAT-7 | 生成中断/继续 |
@@ -420,18 +420,18 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Review attention：decision-dense（凭证、本地映射与 RAGFlow 两份真相、同库写操作与重建的并发）。
 
 **S2b 检索线**
-- Outcome：app-server `kb` 模块经 RAGFlow 做混合检索+重排；agentic 环（改写→召回→充分性→二轮）放 `kb` 模块还是用 RAGFlow 自带能力由本阶段定；`/center` 检索测试 tab。
+- Outcome：app-server `kb` 模块经 RAGFlow 做「单轮检索」（混合检索 + 可选全局重排模型，重排不可用时自动降级为不重排）；`/center` 知识库详情页的检索测试（单轮，按库保存检索参数）。agentic 环由 omp 模型驱动（ADR-0017，2026-11-07 grill），其实现与验收随 `kb_search` 在 S2c。
 - 覆盖：F-CTR-KB3。
 - 必读增量：ADR-0016；backend-research §1 agentic_rag 环行号引用（v0.27.1 的历史参照，吸收方案已被 ADR-0016 取代）。
-- Verify：检索测试返回带出处切片；agentic 二轮在构造的不充分场景下真实触发。
+- Verify：检索测试返回命中切片（文档名、切片序号、综合相似度）；`make smoke-kb` 的检索断言；验收清单 CK 节新增检索测试行。
 - Depends on：S2a。
-- Review attention：decision-dense（检索质量参数与环终止条件）。
+- Review attention：decision-dense（检索参数的存放位置以组 1 实测为准、重排降级路径）。
 
 **S2c 会话接入与可见范围**
 - Outcome：`host_tool_call`→app-server `kb` 模块转发（先过滤 kb_ids 再调 RAGFlow）；附件双语义；可见范围四档模型落库（部门/项目组字段就位，真实组数据 S3a 接入）；共享只读+跨账号检索审计。**P2 里程碑验收：会话内 KB 引用给出带出处切片，共享检索入审计。**
 - 覆盖：F-CHAT-4、F-CHAT-5b、F-CTR-KB4。
 - 必读增量：system.md §6.1 时序图；CONTEXT.md 不变量 1、2、4。
-- Verify：整篇文档绝不入上下文（不变量 2 用例）；无权 kb_id 检索被过滤且不可探测。
+- Verify：整篇文档绝不入上下文（不变量 2 用例）；无权 kb_id 检索被过滤且不可探测；真实 omp 会话在构造的证据不足场景下由模型自行发起第二次 `kb_search`（ADR-0017）。
 - Depends on：S2b、S1c。
 - Review attention：decision-dense（多租户过滤是灰盒决定的例外候选——出事故重议）。
 
