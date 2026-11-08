@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 9 第三刀：列表里的编译状态。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。组 14：嵌入模型更换与全量重建。组 18：部署要求、回滚与 `make smoke-kb`（文末）。web 侧（组 15–17）的界面契约在 spec，不在本文。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 9 第三刀：列表里的编译状态。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。组 14：嵌入模型更换与全量重建。组 18：部署要求、回滚与 `make smoke-kb`（文末）。S2b 组 6：重排模型的设置、下发与探活（并在「知识库模型设置」里）。web 侧（组 15–17）的界面契约在 spec，不在本文。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -63,27 +63,29 @@ printf '%s\n' "$KEY" > <密钥文件路径>
 |---|---|
 | `GET /api/kb/settings` | 读 |
 | `PUT /api/kb/settings` | 保存：先下发到 RAGFlow，成功后在同一事务里写 `kb_settings` 与审计；下发失败本地不变 |
-| `POST /api/kb/settings/probe` | 探活嵌入模型（bodyless），不下发，不改嵌入身份 |
+| `POST /api/kb/settings/probe` | 探活嵌入或重排模型（bodyless；`?target=embedding\|rerank`，缺省嵌入；其它、空值、重复为 400；重排未配置为 400），不下发，不改模型身份 |
 | `POST /api/kb/settings/rebuild` | 重试失败的重建（bodyless），见下面的「嵌入模型更换与全量重建」 |
 
-读视图恰为 `{embedding, chatModelId, bases, compileBases, documents, rebuilding, rebuildFailed}`，不含任何密钥。`embedding` 是 `{name, baseUrl, probe}` 或 `null`；`compileBases` 是 `raptor` 或 `graph` 为 1 的库数，含重建中与重建失败的库。
+读视图恰为八键 `{embedding, chatModelId, rerank, bases, compileBases, documents, rebuilding, rebuildFailed}`，不含任何密钥。`embedding` 与 `rerank` 都是 `{name, baseUrl, probe}` 或 `null`，`rerank.probe` 是重排模型自己的探活；`compileBases` 是 `raptor` 或 `graph` 为 1 的库数，含重建中与重建失败的库。
 
-`PUT` 的 body 键集是 `embedding`、`chatModelId`、`confirmRebuild` 的子集，且至少含前两者之一。`embedding` 是 `{name, baseUrl, apiKey?}`：`name` 1–128 字节、无控制字符、不含 `@`；首次配置必须带 `apiKey`，之后省略即保留已存的值，空串或纯空白是 400。`chatModelId` 是 `models` 里带上游的 id（不含 `@`）或 `null`。`embedding.name` 与 `chatModelId` 不含 `@`，是因为 RAGFlow 用三段式 `<名称>@<实例>@<提供方>` 引用它们。
+`PUT` 的 body 键集是 `embedding`、`chatModelId`、`rerank`、`confirmRebuild` 的子集，且至少含前三者之一。`rerank` 是 `{name, baseUrl, apiKey?}` 或 `null`，校验同 `embedding`。`embedding` 是 `{name, baseUrl, apiKey?}`：`name` 1–128 字节、无控制字符、不含 `@`；首次配置必须带 `apiKey`，之后省略即保留已存的值，空串或纯空白是 400。`chatModelId` 是 `models` 里带上游的 id（不含 `@`）或 `null`。`embedding.name` 与 `chatModelId` 不含 `@`，是因为 RAGFlow 用三段式 `<名称>@<实例>@<提供方>` 引用它们。
 
 当前值非 `null` 且有开编译的知识库时，`chatModelId` 改为 `null` 或别的 id 都是 409 `kb_chat_model_locked`，同 id 照常下发：Compiler 的 `llm_id` 建库时固化，换模型会让旧库打到新上游。没有开编译的库时，改为 `null` 只改本地；已是 `null` 再设 `null` 是无操作，不写库、不审计。
 
 嵌入身份是 `(name, baseUrl)`，只换密钥不算身份变化。身份变化且已有知识库时：有库处于 `rebuilding` 即 409 `kb_rebuilding`（带不带 `confirmRebuild` 都一样）；没带 `confirmRebuild:true` 即 409 `kb_rebuild_required`，不下发、不保存；带了就照常下发并保存，同时发起全量重建（见下面的「嵌入模型更换与全量重建」）。
 
-**下发的固定序列**：两个实例名是常量，`owb-embed` 承载嵌入模型，`owb-chat` 承载知识库对话模型，提供方都是 `OpenAI-API-Compatible`。一个实例的一轮下发：
+**下发的固定序列**：实例名是常量，`owb-embed` 承载嵌入模型，`owb-chat` 承载知识库对话模型，`owb-rerank` 承载重排模型（见下面的「重排模型」），提供方都是 `OpenAI-API-Compatible`。一个实例的一轮下发：
 
 1. `PUT /api/v1/providers`，body `{provider_name}`（幂等）。
 2. `GET /api/v1/models`，按 `provider_name` 与 `instance_name` 判断实例是否存在。
 3. 不存在：`POST …/instances`，body `{instance_name, api_key, base_url, model_info}`。存在：`GET …/instances/<实例>/models`，再 `PUT …/instances/<实例>`，body 同样四个键，`model_info` 为现有模型加本次的模型，同名项以本次为准。
 4. `PATCH /api/v1/models/default`，body `{model_provider, model_instance, model_name, model_type}`。
 
+**重排模型**（S2b D6）：实例 `owb-rerank`，`model_type:["rerank"]`，`max_tokens` 8192，一轮只有上面的第 1–3 步，没有第 4 步：重排不设账号缺省，检索时按请求传 `rerank_id`（续篇 §19.3）。body 含 `rerank` 对象时这一轮排在最前，失败即停，后面的嵌入、对话两轮都不发。排在最前是因为它没有账号级副作用：排在后面时，嵌入一轮的 `PATCH /models/default` 已生效而重排失败让本地不变，账号缺省嵌入就与本地分裂；代价是重排一轮成功、后面某轮失败时 `owb-rerank` 已是新地址与密钥，只影响重排，下一次成功保存即覆盖。`rerank:null` 只把本地三列置空，不发 RAGFlow 请求，实例与密钥留在 RAGFlow；只含 `rerank` 的保存不重发对话模型。重排不是嵌入身份的一部分，换重排模型不重建。
+
 body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话模型（该行没有上游时跳过），所以管理员保存一次嵌入模型就能把两种缺省都补回来。只含 `chatModelId` 时只下发对话模型。`api_key` 恒为实际密钥：RAGFlow 按 trim 后的值写入，空串或纯空白会清空实例密钥，所以都不发出。不用 `PATCH /api/v1/users/me/models`，也不用 `GET …/instances/<实例>`：它明文回显上游密钥。下发不是原子的，第 3 步成功、第 4 步失败时 RAGFlow 已是新值、本地仍是旧值；重试同一次保存即收敛。
 
-**账号缺省不变量**：`kb` 模块不发清空缺省的 `PATCH /api/v1/models/default`（只带 `model_type`，或名字为空串），也不调用 `/api/v1/providers` 下的任何 `DELETE`。RAGFlow 里的模型配置只增、只覆盖。账号没有缺省对话模型而有 pipeline 数据集时，数据集级合并任务会让全栈唯一的入库进程崩溃循环，影响栈上全部账号（实测记录 §13）。客户端没有这些调用的写法，`setDefaultModel` 拒绝发出空名字。
+**账号缺省不变量**：`kb` 模块不发清空缺省的 `PATCH /api/v1/models/default`（只带 `model_type`，或名字为空串），也不调用 `/api/v1/providers` 下的任何 `DELETE`。RAGFlow 里的模型配置只增、只覆盖。账号没有缺省对话模型而有 pipeline 数据集时，数据集级合并任务会让全栈唯一的入库进程崩溃循环，影响栈上全部账号（实测记录 §13）。客户端没有这些调用的写法，`setDefaultModel` 拒绝发出空名字。`owb-rerank` 不是账号缺省，删除它没有 §13 的风险。
 
 **取消指定不撤销**：`chatModelId` 改为 `null` 只改本地，账号缺省仍指向 `owb-chat`。上游密钥留在 RAGFlow 里，直到下一次下发覆盖或运维清理。运维清理要按实测记录 §16 的次序：账号缺省保持不动，先删数据集、画布、模板组，静默到没有编译活动，才清缺省、删实例。
 
@@ -100,9 +102,11 @@ body 含 `embedding` 时先下发嵌入模型，再重发当时指定的对话�
 
 **探活**：向嵌入上游发 `POST <baseUrl>/embeddings`，body `{model, input:"ping"}`，期限同模型探活（连接 10 s、总 15 s），不跟随重定向。2xx 且 `data[0].embedding` 为非空数字数组是 `ok`，否则是 `failed`。未配置嵌入模型时 409 `kb_not_ready`。保存时名称、地址或密钥任一变化，探活状态在同一事务里重置为 `never`；三者都不变时保留。
 
-**写操作串行**：保存全程持进程级设置锁，取值规则与身份判定在锁内做，读到的是锁内的行。探活的请求在锁外，只有写回在锁内：结果只写回发起时的同一身份（名称、地址、密钥），身份已变时丢弃、不审计，应答回当前读视图。探活逐次串行：一条进程级链把「读身份 → 发请求 → 取锁写回」整段排队，后发的排在在途的之后，身份在排到时读取，前一个失败不影响后一个。这条链不并进设置锁，探活不能占锁 15 s。
+重排模型的探活（`?target=rerank`）同一套规则，只有这几处不同：向重排上游发 `POST <baseUrl>/rerank`，body `{model, query:"ping", documents:["ping"]}`；2xx 且 `results[0].relevance_score` 是有限数字是 `ok`，否则是 `failed`（`响应不含重排分数`）；未配置重排模型时 400 `bad_request`，不是 `kb_not_ready`（它的文案说的是嵌入模型）。续篇 §19.4 有一次同一请求耗时 22 s，超过 15 s 总期限，这样的探活会判为 `超时`；期限不为它放宽。
 
-每次保存写一条 `kb.settings` 审计，detail 只含实际变化的键（`embedding` 为模型名，`chatModelId`），可以为空；探活写一条，detail 是 `{probe}`。
+**写操作串行**：保存全程持进程级设置锁，取值规则与身份判定在锁内做，读到的是锁内的行。探活的请求在锁外，只有写回在锁内：结果只写回发起时的同一身份（名称、地址、密钥），身份已变时丢弃、不审计，应答回当前读视图。探活逐次串行：一条进程级链把「读身份 → 发请求 → 取锁写回」整段排队，后发的排在在途的之后，身份在排到时读取，前一个失败不影响后一个。这条链不并进设置锁，探活不能占锁 15 s。两种探活排在同一条链上；未配置的判定也在轮到时做。
+
+每次保存写一条 `kb.settings` 审计，detail 只含实际变化的键（`embedding` 为模型名，`chatModelId`，`rerank` 为模型名或 `null`），可以为空；探活写一条，嵌入是 `{probe}`，重排是 `{rerankProbe}`。
 
 **知识库端点**（`server/src/kb/bases.ts`，组 9 首刀与第二刀；编译状态在 `server/src/kb/compile-status.ts`，第三刀）：三条路由对任何已登录用户开放，只操作自己的库，全部应答带 `Cache-Control: no-store`。别人的或不存在的 id 一律 404 `not_found`，两者不可区分，判定先于 body 解析与 `state`，不发出站请求，不写审计。管理员没有例外。
 
@@ -433,7 +437,7 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 
 - 去掉 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE` 两个键并重启，知识库即关闭：tab 不出现，`/api/kb/*` 返回 503 `kb_disabled`（`/api/kb/status` 除外），`models` 的删除与修改不再受联动约束。本地的三张表与行保留，重新配置后照常可用；仍是 `rebuilding` 的库在下次启动时续做。
 - 回退代码时迁移文件保留：迁移账本拒收多出的回执，规则同 049。
-- RAGFlow 里的 `owb-` 数据集、画布与模板组由运维按需清理。次序按实测记录 §16：账号缺省模型保持不动，先删数据集、画布与模板组，等到没有编译活动，才清缺省、删模型实例。账号上还有 pipeline 数据集时清空缺省对话模型，会让全栈唯一的入库进程崩溃循环（上面的「账号缺省不变量」）。
+- RAGFlow 里的 `owb-` 数据集、画布与模板组由运维按需清理。次序按实测记录 §16：账号缺省模型保持不动，先删数据集、画布与模板组，等到没有编译活动，才清缺省、删模型实例。账号上还有 pipeline 数据集时清空缺省对话模型，会让全栈唯一的入库进程崩溃循环（上面的「账号缺省不变量」）。`owb-rerank` 不是账号缺省，删除它没有 §13 的风险。
 - 删除的 `kbservice/` 不能靠配置恢复，需要时从 git 历史恢复。
 
 **真实端点冒烟 `make smoke-kb`**（`Makefile`、`smoke/kb.hurl`、`smoke/kb-cleanup.hurl`，组 18 首刀）。它在验证矩阵里是 `review-only` / `required_at: manual`：`make smoke` 与 CI 都不调用它，真实运行是 owner 的验收行 CK-11。前提：

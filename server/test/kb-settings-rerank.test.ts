@@ -1,7 +1,7 @@
 /**
  * s2b-kb-retrieval tasks 6.1（#1917）：重排模型的设置（ragflow-backend「知识库模型设置」的重排各场景，knowledge-bases
  * 「知识库审计」的 `kb.settings` 行与「detail 不含敏感内容」，design D6）。期望值是 spec 的字面量、tasks.md「组 6 首刀约定」
- * 与实测记录 §11.1、§19.3 的请求形状。重排探活（`?target=rerank`）不在本刀。
+ * 与实测记录 §11.1、§19.3 的请求形状。重排探活（`?target=rerank`，#1919）在 `kb-settings-rerank-probe.test.ts`。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -14,6 +14,7 @@ import {
   FORBIDDEN,
   INSTANCES,
   KB_UNAVAILABLE,
+  LOCKED,
   nextRound,
   PATCH_DEFAULT,
   PROVIDER,
@@ -43,7 +44,7 @@ async function withRerank(world: World): Promise<World> {
   return world;
 }
 
-/** 直接种重排探活 `ok`（`?target=rerank` 不在本刀）；身份必须与已存的一致，否则不写回。 */
+/** 直接种重排探活 `ok`，不经探活端点；身份必须与已存的一致，否则不写回。 */
 function seedRerankOk(world: World): void {
   const { recorded } = world.store.recordRerankProbe(QWEN, {
     status: "ok",
@@ -305,6 +306,30 @@ describe("保存流程（tasks.md「组 6 首刀约定」）", () => {
     expect(bodyOf(response)).toEqual(BAD_REQUEST);
     expect(world.sent()).toEqual([]);
     expect(world.store.settings()).toMatchObject({ rerank: null, chatModelId: "m2" });
+  });
+
+  it("已配对话模型且有开编译的库：{rerank, chatModelId:<另一个>} 409 kb_chat_model_locked，零个请求", async () => {
+    const world = await chatWorld(open);
+    addCompileBase(world, 1);
+    world.addChatModel("m3");
+    const audits = world.audits();
+    const response = await world.put({ rerank: QWEN, chatModelId: "m3" });
+    expect(response.statusCode).toBe(409);
+    expect(bodyOf(response)).toEqual(LOCKED);
+    expect(world.sent()).toEqual([]);
+    expect(world.store.settings()).toMatchObject({ rerank: null, chatModelId: "m2" });
+    expect(world.audits()).toEqual(audits);
+  });
+
+  it("已配重排模型时 {embedding, rerank:null}：只有 owb-embed、owb-chat 两轮，没有 owb-rerank，detail 含 rerank:null", async () => {
+    const world = await withRerank(await chatWorld(open));
+    const { apiKey: _key, ...kept } = world.embedding;
+    const response = await world.put({ embedding: kept, rerank: null });
+    expect(response.statusCode).toBe(200);
+    expect(routes(world.sent())).toEqual([...nextRound("owb-embed"), ...nextRound("owb-chat")]);
+    expect(JSON.stringify(world.sent())).not.toContain("owb-rerank");
+    expect(rerankOf(response)).toBeNull();
+    expect(world.audits().at(-1)).toEqual({ actorId: "u3", detail: { rerank: null } });
   });
 
   it("普通用户：403 forbidden，零个请求，设置不变", async () => {

@@ -23,6 +23,8 @@
  * 发起者、审计 `{bases, documents, retry:true}`、唤醒；没有失败库时不写库、不审计、不唤醒。
  *
  * 探活逐次串行：一条进程级 Promise 链，「读身份 → 发请求 → 取锁写回」整段排队。它不并进设置锁，探活不能占锁 15 s。
+ * 两种目标（D7）排在同一条链上，按 `PROBES` 的一行取身份、未配置的错误码、写回与审计：嵌入未配置 `kb_not_ready`，
+ * 重排未配置 400 `bad_request`，都在轮到时判。
  *
  * `models` 写入钩子（`guardModelWrite`，D1、D7）：`plan`、引用判定、重新下发与 `models` 的那次写入整段在设置锁内，所以不会
  * 与一次保存交错：判定读到的是别的写者落库之后的 `chat_model_id`，保存读到的是写入之后的行。没有被引用的行不碰 RAGFlow；
@@ -70,11 +72,13 @@ interface SaveDetail {
   rerank?: string | null;
 }
 
+type ProbeStatus = "ok" | "failed";
+
 interface AuditEvent {
   kind: "kb.settings" | "kb.rebuild";
   actorId: string;
   title: string;
-  detail: SaveDetail | { probe: "ok" | "failed" } | RebuildDetail;
+  detail: SaveDetail | { probe: ProbeStatus } | { rerankProbe: ProbeStatus } | RebuildDetail;
 }
 
 /** `kb.rebuild` 的确认与重试两支（knowledge-bases「知识库审计」）。 */
@@ -94,6 +98,7 @@ interface KbSettingsDependencies {
     | "rerankApiKey"
     | "saveSettings"
     | "recordEmbeddingProbe"
+    | "recordRerankProbe"
     | "countBases"
     | "countCompileBases"
     | "countBasesInState"
@@ -158,6 +163,32 @@ interface SavePlan {
   /** 确认了的身份变化：这次保存同时发起重建。 */
   rebuild: boolean;
 }
+
+/** 探活的一种目标（D7）：身份取 `settings()[target]` 加 `apiKey`，未配置时的错误码，写回方法，审计的 title 与 detail。 */
+interface ProbeSpec {
+  apiKey: "embeddingApiKey" | "rerankApiKey";
+  missing: "kb_not_ready" | "bad_request";
+  record: "recordEmbeddingProbe" | "recordRerankProbe";
+  title: string;
+  detail(status: ProbeStatus): { probe: ProbeStatus } | { rerankProbe: ProbeStatus };
+}
+
+const PROBES: Record<"embedding" | "rerank", ProbeSpec> = {
+  embedding: {
+    apiKey: "embeddingApiKey",
+    missing: "kb_not_ready",
+    record: "recordEmbeddingProbe",
+    title: "探活知识库嵌入模型",
+    detail: (status) => ({ probe: status }),
+  },
+  rerank: {
+    apiKey: "rerankApiKey",
+    missing: "bad_request",
+    record: "recordRerankProbe",
+    title: "探活知识库重排模型",
+    detail: (status) => ({ rerankProbe: status }),
+  },
+};
 
 function badRequest(): never {
   throw new HttpError("bad_request");
@@ -457,21 +488,22 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
     };
   }
 
-  async function probeOnce(actorId: string) {
-    const { embedding } = store.settings();
-    const apiKey = store.embeddingApiKey();
-    if (embedding === null || apiKey === null) {
-      throw new HttpError("kb_not_ready");
+  async function probeOnce(actorId: string, target: keyof typeof PROBES) {
+    const spec = PROBES[target];
+    const model = store.settings()[target];
+    const apiKey = store[spec.apiKey]();
+    if (model === null || apiKey === null) {
+      throw new HttpError(spec.missing);
     }
-    const identity = { ...embedding, apiKey };
-    const result = await probeModel("embedding", identity, probeDeadlines);
+    const identity = { ...model, apiKey };
+    const result = await probeModel(target, identity, probeDeadlines);
     return locks.settings(async () => {
-      store.recordEmbeddingProbe(identity, { ...result, at: Date.now() }, () => {
+      store[spec.record](identity, { ...result, at: Date.now() }, () => {
         audit({
           kind: "kb.settings",
           actorId,
-          title: "探活知识库嵌入模型",
-          detail: { probe: result.status },
+          title: spec.title,
+          detail: spec.detail(result.status),
         });
       });
       return view();
@@ -571,9 +603,12 @@ export function createKbSettings(dependencies: KbSettingsDependencies) {
       return locks.settings(() => retryLocked(actorId));
     },
 
-    /** `POST /api/kb/settings/probe`：逐次串行，身份在排到时读取；请求在锁外，写回在锁内，身份已变时丢弃，不审计（D20）。 */
-    probe(actorId: string) {
-      return inProbeOrder(() => probeOnce(actorId));
+    /**
+     * `POST /api/kb/settings/probe?target=`：两种目标逐次串行，身份在排到时读取；请求在锁外，写回在锁内，身份已变时丢弃，
+     * 不审计（D7、D20）。`target` 由 `rest.ts` 解析。
+     */
+    probe(actorId: string, target: keyof typeof PROBES) {
+      return inProbeOrder(() => probeOnce(actorId, target));
     },
   };
 }
