@@ -171,9 +171,70 @@ Minimal mergeable slice: atomic - 改名与按目标参数化改的是同一个�
     - 不得放宽的三道防线：`expectDefaultNeverCleared` 的 `/^owb-(embed|chat)$/u`；`ragflow-models.ts` 中 `setDefaultModel` 的 `modelType: "embedding" | "chat"`（`provision` 对 `"rerank"` 按类型收窄后跳过缺省一步）；`fake-ragflow-models.mjs` 的 `DEFAULT_TYPES`。假 RAGFlow 建实例与改实例路由对 `model_type` 无白名单，不改。
     - web：`SETTINGS_KEYS` 加 `rerank`；`rerank` 与 `embedding` 走同一解析函数，精确键集 `{name, baseUrl, probe}`，`probe` 为 `{status, message, at}`，`null` 合法；缺键或形状不符即 `requestFailed`。`UpdateKbSettingsInput` 加第三分支 `rerank: {name, baseUrl, apiKey?} | null` 必填，每个分支保留 `embedding?` 与 `chatModelId?`（`use-kb-settings.ts:20` 引用 `UpdateKbSettingsInput["embedding"]`）。web 测试原地改：`api-kb.test.ts` 的 `SETTINGS` / `SETTINGS_EMPTY` 加 `rerank`，`malformed(SETTINGS, {…})` 加 `rerank:` 一列；`center-models-kb.test.tsx` 的 `settings()` 工厂加 `rerank: null`。内层形状拒绝、「缺 `rerank` 键即 requestFailed」、`updateKbSettings` 三种序列化（`{rerank:null}` 得 `'{"rerank":null}'`、省略密钥、带密钥）只放 `web/test/api-kb-rerank.test.ts`。
     - 不动：`kb-store-settings.test.ts`（#1912 已含 `rerank` / `rerankProbe`）。
-- [ ] 6.3 测试先行：在 `server/test/kb-settings-rerank.test.ts` 加「重排探活」「探活目标的取值」、「非管理员」对 `?target=rerank` 的 403、http-service-skeleton「知识库的归属路由」对 `POST /api/kb/settings/probe?target=rerank` 携 `{}` 的 400。先看到红。验证：用例先红。
-- [ ] 6.4 实现 design D7：`rest.ts` 的探活路由读 `target`（缺省、`embedding`、`rerank`；其它、重复、空值为 400；未配置重排时 400 `bad_request`）；`settings.ts` 的重排探活写回只写同一身份、排在同一条探活 Promise 链上，审计 `kb.settings` detail `{rerankProbe}`。验证：`npm run test:focus --workspace server -- kb-settings` 全过，`make typecheck`、`make lint` 退出 0。
-- [ ] 6.5 文档：`docs/architecture/system.md` 9.13 的知识库模型一节加重排模型（实例 `owb-rerank`、排在最前下发、不设账号缺省、清除只改本地、探活 `?target=rerank`）；`docs/architecture/knowledge-base.md` 的运维说明加「`owb-rerank` 不是账号缺省，删除没有 §13 的风险」。验证：`make anti-drift` 退出 0。
+- [x] 6.3 测试先行：在 `server/test/kb-settings-rerank.test.ts` 加「重排探活」「探活目标的取值」、「非管理员」对 `?target=rerank` 的 403、http-service-skeleton「知识库的归属路由」对 `POST /api/kb/settings/probe?target=rerank` 携 `{}` 的 400。先看到红。验证：用例先红。
+- [x] 6.4 实现 design D7：`rest.ts` 的探活路由读 `target`（缺省、`embedding`、`rerank`；其它、重复、空值为 400；未配置重排时 400 `bad_request`）；`settings.ts` 的重排探活写回只写同一身份、排在同一条探活 Promise 链上，审计 `kb.settings` detail `{rerankProbe}`。验证：`npm run test:focus --workspace server -- kb-settings` 全过，`make typecheck`、`make lint` 退出 0。
+- [x] 6.5 文档：正文写在 `docs/architecture/knowledge-base.md`「知识库模型设置」（重排模型：实例 `owb-rerank`、排在最前下发、不设账号缺省、清除只改本地、探活 `?target=rerank`；读视图八键），运维说明加「`owb-rerank` 不是账号缺省，删除没有 §13 的风险」；`docs/architecture/system.md` 9.13 只是一段指引，它的话题清单与 §2 `kb` 行各加一项（落点见下方「组 6 第二刀约定」）。验证：`make anti-drift` 退出 0。
+  - 组 6 第二刀约定（#1919 fixture 审查补；6.3–6.5 照此实现与测试）：
+    - 假上游密钥：`useSettingsWorlds` 启动假上游时用的是 `apiKey: EMBED_KEY`（`server/test/kb-settings-helpers.ts:183`），它的 `/rerank` 也只认这个 bearer（`fake-upstream.mjs:100`）。既有的 `QWEN` 常量指向的不是假上游。探活用例另定一个常量 `{name:"qwen3-rerank", baseUrl: world.embedding.baseUrl, apiKey: EMBED_KEY}` 来走 `ok` 路径。用的是哪把密钥，只由 `RERANK_KEY` 那一例证明：断言 `upstream.rerank.requests()[0].authorization === "Bearer " + RERANK_KEY`，结果为 `failed`。`fake-upstream.mjs`（781 行）与 `fake-upstream-embeddings.mjs` 不改。
+    - 请求入口：用 `world.call("POST", "/api/kb/settings/probe?target=…", who)`，不带 body。`world.probe()` 不加参数，也不另写 helper。重排的审计在新文件里按 `Object.hasOwn(detail, "rerankProbe")` 过滤。
+    - `?target` 取值表。下表每个 400 都断言：`BAD_REQUEST` 信封、no-store、两种上游的 `requests()` 都不增加、`world.sent()` 为空、没有 `kb.settings` 审计。
+      - 不带 `target`：探嵌入。
+      - `?target=embedding`：探嵌入，上游请求与审计 detail `{probe}` 都和不带 `target` 时相同。
+      - `?target=rerank`：探重排。
+      - `?target=`、`?target`：400。
+      - `?target=rerank&target=embedding`、`?target=rerank&target=rerank`：400。
+      - `?target=Rerank`、`?target=RERANK`、`?target=%20rerank`、`?target=nope`：400，按原值精确匹配。
+      - 其它查询键（如 `?foo=1`）忽略，同 `models/rest.ts:126` 的 `idOf` 先例。
+    - 接线：`target` 在 `rest.ts` 的 handler 里解析，次序为先校验 body、再解析 `target`、再调 `settings().probe(actorId, target)`，其中 `target: "embedding" | "rerank"` 为必填参数。非法 `target` 因此不进探活链：嵌入探活被 `hold()` 期间，`?target=nope` 立即得 400。`rest.ts:183` 的 probe/rebuild 共用循环里，`/rebuild` 不读 query，行为不变。`rest.ts` 文件头注释（:15-18）加 `target`。
+    - 次序：普通用户对 `?target=rerank` 和 `?target=nope` 都得 403 `forbidden`（preParsing 先判），零个上游请求。匿名对 `?target=rerank` 得 401。管理员对 `?target=rerank` 携 `{}`，或对 `?target=nope` 携 `{}`，都得 400，零个上游请求，没有审计。
+    - 未配置的判定：「重排未配置得 400 `bad_request`」放在探活链里、轮到时才判，镜像 `kb_not_ready`；`target=rerank` 永远不会得 `kb_not_ready`。用例：
+      - 全新世界 `?target=rerank` 得 400。
+      - 只配了重排、没配嵌入时，`?target=rerank` 得 200 `ok`。
+      - 嵌入探活被 `hold()` 期间排入一个 `?target=rerank`，其间 `PUT {rerank:null}`；放行后这个重排探活得 400，`rerank.requests()` 为空。
+    - 实现形状：不另写 `probeRerankOnce`。`probeOnce(actorId, target)` 内部按目标查一张表，表里有：
+      - 身份：`settings().embedding` 加 `embeddingApiKey()`，或 `settings().rerank` 加 `rerankApiKey()`。
+      - 未配置时的错误码：`kb_not_ready` 或 `bad_request`。
+      - 写回：`recordEmbeddingProbe` 或 `recordRerankProbe`。
+      - 审计 title 与 detail 键：`probe` 或 `rerankProbe`。
+      另外，`KbSettingsDependencies.store` 的 Pick 加 `"recordRerankProbe"`，`AuditEvent.detail` 的联合加 `{rerankProbe: "ok" | "failed"}`。
+    - 审计：`kind:"kb.settings"`，`actorId` 为 principal，title 恰为 `探活知识库重排模型`，detail 恰为 `{rerankProbe:"ok"|"failed"}`。不带 `probe` 键，不含 message、名称、地址。
+    - 应答：200、no-store、八键读视图，与随后 `GET` 的结果 `toEqual`。`rerank.probe` 的取值：
+      - `ok` 时为 `{status:"ok", at:≥before, message:null}`。
+      - 上游 401 时 `message` 以 `HTTP 401` 开头。
+      - 上游返回 `results:[]` 时 `message` 为 `响应不含重排分数`。
+      每例都断言 `embedding.probe` 不变。反方向：不带 `target` 的探活不改 `rerank.probe`，`rerank.requests()` 为空。
+    - 上游请求形状：`upstream.rerank.requests()[0].body` 恰为 `{model:"qwen3-rerank", query:"ping", documents:["ping"]}`；`world.sent()` 为空（零个 RAGFlow 请求，没有 `PATCH /models/default`）。
+    - 只写回同一身份：
+      - `rerank.hold()` 后发 `?target=rerank`，`await reached`，再 `PUT {rerank:{name:"bge-reranker", baseUrl, apiKey}}`，然后放行。结果：200，`rerank.name` 为 `bge-reranker`，`rerank.probe` 为 `NEVER`，没有 `rerankProbe` 审计。
+      - 独立性：`rerank.hold()` 期间改的是嵌入模型。放行后重排探活照常写回，有一条 `{rerankProbe:"ok"}`。
+    - 共用一条链：
+      - `embeddings.hold()` 后发不带 `target` 的探活，`await reached`，再发 `?target=rerank`。放行前 `rerank.requests()` 长度为 0；放行后两者都 200，审计次序为 `{probe:"ok"}`、`{rerankProbe:"ok"}`。
+      - 前一个失败不影响后一个：未配置重排时 `?target=rerank` 得 400，紧接着不带 `target` 的探活照常 `ok`。
+    - 密钥哨兵：`RERANK_KEY` 那个 401 例里，哨兵不出现在 `rerank.probe.message`、应答 body、审计 detail、`world.logged` 中的任何一处。
+    - 必须保持：
+      - `server/test/kb-settings-probe.test.ts` 一字不改且全绿：`git diff --exit-code origin/master -- server/test/kb-settings-probe.test.ts` 退出 0。
+      - `kb-model-probe.test.ts` 全绿，`store.recordEmbeddingProbe` 不动。
+      - 路由身份不变，`kb-disabled.test.ts` 的条目数与 `http-parser-owners` 的计数都不改。
+      - web 不改。
+      - `settings.ts` 与 `kb-settings-rerank.test.ts` 都不超过 800 行，测试超了就照 `kb-*-helpers.ts` 拆一个兄弟文件。
+    - 防回归（结转自 #1939 审查，加在 `kb-settings-rerank.test.ts`）：
+      - 已配对话模型且 `compileBases>0` 时，`{rerank: <完整重排模型>, chatModelId:"<另一个 id>"}` 得 409 `kb_chat_model_locked`，零个请求。
+      - 已配重排模型时，`{embedding, rerank:null}` 只有 `owb-embed`、`owb-chat` 两轮，没有 `owb-rerank` 一轮，detail 含 `rerank:null`。
+    - 风险包补落点：「并发」→ 本刀的同链用例与身份变更用例；「凭证泄露」→ 探活 message 的哨兵；「共用外部资源」→ 探活零个 RAGFlow 请求。
+    - 6.5 文档落点：`system.md` 9.13 只是一段指引，正文写在 `docs/architecture/knowledge-base.md`「知识库模型设置」。
+      - :5 节首清单加 S2b 组 6。
+      - :66 探活一行改为「探活嵌入或重排模型（`?target=embedding|rerank`，缺省嵌入；其它、空值、重复为 400；重排未配置为 400）」。
+      - :69 读视图由七键改为八键 `{embedding, chatModelId, rerank, bases, compileBases, documents, rebuilding, rebuildFailed}`，`rerank` 为 `{name, baseUrl, probe}` 或 `null`。
+      - :71 PUT 键集加 `rerank`：「至少含三者之一」，校验同嵌入。
+      - :77-84 下发序列加 `owb-rerank` 一轮：`model_type:["rerank"]`，`max_tokens` 8192，没有第 4 步，排在最前，失败即停，并写明排在最前的理由；`rerank:null` 只改本地，换重排模型不重建。
+      - :101 探活段加重排变体：`POST <baseUrl>/rerank`、body、判定方式，以及 §19.4 那次 22 s 的探活会判为超时。
+      - :103 写明两种探活走同一条链。
+      - :105 审计 detail 加 `rerank`（名称或 `null`）与 `{rerankProbe}`。
+      - :86-88 附近与 :416 运维清理条各加一句「`owb-rerank` 不是账号缺省，删除它没有 §13 的风险」。
+      - 不写检索带重排与降级，那是 7.2 的文档。
+      - `system.md` 只改两处：9.13 的指引句加「重排模型（`owb-rerank`）与 `?target=rerank` 探活」；§2 `kb` 行的探活条目加 `?target=rerank`。
+      - 行号以 origin/master 为准，#1918 的 4.6 合入后会有偏移，按内容定位。
+    - 6.4 的验证加：`npm run test:focus --workspace server -- probe`，覆盖 `kb-settings-probe` 与 `kb-model-probe`。
 - [ ] 6.6 web 原地改名：测试先行，`web/test/api-kb-rerank.test.ts` 加 `probeKbModel("rerank")` 发 `?target=rerank`；`web/test/api-kb.test.ts`、`web/test/api-files-archive.test.ts`、`web/test/center-models-kb.test.tsx` 里的旧名原地改。实现：`web/src/lib/api-kb.ts` 的 `probeKbEmbedding()` 改为 `probeKbModel(target)`，`web/src/lib/api.ts` 的 `ApiClient`、`web/test/api-files-archive.test.ts` 的方法清单与 `use-kb-settings.ts` 的调用点随之改。验证：`npm run test:focus --workspace web -- api-kb api-files-archive center-models-kb` 全过，`make typecheck` 退出 0，`git grep -n probeKbEmbedding -- web` 退出 1。
 
 Suggested fixture level: expanded - 带凭证的出站请求、管理员权限与公共 API 的视图加键（outbound with credentials、auth、public API）。

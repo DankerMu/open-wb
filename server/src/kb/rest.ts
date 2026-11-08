@@ -15,7 +15,9 @@
  *
  * 设置路由管理员专用：次序同 `models/rest.ts`，未登录 401（root guard）→ 关闭时 503 → 非管理员 403（路由级 `preParsing`）→
  * body 解析（`PUT` 与 bodyless 的两条 `POST` 都在 content-parser 归属集）→ 设置模块的校验。业务都在 `kb/settings.ts`。探活与
- * 重试重建（`POST /api/kb/settings/rebuild`）都是 bodyless：任意 body（含 `{}`）400。
+ * 重试重建（`POST /api/kb/settings/rebuild`）都是 bodyless：任意 body（含 `{}`）400。探活读查询参数 `target`（D7）：缺省或
+ * `embedding` 探嵌入，`rerank` 探重排，按原值精确匹配，其它取值、空值与重复 400；先判 body 再判 `target`，非法的不进探活链。
+ * 其它查询键忽略。重试不读 query。
  * 路由在知识库关闭时同样注册：不注册就是 catch-all 的 404，不是 503；处理函数在关闭时走不到。
  *
  * 知识库路由对任何已登录用户开放，只操作自己的库：`POST` 在 content-parser 归属集，业务都在 `kb/bases.ts`。`DELETE` 不读
@@ -119,6 +121,18 @@ function principalOf(request: FastifyRequest): { readonly id: string; readonly r
   return principal;
 }
 
+/** 查询参数 `target`：Fastify 已解码；`?target` 与 `?target=` 都是空串，重复是数组，同 `models/rest.ts` 的 `idOf`。 */
+function probeTargetOf(request: FastifyRequest): "embedding" | "rerank" {
+  const { target } = request.query as Record<string, unknown>;
+  if (target === undefined) {
+    return "embedding";
+  }
+  if (target !== "embedding" && target !== "rerank") {
+    throw new HttpError("bad_request");
+  }
+  return target;
+}
+
 const adminOnly: preParsingHookHandler = (request, _reply, payload, done) => {
   if (!isAdmin(principalOf(request))) {
     throw new HttpError("forbidden");
@@ -189,14 +203,21 @@ export function registerKbRoutes(
   );
 
   for (const [url, run] of [
-    [SETTINGS_PROBE_ROUTE, (actorId: string) => settings().probe(actorId)],
-    [SETTINGS_REBUILD_ROUTE, (actorId: string) => settings().retry(actorId)],
+    [
+      SETTINGS_PROBE_ROUTE,
+      (request: FastifyRequest) =>
+        settings().probe(principalOf(request).id, probeTargetOf(request)),
+    ],
+    [
+      SETTINGS_REBUILD_ROUTE,
+      (request: FastifyRequest) => settings().retry(principalOf(request).id),
+    ],
   ] as const) {
     app.post(url, { ...admin, bodyLimit: BODYLESS_BODY_LIMIT }, (request) => {
       if (request.body !== undefined) {
         throw new HttpError("bad_request");
       }
-      return run(principalOf(request).id);
+      return run(request);
     });
   }
 
