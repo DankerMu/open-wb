@@ -86,7 +86,7 @@ Minimal mergeable slice: atomic - 服务端加键与 web 解析器必须同 PR�
     - 夹具自测逐条：六条 `code:101` 各一例（输入与原样 message）；不存在数据集 HTTP 200 `code:404`；`rerank_id` 无此模型 `code:102`；零命中原样（含 `message:null`）；带命中时 `data` 恰四键、切片恰十六键；`failRerank` 只影响带 `rerank_id` 的请求；每例断言 `unknownRoutes()` 为空（防路由没挂上时 404 假通过）。
     - 3.3 用例另加：带与不带 `rerankId` 时 `requests()[0].json` 各恰为 D2 形状；非 200 的 `code:102` 为 `kb_rejected`（不是 `retrieval_failed`）；挂起超期为 `kb_unavailable`。
     - PR Boundary 补：`fake-ragflow.mjs` 的 `createState` 加检索状态、`ROUTES` 挂载、`start()` 返回加 `...retrievalViews(…)`（同 `pipelineViews`），行数上限 800；`fake-ragflow.d.mts` 的 `FakeRagflowServer` 加两个方法与 `addModel` 的 `"rerank"`；`ragflow-client.ts` 头注释「101 / 102 为 kb_rejected」改为点明检索路由的 102 例外（措辞不带路径字样，见下条），与并入行合计增加不超过 5 行。
-    - 必须保持：`/retrieval` 字样（含注释）在 `server/src` 里只出现在 `kb/ragflow-retrieval.ts`，`ragflow-client.ts` 的并入行与注释都不带（组 4 的扫描用例）；其它路径照旧回 404 并标 `unknown`；`fake-ragflow.test.ts` 不动；`kb-ragflow-client.test.ts`（768 行）只原地改客户端方法清单的计数断言（加 `"retrieve"`），不加用例。
+    - 必须保持：RAGFlow 检索路由片段（`${API}/retrieval` / `/api/v1/retrieval`，含注释）在 `server/src` 里只出现在 `kb/ragflow-retrieval.ts`（组 4 收窄，本系统的 `/api/kb/bases/:id/retrieval` 不算），`ragflow-client.ts` 的并入行与注释都不带（组 4 的扫描用例）；其它路径照旧回 404 并标 `unknown`；`fake-ragflow.test.ts` 不动；`kb-ragflow-client.test.ts`（768 行）只原地改客户端方法清单的计数断言（加 `"retrieve"`），不加用例。
 
 Suggested fixture level: expanded - 带凭证的出站请求（outbound with credentials）与新的类型化失败映射。
 Minimal mergeable slice: atomic - 夹具与客户端路由共一条验证路径：客户端用例只能对夹具跑（真 RAGFlow 不进 CI），夹具的协议应答只有客户端用例消费；单独合入夹具，它的自测只证明自洽，不证明协议映射（S2a 组 5 先例）。
@@ -148,7 +148,7 @@ Minimal mergeable slice: 6.1–6.2 为首刀（设置的解析、下发、清除
 
 ## 7. 检索带重排与自动降级（ragflow-backend「RAGFlow 出站请求」的重排降级与三个场景；knowledge-bases「单轮检索」的「带重排」）
 
-- [ ] 7.1 测试先行：新 `server/test/kb-retrieval-rerank.test.ts`，加「带重排」「重排降级」「检索失败的映射」（收窄为带 `rerank_id` 重试后仍是 102 得 503；未配置重排时的 102 与 101 已由 4.1 覆盖，不重复）「超时不降级」四个场景；`kb_rerank_degraded` 60 秒内至多一行（注入时钟）；降级时 stderr 与应答都不含假 RAGFlow 的 message 哨兵。先看到红。验证：用例先红。
+- [ ] 7.1 测试先行：新 `server/test/kb-retrieval-rerank.test.ts`，加「带重排」「重排降级」「检索失败的映射」（收窄为带 `rerank_id` 重试后仍是 102 得 503；未配置重排时 102 与 101 的原语映射已由 4.1 覆盖，不重复；但要加一例未配置重排、`code:102` 时 stderr 无 `kb_rerank_degraded`）「超时不降级」四个场景；`kb_rerank_degraded` 60 秒内至多一行（注入时钟）；降级时 stderr 与应答都不含假 RAGFlow 的 message 哨兵。先看到红。验证：用例先红。
 - [ ] 7.2 `server/src/kb/retrieval.ts`：配置了重排模型时带 `rerank_id`，检索失败且带了 `rerank_id` 时去掉它重试恰一次并写降级记录（复用 `perMinute`），其余检索失败为 `kb_unavailable`（design D3）。验证：`npm run test:focus --workspace server -- kb-retrieval` 全过；`docs/architecture/system.md` 9.13 的检索一节补上降级规则与「`code:102` 不可区分」的后果。
 
 Suggested fixture level: expanded - 出站请求的重试语义，是「不重试」规则的唯一例外（outbound、shared failure mapping）。

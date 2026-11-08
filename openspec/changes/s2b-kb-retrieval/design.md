@@ -260,7 +260,7 @@ knowledge-bases 新增「`kb_search` 工具契约」：
 - 只有命中切片与出处进入上下文，不变量 2。
 - 多库命中如何标注所属库、合并与条数、可见范围过滤与审计，都由 S2c 定；非 `ready` 的库（`rebuilding` / `rebuild_failed`）是否参与检索也由 S2c 定（D4 第 3 步只约束检索测试端点）。
 
-本 change 里没有 `kb_search` 的任何代码。这条要求的可验证部分只有一条：检索测试与 D1 走的是同一个函数。验证方式是扫描 `server/src`：客户端的检索方法只在 `kb/retrieval.ts` 里被调用，路由片段 `/retrieval` 只出现在 `kb/ragflow-retrieval.ts`。只扫字面量 `/api/v1/retrieval` 不够：兄弟文件以 `${API}/…` 拼路径（`ragflow-route.ts:5`），另一处直接调客户端方法时也不含这个字面量。
+本 change 里没有 `kb_search` 的任何代码。这条要求的可验证部分只有一条：检索测试与 D1 走的是同一个函数。验证方式是扫描 `server/src`：客户端的检索方法只在 `kb/retrieval.ts` 里被调用，RAGFlow 的检索路由片段（`${API}/retrieval` 或 `/api/v1/retrieval`）只出现在 `kb/ragflow-retrieval.ts`，本系统自己的 `/api/kb/bases/:id/retrieval` 不算。只扫字面量 `/api/v1/retrieval` 不够：兄弟文件以 `${API}/…` 拼路径（`ragflow-route.ts:5`），另一处直接调客户端方法时也不含这个字面量。
 
 ### D10 测试与夹具
 

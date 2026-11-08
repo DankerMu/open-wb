@@ -369,7 +369,7 @@
 
 #### Scenario: 只有一处检索实现
 - **WHEN** 检索测试端点处理一次检索；另扫描 `server/src`
-- **THEN** 它经单轮检索那一个函数发出请求；客户端的检索方法只在 `kb/retrieval.ts` 里被调用，路由片段 `/retrieval` 只出现在 `kb/ragflow-retrieval.ts`
+- **THEN** 它经单轮检索那一个函数发出请求；客户端的检索方法只在 `kb/retrieval.ts` 里被调用，RAGFlow 的检索路由片段（`${API}/retrieval` 或 `/api/v1/retrieval`）只出现在 `kb/ragflow-retrieval.ts`；本系统自己的 `/api/kb/bases/:id/retrieval` 不算
 
 ### Requirement: 检索测试端点
 知识库开启后，所有者 SHALL 能经 `POST /api/kb/bases/:id/retrieval` 对自己的一个知识库做单轮检索，并在检索时写回该库的检索参数。body limit 16 KiB，应答带 no-store。
