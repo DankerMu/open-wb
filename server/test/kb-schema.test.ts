@@ -2,15 +2,20 @@
  * Issue #1836（任务 7.2）：knowledge-bases「迁移 050 知识库 schema」的表形状，经 `openDb` 的真实迁移测。
  * 「约束」场景的九例在 `kb-store.test.ts`；这里是 spec 列出的其余约束，逐列一个非法取值与它的合法对照。
  * 直接写 SQL：表约束是 store 之外的最后一道兜底，要证明它自己拒绝。期望值是 spec 与 design 里的字面量。
+ * Issue #1911（s2b 任务 1.2）：「迁移 051 检索参数与重排模型」的「列与约束」场景与 050 库升级不改其它表；
+ * 完整迁移链的表形状断言是 051 之后的形状。
  */
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   COMPLETE_CATALOG,
+  expectCatalogSnapshot,
   ledgerFilenames,
+  ledgerRows,
   MIGRATION_049,
   MIGRATION_050,
+  MIGRATION_051,
   TRACKED_MIGRATION_FILENAMES,
   tempDir,
   uniqueIndexKeys,
@@ -62,7 +67,7 @@ describe("migration 050 schema", () => {
     expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
   });
 
-  it("builds exactly the spec's columns on the three tables", () => {
+  it("builds exactly the spec's columns on the three tables (051 appends to kb_settings and knowledge_bases)", () => {
     const { db } = fresh();
     expect(tableInfo(db, "kb_settings")).toEqual([
       ["id", "TEXT", 1, null, 1],
@@ -76,6 +81,12 @@ describe("migration 050 schema", () => {
       ["chat_model_id", "TEXT", 0, null, 0],
       ["rebuild_actor_id", "TEXT", 0, null, 0],
       ["updated_at", "INTEGER", 1, null, 0],
+      ["rerank_name", "TEXT", 0, null, 0],
+      ["rerank_base_url", "TEXT", 0, null, 0],
+      ["rerank_api_key", "TEXT", 0, null, 0],
+      ["rerank_probe_status", "TEXT", 1, "'never'", 0],
+      ["rerank_probe_at", "INTEGER", 0, null, 0],
+      ["rerank_probe_message", "TEXT", 0, null, 0],
     ]);
     expect(tableInfo(db, "knowledge_bases")).toEqual([
       ["id", "TEXT", 1, null, 1],
@@ -95,6 +106,8 @@ describe("migration 050 schema", () => {
       ["state_message", "TEXT", 0, null, 0],
       ["created_at", "INTEGER", 1, null, 0],
       ["updated_at", "INTEGER", 1, null, 0],
+      ["retrieval_threshold", "REAL", 1, "0.2", 0],
+      ["retrieval_vector_weight", "REAL", 1, "0.7", 0],
     ]);
     expect(tableInfo(db, "kb_documents")).toEqual([
       ["id", "TEXT", 1, null, 1],
@@ -125,6 +138,12 @@ describe("migration 050 schema", () => {
         chat_model_id: null,
         rebuild_actor_id: null,
         updated_at: 0,
+        rerank_name: null,
+        rerank_base_url: null,
+        rerank_api_key: null,
+        rerank_probe_status: "never",
+        rerank_probe_at: null,
+        rerank_probe_message: null,
       },
     ]);
     expect(rows(db, "knowledge_bases")).toEqual([]);
@@ -169,6 +188,145 @@ describe("migration 050 schema", () => {
       expect(rows(db, "knowledge_bases")).toEqual([]);
       expect(rows(db, "kb_documents")).toEqual([]);
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
+    });
+  });
+});
+
+const RERANK_COLUMNS = [
+  "rerank_name",
+  "rerank_base_url",
+  "rerank_api_key",
+  "rerank_probe_status",
+  "rerank_probe_at",
+  "rerank_probe_message",
+];
+const RETRIEVAL_COLUMNS = ["retrieval_threshold", "retrieval_vector_weight"];
+const ALTERED_TABLES = ["kb_settings", "knowledge_bases"];
+
+/** 跑完 050 为止的迁移再预置数据：一个停在 050 的库。 */
+function seed050(file: string, seed: (db: DatabaseSync) => void): void {
+  const through050 = TRACKED_MIGRATION_FILENAMES.slice(
+    0,
+    TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_051),
+  );
+  expect(through050.at(-1)).toBe(MIGRATION_050);
+  seedThrough(file, through050, seed);
+}
+
+/** 除 051 改动的两张表之外的全部 schema 对象（kb_documents 也在其内）。 */
+function untouchedSchema(db: DatabaseSync) {
+  return db
+    .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
+    .all()
+    .filter((row) => !ALTERED_TABLES.includes(String(row.tbl_name)));
+}
+
+/** 某表除给定列之外的整行，按 id 排序。 */
+function rowsWithout(db: DatabaseSync, table: string, dropped: readonly string[]) {
+  return db
+    .prepare(`SELECT * FROM ${table} ORDER BY id`)
+    .all()
+    .map((row) =>
+      Object.fromEntries(Object.entries(row).filter(([key]) => !dropped.includes(key))),
+    );
+}
+
+describe("迁移 051 检索参数与重排模型", () => {
+  it("列与约束：050 库上应用后取列缺省；越界与非数字文本被拒，1 存成 real", () => {
+    const file = join(tempDir(), "kb-050.db");
+    seed050(file, (db) => insertRow(db, "knowledge_bases", BASE_ROW));
+    withOpenDb(file, (db) => {
+      expect(
+        db
+          .prepare(
+            "SELECT retrieval_threshold, typeof(retrieval_threshold) AS threshold_type, retrieval_vector_weight, typeof(retrieval_vector_weight) AS weight_type FROM knowledge_bases",
+          )
+          .all(),
+      ).toEqual([
+        {
+          retrieval_threshold: 0.2,
+          threshold_type: "real",
+          retrieval_vector_weight: 0.7,
+          weight_type: "real",
+        },
+      ]);
+      expect(db.prepare(`SELECT ${RERANK_COLUMNS.join(", ")} FROM kb_settings`).all()).toEqual([
+        {
+          rerank_name: null,
+          rerank_base_url: null,
+          rerank_api_key: null,
+          rerank_probe_status: "never",
+          rerank_probe_at: null,
+          rerank_probe_message: null,
+        },
+      ]);
+      for (const value of [1.5, -0.1, "abc"]) {
+        expect(() =>
+          db.prepare("UPDATE knowledge_bases SET retrieval_threshold = ?").run(value),
+        ).toThrow(CHECK);
+      }
+      db.prepare("UPDATE knowledge_bases SET retrieval_vector_weight = ?").run(1);
+      expect(
+        db
+          .prepare(
+            "SELECT retrieval_threshold, retrieval_vector_weight, typeof(retrieval_vector_weight) AS weight_type FROM knowledge_bases",
+          )
+          .all(),
+      ).toEqual([{ retrieval_threshold: 0.2, retrieval_vector_weight: 1, weight_type: "real" }]);
+    });
+  });
+
+  it("重排探活状态只认 never、ok、failed", () => {
+    const { db } = fresh();
+    expect(() => db.exec("UPDATE kb_settings SET rerank_probe_status = 'unknown'")).toThrow(CHECK);
+    for (const status of ["ok", "failed", "never"]) {
+      db.prepare("UPDATE kb_settings SET rerank_probe_status = ?").run(status);
+      expect(rows(db, "kb_settings")).toMatchObject([{ rerank_probe_status: status }]);
+    }
+  });
+
+  it("050 库升级只给两张表加列：既有列值不变，其它表的 schema 不变，回执落在第 25 位", () => {
+    const file = join(tempDir(), "populated-050.db");
+    seed050(file, (db) => {
+      insertRow(db, "knowledge_bases", {
+        ...COMPILE_ROW,
+        name: "旧库",
+        rebuild_dataset_id: "ds-next",
+        rebuild_canvas_id: "canvas-next",
+        rebuild_template_group_id: "group-next",
+        embedding_generation: 3,
+        state: "rebuild_failed",
+        state_message: "重建失败",
+        updated_at: T0 + 5,
+      });
+      insertRow(db, "kb_documents", UPLOAD_ROW);
+      db.prepare(
+        "UPDATE kb_settings SET embedding_name = ?, embedding_base_url = ?, embedding_api_key = ?, embedding_generation = 3, embedding_probe_status = 'ok', embedding_probe_at = ?, updated_at = ? WHERE id = 'kb'",
+      ).run("bge-m3", "http://embed/v1", "k-050", T0 + 1, T0 + 2);
+    });
+    const before = withDatabase(file, (db) => ({
+      schema: untouchedSchema(db),
+      settings: rows(db, "kb_settings"),
+      bases: rows(db, "knowledge_bases"),
+      documents: rows(db, "kb_documents"),
+    }));
+    expect(before.settings).toMatchObject([
+      { embedding_name: "bge-m3", embedding_probe_status: "ok", embedding_generation: 3 },
+    ]);
+    expect(before.bases).toMatchObject([{ state: "rebuild_failed", embedding_generation: 3 }]);
+    withOpenDb(file, (db) => {
+      expect(untouchedSchema(db)).toEqual(before.schema);
+      expect(rowsWithout(db, "kb_settings", RERANK_COLUMNS)).toEqual(before.settings);
+      expect(rowsWithout(db, "knowledge_bases", RETRIEVAL_COLUMNS)).toEqual(before.bases);
+      expect(rows(db, "kb_documents")).toEqual(before.documents);
+      expect(
+        db.prepare(`SELECT ${RETRIEVAL_COLUMNS.join(", ")} FROM knowledge_bases`).all(),
+      ).toEqual([{ retrieval_threshold: 0.2, retrieval_vector_weight: 0.7 }]);
+      expect(ledgerRows(db).at(-1)).toEqual([25, MIGRATION_051]);
+      expect(TRACKED_MIGRATION_FILENAMES.at(-2)).toBe(MIGRATION_050);
+      expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
+      expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 25, "integer"]]);
+      expectCatalogSnapshot(db, COMPLETE_CATALOG);
     });
   });
 });
