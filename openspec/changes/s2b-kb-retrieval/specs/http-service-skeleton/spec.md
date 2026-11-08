@@ -1,0 +1,118 @@
+## MODIFIED Requirements
+
+### Requirement: 统一错误信封
+所有本阶段可预期 `/api/*` 应用错误与 API 404 SHALL 使用统一信封 `{ "error": { "code": "<snake_case>", "message": "<可直接展示的中文文案>" } }`；typed definition map 固定为**三十七码**：`bad_request`(400, `请求格式不正确`)、`invalid_credentials`(401, `账号或密码不正确`)、`account_disabled`(403, `该账号已停用，请联系管理员`)、`unauthorized`(401, `请先登录`)、`not_found`(404, `请求的资源不存在`)、`session_busy`(409, `会话正在生成，请稍候`)、`agent_unavailable`(502, `Agent 运行时不可用`)、`sandbox_denied`(403, `目标路径不在你的沙箱内，操作已拒绝`)、`conflict`(409, `同名资源已存在`)、`preview_too_large`(413, `文件过大，无法预览`)、`preview_unsupported`(415, `该类型不支持预览`)、`agent_capacity`(503, `Agent 容量已满，请稍后重试`)、`approval_settled`(409, `该审批已处理`)、`session_archived`(409, `会话已归档，恢复后才能继续对话`)、`undo_conflict`(409, `其它会话在这之后改动过工作空间`)、`upload_too_large`(413, `文件超过大小上限`)、`forbidden`(403, `没有权限执行此操作`)、`model_in_use`(409, `该模型是缺省模型，先把缺省换成别的模型`)、`mount_disabled`(503, `服务器未启用远程挂载`)、`mount_failed`(502, `挂载失败，请检查主机、路径与凭证`)、`mount_offline`(409, `挂载已离线，重新连接后可用`)、`mount_limit`(409, `挂载数已达上限`)、`mount_host_rejected`(403, `该主机不允许挂载`)、`mount_read_only`(403, `只读挂载不能写入`)、`mount_boundary`(409, `挂载目录内不能删除，也不能跨挂载移动`)、`kb_disabled`(503, `知识库未启用`)、`kb_unavailable`(503, `知识库服务暂不可用`)、`kb_rejected`(400, `知识库服务拒绝了这个请求`)、`kb_not_ready`(409, `知识库模型未就绪，请管理员在模型设置里保存知识库嵌入模型`)、`kb_rebuilding`(409, `知识库正在重建，请稍后再试`)、`kb_rebuild_required`(409, `更换嵌入模型需要重建全部知识库，请确认后再保存`)、`kb_limit`(409, `知识库或文档数已达上限`)、`kb_source_unreadable`(409, `源文件无法读取或已变动，未重新入库`)、`kb_model_in_use`(409, `该模型是知识库对话模型，先在知识库模型设置里换掉它`)、`kb_chat_model_locked`(409, `已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型`)、`kb_document_busy`(409, `文档正在停止解析，请稍后再试`)、`kb_file_unsupported`(400, `这个文件不能入库：模板不支持这种类型，或文件是空的`)；`forbidden`、`account_disabled`、`sandbox_denied`、`mount_host_rejected` 与 `mount_read_only` 共享 403 状态，`session_busy`、`conflict`、`approval_settled`、`session_archived`、`undo_conflict`、`model_in_use`、`mount_offline`、`mount_limit`、`mount_boundary`、`kb_not_ready`、`kb_rebuilding`、`kb_rebuild_required`、`kb_limit`、`kb_source_unreadable`、`kb_model_in_use`、`kb_chat_model_locked` 与 `kb_document_busy` 共享 409 状态、`bad_request`、`kb_rejected` 与 `kb_file_unsupported` 共享 400 状态、`preview_too_large` 与 `upload_too_large` 共享 413 状态、`agent_unavailable` 与 `mount_failed` 共享 502 状态、`agent_capacity`、`mount_disabled`、`kb_disabled` 与 `kb_unavailable` 共享 503 状态，但 code/message 各自独立，映射 SHALL 以 code 而非状态码区分。公共类、代码与消息 SHALL 仅定义在 `core/errors`；状态码、parser ownership与处理器 SHALL 落在 `http/` 横切层，不保留旧路径兼容导出。`bad_request` 覆盖显式 typed `HttpError("bad_request")`；仅当 request 的 method 与 matched route identity 合起来恰为精确三十九条归属身份 `POST /api/auth/login`、`POST /api/auth/logout`、`POST /api/sessions/:id/prompt`、`POST /v1/chat/completions`、`POST /api/workspaces`、`POST /api/workspaces/:id/dirs`、`POST /api/workspaces/:id/move`、`POST /api/workspaces/:id/preview-token`、`POST /api/sessions/:id/stop`、`POST /api/sessions/:id/regenerate`、`POST /api/sessions/:id/fork`、`POST /api/sessions/:id/approvals/:approvalId`、`POST /api/sessions/:id/undo`、`POST /api/workspaces/:id/promote`、`POST /api/workspaces/:id/uploads`、`POST /api/sessions`、`POST /api/models`、`POST /api/models/default`、`POST /api/models/probe`、`PUT /api/models`、`POST /api/experts`、`PUT /api/experts`、`PUT /api/skills/defaults`、`PUT /api/sessions/:id/capabilities`、`POST /api/connectors`、`PUT /api/connectors`、`POST /api/connectors/probe`、`PUT /api/connectors/defaults`、`POST /api/workspaces/:id/mounts`、`POST /api/mount-sources`、`POST /api/kb/bases`、`POST /api/kb/bases/:id/documents`、`POST /api/kb/bases/:id/uploads`、`POST /api/kb/bases/:id/documents/reingest`、`POST /api/kb/bases/:id/retrieval`、`PUT /api/kb/settings`、`POST /api/kb/settings/probe`、`POST /api/kb/settings/rebuild` 或 `PATCH /api/sessions/:id` 时（method 为归属身份的一部分：映射不再只认 POST，`PATCH /api/sessions/:id` 以 PATCH 归属，`PUT /api/models`、`PUT /api/experts`、`PUT /api/skills/defaults`、`PUT /api/sessions/:id/capabilities`、`PUT /api/connectors`、`PUT /api/connectors/defaults` 与 `PUT /api/kb/settings` 七条以 PUT 归属，其余三十一条以 POST 归属），才额外覆盖 exact Fastify content-parser error code allowlist：`FST_ERR_CTP_INVALID_MEDIA_TYPE`、`FST_ERR_CTP_INVALID_JSON_BODY`、`FST_ERR_CTP_EMPTY_JSON_BODY`、`FST_ERR_CTP_BODY_TOO_LARGE`。对使用框架内置 parser 的归属路由，到达 content parser 且媒体类型有内置 parser 的请求，其 `Content-Length` 超过路由 body limit 时由框架仅凭请求头拒绝：不读取请求体，发出该 400 后关闭连接；仍在写请求体的客户端可能观察到连接重置，这不改变服务端已发出的响应（`POST /v1/chat/completions` 自带流式 parser，读完请求体后才拒绝，不在此列）。bodyless 的 `POST /api/sessions/:id/stop` 与 `POST /api/sessions/:id/regenerate` 按 `POST /api/auth/logout` 先例属于归属集：任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超过其最小合法 body limit 均为 exact 400 `bad_request`，发生在任何 supervisor 调用、omp 帧或数据库写入之前。`POST /api/workspaces/:id/preview-token`（preview-origin）同为 bodyless 归属路由：任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超限均为 exact 400 `bad_request`，发生在任何令牌签发之前；`POST /api/workspaces/:id/move`（file-operations）携 JSON body，其 content-parser 错误同为 exact 400，发生在任何文件系统改动与审计写入之前。`DELETE /api/workspaces/:id/entries`、`DELETE /api/sessions/:id` 与 `DELETE /api/models` 同理不属于归属集。`POST /api/models` 与 `PUT /api/models`（model-registry「模型管理端点」；模型 id 经查询参数 `?id=` 传递，不进路径）携 JSON body：其 content-parser 错误为 exact 400 `bad_request`，发生在管理员判定（非管理员 403 `forbidden`）之后、任何表写入与审计写入之前；bodyless 的 `POST /api/models/default` 与 `POST /api/models/probe` 按 stop / regenerate 先例：任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超限均为 exact 400，同样在管理员判定之后、任何写入与上游请求之前。`POST /api/experts` 与 `PUT /api/experts`（experts「专家管理端点」；专家 id 经查询参数 `?id=` 传递，不进路径；body limit 64 KiB）携 JSON body：未认证 401、`PUT` 的 `id` 缺失 / 空 / 多值 400、`id` 为内置专家 403 `forbidden`、`id` 对调用者不可见 404 都在 body 解析之前判定（preParsing，与会话元数据修改的属主预检同一做法），其后 content-parser 错误为 exact 400 `bad_request`，发生在任何表写入与审计写入之前；`DELETE /api/experts` 不读取 body，不属于归属集。`PUT /api/skills/defaults`（skill-switches「技能清单与账号缺省」，body limit 64 KiB，理由同下）携 JSON body，其 content-parser 错误为 exact 400 `bad_request`，发生在任何偏好写入之前。`PUT /api/sessions/:id/capabilities`（skill-switches「会话能力端点」，body limit 64 KiB——停用列表至多 128 个名称、每个至多 128 字节，按 JSON 转义（`"`、`\` 各占两字节）最坏约 33 KB，三条带该列表的路由（`POST /api/sessions`、`PUT /api/skills/defaults`、`PUT /api/sessions/:id/capabilities`）统一 64 KiB）按 `PATCH /api/sessions/:id` 先例：owner 预检（未知或属他人 → 与未知 id 相同的 404，先于 body 解析）之后，其 content-parser 错误同样为 exact 400 `bad_request`，无写入。`POST /api/connectors` 与 `PUT /api/connectors`（connectors「连接器管理端点」；连接器名经查询参数 `?name=` 传递，不进路径；body limit 64 KiB）携 JSON body：未认证 401、非管理员 403 `forbidden`、`PUT` 的 `name` 缺失 / 空 / 多值 400、`name` 未登记 404 都在 body 解析之前判定（preParsing，与 `/api/models` 同一做法；403 先于 `name` 判定），其后 content-parser 错误为 exact 400 `bad_request`，发生在任何表写入、审计写入与 `mcp.json` 重写之前；bodyless 的 `POST /api/connectors/probe` 按 `POST /api/models/probe` 先例：在同样先于 body 解析的 401、非管理员 403 `forbidden`、`name` 缺失 / 空 / 多值 400 与未登记 404 之后，任意 parsed body（含 `{}`）、empty-or-malformed JSON、unsupported media 或超限均为 exact 400 `bad_request`，发生在任何探活请求、文件检查与写入之前；`DELETE /api/connectors` 不读取 body，不属于归属集。`PUT /api/connectors/defaults`（connectors「连接器账号缺省」，对所有已认证账号开放，body limit 16 KiB——至多 32 个、每个至多 32 字节的名称）携 JSON body，其 content-parser 错误为 exact 400 `bad_request`，发生在任何偏好写入之前（change s1d-connectors）。`POST /api/workspaces/:id/mounts`（workspace-mounts「挂载端点」；body limit 64 KiB——私钥文本至多 16 KiB）携 JSON body：未认证 401、空间不属本人或不存在 404、未配置 `RCLONE_BIN` 503 `mount_disabled` 都在 body 解析之前判定（preParsing，与 `POST /api/workspaces/:id/move` 同一做法），其后 content-parser 错误为 exact 400 `bad_request`，发生在任何凭证文件写入、挂载点创建、子进程启动、表写入与审计写入之前；`DELETE /api/workspaces/:id/mounts/:mountId` 不读取 body，不属于归属集。`POST /api/mount-sources`（workspace-mounts「挂载源端点」，body limit 16 KiB）携 JSON body：未认证 401、非管理员 403 `forbidden` 在 body 解析之前判定，其后 content-parser 错误为 exact 400 `bad_request`，发生在任何表写入与审计写入之前；`DELETE /api/mount-sources/:id` 不读取 body，不属于归属集（change s1b-workspace-mounts）。错误码的 definition map 不因 s1f-files-page 改变：workspaces「文件预览」对范围不可满足的请求返回的 416（空体、`Content-Range: bytes */<size>`）是部分内容协议的响应，不是应用错误，不属于 definition map，也不带信封。`POST /api/sessions` 是**可选 body** 的归属路由：无 body（无 Content-Type 且无内容）为合法请求，按默认值创建；一旦携带 body，则必须为 `application/json` 且解析成功，empty-or-malformed JSON、unsupported media 或超过其 body limit 均为 exact 400 `bad_request`，发生在任何会话行、审计行写入之前——它不适用 stop/regenerate 的「任意 parsed body 即 400」规则，parsed body 交由 session-metadata 的手写 exact validator 判定。`PATCH /api/sessions/:id` 在 owner 预检（未知或属他人 → 与未知 id 相同的 404，先于 body 解析）之后，其 content-parser 错误同样为 exact 400 `bad_request`，无写入。`POST /api/workspaces/:id/uploads` 是**流式 body** 的归属路由：它只为 `application/octet-stream` 注册一个把请求流原样交给 handler 的 route-local parser，不经框架的缓冲与 body limit；媒体类型不符（`FST_ERR_CTP_INVALID_MEDIA_TYPE`）在空间归属检查（未知或属他人 → 404）之后为 exact 400 `bad_request`，不写文件、不写审计。该路由的大小上限 SHALL NOT 由框架的 body limit 执行——否则超限会被本条的 allowlist 映射成 400——而由 handler 按 workspaces「文件上传」判定并返回 typed 413 `upload_too_large`；`FST_ERR_CTP_BODY_TOO_LARGE` 不在该路由产生。`POST /api/kb/bases/:id/uploads`（knowledge-bases「本地上传入库」）与 `POST /api/workspaces/:id/uploads` 同一写法：只注册 `application/octet-stream` 的 route-local parser，媒体类型不符为 exact 400 `bad_request`，大小上限由 handler 判定并返回 typed 413 `upload_too_large`；知识库关闭时 `/api/kb/*`（`GET /api/kb/status` 除外）的 503 `kb_disabled` 在 cookie guard 的 401 之后、管理员 403 与 body 解析之前判定（change s2a-kb-ragflow）。`DELETE /api/sessions/:id` 不读取 body、**不**属于归属集：该路由不注册 body 语义，请求携带的格式良好的 body 被忽略，不因 body 改变其 204/404/409 行为；body 引发的 genuine allowlisted content-parser 错误（malformed JSON、空 JSON body、不支持的媒体类型、超限）按非归属已注册路由语义保持 generic 500（见 Scenario「产品路由身份在共享映射器中的归属」），不执行任何删除步骤。归属身份对应的合同不使用 route schema，因此 `FST_ERR_VALIDATION` 不在此 allowlist，避免把可伪造的普通 Error shape当作受信 request error。映射不依赖 raw `statusCode`（body-too-large 原始状态可为 413），最终均为 exact 400。其他原始API namespace的protected request在root preParsing guard前不解析body：未认证先返回401；通过guard后，相同parser/media错误若发生在matched `/api`/`/api/*` catch-all，恢复既有typed `not_found` 404，发生在归属集之外其他已注册API route保持generic5xx。原始non-API unmatched non-GET miss无论是否携cookie都绕过guard、零session query并保持既有typed404。不得回显parser/schema/password/session细节；具有相同status/statusCode或伪造code的任意programmer error不得被误标成三十七种语义错误，仍为5xx。
+
+#### Scenario: 十一码信封形状一致
+- **WHEN** 测试路由分别抛出原有十一种 typed application error
+- **THEN** 响应 status/code/message 与 definition map exact 对应，body 仅含 `{error:{code,message}}`，无 Fastify 默认 error 字段
+
+#### Scenario: 新增两码信封形状一致
+- **WHEN** 测试路由分别抛出 `HttpError("agent_capacity")` 与 `HttpError("approval_settled")`
+- **THEN** 响应分别为 503 `{error:{code:"agent_capacity",message:"Agent 容量已满，请稍后重试"}}` 与 409 `{error:{code:"approval_settled",message:"该审批已处理"}}`，无 Fastify 默认 error 字段；伪造 `{code:"agent_capacity",statusCode:503}` 的普通对象仍为 generic 5xx
+
+#### Scenario: auth POST 请求 parse/validation 错误稳定映射
+- **WHEN** `/api/auth/login` 收到 empty/malformed JSON、unsupported media type、不符合手写 exact body validator 的 JSON 或超过 16 KiB body limit，或 bodyless `/api/auth/logout` 收到任意 parsed body/empty-or-malformed JSON/unsupported media/超过其最小合法 body limit
+- **THEN** 不论 Fastify raw status 是否为 400/413/415，均按显式 typed error 或 exact matched auth-route-scoped allowlisted Fastify error code 返回 exact 400 `bad_request` 信封，不回显 validation/parser 详情或请求中的密码；错误发生在 logout cookie lookup/DELETE/clear-cookie 前
+- **WHEN** 未认证请求携相同 malformed/media/body 输入访问original API namespace的受保护matched `/api`/`/api/*` catch-all或其他protected API route
+- **THEN** guard在content parser前返回exact401 unauthorized；不得被raw parser status改写为400/404/500
+- **WHEN** 无论有无cookie，相同输入访问original non-API unmatched non-GET miss
+- **THEN** 绕过guard且零session query，保持既有exact typed `not_found` 404
+- **WHEN** 有效会话携相同输入访问matched `/api`/`/api/*` catch-all
+- **THEN** 通过guard后返回既有exact typed `not_found` 404；不得因content parser先于catch-all handler而成为400/500
+- **WHEN** 有效会话携相同错误访问三十九条归属身份之外的其他已注册protected API route，或programmer error仅携带`statusCode=400/413`/伪造allowlist code/validation-shaped fields
+- **THEN** 保持generic5xx，不得被auth POST request-error mapper或guard改写
+
+#### Scenario: 意外错误不伪装
+- **WHEN** API route 抛出未分类的 programmer error
+- **THEN** 返回 5xx，且 body 不得声称三十七个 typed semantic code 中任一个
+
+#### Scenario: 产品路由身份在共享映射器中的归属
+- **WHEN** genuine allowlisted Fastify content-parser error is mapped for the production-mounted POST matched /api/sessions/:id/prompt, /v1/chat/completions, /api/workspaces, /api/workspaces/:id/dirs, /api/workspaces/:id/move, /api/workspaces/:id/preview-token, /api/sessions/:id/stop, /api/sessions/:id/regenerate, /api/sessions/:id/fork, /api/sessions/:id/approvals/:approvalId, /api/sessions/:id/undo, /api/workspaces/:id/promote, /api/workspaces/:id/uploads or /api/sessions, or the PATCH matched /api/sessions/:id
+- **THEN** the mapper returns exact400 bad_request without rawdetails; a method other than the owner identity's own method (for example PATCH /api/sessions, POST /api/sessions/:id, DELETE /api/sessions/:id), lookalike/raw-concrete identities and registered unowned routes staygeneric500; ownership is decided solely by the shared mapper's exact thirty-eight-identity (method + route) set, not by whichever module registered the route
+
+#### Scenario: Cache policy remains route-owned
+- **WHEN** each of the thirty-seven typed errors passes through an existing no-store-owning route and the shared mapper
+- **THEN** the response preserves exact Cache-Control no-store and exact typed envelope, without widening that route's auth error vocabulary
+- **WHEN** an existing non-auth route emits401/204 without its own cache policy
+- **THEN** it SHALL NOT inherit auth no-store or clear-cookie side effects; this additive mapper change SHALL NOT install a global cache hook
+
+#### Scenario: 工作空间 parser owner 的真实 HTTP 边界
+- **WHEN** the production POST /api/workspaces and /api/workspaces/:id/dirs routes mounted by createApp (16 KiB body limit, route-owned no-store) receive genuine malformed/empty/unsupported/oversized content-parser errors with a real login cookie
+- **THEN** exact400 bad_request is returned before their handlers run, with the route's own no-store preserved; the thirty-eight-owner policy covers these two identities alongside the thirty-six other owners
+- **WHEN** the same parser failures hit a registered non-POST or lookalike route (proved by explicitly registered test probes), or an owner handler throws a forged parser/code/status/validation-shaped programmer error
+- **THEN** the existing generic500 boundary remains and raw internal details are not disclosed
+- **WHEN** unauthenticated requests hit those protected production workspace routes with invalid bodies
+- **THEN** the existing guard returns401 before parser or handler work
+
+#### Scenario: 回合控制 parser owner 的真实 HTTP 边界
+- **WHEN** the production POST /api/sessions/:id/fork and /api/sessions/:id/approvals/:approvalId routes mounted by createApp receive genuine malformed/empty/unsupported/oversized content-parser errors with a real owner cookie
+- **THEN** exact400 bad_request with the route's no-store is returned before any supervisor call, omp frame or database write
+- **WHEN** malformed, empty or unsupported-media inputs arrive unauthenticated on any of the four routes, or with a foreign/unknown session id
+- **THEN** 401 respectively the identical 404 is returned before parser or handler work
+
+#### Scenario: bodyless 归属路由拒绝任何 body
+- **WHEN** the bodyless production POST /api/sessions/:id/stop or /api/sessions/:id/regenerate receives, with a real owner cookie on a running or done session, any parsed body (including `{}`), an empty or malformed JSON body, an unsupported media type or a body above its minimal legal body limit
+- **THEN** like bodyless `/api/auth/logout`, exact400 bad_request with the route's no-store is returned before any supervisor call, `abort`/`branch` frame or database write, and the same request without a body keeps its normal behaviour
+
+#### Scenario: 会话元数据 parser owner 的真实 HTTP 边界
+- **WHEN** the production POST /api/sessions mounted by createApp receives, with a real owner cookie, a malformed JSON body, an empty body declared `application/json`, a `text/plain` body or a body above its limit
+- **THEN** exact400 bad_request with no-store is returned and no session row or audit row is written
+- **WHEN** the same route receives no body at all (no Content-Type, no content), or the JSON body `{}`
+- **THEN** 201 with the default session view is returned: `scene` null, `workspaceId` the id of the temporary workspace created for that session and `temporaryWorkspace` true (session-metadata「会话创建与空间绑定」); the two requests yield two different workspace ids
+- **WHEN** the production PATCH /api/sessions/:id receives the same four content-parser failures on an owned session
+- **THEN** exact400 bad_request with no-store is returned and the session row is unchanged; on a foreign or unknown id the identical404 not_found is returned before parsing; unauthenticated requests on either route receive401 before parsing
+- **WHEN** DELETE /api/sessions/:id is sent with a JSON body on an owned idle session
+- **THEN** the body is ignored and the route returns204 exactly as without a body; DELETE is not part of the parser-owner set
+- **WHEN** DELETE /api/sessions/:id is sent on an owned idle session with `Content-Type: application/json` and a malformed JSON body
+- **THEN** the content-parser error stays generic500 (the non-owner mapping of 「产品路由身份在共享映射器中的归属」, not a400 envelope), the session row, its audit trail and any live process are unchanged, and a following bodyless DELETE returns204
+
+#### Scenario: 归档与撤回冲突的错误码
+- **WHEN** 测试路由分别抛出 `HttpError("session_archived")` 与 `HttpError("undo_conflict")`
+- **THEN** 响应分别为 409 `{"error":{"code":"session_archived","message":"会话已归档，恢复后才能继续对话"}}` 与 409 `{"error":{"code":"undo_conflict","message":"其它会话在这之后改动过工作空间"}}`；二者与 `session_busy`、`conflict`、`approval_settled` 的 code 与 message 互不相同
+
+#### Scenario: 撤回与转正路由属于归属集
+- **WHEN** 已认证的所有者以 malformed JSON、空 JSON body、`text/plain` 或超过 body limit 的请求体调用 `POST /api/sessions/<自己的会话>/undo` 与 `POST /api/workspaces/<自己的临时空间>/promote`
+- **THEN** 均为 exact 400 `bad_request` 与 no-store，发生在任何行写入、文件改动与进程调用之前
+
+#### Scenario: 上传超限码的信封形状
+- **WHEN** 测试路由抛出 `HttpError("upload_too_large")`
+- **THEN** 响应为 413 `{error:{code:"upload_too_large",message:"文件超过大小上限"}}`，无 Fastify 默认 error 字段；`HttpError("preview_too_large")` 仍为 413 与其自己的 code/message；伪造 `{code:"upload_too_large",statusCode:413}` 的普通对象仍为 generic 5xx
+
+#### Scenario: 上传路由的 parser 归属
+- **WHEN** 已认证 owner 以 `Content-Type: application/json`、`text/plain` 或 `multipart/form-data` 请求 `POST /api/workspaces/:id/uploads`（自有空间）；以同样的媒体类型请求他人的空间；匿名以任意媒体类型请求
+- **THEN** 依次为 exact 400 `bad_request`、404 `not_found`、401，均为统一信封与 no-store，没有文件与审计写入
+- **WHEN** 已认证 owner 以 `application/octet-stream` 发送超过 `UPLOAD_MAX_BYTES` 的请求体
+- **THEN** 响应为 413 `upload_too_large`，不是 400 `bad_request`
+
+#### Scenario: 工作空间新增两条归属路由
+- **WHEN** 有效会话对自己的工作空间 `POST /api/workspaces/:id/move` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 16 KiB 的 body；`POST /api/workspaces/:id/preview-token` 携 `{}`、malformed JSON 或 `text/plain` body；`DELETE /api/workspaces/:id/entries?path=a` 携 malformed JSON body
+- **THEN** 前两条路由的每一例都是 exact 400 `bad_request` 信封，没有文件被移动、没有令牌被签发、没有审计行；`DELETE` 一例保持 generic 500 且目标未被移动（非归属已注册路由的既有语义）
+
+#### Scenario: 两个 s1d 新码
+- **WHEN** 测试路由分别抛出 `HttpError("forbidden")` 与 `HttpError("model_in_use")`
+- **THEN** 响应分别为 403 `{"error":{"code":"forbidden","message":"没有权限执行此操作"}}` 与 409 `{"error":{"code":"model_in_use","message":"该模型是缺省模型，先把缺省换成别的模型"}}`，均带 no-store；码表恰三十七码，`forbidden` 与 `account_disabled`、`sandbox_denied` 的 code / message 互不相同，`model_in_use` 与其余十六个 409 码互不相同
+
+#### Scenario: 专家、技能与会话能力的归属路由
+- **WHEN** 有效会话对 `POST /api/experts` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 64 KiB 的 body；对自己的专家 `PUT /api/experts?id=<id>` 携同四种输入；对 `PUT /api/experts?id=builtin:data-analyst`、不带 `id` 的 `PUT /api/experts`、`id` 为他人专家的 `PUT /api/experts` 各携 malformed JSON；对 `PUT /api/skills/defaults` 与自己会话的 `PUT /api/sessions/<id>/capabilities` 携同四种输入（后两者超过 64 KiB）；对他人会话的 `PUT /api/sessions/<id>/capabilities` 携 malformed JSON；匿名对这四条路由携 malformed JSON
+- **THEN** 自己的专家、`POST /api/experts`、`PUT /api/skills/defaults` 与自己会话的每一例都是 exact 400 `bad_request` 信封与 no-store，没有表写入、偏好写入或审计行；内置专家一例 403 `forbidden`、缺 `id` 一例 400 `bad_request`、他人专家一例 404 `not_found`、他人会话一例 404 `not_found`，均在 body 解析之前；匿名各例 401；`DELETE /api/experts?id=<自己的专家>` 携 malformed JSON body 保持 generic 500 且专家未被删除（非归属已注册路由的既有语义）
+
+#### Scenario: 连接器的归属路由
+- **WHEN** 管理员对 `POST /api/connectors` 与 `PUT /api/connectors?name=<已登记>` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 64 KiB 的 body；对 `POST /api/connectors/probe?name=<已登记>` 携 `{}`、malformed JSON 或 `text/plain` body；对不带 `name` 的 `PUT /api/connectors` 与 `name` 未登记的 `PUT /api/connectors` 各携 malformed JSON；普通用户对 `POST /api/connectors`、`PUT /api/connectors?name=<已登记>`、`POST /api/connectors/probe?name=<已登记>` 各携 malformed JSON；任一账号对 `PUT /api/connectors/defaults` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 16 KiB 的 body；匿名对这四条路由携 malformed JSON；管理员对 `DELETE /api/connectors?name=<已登记>` 携 malformed JSON body
+- **THEN** 管理员的前三组与 `PUT /api/connectors/defaults` 的每一例都是 exact 400 `bad_request` 信封与 no-store，没有表写入、偏好写入、审计行、探活请求，`mcp.json` 字节与 mtime 不变；缺 `name` 一例 400 `bad_request`、未登记一例 404 `not_found`、普通用户各例 403 `forbidden`，均在 body 解析之前；匿名各例 401；`DELETE` 一例保持 generic 500 且连接器未被删除（非归属已注册路由的既有语义）
+
+#### Scenario: 七个挂载码
+- **WHEN** 测试路由分别抛出 `HttpError("mount_disabled")`、`HttpError("mount_failed")`、`HttpError("mount_offline")`、`HttpError("mount_limit")`、`HttpError("mount_host_rejected")`、`HttpError("mount_read_only")` 与 `HttpError("mount_boundary")`
+- **THEN** 响应依次为 503、502、409、409、403、403、409，body 恰为 `{"error":{"code":<该码>,"message":<该码的文案>}}`，文案依次为 `服务器未启用远程挂载`、`挂载失败，请检查主机、路径与凭证`、`挂载已离线，重新连接后可用`、`挂载数已达上限`、`该主机不允许挂载`、`只读挂载不能写入`、`挂载目录内不能删除，也不能跨挂载移动`，均带 no-store；码表恰三十七码，七个挂载码的 code 与 message 与同状态的既有码互不相同；伪造 `{code:"mount_failed",statusCode:502}` 的普通对象仍为 generic 5xx
+
+#### Scenario: 挂载的归属路由
+- **WHEN** 有效会话对自己的正式空间 `POST /api/workspaces/:id/mounts` 携 malformed JSON、空 JSON body、`text/plain` body 或超过 64 KiB 的 body；对他人的空间携 malformed JSON；未配置 `RCLONE_BIN` 时对自己的空间携 malformed JSON；管理员对 `POST /api/mount-sources` 携同四种输入（超过 16 KiB）；普通用户对 `POST /api/mount-sources` 携 malformed JSON；匿名对这两条路由携 malformed JSON；`DELETE /api/workspaces/:id/mounts/<自己的挂载>` 与管理员 `DELETE /api/mount-sources/<id>` 各携 malformed JSON body
+- **THEN** 自己空间与管理员的每一例都是 exact 400 `bad_request` 信封与 no-store，没有私有目录、挂载点、子进程、表写入与审计行；他人空间一例 404 `not_found`、未配置一例 503 `mount_disabled`、普通用户一例 403 `forbidden`，均在 body 解析之前；匿名各例 401；两个 `DELETE` 各保持 generic 500 且挂载 / 挂载源未被删除（非归属已注册路由的既有语义）
+
+#### Scenario: 十二个知识库码
+- **WHEN** 测试路由分别抛出 `HttpError("kb_disabled")`、`HttpError("kb_unavailable")`、`HttpError("kb_rejected")`、`HttpError("kb_not_ready")`、`HttpError("kb_rebuilding")`、`HttpError("kb_rebuild_required")`、`HttpError("kb_limit")`、`HttpError("kb_source_unreadable")`、`HttpError("kb_model_in_use")`、`HttpError("kb_chat_model_locked")`、`HttpError("kb_document_busy")` 与 `HttpError("kb_file_unsupported")`
+- **THEN** 响应依次为 503、503、400、409、409、409、409、409、409、409、409、400，body 恰为 `{"error":{"code":<该码>,"message":<该码的文案>}}`，文案依次为 `知识库未启用`、`知识库服务暂不可用`、`知识库服务拒绝了这个请求`、`知识库模型未就绪，请管理员在模型设置里保存知识库嵌入模型`、`知识库正在重建，请稍后再试`、`更换嵌入模型需要重建全部知识库，请确认后再保存`、`知识库或文档数已达上限`、`源文件无法读取或已变动，未重新入库`、`该模型是知识库对话模型，先在知识库模型设置里换掉它`、`已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型`、`文档正在停止解析，请稍后再试`、`这个文件不能入库：模板不支持这种类型，或文件是空的`，均带 no-store；码表恰三十七码；伪造 `{code:"kb_unavailable",statusCode:503}` 的普通对象仍为 generic 5xx
+
+#### Scenario: 知识库的归属路由
+- **WHEN** 有效会话对 `POST /api/kb/bases`、`POST /api/kb/bases/:id/documents`、`POST /api/kb/bases/:id/retrieval`（自己的库）、`PUT /api/kb/settings`（管理员）携 malformed JSON、空 JSON body 或 `text/plain` body；对 `POST /api/kb/bases/:id/documents/reingest`、`POST /api/kb/settings/probe`（含 `?target=rerank`）、`POST /api/kb/settings/rebuild` 携 `{}`；对 `POST /api/kb/bases/:id/uploads` 携 `text/plain` body
+- **THEN** 每次都是 exact 400 `bad_request`，发生在任何出站请求、文件读取与写入之前；归属集恰为三十九条
