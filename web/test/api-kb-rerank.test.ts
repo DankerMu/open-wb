@@ -5,6 +5,9 @@
  * 期望值抄自规格，不从实现推：ragflow-backend「知识库模型设置」的读视图恰为八键，`rerank` 为
  * `{name, baseUrl, probe:{status, message, at}}` 或 `null`，各字段同 `embedding`；PUT body 的 `rerank` 为
  * `{name, baseUrl, apiKey?}` 或 `null`（tasks.md「组 6 首刀约定」的 web 一条）。
+ *
+ * tasks 6.6（#1927）：`probeKbModel("rerank")` 发 `POST /api/kb/settings/probe?target=rerank`，不带 body
+ *（tasks.md「组 6 第三刀约定」；ragflow-backend「知识库模型设置」的「探活目标的取值」）。
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -32,13 +35,14 @@ const VIEW: KbSettingsView = {
   rebuildFailed: 0,
 };
 
-/** 设置读视图的两个代表方法：读与写。四个方法共用一个解析器，全量矩阵在 `api-kb.test.ts`。 */
+/** 设置读视图的三个代表方法：读、写与重排探活。四个方法共用一个解析器，全量矩阵在 `api-kb.test.ts`。 */
 const METHODS = [
   { method: "getKbSettings", call: (client: ApiClient) => client.getKbSettings() },
   {
     method: "updateKbSettings",
     call: (client: ApiClient) => client.updateKbSettings({ rerank: null }),
   },
+  { method: "probeKbModel(rerank)", call: (client: ApiClient) => client.probeKbModel("rerank") },
 ];
 
 const ACCEPTED: Case[] = [
@@ -121,5 +125,40 @@ describe("updateKbSettings 的 rerank input 只发所给的键", () => {
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/kb/settings");
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "PUT", body });
+  });
+});
+
+describe('probeKbModel("rerank") 的请求', () => {
+  const URL = "/api/kb/settings/probe?target=rerank";
+
+  it("恰发一次 POST ?target=rerank，不带 body 与 Content-Type", async () => {
+    const fetchMock = stub(jsonResponse(VIEW));
+
+    await expect(createApiClient().probeKbModel("rerank")).resolves.toStrictEqual(VIEW);
+
+    expect(fetchMock.mock.calls).toStrictEqual([
+      [URL, { method: "POST", credentials: "same-origin" }],
+    ]);
+  });
+
+  it("传入的 signal 进请求", async () => {
+    const fetchMock = stub(jsonResponse(VIEW));
+    const { signal } = new AbortController();
+
+    await createApiClient().probeKbModel("rerank", { signal });
+
+    expect(fetchMock.mock.calls).toStrictEqual([
+      [URL, { method: "POST", credentials: "same-origin", signal }],
+    ]);
+  });
+
+  it("400 错误信封原样保留，不重发", async () => {
+    const envelope = { error: { code: "bad_request", message: "target 取值不合法" } };
+    const fetchMock = stub(jsonResponse(envelope, 400));
+
+    const error = await captureApiError(createApiClient().probeKbModel("rerank"));
+
+    expect(error).toMatchObject({ status: 400, ...envelope.error });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

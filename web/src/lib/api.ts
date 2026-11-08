@@ -268,7 +268,10 @@ export type ApiClient = {
     input: UpdateKbSettingsInput,
     options?: ApiRequestOptions,
   ): Promise<KbSettingsView>;
-  probeKbEmbedding(options?: ApiRequestOptions): Promise<KbSettingsView>;
+  probeKbModel(
+    target: "embedding" | "rerank",
+    options?: ApiRequestOptions,
+  ): Promise<KbSettingsView>;
   retryKbRebuild(options?: ApiRequestOptions): Promise<KbSettingsView>;
   listKnowledgeBases(options?: ApiRequestOptions): Promise<BaseView[]>;
   createKnowledgeBase(

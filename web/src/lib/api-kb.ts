@@ -178,7 +178,7 @@ type KbMethods = Pick<
   | "getKbStatus"
   | "getKbSettings"
   | "updateKbSettings"
-  | "probeKbEmbedding"
+  | "probeKbModel"
   | "retryKbRebuild"
   | "listKnowledgeBases"
   | "createKnowledgeBase"
@@ -545,8 +545,9 @@ export function createKbMethods(
       return parsed("/api/kb/settings", init, 200, parseSettings);
     },
 
-    probeKbEmbedding(options) {
-      return parsed("/api/kb/settings/probe", bodyless(options?.signal), 200, parseSettings);
+    probeKbModel(target, options) {
+      const path = `/api/kb/settings/probe?target=${target}`;
+      return parsed(path, bodyless(options?.signal), 200, parseSettings);
     },
 
     retryKbRebuild(options) {
