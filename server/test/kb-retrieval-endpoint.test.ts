@@ -19,7 +19,7 @@ import {
 import { KB_UNAVAILABLE } from "./kb-settings-helpers.js";
 import { holdWriteLock } from "./kb-upload-helpers.js";
 import { OWNER } from "./mounts-manager-helpers.js";
-import { padded, send } from "./mounts-rest-helpers.js";
+import { auditRows, padded, send } from "./mounts-rest-helpers.js";
 
 const open = useIngestWorlds();
 
@@ -91,11 +91,24 @@ function expectAnswer(response: LightMyRequestResponse, status: number, body: un
   expect(response.json()).toEqual(body);
 }
 
+const auditCount = (world: IngestWorld): number => auditRows(world.fw.world).length;
+
+/** 发一次检索，断言 `audit_events` 的总行数不变：检索本身与被拒的请求都不写任何一种审计。 */
+async function postWithoutAudit(
+  world: IngestWorld,
+  body: unknown,
+  options?: PostOptions,
+): Promise<LightMyRequestResponse> {
+  const before = auditCount(world);
+  const response = await post(world, body, options);
+  expect(auditCount(world)).toBe(before);
+  return response;
+}
+
 /** 400 `bad_request`，零个 RAGFlow 请求，没有审计。 */
-function expectRefused(world: IngestWorld, response: LightMyRequestResponse): void {
-  expectAnswer(response, 400, BAD_REQUEST);
+async function expectRefused(world: IngestWorld, body: unknown): Promise<void> {
+  expectAnswer(await postWithoutAudit(world, body), 400, BAD_REQUEST);
   expect(world.lines()).toEqual([]);
-  expect(world.audits(KIND)).toEqual([]);
 }
 
 const waitForWaiters = (world: IngestWorld, count: number) =>
@@ -118,7 +131,7 @@ describe("参数不变只检索", () => {
       { documentId: "rf-local", content: "# 销售额口径", similarity: 0.61 },
       { documentId: "rf-unknown", content: "无本地行", similarity: 0.9 },
     ]);
-    const response = await post(world, SAME);
+    const response = await postWithoutAudit(world, SAME);
     expectAnswer(response, 200, {
       hits: [{ documentId: doc.id, name: "sales.md", similarity: 0.61, content: "# 销售额口径" }],
       retrieval: STORED,
@@ -133,27 +146,25 @@ describe("参数不变只检索", () => {
         page_size: 6,
       },
     ]);
-    expect(world.audits(KIND)).toEqual([]);
     expect(storedOf(world)).toEqual(before);
   });
 
   it("零命中与全部关联不上：两次都是 200 {hits:[], retrieval:{0.2, 0.7}}", async () => {
     const world = await open();
-    expectAnswer(await post(world, SAME), 200, { hits: [], retrieval: STORED });
+    expectAnswer(await postWithoutAudit(world, SAME), 200, { hits: [], retrieval: STORED });
     world.fake.setRetrievalHits(world.datasetId, [
       { documentId: "rf-x", content: "x", similarity: 0.7 },
       { documentId: "rf-y", content: "y", similarity: 0.6 },
     ]);
-    expectAnswer(await post(world, SAME), 200, { hits: [], retrieval: STORED });
+    expectAnswer(await postWithoutAudit(world, SAME), 200, { hits: [], retrieval: STORED });
     expect(retrievals(world)).toHaveLength(2);
   });
 
   it("快路径不拿锁：重建器持锁、库为 ready 时提交已存参数，200，恰一次检索，没有审计", async () => {
     const world = await open();
     const release = holdWriteLock(world, "rebuild");
-    expectAnswer(await post(world, SAME), 200, { hits: [], retrieval: STORED });
+    expectAnswer(await postWithoutAudit(world, SAME), 200, { hits: [], retrieval: STORED });
     expect(retrievals(world)).toHaveLength(1);
-    expect(world.audits(KIND)).toEqual([]);
     await release();
   });
 });
@@ -214,12 +225,11 @@ describe("写回失败不检索", () => {
     const world = await open();
     const before = storedOf(world);
     world.fw.world.db.exec(trigger);
-    const response = await post(world, CHANGED);
+    const response = await postWithoutAudit(world, CHANGED);
     expect(response.statusCode).toBe(500);
     expect(response.body).toBe(JSON.stringify(GENERIC_500));
     expect(storedOf(world)).toEqual(before);
     expect(retrievals(world)).toEqual([]);
-    expect(world.audits(KIND)).toEqual([]);
   });
 });
 
@@ -240,13 +250,13 @@ describe("body 校验", () => {
     ["body 为 []", []],
   ])("%s：400 bad_request，零请求，没有审计", async (_name, body) => {
     const world = await open();
-    expectRefused(world, await post(world, body));
+    await expectRefused(world, body);
   });
 
   it("threshold:1e999（解析为无穷大）：400 bad_request", async () => {
     const world = await open();
     const raw = '{"question":"销售额","threshold":1e999,"vectorWeight":0.7}';
-    expectRefused(world, await post(world, { raw, type: "application/json" }));
+    await expectRefused(world, { raw, type: "application/json" });
   });
 
   it.each([
@@ -255,7 +265,7 @@ describe("body 校验", () => {
     ["1000 码点（2000 个 UTF-16 码元）", "😀".repeat(1000)],
   ])("%s：200，RAGFlow 收到的 question 逐字相同", async (_name, question) => {
     const world = await open();
-    expect((await post(world, { ...SAME, question })).statusCode).toBe(200);
+    expect((await postWithoutAudit(world, { ...SAME, question })).statusCode).toBe(200);
     expect(retrievals(world)).toEqual([expect.objectContaining({ question })]);
   });
 
@@ -268,6 +278,14 @@ describe("body 校验", () => {
     ]);
   });
 
+  it("恰 16 KiB 的合法 body：200，恰一次检索（上限是路由的 16 KiB）", async () => {
+    const world = await open();
+    const body = padded(16 * 1024, SAME);
+    expect(Buffer.byteLength(body.raw)).toBe(16 * 1024);
+    expectAnswer(await postWithoutAudit(world, body), 200, { hits: [], retrieval: STORED });
+    expect(retrievals(world)).toEqual([expect.objectContaining({ question: "销售额" })]);
+  });
+
   it.each([
     ["malformed JSON", { raw: "{not json", type: "application/json" }],
     ["空 JSON body", { raw: "", type: "application/json" }],
@@ -275,14 +293,14 @@ describe("body 校验", () => {
     ["超过 16 KiB", padded(16 * 1024 + 1, SAME)],
   ])("归属路由 %s：exact 400，零个 RAGFlow 请求", async (_name, raw) => {
     const world = await open();
-    expectRefused(world, await post(world, raw));
+    await expectRefused(world, raw);
   });
 });
 
 describe("判定次序", () => {
   it("别人的 id 带坏 JSON：404，归属先于解析", async () => {
     const world = await open();
-    const response = await post(
+    const response = await postWithoutAudit(
       world,
       { raw: "{not json", type: "application/json" },
       { who: "admin" },
@@ -294,16 +312,15 @@ describe("判定次序", () => {
   it("自己的 rebuilding 库带坏 body：400，body 先于 state", async () => {
     const world = await open();
     world.setState("rebuilding");
-    expectRefused(world, await post(world, { ...SAME, threshold: 2 }));
+    await expectRefused(world, { ...SAME, threshold: 2 });
   });
 
   it("所有权：别人的 id 与不存在的 id，合法 body 且参数不同，404，零请求，没有审计，A 的参数不变", async () => {
     const world = await open();
     const before = storedOf(world);
-    expectAnswer(await post(world, CHANGED, { who: "admin" }), 404, NOT_FOUND);
-    expectAnswer(await post(world, CHANGED, { baseId: ABSENT_ID }), 404, NOT_FOUND);
+    expectAnswer(await postWithoutAudit(world, CHANGED, { who: "admin" }), 404, NOT_FOUND);
+    expectAnswer(await postWithoutAudit(world, CHANGED, { baseId: ABSENT_ID }), 404, NOT_FOUND);
     expect(world.lines()).toEqual([]);
-    expect(world.audits(KIND)).toEqual([]);
     expect(storedOf(world)).toEqual(before);
   });
 
@@ -312,7 +329,7 @@ describe("判定次序", () => {
     async (state) => {
       const world = await open();
       world.setState(state);
-      expectAnswer(await post(world, SAME), 409, REBUILDING);
+      expectAnswer(await postWithoutAudit(world, SAME), 409, REBUILDING);
       expect(world.lines()).toEqual([]);
     },
   );
@@ -323,23 +340,21 @@ describe("写回与写锁", () => {
     const world = await open();
     const before = storedOf(world);
     const release = holdWriteLock(world, "rebuild");
-    expectAnswer(await post(world, CHANGED), 409, REBUILDING);
+    expectAnswer(await postWithoutAudit(world, CHANGED), 409, REBUILDING);
     expect(storedOf(world)).toEqual(before);
     expect(world.lines()).toEqual([]);
-    expect(world.audits(KIND)).toEqual([]);
     await release();
   });
 
   it("排队期间库转入 rebuilding：锁内重读，409，零请求，没有审计", async () => {
     const world = await open();
     const release = holdWriteLock(world);
-    const pending = post(world, CHANGED);
+    const pending = postWithoutAudit(world, CHANGED);
     await waitForWaiters(world, 1);
     world.setState("rebuilding");
     await release();
     expectAnswer(await pending, 409, REBUILDING);
     expect(world.lines()).toEqual([]);
-    expect(world.audits(KIND)).toEqual([]);
   });
 
   it("写回排在入库之后：入库挂起上传时以不同参数检索，入库结束后才写回，检索在上传之后带新参数", async () => {
