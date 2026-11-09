@@ -695,7 +695,8 @@ modelRoles:
 - **构建**：在仓库根执行 `docker build -f deploy/app/Dockerfile .`，或 `docker compose -f deploy/app/compose.yml up -d --build`（compose 的构建上下文已指向仓库根）。
   - 镜像只有 `linux/amd64`，因为 `scripts/omp-fetch.sh` 只取 Linux x86_64 的 omp。Apple 芯片的机器用 `docker buildx build --platform linux/amd64 -f deploy/app/Dockerfile -t <tag> --load .`。
   - 构建要能访问 GitHub release、Debian 源与 npm 源。
-  - 忽略清单是 `deploy/app/Dockerfile.dockerignore`，只有 BuildKit 认它。若用旧构建器，本机的 `node_modules` 和 `var/omp/omp`（darwin 版）会被带进构建，`omp-fetch.sh` 校验哈希不符就失败。
+  - CI（job `browser-image`，#1932）先 `make omp-fetch`（经 `actions/cache` 缓存、SHA256 校验），再以 `--build-context omp-seed=var/omp` 构建：Dockerfile 的 `omp-seed` 阶段缺省为空，带上该参数时已校验的二进制铺进构建阶段的 `var/omp/`，`omp-fetch.sh` 校验通过即跳过下载，不符则构建失败。默认不带该参数时照常下载，需要访问 GitHub release。
+  - 本 Dockerfile 需要 BuildKit：忽略清单 `deploy/app/Dockerfile.dockerignore`、`COPY --chmod`、`--build-context` 与空的 `scratch` 阶段都依赖它。忽略清单排除 `var/`，本机的 `var/omp/omp`（darwin 版）不进构建上下文。
 - **镜像内容**：构建阶段以 `node:24.13.1-bookworm` 跑 `npm ci` 和 web、server 构建，再跑 `omp-fetch.sh`（SHA256 校验）。运行阶段以 `node:24.13.1-bookworm-slim` 为底，装五个包 `chromium`、`fonts-noto-cjk`、`fonts-dejavu-core`、`sudo`、`ca-certificates`，只拷入编译产物、server 的生产依赖和 omp（`/opt/workbuddy/omp`，`0755 root`）。
   - `/usr/bin/chromium` 是 Debian 的 shell 包装脚本，是合法的 `BROWSER_BIN`。
   - `fontconfig` 随 `chromium` 作为依赖装入，字体缓存在构建时生成。只读根下以 omp 身份截图，没有 `No writable cache directories` 告警。

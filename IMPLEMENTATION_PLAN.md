@@ -519,8 +519,9 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 > CK-14（重排模型）为 `待签`，agent 不代签；三行签完 Epic 才关。
 > 签收后可启动的是 **S2c 会话接入与可见范围**（依赖 S2b、S1c）：`kb_search` 的分派与注册、agentic 环的真实触发验收（ADR-0017）、
 > 可见范围四档、共享检索审计、附件双语义（范围以上文 S2c 一节为准）。
-> 开着的计划外 issue：#1932（CI 的 omp 二进制缓存，待 owner 决定）、#1935（`omp-fetch.sh` 中断后仍走回退下载）。
-> 计划外已交付：omp-fetch 主地址失败时经 API 资产地址回退（#1934，change `ci-omp-fetch-resilience` 已归档）。
+> 计划外已交付：omp-fetch 主地址失败时经 API 资产地址回退（#1934，change `ci-omp-fetch-resilience` 已归档）；
+> `omp-fetch.sh` 中断后不再走回退下载（#1935，change `omp-fetch-signal-abort` 已归档）；
+> CI 的 omp 二进制缓存（#1932，owner 2026-11-09 裁定加缓存，change `ci-omp-binary-cache`）。
 >
 > 以下为更早的记录。
 
