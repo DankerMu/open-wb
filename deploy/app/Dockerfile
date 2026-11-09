@@ -1,9 +1,14 @@
 # app 参考镜像（browser-runtime「参考部署镜像」；design D7）：app + omp + Chromium + 字体，部署方自建、不发布。
 # 以仓库根为上下文：docker build -f deploy/app/Dockerfile .（Apple 芯片加 --platform linux/amd64：omp-fetch.sh 只认 Linux x86_64）。
+# CI 另加 --build-context omp-seed=var/omp 带入已校验的 omp 二进制，omp-fetch.sh 校验通过即跳过下载；不带时照常下载。
 # 运行时的隔离（只读根、三个挂载、capability）在 compose.yml；忽略清单在 Dockerfile.dockerignore（BuildKit）。
+# omp 种子阶段，缺省为空；--build-context omp-seed=<目录> 以该目录取代它，其内容铺进构建阶段的 var/omp/。
+FROM scratch AS omp-seed
+
 FROM node:24.13.1-bookworm AS build
 WORKDIR /src
 COPY . .
+COPY --from=omp-seed / var/omp/
 RUN npm ci \
   && npm run build --workspace web \
   && npm run build --workspace server \
