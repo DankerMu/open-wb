@@ -23,5 +23,5 @@ job SHALL 进入 `all-checks-passed.needs`；`scripts/test-ci-harness.sh` 与 `A
 仓库 SHALL NOT 发布该镜像或引用镜像仓库。
 
 #### Scenario: 镜像可构建且身份正确
-- **WHEN** 在任一 Docker 主机上（CI 由「CI browser-image job」执行）`docker build -f deploy/app/Dockerfile .`，再在该镜像的容器内检查
+- **WHEN** 在任一 Docker 主机上 `docker build -f deploy/app/Dockerfile .`（CI 由「CI browser-image job」执行，带 `--build-context omp-seed=var/omp`，构建阶段不下载；不带种子的默认路径不在 CI 内构建，其与带种子路径的差别只在 `var/omp/` 初始为空、由 `omp-fetch.sh` 照常下载），再在该镜像的容器内检查
 - **THEN** 构建成功；以 compose 的安全标志（只读根、三个挂载、`/tmp` tmpfs）运行时服务启动成功、`GET /api/healthz` 为 200；`/opt/workbuddy/omp --version` 输出 `omp/18.12.3`；`id -u workbuddy` 为 `10001`、`id -u omp` 为 `10002`，两者的主组都是 `workbuddy`（gid `10001`）；`visudo -c` 通过且 `/etc/sudoers.d/workbuddy-omp` 恰为上述两条规则；`/usr/bin/chromium` 可执行；`/usr/share/fonts/opentype/noto/` 下有 Noto CJK 字体文件；`docker image inspect` 的环境变量与镜像文件系统里都没有 `MODEL_UPSTREAM_API_KEY` 的取值（构建前把一个哨兵值同时放进构建 shell 的环境与构建上下文根目录的 `.env`，构建后在镜像 Env、`docker history --no-trunc` 与导出的根文件系统里搜，导出一路以一个已知存在的字符串作对照）；`visudo -c` 与 sudoers 文件读取以 `docker exec -u 0` 执行；服务进程的 umask 为 `0007`（`/proc/<pid>/status` 的 `Umask`）；运行镜像里没有 `/app/server/src` 与开发依赖（如 `/app/node_modules/typescript`、`vite`）

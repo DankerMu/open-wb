@@ -91,7 +91,7 @@ Required evidence：
 - 本机 BuildKit 的种子阶段实测（D3）写进 PR。
 
 Risk notes：
-- GitHub cache 在 7 天无访问后逐出，仓库总量上限 10 GB。omp 约 190 MB，npm 缓存另算，量级可接受。
+- GitHub cache 在 7 天无访问后逐出，仓库总量上限 10 GB。omp 约 250 MB（CI 日志的种子上下文为 256.68MB），npm 缓存另算，量级可接受。
 - 缓存按分支作用域隔离：PR 能读 master 的缓存，master push 的 CI 写入后各 PR 都能命中。fork PR 不能写 master 作用域。
 - `hashFiles` 在 job 开始时按 checkout 后的文件计算，与 `make omp-fetch` 实际执行的脚本是同一份。
 - 坏缓存条目（概率极低，只有 job 成功后才保存）会让 `omp-fetch.sh` 删文件并非零退出；失败的 job 仍会访问它，它就不会被逐出。处置：`gh cache delete <key> --repo DankerMu/open-wb` 后重跑。
