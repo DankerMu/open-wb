@@ -258,6 +258,10 @@ describe("父目录未加载的改动文件可选中", () => {
 
       await waitFor(() => expect(rowNames(region)).toStrictEqual(["项目", "deep", "y.md"]));
       expect(description(button(region, "y.md"))).toBe(MARK);
+      // 等过 300 毫秒的合并窗口再选中：在窗口内选中的话，到点的那一轮局部刷新会把当前文件重取一次
+      // （「随助手改动刷新」），「恰一次 file」就取决于机器快慢了（#1952）。
+      await waitMs(350);
+      await settled();
       fireEvent.click(button(region, "y.md"));
       await previewShows(region, "乙的正文");
       await settled();
