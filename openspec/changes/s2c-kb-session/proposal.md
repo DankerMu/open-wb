@@ -100,11 +100,11 @@
 
 - 服务端：
   - 新文件 `server/src/sessions/omp/host-tools.ts`（帧的收发、取消、退出与过大降级）、`server/src/sessions/host-tool-align.ts`（派发前对齐第 3 步）、`server/src/sessions/kb-hits.ts`（`kb.hits` 校验）、`server/src/sessions/store-knowledge-bases.ts`（引用的落库与读出）与 `server/src/kb/session-search.ts`（`kb_search` 的定义与执行）。
-  - 改动 `omp/process.ts`、`omp/ui-requests.ts`、`omp/runtime.ts`（只透传）、`pool.ts`、`supervisor.ts`、`events.ts`、`turn-control.ts`、`rest.ts`、`prompt-attachments.ts`、`slash-commands.ts`、`store-branch.ts`、`branching.ts`、`branch-temp.ts`、`kb/retrieval.ts`、`kb/ragflow-retrieval.ts`、`kb/index.ts`、`app.ts`。
+  - 改动 `omp/process.ts`、`omp/ui-requests.ts`、`omp/runtime.ts`（只透传）、`pool.ts`、`supervisor.ts`、`events.ts`、`turn-control.ts`、`store.ts`、`rest.ts`、`prompt-attachments.ts`、`slash-commands.ts`、`store-branch.ts`、`branching.ts`、`branch-temp.ts`、`kb/retrieval.ts`、`kb/ragflow-retrieval.ts`、`kb/index.ts`、`app.ts`。
   - 新迁移 `052_chat_message_knowledge_bases.sql`。
 - 前端：
   - 新文件 `web/src/features/chat/kb-search-card.tsx`、`stream-kb-hits.ts`、`kb-refs-state.ts`、`kb-ref-picker.tsx`。
-  - 改动 `session-contract.ts`、`api-sessions.ts`、`stream.ts`、`capability-bar.tsx`、`attachment-chips.tsx`、`turn-actions.ts`、`message-segments.ts`、`message-segments-view.tsx`、`tool-summary.ts`。
+  - 改动 `session-contract.ts`、`api-sessions.ts`、`stream.ts`、`capability-bar.tsx`、`attachment-chips.tsx`、`turn-actions.ts`、`use-chat-session.ts`、`message-segments.ts`、`message-segments-view.tsx`、`tool-summary.ts`。
 - 测试夹具：
   - 假 omp 加 `host-tool`、`host-tool-parallel`、`host-tool-abort`、`host-tool-register-fail` 场景（新文件 `fake-omp-host-tool.mjs`）。
   - 受控假上游加 `WORKBUDDY_KB_SEARCH:` 标记（新文件 `fake-upstream-kb.mjs`）。

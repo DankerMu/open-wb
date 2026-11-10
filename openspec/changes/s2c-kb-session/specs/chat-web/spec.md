@@ -105,6 +105,10 @@ web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视�
 - **WHEN** 对一条 `thinkingSegments` 为 `[]` 的 running assistant 应用 thinking.end（`segment` 为 `{bodyOffset:0,thinkingOffset:0,thinkingLength:0,stepsBefore:0,thinkingMs:300}`）；另一例应用 `approvalId` 为 99（该消息没有这一审批）的 step.start；再对该 assistant 应用 turn.start
 - **THEN** 前者 `thinkingSegments` 恰为该段；中者新建步骤、`approvals` 不变；turn.start 后 `thinkingSegments` 回到 `[]`
 
+#### Scenario: 检索结果归约
+- **WHEN** 对 running assistant 依次应用 step.start(stepId 5, `kb_search`)、kb.hits `{messageId, stepId:5, intent:"查规则", bases:[…]}`、同一步骤的第二条 kb.hits（`intent:null`）；另一例应用 `stepId` 为 99（该消息没有这一步骤）的 kb.hits
+- **THEN** 步骤 5 的 `kbHits` 先为第一条的 `{intent, bases}`，再为第二条的（后到者胜），步骤的其余字段、正文与会话状态不变；后一例返回同一引用，不新建步骤
+
 ### Requirement: 事件流消费与续流
 `connectSessionEvents` SHALL 使用注入的 EventSourceCtor 建立编码 sessionId 的同源 events URL，并设置 withCredentials:true。调用方先取得初始完整快照并传入 initialCursor；连接器 SHALL 提供 close，并通过 loadSnapshot(signal)、同步 onSnapshot/onEvent、可选 onGap 和 onError 管理恢复与错误。API 方法和页面由其他模块拥有。
 连接器 SHALL 从命名 MessageEvent 的 data 解码负载、从 lastEventId 读取 canonical 安全整数 epoch:seq；十四类数据事件（含 `approval.request`、`approval.resolved`、`thinking.delta`、`thinking.end`、`files.changed`、`todo.updated`、`turn.retry`、`kb.hits`）均经过同一游标过滤。`error` 按严格键集 `{messageId,message,reason,status,detail}` 解码（`messageId` 安全整数，`message`、`reason` 非空字符串，`status` 为 `null` 或 100–599 的整数，`detail` 字符串，可为空串），`turn.retry` 按严格键集 `{messageId}`（安全整数）解码。`kb.hits` 按严格键集 `{messageId,stepId,intent,bases}` 解码：`messageId`、`stepId` 安全整数，`intent` 为 `null` 或非空字符串，`bases` 为 1–5 项、每项严格键集 `{kbId,name,status,hits}`（规则同 chat-stream「检索结果事件发布」）。`thinking.delta` 按严格键集 `{messageId,delta}`（`messageId` 安全整数、`delta` 非空字符串）解码，`thinking.end` 按严格键集 `{messageId,thinkingMs,segment}`（`messageId` 安全整数、`thinkingMs` 非负安全整数，`segment` 为严格键集 `{bodyOffset,thinkingOffset,thinkingLength,stepsBefore,thinkingMs}` 的对象、五个值都是非负安全整数——刚结束的那一段，不为 `null`）解码，`step.start` 按严格键集 `{messageId,stepId,name,detail,bodyOffset,approvalId}`（`messageId`/`stepId` 安全整数，`name`/`detail` 字符串，`bodyOffset` 非负安全整数，`approvalId` 为 `null` 或安全整数）解码，`approval.request` 按严格键集 `{messageId,approvalId,tool,title,expiresAt,stepId}`（`stepId` 为 `null` 或安全整数，其余同既有规则）解码，`files.changed` 按严格键集 `{messageId,stepId,files}`（`messageId`/`stepId` 安全整数，`files` 的规则同快照步骤的非 null `changes`：1 至 50 项，每项严格键集 `{path,added,removed,kind}`）解码，`todo.updated` 按严格键集 `{messageId,todo}`（`messageId` 安全整数，`todo` 的规则同快照的 `todo`，含 `null`，见 session-todo `web 契约解析与归约`）解码。原生传输 error 不得被当作业务 error：CONNECTING 时保留状态并交给原生自动重连，CLOSED 时关闭并报告，不推断 HTTP 状态。已知事件的非法 payload/id SHALL 触发重新同步，未知事件类型忽略。
@@ -170,6 +174,12 @@ web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视�
 - **THEN** 两条都交付 onEvent，`stepId` 分别为 5 与 `null`
 - **WHEN** approval.request 只有旧的五键，或 `stepId` 为字符串或 `1.5`，或多一个键
 - **THEN** 触发重新同步，与其它已知事件的非法 payload 相同
+
+#### Scenario: 检索结果事件严格解码
+- **WHEN** 快照游标为 1:2，随后到达 kb.hits(1:3) `{messageId:7, stepId:5, intent:"查规则", bases:[…]}` 与 kb.hits(1:4) `{…, intent:null}`
+- **THEN** 两条按到达顺序交付 onEvent，负载逐值保留
+- **WHEN** kb.hits 缺任一键或多一个键，或 `stepId` 为字符串或 `1.5`，或 `intent` 不是字符串也不是 `null`
+- **THEN** 触发完整快照重新同步，不交付该事件，与其它已知事件的非法 payload 相同
 
 ### Requirement: API 客户端扩展
 `ApiClient` SHALL 提供 `listSessions()`、`createSession()`、`getMessages(id)`、`prompt(id, message)`，分别返回类型化的会话列表、会话、完整消息快照和接受回合的消息 ID；并 SHALL 提供 S1c 回合控制四方法 `stopSession(id)`、`regenerateSession(id)`、`forkSession(id, messageId)`、`decideApproval(id, approvalId, decision)` 与 S1c 会话元数据二方法 `patchSession(id, patch)`、`deleteSession(id)`；`createSession` 扩为 `createSession(input?, options?)`（`options` 仍为既有请求选项、携带可选 `signal`，调用方只传 signal 时 input 为 `undefined`）。十方法 SHALL 使用既有 same-origin 请求、可选 AbortSignal、错误信封与 401 通知机制；GET SHALL 禁止缓存，路径 ID（会话 id、`approvalId`）SHALL 编码。原四方法成功状态 SHALL 分别为 200、201、200、202；`createSession()` 无 input（或 input 为 `undefined`）时不发送 body，给出 input 时 SHALL 原样发送恰含所给键的 JSON `{workspaceId?, scene?, approvalMode?, modelId?, reasoningEffort?}`（`workspaceId` 为 32 位小写十六进制、`scene ∈ {"office","code","design"}`；空对象 input 视同无 input、不发送 body），prompt SHALL 原样发送 JSON `{message}`，带附件时为 `{message, attachments}`（见本条「S1g 输入框能力」一段）。
@@ -345,7 +355,7 @@ N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1�
 - 行首为 `第 <k> 轮`。
 - 其后是意图：`kbHits.intent` 非空时用它，否则用步骤 detail（`{"question":…}` 形式的 JSON）里的 `question`，两者都取不到时为空。
 - `kbHits` 非空时，接 `命中 <m> 条`（m 为各库 `hits` 的条数之和）。
-- 行状态取步骤状态。
+- 行状态取步骤状态。该步骤有已配对的审批时（只在 `always-ask` 档出现），行状态之前按「步骤卡的确认标记」同一规则显示 `超时自动允许` 或 `已拒绝`，卡收起时也可见；这些审批同样不渲染为兜底确认记录。
 - 有 `kbHits` 的行可以展开：按库列出状态不是 `ok` 的说明（`未找到该知识库`、`正在重建，本轮未检索`、`检索失败`）与 `ok` 的命中，每条命中显示文档名、相似度（保留两位小数）与切片原文；切片原文按纯文本呈现。
 - 没有 `kbHits` 的行不可展开。快照恢复的行即如此（chat-stream「检索结果事件发布」）。
 
@@ -360,6 +370,10 @@ N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1�
 #### Scenario: 刷新后只剩各轮
 - **WHEN** 同一回合结束后刷新页面
 - **THEN** 仍是一张卡、两行；行里显示各自 detail 的 `question` 与状态，没有命中条数，行不可展开
+
+#### Scenario: 检索行的确认标记
+- **WHEN** `always-ask` 档的一个回合有两个 `kb_search` 步骤，其审批的 `decision` 分别为 `deny` 与 `timeout`
+- **THEN** 第一行行状态之前有 `已拒绝`，第二行有 `超时自动允许`；消息内没有兜底确认记录
 
 #### Scenario: 部分失败与检索中
 - **WHEN** 第一轮的 kb.hits 为一个 `failed` 的库与一个 `ok` 命中 0 条的库；第二轮的步骤仍为 `running`

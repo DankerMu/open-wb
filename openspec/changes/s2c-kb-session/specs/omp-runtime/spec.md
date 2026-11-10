@@ -46,7 +46,7 @@ The transport SHALL classify every `extension_ui_request` frame into four kinds;
   - 没有注入处理函数，或处理函数不认识 `toolName` 时，SHALL 回 `isError:true`，文本为 `未知工具`。
   - 处理函数抛错时 SHALL 回 `isError:true`，文本为 `工具执行失败`；错误原文 SHALL NOT 进入帧、stdout 或日志。
   - `id` 不是非空字符串的帧 SHALL 被忽略，不写任何帧。
-- **帧长**：应答帧经既有的写入路径，遵守物理帧长上限（「Bounded lossless RPC transport」，至多 1 MiB）。序列化后超过上限时，SHALL 先去掉 `details` 重新序列化；仍超过时，SHALL 改写恰一帧 `{type:"host_tool_result", id, result:{content:[{type:"text", text:"工具结果过大"}]}, isError:true}`。无论哪种情形，每个调用都恰有一帧应答，omp 不会因为宿主没有应答而挂起（记录 §2.7：omp 不会自己让调用超时）。
+- **帧长**：应答帧经既有的写入路径，遵守物理帧长上限（「Bounded lossless RPC transport」，至多 1 MiB）。序列化后超过上限时，SHALL 先去掉 `details` 重新序列化；仍超过时，SHALL 改写恰一帧 `{type:"host_tool_result", id, result:{content:[{type:"text", text:"工具结果过大"}]}, isError:true}`。无论哪种情形，每个调用都恰有一帧应答，omp 不会因为宿主没有应答而挂起（记录 §2.7：宿主不应答时 omp 至少 5 s 内不会自己让调用超时，更长时间没有测，所以不能依赖 omp 超时）。
 - **`host_tool_cancel{targetId}`**：中止 `targetId` 对应的在途处理。之后该调用 SHALL NOT 再写 `host_tool_result`；没有对应在途处理时忽略。
 - **进程退出或写端关闭**：中止全部在途处理，SHALL NOT 再写任何帧。
 - 步骤事件仍只由 `tool_execution_*` 帧驱动（chat-stream「纯协议事件归约」）。本协议不假定 `host_tool_call` 与 `tool_execution_start` 的先后（记录 §2.3：`yolo` 下前者先到，`write` / `always-ask` 下后者先到）。

@@ -151,7 +151,7 @@ interface HostToolHandler {
 
 ### D4 `kb_search` 的审批由传输层应答
 
-`ui-requests.ts` 增加 `isKbSearchApproval(frame)`：`method:"select"`、标题恰为 `Allow tool: kb_search`、选项恰为 `["Approve","Approve kb_search for this session","Deny"]` 或 `["Approve","Deny"]`。
+`ui-requests.ts` 增加 `isKbSearchApproval(frame)`：`method:"select"`、标题恰为 `Allow tool: kb_search`、选项为 tool-approval「审批请求识别」的两种闭合形状之一（实测的三项 `["Approve","Approve kb_search for this session","Deny"]` 属于其一）。
 
 `#onUiRequest` 在 `approvalRequest` 之前判它。这一代进程的 `approvalMode` 不是 `always-ask` 时，写 `answerFrame(id,"allow")`，不登记审批、不发审批事件；是 `always-ask` 时走原路径交给所有者。
 
@@ -159,7 +159,7 @@ interface HostToolHandler {
 
 ### D5 会话检索：`kb/session-search.ts`
 
-kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `app.ts`。知识库关闭时 `app.ts` 拿到的是 `null`，处理函数与定义源都不注入。返回两个函数：
+kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `app.ts`。知识库关闭时 `app.ts` 拿到的是 `null`，处理函数与定义源都不注入。返回三个函数：
 
 - **`definitionFor(ownerId)`**：读 `store.listBases(ownerId)`（本地，不访问 RAGFlow）。空则 `null`，否则给出 D3 的定义。
 - **`execute(ownerId, args, signal)`**：
@@ -178,6 +178,8 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
      - 其余状态各一行：`知识库 <id>：未找到该知识库`、`知识库「<名称>」（<id>）：正在重建，本轮未检索`、`知识库「<名称>」（<id>）：检索失败`。
      - `details` 为 `{bases:[{kbId, name, status, hits}]}`。`not_found` 的 `name` 为 `null`、`hits` 为 `[]`；`hits` 与 `RetrievalHit` 同形。
   4. **不做的事**：不写回检索参数，不写审计；切片原文不进日志。
+
+- **`resolveReferences(ownerId, ids)`**：知识库引用的受理用（D8），全部是该账号的库时返回 `[{id, name}]`，否则 `null`。
 
 单轮检索仍是唯一的检索实现（knowledge-bases「单轮检索」的扫描用例加一条：`session-search.ts` 只经 `retrieveForBase` 检索）。
 
@@ -261,7 +263,7 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
 - **`process.ts`**（760 行）：只加分流与 `#onUiRequest` 的一个判断，帧的处理全在 `host-tools.ts`。`ui-requests.ts` 保持无状态的纯判定函数，`OmpProcess` 仍是唯一写帧的地方。
 - **`runtime.ts`**：不加注册逻辑，只把 `hostTools` 从 `SessionRuntimeOpts` 透传给 `OmpProcessOpts`。
 - **对齐**：第 3 步放在新文件 `sessions/host-tool-align.ts`，`supervisor.ts`（785 行）只加一处调用。
-- **web**：新组件单独成文件；归约加在 `stream.ts` 旁的新文件 `stream-kb-hits.ts`，与 `stream-failure.ts` 同一先例。
+- **web**：新组件单独成文件；`use-chat-session.ts`（796 行）只加接线，放不下先移出欢迎态首次发送；归约加在 `stream.ts` 旁的新文件 `stream-kb-hits.ts`，与 `stream-failure.ts` 同一先例。
 
 ### Sketch seams under test
 
@@ -282,6 +284,7 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
 - **`i` 字段是 omp 的实现细节**：升级 omp 时可能变 → 意图缺失时退回问句（D10），不依赖它。
 - **检索卡不持久化**：刷新后丢命中 → owner 已接受（G12）。
 - **库多时描述变长**：每个库一行 → Non-Goals 的复活条件盯住它。
+- **omp 行为里没测到的部分**（记录 §2.4、§2.6、§2.7）：`Deny` 与 session grant 之后的行为、`write` 档的并行调用、宿主超过 5 s 不应答时 omp 是否超时都没测。→ 宿主保证每个调用恰一帧应答，不依赖 omp 超时；`Deny` 的假 omp 帧形按 tool-approval 的既有审批写，组 9 第二刀在真实 omp 的 `write` 档回归；与实测不符时以记录补测为准。
 - **单轮检索被并发调用**：一次 `kb_search` 至多 5 次并发 RAGFlow 请求，再加上降级重试 → 期限 30 s 不变，至多 10 次出站。
 
 ## Migration Plan
