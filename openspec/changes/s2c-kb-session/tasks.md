@@ -78,7 +78,7 @@ Minimal mergeable slice: 3.1–3.4 为首刀：协议在 `yolo` 帧序下独立�
 
 - [ ] 4.1 核对 Context：`composer-align.ts` 的 `alignModel` / `alignmentOf` 与 `slot.generation.applied`（:136-154）、`pool.ts` 的 `commandOn`（:380）与 `buildSessionRuntime`（:296）、`supervisor.ts` `#onNewSlot`（:474）与派发前对齐的调用点、`runtime.ts` 的 `SessionRuntimeOpts` 与 `#openProcess`（:436）、`branch-temp.ts:107` 的 `branchAt`
 - [ ] 4.2 假 omp：在 `server/test/support/fake-omp-host-tool.mjs` 加 `host-tool-register-fail` 场景（`set_host_tools` 回 `success:false`），契约用例加在 `server/test/fake-omp-host-tool.test.ts`
-- [ ] 4.3 测试先行：新文件 `server/test/session-host-tool-align.test.ts`，在 slot 层以假 omp 与注入的定义源覆盖 omp-runtime「`kb_search` 的注册」的「首次派发前注册」「不注册」「库清单变化后重发」「空闲回收后重新注册」「注册失败」「临时进程不注册」「只以所有者执行」（两个账号各一个会话，`kb_ids` 互指对方的库，结果为 `not_found`），以及 chat-sessions「派发前按会话设置对齐进程」的帧序场景
+- [ ] 4.3 测试先行：新文件 `server/test/session-host-tool-align.test.ts`，在 slot 层以假 omp 与注入的定义源覆盖 omp-runtime「`kb_search` 的注册」的「首次派发前注册」「不注册」「库清单变化后重发」「空闲回收后重新注册」「注册失败」「临时进程不注册」「只以所有者执行」（两个账号各一个会话，`kb_ids` 互指对方的库，结果为 `not_found`），以及 chat-sessions「派发前按会话设置对齐进程」的「宿主工具对齐在模型命令之后、在 regenerate 事务之前」「宿主工具对齐失败时 regenerate 不动分支」
 - [ ] 4.4 实现：
   - 新文件 `server/src/sessions/host-tool-align.ts`：派发前对齐的第 3 步（每代所记的库清单、比较、`set_host_tools`、应答校验），经 `commandOn` 与 `slot.generation`；`supervisor.ts` 在第 2 步之后只加一处调用，失败与第 1、2 步同一处理。
   - 处理函数在 `pool.ts` `buildSessionRuntime` 绑定为「以 slot 的所有者执行」，经 `SessionRuntimeOpts` 透传到 `OmpProcessOpts.hostTools`；只有 `#onNewSlot` 这条路径传，`branch-temp.ts` 不传。`runtime.ts` 只加透传。
@@ -140,7 +140,7 @@ Minimal mergeable slice: atomic - 入口、标签与发送是同一个用户动�
 
 - [ ] 9.1 核对 Context：`fake-upstream.mjs:263-272` 的「是否已回答」判定与 `toolRoundCall`（:638-657）、`fake-upstream-pace.mjs` 的兄弟模块写法、`server/test/omp-official-*.test.ts` 的门控与 stdout tee
 - [ ] 9.2 测试先行后实现：新文件 `server/test/support/fake-upstream-kb.mjs`（按本回合 tool 消息条数分三阶段，只在 `tools` 含 `kb_search` 时生效），`fake-upstream.mjs` 只加分派的几行；用例放新文件 `server/test/fake-upstream-kb.test.ts`（「标记的三个阶段」）
-- [ ] 9.3 新文件 `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1` 门下）实现「两轮检索」；本机运行并在 PR 附命令、退出码与输出；验收清单 CK 节新增 CK-18（真实模型在构造的证据不足场景下自行第二次调用 `kb_search`），结论 `待签`，由 owner 执行
+- [ ] 9.3 新文件 `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1` 门下）实现「两轮检索」，断言第二次上游请求的 tool 消息只含切片文本、不含 `details` 的任何内容；本机运行并在 PR 附命令、退出码与输出；验收清单 CK 节新增 CK-18（真实模型在构造的证据不足场景下自行第二次调用 `kb_search`），结论 `待签`，由 owner 执行
 
 Suggested fixture level: expanded - 端到端证明白盒关键路径在真实二进制上成立（production-like runtime）。
 Minimal mergeable slice: 9.1–9.2 为首刀：受控上游标记只有自己的用例消费，可独立合入保绿；9.3 依赖它与组 3 第二刀、组 4、组 5。

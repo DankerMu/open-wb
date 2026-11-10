@@ -304,8 +304,10 @@ fork 的临时进程 SHALL 以源会话的有效档位、有效模型与有效�
 #### Scenario: 宿主工具对齐在模型命令之后、在 regenerate 事务之前
 - **WHEN** 知识库开启、所有者有一个库，有效设置为 `{m1, high}`（`m1` 支持推理）的会话首次派发；之后所有者新建一个库，对最后一个回合调用 regenerate
 - **THEN** 首次派发的入站帧为 `negotiate_protocol,get_state,set_model,set_thinking_level,set_host_tools,prompt`；regenerate 的入站帧里 `set_host_tools` 在 `get_branch_messages` 之前
-- **WHEN** 同一 regenerate 里假 omp 以 `host-tool-register-fail` 场景对 `set_host_tools` 回 `success:false`
-- **THEN** 502 `agent_unavailable`，没有 `branch`，被重新生成的旧助手消息及其步骤不变，该 slot 被退役
+
+#### Scenario: 宿主工具对齐失败时 regenerate 不动分支
+- **WHEN** 假 omp 以 `host-tool-register-fail` 场景运行；知识库开启而所有者还没有库时，会话完成一个回合（这一代没有定义，不发 `set_host_tools`）；之后所有者新建一个库，对这个回合调用 regenerate，假 omp 对 `set_host_tools` 回 `success:false`
+- **THEN** regenerate 返回 502 `agent_unavailable`，入站帧里没有 `get_branch_messages` 与 `branch`，被重新生成的旧助手消息及其步骤不变，该 slot 被退役
 
 ### Requirement: 会话持久化与回合刷盘
 createSessionStore(db,{onFlushError}) SHALL additionally receive the `core/audit` emit bound to the same DB (workspace-store precedent) and SHALL provide SessionStore owner-scopedcreation/list/message-tree reads and the explicitmutation/lifecycle contract inthischange. IDs SHALL be random128-bit lowercasehex; creation SHALL persistidle/nulltitle/epoch0. Creation SHALL additionally persist the caller-validated nullable `workspace_id` and `scene` (session-metadata「会话创建与空间绑定」) and a NULL `pinned_at`; admission, turn settlement and reconciliation SHALL NOT change `workspace_id`, `scene` or `pinned_at`. Foreign/missingmessage-tree reads SHALL returnnull andownerlists SHALL excludeotherowners. Views SHALL expose only declaredsession/message/step fields, orderedupdatedAtDESC/idASC forsessionlist, createdAtASC/idASC formessages andordinalASC/idASC forsteps. getMessages SHALL return complete current content by joining the persisted body with only the matching owned active assistant pending tail. This read SHALL NOT force persistence, change timers/budgets/progress or mutate pending state; fault-retained pending data remains visible without claiming durability.
