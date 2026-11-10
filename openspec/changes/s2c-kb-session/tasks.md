@@ -102,9 +102,9 @@ Minimal mergeable slice: atomic - reducer 派生与 supervisor 校验发布是�
 ## 6. web：`kb.hits` 与检索卡（chat-web「纯会话视图归约」「事件流消费与续流」「助手消息分段」「工具段摘要与折叠」「会话知识库检索卡」）
 
 - [ ] 6.1 核对 Context：`stream.ts` 的事件名表（:121）与归约、`stream-failure.ts` 的 `turn.retry` 严格解码先例、`message-segments.ts`、`tool-summary.ts:9-24`、`tool-call-group.tsx` / `message-segments-view.tsx` 的分流、`step-card.tsx`
-- [ ] 6.2 测试先行后实现：新文件 `web/src/features/chat/stream-kb-hits.ts`（严格解码与把 `kbHits` 挂到步骤上），`stream.ts` 只加事件名与分派的几行；用例覆盖「检索结果归约」「检索结果事件严格解码」（键集不符触发重新同步、未知步骤保持同一引用）
+- [ ] 6.2 测试先行（新文件 `web/test/chat-stream-kb-hits.test.ts`）后实现：新文件 `web/src/features/chat/stream-kb-hits.ts`（严格解码与把 `kbHits` 挂到步骤上），`stream.ts` 只加事件名与分派的几行；用例覆盖「检索结果归约」「检索结果事件严格解码」（键集不符触发重新同步、未知步骤保持同一引用）
 - [ ] 6.3 测试先行后实现：`message-segments.ts` 的检索块（「kb_search 步骤合成一个检索块」场景）；`tool-summary.ts` 不计 `kb_search`，既有分段与摘要用例原样全绿
-- [ ] 6.4 测试先行后实现：新组件 `web/src/features/chat/kb-search-card.tsx`，覆盖「实时两轮」「刷新后只剩各轮」「检索行的确认标记」「部分失败与检索中」；展开态以块键保留
+- [ ] 6.4 测试先行（新文件 `web/test/chat-kb-search-card.test.tsx`）后实现：新组件 `web/src/features/chat/kb-search-card.tsx`，覆盖「实时两轮」「刷新后只剩各轮」「检索行的确认标记」「部分失败与检索中」；展开态以块键保留
 - [ ] 6.5 证据：本机对一个注入了 `kb.hits` 的会话截图（亮 / 暗），零新增控制台报错，附在 PR；验收清单 CK 节新增 CK-16（接 CK-15，模型检索两轮的回合里，助手消息只有一张「知识库检索」卡，逐轮列出意图与命中条数，展开看到切片；刷新后只剩各轮），结论 `待签`，由 owner 执行
 
 Suggested fixture level: expanded - 前端改变公共事件流的解码与会话页呈现（public API、shared rendering）。
@@ -115,13 +115,13 @@ Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可
 - [ ] 7.1 核对 Context：`042_chat_message_attachments.sql` 的写法、`server/test/core-db-helpers.ts` 的跟踪清单与受信任迁移目录计数、`051_kb_retrieval.sql` 的回执位置
 - [ ] 7.2 测试先行后实现：迁移 `052_chat_message_knowledge_bases.sql`；在迁移的权威用例文件里覆盖「新库与存量库」「中途失败原子回滚」，目录计数原地加一
 - [ ] 7.3 核对 Context：`prompt-attachments.ts:47` 的 `parsePromptBody`、`rest.ts` 的受理与后缀拼接（:315-349）、`store-attachments.ts`、`slash-commands.ts:324` 的 `attachmentSuffix`、`branch-temp.ts:191` 的 `matches`、`branching.ts:126/156/258`、`store-branch.ts` 的 fork 拷贝、`turn-control.ts` 的 `acceptPrompt`
-- [ ] 7.4 测试先行：新文件 `server/test/prompt-knowledge-bases.test.ts` 覆盖「拒绝」「坏值」、后缀的「带知识库引用的后缀」与「prompt 带知识库引用」（假 omp 入站 prompt 文本逐字节）、列的落库值；分支对位的场景（「带知识库引用回合的对位」）放进 `message-attachments` 既有的对位用例文件；fork 拷贝在本刀只断言新会话消息行的 `knowledge_bases` 列原值（快照还没有这一键）；无引用时后缀逐字节不变的既有用例原样全绿
+- [ ] 7.4 测试先行：新文件 `server/test/prompt-knowledge-bases.test.ts` 覆盖「拒绝」、后缀的「带知识库引用的后缀」与「prompt 带知识库引用」、列的落库值，以及 `store-knowledge-bases.ts` 读出坏值整列为 `[]` 的单元用例；派发文本与 spec 场景同一写法用桩 supervisor 观察（不经假 omp：组 4 合入后，知识库开启且所有者有库时缺省假 omp 会让注册失败，需要假 omp 的用例改用 `host-tool` 场景）；分支对位的场景（「带知识库引用回合的对位」）放进 `message-attachments` 既有的对位用例文件；fork 拷贝在本刀只断言新会话消息行的 `knowledge_bases` 列原值（快照还没有这一键）；无引用时后缀逐字节不变的既有用例原样全绿
 - [ ] 7.5 实现（服务端写入侧，快照不加键）：
   - body 四种键集与 `knowledgeBases` 的判定（经组 2 的 `resolveReferences`，由 `app.ts` 注入路由）。
   - 引用的落库与读出放新文件 `server/src/sessions/store-knowledge-bases.ts`；`store.ts`（784 行）里 `acceptPrompt` 只多一个参数与一处调用，消息视图类型的第十四键留给 7.7。
   - `attachmentSuffix` 原地改名为 `promptSuffix(paths, kbs)`，全部调用点同改，不留旧名。
   - 对位候选由落库快照重建；fork 拷贝列。
-- [ ] 7.6 测试先行：快照的「受理与快照」「分叉拷贝引用」场景（服务端）与 web 的「知识库引用的解析与发送」场景；消息键集的既有断言（服务端与 web 各自的权威文件）原地改为十四键
+- [ ] 7.6 测试先行：快照的「受理与快照」「坏值」「分叉拷贝引用」场景（服务端；需要假 omp 时同 7.4 的场景选择）与 web 的「知识库引用的解析与发送」场景；消息键集的既有断言（服务端与 web 各自的权威文件）原地改为十四键
 - [ ] 7.7 实现（跨服务契约对，同一 PR）：服务端消息视图第十四键 `knowledgeBases`；web `parseMessage` 十四键与 `ChatKnowledgeBaseRef`；`api-sessions.ts` 的 `prompt` 加 `knowledgeBases` 选项
 
 Suggested fixture level: expanded - 迁移、公共 API 的请求与应答形状、权限与分支对位（migration、public API、auth、legacy compatibility）。
@@ -130,8 +130,8 @@ Minimal mergeable slice: 7.1–7.2 为首刀：只加可空列，既有代码不
 ## 8. web：引用入口、标签与气泡（message-attachments「输入框知识库引用」「用户气泡中的知识库引用」）
 
 - [ ] 8.1 核对 Context：`capability-bar.tsx:169-260` 的 `CommandMenu`、`attachment-chips.tsx`、`attachments-state.ts`、`conversation-view.tsx:374`、`turn-actions.ts:289-296` 的发送、欢迎态首次发送的流程、`web/src/lib/api-kb.ts` 的 `listKnowledgeBases` 与 `getKbStatus`
-- [ ] 8.2 测试先行后实现：引用状态放新文件 `web/src/features/chat/kb-refs-state.ts`，选择列表与标签放新组件 `web/src/features/chat/kb-ref-picker.tsx`；`turn-actions.ts` 只加 body 的一个参数；`use-chat-session.ts`（796 行）只加引用状态的接线，放不下时先把欢迎态首次发送（既有逻辑）原地移进兄弟文件再加；覆盖「引用并发送」「关闭时没有入口」「空白草稿与上限」「欢迎态暂存」，以及分叉 / 撤回回填时清空引用
-- [ ] 8.3 测试先行后实现：用户气泡的 `引用的知识库` 列表，覆盖「受理后与刷新后一致」
+- [ ] 8.2 测试先行（新文件 `web/test/chat-kb-refs-state.test.ts` 与 `web/test/chat-kb-ref-picker.test.tsx`）后实现：引用状态放新文件 `web/src/features/chat/kb-refs-state.ts`，选择列表与标签放新组件 `web/src/features/chat/kb-ref-picker.tsx`；`turn-actions.ts` 只加 body 的一个参数；`use-chat-session.ts`（796 行）只加引用状态的接线，放不下时先把欢迎态首次发送（既有逻辑）原地移进兄弟文件再加；覆盖「引用并发送」「关闭时没有入口」「空白草稿与上限」「欢迎态暂存」，以及分叉 / 撤回回填时清空引用
+- [ ] 8.3 测试先行（新文件 `web/test/chat-kb-ref-bubble.test.tsx`）后实现：用户气泡的 `引用的知识库` 列表，覆盖「受理后与刷新后一致」
 - [ ] 8.4 验收清单 `docs/acceptance/functional-checklist.md` 的 CK 节新增 CK-17（在输入框「+」里引用一个库再发送，用户气泡列出引用的库，刷新后仍在；欢迎态暂存的引用随首条消息发出），结论 `待签`，由 owner 执行（agent 不得代签）
 
 Suggested fixture level: expanded - 前端呈现与输入框的发送流程（shared rendering、public API 的请求形状）。

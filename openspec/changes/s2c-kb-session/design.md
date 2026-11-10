@@ -192,7 +192,7 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
 
 ### D7 `kb.hits` 事件：派生、占序号、不落库
 
-- **派生**：`events.ts` 的运行中工具条目，对名为 `kb_search` 的调用记下 `tool_execution_start` 的 `intent`（非空字符串，否则 `null`）。其 `tool_execution_end` 未失败且 `result.details` 是普通对象时，在 `step.end` 之前发 `kb.hits{messageId, stepId, intent, bases}`。`bases` 原样取 `details.bases`，reducer 不校验，与 `todo.updated` 的分工相同。
+- **派生**：`events.ts` 的运行中工具条目，对名为 `kb_search` 的调用记下 `tool_execution_start` 的 `intent`（非空字符串，否则 `null`）。其 `tool_execution_end` 未失败、`result.details` 是普通对象且有自有属性 `bases` 时，在 `step.end` 之前发 `kb.hits{messageId, stepId, intent, bases}`。`bases` 原样取 `details.bases`，reducer 不校验，与 `todo.updated` 的分工相同。
 - **校验**：supervisor 在发布前严格校验 `bases`，结构不符就丢弃这个事件，并写一行不含切片原文的 stderr 记录。
 - **stepId**：reducer 给出的是 omp 的 `toolCallId`。`persistEvent` 与 `step.end`、`files.changed` 一样，经 `steps.toolIds` 映射成落库的步骤 id；映射不到（该步骤没有登记）时丢弃这个事件。所以 `kb.hits.stepId` 与同一步骤的 `step.start.stepId` 相等。
 - **存储**：映射之后 `persistEvent` 对 `kb.hits` 与 `turn.retry` 同样原样返回、不写库。
@@ -249,7 +249,7 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
 - **受控假上游**：标记 `WORKBUDDY_KB_SEARCH:<kbId>`。本回合第一次请求回 `kb_search{question:<原问句>, kb_ids:[kbId]}`；本回合已有一条 tool 消息时，回第二次 `kb_search{question:<原问句> 详细说明}`；已有两条时回固定正文。
 - **官方 omp 门控用例** `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1`）：
   - 用 `createApp` 起服务，接受控假上游与假 RAGFlow。
-  - 发带标记的 prompt，断言两次 `kb_search`、两次 `kb.hits`；假 RAGFlow 恰收到两次检索；第二次上游请求的 tool 消息只含切片文本、不含 `details`。
+  - 发带标记的 prompt，断言两次 `kb_search`、两次 `kb.hits`；假 RAGFlow 恰收到两次检索；第二、第三次上游请求的 tool 消息只含切片文本，不含 `details` 的键名 `bases`。
   - 在 `write` 档跑，断言没有 `approval.request`。
 - **ui-walk 分支** `web/e2e/ui-walk-chat-kb.ts`（`ui-walk-center-kb.ts` 的先例）：
   - 用 `page.route` 应答 `/api/kb/status`（开启）与 `/api/kb/bases`，走查「+」菜单的 `引用知识库…`、选择列表与引用标签。
