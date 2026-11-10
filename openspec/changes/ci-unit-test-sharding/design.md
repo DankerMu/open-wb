@@ -20,12 +20,13 @@ Must add/change：
 - D1 concurrency（工作流顶层，`jobs:` 之前）：
   ```yaml
   concurrency:
-    group: ci-${{ github.ref }}
+    group: ci-${{ github.ref == 'refs/heads/master' && github.sha || github.ref }}
     cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
   ```
-  - PR 的 `github.ref` 是 `refs/pull/<n>/merge`，同一 PR 的新运行取消旧运行。master 永不取消，每个合入提交都有一次完整运行。
+  - PR 的 `github.ref` 是 `refs/pull/<n>/merge`，同一 PR 的新运行取消旧运行。
+  - master 按 `github.sha` 各占一组：GitHub 的一个并发组只留一个运行中加一个排队的，新到的会取消排队的那个，与 `cancel-in-progress` 无关。若 master 也按 ref 分组，连续合入三个提交时中间那次就会被取消。每个 sha 一组之后，master 的运行既不排队也不互相取消，每个合入提交都有一次完整运行；`cancel-in-progress` 对 master 为假，作为第二道保险。
   - 默认分支是 `master` 不是 `main`。写成 `main` 时 master 的运行也会被取消，oracle 钉住字面值。
-  - 给 PR 加 label 也会触发新运行并取消在跑的那次，被取消的旧运行的 `all-checks-passed` 记为 cancelled，以新运行为准。
+  - 被取消的旧 PR 运行的 `all-checks-passed` 记为 cancelled，以新运行为准。`pull_request` 未写 `types`，只在 opened、synchronize、reopened 时触发，加 label 不会触发新运行。
 - D2 分片 job：
   - `unit-tests` 为 `strategy: { fail-fast: false, matrix: { shard: [1, 2, 3] } }`（块式写法），步骤：checkout → setup-node → `npm ci` → `npm run test:shard --workspace server -- --shard=${{ matrix.shard }}/3` → `actions/upload-artifact@v7`（`name: vitest-blob-server-${{ matrix.shard }}`、`path: server/.vitest-reports/`、`include-hidden-files: true`、`if-no-files-found: error`、`retention-days: 1`、`overwrite: true`）。
   - `unit-tests-web` 同形，分 4 片，`web` 替换 `server`。
@@ -70,7 +71,7 @@ Must add/change：
   - 现有用例里以 `actions/upload-artifact@v4` 作「非目标 action」诱饵的正对照（unrelated-job 与 ast cand02/03/09/10），诱饵换成不在 `ALLOWED` 里的 `actions/labeler@v5`。
   - 原来以 `- run: npm test --workspace web|server` 为锚点的变异改用分片命令作锚点，语义不变（删除、替换、互换 workspace、step `if` / `continue-on-error`）；聚合依赖「去掉 unit-tests-web」的锚点随 needs 列表更新。
   - 新增变异，每条都必须被拒：
-    - concurrency：删除；`cancel-in-progress` 改为 `true`；`master` 改为 `main`；group 去掉 ref；改为行内写法。
+    - concurrency：删除；`cancel-in-progress` 改为 `true`；`master` 改为 `main`（cancel 与 group 两处各一条）；master 不再按 sha 分组；group 去掉 ref；改为行内写法。
     - 分片：分片列表少一片、分母与列表不符、`fail-fast: true`、strategy 多一个键或整段删除、改跑 `test:focus`、分片步骤 `continue-on-error`。
     - 上传：删除、旧 major、`if-no-files-found` 放宽、删掉 `include-hidden-files` 或 `overwrite`、artifact 名与另一个 workspace 冲突、路径改错、`continue-on-error`；在 sast 加一步 upload（`WANT` 计数）。
     - 合并 job：删除、移出聚合依赖、`needs` 少一个分片 job、加 job 级 `if: always()` 或 `continue-on-error`、timeout 改动、绕过 `ci-unit-merge.sh` 直接 `npm run test:merge`、删掉一个 workspace 的合并、合并步骤 `continue-on-error`、download 的 pattern 放宽、路径互换、`merge-multiple: false`、旧 major、删掉一个 download。

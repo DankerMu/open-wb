@@ -18,7 +18,7 @@
 ## What Changes
 
 - `.github/workflows/ci.yml`：
-  - 顶层加 `concurrency`：同一 ref 的新运行取消旧运行；`cancel-in-progress` 只在非 `refs/heads/master` 时为真，master 的每次 push 都跑完。
+  - 顶层加 `concurrency`：同一 PR 的新运行取消旧运行；master 按提交 sha 各占一组，`cancel-in-progress` 对它为假，每次 push 都跑完。
   - `unit-tests` 改为 3 片 matrix、`unit-tests-web` 改为 4 片 matrix（job 名、runs-on、timeout 不变，`fail-fast: false`）；每片执行 `npm run test:shard --workspace <ws> -- --shard=<i>/<N>`，再以 `actions/upload-artifact@v7` 上传 vitest blob（`if-no-files-found: error`）。
   - 新 job `unit-coverage`（`needs: [unit-tests, unit-tests-web]`）：以 `actions/download-artifact@v8` 取回两个 workspace 的全部 blob，再各执行一次 `bash .github/scripts/ci-unit-merge.sh <ws>`。`all-checks-passed.needs` 加入 `unit-coverage`。
 - `server/package.json`、`web/package.json`：新增 `test:shard`（覆盖率开、阈值清零、`--reporter=default --reporter=blob`）与 `test:merge`（`vitest --merge-reports --coverage`，阈值取 `vitest.shared.mjs`）。`test` 与 `test:focus` 不变。
@@ -31,4 +31,4 @@
 - 预期 PR CI 墙钟中位数 11.8 min → 约 5–6 min，关键路径变为 `uid-isolation`。
 - runner 分钟数增加：多 5 个分片 job 和 1 个合并 job，每个约 20–30 s 的 setup（公开仓库不计费，仍在 PR 中报告）。
 - 本地 `make test` / `npm test --workspace <ws>` 与覆盖率阈值不变。
-- 给 PR 加 label 也会触发新运行并取消在跑的那次；PR 说明里写明，免得把这种取消误当成失败。
+- 被新推送替代的 PR 运行显示为 cancelled，以最新一次运行为准。

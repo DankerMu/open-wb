@@ -4,10 +4,10 @@ on:
     branches: [master]
   pull_request:
 
-# 同一 ref 上新运行取消旧运行，省掉被新推送替代的 PR 运行；master 永不取消，每个合入提交都有完整结果。
-# 注意：给 PR 加 label 也会触发新运行并取消在跑的那次，这种 cancelled 不是失败。
+# 同一 PR 的新推送取消旧运行。master 永不取消，每个合入提交都有完整结果：同组里排队等待的运行
+# 会被更新的到达者取消（与 cancel-in-progress 无关），所以 master 按提交 sha 各占一组，不排队也不互相取消。
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref == 'refs/heads/master' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 
 jobs:
@@ -45,7 +45,9 @@ jobs:
           path: server/.vitest-reports/
           # .vitest-reports 是点目录，upload-artifact 默认跳过隐藏文件；不打开就会报「没有文件」。
           include-hidden-files: true
+          # 默认 warn：blob 没写出来时分片仍算成功，合并 job 才发现缺片；在源头就失败。
           if-no-files-found: error
+          # blob 只供同一次运行的 unit-coverage 使用，默认 90 天白占存储配额。
           retention-days: 1
           # 「重跑全部 job」时上一轮的同名 artifact 还在，不覆盖会 409；名字按 workspace 与分片唯一，只会覆盖同一片自己的旧 blob。
           overwrite: true
@@ -70,7 +72,9 @@ jobs:
           path: web/.vitest-reports/
           # 同 unit-tests：点目录要显式打开隐藏文件。
           include-hidden-files: true
+          # 同 unit-tests：没有 blob 即在源头失败。
           if-no-files-found: error
+          # 同 unit-tests：只供本次运行合并。
           retention-days: 1
           # 同 unit-tests：重跑时覆盖同一片自己的旧 blob。
           overwrite: true
@@ -89,11 +93,13 @@ jobs:
         with:
           pattern: vitest-blob-server-*
           path: server/.vitest-reports
+          # 默认每个 artifact 落进自己的子目录；ci-unit-merge.sh 要求 blob 平铺在同一目录。
           merge-multiple: true
       - uses: actions/download-artifact@v8
         with:
           pattern: vitest-blob-web-*
           path: web/.vitest-reports
+          # 同上：平铺进同一目录。
           merge-multiple: true
       - run: bash .github/scripts/ci-unit-merge.sh server
       - run: bash .github/scripts/ci-unit-merge.sh web

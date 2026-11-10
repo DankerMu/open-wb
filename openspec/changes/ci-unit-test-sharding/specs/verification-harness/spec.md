@@ -30,18 +30,18 @@
 
 ```yaml
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref == 'refs/heads/master' && github.sha || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
 ```
 
-同一 ref 上的新运行取消旧运行；`refs/heads/master` 的运行永不取消，每个合入 master 的提交都有一次完整运行（change ci-unit-test-sharding）。source-derived oracle SHALL 逐字钉住这两行。
+同一 PR ref 上的新运行取消旧运行；`refs/heads/master` 的运行永不取消，每个合入 master 的提交都有一次完整运行（change ci-unit-test-sharding）。master SHALL 按提交 sha 各占一个并发组：同一并发组里排队的运行会被更新的到达者取消，与 `cancel-in-progress` 无关，按 ref 分组会让连续合入时排队的 master 运行被取消。source-derived oracle SHALL 逐字钉住这两行。
 
 #### Scenario: PR 新推送取消旧运行，master 不取消
 - **WHEN** 同一 PR 在前一次运行结束前再次推送，或 master 连续合入两个提交
-- **THEN** PR 的旧运行被取消（其 `all-checks-passed` 记为 cancelled，以新运行为准）；master 的两次运行都跑完
+- **THEN** PR 的旧运行被取消（其 `all-checks-passed` 记为 cancelled，以新运行为准）；master 的每次运行各在自己的组里，都跑完，没有一次被排队或取消
 
 #### Scenario: 并发配置不可漂移
-- **WHEN** fixture 删除 `concurrency`、把 `cancel-in-progress` 改为 `true`、把 `master` 改为 `main`、让 group 不再带 ref，或改成行内写法
+- **WHEN** fixture 删除 `concurrency`、把 `cancel-in-progress` 改为 `true`、把任一处 `master` 改为 `main`、让 master 回到按 ref 分组、让 group 不再带 ref，或改成行内写法
 - **THEN** `make test-guardrails` 非零；只改注释措辞的正对照仍通过
 
 ## MODIFIED Requirements
