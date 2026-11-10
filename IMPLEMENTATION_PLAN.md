@@ -513,6 +513,13 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 ## Next Step
 
+> 2026-11-10 更新。**S2b 已签收**：验收清单「中心·知识库（CK）」CK-11、CK-13、CK-14 由 owner 签为 `通过`，Epic #1910 关闭；
+> 验收清单无 `待签` 行。计划外收尾：CI 的 omp 二进制缓存（#1932，change `ci-omp-binary-cache` 已归档）、
+> CI 规格补计 guardrails job（#1954，change `ci-spec-guardrails-sync` 已归档）。仓库无开着的 issue。
+> 可启动的是 **S2c 会话接入与可见范围**（依赖 S2b、S1c；范围以上文 S2c 一节为准）。
+>
+> 以下为更早的记录。
+
 > 2026-11-08 更新。**S2b 的实现全部合入**：Epic #1910 的子 issue 中 #1911–#1925、#1927 均已关闭，#1926 即本收口、随本 PR 关闭；
 > change `s2b-kb-retrieval` 已归档（`openspec/changes/archive/2026-11-08-s2b-kb-retrieval/`）。
 > Epic #1910 待 owner 签收：验收清单「中心·知识库（CK）」的 CK-11（真实栈 `make smoke-kb`，含检索断言）、CK-13（检索测试面板）、
@@ -522,8 +529,6 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 > 计划外已交付：omp-fetch 主地址失败时经 API 资产地址回退（#1934，change `ci-omp-fetch-resilience` 已归档）；
 > `omp-fetch.sh` 中断后不再走回退下载（#1935，change `omp-fetch-signal-abort` 已归档）；
 > CI 的 omp 二进制缓存（#1932，owner 2026-11-09 裁定加缓存，change `ci-omp-binary-cache`）。
->
-> 以下为更早的记录。
 
 > 2026-11-07 更新。**S2a 已签收**：验收清单「中心·知识库（CK）」CK-01–CK-12 由 owner 签为 `通过`（#1905），Epic #1831 已关闭；
 > 交付后的三处修复（#1878 mounts jsonl 半行、#1900 编译画布名超长、#1901 CK-05/CK-07 上传入口与 files-web 规格冲突）均已合入，
