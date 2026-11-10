@@ -20,6 +20,7 @@ resource/oh-my-pi/
 node_modules/
 dist/
 coverage/
+.vitest-reports/
 *.tsbuildinfo
 __pycache__/
 .venv/
