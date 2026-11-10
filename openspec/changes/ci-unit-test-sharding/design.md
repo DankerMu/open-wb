@@ -26,7 +26,7 @@ Must add/change：
   - PR 的 `github.ref` 是 `refs/pull/<n>/merge`，同一 PR 的新运行取消旧运行。
   - master 按 `github.sha` 各占一组：GitHub 的一个并发组只留一个运行中加一个排队的，新到的会取消排队的那个，与 `cancel-in-progress` 无关。若 master 也按 ref 分组，连续合入三个提交时中间那次就会被取消。每个 sha 一组之后，master 的运行既不排队也不互相取消，每个合入提交都有一次完整运行；`cancel-in-progress` 对 master 为假，作为第二道保险。
   - 默认分支是 `master` 不是 `main`。写成 `main` 时 master 的运行也会被取消，oracle 钉住字面值。
-  - 被取消的旧 PR 运行的 `all-checks-passed` 记为 cancelled，以新运行为准。`pull_request` 未写 `types`，只在 opened、synchronize、reopened 时触发，加 label 不会触发新运行。
+  - 被取消的旧 PR 运行以 cancelled 结束（其 `all-checks-passed` 带 `if: always()`，可能照常执行并因上游 cancelled 判失败），以新运行为准。`pull_request` 未写 `types`，只在 opened、synchronize、reopened 时触发，加 label 不会触发新运行。
 - D2 分片 job：
   - `unit-tests` 为 `strategy: { fail-fast: false, matrix: { shard: [1, 2, 3] } }`（块式写法），步骤：checkout → setup-node → `npm ci` → `npm run test:shard --workspace server -- --shard=${{ matrix.shard }}/3` → `actions/upload-artifact@v7`（`name: vitest-blob-server-${{ matrix.shard }}`、`path: server/.vitest-reports/`、`include-hidden-files: true`、`if-no-files-found: error`、`retention-days: 1`、`overwrite: true`）。
   - `unit-tests-web` 同形，分 4 片，`web` 替换 `server`。
@@ -40,14 +40,14 @@ Must add/change：
     下限是 `uid-isolation`（中位 4.9 min，p90 5.3 min）。分片线要在它之内完成，即最长一片加合并 job（setup 约 20 s 加合并约 10 s）。web 取 4 片（210 s），server 取 3 片（157 s）：再多分一片，墙钟不会更短，只会多一份 setup。
   - `fail-fast: false`：默认值会在一片失败时取消其余分片，失败日志就不完整了。
   - `include-hidden-files: true`：`.vitest-reports` 是点目录，upload-artifact v4 起默认跳过隐藏文件，不打开就上传不到任何文件，`if-no-files-found: error` 会让分片失败。
-  - `retention-days: 1`：blob 只供同一次运行的合并 job 使用。
+  - `retention-days: 1`：blob 只供同一次运行的合并 job 使用。代价是运行超过一天后，单独重跑失败的分片时其余分片的 blob 已过期，`ci-unit-merge.sh` 以缺片失败（fail closed），这时要「重跑全部 job」。排障时先看是哪一片红。
   - `overwrite: true`：upload-artifact v4 起同一运行内同名 artifact 再上传会 409，「重跑全部 job」时上一轮的 blob 还在。名字按 workspace 与分片唯一，覆盖的只会是同一片自己的旧 blob。
 - D3 `test:shard` / `test:merge`（两个 workspace 相同）：
   - `test:shard` = `vitest run --coverage --coverage.reporter=json --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0 --reporter=default --reporter=blob`。
     - 分片内必须清零阈值：本机实测 server 1/8 片单独跑时覆盖率 62%，按 80% 阈值以退出码 1 失败。
     - `--coverage.reporter=json` 让分片日志不打印局部覆盖率表：局部数字会被误读成失败。覆盖率数据仍随 blob 带到合并步骤。
     - `--reporter=default` 保留分片日志里的失败详情，只用 blob 会丢掉它们。
-  - `test:merge` = `vitest --merge-reports --coverage`：读取 `.vitest-reports/` 下的全部 blob，阈值取 `vitest.shared.mjs`。
+  - `test:merge` = `vitest run --merge-reports --coverage`（带 `run`：交互终端里 vitest 默认进 watch，而 `--merge-reports` 与 watch 互斥，本地照 CI 命令复现时会直接报错）：读取 `.vitest-reports/` 下的全部 blob，阈值取 `vitest.shared.mjs`。
   - `test` 仍是 `vitest run --coverage`。CI 不再直接跑它，但 `make test` 照旧用它。
 - D4 `.github/scripts/ci-unit-merge.sh <server|web>`：
   - 参数不是 `server` 或 `web` 时退出 2。目录缺失、为空、含任何不匹配 `^blob-([1-9][0-9]*)-([1-9][0-9]*)\.json$` 的条目（含点文件、目录）、各文件 N 不一致、序号大于 N、个数不等于 N 时，都在调用 npm 之前退出 1。
@@ -82,7 +82,7 @@ Must add/change：
     - 未知 workspace 与缺参数退出 2。
     - npm 失败时原样带回退出码 7。
   - 正对照：只改 concurrency 注释措辞仍通过。
-- D7 文档同步：`AGENTS.md`「CI 排障协议」的失败层列表加入 `unit-coverage`，同步刷新 `AGENTS.md.fixture`。spec delta 改写「CI 接线与控制面同步」里单元测试拆分一段及其两个 Scenario，新增「单元测试分片与合并覆盖率门禁」与「CI 并发取消」两个 requirement，并改写「第三方 CI action 使用 Node 24 runtime」的白名单与计数。
+- D7 文档同步：`AGENTS.md`「CI 排障协议」的失败层列表加入 `unit-coverage`，同步刷新 `AGENTS.md.fixture`（该行受 307 字节上限约束，分片与 blob 保留期的排障提示放在本 design D2）。spec delta 改写「CI 接线与控制面同步」里单元测试拆分一段及其两个 Scenario，新增「单元测试分片与合并覆盖率门禁」与「CI 并发取消」两个 requirement，并改写「第三方 CI action 使用 Node 24 runtime」的白名单与计数。
 
 Required evidence：
 - 先红：改 oracle 而 ci.yml 仍为旧版时，`check_wf` 拒绝旧 workflow，`inspect-ci-workflow.js` 报 `protected cardinality`；合并脚本用例在脚本落地前 22 条 FAIL。

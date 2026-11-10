@@ -3,7 +3,7 @@
 ### Requirement: 单元测试分片与合并覆盖率门禁
 `unit-tests` SHALL 以 `strategy: { fail-fast: false, matrix: { shard: [1, 2, 3] } }`（块式）把 server 套件分 3 片，`unit-tests-web` 以同形 strategy 与 `shard: [1, 2, 3, 4]` 把 web 套件分 4 片（change ci-unit-test-sharding，#1959）。每片 SHALL 依次执行 checkout、setup-node、`npm ci`、`npm run test:shard --workspace <ws> -- --shard=${{ matrix.shard }}/<N>`，再以 `actions/upload-artifact@v7` 上传该片的 vitest blob：`name: vitest-blob-<ws>-${{ matrix.shard }}`、`path: <ws>/.vitest-reports/`、`include-hidden-files: true`、`if-no-files-found: error`、`retention-days: 1`、`overwrite: true`，不得有其它输入。
 
-- 两个 workspace 的 `package.json` SHALL 含 exact `"test:shard": "vitest run --coverage --coverage.reporter=json --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0 --reporter=default --reporter=blob"` 与 exact `"test:merge": "vitest --merge-reports --coverage"`；`test` SHALL 仍为 `vitest run --coverage`。阈值只在分片内清零：单片的覆盖率远低于 80%，不清零就会失败。合并步骤不带任何阈值覆盖，阈值取 `vitest.shared.mjs`。
+- 两个 workspace 的 `package.json` SHALL 含 exact `"test:shard": "vitest run --coverage --coverage.reporter=json --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0 --reporter=default --reporter=blob"` 与 exact `"test:merge": "vitest run --merge-reports --coverage"`；`test` SHALL 仍为 `vitest run --coverage`。阈值只在分片内清零：单片的覆盖率远低于 80%，不清零就会失败。合并步骤不带任何阈值覆盖，阈值取 `vitest.shared.mjs`。
 - 新 job `unit-coverage` SHALL 为 `needs: [unit-tests, unit-tests-web]`、`runs-on: ubuntu-latest`、`timeout-minutes: 10`，无 job 级 `if`。步骤依次为 checkout、setup-node、`npm ci`、两步 `actions/download-artifact@v8`（`pattern: vitest-blob-<ws>-*`、`path: <ws>/.vitest-reports`、`merge-multiple: true`，先 server 后 web）、`bash .github/scripts/ci-unit-merge.sh server`、`bash .github/scripts/ci-unit-merge.sh web`。任一分片失败时它为 skipped，由 `all-checks-passed` 拒绝。
 - `.github/scripts/ci-unit-merge.sh <server|web>` SHALL 在调用 npm 之前确认 `<ws>/.vitest-reports/` 里恰为同一 N 的 `blob-1-N.json … blob-N-N.json`（序号与 N 都是不带前导零的正整数），无缺无多。参数不是 `server` 或 `web` 时退出 2；目录缺失或为空、含任何其它条目（点文件、目录、外来文件）、N 不一致、序号超出、个数不等于 N 时退出 1；全部通过后执行 `npm run test:merge --workspace <ws>`，原样带回其退出码。vitest `--merge-reports` 不校验分片是否齐全，缺片时其余分片的覆盖率仍可能越过阈值，这一步就是为了不让门禁因此假绿。
 - 分片数 SHALL 有测量依据：按 vitest 的分片算法与 CI 实测逐文件耗时模拟，选出让最长一片加合并 job 不超过墙钟下限 job（当前为 `uid-isolation`）的最小片数。调整片数时 SHALL 重新测量，并同步 oracle 与本 requirement。
@@ -38,7 +38,7 @@ concurrency:
 
 #### Scenario: PR 新推送取消旧运行，master 不取消
 - **WHEN** 同一 PR 在前一次运行结束前再次推送，或 master 连续合入两个提交
-- **THEN** PR 的旧运行被取消（其 `all-checks-passed` 记为 cancelled，以新运行为准）；master 的每次运行各在自己的组里，都跑完，没有一次被排队或取消
+- **THEN** PR 的旧运行以 cancelled 结束，以新运行为准；master 的每次运行各在自己的组里，都跑完，没有一次被排队或取消
 
 #### Scenario: 并发配置不可漂移
 - **WHEN** fixture 删除 `concurrency`、把 `cancel-in-progress` 改为 `true`、把任一处 `master` 改为 `main`、让 master 回到按 ref 分组、让 group 不再带 ref，或改成行内写法

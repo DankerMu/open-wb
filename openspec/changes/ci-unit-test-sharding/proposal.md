@@ -21,7 +21,7 @@
   - 顶层加 `concurrency`：同一 PR 的新运行取消旧运行；master 按提交 sha 各占一组，`cancel-in-progress` 对它为假，每次 push 都跑完。
   - `unit-tests` 改为 3 片 matrix、`unit-tests-web` 改为 4 片 matrix（job 名、runs-on、timeout 不变，`fail-fast: false`）；每片执行 `npm run test:shard --workspace <ws> -- --shard=<i>/<N>`，再以 `actions/upload-artifact@v7` 上传 vitest blob（`if-no-files-found: error`）。
   - 新 job `unit-coverage`（`needs: [unit-tests, unit-tests-web]`）：以 `actions/download-artifact@v8` 取回两个 workspace 的全部 blob，再各执行一次 `bash .github/scripts/ci-unit-merge.sh <ws>`。`all-checks-passed.needs` 加入 `unit-coverage`。
-- `server/package.json`、`web/package.json`：新增 `test:shard`（覆盖率开、阈值清零、`--reporter=default --reporter=blob`）与 `test:merge`（`vitest --merge-reports --coverage`，阈值取 `vitest.shared.mjs`）。`test` 与 `test:focus` 不变。
+- `server/package.json`、`web/package.json`：新增 `test:shard`（覆盖率开、阈值清零、`--reporter=default --reporter=blob`）与 `test:merge`（`vitest run --merge-reports --coverage`，阈值取 `vitest.shared.mjs`）。`test` 与 `test:focus` 不变。
 - 新脚本 `.github/scripts/ci-unit-merge.sh`：确认 `<ws>/.vitest-reports/` 里恰为同一 N 的 `blob-1-N.json … blob-N-N.json`，无缺无多，再运行 `npm run test:merge --workspace <ws>`。
 - `.gitignore` 加 `.vitest-reports/`。
 - CI 契约：`scripts/test-ci-harness.sh` 的 oracle 与变异用例、`scripts/inspect-ci-workflow.js` 的 `ALLOWED`/`WANT`、`scripts/fixtures/ci-contract/ci.yml.fixture`；verification-harness spec delta；`AGENTS.md` 的 CI 排障协议加入 `unit-coverage` 层。

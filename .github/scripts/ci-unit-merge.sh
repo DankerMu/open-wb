@@ -3,7 +3,7 @@
 # 用法（在仓库根）：bash .github/scripts/ci-unit-merge.sh <server|web>
 # 先确认 <ws>/.vitest-reports/ 里恰为同一 N 的 blob-1-N.json … blob-N-N.json，无缺无多：
 # vitest --merge-reports 不检查分片是否齐全，少一片时其余分片的覆盖率仍可能越过 80% 阈值，门禁就会假绿。
-# 阈值只在合并这一步生效（npm run test:merge → vitest --merge-reports --coverage，阈值取 vitest.shared.mjs）。
+# 阈值只在合并这一步生效（npm run test:merge → vitest run --merge-reports --coverage，阈值取 vitest.shared.mjs）。
 set -euo pipefail
 
 ws="${1:-}"

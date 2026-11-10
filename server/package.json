@@ -8,7 +8,7 @@
     "test": "vitest run --coverage",
     "test:focus": "vitest run",
     "test:shard": "vitest run --coverage --coverage.reporter=json --coverage.thresholds.lines=0 --coverage.thresholds.functions=0 --coverage.thresholds.branches=0 --coverage.thresholds.statements=0 --reporter=default --reporter=blob",
-    "test:merge": "vitest --merge-reports --coverage",
+    "test:merge": "vitest run --merge-reports --coverage",
     "build": "rm -rf dist && tsc -p tsconfig.build.json && node scripts/copy-migration-assets.mjs",
     "start": "npm run build && exec node dist/server.js"
   },
