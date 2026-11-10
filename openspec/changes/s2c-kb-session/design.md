@@ -118,6 +118,8 @@ interface HostToolHandler {
 - **处理函数抛错**：回 `isError`，文本为「工具执行失败」；错误原文不进帧，也不进日志。
 - **未注入 `hostTools`，或工具名未知**：回 `isError`，文本为「未知工具」。
 - **应答**：`{type:"host_tool_result", id, result:{content:[{type:"text", text}], details?}, isError?}`，经现有的 `#write`，遵守帧长上限。
+- **结果过大**：序列化后超过 1 MiB 时先去掉 `details` 重试；仍超过就改回 `isError`，文本为「工具结果过大」。每个调用恰有一帧应答，否则 omp 会一直等（§2.7），回合挂死。
+- **绑定**：处理函数在构造进程时绑定，进程存活期间不变。会话 slot 的处理函数由 `pool.ts` `buildSessionRuntime` 绑定为「以 slot 的所有者执行」，经 `SessionRuntimeOpts` 传到 `OmpProcessOpts.hostTools`；只有 `supervisor.ts` `#onNewSlot` 这条路径传它。模型给的 kb_id 只按这个所有者判定，不同会话的进程不会串号。
 
 放在 `OmpProcess` 而不是 `SessionRuntime`：`SessionRuntime.#onFrame` 在没有已发送回合时丢帧（主干现状），而 omp 等不到应答会一直挂着（§2.7）。
 `sessions` 不导入 `kb`：处理函数由 `app.ts` 注入，依赖规则不加新边（`docs/architecture/system.md` §4 的 `sessions → kb` 改写为「经注入」）。
@@ -127,18 +129,22 @@ interface HostToolHandler {
 - 不假定 `host_tool_call` 先于或晚于 `tool_execution_start`（§2.3）。`host-tools.ts` 只认 `id`，不碰步骤；步骤仍由 `tool_execution_*` 驱动（`events.ts`）。
 - 同一进程的多个在途调用并发执行，互不等待（§2.6）。
 
-### D3 注册：只在会话 slot，spawn 之后与派发前
+### D3 注册：派发前对齐的第 3 步
 
-`SessionRuntimeOpts` 多一个可选的 `hostToolSet: { definitionFor(ownerId): HostToolDefinition | null }`。只有 `supervisor.ts` `#onNewSlot` 传它，`branch-temp.ts` 不传，所以临时进程不注册。
+注册不挂在 `runtime.ts` 的 `#acquire` / `#runPrompt` 上，而是进入现有的派发前对齐（chat-sessions「派发前按会话设置对齐进程」）。
+对齐由 `supervisor.ts` 在每次派发前执行：第 1 步档位与能力，第 2 步 `set_model` / `set_thinking_level`（`composer-align.ts`，以 `slot.generation.applied` 记这一代已对齐的值），之后是 `prompt`。
+本 change 在第 2 步之后插入第 3 步「宿主工具」，放在 `composer-align.ts` 旁的新文件 `sessions/host-tool-align.ts`，用同一套 `commandOn` 与 `slot.generation`。
 
-- **定义**：`definitionFor` 由 kb 模块给出（D5）。知识库关闭，或调用者一个库都没有时为 `null`。
-- **注册时机**：`#acquire` 在 `proc.start()` 成功后读一次定义，非 `null` 就 `request({type:"set_host_tools", tools:[定义]})`。应答不是 `success:true` 且 `toolNames` 恰为 `["kb_search"]` 时，视同握手失败（`agent_unavailable`）。这一代进程记下注册时的指纹（库清单的 `[{id, name}]` 依 `created_at` 排序后的 JSON）。
-- **派发前对齐**：`#runPrompt` 在 `send({type:"prompt"})` 之前重读定义，与这一代的指纹比较：
-  - 不同：先发 `set_host_tools`。新定义为 `null` 时发空集 `tools:[]`，表示撤下。
-  - 相同：不发。
-  - 对齐失败与注册失败同样处理。
+- **定义**：`definitionFor(ownerId)` 由 kb 模块给出（D5），经 `app.ts` 注入 supervisor。知识库关闭，或所有者一个库都没有时为 `null`。
+- **每一代记下已注册的库清单**：新 generation（spawn 与 resume，§2.8）从「尚未注册」开始，所以 G9 的「每个新进程都注册」落实为「每个新 generation 的首次派发前注册」。
+- **比较与发送**：每次派发都重新取定义，与所记清单（`[{id, name}]`，依 `created_at` 排序）比较：
+  - 有定义，而尚未注册或清单不同：发 `set_host_tools{tools:[定义]}`。
+  - 没有定义而所记清单非空：发 `set_host_tools{tools:[]}`，表示撤下。
+  - 其余：不发。这一代从来没有定义时一帧 `set_host_tools` 都不发，知识库关闭的部署帧序不变。
+- **应答**：须为 `success:true` 且 `data.toolNames` 恰为 `["kb_search"]`（撤下时为 `[]`），成功后才更新所记清单。失败与第 1、2 步失败同样处理：retire slot，prompt 以 `agent_unavailable` 失败。
+- **临时进程**：fork 与撤回的 `branch-temp.ts` 不跑对齐的第 2、3 步，也不注入处理函数，所以不注册。
 - **不做的事**：
-  - 回合进行中库清单变了，不重发（omp 在下一次模型调用前生效，但回合内一致更简单）。
+  - 回合进行中库清单变了，不重发（回合内一致更简单）。
   - 不为对齐而重新 spawn。
 - **定义的固定部分**：`name:"kb_search"`、`label:"知识库检索"`、`loadMode:"essential"`。参数 schema 为 `{question:string, kb_ids:string[] (minItems 1, maxItems 5)}`，`additionalProperties:false`。
 - **描述**：中文说明（含「证据不足时可以改写问句或换库再次调用」），末尾逐行列 `- <名称>（<id>）`。
@@ -186,7 +192,8 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
 
 - **派生**：`events.ts` 的运行中工具条目，对名为 `kb_search` 的调用记下 `tool_execution_start` 的 `intent`（非空字符串，否则 `null`）。其 `tool_execution_end` 未失败且 `result.details` 是普通对象时，在 `step.end` 之前发 `kb.hits{messageId, stepId, intent, bases}`。`bases` 原样取 `details.bases`，reducer 不校验，与 `todo.updated` 的分工相同。
 - **校验**：supervisor 在发布前严格校验 `bases`，结构不符就丢弃这个事件，并写一行不含切片原文的 stderr 记录。
-- **存储**：`persistEvent` 对 `kb.hits` 与 `turn.retry` 同样原样返回、不写库。
+- **stepId**：reducer 给出的是 omp 的 `toolCallId`。`persistEvent` 与 `step.end`、`files.changed` 一样，经 `steps.toolIds` 映射成落库的步骤 id；映射不到（该步骤没有登记）时丢弃这个事件。所以 `kb.hits.stepId` 与同一步骤的 `step.start.stepId` 相等。
+- **存储**：映射之后 `persistEvent` 对 `kb.hits` 与 `turn.retry` 同样原样返回、不写库。
 - **可见性**：同一 epoch 内带 `Last-Event-ID` 重连可以回放；从完整快照恢复的连接看不到它（G12）。
 
 ### D8 知识库引用（F-CHAT-5b）
@@ -232,7 +239,11 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
   - prompt 回合先发 `set_host_tools` 的应答形态检查（记录入站帧）。
   - 再依次发两次 `kb_search` 的 `tool_execution_start` + `host_tool_call`，各自等宿主的 `host_tool_result` 后发 `tool_execution_end`（`result` 原样）。
   - 场景变体 `host-tool-abort`：第一次调用后不等结果，收到 `abort` 时发 `host_tool_cancel` 与失败的 `tool_execution_end`。
+  - 场景变体 `host-tool-parallel`：同一条回复里连发三个 `host_tool_call`（第三个的 `toolName` 为 `other`），不等任何应答，再按到达顺序收齐三个结果。
+  - 场景变体 `host-tool-register-fail`：`set_host_tools` 回 `success:false`，供注册失败的用例。
+  - 其余场景收到 `set_host_tools` 时回按 `id` 关联的 `success:false`。
   - `--approval-mode write` 时，在 `host_tool_call` 之前发 `Allow tool: kb_search` 的 `select`，等应答。
+- **观察宿主写出的帧**：假 omp 的入站帧记录只有帧类型，看不到载荷。协议用例改用 `server/test/support/omp-runtime.ts` 的 `capturePromptWrites` 同一手法截获子进程 stdin（stdin tee），断言 `host_tool_result` 的 `id`、文本、`details` 与 `isError`。
 - **受控假上游**：标记 `WORKBUDDY_KB_SEARCH:<kbId>`。本回合第一次请求回 `kb_search{question:<原问句>, kb_ids:[kbId]}`；本回合已有一条 tool 消息时，回第二次 `kb_search{question:<原问句> 详细说明}`；已有两条时回固定正文。
 - **官方 omp 门控用例** `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1`）：
   - 用 `createApp` 起服务，接受控假上游与假 RAGFlow。
@@ -247,8 +258,9 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
 ### D12 模块划分与行数
 
 - **新文件**：`sessions/omp/host-tools.ts`（协议）与 `kb/session-search.ts`（语义）。
-- **`process.ts`**：只加分流与 `#onUiRequest` 的一个判断；行数接近上限时把 UI 请求分流整体移进 `ui-requests.ts`。
-- **`runtime.ts`**：注册与对齐放进新文件 `sessions/omp/host-tool-set.ts`，`#acquire` 与 `#runPrompt` 只各调一次。
+- **`process.ts`**（760 行）：只加分流与 `#onUiRequest` 的一个判断，帧的处理全在 `host-tools.ts`。`ui-requests.ts` 保持无状态的纯判定函数，`OmpProcess` 仍是唯一写帧的地方。
+- **`runtime.ts`**：不加注册逻辑，只把 `hostTools` 从 `SessionRuntimeOpts` 透传给 `OmpProcessOpts`。
+- **对齐**：第 3 步放在新文件 `sessions/host-tool-align.ts`，`supervisor.ts`（785 行）只加一处调用。
 - **web**：新组件单独成文件；归约加在 `stream.ts` 旁的新文件 `stream-kb-hits.ts`，与 `stream-failure.ts` 同一先例。
 
 ### Sketch seams under test

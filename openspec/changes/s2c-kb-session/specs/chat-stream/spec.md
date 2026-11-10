@@ -124,6 +124,8 @@ supervisor SHALL 在发布 reducer 给出的 kb.hits 之前严格校验 `bases`�
 
 不符时 SHALL 丢弃这个事件，并写一行 `{"event":"kb_hits_invalid","messageId":<id>}` 的 stderr 记录，不含切片原文。步骤与回合照常。
 
+发布前 supervisor SHALL 把 reducer 给出的 `stepId`（omp 的 `toolCallId`）换成该调用持久化步骤的数字 id，与 files.changed 同一映射（「思考与文件变更事件发布」）：发布的 `stepId` 恒等于该调用 step.start 发布的 `stepId`。该调用没有已登记的步骤时 SHALL 丢弃事件，不写记录。
+
 通过校验的 kb.hits SHALL 与 turn.retry 一样：
 - 占当代环形缓冲的一个序号，按 reducer 给出的次序发布（在同一调用的 step.end 之前）。
 - SHALL NOT 写任何表或列：消息、步骤、会话都不变。
@@ -132,7 +134,7 @@ supervisor SHALL 在发布 reducer 给出的 kb.hits 之前严格校验 `bases`�
 
 #### Scenario: 发布但不落库
 - **WHEN** 假 omp `host-tool` 场景跑完一个回合，两次调用的结果都带合规的 `details.bases`
-- **THEN** SSE 依次有 step.start、kb.hits、step.end（第一次调用）与同样三条（第二次调用），kb.hits 各占一个序号；回合结束后 `chat_messages`、`chat_steps` 的行与不发 kb.hits 时逐列相同；完整快照里没有 kb.hits 的任何数据
+- **THEN** SSE 依次有 step.start、kb.hits、step.end（第一次调用）与同样三条（第二次调用），kb.hits 各占一个序号，其 `stepId` 是安全整数且等于同一调用 step.start 的 `stepId`；回合结束后 `chat_messages`、`chat_steps` 的行与不发 kb.hits 时逐列相同；完整快照里没有 kb.hits 的任何数据
 
 #### Scenario: 回放与快照
 - **WHEN** 回合结束后同一 epoch 内以第一个 step.start 的 id 作 `Last-Event-ID` 重连；另一连接不带 `Last-Event-ID` 读完整快照

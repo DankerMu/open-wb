@@ -41,7 +41,7 @@
 
 `DELETE /datasets` 的 `ids` SHALL 恰含一个非空 id，成功 SHALL 以 `success_count` 为 1 为准。客户端 SHALL NOT 提供 `GET /providers/<提供方>/instances/<实例>`：该应答明文回显上游密钥。
 
-RAGFlow 应答的 message 与错误应答的正文 SHALL NOT 进入本系统的响应、审计或日志，message 只用于上面的前缀判定。唯一的例外是成功检索应答里命中切片的 `content` 与 `similarity`：它们作为数据进入检索测试的 200 应答（knowledge-bases「单轮检索」），仍 SHALL NOT 进入审计或日志。
+RAGFlow 应答的 message 与错误应答的正文 SHALL NOT 进入本系统的响应、审计或日志，message 只用于上面的前缀判定。唯一的例外是成功检索应答里命中切片的 `content` 与 `similarity`：它们作为数据进入检索测试的 200 应答（knowledge-bases「单轮检索」）、会话检索 `kb_search` 交给模型的文本与 `details`（knowledge-bases「会话检索 `kb_search`」）以及会话事件 `kb.hits`（chat-stream「检索结果事件发布」），仍 SHALL NOT 进入审计或日志。
 
 #### Scenario: 结果映射
 - **WHEN** 假 RAGFlow 对建库请求依次应答：HTTP 200 `code:0`；HTTP 200 `code:101`；HTTP 401 `code:401`；HTTP 302；HTTP 200 非 JSON；挂起超过总期限（期限经装配注入缩短）
