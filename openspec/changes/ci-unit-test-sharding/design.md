@@ -93,5 +93,11 @@ Required evidence：
 - 缺片拒绝：真实 blob 只放 server 第 2/3 片时，`ci-unit-merge.sh server` 报「只有 1/3 个分片报告」并退出 1，没有调用 npm。
 - `make test-guardrails` 与 `make check` 退出 0；`npx openspec validate ci-unit-test-sharding --strict --no-interactive` 退出 0。
 - CI：本 PR 至少两次热缓存运行全绿。记录墙钟、关键路径、各分片与合并 job 的耗时，与模拟对照。
+  - run 42844722963（未改任何缓存 key），第 1 次运行与第 2 次「重跑全部 job」均全绿：墙钟 329 s、328 s，关键路径 uid-isolation（322 s、315 s）。
+  - web 最长一片 216 s、203 s；server 最长一片 216 s、188 s；unit-coverage 32 s、29 s。
+  - 合并后的测试数与覆盖率和改前全量 CI 逐项一致。
+  - 第 2 次是「重跑全部 job」，7 个上传步骤都没有 409，`overwrite: true` 生效。
+  - server 分片比模拟慢 30–60 s，多出的时间估计来自每片重复的 import 与启动开销。
+- 红路径：本机注入一个必败用例，`test:shard` 退出 1 并打印 `AssertionError`；CI 上此后的上传步骤因默认 `success()` 被跳过，`unit-coverage` 为 skipped，聚合拒绝。
 
 Rollback：单个 revert 即可。oracle、fixture、ci.yml 与 package 脚本在同一提交里，revert 后回到不分片的两 job 结构。

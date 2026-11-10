@@ -18,7 +18,7 @@
 - [x] 1.3 按 D1、D2、D5 改 `.github/workflows/ci.yml`，按 D3 加两个 workspace 的 `test:shard` / `test:merge`，`.gitignore` 加 `.vitest-reports/`；刷新 `ci.yml.fixture`。验证：`diff -u .github/workflows/ci.yml scripts/fixtures/ci-contract/ci.yml.fixture` 退出 0；`make test-guardrails` 退出 0，新增变异逐条 PASS（即被拒）。
 - [x] 1.4 本机等价性：两个 workspace 各跑一次「逐片 `test:shard` → `ci-unit-merge.sh`」与同机全量，测试文件数、测试数一致，覆盖率相差不超过 0.1 个百分点；只放部分 blob 时合并脚本退出 1、不调用 npm（design Required evidence）。
 - [x] 1.5 文档同步（D7）。spec delta 与实现一致，验证：`npx openspec validate ci-unit-test-sharding --strict --no-interactive` 退出 0。
-- [ ] 1.6 `make check` 退出 0；CI 至少两次热缓存运行全绿，记录墙钟、关键路径、各分片与合并 job 耗时，与 design D2 的模拟对照（由编排方取得）。
+- [ ] 1.6（CI 部分已满足，见 design Required evidence；本机 server 套件在高负载下有 mounts 用例 10 s 超时，待负载正常时重跑）`make check` 退出 0；CI 至少两次热缓存运行全绿，记录墙钟、关键路径、各分片与合并 job 耗时，与 design D2 的模拟对照（由编排方取得）。
 
 Suggested fixture level: expanded：改的是两个门禁 job 与聚合依赖，新增一个门禁 job。
 Minimal mergeable slice: atomic：oracle、fixture、ci.yml 与 package 脚本必须在同一提交里一起改，否则 guardrails 会红。
