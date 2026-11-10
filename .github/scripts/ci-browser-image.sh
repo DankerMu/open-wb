@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # CI job browser-image（browser-runtime「参考部署镜像」场景「镜像可构建且身份正确」与「CI browser-image job」
 # 场景「真实浏览器打开工作空间页面并截图」；change omp-browser-integration design D8）。
-# 前提：同一 job 里已 `docker build -t workbuddy-app:ci -f deploy/app/Dockerfile .`；本脚本不推送、不发布。
-# (1) 构建期哨兵：随机值进构建 shell 环境与上下文根的点开头环境文件，以同一 Dockerfile 另建哨兵 tag
+# 前提：同一 job 里已 `make omp-fetch` 并 `docker build --build-context omp-seed=var/omp -t workbuddy-app:ci -f deploy/app/Dockerfile .`；本脚本不推送、不发布。
+# (1) 构建期哨兵：随机值进构建 shell 环境与上下文根的点开头环境文件，以同一 Dockerfile、同一 omp 种子另建哨兵 tag
 #     （全程命中缓存），在镜像 Env、history、导出的根文件系统里搜；再在镜像里查身份、字体、无源码与开发依赖、omp 版本。
 # (2) 三个挂载目录属容器内 workbuddy（10001:10001），浏览器包装脚本只读挂到不在 PATH 上的 /opt/ci。
 # (3) 与 deploy/app/compose.yml 逐项相同的安全标志起容器（scripts/test-ci-harness.sh 把这一行钉成字面）；
@@ -40,7 +40,7 @@ in_box() { docker exec "$cid" "$@"; }
 sentinel="wbsentinel-$(openssl rand -hex 12)"
 env_file="$root/.env"
 printf 'MODEL_UPSTREAM_API_KEY=%s\n' "$sentinel" > "$env_file"
-(export MODEL_UPSTREAM_API_KEY="$sentinel"; docker build -q --build-arg MODEL_UPSTREAM_API_KEY -t "$sentinel_image" -f "$root/deploy/app/Dockerfile" "$root" >/dev/null) || die "the sentinel build failed"
+(export MODEL_UPSTREAM_API_KEY="$sentinel"; docker build -q --build-context omp-seed="$root/var/omp" --build-arg MODEL_UPSTREAM_API_KEY -t "$sentinel_image" -f "$root/deploy/app/Dockerfile" "$root" >/dev/null) || die "the sentinel build failed"
 rm -f "$env_file"; env_file=""
 # 先取全文再搜：pipefail 下 `grep -q` 提前退出会让上游吃 SIGPIPE，管道失败即把命中当成未命中。
 config="$(docker image inspect "$sentinel_image")"; hist="$(docker history --no-trunc "$sentinel_image")"
