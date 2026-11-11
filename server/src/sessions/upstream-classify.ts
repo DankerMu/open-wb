@@ -8,7 +8,7 @@
  *
  * The proxy's own failure envelopes reach omp's `errorMessage` ending in
  * `(type=wb_upstream param=<kind>)` (model-proxy「透传端点与 bearer 鉴权」, shape 实测 under omp
- * v18.0.10；v18.12.3 同（omp-official-upstream-failure.test.ts 在翻转后仍绿）). Such a marker is
+ * v18.0.10；v18.12.3 同（omp-official-upstream-*.test.ts 在翻转后仍绿）). Such a marker is
  * credited only at the very end of the text and only when `errorStatus` is the status the proxy
  * sends for that kind (502 for `status.*` / `connect.*`, 424 for the other
  * three): a `< 500` upstream body is passed through and omp appends its own `type` / `param`, so a

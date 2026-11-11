@@ -35,7 +35,7 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
 
 /**
  * How omp v18.0.10 spells a JSON error envelope in `errorMessage` (design D6, 实测 shape；v18.12.3 同
- * （omp-official-upstream-failure.test.ts 在翻转后仍绿）).
+ * （omp-official-upstream-*.test.ts 在翻转后仍绿）).
  */
 function ompErrorMessage(status: number, body: string): string {
   const { error } = JSON.parse(body) as { error: { message: string; type: string; param: string } };
