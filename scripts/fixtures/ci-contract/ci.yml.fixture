@@ -4,6 +4,12 @@ on:
     branches: [master]
   pull_request:
 
+# 同一 PR 的新推送取消旧运行。master 永不取消，每个合入提交都有完整结果：同组里排队等待的运行
+# 会被更新的到达者取消（与 cancel-in-progress 无关），所以 master 按提交 sha 各占一组，不排队也不互相取消。
+concurrency:
+  group: ci-${{ github.ref == 'refs/heads/master' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
 jobs:
   fast-checks:
     runs-on: ubuntu-latest
@@ -17,7 +23,65 @@ jobs:
       - run: npm run typecheck --workspaces
       - run: npx openspec validate --all --strict --no-interactive
 
+  # 单元测试按文件分片（change ci-unit-test-sharding）：分片内只跑测试并写 vitest blob，
+  # 覆盖率阈值在 unit-coverage 合并全部分片后才执行。分片数来自逐文件耗时模拟，改动前先重新测量。
   unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      # 一片失败不取消其余分片，每片的失败日志都完整保留。
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run test:shard --workspace server -- --shard=${{ matrix.shard }}/3
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vitest-blob-server-${{ matrix.shard }}
+          path: server/.vitest-reports/
+          # .vitest-reports 是点目录，upload-artifact 默认跳过隐藏文件；不打开就会报「没有文件」。
+          include-hidden-files: true
+          # 默认 warn：blob 没写出来时分片仍算成功，合并 job 才发现缺片；在源头就失败。
+          if-no-files-found: error
+          # blob 只供同一次运行的 unit-coverage 使用，默认 90 天白占存储配额。
+          retention-days: 1
+          # 「重跑全部 job」时上一轮的同名 artifact 还在，不覆盖会 409；名字按 workspace 与分片唯一，只会覆盖同一片自己的旧 blob。
+          overwrite: true
+
+  unit-tests-web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      # 同 unit-tests：一片失败不取消其余分片。
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version-file: .tool-versions, cache: npm }
+      - run: npm ci
+      - run: npm run test:shard --workspace web -- --shard=${{ matrix.shard }}/4
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vitest-blob-web-${{ matrix.shard }}
+          path: web/.vitest-reports/
+          # 同 unit-tests：点目录要显式打开隐藏文件。
+          include-hidden-files: true
+          # 同 unit-tests：没有 blob 即在源头失败。
+          if-no-files-found: error
+          # 同 unit-tests：只供本次运行合并。
+          retention-days: 1
+          # 同 unit-tests：重跑时覆盖同一片自己的旧 blob。
+          overwrite: true
+
+  # 合并两个 workspace 的全部分片并执行覆盖率门禁；ci-unit-merge.sh 先确认分片 1..N 一个不缺。
+  unit-coverage:
+    needs: [unit-tests, unit-tests-web]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -25,17 +89,20 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version-file: .tool-versions, cache: npm }
       - run: npm ci
-      - run: npm test --workspace server
-
-  unit-tests-web:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with: { node-version-file: .tool-versions, cache: npm }
-      - run: npm ci
-      - run: npm test --workspace web
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: vitest-blob-server-*
+          path: server/.vitest-reports
+          # 默认每个 artifact 落进自己的子目录；ci-unit-merge.sh 要求 blob 平铺在同一目录。
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: vitest-blob-web-*
+          path: web/.vitest-reports
+          # 同上：平铺进同一目录。
+          merge-multiple: true
+      - run: bash .github/scripts/ci-unit-merge.sh server
+      - run: bash .github/scripts/ci-unit-merge.sh web
 
   anti-drift:
     runs-on: ubuntu-latest
@@ -204,7 +271,7 @@ jobs:
     # 聚合门禁：分支保护只指向本 job。skipped 视为失败——GitHub 把 skipped 的
     # required check 当通过，这个洞必须在这里堵死。
     if: always()
-    needs: [fast-checks, unit-tests, unit-tests-web, anti-drift, guardrails, secret-scan, sast, smoke, ui-walk, uid-isolation, office-sidecar, browser-image]
+    needs: [fast-checks, unit-tests, unit-tests-web, unit-coverage, anti-drift, guardrails, secret-scan, sast, smoke, ui-walk, uid-isolation, office-sidecar, browser-image]
     runs-on: ubuntu-latest
     steps:
       - name: verify all required jobs succeeded

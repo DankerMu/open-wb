@@ -8,13 +8,17 @@ const FALLBACK = "ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION";
 const ALLOWED = {
   "actions/cache": "v6",
   "actions/checkout": "v5",
+  "actions/download-artifact": "v8",
   "actions/setup-node": "v5",
+  "actions/upload-artifact": "v7",
   "gitleaks/gitleaks-action": "v3",
 };
 const WANT = {
   "actions/cache@v6": 4,
-  "actions/checkout@v5": 12,
-  "actions/setup-node@v5": 10,
+  "actions/checkout@v5": 13,
+  "actions/download-artifact@v8": 2,
+  "actions/setup-node@v5": 11,
+  "actions/upload-artifact@v7": 2,
   "gitleaks/gitleaks-action@v3": 1,
 };
 const CORE_TAGS = new Set([
