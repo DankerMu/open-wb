@@ -44,7 +44,7 @@ app-server 注入转发，每会话计量/限额/审计**可以**落在代理层
 - **首字节期限**：发出上游请求后 120 s 内没有响应头，回 424 `no_response`；收到响应头之后不计时。
 - **慢失败不重试**（owner 2026-10-14）：10 s 建连期限到期回 424 `no_connect`（此前是可重试的 502）；上游答 504 / 524 回 424 `gateway_<s>`，不带上游正文。这几种回合在一次等待之内结束。
 - **实测**（官方 omp v18.0.10 经代理，注入短期限）：三种 424 都只有 1 次上游请求（建连卡住时 1 个连接、0 次请求）、没有 `auto_retry_start`；回合在期限或上游应答之后约 2–3 s（omp 开销）以 `failed` 结束——首字节注入 3 s 时 5.1–5.2 s，建连注入 1 s 时 3.8–4.0 s，上游 2 s 后答 504 时 4.1–4.2 s（各两次运行）。生产缺省下推算：不回响应头约 122 s，建连卡住约 13 s，上游答 504 / 524 后约 2 s。
-- **与 omp 版本绑定**：424 与 `no_connect`、`no_response`、`gateway_<s>` 是按 v18.0.10 的三层重试与会话层文本分类器选的（design D6、D7）。升级 omp 时重跑 `server/test/omp-official-upstream-failure.test.ts`：任何一例出现 `auto_retry_start` 或上游请求数大于 1，就要重议信封，不得换状态码或记号名绕过。
+- **与 omp 版本绑定**：424 与 `no_connect`、`no_response`、`gateway_<s>` 是按 v18.0.10 的三层重试与会话层文本分类器选的（design D6、D7）。升级 omp 时重跑 `server/test/omp-official-upstream-*.test.ts`（四个文件，#1979 拆分）：任何一例出现 `auto_retry_start` 或上游请求数大于 1，就要重议信封，不得换状态码或记号名绕过。
 
 ## 2026-10-21 补充（s1d-model-registry）：上游凭证按模型存进数据库
 

@@ -11,7 +11,7 @@
 
 最近 50 次 `ci.yml` 运行（46 次成功，截至 2026-11-10）墙钟中位数 11.8 min、p90 12.3 min。关键路径 46 次中 42 次是 `unit-tests-web`（中位 11.4 min），4 次是 `unit-tests`（7.7 min）；其余 job 都不超过 4.9 min，setup 中位约 18 s，job 间没有串行 `needs`。单元测试两条线各自只能在一个 4 vCPU runner 上跑（vitest 默认 3 个 worker），这就是全部 PR 的等待时间。
 
-按 vitest 4.1.11 的真实分片算法（文件路径 sha1 排序后等数切片）加实测逐文件耗时模拟，单片结果与实测相差不超过 2%：web 分 4 片时最长一片约 210 s，server 分 3 片时约 157 s。墙钟下限是 `uid-isolation`（4.9 min），被 `omp-official-upstream-failure.test.ts` 的真实退避等待钉住，单个文件不可拆。
+按 vitest 4.1.11 的真实分片算法（文件路径 sha1 排序后等数切片）加实测逐文件耗时模拟，单片结果与实测相差不超过 2%：web 分 4 片时最长一片约 210 s，server 分 3 片时约 157 s。墙钟下限是 `uid-isolation`（4.9 min），被 `omp-official-upstream-failure.test.ts` 的真实退避等待钉住；本 change 不拆它，拆分另见 #1979。
 
 工作流没有 `concurrency`，同一 PR 连推几次时旧运行照跑到底。
 

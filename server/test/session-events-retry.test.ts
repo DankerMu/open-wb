@@ -3,7 +3,7 @@
  * 「纯协议事件归约」, design D11) and the classified failure payload of the mapper's `error` event.
  * Frame shapes are omp v18.0.10's (design Context, 实测 c06r: `auto_retry_start{attempt,
  * maxAttempts,delayMs,errorMessage}`, `auto_retry_end{success,attempt,finalError}`；v18.12.3 同
- * （omp-official-upstream-failure.test.ts 在翻转后仍绿）). Expected sequences and payloads are
+ * （omp-official-upstream-*.test.ts 在翻转后仍绿）). Expected sequences and payloads are
  * fixture literals of the chat-stream scenarios, not reducer logic.
  */
 import { describe, expect, it } from "vitest";
