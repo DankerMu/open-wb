@@ -84,6 +84,18 @@
 | 组 7 首刀：回执次序与目录计数 | 是 | `COMPLETE_CATALOG` 26 条；052 紧随 051 |
 | 组 7 首刀：旧迁移不改、旧用例只跟进末尾假设 | 是 | 「既有用例唯一许可改动」条；PR 列 grep 清单 |
 | 组 7 首刀：公共 API / 权限 / web | 否 | 本刀没有代码读写该列，应答形状不变 |
+| 组 7 第二刀：公共 API 请求形状（四种键集） | 是 | 「组 7 第二刀约定」body 判定条；「拒绝」与多键用例 |
+| 组 7 第二刀：权限与不可区分的 404 | 是 | 三个 404 body 逐字节相同、无新增行；解析按所有者 |
+| 组 7 第二刀：不访问 RAGFlow、不写审计 | 是 | 真实 kb 世界里假 RAGFlow 请求记录不变；三个 404 审计为 `[]` |
+| 组 7 第二刀：判定次序（附件之后、归档与控制权之后） | 是 | 403 + 坏引用 → 403、409 + 坏引用 → 409 两个次序用例 |
+| 组 7 第二刀：builtin 带引用（规格缺口） | 是 | 字面行为用例（202 + 派发字节）；PR 上报 owner |
+| 组 7 第二刀：原子受理与补偿 | 是 | 列在受理事务内写；`wire` reject 时行连同引用移除 |
+| 组 7 第二刀：后缀逐字节与旧行为兼容 | 是 | 规格字面量；`[]` 与缺省同字节；既有后缀用例原样全绿 |
+| 组 7 第二刀：分支对位（regenerate / 撤回 / fork） | 是 | 三个对位用例；对位不查库表 |
+| 组 7 第二刀：fork 拷贝列 | 是 | 列原值相等（含 NULL） |
+| 组 7 第二刀：坏值容错 | 是 | `parseKnowledgeBases` 单元用例 |
+| 组 7 第二刀：行数上限 | 是 | 「行数预算」条 |
+| 组 7 第二刀：应答形状 / web / 事件流 | 否 | 本刀不改快照与 fork/撤回响应，web 不受影响（7.6–7.7） |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -304,13 +316,39 @@ Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可
     - 行数：`core-db-helpers.ts` 553 → ≤ 560；新测试文件 ≤ 400。
     - 非目标：任何读写该列的代码（组 7 第二、三刀）；索引；回填。
     - 回归命令：`npm run test:focus --workspace server -- migration-052 core-db kb-schema migration-0 store-attachments message-undo-state session-composer-align`，外加全量 `npm test --workspace server`（列集断言散在多个文件，全量兜底）、`make lint`、`make typecheck`、`make anti-drift`。
-- [ ] 7.3 核对 Context：`prompt-attachments.ts:47` 的 `parsePromptBody`、`rest.ts` 的受理与后缀拼接（:315-349）、`store-attachments.ts`、`slash-commands.ts:324` 的 `attachmentSuffix`、`branch-temp.ts:191` 的 `matches`、`branching.ts:126/156/258`、`store-branch.ts` 的 fork 拷贝、`turn-control.ts` 的 `acceptPrompt`
+- [ ] 7.3 核对 Context：`prompt-attachments.ts:47` 的 `parsePromptBody`、`rest.ts` 的受理与后缀拼接（:315-349）、`store-attachments.ts`、`slash-commands.ts:324` 的 `attachmentSuffix`、`branch-temp.ts:191` 的 `matches`、`branching.ts:126/156/258`、`store-branch.ts` 的 fork 拷贝、`store.ts:203/389` 的 `acceptPrompt`、`undo.ts:164` 的撤回预检
 - [ ] 7.4 测试先行：新文件 `server/test/prompt-knowledge-bases.test.ts` 覆盖「拒绝」、后缀的「带知识库引用的后缀」与「prompt 带知识库引用」、列的落库值，以及 `store-knowledge-bases.ts` 读出坏值整列为 `[]` 的单元用例；派发文本与 spec 场景同一写法用桩 supervisor 观察（不经假 omp：组 4 合入后，知识库开启且所有者有库时缺省假 omp 会让注册失败，需要假 omp 的用例改用 `host-tool` 场景）；分支对位的场景（「带知识库引用回合的对位」）放进 `message-attachments` 既有的对位用例文件；fork 拷贝在本刀只断言新会话消息行的 `knowledge_bases` 列原值（快照还没有这一键）；无引用时后缀逐字节不变的既有用例原样全绿
 - [ ] 7.5 实现（服务端写入侧，快照不加键）：
   - body 四种键集与 `knowledgeBases` 的判定（经组 2 的 `resolveReferences`，由 `app.ts` 注入路由）。
   - 引用的落库与读出放新文件 `server/src/sessions/store-knowledge-bases.ts`；`store.ts`（784 行）里 `acceptPrompt` 只多一个参数与一处调用，消息视图类型的第十四键留给 7.7。
   - `attachmentSuffix` 原地改名为 `promptSuffix(paths, kbs)`，全部调用点同改，不留旧名。
   - 对位候选由落库快照重建；fork 拷贝列。
+  - 组 7 第二刀约定（#1971 fixture 审查补；7.3–7.5 照此实现与测试）：
+    - body 键集（`prompt-attachments.ts` 的 `parsePromptBody`，原地扩）：只判键集——键数恰为 `1 + 有 attachments + 有 knowledgeBases`，`message` 必在且为字符串，其余任何键 400；返回 `{ text, paths, knowledgeBases: unknown }`（原值，缺省为 `undefined`），不判它的形状。空文本规则不变：去空白后为空且 `paths` 为空即 400，引用不放宽。
+    - 引用判定（`rest.ts` 受理段，规格「在附件的判定之后、受理之前」）：`admitAttachments` 之后、`acceptPrompt` 之前，仍在「归档读、控制权检查、附件检查、受理」同一同步段内，不加 await。先判形状：缺省或 `[]` 为无引用；否则须为数组、至多 5 项、每项非空字符串、按原样比较互不相同，否则 400 `bad_request`。再解析：调路由依赖 `knowledgeBases(ownerId, ids)`，返回 `null` 即 404 `not_found`（body 与其它 404 同一份）；依赖缺席（知识库关闭）同样 404。不写审计、不访问 RAGFlow（解析是 `kb/session-search.ts` 的 `resolveReferences`，只读本地库表）。形状与解析的函数放 `store-knowledge-bases.ts` 或 `prompt-attachments.ts`，由实现定，只一处。
+    - builtin 命令带引用（规格缺口）：附件遇 builtin 是 400（「prompt 携带附件」条件 3），规格对引用没有这条拒绝。按规格字面受理，不自行加 400：用例钉住 `{message:"/compact", knowledgeBases:["k1"]}` → 202、派发文本为 `toWireText("/compact", skills)` 接引用段；PR 把它列为规格缺口上报 owner（结转 #1977）。
+    - 注入：`sessions/index.ts` 的选项与 `registerSessionRoutes` 依赖加可选 `knowledgeBases`；`app.ts` 迟绑定传 `(ownerId, ids) => sessionSearch?.resolveReferences(ownerId, ids) ?? null`（与 `hostToolsOf` 同一个 `sessionSearch` 句柄，`registerKb` 在后）。测试接缝 `assembly.sessionSearch` 的类型改为带 `resolveReferences` 的会话检索端口（sessions 侧定义 `KnowledgeBaseRef {id, name}` 与该端口类型，`kb` 侧结构兼容，不跨模块 import 运行时值）；既有用例里手写的会话检索桩（如 `session-regenerate-helpers.ts` 的 `stubSearch`、`session-host-tool-align.test.ts` 的桩）唯一许可改动是补一个 `resolveReferences`。
+    - 落库：新文件 `server/src/sessions/store-knowledge-bases.ts` 放 `KnowledgeBaseRef`、内部（不导出，免 knip）的 `serializeKnowledgeBases(list?)`（无引用或 `[]` 为 NULL，否则紧凑 JSON `[{"id":…,"name":…}]` 按请求次序、恰两键）、`parseKnowledgeBases(text)`（非字符串、非 JSON、非数组、多于 5 项、任一项不是恰 `{id, name}` 两键、`id` 或 `name` 不是非空字符串、`id` 重复——任一成立整列 `[]`，不抛）、`writeKnowledgeBases(db, messageId, list)`（非空时 `UPDATE chat_messages SET knowledge_bases = ? WHERE id = ?`）与 `readKnowledgeBaseRefs(db, sessionId)`（消息 id → 引用，空与坏值无条目，同 `readAttachmentPaths`）。`store.ts` 的 `acceptPrompt` 只多参数 `knowledgeBases?` 与事务内一处 `writeKnowledgeBases` 调用（`INSERT_MESSAGE` 不改），store 端口多一行 `knowledgeBaseRefs(sessionId)`；助手行恒 NULL；`rollbackPrompt` 删行即连同引用移除。消息视图类型不加键（7.7）。
+    - 后缀：`slash-commands.ts` 的 `attachmentSuffix(paths)` 原地改名 `promptSuffix(paths, kbs)`：附件段不变，接引用段（`\n\n用户在本条消息中引用了以下知识库，可以用 kb_search 检索：` 后每项 `\n- <name>（<id>）`，全角括号）；全部调用点同改，`server/src` 与 `server/test` 不留旧名（grep 为零；`openspec/specs` 与 archive 的历史文字不动）。
+    - 对位：`branch-temp.ts` 的 `matches` / `entryFor` 多一个 `kbs` 参数，候选 = 原文或转义形式 + `promptSuffix(paths, kbs)`；三条路径同改——regenerate（`branching.ts` `#precheck` 在读 `attachmentPaths` 的同一同步段读 `knowledgeBaseRefs`，plan 加 `kbs`）、撤回（`undo.ts:164` 的 `#precheck` 在读附件的同一同步段读 `knowledgeBaseRefs`，经 `BranchTempPlan`（`undo.ts:190-200`）交给 `branch-temp.ts:233` 的对位循环）、fork（plan 加与 `attachments` 并列的引用表）。对位只读落库快照，不查库表。
+    - fork 拷贝：`store-branch.ts:254` 的 `INSERT … SELECT` 列清单加 `knowledge_bases`（两侧同位）；fork 与撤回的响应形状不变、不带引用。
+    - 用例：
+      - 新文件 `server/test/prompt-knowledge-bases.test.ts`：主世界用 `openBareSession` + `assembly.kb`（真实 `kb` 模块接假 RAGFlow，先例 `session-host-tool-align.test.ts:356` 的 `openKbWorld`；`supervisor.prompt` 为 spy），直接种库 `zhangsan` 的 k1 `产品文档`、`lisi` 的 k2；知识库关闭的世界用 `session-prompt-attachments-helpers.ts` 的 `openWorld()`：
+        - 「拒绝」五个 400（`"k1"`、`[1]`、`[""]`、`["k1","k1"]`、六个 id）与 `{message:"  ", knowledgeBases:["k1"]}` 400、多一个键 400，每次 `chat_messages` 行数不变、`wire` 未调用。
+        - 三个 404（不存在的 id、k2、知识库关闭的世界里任意 id）body 逐字节相同、行数不变、`wire` 未调用、审计为 `[]`（helper 的 `send(...).audit`），真实 kb 世界里假 RAGFlow 的请求记录在这些请求前后不变。
+        - 次序：被 sandbox 拒绝的附件 + 形状不合规的 `knowledgeBases` → 403 `sandbox_denied` 且审计 1 行；已归档会话 + 形状不合规的 `knowledgeBases` → 409 `session_archived`；合规附件 + 不属于本人的引用 → 404，行数不变。
+        - builtin 带引用：`/compact` + `["k1"]` → 202，派发文本逐字节为 `/compact` 接引用段（规格缺口，见上）。
+        - 「带知识库引用的后缀」：`{message:"查一下工单超时", knowledgeBases:["k1"]}` 交给 supervisor 的文本逐字节等于规格字面量，落库 `content` 为原文；附件 + 引用组合同理；`knowledgeBases: []` 与缺省的派发文本、列值（NULL）逐字节相同。
+        - 落库值：用户行 `knowledge_bases` 恰为 `[{"id":"k1","name":"产品文档"}]`，助手行 NULL；`wire` reject 时补偿删除用户行（行与列一并消失）。
+        - `parseKnowledgeBases` 单元：规格「坏值」三例加非数组、空 `id`、空 `name`、重复 `id`、6 项，都为 `[]`；合规两项按次序原样。
+      - `slash-commands.test.ts`：`promptSuffix` 两个规格字面量；既有「后缀的确切字节」用例只改调用名（`promptSuffix(paths, [])`）。
+      - `session-regenerate.test.ts`（对位用例文件）：「带知识库引用回合的对位」两例；世界不装 `kb` 模块（库不存在等价于已删除，证明对位不查库表）；引用由带外 `UPDATE chat_messages SET knowledge_bases = '[{"id":"k1","name":"产品文档"}]'` 写入。
+      - `session-undo-attachments.test.ts`：u1 带引用、条目文本为原文 + 引用段时 undo u1 200、`draft` 为原文；条目无后缀时 502。
+      - `session-fork.test.ts`（≤ 800 行）：「分叉拷贝引用」——u1 带引用（带外写列）、其 omp 条目文本为原文 + 引用段，在 u2 处分叉 → 201（对位用了落库快照）；新会话被拷贝的用户消息行 `knowledge_bases` 列原值等于源行（含 NULL 行），201 body 恰三键（本刀不读快照键）；u1 条目无引用段时 502。
+      - 无引用时后缀逐字节不变的既有用例原样全绿。
+    - 行数预算：`store.ts` 784 → ≤ 792；`app.ts` 766 → ≤ 775；`rest.ts` 603 → ≤ 625；`prompt-attachments.ts` ≤ 250；`branch-temp.ts` ≤ 260；`branching.ts` ≤ 440；`store-branch.ts` ≤ 360；新文件 ≤ 150；`undo.ts` 447 → ≤ 455；测试文件各 ≤ 800（`session-prompt-attachments.test.ts` 651 不往里加）。
+    - 非目标：消息快照第十四键与 web（7.6–7.7）；会话事件流不带引用；引用不限制 `kb_search` 的检索范围。
+    - 回归命令：`npm run test:focus --workspace server -- prompt-knowledge-bases session-prompt-attachments slash-commands session-regenerate session-undo-attachments session-fork store-attachments kb-session-search session-kb-hits session-host-tool-align branch`，外加全量 `npm test --workspace server`、`make lint`、`make typecheck`、`make anti-drift`。
 - [ ] 7.6 测试先行：快照的「受理与快照」「坏值」「分叉拷贝引用」场景（服务端；需要假 omp 时同 7.4 的场景选择）与 web 的「知识库引用的解析与发送」场景；消息键集的既有断言（服务端与 web 各自的权威文件）原地改为十四键
 - [ ] 7.7 实现（跨服务契约对，同一 PR）：服务端消息视图第十四键 `knowledgeBases`；web `parseMessage` 十四键与 `ChatKnowledgeBaseRef`；`api-sessions.ts` 的 `prompt` 加 `knowledgeBases` 选项
 
