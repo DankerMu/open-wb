@@ -122,7 +122,7 @@ For non-:memory: DB paths, the entry SHALL ensure the SQLite main file mode is06
 
 #### Scenario: job 全绿并入聚合
 - WHEN PR CI 运行 `uid-isolation`
-- THEN Linux 测试非 skipped 且通过、`make smoke` 五文件全绿、cleanup 后无残留 omp/假上游进程；`all-checks-passed.needs` 含十二个 direct job（change office-convert-sandbox 加入 `office-sidecar`，见 office-preview「转换 sidecar 实现与镜像」；change omp-browser-integration 加入 `browser-image`，见 browser-runtime「CI browser-image job」；PR #1906 加入 `guardrails`，见 verification-harness「CI 接线与控制面同步」），任一失败/取消/跳过时聚合非零
+- THEN Linux 测试非 skipped 且通过、`make smoke` 五文件全绿、cleanup 后无残留 omp/假上游进程；`all-checks-passed.needs` 含十三个 direct job（change office-convert-sandbox 加入 `office-sidecar`，见 office-preview「转换 sidecar 实现与镜像」；change omp-browser-integration 加入 `browser-image`，见 browser-runtime「CI browser-image job」；PR #1906 加入 `guardrails`，见 verification-harness「CI 接线与控制面同步」；change ci-unit-test-sharding 加入 `unit-coverage`，见 verification-harness「单元测试分片与合并覆盖率门禁」），任一失败/取消/跳过时聚合非零
 
 #### Scenario: 预检与换组不能假绿
 - WHEN HOME preservation, effective shared group, required interpreter, selected test or real-omp smoke fails, or child residue remains
