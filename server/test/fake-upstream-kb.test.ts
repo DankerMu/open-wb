@@ -113,6 +113,12 @@ describe("the marker's three stages", () => {
     expect(outcome(reply)).toEqual(expected);
     expect(reply.text).not.toContain("reasoning_content");
   });
+
+  it("finds kb_search anywhere in tools, not only first", async () => {
+    const port = await upstream();
+    const tools = [{ type: "function", function: { name: "bash" } }, ...KB_TOOLS];
+    expect(outcome(await chat(port, turn(MARKED, 0), { tools }))).toEqual(kbCall(ROUND_1));
+  });
 });
 
 describe("as if there were no marker", () => {
@@ -159,6 +165,7 @@ describe("the question and the kbId", () => {
       '{"question":"前文  后文","kb_ids":["k1"],"i":"第 1 轮"}',
     ],
     ["ending at U+3000", `${KB}k1　工单`, '{"question":"工单","kb_ids":["k1"],"i":"第 1 轮"}'],
+    ["a kbId ending the text, the question trimmed", `工单超时 ${KB}k1`, ROUND_1],
     [
       "the first occurrence deciding",
       `${KB}k1 工单 ${KB}k2`,
