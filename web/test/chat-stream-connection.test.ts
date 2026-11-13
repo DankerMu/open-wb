@@ -28,6 +28,7 @@ function completedSnapshot(): ChatMessageSnapshot {
         role: "assistant",
         undo: null,
         attachments: [],
+        knowledgeBases: [],
         approvals: [],
         content: COMPLETED_BODY,
         status: "done",

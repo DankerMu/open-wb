@@ -33,6 +33,7 @@ function message(id: number, role: "user" | "assistant") {
     approvals: [],
     steps: [],
     attachments: [],
+    knowledgeBases: [],
     error: null,
     thinkingMs: null,
     thinkingSegments: [],

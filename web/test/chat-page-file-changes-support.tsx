@@ -81,6 +81,7 @@ export function assistantMessage(
     role: "assistant",
     undo: null,
     attachments: [],
+    knowledgeBases: [],
     content: "",
     thinking: null,
     status,

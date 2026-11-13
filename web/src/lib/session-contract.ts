@@ -22,6 +22,9 @@ type ChatSessionComposer = {
 /** 消息附件：工作空间内的相对路径与字节数。 */
 type ChatAttachment = { path: string; size: number };
 
+/** 消息引用的知识库：受理那一刻的库 id 与名称（issue 1972）。 */
+type ChatKnowledgeBaseRef = { id: string; name: string };
+
 type ChatSessionMeta = {
   scene: ChatSessionScene | null;
   workspaceId: string | null;
@@ -68,6 +71,8 @@ export type ChatMessage = {
   undo: ChatUndoState | null;
   /** 助手消息恒为空数组。 */
   attachments: ChatAttachment[];
+  /** 受理时记录的引用，次序不变；助手消息恒为空数组。 */
+  knowledgeBases: ChatKnowledgeBaseRef[];
   /** 失败回合的分类说明与原文（issue 909）；用户消息与未失败的助手消息为 null。 */
   error: ChatMessageError | null;
   /** 思考累计毫秒（issue 910）：非负安全整数；用户消息、无思考与思考段进行中为 null。 */
@@ -374,6 +379,26 @@ function parseAttachments(value: unknown): ChatAttachment[] | null {
   return parseJsonArray(value, parseAttachment);
 }
 
+function parseKnowledgeBaseRef(value: unknown): ChatKnowledgeBaseRef | null {
+  if (!hasExactlyKeys(value, ["id", "name"])) {
+    return null;
+  }
+
+  const { id, name } = value;
+  return typeof id === "string" && id.length > 0 && typeof name === "string" && name.length > 0
+    ? { id, name }
+    : null;
+}
+
+/** The references of a user message; an assistant message carries none. */
+function parseMessageKnowledgeBases(
+  value: unknown,
+  role: ChatMessageRole,
+): ChatKnowledgeBaseRef[] | null {
+  const refs = parseJsonArray(value, parseKnowledgeBaseRef);
+  return refs && (role === "user" || refs.length === 0) ? refs : null;
+}
+
 function parseMessage(value: unknown): ChatMessage | null {
   if (
     !hasExactlyKeys(value, [
@@ -387,6 +412,7 @@ function parseMessage(value: unknown): ChatMessage | null {
       "approvals",
       "undo",
       "attachments",
+      "knowledgeBases",
       "error",
       "thinkingMs",
       "thinkingSegments",
@@ -413,6 +439,7 @@ function parseMessage(value: unknown): ChatMessage | null {
   const parsedSteps = parseJsonArray(steps, parseStep);
   const parsedApprovals = parseMessageApprovals(approvals, role);
   const attachments = parseAttachments(value.attachments);
+  const knowledgeBases = parseMessageKnowledgeBases(value.knowledgeBases, role);
   const error = parseMessageError(value.error, role);
   const thinkingSegments = parseThinkingSegments(value.thinkingSegments, role);
   // 附件只属于用户消息。
@@ -422,6 +449,7 @@ function parseMessage(value: unknown): ChatMessage | null {
     !thinkingSegments ||
     !attachments ||
     (role === "assistant" && attachments.length > 0) ||
+    !knowledgeBases ||
     error === undefined
   ) {
     return null;
@@ -438,6 +466,7 @@ function parseMessage(value: unknown): ChatMessage | null {
     approvals: parsedApprovals,
     undo,
     attachments,
+    knowledgeBases,
     error,
     thinkingMs,
     thinkingSegments,

@@ -1,7 +1,8 @@
 /**
  * Issue #1971 (s2c-kb-session tasks 7.4 / 7.5) the write side of knowledge-base references:
  * message-attachments「prompt 引用知识库」(拒绝, the admission and the stored column, 坏值) and「交给
- * omp 的附件后缀」(带知识库引用的后缀), chat-sessions「REST prompt 受理与补偿」(the four key sets).
+ * omp 的附件后缀」(带知识库引用的后缀), chat-sessions「REST prompt 受理与补偿」(the four key sets);
+ * issue #1972 (tasks 7.6 / 7.7) the read side: the snapshot's `knowledgeBases` (受理与快照, 坏值).
  * The main world is the production createApp → registerSessions assembly with the real kb module
  * against the fake RAGFlow (precedent: `openKbWorld` of session-host-tool-align.test.ts), a real
  * in-memory SQLite and `supervisor.prompt` a resolving spy, driven through `app.inject()`; the base
@@ -26,7 +27,11 @@ import {
   send,
   type World,
 } from "./session-prompt-attachments-helpers.js";
-import { AGENT_UNAVAILABLE_ENVELOPE, SESSION_ARCHIVED_ENVELOPE } from "./session-rest-helpers.js";
+import {
+  AGENT_UNAVAILABLE_ENVELOPE,
+  getSessionMessages,
+  SESSION_ARCHIVED_ENVELOPE,
+} from "./session-rest-helpers.js";
 import { type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
 import { SANDBOX_DENIED_ENVELOPE } from "./workspace-upload-helpers.js";
 
@@ -94,6 +99,22 @@ function columnOf(world: World, session: string) {
       "SELECT role, content, knowledge_bases FROM chat_messages WHERE session_id = ? ORDER BY id",
     )
     .all(session);
+}
+
+/**
+ * The snapshot over `GET /api/sessions/:id/messages`: 200 and every reference exactly `{id, name}`;
+ * each message's id, role and `knowledgeBases`.
+ */
+async function referencesOf(world: World, session: string) {
+  const history = await getSessionMessages(world.app, session, world.cookie);
+  expect(history.statusCode).toBe(200);
+  const { messages } = history.json<{ messages: Array<Record<string, unknown>> }>();
+  for (const message of messages) {
+    for (const ref of message.knowledgeBases as object[]) {
+      expect(Object.keys(ref)).toEqual(["id", "name"]);
+    }
+  }
+  return messages.map((message) => [message.id, message.role, message.knowledgeBases]);
 }
 
 /** A 404 of the reference check: no row, dispatch, notification or audit row; its raw body. */
@@ -328,6 +349,72 @@ describe("prompt 引用知识库: 受理、后缀与落库 (#1971)", () => {
       "[]",
     ]);
   });
+});
+
+describe("prompt 引用知识库: 快照 (#1972)", () => {
+  it("受理与快照: 带引用的用户消息读出受理时的 {id, name}，其余消息为 []；删库后再读值不变", async () => {
+    const world = await openKbWorld();
+    const session = await world.proj.session();
+    const plain = (await expectAdmitted(world, session, { message: "你好" })).body.userMessageId;
+    expect(world.app.sessions.store.finishTurn(plain + 1, "done")).toBe(true);
+    const referred = (
+      await expectAdmitted(world, session, { message: "查一下", knowledgeBases: [K1] })
+    ).body.userMessageId;
+    const expected = [
+      [plain, "user", []],
+      [plain + 1, "assistant", []],
+      [referred, "user", [{ id: K1, name: "产品文档" }]],
+      [referred + 1, "assistant", []],
+    ];
+    expect(await referencesOf(world, session)).toEqual(expected);
+
+    const removed = await world.app.inject({
+      method: "DELETE",
+      url: `/api/kb/bases/${K1}`,
+      headers: { cookie: world.cookie },
+    });
+
+    expect(removed.statusCode).toBe(204);
+    expect(createKbStore(world.db).getBase(K1)).toBeUndefined();
+    expect(await referencesOf(world, session)).toEqual(expected);
+  });
+
+  it("带外写到助手行的合法列表读作 []：快照 200，列原文不变", async () => {
+    const world = await openKbWorld();
+    const session = await world.proj.session();
+    const user = (await expectAdmitted(world, session, { message: "查一下", knowledgeBases: [K1] }))
+      .body.userMessageId;
+    world.db
+      .prepare("UPDATE chat_messages SET knowledge_bases = ? WHERE id = ?")
+      .run(K1_COLUMN, user + 1);
+
+    expect(await referencesOf(world, session)).toEqual([
+      [user, "user", [{ id: K1, name: "产品文档" }]],
+      [user + 1, "assistant", []],
+    ]);
+    expect(columnOf(world, session).map((row) => row.knowledge_bases)).toEqual([
+      K1_COLUMN,
+      K1_COLUMN,
+    ]);
+  });
+
+  it.each(["not json", '[{"id":"k1"}]', '[{"id":"k1","name":"x","extra":1}]'])(
+    "坏值 %s: 快照 200，该消息 knowledgeBases 为 []，列值未被改写",
+    async (stored) => {
+      const world = await openKbWorld();
+      const session = await world.proj.session();
+      const user = (await expectAdmitted(world, session, { message: "查一下" })).body.userMessageId;
+      world.db
+        .prepare("UPDATE chat_messages SET knowledge_bases = ? WHERE id = ?")
+        .run(stored, user);
+
+      expect(await referencesOf(world, session)).toEqual([
+        [user, "user", []],
+        [user + 1, "assistant", []],
+      ]);
+      expect(columnOf(world, session).map((row) => row.knowledge_bases)).toEqual([stored, null]);
+    },
+  );
 });
 
 describe("store-knowledge-bases.ts on its own (#1971)", () => {

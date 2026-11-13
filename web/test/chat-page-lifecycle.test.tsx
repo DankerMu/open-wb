@@ -62,6 +62,7 @@ function snapshotFor(session: ChatSession, content: string): ChatMessageSnapshot
         role: "user",
         undo: "none",
         attachments: [],
+        knowledgeBases: [],
         approvals: [],
         content,
         status: "done",

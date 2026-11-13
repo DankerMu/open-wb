@@ -37,6 +37,7 @@ const MESSAGE_KEYS = [
   "createdAt",
   "error",
   "id",
+  "knowledgeBases",
   "role",
   "status",
   "steps",
@@ -86,7 +87,7 @@ function byId(list: WireMessage[], id: number): WireMessage {
   return found;
 }
 
-describe("chat-sessions「会话 REST」: 13 message, 8 step and 7 approval keys", () => {
+describe("chat-sessions「会话 REST」: 14 message, 8 step and 7 approval keys", () => {
   it(
     "approval: the running snapshot carries stepId of the started bash step; allow answers 7 keys",
     REAL,

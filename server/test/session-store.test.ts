@@ -75,6 +75,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               createdAt: FIXED_NOW + 20,
               approvals: [],
               attachments: [],
+              knowledgeBases: [],
               steps: [],
               thinking: null,
               error: null,
@@ -89,6 +90,7 @@ describe("SessionStore owner-scoped persisted views", () => {
               createdAt: FIXED_NOW + 20,
               approvals: [],
               attachments: [],
+              knowledgeBases: [],
               steps: [
                 {
                   id: firstStepId,

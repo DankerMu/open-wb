@@ -5,6 +5,7 @@ import type { MessageRole, MessageStatus, MessageView, StepStatus, StepView } fr
 import { parseAttachments } from "./store-attachments.js";
 import { type ComposerConfig, storedModeUnderCap } from "./store-composer.js";
 import type { MessageError } from "./store-error.js";
+import { parseKnowledgeBases } from "./store-knowledge-bases.js";
 import { failureSentence, httpStatusOrNull, isFailureReason } from "./upstream-classify.js";
 
 export type MessageDbRow = ErrorColumns & {
@@ -19,6 +20,8 @@ export type MessageDbRow = ErrorColumns & {
   attachments: unknown;
   /** Bare column (044, no CHECK): judged by `thinkingMsOf`. */
   thinking_ms: unknown;
+  /** Bare column (052, no CHECK): judged by `parseKnowledgeBases`, on a user row only. */
+  knowledge_bases: unknown;
 };
 
 /** The three error columns (migration 043) as SQLite returned them: any storage class a hand edit left. */
@@ -43,7 +46,7 @@ export type StepDbRow = {
 };
 
 export const MESSAGE_COLUMNS =
-  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments, error_reason, error_status, CAST(error_detail AS BLOB) AS error_detail, thinking_ms";
+  "id, session_id, role, CAST(content AS BLOB) AS content, status, created_at, CAST(thinking AS BLOB) AS thinking, attachments, error_reason, error_status, CAST(error_detail AS BLOB) AS error_detail, thinking_ms, knowledge_bases";
 export const STEP_COLUMNS =
   "s.id, s.message_id, s.ordinal, CAST(s.name AS BLOB) AS name, CAST(s.detail AS BLOB) AS detail, CAST(s.output AS BLOB) AS output, s.status, s.started_at, s.ended_at, CAST(s.changes AS BLOB) AS changes, s.body_offset";
 export const INSERT_MESSAGE =
@@ -79,6 +82,8 @@ export function toMessageView(
     status: row.status,
     createdAt: Number(row.created_at),
     attachments: parseAttachments(row.attachments),
+    // An assistant row reads [] whatever a hand edit stored (as `thinkingMsOf`, `messageError`).
+    knowledgeBases: row.role === "user" ? parseKnowledgeBases(row.knowledge_bases) : [],
     error: messageError(row.role, row, decoder),
     thinkingMs: thinkingMsOf(row.role, row.thinking_ms),
   };

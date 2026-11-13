@@ -43,6 +43,7 @@ function assistant(id: number, steps: Step[], status: Message["status"] = "done"
     role: "assistant",
     undo: null,
     attachments: [],
+    knowledgeBases: [],
     approvals: [],
     content: `回答 ${id}`,
     status,

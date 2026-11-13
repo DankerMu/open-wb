@@ -63,6 +63,7 @@ export function assistantRow(
     role: "assistant",
     undo: null,
     attachments: [],
+    knowledgeBases: [],
     approvals,
     content: `answer ${id}`,
     status,

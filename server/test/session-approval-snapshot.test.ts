@@ -36,6 +36,7 @@ const MESSAGE_KEYS = [
   "createdAt",
   "error",
   "id",
+  "knowledgeBases",
   "role",
   "status",
   "steps",

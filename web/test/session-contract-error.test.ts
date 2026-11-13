@@ -45,6 +45,7 @@ function message(id: number, role: "user" | "assistant") {
     steps: [],
     undo: role === "user" ? "available" : null,
     attachments: [],
+    knowledgeBases: [],
     thinkingMs: null,
     thinkingSegments: [],
   };
