@@ -45,8 +45,8 @@ export const W_MISSING = "99999999999999999999999999999999";
 
 // [name, type, notnull, dflt_value, pk] of the current schema: 032/033/034 columns, the 035 tail,
 // then the 036 `todo`, 037 `archived_at`, 040 composer-setting, 047 capability and 048 connector tails on
-// chat_sessions and the 042 `attachments`, 043 error and 044 `thinking_ms` tails on chat_messages and the 045
-// `body_offset` tail on chat_steps.
+// chat_sessions and the 042 `attachments`, 043 error, 044 `thinking_ms` and 052 `knowledge_bases` tails on
+// chat_messages and the 045 `body_offset` tail on chat_steps.
 type ColumnInfo = [string, string, number, string | null, number];
 const CHAT_TABLE_INFO = {
   chat_sessions: [
@@ -84,6 +84,7 @@ const CHAT_TABLE_INFO = {
     ["error_status", "INTEGER", 0, null, 0],
     ["error_detail", "TEXT", 0, null, 0],
     ["thinking_ms", "INTEGER", 0, null, 0],
+    ["knowledge_bases", "TEXT", 0, null, 0],
   ],
   chat_steps: [
     ["id", "INTEGER", 0, null, 1],
@@ -105,7 +106,7 @@ const SESSION_FOREIGN_KEYS = [
   { from: "workspace_id", table: "workspaces", to: "id", on_delete: "SET NULL" },
 ];
 
-/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three, 047 two, 048 one; on messages 042 one more, 043 three, 044 one; on steps 045 one more). */
+/** Drops the trailing columns later migrations appended (035: 3/1/1; on sessions 036 and 037 one more each, 040 three, 047 two, 048 one; on messages 042 one more, 043 three, 044 one, 052 one; on steps 045 one more). */
 function namesBefore035(info: ColumnInfo[], newColumns: number): string[] {
   return info.slice(0, info.length - newColumns).map(([name]) => name);
 }
@@ -115,7 +116,7 @@ export const PRIOR_COLUMNS = {
   accounts: ["id", "account", "role", "disabled", "password_hash"],
   workspaces: ["id", "owner_id", "name", "dir", "created_at"],
   chat_sessions: namesBefore035(CHAT_TABLE_INFO.chat_sessions, 11),
-  chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 6),
+  chat_messages: namesBefore035(CHAT_TABLE_INFO.chat_messages, 7),
   chat_steps: namesBefore035(CHAT_TABLE_INFO.chat_steps, 2),
   chat_approvals: [
     "id",

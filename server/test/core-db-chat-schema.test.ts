@@ -317,6 +317,7 @@ describe("core/db chat schema", () => {
         ["error_status", "INTEGER", 0, null, 0, 0],
         ["error_detail", "TEXT", 0, null, 0, 0],
         ["thinking_ms", "INTEGER", 0, null, 0, 0],
+        ["knowledge_bases", "TEXT", 0, null, 0, 0],
       ]);
       expect(columnInfo(db, "chat_steps")).toEqual([
         ["id", "INTEGER", 0, null, 1, 0],

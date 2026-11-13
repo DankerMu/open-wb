@@ -96,8 +96,8 @@ function expect043Applied(db: DatabaseSync): void {
   const names = columnNames(db, "chat_messages");
   const before = COLUMNS_042.chat_messages.length;
   expect(names.slice(0, before)).toEqual(COLUMNS_042.chat_messages);
-  // 044 appends `thinking_ms` after them (issue 1439).
-  expect(names.slice(before)).toEqual([...NEW_COLUMNS, "thinking_ms"]);
+  // 044 appends `thinking_ms` after them (issue 1439), then 052 `knowledge_bases` (issue 1970).
+  expect(names.slice(before)).toEqual([...NEW_COLUMNS, "thinking_ms", "knowledge_bases"]);
   expectChatSchema(db);
 }
 

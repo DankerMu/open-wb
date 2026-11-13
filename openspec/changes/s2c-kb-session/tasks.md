@@ -292,8 +292,8 @@ Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可
 
 ## 7. 知识库引用：迁移、受理、后缀与快照（message-attachments「迁移 052 知识库引用列」「prompt 引用知识库」「交给 omp 的附件后缀」「重新生成与分叉中的附件」；chat-sessions「会话 REST」「REST prompt 受理与补偿」「Slash 命令白名单与命令目录」；chat-web「API 客户端扩展」）
 
-- [ ] 7.1 核对 Context：`042_chat_message_attachments.sql` 的写法、`server/test/core-db-helpers.ts` 的跟踪清单与受信任迁移目录计数、`051_kb_retrieval.sql` 的回执位置
-- [ ] 7.2 测试先行后实现：迁移 `052_chat_message_knowledge_bases.sql`；在迁移的权威用例文件里覆盖「新库与存量库」「中途失败原子回滚」，目录计数原地加一
+- [x] 7.1 核对 Context：`042_chat_message_attachments.sql` 的写法、`server/test/core-db-helpers.ts` 的跟踪清单与受信任迁移目录计数、`051_kb_retrieval.sql` 的回执位置
+- [x] 7.2 测试先行后实现：迁移 `052_chat_message_knowledge_bases.sql`；在迁移的权威用例文件里覆盖「新库与存量库」「中途失败原子回滚」，目录计数原地加一
   - 组 7 首刀约定（#1970 fixture 审查补；7.2 照此实现与测试）：
     - 迁移文件 `server/src/core/db/migrations/052_chat_message_knowledge_bases.sql`：文件头注释照 042 的五行写法（来源、可空无 DEFAULT 无索引不回填、不带 CHECK 由应用层判定、只 ADD COLUMN、事务与回执归 runner），正文恰一句 `ALTER TABLE chat_messages ADD COLUMN knowledge_bases TEXT NULL;`。更早的迁移文件一律不改。
     - 权威用例：新文件 `server/test/migration-052.test.ts`（042 的权威文件 `core-db-session-composer.test.ts` 已 756 行，放不下；先例 `migration-045.test.ts`）。052 按目录位置定位（紧随 051），期望值写字面量、不由迁移反推。
