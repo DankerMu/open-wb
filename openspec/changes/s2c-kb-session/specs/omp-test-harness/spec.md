@@ -166,7 +166,7 @@ For S2c (change `s2c-kb-session`) the fixture SHALL additionally support the fou
 
 ### Requirement: 受控上游知识库检索标记
 受控假上游 SHALL 支持标记 `WORKBUDDY_KB_SEARCH:<kbId>`（`kbId` 到下一个空白为止，空即无标记）。以本回合最后一条 user 消息之后的 `role:"tool"` 消息条数为准：
-- 0 条：回一次 `kb_search` 调用，`arguments` 为 `{question:<去掉标记后的 user 文本，首尾空白去掉>, kb_ids:[kbId], i:"第 1 轮"}`。
+- 0 条：回一次 `kb_search` 调用，`arguments` 为 `{question:<去掉标记后的 user 文本，首尾空白去掉>, kb_ids:[kbId], i:"第 1 轮"}`。user 文本（不 trim）以 `<system-reminder>` 开头时，先去掉从开头到首个 `</system-reminder>` 的整块，没有闭合标签时原样保留：omp v18.12.3 把日期与 cwd 提醒作为同一条 user 消息的首个 text part 发出（#1975 实测）；这与 #1769 的整条提醒消息是两种形状。
 - 1 条：回第二次 `kb_search`，`question` 为第一次的问句加 ` 详细说明`，`i` 为 `第 2 轮`。
 - 2 条及以上：回固定正文 `已根据知识库检索结果作答。`。
 
@@ -177,3 +177,5 @@ For S2c (change `s2c-kb-session`) the fixture SHALL additionally support the fou
 - **THEN** 前两次回 `kb_search` 调用，`question` 依次为 `工单超时` 与 `工单超时 详细说明`，`kb_ids` 都是 `["k1"]`；第三次回正文 `已根据知识库检索结果作答。`
 - **WHEN** 同一 user 文本而 `tools` 不含 `kb_search`
 - **THEN** 按无标记的缺省回合应答
+- **WHEN** user 文本为 `<system-reminder>\nToday: 2026-10-26; current working directory: '/w'. Do not repeat this information in your reply.\n</system-reminder>WORKBUDDY_KB_SEARCH:k1 工单超时`、`tools` 含 `kb_search`、其后 0 条 tool 消息
+- **THEN** `question` 为 `工单超时`

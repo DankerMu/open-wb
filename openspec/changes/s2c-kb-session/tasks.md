@@ -567,6 +567,18 @@ Minimal mergeable slice: atomic - 入口、标签与发送是同一个用户动�
       - 操作：由 owner 执行（agent 不得代签）。在 CK-15 同一台服务上，`zhangsan` 新建一个专用库「半事实库」，入库一份只写了一半事实的文档（例如只写升级时限，不写升级给谁）。「规范库」与其中的 `manual.pdf` 保持不动。新建会话，点名「半事实库」，问一个需要两部分事实的问题，问句里不提检索几次，等回答结束。
       - 预期：模型自行第二次调用 `kb_search` 并换了问法。助手消息的「知识库检索」卡有 2 行或更多，各行的问句或意图不同。回合正常结束，页面没有错误提示。模型只检索一次时记 `不通过` 并注明。
       - 结论：`待签`。
+    - 实测修订（#1975 实现时发现，fixture 复核后补）：
+      - 真实 omp 把 `<system-reminder>`（日期与 cwd）作为同一条 user 消息的首个 text part 发出。`isReminderOnly` 只认整条都是提醒的消息，所以假上游的 `question` 会带上整段提醒；实测 `question` 为 `<system-reminder>…</system-reminder> 工单超时`。
+      - 修法放在 `fake-upstream-kb.mjs`：
+        - 解析标记前，若文本以 `<system-reminder>` 开头，先去掉直到首个 `</system-reminder>` 的整块。
+        - 没有闭合标签时原样保留。
+        - 这条是本兄弟模块的私有规则；字面量在兄弟文件里另写一次，因为它零依赖。
+        - `fake-upstream.mjs` 不改。
+      - 规格条文同步：omp-test-harness「受控上游知识库检索标记」加一句，并加一组 WHEN/THEN。
+      - `fake-upstream-kb.test.ts` 在 「the question and the kbId」 表里加两行：
+        - 提醒块后接标记，question 为 `工单超时`；
+        - 只有开标签、没有闭合标签，原样保留。
+      - 9.3 的期望不变，仍是 `工单超时` 与 `工单超时 详细说明`。
     - PR 边界偏离：issue 写的是「一个新门控用例文件；验收清单一行」，本刀另外新增一个 support 文件，并原地改 `omp-official-proxied.ts`、`rpc-ui`、`session-capabilities`。理由是 tasks.md 头部的 Code Canonicality 与「放不下时先把相邻的既有逻辑原地移出」。diff 预计接近 400 行（`constraints.yaml` review-only）。两点都要在 PR 描述里写明。
     - 白盒：本刀在真实二进制上验证 omp 子进程治理这条 Critical Path，PR 标注请求白盒审查，不改 `server/src`。
 
