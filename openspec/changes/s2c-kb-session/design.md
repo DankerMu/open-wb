@@ -47,7 +47,7 @@ S2b 交付了单轮检索（knowledge-bases「单轮检索」），并把 `kb_se
   - 后缀由 `attachmentSuffix`（`slash-commands.ts:324`）唯一构造。
   - 分支对位（`branch-temp.ts:191`）逐字节比较 `content + suffix`。
 - **kb**：
-  - `retrieveForBase`（`kb/retrieval.ts:91`）不判 `state`，也传不下 `AbortSignal`（`ragflow-retrieval.ts:69`）；但 `ragflow-client.ts` 的 `json(…, signal)` 已支持中止。
+  - `retrieveForBase`（`kb/retrieval.ts:93`）不判 `state`，也传不下 `AbortSignal`（`ragflow-retrieval.ts:69`）；但 `ragflow-client.ts` 的 `json(…, signal)` 已支持中止。
   - `kb/index.ts` 不向其它模块暴露任何句柄。
   - 库没有改名接口，名称建后不变。
 - **web**：

@@ -39,6 +39,10 @@
 | 外部接口漂移（omp 的 `i` 字段、帧序） | 是 | 组 5 意图缺失时退回问句；组 9 第二刀在真实 omp 上回归 |
 | 中止的时序与错误映射（中止与期限同为 `kb_unavailable`；中止与重排降级重试的先后） | 是 | 组 1 的三个中止用例（`kb-retrieval-abort.test.ts`） |
 | 旧调用方兼容（检索测试端点不传信号） | 是 | 组 1：`kb-retrieval`、`kb-ragflow-client-retrieval` 两组既有用例原样全绿；本组无 schema、权限或公共 API 变化，其余风险包不选 |
+| 组 2：并发与中止（逐库并发检索；中止后执行立即结束） | 是 | 组 2「中止」与「两个库都命中」的并发证据（「组 2 约定」） |
+| 组 2：部分输出（部分库失败、不可探测） | 是 | 组 2「部分失败与不可探测」 |
+| 组 2：资源上限（5 库、每库 6 条、1000 码点） | 是 | 组 2「参数校验」；每库 6 条由单轮检索的 `page_size:6` 保证（S2b 既有用例） |
+| 组 2：旧调用方兼容（检索测试端点、model 写入钩子、降级限频记录） | 是 | 组 2 回归命令（「组 2 约定」最后一条） |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -58,15 +62,30 @@ Minimal mergeable slice: atomic - 签名改动与它唯一的验证路径（中�
 
 ## 2. 会话检索 `kb_search`（knowledge-bases「会话检索 `kb_search`」「单轮检索」的扫描用例）
 
-- [ ] 2.1 核对 Context：`kb/store.ts` 的 `listBases`（:323）、`getBase`（:320），`kb/bases.ts:89` 的 `ownedBase`，`retrieval.ts` 里检索测试端点的问句判定函数（复用它，不另写），`kb/index.ts` 的 `registerKb` 返回值与 `app.ts:383` 的调用点
-- [ ] 2.2 测试先行：新文件 `server/test/kb-session-search.test.ts` 覆盖「定义」「两个库都命中」「部分失败与不可探测」「参数校验」「中止」五个场景；断言文本逐字节、`details` 的键集与次序、假 RAGFlow 的请求计数、`knowledge_bases` 列与审计表不变
-- [ ] 2.3 实现新文件 `server/src/kb/session-search.ts` 的 `createKbSessionSearch(deps)`：
+- [x] 2.1 核对 Context：`kb/store.ts` 的 `listBases`（:323）、`getBase`（:320），`kb/bases.ts:89` 的 `ownedBase`，`retrieval.ts` 里检索测试端点的问句判定函数（复用它，不另写），`kb/index.ts` 的 `registerKb` 返回值与 `app.ts:383` 的调用点
+- [x] 2.2 测试先行：新文件 `server/test/kb-session-search.test.ts` 覆盖「定义」「两个库都命中」「部分失败与不可探测」「参数校验」「中止」五个场景；断言文本逐字节、`details` 的键集与次序、假 RAGFlow 的请求计数、`knowledge_bases` 列与审计表不变
+- [x] 2.3 实现新文件 `server/src/kb/session-search.ts` 的 `createKbSessionSearch(deps)`：
   - `definitionFor(ownerId)`、`execute(ownerId, args, signal)`（design D5）。
   - `resolveReferences(ownerId, ids)`：组 7 第二刀用，返回 `[{id,name}]` 或 `null`（任一不是该账号的库）。
-- [ ] 2.4 `registerKb` 在知识库开启时把它与既有的返回值一起交回给 `app.ts`，关闭时为 `null`；本组不接进会话（组 4 接）。knip 不报未用：`app.ts` 已读取返回对象，新成员由组 4 消费前先在 2.2 的用例里被调用
-- [ ] 2.5 扫描用例：在 `server/test/kb-retrieval-canonical.test.ts`（「只有一处检索实现」的权威用例文件）里：
+- [x] 2.4 `registerKb` 在知识库开启时把它与既有的返回值一起交回给 `app.ts`，关闭时为 `null`；本组不接进会话（组 4 接）。knip 不报未用：`app.ts` 已读取返回对象，新成员由组 4 消费前先在 2.2 的用例里被调用
+- [x] 2.5 扫描用例：在 `server/test/kb-retrieval-canonical.test.ts`（「只有一处检索实现」的权威用例文件）里：
   - 加一条，断言 `session-search.ts` 只经 `retrieveForBase` 检索。
   - 删掉「kb_search 在 server/src 里零出现」这条（它对应的「`kb_search` 工具契约」被本 change 的 knowledge-bases delta REMOVED），文件头注释同改；不另写替代的零出现断言。
+  - 组 2 约定（#1963 fixture 审查补；2.2–2.5 照此实现与测试）：
+    - 类型与位置：`session-search.ts` 自己声明结构类型，kb 不导入 sessions（组 3/4 在 sessions 侧各写同构类型，由 `app.ts` 接起来）。工具定义 `KbSearchTool` 键集与次序恰为 `{name, label, description, parameters, loadMode}`（`parameters` 取自 `docs/reviews/2026-11-10-omp-host-tools.md` §1）。`definitionFor(ownerId)` 返回 `{tool: KbSearchTool, bases: [{id, name}]} | null`——`bases` 即注册比较的库清单（D3），次序同描述。`execute` 返回 `{text, details?, isError}`。
+    - 「该账号的库」只有一份读取：`definitionFor`、`execute`、`resolveReferences` 都经 `store.listBases(ownerId)` 一次读出、按 id 建表判定；不用 `ownedBase`（它抛 `HttpError`），也不逐个 `getBase`。不在表里即 `not_found`。
+    - `registerKb` 返回类型改为 `{modelWriteGuard, sessionSearch} | null`：开启时两者都有，关闭时整个返回值为 `null`（D5 的「拿到的是 null」）。`app.ts` 改为 `const kb = registerKb(…); modelWriteGuard ??= kb?.modelWriteGuard;`，不解构出未用的 `sessionSearch`（组 4 才消费）。接线用例：`kb-disabled` 里 `registerKb(app, undefined)` 为 `null`；`kb-session-search.test.ts` 经开启的 `registerKb` 返回值取 `sessionSearch` 跑至少一例。
+    - 降级限频记录只有一份：`registerKb` 里 `perMinute(now, () => log({event:"kb_rerank_degraded"}))` 提成一个常量，`createKbRetrieval` 与 `createKbSessionSearch` 共用（ragflow-backend「同一进程 60 秒内至多一行」）。
+    - 扫描陷阱：既有断言只许 `\bretrieve\b` 出现在 `ragflow-retrieval.ts` 与 `retrieval.ts`。`session-search.ts` 的依赖类型写 `Parameters<typeof retrieveForBase>[0]`（或 `retrieval.ts` 原地导出的依赖类型），注释与代码里不出现独立的词 `retrieve`。
+    - 2.5 新断言的谓词：扫描集合包含 `kb/session-search.ts`（防空过），且其内容匹配 `/\bretrieveForBase\(/`；PR 记录这条断言自己的变异（去掉 `session-search.ts` 的 `retrieveForBase` 调用后新断言变红），与 AC 里旧断言的变异各一次。
+    - 问句判定：`retrieval.ts` 的 `isQuestion` 原地导出复用，不另写。
+    - 库的次序：用例让建库时间次序与 id 字典序相反（建库后 `UPDATE knowledge_bases SET created_at = …`），断言描述末尾行与 `bases` 按建库时间升序。
+    - 文本格式：行间 `\n`，库段之间 `\n\n`，末尾无换行。`[<序号>]` 每个库从 1 起。相似度 `toFixed(4)`，用例含一个需要进位的值（如 `0.123456` → `0.1235`）与一个补零的值（如 `0.5` → `0.5000`）。
+    - 参数错误：结果不带 `details` 键（组 5 靠 `details.bases` 是否存在判定）。判定次序：键集 → `question` → `kb_ids`（数组、元素非空字符串）→ 去重后计数。只有「一次至多检索 5 个知识库」断言字节；其余六种只断言 `isError` 为真、无 `details`、零请求。
+    - `resolveReferences(ownerId, ids)`：加一例——都是自己的库返回 `[{id, name}]`、次序同输入；任一不存在或属于别人都返回 `null`（两种情形结果相同）；非 `ready` 的库照样解析；重复 id 的校验归调用方（组 7 第二刀），这里按输入原样逐个解析；假 RAGFlow 零请求。
+    - 并发与中止（照组 1 约定）：「两个库都命中」两条请求按集合比较 `dataset_ids` 与参数，不按到达次序；并发证据：`hold` 住检索后两个库的请求都已到达，再放行。「中止」：`hold` 住后 `abort`，结果为该库 `failed` 一行、`isError:true`；检索请求恰一条；`expect.poll(…closed).toBe(true)`；耗时 < 3 s。
+    - 切片不进日志：命中内容里放哨兵（照 `kb-ingest-helpers.ts` 的写法），断言注入的 `log` 与 stdout/stderr 都看不到它。
+    - 回归命令：`npm run test:focus --workspace server -- kb-session-search kb-retrieval kb-models-guard kb-disabled server-assembly-modules`（`kb-retrieval` 覆盖 `-endpoint`、`-rerank`、`-abort`、`-canonical`）。
 
 Suggested fixture level: expanded - 权限判定（别人的库不可探测）与发给模型的内容契约（不变量 2）。
 Minimal mergeable slice: atomic - 定义、执行与引用解析共用同一份「该账号的库」读取与同一组用例，拆开只会让两个 PR 改同一个新文件。

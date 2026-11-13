@@ -1,11 +1,11 @@
 /**
- * s2b-kb-retrieval tasks 4.3（#1916）：knowledge-bases「单轮检索」的「只有一处检索实现」与「`kb_search` 工具契约」的
- * 「契约与检索测试同源」，扫描 `server/src` 的源码。匹配规则是 tasks.md「组 4 首刀约定」的三条正则与正向对照：
+ * s2b-kb-retrieval tasks 4.3（#1916）：knowledge-bases「单轮检索」的「只有一处检索实现」，扫描 `server/src` 的源码。匹配规则是
+ * tasks.md「组 4 首刀约定」的正则与正向对照，s2c-kb-session tasks 2.5（#1963）加会话检索一条：
  * - 词 `retrieve`（客户端检索方法名，#1913 定；解构、字符串键、`Pick<…, "retrieve">` 都算）只在 `kb/ragflow-retrieval.ts`
  *   与 `kb/retrieval.ts`；
  * - RAGFlow 的检索路由片段（`${API}` 或 `/api/v1` 加 `/retrieval`）只在 `kb/ragflow-retrieval.ts`；本系统自己的
  *   `/api/kb/bases/:id/retrieval` 不算；
- * - 工具名 `kb_search` 零出现（含注释；S2c 再改这条）。
+ * - 会话检索 `kb/session-search.ts` 在扫描集合里，且调用单轮检索 `retrieveForBase`：它不调客户端的检索方法由第一条保证。
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -16,7 +16,7 @@ const SRC = fileURLToPath(new URL("../src", import.meta.url));
 
 const RETRIEVE_WORD = /\bretrieve\b/;
 const RAGFLOW_ROUTE = /(?:\$\{API\}|\/api\/v1)\/retrieval\b/;
-const TOOL_NAME = /kb_search/;
+const SINGLE_ROUND_CALL = /\bretrieveForBase\(/;
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -50,15 +50,14 @@ describe("只有一处检索实现（server/src 源码扫描）", () => {
     expect(filesMatching(RAGFLOW_ROUTE)).toEqual(["kb/ragflow-retrieval.ts"]);
   });
 
+  it("会话检索只经单轮检索：kb/session-search.ts 在扫描集合里，且调用 retrieveForBase", () => {
+    expect([...sources.keys()]).toContain("kb/session-search.ts");
+    expect(sources.get("kb/session-search.ts")).toMatch(SINGLE_ROUND_CALL);
+  });
+
   it("本系统自己的检索端点路由串不触发路由正则", () => {
     expect(RAGFLOW_ROUTE.test("/api/kb/bases/:id/retrieval")).toBe(false);
     expect(RAGFLOW_ROUTE.test(`json("POST", \`\${API}/retrieval\`)`)).toBe(true);
     expect(RAGFLOW_ROUTE.test("POST /api/v1/retrieval")).toBe(true);
-  });
-});
-
-describe("kb_search 工具契约：本 change 不注册、不分派", () => {
-  it("kb_search 在 server/src 里零出现（含注释）", () => {
-    expect(filesMatching(TOOL_NAME)).toEqual([]);
   });
 });

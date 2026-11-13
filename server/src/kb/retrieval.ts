@@ -141,8 +141,8 @@ function hasForbiddenCharacter(value: string): boolean {
   return false;
 }
 
-/** 去掉首尾空白后非空、至多 1000 码点、没有禁用字符；不 trim，原样发出。 */
-const isQuestion = (value: unknown): value is string =>
+/** 去掉首尾空白后非空、至多 1000 码点、没有禁用字符；不 trim，原样发出。会话检索复用它（s2c-kb-session D5）。 */
+export const isQuestion = (value: unknown): value is string =>
   typeof value === "string" &&
   value.trim() !== "" &&
   [...value].length <= MAX_QUESTION_CODE_POINTS &&
