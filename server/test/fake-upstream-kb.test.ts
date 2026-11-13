@@ -171,6 +171,16 @@ describe("the question and the kbId", () => {
       `${KB}k1 工单 ${KB}k2`,
       '{"question":"工单 WORKBUDDY_KB_SEARCH:k2","kb_ids":["k1"],"i":"第 1 轮"}',
     ],
+    [
+      "after omp's leading reminder block, dropped",
+      `<system-reminder>\nToday: 2026-10-26; current working directory: '/w'. Do not repeat this information in your reply.\n</system-reminder>${MARKED}`,
+      ROUND_1,
+    ],
+    [
+      "after an unclosed reminder tag, kept as it is",
+      `<system-reminder>${MARKED}`,
+      '{"question":"<system-reminder> 工单超时","kb_ids":["k1"],"i":"第 1 轮"}',
+    ],
   ])("%s", async (_label, text, args) => {
     const port = await upstream();
     expect(outcome(await chat(port, turn(text, 0)))).toEqual(kbCall(args));

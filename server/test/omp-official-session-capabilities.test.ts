@@ -22,8 +22,7 @@ import {
   openAppSession,
   openProxiedApp,
   type ProxiedApp,
-  publishedOf,
-  until,
+  promptAppTurn,
 } from "./support/omp-official-proxied.js";
 
 const CASE = { timeout: 400_000 };
@@ -59,17 +58,6 @@ async function setExpert(world: ProxiedApp, session: string, expertId: string): 
   ]);
 }
 
-/** One prompt to its published `turn.end`. */
-async function turn(world: ProxiedApp, session: string, text: string): Promise<void> {
-  const ended = () => publishedOf(world, session).filter((e) => e.type === "turn.end").length;
-  const before = ended();
-  const response = await inject(world, "POST", `/api/sessions/${session}/prompt`, {
-    message: text,
-  });
-  expect(response.statusCode).toBe(202);
-  await until(() => ended() > before, `the turn of ${text}`);
-}
-
 function epochOf(world: ProxiedApp, session: string): number {
   const row = world.db
     .prepare("SELECT stream_epoch FROM chat_sessions WHERE id = ?")
@@ -100,7 +88,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: session expert prom
       const session = await openAppSession(world);
 
       await setExpert(world, session, first);
-      await turn(world, session, "你好");
+      await promptAppTurn(world, session, "你好");
       const epoch = epochOf(world, session);
       const before = await systemPrompt(world);
       console.log(
@@ -110,7 +98,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: session expert prom
       expect(before).not.toContain(SENTINEL_2);
 
       await setExpert(world, session, second);
-      await turn(world, session, "再说一句");
+      await promptAppTurn(world, session, "再说一句");
       const after = await systemPrompt(world);
       console.log(
         `[session-capabilities] ${JSON.stringify({ epoch: epochOf(world, session), sentinel1: after.includes(SENTINEL_1), sentinel2: after.includes(SENTINEL_2) })}`,

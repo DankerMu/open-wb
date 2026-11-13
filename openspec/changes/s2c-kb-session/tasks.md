@@ -505,7 +505,7 @@ Minimal mergeable slice: atomic - 入口、标签与发送是同一个用户动�
       - 请求记录只有 `{model, messages, maxTokens}`，看不到 tool 消息内容，本刀不扩记录。9.3 要断言上游 tool 消息不含 `details` 时，可把 `omp-official-rpc-ui.test.ts:202-238` 的 `recordBodies` 与 :251-269 的 `toolResultText` 原地移到共用 support 复用，不复制。
       - `tools` 项形状 `{type:"function", function:{name}}` 是 OpenAI 惯例，仓库里没有 omp 上游请求的实测记录。9.3 先断言请求体 `tools` 含 `kb_search`，否则形状不符时标记静默失效，只会退回缺省 bash 回合。
       - 真实 omp 的 user 文本会带服务端的引用后缀，`question` 会把它一起带上。9.3 要么用 `promptSuffix` 的实际输出算期望，要么在不带引用的会话里跑；后缀仍须满足检索端的 `question` 判定（≤1000 码点、除 `\t` `\n` 外无 C0）。
-- [ ] 9.3 新文件 `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1` 门下）实现「两轮检索」，断言第二、第三次上游请求的 tool 消息只含切片文本、不含 `details` 的任何内容；本机运行并在 PR 附命令、退出码与输出；验收清单 CK 节新增 CK-18（真实模型在构造的证据不足场景下自行第二次调用 `kb_search`），结论 `待签`，由 owner 执行
+- [x] 9.3 新文件 `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1` 门下）实现「两轮检索」，断言第二、第三次上游请求的 tool 消息只含切片文本、不含 `details` 的任何内容；本机运行并在 PR 附命令、退出码与输出；验收清单 CK 节新增 CK-18（真实模型在构造的证据不足场景下自行第二次调用 `kb_search`），结论 `待签`，由 owner 执行
   - 组 9 第二刀约定（#1975 fixture 审查补；9.3 照此实现与测试）：
     - 世界：用 `server/test/support/omp-official-proxied.ts`（413 行）的 `openProxiedApp`。它由 `createApp` 装配，带官方二进制和受控假上游，所有者 zhangsan（`u1`）；用例调用时传 `{ registry: { apiKey }, kb, recordBodies: true }`。不带 `registry` 时只有单模型静态白名单（`app.ts:288-293`），换模型会得到 400。
       - kb 接线：

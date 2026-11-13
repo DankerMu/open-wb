@@ -22,8 +22,9 @@
  * reducer (`applyFrame`). The spawn wrappers below are test-only (precedent: `rewritingSpawn` in
  * support/omp-official.ts); the product has no spawn other than `spawnOmp`'s. A wrapped runtime is
  * built here on the world's managed state, so the world's own runtime is never started. The second
- * upstream request is read from a loopback forwarder placed between omp and the fake upstream: the
- * fake upstream's own record keeps no message content (omp-test-harness「受控上游请求记录」).
+ * upstream request is read from a loopback forwarder placed between omp and the fake upstream
+ * (support/omp-official-bodies.ts): the fake upstream's own record keeps no message content
+ * (omp-test-harness「受控上游请求记录」).
  *
  * Run locally (`OMP_BIN` absolute; see omp-official-approval-modes.test.ts):
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
@@ -31,8 +32,6 @@
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
-import { createServer, request as forward } from "node:http";
-import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { writeManagedModelsYml } from "../src/model-proxy/models-yml.js";
@@ -51,6 +50,7 @@ import {
   openOfficialWorld,
   teeStdoutFrames,
 } from "./support/omp-official.js";
+import { bodyRecorder, toolMessages } from "./support/omp-official-bodies.js";
 import { collectPrompt } from "./support/omp-runtime.js";
 import { EMPTY_CAPABILITIES } from "./support/session-config.js";
 
@@ -198,45 +198,6 @@ function cancelledIds(stdin: OmpFrame[]): unknown[] {
     .map((frame) => frame.id);
 }
 
-/** A loopback forwarder to the world's fake upstream that keeps every request body. */
-async function recordBodies(world: OfficialWorld): Promise<unknown[]> {
-  const bodies: unknown[] = [];
-  const server = createServer((incoming, outgoing) => {
-    const parts: Buffer[] = [];
-    incoming.on("data", (part: Buffer) => parts.push(part));
-    incoming.on("end", () => {
-      const body = Buffer.concat(parts);
-      bodies.push(JSON.parse(body.toString("utf8")) as unknown);
-      const relay = forward(
-        {
-          host: "127.0.0.1",
-          port: world.upstream.port,
-          method: incoming.method,
-          path: incoming.url,
-          headers: incoming.headers,
-        },
-        (answer) => {
-          outgoing.writeHead(answer.statusCode ?? 502, answer.headers);
-          answer.pipe(outgoing);
-        },
-      );
-      relay.on("error", () => outgoing.destroy());
-      relay.end(body);
-    });
-  });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  onTeardown(
-    () =>
-      new Promise<void>((resolve) => {
-        server.closeAllConnections();
-        server.close(() => resolve());
-      }),
-  );
-  const { port } = server.address() as AddressInfo;
-  await writeModels(world, port, false);
-  return bodies;
-}
-
 /**
  * Rewrites the world's single `models.yml` entry before anything is spawned: the entry the world
  * wrote, with the given port and `reasoning`. A reasoning model makes `get_state` carry
@@ -247,26 +208,6 @@ async function writeModels(world: OfficialWorld, port: number, reasoning: boolea
     proxyBaseUrl: `http://127.0.0.1:${String(port)}/v1`,
     models: [{ id: MODEL_ID, name: MODEL_ID, reasoning, vision: false, maxTokens: 32768 }],
   });
-}
-
-/** The text of the tool result answering the call named `name` in an OpenAI chat request body. */
-function toolResultText(body: unknown, name: string): string | undefined {
-  const messages = (body as { messages?: Array<Record<string, unknown>> }).messages ?? [];
-  const calls = messages.flatMap(
-    (message) =>
-      (message.tool_calls as Array<{ id: string; function: { name: string } }> | undefined) ?? [],
-  );
-  const call = calls.find((entry) => entry.function.name === name);
-  const result = messages.find(
-    (message) => message.role === "tool" && message.tool_call_id === call?.id,
-  );
-  const content = result?.content;
-  if (typeof content === "string") {
-    return content;
-  }
-  return Array.isArray(content)
-    ? content.map((part: { text?: unknown }) => String(part.text ?? "")).join("")
-    : undefined;
 }
 
 describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: --mode rpc-ui`, () => {
@@ -303,7 +244,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: --mode rpc-ui`, () 
     TURN,
     async () => {
       const world = await openOfficialWorld(() => {});
-      const bodies = await recordBodies(world);
+      const { port, bodies } = await bodyRecorder(world.upstream.port);
+      await writeModels(world, port, false);
       const run = launch(world, "write");
 
       const frames = await collectPrompt(run.runtime.prompt(ASK_PROMPT));
@@ -314,7 +256,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: --mode rpc-ui`, () 
       expect(run.approvals).toEqual([]);
       expect(turnStatus(frames)).toBe("done");
       expect(bodies).toHaveLength(2);
-      expect(toolResultText(bodies[1], "ask")).toBe(NO_ASK);
+      expect(toolMessages(bodies[1]).find((tool) => tool.name === "ask")?.text).toBe(NO_ASK);
     },
   );
 
