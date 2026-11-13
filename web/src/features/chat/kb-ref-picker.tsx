@@ -1,7 +1,7 @@
 // 输入框知识库引用的选择列表与标签区（message-attachments「输入框知识库引用」；s2c-kb-session 任务 8.2）：「+」菜单的
 // `引用知识库…` 打开选择列表，每次打开重取一次库列表，点选切换引用、不关闭；标签区经输入卡的附件插槽放在文本框上方。
 // 引用状态在 kb-refs-state.ts。
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useEscapeFallback } from "../../components/escape-fallback.js";
@@ -60,13 +60,18 @@ const OPTION =
   "flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-md border-0 bg-transparent px-2.5 py-2 text-left text-[13px] text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 aria-pressed:bg-accent";
 const NOTE = "m-0 px-2.5 py-1 text-xs wrap-anywhere";
 
-/** 选择列表（`Dialog`，可访问名 `引用知识库`）；关闭后焦点交给 `restoreFocus`（`添加文件或命令` 按钮）。 */
+/**
+ * 选择列表（`Dialog`，可访问名 `引用知识库`）；关闭后焦点交给 `restoreFocus`（`添加文件或命令` 按钮）。开合状态在
+ * 会话页，列表随输入框卸下（归档会话）时 Radix 不回调 `onOpenChange`，卸下时在这里关上，重挂不会自己弹开。
+ */
 export function KbRefPicker({
   dialog,
   onToggle,
   refs,
   restoreFocus,
 }: Omit<KbRefEntry, "onRemove"> & { restoreFocus(): void }) {
+  const { close } = dialog;
+  useEffect(() => close, [close]);
   const onOpenChange = (open: boolean) => {
     if (!open) dialog.close();
   };

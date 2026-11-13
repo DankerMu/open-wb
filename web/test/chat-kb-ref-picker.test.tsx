@@ -60,7 +60,7 @@ import {
   cleanupSessionMeta,
   envelope,
   findList,
-  messagesPath,
+  mountSessions,
   newSessionButton,
   view,
 } from "./chat-page-session-meta-support.js";
@@ -308,12 +308,11 @@ describe("清空时机", () => {
     expect(tagArea()).toBeNull();
   });
 
-  it("换账号清空", async () => {
-    const { getProbe } = renderChatPageWithAuthProbe(`/?session=${A}`, {
+  it("换账号清空：新账号在同一会话里发送，body 不带旧账号的引用", async () => {
+    const { fetchMock, getProbe } = renderChatPageWithAuthProbe(`/?session=${A}`, {
       "/api/sessions": () => jsonResponse({ sessions: [SA] }),
-      [messagesPath(A)]: () =>
-        jsonResponse({ session: SA, messages: [], streamCursor: { epoch: 1, seq: 0 }, todo: null }),
       ...kbRoutes(),
+      ...turn(SA),
     });
     await findList("会话甲");
     await waitFor(() => expect(composer().disabled).toBe(false));
@@ -324,7 +323,51 @@ describe("清空时机", () => {
     await quiesce();
     await waitFor(() => expect(composer().disabled).toBe(false));
     expect(tagArea()).toBeNull();
+
+    typeDraft("查一下");
+    clickSend();
+    await waitFor(() => expect(promptBodies(fetchMock, A)).toHaveLength(1));
+    expect(promptBodies(fetchMock, A)).toEqual([{ message: "查一下" }]);
   });
+});
+
+const ARCHIVED_NOTICE = '[data-slot="archived-notice"]';
+
+describe("选择列表随输入框卸下", () => {
+  it.each([
+    ["", false],
+    ["（StrictMode）", true],
+  ])(
+    "开着选择列表经导航切到已归档的会话（输入框卸下）再回来：列表不再自己打开、不再读库列表%s",
+    async (_, strict) => {
+      const archived = view(B, "旧项目", { archivedAt: 1 });
+      const mounted = mountSessions(
+        `/?session=${A}`,
+        [SA, archived],
+        { ...kbRoutes(), ...turn(SA) },
+        strict,
+      );
+      await findList("会话甲");
+      await waitFor(() => expect(composer().disabled).toBe(false));
+      await quiesce();
+      await openPicker();
+      expect(baseReads(mounted.fetchMock)).toBe(1);
+
+      await act(() => mounted.router.navigate(`/?session=${B}`));
+      await waitFor(() => expect(document.querySelector(ARCHIVED_NOTICE)).not.toBeNull());
+      expect(screen.queryByRole("dialog", { name: DIALOG })).toBeNull();
+      await act(() => mounted.router.navigate(`/?session=${A}`));
+      await waitFor(() => expect(document.querySelector(ARCHIVED_NOTICE)).toBeNull());
+      // 输入框重挂后再判定：开着的模态列表会把输入框藏出无障碍树，所以先看 DOM 里的表单。
+      await waitFor(() =>
+        expect(document.querySelector('form[data-slot="composer"]')).not.toBeNull(),
+      );
+      await quiesce();
+      expect(screen.queryByRole("dialog", { name: DIALOG })).toBeNull();
+      expect(composer().disabled).toBe(false);
+      expect(baseReads(mounted.fetchMock)).toBe(1);
+    },
+  );
 });
 
 const DENIED = "路径不在工作空间内";

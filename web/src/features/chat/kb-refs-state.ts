@@ -26,7 +26,7 @@ const NONE: readonly KbRef[] = [];
  * 引用按归属存放：渲染所在归属（`scopeKey`）与 `owner` 不同就不给出；真正清空只在 `client` 或 `scopeKey` 变化后的
  * effect 里（切换会话、回到欢迎态、换账号）。`adopt` 先写 ref：欢迎态建出会话后 `navigate(…, { flushSync })` 可能先
  * 渲染出「已选新 id、`owner` 还是欢迎态」的一帧，那一帧只是不显示，effect 读 ref 认得这是交接，不清空。
- * `ids` / `clear` 引用稳定、按归属读写，给回合派发用：发送时读、受理后清，未受理不动。
+ * `ids` / `clear` 按归属读写（`ids` 随 `client` 换新，其余引用稳定），给回合派发用：发送时读、受理后清，未受理不动。
  */
 export function useKbRefsState(client: ApiClient, scopeKey: string | null) {
   const [state, setState] = useState<KbRefsState>({ client, owner: scopeKey, refs: NONE });
@@ -68,10 +68,16 @@ export function useKbRefsState(client: ApiClient, scopeKey: string | null) {
     },
     [commit],
   );
-  const ids = useCallback((owner: string) => {
-    const current = stateRef.current;
-    return current.owner === owner ? current.refs.map(({ id }) => id) : [];
-  }, []);
+  // 与渲染同一判据：属于别的 client（换账号后、清空的 effect 之前）的引用不发出。
+  const ids = useCallback(
+    (owner: string) => {
+      const current = stateRef.current;
+      return current.client === client && current.owner === owner
+        ? current.refs.map(({ id }) => id)
+        : [];
+    },
+    [client],
+  );
   const clear = useCallback(
     (owner: string) => {
       const current = stateRef.current;
