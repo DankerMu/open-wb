@@ -532,6 +532,7 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 >    - (b) `kb_ids` 的计数不一致：schema `maxItems:5` 数的是原始数组，执行先去重再判 1–5（`session-search.ts:32`、`:94-100`）。
 >    - (c) **需 owner 裁定**：内置斜杠命令带引用按规格字面受理，`{message:"/compact", knowledgeBases:["k1"]}` → 202（用例 `server/test/prompt-knowledge-bases.test.ts:279`）；内置命令带附件则是 400（`server/src/sessions/prompt-attachments.ts:142`）。引用是否也该拒绝？
 >    - (d) 任何一次快照安装都把 `kbHits` 置空（`web/src/features/chat/stream.ts:154`），检索卡刷新后只剩各轮（G12 已接受；复活条件见 design.md Non-Goals）。
+>    - (e) 每库至多 6 条只靠 RAGFlow 遵守 `page_size:6`（`server/src/kb/ragflow-retrieval.ts:26`），本地不截断；上游多给时文本照样全给、`kb.hits` 整条丢弃（fail-closed），而工具描述承诺「每个知识库至多返回 6 条」（`server/src/kb/session-search.ts:24`）。
 > 3. **跟进 issue**：#2002（官方门控用例默认并发下大面积握手超时，本机全量需 `--maxWorkers=4`）；#2004（真实 omp 上 branch / fork 之后 host tool 是否保留，以及 `set_host_tools []` 的应答）；#1999（已关闭：hurl 8.0.1 需要 `libxml2.so.2`，smoke job 钉在 `ubuntu-24.04`；runner 升级时换掉 hurl 再解除钉住）。
 > 4. **已知代码瑕疵（本收口不改）**：`web/src/features/chat/turn-actions.ts:67` 的注释仍写「两个函数引用稳定」，而 `ids` 现在随 `client` 变化（#1973 的修复 `a41a8444`）。
 >

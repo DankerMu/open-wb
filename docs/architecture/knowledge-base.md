@@ -411,7 +411,7 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 
 **给模型什么，`details` 与 `kb.hits` 里是什么**：
 
-- 宿主对每个调用恰写一帧 `host_tool_result{id, result:{content:[{type:"text", text}], details?}, isError?}`（`host-tools.ts:111-124`）。`text` 进模型上下文，只有切片原文与出处：每个库一段，段间空一行；`ok` 的段首行为 `知识库「<名称>」（<id>）：命中 N 条`，之后每条命中两行，`[k] <文档名>（相似度 0.xxxx）` 与切片原文（`session-search.ts:111-129`）。没有整篇文档（CONTEXT.md 不变量 2）。
+- 宿主对每个调用至多写一帧（被取消或写端关闭后不写）`host_tool_result{id, result:{content:[{type:"text", text}], details?}, isError?}`（`host-tools.ts:111-124`）。`text` 进模型上下文，只有切片原文与出处：每个库一段，段间空一行；`ok` 的段首行为 `知识库「<名称>」（<id>）：命中 N 条`，之后每条命中两行，`[k] <文档名>（相似度 0.xxxx）` 与切片原文（`session-search.ts:111-129`）。没有整篇文档（CONTEXT.md 不变量 2）。
 - `details` 恰为 `{bases:[{kbId, name, status, hits}]}`，次序同文本（`session-search.ts:185-189`）；`hits` 与检索测试的命中同形，`not_found` 的 `name` 为 `null`，非 `ok` 的 `hits` 为 `[]`。omp 把 `details` 原样放进 `tool_execution_end.result.details`，不发给上游（实测记录 §2.5）。本仓对这一点的证据只有本机门控用例 `server/test/omp-official-host-tools.test.ts`（上游第二、三次请求的 tool 消息不含键名 `bases`），CI 不跑它。
 - `kb.hits{messageId, stepId, intent, bases}`：reducer 只从成功的 `kb_search` 步骤派生，`bases` 原样取 `details.bases`，排在同一调用的 `step.end` 之前（`sessions/events.ts:311-315`）；`intent` 取 `tool_execution_start` 顶层的 `intent`（omp 往参数 schema 里加的 `i`），不是非空字符串时为 `null`（`events.ts:252-253`）。supervisor 发布前严格校验（`kb-hits.ts:72-99`），不符就丢弃并写一行 `{"event":"kb_hits_invalid","messageId":<id>}`（不含切片原文，不限频）；`stepId` 换成落库步骤的数字 id，映射不到即丢（`turn-control.ts:336-341`）。它与 `turn.retry` 一样占当代环形缓冲的一个序号、不写任何表：同一 epoch 内带 `Last-Event-ID` 的重连可以回放，经完整快照恢复的连接看不到。
 - 切片原文不进日志与 stderr。会话检索不写回检索参数、不写审计（`session-search.ts:9-11`）。
@@ -437,7 +437,7 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 
 `isError` 当且仅当没有一个库是 `ok`（`session-search.ts:188`）。这时 omp 以失败结束这一步，而 reducer 不从失败的步骤、也不从 `result.isError` 为真的结果派生候选（`events.ts:277`、`:283-284`、`:345`），所以没有 `kb.hits`：检索卡上这一行只有问句与「失败」状态。
 
-**协议**（`host-tools.ts`，白盒关键路径）：每个 `host_tool_call` 以帧的 `id` 进在途表，交给处理函数并附一个中止信号；多个调用并发，互不等待（`host-tools.ts:64-71`）。`host_tool_cancel{targetId}` 中止对应的处理，之后的结果不写（`:49-51`、`:81-83`）；中止信号经单轮检索传到 RAGFlow 请求（`retrieval.ts:97-102`、`ragflow-retrieval.ts:88`），该库为 `failed`。进程退出或写端关闭时中止全部在途调用，不再写帧。处理函数抛错回 `工具执行失败`，错误原文不进帧与日志；不认识的工具名回 `未知工具`；应答超过 1 MiB 帧长时先去掉 `details`，仍超过回 `工具结果过大`（`:94-108`）。每个调用恰有一帧应答：omp 在 5 s 内不会自己让调用超时（§2.7），更长没测，所以不能依赖它。
+**协议**（`host-tools.ts`，白盒关键路径）：每个 `host_tool_call` 以帧的 `id` 进在途表，交给处理函数并附一个中止信号；多个调用并发，互不等待（`host-tools.ts:64-71`）。`host_tool_cancel{targetId}` 中止对应的处理，之后的结果不写（`:49-51`、`:81-83`）；中止信号经单轮检索传到 RAGFlow 请求（`retrieval.ts:97-102`、`ragflow-retrieval.ts:88`），该库为 `failed`。进程退出或写端关闭时中止全部在途调用，不再写帧。处理函数抛错回 `工具执行失败`，错误原文不进帧与日志；不认识的工具名回 `未知工具`；应答超过 1 MiB 帧长时先去掉 `details`，仍超过回 `工具结果过大`（`:94-108`）。没被取消、写端也没关闭时，每个调用恰有一帧应答：omp 在 5 s 内不会自己让调用超时（§2.7），更长没测，所以不能依赖它。
 
 **注册**（`host-tool-align.ts:72-88`）：派发前对齐的第 3 步，在 `set_model` / `set_thinking_level` 之后、`prompt`（regenerate 是 `get_branch_messages`）之前（`supervisor.ts:409-412`）。
 
