@@ -121,6 +121,11 @@
 | 组 9：Canonicality（回合计数） | 是 | `toolFollowsLastUser` 原地改为计数，跳过规则只一份；`fake-upstream-tool-rounds.test.ts` 原样全绿 |
 | 组 9：既有标记回归 | 是 | 优先级三例（ERROR、FAKE_STATUS、WRITE）与正文阶段先于 THINK 一例；`test:focus fake-upstream` 全部既有用例 |
 | 组 9：行数上限 | 是 | `fake-upstream.mjs` ≤ 793；新逻辑只在兄弟文件 |
+| 组 9 第二刀：白盒关键路径（真实 omp 上的注册、调用、放行） | 是 | 「两轮检索」在官方 v18.12.3 上跑；PR 标注请求白盒审查 |
+| 组 9 第二刀：不变量 2（`details` 不进上游） | 是 | tool 消息逐字节等于给模型的文本，不含 `details` 键名 |
+| 组 9 第二刀：外部接口漂移（`i`→`intent`、帧序、`tools` 形状、换模型后注册） | 是 | 先断言 `tools` 形状；`intent` 两轮字面量；「换模型后仍可检索」 |
+| 组 9 第二刀：Canonicality（请求体记录、回合） | 是 | `bodyRecorder` / `toolMessages` 原地移到共用 support；`promptAppTurn` 原地拆出并替换 `session-capabilities` 的私有 `turn()`；`runAppTurn` 六个调用方与 `rpc-ui` 原样全绿 |
+| 组 9 第二刀：验收 | 是 | CK-18 `待签`，由 owner 执行 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -501,6 +506,69 @@ Minimal mergeable slice: atomic - 入口、标签与发送是同一个用户动�
       - `tools` 项形状 `{type:"function", function:{name}}` 是 OpenAI 惯例，仓库里没有 omp 上游请求的实测记录。9.3 先断言请求体 `tools` 含 `kb_search`，否则形状不符时标记静默失效，只会退回缺省 bash 回合。
       - 真实 omp 的 user 文本会带服务端的引用后缀，`question` 会把它一起带上。9.3 要么用 `promptSuffix` 的实际输出算期望，要么在不带引用的会话里跑；后缀仍须满足检索端的 `question` 判定（≤1000 码点、除 `\t` `\n` 外无 C0）。
 - [ ] 9.3 新文件 `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1` 门下）实现「两轮检索」，断言第二、第三次上游请求的 tool 消息只含切片文本、不含 `details` 的任何内容；本机运行并在 PR 附命令、退出码与输出；验收清单 CK 节新增 CK-18（真实模型在构造的证据不足场景下自行第二次调用 `kb_search`），结论 `待签`，由 owner 执行
+  - 组 9 第二刀约定（#1975 fixture 审查补；9.3 照此实现与测试）：
+    - 世界：用 `server/test/support/omp-official-proxied.ts`（413 行）的 `openProxiedApp`。它由 `createApp` 装配，带官方二进制和受控假上游，所有者 zhangsan（`u1`）；用例调用时传 `{ registry: { apiKey }, kb, recordBodies: true }`。不带 `registry` 时只有单模型静态白名单（`app.ts:288-293`），换模型会得到 400。
+      - kb 接线：
+        - `ProxiedWorldOptions` 加 `kb?: KbDependencies`，原样透传到 `createApp` 的 `assembly.kb`（`app.ts:167-176`，`hostToolsOf` 由此注入 `hostTools`）。
+        - `KbDependencies` 的必填项照 `kb/index.ts:58-69`：`key: { read }`、`baseUrl`、`uploadMaxBytes`、`uploadMaxFiles`、`log`。
+        - 假 RAGFlow 由用例自己 `start({ apiKey })`（`fake-ragflow.mjs:629`）；helper 不 import 假 RAGFlow。
+      - 请求体记录（Code Canonicality）：
+        - 把 `omp-official-rpc-ui.test.ts:202-238` 的回环转发器和 `:251-269` 的 `toolResultText` 原地移到新文件 `server/test/support/omp-official-bodies.ts`。
+        - 该文件导出 `bodyRecorder(upstreamPort): Promise<{ port, bodies }>`，只负责起转发器、记录请求体、注册 teardown。
+        - `toolResultText` 原地扩成 `toolMessages(body)`：返回该请求体里全部 `role:"tool"` 消息，每条含 `tool_call_id`、调用名、content 文本与整条消息本身。`rpc-ui` 原来取第一条的用法改成从中取，不另写一份。
+        - `rpc-ui` 原地改成 import 上述两个导出，`writeModels` 那一步留在原处。
+        - `ProxiedWorldOptions` 再加 `recordBodies?: true`：为真时 proxy 的 target 指向转发器（转发器再到假上游），`ProxiedApp` 多出 `bodies: unknown[]`，未开启时为 `[]`。
+        - 不改 `fake-upstream.mjs`（793 行）。
+      - 回合（Code Canonicality）：
+        - `runAppTurn`（`:389-413`）原地拆出 `promptAppTurn(world, session, text, stopAt?)`。它先记下基线（该会话已有的 `turn.end` 条数与 `world.frames.length`），再发 prompt，等 `turn.end` 条数增加或 `stopAt` 命中，帧从基线往后切，返回 `AppTurn`。照 `omp-official-session-capabilities.test.ts:63-71` 的写法。
+        - `runAppTurn` 改为「`openAppSession` + `promptAppTurn`」。
+        - `omp-official-session-capabilities.test.ts:63-71` 的私有 `turn()` 做的是同一件事，原地换成 `promptAppTurn`。
+        - `stop-early:87`、`upstream-retry:78` 要在 202 与 stop 之间同步动作，逻辑不同，不动。
+        - `runAppTurn` 的六个调用方（upstream-cap、registry-secrets、delta-coalescing、upstream-retry、upstream-failure、approval-pairing）不改。
+      - 行数：`omp-official-proxied.ts` 估计改完约 450 行，以 800 为硬限。
+    - 库：照 `kb-session-search.test.ts` 直接写库，不走 REST。
+      - `const store = createKbStore(world.db); const id = store.newId();`
+      - `const datasetId = fake.addDataset(resourceName(id, 0));`
+      - `store.createBase({ id, ownerId: "u1", name: "规范库", template: "naive", raptor: false, graph: false, datasetId, canvasId: null, templateGroupId: null });` INSERT 时 `state` 已为 `ready`。
+      - `store.addDocument({ kbId: id, ragflowDocumentId: "rf-doc-1", name: "规格.md", size: 3, source: "upload" });`
+      - `fake.setRetrievalHits(datasetId, [{ documentId: "rf-doc-1", content: "工单超过 48 小时未响应自动升级。", similarity: 0.9 }]);`
+      - 命中的 `documentId` 必须等于 `ragflowDocumentId`，否则 `retrieval.ts:114-119` 会静默丢掉命中。
+    - 新文件 `server/test/omp-official-host-tools.test.ts`：`describe.skipIf(OMP_TEST_OFF)`，超时照既有官方用例（`CASE`）。共两例。
+      - 「两轮检索」：
+        - 流程：`openAppSession` → `PATCH /api/sessions/:id {approvalMode:"write"}` → `promptAppTurn(…, "WORKBUDDY_KB_SEARCH:<id> 工单超时")`。不带 `knowledgeBases` 引用，所以 user 文本里没有服务端后缀。以下断言照 spec「两轮检索」逐条写。
+        - 上游请求：恰好 3 次（按 `bodies` 计）。依据：`omp-official-max-tokens.test.ts:26` 在同一二进制上一轮工具加作答恰为 2 次；`registry-secrets:92` 在 app 世界里一回合失败恰为 1 次。真实 omp 若另有请求，停下报告，不放宽。
+        - `tools` 形状先断言：第 1 次请求体的 `tools` 里有 `function.name === "kb_search"`。
+        - SSE（`publishedOf`）依次出现两组 `kb_search` 的 `step.start` → `kb.hits` → `step.end`（`done`）。
+          - 每条 `kb.hits` 的 `stepId` 等于它之前那个 `step.start` 的 `stepId`。
+          - `intent` 依次为 `第 1 轮`、`第 2 轮`（实测记录 §2.2；`fake-upstream-kb.mjs` 发出 `i`）。
+          - 没有 `approval.request`，`world.denied` 为空。
+          - 回合以 `turn.end` 结束，助手正文为 `已根据知识库检索结果作答。`。
+        - 检索请求：假 RAGFlow 恰收到两次 `POST /api/v1/retrieval`，`question` 依次为 `工单超时` 与 `工单超时 详细说明`。
+        - tool 消息：`bodies[1]` 有 1 条、`bodies[2]` 有 2 条 `role:"tool"` 消息，每条 content 都等于下面三行字面量，用 `\n` 连接，不 import `render`：
+          - `知识库「规范库」（<id>）：命中 1 条`
+          - `[1] 规格.md（相似度 0.9000）`
+          - `工单超过 48 小时未响应自动升级。`
+          
+          每条整条消息的 JSON 串里都不含 `details`、`bases`、`documentId`、`similarity`、`hits`。
+        - 收尾：`world.log` 里没有 `kb_hits_invalid`，即真实 `details.bases` 原样通过 `checkKbHits`（#1967 结转）；`world.faults` 为空。
+      - 「换模型后仍可检索」（#1966 结转，只做 `set_model` 这一半）：
+        - 流程：同一会话跑完上一回合后，`PATCH {modelId: PROXIED_MODELS[1]}`，再 `promptAppTurn` 第二回合，标记相同、问句换新。
+        - 断言：
+          - 第二回合第 1 次上游请求体的 `tools` 仍有 `kb_search`，`model` 为新模型。
+          - 又出现一次 `kb_search` 的 `step.start`。
+          - 进程没有重启：`world.frames` 里恰有一个 `ready`，`set_host_tools` 应答恰为一次。如果重启了，宿主会重新注册（`host-tool-align.ts:3-6`），断言就测不到「同一代内 `set_model` 之后是否保留」。
+        - 本刀不做：branch 那一半，以及 `set_host_tools {tools:[]}` 的真实应答。二者记入 #1977 收口的残余。
+      - 结论与预期不符时（例如 `intent` 为 `null`、帧序不同、请求不止 3 次、换模型后重启），停下报告并附原始帧，不改断言去迁就。
+    - 证据：
+      - 本机先 `make omp-fetch`，再跑 `WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/var/omp/omp" npm run test:focus --workspace server -- omp-official-`，覆盖 proxied 世界与移动波及的全部官方用例。PR 附上命令、退出码与输出。
+      - 不门控的验证：`npm test --workspace server`、`make lint`、`make typecheck`、`make anti-drift`。注意 `rpc-ui` 整个文件都在 `skipIf` 下（:272），CI 不会执行被移动的代码，只有 lint、typecheck、knip 兜底，PR 照实写明。
+      - PR 里贴一帧真实 `kb.hits` 的 JSON。这是降级做法：#1998 结转的「web 侧 `decodeKbHits` 解码」受 server / web 互不 import 的限制，不落盘，也不建 web fixture，PR 里写明。
+    - CK-18 行（接在 CK-17 之后，`待签`，由 owner 执行）：
+      - 操作：由 owner 执行（agent 不得代签）。在 CK-15 同一台服务上，`zhangsan` 新建一个专用库「半事实库」，入库一份只写了一半事实的文档（例如只写升级时限，不写升级给谁）。「规范库」与其中的 `manual.pdf` 保持不动。新建会话，点名「半事实库」，问一个需要两部分事实的问题，问句里不提检索几次，等回答结束。
+      - 预期：模型自行第二次调用 `kb_search` 并换了问法。助手消息的「知识库检索」卡有 2 行或更多，各行的问句或意图不同。回合正常结束，页面没有错误提示。模型只检索一次时记 `不通过` 并注明。
+      - 结论：`待签`。
+    - PR 边界偏离：issue 写的是「一个新门控用例文件；验收清单一行」，本刀另外新增一个 support 文件，并原地改 `omp-official-proxied.ts`、`rpc-ui`、`session-capabilities`。理由是 tasks.md 头部的 Code Canonicality 与「放不下时先把相邻的既有逻辑原地移出」。diff 预计接近 400 行（`constraints.yaml` review-only）。两点都要在 PR 描述里写明。
+    - 白盒：本刀在真实二进制上验证 omp 子进程治理这条 Critical Path，PR 标注请求白盒审查，不改 `server/src`。
 
 Suggested fixture level: expanded - 端到端证明白盒关键路径在真实二进制上成立（production-like runtime）。
 Minimal mergeable slice: 9.1–9.2 为首刀：受控上游标记只有自己的用例消费，可独立合入保绿；9.3 依赖它与组 3 第二刀、组 4、组 5。
