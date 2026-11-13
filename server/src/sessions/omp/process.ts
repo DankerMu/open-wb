@@ -30,6 +30,7 @@ import {
   answerFrame,
   approvalRequest,
   cancelFrame,
+  isKbSearchApproval,
   isPreludeCard,
 } from "./ui-requests.js";
 
@@ -597,16 +598,17 @@ export class OmpProcess {
     pending.resolve(frame);
   }
 
-  /** An approval goes to the owner; the prelude card is answered `Approve` (D3); else cancel. */
+  /** Approval → owner; prelude (D3), kb_search unless always-ask (D4) → `Approve`; else cancel. */
   #onUiRequest(frame: OmpFrame, id: string): void {
-    const approval = approvalRequest(frame, id);
+    const kb = this.#opts.approvalMode !== "always-ask" && isKbSearchApproval(frame);
+    const approval = kb ? undefined : approvalRequest(frame, id);
     if (approval !== undefined) {
       this.#approvals.add(id);
       this.#events.emit("approval", approval);
       return;
     }
     const prelude = isPreludeCard(frame);
-    const answer = prelude ? answerFrame(id, "allow") : cancelFrame(id);
+    const answer = prelude || kb ? answerFrame(id, "allow") : cancelFrame(id);
     void this.#write(answer).catch((error: unknown) => {
       this.#failIo(error);
     });

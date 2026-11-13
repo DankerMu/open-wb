@@ -134,7 +134,12 @@ const applied = { ...INITIAL_APPLIED };
 let turnOpen = false;
 const deferred = [];
 const readyGate = scenario === "slow-ready" ? delayReady(readyDelayMs) : Promise.resolve();
-const hostTool = hostToolScenario(scenario, { emit, emitDeltas, finishTurn, flushCommands });
+const hostTool = hostToolScenario(scenario, approvalMode, {
+  emit,
+  emitDeltas,
+  finishTurn,
+  flushCommands,
+});
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
   queue = readyGate.then(() =>

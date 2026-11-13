@@ -1,9 +1,12 @@
 /**
- * Change s2c-kb-session 3.2 (#1964): omp-test-harness「假 omp host tool 场景」 first slice — the
- * `host-tool`, `host-tool-parallel` and `host-tool-abort` scenarios in `yolo` frame order (the
- * write / always-ask select is 3.5, `host-tool-register-fail` is 4.2) — and「假 omp 进程契约」's
- * id-correlated `set_host_tools` refusal of every other scenario. Real subprocess; the expected frames
- * are literals of those requirements and of docs/reviews/2026-11-10-omp-host-tools.md §2.3, §2.6, §2.7.
+ * Change s2c-kb-session 3.2 (#1964): omp-test-harness「假 omp host tool 场景」 — the `host-tool`,
+ * `host-tool-parallel` and `host-tool-abort` scenarios in `yolo` frame order (`host-tool-register-fail`
+ * is 4.2) — and「假 omp 进程契约」's id-correlated `set_host_tools` refusal of every other scenario.
+ * 3.5 (#1965): `host-tool` under `write` / `always-ask` — `tool_execution_start`, then the
+ * `Allow tool: kb_search` select, and `host_tool_call` only after `Approve`; any other answer ends
+ * the call as denied (the fake's choice: record §2.4 did not measure Deny). Real subprocess; the
+ * expected frames are literals of those requirements, of tasks.md「组 3 第二刀约定」 and of
+ * docs/reviews/2026-11-10-omp-host-tools.md §2.3, §2.4, §2.6, §2.7.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -24,7 +27,6 @@ import {
 } from "./fake-omp-helpers.js";
 
 const SUPPORT = fileURLToPath(new URL("./support/", import.meta.url));
-const YOLO = ["--approval-mode", "yolo"];
 const QUESTION = "查一下 KB:k1";
 const QUIET_MS = 300;
 const KB_SEARCH = { name: "kb_search", label: "知识库检索", description: "检索", parameters: {} };
@@ -39,8 +41,8 @@ afterEach(async () => {
 });
 
 /** Handshake, `set_host_tools` and one prompt; returns once the prompt is acknowledged. */
-async function openTurn(scenario: string, message: string): Promise<Session> {
-  const session = startFake({ scenario, extraArgs: YOLO });
+async function openTurn(scenario: string, message: string, mode = "yolo"): Promise<Session> {
+  const session = startFake({ scenario, extraArgs: ["--approval-mode", mode] });
   await session.wait((frame) => frame.type === "ready");
   session.write([...HANDSHAKE, REGISTER]);
   await session.wait(response("t1", "set_host_tools"));
@@ -59,6 +61,21 @@ function isStart(toolCallId: string): (frame: Frame) => boolean {
 
 function isEnd(toolCallId: string): (frame: Frame) => boolean {
   return (frame) => frame.type === "tool_execution_end" && frame.toolCallId === toolCallId;
+}
+
+function isSelect(id: string): (frame: Frame) => boolean {
+  return (frame) => frame.type === "extension_ui_request" && frame.id === id;
+}
+
+/** The select omp v18.12.3 sends per call under `write` / `always-ask` (record §2.4). */
+function kbSelect(id: string): Frame {
+  return {
+    type: "extension_ui_request",
+    id,
+    method: "select",
+    title: "Allow tool: kb_search",
+    options: ["Approve", "Approve kb_search for this session", "Deny"],
+  };
 }
 
 function hostResult(id: string, text: string, isError = false): Frame {
@@ -182,6 +199,78 @@ describe("fake omp host-tool: yolo frame order", () => {
     expect(ends.map((frame) => frame.toolCallId)).toEqual(["c2", "c3", "c1"]);
     await closeSession(session);
   });
+});
+
+describe("fake omp host-tool: write / always-ask frame order (3.5)", () => {
+  /** Waits for call n's start and select; nothing more is sent until it is answered. */
+  async function selected(session: Session, n: number): Promise<void> {
+    expect(await session.wait(isStart(`c${n}`))).toMatchObject({
+      toolName: "kb_search",
+      intent: `第 ${n} 轮`,
+    });
+    expect(await session.wait(isSelect(`r${n}`), 2_000)).toEqual(kbSelect(`r${n}`));
+    expect(indexOf(session, isStart(`c${n}`))).toBeLessThan(indexOf(session, isSelect(`r${n}`)));
+    expect(await quiet(session)).toBe(0);
+    expect(indexOf(session, isCall(`h${n}`))).toBe(-1);
+  }
+
+  it.each(["write", "always-ask"])(
+    "%s: each host_tool_call follows its select and only an Approve releases it",
+    async (mode) => {
+      const session = await openTurn("host-tool", QUESTION, mode);
+      for (const n of [1, 2]) {
+        await selected(session, n);
+        session.write({ type: "extension_ui_response", id: `r${n}`, value: "Approve" });
+        expect(await session.wait(isCall(`h${n}`))).toMatchObject({
+          toolCallId: `c${n}`,
+          toolName: "kb_search",
+          arguments: { question: n === 1 ? QUESTION : `${QUESTION} 详细说明`, kb_ids: ["k1"] },
+        });
+        expect(indexOf(session, isSelect(`r${n}`))).toBeLessThan(indexOf(session, isCall(`h${n}`)));
+        session.write(hostResult(`h${n}`, `r${n}`));
+        await session.wait(isEnd(`c${n}`));
+      }
+      await session.wait((frame) => frame.type === "agent_end");
+      expect(session.frames.slice(indexOf(session, isEnd("c2"))).some(isTextDelta)).toBe(true);
+      expect(await probeFrames(session)).toBe(
+        "negotiate_protocol,get_state,set_host_tools,prompt,extension_ui_response,host_tool_result," +
+          "extension_ui_response,host_tool_result,prompt",
+      );
+      await closeSession(session);
+    },
+  );
+
+  it.each([
+    ["Deny", { value: "Deny" }],
+    ["cancelled", { cancelled: true }],
+  ])(
+    "an answer of %s ends the call as denied without a host_tool_call; the next call is r2/c2/h2",
+    async (_label, answer) => {
+      const session = await openTurn("host-tool", QUESTION, "write");
+      await selected(session, 1);
+      session.write({ type: "extension_ui_response", id: "r1", ...answer });
+      expect(await session.wait(isEnd("c1"))).toEqual({
+        type: "tool_execution_end",
+        toolCallId: "c1",
+        toolName: "kb_search",
+        result: { content: [{ type: "text", text: "Tool call denied by user: kb_search" }] },
+        isError: true,
+      });
+      await selected(session, 2);
+      expect(indexOf(session, isEnd("c1"))).toBeLessThan(indexOf(session, isStart("c2")));
+      session.write({ type: "extension_ui_response", id: "r2", value: "Approve" });
+      await session.wait(isCall("h2"));
+      session.write(hostResult("h2", "r2"));
+      await session.wait((frame) => frame.type === "agent_end");
+      const calls = session.frames.filter((frame) => frame.type === "host_tool_call");
+      expect(calls.map((call) => [call.id, call.toolCallId])).toEqual([["h2", "c2"]]);
+      expect(await probeFrames(session)).toBe(
+        "negotiate_protocol,get_state,set_host_tools,prompt,extension_ui_response," +
+          "extension_ui_response,host_tool_result,prompt",
+      );
+      await closeSession(session);
+    },
+  );
 });
 
 describe("fake omp host-tool-abort", () => {

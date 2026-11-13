@@ -47,6 +47,9 @@
 | 组 3 首刀：资源上限（帧长） | 是 | 「结果过大」两例（「组 3 首刀约定」） |
 | 组 3 首刀：错误外泄（处理函数错误原文） | 是 | 「未知工具与失败」的哨兵断言：`OmpProcess` 无 logger、`host-tools.ts` 不记日志；spy 测试进程的 `process.stderr.write` 与 `console.*`，`error` 事件不含哨兵 |
 | 组 3 首刀：旧调用方兼容（既有帧路由与假 omp 场景） | 是 | 回归命令（「组 3 首刀约定」最后一条）原样全绿；权限、迁移与 schema、公共 API 不选：本刀只动传输层与假 omp，不碰账号、库表与 REST/SSE |
+| 组 3 第二刀：审批语义越界（只认整体恰为 `Allow tool: kb_search` 的标题与闭合选项；`always-ask` 照旧） | 是 | 「组 3 第二刀约定」的正反例与两次变异 |
+| 组 3 第二刀：白盒关键路径（放行帧由传输层写） | 是 | 继承 `#onFrame` 的 `!#writesClosed` 守卫；写失败与 prelude 同一处理（`#failIo`）；`omp-host-tools` 真子进程一例 |
+| 组 3 第二刀：旧调用方兼容（既有审批与 prelude） | 是 | 回归命令原样全绿；权限、迁移与 schema、跨服务契约、公共 API 不选：不动库表、REST、SSE 形状，只在 `write` / `yolo` 下少一类审批事件 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -121,8 +124,27 @@ Minimal mergeable slice: atomic - 定义、执行与引用解析共用同一份�
       - 「未知工具与失败」：未注入、resolve `undefined`、同步 `throw`、异步 reject 各一例（错误信息含哨兵）；cancel 之后才 reject 一例不写帧。
       - 「结果过大」：例一 ASCII `text` 约 100 KiB、`details` 约 1 MiB → 帧无 `details`、`isError` 无；例二 `text` 本身超过 1 MiB（另一 CJK 变体：字符数小于上限、字节数超过）→ `isError`「工具结果过大」。假 omp 会把 `result` 回显进 `tool_execution_end`，所以另断言收到了这次调用的 `tool_execution_end` 且 `proc` 零 `error` 事件（防回显帧超入站上限而假绿）。
     - 回归命令：`npm run test:focus --workspace server -- omp-host-tools fake-omp omp-process omp-rpc omp-runtime omp-approval-requests`，全部原样全绿；`grep -rn kb_search server/src/sessions` 无输出。
-- [ ] 3.5 假 omp 场景补 `write` / `always-ask` 帧序（`Allow tool: kb_search` 的 select 与 `Deny` 分支），并在 3.2 的契约用例里加对应断言
-- [ ] 3.6 测试先行后实现：`ui-requests.ts` 的纯判定函数 `isKbSearchApproval`（`ui-requests.ts` 保持无状态，`OmpProcess` 仍是唯一写帧的地方），`#onUiRequest` 在审批识别之前按这一代的 `approvalMode` 判定；覆盖 tool-approval 的新场景与 session-permission-tier「kb_search 的确认只在 always-ask 档出卡」，以及 omp-runtime「RPC IO and child observation」的「kb_search card by approval mode」，既有审批用例原样全绿
+- [x] 3.5 假 omp 场景补 `write` / `always-ask` 帧序（`Allow tool: kb_search` 的 select 与 `Deny` 分支），并在 3.2 的契约用例里加对应断言
+- [x] 3.6 测试先行后实现：`ui-requests.ts` 的纯判定函数 `isKbSearchApproval`（`ui-requests.ts` 保持无状态，`OmpProcess` 仍是唯一写帧的地方），`#onUiRequest` 在审批识别之前按这一代的 `approvalMode` 判定；覆盖 tool-approval 的新场景与 session-permission-tier「kb_search 的确认只在 always-ask 档出卡」，以及 omp-runtime「RPC IO and child observation」的「kb_search card by approval mode」，既有审批用例原样全绿
+  - 组 3 第二刀约定（#1965 fixture 审查补；3.5–3.6 照此实现与测试）：
+    - 档位来源：`#onUiRequest` 读 `this.#opts.approvalMode`（`SpawnOmpOpts`，构造时定、整代不变，即写进 argv 的那个值）；不加 `OmpProcessOpts` 字段，`runtime.ts` 不改。
+    - `process.ts` 预算 ≤ 782 行（估计值，全局上限 800）。允许的改动点只有：import 加 `isKbSearchApproval`；`#onUiRequest` 里 `const kb = this.#opts.approvalMode !== "always-ask" && isKbSearchApproval(frame);`；`approval` 原地改为 `kb ? undefined : approvalRequest(frame, id)`，`answer` 原地改为 `prelude || kb ? answerFrame(id, "allow") : cancelFrame(id)`；`kb` 为真时不发 `preludeApproval`。放行帧继承 `#onFrame` 的 `!#writesClosed` 守卫，写失败与 prelude 同样进 `#failIo`。
+    - Code Canonicality：`isKbSearchApproval(frame)` 判 `method === "select"` 且 `title === "Allow tool: kb_search"`，选项复用 `ui-requests.ts` 既有的 `isApprovalOptions`（两种闭合形状：`["Approve","Deny"]`，与恰三项 `["Approve", /^Approve .+ for this session$/, "Deny"]`），不另写选项判定；文件头注释同改。`server/src/sessions` 自此允许出现 `kb_search`（首刀的 grep 断言不再列入回归）。
+    - 假 omp 拿档位：`fake-omp.mjs:137` 改为 `hostToolScenario(scenario, approvalMode, {...})`（净增 0 行，≤ 770）；叶子模块保持无 import、不读 argv（`fake-omp-host-tool.test.ts` 的结构断言原样绿），文件头「首刀不论档位按 yolo」改写。只有 `host-tool` 在 `write` / `always-ask` 下往 handlers 加 `extension_ui_response`（展开在后，盖过 `handleUi`）；`host-tool-parallel`、`host-tool-abort` 不论档位都按 `yolo`。
+    - 假 omp `write` / `always-ask` 帧序：每次调用依次 `tool_execution_start{toolCallId:"c<n>", intent:"第 <n> 轮"}`、`extension_ui_request{id:"r<n>", method:"select", title:"Allow tool: kb_search", options:["Approve","Approve kb_search for this session","Deny"]}`；收到 `value:"Approve"` 才发 `host_tool_call{id:"h<n>"}`。`r` / `c` / `h` 序号在调用开始时分配（第 1 次被 Deny 后，第 2 次仍是 `r2` / `c2` / `h2`）。
+    - Deny 分支（review 记录 §2.4 未实测，是假 omp 的选择，文件里如此标注）：`value` 不是 `Approve`（`Deny` 或 `cancelled`）时写 `tool_execution_end{toolCallId, toolName:"kb_search", result:{content:[{type:"text", text:"Tool call denied by user: kb_search"}]}, isError:true}`（文本照 `fake-omp-composer.mjs:126` 内联），这次不发 `host_tool_call`、处理函数零调用；回合接着走第 2 次调用，两次都结束后照常发正文与终态 `agent_end`。
+    - 3.5 契约用例（`fake-omp-host-tool.test.ts`）：`write` 下 Approve 两次（每个 `host_tool_call` 之前都有 `r<n>` 的 select；作答之前输出与入站帧记录都没有 `host_tool_call`）；`always-ask` 同一帧序一例；Deny 一例（失败 end 字面量与之后的 `r2` 调用）。
+    - id 分配：tool-approval 场景用 `r1`（假 omp `host-tool`），omp-runtime「kb_search card by approval mode」用 `k1`，走 FakeChild 合成帧，放在 `omp-process-prelude.test.ts`；先给 `support/omp-rpc.ts` 的 `startFakeProcess` / `openFakeProcess` 加可选 `approvalMode`，覆盖 `tempOpts` 写死的 `"write"`（`:76`），缺省不变（`yolo` 只能用合成帧测：假 omp 在 `yolo` 下不发 select）。
+    - 合成帧正反例（oracle：stdin 记录 + `approval` + `preludeApproval` 事件）：
+      - `write` 与 `yolo` 下，三项与两项选项都立即收到 `{type:"extension_ui_response", id, value:"Approve"}`；没有 `approval`、没有 `preludeApproval`；之后 `respondApproval(id, "deny")` 什么也不写（「未登记」的观测量，先例同在 `omp-process-prelude.test.ts`）。
+      - `always-ask` 下三项照常上抛 `{id, tool:"kb_search", title:"Allow tool: kb_search"}`，作答之前 stdin 没有应答；`allow` 恰写一帧 `Approve`。
+      - `write` 与 `yolo` 下，`Allow tool: kb_search\nReason: x`、`Allow tool: kb_search_extra`、`Allow tool: kb_search `（尾随空格）都按审批上抛，`tool` 分别为 `kb_search`、`kb_search_extra`、`kb_search`。
+      - 恰好的标题配非闭合选项（`["Approve","Approve kb_search","Deny"]`）与 `method:"confirm"`：收到 `cancelled:true`，不放行、不上抛。
+    - 纯函数表格用例放进 `omp-approval-requests.test.ts`：`isKbSearchApproval` 对上面正反例逐个给出真 / 假，不读档位。
+    - 真子进程（`omp-host-tools.test.ts`，`start()` 加档位参数，缺省 `yolo`）：`write` 跑 `host-tool`、注入处理函数——tee 截获 `r1` 的 `Approve` 在 `h1` 的 `host_tool_result` 之前，零 `approval`，回合到 `agent_end`；`always-ask` 一例——`r1` 上抛，未作答之前没有 `host_tool_call`。
+    - session-permission-tier「kb_search 的确认只在 always-ask 档出卡」：新文件 `server/test/session-kb-search-approval.test.ts`，走生产装配（`createApp` → `registerSessions`，先例 `session-prelude-card.test.ts`；`approvalMaxMode` 缺省 `yolo`，三档可选）。组 4 之前 slot 不注入 `hostTools`，两次调用都回 `未知工具`：「照常完成」在此指两个 `kb_search` 步骤都以 isError 结束、回合以 done 收尾（生产可达要到组 4）。断言：`write` / `yolo` 下 `chat_approvals` 零行、零 `approval.request` 事件、零 `session.approval` 审计；`always-ask` 下两次调用各一条 `approval.request`（`tool:"kb_search"`），与 `kb_search` 步骤配对，作答 allow 后才出现下一次。
+    - 变异（PR 各记一次）：去掉档位判断 → `always-ask` 用例红；标题放宽为前缀或首行匹配 → 近似标题用例红。
+    - 回归命令：`npm run test:focus --workspace server -- approval omp-host-tools fake-omp omp-process omp-rpc omp-runtime session-prelude-card`，全部原样全绿；AC 的 `make check` 本地可跑（不需要已运行的服务），PR 附命令与退出码。
 
 Suggested fixture level: expanded - omp 子进程治理（白盒关键路径）、并发与取消、审批语义。
 Minimal mergeable slice: 3.1–3.4 为首刀：协议在 `yolo` 帧序下独立可测，`hostTools` 为可选参数，生产路径不注入时行为不变；3.5–3.6（审批放行）依赖首刀的假 omp 场景与组 2（扫描用例已放开 `kb_search` 字样）。

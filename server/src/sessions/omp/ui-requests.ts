@@ -6,6 +6,9 @@
  * is answered `Approve` by the transport; anything else is cancelled.
  * Issue #1570 (design D7): #1526's rewrite of a `write` to `xd://browser` is gone with the device
  * (omp v18.12.3 drives its browser from `eval`): every approval keeps its title verbatim.
+ * Change s2c-kb-session D4 (#1965): the kb_search card — select, the whole title, an approval option
+ * shape — is answered `Approve` by the transport unless the generation runs `always-ask`; the mode
+ * is OmpProcess's to read, not this file's.
  */
 import type { OmpFrame } from "./frame.js";
 
@@ -14,6 +17,7 @@ const UNKNOWN_TOOL = "unknown";
 const SESSION_GRANT = /^Approve .+ for this session$/u;
 // The prelude's header alone (the previous pin's real `browser` tool card had `Action:` lines).
 const PRELUDE_TITLE = /^Allow tool: browser(?:\nReason: [^\n]+)?$/u;
+const KB_SEARCH_TITLE = "Allow tool: kb_search";
 
 /** Owner-facing approval request: the frame id, the full title, the tool. */
 export interface ApprovalRequest {
@@ -68,6 +72,12 @@ export function isPreludeCard(frame: OmpFrame): boolean {
     options[0] === "Approve" &&
     options[1] === "Deny"
   );
+}
+
+/** The kb_search card: select, the title exactly `Allow tool: kb_search`, an approval option shape. */
+export function isKbSearchApproval(frame: OmpFrame): boolean {
+  const { method, options, title } = frame;
+  return method === "select" && title === KB_SEARCH_TITLE && isApprovalOptions(options);
 }
 
 export function cancelFrame(id: string): OmpFrame {
