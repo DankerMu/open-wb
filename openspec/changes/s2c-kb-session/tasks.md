@@ -69,6 +69,16 @@
 | 组 6 首刀：快照恢复与回放 | 是 | `chatStateFromSnapshot` 的 `kbHits:null`；重复帧由既有游标过滤 |
 | 组 6 首刀：旧事件与旧用例兼容 | 是 | 回归命令；旧用例只许原地加 `kbHits: null` |
 | 组 6 首刀：行数上限 | 是 | `stream.ts` ≤ 780；`chat-page-file-changes.test.tsx` 先移出 `describe("summarizeChanges")` |
+| 组 6 第二刀：共享呈现与分段（检索块） | 是 | 「组 6 第二刀约定」分段条与场景字面量用例；快照与实时按 kind / key / 步骤 id 逐块相等 |
+| 组 6 第二刀：旧布局 | 是 | 「旧布局」条：原样 `ToolCallGroup`；只含 `kb_search` 的旧布局组摘要为空串列为非目标 |
+| 组 6 第二刀：确认标记与兜底确认记录 | 是 | 「确认标记」条；「检索行的确认标记」场景断言无 `approval-records` |
+| 组 6 第二刀：切片纯文本（XSS） | 是 | 共享命中列表以 React 文本节点渲染；`<b>x</b>` 原样为文本的用例 |
+| 组 6 第二刀：行数上限 | 是 | 「行数预算」条 |
+| 组 6 第二刀：Canonicality / jscpd | 是 | 命中列表上移为 `web/src/components/kb-hit-list.tsx`，`center/kb/retrieval-panel.tsx` 与检索卡共用；`make anti-drift` |
+| 组 6 第二刀：下游 ui-walk 选择器（#1976） | 是 | 「组件」条的 `aria-label` / `data-slot` / 「行内无 button」 |
+| 组 6 第二刀：亮暗主题与窄视口 | 是 | 只用 `--wb-*` token；「窄视口」条；6.5 亮 / 暗 / 390 宽三张截图 |
+| 组 6 第二刀：快照原地重装 | 是 | 展开后 `resync` 用例 |
+| 组 6 第二刀：库表 / 权限 / 公共 API | 否 | 纯 web 呈现：不改服务端、快照形状与事件形状 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -245,6 +255,32 @@ Minimal mergeable slice: atomic - reducer 派生与 supervisor 校验发布是�
 - [ ] 6.3 测试先行后实现：`message-segments.ts` 的检索块（「kb_search 步骤合成一个检索块」场景）；`tool-summary.ts` 不计 `kb_search`，既有分段与摘要用例原样全绿
 - [ ] 6.4 测试先行（新文件 `web/test/chat-kb-search-card.test.tsx`）后实现：新组件 `web/src/features/chat/kb-search-card.tsx`，覆盖「实时两轮」「刷新后只剩各轮」「检索行的确认标记」「部分失败与检索中」；展开态以块键保留
 - [ ] 6.5 证据：本机对一个注入了 `kb.hits` 的会话截图（亮 / 暗），零新增控制台报错，附在 PR；验收清单 CK 节新增 CK-16（接 CK-15，模型检索两轮的回合里，助手消息只有一张「知识库检索」卡，逐轮列出意图与命中条数，展开看到切片；刷新后只剩各轮），结论 `待签`，由 owner 执行
+  - 组 6 第二刀约定（#1969 fixture 审查补；6.3–6.5 照此实现与测试）：
+    - 分段：`MessageSegment` 加第四种 `{ kind: "kb"; key: "kb:<第一个 kb_search 步骤 id>"; steps: ChatStepView[] }`；`segmentMessage` 遇 `step.name === "kb_search"`（精确匹配）时：本消息还没有检索块就在当前位置推入一个，否则并入已有的那个（不论位置），不进工具段、不改 `previous` 的工具段合并判定——检索块与正文段一样分隔两侧工具段。旧布局判定与 `mergeItems` 不改。用例照规格场景「kb_search 步骤合成一个检索块」字面量，另补：只有 kb_search、kb 在最后一块（小圆点单独一行）、两个检索步骤之间夹工具段（s2 在别处不出块）、同一回合的快照视图与实时视图（实时序列含 kb.hits）按每块的 kind / key / 步骤 id 列表逐块相等（`kbHits` 实时非空、快照为 null，不做深相等）。
+    - 呈现：`message-segments-view.tsx` 的 `Block` 加 `case "kb"` → `KbSearchCard`（`default` 分支不再兜 kb）；React key 仍是块键，故卡与行的展开态随块键保留，流式增长与快照原地重装不重挂载。
+    - 旧布局：规格只为分段布局定义检索块；旧布局（`segmentMessage` 返回 null）原样渲染 `ToolCallGroup`，`kb_search` 步骤仍是步骤卡。本 change 产生的消息每个步骤都有 `bodyOffset`，不进旧布局；旧布局下不另画检索卡（非目标）；旧布局规则 2–4（思考段不自洽）仍可能命中带 `kb_search` 的消息，此时全为 `kb_search` 的组摘要为空串、`running` 时只有转圈没有 `进行中`——不在真实输入域内，列为非目标。
+    - 工具段摘要：`summarizeTools` 跳过 `name === "kb_search"` 的步骤（不计类、不计失败、不计进行中），`toolAction("kb_search")` 仍为 `其它`（表不改）；只在旧布局里可观测。用例：`summarizeTools([read, kb_search(failed), kb_search(running)])` 为 `读取 1 个文件`；既有摘要用例原样全绿。
+    - 确认标记：`step-card.tsx` 的 `MARK` 表就近导出（同一规则只一处），检索卡行用它；配对规则同 `ToolCallGroup`（`approvals.find(a => a.stepId === step.id)`）。兜底确认记录 `ApprovalRecords` 已按「步骤存在」排除，不改代码，用例断言消息内没有 `approval-records`。
+    - 组件 `web/src/features/chat/kb-search-card.tsx`，props `{ approvals, steps }`：
+      - 根 `<section aria-label="知识库检索" data-slot="kb-search-card">`；卡头含标题文字 `知识库检索`、` · ` + ok 库名（按 `name` 字符串去重、首次出现次序、`、` 连接）、`（n 轮）`、状态（任一步骤 `running` → `检索中`；否则全部步骤 `failed` → `检索失败`；其余 `检索完成`；`stopped` 不算失败）。
+      - 行 `<ol>` / `<li data-slot="kb-search-row">`：`第 k 轮`、意图（`kbHits.intent` 非空用它；否则 `JSON.parse(detail)` 为对象且 `question` 为字符串时用它；都不成立为空，解析失败不抛）、有 `kbHits` 时 `命中 m 条`（各库 `hits.length` 之和，`ok` 0 条也显示 `命中 0 条`）、确认标记、行状态（`SESSION_STATUS_LABEL[step.status]`）。
+      - 有 `kbHits` 的行是一个 `<button aria-expanded>`（初始 false，展开态按步骤 id 存在卡组件的 state 里）；没有 `kbHits` 的行不渲染按钮（ui-walk 以「行内无 button」断言不可展开）。
+      - 展开内容按 `bases` 次序逐库：库标签为 `name ?? kbId`；`not_found` → `未找到该知识库`，`not_ready` → `正在重建，本轮未检索`，`failed` → `检索失败`；`ok` 列命中用共享命中列表（下条）。
+      - 共享命中列表（Canonicality）：`center/kb/retrieval-panel.tsx:128-152` 的 `Hits` 原地上移为新文件 `web/src/components/kb-hit-list.tsx` 的 `KbHitList({ hits, numbered })`（`hits: readonly { name: string; similarity: number; content: string }[]`；`numbered` 为真时保留 `#n` 徽标，检索面板传真、检索卡传假），文档名、`相似度 ${similarity.toFixed(2)}`、切片原文（React 文本节点，`whitespace-pre-wrap`，不经 Markdown 或 HTML）只此一处实现；检索面板改为引用它，其既有用例原样全绿（回归命令含 `kb-retrieval`）。配对测试 `web/test/kb-hit-list.test.tsx`（`#n` 有无、两位小数、纯文本）。
+      - 窄视口：卡头库名列表、行内意图、库标签、文档名与切片都 `min-w-0` + `wrap-anywhere`（卡头库名可 `truncate`，`title` 给全文），390 宽下卡内无横向溢出（#1976 的 overflow oracle 会走查）。
+      - 图标用既有 `search`，不加新图标或依赖；卡自身颜色只用 `--wb-*` token（亮 / 暗）；共享 `KbHitList` 原样沿用检索面板的样式类（上移不改样式），不受此条约束。
+    - 用例（新文件 `web/test/chat-kb-search-card.test.tsx`，用 `chat-segments-support.tsx` 既有渲染 helper）：四个规格场景逐字面量；另补：意图回退（intent null 且 detail 非 JSON → 空）、`not_found` 库标签用 `kbId`、切片里的 `<b>x</b>` 原样为文本、`stopped` 步骤卡头为 `检索完成`、展开第一行后追加第三轮（rerender）展开态保留且新行收起；展开一行后经 `chat-segments-support.tsx` 的 `openSession().resync` 原地重装快照：卡仍挂载、行内无 button、无展开内容、不抛错。
+    - 行数预算：`message-segments.ts` 123 → ≤ 140；`message-segments-view.tsx` 152 → ≤ 160；`tool-summary.ts` ≤ 55；`step-card.tsx` 只多 `export`；`retrieval-panel.tsx` 只减不增；`kb-search-card.tsx` ≤ 200。
+    - 6.5 截图（确定性桩，主路径；真实模型与真实 RAGFlow 归 owner 验收，见文件头）：
+      - 本机起一份验收服务（全新状态目录、种子账号、`web/dist` 静态资源），不接 RAGFlow、不发 prompt；以 `zhangsan` 登录后建一个空会话。
+      - Playwright 脚本放会话 scratchpad，不进仓库；用 `page.route` 应答该会话的消息快照（一条 user 消息 + 一条 `running` 助手消息，两个 `kb_search` 步骤，detail 带 `question`，`bodyOffset` 齐备）与事件流。
+      - 事件流应答体以 `retry: 3600000` 开头，随后的帧 id 沿用快照的 epoch、seq 大于快照游标，依次为两轮的 `kb.hits`（第一轮 `ok` 两条命中 + 一个 `failed` 库，第二轮 `intent:null`）、`step.end` ×2、`turn.end`；流关闭后 EventSource 一小时内不重连，故不触发 `beginRecovery` 重装快照。
+      - 断言卡头 `（2 轮）`、两行 `命中 n 条`；展开第一行后截亮 / 暗两张（1280 宽）与 390 宽一张；页面控制台无新增报错（`page.on("console")` 收集 error）。
+      - 刷新形态：把快照桩换成回合结束后的快照（助手消息 `done`，两个 `kb_search` 步骤 `done`，步骤与 detail 不变），事件流桩换成只有 `retry: 3600000` 的空应答体，再 `page.reload()`；断言卡头 `检索完成`、两行、行内无 button，截一张。截图贴 PR 评论，不进仓库。
+      - 报错 oracle 同时收集 `console` 的 error 与 `pageerror`，两者都为零。
+    - 已知取舍（#1968 integration 席）：发送下一条 prompt、regenerate、撤回、审批 409 对账、原生重连都会装完整快照，前面各轮的 `kbHits` 回到 `null`——即「刷新后只剩各轮」形态，规格如此（G12），CK-16 文案按「刷新或发送下一条后只剩各轮」写。
+    - CK-16 行（接 CK-15，`待签`，由 owner 执行）：操作——在 CK-15 同一台服务上，`zhangsan` 新建会话，问「先在规范库里查 `manual.pdf` 里关于<CK-15 那条事实>的说法，再换一种问法查一次，对比两次结果后回答」，等回答结束；展开第一行；随后刷新页面；亮 / 暗主题与 390 宽各看一次。期望——设实际出现 n 行（n ≥ 2 为本行通过的前提；模型只检索一次记 `不通过` 并注明）：助手消息里只有一张「知识库检索」卡，卡头 `知识库检索 · 规范库`、`（n 轮）`、`检索完成`；每行 `第 k 轮`、意图或问句、`命中 m 条`；展开第一行看到 `manual.pdf` 的文档名、两位小数的相似度与切片原文；工具段摘要里不计检索；刷新后仍是一张卡、n 行，行里只有问句与状态，行不可展开；三种外观下卡内无横向溢出、无错误提示。
+    - 回归命令：`npm run test:focus --workspace web -- message-segments tool-summary kb-search-card kb-hit-list kb-retrieval chat-tool-group chat-message-segments chat-step-approval-mark chat-page-search-segments chat-thinking-segments functional-checklist`，外加 `make lint`、`make typecheck`、`make anti-drift`。
 
 Suggested fixture level: expanded - 前端改变公共事件流的解码与会话页呈现（public API、shared rendering）。
 Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可独立合入保绿（还没有组件读 `kbHits`）；6.3–6.5 依赖它。
