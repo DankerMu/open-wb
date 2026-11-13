@@ -79,6 +79,11 @@
 | 组 6 第二刀：亮暗主题与窄视口 | 是 | 只用 `--wb-*` token；「窄视口」条；6.5 亮 / 暗 / 390 宽三张截图 |
 | 组 6 第二刀：快照原地重装 | 是 | 展开后 `resync` 用例 |
 | 组 6 第二刀：库表 / 权限 / 公共 API | 否 | 纯 web 呈现：不改服务端、快照形状与事件形状 |
+| 组 7 首刀：迁移原子性与可重试 | 是 | 「组 7 首刀约定」的「中途失败原子回滚」用例 |
+| 组 7 首刀：存量数据不变（列值、行数、序列、外键） | 是 | 「新库与存量库」存量分支逐行比对 |
+| 组 7 首刀：回执次序与目录计数 | 是 | `COMPLETE_CATALOG` 26 条；052 紧随 051 |
+| 组 7 首刀：旧迁移不改、旧用例只跟进末尾假设 | 是 | 「既有用例唯一许可改动」条；PR 列 grep 清单 |
+| 组 7 首刀：公共 API / 权限 / web | 否 | 本刀没有代码读写该列，应答形状不变 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -289,6 +294,16 @@ Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可
 
 - [ ] 7.1 核对 Context：`042_chat_message_attachments.sql` 的写法、`server/test/core-db-helpers.ts` 的跟踪清单与受信任迁移目录计数、`051_kb_retrieval.sql` 的回执位置
 - [ ] 7.2 测试先行后实现：迁移 `052_chat_message_knowledge_bases.sql`；在迁移的权威用例文件里覆盖「新库与存量库」「中途失败原子回滚」，目录计数原地加一
+  - 组 7 首刀约定（#1970 fixture 审查补；7.2 照此实现与测试）：
+    - 迁移文件 `server/src/core/db/migrations/052_chat_message_knowledge_bases.sql`：文件头注释照 042 的五行写法（来源、可空无 DEFAULT 无索引不回填、不带 CHECK 由应用层判定、只 ADD COLUMN、事务与回执归 runner），正文恰一句 `ALTER TABLE chat_messages ADD COLUMN knowledge_bases TEXT NULL;`。更早的迁移文件一律不改。
+    - 权威用例：新文件 `server/test/migration-052.test.ts`（042 的权威文件 `core-db-session-composer.test.ts` 已 756 行，放不下；先例 `migration-045.test.ts`）。052 按目录位置定位（紧随 051），期望值写字面量、不由迁移反推。
+      - 「新库与存量库」：新库回执里 `052` 恰一次且紧随 `051`；`PRAGMA table_info(chat_messages)` 末行恰为 `["knowledge_bases","TEXT",0,null,0]`（可空、无缺省、非主键）；存量库用 `seedThrough` 停在 051、预置含 user 与 assistant 消息（含带 `attachments` 的一条）的会话，升级后每条消息除新列外整行不变、行数不变、新列全为 NULL，`sqlite_sequence` 与 `PRAGMA foreign_key_check` 不变 / 为空，其余 schema 对象（`sqlite_master` 除 `chat_messages` 行）不变。
+      - 「中途失败原子回滚」：一次性副本停在 051 后手工 `ALTER TABLE chat_messages ADD COLUMN knowledge_bases TEXT` 预置冲突，`openDb` 失败（`expectOpenDbFailure`），无 `052` 回执、此前回执与消息行不变；去掉冲突（重建副本或 `DROP COLUMN`）重试恰应用一次，再开一次稳定（`expectRepeatedOpenStable`）。
+    - 目录与计数：`core-db-helpers.ts` 加 `MIGRATION_052`、进跟踪清单、`COMPLETE_CATALOG` 回执 `[26, MIGRATION_052]` 与 `sequenceRows` 26。
+    - 既有用例唯一许可改动：凡断言「完整迁移链的最后一个迁移是 051」或「完整链 `chat_messages` 列集」的地方原地跟进（如 `kb-schema.test.ts:332-335` 改为按 051 的位置断言、不再假定它是末尾；`core-db-chat-schema.test.ts:315`、`core-db-session-fixture.ts:82` 等完整链列集末尾加 `knowledge_bases`）；只停在某个更早迁移、且按位置截取前缀的用例不动。例外：用「排除其后每个迁移」搭早期前缀的 `migration-034.test.ts:274-289` 与 `core-db-chat-step-output.test.ts:83-98` 在排除表末尾加 `MIGRATION_052`（不改成别的写法）。完整链 `chat_messages` 列集的 6 元组读法（`core-db-chat-schema.test.ts:308-320`）末尾加 `["knowledge_bases","TEXT",0,null,0,0]`；`core-db-message-thinking-ms.test.ts:125`、`core-db-message-error.test.ts:100`、`migration-034.test.ts:131-143` 这类「完整链列集末尾」同规则加 `knowledge_bases`。`seedThrough` 从 `core-db-session-fixture.ts` 取。实施时 grep 出完整清单写进 PR。
+    - 行数：`core-db-helpers.ts` 553 → ≤ 560；新测试文件 ≤ 400。
+    - 非目标：任何读写该列的代码（组 7 第二、三刀）；索引；回填。
+    - 回归命令：`npm run test:focus --workspace server -- migration-052 core-db kb-schema migration-0 store-attachments message-undo-state session-composer-align`，外加全量 `npm test --workspace server`（列集断言散在多个文件，全量兜底）、`make lint`、`make typecheck`、`make anti-drift`。
 - [ ] 7.3 核对 Context：`prompt-attachments.ts:47` 的 `parsePromptBody`、`rest.ts` 的受理与后缀拼接（:315-349）、`store-attachments.ts`、`slash-commands.ts:324` 的 `attachmentSuffix`、`branch-temp.ts:191` 的 `matches`、`branching.ts:126/156/258`、`store-branch.ts` 的 fork 拷贝、`turn-control.ts` 的 `acceptPrompt`
 - [ ] 7.4 测试先行：新文件 `server/test/prompt-knowledge-bases.test.ts` 覆盖「拒绝」、后缀的「带知识库引用的后缀」与「prompt 带知识库引用」、列的落库值，以及 `store-knowledge-bases.ts` 读出坏值整列为 `[]` 的单元用例；派发文本与 spec 场景同一写法用桩 supervisor 观察（不经假 omp：组 4 合入后，知识库开启且所有者有库时缺省假 omp 会让注册失败，需要假 omp 的用例改用 `host-tool` 场景）；分支对位的场景（「带知识库引用回合的对位」）放进 `message-attachments` 既有的对位用例文件；fork 拷贝在本刀只断言新会话消息行的 `knowledge_bases` 列原值（快照还没有这一键）；无引用时后缀逐字节不变的既有用例原样全绿
 - [ ] 7.5 实现（服务端写入侧，快照不加键）：
