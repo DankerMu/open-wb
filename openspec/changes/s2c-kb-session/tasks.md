@@ -427,8 +427,8 @@ Minimal mergeable slice: atomic - 入口、标签与发送是同一个用户动�
 
 ## 9. 夹具与真实 omp 回归（omp-test-harness「受控上游知识库检索标记」；omp-runtime「host tool 的真实 omp 回归」）
 
-- [ ] 9.1 核对 Context：`fake-upstream.mjs:263-272` 的「是否已回答」判定与 `toolRoundCall`（:638-657）、`fake-upstream-pace.mjs` 的兄弟模块写法、`server/test/omp-official-*.test.ts` 的门控与 stdout tee
-- [ ] 9.2 测试先行后实现：新文件 `server/test/support/fake-upstream-kb.mjs`（按本回合 tool 消息条数分三阶段，只在 `tools` 含 `kb_search` 时生效），`fake-upstream.mjs` 只加分派的几行；用例放新文件 `server/test/fake-upstream-kb.test.ts`（「标记的三个阶段」）
+- [x] 9.1 核对 Context：`fake-upstream.mjs:263-272` 的「是否已回答」判定与 `toolRoundCall`（:638-657）、`fake-upstream-pace.mjs` 的兄弟模块写法、`server/test/omp-official-*.test.ts` 的门控与 stdout tee
+- [x] 9.2 测试先行后实现：新文件 `server/test/support/fake-upstream-kb.mjs`（按本回合 tool 消息条数分三阶段，只在 `tools` 含 `kb_search` 时生效），`fake-upstream.mjs` 只加分派的几行；用例放新文件 `server/test/fake-upstream-kb.test.ts`（「标记的三个阶段」）
   - 组 9 首刀约定（#1974 fixture 审查补；9.1–9.2 照此实现与测试）：
     - 9.1 核对结论（fake-upstream.mjs 781 行，余 19 行）：
       - `readChatMessages`（:231-252）只带出 `{messages, model}`。
