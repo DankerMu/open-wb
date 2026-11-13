@@ -34,7 +34,7 @@ const SETTINGS_ROUTE = "**/api/kb/settings";
 const RERANK_NAME = "qwen3-rerank";
 const RERANK_URL = "https://rerank-gateway.internal.example/v1/RERANK_UPSTREAM_0123456789";
 
-const STATUS = {
+export const STATUS = {
   enabled: true,
   available: true,
   embeddingReady: true,
@@ -43,7 +43,7 @@ const STATUS = {
   uploadMaxFiles: 10,
 };
 const RETRIEVAL = { threshold: 0.2, vectorWeight: 0.7 };
-const BASE = {
+export const BASE = {
   id: BASE_ID,
   name: BASE_NAME,
   template: "naive",
@@ -98,7 +98,7 @@ const SETTINGS = {
   rebuildFailed: 0,
 };
 
-const json = (route: Route, body: unknown) =>
+export const json = (route: Route, body: unknown) =>
   route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 
 /** 检索测试一步：登录、装桩、两次检索、卸桩、退出。 */
@@ -252,7 +252,7 @@ async function expectPanelFits(panel: Locator): Promise<void> {
   ).toBeLessThanOrEqual(widths.scroller?.client ?? 0);
 }
 
-async function shot(page: Page, panel: Locator, file: string) {
+export async function shot(page: Page, panel: Locator, file: string) {
   const dir = env.UI_WALK_SHOT_DIR;
   if (!dir) return;
   await panel.scrollIntoViewIfNeeded();

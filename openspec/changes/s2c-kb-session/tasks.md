@@ -592,8 +592,8 @@ Minimal mergeable slice: 9.1–9.2 为首刀：受控上游标记只有自己的
 
 ## 10. ui-walk 会话知识库分支（chat-harness「UI 走查会话知识库引用与检索卡」）
 
-- [ ] 10.1 核对 Context：`web/e2e/ui-walk-center-kb.ts` 的 route 桩与键集纪律、`route-hold.ts`、`ui-walk-oracle.ts`、`ui-walk-cleanup.ts`、视口矩阵
-- [ ] 10.2 实现新文件 `web/e2e/ui-walk-chat-kb.ts` 的三步，并在 `ui-walk.spec.ts` 接入；本机对已运行的服务跑 `make ui-walk`，PR 附退出码与截图
+- [x] 10.1 核对 Context：`web/e2e/ui-walk-center-kb.ts` 的 route 桩与键集纪律、`route-hold.ts`、`ui-walk-oracle.ts`、`ui-walk-cleanup.ts`、视口矩阵
+- [x] 10.2 实现新文件 `web/e2e/ui-walk-chat-kb.ts` 的三步，并在 `ui-walk.spec.ts` 接入；本机对已运行的服务跑 `make ui-walk`，PR 附退出码与截图
   - 组 10 约定（#1976 fixture 审查补；10.1–10.2 照此实现与验证）：
     - 10.1 核对结论：
       - 装桩：照 `ui-walk-center-kb.ts:104-155`，顺序是 `login()` → 装桩 → `page.goto`，`finally` 里逐个 `unroute`，最后 `logout()`。

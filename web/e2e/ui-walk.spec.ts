@@ -11,6 +11,7 @@ import { holdRoute } from "./route-hold.js";
 import { walkActionRow } from "./ui-walk-action-row.js";
 import { allowFirstApproval, expectNoSettledRecord, generatingStatus } from "./ui-walk-approval.js";
 import { walkKbRerankRow, walkKbRetrieval } from "./ui-walk-center-kb.js";
+import { walkChatKbRefs } from "./ui-walk-chat-kb.js";
 import { type CreatedSessions, watchCreatedSessions } from "./ui-walk-cleanup.js";
 import { walkComposer } from "./ui-walk-composer.js";
 import { createSessionFromSidebar } from "./ui-walk-create-session.js";
@@ -142,6 +143,19 @@ test("models tab shows the rerank model row and its clear confirmation against s
   const options = { watchAssets: project === "desktop-light" };
   await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
     walkKbRerankRow(page, oracle, project),
+  );
+});
+
+// 会话知识库引用与检索卡（chat-harness「UI 走查会话知识库引用与检索卡」，s2c-kb-session 10.2）：独立 test，自带登录、
+// 退出与 oracle 实例；知识库接口、prompt 与第 3 步的消息快照由 route 桩应答，步骤在 helper。
+test("chat kb refs travel with the prompt and the snapshot shows the bubble refs and a two-round kb search card", async ({
+  baseURL,
+  page,
+}, testInfo) => {
+  const project = walkProject(testInfo.project.name);
+  const options = { watchAssets: project === "desktop-light" };
+  await runWithBrowserErrorOracle(page, baseURL, options, (oracle) =>
+    walkChatKbRefs(page, oracle, project),
   );
 });
 
