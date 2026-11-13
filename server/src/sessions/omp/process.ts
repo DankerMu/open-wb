@@ -264,6 +264,7 @@ export class OmpProcess {
 
   closeInput(): void {
     this.#child?.stdin.end();
+    this.#hostTools.close();
   }
 
   kill(signal: NodeJS.Signals = "SIGKILL"): boolean {
@@ -583,6 +584,7 @@ export class OmpProcess {
     ) {
       this.#onUiRequest(frame, frame.id);
     }
+    if (this.#child?.stdin.writableEnded) this.#hostTools.close();
     if (!this.#writesClosed) this.#hostTools.onFrame(frame);
     if (frame.type !== "response" || typeof frame.id !== "string") {
       return;

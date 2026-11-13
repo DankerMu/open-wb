@@ -12,10 +12,17 @@ import { join } from "node:path";
 import { setImmediate as macrotask } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { closeStdin, type Generation } from "../src/sessions/omp/commands.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { HostToolHandler, HostToolResult } from "../src/sessions/omp/host-tools.js";
 import { OmpProcess, type SpawnImpl } from "../src/sessions/omp/process.js";
-import { asRecord, createRpcHarness, DEFAULT_READY } from "./support/omp-rpc.js";
+import {
+  asRecord,
+  createRpcHarness,
+  DEFAULT_READY,
+  emitIoFailure,
+  type FakeChild,
+} from "./support/omp-rpc.js";
 import { captureStdinFrames } from "./support/omp-runtime.js";
 
 const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
@@ -247,6 +254,47 @@ describe("omp-runtime「宿主工具协议」: 取消与迟到的结果", () => 
     },
   );
 
+  /** Records whether stdin has emitted `finish`: the aborts below must not wait for it. */
+  function finished(run: Run): () => boolean {
+    let done = false;
+    run.proc.child?.stdin.once("finish", () => {
+      done = true;
+    });
+    return () => done;
+  }
+
+  it(
+    "closeInput aborts the in-flight call synchronously, before stdin finishes",
+    REAL,
+    async () => {
+      const { run, call, release } = await holdFirst("host-tool");
+      const writes = run.writes.length;
+      const isFinished = finished(run);
+      run.proc.closeInput();
+
+      expect(call.signal.aborted).toBe(true);
+      expect(isFinished()).toBe(false);
+      release();
+      await macrotask();
+      expect(run.writes).toHaveLength(writes);
+      expect(run.errors).toEqual([]);
+    },
+  );
+
+  it("the runtime's closeStdin aborts the in-flight call synchronously too", REAL, async () => {
+    const { run, call, release } = await holdFirst("host-tool");
+    const writes = run.writes.length;
+    const isFinished = finished(run);
+    closeStdin({ child: run.proc.child, proc: run.proc } as unknown as Generation);
+
+    expect(call.signal.aborted).toBe(true);
+    expect(isFinished()).toBe(false);
+    release();
+    await macrotask();
+    expect(run.writes).toHaveLength(writes);
+    expect(run.errors).toEqual([]);
+  });
+
   it("a result released in the same tick as closeInput is dropped, not written", REAL, async () => {
     const { run, release } = await holdFirst("host-tool");
     const writes = run.writes.length;
@@ -361,6 +409,52 @@ describe("omp-runtime「宿主工具协议」: 结果过大", () => {
     },
   );
 
+  const nonPlain: [string, () => object][] = [
+    ["an array", () => [{ id: "k1" }]],
+    ["a Map", () => new Map([["k1", 1]])],
+  ];
+  for (const [name, details] of nonPlain) {
+    it(`details that are ${name} (not a plain object) are dropped`, REAL, async () => {
+      const run = await start(
+        "host-tool",
+        recording(async () => ({ text: "r", details: details(), isError: false })).tools,
+      );
+      await prompt(run);
+      await terminal(run);
+
+      expect(results(run)).toStrictEqual([reply("h1", "r", false), reply("h2", "r", false)]);
+      expect(run.errors).toEqual([]);
+    });
+  }
+
+  it(
+    "a text that cannot be rendered still gets exactly one reply: 工具结果过大",
+    REAL,
+    async () => {
+      const unhandled = vi.fn();
+      process.on("unhandledRejection", unhandled);
+      try {
+        const text = Object.create(null) as string;
+        const run = await start(
+          "host-tool",
+          recording(async () => ({ text, isError: false })).tools,
+        );
+        await prompt(run);
+        await terminal(run);
+        await macrotask();
+
+        expect(results(run)).toStrictEqual([
+          reply("h1", "工具结果过大", true),
+          reply("h2", "工具结果过大", true),
+        ]);
+        expect(unhandled).not.toHaveBeenCalled();
+        expect(run.errors).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", unhandled);
+      }
+    },
+  );
+
   it(
     "a text over the limit (ASCII, and CJK under it in characters) is 工具结果过大",
     REAL,
@@ -386,21 +480,42 @@ describe("omp-runtime「宿主工具协议」: 结果过大", () => {
   );
 });
 
-/** Synthetic child (FakeChild) for frames the fake omp never sends. */
-async function startSynthetic(tools: HostToolHandler) {
+/** Synthetic child (FakeChild) for frames the fake omp never sends; not started yet. */
+function openSynthetic(tools: HostToolHandler, handshakeTimeoutMs?: number) {
   const child = harness.fake();
   const written: OmpFrame[] = [];
   child.onCommand("host_tool_result", (frame) => {
     written.push(frame);
   });
+  const opts = { ...harness.tempOpts(TOKEN), spawnImpl: child.spawnImpl, hostTools: tools };
   const proc = harness.manage(
-    new OmpProcess({ ...harness.tempOpts(TOKEN), spawnImpl: child.spawnImpl, hostTools: tools }),
+    new OmpProcess(handshakeTimeoutMs === undefined ? opts : { ...opts, handshakeTimeoutMs }),
   );
   const errors = harness.collectErrors(proc);
-  child.emitLine(DEFAULT_READY);
-  child.replyHandshake();
-  await proc.start();
-  return { child, proc, written, errors };
+  let exited = false;
+  proc.on("exit", () => {
+    exited = true;
+  });
+  return { child, proc, written, errors, exited: () => exited };
+}
+
+async function startSynthetic(tools: HostToolHandler) {
+  const opened = openSynthetic(tools);
+  opened.child.emitLine(DEFAULT_READY);
+  opened.child.replyHandshake();
+  await opened.proc.start();
+  return opened;
+}
+
+/** Holds stdin's `finish` (writableEnded, not yet finished) until the returned release runs. */
+function holdFinish(child: FakeChild): () => void {
+  const stdin = child.stdin as unknown as { _final: (callback: () => void) => void };
+  const final = stdin._final.bind(stdin);
+  let held: (() => void) | undefined;
+  stdin._final = (callback) => {
+    held = () => final(callback);
+  };
+  return () => held?.();
 }
 
 const SYNTHETIC_CALL = { type: "host_tool_call", toolCallId: "c1", toolName: "kb_search" };
@@ -435,5 +550,60 @@ describe("omp-runtime「宿主工具协议」: frames the transport ignores", ()
     expect(calls).toEqual([]);
     expect(written).toEqual([]);
     expect(errors).toEqual([]);
+  });
+
+  const unfinished: [string, (child: FakeChild, proc: OmpProcess) => void][] = [
+    ["closeInput()", (_child, proc) => proc.closeInput()],
+    ["a bare stdin.end()", (child) => child.stdin.end()],
+  ];
+  for (const [name, end] of unfinished) {
+    it(`a call arriving after ${name}, before stdin finishes, never reaches the handler`, async () => {
+      const { tools, calls } = recording(async () => ({ text: "r", isError: false }));
+      const { child, proc, written, errors } = await startSynthetic(tools);
+      const releaseFinish = holdFinish(child);
+      end(child, proc);
+      expect(child.stdin.writableEnded).toBe(true);
+      child.emitLine({ ...SYNTHETIC_CALL, id: "h1" });
+      await macrotask();
+      await macrotask();
+
+      expect(child.stdin.writableFinished).toBe(false);
+      expect(calls).toEqual([]);
+      expect(written).toEqual([]);
+      expect(errors).toEqual([]);
+      releaseFinish();
+    });
+  }
+});
+
+describe("omp-runtime「宿主工具协议」: transport failure and failed startup abort in-flight calls", () => {
+  it("a stdout I/O failure aborts the in-flight call before any exit", async () => {
+    const { tools, calls } = recording(() => gate().promise);
+    const { child, written, errors, exited } = await startSynthetic(tools);
+    child.emitLine({ ...SYNTHETIC_CALL, id: "h1" });
+    await expect.poll(() => calls.length, POLL).toBe(1);
+    emitIoFailure(child, "stdout", TOKEN);
+
+    expect(calls[0]?.signal.aborted).toBe(true);
+    expect(exited()).toBe(false);
+    expect(written).toEqual([]);
+    expect(errors).toHaveLength(1);
+  });
+
+  it("a call that arrives before the handshake is aborted when the handshake times out", async () => {
+    const { tools, calls } = recording(() => gate().promise);
+    const { child, proc, written, exited } = openSynthetic(tools, 100);
+    // A kill that does not exit at once: the abort must come from the failed startup itself.
+    child.kill = () => true;
+    child.emitLine({ ...SYNTHETIC_CALL, id: "h1" });
+    const started = proc.start();
+    await expect.poll(() => calls.length, POLL).toBe(1);
+    expect(calls[0]?.signal.aborted).toBe(false);
+    await expect(started).rejects.toThrow("handshake timeout");
+
+    expect(calls[0]?.signal.aborted).toBe(true);
+    expect(exited()).toBe(false);
+    expect(written).toEqual([]);
+    child.exit(null, "SIGKILL");
   });
 });

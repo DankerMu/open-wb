@@ -86,19 +86,20 @@ export class HostTools {
   }
 
   /**
-   * Full frame; on any refusal (too long, unserializable `details`) the frame without `details`;
-   * then the too-large error. Every attempt passes the transport's writability guard, so after
-   * input is gone each one is refused unwritten; a refusal never escapes.
+   * Full frame; on any refusal (too long, unserializable `details`, a text that cannot be
+   * rendered) the frame without `details`; then the too-large error. Each attempt is built inside
+   * the try and passes the transport's writability guard, so after input is gone each one is
+   * refused unwritten; a refusal never escapes.
    */
   async #reply(id: string, result: HostToolResult): Promise<void> {
     const attempts = [
-      resultFrame(id, result.text, result.isError === true, plainObject(result.details)),
-      resultFrame(id, result.text, result.isError === true, undefined),
-      resultFrame(id, RESULT_TOO_LARGE, true, undefined),
+      () => resultFrame(id, result.text, result.isError === true, plainObject(result.details)),
+      () => resultFrame(id, result.text, result.isError === true, undefined),
+      () => resultFrame(id, RESULT_TOO_LARGE, true, undefined),
     ];
     for (const attempt of attempts) {
       try {
-        await this.#write(attempt);
+        await this.#write(attempt());
         return;
       } catch {
         // Next, smaller attempt.
