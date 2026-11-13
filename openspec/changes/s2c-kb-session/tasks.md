@@ -252,9 +252,9 @@ Minimal mergeable slice: atomic - reducer 派生与 supervisor 校验发布是�
     - 旧用例唯一许可改动：在既有视图步骤字面量与构造 helper 里原地加 `kbHits: null`，不改任何断言（必填字段会让 `tool-summary.test.ts:10`、`message-segments.test.ts:25`、`chat-tool-group.test.tsx:27`、`chat-page-file-changes.test.tsx:377-381` 等 typecheck 失败，精确 `toEqual` / `toStrictEqual` 在 `chat-stream.test.ts`、`chat-stream-recovery.test.ts`、`chat-runtime-convert.test.ts` 等运行时失败）；实施时 grep 出完整清单写进 PR。`web/test/chat-page-file-changes.test.tsx`（793 行）先把 `describe("summarizeChanges")` 原地移到兄弟文件，再加字段（size-guard）。
     - 行数预算：`stream.ts` 771 → ≤ 780（import、`ChatEvent` 联合、`DATA_EVENTS`、`applyChatEvent` 的 case、`decodeEvent` 的 case、快照步骤 `kbHits: null`）；`use-chat-session.ts` 零改动。
     - 回归命令：`npm run test:focus --workspace web -- stream-kb-hits chat-stream chat-page-file-changes tool-summary message-segments chat-tool-group chat-runtime-convert`（再加 grep 清单里其余改到的文件），外加 `make lint`、`make typecheck`、`make anti-drift`。
-- [ ] 6.3 测试先行后实现：`message-segments.ts` 的检索块（「kb_search 步骤合成一个检索块」场景）；`tool-summary.ts` 不计 `kb_search`，既有分段与摘要用例原样全绿
-- [ ] 6.4 测试先行（新文件 `web/test/chat-kb-search-card.test.tsx`）后实现：新组件 `web/src/features/chat/kb-search-card.tsx`，覆盖「实时两轮」「刷新后只剩各轮」「检索行的确认标记」「部分失败与检索中」；展开态以块键保留
-- [ ] 6.5 证据：本机对一个注入了 `kb.hits` 的会话截图（亮 / 暗），零新增控制台报错，附在 PR；验收清单 CK 节新增 CK-16（接 CK-15，模型检索两轮的回合里，助手消息只有一张「知识库检索」卡，逐轮列出意图与命中条数，展开看到切片；刷新后只剩各轮），结论 `待签`，由 owner 执行
+- [x] 6.3 测试先行后实现：`message-segments.ts` 的检索块（「kb_search 步骤合成一个检索块」场景）；`tool-summary.ts` 不计 `kb_search`，既有分段与摘要用例原样全绿
+- [x] 6.4 测试先行（新文件 `web/test/chat-kb-search-card.test.tsx`）后实现：新组件 `web/src/features/chat/kb-search-card.tsx`，覆盖「实时两轮」「刷新后只剩各轮」「检索行的确认标记」「部分失败与检索中」；展开态以块键保留
+- [x] 6.5 证据：本机对一个注入了 `kb.hits` 的会话截图（亮 / 暗），零新增控制台报错，附在 PR；验收清单 CK 节新增 CK-16（接 CK-15，模型检索两轮的回合里，助手消息只有一张「知识库检索」卡，逐轮列出意图与命中条数，展开看到切片；刷新后只剩各轮），结论 `待签`，由 owner 执行
   - 组 6 第二刀约定（#1969 fixture 审查补；6.3–6.5 照此实现与测试）：
     - 分段：`MessageSegment` 加第四种 `{ kind: "kb"; key: "kb:<第一个 kb_search 步骤 id>"; steps: ChatStepView[] }`；`segmentMessage` 遇 `step.name === "kb_search"`（精确匹配）时：本消息还没有检索块就在当前位置推入一个，否则并入已有的那个（不论位置），不进工具段、不改 `previous` 的工具段合并判定——检索块与正文段一样分隔两侧工具段。旧布局判定与 `mergeItems` 不改。用例照规格场景「kb_search 步骤合成一个检索块」字面量，另补：只有 kb_search、kb 在最后一块（小圆点单独一行）、两个检索步骤之间夹工具段（s2 在别处不出块）、同一回合的快照视图与实时视图（实时序列含 kb.hits）按每块的 kind / key / 步骤 id 列表逐块相等（`kbHits` 实时非空、快照为 null，不做深相等）。
     - 呈现：`message-segments-view.tsx` 的 `Block` 加 `case "kb"` → `KbSearchCard`（`default` 分支不再兜 kb）；React key 仍是块键，故卡与行的展开态随块键保留，流式增长与快照原地重装不重挂载。
@@ -279,7 +279,7 @@ Minimal mergeable slice: atomic - reducer 派生与 supervisor 校验发布是�
       - 刷新形态：把快照桩换成回合结束后的快照（助手消息 `done`，两个 `kb_search` 步骤 `done`，步骤与 detail 不变），事件流桩换成只有 `retry: 3600000` 的空应答体，再 `page.reload()`；断言卡头 `检索完成`、两行、行内无 button，截一张。截图贴 PR 评论，不进仓库。
       - 报错 oracle 同时收集 `console` 的 error 与 `pageerror`，两者都为零。
     - 已知取舍（#1968 integration 席）：发送下一条 prompt、regenerate、撤回、审批 409 对账、原生重连都会装完整快照，前面各轮的 `kbHits` 回到 `null`——即「刷新后只剩各轮」形态，规格如此（G12），CK-16 文案按「刷新或发送下一条后只剩各轮」写。
-    - CK-16 行（接 CK-15，`待签`，由 owner 执行）：操作——在 CK-15 同一台服务上，`zhangsan` 新建会话，问「先在规范库里查 `manual.pdf` 里关于<CK-15 那条事实>的说法，再换一种问法查一次，对比两次结果后回答」，等回答结束；展开第一行；随后刷新页面；亮 / 暗主题与 390 宽各看一次。期望——设实际出现 n 行（n ≥ 2 为本行通过的前提；模型只检索一次记 `不通过` 并注明）：助手消息里只有一张「知识库检索」卡，卡头 `知识库检索 · 规范库`、`（n 轮）`、`检索完成`；每行 `第 k 轮`、意图或问句、`命中 m 条`；展开第一行看到 `manual.pdf` 的文档名、两位小数的相似度与切片原文；工具段摘要里不计检索；刷新后仍是一张卡、n 行，行里只有问句与状态，行不可展开；三种外观下卡内无横向溢出、无错误提示。
+    - CK-16 行（接 CK-15，`待签`，由 owner 执行）：操作——在 CK-15 同一台服务上，`zhangsan` 新建会话，问「先在规范库里查 `manual.pdf` 里关于<CK-15 那条事实>的说法，再换一种问法查一次，对比两次结果后回答」，等回答结束；展开第一行；随后刷新页面；亮 / 暗主题与 390 宽各看一次。期望——设实际出现 n 行（n ≥ 2 为本行通过的前提；模型只检索一次记 `不通过` 并注明）：助手消息里只有一张「知识库检索」卡，卡头 `知识库检索 · 规范库`、`（n 轮）`、`检索完成`；每行 `第 k 轮`、意图或问句、`命中 m 条`；展开第一行看到 `manual.pdf` 的文档名、两位小数的相似度与切片原文；工具段摘要里不计检索；刷新后（发送下一条后同样）仍是一张卡、n 行，行里只有问句与状态，行不可展开；三种外观下卡内无横向溢出、无错误提示。
     - 回归命令：`npm run test:focus --workspace web -- message-segments tool-summary kb-search-card kb-hit-list kb-retrieval chat-tool-group chat-message-segments chat-step-approval-mark chat-page-search-segments chat-thinking-segments functional-checklist`，外加 `make lint`、`make typecheck`、`make anti-drift`。
 
 Suggested fixture level: expanded - 前端改变公共事件流的解码与会话页呈现（public API、shared rendering）。

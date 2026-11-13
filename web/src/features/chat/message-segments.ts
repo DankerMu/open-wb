@@ -22,7 +22,11 @@ export type SegmentSource = {
 export type MessageSegment =
   | { kind: "text"; key: string; text: string }
   | { kind: "thinking"; key: string; text: string; thinkingMs: number | null; active: boolean }
-  | { kind: "tool"; key: string; steps: ChatStepView[] };
+  | { kind: "tool"; key: string; steps: ChatStepView[] }
+  | { kind: "kb"; key: string; steps: ChatStepView[] };
+
+/** 知识库检索的步骤名（精确匹配）：这些步骤合成检索块，不进工具段（s2c-kb-session D10）。 */
+export const KB_SEARCH = "kb_search";
 
 type Item =
   | { offset: number; step: ChatStepView }
@@ -81,6 +85,21 @@ function orderedItems(message: SegmentSource): Item[] | null {
     : null;
 }
 
+type KbBlock = Extract<MessageSegment, { kind: "kb" }>;
+
+/** `kb_search` 并入唯一的检索块（首个在原位新起，其后的不在原位出块）；其余并入前一个工具段或新起。 */
+function placeStep(blocks: MessageSegment[], step: ChatStepView) {
+  if (step.name === KB_SEARCH) {
+    const kb = blocks.find((block): block is KbBlock => block.kind === "kb");
+    if (kb) kb.steps.push(step);
+    else blocks.push({ kind: "kb", key: `kb:${String(step.id)}`, steps: [step] });
+    return;
+  }
+  const previous = blocks.at(-1);
+  if (previous?.kind === "tool") previous.steps.push(step);
+  else blocks.push({ kind: "tool", key: `tool:${String(step.id)}`, steps: [step] });
+}
+
 /**
  * 切段：先输出 [游标, 偏移) 的正文段，再输出该项；步骤并入紧挨着的前一个工具段，否则新起一段。只含空白
  * 的正文段与原文为空串的思考段不输出，所以也不分隔两侧的工具段。全条消息判为旧布局时返回 null。
@@ -99,10 +118,8 @@ export function segmentMessage(message: SegmentSource): MessageSegment[] | null 
   };
   for (const item of items) {
     textUntil(item.offset);
-    const previous = blocks.at(-1);
     if ("step" in item) {
-      if (previous?.kind === "tool") previous.steps.push(item.step);
-      else blocks.push({ kind: "tool", key: `tool:${String(item.step.id)}`, steps: [item.step] });
+      placeStep(blocks, item.step);
       continue;
     }
     const { thinkingLength, thinkingMs, thinkingOffset } = item.segment;

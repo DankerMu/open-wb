@@ -230,7 +230,7 @@ kb 模块新增 `createKbSessionSearch(deps)`，`registerKb` 把它交回给 `ap
 
 - **合卡**：一条助手消息里，名为 `kb_search` 的步骤合成一张「知识库检索」卡，放在第一个 `kb_search` 步骤的分段位置。后续的 `kb_search` 步骤并进同一张卡，不再单独出现。
 - **工具段**：`tool-summary.ts` 不把 `kb_search` 计入工具段摘要。
-- **卡头**：`知识库检索 · <库名、库名>`（取 `kb.hits` 里 `ok` 的库名，没有时只写「知识库检索」）、轮数、状态（检索中 / 检索完成 / 失败）。
+- **卡头**：`知识库检索 · <库名、库名>`（取 `kb.hits` 里 `ok` 的库名，没有时只写「知识库检索」）、轮数、状态（检索中 / 检索完成 / 检索失败）。
 - **每次调用一行**：`第 N 轮`、意图（`kb.hits.intent`，没有时用步骤 detail 里的 `question`）、命中条数（没有 `kb.hits` 时不显示）、行状态。展开后按库列出命中：文档名、相似度、切片原文。
 - **刷新或从快照恢复后**：只有步骤，行里显示问句与状态，不显示命中（G12）。
 - **新组件**：`web/src/features/chat/kb-search-card.tsx`。会话视图归约（`stream.ts`）把 `kb.hits` 按 `stepId` 挂到消息上；`kb.hits` 的严格键集为 `{messageId, stepId, intent, bases}`，不符则重新同步完整快照（与 `turn.retry` 同一纪律）。
