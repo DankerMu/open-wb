@@ -472,6 +472,7 @@ describe("chat-stream 非增量事件前冲刷", () => {
       { type: "files.changed", data: { messageId, stepId: "t", files: [] } },
       { type: "step.end", data: { messageId, stepId: "t", status: "done", output: "" } },
       { type: "todo.updated", data: { messageId, todo: null } },
+      { type: "kb.hits", data: { messageId, stepId: "t", intent: null, bases: [] } },
       { type: "turn.retry", data: { messageId } },
       { type: "turn.end", data: { messageId, status: "stopped" } },
     ];

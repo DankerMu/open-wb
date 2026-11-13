@@ -11,6 +11,7 @@ import { HttpError } from "../core/errors/index.js";
 import type { PumpSteps } from "./approval-pairing.js";
 import type { ChatEvent } from "./events.js";
 import { ownedChanges } from "./file-changes-ownership.js";
+import type { AdmittedEvent } from "./kb-hits.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { Slot } from "./pool.js";
 import type { SessionStore, SettledApproval } from "./store.js";
@@ -218,7 +219,7 @@ function skipSettled(error: unknown): void {
 }
 
 type Persisted = ChatEvent<number> | undefined;
-type FilesChanged = Extract<ChatEvent<string>, { type: "files.changed" }>;
+type FilesChanged = Extract<AdmittedEvent, { type: "files.changed" }>;
 /** `persistEvent`'s parameters after the event, the same for every overload. */
 type PersistRest = [
   steps: PumpSteps,
@@ -233,24 +234,24 @@ type PersistRest = [
  * bound session's registered call: its ownership judgment waits on the file system (each call
  * under its deadline, D21), so that one returns a promise, and nothing of it is stored before the
  * judgment is done. `mountNames` is read for that judgment only: the bound workspace's registered
- * mount names right then.
+ * mount names right then. A kb.hits is taken only after the supervisor's gate (`admitKbHits`).
  */
 export function persistEvent(
   store: SessionStore,
   assistantMessageId: number,
-  event: Exclude<ChatEvent<string>, FilesChanged>,
+  event: Exclude<AdmittedEvent, FilesChanged>,
   ...rest: PersistRest
 ): Persisted;
 export function persistEvent(
   store: SessionStore,
   assistantMessageId: number,
-  event: ChatEvent<string>,
+  event: AdmittedEvent,
   ...rest: PersistRest
 ): Persisted | Promise<Persisted>;
 export function persistEvent(
   store: SessionStore,
   assistantMessageId: number,
-  event: ChatEvent<string>,
+  event: AdmittedEvent,
   steps: PumpSteps,
   settled: SettledApproval[],
   workspaceRoot: string | null,
@@ -329,6 +330,14 @@ export function persistEvent(
       return stored === undefined
         ? undefined
         : { type: "todo.updated", data: { messageId: event.data.messageId, todo: stored.todo } };
+    }
+    // s2c-kb-session D7: an unregistered call drops it; mapped like step.end, then never stored
+    // (as turn.retry), so it takes one ring sequence and no row changes.
+    case "kb.hits": {
+      const stepId = steps.toolIds.get(event.data.stepId);
+      return stepId === undefined
+        ? undefined
+        : { type: "kb.hits", data: { ...event.data, stepId } };
     }
     // thinking.delta never reaches here: the supervisor's delta coalescer (#910) takes it first;
     // thinking.end is published by its thinking spans (thinking-span.ts), never mapped.

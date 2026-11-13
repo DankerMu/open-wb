@@ -9,6 +9,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, expect } from "vitest";
 import { HttpError } from "../src/core/errors/index.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
+import type { HostToolResult } from "../src/sessions/omp/host-tools.js";
 import {
   type ApprovalWorld,
   type ApprovalWorldOptions,
@@ -209,6 +210,47 @@ export async function reclaimed(world: ApprovalWorld, index: number): Promise<vo
     () => (world.fixture.supervisor.liveProcessCount() === 0 ? true : undefined),
     "idle reclaim",
   );
+}
+
+/** The text every stub `execute` answers unless the case hands in its own result. */
+export const STUB_TEXT = "stub-search-result";
+const STUB_ANSWER: HostToolResult = { text: STUB_TEXT, isError: false };
+
+interface Base {
+  id: string;
+  name: string;
+}
+
+/**
+ * A stub definition source: one mutable list of bases for every owner, each `execute` recorded. The
+ * n-th execution answers `answers[n]`, the last one again once they run out (the stub text by default).
+ */
+export function stubSearch(initial: Base[], answers: readonly HostToolResult[] = [STUB_ANSWER]) {
+  const bases = [...initial];
+  const executed: Array<{ ownerId: string; args: unknown }> = [];
+  const source = {
+    definitionFor: (_ownerId: string) =>
+      bases.length === 0
+        ? null
+        : {
+            tool: {
+              name: "kb_search",
+              label: "知识库检索",
+              description: [
+                "检索知识库。",
+                ...bases.map(({ id, name }) => `- ${name}（${id}）`),
+              ].join("\n"),
+              parameters: { type: "object" },
+              loadMode: "essential",
+            },
+            bases: bases.map((base) => ({ ...base })),
+          },
+    execute: (ownerId: string, args: unknown) => {
+      executed.push({ ownerId, args });
+      return Promise.resolve(answers[Math.min(executed.length, answers.length) - 1] ?? STUB_ANSWER);
+    },
+  };
+  return { source, bases, executed };
 }
 
 /**

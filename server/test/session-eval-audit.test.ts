@@ -12,7 +12,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { PumpSteps } from "../src/sessions/approval-pairing.js";
-import type { ChatEvent } from "../src/sessions/events.js";
+import type { AdmittedEvent } from "../src/sessions/kb-hits.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { persistEvent } from "../src/sessions/turn-control.js";
 import {
@@ -227,10 +227,10 @@ describe("browser-runtime「审计失败时步骤不落库」: a store without e
       type === "step.start"
         ? { messageId: 0, stepId: call, name: call.startsWith("e") ? "eval" : "bash", detail: "{}" }
         : { messageId: 0, stepId: call, status: "done", output: `${call} out` };
-    return { type, data: { ...data, ...extra } } as ChatEvent<string>;
+    return { type, data: { ...data, ...extra } } as AdmittedEvent;
   }
 
-  type Persist = (persisted: ChatEvent<string>) => unknown;
+  type Persist = (persisted: AdmittedEvent) => unknown;
 
   function seam(run: (db: DatabaseSync, persist: Persist, messageId: number) => void) {
     withSessionStore(({ db, store }) => {

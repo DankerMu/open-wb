@@ -66,6 +66,7 @@ import { createOfficeCache, createOfficeCleanup } from "./preview/office-cache.j
 import { preflightOfficeSidecar } from "./preview/office-sidecar-health.js";
 import { createPreviewTokens, type PreviewTokens } from "./preview/tokens.js";
 import { type PreviewSettings, resolvePreviewSettings } from "./preview-config.js";
+import type { KbHitsInvalidRecord } from "./sessions/kb-hits.js";
 import type { HandshakeTimeoutRecord } from "./sessions/omp/spawn-gate.js";
 import { ensureOmpStateLayout, sweepSessionConfig } from "./sessions/omp/state-layout.js";
 import type { TodoRejection } from "./sessions/store-todo.js";
@@ -224,6 +225,7 @@ function writeRecord(
   record:
     | HandshakeTimeoutRecord
     | UpstreamFailedRecord
+    | KbHitsInvalidRecord
     | TodoRejection
     | ModelEnvIgnoredRecord
     | ModelPublishFailedRecord

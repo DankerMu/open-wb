@@ -27,9 +27,11 @@ import {
   openRegenWorld,
   type RegenWorld,
   reclaimed,
+  STUB_TEXT,
   sendPrompt,
   sessionFile,
   snapshot,
+  stubSearch,
   types,
   waitDead,
 } from "./session-regenerate-helpers.js";
@@ -53,44 +55,9 @@ const PLAIN = {
   defaultModelId: "m2",
 };
 const FIRST_DISPATCH = ["negotiate_protocol", "get_state", "set_model", "set_host_tools", "prompt"];
-const STUB_TEXT = "stub-search-result";
 const RAGFLOW_KEY = "wb-issue1966-ragflow-key";
 const RETRIEVAL = "POST /api/v1/retrieval";
 const SENTINEL = "Snt1nelChunk1966";
-
-interface Base {
-  id: string;
-  name: string;
-}
-
-/** A stub definition source: one mutable list of bases for every owner, each `execute` recorded. */
-function stubSearch(initial: Base[]) {
-  const bases = [...initial];
-  const executed: Array<{ ownerId: string; args: unknown }> = [];
-  const source = {
-    definitionFor: (_ownerId: string) =>
-      bases.length === 0
-        ? null
-        : {
-            tool: {
-              name: "kb_search",
-              label: "知识库检索",
-              description: [
-                "检索知识库。",
-                ...bases.map(({ id, name }) => `- ${name}（${id}）`),
-              ].join("\n"),
-              parameters: { type: "object" },
-              loadMode: "essential",
-            },
-            bases: bases.map((base) => ({ ...base })),
-          },
-    execute: (ownerId: string, args: unknown) => {
-      executed.push({ ownerId, args });
-      return Promise.resolve({ text: STUB_TEXT, isError: false });
-    },
-  };
-  return { source, bases, executed };
-}
 
 type Stub = ReturnType<typeof stubSearch>;
 

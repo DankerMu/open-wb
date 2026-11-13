@@ -2,6 +2,7 @@
  * Issue #652 bounded concurrent spawn: `limit` permits, FIFO waiters, cancellable while queued.
  * A permit covers one acquisition from grant until its startup (spawn + handshake) settles.
  */
+import type { KbHitsInvalidRecord } from "../kb-hits.js";
 import type { UpstreamFailedRecord } from "../upstream-failure-log.js";
 import { AgentUnavailableError } from "./process.js";
 
@@ -71,9 +72,11 @@ export interface HandshakeTimeoutRecord {
 
 /**
  * The sessions module's synchronous observation port (handshake timeouts; #909 adds the
- * upstream_failed record); omitted → records are discarded.
+ * upstream_failed record, #1967 kb_hits_invalid); omitted → records are discarded.
  */
-export type SpawnLog = (record: HandshakeTimeoutRecord | UpstreamFailedRecord) => void;
+export type SpawnLog = (
+  record: HandshakeTimeoutRecord | UpstreamFailedRecord | KbHitsInvalidRecord,
+) => void;
 
 /**
  * One record for a handshake-deadline failure only; `began` is `performance.now()` at acquisition

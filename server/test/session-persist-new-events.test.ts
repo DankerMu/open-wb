@@ -6,17 +6,17 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { PumpSteps } from "../src/sessions/approval-pairing.js";
-import type { ChatEvent } from "../src/sessions/events.js";
+import type { AdmittedEvent } from "../src/sessions/kb-hits.js";
 import type { SessionStore, SettledApproval } from "../src/sessions/store.js";
 import { persistEvent } from "../src/sessions/turn-control.js";
 
 const ASSISTANT_ID = 41;
 
-const THINKING: ChatEvent<string> = {
+const THINKING: AdmittedEvent = {
   type: "thinking.delta",
   data: { messageId: ASSISTANT_ID, delta: "先读需求，" },
 };
-const FILES: ChatEvent<string> = {
+const FILES: AdmittedEvent = {
   type: "files.changed",
   data: {
     messageId: ASSISTANT_ID,
@@ -48,7 +48,7 @@ function recordingStore(): { store: SessionStore; touched: string[] } {
   return { store, touched };
 }
 
-function persistAlone(event: ChatEvent<string>) {
+function persistAlone(event: AdmittedEvent) {
   const { store, touched } = recordingStore();
   const steps = new PumpSteps(ASSISTANT_ID);
   steps.toolIds.set("call_prior", 7);
@@ -60,7 +60,7 @@ function persistAlone(event: ChatEvent<string>) {
 
 describe("persistEvent — thinking.delta and files.changed are neither stored nor published", () => {
   it("the recording store double sees an existing store-backed event", () => {
-    const text: ChatEvent<string> = {
+    const text: AdmittedEvent = {
       type: "text.delta",
       data: { messageId: ASSISTANT_ID, delta: "答" },
     };

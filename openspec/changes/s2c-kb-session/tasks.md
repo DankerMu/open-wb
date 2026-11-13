@@ -19,7 +19,7 @@
 > web 的解析器 SHALL 在同一个 PR 里改，否则合入即让会话页 `requestFailed`。SSE 的未知事件类型被 web 忽略（chat-web「事件流消费与续流」），
 > 所以组 5 的服务端 `kb.hits` 可以先于组 6 的 web 解码合入。
 >
-> 文件行数（size-guard 上限 800，含 `server/test`、`web/test`）：`supervisor.ts` 785、`fake-upstream.mjs` 781、`web/src/features/chat/stream.ts` 771、
+> 文件行数（size-guard 上限 800，含 `server/test`、`web/test`）：`supervisor.ts` 785（#1966 后 792）、`fake-upstream.mjs` 781、`web/src/features/chat/stream.ts` 771、
 > `web/src/features/chat/use-chat-session.ts` 796、`server/src/sessions/store.ts` 784、`omp/process.ts` 760、`turn-actions.ts` 760、`fake-omp.mjs` 758、`app.ts` 756、`omp/runtime.ts` 739、`session-contract.ts` 710。
 > 本 change 的新逻辑一律放进下面点名的新兄弟文件，这些文件只加分流或调用的几行；放不下时先把相邻的既有逻辑原地移出，不加新的。
 >
@@ -36,7 +36,7 @@
 | 迁移与 DB 约束 | 是 | 组 7 首刀 |
 | 跨服务契约（快照加键而 web 严格解析） | 是 | 组 7 第三刀同 PR 改两端 |
 | 分支对位（后缀字节变化让存量会话的 regenerate / fork / 撤回 502） | 是 | 组 7 第二刀：无引用时后缀逐字节不变的用例、引用快照的对位用例 |
-| 外部接口漂移（omp 的 `i` 字段、帧序） | 是 | 组 5 意图缺失时退回问句；组 9 第二刀在真实 omp 上回归 |
+| 外部接口漂移（omp 的 `i` 字段、帧序） | 是 | 组 5 意图缺失时为 `intent:null`（服务端不读 `args.question`）；组 6 的检索卡对 `null` 退回问句（D10）；组 9 第二刀在真实 omp 上回归 |
 | 中止的时序与错误映射（中止与期限同为 `kb_unavailable`；中止与重排降级重试的先后） | 是 | 组 1 的三个中止用例（`kb-retrieval-abort.test.ts`） |
 | 旧调用方兼容（检索测试端点不传信号） | 是 | 组 1：`kb-retrieval`、`kb-ragflow-client-retrieval` 两组既有用例原样全绿；本组无 schema、权限或公共 API 变化，其余风险包不选 |
 | 组 2：并发与中止（逐库并发检索；中止后执行立即结束） | 是 | 组 2「中止」与「两个库都命中」的并发证据（「组 2 约定」） |
@@ -57,6 +57,12 @@
 | 组 4：失败退役与 502 | 是 | 「注册失败」与 `toolNames` 不符的单元用例 |
 | 组 4：regenerate 事务前的帧序 | 是 | chat-sessions 两个帧序场景（`host-tool` 场景应答分支命令） |
 | 组 4：旧调用方兼容（知识库关闭、所有者无库） | 是 | 回归命令原样全绿；`kb-omp-env` 零帧 |
+| 组 5：公共 API 事件形状（`kb.hits{messageId, stepId, intent, bases}` 严格键集） | 是 | reducer 子例与校验器纯函数正反例表（「组 5 约定」） |
+| 组 5：环形缓冲与库表的边界（占一个序号、零写库） | 是 | 「发布但不落库」的具名对照与 SSE id 连续断言 |
+| 组 5：回放与快照 | 是 | 「回放与快照」 |
+| 组 5：不合规即丢弃、日志不含切片 | 是 | 「不合规即丢弃」的唯一哨兵断言 |
+| 组 5：旧 web 兼容 | 是 | web 只给 `stream.ts` 的 `DATA_EVENTS` 注册监听，未知类型忽略；组 6 才解码。无需用例，评审核对 |
+| 组 5：资源上限（单事件大小） | 否 | 切片不截断；单事件大小受 host 帧上限约束（组 3 首刀：`host_tool_result` 超 1 MiB 先去 `details`），环形缓冲只按条数限 1000 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -193,9 +199,24 @@ Minimal mergeable slice: atomic - 注册逻辑与装配是同一条验证路径�
 
 ## 5. `kb.hits` 事件（chat-stream「纯协议事件归约」的 `kb_search` 派生、「检索结果事件发布」）
 
-- [ ] 5.1 核对 Context：`events.ts` 的运行中工具条目与 `applyToolStart` / `applyToolEnd`、`todo.updated` 的派生写法；`turn-control.ts:261` 的 `turn.retry` 分支；supervisor 的 `todo.updated` 校验与发布；合并窗口的冲刷清单
-- [ ] 5.2 测试先行：reducer 用例（「kb_search result yields a raw candidate」）放进 reducer 的权威用例文件；发布用例放新文件 `server/test/session-kb-hits.test.ts`，以假 omp `host-tool` 场景覆盖「发布但不落库」「回放与快照」「不合规即丢弃」
-- [ ] 5.3 实现：reducer 记下 `intent` 并在 `step.end` 前发 `kb.hits`；校验与 stderr 记录放新文件 `server/src/sessions/kb-hits.ts`，supervisor 只加调用；`persistEvent` 与 `step.end`、`files.changed` 同样经 `steps.toolIds`（`turn-control.ts:297`、`:319`）把 `stepId` 映射成落库的步骤 id，映射不到即丢弃，映射后与 `turn.retry` 同样原样返回、不写库；用例断言 `kb.hits.stepId` 等于同一步骤 `step.start` 的 `stepId`；事件种类计数断言原地加一
+- [x] 5.1 核对 Context：`events.ts` 的运行中工具条目与 `applyToolStart` / `applyToolEnd`、`todo.updated` 的派生写法；`turn-control.ts:261` 的 `turn.retry` 分支；supervisor 的 `todo.updated` 校验与发布；合并窗口的冲刷清单
+- [x] 5.2 测试先行：reducer 用例（「kb_search result yields a raw candidate」）放进 reducer 的权威用例文件；发布用例放新文件 `server/test/session-kb-hits.test.ts`，以假 omp `host-tool` 场景覆盖「发布但不落库」「回放与快照」「不合规即丢弃」
+- [x] 5.3 实现：reducer 记下 `intent` 并在 `step.end` 前发 `kb.hits`；校验与 stderr 记录放新文件 `server/src/sessions/kb-hits.ts`，supervisor 只加调用；`persistEvent` 与 `step.end`、`files.changed` 同样经 `steps.toolIds`（`turn-control.ts:297`、`:319`）把 `stepId` 映射成落库的步骤 id，映射不到即丢弃，映射后与 `turn.retry` 同样原样返回、不写库；用例断言 `kb.hits.stepId` 等于同一步骤 `step.start` 的 `stepId`；事件种类计数断言原地加一
+  - 组 5 约定（#1967 fixture 审查补；5.2–5.3 照此实现与测试）：
+    - 5.1 锚点更正：supervisor 里没有 `todo.updated` 的校验——它在 `turn-control.ts:327` 的 `store.storeTodo` 与 `session-todo.ts` 的 `normalizeTodo`；stderr 记录的先例是 `upstream-failure-log.ts` 的 `reportUpstreamFailure`（调用点 `supervisor.ts:710`，经 `log` 端口，外包 try/catch 与 `consumeThenable`）；「合并窗口的冲刷清单」指 `delta-coalescer.test.ts:467-485`，源码不改（`route` 对任何非增量事件先 flush，`delta-coalescer.ts:96`）；`turn-control.ts:261` 是注释，`case` 在 `:263`。
+    - 「事件种类计数断言原地加一」：仓库里没有事件种类计数断言，改为把 `kb.hits` 原地加进 `delta-coalescer.test.ts:469` 的冲刷事件清单（「every non-delta event of the turn flushes held thinking first」）。
+    - 意图：服务端只读 `tool_execution_start` 顶层 `intent`（review 记录 §2.2）；非空字符串照用，缺失、`""` 或非字符串为 `null`；不读 `args.question`（退回问句是组 6 检索卡的事，D10）。
+    - 改动面：`omp/spawn-gate.ts:76` 的 `SpawnLog` 封闭联合原地并入 `kb-hits.ts` 声明的 `KbHitsInvalidRecord{event:"kb_hits_invalid", messageId}`（恰两键）。`ChatEvent` 加 `kb.hits` 变体，照 `todo.updated` 写法 `bases: StepId extends number ? KbHitBase[] : unknown`；校验后的有类型 `bases` 交给 `persistEvent` 的 `kb.hits` 分支，不用 `as`。
+    - 接缝：supervisor 的一处调用放在 `#commit` 循环里 `route` 之前，校验先于映射；`#commit` 复杂度仍 ≤ 15。两种丢弃分开：不合规丢弃写一条 `kb_hits_invalid`；映射不到丢弃不写记录。
+    - 预算：`supervisor.ts` ≤ 795（只许 import 与那一处调用）；`events.ts` ≤ 600；`turn-control.ts` ≤ 380。
+    - 校验器规则：照 chat-stream「检索结果事件发布」（`specs/chat-stream/spec.md:117-123`）逐条——`bases` 为 1–5 项的数组；每项精确自有键集 `{kbId, name, status, hits}`；`kbId` 为非空字符串；`status ∈ {ok, not_found, not_ready, failed}`；`name` 在 `not_found` 时为 `null`、其余为非空字符串；`hits` 为至多 6 项的数组，`status` 不是 `ok` 时为 `[]`；每个命中精确自有键集 `{documentId, name, similarity, content}`，`documentId`、`name`、`content` 为字符串，`similarity` 为有限数（`NaN`、`Infinity` 不合规）；`intent` 为 `null` 或非空字符串。另：任何一层多键少键、稀疏数组都不合规。纯函数正反例表给每个分支至少一个反例（至少含：0 库、6 库、空 `kbId`、未知 `status`、`ok` 配 `null` 名、`not_found` 配非 `null` 名、空名、7 条命中、非 `ok` 带命中、命中多键、`similarity` 为 `NaN` / `Infinity` / 字符串、`content` 非字符串、稀疏数组、`intent` 为 `""`）。输出照 `normalizeTodo` 先例新建对象、键序固定，不原样转发。复用 `file-changes.ts:87/:92` 的 `own` / `asPlain`；`session-todo.ts` 私有的 `validItems` 若可复用则原地导出，不复制（jscpd）。
+    - reducer 用例放新兄弟文件 `server/test/session-events-kb-hits.test.ts`（照 `session-events-todo.test.ts` 先例；PR Boundary 因此为两个新用例文件）。规格四例之外补：帧 `isError:false` 而 `result.isError:true` → 无 `kb.hits`（现有 `applyToolEnd` 只读帧级 `isError`，`events.ts:260`，须另判 `result.isError`）；`bases` 只在 `details` 的原型上 → 无 `kb.hits`；`intent` 为 `""` 或非字符串 → `null`。
+    - 发布用例输入：`session-host-tool-align.test.ts:66` 私有的 `stubSearch` 原地移进共享 helper 并参数化 `execute` 的结果（不复制）；世界用 `openRegenWorld({scenario:"host-tool", assembly:{sessionSearch, log}})`；合规 `bases` 字面量覆盖 `ok`（含 6 条命中）、`not_found`（`name:null`、`hits:[]`）、`failed`；期望意图 `第 1 轮` / `第 2 轮`（`fake-omp-host-tool.mjs:41`）。
+    - 「发布但不落库」：具名对照——同一个桩只去掉 `details` 跑第二个会话；比较 `chat_messages` / `chat_steps` 时排除 id、外键、时间戳，其余逐列相等。会话显式定档 `yolo`（`always-ask` 下 `step.start` 与 `kb.hits` 之间插 `approval.request`）；序号用 SSE id 连续断言（`step.start` 为 n、`kb.hits` 为 n+1、`step.end` 为 n+2）；`kb.hits.stepId` 等于同一调用 `step.start.stepId` 的断言放在这里。
+    - 回放：`supervisor.subscribe(session, <第一个 step.start 的 id>)`（先例 `session-turn-retry.test.ts:169-173`），断言 `mode:"replay"` 里恰有两条 `kb.hits`。快照：回合结束后快照 JSON 里找不到切片哨兵，也找不到键名 `bases`。（回合进行中不带 `Last-Event-ID` 的连接经 `ring-buffer.ts` 的 `#activeTurn` 会回放本回合的 `kb.hits`，与 `turn.retry` 一致；组 6 知悉。）
+    - 映射不到即丢弃（假 omp 端到端不可达）：`session-kb-hits.test.ts` 里一个 `persistEvent` 单元用例——`steps.toolIds` 没有该 id 返回 `undefined`、有则返回数字 `stepId`；桩 store 的任何方法零调用（mock 依赖，不 mock 被测）；注入的 `log` 零记录。
+    - 不合规即丢弃：唯一哨兵串作 `content`；断言注入的 `log` 恰收到 `[{event:"kb_hits_invalid", messageId:<assistantId>}]`，所有记录序列化后与 spy 到的 `process.stderr` 都不含哨兵；另加一张纯函数正反例表，逐条覆盖上面每条校验规则。
+    - 回归命令：`npm run test:focus --workspace server -- session-kb-hits session-events delta-coalescer session-host-tool-align session-turn-retry session-composer`，全部原样全绿；`make lint`、`make typecheck`、`make anti-drift`。
 
 Suggested fixture level: expanded - 会话事件流是公共 API（public API），且涉及环形缓冲与持久化的边界（persisted / shared state）。
 Minimal mergeable slice: atomic - reducer 派生与 supervisor 校验发布是同一个事件的两半：只派生不发布，事件出不了 supervisor；只发布不派生，没有事件可发。

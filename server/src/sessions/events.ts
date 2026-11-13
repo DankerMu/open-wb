@@ -11,9 +11,11 @@
  * Issue 1474 (design D8): published step.start, approval.request and thinking.end gain fields.
  * #1568 (design D7): an `eval` step.end carries its `op:"browser"` status events as `browser` (never
  * stored or published). #1570 deletes #1526's `browser` step: a `write` to `xd://browser` is a `write`.
+ * #1967 (s2c-kb-session D7): a `kb_search` result's raw `details.bases` becomes kb.hits before its step.end.
  */
 import { TRUNCATED_MARK } from "../core/upstream-failure.js";
 import { asPlain, type FileChange, fileChangeCandidates, own } from "./file-changes.js";
+import type { KbHitBase } from "./kb-hits.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { SessionTodo } from "./session-todo.js";
 import type { EvalBrowserAudit } from "./store-browser-audit.js";
@@ -42,6 +44,15 @@ export type ChatEvent<StepId extends string | number = number> =
   | {
       type: "todo.updated";
       data: { messageId: number; todo: StepId extends number ? SessionTodo | null : unknown };
+    }
+  | {
+      type: "kb.hits";
+      data: {
+        messageId: number;
+        stepId: StepId;
+        intent: string | null;
+        bases: StepId extends number ? KbHitBase[] : unknown;
+      };
     }
   | { type: "step.start"; data: StepStart<StepId> }
   | {
@@ -91,6 +102,8 @@ const NO_IDS: readonly string[] = Object.freeze([]);
 interface ToolEntry {
   readonly id: string;
   readonly name: string;
+  /** A `kb_search` start's own top-level `intent` (nonempty string, else null); other tools: none. */
+  readonly intent?: string | null;
 }
 
 /**
@@ -235,8 +248,12 @@ function applyToolStart(state: EventState, frame: OmpFrame): ApplyResult {
   }
   // `args` absent → "".
   const detail = truncateStep(serializeArgs(frame.args));
+  const entry =
+    name === "kb_search"
+      ? { id, name, intent: nonemptyString(own(frame, "intent")) ?? null }
+      : { id, name };
   return {
-    state: evolve(state, { running: Object.freeze([...state.running, { id, name }]) }),
+    state: evolve(state, { running: Object.freeze([...state.running, entry]) }),
     events: [
       { type: "step.start", data: { messageId: state.messageId, stepId: id, name, detail } },
     ],
@@ -263,18 +280,8 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
     type: "step.end",
     data: { messageId, stepId: id, status: failed ? "failed" : "done", output, ...browser },
   };
-  // 工具名以 tool_execution_start 登记的为准；失败帧不推导候选。
-  const events: ChatEvent<string>[] = [];
-  if (!failed) {
-    const files = fileChangeCandidates(entry.name, frame.result);
-    if (files.length > 0) {
-      events.push({ type: "files.changed", data: { messageId, stepId: id, files } });
-    }
-    const todo = entry.name === "todo" ? todoCandidate(frame.result) : undefined;
-    if (todo !== undefined) {
-      events.push({ type: "todo.updated", data: { messageId, todo: todo.phases } });
-    }
-  }
+  // 失败帧不推导候选。
+  const events = failed ? [] : resultCandidates(messageId, entry, frame.result);
   events.push(stepEnd);
   return {
     state: evolve(state, {
@@ -283,6 +290,30 @@ function applyToolEnd(state: EventState, frame: OmpFrame): ApplyResult {
     }),
     events,
   };
+}
+
+/** 成功调用在 step.end 之前的原始候选；工具名以 tool_execution_start 登记的为准。 */
+function resultCandidates(
+  messageId: number,
+  entry: ToolEntry,
+  result: unknown,
+): ChatEvent<string>[] {
+  const { id: stepId, name } = entry;
+  const events: ChatEvent<string>[] = [];
+  const files = fileChangeCandidates(name, result);
+  if (files.length > 0) {
+    events.push({ type: "files.changed", data: { messageId, stepId, files } });
+  }
+  const todo = name === "todo" ? detailCandidate(result, "phases") : undefined;
+  if (todo !== undefined) {
+    events.push({ type: "todo.updated", data: { messageId, todo: todo.value } });
+  }
+  const bases = name === "kb_search" ? detailCandidate(result, "bases") : undefined;
+  if (bases !== undefined) {
+    const intent = entry.intent ?? null;
+    events.push({ type: "kb.hits", data: { messageId, stepId, intent, bases: bases.value } });
+  }
+  return events;
 }
 
 /**
@@ -305,19 +336,17 @@ function evalBrowser(result: unknown): { browser: EvalBrowserAudit } | undefined
 }
 
 /**
- * `todo` 工具结果的 `details.phases` 原值（包一层，使自有的 `undefined` 也算候选）：`result` 与 `details`
- * 皆为普通对象、`result.isError` 不为 true 且 `details` 有自有 `phases` 时产出；只读自有属性，不读其它键，
- * 不校验、不归一化。
+ * 工具结果 `details[key]` 的原值（包一层，使自有的 `undefined` 也算候选；`todo` 取 `phases`，`kb_search`
+ * 取 `bases`）：`result` 与 `details` 皆为普通对象、`result.isError` 不为 true 且 `details` 有自有 `key`
+ * 时产出；只读自有属性，不读其它键，不校验、不归一化。
  */
-function todoCandidate(result: unknown): { phases: unknown } | undefined {
+function detailCandidate(result: unknown, key: string): { value: unknown } | undefined {
   const record = asPlain(result);
   if (record === undefined || own(record, "isError") === true) {
     return undefined;
   }
   const details = asPlain(own(record, "details"));
-  return details !== undefined && Object.hasOwn(details, "phases")
-    ? { phases: details.phases }
-    : undefined;
+  return details !== undefined && Object.hasOwn(details, key) ? { value: details[key] } : undefined;
 }
 
 /**

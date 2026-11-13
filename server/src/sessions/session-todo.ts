@@ -58,7 +58,7 @@ function capTask({ content, status }: Task): Task {
 }
 
 /** 数组且每个下标都是自有元素（稀疏空洞不合规）并通过 `validItem`；否则 `undefined`。 */
-function validItems<T>(
+export function validItems<T>(
   value: unknown,
   validItem: (item: unknown) => T | undefined,
 ): T[] | undefined {

@@ -12,6 +12,7 @@ import { openDb } from "../src/core/db/index.js";
 import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import { DeltaCoalescer } from "../src/sessions/delta-coalescer.js";
 import { applyFrame, type ChatEvent, createEventState } from "../src/sessions/events.js";
+import { admitKbHits } from "../src/sessions/kb-hits.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { Generation, Slot } from "../src/sessions/pool.js";
 import { createSessionStore, type SessionStore } from "../src/sessions/store.js";
@@ -92,9 +93,11 @@ function openWorld(): World {
   };
 }
 
-/** `#commit`: route, then persist a passed event (`persistEvent`) and record it as published. */
+/** `#commit`: gate kb.hits, route, then persist a passed event (`persistEvent`) and record it as published. */
 function commit(world: World, events: ChatEvent<string>[]): boolean {
-  for (const event of events) {
+  for (const raw of events) {
+    const event = admitKbHits(() => {}, raw);
+    if (event === undefined) continue;
     const routed = world.coalescer.route(world.slot, world.generation, event);
     if (routed === false) {
       return false;
