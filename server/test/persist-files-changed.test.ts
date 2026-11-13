@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PumpSteps } from "../src/sessions/approval-pairing.js";
 import type { ChatEvent } from "../src/sessions/events.js";
 import type { FileChange } from "../src/sessions/file-changes.js";
+import type { AdmittedEvent } from "../src/sessions/kb-hits.js";
 import type { SessionStore, SettledApproval } from "../src/sessions/store.js";
 import { persistEvent } from "../src/sessions/turn-control.js";
 import { withSessionStore } from "./session-store-helpers.js";
@@ -63,7 +64,7 @@ function openRoot(): string {
   return root;
 }
 
-function filesChanged(files: FileChange[], stepId = CALL_ID): ChatEvent<string> {
+function filesChanged(files: FileChange[], stepId = CALL_ID): AdmittedEvent {
   return { type: "files.changed", data: { messageId: MESSAGE_ID, stepId, files } };
 }
 
@@ -99,11 +100,7 @@ function recorder(failure?: Error): Recorder {
 }
 
 /** One `persistEvent` call for a turn whose only registered tool call is CALL_ID → STEP_ID. */
-async function persist(
-  event: ChatEvent<string>,
-  workspaceRoot: string | null,
-  double = recorder(),
-) {
+async function persist(event: AdmittedEvent, workspaceRoot: string | null, double = recorder()) {
   const steps = new PumpSteps(MESSAGE_ID);
   steps.toolIds.set(CALL_ID, STEP_ID);
   const ordinals = vi.spyOn(steps, "nextOrdinal");
@@ -221,7 +218,7 @@ describe("persistEvent files.changed", () => {
 
   it("P6 thinking.delta still returns undefined without touching the store", async () => {
     const root = openRoot();
-    const thinking: ChatEvent<string> = {
+    const thinking: AdmittedEvent = {
       type: "thinking.delta",
       data: { messageId: MESSAGE_ID, delta: "先读需求，" },
     };

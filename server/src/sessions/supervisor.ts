@@ -13,6 +13,7 @@ import { alignModel, alignmentOf, effectiveCapabilities, reusable } from "./comp
 import { DeltaCoalescer } from "./delta-coalescer.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
 import { alignHostTools, type HostToolPort } from "./host-tool-align.js";
+import { type AdmittedEvent, admitKbHits } from "./kb-hits.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { PromptDispatchReceipt } from "./omp/runtime.js";
 import { SpawnGate } from "./omp/spawn-gate.js";
@@ -650,7 +651,7 @@ export class SessionSupervisor {
   #persist(
     slot: Slot,
     assistantMessageId: number,
-    event: ChatEvent<string>,
+    event: AdmittedEvent,
     steps: PumpSteps,
     settled: SettledApproval[],
   ) {
@@ -689,7 +690,9 @@ export class SessionSupervisor {
     steps: PumpSteps,
     generation: Generation | undefined,
   ): Promise<boolean> {
-    for (const event of events) {
+    for (const raw of events) {
+      const event = admitKbHits(this.#spawn.log, raw); // kb.hits is validated before it is mapped
+      if (event === undefined) continue;
       // A coalesced delta never reaches persistEvent; any other event flushes the coalescer first,
       // so a failed flush leaves no stored terminal off the ring.
       const routed = this.#deltas.route(slot, generation, event);
