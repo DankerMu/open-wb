@@ -37,12 +37,21 @@
 | 跨服务契约（快照加键而 web 严格解析） | 是 | 组 7 第三刀同 PR 改两端 |
 | 分支对位（后缀字节变化让存量会话的 regenerate / fork / 撤回 502） | 是 | 组 7 第二刀：无引用时后缀逐字节不变的用例、引用快照的对位用例 |
 | 外部接口漂移（omp 的 `i` 字段、帧序） | 是 | 组 5 意图缺失时退回问句；组 9 第二刀在真实 omp 上回归 |
+| 中止的时序与错误映射（中止与期限同为 `kb_unavailable`；中止与重排降级重试的先后） | 是 | 组 1 的三个中止用例（`kb-retrieval-abort.test.ts`） |
+| 旧调用方兼容（检索测试端点不传信号） | 是 | 组 1：`kb-retrieval`、`kb-ragflow-client-retrieval` 两组既有用例原样全绿；本组无 schema、权限或公共 API 变化，其余风险包不选 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
-- [ ] 1.1 核对 Context：`server/src/kb/ragflow-retrieval.ts:69-84` 的 `retrieve` 与 `json(…)` 调用，`ragflow-client.ts:25`、`:85`、`:372-425` 的 `signal` 与放弃写法，`retrieval.ts` 的 `retrieveForBase` 与降级重试（`searchWithFallback`）
-- [ ] 1.2 测试先行：在新文件 `server/test/kb-retrieval-abort.test.ts` 覆盖两份规格的「中止」场景（挂起时中止、调用前已中止不发请求、降级重试前中止只有一次请求），对假 RAGFlow 跑
-- [ ] 1.3 实现：`RetrievalQuery` 加可选 `signal` 并传给 `json`；`retrieveForBase(deps, base, question, signal?)` 往下传，降级重试用同一个 signal；检索测试端点不传，既有用例原样全绿
+- [x] 1.1 核对 Context：`server/src/kb/ragflow-retrieval.ts:69-84` 的 `retrieve` 与 `json(…)` 调用，`ragflow-client.ts:25`、`:85`、`:372-425` 的 `signal` 与放弃写法，`retrieval.ts` 的 `retrieveForBase` 与降级重试（`searchWithFallback`）
+- [x] 1.2 测试先行：在新文件 `server/test/kb-retrieval-abort.test.ts` 覆盖两份规格的「中止」场景（挂起时中止、调用前已中止不发请求、降级重试前中止只有一次请求），对假 RAGFlow 跑
+- [x] 1.3 实现：`RetrievalQuery` 加可选 `signal` 并传给 `json`；`retrieveForBase(deps, base, question, signal?)` 往下传，降级重试用同一个 signal；检索测试端点不传，既有用例原样全绿
+  - 组 1 约定（#1962 fixture 审查补；1.2–1.3 照此实现与测试）：
+    - 「观察到连接被放弃」的可观测量：假 RAGFlow 的请求记录加 `closed: boolean`——应答写完之前连接就关了为 `true`。实现放在既有兄弟文件 `server/test/support/fake-ragflow-wire.mjs` 的 `wireCounter`（`response` 的 `close` 早于 `finish`），`fake-ragflow.d.mts` 同加字段与注释，`fake-ragflow.mjs` 只在记录初值里加一键；夹具自身的契约用例（照 `aborted` 现有用例所在文件）加一例「挂起的应答被客户端放弃 → `closed:true`；正常应答 → `false`」。
+    - 「挂起时中止」：配置了重排模型、`hold` 住检索应答，`controller.abort()` 后结果为 `kb_unavailable`，耗时远小于缺省总期限；检索路由请求恰一条、body 带 `rerank_id`、`closed:true`；`onRerankDegraded` 零次（证明 ragflow-backend「检索请求被中止」的「没有重试」）。
+    - 「调用前已中止」：传入已中止的信号，结果 `kb_unavailable`，检索路由零请求。
+    - 「降级重试前中止」：配置重排模型，`failRerank()` 让带重排的请求回 `code:102`；注入的 `onRerankDegraded` 回调里调用 `controller.abort()`；结果 `kb_unavailable`，检索路由请求恰一条（带 `rerank_id`），`onRerankDegraded` 恰一次（降级确已发生，按现有次序先记后重试，不改）。
+    - `closed` 由服务端 `close` 事件异步置位，断言照 `aborted` 现有写法用 `expect.poll(() => fake.requests()[0]?.closed).toBe(true)`，不在 `await` 之后同步断言。
+    - 回归命令：`npm run test:focus --workspace server -- kb-retrieval kb-ragflow-client-retrieval fake-ragflow`（`kb-ragflow-client-retrieval` 是 `RetrievalQuery` / `retrieve` 的直接用例；`fake-ragflow` 跑到夹具契约用例 `fake-ragflow-documents.test.ts` 及其余夹具用例）。
 
 Suggested fixture level: compact - 在既有出站路由上传一个可选参数，没有公共 API、schema 或权限变化；检索测试的既有用例原样全绿即证明不变。
 Minimal mergeable slice: atomic - 签名改动与它唯一的验证路径（中止用例）是同一个函数链，拆开后任何一半都没有可单独验证的行为。

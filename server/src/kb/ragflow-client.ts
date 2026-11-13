@@ -22,8 +22,8 @@
  * 密钥只进请求头，一个请求读一次句柄。任何错误都不外抛：不发出的请求（空 id、空 `api_key`）同样是
  * `kb_unavailable`，绝不能是 `not_found`，那会被调用点当成已删除。
  *
- * 重建器用到的方法收一个可选的 `signal`（#1852，关停时中止在途请求）：中止与期限到期同一写法，结果是 `kb_unavailable`；
- * 已中止的不发出。文件流交出之后照样受它管：中止即销毁请求，流报错。上传的请求体随出站销毁。
+ * 重建器用到的方法（#1852，关停时中止在途请求）与检索（s2c-kb-session D6）收一个可选的 `signal`：中止与期限到期
+ * 同一写法，结果是 `kb_unavailable`；已中止的不发出。文件流交出之后照样受它管：中止即销毁请求，流报错。上传的请求体随出站销毁。
  */
 import type { ClientRequest, IncomingMessage } from "node:http";
 import http from "node:http";

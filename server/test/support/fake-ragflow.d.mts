@@ -29,6 +29,8 @@ export interface FakeRagflowRequest {
   unknown: boolean;
   /** 请求体没到结尾连接就断了。 */
   aborted: boolean;
+  /** 应答写完之前连接就关了：客户端放弃了挂起的请求（#1962）。服务端 `close` 事件异步置位，断言用 `expect.poll`。 */
+  closed: boolean;
 }
 
 /**

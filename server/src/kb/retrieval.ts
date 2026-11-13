@@ -10,6 +10,8 @@
  *   `kb_unavailable`；`kb_rejected` / `kb_unavailable`（含超时）原样，不重试。调用方照 `bases.ts` 的写法 `throw new HttpError(result.kind)`。
  * - 命中关联：切片的 RAGFlow 文档 id 只对本库的本地文档行（`listDocuments(base.id)`）关联，名称取本地记录；关联不上的丢弃，
  *   不暴露 RAGFlow 侧或别的库的文档名。同一文档的多条切片各成一条命中，次序同应答。零候选或全部丢弃时为空数组。
+ * - 中止（s2c-kb-session D6）：可选的 `signal` 随查询交给客户端，降级重试的查询只去掉 `rerankId`，带的是同一个 signal，所以
+ *   降级回调之后已中止的重试不发出。中止与期限到期同为 `kb_unavailable`。检索测试端点不传。
  *
  * 检索测试端点（D4；knowledge-bases「检索测试端点」）是 `createKbRetrieval` 的 `test`：判定次序为 body → 所有权重读 → `state` →
  * 参数比较（所有权的第一次判定在路由的 preParsing，先于 body 解析）。参数与已存值相同时不取锁、不写、不审计，直接检索。不同则经
@@ -92,10 +94,12 @@ export async function retrieveForBase(
   deps: RetrievalDependencies,
   base: KnowledgeBase,
   question: string,
+  signal?: AbortSignal,
 ): Promise<Result<RetrievalHit[]>> {
   const { rerank } = deps.store.settings();
   const result = await searchWithFallback(deps, {
     question,
+    signal,
     datasetId: base.datasetId,
     threshold: base.retrievalThreshold,
     vectorWeight: base.retrievalVectorWeight,

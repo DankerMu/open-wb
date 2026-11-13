@@ -242,6 +242,24 @@ describe("上传（§7）", () => {
     expect(fake.requests()[0]?.received).toBe(TORN.length);
   });
 
+  it("挂起的应答被客户端放弃：记录标 closed；正常应答：closed 为 false", async () => {
+    const id = fake.addDataset();
+    const gate = fake.fault("POST /api/v1/datasets/*/documents", { kind: "hold" });
+    const socket = connect(fake.port, "127.0.0.1");
+    await new Promise<void>((resolve) => socket.once("connect", resolve));
+    socket.write(
+      `POST /api/v1/datasets/${id}/documents HTTP/1.1\r\nHost: h\r\n` +
+        `Authorization: Bearer ${KEY}\r\nContent-Length: 0\r\n\r\n`,
+    );
+    await gate.reached;
+    socket.destroy();
+    await expect.poll(() => fake.requests()[0]?.closed).toBe(true);
+    expect(fake.requests()[0]?.aborted).toBe(false);
+    const answer = await upload(id, formOf("a.txt", "x"));
+    expect(answer.status).toBe(200);
+    expect(fake.requests()[1]?.closed).toBe(false);
+  });
+
   describe("实际到达的字节数", () => {
     const multipart = (id: string, declared: number, body: string) =>
       `POST /api/v1/datasets/${id}/documents HTTP/1.1\r\nHost: h\r\n` +
