@@ -14,7 +14,7 @@ const ALLOWED = {
   "gitleaks/gitleaks-action": "v3",
 };
 const WANT = {
-  "actions/cache@v6": 4,
+  "actions/cache@v6": 5,
   "actions/checkout@v5": 13,
   "actions/download-artifact@v8": 2,
   "actions/setup-node@v5": 11,

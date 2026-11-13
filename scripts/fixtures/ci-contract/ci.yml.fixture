@@ -177,7 +177,15 @@ jobs:
       - run: npm ci
       - run: npm run build --workspace web
       - run: npm run build --workspace server
-      - run: npx playwright install --with-deps chromium
+      # Chromium 与 apt 下载的字体包一起缓存（change ci-playwright-cache，#1981）：命中时安装不连 Ubuntu 软件源，
+      # 软件源 DNS 故障不再让 ui-walk 失败。key 只随 Playwright 版本变；restore-keys 在升级时沿用旧的 .deb，
+      # 旧缓存不受信任也无妨：apt 按索引校验每个 .deb，浏览器版本不符时 Playwright 重新下载。
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('node_modules/playwright-core/package.json') }}
+          restore-keys: playwright-${{ runner.os }}-${{ runner.arch }}-
+      - run: bash .github/scripts/ci-playwright-install.sh
       - uses: actions/cache@v6
         with:
           path: var/omp/omp

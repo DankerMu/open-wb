@@ -8,7 +8,8 @@
 # 沿用 runner 镜像自带的索引。Playwright 只清理名字像浏览器目录的子目录，apt-archives/ 不受影响。
 set -euo pipefail
 
-debs="${PLAYWRIGHT_APT_ARCHIVES:-$HOME/.cache/ms-playwright/apt-archives}"
+debs="$HOME/.cache/ms-playwright/apt-archives"
+# 只为 scripts/test-ci-harness.sh 的桩测试可覆盖；CI 不设。
 conf="${PLAYWRIGHT_APT_CONF:-/etc/apt/apt.conf.d/90workbuddy-playwright-debs}"
 
 mkdir -p "$debs/partial"
