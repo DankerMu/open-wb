@@ -12,12 +12,6 @@ debs="$HOME/.cache/ms-playwright/apt-archives"
 # 只为 scripts/test-ci-harness.sh 的桩测试可覆盖；CI 不设。
 conf="${PLAYWRIGHT_APT_CONF:-/etc/apt/apt.conf.d/90workbuddy-playwright-debs}"
 
-# 临时探针（#1981，验证后撤销）：把 Ubuntu 软件源解析到 0.0.0.0，证明缓存命中时安装不需要软件源。
-cat /etc/apt/apt-mirrors.txt || true
-for h in $(sed -E 's#^[a-z]+://([^/:]+).*#\1#' /etc/apt/apt-mirrors.txt 2>/dev/null | sort -u) archive.ubuntu.com security.ubuntu.com; do
-  echo "0.0.0.0 $h" | sudo tee -a /etc/hosts >/dev/null
-done
-getent hosts azure.archive.ubuntu.com archive.ubuntu.com security.ubuntu.com || true
 mkdir -p "$debs/partial"
 printf 'Dir::Cache::Archives "%s/";\nAPT::Keep-Downloaded-Packages "true";\n' "$debs" | sudo tee "$conf" >/dev/null
 
