@@ -23,6 +23,7 @@ import {
   failureOf,
   markRetrying,
 } from "./stream-failure.js";
+import { type ChatKbHitsEvent, decodeKbHits, setStepKbHits } from "./stream-kb-hits.js";
 import {
   type ChatStepStartData,
   closeSegment,
@@ -80,6 +81,7 @@ export type ChatEvent =
   | ChatApprovalEvent
   | ChatThinkingEvent
   | ChatFilesEvent
+  | ChatKbHitsEvent
   | ChatTodoEvent;
 
 type ChatEventType = ChatEvent["type"];
@@ -119,6 +121,7 @@ const DATA_EVENTS = [
   "files.changed",
   "todo.updated",
   "turn.retry",
+  "kb.hits",
 ] as const satisfies readonly ChatEventType[];
 const QUEUE_CAP = 1000;
 const CANONICAL_CURSOR = /^(0|[1-9][0-9]*):(0|[1-9][0-9]*)$/;
@@ -146,6 +149,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
         changes: step.changes,
         status: step.status,
         bodyOffset: step.bodyOffset,
+        kbHits: null,
       })),
       approvals: approvalViews(message.approvals),
       error: message.error,
@@ -209,6 +213,8 @@ export function applyChatEvent(state: ChatState, event: ChatEvent): ChatState {
     // files.changed only replaces one step's changes; the session status is left untouched.
     case "files.changed":
       return replaceAssistant(state, event.data.messageId, (m) => setStepChanges(m, event.data));
+    case "kb.hits":
+      return replaceAssistant(state, event.data.messageId, (m) => setStepKbHits(m, event.data));
     // todo.updated replaces the session's list; no message, step or status is touched or created.
     case "todo.updated":
       return setTodo(state, event.data.todo);
@@ -693,6 +699,8 @@ function decodeEvent(type: ChatEventType, value: unknown): ChatEvent | undefined
       return decodeFilesChanged(value);
     case "todo.updated":
       return decodeTodoUpdated(value);
+    case "kb.hits":
+      return decodeKbHits(value);
   }
 }
 

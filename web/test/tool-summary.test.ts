@@ -17,6 +17,7 @@ function step(name: string, status: ChatStepView["status"] = "done"): ChatStepVi
     changes: null,
     status,
     bodyOffset: null,
+    kbHits: null,
   };
 }
 

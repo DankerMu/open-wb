@@ -79,6 +79,7 @@ describe("turn.end stopped reduction", () => {
           changes: null,
           status: "stopped",
           bodyOffset: null,
+          kbHits: null,
         },
         {
           id: 2,
@@ -88,6 +89,7 @@ describe("turn.end stopped reduction", () => {
           changes: null,
           status: "done",
           bodyOffset: null,
+          kbHits: null,
         },
       ],
       thinking: null,

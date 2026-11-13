@@ -371,6 +371,7 @@ describe("Session contract: SSE step.end stays four keys", () => {
           changes: null,
           status: "running",
           bodyOffset: null,
+          kbHits: null,
         },
       ]);
 
@@ -389,6 +390,7 @@ describe("Session contract: SSE step.end stays four keys", () => {
           changes: null,
           status: "done",
           bodyOffset: null,
+          kbHits: null,
         },
       ]);
       context.handle.close();

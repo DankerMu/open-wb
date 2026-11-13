@@ -23,7 +23,16 @@ import { chatSnapshot } from "./chat-stream-support.js";
 type Segment = ChatThinkingSegment;
 
 function stepAt(id: number, name: string, bodyOffset: number | null): ChatStepView {
-  return { id, name, detail: "", output: "", changes: null, status: "done", bodyOffset };
+  return {
+    id,
+    name,
+    detail: "",
+    output: "",
+    changes: null,
+    status: "done",
+    bodyOffset,
+    kbHits: null,
+  };
 }
 
 function segment(
