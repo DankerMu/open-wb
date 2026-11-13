@@ -85,7 +85,7 @@ const { scenario, resume, sessionDir, approvalMode, delay, startDelay, repeat, h
 const { silent, entries } = argv;
 /**
  * `branch` 实际列表（#552）：固定两条之后按 argv 序追加每个 `--branch-entry` 值（原样）。顶层算一次并
- * 冻结；无旋钮时即 BRANCH_MESSAGES，逐字不变。非 branch 场景不读它。
+ * 冻结；无旋钮时即 BRANCH_MESSAGES，逐字不变。只有 branch 与 host-tool 读它。
  */
 const branchMessages = Object.freeze([
   ...BRANCH_MESSAGES,
@@ -226,7 +226,7 @@ async function dispatch(frame) {
     prompt: handlePrompt,
     ...(abortable ? { abort: handleAbort } : {}),
     ...(scenario === "slash" ? { abort: handleSlashAbort } : {}),
-    ...(scenario === "branch"
+    ...(scenario === "branch" || scenario === "host-tool"
       ? { get_branch_messages: handleBranchMessages, branch: handleBranch }
       : {}),
     ...hostTool.handlers,

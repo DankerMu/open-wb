@@ -20,6 +20,7 @@ import { postPrompt } from "./session-rest-helpers.js";
 import { collectRejections, type RejectionLog } from "./session-stop-helpers.js";
 import {
   createControlledRuntime,
+  IDLE_MS,
   OWNER_ID,
   type RecordingWorld,
   requiredCall,
@@ -197,6 +198,16 @@ export async function waitDead(world: ApprovalWorld, index: number): Promise<voi
   await waitFor(
     () => (isLive(world.spawned[index]?.child) ? undefined : true),
     `child ${String(index)} exit`,
+  );
+}
+
+/** The n-th child once the idle timer reclaimed it and the supervisor let its capacity go. */
+export async function reclaimed(world: ApprovalWorld, index: number): Promise<void> {
+  world.clock.advance(IDLE_MS);
+  await waitDead(world, index);
+  await waitFor(
+    () => (world.fixture.supervisor.liveProcessCount() === 0 ? true : undefined),
+    "idle reclaim",
   );
 }
 

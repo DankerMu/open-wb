@@ -12,6 +12,7 @@ import { type ForkResult, Forks, Regenerations, type Resume } from "./branching.
 import { alignModel, alignmentOf, effectiveCapabilities, reusable } from "./composer-align.js";
 import { DeltaCoalescer } from "./delta-coalescer.js";
 import { applyFailure, applyFrame, applyStop, type ChatEvent, createEventState } from "./events.js";
+import { alignHostTools, type HostToolPort } from "./host-tool-align.js";
 import type { OmpFrame } from "./omp/frame.js";
 import type { PromptDispatchReceipt } from "./omp/runtime.js";
 import { SpawnGate } from "./omp/spawn-gate.js";
@@ -108,6 +109,7 @@ export class SessionSupervisor {
   readonly #capabilitiesOf: ReturnType<typeof effectiveCapabilities>;
   readonly #redactUpstream: (text: string) => string;
   readonly #mountNamesOf: (workspaceId: string) => ReadonlySet<string>;
+  readonly #hostTools: HostToolPort | undefined;
   #closed = false;
 
   constructor(options: SessionSupervisorOptions) {
@@ -120,6 +122,7 @@ export class SessionSupervisor {
     this.#capabilitiesOf = effectiveCapabilities(options.expertPrompt);
     this.#redactUpstream = options.redactUpstream;
     this.#mountNamesOf = options.mountNamesOf ?? (() => new Set());
+    this.#hostTools = options.hostTools;
     this.#cwdOf = sessionCwdResolver(options.runtime.sandboxRoot, options.workspaceRootOf);
     const clock = options.runtime.clock;
     this.#pool = new ProcessPool(
@@ -402,7 +405,10 @@ export class SessionSupervisor {
   ): Promise<T> {
     const live = this.#slots.get(sessionId);
     const effective = alignmentOf(resume, this.#composer, this.#capabilitiesOf, this.#runtime);
-    const aligned = (slot: Slot) => alignModel(slot, effective).then(() => use(slot));
+    const aligned = (slot: Slot) =>
+      alignModel(slot, effective)
+        .then(() => alignHostTools(slot, this.#hostTools, resume.ownerId))
+        .then(() => use(slot));
     const fresh = () => this.#onNewSlot(sessionId, resume, effective, claim, aligned);
     if (live === undefined || live.retiring !== undefined || !this.#pool.holds(live.entry)) {
       return fresh();
@@ -486,6 +492,7 @@ export class SessionSupervisor {
       onApproval: (request) => {
         this.#approvals.register(slot, request);
       },
+      hostTools: this.#hostTools,
     });
     this.#slots.set(sessionId, slot);
     try {

@@ -104,8 +104,11 @@ export interface OpenSessionOptions {
    * And the registry publisher the admin endpoints call (group 7); omitted → a no-op. And the
    * managed `mcp.json` publisher the connector endpoints call (s1d-connectors); omitted → a no-op.
    * And the mount-manager (s1b-workspace-mounts D12); omitted → the feature-off one createApp builds.
+   * And the knowledge base and the session search seam (s2c-kb-session 4.3); omitted → kb off.
    */
   assembly?: Partial<ComposerConfig> & {
+    kb?: AssemblyDependencies["kb"];
+    sessionSearch?: NonNullable<AssemblyDependencies["sessionSearch"]>;
     uploadMaxFiles?: number;
     log?: SpawnLog;
     upstream?: AssemblyDependencies["upstream"];

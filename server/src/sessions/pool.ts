@@ -4,7 +4,9 @@
  */
 import { HttpError } from "../core/errors/index.js";
 import type { ApprovalMode, Effort } from "../model-catalog.js";
+import type { HostToolPort } from "./host-tool-align.js";
 import type { RuntimeCommandFrame } from "./omp/commands.js";
+import type { HostToolHandler } from "./omp/host-tools.js";
 import { SessionRuntime, type SessionRuntimeOpts } from "./omp/runtime.js";
 import type { SessionConfigReport } from "./omp/session-config.js";
 import type { SessionStore } from "./store.js";
@@ -24,7 +26,15 @@ export interface Generation {
    * its first dispatch aligned it. `effort` is undefined right after a `set_model`.
    */
   applied: { modelId: string; effort: Effort | undefined } | undefined;
+  /**
+   * The bases of the `kb_search` definition last registered on this generation by a successful
+   * `set_host_tools`; undefined until then (never registered), `[]` once withdrawn.
+   */
+  hostTools: readonly { id: string; name: string }[] | undefined;
 }
+
+/** The one host tool a session slot registers (omp-runtime「`kb_search` 的注册」). */
+export const KB_SEARCH = "kb_search";
 
 export interface Slot {
   sessionId: string;
@@ -240,6 +250,8 @@ type PerRuntime = Pick<
 > & {
   resumePath: string | null;
   onExit: () => void;
+  /** Only a session slot's (supervisor `#onNewSlot`); bound here to `ownerId`, never to a temporary. */
+  hostTools?: HostToolPort | undefined;
 };
 
 /**
@@ -270,6 +282,7 @@ export function sessionRuntimeOpts(
     resumePath: per.resumePath,
     onExit: per.onExit,
     ...(per.onApproval === undefined ? {} : { onApproval: per.onApproval }),
+    ...(per.hostTools === undefined ? {} : { hostTools: ownerBound(per.hostTools, per.ownerId) }),
     ...(base.idleMs === undefined ? {} : { idleMs: base.idleMs }),
     ...(base.ompUser === undefined ? {} : { ompUser: base.ompUser }),
     ...(base.browserBin === undefined ? {} : { browserBin: base.browserBin }),
@@ -281,6 +294,22 @@ export function sessionRuntimeOpts(
     spawnGate: shared.spawnGate,
     log: shared.log,
     onSessionConfigError: shared.onSessionConfigError,
+  };
+}
+
+/**
+ * A slot's host tool handler: `kb_search` runs as the slot's owner, for this process's whole life;
+ * any other tool name is not this handler's (`undefined`, answered `未知工具`). A throw or rejection of
+ * `execute` is the transport's to answer (`工具执行失败`).
+ */
+function ownerBound(hostTools: HostToolPort, ownerId: string): HostToolHandler {
+  return {
+    call: (toolName, args, signal) => {
+      const source = hostTools();
+      return toolName === KB_SEARCH && source !== undefined
+        ? source.execute(ownerId, args, signal)
+        : Promise.resolve(undefined);
+    },
   };
 }
 
@@ -323,6 +352,7 @@ export function generationTokens(
         pumpCount: 0,
         sealed: false,
         applied: undefined,
+        hostTools: undefined,
       };
       slot.generation = generation;
       try {

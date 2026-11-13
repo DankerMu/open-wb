@@ -36,6 +36,7 @@ import {
   watchHeldPipe,
 } from "./commands.js";
 import type { OmpFrame } from "./frame.js";
+import type { HostToolHandler } from "./host-tools.js";
 import { LocalCompletionWait } from "./local-wait.js";
 import {
   AgentUnavailableError,
@@ -82,6 +83,7 @@ export interface SessionRuntimeOpts {
   clock?: SessionClock;
   onExit?: (exit: OmpExit) => void;
   onApproval?: (request: ApprovalRequest) => void;
+  hostTools?: HostToolHandler | undefined;
   handshakeTimeoutMs?: number;
   spawnGate?: SpawnGate;
   log?: SpawnLog;
@@ -125,6 +127,7 @@ export class SessionRuntime {
   readonly #userSpawn: SpawnImpl;
   readonly #onExit: ((exit: OmpExit) => void) | undefined;
   readonly #onApproval: ((request: ApprovalRequest) => void) | undefined;
+  readonly #hostTools: HostToolHandler | undefined;
   readonly #handshakeTimeoutMs: number | undefined;
   readonly #spawnGate: SpawnGate | undefined;
   readonly #log: SpawnLog | undefined;
@@ -166,6 +169,7 @@ export class SessionRuntime {
     this.#userSpawn = opts.spawnImpl ?? (spawn as SpawnImpl);
     this.#onExit = opts.onExit;
     this.#onApproval = opts.onApproval;
+    this.#hostTools = opts.hostTools;
     this.#handshakeTimeoutMs = opts.handshakeTimeoutMs;
     this.#spawnGate = opts.spawnGate;
     this.#log = opts.log;
@@ -447,6 +451,7 @@ export class SessionRuntime {
       ...this.#spawnIdentity,
       cwd: this.#cwd,
       spawnImpl,
+      hostTools: this.#hostTools,
       ...(this.#handshakeTimeoutMs === undefined
         ? {}
         : { handshakeTimeoutMs: this.#handshakeTimeoutMs }),

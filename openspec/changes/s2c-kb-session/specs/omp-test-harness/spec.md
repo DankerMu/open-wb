@@ -143,6 +143,7 @@ For S2c (change `s2c-kb-session`) the fixture SHALL additionally support the fou
     - `write`、`always-ask`：`tool_execution_start`，然后是 `extension_ui_request{method:"select", title:"Allow tool: kb_search", options:["Approve","Approve kb_search for this session","Deny"]}`，收到 `Approve` 才发 `host_tool_call`；收到 `Deny` 时以失败的 `tool_execution_end` 结束这次调用。
   - 收到对应 `id` 的 `host_tool_result` 后，发 `tool_execution_end{result:<收到的 result 原样>, isError:<收到的 isError 是否为真>}`。
   - 两次调用都结束后发正文与终态 `agent_end`。
+  - 分支命令 `get_branch_messages` / `branch`（含 argv 的 `--branch-entry`）与场景 `branch` 应答相同，供 regenerate 在注册之后走同一进程。
 - **`host-tool-parallel`**：prompt 回合在 `agent_start` 之后、宿主应答任何一个之前，连发三个 `host_tool_call`：两个 `kb_search`（`kb_ids` 分别为 `KB:<kbId>` 记号给出的第一、二个 kb_id，没有第二个时重复第一个）与一个 `toolName:"other"`。每个调用的 `tool_execution_start` 紧随其 `host_tool_call`，帧序按 `yolo`，不论 argv 的档位。三个结果各自到达后，各发 `tool_execution_end`；全部结束后发正文与终态 `agent_end`。
 - **`host-tool-register-fail`**：对 `set_host_tools` 回 `{id:<请求 id>, type:"response", command:"set_host_tools", success:false, error:"host tools rejected"}`；其余命令与无场景时相同。
 - **`host-tool-abort`**：发出第一次 `host_tool_call` 之后不等应答。收到 `abort` 时，依次发 `host_tool_cancel{targetId}`、`tool_execution_end{isError:true, result:{content:[{type:"text", text:"Host tool \"kb_search\" was aborted"}]}}`、`turn_end{stopReason:"aborted"}` 与终态 `agent_end`，再应答 `abort`。之后收到的 `host_tool_result` 被记录但不产生任何帧。

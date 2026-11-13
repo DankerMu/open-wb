@@ -50,6 +50,13 @@
 | 组 3 第二刀：审批语义越界（只认整体恰为 `Allow tool: kb_search` 的标题与闭合选项；`always-ask` 照旧） | 是 | 「组 3 第二刀约定」的正反例与两次变异 |
 | 组 3 第二刀：白盒关键路径（放行帧由传输层写） | 是 | 继承 `#onFrame` 的 `!#writesClosed` 守卫；写失败与 prelude 同一处理（`#failIo`）；`omp-host-tools` 真子进程一例 |
 | 组 3 第二刀：旧调用方兼容（既有审批与 prelude） | 是 | 回归命令原样全绿；权限、迁移与 schema、跨服务契约、公共 API 不选：不动库表、REST、SSE 形状，只在 `write` / `yolo` 下少一类审批事件 |
+| 组 4：白盒关键路径（处理函数只在 `#onNewSlot` 注入） | 是 | 「临时进程不注册」用例 + PR 标注白盒审查 `branch-temp.ts` 的 per 参数无 `hostTools`（用例观测不到注入与否） |
+| 组 4：共享装配入口（`app.ts` 迟绑定） | 是 | 4.5 `createApp` 用例；知识库关闭零帧（`session-composer-align` 的 `ALIGNED` 帧序原样） |
+| 组 4：权限（以所有者执行） | 是 | 「只以所有者执行」两个账号同时存活、互指为 `not_found` 加正向对照 |
+| 组 4：按代的注册状态（spawn、resume、空闲回收） | 是 | 「首次派发前注册」「库清单变化后重发」「空闲回收后重新注册」（兼作 resume 证据） |
+| 组 4：失败退役与 502 | 是 | 「注册失败」与 `toolNames` 不符的单元用例 |
+| 组 4：regenerate 事务前的帧序 | 是 | chat-sessions 两个帧序场景（`host-tool` 场景应答分支命令） |
+| 组 4：旧调用方兼容（知识库关闭、所有者无库） | 是 | 回归命令原样全绿；`kb-omp-env` 零帧 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -151,16 +158,35 @@ Minimal mergeable slice: 3.1–3.4 为首刀：协议在 `yolo` 帧序下独立�
 
 ## 4. `kb_search` 的注册与装配（omp-runtime「`kb_search` 的注册」；chat-sessions「派发前按会话设置对齐进程」）
 
-- [ ] 4.1 核对 Context：`composer-align.ts` 的 `alignModel` / `alignmentOf` 与 `slot.generation.applied`（:136-154）、`pool.ts` 的 `commandOn`（:380）与 `buildSessionRuntime`（:296）、`supervisor.ts` `#onNewSlot`（:474）与派发前对齐的调用点、`runtime.ts` 的 `SessionRuntimeOpts` 与 `#openProcess`（:436）、`branch-temp.ts:107` 的 `branchAt`
-- [ ] 4.2 假 omp：在 `server/test/support/fake-omp-host-tool.mjs` 加 `host-tool-register-fail` 场景（`set_host_tools` 回 `success:false`），契约用例加在 `server/test/fake-omp-host-tool.test.ts`
-- [ ] 4.3 测试先行：新文件 `server/test/session-host-tool-align.test.ts`，在 slot 层以假 omp 与注入的定义源覆盖 omp-runtime「`kb_search` 的注册」的「首次派发前注册」「不注册」「库清单变化后重发」「空闲回收后重新注册」「注册失败」「临时进程不注册」「只以所有者执行」（两个账号各一个会话，`kb_ids` 互指对方的库，结果为 `not_found`），以及 chat-sessions「派发前按会话设置对齐进程」的「宿主工具对齐在模型命令之后、在 regenerate 事务之前」「宿主工具对齐失败时 regenerate 不动分支」
-- [ ] 4.4 实现：
+- [x] 4.1 核对 Context：`composer-align.ts` 的 `alignModel` / `alignmentOf` 与 `slot.generation.applied`（:136-154）、`pool.ts` 的 `commandOn`（:380）与 `buildSessionRuntime`（:296）、`supervisor.ts` `#onNewSlot`（:474）与派发前对齐的调用点、`runtime.ts` 的 `SessionRuntimeOpts` 与 `#openProcess`（:436）、`branch-temp.ts:107` 的 `branchAt`
+- [x] 4.2 假 omp：在 `server/test/support/fake-omp-host-tool.mjs` 加 `host-tool-register-fail` 场景（`set_host_tools` 回 `success:false`），契约用例加在 `server/test/fake-omp-host-tool.test.ts`
+- [x] 4.3 测试先行：新文件 `server/test/session-host-tool-align.test.ts`，在 slot 层以假 omp 与注入的定义源覆盖 omp-runtime「`kb_search` 的注册」的「首次派发前注册」「不注册」「库清单变化后重发」「空闲回收后重新注册」「注册失败」「临时进程不注册」「只以所有者执行」（两个账号各一个会话，`kb_ids` 互指对方的库，结果为 `not_found`），以及 chat-sessions「派发前按会话设置对齐进程」的「宿主工具对齐在模型命令之后、在 regenerate 事务之前」「宿主工具对齐失败时 regenerate 不动分支」
+- [x] 4.4 实现：
   - 先 grep 既有用例里「知识库开启且所有者有库、又跑会话回合」的组合：假 omp 的缺省场景对 `set_host_tools` 回 `success:false`，这类用例改用 `host-tool` 场景，不改缺省应答。
   - 新文件 `server/src/sessions/host-tool-align.ts`：派发前对齐的第 3 步（每代所记的库清单、比较、`set_host_tools`、应答校验），经 `commandOn` 与 `slot.generation`；`supervisor.ts` 在第 2 步之后只加一处调用，失败与第 1、2 步同一处理。
   - 处理函数在 `pool.ts` `buildSessionRuntime` 绑定为「以 slot 的所有者执行」，经 `SessionRuntimeOpts` 透传到 `OmpProcessOpts.hostTools`；只有 `#onNewSlot` 这条路径传，`branch-temp.ts` 不传。`runtime.ts` 只加透传。
-- [ ] 4.5 装配：`app.ts` 把组 2 的 `definitionFor` / `execute` 注入 supervisor 与 pool，知识库关闭时不注入；`createApp` 级用例（假 omp `host-tool` 场景 + 假 RAGFlow）断言一个回合里 `host_tool_result` 的文本来自假 RAGFlow 的切片
-- [ ] 4.6 `docs/architecture/system.md`：`sessions` 行写 host tool 的注册与分派（经注入），`kb` 行写会话检索，§4 依赖规则的 `sessions → kb` 改为「经 `app.ts` 注入，不导入」
-- [ ] 4.7 验收清单 `docs/acceptance/functional-checklist.md` 的 CK 节新增 CK-15（在接上真实 RAGFlow 与真实模型的会话里问库里才有的事实，回答用到库里的切片，且助手消息里有这次检索：组 6 第二刀合入前是名为 `kb_search` 的步骤卡，之后是「知识库检索」卡），结论 `待签`，由 owner 执行（agent 不得代签）
+  - 组 4 约定（#1966 fixture 审查补；4.2–4.5 照此实现与测试）：
+    - 4.1 锚点更正：`alignModel` 在 `composer-align.ts:141-157`；派发前对齐的唯一调用点是 `supervisor.ts:405`（`alignModel(slot, effective).then(() => use(slot))`）；`#onNewSlot` 在 `:430`，`:474` 是其中的 `buildSessionRuntime` 调用。其余锚点准确。
+    - 改动面（超出原 PR Boundary 的写明）：`omp/commands.ts` 的 `RuntimeCommandFrame` 加 `{type:"set_host_tools"; tools: readonly object[]}`；`pool.ts` 的 `Generation` 加 `hostTools: readonly {id,name}[] | undefined`，在 `generationTokens.issue` 与 `applied: undefined` 同处初值 `undefined`（`undefined` = 尚未注册，`[]` = 已撤下，二者区分）；`supervisor-options.ts` 加可选定义源，`sessions/index.ts` 的 `RegisterSessionsOptions` 透传。
+    - `supervisor.ts` 允许的改动点：import、私有字段、构造函数赋值、`#onNewSlot` 的 per 参数一行、`:405` 原地改为 `alignModel(...).then(() => alignHostTools(slot, <定义源>?.definitionFor(<所有者>) ?? null)).then(() => use(slot))`。定义在第 2 步之后的闭包里读（不在 `:404` 的 `alignmentOf` 里读——那时还没经过退役与准入等待）。regenerate 也经 `#onSlot` 进来，这一处同时覆盖 prompt 与 regenerate。预算 `supervisor.ts` ≤ 792 行。
+    - 处理函数的通道：放在 `PerRuntime` 上，可选的未绑定 `hostTools?: <定义源>`；只有 `#onNewSlot` 传，`buildSessionRuntime` 用 `per.ownerId` 绑成 `HostToolHandler` 放进 `SessionRuntimeOpts.hostTools`。SHALL NOT 放进 `SessionSupervisorRuntime` 或 `SpawnShared`（`branch-temp.ts:107` 与正常 slot 共用这两者，否则临时进程也被注入）。`runtime.ts` 只加 opts 字段、私有字段、构造函数赋值、`#openProcess` 的展开，≤ 745 行。
+    - sessions 侧类型与工具名：`host-tool-align.ts` 声明结构类型的定义源 `{definitionFor(ownerId) → {tool: {name: string} & object, bases: readonly {id, name}[]} | null; execute(ownerId, args, signal) → Promise<HostToolResult>}`（`HostToolResult` 取自 `omp/host-tools.ts`）。为免 `pool ↔ host-tool-align` 运行期成环：常量 `KB_SEARCH = "kb_search"` 与适配器（`toolName !== KB_SEARCH` 时 resolve `undefined`，否则调 `execute(ownerId, args, signal)`）放在 `pool.ts`；`host-tool-align.ts` 从 `pool.ts` 导入 `commandOn` 与 `KB_SEARCH`（单向），`pool.ts` 对定义源类型只 `import type`。适配器不加 try/catch：`execute` 同步抛错或 reject 已由 `host-tools.ts` 的 `#run` 兜成「工具执行失败」。
+    - 失败映射：`#runCommand`（`runtime.ts:296-304`）已把 `success:false` 转成 `AgentUnavailableError`、成功时返回 `response.data`；第 3 步只校验 `data.toolNames` 与 `[KB_SEARCH]`（撤下时 `[]`）深相等，不符自己抛 `AgentUnavailableError`（`translateSupervisorError` 只把这一类映射为 `agent_unavailable`）。`definitionFor` 同步抛错（DB 错误）照 `managedMcpJson` 先例包成 `AgentUnavailableError` 并带 `cause`。成功后才在命令所在的 `slot.generation` 上记清单，与 `alignModel` 同一写法。
+    - 4.2：`host-tool-register-fail` 不进 `fake-omp-host-tool.mjs` 的 `SCENARIOS`（否则接管 prompt）；`onRegister` 的非 active 分支原地按场景取 `error`（`"host tools rejected"` 或 `"unsupported"`），`fake-omp.mjs` 净增 0 行（≤ 770），文件头「其余场景」一句同改。契约用例断言 `{id:"r1", type:"response", command:"set_host_tools", success:false, error:"host tools rejected"}` 恰一帧，之后普通 probe 回合照常完成。
+    - regenerate 世界：`fake-omp.mjs:229` 的分支命令应答条件原地改为 `scenario === "branch" || scenario === "host-tool"`（净增 0 行），契约用例加一例；用 `openRegenWorld` 的 `entries` 对齐用户消息。首次派发单独断言 `negotiate_protocol,get_state,set_model,set_thinking_level,set_host_tools,prompt`；之后新建一个库、在同一代进程上 regenerate（规格 SHALL NOT 为对齐而重新 spawn，`alignModel` 见模型与强度未变不发命令）：regenerate 之前记下 `spawnedAt(world, 0).stdin.length`，202 之后增量的 `types()` 恰为 `["set_host_tools","get_branch_messages","branch","get_state","prompt"]`（先例 `session-composer-align.test.ts:630-641` 的 `first.stdin.slice(sent)`），且这帧 `set_host_tools` 的描述列出两个库；「对齐失败时 regenerate 不动分支」用 `host-tool-register-fail`：502、stdin 无 `get_branch_messages` / `branch`、分支行不变。
+    - 帧序观测：`host-tool` 场景接管每条 prompt，`frames=` probe 到不了；注册失败两例 slot 已退役。所以七个 omp-runtime 场景与两个 chat-sessions 场景一律用 `spawnedAt(world, n).stdin`（`session-approval-helpers.ts:284`）加 `types()`（先例 `session-composer-align.test.ts:619-660`），断言写到 `prompt` 为止的前缀；`tools` 恰一项、`loadMode:"essential"`、描述列出两个库，都从同一份 stdin 帧读。
+    - 「空闲回收后重新注册」：复用 `session-composer-align.test.ts:116` 的 `reclaimed()`，原地移进共享 helper（不复制，jscpd）；断言第二次 spawn 的 argv 含 `--resume <第一回合会话文件>`，且 `spawnedAt(world, 1)` 在 `prompt` 之前有 `set_host_tools`。兼作 §2.8 resume 证据，不另写 resume 用例。
+    - 「只以所有者执行」加正向对照：两个账号的 slot 同时存活（先建 A、再建 B、再让 A 派发——「最后一个所有者生效」的错法会变红）。A 用 `KB:kB` 得 `知识库 kB：未找到该知识库`、`isError:true`；B 用 `KB:kA` 对称一例；A 用 `KB:kA` 得假 RAGFlow 切片的文本。前两例假 RAGFlow 检索请求为零。用真实 `createKbSessionSearch`，第二个账号用 `zhaoliu`（`session-db-helpers.ts` 的 `PRINCIPAL_ZHAOLIU`）建会话。
+    - 未知工具名一例：注入定义源的 slot 上跑 `host-tool-parallel`，第三个调用（`other`）回 `未知工具`，`execute` 零次收到它（适配器 resolve `undefined` 的证据）。
+    - `toolNames` 不符一例（假 omp 原样回显，造不出）：`session-host-tool-align.test.ts` 单元用例桩 `runtime.command` resolve `{toolNames:["other"]}`（mock 依赖，不 mock 被测），断言抛 `AgentUnavailableError`、所记清单不变。
+    - 桩与真实：首次注册、不注册、清单变化、空闲回收、注册失败、临时进程、两个 regenerate 例用桩定义源；「只以所有者执行」与 4.5 用真实 kb 与假 RAGFlow。原地扩展既有构造器（`openRegenWorld` / `openForkWorld` / `openRecordingSession`）的 assembly 透传，不另写新构造器；库行照 `kb-settings-helpers.ts` 用 store 或 SQL 直接插入。
+    - 4.4 保持不变清单：按「知识库开启、所有者有库、又跑会话回合」grep，没有既有用例会坏（`kb-omp-env.test.ts` 开知识库但账号无库，`definitionFor` 为 `null`，零帧）。`session-kb-search-approval.test.ts` 的装配知识库关闭、不注入处理函数，照旧 `未知工具`；其文件头「Before group 4 the slot injects no host tool handler」原地改为「这个装配知识库关闭」。
+    - 4.5 迟绑定：`registerSessions`（`app.ts:314`）早于 `registerKb`（`:383`），而 `registerKb` 要读 `app.workspaces`（`:342` 才 decorate），不能前移。照 `() => modelWriteGuard` 先例：是否注入在 `:314` 以 `assembly?.kb !== undefined` 判定（与 `registerKb` 返回 `null` 等价），定义源是闭包、派发时才读 `kb.sessionSearch`。预算 `app.ts` ≤ 766 行。4.5 用例 oracle：stdin 里 `host_tool_result.result.content[0].text` 含假 RAGFlow 切片的哨兵。
+    - CK-15：照 CK-11–CK-14 写法（「由 owner 执行（agent 不得代签）。」开头），结论 `待签`，接在 CK-14 之后；`web/test/functional-checklist.test.ts` 全过。
+    - 回归命令：`npm run test:focus --workspace server -- session-host-tool-align fake-omp-host-tool omp-host-tools session-kb-search-approval session-composer session-regenerate session-fork session-undo kb-session-search kb-omp-env kb-disabled server-assembly-modules`，全部原样全绿；外加 `npm run test:focus --workspace web -- functional-checklist`。
+- [x] 4.5 装配：`app.ts` 把组 2 的 `definitionFor` / `execute` 注入 supervisor 与 pool，知识库关闭时不注入；`createApp` 级用例（假 omp `host-tool` 场景 + 假 RAGFlow）断言一个回合里 `host_tool_result` 的文本来自假 RAGFlow 的切片
+- [x] 4.6 `docs/architecture/system.md`：`sessions` 行写 host tool 的注册与分派（经注入），`kb` 行写会话检索，§4 依赖规则的 `sessions → kb` 改为「经 `app.ts` 注入，不导入」
+- [x] 4.7 验收清单 `docs/acceptance/functional-checklist.md` 的 CK 节新增 CK-15（在接上真实 RAGFlow 与真实模型的会话里问库里才有的事实，回答用到库里的切片，且助手消息里有这次检索：组 6 第二刀合入前是名为 `kb_search` 的步骤卡，之后是「知识库检索」卡），结论 `待签`，由 owner 执行（agent 不得代签）
 
 Suggested fixture level: expanded - omp 子进程治理（白盒关键路径）与共享装配入口（`app.ts`、supervisor）。
 Minimal mergeable slice: atomic - 注册逻辑与装配是同一条验证路径（4.5 的 `createApp` 用例要两者都在）；只合注册而不装配，生产里没有任何定义源，等于死代码。

@@ -4,6 +4,7 @@
  */
 import type { effectiveCapabilities } from "./composer-align.js";
 import type { ChatEvent } from "./events.js";
+import type { HostToolPort } from "./host-tool-align.js";
 import type { SpawnImpl } from "./omp/process.js";
 import type { SessionClock } from "./omp/runtime.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
@@ -63,4 +64,10 @@ export interface SessionSupervisorOptions {
    * session's file-change candidates inside one are dropped untouched. Omitted means none.
    */
   mountNamesOf?: (workspaceId: string) => ReadonlySet<string>;
+  /**
+   * The kb module's session search (`app.ts`, knowledge base on): step 3 of every dispatch registers
+   * its `kb_search` definition, and each session slot's process runs it as the session's owner.
+   * Omitted means knowledge base off: no `set_host_tools` frame, no host tool handler.
+   */
+  hostTools?: HostToolPort;
 }

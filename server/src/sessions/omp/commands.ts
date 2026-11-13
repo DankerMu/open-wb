@@ -75,7 +75,8 @@ export type RuntimeCommandFrame =
   | { type: "get_state" }
   | { type: "branch"; entryId: string }
   | { type: "set_model"; provider: string; modelId: string }
-  | { type: "set_thinking_level"; level: string };
+  | { type: "set_thinking_level"; level: string }
+  | { type: "set_host_tools"; tools: readonly object[] };
 
 // A child that never obtained a pid (spawn failed) is never live, whether or not
 // Node has reported the failure yet; 'error' alone never means "dead" (#205).

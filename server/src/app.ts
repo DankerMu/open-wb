@@ -56,7 +56,7 @@ import { createModelStore } from "./models/store.js";
 import { DEFAULT_TRASH_RETENTION_DAYS } from "./preview-config.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
-import { registerSessions } from "./sessions/index.js";
+import { type HostToolPort, registerSessions } from "./sessions/index.js";
 import type { SessionListNotifier } from "./sessions/list-events.js";
 import { ompAgentDir } from "./sessions/omp/process.js";
 import { ensureRepoRootMarker } from "./sessions/omp/repo-root-marker.js";
@@ -172,6 +172,8 @@ export interface AssemblyDependencies {
    * `models` 直接写。
    */
   modelWriteGuard?: ModelWriteGuard;
+  /** 替换 `kb` 注册时给出的会话检索（s2c-kb-session D3；测试接缝，生产省略）；省略且知识库关闭时不注入。 */
+  sessionSearch?: ReturnType<HostToolPort>;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -227,6 +229,10 @@ export interface CreateAppOptions {
 
 /** 定义在 `http/listener-shutdown.ts`（预览监听器共用）；从这里再导出，既有导入方不变。 */
 export { LISTENER_CLOSE_BUDGET_MS };
+
+/** 会话检索注入 sessions（迟绑定：句柄到派发时才读）；测试接缝与知识库都没有时不注入。 */
+const hostToolsOf = (assembly: AssemblyDependencies | undefined, read: HostToolPort) =>
+  assembly?.sessionSearch === undefined && assembly?.kb === undefined ? {} : { hostTools: read };
 
 /**
  * 装配可注入的 HTTP app。调用方拥有 db 的完整生命周期；本函数不监听也不关闭它。
@@ -311,6 +317,8 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   app.addHook("onClose", async () => {
     await mounts.closeAll();
   });
+  // `registerKb` 在后（它读 `app.workspaces`）：是否注入看 `assembly.kb`，句柄到派发时才读（迟绑定）。
+  let sessionSearch = assembly?.sessionSearch;
   const registered = registerSessions(app, {
     db,
     tokens,
@@ -339,6 +347,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.log === undefined ? {} : { log: assembly.log }),
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
     redactUpstream: upstreamRedactor(registry, runtime),
+    ...hostToolsOf(assembly, () => sessionSearch),
   });
   app.decorate("sessions", registered);
   app.decorate("workspaces", { store, sandbox });
@@ -382,6 +391,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   // 第十二个模块 `kb`（s2a-kb-ragflow D5、D18）：只收这一个依赖，store 与客户端都在模块里建。
   const kb = registerKb(app, assembly?.kb);
   modelWriteGuard ??= kb?.modelWriteGuard;
+  sessionSearch ??= kb?.sessionSearch;
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));
