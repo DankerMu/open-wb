@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { emit } from "../core/audit/index.js";
 import { createExpertStore } from "../experts/store.js";
 import type { ChatEvent } from "./events.js";
+import type { HostToolPort } from "./host-tool-align.js";
 import { registerSessionListEvents, type SessionListNotifier } from "./list-events.js";
 import type { SpawnLog } from "./omp/spawn-gate.js";
 import type { SessionSandboxPort } from "./prompt-attachments.js";
@@ -24,6 +25,8 @@ import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js
 import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import { createTurnSnapshots, type TurnSnapshotService } from "./turn-snapshot.js";
+
+export type { HostToolPort } from "./host-tool-align.js";
 
 export interface RegisterSessionsOptions {
   db: DatabaseSync;
@@ -92,6 +95,8 @@ export interface RegisterSessionsOptions {
    * the secrets themselves.
    */
   redactUpstream: (text: string) => string;
+  /** The kb module's session search, forwarded to the supervisor; omitted → knowledge base off. */
+  hostTools?: HostToolPort;
 }
 
 export function registerSessions(
@@ -136,6 +141,7 @@ export function registerSessions(
       return options.onEvent?.(sessionId, epoch, event);
     },
     ...(options.log === undefined ? {} : { log: options.log }),
+    ...(options.hostTools === undefined ? {} : { hostTools: options.hostTools }),
   });
   store.reconcileOnStartup();
   const metadata = createSessionMetadataStore(options.db, {

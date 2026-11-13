@@ -4,8 +4,8 @@
  * SQLite; precedent session-prelude-card.test.ts) over real fake-omp `host-tool` children spawned with
  * the session's `--approval-mode`. The session is moved off the default `write` over
  * `PATCH /api/sessions/:id` before its first prompt (the cap is the assembly's default `yolo`).
- * Before group 4 the slot injects no host tool handler, so both `kb_search` calls are answered
- * `未知工具`: "the calls complete" here means both steps end failed and the turn ends done.
+ * 这个装配知识库关闭（no session search, so no host tool handler), so both `kb_search` calls are
+ * answered `未知工具`: "the calls complete" here means both steps end failed and the turn ends done.
  * Oracles: `chat_approvals` rows, the recorded `approval.request` events, the `session.approval`
  * audits, the step rows and the spawn argv; never supervisor internals.
  */

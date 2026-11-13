@@ -1,7 +1,8 @@
 /**
  * Change s2c-kb-session 3.2 (#1964): omp-test-harness「假 omp host tool 场景」 — the `host-tool`,
- * `host-tool-parallel` and `host-tool-abort` scenarios in `yolo` frame order (`host-tool-register-fail`
- * is 4.2) — and「假 omp 进程契约」's id-correlated `set_host_tools` refusal of every other scenario.
+ * `host-tool-parallel` and `host-tool-abort` scenarios in `yolo` frame order — and「假 omp 进程契约」's
+ * id-correlated `set_host_tools` refusal of every other scenario. 4.2 (#1966): `host-tool-register-fail`
+ * refuses with `host tools rejected`, and `host-tool` answers the branch commands like `branch`.
  * 3.5 (#1965): `host-tool` under `write` / `always-ask` — `tool_execution_start`, then the
  * `Allow tool: kb_search` select, and `host_tool_call` only after `Approve`; any other answer ends
  * the call as denied (the fake's choice: record §2.4 did not measure Deny). Real subprocess; the
@@ -348,5 +349,70 @@ describe("fake omp set_host_tools outside the host tool scenarios", () => {
       });
       expect(check.status, check.stderr).toBe(0);
     }
+  });
+});
+
+describe("fake omp host-tool-register-fail (4.2)", () => {
+  it("refuses set_host_tools with exactly one id-correlated frame; a later probe turn runs as normal", async () => {
+    const session = startFake({ scenario: "host-tool-register-fail" });
+    await session.wait((frame) => frame.type === "ready");
+    session.write([...HANDSHAKE, { id: "r1", type: "set_host_tools", tools: [KB_SEARCH] }]);
+    await session.wait(response("r1", "set_host_tools"));
+    expect(session.frames.filter(response("r1", "set_host_tools"))).toEqual([
+      {
+        id: "r1",
+        type: "response",
+        command: "set_host_tools",
+        success: false,
+        error: "host tools rejected",
+      },
+    ]);
+    expect(await probeFrames(session)).toBe("negotiate_protocol,get_state,set_host_tools,prompt");
+    await closeSession(session);
+  });
+});
+
+describe("fake omp host-tool answers the branch commands (4.2, regenerate)", () => {
+  it("lists the fixed entries and --branch-entry, branches to a new session file, then runs its turn", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "fake-omp-host-tool-branch-"));
+    temps.push(dir);
+    const session = startFake({
+      scenario: "host-tool",
+      extraArgs: ["--approval-mode", "yolo", "--session-dir", dir, "--branch-entry", QUESTION],
+    });
+    await session.wait((frame) => frame.type === "ready");
+    session.write([...HANDSHAKE, REGISTER, { id: "gbm-1", type: "get_branch_messages" }]);
+    expect(await session.wait(response("gbm-1", "get_branch_messages"))).toEqual({
+      id: "gbm-1",
+      type: "response",
+      command: "get_branch_messages",
+      success: true,
+      data: {
+        messages: [
+          { entryId: "fake-entry-1", text: "first question" },
+          { entryId: "fake-entry-2", text: "second question" },
+          { entryId: "fake-entry-3", text: QUESTION },
+        ],
+      },
+    });
+    session.write([
+      { id: "br-1", type: "branch", entryId: "fake-entry-3" },
+      { id: "state-2", type: "get_state" },
+    ]);
+    expect(await session.wait(response("br-1", "branch"))).toEqual({
+      id: "br-1",
+      type: "response",
+      command: "branch",
+      success: true,
+      data: { text: QUESTION, cancelled: false },
+    });
+    const state = await session.wait(response("state-2", "get_state"));
+    const file = String(asRecord(state.data).sessionFile);
+    expect([file.startsWith(`${dir}/branch-`), file.endsWith(".jsonl")]).toEqual([true, true]);
+    session.write({ id: "p1", type: "prompt", message: QUESTION });
+    expect(await session.wait(isCall("h1"))).toMatchObject({
+      arguments: { question: QUESTION, kb_ids: ["k1"] },
+    });
+    await closeSession(session);
   });
 });

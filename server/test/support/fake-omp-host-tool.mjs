@@ -5,7 +5,8 @@
  * 先发 `tool_execution_start` 与 `Allow tool: kb_search` 的 select，收到 `Approve` 才发 `host_tool_call`；
  * 其它应答（`Deny`、`cancelled`）以拒绝结束这次调用——记录 §2.4 未实测 Deny，这是假 omp 的选择。
  * `host-tool-parallel`、`host-tool-abort` 不论档位都按 `yolo`。
- * 其余场景对 `set_host_tools` 回按 id 关联的 `success:false`。没有 import、不发 ready、不读 argv（档位由主程序传入）：
+ * 其余场景对 `set_host_tools` 回按 id 关联的 `success:false`：`host-tool-register-fail`（4.2，#1966；不进 SCENARIOS，
+ * 不接管 prompt）的 `error` 为 `host tools rejected`，别的为 `unsupported`。没有 import、不发 ready、不读 argv（档位由主程序传入）：
  * 帧经主程序给的 `emit` 等函数写出，调用发出后立即返回，`host_tool_result` 到达时按状态表推进，
  * 不在串行 queue 的 handler 里等结果。
  */
@@ -178,7 +179,7 @@ export function hostToolScenario(scenario, approvalMode, hooks) {
             type: "response",
             command: "set_host_tools",
             success: false,
-            error: "unsupported",
+            error: scenario === "host-tool-register-fail" ? "host tools rejected" : "unsupported",
           },
     );
   }

@@ -52,6 +52,7 @@ import {
   heldLine,
   openRegenWorld,
   QUESTION,
+  reclaimed,
   scriptedAt,
   seedDone,
   sendPrompt,
@@ -62,7 +63,6 @@ import {
 import { AGENT_UNAVAILABLE_ENVELOPE, getSessionMessages } from "./session-rest-helpers.js";
 import { probeFrames } from "./session-stop-helpers.js";
 import {
-  IDLE_MS,
   OWNER_ID,
   type RecordingWorld,
   requiredCall,
@@ -109,16 +109,6 @@ function models(frames: readonly OmpFrame[]) {
 /** The `level` of each `set_thinking_level` frame a child received, in order. */
 function levels(frames: readonly OmpFrame[]): unknown[] {
   return frames.filter((frame) => frame.type === "set_thinking_level").map((frame) => frame.level);
-}
-
-/** The n-th child once the idle timer reclaimed it and the supervisor let its capacity go. */
-async function reclaimed(world: World, index: number): Promise<void> {
-  world.clock.advance(IDLE_MS);
-  await waitDead(world, index);
-  await waitFor(
-    () => (world.fixture.supervisor.liveProcessCount() === 0 ? true : undefined),
-    "idle reclaim",
-  );
 }
 
 function regenerate(world: RecordingWorld) {
