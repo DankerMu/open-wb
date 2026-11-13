@@ -108,7 +108,7 @@ function messageIndexes(db: DatabaseSync) {
     .all();
 }
 
-/** 044's receipt sits right after 043's, once; `thinking_ms` is the last column of chat_messages. */
+/** 044's receipt sits right after 043's, once; `thinking_ms` follows 043's columns, then 052's `knowledge_bases`. */
 function expect044Applied(db: DatabaseSync): void {
   expect(POS).toBeGreaterThan(0);
   const ledger = ledgerRows(db);
@@ -122,7 +122,7 @@ function expect044Applied(db: DatabaseSync): void {
   const names = columnNames(db, "chat_messages");
   const before = COLUMNS_043.chat_messages.length;
   expect(names.slice(0, before)).toEqual(COLUMNS_043.chat_messages);
-  expect(names.slice(before)).toEqual(["thinking_ms"]);
+  expect(names.slice(before)).toEqual(["thinking_ms", "knowledge_bases"]);
   expectChatSchema(db);
 }
 
@@ -185,7 +185,7 @@ describe("migration 044 thinking_ms column: 新库与存量库", () => {
   it.each([
     ["in-memory", () => ":memory:"],
     ["new file", () => join(tempDir(), "fresh-044.db")],
-  ])("%s database has 044 right after 043 and a nullable default-free last column", (_l, path) => {
+  ])("%s database has 044 right after 043 and a nullable default-free tail column", (_l, path) => {
     withOpenDb(path(), (db) => {
       expect044Applied(db);
       expect(durationRows(db)).toEqual([]);

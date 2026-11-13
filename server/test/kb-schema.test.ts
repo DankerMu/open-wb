@@ -39,6 +39,7 @@ import {
 } from "./kb-store-helpers.js";
 
 const NEW_TABLES = ["kb_settings", "knowledge_bases", "kb_documents"];
+type SchemaRow = Record<string, unknown>;
 
 const fresh = useKbDatabases();
 
@@ -55,6 +56,21 @@ function existingSchema(db: DatabaseSync) {
     .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
     .all()
     .filter((row) => !NEW_TABLES.includes(String(row.tbl_name)));
+}
+
+/** 完整链在 050 / 051 之后还有 052（#1970）：只给 chat_messages 的表定义在 `thinking_ms` 后添一列。 */
+function with052(schema: SchemaRow[]): SchemaRow[] {
+  return schema.map((row) =>
+    row.name === "chat_messages"
+      ? {
+          ...row,
+          sql: String(row.sql).replace(
+            " thinking_ms INTEGER,",
+            " thinking_ms INTEGER, knowledge_bases TEXT NULL,",
+          ),
+        }
+      : row,
+  );
 }
 
 describe("migration 050 schema", () => {
@@ -181,7 +197,7 @@ describe("migration 050 schema", () => {
       workspaces: rows(db, "workspaces"),
     }));
     withOpenDb(file, (db) => {
-      expect(existingSchema(db)).toEqual(before.schema);
+      expect(existingSchema(db)).toEqual(with052(before.schema));
       expect(rows(db, "accounts")).toEqual(before.accounts);
       expect(rows(db, "workspaces")).toEqual(before.workspaces);
       expect(rows(db, "kb_settings")).toHaveLength(1);
@@ -322,17 +338,18 @@ describe("迁移 051 检索参数与重排模型", () => {
     ]);
     expect(before.bases).toMatchObject([{ state: "rebuild_failed", embedding_generation: 3 }]);
     withOpenDb(file, (db) => {
-      expect(untouchedSchema(db)).toEqual(before.schema);
+      expect(untouchedSchema(db)).toEqual(with052(before.schema));
       expect(rowsWithout(db, "kb_settings", RERANK_COLUMNS)).toEqual(before.settings);
       expect(rowsWithout(db, "knowledge_bases", RETRIEVAL_COLUMNS)).toEqual(before.bases);
       expect(rows(db, "kb_documents")).toEqual(before.documents);
       expect(
         db.prepare(`SELECT ${RETRIEVAL_COLUMNS.join(", ")} FROM knowledge_bases`).all(),
       ).toEqual([{ retrieval_threshold: 0.2, retrieval_vector_weight: 0.7 }]);
-      expect(ledgerRows(db).at(-1)).toEqual([25, MIGRATION_051]);
-      expect(TRACKED_MIGRATION_FILENAMES.at(-2)).toBe(MIGRATION_050);
+      const pos051 = TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_051);
+      expect(ledgerRows(db)[pos051]).toEqual([25, MIGRATION_051]);
+      expect(TRACKED_MIGRATION_FILENAMES[pos051 - 1]).toBe(MIGRATION_050);
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
-      expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 25, "integer"]]);
+      expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 26, "integer"]]);
       expectCatalogSnapshot(db, COMPLETE_CATALOG);
     });
   });
