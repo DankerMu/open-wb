@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { createEmbeddingScript } from "./fake-upstream-embeddings.mjs";
 import { createFailureScript } from "./fake-upstream-failures.mjs";
+import { kbSearchReply } from "./fake-upstream-kb.mjs";
 import {
   INTERLEAVE_MARKER,
   PACE_MARKER,
@@ -248,7 +249,7 @@ async function readChatMessages(request, response, requests) {
     writeJson(response, 400, { error: { message: "Invalid request" } });
     return undefined;
   }
-  return { messages: body.messages, model: body.model };
+  return { messages: body.messages, model: body.model, tools: body.tools };
 }
 
 function serveChat(response, gates, parsed, { scope, failures }) {
@@ -260,13 +261,23 @@ function serveChat(response, gates, parsed, { scope, failures }) {
   const created = Math.floor(Date.now() / 1000);
   const model = typeof parsed.model === "string" ? parsed.model : "fake";
   const contentChunk = (delta) => chunk(id, created, model, delta, null);
-  if (failures.serve(response, lastUserTextFrom(parsed.messages), contentChunk)) {
+  const text = lastUserTextFrom(parsed.messages);
+  if (failures.serve(response, text, contentChunk)) {
+    return;
+  }
+  const kb = kbSearchReply(text, parsed.tools, toolsAfterLastUser(parsed.messages));
+  if (kb?.call !== undefined) {
+    writeSse(response, toolFrames(id, created, model, kb.call));
+    return;
+  }
+  if (kb !== undefined) {
+    writeSse(response, textFrames(id, created, model, [], kb.parts));
     return;
   }
   const answered =
-    scope === "turn" ? toolFollowsLastUser(parsed.messages) : hasToolRole(parsed.messages);
+    scope === "turn" ? toolsAfterLastUser(parsed.messages) > 0 : hasToolRole(parsed.messages);
   if (!answered) {
-    const call = toolRoundCall(lastUserTextFrom(parsed.messages));
+    const call = toolRoundCall(text);
     writeSse(response, toolFrames(id, created, model, call));
     return;
   }
@@ -568,28 +579,29 @@ function hasToolRole(messages) {
 }
 
 /**
- * `toolRoundScope: "turn"`：最后一条 user 消息之后有没有 tool 消息。历史里没有 user 消息时
- * 看的就是整段历史，与缺省判定同一结果（规格条文没有点名这种历史；实测三种这样的历史两种
- * 判定逐字节相同，见 fake-upstream-tool-rounds.test.ts 的「for a history with …」）。
+ * 最后一条 user 消息之后的 tool 消息条数：`"turn"` 判定（> 0）与 kb 标记的阶段（#1974）。历史里
+ * 没有 user 消息时数整段历史，`"turn"` 与缺省判定同一结果（规格条文没有点名这种历史；实测三种
+ * 这样的历史两种判定逐字节相同，见 fake-upstream-tool-rounds.test.ts 的「for a history with …」）。
  */
-function toolFollowsLastUser(messages) {
+function toolsAfterLastUser(messages) {
+  let count = 0;
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (message === null || typeof message !== "object") {
       continue;
     }
     if (message.role === "tool") {
-      return true;
+      count += 1;
     }
     if (
       message.role === "user" &&
       !isImageAttachment(messages, index) &&
       !isReminderOnly(message)
     ) {
-      return false;
+      return count;
     }
   }
-  return false;
+  return count;
 }
 
 /**
@@ -634,7 +646,7 @@ function evalArgs(code) {
   return JSON.stringify({ language: "js", code });
 }
 
-/** 工具轮只发一个调用：WRITE、TODO、ASK（#1566）、浏览器 OPEN、SHOT（#1527）依次优先，都没有即缺省 bash。 */
+/** 工具轮只发一个调用：kb 标记（#1974，serveChat 里）最先，其后 WRITE、TODO、ASK（#1566）、浏览器 OPEN、SHOT（#1527）依次优先，都没有即缺省 bash。 */
 function toolRoundCall(text) {
   if (text.includes(WRITE_MARKER)) {
     return { name: "write", arguments: WRITE_ARGS };
@@ -680,12 +692,12 @@ function toolFrames(id, created, model, call) {
   ];
 }
 
-function textFrames(id, created, model, think) {
+function textFrames(id, created, model, think, parts = REPLY_PARTS) {
   const frames = [
     chunk(id, created, model, { role: "assistant" }, null),
     ...thinkFrames(id, created, model, think),
   ];
-  for (const part of REPLY_PARTS) {
+  for (const part of parts) {
     frames.push(chunk(id, created, model, { content: part }, null));
   }
   frames.push(chunk(id, created, model, {}, "stop"));

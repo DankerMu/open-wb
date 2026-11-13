@@ -117,6 +117,10 @@
 | 组 8：欢迎态交接与失败重发 | 是 | `adopt` 交接；上传失败 / 停止后再发的用例 |
 | 组 8：异步竞态（选择列表重取） | 是 | 迟到应答被丢弃的用例 |
 | 组 8：服务端 / 权限 | 否 | 纯 web；判定与 404 已在 #1971 |
+| 组 9：夹具行为面（标记三阶段与生效条件） | 是 | 「标记的三个阶段」与「不生效」逐字节对比缺省回合 |
+| 组 9：Canonicality（回合计数） | 是 | `toolFollowsLastUser` 原地改为计数，跳过规则只一份；`fake-upstream-tool-rounds.test.ts` 原样全绿 |
+| 组 9：既有标记回归 | 是 | 优先级三例（ERROR、FAKE_STATUS、WRITE）与正文阶段先于 THINK 一例；`test:focus fake-upstream` 全部既有用例 |
+| 组 9：行数上限 | 是 | `fake-upstream.mjs` ≤ 793；新逻辑只在兄弟文件 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -423,8 +427,79 @@ Minimal mergeable slice: atomic - 入口、标签与发送是同一个用户动�
 
 ## 9. 夹具与真实 omp 回归（omp-test-harness「受控上游知识库检索标记」；omp-runtime「host tool 的真实 omp 回归」）
 
-- [ ] 9.1 核对 Context：`fake-upstream.mjs:263-272` 的「是否已回答」判定与 `toolRoundCall`（:638-657）、`fake-upstream-pace.mjs` 的兄弟模块写法、`server/test/omp-official-*.test.ts` 的门控与 stdout tee
-- [ ] 9.2 测试先行后实现：新文件 `server/test/support/fake-upstream-kb.mjs`（按本回合 tool 消息条数分三阶段，只在 `tools` 含 `kb_search` 时生效），`fake-upstream.mjs` 只加分派的几行；用例放新文件 `server/test/fake-upstream-kb.test.ts`（「标记的三个阶段」）
+- [x] 9.1 核对 Context：`fake-upstream.mjs:263-272` 的「是否已回答」判定与 `toolRoundCall`（:638-657）、`fake-upstream-pace.mjs` 的兄弟模块写法、`server/test/omp-official-*.test.ts` 的门控与 stdout tee
+- [x] 9.2 测试先行后实现：新文件 `server/test/support/fake-upstream-kb.mjs`（按本回合 tool 消息条数分三阶段，只在 `tools` 含 `kb_search` 时生效），`fake-upstream.mjs` 只加分派的几行；用例放新文件 `server/test/fake-upstream-kb.test.ts`（「标记的三个阶段」）
+  - 组 9 首刀约定（#1974 fixture 审查补；9.1–9.2 照此实现与测试）：
+    - 9.1 核对结论（fake-upstream.mjs 781 行，余 19 行）：
+      - `readChatMessages`（:231-252）只带出 `{messages, model}`。
+      - 判定是否工具轮，`toolFollowsLastUser`（:575-593）与 `lastUserTextFrom`（:498-507）共用两条跳过规则：`isImageAttachment` 与 `isReminderOnly` 都不算 user。
+      - `textFrames`（:683）只写 `REPLY_PARTS`。
+      - `toolFrames`（:659）写一个调用。
+    - 主文件只做以下几处改动，合计 ≤ 12 行，改完 ≤ 793：
+      - 计数（Code Canonicality）：
+        - `toolFollowsLastUser` 原地改为 `toolsAfterLastUser(messages)`，返回最后一条 user 消息之后 `role:"tool"` 消息的条数。
+        - 跳过规则不变，没有 user 消息时数整段历史。
+        - 原判定写成 `toolsAfterLastUser(messages) > 0`。
+        - 注释原地改：:570-574 改为计数的说法；:637 的工具轮优先级注释注明 kb 标记先于 WRITE。
+        - 不另写一份跳过规则。
+        - `fake-upstream-tool-rounds.test.ts` 原样全绿。
+      - `readChatMessages` 多带出 `tools: body.tools`，原样传，不校验。
+      - `textFrames` 加一个正文参数，缺省为 `REPLY_PARTS`。
+      - 分派：
+        - 位置在 `serveChat` 里 `failures.serve` 之后、`answered` 判定之前。
+        - 调 `kbSearchReply(lastUserTextFrom(messages), tools, toolsAfterLastUser(messages))`。
+        - 返回调用时写 `toolFrames`，返回正文时写 `textFrames(id, created, model, [], parts)`，返回 `undefined` 时照旧往下走。
+    - 优先级：
+      - `WORKBUDDY_FAKE_ERROR` 与 failures 标记先于 kb 标记。
+      - kb 标记生效时，先于 `toolRoundScope` 判定和其余工具 / 正文标记（WRITE、TODO、ASK、浏览器、THINK、PACE、INTERLEAVE、UI_WALK 闸门）。规格条文没有点名组合，这是本夹具的选择。
+    - 计数与 `toolRoundScope` 无关：
+      - 永远按「最后一条 user 之后」数。
+      - 所以在缺省 `"history"` 下，第二回合带标记也从 0 条开始。真实 omp 每回合重发整段历史，9.3 需要这一点。
+    - 新文件 `server/test/support/fake-upstream-kb.mjs`（零依赖兄弟模块，照 `fake-upstream-pace.mjs` 的文件头写法）：
+      - 只导出 `kbSearchReply(text, tools, toolCount)`，返回三种之一：`undefined`、`{ call: { name: "kb_search", arguments } }`、`{ parts: ["已根据知识库检索结果作答。"] }`。
+      - `fake-upstream.d.mts` 不改。
+      - 生效条件：`tools` 是数组，并且某一项满足 `item?.function?.name === "kb_search"`。`tools` 不是数组、缺省或各项畸形，一律按无标记处理，不抛错。
+      - 标记：
+        - `WORKBUDDY_KB_SEARCH:` 首次出现处决定。
+        - `kbId` 从冒号之后取到下一个空白为止（`/\s/u`，含 U+3000，与 HOLD_AT 同），或取到文本末尾。
+        - 取到空串即视为无标记。
+      - 问句：
+        - 从 user 文本里删去首个 `WORKBUDDY_KB_SEARCH:<kbId>` 子串，再去掉首尾空白。
+        - 中间的空白不合并。
+        - 文本里其余标记字样原样保留（规格只说去掉本标记）。
+      - `arguments` 是 JSON 字符串，即 `JSON.stringify({ question, kb_ids: [kbId], i })`，键序固定：
+        - 0 条 tool 消息：`question` 为问句，`i` 为 `第 1 轮`。
+        - 1 条：`question` 为问句加 ` 详细说明`（前有一个半角空格），`i` 为 `第 2 轮`。
+        - ≥ 2 条：返回正文。
+    - 用例（新文件 `server/test/fake-upstream-kb.test.ts`）：
+      - 期望值一律照规格写字面量，不 import 夹具常量。
+      - 辅助函数（pin / post）在新文件里只写本文件要用的最小一份，不搬 `gateRun` 之类；`make anti-drift` 绿。
+      - 走真实 HTTP（`startTrackedFakeUpstream` / `streamSnapshot`，照 `fake-upstream-tool-rounds.test.ts`）。
+      - 「标记的三个阶段」：
+        - user `WORKBUDDY_KB_SEARCH:k1 工单超时`，`tools` 含 `kb_search`。
+        - 带 0、1、2 条 tool 消息：前两次的调用名为 `kb_search`，`arguments` 逐字节等于规格的 JSON（含 `i`），finish 为 `tool_calls`。
+        - 第三次 content 拼起来恰为 `已根据知识库检索结果作答。`，finish 为 `stop`。
+        - 带 3 条时同样回正文。
+      - 不生效：
+        - `tools` 不含 `kb_search`（含别的工具）、`tools` 缺省，以及 `tools` 畸形（非数组；项为 `null`、缺 `function`）。
+        - 每种都与去掉标记后的同一请求相比，整段响应文本在固定随机 id 与 `created` 之后逐字节相同；0 条时为缺省 bash 调用，2 条时为缺省正文。
+      - 空 `kbId`（`WORKBUDDY_KB_SEARCH: 工单超时`）按无标记处理。
+      - 问句：
+        - 标记在句中（`前文 WORKBUDDY_KB_SEARCH:k1 后文`）时问句为 `前文  后文`（两个空格）。
+        - 以全角空格结束的 kbId（`WORKBUDDY_KB_SEARCH:k1　工单`）取 `k1`。
+      - 计数：
+        - 跳过规则：tool 消息之后跟一条 reminder-only user 或一条 `Attached image(s) from tool result:` user，都不重置计数。
+        - 跨回合：前一回合有 tool 消息，新 user 带标记、其后 0 条时回第 1 轮。缺省与 `"turn"` 两种 scope 各一例。
+      - 优先级：
+        - 同一文本带 `WORKBUDDY_FAKE_ERROR` 时仍回 500。
+        - 带 `WORKBUDDY_WRITE` 时回的是 `kb_search` 而不是 write。
+        - 带 `WORKBUDDY_FAKE_STATUS=503`（failures 标记，判定在 `failures.serve`，晚于 ERROR）时回 503，证明分派在 `failures.serve` 之后。
+        - 正文阶段先于正文标记：带 `WORKBUDDY_THINK`、其后 2 条 tool 消息时没有 `reasoning_content`，content 恰为 `已根据知识库检索结果作答。`，finish 为 `stop`。
+    - 回归命令：`npm run test:focus --workspace server -- fake-upstream`，覆盖全部既有 fake-upstream 用例。
+    - 下游（#1975 / 9.3）：
+      - 请求记录只有 `{model, messages, maxTokens}`，看不到 tool 消息内容，本刀不扩记录。9.3 要断言上游 tool 消息不含 `details` 时，可把 `omp-official-rpc-ui.test.ts:202-238` 的 `recordBodies` 与 :251-269 的 `toolResultText` 原地移到共用 support 复用，不复制。
+      - `tools` 项形状 `{type:"function", function:{name}}` 是 OpenAI 惯例，仓库里没有 omp 上游请求的实测记录。9.3 先断言请求体 `tools` 含 `kb_search`，否则形状不符时标记静默失效，只会退回缺省 bash 回合。
+      - 真实 omp 的 user 文本会带服务端的引用后缀，`question` 会把它一起带上。9.3 要么用 `promptSuffix` 的实际输出算期望，要么在不带引用的会话里跑；后缀仍须满足检索端的 `question` 判定（≤1000 码点、除 `\t` `\n` 外无 C0）。
 - [ ] 9.3 新文件 `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1` 门下）实现「两轮检索」，断言第二、第三次上游请求的 tool 消息只含切片文本、不含 `details` 的任何内容；本机运行并在 PR 附命令、退出码与输出；验收清单 CK 节新增 CK-18（真实模型在构造的证据不足场景下自行第二次调用 `kb_search`），结论 `待签`，由 owner 执行
 
 Suggested fixture level: expanded - 端到端证明白盒关键路径在真实二进制上成立（production-like runtime）。
