@@ -105,6 +105,18 @@
 | 组 7 第三刀：旧用例兼容 | 是 | 只许加键与 `knowledgeBases: []`；grep 清单进 PR |
 | 组 7 第三刀：行数上限 | 是 | 「行数预算」条 |
 | 组 7 第三刀：事件流 / fork 与撤回应答 / 会话视图 | 否 | 规格不带引用；视图留给 #1973 |
+| 组 8：入口按知识库状态显隐 | 是 | 「关闭时没有入口」两例 |
+| 组 8：公共 API 请求形状（prompt body） | 是 | 「引用并发送」「欢迎态暂存」body 逐键 |
+| 组 8：输入框状态与清空时机 | 是 | 切换 / 回欢迎态 / fork / 撤回清空；拒绝后保留 |
+| 组 8：上限与发送启用条件 | 是 | 「空白草稿与上限」 |
+| 组 8：共享呈现（会话视图 + 气泡） | 是 | 「受理后与刷新后一致」；视图字面量只加键 |
+| 组 8：可访问名与下游选择器（#1976） | 是 | 「下游」条；用例按可访问名查询 |
+| 组 8：亮暗与窄视口 | 是 | 截图亮 / 暗 / 390；只用 `--wb-*` 与拷入层组件 |
+| 组 8：行数上限 | 是 | 「行数预算」条；`use-chat-session.ts` 先移出再加 |
+| 组 8：Canonicality（状态读取与状态字样） | 是 | `useKbEnabled` 与 `STATE_MARK` 原地移到 `lib/kb-status.ts` 共用；中心页用例原样全绿；`make anti-drift` |
+| 组 8：欢迎态交接与失败重发 | 是 | `adopt` 交接；上传失败 / 停止后再发的用例 |
+| 组 8：异步竞态（选择列表重取） | 是 | 迟到应答被丢弃的用例 |
+| 组 8：服务端 / 权限 | 否 | 纯 web；判定与 404 已在 #1971 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -368,7 +380,7 @@ Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可
       - 服务端用例直接加进 `server/test/prompt-knowledge-bases.test.ts`（378 → ≤ 600），复用该文件已有的 `openKbWorld`（`openWorld(undefined, kb)` + `createKbStore(...).createBase`；库 id 用 32 位十六进制，名 `产品文档`），不另开文件、不再抄一份世界。
         - 「受理与快照」：同一会话先发一条不带引用的 prompt（结束其回合），再带引用受理 202，读快照：带引用的用户消息 `knowledgeBases` 为 `[{id, name:"产品文档"}]`，无引用的用户消息（NULL 列）与助手消息 `[]`；经 `DELETE /api/kb/bases/:id` 删库后再读，值不变。另一例带外把合法列表写到助手行：快照 200、该助手消息 `[]`。
         - 「坏值」：带外写 `not json`、`[{"id":"k1"}]`、`[{"id":"k1","name":"x","extra":1}]` 三例，快照 200、该消息 `[]`、列原文未变。
-        - 键集：每条消息恰十四键（列出）、引用元素恰两键。
+        - 键集：只断言引用元素恰两键；消息十四键在权威文件原地改（文件头「计数断言原地改」）。
       - `session-fork.test.ts`（≤ 800）：#1971 的「分叉拷贝引用」用例原地加断言——新会话快照里被拷贝的第一条用户消息 `knowledgeBases` 为 `[{id:"k1",name:"产品文档"}]`，201 body 仍恰三键。
       - 服务端消息键集的既有断言（`session-prompt-attachments`、`session-approval-snapshot`、`session-snapshot-segments`、`message-undo-state`、`session-snapshot-metadata`、`session-composer-align`；消息字面量在 `session-store`、`session-snapshot`、`session-store-stopped` 与 `session-rest-helpers.ts:46`）原地改为十四键；唯一许可改动是在键集清单里加 `knowledgeBases`、在期望消息字面量里加 `knowledgeBases: []`。
       - web 新文件 `web/test/session-contract-knowledge-bases.test.ts`：「知识库引用的解析与发送」——用户消息带 `[{id:"k1",name:"产品文档"}]` 解析成功且 `toStrictEqual` 保留；缺键、元素多键、元素缺键、`id` 或 `name` 为空串或非字符串、非数组、助手消息非空，各整份快照拒绝（`getMessages` 以 `request_failed` 拒绝）；`prompt` 以 `["k1"]` 发 body 恰 `{message, knowledgeBases:["k1"]}`、以 `[]` 与缺省发 body 不含该键、与附件同发时恰三键。
@@ -386,6 +398,25 @@ Minimal mergeable slice: 7.1–7.2 为首刀：只加可空列，既有代码不
 - [ ] 8.2 测试先行（新文件 `web/test/chat-kb-refs-state.test.ts` 与 `web/test/chat-kb-ref-picker.test.tsx`）后实现：引用状态放新文件 `web/src/features/chat/kb-refs-state.ts`，选择列表与标签放新组件 `web/src/features/chat/kb-ref-picker.tsx`；`turn-actions.ts` 只加 body 的一个参数；`use-chat-session.ts`（796 行）只加引用状态的接线，放不下时先把欢迎态首次发送（既有逻辑）原地移进兄弟文件再加；覆盖「引用并发送」「关闭时没有入口」「空白草稿与上限」「欢迎态暂存」，以及分叉 / 撤回回填时清空引用
 - [ ] 8.3 测试先行（新文件 `web/test/chat-kb-ref-bubble.test.tsx`）后实现：用户气泡的 `引用的知识库` 列表，覆盖「受理后与刷新后一致」
 - [ ] 8.4 验收清单 `docs/acceptance/functional-checklist.md` 的 CK 节新增 CK-17（在输入框「+」里引用一个库再发送，用户气泡列出引用的库，刷新后仍在；欢迎态暂存的引用随首条消息发出），结论 `待签`，由 owner 执行（agent 不得代签）
+  - 组 8 约定（#1973 fixture 审查补；8.1–8.4 照此实现与测试）：
+    - 知识库状态（复用，Code Canonicality）：`center/page.tsx:18-35` 的私有 `useKbEnabled` 原地移到新文件 `web/src/lib/kb-status.ts` 并导出，签名改为 `useKbEnabled(client: ApiClient)`（不依赖 `useAuth`；中心页传它已有的 client），语义不变——每个 client 读一次、在途 `null`、失败视为未开启。会话页用同一个 hook；`enabled === true` 才给出入口，在途、失败、关闭都没有入口。不轮询、不在会话切换时重读；中心页既有用例原样全绿。
+    - 入口：`capability-bar.tsx` 的 `CommandMenu` 在 `上传文件` 之后（没有该项时在最前）、`选择专家…` 之前加一项 `引用知识库…`，由一个可选 prop 决定有无（无 prop 即不渲染）；点选打开选择列表，菜单关闭时焦点交给它（与 `选择专家…` 同一 `picked` 写法）。
+    - 选择列表：新组件 `web/src/features/chat/kb-ref-picker.tsx`，照 `expert-picker.tsx` 的对话框写法——`Dialog` 标题 `引用知识库`（可访问名），每次打开在事件里重取一次 `client.listKnowledgeBases()`（不在 effect 里），只采用本次打开的结果；每个库一个 `button[aria-pressed]`，显示库名，非 `ready` 附状态字样——来源是 `center/kb/list.tsx:36-40` 的 `STATE_MARK`（按 `BaseView.state`），原地移到 `web/src/lib/kb-status.ts` 导出、中心列表改为引用它（不用 `documents-table.tsx` 的文档状态表）——同样可选；点选切换引用、不关闭；已引用 5 个时其余未选项 `disabled`；读取失败显示该失败的 `message`，不改已有引用。
+    - 引用状态：新文件 `web/src/features/chat/kb-refs-state.ts`，纯函数（`toggle` / `remove` / 上限 5 / 按加入次序）加一个 hook。状态只在页面内存，形如 `{ owner, refs }`，`owner` 为当前草稿归属（已选会话 id 或欢迎态）：渲染所在归属与 `owner` 不同即清空（切换会话、回到欢迎态）；client 换了（换账号）清空。欢迎态交接：hook 导出 `adopt(sessionId)`，把 `owner` 改为新会话 id、保留引用，在 `createAndSelect` 里与 `attachments.adopt(session.id, …)` 同处调用（`navigate` 之前），所以首次发送那次 prompt 发出时引用还在。`navigate(..., { flushSync: true })` 可能先渲染出「当前会话已是新 id、`owner` 仍是欢迎态」的一帧：`adopt` 须先写一个 ref（与附件的 `heirRef` 同一做法，`attachments-state.ts:67,340`），归属不符的那一帧只是不显示、不删除，真正清空只发生在用户切走时。
+    - 标签：选择器组件同文件导出标签区，经 `composer.tsx` 现有的 `attachments` ReactNode 插槽（`:76,136`）与附件标签一起放入（`composer.tsx` 不改或只改插槽内容的组合处）——`role="list"`、可访问名 `引用的知识库`，与附件标签同在文本框上方、输入框容器之内；每项库名加 `移除 <库名>` 按钮；无引用时不渲染。引用不改变 `发送` 的启用条件。
+    - 发送（`turn-actions.ts`）：`send()` 时读当前引用、不清空，`prompt` options 多传 `knowledgeBases`（按标签次序的 id；空时由 API 客户端省略该键）；受理（`prompt` 的 `.then` 里 `owned()` 成立）后清空；未受理（400/404、上传失败、停止）不动，引用留在原归属并按既有路径显示拒绝的 message——不在 `failOwnedPrompt` 里放回任何东西。回填：撤回（`:633-634`，同一会话）显式清空；分叉（`:557-559`）靠其后的 `selectSession` 切换会话清空，不另写。欢迎态首次发送（含先上传再 prompt 的流程）那唯一一次 prompt 带交接过来的引用。
+    - 会话视图与气泡：`stream.ts` 的 `ChatMessageView` 加 `knowledgeBases`，`chatStateFromSnapshot` 逐字段映射、`emptyAssistant` 为 `[]`（stream.ts 779 → ≤ 784）；`runtime-convert.ts` 的 `ChatMessageCustom` 加该键并透传；`message-thread.tsx` 的用户气泡在 `MessageAttachments` 之后渲染 `引用的知识库` 列表（`role="list"`，每项纯文本库名，不是链接或按钮）；无引用不渲染，助手消息恒不渲染。受理后的气泡来自受理后重装的快照（页面没有乐观用户消息），与刷新同一来源。
+    - `use-chat-session.ts`（796 行，余 4 行）必做第一步：先把 `createAndSelect`（`:516` 起到其依赖数组结束约 `:620`，欢迎态建会话与交接；所用 ref 作参数传入）原地移进新兄弟文件 `web/src/features/chat/create-and-select.ts`（一个由 `use-chat-session.ts` 调用的 hook / 函数，不改行为），单独跑既有欢迎态用例全绿（含 `chat-page-welcome-handoff`），再加引用状态的接线。移出后 `use-chat-session.ts` ≤ 790。
+    - 用例：
+      - `web/test/chat-kb-refs-state.test.ts`：纯函数的 toggle / remove / 上限 / 次序。
+      - `web/test/chat-kb-ref-picker.test.tsx`（页面级，`chat-page-support.tsx` 的 `renderChatPage` 加 fetch 路由；默认路由 `centerRoutes()` 的 kb 状态是关闭，开启的世界覆盖该路由；可拆出 `chat-kb-ref-support.tsx`）：「引用并发送」（body 逐键 `{message:"查一下", knowledgeBases:[id]}`、受理后列表消失）、「关闭时没有入口」（`enabled:false`、状态读取失败两例）、「空白草稿与上限」（只有引用时 `发送` 禁用；5 个后其余项禁用）、「欢迎态暂存」（恰一次 `createSession`、恰一次 prompt 带引用；另一例带附件时也只有那一次 prompt 带引用）、非 `ready` 库可选、读取失败显示 message 且引用不变、再选取消、移除按钮、400/404 拒绝后引用保留、切换会话 / 回欢迎态 / 换账号清空、fork 与撤回回填后清空；欢迎态首次发送在上传阶段失败或按 `停止` 后，引用留在新会话上，再次发送没有第二次 `createSession`、那一次 prompt 带这些引用；选择列表先开一次（应答挂起）、关闭再开，先前那次迟到的应答被丢弃，只显示本次的结果。
+      - `web/test/chat-kb-ref-bubble.test.tsx`：「受理后与刷新后一致」——受理后重装的快照与重新打开会话的快照都给出一项 `产品文档`，气泡文本为 `查一下` 且不含 `kb_search`；助手消息与无引用用户消息没有该列表。
+      - 既有用例唯一许可改动：视图形状字面量（带 `retrying` / `thinkingActive` 的）原地加 `knowledgeBases: []`，不改断言；`CommandMenu` 的菜单项次序断言若因新项变化，只在 kb 开启的世界里出现新项，关闭的世界原样全绿。实施时 grep 清单写进 PR。
+    - 证据（AGENTS「UI 声明需截图」）：本机服务 + Playwright `page.route` 桩，桩按 web 严格形状——`/api/kb/status` 开启时恰为 web 解析器的全部键（以 `api-kb.ts` 为准）、`/api/kb/bases` 两个库（`产品文档` ready、`客服问答` rebuilding）按 `BaseView` 全键、prompt 截获断言 body 恰 `{message:"查一下", knowledgeBases:[<产品文档 id>]}` 后 202、受理后快照消息恰十四键（用户消息带引用、助手消息 `knowledgeBases: []`）。逐张期望：① 选择列表打开，两项，`客服问答` 带 `重建中`；② 输入框上方 `引用的知识库` 一项 `产品文档`，有 `移除 产品文档` 按钮；③ 受理后气泡下 `引用的知识库` 恰一项 `产品文档`，气泡文本 `查一下`、不含 `kb_search`，输入框标签区消失。①②③ 各截 1280 亮、1280 暗、390 宽；`console` error 与 `pageerror` 为零；脚本放 scratchpad，截图只存本地、PR 写明所见。
+    - CK-17 行（接 CK-16，`待签`，由 owner 执行）：操作——由 owner 执行（agent 不得代签）。在 CK-15 同一台服务上，以 `zhangsan` 先在「中心」的「知识库」tab 确认有已入库的「规范库」（若另有非 ready 的库一并看）；在一个已选会话里打开输入框「+」菜单选 `引用知识库…`，选「规范库」后关闭列表，输入一句话发送，等受理后刷新页面；再回到欢迎态，同样引用「规范库」后输入一句话发送；亮 / 暗主题与 390 宽各看一次。期望——「+」菜单在 `上传文件` 之后有 `引用知识库…`；选择列表列出全部库，非 ready 的库带状态字样且同样可选；选中后输入框上方 `引用的知识库` 一项「规范库」并带移除按钮；受理后该标签区消失，用户气泡下方 `引用的知识库` 一项「规范库」，气泡文本里没有引用说明；刷新后气泡仍是这一项；欢迎态那次发送后进入新会话，其用户气泡同样列出「规范库」；三种外观下无横向溢出、无错误提示（引用只是给模型的提示，不要求模型一定检索）。
+    - 行数预算：`stream.ts` ≤ 784；`turn-actions.ts` 760 → ≤ 775；`use-chat-session.ts` ≤ 790（先移出 `createAndSelect`）；`center/page.tsx`、`center/kb/list.tsx` 只减不增；`capability-bar.tsx` 415 → ≤ 440；`message-thread.tsx` 407 → ≤ 430；`conversation-view.tsx` ≤ 450；`runtime-convert.ts` ≤ 95；新文件各 ≤ 300；新测试文件各 ≤ 600。
+    - 下游（#1976 ui-walk）依赖：菜单项文字 `引用知识库…`、对话框可访问名 `引用知识库`、标签区与气泡列表可访问名 `引用的知识库`、prompt body 的 `knowledgeBases`。
+    - 回归命令：`npm run test:focus --workspace web -- chat-kb-refs-state chat-kb-ref-picker chat-kb-ref-bubble chat-composer chat-attachments chat-capability chat-stream chat-runtime-convert chat-thread chat-page-plus-menu chat-expert-picker chat-fork-button chat-undo chat-page-welcome center functional-checklist`（再加 grep 出的改动文件），外加 `make lint`、`make typecheck`、`make anti-drift`、`npm test --workspace web`。
 
 Suggested fixture level: expanded - 前端呈现与输入框的发送流程（shared rendering、public API 的请求形状）。
 Minimal mergeable slice: atomic - 入口、标签与发送是同一个用户动作的一条验证路径；气泡与它共用同一份引用数据，拆开后验收行 CK-17 无法在任一半上走通。
