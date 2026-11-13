@@ -8,6 +8,8 @@
  *   其余照通用映射：`code:101` 为 `kb_rejected`，`code:404` 与其它为 `kb_unavailable`；挂起超期同样是 `kb_unavailable`。
  * - `code:0` 时读 `data.chunks`：须是数组（零命中为 `[]`），每项须有非空字符串 `document_id`、字符串 `content` 与数字
  *   `similarity`，读不到即「成功应答缺字段」。其余十三个切片键与 `doc_aggs`、`labels`、`total` 都丢弃。
+ * - 中止（s2c-kb-session D6）：`signal` 原样交给 `json`，与重建器的方法同一写法：已中止的不发出，进行中被中止即放弃连接，
+ *   结果与期限到期相同，为 `kb_unavailable`。
  */
 import {
   API,
@@ -37,6 +39,8 @@ export interface RetrievalQuery {
   vectorWeight: number;
   /** 三段式 `<名称>@<实例>@<提供方>`；不给就不带重排。 */
   rerankId?: string;
+  /** 调用方的中止信号；不给就只受期限管。 */
+  signal?: AbortSignal | undefined;
 }
 
 function chunkOf(row: unknown): RetrievalChunk | undefined {
@@ -81,7 +85,7 @@ export function retrievalCalls(json: JsonCall) {
         page_size: PAGE_SIZE,
         ...(query.rerankId === undefined ? {} : { rerank_id: query.rerankId }),
       };
-      return json("POST", `${API}/retrieval`, RETRIEVE, body);
+      return json("POST", `${API}/retrieval`, RETRIEVE, body, query.signal);
     },
   };
 }

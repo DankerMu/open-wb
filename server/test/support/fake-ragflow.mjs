@@ -571,6 +571,7 @@ function entryOf(request, url, key) {
     multipart: null,
     unknown: false,
     aborted: false,
+    closed: false,
   };
 }
 

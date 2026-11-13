@@ -4,6 +4,9 @@
  * 只记录，不影响应答：实例同样只读声明的字节。
  *
  * 应答发完算一个请求结束，之后到达的字节不再记到它头上：keep-alive 的连接上下一个请求从头数。
+ *
+ * `closed`（#1962）：应答写完之前连接就关了，即 `response` 的 `close` 早于 `finish`。正常应答之后 Node 照样发 `close`，
+ * 所以只看 `writableFinished`，不看 `close` 本身。
  */
 const HEADER_END = Buffer.from("\r\n\r\n");
 
@@ -21,7 +24,10 @@ function observe(wire, chunk) {
   }
 }
 
-/** 返回 `track(request, response, entry)`：请求头解析完时调用，之后 `entry.received` 随线上字节增长。 */
+/**
+ * 返回 `track(request, response, entry)`：请求头解析完时调用，之后 `entry.received` 随线上字节增长；应答写完之前连接就关了，
+ * `entry.closed` 置为 `true`。
+ */
 export function wireCounter(server) {
   const wires = new WeakMap();
   server.on("connection", (socket) => {
@@ -34,6 +40,11 @@ export function wireCounter(server) {
     wire.entry = entry;
     response.once("finish", () => {
       Object.assign(wire, { head: Buffer.alloc(0), entry: undefined, counting: false });
+    });
+    response.once("close", () => {
+      if (!response.writableFinished) {
+        entry.closed = true;
+      }
     });
   };
 }
