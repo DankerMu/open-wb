@@ -17,7 +17,7 @@
 - [x] 1.2 按 D1 改 `.github/workflows/ci.yml` 的 ui-walk，刷新 `ci.yml.fixture`。验证：`diff -u .github/workflows/ci.yml scripts/fixtures/ci-contract/ci.yml.fixture` 退出 0。
 - [x] 1.3 按 D4 改 oracle：`check_wf` 的 ui-walk 步骤与 `harness_clean`、`inspect-ci-workflow.js` 的计数、受影响的现有变异重新锚定（不删除），加入新变异。验证：`make test-guardrails` 退出 0，新增变异逐条 PASS（即被拒）。
 - [x] 1.4 spec delta 与实现一致，验证：`npx openspec validate ci-playwright-cache --strict --no-interactive` 退出 0。
-- [ ] 1.5 CI 证据（design Required evidence）：冷缓存运行的 post 步骤保存成功；热缓存运行命中、apt 不下载；屏蔽 Ubuntu 软件源的一次运行 ui-walk 仍通过（随后撤掉屏蔽提交）。
+- [x] 1.5 CI 证据（design Required evidence），PR #1984：冷缓存 run 43368512819 下载 21.1 MB 字体包与浏览器，post 步骤 `Cache saved with key: playwright-Linux-X64-cb9dcd7c…`；热缓存 run 43369727997 `Cache hit`、`Need to get 0 B/21.1 MB of archives`、未下载浏览器、ui-walk `15 passed`；屏蔽 run 43370203452 把 `/etc/apt/apt-mirrors.txt` 的三个软件源都解析到 0.0.0.0，`apt-get update` 只报 `W:`，仍 `Need to get 0 B/21.1 MB`、`15 passed`。探针提交 8eb46294 已由下一提交撤销。
 
 Suggested fixture level: standard：只改一个 job 的一步安装，新增一个脚本。
 Minimal mergeable slice: atomic：oracle、fixture 与 ci.yml 必须同一提交，否则 guardrails 会红。
