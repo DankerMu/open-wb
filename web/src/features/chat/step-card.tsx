@@ -11,13 +11,13 @@ import type { ChatStepView } from "./stream-steps.js";
 
 type Decision = ChatApprovalView["decision"];
 
-const MARK: Record<NonNullable<Decision>, { text: string; tone: string } | null> = {
+export const MARK: Record<NonNullable<Decision>, { text: string; tone: string } | null> = {
   allow: null,
   deny: { text: "已拒绝", tone: "text-(--wb-status-error-text)" },
   timeout: { text: "超时自动允许", tone: "text-(--wb-status-warning-text)" },
 };
 
-const STATUS_TONE: Record<ChatStepView["status"], string> = {
+export const STATUS_TONE: Record<ChatStepView["status"], string> = {
   running: "text-(--wb-brand-primary-deep) animate-pulse motion-reduce:animate-none",
   done: "text-(--wb-status-success-text)",
   failed: "text-(--wb-status-error-text)",

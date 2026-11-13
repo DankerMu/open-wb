@@ -64,8 +64,10 @@ function shape(block: MessageSegment) {
       return ["text", block.text];
     case "thinking":
       return ["thinking", block.text, block.thinkingMs, block.active];
-    default:
+    case "tool":
       return ["tool", block.steps.map((step) => step.name)];
+    case "kb":
+      return ["kb", block.steps.map((step) => step.id)];
   }
 }
 
@@ -443,5 +445,140 @@ describe("turn-control「拷贝分段位置」与 message-undo「撤回连带删
       ["text", "tant at 20 ✓"],
     ]);
     expect(segmentMessage(after)).toEqual(segmentMessage(before));
+  });
+});
+
+describe("chat-web「助手消息分段」：kb_search 步骤合成一个检索块", () => {
+  const S1 = stepAt(62, "kb_search", 3);
+  const S2 = stepAt(64, "kb_search", 6);
+
+  it("read、s1、bash、s2：正文段、工具段 [read]、检索块 [s1, s2]、工具段 [bash]、正文段 再查。、正文段 答。", () => {
+    const message = source({
+      content: "先查。再查。答。",
+      steps: [stepAt(61, "read", 3), S1, stepAt(63, "bash", 3), S2],
+    });
+
+    expect(shapes(message)).toEqual([
+      ["text", "先查。"],
+      ["tool", ["read"]],
+      ["kb", [62, 64]],
+      ["tool", ["bash"]],
+      ["text", "再查。"],
+      ["text", "答。"],
+    ]);
+    expect(segmentMessage(message)?.map((block) => block.key)).toEqual([
+      "text:0",
+      "tool:61",
+      "kb:62",
+      "tool:63",
+      "text:3",
+      "text:6",
+    ]);
+  });
+
+  it("只有 kb_search 步骤：唯一的检索块，没有工具段", () => {
+    const message = source({ steps: [stepAt(1, "kb_search", 0), stepAt(2, "kb_search", 0)] });
+
+    expect(shapes(message)).toEqual([["kb", [1, 2]]]);
+  });
+
+  it("检索块在最后一块：正文段之后是检索块", () => {
+    const message = source({ content: "答。", steps: [stepAt(5, "kb_search", 2)] });
+
+    expect(shapes(message)).toEqual([
+      ["text", "答。"],
+      ["kb", [5]],
+    ]);
+  });
+
+  it("两个检索步骤之间夹工具段：s2 在别处不出块，两侧的工具步骤仍并成一个工具段", () => {
+    const message = source({
+      steps: [
+        stepAt(1, "kb_search", 0),
+        stepAt(2, "read", 0),
+        stepAt(3, "kb_search", 0),
+        stepAt(4, "bash", 0),
+      ],
+    });
+
+    expect(shapes(message)).toEqual([
+      ["kb", [1, 3]],
+      ["tool", ["read", "bash"]],
+    ]);
+  });
+
+  it("名字精确匹配：KB_search 与带尾随空格的 kb_search 都进工具段", () => {
+    const message = source({ steps: [stepAt(1, "KB_search", 0), stepAt(2, "kb_search ", 0)] });
+
+    expect(shapes(message)).toEqual([["tool", ["KB_search", "kb_search "]]]);
+  });
+});
+
+/** 一块的 kind / key / 步骤 id 列表（检索块的 `kbHits` 实时非空、快照为 null，不比深相等）。 */
+function outline(message: SegmentSource) {
+  return segmentMessage(message)?.map((block) => [
+    block.kind,
+    block.key,
+    "steps" in block ? block.steps.map((step) => step.id) : [],
+  ]);
+}
+
+const KB_HITS = {
+  intent: "查规则",
+  bases: [{ kbId: "k1", name: "产品文档", status: "ok", hits: [] }],
+};
+const KB_TURN: Array<[ChatEvent["type"], Record<string, unknown>]> = [
+  ["text.delta", { delta: "先查。" }],
+  ["step.start", { stepId: 5, name: "kb_search", detail: "{}", bodyOffset: 3, approvalId: null }],
+  ["kb.hits", { stepId: 5, ...KB_HITS }],
+  ["step.end", { stepId: 5, status: "done", output: "r1" }],
+  ["step.start", { stepId: 6, name: "read", detail: "{}", bodyOffset: 3, approvalId: null }],
+  ["step.end", { stepId: 6, status: "done", output: "r2" }],
+  ["step.start", { stepId: 7, name: "kb_search", detail: "{}", bodyOffset: 3, approvalId: null }],
+  ["kb.hits", { stepId: 7, ...KB_HITS, intent: null }],
+  ["step.end", { stepId: 7, status: "done", output: "r3" }],
+  ["text.delta", { delta: "答。" }],
+  ["turn.end", { status: "done" }],
+];
+
+describe("chat-web「助手消息分段」：检索块的实时与快照切段一致", () => {
+  it("同一回合的实时视图（含 kb.hits）与快照视图按 kind / key / 步骤 id 逐块相等", () => {
+    let state = running();
+    for (const [type, data] of KB_TURN) state = emit(state, type, data);
+    const base = chatSnapshot({ status: "done", assistantStatus: "done", content: "先查。答。" });
+    const snapshotStep = (id: number, ordinal: number, name: string, output: string) => ({
+      id,
+      ordinal,
+      name,
+      detail: "{}",
+      output,
+      status: "done" as const,
+      changes: null,
+      bodyOffset: 3,
+    });
+    base.messages[1] = {
+      ...(base.messages[1] as ChatMessageSnapshot["messages"][number]),
+      steps: [
+        snapshotStep(5, 0, "kb_search", "r1"),
+        snapshotStep(6, 1, "read", "r2"),
+        snapshotStep(7, 2, "kb_search", "r3"),
+      ],
+    };
+    const live = assistantOf(state);
+    const fromSnapshot = assistantOf(chatStateFromSnapshot(base));
+
+    const expected = [
+      ["text", "text:0", []],
+      ["kb", "kb:5", [5, 7]],
+      ["tool", "tool:6", [6]],
+      ["text", "text:3", []],
+    ];
+    expect(outline(live)).toEqual(expected);
+    expect(outline(fromSnapshot)).toEqual(expected);
+    expect(live.steps.map((step) => step.kbHits?.intent ?? null)).toEqual(["查规则", null, null]);
+    expect(live.steps.filter((step) => step.kbHits !== null).map((step) => step.id)).toEqual([
+      5, 7,
+    ]);
+    expect(fromSnapshot.steps.map((step) => step.kbHits)).toEqual([null, null, null]);
   });
 });

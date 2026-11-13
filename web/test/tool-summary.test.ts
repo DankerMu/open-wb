@@ -77,6 +77,13 @@ describe("summarizeTools", () => {
     );
   });
 
+  it("skips kb_search steps: not counted, not failed, not running (kb_search stays 其它 in the table)", () => {
+    expect(
+      summarizeTools([step("read"), step("kb_search", "failed"), step("kb_search", "running")]),
+    ).toBe("读取 1 个文件");
+    expect(toolAction("kb_search")).toBe("其它");
+  });
+
   it("counts a stopped step in its action without a suffix", () => {
     expect(summarizeTools([step("bash", "stopped"), step("read")])).toBe(
       "执行 1 条命令、读取 1 个文件",

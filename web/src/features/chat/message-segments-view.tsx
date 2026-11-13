@@ -1,5 +1,6 @@
 // 分段区的呈现（chat-web「消息线程」；change chat-interleaved-segments design D10）：按 message-segments.ts 的切段
-// 结果逐块渲染既有部件——正文段 → `MessageBody`，思考段 → `ThinkingFold`，工具段 → `ToolCallGroup`。分段区不设
+// 结果逐块渲染——正文段 → `MessageBody`，思考段 → `ThinkingFold`，工具段 → `ToolCallGroup`，检索块 →
+// `KbSearchCard`（s2c-kb-session 组 6 第二刀；旧布局不画检索卡，`kb_search` 仍是步骤卡）。分段区不设
 // 包裹元素：各块直接是消息内容容器的子元素，React key 取块键，流式增长与快照原地重装都不重挂载已有的块，
 // 所以折叠块与工具段的手动展开态保留。旧布局（切段函数判为旧布局）的消息仍由 message-thread.tsx 按 issue 910
 // 的次序渲染，这里只供它用 `MessageBody`。
@@ -10,6 +11,7 @@
 // - 折叠块的「进行中」取该段的（只展开正在思考的那一段，owner 裁定 B12），标题取该段的时长（B5）。
 // - 工具段拿到整条消息的审批，各步骤卡按 `stepId` 取配上自己的那一条画确认小标记（D12）。
 import { Component, type ReactNode } from "react";
+import { KbSearchCard } from "./kb-search-card.js";
 import { MarkdownBody } from "./markdown-body.js";
 import type { MessageSegment } from "./message-segments.js";
 import type { ChatMessageCustom } from "./runtime-convert.js";
@@ -108,8 +110,10 @@ function Block({
           thinkingMs={block.thinkingMs}
         />
       );
-    default:
+    case "tool":
       return <ToolCallGroup approvals={approvals} steps={block.steps} />;
+    case "kb":
+      return <KbSearchCard approvals={approvals} steps={block.steps} />;
   }
 }
 

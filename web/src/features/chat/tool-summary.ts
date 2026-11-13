@@ -1,6 +1,7 @@
 // 工具段摘要（chat-web「工具段摘要与折叠」；owner 裁定 B6 的对应表、B7 的后缀）。纯模块：步骤名按表精确匹配
 // （区分大小写）归入一类，各非零类按表的次序以 `、` 连接，计数按步骤（一次 `read` 读多个文件也记 1）；
 // 有失败接 `，N 步失败`，有运行中再接 `，进行中`；`stopped` 照常计入其类、不加后缀。
+import { KB_SEARCH } from "./message-segments.js";
 import type { ChatStepView } from "./stream-steps.js";
 
 type ToolAction = "执行命令" | "读取" | "新建" | "修改" | "搜索" | "其它";
@@ -33,8 +34,9 @@ export function toolAction(name: string): ToolAction {
   return BY_NAME.get(name) ?? "其它";
 }
 
-/** 一个工具段的摘要文字（展开/收起控件的可见文本与可访问名）。 */
-export function summarizeTools(steps: readonly ChatStepView[]): string {
+/** 一个工具段的摘要文字（展开/收起控件的可见文本与可访问名）；`kb_search` 步骤不计（只旧布局里出现）。 */
+export function summarizeTools(segment: readonly ChatStepView[]): string {
+  const steps = segment.filter((step) => step.name !== KB_SEARCH);
   const counts = new Map<ToolAction, number>();
   for (const step of steps) {
     const action = toolAction(step.name);
