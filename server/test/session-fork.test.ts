@@ -60,6 +60,7 @@ import {
   snapshot,
   types,
 } from "./session-regenerate-helpers.js";
+import { getSessionMessages } from "./session-rest-helpers.js";
 import { heldTurn, openStopWorld } from "./session-stop-helpers.js";
 import {
   createSession,
@@ -696,6 +697,14 @@ describe("fork alignment of messages with attachments (#1018)", () => {
     ]);
     expect(column(fresh)).toEqual(column(world.session).slice(0, 2));
     expect(snapshot(db, world.session, true)).toEqual(before);
+    // #1972: the copy's snapshot reads the copied column as the reference list.
+    const copied = await getSessionMessages(world.fixture.app, fresh, world.cookie);
+    expect(copied.statusCode).toBe(200);
+    const [first] = copied.json<{ messages: Array<Record<string, unknown>> }>().messages;
+    expect([first?.role, first?.knowledgeBases]).toEqual([
+      "user",
+      [{ id: "k1", name: "产品文档" }],
+    ]);
   });
 
   it("an entry without the reference segment aligns neither u1 nor u2: 502", async () => {

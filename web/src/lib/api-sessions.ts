@@ -179,6 +179,7 @@ export function createSessionMethods(
           body: JSON.stringify({
             message,
             ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
+            ...(options?.knowledgeBases?.length ? { knowledgeBases: options.knowledgeBases } : {}),
           }),
         },
         onUnauthorized,

@@ -36,7 +36,11 @@ import type {
 } from "./store.js";
 import type { StoredAttachment } from "./store-attachments.js";
 import type { MessageError } from "./store-error.js";
-import { admitKnowledgeBases, type KnowledgeBaseResolver } from "./store-knowledge-bases.js";
+import {
+  admitKnowledgeBases,
+  type KnowledgeBaseRef,
+  type KnowledgeBaseResolver,
+} from "./store-knowledge-bases.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { ThinkingSegment } from "./store-segments.js";
 import type { UndoState } from "./store-undo.js";
@@ -138,6 +142,8 @@ interface PublicMessage {
   undo: UndoState | null;
   /** The list recorded at admission; never re-checked against the files on a read. */
   attachments: StoredAttachment[];
+  /** The `{id, name}` list recorded at admission; never re-checked against the bases on a read. */
+  knowledgeBases: KnowledgeBaseRef[];
   steps: PublicStep[];
   /** upstream-failure「失败的公开形状」: null, or exactly {reason, message, status, detail}. */
   error: MessageError | null;
@@ -516,6 +522,7 @@ function toPublicHistory(
       approvals: message.approvals.map(toPublicApproval),
       undo: message.role === "user" ? undoOf(message.id) : null,
       attachments: message.attachments.map(toPublicAttachment),
+      knowledgeBases: message.knowledgeBases.map(({ id, name }) => ({ id, name })),
       steps: message.steps.map((step) => ({
         id: step.id,
         ordinal: step.ordinal,

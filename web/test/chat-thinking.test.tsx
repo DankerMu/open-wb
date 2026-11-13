@@ -68,6 +68,7 @@ function assistant(id: number, status: Status, fields: Partial<Message> = {}): M
     approvals: [],
     undo: null,
     attachments: [],
+    knowledgeBases: [],
     error: null,
     thinkingMs: null,
     thinkingSegments: [],

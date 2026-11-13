@@ -62,6 +62,7 @@ function answered(attachments: string[]) {
       role: "assistant",
       undo: null,
       attachments: [],
+      knowledgeBases: [],
       approvals: [],
       content: "好的",
       status: "done",

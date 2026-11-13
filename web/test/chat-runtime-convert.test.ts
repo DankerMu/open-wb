@@ -203,6 +203,7 @@ describe("附件透传：快照 → 视图消息 → 运行时消息的应用自
       approvals: [],
       undo: role === "user" ? "available" : null,
       attachments,
+      knowledgeBases: [],
       error: null,
       thinkingMs: null,
       thinkingSegments: [],

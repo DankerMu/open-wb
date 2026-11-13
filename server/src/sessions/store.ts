@@ -111,6 +111,8 @@ export interface MessageView {
   createdAt: number;
   /** The list stored at admission (#1019); `[]` for none, for an assistant and for a bad column. */
   attachments: StoredAttachment[];
+  /** The references stored at admission (#1972); `[]` for none, for an assistant and a bad column. */
+  knowledgeBases: KnowledgeBaseRef[];
   /** The three error columns (#909, store-error.ts); null for a user message and when unset. */
   error: MessageError | null;
   /** `thinking_ms` (044, store-branch.ts `thinkingMsOf`); null for a user message and when unset. */

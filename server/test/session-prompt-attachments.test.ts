@@ -63,6 +63,7 @@ const MESSAGE_KEYS = [
   "approvals",
   "undo",
   "attachments",
+  "knowledgeBases",
   "steps",
   "error",
   "thinkingMs",

@@ -161,6 +161,7 @@ function snapshotWith(fields: Partial<Assistant> = {}): ChatMessageSnapshot {
         role: "assistant",
         undo: null,
         attachments: [],
+        knowledgeBases: [],
         approvals: [],
         content: "",
         status: "running",

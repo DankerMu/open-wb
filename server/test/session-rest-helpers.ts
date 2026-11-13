@@ -39,6 +39,7 @@ export const UNBOUND_USER_VIEW = {
   approvals: [],
   undo: "unbound",
   attachments: [],
+  knowledgeBases: [],
   steps: [],
   thinking: null,
   error: null,

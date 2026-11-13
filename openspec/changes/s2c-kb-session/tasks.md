@@ -96,6 +96,15 @@
 | 组 7 第二刀：坏值容错 | 是 | `parseKnowledgeBases` 单元用例 |
 | 组 7 第二刀：行数上限 | 是 | 「行数预算」条 |
 | 组 7 第二刀：应答形状 / web / 事件流 | 否 | 本刀不改快照与 fork/撤回响应，web 不受影响（7.6–7.7） |
+| 组 7 第三刀：跨服务契约同刀（服务端十四键 + web 严格解析） | 是 | 同一 PR；两端键集用例原地改十四键 |
+| 组 7 第三刀：坏值不使快照失败、不改写列 | 是 | 「坏值」三例 |
+| 组 7 第三刀：受理时快照、读取不查库 | 是 | 删库后快照值不变 |
+| 组 7 第三刀：web 严格解析的反例 | 是 | web 新文件的六类反例整份拒绝 |
+| 组 7 第三刀：prompt 请求形状（web） | 是 | `["k1"]` / `[]` / 缺省 / 与附件同发四例 body 逐键 |
+| 组 7 第三刀：fork 拷贝在快照可见 | 是 | `session-fork.test.ts` 原地加快照断言 |
+| 组 7 第三刀：旧用例兼容 | 是 | 只许加键与 `knowledgeBases: []`；grep 清单进 PR |
+| 组 7 第三刀：行数上限 | 是 | 「行数预算」条 |
+| 组 7 第三刀：事件流 / fork 与撤回应答 / 会话视图 | 否 | 规格不带引用；视图留给 #1973 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -349,8 +358,24 @@ Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可
     - 行数预算：`store.ts` 784 → ≤ 792；`app.ts` 766 → ≤ 775；`rest.ts` 603 → ≤ 625；`prompt-attachments.ts` ≤ 250；`branch-temp.ts` ≤ 260；`branching.ts` ≤ 440；`store-branch.ts` ≤ 360；新文件 ≤ 150；`undo.ts` 447 → ≤ 455；测试文件各 ≤ 800（`session-prompt-attachments.test.ts` 651 不往里加）。
     - 非目标：消息快照第十四键与 web（7.6–7.7）；会话事件流不带引用；引用不限制 `kb_search` 的检索范围。
     - 回归命令：`npm run test:focus --workspace server -- prompt-knowledge-bases session-prompt-attachments slash-commands session-regenerate session-undo-attachments session-fork store-attachments kb-session-search session-kb-hits session-host-tool-align branch`，外加全量 `npm test --workspace server`、`make lint`、`make typecheck`、`make anti-drift`。
-- [ ] 7.6 测试先行：快照的「受理与快照」「坏值」「分叉拷贝引用」场景（服务端；需要假 omp 时同 7.4 的场景选择）与 web 的「知识库引用的解析与发送」场景；消息键集的既有断言（服务端与 web 各自的权威文件）原地改为十四键
-- [ ] 7.7 实现（跨服务契约对，同一 PR）：服务端消息视图第十四键 `knowledgeBases`；web `parseMessage` 十四键与 `ChatKnowledgeBaseRef`；`api-sessions.ts` 的 `prompt` 加 `knowledgeBases` 选项
+- [x] 7.6 测试先行：快照的「受理与快照」「坏值」「分叉拷贝引用」场景（服务端；需要假 omp 时同 7.4 的场景选择）与 web 的「知识库引用的解析与发送」场景；消息键集的既有断言（服务端与 web 各自的权威文件）原地改为十四键
+- [x] 7.7 实现（跨服务契约对，同一 PR）：服务端消息视图第十四键 `knowledgeBases`；web `parseMessage` 十四键与 `ChatKnowledgeBaseRef`；`api-sessions.ts` 的 `prompt` 加 `knowledgeBases` 选项
+  - 组 7 第三刀约定（#1972 fixture 审查补；7.6–7.7 照此实现与测试）：
+    - 服务端读：`store-branch.ts` 的 `MESSAGE_COLUMNS` 与行类型加 `knowledge_bases`，行映射用 `store-knowledge-bases.ts` 的 `parseKnowledgeBases`（NULL 与坏值都为 `[]`，不改写列），且按角色兜底——助手消息恒读 `[]`（先例 `thinkingMsOf` / `messageError`：带外写到助手行的合法列表不得让 web 整份拒绝快照）；`store.ts` 消息视图类型加 `knowledgeBases: KnowledgeBaseRef[]`（store.ts 791 → ≤ 796）；`rest.ts` 的 `toPublicHistory` 在 `attachments` 之后输出 `knowledgeBases`，每项重组为恰 `{id, name}`。快照读取不查库表（引用是受理时的记录）。会话事件流、fork 与撤回应答不变。
+    - web 解析：`web/src/lib/session-contract.ts` 加 `ChatKnowledgeBaseRef = { id: string; name: string }`、`ChatMessage.knowledgeBases`；`parseMessage` 键集十四键（在 `attachments` 之后），元素严格 `{id, name}` 两者非空字符串（`hasExactlyKeys` + `parseJsonArray`），助手消息非空整体拒绝；照 `parseMessageApprovals(value, role)` 抽一个按角色判定的 helper（Biome 复杂度）；不加规格之外的规则（条数、去重）。`ChatKnowledgeBaseRef` 与 `ChatAttachment` 同样不导出，除非有测试导入（knip）。web 侧规则只写一处，不照抄服务端（jscpd 同扫两棵树）。会话视图（`stream.ts` 的 `ChatMessageView`、`runtime-convert.ts`）不加该键，留给 #1973 的气泡。
+    - web 发送：类型在 `web/src/lib/api.ts:198-202` 的 `ApiClient.prompt` options 加 `knowledgeBases?: string[]`（与 `attachments?: string[]` 同一写法；api.ts 691 → ≤ 693）；实现在 `api-sessions.ts` 的 `prompt`，非空时 body 带该键（在 `attachments` 之后），为空或缺省省略。
+    - 用例：
+      - 服务端用例直接加进 `server/test/prompt-knowledge-bases.test.ts`（378 → ≤ 600），复用该文件已有的 `openKbWorld`（`openWorld(undefined, kb)` + `createKbStore(...).createBase`；库 id 用 32 位十六进制，名 `产品文档`），不另开文件、不再抄一份世界。
+        - 「受理与快照」：同一会话先发一条不带引用的 prompt（结束其回合），再带引用受理 202，读快照：带引用的用户消息 `knowledgeBases` 为 `[{id, name:"产品文档"}]`，无引用的用户消息（NULL 列）与助手消息 `[]`；经 `DELETE /api/kb/bases/:id` 删库后再读，值不变。另一例带外把合法列表写到助手行：快照 200、该助手消息 `[]`。
+        - 「坏值」：带外写 `not json`、`[{"id":"k1"}]`、`[{"id":"k1","name":"x","extra":1}]` 三例，快照 200、该消息 `[]`、列原文未变。
+        - 键集：每条消息恰十四键（列出）、引用元素恰两键。
+      - `session-fork.test.ts`（≤ 800）：#1971 的「分叉拷贝引用」用例原地加断言——新会话快照里被拷贝的第一条用户消息 `knowledgeBases` 为 `[{id:"k1",name:"产品文档"}]`，201 body 仍恰三键。
+      - 服务端消息键集的既有断言（`session-prompt-attachments`、`session-approval-snapshot`、`session-snapshot-segments`、`message-undo-state`、`session-snapshot-metadata`、`session-composer-align`；消息字面量在 `session-store`、`session-snapshot`、`session-store-stopped` 与 `session-rest-helpers.ts:46`）原地改为十四键；唯一许可改动是在键集清单里加 `knowledgeBases`、在期望消息字面量里加 `knowledgeBases: []`。
+      - web 新文件 `web/test/session-contract-knowledge-bases.test.ts`：「知识库引用的解析与发送」——用户消息带 `[{id:"k1",name:"产品文档"}]` 解析成功且 `toStrictEqual` 保留；缺键、元素多键、元素缺键、`id` 或 `name` 为空串或非字符串、非数组、助手消息非空，各整份快照拒绝（`getMessages` 以 `request_failed` 拒绝）；`prompt` 以 `["k1"]` 发 body 恰 `{message, knowledgeBases:["k1"]}`、以 `[]` 与缺省发 body 不含该键、与附件同发时恰三键。
+      - web 既有用例唯一许可改动：快照消息字面量与构造 helper（如 `chat-stream-support.ts` 的 `historyUser`、`chatSnapshot`）原地加 `knowledgeBases: []`，不改断言；实施时 grep 清单写进 PR。
+    - 行数预算：`store.ts` ≤ 796；`store-branch.ts` ≤ 360；`rest.ts` ≤ 620；`web/src/lib/session-contract.ts` 710 → ≤ 740；`web/src/lib/api-sessions.ts` ≤ 312；web 新测试文件 ≤ 400。
+    - 非目标：会话视图与气泡（#1973）；fork / 撤回应答带引用（规格明确不带）。
+    - 回归命令：server `npm run test:focus --workspace server -- prompt-knowledge-bases session-fork session-prompt-attachments session-approval-snapshot session-snapshot-segments message-undo-state session-snapshot-metadata session-composer-align session-store session-snapshot session-store-stopped session-rest`（键集清单文件与消息字面量文件，含 helper `session-rest-helpers.ts:46`）；web `npm run test:focus --workspace web -- session-contract api-sessions chat-stream`（再加实际改到的文件；只给快照形状字面量加键，带 `retrying` 的视图字面量不加）；外加 `make check`（AC 要求）。
 
 Suggested fixture level: expanded - 迁移、公共 API 的请求与应答形状、权限与分支对位（migration、public API、auth、legacy compatibility）。
 Minimal mergeable slice: 7.1–7.2 为首刀：只加可空列，既有代码不读它，可独立合入保绿。7.3–7.5 为第二刀：写入侧只改请求、落库与后缀，应答形状不变，web 不受影响。7.6–7.7 为第三刀：快照加键而 web 严格解析，两端必须同 PR。

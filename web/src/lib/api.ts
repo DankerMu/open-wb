@@ -198,7 +198,7 @@ export type ApiClient = {
   prompt(
     sessionId: string,
     message: string,
-    options?: ApiRequestOptions & { attachments?: string[] },
+    options?: ApiRequestOptions & { attachments?: string[]; knowledgeBases?: string[] },
   ): Promise<ChatPromptAccepted>;
   stopSession(sessionId: string, options?: ApiRequestOptions): Promise<"stopping" | "idle">;
   regenerateSession(
