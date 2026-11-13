@@ -29,6 +29,7 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 `createSession(input)` 的 input 另可含 `approvalMode`、`modelId`、`reasoningEffort`（取值域同上，`reasoningEffort` 不得为 `null`），与既有两键一样只发送所给的键。`patchSession(id, patch)` 的 `patch` 另可含这三键（同样不得为 `null`）。`prompt(id, message, options?)` 的 `options` 另可带 `attachments: string[]`：非空时 body 为 `{message, attachments}`，缺席或空数组时 body 仍恰为 `{message}`。`message` 原样发送，客户端不裁剪、不因它是空串而拒绝或省略该键（只发附件时即 `{"message":"","attachments":[…]}`；能不能发由输入框的启用条件与服务端决定）。
 `ApiClient` SHALL 另提供两个方法。`getComposerOptions(options?)`：GET `/api/composer/options`，禁止缓存，200 返回严格解析的 `{approvalModes, models, defaults, upload}`——`approvalModes` 为上述三个取值的非空、不重复数组；`models` 为非空数组，元素严格键集 `{id, name, reasoning, vision, efforts, defaultEffort}`（`efforts` 为强度名数组，`defaultEffort` 为强度名或 `null`；强度名即上述七个，出现 `auto` 或其它字符串按非法响应处理）；`defaults` 严格键集 `{approvalMode, modelId, reasoningEffort}`；`upload` 严格键集 `{maxBytes, maxFiles}`（正安全整数）；任何不符整体拒绝。
 `uploadFile(workspaceId, file, {signal?, onProgress?})`：POST `/api/workspaces/:id/uploads?name=<编码后的 file.name>`，`Content-Type: application/octet-stream`，请求体为该 `File` 本身（不读入内存、不封装 multipart）；201 返回严格解析的 `{path, name, size}`。它 SHALL 经 `XMLHttpRequest` 发送（`fetch` 没有上传进度），实现放在 `web/src/lib/` 的单独文件里并由 `api.ts` 注入 same-origin、错误信封解析、request_failed 构造与 401 通知——与其它方法共用同一套，不另行实现；`onProgress` 以 0 到 100 的整数百分比被调用（`lengthComputable` 为假时不调用）；`signal` 中止时调用 `abort()` 并以与其它方法相同的中止语义结束；非 2xx 按信封解析为 `ApiError`（含 413 `upload_too_large`、403 `sandbox_denied`、404、409 `conflict`、400），网络错误与非法响应为既有的 request_failed。
+**S2c 知识库引用**（change `s2c-kb-session`）。消息 DTO 的严格键集 SHALL 在上述最终形状之上再增加 `knowledgeBases`，即 `{id,role,content,status,createdAt,steps,approvals,thinking,undo,attachments,knowledgeBases,error,thinkingMs,thinkingSegments}`：`knowledgeBases` 为数组，每项严格键集 `{id,name}`（两者非空字符串），助手消息 SHALL 为 `[]`；违反即整份快照解析失败。`prompt(id, message, options)` 的 options 可含 `knowledgeBases: string[]`，非空时 body 带该键，为空或缺省时 SHALL 省略该键。fork 与撤回应答的解析不变。
 
 #### Scenario: 四方法请求与响应
 - WHEN 调用四方法并收到服务端对应成功响应
@@ -122,9 +123,15 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **WHEN** 另一例消息缺 `thinkingSegments` 键；或段元素多一个键、`bodyOffset` 为 `-1`、`thinkingLength` 为 `"4"`、`stepsBefore` 为 `null`；或步骤缺 `bodyOffset`、`bodyOffset` 为 `1.5`；或审批缺 `stepId`、`stepId` 为字符串；或 user 消息 `thinkingSegments` 非空
 - **THEN** 整个快照以不泄露响应内容的 request_failed 错误拒绝，不部分安装
 
+#### Scenario: 知识库引用的解析与发送
+- **WHEN** 快照的用户消息带 `knowledgeBases:[{id:"k1",name:"产品文档"}]`；另一份快照的某条消息缺 `knowledgeBases`、元素多一个键，或助手消息带非空 `knowledgeBases`
+- **THEN** 前者解析成功并保留该数组；后三者整份快照解析失败
+- **WHEN** 以 `knowledgeBases:["k1"]` 与 `knowledgeBases:[]` 各调用一次 `prompt`
+- **THEN** 前者 body 为 `{message, knowledgeBases:["k1"]}`，后者 body 不含 `knowledgeBases` 键
+
 ### Requirement: 纯会话视图归约
 `chatStateFromSnapshot` SHALL 从完整消息快照生成有序聊天视图，不编造 SSE 缺失的时间戳或 ordinal；每条消息视图 SHALL 携带 `approvals: {id,tool,title,expiresAt,decision,stepId}[]`（由快照 `approvals` 逐项映射并保持按 `id` 升序，user 消息与无审批记录的 assistant 消息恒为 `[]`；`requestedAt` 不进视图），并携带 `thinking: string|null`（取快照原值）、`thinkingMs: number|null`（取快照原值）、思考进行中标记 `thinkingActive: boolean`（由快照生成时为「消息 status 为 `running`、`thinking` 为非空字符串且 `thinkingMs` 为 `null`」）、`error`（取快照原值：`null` 或 `{reason,message,status,detail}`）与重试中标记 `retrying: boolean`（由快照生成时恒为 `false`）；每个步骤视图携带 `changes`（取快照原值，`null` 或变更数组）与 `bodyOffset`（取快照原值）；每条消息视图携带 `thinkingSegments`（取快照原值，元素 `{bodyOffset,thinkingOffset,thinkingLength,stepsBefore,thinkingMs}`，次序不变）；视图状态 `ChatState` SHALL 携带会话级的 `todo`（取快照 `todo` 原值：归一化任务清单或 `null`）。`applyChatEvent(state,event)` SHALL 为确定性的纯函数，只复制改变的分支、不修改输入；未知事件类型 SHALL 保持原状态。
-归约器 SHALL 处理服务端十三类事件：turn.start 重置对应 assistant 正文/步骤/错误并把 `approvals` 与 `thinkingSegments` 置为 `[]`、`thinking` 置为 `null`、`thinkingMs` 置为 `null`、`thinkingActive` 置为 `false`、置 running（不重置 `todo`）；thinking.delta `{messageId, delta}` 先看该 assistant 的 `thinkingSegments`：为空或末元素的 `thinkingLength` 不为 `null`（末段已结束）时，SHALL 在末尾追加一段临时段 `{bodyOffset: 当前正文长度, thinkingOffset: 当前 thinking 长度（null 视为 0）, thinkingLength: null, stepsBefore: 当前步骤数, thinkingMs: null}`（长度均按 UTF-16 码元，即 JavaScript 字符串的 `length`），末段仍开着时不加；然后把 `delta` 原样追加到 `thinking`（`null` 视为空串）并把 `thinkingActive` 置为 `true`，会话状态不变，不存在的 assistant 按消息事件补建；thinking.end `{messageId, thinkingMs, segment}` 把对应 assistant 的 `thinkingMs` 置为事件值、`thinkingActive` 置为 `false`，并以事件的 `segment` 取代 `thinkingSegments` 的末元素（末元素的 `thinkingLength` 为 `null`，即仍开着时），否则把 `segment` 追加到末尾（达到思考上限后没有 thinking.delta 的段即如此）；正文、`thinking`、步骤与会话状态不变，不存在的 assistant 按消息事件补建，指向 user 消息时保持原状态（同一引用）；files.changed `{messageId, stepId, files}` 把该消息内 `stepId` 步骤的 `changes` 整体替换为 `files`（同一步骤后到者胜），该步骤或该消息不存在时保持原状态（同一引用），不编造步骤也不补建消息，会话状态不变；todo.updated `{messageId, todo}` 把 `ChatState.todo` 整体替换为事件的 `todo`（归一化任务清单或 `null`），不补建消息，不改任何消息、步骤与会话状态（`messages` 保持同一引用），新值与当前值深相等时返回原状态（同一引用），且 `turn.start`、`turn.end`、`error` 及其它事件 SHALL NOT 重置或改动 `todo`（清单属于会话，不属于某条消息；见 session-todo `web 契约解析与归约`）；text.delta 原样追加；step.start 按 messageId 内的 stepId 新建 running 步骤（`changes` 为 `null`，`bodyOffset` 取事件值）且不重复，事件的 `approvalId` 非 `null` 且该消息 `approvals` 里有这一 id 时 SHALL 把那一项的 `stepId` 置为该 stepId（其余审批不变；没有这一 id 时忽略，不补建审批）；step.end 更新已有步骤的状态和 output，detail 与 `changes` 保持 step.start、files.changed 或快照中的值不变；error 将对应 assistant 标记 failed、把 `error` 置为事件的 `{reason,message,status,detail}` 并把 `retrying` 置为 `false`，但会话保持 running 等待 turn.end；turn.retry `{messageId}` 只把对应 assistant 的 `retrying` 置为 `true`（不存在的 assistant 按消息事件补建），正文、`thinking`、步骤、`error` 与会话状态不变；同一 assistant 随后的 turn.start、text.delta、thinking.delta、step.start、error、turn.end 都把 `retrying` 置为 `false`；turn.end 将消息、会话和仍 running 的步骤置为其 done/failed/stopped 状态并把该消息的 `thinkingActive` 置为 `false`（`stopped` 不设置 error 文案）；审批按 `approvalId` 为键增改：approval.request `{messageId, approvalId, tool, title, expiresAt, stepId}` 向对应 assistant 的 `approvals` **追加** pending 项 `{id: approvalId, tool, title, expiresAt, decision: null, stepId}`（`stepId` 取事件值：审批在 select 时已配上步骤为该步骤 id，否则 `null`，tool-approval「确认与步骤配对」） 并保持按 `id` 升序，绝不覆盖或移除同消息的其它审批项（同一消息可同时有多条 pending）；若该 `approvalId` 已存在于该消息则保持原状态（同一引用）；会话保持 running；approval.resolved `{messageId, approvalId, decision}` 仅更新该消息 `approvals` 中 `id === approvalId` 的那一项的 `decision`，其余项与其顺序不变；未知 `approvalId`（该消息无此 id、消息无审批或消息不存在）保持原状态（同一引用），不补建。不存在的 assistant 可按消息事件补建；不得重写 user 消息。未知 step.end 不得编造缺失的步骤名称。没有先前 turn.start 或 error 的终态 SHALL 有效。
+归约器 SHALL 处理服务端十四类事件：turn.start 重置对应 assistant 正文/步骤/错误并把 `approvals` 与 `thinkingSegments` 置为 `[]`、`thinking` 置为 `null`、`thinkingMs` 置为 `null`、`thinkingActive` 置为 `false`、置 running（不重置 `todo`）；thinking.delta `{messageId, delta}` 先看该 assistant 的 `thinkingSegments`：为空或末元素的 `thinkingLength` 不为 `null`（末段已结束）时，SHALL 在末尾追加一段临时段 `{bodyOffset: 当前正文长度, thinkingOffset: 当前 thinking 长度（null 视为 0）, thinkingLength: null, stepsBefore: 当前步骤数, thinkingMs: null}`（长度均按 UTF-16 码元，即 JavaScript 字符串的 `length`），末段仍开着时不加；然后把 `delta` 原样追加到 `thinking`（`null` 视为空串）并把 `thinkingActive` 置为 `true`，会话状态不变，不存在的 assistant 按消息事件补建；thinking.end `{messageId, thinkingMs, segment}` 把对应 assistant 的 `thinkingMs` 置为事件值、`thinkingActive` 置为 `false`，并以事件的 `segment` 取代 `thinkingSegments` 的末元素（末元素的 `thinkingLength` 为 `null`，即仍开着时），否则把 `segment` 追加到末尾（达到思考上限后没有 thinking.delta 的段即如此）；正文、`thinking`、步骤与会话状态不变，不存在的 assistant 按消息事件补建，指向 user 消息时保持原状态（同一引用）；files.changed `{messageId, stepId, files}` 把该消息内 `stepId` 步骤的 `changes` 整体替换为 `files`（同一步骤后到者胜），该步骤或该消息不存在时保持原状态（同一引用），不编造步骤也不补建消息，会话状态不变；todo.updated `{messageId, todo}` 把 `ChatState.todo` 整体替换为事件的 `todo`（归一化任务清单或 `null`），不补建消息，不改任何消息、步骤与会话状态（`messages` 保持同一引用），新值与当前值深相等时返回原状态（同一引用），且 `turn.start`、`turn.end`、`error` 及其它事件 SHALL NOT 重置或改动 `todo`（清单属于会话，不属于某条消息；见 session-todo `web 契约解析与归约`）；text.delta 原样追加；step.start 按 messageId 内的 stepId 新建 running 步骤（`changes` 为 `null`，`bodyOffset` 取事件值）且不重复，事件的 `approvalId` 非 `null` 且该消息 `approvals` 里有这一 id 时 SHALL 把那一项的 `stepId` 置为该 stepId（其余审批不变；没有这一 id 时忽略，不补建审批）；step.end 更新已有步骤的状态和 output，detail 与 `changes` 保持 step.start、files.changed 或快照中的值不变；error 将对应 assistant 标记 failed、把 `error` 置为事件的 `{reason,message,status,detail}` 并把 `retrying` 置为 `false`，但会话保持 running 等待 turn.end；turn.retry `{messageId}` 只把对应 assistant 的 `retrying` 置为 `true`（不存在的 assistant 按消息事件补建），正文、`thinking`、步骤、`error` 与会话状态不变；同一 assistant 随后的 turn.start、text.delta、thinking.delta、step.start、error、turn.end 都把 `retrying` 置为 `false`；kb.hits `{messageId, stepId, intent, bases}` 把该消息内 `stepId` 步骤的 `kbHits` 置为 `{intent, bases}`（同一步骤后到者胜），该步骤或该消息不存在时保持原状态（同一引用），不编造步骤也不补建消息，正文、步骤的其余字段与会话状态不变；快照生成的步骤与 step.start 新建的步骤 `kbHits` 为 `null`，step.end 不改它；turn.end 将消息、会话和仍 running 的步骤置为其 done/failed/stopped 状态并把该消息的 `thinkingActive` 置为 `false`（`stopped` 不设置 error 文案）；审批按 `approvalId` 为键增改：approval.request `{messageId, approvalId, tool, title, expiresAt, stepId}` 向对应 assistant 的 `approvals` **追加** pending 项 `{id: approvalId, tool, title, expiresAt, decision: null, stepId}`（`stepId` 取事件值：审批在 select 时已配上步骤为该步骤 id，否则 `null`，tool-approval「确认与步骤配对」） 并保持按 `id` 升序，绝不覆盖或移除同消息的其它审批项（同一消息可同时有多条 pending）；若该 `approvalId` 已存在于该消息则保持原状态（同一引用）；会话保持 running；approval.resolved `{messageId, approvalId, decision}` 仅更新该消息 `approvals` 中 `id === approvalId` 的那一项的 `decision`，其余项与其顺序不变；未知 `approvalId`（该消息无此 id、消息无审批或消息不存在）保持原状态（同一引用），不补建。不存在的 assistant 可按消息事件补建；不得重写 user 消息。未知 step.end 不得编造缺失的步骤名称。没有先前 turn.start 或 error 的终态 SHALL 有效。
 
 #### Scenario: 流式归约与重置
 - WHEN 对初始状态应用 turn.start、step.start(bash)、text.delta×3、step.end(done,output)、turn.end(done)
@@ -186,9 +193,13 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **WHEN** 对一条 `thinkingSegments` 为 `[]` 的 running assistant 应用 thinking.end（`segment` 为 `{bodyOffset:0,thinkingOffset:0,thinkingLength:0,stepsBefore:0,thinkingMs:300}`）；另一例应用 `approvalId` 为 99（该消息没有这一审批）的 step.start；再对该 assistant 应用 turn.start
 - **THEN** 前者 `thinkingSegments` 恰为该段；中者新建步骤、`approvals` 不变；turn.start 后 `thinkingSegments` 回到 `[]`
 
+#### Scenario: 检索结果归约
+- **WHEN** 对 running assistant 依次应用 step.start(stepId 5, `kb_search`)、kb.hits `{messageId, stepId:5, intent:"查规则", bases:[…]}`、同一步骤的第二条 kb.hits（`intent:null`）；另一例应用 `stepId` 为 99（该消息没有这一步骤）的 kb.hits
+- **THEN** 步骤 5 的 `kbHits` 先为第一条的 `{intent, bases}`，再为第二条的（后到者胜），步骤的其余字段、正文与会话状态不变；后一例返回同一引用，不新建步骤
+
 ### Requirement: 事件流消费与续流
 `connectSessionEvents` SHALL 使用注入的 EventSourceCtor 建立编码 sessionId 的同源 events URL，并设置 withCredentials:true。调用方先取得初始完整快照并传入 initialCursor；连接器 SHALL 提供 close，并通过 loadSnapshot(signal)、同步 onSnapshot/onEvent、可选 onGap 和 onError 管理恢复与错误。API 方法和页面由其他模块拥有。
-连接器 SHALL 从命名 MessageEvent 的 data 解码负载、从 lastEventId 读取 canonical 安全整数 epoch:seq；十三类数据事件（含 `approval.request`、`approval.resolved`、`thinking.delta`、`thinking.end`、`files.changed`、`todo.updated`、`turn.retry`）均经过同一游标过滤。`error` 按严格键集 `{messageId,message,reason,status,detail}` 解码（`messageId` 安全整数，`message`、`reason` 非空字符串，`status` 为 `null` 或 100–599 的整数，`detail` 字符串，可为空串），`turn.retry` 按严格键集 `{messageId}`（安全整数）解码。`thinking.delta` 按严格键集 `{messageId,delta}`（`messageId` 安全整数、`delta` 非空字符串）解码，`thinking.end` 按严格键集 `{messageId,thinkingMs,segment}`（`messageId` 安全整数、`thinkingMs` 非负安全整数，`segment` 为严格键集 `{bodyOffset,thinkingOffset,thinkingLength,stepsBefore,thinkingMs}` 的对象、五个值都是非负安全整数——刚结束的那一段，不为 `null`）解码，`step.start` 按严格键集 `{messageId,stepId,name,detail,bodyOffset,approvalId}`（`messageId`/`stepId` 安全整数，`name`/`detail` 字符串，`bodyOffset` 非负安全整数，`approvalId` 为 `null` 或安全整数）解码，`approval.request` 按严格键集 `{messageId,approvalId,tool,title,expiresAt,stepId}`（`stepId` 为 `null` 或安全整数，其余同既有规则）解码，`files.changed` 按严格键集 `{messageId,stepId,files}`（`messageId`/`stepId` 安全整数，`files` 的规则同快照步骤的非 null `changes`：1 至 50 项，每项严格键集 `{path,added,removed,kind}`）解码，`todo.updated` 按严格键集 `{messageId,todo}`（`messageId` 安全整数，`todo` 的规则同快照的 `todo`，含 `null`，见 session-todo `web 契约解析与归约`）解码。原生传输 error 不得被当作业务 error：CONNECTING 时保留状态并交给原生自动重连，CLOSED 时关闭并报告，不推断 HTTP 状态。已知事件的非法 payload/id SHALL 触发重新同步，未知事件类型忽略。
+连接器 SHALL 从命名 MessageEvent 的 data 解码负载、从 lastEventId 读取 canonical 安全整数 epoch:seq；十四类数据事件（含 `approval.request`、`approval.resolved`、`thinking.delta`、`thinking.end`、`files.changed`、`todo.updated`、`turn.retry`、`kb.hits`）均经过同一游标过滤。`error` 按严格键集 `{messageId,message,reason,status,detail}` 解码（`messageId` 安全整数，`message`、`reason` 非空字符串，`status` 为 `null` 或 100–599 的整数，`detail` 字符串，可为空串），`turn.retry` 按严格键集 `{messageId}`（安全整数）解码。`kb.hits` 按严格键集 `{messageId,stepId,intent,bases}` 解码：`messageId`、`stepId` 安全整数，`intent` 为 `null` 或非空字符串，`bases` 为 1–5 项、每项严格键集 `{kbId,name,status,hits}`（规则同 chat-stream「检索结果事件发布」）。`thinking.delta` 按严格键集 `{messageId,delta}`（`messageId` 安全整数、`delta` 非空字符串）解码，`thinking.end` 按严格键集 `{messageId,thinkingMs,segment}`（`messageId` 安全整数、`thinkingMs` 非负安全整数，`segment` 为严格键集 `{bodyOffset,thinkingOffset,thinkingLength,stepsBefore,thinkingMs}` 的对象、五个值都是非负安全整数——刚结束的那一段，不为 `null`）解码，`step.start` 按严格键集 `{messageId,stepId,name,detail,bodyOffset,approvalId}`（`messageId`/`stepId` 安全整数，`name`/`detail` 字符串，`bodyOffset` 非负安全整数，`approvalId` 为 `null` 或安全整数）解码，`approval.request` 按严格键集 `{messageId,approvalId,tool,title,expiresAt,stepId}`（`stepId` 为 `null` 或安全整数，其余同既有规则）解码，`files.changed` 按严格键集 `{messageId,stepId,files}`（`messageId`/`stepId` 安全整数，`files` 的规则同快照步骤的非 null `changes`：1 至 50 项，每项严格键集 `{path,added,removed,kind}`）解码，`todo.updated` 按严格键集 `{messageId,todo}`（`messageId` 安全整数，`todo` 的规则同快照的 `todo`，含 `null`，见 session-todo `web 契约解析与归约`）解码。原生传输 error 不得被当作业务 error：CONNECTING 时保留状态并交给原生自动重连，CLOSED 时关闭并报告，不推断 HTTP 状态。已知事件的非法 payload/id SHALL 触发重新同步，未知事件类型忽略。
 每次 open（含首次连接和自动重连）、replay.gap 或1000条待处理数据队列溢出 SHALL 开启新的完整快照恢复；gap 额外调用 onGap。恢复期间排队，并以 generation/AbortController 使旧加载失效；只有仍有效且属于当前会话、未倒退的快照可安装。安装后丢弃旧 epoch，同 epoch 的 seq:null 覆盖整代，否则丢弃 seq≤边界，仅按到达顺序消费后继；已经成功交付的 watermark 继续去重。过滤包含 turn.start，不能清空已覆盖快照。
 再次 gap/溢出 SHALL 废弃旧队列并重新同步，不以截断后继续消费替代恢复。同步回调重入时仍须保持先后次序，并在关闭/替代后停止旧 drain。loadSnapshot 失败或消费者回调违反同步合同 SHALL 关闭并报告，不能留下未处理拒绝、失效安装或继续追加；不新增自动重试策略。close SHALL 幂等关闭底层源、移除监听、abort加载并使所有迟到结果失效。切换/卸载/未登录由页面生命周期调用 close。
 
@@ -251,6 +262,12 @@ s1f-session-list-temp-space 起 `ApiClient` 另 SHALL：
 - **THEN** 两条都交付 onEvent，`stepId` 分别为 5 与 `null`
 - **WHEN** approval.request 只有旧的五键，或 `stepId` 为字符串或 `1.5`，或多一个键
 - **THEN** 触发重新同步，与其它已知事件的非法 payload 相同
+
+#### Scenario: 检索结果事件严格解码
+- **WHEN** 快照游标为 1:2，随后到达 kb.hits(1:3) `{messageId:7, stepId:5, intent:"查规则", bases:[…]}` 与 kb.hits(1:4) `{…, intent:null}`
+- **THEN** 两条按到达顺序交付 onEvent，负载逐值保留
+- **WHEN** kb.hits 缺任一键或多一个键，或 `stepId` 为字符串或 `1.5`，或 `intent` 不是字符串也不是 `null`
+- **THEN** 触发完整快照重新同步，不交付该事件，与其它已知事件的非法 payload 相同
 
 ### Requirement: 会话页
 `/` SHALL render, as a single full-width column in `main`, the message thread (`消息线程`), the composer dock (`输入框上方停靠区`) and the labeled composer (`输入框与能力栏`), and SHALL own the account-owned session list and new-session action, which it renders into the shell sidebar's list area (spa-shell `路由 IA 与侧栏`) through the shell-provided slot and never inside `main`; the page keeps all list data, selection, creation and ownership fences, and the list behavior specified here is unchanged by its location. The page-level level-1 heading follows spa-shell: in welcome state it is the hero `WorkBuddy，我帮你` rendered by the chat page; with a selected session it is the topbar breadcrumb container (accessible name `我的工作 / <title>`), the title being reported by the chat page via `useTopbar({ breadcrumb: sessionTitle(selected), actions })` as soon as the selected session is known and cleared when none is selected or the page unmounts; with a selected session `actions` (spa-shell topbar `actions` slot) is built from the ordered slot constant `CHAT_TOPBAR_ACTIONS` and holds these icon buttons in this order — `重命名` (`Icon pencil`, session-sidebar), `对话内搜索` (`Icon search`, conversation-search) and, only while the selected session's `workspaceId` is not `null`, `工作空间侧边栏` (`Icon folder`, workspace-sidebar; it carries `aria-expanded`) — each with that accessible name and tooltip — and the welcome state reports no actions; while the workspace sidebar is open the page's main area SHALL be laid out as workspace-sidebar「布局与开合」specifies (thread and sidebar side by side, or the sidebar as a full-viewport layer at the shell's narrow breakpoint), the thread keeping every behaviour specified here; the page SHALL NOT render its own page-level `<h1>` (headings inside rendered Markdown are content, not page headings). List SHALL be rendered as specified by session-sidebar — title search, the pinned section, collapsible groups by workspace or by time, entry menus and the archived view — each group retaining server updatedAt-descending order, and each entry SHALL show server title or `新会话` plus a status element (`role="status"`, accessible name `<title> 等待确认|运行中|已完成|失败|已停止|未开始`: `等待确认` when the session's `pendingApproval` is true, otherwise by status with `stopped` reading `已停止` and `idle` reading `未开始`, texts taken from `SESSION_STATUS_LABEL`); only `等待确认`, `运行中` and `失败` have a visible mark and the other three carry visually-hidden text only (session-sidebar「会话状态标记」). The list is kept fresh by one list-event connection (session-list-push「web 列表事件消费」). Selecting a session SHALL update `?session=<id>` while preserving unrelated search/hash; refresh and Back SHALL restore the selected session. Missing selection (no `?session=`) or an inaccessible target that has been replace-removed SHALL show the welcome state (hero `WorkBuddy，我帮你`) and composer, never auto-select first session; a selected session whose history is pending or failed renders neither hero nor a page-level heading of its own (the breadcrumb owns it). An inaccessible initial GET404 SHALL replace-remove the session parameter and SHALL NOT open EventSource; other errors SHALL remain visible without displaying another session's history.
@@ -775,7 +792,7 @@ The chat page SHALL NOT show toasts: none of the page's rebuilt source files imp
 - **THEN** 第一例输入框与 `停止` 按钮的包围盒完整位于视口内，消息线程的可见高度大于 0，文档没有横向滚动，提问卡的 `允许` 与 `拒绝` 按钮在视口内；另一例输入框与发送按钮的包围盒完整位于视口内，消息线程的可见高度大于 0，文档没有横向滚动
 
 ### Requirement: 助手消息分段
-web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视图与快照恢复的视图都只经这一个函数（「会话页源码模块划分」的 `message-segments.ts`）。输入为消息的 `content`、`thinking`、步骤（按视图里的数组次序，各带 `bodyOffset`；快照生成的视图按 `ordinal` 升序，实时归约的视图按 `step.start` 到达次序，二者对同一回合相同——`ordinal` 由 pump 按 `tool_execution_start` 的到达次序分配；视图步骤不带 `ordinal`，见「纯会话视图归约」）与 `thinkingSegments`（按给出次序）；输出为「旧布局」，或一个有序的块列表，每块是正文段（一段正文原文）、思考段（一段思考原文及该段的时长与是否进行中）或工具段（一串步骤）之一。所有偏移与长度都按 UTF-16 码元（JavaScript 字符串的 `length` 与 `slice`）计。
+web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视图与快照恢复的视图都只经这一个函数（「会话页源码模块划分」的 `message-segments.ts`）。输入为消息的 `content`、`thinking`、步骤（按视图里的数组次序，各带 `bodyOffset`；快照生成的视图按 `ordinal` 升序，实时归约的视图按 `step.start` 到达次序，二者对同一回合相同——`ordinal` 由 pump 按 `tool_execution_start` 的到达次序分配；视图步骤不带 `ordinal`，见「纯会话视图归约」）与 `thinkingSegments`（按给出次序）；输出为「旧布局」，或一个有序的块列表，每块是正文段（一段正文原文）、思考段（一段思考原文及该段的时长与是否进行中）、工具段（一串步骤）或检索块（该消息全部名为 `kb_search` 的步骤，「会话知识库检索卡」）之一。所有偏移与长度都按 UTF-16 码元（JavaScript 字符串的 `length` 与 `slice`）计。
 
 **旧布局判定**：以下任一条成立时 SHALL 输出旧布局（不切段，消息按「消息线程」规定的旧布局呈现），不出现部分分段、部分不分段的消息：
 1. 任一步骤的 `bodyOffset` 为 `null`；
@@ -785,7 +802,7 @@ web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视�
 
 **合并次序**：步骤按输入的数组次序、思考段按给出次序，第 j 段排在第 k 个步骤（0 起）之前当且仅当该段的 `stepsBefore ≤ k`；由此每段思考恰排在它开始时已开始的那些步骤之后、其余步骤之前。各项的正文偏移取其 `bodyOffset`，大于 `content` 长度的按 `content` 长度计（宿主进程崩溃会丢掉尚未落库的正文尾部而留下偏移，chat-sessions「会话持久化与回合刷盘」）。
 
-**切段**：自正文起点起依次处理合并后的各项：项的正文偏移大于当前游标时，先输出 `content` 在 [游标, 偏移) 的正文段并把游标移到偏移；然后输出该项——思考段的原文为 `thinking` 在 [`thinkingOffset`, `thinkingOffset + thinkingLength`) 的部分（末段 `thinkingLength` 为 `null` 时到 `thinking` 末尾）；步骤并入紧挨着的前一块，前一块是工具段时并入它，否则新起一个工具段。全部项处理完后输出余下的正文段。以下两类块 SHALL 不输出，也不分隔它两侧的工具段：只含空白字符的正文段；原文为空串的思考段（达到 32768 码点上限之后才开始的段即如此，见 thinking-fold）。每块带一个在消息内稳定、且各块互不相同的键，按块的种类加前缀：正文段为 `text:<起点偏移>`，思考段为 `thinking:<thinkingOffset>`，工具段为 `tool:<第一个步骤的 id>`（不加前缀时，先思考后正文的消息里思考段与第一个正文段的键都会是 0）；流式增长与快照重新安装不改变已有块的键。
+**切段**：自正文起点起依次处理合并后的各项：项的正文偏移大于当前游标时，先输出 `content` 在 [游标, 偏移) 的正文段并把游标移到偏移；然后输出该项——思考段的原文为 `thinking` 在 [`thinkingOffset`, `thinkingOffset + thinkingLength`) 的部分（末段 `thinkingLength` 为 `null` 时到 `thinking` 末尾）；步骤并入紧挨着的前一块，前一块是工具段时并入它，否则新起一个工具段；名为 `kb_search`（精确匹配）的步骤例外：它 SHALL NOT 进入工具段——消息里第一个 `kb_search` 步骤在它的位置输出一个检索块，之后的 `kb_search` 步骤不论位置都并入这个检索块、不在自己的位置输出任何块。检索块与其它块一样分隔它两侧的工具段。全部项处理完后输出余下的正文段。以下两类块 SHALL 不输出，也不分隔它两侧的工具段：只含空白字符的正文段；原文为空串的思考段（达到 32768 码点上限之后才开始的段即如此，见 thinking-fold）。每块带一个在消息内稳定、且各块互不相同的键，按块的种类加前缀：正文段为 `text:<起点偏移>`，思考段为 `thinking:<thinkingOffset>`，工具段为 `tool:<第一个步骤的 id>`，检索块为 `kb:<第一个 kb_search 步骤的 id>`（不加前缀时，先思考后正文的消息里思考段与第一个正文段的键都会是 0）；流式增长与快照重新安装不改变已有块的键。
 
 **思考段的标题数据**：思考段带该段的 `thinkingMs` 与「进行中」标记；进行中当且仅当它是末段、末段的 `thinkingLength` 为 `null`、消息 `running` 且消息的 `thinkingActive` 为 `true`。
 
@@ -811,6 +828,10 @@ web SHALL 用一个纯函数把一条助手消息视图切成分段，实时视�
 - **WHEN** 上例在思考段进行中（thinking.delta 之后、thinking.end 之前）读取快照（该段的 `thinkingLength` 与 `thinkingMs` 为 `null`），客户端以快照游标续流其余事件
 - **THEN** 快照视图的切段输出在正文段之后有一个进行中的思考段；续流到回合结束后与上例的输出逐块相等
 
+#### Scenario: kb_search 步骤合成一个检索块
+- **WHEN** 一条助手消息的正文为 `先查。再查。答。`，步骤依次为 `read`（偏移 3）、`kb_search` s1（偏移 3）、`bash`（偏移 3）、`kb_search` s2（偏移 6），没有思考
+- **THEN** 块依次为正文段 `先查。`、工具段 [`read`]、检索块 [s1, s2]（键 `kb:<s1 的 id>`）、工具段 [`bash`]、正文段 `再查。`、正文段 `答。`（在 s2 的位置不输出块，两段正文相邻而各自成块）
+
 ### Requirement: 工具段摘要与折叠
 web SHALL 用一个纯函数（「会话页源码模块划分」的 `tool-summary.ts`）由工具段的步骤生成摘要文字。每个步骤按步骤名（精确匹配，区分大小写）归入一类：
 
@@ -823,7 +844,7 @@ web SHALL 用一个纯函数（「会话页源码模块划分」的 `tool-summar
 | 搜索 | `grep`、`glob`、`ast_grep`、`web_search`、`search`、`find` | `搜索 N 次` |
 | 其它 | 其余任何名字 | `其它 N 步` |
 
-N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1）。摘要 SHALL 为各非零类按上表次序以 `、` 连接；段内有 `failed` 步骤时末尾接 `，N 步失败`（N 为失败步骤数）；段内有 `running` 步骤时再接 `，进行中`。`stopped` 步骤照常计入其类，不另加后缀。摘要是工具段展开/收起控件的可见文本与可访问名；失败后缀与其余文字同色（不着色）：它与摘要其余文字在同一个文本元素里，该元素与后缀都不带任何颜色类。段内有 `running` 步骤时控件另带转圈图标与流光（`prefers-reduced-motion: reduce` 下静止），与 #910 之前的运行中样式相同。
+N 是该类的步骤数（按步骤计，一次 `read` 读多个文件也记 1）。`kb_search` 步骤不进工具段（「助手消息分段」），所以不出现在任何摘要里。摘要 SHALL 为各非零类按上表次序以 `、` 连接；段内有 `failed` 步骤时末尾接 `，N 步失败`（N 为失败步骤数）；段内有 `running` 步骤时再接 `，进行中`。`stopped` 步骤照常计入其类，不另加后缀。摘要是工具段展开/收起控件的可见文本与可访问名；失败后缀与其余文字同色（不着色）：它与摘要其余文字在同一个文本元素里，该元素与后缀都不带任何颜色类。段内有 `running` 步骤时控件另带转圈图标与流光（`prefers-reduced-motion: reduce` 下静止），与 #910 之前的运行中样式相同。
 
 **折叠**：每个工具段 SHALL 在首次出现时为收起态，无论其中有没有 `failed` 步骤，也无论消息是否在运行；此后只有用户点击控件才改变它的展开态：步骤的开始与结束（含新的失败步骤）、新到的正文与思考、快照的原地重新安装都 SHALL NOT 改变它。展开一个工具段不影响同一消息或其它消息的其它工具段。展开态以「助手消息分段」的块键为身份保留：同一工具段因新步骤并入而增长时保留展开态；新回合（turn.start 清空步骤）之后出现的工具段从收起态开始。
 
@@ -868,3 +889,39 @@ When a welcome-state first send has created its session, the page SHALL commit i
 #### Scenario: The created session is not prompted again
 - **WHEN** after either of the above the user selects `D` from the session list
 - **THEN** no prompt is sent; `D` still has received exactly one prompt in total
+
+### Requirement: 会话知识库检索卡
+检索块（「助手消息分段」）SHALL 渲染为一张「知识库检索」卡，是 `web/src/features/chat/` 内的应用层组件。
+
+**卡头**：
+- 图标、标题 `知识库检索`，其后接 ` · ` 与各轮 `kbHits` 里状态为 `ok` 的库名（去重、按首次出现次序，以 `、` 连接；没有时不接）。
+- 轮数 `（<n> 轮）`，n 为块内步骤数。
+- 状态：任一步骤 `running` 为 `检索中`；否则全部失败为 `检索失败`；其余为 `检索完成`。
+
+**行**：块内每个步骤一行，按块内次序。
+- 行首为 `第 <k> 轮`。
+- 其后是意图：`kbHits.intent` 非空时用它，否则用步骤 detail（`{"question":…}` 形式的 JSON）里的 `question`，两者都取不到时为空。
+- `kbHits` 非空时，接 `命中 <m> 条`（m 为各库 `hits` 的条数之和）。
+- 行状态取步骤状态。该步骤有已配对的审批时（只在 `always-ask` 档出现），行状态之前按「步骤卡的确认标记」同一规则显示 `超时自动允许` 或 `已拒绝`，卡收起时也可见；这些审批同样不渲染为兜底确认记录。
+- 有 `kbHits` 的行可以展开：按库列出状态不是 `ok` 的说明（`未找到该知识库`、`正在重建，本轮未检索`、`检索失败`）与 `ok` 的命中，每条命中显示文档名、相似度（保留两位小数）与切片原文；切片原文按纯文本呈现。
+- 没有 `kbHits` 的行不可展开。快照恢复的行即如此（chat-stream「检索结果事件发布」）。
+
+**交互**：
+- 卡首次出现时行全部收起，只随用户点击变化；展开态以块键为身份保留，与工具段同一规则（「工具段摘要与折叠」）。
+- 卡里没有「评估证据是否充分」与「采纳切片」两步。宿主侧没有它们的来源（ADR-0017）。
+
+#### Scenario: 实时两轮
+- **WHEN** 一个回合依次收到两个 `kb_search` 步骤的 step.start、kb.hits（第一轮 `intent:"查规则"`，库 `产品文档` 命中 2 条；第二轮 `intent:null`、detail 的 `question` 为 `工单超时 详细说明`，命中 1 条）与 step.end
+- **THEN** 一张卡，卡头为 `知识库检索 · 产品文档`、`（2 轮）`、`检索完成`；第一行 `第 1 轮`、`查规则`、`命中 2 条`；第二行 `第 2 轮`、`工单超时 详细说明`、`命中 1 条`；展开第一行列出两条命中的文档名、相似度与原文
+
+#### Scenario: 刷新后只剩各轮
+- **WHEN** 同一回合结束后刷新页面
+- **THEN** 仍是一张卡、两行；行里显示各自 detail 的 `question` 与状态，没有命中条数，行不可展开
+
+#### Scenario: 检索行的确认标记
+- **WHEN** `always-ask` 档的一个回合有两个 `kb_search` 步骤，其审批的 `decision` 分别为 `deny` 与 `timeout`
+- **THEN** 第一行行状态之前有 `已拒绝`，第二行有 `超时自动允许`；消息内没有兜底确认记录
+
+#### Scenario: 部分失败与检索中
+- **WHEN** 第一轮的 kb.hits 为一个 `failed` 的库与一个 `ok` 命中 0 条的库；第二轮的步骤仍为 `running`
+- **THEN** 卡头状态为 `检索中`；第一行为 `命中 0 条`，展开后先列出 `检索失败` 的库，再列出命中 0 条的库
