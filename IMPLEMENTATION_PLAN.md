@@ -434,6 +434,17 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Verify：整篇文档绝不入上下文（不变量 2 用例）；无权 kb_id 检索被过滤且不可探测；真实 omp 会话在构造的证据不足场景下由模型自行发起第二次 `kb_search`（ADR-0017）。
 - Depends on：S2b、S1c。
 - Review attention：decision-dense（多租户过滤是灰盒决定的例外候选——出事故重议）。
+- 2026-11-10 grill（owner 逐分支拍板，G1）：S2c 拆为两个 change。**A 会话接入**（change `s2c-kb-session`）：`kb_search` 的注册、分派、审批放行、`kb.hits` 与检索卡、知识库引用，可检索的库 = 自己的库。**B 可见范围**：四档、共享只读、跨账号检索审计、部门与项目组字段，A 合入后另跑流水线。
+- 2026-11-13 状态：**A 已交付，待 owner 签收；B 待启动。** Epic #1961 的组 1–10 全部合入（组 → issue → PR）：
+  - 制品：change 制品与 omp host tool 实测记录 `docs/reviews/2026-11-10-omp-host-tools.md`，PR #1978。
+  - 组 1 单轮检索可取消 #1962 → #1987；组 2 会话检索 `kb_search` #1963 → #1988。
+  - 组 3 宿主工具协议 #1964 → #1989；`kb_search` 的审批放行 #1965 → #1990。组 4 注册与装配 #1966 → #1991。
+  - 组 5 `kb.hits` 事件 #1967 → #1992；组 6 web 的 `kb.hits` 解码 #1968 → #1993，检索卡 #1969 → #1994。
+  - 组 7 迁移 052 #1970 → #1995，引用写入侧 #1971 → #1996，快照第十四键与 web 解析 #1972 → #1997；组 8 引用入口、标签与气泡 #1973 → #1998。
+  - 组 9 受控上游检索标记 #1974 → #2001，真实 omp v18.12.3 回归 #1975 → #2003；组 10 ui-walk 会话知识库分支 #1976 → #2005。
+  - 组 11 收口 #1977 即本次（文档与 G1–G15 落点核对）。计划外：#1999 → #2000（smoke 钉 `ubuntu-24.04`）。
+  - CI 证据：组 10 的 PR #2005 跑 run 43500983389，`all-checks-passed` 与 smoke、ui-walk、uid-isolation 等全部 job 为 success。CI 不跑官方 omp 门控用例；真实二进制回归的证据是 #2003 PR 描述里的本机命令与 EXIT=0（`omp-official-host-tools` 2 例；全部官方用例加 `--maxWorkers=4` 22 个文件、135 例）。
+  - 未交付（属 B）：F-CTR-KB4、共享只读与跨账号检索审计；P2 里程碑验收里「共享检索入审计」一句随 B。
 
 ### 里程碑 P3 — 账号权限审计
 
@@ -512,6 +523,19 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
 ## Next Step
+
+> 2026-11-13 更新。**S2c change A（`s2c-kb-session`）的实现全部合入**：Epic #1961 的组 1–10 均已合入（见上文 S2c 一节的清单），#1977 即本收口；change 尚未归档。
+> 1. **待 owner 签收**：验收清单「中心·知识库（CK）」的 CK-15、CK-16、CK-17、CK-18 为 `待签`，由 owner 执行，agent 不代签；签完 Epic #1961 才关。
+> 2. **可启动的是 S2c change B（可见范围）**。grill 种子：
+>    - design.md Non-Goals 列出的 B 开放项：部门与项目组数据在 S3a 之前的来源；跨账号审计的粒度，以及库所有者能否看到；共享库的检索测试范围；四档的设置界面。
+>    - (a) `rebuild_failed` 的库在 `kb_search` 结果里也写「正在重建，本轮未检索」（`server/src/kb/session-search.ts:116-117`、`:146-147`），对模型是误导。
+>    - (b) `kb_ids` 的计数不一致：schema `maxItems:5` 数的是原始数组，执行先去重再判 1–5（`session-search.ts:32`、`:94-100`）。
+>    - (c) **需 owner 裁定**：内置斜杠命令带引用按规格字面受理，`{message:"/compact", knowledgeBases:["k1"]}` → 202（用例 `server/test/prompt-knowledge-bases.test.ts:279`）；内置命令带附件则是 400（`server/src/sessions/prompt-attachments.ts:142`）。引用是否也该拒绝？
+>    - (d) 任何一次快照安装都把 `kbHits` 置空（`web/src/features/chat/stream.ts:154`），检索卡刷新后只剩各轮（G12 已接受；复活条件见 design.md Non-Goals）。
+> 3. **跟进 issue**：#2002（官方门控用例默认并发下大面积握手超时，本机全量需 `--maxWorkers=4`）；#2004（真实 omp 上 branch / fork 之后 host tool 是否保留，以及 `set_host_tools []` 的应答）；#1999（已关闭：hurl 8.0.1 需要 `libxml2.so.2`，smoke job 钉在 `ubuntu-24.04`；runner 升级时换掉 hurl 再解除钉住）。
+> 4. **已知代码瑕疵（本收口不改）**：`web/src/features/chat/turn-actions.ts:67` 的注释仍写「两个函数引用稳定」，而 `ids` 现在随 `client` 变化（#1973 的修复 `a41a8444`）。
+>
+> 以下为更早的记录。
 
 > 2026-11-10 更新。**S2b 已签收**：验收清单「中心·知识库（CK）」CK-11、CK-13、CK-14 由 owner 签为 `通过`，Epic #1910 关闭；
 > 验收清单无 `待签` 行。计划外收尾：CI 的 omp 二进制缓存（#1932，change `ci-omp-binary-cache` 已归档）、
