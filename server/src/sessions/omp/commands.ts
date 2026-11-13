@@ -147,8 +147,10 @@ export async function awaitChild(
   return liveChild(gen) ?? spawned ?? gen.child;
 }
 
+/** `gen.child` is set inside spawn, before `proc.child`; `closeInput` aborts host tool calls. */
 export function closeStdin(gen: Generation): void {
-  (gen.child ?? gen.proc.child)?.stdin.end();
+  gen.child?.stdin.end();
+  gen.proc.closeInput();
 }
 
 export function signalLive(gen: Generation, signal: NodeJS.Signals): void {

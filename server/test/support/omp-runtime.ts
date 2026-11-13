@@ -186,24 +186,32 @@ export async function settlesWithin(promise: Promise<unknown>, ms: number): Prom
   return settled;
 }
 
-export function capturePromptWrites(
+/** stdin tee: every frame the host hands to `child.stdin.write`, in call order, before it is written. */
+export function captureStdinFrames(
   child: ChildProcessWithoutNullStreams,
-  prompts: string[],
+  onFrame: (frame: OmpFrame) => void,
 ): void {
   const originalWrite = child.stdin.write.bind(child.stdin);
   child.stdin.write = ((chunk: string | Uint8Array, ...rest: unknown[]) => {
     const text = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
     for (const line of text.split("\n")) {
-      if (line.length === 0) {
-        continue;
-      }
-      const frame = JSON.parse(line) as { type?: string; message?: string };
-      if (frame.type === "prompt" && typeof frame.message === "string") {
-        prompts.push(frame.message);
+      if (line.length > 0) {
+        onFrame(JSON.parse(line) as OmpFrame);
       }
     }
     return originalWrite(chunk, ...(rest as []));
   }) as typeof child.stdin.write;
+}
+
+export function capturePromptWrites(
+  child: ChildProcessWithoutNullStreams,
+  prompts: string[],
+): void {
+  captureStdinFrames(child, (frame) => {
+    if (frame.type === "prompt" && typeof frame.message === "string") {
+      prompts.push(frame.message);
+    }
+  });
 }
 
 export function observeChild(child: ChildProcessWithoutNullStreams): ChildObservation {

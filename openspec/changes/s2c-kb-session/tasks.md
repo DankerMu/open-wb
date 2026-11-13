@@ -43,6 +43,10 @@
 | 组 2：部分输出（部分库失败、不可探测） | 是 | 组 2「部分失败与不可探测」 |
 | 组 2：资源上限（5 库、每库 6 条、1000 码点） | 是 | 组 2「参数校验」；每库 6 条由单轮检索的 `page_size:6` 保证（S2b 既有用例） |
 | 组 2：旧调用方兼容（检索测试端点、model 写入钩子、降级限频记录） | 是 | 组 2 回归命令（「组 2 约定」最后一条） |
+| 组 3 首刀：并发与顺序（多个在途调用互不等待） | 是 | `omp-host-tools.test.ts`「并发」 |
+| 组 3 首刀：资源上限（帧长） | 是 | 「结果过大」两例（「组 3 首刀约定」） |
+| 组 3 首刀：错误外泄（处理函数错误原文） | 是 | 「未知工具与失败」的哨兵断言：`OmpProcess` 无 logger、`host-tools.ts` 不记日志；spy 测试进程的 `process.stderr.write` 与 `console.*`，`error` 事件不含哨兵 |
+| 组 3 首刀：旧调用方兼容（既有帧路由与假 omp 场景） | 是 | 回归命令（「组 3 首刀约定」最后一条）原样全绿；权限、迁移与 schema、公共 API 不选：本刀只动传输层与假 omp，不碰账号、库表与 REST/SSE |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -92,10 +96,31 @@ Minimal mergeable slice: atomic - 定义、执行与引用解析共用同一份�
 
 ## 3. 宿主工具协议与 `kb_search` 的审批放行（omp-runtime「宿主工具协议」；tool-approval「审批请求识别」；omp-test-harness「假 omp host tool 场景」）
 
-- [ ] 3.1 核对 Context：`process.ts` 的 `#onFrame`（:561）、`#onUiRequest`（:584）、`#write`（:346）、`#writesClosed`、退出观测；`ui-requests.ts` 的 `approvalRequest` / `isPreludeCard` / `answerFrame`；假 omp 的场景选择与入站帧记录（omp-test-harness「假 omp 入站帧记录」）
-- [ ] 3.2 假 omp：新文件 `server/test/support/fake-omp-host-tool.mjs` 实现 `host-tool`、`host-tool-parallel`、`host-tool-abort` 三个场景（`yolo` 帧序、三个并发调用含未知工具名、中止），以及其余场景对 `set_host_tools` 回按 `id` 关联的 `success:false`；`fake-omp.mjs` 只加场景分派的几行；场景的契约用例放新文件 `server/test/fake-omp-host-tool.test.ts`
-- [ ] 3.3 测试先行：新文件 `server/test/omp-host-tools.test.ts`，对真实子进程（假 omp）覆盖「调用与应答」「并发」「取消与迟到的结果」「未知工具与失败」「结果过大」；宿主写出的帧经 stdin tee 观察（`server/test/support/omp-runtime.ts` 的 `capturePromptWrites` 同一手法），断言 `id`、文本、`details` 与 `isError`
-- [ ] 3.4 实现新文件 `server/src/sessions/omp/host-tools.ts`（在途表、取消、退出中止、应答写帧、过大降级、错误不外泄）；`OmpProcessOpts` 加可选 `hostTools`，`#onFrame` 只加分流的一行；源码与注释里不写 `kb_search`
+- [x] 3.1 核对 Context：`process.ts` 的 `#onFrame`（:561）、`#onUiRequest`（:584）、`#write`（:346）、`#writesClosed`、退出观测；`ui-requests.ts` 的 `approvalRequest` / `isPreludeCard` / `answerFrame`；假 omp 的场景选择与入站帧记录（omp-test-harness「假 omp 入站帧记录」）
+- [x] 3.2 假 omp：新文件 `server/test/support/fake-omp-host-tool.mjs` 实现 `host-tool`、`host-tool-parallel`、`host-tool-abort` 三个场景（`yolo` 帧序、三个并发调用含未知工具名、中止），以及其余场景对 `set_host_tools` 回按 `id` 关联的 `success:false`；`fake-omp.mjs` 只加场景分派的几行；场景的契约用例放新文件 `server/test/fake-omp-host-tool.test.ts`
+- [x] 3.3 测试先行：新文件 `server/test/omp-host-tools.test.ts`，对真实子进程（假 omp）覆盖「调用与应答」「并发」「取消与迟到的结果」「未知工具与失败」「结果过大」；宿主写出的帧经 stdin tee 观察（`server/test/support/omp-runtime.ts` 的 `capturePromptWrites` 同一手法），断言 `id`、文本、`details` 与 `isError`
+- [x] 3.4 实现新文件 `server/src/sessions/omp/host-tools.ts`（在途表、取消、退出中止、应答写帧、过大降级、错误不外泄）；`OmpProcessOpts` 加可选 `hostTools`，`#onFrame` 只加分流的一行；源码与注释里不写 `kb_search`
+  - 组 3 首刀约定（#1964 fixture 审查补；3.2–3.4 照此实现与测试）：
+    - 3.1 锚点更正：`#onFrame` 在 `process.ts:559`（`:561` 是 `#applyLimits`）。「只加分流的一行」改为允许的改动点：import；`OmpProcessOpts.hostTools`；构造函数解构（`:197`）把 `hostTools` 拆出 `#opts`，不随 `SpawnOmpOpts` 交给 `spawnOmp`；`#onFrame` 的分流（与 `extension_ui_request` 同样带 `!this.#writesClosed` 守卫）；四处中止挂点。合计约 15 行，`process.ts` ≤ 780 行。`fake-omp.mjs` 只加分派（`set_host_tools`、`host_tool_result`、三个场景的 prompt 分派、`abortable`），≤ 770 行。
+    - 类型：`host-tools.ts` 导出 `HostToolHandler` 与结果类型 `HostToolResult = {text, details?, isError}`。`call(toolName, args, signal)` resolve `undefined` 表示「这个工具不归我」→ 回 `未知工具`；未注入 `hostTools` 同样回 `未知工具`。`未知工具`、`工具执行失败`、`工具结果过大` 三个常量只在 `host-tools.ts` 出现一次。
+    - 错误：处理函数同步 `throw` 与异步 reject 都回 `isError`「工具执行失败」（同步抛错不得逃到 `#onLine` 的 try/catch 成为 `invalid rpc chunk`）；cancel 之后才 reject 的不写帧。错误原文不进帧、不进日志、不进 `error` 事件。
+    - 写帧守卫：与 `respondApproval`（`:245`）相同——`stdin.writableEnded || destroyed || #writesClosed` 时不写。`host_tool_result` 的写失败（含帧长超限的拒绝）一律吞掉，不进 `#failIo`、不 emit `error`（否则 `runtime.ts:579-585` 在回合里退役进程）。
+    - 中止全部在途：挂在与 `#approvals.clear()` 同位的三处——`#forbidCommands`（`:625`）、`#terminateTransport`（`:641`）、`#failStartup`（`:672`）。第四个挂点：写端关闭——`closeInput()` 在 `end()` 之后同步 `close()`（`commands.ts` 的 `closeStdin` 经它走），`#onFrame` 见 `stdin.writableEnded` 即 `close()` 而不分发，stdin 的 `finish` / `close` 兜底其余 `end()`；写端一关即中止全部在途（omp-runtime「写端关闭：中止全部在途处理」字面；退役的 TERM 宽限期内不再跑 RAGFlow 请求）。中止后放行的结果不写帧。
+    - 帧长：量法只有 `#write` 一份（`JSON.stringify(frame)+"\n"` 的 UTF-8 字节数对 `ready` 协商后的 `#maxPhysical`，`:357`）。降级复用 `#write` 的 `OmpProtocolError("outbound frame exceeds physical limit")` 拒绝或同一谓词，不另写量法：先写带 `details` 的帧；被拒则去掉 `details` 再写；仍被拒则写 `isError`「工具结果过大」。
+    - 生产行为：不注入 `hostTools` 时回 `未知工具` 是新增的写帧，但今天到达不了（从不发 `set_host_tools`，omp 不会发 `host_tool_call`），组 4 才可达——这是「不可达的新行为」，不写成「行为不变」。`host_tool_call` / `host_tool_cancel` 仍照常作为 `frame` 事件发出（`events.ts` 的 default 分支忽略）。
+    - 假 omp：
+      - `id` 依次 `h1`、`h2`、`h3`，`toolCallId` 依次 `c1`、`c2`、`c3`。用例 prompt 为 `查一下 KB:k1`（parallel 用 `查一下 KB:k1 KB:k2`），断言 `arguments` 为 `{question:"查一下 KB:k1", kb_ids:["k1"]}`；`host-tool` 一个回合两次调用，「恰一帧」按 `id` 计。
+      - 首刀里 `host-tool` 与 `host-tool-abort` 不论 `--approval-mode` 都按 `yolo` 帧序（`write` / `always-ask` 分支与 `Deny` 属于 3.5）；3.3 的用例一律以 `--approval-mode yolo` 起进程；`host-tool-abort` 的 `host_tool_call` 同样先于 `tool_execution_start`。
+      - 入站帧经同一个串行 queue（`fake-omp.mjs:149-152`）：场景发出调用后立即返回，用状态表在 `host_tool_result` 到达时推进（`openSelects` 同一先例），不在 handler 里 `await` 结果。`host-tool-abort` 加进 `abortable`；abort 之后接受下一个 prompt，按 normal 回合处理。
+      - 其余场景对 `set_host_tools` 的缺省应答钉死为 `{id, type:"response", command:"set_host_tools", success:false, error:"unsupported"}`（今天的应答不带 `id`，`request` 会挂住；全仓无既有用例用到它）。`host-tool-register-fail` 属于 4.2，不在本刀。
+    - 用例证据（`omp-host-tools.test.ts`，真实子进程）：
+      - 「调用与应答」：处理函数返回 `{text:"r", details:{bases:[]}, isError:false}`，tee 截获 `h1` 恰一帧 `{type:"host_tool_result", id:"h1", result:{content:[{type:"text", text:"r"}], details:{bases:[]}}}`，没有 `isError` 键。
+      - 「并发」：处理函数对 `h1` 挂起、对 `h2` 立即返回；放行前处理函数的调用记录已有 `h1`、`h2`；写出次序 `h2` 先于 `h1`；`h3`（`other`，回 `未知工具`）的位置不约束。
+      - 「取消与迟到的结果」：`await proc.request({type:"abort"})` 返回即同步点（`host_tool_cancel` 先于 abort 的应答）；此时断言信号已中止，再放行处理函数、让出一个 macrotask；再走 abort 之后那个 normal 回合的 probe prompt（读它的 `frames=`，入站帧记录只经它暴露），断言 tee 没有 `h1` 的 `host_tool_result`，入站帧记录也没有。
+      - 「退出」与「写端关闭」各一例：处理函数挂起 `h1`，一例 `proc.kill("SIGKILL")` 后等 `exit`，一例 `proc.child.stdin.end()` 并 `await once(proc.child.stdin, "finish")`（或 `expect.poll(() => signal.aborted)`）；随后放行、让出一个 macrotask；断言信号已中止、tee 自观测点起写入数不变、`proc` 没有新的 `error` 事件。
+      - 「未知工具与失败」：未注入、resolve `undefined`、同步 `throw`、异步 reject 各一例（错误信息含哨兵）；cancel 之后才 reject 一例不写帧。
+      - 「结果过大」：例一 ASCII `text` 约 100 KiB、`details` 约 1 MiB → 帧无 `details`、`isError` 无；例二 `text` 本身超过 1 MiB（另一 CJK 变体：字符数小于上限、字节数超过）→ `isError`「工具结果过大」。假 omp 会把 `result` 回显进 `tool_execution_end`，所以另断言收到了这次调用的 `tool_execution_end` 且 `proc` 零 `error` 事件（防回显帧超入站上限而假绿）。
+    - 回归命令：`npm run test:focus --workspace server -- omp-host-tools fake-omp omp-process omp-rpc omp-runtime omp-approval-requests`，全部原样全绿；`grep -rn kb_search server/src/sessions` 无输出。
 - [ ] 3.5 假 omp 场景补 `write` / `always-ask` 帧序（`Allow tool: kb_search` 的 select 与 `Deny` 分支），并在 3.2 的契约用例里加对应断言
 - [ ] 3.6 测试先行后实现：`ui-requests.ts` 的纯判定函数 `isKbSearchApproval`（`ui-requests.ts` 保持无状态，`OmpProcess` 仍是唯一写帧的地方），`#onUiRequest` 在审批识别之前按这一代的 `approvalMode` 判定；覆盖 tool-approval 的新场景与 session-permission-tier「kb_search 的确认只在 always-ask 档出卡」，以及 omp-runtime「RPC IO and child observation」的「kb_search card by approval mode」，既有审批用例原样全绿
 

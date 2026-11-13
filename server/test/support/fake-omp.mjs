@@ -23,6 +23,7 @@ import {
   WRITE_CALL,
   WRITE_SELECT_ID,
 } from "./fake-omp-composer.mjs";
+import { hostToolScenario } from "./fake-omp-host-tool.mjs";
 import { probeReport } from "./fake-omp-probe.mjs";
 import { loadBaseUrl, parseToolCall, postChat } from "./fake-omp-proxy.mjs";
 import {
@@ -133,6 +134,7 @@ const applied = { ...INITIAL_APPLIED };
 let turnOpen = false;
 const deferred = [];
 const readyGate = scenario === "slow-ready" ? delayReady(readyDelayMs) : Promise.resolve();
+const hostTool = hostToolScenario(scenario, { emit, emitDeltas, finishTurn, flushCommands });
 
 if (scenario !== "no-ready" && scenario !== "no-ready-hang") {
   queue = readyGate.then(() =>
@@ -222,6 +224,7 @@ async function dispatch(frame) {
     ...(scenario === "branch"
       ? { get_branch_messages: handleBranchMessages, branch: handleBranch }
       : {}),
+    ...hostTool.handlers,
   };
   const handler = handlers[type];
   if (handler) {
@@ -417,6 +420,9 @@ async function handlePrompt(frame) {
   const report = probeReport(frame.message, inbound);
   if (report !== undefined) {
     await completeTurn([report], false);
+    return;
+  }
+  if (await hostTool.prompt(frame.message)) {
     return;
   }
   await completeTurn(DELTAS, true);

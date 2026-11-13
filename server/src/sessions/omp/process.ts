@@ -15,6 +15,7 @@ import {
   type OmpFrame,
   RpcChunkDecoder,
 } from "./frame.js";
+import { type HostToolHandler, HostTools } from "./host-tools.js";
 import { ensureRepoRootMarker } from "./repo-root-marker.js";
 import {
   type SessionCapabilities,
@@ -121,6 +122,8 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000;
 export interface OmpProcessOpts extends SpawnOmpOpts {
   spawnImpl?: SpawnImpl;
   handshakeTimeoutMs?: number;
+  /** Bound for this process's lifetime; omitted → every host tool call is answered unknown-tool. */
+  hostTools?: HostToolHandler | undefined;
 }
 
 export interface OmpExit {
@@ -173,6 +176,7 @@ export class OmpProcess {
   readonly #pending = new Map<string, PendingRequest>();
   readonly #approvals = new Set<string>();
   readonly #decoder = new RpcChunkDecoder();
+  readonly #hostTools: HostTools;
   readonly #ready: Promise<void>;
   #settleReady: ((error?: Error) => void) | undefined;
   #readySettled = false;
@@ -194,8 +198,9 @@ export class OmpProcess {
   #sentSigkill = false;
 
   constructor(opts: OmpProcessOpts) {
-    const { spawnImpl, handshakeTimeoutMs, ...spawnOpts } = opts;
+    const { spawnImpl, handshakeTimeoutMs, hostTools, ...spawnOpts } = opts;
     this.#opts = spawnOpts;
+    this.#hostTools = new HostTools(hostTools, (frame) => this.#writeHostFrame(frame));
     this.#spawnImpl = spawnImpl ?? (spawn as SpawnImpl);
     this.handshakeTimeoutMs = handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
     this.#ready = new Promise<void>((resolve, reject) => {
@@ -250,8 +255,16 @@ export class OmpProcess {
     });
   }
 
+  /** Refuses unwritten once input is unwritable (as respondApproval); a refusal never #failIo. */
+  #writeHostFrame(frame: OmpFrame): Promise<void> {
+    const input = this.#child?.stdin;
+    const open = input && !input.writableEnded && !input.destroyed && !this.#writesClosed;
+    return open ? this.#write(frame) : Promise.reject(new AgentUnavailableError("stdin closed"));
+  }
+
   closeInput(): void {
     this.#child?.stdin.end();
+    this.#hostTools.close();
   }
 
   kill(signal: NodeJS.Signals = "SIGKILL"): boolean {
@@ -388,6 +401,8 @@ export class OmpProcess {
     child.stdin.on("error", (error) => {
       this.#failIo(error);
     });
+    child.stdin.on("finish", () => this.#hostTools.close());
+    child.stdin.on("close", () => this.#hostTools.close());
     child.stderr.on("data", () => {
       // Drain only; never retain or log raw stderr.
     });
@@ -569,6 +584,8 @@ export class OmpProcess {
     ) {
       this.#onUiRequest(frame, frame.id);
     }
+    if (this.#child?.stdin.writableEnded) this.#hostTools.close();
+    if (!this.#writesClosed) this.#hostTools.onFrame(frame);
     if (frame.type !== "response" || typeof frame.id !== "string") {
       return;
     }
@@ -623,6 +640,7 @@ export class OmpProcess {
     const already = this.#writesClosed;
     this.#writesClosed = true;
     this.#approvals.clear();
+    this.#hostTools.close();
     this.#clearTimer();
     this.#settleReady?.(error);
     if (!this.#started) {
@@ -639,6 +657,7 @@ export class OmpProcess {
     this.#fatal = error;
     this.#writesClosed = true;
     this.#approvals.clear();
+    this.#hostTools.close();
     this.#stdoutClosed = true;
     this.#clearTimer();
     this.#clearInput();
@@ -670,6 +689,7 @@ export class OmpProcess {
     this.#fatal = unavailable;
     this.#writesClosed = true;
     this.#approvals.clear();
+    this.#hostTools.close();
     this.#clearTimer();
     if (this.#nativeExit === undefined) {
       this.#stdoutClosed = true;
