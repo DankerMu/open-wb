@@ -41,6 +41,7 @@ function stoppedView(): View {
         changes: null,
         status: "done",
         bodyOffset: null,
+        kbHits: null,
       },
       {
         id: 32,
@@ -50,6 +51,7 @@ function stoppedView(): View {
         changes: CHANGES,
         status: "failed",
         bodyOffset: null,
+        kbHits: null,
       },
     ],
     approvals: [SETTLED],

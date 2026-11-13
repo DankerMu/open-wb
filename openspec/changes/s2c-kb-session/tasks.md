@@ -63,6 +63,12 @@
 | 组 5：不合规即丢弃、日志不含切片 | 是 | 「不合规即丢弃」的唯一哨兵断言 |
 | 组 5：旧 web 兼容 | 是 | web 只给 `stream.ts` 的 `DATA_EVENTS` 注册监听，未知类型忽略；组 6 才解码。无需用例，评审核对 |
 | 组 5：资源上限（单事件大小） | 否 | 切片不截断；单事件大小受 host 帧上限约束（组 3 首刀：`host_tool_result` 超 1 MiB 先去 `details`），环形缓冲只按条数限 1000 |
+| 组 6 首刀：公共事件解码的严格度（`bases` 深校验） | 是 | 「组 6 首刀约定」反例表，每行 `events` 为 `[]`、`loads` 为 2 |
+| 组 6 首刀：非法负载触发重新同步 | 是 | 同上（`loads` 计数，先例 `chat-stream-failure.test.ts:43-86`） |
+| 组 6 首刀：未知目标返回同一引用 | 是 | 未知步骤、不存在的消息、user 消息三例 `toBe(before)`（`deepFreeze`） |
+| 组 6 首刀：快照恢复与回放 | 是 | `chatStateFromSnapshot` 的 `kbHits:null`；重复帧由既有游标过滤 |
+| 组 6 首刀：旧事件与旧用例兼容 | 是 | 回归命令；旧用例只许原地加 `kbHits: null` |
+| 组 6 首刀：行数上限 | 是 | `stream.ts` ≤ 780；`chat-page-file-changes.test.tsx` 先移出 `describe("summarizeChanges")` |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -223,8 +229,19 @@ Minimal mergeable slice: atomic - reducer 派生与 supervisor 校验发布是�
 
 ## 6. web：`kb.hits` 与检索卡（chat-web「纯会话视图归约」「事件流消费与续流」「助手消息分段」「工具段摘要与折叠」「会话知识库检索卡」）
 
-- [ ] 6.1 核对 Context：`stream.ts` 的事件名表（:121）与归约、`stream-failure.ts` 的 `turn.retry` 严格解码先例、`message-segments.ts`、`tool-summary.ts:9-24`、`tool-call-group.tsx` / `message-segments-view.tsx` 的分流、`step-card.tsx`
-- [ ] 6.2 测试先行（新文件 `web/test/chat-stream-kb-hits.test.ts`）后实现：新文件 `web/src/features/chat/stream-kb-hits.ts`（严格解码与把 `kbHits` 挂到步骤上），`stream.ts` 只加事件名与分派的几行；用例覆盖「检索结果归约」「检索结果事件严格解码」（键集不符触发重新同步、未知步骤保持同一引用）
+- [x] 6.1 核对 Context：`stream.ts` 的事件名表（:121）与归约、`stream-failure.ts` 的 `turn.retry` 严格解码先例、`message-segments.ts`、`tool-summary.ts:9-24`、`tool-call-group.tsx` / `message-segments-view.tsx` 的分流、`step-card.tsx`
+- [x] 6.2 测试先行（新文件 `web/test/chat-stream-kb-hits.test.ts`）后实现：新文件 `web/src/features/chat/stream-kb-hits.ts`（严格解码与把 `kbHits` 挂到步骤上），`stream.ts` 只加事件名与分派的几行；用例覆盖「检索结果归约」「检索结果事件严格解码」（键集不符触发重新同步、未知步骤保持同一引用）
+  - 组 6 首刀约定（#1968 fixture 审查补；6.2 照此实现与测试）：
+    - 形状：每个步骤一个 `kbHits: {intent: string | null, bases} | null`，同一步骤后到者胜（D10「挂到消息上」以规格「挂到步骤上」为准；组 6 第二刀按行读取）。类型 `ChatKbHits` 与校验规则都在 `stream-kb-hits.ts`，`stream-steps.ts` 只 `import type`（免与 `updateStep` 运行时成环）；只导出 `stream.ts` 与 `stream-steps.ts` 实际用到的符号（knip）。
+    - PR Boundary 补 `web/src/features/chat/stream-steps.ts`：`ChatStepView` 加必填 `kbHits: ChatKbHits | null`；`startStep` 置 `null`；`endStep`（`stream-steps.ts:42-56` 逐字段重建）必须加 `kbHits: current.kbHits`——kb.hits 恒先于同一调用的 step.end，不加则命中被 step.end 抹掉。`stream.ts:136-144` 的快照步骤映射加 `kbHits: null`。
+    - 解码深度：照 chat-web「事件流消费与续流」逐条校验，规则同 chat-stream「检索结果事件发布」——`stepId` 为安全整数；`intent` 为 `null` 或非空字符串；`bases` 1–5 项，每项严格键集 `{kbId, name, status, hits}`，`kbId` 非空，`status ∈ {ok, not_found, not_ready, failed}`，`name` 在 `not_found` 时为 `null`、其余非空字符串，`hits` 至多 6 项且非 `ok` 时为 `[]`，每条命中严格键集 `{documentId, name, similarity, content}`、`similarity` 为有限数。用 `web/src/lib/api-json.ts` 的 `hasExactlyKeys` / `parseJsonArray`；web 侧规则只写在 `stream-kb-hits.ts` 一处，不照抄 `server/src/sessions/kb-hits.ts`（jscpd 同扫两棵树）。
+    - 重新同步观测（先例 `chat-stream-failure.test.ts:43-86`）：用 `chat-stream-support.ts` 的 `connectChat` / `chatSnapshot` / `settle`，先装 `1:2` 快照，再 `emitData("kb.hits", "1:3", …)`。正例断言 `connector.events` 用 `toStrictEqual` 逐值保留（两条，第二条 `intent:null`），`loads` 仍为 1；反例断言 `events` 为 `[]`、`loads` 为 2。本地 `installed()` 已有 4 份副本，新文件复用或就近导出，不贴第五份。
+    - 反例表（每行 `events` 为 `[]`、`loads` 为 2）：缺键 / 多键、`stepId` 为字符串或 `1.5`、`intent` 类型错、`intent:""`、`bases:[]`、6 个库、某库或某命中缺键 / 多键、非法 `status`、`not_found` 带字符串 `name`、`ok` 的 `name` 为 `null`、非 `ok` 的库带命中、`ok` 带 7 条命中、`similarity` 为字符串。
+    - 「检索结果归约」补：完整一串 step.start(5, `kb_search`) → kb.hits → step.end → turn.end 后步骤 5 的 `kbHits` 仍是 kb.hits 的值；`chatStateFromSnapshot` 对含 `kb_search` 步骤的快照给出 `kbHits: null`（「刷新后只剩各轮」的数据前提）；未知步骤（99）、不存在的消息、指向 user 消息的 kb.hits 在 `deepFreeze` 的状态上都 `toBe(before)`。
+    - 回放与续流：重复帧由既有游标过滤（`isSuccessor`）丢弃，后到者胜本身幂等，不加新代码；经完整快照恢复后所有 `kbHits` 回到 `null`（含组 5 所述 `#activeTurn` 无 `Last-Event-ID` 回放里游标不大于快照游标的 kb.hits）；kb.hits 不清 `retrying`。
+    - 旧用例唯一许可改动：在既有视图步骤字面量与构造 helper 里原地加 `kbHits: null`，不改任何断言（必填字段会让 `tool-summary.test.ts:10`、`message-segments.test.ts:25`、`chat-tool-group.test.tsx:27`、`chat-page-file-changes.test.tsx:377-381` 等 typecheck 失败，精确 `toEqual` / `toStrictEqual` 在 `chat-stream.test.ts`、`chat-stream-recovery.test.ts`、`chat-runtime-convert.test.ts` 等运行时失败）；实施时 grep 出完整清单写进 PR。`web/test/chat-page-file-changes.test.tsx`（793 行）先把 `describe("summarizeChanges")` 原地移到兄弟文件，再加字段（size-guard）。
+    - 行数预算：`stream.ts` 771 → ≤ 780（import、`ChatEvent` 联合、`DATA_EVENTS`、`applyChatEvent` 的 case、`decodeEvent` 的 case、快照步骤 `kbHits: null`）；`use-chat-session.ts` 零改动。
+    - 回归命令：`npm run test:focus --workspace web -- stream-kb-hits chat-stream chat-page-file-changes tool-summary message-segments chat-tool-group chat-runtime-convert`（再加 grep 清单里其余改到的文件），外加 `make lint`、`make typecheck`、`make anti-drift`。
 - [ ] 6.3 测试先行后实现：`message-segments.ts` 的检索块（「kb_search 步骤合成一个检索块」场景）；`tool-summary.ts` 不计 `kb_search`，既有分段与摘要用例原样全绿
 - [ ] 6.4 测试先行（新文件 `web/test/chat-kb-search-card.test.tsx`）后实现：新组件 `web/src/features/chat/kb-search-card.tsx`，覆盖「实时两轮」「刷新后只剩各轮」「检索行的确认标记」「部分失败与检索中」；展开态以块键保留
 - [ ] 6.5 证据：本机对一个注入了 `kb.hits` 的会话截图（亮 / 暗），零新增控制台报错，附在 PR；验收清单 CK 节新增 CK-16（接 CK-15，模型检索两轮的回合里，助手消息只有一张「知识库检索」卡，逐轮列出意图与命中条数，展开看到切片；刷新后只剩各轮），结论 `待签`，由 owner 执行

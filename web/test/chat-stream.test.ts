@@ -176,6 +176,7 @@ describe("Chat stream reducer", () => {
               changes: null,
               status: "done",
               bodyOffset: 0,
+              kbHits: null,
             },
           ],
           thinking: null,
@@ -253,6 +254,7 @@ describe("Chat stream reducer", () => {
         changes: null,
         status: "done",
         bodyOffset: 0,
+        kbHits: null,
       },
     ]);
   });
@@ -292,6 +294,7 @@ describe("Chat stream reducer", () => {
               changes: null,
               status: "running",
               bodyOffset: null,
+              kbHits: null,
             },
           ],
           thinking: null,
@@ -329,6 +332,7 @@ describe("Chat stream reducer", () => {
               changes: null,
               status: "failed",
               bodyOffset: null,
+              kbHits: null,
             },
           ],
           thinking: null,
@@ -375,6 +379,7 @@ describe("Chat stream reducer", () => {
           changes: null,
           status: "failed",
           bodyOffset: null,
+          kbHits: null,
         },
       ],
       thinking: null,
@@ -579,6 +584,7 @@ describe("Chat stream reducer", () => {
         changes: null,
         status: "done",
         bodyOffset: null,
+        kbHits: null,
       },
       {
         id: 4,
@@ -588,6 +594,7 @@ describe("Chat stream reducer", () => {
         changes: null,
         status: "done",
         bodyOffset: null,
+        kbHits: null,
       },
       {
         id: 5,
@@ -597,6 +604,7 @@ describe("Chat stream reducer", () => {
         changes: null,
         status: "failed",
         bodyOffset: null,
+        kbHits: null,
       },
     ]);
 

@@ -34,6 +34,7 @@ const STEP = {
   output: "",
   status: "running" as const,
   changes: null,
+  kbHits: null,
 };
 
 describe("hasVisibleBlock：可见块判据（纯函数）", () => {

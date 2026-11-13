@@ -528,6 +528,7 @@ describe("Chat stream recovery", () => {
             changes: null,
             status: "done",
             bodyOffset: 0,
+            kbHits: null,
           },
         ]);
 
@@ -543,6 +544,7 @@ describe("Chat stream recovery", () => {
             changes: null,
             status: "done",
             bodyOffset: 0,
+            kbHits: null,
           },
         ]);
         context.loads[1]?.resolve(

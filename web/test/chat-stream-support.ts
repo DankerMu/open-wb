@@ -314,6 +314,15 @@ export function connectChat(
   return context;
 }
 
+/** Connector that has opened and installed `snapshot` from its one load; no event delivered yet. */
+export async function installedChat(snapshot: ChatMessageSnapshot): Promise<ChatConnectContext> {
+  const context = connectChat(snapshot);
+  context.source.emitOpen();
+  context.loads[0]?.resolve(snapshot);
+  await settle();
+  return context;
+}
+
 export function assistantContent(state: ChatState, messageId = 0) {
   return state.messages.find((message) => message.id === messageId)?.content;
 }

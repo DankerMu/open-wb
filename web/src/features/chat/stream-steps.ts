@@ -1,6 +1,10 @@
 import type { ChatStep } from "../../lib/session-contract.js";
+import type { ChatKbHits } from "./stream-kb-hits.js";
 
-/** A message's step as the chat view holds it: the snapshot step without `ordinal`. */
+/**
+ * A message's step as the chat view holds it: the snapshot step without `ordinal`, plus the
+ * live-only `kbHits` of a `kb.hits` event (`null` from a snapshot or step.start).
+ */
 export type ChatStepView = {
   id: ChatStep["id"];
   name: ChatStep["name"];
@@ -9,6 +13,7 @@ export type ChatStepView = {
   changes: ChatStep["changes"];
   status: ChatStep["status"];
   bodyOffset: ChatStep["bodyOffset"];
+  kbHits: ChatKbHits | null;
 };
 
 type WithSteps = { steps: ChatStepView[] };
@@ -33,12 +38,13 @@ export function startStep<M extends WithSteps>(
         changes: null,
         status: "running",
         bodyOffset: data.bodyOffset,
+        kbHits: null,
       },
     ],
   };
 }
 
-/** Settles an existing step; `step.end` carries no changes, so the step keeps the ones it has. */
+/** Settles an existing step; `step.end` carries no changes or hits, so the step keeps its own. */
 export function endStep<M extends WithSteps>(
   message: M,
   data: { stepId: number; status: "done" | "failed"; output: string },
@@ -52,6 +58,7 @@ export function endStep<M extends WithSteps>(
     changes: current.changes,
     status: data.status,
     bodyOffset: current.bodyOffset,
+    kbHits: current.kbHits,
   }));
 }
 

@@ -2,8 +2,9 @@
  * Issue #535 `files.changed` decoding/reduction and the 文件变更 card (parent tasks 7.5a),
  * C1–C14 of openspec/changes/archive/2026-10-02-file-changes-card/design.md plus the review-round
  * gaps G1–G6.
- * Seams: `chatStateFromSnapshot` / `applyChatEvent` / `summarizeChanges` on frozen inputs,
- * `connectSessionEvents` over the fake EventSource and the jsdom chat page.
+ * Seams: `chatStateFromSnapshot` / `applyChatEvent` on frozen inputs, `connectSessionEvents` over
+ * the fake EventSource and the jsdom chat page; C6 `summarizeChanges` is in
+ * chat-page-file-changes-summarize.test.ts.
  * Expected values are literals from the spec deltas; cases marked (guard) already hold before the
  * change.
  */
@@ -12,10 +13,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyChatEvent,
   type ChatEvent,
-  type ChatState,
   chatStateFromSnapshot,
 } from "../src/features/chat/stream.js";
-import { summarizeChanges } from "../src/features/chat/stream-artifacts.js";
 import {
   assistantMessage,
   cardNamed,
@@ -52,8 +51,6 @@ import {
 import { cleanupChatPage, expandToolGroups } from "./chat-page-support.js";
 import { assistantSteps, deferred, historyUser, SESSION_ID } from "./chat-stream-support.js";
 import { calls, currentLocation, jsonResponse, textPreviewResponse } from "./support.js";
-
-type StepView = ChatState["messages"][number]["steps"][number];
 
 afterEach(() => {
   cleanupChatPage();
@@ -208,6 +205,7 @@ describe("files.changed reduction and the step view shape", () => {
         changes: [{ path: "a.html", added: null, removed: null, kind: "write" }],
         status: "running",
         bodyOffset: 2,
+        kbHits: null,
       },
     ]);
     expect(assistantSteps(second)?.map((step) => step.changes)).toStrictEqual([
@@ -222,6 +220,7 @@ describe("files.changed reduction and the step view shape", () => {
         changes: [{ path: "b.html", added: null, removed: null, kind: "write" }],
         status: "done",
         bodyOffset: 2,
+        kbHits: null,
       },
     ]);
     expect(ended.messages[1]?.thinking).toBe("先想");
@@ -271,6 +270,7 @@ describe("files.changed reduction and the step view shape", () => {
         changes,
         status: "failed",
         bodyOffset: null,
+        kbHits: null,
       },
     ]);
     expect(assistantSteps(ended)?.[0]?.changes).toBe(assistantSteps(state)?.[0]?.changes);
@@ -332,6 +332,7 @@ describe("files.changed reduction and the step view shape", () => {
         changes: null,
         status: "done",
         bodyOffset: null,
+        kbHits: null,
       },
       {
         id: 12,
@@ -341,6 +342,7 @@ describe("files.changed reduction and the step view shape", () => {
         changes: [{ path: "src/app.ts", added: 2, removed: 1, kind: "edit" }],
         status: "done",
         bodyOffset: null,
+        kbHits: null,
       },
     ]);
   });
@@ -359,6 +361,7 @@ describe("files.changed reduction and the step view shape", () => {
         changes: null,
         status: "running",
         bodyOffset: 0,
+        kbHits: null,
       },
     ]);
   });
@@ -370,51 +373,6 @@ describe("files.changed reduction and the step view shape", () => {
     const restarted = applyChatEvent(state, { type: "turn.start", data: { messageId: 0 } });
 
     expect(assistantSteps(restarted)).toStrictEqual([]);
-  });
-});
-
-describe("summarizeChanges", () => {
-  const stepView = (
-    id: number,
-    status: StepView["status"],
-    changes: StepView["changes"],
-  ): StepView => ({ id, name: "edit", detail: "", output: "", changes, status, bodyOffset: null });
-
-  it("C6 skips running steps and counts done, failed and stopped ones", () => {
-    const steps = deepFrozen([
-      stepView(1, "running", [edit("running.md", 9, 9)]),
-      stepView(2, "done", [edit("done.md", 1, 0)]),
-      stepView(3, "failed", [write("failed.html")]),
-      stepView(4, "stopped", [edit("stopped.md", 0, 2)]),
-    ]);
-    const before = structuredClone(steps);
-
-    expect(summarizeChanges(steps)).toStrictEqual([
-      { path: "done.md", added: 1, removed: 0, kind: "edit" },
-      { path: "failed.html", added: null, removed: null, kind: "write" },
-      { path: "stopped.md", added: 0, removed: 2, kind: "edit" },
-    ]);
-    expect(steps).toEqual(before);
-  });
-
-  it("C6 keeps the first position of a path and the value of its last step", () => {
-    const steps = deepFrozen([
-      stepView(1, "done", [edit("a", 1, 0)]),
-      stepView(2, "done", [write("b")]),
-      stepView(3, "done", [edit("a", 4, 2)]),
-    ]);
-
-    expect(summarizeChanges(steps)).toStrictEqual([
-      { path: "a", added: 4, removed: 2, kind: "edit" },
-      { path: "b", added: null, removed: null, kind: "write" },
-    ]);
-  });
-
-  it("C6 returns an empty list when no step carries changes", () => {
-    expect(
-      summarizeChanges(deepFrozen([stepView(1, "done", null), stepView(2, "failed", null)])),
-    ).toStrictEqual([]);
-    expect(summarizeChanges([])).toStrictEqual([]);
   });
 });
 
