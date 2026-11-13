@@ -89,6 +89,7 @@ app-server SHALL 解析四个键：`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE`�
 - `agent:false`，不跟随重定向，不重试。唯一的例外是检索的重排降级（见下面「调用点对类型化结果的处理」），它恰重试一次。
 - JSON 请求：连接期限 10 s，总期限 30 s，响应体至多 1 MiB。
 - 上传与下载：连接期限 10 s，空闲期限 60 s。
+- 检索请求（`POST /api/v1/retrieval`，含重排降级的那一次重试）SHALL 接受调用方的中止信号（knowledge-bases「单轮检索」）：信号已中止时不发出请求；请求进行中被中止时放弃连接，结果与期限到期相同。
 - 除 `/api/v1/system/version` 外，每个请求都带 `Authorization: Bearer <密钥>`。
 
 结果映射 SHALL 按以下次序判定：
@@ -124,7 +125,7 @@ app-server SHALL 解析四个键：`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE`�
 
 `DELETE /datasets` 的 `ids` SHALL 恰含一个非空 id，成功 SHALL 以 `success_count` 为 1 为准。客户端 SHALL NOT 提供 `GET /providers/<提供方>/instances/<实例>`：该应答明文回显上游密钥。
 
-RAGFlow 应答的 message 与错误应答的正文 SHALL NOT 进入本系统的响应、审计或日志，message 只用于上面的前缀判定。唯一的例外是成功检索应答里命中切片的 `content` 与 `similarity`：它们作为数据进入检索测试的 200 应答（knowledge-bases「单轮检索」），仍 SHALL NOT 进入审计或日志。
+RAGFlow 应答的 message 与错误应答的正文 SHALL NOT 进入本系统的响应、审计或日志，message 只用于上面的前缀判定。唯一的例外是成功检索应答里命中切片的 `content` 与 `similarity`：它们作为数据进入检索测试的 200 应答（knowledge-bases「单轮检索」）、会话检索 `kb_search` 交给模型的文本与 `details`（knowledge-bases「会话检索 `kb_search`」）以及会话事件 `kb.hits`（chat-stream「检索结果事件发布」），仍 SHALL NOT 进入审计或日志。
 
 #### Scenario: 结果映射
 - **WHEN** 假 RAGFlow 对建库请求依次应答：HTTP 200 `code:0`；HTTP 200 `code:101`；HTTP 401 `code:401`；HTTP 302；HTTP 200 非 JSON；挂起超过总期限（期限经装配注入缩短）
@@ -161,6 +162,10 @@ RAGFlow 应答的 message 与错误应答的正文 SHALL NOT 进入本系统的�
 #### Scenario: 超时不降级
 - **WHEN** 配置了重排模型，假 RAGFlow 挂起带 `rerank_id` 的检索超过总期限（期限经装配注入缩短）
 - **THEN** 503 `kb_unavailable`；假 RAGFlow 只收到这一次请求
+
+#### Scenario: 检索请求被中止
+- **WHEN** 假 RAGFlow 挂起检索应答，调用方在总期限之前中止信号
+- **THEN** 结果与期限到期相同（`kb_unavailable`），不等到总期限；假 RAGFlow 观察到连接关闭；没有重试
 
 ### Requirement: 知识库状态端点
 `GET /api/kb/status` SHALL 对任何已登录用户可用，未登录 401。

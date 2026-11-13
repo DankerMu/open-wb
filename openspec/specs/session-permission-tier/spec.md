@@ -8,7 +8,7 @@
 ### Requirement: 档位与 omp 审批模式
 会话的工具审批档位 SHALL 取 omp 的三个审批模式字面量之一，从存储、API 到 spawn 参数不做任何映射：`always-ask`（界面名 `每次都问`：写文件与执行命令的工具都先请求确认）、`write`（界面名 `只问命令`：只有执行命令一类的工具请求确认，写文件不请求——本 change 之前唯一的行为）、`yolo`（界面名 `全部自动`：工具不因档位请求确认）。严格程度的次序为 `always-ask < write < yolo`。
 会话每一次 generation spawn 与以它为源的 fork 临时进程 SHALL 以 `--approval-mode <该会话的有效档位>` 启动（有效档位见 session-composer-settings「有效值解析」；argv 的位置与其余参数见 omp-runtime「子进程 spawn 契约」）。
-宿主 SHALL NOT 因档位而自行应答、丢弃或改写任何审批请求：是否请求确认完全由 omp 决定，凡被识别为审批请求的（tool-approval「审批请求识别」）在任何档位下都照常登记、出确认卡、可作答。唯一由宿主自己应答的 `extension_ui_request` 是浏览器 eval prelude 的 `Allow tool: browser` 卡（omp-runtime「RPC IO and child observation」；#1563，owner 2026-10-20）：它不是审批请求，只在 `write` / `always-ask` 档下出现（`yolo` 档不因档位请求确认，prelude 也不问；工具自带的强制提示如 bash 的 `Critical pattern detected` 在 `yolo` 下仍可能出现，按审批处理）、且只出现在已批准的 `eval` 执行过程中，出现即被宿主立即应答 `Approve`，痕迹是三个档位下都写的 `eval` 步骤 `session.browser` 审计。宿主 overlay 的文件内容不随档位变化（omp-runtime「宿主 overlay」）。
+宿主 SHALL NOT 因档位而自行应答、丢弃或改写任何审批请求：是否请求确认完全由 omp 决定，凡被识别为审批请求的（tool-approval「审批请求识别」）在任何档位下都照常登记、出确认卡、可作答。由宿主自己应答的 `extension_ui_request` 只有两种（omp-runtime「RPC IO and child observation」）。一是 `write` / `yolo` 档下标题恰为 `Allow tool: kb_search` 的确认请求：宿主立即应答 `Approve`，不登记、不出确认卡；`always-ask` 档下它照常作为审批请求（tool-approval「审批请求识别」；change `s2c-kb-session`，owner 2026-11-10）。这是档位对应答方式的唯一影响。二是浏览器 eval prelude 的 `Allow tool: browser` 卡（#1563，owner 2026-10-20）：它不是审批请求，只在 `write` / `always-ask` 档下出现（`yolo` 档不因档位请求确认，prelude 也不问；工具自带的强制提示如 bash 的 `Critical pattern detected` 在 `yolo` 下仍可能出现，按审批处理）、且只出现在已批准的 `eval` 执行过程中，出现即被宿主立即应答 `Approve`，痕迹是三个档位下都写的 `eval` 步骤 `session.browser` 审计。宿主 overlay 的文件内容不随档位变化（omp-runtime「宿主 overlay」）。
 三档在真实 omp v18.12.3 上的行为由官方二进制对照用例钉住（见下方场景）；升级 omp 时 SHALL 重跑。v18.12.3 对被档位抬高的提示附带「本会话内放行」选项（`["Approve","Approve <subject> for this session","Deny"]`），宿主只回 `Approve` 或 `Deny`、不暴露该选项。
 
 #### Scenario: 每次都问（真实 omp）
@@ -28,6 +28,10 @@
 #### Scenario: 档位进入 argv
 - **WHEN** 有效档位分别为 `always-ask`、`write`、`yolo` 的三个会话各发一条 prompt（假 omp 真子进程，测试经注入的 spawn 包装记下 argv 后照常启动）
 - **THEN** 三个进程的 argv 里 `--approval-mode` 之后的取值分别为 `always-ask`、`write`、`yolo`，其余参数与同一会话在别的档位下逐字相同
+
+#### Scenario: kb_search 的确认只在 always-ask 档出卡
+- **WHEN** 同一个会话分别以三个档位各跑一次假 omp `host-tool` 场景的回合
+- **THEN** `always-ask` 档下每次 `kb_search` 调用都有 `approval.request` 并等待作答；`write` 与 `yolo` 档下没有 `approval.request`，`chat_approvals` 没有新行，两次调用照常完成
 
 ### Requirement: 换档从下一条消息起生效
 会话的档位被修改后（session-composer-settings「修改会话设置」），SHALL 从该会话下一次派发的回合起生效，SHALL NOT 影响正在进行的回合：在途回合继续以其进程启动时的档位运行，已出现的确认卡保持待决、可作答、按原计时超时。
