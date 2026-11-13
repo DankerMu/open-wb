@@ -39,21 +39,24 @@ const MESSAGE_LIMIT = 32_768;
 const PATH_LIMIT = 1_024;
 
 /**
- * Exactly `{message}` or `{message, attachments}` of an already checked plain record. `text` is the
- * message trimmed once, at most 32768 UTF-8 bytes; it may be empty only beside a non-empty
- * `attachments`. `paths` are the attachments as given (`[]` when absent), at most `maxFiles` of
- * them — the effective `UPLOAD_MAX_FILES`.
+ * Exactly `{message}`, `{message, attachments}`, `{message, knowledgeBases}` or all three keys, of an
+ * already checked plain record. `text` is the message trimmed once, at most 32768 UTF-8 bytes; it
+ * may be empty only beside a non-empty `attachments` (references do not relax that, #1971).
+ * `paths` are the attachments as given (`[]` when absent), at most `maxFiles` of them — the
+ * effective `UPLOAD_MAX_FILES`. `knowledgeBases` is the raw value (`undefined` when absent): its
+ * shape is judged after the attachments (`admitKnowledgeBases`, store-knowledge-bases.ts).
  */
 export function parsePromptBody(
   body: Record<string, unknown>,
   maxFiles: number,
-): { text: string; paths: string[] } {
+): { text: string; paths: string[]; knowledgeBases: unknown } {
   const keys = Object.keys(body).length;
   const listed = Object.hasOwn(body, "attachments");
+  const referenced = Object.hasOwn(body, "knowledgeBases");
   if (
     !Object.hasOwn(body, "message") ||
     typeof body.message !== "string" ||
-    keys !== (listed ? 2 : 1)
+    keys !== 1 + Number(listed) + Number(referenced)
   ) {
     throw new HttpError("bad_request");
   }
@@ -65,7 +68,7 @@ export function parsePromptBody(
   ) {
     throw new HttpError("bad_request");
   }
-  return { text, paths };
+  return { text, paths, knowledgeBases: referenced ? body.knowledgeBases : undefined };
 }
 
 /**

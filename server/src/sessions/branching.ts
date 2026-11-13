@@ -4,8 +4,9 @@
  * dispatches on the session's own process; fork (#466) runs the commands on a temporary process
  * admitted after the source's process retired, shuts it down and only then commits. Both pick the
  * branch entry by wire candidates (#555): a whitelisted command turn has no entry and is refused,
- * escaped text has one with a leading space, and a message stored with attachments has one ending
- * in their suffix (#1018; the paths are read in the precheck, with the messages). Regenerate
+ * escaped text has one with a leading space, and a message stored with attachments or knowledge-base
+ * references has one ending in their suffix (#1018, #1971; read in the precheck, with the
+ * messages). Regenerate
  * dispatches the branch text escaped when it starts with `/` (#711), so an entry left before the
  * prompt route escaped is never re-sent bare.
  */
@@ -30,6 +31,7 @@ import { classifyPrompt } from "./slash-commands.js";
 import type { SessionStore, SettledApproval } from "./store.js";
 import type { StoredAttachment } from "./store-attachments.js";
 import type { ComposerConfig } from "./store-composer.js";
+import type { KnowledgeBaseRef } from "./store-knowledge-bases.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import type { ControlClaims, TurnStops } from "./turn-control.js";
@@ -82,8 +84,9 @@ interface RegeneratePlan {
   sessionId: string;
   expectedId: number;
   question: string;
-  /** The attachment paths the last user message stores (none: `[]`). */
+  /** The attachment paths and the reference snapshot the last user message stores (none: `[]`). */
   paths: readonly string[];
+  kbs: readonly KnowledgeBaseRef[];
   resume: Resume;
 }
 
@@ -124,6 +127,7 @@ export class Regenerations {
     const tree = store.getMessages(sessionId, ownerId);
     // Same synchronous segment as the messages: the paths are those of the rows just read.
     const attachments = store.attachmentPaths(sessionId);
+    const knowledgeBases = store.knowledgeBaseRefs(sessionId);
     const resume = store.runtimeState(sessionId);
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
@@ -154,6 +158,7 @@ export class Regenerations {
       expectedId: assistant.id,
       question: user.content,
       paths: attachments.get(user.id) ?? [],
+      kbs: knowledgeBases.get(user.id) ?? [],
       resume,
     };
   }
@@ -168,7 +173,7 @@ export class Regenerations {
   async #lastEntry(slot: Slot, plan: RegeneratePlan): Promise<string> {
     const data = await commandOn(slot, { type: "get_branch_messages" });
     // Only the last pair is compared: earlier entries are not read.
-    const entryId = entryFor(branchEntries(data).at(-1), plan.question, plan.paths);
+    const entryId = entryFor(branchEntries(data).at(-1), plan.question, plan.paths, plan.kbs);
     if (entryId === undefined) {
       throw new HttpError("agent_unavailable");
     }
@@ -254,8 +259,9 @@ interface ForkPlan {
   /** The fork point's stored content, and the source's user messages in order to align it. */
   text: string;
   users: readonly StoredUser[];
-  /** Message id → the attachment paths it stores, read with `users`. */
+  /** Message id → the attachment paths and the reference snapshot it stores, read with `users`. */
   attachments: ReadonlyMap<number, readonly string[]>;
+  knowledgeBases: ReadonlyMap<number, readonly KnowledgeBaseRef[]>;
   /** The fork point's stored attachments, read with `text`; handed back beside the draft. */
   stored: StoredAttachment[];
   expectedAssistantId: number | null;
@@ -320,6 +326,7 @@ export class Forks {
     const tree = store.getMessages(sourceId, ownerId);
     // Same synchronous segment as the messages: the paths are those of the rows just read.
     const attachments = store.attachmentPaths(sourceId);
+    const knowledgeBases = store.knowledgeBaseRefs(sourceId);
     const resume = store.runtimeState(sourceId);
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
@@ -355,6 +362,7 @@ export class Forks {
       text: user.content,
       users,
       attachments,
+      knowledgeBases,
       stored: user.attachments,
       expectedAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
@@ -382,6 +390,7 @@ export class Forks {
       messageId: plan.messageId,
       users: plan.users,
       attachments: plan.attachments,
+      knowledgeBases: plan.knowledgeBases,
     });
     return this.#commit(plan, branched);
   }

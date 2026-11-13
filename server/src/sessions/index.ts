@@ -19,6 +19,7 @@ import { createSessionDeleter } from "./session-delete.js";
 import { sessionSkillsResolver } from "./slash-commands.js";
 import { createSessionStore, type SessionStore } from "./store.js";
 import type { ComposerConfig } from "./store-composer.js";
+import type { KnowledgeBaseResolver } from "./store-knowledge-bases.js";
 import { createSessionMetadataStore, type SessionMetadataStoreOptions } from "./store-metadata.js";
 import type { TodoWarn } from "./store-todo.js";
 import { defaultSessionClock, registerSessionEventStream } from "./stream/sse.js";
@@ -26,7 +27,7 @@ import { SessionSupervisor, type SessionSupervisorRuntime } from "./supervisor.j
 import type { TokenRegistry } from "./tokens.js";
 import { createTurnSnapshots, type TurnSnapshotService } from "./turn-snapshot.js";
 
-export type { HostToolPort } from "./host-tool-align.js";
+export type { HostToolPort, SessionSearchPort } from "./host-tool-align.js";
 
 export interface RegisterSessionsOptions {
   db: DatabaseSync;
@@ -97,6 +98,8 @@ export interface RegisterSessionsOptions {
   redactUpstream: (text: string) => string;
   /** The kb module's session search, forwarded to the supervisor; omitted → knowledge base off. */
   hostTools?: HostToolPort;
+  /** The kb module's reference resolver, forwarded to the prompt route; omitted → kb off (#1971). */
+  knowledgeBases?: KnowledgeBaseResolver;
 }
 
 export function registerSessions(
@@ -185,6 +188,7 @@ export function registerSessions(
     turnSnapshots,
     sandbox: options.sandbox,
     uploadMaxFiles: options.upload.maxFiles,
+    ...(options.knowledgeBases === undefined ? {} : { knowledgeBases: options.knowledgeBases }),
   });
   registerCommandRoutes(app, {
     agentDir: options.agentDir,

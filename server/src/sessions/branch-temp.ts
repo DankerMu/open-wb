@@ -1,6 +1,7 @@
 /**
  * The part of the branch family that fork (#466) and undo share (#950): the entry alignment by
- * wire candidates (#555; with the attachment suffix of a message that stores attachments, #1018),
+ * wire candidates (#555; with the prompt suffix of a message that stores attachments, #1018, or
+ * knowledge-base references, #1971),
  * `branch` → `get_state`, and the temporary process that runs them — pool admitted, never a slot or
  * a generation, shut down before its caller commits anything. The prechecks, the control claim and
  * the commit stay with the caller.
@@ -17,8 +18,9 @@ import {
   type SpawnShared,
   temporaryTokens,
 } from "./pool.js";
-import { attachmentSuffix } from "./slash-commands.js";
+import { promptSuffix } from "./slash-commands.js";
 import type { ComposerConfig } from "./store-composer.js";
+import type { KnowledgeBaseRef } from "./store-knowledge-bases.js";
 import type { SessionSupervisorRuntime } from "./supervisor.js";
 import type { TokenRegistry } from "./tokens.js";
 import type { ControlClaims } from "./turn-control.js";
@@ -73,6 +75,8 @@ interface BranchTempPlan {
    * message with no entry has no attachment.
    */
   attachments: ReadonlyMap<number, readonly string[]>;
+  /** Message id → the reference snapshot it stores (#1971), read with `users`; none: no entry. */
+  knowledgeBases: ReadonlyMap<number, readonly KnowledgeBaseRef[]>;
 }
 
 /**
@@ -141,9 +145,7 @@ export class BranchTemps {
     } catch {
       throw new HttpError("agent_unavailable");
     }
-    const entryId = alignBranchEntries(plan.users, branchEntries(data), plan.attachments).get(
-      plan.messageId,
-    );
+    const entryId = alignBranchEntries(plan, branchEntries(data)).get(plan.messageId);
     if (entryId === undefined) {
       throw new HttpError("agent_unavailable");
     }
@@ -184,12 +186,18 @@ export async function branchTo(runtime: SessionRuntime, entryId: string): Promis
 /**
  * Whether an entry's text is a wire candidate of a stored user message: its content (sent verbatim
  * before the prompt route escaped) or, for `/` text, its escaped form — each followed by the
- * attachment suffix of the paths the message stores, which is empty for none. A message with
- * attachments and no text therefore has one candidate, the suffix itself. The stored row only —
- * the current skill set is never consulted, so installing or removing a skill moves no alignment.
+ * prompt suffix of the paths and the reference snapshot the message stores, which is empty for
+ * none. A message with attachments and no text therefore has one candidate, the suffix itself. The
+ * stored row only — the current skill set and the base table are never consulted, so installing
+ * or removing a skill, or deleting a base, moves no alignment.
  */
-function matches(entryText: string, content: string, paths: readonly string[]): boolean {
-  const suffix = attachmentSuffix(paths);
+function matches(
+  entryText: string,
+  content: string,
+  paths: readonly string[],
+  kbs: readonly KnowledgeBaseRef[],
+): boolean {
+  const suffix = promptSuffix(paths, kbs);
   return (
     entryText === content + suffix ||
     (content.startsWith("/") && entryText === ` ${content}${suffix}`)
@@ -204,15 +212,18 @@ export function branchEntries(data: unknown): readonly unknown[] {
 
 /**
  * The entryId of `entry` when it is well formed and its text is a wire candidate of the message
- * stored as `content` with the attachment `paths`.
+ * stored as `content` with the attachment `paths` and the reference snapshot `kbs`.
  */
 export function entryFor(
   entry: unknown,
   content: string,
   paths: readonly string[],
+  kbs: readonly KnowledgeBaseRef[],
 ): string | undefined {
   const { entryId, text } = record(entry) ?? {};
-  return typeof entryId === "string" && typeof text === "string" && matches(text, content, paths)
+  return typeof entryId === "string" &&
+    typeof text === "string" &&
+    matches(text, content, paths, kbs)
     ? entryId
     : undefined;
 }
@@ -223,14 +234,14 @@ export function entryFor(
  * entry is never skipped, so a malformed one aligns nothing from there on.
  */
 function alignBranchEntries(
-  users: readonly StoredUser[],
+  { users, attachments, knowledgeBases }: BranchTempPlan,
   entries: readonly unknown[],
-  attachments: ReadonlyMap<number, readonly string[]>,
 ): Map<number, string> {
   const aligned = new Map<number, string>();
   let next = 0;
   for (const user of users) {
-    const entryId = entryFor(entries[next], user.content, attachments.get(user.id) ?? []);
+    const paths = attachments.get(user.id) ?? [];
+    const entryId = entryFor(entries[next], user.content, paths, knowledgeBases.get(user.id) ?? []);
     if (entryId !== undefined) {
       aligned.set(user.id, entryId);
       next += 1;

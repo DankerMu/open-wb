@@ -52,6 +52,19 @@ export const A_PDF_SUFFIX =
 export const A_PDF = { path: "uploads/a.pdf", size: 3 };
 /** What `attach` stores: the column as an admission would have written it. */
 export const A_PDF_STORED = '[{"path":"uploads/a.pdf","size":3}]';
+/**
+ * The reference segment omp was given for `[{id:"k1",name:"产品文档"}]`, spelled out from
+ * message-attachments「交给 omp 的附件后缀」(s2c-kb-session); never built by the module under test.
+ */
+export const K1_SUFFIX =
+  "\n\n用户在本条消息中引用了以下知识库，可以用 kb_search 检索：\n- 产品文档（k1）";
+/** What `refer` stores: the `knowledge_bases` column as an admission would have written it. */
+export const K1_STORED = '[{"id":"k1","name":"产品文档"}]';
+
+/** Gives a stored user message the reference to k1, out of band (no kb module, no base row). */
+export function refer(db: DatabaseSync, messageId: number): void {
+  db.prepare("UPDATE chat_messages SET knowledge_bases = ? WHERE id = ?").run(K1_STORED, messageId);
+}
 
 type Forked = Awaited<ReturnType<SessionSupervisor["fork"]>>;
 type Worlds = ReturnType<typeof regenWorlds>;

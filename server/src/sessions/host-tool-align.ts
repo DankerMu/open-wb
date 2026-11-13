@@ -12,6 +12,7 @@ import { isDeepStrictEqual } from "node:util";
 import type { HostToolResult } from "./omp/host-tools.js";
 import { AgentUnavailableError } from "./omp/process.js";
 import { commandOn, KB_SEARCH, type Slot } from "./pool.js";
+import type { KnowledgeBaseResolver } from "./store-knowledge-bases.js";
 
 type Bases = readonly { id: string; name: string }[];
 
@@ -30,6 +31,11 @@ interface HostToolSource {
 
 /** Read at each use: the assembly hands it over before the kb module is registered (late binding). */
 export type HostToolPort = () => HostToolSource | undefined;
+
+/** The whole session search the assembly holds: the host tool and the prompt's reference resolver. */
+export interface SessionSearchPort extends HostToolSource {
+  resolveReferences: KnowledgeBaseResolver;
+}
 
 /** A throw of the source (a DB error) is a step-3 failure, like an unreadable `mcp.json` in step 1. */
 function definitionOf(hostTools: HostToolPort | undefined, ownerId: string) {

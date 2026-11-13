@@ -10,6 +10,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
 import { expect, vi } from "vitest";
+import type { AssemblyDependencies } from "../src/app.js";
 import { postPrompt } from "./session-rest-helpers.js";
 import { sessionRow } from "./session-store-helpers.js";
 import {
@@ -37,14 +38,17 @@ export async function closeWorlds(): Promise<void> {
 
 /**
  * A logged-in owner (zhangsan, `u1`) and one workspace `proj` holding `uploads/a.pdf` (3 bytes);
- * `wire` records every call that reaches the supervisor, `notified` every list notification.
+ * `wire` records every call that reaches the supervisor, `notified` every list notification. With
+ * `kb` the knowledge base is on (#1971); omitted, it is off.
  */
-export async function openWorld(uploadMaxFiles?: number) {
+export async function openWorld(uploadMaxFiles?: number, kb?: AssemblyDependencies["kb"]) {
   const rt = createControlledRuntime(() => {});
-  const opened = await openBareSession(
-    rt.runtime,
-    uploadMaxFiles === undefined ? {} : { assembly: { uploadMaxFiles } },
-  );
+  const opened = await openBareSession(rt.runtime, {
+    assembly: {
+      ...(uploadMaxFiles === undefined ? {} : { uploadMaxFiles }),
+      ...(kb === undefined ? {} : { kb }),
+    },
+  });
   closeAfterTest(opened.fixture);
   const { app, db, supervisor } = opened.fixture;
   // The workspace store realpaths the sandbox root, so it has to exist first.

@@ -11,7 +11,15 @@ import { describe, expect, it, vi } from "vitest";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { RetainedEvent } from "../src/sessions/stream/ring-buffer.js";
 import { REAL, settle, spawnedAt } from "./session-approval-helpers.js";
-import { A_PDF_STORED, A_PDF_SUFFIX, attach, messagesOf } from "./session-fork-helpers.js";
+import {
+  A_PDF_STORED,
+  A_PDF_SUFFIX,
+  attach,
+  K1_STORED,
+  K1_SUFFIX,
+  messagesOf,
+  refer,
+} from "./session-fork-helpers.js";
 import {
   answered,
   count,
@@ -542,4 +550,60 @@ describe("regenerate of a turn whose user message has attachments (#1018)", () =
       expect(held(world)).toBe(false);
     });
   }
+});
+
+/**
+ * Issue #1971 (message-attachments「带知识库引用回合的对位」): the last user message `查一下` stores the
+ * reference snapshot to k1, written out of band. The world has no kb module, so no base k1 exists —
+ * as if it was deleted after the admission: the alignment reads the stored snapshot only.
+ */
+describe("regenerate of a turn whose user message references a knowledge base (#1971)", () => {
+  async function referred(entry: string) {
+    const world = worlds.track(await openRegenWorld({ entries: [entry] }));
+    const { db } = world.fixture;
+    seedDone(world);
+    const user = messagesOf(db, world.session)[0]?.id ?? -1;
+    db.prepare("UPDATE chat_messages SET content = ? WHERE id = ?").run("查一下", user);
+    refer(db, user);
+    const row = () => db.prepare("SELECT * FROM chat_messages WHERE id = ?").get(user);
+    expect(row()).toMatchObject({
+      content: "查一下",
+      attachments: null,
+      knowledge_bases: K1_STORED,
+    });
+    return { world, db, row };
+  }
+
+  it(
+    "aligns the text followed by the reference segment: 202, the branch text dispatched",
+    REAL,
+    async () => {
+      const entry = `查一下${K1_SUFFIX}`;
+      const { world, row } = await referred(entry);
+      const before = row();
+
+      await regenerate(world);
+
+      const sent = spawnedAt(world, 0).stdin;
+      expect(sent.filter((frame) => frame.type === "branch")).toEqual([
+        expect.objectContaining({ entryId: "fake-entry-3" }),
+      ]);
+      expect(sent.filter((frame) => frame.type === "prompt")).toEqual([
+        expect.objectContaining({ message: entry }),
+      ]);
+      await waitForTurn(world.fixture, world.session, "done");
+      expect(row()).toEqual(before);
+    },
+  );
+
+  it("an entry that is the text alone is no candidate: 502 and no row changes", REAL, async () => {
+    const { world, db } = await referred("查一下");
+    const before = snapshot(db, world.session);
+
+    expect(await rejectedCode(regenerate(world))).toBe("agent_unavailable");
+
+    expect(types(spawnedAt(world, 0).stdin)).not.toContain("branch");
+    expect(snapshot(db, world.session)).toEqual(before);
+    expect(held(world)).toBe(false);
+  });
 });

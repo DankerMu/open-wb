@@ -22,8 +22,8 @@ import type { WorkspaceRootOf } from "./session-cwd.js";
 import type { SessionDeleter } from "./session-delete.js";
 import type { SessionTodo } from "./session-todo.js";
 import {
-  attachmentSuffix,
   classifyPrompt,
+  promptSuffix,
   sessionSkillsResolver,
   toWireText,
 } from "./slash-commands.js";
@@ -36,6 +36,7 @@ import type {
 } from "./store.js";
 import type { StoredAttachment } from "./store-attachments.js";
 import type { MessageError } from "./store-error.js";
+import { admitKnowledgeBases, type KnowledgeBaseResolver } from "./store-knowledge-bases.js";
 import type { SessionMetadataStore } from "./store-metadata.js";
 import type { ThinkingSegment } from "./store-segments.js";
 import type { UndoState } from "./store-undo.js";
@@ -92,6 +93,8 @@ interface SessionRestDependencies {
   sandbox: SessionSandboxPort;
   /** The effective `UPLOAD_MAX_FILES`: how many attachments one prompt may carry. */
   uploadMaxFiles: number;
+  /** The kb module's reference resolver (late bound by `app.ts`); omitted → knowledge base off. */
+  knowledgeBases?: KnowledgeBaseResolver;
 }
 
 interface PublicSession {
@@ -297,7 +300,7 @@ export function registerSessionRoutes(
     { onRequest: noStoreSessionResponse, preParsing: authorizeOwnedBeforeParse },
     async (request, reply) => {
       const principal = currentPrincipal(request);
-      const { text, paths } = parsePromptBody(
+      const { text, paths, knowledgeBases } = parsePromptBody(
         requirePlainRecord(request.body),
         dependencies.uploadMaxFiles,
       );
@@ -308,9 +311,9 @@ export function registerSessionRoutes(
       // The skills are those of this session's cwd: its workspace root, else the owner root. Read
       // (and awaited) ahead of the segment below, which they depend on only through `bound`.
       const skills = text.startsWith("/") ? await skillsOf(principal.id, bound) : [];
-      // Archive read, claim check, attachment checks and admission share one synchronous segment:
-      // no await in between. The read is fresh: the tree cached before the body arrived may
-      // predate a PATCH.
+      // Archive read, claim check, attachment and reference checks and admission share one
+      // synchronous segment: no await in between. The read is fresh: the tree cached before the
+      // body arrived may predate a PATCH.
       if (dependencies.metadata.archivedAt(request.params.id, principal.id) !== null) {
         throw new HttpError("session_archived");
       }
@@ -327,11 +330,14 @@ export function registerSessionRoutes(
         builtin: classifyPrompt(text, skills).kind === "builtin",
         paths,
       });
+      // message-attachments「prompt 引用知识库」: after the attachments; `[]` for none (#1971).
+      const refs = admitKnowledgeBases(knowledgeBases, principal.id, dependencies.knowledgeBases);
       const accepted = dependencies.store.acceptPrompt(
         request.params.id,
         principal.id,
         text,
         attachments,
+        refs,
       );
       dependencies.listEvents.notify(principal.id);
       try {
@@ -344,8 +350,11 @@ export function registerSessionRoutes(
           userMessageId: accepted.userMessageId,
           command: classifyPrompt(text, skills).kind !== "text",
         });
-        // The suffix is built from the admitted list, in request order; it is never stored.
-        const suffix = attachmentSuffix(attachments.map((attachment) => attachment.path));
+        // The suffix is built from the admitted lists, in request order; it is never stored.
+        const suffix = promptSuffix(
+          attachments.map((attachment) => attachment.path),
+          refs,
+        );
         await dependencies.supervisor.prompt(
           request.params.id,
           toWireText(text, skills) + suffix,
