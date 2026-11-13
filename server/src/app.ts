@@ -380,8 +380,8 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
   registerSkills(app, { db, agentDir: ompAgentDir(runtime.stateDir) });
   registerConnectorAdmin(app, db, assembly);
   // 第十二个模块 `kb`（s2a-kb-ragflow D5、D18）：只收这一个依赖，store 与客户端都在模块里建。
-  const kbModelWriteGuard = registerKb(app, assembly?.kb);
-  modelWriteGuard ??= kbModelWriteGuard;
+  const kb = registerKb(app, assembly?.kb);
+  modelWriteGuard ??= kb?.modelWriteGuard;
 
   app.all("/api", (request, reply) => sendNotFound(reply, request));
   app.get("/api/healthz", () => ({ status: "ok" }));

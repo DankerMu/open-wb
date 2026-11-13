@@ -7,7 +7,9 @@
  * 这一份（D20）：设置锁是进程级的。注册不碰 RAGFlow，构造 store 也不读库。工作空间的 store、沙箱 facade 与挂载 manager 取
  * `app` 上已有的那一份：`kb` 注册晚于 `workspaces`，不另建。
  *
- * 开启时注册返回 `models` 的写入钩子（D1）：`kb` 注册晚于 `models`，由 `app.ts` 绑过去；`models` 不导入 `kb`。
+ * 开启时注册返回 `models` 的写入钩子（D1）与会话检索（s2c-kb-session D5，`kb/session-search.ts`）：`kb` 注册晚于 `models`，
+ * 由 `app.ts` 绑过去；`models` 与 `sessions` 都不导入 `kb`。关闭时返回 `null`，两者都没有。重排降级的限频记录只建一份，
+ * 检索测试端点与会话检索共用（ragflow-backend「同一进程 60 秒内至多一行」）。
  *
  * 重建器（`kb/rebuild.ts`，#1852）也只建这一个，挂在 `app.kbRebuild` 上：入口在 `server_started` 之后调 `start` 续做，关停时在
  * 关闭 DB 之前调 `stop`（`startup-registry.ts`）。知识库关闭时它是空操作：不启动，`rebuilding` 的库保持原状。
@@ -31,6 +33,7 @@ import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client
 import { createKbRebuilder, type KbRebuilder } from "./rebuild.js";
 import { registerKbRoutes } from "./rest.js";
 import { createKbRetrieval } from "./retrieval.js";
+import { createKbSessionSearch } from "./session-search.js";
 import { createKbSettings } from "./settings.js";
 import { createSourceFiles } from "./source-file.js";
 import { createKbStore } from "./store.js";
@@ -83,14 +86,20 @@ export interface KbDependencies {
   rebuildSchedule?: (pass: () => Promise<void>) => void;
 }
 
+/** 开启时交回给 `app.ts` 的句柄。 */
+interface KbRegistration {
+  modelWriteGuard: ModelWriteGuard;
+  sessionSearch: ReturnType<typeof createKbSessionSearch>;
+}
+
 export function registerKb(
   app: FastifyInstance,
   dependencies: KbDependencies | undefined,
-): ModelWriteGuard | undefined {
+): KbRegistration | null {
   if (dependencies === undefined) {
     app.decorate("kbRebuild", NO_REBUILD);
     registerKbRoutes(app, undefined);
-    return undefined;
+    return null;
   }
   const {
     uploadMaxBytes,
@@ -107,6 +116,7 @@ export function registerKb(
   const { log, now = Date.now } = dependencies;
   const store = createKbStore(app.db);
   const client = createRagflowClient(clientOptions);
+  const onRerankDegraded = perMinute(now, () => log({ event: "kb_rerank_degraded" }));
   const audit = (event: Parameters<typeof emit>[1]): void => {
     emit(app.db, event);
   };
@@ -174,8 +184,11 @@ export function registerKb(
       client,
       locks,
       audit,
-      onRerankDegraded: perMinute(now, () => log({ event: "kb_rerank_degraded" })),
+      onRerankDegraded,
     }),
   });
-  return settings.guardModelWrite;
+  return {
+    modelWriteGuard: settings.guardModelWrite,
+    sessionSearch: createKbSessionSearch({ store, client, onRerankDegraded }),
+  };
 }
