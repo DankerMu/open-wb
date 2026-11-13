@@ -516,8 +516,9 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 > 2026-11-10 更新。**S2b 已签收**：验收清单「中心·知识库（CK）」CK-11、CK-13、CK-14 由 owner 签为 `通过`，Epic #1910 关闭；
 > 验收清单无 `待签` 行。计划外收尾：CI 的 omp 二进制缓存（#1932，change `ci-omp-binary-cache` 已归档）、
 > CI 规格补计 guardrails job（#1954，change `ci-spec-guardrails-sync` 已归档）。
-> 进行中：CI 单元测试分片与合并覆盖率门禁、并发取消（#1959，owner 2026-11-10 批准，change `ci-unit-test-sharding`），
-> PR 墙钟中位数 11.8 min 的关键路径是 `unit-tests-web`。
+> 计划外收尾（2026-11-12）：CI 单元测试分片与合并覆盖率门禁、并发取消（#1959，owner 2026-11-10 批准，change `ci-unit-test-sharding` 已归档），
+> 以及 uid-isolation 的 omp 上游失败用例拆成四个文件（#1979）；PR 墙钟中位数由 11.8 min 降到约 4–5.5 min，
+> 关键路径现为 uid-isolation 与单元测试线（各约 4 min）。
 > 可启动的是 **S2c 会话接入与可见范围**（依赖 S2b、S1c；范围以上文 S2c 一节为准）。
 >
 > 以下为更早的记录。
