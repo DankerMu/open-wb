@@ -8,6 +8,7 @@ import {
   collapseAndExpand,
   expectLocation,
   expectTreeRequestCount,
+  type FetchRoutes,
   hasLucideGlyph,
   imagePreviewResponse,
   openDirectoryDialog,
@@ -45,6 +46,28 @@ async function expectCardPath(path: string) {
   });
 }
 
+const browseRootEntries = [
+  { name: "out", type: "dir", size: 0, mtime: 101 },
+  { name: "in", type: "dir", size: 0, mtime: 101.5 },
+  { name: "readme.md", type: "file", size: 8, mtime: 102 },
+  { name: "notes.csv", type: "file", size: 24, mtime: 103 },
+  { name: "logo.png", type: "file", size: 8, mtime: 104 },
+  { name: "archive.zip", type: "file", size: 2, mtime: 105 },
+] as const;
+
+// 浏览三用例共用的挂载：根列表与空的 out，用例传同键路由即覆盖。应答在每次调用时新建（体只能读一次）。
+function renderBrowseFixture(routes: FetchRoutes = {}) {
+  return renderFiles(
+    "/files?ws=workspace-1",
+    authenticatedFilesRoutes([workspace], {
+      "/api/workspaces/workspace-1/tree?path=": () =>
+        jsonResponse({ path: "", entries: browseRootEntries }),
+      "/api/workspaces/workspace-1/tree?path=out": jsonResponse({ path: "out", entries: [] }),
+      ...routes,
+    }),
+  );
+}
+
 describe("workspace page route integration", () => {
   it("loads the authenticated account workspace, reconciles its URL, and starts the root tree", async () => {
     const { fetchMock } = renderFiles(
@@ -77,53 +100,8 @@ describe("workspace page route integration", () => {
     });
   });
 
-  it("browses cached directories, previews supported files, and creates a directory", async () => {
-    const secondReadme = deferredResponse();
-    const blobUrls = stubBlobUrls(["blob:logo"]);
-    const rootEntries = [
-      { name: "out", type: "dir", size: 0, mtime: 101 },
-      { name: "in", type: "dir", size: 0, mtime: 101.5 },
-      { name: "readme.md", type: "file", size: 8, mtime: 102 },
-      { name: "notes.csv", type: "file", size: 24, mtime: 103 },
-      { name: "logo.png", type: "file", size: 8, mtime: 104 },
-      { name: "archive.zip", type: "file", size: 2, mtime: 105 },
-    ] as const;
-    const rootAfterCreate = [
-      ...rootEntries,
-      { name: "drafts", type: "dir" as const, size: 0, mtime: 106 },
-    ];
-    let rootReads = 0;
-    let readmeReads = 0;
-    const { fetchMock } = renderFiles(
-      "/files?ws=workspace-1",
-      authenticatedFilesRoutes([workspace], {
-        "/api/workspaces/workspace-1/tree?path=": () => {
-          rootReads += 1;
-          return jsonResponse({
-            path: "",
-            entries: rootReads === 1 ? rootEntries : rootAfterCreate,
-          });
-        },
-        "/api/workspaces/workspace-1/tree?path=out": jsonResponse({ path: "out", entries: [] }),
-        "/api/workspaces/workspace-1/file?path=readme.md": () => {
-          readmeReads += 1;
-          return readmeReads === 1 ? textPreviewResponse("# 第一份") : secondReadme.promise;
-        },
-        "/api/workspaces/workspace-1/file?path=notes.csv": textPreviewResponse(
-          "name,size\nalpha,1\nbeta,2\n",
-        ),
-        "/api/workspaces/workspace-1/file?path=logo.png": imagePreviewResponse(),
-        "/api/workspaces/workspace-1/archive?path=archive.zip": jsonResponse({
-          format: "zip",
-          entries: [{ path: "a.txt", type: "file", size: 5 }],
-          truncated: false,
-        }),
-        "/api/workspaces/workspace-1/dirs": (_path, options) => {
-          expect(options).toMatchObject({ body: '{"path":"drafts"}', method: "POST" });
-          return jsonResponse({ path: "drafts" }, 201);
-        },
-      }),
-    );
+  it("lists the root in order and caches an expanded directory across collapse and expand", async () => {
+    const { fetchMock } = renderBrowseFixture();
 
     await screen.findByRole("button", { name: "展开 out" });
     const tree = screen.getByRole("navigation", { name: "工作空间目录树" });
@@ -133,8 +111,29 @@ describe("workspace page route integration", () => {
     fireEvent.click(screen.getByRole("button", { name: "展开 out" }));
     await collapseAndExpand("out");
     await expectTreeRequestCount(fetchMock, "/api/workspaces/workspace-1/tree?path=out", 1);
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "readme.md" }));
+  it("previews markdown, table, image, and archive files with their own previewers", async () => {
+    const secondReadme = deferredResponse();
+    const blobUrls = stubBlobUrls(["blob:logo"]);
+    let readmeReads = 0;
+    const { fetchMock } = renderBrowseFixture({
+      "/api/workspaces/workspace-1/file?path=readme.md": () => {
+        readmeReads += 1;
+        return readmeReads === 1 ? textPreviewResponse("# 第一份") : secondReadme.promise;
+      },
+      "/api/workspaces/workspace-1/file?path=notes.csv": textPreviewResponse(
+        "name,size\nalpha,1\nbeta,2\n",
+      ),
+      "/api/workspaces/workspace-1/file?path=logo.png": imagePreviewResponse(),
+      "/api/workspaces/workspace-1/archive?path=archive.zip": jsonResponse({
+        format: "zip",
+        entries: [{ path: "a.txt", type: "file", size: 5 }],
+        truncated: false,
+      }),
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "readme.md" }));
     const markdownSourceButton = await screen.findByRole("button", { name: "查看源码" });
     expect(screen.getAllByRole("heading", { level: 1, name: "工作空间" })).toHaveLength(1);
     expect(
@@ -174,6 +173,32 @@ describe("workspace page route integration", () => {
         ([path]) => path === "/api/workspaces/workspace-1/file?path=archive.zip",
       ),
     ).toHaveLength(0);
+  });
+
+  it("toggles the creation menu and creates a directory in a loaded location", async () => {
+    const rootAfterCreate = [
+      ...browseRootEntries,
+      { name: "drafts", type: "dir" as const, size: 0, mtime: 106 },
+    ];
+    let rootReads = 0;
+    renderBrowseFixture({
+      "/api/workspaces/workspace-1/tree?path=": () => {
+        rootReads += 1;
+        return jsonResponse({
+          path: "",
+          entries: rootReads === 1 ? browseRootEntries : rootAfterCreate,
+        });
+      },
+      "/api/workspaces/workspace-1/dirs": (_path, options) => {
+        expect(options).toMatchObject({ body: '{"path":"drafts"}', method: "POST" });
+        return jsonResponse({ path: "drafts" }, 201);
+      },
+    });
+
+    // 位置下拉只列已读取的目录：先展开 out 并等它的空列表落地，in 不展开。
+    fireEvent.click(await screen.findByRole("button", { name: "展开 out" }));
+    const outItem = screen.getByRole("button", { name: "折叠 out" }).closest("li");
+    await within(outItem as HTMLElement).findByText("空目录", { exact: true });
 
     const menuTrigger = screen.getByRole("button", { name: "新建" });
     pressPointer(menuTrigger);
