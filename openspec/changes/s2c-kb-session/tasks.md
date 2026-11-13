@@ -316,9 +316,9 @@ Minimal mergeable slice: 6.1–6.2 为首刀：解码与归约没有呈现，可
     - 行数：`core-db-helpers.ts` 553 → ≤ 560；新测试文件 ≤ 400。
     - 非目标：任何读写该列的代码（组 7 第二、三刀）；索引；回填。
     - 回归命令：`npm run test:focus --workspace server -- migration-052 core-db kb-schema migration-0 store-attachments message-undo-state session-composer-align`，外加全量 `npm test --workspace server`（列集断言散在多个文件，全量兜底）、`make lint`、`make typecheck`、`make anti-drift`。
-- [ ] 7.3 核对 Context：`prompt-attachments.ts:47` 的 `parsePromptBody`、`rest.ts` 的受理与后缀拼接（:315-349）、`store-attachments.ts`、`slash-commands.ts:324` 的 `attachmentSuffix`、`branch-temp.ts:191` 的 `matches`、`branching.ts:126/156/258`、`store-branch.ts` 的 fork 拷贝、`store.ts:203/389` 的 `acceptPrompt`、`undo.ts:164` 的撤回预检
-- [ ] 7.4 测试先行：新文件 `server/test/prompt-knowledge-bases.test.ts` 覆盖「拒绝」、后缀的「带知识库引用的后缀」与「prompt 带知识库引用」、列的落库值，以及 `store-knowledge-bases.ts` 读出坏值整列为 `[]` 的单元用例；派发文本与 spec 场景同一写法用桩 supervisor 观察（不经假 omp：组 4 合入后，知识库开启且所有者有库时缺省假 omp 会让注册失败，需要假 omp 的用例改用 `host-tool` 场景）；分支对位的场景（「带知识库引用回合的对位」）放进 `message-attachments` 既有的对位用例文件；fork 拷贝在本刀只断言新会话消息行的 `knowledge_bases` 列原值（快照还没有这一键）；无引用时后缀逐字节不变的既有用例原样全绿
-- [ ] 7.5 实现（服务端写入侧，快照不加键）：
+- [x] 7.3 核对 Context：`prompt-attachments.ts:47` 的 `parsePromptBody`、`rest.ts` 的受理与后缀拼接（:315-349）、`store-attachments.ts`、`slash-commands.ts:324` 的 `attachmentSuffix`、`branch-temp.ts:191` 的 `matches`、`branching.ts:126/156/258`、`store-branch.ts` 的 fork 拷贝、`store.ts:203/389` 的 `acceptPrompt`、`undo.ts:164` 的撤回预检
+- [x] 7.4 测试先行：新文件 `server/test/prompt-knowledge-bases.test.ts` 覆盖「拒绝」、后缀的「带知识库引用的后缀」与「prompt 带知识库引用」、列的落库值，以及 `store-knowledge-bases.ts` 读出坏值整列为 `[]` 的单元用例；派发文本与 spec 场景同一写法用桩 supervisor 观察（不经假 omp：组 4 合入后，知识库开启且所有者有库时缺省假 omp 会让注册失败，需要假 omp 的用例改用 `host-tool` 场景）；分支对位的场景（「带知识库引用回合的对位」）放进 `message-attachments` 既有的对位用例文件；fork 拷贝在本刀只断言新会话消息行的 `knowledge_bases` 列原值（快照还没有这一键）；无引用时后缀逐字节不变的既有用例原样全绿
+- [x] 7.5 实现（服务端写入侧，快照不加键）：
   - body 四种键集与 `knowledgeBases` 的判定（经组 2 的 `resolveReferences`，由 `app.ts` 注入路由）。
   - 引用的落库与读出放新文件 `server/src/sessions/store-knowledge-bases.ts`；`store.ts`（784 行）里 `acceptPrompt` 只多一个参数与一处调用，消息视图类型的第十四键留给 7.7。
   - `attachmentSuffix` 原地改名为 `promptSuffix(paths, kbs)`，全部调用点同改，不留旧名。

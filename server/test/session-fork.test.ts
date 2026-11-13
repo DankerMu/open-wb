@@ -28,12 +28,15 @@ import {
   forkWorlds,
   heldRegenerate,
   insertApproval,
+  K1_STORED,
+  K1_SUFFIX,
   listedIds,
   messagesOf,
   openCappedWorld,
   openForkScripted,
   openForkWorld,
   realSource,
+  refer,
   rowCounts,
   seedTwoTurns,
   sessionRowOf,
@@ -661,6 +664,52 @@ describe("fork alignment of messages with attachments (#1018)", () => {
       expect((await forked(world, u1 ?? -1)).attachments).toEqual([A_PDF]);
     },
   );
+
+  // message-attachments「分叉拷贝引用」(#1971): the snapshot is written out of band, no kb module.
+  it("分叉拷贝引用: aligns by the stored snapshot and copies the column value for value", async () => {
+    const world = await openForkScripted(worlds, [
+      { messages: entries(`${FIRST}${K1_SUFFIX}`, QUESTION) },
+    ]);
+    const { db } = world.fixture;
+    const seeded = seedTwoTurns(world);
+    refer(db, seeded.u1);
+    const column = (session: string) =>
+      db
+        .prepare(
+          "SELECT role, knowledge_bases, typeof(knowledge_bases) AS type FROM chat_messages WHERE session_id = ? ORDER BY id",
+        )
+        .all(session);
+    const before = snapshot(db, world.session, true);
+
+    expect(await forked(world, seeded.u2)).toEqual({
+      draft: QUESTION,
+      attachments: [],
+      branch: ["e-2"],
+    });
+
+    const fresh = String(
+      db.prepare("SELECT id FROM chat_sessions WHERE parent_session_id = ?").get(world.session)?.id,
+    );
+    expect(column(fresh)).toEqual([
+      { role: "user", knowledge_bases: K1_STORED, type: "text" },
+      { role: "assistant", knowledge_bases: null, type: "null" },
+    ]);
+    expect(column(fresh)).toEqual(column(world.session).slice(0, 2));
+    expect(snapshot(db, world.session, true)).toEqual(before);
+  });
+
+  it("an entry without the reference segment aligns neither u1 nor u2: 502", async () => {
+    const world = await openForkScripted(worlds, [{ messages: entries(FIRST, QUESTION) }]);
+    const { db } = world.fixture;
+    const seeded = seedTwoTurns(world);
+    refer(db, seeded.u1);
+    const { before, rows } = baseline(world);
+
+    for (const target of [seeded.u2, seeded.u1]) {
+      await expectForkRejected(world, forkAt(world, target), "agent_unavailable", rows);
+    }
+    expect(snapshot(db, world.session, true)).toEqual(before);
+  });
 
   it.each([
     ["the text alone", undefined, FIRST],

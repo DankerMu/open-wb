@@ -24,8 +24,11 @@ import {
   attach,
   FIRST,
   forkWorlds,
+  K1_STORED,
+  K1_SUFFIX,
   messagesOf,
   openForkScripted,
+  refer,
 } from "./session-fork-helpers.js";
 import { count, held, QUESTION, scriptedAt, types } from "./session-regenerate-helpers.js";
 import { AGENT_UNAVAILABLE_ENVELOPE, postPrompt } from "./session-rest-helpers.js";
@@ -133,6 +136,55 @@ describe("undo alignment of messages with attachments (#1018)", () => {
       seeded.unchanged();
     },
   );
+});
+
+/**
+ * Issue #1971 (message-attachments「重新生成与分叉中的附件」for a reference): u1 stores the reference
+ * snapshot to k1, out of band, and no kb module is assembled — the alignment reads the stored
+ * snapshot only.
+ */
+describe("undo alignment of a message that references a knowledge base (#1971)", () => {
+  async function referred(u1Entry: string) {
+    const world = await openForkScripted(worlds, [
+      {
+        messages: [
+          { entryId: "e-1", text: u1Entry },
+          { entryId: "e-2", text: QUESTION },
+        ],
+      },
+    ]);
+    const seeded = seedUndoable(world);
+    refer(world.fixture.db, seeded.u1);
+    return { world, seeded };
+  }
+
+  it("u1's entry is its text followed by the reference segment: undo u1 is 200, the draft its text", async () => {
+    const { world, seeded } = await referred(`${FIRST}${K1_SUFFIX}`);
+    expect(
+      world.fixture.db
+        .prepare("SELECT content, knowledge_bases FROM chat_messages WHERE id = ?")
+        .get(seeded.u1),
+    ).toEqual({ content: FIRST, knowledge_bases: K1_STORED });
+
+    const result = undone(await postUndo(world, seeded.u1));
+
+    expect(result.draft).toBe(FIRST);
+    expect(result.attachments).toEqual([]);
+    expect(branchedTo(world, 0)).toEqual(["e-1"]);
+    expect(messagesOf(world.fixture.db, world.session)).toEqual([]);
+  });
+
+  it("u1's entry is its text alone: undo u1 is 502 with nothing changed", async () => {
+    const { world, seeded } = await referred(FIRST);
+    const before = observed(world);
+
+    expectEnvelope(await postUndo(world, seeded.u1), 502, AGENT_UNAVAILABLE_ENVELOPE);
+
+    expect(types(scriptedAt(world.scripted, before.spawns).frames)).not.toContain("branch");
+    expect(observed(world)).toEqual({ ...before, spawns: before.spawns + 1 });
+    expect(held(world)).toBe(false);
+    seeded.unchanged();
+  });
 });
 
 const B_PNG = { path: "uploads/b.png", size: 1 };

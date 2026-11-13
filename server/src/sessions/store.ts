@@ -52,6 +52,8 @@ import {
   type MessageError,
   type SessionErrorStore,
 } from "./store-error.js";
+import type { KnowledgeBaseRef } from "./store-knowledge-bases.js";
+import { readKnowledgeBaseRefs, writeKnowledgeBases } from "./store-knowledge-bases.js";
 import {
   approvalTool,
   createThinkingSegmentStore,
@@ -200,11 +202,14 @@ export interface SessionStore extends SessionTodoStore, SessionErrorStore, Think
   getMessages(sessionId: string, ownerId: string): SessionMessageTree | null;
   /** Message id → stored attachment paths (#1018, store-attachments.ts); absent means none. */
   attachmentPaths(sessionId: string): Map<number, string[]>;
+  /** Message id → stored knowledge-base references (#1971, store-knowledge-bases.ts). */
+  knowledgeBaseRefs(sessionId: string): Map<number, KnowledgeBaseRef[]>;
   acceptPrompt(
     sessionId: string,
     ownerId: string,
     text: string,
     attachments?: readonly StoredAttachment[],
+    knowledgeBases?: readonly KnowledgeBaseRef[],
   ): AcceptedPrompt;
   rollbackPrompt(assistantMessageId: number): boolean;
   /** A metadata PATCH wrote the title: an in-flight admission's rollback keeps it (no-op if idle). */
@@ -386,7 +391,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
       return { session: toSessionView(session, decoder, options.composer), messages: views };
     },
 
-    acceptPrompt(sessionId, ownerId, text, attachments) {
+    acceptPrompt(sessionId, ownerId, text, attachments, knowledgeBases) {
       assertOpen(closed);
       const now = Date.now();
       const accepted = runOwnedTransaction(db, "prompt admission rollback failed", () => {
@@ -406,6 +411,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
           .prepare(INSERT_MESSAGE)
           .run(sessionId, "user", text, "done", now, serializeAttachments(attachments));
         requireChanges(userReceipt.changes, 1, "user message insert");
+        writeKnowledgeBases(db, Number(userReceipt.lastInsertRowid), knowledgeBases);
         const assistantReceipt = db
           .prepare(INSERT_MESSAGE)
           .run(sessionId, "assistant", "", "running", now, null);
@@ -642,6 +648,7 @@ export function createSessionStore(db: DatabaseSync, options: SessionStoreOption
     },
 
     attachmentPaths: (sessionId) => readAttachmentPaths(db, sessionId),
+    knowledgeBaseRefs: (sessionId) => readKnowledgeBaseRefs(db, sessionId),
     approvalTool: (messageId, requestId) => approvalTool(db, messageId, requestId),
     pairApproval: (messageId, requestId, stepId) => pairApproval(db, messageId, requestId, stepId),
 

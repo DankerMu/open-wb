@@ -249,6 +249,7 @@ export function stubSearch(initial: Base[], answers: readonly HostToolResult[] =
       executed.push({ ownerId, args });
       return Promise.resolve(answers[Math.min(executed.length, answers.length) - 1] ?? STUB_ANSWER);
     },
+    resolveReferences: () => null,
   };
   return { source, bases, executed };
 }

@@ -38,6 +38,7 @@ import { realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
 import { compareMigrationFilenames as compareCodePoints } from "../core/db/migration-assets.js";
 import { sessionCwdResolver, type WorkspaceRootOf } from "./session-cwd.js";
+import type { KnowledgeBaseRef } from "./store-knowledge-bases.js";
 
 interface BuiltinCommand {
   name: string;
@@ -312,19 +313,30 @@ export function toWireText(text: string, skills: readonly { name: string }[]): s
   return text.startsWith("/") && classifyPrompt(text, skills).kind === "text" ? ` ${text}` : text;
 }
 
-/** The line every attachment suffix opens with; the paths follow it one per line. */
+/** The line the attachment segment opens with; the paths follow it one per line. */
 const ATTACHMENT_NOTE = "用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：";
+/** The line the reference segment opens with (#1971); the bases follow it one per line. */
+const REFERENCE_NOTE = "用户在本条消息中引用了以下知识库，可以用 kb_search 检索：";
 
 /**
- * What follows the wire text of a prompt sent with attachments (#1018): two U+000A, the fixed
- * line, then U+000A and `- ` before each path as given, in order, and no trailing newline; the
- * empty string for no path. The one construction of it: the prompt route and the branch alignment
- * (branch-temp.ts) both come here, so the entry omp stored is matched byte for byte.
+ * What follows the wire text of a prompt sent with attachments (#1018) or knowledge-base
+ * references (#1971): the attachment segment — two U+000A, the fixed line, then U+000A and `- `
+ * before each path as given — then the reference segment — two U+000A, its fixed line, then U+000A,
+ * `- `, the name and the id in full-width parentheses for each reference — both in order, without a
+ * trailing newline, and each the empty string when it has nothing to list. The one construction of
+ * it: the prompt route and the branch alignment (branch-temp.ts) both come here, so the entry omp
+ * stored is matched byte for byte.
  */
-export function attachmentSuffix(paths: readonly string[]): string {
-  return paths.length === 0
-    ? ""
-    : `\n\n${ATTACHMENT_NOTE}${paths.map((path) => `\n- ${path}`).join("")}`;
+export function promptSuffix(paths: readonly string[], kbs: readonly KnowledgeBaseRef[]): string {
+  const attached =
+    paths.length === 0
+      ? ""
+      : `\n\n${ATTACHMENT_NOTE}${paths.map((path) => `\n- ${path}`).join("")}`;
+  const referenced =
+    kbs.length === 0
+      ? ""
+      : `\n\n${REFERENCE_NOTE}${kbs.map(({ id, name }) => `\n- ${name}（${id}）`).join("")}`;
+  return attached + referenced;
 }
 
 function byName(left: Skill, right: Skill): number {

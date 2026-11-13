@@ -19,10 +19,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  attachmentSuffix,
   BUILTIN_COMMANDS,
   classifyPrompt,
   listSkills,
+  promptSuffix,
   toWireText,
 } from "../src/sessions/slash-commands.js";
 
@@ -165,23 +165,23 @@ describe("classifyPrompt and toWireText", () => {
 /** message-attachments「交给 omp 的附件后缀」, spelled out: the fixed line and one `- ` line per path. */
 const NOTE = "用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：";
 
-describe("attachmentSuffix (#1018)", () => {
+describe("promptSuffix (#1018, #1971)", () => {
   it("后缀的确切字节: two newlines, the fixed line, one line per path, no trailing newline", () => {
-    const suffix = attachmentSuffix(["uploads/a.pdf", "uploads/图 (1).png"]);
+    const suffix = promptSuffix(["uploads/a.pdf", "uploads/图 (1).png"], []);
 
     expect(suffix).toBe(`\n\n${NOTE}\n- uploads/a.pdf\n- uploads/图 (1).png`);
     expect([...suffix].filter((char) => char === "\n")).toHaveLength(4);
-    expect(attachmentSuffix(["uploads/a.pdf"])).toBe(`\n\n${NOTE}\n- uploads/a.pdf`);
-    expect(attachmentSuffix([])).toBe("");
+    expect(promptSuffix(["uploads/a.pdf"], [])).toBe(`\n\n${NOTE}\n- uploads/a.pdf`);
+    expect(promptSuffix([], [])).toBe("");
   });
 
   it("a path is appended as it is, in the order given", () => {
-    expect(attachmentSuffix(["b/- x\ty ", "a"])).toBe(`\n\n${NOTE}\n- b/- x\ty \n- a`);
+    expect(promptSuffix(["b/- x\ty ", "a"], [])).toBe(`\n\n${NOTE}\n- b/- x\ty \n- a`);
   });
 
   it("与斜杠规则的组合: the suffix follows the wire text of a skill, of escaped text and of no text", () => {
     const suffix = `\n\n${NOTE}\n- uploads/a.pdf`;
-    const wire = (text: string) => toWireText(text, SKILLS) + attachmentSuffix(["uploads/a.pdf"]);
+    const wire = (text: string) => toWireText(text, SKILLS) + promptSuffix(["uploads/a.pdf"], []);
 
     expect(wire("/skill:weekly-report 写周报")).toBe(`/skill:weekly-report 写周报${suffix}`);
     expect(wire("/etc/hosts 是什么")).toBe(` /etc/hosts 是什么${suffix}`);
@@ -189,6 +189,28 @@ describe("attachmentSuffix (#1018)", () => {
     expect(toWireText("", SKILLS)).toBe("");
     expect(wire("")).toBe(suffix);
     expect(wire("").codePointAt(0)).toBe(0x0a);
+  });
+
+  it("带知识库引用的后缀: the attachment segment, then two newlines, the fixed line, `- name（id）`", () => {
+    const k1 = [{ id: "k1", name: "产品文档" }];
+
+    expect(promptSuffix(["uploads/a.pdf"], k1)).toBe(
+      "\n\n用户随本条消息上传了以下文件（相对当前工作目录的路径），需要时请读取：\n- uploads/a.pdf\n\n用户在本条消息中引用了以下知识库，可以用 kb_search 检索：\n- 产品文档（k1）",
+    );
+    expect(promptSuffix([], k1)).toBe(
+      "\n\n用户在本条消息中引用了以下知识库，可以用 kb_search 检索：\n- 产品文档（k1）",
+    );
+  });
+
+  it("references are listed in the order given, each name and id as they are", () => {
+    const refs = [
+      { id: "k2", name: "b （x）" },
+      { id: "k1", name: "a" },
+    ];
+
+    expect(promptSuffix([], refs)).toBe(
+      "\n\n用户在本条消息中引用了以下知识库，可以用 kb_search 检索：\n- b （x）（k2）\n- a（k1）",
+    );
   });
 });
 

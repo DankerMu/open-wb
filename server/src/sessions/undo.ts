@@ -43,6 +43,7 @@ import {
 } from "./rest.js";
 import type { SessionMessageTree, SessionStore } from "./store.js";
 import type { StoredAttachment } from "./store-attachments.js";
+import type { KnowledgeBaseRef } from "./store-knowledge-bases.js";
 import {
   commitUndo,
   listSessionTurnSnapshots,
@@ -115,8 +116,9 @@ interface UndoPlan {
   /** The undone message's stored attachments (#1020), read with `text`: the commit deletes the row. */
   stored: StoredAttachment[];
   users: readonly StoredUser[];
-  /** Message id → the attachment paths it stores (#1018), read with `users`. */
+  /** Message id → its attachment paths (#1018) and its reference snapshot (#1971), read with `users`. */
   attachments: ReadonlyMap<number, readonly string[]>;
+  knowledgeBases: ReadonlyMap<number, readonly KnowledgeBaseRef[]>;
   /** The last assistant message of the whole session as the precheck read it. */
   expectedLastAssistantId: number | null;
   file: string;
@@ -162,6 +164,7 @@ export class Undos {
     const tree = store.getMessages(sessionId, ownerId);
     // Same synchronous segment as the messages: the paths are those of the rows just read.
     const attachments = store.attachmentPaths(sessionId);
+    const knowledgeBases = store.knowledgeBaseRefs(sessionId);
     const resume = store.runtimeState(sessionId);
     if (tree === null || resume === null) {
       throw new HttpError("not_found");
@@ -192,6 +195,7 @@ export class Undos {
       stored: user.attachments,
       users,
       attachments,
+      knowledgeBases,
       expectedLastAssistantId: assistant?.id ?? null,
       file: resume.ompSessionFile,
       workspaceId: resume.workspaceId,
@@ -221,6 +225,7 @@ export class Undos {
       messageId,
       users: plan.users,
       attachments: plan.attachments,
+      knowledgeBases: plan.knowledgeBases,
     });
     if (this.#ports.closed()) {
       throw new HttpError("agent_unavailable");

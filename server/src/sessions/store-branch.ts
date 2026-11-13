@@ -251,7 +251,7 @@ const FORK_SESSION =
 const FORK_HISTORY =
   "SELECT id, role, status FROM chat_messages WHERE session_id = ? AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at ASC, id ASC";
 const FORK_MESSAGE =
-  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms) SELECT ?, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms FROM chat_messages WHERE id = ?";
+  "INSERT INTO chat_messages(session_id, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms, knowledge_bases) SELECT ?, role, content, status, created_at, thinking, attachments, error_reason, error_status, error_detail, thinking_ms, knowledge_bases FROM chat_messages WHERE id = ?";
 const FORK_STEPS =
   "INSERT INTO chat_steps(message_id, ordinal, name, detail, output, status, started_at, ended_at, changes, body_offset) SELECT ?, ordinal, name, detail, output, status, started_at, ended_at, changes, body_offset FROM chat_steps WHERE message_id = ? ORDER BY ordinal ASC, id ASC";
 // Issue 1472 (design D7): segment rows value for value, NULL included, in their row order.

@@ -56,7 +56,7 @@ import { createModelStore } from "./models/store.js";
 import { DEFAULT_TRASH_RETENTION_DAYS } from "./preview-config.js";
 import { SERVICE_INFO } from "./service-info.js";
 import type { ChatEvent } from "./sessions/events.js";
-import { type HostToolPort, registerSessions } from "./sessions/index.js";
+import { type HostToolPort, registerSessions, type SessionSearchPort } from "./sessions/index.js";
 import type { SessionListNotifier } from "./sessions/list-events.js";
 import { ompAgentDir } from "./sessions/omp/process.js";
 import { ensureRepoRootMarker } from "./sessions/omp/repo-root-marker.js";
@@ -173,7 +173,7 @@ export interface AssemblyDependencies {
    */
   modelWriteGuard?: ModelWriteGuard;
   /** 替换 `kb` 注册时给出的会话检索（s2c-kb-session D3；测试接缝，生产省略）；省略且知识库关闭时不注入。 */
-  sessionSearch?: ReturnType<HostToolPort>;
+  sessionSearch?: SessionSearchPort;
   /** 模型白名单；省略时只有 `runtime.modelId` 一个模型。 */
   modelCatalog?: ModelCatalog;
   /** 审批档位的最高档；省略时不封顶（`yolo`）。 */
@@ -348,6 +348,7 @@ export function createApp(options: CreateAppOptions): FastifyInstance {
     ...(assembly?.warn === undefined ? {} : { warn: assembly.warn }),
     redactUpstream: upstreamRedactor(registry, runtime),
     ...hostToolsOf(assembly, () => sessionSearch),
+    knowledgeBases: (ownerId, ids) => sessionSearch?.resolveReferences(ownerId, ids) ?? null,
   });
   app.decorate("sessions", registered);
   app.decorate("workspaces", { store, sandbox });
