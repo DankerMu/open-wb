@@ -43,6 +43,7 @@ import fastify, { type FastifyInstance } from "fastify";
 import { createApp } from "../../src/app.js";
 import { openDb } from "../../src/core/db/index.js";
 import { handleHttpError } from "../../src/http/errors.js";
+import type { KbDependencies } from "../../src/kb/index.js";
 import { registerModelProxy } from "../../src/model-proxy/index.js";
 import { staticRegistry } from "../../src/model-proxy/lookup.js";
 import { deriveProxyBaseUrl, writeManagedModelsYml } from "../../src/model-proxy/models-yml.js";
@@ -60,6 +61,7 @@ import { FIXED_NOW, fixedRuntime } from "../session-db-helpers.js";
 import { cookieFor } from "../session-rest-helpers.js";
 import { type FakeUpstreamServer, start } from "./fake-upstream.mjs";
 import { officialBin, onTeardown, teeStdoutFrames } from "./omp-official.js";
+import { bodyRecorder } from "./omp-official-bodies.js";
 import { EMPTY_CAPABILITIES } from "./session-config.js";
 import { type StalledHandshake, startStalledHandshake } from "./stalled-handshake.js";
 
@@ -87,6 +89,10 @@ interface ProxiedWorldOptions {
   registry?: { apiKey: string };
   /** `openProxiedWorld` only: the runtime's session capabilities; absent → none. */
   capabilities?: SessionRuntimeOpts["capabilities"];
+  /** `openProxiedApp` only: createApp's `assembly.kb`, as given; absent → knowledge base off. */
+  kb?: KbDependencies;
+  /** The proxy's target is a body recorder in front of the fake upstream (`ProxiedApp.bodies`). */
+  recordBodies?: true;
 }
 
 /** The shared registry of the `registry` option: its database is the app's. */
@@ -129,6 +135,8 @@ export interface ProxiedApp {
   models: SharedRegistry | undefined;
   /** RPC `get_state` on the latest spawned child, between turns: its `data`. */
   probeState(): Promise<Record<string, unknown>>;
+  /** Every upstream request body under `recordBodies`, in arrival order; `[]` without it. */
+  bodies: unknown[];
 }
 
 interface Proxied {
@@ -142,6 +150,7 @@ interface Proxied {
   /** What the proxy forwards to; createApp gets the same (production's one `upstream`). */
   target: { baseUrl: string; apiKey: string };
   shared: SharedRegistry | undefined;
+  bodies: unknown[];
 }
 
 /** The `registry` option: the proxied catalog registered in a fresh database, each row routed to `target`. */
@@ -173,14 +182,16 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
   onTeardown(() => upstream.close());
   const stalled = await startStalledHandshake();
   onTeardown(() => stalled.close());
+  const recorder = options.recordBodies === true ? await bodyRecorder(upstream.port) : undefined;
   const tokens = new TokenRegistry();
   const proxy = fastify({ logger: false });
   proxy.setErrorHandler((error, request, reply) => handleHttpError(error, request, reply));
+  const upstreamPort = recorder?.port ?? upstream.port;
   const target = {
     baseUrl:
       options.target === "stalled-handshake"
         ? `https://127.0.0.1:${String(stalled.port)}`
-        : `http://127.0.0.1:${String(upstream.port)}/v1`,
+        : `http://127.0.0.1:${String(upstreamPort)}/v1`,
     apiKey: options.registry?.apiKey ?? UPSTREAM_KEY,
   };
   // Written only now: the rows carry the fake upstream's port.
@@ -202,7 +213,19 @@ async function openProxy(options: ProxiedWorldOptions): Promise<Proxied> {
     models: PROXIED_CATALOG.models,
   });
   await writeHostOverlay(stateDir, { browserEnabled: false, visionModelId: null });
-  return { bin, stateDir, sandboxRoot, workspaceRoot, upstream, stalled, tokens, target, shared };
+  const bodies = recorder?.bodies ?? [];
+  return {
+    bin,
+    stateDir,
+    sandboxRoot,
+    workspaceRoot,
+    upstream,
+    stalled,
+    tokens,
+    target,
+    shared,
+    bodies,
+  };
 }
 
 export async function openProxiedWorld(options: ProxiedWorldOptions = {}): Promise<ProxiedWorld> {
@@ -300,6 +323,7 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
       log: (record) => {
         log.push({ ...record });
       },
+      kb: options.kb,
     },
   });
   onTeardown(async () => {
@@ -327,6 +351,7 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
     faults,
     models: shared,
     probeState,
+    bodies: proxied.bodies,
   };
 }
 
@@ -383,15 +408,19 @@ function turnFrames(frames: readonly OmpFrame[]): OmpFrame[] {
 }
 
 /**
- * Prompts a fresh session and waits for its published `turn.end`, or until a frame matches `stopAt`
- * (the turn is then abandoned to the case's teardown).
+ * Prompts `session` and waits until its published `turn.end` count grows, or until a frame after the
+ * prompt matches `stopAt` (the turn is then abandoned to the case's teardown). The frames are taken
+ * from the ones that arrived after the prompt.
  */
-export async function runAppTurn(
+export async function promptAppTurn(
   world: ProxiedApp,
+  session: string,
   text: string,
   stopAt?: (frame: OmpFrame) => boolean,
 ): Promise<AppTurn> {
-  const session = await openAppSession(world);
+  const ended = () => publishedOf(world, session).filter((e) => e.type === "turn.end").length;
+  const before = ended();
+  const from = world.frames.length;
   const startedAt = Date.now();
   const response = await world.app.inject({
     method: "POST",
@@ -403,11 +432,19 @@ export async function runAppTurn(
     throw new Error(`prompt answered ${String(response.statusCode)}`);
   }
   await until(
-    () =>
-      publishedOf(world, session).some((event) => event.type === "turn.end") ||
-      (stopAt !== undefined && world.frames.some(stopAt)),
+    () => ended() > before || (stopAt !== undefined && world.frames.slice(from).some(stopAt)),
     `the turn of ${text}`,
   );
   const ms = Date.now() - startedAt;
-  return { session, frames: turnFrames(world.frames), events: publishedOf(world, session), ms };
+  const frames = turnFrames(world.frames.slice(from));
+  return { session, frames, events: publishedOf(world, session), ms };
+}
+
+/** `promptAppTurn` on a fresh session. */
+export async function runAppTurn(
+  world: ProxiedApp,
+  text: string,
+  stopAt?: (frame: OmpFrame) => boolean,
+): Promise<AppTurn> {
+  return promptAppTurn(world, await openAppSession(world), text, stopAt);
 }
