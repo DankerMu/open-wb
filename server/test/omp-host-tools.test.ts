@@ -4,6 +4,8 @@
  * argv and `--approval-mode yolo`) and observes the frames the host writes through an stdin tee
  * (`captureStdinFrames`); the expected replies are the literals of the requirement's scenarios and
  * of tasks.md「组 3 首刀约定」. The fake's inbound record (`frames=`) is read with a probe prompt.
+ * 3.6 (#1965): omp-runtime「kb_search card by approval mode」 on the same real child under `write`
+ * (the transport answers each select before the result) and `always-ask` (the select is surfaced).
  */
 import { once } from "node:events";
 import { mkdtempSync } from "node:fs";
@@ -12,6 +14,7 @@ import { join } from "node:path";
 import { setImmediate as macrotask } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ApprovalMode } from "../src/model-catalog.js";
 import { closeStdin, type Generation } from "../src/sessions/omp/commands.js";
 import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import type { HostToolHandler, HostToolResult } from "../src/sessions/omp/host-tools.js";
@@ -74,7 +77,11 @@ function gate(): { promise: Promise<unknown>; release: (value: unknown) => void 
   return { promise, release };
 }
 
-async function start(scenario: string, tools?: HostToolHandler): Promise<Run> {
+async function start(
+  scenario: string,
+  tools?: HostToolHandler,
+  approvalMode: ApprovalMode = "yolo",
+): Promise<Run> {
   const writes: OmpFrame[] = [];
   const spawnImpl: SpawnImpl = (_command, args, options) => {
     const child = harness.spawnTracked([FAKE, ...args, "--scenario", scenario], options);
@@ -86,7 +93,7 @@ async function start(scenario: string, tools?: HostToolHandler): Promise<Run> {
   const proc = harness.manage(
     new OmpProcess({
       ...harness.tempOpts(TOKEN, "omp-host-tools-"),
-      approvalMode: "yolo",
+      approvalMode,
       spawnImpl,
       hostTools: tools,
     }),
@@ -177,6 +184,59 @@ describe("omp-runtime「宿主工具协议」: 调用与应答", () => {
       ]);
       expect(run.frames.filter((frame) => frame.type === "host_tool_call")).toHaveLength(2);
       expect(toolEnds(run)).toEqual(["c1", "c2"]);
+      expect(run.errors).toEqual([]);
+    },
+  );
+});
+
+describe("omp-runtime「kb_search card by approval mode」 over the real fake omp (#1965)", () => {
+  function uiAnswers(run: Run): OmpFrame[] {
+    return run.writes.filter((frame) => frame.type === "extension_ui_response");
+  }
+
+  it("write: each r<n> is answered Approve before h<n>'s result, no approval", REAL, async () => {
+    const { tools, calls } = recording(async () => ({ text: "r", isError: false }));
+    const run = await start("host-tool", tools, "write");
+    const approvals: unknown[] = [];
+    run.proc.on("approval", (request) => approvals.push(request));
+    await prompt(run);
+    await terminal(run);
+
+    const answered = run.writes.filter(
+      (frame) => frame.type === "extension_ui_response" || frame.type === "host_tool_result",
+    );
+    expect(answered).toStrictEqual([
+      { type: "extension_ui_response", id: "r1", value: "Approve" },
+      reply("h1", "r", false),
+      { type: "extension_ui_response", id: "r2", value: "Approve" },
+      reply("h2", "r", false),
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(approvals).toEqual([]);
+    expect(run.errors).toEqual([]);
+  });
+
+  it(
+    "always-ask: r1 is surfaced and no host_tool_call comes before the owner answers",
+    REAL,
+    async () => {
+      const { tools, calls } = recording(async () => ({ text: "r", isError: false }));
+      const run = await start("host-tool", tools, "always-ask");
+      const approvals: unknown[] = [];
+      run.proc.on("approval", (request) => approvals.push(request));
+      await prompt(run);
+      await expect.poll(() => approvals.length, POLL).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+
+      expect(approvals).toEqual([{ id: "r1", tool: "kb_search", title: "Allow tool: kb_search" }]);
+      expect(run.frames.some((frame) => frame.type === "host_tool_call")).toBe(false);
+      expect(uiAnswers(run)).toEqual([]);
+      expect(calls).toEqual([]);
+      run.proc.respondApproval("r1", "allow");
+      await harness.waitFrame(run.proc, (frame) => frame.id === "h1", 8_000, run.frames);
+      expect(uiAnswers(run)).toEqual([
+        { type: "extension_ui_response", id: "r1", value: "Approve" },
+      ]);
       expect(run.errors).toEqual([]);
     },
   );

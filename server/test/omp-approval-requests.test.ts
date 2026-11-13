@@ -17,6 +17,7 @@ import { SessionRuntime } from "../src/sessions/omp/runtime.js";
 import {
   type ApprovalRequest,
   approvalRequest,
+  isKbSearchApproval,
   isPreludeCard,
 } from "../src/sessions/omp/ui-requests.js";
 import { createRealFakeRuntime, type RealFakeRuntime } from "./session-supervisor-helpers.js";
@@ -677,5 +678,61 @@ describe("approval shape whitelist and prelude card (#1566)", () => {
       shapes.map((shape) => ({ type: "extension_ui_response", id: shape.id, cancelled: true })),
     );
     expect(run.approvals).toEqual([]);
+  });
+});
+
+/**
+ * Change s2c-kb-session 3.6 (#1965): tool-approval「审批请求识别」's `kb_search` shape at the pure seam
+ * `isKbSearchApproval(frame)` — select, the whole title exactly `Allow tool: kb_search`, one of the two
+ * closed option shapes. It does not read the approval mode (that is OmpProcess's). Frames are the
+ * literals of the scenarios「kb_search 在 write 档由传输层放行」「只有恰好的标题适用放行」 and of tasks.md
+ * 「组 3 第二刀约定」.
+ */
+describe("isKbSearchApproval (#1965)", () => {
+  const KB = "Allow tool: kb_search";
+  const THREE = ["Approve", "Approve kb_search for this session", "Deny"];
+  const kb = (method: string, title: string, options?: unknown): OmpFrame => ({
+    type: "extension_ui_request",
+    id: "k1",
+    method,
+    title,
+    ...(options === undefined ? {} : { options }),
+  });
+
+  it.each([
+    ["the three-item shape omp v18.12.3 sends", kb("select", KB, THREE)],
+    ["the two-item shape", kb("select", KB, ["Approve", "Deny"])],
+    [
+      "a session grant naming a policy key",
+      kb("select", KB, ["Approve", "Approve kb:any for this session", "Deny"]),
+    ],
+  ])("%s is the kb_search card", (_label, frame) => {
+    expect(isKbSearchApproval(frame)).toBe(true);
+  });
+
+  it.each([
+    ["a second line", kb("select", `${KB}\nReason: x`, THREE)],
+    ["another tool name", kb("select", `${KB}_extra`, THREE)],
+    ["a trailing space", kb("select", `${KB} `, THREE)],
+    ["a trailing newline", kb("select", `${KB}\n`, THREE)],
+    ["another tool", kb("select", "Allow tool: bash", THREE)],
+    [
+      "a middle item without for this session",
+      kb("select", KB, ["Approve", "Approve kb_search", "Deny"]),
+    ],
+    ["four items", kb("select", KB, [...THREE, "Other"])],
+    ["options [Deny, Approve]", kb("select", KB, ["Deny", "Approve"])],
+    ["no options", kb("select", KB)],
+    ["confirm", kb("confirm", KB, THREE)],
+  ])("%s is not the kb_search card", (_label, frame) => {
+    expect(isKbSearchApproval(frame)).toBe(false);
+  });
+
+  it("every kb_search card is also an approval shape (always-ask surfaces it unchanged)", () => {
+    expect(approvalRequest(kb("select", KB, THREE), "k1")).toEqual({
+      id: "k1",
+      tool: "kb_search",
+      title: KB,
+    });
   });
 });

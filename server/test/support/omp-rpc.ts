@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, expect } from "vitest";
+import type { ApprovalMode } from "../../src/model-catalog.js";
 import type { OmpFrame } from "../../src/sessions/omp/frame.js";
 import {
   type OmpExit,
@@ -253,10 +254,17 @@ export function rpcChunkFrames(bytes: Buffer, chunkId: string): OmpFrame[] {
   }));
 }
 
+/** `approvalMode` overrides tempOpts' `write` (the generation's `--approval-mode`). */
+interface FakeProcessOptions {
+  handshakeTimeoutMs?: number;
+  prefix?: string;
+  approvalMode?: ApprovalMode;
+}
+
 export function openFakeProcess(
   harness: RpcHarness,
   token: string,
-  options: { handshakeTimeoutMs?: number; prefix?: string } = {},
+  options: FakeProcessOptions = {},
 ): {
   child: FakeChild;
   proc: OmpProcess;
@@ -267,6 +275,7 @@ export function openFakeProcess(
   const proc = harness.manage(
     new OmpProcess({
       ...harness.tempOpts(token, options.prefix ?? "omp-rpc-io-"),
+      ...(options.approvalMode === undefined ? {} : { approvalMode: options.approvalMode }),
       spawnImpl: child.spawnImpl,
       ...(options.handshakeTimeoutMs === undefined
         ? {}
@@ -284,7 +293,7 @@ export function openFakeProcess(
 export async function startFakeProcess(
   harness: RpcHarness,
   token: string,
-  options: { handshakeTimeoutMs?: number; prefix?: string; ready?: OmpFrame } = {},
+  options: FakeProcessOptions & { ready?: OmpFrame } = {},
 ): Promise<{
   child: FakeChild;
   proc: OmpProcess;
