@@ -126,6 +126,11 @@
 | 组 9 第二刀：外部接口漂移（`i`→`intent`、帧序、`tools` 形状、换模型后注册） | 是 | 先断言 `tools` 形状；`intent` 两轮字面量；「换模型后仍可检索」 |
 | 组 9 第二刀：Canonicality（请求体记录、回合） | 是 | `bodyRecorder` / `toolMessages` 原地移到共用 support；`promptAppTurn` 原地拆出并替换 `session-capabilities` 的私有 `turn()`；`runAppTurn` 六个调用方与 `rpc-ui` 原样全绿 |
 | 组 9 第二刀：验收 | 是 | CK-18 `待签`，由 owner 执行 |
+| 组 10：桩的键集（web 严格解析） | 是 | 六键 status、十一键 base、三键 202、十四键消息与八键步骤；快照沿用真实 `session` / `streamCursor` / `todo` |
+| 组 10：真实浏览器的 error oracle 与视口矩阵 | 是 | 独立 test 自带 oracle；desktop-light / mobile-dark 两套截图与溢出检查 |
+| 组 10：不留会话与路由 | 是 | `finally` 回欢迎态、逆序 unroute、删两个会话 |
+| 组 10：欢迎态交接的真实帧（#1973 留下的缺口） | 是 | 第 4 步断言首发 body 带 `knowledgeBases` |
+| 组 10：行数上限 | 是 | `ui-walk.spec.ts` ≤ 725；新文件 ≤ 300；`ui-walk-layout.ts` 不加 |
 
 ## 1. 单轮检索可取消（knowledge-bases「单轮检索」的中止；ragflow-backend「RAGFlow 出站请求」的检索中止）
 
@@ -587,8 +592,71 @@ Minimal mergeable slice: 9.1–9.2 为首刀：受控上游标记只有自己的
 
 ## 10. ui-walk 会话知识库分支（chat-harness「UI 走查会话知识库引用与检索卡」）
 
-- [ ] 10.1 核对 Context：`web/e2e/ui-walk-center-kb.ts` 的 route 桩与键集纪律、`route-hold.ts`、`ui-walk-oracle.ts`、`ui-walk-cleanup.ts`、视口矩阵
-- [ ] 10.2 实现新文件 `web/e2e/ui-walk-chat-kb.ts` 的三步，并在 `ui-walk.spec.ts` 接入；本机对已运行的服务跑 `make ui-walk`，PR 附退出码与截图
+- [x] 10.1 核对 Context：`web/e2e/ui-walk-center-kb.ts` 的 route 桩与键集纪律、`route-hold.ts`、`ui-walk-oracle.ts`、`ui-walk-cleanup.ts`、视口矩阵
+- [x] 10.2 实现新文件 `web/e2e/ui-walk-chat-kb.ts` 的三步，并在 `ui-walk.spec.ts` 接入；本机对已运行的服务跑 `make ui-walk`，PR 附退出码与截图
+  - 组 10 约定（#1976 fixture 审查补；10.1–10.2 照此实现与验证）：
+    - 10.1 核对结论：
+      - 装桩：照 `ui-walk-center-kb.ts:104-155`，顺序是 `login()` → 装桩 → `page.goto`，`finally` 里逐个 `unroute`，最后 `logout()`。
+      - 桩必须在会话页挂载前装好：会话页的 `useKbEnabled` 每个 client 只读一次（`web/src/lib/kb-status.ts:6-21`）。`login()` 结束时停在 `/files`，所以上面的顺序成立。
+      - error oracle 只放行 `/api/auth/me` 的 401（`ui-walk-oracle.ts:221-231`），桩里不能出现 4xx/5xx。
+      - 断言不写在 route handler 里：handler 只负责记录和 fulfill，断言放在 handler 之外，照 `ui-walk-center-kb.ts:119-122,146-147`。handler 里抛错的话请求永远不会被 fulfill，测试只会超时。
+      - 经 `page.request.post` 建的会话不会被 `watchCreatedSessions` 记录，要自己记 id。删会话之前先 `goto("/")` 回到欢迎态，照 `ui-walk-upstream-failure.ts:109-118`。
+      - ui-walk 里还没有 prompt 桩和快照桩的先例。
+    - 接入：
+      - `web/e2e/ui-walk.spec.ts`（710 行，改完 ≤ 725）里，紧跟 `walkKbRerankRow` 的 test 新增一个独立 test，写法照 `:104-132`，自带 `runWithBrowserErrorOracle` 与 `walkProject`，只多一行 import。
+      - 主旅程与 CI 文件不动。
+    - 新文件 `web/e2e/ui-walk-chat-kb.ts`（≤ 300 行），导出 `walkChatKbRefs(page, oracle, project)`。
+    - 共用（Code Canonicality）：`ui-walk-center-kb.ts` 的 `shot`（:255-260）、`json`（:101-102）、`STATUS`（:37-44）与 base 形状（`BASE`，:46-58）原地加 `export` 后共用，不复制。base 若需要第二个形状，从 `BASE` 展开再改字段。
+    - 桩体：严格按 web 解析器的键集，以 `web/src/lib/api-kb.ts`、`session-contract.ts` 为准。
+      - `GET /api/kb/status`：直接用 `STATUS`（六键，开启）。
+      - `GET /api/kb/bases`：只答 GET，其余 `fallback`；应答 `{bases:[{...BASE, id:A, name:"产品文档", state:"ready"}, {...BASE, id:B, name:"客服问答", state:"rebuilding"}]}`，按需调整 `stateMessage`。
+      - prompt：
+        - 一个 `**/api/sessions/*/prompt` 的通配桩，第 2 步与第 4 步共用，在第 2 步发送之前就装好。
+        - 只拦 POST：handler 记录 `{pathname, body: postDataJSON()}`，然后 fulfill 202，应答体恰三键 `{userMessageId, assistantMessageId, undo:"none"}`。
+        - 断言在 handler 之外，用 `expect.poll` 等记录出现。
+      - 消息快照：
+        - `GET /api/sessions/<第 2 步会话 id>/messages` 用 `route.fetch()` 取真实应答，再 fulfill `{...real, messages}`：保留真实的 `session`、`streamCursor`、`todo`，只换 `messages`，所以快照恰为四键。
+        - `messages` 是两条十四键消息，按 `session-contract.ts:477-494` 的角色约束：
+          - 用户消息：`undo:"none"`、`thinking:null`、`steps:[]`、`approvals:[]`、`attachments:[]`、`knowledgeBases:[{id:A, name:"产品文档"}]`、`error:null`、`thinkingMs:null`、`thinkingSegments:[]`。
+          - 助手消息：`status:"done"`、`undo:null`、`error:null`、`thinkingMs:null`、`thinking:null`、`thinkingSegments:[]`、`approvals:[]`、`attachments:[]`、`knowledgeBases:[]`；两个八键 `kb_search` 步骤，`detail` 为 `JSON.stringify({question})`，`bodyOffset` 非 null，`status:"done"`，`changes:null`。
+    - 步骤（spec 三步加第 4 步）：
+      - 会话：
+        - `login` 后用 `GET /api/workspaces` 按名字找 `smoke-fixture` 的 id。`login()` 已经确保它存在（`ui-walk-composer.ts:55`），这里不重写 ensure。
+        - 经真实服务 `POST /api/sessions {workspaceId}` 建一个空会话，写法照 `ui-walk-project-config.ts:50-58`，并记下 id。
+        - 装好 status 与 bases 的桩之后，`goto("/?session=<id>")`。
+      - 第 1 步，入口与标签：
+        - 「+」（`添加文件或命令`）菜单里，`nth(0)` 为 `上传文件`、`nth(1)` 为 `引用知识库…`，逐项断言相邻。
+        - 选择列表 `引用知识库` 里，「客服问答」的按钮名匹配 `/重建中/`。Chromium 拼可访问名时是否插空格没实测，所以用正则。
+        - 点「产品文档」，然后关闭列表。
+        - `[data-slot="composer-kb-refs"]` 里有「产品文档」与 `移除 产品文档`。
+        - 截图，检查没有横向溢出。
+      - 第 2 步，发送：
+        - 输入文本后回车。
+        - 在 handler 之外断言：记录恰为 1 条，路径 id 等于本会话 id，body 恰为 `{message:<文本>, knowledgeBases:[A]}`（`toStrictEqual`）。
+        - 受理后 `composer-kb-refs` 数量为 0。
+        - 等真实的 `GET …/messages` 应答回来再进下一步，让时序确定。这一步的快照是真实的，内容为空，所以不断言气泡。
+      - 第 3 步，刷新形态：
+        - 装快照桩，然后 `page.reload()`。
+        - 用户 article 内的 `[data-slot="message-kb-refs"]` 列出「产品文档」。
+        - 助手 article 内有 `section[aria-label="知识库检索"]`：标题为 `知识库检索`，`[data-slot="kb-search-rounds"]` 为 `（2 轮）`，`[data-slot="kb-search-row"]` 恰 2 个且依次带两句问句，行内 `button` 数为 0（不可展开）。
+        - 两处列表的可访问名都是 `引用的知识库`，一律用 data-slot 限定，不用裸 `listitem`。
+        - 截图，检查没有横向溢出。
+      - 第 4 步，欢迎态交接：spec 之外的加固，来自 PR 1998 correctness 席。jsdom 造不出 `navigate(…, { flushSync })` 那一帧，这里在真实浏览器里钉住「欢迎态暂存的引用随首发交给新会话」。
+        - 回到欢迎态 `/`，同样经「+」引用「产品文档」，输入文本后回车。
+        - 会话由真实服务创建，`watchCreatedSessions` 或 201 应答记下 id。prompt 由已装好的通配桩接住，不会起真实回合。
+        - 在 handler 之外断言：新增记录恰 1 条，路径 id 等于 201 的 id，body 恰为 `{message, knowledgeBases:[A]}`。
+        - 真实浏览器里 body 如果缺 `knowledgeBases`，停下报告。那是 #1973 的缺陷，不在本刀修。
+    - 收尾：`finally` 里先 `goto("/")` 回欢迎态，再按逆序 `unroute` 全部桩，然后用 `deleteCreatedSession` 删两个会话，最后 `logout`。不留会话，也不留临时空间。
+    - 证据：
+      - 本机先 build web 与 server，确认 `var/omp/omp` 存在，再用 CI 的编译服务脚本对全新状态目录跑一遍。命令：
+        `env -u RAGFLOW_BASE_URL -u RAGFLOW_API_KEY_FILE HOST=127.0.0.1 PORT=18017 UI_WALK_BASE_URL=http://127.0.0.1:18017 FAKE_UPSTREAM_PORT=19017 MODEL_UPSTREAM_BASE_URL=http://127.0.0.1:19017/v1 MODEL_UPSTREAM_API_KEY=fake DB_PATH=<repo>/var/walk-1976/app.db OMP_STATE_DIR=<repo>/var/walk-1976/omp-state SANDBOX_ROOT=<repo>/var/walk-1976/sandbox STATIC_ROOT=<repo>/web/dist OMP_BIN=<repo>/var/omp/omp RUNNER_TEMP=<repo>/var/walk-1976/tmp UI_WALK_SHOT_DIR=<repo>/var/walk-1976/shots bash .github/scripts/ci-compiled-server.sh ui-walk`
+      - 必须清掉知识库变量：服务端只要设了 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE` 就会开启知识库（`server/src/kb/config.ts:15-41`），这样主旅程「知识库关闭」的断言会失败，还会连到共用的 RAGFlow 栈（D16）。
+      - 端口照 CI 用 18017 / 19017，不要碰本机验收服务的 3100。所有路径一律写绝对路径：Playwright 在 `web/` 下运行。
+      - 脚本会顺带起停假上游与服务。它的退出码是 `make ui-walk` 与清理的合成结果（`:71-77`），PR 里照实写。
+      - PR 附命令、退出码、全部 test 计数，以及新分支在 desktop-light / mobile-dark 两个 project 下的截图清单。截图只存本地（`gh` 不能传图，先例 #1944 / #1994），PR 里逐张描述图的内容。用完删掉状态目录。
+    - 不动：
+      - `ui-walk-sessions.spec.ts:541` 的注释「项数相等」不准确：数组形式的 `toContainText` 是按顺序匹配子集。这一处在本刀范围之外，只在 PR 里报告，不改。
+      - `ui-walk-layout.ts`（791 行）不加任何东西。
 
 Suggested fixture level: expanded - 前端真实浏览器走查（视口矩阵 + error oracle）。
 Minimal mergeable slice: atomic - 一个走查分支只有一条验证路径（`make ui-walk` 全绿）。
