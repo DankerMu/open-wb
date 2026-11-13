@@ -663,9 +663,9 @@ Minimal mergeable slice: atomic - 一个走查分支只有一条验证路径（`
 
 ## 11. 收口
 
-- [ ] 11.1 `docs/architecture/knowledge-base.md` 加会话检索（`kb_search` 的语义、上限、失败与审批放行）；`openspec/glossary.md` 的「附件」加知识库引用、「host tool」写注册与放行；若 4.6 之后 `system.md` 又有漂移，一并修正
-- [ ] 11.2 `IMPLEMENTATION_PLAN.md`：S2c 一节标注 A（本 change）已交付、B 待启动；Next Step 记录 CK-15–CK-18 待签与 change B 的 grill 种子（design.md Non-Goals 列出的 B 开放项）
-- [ ] 11.3 核对 design.md「Grill 结论」G1–G15 在代码与规格中的落点，逐条记录于收口 PR 描述
+- [x] 11.1 `docs/architecture/knowledge-base.md` 加会话检索（`kb_search` 的语义、上限、失败与审批放行）；`openspec/glossary.md` 的「附件」加知识库引用、「host tool」写注册与放行；若 4.6 之后 `system.md` 又有漂移，一并修正
+- [x] 11.2 `IMPLEMENTATION_PLAN.md`：S2c 一节标注 A（本 change）已交付、B 待启动；Next Step 记录 CK-15–CK-18 待签与 change B 的 grill 种子（design.md Non-Goals 列出的 B 开放项）
+- [x] 11.3 核对 design.md「Grill 结论」G1–G15 在代码与规格中的落点，逐条记录于收口 PR 描述
 
 Suggested fixture level: none - 只改文档与计划，没有运行时行为。
 Minimal mergeable slice: atomic - 收口只有一条验证路径（全部组合入后的状态核对），依赖组 1–10 全部。

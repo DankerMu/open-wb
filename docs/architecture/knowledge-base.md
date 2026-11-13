@@ -2,7 +2,7 @@
 
 `system.md` §9.13 的正文（S2a，change `s2a-kb-ragflow`）。单独成文件，`system.md` 那一节只留指引。
 
-本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 9 第三刀：列表里的编译状态。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。组 14：嵌入模型更换与全量重建。组 18：部署要求、回滚与 `make smoke-kb`（文末）。S2b 组 6：重排模型的设置、下发与探活（并在「知识库模型设置」里）。web 侧（组 15–17）的界面契约在 spec，不在本文。
+本节随任务组落地。组 4：配置键、密钥文件要求与 `kb_key` 阶段。组 6：`kb` 模块装配、关闭判定、状态端点与版本钉住。组 8：知识库模型设置、下发到 RAGFlow、探活与 `models` 联动。组 9 首刀：普通模板的建库、列表与删库，模板表。组 9 第二刀：开了 RAPTOR / 知识图谱的建库与删库，模板组与画布的生命周期。组 9 第三刀：列表里的编译状态。组 10：工作空间来源入库与 RAGFlow 文档的删除写法。组 11：文档列表。组 12：本地上传。组 13：移出与重新入库。组 14：嵌入模型更换与全量重建。组 18：部署要求、回滚与 `make smoke-kb`（文末）。S2b 组 6：重排模型的设置、下发与探活（并在「知识库模型设置」里）。S2c（change `s2c-kb-session`）：会话检索 `kb_search` 与知识库引用（「单轮检索与检索测试」之后）。web 侧（组 15–17）的界面契约在 spec，不在本文。
 
 **配置键**（`server/src/kb/config.ts`；四项都可选，下面的配对规则另算）：
 
@@ -14,6 +14,8 @@
 | `KB_UPLOAD_MAX_FILES` | `10` | 一次上传的文件数上限，解析纪律同上（`1..2147483647`） |
 
 `RAGFLOW_BASE_URL` 与 `RAGFLOW_API_KEY_FILE` 必须成对：只配一个是配置错误。任一项非法，服务启动失败：退出码 1，标准错误只有一行 `{"event":"server_start_failed","reason":"config"}`，不指出是哪一项、也不回显取值。
+
+**本机跑 `make smoke` / `make ui-walk`**：这两项在 shell 里 export 着时，起的服务会开启知识库并连上那套 RAGFlow，ui-walk 主旅程里「知识库关闭时 tab 条不含「知识库」」的断言（`web/e2e/ui-walk-center.ts:24`）随之失败。起服务时去掉它们：`env -u RAGFLOW_BASE_URL -u RAGFLOW_API_KEY_FILE <起服务的命令>`。CI 的 smoke 与 ui-walk 两个 job 不配这两项。
 
 **密钥文件**（`server/src/kb/key-file.ts`）。RAGFlow 的 API key 放文件、不放环境变量：key 一旦泄露，就能读写全部账号的知识库；放在 `0600` 文件里，它不进 `/proc/<pid>/environ`，也不被 app-server 派生的进程继承。要求：
 
@@ -404,6 +406,73 @@ RAGFlow 不可达 503 `kb_unavailable`，翻页到一半也是，不给半张表
 成功 200 恰为 `{hits, retrieval}`：`hits` 是上面的命中数组，`retrieval` 是 `{threshold, vectorWeight}`，取这次检索实际使用的已存值，与 `BaseView.retrieval` 同形。检索本身不写审计。
 
 审计：`kb.retrieval_settings` 只在参数实际写回时写一条，与两列的写入同一事务，actor 为请求的所有者，`workspace_id` 列为 null，标题是固定短句「修改检索参数」；detail 恰为 `{id, before:{threshold, vectorWeight}, after:{threshold, vectorWeight}}`，`id` 是知识库 id，`before` 取锁内重读的值，`after` 是提交的值。问句只发给 RAGFlow，不进审计与日志。
+
+**会话检索 `kb_search`**（`server/src/kb/session-search.ts`、`sessions/omp/host-tools.ts`、`sessions/host-tool-align.ts`、`sessions/kb-hits.ts`，S2c change `s2c-kb-session`；规格 knowledge-bases「会话检索 `kb_search`」、omp-runtime「宿主工具协议」「`kb_search` 的注册」）。会话里的 omp 模型经 host tool 调用 `kb_search`，app-server 以会话所有者的身份，对每个指定的库做一次上面的单轮检索；要不要再查由模型决定（ADR-0017）。可检索的库就是所有者自己的库（`session-search.ts:134-135` 只读 `listBases(ownerId)`）；可见范围四档、共享只读与跨账号检索审计在 change B。omp 侧的帧形以实测记录 `docs/reviews/2026-11-10-omp-host-tools.md`（v18.12.3）为准。
+
+**给模型什么，`details` 与 `kb.hits` 里是什么**：
+
+- 宿主对每个调用至多写一帧（被取消或写端关闭后不写）`host_tool_result{id, result:{content:[{type:"text", text}], details?}, isError?}`（`host-tools.ts:111-124`）。`text` 进模型上下文，只有切片原文与出处：每个库一段，段间空一行；`ok` 的段首行为 `知识库「<名称>」（<id>）：命中 N 条`，之后每条命中两行，`[k] <文档名>（相似度 0.xxxx）` 与切片原文（`session-search.ts:111-129`）。没有整篇文档（CONTEXT.md 不变量 2）。
+- `details` 恰为 `{bases:[{kbId, name, status, hits}]}`，次序同文本（`session-search.ts:185-189`）；`hits` 与检索测试的命中同形，`not_found` 的 `name` 为 `null`，非 `ok` 的 `hits` 为 `[]`。omp 把 `details` 原样放进 `tool_execution_end.result.details`，不发给上游（实测记录 §2.5）。本仓对这一点的证据只有本机门控用例 `server/test/omp-official-host-tools.test.ts`（上游第二、三次请求的 tool 消息不含键名 `bases`），CI 不跑它。
+- `kb.hits{messageId, stepId, intent, bases}`：reducer 只从成功的 `kb_search` 步骤派生，`bases` 原样取 `details.bases`，排在同一调用的 `step.end` 之前（`sessions/events.ts:311-315`）；`intent` 取 `tool_execution_start` 顶层的 `intent`（omp 往参数 schema 里加的 `i`），不是非空字符串时为 `null`（`events.ts:252-253`）。supervisor 发布前严格校验（`kb-hits.ts:72-99`），不符就丢弃并写一行 `{"event":"kb_hits_invalid","messageId":<id>}`（不含切片原文，不限频）；`stepId` 换成落库步骤的数字 id，映射不到即丢（`turn-control.ts:336-341`）。它与 `turn.retry` 一样占当代环形缓冲的一个序号、不写任何表：同一 epoch 内带 `Last-Event-ID` 的重连可以回放，经完整快照恢复的连接看不到。
+- 切片原文不进日志与 stderr。会话检索不写回检索参数、不写审计（`session-search.ts:9-11`）。
+
+**上限**：
+
+- **库数**：每次调用至多 5 个库，超过时文本恰为 `一次至多检索 5 个知识库`。
+- **每库条数**：就是单轮检索的 `page_size:6`（`ragflow-retrieval.ts:26`），本地不截断。`kb.hits` 的校验要求每库 `hits` 至多 6 条（`kb-hits.ts:45`、`:94-96`）：RAGFlow 回得更多时，给模型的文本照样全给，`kb.hits` 整个被丢弃（fail-closed），检索卡那一行没有命中。
+- **问句**：与检索测试端点同一个判定函数 `isQuestion`（`retrieval.ts:145-149`）：去掉首尾空白后非空、至多 1000 码点、不含 C0 控制字符（`\t`、`\n` 除外）与 DEL；原样检索，不去空白。
+- **参数键集**恰为 `question`、`kb_ids`。omp 加的 `i` 不在 `host_tool_call.arguments` 里（实测记录 §2.2）。
+- **`kb_ids` 的两处计数不一致**：schema 写 `minItems:1, maxItems:5`（`session-search.ts:32`），执行时先按首次出现去重、再判 1–5 个（`session-search.ts:94-100`）。原始 6 个、去重后不超过 5 个的数组违反 schema，执行照常受理（用例 `server/test/kb-session-search.test.ts:359`）。omp 会不会在发 `host_tool_call` 之前按 schema 拦下它，没有实测。
+
+参数不合规时结果为 `isError`，文本说明哪里不符，没有 `details`，不访问 RAGFlow。
+
+**逐库结果**（按去重后的次序）：
+
+| `status` | 何时 | 给模型的那一行 |
+|---|---|---|
+| `ok` | 单轮检索成功，命中可以为 0 条 | `知识库「<名称>」（<id>）：命中 N 条` 加命中 |
+| `not_found` | 不存在，或不是所有者的库。两种情形的文本与 `details` 除 `kbId` 外完全相同，不回显名称，不能据此探测别人的库 | `知识库 <id>：未找到该知识库` |
+| `not_ready` | `state` 不是 `ready`，不检索。`rebuilding` 与 `rebuild_failed` 都落在这里，`rebuild_failed` 也写「正在重建」（`session-search.ts:146-147`、`:116-117`），对模型不准确 | `知识库「<名称>」（<id>）：正在重建，本轮未检索` |
+| `failed` | 单轮检索 `kb_unavailable` / `kb_rejected`，含调用被中止 | `知识库「<名称>」（<id>）：检索失败` |
+
+`isError` 当且仅当没有一个库是 `ok`（`session-search.ts:188`）。这时 omp 以失败结束这一步，而 reducer 不从失败的步骤、也不从 `result.isError` 为真的结果派生候选（`events.ts:277`、`:283-284`、`:345`），所以没有 `kb.hits`：检索卡上这一行只有问句与「失败」状态。
+
+**协议**（`host-tools.ts`，白盒关键路径）：每个 `host_tool_call` 以帧的 `id` 进在途表，交给处理函数并附一个中止信号；多个调用并发，互不等待（`host-tools.ts:64-71`）。`host_tool_cancel{targetId}` 中止对应的处理，之后的结果不写（`:49-51`、`:81-83`）；中止信号经单轮检索传到 RAGFlow 请求（`retrieval.ts:97-102`、`ragflow-retrieval.ts:88`），该库为 `failed`。进程退出或写端关闭时中止全部在途调用，不再写帧。处理函数抛错回 `工具执行失败`，错误原文不进帧与日志；不认识的工具名回 `未知工具`；应答超过 1 MiB 帧长时先去掉 `details`，仍超过回 `工具结果过大`（`:94-108`）。没被取消、写端也没关闭时，每个调用恰有一帧应答：omp 在 5 s 内不会自己让调用超时（§2.7），更长没测，所以不能依赖它。
+
+**注册**（`host-tool-align.ts:72-88`）：派发前对齐的第 3 步，在 `set_model` / `set_thinking_level` 之后、`prompt`（regenerate 是 `get_branch_messages`）之前（`supervisor.ts:409-412`）。
+
+- 定义恰为 `{name:"kb_search", label:"知识库检索", description, parameters, loadMode:"essential"}`（`session-search.ts:157-173`）：缺省 `loadMode` 的工具不进模型的 `tools`（§2.1）。描述末尾逐行列所有者的全部库 `- <名称>（<id>）`，按建库时间升序；定义只读本地库表，不访问 RAGFlow。
+- 每个 generation 记下上次成功注册的库清单，新 generation（spawn、resume、空闲回收之后）从「尚未注册」开始：host tool 不随会话文件保存（§2.8）。清单变了就重发；库全删了发 `set_host_tools{tools:[]}`；从来没有定义（知识库关闭，或所有者没有库）就一帧都不发，帧序与 S2c 之前相同。回合进行中清单变了不重发。
+- 应答须为 `success:true` 且 `data.toolNames` 恰为 `["kb_search"]`（撤下时为 `[]`），否则这一步失败：slot 退役，prompt 以 502 `agent_unavailable` 失败。
+- 处理函数在 slot 构造进程时绑定为「以所有者执行」（`pool.ts:305-314`），模型给的 kb_id 只按这个所有者判定。fork 与撤回的临时进程不注册、不注入处理函数。
+- 装配：`registerKb` 建会话检索（`kb/index.ts:192`），`app.ts` 迟绑定注入 sessions（`app.ts:234-235`、`:350-351`）；sessions 不导入 kb。
+
+**审批放行**（`ui-requests.ts:78-81`、`omp/process.ts:601-618`；规格 tool-approval「审批请求识别」）：`write`、`always-ask` 下 omp 对每次 `kb_search` 调用都发 `select`，标题恰为 `Allow tool: kb_search`（§2.4）；`yolo` 下不发。这一代进程不是 `always-ask` 时，传输层立即答 `Approve`：不登记审批、不发 `approval.request`、不写 `chat_approvals`、不审计。`always-ask` 照常交给所有者，检索卡那一行显示 `已拒绝` 或 `超时自动允许`。只认整个标题恰好相等：带第二行，或工具名不同（如 `kb_search_extra`）的不放行。残余：[INFERENCE] 放行只看标题，工作空间里项目层的同名工具 `.omp/tools/kb_search` 只要出同一标题的确认卡，在 `write` 档下也会被放行。这是 ADR-0012 已接受残余（项目层 `.omp/tools` 不拦）的延伸；同名项目工具与宿主 `kb_search` 在真实 omp 上怎样共存没有测过。
+
+**知识库引用**（`sessions/store-knowledge-bases.ts`、`sessions/slash-commands.ts:330-339`，迁移 052；规格 message-attachments「prompt 引用知识库」）：
+
+- 迁移 `052_chat_message_knowledge_bases.sql` 给 `chat_messages` 加 `knowledge_bases TEXT NULL`：只 `ADD COLUMN`，无缺省、无 CHECK，存量行不回填。
+- prompt body 可带 `knowledgeBases`：须为至多 5 个互不相同的非空字符串，否则 400 `bad_request`；任何一个不是调用者的库即 404 `not_found`，不存在、别人的库与知识库关闭三者 body 相同（`store-knowledge-bases.ts:38-61`）。判定在附件之后、受理之前（`sessions/rest.ts:340`），不访问 RAGFlow，不审计，不放宽空文本规则。它只是给模型的提示，不限制 `kb_search` 能查哪些库。
+- 受理时在同一事务里落紧凑 JSON `[{id, name}]`，名称取受理那一刻的本地值；无引用为 NULL。坏值整列读作 `[]`，不改写列（`store-knowledge-bases.ts:68-100`）。
+- 后缀 `promptSuffix(paths, kbs)` 是唯一构造：附件段之后接引用段，`\n\n用户在本条消息中引用了以下知识库，可以用 kb_search 检索：` 再逐项 `\n- <名称>（<id>）`。无引用时与之前逐字节相同，存量会话的重新生成、fork 与撤回的对位不受影响；有引用的消息按落库的引用快照重建后缀再对位（`branch-temp.ts:200`）。
+- 消息快照每条消息带第十四键 `knowledgeBases`（助手消息恒为 `[]`），读取时不核对库是否还在；事件流不带引用。
+- fork 原样拷贝被复制消息的这一列（`store-branch.ts:259`）；fork 与撤回的应答不回填引用。
+- 已知缺口：内置斜杠命令带引用按规格字面受理，`{message:"/compact", knowledgeBases:["k1"]}` 为 202 并派发 `/compact` 接引用段（用例 `server/test/prompt-knowledge-bases.test.ts:279`）；而内置命令带附件是 400（`prompt-attachments.ts:142`）。是否也拒绝引用待 owner 裁定。
+
+**web**（界面契约在 chat-web「会话知识库检索卡」、message-attachments「输入框知识库引用」「用户气泡中的知识库引用」）：
+
+- 「+」菜单在 `上传文件` 之后有 `引用知识库…`，只在 `GET /api/kb/status` 回 `enabled:true` 时出现（`web/src/features/chat/page.tsx:151-159`、`capability-bar.tsx:240-250`）。它打开选择列表 `引用知识库`（`kb-ref-picker.tsx`），非 `ready` 的库同样可选，满 5 个后其余禁用；标签区 `引用的知识库` 在文本框上方，欢迎态可暂存，首次发送带上。
+- 用户气泡在文本与附件下方列出引用的库名，纯文本（`message-thread.tsx:174-193`）。
+- 一条消息里的 `kb_search` 步骤合成一张「知识库检索」卡，放在第一个 `kb_search` 步骤的位置（`message-segments.ts:90-95`、`kb-search-card.tsx`），不计入工具段摘要（`tool-summary.ts:39`）。每次调用一行：`第 N 轮`、意图（没有时用问句）、命中条数、状态。
+- 命中只来自实时的 `kb.hits`（`stream-kb-hits.ts`）。任何一次快照安装都把每个步骤的 `kbHits` 置为 `null`（`stream.ts:154`），所以刷新或经快照恢复之后，卡上只剩各轮的问句与状态，行不可展开（G12 已接受）。
+
+**测试说明**：
+
+- CI 覆盖协议面：假 omp 的 `host-tool`、`host-tool-parallel`、`host-tool-abort`、`host-tool-register-fail` 场景（`server/test/support/fake-omp-host-tool.mjs`），以及 ui-walk 分支 `web/e2e/ui-walk-chat-kb.ts`（只用 `page.route` 桩，CI 不配 RAGFlow）。
+- 受控假上游的标记 `WORKBUDDY_KB_SEARCH:<kbId>`（`server/test/support/fake-upstream-kb.mjs`）：以本回合最后一条 user 消息之后的 tool 消息条数为准，0 条回第一次 `kb_search`，1 条回第二次（问句加 ` 详细说明`），2 条及以上回固定正文 `已根据知识库检索结果作答。`；请求的 `tools` 里没有 `kb_search` 时标记不生效。
+- 真实 omp v18.12.3 把日期与 cwd 的 `<system-reminder>` 作为同一条 user 消息的第一个 text part 发出（#1975 实测），所以标记解析先去掉从开头到第一个 `</system-reminder>` 的整块，没有闭合标签时原样保留（`fake-upstream-kb.mjs:13-15`）。这与 #1769 那种整条提醒消息是两种形状。
+- 本机门控回归 `server/test/omp-official-host-tools.test.ts`（`WORKBUDDY_OMP_TEST=1`，CI 跳过）：官方二进制在 `write` 档跑两轮 `kb_search`，断言两条 `kb.hits`、没有 `approval.request`、`details` 不进上游。单跑用文件头的命令；与全部官方门控用例一起跑时要加 `--maxWorkers=4`，默认并发下大量用例握手超时（#2002）。
+- 真实模型与真实 RAGFlow 下的会话检索是验收行 CK-15–CK-18，由 owner 执行。
 
 **嵌入模型更换与全量重建**（`server/src/kb/rebuild.ts`、`kb/settings.ts`，组 14）。换嵌入模型的数据集不能就地改：`PUT /datasets/<id>` 改 `embedding_model` 不重算向量（实测记录 §6），所以每个库建一代新数据集，把入库原件从旧数据集搬过去。
 
