@@ -63,18 +63,25 @@ async function patch(world: ProxiedApp, session: string, body: unknown): Promise
 async function openKbWorld(): Promise<KbWorld> {
   const fake = await start({ apiKey: RAGFLOW_KEY });
   onTeardown(() => fake.close());
+  // The kb records join the sessions port's `world.log`; any written before it exists go first.
+  const early: Array<Record<string, unknown>> = [];
+  let sink = early;
   const kb: KbDependencies = {
     key: { read: () => RAGFLOW_KEY },
     baseUrl: fake.baseUrl,
     uploadMaxBytes: 1024 * 1024,
     uploadMaxFiles: 10,
-    log: () => undefined,
+    log: (record) => {
+      sink.push({ ...record });
+    },
   };
   const world = await openProxiedApp({
     registry: { apiKey: UPSTREAM_KEY },
     kb,
     recordBodies: true,
   });
+  world.log.unshift(...early);
+  sink = world.log;
   const store = createKbStore(world.db);
   const kbId = store.newId();
   const datasetId = fake.addDataset(resourceName(kbId, 0));

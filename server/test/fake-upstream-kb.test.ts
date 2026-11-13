@@ -181,16 +181,35 @@ describe("the question and the kbId", () => {
       `<system-reminder>${MARKED}`,
       '{"question":"<system-reminder> 工单超时","kb_ids":["k1"],"i":"第 1 轮"}',
     ],
+    [
+      "after a reminder block not at the very start, kept as it is",
+      ` <system-reminder>a</system-reminder>${MARKED}`,
+      '{"question":"<system-reminder>a</system-reminder> 工单超时","kb_ids":["k1"],"i":"第 1 轮"}',
+    ],
+    [
+      "after the reminder block, only up to the first closing tag dropped",
+      `<system-reminder>a</system-reminder>${KB}k1 工单</system-reminder>超时`,
+      '{"question":"工单</system-reminder>超时","kb_ids":["k1"],"i":"第 1 轮"}',
+    ],
   ])("%s", async (_label, text, args) => {
     const port = await upstream();
     expect(outcome(await chat(port, turn(text, 0)))).toEqual(kbCall(args));
   });
 
-  it("mid-sentence on the second round", async () => {
+  it.each([
+    [
+      "mid-sentence",
+      `前文 ${KB}k1 后文`,
+      '{"question":"前文  后文 详细说明","kb_ids":["k1"],"i":"第 2 轮"}',
+    ],
+    [
+      "after omp's leading reminder block",
+      `<system-reminder>a</system-reminder>${MARKED}`,
+      ROUND_2,
+    ],
+  ])("%s on the second round", async (_label, text, args) => {
     const port = await upstream();
-    expect(outcome(await chat(port, turn(`前文 ${KB}k1 后文`, 1)))).toEqual(
-      kbCall('{"question":"前文  后文 详细说明","kb_ids":["k1"],"i":"第 2 轮"}'),
-    );
+    expect(outcome(await chat(port, turn(text, 1)))).toEqual(kbCall(args));
   });
 });
 
