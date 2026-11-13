@@ -64,6 +64,8 @@ type TurnActionDeps = {
   focusOnUnlockRef: RefObject<boolean>;
   historyGenerationRef: RefObject<number>;
   installSnapshot: (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => void;
+  /** 某个会话的知识库引用（两个函数引用稳定）：发送时按标签次序读 id，受理后与撤回回填时清空，未受理不动。 */
+  kbRefs: { clear(owner: string): void; ids(owner: string): string[] };
   /** A ref: `loadHistory` changes with the location, `dispatchPrompt` must not. */
   loadHistoryRef: RefObject<(sessionId: string, ownedClient: ApiClient) => void>;
   mountedRef: RefObject<boolean>;
@@ -110,6 +112,7 @@ export function useTurnActions({
   focusOnUnlockRef,
   historyGenerationRef,
   installSnapshot,
+  kbRefs: { clear: clearKbRefs, ids: kbRefIds },
   loadHistoryRef,
   mountedRef,
   mutationControllerRef,
@@ -293,6 +296,7 @@ export function useTurnActions({
         void ownedClient
           .prompt(sessionId, prompt, {
             attachments: sent.flatMap(({ path }) => path ?? []),
+            knowledgeBases: kbRefIds(sessionId),
             signal: controller.signal,
           })
           .then(() => {
@@ -301,6 +305,7 @@ export function useTurnActions({
               return;
             }
             pendingCreateSendRef.current = { ...pending, accepted: true };
+            clearKbRefs(sessionId);
             // Before the history read: once accepted the page may leave, and the sidebar entry
             // (title, status) must not wait for a read that leaving aborts.
             refreshList(ownedClient);
@@ -363,12 +368,14 @@ export function useTurnActions({
     },
     [
       abortMutation,
+      clearKbRefs,
       clientRef,
       closeSource,
       failOwnedPrompt,
       finishCreateSend,
       flushAttachments,
       installSnapshot,
+      kbRefIds,
       mountedRef,
       mutationControllerRef,
       mutationGenerationRef,
@@ -634,6 +641,7 @@ export function useTurnActions({
           setDraft(draft);
           // 空数组也调：撤回后仍在的附件覆盖输入框里已有的标签（在途上传中止），不发请求。
           restoreAttachments(sessionId, attachments);
+          clearKbRefs(sessionId); // 撤回的响应不带引用：同一会话里显式清空
           // 每一次被应用的 200 都重新决定说明：有未还原的就换成这一份，没有就撤掉已有的。
           setUndoNotice(
             skipped.count + failed.count > 0
@@ -682,6 +690,7 @@ export function useTurnActions({
       );
     },
     [
+      clearKbRefs,
       clientRef,
       closeSource,
       focusOnUnlockRef,

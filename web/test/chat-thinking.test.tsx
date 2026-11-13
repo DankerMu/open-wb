@@ -279,6 +279,7 @@ describe("thinking snapshot mapping and reduction", () => {
       role: "assistant",
       undo: null,
       attachments: [],
+      knowledgeBases: [],
       status: "running",
       content: "",
       thinking: "y",

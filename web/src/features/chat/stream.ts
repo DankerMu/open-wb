@@ -50,6 +50,7 @@ type ChatMessageView = {
   status: ChatMessage["status"];
   undo: ChatMessage["undo"];
   attachments: ChatMessage["attachments"];
+  knowledgeBases: ChatMessage["knowledgeBases"];
   steps: ChatStepView[];
   approvals: ChatApprovalView[];
   error: ChatMessage["error"];
@@ -141,6 +142,7 @@ export function chatStateFromSnapshot(snapshot: ChatMessageSnapshot): ChatState 
       status: message.status,
       undo: message.undo,
       attachments: message.attachments,
+      knowledgeBases: message.knowledgeBases,
       steps: message.steps.map((step) => ({
         id: step.id,
         name: step.name,
@@ -250,6 +252,7 @@ function emptyAssistant(messageId: number): ChatMessageView {
     thinking: null,
     undo: null,
     attachments: [],
+    knowledgeBases: [],
     steps: [],
     approvals: [],
     error: null,

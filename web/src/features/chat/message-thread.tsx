@@ -6,7 +6,7 @@
 // 助手消息的分段区（change chat-interleaved-segments D9、D10）：本文件只按 message-segments.ts 判布局——
 // 分段布局交给 message-segments-view.tsx 逐块渲染，旧布局仍是「思考 → 正文 → 一个工具段」——其后各部件
 // 一律排在分段区之后。
-// 用户消息的附件列表（design D15）就在本文件，数据取自透传字段。
+// 用户消息的附件列表（design D15）与知识库引用列表就在本文件，数据取自透传字段。
 import {
   AssistantRuntimeProvider,
   MessagePrimitive,
@@ -127,6 +127,7 @@ const UserMessage = memo(function UserMessage({
             </p>
           )}
           <MessageAttachments attachments={custom.attachments} />
+          <MessageKnowledgeBases refs={custom.knowledgeBases} />
           <ToolCallGroup approvals={custom.approvals} steps={custom.steps} />
           <MessageError error={custom.error} retrying={custom.retrying} status={custom.status} />
         </div>
@@ -163,6 +164,28 @@ function MessageAttachments({ attachments }: { attachments: ChatMessageCustom["a
         <li className="flex min-w-0 gap-1.5" key={path}>
           <span className="min-w-0 wrap-anywhere">{path.slice(path.lastIndexOf("/") + 1)}</span>
           <span className="flex-none text-(--wb-text-secondary)">{formatSize(size)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * 用户消息引用的知识库（message-attachments「用户气泡中的知识库引用」）：附件列表之下，库名一项一行，按数组次序。
+ * 纯文本，不是链接也不是按钮；没有引用时不渲染（助手消息恒为空数组）。
+ */
+function MessageKnowledgeBases({ refs }: { refs: ChatMessageCustom["knowledgeBases"] }) {
+  return refs.length === 0 ? null : (
+    <ul
+      aria-label="引用的知识库"
+      className="m-0 flex min-w-0 list-none flex-col gap-1 p-0 text-xs leading-5 text-(--wb-text-secondary)"
+      data-slot="message-kb-refs"
+      // biome-ignore lint/a11y/noRedundantRoles: list-none 会让 Safari 丢掉列表语义，显式写回。
+      role="list"
+    >
+      {refs.map(({ id, name }) => (
+        <li className="min-w-0 wrap-anywhere" key={id}>
+          {name}
         </li>
       ))}
     </ul>

@@ -318,6 +318,7 @@ describe("approval snapshot and event reduction", () => {
       role: "assistant",
       undo: null,
       attachments: [],
+      knowledgeBases: [],
       content: "",
       status: "running",
       steps: [],

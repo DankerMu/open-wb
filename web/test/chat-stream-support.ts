@@ -42,6 +42,7 @@ export const userView = {
   role: "user" as const,
   undo: "none" as const,
   attachments: [] as [],
+  knowledgeBases: [] as [],
   approvals: [] as [],
   content: USER_CONTENT,
   status: "done" as const,

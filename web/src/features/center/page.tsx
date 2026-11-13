@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/features/auth/index";
+import { useKbEnabled } from "@/lib/kb-status";
 import { isAdmin } from "@/lib/roles";
 import { CENTER_TABS, type CenterTab } from "./tabs.js";
 
@@ -14,38 +15,17 @@ function tabLocation(pathname: string, search: string, hash: string, key: string
   return { hash, pathname, search: `?${parameters}` };
 }
 
-/** 中心页每次挂载读一次 `GET /api/kb/status`：在途为 `null`，读取失败视为未开启。 */
-function useKbEnabled(): boolean | null {
-  const { createSessionClient } = useAuth();
-  const client = useMemo(() => createSessionClient(), [createSessionClient]);
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  useEffect(() => {
-    let live = true;
-    client.getKbStatus().then(
-      (status) => {
-        if (live) setEnabled(status.enabled);
-      },
-      () => {
-        if (live) setEnabled(false);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [client]);
-  return enabled;
-}
-
 /**
  * `/center`：页内 tab 由 `?tab=<key>` 表示。可见 tab 为角色允许的项，带 `requiresKb` 的另须知识库开启。`tab` 缺省、
  * 未知或不可见 → replace 到第一个可见 tab；没有可见 tab → 空态且不改地址。知识库状态在途时，指向带 `requiresKb`
  * 的 tab 的地址不改、只渲染 tab 条，读到之后再按规则重算。页面级 heading 归顶栏。
  */
 export function CenterPage({ tabs = CENTER_TABS }: { tabs?: readonly CenterTab[] }) {
-  const { principal } = useAuth();
+  const { createSessionClient, principal } = useAuth();
+  const client = useMemo(() => createSessionClient(), [createSessionClient]);
   const { hash, pathname, search } = useLocation();
   const navigate = useNavigate();
-  const kbEnabled = useKbEnabled();
+  const kbEnabled = useKbEnabled(client);
   const admin = principal !== null && isAdmin(principal);
   const permitted = tabs.filter((tab) => admin || !tab.adminOnly);
   const visible = permitted.filter((tab) => !tab.requiresKb || kbEnabled === true);
