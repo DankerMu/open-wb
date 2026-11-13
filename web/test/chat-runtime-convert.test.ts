@@ -32,6 +32,7 @@ function stoppedView(): View {
     status: "stopped",
     undo: null,
     attachments: [],
+    knowledgeBases: [],
     steps: [
       {
         id: 31,
@@ -72,6 +73,7 @@ function runningView(): View {
     status: "running",
     undo: null,
     attachments: [],
+    knowledgeBases: [],
     steps: [],
     approvals: [],
     error: null,

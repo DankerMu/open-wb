@@ -1,10 +1,12 @@
 import type { ComponentProps } from "react";
+import { useKbEnabled } from "../../lib/kb-status.js";
 import { useSidebarNavigate, useSidebarSlot } from "../../lib/sidebar-slot.js";
 import { useTopbar } from "../../lib/topbar.js";
 import { useAttachmentArea } from "./attachment-chips.js";
 import { useConversationSearch } from "./conversation-search.js";
 import { ConversationView } from "./conversation-view.js";
 import { DeleteDialog } from "./delete-dialog.js";
+import { useKbRefDialog } from "./kb-ref-picker.js";
 import { useProjectConfig } from "./project-config.js";
 import { PromoteDialog } from "./promote-dialog.js";
 import { RenameDialog } from "./rename-dialog.js";
@@ -66,6 +68,9 @@ export function ChatPage() {
   // 在欢迎态第一次打开时取一次。
   const connectorList = useConnectorList(client);
   const connectorDefaults = useConnectorDefaults(client);
+  // 知识库引用（message-attachments「输入框知识库引用」）：状态每个 client 读一次，开启才有入口、选择列表与标签区。
+  const kbEnabled = useKbEnabled(client);
+  const kbDialog = useKbRefDialog(client);
   // 「+」菜单与斜杠候选不列的技能（chat-web「停用技能过滤」）：会话中为已取得的会话能力（未取得或失败时不过滤），
   // 欢迎态为弹层的页面选择 ?? 已取得的账号缺省 ?? 不过滤。
   const disabledSkills = requestedSessionId
@@ -143,6 +148,16 @@ export function ChatPage() {
           generating={session.generating}
           historyError={session.historyError}
           historyView={historyView}
+          kbRefs={
+            kbEnabled === true
+              ? {
+                  dialog: kbDialog,
+                  onRemove: session.kbRefs.remove,
+                  onToggle: session.kbRefs.toggle,
+                  refs: session.kbRefs.refs,
+                }
+              : null
+          }
           modelId={selected?.modelId}
           onAnswerApproval={session.answerApproval}
           onChangeDraft={session.setDraft}

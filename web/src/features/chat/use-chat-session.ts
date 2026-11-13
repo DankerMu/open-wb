@@ -7,7 +7,9 @@ import { useAuth } from "../auth/index.js";
 import { useAttachmentsState } from "./attachments-state.js";
 import { canSend, composerLocks } from "./composer-locks.js";
 import { useComposerOptions } from "./composer-options.js";
+import { useCreateAndSelect } from "./create-and-select.js";
 import { errorMessage, isNotFound, isUnauthorized } from "./errors.js";
+import { useKbRefsState } from "./kb-refs-state.js";
 import {
   blocksNewSession,
   ownsCreateSend,
@@ -410,6 +412,7 @@ export function useChatSession() {
     upload: composer.options?.upload,
   });
   const tags = attachments.items;
+  const kbRefs = useKbRefsState(client, requestedSessionId);
   const turn = useTurnActions({
     abortMutation,
     clientRef,
@@ -418,6 +421,7 @@ export function useChatSession() {
     focusOnUnlockRef,
     historyGenerationRef,
     installSnapshot,
+    kbRefs: { clear: kbRefs.clear, ids: kbRefs.ids },
     loadHistoryRef,
     mountedRef,
     mutationControllerRef,
@@ -512,113 +516,26 @@ export function useChatSession() {
     dispatchPrompt(pending.sessionId, pending.prompt, pending.generation, pending.client);
   }, [client, dispatchPrompt, requestedSessionId]);
 
-  // 会话只在欢迎态首次发送时创建：恰一次创建，选中返回的 id 后恰一次 prompt。
-  const createAndSelect = useCallback(
-    (prompt: string) => {
-      if (createControllerRef.current || mutationControllerRef.current) {
-        return;
-      }
-      const controller = new AbortController();
-      createControllerRef.current = controller;
-      createSendGenerationRef.current += 1;
-      const generation = createSendGenerationRef.current;
-      const originSessionId = requestedSessionId;
-      pendingCreateSendRef.current = {
-        accepted: false,
-        client,
-        generation,
-        originSessionId,
-        prompt,
-        sessionId: null,
-      };
-      setSubmitting(true);
-      setCreating(true);
-      setMutationOwner({ client, originSessionId, sessionId: null });
-      setPromptError(null);
-      void client
-        .createSession(welcome.createBody(), { signal: controller.signal })
-        .then((session) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== createSendGenerationRef.current ||
-            client !== clientRef.current
-          ) {
-            return;
-          }
-          createControllerRef.current = null;
-          if (Object.keys(welcome.picked).length > 0) composer.invalidate(); // 创建带了设置键
-          if (pendingCreateSendRef.current?.generation === generation) {
-            pendingCreateSendRef.current = {
-              accepted: false,
-              client,
-              generation,
-              originSessionId: pendingCreateSendRef.current.originSessionId,
-              prompt: pendingCreateSendRef.current.prompt,
-              sessionId: session.id,
-            };
-            setMutationOwner({
-              client,
-              originSessionId: pendingCreateSendRef.current.originSessionId,
-              sessionId: session.id,
-            });
-          } else {
-            setCreating(false);
-            setMutationOwner(null);
-          }
-          attachments.adopt(session.id, session.workspaceId);
-          refreshList(client);
-          // Sync commit only holds while routes have no loader/lazy/middleware; adding one reopens
-          // #1543 (guarded by chat-page-welcome-handoff.test.tsx).
-          navigate(
-            sessionNavigation(location.pathname, location.search, location.hash, session.id),
-            { flushSync: true },
-          );
-        })
-        .catch((error: unknown) => {
-          if (
-            !mountedRef.current ||
-            controller.signal.aborted ||
-            generation !== createSendGenerationRef.current ||
-            isUnauthorized(error)
-          ) {
-            if (createControllerRef.current === controller) {
-              createControllerRef.current = null;
-            }
-            return;
-          }
-          const rejectedPrompt =
-            pendingCreateSendRef.current?.generation === generation
-              ? pendingCreateSendRef.current.prompt
-              : "";
-          createControllerRef.current = null;
-          pendingCreateSendRef.current = null;
-          restoreOwnedDraft(rejectedPrompt, client, originSessionId);
-          setCreating(false);
-          setSubmitting(false);
-          setMutationOwner(null);
-          setPromptError({
-            client,
-            sessionId: originSessionId,
-            message: errorMessage(error),
-          });
-        });
-    },
-    [
-      attachments.adopt,
-      client,
-      composer.invalidate,
-      location.hash,
-      location.pathname,
-      location.search,
-      navigate,
-      refreshList,
-      requestedSessionId,
-      restoreOwnedDraft,
-      welcome.createBody,
-      welcome.picked,
-    ],
-  );
+  const createAndSelect = useCreateAndSelect({
+    adoptAttachments: attachments.adopt,
+    adoptKbRefs: kbRefs.adopt,
+    client,
+    clientRef,
+    createControllerRef,
+    createSendGenerationRef,
+    invalidateComposer: composer.invalidate,
+    mountedRef,
+    mutationControllerRef,
+    pendingCreateSendRef,
+    refreshList,
+    requestedSessionId,
+    restoreOwnedDraft,
+    setCreating,
+    setMutationOwner,
+    setPromptError,
+    setSubmitting,
+    welcome,
+  });
   // 发送路径的文本入口：表单提交与运行时适配器的 `onNew` 都走这里。
   const sendPrompt = useCallback(
     (prompt: string) => {
@@ -766,6 +683,7 @@ export function useChatSession() {
     historyError: ownedHistory && historyState.status === "error" ? historyState.message : null,
     historyView,
     invalidateComposerOptions: composer.invalidate,
+    kbRefs,
     listError:
       listState.client === client && listState.status === "error" ? listState.message : null,
     listLoading: listState.client === client && listState.status === "loading",

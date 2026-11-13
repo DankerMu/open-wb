@@ -8,6 +8,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { BaseView } from "@/lib/api";
+import { STATE_MARK } from "@/lib/kb-status";
 import { templateLabel } from "./templates.js";
 
 const HEADERS = ["名称", "模板", "编译", "文档", "状态", "操作"];
@@ -32,12 +33,6 @@ const KINDS = [
   ["raptor", "RAPTOR"],
   ["graph", "知识图谱"],
 ] as const;
-
-const STATE_MARK: Readonly<Record<BaseView["state"], string | null>> = {
-  ready: null,
-  rebuilding: "重建中",
-  rebuild_failed: "重建失败",
-};
 
 /** 表头行（列表与文档表共用）。 */
 export function HeaderRow({ headers }: { headers: readonly string[] }) {

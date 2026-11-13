@@ -39,6 +39,7 @@ function view(id: number, role: View["role"], status: View["status"], content = 
   const empty = {
     thinking: null,
     attachments: [],
+    knowledgeBases: [],
     steps: [],
     approvals: [],
     error: null,

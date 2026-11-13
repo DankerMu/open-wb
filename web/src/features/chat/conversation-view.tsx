@@ -16,6 +16,7 @@ import { CapabilityBar, type ExpertChoice } from "./capability-bar.js";
 import { skillSwitches } from "./capability-popover.js";
 import { Composer } from "./composer.js";
 import { ComposerDock } from "./composer-dock.js";
+import { type KbRefEntry, KbRefTags } from "./kb-ref-picker.js";
 import { Thread } from "./message-thread.js";
 import { ModelPicker } from "./model-picker.js";
 import type { useSlashMenu } from "./slash-menu.js";
@@ -192,6 +193,8 @@ type ConversationViewProps = {
   generating: boolean;
   historyError: string | null;
   historyView: ChatState | null;
+  /** 知识库引用（知识库开启时才有）：「+」菜单项、选择列表与输入卡里附件标签之后的引用标签区；null 即都没有。 */
+  kbRefs: KbRefEntry | null;
   /** 当前会话视图的模型；欢迎态与会话还没解析出来时为 undefined。 */
   modelId: ChatSession["modelId"] | undefined;
   onAnswerApproval: AnswerApproval;
@@ -256,6 +259,7 @@ export function ConversationView({
   generating,
   historyError,
   historyView,
+  kbRefs,
   modelId,
   onAnswerApproval,
   onChangeDraft,
@@ -371,7 +375,14 @@ export function ConversationView({
         ) : (
           <Composer
             actions={actions}
-            attachments={files.chips}
+            attachments={
+              <>
+                {files.chips}
+                {kbRefs === null ? null : (
+                  <KbRefTags onRemove={kbRefs.onRemove} refs={kbRefs.refs} />
+                )}
+              </>
+            }
             capabilityBar={
               <CapabilityBar
                 choice={{
@@ -389,6 +400,7 @@ export function ConversationView({
                   workspaceId,
                 })}
                 inputRef={composerRef}
+                kbRefs={kbRefs ?? undefined}
                 plus={slash.plus}
                 skills={skillSwitches({
                   capabilities,

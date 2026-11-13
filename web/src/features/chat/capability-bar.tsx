@@ -18,6 +18,7 @@ import { useAuth } from "../auth/index.js";
 import { logicalPath } from "../files/index.js";
 import { CapabilityPopover, type SkillSwitches } from "./capability-popover.js";
 import { ExpertPicker, useExpertDialog } from "./expert-picker.js";
+import { type KbRefEntry, KbRefPicker } from "./kb-ref-picker.js";
 import { PermissionTier } from "./permission-tier.js";
 import { sourceTag, type useSlashMenu } from "./slash-menu.js";
 import type { WelcomeOptions } from "./welcome-options.js";
@@ -55,6 +56,8 @@ type CapabilityBarProps = {
   expert: ExpertChoice;
   /** 输入框元素：「+」菜单点选后把焦点交给它。 */
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  /** 知识库引用（知识库开启时才传）：「+」菜单的 `引用知识库…` 与它打开的选择列表；不传即没有这一项。 */
+  kbRefs?: KbRefEntry | undefined;
   /**
    * 权限档位控件的 props；输入框选项未取得（或已选会话还没解析出来）时不传，控件不渲染、不摆占位。
    * `scope` 是它的 `key`：换会话即重挂，在途禁用与打开的确认框不带到另一个会话。不随 `disabled` 禁用。
@@ -82,6 +85,7 @@ export function CapabilityBar({
   disabled,
   expert,
   inputRef,
+  kbRefs,
   permission,
   plus,
   session,
@@ -99,6 +103,7 @@ export function CapabilityBar({
         expertDisabled={expert.pending}
         inputRef={inputRef}
         onPickExpert={dialog.show}
+        onPickKb={kbRefs?.dialog.show}
         plus={plus}
         triggerRef={triggerRef}
         upload={upload}
@@ -125,6 +130,9 @@ export function CapabilityBar({
         restoreFocus={() => triggerRef.current?.focus()}
         status={dialog.status}
       />
+      {kbRefs === undefined ? null : (
+        <KbRefPicker {...kbRefs} restoreFocus={() => triggerRef.current?.focus()} />
+      )}
     </div>
   );
 }
@@ -172,20 +180,23 @@ const MENU_NOTE = "m-0 px-1.5 py-1 text-sm text-muted-foreground";
  * 列表前有一行 `清空输入后可选择命令`（菜单的直接子元素）。给出 `upload` 时第一项是 `上传文件`：它不看草稿、
  * 不看目录（拉取中、失败、为空时都在），点选只打开文件选择框，不动草稿。其后是 `选择专家…`：同样不看草稿与
  * 目录，`PUT …/capabilities` 在途或会话还没解析出来时禁用；点选打开专家对话框，菜单关闭时焦点留给对话框。
+ * 给出 `onPickKb` 时 `上传文件` 之后（没有它时在最前）有 `引用知识库…`：点选打开引用选择列表，焦点同样留给它。
  */
 function CommandMenu({
   expertDisabled,
   inputRef,
   onPickExpert,
+  onPickKb,
   plus,
   triggerRef,
   upload,
 }: Pick<CapabilityBarProps, "inputRef" | "plus" | "upload"> & {
   expertDisabled: boolean;
   onPickExpert(): void;
+  onPickKb: (() => void) | undefined;
   triggerRef: RefObject<HTMLButtonElement | null>;
 }) {
-  /** 关闭菜单的那次点选要把焦点交给谁：命令交给输入框，`选择专家…` 交给对话框；其余按菜单默认还给按钮。 */
+  /** 关闭菜单的那次点选要把焦点交给谁：命令交给输入框，两个对话框项交给对话框；其余按菜单默认还给按钮。 */
   const picked = useRef<"input" | "dialog" | null>(null);
   return (
     <DropdownMenu onOpenChange={plus.onOpenChange} open={plus.open}>
@@ -224,6 +235,17 @@ function CommandMenu({
             {upload.reason === null ? null : (
               <span className="text-muted-foreground">{upload.reason}</span>
             )}
+          </DropdownMenuItem>
+        )}
+        {onPickKb === undefined ? null : (
+          <DropdownMenuItem
+            className="text-[13px] leading-5 font-medium"
+            onSelect={() => {
+              picked.current = "dialog";
+              onPickKb();
+            }}
+          >
+            引用知识库…
           </DropdownMenuItem>
         )}
         <DropdownMenuItem
