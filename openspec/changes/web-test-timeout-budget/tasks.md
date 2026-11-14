@@ -28,8 +28,8 @@ Must-preserve：
 
 ## 1. web 单例预算（#2008）
 
-- [ ] 1.1 改 `web/vitest.config.ts`：`test.testTimeout: 15000`，注释写明 #2008 与诊断结论（不是挂起，CI 慢 4–10 倍）。
-- [ ] 1.2 解析 web 与 server 的配置（vitest `resolveConfig`），记录：web `testTimeout=15000`；web 与 server `hookTimeout=10000`、`retry` 未设或为 0；server `testTimeout=5000`。
-- [ ] 1.3 `npm test --workspace web`、`npm run test:focus --workspace web -- scheduler-drain`、native loader `npm exec --workspace @workbuddy/web -- vitest run --coverage --configLoader native`（退出码 0、实际跑完用例并出 V8 coverage summary、无 loader warning）、`make check` 通过。
+- [x] 1.1 改 `web/vitest.config.ts`：`test.testTimeout: 15000`，注释写明 #2008 与诊断结论（不是挂起，CI 慢 4–10 倍）。
+- [x] 1.2 解析 web 与 server 的配置（vitest `resolveConfig`），记录：web `testTimeout=15000`；web 与 server `hookTimeout=10000`、`retry` 未设或为 0；server `testTimeout=5000`。
+- [x] 1.3 `npm test --workspace web`、`npm run test:focus --workspace web -- scheduler-drain`、native loader `npm exec --workspace @workbuddy/web -- vitest run --coverage --configLoader native`（退出码 0、实际跑完用例并出 V8 coverage summary、无 loader warning）、`make check` 通过。
 
 Suggested fixture level: compact - 一个配置值。
