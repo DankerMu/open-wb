@@ -7,7 +7,9 @@
  * 2026-11-14 实测），真实 omp 的 `result` 另带 `details:{}`；`cancelled` 未实测，仍是假 omp 的选择。
  * `host-tool-parallel`、`host-tool-abort` 不论档位都按 `yolo`。
  * 其余场景对 `set_host_tools` 回按 id 关联的 `success:false`：`host-tool-register-fail`（4.2，#1966；不进 SCENARIOS，
- * 不接管 prompt）的 `error` 为 `host tools rejected`，别的为 `unsupported`。没有 import、不发 ready、不读 argv（档位由主程序传入）：
+ * 不接管 prompt）的 `error` 为 `host tools rejected`；`host-tool-register-conflict`（#2011，同样不进 SCENARIOS）的 `error`
+ * 恰为 v18.12.3 的冲突原文（记录 §2.10），设了环境变量 `WORKBUDDY_FAKE_CONFLICT_PREFIX` 时前面接上它（「只认恰好相等」的对照）；
+ * 别的为 `unsupported`。没有 import、不发 ready、不读 argv（档位由主程序传入），只读上面这一个环境变量：
  * 帧经主程序给的 `emit` 等函数写出，调用发出后立即返回，`host_tool_result` 到达时按状态表推进，
  * 不在串行 queue 的 handler 里等结果。
  */
@@ -17,6 +19,15 @@ const KB_TOOL = "kb_search";
 const ABORTED = `Host tool "${KB_TOOL}" was aborted`;
 const DELTAS = ["已根据", "检索结果作答。"];
 const SELECT_OPTIONS = ["Approve", `Approve ${KB_TOOL} for this session`, "Deny"];
+const CONFLICT = `RPC host tool "${KB_TOOL}" conflicts with an existing tool`;
+/** `set_host_tools` 的拒绝文本，按不注册的场景。 */
+const REFUSALS = new Map([
+  ["host-tool-register-fail", () => "host tools rejected"],
+  [
+    "host-tool-register-conflict",
+    () => `${process.env.WORKBUDDY_FAKE_CONFLICT_PREFIX ?? ""}${CONFLICT}`,
+  ],
+]);
 
 /**
  * `hooks`：`emit(frame)`、`emitDeltas(deltas)`、`finishTurn()`（终态 agent_end 并应答回合内延后的命令）、
@@ -180,7 +191,7 @@ export function hostToolScenario(scenario, approvalMode, hooks) {
             type: "response",
             command: "set_host_tools",
             success: false,
-            error: scenario === "host-tool-register-fail" ? "host tools rejected" : "unsupported",
+            error: REFUSALS.get(scenario)?.() ?? "unsupported",
           },
     );
   }

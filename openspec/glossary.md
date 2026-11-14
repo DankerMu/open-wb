@@ -103,7 +103,7 @@ MCP 连接器，仅显式配置不自动发现
 **host tool**:
 omp RPC 的宿主工具机制；KB 检索经 app-server 转发实现，目前只有 `kb_search`
 注册：派发前对齐时（`set_model` 之后、`prompt` 之前）按会话所有者的库清单发 `set_host_tools`，带 `loadMode:"essential"`（缺省的工具不进模型的 tools）；每个新进程重新注册，知识库关闭或没有库时不注册
-放行：`write` / `yolo` 档下 `kb_search` 的确认由宿主直接答允许，不出确认卡；`always-ask` 照常问用户
+放行：`write` / `yolo` 档下、且这一代进程注册过 `kb_search`（上一次成功的 `set_host_tools` 应答列着它）时，`kb_search` 的确认由宿主直接答允许，不出确认卡；`always-ask` 或这一代没有注册（知识库关闭、没有库、撤下之后）时照常问用户
 凭证只在 app-server，不进 omp 环境
 
 **模型代理 model-proxy**:

@@ -52,6 +52,25 @@ import type { ApprovalDecision, ApprovalRequest } from "./ui-requests.js";
 
 const DEFAULT_IDLE_MS = 600_000;
 
+/**
+ * A command omp answered `success:false` (kb-search-approval-scope D2, #2011): omp's `error` text
+ * rides along in a private field, for classification only — never in `message`, own enumerable
+ * properties, a log, a response or an event.
+ */
+export class CommandRefusedError extends AgentUnavailableError {
+  readonly #ompError: unknown;
+
+  constructor(command: string, ompError: unknown) {
+    super(`${command} failed`);
+    this.#ompError = ompError;
+  }
+
+  /** Whether omp's `error` was exactly `text`. */
+  refusedWith(text: string): boolean {
+    return this.#ompError === text;
+  }
+}
+
 export interface SessionClock {
   now(): number;
   setTimeout(callback: () => void, ms: number): unknown;
@@ -298,7 +317,7 @@ export class SessionRuntime {
       });
       const response = await gen.proc.request({ ...frame, id: this.#nextId() });
       if (response.success !== true) {
-        throw new AgentUnavailableError(`${String(frame.type)} failed`);
+        throw new CommandRefusedError(String(frame.type), response.error);
       }
       const sessionFile = stateSessionFile(frame, response);
       if (sessionFile !== undefined && this.#generation === gen) {

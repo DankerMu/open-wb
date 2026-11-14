@@ -73,8 +73,8 @@ const THIRTY_NINE_OWNER_IDENTITIES = [
   ...KB_OWNER_IDENTITIES,
 ] as const;
 
-/** spec 码表的三十七码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
-const THIRTY_SEVEN_CODES = [
+/** spec 码表的三十八码键集（与 http-typed-errors.test.ts 同义的本文件守卫）。 */
+const THIRTY_EIGHT_CODES = [
   "bad_request",
   "invalid_credentials",
   "account_disabled",
@@ -112,6 +112,7 @@ const THIRTY_SEVEN_CODES = [
   "kb_chat_model_locked",
   "kb_document_busy",
   "kb_file_unsupported",
+  "kb_tool_conflict",
 ] as const;
 
 interface ReplyCapture {
@@ -181,7 +182,7 @@ function expectGeneric500(captured: ReplyCapture, error: Error): void {
   expect(captured.statusCode).toBe(500);
   expect(captured.body).toBe(GENERIC_BODY);
   expectNoRawDetail(captured, error);
-  for (const code of THIRTY_SEVEN_CODES) {
+  for (const code of THIRTY_EIGHT_CODES) {
     expect(captured.body).not.toContain(code);
   }
 }
@@ -379,8 +380,8 @@ describe("证据 5（回归）：catch-all 与 unmatched 分流不变", () => {
   });
 });
 
-describe("证据 6（守卫）：错误码表恰三十七码", () => {
+describe("证据 6（守卫）：错误码表恰三十八码", () => {
   it("HTTP_ERROR_MESSAGES 键集与 spec 码表相等", () => {
-    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...THIRTY_SEVEN_CODES].sort());
+    expect(Object.keys(HTTP_ERROR_MESSAGES).sort()).toEqual([...THIRTY_EIGHT_CODES].sort());
   });
 });

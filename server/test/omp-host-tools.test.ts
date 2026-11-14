@@ -6,6 +6,8 @@
  * of tasks.md「组 3 首刀约定」. The fake's inbound record (`frames=`) is read with a probe prompt.
  * 3.6 (#1965): omp-runtime「kb_search card by approval mode」 on the same real child under `write`
  * (the transport answers each select before the result) and `always-ask` (the select is surfaced).
+ * kb-search-approval-scope (#2011 D1): the `write` case registers `kb_search` first, as the host does
+ * before every prompt that needs it; without it the card would go to the owner.
  */
 import { once } from "node:events";
 import { mkdtempSync } from "node:fs";
@@ -199,6 +201,9 @@ describe("omp-runtime「kb_search card by approval mode」 over the real fake om
     const run = await start("host-tool", tools, "write");
     const approvals: unknown[] = [];
     run.proc.on("approval", (request) => approvals.push(request));
+    await expect(
+      run.proc.request({ type: "set_host_tools", tools: [{ name: "kb_search" }] }),
+    ).resolves.toMatchObject({ success: true, data: { toolNames: ["kb_search"] } });
     await prompt(run);
     await terminal(run);
 

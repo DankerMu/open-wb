@@ -40,6 +40,8 @@ export const HTTP_ERROR_MESSAGES = Object.freeze({
   kb_chat_model_locked: "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型",
   kb_document_busy: "文档正在停止解析，请稍后再试",
   kb_file_unsupported: "这个文件不能入库：模板不支持这种类型，或文件是空的",
+  kb_tool_conflict:
+    "工作空间里有同名的项目工具 kb_search（.omp/tools），与知识库检索冲突，改名或移除后再试",
 });
 
 export type HttpErrorCode = keyof typeof HTTP_ERROR_MESSAGES;

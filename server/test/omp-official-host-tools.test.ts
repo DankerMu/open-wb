@@ -18,8 +18,10 @@
  * in the session's workspace. Their literals are the ones measured on v18.12.3 and recorded in
  * docs/reviews/2026-11-10-omp-host-tools.md §2.1, §2.4, §2.9 and §2.10.
  *
- * The three same-name cases (bases, no base, knowledge base off) pin the current state of #2011: when
- * #2011 is fixed their expectations must be flipped to the fixed behaviour, not kept green.
+ * The three same-name cases (bases, no base, knowledge base off) pin #2011's fix
+ * (kb-search-approval-scope): with a base omp's refusal is a 409 `kb_tool_conflict`; without a
+ * registration the project tool's card goes to the owner (the world denies it) and its `execute`
+ * never runs.
  *
  * Run locally (`OMP_BIN` absolute):
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
@@ -192,11 +194,11 @@ const BUILT_IN_TOOLS = [
 ];
 
 /**
- * #2011 (current state): this generation registered no host tool, the project kb_search is offered
- * once, its `Allow tool: kb_search` card is answered by the transport on `write` (no approval.request)
- * and its `execute` ran: the model sees its text as kb_search's result, the page a kb_search step.
+ * #2011: this generation registered no host tool, so the project kb_search's `Allow tool: kb_search`
+ * card is an approval on `write` too; the world denies each one, so the project tool's `execute`
+ * never runs: the model and the page see omp's denial (record §2.4), never the project tool's text.
  */
-function expectProjectToolBypass(world: ProxiedApp, session: string): void {
+function expectProjectToolDenied(world: ProxiedApp, session: string): void {
   expect(world.frames.filter(isRegistered)).toEqual([]);
   expect(world.bodies.map(kbToolCount)).toEqual([1, 1, 1]);
   expect(world.frames.filter(isSelect).map((frame) => frame.title)).toEqual([
@@ -204,17 +206,23 @@ function expectProjectToolBypass(world: ProxiedApp, session: string): void {
     "Allow tool: kb_search",
   ]);
   const events = publishedOf(world, session);
-  expect(events.filter((event) => event.type === "approval.request")).toEqual([]);
-  expect(world.denied).toEqual([]);
-  expect(toolMessages(world.bodies[1]).map(({ name, text }) => [name, text])).toEqual([
-    ["kb_search", PROJECT_TEXT],
+  const approvals = events.filter((event) => event.type === "approval.request");
+  expect(approvals.map((event) => [event.data.tool, event.data.title])).toEqual([
+    ["kb_search", "Allow tool: kb_search"],
+    ["kb_search", "Allow tool: kb_search"],
   ]);
+  expect(world.denied).toEqual(approvals.map((event) => event.data.approvalId));
+  expect(toolMessages(world.bodies[1]).map(({ name, text }) => [name, text])).toEqual([
+    ["kb_search", DENIED],
+  ]);
+  expect(JSON.stringify(world.bodies).includes(PROJECT_TEXT)).toBe(false);
   const steps = events.filter((event) => event.type === "step.start" || event.type === "step.end");
   expect(
     steps.map((event) =>
       event.type === "step.start" ? event.data.name : [event.data.status, event.data.output],
     ),
-  ).toEqual(["kb_search", ["done", PROJECT_TEXT], "kb_search", ["done", PROJECT_TEXT]]);
+  ).toEqual(["kb_search", ["failed", DENIED], "kb_search", ["failed", DENIED]]);
+  expect(JSON.stringify(events).includes(PROJECT_TEXT)).toBe(false);
   expect(events.filter((event) => event.type === "kb.hits")).toEqual([]);
   expectDone(events);
   expect(world.frames.filter(isHostCall)).toEqual([]);
@@ -541,17 +549,24 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
   );
 
   it(
-    "项目层同名工具 (#2011 current state): a workspace .omp/tools/kb_search makes omp refuse set_host_tools, so every prompt fails before any upstream request",
+    "项目层同名工具 (#2011): a workspace .omp/tools/kb_search makes omp refuse set_host_tools, so every prompt is a 409 kb_tool_conflict before any upstream request",
     CASE,
     async () => {
       const { world, fake, kbId, session } = await openKbWorld();
-      writeProjectTool(world, session, false);
+      writeProjectTool(world, session, true);
       const conflict = 'RPC host tool "kb_search" conflicts with an existing tool';
 
       for (const round of [1, 2]) {
         const response = await postPrompt(world, session, `WORKBUDDY_KB_SEARCH:${kbId} 工单超时`);
-        expect(response.statusCode, `prompt ${String(round)}`).toBe(502);
-        expect(response.json()).toMatchObject({ error: { code: "agent_unavailable" } });
+        expect(response.statusCode, `prompt ${String(round)}`).toBe(409);
+        expect(response.json()).toEqual({
+          error: {
+            code: "kb_tool_conflict",
+            message:
+              "工作空间里有同名的项目工具 kb_search（.omp/tools），与知识库检索冲突，改名或移除后再试",
+          },
+        });
+        expect(response.body.includes("conflicts with an existing tool")).toBe(false);
         // The refused generation is retired: each prompt spawns, registers and is refused anew.
         expect(world.frames.filter(isReady)).toHaveLength(round);
         expect(
@@ -560,12 +575,13 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
         expect(answered(world.frames).at(-1)).toBe("set_host_tools");
       }
       expect(world.bodies).toEqual([]);
+      expect(JSON.stringify(world.log).includes("conflicts with an existing tool")).toBe(false);
       expectNoRetrieval(world, fake);
     },
   );
 
   it(
-    "项目层同名工具, owner without a base (#2011 current state): no registration, the project kb_search runs on write without reaching the owner",
+    "项目层同名工具, owner without a base (#2011): no registration, the project kb_search card goes to the owner on write and, denied, its execute never runs",
     CASE,
     async () => {
       const { world, fake, kbId, session } = await openKbWorld();
@@ -574,13 +590,13 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
 
       await promptAppTurn(world, session, `WORKBUDDY_KB_SEARCH:${kbId} 工单超时`);
 
-      expectProjectToolBypass(world, session);
+      expectProjectToolDenied(world, session);
       expect(retrievals(fake)).toEqual([]);
     },
   );
 
   it(
-    "项目层同名工具, knowledge base off (#2011 current state): no registration, the project kb_search runs on write without reaching the owner",
+    "项目层同名工具, knowledge base off (#2011): no registration, the project kb_search card goes to the owner on write and, denied, its execute never runs",
     CASE,
     async () => {
       // No `kb` dependencies: the deployment has no RAGFlow, so sessions get no host tool port.
@@ -594,7 +610,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
 
       await promptAppTurn(world, session, "WORKBUDDY_KB_SEARCH:kb-off 工单超时");
 
-      expectProjectToolBypass(world, session);
+      expectProjectToolDenied(world, session);
     },
   );
 });

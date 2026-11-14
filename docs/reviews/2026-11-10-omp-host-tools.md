@@ -145,3 +145,16 @@ host tool 不随会话文件保存：每个新进程都要重新注册。
   原先标 [INFERENCE] 的「同标题即放行」由此实测成立。ADR-0012 的 Consequences 已接受项目层工具在 spawn 时执行、无审批、
   无步骤行、无审计；这里多出来的是：项目工具的 `execute()` 跳过了它自己的确认卡，输出以 `kb_search` 步骤和检索结果的身份出现，
   冒充宿主检索而所有者不知情。只有这一点算 ADR-0012 已接受残余的延伸，是否仍按已接受处理待所有者确认。
+
+**宿主处理的变化（2026-11-14，#2011，change `kb-search-approval-scope`；上面的实测事实不变）**：owner 裁定「收紧放行+可诊断错误」。
+
+- 这一代要注册：同一条 omp 应答，宿主改按 `error` 整体恰好相等判别，prompt 回 409 `kb_tool_conflict`
+  （`工作空间里有同名的项目工具 kb_search（.omp/tools），与知识库检索冲突，改名或移除后再试`），不再是 502；omp 的 `error` 原文不进响应、日志、审计与 SSE。
+  其余 `success:false` 照旧 502。每条 prompt 仍起新进程再试，不缓存冲突。
+- 这一代没有注册：传输层的放行多了一个前提——这一代进程上一次成功的 `set_host_tools` 应答把 `kb_search` 列在 `toolNames` 里。
+  知识库关闭与所有者没有库时这一条不成立，项目工具的卡在 `write` 档也作为审批交给所有者（`approval.request`，`tool:"kb_search"`）；
+  门控用例的装配自动拒绝，项目工具的 `execute` 没有运行，上游 tool 消息是 `Tool call denied by user: kb_search`，两个 `kb_search` 步骤以 `failed` 结束。
+- 三个同名用例已随之翻转，在 v18.12.3 上实测通过。
+- 残余：所有者批准之后，项目工具的输出仍以 `kb_search` 步骤与检索卡出现（`details.bases` 形状合法时还成为 `kb.hits`）；
+  [INFERENCE] 未实测：`set_host_tools` 成功之后 omp 若在同一进程里再加载同名项目工具，它的卡仍会被放行（本节用例都在 spawn 之前写文件）。
+  另一条 [INFERENCE] 未实测：项目工具的代码在 spawn 时于 omp 进程内执行（ADR-0012），能从 stdin 读到 `set_host_tools` 的 id 并抢先写出配对的成功应答，使 409 不出现、卡被放行；能力不超过 ADR-0012 已接受的范围，宿主无从防御。

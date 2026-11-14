@@ -75,9 +75,9 @@ describe("十二个知识库码", () => {
     },
   );
 
-  it("码表恰三十七码，十二码都在其中", () => {
+  it("码表恰三十八码，十二码都在其中", () => {
     const codes = Object.keys(HTTP_ERROR_MESSAGES);
-    expect(codes).toHaveLength(37);
+    expect(codes).toHaveLength(38);
     expect(codes).toEqual(expect.arrayContaining(KB_CODES.map(([code]) => code)));
   });
 
