@@ -4,10 +4,11 @@
  * lisi 是 `admin`，拥有 `W_LISI`，在这里就是「别的账号」。知识库行由 store 直接插入，不走建库：这里不关心建库的请求序列。
  *
  * 每个用例收尾沿用 `kb-settings-helpers.ts` 的不变量：版本请求之外都带交下来的密钥，版本请求不带，没有落到未知路由，账号缺省
- * 没被清空；stdout、stderr 全程不得出现文件内容与 RAGFlow message 的哨兵。期望值是 spec 与实测记录的字面量。
+ * 没被清空；stdout、stderr 与 `console` 全程不得出现文件内容与 RAGFlow message 的哨兵。期望值是 spec 与实测记录的字面量。
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { format } from "node:util";
 import type { LightMyRequestResponse } from "fastify";
 import { afterEach, beforeEach, expect, type MockInstance, vi } from "vitest";
 import type { KbDependencies } from "../src/kb/index.js";
@@ -122,12 +123,47 @@ export const scriptSecondUpload = (
 
 type OpenWorld = (setup?: IngestSetup) => Promise<IngestWorld>;
 
+/** 用例期间的输出收集器：`start()` 装 spy（透传，不吞输出），`stop()` 恢复全部 spy 并返回收集到的文本。 */
+export interface OutputCollector {
+  start(): void;
+  stop(): string;
+}
+
+const CONSOLE_METHODS = ["log", "info", "warn", "error", "debug"] as const;
+
+export function outputCollector(): OutputCollector {
+  let writes: Array<MockInstance<typeof process.stdout.write>> = [];
+  let consoles: Array<MockInstance<typeof console.log>> = [];
+  return {
+    start() {
+      writes = [vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
+      // vitest 截走 `console`，不经过上面两个 `write`（#2009）；spy 不给实现，照常透传给 vitest。
+      consoles = CONSOLE_METHODS.map((method) => vi.spyOn(console, method));
+    },
+    stop() {
+      const written = writes.flatMap((spy) => spy.mock.calls.map((args) => String(args[0])));
+      const logged = consoles.flatMap((spy) => spy.mock.calls.map((args) => format(...args)));
+      for (const spy of [...writes.splice(0), ...consoles.splice(0)]) spy.mockRestore();
+      return [...written, ...logged].join("");
+    },
+  };
+}
+
+/** 泄密判定：文本含任一哨兵就抛错，信息只点名哨兵，不回显文本。 */
+export function expectNoSentinel(text: string): void {
+  for (const sentinel of [CONTENT_SENTINEL, MESSAGE_SENTINEL]) {
+    if (text.includes(sentinel)) {
+      throw new Error(`泄密哨兵 ${sentinel} 出现在输出里`);
+    }
+  }
+}
+
 /** 在所在文件登记收尾，返回开世界函数。 */
 export function useIngestWorlds(): OpenWorld {
   const fakes: FakeRagflowServer[] = [];
-  let outputs: Array<MockInstance<typeof process.stdout.write>> = [];
+  const output = outputCollector();
   beforeEach(() => {
-    outputs = [vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
+    output.start();
   });
   afterEach(async () => {
     try {
@@ -145,11 +181,7 @@ export function useIngestWorlds(): OpenWorld {
       await closeApps();
       await disposeWorlds();
       for (const fake of fakes.splice(0)) await fake.close();
-      const written = outputs.flatMap((spy) => spy.mock.calls.map((args) => String(args[0])));
-      for (const spy of outputs) spy.mockRestore();
-      const text = written.join("");
-      expect(text).not.toContain(CONTENT_SENTINEL);
-      expect(text).not.toContain(MESSAGE_SENTINEL);
+      expectNoSentinel(output.stop());
     }
   });
 
