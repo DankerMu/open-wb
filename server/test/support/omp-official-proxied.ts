@@ -32,6 +32,10 @@
  * spawned child's stdin (frame id `probe-<n>`, never the runtime's `rt-<n>`; omp's reader drops a
  * response whose id it did not send) and its answer read from the stdout tee. A case calls it only
  * between turns and awaits it before the next prompt.
+ *
+ * Issue #2004 adds `regenerateAppTurn` (the regenerate route, waited on like `promptAppTurn`) and
+ * exposes the app's `sandboxRoot`, under which a case writes a session workspace's project files
+ * before the first prompt spawns the child.
  */
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -137,6 +141,8 @@ export interface ProxiedApp {
   probeState(): Promise<Record<string, unknown>>;
   /** Every upstream request body under `recordBodies`, in arrival order; `[]` without it. */
   bodies: unknown[];
+  /** The app's sandbox root: the owner's workspace roots are `<sandboxRoot>/u1/<dir>`. */
+  sandboxRoot: string;
 }
 
 interface Proxied {
@@ -352,6 +358,7 @@ export async function openProxiedApp(options: ProxiedWorldOptions = {}): Promise
     models: shared,
     probeState,
     bodies: proxied.bodies,
+    sandboxRoot: proxied.sandboxRoot,
   };
 }
 
@@ -408,36 +415,65 @@ function turnFrames(frames: readonly OmpFrame[]): OmpFrame[] {
 }
 
 /**
- * Prompts `session` and waits until its published `turn.end` count grows, or until a frame after the
- * prompt matches `stopAt` (the turn is then abandoned to the case's teardown). The frames are taken
- * from the ones that arrived after the prompt.
+ * Runs `post` (any status but `expected` throws `<route> answered <status>`), then waits for
+ * `session`'s next published `turn.end` or a frame matching `stopAt`.
  */
-export async function promptAppTurn(
+async function awaitAppTurn(
   world: ProxiedApp,
   session: string,
-  text: string,
+  what: { route: string; turn: string },
+  post: () => Promise<{ statusCode: number }>,
+  expected: number,
   stopAt?: (frame: OmpFrame) => boolean,
 ): Promise<AppTurn> {
   const ended = () => publishedOf(world, session).filter((e) => e.type === "turn.end").length;
   const before = ended();
   const from = world.frames.length;
   const startedAt = Date.now();
-  const response = await world.app.inject({
-    method: "POST",
-    url: `/api/sessions/${session}/prompt`,
-    headers: { "content-type": "application/json", cookie: world.cookie },
-    payload: JSON.stringify({ message: text }),
-  });
-  if (response.statusCode !== 202) {
-    throw new Error(`prompt answered ${String(response.statusCode)}`);
+  const response = await post();
+  if (response.statusCode !== expected) {
+    throw new Error(`${what.route} answered ${String(response.statusCode)}`);
   }
   await until(
     () => ended() > before || (stopAt !== undefined && world.frames.slice(from).some(stopAt)),
-    `the turn of ${text}`,
+    `the turn of ${what.turn}`,
   );
   const ms = Date.now() - startedAt;
   const frames = turnFrames(world.frames.slice(from));
   return { session, frames, events: publishedOf(world, session), ms };
+}
+
+/**
+ * Prompts `session` and waits until its published `turn.end` count grows, or until a frame after the
+ * prompt matches `stopAt` (the turn is then abandoned to the case's teardown). The frames are taken
+ * from the ones that arrived after the prompt.
+ */
+export function promptAppTurn(
+  world: ProxiedApp,
+  session: string,
+  text: string,
+  stopAt?: (frame: OmpFrame) => boolean,
+): Promise<AppTurn> {
+  const post = () =>
+    world.app.inject({
+      method: "POST",
+      url: `/api/sessions/${session}/prompt`,
+      headers: { "content-type": "application/json", cookie: world.cookie },
+      payload: JSON.stringify({ message: text }),
+    });
+  return awaitAppTurn(world, session, { route: "prompt", turn: text }, post, 202, stopAt);
+}
+
+/** `POST /api/sessions/:id/regenerate` (no body) and its turn, as `promptAppTurn` (#2004). */
+export function regenerateAppTurn(world: ProxiedApp, session: string): Promise<AppTurn> {
+  const post = () =>
+    world.app.inject({
+      method: "POST",
+      url: `/api/sessions/${session}/regenerate`,
+      headers: { cookie: world.cookie },
+    });
+  const what = { route: "regenerate", turn: "regenerate" };
+  return awaitAppTurn(world, session, what, post, 202);
 }
 
 /** `promptAppTurn` on a fresh session. */
