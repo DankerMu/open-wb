@@ -153,7 +153,7 @@ AGENTS.md 的 files-harness 文档镜像 SHALL 保持 server/ 的沙箱/审计/�
 - **THEN** `make test-guardrails` 的 CI contract oracle 对每一例非零；未变 fixture 仍通过；仓库里不存在 `kbservice/` 目录
 
 ### Requirement: 共享 Vitest 配置的 native ESM 边界
-server 与 web SHALL 通过逐字相同的完整相对 specifier `../vitest.shared.mjs` 消费唯一 tracked 根共享配置；该文件 SHALL 以 `.mjs` 自描述为 ESM，不依赖根 `package.json` 的 module type，不得保留 `.ts`/`.js` sibling、无扩展名 import、wrapper、fallback 或 warning suppression。共享配置 SHALL 继续使用 V8 coverage provider、include `src/**/*.{ts,tsx}`，且 lines/functions/branches/statements thresholds 各为 80；web SHALL 只在共享配置之上继续叠加 `environment: jsdom` 与 `e2e/**` exclusion。Makefile lint/fmt source list 与 `biome.json` 根级 include SHALL 指向同一 exact `.mjs` 文件并实际让 Biome 处理它；CI 的既有 Biome 命令、workspace test scripts、产品代码、依赖/lockfile及 Vite/Vitest versions SHALL 保持不变。
+server 与 web SHALL 通过逐字相同的完整相对 specifier `../vitest.shared.mjs` 消费唯一 tracked 根共享配置；该文件 SHALL 以 `.mjs` 自描述为 ESM，不依赖根 `package.json` 的 module type，不得保留 `.ts`/`.js` sibling、无扩展名 import、wrapper、fallback 或 warning suppression。共享配置 SHALL 继续使用 V8 coverage provider、include `src/**/*.{ts,tsx}`，且 lines/functions/branches/statements thresholds 各为 80；两个 workspace SHALL 只在共享配置之上叠加下列设置，且不改共享配置的 provider、include 与四项阈值：web 叠加 `resolve.alias`（`@` → `./src`）、`environment: jsdom`、`e2e/**` exclusion、`setupFiles`（「Web assertions await the committed outcome they check」）、拷入层的 `coverage.exclude`（ADR-0013）与 `testTimeout: 15000`（「web 单测的单例预算」）；server 只在 `WORKBUDDY_OMP_TEST=1` 时叠加 `maxWorkers`（「官方 omp 门控用例的 worker 上限」）。Makefile lint/fmt source list 与 `biome.json` 根级 include SHALL 指向同一 exact `.mjs` 文件并实际让 Biome 处理它；CI 的既有 Biome 命令、workspace test scripts、产品代码、依赖/lockfile及 Vite/Vitest versions SHALL 保持不变。
 
 #### Scenario: 默认 loader 保持完整验证命令面
 - **WHEN** 在 clean checkout 执行 `make check`
@@ -546,3 +546,16 @@ ui-walk SHALL 在 `npm run build --workspace server` 之后、omp 二进制缓�
 #### Scenario: 既有入库用例不变
 - **WHEN** 跑 `npm run test:focus --workspace server -- kb-`
 - **THEN** 全部既有用例通过，断言不改
+
+### Requirement: web 单测的单例预算
+`web/vitest.config.ts` SHALL 在 `test` 下设 `testTimeout: 15000`，注释写明来历：#2008 诊断出 CI web 分片相对本机慢 4–10 倍，最长单例在慢 runner 上越过 5 s 缺省，而不是挂起。
+不设 `retry`，不改 `hookTimeout`，不改 `vitest.shared.mjs` 与 server 配置。用例自己显式给的用例级 `timeout`（`web/test/scheduler-drain.test.tsx:92` 的 `{ timeout: 2000 }`）照常优先；RTL `waitFor` 的等待超时（如同文件 `:87`）本来就不受 `testTimeout` 影响。
+server 的 vitest 配置解析结果与改前相同。
+
+#### Scenario: web 配置带 15 s 预算，server 不变
+- **WHEN** 分别解析 web 与 server 的 vitest 配置
+- **THEN** web 的 `testTimeout` 为 15000；web 与 server 的 `hookTimeout` 都是 vitest 缺省 10000，`retry` 都未设或为 0；server 的 `testTimeout` 仍是 vitest 缺省 5000
+
+#### Scenario: 既有 web 用例不变
+- **WHEN** 跑 `npm test --workspace web`，以及 CI 的四个 `unit-tests-web` 分片
+- **THEN** 全部通过，四项覆盖率阈值不变，没有用例或断言被改
