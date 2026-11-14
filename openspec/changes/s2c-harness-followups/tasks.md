@@ -39,11 +39,11 @@ Must-preserve：
 - verification-harness「共享 Vitest 配置的 native ESM 边界」仍成立：specifier 逐字是 `../vitest.shared.mjs`；共享文件不改。
   native loader 场景（`npm exec --workspace @workbuddy/server -- vitest run --coverage --configLoader native`）要实际跑一次。
 
-- [ ] 1.1 改前：本机 `WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/var/omp/omp" npm run test:focus --workspace server -- omp-official-`（在仓库根执行；`var/omp/omp` 缺失先 `make omp-fetch`），记录失败文件数、用例数与 `handshake timeout` 计数（红）。
-- [ ] 1.2 实现 `server/vitest.config.ts`。
-- [ ] 1.3 改后：同一命令全绿（记录耗时与 `availableParallelism()`）；解析两次配置并记录结果：未设变量时没有 `maxWorkers`；`WORKBUDDY_OMP_TEST=1` 时 `maxWorkers` 等于 `min(3, n-1)`。
+- [x] 1.1 改前：本机 `WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/var/omp/omp" npm run test:focus --workspace server -- omp-official-`（在仓库根执行；`var/omp/omp` 缺失先 `make omp-fetch`），记录失败文件数、用例数与 `handshake timeout` 计数（红）。
+- [x] 1.2 实现 `server/vitest.config.ts`。
+- [x] 1.3 改后：同一命令全绿（记录耗时与 `availableParallelism()`）；解析两次配置并记录结果：未设变量时没有 `maxWorkers`；`WORKBUDDY_OMP_TEST=1` 时 `maxWorkers` 等于 `min(3, n-1)`。
   CI 侧的证据只能是「uid-isolation 绿 + n=4 时公式等于 3」：vitest 不打印 worker 数，`.github/**` 只读，不为取证改 CI。
-- [ ] 1.4 `npm test --workspace server`、native loader 命令、`make check` 通过。
+- [x] 1.4 `npm test --workspace server`、native loader 命令、`make check` 通过。
 
 ## 2. host tool 真实 omp 补测（#2004）
 
