@@ -655,7 +655,7 @@ Migration `036_chat_session_todo.sql` SHALL run inside the existing runner-owned
 3. **宿主工具**（change `s2c-kb-session`）。按 omp-runtime「`kb_search` 的注册」比较这一代进程所记的库清单与会话所有者当前的 `kb_search` 定义，需要时经 `runtime.command` 发 `set_host_tools`，应答合规才更新所记清单；不需要时不发任何帧。定义只读本地库表，不访问 RAGFlow。prompt 路径上这一步紧接在第 2 步之后；regenerate 路径上它同样紧接在第 2 步之后、`get_branch_messages` 之前，即先于 `branch` 与该路径的 SQLite 事务。
 4. 写出 `prompt` 帧（既有的派发回执规则不变）。
 
-第 1–3 步的任何失败（退役或准入失败、`command` 以 `AgentUnavailableError` 拒绝、`set_host_tools` 的应答不合规、进程在其间退出）SHALL 作为派发前失败处理：不写 `prompt` 帧，该 slot 被退役，prompt 路径以 `agent_unavailable` 拒绝使 REST 补偿受理对（`agent_capacity` 保持 503）；regenerate 路径上这三步都发生在 `branch` 与事务之前，所以属于「事务前失败」：502 `agent_unavailable`（准入满为 503 `agent_capacity`），不发 `branch`，不改任何行——被重新生成的旧助手消息及其步骤、审批保持原样，`omp_session_file` 不变，占用释放。regenerate 的事务提交之后只剩写 `prompt` 帧一步，其失败映射不变（新助手行记 `failed`）。第 2、3 步发生在该会话的回合认领已登记之后，其间到达的 prompt / regenerate / fork 照常得到 `session_busy`。
+第 1–3 步的任何失败（退役或准入失败、`command` 以 `AgentUnavailableError` 拒绝、`set_host_tools` 的应答不合规、进程在其间退出）SHALL 作为派发前失败处理：不写 `prompt` 帧，该 slot 被退役，prompt 路径以 `agent_unavailable` 拒绝使 REST 补偿受理对（`agent_capacity` 保持 503；第 3 步的注册冲突为 409 `kb_tool_conflict`，omp-runtime「`kb_search` 的注册」）；regenerate 路径上这三步都发生在 `branch` 与事务之前，所以属于「事务前失败」：502 `agent_unavailable`（准入满为 503 `agent_capacity`，注册冲突为 409 `kb_tool_conflict`），不发 `branch`，不改任何行——被重新生成的旧助手消息及其步骤、审批保持原样，`omp_session_file` 不变，占用释放。regenerate 的事务提交之后只剩写 `prompt` 帧一步，其失败映射不变（新助手行记 `failed`）。第 2、3 步发生在该会话的回合认领已登记之后，其间到达的 prompt / regenerate / fork 照常得到 `session_busy`。
 走到派发时该会话没有在途回合也没有被持有的控制占用（既有的 prompt 与 regenerate 前置），所以第 1 步的退役 SHALL NOT 打断任何回合或待决审批。会话设置的修改（`PATCH`）、会话能力的修改（`PUT /api/sessions/:id/capabilities`，skill-switches「会话能力端点」）、专家的修改与删除（`PUT` / `DELETE /api/experts`）以及连接器的写入、探活与账号缺省的修改（`POST` / `PUT` / `DELETE /api/connectors`、`POST /api/connectors/probe`、`PUT /api/connectors/defaults`，connectors「连接器管理端点」「连接器账号缺省」）SHALL NOT 触发本条的任何动作：supervisor 不被通知，存活进程与在途回合在下一次派发之前保持原状。
 fork 的临时进程 SHALL 以源会话的有效档位、有效模型与有效能力作为 spawn 参数，SHALL NOT 执行第 2、3 步（它不派发 prompt）；fork 对源会话存活进程的先行退役规则不变。空闲回收、崩溃恢复、驱逐后的再次获取都经同一条派发路径，因而同样按当时的有效值启动并重新应用模型与强度。
 
@@ -734,6 +734,10 @@ fork 的临时进程 SHALL 以源会话的有效档位、有效模型与有效�
 #### Scenario: 宿主工具对齐失败时 regenerate 不动分支
 - **WHEN** 假 omp 以 `host-tool-register-fail` 场景运行；知识库开启而所有者还没有库时，会话完成一个回合（这一代没有定义，不发 `set_host_tools`）；之后所有者新建一个库，对这个回合调用 regenerate，假 omp 对 `set_host_tools` 回 `success:false`
 - **THEN** regenerate 返回 502 `agent_unavailable`，入站帧里没有 `get_branch_messages` 与 `branch`，被重新生成的旧助手消息及其步骤不变，该 slot 被退役
+
+#### Scenario: 注册冲突时 regenerate 不动分支
+- **WHEN** 假 omp 以 `host-tool-register-conflict` 场景运行；知识库开启而所有者还没有库时，会话完成一个回合；之后所有者新建一个库，对这个回合调用 regenerate
+- **THEN** regenerate 返回 409 `kb_tool_conflict`，入站帧里没有 `get_branch_messages` 与 `branch`，被重新生成的旧助手消息及其步骤不变，该 slot 被退役
 
 ### Requirement: 迁移 045 分段位置与确认关联
 迁移 `045_chat_interleaved_segments.sql` SHALL 在既有 runner 持有的事务内执行，回执紧随 `044` 之后追加，只做以下三件事，不重建既有表、不回填：
