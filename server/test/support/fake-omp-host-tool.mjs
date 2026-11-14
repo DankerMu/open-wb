@@ -3,7 +3,8 @@
  * 帧形照 docs/reviews/2026-11-10-omp-host-tools.md §2.3、§2.4、§2.6、§2.7（v18.12.3 实测）。`yolo` 帧序：
  * `host_tool_call` 先于 `tool_execution_start`。3.5（#1965）：只有 `host-tool` 在 `write` / `always-ask` 下
  * 先发 `tool_execution_start` 与 `Allow tool: kb_search` 的 select，收到 `Approve` 才发 `host_tool_call`；
- * 其它应答（`Deny`、`cancelled`）以拒绝结束这次调用——记录 §2.4 未实测 Deny，这是假 omp 的选择。
+ * 其它应答（`Deny`、`cancelled`）以拒绝结束这次调用。`Deny` 的帧序与真实 omp v18.12.3 一致（记录 §2.4，
+ * 2026-11-14 实测），真实 omp 的 `result` 另带 `details:{}`；`cancelled` 未实测，仍是假 omp 的选择。
  * `host-tool-parallel`、`host-tool-abort` 不论档位都按 `yolo`。
  * 其余场景对 `set_host_tools` 回按 id 关联的 `success:false`：`host-tool-register-fail`（4.2，#1966；不进 SCENARIOS，
  * 不接管 prompt）的 `error` 为 `host tools rejected`，别的为 `unsupported`。没有 import、不发 ready、不读 argv（档位由主程序传入）：

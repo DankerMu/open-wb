@@ -61,10 +61,10 @@ Must-preserve：
   若 v18.12.3 根本不加载项目层工具，或需要的东西超出本组可改范围，就把实测到的事实写进记录与断言（例如「上游 `tools` 恰一个 `kb_search`，调用落到宿主」），不扩大范围。
 - 实测与宿主的生产处理冲突时，按全 change 的 Boundary 停下。
 
-- [ ] 2.1 核对 Context：`server/src/sessions/host-tool-align.ts`、`branching.ts`、`branch-temp.ts`、`omp/ui-requests.ts`、`omp/process.ts`（审批放行）、记录 §2.1/§2.4/§2.8。
-- [ ] 2.2 写五个场景的门控用例（omp-runtime delta）；跑 `WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/var/omp/omp" npm run test:focus --workspace server -- omp-official-host-tools`，记录每个场景的实测帧与上游请求。
-- [ ] 2.3 依实测补记录 §2.1、§2.4、新 §2.9、§2.10，改 knowledge-base.md 那一句；Deny 帧序与假 omp 不一致时改 `fake-omp-host-tool.mjs` 并跑 `npm run test:focus --workspace server -- host-tool`。
-- [ ] 2.4 全部官方门控用例（组 1 合入后的默认命令）、`npm test --workspace server`、`make check` 通过。
+- [x] 2.1 核对 Context：`server/src/sessions/host-tool-align.ts`、`branching.ts`、`branch-temp.ts`、`omp/ui-requests.ts`、`omp/process.ts`（审批放行）、记录 §2.1/§2.4/§2.8。
+- [x] 2.2 写五个场景的门控用例（omp-runtime delta）；跑 `WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/var/omp/omp" npm run test:focus --workspace server -- omp-official-host-tools`，记录每个场景的实测帧与上游请求。
+- [x] 2.3 依实测补记录 §2.1、§2.4、新 §2.9、§2.10，改 knowledge-base.md 那一句；Deny 帧序与假 omp 不一致时改 `fake-omp-host-tool.mjs` 并跑 `npm run test:focus --workspace server -- host-tool`。
+- [x] 2.4 全部官方门控用例（组 1 合入后的默认命令）、`npm test --workspace server`、`make check` 通过。
 
 ## 3. 测试支架两处（#2009）
 
