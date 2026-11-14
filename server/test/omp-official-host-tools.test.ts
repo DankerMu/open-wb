@@ -18,6 +18,9 @@
  * in the session's workspace. Their literals are the ones measured on v18.12.3 and recorded in
  * docs/reviews/2026-11-10-omp-host-tools.md §2.1, §2.4, §2.9 and §2.10.
  *
+ * The three same-name cases (bases, no base, knowledge base off) pin the current state of #2011: when
+ * #2011 is fixed their expectations must be flipped to the fixed behaviour, not kept green.
+ *
  * Run locally (`OMP_BIN` absolute):
  *   WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/../var/omp/omp" \
  *     npx vitest run test/omp-official-host-tools.test.ts --coverage=false
@@ -170,6 +173,51 @@ function expectOneGeneration(world: ProxiedApp): void {
 function expectNoRetrieval(world: ProxiedApp, fake: FakeRagflowServer): void {
   expect(world.frames.filter(isHostCall)).toEqual([]);
   expect(retrievals(fake)).toEqual([]);
+  expect(world.faults).toEqual([]);
+}
+
+/** Every upstream tool except kb_search, in omp v18.12.3's order (record §2.1). */
+const BUILT_IN_TOOLS = [
+  "read",
+  "bash",
+  "edit",
+  "eval",
+  "glob",
+  "grep",
+  "task",
+  "wait",
+  "todo",
+  "web_search",
+  "write",
+];
+
+/**
+ * #2011 (current state): this generation registered no host tool, the project kb_search is offered
+ * once, its `Allow tool: kb_search` card is answered by the transport on `write` (no approval.request)
+ * and its `execute` ran: the model sees its text as kb_search's result, the page a kb_search step.
+ */
+function expectProjectToolBypass(world: ProxiedApp, session: string): void {
+  expect(world.frames.filter(isRegistered)).toEqual([]);
+  expect(world.bodies.map(kbToolCount)).toEqual([1, 1, 1]);
+  expect(world.frames.filter(isSelect).map((frame) => frame.title)).toEqual([
+    "Allow tool: kb_search",
+    "Allow tool: kb_search",
+  ]);
+  const events = publishedOf(world, session);
+  expect(events.filter((event) => event.type === "approval.request")).toEqual([]);
+  expect(world.denied).toEqual([]);
+  expect(toolMessages(world.bodies[1]).map(({ name, text }) => [name, text])).toEqual([
+    ["kb_search", PROJECT_TEXT],
+  ]);
+  const steps = events.filter((event) => event.type === "step.start" || event.type === "step.end");
+  expect(
+    steps.map((event) =>
+      event.type === "step.start" ? event.data.name : [event.data.status, event.data.output],
+    ),
+  ).toEqual(["kb_search", ["done", PROJECT_TEXT], "kb_search", ["done", PROJECT_TEXT]]);
+  expect(events.filter((event) => event.type === "kb.hits")).toEqual([]);
+  expectDone(events);
+  expect(world.frames.filter(isHostCall)).toEqual([]);
   expect(world.faults).toEqual([]);
 }
 
@@ -342,6 +390,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
       const events = publishedOf(world, session).slice(eventsFrom);
       expect(kbStepEvents(events).map((event) => event.type)).toEqual(TWO_KB_STEPS);
       expectDone(events);
+      expect(world.frames.slice(framesFrom).filter(isHostCall)).toHaveLength(2);
       expect(retrievals(fake).slice(2)).toEqual(["工单超时", "工单超时 详细说明"]);
       expectOneGeneration(world);
     },
@@ -414,7 +463,13 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
       expect(registered.map((frame) => [frame.success, frame.data])).toEqual([
         [true, { toolNames: [] }],
       ]);
-      expect(world.bodies.slice(bodiesFrom).map(kbToolCount)).toEqual([0]);
+      const later = world.bodies.slice(bodiesFrom);
+      expect(later.map(toolNames)).toEqual([BUILT_IN_TOOLS]);
+      // The history still replays the first turn's two kb_search calls and their tool messages.
+      expect(toolMessages(later[0]).map(({ name, text }) => [name, text])).toEqual([
+        ["kb_search", hitText(kbId)],
+        ["kb_search", hitText(kbId)],
+      ]);
       const events = publishedOf(world, session).slice(eventsFrom);
       expect(events.filter(isKbStart)).toEqual([]);
       expectDone(events);
@@ -438,6 +493,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
           frame.type === "tool_execution_start" ||
           frame.type === "tool_execution_end" ||
           isHostCall(frame) ||
+          frame.type === "host_tool_cancel" ||
           isSelect(frame),
       );
       expect(calls.map((frame) => frame.type)).toEqual([
@@ -449,11 +505,8 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
         "tool_execution_end",
       ]);
       for (const ended of calls.filter((frame) => frame.type === "tool_execution_end")) {
-        expect(ended).toMatchObject({
-          toolName: "kb_search",
-          result: { content: [{ type: "text", text: DENIED }], details: {} },
-          isError: true,
-        });
+        expect(ended).toMatchObject({ toolName: "kb_search", isError: true });
+        expect(ended.result).toEqual({ content: [{ type: "text", text: DENIED }], details: {} });
       }
       const events = publishedOf(world, session);
       const approvals = events.filter((event) => event.type === "approval.request");
@@ -462,6 +515,10 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
         ["kb_search", "Allow tool: kb_search"],
       ]);
       expect(world.denied).toHaveLength(2);
+      const resolved = events.filter((event) => event.type === "approval.resolved");
+      expect(resolved.map((event) => [event.data.approvalId, event.data.decision])).toEqual(
+        approvals.map((event) => [event.data.approvalId, "deny"]),
+      );
       const steps = kbStepEvents(events);
       expect(
         steps.map((event) => [event.type, event.type === "step.end" ? event.data : null]),
@@ -484,7 +541,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
   );
 
   it(
-    "项目层同名工具: a workspace .omp/tools/kb_search makes omp refuse set_host_tools, so every prompt fails before any upstream request",
+    "项目层同名工具 (#2011 current state): a workspace .omp/tools/kb_search makes omp refuse set_host_tools, so every prompt fails before any upstream request",
     CASE,
     async () => {
       const { world, fake, kbId, session } = await openKbWorld();
@@ -508,7 +565,7 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
   );
 
   it(
-    "项目层同名工具, owner without a base: no registration, the project kb_search runs on write without reaching the owner",
+    "项目层同名工具, owner without a base (#2011 current state): no registration, the project kb_search runs on write without reaching the owner",
     CASE,
     async () => {
       const { world, fake, kbId, session } = await openKbWorld();
@@ -517,26 +574,27 @@ describe.skipIf(OMP_TEST_OFF)(`official omp v${OMP_VERSION}: the kb_search host 
 
       await promptAppTurn(world, session, `WORKBUDDY_KB_SEARCH:${kbId} 工单超时`);
 
-      expect(world.frames.filter(isRegistered)).toEqual([]);
-      expect(world.bodies.map(kbToolCount)).toEqual([1, 1, 1]);
-      expect(world.frames.filter(isSelect).map((frame) => frame.title)).toEqual([
-        "Allow tool: kb_search",
-        "Allow tool: kb_search",
-      ]);
-      const events = publishedOf(world, session);
-      expect(events.filter((event) => event.type === "approval.request")).toEqual([]);
-      expect(world.denied).toEqual([]);
-      expect(toolMessages(world.bodies[1]).map(({ name, text }) => [name, text])).toEqual([
-        ["kb_search", PROJECT_TEXT],
-      ]);
-      const ends = events.filter((event) => event.type === "step.end");
-      expect(ends.map((event) => [event.data.status, event.data.output])).toEqual([
-        ["done", PROJECT_TEXT],
-        ["done", PROJECT_TEXT],
-      ]);
-      expect(events.filter((event) => event.type === "kb.hits")).toEqual([]);
-      expectDone(events);
-      expectNoRetrieval(world, fake);
+      expectProjectToolBypass(world, session);
+      expect(retrievals(fake)).toEqual([]);
+    },
+  );
+
+  it(
+    "项目层同名工具, knowledge base off (#2011 current state): no registration, the project kb_search runs on write without reaching the owner",
+    CASE,
+    async () => {
+      // No `kb` dependencies: the deployment has no RAGFlow, so sessions get no host tool port.
+      const world = await openProxiedApp({
+        registry: { apiKey: UPSTREAM_KEY },
+        recordBodies: true,
+      });
+      const session = await openAppSession(world);
+      await patch(world, session, { approvalMode: "write" });
+      writeProjectTool(world, session, true);
+
+      await promptAppTurn(world, session, "WORKBUDDY_KB_SEARCH:kb-off 工单超时");
+
+      expectProjectToolBypass(world, session);
     },
   );
 });

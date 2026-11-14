@@ -16,7 +16,8 @@ change `s2c-kb-session` 的 omp 事实只以本文件为准。本地参考克隆
 - 2026-11-14（#2004）补测 §2.1 撤下、§2.4 Deny、§2.9、§2.10：不用探针，用门控用例 `server/test/omp-official-host-tools.test.ts`
   （`WORKBUDDY_OMP_TEST=1`，同一官方 v18.12.3 二进制）。服务端是应用装配（`openProxiedApp`：createApp → SessionSupervisor，
   真实模型代理与模型注册表），上游是受控假上游的知识库检索标记（同样由脚本发起工具调用），RAGFlow 是假 RAGFlow；
-  regenerate、fork、删库都走应用的 REST。下面这几节的结论就是这些用例断言的值。
+  regenerate、fork、删库都走应用的 REST。下面这几节的结论就是这些用例断言的值；§2.10 里标明为探针的几项除外，
+  帧里的 `id` 等随运行变化的值取自一次运行。
 
 ## 2. 结论
 
@@ -111,16 +112,17 @@ host tool 不随会话文件保存：每个新进程都要重新注册。
 
 - regenerate：宿主在会话自己的进程上发 `get_branch_messages` → `branch` → `get_state` → `prompt`，中间没有 `set_model`、
   没有 `set_host_tools`（这一代记下的库清单没变）。`branch` 之后的新回合，每个上游请求的 `tools` 里恰有一个 `kb_search`，
-  两次调用都落到宿主（`host_tool_call`），SSE 有两组 `step.start` / `kb.hits` / `step.end`，假 RAGFlow 收到两次检索。
+  两次调用都落到宿主（两帧 `host_tool_call`），SSE 有两组 `step.start` / `kb.hits` / `step.end`，假 RAGFlow 收到两次检索。
   整个用例只有一个 `ready`、一帧 `set_host_tools` 应答：**omp 的 `branch` 不丢 host tool**，同一进程不必重新注册。
-- fork：源会话的进程先退役；临时进程（`ready` → `negotiate_protocol` → `get_state` → `get_branch_messages` → `branch` → `get_state`）
-  不发 `set_host_tools`。fork 提交之后，fork 出的会话第一条 prompt 起新一代进程（一个 `ready`），这一代恰注册一次，
+- fork：临时进程（`ready` → `negotiate_protocol` → `get_state` → `get_branch_messages` → `branch` → `get_state`）
+  不发 `set_host_tools`（源会话的进程何时退役用例没有断言）。fork 提交之后，fork 出的会话第一条 prompt 起新一代进程（一个 `ready`），这一代恰注册一次，
   应答 `toolNames:["kb_search"]`；上游 `tools` 里恰有一个 `kb_search`，SSE 有两条 `kb.hits`，没有审批（`write` 档）。
 
-### 2.10 项目层同名工具 `.omp/tools/kb_search`（2026-11-14）
+### 2.10 项目层同名工具 `.omp/tools/kb_search`（2026-11-14，#2011）
 
-下面「所有者有库」「所有者没有库」两条由门控用例断言；「最小形式」里 `.md`、不带 `loadMode` 的可见性与 `kb_probe` 对照三项
-是同一天用同一装配跑的一次性探针，原始帧只留在本机，没有进用例。
+下面「这一代要注册」「这一代没有注册」两条由门控用例断言（三个同名用例：有库、无库、知识库关闭）。这三个用例钉的是 #2011 的现状，
+#2011 修复时要随之翻转。「最小形式」里 `.md`、不带 `loadMode` 的可见性与 `kb_probe` 对照三项是同一天用同一装配跑的一次性探针，
+原始帧只留在本机，没有进用例。
 
 - omp 能加载的最小形式：会话工作空间（进程 cwd）下的 `.omp/tools/kb_search.js`，默认导出一个工厂，返回带
   `name`、`description`、`parameters`（普通 JSON Schema 即可）与 `execute` 的对象（参考克隆 `loader.ts` 的 `isLoadableCustomTool`）。
@@ -129,14 +131,17 @@ host tool 不随会话文件保存：每个新进程都要重新注册。
     带 `loadMode:"essential"` 才进 `tools`。
   - 对照探针：工作空间里只放另一个名字的工具（`.omp/tools/kb_probe.js`，`essential`）时，`kb_probe` 出现在 `tools` 里，
     `kb_search` 照常注册、调用落到宿主——项目层工具确实从会话 cwd 加载，冲突只因同名。
-- 所有者有库（宿主照常注册）：omp 拒绝注册，
+- 这一代进程要注册 host tool（所有者有库，宿主照常注册）：omp 拒绝注册，
   `{"type":"response","command":"set_host_tools","success":false,"error":"RPC host tool \"kb_search\" conflicts with an existing tool"}`。
   不带 `loadMode` 的最小形式就会这样（带 `essential` 的探针结果相同）。宿主按 §2.1 的契约处理：这一步失败，slot 退役，
   prompt 回 502 `agent_unavailable`；没有任何上游请求、没有 `host_tool_call`、没有检索，上游 `tools` 里 `kb_search` 的项数与调用落点都无从谈起。
   用例连发两条 prompt：每条都起新进程（第二个 `ready`）、重新注册、再次被拒、再次 502。只要工作空间里有这个文件，
-  所有者有库时该工作空间里的 prompt 就都失败。
-- 所有者没有库（宿主一帧 `set_host_tools` 都不发）：`essential` 的项目工具出现在 `tools` 里（恰一个 `kb_search`）。
-  omp 为它发标题恰为 `Allow tool: kb_search` 的 `select`，`write` 档下传输层立即答 `Approve`：没有 `approval.request`，
-  所有者看不到；项目工具的 `execute` 运行，上游 tool 消息是它返回的文本，没有 `host_tool_call`、没有检索。
-  原先标 [INFERENCE] 的「同标题即放行」由此实测成立：同名项目工具在 `write` 档下绕过了所有者审批。它属于 ADR-0012 已接受残余
-  （项目层 `.omp/tools` 不拦）的延伸，是否仍按已接受处理待所有者确认。
+  所有者有库时该工作空间里的 prompt 就都失败。这是可用性问题，不属于 ADR-0012 的残余。
+- 这一代进程没有注册 host tool（知识库关闭的部署，或所有者没有库；宿主一帧 `set_host_tools` 都不发）：两种情形实测相同。
+  `essential` 的项目工具出现在 `tools` 里（恰一个 `kb_search`）。omp 为它发标题恰为 `Allow tool: kb_search` 的 `select`，
+  传输层放行只看标题、不看这一代是否注册过（`server/src/sessions/omp/process.ts:603`），`write` 档下立即答 `Approve`：
+  没有 `approval.request`，所有者看不到；项目工具的 `execute` 运行，上游 tool 消息是它返回的文本，页面上是两行 `status:"done"`、
+  输出为该文本的 `kb_search` 步骤，没有 `kb.hits`、没有 `host_tool_call`、没有检索。知识库关闭的部署里这对每个账号都成立。
+  原先标 [INFERENCE] 的「同标题即放行」由此实测成立。ADR-0012 的 Consequences 已接受项目层工具在 spawn 时执行、无审批、
+  无步骤行、无审计；这里多出来的是：项目工具的 `execute()` 跳过了它自己的确认卡，输出以 `kb_search` 步骤和检索结果的身份出现，
+  冒充宿主检索而所有者不知情。只有这一点算 ADR-0012 已接受残余的延伸，是否仍按已接受处理待所有者确认。
