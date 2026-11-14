@@ -22,7 +22,7 @@ Boundary：只改 `web/vitest.config.ts`；其余只读。
 
 Must-preserve：
 - 不加 `retry`，不改 `hookTimeout`。
-- 用例级 `timeout`（web 唯一一处：`web/test/scheduler-drain.test.tsx:92` 的 `{ timeout: 2000 }`）照常生效；`:87` 是 RTL `waitFor` 的等待选项，不受 `testTimeout` 影响。
+- 用例级 `timeout` 照常优先：`web/test/scheduler-drain.test.tsx:92`（2000）、`md-render.test.ts:408`（15000）、`:416`（60000）、`preview.test.tsx:274`（30000）；`:87` 是 RTL `waitFor` 的等待选项，不受 `testTimeout` 影响。
 - verification-harness「共享 Vitest 配置的 native ESM 边界」随本 change 改写为如实列出各 workspace 的叠加项（MODIFIED），共享配置本身不动。
 - 覆盖率 include/exclude 与阈值不变。
 
