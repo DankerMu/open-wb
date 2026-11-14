@@ -76,8 +76,8 @@ Must-preserve：
 - 新用例不能放进 `useIngestWorlds` 的文件里直接写哨兵：`afterEach` 会对整段收集文本断言不含哨兵（`kb-ingest-helpers.ts:148-152`），判定按预期抛错之后收尾照样失败。做法：把收集器提成导出的工厂（`start()` 装 spy、`stop()` 恢复并返回收集到的文本），`useIngestWorlds` 用它；新用例放在不用 `useIngestWorlds` 的新文件里，自己起一个收集器，写哨兵后 `stop()`，再断言判定对这段文本抛错且信息点名哨兵。
 - 红绿顺序：先提出收集器与判定，保持只 spy 两个 `write` 的旧行为，新用例在这一步红，红的原因必须是「期望抛错但没抛」（不是 import 失败）；再把 console 纳入收集，变绿。
 
-- [ ] 3.1 提出收集器工厂与判定函数（行为不变，只 spy 两个 `write`），写新用例：经 `console.log` 写哨兵后 `stop()`，断言判定抛错；记录红（原因是没抛）。
-- [ ] 3.2 收集器纳入 `console` 五个方法；新用例变绿；修正 `closed` 注释（现有两处 `closed` 断言注入的都是 `hold`——`kb-session-search.test.ts:381`、`kb-retrieval-abort.test.ts:62`——只改注释）。
-- [ ] 3.3 `npm run test:focus --workspace server -- kb-`、`npm test --workspace server`、`make check` 通过。
+- [x] 3.1 提出收集器工厂与判定函数（行为不变，只 spy 两个 `write`），写新用例：经 `console.log` 写哨兵后 `stop()`，断言判定抛错；记录红（原因是没抛）。
+- [x] 3.2 收集器纳入 `console` 五个方法；新用例变绿；修正 `closed` 注释（现有两处 `closed` 断言注入的都是 `hold`——`kb-session-search.test.ts:381`、`kb-retrieval-abort.test.ts:62`——只改注释）。
+- [x] 3.3 `npm run test:focus --workspace server -- kb-`、`npm test --workspace server`、`make check` 通过。
 
 Suggested fixture level: compact - 三组都只动测试与记录，无产品代码。
