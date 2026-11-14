@@ -595,12 +595,14 @@ export class OmpProcess {
       return;
     }
     this.#pending.delete(frame.id);
+    if (pending.command === "set_host_tools") this.#hostTools.onRegistration(frame);
     pending.resolve(frame);
   }
 
-  /** Approval → owner; prelude (D3), kb_search unless always-ask (D4) → `Approve`; else cancel. */
+  /** Approval → owner; prelude, registered kb_search unless always-ask (#2011) → Approve; else cancel. */
   #onUiRequest(frame: OmpFrame, id: string): void {
-    const kb = this.#opts.approvalMode !== "always-ask" && isKbSearchApproval(frame);
+    const registered = this.#hostTools.kbSearchRegistered;
+    const kb = registered && this.#opts.approvalMode !== "always-ask" && isKbSearchApproval(frame);
     const approval = kb ? undefined : approvalRequest(frame, id);
     if (approval !== undefined) {
       this.#approvals.add(id);

@@ -9,8 +9,10 @@
  * `app.ts` (sessions does not import kb); the structural type is written here.
  */
 import { isDeepStrictEqual } from "node:util";
+import { HttpError } from "../core/errors/index.js";
 import type { HostToolResult } from "./omp/host-tools.js";
 import { AgentUnavailableError } from "./omp/process.js";
+import { CommandRefusedError } from "./omp/runtime.js";
 import { commandOn, KB_SEARCH, type Slot } from "./pool.js";
 import type { KnowledgeBaseResolver } from "./store-knowledge-bases.js";
 
@@ -53,12 +55,31 @@ const sameBases = (recorded: Bases, bases: Bases): boolean =>
   recorded.every((base, index) => base.id === bases[index]?.id && base.name === bases[index]?.name);
 
 /**
+ * omp v18.12.3's refusal when the workspace has a project-level tool of the same name (record §2.10).
+ * Matched exactly: another text — an upgraded omp's included — stays the 502 (#2011 D2).
+ */
+const KB_TOOL_CONFLICT = `RPC host tool "${KB_SEARCH}" conflicts with an existing tool`;
+
+/** The one `set_host_tools` command: omp's conflict refusal → 409 `kb_tool_conflict`, else as is. */
+async function setHostTools(slot: Slot, tools: readonly object[]): Promise<unknown> {
+  try {
+    return await commandOn(slot, { type: "set_host_tools", tools });
+  } catch (error) {
+    if (error instanceof CommandRefusedError && error.refusedWith(KB_TOOL_CONFLICT)) {
+      throw new HttpError("kb_tool_conflict");
+    }
+    throw error;
+  }
+}
+
+/**
  * One `set_host_tools` on the slot; the answer must name exactly the tools sent, else the step fails
- * as `AgentUnavailableError` (a `success:false` already is, by `runtime.command`). The bases are
- * recorded only then, on the generation the command ran on, like `alignModel`'s applied values.
+ * as `AgentUnavailableError` (a `success:false` already is, by `runtime.command`, except omp's
+ * conflict refusal: `kb_tool_conflict`). The bases are recorded only then, on the generation the
+ * command ran on, like `alignModel`'s applied values.
  */
 async function register(slot: Slot, tools: readonly object[], bases: Bases): Promise<void> {
-  const data = await commandOn(slot, { type: "set_host_tools", tools });
+  const data = await setHostTools(slot, tools);
   const expected = tools.length === 0 ? [] : [KB_SEARCH];
   if (!isDeepStrictEqual((data as { toolNames?: unknown } | undefined)?.toolNames, expected)) {
     throw new AgentUnavailableError("set_host_tools answered other tool names");

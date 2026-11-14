@@ -40,6 +40,7 @@ const HTTP_ERROR_STATUSES = Object.freeze({
   kb_chat_model_locked: 409,
   kb_document_busy: 409,
   kb_file_unsupported: 400,
+  kb_tool_conflict: 409,
 } as const satisfies Record<HttpErrorCode, number>);
 
 export function sendHttpError(reply: FastifyReply, code: HttpErrorCode): FastifyReply {

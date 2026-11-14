@@ -42,30 +42,30 @@ Must-preserve：
 
 ## 1. 放行前提（D1）
 
-- [ ] 1.1 核对 Context：`omp/process.ts:595-620`（`#onUiRequest`）、`#request` / `request`（:242、:340）、`omp/ui-requests.ts`、`omp/host-tools.ts`、
+- [x] 1.1 核对 Context：`omp/process.ts:595-620`（`#onUiRequest`）、`#request` / `request`（:242、:340）、`omp/ui-requests.ts`、`omp/host-tools.ts`、
   `host-tool-align.ts:55-88`、tool-approval「审批请求识别」既有 `kb_search` 三个场景所在的测试文件。
-- [ ] 1.2 测试先行（红）：OmpProcess 层，`write` 档，同形 select 在三态下的去向——从未成功注册（交给 owner）、以 `["kb_search"]` 注册后（立即 `Approve`）、
+- [x] 1.2 测试先行（红）：OmpProcess 层，`write` 档，同形 select 在三态下的去向——从未成功注册（交给 owner）、以 `["kb_search"]` 注册后（立即 `Approve`）、
   撤下 `[]` 后（交给 owner）、`success:false` 不改状态、撤下后再注册恢复放行。既有「`kb_search` 在 write 档由传输层放行」用例按 delta 先注册再发卡。
-- [ ] 1.3 实现：注册状态由进程观察自己的 `set_host_tools` 成功应答更新；放行判定加「已注册」。`process.ts` 只接线（≤ 790 行）。
-- [ ] 1.2b 同一层再加一例：id 对不上任何宿主请求的 `response{command:"set_host_tools",success:true,data:{toolNames:["kb_search"]}}` 不改状态，随后的同形卡交给 owner。
-- [ ] 1.4 slot 层（假 omp）：知识库关闭的会话、所有者没有库的会话在 `write` 档下，假 omp 发 `Allow tool: kb_search` 时 SSE 有 `approval.request`（`tool:"kb_search"`）。
+- [x] 1.3 实现：注册状态由进程观察自己的 `set_host_tools` 成功应答更新；放行判定加「已注册」。`process.ts` 只接线（≤ 790 行）。
+- [x] 1.2b 同一层再加一例：id 对不上任何宿主请求的 `response{command:"set_host_tools",success:true,data:{toolNames:["kb_search"]}}` 不改状态，随后的同形卡交给 owner。
+- [x] 1.4 slot 层（假 omp）：知识库关闭的会话、所有者没有库的会话在 `write` 档下，假 omp 发 `Allow tool: kb_search` 时 SSE 有 `approval.request`（`tool:"kb_search"`）。
 
 ## 2. 冲突分类与错误码（D2、D3）
 
-- [ ] 2.1 `kb_tool_conflict`：`core/errors/index.ts` 文案、`http/errors.ts` 409；码数守卫（见 Boundary）三十七 → 三十八，`http-typed-errors` 新场景（红→绿）；`docs/architecture/system.md:31` 码数。
-- [ ] 2.2 测试先行（红）：假 omp 新场景 `host-tool-register-conflict`（`error` 为冲突原文）→ prompt 409 `kb_tool_conflict`、body 恰为信封；
+- [x] 2.1 `kb_tool_conflict`：`core/errors/index.ts` 文案、`http/errors.ts` 409；码数守卫（见 Boundary）三十七 → 三十八，`http-typed-errors` 新场景（红→绿）；`docs/architecture/system.md:31` 码数。
+- [x] 2.2 测试先行（红）：假 omp 新场景 `host-tool-register-conflict`（`error` 为冲突原文）→ prompt 409 `kb_tool_conflict`、body 恰为信封；
   对照（`WORKBUDDY_FAKE_CONFLICT_PREFIX=x`，`error` 带前缀）与 `host-tool-register-fail` 仍 502；三者都补偿受理、入站帧无 `prompt`、slot 退役；
   响应、日志行（`world.log` 或等价）、`onError` 收到的错误所产生的输出、审计行与 SSE 都不含 `conflicts with an existing tool`。
   regenerate 路径（chat-sessions delta 场景）：409，没有 `get_branch_messages` / `branch`，旧消息不变。假 omp 场景本身按 omp-test-harness delta 加单测。
-- [ ] 2.3 实现：`runtime.#runCommand` 抛出的错误带上应答 `error`（不进 `message`）；`host-tool-align.ts` 的 `register` 恰好相等时抛 `HttpError("kb_tool_conflict")`。
+- [x] 2.3 实现：`runtime.#runCommand` 抛出的错误带上应答 `error`（不进 `message`）；`host-tool-align.ts` 的 `register` 恰好相等时抛 `HttpError("kb_tool_conflict")`。
 
 ## 3. 真实 omp 与文档
 
-- [ ] 3.1 翻转 `server/test/omp-official-host-tools.test.ts` 的三个同名用例（标题里的 `#2011 current state` 换成新行为）：有库 → 两条 prompt 都 409 `kb_tool_conflict`；
+- [x] 3.1 翻转 `server/test/omp-official-host-tools.test.ts` 的三个同名用例（标题里的 `#2011 current state` 换成新行为）：有库 → 两条 prompt 都 409 `kb_tool_conflict`；
   没有库、知识库关闭 → `approval.request{tool:"kb_search"}`、自动拒绝后项目工具 `execute` 没运行（上游 tool 消息是 `Tool call denied by user: kb_search`，不是项目工具的哨兵）。
   跑 `env -u RAGFLOW_BASE_URL -u RAGFLOW_API_KEY_FILE WORKBUDDY_OMP_TEST=1 OMP_BIN="$PWD/var/omp/omp" npm run test:focus --workspace server -- omp-official-host-tools`。
-- [ ] 3.2 文档：`knowledge-base.md` 审批放行段改为新规则（放行前提、冲突码）；残余句不删，改写为「已收紧为须经所有者审批（#2011）；批准之后项目工具的输出仍以 `kb_search` 步骤与检索卡展示（`details.bases` 合法时还成为 `kb.hits`），
+- [x] 3.2 文档：`knowledge-base.md` 审批放行段改为新规则（放行前提、冲突码）；残余句不删，改写为「已收紧为须经所有者审批（#2011）；批准之后项目工具的输出仍以 `kb_search` 步骤与检索卡展示（`details.bases` 合法时还成为 `kb.hits`），
   已注册之后才加载的同名项目工具 [INFERENCE] 未实测」两条残余；实测记录 §2.10 末尾补一段宿主处理的变化（不改实测事实本身）；`openspec/glossary.md:106`「放行」加上「这一代进程注册过 `kb_search`」。
-- [ ] 3.2b 功能验收清单：`docs/acceptance/functional-checklist.md` 加两行（`待签`）——工作空间有同名项目工具且有库时，发送显示 `kb_tool_conflict` 的文案；
+- [x] 3.2b 功能验收清单：`docs/acceptance/functional-checklist.md` 加两行（`待签`）——工作空间有同名项目工具且有库时，发送显示 `kb_tool_conflict` 的文案；
   知识库关闭（或没有库）时 `write` 档出现 `kb_search` 确认卡。格式由 `web/test/functional-checklist.test.ts` 守卫。
-- [ ] 3.3 `npm run test:focus --workspace server -- host-tool`、`-- approval`、全部官方门控 `-- omp-official-`、`npm test --workspace server`、`make check` 通过（日志带 `EXIT=`）。
+- [x] 3.3 `npm run test:focus --workspace server -- host-tool`、`-- approval`、全部官方门控 `-- omp-official-`、`npm test --workspace server`、`make check` 通过（日志带 `EXIT=`）。

@@ -8,6 +8,8 @@
  * the call as denied (the fake's choice: record §2.4 did not measure Deny). Real subprocess; the
  * expected frames are literals of those requirements, of tasks.md「组 3 第二刀约定」 and of
  * docs/reviews/2026-11-10-omp-host-tools.md §2.3, §2.4, §2.6, §2.7.
+ * kb-search-approval-scope (#2011): `host-tool-register-conflict` refuses with omp v18.12.3's
+ * conflict text (record §2.10), prefixed by `WORKBUDDY_FAKE_CONFLICT_PREFIX` when it is set.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -370,6 +372,32 @@ describe("fake omp host-tool-register-fail (4.2)", () => {
     expect(await probeFrames(session)).toBe("negotiate_protocol,get_state,set_host_tools,prompt");
     await closeSession(session);
   });
+});
+
+describe("fake omp host-tool-register-conflict (#2011)", () => {
+  const CONFLICT = 'RPC host tool "kb_search" conflicts with an existing tool';
+
+  it.each([
+    ["without a prefix", {}, CONFLICT],
+    [
+      "with WORKBUDDY_FAKE_CONFLICT_PREFIX=x",
+      { WORKBUDDY_FAKE_CONFLICT_PREFIX: "x" },
+      `x${CONFLICT}`,
+    ],
+  ])(
+    "%s refuses set_host_tools with exactly one id-correlated frame",
+    async (_label, env, error) => {
+      const session = startFake({ scenario: "host-tool-register-conflict", env });
+      await session.wait((frame) => frame.type === "ready");
+      session.write([...HANDSHAKE, { id: "r1", type: "set_host_tools", tools: [KB_SEARCH] }]);
+      await session.wait(response("r1", "set_host_tools"));
+      expect(session.frames.filter(response("r1", "set_host_tools"))).toEqual([
+        { id: "r1", type: "response", command: "set_host_tools", success: false, error },
+      ]);
+      expect(await probeFrames(session)).toBe("negotiate_protocol,get_state,set_host_tools,prompt");
+      await closeSession(session);
+    },
+  );
 });
 
 describe("fake omp host-tool answers the branch commands (4.2, regenerate)", () => {

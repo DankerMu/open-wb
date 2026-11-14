@@ -3,7 +3,7 @@ import type { AuthErrorCode } from "../src/auth/errors.js";
 import { HttpError, type HttpErrorCode } from "../src/core/errors/index.js";
 import { loginSessionPair, withApp } from "./auth-lifecycle-helpers.js";
 
-describe("HTTP typed error map 恰三十七码（auth 域只复用既有 unauthorized）", () => {
+describe("HTTP typed error map 恰三十八码（auth 域只复用既有 unauthorized）", () => {
   const codes = {
     bad_request: { statusCode: 400, message: "请求格式不正确" },
     invalid_credentials: { statusCode: 401, message: "账号或密码不正确" },
@@ -56,6 +56,11 @@ describe("HTTP typed error map 恰三十七码（auth 域只复用既有 unautho
     kb_file_unsupported: {
       statusCode: 400,
       message: "这个文件不能入库：模板不支持这种类型，或文件是空的",
+    },
+    kb_tool_conflict: {
+      statusCode: 409,
+      message:
+        "工作空间里有同名的项目工具 kb_search（.omp/tools），与知识库检索冲突，改名或移除后再试",
     },
   } as const satisfies Record<HttpErrorCode, { statusCode: number; message: string }>;
 

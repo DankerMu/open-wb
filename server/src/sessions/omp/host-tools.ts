@@ -4,6 +4,9 @@
  * injected handler with an abort signal and gets exactly one `host_tool_result`, unless it is
  * cancelled or the transport closes first. Calls run concurrently. Only the tool name is known
  * here, never which tools exist; errors of the handler never reach a frame, a log or an event.
+ * Change kb-search-approval-scope D1 (#2011): it also holds whether this process has registered
+ * `kb_search` — fed only the id-matched answer to the host's own `set_host_tools` (OmpProcess), never
+ * a frame seen on stdout, which omp or project code may emit in any shape.
  */
 import type { OmpFrame } from "./frame.js";
 
@@ -24,6 +27,7 @@ export interface HostToolHandler {
  */
 type FrameWriter = (frame: OmpFrame) => Promise<void>;
 
+const KB_SEARCH = "kb_search";
 const UNKNOWN_TOOL = "未知工具";
 const TOOL_FAILED = "工具执行失败";
 const RESULT_TOO_LARGE = "工具结果过大";
@@ -33,6 +37,7 @@ export class HostTools {
   readonly #write: FrameWriter;
   readonly #inFlight = new Map<string, AbortController>();
   #closed = false;
+  #kbSearchRegistered = false;
 
   constructor(handler: HostToolHandler | undefined, write: FrameWriter) {
     this.#handler = handler;
@@ -50,6 +55,27 @@ export class HostTools {
       this.#inFlight.get(frame.targetId)?.abort();
       this.#inFlight.delete(frame.targetId);
     }
+  }
+
+  /**
+   * Whether this process's last successful `set_host_tools` answer listed `kb_search`: the
+   * transport's pass-through of the `Allow tool: kb_search` card requires it (D1).
+   */
+  get kbSearchRegistered(): boolean {
+    return this.#kbSearchRegistered;
+  }
+
+  /**
+   * The response matched by id to a `set_host_tools` the host sent on this process: `success:true`
+   * sets the state from `data.toolNames`; any other answer leaves it as it was.
+   */
+  onRegistration(response: OmpFrame): void {
+    if (response.success !== true) {
+      return;
+    }
+    const data = response.data as { toolNames?: unknown } | undefined;
+    const names = data?.toolNames;
+    this.#kbSearchRegistered = Array.isArray(names) && names.includes(KB_SEARCH);
   }
 
   /** Input is gone for good: abort every in-flight call and ignore every later frame. */

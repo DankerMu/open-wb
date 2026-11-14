@@ -10,6 +10,9 @@
  * the real kb module against the fake RAGFlow. Oracles: each child's stdin frames (the fake's inbound
  * record is out of reach: `host-tool` takes over every prompt), the spawn argv, SQLite rows and the
  * fake RAGFlow's request log; never supervisor internals. Expected values are the specs' literals.
+ * kb-search-approval-scope (#2011 D1): the cases whose process has no `kb_search` registered while
+ * `host-tool` runs its calls (nothing registered, or after `tools:[]`) set the session to `yolo` — no
+ * card at all — since under `write` the card now goes to the owner (session-kb-search-approval.test.ts).
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { resourceName } from "../src/kb/pipeline.js";
@@ -18,6 +21,7 @@ import type { OmpFrame } from "../src/sessions/omp/frame.js";
 import { AgentUnavailableError } from "../src/sessions/omp/process.js";
 import type { Slot } from "../src/sessions/pool.js";
 import { REAL, spawnedAt } from "./session-approval-helpers.js";
+import { patch } from "./session-archive-helpers.js";
 import { postSessionAction } from "./session-bodyless-rest-helpers.js";
 import { PRINCIPAL_ZHAOLIU } from "./session-db-helpers.js";
 import { forkAt, forkWorlds, messagesOf } from "./session-fork-helpers.js";
@@ -69,6 +73,12 @@ function openStubWorld(stub: Stub | undefined, scenario = "host-tool", plain = t
       ...(stub === undefined ? {} : { sessionSearch: stub.source }),
     },
   });
+}
+
+/** A `yolo` session: `host-tool` sends no card, so an unregistered process runs its calls. */
+async function yolo(world: RegenWorld): Promise<RegenWorld> {
+  expect((await patch(world, { approvalMode: "yolo" })).statusCode).toBe(200);
+  return world;
 }
 
 /** The frames up to and including the first `prompt`: `host-tool` keeps answering after it. */
@@ -123,7 +133,7 @@ describe("kb_search 的注册 (omp-runtime)", () => {
   );
 
   it("不注册：知识库关闭时入站帧没有 set_host_tools", REAL, async () => {
-    const world = worlds.track(await openStubWorld(undefined));
+    const world = await yolo(worlds.track(await openStubWorld(undefined)));
 
     await answered(world);
     await answered(world);
@@ -146,7 +156,7 @@ describe("kb_search 的注册 (omp-runtime)", () => {
 
   it("不注册：所有者没有库时不发 set_host_tools；建库之后的下一次派发才发", REAL, async () => {
     const stub = stubSearch([]);
-    const world = worlds.track(await openStubWorld(stub));
+    const world = await yolo(worlds.track(await openStubWorld(stub)));
 
     await answered(world);
     const { stdin } = spawnedAt(world, 0);
@@ -170,7 +180,7 @@ describe("kb_search 的注册 (omp-runtime)", () => {
     REAL,
     async () => {
       const stub = stubSearch([{ id: "k1", name: "产品文档" }]);
-      const world = worlds.track(await openStubWorld(stub));
+      const world = await yolo(worlds.track(await openStubWorld(stub)));
       await answered(world);
       const { stdin } = spawnedAt(world, 0);
       const dispatch = async () => {

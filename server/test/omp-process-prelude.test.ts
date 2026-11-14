@@ -12,6 +12,12 @@
  * `write` / `yolo` the exact `Allow tool: kb_search` select is answered `Approve` by the transport
  * and never registered; under `always-ask` it is an approval; near-miss titles stay approvals and
  * non-closed shapes stay cancelled. `yolo` is only reachable here (the fake omp sends no select).
+ *
+ * Change kb-search-approval-scope D1 (#2011): the pass-through needs this process to have registered
+ * `kb_search` — the last successful answer to a `set_host_tools` the host itself sent lists it.
+ * Scenario「kb_search card without host registration」 and tool-approval「这一代没有注册时不放行」
+ * 「撤下后再注册恢复放行」: never registered, withdrawn (`[]`), `success:false`, re-registered, and a
+ * `response` frame whose id matches no host request. The pass-through cases register first.
  */
 import { describe, expect, it } from "vitest";
 import type { ApprovalMode } from "../src/model-catalog.js";
@@ -64,6 +70,25 @@ function select(id: string, title: string, options: unknown): OmpFrame {
 
 function uiAnswers(written: OmpFrame[]): OmpFrame[] {
   return written.filter((frame) => frame.type === "extension_ui_response");
+}
+
+/**
+ * One host `set_host_tools` on the process, answered by the child with `success` and `toolNames`;
+ * resolves with the response frame the request resolved to.
+ */
+async function register(run: Run, toolNames: string[], success = true): Promise<OmpFrame> {
+  const sent = run.written.length;
+  const reply = run.proc.request({ type: "set_host_tools", tools: [] });
+  await settle();
+  const request = run.written.slice(sent).find((frame) => frame.type === "set_host_tools");
+  run.child.emitLine({
+    id: request?.id,
+    type: "response",
+    command: "set_host_tools",
+    success,
+    ...(success ? { data: { toolNames } } : { error: "host tools rejected" }),
+  });
+  return reply;
 }
 
 async function settle(): Promise<void> {
@@ -162,6 +187,7 @@ describe("omp-runtime「kb_search card by approval mode」", () => {
     "%s: the exact %s kb_search select is answered Approve at once, never registered",
     async (mode, _label, options) => {
       const run = await startRun(mode as ApprovalMode);
+      await register(run, ["kb_search"]);
       run.child.emitLine(select("k1", KB, options));
       await settle();
 
@@ -228,4 +254,107 @@ describe("omp-runtime「kb_search card by approval mode」", () => {
       expect(run.preludes).toEqual([]);
     },
   );
+});
+
+describe("omp-runtime「kb_search card without host registration」 (#2011 D1)", () => {
+  const KB_SURFACED = { id: "k1", tool: "kb_search", title: KB };
+
+  /** The card is surfaced to the owner with its title and gets no answer from the transport. */
+  function expectSurfaced(run: Run): void {
+    expect(run.approvals).toEqual([KB_SURFACED]);
+    expect(uiAnswers(run.written)).toEqual([]);
+    expect(run.preludes).toEqual([]);
+    expect(run.errors).toEqual([]);
+  }
+
+  it("write, never registered: the exact kb_search select is an approval with tool kb_search", async () => {
+    const run = await startRun("write");
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expectSurfaced(run);
+  });
+
+  it("write, registered then withdrawn with toolNames []: the select is an approval again", async () => {
+    const run = await startRun("write");
+    await register(run, ["kb_search"]);
+    await register(run, []);
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expectSurfaced(run);
+  });
+
+  it("write, a success:false answer as the only one: the select is an approval", async () => {
+    const run = await startRun("write");
+    await expect(register(run, ["kb_search"], false)).resolves.toMatchObject({ success: false });
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expectSurfaced(run);
+  });
+
+  it("write, a success:false answer after a registration leaves it registered: Approve", async () => {
+    const run = await startRun("write");
+    await register(run, ["kb_search"]);
+    await register(run, ["kb_search"], false);
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expect(uiAnswers(run.written)).toEqual([
+      { type: "extension_ui_response", id: "k1", value: "Approve" },
+    ]);
+    expect(run.approvals).toEqual([]);
+  });
+
+  it("write, withdrawn then registered again: the select is answered Approve at once", async () => {
+    const run = await startRun("write");
+    await register(run, ["kb_search"]);
+    await register(run, []);
+    await register(run, ["kb_search"]);
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expect(uiAnswers(run.written)).toEqual([
+      { type: "extension_ui_response", id: "k1", value: "Approve" },
+    ]);
+    expect(run.approvals).toEqual([]);
+  });
+
+  it("write, an unsolicited set_host_tools success whose id matches no host request changes nothing", async () => {
+    const run = await startRun("write");
+    run.child.emitLine({
+      id: "omp-own-1",
+      type: "response",
+      command: "set_host_tools",
+      success: true,
+      data: { toolNames: ["kb_search"] },
+    });
+    await settle();
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expectSurfaced(run);
+  });
+
+  it("write, a set_host_tools response matching a pending request of another command changes nothing", async () => {
+    const run = await startRun("write");
+    const sent = run.written.length;
+    const pending = run.proc.request({ type: "get_state" });
+    await settle();
+    const request = run.written.slice(sent).find((frame) => frame.type === "get_state");
+    run.child.emitLine({
+      id: request?.id,
+      type: "response",
+      command: "set_host_tools",
+      success: true,
+      data: { toolNames: ["kb_search"] },
+    });
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expectSurfaced(run);
+    run.child.emitLine({ id: request?.id, type: "response", command: "get_state", success: true });
+    await expect(pending).resolves.toMatchObject({ command: "get_state" });
+  });
 });
