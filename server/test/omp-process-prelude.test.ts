@@ -73,10 +73,16 @@ function uiAnswers(written: OmpFrame[]): OmpFrame[] {
 }
 
 /**
- * One host `set_host_tools` on the process, answered by the child with `success` and `toolNames`;
- * resolves with the response frame the request resolved to.
+ * One host `set_host_tools` on the process, answered by the child with `success` and `toolNames`
+ * (a refusal carries `error`, and with `refusedWithData` also `data.toolNames`); resolves with the
+ * response frame the request resolved to.
  */
-async function register(run: Run, toolNames: string[], success = true): Promise<OmpFrame> {
+async function register(
+  run: Run,
+  toolNames: string[],
+  success = true,
+  refusedWithData = false,
+): Promise<OmpFrame> {
   const sent = run.written.length;
   const reply = run.proc.request({ type: "set_host_tools", tools: [] });
   await settle();
@@ -86,7 +92,8 @@ async function register(run: Run, toolNames: string[], success = true): Promise<
     type: "response",
     command: "set_host_tools",
     success,
-    ...(success ? { data: { toolNames } } : { error: "host tools rejected" }),
+    ...(success || refusedWithData ? { data: { toolNames } } : {}),
+    ...(success ? {} : { error: "host tools rejected" }),
   });
   return reply;
 }
@@ -223,6 +230,7 @@ describe("omp-runtime「kb_search card by approval mode」", () => {
     "%s: near-miss titles are ordinary approvals, not answered by the transport",
     async (mode) => {
       const run = await startRun(mode);
+      await register(run, ["kb_search"]);
       run.child.emitLine(select("n1", `${KB}\nReason: x`, KB_THREE));
       run.child.emitLine(select("n2", `${KB}_extra`, KB_THREE));
       run.child.emitLine(select("n3", `${KB} `, KB_THREE));
@@ -242,6 +250,7 @@ describe("omp-runtime「kb_search card by approval mode」", () => {
     "%s: the exact title with non-closed options or as confirm is cancelled",
     async (mode) => {
       const run = await startRun(mode);
+      await register(run, ["kb_search"]);
       run.child.emitLine(select("x1", KB, ["Approve", "Approve kb_search", "Deny"]));
       run.child.emitLine({ type: "extension_ui_request", id: "x2", method: "confirm", title: KB });
       await settle();
@@ -298,6 +307,31 @@ describe("omp-runtime「kb_search card without host registration」 (#2011 D1)",
     const run = await startRun("write");
     await register(run, ["kb_search"]);
     await register(run, ["kb_search"], false);
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expect(uiAnswers(run.written)).toEqual([
+      { type: "extension_ui_response", id: "k1", value: "Approve" },
+    ]);
+    expect(run.approvals).toEqual([]);
+  });
+
+  it("write, success:false carrying data.toolNames [kb_search] as the only answer: still an approval", async () => {
+    const run = await startRun("write");
+    await expect(register(run, ["kb_search"], false, true)).resolves.toMatchObject({
+      success: false,
+      data: { toolNames: ["kb_search"] },
+    });
+    run.child.emitLine(select("k1", KB, KB_THREE));
+    await settle();
+
+    expectSurfaced(run);
+  });
+
+  it("write, success:false carrying data.toolNames [] after a registration: still Approve", async () => {
+    const run = await startRun("write");
+    await register(run, ["kb_search"]);
+    await register(run, [], false, true);
     run.child.emitLine(select("k1", KB, KB_THREE));
     await settle();
 
