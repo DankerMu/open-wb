@@ -435,7 +435,15 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Depends on：S2b、S1c。
 - Review attention：decision-dense（多租户过滤是灰盒决定的例外候选——出事故重议）。
 - 2026-11-10 grill（owner 逐分支拍板，G1）：S2c 拆为两个 change。**A 会话接入**（change `s2c-kb-session`）：`kb_search` 的注册、分派、审批放行、`kb.hits` 与检索卡、知识库引用，可检索的库 = 自己的库。**B 可见范围**：四档、共享只读、跨账号检索审计、部门与项目组字段，A 合入后另跑流水线。
-- 2026-11-17 状态：**A 已签收**（CK-15–CK-20 由 owner 签为 `通过`，`d664f88b`；change 已归档 `openspec/changes/archive/2026-11-13-s2c-kb-session/`，Epic #1961 关闭）；**B 的 change `s2c-kb-visibility` 已建**（grill 19 分支，owner 2026-11-17 拍板，见其 design.md「Grill 结论」），并入 A 的种子 (a)(b)(c)(e)，(d) 维持 G12。
+- 2026-11-17 状态（B 交付）：**B 的实现全部合入**，待 owner 签收；change `s2c-kb-visibility` 尚未归档，Epic #2025 未关。组 → issue → PR：
+  - 制品：change 制品 PR #2041。
+  - 组 1 迁移 053 #2026 → #2042，账号范围读取 #2027 → #2043；组 2 单轮检索本地截断 #2028 → #2044；组 3 会话检索的措辞与计数 #2029 → #2045；组 4 内建命令带引用 400 #2030 → #2047。
+  - 组 5 可见判定与两级归属 #2031 → #2048；组 6 非所有者读文档列表 #2032 → #2049；组 7 共享检索审计与检索测试对非所有者开放 #2033 → #2050；组 8 会话检索与引用的可见集合 #2034 → #2051。
+  - 组 9 web 共享库只读呈现 #2035 → #2052；组 10 引用选择列表附所有者 #2036 → #2053；组 11 范围端点与建库范围 #2037 → #2054；组 12 web 范围对话框与新建范围 #2038 → #2055；组 13 ui-walk 共享知识库分支 #2039 → #2056。
+  - 组 14 收口 #2040 即本次（文档与计划状态）。
+  - 待签：验收清单「中心·知识库（CK）」CK-21、CK-22、CK-23 为 `待签`，由 owner 执行，agent 不代签；签收后归档 change、关 Epic #2025。
+  - 跟进：#2046（检索卡把 `rebuild_failed` 的库写成「正在重建」：`kb.hits` 的逐库 `status` 分不出两者，契约待 owner 裁定）。
+- 2026-11-17 状态（建 change 时，历史）：**A 已签收**（CK-15–CK-20 由 owner 签为 `通过`，`d664f88b`；change 已归档 `openspec/changes/archive/2026-11-13-s2c-kb-session/`，Epic #1961 关闭）；**B 的 change `s2c-kb-visibility` 已建**（grill 19 分支，owner 2026-11-17 拍板，见其 design.md「Grill 结论」），并入 A 的种子 (a)(b)(c)(e)，(d) 维持 G12。
 - 2026-11-13 状态（历史）：A 已交付，待 owner 签收。Epic #1961 的组 1–10 全部合入（组 → issue → PR）：
   - 制品：change 制品与 omp host tool 实测记录 `docs/reviews/2026-11-10-omp-host-tools.md`，PR #1978。
   - 组 1 单轮检索可取消 #1962 → #1987；组 2 会话检索 `kb_search` #1963 → #1988。
@@ -524,6 +532,12 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
 ## Next Step
+
+> 2026-11-17 更新（B 交付）。**S2c change B（`s2c-kb-visibility`）的实现全部合入**：Epic #2025 的组 1–13 均已合入（见上文 S2c 一节的清单），#2040 即本收口；change 尚未归档。
+> 1. **待 owner 签收**：验收清单「中心·知识库（CK）」的 CK-21、CK-22、CK-23 为 `待签`，由 owner 执行，agent 不代签；签完归档 change、关 Epic #2025。
+> 2. **签收后可启动**：S3a（本地账号与治理，ADR-0018）与 S4a；S4a 保持串行（owner 2026-11-17）。
+> 3. **跟进 issue**：#2046（检索卡把 `rebuild_failed` 的库写成「正在重建」，`kb.hits` 逐库 `status` 分不出两者），契约待 owner 裁定。
+> 下面 2026-11-17 一条里的「进入流水线」已过时，保留为历史。
 
 > 2026-11-17 更新。**S2c change A 已签收**（CK-15–CK-20 `通过`），change 已归档，跟进 issue #2002、#2004、#2011 均已关闭。
 > **S2c change B（`s2c-kb-visibility`）进入流水线**：可见范围四档、共享只读、跨账号检索审计、部门与项目组字段，并入 A 的种子 (a)(b)(c)(e)（owner 2026-11-17）。
