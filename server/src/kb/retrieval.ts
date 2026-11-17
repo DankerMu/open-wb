@@ -14,21 +14,24 @@
  * - 中止（s2c-kb-session D6）：可选的 `signal` 随查询交给客户端，降级重试的查询只去掉 `rerankId`，带的是同一个 signal，所以
  *   降级回调之后已中止的重试不发出。中止与期限到期同为 `kb_unavailable`。检索测试端点不传。
  *
- * 检索测试端点（D4；knowledge-bases「检索测试端点」）是 `createKbRetrieval` 的 `test`：判定次序为 body → 所有权重读 → `state` →
- * 参数比较（所有权的第一次判定在路由的 preParsing，先于 body 解析）。参数与已存值相同时不取锁、不写、不审计，直接检索。不同则经
- * `locks.write` 取该库写锁（重建器持锁即 409），锁内重读：不在 404，非 `ready` 409，再比较一次，仍不同才经 `saveRetrieval` 在同一
- * 事务里写两列并审计 `kb.retrieval_settings`（`before` 取锁内重读的值）。写入或审计失败时错误原样抛出，事务回滚，通用 500，
- * 不检索。检索在锁外，用的是库里存的行（写回的返回值或重读的行），不用请求 body；应答的 `retrieval` 同取这一行。
+ * 检索测试端点（D4；knowledge-bases「检索测试端点」）是 `createKbRetrieval` 的 `test`：判定次序为 body → 可读重读 → `state`
+ * （可见的第一次判定在路由的 preParsing，先于 body 解析）；所有者比较参数、必要时取锁写回；非所有者跳过比较与锁，按已存值检索，
+ * 检索前写 `kb.shared_retrieval`（`shared-audit.ts`，写失败通用 500、不检索）；对自己的库检索不审计。所有者参数与已存值相同时
+ * 不取锁、不写，直接检索。不同则经 `locks.write` 取该库写锁（重建器持锁即 409），锁内按写级重读：不在 404，非 `ready` 409，再比较
+ * 一次，仍不同才经 `saveRetrieval` 在同一事务里写两列并审计 `kb.retrieval_settings`（`before` 取锁内重读的值）。写入或审计失败时
+ * 错误原样抛出，事务回滚，通用 500，不检索。检索在锁外，用的是库里存的行（写回的返回值或重读的行），不用请求 body；应答的
+ * `retrieval` 同取这一行。
  */
 import { HttpError } from "../core/errors/index.js";
-import { ownedBase } from "./bases.js";
+import { ownedBase, readableBase } from "./bases.js";
 import type { createKbLocks } from "./locks.js";
 import type { createRagflowClient } from "./ragflow-client.js";
 import { PAGE_SIZE, type RetrievalQuery } from "./ragflow-retrieval.js";
 import { isRecord, type Result, UNAVAILABLE } from "./ragflow-route.js";
 import { rerankModelOf } from "./settings.js";
+import { auditSharedRetrieval, type SharedRetrievalEvent } from "./shared-audit.js";
 import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
-import type { createKbVisibility } from "./visibility.js";
+import type { BaseAccess, createKbVisibility } from "./visibility.js";
 
 const BODY_KEYS = ["question", "threshold", "vectorWeight"];
 const MAX_QUESTION_CODE_POINTS = 1000;
@@ -74,7 +77,7 @@ interface KbRetrievalDependencies {
   locks: Pick<ReturnType<typeof createKbLocks>, "write">;
   visibility: Pick<ReturnType<typeof createKbVisibility>, "accessOf">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
-  audit: (event: AuditEvent) => void;
+  audit: (event: AuditEvent | SharedRetrievalEvent) => void;
   onRerankDegraded: () => void;
 }
 
@@ -177,17 +180,12 @@ const sameParameters = (base: KnowledgeBase, request: RetrievalParameters): bool
   base.retrievalThreshold === request.threshold &&
   base.retrievalVectorWeight === request.vectorWeight;
 
-/** 写回只对 `ready` 的库（D4 第 3 步）：`rebuild_failed` 也拒。 */
-function readyBase(
-  visibility: KbRetrievalDependencies["visibility"],
-  id: string,
-  ownerId: string,
-): KnowledgeBase {
-  const { base } = ownedBase(visibility, id, ownerId);
-  if (base.state !== "ready") {
+/** 检索测试只对 `ready` 的库（D4 第 3 步）：`rebuild_failed` 也拒。 */
+function ready(access: BaseAccess): BaseAccess {
+  if (access.base.state !== "ready") {
     throw new HttpError("kb_rebuilding");
   }
-  return base;
+  return access;
 }
 
 export function createKbRetrieval(dependencies: KbRetrievalDependencies) {
@@ -195,7 +193,7 @@ export function createKbRetrieval(dependencies: KbRetrievalDependencies) {
 
   /** 锁内：重读、再比较，仍不同才写两列并审计。返回检索要用的行。 */
   function saveLocked(id: string, request: TestRequest, ownerId: string): KnowledgeBase {
-    const base = readyBase(visibility, id, ownerId);
+    const { base } = ready(ownedBase(visibility, id, ownerId));
     if (sameParameters(base, request)) {
       return base;
     }
@@ -225,11 +223,18 @@ export function createKbRetrieval(dependencies: KbRetrievalDependencies) {
   }
 
   return {
-    /** `POST /api/kb/bases/:id/retrieval`：200 恰为 `{hits, retrieval}`。检索本身不审计。 */
-    async test(id: string, body: unknown, ownerId: string) {
+    /**
+     * `POST /api/kb/bases/:id/retrieval`：200 恰为 `{hits, retrieval}`。所有者比较参数、必要时写回；非所有者跳过比较与锁，
+     * 按已存值检索，检索前写 `kb.shared_retrieval`；对自己的库检索不审计。
+     */
+    async test(id: string, body: unknown, viewerId: string) {
       const request = parseTest(body);
-      const base = readyBase(visibility, id, ownerId);
-      const used = sameParameters(base, request) ? base : await writeBack(id, request, ownerId);
+      const access = ready(readableBase(visibility, id, viewerId));
+      const used =
+        !access.owned || sameParameters(access.base, request)
+          ? access.base
+          : await writeBack(id, request, viewerId);
+      auditSharedRetrieval(dependencies, viewerId, access);
       const result = await retrieveForBase(dependencies, used, request.question);
       if (result.kind !== "ok") {
         throw new HttpError(result.kind);

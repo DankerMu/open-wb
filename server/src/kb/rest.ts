@@ -22,8 +22,8 @@
  *
  * 知识库路由对任何已登录用户开放，列表是查看者可见的库：`POST` 在 content-parser 归属集，业务都在 `kb/bases.ts`。`DELETE`
  * 不读 body、不在归属集（同 `connectors/rest.ts`）。带 `:id` 的路由都在路由级 `preParsing` 判定归属：写路由不可见 404、可见
- * 非所有者 403；读路由 `GET …/documents` 不可见 404、可见即放行（`POST …/retrieval` 组 7 放开）。所以不可见的或不存在的 id
- * 带坏 body 也是 404，可见而不是自己的库带坏 body 也是 403。
+ * 非所有者 403；读路由 `GET …/documents`、`POST …/retrieval` 不可见 404、可见即放行。所以不可见的或不存在的 id 带坏 body
+ * 也是 404，可见而不是自己的库带坏写路由的 body 也是 403。
  *
  * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
  * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。`DELETE …/documents?doc=<文档 id>`（移出）同删库的写法：
@@ -35,7 +35,7 @@
  * 连接：Node 否则会在 keep-alive 上读完并丢弃剩下的请求体。业务都在 `kb/uploads.ts`。
  *
  * `POST …/retrieval`（检索测试，s2b-kb-retrieval D4）：在归属集，body limit 16 KiB，归属判定先于 body 解析；body 校验、
- * `state`、参数写回与检索都在 `kb/retrieval.ts`，成功 200 `{hits, retrieval}`。
+ * `state`、参数写回与检索都在 `kb/retrieval.ts`，成功 200 `{hits, retrieval}`。非所有者按已存参数检索并审计。
  */
 import type {
   FastifyInstance,
@@ -290,7 +290,7 @@ export function registerKbRoutes(
 
   app.post<BaseParams>(
     RETRIEVAL_ROUTE,
-    { onRequest: noStore, preParsing: ownedBase, bodyLimit: RETRIEVAL_BODY_LIMIT },
+    { onRequest: noStore, preParsing: readableBase, bodyLimit: RETRIEVAL_BODY_LIMIT },
     (request) => enabled().retrieval.test(request.params.id, request.body, principalOf(request).id),
   );
 
