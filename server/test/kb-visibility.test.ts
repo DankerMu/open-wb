@@ -5,7 +5,7 @@
  * 成员 u1、u2），u4（wangwu，部门为空）按需带外启用。库行与范围列带外写入（组 11 之前没有改范围的路由）。期望值抄自规格与
  * tasks.md「组 5 约定」，一律写字面量。
  *
- * `GET …/documents` 已由组 6 放开；`POST …/retrieval` 由组 7 原地改为 200。
+ * `GET …/documents` 与 `POST …/retrieval` 已由组 6、组 7 放开。
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,6 +31,7 @@ import {
   T0,
   UPLOAD_ROW,
 } from "./kb-store-helpers.js";
+import { expectAnswer } from "./models-rest-helpers.js";
 import { W1 } from "./mounts-manager-helpers.js";
 import { auditRows, send } from "./mounts-rest-helpers.js";
 import { disableAccount, enableAccount } from "./session-db-helpers.js";
@@ -314,10 +315,12 @@ describe("可见范围判定", () => {
 });
 
 describe("知识库端点：两级归属", () => {
-  it("共享库的两级归属：可见的非所有者检索测试与五条写路由 403、文档列表 200，零写入（组 7 把检索测试原地改为 200）", async () => {
+  it("共享库的两级归属：可见的非所有者五条写路由 403、文档列表与检索测试 200，写路由零写入", async () => {
     const world = await ready();
     const id = sharedWorld(world, "all");
-    await expectAllForbidden(world, VALID.slice(1), id);
+    const ds = world.fake.addDataset();
+    world.db.prepare("UPDATE knowledge_bases SET dataset_id = ? WHERE id = ?").run(ds, id);
+    await expectAllForbidden(world, VALID.slice(2), id);
     const before = snapshot(world);
     const response = await documentsOf(world, id, "peer");
     expect([response.statusCode, response.headers["cache-control"]]).toEqual([200, "no-store"]);
@@ -338,14 +341,31 @@ describe("知识库端点：两级归属", () => {
         },
       ],
     });
-    expect(routes(world.sent())).toEqual(["GET /api/v1/datasets/ds-1/documents"]);
-    expect(snapshot(world)).toEqual(before);
+    const retrieval = { threshold: 0.2, vectorWeight: 0.7 };
+    for (const [, search] of VALID.slice(1, 2)) {
+      expectAnswer(await search(world, id), 200, { hits: [], retrieval });
+    }
+    expect(routes(world.sent())).toEqual([
+      `GET /api/v1/datasets/${ds}/documents`,
+      "POST /api/v1/retrieval",
+    ]);
+    expect(world.sent()[1]?.json).toMatchObject({
+      similarity_threshold: 0.2,
+      vector_similarity_weight: 0.7,
+    });
+    const [bases, documents, audits] = snapshot(world);
+    expect([bases, documents, audits?.slice(0, -1)]).toEqual(before);
+    const detail = `{"id":"${id}","name":"库 1","ownerId":"u1","scope":{"scope":"all","groupId":null}}`;
+    expect(audits?.slice(-1)).toMatchObject([
+      { kind: "kb.shared_retrieval", actor_id: "u2", detail },
+    ]);
   });
 
-  it("403 先于 body：畸形、超限、bodyless 带 {}、错媒体类型都是 403 不是 400", async () => {
+  it("403 先于 body：畸形、超限、bodyless 带 {}、错媒体类型都是 403 不是 400（检索测试是读路由，可见非所有者的超限 body 为 400，见 kb-retrieval-shared.test.ts）", async () => {
     const world = await ready();
     const id = sharedWorld(world, "all");
-    await expectAllForbidden(world, MALFORMED, id);
+    const writes = MALFORMED.filter(([name]) => name !== "POST 检索测试 16 KiB+1");
+    await expectAllForbidden(world, writes, id);
   });
 
   it("不可见与不存在不可区分：状态码、body 字节与去掉 date 的响应头全等，零出站，行不变", async () => {

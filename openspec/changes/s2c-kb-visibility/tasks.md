@@ -396,9 +396,9 @@ Minimal mergeable slice: atomic - 放开 `GET …/documents` 与非所有者置�
 
 ## 7. 共享检索审计与检索测试对非所有者开放（knowledge-bases「检索测试端点」「知识库审计」`kb.shared_retrieval`）
 
-- [ ] 7.1 核对 Context：`kb/retrieval.ts:184-240`（`readyBase`、参数比较、写锁、写回与审计）；`core/audit` 的 `emit` 与失败传播；`server/test/kb-retrieval-endpoint.test.ts`（443 行）
-- [ ] 7.2 测试先行：新文件 `server/test/kb-retrieval-shared.test.ts` 覆盖「非所有者按已存参数检索」「非所有者的 body 仍须合规」「共享审计写失败不检索」；「同一知识库的写操作串行」里「非所有者的检索测试从不取锁」；把「共享库的两级归属」里 `POST …/retrieval` 改为 200
-- [ ] 7.3 实现新文件 `server/src/kb/shared-audit.ts`（design D6，只在非所有者时写，detail 取判定时读到的行）；`retrieval.ts` 的非所有者分支跳过比较与写锁、检索前调用它；`POST …/retrieval` 的钩子与复核点改用 `readableBase`
+- [x] 7.1 核对 Context：`kb/retrieval.ts:184-240`（`readyBase`、参数比较、写锁、写回与审计）；`core/audit` 的 `emit` 与失败传播；`server/test/kb-retrieval-endpoint.test.ts`（443 行）
+- [x] 7.2 测试先行：新文件 `server/test/kb-retrieval-shared.test.ts` 覆盖「非所有者按已存参数检索」「非所有者的 body 仍须合规」「共享审计写失败不检索」；「同一知识库的写操作串行」里「非所有者的检索测试从不取锁」；把「共享库的两级归属」里 `POST …/retrieval` 改为 200
+- [x] 7.3 实现新文件 `server/src/kb/shared-audit.ts`（design D6，只在非所有者时写，detail 取判定时读到的行）；`retrieval.ts` 的非所有者分支跳过比较与写锁、检索前调用它；`POST …/retrieval` 的钩子与复核点改用 `readableBase`
   - 组 7 约定（#2033 fixture 审查补；7.2–7.3 照此实现与测试）：
     - 7.1 行号更正：`readyBase` 是 `retrieval.ts:181-191`（`ownedBase` 在 `:186`），被 `saveLocked`（`:197-215`，调用在 `:198`）与 `test`（`:229-238`，调用在 `:231`）调用；`writeBack` 是 `:217-225`；检索路由的钩子是 `rest.ts:293`；`kb-retrieval-endpoint.test.ts` 443 行，已核实。
     - 新文件 `server/src/kb/shared-audit.ts`（≤ 45 行）：
