@@ -8,7 +8,7 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import type { LightMyRequestResponse } from "fastify";
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { probeUpstream } from "../src/models/probe.js";
 import { ompAgentDir } from "../src/sessions/omp/state-layout.js";
 import {
@@ -34,6 +34,7 @@ import {
   VIEW_KEYS,
 } from "./models-rest-helpers.js";
 import { start } from "./support/fake-upstream.mjs";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 /** Low-entropy sentinels (gitleaks); neither starts with `sk-` nor `Bearer` (`redact` drops those anyway). */
 const PROBE_KEY = "wb-issue1650-probe-api-key";
@@ -43,16 +44,14 @@ const TIMEOUT_DEADLINES = { totalDeadlineMs: 1000 };
 
 /** Every base URL a row was registered with in the running test. */
 const baseUrls: string[] = [];
-let outputs: Array<MockInstance<typeof process.stdout.write>> = [];
+const output = outputCollector();
 beforeEach(() => {
   baseUrls.length = 0;
-  outputs = [vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
+  output.start();
 });
 afterEach(() => {
-  const written = outputs.flatMap((spy) => spy.mock.calls.map((args) => String(args[0])));
-  for (const spy of outputs) spy.mockRestore();
-  const text = written.join("");
-  for (const secret of [...SENTINELS, ...baseUrls]) expect(text).not.toContain(secret);
+  // `baseUrls` 在判定时展开：用例里登记的上游这时才齐。
+  expectNoSentinel(output.stop(), [...SENTINELS, ...baseUrls]);
 });
 
 const local = (port: number, path = "/v1") => `http://127.0.0.1:${String(port)}${path}`;

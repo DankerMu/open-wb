@@ -33,6 +33,7 @@ import {
 import { getSessionMessages } from "./session-rest-helpers.js";
 import { openEventStream, readUntil } from "./session-sse-helpers.js";
 import { assistantIdFor, waitForTurn } from "./session-supervisor-helpers.js";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 const worlds = forkWorlds();
 
@@ -200,21 +201,22 @@ describe("检索结果事件发布：不合规即丢弃", () => {
     "a string similarity drops kb.hits, step.end goes on, and one kb_hits_invalid record carries no chunk",
     REAL,
     async () => {
-      const written: string[] = [];
-      const write = process.stderr.write.bind(process.stderr);
-      vi.spyOn(process.stderr, "write").mockImplementation((chunk, ...rest) => {
-        written.push(String(chunk));
-        return write(chunk, ...(rest as []));
-      });
-      const turn = await runTurn([INVALID, PLAIN_TEXT]);
-      expect(framesOf(turn.frames, "kb.hits")).toEqual([]);
-      expect(framesOf(turn.frames, "step.end").map((frame) => frame.data.status)).toEqual([
-        "done",
-        "done",
-      ]);
-      expect(turn.records).toEqual([{ event: "kb_hits_invalid", messageId: turn.assistant }]);
-      expect(JSON.stringify(turn.records)).not.toContain(INVALID_CHUNK);
-      expect(written.join("")).not.toContain(INVALID_CHUNK);
+      const output = outputCollector();
+      output.start();
+      let written = "";
+      try {
+        const turn = await runTurn([INVALID, PLAIN_TEXT]);
+        expect(framesOf(turn.frames, "kb.hits")).toEqual([]);
+        expect(framesOf(turn.frames, "step.end").map((frame) => frame.data.status)).toEqual([
+          "done",
+          "done",
+        ]);
+        expect(turn.records).toEqual([{ event: "kb_hits_invalid", messageId: turn.assistant }]);
+        expect(JSON.stringify(turn.records)).not.toContain(INVALID_CHUNK);
+      } finally {
+        written = output.stop();
+      }
+      expectNoSentinel(written, [INVALID_CHUNK]);
     },
   );
 });

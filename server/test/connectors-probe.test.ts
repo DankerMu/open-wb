@@ -23,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createApp } from "../src/app.js";
 import { createMcpPublisher } from "../src/connectors/mcp-json.js";
 import { createConnectorStore } from "../src/connectors/store.js";
@@ -43,6 +43,7 @@ import {
 import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
 import { type FakeMcpHttpStartOptions, start } from "./support/fake-mcp-http.mjs";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 /** Low-entropy sentinels (gitleaks): credential values that must never leave `mcp.json` or the probe request. */
 const HEADER_KEY = "wb-issue1673-header-key";
@@ -92,15 +93,17 @@ interface World {
 }
 
 const opened: Array<() => Promise<void>> = [];
-let outputs: Array<MockInstance<typeof process.stdout.write>> = [];
+const output = outputCollector();
 beforeEach(() => {
-  outputs = [vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
+  output.start();
 });
 afterEach(async () => {
-  for (const close of opened.splice(0).reverse()) await close();
-  const written = outputs.flatMap((spy) => spy.mock.calls.map((args) => String(args[0])));
-  for (const spy of outputs) spy.mockRestore();
-  for (const secret of SENTINELS) expect(written.join("")).not.toContain(secret);
+  // 关闭抛错时 spy 照样恢复、照样判定（#2021）。
+  try {
+    for (const close of opened.splice(0).reverse()) await close();
+  } finally {
+    expectNoSentinel(output.stop(), SENTINELS);
+  }
 });
 
 async function openWorld(probeDeadlines?: { totalDeadlineMs: number }): Promise<World> {

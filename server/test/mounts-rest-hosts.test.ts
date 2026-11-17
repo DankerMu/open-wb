@@ -39,9 +39,11 @@ import {
   openMounts,
   postMount,
   privateDirs,
+  SECRETS,
   send,
   sftpBody,
 } from "./mounts-rest-helpers.js";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 afterEach(async () => {
   vi.restoreAllMocks();
@@ -272,47 +274,46 @@ describe("凭证不外泄", () => {
   it("password, private-key and smb-domain mounts: no username, password, key, domain or obscure string in responses, /api/audit, audit rows, stdout / stderr, the error channel or any mount argv / env", {
     timeout: CASE_MS,
   }, async () => {
-    const written: string[] = [];
-    for (const stream of [process.stdout, process.stderr]) {
-      const original = stream.write.bind(stream);
-      vi.spyOn(stream, "write").mockImplementation(((chunk: unknown, ...rest: unknown[]) => {
-        written.push(String(chunk));
-        return (original as (...args: unknown[]) => boolean)(chunk, ...rest);
-      }) as typeof stream.write);
-    }
-    const rest = await openMounts();
-    const { world } = rest;
+    const output = outputCollector();
+    output.start();
+    let written = "";
     const bodies: string[] = [];
-    const keep = async (response: Promise<{ body: string; statusCode: number }>) => {
-      const answer = await response;
-      bodies.push(answer.body);
-      return answer;
-    };
-    const smb = {
-      name: "共享盘",
-      backend: "smb",
-      host: "files.intra",
-      remotePath: "/share/product",
-      readOnly: true,
-      username: USER_SENTINEL,
-      password: PASS_SENTINEL,
-      domain: DOMAIN_SENTINEL,
-    };
-    const ids: string[] = [];
-    for (const body of [sftpBody("远端"), sftpKey(), smb]) {
-      const answer = await keep(send(rest, "member", "POST", mountsUrl(W1), body));
-      expect(answer.statusCode, answer.body).toBe(201);
-      ids.push(String((JSON.parse(answer.body) as { id: string }).id));
+    let world: World;
+    try {
+      const rest = await openMounts();
+      ({ world } = rest);
+      const keep = async (response: Promise<{ body: string; statusCode: number }>) => {
+        const answer = await response;
+        bodies.push(answer.body);
+        return answer;
+      };
+      const smb = {
+        name: "共享盘",
+        backend: "smb",
+        host: "files.intra",
+        remotePath: "/share/product",
+        readOnly: true,
+        username: USER_SENTINEL,
+        password: PASS_SENTINEL,
+        domain: DOMAIN_SENTINEL,
+      };
+      const ids: string[] = [];
+      for (const body of [sftpBody("远端"), sftpKey(), smb]) {
+        const answer = await keep(send(rest, "member", "POST", mountsUrl(W1), body));
+        expect(answer.statusCode, answer.body).toBe(201);
+        ids.push(String((JSON.parse(answer.body) as { id: string }).id));
+      }
+      await keep(send(rest, "member", "GET", mountsUrl(W1)));
+      await keep(send(rest, "member", "GET", "/api/audit"));
+      await keep(send(rest, "admin", "GET", "/api/audit"));
+      for (const id of ids) {
+        const answer = await keep(send(rest, "member", "DELETE", mountsUrl(W1, id)));
+        expect(answer.statusCode).toBe(204);
+      }
+      await keep(send(rest, "member", "GET", "/api/audit"));
+    } finally {
+      written = output.stop();
     }
-    await keep(send(rest, "member", "GET", mountsUrl(W1)));
-    await keep(send(rest, "member", "GET", "/api/audit"));
-    await keep(send(rest, "admin", "GET", "/api/audit"));
-    for (const id of ids) {
-      const answer = await keep(send(rest, "member", "DELETE", mountsUrl(W1, id)));
-      expect(answer.statusCode).toBe(204);
-    }
-    await keep(send(rest, "member", "GET", "/api/audit"));
-    vi.restoreAllMocks();
 
     expect(auditRows(world).map((row) => row.kind)).toEqual([
       "mount.attach",
@@ -325,11 +326,11 @@ describe("凭证不外泄", () => {
     for (const text of [
       ...bodies,
       JSON.stringify(auditRows(world)),
-      written.join(""),
       ...world.errors.map((error) => `${error.message}\n${error.stack ?? ""}`),
     ]) {
       expectNoSecret(text);
     }
+    expectNoSentinel(written, SECRETS);
     const mounts = world.mountCalls();
     expect(mounts).toHaveLength(3);
     for (const entry of mounts) {

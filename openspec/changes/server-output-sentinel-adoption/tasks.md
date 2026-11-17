@@ -37,12 +37,12 @@ Must-preserve：
 
 ## 1. 收口（#2021）
 
-- [ ] 1.1 共享收集器可嵌套：`start()` 时某方法已是 mock（`vi.isMockFunction`），就不再 `spyOn`，只记下该 mock 当前 `mock.calls.length` 作为起点，`stop()` 只读起点之后的调用、不恢复它；自己装的 spy 照旧读全部并恢复。`kb-ingest-sentinel.test.ts` 加一例：外层收集器 start，内层 start，`console.warn(<哨兵>)`，内层 stop 并判定抛错；随后外层 stop，外层文本同样含该哨兵且全部 spy 已恢复。改前该例红（内层 `mockRestore` 清空外层），记 `.workplans/2021/nested-red.log`。
+- [x] 1.1 共享收集器可嵌套：`start()` 时某方法已是 mock（`vi.isMockFunction`），就不再 `spyOn`，只记下该 mock 当前 `mock.calls.length` 作为起点，`stop()` 只读起点之后的调用、不恢复它；自己装的 spy 照旧读全部并恢复。`kb-ingest-sentinel.test.ts` 加一例：外层收集器 start，内层 start，`console.warn(<哨兵>)`，内层 stop 并判定抛错；随后外层 stop，外层文本同样含该哨兵且全部 spy 已恢复。改前该例红（内层 `mockRestore` 清空外层），记 `.workplans/2021/nested-red.log`。
   另：共享收集器的 `write` 通道按 UTF-8 解码 `Uint8Array`/`Buffer` 块（`typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8")`）。`kb-ingest-sentinel.test.ts` 加一例：`process.stdout.write(new TextEncoder().encode(<哨兵>))`，判定抛错并点名哨兵。改前该例红（`String(Uint8Array)` 得逗号分隔数字），记 `.workplans/2021/uint8-red.log`。
-- [ ] 1.2 10 个文件逐个改用共享收集器与判定。每个文件改前加临时探针：在该处收集期间 `console.warn(<该处一个哨兵>)`；`models-probe` 写一个 `addModel` 之后才进 `baseUrls` 的条目，`preview-token-rest` 写运行时拿到的 `token`。`kb-retrieval-endpoint` 另加第二个探针：在那个用例里 `console.warn(CONTENT_SENTINEL)`，改后必须在入库世界收尾报红（证明嵌套没吃掉外层）。跑该文件记 `probe-<文件>-before.log`（预期全绿＝漏判；`preview-token-rest`、`omp-host-tools` 预期已红＝不退化基线）；改后同一探针记 `probe-<文件>-after.log`（预期红，信息点名哨兵）；删探针，跑该文件全绿。
-- [ ] 1.3 `useIngestWorlds` 与 `connectors-probe` 的收尾按 Must-preserve 改结构。变异证据（临时，不提交）：在 `useIngestWorlds` 收尾的关闭段临时插一个 `throw`；新建一个临时测试文件，在 `describe("A")` 里调用 `useIngestWorlds()` 并跑一个开世界的用例，在其后的兄弟 `describe("B")`（不受 A 的钩子作用）里断言 `vi.isMockFunction(console.log)` 与 `vi.isMockFunction(process.stdout.write)` 都为 false。改前 B 红（spy 遗留），改后 B 绿；记 `.workplans/2021/ingest-teardown-{before,after}.log`，随后撤掉变异并删掉临时文件。
-- [ ] 1.4 用例体内判定的各处，确认 `stop()` 在 `finally` 里（逐处列出行号写进 PR）。
-- [ ] 1.5 grep 证明：`server/test` 里 `vi.spyOn(<任意对象>, "write")` 与 `vi.spyOn(console, …)` 只剩 `support/output-sentinel.ts` 与三处例外（`server-entry-silent`、`server-upstream-failed-log`、`server-handshake-log`），其它命中逐条列出并说明非泄密用途；记 `.workplans/2021/grep.log`。
-- [ ] 1.6 `npm run test:focus --workspace server -- <10 个文件与 kb-ingest-sentinel>`、`npm run test:focus --workspace server -- kb-`、`npm test --workspace server`、`make check` 通过（日志带 `EXIT=`）。
+- [x] 1.2 10 个文件逐个改用共享收集器与判定。每个文件改前加临时探针：在该处收集期间 `console.warn(<该处一个哨兵>)`；`models-probe` 写一个 `addModel` 之后才进 `baseUrls` 的条目，`preview-token-rest` 写运行时拿到的 `token`。`kb-retrieval-endpoint` 另加第二个探针：在那个用例里 `console.warn(CONTENT_SENTINEL)`，改后必须在入库世界收尾报红（证明嵌套没吃掉外层）。跑该文件记 `probe-<文件>-before.log`（预期全绿＝漏判；`preview-token-rest`、`omp-host-tools` 预期已红＝不退化基线）；改后同一探针记 `probe-<文件>-after.log`（预期红，信息点名哨兵）；删探针，跑该文件全绿。
+- [x] 1.3 `useIngestWorlds` 与 `connectors-probe` 的收尾按 Must-preserve 改结构。变异证据（临时，不提交）：在 `useIngestWorlds` 收尾的关闭段临时插一个 `throw`；新建一个临时测试文件，在 `describe("A")` 里调用 `useIngestWorlds()` 并跑一个开世界的用例，在其后的兄弟 `describe("B")`（不受 A 的钩子作用）里断言 `vi.isMockFunction(console.log)` 与 `vi.isMockFunction(process.stdout.write)` 都为 false。改前 B 红（spy 遗留），改后 B 绿；记 `.workplans/2021/ingest-teardown-{before,after}.log`，随后撤掉变异并删掉临时文件。
+- [x] 1.4 用例体内判定的各处，确认 `stop()` 在 `finally` 里（逐处列出行号写进 PR）。
+- [x] 1.5 grep 证明：`server/test` 里 `vi.spyOn(<任意对象>, "write")` 与 `vi.spyOn(console, …)` 只剩 `support/output-sentinel.ts` 与三处例外（`server-entry-silent`、`server-upstream-failed-log`、`server-handshake-log`），其它命中逐条列出并说明非泄密用途；记 `.workplans/2021/grep.log`。
+- [x] 1.6 `npm run test:focus --workspace server -- <10 个文件与 kb-ingest-sentinel>`、`npm run test:focus --workspace server -- kb-`、`npm test --workspace server`、`make check` 通过（日志带 `EXIT=`）。
 
 Suggested fixture level: compact - 测试支架收口。

@@ -65,7 +65,7 @@ export const VIEW_KEYS = [
 ];
 export const DOMAIN_SENTINEL = "domain-sentinel-1690";
 /** Every credential string a response, audit row, log line or error must never carry. */
-const SECRETS = [
+export const SECRETS = [
   USER_SENTINEL,
   PASS_SENTINEL,
   KEY_SENTINEL,

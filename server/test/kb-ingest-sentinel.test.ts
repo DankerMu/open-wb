@@ -3,6 +3,7 @@
  * 哨兵也得抓到。不用 `useIngestWorlds`：它的收尾会对整段输出断言不含哨兵，这里故意写出哨兵，会被它自己绊倒。
  * 设置世界一例（#2018）：同一收集器以 `useSettingsWorlds` 的哨兵列表判定，经 `console.warn` 写出的密钥也得抓到；同理不用
  * `useSettingsWorlds`。
+ * 嵌套与二进制块两例（#2021）：内层收集器不清外层的记录与 spy；`write` 收到的 `Uint8Array` 按 UTF-8 解码。
  */
 import { describe, expect, it, vi } from "vitest";
 import { CONTENT_SENTINEL, MESSAGE_SENTINEL } from "./kb-ingest-helpers.js";
@@ -33,5 +34,57 @@ describe("泄密哨兵（verification-harness「入库世界的泄密哨兵覆�
     expect(vi.isMockFunction(console.warn)).toBe(false);
     expect(vi.isMockFunction(process.stderr.write)).toBe(false);
     expect(() => expectNoSentinel(text, SENTINELS)).toThrow(`泄密哨兵 ${EMBED_KEY} 出现在输出里`);
+  });
+
+  it("嵌套：内层 stop 不清外层的记录与 spy，外层文本同样含内层期间写出的哨兵；外层 stop 之后 spy 全部恢复", () => {
+    const outer = outputCollector();
+    const inner = outputCollector();
+    outer.start();
+    let innerText = "";
+    let outerText = "";
+    let spiedBetween: boolean[] = [];
+    try {
+      console.warn("内层之前", `…${MESSAGE_SENTINEL}…`);
+      inner.start();
+      try {
+        console.warn("内层期间", `…${CONTENT_SENTINEL}…`);
+      } finally {
+        innerText = inner.stop();
+      }
+      spiedBetween = [vi.isMockFunction(console.warn), vi.isMockFunction(process.stdout.write)];
+    } finally {
+      outerText = outer.stop();
+    }
+    expect(() => expectNoSentinel(innerText, [CONTENT_SENTINEL])).toThrow(
+      `泄密哨兵 ${CONTENT_SENTINEL} 出现在输出里`,
+    );
+    expect(() => expectNoSentinel(outerText, [CONTENT_SENTINEL])).toThrow(
+      `泄密哨兵 ${CONTENT_SENTINEL} 出现在输出里`,
+    );
+    // 内层只读它 start 之后的调用；外层从头读。
+    expect(() => expectNoSentinel(innerText, [MESSAGE_SENTINEL])).not.toThrow();
+    expect(() => expectNoSentinel(outerText, [MESSAGE_SENTINEL])).toThrow(
+      `泄密哨兵 ${MESSAGE_SENTINEL} 出现在输出里`,
+    );
+    expect(spiedBetween).toEqual([true, true]);
+    for (const method of [console.log, console.info, console.warn, console.error, console.debug]) {
+      expect(vi.isMockFunction(method)).toBe(false);
+    }
+    expect(vi.isMockFunction(process.stdout.write)).toBe(false);
+    expect(vi.isMockFunction(process.stderr.write)).toBe(false);
+  });
+
+  it("process.stdout.write 收到的 Uint8Array 块按 UTF-8 解码，块里的哨兵被判定抓到并点名", () => {
+    const output = outputCollector();
+    output.start();
+    let text = "";
+    try {
+      process.stdout.write(new TextEncoder().encode(`二进制块 ${MESSAGE_SENTINEL}\n`));
+    } finally {
+      text = output.stop();
+    }
+    expect(() => expectNoSentinel(text, [CONTENT_SENTINEL, MESSAGE_SENTINEL])).toThrow(
+      `泄密哨兵 ${MESSAGE_SENTINEL} 出现在输出里`,
+    );
   });
 });

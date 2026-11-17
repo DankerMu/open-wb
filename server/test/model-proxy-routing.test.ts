@@ -29,6 +29,7 @@ import {
   useResources,
   withListeningProxy,
 } from "./model-proxy-helpers.js";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 const resources = useResources();
 afterEach(async () => {
@@ -140,34 +141,36 @@ describe("Per-model routing", () => {
     baseA = `${upstreamA.origin}/tenant-aaaaaaaaaa/v1`;
     baseB = `${upstreamB.origin}/tenant-bbbbbbbbbb/v1`;
     const table = new Map<string, ModelRoute>();
-    const stdout = vi.spyOn(process.stdout, "write");
-    const stderr = vi.spyOn(process.stderr, "write");
-    await withListeningProxy(options(tableModels(table)), async (origin) => {
-      // Listed after registration: a key set captured when the proxy was built would miss both.
-      table.set("m1", { upstream: { baseUrl: baseA, apiKey: KEY_A } });
-      table.set("m2", { upstream: { baseUrl: baseB, apiKey: KEY_B } });
-      const first = await postCompletions(origin, { body: '{"model":"m1"}' });
-      expect(first.status).toBe(200);
-      expect(await first.text()).toBe('{"from":"A"}');
-      const message = await excerptOf(
-        await postCompletions(origin, { body: '{"model":"m2"}' }),
-        500,
-      );
-      for (const secret of [KEY_A, baseA, KEY_B, baseB]) {
-        expect(message).not.toContain(secret);
-      }
-      expect(message).toContain("[已移除]");
-    });
-    expect(upstreamA.requests.map((r) => r.body.toString("utf8"))).toEqual(['{"model":"m1"}']);
-    expect(upstreamA.requests[0]?.headers.authorization).toBe(`Bearer ${KEY_A}`);
-    expect(upstreamA.requests[0]?.url).toBe("/tenant-aaaaaaaaaa/v1/chat/completions");
-    expect(upstreamB.requests.map((r) => r.body.toString("utf8"))).toEqual(['{"model":"m2"}']);
-    expect(upstreamB.requests[0]?.headers.authorization).toBe(`Bearer ${KEY_B}`);
-    expect(upstreamB.requests[0]?.url).toBe("/tenant-bbbbbbbbbb/v1/chat/completions");
-    const output = [...stdout.mock.calls, ...stderr.mock.calls].map(([chunk]) => String(chunk));
-    for (const sentinel of [KEY_A, KEY_B]) {
-      expect(output.join("")).not.toContain(sentinel);
+    const output = outputCollector();
+    output.start();
+    let text = "";
+    try {
+      await withListeningProxy(options(tableModels(table)), async (origin) => {
+        // Listed after registration: a key set captured when the proxy was built would miss both.
+        table.set("m1", { upstream: { baseUrl: baseA, apiKey: KEY_A } });
+        table.set("m2", { upstream: { baseUrl: baseB, apiKey: KEY_B } });
+        const first = await postCompletions(origin, { body: '{"model":"m1"}' });
+        expect(first.status).toBe(200);
+        expect(await first.text()).toBe('{"from":"A"}');
+        const message = await excerptOf(
+          await postCompletions(origin, { body: '{"model":"m2"}' }),
+          500,
+        );
+        for (const secret of [KEY_A, baseA, KEY_B, baseB]) {
+          expect(message).not.toContain(secret);
+        }
+        expect(message).toContain("[已移除]");
+      });
+      expect(upstreamA.requests.map((r) => r.body.toString("utf8"))).toEqual(['{"model":"m1"}']);
+      expect(upstreamA.requests[0]?.headers.authorization).toBe(`Bearer ${KEY_A}`);
+      expect(upstreamA.requests[0]?.url).toBe("/tenant-aaaaaaaaaa/v1/chat/completions");
+      expect(upstreamB.requests.map((r) => r.body.toString("utf8"))).toEqual(['{"model":"m2"}']);
+      expect(upstreamB.requests[0]?.headers.authorization).toBe(`Bearer ${KEY_B}`);
+      expect(upstreamB.requests[0]?.url).toBe("/tenant-bbbbbbbbbb/v1/chat/completions");
+    } finally {
+      text = output.stop();
     }
+    expectNoSentinel(text, [KEY_A, KEY_B]);
   });
 });
 
