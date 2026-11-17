@@ -28,10 +28,10 @@ Must-preserve：
 
 ## 1. 合并实现（#2018）
 
-- [ ] 1.1 新建 `server/test/support/output-sentinel.ts`，把 `outputCollector` 与 `expectNoSentinel` 原样挪入，判定加 `sentinels` 参数；`useIngestWorlds` 改用它（传两个哨兵）。既有 `kb-ingest-sentinel` 用例改为新导入，保持绿：只允许改导入路径，以及给两处 `expectNoSentinel(text)` 补上 `[CONTENT_SENTINEL, MESSAGE_SENTINEL]` 参数，期望的报错文本不变。
-- [ ] 1.2 新用例（与既有 sentinel 用例同文件）：起共享收集器，`console.warn` 写出设置世界的一个密钥哨兵，停止后以设置世界的哨兵列表判定，断言抛错且点名该哨兵。设置世界的哨兵列表从 `kb-settings-helpers.ts` 导出（只导出列表）。
+- [x] 1.1 新建 `server/test/support/output-sentinel.ts`，把 `outputCollector` 与 `expectNoSentinel` 原样挪入，判定加 `sentinels` 参数；`useIngestWorlds` 改用它（传两个哨兵）。既有 `kb-ingest-sentinel` 用例改为新导入，保持绿：只允许改导入路径，以及给两处 `expectNoSentinel(text)` 补上 `[CONTENT_SENTINEL, MESSAGE_SENTINEL]` 参数，期望的报错文本不变。
+- [x] 1.2 新用例（与既有 sentinel 用例同文件）：起共享收集器，`console.warn` 写出设置世界的一个密钥哨兵，停止后以设置世界的哨兵列表判定，断言抛错且点名该哨兵。设置世界的哨兵列表从 `kb-settings-helpers.ts` 导出（只导出列表）。
   改前证据（临时探针，不提交）：在一个用 `useSettingsWorlds` 的测试文件里临时加一例 `console.warn(<某密钥哨兵>)`，在 1.3 之前跑该文件——全绿即漏判，记 `.workplans/2018/probe-before.log`。
-- [ ] 1.3 `useSettingsWorlds` 改用共享收集器与判定，删掉它自己的 spy 与比对逻辑；文件头注释（`kb-settings-helpers.ts:7`）同步写明也收 `console`。再跑同一探针：该例在收尾失败且点名哨兵，记 `.workplans/2018/probe-after.log`；然后删掉探针。
-- [ ] 1.4 `npm run test:focus --workspace server -- kb-`、`-- kb-ingest-sentinel`、`npm test --workspace server`、`make check` 通过（日志带 `EXIT=`）。
+- [x] 1.3 `useSettingsWorlds` 改用共享收集器与判定，删掉它自己的 spy 与比对逻辑；文件头注释（`kb-settings-helpers.ts:7`）同步写明也收 `console`。再跑同一探针：该例在收尾失败且点名哨兵，记 `.workplans/2018/probe-after.log`；然后删掉探针。
+- [x] 1.4 `npm run test:focus --workspace server -- kb-`、`-- kb-ingest-sentinel`、`npm test --workspace server`、`make check` 通过（日志带 `EXIT=`）。
 
 Suggested fixture level: compact - 测试支架去重。
