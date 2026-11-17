@@ -93,6 +93,12 @@
 | 组 8：收回共享 | 是 | 带外 `SET scope='me', scope_group_id=NULL`（053:53 的 CHECK 要求两列同改）之后，定义里没有 K1、执行为 `not_found`、没有新审计；已受理消息的快照不变 |
 | 组 8：死代码 | 是 | 同一提交删 `store.listBases`、`SELECT_BASES_BY_OWNER` 与 `kb-store.test.ts:194-205`；`BASE_ORDER` 留（`SELECT_BASES_BY_STATE` 仍在用）；knip 绿 |
 | 组 8：白盒 | 是 | 跨账号检索与多租户过滤：PR 标题与描述写明「请求白盒审查」 |
+| 组 9：规格场景与本刀的差异 | 是 | 「共享库的只读呈现」（spec.md:534）写「A 的行有范围按钮 `仅自己可见`」，详情头部（spec.md:462）亦为按钮；本刀按 9.3 两处都是纯文本、不是按钮，用例断言「没有该名称的按钮」；组 12 在 `center-kb-shared.test.tsx` 原地改为按钮，不另写一份 |
+| 组 9：既有定位器 | 是 | `rowOf`（`center-kb-support.tsx:285-291`）、`findByRole("cell",{name})`（`center-kb-detail.test.tsx:51`）、ui-walk `ui-walk-center-kb.ts:129`（`exact:true`）都按名称格全文匹配：自有库的名称格 SHALL 只有名称；`只读` 与 `来自 …` 只出现在共享库的名称格 |
+| 组 9：编译格按 `owned` 分支，不按 `compile` 判空 | 是 | 共享库只出标签、不出 `状态未知`；自有库 `compile:null` 仍为 `状态未知`（`list.tsx:87`，`center-kb-list.test.tsx` 既有用例原样绿） |
+| 组 9：只读数字可证伪 | 是 | jsdom 里 `fireEvent.change` 对 readOnly 输入照样触发；判别断言是「改值后仍为 `0.2`，请求 body 带已存值」，只断言 `readOnly` 属性抓不到仍接着 `onChange` 的实现 |
+| 组 9：对自有库用户可见 | 是 | 计数行与 `范围` 列（`仅自己可见`）本刀即对所有用户可见；本刀不加 CK 行（D12，issue Out of Scope），PR 描述按偏离写明「可见变化 + CK 行在 11.4 / 12.4」 |
+| 组 9：ui-walk 自有分支 | 是 | 列表加一列、详情头部加范围标签只改自有分支的版面；CI `ui-walk`（`all-checks-passed` 成员，`make check` 不跑）须绿，本机亦跑一次；`范围` 列在表格容器的 `overflow-x-auto` 里，不得进入检索测试区域的祖先宽度（`ui-walk-center-kb.ts` 的 `expectPanelFits`） |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -493,6 +499,43 @@ Minimal mergeable slice: atomic - 定义、执行与引用解析共用同一次�
 - [ ] 9.1 核对 Context：`web/src/features/center/kb/` 的 `list.tsx`、`detail.tsx`、`documents-table.tsx`、`retrieval-panel.tsx`；`web/test/center-kb-list.test.tsx`（356）、`center-kb-detail.test.tsx`（443）；demo :3240-3262、:2781-2803
 - [ ] 9.2 测试先行：新文件 `web/test/center-kb-shared.test.tsx` 覆盖「共享库的只读呈现」「所有者没有部门」、列表计数行、四档范围标签文案、自有库与共享库的按钮差异、共享库检索测试两个数字只读
 - [ ] 9.3 实现：按 `owned` 分支渲染；共享库的来源列为 `工作空间` / `本地上传`；编译只显示标签；自有库的范围标签本刀为纯文本（组 12 改为按钮）
+  - 组 9 约定（#2035 fixture 审查补；9.2–9.3 照此实现与测试）：
+    - 9.1 行号核实：`list.tsx` 159 行（`HEADERS` :14，`CompileCell` :74-95，`删除知识库` :139-151）；`detail.tsx` 131 行（标题 :54-61，入库工具条 :62-78，文档表 :87-101，检索测试 :102-109）；`documents-table.tsx` 113 行（`HEADERS` :7，`sourceText` :27-32，操作列 :78-106）；`retrieval-panel.tsx` 127 行（数字框 :60-73，`UnitField` :79-106）；`center-kb-list.test.tsx` 356、`center-kb-detail.test.tsx` 443、`center-kb-retrieval.test.tsx` 647（头部冻结，本组不碰）。demo：计数行 :3244、`只读` :3249、`来自` :3250、只读提示 :2803。
+    - 文案逐字（spec.md:440-442、:462、:465、:476）：
+      - 计数行 `我的 <owned 数> 个 · 共享给我 <非 owned 数> 个`，用一个模板串（单个文本节点）。
+      - 范围：`me` → `仅自己可见`，`dept` → `本部门可见`，`group` → `项目组可见 · <scope.group.name>`，`all` → `全员可见`。`group` 档而 `group` 为 null 在输入域外（053 CHECK），渲染 `项目组可见`，不写用例。
+      - `只读`；`来自 <owner.account> · <owner.department>`，部门为 null 时 `来自 <owner.account>`。
+      - 只读提示 `共享给你的知识库只读：可检索、可在会话中引用，不能增删文档。需要补充内容请联系 <owner.account>。`。
+      - 来源列 `工作空间` / `本地上传`。
+      - demo 的 `title` 悬停文案（:3249、:3254）是非目标。
+    - `list.tsx`（159 → ≤ 220）：
+      - 计数行：`KnowledgeBaseList` 在表格之上渲染 `<p className="ui-muted">`，由 `bases` 现算（删库、建库后跟着变，不另取）。没有知识库时只有空态 `还没有知识库`，没有计数行；`embeddingReady:false` 有库时照常显示。计数行不放 `panel.tsx`（PR 边界）。
+      - `HEADERS` 改为 `["名称","模板","编译","文档","状态","范围","操作"]`（按 spec.md:439 的次序，范围在标记之后）。
+      - 新导出 `ScopeLabel({ scope })`：纯文本 `<span className={TAG}>`，自有库与共享库同用。四档文案只在此一处（组 12 的按钮与对话框从这里取，不另写一份）。
+      - 名称格：自有库只有 `base.name`。共享库为名称加 `<span className={TAG}>只读</span>`，下一行 `<p>`（`text-xs text-muted-foreground`）写 `来自 …`；两者各自独立成元素，`getByText(…, {exact:true})` 可以定位。
+      - `CompileCell` 按 `base.owned` 分支：共享库只出开着的类型标签，不出状态文案与旁注。
+      - `删除知识库` 只在 `owned && state !== "rebuilding"` 时渲染。共享库整行没有按钮，点行与 Enter 照常进详情。
+      - 复杂度 ≤ 15：名称格抽成局部组件 `NameCell`，不在 `map` 里堆三元式。
+    - `detail.tsx`（131 → ≤ 160）：
+      - `<h3>` 文本不变（区域名仍为 `<库名> · 文档`，ui-walk :130 依赖它）；`ScopeLabel` 放在 `<h3>` 外，作同一个 `flex flex-wrap` 行的兄弟。自有库本刀也显示纯文本标签，组 12 改为按钮。
+      - 共享库：用 `MUTED`（`ingest-tree.tsx:8`）的 `<p>` 只读提示代替入库工具条，与 `state` 无关（`rebuild_failed` 时也显示）；不渲染 `IngestDialog` 与 `UploadButton`。
+      - 自有库分支不变；`useKbDocuments` 照旧（共享库也会读一次 `listWorkspaces`，不改不断言）。
+      - 检索测试仍只在 `ready` 时渲染。
+    - `documents-table.tsx`（113 → ≤ 135）：新 prop `owned: boolean`；`sourceText`：`upload` → `本地上传`；`path === null` → `工作空间`（服务端只对非所有者置空，所以按数据判，自有库不会走到）；其余不变。共享库不渲染 `操作` 列：表头为 `["名称","来源","大小","状态"]`，没有操作单元格。自有库的表头与行不变（`center-kb-detail.test.tsx:97-99`、CK-07 不动）。
+    - `retrieval-panel.tsx`（127 → ≤ 145）：`UnitField` 加 `readOnly`，取值为 `!base.owned`；只读时传 `readOnly`，并且不传 `onChange`（受控输入会被 React 还原），不用 `disabled`。请求 body 仍为两个框的当前值，即已存值（服务端对非所有者本来就忽略）。成功后照旧取应答的 `retrieval` 显示（只读），并经 `onRetrieval` 同步列表；`use-retrieval.ts` 不改。
+    - 新文件 `web/test/center-kb-shared.test.tsx`（≤ 320 行，文件头注明 `#2035 s2c-kb-visibility 组 9`）：
+      - 夹具复用 `center-kb-support.tsx` 的 `base`、`doc`、`fakeKb`、`READY`、`renderPanel`、`rowOf`。本地 `shared(id, patch)` = `base(id, { owned:false, owner:{id:"u1",account:"zhangsan",department:"平台研发部"}, scope:{scope:"all",group:null}, compile:null, ...patch })`。共享库的行用 `screen.getByText("来自 …",{exact:true}).closest("tr")` 定位，不改 `rowOf`。打开详情的助手以行元素为参数；若 jscpd 报它与 `center-kb-detail.test.tsx:50-55` 重复，就把 `openDetail` 挪进 `center-kb-support.tsx`，加可选参数 `row`，两边都导入，不留两份。
+      - 「共享库的只读呈现」：A = `base("a",{name:"我的库"})`，K = `shared("k",{name:"规范库",raptor:true,documents:2})`。K 的两份文档为 `doc("d1",{name:"spec.md",workspaceId:null,path:null,sourceChanged:null})` 与 `doc("d2",{name:"notes.md",source:"upload",workspaceId:null,path:null,sourceChanged:null})`。列表：计数行 `我的 1 个 · 共享给我 1 个`；K 行有 `只读` 与 `来自 zhangsan · 平台研发部`，第 6 列为 `全员可见`，编译格的文本恰为 `RAPTOR`，`queryAllByRole("button")` 为空；A 行各格依次为 `["我的库","通用","","0","","仅自己可见","删除知识库"]`，按钮名恰为 `["删除知识库"]`，没有 `只读` 与 `来自`；页面没有 `状态未知`。进 K 的详情：表头为 `["名称","来源","大小","状态"]`；两行来源为 `工作空间`、`本地上传`；只读提示逐字；区域内按钮名恰为 `["检索"]`；`全员可见` 在区域内。
+      - 「所有者没有部门」：`shared("k",{owner:{id:"u1",account:"zhangsan",department:null}})`。`getByText("来自 zhangsan",{exact:true})`；该行 `textContent` 不含 `·`。范围用 `all`，因为 `group` 档的文案本身带 ` · `。
+      - 列表计数行：两个自有 → `我的 2 个 · 共享给我 0 个`；两个共享 → `我的 0 个 · 共享给我 2 个`；空列表 → `还没有知识库`，没有匹配 `/^我的 \d+ 个/` 的文本；一自有一共享，删掉自有的那个 → `我的 0 个 · 共享给我 1 个`，`listKnowledgeBases` 仍为 1 次。
+      - 四档范围标签：依次为自有 `me`、共享 `dept`、自有 `group`（`{id:"g1",name:"内网落地专项"}`）、共享 `all`（`graph:true`）。按行序第 6 列为 `仅自己可见`、`本部门可见`、`项目组可见 · 内网落地专项`、`全员可见`；四个文案都没有同名按钮；共享 `all` 行的编译格为 `知识图谱`。打开自有 `group` 库的详情：`项目组可见 · 内网落地专项` 是纯文本、不是按钮。
+      - 自有库与共享库的按钮差异：A、K 都是 `rebuild_failed`，各一份工作空间来源的文档（K 的 `path` 为 null）。A 行有 `删除知识库`，K 行没有任何按钮；A 的详情有 `移出`；K 的详情没有 `移出`、`重新入库`、`从工作空间入库`、`上传文件`，有只读提示，没有 `检索测试`。
+      - 共享库检索测试两个数字只读：K 为 `ready`，`retrieval:{threshold:0.2,vectorWeight:0.7}`。两个数字框 `readOnly === true`、`disabled === false`；`fireEvent.change(相似度阈值,{target:{value:"0.9"}})` 之后值仍为 `"0.2"`，没有 `填 0 到 1 之间的数字`；先 `retrieveFromKnowledgeBase.mockImplementationOnce` 返回 `{hits:[],retrieval:{threshold:0.3,vectorWeight:0.6}}`，再填问句 `销售额` 点 `检索`：恰一次调用，参数 `("k",{question:"销售额",threshold:0.2,vectorWeight:0.7})`；之后两个框为 `"0.3"`、`"0.6"`，仍为 readOnly；`listKnowledgeBases` 仍为 1 次。对照：自有库 A 的数字框 `readOnly === false`。
+    - 既有用例只许原地改 `center-kb-list.test.tsx:141-163`：表头加 `范围`；三行的格各在第 6 位插入 `仅自己可见`（`["规范库","手册","","3","","仅自己可见","删除知识库"]`、`["表格库","表格","RAPTOR已完成知识图谱编译中","0","重建中","仅自己可见",""]`、`["法规库","法规","","1","重建失败","仅自己可见","删除知识库"]`）。`:236`、`:328` 的第 2 列（编译格）不变。其余 kb 测试文件不改。
+    - TDD：没有新生产文件。四个组件的配对测试是 `center-kb-shared.test.tsx`；先写红的用例再实现。
+    - 非目标：范围按钮与对话框，新建对话框的范围（组 12）；引用选择列表（组 10）；ui-walk 共享分支与截图（组 13）；CK 行（11.4 的「非所有者只读」行由组 11 写，届时建议在期望里补上 `我的 0 个 · 共享给我 1 个`）；共享库详情跳过 `listWorkspaces`；demo 的 `title` 悬停文案。
+    - 实测与上面这些字面量不符时停下来报告，不改期望。
+    - 回归命令：`npm run test:focus --workspace web -- center-kb-shared`（先红后绿）；`npm run test:focus --workspace web -- center-kb`；`make lint`、`make typecheck`、`make anti-drift`（jscpd：打开详情的助手；knip：`ScopeLabel` 有使用者）；本机 ui-walk（自有分支版面有变化）；最后 `make check`。本刀不附截图，也不做 UI 视觉声明。
 
 Suggested fixture level: compact - 纯呈现分支，数据已由组 5 给出。
 Minimal mergeable slice: atomic - 列表与详情的只读呈现是同一个 `owned` 分支在相邻组件里的两处，验证路径是同一个组件测试文件。
