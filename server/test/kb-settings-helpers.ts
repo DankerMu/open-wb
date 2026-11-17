@@ -4,11 +4,11 @@
  *
  * 每个用例收尾都断言 D7 的不变量：所有请求都带着 `KbDependencies` 交下来的密钥，没有落到未知路由，没有 `/providers` 下的
  * `DELETE`，没有 `PATCH /users/me/models`、单实例 `GET`，每个 `PATCH /models/default` 都带非空的三个名字。
- * 夹具把记录里没有的请求判为未知路由，所以序列错了不能悄悄通过。stdout、stderr 全程不得出现密钥与 RAGFlow message 的哨兵。
+ * 夹具把记录里没有的请求判为未知路由，所以序列错了不能悄悄通过。stdout、stderr 与 `console` 全程不得出现密钥与 RAGFlow message 的哨兵。
  */
 import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, LightMyRequestResponse } from "fastify";
-import { afterEach, beforeEach, expect, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, expect } from "vitest";
 import { type AssemblyDependencies, createApp } from "../src/app.js";
 import { openDb } from "../src/core/db/index.js";
 import type { KbDependencies } from "../src/kb/index.js";
@@ -19,6 +19,7 @@ import { FIXED_NOW, fixedRuntime } from "./session-db-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
 import { type FakeRagflowRequest, type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
 import { type FakeUpstreamServer, start as startUpstream } from "./support/fake-upstream.mjs";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 const RAGFLOW_KEY = "wb-issue1844-ragflow-key";
 /** 哨兵：嵌入与对话模型的上游密钥，以及假 RAGFlow 的 message。 */
@@ -46,7 +47,8 @@ export const LOCKED = {
     message: "已有开启 RAPTOR 或知识图谱的知识库，不能更换或取消知识库对话模型",
   },
 };
-const SENTINELS = [EMBED_KEY, CHAT_KEY, RERANK_KEY, ROTATED_KEY, LEAK];
+/** 设置世界收尾判定的哨兵列表。 */
+export const SENTINELS = [EMBED_KEY, CHAT_KEY, RERANK_KEY, ROTATED_KEY, LEAK];
 
 export const bodyOf = (response: { body: string }) => JSON.parse(response.body) as unknown;
 
@@ -162,18 +164,15 @@ type OpenWorld = (options?: Options) => Promise<World>;
 /** 在所在文件登记收尾，返回开世界函数。 */
 export function useSettingsWorlds(): OpenWorld {
   const opened: Array<() => Promise<void>> = [];
-  let outputs: Array<MockInstance<typeof process.stdout.write>> = [];
+  const output = outputCollector();
   beforeEach(() => {
-    outputs = [vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
+    output.start();
   });
   afterEach(async () => {
     try {
       for (const close of opened.splice(0).reverse()) await close();
     } finally {
-      const written = outputs.flatMap((spy) => spy.mock.calls.map((args) => String(args[0])));
-      for (const spy of outputs) spy.mockRestore();
-      const text = written.join("");
-      for (const secret of SENTINELS) expect(text).not.toContain(secret);
+      expectNoSentinel(output.stop(), SENTINELS);
     }
   });
 

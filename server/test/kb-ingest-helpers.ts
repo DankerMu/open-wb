@@ -8,9 +8,8 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { format } from "node:util";
 import type { LightMyRequestResponse } from "fastify";
-import { afterEach, beforeEach, expect, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, expect } from "vitest";
 import type { KbDependencies } from "../src/kb/index.js";
 import { createKbLocks } from "../src/kb/locks.js";
 import { resourceName } from "../src/kb/pipeline.js";
@@ -20,6 +19,7 @@ import { type FileWorld, openFileWorld, put } from "./mounts-file-endpoints-help
 import { disposeWorlds, OWNER, W1 } from "./mounts-manager-helpers.js";
 import { closeApps, send } from "./mounts-rest-helpers.js";
 import { type FakeRagflowRequest, type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 export const RAGFLOW_KEY = "wb-issue1847-ragflow-key";
 const VERSION_PATH = "/api/v1/system/version";
@@ -123,41 +123,6 @@ export const scriptSecondUpload = (
 
 type OpenWorld = (setup?: IngestSetup) => Promise<IngestWorld>;
 
-/** 用例期间的输出收集器：`start()` 装 spy（透传，不吞输出），`stop()` 恢复全部 spy 并返回收集到的文本。 */
-export interface OutputCollector {
-  start(): void;
-  stop(): string;
-}
-
-const CONSOLE_METHODS = ["log", "info", "warn", "error", "debug"] as const;
-
-export function outputCollector(): OutputCollector {
-  let writes: Array<MockInstance<typeof process.stdout.write>> = [];
-  let consoles: Array<MockInstance<typeof console.log>> = [];
-  return {
-    start() {
-      writes = [vi.spyOn(process.stdout, "write"), vi.spyOn(process.stderr, "write")];
-      // vitest 截走 `console`，不经过上面两个 `write`（#2009）；spy 不给实现，照常透传给 vitest。
-      consoles = CONSOLE_METHODS.map((method) => vi.spyOn(console, method));
-    },
-    stop() {
-      const written = writes.flatMap((spy) => spy.mock.calls.map((args) => String(args[0])));
-      const logged = consoles.flatMap((spy) => spy.mock.calls.map((args) => format(...args)));
-      for (const spy of [...writes.splice(0), ...consoles.splice(0)]) spy.mockRestore();
-      return [...written, ...logged].join("");
-    },
-  };
-}
-
-/** 泄密判定：文本含任一哨兵就抛错，信息只点名哨兵，不回显文本。 */
-export function expectNoSentinel(text: string): void {
-  for (const sentinel of [CONTENT_SENTINEL, MESSAGE_SENTINEL]) {
-    if (text.includes(sentinel)) {
-      throw new Error(`泄密哨兵 ${sentinel} 出现在输出里`);
-    }
-  }
-}
-
 /** 在所在文件登记收尾，返回开世界函数。 */
 export function useIngestWorlds(): OpenWorld {
   const fakes: FakeRagflowServer[] = [];
@@ -181,7 +146,7 @@ export function useIngestWorlds(): OpenWorld {
       await closeApps();
       await disposeWorlds();
       for (const fake of fakes.splice(0)) await fake.close();
-      expectNoSentinel(output.stop());
+      expectNoSentinel(output.stop(), [CONTENT_SENTINEL, MESSAGE_SENTINEL]);
     }
   });
 
