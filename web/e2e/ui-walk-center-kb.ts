@@ -55,6 +55,9 @@ export const BASE = {
   compile: { raptor: "off", graph: "off" },
   retrieval: RETRIEVAL,
   createdAt: 1_760_000_000_000,
+  owned: true,
+  owner: { id: "u1", account: "zhangsan", department: "平台研发部" },
+  scope: { scope: "me", group: null },
 };
 // `done`：不触发 3 秒刷新。
 const DOCUMENT = {

@@ -28,6 +28,7 @@ import { PAGE_SIZE, type RetrievalQuery } from "./ragflow-retrieval.js";
 import { isRecord, type Result, UNAVAILABLE } from "./ragflow-route.js";
 import { rerankModelOf } from "./settings.js";
 import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
+import type { createKbVisibility } from "./visibility.js";
 
 const BODY_KEYS = ["question", "threshold", "vectorWeight"];
 const MAX_QUESTION_CODE_POINTS = 1000;
@@ -68,12 +69,10 @@ interface AuditEvent {
 }
 
 interface KbRetrievalDependencies {
-  store: Pick<
-    ReturnType<typeof createKbStore>,
-    "getBase" | "listDocuments" | "saveRetrieval" | "settings"
-  >;
+  store: Pick<ReturnType<typeof createKbStore>, "listDocuments" | "saveRetrieval" | "settings">;
   client: Pick<ReturnType<typeof createRagflowClient>, "retrieve">;
   locks: Pick<ReturnType<typeof createKbLocks>, "write">;
+  visibility: Pick<ReturnType<typeof createKbVisibility>, "accessOf">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
   onRerankDegraded: () => void;
@@ -180,11 +179,11 @@ const sameParameters = (base: KnowledgeBase, request: RetrievalParameters): bool
 
 /** 写回只对 `ready` 的库（D4 第 3 步）：`rebuild_failed` 也拒。 */
 function readyBase(
-  store: KbRetrievalDependencies["store"],
+  visibility: KbRetrievalDependencies["visibility"],
   id: string,
   ownerId: string,
 ): KnowledgeBase {
-  const base = ownedBase(store, id, ownerId);
+  const { base } = ownedBase(visibility, id, ownerId);
   if (base.state !== "ready") {
     throw new HttpError("kb_rebuilding");
   }
@@ -192,11 +191,11 @@ function readyBase(
 }
 
 export function createKbRetrieval(dependencies: KbRetrievalDependencies) {
-  const { store, locks, audit } = dependencies;
+  const { store, locks, visibility, audit } = dependencies;
 
   /** 锁内：重读、再比较，仍不同才写两列并审计。返回检索要用的行。 */
   function saveLocked(id: string, request: TestRequest, ownerId: string): KnowledgeBase {
-    const base = readyBase(store, id, ownerId);
+    const base = readyBase(visibility, id, ownerId);
     if (sameParameters(base, request)) {
       return base;
     }
@@ -229,7 +228,7 @@ export function createKbRetrieval(dependencies: KbRetrievalDependencies) {
     /** `POST /api/kb/bases/:id/retrieval`：200 恰为 `{hits, retrieval}`。检索本身不审计。 */
     async test(id: string, body: unknown, ownerId: string) {
       const request = parseTest(body);
-      const base = readyBase(store, id, ownerId);
+      const base = readyBase(visibility, id, ownerId);
       const used = sameParameters(base, request) ? base : await writeBack(id, request, ownerId);
       const result = await retrieveForBase(dependencies, used, request.question);
       if (result.kind !== "ok") {

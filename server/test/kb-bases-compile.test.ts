@@ -190,6 +190,9 @@ describe("建库应答不读 RAGFlow", () => {
       compile: { raptor: "pending", graph: "off" },
       retrieval: { threshold: 0.2, vectorWeight: 0.7 },
       createdAt: expect.any(Number),
+      owned: true,
+      owner: { id: "u1", account: "zhangsan", department: "平台研发部" },
+      scope: { scope: "me", group: null },
     });
     expect((await createdBase(world, "普通库")).compile).toEqual(COMPILE_OFF);
     const reads = world.fake

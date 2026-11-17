@@ -10,7 +10,7 @@
 # 端点与写法（读代码得出）：
 # - `GET /api/kb/status` → 200 `{enabled, available, embeddingReady, compileReady, …}`（server/src/kb/rest.ts `statusOf`）。
 # - `POST /api/kb/bases` body 只认 `name`、`template`、`raptor`、`graph`（server/src/kb/bases.ts `BODY_KEYS`），201 `BaseView`
-#   `{id, name, template, raptor, graph, state, stateMessage, documents, compile, retrieval, createdAt}`；新库开着的编译为 `pending`，
+#   `{id, name, template, raptor, graph, state, stateMessage, documents, compile, retrieval, createdAt, owned, owner, scope}`；新库开着的编译为 `pending`，
 #   关着的为 `off`（`createdCompile`），`retrieval` 为缺省 `{threshold:0.2, vectorWeight:0.7}`（`viewOf`）。
 #   `GET /api/kb/bases` → 200 `{bases: BaseView[]}`；`DELETE /api/kb/bases/:id` → 204。
 # - `POST /api/kb/bases/:id/documents` body 只认 `workspaceId`、`paths`（server/src/kb/documents.ts `BODY_KEYS`），

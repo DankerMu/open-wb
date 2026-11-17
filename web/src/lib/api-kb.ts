@@ -22,6 +22,8 @@ const TEMPLATES = [
 ] as const;
 const BASE_STATES = ["ready", "rebuilding", "rebuild_failed"] as const;
 const COMPILE_STATES = ["pending", "running", "done", "failed", "off"] as const;
+/** 可见范围的四档（knowledge-bases「可见范围判定」）。 */
+const BASE_SCOPES = ["me", "dept", "group", "all"] as const;
 const DOCUMENT_SOURCES = ["workspace", "upload"] as const;
 const DOCUMENT_STATUSES = [
   "queued",
@@ -108,6 +110,12 @@ export type BaseView = {
   /** 该库的检索参数；0–1 由服务端保证。 */
   retrieval: { threshold: number; vectorWeight: number };
   createdAt: number;
+  /** 查看者是不是所有者：非自有的库只读，`compile` 恒为 `null`。 */
+  owned: boolean;
+  /** 所有者此刻的账号与部门；部门可为空。 */
+  owner: { id: string; account: string; department: string | null };
+  /** 可见范围；`group` 只在 `scope` 为 `group` 时非空（服务端 CHECK 保证）。 */
+  scope: { scope: (typeof BASE_SCOPES)[number]; group: { id: string; name: string } | null };
 };
 
 /** `POST /api/kb/bases` 的 body：只发所给的键。 */
@@ -221,6 +229,9 @@ const BASE_KEYS = [
   "compile",
   "retrieval",
   "createdAt",
+  "owned",
+  "owner",
+  "scope",
 ];
 const DOCUMENT_KEYS = [
   "id",
@@ -342,6 +353,38 @@ function parseCompile(value: unknown): BaseView["compile"] | undefined {
 const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 
+/** 恰 `id, account, department` 三键；部门可为 `null`。 */
+function parseOwner(value: unknown): BaseView["owner"] | null {
+  if (!hasExactlyKeys(value, ["id", "account", "department"])) {
+    return null;
+  }
+  const { id, account, department } = value;
+  return typeof id === "string" && typeof account === "string" && isNullableString(department)
+    ? { id, account, department }
+    : null;
+}
+
+function parseGroup(value: unknown): BaseView["scope"]["group"] | undefined {
+  if (value === null) {
+    return null;
+  }
+  if (!hasExactlyKeys(value, ["id", "name"])) {
+    return undefined;
+  }
+  const { id, name } = value;
+  return typeof id === "string" && typeof name === "string" ? { id, name } : undefined;
+}
+
+/** 恰 `scope, group` 两键；不校验「`group` 档当且仅当 `group` 非空」（服务端 CHECK 是权威）。 */
+function parseScope(value: unknown): BaseView["scope"] | null {
+  if (!hasExactlyKeys(value, ["scope", "group"])) {
+    return null;
+  }
+  const { scope } = value;
+  const group = parseGroup(value.group);
+  return isOneOf(BASE_SCOPES, scope) && group !== undefined ? { scope, group } : null;
+}
+
 /** 只认两键的有限数字，不在 web 侧校验 0–1（服务端 CHECK 是权威）。 */
 function parseRetrieval(value: unknown): BaseView["retrieval"] | null {
   if (!hasExactlyKeys(value, ["threshold", "vectorWeight"])) {
@@ -357,9 +400,12 @@ function parseBaseView(value: unknown): BaseView | null {
   if (!hasExactlyKeys(value, BASE_KEYS)) {
     return null;
   }
-  const { id, name, template, raptor, graph, state, stateMessage, documents, createdAt } = value;
+  const { id, name, template, raptor, graph, state, stateMessage, documents, createdAt, owned } =
+    value;
   const compile = parseCompile(value.compile);
   const retrieval = parseRetrieval(value.retrieval);
+  const owner = parseOwner(value.owner);
+  const scope = parseScope(value.scope);
   if (
     typeof id !== "string" ||
     typeof name !== "string" ||
@@ -371,7 +417,10 @@ function parseBaseView(value: unknown): BaseView | null {
     !isNonNegativeSafeInteger(documents) ||
     compile === undefined ||
     retrieval === null ||
-    !isNonNegativeSafeInteger(createdAt)
+    !isNonNegativeSafeInteger(createdAt) ||
+    typeof owned !== "boolean" ||
+    owner === null ||
+    scope === null
   ) {
     return null;
   }
@@ -387,6 +436,9 @@ function parseBaseView(value: unknown): BaseView | null {
     compile,
     retrieval,
     createdAt,
+    owned,
+    owner,
+    scope,
   };
 }
 

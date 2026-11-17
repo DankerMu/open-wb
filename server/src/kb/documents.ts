@@ -52,6 +52,7 @@ import { type createRagflowClient, isRecord, type ListedDocument } from "./ragfl
 import { type createSourceFiles, isMountOffline, type OpenedSource } from "./source-file.js";
 import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
 import { acceptsFile } from "./templates.js";
+import type { createKbVisibility } from "./visibility.js";
 
 const BODY_KEYS = new Set(["workspaceId", "paths"]);
 export const MAX_DOCUMENTS_PER_BASE = 500;
@@ -180,7 +181,6 @@ interface AuditEvent {
 interface KbDocumentsDependencies {
   store: Pick<
     ReturnType<typeof createKbStore>,
-    | "getBase"
     | "getDocument"
     | "findDocumentBySource"
     | "listDocuments"
@@ -191,6 +191,7 @@ interface KbDocumentsDependencies {
   >;
   client: Client;
   locks: Pick<ReturnType<typeof createKbLocks>, "write">;
+  visibility: Pick<ReturnType<typeof createKbVisibility>, "accessOf">;
   sources: ReturnType<typeof createSourceFiles>;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
@@ -356,12 +357,12 @@ export async function readRagflowDocuments(
 }
 
 export function createKbDocuments(dependencies: KbDocumentsDependencies) {
-  const { store, client, locks, sources, audit } = dependencies;
+  const { store, client, locks, visibility, sources, audit } = dependencies;
   const { uploadMaxBytes, uploadMaxFiles } = dependencies;
 
   /** 取锁前后各判一次；次序同 spec：工作空间先于 `state`。 */
   function ingestable(id: string, actorId: string, workspaceId: string): KnowledgeBase {
-    const base = ownedBase(store, id, actorId);
+    const { base } = ownedBase(visibility, id, actorId);
     sources.assertVisible({ id: actorId }, workspaceId);
     if (base.state !== "ready") {
       throw new HttpError("kb_rebuilding");
@@ -371,7 +372,7 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
 
   /** 移出的判定，取锁前后各一次：见文件头。 */
   function removable(id: string, actorId: string, documentId: string) {
-    const base = ownedBase(store, id, actorId);
+    const { base } = ownedBase(visibility, id, actorId);
     if (base.state === "rebuilding") {
       throw new HttpError("kb_rebuilding");
     }
@@ -393,7 +394,7 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
 
   /** 重新入库的判定，取锁前后各一次：见文件头。返回的 `item` 是这一行的源。 */
   function reingestable(id: string, actorId: string, documentId: string) {
-    const base = ownedBase(store, id, actorId);
+    const { base } = ownedBase(visibility, id, actorId);
     if (base.state !== "ready") {
       throw new HttpError("kb_rebuilding");
     }
@@ -632,7 +633,7 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
   return {
     /** `GET /api/kb/bases/:id/documents`：见文件头。 */
     async list(id: string, actorId: string): Promise<DocumentView[]> {
-      const base = ownedBase(store, id, actorId);
+      const { base } = ownedBase(visibility, id, actorId);
       const documents = store.listDocuments(id);
       const listed = await readRagflowDocuments(client, base.datasetId);
       if (listed.kind === "kb_unavailable" || listed.kind === "kb_rejected") {

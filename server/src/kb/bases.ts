@@ -10,11 +10,12 @@
  * 也不会与一次保存交错（取消指定排在前面，这里读到 `null`；排在后面，它读到开编译的库）。先建 RAGFlow 资源、后插行：插行
  * 或审计失败时按删除次序删掉这一代，删除失败写一行 leak，不改变应答。
  *
- * 删库：别人的或不存在的 id 一律 404，先于 `state`，不发出站请求，不写审计。快判到取锁之间没有 `await`：`locks.ts` 的
- * 准入是同步的，到达次序就是调用次序（D20）。取锁后重判，排队期间库可能已删除或转入重建。每一代走 `deletePipeline`，
- * `rebuild_failed` 时先删新一代；任一步失败行不动，重试从头走一遍，已删的按 `not_found` 跳过。
+ * 删库：两级归属（不可见与不存在 404、可见的非所有者 403），先于 `state`，不发出站请求，不写审计。快判到取锁之间没有
+ * `await`：`locks.ts` 的准入是同步的，到达次序就是调用次序（D20）。取锁后重判，排队期间库可能已删除或转入重建。每一代走
+ * `deletePipeline`，`rebuild_failed` 时先删新一代；任一步失败行不动，重试从头走一遍，已删的按 `not_found` 跳过。
  *
- * 列表只依赖本地行；`compile` 由 `kb/compile-status.ts` 现读（#1870），读不到为 `null`，不影响列表。201 的 `BaseView` 不读
+ * 列表是查看者可见的库（`kb/visibility.ts`，s2c-kb-visibility D2、D4），只依赖本地行；`compile` 只为自有库由
+ * `kb/compile-status.ts` 现读（#1870），读不到为 `null`，不影响列表，非自有库恒为 `null`。201 的 `BaseView` 不读
  * RAGFlow：开着的类型为 `pending`，关着的为 `off`。
  */
 import { HttpError } from "../core/errors/index.js";
@@ -26,6 +27,7 @@ import { type createRagflowClient, isRecord } from "./ragflow-client.js";
 import { embeddingModelOf } from "./settings.js";
 import type { createKbStore, KnowledgeBase } from "./store.js";
 import { templateOf } from "./templates.js";
+import type { BaseAccess, createKbVisibility } from "./visibility.js";
 
 const BODY_KEYS = new Set(["name", "template", "raptor", "graph"]);
 const MAX_NAME_CODE_POINTS = 64;
@@ -43,8 +45,6 @@ interface KbBasesDependencies {
     ReturnType<typeof createKbStore>,
     | "newId"
     | "settings"
-    | "getBase"
-    | "listBases"
     | "isBaseNameTaken"
     | "countBasesByOwner"
     | "countDocuments"
@@ -57,6 +57,7 @@ interface KbBasesDependencies {
     "createPipeline" | "deletePipeline" | "discard"
   >;
   locks: Pick<ReturnType<typeof createKbLocks>, "settings" | "write">;
+  visibility: Pick<ReturnType<typeof createKbVisibility>, "accessOf" | "visibleBases">;
   /** 列表的编译状态；由装配注入，`compile-status.ts` 经 `documents.ts` 间接依赖本文件。 */
   compileStatus: Pick<ReturnType<typeof createCompileStatus>, "read">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
@@ -85,17 +86,24 @@ function badRequest(): never {
   throw new HttpError("bad_request");
 }
 
-/** 别人的与不存在的不可区分。 */
-export function ownedBase(
-  store: Pick<ReturnType<typeof createKbStore>, "getBase">,
-  id: string,
-  ownerId: string,
-): KnowledgeBase {
-  const base = store.getBase(id);
-  if (base === undefined || base.ownerId !== ownerId) {
+type Visibility = Pick<ReturnType<typeof createKbVisibility>, "accessOf">;
+
+/** 第一级：不可见的与不存在的不可区分，都是 404。组 6 起由读路由直接使用。 */
+function readableBase(visibility: Visibility, id: string, viewerId: string): BaseAccess {
+  const access = visibility.accessOf(id, viewerId);
+  if (access === null) {
     throw new HttpError("not_found");
   }
-  return base;
+  return access;
+}
+
+/** 第二级：可见而不是自己的库 403（共享只读）。 */
+export function ownedBase(visibility: Visibility, id: string, viewerId: string): BaseAccess {
+  const access = readableBase(visibility, id, viewerId);
+  if (!access.owned) {
+    throw new HttpError("forbidden");
+  }
+  return access;
 }
 
 const isSwitch = (value: unknown): value is boolean | undefined =>
@@ -166,7 +174,8 @@ export async function createGeneration(
 }
 
 /** `retrieval` 取库行两列的原值（迁移 051 的 CHECK 保证 0–1），不取整、不夹逼。 */
-function viewOf(base: KnowledgeBase, documents: number, compile: CompileView) {
+function viewOf(access: BaseAccess, documents: number, compile: CompileView) {
+  const { base, owned, owner, scope } = access;
   const { id, name, template, raptor, graph, state, stateMessage, createdAt } = base;
   const retrieval = {
     threshold: base.retrievalThreshold,
@@ -184,6 +193,9 @@ function viewOf(base: KnowledgeBase, documents: number, compile: CompileView) {
     compile,
     retrieval,
     createdAt,
+    owned,
+    owner,
+    scope,
   };
 }
 
@@ -194,10 +206,10 @@ const createdCompile = ({ raptor, graph }: KnowledgeBase): CompileView => ({
 });
 
 export function createKbBases(dependencies: KbBasesDependencies) {
-  const { store, pipeline, locks, compileStatus, audit } = dependencies;
+  const { store, pipeline, locks, visibility, compileStatus, audit } = dependencies;
 
   function deletable(id: string, ownerId: string): KnowledgeBase {
-    const base = ownedBase(store, id, ownerId);
+    const { base } = ownedBase(visibility, id, ownerId);
     if (base.state === "rebuilding") {
       throw new HttpError("kb_rebuilding");
     }
@@ -232,23 +244,21 @@ export function createKbBases(dependencies: KbBasesDependencies) {
     const generationName = resourceName(id, embeddingGeneration);
     const embeddingModel = embeddingModelOf(embedding.name);
     const resources = await createResources(request, generationName, embeddingModel);
+    let base: KnowledgeBase;
     try {
-      const base = store.createBase(
-        { id, ownerId, name, template, raptor, graph, ...resources },
-        () => {
-          audit({
-            kind: "kb.create",
-            actorId: ownerId,
-            title: "新建知识库",
-            detail: { id, template, raptor, graph },
-          });
-        },
-      );
-      return viewOf(base, 0, createdCompile(base));
+      base = store.createBase({ id, ownerId, name, template, raptor, graph, ...resources }, () => {
+        audit({
+          kind: "kb.create",
+          actorId: ownerId,
+          title: "新建知识库",
+          detail: { id, template, raptor, graph },
+        });
+      });
     } catch (error) {
       await pipeline.discard(resources);
       throw error;
     }
+    return viewOf(ownedBase(visibility, base.id, ownerId), 0, createdCompile(base));
   }
 
   async function removeLocked(id: string, ownerId: string): Promise<void> {
@@ -264,12 +274,21 @@ export function createKbBases(dependencies: KbBasesDependencies) {
   }
 
   return {
-    /** `GET /api/kb/bases`：按 `created_at` 升序。库与文档数只读本地行，`compile` 各库并发现读、共用总期限。 */
-    async list(ownerId: string) {
-      const bases = store.listBases(ownerId);
-      const compiles = await compileStatus.read(bases);
-      return bases.map((base, index) =>
-        viewOf(base, store.countDocuments(base.id), compiles[index] ?? null),
+    /**
+     * `GET /api/kb/bases`：查看者可见的库，自有的在前，各自按 `created_at` 升序。库与文档数只读本地行；`compile` 只为自有库
+     * 并发现读、共用总期限，非自有库恒为 `null`，不发出站请求。
+     */
+    async list(viewerId: string) {
+      const accesses = visibility.visibleBases(viewerId);
+      const owned = accesses.filter((access) => access.owned).map(({ base }) => base);
+      const compiles = await compileStatus.read(owned);
+      const compileById = new Map(owned.map((base, index) => [base.id, compiles[index] ?? null]));
+      return accesses.map((access) =>
+        viewOf(
+          access,
+          store.countDocuments(access.base.id),
+          compileById.get(access.base.id) ?? null,
+        ),
       );
     },
 
@@ -279,9 +298,9 @@ export function createKbBases(dependencies: KbBasesDependencies) {
       return locks.settings(() => createLocked(request, ownerId));
     },
 
-    /** 所有权判定先于 body 解析（knowledge-bases「知识库端点」）。 */
+    /** 写路由的归属判定（不可见 404、可见非所有者 403），先于 body 解析（knowledge-bases「知识库端点」）。 */
     assertOwned(id: string, ownerId: string): void {
-      ownedBase(store, id, ownerId);
+      ownedBase(visibility, id, ownerId);
     },
 
     /** `DELETE /api/kb/bases/:id`：在该库的写锁下。 */

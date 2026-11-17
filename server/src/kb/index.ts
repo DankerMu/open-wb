@@ -38,6 +38,7 @@ import { createKbSettings } from "./settings.js";
 import { createSourceFiles } from "./source-file.js";
 import { createKbStore } from "./store.js";
 import { createKbUploads, type UploadBodyDeadline } from "./uploads.js";
+import { createKbVisibility } from "./visibility.js";
 
 declare module "fastify" {
   interface FastifyInstance {
@@ -115,6 +116,7 @@ export function registerKb(
   } = dependencies;
   const { log, now = Date.now } = dependencies;
   const store = createKbStore(app.db);
+  const visibility = createKbVisibility(app.db);
   const client = createRagflowClient(clientOptions);
   const onRerankDegraded = perMinute(now, () => log({ event: "kb_rerank_degraded" }));
   const audit = (event: Parameters<typeof emit>[1]): void => {
@@ -151,6 +153,7 @@ export function registerKb(
       client,
       pipeline,
       locks,
+      visibility,
       compileStatus: createCompileStatus({ store, client, deadlineMs: compileStatusDeadlineMs }),
       audit,
     }),
@@ -158,6 +161,7 @@ export function registerKb(
       store,
       client,
       locks,
+      visibility,
       audit,
       log,
       sources: createSourceFiles({
@@ -173,6 +177,7 @@ export function registerKb(
       store,
       client,
       locks,
+      visibility,
       audit,
       log,
       uploadMaxBytes,
@@ -183,6 +188,7 @@ export function registerKb(
       store,
       client,
       locks,
+      visibility,
       audit,
       onRerankDegraded,
     }),

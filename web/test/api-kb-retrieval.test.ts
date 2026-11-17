@@ -38,6 +38,9 @@ const BASE: BaseView = {
   compile: { raptor: "off", graph: "off" },
   retrieval: { threshold: 0.2, vectorWeight: 0.7 },
   createdAt: 1_760_000_000_000,
+  owned: true,
+  owner: { id: "u1", account: "zhangsan", department: "平台研发部" },
+  scope: { scope: "me", group: null },
 };
 
 /** 建库 201 原样返回 `BaseView`；列表 200 的 `{bases}` 外层由客户端拆掉。 */

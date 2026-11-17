@@ -67,6 +67,9 @@ export interface BaseBody {
   compile: unknown;
   retrieval: { threshold: number; vectorWeight: number };
   createdAt: number;
+  owned: boolean;
+  owner: { id: string; account: string; department: string | null };
+  scope: { scope: string; group: { id: string; name: string } | null };
 }
 
 export function createBase(

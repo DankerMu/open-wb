@@ -86,6 +86,9 @@ const BASE: BaseView = {
   compile: COMPILE,
   retrieval: { threshold: 0.2, vectorWeight: 0.7 },
   createdAt: AT,
+  owned: true,
+  owner: { id: "u1", account: "zhangsan", department: "平台研发部" },
+  scope: { scope: "me", group: null },
 };
 
 // knowledge-bases「混合批次」与「上传不落盘」的写端点视图
@@ -223,6 +226,10 @@ const BASE_REJECTED: Case[] = [
     // 内层形状的拒绝用例在 `api-kb-retrieval.test.ts`。
     retrieval: [],
     createdAt: AT_WRONG,
+    // 内层形状的拒绝用例在 `api-kb-visibility.test.ts`。
+    owned: [1, "true", null],
+    owner: [null, "u1", []],
+    scope: [null, "me", []],
   }),
   ...inside(
     "compile",

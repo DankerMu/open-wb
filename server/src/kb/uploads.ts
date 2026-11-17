@@ -42,6 +42,7 @@ import { multipartUpload } from "./multipart.js";
 import type { createRagflowClient } from "./ragflow-client.js";
 import type { createKbStore, KnowledgeBase } from "./store.js";
 import { acceptsFile } from "./templates.js";
+import type { createKbVisibility } from "./visibility.js";
 
 const DECIMAL = /^[0-9]+$/u;
 /** 读请求体的总期限（D11）：`max(下限, Content-Length ÷ 速度)`。 */
@@ -74,12 +75,13 @@ interface AuditEvent {
 }
 
 interface KbUploadsDependencies {
-  store: Pick<ReturnType<typeof createKbStore>, "getBase" | "countDocuments" | "addDocument">;
+  store: Pick<ReturnType<typeof createKbStore>, "countDocuments" | "addDocument">;
   client: Pick<
     ReturnType<typeof createRagflowClient>,
     "uploadDocument" | "parseDocument" | "stopDocument" | "deleteDocument"
   >;
   locks: Pick<ReturnType<typeof createKbLocks>, "write">;
+  visibility: Pick<ReturnType<typeof createKbVisibility>, "accessOf">;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
   /** 受管 stderr writer。 */
@@ -163,7 +165,7 @@ function detachedSource(request: Readable, deadlineMs: number): Readable {
 }
 
 export function createKbUploads(dependencies: KbUploadsDependencies) {
-  const { store, client, locks, audit, uploadMaxBytes, bodyDeadline } = dependencies;
+  const { store, client, locks, visibility, audit, uploadMaxBytes, bodyDeadline } = dependencies;
 
   /** 写一条 `kb.ingest_reject`，返回要抛的错误。 */
   function rejected(
@@ -246,7 +248,7 @@ export function createKbUploads(dependencies: KbUploadsDependencies) {
 
   async function uploadLocked(incoming: Incoming): Promise<DocumentView> {
     const { id, actorId, request } = incoming;
-    const base = ownedBase(store, id, actorId);
+    const { base } = ownedBase(visibility, id, actorId);
     assertReady(base);
     if (store.countDocuments(id) >= MAX_DOCUMENTS_PER_BASE) {
       throw rejected(incoming, "limit", "kb_limit");
@@ -264,7 +266,7 @@ export function createKbUploads(dependencies: KbUploadsDependencies) {
       const name = parseUploadFileName(request.query);
       const size = declaredLength(request.headers);
       const incoming = { id, actorId, name, size, request: body };
-      const base = ownedBase(store, id, actorId);
+      const { base } = ownedBase(visibility, id, actorId);
       assertAcceptable(incoming, base.template);
       assertReady(base);
       const result = await locks.write(id, () => uploadLocked(incoming));
