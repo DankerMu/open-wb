@@ -64,7 +64,7 @@ type TurnActionDeps = {
   focusOnUnlockRef: RefObject<boolean>;
   historyGenerationRef: RefObject<number>;
   installSnapshot: (snapshot: ChatMessageSnapshot, ownedClient: ApiClient) => void;
-  /** 某个会话的知识库引用（两个函数引用稳定）：发送时按标签次序读 id，受理后与撤回回填时清空，未受理不动。 */
+  /** 某个会话的知识库引用：发送时按标签次序读 id，受理后与撤回回填时清空，未受理不动（`clear` 引用稳定，`ids` 随 `client` 换新）。 */
   kbRefs: { clear(owner: string): void; ids(owner: string): string[] };
   /** A ref: `loadHistory` changes with the location, `dispatchPrompt` must not. */
   loadHistoryRef: RefObject<(sessionId: string, ownedClient: ApiClient) => void>;

@@ -547,9 +547,9 @@ Minimal mergeable slice: atomic - 列表与详情的只读呈现是同一个 `ow
 
 ## 10. web：引用选择列表附所有者（message-attachments「输入框知识库引用」）
 
-- [ ] 10.1 核对 Context：`web/src/features/chat/kb-ref-picker.tsx:20-45`；`web/test/chat-kb-ref-picker.test.tsx`（483）；顺带：`web/src/features/chat/turn-actions.ts:67` 的注释仍写「两个函数引用稳定」，而 `ids` 随 `client` 变化（#1973 的修复 `a41a8444`）
-- [ ] 10.2 测试先行：在 `chat-kb-ref-picker.test.tsx` 加「共享库附所有者」「内建命令带引用被拒」（后者断言既有拒绝呈现，不新增前端判定）
-- [ ] 10.3 实现：非自有库附 `（<所有者账号>）`；纠正 `turn-actions.ts:67` 的注释
+- [x] 10.1 核对 Context：`web/src/features/chat/kb-ref-picker.tsx:20-45`；`web/test/chat-kb-ref-picker.test.tsx`（483）；顺带：`web/src/features/chat/turn-actions.ts:67` 的注释仍写「两个函数引用稳定」，而 `ids` 随 `client` 变化（#1973 的修复 `a41a8444`）
+- [x] 10.2 测试先行：在 `chat-kb-ref-picker.test.tsx` 加「共享库附所有者」「内建命令带引用被拒」（后者断言既有拒绝呈现，不新增前端判定）
+- [x] 10.3 实现：非自有库附 `（<所有者账号>）`；纠正 `turn-actions.ts:67` 的注释
   - 组 10 约定（#2036 fixture 审查补；10.2–10.3 照此实现与测试）：
     - 10.1 行号更正：`kb-ref-picker.tsx:20-45` 是 `ListState` 与 `useKbRefDialog`，不是落点；落点是 `KbRefOptions`（:106-162）：文档注释 :102-105，`onToggle(base)` :142，名称 span :145，状态字样 :146-150；标签区 `KbRefTags`（:165-196）用 `ref.name`（:179-180、:183），不改。`chat-kb-ref-picker.test.tsx` 483 行，「拒绝后保留」:265-288（`envelope` 是两参版本，code 为 `rejected`）。`turn-actions.ts:67` 核实：`kbRefIds` 在派发回调依赖表 :378，`clearKbRefs` 在 :371、:693；`kb-refs-state.ts:72-80` 的 `ids` 依赖 `[client]`，`:29` 的注释已正确。
     - 文案逐字（specs/message-attachments/spec.md）：
