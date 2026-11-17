@@ -130,9 +130,9 @@
       - `npm run test:focus --workspace server -- migration-053 migration-0 auth-schema auth-lifecycle auth-login kb-schema kb-store kb-bases core-db`（先红后绿）；
       - 再跑全量 `npm test --workspace server`（schema 断言散在多个文件，全量兜底）；
       - `make lint`、`make typecheck`、`make anti-drift`（jscpd 与 knip：新导出必须有使用者）。
-- [ ] 1.5 核对 Context：`server/src/accounts/index.ts` 的 `registerAccounts` 与 `/api/audit` 的 no-store 写法
-- [ ] 1.6 测试先行：新文件 `server/test/accounts-scope.test.ts` 覆盖「账号范围端点」全部场景（u4 先带外启用；停用账号 401；`memberCount`）
-- [ ] 1.7 实现新文件 `server/src/accounts/scope.ts`：`scopeOf(db, accountId) → {department, groups:[{id, name, memberCount}]}`（组按 `name` 码点升序）；`registerAccounts` 注册 `GET /api/accounts/me/scope`
+- [x] 1.5 核对 Context：`server/src/accounts/index.ts` 的 `registerAccounts` 与 `/api/audit` 的 no-store 写法
+- [x] 1.6 测试先行：新文件 `server/test/accounts-scope.test.ts` 覆盖「账号范围端点」全部场景（u4 先带外启用；停用账号 401；`memberCount`）
+- [x] 1.7 实现新文件 `server/src/accounts/scope.ts`：`scopeOf(db, accountId) → {department, groups:[{id, name, memberCount}]}`（组按 `name` 码点升序）；`registerAccounts` 注册 `GET /api/accounts/me/scope`
   - 组 1 第二刀约定（#2027 fixture 审查补；1.6–1.7 照此实现与测试）：
     - 文件：
       - 新文件 `server/src/accounts/scope.ts`：只导出 `scopeOf`，是纯读函数，不导入 Fastify，也不导入 `../kb/`。组 11 的 kb 直接导入它，不带路由（system.md:87 已声明 `kb → accounts`）。
