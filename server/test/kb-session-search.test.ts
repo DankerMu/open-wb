@@ -1,6 +1,7 @@
 /**
  * s2c-kb-session tasks 2.2（#1963）：knowledge-bases「会话检索 `kb_search`」的五个场景（定义、两个库都命中、部分失败与不可探测、
  * 参数校验、中止），另加 `resolveReferences` 与「降级限频记录只有一份」（tasks.md「组 2 约定」；design D5）。
+ * #2029 s2c-kb-visibility 组 3：重建失败与重建中分开措辞；`kb_ids` 按原始个数计。
  *
  * 会话检索取自真实 `createApp` 里 `registerKb` 的返回值（对模块导出的透传 spy，照 `server-assembly-modules.test.ts`），
  * 真实 SQLite、真实客户端（缺省期限），对假 RAGFlow 跑（`kb-ingest-helpers.ts`：收尾断言 stdout / stderr 不含内容哨兵）。
@@ -20,6 +21,7 @@ const ROUTE = "POST /api/v1/retrieval";
 const K1 = "b1".repeat(16);
 const K2 = "a2".repeat(16);
 const K3 = "c3".repeat(16);
+const K4 = "e5".repeat(16);
 const OTHER = "d4".repeat(16);
 const QUESTION = "工单超时";
 const PROMPT_MS = 3_000;
@@ -59,7 +61,7 @@ interface BaseSeed {
   name: string;
   createdAt: number;
   ownerId?: string;
-  state?: "ready" | "rebuilding";
+  state?: "ready" | "rebuilding" | "rebuild_failed";
   threshold?: number;
   vectorWeight?: number;
 }
@@ -327,12 +329,16 @@ describe("部分失败与不可探测", () => {
 
 describe("参数校验", () => {
   const six = [K1, K2, K3, OTHER, "n1", "n2"];
+  const overLimit: Array<[string, unknown]> = [
+    ["六个不同的 id", { question: QUESTION, kb_ids: six }],
+    ["六元素含重复", { question: QUESTION, kb_ids: [K1, K1, K1, K1, K1, K2] }],
+  ];
   const invalid: Array<[string, unknown]> = [
     ["缺 kb_ids", { question: QUESTION }],
     ["多一个键 top_k", { question: QUESTION, kb_ids: [K1], top_k: 3 }],
     ["kb_ids 为空数组", { question: QUESTION, kb_ids: [] }],
     ["kb_ids 含空串", { question: QUESTION, kb_ids: [""] }],
-    ["去重后六个", { question: QUESTION, kb_ids: [...six, K1] }],
+    ...overLimit,
     ["question 只有空白", { question: "   ", kb_ids: [K1] }],
     ["question 1001 码点", { question: "字".repeat(1001), kb_ids: [K1] }],
   ];
@@ -346,25 +352,21 @@ describe("参数校验", () => {
     expect(world.fake.requests()).toEqual([]);
   });
 
-  it("去重后六个：文本恰为「一次至多检索 5 个知识库」", async () => {
+  it.each(overLimit)("%s：文本恰为「一次至多检索 5 个知识库」", async (_label, args) => {
     const { search } = await seeded();
-    const result = await search.execute(
-      OWNER,
-      { question: QUESTION, kb_ids: [...six, K2] },
-      new AbortController().signal,
-    );
+    const result = await search.execute(OWNER, args, new AbortController().signal);
     expect(result).toStrictEqual({ text: "一次至多检索 5 个知识库", isError: true });
   });
 
-  it("kb_ids 重复：先去重再计数，六个原始 id 去重后五个照常执行；[k1,k1] 只检索一次", async () => {
+  it("原始五个含重复照常执行并去重；[k1,k1] 只检索一次", async () => {
     const { world, search } = await seeded();
     const five = await search.execute(
       OWNER,
-      { question: QUESTION, kb_ids: [K1, K1, "n1", "n2", "n3", "n4"] },
+      { question: QUESTION, kb_ids: [K1, K1, "n1", "n2", "n3"] },
       new AbortController().signal,
     );
     expect(five.isError).toBe(false);
-    expect(five.details?.bases.map(({ kbId }) => kbId)).toEqual([K1, "n1", "n2", "n3", "n4"]);
+    expect(five.details?.bases.map(({ kbId }) => kbId)).toEqual([K1, "n1", "n2", "n3"]);
     const twice = await search.execute(
       OWNER,
       { question: QUESTION, kb_ids: [K1, K1] },
@@ -372,6 +374,33 @@ describe("参数校验", () => {
     );
     expect(twice.details?.bases).toHaveLength(1);
     expect(retrievals(world)).toHaveLength(2);
+  });
+});
+
+describe("重建失败与重建中分开措辞", () => {
+  it("k3 重建中、k4 重建失败：两句分开，status 都是 not_ready，零请求", async () => {
+    const { world, search } = await seeded();
+    seedBase(world, { id: K4, name: "迁移手册", createdAt: 4_000, state: "rebuild_failed" });
+    const result = await search.execute(
+      OWNER,
+      { question: QUESTION, kb_ids: [K3, K4] },
+      new AbortController().signal,
+    );
+    expect(result).toStrictEqual({
+      text: [
+        `知识库「旧版手册」（${K3}）：正在重建，本轮未检索`,
+        "",
+        `知识库「迁移手册」（${K4}）：重建失败，本轮未检索`,
+      ].join("\n"),
+      details: {
+        bases: [
+          { kbId: K3, name: "旧版手册", status: "not_ready", hits: [] },
+          { kbId: K4, name: "迁移手册", status: "not_ready", hits: [] },
+        ],
+      },
+      isError: true,
+    });
+    expect(world.fake.requests()).toEqual([]);
   });
 });
 

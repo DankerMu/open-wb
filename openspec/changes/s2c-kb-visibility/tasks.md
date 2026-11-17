@@ -215,9 +215,9 @@ Minimal mergeable slice: atomic - 一处改动对应一个场景的两例，无�
 
 ## 3. 会话检索的措辞与计数（knowledge-bases「会话检索 `kb_search`」的种子 a、b）
 
-- [ ] 3.1 核对 Context：`server/src/kb/session-search.ts` 的 `render`（:111-118，`not_ready` 固定一句）与 `parseArgs`（:78-102，去重后才判上限）；`server/test/kb-session-search.test.ts`（450 行）；chat-stream 的 `kb.hits` `status` 枚举（不改）
-- [ ] 3.2 测试先行：在 `kb-session-search.test.ts` 加「重建失败与重建中分开措辞」，改写「参数校验」（六个不同的 id 与六元素含重复两例）
-- [ ] 3.3 实现：`render` 按库的 `state` 分两句，`details.status` 仍为 `not_ready`；`parseArgs` 先按原始数组判 1–5 再去重
+- [x] 3.1 核对 Context：`server/src/kb/session-search.ts` 的 `render`（:111-118，`not_ready` 固定一句）与 `parseArgs`（:78-102，去重后才判上限）；`server/test/kb-session-search.test.ts`（450 行）；chat-stream 的 `kb.hits` `status` 枚举（不改）
+- [x] 3.2 测试先行：在 `kb-session-search.test.ts` 加「重建失败与重建中分开措辞」，改写「参数校验」（六个不同的 id 与六元素含重复两例）
+- [x] 3.3 实现：`render` 按库的 `state` 分两句，`details.status` 仍为 `not_ready`；`parseArgs` 先按原始数组判 1–5 再去重
   - 组 3 约定（#2029 fixture 审查补；3.2–3.3 照此实现与测试）：
     - 3.1 的行号更正：`render` 为 `session-search.ts:111-129`（`not_ready` 分支 `:116-117`）；`parseArgs` `:79-102`，去重在 `:94`。
     - `state` 的来路：`render` 改为 `render(entry: BaseOutcome, state: KnowledgeBase["state"] | undefined)`；`execute`（`:186`）改为 `bases.map((entry) => render(entry, owned.get(entry.kbId)?.state))`，取的是 `:181` 同一份 `owned`（与 `searchOne` 判定用的是同一次读取）。`BaseOutcome` 与 `outcome()` 不改，不加第五个键。组 8 把 `owned` 换成可见集合时，这一处跟着换。

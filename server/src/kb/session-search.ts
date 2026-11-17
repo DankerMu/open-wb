@@ -9,7 +9,8 @@
  *   参数取该库已存的值，这里不写回、不审计。
  * - 给模型的文本只有切片原文与出处（库、文档名、相似度），没有整篇文档（CONTEXT.md 不变量 2）；结构化命中只进 `details`。
  *   这里不写任何日志，切片原文不进日志与 stderr。
- * - 参数判定次序：键集 → `question`（与检索测试端点同一个判定函数）→ `kb_ids` 的形状 → 按首次出现去重后的个数（1–5）。
+ * - 参数判定次序：键集 → `question`（与检索测试端点同一个判定函数）→ `kb_ids` 的形状 → 原始个数（1–5，与 schema `maxItems`
+ *   同一口径）→ 按首次出现去重。
  *   参数错误的结果没有 `details` 键。
  */
 import { isNonEmptyString, isRecord } from "./ragflow-route.js";
@@ -91,14 +92,13 @@ function parseArgs(args: unknown): SearchArgs | string {
   if (!Array.isArray(kbIds) || !kbIds.every(isNonEmptyString)) {
     return "kb_ids 须为由非空字符串组成的数组";
   }
-  const unique = [...new Set(kbIds)];
-  if (unique.length === 0) {
+  if (kbIds.length === 0) {
     return "kb_ids 至少含一个知识库 id";
   }
-  if (unique.length > MAX_BASES) {
+  if (kbIds.length > MAX_BASES) {
     return `一次至多检索 ${MAX_BASES} 个知识库`;
   }
-  return { question, kbIds: unique };
+  return { question, kbIds: [...new Set(kbIds)] };
 }
 
 const outcome = (
@@ -108,13 +108,13 @@ const outcome = (
   hits: RetrievalHit[] = [],
 ): BaseOutcome => ({ kbId, name: base?.name ?? null, status, hits });
 
-function render(entry: BaseOutcome): string {
+function render(entry: BaseOutcome, state: KnowledgeBase["state"] | undefined): string {
   const label = `知识库「${entry.name}」（${entry.kbId}）`;
   switch (entry.status) {
     case "not_found":
       return `知识库 ${entry.kbId}：未找到该知识库`;
     case "not_ready":
-      return `${label}：正在重建，本轮未检索`;
+      return `${label}：${state === "rebuild_failed" ? "重建失败" : "正在重建"}，本轮未检索`;
     case "failed":
       return `${label}：检索失败`;
     case "ok":
@@ -183,7 +183,7 @@ export function createKbSessionSearch(dependencies: SessionSearchDependencies) {
         parsed.kbIds.map((kbId) => searchOne(kbId, owned.get(kbId), parsed.question, signal)),
       );
       return {
-        text: bases.map(render).join("\n\n"),
+        text: bases.map((entry) => render(entry, owned.get(entry.kbId)?.state)).join("\n\n"),
         details: { bases },
         isError: !bases.some(({ status }) => status === "ok"),
       };
