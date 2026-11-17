@@ -326,6 +326,7 @@ export function registerSessionRoutes(
       if (dependencies.supervisor.controlHeld(request.params.id)) {
         throw new HttpError("session_busy");
       }
+      const builtin = classifyPrompt(text, skills).kind === "builtin";
       // message-attachments「prompt 携带附件」conditions 2 to 5 (1 was the body's); `[]` for a
       // prompt without attachments.
       const attachments = admitAttachments({
@@ -333,11 +334,17 @@ export function registerSessionRoutes(
         workspaceRootOf: dependencies.workspaceRootOf,
         principal,
         workspaceId: bound,
-        builtin: classifyPrompt(text, skills).kind === "builtin",
+        builtin,
         paths,
       });
       // message-attachments「prompt 引用知识库」: after the attachments; `[]` for none (#1971).
-      const refs = admitKnowledgeBases(knowledgeBases, principal.id, dependencies.knowledgeBases);
+      // 内建命令带引用 400，先于可见判定（与附件第 3 条同一规则）。
+      const refs = admitKnowledgeBases(
+        knowledgeBases,
+        builtin,
+        principal.id,
+        dependencies.knowledgeBases,
+      );
       const accepted = dependencies.store.acceptPrompt(
         request.params.id,
         principal.id,

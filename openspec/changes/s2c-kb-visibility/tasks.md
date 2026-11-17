@@ -243,20 +243,20 @@ Minimal mergeable slice: atomic - 两处都是同一个工具的参数与结果�
 
 ## 4. 内建命令带知识库引用 400（message-attachments「prompt 引用知识库」的种子 c）
 
-- [ ] 4.1 核对 Context：`server/src/sessions/rest.ts:336` 的 `builtin` 计算与附件第 3 条的位置；`server/src/sessions/store-knowledge-bases.ts:38-62` 的 `admitKnowledgeBases`；`server/test/prompt-knowledge-bases.test.ts:279` 的既有用例
-- [ ] 4.2 测试先行：把 `prompt-knowledge-bases.test.ts:279` 原地改为断言 400（`/compact`、` /todo` 带引用；`/compact` 带不存在的 id 也是 400）；`/compact` 不带引用与 `knowledgeBases:[]` 照常受理
-- [ ] 4.3 实现：内建命令带非空 `knowledgeBases` → 400，位置在可见判定之前、与附件第 3 条相邻
+- [x] 4.1 核对 Context：`server/src/sessions/rest.ts:336` 的 `builtin` 计算与附件第 3 条的位置；`server/src/sessions/store-knowledge-bases.ts:38-62` 的 `admitKnowledgeBases`；`server/test/prompt-knowledge-bases.test.ts:279` 的既有用例
+- [x] 4.2 测试先行：把 `prompt-knowledge-bases.test.ts:279` 原地改为断言 400（`/compact`、` /todo` 带引用；`/compact` 带不存在的 id 也是 400）；`/compact` 不带引用与 `knowledgeBases:[]` 照常受理
+- [x] 4.3 实现：内建命令带非空 `knowledgeBases` → 400，位置在可见判定之前、与附件第 3 条相邻
   - 组 4 约定（#2030 fixture 审查补；4.2–4.3 照此实现与测试）：
     - 4.1 的行号更正：`admitKnowledgeBases` 为 `store-knowledge-bases.ts:38-61`；`builtin` 在 `rest.ts:336` 是实参内联、不是绑定。
     - 实现：`rest.ts` 在 `:331` 之前提出 `const builtin = classifyPrompt(text, skills).kind === "builtin";`，`:336` 与 `:340` 共用；`:357` 的 `command` 不动。`admitKnowledgeBases(value, builtin, ownerId, resolve)`：`:43-45` 空值返回 `[]` 之后紧接 `if (builtin) throw new HttpError("bad_request")`，先于形状检查与 `resolve?.`；`:31-37` 的 JSDoc 与 `rest.ts:339` 的注释补一句「内建命令带引用 400，先于可见判定（与附件第 3 条同一规则）」。
     - 测试（`prompt-knowledge-bases.test.ts:279` 原地改，仍在「受理、后缀与落库」describe 内，改名「内建命令带非空引用 400，先于可见判定；不带引用与 `[]` 照常受理」）：
       - 同一会话依次 `expectRefused(world, session, body, 400, BAD_REQUEST_ENVELOPE)`：`{message:"/compact", knowledgeBases:[K1]}`、`{message:" /todo", knowledgeBases:[K1]}`、`{message:"/compact", knowledgeBases:[K9]}`；每次返回的 audit `toEqual([])`；前后 `world.ragflow()` 不变。改前依次为 202、202、404，三例都先红。
       - 各用新会话 `expectAdmitted`：`{message:"/compact"}` 与 `{message:"/compact", knowledgeBases:[]}`，派发文本恰为 `"/compact"`，`columnOf(...).map(r => r.knowledge_bases)` 为 `[null, null]`。
-      - 反向守卫（已绿）：新会话 `{message:"/todo import a.md", knowledgeBases:[K1]}` 202，派发文本恰为模板串 `/todo import a.md${K1_SEGMENT}`（`/todo` 前无空格），列为 `K1_COLUMN`。`K1_SEGMENT` 与 `K1_SUFFIX` 的导入因此仍在用。
+      - 反向守卫（已绿）：新会话 `{message:"/todo import a.md", knowledgeBases:[K1]}` 202，派发文本恰为模板串「一个空格 + `/todo import a.md${K1_SEGMENT}`」（`/todo import` 是 text 类，`toWireText`（`slash-commands.ts:312-314`）加转义前导空格，规格 `message-attachments/spec.md:72`），列为 `K1_COLUMN`。`K1_SEGMENT` 与 `K1_SUFFIX` 的导入因此仍在用。
     - `:424-428` 的三处直调原地补 `builtin` 实参（`false`）；同一用例加 `admitKnowledgeBases(["k1"], true, "u1", undefined)` 抛 `code:"bad_request"`、`admitKnowledgeBases([], true, "u1", undefined)` 为 `[]`。
     - 测试文件头 `:2-5` 补一句「#2030 s2c-kb-visibility 组 4：内建命令带非空引用 400，先于可见判定」。
     - 非目标：已落库的内建命令引用行（只有 `rest.ts:340` 调用判定，快照与对位不重验）；web（组 10 只加用例）；可见受理（组 8）。
-    - 行数：`rest.ts` 619 → ≤ 623；`store-knowledge-bases.ts` 140 → ≤ 145；测试 465 → ≤ 500。
+    - 行数：`rest.ts` 619 → ≤ 626（Biome 折行，原估 ≤ 623）；`store-knowledge-bases.ts` 140 → ≤ 145；测试 465 → ≤ 500。
     - 回归命令：`npm run test:focus --workspace server -- prompt-knowledge-bases`（先红后绿）；`npm run test:focus --workspace server -- session-prompt-attachments session-rest-slash slash-commands`；`make lint`、`make typecheck`、`make anti-drift`；最后 `make check`。
 
 Suggested fixture level: compact - 受理判定多一条拒绝，不改落库与快照。

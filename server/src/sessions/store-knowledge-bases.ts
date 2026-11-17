@@ -34,14 +34,19 @@ const SELECT_STORED =
  * of at most five distinct (compared as given) non-empty strings is 400; a list the resolver does
  * not answer — some id is not this account's base, or the knowledge base is off (`resolve`
  * omitted) — is 404, the same body in all three cases. No audit, no RAGFlow request.
+ * 内建命令带引用 400，先于可见判定（与附件第 3 条同一规则）。
  */
 export function admitKnowledgeBases(
   value: unknown,
+  builtin: boolean,
   ownerId: string,
   resolve: KnowledgeBaseResolver | undefined,
 ): KnowledgeBaseRef[] {
   if (value === undefined || (Array.isArray(value) && value.length === 0)) {
     return [];
+  }
+  if (builtin) {
+    throw new HttpError("bad_request");
   }
   if (
     !Array.isArray(value) ||
