@@ -1,6 +1,6 @@
 /**
- * `kb-store.test.ts`、`kb-store-settings.test.ts` 与 `kb-schema.test.ts` 共用：`:memory:` 经真实迁移的库，
- * 一组合法的原始行，与 store 夹具。
+ * `kb-store.test.ts`、`kb-store-settings.test.ts`、`kb-schema.test.ts` 与 `migration-053.test.ts` 共用：
+ * `:memory:` 经真实迁移的库，一组合法的原始行，与 store 夹具。
  * 每个用例只改一个字段，所以被拒的原因只可能是这个字段。
  */
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
@@ -128,3 +128,13 @@ export function insertRow(db: DatabaseSync, table: string, row: Row): void {
 
 export const rows = (db: DatabaseSync, table: string) => db.prepare(`SELECT * FROM ${table}`).all();
 export const settingsRow = (db: DatabaseSync) => db.prepare("SELECT * FROM kb_settings").get();
+
+/** 某表除给定列之外的整行，按 id 排序。 */
+export function rowsWithout(db: DatabaseSync, table: string, dropped: readonly string[]) {
+  return db
+    .prepare(`SELECT * FROM ${table} ORDER BY id`)
+    .all()
+    .map((row) =>
+      Object.fromEntries(Object.entries(row).filter(([key]) => !dropped.includes(key))),
+    );
+}

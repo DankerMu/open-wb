@@ -10,6 +10,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   COMPLETE_CATALOG,
+  DDL_053,
   expectCatalogSnapshot,
   ledgerFilenames,
   ledgerRows,
@@ -32,6 +33,7 @@ import {
   insertRow,
   type Row,
   rows,
+  rowsWithout,
   T0,
   UPLOAD_ROW,
   useKbDatabases,
@@ -50,12 +52,12 @@ function tableInfo(db: DatabaseSync, table: string) {
     .map((row) => [row.name, row.type, row.notnull, row.dflt_value, row.pk]);
 }
 
-/** 除新表及其自动索引之外的全部 schema 对象。 */
+/** 除新表及其自动索引、053 的四张表（由 migration-053 逐项断言）之外的全部 schema 对象。 */
 function existingSchema(db: DatabaseSync) {
   return db
     .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
     .all()
-    .filter((row) => !NEW_TABLES.includes(String(row.tbl_name)));
+    .filter((row) => ![...NEW_TABLES, ...DDL_053].includes(String(row.tbl_name)));
 }
 
 /** 完整链在 050 / 051 之后还有 052（#1970）：只给 chat_messages 的表定义在 `thinking_ms` 后添一列。 */
@@ -124,6 +126,8 @@ describe("migration 050 schema", () => {
       ["updated_at", "INTEGER", 1, null, 0],
       ["retrieval_threshold", "REAL", 1, "0.2", 0],
       ["retrieval_vector_weight", "REAL", 1, "0.7", 0],
+      ["scope", "TEXT", 1, "'me'", 0],
+      ["scope_group_id", "TEXT", 0, null, 0],
     ]);
     expect(tableInfo(db, "kb_documents")).toEqual([
       ["id", "TEXT", 1, null, 1],
@@ -174,7 +178,10 @@ describe("migration 050 schema", () => {
       ["chat_model_id", "models", "id", "SET NULL"],
       ["rebuild_actor_id", "accounts", "id", "NO ACTION"],
     ]);
-    expect(keys("knowledge_bases")).toEqual([["owner_id", "accounts", "id", "RESTRICT"]]);
+    expect(keys("knowledge_bases")).toEqual([
+      ["owner_id", "accounts", "id", "RESTRICT"],
+      ["scope_group_id", "project_groups", "id", "RESTRICT"],
+    ]);
     expect(keys("kb_documents")).toEqual([["kb_id", "knowledge_bases", "id", "CASCADE"]]);
     expect(uniqueIndexKeys(db, "kb_settings")).toEqual([["id"]]);
     expect(uniqueIndexKeys(db, "knowledge_bases")).toEqual([["id"], ["owner_id", "name"]]);
@@ -193,12 +200,12 @@ describe("migration 050 schema", () => {
     seedThrough(file, through049, seedPopulated034);
     const before = withDatabase(file, (db) => ({
       schema: existingSchema(db),
-      accounts: rows(db, "accounts"),
+      accounts: rowsWithout(db, "accounts", ["department"]),
       workspaces: rows(db, "workspaces"),
     }));
     withOpenDb(file, (db) => {
       expect(existingSchema(db)).toEqual(with052(before.schema));
-      expect(rows(db, "accounts")).toEqual(before.accounts);
+      expect(rowsWithout(db, "accounts", ["department"])).toEqual(before.accounts);
       expect(rows(db, "workspaces")).toEqual(before.workspaces);
       expect(rows(db, "kb_settings")).toHaveLength(1);
       expect(rows(db, "knowledge_bases")).toEqual([]);
@@ -229,22 +236,12 @@ function seed050(file: string, seed: (db: DatabaseSync) => void): void {
   seedThrough(file, through050, seed);
 }
 
-/** 除 051 改动的两张表之外的全部 schema 对象（kb_documents 也在其内）。 */
+/** 除 051 改动的两张表、053 的四张表之外的全部 schema 对象（kb_documents 也在其内）。 */
 function untouchedSchema(db: DatabaseSync) {
   return db
     .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
     .all()
-    .filter((row) => !ALTERED_TABLES.includes(String(row.tbl_name)));
-}
-
-/** 某表除给定列之外的整行，按 id 排序。 */
-function rowsWithout(db: DatabaseSync, table: string, dropped: readonly string[]) {
-  return db
-    .prepare(`SELECT * FROM ${table} ORDER BY id`)
-    .all()
-    .map((row) =>
-      Object.fromEntries(Object.entries(row).filter(([key]) => !dropped.includes(key))),
-    );
+    .filter((row) => ![...ALTERED_TABLES, ...DDL_053].includes(String(row.tbl_name)));
 }
 
 describe("迁移 051 检索参数与重排模型", () => {
@@ -340,7 +337,9 @@ describe("迁移 051 检索参数与重排模型", () => {
     withOpenDb(file, (db) => {
       expect(untouchedSchema(db)).toEqual(with052(before.schema));
       expect(rowsWithout(db, "kb_settings", RERANK_COLUMNS)).toEqual(before.settings);
-      expect(rowsWithout(db, "knowledge_bases", RETRIEVAL_COLUMNS)).toEqual(before.bases);
+      expect(
+        rowsWithout(db, "knowledge_bases", [...RETRIEVAL_COLUMNS, "scope", "scope_group_id"]),
+      ).toEqual(before.bases);
       expect(rows(db, "kb_documents")).toEqual(before.documents);
       expect(
         db.prepare(`SELECT ${RETRIEVAL_COLUMNS.join(", ")} FROM knowledge_bases`).all(),
@@ -349,7 +348,9 @@ describe("迁移 051 检索参数与重排模型", () => {
       expect(ledgerRows(db)[pos051]).toEqual([25, MIGRATION_051]);
       expect(TRACKED_MIGRATION_FILENAMES[pos051 - 1]).toBe(MIGRATION_050);
       expect(ledgerFilenames(db)).toEqual([...TRACKED_MIGRATION_FILENAMES]);
-      expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 26, "integer"]]);
+      expect(COMPLETE_CATALOG.sequenceRows).toEqual([
+        ["schema_migrations", TRACKED_MIGRATION_FILENAMES.length, "integer"],
+      ]);
       expectCatalogSnapshot(db, COMPLETE_CATALOG);
     });
   });

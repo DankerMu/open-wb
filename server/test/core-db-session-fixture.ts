@@ -242,7 +242,7 @@ export function selectRows(db: DatabaseSync, table: string, columns: readonly st
   return db.prepare(`SELECT ${columns.join(", ")} FROM ${table} ORDER BY id`).all();
 }
 
-function tableInfo(db: DatabaseSync, table: string) {
+export function tableInfo(db: DatabaseSync, table: string) {
   return db
     .prepare(`PRAGMA table_info('${table}')`)
     .all()
@@ -309,7 +309,7 @@ export function preservedState(
     indexes: perTable((table) => tableIndexKeys(db, table)),
     indexSql: db
       .prepare(
-        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs','chat_thinking_segments','models','experts','account_skill_prefs','connectors','account_connector_prefs','mount_sources','workspace_mounts','kb_settings','knowledge_bases','kb_documents') ORDER BY name",
+        "SELECT name, tbl_name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name NOT IN ('chat_turn_snapshots','account_composer_prefs','chat_thinking_segments','models','experts','account_skill_prefs','connectors','account_connector_prefs','mount_sources','workspace_mounts','kb_settings','knowledge_bases','kb_documents','project_groups','project_group_members') ORDER BY name",
       )
       .all(),
     sequences: chatSequences(db),
