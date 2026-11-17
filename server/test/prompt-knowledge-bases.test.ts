@@ -3,6 +3,7 @@
  * message-attachments「prompt 引用知识库」(拒绝, the admission and the stored column, 坏值) and「交给
  * omp 的附件后缀」(带知识库引用的后缀), chat-sessions「REST prompt 受理与补偿」(the four key sets);
  * issue #1972 (tasks 7.6 / 7.7) the read side: the snapshot's `knowledgeBases` (受理与快照, 坏值).
+ * #2030 s2c-kb-visibility 组 4：内建命令带非空引用 400，先于可见判定。
  * The main world is the production createApp → registerSessions assembly with the real kb module
  * against the fake RAGFlow (precedent: `openKbWorld` of session-host-tool-align.test.ts), a real
  * in-memory SQLite and `supervisor.prompt` a resolving spy, driven through `app.inject()`; the base
@@ -276,20 +277,34 @@ describe("prompt 引用知识库: 受理、后缀与落库 (#1971)", () => {
     });
   });
 
-  it("builtin 命令带引用按规格字面受理（规格缺口）：202，派发 /compact 接引用段", async () => {
+  it("内建命令带非空引用 400，先于可见判定；不带引用与 `[]` 照常受理", async () => {
     const world = await openKbWorld();
     const session = await world.proj.session();
+    const ragflow = world.ragflow();
 
-    const { text } = await expectAdmitted(world, session, {
-      message: "/compact",
+    for (const body of [
+      { message: "/compact", knowledgeBases: [K1] },
+      { message: " /todo", knowledgeBases: [K1] },
+      { message: "/compact", knowledgeBases: [K9] },
+    ]) {
+      expect(await expectRefused(world, session, body, 400, BAD_REQUEST_ENVELOPE)).toEqual([]);
+    }
+    expect(world.ragflow()).toEqual(ragflow);
+
+    for (const body of [{ message: "/compact" }, { message: "/compact", knowledgeBases: [] }]) {
+      const admitted = await world.proj.session();
+      expect((await expectAdmitted(world, admitted, body)).text).toBe("/compact");
+      expect(columnOf(world, admitted).map((row) => row.knowledge_bases)).toEqual([null, null]);
+    }
+
+    const todo = await world.proj.session();
+    const { text } = await expectAdmitted(world, todo, {
+      message: "/todo import a.md",
       knowledgeBases: [K1],
     });
-
-    expect(text).toBe(`/compact${K1_SEGMENT}`);
-    expect(columnOf(world, session)[0]).toMatchObject({
-      content: "/compact",
-      knowledge_bases: K1_COLUMN,
-    });
+    // Not builtin, so `toWireText` escapes it with one leading space (chat-sessions slash rules).
+    expect(text).toBe(` /todo import a.md${K1_SEGMENT}`);
+    expect(columnOf(world, todo)[0]).toMatchObject({ knowledge_bases: K1_COLUMN });
   });
 
   it.each([
@@ -421,11 +436,15 @@ describe("store-knowledge-bases.ts on its own (#1971)", () => {
   it("admitKnowledgeBases without a resolver (knowledge base off) is 404; no reference asks none", async () => {
     const { admitKnowledgeBases } = await import("../src/sessions/store-knowledge-bases.js");
 
-    expect(() => admitKnowledgeBases(["k1"], "u1", undefined)).toThrowError(
+    expect(() => admitKnowledgeBases(["k1"], false, "u1", undefined)).toThrowError(
       expect.objectContaining({ code: "not_found" }),
     );
-    expect(admitKnowledgeBases([], "u1", undefined)).toEqual([]);
-    expect(admitKnowledgeBases(undefined, "u1", undefined)).toEqual([]);
+    expect(admitKnowledgeBases([], false, "u1", undefined)).toEqual([]);
+    expect(admitKnowledgeBases(undefined, false, "u1", undefined)).toEqual([]);
+    expect(() => admitKnowledgeBases(["k1"], true, "u1", undefined)).toThrowError(
+      expect.objectContaining({ code: "bad_request" }),
+    );
+    expect(admitKnowledgeBases([], true, "u1", undefined)).toEqual([]);
   });
 
   it("坏值: anything but a list of at most five distinct `{id, name}` reads as []", async () => {
