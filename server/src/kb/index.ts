@@ -195,6 +195,6 @@ export function registerKb(
   });
   return {
     modelWriteGuard: settings.guardModelWrite,
-    sessionSearch: createKbSessionSearch({ store, client, onRerankDegraded }),
+    sessionSearch: createKbSessionSearch({ store, client, onRerankDegraded, visibility, audit }),
   };
 }

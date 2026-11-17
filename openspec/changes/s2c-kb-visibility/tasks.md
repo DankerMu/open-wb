@@ -446,9 +446,9 @@ Minimal mergeable slice: atomic - 放开检索测试与写共享审计必须同�
 
 ## 8. 会话检索与知识库引用的可见集合（knowledge-bases「会话检索 `kb_search`」；message-attachments「prompt 引用知识库」的可见受理）
 
-- [ ] 8.1 核对 Context：`server/src/kb/session-search.ts` 的文件头契约（:6「三个函数都经 `listBases(ownerId)` 读一次」）、`ownedBases`（:134，被 `execute` 与 `resolveReferences` 共用）、`definitionFor`、`execute`；`server/src/app.ts:351` 的注入与 `sessions/store-knowledge-bases.ts:18` 的注释
-- [ ] 8.2 测试先行：在 `kb-session-search.test.ts` 加「可见的共享库进清单并被检索」「只有共享库的账号」「共享审计写失败只影响该库」「已中止的信号不写共享审计」；新文件 `server/test/kb-shared-audit.test.ts` 完整覆盖「共享检索审计不含问句」（检索测试与 `kb_search` 合计恰两条；u1 经 `GET /api/audit` 看不到、u3 看得到）；新文件 `server/test/prompt-knowledge-bases-shared.test.ts` 覆盖「引用共享给自己的库」
-- [ ] 8.3 实现：三个函数共用一次 `visibleBases(viewer)`，原地替换 `ownedBases`（文件头契约同改）；可见的库一个都没有时没有定义；非自有库描述行附所有者账号；非自有 `ready` 库先查中止信号、再调 `auditSharedRetrieval`、再检索；`resolveReferences` 存受理那一刻的名称；`store.listBases`（`kb/store.ts:158,322-323`）此后若只剩测试在用，在本组内删除它与 `SELECT_BASES_BY_OWNER` 及其用例（AGENTS.md：无引用导出同一变更内删除）
+- [x] 8.1 核对 Context：`server/src/kb/session-search.ts` 的文件头契约（:6「三个函数都经 `listBases(ownerId)` 读一次」）、`ownedBases`（:134，被 `execute` 与 `resolveReferences` 共用）、`definitionFor`、`execute`；`server/src/app.ts:351` 的注入与 `sessions/store-knowledge-bases.ts:18` 的注释
+- [x] 8.2 测试先行：在 `kb-session-search.test.ts` 加「可见的共享库进清单并被检索」「只有共享库的账号」「共享审计写失败只影响该库」「已中止的信号不写共享审计」；新文件 `server/test/kb-shared-audit.test.ts` 完整覆盖「共享检索审计不含问句」（检索测试与 `kb_search` 合计恰两条；u1 经 `GET /api/audit` 看不到、u3 看得到）；新文件 `server/test/prompt-knowledge-bases-shared.test.ts` 覆盖「引用共享给自己的库」
+- [x] 8.3 实现：三个函数共用一次 `visibleBases(viewer)`，原地替换 `ownedBases`（文件头契约同改）；可见的库一个都没有时没有定义；非自有库描述行附所有者账号；非自有 `ready` 库先查中止信号、再调 `auditSharedRetrieval`、再检索；`resolveReferences` 存受理那一刻的名称；`store.listBases`（`kb/store.ts:158,322-323`）此后若只剩测试在用，在本组内删除它与 `SELECT_BASES_BY_OWNER` 及其用例（AGENTS.md：无引用导出同一变更内删除）
   - 组 8 约定（#2034 fixture 审查补；8.2–8.3 照此实现与测试）：
     - 8.1 行号更正：`store.listBases` 是 `kb/store.ts:158`（SQL）与 `:322-324`（含注释行）；`session-search.ts` 依赖接口是 `:41-43`，`ownedBases` 是 `:134-135`，`searchOne` 是 `:137-153`，`definitionFor` 是 `:157-173`（`:158` 是第二处读取），`execute` 是 `:176-190`（`:181` 读取，`:186` 是 render 取 state 的地方），`resolveReferences` 是 `:193-204`；`app.ts:351` 只核对、不改（`ownerId` 就是会话所有者，也就是查看者）；`store-knowledge-bases.ts` 的注释是 `:17-20` 和 `:35`。
     - 与 8.2 的差异（审查裁定）：

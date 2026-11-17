@@ -4,6 +4,7 @@
  * omp 的附件后缀」(带知识库引用的后缀), chat-sessions「REST prompt 受理与补偿」(the four key sets);
  * issue #1972 (tasks 7.6 / 7.7) the read side: the snapshot's `knowledgeBases` (受理与快照, 坏值).
  * #2030 s2c-kb-visibility 组 4：内建命令带非空引用 400，先于可见判定。
+ * #2034 s2c-kb-visibility 组 8：引用共享给自己的库（可见受理，带外改 `scope`）。
  * The main world is the production createApp → registerSessions assembly with the real kb module
  * against the fake RAGFlow (precedent: `openKbWorld` of session-host-tool-align.test.ts), a real
  * in-memory SQLite and `supervisor.prompt` a resolving spy, driven through `app.inject()`; the base
@@ -22,6 +23,7 @@ import {
   expectAdmitted,
   expectEnvelope,
   expectRefused,
+  openBound,
   openWorld,
   put,
   rowsOf,
@@ -30,6 +32,7 @@ import {
 } from "./session-prompt-attachments-helpers.js";
 import {
   AGENT_UNAVAILABLE_ENVELOPE,
+  cookieFor,
   getSessionMessages,
   SESSION_ARCHIVED_ENVELOPE,
 } from "./session-rest-helpers.js";
@@ -106,8 +109,8 @@ function columnOf(world: World, session: string) {
  * The snapshot over `GET /api/sessions/:id/messages`: 200 and every reference exactly `{id, name}`;
  * each message's id, role and `knowledgeBases`.
  */
-async function referencesOf(world: World, session: string) {
-  const history = await getSessionMessages(world.app, session, world.cookie);
+async function referencesOf(world: World, session: string, cookie = world.cookie) {
+  const history = await getSessionMessages(world.app, session, cookie);
   expect(history.statusCode).toBe(200);
   const { messages } = history.json<{ messages: Array<Record<string, unknown>> }>();
   for (const message of messages) {
@@ -119,9 +122,14 @@ async function referencesOf(world: World, session: string) {
 }
 
 /** A 404 of the reference check: no row, dispatch, notification or audit row; its raw body. */
-async function expectNotFound(world: World, session: string, body: unknown): Promise<string> {
+async function expectNotFound(
+  world: World,
+  session: string,
+  body: unknown,
+  cookie = world.cookie,
+): Promise<string> {
   const before = rowsOf(world, session);
-  const sent = await send(world, session, body);
+  const sent = await send(world, session, body, cookie);
   expectEnvelope(sent.response, 404, NOT_FOUND_ENVELOPE);
   expect(rowsOf(world, session)).toEqual(before);
   expect([sent.calls, sent.notified, sent.audit]).toEqual([[], 0, []]);
@@ -187,6 +195,37 @@ describe("prompt 引用知识库: 拒绝 (#1971)", () => {
 
     expect(foreign).toBe(missing);
     expect(closed).toBe(missing);
+  });
+});
+
+describe("prompt 引用知识库: 引用共享给自己的库 (#2034)", () => {
+  it("u2 引用全员可见的 k1 受理并存受理时的名称；仅自己可见的 k3 与不存在的 k9 同为 404；收回共享后快照不变", async () => {
+    const world = await openKbWorld();
+    const scopeOf = world.db.prepare("UPDATE knowledge_bases SET scope = ? WHERE id = ?");
+    scopeOf.run("all", K1);
+    const u2 = await cookieFor(world.app, "zhaoliu");
+    const session = await (await openBound(world.app, u2, "proj")).session();
+    const ragflow = world.ragflow();
+
+    const sent = await send(world, session, { message: "查一下", knowledgeBases: [K1] }, u2);
+    expect(sent.response.statusCode, sent.response.body).toBe(202);
+    expect(sent.calls).toHaveLength(1);
+    expect(sent.audit).toEqual([]);
+    expect(columnOf(world, session)[0]).toMatchObject({
+      role: "user",
+      knowledge_bases: `[{"id":"${K1}","name":"产品文档"}]`,
+    });
+
+    const [hidden, missing] = [
+      await expectNotFound(world, session, { message: "查一下", knowledgeBases: [K3] }, u2),
+      await expectNotFound(world, session, { message: "查一下", knowledgeBases: [K9] }, u2),
+    ];
+    expect(hidden).toBe(missing);
+
+    scopeOf.run("me", K1);
+    const [user] = await referencesOf(world, session, u2);
+    expect(user?.slice(1)).toEqual(["user", [{ id: K1, name: "产品文档" }]]);
+    expect(world.ragflow()).toEqual(ragflow);
   });
 });
 

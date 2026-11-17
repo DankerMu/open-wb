@@ -2,27 +2,40 @@
  * s2c-kb-session tasks 2.2（#1963）：knowledge-bases「会话检索 `kb_search`」的五个场景（定义、两个库都命中、部分失败与不可探测、
  * 参数校验、中止），另加 `resolveReferences` 与「降级限频记录只有一份」（tasks.md「组 2 约定」；design D5）。
  * #2029 s2c-kb-visibility 组 3：重建失败与重建中分开措辞；`kb_ids` 按原始个数计。
+ * #2034 s2c-kb-visibility 组 8：可见集合与共享审计（共享库进清单、只有共享库的账号、共享审计写失败、已中止不审计）。
  *
  * 会话检索取自真实 `createApp` 里 `registerKb` 的返回值（对模块导出的透传 spy，照 `server-assembly-modules.test.ts`），
  * 真实 SQLite、真实客户端（缺省期限），对假 RAGFlow 跑（`kb-ingest-helpers.ts`：收尾断言 stdout / stderr 不含内容哨兵）。
  * 期望值是规格与「组 2 约定」的字面量与本文件种下的行，不从 `src/` 取。建库时间次序与 id 字典序相反（K1 > K2，K1 先建）。
  */
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import * as kb from "../src/kb/index.js";
-import { resourceName } from "../src/kb/pipeline.js";
+import { describe, expect, it } from "vitest";
 import { CONTENT_SENTINEL, type IngestWorld, useIngestWorlds } from "./kb-ingest-helpers.js";
+import {
+  ROUTE,
+  retrievals,
+  type SessionSearch,
+  seedBase,
+  share,
+  useSessionSearch,
+} from "./kb-session-search-helpers.js";
 import { RERANK_KEY } from "./kb-settings-helpers.js";
 import { LISI, OWNER, WANGWU } from "./mounts-manager-helpers.js";
 import { send } from "./mounts-rest-helpers.js";
 
 const open = useIngestWorlds();
+const sessionSearch = useSessionSearch();
 
-const ROUTE = "POST /api/v1/retrieval";
 const K1 = "b1".repeat(16);
 const K2 = "a2".repeat(16);
 const K3 = "c3".repeat(16);
 const K4 = "e5".repeat(16);
 const OTHER = "d4".repeat(16);
+/** zhaoliu（u2）的库。 */
+const A2 = "f6".repeat(16);
+const PEER = "u2";
+const SHARED = "kb.shared_retrieval";
+const REFUSE_SHARED =
+  "CREATE TRIGGER refuse_shared BEFORE INSERT ON audit_events WHEN NEW.kind = 'kb.shared_retrieval' BEGIN SELECT RAISE(ABORT, 'injected'); END";
 const QUESTION = "工单超时";
 const PROMPT_MS = 3_000;
 const SCHEMA = {
@@ -34,65 +47,6 @@ const SCHEMA = {
   required: ["question", "kb_ids"],
   additionalProperties: false,
 };
-
-type SessionSearch = NonNullable<ReturnType<typeof kb.registerKb>>["sessionSearch"];
-
-let registered: MockInstance<typeof kb.registerKb>;
-
-beforeEach(() => {
-  registered = vi.spyOn(kb, "registerKb");
-});
-
-afterEach(() => {
-  registered.mockRestore();
-});
-
-/** 开启的 `registerKb` 交回的会话检索。 */
-function sessionSearch(): SessionSearch {
-  const result = registered.mock.results.at(-1);
-  if (result?.type !== "return" || result.value === null) {
-    throw new Error("registerKb did not return a registration");
-  }
-  return result.value.sessionSearch;
-}
-
-interface BaseSeed {
-  id: string;
-  name: string;
-  createdAt: number;
-  ownerId?: string;
-  state?: "ready" | "rebuilding" | "rebuild_failed";
-  threshold?: number;
-  vectorWeight?: number;
-}
-
-/** 直接插一行库并改建库时间、状态与检索参数，返回它的 dataset id。 */
-function seedBase(world: IngestWorld, seed: BaseSeed): string {
-  const datasetId = world.fake.addDataset(resourceName(seed.id, 0));
-  world.store.createBase({
-    id: seed.id,
-    ownerId: seed.ownerId ?? OWNER,
-    name: seed.name,
-    template: "naive",
-    raptor: false,
-    graph: false,
-    datasetId,
-    canvasId: null,
-    templateGroupId: null,
-  });
-  world.fw.world.db
-    .prepare(
-      "UPDATE knowledge_bases SET created_at = ?, state = ?, retrieval_threshold = ?, retrieval_vector_weight = ? WHERE id = ?",
-    )
-    .run(
-      seed.createdAt,
-      seed.state ?? "ready",
-      seed.threshold ?? 0.2,
-      seed.vectorWeight ?? 0.7,
-      seed.id,
-    );
-  return datasetId;
-}
 
 interface Seeded {
   world: IngestWorld;
@@ -118,9 +72,6 @@ async function seeded(): Promise<Seeded> {
   seedBase(world, { id: OTHER, name: "别人的库", createdAt: 500, ownerId: LISI });
   return { world, search: sessionSearch(), d1, d2 };
 }
-
-const retrievals = (world: IngestWorld) =>
-  world.fake.requests().filter((entry) => `${entry.method} ${entry.path}` === ROUTE);
 
 const basesTable = (world: IngestWorld) =>
   world.fw.world.db.prepare("SELECT * FROM knowledge_bases ORDER BY id").all();
@@ -477,3 +428,160 @@ function isDegraded(record: unknown): boolean {
     (record as { event?: unknown }).event === "kb_rerank_degraded"
   );
 }
+
+/** 描述里以 `- ` 开头的库清单行。 */
+const listedOf = (definition: ReturnType<SessionSearch["definitionFor"]>): string[] =>
+  definition?.tool.description.split("\n").filter((line) => line.startsWith("- ")) ?? [];
+
+const seedPeerBase = (world: IngestWorld): string =>
+  seedBase(world, { id: A2, name: "销售手册", ownerId: PEER, createdAt: 2_500 });
+
+describe("可见的共享库进清单并被检索", () => {
+  it("自有在前、共享附所有者；审计先于检索恰一条，不可见与不存在同一句；收回之后 not_found、不再审计", async () => {
+    const { world, search, d1 } = await seeded();
+    share(world, K1, "group");
+    const a2 = seedPeerBase(world);
+    const definition = search.definitionFor(PEER);
+    expect(listedOf(definition)).toEqual([
+      `- 销售手册（${A2}）`,
+      `- 产品文档（${K1}，所有者 zhangsan）`,
+    ]);
+    expect(definition?.bases).toStrictEqual([
+      { id: A2, name: "销售手册" },
+      { id: K1, name: "产品文档" },
+    ]);
+    const args = { question: QUESTION, kb_ids: [K1, A2, K2] };
+    const gate = world.fake.fault(ROUTE, { kind: "hold" }, { times: 2 });
+    const pending = search.execute(PEER, args, new AbortController().signal);
+    await gate.reached;
+    expect(world.audits(SHARED)).toHaveLength(1);
+    await expect.poll(() => retrievals(world).length).toBe(2);
+    gate.release();
+
+    expect(await pending).toStrictEqual({
+      text: [
+        `知识库「产品文档」（${K1}）：命中 0 条`,
+        "",
+        `知识库「销售手册」（${A2}）：命中 0 条`,
+        "",
+        `知识库 ${K2}：未找到该知识库`,
+      ].join("\n"),
+      details: {
+        bases: [
+          { kbId: K1, name: "产品文档", status: "ok", hits: [] },
+          { kbId: A2, name: "销售手册", status: "ok", hits: [] },
+          { kbId: K2, name: null, status: "not_found", hits: [] },
+        ],
+      },
+      isError: false,
+    });
+    expect(retrievals(world).map(({ json }) => json)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dataset_ids: [d1],
+          similarity_threshold: 0.35,
+          vector_similarity_weight: 0.5,
+        }),
+        expect.objectContaining({ dataset_ids: [a2] }),
+      ]),
+    );
+    const audited = [
+      {
+        actorId: PEER,
+        title: "检索共享知识库",
+        detail: {
+          id: K1,
+          name: "产品文档",
+          ownerId: OWNER,
+          scope: { scope: "group", groupId: "g1" },
+        },
+        workspaceId: null,
+      },
+    ];
+    expect(world.audits(SHARED)).toStrictEqual(audited);
+
+    share(world, K1, "me");
+    const again = await search.execute(PEER, args, new AbortController().signal);
+    expect(again.details?.bases[0]).toStrictEqual({
+      kbId: K1,
+      name: null,
+      status: "not_found",
+      hits: [],
+    });
+    expect(world.audits(SHARED)).toStrictEqual(audited);
+    expect(search.definitionFor(PEER)?.bases).toStrictEqual([{ id: A2, name: "销售手册" }]);
+  });
+});
+
+describe("只有共享库的账号", () => {
+  it("全员可见的库让没有库的账号也有定义；收回之后没有定义；不访问 RAGFlow", async () => {
+    const { world, search } = await seeded();
+    share(world, K1, "all");
+    const definition = search.definitionFor(PEER);
+    expect(listedOf(definition)).toEqual([`- 产品文档（${K1}，所有者 zhangsan）`]);
+    expect(definition?.bases).toStrictEqual([{ id: K1, name: "产品文档" }]);
+    share(world, K1, "me");
+    expect(search.definitionFor(PEER)).toBeNull();
+    expect(world.fake.requests()).toEqual([]);
+  });
+});
+
+describe("共享审计写失败只影响该库", () => {
+  it("审计写失败：该库 failed、不检索，自有库照常 ok；不留审计、不记日志", async () => {
+    const { world, search } = await seeded();
+    share(world, K1, "all");
+    const a2 = seedPeerBase(world);
+    world.fw.world.db.exec(REFUSE_SHARED);
+    const audits = auditCount(world);
+    const logged = [...world.logged];
+
+    const result = await search.execute(
+      PEER,
+      { question: QUESTION, kb_ids: [K1, A2] },
+      new AbortController().signal,
+    );
+
+    expect(result).toStrictEqual({
+      text: [
+        `知识库「产品文档」（${K1}）：检索失败`,
+        "",
+        `知识库「销售手册」（${A2}）：命中 0 条`,
+      ].join("\n"),
+      details: {
+        bases: [
+          { kbId: K1, name: "产品文档", status: "failed", hits: [] },
+          { kbId: A2, name: "销售手册", status: "ok", hits: [] },
+        ],
+      },
+      isError: false,
+    });
+    expect(retrievals(world).map(({ json }) => json)).toEqual([
+      expect.objectContaining({ dataset_ids: [a2] }),
+    ]);
+    expect(auditCount(world)).toBe(audits);
+    expect(world.logged).toEqual(logged);
+  });
+});
+
+describe("已中止的信号不写共享审计", () => {
+  it("调用前已中止：共享库 failed，不审计、不检索", async () => {
+    const { world, search } = await seeded();
+    share(world, K1, "all");
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await search.execute(
+      PEER,
+      { question: QUESTION, kb_ids: [K1] },
+      controller.signal,
+    );
+
+    expect(result).toStrictEqual({
+      text: `知识库「产品文档」（${K1}）：检索失败`,
+      details: { bases: [{ kbId: K1, name: "产品文档", status: "failed", hits: [] }] },
+      isError: true,
+    });
+    expect(world.audits(SHARED)).toEqual([]);
+    expect(world.fake.requests()).toEqual([]);
+  });
+});
