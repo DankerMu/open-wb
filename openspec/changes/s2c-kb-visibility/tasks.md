@@ -56,6 +56,10 @@
 | 组 2：截断在关联之后 | 是 | 例 2：第 2、5 条关联不上 → 其余 6 条；先截断再关联会只剩 4 条 |
 | 组 2：只有例 1 先红后绿 | 是 | 例 1 改前得 8 条（红）；例 2 改前已是 6 条，是次序守卫，#2028 AC「两例先红后绿」照此读 |
 | 组 2：出站形状与消费者不变 | 是 | 请求 body 原样（`server/test/kb-retrieval.test.ts:62-69`）；检索测试 `server/src/kb/retrieval.ts:233`、会话检索 `server/src/kb/session-search.ts:149` 的既有用例原样全绿；`server/src/sessions/kb-hits.ts:45` 的 `MAX_HITS` 不动、不合并 |
+| 组 3：`details` 键集与 `kb.hits` 枚举不变 | 是 | 措辞只改 `render` 的文本；`BaseOutcome` 仍恰 `kbId, name, status, hits`（`sessions/kb-hits.ts:42` 严格解码），新用例对整个结果 `toStrictEqual` |
+| 组 3：原始计数与既有用例冲突 | 是 | `kb-session-search.test.ts:359-375`（六个原始元素去重后五个照常执行）与新规则相反，原地改写，不另写一份 |
+| 组 3：只有两例先红后绿 | 是 | `rebuild_failed` 那句与 `[K1,K1,K1,K1,K1,K2]` 改前为红；「六个不同的 id」改前已绿，#2029 AC「两个场景先红后绿」按场景读 |
+| 组 3：web 检索卡仍写「正在重建」 | 否 | `web/src/features/chat/kb-search-card.tsx:25` 只按 `status` 出文案；本 change 无 chat-web delta，D7 不动跨服务枚举，`rebuild_failed` 的库在卡上仍显示「正在重建，本轮未检索」（已知残留，不在本组） |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -214,6 +218,21 @@ Minimal mergeable slice: atomic - 一处改动对应一个场景的两例，无�
 - [ ] 3.1 核对 Context：`server/src/kb/session-search.ts` 的 `render`（:111-118，`not_ready` 固定一句）与 `parseArgs`（:78-102，去重后才判上限）；`server/test/kb-session-search.test.ts`（450 行）；chat-stream 的 `kb.hits` `status` 枚举（不改）
 - [ ] 3.2 测试先行：在 `kb-session-search.test.ts` 加「重建失败与重建中分开措辞」，改写「参数校验」（六个不同的 id 与六元素含重复两例）
 - [ ] 3.3 实现：`render` 按库的 `state` 分两句，`details.status` 仍为 `not_ready`；`parseArgs` 先按原始数组判 1–5 再去重
+  - 组 3 约定（#2029 fixture 审查补；3.2–3.3 照此实现与测试）：
+    - 3.1 的行号更正：`render` 为 `session-search.ts:111-129`（`not_ready` 分支 `:116-117`）；`parseArgs` `:79-102`，去重在 `:94`。
+    - `state` 的来路：`render` 改为 `render(entry: BaseOutcome, state: KnowledgeBase["state"] | undefined)`；`execute`（`:186`）改为 `bases.map((entry) => render(entry, owned.get(entry.kbId)?.state))`，取的是 `:181` 同一份 `owned`（与 `searchOne` 判定用的是同一次读取）。`BaseOutcome` 与 `outcome()` 不改，不加第五个键。组 8 把 `owned` 换成可见集合时，这一处跟着换。
+    - 映射：`not_ready` 分支里，`rebuild_failed` → `${label}：重建失败，本轮未检索`；`rebuilding` → `${label}：正在重建，本轮未检索`（原句）。`status` 两者都是 `not_ready`；`ready` 走不到这个分支（`:146`）。
+    - `parseArgs` 次序：键集 → `question` → `kb_ids` 的形状（`:91-93` 原样）→ 原始 `kbIds.length === 0` 返回 `kb_ids 至少含一个知识库 id`（`:96` 原文）→ 原始长度大于 `MAX_BASES` 返回 `一次至多检索 ${MAX_BASES} 个知识库` → 最后 `[...new Set(kbIds)]`。`:12` 的文件头改为「`kb_ids` 的形状 → 原始个数（1–5，与 schema `maxItems` 同一口径）→ 按首次出现去重」；`:78` 的注释保留「合规时给出去重后的参数」。
+    - 新用例 `describe("重建失败与重建中分开措辞")`：`:62` 的 `BaseSeed.state` 加上 `"rebuild_failed"`。在用例内部，`seeded()` 之后执行 `seedBase(world, { id: K4, name: "迁移手册", createdAt: 4_000, state: "rebuild_failed" })`，其中 `K4 = "e5".repeat(16)`。不进 `seeded()`，否则「定义」`:154-167` 会断。用 `kb_ids:[K3, K4]` 执行，整个结果 `toStrictEqual` `{text: [`知识库「旧版手册」（${K3}）：正在重建，本轮未检索`, "", `知识库「迁移手册」（${K4}）：重建失败，本轮未检索`].join("\n"), details:{bases:[{kbId:K3,name:"旧版手册",status:"not_ready",hits:[]},{kbId:K4,name:"迁移手册",status:"not_ready",hits:[]}]}, isError:true}`；`world.fake.requests()` 为 `[]`。
+    - 「参数校验」原地改：
+      - `:335` 那一行拆成两行：`["六个不同的 id", { question: QUESTION, kb_ids: six }]`、`["六元素含重复", { question: QUESTION, kb_ids: [K1, K1, K1, K1, K1, K2] }]`，凑齐规格的八例。
+      - `:349-357` 改为对这两组参数 `it.each`，各自 `toStrictEqual({ text: "一次至多检索 5 个知识库", isError: true })`。
+      - `:359-375` 改名为「原始五个含重复照常执行并去重；[k1,k1] 只检索一次」：`[K1, K1, "n1", "n2", "n3"]`（原始五个，守住上限边界）的 `isError` 为 false，`kbId` 依次为 `[K1, "n1", "n2", "n3"]`；`[K1, K1]` 的部分不变；`:374` 仍为 2。
+      - `:294`（K3 处于 `rebuilding`）不变。
+    - 测试文件头 `:2-3` 补一句：「#2029 s2c-kb-visibility 组 3：重建失败与重建中分开措辞；`kb_ids` 按原始个数计」。
+    - 行数（上限 800）：`session-search.ts` 206 → ≤ 212；`kb-session-search.test.ts` 450 → ≤ 480（组 8 还要往同一文件加四个场景）。
+    - 非目标：`kb.hits` 的 `status` 枚举、`sessions/kb-hits.ts`、web 检索卡文案（`kb-search-card.tsx:25`，残留见风险包）；`session-search.ts:22-27` 的工具描述；可见集合（组 8）。
+    - 回归命令：`npm run test:focus --workspace server -- kb-session-search`（先红后绿）；`npm run test:focus --workspace server -- session-kb-hits session-host-tool-align kb-retrieval`；`make lint`、`make typecheck`、`make anti-drift`；最后 `make check`。
 
 Suggested fixture level: compact - 给模型的两句文本与一处计数口径，不改结构化结果与权限。
 Minimal mergeable slice: atomic - 两处都是同一个工具的参数与结果契约，同一个测试文件的同一组场景；拆开只会多一次对同一文件的串行改动。
