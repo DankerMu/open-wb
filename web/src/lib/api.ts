@@ -1,3 +1,4 @@
+import { createAccountMethods, type MyScope } from "./api-accounts.js";
 import { type Command, createCommandMethods, type ProjectConfigFile } from "./api-commands.js";
 import {
   type ConnectorListing,
@@ -34,6 +35,7 @@ import {
   type KbIngestResult,
   type KbRetrievalInput,
   type KbRetrievalResult,
+  type KbScopeInput,
   type KbSettingsView,
   type KbStatus,
   type UpdateKbSettingsInput,
@@ -301,6 +303,12 @@ export type ApiClient = {
     input: KbRetrievalInput,
     options?: ApiRequestOptions,
   ): Promise<KbRetrievalResult>;
+  setKnowledgeBaseScope(
+    id: string,
+    input: KbScopeInput,
+    options?: ApiRequestOptions,
+  ): Promise<BaseView>;
+  getMyScope(options?: ApiRequestOptions): Promise<MyScope>;
   getSessionCapabilities(
     sessionId: string,
     options?: ApiRequestOptions,
@@ -563,6 +571,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
     ...createSkillMethods(onUnauthorized, transport),
     ...createConnectorMethods(onUnauthorized, transport),
     ...createKbMethods(onUnauthorized, transport),
+    ...createAccountMethods(onUnauthorized, transport),
     ...createSessionCapabilityMethods(onUnauthorized, transport),
     async listAudit(filter, options) {
       const search = new URLSearchParams();
@@ -646,6 +655,7 @@ export function createApiClient({ onUnauthorized }: ApiClientOptions = {}): ApiC
   };
 }
 
+export type { MyScope } from "./api-accounts.js";
 export type {
   ConnectorListing,
   ConnectorSummary,
@@ -668,6 +678,7 @@ export type {
   KbIngestResult,
   KbRetrievalInput,
   KbRetrievalResult,
+  KbScopeInput,
   KbSettingsView,
   KbStatus,
   RetrievalHit,

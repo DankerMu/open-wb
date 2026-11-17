@@ -1,5 +1,6 @@
-// 中心页「知识库」tab 测试共用的夹具（knowledge-bases「中心「知识库」tab」，s2a-kb-ragflow 任务 15.2、16.2）：一个按
-// 规格行为应答的假 `ApiClient`（经 `KnowledgeBasesPanel({client})` 注入，不经 fetch），以及按 role + name 定位的助手。
+// 中心页「知识库」tab 测试共用的夹具（knowledge-bases「中心「知识库」tab」，s2a-kb-ragflow 任务 15.2、16.2；范围对话框
+// 与建库范围：s2c-kb-visibility 组 12）：一个按规格行为应答的假 `ApiClient`（经 `KnowledgeBasesPanel({client})` 注入，
+// 不经 fetch），以及按 role + name 定位的助手。
 
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, vi } from "vitest";
@@ -14,8 +15,10 @@ import {
   type KbIngestResult,
   type KbRetrievalInput,
   type KbRetrievalResult,
+  type KbScopeInput,
   type KbStatus,
   type MountView,
+  type MyScope,
 } from "../src/lib/api.js";
 import "./radix-platform.js";
 
@@ -48,6 +51,21 @@ export function base(id: string, patch: Partial<BaseView> = {}): BaseView {
     scope: { scope: "me", group: null },
     ...patch,
   };
+}
+
+/** 两个项目组（account-groups/spec.md 的种子 g1 与另一个组）。 */
+const G1 = { id: "g1", name: "内网落地专项", memberCount: 2 };
+export const GROUPS: MyScope["groups"] = [G1, { id: "g2", name: "数据治理", memberCount: 3 }];
+
+/** 假客户端 `getMyScope` 的缺省应答：u1 zhangsan 在平台研发部、只属于 g1（account-groups/spec.md:41）。 */
+export const MY_SCOPE: MyScope = { department: "平台研发部", groups: [G1] };
+
+/** 请求的范围对应的 `BaseView.scope`：没带范围即 `me`；组名按 `GROUPS` 取。 */
+function scopeView(input: { scope?: KbScopeInput["scope"]; groupId?: string }): BaseView["scope"] {
+  const group = GROUPS.find((item) => item.id === input.groupId);
+  return input.scope === "group" && group
+    ? { scope: "group", group: { id: group.id, name: group.name } }
+    : { scope: input.scope ?? "me", group: null };
 }
 
 /** 十一键 `DocumentView`：缺省是工作空间 `ws-1` 里 `docs/<id>.md` 的一份、已解析出 3 个切片、源文件未变。 */
@@ -107,7 +125,8 @@ type Call = [method: string, ...args: unknown[]];
  * 假客户端：`statuses` 依次作为每次 `getKbStatus` 的应答（用完后重复最后一个），持有一张知识库表与每库的文档表，
  * 建库 / 删库、移出 / 重新入库按「知识库端点」「重新入库与移出」的语义改它们；`setDocuments` 换掉某库此后的文档表。
  * 检索按「检索测试端点」先写回参数再返回无命中；`setRetrievalOf` 改某库此后在列表里的检索参数。
- * 每次调用记进 `calls`。其余方法来自真实客户端、不会被调用。
+ * 建库与 `setKnowledgeBaseScope` 按请求的范围写该行的 `scope`；`getMyScope` 缺省返回 `MY_SCOPE`（缺省必须成功：新建对话框
+ * 每次打开都读它）。每次调用记进 `calls`。其余方法来自真实客户端、不会被调用。
  */
 export function fakeKb(
   statuses: readonly KbStatus[],
@@ -163,9 +182,21 @@ export function fakeKb(
           raptor: input.raptor ? "pending" : "off",
           graph: input.graph ? "pending" : "off",
         },
+        scope: scopeView(input),
       });
       bases = [...bases, created];
       return created;
+    }),
+    setKnowledgeBaseScope: vi.fn(async (id: string, input: KbScopeInput): Promise<BaseView> => {
+      calls.push(["setKnowledgeBaseScope", id, input]);
+      bases = bases.map((item) => (item.id === id ? { ...item, scope: scopeView(input) } : item));
+      const row = bases.find((item) => item.id === id);
+      if (!row) throw new Error(`no base ${id}`);
+      return { ...row };
+    }),
+    getMyScope: vi.fn(async (): Promise<MyScope> => {
+      calls.push(["getMyScope"]);
+      return { department: MY_SCOPE.department, groups: MY_SCOPE.groups.map((g) => ({ ...g })) };
     }),
     deleteKnowledgeBase: vi.fn(async (id: string) => {
       calls.push(["deleteKnowledgeBase", id]);

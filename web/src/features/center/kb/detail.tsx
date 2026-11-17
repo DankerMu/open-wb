@@ -26,7 +26,7 @@ type UploadLimits = Pick<Extract<KbStatus, { enabled: true }>, "uploadMaxFiles" 
  * 文档表区域之后是检索测试（s2b-kb-retrieval D8），同样只在 `ready` 时渲染，与文档表在读、失败或为空无关；
  * `onRetrieval` 把成功应答的检索参数同步到列表，`onRefetchBases` 静默重取列表。
  *
- * 标题旁是范围标签（本刀为纯文本，组 12 改为按钮）。共享库（非 `owned`）不论 `state` 都以只读提示代替两个入库入口，
+ * 标题旁是范围标签，自有库为按钮（`onScope` 打开范围对话框）。共享库（非 `owned`）不论 `state` 都以只读提示代替两个入库入口，
  * 文档表没有操作列。
  */
 export function KnowledgeBaseDetail({
@@ -36,6 +36,7 @@ export function KnowledgeBaseDetail({
   onCount,
   onRetrieval,
   onRefetchBases,
+  onScope,
 }: {
   base: BaseView;
   client: ApiClient;
@@ -43,6 +44,7 @@ export function KnowledgeBaseDetail({
   onCount(count: number): void;
   onRetrieval(retrieval: BaseView["retrieval"]): void;
   onRefetchBases(): void;
+  onScope(trigger: HTMLElement): void;
 }) {
   const docs = useKbDocuments(client, base.id, onCount);
   const { view } = docs;
@@ -64,7 +66,7 @@ export function KnowledgeBaseDetail({
         >
           {base.name} · 文档
         </h3>
-        <ScopeLabel scope={base.scope} />
+        <ScopeLabel base={base} onScope={(_, trigger) => onScope(trigger)} />
       </div>
       {base.owned ? null : (
         <p className={MUTED}>

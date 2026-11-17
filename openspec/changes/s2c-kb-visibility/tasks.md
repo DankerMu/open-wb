@@ -116,6 +116,19 @@
 | 组 11：归属集与计数 | 是 | errors.ts 集合加一条，共四十条；http-parser-owners 改为 40 条、PUT 8 条；kb-disabled 表十四条；kb.create detail 在 kb-bases.test.ts:168 与 kb-bases-compile.test.ts:162 两处原地改 |
 | 组 11：冒烟按名选库 | 是 | 共享打开后列表含他人同名库：kb.hurl:194 与 kb-cleanup.hurl:32、45、56 加所有者过滤；:184 按 id，不改；smoke-kb 为 review-only |
 | 组 11：CK 行字面量 | 是 | /api/audit 只给 actorId（core/audit/index.ts:140），写 u2 不写 zhaoliu；计数行以 zhaoliu 名下没有库为前提（list.tsx:163） |
+| 组 12：新的严格解析器 | 是 | `getMyScope` 按 account-groups/spec.md:29-31、:37 恰为 `{department, groups}`，组内恰为 `{id, name, memberCount}`；`memberCount` 为正安全整数，`0`、`-1`、`1.5`、`"2"`、`2 ** 53` 都是 `requestFailed(200)`；唯一来源是 `server/src/accounts/scope.ts:8-24`；ui-walk 的桩在组 13 |
+| 组 12：PUT 与 POST 的 `scope` 不对称 | 是 | PUT 必带 `scope` 键（`server/src/kb/scope.ts:85-88`，缺键 400），设回仅自己可见发 `{"scope":"me"}`；建库为仅自己可见时 body 不带 `scope`（spec.md:450）；非 group 档两处都不带 `groupId`（带 `null` 也是 400，`kb/scope.ts:37-52`）；断言用 `toStrictEqual` 与原始 body 串，不用 `toEqual` |
+| 组 12：fakeKb 的缺省方法 | 是 | `center-kb-support.tsx:249` 展开真实客户端：不补成功的缺省 `getMyScope`，新建对话框走真实 fetch，多出一条 alert，`center-kb-list.test.tsx:355` 的 `findByRole("alert")` 变红；support 补 `getMyScope`、`setKnowledgeBaseScope`，并让 `createKnowledgeBase` 回显请求的范围 |
+| 组 12：客户端键集守卫 | 是 | `api-files-archive.test.ts:246-320,344` 断言客户端恰为已归类的方法：两个新方法加进 `OTHER_CLIENT_METHODS`；issue AC 的 test:focus 模式不含这个文件，回归命令补 `api-files-archive` |
+| 组 12：组 9 的用例原地改 | 是 | `center-kb-shared.test.tsx:88,199` 的按钮名加 `仅自己可见`；:174、:179 改为「自有库是按钮、共享库是纯文本」；:153 标题与 :2 头注同步；不另写一份 |
+| 组 12：两个对话框的失败态不同 | 是 | 范围对话框取不到范围：四档与 `保存` 全部禁用、有 alert、`setKnowledgeBaseScope` 零次；新建对话框：只留 `仅自己可见`、有 alert、建库照常且不带 `scope`；判别断言是对 `scopeOptions` 整表 `toEqual` |
+| 组 12：读取在点击事件里发出 | 是 | `getMyScope()` 在打开对话框的点击里发出（先例 `kb-ref-picker.tsx:24-27`）；面板挂载时零次，每次打开恰一次；不传 signal，迟到的应答按打开序号丢弃 |
+| 组 12：保存恰一次、不在前端短路 | 是 | 在途时 `保存`、`取消`、四档都禁用，ref 拦同一帧的第二次；原样保存也发一次（spec.md:459，偏离 demo :3084；服务端遇到相同范围 200、不写、不审计） |
+| 组 12：用应答替换列表行 | 是 | 成功后按 id 用应答的 BaseView 整行替换，不重取列表，再 `invalidateRefetch`（`use-kb.ts:23-24`）；判别：应答带一个请求推不出的 `documents:7` |
+| 组 12：范围按钮不冒泡、任何 state 都有 | 是 | 先 `stopPropagation`，否则点按钮会进入详情；`rebuilding` 的自有行也有范围按钮（B18），只是没有 `删除知识库` |
+| 组 12：Radix RadioGroup 的第一个使用者 | 是 | 拷入层 `radio-group.tsx` 仓内没有使用者；受控「无选中」与表单内隐藏 input 未实测；断言只看 `aria-checked`、`disabled` 与 label 文本；与实测不符时停下来报告 |
+| 组 12：ui-walk 版面 | 是 | 自有行的范围格与详情头部从 span 变成按钮；CI `ui-walk`（`all-checks-passed` 成员，`make check` 不跑）须绿，本机跑一次；范围对话框的走查在组 13 |
+| 组 12：CK 行字面量 | 是 | `/api/audit` 只给 actorId（组 11 裁定），写 `u1`；CK-21/22 已随 #2054 进 master，新行编号 CK-23 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -673,10 +686,83 @@ Minimal mergeable slice: atomic - 建库与改范围共用同一个形状与所�
 
 ## 12. web：范围对话框与新建范围（knowledge-bases「中心「知识库」tab」范围部分；account-groups「账号范围端点」的 web 客户端）
 
-- [ ] 12.1 核对 Context：`web/src/lib/api.ts`（691 行）的审计客户端写法；`getMyScope` 放新文件 `web/src/lib/api-accounts.ts` 并由 `api.ts` 导出；`create-dialog.tsx`；demo :2737-2742、:3058-3092、:3010-3019
-- [ ] 12.2 测试先行：新文件 `web/test/api-kb-scope.test.ts`：`getMyScope` 的严格解析（含 `memberCount`）、`setKnowledgeBaseScope` 与 `createKnowledgeBase` 的 `scope` 参数；新文件 `web/test/center-kb-scope.test.tsx`：「范围对话框」「没有部门与没有项目组」「当前档已不可选」「新建时设范围」「新建对话框取不到范围」、范围对话框 `getMyScope` 失败（四档与 `保存` 全部禁用、有 `role="alert"`、`setKnowledgeBaseScope` 零次，与新建对话框只留 `仅自己可见` 不同）与对话框的保存失败态
-- [ ] 12.3 实现新文件 `web/src/features/center/kb/scope-dialog.tsx`（四档、预选、组下拉带人数、无组提示、部门空禁用、demo 逐字文案）；列表与详情的自有库范围标签改为按钮；新建对话框内嵌同一组控件
-- [ ] 12.4 验收清单：CK 节加一行（`待签`）：`zhangsan` 在中心「知识库」tab 把一个库依次设为「项目组可见 · 内网落地专项」与「全员可见」，`zhaoliu` 刷新后两次都能看到，`lisi` 只在全员可见时看到；再设为「本部门可见」，`zhaoliu`、`lisi` 都看不到（种子里没有与 `zhangsan` 同部门的可登录账号，正向只由 server 单测覆盖）；`lisi` 在浏览器打开 `/api/audit` 看到 `zhangsan` 的三条 `kb.scope`（before → after）。部门为空时 `本部门可见` 置灰只由 12.2 的 web 单测覆盖：种子里唯一没有部门的 `wangwu` 已停用、无法登录
+- [x] 12.1 核对 Context：`web/src/lib/api.ts`（691 行）的审计客户端写法；`getMyScope` 放新文件 `web/src/lib/api-accounts.ts` 并由 `api.ts` 导出；`create-dialog.tsx`；demo :2737-2742、:3058-3092、:3010-3019
+- [x] 12.2 测试先行：新文件 `web/test/api-kb-scope.test.ts`：`getMyScope` 的严格解析（含 `memberCount`）、`setKnowledgeBaseScope` 与 `createKnowledgeBase` 的 `scope` 参数；新文件 `web/test/center-kb-scope.test.tsx`：「范围对话框」「没有部门与没有项目组」「当前档已不可选」「新建时设范围」「新建对话框取不到范围」、范围对话框 `getMyScope` 失败（四档与 `保存` 全部禁用、有 `role="alert"`、`setKnowledgeBaseScope` 零次，与新建对话框只留 `仅自己可见` 不同）与对话框的保存失败态
+- [x] 12.3 实现新文件 `web/src/features/center/kb/scope-dialog.tsx`（四档、预选、组下拉带人数、无组提示、部门空禁用、demo 逐字文案）；列表与详情的自有库范围标签改为按钮；新建对话框内嵌同一组控件
+- [x] 12.4 验收清单：CK 节加一行（`待签`）：`zhangsan` 在中心「知识库」tab 把一个库依次设为「项目组可见 · 内网落地专项」与「全员可见」，`zhaoliu` 刷新后两次都能看到，`lisi` 只在全员可见时看到；再设为「本部门可见」，`zhaoliu`、`lisi` 都看不到（种子里没有与 `zhangsan` 同部门的可登录账号，正向只由 server 单测覆盖）；`lisi` 在浏览器打开 `/api/audit` 看到 `zhangsan` 的三条 `kb.scope`（before → after）。部门为空时 `本部门可见` 置灰只由 12.2 的 web 单测覆盖：种子里唯一没有部门的 `wangwu` 已停用、无法登录
+  - 组 12 约定（#2038 fixture 审查补；12.2–12.4 照此实现与测试）：
+    - 前置：#2054（组 11）已合入。服务端契约：`GET /api/accounts/me/scope` 的 200 恰为 `scopeOf` 的返回值（`server/src/accounts/scope.ts:8-24`，注册在 `accounts/index.ts:21-27`，no-store）；`PUT /api/kb/bases/:id/scope` 的键集恰为 `scope`，group 档另带 `groupId`；缺 `scope` 键即 400（`kb/scope.ts:85-88`）；非 group 档出现 `groupId` 键即 400，含 `null`（`kb/scope.ts:37-52`）；成功为 200 的十四键 BaseView（`kb/rest.ts:302-304`）。
+    - 12.1 行号核实与更正：
+      - `api.ts` 691 行。审计客户端：类型 :93-110；签名 :188；`parseAuditList` :403-410；实现 :567-589（`request(…, 200)` 后严格解析，失败抛 `requestFailed(200)`）。transport :541-550；`createKbMethods` 的展开 :565；kb 类型导出 :663-675；`getRequestOptions` :440-446。
+      - `api-kb.ts` 是 662 行（头部写 610，已过时）。:5 写「十四个方法」；`CreateKnowledgeBaseInput` :121-127；`KbMethods` :184-200；`isPositiveSafeInteger` :262-265（模块私有，`composer-contract.ts:45-47` 另有一份）；`jsonBody` :552-559；`createKnowledgeBase` :613-616（body 原样序列化）；`retrieveFromKnowledgeBase` :653-660。`api-kb.test.ts` 是 695 行（头部写 688），冻结，不加用例。
+      - `list.tsx` 211 行：`SCOPE_TEXT` :37-42，`ScopeLabel` :82-86，列表注释 :143-147，范围格 :187-189，`删除知识库` :190-203。组 9 给的 ≤ 220 已基本用完，本组放宽。
+      - `detail.tsx` 144 行：注释 :29-30，头部 :58-68。`create-dialog.tsx` 178 行：`Values` :21，`toInput` :34-37，注释 :59-63，复选 :147-160，alert :161-165，Dialog 外壳 :103-118。`panel.tsx` 125 行：`restoreFocus` :39-42，新建按钮 :60-69，列表 :77-86，详情 :87-97，新建对话框 :98-107。`use-kb.ts` 216 行：头注 :11-27（本地改动清单 :23-24），`updateBases` :96-99，`invalidateRefetch` :129-131。
+      - `messageOf` 已在 `ingest-tree.tsx:12` 导出，复用，不另写。
+      - demo：`KB_SCOPES` :2737-2742（四档 :2738-2741）。新建对话框：`可见范围` :3010，提示 :3013，`项目组` :3015，人数 :3018，无组提示 :3019。范围对话框是 :3058-3091（不是 :3058-3092）：标题 :3059，预选当前档 :3061，`项目组` :3065，选项与预选当前组 :3068，无组提示 :3069，审计提示 :3071，`取消`、`保存` :3072，相同即关 :3084，toast :3089。
+      - 拷入层 `components/ui/radio-group.tsx` 仓内尚无使用者，本组是第一个。
+    - 字面量（逐字）：
+      - 范围对话框的可访问名为 `「<库名>」可见范围`，括号 U+300C / U+300D（spec.md:452，demo :3059）。
+      - 四档名与说明（spec.md:455，demo :2738-2741）：`仅自己可见`：`只有你能检索与引用，文档留在你的沙箱内`；`本部门可见`：`同部门同事可检索与引用，但不能改动内容`；`项目组可见`：`指定项目组的成员可检索与引用，可跨部门`；`全员可见`：`全公司可检索与引用，适合口径、规范类文档`。
+      - 部门旁注 `你的账号没有部门信息`（:456）。下拉标签 `项目组`（demo :3065）；每项 `<组名>（<memberCount> 人）`，全角括号 U+FF08 / U+FF09，数字与「人」之间一个半角空格（:457，demo :3068）。
+      - 无组提示 `你还不属于任何项目组，请让管理员在「中心 → 账号」中把你加入`（:457，demo :3069）。
+      - 审计提示 `共享只给读权限：他人可检索与引用，不能增删文档或改设置。切换范围会记入审计。`（:458，demo :3071），只出现在范围对话框。
+      - 按钮 `保存`、`取消`（demo :3072）。新建对话框里这组控件的标签为 `可见范围`（demo :3010）。
+      - 范围按钮的文案与 `ScopeLabel` 同出一处（组 9 约定：四档文案只此一处）。
+    - 审查裁定（规格没写；按此实现与测试，PR 按偏离写明）：
+      - 读取时点：`getMyScope()` 在打开对话框的点击里发出，不放在 effect 里（`kb-ref-picker.tsx:24-27` 先例）；面板挂载时不读，每打开一次恰调用一次；不传 signal（`mock.calls` 为 `[[]]`）；迟到的应答按打开序号丢弃。
+      - 读取在途：范围对话框四档都禁用、都不选中，`保存` 禁用，没有 alert；新建对话框 `仅自己可见` 选中且可用，其余三档禁用，没有 alert，`创建` 照常可用。
+      - 范围对话框取不到范围：四档禁用且都不选中（预选只在取得之后计算）；`取消` 可用；不加重试按钮，关闭后重开即重读。
+      - 预选：`me`、`all` 恒可选；`dept` 要 `department !== null`；`group` 要当前组在 `groups` 里。可选时选中当前档，`group` 档的下拉选中当前组。改选 `项目组可见` 时下拉缺省为当前组（若在 `groups` 里），否则 `groups[0]`。缺省值由状态派生，不用 effect 同步。
+      - 禁用：`本部门可见` 只看 `department === null`。`项目组可见` 在 `groups` 为空时不禁用；选中后不渲染下拉、显示无组提示，`保存`（新建对话框里是 `创建`）禁用。
+      - 原样保存也恰调用一次 `setKnowledgeBaseScope`（spec.md:459），偏离 demo :3084 的前端短路。
+      - 新建对话框不加 demo :3013 的提示与 :3071 的审计提示；两个对话框都不做 demo :3089 的 toast。
+    - `web/src/lib/api-accounts.ts`（新文件，≤ 70 行；头注写 s2c-kb-visibility 组 12、account-groups「账号范围端点」）：
+      - `export type MyScope = { department: string | null; groups: { id: string; name: string; memberCount: number }[] }`。
+      - 模块私有 `parseMyScope`：`hasExactlyKeys(value, ["department","groups"])`；`department` 为 `null` 或字符串；`groups` 经 `parseJsonArray`，每项 `hasExactlyKeys(["id","name","memberCount"])`，`id`、`name` 为字符串，`memberCount` 用内联的 `isNonNegativeSafeInteger(x) && x > 0`（不新增第三份 `isPositiveSafeInteger`）；不判非空串与次序。
+      - `export function createAccountMethods(onUnauthorized, { request, getRequestOptions, requestFailed })`，返回 `Pick<ApiClient, "getMyScope">`：`request("/api/accounts/me/scope", getRequestOptions(options?.signal), onUnauthorized, 200)`，解析为 null 抛 `requestFailed(200)`（同 `api.ts:567-589`）。
+    - `api.ts`（691 → ≤ 705）：导入 `createAccountMethods` 与 `type MyScope`；`ApiClient` 加 `getMyScope(options?): Promise<MyScope>` 与 `setKnowledgeBaseScope(id, input: KbScopeInput, options?): Promise<BaseView>`；`createApiClient` 展开 `...createAccountMethods(onUnauthorized, transport)`；导出 `type { MyScope }`，kb 类型导出加 `KbScopeInput`。
+    - `api-kb.ts`（662 → ≤ 685）：`export type KbScopeInput = { scope: "me" | "dept" | "all" } | { scope: "group"; groupId: string }`（判别联合）；`CreateKnowledgeBaseInput` 改为原四键交上「不带范围」或 `KbScopeInput` 之一，方法体不改（body 原样序列化，只发所给的键）；`setKnowledgeBaseScope(id, input, options)` = `parsed(basePath(id) + "/scope", jsonBody("PUT", input, requestOptions(options?.signal)), 200, parseBaseView)`；`KbMethods` 加这个名字；:5 改为「十五个方法对应十五条路由」。
+    - `web/src/features/center/kb/scope-dialog.tsx`（新文件，≤ 260 行；头注写 s2c-kb-visibility D9、knowledge-bases「中心「知识库」tab」范围对话框）：
+      - `export const SCOPES`：四档 `{ value, label, description }`，次序 me、dept、group、all。`list.tsx` 删掉 `SCOPE_TEXT`，`ScopeLabel` 改从 `SCOPES` 取名（文案只此一处）；scope-dialog 不导入 list.tsx（避免成环）。
+      - `export function useMyScope(client)`：返回 `{ state, load }`；`state` 为 `{status:"loading"}`、`{status:"ready", scope}` 或 `{status:"failed", message}`；`load()` 递增打开序号并发出一次 `client.getMyScope()`；失败文案取 `messageOf`。由 panel 持有一份，两个对话框共用。
+      - `export function ScopeFields({ state, value, groupId, onChange, onGroupChange, fallback })`：拷入层 `RadioGroup`，`aria-label="可见范围"`；每档一个 `RadioGroupItem`，以 `Label htmlFor` 关联，可访问名恰为档名；说明是独立元素，经 `aria-describedby` 关联；另含部门旁注、下拉、无组提示。下拉用拷入层 `Select`，触发器名为 `项目组`，在 `SelectValue` 里显式写选中项文案（同 `create-dialog.tsx:136`）。`fallback`：新建对话框 `"me-only"`、范围对话框 `"none"`。复杂度 ≤ 15：下拉抽成 `GroupField`。
+      - `export function ScopeDialog({ base, state, client, restoreFocus, onSaved, onCancel })`：拷入层 `Dialog`，标题为「「」+ 库名 +「」可见范围」；外壳同 `create-dialog.tsx:103-118`（`useEscapeFallback`，`onCloseAutoFocus` 还焦点）。「取不到范围」与「保存失败」各一个 `p`（`role="alert"`，样式同 `create-dialog.tsx:18-19` 的 `ERROR_TEXT`）。`保存` 恰调用一次 `client.setKnowledgeBaseScope(base.id, input)`（恰两个参数）：group 档 `{scope:"group", groupId}`，其余档 `{scope}`（含 `{scope:"me"}`）。在途时 `保存`、`取消`、四档与下拉都禁用，Escape 与遮罩关不掉，`useRef` 拦同一帧第二次点击。成功调 `onSaved(view)`；失败显示信封文案，选择保持，`保存` 恢复可用。
+      - jscpd 若报 Dialog 外壳与 `create-dialog.tsx:103-118`、`ingest-dialog.tsx:125-140` 重复：抽成 kb 目录里一个导出组件三处共用，不留三份。
+    - `list.tsx`（211 → ≤ 240）：`ScopeLabel({ base, onScope })`：`base.owned` 为真时渲染拷入层 `Button`（`size="sm"`、`variant="outline"`，可访问名恰为范围文案），`onClick` 先 `stopPropagation` 再 `onScope(base, event.currentTarget)`；否则仍是组 9 的纯文本 span。任何 `state` 都渲染范围按钮（B18，`rebuilding` 也有）。`KnowledgeBaseList` 加 prop `onScope(base, trigger)`；:82 与 :143-147 的注释同步。
+    - `detail.tsx`（144 → ≤ 155）：加 prop `onScope(trigger)`，头部渲染 `ScopeLabel`（传 `base` 与 `onScope`）；:29-30 的注释改为「自有库为按钮」。
+    - `create-dialog.tsx`（178 → ≤ 230）：加 prop `scope`（`useMyScope` 的 state）；`Values` 加 `scope` 与 `groupId`；复选之后、alert 之前渲染标签 `可见范围` 与 `fallback="me-only"` 的 `ScopeFields`；`toInput`：`me` 不带范围键，`group` 带 `scope` 与 `groupId`，其余档只带 `scope`；选 `项目组可见` 而 `groups` 为空时 `创建` 禁用；两条 alert（取不到范围、建库失败）并存时各占一个元素；:59-63 的注释补范围。
+    - `panel.tsx`（125 → ≤ 150）：持有 `useMyScope(client)` 与正在设置的库 id（每次从 `view.bases` 现取该行）；`新建知识库` 的点击里调 `load()`；`onScope` 里设 `opener`、调 `load()`、打开 `ScopeDialog`；`onSaved` 里 `kb.replaceBase(view)` 并关闭；还焦点沿用 `restoreFocus`。
+    - `use-kb.ts`（216 → ≤ 232）：新方法 `replaceBase(view)`，经 `updateBases` 按 id 整行换成应答，再 `invalidateRefetch()`；头注 :23-24 的本地改动清单加「改范围成功」。
+    - 夹具 `web/test/center-kb-support.tsx`（349 → ≤ 400）：导出 `GROUPS = [{id:"g1",name:"内网落地专项",memberCount:2},{id:"g2",name:"数据治理",memberCount:3}]` 与 `MY_SCOPE: MyScope = {department:"平台研发部", groups:[GROUPS[0]]}`（account-groups/spec.md:41）；`fakeKb` 加 `getMyScope`（记 `["getMyScope"]`，返回 `MY_SCOPE` 的拷贝）与 `setKnowledgeBaseScope(id, input)`（记入 calls，按 `GROUPS` 取组名改表，返回该行拷贝）；`createKnowledgeBase` 按请求的范围生成 `scope`，与 `setKnowledgeBaseScope` 共用同一个局部函数。缺省成功是硬要求（否则 `center-kb-list.test.tsx:355` 等变红）。
+    - 新文件 `web/test/api-kb-scope.test.ts`（≤ 260 行；头注 #2038 s2c-kb-visibility 组 12；接缝同 `api-kb-visibility.test.ts`：真实 `createApiClient` 加替身 `fetch`）：
+      - getMyScope 请求：`fetch.mock.calls` `toStrictEqual` `[["/api/accounts/me/scope",{method:"GET",credentials:"same-origin",cache:"no-store"}]]`；传 signal 时 init 多一个 `signal`。
+      - 原样通过（`toStrictEqual`）：`{department:"平台研发部",groups:[{id:"g1",name:"内网落地专项",memberCount:2}]}`、`{department:null,groups:[]}`、两个组时保持应答次序。
+      - 拒绝（`expectRequestFailure(…, 200)`）：外层多一键、缺 `department`、缺 `groups`、`department` 为 `1`/`true`/`{}`、`groups` 为 `null`/`{}`/`"g1"`、整个应答为 `[]` 或 `null`；组项多一键、各缺一键、`id`/`name` 为 `1` 或 `null`、`memberCount` 为 `0`/`-1`/`1.5`/`"2"`/`null`/`true`/`2 ** 53`。201 为 `requestFailed(201)`；503 信封 `{status:503, code:"kb_unavailable", message:"知识库服务暂不可用"}` 原样透传。
+      - setKnowledgeBaseScope：id `kb/1 中` 的地址为 `/api/kb/bases/kb%2F1%20%E4%B8%AD/scope`；init `toStrictEqual` `{method:"PUT",credentials:"same-origin",headers:{"Content-Type":"application/json"},body}`，`body` 依次为原始串 `{"scope":"group","groupId":"g1"}`、`{"scope":"me"}`、`{"scope":"all"}`；200 的 BaseView 原样返回；201 为 `requestFailed(201)`；缺 `scope` 键的 BaseView 为 `requestFailed(200)`；400 信封（`bad_request`、`请求格式不正确`）原样透传。
+      - createKnowledgeBase 的范围：body 原始串 `{"name":"组库","template":"naive","scope":"group","groupId":"g1"}` 与 `{"name":"全员库","template":"naive","scope":"all"}`；201 带 `scope:{scope:"group",group:{id:"g1",name:"内网落地专项"}}` 的视图原样通过。
+      - 不复制 `api-kb-retrieval.test.ts` 的 401 用例块（jscpd）。
+    - 新文件 `web/test/center-kb-scope.test.tsx`（≤ 480 行；头注 #2038 组 12）。本地助手：`scopeOptions(dialog)`（每个 `role="radio"` 取 `{name: label[for=id] 的文本, checked: aria-checked 为 "true", disabled: 按钮的 disabled}`）、`scopeDialog(name)`（`findByRole("dialog", {name: "「" + name + "」可见范围"})`）、`alertsIn(dialog)`。
+      - 「范围对话框」：A = `base("a",{name:"规范库"})`，渲染后 `getMyScope` 零次。`getMyScope` 以 deferred 挂起，点 A 行的 `仅自己可见` 按钮：对话框名 `「规范库」可见范围`；没有 `规范库 · 文档` 区域（不冒泡）；挂起时四项都 `{checked:false, disabled:true}`，`保存` 禁用，`alertsIn` 为 `[]`。放行返回 `MY_SCOPE`：`scopeOptions` `toEqual` `[{name:"仅自己可见",checked:true,disabled:false},{name:"本部门可见",checked:false,disabled:false},{name:"项目组可见",checked:false,disabled:false},{name:"全员可见",checked:false,disabled:false}]`；四句说明与审计提示都能 `getByText(…, {exact:true})`；没有部门旁注与 `项目组` 下拉。点 `项目组可见`：下拉出现，触发器 `内网落地专项（2 人）`，`openOptions(dialog,"项目组")` 恰为 `["内网落地专项（2 人）"]`，选中它。`setKnowledgeBaseScope.mockImplementationOnce` 挂起，放行返回 `{...A, scope:{scope:"group",group:{id:"g1",name:"内网落地专项"}}, documents:7}`；点 `保存`：在途时 `保存`、`取消` 禁用，再点不再调用；放行后对话框关闭，`mock.calls` `toStrictEqual` `[["a",{scope:"group",groupId:"g1"}]]`；A 行第 6 格按钮为 `项目组可见 · 内网落地专项`，第 4 格为 `7`；焦点在该按钮；`getMyScope` 1 次，`listKnowledgeBases` 1 次。进 A 的详情点头部同名按钮：`项目组可见` 选中、下拉 `内网落地专项（2 人）`；选 `仅自己可见`（下拉消失）保存：第二次调用 `toStrictEqual` `["a",{scope:"me"}]`；详情头部与列表行按钮都为 `仅自己可见`；`getMyScope` 共 2 次。
+      - 「两个项目组」：`getMyScope` 返回 `{department:"平台研发部",groups:GROUPS}`；B 为 group/g2 的自有库：预选 `项目组可见`，下拉 `数据治理（3 人）`（不是首项），下拉文案恰为 `["内网落地专项（2 人）","数据治理（3 人）"]`；C 为 `me`：改选 `项目组可见` 时下拉缺省 `内网落地专项（2 人）`，改选 `数据治理（3 人）` 后保存，调用 `toStrictEqual` `["c",{scope:"group",groupId:"g2"}]`，按钮为 `项目组可见 · 数据治理`。
+      - 「没有部门与没有项目组」：`{department:null,groups:[]}`：`仅自己可见` 选中可用，`本部门可见` `{checked:false,disabled:true}`，`项目组可见`、`全员可见` 可用；旁注逐字存在；点禁用的 `本部门可见` 后仍未选中；选 `项目组可见`：无下拉、无组提示逐字存在、`保存` 禁用；选 `全员可见`：提示消失、`保存` 可用；`取消` 关闭，`setKnowledgeBaseScope` 零次。同一应答下打开新建对话框：`scopeOptions` 与旁注相同；选 `项目组可见` 后出现无组提示，`创建` 禁用。
+      - 「当前档已不可选」：A 为 group/g1，`{department:"平台研发部",groups:[]}`：四项都未选中、都不禁用，`保存` 禁用，无下拉与无组提示；选 `全员可见` 后 `保存` 可用。D 为 dept，`{department:null,groups:[GROUPS[0]]}`：四项都未选中，`本部门可见` 禁用，`保存` 禁用。阳性对照 E 为 dept，在 `MY_SCOPE` 下 `本部门可见` 选中、`保存` 可用。另：`base("r",{name:"重建库",state:"rebuilding"})` 那一行按钮名恰为 `["仅自己可见"]`（B18）。
+      - 「范围对话框取不到范围」（describe 名写明与新建对话框不同）：`getMyScope.mockRejectedValueOnce(new ApiError(503,"kb_unavailable","知识库服务暂不可用"))`；`alertsIn(dialog)` 为 `["知识库服务暂不可用"]`；四项都 `{checked:false,disabled:true}`；`保存` 禁用、`取消` 可用；点 `全员可见` 再点 `保存`，`setKnowledgeBaseScope` 零次；`pageAlerts()` 为 `[]`；`取消` 后关闭，焦点回 A 行按钮。
+      - 「保存失败」：`setKnowledgeBaseScope.mockRejectedValueOnce(new ApiError(400,"bad_request","请求格式不正确"))`；选 `全员可见` 保存：对话框仍在，`alertsIn` 为 `["请求格式不正确"]`，`全员可见` 仍选中，`保存` 可用；A 行按钮仍为 `仅自己可见`；`listKnowledgeBases` 1 次；`pageAlerts()` 为 `[]`。再点 `保存`（缺省成功）：关闭，按钮为 `全员可见`，共调用 2 次。
+      - 「新建时设范围」：`getByRole("radiogroup",{name:"可见范围"})` 存在，`仅自己可见` 选中，四项都可用。第一次：名称 `规范库`、模板 `手册`、选 `全员可见`、点 `创建`：`createKnowledgeBase.mock.calls` `toStrictEqual` `[[{name:"规范库",template:"manual",scope:"all"}]]`，新行按钮 `全员可见`。第二次：`手册库`，范围保持 `仅自己可见`：第 2 次调用 `toStrictEqual` `[{name:"手册库",template:"manual"}]`。第三次：`组库`，选 `项目组可见`（下拉缺省 `内网落地专项（2 人）`）：`toStrictEqual` `[{name:"组库",template:"manual",scope:"group",groupId:"g1"}]`。`getMyScope` 共 3 次。
+      - 「新建对话框取不到范围」：同样的 503；对话框内 alert 恰为 `["知识库服务暂不可用"]`；`仅自己可见` `{checked:true,disabled:false}`，其余三档 `{checked:false,disabled:true}`；没有部门旁注；填 `规范库`、选 `手册`、点 `创建`：对话框关闭，`createKnowledgeBase.mock.calls` `toStrictEqual` `[[{name:"规范库",template:"manual"}]]`。
+    - 既有用例只许原地改：
+      - `center-kb-shared.test.tsx`（269 → ≤ 275）：:2 的「（本刀为纯文本，组 12 改为按钮）」改为「自有库为按钮（组 12）」；:88 与 :199 改为 `["仅自己可见","删除知识库"]`；:153 标题改为「…自有库为按钮、共享库为纯文本…」；:174 改为按行断言第 6 格里的按钮名 `[["仅自己可见"],[],["项目组可见 · 内网落地专项"],[]]`；:179 改为在 `detail` 范围内 `getByRole("button",{name:"项目组可见 · 内网落地专项"})` 存在；共享库相关的 :84、:102、:200 不变。
+      - `api-files-archive.test.ts`（367 → ≤ 371）：`OTHER_CLIENT_METHODS` 在 :303 之后加 `"setKnowledgeBaseScope"`，再加注释「账号范围（account-groups「账号范围端点」）」与 `"getMyScope"`。
+      - 不改：`center-kb-list.test.tsx`（:154-171 第 6 格文本仍是 `仅自己可见`；:302、:330-332、:359 的建库参数不带 `scope`，本身就是守卫；:355 的单个 alert 依赖 fake 的缺省 `getMyScope`）、`api-kb.test.ts`、`center-kb-retrieval.test.tsx`、`center-kb-detail.test.tsx`。
+    - TDD 配对：`scope-dialog.tsx` 对 `center-kb-scope.test.tsx`；`api-accounts.ts` 对 `api-kb-scope.test.ts`（文件名按 12.2，PR 写明）。先红后绿。
+    - PR 边界偏离（PR 写明）：issue 的 PR Boundary 没列 `panel.tsx`、`use-kb.ts`、`center-kb-support.tsx`、`center-kb-shared.test.tsx`、`api-files-archive.test.ts`（接线或原地改）；diff 预计超过 400 行，援引 Width exception（merged-tasks）。
+    - 12.4 验收清单：CK 节在 CK-22 之后加 CK-23，结论 `待签`：
+      - 操作：由 owner 执行（agent 不得代签）。在 CK-21 那台服务上，以 `zhangsan` 打开「中心」的「知识库」tab，点 `新建知识库`，名称填「范围库」，模板保持缺省，可见范围保持 `仅自己可见`，点 `创建`。然后点「范围库」一行的范围按钮 `仅自己可见`，在对话框里选 `项目组可见`，项目组选 `内网落地专项（2 人）`，点 `保存`；以 `zhaoliu`、`lisi` 各刷新自己的「知识库」tab。回到 `zhangsan` 再打开该对话框，选 `全员可见` 并保存，两人各刷新。`zhangsan` 第三次打开，选 `本部门可见` 并保存，两人各刷新。最后以 `lisi` 在浏览器打开 `/api/audit`。
+      - 期望：新建对话框的「可见范围」有四档，各带说明，`仅自己可见` 选中，四档都可选；建成后该行的范围按钮为 `仅自己可见`。对话框标题为「「范围库」可见范围」，打开时选中当前档（第二次打开时为 `项目组可见`，项目组为 `内网落地专项（2 人）`）；`本部门可见` 可选；有提示「共享只给读权限：他人可检索与引用，不能增删文档或改设置。切换范围会记入审计。」。每次保存后对话框关闭，按钮依次变为 `项目组可见 · 内网落地专项`、`全员可见`、`本部门可见`。项目组档：`zhaoliu` 的列表有「范围库」，带 `只读`、「来自 zhangsan · 平台研发部」与纯文本的 `项目组可见 · 内网落地专项`（不是按钮）；`lisi` 的列表没有。全员档：两人都有，标签为 `全员可见`。本部门档：两人都没有（种子里没有与 `zhangsan` 同部门的可登录账号，正向只由 server 单测覆盖）。`/api/audit` 里 `kind` 为 `kb.scope`、detail 的 `id` 为「范围库」的事件恰三条：`actorId` 都为 `u1`（即 `zhangsan`），标题为 `修改知识库可见范围`；按时间先后 before 到 after 依次为 `{"scope":"me","groupId":null}` 到 `{"scope":"group","groupId":"g1"}`、`{"scope":"group","groupId":"g1"}` 到 `{"scope":"all","groupId":null}`、`{"scope":"all","groupId":null}` 到 `{"scope":"dept","groupId":null}`。页面没有错误提示。部门为空时 `本部门可见` 置灰只由 web 单测覆盖：种子里唯一没有部门的 `wangwu` 已停用，无法登录。
+      - 写完跑 `npm run test:focus --workspace web -- functional-checklist`（守卫 `web/test/functional-checklist.test.ts:15-33` 拒绝带 `#` 的选择器样写法与 px）。
+    - 非目标：ui-walk 的范围对话框段与 `GET /api/accounts/me/scope` 的桩（组 13）；system.md 与术语表（组 14）；getMyScope 的重试按钮、跨多次打开的缓存或预取；demo :3013 的提示、:3089 的 toast、前端短路相同范围；共享库改范围；项目组管理与「中心 → 账号」入口（S3a）；管理员特权；本组不附截图、不做 UI 视觉声明。
+    - 实测与上面这些字面量不符时停下来报告，不改期望。Radix `RadioGroup` 在 jsdom 里的受控「无选中」、点击禁用项、表单内隐藏 input 是否进入 `getAllByRole("radio")` 都未实测；与 `scopeOptions` 断言不符时停下来报告，不得不加说明就改用原生 radio。
+    - 回归命令：先红后绿 `npm run test:focus --workspace web -- api-kb-scope center-kb-scope`；`npm run test:focus --workspace web -- center-kb api-kb api-files-archive functional-checklist`；`make lint`、`make typecheck`、`make anti-drift`（knip：`MyScope`、`KbScopeInput`、`SCOPES`、`useMyScope`、`ScopeFields`、`ScopeDialog`、`createAccountMethods`、`GROUPS`、`MY_SCOPE` 都有使用者，`SCOPE_TEXT` 无残留；jscpd：Dialog 外壳、api 测试的信封与 401 用例块）；本机 `make ui-walk`（对新 build 的 web/dist，PR 附命令与退出码）；最后 `make check`。
 
 Suggested fixture level: expanded - 新的严格解析器与公开 API 参数（`issue-risk-contract` 的 parser / public API 触发项）。
 Minimal mergeable slice: atomic - 范围对话框与新建对话框共用同一组控件与同一个 `getMyScope` 调用，拆开两 PR 改同一个新文件。

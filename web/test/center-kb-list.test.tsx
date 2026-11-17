@@ -170,7 +170,11 @@ describe("列表", () => {
       "仅自己可见",
       "删除知识库",
     ]);
-    expect(within(rowOf("表格库")).queryByRole("button")).toBeNull();
+    expect(
+      within(rowOf("表格库"))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["仅自己可见"]);
   });
 
   it("删除知识库：先弹确认，取消不发请求；确认后恰一次 deleteKnowledgeBase，行消失", async () => {

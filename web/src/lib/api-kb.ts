@@ -2,7 +2,7 @@ import type { ApiClient, ApiClientOptions, ApiError } from "./api.js";
 import { hasExactlyKeys, isNonNegativeSafeInteger, parseJsonArray } from "./api-json.js";
 
 /**
- * 知识库的 API 客户端（s2a-kb-ragflow design D19）：状态、设置、知识库、文档、上传，十四个方法对应十四条路由。
+ * 知识库的 API 客户端（s2a-kb-ragflow design D19）：状态、设置、知识库、文档、上传，十五个方法对应十五条路由。
  * 应答形状以 knowledge-bases 与 ragflow-backend 两份 spec 为准，严格解析：多键、少键、类型不符即无效应答。
  * 只判键集、类型与枚举，不交叉判字段之间的关系（`chunkCount` 只在 `done` 时为数字之类是服务端的契约）。
  */
@@ -118,13 +118,16 @@ export type BaseView = {
   scope: { scope: (typeof BASE_SCOPES)[number]; group: { id: string; name: string } | null };
 };
 
-/** `POST /api/kb/bases` 的 body：只发所给的键。 */
+/** `PUT …/scope` 的 body（knowledge-bases「知识库范围端点」）：恒带 `scope`；只有 `group` 档带 `groupId`。 */
+export type KbScopeInput = { scope: "me" | "dept" | "all" } | { scope: "group"; groupId: string };
+
+/** `POST /api/kb/bases` 的 body：只发所给的键；仅自己可见时不带范围键。 */
 export type CreateKnowledgeBaseInput = {
   name: string;
   template: BaseView["template"];
   raptor?: boolean;
   graph?: boolean;
-};
+} & ({ scope?: never; groupId?: never } | KbScopeInput);
 
 /** `chunkCount` 可以是 0；`sourceChanged` 的 `null` 是「不知道」或本地上传。 */
 export type DocumentView = {
@@ -197,6 +200,7 @@ type KbMethods = Pick<
   | "reingestKbDocument"
   | "removeKbDocument"
   | "retrieveFromKnowledgeBase"
+  | "setKnowledgeBaseScope"
 >;
 
 const STATUS_KEYS = [
@@ -657,6 +661,11 @@ export function createKbMethods(
         200,
         parseRetrievalResult,
       );
+    },
+
+    setKnowledgeBaseScope(id, input, options) {
+      const init = jsonBody("PUT", input, requestOptions(options?.signal));
+      return parsed(`${basePath(id)}/scope`, init, 200, parseBaseView);
     },
   };
 }
