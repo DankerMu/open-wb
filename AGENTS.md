@@ -45,7 +45,7 @@
 ## Directory Map
 
 ```
-server/     app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计/对话/预览监听器/文档转换）
+server/     app-server（业务后端：账号/会话/工作空间/权限/沙箱/审计/对话/预览监听器/文档转换）
 web/        浏览器 SPA（Playwright UI 走查在 web/e2e）
 resource/   行为基准原型 + 后端选型研究 +（gitignore 的）上游参考克隆
 app-reference/  上游应用只读副本（gitignore；仅 analysis/ 可写）

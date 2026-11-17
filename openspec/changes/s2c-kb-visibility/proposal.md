@@ -22,7 +22,7 @@ A 收口时还留下五个种子（IMPLEMENTATION_PLAN「Next Step」2026-11-13�
 
 - **账号的部门与项目组**（新 capability `account-groups`）：
   - 迁移 053 给 `accounts` 加只读的 `department` 列，建 `project_groups`、`project_group_members` 两张表；种子按 demo 填部门（u1 平台研发部、u2 数据部、u3 产品部，u4 空）与项目组 `g1 内网落地专项`（u1、u2）。
-  - 应用侧没有写部门与项目组的接口；部门在 S3a 改由 IdP 下发，项目组的增删改与解散在 S3a。
+  - 应用侧没有写部门与项目组的接口；部门、项目组的增删改与解散都在 S3a 由管理员维护（ADR-0018：没有统一身份系统）。
   - `GET /api/accounts/me/scope` 回调用者的部门与所在项目组，供范围对话框用。
 - **可见范围四档**（knowledge-bases）：
   - `knowledge_bases` 加 `scope`（`me` / `dept` / `group` / `all`，缺省 `me`）与 `scope_group_id`。

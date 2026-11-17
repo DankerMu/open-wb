@@ -18,7 +18,7 @@
 ## 目录结构
 
 ```
-server/         app-server（业务后端：SSO/会话/工作空间/权限/沙箱/审计）
+server/         app-server（业务后端：账号/会话/工作空间/权限/沙箱/审计）
 web/            浏览器 SPA（Playwright UI 走查在 web/e2e）
 smoke/          Hurl HTTP 冒烟用例
 openspec/       OpenSpec 规格与变更（含归档）

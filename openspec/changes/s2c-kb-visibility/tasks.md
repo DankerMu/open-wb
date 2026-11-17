@@ -170,7 +170,7 @@ Minimal mergeable slice: atomic - 两段共用同一组 route 桩与收尾。
 
 - [ ] 14.1 `docs/architecture/system.md`：`accounts` 行（`scopeOf`、`GET /api/accounts/me/scope`）、`kb` 行（可见判定、两级归属、范围端点、`kb.shared_retrieval`；删去「S2c change A 只按所有者判定」）、§6.1 时序图里「change A 只有自己的库」一句
 - [ ] 14.2 `openspec/glossary.md`：「可见范围」写明四档判定与「动态跟随所有者当前部门 / 查看者当前成员关系」；「附件」里「只能是自己的库」改为「可见的库」；「审计」补 `kb.scope`；「host tool」里「没有库时不注册」改为「没有可见的库时不注册」
-- [ ] 14.3 `IMPLEMENTATION_PLAN.md`：S2c 状态（B 交付、待 owner 签收）与 Next Step（签收后可启动 S3a 与 S4a；S3a 前置决策「IdP 组声明」）；`smoke/kb.hurl:13` 注释里的 `BaseView` 键集同步
+- [ ] 14.3 `IMPLEMENTATION_PLAN.md`：S2c 状态（B 交付、待 owner 签收）与 Next Step（签收后可启动 S3a（本地账号与治理，ADR-0018）与 S4a）；`smoke/kb.hurl:13` 注释里的 `BaseView` 键集同步
 - [ ] 14.4 逐条核对 design.md「Grill 结论」B1–B19 的落点在代码与规格里成立，核对记录写进 PR 描述
 
 Suggested fixture level: none - 文档与核对，没有行为变化。
