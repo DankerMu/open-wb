@@ -1,7 +1,7 @@
 // 输入框知识库引用（message-attachments「输入框知识库引用」场景「引用并发送」「关闭时没有入口」「空白草稿与上限」
 // 「欢迎态暂存」，以及列表取得失败、拒绝后保留、切换 / 回欢迎态 / 换账号 / 分叉 / 撤回清空、首次发送失败或停止后再发、
-// 迟到应答被丢弃；s2c-kb-session 任务 8.2）。seam：整页挂载 + 假 API + `FakeXhr`。期望的菜单次序、可访问名、请求体与
-// 文案取自规格条文。
+// 迟到应答被丢弃；s2c-kb-session 任务 8.2；「共享库附所有者」「内建命令带引用被拒」，#2036 s2c-kb-visibility 组 10）。
+// seam：整页挂载 + 假 API + `FakeXhr`。期望的菜单次序、可访问名、请求体与文案取自规格条文。
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ChatSessionFork } from "../src/lib/session-contract.js";
@@ -28,6 +28,7 @@ import {
   baseReads,
   closePicker,
   DIALOG,
+  exchange,
   ITEM,
   kbRoutes,
   menuItem,
@@ -285,6 +286,72 @@ describe("拒绝后保留", () => {
       ]);
     },
   );
+});
+
+const ALL = { scope: "all", group: null } as const;
+const SHARED = base("kb-shared", { name: "规范库", owned: false, scope: ALL, compile: null });
+const OWNED_ALL = { ...PRODUCT, scope: ALL };
+
+describe("共享库附所有者", () => {
+  it("非自有库显示 `规范库（zhangsan）`，自有库只有库名；点选后标签与 body 只用库名与 id", async () => {
+    const { fetchMock } = await mountSelected({
+      ...kbRoutes([OWNED_ALL, SHARED]),
+      ...turn(SA, [], exchange("查一下", [SHARED])),
+    });
+    const dialog = await openPicker();
+    expect(options(dialog)).toEqual([
+      { text: "产品文档", pressed: false, disabled: false },
+      { text: "规范库（zhangsan）", pressed: false, disabled: false },
+    ]);
+    expect(within(dialog).getByText("规范库（zhangsan）", { exact: true })).toBeTruthy();
+    expect(screen.queryByText(/产品文档（/)).toBeNull();
+    toggle(dialog, "规范库");
+    expect(options(dialog)[1]?.pressed).toBe(true);
+    await closePicker(dialog);
+    expect(tagNames()).toEqual(["规范库"]);
+    within(tagArea() as HTMLElement).getByRole("button", { name: "移除 规范库" });
+    typeDraft("查一下");
+    clickSend();
+    await waitFor(() => expect(tagArea()).toBeNull());
+    expect(promptBodies(fetchMock, A)).toEqual([
+      { message: "查一下", knowledgeBases: ["kb-shared"] },
+    ]);
+    expect(alerts()).toEqual([]);
+  });
+
+  it("各取自己的所有者，所有者字样在状态字样之前", async () => {
+    const law = base("kb-law", {
+      name: "法规库",
+      owned: false,
+      owner: { id: "u2", account: "zhaoliu", department: "数据部" },
+      state: "rebuilding",
+    });
+    await mountSelected(kbRoutes([SHARED, law]));
+    const dialog = await openPicker();
+    expect(options(dialog).map(({ text }) => text)).toEqual([
+      "规范库（zhangsan）",
+      "法规库（zhaoliu）重建中",
+    ]);
+  });
+});
+
+describe("内建命令带引用被拒", () => {
+  it("`/compact` 带引用：前端照发，服务端 400 的 message 显示出来，引用与草稿保留", async () => {
+    const { fetchMock } = await mountSelected(
+      turn(SA, [
+        () => jsonResponse({ error: { code: "bad_request", message: "请求格式不正确" } }, 400),
+      ]),
+    );
+    await refer("产品文档");
+    typeDraft("/compact");
+    clickSend();
+    await waitFor(() => expect(alerts()).toEqual(["请求格式不正确"]));
+    expect(tagNames()).toEqual(["产品文档"]);
+    expect(composer().value).toBe("/compact");
+    expect(promptBodies(fetchMock, A)).toEqual([
+      { message: "/compact", knowledgeBases: [PRODUCT.id] },
+    ]);
+  });
 });
 
 describe("清空时机", () => {

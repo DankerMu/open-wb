@@ -99,6 +99,11 @@
 | 组 9：只读数字可证伪 | 是 | jsdom 里 `fireEvent.change` 对 readOnly 输入照样触发；判别断言是「改值后仍为 `0.2`，请求 body 带已存值」，只断言 `readOnly` 属性抓不到仍接着 `onChange` 的实现 |
 | 组 9：对自有库用户可见 | 是 | 计数行与 `范围` 列（`仅自己可见`）本刀即对所有用户可见；本刀不加 CK 行（D12，issue Out of Scope），PR 描述按偏离写明「可见变化 + CK 行在 11.4 / 12.4」 |
 | 组 9：ui-walk 自有分支 | 是 | 列表加一列、详情头部加范围标签只改自有分支的版面；CI `ui-walk`（`all-checks-passed` 成员，`make check` 不跑）须绿，本机亦跑一次；`范围` 列在表格容器的 `overflow-x-auto` 里，不得进入检索测试区域的祖先宽度（`ui-walk-center-kb.ts` 的 `expectPanelFits`） |
+| 组 10：所有者字样与库名同一个文本串 | 是 | 后缀写进 `kb-ref-picker.tsx:145` 那个 span，模板串 `${base.name}（${base.owner.account}）`；`options()`（`chat-kb-ref-support.tsx:120-129`）只比按钮 `textContent`，相邻 span 的写法也会绿；判别断言是 `within(dialog).getByText("规范库（zhangsan）",{exact:true})`（只认元素自身的文本节点）；ui-walk `ui-walk-chat-kb.ts:111` 按 `exact:true` 匹配可访问名，状态字样那种相邻 span 只能用正则（`:131-132`），组 13 与 11.4 的 CK 行要的是精确名 |
+| 组 10：按 `owned` 分支，不按所有者或范围 | 是 | 自有库 `产品文档` 用 `base()` 缺省的 `owner.account:"zhangsan"`（`center-kb-support.tsx:46-47`），再补 `scope:{scope:"all",group:null}`：按「有 owner」或按 `scope !== "me"` 判的实现会出 `产品文档（zhangsan）`；半角括号、多空格、取 `owner.id` 或 `department` 的实现，都被 `options` 的精确比较抓到 |
+| 组 10：标签与气泡只写库名 | 是 | `onToggle(base)`（`:142`）不动，`toggleKbRef` 只拷 `{id,name}`（`kb-refs-state.ts:14`），规格 spec.md:56「每项显示库名」；点选共享库后 `tagNames()` 为 `["规范库"]`、有 `移除 规范库`，把带后缀的名字交给 `onToggle` 的实现在这里变红 |
+| 组 10：只有「共享库附所有者」先红后绿 | 是 | web 本来没有内建命令判定（design B16、D10），`chat-kb-ref-picker.test.tsx:265-288` 已证明 400 时引用保留；「内建命令带引用被拒」开工即绿，是守卫；判别断言：prompt body 恰为一条 `{message:"/compact",knowledgeBases:[PRODUCT.id]}`（前端拦截则零条，剥掉键则少键），`alerts()` 恰为服务端的 message |
+| 组 10：对用户惰性 | 是 | 组 11 之前没有 `owned:false` 的库（D12）；ui-walk 桩 `BASE` 是自有库，`ui-walk-chat-kb.ts` 不变；本组不加 CK 行（11.4 的 P2 里程碑行已写 `规范库（zhangsan）`） |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -542,9 +547,28 @@ Minimal mergeable slice: atomic - 列表与详情的只读呈现是同一个 `ow
 
 ## 10. web：引用选择列表附所有者（message-attachments「输入框知识库引用」）
 
-- [ ] 10.1 核对 Context：`web/src/features/chat/kb-ref-picker.tsx:20-45`；`web/test/chat-kb-ref-picker.test.tsx`（483）；顺带：`web/src/features/chat/turn-actions.ts:67` 的注释仍写「两个函数引用稳定」，而 `ids` 随 `client` 变化（#1973 的修复 `a41a8444`）
-- [ ] 10.2 测试先行：在 `chat-kb-ref-picker.test.tsx` 加「共享库附所有者」「内建命令带引用被拒」（后者断言既有拒绝呈现，不新增前端判定）
-- [ ] 10.3 实现：非自有库附 `（<所有者账号>）`；纠正 `turn-actions.ts:67` 的注释
+- [x] 10.1 核对 Context：`web/src/features/chat/kb-ref-picker.tsx:20-45`；`web/test/chat-kb-ref-picker.test.tsx`（483）；顺带：`web/src/features/chat/turn-actions.ts:67` 的注释仍写「两个函数引用稳定」，而 `ids` 随 `client` 变化（#1973 的修复 `a41a8444`）
+- [x] 10.2 测试先行：在 `chat-kb-ref-picker.test.tsx` 加「共享库附所有者」「内建命令带引用被拒」（后者断言既有拒绝呈现，不新增前端判定）
+- [x] 10.3 实现：非自有库附 `（<所有者账号>）`；纠正 `turn-actions.ts:67` 的注释
+  - 组 10 约定（#2036 fixture 审查补；10.2–10.3 照此实现与测试）：
+    - 10.1 行号更正：`kb-ref-picker.tsx:20-45` 是 `ListState` 与 `useKbRefDialog`，不是落点；落点是 `KbRefOptions`（:106-162）：文档注释 :102-105，`onToggle(base)` :142，名称 span :145，状态字样 :146-150；标签区 `KbRefTags`（:165-196）用 `ref.name`（:179-180、:183），不改。`chat-kb-ref-picker.test.tsx` 483 行，「拒绝后保留」:265-288（`envelope` 是两参版本，code 为 `rejected`）。`turn-actions.ts:67` 核实：`kbRefIds` 在派发回调依赖表 :378，`clearKbRefs` 在 :371、:693；`kb-refs-state.ts:72-80` 的 `ids` 依赖 `[client]`，`:29` 的注释已正确。
+    - 文案逐字（specs/message-attachments/spec.md）：
+      - 非自有库：`<库名>（<owner.account>）`，全角括号 U+FF08 / U+FF09，中间没有空格（:50；场景 :84-86 为 `规范库（zhangsan）`）；自有库只有库名；次序同应答（:50）。
+      - 审查裁定（规格没有字面量）：非自有且非 `ready` 的库按 :50 的列举次序为 `名称（账号）状态`，例如 `法规库（zhaoliu）重建中`。
+      - 标签只写库名（:56）；被拒时保留并显示拒绝的 message（:63、:88-90）；服务端 400 文案 `请求格式不正确`（`server/src/core/errors/index.ts:6`）。
+    - `kb-ref-picker.tsx`（196 → ≤ 200）：:145 的 span 内容改为：`owned` 为真时 `base.name`，否则模板串 `${base.name}（${base.owner.account}）`；一个模板串、同一个 span（截断一起作用），不另加 span、不加 `title`；`onToggle(base)` 原样，标签、`移除 <库名>`、气泡都只写库名；:102-104 的注释补「`owned` 为假的库附 `（<所有者账号>）`」；不改 `useKbRefDialog`、`KbRefTags`、`kb-refs-state.ts`。
+    - `turn-actions.ts:67`（769 行不变）：整行替换为 ``  /** 某个会话的知识库引用：发送时按标签次序读 id，受理后与撤回回填时清空，未受理不动（`clear` 引用稳定，`ids` 随 `client` 换新）。 */``；PR 附 `grep -rn "两个函数引用稳定" web/src` 为空。
+    - `chat-kb-ref-picker.test.tsx`（483 → ≤ 550）：
+      - 文件头 :1-4 补「共享库附所有者」「内建命令带引用被拒」（#2036 s2c-kb-visibility 组 10）；从 `chat-kb-ref-support.js` 补导入 `exchange`，其余沿用已导入的辅助函数。
+      - 本地常量：`SHARED = base("kb-shared",{name:"规范库",owned:false,owner:{id:"u1",account:"zhangsan",department:"平台研发部"},scope:{scope:"all",group:null},compile:null})`；`OWNED_ALL = { ...PRODUCT, scope:{scope:"all",group:null} }`（自有、已共享出去）。
+      - 「共享库附所有者」第一例：`mountSelected({ ...kbRoutes([OWNED_ALL, SHARED]), ...turn(SA, [], exchange("查一下", [SHARED])) })`，`openPicker()`；`options(dialog)` 恰为 `[{text:"产品文档",pressed:false,disabled:false},{text:"规范库（zhangsan）",pressed:false,disabled:false}]`；`within(dialog).getByText("规范库（zhangsan）",{exact:true})` 存在，页面没有匹配 `/产品文档（/` 的文本；`toggle(dialog,"规范库")` 后 `options(dialog)[1].pressed` 为 true，`closePicker`；`tagNames()` 为 `["规范库"]`，`within(tagArea()).getByRole("button",{name:"移除 规范库"})` 存在；`typeDraft("查一下")`、`clickSend()`，等 `tagArea()` 为 null；`promptBodies(fetchMock, A)` 为 `[{message:"查一下",knowledgeBases:["kb-shared"]}]`，`alerts()` 为 `[]`。
+      - 「共享库附所有者」第二例（审查裁定）：`kbRoutes([SHARED, base("kb-law",{name:"法规库",owned:false,owner:{id:"u2",account:"zhaoliu",department:"数据部"},state:"rebuilding"})])`；`options(dialog).map(({text}) => text)` 恰为 `["规范库（zhangsan）","法规库（zhaoliu）重建中"]`（各取自己的所有者，所有者字样在状态字样之前）。
+      - 「内建命令带引用被拒」一例：`mountSelected(turn(SA, [() => jsonResponse({error:{code:"bad_request",message:"请求格式不正确"}}, 400)]))`（内联 `jsonResponse`，不用两参 `envelope`）；`refer("产品文档")`、`typeDraft("/compact")`、`clickSend()`（必须点按钮：斜杠候选会吞掉 Enter，见 `chat-page-slash.test.tsx` J5）；`await waitFor(() => expect(alerts()).toEqual(["请求格式不正确"]))`；`tagNames()` 为 `["产品文档"]`，`composer().value` 为 `"/compact"`；`promptBodies(fetchMock, A)` 恰为 `[{message:"/compact",knowledgeBases:[PRODUCT.id]}]`（前端判定内建命令的实现为零条或少键）。本例开工即绿（守卫），PR 描述写明。
+      - jscpd 若报它与 :265-288 重复：本文件内抽局部函数 `sendRejected(draft, response)` 两处共用，不留两份。
+    - TDD：没有新生产文件；`kb-ref-picker.tsx` 的配对测试是 `chat-kb-ref-picker.test.tsx`；「共享库附所有者」两例先红后绿。
+    - 非目标：前端判定内建命令（B16、D10）；标签、气泡、`kb-search-card.tsx` 的库名；`kb-refs-state.ts`、`use-chat-session.ts` 的代码；ui-walk（`BASE` 是自有库，共享分支在组 13）；CK 行（D12，在 11.4）。本组不跑本机 ui-walk、不做截图声明；CI `ui-walk` 须绿。
+    - 实测与上面这些字面量不符时停下来报告，不改期望；`alerts()` 混进斜杠目录读取的提示时也停下来报告。
+    - 回归命令：`npm run test:focus --workspace web -- chat-kb-ref`（先红后绿）；`make lint`、`make typecheck`、`make anti-drift`；最后 `make check`。
 
 Suggested fixture level: compact - 一处文案分支与一处注释。
 Minimal mergeable slice: atomic - 一个组件的一个分支，验证路径单一。

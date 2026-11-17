@@ -100,8 +100,9 @@ export function KbRefPicker({
 }
 
 /**
- * 列表内容：每个库一个 `aria-pressed` 按钮（库名；非 `ready` 附状态字样，同样可选）。已引用 `KB_REF_LIMIT` 个时
- * 其余未选项禁用。在途显示读取中，失败显示该失败的 message，都不改动已有引用。
+ * 列表内容：每个库一个 `aria-pressed` 按钮（库名；`owned` 为假的库附 `（<所有者账号>）`；非 `ready` 附状态字样，
+ * 同样可选；点选交出的仍是库本身，标签与气泡只写库名）。已引用 `KB_REF_LIMIT` 个时其余未选项禁用。在途显示读取中，
+ * 失败显示该失败的 message，都不改动已有引用。
  */
 function KbRefOptions({
   list,
@@ -142,7 +143,9 @@ function KbRefOptions({
               onClick={() => onToggle(base)}
               type="button"
             >
-              <span className="min-w-0 truncate font-medium">{base.name}</span>
+              <span className="min-w-0 truncate font-medium">
+                {base.owned ? base.name : `${base.name}（${base.owner.account}）`}
+              </span>
               {mark === null ? null : (
                 <span className="flex-none rounded-md bg-muted px-1.5 text-xs text-muted-foreground">
                   {mark}
