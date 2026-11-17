@@ -1,6 +1,7 @@
 /**
  * s2b-kb-retrieval tasks 4.1（#1916）：单轮检索 `retrieveForBase` 直接调用，真实 SQLite 与 store，接假 RAGFlow 与真实客户端
  * （knowledge-bases「单轮检索」的「参数显式传」「命中关联本地文档」「应答缺字段」「零命中」，design D1、D2、D3）。
+ * s2c-kb-visibility 组 2（#2028）补「上游多给时本地截断」。
  * 期望值是 spec 与 design 的字面量与本文件种下的本地行；不从 `src/` 取期望值。
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -171,6 +172,62 @@ describe("命中关联本地文档（design D2）", () => {
   it("零命中（§19.1 原样应答）：空数组，不是 kb_unavailable", async () => {
     addLocal(base.id, "rf-local", "local.md");
     await expect(retrieveForBase(deps, base, "q")).resolves.toEqual(ok([]));
+  });
+});
+
+describe("上游多给时本地截断（s2c-kb-visibility 组 2，#2028）", () => {
+  const SIMILARITIES = [0.3, 0.8, 0.5, 0.9, 0.1, 0.7, 0.95, 0.6];
+
+  /** 切片 #1…#8：`段 n`，相似度不单调；`documentIdOf(n)` 给出第 n 条的 RAGFlow 文档 id。 */
+  function answerEight(documentIdOf: (n: number) => string) {
+    fake.fault(ROUTE, {
+      kind: "combo",
+      code: 0,
+      data: {
+        chunks: SIMILARITIES.map((similarity, index) => ({
+          document_id: documentIdOf(index + 1),
+          content: `段 ${index + 1}`,
+          similarity,
+        })),
+        doc_aggs: [],
+        labels: null,
+        total: 8,
+      },
+    });
+  }
+
+  it("8 条都能关联：结果恰为 #1–#6，次序同应答，只发一次请求", async () => {
+    const a = addLocal(base.id, "rf-a", "a.md");
+    const b = addLocal(base.id, "rf-b", "b.md");
+    answerEight((n) => (n % 2 === 1 ? "rf-a" : "rf-b"));
+    await expect(retrieveForBase(deps, base, "q")).resolves.toEqual(
+      ok([
+        { documentId: a.id, name: "a.md", similarity: 0.3, content: "段 1" },
+        { documentId: b.id, name: "b.md", similarity: 0.8, content: "段 2" },
+        { documentId: a.id, name: "a.md", similarity: 0.5, content: "段 3" },
+        { documentId: b.id, name: "b.md", similarity: 0.9, content: "段 4" },
+        { documentId: a.id, name: "a.md", similarity: 0.1, content: "段 5" },
+        { documentId: b.id, name: "b.md", similarity: 0.7, content: "段 6" },
+      ]),
+    );
+    expect(fake.requests()).toHaveLength(1);
+  });
+
+  it("#2、#5 关联不上：结果为其余 6 条，截断在关联之后", async () => {
+    const a = addLocal(base.id, "rf-a", "a.md");
+    const b = addLocal(base.id, "rf-b", "b.md");
+    const ids = ["rf-a", "rf-orphan-2", "rf-b", "rf-a", "rf-orphan-5", "rf-b", "rf-a", "rf-b"];
+    answerEight((n) => ids[n - 1] as string);
+    await expect(retrieveForBase(deps, base, "q")).resolves.toEqual(
+      ok([
+        { documentId: a.id, name: "a.md", similarity: 0.3, content: "段 1" },
+        { documentId: b.id, name: "b.md", similarity: 0.5, content: "段 3" },
+        { documentId: a.id, name: "a.md", similarity: 0.9, content: "段 4" },
+        { documentId: b.id, name: "b.md", similarity: 0.7, content: "段 6" },
+        { documentId: a.id, name: "a.md", similarity: 0.95, content: "段 7" },
+        { documentId: b.id, name: "b.md", similarity: 0.6, content: "段 8" },
+      ]),
+    );
   });
 });
 

@@ -134,9 +134,9 @@ Minimal mergeable slice: 1.1–1.4 为首刀：迁移由 `openDb` 自动执行�
 
 ## 2. 单轮检索本地截断（knowledge-bases「单轮检索」，种子 e）
 
-- [ ] 2.1 核对 Context：关联本地文档在 `server/src/kb/retrieval.ts:114-129` 的 `retrieveForBase`；`PAGE_SIZE` 在 `server/src/kb/ragflow-retrieval.ts:26`，未导出；`server/test/kb-retrieval.test.ts`（207 行）的故障注入写法
-- [ ] 2.2 测试先行：在 `kb-retrieval.test.ts` 加「上游多给时本地截断」两例（8 条全可关联 → 前 6 条；8 条中两条关联不上 → 其余 6 条）
-- [ ] 2.3 实现：导出 `PAGE_SIZE`，`retrieveForBase` 在关联之后 `slice(0, PAGE_SIZE)`；`kb-retrieval-canonical.test.ts` 与检索测试、会话检索的既有用例原样全绿
+- [x] 2.1 核对 Context：关联本地文档在 `server/src/kb/retrieval.ts:114-129` 的 `retrieveForBase`；`PAGE_SIZE` 在 `server/src/kb/ragflow-retrieval.ts:26`，未导出；`server/test/kb-retrieval.test.ts`（207 行）的故障注入写法
+- [x] 2.2 测试先行：在 `kb-retrieval.test.ts` 加「上游多给时本地截断」两例（8 条全可关联 → 前 6 条；8 条中两条关联不上 → 其余 6 条）
+- [x] 2.3 实现：导出 `PAGE_SIZE`，`retrieveForBase` 在关联之后 `slice(0, PAGE_SIZE)`；`kb-retrieval-canonical.test.ts` 与检索测试、会话检索的既有用例原样全绿
   - 组 2 约定（#2028 fixture 审查补；2.2–2.3 照此实现与测试）：
     - 注入：两例都用 `fake.fault(ROUTE, {kind:"combo", code:0, data:{chunks:[…8 条…], doc_aggs:[], labels:null, total:8}})`，写法照 `kb-retrieval.test.ts:180-189`，每条只给 `document_id`、`content`、`similarity`。不用 `setRetrievalHits`：假 RAGFlow 不看 `page_size`，以后它若遵守 `page_size`，例 1 会假绿。
     - 本地行：`addLocal(base.id, "rf-a", "a.md")`、`addLocal(base.id, "rf-b", "b.md")`。可关联的切片在 rf-a、rf-b 之间交替，这样能看出上限按命中数算，不按文档数算。

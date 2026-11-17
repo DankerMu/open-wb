@@ -23,7 +23,8 @@ import {
 } from "./ragflow-route.js";
 
 const RETRIEVAL_FAILED = { kind: "retrieval_failed" } as const;
-const PAGE_SIZE = 6;
+/** 每次检索的命中上限：既是请求的 `page_size`，也是 `retrieval.ts` 关联本地文档之后的截断（knowledge-bases「单轮检索」）。 */
+export const PAGE_SIZE = 6;
 
 /** 一条命中切片。`ragflowDocumentId` 是 RAGFlow 侧的文档 id，与本地文档 id 区分（D2 的关联在调用点）。 */
 export interface RetrievalChunk {

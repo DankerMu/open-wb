@@ -10,6 +10,7 @@
  *   `kb_unavailable`；`kb_rejected` / `kb_unavailable`（含超时）原样，不重试。调用方照 `bases.ts` 的写法 `throw new HttpError(result.kind)`。
  * - 命中关联：切片的 RAGFlow 文档 id 只对本库的本地文档行（`listDocuments(base.id)`）关联，名称取本地记录；关联不上的丢弃，
  *   不暴露 RAGFlow 侧或别的库的文档名。同一文档的多条切片各成一条命中，次序同应答。零候选或全部丢弃时为空数组。
+ *   关联之后至多保留前 `PAGE_SIZE` 条（RAGFlow 多给时本地截断）。
  * - 中止（s2c-kb-session D6）：可选的 `signal` 随查询交给客户端，降级重试的查询只去掉 `rerankId`，带的是同一个 signal，所以
  *   降级回调之后已中止的重试不发出。中止与期限到期同为 `kb_unavailable`。检索测试端点不传。
  *
@@ -23,7 +24,7 @@ import { HttpError } from "../core/errors/index.js";
 import { ownedBase } from "./bases.js";
 import type { createKbLocks } from "./locks.js";
 import type { createRagflowClient } from "./ragflow-client.js";
-import type { RetrievalQuery } from "./ragflow-retrieval.js";
+import { PAGE_SIZE, type RetrievalQuery } from "./ragflow-retrieval.js";
 import { isRecord, type Result, UNAVAILABLE } from "./ragflow-route.js";
 import { rerankModelOf } from "./settings.js";
 import type { createKbStore, KbDocument, KnowledgeBase } from "./store.js";
@@ -127,7 +128,7 @@ export async function retrieveForBase(
           },
         ];
   });
-  return { kind: "ok", value: hits };
+  return { kind: "ok", value: hits.slice(0, PAGE_SIZE) };
 }
 
 /** C0 控制字符（`\t`、`\n` 除外）与 DEL。 */
