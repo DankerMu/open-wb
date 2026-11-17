@@ -10,6 +10,7 @@ import {
 import type { BaseView } from "@/lib/api";
 import { STATE_MARK } from "@/lib/kb-status";
 import { MUTED } from "./ingest-tree.js";
+import { SCOPES } from "./scope-dialog.js";
 import { templateLabel } from "./templates.js";
 
 const HEADERS = ["名称", "模板", "编译", "文档", "状态", "范围", "操作"];
@@ -34,12 +35,6 @@ const KINDS = [
   ["raptor", "RAPTOR"],
   ["graph", "知识图谱"],
 ] as const;
-const SCOPE_TEXT: Readonly<Record<BaseView["scope"]["scope"], string>> = {
-  me: "仅自己可见",
-  dept: "本部门可见",
-  group: "项目组可见",
-  all: "全员可见",
-};
 const READ_ONLY = "只读";
 const NAME_CLASS = "whitespace-normal [overflow-wrap:anywhere]";
 
@@ -79,10 +74,33 @@ export function KnowledgeBasesEmpty() {
   );
 }
 
-/** 范围标签（自有库与共享库同用，四档文案只在这里）；`group` 档带项目组名。本刀为纯文本，组 12 改为按钮。 */
-export function ScopeLabel({ scope }: { scope: BaseView["scope"] }) {
-  const text = SCOPE_TEXT[scope.scope];
-  return <span className={TAG}>{scope.group ? `${text} · ${scope.group.name}` : text}</span>;
+/**
+ * 范围标签（自有库与共享库同用，档名取 `SCOPES`）；`group` 档带项目组名。自有库（任何 `state`）是打开范围对话框
+ * 的按钮，点击不冒泡到行（否则会进入详情），并把按钮本身交出去供还焦点；共享库是纯文本。
+ */
+export function ScopeLabel({
+  base,
+  onScope,
+}: {
+  base: BaseView;
+  onScope(base: BaseView, trigger: HTMLElement): void;
+}) {
+  const { scope, group } = base.scope;
+  const label = SCOPES.find((item) => item.value === scope)?.label ?? scope;
+  const text = group ? `${label} · ${group.name}` : label;
+  if (!base.owned) return <span className={TAG}>{text}</span>;
+  return (
+    <Button
+      onClick={(event) => {
+        event.stopPropagation();
+        onScope(base, event.currentTarget);
+      }}
+      size="sm"
+      variant="outline"
+    >
+      {text}
+    </Button>
+  );
 }
 
 /** 名称格：自有库只有名称（`rowOf` 等定位器按全文匹配）；共享库加 `只读` 标签，下一行写所有者账号与部门。 */
@@ -142,20 +160,22 @@ function CompileCell({ base }: { base: BaseView }) {
 
 /**
  * 表上方的计数行（由 `bases` 现算）与知识库表（拷入层 table）：每行一个知识库，按 `listKnowledgeBases` 的次序；
- * 点行进入详情，当前打开的行带 `data-state="selected"`；行可聚焦，按 Enter 同样进入。`删除知识库` 只在自有库、
- * 且不在 `重建中` 时渲染，共享库整行没有按钮。
+ * 点行进入详情，当前打开的行带 `data-state="selected"`；行可聚焦，按 Enter 同样进入。自有库的范围格是按钮（任何
+ * `state` 都有）；`删除知识库` 只在自有库、且不在 `重建中` 时渲染，共享库整行没有按钮。
  */
 export function KnowledgeBaseList({
   bases,
   selected,
   onOpen,
   onRemove,
+  onScope,
 }: {
   bases: readonly BaseView[];
   selected: string | null;
   onOpen(base: BaseView): void;
   /** 行按钮的点击把按钮本身交出去，供对话框关闭后归还焦点。 */
   onRemove(base: BaseView, trigger: HTMLElement): void;
+  onScope(base: BaseView, trigger: HTMLElement): void;
 }) {
   const owned = bases.filter((base) => base.owned).length;
   return (
@@ -185,7 +205,7 @@ export function KnowledgeBaseList({
                 <TableCell>{base.documents}</TableCell>
                 <TableCell>{mark ? <span className={TAG}>{mark}</span> : null}</TableCell>
                 <TableCell>
-                  <ScopeLabel scope={base.scope} />
+                  <ScopeLabel base={base} onScope={onScope} />
                 </TableCell>
                 <TableCell>
                   {!base.owned || base.state === "rebuilding" ? null : (

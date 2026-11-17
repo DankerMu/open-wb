@@ -1,6 +1,5 @@
 import { type FormEvent, useId, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -10,7 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ApiClient, KbIngestResult } from "@/lib/api";
-import { useEscapeFallback } from "../../../components/escape-fallback.js";
+import { DialogActions, KbDialog } from "./dialog-shell.js";
 import { ALERT, MUTED, messageOf, WorkspaceFiles } from "./ingest-tree.js";
 import type { WorkspacesView } from "./use-documents.js";
 
@@ -98,10 +97,6 @@ export function IngestDialog({
   const spaceId = useId();
   const workspaces = spaces.status === "ready" ? spaces.workspaces : [];
   const workspace = workspaces.find((item) => item.id === chosen) ?? workspaces[0];
-  const onOpenChange = (open: boolean) => {
-    if (!open && !pending) onCancel();
-  };
-  const fallback = useEscapeFallback({ canClose: !pending, onOpenChange });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -122,89 +117,72 @@ export function IngestDialog({
   }
 
   return (
-    <Dialog onOpenChange={onOpenChange} open>
-      <DialogContent
-        aria-describedby={undefined}
-        aria-modal="true"
-        className="max-h-[calc(100%-2rem)] overflow-y-auto sm:max-w-lg"
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          restoreFocus();
-        }}
-        onEscapeKeyDown={fallback.onEscapeKeyDown}
-        onKeyDown={fallback.onKeyDown}
-        ref={fallback.ref}
-      >
-        <DialogHeader className="pr-8">
-          <DialogTitle className="leading-5">从工作空间入库</DialogTitle>
-        </DialogHeader>
-        <form className="flex flex-col gap-3" noValidate onSubmit={(event) => void submit(event)}>
-          {workspace ? (
-            <>
-              <div className="flex flex-col gap-1.5">
-                <Label htmlFor={spaceId}>工作空间</Label>
-                <Select
-                  disabled={pending}
-                  onValueChange={(id) => {
-                    setChosen(id);
-                    setChecked([]);
-                  }}
-                  value={workspace.id}
-                >
-                  <SelectTrigger className="w-full" id={spaceId}>
-                    <SelectValue>{workspace.name}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {workspaces.map((item) => (
-                      <SelectItem key={item.id} value={item.id}>
-                        {item.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="max-h-72 overflow-y-auto rounded-md border p-1.5">
-                <WorkspaceFiles
-                  checked={checked}
-                  client={client}
-                  full={checked.length >= maxFiles}
-                  key={workspace.id}
-                  onToggle={(path, on) =>
-                    setChecked((current) =>
-                      on
-                        ? current.includes(path)
-                          ? current
-                          : [...current, path]
-                        : current.filter((p) => p !== path),
-                    )
-                  }
-                  workspaceId={workspace.id}
-                />
-              </div>
-              <p className={MUTED}>{`已选 ${checked.length} / ${maxFiles}`}</p>
-            </>
-          ) : (
-            <WorkspacesNote onRetry={onRetryWorkspaces} workspaces={spaces} />
-          )}
-          {error ? (
-            <p className={`${ALERT} rounded-lg bg-destructive/10 px-2.5 py-2`} role="alert">
-              {error}
-            </p>
-          ) : null}
-          <div className="flex justify-end gap-2">
-            <Button disabled={pending} onClick={onCancel} type="button" variant="ghost">
-              取消
-            </Button>
-            <Button
-              aria-busy={pending ? true : undefined}
-              disabled={pending || checked.length === 0}
-              type="submit"
-            >
-              入库并解析
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <KbDialog
+      onCancel={onCancel}
+      pending={pending}
+      restoreFocus={restoreFocus}
+      title="从工作空间入库"
+    >
+      <form className="flex flex-col gap-3" noValidate onSubmit={(event) => void submit(event)}>
+        {workspace ? (
+          <>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor={spaceId}>工作空间</Label>
+              <Select
+                disabled={pending}
+                onValueChange={(id) => {
+                  setChosen(id);
+                  setChecked([]);
+                }}
+                value={workspace.id}
+              >
+                <SelectTrigger className="w-full" id={spaceId}>
+                  <SelectValue>{workspace.name}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {workspaces.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="max-h-72 overflow-y-auto rounded-md border p-1.5">
+              <WorkspaceFiles
+                checked={checked}
+                client={client}
+                full={checked.length >= maxFiles}
+                key={workspace.id}
+                onToggle={(path, on) =>
+                  setChecked((current) =>
+                    on
+                      ? current.includes(path)
+                        ? current
+                        : [...current, path]
+                      : current.filter((p) => p !== path),
+                  )
+                }
+                workspaceId={workspace.id}
+              />
+            </div>
+            <p className={MUTED}>{`已选 ${checked.length} / ${maxFiles}`}</p>
+          </>
+        ) : (
+          <WorkspacesNote onRetry={onRetryWorkspaces} workspaces={spaces} />
+        )}
+        {error ? (
+          <p className={`${ALERT} rounded-lg bg-destructive/10 px-2.5 py-2`} role="alert">
+            {error}
+          </p>
+        ) : null}
+        <DialogActions
+          disabled={checked.length === 0}
+          label="入库并解析"
+          onCancel={onCancel}
+          pending={pending}
+        />
+      </form>
+    </KbDialog>
   );
 }

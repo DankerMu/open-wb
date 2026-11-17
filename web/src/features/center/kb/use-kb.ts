@@ -21,8 +21,8 @@ import {
  * - 详情的检索测试成功后经 `setRetrieval` 改该行的检索参数；失败且参数有变时经 `refetchBases` 静默重取列表
  *  （s2b-kb-retrieval D8）：只读 `listKnowledgeBases`，视图保持 `ready`，详情不卸载。静默重取整表覆盖 `bases`，
  *   它的应答可能读于之后的本地改动之前，所以本地改动列表（`setRetrieval`（检索成功）、`setDocumentCount`、新建成功、
- *   删除成功）时若有在途重取，就再发一次，旧应答按序号丢弃。检索成功不论行值是否变化都作废：成功意味着服务端有一次
- *   晚于在途读取的写入。文档数只在真的变了时作废：详情每次读文档（含 3 秒刷新）都会报一次文档数，不变也作废会让
+ *   删除成功、改范围成功）时若有在途重取，就再发一次，旧应答按序号丢弃。检索成功不论行值是否变化都作废：
+ *   成功意味着服务端有一次晚于在途读取的写入。文档数只在真的变了时作废：详情每次读文档（含 3 秒刷新）都会报一次文档数，不变也作废会让
  *   比刷新间隔慢的重取永远落不了地。
  */
 
@@ -187,6 +187,12 @@ export function useKnowledgeBases(client: ApiClient) {
     },
 
     refetchBases,
+
+    /** 改范围成功：按 id 把该行整行换成应答的视图（不重取列表），并作废在途的静默重取。 */
+    replaceBase(next: BaseView) {
+      updateBases((bases) => bases.map((item) => (item.id === next.id ? next : item)));
+      invalidateRefetch();
+    },
 
     askRemove(base: BaseView) {
       setNotice(null);

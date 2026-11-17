@@ -301,6 +301,9 @@ const OTHER_CLIENT_METHODS = [
   "reingestKbDocument",
   "removeKbDocument",
   "retrieveFromKnowledgeBase",
+  "setKnowledgeBaseScope",
+  // 账号范围（account-groups「账号范围端点」）
+  "getMyScope",
   // 挂载（workspace-mounts「挂载端点」，s1b-workspace-mounts D18）
   "listMounts",
   "createMount",

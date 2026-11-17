@@ -1,5 +1,5 @@
 // #2035 s2c-kb-visibility 组 9：knowledge-bases「中心「知识库」tab」的非所有者部分——「共享库的只读呈现」
-//「所有者没有部门」、列表计数行、四档范围标签文案（本刀为纯文本，组 12 改为按钮）、自有库与共享库的按钮差异、
+//「所有者没有部门」、列表计数行、四档范围标签文案（自有库为按钮（组 12））、自有库与共享库的按钮差异、
 // 共享库检索测试两个数字只读。假 `ApiClient` 经 `KnowledgeBasesPanel({client})` 注入。
 
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -85,7 +85,7 @@ describe("共享库的只读呈现", () => {
 
     const a = rowOf("我的库");
     expect(cellsOf(a)).toEqual(["我的库", "通用", "", "0", "", "仅自己可见", "删除知识库"]);
-    expect(buttonNames(a)).toEqual(["删除知识库"]);
+    expect(buttonNames(a)).toEqual(["仅自己可见", "删除知识库"]);
     expect(within(a).queryByText("只读")).toBeNull();
     expect(within(a).queryByText(/来自/)).toBeNull();
     expect(screen.queryByText("状态未知")).toBeNull();
@@ -150,7 +150,7 @@ describe("列表计数行", () => {
 });
 
 describe("四档范围标签", () => {
-  it("范围列依次为四档文案，都不是按钮；共享库编译只出标签；自有 group 库详情里的标签是纯文本", async () => {
+  it("范围列依次为四档文案，自有库为按钮、共享库为纯文本；共享库编译只出标签；自有 group 库详情里的标签是按钮", async () => {
     const fake = fakeKb(
       [READY],
       [
@@ -171,12 +171,13 @@ describe("四档范围标签", () => {
     await countLine();
     const rows = within(screen.getAllByRole("rowgroup")[1] as HTMLElement).getAllByRole("row");
     expect(rows.map((row) => within(row).getAllByRole("cell")[5]?.textContent)).toEqual(SCOPES);
-    for (const name of SCOPES) expect(screen.queryByRole("button", { name })).toBeNull();
+    expect(
+      rows.map((row) => buttonNames(within(row).getAllByRole("cell")[5] as HTMLElement)),
+    ).toEqual([["仅自己可见"], [], ["项目组可见 · 内网落地专项"], []]);
     expect(within(rows[3] as HTMLElement).getAllByRole("cell")[2]?.textContent).toBe("知识图谱");
 
     const detail = await openRow(rowOf("自有项目组"), "自有项目组");
-    expect(within(detail).getByText("项目组可见 · 内网落地专项", { exact: true })).toBeTruthy();
-    expect(within(detail).queryByRole("button", { name: "项目组可见 · 内网落地专项" })).toBeNull();
+    expect(within(detail).getByRole("button", { name: "项目组可见 · 内网落地专项" })).toBeTruthy();
   });
 });
 
@@ -196,7 +197,7 @@ describe("自有库与共享库的按钮差异", () => {
     renderPanel(fake);
 
     await countLine();
-    expect(buttonNames(rowOf("我的库"))).toEqual(["删除知识库"]);
+    expect(buttonNames(rowOf("我的库"))).toEqual(["仅自己可见", "删除知识库"]);
     expect(within(sharedRow()).queryAllByRole("button")).toEqual([]);
 
     const mine = await openRow(rowOf("我的库"), "我的库");
