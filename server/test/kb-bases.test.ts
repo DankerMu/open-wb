@@ -158,14 +158,20 @@ describe("普通模板的建库请求", () => {
     expect(routes(world.sent())).toEqual([POST_DATASETS]);
   });
 
-  it("kb.create 与插行同一事务：detail 恰四键，actor 是建库人，没有工作空间，标题不带用户文本", async () => {
+  it("kb.create 与插行同一事务：detail 恰五键，actor 是建库人，没有工作空间，标题不带用户文本", async () => {
     const world = await ready();
     const view = await createdBase(world, "哨兵库名", "paper");
     expect(auditsOf(world, "kb.create")).toEqual([
       {
         actorId: ownerIdOf(world, view.id),
         title: expect.not.stringContaining("哨兵库名"),
-        detail: { id: view.id, template: "paper", raptor: false, graph: false },
+        detail: {
+          id: view.id,
+          template: "paper",
+          raptor: false,
+          graph: false,
+          scope: { scope: "me", groupId: null },
+        },
         workspaceId: null,
       },
     ]);

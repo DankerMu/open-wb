@@ -25,20 +25,21 @@ const CTP_CODES = [
 
 type CtpCode = (typeof CTP_CODES)[number];
 
-/** 知识库的八条身份：s2a-kb-ragflow 七条（路由由组 8–14 注册，身份先登记）与 s2b-kb-retrieval 的检索测试端点；模板不含查询串。 */
+/** 知识库的九条身份：s2a-kb-ragflow 七条（路由由组 8–14 注册，身份先登记）、s2b-kb-retrieval 的检索测试端点与 s2c-kb-visibility 的范围端点；模板不含查询串。 */
 const KB_OWNER_IDENTITIES = [
   ["POST", "/api/kb/bases"],
   ["POST", "/api/kb/bases/:id/documents"],
   ["POST", "/api/kb/bases/:id/uploads"],
   ["POST", "/api/kb/bases/:id/documents/reingest"],
   ["POST", "/api/kb/bases/:id/retrieval"],
+  ["PUT", "/api/kb/bases/:id/scope"],
   ["PUT", "/api/kb/settings"],
   ["POST", "/api/kb/settings/probe"],
   ["POST", "/api/kb/settings/rebuild"],
 ] as const;
 
-/** spec 的三十九条 method + matched route 归属身份（三十一条 POST + 一条 PATCH + 七条 PUT）。 */
-const THIRTY_NINE_OWNER_IDENTITIES = [
+/** spec 的四十条 method + matched route 归属身份（三十一条 POST + 一条 PATCH + 八条 PUT）。 */
+const FORTY_OWNER_IDENTITIES = [
   ["POST", "/api/auth/login"],
   ["POST", "/api/auth/logout"],
   ["POST", "/api/sessions/:id/prompt"],
@@ -197,21 +198,21 @@ function crossWithCodes<T extends readonly unknown[]>(rows: readonly T[]) {
   return rows.flatMap((row) => CTP_CODES.map((code) => [...row, code] as const));
 }
 
-describe("证据 1：三十九条身份 × 四个真实 CTP 错误 -> 400", () => {
-  it("身份集恰三十九条且互不重复", () => {
-    const keys = THIRTY_NINE_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
-    expect(keys).toHaveLength(39);
-    expect(new Set(keys).size).toBe(39);
+describe("证据 1：四十条身份 × 四个真实 CTP 错误 -> 400", () => {
+  it("身份集恰四十条且互不重复", () => {
+    const keys = FORTY_OWNER_IDENTITIES.map(([method, url]) => `${method} ${url}`);
+    expect(keys).toHaveLength(40);
+    expect(new Set(keys).size).toBe(40);
   });
 
-  it("三十九条里七条 PUT、三十一条 POST、一条 PATCH", () => {
-    const methods = THIRTY_NINE_OWNER_IDENTITIES.map(([method]) => method as string);
-    expect(methods.filter((method) => method === "PUT")).toHaveLength(7);
+  it("四十条里八条 PUT、三十一条 POST、一条 PATCH", () => {
+    const methods = FORTY_OWNER_IDENTITIES.map(([method]) => method as string);
+    expect(methods.filter((method) => method === "PUT")).toHaveLength(8);
     expect(methods.filter((method) => method === "POST")).toHaveLength(31);
     expect(methods.filter((method) => method === "PATCH")).toHaveLength(1);
   });
 
-  it.each(crossWithCodes(THIRTY_NINE_OWNER_IDENTITIES))(
+  it.each(crossWithCodes(FORTY_OWNER_IDENTITIES))(
     "%s %s 上真实 %s -> 400 bad_request 且无 raw 细节",
     (method, url, code) => {
       const error = genuineCtpError(code);
@@ -285,6 +286,8 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["PUT", "/api/kb/bases/:id/documents/reingest"],
     ["GET", "/api/kb/bases/:id/retrieval"],
     ["PUT", "/api/kb/bases/:id/retrieval"],
+    ["GET", "/api/kb/bases/:id/scope"],
+    ["POST", "/api/kb/bases/:id/scope"],
     ["GET", "/api/kb/settings"],
     ["POST", "/api/kb/settings"],
     ["PATCH", "/api/kb/settings"],
@@ -301,6 +304,7 @@ describe("证据 3（守卫）：非本身份与 lookalike 保持 500", () => {
     ["patch", "/api/sessions/:id"],
     ["POST", "/api/kb/bases/"],
     ["POST", "/api/kb/bases/abc/uploads"],
+    ["PUT", "/api/kb/bases/abc/scope"],
     ["PUT", "/api/kb/settings/"],
     ["put", "/api/kb/settings"],
   ] as const;

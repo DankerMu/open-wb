@@ -631,8 +631,8 @@ function toDocument(row: Raw): KbDocument {
   };
 }
 
-/** 本模块自己的事务，同 `models/store.ts`、`connectors/store.ts`、`workspaces/mounts/store.ts`。 */
-function inTransaction<T>(db: DatabaseSync, work: () => T): T {
+/** 本模块自己的事务（`kb/scope.ts` 共用），同 `models/store.ts`、`connectors/store.ts`、`workspaces/mounts/store.ts`。 */
+export function inTransaction<T>(db: DatabaseSync, work: () => T): T {
   db.exec("BEGIN");
   try {
     const value = work();

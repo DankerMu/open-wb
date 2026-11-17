@@ -98,7 +98,7 @@ export interface World {
   models(method: "PUT" | "DELETE", id: string, body?: unknown): Promise<LightMyRequestResponse>;
   /** 任意路由，`payload` 省略即不带 body。 */
   call(
-    method: "GET" | "POST" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "DELETE",
     url: string,
     who: Who,
     payload?: unknown,

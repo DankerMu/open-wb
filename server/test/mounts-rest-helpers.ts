@@ -173,7 +173,7 @@ export function mountsUrl(workspaceId: string, mountId?: string): string {
 export function send(
   rest: MountsRest,
   who: Who,
-  method: "GET" | "POST" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   url: string,
   body?: unknown | RawBody,
 ): Promise<LightMyRequestResponse> {

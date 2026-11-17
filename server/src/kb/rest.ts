@@ -36,6 +36,9 @@
  *
  * `POST …/retrieval`（检索测试，s2b-kb-retrieval D4）：在归属集，body limit 16 KiB，归属判定先于 body 解析；body 校验、
  * `state`、参数写回与检索都在 `kb/retrieval.ts`，成功 200 `{hits, retrieval}`。非所有者按已存参数检索并审计。
+ *
+ * `PUT …/scope`（改范围，s2c-kb-visibility D3）：写路由，在归属集，body limit 16 KiB，归属判定先于 body 解析（可见非所有者带坏
+ * body 也是 403）；业务在 `kb/bases.ts` 的 `setScope` 与 `kb/scope.ts`，成功 200 `BaseView`。
  */
 import type {
   FastifyInstance,
@@ -70,6 +73,7 @@ const DOCUMENTS_ROUTE = "/api/kb/bases/:id/documents";
 const REINGEST_ROUTE = "/api/kb/bases/:id/documents/reingest";
 const UPLOADS_ROUTE = "/api/kb/bases/:id/uploads";
 const RETRIEVAL_ROUTE = "/api/kb/bases/:id/retrieval";
+const SCOPE_ROUTE = "/api/kb/bases/:id/scope";
 const UPLOAD_MEDIA_TYPE = "application/octet-stream";
 /** 最长的合法 body 也只有几百字节，同 `models/rest.ts`。 */
 const SETTINGS_BODY_LIMIT = 16 * 1024;
@@ -292,6 +296,12 @@ export function registerKbRoutes(
     RETRIEVAL_ROUTE,
     { onRequest: noStore, preParsing: readableBase, bodyLimit: RETRIEVAL_BODY_LIMIT },
     (request) => enabled().retrieval.test(request.params.id, request.body, principalOf(request).id),
+  );
+
+  app.put<BaseParams>(
+    SCOPE_ROUTE,
+    { onRequest: noStore, preParsing: ownedBase, bodyLimit: BASE_BODY_LIMIT },
+    (request) => bases().setScope(request.params.id, request.body, principalOf(request).id),
   );
 
   app.register((scope, _options, done) => {

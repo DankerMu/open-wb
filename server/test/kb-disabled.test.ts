@@ -1,6 +1,6 @@
 /**
  * s2a-kb-ragflow tasks 8.2（#1844）：ragflow-backend「未配置即关闭」的路由表。每个注册知识库路由的组把路由加进这张表
- *（tasks 头部），组 14（#1852）注册 S2a 的最后一条；s2b-kb-retrieval 组 4（#1918）加检索测试端点，表恰十三条。每条都经真实 `createApp`，不靠探针路由；判定次序的探针用例在 `kb-status.test.ts`。
+ *（tasks 头部），组 14（#1852）注册 S2a 的最后一条；s2b-kb-retrieval 组 4（#1918）加检索测试端点；s2c-kb-visibility 组 11 加范围端点，表恰十四条。每条都经真实 `createApp`，不靠探针路由；判定次序的探针用例在 `kb-status.test.ts`。
  * 期望值是 spec 的字面量。没有配置 RAGFlow 地址，所以这里不用假 RAGFlow：判定放行了，请求也无处可发，断言的是信封。
  * s2c-kb-session tasks 2.4（#1963）：关闭时 `registerKb` 交回的是 `null`（design D5），经对模块导出的透传 spy 观察。
  */
@@ -39,6 +39,7 @@ const ROUTES = [
   },
   { method: "POST", url: `/api/kb/bases/${"a".repeat(32)}/uploads?name=a.md`, body: true },
   { method: "POST", url: `/api/kb/bases/${"a".repeat(32)}/retrieval`, body: true },
+  { method: "PUT", url: `/api/kb/bases/${"a".repeat(32)}/scope`, body: true },
 ] as const;
 
 let app: FastifyInstance;
@@ -68,11 +69,11 @@ function request(route: (typeof ROUTES)[number], cookie?: string) {
 }
 
 describe("未配置即关闭", () => {
-  it("路由表恰十三条：GET /api/kb/status 之外的全部知识库路由", async () => {
+  it("路由表恰十四条：GET /api/kb/status 之外的全部知识库路由", async () => {
     await openDisabled();
-    expect(ROUTES).toHaveLength(13);
+    expect(ROUTES).toHaveLength(14);
     expect(new Set(ROUTES.map(({ method, url }) => `${method} ${url.split("?")[0]}`)).size).toBe(
-      13,
+      14,
     );
   });
 
