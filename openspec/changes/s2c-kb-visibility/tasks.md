@@ -73,6 +73,11 @@
 | 组 5：跨服务严格解析 | 是 | 同一 PR 改 `api-kb.ts` 解析器、`center-kb-support.tsx` 的 `base()`、两个 typed `BASE`、`api-kb.test.ts:212-226` 的 `malformed` 映射（不改即 typecheck 红）、ui-walk 的 `BASE`；ui-walk 对新 build 的 `web/dist` 跑 |
 | 组 5：死代码 | 是 | `readableBase` 本刀只作 `ownedBase` 的第一级，模块内、不导出；路由钩子的读入口由组 6（第一个使用者）加，本刀 `assertOwned` 只此一个入口 |
 | 组 5：白盒 | 是 | 多租户过滤（灰盒例外候选，design Risks）：PR 标题与描述写明「请求白盒审查」 |
+| 组 6：只放开一处读路由 | 是 | 只有 `rest.ts:246-248` 的 `GET …/documents` 改用读入口；`POST …/retrieval`（`:286-289`）与五条写路由的钩子、`documents.ts:365,375,397`、`uploads.ts:251,269`、`retrieval.ts:186`、`bases.ts:212,261,303` 的复核点仍为 `ownedBase`；「共享库的两级归属」里检索测试仍断言 403 |
+| 组 6：「不解析、不 stat」可证伪 | 是 | 非所有者若照旧以自己身份调 `sourceChangedOf`，`rootOf(u2, W1)` 得 null（`source-file.ts:204` → `:140`），三个 `null` 与 `node:fs` 记录器都照样绿；唯一能分辨的观察点是 `app.workspaces.store.rootOf` 的 spy（与 kb 的 sources 同一对象，`kb/index.ts:167-168`），同一用例里 u1 的请求作阳性对照 |
+| 组 6：原子性 | 是 | 钩子改读级、`documents.ts:636` 复核点改读级、非所有者三键置空在同一个实现提交里（仓库按 `--merge` 合并，提交级中间态也会进 master 历史）；只改其一时「非所有者看不到来源」为红（403 或泄露 `W1` / `docs/a.md`） |
+| 组 6：既有用例的 403→200 | 是 | `kb-visibility.test.ts:237`、`:256` 与「共享库的两级归属」三处原地改；`:261` 的 404 与「不可见与不存在不可区分」（`:329` 遍历 `VALID`）不变 |
+| 组 6：白盒 | 是 | 隐私（所有者沙箱路径）与沙箱边界：PR 标题与描述写明「请求白盒审查」 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -350,9 +355,34 @@ Minimal mergeable slice: atomic - 可见判定、两级归属、列表与 `BaseV
 
 ## 6. 非所有者读文档列表（knowledge-bases「文档列表与状态」「知识库端点」读路由）
 
-- [ ] 6.1 核对 Context：`server/src/kb/documents.ts:256-268` 的 `viewOf`（无条件输出 `workspaceId` 与 `path`）、`:635` 的复核点与 `sourceChanged` 的计算路径
-- [ ] 6.2 测试先行：在 `kb-visibility.test.ts` 加「非所有者看不到来源」（三个 `null`、不对所有者工作空间做文件系统调用、无审计）；把「共享库的两级归属」里 `GET …/documents` 改为 200
-- [ ] 6.3 实现：`GET …/documents` 的钩子与 `documents.ts:635` 改用 `readableBase`；列表按 `owned` 分支，非所有者三键为 `null`、跳过 `sourceChanged` 的解析与 stat
+- [x] 6.1 核对 Context：`server/src/kb/documents.ts:256-268` 的 `viewOf`（无条件输出 `workspaceId` 与 `path`）、`:635` 的复核点与 `sourceChanged` 的计算路径
+- [x] 6.2 测试先行：在 `kb-visibility.test.ts` 加「非所有者看不到来源」（三个 `null`、不对所有者工作空间做文件系统调用、无审计）；把「共享库的两级归属」里 `GET …/documents` 改为 200
+- [x] 6.3 实现：`GET …/documents` 的钩子与 `documents.ts:635` 改用 `readableBase`；列表按 `owned` 分支，非所有者三键为 `null`、跳过 `sourceChanged` 的解析与 stat
+  - 组 6 约定（#2032 fixture 审查补；6.2–6.3 照此实现与测试）：
+    - 6.1 行号更正：`viewOf` 是 `documents.ts:257-270`，列表复核点是 `:636`（`list` 在 `:635`），`sourceChangedOf` 在 `:621-631`（`sources.stat` 在 `:626`）；tasks 头部「`api-kb.ts:419-420`」现为类型 `:135-136,140`、解析器 `:471-472,476`；头部 `documents.ts` 675 现为 676。
+    - `bases.ts`：`readableBase`（`:91-98`）改为 `export`，`:91` 注释去掉「组 6 起」的预告；返回对象在 `assertOwned`（`:301-304`）旁加 `assertReadable(id: string, viewerId: string): void`，只调 `readableBase(visibility, id, viewerId)`，注释「读路由的归属判定（不可见 404，可见即放行），先于 body 解析」。不加别的入口，不改 `ownedBase`。
+    - `rest.ts`：在 `:193-197` 的 `ownedBase` 钩子旁加 `readableBase: BasePreParsing`，调 `bases().assertReadable(...)`；只有 `GET …/documents`（`:246-248`）改用它，其余六条（含 `:288` 的检索测试，组 7 改）仍为 `ownedBase`。文件头 `:23-25` 改为「写路由不可见 404、可见非所有者 403；读路由 `GET …/documents` 不可见 404、可见即放行（`POST …/retrieval` 组 7 放开）」。
+    - `documents.ts`：`:48` 导入加 `readableBase`；`list` 改为 `const { base, owned } = readableBase(visibility, id, actorId)`；所有者照旧 `viewOf(document, run, await sourceChangedOf(document, actorId))`；非所有者为 `{ ...viewOf(document, run, null), workspaceId: null, path: null }`，不调用 `sourceChangedOf`。`viewOf` 的签名与键序不改（`uploads.ts:210`、`documents.ts:435,517` 不动）；非所有者照常读本地行与 RAGFlow。文件头 `:26-32` 的「列表」段补一句：调用者不是所有者时三键为 `null`，不解析、不 stat。
+    - PR 附 grep 证据：`grep -n "readableBase(" server/src` 恰为 `bases.ts` 的定义、`ownedBase` 体内一处、`assertReadable` 一处、`documents.ts` 的 `list` 一处；`grep -n "ownedBase(" server/src` 只比改前少 `documents.ts:636` 一处。写路由处理函数里的复核点若误降为读级会被钩子掩盖，测试抓不到，靠这条 grep 与白盒审查兜底。
+    - 新用例「非所有者看不到来源」进 `kb-visibility.test.ts`，用 `useIngestWorlds()`（`kb-ingest-helpers.ts:127`），在文件顶部与 `useSettingsWorlds()` 并列登记（两者收尾互不相干，输出收集器可嵌套，见 `support/output-sentinel.ts:8-12`）：
+      - `const world = await openIngest()`；`world.fw.world.db.prepare("UPDATE knowledge_bases SET scope = 'all' WHERE id = ?").run(world.baseId)`。
+      - 工作空间来源：`const source = await ingestedRow(world, "docs/a.md", "one")`。本地上传：`const rf = world.fake.addDocument(world.datasetId, { name: "b.txt", content: "x", ingestionStatus: "COMPLETED", chunkCount: 7 })`，`const upload = world.store.addDocument({ kbId: world.baseId, ragflowDocumentId: rf, name: "b.txt", size: 1, source: "upload" })`。
+      - 带外 `UPDATE kb_documents SET created_at = ? WHERE id = ?`：`source` 为 1000，`upload` 为 2000。之后 `world.write("docs/a.md", "one rewritten")`。
+      - `const rootOf = vi.spyOn(world.fw.rest.app.workspaces.store, "rootOf")`。
+      - u1：`send(world.fw.rest, "member", "GET", url)` 得 200，`documents` 按字面量 `toEqual`：`[{ id: source.id, name: "a.md", size: 3, source: "workspace", workspaceId: W1, path: "docs/a.md", status: "unparsed", chunkCount: null, message: null, sourceChanged: true, createdAt: 1000 }, { id: upload.id, name: "b.txt", size: 1, source: "upload", workspaceId: null, path: null, status: "done", chunkCount: 7, message: null, sourceChanged: null, createdAt: 2000 }]`（`unparsed` 照 `kb-documents-list.test.ts:407-444` 的实测）。`expect(rootOf).toHaveBeenCalledWith({ id: "u1" }, W1)`（阳性对照，证明 spy 接在真实路径上）。
+      - `rootOf.mockClear()`；记 `auditRows(world.fw.world).length`，并断言它大于 0（入库已写 `kb.ingest`，防空过）。
+      - u2：`const cookie = await cookieFor(world.fw.rest.app, "zhaoliu")`，`world.fw.rest.app.inject({ method: "GET", url, headers: { cookie } })` 得 200、`cache-control: no-store`；`documents` 为上面两条把 `workspaceId`、`path`、`sourceChanged` 都换成 `null`（字面量写出，`source` 依次 `workspace`、`upload`，`status` 与 `chunkCount` 同 u1）。`expect(rootOf).not.toHaveBeenCalled()`；审计行数不变。
+      - 实测与这些字面量不符时停下报告，不改期望。
+    - 既有用例原地改（只限这些）：
+      - `:8` 文件头改为「`GET …/documents` 已由组 6 放开；`POST …/retrieval` 由组 7 原地改为 200」。
+      - `:237`：u3 请求 `KA` 的文档列表改为 200，`json()` 为 `{ documents: [] }`（`ds-4` 不在假 RAGFlow，按 not-found 读成空表）。
+      - `:256`：u2 请求 `KG` 改为 200；`:261` 删成员后的 404 不变。
+      - `:312-316`：标题改为「…检索测试与五条写路由 403、文档列表 200，零写入（组 7 把检索测试原地改为 200）」。`VALID` 本身不拆，`:329` 照旧遍历全部七条。先 `await expectAllForbidden(world, VALID.slice(1), id)`，再由 peer 请求 `GET …/${id}/documents`，得 200、`no-store`、`{ documents: [{ id: "doc-1", name: "a.txt", size: 3, source: "upload", workspaceId: null, path: null, status: "missing", chunkCount: null, message: null, sourceChanged: null, createdAt: T0 }] }`；`routes(world.sent())` 为 `["GET /api/v1/datasets/ds-1/documents"]`；三张表的快照不变。
+      - 「列表的可见集合、次序与非自有的编译状态」（#2048 的 P2）：在 `:366` 之后、`:368` 的 `forget()` 之前加 `addBase(world, 0, { owner_id: "u3", scope: "all", created_at: T0 + 1 })`；期望改为 id `[a2.id, hex(5), hex(1), hex(3), hex(0)]`，`owned` `[true, true, false, false, false]`，`owner` `[U2, U2, U1, U3, U3]`，`compile` 末尾再加一个 `null`；`routes` 不变。只按 id 排序的实现会让 `hex(0)` 排在非自有第一位，从而变红。
+    - `kb-documents-list.test.ts` 不改（「别人的库」那个用例是 `me` 档，仍为 404）；所有者视图的既有用例原样全绿。
+    - 行数（上限 800）：`documents.ts` 676 → ≤ 690；`bases.ts` 315 → ≤ 325；`rest.ts` 308 → ≤ 318；`kb-visibility.test.ts` 384 → ≤ 500（实测 497：约定要求的字面量逐字写出）。
+    - 非目标：`POST …/retrieval` 与 `retrieval.ts`（组 7）；web 解析器与组件（`DocumentView` 已可为 null，组 9 呈现）；功能验收清单行（D12，对用户惰性）；`smoke/`。
+    - 回归命令：`npm run test:focus --workspace server -- kb-visibility`（先红后绿）；`npm run test:focus --workspace server -- kb-visibility kb-documents-list kb-documents kb-bases kb-upload kb-ingest kb-retrieval-endpoint`；`make lint`、`make typecheck`、`make anti-drift`（knip：`readableBase`、`assertReadable` 都有使用者）、`make check`。
 
 Suggested fixture level: expanded - 隐私不变量（所有者沙箱路径），放开读路由与置空必须原子。
 Minimal mergeable slice: atomic - 放开 `GET …/documents` 与非所有者置空必须同时合入，否则中间态把所有者路径交给非所有者。

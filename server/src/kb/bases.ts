@@ -88,8 +88,8 @@ function badRequest(): never {
 
 type Visibility = Pick<ReturnType<typeof createKbVisibility>, "accessOf">;
 
-/** 第一级：不可见的与不存在的不可区分，都是 404。组 6 起由读路由直接使用。 */
-function readableBase(visibility: Visibility, id: string, viewerId: string): BaseAccess {
+/** 第一级：不可见的与不存在的不可区分，都是 404。 */
+export function readableBase(visibility: Visibility, id: string, viewerId: string): BaseAccess {
   const access = visibility.accessOf(id, viewerId);
   if (access === null) {
     throw new HttpError("not_found");
@@ -301,6 +301,11 @@ export function createKbBases(dependencies: KbBasesDependencies) {
     /** 写路由的归属判定（不可见 404、可见非所有者 403），先于 body 解析（knowledge-bases「知识库端点」）。 */
     assertOwned(id: string, ownerId: string): void {
       ownedBase(visibility, id, ownerId);
+    },
+
+    /** 读路由的归属判定（不可见 404，可见即放行），先于 body 解析。 */
+    assertReadable(id: string, viewerId: string): void {
+      readableBase(visibility, id, viewerId);
     },
 
     /** `DELETE /api/kb/bases/:id`：在该库的写锁下。 */

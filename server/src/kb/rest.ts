@@ -21,8 +21,9 @@
  * 路由在知识库关闭时同样注册：不注册就是 catch-all 的 404，不是 503；处理函数在关闭时走不到。
  *
  * 知识库路由对任何已登录用户开放，列表是查看者可见的库：`POST` 在 content-parser 归属集，业务都在 `kb/bases.ts`。`DELETE`
- * 不读 body、不在归属集（同 `connectors/rest.ts`）。带 `:id` 的路由都在路由级 `preParsing` 判定归属（不可见 404、可见非所有者
- * 403），所以不可见的或不存在的 id 带坏 body 也是 404，可见而不是自己的库带坏 body 也是 403。
+ * 不读 body、不在归属集（同 `connectors/rest.ts`）。带 `:id` 的路由都在路由级 `preParsing` 判定归属：写路由不可见 404、可见
+ * 非所有者 403；读路由 `GET …/documents` 不可见 404、可见即放行（`POST …/retrieval` 组 7 放开）。所以不可见的或不存在的 id
+ * 带坏 body 也是 404，可见而不是自己的库带坏 body 也是 403。
  *
  * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
  * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。`DELETE …/documents?doc=<文档 id>`（移出）同删库的写法：
@@ -195,6 +196,10 @@ export function registerKbRoutes(
     bases().assertOwned(request.params.id, principalOf(request).id);
     done(null, payload);
   };
+  const readableBase: BasePreParsing = (request, _reply, payload, done) => {
+    bases().assertReadable(request.params.id, principalOf(request).id);
+    done(null, payload);
+  };
 
   app.get(SETTINGS_ROUTE, admin, () => settings().view());
 
@@ -245,7 +250,7 @@ export function registerKbRoutes(
 
   app.get<BaseParams>(
     DOCUMENTS_ROUTE,
-    { onRequest: noStore, preParsing: ownedBase },
+    { onRequest: noStore, preParsing: readableBase },
     async (request) => ({
       documents: await enabled().documents.list(request.params.id, principalOf(request).id),
     }),

@@ -26,7 +26,8 @@
  * 列表：先读本地行，再读全 RAGFlow 的文档，按 RAGFlow 文档 id 关联，不取锁、不判 `state`（D12）。次序不能反：反过来，翻页
  * 之后才提交的文档会显示 `missing`。`readRagflowDocuments` 读到 `total` 为止，不设页数上限，所以 `kb_document_leak` 留下的文档
  * 不会把真实文档挤成 `missing`；读到空页也停：`total` 是这一页说的，翻页期间可能变。结果不抛错：数据集 not-found 在这里
- * 是全部 `missing`，在编译状态（组 9 第三刀）是读取失败，由调用方映射。
+ * 是全部 `missing`，在编译状态（组 9 第三刀）是读取失败，由调用方映射。调用者不是所有者时 `workspaceId`、`path`、
+ * `sourceChanged` 三键为 `null`，不解析、不 stat。
  *
  * 运行状态只看 `ingestion_status`。八种之外是协议漂移，不看这一行有没有本地行，整个请求 503。`sourceChanged` 排在 RAGFlow
  * 之后：RAGFlow 失败时不碰文件系统。`sources.stat` 不写审计，所以这个读取整体没有审计。
@@ -45,7 +46,7 @@
  */
 import { basename } from "node:path";
 import { HttpError, type HttpErrorCode } from "../core/errors/index.js";
-import { ownedBase } from "./bases.js";
+import { ownedBase, readableBase } from "./bases.js";
 import type { createKbLocks } from "./locks.js";
 import { multipartUpload } from "./multipart.js";
 import { type createRagflowClient, isRecord, type ListedDocument } from "./ragflow-client.js";
@@ -633,7 +634,7 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
   return {
     /** `GET /api/kb/bases/:id/documents`：见文件头。 */
     async list(id: string, actorId: string): Promise<DocumentView[]> {
-      const { base } = ownedBase(visibility, id, actorId);
+      const { base, owned } = readableBase(visibility, id, actorId);
       const documents = store.listDocuments(id);
       const listed = await readRagflowDocuments(client, base.datasetId);
       if (listed.kind === "kb_unavailable" || listed.kind === "kb_rejected") {
@@ -642,13 +643,13 @@ export function createKbDocuments(dependencies: KbDocumentsDependencies) {
       const rows = listed.kind === "ok" ? listed.value : [];
       const states = new Map(rows.map((row) => [row.id, runStateOf(row)]));
       return Promise.all(
-        documents.map(async (document) =>
-          viewOf(
-            document,
-            states.get(document.ragflowDocumentId) ?? MISSING,
-            await sourceChangedOf(document, actorId),
-          ),
-        ),
+        documents.map(async (document) => {
+          const run = states.get(document.ragflowDocumentId) ?? MISSING;
+          if (!owned) {
+            return { ...viewOf(document, run, null), workspaceId: null, path: null };
+          }
+          return viewOf(document, run, await sourceChangedOf(document, actorId));
+        }),
       );
     },
 
