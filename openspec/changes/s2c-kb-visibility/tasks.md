@@ -23,7 +23,7 @@
 > 新逻辑放进下面点名的新文件；上面这些测试文件只改既有断言，不加新用例（新用例进点名的新测试文件）。`app.ts` 预期不改（kb 经已声明的 `kb → accounts` 依赖直接导入 `accounts/scope.ts`）。
 >
 > 精确形状断言原地改（Code Canonicality：在权威文件里改，SHALL NOT 在新文件里另写一份）：迁移目录计数（`server/test/core-db-helpers.ts:34-61,106-133`）、`accounts` 列清单（`auth-schema.test.ts:54,446`，保留「010 契约恰 5 列」的语义、另断言 053 之后多 `department`）、
-> `knowledge_bases` 列与外键清单（`kb-schema.test.ts:107-127,177`）、`BaseView` 键集（`kb-bases-list.test.ts:18-30`、`kb-bases.test.ts:141-153`、`kb-bases-compile.test.ts:188`）、`kb.create` detail（`kb-bases.test.ts:161`）、content-parser 归属集计数（`server/test/http-parser-owners.test.ts`）。
+> `knowledge_bases` 列与外键清单（`kb-schema.test.ts:107-127,177`）、`BaseView` 键集（`kb-bases-list.test.ts:18-30`、`kb-bases.test.ts:141-153`、`kb-bases-compile.test.ts:188`）、`kb.create` detail（`kb-bases.test.ts:161`、`kb-bases-compile.test.ts:162`）、content-parser 归属集计数（`server/test/http-parser-owners.test.ts`）。
 
 ## 风险包
 
@@ -104,6 +104,18 @@
 | 组 10：标签与气泡只写库名 | 是 | `onToggle(base)`（`:142`）不动，`toggleKbRef` 只拷 `{id,name}`（`kb-refs-state.ts:14`），规格 spec.md:56「每项显示库名」；点选共享库后 `tagNames()` 为 `["规范库"]`、有 `移除 规范库`，把带后缀的名字交给 `onToggle` 的实现在这里变红 |
 | 组 10：只有「共享库附所有者」先红后绿 | 是 | web 本来没有内建命令判定（design B16、D10），`chat-kb-ref-picker.test.tsx:265-288` 已证明 400 时引用保留；「内建命令带引用被拒」开工即绿，是守卫；判别断言：prompt body 恰为一条 `{message:"/compact",knowledgeBases:[PRODUCT.id]}`（前端拦截则零条，剥掉键则少键），`alerts()` 恰为服务端的 message |
 | 组 10：对用户惰性 | 是 | 组 11 之前没有 `owned:false` 的库（D12）；ui-walk 桩 `BASE` 是自有库，`ui-walk-chat-kb.ts` 不变；本组不加 CK 行（11.4 的 P2 里程碑行已写 `规范库（zhangsan）`） |
+| 组 11：打开共享的唯一开关（D12） | 是 | 依赖头保证最后合入（← 1 第二刀、6–10）；合入即对非所有者生效。PR 标题与描述写「多租户过滤与跨账号共享：请求白盒审查」 |
+| 组 11：ragflow-backend 增量规格 | 是 | 主规格 ragflow-backend/spec.md:79-81 写死「十三条」，kb-disabled.test.ts:2 要求逐组扩表；#2037 fixture 审查时补了 MODIFIED「知识库可用性」改为十四条，实现方同 PR 扩表 |
+| 组 11：判定次序 | 是 | 钩子 ownedBase 先于 body（坏 JSON 的 PUT 对可见非所有者 403，不是 400）；处理函数 ownedBase → 形状 → scopeOf 条件 → 与 access.scope 相同不写 → inTransaction 里 UPDATE，changes 为 0 抛 404 回滚，再写 kb.scope；条件先于「相同」（失去成员后重存同一范围 400） |
+| 组 11：0 行 404 只能注入 | 是 | 第 1–5 步是同一连接上的同步调用，真实删库落不进这一段，只会在重读时 404；0 行分支用 TEMP 触发器 BEFORE UPDATE OF scope … RAISE(IGNORE) 注入（先例 auth-session.test.ts:394-401），另写一例真实删库交错；不为测试加 await 或注入点 |
+| 组 11：不取写锁、任何 state | 是 | 入库持锁（上传挂起）时 PUT 立即 200，入库仍未落定，writeWaiters 为 0；重建器持锁且 rebuilding 时 200 不是 409；rebuild_failed 同样 200 |
+| 组 11：一条事务 | 是 | 触发器拒绝 kb.scope 审计：通用 500，范围不变，isTransaction 为 false；只改 UPDATE、不包事务的实现会留下没有审计的范围变更 |
+| 组 11：应答 compile 的 5 s 期限 | 是 | 经 bases 的同一个 compileStatus 实例 read([base])（同一期限）；假 RAGFlow 关闭时 null 仍 200；挂起加 300 ms 期限仍 200；开 RAPTOR 的阳性对照恰读两条 |
+| 组 11：建库范围的次序 | 是 | 第 1 步不读库（未配置嵌入时坏范围 400，不是 409）；第 5 步在锁内、重名之后（重名加坏组得 409 conflict）、出站之前（raptor:true 的 u3、u4 零出站） |
+| 组 11：SQL 落点与 scopeOf 复用 | 是 | 写 scope 的 SQL 只有一条，在 kb/scope.ts；扫描集合原地扩为 kb/scope.ts、kb/visibility.ts，scope.ts 的 SQL 字面量恰为那条 UPDATE；department 与 project_group_members 两个集合不变（证明复用 scopeOf） |
+| 组 11：归属集与计数 | 是 | errors.ts 集合加一条，共四十条；http-parser-owners 改为 40 条、PUT 8 条；kb-disabled 表十四条；kb.create detail 在 kb-bases.test.ts:168 与 kb-bases-compile.test.ts:162 两处原地改 |
+| 组 11：冒烟按名选库 | 是 | 共享打开后列表含他人同名库：kb.hurl:194 与 kb-cleanup.hurl:32、45、56 加所有者过滤；:184 按 id，不改；smoke-kb 为 review-only |
+| 组 11：CK 行字面量 | 是 | /api/audit 只给 actorId（core/audit/index.ts:140），写 u2 不写 zhaoliu；计数行以 zhaoliu 名下没有库为前提（list.tsx:163） |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -576,11 +588,85 @@ Minimal mergeable slice: atomic - 一个组件的一个分支，验证路径单�
 ## 11. 打开共享：范围端点与建库范围（knowledge-bases「知识库范围端点」「知识库端点」建库、「同一知识库的写操作串行」、「知识库审计」`kb.scope`；http-service-skeleton「统一错误信封」）
 
 - [ ] 11.1 核对 Context：`kb/bases.ts` 的建库判定与设置锁、`kb.create` 的 detail（`kb-bases.test.ts:161`）；`kb/rest.ts` 的路由注册与 body limit；`accounts/scope.ts` 的 `scopeOf`；`server/src/http/errors.ts:94-133` 的归属集与 `server/test/http-parser-owners.test.ts` 的计数
-- [ ] 11.2 测试先行：新文件 `server/test/kb-scope.test.ts` 覆盖「知识库范围端点」全部场景、「知识库端点」的「建库带范围」、「不可见与不存在不可区分」里 `PUT …/scope` 的两次；在 `kb-visibility.test.ts` 的「共享库的两级归属」补上 `PUT …/scope`（合法 body）对可见非所有者 403、范围不变、无 `kb.scope`、假 RAGFlow 零请求；「同一知识库的写操作串行」的「改范围不排队」；`kb-bases.test.ts:161` 的 `kb.create` detail 加 `scope`；`http-parser-owners.test.ts` 的归属集加 `PUT …/scope`、计数改为四十（畸形 JSON 与 `text/plain` 得 400）
+- [ ] 11.2 测试先行：新文件 `server/test/kb-scope.test.ts` 覆盖「知识库范围端点」全部场景、「知识库端点」的「建库带范围」、「不可见与不存在不可区分」里 `PUT …/scope` 的两次；在 `kb-visibility.test.ts` 的「共享库的两级归属」补上 `PUT …/scope`（合法 body）对可见非所有者 403、范围不变、无 `kb.scope`、假 RAGFlow 零请求；「同一知识库的写操作串行」的「改范围不排队」；`kb-bases.test.ts:161` 与 `kb-bases-compile.test.ts:162` 的 `kb.create` detail 加 `scope`；`http-parser-owners.test.ts` 的归属集加 `PUT …/scope`、计数改为四十（畸形 JSON、空 JSON 与 `text/plain` 得 400）；`kb-disabled.test.ts` 的路由表加 `PUT …/scope`，恰十四条（ragflow-backend「知识库可用性」）
 - [ ] 11.3 实现新文件 `server/src/kb/scope.ts`（`PUT /api/kb/bases/:id/scope`：`ownedBase` → 形状 → 所有者条件（`scopeOf`）→ 相同不写 → 一条事务 `UPDATE` + `kb.scope`，0 行 404；不取写锁；应答的 `compile` 5 s 期限、失败为 `null`）；建库 body 加 `scope?` / `groupId?`，第 5 步复用同一个所有者条件函数；`errors.ts` 归属集加该路由
 - [ ] 11.4 验收清单：在 `docs/acceptance/functional-checklist.md` 的 CK 节加两行（`待签`）：
-  - P2 里程碑：`zhangsan` 把「规范库」设为全员可见（组 12 合入前经 `PUT …/scope`，之后经范围对话框）后，`zhaoliu` 在会话里经「+ → 引用知识库…」选 `规范库（zhangsan）`，问一个只有该库能答的问题，回答带出处切片，检索卡显示该库；以 `lisi` 在浏览器打开 `/api/audit`，看到至少一条 `kb.shared_retrieval`，每条 actor 为 `zhaoliu`、detail 的 `ownerId` 为 `u1`、不含问句。
+  - P2 里程碑：`zhangsan` 把「规范库」设为全员可见（组 12 合入前经 `PUT …/scope`，之后经范围对话框）后，`zhaoliu` 在会话里经「+ → 引用知识库…」选 `规范库（zhangsan）`，问一个只有该库能答的问题，回答带出处切片，检索卡显示该库；以 `lisi` 在浏览器打开 `/api/audit`，看到至少一条 `kb.shared_retrieval`，每条 `actorId` 为 `u2`（即 `zhaoliu`）、detail 的 `ownerId` 为 `u1`、不含问句。
   - 非所有者只读：`zhaoliu` 在中心「知识库」tab 看到该库带 `只读` 与「来自 zhangsan · 平台研发部」，没有删除、入库、上传、移出，文档来源不显示路径，检索测试可用但两个参数不可改。
+  - 组 11 约定（#2037 fixture 审查补；11.2–11.4 照此实现与测试）：
+    - 规格前置（已由编排方在 fixture 提交里补齐，实现方不改 openspec/）：`specs/ragflow-backend/spec.md` 的 MODIFIED「知识库可用性」把「十三条 / 十三次」改为十四（先例 archive/2026-11-08-s2b-kb-retrieval/specs/ragflow-backend/spec.md:51）；11.2 的 parser 输入以 http-service-skeleton/spec.md:117 的三种为准；11.4 的 actor 改为 `actorId`。
+    - 11.1 行号核实与更正：
+      - `bases.ts` 320 行：`BODY_KEYS` :32，`parseCreate` :116-135，`createLocked` :228-262（就绪、重名、上限 :230-242，`createBase` 与 `kb.create` :248-256，detail :254），设置锁在 `create` :296-299，`viewOf` :177-200（不导出），`ownedBase` :101-107。
+      - `rest.ts` 313 行：路由 :229-312，`BASE_BODY_LIMIT` :76（16 KiB），钩子 :195-202。`accounts/scope.ts:8-24` 的 `scopeOf`。
+      - `errors.ts` 的集合是 :94-134（:133 是最后一条，:134 收尾）；注释里的「三十九」在 :67 与 :138，枚举在 :85-89。
+      - `http-parser-owners.test.ts` 387 行：`KB_OWNER_IDENTITIES` :29-38，三十九条清单 :41-74，计数 :201-212（PUT 为 :209）。
+      - `kb.create` detail：`kb-bases.test.ts:161` 是标题，detail 在 :168；`kb-bases-compile.test.ts:158-165`（detail :162，同样 toEqual）。
+      - 其余：`compile-status.ts:28` 的 5 s、`:137-160` 的 `read`；`index.ts:157` 的 compileStatus 内联建；`store.ts:635` 的 `inTransaction` 模块私有；`kb-disabled.test.ts:20-42,71-77`（恰十三条）；`kb-visibility.test.ts` 517 行（VALID :95，MALFORMED :125，扫描 :290-315，:308 是 scope 集合）。
+    - 字面量（逐字）：
+      - 路由 `PUT /api/kb/bases/:id/scope`，body 上限 16 KiB，no-store（knowledge-bases/spec.md:52）。
+      - 审计 kind `kb.scope`，title `修改知识库可见范围`（:410），workspaceId 为 null；detail 键序 `{id, before:{scope, groupId}, after:{scope, groupId}}`（:405）；只在实际变化时写（:415）。
+      - `kb.create` 的 detail 为 `{id, template, raptor, graph, scope:{scope, groupId}}`（:390）。
+      - 应答为 200 的十四键 BaseView（:61）；建库的 201 带 `scope`（:189）。归属集恰四十条（http-service-skeleton/spec.md:118）。
+      - 所有者的部门与成员关系与端点用同一个读取函数（account-groups/spec.md:35）。
+    - 与 11.2、11.3 的差异（审查裁定，PR 按偏离写明）：
+      - 「不可见与不存在不可区分」的两次 PUT 不在 kb-scope.test.ts 另写：把 PUT 加进 kb-visibility 的 VALID，由既有循环（:376）覆盖。
+      - 「改范围不排队」进 kb-scope.test.ts（kb-visibility 已近上限）。
+      - 「与删库并发」的 0 行用触发器注入（第 1–5 步同步，真实删库落不进这一段），另写一例真实删库交错作补充。
+      - 建库与改范围的写入共用 scope.ts 里同一条 UPDATE；建库在 `createBase` 的 `within` 里执行。store.ts 的 INSERT 与 43 处 `createBase` 调用点都不改。
+      - 写入只改两列，不动 `updated_at`（`updatedAt` 只在 `toBase` 映射，store.ts:615，不进 BaseView）；测试钉住。
+    - 新文件 `server/src/kb/scope.ts`（≤ 110 行；头注释写 s2c-kb-visibility D3、D12，knowledge-bases「知识库范围端点」）：
+      - 依赖方向只能是 bases.ts → scope.ts。scope.ts 从 `./store.js` 导入 `inTransaction`（store.ts:635 只加 export，不另写事务助手），从 `../accounts/scope.js` 导入 `scopeOf`，从 `./ragflow-route.js` 导入 `isRecord`；`BaseAccess` 只作类型导入；不导入 bases.ts。
+      - 唯一的 SQL：`UPDATE knowledge_bases SET scope = ?, scope_group_id = ? WHERE id = ?`。
+      - `export function parseScope(body)`（body 为 `Record<string, unknown>`）返回 `{scope, groupId}`，键序固定：`scope` 缺省 `me`，其它值必须是 me、dept、group、all 之一；`group` 时 `groupId` 必须是非空字符串；其余档位只要 body 有 `groupId` 键就 400（含 `groupId:null`）；不读库，建库第 1 步与改范围第 2 步共用。
+      - `export function createKbScope(deps: { db; audit })` 返回三个方法：
+        - `assertQualified(ownerId, ref)`：只有 dept、group 才调 `scopeOf`；dept 要 `department` 非空，group 要 `groups` 里有该 id（含组不存在）；不满足抛 `bad_request`。
+        - `write(id, ref)`：执行那条 UPDATE，返回 `Number(changes)`，不开事务。
+        - `change(access, body, actorId)`：形状（body 不是对象、没有 `scope` 键、或有 `scope`/`groupId` 之外的键时 400，再调 `parseScope`）→ `assertQualified(access.owner.id, ref)` → `before = {scope: access.scope.scope, groupId: access.scope.group?.id ?? null}`，与 ref 相同就返回不写 → 否则 `inTransaction`：先 `write`，为 0 抛 `not_found`（回滚），再 audit。不读库行、不读 RAGFlow、不取锁。
+      - 审计事件的 interface 留在模块内，不导出（knip）。
+    - `bases.ts`（320 → ≤ 350）：
+      - `BODY_KEYS` 加 `scope`、`groupId`；`CreateRequest` 加 `scope`（取 `parseScope` 的返回类型）；`parseCreate` 末尾调 `parseScope(body)`。依赖加 `scope`（`createKbScope` 的返回类型，类型导入）。
+      - `createLocked` 在 :240-242 的上限判定之后调 `scope.assertQualified(ownerId, request.scope)`；`within` 改为先 `scope.write(id, request.scope)`，再 audit，detail 末尾加 `scope: request.scope`。
+      - 新方法 `async setScope(id, body, ownerId)`：`scope.change(ownedBase(visibility, id, ownerId), body, ownerId)`；重读 `const access = ownedBase(…)`；`const [compile = null] = await compileStatus.read([access.base])`；返回 `viewOf(access, store.countDocuments(id), compile)`。本地读失败照常抛出（同列表）。
+      - 文件头 :8-19 补「范围」一段。
+    - `rest.ts`（313 → ≤ 325）：加 `SCOPE_ROUTE = "/api/kb/bases/:id/scope"`；`app.put` 注册，选项 `{ onRequest: noStore, preParsing: ownedBase, bodyLimit: BASE_BODY_LIMIT }`，处理函数调 `bases().setScope(request.params.id, request.body, principalOf(request).id)`。知识库关闭时也照常注册（rest.ts:21）。文件头补一段。
+    - `index.ts`（200 → ≤ 205）：audit（:122）之后加 `const scope = createKbScope({ db: app.db, audit })`，传给 `createKbBases`。`app.ts` 不改。
+    - `errors.ts`（199 → ≤ 201）：:130 之后加 `"PUT /api/kb/bases/:id/scope"`；:67、:138 的「三十九」改「四十」；:85-89 的枚举加这条。
+    - 新测试文件 `server/test/kb-scope.test.ts`（≤ 520 行；文件头写 #2037 s2c-kb-visibility 组 11）：
+      - 夹具：同时登记 `useSettingsWorlds()` 与 `useIngestWorlds()`（先例 kb-visibility.test.ts:41-42）。复用 `createdBase`、`deleteBase`、`auditsOf`、`baseCount`、`NOT_FOUND`、`GENERIC_500`、`COMPILE_OFF`（kb-bases-helpers），`BAD_REQUEST`、`addCompileBase`、`routes`（kb-settings-helpers），`holdWriteLock`（kb-upload-helpers.ts:170），`LIST`、`UPLOAD`（kb-ingest-helpers），`totalChanges`、`enableAccount`（session-db-helpers），`cookieFor`，`padded`，`PARSER_INPUTS`（http-guard-helpers.ts:66），`expectAnswer`。
+      - u4：`enableAccount(world.db,"u4")`，`cookieFor(world.app,"wangwu")`，加 `app.inject`；若 jscpd 报与 kb-visibility 的 `wangwuIds` 重复，挪进 kb-settings-helpers 共用。
+      - kb.scope 读法：`SELECT actor_id, title, detail, workspace_id FROM audit_events WHERE kind = 'kb.scope' ORDER BY id`，detail 按原始串比较（钉住键序）。
+      - 「改范围并审计」：u1 `createdBase(world,"规范库")` 得 K 与 201 的 `created`；读 `updated_at`；`world.forget()`。PUT `{scope:"group",groupId:"g1"}`：200、no-store，body toEqual `{...created, scope:{scope:"group",group:{id:"g1",name:"内网落地专项"}}}`；记 `totalChanges`，再提交同一 body：200、同一 body，差为 0。PUT `{scope:"all"}`：body `{...created, scope:{scope:"all",group:null}}`。kb.scope 恰两行：actor `u1`、title `修改知识库可见范围`、workspace null；detail 原始串依次为 `{"id":"<K>","before":{"scope":"me","groupId":null},"after":{"scope":"group","groupId":"g1"}}` 与 `{"id":"<K>","before":{"scope":"group","groupId":"g1"},"after":{"scope":"all","groupId":null}}`。设为 group 后 peer 列表 id 为 `[K]`、`owned:false`，admin 列表 `[]`；设为 all 后 admin 列表 `[K]`。行的 `scope_group_id` 为 null，`updated_at` 等于建库时的值；`world.sent()` 为 `[]`。（抓「相同仍 UPDATE」「应答由请求拼出没带组名」「只写一列」。）
+      - 「所有者条件与形状」：u4 建「空部门库」（201）再 PUT `{scope:"dept"}`；u3 `createdBase(…,"admin")` 建库再 PUT `{scope:"group",groupId:"g1"}`。u1 的 K 依次提交 `{scope:"group"}`、`{scope:"all",groupId:"g1"}`、`{scope:"group",groupId:"nope"}`、`{scope:"me",extra:1}`、`{}`、`{scope:"team"}`、`{scope:"ME"}`、`{scope:null}`、`{scope:"me",groupId:null}`、`{scope:"group",groupId:""}`、`{scope:"group",groupId:1}`、`{scope:"group",groupId:"g1",extra:1}`，另用 raw 的 `[]` 与 `"all"`（application/json）。每次 400 `BAD_REQUEST`、no-store；`SELECT id, scope, scope_group_id, updated_at FROM knowledge_bases ORDER BY id` 前后相等，kb.scope `[]`，`world.sent()` `[]`。最后 u1 PUT `{scope:"dept"}` 得 200、`scope:{scope:"dept",group:null}`、kb.scope 一条（阳性对照）。
+      - 「重建中也能改」（ingest 世界）：`setState("rebuilding")`，`const release = holdWriteLock(world,"rebuild")`，记 `world.lines().length`；`send(world.fw.rest,"member","PUT",…,{scope:"all"})`：200，body `state:"rebuilding"`、`scope:{scope:"all",group:null}`、`compile` 为 `COMPILE_OFF`；`world.locks.writeWaiters(world.baseId)` 为 0；`world.audits("kb.scope")` 恰一条（me → all）；新增 lines `[]`；`await release()`。再 `setState("rebuild_failed")`，PUT `{scope:"me"}` 得 200，kb.scope 共两条。（取锁或按 state 拦截的实现得 409。）
+      - 「读编译状态失败不影响改范围」：阳性 `addCompileBase(world,1)`，`const ds = world.fake.addDataset()` 并带外改 `dataset_id`，`forget`；PUT `{scope:"all"}` 得 200、`compile:{raptor:"pending",graph:"off"}`，`routes(world.sent())` 恰为 `GET …/datasets/<ds>/documents` 与 `GET …/datasets/<ds>/ingestions`。不可达：`await world.fake.close()`；PUT `{scope:"me"}` 得 200、`compile:null`、`scope:{scope:"me",group:null}`；kb.scope 共两条。期限：`configuredWorld(open,{compileStatusDeadlineMs:300})`，同样建库，`fault(LIST,{kind:"hang"})`；PUT `{scope:"all"}` 得 200、`compile:null`，耗时 ≥ 299 ms；kb.scope 一条；`world.db.isTransaction` 为 false。
+      - 「已失去条件时重存同一范围」：K 经 PUT 设为 group/g1（200），`DELETE FROM project_group_members WHERE group_id='g1' AND account_id='u1'`；再提交同一 body：400，行仍 group/g1，kb.scope 仍一条；PUT `{scope:"me"}`：200，kb.scope 两条，第二条 detail 原始串 `{"id":"<K>","before":{"scope":"group","groupId":"g1"},"after":{"scope":"me","groupId":null}}`。
+      - 「与删库并发」：注入 `CREATE TEMP TRIGGER scope_race BEFORE UPDATE OF scope ON knowledge_bases BEGIN SELECT RAISE(IGNORE); END`；PUT `{scope:"all"}` 得 `expectAnswer(…,404,NOT_FOUND)`，kb.scope `[]`，行仍 me，`isTransaction` false；`DROP TRIGGER scope_race` 后同一请求 200，kb.scope 一条（抓「不看 changes 就 200 加审计」）。真实交错：另建 K2，`const gate = world.fake.fault("DELETE /api/v1/datasets",{kind:"hold"})`，`const removing = deleteBase(world,K2)`，`await gate.reached`；此时 PUT K2 `{scope:"all"}` 得 200，`writeWaiters(K2)` 为 0；`gate.release()` 后 `removing` 得 204；再 PUT K2 `{scope:"me"}` 得 404 `NOT_FOUND`；K2 的 kb.scope 恰一条。
+      - 「改范围不排队」（ingest 世界）：写入 docs/a.md，`const gate = world.fake.fault(UPLOAD,{kind:"hold"})`，`const pending = world.ingest(["docs/a.md"])`，登记 settled 标志，`await gate.reached`；PUT `{scope:"all"}` 得 200；此时 settled 为 false，`writeWaiters` 为 0，kb.scope 一条，`world.countOf(UPLOAD)` 为 1；`gate.release()` 后 `pending` 得 201。
+      - 「建库带范围」（`chatWorld`）：u1 建 `{name:"组库",template:"naive",scope:"group",groupId:"g1"}`：201，`scope:{scope:"group",group:{id:"g1",name:"内网落地专项"}}`、`owned:true`；u1 建 `{name:"部门库",template:"naive",scope:"dept"}`：201，`scope:{scope:"dept",group:null}`。`auditsOf(world,"kb.create")` 两个 detail toEqual `{id,template:"naive",raptor:false,graph:false,scope:{scope:"group",groupId:"g1"}}` 与 `{…,scope:{scope:"dept",groupId:null}}`；两行 scope 列相符。`forget()`，记 `baseCount`。以下各为 400 `BAD_REQUEST`：u4 带 `raptor:true` 的 `{scope:"dept"}`；u3 带 `raptor:true` 的 `{scope:"group",groupId:"g1"}`；u1 `{scope:"all",groupId:"g1"}`；u1 `{scope:"team"}`；u1 不带 scope 只带 `groupId:"g1"`。u1 用重名「组库」加 `{scope:"group",groupId:"nope"}`：409 conflict（第 4 步先于第 5 步）。以上全部 `world.sent()` `[]`，`baseCount` 与 kb.create 条数不变。另开未配置嵌入的世界 `open()`：u1 带 `{scope:"all",groupId:"g1"}` 得 400（第 1 步不读库）；u4 带 `{scope:"dept"}` 得 409 `kb_not_ready`（条件在就绪之后）。
+      - 「归属路由」（http-service-skeleton:116-118）：u1 自己的 K，`PARSER_INPUTS` 四项、`text/plain` 的 `{"scope":"all"}`、`padded(16*1024+1,{scope:"all"})` 每次 400 `BAD_REQUEST`、no-store；行不变，kb.scope `[]`，`world.sent()` `[]`；最后 `padded(16*1024,{scope:"all"})` 得 200（忘了 16 KiB 上限的实现在 +1 得 200）。
+      - 「一条事务」：`CREATE TEMP TRIGGER refuse_scope BEFORE INSERT ON audit_events WHEN NEW.kind = 'kb.scope' BEGIN SELECT RAISE(ABORT, 'injected'); END`；PUT `{scope:"all"}` 得 500、body `GENERIC_500`；行仍 me，`isTransaction` false。
+    - 既有用例原地改（只限这些）：
+      - `kb-visibility.test.ts`（517 → ≤ 540；放宽组 7 的 ≤ 520）：VALID 末尾加一项，名 `PUT 范围`，调 `w.call("PUT", <BASES>/<id>/scope, "peer", { scope: "group", groupId: "g1" })`（peer 是 g1 成员：钩子误用读级、按调用者判条件的实现会 200）；MALFORMED 末尾加一项，名 `PUT 范围 坏 JSON`，调 `w.raw("PUT", <BASES>/<id>/scope, "{not json", "application/json", "peer")`（没有钩子的实现在「403 先于 body」得 400）。:318 标题改为「…六条写路由 403…」；:5、:94、:124 的注释同步（「组 11 之前没有改范围的路由」「七条」「五种」）。:308 改为 `["kb/scope.ts","kb/visibility.ts"]`，另断言 kb/scope.ts 的 SQL 字面量恰为 `["UPDATE knowledge_bases SET scope = ?, scope_group_id = ? WHERE id = ?"]`；:309-313 的 department、project_group_members 两个集合不变。
+      - `kb-bases.test.ts:161,168`：标题改为「恰五键」，detail 加 `scope: { scope: "me", groupId: null }`（442 → ≤ 450）。`kb-bases-compile.test.ts:162` 同样改（606 → ≤ 615，放宽组 5 的 ≤ 608）。
+      - `http-parser-owners.test.ts`（387 → ≤ 395）：`KB_OWNER_IDENTITIES` 加 `["PUT", "/api/kb/bases/:id/scope"]`，注释八条改九条；`THIRTY_NINE_OWNER_IDENTITIES` 改名 `FORTY_OWNER_IDENTITIES`，标题与注释三十九改四十；:203-204 的 39 改 40，:209 的 PUT 7 改 8；`NON_OWNER_METHODS` 加 GET、POST 的 `/api/kb/bases/:id/scope`；`LOOKALIKES` 加 `["PUT", "/api/kb/bases/abc/scope"]`。
+      - `kb-disabled.test.ts`（111 → ≤ 113）：ROUTES 加 PUT …/scope（body:true）；:71-77 的十三改十四；文件头补「s2c-kb-visibility 组 11 加范围端点，表恰十四条」（只在开启时注册的实现得 404，变红）。
+      - 测试助手的方法联合加 PUT：`kb-settings-helpers.ts:100-105` 的 `World.call`、`mounts-rest-helpers.ts:173-182` 的 `send`。
+    - 冒烟（只能经 make smoke-kb 验证，review-only，PR 写明）：
+      - `kb.hurl:194` 拆两行：`$.bases[?(@.owner.account=='zhangsan' && @.name=='smoke-kb')]` not exists，smoke-kb-compile 同样一行。
+      - `kb-cleanup.hurl:32,45` 的取值加 `@.owner.account=='zhangsan' &&`；`:56` 同 kb.hurl:194 拆两行。
+      - 用 owner.account 不用 owned==true：嵌套成员加 && 加字符串比较在 kb.hurl:184 有先例，布尔字面量与括号在仓库 hurl 里没有先例；拆两行避开 && 与 || 的优先级。
+      - `kb.hurl:184` 按 id 过滤，不改。`kb-cleanup.hurl:23-24` 是对原始正文 replaceRegex，不改；文件头注明：若可见的他人同名库存在而 zhangsan 的不在，:32 取不到值，清理失败（Makefile:104 不改变退出码），也删不到别人的库。
+      - `kb.hurl:12` 注释的 body 键集加 `scope`、`groupId`。
+    - 11.4 验收清单，CK 节在 CK-20 之后加两行，结论都写 `待签`：
+      - CK-21 操作：由 owner 执行（agent 不得代签）。在 CK-15 那台接上共用 RAGFlow 栈与真实模型上游的服务上，`zhangsan` 的「规范库」里有已切片的 `manual.pdf`（CK-06）。以 `zhangsan` 把「规范库」设为全员可见：组 12 合入前，先在浏览器打开 `/api/kb/bases` 记下「规范库」的 `id`，再在开发者工具控制台以同一登录态发 `PUT /api/kb/bases/<该 id>/scope`，`Content-Type` 为 `application/json`，body `{"scope":"all"}`；组 12 合入后改为点「规范库」一行的范围按钮，选「全员可见」并保存。然后以 `zhaoliu` 新建会话，打开输入框「+」菜单选 `引用知识库…`，选 `规范库（zhangsan）`，问一个只有 `manual.pdf` 里才有的事实，等回答结束。最后以 `lisi` 在浏览器打开 `/api/audit`。期望：设范围得 200（组 12 后为对话框关闭、按钮变为「全员可见」）；选择列表有 `规范库（zhangsan）`；回答的事实与 `manual.pdf` 原文一致；助手消息有「知识库检索」卡，卡头 `知识库检索 · 规范库`，展开一行能看到 `manual.pdf` 与切片原文；模型没有检索时记 `不通过` 并注明；`/api/audit` 至少一条 `kind` 为 `kb.shared_retrieval`，每条 `actorId` 为 `u2`（即 `zhaoliu`），detail 的 `ownerId` 为 `u1`、`name` 为 `规范库`，标题与 detail 都不含问句；页面没有错误提示。
+      - CK-22 操作：由 owner 执行（agent 不得代签）。接 CK-21（「规范库」为全员可见，`zhaoliu` 名下没有知识库）。以 `zhaoliu` 打开「中心」的「知识库」tab；点「规范库」一行；在「相似度阈值」与「向量权重」里试着改数字，再填问句点「检索」。期望：计数行 `我的 0 个 · 共享给我 1 个`（list.tsx:163）；「规范库」一行带 `只读` 与「来自 zhangsan · 平台研发部」，整行没有按钮；详情没有「从工作空间入库」「上传文件」，原入库工具条位置显示「共享给你的知识库只读：可检索、可在会话中引用，不能增删文档。需要补充内容请联系 zhangsan。」（detail.tsx:71）；文档表没有「操作」列，也没有「移出」「重新入库」；`manual.pdf` 来源为「本地上传」，`guide.pdf` 来源只写「工作空间」，没有空间名与路径；「检索测试」可用，两个数字改不动、仍是 zhangsan 保存的值，检索照常出结果；页面没有错误提示。
+      - 写完跑 `npm run test:focus --workspace web -- functional-checklist`（格式守卫 web/test/functional-checklist.test.ts:15-33）。
+    - 行数汇总：`scope.ts` ≤ 110、`kb-scope.test.ts` ≤ 520；`bases.ts` ≤ 350；`rest.ts` ≤ 325；`index.ts` ≤ 205；`errors.ts` ≤ 201；`store.ts` 653 不变（只加 export）。PR 预计超过 400 行，援引 issue 的 Width exception（merged-tasks）。
+    - TDD 配对：`scope.ts` 对应 `kb-scope.test.ts`；`bases.ts`、`rest.ts` 的改动由同一文件加 kb-visibility、kb-bases 的原地改动覆盖。
+    - PR：标题与描述写「多租户过滤与跨账号共享：请求白盒审查」；附 grep 证据：`grep -rn "scope_group_id\|SET scope" server/src` 只命中 kb/scope.ts 与 kb/visibility.ts；`grep -n "PUT /api/kb/bases/:id/scope" server/src/http/errors.ts` 恰一行。
+    - 非目标：web 范围对话框、新建时设范围、`getMyScope`（组 12）；ui-walk（组 13）；system.md、glossary、计划状态（组 14）；项目组管理（S3a）；管理员特权（没有分支）；应答编译状态的本地行读取失败（同列表，照常 500）；`updated_at` 之外的 schema。
+    - 实测与上面这些字面量不符时停下来报告，不改期望；`RAISE(IGNORE)` 使 changes 为 0 以及 Biome 折行后的行数，以实测为准。
+    - 回归命令：先红后绿 `npm run test:focus --workspace server -- kb-scope`（kb-visibility、http-parser-owners、kb-disabled、kb-bases 的原地改动在实现前也应为红）；`npm run test:focus --workspace server -- kb-scope kb-bases http-parser-owners kb-visibility kb-disabled kb-settings kb-retrieval-shared kb-ingest-workspace kb-compile-status accounts-scope`；`npm run test:focus --workspace web -- functional-checklist`；`make lint`、`make typecheck`、`make anti-drift`（knip：`inTransaction`、`parseScope`、`createKbScope` 都有使用者；jscpd：不另写事务助手）；最后 `make check`。`make smoke` 本机不必跑（CI 照跑）；`make smoke-kb` review-only，PR 写明；无 web 改动，不跑 ui-walk。
 
 Suggested fixture level: expanded - 新写端点、审计、parser 归属集、与删库并发的 0 行语义，且是打开共享的开关。
 Minimal mergeable slice: atomic - 建库与改范围共用同一个形状与所有者条件判定；它是打开共享的唯一开关，依赖头保证它最后合入（D12）。
