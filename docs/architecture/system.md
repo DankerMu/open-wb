@@ -31,8 +31,8 @@ API 端点清单（属 spec 阶段）。
 | `core/errors` | `HttpError`、三十八码与中文消息（含 `sandbox_denied`/`conflict`/`preview_too_large`/`preview_unsupported`，s1d 增 `forbidden`（403）/`model_in_use`（409），s1b 增七个挂载码：`mount_disabled`（503）/`mount_limit`（409）/`mount_host_rejected`（403）/`mount_failed`（502）归 `workspaces/mounts` 的挂载端点与 manager，`mount_offline`（409）/`mount_read_only`（403）/`mount_boundary`（409）归 workspaces 文件端点的挂载判定（`mount_offline` 另含异步适配器超期），s2a 增十二个知识库码（`kb_disabled`（503）等，见 9.13），#2011 增 `kb_tool_conflict`（409）归会话派发前对齐的宿主工具注册） | HTTP 状态码、content-parser 归属与信封映射仍在 `http/` | 一处运行时身份，避免 core 反向依赖 http |
 | `core/roles` | `ADMIN_ROLE`、`isAdmin(principal)`（`role === "管理员"` 严格相等，不修剪、不归一） | 结构化入参，不导入 auth | 管理员判定一处出处（现由 `core/audit` 可见性过滤使用） |
 | `core/db` | SQLite 句柄 + 迁移执行 | WAL 配置、schema 迁移（ADR-0004） | |
-| `auth` | `authenticate(req) → Principal`；login/callback/logout 路由 | OIDC 流程、会话 cookie、首登 provisioning；适配器×2：oidc、dev-stub（ADR-0007） | 两个适配器 = 真接缝 |
-| `accounts` | 账号属性/角色/配额/项目组管理；`scopeOf(principal)` → 可见范围解析输入 | IdP 字段与应用侧字段的分界 | |
+| `auth` | `authenticate(req) → Principal`；login/logout 路由 | 本地凭证（scrypt）与会话 cookie；当前唯一适配器 dev-stub，接缝是否保留与命名待 S3a（ADR-0018 取代 ADR-0007） | |
+| `accounts` | 账号属性/角色/配额/部门/项目组管理（全部由本系统维护，ADR-0018）；`scopeOf(principal)` → 可见范围解析输入 | 管理员写、其余只读 | |
 | `workspaces` | 空间 CRUD、树列举、文件读/预览、挂载 attach/detach/status | `mounts/` 子模块 = mount-manager：rclone 进程生命周期、凭证保管、健康探测、崩溃重挂（ADR-0003）；多根树合并；S1f change C（`s1f-session-list-temp-space`）：临时空间（`workspaces.temporary` 标记，目录名 `tmp-<id>`；随会话在同一事务里创建，`GET /api/workspaces` 不列出、按 id 的端点照常可达）、`POST /api/workspaces/:id/promote`（原地转正：只改名字与标记，目录不动，`workspace.promote` 审计）、`temp-dir-remove.ts`（临时空间目录经 app 私有 trash 中转删除，`EXDEV` 时原地删）、`snapshots.ts`（回合快照的落盘 `take` 与两种目录删除）与 `snapshots-restore.ts`（还原）——快照根目录由 `createApp` 注入，这两个模块不导入 `sessions/`，也没有自己的路由（部署侧见 §9.1） | 挂载协议差异（SFTP/NFS/SMB）全部藏在接缝后 |
 | `sessions` | `create/resume/fork/list`；`post(input)`；`interrupt()`；`subscribe(lastEventId) → 事件流` | omp-supervisor（每活跃会话 spawn、空闲回收、全局上限 `OMP_MAX_PROCESSES`（默认 16）/ 触顶驱逐最久空闲进程（无可驱逐 → `agent_capacity`）、并发 spawn 上限 `OMP_SPAWN_CONCURRENCY`（缺省 CPU 数；准入后 FIFO 排队、排队不计入握手 deadline，握手超时写一行 stderr 记录；保留的基础设施故障与会话删除清理失败各写一行 `{"event":"session_fault"}`）、审批经 host 应答（`approval.request`/`approval.resolved`，`chat_approvals` 持久化））、JSONL RPC 编解码、host tool 的注册与分派（change `s2c-kb-session`：派发前对齐的第 3 步按所有者的 `kb_search` 定义发 `set_host_tools`，每代记下已注册的库清单，`host-tool-align.ts`；`host_tool_call` 由 `omp/host-tools.ts` 交给会话 slot 构造时绑定为「以所有者执行」的处理函数，fork 与撤回的临时进程不注册、不注入；定义源与执行都由 `app.ts` 注入，不导入 `kb`）、`kb.hits` 事件（change `s2c-kb-session`：`kb_search` 成功步骤的结构化命中，supervisor 严格校验后发布，与 `turn.retry` 一样占序号、不落库，`kb-hits.ts`）、知识库引用（prompt 的 `knowledgeBases`，判定后落迁移 052 的 `chat_messages.knowledge_bases`，后缀经 `slash-commands.ts` 的 `promptSuffix` 唯一构造，消息快照第十四键 `knowledgeBases`，fork 原样拷贝，`store-knowledge-bases.ts`；解析器同样由 `app.ts` 注入）、事件序号+环形缓冲（ADR-0006）、SQLite 会话/消息/步骤存储（持久历史事实源；实时缺口恢复使用 store 自有待刷尾部补齐的完整快照及同刻 streamCursor，读取不改变刷盘策略——#214）；omp `.jsonl` 存于 app-server 托管的 `OMP_STATE_DIR`、只供 `--resume`（S0b grill 2026-09-18）；S1c change B：会话可绑定工作空间（绑定会话的 omp cwd 为该空间根，`session.bind` 审计）、元数据 `PATCH /api/sessions/:id`（标题 / 场景 / 置顶）与 `DELETE /api/sessions/:id`（`session.delete` 审计）、`thinking.delta` 与 `files.changed` 事件（分别持久化到 `chat_messages.thinking` 与 `chat_steps.changes`）、`MODEL_REASONING`（托管 `models.yml` 的模型条目是否声明 reasoning；只影响 omp 的请求侧，不门控宿主对 thinking 的解析）、slash 白名单与 `GET /api/commands`（白名单外以 `/` 开头的文本转义后送模型）；S1f：任务清单（omp `todo` 工具结果的全量清单归一化后持久化到 `chat_sessions.todo`，经 `todo.updated` 事件与消息快照顶层 `todo` 下发；结构不合规的候选丢弃并写一行不含任务文本的 stderr warn 记录）；S1f change C（`s1f-session-list-temp-space`）：会话视图十一键（增 `archivedAt`、`pendingApproval`、`temporaryWorkspace`，`store-view.ts`）；`PATCH /api/sessions/:id` 增 `archived` 键，已归档会话的 prompt / 重新生成 / fork / 撤回以 409 `session_archived` 拒绝；不带 `workspaceId` 的 `POST /api/sessions` 同事务创建临时空间，`DELETE /api/sessions/:id` 在它是最后一个使用者时连同临时空间的行、目录与快照一起删（`workspace.delete` 审计）；列表事件连接 `GET /api/sessions/events`（`list-events.ts`：按账号的通知器与 SSE 路由，只发 `sessions.changed` 与 `session.rewound`，无序号、无回放，见 §9.2）；受理 prompt 后、派发前的回合快照步骤（`turn-snapshot.ts`，经 `supervisor.prompt` 的 `beforeDispatch`；登记表 `chat_turn_snapshots` 只由 `store-undo.ts` 读写）；撤回 `POST /api/sessions/:id/undo`（`undo.ts`：body `{messageId, files}`，`files` 为 `keep` / `restore` / `force`；临时进程上 `branch` 后原地回退对话并可还原文件，冲突为 409 `undo_conflict`，`session.undo` 审计；与 fork 共用 `branch-temp.ts` 的对位与临时进程）；消息视图与 prompt 202 增 `undo` 键 | omp 协议与进程治理全部不外泄；调用方只见会话语义 |
 | `kb` | `GET /api/kb/status`（登录用户可调，版本钉住与就绪位，见 9.13）；`GET` / `PUT /api/kb/settings`、`POST /api/kb/settings/probe`（`?target=rerank` 探重排模型）、`POST /api/kb/settings/rebuild`（管理员；确认换嵌入模型即全量重建，见 9.13）；`GET` / `POST /api/kb/bases`、`DELETE /api/kb/bases/:id`（登录用户，只看自己的库，见 9.13）；`GET` / `POST` / `DELETE /api/kb/bases/:id/documents`（文档列表、工作空间来源入库与移出，见 9.13）；`POST /api/kb/bases/:id/documents/reingest`（重新入库，见 9.13）；`POST /api/kb/bases/:id/uploads`（本地上传，见 9.13）；`POST /api/kb/bases/:id/retrieval`（检索测试：单轮检索，参数变了先在写锁内写回，见 9.13）；单轮检索 `retrieveForBase(base, question, signal?) → 命中（本地文档 + 切片）`（`signal` 中止 RAGFlow 请求，会话检索用），检索测试与 S2c 的会话内检索共用；会话检索 `kb/session-search.ts` 的 `createKbSessionSearch`（`definitionFor(ownerId)` 给出所有者的 `kb_search` 定义与库清单，`execute(ownerId, args, signal)` 逐库单轮检索，`resolveReferences` 解析知识库引用），知识库开启时由 `registerKb` 交回 `app.ts`、经注入给 `sessions`；center 管理透传 | 可见范围过滤（先过滤 kb_ids 再调 RAGFlow；S2c change A 只按所有者判定，四档与共享库检索审计属 change B）、bearer 凭证 | host tool 与 UI 检索共用同一过滤路径 |
@@ -170,7 +170,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 
 ### 6.2 其余流（一行一条）
 
-- **登录**：浏览器 → OIDC IdP → callback → auth 建 Principal，首登 provisioning 账号与沙箱根目录。
+- **登录**：浏览器 → `POST /api/auth/login`（本地账号 + 密码）→ auth 建会话与 Principal；账号由管理员建立（ADR-0018，管理面在 S3a）。
 - **挂载**：UI 填凭证 → mounts 起 rclone 挂到空间根下的挂载点 → 挂载点在空间根下，沙箱 resolve 按包含关系覆盖 → 在线状态探测。
 - **摄取**：UI 选工作空间文件（含只读挂载）或本地上传 → app-server `kb` 在该库的写锁下逐条处理：工作空间来源依次过沙箱 `resolve(read)`、查重与 500 份上限、模板后缀、读取与大小，任一步不过就带固定的 `reason` 与 `message` 记入 `rejected`，其余条目照常处理；通过的逐份流式上传，各自触发一次解析（`document_ids` 只有这一份）→ RAGFlow 解析/切片/嵌入（原件存 RAGFlow，嵌入直连模型上游；开编译的库由 pipeline 里的 Compiler 随解析跑 RAPTOR / 知识图谱）→ Infinity（经 `DOC_ENGINE`）。拒绝原因见 [knowledge-base.md](knowledge-base.md)「拒绝原因」。
 - **审计**：sandbox 拒绝、共享 KB 检索、账号操作、model-proxy 计量 → `core/audit` 追加表 → center 审计页查询。
@@ -185,7 +185,8 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 | [0004](../adr/0004-sqlite-wal-metadata-store.md) | SQLite WAL 元数据存储 |
 | [0005](../adr/0005-infinity-doc-store.md) | Infinity 文档存储（2026-11-01 补充：经 RAGFlow 的 `DOC_ENGINE`） |
 | [0006](../adr/0006-rest-sse-event-replay.md) | REST + SSE，事件序号回放 |
-| [0007](../adr/0007-oidc-provider-seam.md) | OIDC provider 接缝 |
+| [0007](../adr/0007-oidc-provider-seam.md) | OIDC provider 接缝（已被 0018 取代） |
+| [0018](../adr/0018-local-accounts-only.md) | 本地账号是唯一身份来源，不对接 OIDC |
 | [0008](../adr/0008-model-proxy-credentials.md) | app-server 模型代理，omp 零凭证 |
 | [0010](../adr/0010-dedicated-omp-uid.md) | omp 子进程单一专用 uid，与 app-server 分离 |
 | [0011](../adr/0011-sandbox-paths-not-browser-secret.md) | 绝对沙箱路径不属于对浏览器保密的信息（界面仍以逻辑路径展示） |
@@ -194,7 +195,7 @@ S0b 实际流入口为 `GET /api/sessions/:id/events`（#103）：cookie/owner �
 
 ## 8. 开放问题
 
-- **IdP 是否带组声明**：带则项目组改同步（ADR-0007 的开放尾巴）。解锁条件 = 身份源调研结论；P3 前必须关闭。
+- ~~IdP 是否带组声明~~ 已关闭 2026-11-17：没有统一身份系统，项目组自建（ADR-0018）。
 - ~~omp 子进程池参数~~ 已关闭（2026-09-28，#494：上限 `OMP_MAX_PROCESSES` 默认 16、空闲回收 `OMP_IDLE_MS` 默认 600s 经测试 VPS 实测保留）；内存限额（cgroup）移交 S4b 部署包。
 - ~~deepdoc 模型内网分发清单~~ 已关闭（2026-10-28，ADR-0016：解析在 RAGFlow 服务内，本仓不分发模型）。
 - ~~omp 子进程与 app-server 的 uid 分离~~ 已关闭（2026-09-18，ADR-0010：单一专用 omp uid；每账号 uid 记为 S3b/S4b 升级路径）。

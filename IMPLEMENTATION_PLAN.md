@@ -65,7 +65,7 @@
 ## Assumptions
 
 - 内网模型注册表提供 OpenAI 兼容端点（P0 即需）。
-- OIDC IdP 在 S3a 前可拿到测试租户；此前 auth 走 dev-stub 适配器（ADR-0007）。
+- ~~OIDC IdP 在 S3a 前可拿到测试租户~~ 作废 2026-11-17：部署环境没有统一身份系统，本地账号是唯一身份来源（ADR-0018 取代 ADR-0007）。
 - RAGFlow `v1.0.0-rc2` 的 HTTP API 足以承载建库、摄取与模型下发（change `s2a-kb-ragflow` 组 1 实测；不能下发模型时走其 design D7 的应急预案）。
 
 ## Open Decisions
@@ -77,7 +77,7 @@
 | ~~S0b 开发期模型上游~~ 已关闭 2026-09-18：公网 OpenAI 兼容替身，单测打假上游（ADR-0008 补充） | S0b 启动前 | S0b |
 | ~~omp 池参数（上限/内存/空闲回收）~~ 已关闭 2026-09-28：`OMP_MAX_PROCESSES` 保持默认 16、空闲回收 `OMP_IDLE_MS` 默认 600s（#494 测试 VPS 实测，数据见归档 change `2026-10-03-s1c-turn-control-governance` design Open Questions）；内存限额（cgroup）移交 S4b 部署包 | S1c 实测定参 | S1c |
 | ~~deepdoc 模型内网分发清单与体积~~ 已关闭 2026-10-28：随 ADR-0016 作废（解析在 RAGFlow 服务内，本仓不分发模型） | S2a spike 输出 | S2a |
-| IdP 是否带组声明（项目组自建 vs 同步） | S3a 启动前 | S3a |
+| ~~IdP 是否带组声明（项目组自建 vs 同步）~~ 已关闭 2026-11-17：没有统一身份系统，项目组自建（ADR-0018） | S3a 启动前 | S3a |
 | dependency-cruiser 接入时机（import 边界机械化） | 出现跨模块违规即接 | 任意 |
 
 ## 功能实现清单（稳定 ID）
@@ -128,7 +128,7 @@
 | ID | 行为 |
 |---|---|
 | F-SET-1 | 主题/通用/关于 |
-| F-SET-2 | 登录态与退出（内网统一身份） |
+| F-SET-2 | 登录态与退出（本地账号，ADR-0018） |
 | F-OPS-1 | omp 子进程池治理（每活跃会话一个、空闲回收、上限） |
 | F-OPS-2 | 模型代理（omp 环境零凭证，ADR-0008） |
 | F-OPS-3 | omp 减肥（backend-research §2.2 阶段 1→4） |
@@ -435,7 +435,8 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Depends on：S2b、S1c。
 - Review attention：decision-dense（多租户过滤是灰盒决定的例外候选——出事故重议）。
 - 2026-11-10 grill（owner 逐分支拍板，G1）：S2c 拆为两个 change。**A 会话接入**（change `s2c-kb-session`）：`kb_search` 的注册、分派、审批放行、`kb.hits` 与检索卡、知识库引用，可检索的库 = 自己的库。**B 可见范围**：四档、共享只读、跨账号检索审计、部门与项目组字段，A 合入后另跑流水线。
-- 2026-11-13 状态：**A 已交付，待 owner 签收；B 待启动。** Epic #1961 的组 1–10 全部合入（组 → issue → PR）：
+- 2026-11-17 状态：**A 已签收**（CK-15–CK-20 由 owner 签为 `通过`，`d664f88b`；change 已归档 `openspec/changes/archive/2026-11-13-s2c-kb-session/`，Epic #1961 关闭）；**B 的 change `s2c-kb-visibility` 已建**（grill 19 分支，owner 2026-11-17 拍板，见其 design.md「Grill 结论」），并入 A 的种子 (a)(b)(c)(e)，(d) 维持 G12。
+- 2026-11-13 状态（历史）：A 已交付，待 owner 签收。Epic #1961 的组 1–10 全部合入（组 → issue → PR）：
   - 制品：change 制品与 omp host tool 实测记录 `docs/reviews/2026-11-10-omp-host-tools.md`，PR #1978。
   - 组 1 单轮检索可取消 #1962 → #1987；组 2 会话检索 `kb_search` #1963 → #1988。
   - 组 3 宿主工具协议 #1964 → #1989；`kb_search` 的审批放行 #1965 → #1990。组 4 注册与装配 #1966 → #1991。
@@ -448,11 +449,11 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 
 ### 里程碑 P3 — 账号权限审计
 
-**S3a OIDC 与账号治理**
-- Outcome：OIDC 真对接（替换 dev-stub，接缝不动）；首登 provisioning；项目组（自建或同步——启动前关闭 IdP 组声明决策）；`/center` 账号 tab。
+**S3a 本地账号与治理**（2026-11-17 改向：部署环境没有统一身份系统，ADR-0018 取代 ADR-0007，OIDC 从路线图上去掉）
+- Outcome：本地账号转正——管理员建账号、重置密码、启停，维护部门、角色、配额与项目组（含解散时以它共享的库退回仅自己并逐库审计，demo :2991-3000）；用户改自己的密码；`/center` 账号 tab。grill 种子：provider 接缝是否保留与 `dev-stub` 改名、种子账号与已知密码在生产的处置、首个管理员如何产生、登录失败节流、账号页与登录页「内网统一身份」文案偏离 demo 的确认。
 - 覆盖：F-SET-2、F-CTR-ACC。
-- 必读增量：ADR-0007；demo `/center` 账号 tab（身份字段只读语义）。
-- Verify：真实 IdP 登录/登出/过期；非管理员不见账号 tab。
+- 必读增量：ADR-0018（取代 ADR-0007）；demo `/center` 账号 tab。
+- Verify：管理员建账号后该账号可登录、停用后 401、重置密码后旧密码失效；非管理员不见账号 tab。
 - Depends on：S2c。
 - Review attention：decision-dense（灰盒例外候选：认证是安全面）。
 
@@ -523,6 +524,11 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
 ## Next Step
+
+> 2026-11-17 更新。**S2c change A 已签收**（CK-15–CK-20 `通过`），change 已归档，跟进 issue #2002、#2004、#2011 均已关闭。
+> **S2c change B（`s2c-kb-visibility`）进入流水线**：可见范围四档、共享只读、跨账号检索审计、部门与项目组字段，并入 A 的种子 (a)(b)(c)(e)（owner 2026-11-17）。
+> 顺序：B 交付并签收后启动 S3a 与 S4a；S4a 保持串行，不与 B 并行（owner 2026-11-17）。S3a 前置决策「IdP 是否带组声明」已关闭：部署环境没有统一身份系统，S3a 改为本地账号与治理（ADR-0018）。
+> 下面 2026-11-13 一条里的「待 owner 签收」「change 尚未归档」均已过时，保留为历史。
 
 > 2026-11-13 更新。**S2c change A（`s2c-kb-session`）的实现全部合入**：Epic #1961 的组 1–10 均已合入（见上文 S2c 一节的清单），#1977 即本收口；change 尚未归档。
 > 1. **待 owner 签收**：验收清单「中心·知识库（CK）」的 CK-15、CK-16、CK-17、CK-18 为 `待签`，由 owner 执行，agent 不代签；签完 Epic #1961 才关。
