@@ -2,20 +2,28 @@ import type { DatabaseSync } from "node:sqlite";
 import type { FastifyInstance, onRequestHookHandler } from "fastify";
 import { query } from "../core/audit/index.js";
 import { HttpError } from "../core/errors/index.js";
+import { scopeOf } from "./scope.js";
 
-/** exact audit route 的最早响应策略：在 guard 与 handler 之前声明不可存储。 */
-const noStoreAuditResponse: onRequestHookHandler = (_request, reply, done) => {
+/** audit 与 scope 两条 exact route 的最早响应策略：在 guard 与 handler 之前声明不可存储。 */
+const noStoreResponse: onRequestHookHandler = (_request, reply, done) => {
   reply.header("Cache-Control", "no-store");
   done();
 };
 
 export function registerAccounts(app: FastifyInstance, { db }: { db: DatabaseSync }): void {
-  app.get("/api/audit", { onRequest: noStoreAuditResponse }, async (request) => {
+  app.get("/api/audit", { onRequest: noStoreResponse }, async (request) => {
     const principal = request.principal;
     if (principal === null) {
       throw new HttpError("unauthorized");
     }
     return { events: query(db, principal, parseAuditQuery(request.query)) };
+  });
+  app.get("/api/accounts/me/scope", { onRequest: noStoreResponse }, async (request) => {
+    const principal = request.principal;
+    if (principal === null) {
+      throw new HttpError("unauthorized");
+    }
+    return scopeOf(db, principal.id);
   });
 }
 

@@ -119,9 +119,13 @@ export function insertOrphanRow(
   }
 }
 
-/** 停用账号：disabled 状态迁移矩阵的唯一写入口。 */
+/** disabled 状态的写入口（停用与启用）。 */
 export function disableAccount(db: DatabaseSync, id: string): void {
   db.prepare("UPDATE accounts SET disabled = 1 WHERE id = ?").run(id);
+}
+
+export function enableAccount(db: DatabaseSync, id: string): void {
+  db.prepare("UPDATE accounts SET disabled = 0 WHERE id = ?").run(id);
 }
 
 export function row(id: string, userId: string, expiresAt: number | bigint): SessionRow {
