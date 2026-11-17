@@ -33,6 +33,7 @@ import { createRagflowClient, type Deadlines, perMinute } from "./ragflow-client
 import { createKbRebuilder, type KbRebuilder } from "./rebuild.js";
 import { registerKbRoutes } from "./rest.js";
 import { createKbRetrieval } from "./retrieval.js";
+import { createKbScope } from "./scope.js";
 import { createKbSessionSearch } from "./session-search.js";
 import { createKbSettings } from "./settings.js";
 import { createSourceFiles } from "./source-file.js";
@@ -122,6 +123,7 @@ export function registerKb(
   const audit = (event: Parameters<typeof emit>[1]): void => {
     emit(app.db, event);
   };
+  const scope = createKbScope({ db: app.db, audit });
   const pipeline = createKbPipeline({ client, log });
   const rebuild = createKbRebuilder({
     store,
@@ -155,6 +157,7 @@ export function registerKb(
       locks,
       visibility,
       compileStatus: createCompileStatus({ store, client, deadlineMs: compileStatusDeadlineMs }),
+      scope,
       audit,
     }),
     documents: createKbDocuments({

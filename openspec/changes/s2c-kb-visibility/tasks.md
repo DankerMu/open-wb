@@ -587,10 +587,10 @@ Minimal mergeable slice: atomic - 一个组件的一个分支，验证路径单�
 
 ## 11. 打开共享：范围端点与建库范围（knowledge-bases「知识库范围端点」「知识库端点」建库、「同一知识库的写操作串行」、「知识库审计」`kb.scope`；http-service-skeleton「统一错误信封」）
 
-- [ ] 11.1 核对 Context：`kb/bases.ts` 的建库判定与设置锁、`kb.create` 的 detail（`kb-bases.test.ts:161`）；`kb/rest.ts` 的路由注册与 body limit；`accounts/scope.ts` 的 `scopeOf`；`server/src/http/errors.ts:94-133` 的归属集与 `server/test/http-parser-owners.test.ts` 的计数
-- [ ] 11.2 测试先行：新文件 `server/test/kb-scope.test.ts` 覆盖「知识库范围端点」全部场景、「知识库端点」的「建库带范围」、「不可见与不存在不可区分」里 `PUT …/scope` 的两次；在 `kb-visibility.test.ts` 的「共享库的两级归属」补上 `PUT …/scope`（合法 body）对可见非所有者 403、范围不变、无 `kb.scope`、假 RAGFlow 零请求；「同一知识库的写操作串行」的「改范围不排队」；`kb-bases.test.ts:161` 与 `kb-bases-compile.test.ts:162` 的 `kb.create` detail 加 `scope`；`http-parser-owners.test.ts` 的归属集加 `PUT …/scope`、计数改为四十（畸形 JSON、空 JSON 与 `text/plain` 得 400）；`kb-disabled.test.ts` 的路由表加 `PUT …/scope`，恰十四条（ragflow-backend「知识库可用性」）
-- [ ] 11.3 实现新文件 `server/src/kb/scope.ts`（`PUT /api/kb/bases/:id/scope`：`ownedBase` → 形状 → 所有者条件（`scopeOf`）→ 相同不写 → 一条事务 `UPDATE` + `kb.scope`，0 行 404；不取写锁；应答的 `compile` 5 s 期限、失败为 `null`）；建库 body 加 `scope?` / `groupId?`，第 5 步复用同一个所有者条件函数；`errors.ts` 归属集加该路由
-- [ ] 11.4 验收清单：在 `docs/acceptance/functional-checklist.md` 的 CK 节加两行（`待签`）：
+- [x] 11.1 核对 Context：`kb/bases.ts` 的建库判定与设置锁、`kb.create` 的 detail（`kb-bases.test.ts:161`）；`kb/rest.ts` 的路由注册与 body limit；`accounts/scope.ts` 的 `scopeOf`；`server/src/http/errors.ts:94-133` 的归属集与 `server/test/http-parser-owners.test.ts` 的计数
+- [x] 11.2 测试先行：新文件 `server/test/kb-scope.test.ts` 覆盖「知识库范围端点」全部场景、「知识库端点」的「建库带范围」、「不可见与不存在不可区分」里 `PUT …/scope` 的两次；在 `kb-visibility.test.ts` 的「共享库的两级归属」补上 `PUT …/scope`（合法 body）对可见非所有者 403、范围不变、无 `kb.scope`、假 RAGFlow 零请求；「同一知识库的写操作串行」的「改范围不排队」；`kb-bases.test.ts:161` 与 `kb-bases-compile.test.ts:162` 的 `kb.create` detail 加 `scope`；`http-parser-owners.test.ts` 的归属集加 `PUT …/scope`、计数改为四十（畸形 JSON、空 JSON 与 `text/plain` 得 400）；`kb-disabled.test.ts` 的路由表加 `PUT …/scope`，恰十四条（ragflow-backend「知识库可用性」）
+- [x] 11.3 实现新文件 `server/src/kb/scope.ts`（`PUT /api/kb/bases/:id/scope`：`ownedBase` → 形状 → 所有者条件（`scopeOf`）→ 相同不写 → 一条事务 `UPDATE` + `kb.scope`，0 行 404；不取写锁；应答的 `compile` 5 s 期限、失败为 `null`）；建库 body 加 `scope?` / `groupId?`，第 5 步复用同一个所有者条件函数；`errors.ts` 归属集加该路由
+- [x] 11.4 验收清单：在 `docs/acceptance/functional-checklist.md` 的 CK 节加两行（`待签`）：
   - P2 里程碑：`zhangsan` 把「规范库」设为全员可见（组 12 合入前经 `PUT …/scope`，之后经范围对话框）后，`zhaoliu` 在会话里经「+ → 引用知识库…」选 `规范库（zhangsan）`，问一个只有该库能答的问题，回答带出处切片，检索卡显示该库；以 `lisi` 在浏览器打开 `/api/audit`，看到至少一条 `kb.shared_retrieval`，每条 `actorId` 为 `u2`（即 `zhaoliu`）、detail 的 `ownerId` 为 `u1`、不含问句。
   - 非所有者只读：`zhaoliu` 在中心「知识库」tab 看到该库带 `只读` 与「来自 zhangsan · 平台研发部」，没有删除、入库、上传、移出，文档来源不显示路径，检索测试可用但两个参数不可改。
   - 组 11 约定（#2037 fixture 审查补；11.2–11.4 照此实现与测试）：

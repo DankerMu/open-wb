@@ -14,6 +14,10 @@
  * `await`：`locks.ts` 的准入是同步的，到达次序就是调用次序（D20）。取锁后重判，排队期间库可能已删除或转入重建。每一代走
  * `deletePipeline`，`rebuild_failed` 时先删新一代；任一步失败行不动，重试从头走一遍，已删的按 `not_found` 跳过。
  *
+ * 范围（s2c-kb-visibility D3）：body 可带 `scope` / `groupId`，形状与所有者条件都在 `kb/scope.ts`，与改范围共用。形状在第 1 步，
+ * 所有者条件在锁内、数量上限之后、出站之前；插行之后在同一事务里写两列，`kb.create` 的 detail 带上范围。改范围（`setScope`）
+ * 不取写锁，应答的 `compile` 与列表同一个读取（同一期限）。
+ *
  * 列表是查看者可见的库（`kb/visibility.ts`，s2c-kb-visibility D2、D4），只依赖本地行；`compile` 只为自有库由
  * `kb/compile-status.ts` 现读（#1870），读不到为 `null`，不影响列表，非自有库恒为 `null`。201 的 `BaseView` 不读
  * RAGFlow：开着的类型为 `pending`，关着的为 `off`。
@@ -24,12 +28,13 @@ import type { CompileView, createCompileStatus } from "./compile-status.js";
 import type { createKbLocks } from "./locks.js";
 import { type createKbPipeline, type PipelineResources, resourceName } from "./pipeline.js";
 import { type createRagflowClient, isRecord } from "./ragflow-client.js";
+import { type createKbScope, parseScope } from "./scope.js";
 import { embeddingModelOf } from "./settings.js";
 import type { createKbStore, KnowledgeBase } from "./store.js";
 import { templateOf } from "./templates.js";
 import type { BaseAccess, createKbVisibility } from "./visibility.js";
 
-const BODY_KEYS = new Set(["name", "template", "raptor", "graph"]);
+const BODY_KEYS = new Set(["name", "template", "raptor", "graph", "scope", "groupId"]);
 const MAX_NAME_CODE_POINTS = 64;
 const MAX_BASES_PER_OWNER = 50;
 
@@ -60,6 +65,8 @@ interface KbBasesDependencies {
   visibility: Pick<ReturnType<typeof createKbVisibility>, "accessOf" | "visibleBases">;
   /** 列表的编译状态；由装配注入，`compile-status.ts` 经 `documents.ts` 间接依赖本文件。 */
   compileStatus: Pick<ReturnType<typeof createCompileStatus>, "read">;
+  /** 范围的所有者条件与写入（`kb/scope.ts`）。 */
+  scope: ReturnType<typeof createKbScope>;
   /** `core/audit` 的 `emit`，已绑定 DB。 */
   audit: (event: AuditEvent) => void;
 }
@@ -80,6 +87,7 @@ interface CreateRequest {
   parserId: string;
   raptor: boolean;
   graph: boolean;
+  scope: ReturnType<typeof parseScope>;
 }
 
 function badRequest(): never {
@@ -131,6 +139,7 @@ function parseCreate(body: unknown): CreateRequest {
     parserId: entry.parserId,
     raptor: raptor === true,
     graph: graph === true,
+    scope: parseScope(body),
   };
 }
 
@@ -206,7 +215,7 @@ const createdCompile = ({ raptor, graph }: KnowledgeBase): CompileView => ({
 });
 
 export function createKbBases(dependencies: KbBasesDependencies) {
-  const { store, pipeline, locks, visibility, compileStatus, audit } = dependencies;
+  const { store, pipeline, locks, visibility, compileStatus, scope, audit } = dependencies;
 
   function deletable(id: string, ownerId: string): KnowledgeBase {
     const { base } = ownedBase(visibility, id, ownerId);
@@ -240,6 +249,7 @@ export function createKbBases(dependencies: KbBasesDependencies) {
     if (store.countBasesByOwner(ownerId) >= MAX_BASES_PER_OWNER) {
       throw new HttpError("kb_limit");
     }
+    scope.assertQualified(ownerId, request.scope);
     const id = store.newId();
     const generationName = resourceName(id, embeddingGeneration);
     const embeddingModel = embeddingModelOf(embedding.name);
@@ -247,11 +257,12 @@ export function createKbBases(dependencies: KbBasesDependencies) {
     let base: KnowledgeBase;
     try {
       base = store.createBase({ id, ownerId, name, template, raptor, graph, ...resources }, () => {
+        scope.write(id, request.scope);
         audit({
           kind: "kb.create",
           actorId: ownerId,
           title: "新建知识库",
-          detail: { id, template, raptor, graph },
+          detail: { id, template, raptor, graph, scope: request.scope },
         });
       });
     } catch (error) {
@@ -306,6 +317,14 @@ export function createKbBases(dependencies: KbBasesDependencies) {
     /** 读路由的归属判定（不可见 404，可见即放行），先于 body 解析。 */
     assertReadable(id: string, viewerId: string): void {
       readableBase(visibility, id, viewerId);
+    },
+
+    /** `PUT /api/kb/bases/:id/scope`：不取写锁；本地读失败照常抛出（同列表），`compile` 读不到为 `null`。 */
+    async setScope(id: string, body: unknown, ownerId: string) {
+      scope.change(ownedBase(visibility, id, ownerId), body, ownerId);
+      const access = ownedBase(visibility, id, ownerId);
+      const [compile = null] = await compileStatus.read([access.base]);
+      return viewOf(access, store.countDocuments(id), compile);
     },
 
     /** `DELETE /api/kb/bases/:id`：在该库的写锁下。 */

@@ -159,7 +159,13 @@ describe("建库与列表隔离", () => {
       {
         actorId: ownerIdOf(world, view.id),
         title: expect.not.stringContaining("规范库"),
-        detail: { id: view.id, template: "manual", raptor: true, graph: false },
+        detail: {
+          id: view.id,
+          template: "manual",
+          raptor: true,
+          graph: false,
+          scope: { scope: "me", groupId: null },
+        },
         workspaceId: null,
       },
     ]);

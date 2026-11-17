@@ -2,7 +2,7 @@
  * s2c-kb-visibility 组 5（#2031）：可见判定与两级归属（knowledge-bases「可见范围判定」「知识库端点」）。
  *
  * 多账号世界：种子账号 u1（zhangsan，平台研发部）、u2（zhaoliu，数据部）、u3（lisi，管理员，产品部）与 g1（内网落地专项，
- * 成员 u1、u2），u4（wangwu，部门为空）按需带外启用。库行与范围列带外写入（组 11 之前没有改范围的路由）。期望值抄自规格与
+ * 成员 u1、u2），u4（wangwu，部门为空）按需带外启用。库行与范围列带外写入（组 11 之前没有改范围的路由；组 11 加了 `PUT …/scope`，这里照旧带外写）。期望值抄自规格与
  * tasks.md「组 5 约定」，一律写字面量。
  *
  * `GET …/documents` 与 `POST …/retrieval` 已由组 6、组 7 放开。
@@ -91,7 +91,7 @@ const documentsOf = (world: World, id: string, who: Who) =>
 
 type Send = (world: World, id: string) => Promise<LightMyRequestResponse>;
 
-/** 本刀七条 `:id` 路由，合法的请求，都由 peer（u2）发出。 */
+/** 八条 `:id` 路由（组 5 的七条加组 11 的 `PUT …/scope`），合法的请求，都由 peer（u2）发出。 */
 const VALID: Array<[string, Send]> = [
   ["GET 文档列表", (w, id) => documentsOf(w, id, "peer")],
   [
@@ -119,9 +119,13 @@ const VALID: Array<[string, Send]> = [
     (w, id) =>
       w.raw("POST", `${BASES}/${id}/uploads?name=a.md`, "abc", "application/octet-stream", "peer"),
   ],
+  [
+    "PUT 范围",
+    (w, id) => w.call("PUT", `${BASES}/${id}/scope`, "peer", { scope: "group", groupId: "g1" }),
+  ],
 ];
 
-/** 坏 body、空 `doc`、超 16 KiB、bodyless 带 `{}`、上传错媒体类型：所有者得 400 的五种请求。 */
+/** 坏 body、空 `doc`、超 16 KiB、bodyless 带 `{}`、上传错媒体类型、改范围坏 JSON：所有者得 400 的六种请求。 */
 const MALFORMED: Array<[string, Send]> = [
   [
     "POST 文档 坏 JSON",
@@ -146,6 +150,10 @@ const MALFORMED: Array<[string, Send]> = [
   [
     "POST 上传 text/plain",
     (w, id) => w.raw("POST", `${BASES}/${id}/uploads?name=a.md`, "abc", "text/plain", "peer"),
+  ],
+  [
+    "PUT 范围 坏 JSON",
+    (w, id) => w.raw("PUT", `${BASES}/${id}/scope`, "{not json", "application/json", "peer"),
   ],
 ];
 
@@ -305,7 +313,10 @@ describe("可见范围判定", () => {
         .filter(({ sql }) => sql.some((text) => pattern.test(text)))
         .map(({ name }) => name)
         .sort();
-    expect(filesWith(/\bscope(?:_group_id)?\b/)).toEqual(["kb/visibility.ts"]);
+    expect(filesWith(/\bscope(?:_group_id)?\b/)).toEqual(["kb/scope.ts", "kb/visibility.ts"]);
+    expect(
+      literals.find(({ name }) => name === "kb/scope.ts")?.sql.map((text) => text.slice(1, -1)),
+    ).toEqual(["UPDATE knowledge_bases SET scope = ?, scope_group_id = ? WHERE id = ?"]);
     expect(filesWith(/\bproject_group_members\b/)).toEqual([
       "accounts/scope.ts",
       "kb/visibility.ts",
@@ -315,7 +326,7 @@ describe("可见范围判定", () => {
 });
 
 describe("知识库端点：两级归属", () => {
-  it("共享库的两级归属：可见的非所有者五条写路由 403、文档列表与检索测试 200，写路由零写入", async () => {
+  it("共享库的两级归属：可见的非所有者六条写路由 403、文档列表与检索测试 200，写路由零写入", async () => {
     const world = await ready();
     const id = sharedWorld(world, "all");
     const ds = world.fake.addDataset();

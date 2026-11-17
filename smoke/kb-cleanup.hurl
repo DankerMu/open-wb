@@ -6,6 +6,8 @@
 # 名称在同一所有者下唯一（server/src/kb/bases.ts `isBaseNameTaken`），每个名字至多一个库。Hurl 没有条件分支：先由库列表
 # 的原始正文算出「不在」标志（`"name":"<名>"` 出现即在；名字后紧跟引号，`smoke-kb` 不会命中 `smoke-kb-compile`），
 # 再以它作为后两步的 `skip`，取 id 与删除只在库存在时执行。`DELETE /api/kb/bases/:id` → 204（server/src/kb/rest.ts）。
+# 列表含别人共享来的库（s2c-kb-visibility），取 id 与末尾断言都按所有者 `zhangsan` 过滤：若可见的他人同名库存在而 zhangsan
+# 的不在，「不在」标志为假、取 id 取不到值，清理失败（Makefile 里清理的失败不改变退出码），也删不到别人的库。
 
 # 登录：同 smoke/chat.hurl。
 POST {{base_url}}/api/auth/login
@@ -29,7 +31,7 @@ GET {{base_url}}/api/kb/bases
 skip: {{kb_absent}}
 HTTP 200
 [Captures]
-kb_id: jsonpath "$.bases[?(@.name=='smoke-kb')].id"
+kb_id: jsonpath "$.bases[?(@.owner.account=='zhangsan' && @.name=='smoke-kb')].id"
 
 DELETE {{base_url}}/api/kb/bases/{{kb_id}}
 [Options]
@@ -42,7 +44,7 @@ GET {{base_url}}/api/kb/bases
 skip: {{compile_absent}}
 HTTP 200
 [Captures]
-compile_id: jsonpath "$.bases[?(@.name=='smoke-kb-compile')].id"
+compile_id: jsonpath "$.bases[?(@.owner.account=='zhangsan' && @.name=='smoke-kb-compile')].id"
 
 DELETE {{base_url}}/api/kb/bases/{{compile_id}}
 [Options]
@@ -53,7 +55,8 @@ HTTP 204
 GET {{base_url}}/api/kb/bases
 HTTP 200
 [Asserts]
-jsonpath "$.bases[?(@.name=='smoke-kb' || @.name=='smoke-kb-compile')]" not exists
+jsonpath "$.bases[?(@.owner.account=='zhangsan' && @.name=='smoke-kb')]" not exists
+jsonpath "$.bases[?(@.owner.account=='zhangsan' && @.name=='smoke-kb-compile')]" not exists
 
 # 登出。
 POST {{base_url}}/api/auth/logout
