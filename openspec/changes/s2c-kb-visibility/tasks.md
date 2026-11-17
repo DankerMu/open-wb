@@ -81,11 +81,11 @@ Minimal mergeable slice: atomic - 一条判定一组用例。
 ## 5. 可见判定与两级归属（knowledge-bases「可见范围判定」「知识库端点」）
 
 - [ ] 5.1 核对 Context：`server/src/kb/bases.ts:89-99` 的 `ownedBase`、`:283-284` 的 `assertOwned`（`rest.ts:195` 钩子实际调用的入口）与处理函数里的复核点（`documents.ts:364,374,396,635`、`uploads.ts:249,267`、`retrieval.ts:186,196`、`bases.ts:200`）；`kb/store.ts:158,323` 的 `listBases`；列表的编译状态读取；`web/src/lib/api-kb.ts:212` 的 `BASE_KEYS`；web 夹具 `web/test/center-kb-support.tsx`、`chat-kb-ref-support.tsx`、`api-kb-retrieval.test.ts:36`；ui-walk 桩 `web/e2e/ui-walk-center-kb.ts:46-57`
-- [ ] 5.2 测试先行（server）：新文件 `server/test/kb-visibility.test.ts`，在假 RAGFlow 上用种子账号与 g1 搭多账号世界（库的范围带外写列；u4 按需带外启用），覆盖「可见范围判定」全部场景（含「只有一处可见判定」的扫描）、「知识库端点」的「403 先于 body」「不可见与不存在不可区分」（`PUT …/scope` 那两次在组 11 加）、「列表的可见集合、次序与非自有的编译状态」，以及「共享库的两级归属」的写路由 403 部分。本刀里 `GET …/documents` 与 `POST …/retrieval` 对可见非所有者仍为 403（组 6、组 7 放开，用例按本刀行为写、由它们原地改）
+- [ ] 5.2 测试先行（server）：新文件 `server/test/kb-visibility.test.ts`，在假 RAGFlow 上用种子账号与 g1 搭多账号世界（库的范围带外写列；u4 按需带外启用），覆盖「可见范围判定」全部场景（含「只有一处可见判定」的扫描）、「知识库端点」的「403 先于 body」「不可见与不存在不可区分」（`PUT …/scope` 那两次在组 11 加）、「列表的可见集合、次序与非自有的编译状态」，以及「共享库的两级归属」的写路由 403 部分（`PUT …/scope` 的 403 在组 11 加：路由到那时才注册）。本刀里 `GET …/documents` 与 `POST …/retrieval` 对可见非所有者仍为 403（组 6、组 7 放开，用例按本刀行为写、由它们原地改）
 - [ ] 5.3 测试先行（web）：新文件 `web/test/api-kb-visibility.test.ts`：`BaseView` 三键的严格解析（多键、缺键、`scope` 越界、`owner.department` 非字符串非 null 即 `requestFailed`）
-- [ ] 5.4 实现新文件 `server/src/kb/visibility.ts`（design D2：一条 SQL 的 `visibleBases(viewerId)` 与 `accessOf(id, viewerId)`）；`ownedBase` 原地改为两级（`readableBase` / `ownedBase`），`assertOwned` 拆读写两个入口，不留旧函数；本刀全部 `:id` 路由仍用 `ownedBase`；列表改为可见集合与 D2 次序，编译状态只为自有库读；`BaseView` 加 `owned`、`owner`、`scope`
+- [ ] 5.4 实现新文件 `server/src/kb/visibility.ts`（design D2：一条 SQL 的 `visibleBases(viewerId)` 与 `accessOf(id, viewerId)`；列表改经它取可见集合，`kb/store.ts` 不加读 `scope` 列的 SQL）；`ownedBase` 原地改为两级（`readableBase` / `ownedBase`），`assertOwned` 拆读写两个入口，不留旧函数；本刀全部 `:id` 路由仍用 `ownedBase`；列表改为可见集合与 D2 次序，编译状态只为自有库读；`BaseView` 加 `owned`、`owner`、`scope`
 - [ ] 5.5 原地改精确形状断言：`kb-bases-list.test.ts:18-30`、`kb-bases.test.ts:141-153`、`kb-bases-compile.test.ts:188`
-- [ ] 5.6 实现（web）：`api-kb.ts` 的类型与解析器加三键；web 夹具与 `api-kb-retrieval.test.ts:36` 补三键；ui-walk 的 `BASE` 按 `owned:true` 自有库补三键；本刀不改任何组件；本机 `make ui-walk` 全绿，PR 附命令与退出码
+- [ ] 5.6 实现（web）：`api-kb.ts` 的类型与解析器加三键；web 夹具、`api-kb.test.ts:77` 的 typed `BASE` 与 `api-kb-retrieval.test.ts:36` 补三键；ui-walk 的 `BASE`（`ui-walk-center-kb.ts:46-57`，`ui-walk-chat-kb.ts` 展开复用它）按 `owned:true` 自有库补三键；本刀不改任何组件；本机 `make ui-walk` 全绿，PR 附命令与退出码
 
 Suggested fixture level: expanded - 多租户过滤的唯一判定点（灰盒例外候选）、不可探测性、跨服务严格解析。
 Minimal mergeable slice: atomic - 可见判定、两级归属、列表与 `BaseView`（含 web 解析器与 ui-walk 桩）合起来才是可独立验证的「谁能看见哪些库」，且跨服务契约要求同 PR；读面的放开（组 6、组 7）已经各自拆出。
@@ -112,7 +112,7 @@ Minimal mergeable slice: atomic - 放开检索测试与写共享审计必须同�
 
 - [ ] 8.1 核对 Context：`server/src/kb/session-search.ts` 的文件头契约（:6「三个函数都经 `listBases(ownerId)` 读一次」）、`ownedBases`（:134，被 `execute` 与 `resolveReferences` 共用）、`definitionFor`、`execute`；`server/src/app.ts:351` 的注入与 `sessions/store-knowledge-bases.ts:18` 的注释
 - [ ] 8.2 测试先行：在 `kb-session-search.test.ts` 加「可见的共享库进清单并被检索」「只有共享库的账号」「共享审计写失败只影响该库」「已中止的信号不写共享审计」；新文件 `server/test/kb-shared-audit.test.ts` 完整覆盖「共享检索审计不含问句」（检索测试与 `kb_search` 合计恰两条；u1 经 `GET /api/audit` 看不到、u3 看得到）；新文件 `server/test/prompt-knowledge-bases-shared.test.ts` 覆盖「引用共享给自己的库」
-- [ ] 8.3 实现：三个函数共用一次 `visibleBases(viewer)`，原地替换 `ownedBases`（文件头契约同改）；可见的库一个都没有时没有定义；非自有库描述行附所有者账号；非自有 `ready` 库先查中止信号、再调 `auditSharedRetrieval`、再检索；`resolveReferences` 存受理那一刻的名称
+- [ ] 8.3 实现：三个函数共用一次 `visibleBases(viewer)`，原地替换 `ownedBases`（文件头契约同改）；可见的库一个都没有时没有定义；非自有库描述行附所有者账号；非自有 `ready` 库先查中止信号、再调 `auditSharedRetrieval`、再检索；`resolveReferences` 存受理那一刻的名称；`store.listBases`（`kb/store.ts:158,322-323`）此后若只剩测试在用，在本组内删除它与 `SELECT_BASES_BY_OWNER` 及其用例（AGENTS.md：无引用导出同一变更内删除）
 
 Suggested fixture level: expanded - 给模型的工具描述、跨账号审计、不可探测性、引用受理的权限判定。
 Minimal mergeable slice: atomic - 定义、执行与引用解析共用同一次可见集合读取（Code Canonicality：不得让同一文件里新旧两份读取并存），验证路径是同一组 `createKbSessionSearch` 与 prompt 路由用例。
@@ -138,7 +138,7 @@ Minimal mergeable slice: atomic - 一个组件的一个分支，验证路径单�
 ## 11. 打开共享：范围端点与建库范围（knowledge-bases「知识库范围端点」「知识库端点」建库、「同一知识库的写操作串行」、「知识库审计」`kb.scope`；http-service-skeleton「统一错误信封」）
 
 - [ ] 11.1 核对 Context：`kb/bases.ts` 的建库判定与设置锁、`kb.create` 的 detail（`kb-bases.test.ts:161`）；`kb/rest.ts` 的路由注册与 body limit；`accounts/scope.ts` 的 `scopeOf`；`server/src/http/errors.ts:94-133` 的归属集与 `server/test/http-parser-owners.test.ts` 的计数
-- [ ] 11.2 测试先行：新文件 `server/test/kb-scope.test.ts` 覆盖「知识库范围端点」全部场景、「知识库端点」的「建库带范围」、「不可见与不存在不可区分」里 `PUT …/scope` 的两次、「同一知识库的写操作串行」的「改范围不排队」；`kb-bases.test.ts:161` 的 `kb.create` detail 加 `scope`；`http-parser-owners.test.ts` 的归属集加 `PUT …/scope`、计数改为四十（畸形 JSON 与 `text/plain` 得 400）
+- [ ] 11.2 测试先行：新文件 `server/test/kb-scope.test.ts` 覆盖「知识库范围端点」全部场景、「知识库端点」的「建库带范围」、「不可见与不存在不可区分」里 `PUT …/scope` 的两次；在 `kb-visibility.test.ts` 的「共享库的两级归属」补上 `PUT …/scope`（合法 body）对可见非所有者 403、范围不变、无 `kb.scope`、假 RAGFlow 零请求；「同一知识库的写操作串行」的「改范围不排队」；`kb-bases.test.ts:161` 的 `kb.create` detail 加 `scope`；`http-parser-owners.test.ts` 的归属集加 `PUT …/scope`、计数改为四十（畸形 JSON 与 `text/plain` 得 400）
 - [ ] 11.3 实现新文件 `server/src/kb/scope.ts`（`PUT /api/kb/bases/:id/scope`：`ownedBase` → 形状 → 所有者条件（`scopeOf`）→ 相同不写 → 一条事务 `UPDATE` + `kb.scope`，0 行 404；不取写锁；应答的 `compile` 5 s 期限、失败为 `null`）；建库 body 加 `scope?` / `groupId?`，第 5 步复用同一个所有者条件函数；`errors.ts` 归属集加该路由
 - [ ] 11.4 验收清单：在 `docs/acceptance/functional-checklist.md` 的 CK 节加两行（`待签`）：
   - P2 里程碑：`zhangsan` 把「规范库」设为全员可见（组 12 合入前经 `PUT …/scope`，之后经范围对话框）后，`zhaoliu` 在会话里经「+ → 引用知识库…」选 `规范库（zhangsan）`，问一个只有该库能答的问题，回答带出处切片，检索卡显示该库；以 `lisi` 在浏览器打开 `/api/audit`，看到至少一条 `kb.shared_retrieval`，每条 actor 为 `zhaoliu`、detail 的 `ownerId` 为 `u1`、不含问句。
@@ -150,7 +150,7 @@ Minimal mergeable slice: atomic - 建库与改范围共用同一个形状与所�
 ## 12. web：范围对话框与新建范围（knowledge-bases「中心「知识库」tab」范围部分；account-groups「账号范围端点」的 web 客户端）
 
 - [ ] 12.1 核对 Context：`web/src/lib/api.ts`（691 行）的审计客户端写法；`getMyScope` 放新文件 `web/src/lib/api-accounts.ts` 并由 `api.ts` 导出；`create-dialog.tsx`；demo :2737-2742、:3058-3092、:3010-3019
-- [ ] 12.2 测试先行：新文件 `web/test/api-kb-scope.test.ts`：`getMyScope` 的严格解析（含 `memberCount`）、`setKnowledgeBaseScope` 与 `createKnowledgeBase` 的 `scope` 参数；新文件 `web/test/center-kb-scope.test.tsx`：「范围对话框」「没有部门与没有项目组」「当前档已不可选」「新建时设范围」「新建对话框取不到范围」与对话框的保存失败态
+- [ ] 12.2 测试先行：新文件 `web/test/api-kb-scope.test.ts`：`getMyScope` 的严格解析（含 `memberCount`）、`setKnowledgeBaseScope` 与 `createKnowledgeBase` 的 `scope` 参数；新文件 `web/test/center-kb-scope.test.tsx`：「范围对话框」「没有部门与没有项目组」「当前档已不可选」「新建时设范围」「新建对话框取不到范围」、范围对话框 `getMyScope` 失败（四档与 `保存` 全部禁用、有 `role="alert"`、`setKnowledgeBaseScope` 零次，与新建对话框只留 `仅自己可见` 不同）与对话框的保存失败态
 - [ ] 12.3 实现新文件 `web/src/features/center/kb/scope-dialog.tsx`（四档、预选、组下拉带人数、无组提示、部门空禁用、demo 逐字文案）；列表与详情的自有库范围标签改为按钮；新建对话框内嵌同一组控件
 - [ ] 12.4 验收清单：CK 节加一行（`待签`）：`zhangsan` 在中心「知识库」tab 把一个库依次设为「项目组可见 · 内网落地专项」与「全员可见」，`zhaoliu` 刷新后两次都能看到，`lisi` 只在全员可见时看到；再设为「本部门可见」，`zhaoliu`、`lisi` 都看不到（种子里没有与 `zhangsan` 同部门的可登录账号，正向只由 server 单测覆盖）；`lisi` 在浏览器打开 `/api/audit` 看到 `zhangsan` 的三条 `kb.scope`（before → after）。部门为空时 `本部门可见` 置灰只由 12.2 的 web 单测覆盖：种子里唯一没有部门的 `wangwu` 已停用、无法登录
 

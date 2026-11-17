@@ -70,7 +70,7 @@ A 收口时还留下五个种子（IMPLEMENTATION_PLAN「Next Step」2026-11-13�
 
 - **server**：
   - 新文件：`server/src/core/db/migrations/053_kb_visibility.sql`、`server/src/accounts/scope.ts`（部门与项目组的读取与端点）、`server/src/kb/visibility.ts`（可见判定与两级归属）、`server/src/kb/scope.ts`（范围端点）、`server/src/kb/shared-audit.ts`（`kb.shared_retrieval`）。
-  - 改动：`kb/bases.ts`（`ownedBase` 换成两级判定、建库范围、`BaseView`）、`kb/rest.ts`（preParsing 钩子分读写、注册范围路由）、`kb/store.ts`（可见列表 SQL、范围写入）、`kb/documents.ts`（非所有者形态）、`kb/retrieval.ts`（读写拆开、审计）、`kb/retrieval.ts` 与 `kb/ragflow-retrieval.ts`（关联之后截断，导出 `PAGE_SIZE`）、`kb/session-search.ts`（可见集合、(a)(b)、审计）、`sessions/store-knowledge-bases.ts` 与 `sessions/rest.ts`（内置命令带引用）、`accounts/index.ts`（注册端点）、`http/errors.ts`（content-parser 归属集加 `PUT …/scope`）；`app.ts` 预期不改。
+  - 改动：`kb/bases.ts`（`ownedBase` 换成两级判定、建库范围、`BaseView`）、`kb/rest.ts`（preParsing 钩子分读写、注册范围路由）、`kb/store.ts`（范围写入；可见列表的 SQL 只在 `kb/visibility.ts`，`listBases` 无调用者后删除）、`kb/documents.ts`（非所有者形态）、`kb/retrieval.ts`（读写拆开、审计）、`kb/retrieval.ts` 与 `kb/ragflow-retrieval.ts`（关联之后截断，导出 `PAGE_SIZE`）、`kb/session-search.ts`（可见集合、(a)(b)、审计）、`sessions/store-knowledge-bases.ts` 与 `sessions/rest.ts`（内置命令带引用）、`accounts/index.ts`（注册端点）、`http/errors.ts`（content-parser 归属集加 `PUT …/scope`）；`app.ts` 预期不改。
 - **web**：`lib/api-kb.ts`（`BaseView` 三键、`setKnowledgeBaseScope`）、新 `lib/api-accounts.ts` 或并入既有客户端（`getMyScope`）、`features/center/kb/`（list、detail、create-dialog、documents-table、retrieval-panel，新 `scope-dialog.tsx`）、`features/chat/kb-ref-picker.tsx`；顺带纠正 `features/chat/turn-actions.ts:67` 的注释漂移。
 - **测试与走查**：`server/test/` 新增多账号可见性、范围端点、共享审计、迁移 053 用例；既有归属用例（「文档路由的所有权」）按两级判定改写；`web/test/` 对应组件；`web/e2e/ui-walk-center-kb.ts`。
 - **不受影响**：omp 子进程治理（`kb_search` 的注册与协议不变，只是库清单变长）、RAGFlow 出站形状（除截断外）、CI 文件。
