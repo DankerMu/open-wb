@@ -20,6 +20,7 @@ import { KB_UNAVAILABLE } from "./kb-settings-helpers.js";
 import { holdWriteLock } from "./kb-upload-helpers.js";
 import { OWNER } from "./mounts-manager-helpers.js";
 import { auditRows, padded, send } from "./mounts-rest-helpers.js";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 const open = useIngestWorlds();
 
@@ -202,18 +203,23 @@ describe("参数变了先写回", () => {
 
   it("含哨兵问句的写回：审计的 title 与 detail、受管 stderr 记录、stdout 与 stderr 都不含哨兵", async () => {
     const world = await open();
-    const stderr = vi.spyOn(process.stderr, "write");
-    const stdout = vi.spyOn(process.stdout, "write");
-    const question = `季度 ${SENTINEL} 的口径`;
-    expect((await post(world, { ...CHANGED, question })).statusCode).toBe(200);
-    expect(retrievals(world)).toEqual([expect.objectContaining({ question })]);
-    const audits = world.audits(KIND);
-    expect(audits).toHaveLength(1);
-    expect(Object.keys(audits[0]?.detail ?? {}).sort()).toEqual(["after", "before", "id"]);
-    expect(JSON.stringify(audits)).not.toContain(SENTINEL);
-    expect(JSON.stringify(world.logged)).not.toContain(SENTINEL);
-    const written = [...stderr.mock.calls, ...stdout.mock.calls].map((args) => String(args[0]));
-    expect(written.join("")).not.toContain(SENTINEL);
+    // 套在 `useIngestWorlds` 的收集器里面：内层只读自己 start 之后的调用，不恢复外层的 spy。
+    const output = outputCollector();
+    output.start();
+    let text = "";
+    try {
+      const question = `季度 ${SENTINEL} 的口径`;
+      expect((await post(world, { ...CHANGED, question })).statusCode).toBe(200);
+      expect(retrievals(world)).toEqual([expect.objectContaining({ question })]);
+      const audits = world.audits(KIND);
+      expect(audits).toHaveLength(1);
+      expect(Object.keys(audits[0]?.detail ?? {}).sort()).toEqual(["after", "before", "id"]);
+      expect(JSON.stringify(audits)).not.toContain(SENTINEL);
+      expect(JSON.stringify(world.logged)).not.toContain(SENTINEL);
+    } finally {
+      text = output.stop();
+    }
+    expectNoSentinel(text, [SENTINEL]);
   });
 });
 

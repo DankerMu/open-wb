@@ -4,10 +4,11 @@
  * 传输层的期限、上传与下载在 `kb-ragflow-client-transfer.test.ts`。
  */
 import { Readable } from "node:stream";
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRagflowClient } from "../src/kb/ragflow-client.js";
 import { closedPort, holdServer, scriptedServer } from "./models-probe-helpers.js";
 import { type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 const KEY = "wb-issue1840-ragflow-key";
 const UPSTREAM_KEY = "wb-issue1840-upstream-key";
@@ -37,7 +38,7 @@ let fake: FakeRagflowServer;
 let client: Client;
 let logged: unknown[];
 let clock: number;
-let stderr: MockInstance<typeof process.stderr.write>;
+const output = outputCollector();
 
 function clientOf(baseUrl: string, deadlines: Record<string, number> = {}): Client {
   return createRagflowClient({
@@ -65,12 +66,12 @@ beforeEach(async () => {
   fake = await start({ apiKey: KEY });
   logged = [];
   clock = 1_000_000;
-  stderr = vi.spyOn(process.stderr, "write");
+  output.start();
   client = clientOf(fake.baseUrl);
 });
 
 afterEach(async () => {
-  stderr.mockRestore();
+  output.stop();
   try {
     expect(fake.unknownRoutes()).toEqual([]);
   } finally {
@@ -752,14 +753,17 @@ describe("RAGFlow 的 message 不外泄", () => {
   ];
 
   it.each(rows)("%s：结果对象、日志与 stderr 都没有哨兵与 key", async (_label, arrange, invoke) => {
-    arrange();
-    const result = await invoke();
-    expect(JSON.stringify(result)).not.toContain(SENTINEL);
-    expect(JSON.stringify(logged)).not.toContain(SENTINEL);
-    expect(JSON.stringify(logged)).not.toContain(KEY);
-    const written = stderr.mock.calls.map(([chunk]) => String(chunk)).join("");
-    expect(written).not.toContain(SENTINEL);
-    expect(written).not.toContain(KEY);
+    let written = "";
+    try {
+      arrange();
+      const result = await invoke();
+      expect(JSON.stringify(result)).not.toContain(SENTINEL);
+      expect(JSON.stringify(logged)).not.toContain(SENTINEL);
+      expect(JSON.stringify(logged)).not.toContain(KEY);
+    } finally {
+      written = output.stop();
+    }
+    expectNoSentinel(written, [SENTINEL, KEY]);
   });
 
   it("结果只有 kind，失败不带原始 code 与 message", async () => {

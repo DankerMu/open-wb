@@ -3,9 +3,10 @@
  * `POST /retrieval` 一行与「检索失败的映射」，design D2、D3）。请求形状是 D2 的字面量，应答是实测记录续篇 §19.1、§19.4 的
  * 字面量，映射是 spec 的通用五条加检索的路由专属组合；不从 `src/` 取期望值。
  */
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createRagflowClient } from "../src/kb/ragflow-client.js";
 import { type FakeRagflowServer, start } from "./support/fake-ragflow.mjs";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 const KEY = "wb-issue1913-client-key";
 const SENTINEL = "wb-issue1913-message-sentinel";
@@ -22,7 +23,7 @@ let fake: FakeRagflowServer;
 let client: Client;
 let dataset: string;
 let logged: unknown[];
-let stderr: MockInstance<typeof process.stderr.write>;
+const output = outputCollector();
 
 function clientOf(deadlines: Record<string, number> = {}): Client {
   return createRagflowClient({
@@ -39,12 +40,12 @@ beforeEach(async () => {
   fake = await start({ apiKey: KEY });
   dataset = fake.addDataset();
   logged = [];
-  stderr = vi.spyOn(process.stderr, "write");
+  output.start();
   client = clientOf();
 });
 
 afterEach(async () => {
-  stderr.mockRestore();
+  output.stop();
   try {
     expect(fake.unknownRoutes()).toEqual([]);
   } finally {
@@ -214,13 +215,18 @@ describe("RAGFlow 的 message 不进结果与 stderr（凭证泄露）", () => {
       {},
     ],
   ])("%s：结果、日志与 stderr 都没有哨兵与 key", async (_label, arrange, extra) => {
-    arrange();
-    const result = await client.retrieve(query(extra));
-    expect(result.kind).not.toBe("ok");
-    const written = stderr.mock.calls.map(([chunk]) => String(chunk)).join("");
-    for (const text of [JSON.stringify(result), JSON.stringify(logged), written]) {
-      expect(text).not.toContain(SENTINEL);
-      expect(text).not.toContain(KEY);
+    let written = "";
+    try {
+      arrange();
+      const result = await client.retrieve(query(extra));
+      expect(result.kind).not.toBe("ok");
+      for (const text of [JSON.stringify(result), JSON.stringify(logged)]) {
+        expect(text).not.toContain(SENTINEL);
+        expect(text).not.toContain(KEY);
+      }
+    } finally {
+      written = output.stop();
     }
+    expectNoSentinel(written, [SENTINEL, KEY]);
   });
 });

@@ -131,21 +131,25 @@ export function useIngestWorlds(): OpenWorld {
     output.start();
   });
   afterEach(async () => {
+    // 收尾检查失败或关闭抛错时，世界照样关闭、spy 照样恢复（#2021）。
     try {
-      for (const fake of fakes) {
-        const requests = fake.requests();
-        expect(fake.unknownRoutes()).toEqual([]);
-        expect(
-          requests.filter(({ bearer, path }) =>
-            path === VERSION_PATH ? bearer !== "missing" : bearer !== "ok",
-          ),
-        ).toEqual([]);
-        expectDefaultNeverCleared(requests);
+      try {
+        for (const fake of fakes) {
+          const requests = fake.requests();
+          expect(fake.unknownRoutes()).toEqual([]);
+          expect(
+            requests.filter(({ bearer, path }) =>
+              path === VERSION_PATH ? bearer !== "missing" : bearer !== "ok",
+            ),
+          ).toEqual([]);
+          expectDefaultNeverCleared(requests);
+        }
+      } finally {
+        await closeApps();
+        await disposeWorlds();
+        for (const fake of fakes.splice(0)) await fake.close();
       }
     } finally {
-      await closeApps();
-      await disposeWorlds();
-      for (const fake of fakes.splice(0)) await fake.close();
       expectNoSentinel(output.stop(), [CONTENT_SENTINEL, MESSAGE_SENTINEL]);
     }
   });

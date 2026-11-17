@@ -31,6 +31,7 @@ import {
   UNAUTHORIZED_ENVELOPE,
 } from "./session-db-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 import { seedTemporaryWorkspaceSession } from "./support/temporary-workspace.js";
 import { insertWorkspace, withWorkspacesApp } from "./workspaces-http-helpers.js";
 
@@ -530,50 +531,51 @@ describe("preview-token: 归属与请求体", () => {
 
 describe("preview-token: 令牌不外泄", () => {
   it("keeps the token and the embedding origin out of every response header, log sink and audit row", async () => {
-    const stdout = vi.spyOn(process.stdout, "write");
-    const stderr = vi.spyOn(process.stderr, "write");
-    const consoles = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
-      vi.spyOn(console, method),
-    );
+    const output = outputCollector();
+    output.start();
     const sinks = { log: vi.fn(), warn: vi.fn(), onError: vi.fn() };
     const embedOrigin = "http://embed-marker.example.test:3000";
-    await withPreviewWorld(
-      async ({ app, db, zhangsan, lisi }) => {
-        const issued = await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin });
-        const { token } = issuedOf(issued);
-        const responses = [
-          issued,
-          await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin }),
-          await issueToken(app, WORKSPACE, lisi, { origin: embedOrigin }),
-          await issueToken(app, WORKSPACE, null, { origin: embedOrigin }),
-          await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin }, INJECT_BODIES[0]),
-          await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin, host: ":3000" }),
-        ];
-        expect(responses.map((response) => response.statusCode)).toEqual([
-          200, 200, 404, 401, 400, 400,
-        ]);
+    let token = "";
+    let written = "";
+    try {
+      await withPreviewWorld(
+        async ({ app, db, zhangsan, lisi }) => {
+          const issued = await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin });
+          ({ token } = issuedOf(issued));
+          const responses = [
+            issued,
+            await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin }),
+            await issueToken(app, WORKSPACE, lisi, { origin: embedOrigin }),
+            await issueToken(app, WORKSPACE, null, { origin: embedOrigin }),
+            await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin }, INJECT_BODIES[0]),
+            await issueToken(app, WORKSPACE, zhangsan, { origin: embedOrigin, host: ":3000" }),
+          ];
+          expect(responses.map((response) => response.statusCode)).toEqual([
+            200, 200, 404, 401, 400, 400,
+          ]);
 
-        const headerText = responses.map((response) => JSON.stringify(response.headers)).join("\n");
-        const written = [...stdout.mock.calls, ...stderr.mock.calls]
-          .map(([chunk]) => (typeof chunk === "string" ? chunk : Buffer.from(chunk).toString()))
-          .join("\n");
-        const sunk = JSON.stringify(
-          [...Object.values(sinks), ...consoles].map((sink) => sink.mock.calls),
-        );
-        const audited = JSON.stringify(db.prepare("SELECT * FROM audit_events").all());
-        for (const text of [headerText, written, sunk, audited]) {
-          expect(text).not.toContain(token);
-          expect(text).not.toContain(embedOrigin);
-        }
-        // Outside the two 200 bodies the token is in no response body either.
-        for (const response of responses.slice(2)) {
-          expect(response.payload).not.toContain(token);
-        }
-        expect(sinks.onError).not.toHaveBeenCalled();
-      },
-      {},
-      sinks,
-    );
+          const headerText = responses
+            .map((response) => JSON.stringify(response.headers))
+            .join("\n");
+          const sunk = JSON.stringify(Object.values(sinks).map((sink) => sink.mock.calls));
+          const audited = JSON.stringify(db.prepare("SELECT * FROM audit_events").all());
+          for (const text of [headerText, sunk, audited]) {
+            expect(text).not.toContain(token);
+            expect(text).not.toContain(embedOrigin);
+          }
+          // Outside the two 200 bodies the token is in no response body either.
+          for (const response of responses.slice(2)) {
+            expect(response.payload).not.toContain(token);
+          }
+          expect(sinks.onError).not.toHaveBeenCalled();
+        },
+        {},
+        sinks,
+      );
+    } finally {
+      written = output.stop();
+    }
+    expectNoSentinel(written, [token, embedOrigin]);
   });
 });
 

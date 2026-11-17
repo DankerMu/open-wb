@@ -29,6 +29,7 @@ import {
   type FakeChild,
 } from "./support/omp-rpc.js";
 import { captureStdinFrames } from "./support/omp-runtime.js";
+import { expectNoSentinel, outputCollector } from "./support/output-sentinel.js";
 
 const FAKE = fileURLToPath(new URL("./support/fake-omp.mjs", import.meta.url));
 const TOKEN = "wb-issue1964-secret-token";
@@ -403,21 +404,24 @@ describe("omp-runtime「宿主工具协议」: 未知工具与失败", () => {
   ];
   for (const [name, answer] of failing) {
     it(`${name} is answered isError 工具执行失败 and the message leaks nowhere`, REAL, async () => {
-      const stderr = vi.spyOn(process.stderr, "write");
-      const consoles = (["log", "info", "warn", "error", "debug"] as const).map((method) =>
-        vi.spyOn(console, method),
-      );
-      const run = await start("host-tool", recording(answer).tools);
-      await prompt(run);
-      await terminal(run);
+      const output = outputCollector();
+      output.start();
+      let written = "";
+      try {
+        const run = await start("host-tool", recording(answer).tools);
+        await prompt(run);
+        await terminal(run);
 
-      expect(results(run)).toStrictEqual([
-        reply("h1", "工具执行失败", true),
-        reply("h2", "工具执行失败", true),
-      ]);
-      expect(run.errors).toEqual([]);
-      const seen = [run.writes, ...[stderr, ...consoles].map((spy) => spy.mock.calls)];
-      expect(JSON.stringify(seen)).not.toContain(SENTINEL);
+        expect(results(run)).toStrictEqual([
+          reply("h1", "工具执行失败", true),
+          reply("h2", "工具执行失败", true),
+        ]);
+        expect(run.errors).toEqual([]);
+        expect(JSON.stringify(run.writes)).not.toContain(SENTINEL);
+      } finally {
+        written = output.stop();
+      }
+      expectNoSentinel(written, [SENTINEL]);
     });
   }
 
