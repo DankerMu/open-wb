@@ -496,9 +496,9 @@ Minimal mergeable slice: atomic - 定义、执行与引用解析共用同一次�
 
 ## 9. web：共享库的只读呈现（knowledge-bases「中心「知识库」tab」非所有者部分）
 
-- [ ] 9.1 核对 Context：`web/src/features/center/kb/` 的 `list.tsx`、`detail.tsx`、`documents-table.tsx`、`retrieval-panel.tsx`；`web/test/center-kb-list.test.tsx`（356）、`center-kb-detail.test.tsx`（443）；demo :3240-3262、:2781-2803
-- [ ] 9.2 测试先行：新文件 `web/test/center-kb-shared.test.tsx` 覆盖「共享库的只读呈现」「所有者没有部门」、列表计数行、四档范围标签文案、自有库与共享库的按钮差异、共享库检索测试两个数字只读
-- [ ] 9.3 实现：按 `owned` 分支渲染；共享库的来源列为 `工作空间` / `本地上传`；编译只显示标签；自有库的范围标签本刀为纯文本（组 12 改为按钮）
+- [x] 9.1 核对 Context：`web/src/features/center/kb/` 的 `list.tsx`、`detail.tsx`、`documents-table.tsx`、`retrieval-panel.tsx`；`web/test/center-kb-list.test.tsx`（356）、`center-kb-detail.test.tsx`（443）；demo :3240-3262、:2781-2803
+- [x] 9.2 测试先行：新文件 `web/test/center-kb-shared.test.tsx` 覆盖「共享库的只读呈现」「所有者没有部门」、列表计数行、四档范围标签文案、自有库与共享库的按钮差异、共享库检索测试两个数字只读
+- [x] 9.3 实现：按 `owned` 分支渲染；共享库的来源列为 `工作空间` / `本地上传`；编译只显示标签；自有库的范围标签本刀为纯文本（组 12 改为按钮）
   - 组 9 约定（#2035 fixture 审查补；9.2–9.3 照此实现与测试）：
     - 9.1 行号核实：`list.tsx` 159 行（`HEADERS` :14，`CompileCell` :74-95，`删除知识库` :139-151）；`detail.tsx` 131 行（标题 :54-61，入库工具条 :62-78，文档表 :87-101，检索测试 :102-109）；`documents-table.tsx` 113 行（`HEADERS` :7，`sourceText` :27-32，操作列 :78-106）；`retrieval-panel.tsx` 127 行（数字框 :60-73，`UnitField` :79-106）；`center-kb-list.test.tsx` 356、`center-kb-detail.test.tsx` 443、`center-kb-retrieval.test.tsx` 647（头部冻结，本组不碰）。demo：计数行 :3244、`只读` :3249、`来自` :3250、只读提示 :2803。
     - 文案逐字（spec.md:440-442、:462、:465、:476）：

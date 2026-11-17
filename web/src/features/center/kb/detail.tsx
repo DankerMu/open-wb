@@ -3,7 +3,8 @@ import { Button } from "@/components/ui/button";
 import type { ApiClient, BaseView, KbStatus } from "@/lib/api";
 import { DocumentsTable } from "./documents-table.js";
 import { IngestDialog, type IngestOutcome, IngestResults } from "./ingest-dialog.js";
-import { RetryAlert } from "./list.js";
+import { MUTED } from "./ingest-tree.js";
+import { RetryAlert, ScopeLabel } from "./list.js";
 import { RetrievalPanel } from "./retrieval-panel.js";
 import { UploadButton } from "./upload-button.js";
 import { useKbDocuments } from "./use-documents.js";
@@ -24,6 +25,9 @@ type UploadLimits = Pick<Extract<KbStatus, { enabled: true }>, "uploadMaxFiles" 
  *
  * 文档表区域之后是检索测试（s2b-kb-retrieval D8），同样只在 `ready` 时渲染，与文档表在读、失败或为空无关；
  * `onRetrieval` 把成功应答的检索参数同步到列表，`onRefetchBases` 静默重取列表。
+ *
+ * 标题旁是范围标签（本刀为纯文本，组 12 改为按钮）。共享库（非 `owned`）不论 `state` 都以只读提示代替两个入库入口，
+ * 文档表没有操作列。
  */
 export function KnowledgeBaseDetail({
   base,
@@ -51,15 +55,23 @@ export function KnowledgeBaseDetail({
 
   return (
     <section aria-labelledby={titleId} className="flex min-w-0 flex-col gap-2 pt-2">
-      <h3
-        className="m-0 text-sm font-medium [overflow-wrap:anywhere]"
-        id={titleId}
-        ref={titleRef}
-        tabIndex={-1}
-      >
-        {base.name} · 文档
-      </h3>
-      {base.state === "ready" ? (
+      <div className="flex flex-wrap items-center gap-2">
+        <h3
+          className="m-0 min-w-0 text-sm font-medium [overflow-wrap:anywhere]"
+          id={titleId}
+          ref={titleRef}
+          tabIndex={-1}
+        >
+          {base.name} · 文档
+        </h3>
+        <ScopeLabel scope={base.scope} />
+      </div>
+      {base.owned ? null : (
+        <p className={MUTED}>
+          {`共享给你的知识库只读：可检索、可在会话中引用，不能增删文档。需要补充内容请联系 ${base.owner.account}。`}
+        </p>
+      )}
+      {base.owned && base.state === "ready" ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button disabled={uploading} onClick={() => setIngesting(true)} ref={ingestRef} size="sm">
             从工作空间入库
@@ -93,6 +105,7 @@ export function KnowledgeBaseDetail({
               if (gone) titleRef.current?.focus();
             })
           }
+          owned={base.owned}
           pending={docs.pending}
           rowErrors={docs.rowErrors}
           spaces={docs.spaces}

@@ -22,7 +22,7 @@ type Props = {
  * 详情文档表下方的「检索测试」（knowledge-bases「中心「知识库」tab」，s2b-kb-retrieval D8）：问句框、`相似度阈值` 与
  * `向量权重` 两个 0–1 数字框、`检索` 按钮与结果区。调用方只在库 `ready` 时渲染它。只有问句框的 Enter 等同点 `检索`
  *（demo 只给它绑了 Enter），输入法组合中的 Enter 不算。不渲染 demo 面板头的 `召回 → 重排 → 引用` 标签（重排是可选的），
- * 命中不显示来源路径与切片序号（owner 授权偏离 demo）。
+ * 命中不显示来源路径与切片序号（owner 授权偏离 demo）。共享库（非 `owned`）的两个数字框只读，检索照常可用。
  */
 export function RetrievalPanel({ base, client, onRetrieval, onRefetchBases }: Props) {
   const state = useRetrieval(client, base, { onRetrieval, onRefetchBases });
@@ -62,12 +62,14 @@ export function RetrievalPanel({ base, client, onRetrieval, onRefetchBases }: Pr
           error={state.errors.threshold}
           label="相似度阈值"
           onChange={state.setThreshold}
+          readOnly={!base.owned}
           value={state.threshold}
         />
         <UnitField
           error={state.errors.vectorWeight}
           label="向量权重"
           onChange={state.setVectorWeight}
+          readOnly={!base.owned}
           value={state.vectorWeight}
         />
       </div>
@@ -76,16 +78,19 @@ export function RetrievalPanel({ base, client, onRetrieval, onRefetchBases }: Pr
   );
 }
 
+/** 只读（共享库）时不接 `onChange`：受控输入的改动由 React 还原，提交的仍是已存值；不用 `disabled`。 */
 function UnitField({
   label,
   error,
   value,
   onChange,
+  readOnly,
 }: {
   label: string;
   error: string | undefined;
   value: string;
   onChange(value: string): void;
+  readOnly: boolean;
 }) {
   return (
     <TextField error={error} label={label}>
@@ -95,7 +100,8 @@ function UnitField({
           inputMode="decimal"
           max={1}
           min={0}
-          onChange={(event) => onChange(event.target.value)}
+          onChange={readOnly ? undefined : (event) => onChange(event.target.value)}
+          readOnly={readOnly}
           step={0.01}
           type="number"
           value={value}

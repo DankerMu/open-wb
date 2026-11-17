@@ -144,22 +144,32 @@ describe("列表", () => {
       "编译",
       "文档",
       "状态",
+      "范围",
       "操作",
     ]);
     const cells = (name: string) =>
       within(rowOf(name))
         .getAllByRole("cell")
         .map((cell) => cell.textContent);
-    expect(cells("规范库")).toEqual(["规范库", "手册", "", "3", "", "删除知识库"]);
+    expect(cells("规范库")).toEqual(["规范库", "手册", "", "3", "", "仅自己可见", "删除知识库"]);
     expect(cells("表格库")).toEqual([
       "表格库",
       "表格",
       "RAPTOR已完成知识图谱编译中",
       "0",
       "重建中",
+      "仅自己可见",
       "",
     ]);
-    expect(cells("法规库")).toEqual(["法规库", "法规", "", "1", "重建失败", "删除知识库"]);
+    expect(cells("法规库")).toEqual([
+      "法规库",
+      "法规",
+      "",
+      "1",
+      "重建失败",
+      "仅自己可见",
+      "删除知识库",
+    ]);
     expect(within(rowOf("表格库")).queryByRole("button")).toBeNull();
   });
 
