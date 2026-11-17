@@ -85,6 +85,14 @@
 | 组 7：自有库永不写共享审计 | 是 | `auditSharedRetrieval` 在 `owned` 时直接返回；所有者对 `dept` 库检索（参数相同与不同各一次），`kb.shared_retrieval` 为 0 条；`kb-retrieval-endpoint.test.ts` 不改、全绿 |
 | 组 7：原子性 | 是 | 钩子改读级、非所有者分支、`shared-audit.ts` 放在同一个实现提交里（按 `--merge` 合并，提交级的中间态也会进 master 历史）；只改钩子时会出现未审计的跨账号检索 |
 | 组 7：白盒 | 是 | 多租户过滤与跨账号读：PR 标题与描述写明「请求白盒审查」 |
+| 组 8：一次读取、不留旧读法 | 是 | `definitionFor`、`execute`、`resolveReferences` 都经同一个 `visibleOf(viewerId)`（`visibility.visibleBases` 一次）；`grep -n "listBases\b\|SELECT_BASES_BY_OWNER" server/src server/test` 为空（`listBasesInState` 除外） |
+| 组 8：描述行与次序 | 是 | 非自有行 `- <名称>（<id>，所有者 <account>）`；K1 的 `created_at` 早于 A2，结果仍是 A2 在前（只按建库时间排会红） |
+| 组 8：先查中止、再审计、再检索 | 是 | 已中止的信号：K 为 `failed`，`kb.shared_retrieval` 0 条，假 RAGFlow 0 请求；`gate.reached` 时共享审计已恰 1 条；触发器让审计写失败：K 为 `failed`，只收到 A2 的检索 |
+| 组 8：审计失败只影响该库 | 是 | try/catch 只包 `auditSharedRetrieval` 这一调用，不包检索；捕获后不记日志、不重抛；同调用里自有库照常 `ok`，`isError` 为假 |
+| 组 8：哨兵与审计可见性 | 是 | 问句带 `CONTENT_SENTINEL`：`audit_events` 全表原始行、三份 `GET /api/audit` body、`world.logged` 都不含它；u1 看不到，u2 与 u3 各看到恰两条 |
+| 组 8：收回共享 | 是 | 带外 `SET scope='me', scope_group_id=NULL`（053:53 的 CHECK 要求两列同改）之后，定义里没有 K1、执行为 `not_found`、没有新审计；已受理消息的快照不变 |
+| 组 8：死代码 | 是 | 同一提交删 `store.listBases`、`SELECT_BASES_BY_OWNER` 与 `kb-store.test.ts:194-205`；`BASE_ORDER` 留（`SELECT_BASES_BY_STATE` 仍在用）；knip 绿 |
+| 组 8：白盒 | 是 | 跨账号检索与多租户过滤：PR 标题与描述写明「请求白盒审查」 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -438,9 +446,44 @@ Minimal mergeable slice: atomic - 放开检索测试与写共享审计必须同�
 
 ## 8. 会话检索与知识库引用的可见集合（knowledge-bases「会话检索 `kb_search`」；message-attachments「prompt 引用知识库」的可见受理）
 
-- [ ] 8.1 核对 Context：`server/src/kb/session-search.ts` 的文件头契约（:6「三个函数都经 `listBases(ownerId)` 读一次」）、`ownedBases`（:134，被 `execute` 与 `resolveReferences` 共用）、`definitionFor`、`execute`；`server/src/app.ts:351` 的注入与 `sessions/store-knowledge-bases.ts:18` 的注释
-- [ ] 8.2 测试先行：在 `kb-session-search.test.ts` 加「可见的共享库进清单并被检索」「只有共享库的账号」「共享审计写失败只影响该库」「已中止的信号不写共享审计」；新文件 `server/test/kb-shared-audit.test.ts` 完整覆盖「共享检索审计不含问句」（检索测试与 `kb_search` 合计恰两条；u1 经 `GET /api/audit` 看不到、u3 看得到）；新文件 `server/test/prompt-knowledge-bases-shared.test.ts` 覆盖「引用共享给自己的库」
-- [ ] 8.3 实现：三个函数共用一次 `visibleBases(viewer)`，原地替换 `ownedBases`（文件头契约同改）；可见的库一个都没有时没有定义；非自有库描述行附所有者账号；非自有 `ready` 库先查中止信号、再调 `auditSharedRetrieval`、再检索；`resolveReferences` 存受理那一刻的名称；`store.listBases`（`kb/store.ts:158,322-323`）此后若只剩测试在用，在本组内删除它与 `SELECT_BASES_BY_OWNER` 及其用例（AGENTS.md：无引用导出同一变更内删除）
+- [x] 8.1 核对 Context：`server/src/kb/session-search.ts` 的文件头契约（:6「三个函数都经 `listBases(ownerId)` 读一次」）、`ownedBases`（:134，被 `execute` 与 `resolveReferences` 共用）、`definitionFor`、`execute`；`server/src/app.ts:351` 的注入与 `sessions/store-knowledge-bases.ts:18` 的注释
+- [x] 8.2 测试先行：在 `kb-session-search.test.ts` 加「可见的共享库进清单并被检索」「只有共享库的账号」「共享审计写失败只影响该库」「已中止的信号不写共享审计」；新文件 `server/test/kb-shared-audit.test.ts` 完整覆盖「共享检索审计不含问句」（检索测试与 `kb_search` 合计恰两条；u1 经 `GET /api/audit` 看不到、u3 看得到）；新文件 `server/test/prompt-knowledge-bases-shared.test.ts` 覆盖「引用共享给自己的库」
+- [x] 8.3 实现：三个函数共用一次 `visibleBases(viewer)`，原地替换 `ownedBases`（文件头契约同改）；可见的库一个都没有时没有定义；非自有库描述行附所有者账号；非自有 `ready` 库先查中止信号、再调 `auditSharedRetrieval`、再检索；`resolveReferences` 存受理那一刻的名称；`store.listBases`（`kb/store.ts:158,322-323`）此后若只剩测试在用，在本组内删除它与 `SELECT_BASES_BY_OWNER` 及其用例（AGENTS.md：无引用导出同一变更内删除）
+  - 组 8 约定（#2034 fixture 审查补；8.2–8.3 照此实现与测试）：
+    - 8.1 行号更正：`store.listBases` 是 `kb/store.ts:158`（SQL）与 `:322-324`（含注释行）；`session-search.ts` 依赖接口是 `:41-43`，`ownedBases` 是 `:134-135`，`searchOne` 是 `:137-153`，`definitionFor` 是 `:157-173`（`:158` 是第二处读取），`execute` 是 `:176-190`（`:181` 读取，`:186` 是 render 取 state 的地方），`resolveReferences` 是 `:193-204`；`app.ts:351` 只核对、不改（`ownerId` 就是会话所有者，也就是查看者）；`store-knowledge-bases.ts` 的注释是 `:17-20` 和 `:35`。
+    - 与 8.2 的差异（审查裁定）：
+      - 四个 `kb_search` 场景按 8.2 原地加进 `kb-session-search.test.ts`。组 3 定的 ≤ 480 是给本组留的余量，硬上限是 800；这个文件不在 tasks 头部的冻结名单里。
+      - 「引用共享给自己的库」原地加进 `prompt-knowledge-bases.test.ts`，不新建 `prompt-knowledge-bases-shared.test.ts`。理由：`openKbWorld`（`:66-95`）和 K1/K3 常量都是这个文件的局部定义；新建文件就得复制世界的搭法（jscpd 会报），或者为一个场景再抽一层 helper。AC 里的过滤串 `prompt-knowledge-bases` 已经能覆盖到它。PR 描述里写明这一条。
+    - 新 helper `server/test/kb-session-search-helpers.ts`（≤ 100 行）：把 `kb-session-search.test.ts` 里的以下内容原样搬过去，原文件改成导入（不留两份）：`ROUTE`（`:20`）、`SessionSearch` 类型（`:38`）、`retrievals`（`:122-123`）；`:40-57` 的 spy 与取值，改成 `export function useSessionSearch(): () => SessionSearch`，在调用它的文件里登记 beforeEach/afterEach；`BaseSeed` 与 `seedBase`（`:59-95`）；新加 `export function share(world, id, scope: "me" | "group" | "all")`，执行 `UPDATE knowledge_bases SET scope = ?, scope_group_id = ? WHERE id = ?`，`scope` 为 `group` 时组 id 用 `'g1'`，否则用 NULL（053:64 的种子里 g1 的成员是 u1、u2）。
+    - `session-search.ts`（原地改，206 → ≤ 225）：
+      - 依赖接口：删掉 `store` 上额外的 `& Pick<…, "listBases">`；新增 `visibility: Pick<ReturnType<typeof createKbVisibility>, "visibleBases">` 和 `audit: (event: SharedRetrievalEvent) => void`；删掉 `import type { createKbStore }`（若不再使用）。
+      - 用 `const visibleOf = (viewerId) => new Map(visibility.visibleBases(viewerId).map((access) => [access.base.id, access]))` 原地替换 `ownedBases`。三个函数各调用一次读取；`definitionFor` 遍历 `visibility.visibleBases(viewerId)` 的结果（SQL 的 D2 次序：自有在前，再按 `created_at`、`id`），JS 里不排序。
+      - `definitionFor`：结果为空时返回 `null`；描述行自有库为 `- ${name}（${id}）`，非自有库为 `- ${name}（${id}，所有者 ${owner.account}）`；`bases` 仍为 `[{id, name}]`、次序相同。
+      - `:24` 改为「检索当前账号可见的知识库（含共享给它的），返回…」，其余三行不变。现有用例只检查关键词，不受影响。
+      - `searchOne(kbId, access: BaseAccess | undefined, viewerId, question, signal)` 的判定次序：1. `undefined` → `not_found`；2. 非 `ready` → `not_ready`；3. `if (!access.owned && signal.aborted) return failed`；4. `try { auditSharedRetrieval(dependencies, viewerId, access) } catch { return failed }`，无条件调用，`owned` 时由这个函数自己返回（同组 7）；5. `retrieveForBase(...)`。第 3、4 步都在第一个 `await` 之前。catch 里不记日志、不重抛。自有库的路径不变。`outcome` 取 `access?.base`。
+      - `execute`：`render(entry, visible.get(entry.kbId)?.base.state)`，用的是同一份 `visible`（组 3 约定的那一处跟着换）。
+      - `resolveReferences`：只用一次 `visibleOf`，按输入次序给出 `{id, name: access.base.name}`。
+      - 文件头 `:6-9` 改为：「可见的库」只有一份读取（`visibleBases(viewerId)`，D2 次序）；不可见与不存在同为 `not_found`；可见、`ready` 的非自有库先查中止信号，再写 `kb.shared_retrieval`（`shared-audit.ts`），写失败该库为 `failed`、不检索；对自己的库检索不审计；不写回。
+    - 装配：`kb/index.ts:198` 改为 `createKbSessionSearch({ store, client, onRerankDegraded, visibility, audit })`（用的是 `:119` 和 `:122` 已经建好的那两份）。`index.ts` 200 → ≤ 208（格式化可能把调用折成多行）。
+    - 注释同步：`store-knowledge-bases.ts:18-19` 与 `:35` 里的 "one of that account's bases" / "not this account's base" 改成 "visible to that account"；`sessions/host-tool-align.ts:29` 的 "(knowledge base off or no base)" 改成 "no visible base"。
+    - 删除：`kb/store.ts:158` 的 `SELECT_BASES_BY_OWNER`、`:322-324` 的 `listBases` 及其注释、`kb-store.test.ts:194-205` 的「按 owner 列出」用例。`BASE_ORDER` 保留。PR 附 grep 证据：`grep -rn "listBases\b\|SELECT_BASES_BY_OWNER" server/src server/test` 为空。
+    - `kb-session-search.test.ts` 新加四个场景（479 → ≤ 600；文件头加一句「#2034 s2c-kb-visibility 组 8：可见集合与共享审计」）。A2 = `"f6".repeat(16)`，名称「销售手册」，`ownerId:"u2"`，`createdAt: 2_500`。审计用 `world.audits("kb.shared_retrieval")` 读。
+      - 「可见的共享库进清单并被检索」：在 `seeded()` 之后 `share(world, K1, "group")`，再种 A2。`definitionFor("u2")` 描述里以 `- ` 开头的行恰为 `[`- 销售手册（${A2}）`, `- 产品文档（${K1}，所有者 zhangsan）`]`，`bases` 为 `[{id:A2,name:"销售手册"},{id:K1,name:"产品文档"}]`。`fault(ROUTE,{kind:"hold"},{times:2})` 之后以 u2 执行 `{question:QUESTION, kb_ids:[K1, A2, K2]}`；`await gate.reached` 时共享审计已恰 1 条；再 poll 到 2 次检索，然后 release。结果 `toStrictEqual`：text 为 `知识库「产品文档」（K1）：命中 0 条`、`知识库「销售手册」（A2）：命中 0 条`、`知识库 ${K2}：未找到该知识库` 三段，以空行隔开；details 依次为 ok/ok/`{kbId:K2,name:null,status:"not_found",hits:[]}`；`isError:false`。两次检索的 `dataset_ids` 为 d1 与 A2 的数据集（`arrayContaining`）；K1 那次带 0.35/0.5。共享审计恰为 `[{actorId:"u2",title:"检索共享知识库",detail:{id:K1,name:"产品文档",ownerId:"u1",scope:{scope:"group",groupId:"g1"}},workspaceId:null}]`。接着 `share(world, K1, "me")`，以同样参数再执行一次：K1 为 `not_found`；共享审计仍为 1 条；`definitionFor("u2").bases` 为 `[{id:A2,…}]`。
+      - 「只有共享库的账号」：`seeded()` 之后 `share(world, K1, "all")`。`definitionFor("u2")` 以 `- ` 开头的行恰为 `[`- 产品文档（${K1}，所有者 zhangsan）`]`，`bases` 为 `[{id:K1,name:"产品文档"}]`。`share(world, K1, "me")` 之后返回 `null`。`world.fake.requests()` 为 `[]`。
+      - 「共享审计写失败只影响该库」：`share(K1,"all")`，种 A2，再执行组 7 的触发器（`kb-retrieval-shared.test.ts:26-27` 的 `REFUSE_SHARED`，写成本地常量）。u2 以 `[K1, A2]` 执行，`toStrictEqual`：text 为 `知识库「产品文档」（K1）：检索失败` 与 `知识库「销售手册」（A2）：命中 0 条`；details 为 `failed` 与 `ok`；`isError:false`。`retrievals` 的 `dataset_ids` 恰为 `[[A2 的数据集]]`；`auditCount` 不变；`world.logged` 不变。
+      - 「已中止的信号不写共享审计」：`share(K1,"all")`，`controller.abort()` 之后再以 u2 执行 `[K1]`。`toStrictEqual({text:`知识库「产品文档」（K1）：检索失败`, details:{bases:[{kbId:K1,name:"产品文档",status:"failed",hits:[]}]}, isError:true})`。共享审计为 `[]`（这条才是区分用的断言）；`world.fake.requests()` 为 `[]`。
+    - 新文件 `server/test/kb-shared-audit.test.ts`（≤ 170 行）：
+      - 夹具：`useIngestWorlds()` 加 `useSessionSearch()`；K = `world.baseId`（u1，名称 `` `库 ${K}` ``），`share(world, K, "group")`；种 A2（u2）。问句 `Q = `销售额 ${CONTENT_SENTINEL}``，这样收尾时的 stdout/stderr 哨兵检查自动生效。
+      - 检索测试：u2 用 `cookieFor(world.fw.rest.app, "zhaoliu")` 发 `POST /api/kb/bases/K/retrieval`，body 为 `{question:Q, threshold:0.2, vectorWeight:0.7}`，得 200。会话检索：`search().execute("u2", {question:Q, kb_ids:[K, A2]}, signal)`，`isError:false`。
+      - 审计行：`SELECT actor_id, kind, title, detail, workspace_id FROM audit_events WHERE kind='kb.shared_retrieval' ORDER BY id` 恰两行，两行相同：actor `u2`、title `检索共享知识库`、workspace NULL，detail 原始串逐字为 `{"id":"<K>","name":"库 <K>","ownerId":"u1","scope":{"scope":"group","groupId":"g1"}}`。没有 detail.id 为 A2 的审计。
+      - 哨兵：`JSON.stringify(SELECT * FROM audit_events)` 不含 `CONTENT_SENTINEL`；`JSON.stringify(world.logged)` 也不含。
+      - `GET /api/audit?limit=200`：u1 用 `send(world.fw.rest,"member","GET",…)`，events 里没有 `kb.shared_retrieval`；u3 用 `"admin"`，u2 用 cookie，各自恰两条 `kb.shared_retrieval`，`actorId` 都是 `u2`，detail 同上；三份 body 都不含哨兵，都带 `cache-control: no-store`。依据：`accounts/index.ts:14`、`core/audit/index.ts:81-84`（非管理员按 actor 过滤）。若 `send` 不透传查询串或假 RAGFlow 进程会把请求打到 stdout，改用本地哨兵在数据库与 API 上逐项断言，并在偏离里写明。
+    - `prompt-knowledge-bases.test.ts` 原地加 `describe("prompt 引用知识库: 引用共享给自己的库 (#2034)")`（484 → ≤ 530）：`openKbWorld()` 之后带外 `UPDATE knowledge_bases SET scope='all' WHERE id=K1`，K3 仍为 me（即规格里的 P）。u2 = `cookieFor(world.app,"zhaoliu")`，会话用 `openBound(world.app, u2, "proj").session()`（先例 `session-prompt-attachments.test.ts:385-387`）。`send(world, s, {message:"查一下", knowledgeBases:[K1]}, u2)` 得 202，`calls` 1 次，`audit` 为 `[]`；`columnOf` 的用户行 `knowledge_bases` 为 `[{"id":"<K1>","name":"产品文档"}]`。以 `[K3]` 和 `[K9]` 分别 `send(…, u2)`：都是 404 `NOT_FOUND_ENVELOPE`，两个 `response.body` 全等，没有新增行。然后 `UPDATE … SET scope='me' WHERE id=K1`，用 `getSessionMessages(world.app, s, u2)` 读快照：那条用户消息的 `knowledgeBases` 为 `[{id:K1,name:"产品文档"}]`。全程 `world.ragflow()` 不变。
+    - 行数汇总：`session-search.ts` ≤ 225；`index.ts` ≤ 208；`store.ts` 658 → ≤ 654；`store-knowledge-bases.ts` 145 不增；`kb-session-search.test.ts` ≤ 600；`kb-session-search-helpers.ts` ≤ 100；`kb-shared-audit.test.ts` ≤ 170；`prompt-knowledge-bases.test.ts` ≤ 530；`kb-store.test.ts` 711 → ≤ 700。
+    - TDD 配对：`session-search.ts` 的配对是 `kb-session-search.test.ts` 加 `kb-shared-audit.test.ts`。
+    - 非目标：`docs/architecture/knowledge-base.md:410`（「`session-search.ts:134-135` 只读 `listBases`」，留给组 14 同步）；`kb-visibility.test.ts:364` 的标题措辞；web 选择列表（组 10）；`PUT …/scope`（组 11，所以这里收回共享用带外 UPDATE）；功能验收清单（D12）；`app.ts`。
+    - 实测与上面这些字面量不符时停下来报告，不改期望。
+    - 回归命令：`npm run test:focus --workspace server -- kb-session-search kb-shared-audit`（先红后绿）；`npm run test:focus --workspace server -- kb-session-search kb-shared-audit prompt-knowledge-bases session-host-tool-align kb-store kb-retrieval-shared kb-visibility session-kb-hits session-kb-search-approval omp-host-tools`；`make lint`、`make typecheck`、`make anti-drift`（knip：`listBases` 删掉之后不留无引用导出，helper 的导出都有使用者；jscpd），最后 `make check`。
 
 Suggested fixture level: expanded - 给模型的工具描述、跨账号审计、不可探测性、引用受理的权限判定。
 Minimal mergeable slice: atomic - 定义、执行与引用解析共用同一次可见集合读取（Code Canonicality：不得让同一文件里新旧两份读取并存），验证路径是同一组 `createKbSessionSearch` 与 prompt 路由用例。

@@ -155,7 +155,6 @@ const UPDATE_REBUILD_ACTOR =
 
 const BASE_ORDER = "ORDER BY created_at, id";
 const SELECT_BASE = "SELECT * FROM knowledge_bases WHERE id = ?";
-const SELECT_BASES_BY_OWNER = `SELECT * FROM knowledge_bases WHERE owner_id = ? ${BASE_ORDER}`;
 const SELECT_BASES_BY_STATE = `SELECT * FROM knowledge_bases WHERE state = ? ${BASE_ORDER}`;
 const SELECT_BASE_NAME_TAKEN = "SELECT 1 FROM knowledge_bases WHERE owner_id = ? AND name = ?";
 const COUNT_BASES = "SELECT COUNT(*) AS count FROM knowledge_bases";
@@ -318,10 +317,6 @@ export function createKbStore(db: DatabaseSync) {
     },
 
     getBase: base,
-
-    /** 该账号的知识库，按 `created_at`、`id` 升序。 */
-    listBases: (ownerId: string): KnowledgeBase[] =>
-      db.prepare(SELECT_BASES_BY_OWNER).all(ownerId).map(toBase),
 
     /** 全部账号里处于该状态的库，次序同上：重建器的工作清单。 */
     listBasesInState: (state: BaseState): KnowledgeBase[] =>

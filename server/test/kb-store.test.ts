@@ -191,19 +191,6 @@ describe("kb store: 知识库", () => {
     expect(store.createBase({ ...again, ownerId: "u2" }).ownerId).toBe("u2");
   });
 
-  it("按 owner 列出：created_at 升序，同刻按 id；不含别人的库", () => {
-    const { store } = fresh();
-    vi.setSystemTime(T0 + 10);
-    createPlainBase(store, hex(3));
-    createPlainBase(store, hex(2));
-    vi.setSystemTime(T0);
-    createPlainBase(store, hex(4));
-    createPlainBase(store, hex(1), "u2");
-    expect(store.listBases("u1").map((base) => base.id)).toEqual([hex(4), hex(2), hex(3)]);
-    expect(store.listBases("u2").map((base) => base.id)).toEqual([hex(1)]);
-    expect(store.listBases("u3")).toEqual([]);
-  });
-
   it("按 owner 计数供 50 上限用：第 50 个之后计数恰为 50，别的账号不计入", () => {
     const { store } = fresh();
     for (let n = 1; n <= 50; n += 1) createPlainBase(store, hex(n));

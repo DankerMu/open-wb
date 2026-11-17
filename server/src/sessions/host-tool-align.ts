@@ -26,7 +26,7 @@ interface HostToolDefinition {
 
 /** The kb module's session search, as sessions sees it (kb/session-search.ts is the other half). */
 interface HostToolSource {
-  /** The owner's `kb_search` definition, or null (knowledge base off or no base); local reads only. */
+  /** The owner's `kb_search` definition, or null (knowledge base off or no visible base); local reads only. */
   definitionFor(ownerId: string): HostToolDefinition | null;
   execute(ownerId: string, args: unknown, signal: AbortSignal): Promise<HostToolResult>;
 }

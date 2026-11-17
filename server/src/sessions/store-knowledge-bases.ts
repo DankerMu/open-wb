@@ -15,8 +15,8 @@ export interface KnowledgeBaseRef {
 }
 
 /**
- * The kb module's `resolveReferences` (kb/session-search.ts), as sessions sees it: every id one of
- * that account's bases → their `{id, name}` in input order; any other → null. Local reads only.
+ * The kb module's `resolveReferences` (kb/session-search.ts), as sessions sees it: every id a base
+ * visible to that account → their `{id, name}` in input order; any other → null. Local reads only.
  */
 export type KnowledgeBaseResolver = (
   ownerId: string,
@@ -32,7 +32,7 @@ const SELECT_STORED =
  * The `knowledgeBases` of a prompt body as `parsePromptBody` handed it over, judged once the
  * attachments are: absent or `[]` is no reference (the resolver is not asked); anything but a list
  * of at most five distinct (compared as given) non-empty strings is 400; a list the resolver does
- * not answer — some id is not this account's base, or the knowledge base is off (`resolve`
+ * not answer — some id is not visible to that account, or the knowledge base is off (`resolve`
  * omitted) — is 404, the same body in all three cases. No audit, no RAGFlow request.
  * 内建命令带引用 400，先于可见判定（与附件第 3 条同一规则）。
  */
