@@ -29,7 +29,7 @@ export const READY: Extract<KbStatus, { enabled: true }> = {
   uploadMaxFiles: 10,
 };
 
-/** 十一键 `BaseView`：缺省是两开关都关、就绪、没有文档、检索参数取缺省 `{0.2, 0.7}` 的 `naive` 库。 */
+/** 十四键 `BaseView`：缺省是 u1 自有、仅自己可见、两开关都关、就绪、没有文档、检索参数取缺省 `{0.2, 0.7}` 的 `naive` 库。 */
 export function base(id: string, patch: Partial<BaseView> = {}): BaseView {
   return {
     id,
@@ -43,6 +43,9 @@ export function base(id: string, patch: Partial<BaseView> = {}): BaseView {
     compile: { raptor: "off", graph: "off" },
     retrieval: { threshold: 0.2, vectorWeight: 0.7 },
     createdAt: 1_760_000_000_000,
+    owned: true,
+    owner: { id: "u1", account: "zhangsan", department: "平台研发部" },
+    scope: { scope: "me", group: null },
     ...patch,
   };
 }

@@ -23,8 +23,11 @@ const BASE_KEYS = [
   "graph",
   "id",
   "name",
+  "owned",
+  "owner",
   "raptor",
   "retrieval",
+  "scope",
   "state",
   "stateMessage",
   "template",
@@ -40,7 +43,7 @@ async function basesOf(world: World, who?: "member" | "peer" | "admin") {
 }
 
 describe("GET /api/kb/bases", () => {
-  it("应答恰为 {bases}，BaseView 恰十一键，no-store", async () => {
+  it("应答恰为 {bases}，BaseView 恰十四键，no-store", async () => {
     const world = await ready();
     const view = await createdBase(world, "规范库", "manual");
     const response = await list(world);

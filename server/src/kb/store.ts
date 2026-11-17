@@ -597,7 +597,7 @@ function toSettings(row: Raw): KbSettings {
   };
 }
 
-function toBase(row: Raw): KnowledgeBase {
+export function toBase(row: Raw): KnowledgeBase {
   return {
     id: String(row.id),
     ownerId: String(row.owner_id),

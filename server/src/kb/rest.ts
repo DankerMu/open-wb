@@ -20,20 +20,20 @@
  * 其它查询键忽略。重试不读 query。
  * 路由在知识库关闭时同样注册：不注册就是 catch-all 的 404，不是 503；处理函数在关闭时走不到。
  *
- * 知识库路由对任何已登录用户开放，只操作自己的库：`POST` 在 content-parser 归属集，业务都在 `kb/bases.ts`。`DELETE` 不读
- * body、不在归属集（同 `connectors/rest.ts`）。带 `:id` 的路由都在路由级 `preParsing` 判定所有权，所以别人的或不存在的 id
- * 带坏 body 也是 404。
+ * 知识库路由对任何已登录用户开放，列表是查看者可见的库：`POST` 在 content-parser 归属集，业务都在 `kb/bases.ts`。`DELETE`
+ * 不读 body、不在归属集（同 `connectors/rest.ts`）。带 `:id` 的路由都在路由级 `preParsing` 判定归属（不可见 404、可见非所有者
+ * 403），所以不可见的或不存在的 id 带坏 body 也是 404，可见而不是自己的库带坏 body 也是 403。
  *
  * `POST …/documents` 的业务在 `kb/documents.ts`；请求合法且本地写入没有失败即 201，被拒的条目在应答的 `rejected` 里。
  * `GET …/documents` 不读 body、不在归属集，业务同在 `kb/documents.ts`。`DELETE …/documents?doc=<文档 id>`（移出）同删库的写法：
  * 不读 body、不在归属集，成功 204，业务同在 `kb/documents.ts`。`POST …/documents/reingest?doc=<文档 id>`（重新入库）同探活的写法：
- * bodyless，在归属集，任意 body（含 `{}`）都是 400，所有权判定先于它；成功 200 `DocumentView`。
+ * bodyless，在归属集，任意 body（含 `{}`）都是 400，归属判定（不可见 404、可见非所有者 403）先于它；成功 200 `DocumentView`。
  *
  * `POST …/uploads` 同 `POST /api/workspaces/:id/uploads` 的写法：独立 scope，只认 `application/octet-stream`，请求流原样交出，
- * 没有框架的 body 上限，别的媒体类型是 parser 错误（归属集，400）。所有权判定先于这一切，一个字节都不读。失败的上传一律关
+ * 没有框架的 body 上限，别的媒体类型是 parser 错误（归属集，400）。归属判定先于这一切，一个字节都不读。失败的上传一律关
  * 连接：Node 否则会在 keep-alive 上读完并丢弃剩下的请求体。业务都在 `kb/uploads.ts`。
  *
- * `POST …/retrieval`（检索测试，s2b-kb-retrieval D4）：在归属集，body limit 16 KiB，所有权判定先于 body 解析；body 校验、
+ * `POST …/retrieval`（检索测试，s2b-kb-retrieval D4）：在归属集，body limit 16 KiB，归属判定先于 body 解析；body 校验、
  * `state`、参数写回与检索都在 `kb/retrieval.ts`，成功 200 `{hits, retrieval}`。
  */
 import type {
