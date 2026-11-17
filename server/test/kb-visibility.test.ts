@@ -5,14 +5,15 @@
  * 成员 u1、u2），u4（wangwu，部门为空）按需带外启用。库行与范围列带外写入（组 11 之前没有改范围的路由）。期望值抄自规格与
  * tasks.md「组 5 约定」，一律写字面量。
  *
- * 本刀七条 `:id` 路由对可见的非所有者都是 403：`GET …/documents` 与 `POST …/retrieval` 由组 6、组 7 原地改为 200。
+ * `GET …/documents` 已由组 6 放开；`POST …/retrieval` 由组 7 原地改为 200。
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { LightMyRequestResponse } from "fastify";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BASES, NOT_FOUND } from "./kb-bases-helpers.js";
+import { ingestedRow, useIngestWorlds } from "./kb-ingest-helpers.js";
 import {
   chatWorld,
   configuredWorld,
@@ -30,10 +31,13 @@ import {
   T0,
   UPLOAD_ROW,
 } from "./kb-store-helpers.js";
+import { W1 } from "./mounts-manager-helpers.js";
+import { auditRows, send } from "./mounts-rest-helpers.js";
 import { disableAccount, enableAccount } from "./session-db-helpers.js";
 import { cookieFor } from "./session-rest-helpers.js";
 
 const open = useSettingsWorlds();
+const openIngest = useIngestWorlds();
 const ready = () => configuredWorld(open);
 
 type Who = "member" | "peer" | "admin";
@@ -234,7 +238,8 @@ describe("可见范围判定", () => {
     });
     expect(world.sent()).toEqual([]);
     expect((await documentsOf(world, KM, "admin")).statusCode).toBe(404);
-    expect((await documentsOf(world, KA, "admin")).statusCode).toBe(403);
+    const shared = await documentsOf(world, KA, "admin");
+    expect([shared.statusCode, shared.json()]).toEqual([200, { documents: [] }]);
   });
 
   it("同部门与空部门：部门现查；所有者或查看者部门为空都不匹配", async () => {
@@ -253,7 +258,7 @@ describe("可见范围判定", () => {
   it("成员关系与组名现查：删成员即 404，加成员即可见，改组名下一次请求即变", async () => {
     const world = await ready();
     addTiers(world);
-    expect((await documentsOf(world, KG, "peer")).statusCode).toBe(403);
+    expect((await documentsOf(world, KG, "peer")).statusCode).toBe(200);
     world.db
       .prepare("DELETE FROM project_group_members WHERE group_id = 'g1' AND account_id = 'u2'")
       .run();
@@ -309,10 +314,32 @@ describe("可见范围判定", () => {
 });
 
 describe("知识库端点：两级归属", () => {
-  it("共享库的两级归属：可见的非所有者对本刀七条路由都 403，零出站，三张表逐行不变（组 6、组 7 把前两次原地改为 200）", async () => {
+  it("共享库的两级归属：可见的非所有者检索测试与五条写路由 403、文档列表 200，零写入（组 7 把检索测试原地改为 200）", async () => {
     const world = await ready();
     const id = sharedWorld(world, "all");
-    await expectAllForbidden(world, VALID, id);
+    await expectAllForbidden(world, VALID.slice(1), id);
+    const before = snapshot(world);
+    const response = await documentsOf(world, id, "peer");
+    expect([response.statusCode, response.headers["cache-control"]]).toEqual([200, "no-store"]);
+    expect(response.json()).toEqual({
+      documents: [
+        {
+          id: "doc-1",
+          name: "a.txt",
+          size: 3,
+          source: "upload",
+          workspaceId: null,
+          path: null,
+          status: "missing",
+          chunkCount: null,
+          message: null,
+          sourceChanged: null,
+          createdAt: T0,
+        },
+      ],
+    });
+    expect(routes(world.sent())).toEqual(["GET /api/v1/datasets/ds-1/documents"]);
+    expect(snapshot(world)).toEqual(before);
   });
 
   it("403 先于 body：畸形、超限、bodyless 带 {}、错媒体类型都是 403 不是 400", async () => {
@@ -364,15 +391,17 @@ describe("列表的可见集合、次序与非自有的编译状态", () => {
     expect(created.statusCode).toBe(201);
     const a2 = created.json<{ id: string; createdAt: number }>();
     addBase(world, 5, { owner_id: "u2", created_at: a2.createdAt + 1 });
+    addBase(world, 0, { owner_id: "u3", scope: "all", created_at: T0 + 1 });
     const datasetId = world.store.getBase(a2.id)?.datasetId ?? "";
     world.forget();
     const bases = await listOf(world, "peer");
-    expect(bases.map(({ id }) => id)).toEqual([a2.id, hex(5), hex(1), hex(3)]);
-    expect(bases.map(({ owned }) => owned)).toEqual([true, true, false, false]);
-    expect(bases.map(({ owner }) => owner)).toEqual([U2, U2, U1, U3]);
+    expect(bases.map(({ id }) => id)).toEqual([a2.id, hex(5), hex(1), hex(3), hex(0)]);
+    expect(bases.map(({ owned }) => owned)).toEqual([true, true, false, false, false]);
+    expect(bases.map(({ owner }) => owner)).toEqual([U2, U2, U1, U3, U3]);
     expect(bases.map(({ compile }) => compile)).toEqual([
       { raptor: "pending", graph: "off" },
       { raptor: "off", graph: "off" },
+      null,
       null,
       null,
     ]);
@@ -380,5 +409,89 @@ describe("列表的可见集合、次序与非自有的编译状态", () => {
       `GET /api/v1/datasets/${datasetId}/documents`,
       `GET /api/v1/datasets/${datasetId}/ingestions`,
     ]);
+  });
+});
+
+describe("文档列表与状态：非所有者", () => {
+  it("非所有者看不到来源：workspaceId、path、sourceChanged 为 null，不对所有者工作空间做文件系统调用，无审计", async () => {
+    const world = await openIngest();
+    const { db } = world.fw.world;
+    db.prepare("UPDATE knowledge_bases SET scope = 'all' WHERE id = ?").run(world.baseId);
+    const source = await ingestedRow(world, "docs/a.md", "one");
+    const rf = world.fake.addDocument(world.datasetId, {
+      name: "b.txt",
+      content: "x",
+      ingestionStatus: "COMPLETED",
+      chunkCount: 7,
+    });
+    const upload = world.store.addDocument({
+      kbId: world.baseId,
+      ragflowDocumentId: rf,
+      name: "b.txt",
+      size: 1,
+      source: "upload",
+    });
+    const setCreatedAt = db.prepare("UPDATE kb_documents SET created_at = ? WHERE id = ?");
+    setCreatedAt.run(1000, source.id);
+    setCreatedAt.run(2000, upload.id);
+    world.write("docs/a.md", "one rewritten");
+    const rootOf = vi.spyOn(world.fw.rest.app.workspaces.store, "rootOf");
+    const url = `/api/kb/bases/${world.baseId}/documents`;
+    const uploaded = {
+      id: upload.id,
+      name: "b.txt",
+      size: 1,
+      source: "upload",
+      workspaceId: null,
+      path: null,
+      status: "done",
+      chunkCount: 7,
+      message: null,
+      sourceChanged: null,
+      createdAt: 2000,
+    };
+    const owner = await send(world.fw.rest, "member", "GET", url);
+    expect(owner.statusCode).toBe(200);
+    expect(owner.json<{ documents: unknown[] }>().documents).toEqual([
+      {
+        id: source.id,
+        name: "a.md",
+        size: 3,
+        source: "workspace",
+        workspaceId: W1,
+        path: "docs/a.md",
+        status: "unparsed",
+        chunkCount: null,
+        message: null,
+        sourceChanged: true,
+        createdAt: 1000,
+      },
+      uploaded,
+    ]);
+    expect(rootOf).toHaveBeenCalledWith({ id: "u1" }, W1);
+    rootOf.mockClear();
+    const audited = auditRows(world.fw.world).length;
+    expect(audited).toBeGreaterThan(0);
+    const cookie = await cookieFor(world.fw.rest.app, "zhaoliu");
+    const peer = await world.fw.rest.app.inject({ method: "GET", url, headers: { cookie } });
+    expect([peer.statusCode, peer.headers["cache-control"]]).toEqual([200, "no-store"]);
+    expect(peer.json<{ documents: unknown[] }>().documents).toEqual([
+      {
+        id: source.id,
+        name: "a.md",
+        size: 3,
+        source: "workspace",
+        workspaceId: null,
+        path: null,
+        status: "unparsed",
+        chunkCount: null,
+        message: null,
+        sourceChanged: null,
+        createdAt: 1000,
+      },
+      uploaded,
+    ]);
+    expect(rootOf).not.toHaveBeenCalled();
+    expect(auditRows(world.fw.world).length).toBe(audited);
   });
 });

@@ -355,9 +355,9 @@ Minimal mergeable slice: atomic - 可见判定、两级归属、列表与 `BaseV
 
 ## 6. 非所有者读文档列表（knowledge-bases「文档列表与状态」「知识库端点」读路由）
 
-- [ ] 6.1 核对 Context：`server/src/kb/documents.ts:256-268` 的 `viewOf`（无条件输出 `workspaceId` 与 `path`）、`:635` 的复核点与 `sourceChanged` 的计算路径
-- [ ] 6.2 测试先行：在 `kb-visibility.test.ts` 加「非所有者看不到来源」（三个 `null`、不对所有者工作空间做文件系统调用、无审计）；把「共享库的两级归属」里 `GET …/documents` 改为 200
-- [ ] 6.3 实现：`GET …/documents` 的钩子与 `documents.ts:635` 改用 `readableBase`；列表按 `owned` 分支，非所有者三键为 `null`、跳过 `sourceChanged` 的解析与 stat
+- [x] 6.1 核对 Context：`server/src/kb/documents.ts:256-268` 的 `viewOf`（无条件输出 `workspaceId` 与 `path`）、`:635` 的复核点与 `sourceChanged` 的计算路径
+- [x] 6.2 测试先行：在 `kb-visibility.test.ts` 加「非所有者看不到来源」（三个 `null`、不对所有者工作空间做文件系统调用、无审计）；把「共享库的两级归属」里 `GET …/documents` 改为 200
+- [x] 6.3 实现：`GET …/documents` 的钩子与 `documents.ts:635` 改用 `readableBase`；列表按 `owned` 分支，非所有者三键为 `null`、跳过 `sourceChanged` 的解析与 stat
   - 组 6 约定（#2032 fixture 审查补；6.2–6.3 照此实现与测试）：
     - 6.1 行号更正：`viewOf` 是 `documents.ts:257-270`，列表复核点是 `:636`（`list` 在 `:635`），`sourceChangedOf` 在 `:621-631`（`sources.stat` 在 `:626`）；tasks 头部「`api-kb.ts:419-420`」现为类型 `:135-136,140`、解析器 `:471-472,476`；头部 `documents.ts` 675 现为 676。
     - `bases.ts`：`readableBase`（`:91-98`）改为 `export`，`:91` 注释去掉「组 6 起」的预告；返回对象在 `assertOwned`（`:301-304`）旁加 `assertReadable(id: string, viewerId: string): void`，只调 `readableBase(visibility, id, viewerId)`，注释「读路由的归属判定（不可见 404，可见即放行），先于 body 解析」。不加别的入口，不改 `ownedBase`。
@@ -380,7 +380,7 @@ Minimal mergeable slice: atomic - 可见判定、两级归属、列表与 `BaseV
       - `:312-316`：标题改为「…检索测试与五条写路由 403、文档列表 200，零写入（组 7 把检索测试原地改为 200）」。`VALID` 本身不拆，`:329` 照旧遍历全部七条。先 `await expectAllForbidden(world, VALID.slice(1), id)`，再由 peer 请求 `GET …/${id}/documents`，得 200、`no-store`、`{ documents: [{ id: "doc-1", name: "a.txt", size: 3, source: "upload", workspaceId: null, path: null, status: "missing", chunkCount: null, message: null, sourceChanged: null, createdAt: T0 }] }`；`routes(world.sent())` 为 `["GET /api/v1/datasets/ds-1/documents"]`；三张表的快照不变。
       - 「列表的可见集合、次序与非自有的编译状态」（#2048 的 P2）：在 `:366` 之后、`:368` 的 `forget()` 之前加 `addBase(world, 0, { owner_id: "u3", scope: "all", created_at: T0 + 1 })`；期望改为 id `[a2.id, hex(5), hex(1), hex(3), hex(0)]`，`owned` `[true, true, false, false, false]`，`owner` `[U2, U2, U1, U3, U3]`，`compile` 末尾再加一个 `null`；`routes` 不变。只按 id 排序的实现会让 `hex(0)` 排在非自有第一位，从而变红。
     - `kb-documents-list.test.ts` 不改（「别人的库」那个用例是 `me` 档，仍为 404）；所有者视图的既有用例原样全绿。
-    - 行数（上限 800）：`documents.ts` 676 → ≤ 690；`bases.ts` 315 → ≤ 325；`rest.ts` 308 → ≤ 318；`kb-visibility.test.ts` 384 → ≤ 480。
+    - 行数（上限 800）：`documents.ts` 676 → ≤ 690；`bases.ts` 315 → ≤ 325；`rest.ts` 308 → ≤ 318；`kb-visibility.test.ts` 384 → ≤ 500（实测 497：约定要求的字面量逐字写出）。
     - 非目标：`POST …/retrieval` 与 `retrieval.ts`（组 7）；web 解析器与组件（`DocumentView` 已可为 null，组 9 呈现）；功能验收清单行（D12，对用户惰性）；`smoke/`。
     - 回归命令：`npm run test:focus --workspace server -- kb-visibility`（先红后绿）；`npm run test:focus --workspace server -- kb-visibility kb-documents-list kb-documents kb-bases kb-upload kb-ingest kb-retrieval-endpoint`；`make lint`、`make typecheck`、`make anti-drift`（knip：`readableBase`、`assertReadable` 都有使用者）、`make check`。
 
