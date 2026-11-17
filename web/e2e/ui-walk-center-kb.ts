@@ -10,10 +10,12 @@
 // `/api/kb/status` 与 `GET /api/kb/settings` 由 route 应答（设置严格八键），`/api/models` 走真实服务。不点保存、探活与
 // 清除确认：真实服务的知识库是关闭的，写请求会回 503 `kb_disabled`；只点 `清除重排模型` 再 `取消`，并断言没有非 GET
 // 的设置请求。写路径由 jsdom 用例（web/test/center-models-kb-rerank.test.tsx）覆盖。
+// 共享知识库分支（只读呈现与范围对话框，s2c-kb-visibility 任务 13.2）在 ui-walk-center-kb-shared.ts，检索测试撤桩后调用。
 
 import { join } from "node:path";
 import { env } from "node:process";
 import { expect, type Locator, type Page, type Request, type Route } from "@playwright/test";
+import { walkKbShared } from "./ui-walk-center-kb-shared.js";
 import { login, logout } from "./ui-walk-composer.js";
 import { expectNoHorizontalOverflow, type WalkProject } from "./ui-walk-layout.js";
 import type { AuthOracle } from "./ui-walk-oracle.js";
@@ -154,6 +156,7 @@ export async function walkKbRetrieval(
     await page.unroute(DOCUMENTS_ROUTE);
     await page.unroute(RETRIEVAL_ROUTE);
   }
+  await walkKbShared(page, project);
   await logout(page, oracle, project);
 }
 

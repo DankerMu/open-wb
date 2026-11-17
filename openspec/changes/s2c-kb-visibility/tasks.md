@@ -779,9 +779,9 @@ Minimal mergeable slice: atomic - 范围对话框与新建对话框共用同一�
 
 ## 13. ui-walk：共享知识库分支（knowledge-bases「UI 走查共享知识库」）
 
-- [ ] 13.1 核对 Context：`web/e2e/ui-walk-center-kb.ts`（260 行）的 route 桩与收尾写法；`ui-walk-chat-kb.ts` 的先例
-- [ ] 13.2 实现：新兄弟文件 `web/e2e/ui-walk-center-kb-shared.ts` 写两段（只读呈现、范围对话框），由 `ui-walk-center-kb.ts` 调用；应答体严格按 web 解析器的键集
-- [ ] 13.3 本机 `make ui-walk` 全绿，PR 附命令与退出码、截图清单
+- [x] 13.1 核对 Context：`web/e2e/ui-walk-center-kb.ts`（260 行）的 route 桩与收尾写法；`ui-walk-chat-kb.ts` 的先例
+- [x] 13.2 实现：新兄弟文件 `web/e2e/ui-walk-center-kb-shared.ts` 写两段（只读呈现、范围对话框），由 `ui-walk-center-kb.ts` 调用；应答体严格按 web 解析器的键集
+- [x] 13.3 本机 `make ui-walk` 全绿，PR 附命令与退出码、截图清单
   - 组 13 约定（#2039 fixture 审查补；13.2–13.3 照此实现与测试）：
     - 前置：#2038（组 12）已合入，分支从其后的 master 切出。DOM 契约以组 12 约定为准：四档文案与对话框名、`ScopeFields`、`ScopeDialog`、`list.tsx` 的范围按钮先 `stopPropagation`、`panel.tsx` 在点击里 `load()`、`replaceBase` 整行替换。
     - 13.1 行号核实（#2038 合入前的 master）：
