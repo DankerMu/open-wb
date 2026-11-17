@@ -45,6 +45,9 @@
 | 组 1 首刀：旧迁移不改、旧用例只跟进末尾假设 | 是 | 「既有用例唯一许可改动」清单；PR 描述贴 grep 结果 |
 | 组 1 首刀：Principal 与认证应答形状 | 是 | 「053 之后 Principal 不变」：登录与 `GET /api/auth/me` 逐字节 |
 | 组 1 首刀：权限 / web / kb 行为 | 否 | 本刀没有应用代码读写新列新表；`server/src/kb/store.ts:600` 的 `toBase` 逐字段取值，`BaseView` 不变 |
+| 组 2：截断在关联之后 | 是 | 例 2：第 2、5 条关联不上 → 其余 6 条；先截断再关联会只剩 4 条 |
+| 组 2：只有例 1 先红后绿 | 是 | 例 1 改前得 8 条（红）；例 2 改前已是 6 条，是次序守卫，#2028 AC「两例先红后绿」照此读 |
+| 组 2：出站形状与消费者不变 | 是 | 请求 body 原样（`server/test/kb-retrieval.test.ts:62-69`）；检索测试 `server/src/kb/retrieval.ts:233`、会话检索 `server/src/kb/session-search.ts:149` 的既有用例原样全绿；`server/src/sessions/kb-hits.ts:45` 的 `MAX_HITS` 不动、不合并 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -134,6 +137,17 @@ Minimal mergeable slice: 1.1–1.4 为首刀：迁移由 `openDb` 自动执行�
 - [ ] 2.1 核对 Context：关联本地文档在 `server/src/kb/retrieval.ts:114-129` 的 `retrieveForBase`；`PAGE_SIZE` 在 `server/src/kb/ragflow-retrieval.ts:26`，未导出；`server/test/kb-retrieval.test.ts`（207 行）的故障注入写法
 - [ ] 2.2 测试先行：在 `kb-retrieval.test.ts` 加「上游多给时本地截断」两例（8 条全可关联 → 前 6 条；8 条中两条关联不上 → 其余 6 条）
 - [ ] 2.3 实现：导出 `PAGE_SIZE`，`retrieveForBase` 在关联之后 `slice(0, PAGE_SIZE)`；`kb-retrieval-canonical.test.ts` 与检索测试、会话检索的既有用例原样全绿
+  - 组 2 约定（#2028 fixture 审查补；2.2–2.3 照此实现与测试）：
+    - 注入：两例都用 `fake.fault(ROUTE, {kind:"combo", code:0, data:{chunks:[…8 条…], doc_aggs:[], labels:null, total:8}})`，写法照 `kb-retrieval.test.ts:180-189`，每条只给 `document_id`、`content`、`similarity`。不用 `setRetrievalHits`：假 RAGFlow 不看 `page_size`，以后它若遵守 `page_size`，例 1 会假绿。
+    - 本地行：`addLocal(base.id, "rf-a", "a.md")`、`addLocal(base.id, "rf-b", "b.md")`。可关联的切片在 rf-a、rf-b 之间交替，这样能看出上限按命中数算，不按文档数算。
+    - 切片 #1…#8：`content` 依次为 `段 1`…`段 8`，`similarity` 依次为 0.3、0.8、0.5、0.9、0.1、0.7、0.95、0.6（不单调，#7 最高，先排序再截会留下它）。
+    - 例 1（8 条都能关联）：结果恰为 #1–#6，次序同应答；`fake.requests()` 恰 1 次。改前得 8 条，是先红的那一例。
+    - 例 2：#2、#5 的 `document_id` 为 `rf-orphan-2`、`rf-orphan-5`，任何库都没有这两个本地行（同 `kb-retrieval.test.ts:117` 的 `rf-orphan`）。结果恰为 #1、#3、#4、#6、#7、#8。改前已绿，它守的是截断次序：先截断再关联只剩 4 条。
+    - 期望值写字面量。测试不 import `PAGE_SIZE`（文件头 `kb-retrieval.test.ts:4`：不从 `src/` 取期望值）。
+    - 实现：`ragflow-retrieval.ts:26` 改为 `export const PAGE_SIZE = 6;`，加一行 JSDoc，说明请求的 `page_size` 和关联后的截断都用它。`retrieval.ts:26` 改为 `import { PAGE_SIZE, type RetrievalQuery } from "./ragflow-retrieval.js"`（不是 `ragflow-client.ts:58` 那个 100）。`retrieval.ts:130` 返回 `hits.slice(0, PAGE_SIZE)`。`retrieval.ts:11-12` 文件头「命中关联」一条补一句「关联之后至多保留前 `PAGE_SIZE` 条」。
+    - 不动：`session-search.ts:24` 的工具描述；`sessions/kb-hits.ts:45` 的 `MAX_HITS`（会话侧对子进程事件的独立校验，不在本 PR 合并）。
+    - 行数：`kb-retrieval.test.ts` 207（+约 45）、`retrieval.ts` 240、`ragflow-retrieval.ts` 91，都远低于 800。
+    - 回归命令：`npm run test:focus --workspace server -- kb-retrieval kb-session-search session-kb-hits session-host-tool-align`（`kb-retrieval` 已匹配 canonical、endpoint、abort、rerank），再跑 `make lint`、`make typecheck`、`make anti-drift`（knip：`PAGE_SIZE` 由 `retrieval.ts` 使用），最后 `make check`。
 
 Suggested fixture level: compact - 一个已有函数内的一行截断与一个常量导出，没有接口、schema 或权限变化。
 Minimal mergeable slice: atomic - 一处改动对应一个场景的两例，无可再分。
