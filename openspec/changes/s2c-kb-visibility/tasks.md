@@ -37,6 +37,14 @@
 | 跨服务契约（`BaseView` 加键而 web 严格解析） | 是 | 组 5 同 PR 改两端与 ui-walk 桩 |
 | 隐私（所有者沙箱路径外泄） | 是 | 组 6：非所有者文档列表的三个 `null` 与「不 stat」；组 11 依赖它（D12） |
 | 中间态 | 是 | 组 11 最后合入（D12）；依赖头即合入次序约束 |
+| 组 1 首刀：迁移原子性与可重试 | 是 | 「组 1 首刀约定」的「中途失败原子回滚」用例：冲突落在第 ⑥ 句，①–⑤ 必须一并回滚 |
+| 组 1 首刀：存量数据不变（052 → 053） | 是 | 「升级保留既有的库」：两个库除新两列外逐值不变；其余表逐行、其余 schema 对象、`sqlite_sequence` 不变 |
+| 组 1 首刀：回执次序与目录计数 | 是 | `COMPLETE_CATALOG` 27 条；053 紧随 052 |
+| 组 1 首刀：种子进生产库 | 是 | 「种子与约束」字面量断言；新库与 052 升级库结果相同 |
+| 组 1 首刀：外键语义（RESTRICT 与双向 CASCADE） | 是 | 「列与约束」删 g1 失败且三表不变；「级联」组侧、账号侧各一例 |
+| 组 1 首刀：旧迁移不改、旧用例只跟进末尾假设 | 是 | 「既有用例唯一许可改动」清单；PR 描述贴 grep 结果 |
+| 组 1 首刀：Principal 与认证应答形状 | 是 | 「053 之后 Principal 不变」：登录与 `GET /api/auth/me` 逐字节 |
+| 组 1 首刀：权限 / web / kb 行为 | 否 | 本刀没有应用代码读写新列新表；`server/src/kb/store.ts:600` 的 `toBase` 逐字段取值，`BaseView` 不变 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -44,6 +52,76 @@
 - [ ] 1.2 测试先行：新文件 `server/test/migration-053.test.ts` 覆盖 account-groups「迁移 053 部门与项目组」与 knowledge-bases「迁移 053 知识库范围列」的全部场景（种子、CHECK、外键 RESTRICT 与 CASCADE、052 → 053 升级保留既有库），以及 dev-stub-auth「053 之后 Principal 不变」（登录与 `GET /api/auth/me` 不含 `department`）
 - [ ] 1.3 实现 `053_kb_visibility.sql`（design D1；列级 CHECK 引用另一列已于 2026-11-17 在 node:sqlite 实测可用，以 1.2 的用例为准）
 - [ ] 1.4 原地改精确形状断言：迁移清单与计数 +1；`auth-schema.test.ts` 保留 010 的 5 列契约断言、对全量迁移后的库断言多 `department`；`kb-schema.test.ts` 的列与外键清单加两列
+  - 组 1 首刀约定（#2026 fixture 审查补；1.2–1.4 照此实现与测试）：
+    - 迁移文件 `server/src/core/db/migrations/053_kb_visibility.sql`：文件头注释照 052 的写法，写明：来源（#2026，s2c-kb-visibility design D1；account-groups「迁移 053 部门与项目组」、knowledge-bases「迁移 053 知识库范围列」）；种子与 010 同一先例进生产库；`scope_group_id` 用 RESTRICT 的理由（S3a 删组前先把库退回 `me`）；不含 `IF NOT EXISTS` / `OR IGNORE` / `OR REPLACE`（同名冲突必须让事务失败）；事务与回执归 runner（无 BEGIN / COMMIT / PRAGMA）；迁移不逆转。更早的迁移文件一律不改。
+      - 正文语句次序固定（回滚用例依赖它）：① `ALTER TABLE accounts ADD COLUMN department TEXT NULL CHECK (…)` ② `CREATE TABLE project_groups` ③ `CREATE TABLE project_group_members` ④ `CREATE INDEX project_group_members_account ON project_group_members(account_id)`（命名照 `experts_owner`、`chat_approvals_message`）⑤ `ALTER TABLE knowledge_bases ADD COLUMN scope TEXT NOT NULL DEFAULT 'me' CHECK (scope IN ('me','dept','group','all'))` ⑥ `ALTER TABLE knowledge_bases ADD COLUMN scope_group_id TEXT NULL REFERENCES project_groups(id) ON DELETE RESTRICT CHECK ((scope = 'group') = (scope_group_id IS NOT NULL))` ⑦ `UPDATE accounts` 给 u1 `平台研发部`、u2 `数据部`、u3 `产品部` ⑧ `INSERT INTO project_groups` 一行 `('g1','内网落地专项',0)` ⑨ `INSERT INTO project_group_members` 两行 `('g1','u1')`、`('g1','u2')`。
+      - 文本 CHECK 照 `050_knowledge_bases.sql:62-67`：`typeof(x) = 'text' AND length(x) BETWEEN 1 AND 64 AND instr(x, char(0)) = 0 AND x NOT GLOB ('*[' || char(1) || '-' || char(31) || char(127) || ']*')`。用于 `department`（另允许 NULL）、`project_groups.id`、`project_groups.name`。
+      - `project_groups.created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer' AND created_at >= 0)`：规格写「非负整数」，以规格为准。g1 的种子值为 0（不取墙钟，先例是 050 `kb_settings.updated_at` 从 0 起）。
+      - `project_group_members(group_id TEXT NOT NULL REFERENCES project_groups(id) ON DELETE CASCADE, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, PRIMARY KEY (group_id, account_id))`。
+      - 不给 `accounts.department`、`knowledge_bases.scope`、`knowledge_bases.scope_group_id` 建索引，也不加触发器：`auth-schema.test.ts:490` 与 `kb-schema.test.ts:180` 的 `uniqueIndexKeys` 要求这两张表上只有唯一索引。
+    - 权威用例：新文件 `server/test/migration-053.test.ts`（头部规定 `auth-schema.test.ts` 737 行等文件不加新用例）。053 按目录位置定位：`POS = TRACKED_MIGRATION_FILENAMES.indexOf(MIGRATION_053)`，紧随 052。期望值写字面量，不从迁移反推。
+      - 目录：`POS` 为 26；`TRACKED_MIGRATION_FILENAMES[25]` 为 `MIGRATION_052`；053 恰出现一次；`COMPLETE_CATALOG.receipts[26]` 为 `[27, MIGRATION_053]`；`sequenceRows` 为 `[["schema_migrations", 27, "integer"]]`。源码不匹配 `/\b(IF NOT EXISTS|OR IGNORE|OR REPLACE|BEGIN|COMMIT|PRAGMA)\b/i`。
+      - 新库形状（`:memory:` 与新文件各一次；新文件再走 `expectRepeatedOpenStable`）：
+        - `PRAGMA table_info(accounts)` 末行为 `["department","TEXT",0,null,0]`，前 5 行列名为 `id, account, role, disabled, password_hash`。
+        - `project_groups` 为 `[["id","TEXT",1,null,1],["name","TEXT",1,null,0],["created_at","INTEGER",1,null,0]]`。
+        - `project_group_members` 为 `[["group_id","TEXT",1,null,1],["account_id","TEXT",1,null,2]]`；`sortedForeignKeys` 为 `account_id→accounts.id CASCADE`、`group_id→project_groups.id CASCADE`；`PRAGMA index_list` 含非唯一、非部分的 `project_group_members_account`，列为 `account_id`。
+        - `knowledge_bases` 末两行为 `["scope","TEXT",1,"'me'",0]`、`["scope_group_id","TEXT",0,null,0]`。
+        - `PRAGMA foreign_key_check` 为 `[]`。
+      - 「种子与约束」：
+        - `SELECT id, department FROM accounts ORDER BY id` 为 `[{u1,平台研发部},{u2,数据部},{u3,产品部},{u4,null}]`；`project_groups` 为 `[{id:"g1",name:"内网落地专项",created_at:0}]`；`project_group_members ORDER BY group_id, account_id` 为 `[{g1,u1},{g1,u2}]`。
+        - 五次写入各自报错，每次之后 accounts 整表、`project_groups`、`project_group_members` 逐行不变：`UPDATE accounts SET department = ? WHERE id = 'u1'` 写 `''`、`'部'.repeat(65)`、`'a\u0007b'`，均为 `/CHECK constraint failed/`；`INSERT INTO project_groups VALUES ('g2','内网落地专项',0)` 为 `/UNIQUE constraint failed: project_groups.name/`；`INSERT INTO project_group_members VALUES ('g1','nope')` 为 `/FOREIGN KEY constraint failed/`。
+        - 最后写 `'部'.repeat(64)` 成功：按字符计长，不按字节。
+      - 「列与约束」（knowledge-bases）：新库插入 `BASE_ROW`（`kb-store-helpers.ts:20`，owner u1）。
+        - 依次 `UPDATE`：`('group', NULL)` 为 CHECK；`('all','g1')` 为 CHECK；`('group','g9')` 为 FOREIGN KEY；`('team', NULL)` 为 CHECK。每次之后该行 `{scope:'me', scope_group_id:null}`。
+        - 再写 `('group','g1')` 成功。
+        - 然后 `DELETE FROM project_groups WHERE id = 'g1'` 为 FOREIGN KEY：g1 行、两条成员行与库行（`group`/`g1`）都不变。
+      - 「级联」：新库 `DELETE FROM project_groups WHERE id = 'g1'` 后成员表为 `[]`，accounts 不变；另一个新库 `DELETE FROM accounts WHERE id = 'u2'` 后成员表为 `[{g1,u1}]`。
+      - 「升级保留既有的库」：
+        - `seedThrough`（`core-db-session-fixture.ts:222`）停在 052，插入 `BASE_ROW` 与 `{...COMPILE_ROW, id: hex(2), owner_id: "u2", name: "数据手册", dataset_id: "ds-2"}`。读 before：两库整行、accounts 的 5 列、`tbl_name` 不在四张表（`accounts`、`knowledge_bases`、`project_groups`、`project_group_members`）里的 `sqlite_master` 行，以及其余每张表 `SELECT * … ORDER BY rowid`。
+        - `openDb` 之后：
+          - 两库 `scope` 为 `'me'`、`scope_group_id` 为 NULL，其余列逐值等于 before；
+          - accounts 的 5 列等于 before，部门与 g1、成员同新库字面量；
+          - 其余表、schema 对象、除 `schema_migrations` 外的 `sqlite_sequence` 都不变；
+          - 回执 `ledgerRows(db).slice(25, 27)` 为 `[[26, MIGRATION_052],[27, MIGRATION_053]]`；`expectCatalogSnapshot(db, COMPLETE_CATALOG)`；`expectRepeatedOpenStable` 通过。
+      - 「中途失败原子回滚」：
+        - 停在 052 的副本插入同样两库后，手工 `ALTER TABLE knowledge_bases ADD COLUMN scope_group_id TEXT` 预置冲突。`expectOpenDbFailure(file, /duplicate column name: scope_group_id/)`。
+        - 之后 `fullCatalogSnapshot` 与此前相等；无 053 回执；`columnNames(db, "accounts")` 恰为 5 列（①已回滚）；`tableExists` 对 `project_groups`、`project_group_members` 为 false（②③已回滚）；`knowledge_bases` 无 `scope` 列（⑤已回滚）；两库整行不变。
+        - 然后 `ALTER TABLE knowledge_bases DROP COLUMN scope_group_id`，重试恰应用一次，结果与「升级保留既有的库」相同，再开一次稳定。
+      - 「053 之后 Principal 不变」：`withApp({}, …)`（`auth-lifecycle-helpers.ts:71`）。
+        - 以 `CREDENTIALS`（`session-db-helpers.ts:15`）`POST /api/auth/login`，200，payload 逐字节为 `{"id":"u1","account":"zhangsan","role":"成员"}`。
+        - 带它的 cookie 调 `requestMe`（`auth-lifecycle-helpers.ts:95`），payload 逐字节相同，`Object.keys` 为 `["id","account","role"]`。
+        - 同一库里 `SELECT department FROM accounts WHERE id='u1'` 为 `平台研发部`（列存在但不外泄）。
+      - 不复制 `migration-052.test.ts` 的 `COLUMNS_051` / `kept`（jscpd）；`kb-schema.test.ts:240-248` 的 `rowsWithout` 原地移进 `kb-store-helpers.ts` 导出，由两个文件共用。
+    - 目录与计数（`core-db-helpers.ts`）：`:33` 后加 `MIGRATION_053 = "053_kb_visibility.sql"`；`:60` 后进跟踪清单；`:132` 后加 `[27, MIGRATION_053]`；`:134` 改为 27（注意 1.1 引的 106-133 不含 `:134`）；另导出一个常量，列 053 触及的四张表（`accounts`、`knowledge_bases`、`project_groups`、`project_group_members`），供下面的剔除共用。
+    - 既有用例唯一许可改动（凡断言「完整链末尾是 052」或「完整链的 accounts / knowledge_bases / schema 对象全集」的地方原地跟进；只停在更早迁移、按位置截前缀的用例不动）：
+      - `auth-schema.test.ts:446` 改为 `[...EXPECTED_ACCOUNT_COLUMNS, "department"]`；`:54` 常量作为 010 契约 5 列保留，名字和值都不改。`:496-518` 表清单在 `"mount_sources"` 后插入 `"project_group_members"`、`"project_groups"`（BINARY 序，`_` < `s`）。调用点 `:131`、`:365` 不改。
+      - `kb-schema.test.ts`：
+        - `:107-127` 末尾加两行列元组；`:177` 改为 `[["owner_id","accounts","id","RESTRICT"],["scope_group_id","project_groups","id","RESTRICT"]]`。
+        - `:200` 与 `:341` 的 schema 比较两侧按 `tbl_name` 剔除四表对象（`with052` 保留；四表的变化由 migration-053 逐项断言），不得为此整体放宽 `existingSchema` / `untouchedSchema` 的其余部分。
+        - `:196/201` 两侧都改为不含 `department` 的读法（`rowsWithout(db, "accounts", ["department"])`）。
+        - `:343` 的 dropped 加 `scope`、`scope_group_id`。
+        - `:352` 改为 `[["schema_migrations", TRACKED_MIGRATION_FILENAMES.length, "integer"]]`（先例 `migration-045.test.ts:284`）。
+      - `migration-052.test.ts`：`:146` 同样剔除四表对象（保留 `name <> 'chat_messages'`）；`:167` 改为 `{ seq: TRACKED_MIGRATION_FILENAMES.length }`；`:217` 同 `kb-schema.test.ts:352` 的改法。
+      - `core-db-session-fixture.ts:312` 的 `NOT IN` 列表末尾加 `'project_groups','project_group_members'`。这一处让 `preservedState` 的 10 个使用者跟随：`core-db-message-error`、`core-db-message-thinking-ms`、`core-db-session-archive`、`core-db-session-composer`、`core-db-session-metadata`、`core-db-session-todo`、`core-db-turn-snapshots`、`core-db-workspace-temporary`、`migration-045`、`migration-052`，这些文件本身不改。
+      - 例外：用「排除其后每个迁移」搭早期前缀的 `migration-034.test.ts:273-291` 在 `:291` 后加 `MIGRATION_053`（import 在 `:43` 后）；`core-db-chat-step-output.test.ts:98` 改为 `&&` 并加 `asset.filename !== MIGRATION_053`（import 在 `:36` 后）。不改成别的写法。
+      - 已核实不需要改：
+        - 按 `TRACKED_MIGRATION_FILENAMES.length` 断言的：`core-db-turn-snapshots.test.ts:206,231`、`core-db-session-todo.test.ts:67`、`migration-045.test.ts:284`、`experts-store.test.ts:124`、`connectors-store.test.ts:122`、`mounts-store.test.ts:170`。
+        - 同库前后快照：`app.test.ts:229-255`、`auth-login.test.ts:572-577`、`kb-session-search.test.ts:186,271`、`kb-store.test.ts:528-595`。
+        - 列冻结在 045：`models-store.test.ts:157-199`。
+        - 停在 047：`experts-store.test.ts:183-187`。
+        - accounts 显式 5 列读取：`auth-schema.test.ts:576`、`core-db-chat-schema.test.ts:254`、`session-db-helpers.ts:86`。
+        - 实施时再 grep 一遍，把完整清单写进 PR。
+    - 行数（上限 800）：
+      - 新测试文件 ≤ 400；`core-db-helpers.ts` 556 → ≤ 562；`auth-schema.test.ts` 737 → ≤ 740；`kb-schema.test.ts` 495 → ≤ 505；`migration-052.test.ts` 277 → ≤ 282；`core-db-session-fixture.ts` 404 不增；`migration-034.test.ts` 722 → ≤ 724；`core-db-chat-step-output.test.ts` 188 → ≤ 190；`kb-store-helpers.ts` 130 → ≤ 142。
+      - 本 PR 预计超过 400 行（review-only），PR 描述援引组 1 的 Width exception 说明理由。
+    - 非目标：
+      - `scopeOf` 与 `GET /api/accounts/me/scope`（1.5–1.7）；任何读写 `scope` / 部门 / 项目组的 kb 或 accounts 代码（组 5 起）。
+      - 新列上的索引、触发器；文档同步（组 14）；web。
+      - 缺 u1 或 u2 的存量库：应用侧没有删改账号的路径（`server/src` 里只有 010 写 accounts），种子成员行的外键失败不在输入域内。
+    - 回归命令：
+      - `npm run test:focus --workspace server -- migration-053 migration-0 auth-schema auth-lifecycle auth-login kb-schema kb-store kb-bases core-db`（先红后绿）；
+      - 再跑全量 `npm test --workspace server`（schema 断言散在多个文件，全量兜底）；
+      - `make lint`、`make typecheck`、`make anti-drift`（jscpd 与 knip：新导出必须有使用者）。
 - [ ] 1.5 核对 Context：`server/src/accounts/index.ts` 的 `registerAccounts` 与 `/api/audit` 的 no-store 写法
 - [ ] 1.6 测试先行：新文件 `server/test/accounts-scope.test.ts` 覆盖「账号范围端点」全部场景（u4 先带外启用；停用账号 401；`memberCount`）
 - [ ] 1.7 实现新文件 `server/src/accounts/scope.ts`：`scopeOf(db, accountId) → {department, groups:[{id, name, memberCount}]}`（组按 `name` 码点升序）；`registerAccounts` 注册 `GET /api/accounts/me/scope`
