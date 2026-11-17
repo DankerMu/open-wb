@@ -6,7 +6,7 @@
 
 ### Requirement: 入库世界的泄密哨兵覆盖 console
 输出泄密哨兵 SHALL 只有一份实现，放在中立的测试支架模块 `server/test/support/output-sentinel.ts`：
-- 收集器工厂 `outputCollector()`：`start()` 装 spy，`stop()` 恢复全部 spy 并返回收集到的文本。它在每个用例期间同时收集 `process.stdout.write`、`process.stderr.write` 与 `console` 的 `log`、`info`、`warn`、`error`、`debug` 的输出；`write` 收到的 `Uint8Array`/`Buffer` 块按 UTF-8 解码。收集器 SHALL 可嵌套：`start()` 时方法已被 spy 的，只从当时的调用数之后读起，`stop()` 不恢复它，外层收集器的记录与 spy 不受内层影响。收集到的 `console` 输出 SHALL 仍照常交给 vitest（spy 不吞输出）。
+- 收集器工厂 `outputCollector()`：`start()` 装 spy，`stop()` 恢复自己装的 spy 并返回收集到的文本。它在每个用例期间同时收集 `process.stdout.write`、`process.stderr.write` 与 `console` 的 `log`、`info`、`warn`、`error`、`debug` 的输出；`write` 收到的 `Uint8Array`/`Buffer` 块按 UTF-8 解码。收集器 SHALL 可嵌套：`start()` 时方法已被 spy 的，只从当时的调用数之后读起，`stop()` 不恢复它，外层收集器的记录与 spy 不受内层影响。收集到的 `console` 输出 SHALL 仍照常交给 vitest（spy 不吞输出）。
 - 判定函数 `expectNoSentinel(text, sentinels)`：文本含任一哨兵就抛错，信息只点名命中的哨兵，不回显文本。
 
 `server/test/kb-ingest-helpers.ts` 的 `useIngestWorlds` 与 `server/test/kb-settings-helpers.ts` 的 `useSettingsWorlds` SHALL 都用这两个函数，收尾时分别断言收集到的文本不含各自的哨兵：入库世界是 `CONTENT_SENTINEL` 与 `MESSAGE_SENTINEL`，设置世界是它的密钥与泄漏哨兵列表（`SENTINELS`）。两个世界的收尾 SHALL 先跑各自的收尾检查、关闭世界与假服务（检查失败时照样关闭），再在最外层 `finally` 里停止收集并判定；收尾检查失败或关闭抛错时 spy 也恢复。这两个世界工厂里 SHALL NOT 再有自带的输出收集或哨兵比对逻辑。判定与收集器可直接调用，让用例能断言它会抓到泄漏，而不必依赖 `afterEach` 自己失败。
