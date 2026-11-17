@@ -64,6 +64,15 @@
 | 组 4：「无引用」只有一处定义 | 是 | 判定放在 `admitKnowledgeBases` 内、`store-knowledge-bases.ts:43-45` 的空值短路之后（同 `prompt-attachments.ts:142` 的写法），`rest.ts` 不另写「非空」判断；缺省与 `[]` 照常受理 |
 | 组 4：只拦 `builtin` | 是 | 去首尾空白后的 ` /todo` 是 builtin（`prompt-attachments.ts:63` 先 trim）；`/todo import …`、未知 `/x`、`/skill:<名>` 不是（`slash-commands.ts:286-309`），带引用照常受理；用 `/todo import a.md` 作已绿的反向守卫 |
 | 组 4：web / ui-walk / smoke | 否 | `web/e2e/ui-walk-chat-kb.ts` 不发 `/compact`，`smoke/` 无 `knowledgeBases`；web 用例在组 10 |
+| 组 5：可见判定只有一处 | 是 | `kb/visibility.ts` 两条语句共用同一谓词常量，查看者经 `JOIN accounts AS v ON v.id = ?` 只绑定一次；扫描用例对三类 SQL 字面量断言「命中文件集合恰为点名文件」（非空，防空过），`accounts/scope.ts` 在白名单内 |
+| 组 5：不可探测 | 是 | 七条 `:id` 路由对不可见库与不存在 id：状态码、body 字节、去掉 `date` 后的响应头全等；坏 body、超 16 KiB、`doc=`、bodyless 带 `{}`、上传错媒体类型下仍逐字节相同；零出站、无审计、行不变 |
+| 组 5：403 先于 body、不写 | 是 | 本刀七条路由（含 `GET …/documents`、`POST …/retrieval`）对可见非所有者都 403 同一信封；畸形或超限请求也是 403 不是 400；零出站；`audit_events`、`knowledge_bases`、`kb_documents` 逐行不变 |
+| 组 5：现查与无特权 | 是 | 带外改部门、删/加成员、改组名、停用所有者后，同一 cookie 下一次请求即变；u3（管理员）只看到 `all`；查看者部门为空、所有者部门为空都不匹配 |
+| 组 5：列表次序 | 是 | 自有库 `created_at` 晚于他人库仍排在前；他人库两行 `created_at` 相同、插入次序与 id 次序相反，结果按 id；自有的第二个库带外写 `created_at = A2+1`，不靠同毫秒 |
+| 组 5：非自有不读编译 | 是 | 非自有 raptor 库与非自有两开关都关的库 `compile` 都为 `null`；假 RAGFlow 只收到自有 raptor 库的文档列表与任务日志两条读取 |
+| 组 5：跨服务严格解析 | 是 | 同一 PR 改 `api-kb.ts` 解析器、`center-kb-support.tsx` 的 `base()`、两个 typed `BASE`、`api-kb.test.ts:212-226` 的 `malformed` 映射（不改即 typecheck 红）、ui-walk 的 `BASE`；ui-walk 对新 build 的 `web/dist` 跑 |
+| 组 5：死代码 | 是 | `readableBase` 本刀只作 `ownedBase` 的第一级，模块内、不导出；路由钩子的读入口由组 6（第一个使用者）加，本刀 `assertOwned` 只此一个入口 |
+| 组 5：白盒 | 是 | 多租户过滤（灰盒例外候选，design Risks）：PR 标题与描述写明「请求白盒审查」 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -270,6 +279,71 @@ Minimal mergeable slice: atomic - 一条判定一组用例。
 - [ ] 5.4 实现新文件 `server/src/kb/visibility.ts`（design D2：一条 SQL 的 `visibleBases(viewerId)` 与 `accessOf(id, viewerId)`；列表改经它取可见集合，`kb/store.ts` 不加读 `scope` 列的 SQL）；`ownedBase` 原地改为两级（`readableBase` / `ownedBase`），`assertOwned` 拆读写两个入口，不留旧函数；本刀全部 `:id` 路由仍用 `ownedBase`；列表改为可见集合与 D2 次序，编译状态只为自有库读；`BaseView` 加 `owned`、`owner`、`scope`
 - [ ] 5.5 原地改精确形状断言：`kb-bases-list.test.ts:18-30`、`kb-bases.test.ts:141-153`、`kb-bases-compile.test.ts:188`
 - [ ] 5.6 实现（web）：`api-kb.ts` 的类型与解析器加三键；web 夹具、`api-kb.test.ts:77` 的 typed `BASE` 与 `api-kb-retrieval.test.ts:36` 补三键；ui-walk 的 `BASE`（`ui-walk-center-kb.ts:46-57`，`ui-walk-chat-kb.ts` 展开复用它）按 `owned:true` 自有库补三键；本刀不改任何组件；本机 `make ui-walk` 全绿，PR 附命令与退出码
+  - 组 5 约定（#2031 fixture 审查补；5.2–5.6 照此实现与测试）：
+    - 5.1 行号更正：`retrieval.ts` 的复核点是 `:187`（`readyBase`，`:182-191`，被 `:199`、`:232` 调用）；`kb-bases-compile.test.ts` 的 201 字面量是 `:182-193`；ui-walk 的 `BASE` 是 `ui-walk-center-kb.ts:46-58`。其余 5.1 行号已核实。
+    - 与 5.4 的差异（审查裁定）：5.4 的「`assertOwned` 拆读写两个入口」改为本刀只有写入口——本刀没有读路由使用者，读入口与 `readableBase` 的导出由组 6（第一个使用者）加，免得留无引用导出。
+    - 新文件 `server/src/kb/visibility.ts`（≤ 110 行）：
+      - 导出 `createKbVisibility(db: DatabaseSync)`，返回 `{ visibleBases(viewerId: string): BaseAccess[]; accessOf(id: string, viewerId: string): BaseAccess | null }`。
+      - 导出 `interface BaseAccess { base: KnowledgeBase; owned: boolean; owner: { id: string; account: string; department: string | null }; scope: { scope: "me" | "dept" | "group" | "all"; group: { id: string; name: string } | null } }`。在 D2 的形状上加 `scope`：`BaseView` 与组 7 的审计 detail 都取它。`KnowledgeBase` 不加字段（`kb-store.test.ts:165` 等是整对象断言）。
+      - `store.ts` 只把 `function toBase` 改成导出，供映射用（不加 SQL，`store.ts` 658 行不增）。
+      - SQL：一个 SELECT 常量加一个谓词常量，两条预编译语句共用：
+        `SELECT kb.*, kb.owner_id = v.id AS owned, o.account AS owner_account, o.department AS owner_department, g.name AS group_name FROM knowledge_bases AS kb JOIN accounts AS o ON o.id = kb.owner_id JOIN accounts AS v ON v.id = ? LEFT JOIN project_groups AS g ON g.id = kb.scope_group_id`
+        谓词：`(kb.owner_id = v.id OR kb.scope = 'all' OR (kb.scope = 'dept' AND v.department IS NOT NULL AND v.department = o.department) OR (kb.scope = 'group' AND EXISTS (SELECT 1 FROM project_group_members AS m WHERE m.group_id = kb.scope_group_id AND m.account_id = v.id)))`
+        - `visibleBases`：`WHERE <谓词> ORDER BY owned DESC, kb.created_at, kb.id`，`.all(viewerId)`。
+        - `accessOf`：`WHERE kb.id = ? AND <谓词>`，`.get(viewerId, id)`（占位符次序：v 在前）。
+        - 不按角色分支，不读 `disabled`，不缓存；JS 里不排序。
+      - 映射：`owned` 为 `row.owned === 1`；`owner` 按 `id`（取 `kb.owner_id`）、`account`、`department` 的键序构造；`scope` 为 `{ scope, group }`，`scope_group_id` 为 NULL 时 `group` 为 `null`，否则为 `{ id, name }`。
+      - 装配：`kb/index.ts` 在 `const store = createKbStore(app.db)` 之后建 `const visibility = createKbVisibility(app.db)`，传给 `createKbBases`、`createKbDocuments`、`createKbUploads`、`createKbRetrieval`。各自的依赖接口加 `visibility: Pick<ReturnType<typeof createKbVisibility>, "accessOf">`，bases 再加 `"visibleBases"`。测试里没有直接构造这四个模块，无连带改动。
+    - `bases.ts` 两级归属（`:88-99` 原地改，不留旧函数）：
+      - 模块内 `readableBase(visibility, id, viewerId): BaseAccess`：`accessOf` 为 `null` 时抛 `not_found`。本刀不导出，组 6 导出并接到读路由。
+      - `export function ownedBase(visibility, id, viewerId): BaseAccess`：先走 `readableBase`，`owned` 为假时抛 `forbidden`。
+      - 8 个调用点只改第一个实参并解构 `{ base }`：`bases.ts:200`、`documents.ts:364,374,396,635`、`uploads.ts:249,267`、`retrieval.ts:187`（`readyBase` 的第一个参数从 store 改为 visibility）。
+      - `assertOwned`（`:282-285`）照旧是钩子唯一入口，改为调用新的 `ownedBase`；`rest.ts:194-197` 的钩子不改。本刀不加读入口（组 6 加）。
+      - `viewOf`（`:169-188`）改为 `viewOf(access, documents, compile)`，输出键序为 `id, name, template, raptor, graph, state, stateMessage, documents, compile, retrieval, createdAt, owned, owner, scope`。
+      - 建库（`:235-248`）：`try` 里只 `createBase`，`catch` 照旧 discard 后重抛；`try` 之后再 `return viewOf(ownedBase(visibility, base.id, ownerId), 0, createdCompile(base))`。读访问失败不会触发删 RAGFlow 资源。
+      - 列表（`:267-273`）：`const accesses = visibility.visibleBases(viewerId); const owned = accesses.filter(a => a.owned).map(a => a.base); const compiles = await compileStatus.read(owned);` 按 id 建表回填；非自有库恒为 `null`，包括两开关都关的库。只调用一次 `read`，5 s 期限共用（`compile-status.ts:137-160`）。
+      - `KbBasesDependencies.store` 的 Pick 删掉 `"listBases"`（`:47`）。`store.listBases` 仍由 `session-search.ts:135,158` 使用，knip 不报，组 8 删。
+      - 注释同步：`bases.ts:13,17-18,88,267,282`；`rest.ts:23-25,30,33,36`，「所有权」改为「归属（不可见 404、可见非所有者 403）」。
+    - 新测试文件 `server/test/kb-visibility.test.ts`（≤ 560 行）：
+      - 夹具：世界用 `useSettingsWorlds` 加 `configuredWorld`；次序用例用 `chatWorld`（`kb-settings-helpers.ts`）。member、peer、admin 分别是 u1（zhangsan）、u2（zhaoliu）、u3（lisi）。u4 每个用例按需先 `enableAccount(world.db, "u4")`（`session-db-helpers.ts:127`），再取 `cookieFor(world.app, "wangwu")`（`session-rest-helpers.ts:221`），本文件写一个小助手直接 `app.inject`。库行用 `insertRow` 加 `BASE_ROW`、`COMPILE_ROW`、`UPLOAD_ROW` 与 `hex`（`kb-store-helpers.ts:18-39`），`T0` 为 1_760_000_000_000。期望值一律写字面量。
+      - 常量：U1 = `{id:"u1",account:"zhangsan",department:"平台研发部"}`；U2 = `{id:"u2",account:"zhaoliu",department:"数据部"}`；U3 = `{id:"u3",account:"lisi",department:"产品部"}`；G1 = `{scope:"group",group:{id:"g1",name:"内网落地专项"}}`。
+      - 「四档 × 查看者」：u1 名下带外插入 Km=hex(1)（me，T0+1）、Kd=hex(2)（dept，T0+2）、Kg=hex(3)（group/g1，T0+3）、Ka=hex(4)（all，T0+4）。
+        - 各人列表的 id：u1 `[Km,Kd,Kg,Ka]`；u2 `[Kg,Ka]`；u3 `[Ka]`；u4 `[Ka]`。
+        - u2 的两项按 14 键 `toEqual`。Kg 为 `{…, compile:null, owned:false, owner:U1, scope:G1, createdAt:T0+3}`；Ka 的 `scope` 为 `{scope:"all",group:null}`，`compile` 为 `null`。
+        - u1 的 Kd 为 `owned:true`、`compile:{raptor:"off",graph:"off"}`、`scope:{scope:"dept",group:null}`。
+        - `world.sent()` 为 `[]`。u3 请求 `GET …/Km/documents` 得 404，请求 `GET …/Ka/documents` 得 403。
+      - 「同部门与空部门」：`UPDATE accounts SET department='平台研发部' WHERE id='u2'` 之后，u2 为 `[Kd,Kg,Ka]`。再把 u1 的部门改为 NULL：u2 为 `[Kg,Ka]`，其中 Kg 的 `owner.department` 为 `null`；u4 为 `[Ka]`；u1 仍为四个。
+      - 「成员关系现查」：u2 请求 `GET …/Kg/documents` 得 403（本刀）；删除成员行 `(g1,u2)` 之后 u2 为 `[Ka]`、同一请求得 404 `NOT_FOUND`；插入成员行 `(g1,u3)` 后 u3 为 `[Kg,Ka]`；`UPDATE project_groups SET name='新专项'` 后 u3 的 Kg `scope` 为 `{scope:"group",group:{id:"g1",name:"新专项"}}`。
+      - 「停用的所有者」：`disableAccount(world.db,"u1")` 之后，u2 为 `[Kg,Ka]`，`owner` 都是 U1。
+      - 「共享库的两级归属（本刀七条都 403）」：K=hex(1)（u1，all，ready），带 `UPLOAD_ROW` 一行文档。
+        - peer 依次请求：GET 文档列表、POST retrieval（合法 body，参数与已存值不同）、DELETE 库、POST documents（`{workspaceId:"w1",paths:["a.md"]}`）、`DELETE …/documents?doc=doc-1`、`POST …/reingest?doc=doc-1`、`POST …/uploads?name=a.md`（`application/octet-stream`）。
+        - 七次都是 403、信封都是 `FORBIDDEN`（`kb-settings-helpers.ts:42`）、都带 `cache-control: no-store`；`world.sent()` 为 `[]`。
+        - 前后快照逐行相等：`SELECT * FROM knowledge_bases ORDER BY id`、`SELECT * FROM kb_documents ORDER BY id`、`SELECT * FROM audit_events ORDER BY id`。
+        - 用例名注明「组 6、组 7 把前两次原地改为 200」。
+      - 「403 先于 body」：peer 对 K 发以下请求都是 403：`raw("POST", …/documents, "{not json", "text/plain")`；`DELETE …/documents?doc=`；`POST …/retrieval` 带 16 KiB+1 的 body；`POST …/reingest` 带 `{}`；`POST …/uploads?name=a.md` 用 `text/plain`。owner 对这些请求得 400 的对照已有用例覆盖，不再写：`kb-retrieval-endpoint.test.ts:296-303`、`kb-ingest-workspace.test.ts:329`、`kb-documents-reingest.test.ts:569`。
+      - 「不可见与不存在不可区分」：K 为 `me`，幽灵 id 为 `"e".repeat(32)`。上面七条路由与四个坏请求，peer 各对 K 和幽灵 id 发一次；两两比较：`statusCode` 都是 404；`body` 字符串全等且等于 `NOT_FOUND`；去掉 `date` 后的 `headers` 全等。零出站，三张表的快照不变。
+      - 「列表的可见集合、次序与非自有的编译状态」：
+        - 准备：先插 K3=hex(3)（u3，all，`BASE_ROW`，T0），再插 K1=hex(1)（u1，all，`COMPILE_ROW`，`dataset_id:"ds-k1"`，T0）和 K2=hex(2)（u1，me，T0-1）；peer `POST` 建 A2：`{name:"A2",template:"naive",raptor:true}`，得 201；带外插 B2=hex(5)（u2，`BASE_ROW`，`created_at` 为 A2 的 `createdAt` + 1）；然后 `world.forget()`。
+        - 期望：peer 列表 id 为 `[A2,B2,K1,K3]`；`owned` 为 `[true,true,false,false]`；`owner` 为 `[U2,U2,U1,U3]`；`compile` 依次为 `{raptor:"pending",graph:"off"}`、`{raptor:"off",graph:"off"}`、`null`、`null`；`routes(world.sent())` 为 `["GET /api/v1/datasets/<A2 的 datasetId>/documents","GET /api/v1/datasets/<A2 的 datasetId>/ingestions"]`。实测与此不符时停下报告，不改期望。
+      - 「只有一处可见判定」：写法照 `server-handshake-log.test.ts:465-471`，用 `readdirSync(server/src, {recursive:true})` 取全部 `.ts`；每个文件先删块注释 `/\/\*[\s\S]*?\*\//g` 和整行 `//` 注释；再取字面量 ``/"(?:[^"\\\n]|\\.)*"|`(?:[^`\\]|\\.)*`/g``；SQL 字面量指匹配 `/\b(?:SELECT|INSERT|UPDATE|DELETE|FROM|JOIN|WHERE)\b/` 的那些。命中文件集合（排序后）断言：`/\bscope(?:_group_id)?\b/` 恰为 `["kb/visibility.ts"]`（组 11 加写入 SQL 时原地扩）；`/\bproject_group_members\b/` 与 `/\bdepartment\b/` 都恰为 `["accounts/scope.ts","kb/visibility.ts"]`。
+    - 允许的既有文件原地改动（只限这些）：
+      - `kb-bases-list.test.ts:19-31` 改为十四键排序：`["compile","createdAt","documents","graph","id","name","owned","owner","raptor","retrieval","scope","state","stateMessage","template"]`；`:43` 的「十一键」改为「十四键」。
+      - `kb-bases.test.ts:135` 标题改为十四键；`:141-153` 加 `owned:true, owner:{id:"u1",account:"zhangsan",department:"平台研发部"}, scope:{scope:"me",group:null}`；`:161` 的 `kb.create` detail 不改（组 11 加）。
+      - `kb-bases-compile.test.ts:182-193` 加同样三键。
+      - `kb-bases-helpers.ts:58-70` 的 `BaseBody` 加三键。
+      - web `api-kb.ts`：`:23-24` 旁加 `const BASE_SCOPES = ["me","dept","group","all"] as const`，不导出；`:98-111` 的 `BaseView` 加三键，类型内联写，不另导出类型（knip）；`:212-224` 的 `BASE_KEYS` 加 `"owned","owner","scope"`；`:345-354` 旁加 `parseOwner`（恰 `id,account,department` 三键；`id`、`account` 为字符串，`department` 用 `isNullableString`）与 `parseScope`（恰 `scope,group` 两键；`scope` 在 `BASE_SCOPES` 里；`group` 为 `null` 或恰 `id,name` 两个字符串）；`:356-391` 的 `parseBaseView` 加三键；不校验「`scope` 为 group 当且仅当 `group` 非空」（先例 `api-kb.ts:345`：服务端 CHECK 是权威）。
+      - `api-kb.test.ts:77-89` 的 `BASE` 加三键（与 u1 自有、`me` 同值）；`:212-226` 的 `malformed` 映射加 `owned:[1,"true",null]`、`owner:[null,"u1",[]]`、`scope:[null,"me",[]]`，注释写「内层形状的拒绝用例在 `api-kb-visibility.test.ts`」。
+      - `api-kb-retrieval.test.ts:29-41` 的 `BASE` 加三键。
+      - `center-kb-support.tsx:32-48` 的 `base()` 默认值加 `owned:true`、`owner:U1`、`scope:{scope:"me",group:null}`，注释改为十四键。
+      - `ui-walk-center-kb.ts:46-58` 的 `BASE` 加同样三键。`ui-walk-chat-kb.ts:33-36` 与 `chat-kb-ref-support.tsx` 经展开或 `base()` 跟随，不改。
+      - `smoke/kb.hurl:12-13` 注释的键表改为十四键，断言不改。
+    - 新 web 测试 `web/test/api-kb-visibility.test.ts`（≤ 200 行）：视图取 `base()`（`center-kb-support.tsx`）；不复制 `api-kb-retrieval.test.ts:43-58` 的 `METHODS`，也不复制 `api-kb.test.ts:136` 的 `malformed`（jscpd）。
+      - 通过（`listKnowledgeBases` 的 200 `{bases:[…]}`，`toStrictEqual`）：自有 me；`owned:false` 且 `owner.department:null` 加 G1；`dept`；`all`。
+      - `createKnowledgeBase` 的 201：自有一例通过；`owner` 多一键一例 `requestFailed(201)`。
+      - 拒绝（列表 200，`expectRequestFailure(…, 200)`）：`owner`：多键；缺 `id`、`account`、`department`；`id` 或 `account` 为 `1`、`null`；`department` 为 `1`、`true`、`{}`。`scope`：多键；缺 `scope`、`group`；`scope` 为 `"team"`、`""`、`"ME"`、`null`、`1`；`group` 为 `"g1"`、`1`、`[]`；`group` 多键；`group` 缺 `id`、`name`；`group.id` 或 `group.name` 为 `1`、`null`。
+    - 行数（上限 800）：server 源码 `bases.ts` 296 → ≤ 340；`documents.ts` 675 → ≤ 680；`uploads.ts` 277 → ≤ 282；`retrieval.ts` 241 → ≤ 246；`index.ts` 194 → ≤ 200；`rest.ts` 308 → ≤ 312；`store.ts` 658 不增。server 测试 `kb-bases-list.test.ts` 145 → ≤ 150；`kb-bases.test.ts` 439 → ≤ 445；`kb-bases-compile.test.ts` 603 → ≤ 608；`kb-bases-helpers.ts` 182 → ≤ 186。web `api-kb.ts` 610 → ≤ 665；`api-kb.test.ts` 688 → ≤ 700；`api-kb-retrieval.test.ts` 327 → ≤ 333；`center-kb-support.tsx` 346 → ≤ 352；`ui-walk-center-kb.ts` 260 → ≤ 266。PR 预计超过 400 行，援引组 5 的 Width exception。
+    - 非目标：`PUT …/scope` 及其 404 / 403；建库带 `scope` 与 `kb.create` detail（组 11）；放开读路由与 `readableBase` 的导出（组 6、组 7）；`session-search.ts` 与引用受理改用可见集合，删除 `store.listBases`（组 8）；任何 web 组件（组 9 起）；功能验收清单行（本刀对用户惰性，D12）；文档同步（组 14）。
+    - 回归命令：`npm run test:focus --workspace server -- kb-visibility`（先红后绿）；`npm run test:focus --workspace server -- kb-visibility kb-bases kb-bases-list kb-bases-compile kb-documents kb-upload kb-ingest kb-retrieval-endpoint kb-compile-status kb-session-search prompt-knowledge-bases`；`npm run test:focus --workspace web -- api-kb center-kb chat-kb-ref`；`make lint`、`make typecheck`、`make anti-drift`（knip：`toBase`、`BaseAccess`、`createKbVisibility` 都有使用者；jscpd）、`make check`。ui-walk（先例：归档 `2026-11-13-s2c-kb-session/tasks.md:652`）：先 `npm run build --workspace web && npm run build --workspace server`，确认 `var/omp/omp` 存在，再用全新状态目录、清掉知识库环境变量（`env -u RAGFLOW_BASE_URL -u RAGFLOW_API_KEY_FILE`）以 CI 同款变量执行 `bash .github/scripts/ci-compiled-server.sh ui-walk`（脚本在 `:113` 跑 `make ui-walk`）；PR 附命令、退出码与两个 project 的计数，用完删掉状态目录。PR 标题与描述标注「多租户过滤：请求白盒审查」。
 
 Suggested fixture level: expanded - 多租户过滤的唯一判定点（灰盒例外候选）、不可探测性、跨服务严格解析。
 Minimal mergeable slice: atomic - 可见判定、两级归属、列表与 `BaseView`（含 web 解析器与 ui-walk 桩）合起来才是可独立验证的「谁能看见哪些库」，且跨服务契约要求同 PR；读面的放开（组 6、组 7）已经各自拆出。
