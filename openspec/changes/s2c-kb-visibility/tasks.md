@@ -48,10 +48,10 @@
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
-- [ ] 1.1 核对 Context：`server/src/core/db/migrations/010_auth_schema_seed.sql`、`052_chat_message_knowledge_bases.sql` 的写法（事务归 runner、无 `IF NOT EXISTS`）；`server/test/core-db-helpers.ts:34-61,106-133` 的迁移清单与计数；`server/test/auth-schema.test.ts:54,446` 与 `kb-schema.test.ts:107-127,177` 的精确形状断言
-- [ ] 1.2 测试先行：新文件 `server/test/migration-053.test.ts` 覆盖 account-groups「迁移 053 部门与项目组」与 knowledge-bases「迁移 053 知识库范围列」的全部场景（种子、CHECK、外键 RESTRICT 与 CASCADE、052 → 053 升级保留既有库），以及 dev-stub-auth「053 之后 Principal 不变」（登录与 `GET /api/auth/me` 不含 `department`）
-- [ ] 1.3 实现 `053_kb_visibility.sql`（design D1；列级 CHECK 引用另一列已于 2026-11-17 在 node:sqlite 实测可用，以 1.2 的用例为准）
-- [ ] 1.4 原地改精确形状断言：迁移清单与计数 +1；`auth-schema.test.ts` 保留 010 的 5 列契约断言、对全量迁移后的库断言多 `department`；`kb-schema.test.ts` 的列与外键清单加两列
+- [x] 1.1 核对 Context：`server/src/core/db/migrations/010_auth_schema_seed.sql`、`052_chat_message_knowledge_bases.sql` 的写法（事务归 runner、无 `IF NOT EXISTS`）；`server/test/core-db-helpers.ts:34-61,106-133` 的迁移清单与计数；`server/test/auth-schema.test.ts:54,446` 与 `kb-schema.test.ts:107-127,177` 的精确形状断言
+- [x] 1.2 测试先行：新文件 `server/test/migration-053.test.ts` 覆盖 account-groups「迁移 053 部门与项目组」与 knowledge-bases「迁移 053 知识库范围列」的全部场景（种子、CHECK、外键 RESTRICT 与 CASCADE、052 → 053 升级保留既有库），以及 dev-stub-auth「053 之后 Principal 不变」（登录与 `GET /api/auth/me` 不含 `department`）
+- [x] 1.3 实现 `053_kb_visibility.sql`（design D1；列级 CHECK 引用另一列已于 2026-11-17 在 node:sqlite 实测可用，以 1.2 的用例为准）
+- [x] 1.4 原地改精确形状断言：迁移清单与计数 +1；`auth-schema.test.ts` 保留 010 的 5 列契约断言、对全量迁移后的库断言多 `department`；`kb-schema.test.ts` 的列与外键清单加两列
   - 组 1 首刀约定（#2026 fixture 审查补；1.2–1.4 照此实现与测试）：
     - 迁移文件 `server/src/core/db/migrations/053_kb_visibility.sql`：文件头注释照 052 的写法，写明：来源（#2026，s2c-kb-visibility design D1；account-groups「迁移 053 部门与项目组」、knowledge-bases「迁移 053 知识库范围列」）；种子与 010 同一先例进生产库；`scope_group_id` 用 RESTRICT 的理由（S3a 删组前先把库退回 `me`）；不含 `IF NOT EXISTS` / `OR IGNORE` / `OR REPLACE`（同名冲突必须让事务失败）；事务与回执归 runner（无 BEGIN / COMMIT / PRAGMA）；迁移不逆转。更早的迁移文件一律不改。
       - 正文语句次序固定（回滚用例依赖它）：① `ALTER TABLE accounts ADD COLUMN department TEXT NULL CHECK (…)` ② `CREATE TABLE project_groups` ③ `CREATE TABLE project_group_members` ④ `CREATE INDEX project_group_members_account ON project_group_members(account_id)`（命名照 `experts_owner`、`chat_approvals_message`）⑤ `ALTER TABLE knowledge_bases ADD COLUMN scope TEXT NOT NULL DEFAULT 'me' CHECK (scope IN ('me','dept','group','all'))` ⑥ `ALTER TABLE knowledge_bases ADD COLUMN scope_group_id TEXT NULL REFERENCES project_groups(id) ON DELETE RESTRICT CHECK ((scope = 'group') = (scope_group_id IS NOT NULL))` ⑦ `UPDATE accounts` 给 u1 `平台研发部`、u2 `数据部`、u3 `产品部` ⑧ `INSERT INTO project_groups` 一行 `('g1','内网落地专项',0)` ⑨ `INSERT INTO project_group_members` 两行 `('g1','u1')`、`('g1','u2')`。

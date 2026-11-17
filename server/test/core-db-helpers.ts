@@ -31,6 +31,7 @@ export const MIGRATION_049 = "049_workspace_mounts.sql";
 export const MIGRATION_050 = "050_knowledge_bases.sql";
 export const MIGRATION_051 = "051_kb_retrieval.sql";
 export const MIGRATION_052 = "052_chat_message_knowledge_bases.sql";
+export const MIGRATION_053 = "053_kb_visibility.sql";
 export const TRACKED_MIGRATION_FILENAMES = [
   MIGRATION_0010,
   MIGRATION_002,
@@ -58,7 +59,10 @@ export const TRACKED_MIGRATION_FILENAMES = [
   MIGRATION_050,
   MIGRATION_051,
   MIGRATION_052,
+  MIGRATION_053,
 ] as const;
+// The four tables whose DDL 053 changes; full-chain "untouched" comparisons leave them to migration-053.
+export const DDL_053 = ["accounts", "knowledge_bases", "project_groups", "project_group_members"];
 export const HISTORY_VIEW = "schema_migration_history";
 export type SqlLineEnding = "\n" | "\r\n" | "\r";
 
@@ -130,8 +134,9 @@ export const COMPLETE_CATALOG: CatalogSnapshot = {
     [24, MIGRATION_050],
     [25, MIGRATION_051],
     [26, MIGRATION_052],
+    [27, MIGRATION_053],
   ],
-  sequenceRows: [["schema_migrations", 26, "integer"]],
+  sequenceRows: [["schema_migrations", 27, "integer"]],
   triggerNames: [
     "audit_events_no_delete",
     "audit_events_no_update",

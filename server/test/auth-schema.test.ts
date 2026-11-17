@@ -443,7 +443,7 @@ function expectConflictOpenPreservesFoundation(
 }
 
 function expectAuthSchema(db: DatabaseSync): void {
-  expect(visibleColumnNames(db, "accounts")).toEqual([...EXPECTED_ACCOUNT_COLUMNS]);
+  expect(visibleColumnNames(db, "accounts")).toEqual([...EXPECTED_ACCOUNT_COLUMNS, "department"]);
   expect(visibleColumnNames(db, "auth_sessions")).toEqual([...EXPECTED_SESSION_COLUMNS]);
   expect(tableColumn(db, "accounts", "id")).toMatchObject({
     declaredType: "TEXT",
@@ -513,6 +513,8 @@ function expectAuthSchema(db: DatabaseSync): void {
     "knowledge_bases",
     "models",
     "mount_sources",
+    "project_group_members",
+    "project_groups",
     "workspace_mounts",
     "workspaces",
   ]);

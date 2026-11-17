@@ -10,6 +10,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   COMPLETE_CATALOG,
+  DDL_053,
   expectCatalogSnapshot,
   expectOpenDbFailure,
   expectRepeatedOpenStable,
@@ -145,7 +146,8 @@ function kept(db: DatabaseSync) {
       .prepare(
         "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name <> 'chat_messages' ORDER BY type, name",
       )
-      .all(),
+      .all()
+      .filter((row) => !DDL_053.includes(String(row.tbl_name))),
     sequences: db
       .prepare(
         "SELECT name, seq FROM sqlite_sequence WHERE name <> 'schema_migrations' ORDER BY name",
@@ -164,7 +166,7 @@ function expect052Applied(db: DatabaseSync): void {
   ]);
   expect(countReceipts(db, MIGRATION_052)).toBe(1);
   expectCatalogSnapshot(db, COMPLETE_CATALOG);
-  expect(migrationSequence(db)).toEqual({ seq: 26 });
+  expect(migrationSequence(db)).toEqual({ seq: TRACKED_MIGRATION_FILENAMES.length });
   expect(messagesInfo(db).at(-1)).toEqual(KB_INFO);
   expect(columnNames(db, "chat_messages")).toEqual([
     ...COLUMNS_051.chat_messages,
@@ -214,7 +216,9 @@ describe("migration 052 knowledge-base references: 新库与存量库", () => {
     expect(TRACKED_MIGRATION_FILENAMES.filter((name) => name === MIGRATION_052)).toHaveLength(1);
     expect(TRACKED_MIGRATION_FILENAMES[POS - 1]).toBe(MIGRATION_051);
     expect(COMPLETE_CATALOG.receipts[POS]).toEqual([26, MIGRATION_052]);
-    expect(COMPLETE_CATALOG.sequenceRows).toEqual([["schema_migrations", 26, "integer"]]);
+    expect(COMPLETE_CATALOG.sequenceRows).toEqual([
+      ["schema_migrations", TRACKED_MIGRATION_FILENAMES.length, "integer"],
+    ]);
   });
 
   it.each([
