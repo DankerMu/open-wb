@@ -129,6 +129,16 @@
 | 组 12：Radix RadioGroup 的第一个使用者 | 是 | 拷入层 `radio-group.tsx` 仓内没有使用者；受控「无选中」与表单内隐藏 input 未实测；断言只看 `aria-checked`、`disabled` 与 label 文本；与实测不符时停下来报告 |
 | 组 12：ui-walk 版面 | 是 | 自有行的范围格与详情头部从 span 变成按钮；CI `ui-walk`（`all-checks-passed` 成员，`make check` 不跑）须绿，本机跑一次；范围对话框的走查在组 13 |
 | 组 12：CK 行字面量 | 是 | `/api/audit` 只给 actorId（组 11 裁定），写 `u1`；CK-21/22 已随 #2054 进 master，新行编号 CK-23 |
+| 组 13：调用点与用例计数 | 是 | 新段由 `walkKbRetrieval` 在 `finally`（`ui-walk-center-kb.ts:151-156`）之后、`logout`（:157）之前调用一次，`ui-walk.spec.ts` 不改；用例数不变，仍为 17 passed、1 skipped（(7+2)×2 减 mobile-dark 的 pre-paint skip）；放在 `try` 里会让新段按 pattern 撤桩时连父级的同名桩一起撤掉 |
+| 组 13：import 环 | 是 | 新文件从 `ui-walk-center-kb.js` 导入 `BASE`、`STATUS`、`json`、`shot`，后者反向导入新文件；新文件先求值，顶层的 `{ ...BASE }`（`ui-walk-chat-kb.ts:33-36` 的写法）会触发 TDZ。桩对象一律在函数里现造，顶层只放字面量常量 |
+| 组 13：桩的键集与 oracle | 是 | `BaseView` 十四键（`api-kb.ts:220-235`）、`DocumentView` 十一键（:236-248）、`GET /api/accounts/me/scope` 恰 `department, groups`，组内恰 `id, name, memberCount`（组 12 契约）；只回 200。PUT 未桩时打到真实服务，得 503 `kb_disabled`，console error 会让 oracle 变红 |
+| 组 13：判别断言 | 是 | PUT 应答带 `documents:7`，判别「用应答整行替换」与本地拼行；列表 GET 恰 1 次、范围 GET 点按钮前 0 次、之后恰 1 次（种子里 zhangsan 的真实范围与桩值相同，只能靠计数证明走的是桩）；PUT 的 body 用 `toStrictEqual`，并比对原始串 |
+| 组 13：撤桩 | 是 | 新段自己的 `finally` 按装桩的逆序 `unroute` 五个 pattern；调用点在父级撤桩之后，所以按 pattern 撤不会误伤 |
+| 组 13：宽度检查 | 是 | `expectPanelFits`（:237-256）是模块私有的，对 portal 出来的对话框会在 :251 失败，不导出也不复用；用 `expectNoHorizontalOverflow` 加本地的 scrollWidth / boundingBox 检查 |
+| 组 13：Radix 在真实 Chromium | 是 | 拷入层 `RadioGroup` 与 `Select` 第一次进 ui-walk（组 12 只在 jsdom 测过）；`Select` 打开时其余内容被设为 aria-hidden，选项要从 `page` 找；与实测不符时停下来报告 |
+| 组 13：时限 | 是 | 宿主用例沿用配置的 30 s（`playwright.config.ts`），没有 `setTimeout`；基线 desktop-light 1.1 s、mobile-dark 1.7 s；任一 project 超过 24 s 停下来报告，不改 spec 文件 |
+| 组 13：依赖组 12 的产物 | 是 | 分支从合入 #2038 之后的 master 切出；ui-walk 对本分支新 build 的 `web/dist` 跑（`ci-compiled-server.sh` 本身不 build） |
+| 组 13：失败路径、CK 行、产品代码 | 否 | oracle 不放行 4xx/5xx，失败态、没有部门与没有项目组、新建对话框的范围由 `center-kb-scope.test.tsx` 覆盖；不改产品代码、不加 CK 行 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -769,9 +779,49 @@ Minimal mergeable slice: atomic - 范围对话框与新建对话框共用同一�
 
 ## 13. ui-walk：共享知识库分支（knowledge-bases「UI 走查共享知识库」）
 
-- [ ] 13.1 核对 Context：`web/e2e/ui-walk-center-kb.ts`（260 行）的 route 桩与收尾写法；`ui-walk-chat-kb.ts` 的先例
-- [ ] 13.2 实现：新兄弟文件 `web/e2e/ui-walk-center-kb-shared.ts` 写两段（只读呈现、范围对话框），由 `ui-walk-center-kb.ts` 调用；应答体严格按 web 解析器的键集
-- [ ] 13.3 本机 `make ui-walk` 全绿，PR 附命令与退出码、截图清单
+- [x] 13.1 核对 Context：`web/e2e/ui-walk-center-kb.ts`（260 行）的 route 桩与收尾写法；`ui-walk-chat-kb.ts` 的先例
+- [x] 13.2 实现：新兄弟文件 `web/e2e/ui-walk-center-kb-shared.ts` 写两段（只读呈现、范围对话框），由 `ui-walk-center-kb.ts` 调用；应答体严格按 web 解析器的键集
+- [x] 13.3 本机 `make ui-walk` 全绿，PR 附命令与退出码、截图清单
+  - 组 13 约定（#2039 fixture 审查补；13.2–13.3 照此实现与测试）：
+    - 前置：#2038（组 12）已合入，分支从其后的 master 切出。DOM 契约以组 12 约定为准：四档文案与对话框名、`ScopeFields`、`ScopeDialog`、`list.tsx` 的范围按钮先 `stopPropagation`、`panel.tsx` 在点击里 `load()`、`replaceBase` 整行替换。
+    - 13.1 行号核实（#2038 合入前的 master）：
+      - `ui-walk-center-kb.ts` 263 行（不是 260）：`STATUS` :37-44（已导出），`BASE` :46-61（头部写 :46-57，已过时），`DOCUMENT` :63-75，`json` :104-105，`walkKbRetrieval` :108-158（装桩 :115-125，`try` :126-150，`finally` 按 pattern 撤桩 :151-156，`logout` :157），`expectPanelFits` :237-256（模块私有），`shot` :258-263。
+      - `ui-walk-chat-kb.ts` 282 行：导入 :12，`BASES` 在顶层展开 `BASE` :33-36（该文件不在环里），逆序撤桩 :271-282。
+      - `ui-walk.spec.ts` 724 行，7 个用例，宿主用例 :124-134；`ui-walk-sessions.spec.ts` 2 个用例。`playwright.config.ts`：`testMatch` 为 `ui-walk*.spec.ts`（新文件不会被当成 spec），`timeout` 30_000，`desktop-light`（1440×900 浅色）与 `mobile-dark`（390×844 深色）。
+      - 解析器：`api-kb.ts` 的 `BASE_KEYS` :220-235，`DOCUMENT_KEYS` :236-248，`parseOwner` :357-365，`parseScope` :379-386，`parseBaseList` :445-447，`parseDocumentList` :496-499；`hasExactlyKeys`（`api-json.ts:10-18`）只比键集不比键序。
+      - 呈现：`list.tsx` 的 `NameCell` :89-103、计数行 :163；`detail.tsx` 的只读提示 :69-73、入库工具条只在自有库渲染 :74-90；`documents-table.tsx` 的共享表头 :7-9、`工作空间` :35；`retrieval-panel.tsx` 只读时不接 `onChange` :103-104（组 12 合入后以实际行号为准）。
+      - 守卫覆盖面：jscpd 含 `web/**`；knip 的 web `project` 只有 `src/**`、`test/**`，不看 e2e；`web/tsconfig.json` 含 `e2e`；Biome 含 `web/**`（认知复杂度 ≤ 15）；size-guard 生效。
+    - 调用点（PR 边界）：`ui-walk-center-kb.ts`（263 → ≤ 267）只改三处：一行 `import { walkKbShared } from "./ui-walk-center-kb-shared.js";`；`finally` 闭合（:156）与 `await logout(page, oracle, project);`（:157）之间加 `await walkKbShared(page, project);`；文件头注释加一句指向共享分支。其余不动，`expectPanelFits` 不导出，`ui-walk.spec.ts` 不改。
+    - 新文件 `web/e2e/ui-walk-center-kb-shared.ts`（≤ 240 行）：
+      - 头注：knowledge-bases「UI 走查共享知识库」，s2c-kb-visibility 任务 13.2，#2039；两段的内容；只回 200 的原因（oracle）；为什么不得在顶层读导入值（import 环）。
+      - 从 `./ui-walk-center-kb.js` 导入 `BASE`、`json`、`STATUS`、`shot`；另导入 `expectNoHorizontalOverflow`、`type WalkProject`。导出唯一的 `walkKbShared(page, project)`。
+      - import 环规则：模块顶层只放字符串、数字、字面量对象，不得读四个导入值；桩对象由函数现造（`ownBase()`、`sharedBase()`、`savedBase()`）。违反时 ESM 加载期抛 `ReferenceError`，整个 ui-walk 变红。
+      - 复杂度 ≤ 15：装桩、列表段、详情段、对话框段各自成函数。
+    - 桩（应答只走 `json(route, …)`；handler 只记录与 fulfill，断言写在 handler 之外）：
+      - `**/api/kb/status` → `STATUS`。
+      - `**/api/kb/bases`：只应答 GET，计数 `listReads`；GET 之外 `route.fallback()`。应答 `{bases:[ownBase(), sharedBase()]}`，自有库在前。`ownBase()` = `{ ...BASE, id:"kb-walk-own", name:"我的库" }`（`scope` 为 `{scope:"me",group:null}`，`documents:1`）。`sharedBase()` = `{ ...BASE, id:"kb-walk-shared", name:"规范库", raptor:true, compile:null, owned:false, owner:{id:"u2",account:"zhaoliu",department:"数据部"}, scope:{scope:"all",group:null} }`（`documents:1`，`state:"ready"`）。
+      - `**/api/kb/bases/kb-walk-shared/documents`：只应答 GET，`{documents:[…]}`，恰一条 `{id:"doc-walk-shared", name:"spec.md", size:2048, source:"workspace", workspaceId:null, path:null, status:"done", chunkCount:3, message:null, sourceChanged:null, createdAt:1_760_000_000_000}`（`done` 不触发 3 秒刷新；误进自有库详情会打到真实服务，由 oracle 抓住）。
+      - `**/api/accounts/me/scope`：只应答 GET，计数 `scopeReads`，应答 `{department:"平台研发部", groups:[{id:"g1", name:"内网落地专项", memberCount:2}]}`。
+      - `**/api/kb/bases/kb-walk-own/scope`：只应答 PUT；记录 `{method, pathname, body: postDataJSON(), raw: postData()}`，应答 `savedBase()` = `{ ...ownBase(), documents:7, scope:{scope:"group", group:{id:"g1", name:"内网落地专项"}} }`。
+      - 次序：先装五个桩，再 `page.goto("/center?tab=knowledge-bases")`。父级的桩已在它的 `finally` 里撤掉，STATUS 要重新装。
+    - 第 1 段「只读呈现」（`main = page.locator("main")`）：
+      - 定位：自有行 = `main.getByRole("row").filter({ has: page.getByRole("cell", { name: "我的库", exact: true }) })`；共享行 = `main.getByRole("row").filter({ has: page.getByText("来自 zhaoliu · 数据部", { exact: true }) })`（共享库名称格全文不只是库名，不能精确匹配名称格）。
+      - 列表：`getByText("我的 1 个 · 共享给我 1 个", { exact: true })` 可见；共享行有 `只读`（exact），第 3 格 `toHaveText("RAPTOR")`，第 6 格 `toHaveText("全员可见")`，行内按钮 `toHaveCount(0)`；阳性对照：自有行按钮 `toHaveText(["仅自己可见","删除知识库"])`；`main.getByText("状态未知")` 为 0 个；`scopeReads` 为 0；`expectNoHorizontalOverflow(page)`；`shot(page, 共享行, "kb-shared-<project>-list")`。
+      - 点共享行的 `来自 zhaoliu · 数据部` 进详情。`detail = main.getByRole("region", { name: "规范库 · 文档", exact: true })`：`getByRole("columnheader")` `toHaveText(["名称","来源","大小","状态"])`；`spec.md` 行的来源格为 `工作空间`；只读提示逐字 `共享给你的知识库只读：可检索、可在会话中引用，不能增删文档。需要补充内容请联系 zhaoliu。`；`全员可见` 是纯文本；`从工作空间入库`、`上传文件` 各 `toHaveCount(0)`；区域内全部按钮 `toHaveText(["检索"])`；`getByRole("spinbutton", { name: "相似度阈值", exact: true })` 与 `向量权重` 都 `not.toBeEditable()`、`toBeEnabled()`，值为 `0.2`、`0.7`；`expectNoHorizontalOverflow(page)`；本地检查区域 `scrollWidth <= clientWidth`；`shot(page, detail, "kb-shared-<project>-detail")`。
+    - 第 2 段「范围对话框」（承接第 1 段，不重新加载；共享库详情仍开着）：
+      - 点自有行的 `仅自己可见` 按钮。对话框从 `page` 找：`page.getByRole("dialog", { name: "「我的库」可见范围", exact: true })`（对话框打开时 `#root` 被设为 aria-hidden，同 `ui-walk-center-kb.ts:182`）。
+      - 打开后：`scopeReads` 为 1；`dialog.getByRole("radio")` 的可访问名依次为 `["仅自己可见","本部门可见","项目组可见","全员可见"]`，`仅自己可见` `toBeChecked()`，四项都 `toBeEnabled()`；审计提示 `共享只给读权限：他人可检索与引用，不能增删文档或改设置。切换范围会记入审计。`（exact）可见；对话框里没有 `combobox`。
+      - 点 `项目组可见`：它变为 checked；`dialog.getByRole("combobox", { name: "项目组", exact: true })` `toHaveText("内网落地专项（2 人）")`；点开下拉，`page.getByRole("option")` `toHaveText(["内网落地专项（2 人）"])`，点它；`page.getByRole("listbox")` 回到 `toHaveCount(0)`，触发器文案不变；`expectNoHorizontalOverflow(page)`；本地检查对话框 `scrollWidth <= clientWidth`，`boundingBox` 的 `x >= 0` 且 `x + width` 不超过视口宽；`shot(page, dialog, "kb-shared-<project>-dialog")`。
+      - 点 `保存` 后：对话框 `toHaveCount(0)`；PUT 记录 `toStrictEqual` `[{method:"PUT", pathname:"/api/kb/bases/kb-walk-own/scope", body:{scope:"group",groupId:"g1"}, raw:'{"scope":"group","groupId":"g1"}'}]`；自有行按钮变为 `["项目组可见 · 内网落地专项","删除知识库"]`，`main` 里已没有 `仅自己可见` 按钮；自有行第 4 格为 `7`；`listReads` 为 1；`scopeReads` 为 1；`规范库 · 文档` 区域仍在，`我的库 · 文档` 区域为 0 个；`expectNoHorizontalOverflow(page)`；`shot(page, 自有行, "kb-shared-<project>-saved")`。
+    - 截图：设了 `UI_WALK_SHOT_DIR` 才截（沿用 `shot`）。新增 4 张 × 2 个 project = 8 张：`kb-shared-{desktop-light,mobile-dark}-{list,detail,dialog,saved}.png`。PR 附清单。
+    - 收尾：桩与断言包在 `try` 里，`finally` 按装桩的逆序 `unroute` 五个 pattern，不另做导航；随后父级 `logout`。
+    - error oracle：桩不出现 4xx/5xx；不加放行项。
+    - 非目标：失败路径（`getMyScope` 503、保存 400）、没有部门与没有项目组、当前档已不可选、在途禁用、还焦点、新建对话框的范围、详情头部的范围按钮（由 `center-kb-scope.test.tsx` 覆盖）；改 `ui-walk.spec.ts` 或 `setTimeout`；导出 `expectPanelFits`；CK 行；产品代码。
+    - TDD：没有新生产文件；走查脚本没有配对单测，PR 写明。
+    - 时限：宿主用例两个 project 的耗时与基线（desktop-light 1.1 s、mobile-dark 1.7 s）对比写进 PR；任一超过 24 s 停下来报告。
+    - jscpd 若报新文件与 `ui-walk-center-kb.ts:115-125` 或 `ui-walk-chat-kb.ts:52-55` 的装桩块重复：停下来报告，不扩大 PR 边界。
+    - 实测与上面这些字面量不符时停下来报告，不改期望。真实 Chromium 里未实测、不符时同样停下来报告、不得不加说明就换定位器的：`RadioGroup` 的 radio 个数与可访问名；`Select` 触发器的可访问名 `项目组` 与文案；选项与 listbox 在 portal 里的可见性；`not.toBeEditable()` 对 readOnly 数字框的判定。
+    - 回归命令：`make lint`、`make typecheck`、`make anti-drift`；`npm run build --workspace web` 之后，对本分支 `web/dist` 起 `.github/scripts/ci-compiled-server.sh ui-walk`（假上游）并设 `UI_WALK_SHOT_DIR=<scratchpad 目录>`，期望退出 0、`17 passed`、`1 skipped`；PR 附命令、退出码与 8 张截图清单；最后 `make check`。
 
 Suggested fixture level: compact - 走查脚本，桩应答，不改产品代码。
 Minimal mergeable slice: atomic - 两段共用同一组 route 桩与收尾。
