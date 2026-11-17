@@ -435,7 +435,8 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - Depends on：S2b、S1c。
 - Review attention：decision-dense（多租户过滤是灰盒决定的例外候选——出事故重议）。
 - 2026-11-10 grill（owner 逐分支拍板，G1）：S2c 拆为两个 change。**A 会话接入**（change `s2c-kb-session`）：`kb_search` 的注册、分派、审批放行、`kb.hits` 与检索卡、知识库引用，可检索的库 = 自己的库。**B 可见范围**：四档、共享只读、跨账号检索审计、部门与项目组字段，A 合入后另跑流水线。
-- 2026-11-13 状态：**A 已交付，待 owner 签收；B 待启动。** Epic #1961 的组 1–10 全部合入（组 → issue → PR）：
+- 2026-11-17 状态：**A 已签收**（CK-15–CK-20 由 owner 签为 `通过`，`d664f88b`；change 已归档 `openspec/changes/archive/2026-11-13-s2c-kb-session/`，Epic #1961 关闭）；**B 的 change `s2c-kb-visibility` 已建**（grill 19 分支，owner 2026-11-17 拍板，见其 design.md「Grill 结论」），并入 A 的种子 (a)(b)(c)(e)，(d) 维持 G12。
+- 2026-11-13 状态（历史）：A 已交付，待 owner 签收。Epic #1961 的组 1–10 全部合入（组 → issue → PR）：
   - 制品：change 制品与 omp host tool 实测记录 `docs/reviews/2026-11-10-omp-host-tools.md`，PR #1978。
   - 组 1 单轮检索可取消 #1962 → #1987；组 2 会话检索 `kb_search` #1963 → #1988。
   - 组 3 宿主工具协议 #1964 → #1989；`kb_search` 的审批放行 #1965 → #1990。组 4 注册与装配 #1966 → #1991。
@@ -523,6 +524,11 @@ Critical Paths（沙箱/omp 治理）的必须白盒审查。必读文档所有�
 - S4a：减肥二进制回归不过即回官方全量二进制，部署包两者可切。
 
 ## Next Step
+
+> 2026-11-17 更新。**S2c change A 已签收**（CK-15–CK-20 `通过`），change 已归档，跟进 issue #2002、#2004、#2011 均已关闭。
+> **S2c change B（`s2c-kb-visibility`）进入流水线**：可见范围四档、共享只读、跨账号检索审计、部门与项目组字段，并入 A 的种子 (a)(b)(c)(e)（owner 2026-11-17）。
+> 顺序：B 交付并签收后启动 S3a 与 S4a；S4a 保持串行，不与 B 并行（owner 2026-11-17）。S3a 前置决策「IdP 是否带组声明」仍待甲方信息。
+> 下面 2026-11-13 一条里的「待 owner 签收」「change 尚未归档」均已过时，保留为历史。
 
 > 2026-11-13 更新。**S2c change A（`s2c-kb-session`）的实现全部合入**：Epic #1961 的组 1–10 均已合入（见上文 S2c 一节的清单），#1977 即本收口；change 尚未归档。
 > 1. **待 owner 签收**：验收清单「中心·知识库（CK）」的 CK-15、CK-16、CK-17、CK-18 为 `待签`，由 owner 执行，agent 不代签；签完 Epic #1961 才关。
