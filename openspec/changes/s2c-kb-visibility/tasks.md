@@ -78,6 +78,13 @@
 | 组 6：原子性 | 是 | 钩子改读级、`documents.ts:636` 复核点改读级、非所有者三键置空在同一个实现提交里（仓库按 `--merge` 合并，提交级中间态也会进 master 历史）；只改其一时「非所有者看不到来源」为红（403 或泄露 `W1` / `docs/a.md`） |
 | 组 6：既有用例的 403→200 | 是 | `kb-visibility.test.ts:237`、`:256` 与「共享库的两级归属」三处原地改；`:261` 的 404 与「不可见与不存在不可区分」（`:329` 遍历 `VALID`）不变 |
 | 组 6：白盒 | 是 | 隐私（所有者沙箱路径）与沙箱边界：PR 标题与描述写明「请求白盒审查」 |
+| 组 7：不变量 1（非所有者不写回、从不取锁） | 是 | 非所有者以与已存值不同的参数检索：重建器持锁时 200（所有者同情形 409，`kb-retrieval-endpoint.test.ts:345-353`）、写者持锁时不等待即 200，`writeWaiters` 恒为 0；已存两列与 `updated_at` 逐值不变，没有 `kb.retrieval_settings`，检索 body 带已存值 |
+| 组 7：审计时点与失败语义 | 是 | 挂起假 RAGFlow 的检索路由，`gate.reached` 时已恰一条 `kb.shared_retrieval`（写在请求之前）；检索 503 时审计照样一条（与结果无关）；按 kind 的触发器让审计写失败 → 通用 500 逐字节、零出站、零审计；400 / 409 / 404 都不写 |
+| 组 7：只放开一处读路由，写回复核仍为写级 | 是 | `rest.ts:293` 的钩子改为 `readableBase`；首判 `readableBase`，锁内写回 `saveLocked` 仍为 `ownedBase`；靠 grep 证据兜底（锁内复核误降为读级时测试抓不到） |
+| 组 7：既有用例的 403→200 与 403→400 | 是 | 「两级归属」的检索测试改为 200（需要先在假 RAGFlow 种数据集，否则是 503）；「403 先于 body」剔除 `MALFORMED` 里的检索超限一条（可见的非所有者此后得 400）；「不可见与不存在不可区分」原样遍历全部（仍是 404） |
+| 组 7：自有库永不写共享审计 | 是 | `auditSharedRetrieval` 在 `owned` 时直接返回；所有者对 `dept` 库检索（参数相同与不同各一次），`kb.shared_retrieval` 为 0 条；`kb-retrieval-endpoint.test.ts` 不改、全绿 |
+| 组 7：原子性 | 是 | 钩子改读级、非所有者分支、`shared-audit.ts` 放在同一个实现提交里（按 `--merge` 合并，提交级的中间态也会进 master 历史）；只改钩子时会出现未审计的跨账号检索 |
+| 组 7：白盒 | 是 | 多租户过滤与跨账号读：PR 标题与描述写明「请求白盒审查」 |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -392,6 +399,39 @@ Minimal mergeable slice: atomic - 放开 `GET …/documents` 与非所有者置�
 - [ ] 7.1 核对 Context：`kb/retrieval.ts:184-240`（`readyBase`、参数比较、写锁、写回与审计）；`core/audit` 的 `emit` 与失败传播；`server/test/kb-retrieval-endpoint.test.ts`（443 行）
 - [ ] 7.2 测试先行：新文件 `server/test/kb-retrieval-shared.test.ts` 覆盖「非所有者按已存参数检索」「非所有者的 body 仍须合规」「共享审计写失败不检索」；「同一知识库的写操作串行」里「非所有者的检索测试从不取锁」；把「共享库的两级归属」里 `POST …/retrieval` 改为 200
 - [ ] 7.3 实现新文件 `server/src/kb/shared-audit.ts`（design D6，只在非所有者时写，detail 取判定时读到的行）；`retrieval.ts` 的非所有者分支跳过比较与写锁、检索前调用它；`POST …/retrieval` 的钩子与复核点改用 `readableBase`
+  - 组 7 约定（#2033 fixture 审查补；7.2–7.3 照此实现与测试）：
+    - 7.1 行号更正：`readyBase` 是 `retrieval.ts:181-191`（`ownedBase` 在 `:186`），被 `saveLocked`（`:197-215`，调用在 `:198`）与 `test`（`:229-238`，调用在 `:231`）调用；`writeBack` 是 `:217-225`；检索路由的钩子是 `rest.ts:293`；`kb-retrieval-endpoint.test.ts` 443 行，已核实。
+    - 新文件 `server/src/kb/shared-audit.ts`（≤ 45 行）：
+      - `export interface SharedRetrievalEvent { kind: "kb.shared_retrieval"; actorId: string; title: string; detail: { id: string; name: string; ownerId: string; scope: { scope: BaseAccess["scope"]["scope"]; groupId: string | null } } }`。
+      - `export function auditSharedRetrieval(deps: { audit: (event: SharedRetrievalEvent) => void }, viewerId: string, access: BaseAccess): void`：`access.owned` 为真时直接返回。否则调用一次 `deps.audit`：`kind`、`actorId: viewerId`、`title: "检索共享知识库"`；detail 键序为 `{ id: access.base.id, name: access.base.name, ownerId: access.owner.id, scope: { scope: access.scope.scope, groupId: access.scope.group?.id ?? null } }`；不传 `workspaceId`，`emit` 写成 null。
+      - 不重读库：detail 只取调用方首判得到的 `access`。不开事务（「单独写入」），不吞错：写失败原样抛出，由调用方决定。检索测试照常传播，结果为通用 500；会话检索在组 8 里捕获，记为该库 `failed`。组 8 原样复用这个函数，在 `createKbSessionSearch` 的依赖里加 `audit` 并在 `index.ts:198` 接线，这些是组 8 的事。
+    - `retrieval.ts`：
+      - `readyBase` 原地改为 `function ready(access: BaseAccess): BaseAccess`，只判 `state !== "ready"` 就抛 409 `kb_rebuilding`。
+      - `saveLocked` 改为 `const { base } = ready(ownedBase(visibility, id, ownerId))`：锁内写回仍为写级。
+      - `test(id, body, viewerId)`：`parseTest(body)`，然后 `const access = ready(readableBase(visibility, id, viewerId))`，然后 `const used = !access.owned || sameParameters(access.base, request) ? access.base : await writeBack(id, request, viewerId)`，然后 `auditSharedRetrieval(dependencies, viewerId, access)`，最后 `retrieveForBase(dependencies, used, …)`。次序与规格一致：归属（钩子）→ body → state → 所有者比较 → 共享审计 → 检索。
+      - 无条件调用、由函数内部判 `owned`：「自有库不写」只在一处成立，所有者的既有用例也覆盖到那条返回分支。非所有者不进 `writeBack`。
+      - `KbRetrievalDependencies.audit` 改为 `(event: AuditEvent | SharedRetrievalEvent) => void`，`index.ts` 不改。
+      - 文件头 `:17-21` 与 `:228` 改为「判定次序 body → 可读重读 → `state`；所有者比较参数、必要时取锁写回；非所有者跳过比较与锁，按已存值检索，检索前写 `kb.shared_retrieval`；对自己的库检索不审计」。
+    - `rest.ts`：`:293` 的 `preParsing: ownedBase` 改为 `readableBase`。文件头 `:23-26` 改为「读路由 `GET …/documents`、`POST …/retrieval` 不可见 404、可见即放行」；`:37-38` 补一句「非所有者按已存参数检索并审计」。
+    - PR 附 grep 证据：`grep -n "readableBase(" server/src` 比改前多一处，恰为 `retrieval.ts` 的 `test`；`grep -n "ownedBase(" server/src` 条数不变（10 条），其中 `retrieval.ts` 那一处在 `saveLocked`；`grep -n "preParsing: ownedBase" server/src/kb/rest.ts` 从 6 条变为 5 条，`preParsing: readableBase` 恰 2 条（文档列表、检索测试）。
+    - 新测试文件 `server/test/kb-retrieval-shared.test.ts`（≤ 340 行）：
+      - 夹具与身份：`useIngestWorlds()`。库为 u1 的 `world.baseId`，名称 `` `库 ${world.baseId}` ``。每个用例先带外执行 `UPDATE knowledge_bases SET scope='dept', retrieval_threshold=0.35, retrieval_vector_weight=0.5 WHERE id=?` 与 `UPDATE accounts SET department='平台研发部' WHERE id='u2'`。检索者是 u2：`cookieFor(world.fw.rest.app, "zhaoliu")`（`session-rest-helpers.ts:221`）加 `world.fw.rest.app.inject`，同组 6 的写法。不复制 `kb-retrieval-endpoint.test.ts:62-93` 的 `retrievals`、`storedOf`、`expectAnswer`（jscpd），行读取与请求过滤就地内联写。
+      - 「非所有者按已存参数检索」：u2 以 `{question:"销售额", threshold:0.1, vectorWeight:0.9}` 检索，得 200、`no-store`，body 为 `{hits:[], retrieval:{threshold:0.35, vectorWeight:0.5}}`；假 RAGFlow 恰收到一次 `POST /api/v1/retrieval`，body 带 `similarity_threshold:0.35`、`vector_similarity_weight:0.5`；两列与 `updated_at` 逐值等于检索前；`world.audits("kb.retrieval_settings")` 为 `[]`；`world.audits("kb.shared_retrieval")` 为 `[{actorId:"u2", title:"检索共享知识库", detail:{id:world.baseId, name:`库 ${world.baseId}`, ownerId:"u1", scope:{scope:"dept", groupId:null}}, workspaceId:null}]`。另一例：把库改为 `scope='group', scope_group_id='g1'`，detail 的 `scope` 为 `{scope:"group", groupId:"g1"}`。
+      - 时点：`const gate = world.fake.fault("POST /api/v1/retrieval", {kind:"hold"})`，发请求后 `await gate.reached`，此时共享审计已恰一条，然后 `gate.release()`，应答 200。另一例用 `fault(…, {kind:"status", status:503})`：应答 503 `kb_unavailable`，共享审计仍恰一条。
+      - 「非所有者的 body 仍须合规」：`threshold:1.5` 得 400 `bad_request`；以 `padded(16*1024+1, …)`（`mounts-rest-helpers.ts`）的超限 body 得 400；`setState("rebuild_failed")` 与 `setState("rebuilding")` 带合法 body 都得 409 `kb_rebuilding`；`rebuilding` 带坏 body 得 400（body 先于 state）。每次 `world.lines()` 为 `[]`，`audit_events` 总行数不变。
+      - 「共享审计写失败不检索」：`world.fw.world.db.exec("CREATE TRIGGER refuse_shared BEFORE INSERT ON audit_events WHEN NEW.kind = 'kb.shared_retrieval' BEGIN SELECT RAISE(ABORT, 'injected'); END")`（先例 `kb-retrieval-endpoint.test.ts:39`）。合法 body 得 500，`response.body` 恰为 `JSON.stringify({error:{message:"服务器内部错误"}})`；`world.lines()` 为 `[]`；审计总行数不变；两列与 `updated_at` 不变。
+      - 「非所有者的检索测试从不取锁」（规格只在「同一知识库的写操作串行」正文里有这句，没有单列场景，这里补上）：参数必须与已存值不同，否则所有者的快路径也会绿。`holdWriteLock(world, "rebuild")`（`kb-upload-helpers.ts:170`）期间，u2 以 `{0.1, 0.9}` 检索得 200，`retrieval` 为 `{0.35, 0.5}`；`holdWriteLock(world)`（写者）期间同一请求不等待即 200；两次都断言 `world.locks.writeWaiters(world.baseId)` 为 0，然后 `await release()`。
+      - 所有者对共享库：u1（`send(world.fw.rest, "member", …)`）对同一个 `dept` 库，以 `{0.35, 0.5}` 检索时零审计；以 `{0.1, 0.9}` 检索时恰一条 `kb.retrieval_settings`。`kb.shared_retrieval` 为 `[]`。
+      - 实测与这些字面量不符时停下报告，不改期望。
+    - 既有用例原地改（只限这些）：
+      - `kb-visibility.test.ts:8` 文件头改为「`GET …/documents` 与 `POST …/retrieval` 已由组 6、组 7 放开」。
+      - `kb-visibility.test.ts:317-343`「共享库的两级归属」：标题改为「…五条写路由 403、文档列表与检索测试 200，写路由零写入」；`sharedWorld` 之后执行 `const ds = world.fake.addDataset(); world.db.prepare("UPDATE knowledge_bases SET dataset_id = ? WHERE id = ?").run(ds, id)`（`ds-1` 不在假 RAGFlow，检索会是 503：`fake-ragflow-retrieval.mjs:184-185` → `ragflow-client.ts:469`）；改为 `expectAllForbidden(world, VALID.slice(2), id)`；之后 peer 先发文档列表（期望同前，只把路由改为 `ds`），再发 `VALID[1]` 的检索，得 200、`no-store`，body 为 `{hits:[], retrieval:{threshold:0.2, vectorWeight:0.7}}`；`routes(world.sent())` 为 `` [`GET /api/v1/datasets/${ds}/documents`, "POST /api/v1/retrieval"] ``，第二条的 `json` 带 `similarity_threshold:0.2`、`vector_similarity_weight:0.7`；`knowledge_bases`、`kb_documents` 的快照不变；`audit_events` 恰比之前多一行：`kind:"kb.shared_retrieval"`、`actor_id:"u2"`，`detail` 逐字为 `{"id":"<hex(1)>","name":"库 1","ownerId":"u1","scope":{"scope":"all","groupId":null}}`。
+      - `kb-visibility.test.ts:345-349`「403 先于 body」：改为 `expectAllForbidden(world, MALFORMED.filter(([name]) => name !== "POST 检索测试 16 KiB+1"), id)`。标题注明「检索测试是读路由，可见非所有者的超限 body 为 400，见 `kb-retrieval-shared.test.ts`」。`MALFORMED` 本身不拆，`:356` 照旧遍历全部，仍是 404。
+      - `kb-retrieval-endpoint.test.ts`、`http-parser-owners.test.ts`、`kb-disabled.test.ts` 不改，原样全绿（`:324` 的「别人的 id」是 `me` 档，仍为 404）。
+    - TDD 配对：`shared-audit.ts` 没有同名测试。PR 写明它的配对是 `kb-retrieval-shared.test.ts`（组 8 的 `kb-shared-audit.test.ts` 再覆盖会话一侧）。
+    - 行数（上限 800）：`retrieval.ts` 240 → ≤ 262；`shared-audit.ts` 新增 ≤ 45；`rest.ts` 313 → ≤ 316；`kb-visibility.test.ts` 497 → ≤ 520（放宽组 6 定的 ≤ 500）；`kb-retrieval-shared.test.ts` 新增 ≤ 340。`bases.ts`、`index.ts`、`documents.ts` 不改。
+    - 非目标：会话检索的共享审计与 `index.ts:198` 接线、「共享检索审计不含问句」的哨兵与 `GET /api/audit` 可见性（组 8）；web 检索面板只读（组 9）；功能验收清单行（D12，对用户惰性）；`smoke/`。
+    - 回归命令：`npm run test:focus --workspace server -- kb-retrieval-shared`（先红后绿）；`npm run test:focus --workspace server -- kb-retrieval-shared kb-retrieval-endpoint kb-retrieval kb-visibility kb-session-search http-parser-owners kb-disabled`；`make lint`、`make typecheck`、`make anti-drift`（knip：`SharedRetrievalEvent`、`auditSharedRetrieval` 都有使用者；jscpd），`make check`。
 
 Suggested fixture level: expanded - 审计时点与失败语义、不变量 1（非所有者不写回）。
 Minimal mergeable slice: atomic - 放开检索测试与写共享审计必须同时合入，否则中间态出现未审计的跨账号检索。
