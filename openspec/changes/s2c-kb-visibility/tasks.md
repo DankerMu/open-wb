@@ -45,6 +45,14 @@
 | 组 1 首刀：旧迁移不改、旧用例只跟进末尾假设 | 是 | 「既有用例唯一许可改动」清单；PR 描述贴 grep 结果 |
 | 组 1 首刀：Principal 与认证应答形状 | 是 | 「053 之后 Principal 不变」：登录与 `GET /api/auth/me` 逐字节 |
 | 组 1 首刀：权限 / web / kb 行为 | 否 | 本刀没有应用代码读写新列新表；`server/src/kb/store.ts:600` 的 `toBase` 逐字段取值，`BaseView` 不变 |
+| 组 1 第二刀：认证与只给本人 | 是 | 「三个账号」u3（管理员）为 `groups:[]`（没有管理员分支）；u1 带 `?accountId=u3&id=u3` 仍得 u1 的应答；未登录、种子 u4 的预置会话、u4 启用后登录再停用的真实 cookie 都是 401 |
+| 组 1 第二刀：公共 API 形状（严格键与键序） | 是 | 每个 200 应答的 `payload` 与字面量逐字节相等：键序 `department, groups`，组内 `id, name, memberCount`，不带成员 id |
+| 组 1 第二刀：缓存头 | 是 | no-store 挂在 route 自己的 `onRequest` 上（早于守卫的 `preParsing`）；200 与守卫 401 都断言 `cache-control: no-store`，且 `set-cookie` 为 undefined |
+| 组 1 第二刀：只读 | 是 | 登录之后，每次请求前后 `totalChanges` 的差为 0（涵盖 `audit_events`、`auth_sessions`）；停用账号的会话行仍在 |
+| 组 1 第二刀：此刻、成员数与码点序 | 是 | 带外改部门、加组、加成员后，用同一个 cookie 立刻看到变化；五个组的名称次序与插入序、id 序、JS UTF-16 序、locale 序都不同；`memberCount` 为 3 证明计的是全组成员 |
+| 组 1 第二刀：与知识库开关无关 | 是 | `withApp({})` 不注入 kb（`server/src/kb/index.ts:99-103`），在这个装配下 200 |
+| 组 1 第二刀：依赖方向与 SQL 落点 | 是 | 用例扫描 `server/src/accounts/*.ts`，不得出现对 `../kb/` 的导入；读 `department` 与 `project_group_members` 的 SQL 只在 `accounts/scope.ts`（knowledge-bases/spec.md:49，组 5 的扫描依赖它） |
+| 组 1 第二刀：迁移 / web / kb 行为 | 否 | 不改 schema、web、kb；`app.ts` 不改（`registerAccounts` 已在 `server/src/app.ts:383` 注册） |
 
 ## 1. 迁移 053 与账号范围读取（account-groups 全部；knowledge-bases「迁移 053 知识库范围列」；dev-stub-auth「账号与认证会话数据基座」）
 
@@ -125,6 +133,55 @@
 - [ ] 1.5 核对 Context：`server/src/accounts/index.ts` 的 `registerAccounts` 与 `/api/audit` 的 no-store 写法
 - [ ] 1.6 测试先行：新文件 `server/test/accounts-scope.test.ts` 覆盖「账号范围端点」全部场景（u4 先带外启用；停用账号 401；`memberCount`）
 - [ ] 1.7 实现新文件 `server/src/accounts/scope.ts`：`scopeOf(db, accountId) → {department, groups:[{id, name, memberCount}]}`（组按 `name` 码点升序）；`registerAccounts` 注册 `GET /api/accounts/me/scope`
+  - 组 1 第二刀约定（#2027 fixture 审查补；1.6–1.7 照此实现与测试）：
+    - 文件：
+      - 新文件 `server/src/accounts/scope.ts`：只导出 `scopeOf`，是纯读函数，不导入 Fastify，也不导入 `../kb/`。组 11 的 kb 直接导入它，不带路由（system.md:87 已声明 `kb → accounts`）。
+      - `server/src/accounts/index.ts`：在 `registerAccounts` 里加一条 `app.get("/api/accounts/me/scope", …)`。PR Boundary 的「注册一行」按「一条路由」理解。
+      - 新用例文件 `server/test/accounts-scope.test.ts`。
+      - `server/test/session-db-helpers.ts`：在 `:123-125` 的 `disableAccount` 旁边加 `enableAccount(db, id)`（`UPDATE accounts SET disabled = 0 WHERE id = ?`）；`:122` 的注释改为「disabled 状态的写入口（停用与启用）」。组 5.2 的「u4 按需带外启用」复用它。
+    - 函数与 SQL：
+      - 签名：`export function scopeOf(db: DatabaseSync, accountId: string): { department: string | null; groups: { id: string; name: string; memberCount: number }[] }`。
+      - 返回类型写在签名里，不另外导出 interface 或 type：knip 会把本刀无人使用的导出类型报出来（`Makefile:30`，`knip.json` 无 rules 覆盖）。组 11 需要时再导出。
+      - 两条预编译语句：
+        - ① `SELECT department FROM accounts WHERE id = ?`
+        - ② `SELECT g.id, g.name, (SELECT COUNT(*) FROM project_group_members AS c WHERE c.group_id = g.id) AS memberCount FROM project_group_members AS m JOIN project_groups AS g ON g.id = m.group_id WHERE m.account_id = ? ORDER BY g.name`
+      - 次序：用 SQL 的 BINARY 排序。UTF-8 字节序就是码点序，`name` 是 UNIQUE，不需要第二排序键。SHALL NOT 在 JS 里 `sort`，也不用 `localeCompare`。
+      - `memberCount` 统计该组全部成员行，不联 `disabled`。应用侧不产生停用的成员，种子里也没有。
+      - 返回对象按 `department, groups` 构造；组对象按 `id, name, memberCount` 构造；`memberCount` 为 number。
+    - 路由：
+      - `index.ts:7` 的 `noStoreAuditResponse` 原地改名为 `noStoreResponse`，`:6` 的注释改为同时覆盖 audit 与 scope。审计路由和新路由共用这一个 `onRequest` hook，不另写第二份（Code Canonicality）。
+      - handler 照 `:14-17` 的写法：先判断 `principal === null` 就抛 `HttpError("unauthorized")`，然后 `return scopeOf(db, principal.id)`。
+      - 不读 `request.query`；不写表，不写审计。
+    - 用例：经 `withApp({}, …)`（`auth-lifecycle-helpers.ts:71`，不注入 kb）。原语从 `auth-lifecycle-helpers.js` 导入（`:26` 整体转发 session-db-helpers），包括 `loginSessionPair`、`bearerCookie`、`insertRow`、`testId`、`totalChanges`、`sessionSnapshot`、`accountSnapshot`、`disableAccount`、`enableAccount`、`FIXED_NOW`、`UNAUTHORIZED_ENVELOPE`。
+      - 「三个账号」：
+        - 准备：先 `enableAccount(db, "u4")`；u1、u2、u3、u4 各自用 `loginSessionPair(app, <account>)` 登录（zhangsan / zhaoliu / lisi / wangwu）。登录之后记下 `totalChanges(db)`。
+        - 逐个请求 `GET /api/accounts/me/scope`，每次 200，`cache-control` 为 `no-store`，`payload` 逐字节等于：
+          - u1：`{"department":"平台研发部","groups":[{"id":"g1","name":"内网落地专项","memberCount":2}]}`
+          - u2：`{"department":"数据部","groups":[{"id":"g1","name":"内网落地专项","memberCount":2}]}`（由 053:55-64 推出，规格未列）
+          - u3：`{"department":"产品部","groups":[]}`
+          - u4：`{"department":null,"groups":[]}`
+        - u1 带 `?accountId=u3&id=u3` 请求，`payload` 等于 u1 的字面量。
+        - 全部请求结束后，`totalChanges(db)` 的差为 0。
+      - 「此刻、成员数与码点序」：
+        - 先用 u3 的 cookie 请求一次，得 `{"department":"产品部","groups":[]}`。
+        - 带外写入：
+          - 依次插入组 `('g2','\u{1F600}组',0)`、`('g3','a组',0)`、`('g4','｡组',0)`、`('g5','Z组',0)`；
+          - 插入成员 `(g2,u3)`、`(g3,u3)`、`(g4,u3)`、`(g5,u3)`、`(g1,u3)`；
+          - `UPDATE accounts SET department = '设计部' WHERE id = 'u3'`。
+        - 用同一个 u3 cookie 再请求，`payload` 逐字节等于 `{"department":"设计部","groups":[{"id":"g5","name":"Z组","memberCount":1},{"id":"g3","name":"a组","memberCount":1},{"id":"g1","name":"内网落地专项","memberCount":3},{"id":"g4","name":"｡组","memberCount":1},{"id":"g2","name":"😀组","memberCount":1}]}`。各名称首字的码点为 Z 0x5A < a 0x61 < 内 0x5185 < ｡ 0xFF61 < 😀 0x1F600。这个结果与插入序、id 序、JS UTF-16 序（😀 会排在 ｡ 前）、locale 序（a 会排在 Z 前）都不同。
+        - u1 再请求，得 `{"department":"平台研发部","groups":[{"id":"g1","name":"内网落地专项","memberCount":3}]}`：g2–g5 不出现，g1 的计数跟着成员变化。
+      - 「未登录」：
+        - 不带 cookie 请求，401，`payload` 逐字节等于 `{"error":{"code":"unauthorized","message":"请先登录"}}`。
+        - `cache-control` 为 `no-store`，`set-cookie` 为 undefined（先例 `accounts.test.ts:163-175`；不用 `expectUnauthorizedTerminal`，它断言 `CLEAR_COOKIE`）。
+        - `sessionSnapshot` 与 `accountSnapshot` 不变。
+      - 「停用账号」：
+        - 种子 u4 保持 `disabled=1`，执行 `insertRow(db, testId("b"), "u4", FIXED_NOW + 60_000)`（先例 `http-guard.test.ts:314-316`），用 `bearerCookie(testId("b"))` 请求。
+        - 另一例：`enableAccount` → u4 登录 → `disableAccount(db, "u4")` → 用这个真实 cookie 再请求。
+        - 两例的期望与「未登录」逐项相同；会话行仍在，`totalChanges` 的差为 0。
+      - 「依赖方向」：用 `readdirSync` 列出 `server/src/accounts/*.ts`，逐个 `readFileSync` 读源码，断言都不匹配 `/from\s+["']\.\.\/kb\//`。源码扫描的先例是 `migration-053.test.ts:59-60,219`。
+    - 行数（上限 800）：`server/src/accounts/scope.ts` ≤ 60；`server/src/accounts/index.ts` 41 → ≤ 56；`server/test/accounts-scope.test.ts` ≤ 260；`server/test/session-db-helpers.ts` 251 → ≤ 257；`app.ts`（767）、`accounts.test.ts`（320）、`auth-lifecycle-helpers.ts`（168）不改。PR diff 预计少于 400 行。
+    - 非目标：kb 使用 `scopeOf`（组 11）；web 的 `getMyScope`（组 12）；`docs/architecture/system.md:35` 的 `scopeOf(principal)` 签名与端点同步（组 14.1）；功能验收清单行（本刀没有用户可见的界面）；`scopeOf` 遇到不存在的账号 id（守卫保证调用者是已存在的启用账号，组 11 用 `owner_id` 外键，都不在输入域内），不加分支用例；部门与项目组的写接口（S3a）；HEAD 与查询参数校验。
+    - 回归命令：`npm run test:focus --workspace server -- accounts-scope`（先红后绿）；`npm run test:focus --workspace server -- accounts http-guard auth-lifecycle auth-session migration-053`；再跑全量 `npm test --workspace server`（覆盖率门禁）；`make lint`、`make typecheck`、`make anti-drift`（knip：`scopeOf` 有 `accounts/index.ts` 使用，`enableAccount` 有新用例使用；jscpd：不复制 no-store hook）。
 
 Suggested fixture level: expanded - 新 schema、种子进生产库、外键语义（RESTRICT 约束 S3a 的删组）。
 Minimal mergeable slice: 1.1–1.4 为首刀：迁移由 `openDb` 自动执行，独立 SQL 加形态测试即可合并保绿（先例 `openspec/changes/archive/2026-09-24-s1a-sandbox-audit-files/tasks.md:24`），组 5 只需要它；1.5–1.7（读取函数与端点）由组 11、组 12 消费，依赖首刀的表。
