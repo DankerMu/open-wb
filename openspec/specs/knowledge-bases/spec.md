@@ -49,7 +49,8 @@
 `kb` 模块 SHALL 为每个知识库持有一把进程内写锁。持锁范围：
 - 工作空间入库（整批）、本地上传、重新入库、移出文档、删库，各在整个操作期间持有该库的锁。
 - 重建器在重建该库期间持有它的锁。
-- 检索测试的参数写回：只在提交的参数与已存值不同时取锁，持有到两列的写入提交为止（「检索测试端点」）；检索本身在锁外执行。
+- 检索测试的参数写回：只在提交的参数与已存值不同时取锁，持有到两列的写入提交为止（「检索测试端点」）；检索本身在锁外执行。非所有者的检索测试不写回，从不取锁。
+- 改范围（「知识库范围端点」）SHALL NOT 取这把锁：它只写本地两列，与 RAGFlow 无关；与删库并发时由更新影响 0 行判定（404）。下文「写操作 SHALL 在取得锁之后重新判定」不适用于它。
 
 写操作 SHALL 在取得锁之后重新判定：该库是否存在、`state` 是否允许本操作、本操作涉及的文档数上限。检索写回另在锁内用重读的值重新比较参数，相同即不写。锁正被重建器持有时，写操作不等待，立即 409 `kb_rebuilding`。
 
@@ -69,15 +70,29 @@
 - **WHEN** 一批入库进行中（假 RAGFlow 挂起第一份上传），所有者删除该知识库，然后假 RAGFlow 放行
 - **THEN** 删除在入库结束之后才执行，得 204；结束后库与文档行都不在，假 RAGFlow 收到的删数据集请求在上传之后
 
-### Requirement: 知识库端点
-知识库开启后，已登录用户 SHALL 能管理自己的知识库。别人的或不存在的 id 一律 404 `not_found`，不可探测：这条对本 Requirement 与下面的入库、上传、文档列表、重新入库、移出与检索测试路由都成立，判定先于 body 解析、`doc` 参数与 `state` 判定，SHALL NOT 发出站请求，SHALL NOT 写审计。全部应答带 no-store。
+#### Scenario: 改范围不排队
+- **WHEN** 一批工作空间入库持有库 K 的写锁（假 RAGFlow 挂起上传），所有者把 K 改为 `{scope:"all"}`
+- **THEN** 改范围立即 200，不等待入库结束；恰一条 `kb.scope`
 
-**视图** `BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, retrieval, createdAt}`：
+### Requirement: 知识库端点
+知识库开启后，已登录用户 SHALL 能管理自己的知识库，并按「可见范围判定」读取别人共享给他的知识库。`/api/kb/bases/:id` 下的每条路由（本 Requirement 的删库，以及入库、上传、文档列表、重新入库、移出、检索测试与「知识库范围端点」）SHALL 先做归属判定。判定先于 body 解析、`doc` 参数与 `state` 判定，SHALL NOT 发出站请求，SHALL NOT 写审计：
+- 对调用者不可见或不存在的 id：404 `not_found`，两种情形的应答完全相同，不可探测。
+- 可见而调用者不是所有者：
+  - 读路由放行：`GET …/documents`、`POST …/retrieval`。
+  - 写路由 403 `forbidden`：`DELETE /api/kb/bases/:id`、`POST …/documents`、`DELETE …/documents`、`POST …/documents/reingest`、`POST …/uploads`、`PUT …/scope`。共享的知识库对非所有者永远只读（CONTEXT.md 不变量 1）。
+
+全部应答带 no-store。
+
+**视图** `BaseView` 恰为 `{id, name, template, raptor, graph, state, stateMessage, documents, compile, retrieval, createdAt, owned, owner, scope}`：
+- `owned`：布尔，调用者是否为该库的所有者。
+- `owner`：恰为 `{id, account, department}`，取所有者账号此刻的值；`department` 为字符串或 `null`。
+- `scope`：恰为 `{scope, group}`。`scope ∈ {me, dept, group, all}`；`group` 在 `scope` 为 `group` 时为 `{id, name}`（该项目组此刻的名称），否则为 `null`。
 - `retrieval`：该库的检索参数 `{threshold, vectorWeight}`，取迁移 051 的两列，两者都是 0–1 的数字；只依赖本地行。
 - `raptor`、`graph`：布尔，与建库 body 同型，库列的 0 / 1 在视图层转换。
 - `createdAt`：`created_at` 的 epoch 毫秒，非负整数。
 - `documents`：本地文档行数。
 - `compile`：
+  - 调用者不是所有者的库：恒为 `null`，不发出站请求（编译进度只对所有者呈现）。
   - 两个开关都为 0 的库：恒为 `{raptor:"off", graph:"off"}`，不发出站请求。
   - 其余的库：为 `{raptor, graph}`，关着的类型为 `off`，开着的类型按下面的规则从 RAGFlow 现读，各取 `pending` / `running` / `done` / `failed`。
 
@@ -89,18 +104,19 @@
 
 `failed` SHALL 只来自文档 `FAILED`。文档已 `COMPLETED` 而该类型没有日志时（RAPTOR 在对话模型失败时没有任何信号）SHALL 保持 `pending`，不得显示 `failed` 或 `done`。文档列表判定该库的数据集为 not-found 时，按读取失败处理。
 
-**`GET /api/kb/bases`**：200 `{bases: BaseView[]}`，按 `created_at` 升序。
+**`GET /api/kb/bases`**：200 `{bases: BaseView[]}`，列出调用者可见的全部库（「可见范围判定」）：调用者拥有的库按 `created_at` 升序在前，其余按 `created_at` 升序在后，`created_at` 相同按 `id` 升序。
 - 列表只依赖本地行。
-- 各库的编译状态读取并发发出，共用一个 5 s 总期限；没有在期限内读完的库 `compile` 为 `null`，读取失败同此。
+- 只为调用者拥有的库读取编译状态，并发发出，共用一个 5 s 总期限；没有在期限内读完的库 `compile` 为 `null`，读取失败同此。
 - RAGFlow 不可达时列表照常 200。
 
-**`POST /api/kb/bases`**：body 键集为 `name`、`template`、`raptor?`、`graph?`。依次判定：
-1. 键集、类型、名称或模板不合规：400 `bad_request`。这一步不读库。
+**`POST /api/kb/bases`**：body 键集为 `name`、`template`、`raptor?`、`graph?`、`scope?`、`groupId?`。依次判定：
+1. 键集、类型、名称或模板不合规：400 `bad_request`。范围按「知识库范围端点」的形状规则判定：`scope` 缺省为 `me`；`groupId` 当且仅当 `scope` 为 `group` 时出现。这一步不读库。
 2. 嵌入模型未就绪：409 `kb_not_ready`。
 3. 开关为真而知识库对话模型未指定：400 `bad_request`。RAPTOR 与知识图谱对十一种模板都可用，没有按模板的限制。
 4. 同账号重名：409 `conflict`。已有 50 个知识库：409 `kb_limit`。
+5. 范围不满足所有者条件（「知识库范围端点」：`dept` 而所有者没有部门，`group` 而所有者不是该组成员或组不存在）：400 `bad_request`。
 
-判定 2–4 SHALL 在取得进程级设置锁之后进行，读到的是锁内的设置行与知识库行；建库全程持有这把锁。
+判定 2–5 SHALL 在取得进程级设置锁之后进行，读到的是锁内的设置行与知识库行；建库全程持有这把锁。
 
 下文的「代数」为当前嵌入代数，`<名字>` 为 `owb-<id 前 16 位>-g<代数>`：`<id>` 是知识库 id（32 位小写十六进制），取其前 16 个字符。数据集、模板组与画布 SHALL 同名，由同一处函数生成（建库与重建共用）。`<名字>` 的长度 SHALL 不超过 32 个字符（代数不超过 10 位时成立）：RAGFlow 建入库任务时把画布标题拷进 `pipeline_operation_log.pipeline_title`（`varchar(32)`），超长时任务建不出来，解析触发回 `code:0`、`success_count:0`，日志里没有记录。
 
@@ -117,7 +133,7 @@
 两种情形：
 - `embedding_model` SHALL 恒显式传三段式 `<名称>@owb-embed@OpenAI-API-Compatible`。
 - SHALL NOT 发送 `chunk_method`，也不在 `parser_config` 里发送 RAPTOR 或知识图谱字段。
-- 全部成功后插行，并在同一事务里审计 `kb.create`；成功应答为 201 `BaseView`，SHALL NOT 为这个应答读 RAGFlow：`state` 为 `ready`，`stateMessage` 为 `null`，`documents` 为 0，`compile` 里开着的类型为 `pending`，关着的为 `off`，`retrieval` 为 `{threshold:0.2, vectorWeight:0.7}`。
+- 全部成功后插行，并在同一事务里审计 `kb.create`；成功应答为 201 `BaseView`，SHALL NOT 为这个应答读 RAGFlow：`state` 为 `ready`，`stateMessage` 为 `null`，`documents` 为 0，`compile` 里开着的类型为 `pending`，关着的为 `off`，`retrieval` 为 `{threshold:0.2, vectorWeight:0.7}`，`owned` 为真，`scope` 为请求的范围（缺省 `{scope:"me", group:null}`）。
 - 任一步失败或插行失败：SHALL 逆序删除这一次已建的资源（数据集 → 画布 → 模板组），按「RAGFlow 出站请求」映射返回。回滚里某一步删除失败即停，SHALL NOT 再删后面的资源，并写一行 stderr 记录（`kb_dataset_leak` 或 `kb_pipeline_leak`，形状见 ragflow-backend「嵌入模型更换与全量重建」），不改变应答。
 
 **DSL**：画布 DSL SHALL 由内置 DSL 改写，并同时含 `components` 与 `graph`：
@@ -229,6 +245,26 @@
 #### Scenario: 开编译的库能入库（画布名不超过 32 字符）
 - **WHEN** 知识库对话模型已指定；用户建 `{"template":"naive","raptor":true}` 与 `{"template":"naive","graph":true}` 各一个库，并各自从工作空间入库一份 `notes.md`；假 RAGFlow 照真实行为，对绑定画布标题超过 32 个字符的文档触发解析时回 `code:0`、`success_count:0`、不建任务
 - **THEN** 两次建库都是 201，假 RAGFlow 收到的数据集名、模板组名与画布标题都等于 `owb-<id 前 16 位>-g0`，长度不超过 32；两次入库都是 201，`documents` 各 1 份、`rejected` 为空；对 32 位 id 与 10 位代数生成的名字长度仍不超过 32
+
+#### Scenario: 共享库的两级归属
+- **WHEN** u1（平台研发部）有库 K（`scope:"all"`，一份文档）；u2 依次请求 `GET /api/kb/bases/K/documents`、`POST …/retrieval`（合法 body，K 为 `ready`）、`DELETE /api/kb/bases/K`、`POST …/documents`（合法 body）、`DELETE …/documents?doc=<K 的文档 id>`、`POST …/documents/reingest?doc=<K 的文档 id>`、`POST …/uploads?name=a.md`、`PUT …/scope`（合法 body）
+- **THEN** 前两次 200；后六次 403 `forbidden`，body 都是同一个信封；假 RAGFlow 只收到前两次引起的文档列表与检索请求；K 的行、文档行、范围与检索参数都不变；后六次都没有新增审计
+
+#### Scenario: 403 先于 body
+- **WHEN** u2 对 u1 的可见库 K 以 `Content-Type: text/plain` 与非 JSON 的 body 请求 `POST …/documents`，并以畸形 `doc` 参数请求 `DELETE …/documents?doc=`
+- **THEN** 两次都是 403 `forbidden`，不是 400
+
+#### Scenario: 不可见与不存在不可区分
+- **WHEN** u1 的库 K 为 `scope:"me"`；u2 以 K 的 id 与一个不存在的 id 各请求 `GET …/documents`、`DELETE /api/kb/bases/:id` 与 `PUT …/scope`（合法 body）
+- **THEN** 六次都是 404 `not_found`，K 的三次与不存在的三次 body 逐字节相同
+
+#### Scenario: 列表的可见集合、次序与非自有的编译状态
+- **WHEN** u2 依次建了库 A2（`raptor:true`）、B2；之前 u1 建了 K1（`scope:"all"`，`raptor:true`）、K2（`scope:"me"`），u3 建了 K3（`scope:"all"`）；u2 请求列表
+- **THEN** 列表依次为 A2、B2、K1、K3，不含 K2；A2、B2 的 `owned` 为真，K1、K3 为假，`owner` 依次为 u2、u2、`{id:"u1", account:"zhangsan", department:"平台研发部"}`、`{id:"u3", account:"lisi", department:"产品部"}`；K1 的 `compile` 为 `null`，A2 的为对象；假 RAGFlow 只收到为 A2 读编译状态的请求
+
+#### Scenario: 建库带范围
+- **WHEN** u1 建库带 `{scope:"group", groupId:"g1"}`；再建一个带 `{scope:"dept"}`；u4（部门为空；测试带外先把 u4 的 `disabled` 置 0：种子里 u4 是停用账号，停用账号的请求一律 401）建库带 `{scope:"dept"}`；u3（不是 g1 成员）建库带 `{scope:"group", groupId:"g1"}`；u1 建库带 `{scope:"all", groupId:"g1"}`；u1 建库带 `{scope:"team"}`
+- **THEN** 前两次 201，应答的 `scope` 依次为 `{scope:"group", group:{id:"g1", name:"内网落地专项"}}`、`{scope:"dept", group:null}`，各自的 `kb.create` detail 带 `scope`；后四次 400 `bad_request`，没有知识库行，四次都没有任何出站请求（所有者条件在锁内、建 RAGFlow 资源之前判定）
 
 ### Requirement: 工作空间来源入库
 所有者 SHALL 能经 `POST /api/kb/bases/:id/documents` 把自己工作空间里的文件入库。
@@ -384,7 +420,7 @@
 - **THEN** 第一次 503 `kb_unavailable`，第二次 400 `kb_rejected`；两次假 RAGFlow 都收到删除该文档的请求；没有文档行
 
 ### Requirement: 文档列表与状态
-所有者 SHALL 能经 `GET /api/kb/bases/:id/documents` 读文档列表，应答 200 `{documents: DocumentView[]}`，按 `created_at` 升序，带 no-store。
+能看到该库的账号（「可见范围判定」）SHALL 能经 `GET /api/kb/bases/:id/documents` 读文档列表，应答 200 `{documents: DocumentView[]}`，按 `created_at` 升序，带 no-store。
 - 状态以 RAGFlow 为准，每次请求时读取：先读本地行，再分页读取该数据集的全部文档（`page_size` 为 100，`orderby=create_time`，`desc=false`，读到 `total` 为止，不设页数上限），按 RAGFlow 文档 id 关联；不起后台轮询。翻页期间的写入可能让这次读漏掉一行，该条显示 `missing`，下一次读取修正。
 - 数据集本身为 not-found 时，全部文档为 `missing`。
 - RAGFlow 不可达：503 `kb_unavailable`。
@@ -409,6 +445,8 @@
   - 计算方式：经 core 的无审计解析（工作空间根加纯函数 `resolve`，第四个参数传该工作空间的挂载名集合，与 facade 注入的 `mountNamesOf` 同一来源，使挂载点及其下路径不被同步 `lstat`，遵守 workspace-mounts 对挂载路径的既有约束），再 stat 源路径；挂载内经挂载 stat。
   - 大小或修改时间与入库记录不同，或文件已不存在：`true`；相同：`false`。
   - 解析被拒、工作空间已不可见、挂载离线：`null`。
+
+调用者不是所有者时，每条的 `workspaceId`、`path`、`sourceChanged` SHALL 为 `null`，其余键照常；SHALL NOT 为它计算 `sourceChanged`（不解析、不 stat 所有者工作空间里的任何路径）。所有者沙箱里的路径与文件状态不给非所有者。
 
 这次读取 SHALL NOT 写任何审计。
 
@@ -439,6 +477,10 @@
 #### Scenario: 源路径变成符号链接
 - **WHEN** 入库后把源文件所在目录换成指向它的符号链接，然后连续两次请求列表
 - **THEN** 两次该条的 `sourceChanged` 都是 `null`；`audit_events` 里没有新增 `sandbox.reject`
+
+#### Scenario: 非所有者看不到来源
+- **WHEN** u1 的库 K（`scope:"all"`）有一份工作空间来源的文档（入库后源文件被改写）与一份本地上传；u1 与 u2 各请求文档列表
+- **THEN** u1 的工作空间来源那条 `workspaceId`、`path` 为入库时的值，`sourceChanged` 为 `true`；u2 的两条 `workspaceId`、`path`、`sourceChanged` 都是 `null`，`source` 依次为 `workspace`、`upload`，`status` 与 `chunkCount` 与 u1 看到的相同；u2 那次请求没有对 u1 的工作空间做任何文件系统调用，`audit_events` 没有新增
 
 ### Requirement: 重新入库与移出
 **重新入库**：所有者 SHALL 能经 `POST /api/kb/bases/:id/documents/reingest?doc=<文档 id>` 重新入库一份工作空间来源的文档，在该库的写锁下进行。
@@ -514,11 +556,11 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **THEN** 移出 204，该行已删除；重新入库 409 `kb_rebuilding`
 
 ### Requirement: 知识库审计
-知识库相关审计 SHALL 只用下表八种 kind。标题为中文短句；detail 的键集恰如下表，SHALL NOT 含密钥、文件内容或 RAGFlow 应答原文。
+知识库相关审计 SHALL 只用下表十种 kind。标题为中文短句；detail 的键集恰如下表，SHALL NOT 含密钥、文件内容或 RAGFlow 应答原文。
 
 | kind | 时机 | detail |
 |---|---|---|
-| `kb.create` | 建库成功 | `{id, template, raptor, graph}` |
+| `kb.create` | 建库成功 | `{id, template, raptor, graph, scope:{scope, groupId}}` |
 | `kb.delete` | 删库成功 | `{id}` |
 | `kb.ingest` | 工作空间入库，每份文档一条 | `{id, source:"workspace", workspaceId, path, documentId}` |
 | `kb.ingest` | 本地上传 | `{id, source:"upload", name, size, documentId}` |
@@ -533,13 +575,17 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 | `kb.rebuild` | 重试 | `{bases, documents, retry:true}` |
 | `kb.rebuild` | 单库结束 | `{id, result:"ok", skipped: string[]}` 或 `{id, result:"failed"}` |
 | `kb.retrieval_settings` | 检索测试写回检索参数 | `{id, before:{threshold, vectorWeight}, after:{threshold, vectorWeight}}` |
+| `kb.scope` | 改范围且实际变化 | `{id, before:{scope, groupId}, after:{scope, groupId}}` |
+| `kb.shared_retrieval` | 对一个非自有库发出检索请求之前（检索测试与会话检索 `kb_search`） | `{id, name, ownerId, scope:{scope, groupId}}` |
 
 规则：
-- actor 为请求的 principal；重建器写的单库记录，actor 为 `kb_settings.rebuild_actor_id`。
+- actor 为请求的 principal；重建器写的单库记录，actor 为 `kb_settings.rebuild_actor_id`；`kb.shared_retrieval` 的 actor 为检索者（会话检索时为会话所有者）。
+- `groupId` 在 `scope` 为 `group` 时为组 id，否则为 `null`。标题：`kb.scope` 为 `修改知识库可见范围`，`kb.shared_retrieval` 为 `检索共享知识库`。
 - 工作空间来源的记录，`workspaceId` 列为该工作空间；其余为 null。
 - 每条成功审计与它对应的那一次本地写入在同一事务内；本地写入失败时不留审计。确认重建的那次保存写 `kb.settings` 与 `kb.rebuild` 两条，其余每次写入一条。
 - `kb.ingest_reject` 没有对应的本地写入，单独写入。
-- 设置保存没有实际写入时（`chatModelId` 或 `rerank` 由 `null` 到 `null`）不写审计；检索测试的参数与已存值相同时不写回，也不写审计。检索本身不写审计。同身份重存嵌入模型也是一次写入，写一条；`kb.settings` 的 detail 只含实际变化的键，可以为空。
+- `kb.shared_retrieval` 没有对应的本地写入，单独写入：判定该库可见、调用者不是所有者且 `state` 为 `ready` 之后，调用单轮检索之前；与检索结果（成功、失败、中途取消）无关。没有发出检索请求的情形（不可见、非 `ready`、参数不合规、中止信号在写审计之前已中止）不写：会话检索对每个非自有库先查中止信号，已中止即为 `failed`，不写审计、不检索。这条审计写入失败时 SHALL NOT 检索该库（检索测试为通用 500；会话检索里该库为 `failed`）。detail 取判定可见时读到的那一行，SHALL NOT 含问句与命中内容。
+- 设置保存没有实际写入时（`chatModelId` 或 `rerank` 由 `null` 到 `null`）不写审计；检索测试的参数与已存值相同时不写回，也不写审计。对调用者自己的库检索不写审计。范围与已存值相同时不写、不审计。同身份重存嵌入模型也是一次写入，写一条；`kb.settings` 的 detail 只含实际变化的键，可以为空。
 
 #### Scenario: detail 不含敏感内容
 - **WHEN** 以内容含哨兵串的文件完成一次工作空间入库、一次本地上传、一次重新入库与一次移出，以带密钥哨兵的 body 保存一次知识库模型设置（含 `embedding` 与 `rerank`），并以含哨兵串的问句完成一次带写回的检索测试
@@ -549,46 +595,66 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **WHEN** 经注入让文档行插入失败
 - **THEN** 没有 `kb.ingest` 审计；假 RAGFlow 收到删除刚上传文档的请求
 
+#### Scenario: 共享检索审计不含问句
+- **WHEN** u2 以含哨兵串的问句对 u1 的可见库 K（`scope:"group"`，g1）做一次检索测试，并以含哨兵串的问句执行一次覆盖 K 与 u2 自己的库的 `kb_search`
+- **THEN** 恰两条 `kb.shared_retrieval`，actor 都是 u2，detail 都是 `{id:K, name:<K 的名称>, ownerId:"u1", scope:{scope:"group", groupId:"g1"}}`；`title` 与 `detail` 都不含哨兵；u2 自己的库没有审计
+- **WHEN** u1 以 `GET /api/audit` 读审计
+- **THEN** 看不到这两条（审计查询按 actor 过滤，audit-core）；管理员 u3 看得到
+
 ### Requirement: 中心「知识库」tab
-`/center?tab=knowledge-bases` SHALL 在 `GET /api/kb/status` 为 `enabled:true` 时对所有用户可见（见 model-registry「中心页外壳」），渲染当前用户的知识库。
+`/center?tab=knowledge-bases` SHALL 在 `GET /api/kb/status` 为 `enabled:true` 时对所有用户可见（见 model-registry「中心页外壳」），渲染当前用户可见的知识库（`GET /api/kb/bases` 的全部条目）。下文的「自有库」指 `owned` 为真的库，「共享库」指其余的库。
 
 **状态行**：
 - `available:false`：页顶以 `role="alert"` 显示 `知识库服务暂不可用` 与 `重试` 按钮（重取状态与列表），本 tab 其余控件不渲染。模型 tab 的「知识库模型」段不受影响（ragflow-backend「知识库可用性」）。
 - `embeddingReady:false`：显示 `管理员尚未配置知识库嵌入模型`，不渲染 `新建知识库`。
 
 **列表**：
-- 每个知识库一行：名称、模板中文名、`RAPTOR` / `知识图谱` 标签与其编译状态、文档数、`重建中` / `重建失败` 标记。
+- 每个知识库一行：名称、模板中文名、`RAPTOR` / `知识图谱` 标签与其编译状态、文档数、`重建中` / `重建失败` 标记、范围标签。
+- 列表上方显示 `我的 <自有库数> 个 · 共享给我 <共享库数> 个`。
+- 范围标签文案：`me` 为 `仅自己可见`，`dept` 为 `本部门可见`，`group` 为 `项目组可见 · <组名>`，`all` 为 `全员可见`。自有库的范围标签是一个按钮，打开范围对话框；共享库的是纯文本。
+- 共享库：名称旁有 `只读` 标签；行内显示 `来自 <所有者账号> · <所有者部门>`，部门为 `null` 时为 `来自 <所有者账号>`；只显示 `RAPTOR` / `知识图谱` 标签，不显示编译状态文案（`compile` 恒为 `null`）。
 - 编译状态文案：`pending` 为 `尚未产出`，旁注 `解析完成后长时间没有变化，可能是知识库对话模型不可用，请联系管理员`；`running` 为 `编译中`；`done` 为 `已完成`；`failed` 为 `有文档失败`；`compile` 为 `null` 时为 `状态未知`。这些文案 SHALL NOT 含 `编译失败`：`pending` 没有失败信号，`failed` 来自文档。
 - 点行进入详情。
-- 每行有 `删除知识库`，先弹确认对话框，确认后恰调用一次 `deleteKnowledgeBase`；`state` 为 `rebuilding` 时不渲染，`rebuild_failed` 时渲染。
+- 自有库每行有 `删除知识库`，共享库没有；先弹确认对话框，确认后恰调用一次 `deleteKnowledgeBase`；`state` 为 `rebuilding` 时不渲染，`rebuild_failed` 时渲染。
 - 没有知识库时显示空态 `还没有知识库`。
 
 **`新建知识库` 对话框**：
-- 字段：名称；模板（十一种，每项带 demo 的说明文案）；`RAPTOR` 与 `知识图谱` 复选，只在 `compileReady` 为真时渲染，十一种模板都一样。
-- 提交恰调用一次 `createKnowledgeBase`；失败时在对话框内以 `role="alert"` 显示信封文案。
+- 字段：名称；模板（十一种，每项带 demo 的说明文案）；`RAPTOR` 与 `知识图谱` 复选，只在 `compileReady` 为真时渲染，十一种模板都一样；可见范围（与范围对话框同一组控件，初值 `仅自己可见`）。对话框打开时恰调用一次 `getMyScope`；取得失败时只有 `仅自己可见` 可选、其余三档禁用，并以 `role="alert"` 显示信封文案，建库不受影响。
+- 提交恰调用一次 `createKnowledgeBase`，范围为 `仅自己可见` 时 body 不带 `scope`；失败时在对话框内以 `role="alert"` 显示信封文案。
+
+**范围对话框**（可访问名 `「<库名>」可见范围`，demo :3059）：
+- 打开时恰调用一次 `getMyScope`；取得失败时对话框内以 `role="alert"` 显示信封文案，四个选项都禁用，`保存` 禁用。
+- 初始选中该库当前的档，`group` 时下拉初始选中当前组（demo :3061、:3068）。当前档已不可选（`dept` 而 `department` 为 `null`，或 `group` 而当前组不在 `groups` 里）时，初始不选中任何档，`保存` 禁用，直到用户选一个可选的档（服务端对失去条件的重存回 400，「知识库范围端点」）。
+- 四档单选，每档带 demo 的说明，逐字取 demo :2738-2741（`仅自己可见`：只有你能检索与引用，文档留在你的沙箱内；`本部门可见`：同部门同事可检索与引用，但不能改动内容；`项目组可见`：指定项目组的成员可检索与引用，可跨部门；`全员可见`：全公司可检索与引用，适合口径、规范类文档）。
+- `getMyScope` 的 `department` 为 `null` 时 `本部门可见` 禁用，旁注 `你的账号没有部门信息`。
+- 选 `项目组可见` 时出现项目组下拉，列出 `getMyScope` 的 `groups`，每项为 `<组名>（<memberCount> 人）`（demo :3068）；`groups` 为空时下拉不渲染，显示 `你还不属于任何项目组，请让管理员在「中心 → 账号」中把你加入`（demo :3069），`保存` 禁用。
+- 提示 `共享只给读权限：他人可检索与引用，不能增删文档或改设置。切换范围会记入审计。`（demo :3071）
+- `保存` 恰调用一次 `setKnowledgeBaseScope`；成功后关闭，列表里该库替换为应答的 `BaseView`，不重取列表；失败时对话框内以 `role="alert"` 显示信封文案，选择保持。
 
 **详情**：
+- 自有库的详情头部有同一个范围按钮；共享库显示范围标签与 `共享给你的知识库只读：可检索、可在会话中引用，不能增删文档。需要补充内容请联系 <所有者账号>。`
 - **文档表**，每行：
   - 名称。
-  - 来源：工作空间来源显示 `<空间名>/<路径>`，本地上传显示 `本地上传`。
+  - 来源：工作空间来源显示 `<空间名>/<路径>`，本地上传显示 `本地上传`；共享库的工作空间来源显示 `工作空间`（`path` 为 `null`）。
   - 大小。
   - 状态：`排队中` / `解析中` / `已切片 N` / `解析失败` / `已取消` / `未解析` / `已丢失`。
   - `源文件已变更` 标记：只在 `sourceChanged` 为 `true` 时显示。
-  - 每个工作空间来源的行都有 `重新入库` 按钮。
-  - `移出`。409 `kb_document_busy` 时行内显示信封文案，行仍在。
+  - 自有库每个工作空间来源的行都有 `重新入库` 按钮。
+  - 自有库每行有 `移出`。409 `kb_document_busy` 时行内显示信封文案，行仍在。
 - **`从工作空间入库` 对话框**：选工作空间，逐级浏览目录树并勾选文件，至多 `uploadMaxFiles` 个；提交恰调用一次 `ingestFromWorkspace`；结果里被拒的条目逐条显示 `message`。
 - **`上传文件`**：文件选择，一次至多 `uploadMaxFiles` 个；单个超过 `uploadMaxBytes` 在客户端就地拒绝；逐个调用 `uploadToKnowledgeBase`，失败逐个显示信封文案（含 `kb_file_unsupported`）。
+- 共享库不渲染 `从工作空间入库`、`上传文件`、`重新入库` 与 `移出`。
 - 知识库 `state` 不是 `ready` 时，入库、上传与重新入库按钮不渲染；`rebuild_failed` 时 `移出` 仍渲染，`rebuilding` 时不渲染。
 - **检索测试**：文档表下方、标题 `检索测试` 的一块，只在 `state` 为 `ready` 时渲染；SHALL NOT 渲染 demo 面板头的 `召回 → 重排 → 引用` 标签（重排是可选的）。
-  - 控件：问句输入框（placeholder `例如 销售额口径 / 弹窗 / 工单超时`）；`相似度阈值` 与 `向量权重` 两个数字输入（0–1，步长 0.01，初值取 `BaseView.retrieval`）；`检索` 按钮。问句为空白，或任一数字字段为空、不是数字、越界时 `检索` 禁用；数字字段无效时该字段旁显示原因（问句空白只禁用、不显示原因：初始态即为空白）；在途时禁用，文字为 `正在检索`。
+  - 控件：问句输入框（placeholder `例如 销售额口径 / 弹窗 / 工单超时`）；`相似度阈值` 与 `向量权重` 两个数字输入（0–1，步长 0.01，初值取 `BaseView.retrieval`）；`检索` 按钮。共享库的两个数字输入只读（不可编辑，显示 `BaseView.retrieval`）。问句为空白，或任一数字字段为空、不是数字、越界时 `检索` 禁用；数字字段无效时该字段旁显示原因（问句空白只禁用、不显示原因：初始态即为空白）；在途时禁用，文字为 `正在检索`。
   - 点 `检索`，或在问句框按 Enter，恰调用一次 `retrieveFromKnowledgeBase`，body 为问句与两个数字的当前值；按钮禁用时 Enter 不发请求。成功后面板的两个数字取应答的 `retrieval`，列表里该库的 `retrieval` 同步更新，不重取列表。
   - 还没检索时显示 `输入问题后检索，命中切片会带出所属文档`；`hits` 为空时显示 `没有命中，换个说法或先把相关文档入库`。
   - 每条命中显示 `#<序号>`（从 1 起）、文档名、`相似度 <similarity 保留两位小数>` 与切片原文（保留换行）。SHALL NOT 显示来源路径与切片序号（owner 2026-11-07 授权偏离 demo；rc2 的应答没有切片序号）。
-  - 失败时在面板内以 `role="alert"` 显示信封文案，问句与两个数字保持用户输入。这次提交的参数与面板初值（打开详情时的 `BaseView.retrieval`，或上一次成功应答的 `retrieval`）或列表里该库当前的 `retrieval` 任一不同时，SHALL 重取一次知识库列表：写回可能已成功（「检索测试端点」第 5 步）。
+  - 失败时在面板内以 `role="alert"` 显示信封文案，问句与两个数字保持用户输入。这次提交的参数与面板初值（打开详情时的 `BaseView.retrieval`，或上一次成功应答的 `retrieval`）或列表里该库当前的 `retrieval` 任一不同时，SHALL 重取一次知识库列表：写回可能已成功（「检索测试端点」第 6 步）。
 
 **刷新**：详情里存在 `queued` / `parsing` 文档且页面可见时，每 3 秒重取文档列表；页面隐藏时停止。`unparsed` 不触发刷新。入库、上传与重新入库成功后重取一次文档列表，写端点返回的 `queued` 由此进入 3 秒刷新。
 
-**API 客户端** `web/src/lib/api-kb.ts` SHALL 提供 `retrieveFromKnowledgeBase(id, {question, threshold, vectorWeight})`，并按上面各端点的应答形状严格解析全部应答（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型与方法。
+**API 客户端** `web/src/lib/api-kb.ts` SHALL 提供 `retrieveFromKnowledgeBase(id, {question, threshold, vectorWeight})` 与 `setKnowledgeBaseScope(id, {scope, groupId?})`（`PUT …/scope`，应答 `BaseView`），`createKnowledgeBase` 接受可选的 `scope` 与 `groupId`，并按上面各端点的应答形状严格解析全部应答（键集与类型不符即 `requestFailed`），`api.ts` 导出其类型与方法。
 
 #### Scenario: 不可用与未就绪
 - **WHEN** 状态为 `{enabled:true, available:false, …}` 时打开 tab；点 `重试` 后状态变为可用，但 `embeddingReady:false`
@@ -638,6 +704,34 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **WHEN** 库的 `retrieval` 为 `{0.2, 0.7}`；用户改为 `{0.1, 0.7}` 检索，`retrieveFromKnowledgeBase` 返回 503 `kb_unavailable`，随后 `listKnowledgeBases` 返回该库 `retrieval:{0.1, 0.7}`；另一次以未改动的参数检索失败
 - **THEN** 第一次失败后恰一次 `listKnowledgeBases`，切到别的库再切回来时面板初值为 `0.1`；第二次失败后没有重取列表
 
+#### Scenario: 共享库的只读呈现
+- **WHEN** 列表为自有库 A（`scope:"me"`）与共享库 K（`owner:{account:"zhangsan", department:"平台研发部"}`，`scope:"all"`，`raptor:true`，`compile:null`）；用户先看列表，再进 K 的详情（一份工作空间来源的文档，`path:null`）
+- **THEN** 列表顶部为 `我的 1 个 · 共享给我 1 个`；K 的行有 `只读`、`来自 zhangsan · 平台研发部`、`全员可见` 纯文本与 `RAPTOR` 标签，没有 `删除知识库` 与编译状态文案；A 的行有范围按钮 `仅自己可见`；K 的详情没有 `从工作空间入库`、`上传文件`、`重新入库`、`移出`，文档的来源为 `工作空间`，有只读提示，`检索测试` 的两个数字不可编辑
+
+#### Scenario: 范围对话框
+- **WHEN** 自有库 A 为 `scope:"me"`；用户点 A 的范围按钮，`getMyScope` 返回 `{department:"平台研发部", groups:[{id:"g1", name:"内网落地专项", memberCount:2}]}`；选 `项目组可见`、选 `内网落地专项`、点 `保存`，`setKnowledgeBaseScope` 返回 A 的新视图
+- **THEN** 对话框可访问名为 `「<A 的名称>」可见范围`，下拉项为 `内网落地专项（2 人）`；恰一次 `getMyScope`、恰一次 `setKnowledgeBaseScope(A, {scope:"group", groupId:"g1"})`；对话框关闭，A 的范围按钮为 `项目组可见 · 内网落地专项`，没有重取列表
+
+#### Scenario: 没有部门与没有项目组
+- **WHEN** `getMyScope` 返回 `{department:null, groups:[]}`，用户打开范围对话框并选 `项目组可见`
+- **THEN** `本部门可见` 禁用，旁注 `你的账号没有部门信息`；没有项目组下拉，显示 `你还不属于任何项目组，请让管理员在「中心 → 账号」中把你加入`，`保存` 禁用
+
+#### Scenario: 当前档已不可选
+- **WHEN** 自有库 A 为 `{scope:"group", group:{id:"g1", name:"内网落地专项"}}`，`getMyScope` 返回 `{department:"平台研发部", groups:[]}`，用户打开 A 的范围对话框
+- **THEN** 没有任何档被选中，`保存` 禁用；选 `全员可见` 后 `保存` 可用
+
+#### Scenario: 新建对话框取不到范围
+- **WHEN** 打开新建对话框，`getMyScope` 返回 503 信封；用户填名称、选 `manual` 后提交
+- **THEN** 只有 `仅自己可见` 可选，对话框内有 `role="alert"`；`createKnowledgeBase` 恰一次，参数不带 `scope`
+
+#### Scenario: 所有者没有部门
+- **WHEN** 列表里的共享库 K 的 `owner` 为 `{account:"zhangsan", department:null}`
+- **THEN** K 的行显示 `来自 zhangsan`，没有 ` · `
+
+#### Scenario: 新建时设范围
+- **WHEN** 在新建对话框填名称、选 `manual`、范围选 `全员可见` 后提交；另一次范围保持 `仅自己可见`
+- **THEN** 第一次 `createKnowledgeBase` 的参数带 `scope:"all"`；第二次不带 `scope`
+
 ### Requirement: 迁移 051 检索参数与重排模型
 `server/src/core/db/migrations/051_kb_retrieval.sql` SHALL 只用 `ALTER TABLE … ADD COLUMN` 给两张既有表加列，不改其它表，不插入、不改写任何行：
 - `knowledge_bases.retrieval_threshold REAL NOT NULL DEFAULT 0.2`、`knowledge_bases.retrieval_vector_weight REAL NOT NULL DEFAULT 0.7`：各带 CHECK，`typeof` 为 `real` 且取值在 0 与 1 之间（含两端）。既有行取列缺省。
@@ -666,7 +760,8 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 
 结果：
 - `code:0` 时读 `data.chunks`：它 SHALL 是数组（零命中时为 `[]`，实测记录 §19.1），每项须有字符串 `document_id`、字符串 `content` 与数字 `similarity`；`chunks` 不是数组或某项缺字段即 `kb_unavailable`。
-- 每条按 `document_id` 关联该库本地文档行的 `ragflow_document_id`；关联不上的 SHALL 丢弃。零候选或全部丢弃时结果为空数组，不是错误。命中视图 `RetrievalHit` 恰为 `{documentId, name, similarity, content}`：
+- 每条按 `document_id` 关联该库本地文档行的 `ragflow_document_id`；关联不上的 SHALL 丢弃。零候选或全部丢弃时结果为空数组，不是错误。
+- 关联之后 SHALL 至多保留前 6 条（与 `page_size` 同一个常量）：RAGFlow 多给时本地截断，检索测试与会话检索都因此每库至多 6 条。命中视图 `RetrievalHit` 恰为 `{documentId, name, similarity, content}`：
   - `documentId` 为本地文档 id。
   - `name` 取本地记录。
   - `similarity` 与 `content` 原样取 RAGFlow 的值。
@@ -704,24 +799,32 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **WHEN** 配置了重排模型，带重排的检索回 `code:102`，降级重试发出之前信号被中止
 - **THEN** 结果为 `kb_unavailable`，假 RAGFlow 只收到一次检索请求
 
+#### Scenario: 上游多给时本地截断
+- **WHEN** 经故障注入，假 RAGFlow 对 `page_size:6` 的检索回 8 条都能关联本地文档的切片
+- **THEN** 单轮检索的结果恰为前 6 条，次序同 RAGFlow 应答
+- **WHEN** 假 RAGFlow 回 8 条切片，其中第 2、第 5 条关联不上本地文档
+- **THEN** 结果为其余 6 条可关联的切片，次序同 RAGFlow 应答（截断发生在关联之后）
+
 ### Requirement: 检索测试端点
-知识库开启后，所有者 SHALL 能经 `POST /api/kb/bases/:id/retrieval` 对自己的一个知识库做单轮检索，并在检索时写回该库的检索参数。body limit 16 KiB，应答带 no-store。
+知识库开启后，能看到该库的账号（「可见范围判定」）SHALL 能经 `POST /api/kb/bases/:id/retrieval` 对它做单轮检索。所有者在检索时写回该库的检索参数；非所有者按已存参数检索，SHALL NOT 写回。body limit 16 KiB，应答带 no-store。
 
 依次判定：
-1. 所有权（见「知识库端点」）：别人的或不存在的 id 404 `not_found`，先于 body 解析，不发出站请求，不写审计。
+1. 归属（见「知识库端点」）：不可见或不存在的 id 404 `not_found`，先于 body 解析，不发出站请求，不写审计；可见的非所有者放行（读路由）。
 2. body 键集恰为 `question`、`threshold`、`vectorWeight`：
    - `question`：去掉首尾空白后非空、至多 1000 码点、不含 C0 控制字符（`\t`、`\n` 除外）与 DEL 的字符串；原样发出，不去空白。
    - `threshold`、`vectorWeight`：0–1 的有限数字（含两端）。
    - 不符：400 `bad_request`，不发出站请求。
 3. `state` 不是 `ready`（含 `rebuild_failed`）：409 `kb_rebuilding`，不发出站请求。
-4. 两个参数与已存值逐个比较：
+4. 调用者不是所有者：跳过本步。两个参数的值被忽略，不比较、不取锁、不写回，不写 `kb.retrieval_settings`，按该库已存的参数检索。
+   调用者是所有者：两个参数与已存值逐个比较：
    - **都相同**：不写库，不审计，直接检索。
    - **有不同**：取该库的写锁（「同一知识库的写操作串行」，FIFO）。锁被重建器持有即 409 `kb_rebuilding`。取锁后重读该库：不存在 404 `not_found`，不发检索；`state` 不是 `ready` 409 `kb_rebuilding`。
      SHALL 用重读的值再比较一次：已相同则释放锁，不写、不审计，直接检索；仍不同则在同一事务里写两列，并审计 `kb.retrieval_settings`（detail 的 `before` 取锁内重读的值，`after` 为提交的值），然后释放锁再检索。
      写入失败：不审计、不检索，通用 500，body SHALL NOT 声称任何 typed code。
-5. 检索（「单轮检索」）。写回成功之后检索失败时，参数已保存，应答为检索的失败。
+5. 调用者不是所有者时，先写一条 `kb.shared_retrieval`（「知识库审计」）；写入失败为通用 500，body SHALL NOT 声称任何 typed code，不检索。
+6. 检索（「单轮检索」）。写回成功之后检索失败时，参数已保存，应答为检索的失败。
 
-成功应答 200 恰为 `{hits: RetrievalHit[], retrieval: {threshold, vectorWeight}}`。`retrieval` 为这次检索实际使用的参数，即写回后的已存值。检索本身 SHALL NOT 写审计。
+成功应答 200 恰为 `{hits: RetrievalHit[], retrieval: {threshold, vectorWeight}}`。`retrieval` 为这次检索实际使用的参数，即（写回后的）已存值。对自己的库的检索 SHALL NOT 写审计。
 
 #### Scenario: 参数不变只检索
 - **WHEN** 一个库的检索参数为缺省 `{0.2, 0.7}`，所有者以 `{question:"销售额", threshold:0.2, vectorWeight:0.7}` 检索
@@ -767,13 +870,25 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **WHEN** 重建器正持有该库的写锁，所有者以与已存值不同的参数检索；另一次以相同的参数检索时，该库在检索开始前已被置为 `rebuilding`
 - **THEN** 两次都是 409 `kb_rebuilding`，参数不变，假 RAGFlow 没有收到检索请求
 
-### Requirement: 会话检索 `kb_search`
-知识库开启时，kb 模块 SHALL 为会话提供宿主工具 `kb_search` 的定义与执行（omp-runtime「`kb_search` 的注册」「宿主工具协议」）。本要求中，一个账号「可见的库」就是它拥有的库（可见范围四档在后续 change）。
+#### Scenario: 非所有者按已存参数检索
+- **WHEN** u1 的库 K（`scope:"dept"`，已存 `{0.35, 0.5}`）；同部门的另一账号以 `{question:"销售额", threshold:0.1, vectorWeight:0.9}` 检索
+- **THEN** 200，`retrieval` 为 `{threshold:0.35, vectorWeight:0.5}`；假 RAGFlow 收到的 body 带 `similarity_threshold:0.35`、`vector_similarity_weight:0.5`；K 的已存参数与 `updated_at` 不变；没有 `kb.retrieval_settings`；恰一条 `kb.shared_retrieval`，actor 为检索者，写在检索请求之前
 
-**定义**：只读本地库表，不访问 RAGFlow。账号一个库都没有时没有定义。否则定义恰为：
+#### Scenario: 非所有者的 body 仍须合规
+- **WHEN** 可见的非所有者以 `threshold:1.5` 检索；另一次以合法 body 检索一个 `rebuild_failed` 的共享库
+- **THEN** 前者 400 `bad_request`，后者 409 `kb_rebuilding`；两次都没有出站请求，没有审计
+
+#### Scenario: 共享审计写失败不检索
+- **WHEN** 经注入让 `kb.shared_retrieval` 的写入失败，可见的非所有者以合法 body 检索
+- **THEN** 500，body 不声称任何 typed code；假 RAGFlow 没有收到检索请求
+
+### Requirement: 会话检索 `kb_search`
+知识库开启时，kb 模块 SHALL 为会话提供宿主工具 `kb_search` 的定义与执行（omp-runtime「`kb_search` 的注册」「宿主工具协议」）。本要求中，一个账号「可见的库」按「可见范围判定」。
+
+**定义**：只读本地库表，不访问 RAGFlow。对该账号可见的库一个都没有时没有定义；只要有一个可见的库（含共享给它的库）就有定义。否则定义恰为：
 - `name:"kb_search"`、`label:"知识库检索"`、`loadMode:"essential"`。
 - 参数 schema `{type:"object", properties:{question:{type:"string"}, kb_ids:{type:"array", items:{type:"string"}, minItems:1, maxItems:5}}, required:["question","kb_ids"], additionalProperties:false}`。
-- `description` 为固定的中文说明，之后逐行列出该账号的全部库：`- <名称>（<id>）`，按建库时间升序。固定说明 SHALL 讲清三件事：
+- `description` 为固定的中文说明，之后逐行列出该账号的全部可见库，次序同 `GET /api/kb/bases`（自有库按建库时间在前，其余在后）：自有库为 `- <名称>（<id>）`，其余为 `- <名称>（<id>，所有者 <所有者账号>）`。固定说明 SHALL 讲清三件事：
   - 返回的是切片与出处。
   - 一次至多 5 个库，每库至多 6 条。
   - 证据不足时可以改写问句或换库再次调用。
@@ -783,17 +898,18 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 1. **参数**：
    - 键集恰为 `question`、`kb_ids`。
    - `question` 按检索测试端点同一条规则判定：去掉首尾空白后非空、至多 1000 码点、不含 C0 控制字符（`\t`、`\n` 除外）与 DEL；原样检索，不去空白。
-   - `kb_ids` 为数组，元素为非空字符串，按首次出现去重后为 1–5 个。
-   - 不符：`isError`，文本说明不符之处；去重后超过 5 个时，文本恰为 `一次至多检索 5 个知识库`。不访问 RAGFlow。
+   - `kb_ids` 为数组，元素为非空字符串，元素个数（去重之前，与 schema 的 `maxItems` 同一口径）为 1–5 个；通过后按首次出现去重。
+   - 不符：`isError`，文本说明不符之处；元素个数超过 5 个时，文本恰为 `一次至多检索 5 个知识库`。不访问 RAGFlow。
 2. **逐库**（按去重后的次序）：
-   - 不存在或不是调用者的库：状态 `not_found`。两种情形的文本与 `details` 完全相同，不回显任何名称，SHALL NOT 能据此探测别人的库。
+   - 不存在或对调用者不可见的库：状态 `not_found`。两种情形的文本与 `details` 完全相同，不回显任何名称，SHALL NOT 能据此探测别人的库。
    - `state` 不是 `ready`：状态 `not_ready`，不检索。
+   - 调用者不是所有者的 `ready` 库：先写一条 `kb.shared_retrieval`（「知识库审计」）；写入失败时该库为 `failed`，不检索。
    - 其余库各做一次单轮检索（「单轮检索」，参数取该库已存的检索参数，带上中止信号），彼此并发：成功为 `ok`（命中可以为零条），`kb_unavailable` 或 `kb_rejected` 为 `failed`。
 3. **结果**：
    - **给模型的文本**：各库按次序分段，段间空一行。
      - `ok`：首行 `知识库「<名称>」（<id>）：命中 <n> 条`，其后每条命中两行：`[<序号>] <文档名>（相似度 <similarity 保留四位小数>）` 与切片原文。
      - `not_found`：恰一行 `知识库 <id>：未找到该知识库`。
-     - `not_ready`：恰一行 `知识库「<名称>」（<id>）：正在重建，本轮未检索`。
+     - `not_ready`：恰一行；`state` 为 `rebuilding` 时为 `知识库「<名称>」（<id>）：正在重建，本轮未检索`，为 `rebuild_failed` 时为 `知识库「<名称>」（<id>）：重建失败，本轮未检索`。
      - `failed`：恰一行 `知识库「<名称>」（<id>）：检索失败`。
      - 文本里只有切片原文与出处（库、文档名、相似度），SHALL NOT 有整篇文档（CONTEXT.md 不变量 2）。
    - **`details`**：恰为 `{bases:[{kbId, name, status, hits}]}`，次序同上。
@@ -801,7 +917,7 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
      - `status ∈ {ok, not_found, not_ready, failed}`。
      - `hits` 在 `ok` 时为该库的 `RetrievalHit` 数组，其余为 `[]`。
    - **`isError`**：当且仅当没有任何一个库是 `ok`。
-4. **不做的事**：不写回检索参数，不写审计；切片原文 SHALL NOT 进入日志或 stderr。
+4. **不做的事**：不写回检索参数，除 `kb.shared_retrieval` 外不写审计；切片原文 SHALL NOT 进入日志或 stderr。
 
 #### Scenario: 定义
 - **WHEN** 账号依次建了库 `产品文档`（id `k1`）与 `客服问答`（id `k2`），取定义；另一账号没有库
@@ -818,11 +934,129 @@ SHALL NOT 在 `deleted:0` 时删除本地行。
 - **THEN** `isError` 为假，k1 的段为 `知识库「产品文档」（k1）：命中 0 条`
 
 #### Scenario: 参数校验
-- **WHEN** 依次以缺 `kb_ids`、多一个键 `top_k`、`kb_ids:[]`、`kb_ids:[""]`、去重后六个 kb_id、`question:"   "`、1001 码点的问句执行
-- **THEN** 七次都是 `isError`，假 RAGFlow 收到零个请求；去重后六个时文本恰为 `一次至多检索 5 个知识库`
+- **WHEN** 依次以缺 `kb_ids`、多一个键 `top_k`、`kb_ids:[]`、`kb_ids:[""]`、六个不同的 kb_id、`kb_ids:["k1","k1","k1","k1","k1","k2"]`（六个元素、去重后两个）、`question:"   "`、1001 码点的问句执行
+- **THEN** 八次都是 `isError`，假 RAGFlow 收到零个请求；两个六元素的调用文本都恰为 `一次至多检索 5 个知识库`
 - **WHEN** 以 `kb_ids:["k1","k1"]` 执行
 - **THEN** 只检索 k1 一次，`details.bases` 一项
 
 #### Scenario: 中止
 - **WHEN** 假 RAGFlow 挂起检索，执行中止信号
 - **THEN** 该库为 `failed`；执行在信号中止后结束，不再等待假 RAGFlow
+
+#### Scenario: 可见的共享库进清单并被检索
+- **WHEN** u2 有库 A2；u1 有 K1（`scope:"group"`，g1）与 K2（`scope:"me"`）；取 u2 的定义，再以 `{question:"工单超时", kb_ids:["K1","A2","K2"]}` 执行
+- **THEN** 描述末尾两行依次为 `- <A2 的名称>（A2）` 与 `- <K1 的名称>（K1，所有者 zhangsan）`，库清单为 `[{id:"A2",…},{id:"K1",…}]`；执行时 K1 与 A2 各检索一次，K2 为 `not_found`（文本与不存在的 id 相同）；恰一条 `kb.shared_retrieval`（K1，actor u2），它的写入早于假 RAGFlow 收到 K1 的检索请求
+- **WHEN** u1 随后把 K1 改为 `scope:"me"`，u2 再以同样参数执行
+- **THEN** K1 为 `not_found`；没有新的 `kb.shared_retrieval`；u2 的定义里不再有 K1
+
+#### Scenario: 重建失败与重建中分开措辞
+- **WHEN** 以 `kb_ids:["k3","k4"]` 执行，k3 为 `rebuilding`，k4 为 `rebuild_failed`
+- **THEN** 文本依次为 `知识库「<k3 的名称>」（k3）：正在重建，本轮未检索` 与 `知识库「<k4 的名称>」（k4）：重建失败，本轮未检索`；`details` 两项的 `status` 都是 `not_ready`；假 RAGFlow 收到零个请求
+
+#### Scenario: 只有共享库的账号
+- **WHEN** u2 自己没有库，u1 的 K 为 `scope:"all"`；取 u2 的定义；随后 u1 把 K 改为 `scope:"me"`，再取 u2 的定义
+- **THEN** 第一次有定义，描述末尾恰一行 `- <K 的名称>（K，所有者 zhangsan）`，库清单为 `[{id:"K", name:<K 的名称>}]`；第二次没有定义
+
+#### Scenario: 共享审计写失败只影响该库
+- **WHEN** u2 以 `kb_ids:["K","A2"]` 执行，K 是可见的非自有库，A2 是 u2 自己的库；经注入让 `kb.shared_retrieval` 的写入失败
+- **THEN** K 为 `failed`，文本为 `知识库「<K 的名称>」（K）：检索失败`；A2 为 `ok`；`isError` 为假；假 RAGFlow 只收到 A2 的检索请求
+
+#### Scenario: 已中止的信号不写共享审计
+- **WHEN** u2 以 `kb_ids:["K"]` 执行，调用时中止信号已中止
+- **THEN** K 为 `failed`；没有 `kb.shared_retrieval`；假 RAGFlow 没有收到请求
+
+### Requirement: 迁移 053 知识库范围列
+迁移 `053_kb_visibility.sql`（与 account-groups「迁移 053 部门与项目组」同一个文件、同一个事务）SHALL 给 `knowledge_bases` 追加两列：
+- `scope TEXT NOT NULL DEFAULT 'me'`，CHECK 取值恰为 `me`、`dept`、`group`、`all`。
+- `scope_group_id TEXT NULL`，引用 `project_groups(id)` `ON DELETE RESTRICT`；CHECK `(scope = 'group') = (scope_group_id IS NOT NULL)`。
+
+既有的库升级后为 `me`，行为与升级前相同。受信任迁移目录的计数断言在它的权威文件里 +1。
+
+#### Scenario: 列与约束
+- **WHEN** 对迁移后的库依次把一个库写成 `scope:'group'` 而 `scope_group_id` 为 NULL、`scope:'all'` 而 `scope_group_id` 为 `g1`、`scope:'group'` 而 `scope_group_id` 为不存在的组、`scope:'team'`；再把它写成 `scope:'group'`、`scope_group_id:'g1'` 后删除 `g1`
+- **THEN** 前四次与删除都失败，行不变；`scope:'group'`、`g1` 那次成功
+
+#### Scenario: 升级保留既有的库
+- **WHEN** 一个已应用到 052 的库里有两个知识库，随后打开到 053
+- **THEN** 两个库的 `scope` 为 `me`、`scope_group_id` 为 NULL，其余列逐值不变
+
+### Requirement: 可见范围判定
+一个知识库对查看者 V 可见，当且仅当下列任一条成立（四档，glossary「可见范围」）：
+1. V 是它的所有者。
+2. `scope` 为 `all`。
+3. `scope` 为 `dept`，V 的部门不为 `null`，且等于所有者**此刻**的部门（account-groups）。
+4. `scope` 为 `group`，且 V **此刻**是 `scope_group_id` 那个项目组的成员。
+
+规则：
+- 判定每次现查，不缓存：所有者换部门、V 退出项目组后的下一次请求即按新值判定。
+- 管理员没有额外的可见权；所有者账号停用不影响它的库的可见性。
+- 知识库的列表、`/api/kb/bases/:id` 下的归属判定（「知识库端点」）、会话检索 `kb_search` 与知识库引用（message-attachments「prompt 引用知识库」）SHALL 用同一个判定，不各写一份。
+- 可见只授予读：检索、在会话中引用、读文档列表（「知识库端点」的读路由）。
+
+#### Scenario: 四档 × 查看者
+- **WHEN** u1（平台研发部，g1 成员）建 Km（`me`）、Kd（`dept`）、Kg（`group`，g1）、Ka（`all`）；u2（数据部，g1 成员）、u3（产品部，管理员，非 g1 成员）、u4（部门为空；测试带外先把 u4 的 `disabled` 置 0：种子里 u4 是停用账号，停用账号的请求一律 401）各请求列表
+- **THEN** u2 看到 Kg、Ka；u3 看到 Ka；u4 看到 Ka；u1 看到全部四个
+
+#### Scenario: 同部门与空部门
+- **WHEN** 测试带外把 u2 的部门改为 `平台研发部`；再把 u1 的部门改为 NULL
+- **THEN** 第一次之后 u2 的列表多出 Kd；第二次之后 u2 与 u4（已按上一场景启用）都看不到 Kd（空部门不匹配任何部门），u1 仍看到 Kd
+
+#### Scenario: 成员关系现查
+- **WHEN** 测试带外删除 u2 在 g1 的成员行，u2 再请求列表与 `GET /api/kb/bases/Kg/documents`
+- **THEN** 列表不含 Kg；文档请求 404 `not_found`
+
+#### Scenario: 停用的所有者
+- **WHEN** 测试带外把 u1 的 `disabled` 置 1，u2 请求列表
+- **THEN** 仍看到 Kg、Ka
+
+#### Scenario: 只有一处可见判定
+- **WHEN** 扫描 `server/src`
+- **THEN** 读 `knowledge_bases.scope` 列的 SQL 只出现在 `kb/visibility.ts`；列表、归属判定、会话检索与知识库引用都经它取可见集合；读 `project_group_members` 与 `accounts.department` 的 SQL 只出现在 `accounts/scope.ts` 与 `kb/visibility.ts`
+
+### Requirement: 知识库范围端点
+知识库开启后，所有者 SHALL 能经 `PUT /api/kb/bases/:id/scope` 改自己的库的可见范围。body limit 16 KiB，应答带 no-store。
+
+依次判定：
+1. 归属（「知识库端点」，写路由）：不可见或不存在 404 `not_found`；可见的非所有者 403 `forbidden`。先于 body 解析。
+2. body 的形状：`scope` 为 `me` / `dept` / `group` / `all` 之一；`scope` 为 `group` 时 body 键集恰为 `scope`、`groupId`，`groupId` 为非空字符串；其余档位键集恰为 `scope`。不符：400 `bad_request`。
+3. 所有者条件（读所有者此刻的部门与成员关系，account-groups）：`dept` 而所有者部门为 `null`，或 `group` 而所有者不是该组成员（含组不存在）：400 `bad_request`。
+4. 与已存的 `scope`、`scope_group_id` 都相同：不写、不审计。
+5. 否则在一条事务里更新两列并审计 `kb.scope`（「知识库审计」）。更新影响 0 行（库已被并发删除）：404 `not_found`，不审计。
+
+端点 SHALL NOT 取该库的写锁（「同一知识库的写操作串行」），对任何 `state` 都可用：范围的判定与写入只用本地数据，SHALL NOT 访问 RAGFlow。成功应答 200 `BaseView`，`scope` 为新值；其中 `compile` 按「知识库端点」的视图规则为这个库读取（调用者恒为所有者），读取共用一个 5 s 期限，超时或读取失败时 `compile` 为 `null`，应答仍为 200（范围已写、审计已记）。
+
+#### Scenario: 改范围并审计
+- **WHEN** u1 的库 K 为 `me`；u1 依次 `PUT …/scope` 为 `{scope:"group", groupId:"g1"}`、再提交同一个 body、再改为 `{scope:"all"}`
+- **THEN** 三次 200；恰两条 `kb.scope`，detail 依次为 `{id:K, before:{scope:"me", groupId:null}, after:{scope:"group", groupId:"g1"}}` 与 `{id:K, before:{scope:"group", groupId:"g1"}, after:{scope:"all", groupId:null}}`
+
+#### Scenario: 所有者条件与形状
+- **WHEN** u4（部门为空；测试带外先把 u4 的 `disabled` 置 0：种子里 u4 是停用账号，停用账号的请求一律 401）建一个库后把它改为 `{scope:"dept"}`；u3 把自己的库改为 `{scope:"group", groupId:"g1"}`（u3 不是成员）；u1 依次提交 `{scope:"group"}`、`{scope:"all", groupId:"g1"}`、`{scope:"group", groupId:"nope"}`、`{scope:"me", extra:1}`
+- **THEN** 六次都是 400 `bad_request`；范围不变，没有审计
+
+#### Scenario: 重建中也能改
+- **WHEN** u1 的库 K 处于 `rebuilding`，重建器持有它的写锁，u1 把 K 改为 `{scope:"all"}`
+- **THEN** 200，不等待写锁；恰一条 `kb.scope`；假 RAGFlow 没有因这次请求收到任何非编译状态的请求
+
+#### Scenario: 读编译状态失败不影响改范围
+- **WHEN** u1 的库 K 开了 RAPTOR，假 RAGFlow 不可达，u1 把 K 改为 `{scope:"all"}`
+- **THEN** 200，应答的 `compile` 为 `null`、`scope` 为新值；恰一条 `kb.scope`
+
+#### Scenario: 已失去条件时重存同一范围
+- **WHEN** u1 的库 K 为 `{scope:"group", groupId:"g1"}`；测试带外删除 u1 在 g1 的成员行；u1 再提交 `{scope:"group", groupId:"g1"}`；随后提交 `{scope:"me"}`
+- **THEN** 前者 400 `bad_request`（所有者条件先于「与已存值相同」判定），K 的范围不变、没有审计；后者 200，恰一条 `kb.scope`
+
+#### Scenario: 与删库并发
+- **WHEN** u1 删除库 K（假 RAGFlow 挂起删数据集），删库提交之后、u1 的一次 `PUT …/scope` 恰在更新时发现 0 行（经注入在归属判定之后放行删库）
+- **THEN** 该 `PUT` 为 404 `not_found`，没有 `kb.scope`
+
+### Requirement: UI 走查共享知识库
+`make ui-walk` 的中心知识库分支（`web/e2e/ui-walk-center-kb.ts`）SHALL 加一段共享知识库的走查，与既有分支同一写法：知识库相关接口与 `GET /api/accounts/me/scope` 由 `page.route` 应答，应答体严格按 web 解析器的键集。
+
+1. **只读呈现**：route 应答列表为一个自有库与一个共享库（`owned:false`）；断言 `我的 1 个 · 共享给我 1 个`、共享库的 `只读` 与 `来自 <账号> · <部门>`、共享库没有 `删除知识库`；进入共享库详情，断言没有 `从工作空间入库` 与 `上传文件`，有只读提示。
+2. **范围对话框**：点自有库的范围按钮，route 应答 `GET /api/accounts/me/scope`（一个部门、一个项目组）；选 `项目组可见` 与该组，route 截获 `PUT …/scope`，断言 body 为 `{scope:"group", groupId:<该组 id>}` 并以新的 `BaseView` 应答；断言范围按钮的文案更新。
+
+分支 SHALL 在既有的视口矩阵下截图，并通过 browser-error oracle；结束时撤掉它的全部 route。
+
+#### Scenario: 走查分支全绿
+- **WHEN** `make ui-walk` 对已运行的服务跑到本分支
+- **THEN** 上述两段的断言全部通过，视口矩阵截图齐全，error oracle 没有新增报错，退出码 0

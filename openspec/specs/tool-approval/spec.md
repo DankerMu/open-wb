@@ -30,10 +30,10 @@ omp 子进程 SHALL 按 omp-runtime 的 spawn 契约以该会话的有效审批�
 - **形状**：`method==="select"`、`title` 整体恰为 `Allow tool: kb_search`、`options` 为上述两种闭合形状之一的请求，先于上面的审批识别判定。
 - **非 `always-ask` 档**：这一代进程以 `write` 或 `yolo` 启动，**且这一代进程上一次成功的 `set_host_tools` 应答的 `data.toolNames` 含 `kb_search`**（应答须按 id 对上宿主自己在这一进程上发出的 `set_host_tools` 请求；kb-search-approval-scope，#2011）时，`OmpProcess` SHALL 立即写 `{type:"extension_ui_response", id, value:"Approve"}`。不登记审批、不发审批事件、不写 `chat_approvals`、不审计，与浏览器预载卡同一写法。
 - **`always-ask` 档**：按审批识别照常交给所有者，`tool="kb_search"`。
-- **这一代没有注册 `kb_search`**：从未成功注册过（知识库关闭的部署、所有者没有库、fork 与撤回的临时进程），或最近一次成功应答是撤下（`toolNames:[]`）时，同形请求 SHALL NOT 由传输层放行，按审批识别照常交给所有者，`tool="kb_search"`，`write` 档也一样。`set_host_tools` 回 `success:false`、请求失败，或 id 对不上任何宿主请求的 `response` 帧，都不改变注册状态。理由：此时这张卡不可能是宿主的 host tool 的，而是项目层同名工具（`.omp/tools/kb_search`，实测记录 §2.10）。
+- **这一代没有注册 `kb_search`**：从未成功注册过（知识库关闭的部署、所有者没有可见的库、fork 与撤回的临时进程），或最近一次成功应答是撤下（`toolNames:[]`）时，同形请求 SHALL NOT 由传输层放行，按审批识别照常交给所有者，`tool="kb_search"`，`write` 档也一样。`set_host_tools` 回 `success:false`、请求失败，或 id 对不上任何宿主请求的 `response` 帧，都不改变注册状态。理由：此时这张卡不可能是宿主的 host tool 的，而是项目层同名工具（`.omp/tools/kb_search`，实测记录 §2.10）。
 - **其余**：`title` 带第二行或工具名不同的请求不适用本条。
 
-理由：`kb_search` 只读、只检索调用者自己的库，过滤在宿主手里，不是「命令」；`always-ask` 的承诺是每次都问。
+理由：`kb_search` 只读、只检索调用者可见的库（共享库对非所有者只读，knowledge-bases「可见范围判定」），过滤在宿主手里，不是「命令」；`always-ask` 的承诺是每次都问。
 
 #### Scenario: 识别为审批
 - **WHEN** fake-omp `approval` 脚本在 `message_end(toolUse)` 与 bash 的 `tool_execution_start` 之后（与真 omp v18.12.3 实测一致）发 `extension_ui_request{id:"r1",method:"select",title:"Allow tool: bash\nCommand: echo workbuddy-smoke",options:["Approve","Approve bash for this session","Deny"]}`

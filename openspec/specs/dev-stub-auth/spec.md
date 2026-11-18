@@ -2,7 +2,9 @@
 
 ## Purpose
 Defines the provider-independent authentication seam and SQLite-backed dev-stub account/session contracts, including login, current-session, logout, guard, and no-store response behavior.
+
 ## Requirements
+
 ### Requirement: provider 接缝
 auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一认证判定出口（ADR-0007 接缝）；Principal SHALL 恰为 `{id:string,account:string,role:string}`。dev-stub 凭证适配器 SHALL 落在 `server/src/auth/providers/dev-stub.ts`；cookie/session 读取 SHALL 是 provider 无关的共享实现，且不得 import dev-stub provider——S3a 增加 OIDC 适配器时接缝、session storage 与调用方不变。
 
@@ -19,7 +21,7 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 - THEN `authenticate()` 只删除该 matched expired row并返回 null；siblings 与 accounts 逐值不变，重复调用不产生额外写入
 
 ### Requirement: 账号与认证会话数据基座
-首批业务迁移 SHALL 以单一原子 migration 建立 `accounts` 与 `auth_sessions`。`accounts` 的持久契约 SHALL 恰为 `id`、`account`、`role`、`disabled`、`password_hash`：`id` 为非空 TEXT；`account` 唯一且仅允许非空 lowercase ASCII `[a-z0-9._-]+`（登录输入仍先 trim+小写化后查询），`role` 仅允许 `成员 | 管理员`，`disabled` 仅允许整数 `0 | 1`。`auth_sessions` 的持久契约 SHALL 恰为 `id`（256 bit lowercase hex）、`user_id`（引用 `accounts.id`，删账号级联删会话）与 `expires_at`（非负 Unix epoch milliseconds）；`openDb()` 返回的连接 SHALL 实际启用 SQLite foreign-key enforcement。
+首批业务迁移 SHALL 以单一原子 migration 建立 `accounts` 与 `auth_sessions`。`accounts` 的持久契约 SHALL 恰为 `id`、`account`、`role`、`disabled`、`password_hash`：`id` 为非空 TEXT；`account` 唯一且仅允许非空 lowercase ASCII `[a-z0-9._-]+`（登录输入仍先 trim+小写化后查询），`role` 仅允许 `成员 | 管理员`，`disabled` 仅允许整数 `0 | 1`。迁移 053 之后 `accounts` 另有可空列 `department`（account-groups「迁移 053 部门与项目组」）：本迁移的契约与种子不变，`department` 不进 Principal，登录与 `GET /api/auth/me` 的应答形状不变。`auth_sessions` 的持久契约 SHALL 恰为 `id`（256 bit lowercase hex）、`user_id`（引用 `accounts.id`，删账号级联删会话）与 `expires_at`（非负 Unix epoch milliseconds）；`openDb()` 返回的连接 SHALL 实际启用 SQLite foreign-key enforcement。
 
 该 migration SHALL 同时 seed 四账号（镜像 demo:1400-1407 + 停用扩展）：`u1/zhangsan/成员`、`u2/zhaoliu/成员`、`u3/lisi/管理员`，密码均为 `demo`（demo:1734，dev-stub 测试值，非生产凭证）；另 seed `u4/wangwu/成员` 且 `disabled=1`——demo 无停用 seed，为验证 403 分支引入。每行 SHALL 使用不同的 16-byte salt，以 `scrypt$16384$8$1$<32 lowercase hex salt>$<64 lowercase hex digest>` 存入 `password_hash`；迁移源码与数据库均不得存储密码明文。`auth_sessions` 初始为空。
 
@@ -30,6 +32,10 @@ auth 模块 SHALL 以 `authenticate(req) → Principal | null` 为对外唯一�
 #### Scenario: 既有 migration 基座原子升级并稳定重开
 - WHEN 临时文件库已是合法的 `0010` + `002` receipt/schema prefix，随后首次及再次调用 `openDb(path)`
 - THEN 首次只原子追加 `010` 的 schema、四个 seed 与 receipt，第二次 schema/seed/receipt 均不变化；若 `010` 发生 catalog conflict，则本次 schema、seed 与 receipt 全部回滚并保留既有 prefix
+
+#### Scenario: 053 之后 Principal 不变
+- **WHEN** 迁移到 053 之后 u1 登录并请求 `GET /api/auth/me`
+- **THEN** 两个应答都恰为 `{id:"u1", account:"zhangsan", role:"成员"}`，不含 `department`
 
 ### Requirement: 登录端点与语义
 `POST /api/auth/login` SHALL 只接受 `application/json` 且 body 为 exact plain object `{account:string,password:string}`；缺失/额外字段、null/array、非 string 值、malformed JSON 或非 JSON content type SHALL 以稳定 400 `bad_request` 拒绝，且不得查询凭证、设置 cookie 或写会话。登录路由 SHALL 对 Fastify 已解析但未经 route-schema 变换的原始 JSON 值执行手写 exact-shape 校验；不得用会触发 Fastify/AJV 默认 type coercion 或 additional-property stripping 的 route schema，否则 `password:5` 或额外字段会在校验前被改写为合法 shape。全局 AJV 行为不得因本端点而改变。账号 SHALL 先使用 JavaScript `trim()` 再 `toLowerCase()` 后匹配（demo:1644）；空白归一化后为空 SHALL 等同未知账号。dev-stub provider SHALL 以存储 encoding 内的参数/salt/digest 使用 `node:crypto` scrypt，并以 constant-time digest compare 校验密码；未知账号 SHALL 使用请求提交的 password 对固定有效 dummy encoding 执行同参数 KDF并忽略 compare 结果，然后返回与错误密码同形状的 401，避免用响应类别或是否执行密码 KDF 枚举账号。production SHALL 只持有 dummy encoding，不得为该路径新增固定明文 dummy password。失败语义镜像 demo，错误响应使用统一错误信封。
