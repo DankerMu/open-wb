@@ -107,7 +107,8 @@ describe("范围对话框", () => {
     const read = deferred<MyScope>();
     fake.getMyScope.mockImplementationOnce(() => read.promise);
     const dialog = await openScope("规范库", "仅自己可见");
-    expect(screen.queryByRole("region", { name: "规范库 · 文档" })).toBeNull();
+    // 对话框开着时页面其余部分 aria-hidden，不带 hidden 的查询恒为 null。
+    expect(screen.queryByRole("region", { name: "规范库 · 文档", hidden: true })).toBeNull();
     expect(scopeOptions(dialog)).toEqual(options(-1, [0, 1, 2, 3]));
     expect(button(dialog, "保存").disabled).toBe(true);
     expect(alertsIn(dialog)).toEqual([]);
@@ -147,6 +148,7 @@ describe("范围对话框", () => {
     await waitFor(() => expect(document.activeElement).toBe(scopeButton));
     expect(fake.getMyScope.mock.calls).toStrictEqual([[]]);
     expect(fake.listKnowledgeBases).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("region", { name: "规范库 · 文档" })).toBeNull();
 
     fireEvent.click(rowOf("规范库"));
     const detail = await screen.findByRole("region", { name: "规范库 · 文档" });
