@@ -834,7 +834,7 @@ omp v18.12.3 从会话 cwd 向上到最近含名为 `.git` 条目的祖先（文
 
 ### Requirement: `kb_search` 的注册
 会话 slot 的 omp 进程 SHALL 按以下规则注册并执行宿主工具 `kb_search`。fork 与撤回的临时进程 SHALL NOT 注册，也不注入处理函数：它们只执行命令，不跑模型回合，也不执行派发前对齐的第 2、3 步（chat-sessions「派发前按会话设置对齐进程」）。
-- **定义来源**：`kb_search` 的定义由知识库模块按会话的所有者给出（knowledge-bases「会话检索 `kb_search`」）。知识库关闭，或所有者一个库都没有时，没有定义。
+- **定义来源**：`kb_search` 的定义由知识库模块按会话的所有者给出（knowledge-bases「会话检索 `kb_search`」）。知识库关闭，或对所有者可见的库一个都没有（knowledge-bases「可见范围判定」：自有库与共享给他的库都没有）时，没有定义。
 - **注册与对齐**：是派发前对齐的第 3 步（chat-sessions「派发前按会话设置对齐进程」）：
   - 每个 generation 记下它上次成功注册的库清单（`[{id, name}]`），新 generation 为「尚未注册」。host tool 不随会话文件保存（记录 §2.8），所以 spawn 与 resume 出的每个新 generation 都从「尚未注册」开始。
   - 每次派发都重新取定义，与所记的库清单比较：有定义而尚未注册或清单不同时，发 `set_host_tools{tools:[<定义>]}`，带 `loadMode:"essential"`（缺省 `loadMode` 的工具对模型不可见，记录 §2.1）；没有定义而所记清单非空时，发 `set_host_tools{tools:[]}`；其余情形不发。

@@ -1,6 +1,7 @@
 {
   "exclude": [
     ".omp/skills/*",
-    "resource/workbuddy-live-demo.html"
+    "resource/workbuddy-live-demo.html",
+    "openspec/specs/knowledge-bases/spec.md"
   ]
 }

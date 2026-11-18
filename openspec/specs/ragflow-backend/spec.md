@@ -77,8 +77,8 @@ app-server SHALL 解析四个键：`RAGFLOW_BASE_URL`、`RAGFLOW_API_KEY_FILE`�
 - `available:false` 时，中心「知识库」tab 只显示不可用提示与 `重试`（knowledge-bases「中心「知识库」tab」）；模型 tab 的「知识库模型」段不看 `available`，只看 `enabled`：它读本地设置，RAGFlow 不可达时保存失败，显示信封文案。
 
 #### Scenario: 未配置即关闭
-- **WHEN** 未配置 `RAGFLOW_BASE_URL` 时，管理员逐个请求 `GET /api/kb/status` 之外的十三条知识库路由，`POST` / `PUT` 路由带 malformed JSON body；再以匿名身份请求其中一条
-- **THEN** 管理员的十三次都是 503 `kb_disabled` 信封；匿名那次是 401；假 RAGFlow 收到零个请求
+- **WHEN** 未配置 `RAGFLOW_BASE_URL` 时，管理员逐个请求 `GET /api/kb/status` 之外的十四条知识库路由，`POST` / `PUT` 路由带 malformed JSON body；再以匿名身份请求其中一条
+- **THEN** 管理员的十四次都是 503 `kb_disabled` 信封；匿名那次是 401；假 RAGFlow 收到零个请求
 
 #### Scenario: 不可达不阻断
 - **WHEN** `RAGFLOW_BASE_URL` 指向一个已关闭的端口时启动服务（store 里预置一个知识库行）；随后依次创建会话、请求 `GET /api/kb/status`、`GET /api/kb/bases` 与 `DELETE /api/kb/bases/:id`
